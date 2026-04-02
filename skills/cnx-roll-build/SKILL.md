@@ -193,7 +193,7 @@ After CI passes locally:
 **Run self-code-review on staged changes:**
 
 ```bash
-$self-code-review staged
+$cnx-.code-review staged
 ```
 
 **Review Output:**
@@ -219,7 +219,7 @@ $self-code-review staged
 🟢/✅ All clear → Proceed to push
 ```
 
-**Note**: `code-reviewer` placeholder replaced with `$self-code-review` for local execution without external dependencies.
+**Note**: `code-reviewer` placeholder replaced with `$cnx-.code-review` for local execution without external dependencies.
 
 ### Phase 6: Update BACKLOG.md (REQUIRED)
 
@@ -332,7 +332,7 @@ git push
    - User can choose to batch multiple Actions before deploy/verify
 
 5. **Pre-push self-review required**
-   - Run `$self-code-review staged` on final diff
+   - Run `$cnx-.code-review staged` on final diff
    - Fix blocking (Critical) issues via TCR cycle
    - Review focuses on quality, not correctness
 

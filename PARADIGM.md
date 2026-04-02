@@ -1,7 +1,7 @@
 # Cybernetix (CNX)
 
 > AI 时代的控制论软件工程范式  
-> _Let's roll, not sprints!_
+> _Let's roll, no sprints!_
 
 ---
 

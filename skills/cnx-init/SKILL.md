@@ -1,5 +1,5 @@
 ---
-name: cnx-project-init
+name: cnx-init
 description: Initialize a new AI-Coding project with complete PDCA workflow support. Creates standard directory structure, BACKLOG.md, CHANGELOG.md, docs/plans/, and GitHub Actions for sentinel patrols.
 ---
 

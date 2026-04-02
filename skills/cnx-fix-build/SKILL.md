@@ -182,7 +182,7 @@ chmod +x .git/hooks/pre-push
 **Run self-code-review on staged changes:**
 
 ```bash
-$self-code-review staged
+$cnx-.code-review staged
 ```
 
 **Review Output:**
@@ -208,7 +208,7 @@ $self-code-review staged
 🟢/✅ All clear → Proceed to push
 ```
 
-**Note:** `code-reviewer` placeholder replaced with `$self-code-review` for local execution.
+**Note:** `code-reviewer` placeholder replaced with `$cnx-.code-review` for local execution.
 
 ### 7. Commit and push
 

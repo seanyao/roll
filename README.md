@@ -19,7 +19,7 @@
 > 基于控制论的 Agent-First 软件工程范式
 > 
 > **C**yber**n**eti**x** - The AI-Native Development Paradigm  
-> _Feedback loops, not sprints!_
+> _Let's roll, not sprints!_
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 

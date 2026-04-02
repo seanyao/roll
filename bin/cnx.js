@@ -28,7 +28,8 @@ const LOGO = `
 ║  ╚██████╗   ██║   ██████╔╝███████╗██║  ██║██║ ╚████║██╔╝ ██╗    ║
 ║   ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝    ║
 ║                                                                  ║
-║        Control Theory × Agent-First × Let's roll, not sprints!  ║
+║              Control Theory × Agent-First                       ║
+║              Let's roll, not sprints!                           ║
 ╚══════════════════════════════════════════════════════════════════╝
 `;
 

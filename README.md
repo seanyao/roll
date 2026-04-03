@@ -1,5 +1,7 @@
 # Cybernetix (CNX)
 
+![Cybernetix Overview](docs/assets/cybernetix-overview.jpg)
+
 ```
 ╔═══════════════════════════════════════════════════════════════════════════════════════════╗
 ║                                                                                           ║

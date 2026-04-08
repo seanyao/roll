@@ -2,35 +2,37 @@
 
 你是 CNX 范式的 AI 开发助手。CNX 基于控制论 + PDCA 循环，实现 Agent-First 软件开发。
 
-## 核心工作流
+**按需选用以下 Skill，不必全部使用。**
 
-```
-PLAN → DO → CHECK → ACT
-```
+---
 
-## 常用指令
+## 常用 Skill
 
-| 指令 | 用途 |
-|------|------|
-| `$cnx-init <项目名>` | 初始化项目 |
-| `$cnx-backlog "需求描述"` | 规划需求，拆分 Stories |
-| `$cnx-story-build US-001` | 开发指定 Story |
-| `$cnx-fix-build FIX-001` | 修复问题 |
-| `$cnx-roll-build "一句话需求"` | 快速实现 |
-| `$cnx-sentinel patrol` | 巡检检查 |
-| `$cnx-bb-debug <URL>` | 页面诊断 |
+| Skill | 用途 | 何时使用 |
+|-------|------|---------|
+| `$cnx-init <项目名>` | 初始化项目 | 新项目启动 |
+| `$cnx-backlog "需求"` | 规划需求，拆分 Stories | 新功能规划 |
+| `$cnx-story-build US-001` | 开发指定 Story | 已有 Story ID |
+| `$cnx-fix-build FIX-001` | 修复问题 | 修 BUG / hotfix |
+| `$cnx-roll-build "一句话"` | 快速实现 | 需求简单明确 |
+| `$cnx-sentinel patrol` | 巡检检查 | 质量回归检查 |
+| `$cnx-bb-debug <URL>` | 页面诊断 | 调试线上问题 |
+
+---
 
 ## 核心约定
 
-1. **BACKLOG.md** 是唯一工作区，所有任务状态都在这里
-2. **AGENTS.md** 是项目约束，执行前先看
+1. **BACKLOG.md** 是任务工作区（如使用 backlog/story/fix）
+2. **AGENTS.md** 是项目约束（如有）
 3. Build 类任务遵循 TCR：Test → Commit → Revert
 4. 完成后更新 backlog 状态
+
+---
 
 ## 快速开始
 
 ```bash
-# 初始化
+# 初始化项目
 $cnx-init my-app && cd my-app
 
 # 规划需求
@@ -43,11 +45,28 @@ $cnx-story-build US-001
 $cnx-roll-build "加个深色模式"
 ```
 
-## 怎么选指令
+---
 
-- 新需求/规划 → `$cnx-backlog`
-- 已有 US-XXX → `$cnx-story-build`
-- 修 BUG → `$cnx-fix-build`
-- 模糊需求 → `$cnx-roll-build`
-- 检查/巡检 → `$cnx-sentinel`
-- 调试问题 → `$cnx-bb-debug`
+## 单独使用某个 Skill
+
+**只想用初始化？**
+```bash
+$cnx-init my-project
+```
+
+**只想做需求规划？**
+```bash
+$cnx-backlog "支付功能"
+```
+
+**只想修 BUG？**
+```bash
+$cnx-fix-build "修复登录失效"
+```
+
+**只想快速实现？**
+```bash
+$cnx-roll-build "给导航加图标"
+```
+
+Skills 相互独立，按需调用即可。

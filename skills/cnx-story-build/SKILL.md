@@ -106,6 +106,56 @@ For each loop, the agent must produce the artifacts listed below and then execut
 ### 2. Split into Actions
    - write 2-6 candidate Actions
    - pick the smallest shippable Action
+   - **粒度约束**: 每个 Action 应在 2-5 分钟内可完成，超过则继续拆分
+   - **禁止占位符**: Action 描述必须具体到可直接执行，禁止 "TBD"、"待定"、"后续补充" 等模糊表述
+
+#### 2.5 Parallel Dispatch (自动判断)
+
+拆完 Actions 后，检查是否可以并行：
+
+```
+冲突检测:
+  ├── 列出每个 Action 涉及的文件
+  ├── 同一文件 → 不可并行，必须串行
+  ├── 同一目录不同文件 → 可以并行
+  └── 不同目录 → 安全并行
+```
+
+**如果 2+ Actions 可并行，自动启用 Worktree 隔离：**
+
+```bash
+# 为每个独立 Action 创建 worktree
+git worktree add .worktrees/{action-id} -b dispatch/{action-id}
+```
+
+- 每个子代理在自己的 worktree 中执行 TCR
+- 子代理 Brief 必须**自包含**（不继承主会话上下文）：
+  - 要做什么（Action 描述 + AC）
+  - 在哪做（文件路径）
+  - 怎么验证（测试命令）
+  - 不要做什么（scope 边界）
+- 全部完成后逐个 review → merge 回 main → 跑完整集成测试 → 清理 worktrees
+
+**状态通知（必须）：** 并行执行期间，向用户报告进度：
+
+```
+🔀 Parallel Dispatch: 3 Actions 可并行，启动子代理
+
+  Agent 1 [Action: 登录 API]     ⏳ 执行中...
+  Agent 2 [Action: 注册 API]     ⏳ 执行中...
+  Agent 3 [Action: 个人资料页]    ⏳ 执行中...
+
+  --- 子代理完成时逐个更新 ---
+
+  Agent 1 [Action: 登录 API]     ✅ 完成 (3 TCR commits)
+  Agent 2 [Action: 注册 API]     ✅ 完成 (2 TCR commits)
+  Agent 3 [Action: 个人资料页]    ❌ 失败 → 需人工介入
+
+🔀 Merge: 2/3 成功，合并中...
+🧪 集成测试: 运行中...
+```
+
+**不满足并行条件时，按原有串行流程逐个执行 Actions。**
 
 ### 3. Define verification
    - test matrix (at least: happy path + one edge/failure/regression where relevant)
@@ -298,6 +348,28 @@ Perform the agreed verification in the runtime environment:
 - confirm edge case handled
 - confirm no regression for previously working paths
 
+### 11.5. Verification Gate (MANDATORY)
+
+**在标记 DONE 之前，必须通过验证门禁。**
+
+这不是走过场——必须提供**新鲜证据**证明功能正常，不能凭假设或记忆声称完成。
+
+```
+🚦 Verification Gate
+   
+   Evidence checklist (每条都必须有实际输出):
+   ├── [ ] 测试通过: 贴出 test run 的实际输出（不是"之前跑过了"）
+   ├── [ ] 构建成功: 贴出 build 输出
+   ├── [ ] 线上验证: 截图 / curl 输出 / 日志片段
+   └── [ ] 无回归: 至少验证一条已有功能仍正常
+   
+   Gate Decision:
+   ├── ✅ 全部有证据 → 可以标记 DONE
+   └── ❌ 任何一条缺证据 → 补齐后再过 Gate
+```
+
+**Hard Rule**: "我确认测试通过了"不算证据。必须是**这次刚跑的**命令输出。
+
 ### 12. Write back status/backlog (REQUIRED)
 
 两处都必须更新，缺一不可：
@@ -374,6 +446,7 @@ An Action is only "done" when all are true:
 - [ ] CI is green (or explicit, recorded exception exists)
 - [ ] Deployment completed
 - [ ] Online verification performed
+- [ ] **Verification Gate passed** (fresh evidence for tests, build, deploy, no regression)
 - [ ] **BACKLOG.md index status updated** (📋 → ✅, REQUIRED)
 - [ ] **docs/features/\<feature\>.md US section updated** (Completed date + [x] ACs, REQUIRED)
 

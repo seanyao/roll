@@ -1,21 +1,23 @@
 ---
 hidden: true
-name: cnx-backlog
-description: Unified entry for planning and backlog management. Analyzes requirements, designs solutions, splits into INVEST-compliant user stories, and writes to BACKLOG.md. Use when user wants to plan, create stories, or manage project backlog.
+name: cnx-design
+description: Unified entry for discussion, design and planning. Explores options when uncertain, designs solutions, splits into INVEST-compliant user stories, and writes to BACKLOG.md. Use when user wants to discuss approaches, design solutions, plan features, or create stories.
 ---
 
-# Backlog
+# Design
 
-规划新需求，并把结果写回 `BACKLOG.md`。
+讨论方案、设计架构、规划需求、写入 `BACKLOG.md`。
 
 ## When to Use
 
+- 需求方案不确定，需要对比多种做法
 - 需求还没进入 backlog
 - 需要先设计方案，再拆成 Stories
 - 需要从已有 plan 写入 `BACKLOG.md`
 
 ## Use This Skill For
 
+- 方案探索与对比（discuss 阶段）
 - 新需求规划
 - 方案设计
 - 拆分 Stories
@@ -24,14 +26,17 @@ description: Unified entry for planning and backlog management. Analyzes require
 ## Quick Start
 
 ```bash
+# 方案不确定 → 先讨论再规划
+$cnx-design "搜索功能用什么方案？Postgres FTS 还是 Meilisearch？"
+
 # 规划新需求 → 设计方案 → 拆分 Stories → 写入 BACKLOG
-$cnx-backlog "用户系统设计方案"
+$cnx-design "用户系统设计方案"
 
 # 从已有 Plan 拆分 Stories
-$cnx-backlog --from-plan docs/features/auth-plan.md
+$cnx-design --from-plan docs/features/auth-plan.md
 
 # 直接创建 Story
-$cnx-backlog --story "用户登录功能"
+$cnx-design --story "用户登录功能"
 ```
 
 ## Workspace Configuration
@@ -60,9 +65,19 @@ docs/features/
 ## Workflow
 
 ```
-User: "帮我设计用户系统"
+User: "帮我设计用户系统" / "搜索用什么方案？"
     │
     ▼
+┌─────────────────────────────┐
+│ 0. Discuss (when uncertain) │  ← 方案不确定时自动触发
+│    - 列出 2-4 个可行方案     │
+│    - 每个: 做法 + 优劣       │
+│    - 对比矩阵               │
+│    - 推荐 + 理由             │
+│    - 人类做最终决策           │
+└─────────────┬───────────────┘
+              │ 方案确认
+              ▼
 ┌─────────────────────────────┐
 │ 1. Understand & Analyze     │
 │    - 需求理解                │
@@ -103,6 +118,13 @@ User: "帮我设计用户系统"
     │
     └── 否 ──→ 等待用户确认
 ```
+
+**Discuss 阶段触发条件** — 满足任一则自动进入:
+- 用户明确在问"怎么选"、"用什么方案"
+- 存在 2 个以上可行技术路径
+- 需求涉及未知技术栈或新领域
+
+**Discuss 阶段可以随时停止** — 如果讨论后用户说"不做了"或"再想想"，不需要继续到规划阶段。
 
 **创建新 Story 的操作顺序:**
 
@@ -165,7 +187,7 @@ FEATURE_FILE="docs/features/${FEATURE}.md"
 ### With story-build
 
 ```
-$cnx-backlog "登录功能" → 创建 US-AUTH-001
+$cnx-design "登录功能" → 创建 US-AUTH-001
 User: "执行 US-AUTH-001"
     ↓
 $cnx-story-build US-AUTH-001 → TCR → CI/CD → Deploy
@@ -175,7 +197,7 @@ $cnx-story-build US-AUTH-001 → TCR → CI/CD → Deploy
 
 ```
 $cnx-bb-debug 发现问题 → 建议创建 FIX
-$cnx-backlog --fix "修复登录 API 404" → 创建 FIX-AUTH-001
+$cnx-design --fix "修复登录 API 404" → 创建 FIX-AUTH-001
 $cnx-fix-build FIX-AUTH-001 → 快速修复
 ```
 
@@ -188,6 +210,24 @@ Each story must be:
 - **Estimable**: 可估算工作量
 - **Small**: 足够小，快速交付
 - **Testable**: 可测试验证
+
+## Action 粒度约束
+
+**每个 Action 必须在 2-5 分钟内可完成。** 如果估算超过 5 分钟，继续拆分。
+
+**禁止占位符**: 所有 AC、Action 描述、文件路径必须具体可执行。以下表述视为无效:
+- "TBD"、"待定"、"后续补充"
+- "参考 XXX 实现"（不给出具体做法）
+- "类似于..."（不说明具体差异）
+
+**正确示例 vs 错误示例:**
+```
+❌ "实现用户认证模块"          → 太大，不可直接执行
+✅ "添加 /api/login POST 路由，接收 email+password，返回 JWT"
+
+❌ "测试待补充"               → 占位符
+✅ "单元测试: loginHandler 对空密码返回 400"
+```
 
 ## Engineering Common Sense Checklist
 

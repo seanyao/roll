@@ -20,11 +20,14 @@ show_skill() {
 }
 
 case $COMMAND in
-  backlog)
-    show_skill "cnx-backlog"
+  design|backlog)
+    show_skill "cnx-design"
     ;;
   build)
     show_skill "cnx-story-build"
+    ;;
+  spar)
+    show_skill "cnx-spar"
     ;;
   fix)
     show_skill "cnx-fix-build"
@@ -88,7 +91,7 @@ case $COMMAND in
 USAGE: $cnx <command> [options]
 
 COMMANDS:
-  backlog     需求规划        $cnx backlog "用户登录功能"
+  design      讨论+规划       $cnx design "用户登录功能"
   build       执行 Story      $cnx build US-001
   fix         修复 Bug        $cnx fix "登录按钮无响应"
   roll        一句话交付      $cnx roll "添加深色模式"
@@ -105,16 +108,16 @@ SCENARIOS:
     整站备份 → $cnx crawl <url> --depth 2
 
   开发工作流
-    规划 → $cnx backlog "需求"
+    设计 → $cnx design "需求"
     执行 → $cnx build US-001
     审查 → $cnx review
     发布 → $cnx changelog
 
 WORKFLOW:
-  1. Plan:   $cnx backlog "需求描述"
-  2. Do:     $cnx build US-XXX
-  3. Check:  $cnx review
-  4. Act:    $cnx changelog
+  1. Design:   $cnx design "需求描述"
+  2. Build:    $cnx build US-XXX
+  3. Check:    $cnx review
+  4. Fix:      $cnx fix / $cnx changelog
 
 EOF
     ;;

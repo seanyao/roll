@@ -1,14 +1,13 @@
 {
   "name": "cybernetix",
   "version": "0.1.0",
-  "description": "Cybernetix (CNX) - AI-Native Development Paradigm based on Control Theory and PDCA",
+  "description": "Cybernetix (CNX) - AI-Native Development Workflow",
   "keywords": [
     "ai",
     "agent",
-    "control-theory",
-    "pdca",
-    "cybernetics",
-    "skills"
+    "development-workflow",
+    "skills",
+    "agent-first"
   ],
   "homepage": "https://github.com/seanyao/cybernetix",
   "repository": {

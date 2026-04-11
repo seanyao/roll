@@ -25,23 +25,23 @@ plans:
 - ❌ `~/.kimi/skills/some-plan.md`
 - ❌ 任何项目外的全局位置
 
-## PDCA Workflow
+## Workflow
 
-### Plan → $cnx-backlog
-- 需求分析、方案设计
+### Design → $cnx-design
+- 方案探索、架构设计
 - 拆分 Stories
 - 写入 BACKLOG.md
 
-### Do → $cnx-story-build / $cnx-fix-build / $cnx-roll-build
+### Build → $cnx-story-build / $cnx-fix-build / $cnx-roll-build
 - 读取 BACKLOG 执行
-- TCR 开发
+- TCR 开发（独立 Actions 自动并行 + Worktree 隔离）
 - CI/CD 部署
 
 ### Check → $cnx-sentinel / $cnx-bb-debug
 - Sentinel: 定时巡检
 - cnx-bb-debug: 深度诊断
 
-### Act → $cnx-fix-build / $cnx-backlog
+### Fix → $cnx-fix-build / $cnx-design
 - 修复问题
 - 或重新规划
 

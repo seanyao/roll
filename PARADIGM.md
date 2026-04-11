@@ -1,52 +1,39 @@
 # Cybernetix (CNX)
 
-> AI 时代的控制论软件工程范式  
+> AI-Native Development Workflow  
 > _Let's roll, no sprints!_
 
 ---
 
-## 一、哲学层：控制论（Cybernetics）
+## 一、核心思路：反馈驱动的持续交付
 
-### 1.1 控制论框架
-
-**控制论**研究「系统在变动环境中如何通过反馈保持目标」。
-
-软件系统是一个**控制系统**：
-- **目标**：Backlog 定义的期望状态
-- **感知**：Sentinel 监控实际状态  
-- **比较**：分析目标与实际的差距
-- **行动**：开发/修复以缩小差距
-- **反馈**：验证行动结果
+CNX 的核心很简单：**设定目标 → 执行 → 检查结果 → 根据反馈调整**，持续循环。
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    控制论控制回路                                │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│      目标(Goal)        感知(Sense)        比较(Compare)         │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐        │
-│   │   BACKLOG   │←───│  Sentinel   │←───│   Diff      │        │
-│   │  (期望状态)  │    │  (实际状态)  │    │  (差距分析)  │        │
-│   └──────┬──────┘    └─────────────┘    └──────┬──────┘        │
-│          │                                      │               │
-│          ▼                                      ▼               │
-│   ┌─────────────┐                        ┌─────────────┐        │
-│   │    PLAN     │                        │    ACT      │        │
-│   │   设定目标   │                        │   调整行动   │        │
-│   └─────────────┘                        └─────────────┘        │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    反馈驱动循环                                │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│   目标              感知               比较                   │
+│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│   │   BACKLOG   │←─│  Sentinel   │←─│   Diff      │         │
+│   │  (期望状态)  │  │  (实际状态)  │  │  (差距分析)  │         │
+│   └──────┬──────┘  └─────────────┘  └──────┬──────┘         │
+│          │                                  │                │
+│          ▼                                  ▼                │
+│   ┌─────────────┐                    ┌─────────────┐         │
+│   │   Design    │                    │    Fix      │         │
+│   │   设计+规划  │                    │   修复改进   │         │
+│   └─────────────┘                    └─────────────┘         │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 PDCA 是控制论的一种实现
+**工作流阶段:**
 
 ```
-控制论（通用框架）
-    └── PDCA（软件工程实践）
-        ├── Plan  = 设定目标（Backlog）
-        ├── Do    = 执行行动（Build）
-        ├── Check = 感知反馈（Sentinel）
-        └── Act   = 调整行动（Fix）
+Design (讨论+规划) → Build (执行) → Check (巡检) → Fix (修复) → 循环
+    $cnx-design       $cnx-story-build   $cnx-sentinel     $cnx-fix-build
 ```
 
 ---
@@ -71,7 +58,7 @@
 │   ┌─────────────────────────────────────┐                      │
 │   │      Kimi Code CLI (Agent)          │                      │
 │   │  ┌─────────┐ ┌─────────┐ ┌───────┐ │                      │
-│   │  │ $cnx-backlog│ │$story   │ │$sentin│ │                      │
+│   │  │ $cnx-design│ │$story   │ │$sentin│ │                      │
 │   │  │         │ │-build   │ │el     │ │                      │
 │   │  │ $project│ │$fix     │ │$bb    │ │                      │
 │   │  │ -init   │ │-build   │ │-debug │ │                      │
@@ -91,18 +78,19 @@
 
 当前基于 Kimi Code CLI 实现的 Skill：
 
-| Skill | PDCA 阶段 | 功能 | 状态 |
-|-------|----------|------|------|
-| `$cnx-project-init` | - | 初始化 PDCA-ready 项目 | ✅ 已实现 |
-| `$cnx-backlog` | PLAN | 需求规划，拆分 Stories | ✅ 已实现 |
-| `$cnx-story-build` | DO | Story 开发交付 | ✅ 已实现 |
-| `$cnx-fix-build` | DO/ACT | Bug 修复 | ✅ 已实现 |
-| `$cnx-roll-build` | PLAN+DO | 一句话快速实现 | ✅ 已实现 |
+| Skill | 阶段 | 功能 | 状态 |
+|-------|------|------|------|
+| `$cnx-init` | - | 初始化项目 | ✅ 已实现 |
+| `$cnx-design` | DESIGN | 讨论方案 + 设计架构 + 规划 Stories | ✅ 已实现 |
+| `$cnx-story-build` | BUILD | Story 开发交付（含并行调度） | ✅ 已实现 |
+| `$cnx-spar` | BUILD | 对抗式 TDD：Attacker/Defender 攻守协同 | ✅ 已实现 |
+| `$cnx-fix-build` | BUILD/FIX | Bug 修复 | ✅ 已实现 |
+| `$cnx-roll-build` | DESIGN+BUILD | 一句话快速实现 | ✅ 已实现 |
 | `$cnx-sentinel` | CHECK | 定时巡检 | ✅ 已实现 |
 | `$cnx-bb-debug` | CHECK | 深度诊断 | ✅ 已实现 |
 | `$cnx-bb-analyzer` | CHECK | 诊断分析 | ✅ 已实现 |
 | `$cnx-qa-cover` | Support | 测试规范 | ✅ 已实现 |
-| `$self-code-review` | Support | 提交前自检 | ✅ 已实现 |
+| `$cnx-.code-review` | Support | 提交前自检 | ✅ 已实现 |
 
 **Tools 工具集**（环境协同）：
 
@@ -115,7 +103,7 @@
 ```bash
 # 当前可运行的完整流程
 $cnx-project-init my-app
-$cnx-backlog "用户系统"
+$cnx-design "用户系统"
 $cnx-story-build US-001
 $cnx-sentinel patrol  # 自动运行
 $cnx-fix-build FIX-001
@@ -177,10 +165,10 @@ bridge.ai 架构：
 
 | 能力 | 说明 | 对应理论 |
 |------|------|---------|
-| **Agent Router** | 根据任务选择最适合的超级智能体 | 控制论的 "决策" 环节 |
-| **Shared Context** | 多 Agent 共享的上下文和记忆 | PDCA 的 "目标" 定义 |
-| **Handoff Protocol** | Agent 间标准化的交接协议 | 多智能体编排模式 |
-| **Feedback Loop** | 执行结果的反馈和验证 | 控制论的 "反馈" 环节 |
+| **Agent Router** | 根据任务选择最适合的智能体 | 智能调度 |
+| **Shared Context** | 多 Agent 共享的上下文和记忆 | 统一目标 |
+| **Handoff Protocol** | Agent 间标准化的交接协议 | 多代理编排 |
+| **Feedback Loop** | 执行结果的反馈和验证 | 反馈驱动 |
 | **Cost Control** | 多 Agent 调用的成本优化 | 工程化实践 |
 
 ### 3.3 愿景：超级智能体协同
@@ -260,37 +248,33 @@ Claude (Master)
 
 ---
 
-## 四、方法论层：PDCA 实现（已实践）
-
-当前实际运行的控制回路：
+## 四、当前工作流（已实践）
 
 ```
-        ┌─────────┐
-        │  PLAN   │  $cnx-backlog
-        │  计划   │  当前：Kimi Agent 执行
-        └────┬────┘
+        ┌──────────┐
+        │ DESIGN   │  $cnx-design
+        │ 讨论+规划 │
+        └────┬─────┘
              │
              ▼
-        ┌─────────┐
-        │   DO    │  $cnx-story-build / $cnx-fix-build
-        │  执行   │  当前：Kimi Agent 执行
-        └────┬────┘
+        ┌──────────┐
+        │  BUILD   │  $cnx-story-build / $cnx-fix-build
+        │  执行    │
+        └────┬─────┘
              │
              ▼
-        ┌─────────┐
-        │  CHECK  │  $cnx-sentinel / $cnx-bb-debug
-        │  检查   │  Sentinel: GitHub Actions 自动
-        └────┬────┘
+        ┌──────────┐
+        │  CHECK   │  $cnx-sentinel / $cnx-bb-debug
+        │  巡检    │  Sentinel: GitHub Actions 自动
+        └────┬─────┘
              │
              ▼
-        ┌─────────┐
-        │   ACT   │  $cnx-fix-build
-        │  改进   │  当前：Kimi Agent 执行
-        └────┬────┘
+        ┌──────────┐
+        │   FIX    │  $cnx-fix-build
+        │  修复    │
+        └────┬─────┘
              │
-             └─────────────┐
-                           │
-                    单一 Agent 持续循环
+             └──────── 持续循环
 ```
 
 ---
@@ -309,11 +293,11 @@ Claude (Master)
 ### 5.2 项目结构（已实现）
 
 ```
-my-project/  （$cnx-project-init 自动生成）
+my-project/  （$cnx-init 自动生成）
 │
-├── 📋 BACKLOG.md              # ✅ PDCA核心
+├── 📋 BACKLOG.md              # ✅ 任务索引
 ├── 🤖 AGENTS.md               # ✅ 约束定义
-├── 📁 docs/plans/             # ✅ Plan产出
+├── 📁 docs/features/          # ✅ Story 详情 & 设计文档
 ├── 🔌 api/                    # ✅ 接口层
 ├── 📦 src/domains/            # ✅ 领域解耦
 ├── ⚙️ .env.example            # ✅ 服务配置
@@ -324,14 +308,15 @@ my-project/  （$cnx-project-init 自动生成）
 
 ## 六、诚实的状态评估
 
-### 6.1 已实现的（硬核工程）
+### 6.1 已实现的
 
 | 维度 | 状态 | 说明 |
 |------|------|------|
-| 控制论框架 | ✅ | 理论基础扎实 |
-| PDCA 闭环 | ✅ | 完整可运行 |
-| Skill 生态 | ✅ | 10+ Skills |
-| 项目模板 | ✅ | $cnx-project-init |
+| 反馈驱动循环 | ✅ | Design → Build → Check → Fix |
+| Skill 生态 | ✅ | 14 Skills + 2 Tools |
+| 并行调度 | ✅ | story-build 内置 Worktree 隔离 |
+| 验证门禁 | ✅ | 完成前强制提供新鲜证据 |
+| 项目模板 | ✅ | $cnx-init |
 | 架构约束 | ✅ | AGENTS.md |
 | 自动化巡检 | ✅ | Sentinel |
 
@@ -355,22 +340,22 @@ my-project/  （$cnx-project-init 自动生成）
 
 ## 七、总结
 
-### 当前：单一 Agent 的硬核工程
+### 当前
 
 ```
 ✅ 已实现：
-控制论 + 单一 Agent (Kimi) + PDCA + Skill 生态
+反馈驱动循环 + Skill 生态 + 子代理调度 + 验证门禁
 
-这是已经运行的、可验证的、工业化的软件工程方法。
+可运行、可验证的 AI 开发工作流。
 ```
 
 ### 未来：多 Agent 协同与 bridge.ai
 
 ```
 🔮 方向：
-控制论 + 多 Agent (Claude/Codex/Kimi) + PDCA
+多 Agent (Claude/Codex/Kimi) 协同
          │
-         └── 落地载体：bridge.ai (多智能体协同平台)
+         └── 落地载体：bridge.ai
 
 bridge.ai 提供：
 - Agent Router (智能任务分发)
@@ -382,27 +367,20 @@ bridge.ai 提供：
 ### 核心洞察
 
 **当前价值（已实践）**：
-- 基于控制论的系统方法论 ✅
+- 反馈驱动的持续交付循环 ✅
 - 标准化、可复用的 Skill 生态 ✅
-- 数据驱动的 PDCA 闭环 ✅
-- 单一 Agent 可运行的硬核工程 ✅
+- story-build 内置并行调度 + Worktree 隔离 ✅
+- 验证门禁：完成前强制提供新鲜证据 ✅
 
-**未来方向（理论+载体）**：
+**未来方向**：
 - 多 Agent 分工提升效率 🔮
 - **bridge.ai 作为协同平台** 🔮
 - 自动编排降低人工决策 🔮
-- 竞合验证提高质量 🔮
-
-> **状态说明**：
-> - ✅ 当前：单一 Agent (Kimi) + Skill 生态，已实践运行
-> - 🔮 未来：多 Agent 协同，理论已设计，**bridge.ai 是落地载体**
 
 ---
 
 ## 参考
 
-- **Cybernetics**: Norbert Wiener
-- **PDCA**: Deming Cycle
-- **Current Agent**: Kimi Code CLI
-- **Future Platform**: bridge.ai (多智能体协同平台)
-- **Future Agents**: Claude (Anthropic), Codex (OpenAI)
+- **Current Agents**: Kimi Code CLI, Claude Code
+- **Future Platform**: bridge.ai
+- **Future Agents**: Codex (OpenAI), Gemini (Google)

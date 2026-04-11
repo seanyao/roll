@@ -1,7 +1,7 @@
 ---
 hidden: true
 name: cnx-init
-description: Initialize a new AI-Coding project with complete PDCA workflow support. Creates standard directory structure, BACKLOG.md, CHANGELOG.md, docs/plans/, and GitHub Actions for sentinel patrols.
+description: Initialize a new AI-Coding project with complete CNX workflow support. Creates standard directory structure, BACKLOG.md, CHANGELOG.md, docs/features/, and GitHub Actions for sentinel patrols.
 ---
 
 # Project Init
@@ -25,7 +25,7 @@ description: Initialize a new AI-Coding project with complete PDCA workflow supp
 ```
 my-project/
 │
-├── 📋 PROJECT MANAGEMENT (PDCA核心)
+├── 📋 PROJECT MANAGEMENT
 │   ├── BACKLOG.md              # Story backlog (主要工作区)
 │   ├── CHANGELOG.md            # 发布历史
 │   └── README.md               # 项目介绍
@@ -99,71 +99,15 @@ my-project/
 └── package.json
 ```
 
-## PDCA Workflow
+## Workflow
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      PDCA 循环流程                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   ┌─────────────┐                                               │
-│   │    PLAN     │                                               │
-│   │   计划阶段   │                                               │
-│   │             │  Input: 需求/想法/问题                         │
-│   │ $cnx-backlog    │  Output: Plan.md → Stories → BACKLOG.md       │
-│   │             │                                               │
-│   │ 1. 分析需求  │  docs/plans/YYYY-MM-DD-feature.md             │
-│   │ 2. 设计方案  │       ↓                                       │
-│   │ 3. 拆分Story │  BACKLOG.md 新增 US-XXX                      │
-│   └──────┬──────┘                                               │
-│          │                                                      │
-│          ▼                                                      │
-│   ┌─────────────┐                                               │
-│   │     DO      │                                               │
-│   │   执行阶段   │                                               │
-│   │             │  Input: BACKLOG.md 中的 Story                  │
-│   │ $story      │  Output: 完成的代码 + 测试 + 文档              │
-│   │ -build      │                                               │
-│   │             │  1. TCR开发 (Test && Commit || Revert)         │
-│   │ 1. 读取Story│  2. Local CI检查                              │
-│   │ 2. TCR开发   │  3. Push → Deploy                             │
-│   │ 3. 部署     │                                               │
-│   │             │  BACKLOG.md: 📋 → 🔄 → ✅                      │
-│   └──────┬──────┘                                               │
-│          │                                                      │
-│          ▼                                                      │
-│   ┌─────────────┐                                               │
-│   │    CHECK    │                                               │
-│   │   检查阶段   │                                               │
-│   │             │  Input: 生产环境 / 代码变更                    │
-│   │ $cnx-sentinel   │  Output: 巡检报告 / 发现问题                   │
-│   │ patrol      │                                               │
-│   │             │  • 定时随机抽检 (GitHub Actions)               │
-│   │ 1. 功能验收  │  • 回归测试                                   │
-│   │ 2. 数据检查  │  • 数据完整性                                 │
-│   │ 3. AI抽查   │                                               │
-│   │             │  发现问题 → BACKLOG.md 新增 FIX-XXX            │
-│   └──────┬──────┘                                               │
-│          │                                                      │
-│          ▼                                                      │
-│   ┌─────────────┐                                               │
-│   │     ACT     │                                               │
-│   │   改进阶段   │                                               │
-│   │             │  Input: BACKLOG.md 中的 FIX/Story              │
-│   │ $cnx-fix-build  │  Output: 修复后的系统                          │
-│   │             │                                               │
-│   │ 1. 读取FIX   │  TCR → CI/CD → Deploy                         │
-│   │ 2. TCR修复   │                                               │
-│   │ 3. 验证     │  BACKLOG.md: FIX-XXX ✅                        │
-│   │             │                                               │
-│   └──────┬──────┘                                               │
-│          │                                                      │
-│          └──────────────────────┬───────────────────────────────┘
-│                                 │
-│                                 ▼
-│                      持续改进 (Continuous Improvement)
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+Design → Build → Check → Fix → 持续循环
+
+Design:  $cnx-design      → docs/features/ + BACKLOG.md
+Build:   $cnx-story-build → TCR → CI/CD → Deploy
+Check:   $cnx-sentinel    → 定时巡检 → 发现问题
+Fix:     $cnx-fix-build   → TCR → Deploy → 验证
 ```
 
 ## File Details
@@ -379,28 +323,29 @@ AI助手工作指南：
 ```markdown
 # Project Agents Configuration
 
-## PDCA Workflow
+## Workflow
 
-### Plan → $cnx-backlog
-- 需求分析、方案设计
+### Design → $cnx-design
+- 方案探索、架构设计
 - 拆分 Stories
 - 写入 BACKLOG.md
 - **必须检查**: 依赖完整性 & 数据流完整性
 
-### Do → $cnx-story-build / $cnx-fix-build / $cnx-roll-build
+### Build → $cnx-story-build / $cnx-fix-build / $cnx-roll-build
 - 读取 BACKLOG 执行
-- TCR 开发
+- TCR 开发（独立 Actions 自动并行 + Worktree 隔离）
 - CI/CD 部署
 - **必须验证**: 数据流集成测试通过
+- **Verification Gate**: 完成前提供新鲜证据
 
 ### Check → $cnx-sentinel / $cnx-bb-debug
 - Sentinel: 定时巡检
 - cnx-bb-debug: 深度诊断
 - **数据完整性**: 验证生产者→消费者数据流
 
-### Act → $cnx-fix-build / $cnx-backlog
+### Fix → $cnx-fix-build / $cnx-design
 - 修复问题
-- 或重新规划
+- 或重新设计
 
 ## Architecture Constraints
 
@@ -616,7 +561,7 @@ JWT_SECRET=your-jwt-secret-key
 `$cnx-init` 会自动创建以下文件：
 
 ### ✅ 项目管理文件
-- `BACKLOG.md` - PDCA核心工作区
+- `BACKLOG.md` - 任务索引
 - `CHANGELOG.md` - 发布历史模板
 - `README.md` - 项目介绍
 
@@ -672,7 +617,7 @@ $cnx-init
 
 ```bash
 # 设计新功能
-$cnx-backlog "用户系统设计方案"
+$cnx-design "用户系统设计方案"
 
 # 输出:
 # - docs/plans/2024-01-20-user-system/design.md
@@ -726,7 +671,7 @@ $cnx-fix-build FIX-001
 
 | Phase | Command | Purpose |
 |-------|---------|---------|
-| Plan | `$cnx-backlog "需求"` | 规划设计，拆分 Stories |
+| Plan | `$cnx-design "需求"` | 规划设计，拆分 Stories |
 | Do | `$cnx-story-build US-XXX` | 开发 Story |
 | Do | `$cnx-fix-build FIX-XXX` | 修复 Bug |
 | Do | `$cnx-roll-build "一句话"` | 快速实现 |

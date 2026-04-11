@@ -1,6 +1,6 @@
 # Project Backlog
 
-> PDCA 核心工作区 - 所有工作在此跟踪
+> 任务索引 - 所有工作在此跟踪
 
 ## 🎯 Active
 
@@ -14,7 +14,7 @@
 
 待开发，已规划好
 
-<!-- $cnx-backlog 会在这里创建新的 Stories -->
+<!-- $cnx-design 会在这里创建新的 Stories -->
 
 ## 🔄 In Progress
 

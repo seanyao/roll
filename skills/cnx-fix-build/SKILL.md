@@ -255,6 +255,28 @@ Verify the shipped fix on the deployed target:
 - confirm the previously working path still works
 - for hotfixes: verify in production environment
 
+### 10.5. Verification Gate (MANDATORY)
+
+**在标记 DONE 之前，必须通过验证门禁。**
+
+必须提供**新鲜证据**，不能凭假设声称完成。
+
+```
+🚦 Verification Gate
+   
+   Evidence checklist (每条都必须有实际输出):
+   ├── [ ] 测试通过: 贴出 test run 的实际输出
+   ├── [ ] 构建成功: 贴出 build 输出
+   ├── [ ] 问题已修复: 截图 / curl 输出 / 日志片段证明
+   └── [ ] 无回归: 至少验证一条已有功能仍正常
+   
+   Gate Decision:
+   ├── ✅ 全部有证据 → 可以标记 DONE
+   └── ❌ 任何一条缺证据 → 补齐后再过 Gate
+```
+
+**Hard Rule**: "我确认测试通过了"不算证据。必须是**这次刚跑的**命令输出。
+
 ### 11. Write Back Status (when tracking is needed)
 
 仅当满足 Hard Rules 第 6 条时更新（用户要求、影响 roadmap 可见行为、需后续跟踪）。
@@ -327,6 +349,7 @@ A minor change is only "done" when all are true:
 - [ ] CI is green (or explicit, recorded exception exists)
 - [ ] Deployment completed
 - [ ] Online verification performed
+- [ ] **Verification Gate passed** (fresh evidence for tests, build, fix confirmation, no regression)
 
 ## TCR Patterns for Common Fixes
 

@@ -1,6 +1,6 @@
 ---
 name: cnx
-description: Unified entry for Cybernetix (CNX) AI-Coding workflow. Routes to backlog planning, story delivery, bug fixes, code review, and project initialization. Use for structured AI-assisted software development with PDCA cycle.
+description: Unified entry for Cybernetix (CNX) AI-Coding workflow. Routes to design/planning, story delivery, bug fixes, parallel dispatch, code review, and project initialization. Use for structured AI-assisted software development.
 ---
 
 # CNX (Cybernetix)
@@ -17,8 +17,9 @@ $cnx <command> [options]
 
 | 命令 | 用途 | 示例 |
 |------|------|------|
-| `backlog` | 需求规划 | `$cnx backlog "用户登录功能"` |
+| `design` | 讨论+规划 | `$cnx design "用户登录功能"` |
 | `build` | 执行 Story | `$cnx build US-001` |
+| `spar` | 对抗式 TDD | `$cnx spar "转账逻辑"` |
 | `fix` | 修复 Bug | `$cnx fix "登录按钮无响应"` |
 | `roll` | 一句话交付 | `$cnx roll "添加深色模式"` |
 | `review` | 代码审查 | `$cnx review` |
@@ -41,8 +42,8 @@ $cnx crawl https://docs.example.com --depth 2
 
 **开发工作流**
 ```bash
-# 1. 规划需求
-$cnx backlog "用户登录功能"
+# 1. 设计规划
+$cnx design "用户登录功能"
 
 # 2. 执行开发
 $cnx build US-001
@@ -62,7 +63,7 @@ $cnx changelog
 
 | 场景 | 调用 |
 |------|------|
-| "规划新功能" / "拆分成 Stories" | `$cnx backlog "需求描述"` |
+| "讨论方案" / "规划新功能" | `$cnx design "需求描述"` |
 | "执行 US-001" / "开始开发" | `$cnx build US-001` |
 | "修复这个 Bug" | `$cnx fix "Bug 描述"` |
 | "快速实现一个功能" | `$cnx roll "一句话需求"` |
@@ -79,9 +80,9 @@ User: "帮我做一个登录功能"
     │
     ▼
 ┌─────────────────────────────────────┐
-│ $cnx backlog "登录功能"             │
-│  → cnx-backlog                      │
-│  → 分析需求 → 拆分 Stories          │
+│ $cnx design "登录功能"              │
+│  → cnx-design                      │
+│  → 讨论方案 → 设计架构 → 拆分 Stories│
 │  → 写入 BACKLOG.md                  │
 └─────────────┬───────────────────────┘
               │
@@ -102,12 +103,13 @@ User: "帮我做一个登录功能"
 
 ### Commands
 
-#### `backlog` - 需求规划
+#### `design` - 讨论+规划
 ```bash
-$cnx backlog "用户系统设计方案"
-$cnx backlog --from-plan docs/plans/auth.md
-$cnx backlog --story "登录功能"
-$cnx backlog --fix "修复 API 404"
+$cnx design "用户系统设计方案"
+$cnx design "搜索用 Postgres FTS 还是 Meilisearch？"
+$cnx design --from-plan docs/features/auth-plan.md
+$cnx design --story "登录功能"
+$cnx design --fix "修复 API 404"
 ```
 
 #### `build` - 执行 Story
@@ -185,10 +187,10 @@ Cybernetix 项目需要以下结构：
 
 ```
 project/
-├── BACKLOG.md          # Story  backlog
+├── BACKLOG.md          # 任务索引
 ├── CHANGELOG.md        # 发布历史
 ├── docs/
-│   └── plans/          # 设计方案
+│   └── features/       # Story 详情 & 设计文档
 └── .github/
     └── workflows/      # CI/CD
 ```
@@ -202,7 +204,7 @@ skills:
   cybernetix:
     workspace: ~/workspace/cybernetix
     commands:
-      - backlog
+      - design
       - build
       - fix
       - roll
@@ -224,7 +226,8 @@ export CYBERNETIX_WORKSPACE=~/workspace/cybernetix
 
 ### Related
 
-- `cnx-backlog` - Backlog 管理
+- `cnx-design` - 讨论+设计+规划
+- `cnx-spar` - 对抗式 TDD（高风险逻辑）
 - `cnx-story-build` - Story 交付
 - `cnx-fix-build` - Bug 修复
 - `cnx-roll-build` - 快速交付

@@ -99,6 +99,6 @@ $cnx-code-review files src/utils.ts
 ## CNX 原则对齐
 
 - **Agent-First**: 结构化审查清单，AI 可执行
-- **PDCA**: Check 阶段的本地质量控制
+- **Check 阶段**: 本地质量控制
 - **Micro-steps**: 小步快跑，每次审查 < 100 行
 - **TCR**: 通过自检后才能 Commit，保证仓库质量

@@ -312,6 +312,28 @@ Follow repo's deployment path (Vercel/Railway/etc).
 - Confirm edge cases handled
 - Confirm no regression
 
+### Phase 8.5: Verification Gate (MANDATORY)
+
+**在标记 DONE 之前，必须通过验证门禁。**
+
+必须提供**新鲜证据**，不能凭假设声称完成。
+
+```
+🚦 Verification Gate
+   
+   Evidence checklist (每条都必须有实际输出):
+   ├── [ ] 测试通过: 贴出 test run 的实际输出
+   ├── [ ] 构建成功: 贴出 build 输出
+   ├── [ ] 线上验证: 截图 / curl 输出 / 日志片段
+   └── [ ] 无回归: 至少验证一条已有功能仍正常
+   
+   Gate Decision:
+   ├── ✅ 全部有证据 → 可以标记 DONE
+   └── ❌ 任何一条缺证据 → 补齐后再过 Gate
+```
+
+**Hard Rule**: "我确认测试通过了"不算证据。必须是**这次刚跑的**命令输出。
+
 ### Phase 9: Update BACKLOG & Report
 
 ```bash
@@ -356,6 +378,8 @@ git push
    - If a step feels "a bit complex", split it
    - Each micro-step should be completable in 1-3 minutes
    - Prefer 5 small commits over 1 medium commit
+   - **Action 粒度约束**: 每个 Action 应在 2-5 分钟内可完成
+   - **禁止占位符**: Action/AC 描述必须具体可执行，禁止 "TBD"、"待定"、"后续补充"
 
 4. **Complete delivery like cnx-story-build**
    - Code reaches GitHub (`git push origin main`)
@@ -385,6 +409,7 @@ git push
 - [ ] CI is green (or explicit, recorded exception)
 - [ ] Deployed to production
 - [ ] Online verification performed
+- [ ] **Verification Gate passed** (fresh evidence for tests, build, deploy, no regression)
 - [ ] **BACKLOG.md index status updated** (📋 → ✅, REQUIRED)
 - [ ] **docs/features/\<feature\>.md US section updated** (Completed date + [x] ACs, REQUIRED)
 - [ ] Summary reported to user

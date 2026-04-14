@@ -23,34 +23,34 @@ CNX decomposes the software delivery lifecycle into three loops, each independen
 ```mermaid
 graph TB
     subgraph "Loop A: Research & Design"
-        A1["$cnx-research<br/>HV 竞品与技术调研"] --> A2["$cnx-design<br/>需求原子化 → INVEST Stories"]
-        A2 --> A3["BACKLOG.md<br/>状态索引"]
-        A3 --> A4["docs/features/<br/>验收标准 & 设计方案"]
+        A1["$cnx-research<br/>HV Research & Analysis"] --> A2["$cnx-design<br/>Requirements → INVEST Stories"]
+        A2 --> A3["BACKLOG.md<br/>Status Index"]
+        A3 --> A4["docs/features/<br/>Acceptance Criteria & Design"]
     end
 
     subgraph "Loop B: Implementation & Iteration"
-        B1["$cnx-init<br/>工程脚手架"] --> B2["$cnx-story-build<br/>TCR 驱动开发"]
-        B2 --> B3["$cnx-.code-review<br/>提交前自审"]
+        B1["$cnx-init<br/>Project Scaffold"] --> B2["$cnx-story-build<br/>TCR-Driven Development"]
+        B2 --> B3["$cnx-.code-review<br/>Pre-commit Review"]
         B3 --> B4["CI / Deploy"]
-        B4 --> B5["Verification Gate<br/>鲜活证据验收"]
-        B5 --> B6["$cnx-.changelog<br/>变更沉淀"]
-        B2 -.->|高风险路径| B7["$cnx-spar<br/>对抗式 TDD"]
+        B4 --> B5["Verification Gate<br/>Live Evidence Required"]
+        B5 --> B6["$cnx-.changelog<br/>Change Log"]
+        B2 -.->|High-risk path| B7["$cnx-spar<br/>Adversarial TDD"]
         B7 --> B3
     end
 
     subgraph "Loop C: Observability & Maintenance"
-        C1["$cnx-sentinel<br/>随机巡检"] --> C2{"异常?"}
-        C2 -->|Yes| C3["$cnx-bb-debug<br/>现场取证"]
-        C3 --> C4["$cnx-bb-analyzer<br/>根因诊断"]
-        C4 --> C5["$cnx-fix-build<br/>回归修复"]
+        C1["$cnx-sentinel<br/>Randomized Patrol"] --> C2{"Anomaly?"}
+        C2 -->|Yes| C3["$cnx-bb-debug<br/>Live Forensics"]
+        C3 --> C4["$cnx-bb-analyzer<br/>Root Cause Analysis"]
+        C4 --> C5["$cnx-fix-build<br/>Regression Fix"]
         C5 --> C1
         C2 -->|No| C1
     end
 
-    A4 -->|"Story 流入"| B2
-    B6 -->|"交付完成"| C1
-    C5 -->|"问题升级"| A2
-    C4 -->|"新需求发现"| A2
+    A4 -->|"Story handoff"| B2
+    B6 -->|"Delivery complete"| C1
+    C5 -->|"Issue escalation"| A2
+    C4 -->|"New requirement"| A2
 
     style A1 fill:#e8f4fd,stroke:#2196F3
     style A2 fill:#e8f4fd,stroke:#2196F3
@@ -516,34 +516,34 @@ CNX is not a new methodology. It encodes proven engineering practices as standar
 
 ```mermaid
 graph LR
-    subgraph "经典方法论"
-        HCD["HCD<br/>以人为本设计"]
-        BDD["BDD<br/>行为驱动开发"]
+    subgraph "Classical Methodologies"
+        HCD["HCD<br/>Human-Centered Design"]
+        BDD["BDD<br/>Behavior-Driven Dev"]
         S["Scrum<br/>Sprint / Backlog"]
         T["TDD<br/>RED-GREEN-Refactor"]
         TCR["TCR<br/>Test && Commit ∥ Revert"]
         SRE["SRE<br/>SLI / SLO / Error Budget"]
-        CE["混沌工程<br/>随机故障注入"]
+        CE["Chaos Engineering<br/>Random Fault Injection"]
     end
 
-    subgraph "CNX 实现"
-        R["$cnx-research<br/>HV 分析"]
+    subgraph "CNX Implementation"
+        R["$cnx-research<br/>HV Analysis"]
         D["$cnx-design<br/>INVEST Stories"]
         SB["$cnx-story-build<br/>TCR Micro-steps"]
-        SP["$cnx-spar<br/>对抗式 TDD"]
-        SE["$cnx-sentinel<br/>随机巡检"]
-        BB["$cnx-bb-debug<br/>自动取证"]
+        SP["$cnx-spar<br/>Adversarial TDD"]
+        SE["$cnx-sentinel<br/>Randomized Patrol"]
+        BB["$cnx-bb-debug<br/>Auto Forensics"]
     end
 
-    HCD -->|"调研先行"| R
-    BDD -->|"验收标准"| D
-    S -->|"Backlog 管理"| D
-    T -->|"测试先行"| SB
-    TCR -->|"原子提交"| SB
-    T -->|"攻防分离"| SP
-    SRE -->|"采样监控"| SE
-    CE -->|"随机策略"| SE
-    SRE -->|"现场取证"| BB
+    HCD -->|"Research first"| R
+    BDD -->|"Acceptance criteria"| D
+    S -->|"Backlog management"| D
+    T -->|"Test first"| SB
+    TCR -->|"Atomic commits"| SB
+    T -->|"Attack-defense split"| SP
+    SRE -->|"Sampling patrol"| SE
+    CE -->|"Random strategy"| SE
+    SRE -->|"Live forensics"| BB
 ```
 
 The key distinction lies in the shift of execution subject: these methodologies originally depended on engineers' personal discipline (humans tire, humans cut corners). CNX hardens them into instruction constraints for AI Agents — an Agent will never "skip the tests just this once," because that branch does not exist in the Skill definition.

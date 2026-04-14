@@ -232,7 +232,7 @@ YAML
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: sync
-# Distribute global conventions to each AI tool's config path
+# Distribute global conventions and skills to each AI tool's config path
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_sync() {
   if [[ ! -d "$CNX_GLOBAL" ]]; then
@@ -240,11 +240,15 @@ cmd_sync() {
     exit 1
   fi
 
-  info "Syncing global conventions to AI tool config paths..."
+  info "Syncing global conventions and skills..."
   echo ""
+
+  # 1. Update skills first
+  cmd_update_skills
 
   local force="${1:-false}"
 
+  # 2. Sync convention files
   # Claude Code: CLAUDE.md → ~/.claude/CLAUDE.md
   local claude_target
   claude_target="$(config_get sync_claude ~/.claude/CLAUDE.md)"

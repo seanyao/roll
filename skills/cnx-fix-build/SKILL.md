@@ -6,35 +6,30 @@ description: Execute bugfix/hotfix from backlog. Reads FIX/BUG from BACKLOG.md, 
 
 # Fix Ship (TCR Edition)
 
-执行单个 `FIX-XXX` / `BUG-XXX`，适合小范围修复或 hotfix。
+> Follows the Architecture Constraints, Development Discipline, and Engineering Common Sense defined in the project AGENTS.md.
+
+Execute a single `FIX-XXX` / `BUG-XXX`, suitable for small-scope fixes or hotfixes.
 
 ## Trigger
 
 Use when:
 
-- 已经有明确的 `FIX-XXX` 或 `BUG-XXX`
-- 是单个问题、单个 hotfix、单个小增强
-- 不需要拆成多个 Story / Action 才能落地
+- There is a clearly defined `FIX-XXX` or `BUG-XXX`
+- It is a single issue, single hotfix, or single small enhancement
+- It does not need to be split into multiple Stories / Actions to deliver
 
 **Workflow:**
 1. Read BACKLOG.md index → Find FIX/BUG row → Follow link to `docs/features/<feature>.md`
 2. Single Action (no splitting)
 3. Execute via TCR workflow
-4. Write back: update BACKLOG.md status column + update US section in Feature file
-
-**文档结构（两层分离）:**
-```
-BACKLOG.md                        # 索引页（状态 + 一句话 + 链接）
-docs/features/
-  <feature>.md                    # 详情（AC / Files / Dependencies）
-```
+4. Write back: update BACKLOG.md status column + update FIX section in Feature file
 
 Do not use for:
 
-- 多步骤功能开发
-- 跨多个子系统的大改动
-- 需要先规划再拆分的需求
-- 应该按 Story 跟踪的 roadmap work
+- Multi-step feature development
+- Large changes spanning multiple subsystems
+- Requirements that need planning and splitting first
+- Roadmap work that should be tracked as Stories
 
 If the issue expands beyond a single bounded change, switch to `cnx-story-build`.
 
@@ -150,10 +145,10 @@ npm run ci:local 2>/dev/null || (npm run lint && npm run build && npm test -- --
 
 **If failures:**
 ```
-❌ 本地 CI 检查失败
-   ├── 运行 'npm run ci:fix' 自动修复格式问题
-   ├── 修复 lint/build/test 错误
-   └── 重新运行检查直到通过
+❌ Local CI check failed
+   ├── Run 'npm run ci:fix' to auto-fix formatting issues
+   ├── Fix lint/build/test errors
+   └── Re-run checks until passing
 ```
 
 **Setup ci:local script (if not exists):**
@@ -171,12 +166,12 @@ Add to `package.json`:
 ```bash
 cat > .git/hooks/pre-push << 'EOF'
 #!/bin/bash
-echo "🔍 运行本地 CI 检查..."
+echo "🔍 Running local CI checks..."
 if ! npm run ci:local 2>/dev/null && ! (npm run lint && npm run build); then
-    echo "❌ CI 检查失败，推送已阻止"
+    echo "❌ CI check failed, push blocked"
     exit 1
 fi
-echo "✅ CI 检查通过"
+echo "✅ CI check passed"
 EOF
 chmod +x .git/hooks/pre-push
 ```
@@ -257,59 +252,59 @@ Verify the shipped fix on the deployed target:
 
 ### 10.5. Verification Gate (MANDATORY)
 
-**在标记 DONE 之前，必须通过验证门禁。**
+**Before marking as DONE, the verification gate must be passed.**
 
-必须提供**新鲜证据**，不能凭假设声称完成。
+**Fresh evidence** must be provided — claiming completion based on assumptions is not acceptable.
 
 ```
 🚦 Verification Gate
    
-   Evidence checklist (每条都必须有实际输出):
-   ├── [ ] 测试通过: 贴出 test run 的实际输出
-   ├── [ ] 构建成功: 贴出 build 输出
-   ├── [ ] 问题已修复: 截图 / curl 输出 / 日志片段证明
-   └── [ ] 无回归: 至少验证一条已有功能仍正常
+   Evidence checklist (each item must have actual output):
+   ├── [ ] Tests pass: paste actual test run output
+   ├── [ ] Build succeeds: paste build output
+   ├── [ ] Issue resolved: screenshot / curl output / log excerpt as proof
+   └── [ ] No regression: verify at least one existing feature still works
    
    Gate Decision:
-   ├── ✅ 全部有证据 → 可以标记 DONE
-   └── ❌ 任何一条缺证据 → 补齐后再过 Gate
+   ├── ✅ All items have evidence → Can mark as DONE
+   └── ❌ Any item lacks evidence → Provide evidence before passing the gate
 ```
 
-**Hard Rule**: "我确认测试通过了"不算证据。必须是**这次刚跑的**命令输出。
+**Hard Rule**: "I confirm tests passed" does not count as evidence. It must be **freshly run** command output from this session.
 
 ### 11. Write Back Status (when tracking is needed)
 
-仅当满足 Hard Rules 第 6 条时更新（用户要求、影响 roadmap 可见行为、需后续跟踪）。
+Only update when Hard Rule #6 conditions are met (user requested, affects roadmap-visible behavior, or needs follow-up tracking).
 
-两处都必须更新，缺一不可：
+Both locations must be updated — neither can be skipped:
 
-**① 更新 BACKLOG.md 索引行（Status 列）:**
+**① Update BACKLOG.md index row (Status column):**
 
 ```markdown
 | [FIX-{ID}](docs/features/<feature>.md#fix-{id}) | {Title} | ✅ Done |
 ```
 
-将对应行的 Status 从 `📋 Todo` 改为 `✅ Done`。
+Change the Status of the corresponding row from `📋 Todo` to `✅ Done`.
 
-**② 更新 `docs/features/<feature>.md` FIX 段落:**
+**② Update `docs/features/<feature>.md` FIX section:**
 
 ```markdown
-## FIX-{ID} {描述} ✅
+## FIX-{ID} {description} ✅
 
 **Fixed**: {YYYY-MM-DD}
 
-**Problem**: {问题描述}
-**Root Cause**: {根本原因}
-**Solution**: {解决方案}
+**Problem**: {problem description}
+**Root Cause**: {root cause}
+**Solution**: {solution}
 
 **Files:**
-- `{修改的文件}`
+- `{modified file}`
 ```
 
-- 标题加 ✅
-- 补 `**Fixed**` 日期
-- AC（如有）从 `[ ]` 改为 `[x]`
-- Files 更新为实际变更文件
+- Add ✅ to the title
+- Add `**Fixed**` date
+- Change AC (if any) from `[ ]` to `[x]`
+- Update Files to reflect actual changed files
 
 ### 12. Report
 

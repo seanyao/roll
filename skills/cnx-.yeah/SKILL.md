@@ -1,19 +1,19 @@
 ---
 hidden: true
 name: cnx-.yeah
-description: Build 流程完成后的庆祝仪式 🎉 在 cnx-story-build / cnx-fix-build / cnx-roll-build 成功完成后输出礼花。
+description: Celebration ceremony after build workflow completion 🎉 Outputs fireworks after cnx-story-build / cnx-fix-build / cnx-roll-build finishes successfully.
 ---
 
 # CNX Yeah! 🎉
 
-Build 成功完成后的庆祝仪式。
+Celebration ceremony after a successful build completion.
 
-## 触发时机
+## When Triggered
 
-- `$cnx-story-build` 完成 US 开发后
-- `$cnx-fix-build` 完成 Bug 修复后
-- `$cnx-roll-build` 完成快速实现后
-- 任何 `$cnx-*` Build 流程成功结束时
+- After `$cnx-story-build` completes US development
+- After `$cnx-fix-build` completes a bug fix
+- After `$cnx-roll-build` completes a quick implementation
+- When any `$cnx-*` build workflow finishes successfully
 
 ## Output
 
@@ -31,7 +31,7 @@ Build 成功完成后的庆祝仪式。
 
 ## Usage
 
-在 Build Skill 的最后一步调用：
+Called as the final step in a build skill:
 
 ```markdown
 ## Post-Deploy
@@ -43,6 +43,6 @@ Build 成功完成后的庆祝仪式。
 
 ## Note
 
-- 仅在实际成功完成后调用
-- 如果流程中有 revert 或失败，不触发
-- 属于 CNX 持续交付循环的正反馈环节 🎯
+- Only called after an actual successful completion
+- Not triggered if the workflow had a revert or failure
+- Part of the positive feedback loop in the CNX continuous delivery cycle 🎯

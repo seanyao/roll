@@ -1,14 +1,14 @@
 ---
 hidden: true
 name: cnx-.code-review
-description: TCR 流程中的代码自审查环节。每个 micro-step 完成后、Commit 前执行，检查代码质量、安全性和设计问题。
+description: Self code review step in the TCR workflow. Runs after each micro-step is completed and before commit, checking code quality, security, and design issues.
 ---
 
 # CNX Self Code Review
 
-**TCR 循环的质量门禁** - 在每个 micro-step 完成后、Commit 前进行自我审查。
+**Quality gate for the TCR loop** - Self-review after each micro-step is completed and before commit.
 
-## 在 CNX 中的位置
+## Position in CNX
 
 ```
 TCR Loop:
@@ -19,49 +19,50 @@ TCR Loop:
                                     No → Proceed
 ```
 
-## 触发时机
+## When Triggered
 
-- **自动触发**：`$cnx-story-build` / `$cnx-fix-build` / `$cnx-roll-build` 的每个 TCR micro-step 后
-- **手动触发**：用户想要检查当前修改时
+- **Auto-triggered**: After each TCR micro-step in `$cnx-story-build` / `$cnx-fix-build` / `$cnx-roll-build`
+- **Manual trigger**: When the user wants to review current changes
 
-## 审查范围
+## Review Scope
 
 ```bash
-# 默认：审查 staged changes（TCR 推荐）
+# Default: review staged changes (recommended for TCR)
 $cnx-code-review staged
 
-# 审查所有未提交修改
+# Review all uncommitted changes
 $cnx-code-review unstaged
 
-# 审查指定文件
+# Review specific files
 $cnx-code-review files src/utils.ts
 ```
 
-## 审查维度（6 个核心维度）
+## Review Dimensions (6 Core Dimensions)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  CNX Quality Checklist                                  │
 ├─────────────────────────────────────────────────────────┤
-│  ✅ Correctness     - 逻辑正确，无 bug                   │
-│  ✅ Security        - 无安全漏洞，输入验证               │
-│  ✅ Maintainability - 命名清晰，结构合理                 │
-│  ✅ Performance     - 无性能隐患                        │
-│  ✅ Testability     - 易于测试，边界覆盖                 │
-│  ✅ Scope           - 聚焦当前任务，无无关修改           │
+│  ✅ Correctness     - Logic is correct, no bugs         │
+│  ✅ Security        - No vulnerabilities, input valid.  │
+│  ✅ Maintainability - Clear naming, sound structure     │
+│  ✅ Performance     - No performance pitfalls           │
+│  ✅ Testability     - Easy to test, edge cases covered  │
+│  ✅ Scope           - Focused on current task, no       │
+│                       unrelated changes                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
-## 严重等级与决策
+## Severity Levels and Decisions
 
-| 等级 | 定义 | 决策 |
-|------|------|------|
-| 🔴 **Critical** | Bug、安全漏洞 | **必须修复**，重新 TCR |
-| 🟡 **Warning** | 可维护性问题 | **建议修复** 或记录 |
-| 🟢 **Suggestion** | 小优化 | 可选，继续提交 |
-| ✅ **Pass** | 无问题 | 继续提交 |
+| Level | Definition | Decision |
+|-------|-----------|----------|
+| 🔴 **Critical** | Bug, security vulnerability | **Must fix**, redo TCR |
+| 🟡 **Warning** | Maintainability issue | **Recommend fix** or document |
+| 🟢 **Suggestion** | Minor optimization | Optional, proceed with commit |
+| ✅ **Pass** | No issues | Proceed with commit |
 
-## 输出格式
+## Output Format
 
 ```markdown
 ## Self Review Report
@@ -80,9 +81,9 @@ $cnx-code-review files src/utils.ts
 - Error handling
 ```
 
-## TCR 集成
+## TCR Integration
 
-在 `$cnx-*-build` 的每个 micro-step 中：
+In each micro-step of `$cnx-*-build`:
 
 ```markdown
 **Micro-Step X: [Description]**
@@ -96,9 +97,9 @@ $cnx-code-review files src/utils.ts
 4. git commit -m "tcr: description"
 ```
 
-## CNX 原则对齐
+## CNX Principle Alignment
 
-- **Agent-First**: 结构化审查清单，AI 可执行
-- **Check 阶段**: 本地质量控制
-- **Micro-steps**: 小步快跑，每次审查 < 100 行
-- **TCR**: 通过自检后才能 Commit，保证仓库质量
+- **Agent-First**: Structured review checklist, executable by AI
+- **Check Phase**: Local quality control
+- **Micro-steps**: Small fast steps, each review < 100 lines
+- **TCR**: Can only commit after passing self-check, ensuring repo quality

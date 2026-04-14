@@ -6,114 +6,122 @@ description: Adversarial TDD mode with Attacker/Defender agents. Attacker writes
 
 # Spar
 
-对抗式 TDD：两个 Agent 攻守协同，推动系统构建更稳固。
+Adversarial TDD: two agents collaborate in attack-and-defend mode to build a more robust system.
 
 ## When to Use
 
-**手动触发：**
-- 用户明确要求 `$cnx-spar`
-- 涉及核心业务逻辑，需要更高质量保证
+**Manual trigger:**
+- User explicitly requests `$cnx-spar`
+- Involves core business logic requiring higher quality assurance
 
-**自动触发（agent 判断）：** 满足任一条件时建议启用
-- 涉及认证/权限/安全
-- 涉及金钱/支付/计费
-- 涉及数据完整性（写入后不可逆）
-- 复杂状态机 / 并发逻辑
-- 之前出过 bug 的模块（BACKLOG 有相关 FIX 记录）
+**Auto trigger (agent judgment):** Recommend enabling when any of these conditions are met
+- Involves authentication / authorization / security
+- Involves money / payments / billing
+- Involves data integrity (writes are irreversible)
+- Complex state machines / concurrency logic
+- Module has had previous bugs (BACKLOG has related FIX records)
 
-**不要用于：**
-- UI 样式调整、文案修改
-- 简单 CRUD
-- 配置变更
-- 工作量不值得两个 agent 协同的小任务
+**Do not use for:**
+- UI styling adjustments, copy changes
+- Simple CRUD
+- Configuration changes
+- Small tasks not worth the overhead of two-agent collaboration
 
 ## Roles
 
 ### Attacker (Red Agent)
 
-**目标：找到代码的弱点，写出能让系统挂掉的测试。**
+**Goal: Find weaknesses in the code and write tests that break the system.**
 
-- 思考边界条件、异常输入、并发场景、状态不一致
-- 写出尽可能刁钻的测试用例
-- 不关心实现难度，只关心"这个场景系统扛得住吗"
-- 每轮至少写 1 个 RED test，可以写多个
+- Think about boundary conditions, invalid inputs, concurrency scenarios, state inconsistencies
+- Write the trickiest test cases possible
+- Don't care about implementation difficulty — only care about "can the system handle this scenario"
+- Write at least 1 RED test per round, can write multiple
 
 ### Defender (Green Agent)
 
-**目标：用最简洁、最健壮的代码让所有测试通过。**
+**Goal: Make all tests pass with the simplest, most robust code possible.**
 
-- 不能修改 Attacker 写的测试（除非测试本身有 bug）
-- 追求最小实现，不过度设计
-- 每轮让所有测试 GREEN，然后 commit
-- 可以重构，但必须保持 GREEN
+- Cannot modify tests written by the Attacker (unless the test itself has a bug)
+- Aim for minimal implementation, avoid over-engineering
+- Make all tests GREEN each round, then commit
+- May refactor, but must stay GREEN
 
 ## Workflow
 
 ```
-User: "$cnx-spar 实现转账逻辑" 或 agent 自动判断启用
+User: "$cnx-spar implement transfer logic" or agent auto-triggers
     │
     ▼
 ┌─────────────────────────────────────┐
 │ 0. Setup                            │
-│    - 明确功能范围和 AC               │
-│    - 创建测试文件骨架                │
-│    - Attacker 和 Defender 各自的     │
-│      context brief                   │
+│    - Define feature scope and AC    │
+│    - Create test file skeleton      │
+│    - Context brief for Attacker     │
+│      and Defender                    │
 └─────────────┬───────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────┐
-│ Spar Loop (重复直到收敛)            │
+│ Spar Loop (repeat until converged)  │
 │                                     │
 │  ┌───────────────────────────────┐  │
 │  │ 🔴 Attacker Turn             │  │
-│  │    - 分析当前代码/接口        │  │
-│  │    - 写 1+ 个 RED test       │  │
-│  │    - 说明攻击意图:            │  │
-│  │      "测试并发转账时余额一致性" │  │
+│  │    - Analyze current code/API │  │
+│  │    - Write 1+ RED tests      │  │
+│  │    - State attack intent:     │  │
+│  │      "Test balance consistency│  │
+│  │       during concurrent       │  │
+│  │       transfers"              │  │
 │  └──────────────┬────────────────┘  │
 │                 │                    │
 │                 ▼                    │
 │  ┌───────────────────────────────┐  │
 │  │ 🟢 Defender Turn             │  │
-│  │    - 读 Attacker 的测试      │  │
-│  │    - 写最小代码让测试通过     │  │
-│  │    - 跑全部测试 → GREEN      │  │
+│  │    - Read Attacker's tests   │  │
+│  │    - Write minimal code to   │  │
+│  │      make tests pass         │  │
+│  │    - Run all tests → GREEN   │  │
 │  │    - git commit              │  │
 │  └──────────────┬────────────────┘  │
 │                 │                    │
 │                 ▼                    │
 │  ┌───────────────────────────────┐  │
 │  │ 🔴 Attacker Turn (again)     │  │
-│  │    - 审视 Defender 的实现     │  │
-│  │    - 找新弱点，写新 RED test  │  │
-│  │    - 或者: "找不到新弱点了"   │  │
+│  │    - Review Defender's impl  │  │
+│  │    - Find new weaknesses,    │  │
+│  │      write new RED tests     │  │
+│  │    - Or: "No new weaknesses  │  │
+│  │      found"                  │  │
 │  └──────────────┬────────────────┘  │
 │                 │                    │
 │        ┌────────┴────────┐          │
 │        │                 │          │
-│   有新 test         无新 test       │
-│   → 继续循环        → 退出 Spar     │
+│   Has new tests    No new tests     │
+│   → Continue loop  → Exit Spar      │
 │                                     │
 └─────────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────┐
 │ Wrap-up                             │
-│    - Attacker 总结攻击覆盖面        │
-│    - Defender 总结防御策略           │
-│    - 合并报告                       │
-│    - 继续正常 story-build 流程      │
+│    - Attacker summarizes attack     │
+│      coverage                       │
+│    - Defender summarizes defense    │
+│      strategy                       │
+│    - Merged report                  │
+│    - Continue normal story-build    │
+│      flow                           │
 │      (push → CI → deploy → verify)  │
 └─────────────────────────────────────┘
 ```
 
-## Spar 收敛条件
+## Spar Convergence Conditions
 
-Attacker 宣布结束的条件（满足任一）：
-- 连续 2 轮写不出新的 RED test
-- 已覆盖: happy path + 边界值 + 异常输入 + 并发/竞态 + 状态一致性
-- 达到约定的最大轮次（默认 5 轮）
+Attacker declares completion when any of these are met:
+- Cannot write a new RED test for 2 consecutive rounds
+- Already covered: happy path + boundary values + invalid inputs + concurrency/race conditions + state consistency
+- Reached the agreed maximum number of rounds (default: 5 rounds)
 
 ## Agent Context Brief
 
@@ -122,28 +130,28 @@ Attacker 宣布结束的条件（满足任一）：
 ```markdown
 ## Role: Attacker (Red Agent)
 
-你的目标是找到这段代码的弱点。
+Your goal is to find weaknesses in this code.
 
-### 功能描述
-{功能的 AC 和接口定义}
+### Feature Description
+{Feature AC and interface definition}
 
-### 当前实现
-{Defender 最新的代码，或"尚未实现"}
+### Current Implementation
+{Defender's latest code, or "not yet implemented"}
 
-### 已有测试
-{当前已存在的测试用例}
+### Existing Tests
+{Currently existing test cases}
 
-### 你的任务
-写出 1+ 个新的测试用例，让当前实现失败（RED）。
-思考方向：
-- 边界值（0, -1, MAX_INT, 空字符串, null）
-- 异常流（网络断开, 超时, 重复请求）
-- 并发（两个请求同时到达）
-- 状态一致性（中途失败后系统状态是否干净）
+### Your Task
+Write 1+ new test cases that make the current implementation fail (RED).
+Directions to explore:
+- Boundary values (0, -1, MAX_INT, empty string, null)
+- Exception flows (network disconnect, timeout, duplicate requests)
+- Concurrency (two requests arriving simultaneously)
+- State consistency (is system state clean after mid-process failure)
 
-### 输出格式
-每个测试说明攻击意图:
-  "攻击: {场景描述} — 预期系统应该 {期望行为}"
+### Output Format
+For each test, state the attack intent:
+  "Attack: {scenario description} — expected system behavior: {expected behavior}"
 ```
 
 ### Defender Brief Template
@@ -151,130 +159,130 @@ Attacker 宣布结束的条件（满足任一）：
 ```markdown
 ## Role: Defender (Green Agent)
 
-你的目标是让所有测试通过，用最简洁的实现。
+Your goal is to make all tests pass with the simplest implementation.
 
-### 功能描述
-{功能的 AC 和接口定义}
+### Feature Description
+{Feature AC and interface definition}
 
-### 当前代码
-{你之前写的代码，或空}
+### Current Code
+{Your previously written code, or empty}
 
-### 新增的 RED tests
-{Attacker 这轮写的测试}
+### New RED Tests
+{Tests written by the Attacker this round}
 
-### 你的任务
-修改/新增代码，让所有测试（包括之前的）通过。
-规则：
-- 不能修改 Attacker 写的测试
-- 追求最小改动
-- 保持代码清晰
-- 所有测试 GREEN 后 commit
+### Your Task
+Modify/add code to make all tests (including previous ones) pass.
+Rules:
+- Cannot modify tests written by the Attacker
+- Aim for minimal changes
+- Keep the code clear
+- Commit after all tests are GREEN
 ```
 
 ## Status Report
 
-每轮结束向用户报告：
+Report to the user after each round:
 
 ```
 ⚔️ Spar Round {N}
 
   🔴 Attacker:
-     攻击: {场景1} — {结果}
-     攻击: {场景2} — {结果}
+     Attack: {scenario 1} — {result}
+     Attack: {scenario 2} — {result}
 
   🟢 Defender:
-     防御策略: {简述怎么防的}
-     测试状态: {通过数}/{总数} ✅
+     Defense strategy: {brief description of how it was defended}
+     Test status: {passed}/{total} ✅
 
-  📊 累计: {总测试数} tests, {总轮次} rounds
-  🔄 下一轮: Attacker 继续寻找弱点...
+  📊 Cumulative: {total tests} tests, {total rounds} rounds
+  🔄 Next round: Attacker continues looking for weaknesses...
 ```
 
 ## Hard Rules
 
-1. **Attacker 不写实现代码** — 只写测试和攻击分析
-2. **Defender 不改测试** — 除非测试本身有 bug（需说明理由）
-3. **每轮必须 commit** — Defender 让测试 GREEN 后立即 commit，保持仓库干净
-4. **攻击意图必须说明** — 不能只写测试不解释"为什么这个场景重要"
-5. **最大轮次限制** — 默认 5 轮，防止无限循环
+1. **Attacker does not write implementation code** — only writes tests and attack analysis
+2. **Defender does not modify tests** — unless the test itself has a bug (must explain the reason)
+3. **Must commit each round** — Defender commits immediately after making tests GREEN, keeping the repo clean
+4. **Attack intent must be explained** — cannot just write tests without explaining "why this scenario matters"
+5. **Maximum round limit** — default 5 rounds, prevents infinite loops
 
 ## Integration with story-build
 
-Spar 替代 story-build 中的 step 4-5（Test Design + TCR Implementation）：
+Spar replaces steps 4-5 in story-build (Test Design + TCR Implementation):
 
 ```
-story-build 正常流程:
+story-build normal flow:
   1. Clarify Story
   2. Split Actions
   3. Define verification
   ──────────────────────
-  4. Test Design Review    ← Spar 替代这步
-  5. TCR Implementation    ← 和这步
+  4. Test Design Review    ← Spar replaces this step
+  5. TCR Implementation    ← and this step
   ──────────────────────
-  6. Local CI check        ← 回到正常流程
+  6. Local CI check        ← Back to normal flow
   7. Quality Review
   ...
 ```
 
-**从 story-build 自动切入 Spar：**
+**Auto-switching from story-build to Spar:**
 
-当 agent 在 step 3 评估 Action 为高风险时：
+When the agent assesses an Action as high-risk at step 3:
 ```
-⚔️ 检测到高风险 Action: {描述}
-   风险因素: {认证/支付/数据完整性/...}
-   建议启用 Spar 模式 — 确认？ [Y/n]
+⚔️ High-risk Action detected: {description}
+   Risk factors: {auth/payment/data integrity/...}
+   Recommend enabling Spar mode — confirm? [Y/n]
 ```
 
-用户确认后进入 Spar，完成后回到 story-build step 6 继续。
+After user confirms, enter Spar. Once complete, return to story-build step 6 to continue.
 
 ## Example
 
 ```
-User: "$cnx-spar 实现用户余额转账"
+User: "$cnx-spar implement user balance transfer"
 
-⚔️ Spar: 用户余额转账
+⚔️ Spar: User Balance Transfer
 
 ── Round 1 ──
 
 🔴 Attacker:
-   攻击 1: 转账金额为 0 — 应拒绝
-   攻击 2: 转账金额为负数 — 应拒绝
-   攻击 3: 转账金额超过余额 — 应拒绝并保持余额不变
+   Attack 1: Transfer amount is 0 — should reject
+   Attack 2: Transfer amount is negative — should reject
+   Attack 3: Transfer amount exceeds balance — should reject and keep balance unchanged
 
 🟢 Defender:
-   实现: transfer(from, to, amount) 基础校验
-   测试: 3/3 ✅
+   Implementation: transfer(from, to, amount) basic validation
+   Tests: 3/3 ✅
    commit: "tcr: transfer basic validation"
 
 ── Round 2 ──
 
 🔴 Attacker:
-   攻击 4: 转账给自己 — 应拒绝
-   攻击 5: 两个并发转账，总额超过余额 — 只应成功一个
+   Attack 4: Transfer to self — should reject
+   Attack 5: Two concurrent transfers whose total exceeds balance — only one should succeed
 
 🟢 Defender:
-   实现: 加 self-transfer 检查 + 乐观锁
-   测试: 5/5 ✅
+   Implementation: add self-transfer check + optimistic lock
+   Tests: 5/5 ✅
    commit: "tcr: transfer self-check and concurrency lock"
 
 ── Round 3 ──
 
 🔴 Attacker:
-   攻击 6: 转账中途数据库异常 — 双方余额应不变（原子性）
-   攻击 7: 收款方账户不存在 — 应拒绝并保持发送方余额
+   Attack 6: Database error mid-transfer — both balances should remain unchanged (atomicity)
+   Attack 7: Recipient account does not exist — should reject and keep sender's balance
 
 🟢 Defender:
-   实现: 数据库事务包裹 + 收款方存在性检查
-   测试: 7/7 ✅
+   Implementation: database transaction wrapper + recipient existence check
+   Tests: 7/7 ✅
    commit: "tcr: transfer atomicity and recipient validation"
 
 ── Round 4 ──
 
 🔴 Attacker:
-   找不到新弱点了。已覆盖: 输入校验、自转账、并发、原子性、关联账户。
+   No new weaknesses found. Covered: input validation, self-transfer, concurrency, atomicity, related accounts.
 
 ⚔️ Spar Complete!
    📊 4 rounds, 7 tests, 3 commits
-   🔴 攻击覆盖: 输入边界 + 业务规则 + 并发 + 原子性
-   🟢 防御策略: 前置校验 + 乐观锁 + 事务
+   🔴 Attack coverage: input boundaries + business rules + concurrency + atomicity
+   🟢 Defense strategy: upfront validation + optimistic lock + transactions
 ```

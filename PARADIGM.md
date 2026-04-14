@@ -5,198 +5,203 @@
 
 ---
 
-## 一、核心思路：反馈驱动的持续交付
+## 1. Core Idea: Feedback-Driven Continuous Delivery
 
-CNX 的核心很简单：**设定目标 → 执行 → 检查结果 → 根据反馈调整**，持续循环。
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    反馈驱动循环                                │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│   目标              感知               比较                   │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│   │   BACKLOG   │←─│  Sentinel   │←─│   Diff      │         │
-│   │  (期望状态)  │  │  (实际状态)  │  │  (差距分析)  │         │
-│   └──────┬──────┘  └─────────────┘  └──────┬──────┘         │
-│          │                                  │                │
-│          ▼                                  ▼                │
-│   ┌─────────────┐                    ┌─────────────┐         │
-│   │   Design    │                    │    Fix      │         │
-│   │   设计+规划  │                    │   修复改进   │         │
-│   └─────────────┘                    └─────────────┘         │
-│                                                               │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**工作流阶段:**
+The core of CNX is simple: **set a goal → execute → check results → adjust based on feedback**, in a continuous loop.
 
 ```
-Design (讨论+规划) → Build (执行) → Check (巡检) → Fix (修复) → 循环
-    $cnx-design       $cnx-story-build   $cnx-sentinel     $cnx-fix-build
+┌──────────────────────────────────────────────────────────┐
+│                  Feedback-Driven Loop                     │
+├──────────────────────────────────────────────────────────┤
+│                                                           │
+│   Goal             Sense             Compare              │
+│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
+│   │   BACKLOG   │←─│  Sentinel   │←─│   Diff      │     │
+│   │ (desired    │  │ (actual     │  │ (gap        │     │
+│   │  state)     │  │  state)     │  │  analysis)  │     │
+│   └──────┬──────┘  └─────────────┘  └──────┬──────┘     │
+│          │                                  │            │
+│          ▼                                  ▼            │
+│   ┌─────────────┐                    ┌─────────────┐     │
+│   │   Design    │                    │    Fix      │     │
+│   │  plan +     │                    │  repair +   │     │
+│   │  design     │                    │  improve    │     │
+│   └─────────────┘                    └─────────────┘     │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Workflow Phases:**
+
+```
+Design (discuss + plan) → Build (execute) → Check (patrol) → Fix (repair) → Loop
+    $cnx-design          $cnx-story-build   $cnx-sentinel     $cnx-fix-build
 ```
 
 ---
 
-## 二、实践层：单一智能体 + Skill 生态系统
+## 2. Practice Layer: Single Agent + Skill Ecosystem
 
-> ⚠️ **当前状态**：基于单一 Agent（Kimi Code CLI）的实践闭环
+> ⚠️ **Current State**: Proven loop based on a single Agent (Kimi Code CLI)
 > 
-> 多智能体协同是**未来方向**，尚未实践
+> Multi-agent coordination is a **future direction**, not yet practiced
 
-### 2.1 当前实践架构
+### 2.1 Current Practice Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              单一 Agent + Skill 生态系统                         │
-│                   （当前已实现）                                  │
+│              Single Agent + Skill Ecosystem                      │
+│                   (currently implemented)                         │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   User (人类)                                                   │
-│      │                                                          │
-│      ▼                                                          │
-│   ┌─────────────────────────────────────┐                      │
-│   │      Kimi Code CLI (Agent)          │                      │
-│   │  ┌─────────┐ ┌─────────┐ ┌───────┐ │                      │
-│   │  │ $cnx-design│ │$story   │ │$sentin│ │                      │
-│   │  │         │ │-build   │ │el     │ │                      │
-│   │  │ $project│ │$fix     │ │$bb    │ │                      │
-│   │  │ -init   │ │-build   │ │-debug │ │                      │
-│   │  │ $roll   │ │...      │ │...    │ │                      │
-│   │  │ -build  │ │         │ │       │ │                      │
-│   │  └─────────┘ └─────────┘ └───────┘ │                      │
-│   │            Skill 生态系统           │                      │
-│   └─────────────────────────────────────┘                      │
-│      │                                                          │
-│      ▼                                                          │
-│   操作系统 / 文件系统 / Git / 测试 / 部署                         │
-│                                                                 │
+│                                                                  │
+│   User (human)                                                   │
+│      │                                                           │
+│      ▼                                                           │
+│   ┌─────────────────────────────────────┐                       │
+│   │      Kimi Code CLI (Agent)          │                       │
+│   │  ┌─────────┐ ┌─────────┐ ┌───────┐ │                       │
+│   │  │$cnx-    │ │$story   │ │$sentin│ │                       │
+│   │  │ design  │ │-build   │ │el     │ │                       │
+│   │  │$project │ │$fix     │ │$bb    │ │                       │
+│   │  │ -init   │ │-build   │ │-debug │ │                       │
+│   │  │$roll    │ │...      │ │...    │ │                       │
+│   │  │ -build  │ │         │ │       │ │                       │
+│   │  └─────────┘ └─────────┘ └───────┘ │                       │
+│   │            Skill Ecosystem          │                       │
+│   └─────────────────────────────────────┘                       │
+│      │                                                           │
+│      ▼                                                           │
+│   OS / Filesystem / Git / Tests / Deploy                         │
+│                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Skill 生态系统
+### 2.2 Skill Ecosystem
 
-当前基于 Kimi Code CLI 实现的 Skill：
+Skills currently implemented on Kimi Code CLI:
 
-| Skill | 阶段 | 功能 | 状态 |
-|-------|------|------|------|
-| `$cnx-init` | - | 初始化项目 | ✅ 已实现 |
-| `$cnx-design` | DESIGN | 讨论方案 + 设计架构 + 规划 Stories | ✅ 已实现 |
-| `$cnx-story-build` | BUILD | Story 开发交付（含并行调度） | ✅ 已实现 |
-| `$cnx-spar` | BUILD | 对抗式 TDD：Attacker/Defender 攻守协同 | ✅ 已实现 |
-| `$cnx-fix-build` | BUILD/FIX | Bug 修复 | ✅ 已实现 |
-| `$cnx-roll-build` | DESIGN+BUILD | 一句话快速实现 | ✅ 已实现 |
-| `$cnx-sentinel` | CHECK | 定时巡检 | ✅ 已实现 |
-| `$cnx-bb-debug` | CHECK | 深度诊断 | ✅ 已实现 |
-| `$cnx-bb-analyzer` | CHECK | 诊断分析 | ✅ 已实现 |
-| `$cnx-qa-cover` | Support | 测试规范 | ✅ 已实现 |
-| `$cnx-.code-review` | Support | 提交前自检 | ✅ 已实现 |
+| Skill | Phase | Function | Status |
+|-------|-------|----------|--------|
+| `$cnx-init` | - | Initialize project | ✅ Implemented |
+| `$cnx-design` | DESIGN | Discuss + design + plan Stories | ✅ Implemented |
+| `$cnx-story-build` | BUILD | Story delivery (with parallel dispatch) | ✅ Implemented |
+| `$cnx-spar` | BUILD | Adversarial TDD: Attacker/Defender collaboration | ✅ Implemented |
+| `$cnx-fix-build` | BUILD/FIX | Bug fix | ✅ Implemented |
+| `$cnx-roll-build` | DESIGN+BUILD | One-sentence quick implementation | ✅ Implemented |
+| `$cnx-sentinel` | CHECK | Scheduled patrol | ✅ Implemented |
+| `$cnx-bb-debug` | CHECK | Deep diagnostics | ✅ Implemented |
+| `$cnx-bb-analyzer` | CHECK | Diagnostic analysis | ✅ Implemented |
+| `$cnx-qa-cover` | Support | Testing standards | ✅ Implemented |
+| `$cnx-.code-review` | Support | Pre-commit self-review | ✅ Implemented |
+| `$cnx-.echo` | Support | Passive intent clarification | ✅ Implemented |
+| `$cnx-research` | RESEARCH | Deep research with HV Analysis + PDF report | ✅ Implemented |
 
-**Tools 工具集**（环境协同）：
+**Tools (environment integration):**
 
-| Tool | 类型 | 功能 | 状态 |
-|------|------|------|------|
-| `$cnx-fetch` | 🕵️ 情报 | 网页抓取、搜索、爬取 | ✅ 已实现 |
-| `$cnx-probe` | 🔭 监控 | 节点发现、健康检查 | ✅ 已实现 |
+| Tool | Type | Function | Status |
+|------|------|----------|--------|
+| `$cnx-fetch` | 🕵️ Intel | Web scraping, search, crawling | ✅ Implemented |
+| `$cnx-probe` | 🔭 Monitor | Node discovery, health check | ✅ Implemented |
 
-**实践闭环**：
+**Proven Loop:**
 ```bash
-# 当前可运行的完整流程
+# Currently runnable end-to-end flow
 $cnx-project-init my-app
-$cnx-design "用户系统"
+$cnx-design "user system"
 $cnx-story-build US-001
-$cnx-sentinel patrol  # 自动运行
+$cnx-sentinel patrol  # runs automatically
 $cnx-fix-build FIX-001
-# ... 持续循环
+# ... continuous loop
 ```
 
 ---
 
-## 三、当前工作流
+## 3. Current Workflow
 
 ```
         ┌──────────┐
         │ DESIGN   │  $cnx-design
-        │ 讨论+规划 │
+        │ discuss  │
+        │ + plan   │
         └────┬─────┘
              │
              ▼
         ┌──────────┐
         │  BUILD   │  $cnx-story-build / $cnx-fix-build
-        │  执行    │
+        │ execute  │
         └────┬─────┘
              │
              ▼
         ┌──────────┐
         │  CHECK   │  $cnx-sentinel / $cnx-bb-debug
-        │  巡检    │  Sentinel: GitHub Actions 自动
+        │ patrol   │  Sentinel: GitHub Actions automated
         └────┬─────┘
              │
              ▼
         ┌──────────┐
         │   FIX    │  $cnx-fix-build
-        │  修复    │
+        │ repair   │
         └────┬─────┘
              │
-             └──────── 持续循环
+             └──────── continuous loop
 ```
 
 ---
 
-## 四、架构层：解耦模式
+## 4. Architecture Layer: Decoupling Patterns
 
-### 5.1 已实践的架构模式
+### 4.1 Practiced Architecture Patterns
 
-| 模式 | 状态 | 说明 |
-|------|------|------|
-| **Domain Driven** | ✅ 已实践 | `src/domains/` 目录结构 |
-| **EDA** | 🟡 部分实践 | 事件定义，待完善 |
-| **API/CLI** | ✅ 已实践 | 项目模板包含 |
-| **Stateless** | ✅ 已实践 | Vercel Edge 部署 |
+| Pattern | Status | Notes |
+|---------|--------|-------|
+| **Domain Driven** | ✅ Practiced | `src/domains/` directory structure |
+| **EDA** | 🟡 Partial | Event definitions, needs refinement |
+| **API/CLI** | ✅ Practiced | Included in project template |
+| **Stateless** | ✅ Practiced | Vercel Edge deployment |
 
-### 5.2 项目结构（已实现）
+### 4.2 Project Structure (Implemented)
 
 ```
-my-project/  （$cnx-init 自动生成）
+my-project/  (auto-generated by $cnx-init)
 │
-├── 📋 BACKLOG.md              # ✅ 任务索引
-├── 🤖 AGENTS.md               # ✅ 约束定义
-├── 📁 docs/features/          # ✅ Story 详情 & 设计文档
-├── 🔌 api/                    # ✅ 接口层
-├── 📦 src/domains/            # ✅ 领域解耦
-├── ⚙️ .env.example            # ✅ 服务配置
-└── 🧪 tests/                  # ✅ 测试结构
+├── 📋 BACKLOG.md              # ✅ Task index
+├── 🤖 AGENTS.md               # ✅ Constraint definitions
+├── 📁 docs/features/          # ✅ Story details & design docs
+├── 🔌 api/                    # ✅ API layer
+├── 📦 src/domains/            # ✅ Domain decoupling
+├── ⚙️ .env.example            # ✅ Service configuration
+└── 🧪 tests/                  # ✅ Test structure
 ```
 
 ---
 
-## 五、状态评估
+## 5. Status Assessment
 
-| 维度 | 状态 | 说明 |
-|------|------|------|
-| 反馈驱动循环 | ✅ | Design → Build → Check → Fix |
-| Skill 生态 | ✅ | 14 Skills + 2 Tools |
-| 并行调度 | ✅ | story-build 内置 Worktree 隔离 |
-| 验证门禁 | ✅ | 完成前强制提供新鲜证据 |
-| 项目模板 | ✅ | $cnx-init |
-| 架构约束 | ✅ | AGENTS.md |
-| 自动化巡检 | ✅ | Sentinel |
-| Convention 管理 | ✅ | cybernetix CLI，多工具规范统一分发 |
-
----
-
-## 总结
-
-已实现：
-
-- 反馈驱动的持续交付循环（Design → Build → Check → Fix）
-- 标准化、可复用的 Skill 生态（14 Skills + 2 Tools）
-- story-build 内置并行调度 + Worktree 隔离
-- 验证门禁：完成前强制提供新鲜证据
-- Convention 管理：统一管理多 AI 工具的行为规范（`cybernetix` CLI）
+| Dimension | Status | Notes |
+|-----------|--------|-------|
+| Feedback-driven loop | ✅ | Design → Build → Check → Fix |
+| Skill ecosystem | ✅ | 14 Skills + 2 Tools |
+| Parallel dispatch | ✅ | Built-in Worktree isolation in story-build |
+| Verification gate | ✅ | Fresh evidence required before completion |
+| Project template | ✅ | $cnx-init |
+| Architecture constraints | ✅ | AGENTS.md |
+| Automated patrol | ✅ | Sentinel |
+| Convention management | ✅ | cybernetix CLI, unified distribution across AI tools |
 
 ---
 
-## 参考
+## Summary
+
+Implemented:
+
+- Feedback-driven continuous delivery loop (Design → Build → Check → Fix)
+- Standardized, reusable skill ecosystem (14 Skills + 2 Tools)
+- Built-in parallel dispatch + Worktree isolation in story-build
+- Verification gate: fresh evidence required before completion
+- Convention management: unified behavioral conventions across AI tools (`cybernetix` CLI)
+
+---
+
+## References
 
 - **Agents**: Kimi Code CLI, Claude Code, Gemini CLI, Codex, Cursor

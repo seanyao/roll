@@ -62,3 +62,25 @@ tests/
 ├── e2e/                  # Playwright
 └── regression/           # Sentinel regression
 ```
+
+## Development Discipline
+
+- **TCR mandatory**: All code changes follow Test → Green = Commit / Red = Revert. No WIP commits.
+- **Action granularity**: Each Action independently deployable, completable in 2–5 min. No placeholders (no TBD/TODO/pending).
+- **Verification Gate**: Before marking done, provide fresh evidence (test output, screenshot, curl). "I confirmed it works" is not evidence.
+- **Complete delivery**: push to GitHub + CI passes + deployed online. Local-only done is not done.
+
+## Testing Requirements
+
+- All business logic must have unit tests (coverage >80%).
+- All API endpoints must have integration tests — no DB mocks, use real database.
+- Critical user flows must have E2E tests (Playwright).
+- New architecture introductions (State/Cache/EventBus) must have data flow integration tests.
+- Sentinel will periodically regression-test completed Stories.
+
+## Workspace Structure
+
+- `BACKLOG.md` = index table, one-line summary per story only.
+- `docs/features/<feature>.md` = US details (AC, Files, Dependencies).
+- `docs/features/<feature>-plan.md` = architecture design doc (optional).
+- Never write project docs to `~/.kimi/` or any global config directory.

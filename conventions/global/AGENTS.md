@@ -45,14 +45,15 @@
 
 ## Testing
 
-- All business logic must have unit tests.
-- API endpoints need integration tests.
-- Critical user flows need E2E tests.
+- All business logic must have unit tests (coverage >80%).
+- All API endpoints must have integration tests — no DB mocks.
+- Critical user flows must have E2E tests (Playwright).
+- New architecture introductions (State/Cache/EventBus) must have data flow integration tests.
 - Run existing tests before pushing to verify no regressions.
 
 ## Engineering Common Sense
 
-Non-negotiable requirements for all code changes:
+Non-negotiable requirements for all code changes. Violating these is a bug:
 
 - **Idempotency**: Same operation N times = same result. Test by running 3 times.
 - **Cross-module contract**: Shared IDs, formats, algorithms must be identical across modules.
@@ -61,17 +62,25 @@ Non-negotiable requirements for all code changes:
 - **Input validation**: All external input (API, user, file) must be validated.
 - **Graceful degradation**: Dependency fails → limited functionality, not crash.
 - **Observability**: User must see progress, state, and errors.
+- **Concurrency safety**: Shared resources under multi-thread/multi-process access must be safe.
 
 ## CNX Workflow (When Project Has It)
 
 When a project has Cybernetix (CNX) workflow configured:
 
-- All work tracked in `BACKLOG.md` (index) + `docs/features/` (details).
-- `AGENTS.md` is the project-level conventions and skill routing file.
-- TCR for all code changes: Test → Green = Commit, Red = Revert.
-- Push to remote after story completion. Run lint + typecheck + test + build before push.
-- Verification Gate: provide fresh evidence (test output, screenshots) before marking done.
-- Update `BACKLOG.md` status and `docs/features/` after completing any US or FIX.
+### Workspace Structure
+
+- `BACKLOG.md` = index table, one-line summary per story only.
+- `docs/features/<feature>.md` = US details (AC, Files, Dependencies).
+- `docs/features/<feature>-plan.md` = architecture design doc (optional).
+- Never write project docs to `~/.kimi/` or any global config directory.
+
+### Development Discipline
+
+- **TCR mandatory**: All code changes follow Test → Green = Commit / Red = Revert. No WIP commits.
+- **Action granularity**: Each Action independently deployable, completable in 2–5 min. No placeholders (no TBD/TODO/pending).
+- **Verification Gate**: Before marking done, provide fresh evidence (test output, screenshot, curl). "I confirmed it works" is not evidence.
+- **Complete delivery**: push to GitHub + CI passes + deployed online. Local-only done is not done.
 
 ### Skill Selection
 

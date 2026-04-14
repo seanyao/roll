@@ -48,37 +48,37 @@ case $COMMAND in
     echo "🔍 Running: cnx-probe"
     echo ""
     echo "Usage:"
-    echo '  $cnx probe find <machine>     # 发现机器'
-    echo '  $cnx probe health <hostname>  # 健康检查'
-    echo '  $cnx probe diagnose <machine> # 完整诊断'
+    echo '  $cnx probe find <machine>     # discover machines'
+    echo '  $cnx probe health <hostname>  # health check'
+    echo '  $cnx probe diagnose <machine> # full diagnostics'
     echo ""
     echo "Examples:"
     echo '  $cnx probe find orin'
     echo '  $cnx probe health seanclaw.local'
     echo '  $cnx probe diagnose apeclaw'
     echo ""
-    echo "功能:"
-    echo "  • 节点发现 (Bonjour/mDNS)"
-    echo "  • OpenClaw Gateway 状态"
-    echo "  • 端口监听检查"
-    echo "  • 日志查看"
+    echo "Features:"
+    echo "  • Node discovery (Bonjour/mDNS)"
+    echo "  • OpenClaw Gateway status"
+    echo "  • Port listener check"
+    echo "  • Log viewer"
     ;;
   fetch)
     echo "🌐 Running: cnx-fetch"
     echo ""
     echo "Usage:"
-    echo '  $cnx fetch <url> [method]  # 单页提取'
-    echo '  $cnx crawl <url>           # 全站爬取'
+    echo '  $cnx fetch <url> [method]  # single page extraction'
+    echo '  $cnx crawl <url>           # full site crawl'
     echo ""
     echo "Examples:"
     echo '  $cnx fetch https://example.com'
     echo '  $cnx fetch https://example.com tavily'
     echo '  $cnx crawl https://docs.example.com --depth 2'
     echo ""
-    echo "Smart Web Fetch v4.0 - 三层策略:"
-    echo "  1. Tavily API (AI 提取，需 TAVILY_API_KEY)"
-    echo "  2. LLM Native Fetch (内置 FetchURL)"
-    echo "  3. Browser Automation (本地优先，云端兜底)"
+    echo "Smart Web Fetch v4.0 - Three-layer strategy:"
+    echo "  1. Tavily API (AI extraction, requires TAVILY_API_KEY)"
+    echo "  2. LLM Native Fetch (built-in FetchURL)"
+    echo "  3. Browser Automation (local first, cloud fallback)"
     echo ""
     echo "Environment Variables:"
     echo "  TAVILY_API_KEY       - Required for Tavily"
@@ -91,30 +91,30 @@ case $COMMAND in
 USAGE: $cnx <command> [options]
 
 COMMANDS:
-  design      讨论+规划       $cnx design "用户登录功能"
-  build       执行 Story      $cnx build US-001
-  fix         修复 Bug        $cnx fix "登录按钮无响应"
-  roll        一句话交付      $cnx roll "添加深色模式"
-  review      代码审查        $cnx review
-  fetch       单页抓取        $cnx fetch https://example.com
-  crawl       全站爬取        $cnx crawl https://docs.example.com
-  probe       节点检查        $cnx probe find orin
-  init        初始化项目      $cnx init my-project
-  changelog   生成日志        $cnx changelog
+  design      Discuss + plan     $cnx design "user login feature"
+  build       Execute Story      $cnx build US-001
+  fix         Fix Bug            $cnx fix "login button unresponsive"
+  roll        One-line delivery  $cnx roll "add dark mode toggle"
+  review      Code review        $cnx review
+  fetch       Single page scrape $cnx fetch https://example.com
+  crawl       Full site crawl    $cnx crawl https://docs.example.com
+  probe       Node check         $cnx probe find orin
+  init        Init project       $cnx init my-project
+  changelog   Generate log       $cnx changelog
 
 SCENARIOS:
-  获取网页内容
-    单篇文章 → $cnx fetch <url>
-    整站备份 → $cnx crawl <url> --depth 2
+  Web content retrieval
+    Single article → $cnx fetch <url>
+    Full site backup → $cnx crawl <url> --depth 2
 
-  开发工作流
-    设计 → $cnx design "需求"
-    执行 → $cnx build US-001
-    审查 → $cnx review
-    发布 → $cnx changelog
+  Development workflow
+    Design → $cnx design "requirement"
+    Execute → $cnx build US-001
+    Review → $cnx review
+    Release → $cnx changelog
 
 WORKFLOW:
-  1. Design:   $cnx design "需求描述"
+  1. Design:   $cnx design "requirement description"
   2. Build:    $cnx build US-XXX
   3. Check:    $cnx review
   4. Fix:      $cnx fix / $cnx changelog

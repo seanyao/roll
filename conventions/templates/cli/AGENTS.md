@@ -49,3 +49,17 @@ tests/
 - Include `bin` field in `package.json`.
 - Test installation flow: `npm install -g` should work cleanly.
 - Include a man page or `--help` output that covers all commands.
+
+## Development Discipline
+
+- **TCR mandatory**: All code changes follow Test → Green = Commit / Red = Revert. No WIP commits.
+- **Action granularity**: Each Action independently deployable, completable in 2–5 min. No placeholders (no TBD/TODO/pending).
+- **Verification Gate**: Before marking done, run the actual command and paste the output. "I confirmed it works" is not evidence.
+- **Complete delivery**: push to GitHub + CI passes + published/deployed. Local-only done is not done.
+
+## Workspace Structure
+
+- `BACKLOG.md` = index table, one-line summary per story only.
+- `docs/features/<feature>.md` = US details (AC, Files, Dependencies).
+- `docs/features/<feature>-plan.md` = architecture design doc (optional).
+- Never write project docs to `~/.kimi/` or any global config directory.

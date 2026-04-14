@@ -1,28 +1,28 @@
 # Project Backlog
 
-> 任务索引 - 所有工作在此跟踪
+> Task index - all work is tracked here
 
 ## 🎯 Active
 
-当前迭代的 Stories
+Stories in the current iteration
 
 | ID | Title | Status | Priority | Est |
 |----|-------|--------|----------|-----|
-| INIT-001 | 项目初始化 | ✅ | P0 | 1d |
+| INIT-001 | Project initialization | ✅ | P0 | 1d |
 
 ## 📋 Todo
 
-待开发，已规划好
+Ready for development, already planned
 
-<!-- $cnx-design 会在这里创建新的 Stories -->
+<!-- $cnx-design will create new Stories here -->
 
 ## 🔄 In Progress
 
-<!-- $cnx-story-build 会更新这里 -->
+<!-- $cnx-story-build will update here -->
 
 ## ✅ Completed
 
-- **INIT-001** 项目初始化 - {date}
+- **INIT-001** Project initialization - {date}
 
 ## 🐛 Bug Fixes
 

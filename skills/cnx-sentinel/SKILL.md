@@ -6,55 +6,56 @@ description: Smart patrol inspector for production systems. Scheduled randomized
 
 # Sentinel
 
-**智能巡检员** - 定时、随机、控成本地走查验收生产系统。
+**Smart Patrol Inspector** - Scheduled, randomized, cost-controlled patrol and acceptance checks for production systems.
 
 ## Core Principle
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    智能巡检逻辑                              │
+│                   Smart Patrol Logic                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  不是全量检查！而是像保安巡逻一样：                           │
+│  Not full-coverage checks! Think of it like a security      │
+│  guard on patrol:                                           │
 │                                                             │
-│  🕐 定时触发 - 按 schedule 自动巡逻                          │
-│       └── "每6小时巡逻一次"                                  │
+│  🕐 Scheduled Triggers - Auto-patrol on schedule            │
+│       └── "Patrol once every 6 hours"                       │
 │                                                             │
-│  🎲 随机抽检 - 每次抽查不同样本                              │
-│       └── "这次查 Stories 1-10，下次查 50-60"                │
+│  🎲 Random Sampling - Different samples each time           │
+│       └── "Check Stories 1-10 this time, 50-60 next time"   │
 │                                                             │
-│  💰 成本控制 - AI检查贵，要省着用                            │
-│       └── "每次只查10个，不是全量100个"                      │
+│  💰 Cost Control - AI checks are expensive, use sparingly   │
+│       └── "Only check 10 each time, not all 100"            │
 │                                                             │
-│  🎯 基于 BACKLOG - 对照需求验收                              │
-│       └── "US-001说能登录，我就验证能不能登"                 │
+│  🎯 BACKLOG-Based - Validate against requirements           │
+│       └── "US-001 says login works, so verify login"        │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## Patrol Strategy
 
-### Sampling Logic (采样策略)
+### Sampling Logic
 
 ```javascript
-// 每次 patrol 的采样逻辑
+// Sampling logic for each patrol
 function selectSamples(backlog, strategy = 'smart') {
   const completedStories = backlog.filter(s => s.status === '✅');
   
   switch(strategy) {
     case 'random':
-      // 完全随机：从所有完成的 Stories 中随机选 N 个
+      // Fully random: randomly select N from all completed Stories
       return shuffle(completedStories).slice(0, 10);
     
     case 'weighted':
-      // 加权随机：近期修改的、高频使用的优先
+      // Weighted random: prioritize recently modified and frequently used
       return completedStories
         .sort((a, b) => b.lastModified - a.lastModified)
-        .slice(0, 5)  // 5个最近的
-        .concat(shuffle(completedStories).slice(0, 5)); // +5个随机
+        .slice(0, 5)  // 5 most recent
+        .concat(shuffle(completedStories).slice(0, 5)); // + 5 random
     
     case 'coverage':
-      // 覆盖采样：确保不同模块都被覆盖到
+      // Coverage sampling: ensure different modules are all covered
       const byModule = groupBy(completedStories, 'module');
       return Object.values(byModule).map(
         stories => randomPick(stories)
@@ -63,59 +64,59 @@ function selectSamples(backlog, strategy = 'smart') {
 }
 ```
 
-### Cost Control (成本控制)
+### Cost Control
 
-| 策略 | 样本量 | 频率 | 适用场景 |
-|------|--------|------|----------|
-| **Light** | 5个 Stories | 每天1次 | 稳定期 |
-| **Normal** | 10个 Stories | 每6小时 | 一般监控 |
-| **Intensive** | 20个 Stories | 每小时 | 发布后期 |
-| **Full** | 全部 | 每周1次 | 周巡检 |
+| Strategy | Sample Size | Frequency | Use Case |
+|----------|-------------|-----------|----------|
+| **Light** | 5 Stories | Once daily | Stable period |
+| **Normal** | 10 Stories | Every 6 hours | General monitoring |
+| **Intensive** | 20 Stories | Every hour | Post-release period |
+| **Full** | All | Once weekly | Weekly patrol |
 
 ```yaml
 # sentinel.config.yml
 cost_control:
-  daily_budget: 100  # AI调用次数预算
+  daily_budget: 100  # AI call budget
   
   light_patrol:
     samples: 5
-    schedule: "0 9 * * *"  # 每天9点
+    schedule: "0 9 * * *"  # Daily at 9am
     
   normal_patrol:
     samples: 10
-    schedule: "0 */6 * * *"  # 每6小时
+    schedule: "0 */6 * * *"  # Every 6 hours
     
-  # 发布后的密集巡逻
+  # Intensive patrol after deployment
   post_deploy:
     trigger: "after_deploy"
     samples: 20
-    duration: "2h"  # 持续2小时
+    duration: "2h"  # Lasts 2 hours
 ```
 
-### Uncertainty Handling (应对不确定性)
+### Uncertainty Handling
 
 ```javascript
-// 系统有不确定性，单次检查可能不准
-// 用多次随机检查来提高置信度
+// Systems have uncertainty; a single check may be inaccurate.
+// Use multiple random checks to increase confidence.
 
 class UncertaintyHandler {
-  // 记录检查结果历史
+  // Track check result history
   history = new Map(); // storyId -> [check1, check2, ...]
   
-  // 判断是否真的有问题
+  // Determine if an issue is real
   isRealIssue(storyId, currentResult) {
     const pastResults = this.history.get(storyId) || [];
     pastResults.push(currentResult);
     
-    // 如果连续3次失败，才认为是真问题
+    // Only consider it a real issue if it fails 3 times consecutively
     const recent3 = pastResults.slice(-3);
     if (recent3.every(r => r.status === 'FAIL')) {
-      return true; // 真问题
+      return true; // Real issue
     }
     
-    // 如果偶尔失败，可能是偶发，继续观察
+    // If it fails occasionally, it may be intermittent; keep observing
     if (recent3.filter(r => r.status === 'FAIL').length === 1) {
-      return false; // 可能是偶发，暂不报警
+      return false; // Likely intermittent, don't alert yet
     }
     
     return false;
@@ -125,26 +126,26 @@ class UncertaintyHandler {
 
 ## When to Patrol
 
-### Scheduled Patrols (定时巡逻)
+### Scheduled Patrols
 
 ```bash
-# 日常巡逻 - 每天随机查几个
+# Daily patrol - randomly check a few each day
 $cnx-sentinel patrol --mode=normal
 
-# 深夜巡检 - 每天凌晨低峰期全量
+# Late-night patrol - full check during off-peak hours
 $cnx-sentinel patrol --mode=full --schedule="0 3 * * *"
 
-# 周末走查 - 周日检查一周积累
+# Weekend walkthrough - check the week's accumulation on Sunday
 $cnx-sentinel patrol --mode=weekly --schedule="0 10 * * 0"
 ```
 
-### Event-Triggered (事件触发)
+### Event-Triggered
 
 ```bash
-# 发布后密集巡逻2小时
+# Intensive patrol for 2 hours after deployment
 $cnx-sentinel patrol --mode=intensive --duration=2h --after-deploy
 
-# 报警后紧急检查
+# Emergency check after an alert
 $cnx-sentinel patrol --mode=focus --target=US-XXX
 ```
 
@@ -162,7 +163,7 @@ $cnx-sentinel patrol --mode=focus --target=US-XXX
 | Total Stories | 150 |
 | Sample Size | 10 |
 | Sampling Rate | 6.7% |
-| Cost Estimate | ¥0.5 |
+| Cost Estimate | $0.07 |
 
 ### 🎲 Random Sample
 | # | Story | Module | Last Checked | Result |
@@ -173,10 +174,10 @@ $cnx-sentinel patrol --mode=focus --target=US-XXX
 | 4 | US-SEARCH-003 | Search | 18h ago | ✅ |
 | 5 | ... | ... | ... | ... |
 
-\* US-AUDIO-015: 播放偶尔卡顿（第2次出现，观察中）
+\* US-AUDIO-015: Occasional playback stuttering (2nd occurrence, under observation)
 
 ### 🔴 Issues Found
-None (本次抽检未发现确定问题)
+None (no confirmed issues found in this sample)
 
 ### 📈 Patrol Statistics (7 days)
 | Metric | Value |
@@ -192,48 +193,48 @@ None (本次抽检未发现确定问题)
 |------|-------|
 | AI Checks | 280 calls |
 | Playwright Runs | 28 sessions |
-| Total Cost | ¥15 |
+| Total Cost | $2 |
 | Budget Used | 15% of monthly |
 ```
 
 ## Smart Detection Logic
 
-### Pattern 1: 偶发 vs 真问题
+### Pattern 1: Intermittent vs Real Issue
 
 ```javascript
-// 不是一查就报，要看趋势
+// Don't alert on the first failure; look at the trend
 const checks = [
   { time: 'T-6h', status: 'PASS' },
-  { time: 'T-12h', status: 'FAIL' },  // 偶发？
+  { time: 'T-12h', status: 'FAIL' },  // Intermittent?
   { time: 'T-18h', status: 'PASS' },
-  { time: 'Now', status: 'FAIL' },    // 又失败了！
+  { time: 'Now', status: 'FAIL' },    // Failed again!
 ];
 
-// 连续2次失败 → 创建 Issue
+// 2 consecutive failures → Create Issue
 if (lastN(checks, 2).all(c => c.status === 'FAIL')) {
   createBacklogItem('FIX-XXX');
 }
-// 偶尔失败 → 记录观察
+// Occasional failure → Log for observation
 else if (checks.filter(c => c.status === 'FAIL').length <= 1) {
   logForObservation('Might be flaky, continue monitoring');
 }
 ```
 
-### Pattern 2: 热点识别
+### Pattern 2: Hotspot Detection
 
 ```javascript
-// 某些 Stories 经常被抽到有问题
-// 自动增加检查频率
+// Some Stories frequently show issues when sampled.
+// Automatically increase their check frequency.
 
 const hotSpots = analyzeHistory();
 // hotSpots = [
-//   { story: 'US-AUDIO-015', failRate: 0.3 }, // 30%失败率
+//   { story: 'US-AUDIO-015', failRate: 0.3 }, // 30% failure rate
 //   { story: 'US-SEARCH-003', failRate: 0.1 },
 // ]
 
-// 对热点增加权重
+// Increase weight for hotspots
 if (hotSpots.some(h => h.story === selectedStory)) {
-  // 如果是热点，即使随机没选中，也有概率额外检查
+  // If it's a hotspot, even if not randomly selected, add extra check probability
   if (Math.random() < 0.3) {
     extraCheck(story);
   }
@@ -242,37 +243,37 @@ if (hotSpots.some(h => h.story === selectedStory)) {
 
 ## Cost Optimization
 
-### Tiered Checking (分层检查)
+### Tiered Checking
 
 ```
-Level 1: 轻量检查 (便宜)
+Level 1: Lightweight Check (cheap)
   └── HTTP ping / API health check
-  └── Cost: ¥0.01 per check
+  └── Cost: $0.001 per check
 
-Level 2: 功能检查 (中等)
-  └── Playwright 关键路径
-  └── Cost: ¥0.1 per check
+Level 2: Functional Check (moderate)
+  └── Playwright critical path
+  └── Cost: $0.01 per check
 
-Level 3: AI 深度检查 (贵)
-  └── AI 分析内容质量
-  └── Cost: ¥0.5 per check
+Level 3: AI Deep Check (expensive)
+  └── AI-powered content quality analysis
+  └── Cost: $0.07 per check
 
-策略：
-- 每次 Patrol 90% Level 1 + 10% Level 2
-- 每周一次 Level 3 深度巡检
+Strategy:
+- Each patrol: 90% Level 1 + 10% Level 2
+- Once weekly: Level 3 deep inspection
 ```
 
 ### Smart Batching
 
 ```javascript
-// 批量检查降低成本
-// 不是查10次，而是开一次浏览器查10个
+// Batch checks to reduce cost.
+// Instead of 10 separate checks, open one browser for all 10.
 
 async function batchCheck(stories) {
   const browser = await chromium.launch();
   const context = await browser.newContext();
   
-  // 复用浏览器会话检查多个 Stories
+  // Reuse browser session to check multiple Stories
   for (const story of stories) {
     const page = await context.newPage();
     await checkStory(page, story);
@@ -288,37 +289,37 @@ async function batchCheck(stories) {
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    巡检发现问题流程                          │
+│              Issue Discovery Workflow via Patrol             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  1. Sentinel Patrol (定时随机抽检)                           │
+│  1. Sentinel Patrol (scheduled random sampling)             │
 │     └── Sample: US-AUDIO-015                                │
 │                                                             │
 │  2. Check Result                                            │
-│     └── Status: FAIL (播放卡顿)                              │
+│     └── Status: FAIL (playback stuttering)                  │
 │                                                             │
-│  3. Uncertainty Check (不确定性处理)                         │
-│     └── 查历史：这是第2次失败                                 │
-│     └── 第1次在 6h ago (可能是偶发)                          │
-│     └── Decision: 继续观察，暂不创建 Issue                    │
+│  3. Uncertainty Check                                       │
+│     └── Check history: this is the 2nd failure              │
+│     └── 1st was 6h ago (possibly intermittent)              │
+│     └── Decision: continue observing, don't create Issue    │
 │                                                             │
-│  4. Next Patrol (下次巡逻)                                   │
-│     └── 又抽到了 US-AUDIO-015 (热点加权)                     │
-│     └── Status: FAIL (又失败了！)                            │
-│     └── 查历史：连续2次失败                                   │
-│     └── Decision: 创建 FIX-AUDIO-015                        │
+│  4. Next Patrol                                             │
+│     └── US-AUDIO-015 sampled again (hotspot weighting)      │
+│     └── Status: FAIL (failed again!)                        │
+│     └── Check history: 2 consecutive failures               │
+│     └── Decision: create FIX-AUDIO-015                      │
 │                                                             │
 │  5. Create Backlog Item                                     │
-│     └── BACKLOG.md 添加 FIX-AUDIO-015                       │
+│     └── Add FIX-AUDIO-015 to BACKLOG.md                     │
 │     └── Status: 📋 Todo                                     │
-│     └── 等待人工修复                                        │
+│     └── Awaiting human fix                                  │
 │                                                             │
 │  6. Human Fix                                               │
-│     └── User: "修复 FIX-AUDIO-015"                          │
+│     └── User: "Fix FIX-AUDIO-015"                           │
 │     └── $cnx-fix-build FIX-AUDIO-015                            │
 │                                                             │
 │  7. Verification                                            │
-│     └── Next patrol 会优先验证这个 FIX                       │
+│     └── Next patrol will prioritize verifying this FIX      │
 │     └── Status: ✅ Fixed                                     │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
@@ -328,28 +329,28 @@ async function batchCheck(stories) {
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    完整监控体系                              │
+│                Complete Monitoring System                    │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  $cnx-sentinel patrol        定时随机巡检 (主力)                 │
+│  $cnx-sentinel patrol        Scheduled random patrol (main) │
 │       ↓                                                     │
-│  发现问题? ──┬── 是 ──→ 创建 BACKLOG 项                      │
-│              │         等待 $cnx-fix-build                      │
-│              │                                              │
-│              └── 否 ──→ 继续巡逻                             │
+│  Issue found? ──┬── Yes ──→ Create BACKLOG item             │
+│                 │           Await $cnx-fix-build             │
+│                 │                                           │
+│                 └── No  ──→ Continue patrolling              │
 │                                                             │
-│  $cnx-bb-debug               按需深度诊断 (辅助)                 │
-│  (当 Sentinel 发现问题后，人工触发深入调查)                   │
+│  $cnx-bb-debug               On-demand deep diagnosis (aux) │
+│  (When Sentinel finds an issue, manually trigger deep dive) │
 │                                                             │
-│  $cnx-story-build            修复后回归验证                      │
+│  $cnx-story-build            Post-fix regression verify     │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## Best Practices
 
-1. **不要全量检查** - 成本高，没必要
-2. **随机+热点** - 平衡覆盖率和成本
-3. **多次确认** - 避免偶发误报
-4. **预算控制** - 设置每日/每月 AI 调用上限
-5. **渐进增强** - 稳定期 Light，发布后 Intensive
+1. **Don't do full-coverage checks** - Expensive and unnecessary
+2. **Random + Hotspots** - Balance coverage and cost
+3. **Multi-check confirmation** - Avoid false positives from intermittent failures
+4. **Budget control** - Set daily/monthly AI call limits
+5. **Progressive intensity** - Light during stable periods, Intensive after releases

@@ -1,34 +1,34 @@
 # CNX-OC (Cybernetix for OpenClaw)
 
-Cybernetix 的 OpenClaw 适配层 - 将 CNX 工作流整合到 OpenClaw 生态。
+OpenClaw adaptation layer for Cybernetix - Integrates the CNX workflow into the OpenClaw ecosystem.
 
-## 这是什么？
+## What Is This?
 
-`cnx-oc` 是 Cybernetix 的 **OpenClaw 专用变体**，提供：
-- 统一的 `$cnx` 命令入口
-- 与 OpenClaw agent 的无缝集成
-- 简化的技能调用方式
+`cnx-oc` is the **OpenClaw-specific variant** of Cybernetix, providing:
+- A unified `$cnx` command entry point
+- Seamless integration with the OpenClaw agent
+- Simplified skill invocation
 
-## 目录结构
+## Directory Structure
 
 ```
 variants/cnx-oc/
-├── README.md              # 本文件
+├── README.md              # This file
 ├── skills/
 │   └── cnx/               # OpenClaw skill
-│       ├── SKILL.md       # 技能文档
-│       └── cnx.sh         # 命令路由脚本
-└── install.sh             # 安装脚本（可选）
+│       ├── SKILL.md       # Skill documentation
+│       └── cnx.sh         # Command routing script
+└── install.sh             # Installation script (optional)
 ```
 
-## 安装到 OpenClaw
+## Installing into OpenClaw
 
 ```bash
-# 创建软链接（推荐）
+# Create symlinks (recommended)
 ln -s ~/workspace/cybernetix/variants/cnx-oc/skills/cnx \
   ~/.openclaw/workspace/skills/cnx
 
-# 同时链接 tools
+# Also link tools
 ln -s ~/workspace/cybernetix/tools/cnx-fetch \
   ~/.openclaw/workspace/skills/cnx-fetch
 
@@ -36,47 +36,47 @@ ln -s ~/workspace/cybernetix/tools/cnx-probe \
   ~/.openclaw/workspace/skills/cnx-probe
 ```
 
-## 使用
+## Usage
 
-安装后，在 OpenClaw 的任何 agent 中都可以使用：
+After installation, use in any OpenClaw agent:
 
 ```bash
-$cnx backlog "用户登录功能"     # 需求规划
-$cnx build US-001               # 执行 Story
-$cnx fetch https://example.com  # 网页抓取
-$cnx probe find orin            # 节点发现
+$cnx backlog "user login feature"     # Requirement planning
+$cnx build US-001                     # Execute Story
+$cnx fetch https://example.com        # Web scraping
+$cnx probe find orin                  # Node discovery
 ```
 
-## 与上游同步
+## Syncing with Upstream
 
-当 cybernetix 升级时，`cnx-oc` 自动获得更新：
+When cybernetix is updated, `cnx-oc` automatically gets the updates:
 
 ```bash
 cd ~/workspace/cybernetix
 git pull origin main
-# 完成！OpenClaw 自动使用新版本
+# Done! OpenClaw automatically uses the new version
 ```
 
-## 版本锁定
+## Version Pinning
 
-如需锁定到特定版本：
+To pin to a specific version:
 
 ```bash
 cd ~/workspace/cybernetix
 git checkout v1.2.3
 ```
 
-## 差异说明
+## Differences
 
-| 特性 | Cybernetix (原始) | CNX-OC (OpenClaw) |
+| Feature | Cybernetix (Original) | CNX-OC (OpenClaw) |
 |------|-------------------|-------------------|
-| 调用方式 | 直接调用各 skill | `$cnx` 统一入口 |
-| 工具名 | `cnx-fetch` | `cnx-fetch` |
-| 工具名 | `cnx-probe` | `cnx-probe` |
-| 集成 | 独立 CLI | OpenClaw 生态 |
+| Invocation | Call individual skills directly | Unified `$cnx` entry point |
+| Tool name | `cnx-fetch` | `cnx-fetch` |
+| Tool name | `cnx-probe` | `cnx-probe` |
+| Integration | Standalone CLI | OpenClaw ecosystem |
 
-## 维护
+## Maintenance
 
-- **上游**: github.com/seanyao/cybernetix
-- **问题反馈**: 在 cybernetix 仓库提交 issue
-- **版本**: 跟随 cybernetix 主版本
+- **Upstream**: github.com/seanyao/cybernetix
+- **Issue reporting**: Submit issues in the cybernetix repository
+- **Version**: Follows cybernetix main version

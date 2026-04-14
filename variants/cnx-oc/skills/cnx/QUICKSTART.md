@@ -1,10 +1,10 @@
-# CNX 命令速查
+# CNX Command Quick Reference
 
-**AI-Coding 工作流统一入口** - 结构化软件开发的完整工具链
+**Unified AI-Coding workflow entry point** - Complete toolchain for structured software development
 
 ---
 
-## 快速开始
+## Getting Started
 
 ```bash
 $cnx <command> [options]
@@ -12,129 +12,129 @@ $cnx <command> [options]
 
 ---
 
-## 命令总览
+## Command Overview
 
-| 命令 | 用途 | 场景 |
+| Command | Purpose | Scenario |
 |------|------|------|
-| `backlog` | 需求规划 | 新功能设计、拆分 Stories |
-| `build` | 执行 Story | 开发具体功能 |
-| `fix` | 修复 Bug | 快速修复问题 |
-| `roll` | 一句话交付 | 简单需求快速实现 |
-| `review` | 代码审查 | 检查代码质量 |
-| `fetch` | 单页抓取 | 获取单个网页内容 |
-| `crawl` | 全站爬取 | 批量抓取网站 |
-| `probe` | 节点检查 | 发现机器、健康诊断 |
-| `init` | 初始化项目 | 创建新项目结构 |
-| `changelog` | 生成日志 | 发布前更新记录 |
+| `backlog` | Requirement planning | New feature design, split into Stories |
+| `build` | Execute Story | Develop specific features |
+| `fix` | Fix Bug | Quick issue fixes |
+| `roll` | One-sentence delivery | Simple requests, fast implementation |
+| `review` | Code review | Check code quality |
+| `fetch` | Single page scrape | Get single webpage content |
+| `crawl` | Full site crawl | Bulk scrape websites |
+| `probe` | Node check | Discover machines, health diagnosis |
+| `init` | Initialize project | Create new project structure |
+| `changelog` | Generate changelog | Pre-release update log |
 
 ---
 
-## 使用示例
+## Usage Examples
 
-### 📝 Plan - 规划阶段
+### 📝 Plan - Planning Phase
 
 ```bash
-# 规划新功能，自动拆分为 Stories
-$cnx backlog "用户登录系统"
+# Plan a new feature, automatically split into Stories
+$cnx backlog "user login system"
 
-# 从已有设计文档规划
+# Plan from an existing design document
 $cnx backlog --from-plan docs/plans/auth.md
 
-# 直接创建单个 Story
-$cnx backlog --story "添加密码重置功能"
+# Directly create a single Story
+$cnx backlog --story "add password reset feature"
 ```
 
-### 🔨 Do - 执行阶段
+### 🔨 Do - Execution Phase
 
 ```bash
-# 执行指定的 Story
+# Execute a specified Story
 $cnx build US-001
 
-# 快速修复 Bug
-$cnx fix "登录按钮点击无响应"
+# Quick bug fix
+$cnx fix "login button click unresponsive"
 
-# 一句话快速交付（自动规划+执行）
-$cnx roll "添加深色模式切换"
+# One-sentence quick delivery (auto plan + execute)
+$cnx roll "add dark mode toggle"
 ```
 
-### 👀 Check - 检查阶段
+### 👀 Check - Review Phase
 
 ```bash
-# 代码审查
+# Code review
 $cnx review
 
-# 抓取技术文档参考
+# Scrape technical docs for reference
 $cnx fetch https://docs.example.com/api
 
-# 爬取竞品网站分析
+# Crawl competitor website for analysis
 $cnx crawl https://competitor.com --depth 2
 ```
 
-### 🚀 Act - 部署阶段
+### 🚀 Act - Deployment Phase
 
 ```bash
-# 生成更新日志
+# Generate changelog
 $cnx changelog
 
-# 检查生产环境节点
+# Check production environment nodes
 $cnx probe health production.local
 ```
 
 ---
 
-## 场景对比
+## Scenario Comparison
 
 ### fetch vs crawl
 
-| 场景 | 命令 | 说明 |
+| Scenario | Command | Description |
 |------|------|------|
-| 查看一篇文章 | `$cnx fetch <url>` | 单页提取，快速获取 |
-| 备份整个文档站 | `$cnx crawl <url>` | 全站递归，批量保存 |
-| 获取 API 文档 | `$cnx fetch` | 一次获取当前页 |
-| 竞品网站分析 | `$cnx crawl` | 深度爬取多页面 |
+| Read a single article | `$cnx fetch <url>` | Single page extraction, fast retrieval |
+| Back up an entire doc site | `$cnx crawl <url>` | Full site recursive, bulk save |
+| Get API docs | `$cnx fetch` | Fetch current page at once |
+| Competitor website analysis | `$cnx crawl` | Deep crawl across multiple pages |
 
 ### build vs fix vs roll
 
-| 场景 | 命令 | 说明 |
+| Scenario | Command | Description |
 |------|------|------|
-| 按计划开发功能 | `$cnx build US-001` | 执行已有 Story |
-| 修复线上 Bug | `$cnx fix "描述"` | 快速修复流程 |
-| 临时小需求 | `$cnx roll "描述"` | 自动规划并执行 |
+| Develop a planned feature | `$cnx build US-001` | Execute existing Story |
+| Fix a production Bug | `$cnx fix "description"` | Quick fix workflow |
+| Ad-hoc small request | `$cnx roll "description"` | Auto-plan and execute |
 
 ---
 
-## 完整工作流示例
+## Full Workflow Example
 
 ```bash
-# 1. 规划需求 → 生成 US-001
-$cnx backlog "用户登录功能"
+# 1. Plan requirements -> generate US-001
+$cnx backlog "user login feature"
 
-# 2. 执行开发 → TCR 工作流
+# 2. Execute development -> TCR workflow
 $cnx build US-001
 
-# 3. 代码审查
+# 3. Code review
 $cnx review
 
-# 4. 发布上线
+# 4. Release
 $cnx changelog
 ```
 
 ---
 
-## 环境要求
+## Environment Requirements
 
 - Node.js 18+
-- 项目目录需包含 `BACKLOG.md`
-- Git 仓库（用于 TCR 工作流）
+- Project directory must contain `BACKLOG.md`
+- Git repository (for TCR workflow)
 
-## 项目结构
+## Project Structure
 
 ```
 project/
 ├── BACKLOG.md          # Story backlog
-├── CHANGELOG.md        # 发布历史
+├── CHANGELOG.md        # Release history
 ├── docs/
-│   └── plans/          # 设计方案
+│   └── plans/          # Design plans
 └── .github/
     └── workflows/      # CI/CD
 ```

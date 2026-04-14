@@ -5,199 +5,200 @@ description: Unified entry for Cybernetix (CNX) AI-Coding workflow. Routes to de
 
 # CNX (Cybernetix)
 
-**AI-Coding 统一入口** - 结构化软件开发的完整工作流。
+**Unified AI-Coding entry point** - Complete workflow for structured software development.
 
-## 快速帮助
+## Quick Help
 
 ```bash
 $cnx <command> [options]
 ```
 
-### 命令总览
+### Command Overview
 
-| 命令 | 用途 | 示例 |
+| Command | Purpose | Example |
 |------|------|------|
-| `design` | 讨论+规划 | `$cnx design "用户登录功能"` |
-| `build` | 执行 Story | `$cnx build US-001` |
-| `spar` | 对抗式 TDD | `$cnx spar "转账逻辑"` |
-| `fix` | 修复 Bug | `$cnx fix "登录按钮无响应"` |
-| `roll` | 一句话交付 | `$cnx roll "添加深色模式"` |
-| `review` | 代码审查 | `$cnx review` |
-| `fetch` | 单页抓取 | `$cnx fetch https://example.com` |
-| `crawl` | 全站爬取 | `$cnx crawl https://docs.example.com` |
-| `probe` | 节点检查 | `$cnx probe find orin` |
-| `init` | 初始化项目 | `$cnx init my-project` |
-| `changelog` | 生成日志 | `$cnx changelog` |
+| `design` | Discuss + plan | `$cnx design "user login feature"` |
+| `build` | Execute Story | `$cnx build US-001` |
+| `spar` | Adversarial TDD | `$cnx spar "transfer logic"` |
+| `fix` | Fix Bug | `$cnx fix "login button unresponsive"` |
+| `roll` | One-sentence delivery | `$cnx roll "add dark mode"` |
+| `review` | Code review | `$cnx review` |
+| `fetch` | Single page scrape | `$cnx fetch https://example.com` |
+| `crawl` | Full site crawl | `$cnx crawl https://docs.example.com` |
+| `probe` | Node check | `$cnx probe find orin` |
+| `init` | Initialize project | `$cnx init my-project` |
+| `changelog` | Generate changelog | `$cnx changelog` |
 
-### 场景速查
+### Scenario Quick Reference
 
-**获取网页内容**
+**Fetching web content**
 ```bash
-# 单篇文章 → 用 fetch（快速）
+# Single article -> use fetch (fast)
 $cnx fetch https://blog.example.com/article
 
-# 整个文档站 → 用 crawl（批量）
+# Entire doc site -> use crawl (bulk)
 $cnx crawl https://docs.example.com --depth 2
 ```
 
-**开发工作流**
+**Development workflow**
 ```bash
-# 1. 设计规划
-$cnx design "用户登录功能"
+# 1. Design and plan
+$cnx design "user login feature"
 
-# 2. 执行开发
+# 2. Execute development
 $cnx build US-001
 
-# 3. 代码审查
+# 3. Code review
 $cnx review
 
-# 4. 发布上线
+# 4. Release
 $cnx changelog
 ```
 
 ---
 
-## 详细文档
+## Detailed Documentation
 
 ### When to Use
 
-| 场景 | 调用 |
+| Scenario | Call |
 |------|------|
-| "讨论方案" / "规划新功能" | `$cnx design "需求描述"` |
-| "执行 US-001" / "开始开发" | `$cnx build US-001` |
-| "修复这个 Bug" | `$cnx fix "Bug 描述"` |
-| "快速实现一个功能" | `$cnx roll "一句话需求"` |
-| "代码审查" | `$cnx review` |
-| "初始化项目" | `$cnx init project-name` |
-| "生成更新日志" | `$cnx changelog` |
-| "抓取网页" / "爬取网站" | `$cnx fetch https://...` |
-| "检查节点" / "发现机器" | `$cnx probe find <machine>` |
+| "Discuss approach" / "Plan new feature" | `$cnx design "requirement description"` |
+| "Execute US-001" / "Start development" | `$cnx build US-001` |
+| "Fix this Bug" | `$cnx fix "Bug description"` |
+| "Quickly implement a feature" | `$cnx roll "one-sentence request"` |
+| "Code review" | `$cnx review` |
+| "Initialize project" | `$cnx init project-name` |
+| "Generate changelog" | `$cnx changelog` |
+| "Scrape webpage" / "Crawl website" | `$cnx fetch https://...` |
+| "Check node" / "Discover machine" | `$cnx probe find <machine>` |
 
 ### Workflow
 
 ```
-User: "帮我做一个登录功能"
-    │
-    ▼
-┌─────────────────────────────────────┐
-│ $cnx design "登录功能"              │
-│  → cnx-design                      │
-│  → 讨论方案 → 设计架构 → 拆分 Stories│
-│  → 写入 BACKLOG.md                  │
-└─────────────┬───────────────────────┘
-              │
-              ▼
-    "创建 US-AUTH-001"
-    │
-    ▼
-┌─────────────────────────────────────┐
-│ $cnx build US-AUTH-001              │
-│  → cnx-story-build                  │
-│  → TCR 工作流 → CI/CD → Deploy      │
-│  → 更新 BACKLOG.md                  │
-└─────────────┬───────────────────────┘
-              │
-              ▼
-    "✅ US-AUTH-001 已完成"
+User: "Help me build a login feature"
+    |
+    v
++-------------------------------------+
+| $cnx design "login feature"         |
+|  -> cnx-design                      |
+|  -> Discuss approach -> Design      |
+|     architecture -> Split Stories   |
+|  -> Write to BACKLOG.md             |
++---------------+---------------------+
+                |
+                v
+    "Created US-AUTH-001"
+    |
+    v
++-------------------------------------+
+| $cnx build US-AUTH-001              |
+|  -> cnx-story-build                 |
+|  -> TCR workflow -> CI/CD -> Deploy |
+|  -> Update BACKLOG.md               |
++---------------+---------------------+
+                |
+                v
+    "✅ US-AUTH-001 completed"
 ```
 
 ### Commands
 
-#### `design` - 讨论+规划
+#### `design` - Discuss + Plan
 ```bash
-$cnx design "用户系统设计方案"
-$cnx design "搜索用 Postgres FTS 还是 Meilisearch？"
+$cnx design "user system design"
+$cnx design "Use Postgres FTS or Meilisearch for search?"
 $cnx design --from-plan docs/features/auth-plan.md
-$cnx design --story "登录功能"
-$cnx design --fix "修复 API 404"
+$cnx design --story "login feature"
+$cnx design --fix "fix API 404"
 ```
 
-#### `build` - 执行 Story
+#### `build` - Execute Story
 ```bash
-$cnx build US-001          # 执行指定 Story
-$cnx build --latest        # 执行最新的 Story
+$cnx build US-001          # Execute specified Story
+$cnx build --latest        # Execute latest Story
 ```
 
-#### `fix` - 快速修复
+#### `fix` - Quick Fix
 ```bash
-$cnx fix "登录按钮不响应"
-$cnx fix BUG-001           # 执行已有 Bug
+$cnx fix "login button unresponsive"
+$cnx fix BUG-001           # Execute existing Bug
 ```
 
-#### `roll` - 一句话交付
+#### `roll` - One-Sentence Delivery
 ```bash
-$cnx roll "加个深色模式"
-# 自动: 规划 → 拆分 → 执行 → 交付
+$cnx roll "add dark mode"
+# Auto: plan -> split -> execute -> deliver
 ```
 
-#### `review` - 代码审查
+#### `review` - Code Review
 ```bash
-$cnx review                 # 审查 staged changes
-$cnx review --staged       # 同上
-$cnx review --unstaged     # 审查所有修改
-$cnx review files src/     # 审查指定文件
+$cnx review                 # Review staged changes
+$cnx review --staged       # Same as above
+$cnx review --unstaged     # Review all modifications
+$cnx review files src/     # Review specified files
 ```
 
-#### `fetch` - 网页抓取/情报收集
+#### `fetch` - Web Scraping / Intelligence Gathering
 ```bash
-$cnx fetch https://example.com           # 单页提取
-$cnx crawl https://docs.example.com      # 全站爬取
-$cnx crawl https://site.com --depth 2    # 指定深度
+$cnx fetch https://example.com           # Single page extraction
+$cnx crawl https://docs.example.com      # Full site crawl
+$cnx crawl https://site.com --depth 2    # Specify depth
 ```
 
-**三层策略：**
-1. **Tavily API** - AI 提取，质量最佳（需要 `TAVILY_API_KEY`）
-2. **LLM Native Fetch** - 使用内置 FetchURL 能力
-3. **Browser Automation** - 本地 browser-use 优先，云端兜底（需要 `BROWSER_USE_API_KEY`）
+**Three-layer strategy:**
+1. **Tavily API** - AI extraction, best quality (requires `TAVILY_API_KEY`)
+2. **LLM Native Fetch** - Uses built-in FetchURL capability
+3. **Browser Automation** - Local browser-use preferred, cloud fallback (requires `BROWSER_USE_API_KEY`)
 
-**环境变量配置（每台机器独立）：**
+**Environment variable configuration (independent per machine):**
 ```bash
 export TAVILY_API_KEY=tvly-...
-export BROWSER_USE_API_KEY=bu-...  # 可选，本地 browser-use 优先
+export BROWSER_USE_API_KEY=bu-...  # Optional, local browser-use preferred
 ```
 
-#### `probe` - 节点发现与健康检查
+#### `probe` - Node Discovery and Health Check
 ```bash
-$cnx probe find orin              # 发现机器 (Bonjour/mDNS)
-$cnx probe health seanclaw.local  # 健康检查
-$cnx probe diagnose apeclaw       # 完整诊断
+$cnx probe find orin              # Discover machine (Bonjour/mDNS)
+$cnx probe health seanclaw.local  # Health check
+$cnx probe diagnose apeclaw       # Full diagnosis
 ```
 
-**功能:**
-- 局域网节点发现 (支持 .local 主机名)
-- OpenClaw Gateway 状态检查
-- 端口监听验证
-- 日志查看
+**Features:**
+- LAN node discovery (supports .local hostnames)
+- OpenClaw Gateway status check
+- Port listening verification
+- Log viewing
 
-#### `init` - 项目初始化
+#### `init` - Project Initialization
 ```bash
-$cnx init my-project       # 创建新项目
-$cnx init .                # 初始化当前目录
+$cnx init my-project       # Create new project
+$cnx init .                # Initialize current directory
 ```
 
-#### `changelog` - 生成更新日志
+#### `changelog` - Generate Changelog
 ```bash
-$cnx changelog             # 从 BACKLOG.md 生成
-$cnx changelog --draft     # 预览，不写入文件
+$cnx changelog             # Generate from BACKLOG.md
+$cnx changelog --draft     # Preview, don't write to file
 ```
 
 ### Project Structure
 
-Cybernetix 项目需要以下结构：
+Cybernetix projects require the following structure:
 
 ```
 project/
-├── BACKLOG.md          # 任务索引
-├── CHANGELOG.md        # 发布历史
+├── BACKLOG.md          # Task index
+├── CHANGELOG.md        # Release history
 ├── docs/
-│   └── features/       # Story 详情 & 设计文档
+│   └── features/       # Story details & design docs
 └── .github/
     └── workflows/      # CI/CD
 ```
 
 ### Integration
 
-#### 与 OpenClaw 集成
+#### Integration with OpenClaw
 ```yaml
 # ~/.openclaw/openclaw.yaml
 skills:
@@ -213,7 +214,7 @@ skills:
       - changelog
 ```
 
-#### 环境变量
+#### Environment Variables
 ```bash
 export CYBERNETIX_WORKSPACE=~/workspace/cybernetix
 ```
@@ -221,16 +222,16 @@ export CYBERNETIX_WORKSPACE=~/workspace/cybernetix
 ### Requirements
 
 - Node.js 18+
-- 项目目录需包含 `BACKLOG.md`（可由 init 创建）
-- Git 仓库（用于 TCR 工作流）
+- Project directory must contain `BACKLOG.md` (can be created by init)
+- Git repository (for TCR workflow)
 
 ### Related
 
-- `cnx-design` - 讨论+设计+规划
-- `cnx-spar` - 对抗式 TDD（高风险逻辑）
-- `cnx-story-build` - Story 交付
-- `cnx-fix-build` - Bug 修复
-- `cnx-roll-build` - 快速交付
-- `cnx-.code-review` - 代码审查
-- `cnx-init` - 项目初始化
-- `cnx-.changelog` - 更新日志
+- `cnx-design` - Discuss + Design + Plan
+- `cnx-spar` - Adversarial TDD (high-risk logic)
+- `cnx-story-build` - Story delivery
+- `cnx-fix-build` - Bug fix
+- `cnx-roll-build` - Quick delivery
+- `cnx-.code-review` - Code review
+- `cnx-init` - Project initialization
+- `cnx-.changelog` - Changelog

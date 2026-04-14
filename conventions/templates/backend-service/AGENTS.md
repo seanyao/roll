@@ -64,3 +64,24 @@ tests/
 - CORS configured explicitly — no wildcard in production.
 - Authentication middleware applied at route level, not globally.
 - Secrets rotated periodically. Never in git history.
+
+## Architecture Constraints
+
+- **Domain Driven**: organize code by business domain, not technical layer. `src/services/` contains domain logic, not generic utilities.
+- **Clean Architecture**: routes (thin) → services (business logic) → models (data) ← infrastructure (DB/external APIs). Routes delegate; they don't contain business logic.
+- **Data Schema First**: define types/schemas before writing business logic.
+- **API Contract**: typed request/response schemas. API changes must bump version or be backward-compatible.
+
+## Development Discipline
+
+- **TCR mandatory**: All code changes follow Test → Green = Commit / Red = Revert. No WIP commits.
+- **Action granularity**: Each Action independently deployable, completable in 2–5 min. No placeholders (no TBD/TODO/pending).
+- **Verification Gate**: Before marking done, provide fresh evidence (test output, curl response). "I confirmed it works" is not evidence.
+- **Complete delivery**: push to GitHub + CI passes + deployed online. Local-only done is not done.
+
+## Workspace Structure
+
+- `BACKLOG.md` = index table, one-line summary per story only.
+- `docs/features/<feature>.md` = US details (AC, Files, Dependencies).
+- `docs/features/<feature>-plan.md` = architecture design doc (optional).
+- Never write project docs to `~/.kimi/` or any global config directory.

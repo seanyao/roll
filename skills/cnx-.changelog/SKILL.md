@@ -1,67 +1,67 @@
 ---
 hidden: true
 name: cnx-.changelog
-description: Build 完成后，从 BACKLOG.md 提取已完成的 Stories 生成 CHANGELOG.md。在 Deploy 成功后自动触发，保持对外更新日志与内部 backlog 同步。
+description: After build completion, extracts completed Stories from BACKLOG.md to generate CHANGELOG.md. Auto-triggered after successful deploy, keeping the external changelog in sync with the internal backlog.
 ---
 
 # CNX Generate Changelog
 
-Build & Deploy 成功后，从 BACKLOG.md 提取已完成的 Stories，生成对外友好的 `CHANGELOG.md`。
+After successful Build & Deploy, extracts completed Stories from BACKLOG.md to generate a user-friendly `CHANGELOG.md`.
 
-## 触发时机
+## When Triggered
 
-- **自动触发**：`$cnx-story-build` 或 `$cnx-fix-build` 成功 Deploy 后
-- **手动触发**：用户要求 "更新 changelog"、"生成发布日志" 时
+- **Auto-triggered**: After successful deploy of `$cnx-story-build` or `$cnx-fix-build`
+- **Manual trigger**: When user requests "update changelog" or "generate release notes"
 
 ## Workflow
 
-### 1. 读取 BACKLOG.md
+### 1. Read BACKLOG.md
 
 ```
-读取项目根目录的 BACKLOG.md
-提取状态为 ✅ Completed / Done / 已完成 的 Stories
+Read BACKLOG.md from the project root directory.
+Extract Stories with status ✅ Completed / Done.
 ```
 
-### 2. 过滤对外内容
+### 2. Filter for External Content
 
-**移除内部信息：**
-- 进度表格、完成度百分比
-- "As a / I can / So that" 格式
-- 详细 AC 检查清单
-- 技术债务、内部文件路径
-- 测试用例数量、架构图
+**Remove internal information:**
+- Progress tables, completion percentages
+- "As a / I can / So that" format
+- Detailed AC checklists
+- Technical debt, internal file paths
+- Test case counts, architecture diagrams
 
-**保留用户价值：**
-- 新功能（一句话描述）
-- Bug 修复（用户可见影响）
-- UX 改进（布局、交互优化）
-- 性能/可靠性提升
+**Keep user-facing value:**
+- New features (one-sentence description)
+- Bug fixes (user-visible impact)
+- UX improvements (layout, interaction enhancements)
+- Performance/reliability improvements
 
-### 3. 版本号格式
+### 3. Version Number Format
 
 ```
 YYYY.MM.DD
-YYYY.MM.DD-1  (同日多次发布)
+YYYY.MM.DD-1  (multiple releases on the same day)
 YYYY.MM.DD-2
 ```
 
-### 4. 生成 CHANGELOG.md
+### 4. Generate CHANGELOG.md
 
 ```markdown
-# 更新日志
+# Changelog
 
 ## 2026.04.03
-- **新增**：<从 BACKLOG 提取的已完成功能>
-- **修复**：<已解决的 Bug>
-- **改进**：<UX/性能优化>
+- **Added**: <completed feature extracted from BACKLOG>
+- **Fixed**: <resolved bug>
+- **Improved**: <UX/performance optimization>
 
 ## 2026.04.01
 - ...
 ```
 
-**排序**：最新的版本在前（逆序）
+**Ordering**: Most recent version first (reverse chronological)
 
-### 5. 提交更新
+### 5. Commit Update
 
 ```bash
 git add CHANGELOG.md
@@ -71,9 +71,9 @@ git push
 
 ## Integration
 
-在 `$cnx-story-build` / `$cnx-fix-build` / `$cnx-roll-build` 的 Deploy 成功后：
+After successful deploy in `$cnx-story-build` / `$cnx-fix-build` / `$cnx-roll-build`:
 
 ```markdown
 **Post-Deploy:**
-- `$cnx-changelog` - 同步更新对外日志
+- `$cnx-changelog` - Sync external changelog
 ```

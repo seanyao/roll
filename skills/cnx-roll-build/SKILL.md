@@ -6,15 +6,17 @@ description: Convert vague one-sentence request into stories, insert into BACKLO
 
 # Roll (TCR Edition)
 
-把一句模糊需求先转成 backlog 条目，再直接执行。
+> Follows the Architecture Constraints, Development Discipline, and Engineering Common Sense defined in the project AGENTS.md.
+
+Turn a vague one-sentence request into a backlog item and execute it directly.
 
 ## Trigger
 
 Use when:
 
-- 用户只有一句话需求
-- 当前没有现成的 `US-XXX` / `FIX-XXX`
-- 既要补规划，又想直接做出来
+- The user has only a one-sentence request
+- There is no existing `US-XXX` / `FIX-XXX` to work from
+- Both planning and execution are needed
 
 **Workflow:**
 1. Clarify & analyze the vague request
@@ -24,9 +26,9 @@ Use when:
 
 Do not use for:
 
-- 已有明确 `US-XXX`（用 `cnx-story-build`）
-- 明显是单个小 bug / 小修复（用 `cnx-fix-build`）
-- 纯分析、纯调研、不改代码
+- An existing `US-XXX` is already defined (use `cnx-story-build`)
+- A single small bug / minor fix (use `cnx-fix-build`)
+- Pure analysis, pure research, no code changes
 
 ## Core Philosophy
 
@@ -56,31 +58,6 @@ Do not use for:
 ```
 
 **Key Principle**: Each commit represents a **guaranteed working state**. No "WIP" commits, no broken commits.
-
-## Workspace Configuration
-
-文档结构（两层分离）:
-
-```
-BACKLOG.md                        # US 索引页（状态 + 一句话 + 链接）
-docs/features/
-  <feature>.md                    # US 详情（AC / Files / Dependencies）
-  <feature>-plan.md               # 设计文档（why / how）
-```
-
-**重要规则:**
-1. Plan 文件写入 `docs/features/<feature>-plan.md`（**不再使用** `docs/plans/`）
-2. US 详情写入对应的 `docs/features/<feature>.md`
-3. BACKLOG.md 只写索引行（一行一个 US），**不写** AC / Files / Notes
-4. **禁止**写入 `~/.kimi/` 或任何全局配置目录
-
-**创建 Plan 时的文件路径:**
-```bash
-# 确定 Feature 归属（如 compiler / ingest / qa）
-FEATURE="<feature-name>"
-PLAN_FILE="docs/features/${FEATURE}-plan.md"
-FEATURE_FILE="docs/features/${FEATURE}.md"
-```
 
 ## Adaptive Workflow
 
@@ -173,10 +150,10 @@ else:
 
 **If CI fails locally:**
 ```
-❌ 本地 CI 检查失败
-   ├── 运行 'npm run ci:fix' 或 'npm run format' 自动修复
-   ├── 修复 lint/build/test 错误
-   └── 重新运行检查直到通过
+❌ Local CI check failed
+   ├── Run 'npm run ci:fix' or 'npm run format' to auto-fix
+   ├── Fix lint/build/test errors
+   └── Re-run checks until all pass
 ```
 
 **Set up pre-push hook (one-time per repo):**
@@ -184,12 +161,12 @@ else:
 # .git/hooks/pre-push
 cat > .git/hooks/pre-push << 'EOF'
 #!/bin/bash
-echo "🔍 运行本地 CI 检查..."
+echo "🔍 Running local CI checks..."
 if ! npm run ci:local 2>/dev/null && ! (npm run lint && npm run build); then
-    echo "❌ CI 检查失败，推送已阻止"
+    echo "❌ CI check failed, push blocked"
     exit 1
 fi
-echo "✅ CI 检查通过"
+echo "✅ CI check passed"
 EOF
 chmod +x .git/hooks/pre-push
 ```
@@ -245,39 +222,39 @@ $cnx-.code-review staged
 
 ### Phase 6: Write Back Status (REQUIRED)
 
-两处都必须更新，缺一不可：
+Both locations must be updated — neither can be skipped:
 
-**① 更新 BACKLOG.md 索引行（Status 列）:**
+**1. Update the BACKLOG.md index row (Status column):**
 
 ```markdown
 | [US-{ID}](docs/features/<feature>.md#us-{id}) | {Title} | ✅ Done |
 ```
 
-将对应行的 Status 从 `📋 Todo` 改为 `✅ Done`。
-若是新建的 Story，先在对应 Epic > Feature 分组下追加索引行，再标记完成。
+Change the Status of the corresponding row from `📋 Todo` to `✅ Done`.
+If this is a newly created Story, first append an index row under the appropriate Epic > Feature group, then mark it as done.
 
-**② 更新 `docs/features/<feature>.md` US 段落:**
+**2. Update the `docs/features/<feature>.md` US section:**
 
 ```markdown
-## US-{ID} {Story 名称} ✅
+## US-{ID} {Story Title} ✅
 
 **Completed**: {YYYY-MM-DD}
 
 **AC:**
-- [x] {完成的验收标准1}
-- [x] {完成的验收标准2}
+- [x] {Completed acceptance criterion 1}
+- [x] {Completed acceptance criterion 2}
 
 **Files:**
-- `{新增/修改的文件1}`
-- `{新增/修改的文件2}`
+- `{Added/modified file 1}`
+- `{Added/modified file 2}`
 ```
 
-- 标题加 ✅
-- 补 `**Completed**` 日期
-- AC 从 `[ ]` 改为 `[x]`
-- Files 更新为实际变更文件
+- Add ✅ to the heading
+- Add `**Completed**` date
+- Change AC items from `[ ]` to `[x]`
+- Update Files to reflect actual changed files
 
-若 US 段落尚不存在，新建完整段落（含 AC / Files / Dependencies）。
+If the US section does not yet exist, create the full section (including AC / Files / Dependencies).
 
 ### Phase 7: Commit & Push
 
@@ -314,25 +291,25 @@ Follow repo's deployment path (Vercel/Railway/etc).
 
 ### Phase 8.5: Verification Gate (MANDATORY)
 
-**在标记 DONE 之前，必须通过验证门禁。**
+**Before marking as DONE, must pass the verification gate.**
 
-必须提供**新鲜证据**，不能凭假设声称完成。
+Fresh evidence must be provided — cannot claim completion based on assumptions.
 
 ```
 🚦 Verification Gate
    
-   Evidence checklist (每条都必须有实际输出):
-   ├── [ ] 测试通过: 贴出 test run 的实际输出
-   ├── [ ] 构建成功: 贴出 build 输出
-   ├── [ ] 线上验证: 截图 / curl 输出 / 日志片段
-   └── [ ] 无回归: 至少验证一条已有功能仍正常
+   Evidence checklist (each item must have actual output):
+   ├── [ ] Tests passed: paste actual test run output
+   ├── [ ] Build succeeded: paste build output
+   ├── [ ] Online verification: screenshot / curl output / log snippet
+   └── [ ] No regression: verify at least one existing feature still works
    
    Gate Decision:
-   ├── ✅ 全部有证据 → 可以标记 DONE
-   └── ❌ 任何一条缺证据 → 补齐后再过 Gate
+   ├── ✅ All items have evidence → Can mark as DONE
+   └── ❌ Any item missing evidence → Gather evidence before passing the gate
 ```
 
-**Hard Rule**: "我确认测试通过了"不算证据。必须是**这次刚跑的**命令输出。
+**Hard Rule**: "I confirmed the tests passed" does not count as evidence. Must be **freshly run** command output from this session.
 
 ### Phase 9: Update BACKLOG & Report
 
@@ -378,8 +355,8 @@ git push
    - If a step feels "a bit complex", split it
    - Each micro-step should be completable in 1-3 minutes
    - Prefer 5 small commits over 1 medium commit
-   - **Action 粒度约束**: 每个 Action 应在 2-5 分钟内可完成
-   - **禁止占位符**: Action/AC 描述必须具体可执行，禁止 "TBD"、"待定"、"后续补充"
+   - **Action granularity constraint**: Each Action should be completable in 2-5 minutes
+   - **No placeholders**: Action/AC descriptions must be specific and actionable — no "TBD", "to be determined", "to be added later"
 
 4. **Complete delivery like cnx-story-build**
    - Code reaches GitHub (`git push origin main`)
@@ -446,37 +423,37 @@ If implementation reveals test design flaw:
 
 ### Pattern 4: Complex State vs Simple Reset
 
-**真实案例**: 游戏关卡切换导致黑屏/卡死
+**Real-world case**: Game level transitions causing black screen / freezes
 
 ```
-初始方案（复杂，有 Bug）:
+Initial approach (complex, buggy):
 nextLevel() {
   this.level++;
-  this.saveProgress();      // 状态保存
-  this.resetState();        // 部分重置
-  this.initLevel();         // 初始化
-  this.updateUI();          // UI 更新
-  // 多步骤容易出错，状态不一致导致 Infinity
+  this.saveProgress();      // save state
+  this.resetState();        // partial reset
+  this.initLevel();         // initialize
+  this.updateUI();          // update UI
+  // multi-step process is error-prone, inconsistent state leads to Infinity
 }
 
-简化方案（可靠）:
+Simplified approach (reliable):
 onLevelComplete() {
-  showConfetti(3000);       // 庆祝动画
+  showConfetti(3000);       // celebration animation
   
   setTimeout(() => {
     this.level++;
     localStorage.setItem('level', this.level);
-    this.initLevel();       // 完全重新初始化
+    this.initLevel();       // full re-initialization
   }, 2000);
 }
 
-结果: 代码减少 60%，Bug 归零
+Result: 60% less code, zero bugs
 ```
 
-**决策原则**:
-- 如果复杂状态管理容易出错 → 考虑完全重置 + 重新初始化
-- 用户体验不应被技术复杂度绑架
-- 有时"闪一下"的重置比"卡顿的过渡"更好
+**Decision principles**:
+- If complex state management is error-prone → consider full reset + re-initialization
+- User experience should not be held hostage by technical complexity
+- Sometimes a "flash" reset is better than a "janky transition"
 
 ## When to Escalate
 
@@ -494,7 +471,7 @@ Switch to `minor-ship` when:
 ### Example: Small Fix
 
 ```
-User: "这个按钮颜色不对"
+User: "The button color is wrong"
 
 🎯 Clarified Goal: Fix button color on login page
 📏 Complexity Assessment: Small (1 file, ~5 min)
@@ -534,7 +511,7 @@ Step 3: TCR
 ### Example: Medium Feature with Multiple TCR Cycles
 
 ```
-User: "加个搜索功能"
+User: "Add a search feature"
 
 🎯 Clarified Goal: Add product search to catalog page
 📏 Complexity Assessment: Medium (UI + state, ~20 min)

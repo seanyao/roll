@@ -6,17 +6,17 @@ description: Universal web debugger using Playwright. Works with or without Blac
 
 # BB Debug
 
-通用 Web 调试工具，支持两种模式：
-- **原生 BB 模式**: 页面已集成 Black Box，点击收集诊断数据
-- **通用诊断模式**: 页面无 BB，用 Playwright 直接收集 console/network/DOM/截图
+Universal web debugging tool with two modes:
+- **Native BB Mode**: Page has Black Box integrated; click to collect diagnostic data
+- **Universal Diagnostic Mode**: Page has no BB; use Playwright to directly collect console/network/DOM/screenshot data
 
 ## When to Use
 
-- "调试一下页面"
-- "看看什么问题"
-- "页面显示空白"
-- "功能不工作"
-- 任何需要诊断网页问题的场景
+- "Debug the page"
+- "See what's wrong"
+- "Page shows blank"
+- "Feature not working"
+- Any scenario requiring web page diagnosis
 
 ## Two Diagnostic Modes
 
@@ -48,23 +48,23 @@ Collects:
 ## Quick Start
 
 ```bash
-# 诊断并自动分析（推荐）
+# Diagnose and auto-analyze (recommended)
 $cnx-bb-debug https://example.com/page
-# 自动收集 → 自动调用 $cnx-bb-analyzer 分析 → 输出诊断结论
+# Auto-collect → Auto-call $cnx-bb-analyzer to analyze → Output diagnosis
 
-# 仅收集数据（不自动分析）
+# Collect data only (skip auto-analysis)
 $cnx-bb-debug https://example.com/page --no-analyze
 
-# 强制通用诊断模式
+# Force universal diagnostic mode
 $cnx-bb-debug https://example.com/page --universal
 
-# 诊断并自动修复
+# Diagnose and auto-fix
 $cnx-bb-debug https://example.com/page --fix
 ```
 
 ## Usage Examples
 
-### Example 1: Auto-detect + Auto-analyze (默认)
+### Example 1: Auto-detect + Auto-analyze (default)
 
 ```bash
 $cnx-bb-debug https://yyy.up.railway.app/story/cars/chapter/1
@@ -83,20 +83,20 @@ $cnx-bb-debug https://yyy.up.railway.app/story/cars/chapter/1
 
 🔍 Auto-analyzing with $cnx-bb-analyzer...
 
-## 📊 BB 诊断分析报告
+## 📊 BB Diagnostic Analysis Report
 
-### 🔴 关键发现
-| 指标 | 值 | 状态 |
-|------|-----|------|
-| contentLength | 0 | ❌ 未加载 |
-| audioState.src | "" | ❌ 未设置 |
-| hasText | false | ❌ 无内容 |
+### 🔴 Key Findings
+| Metric | Value | Status |
+|--------|-------|--------|
+| contentLength | 0 | ❌ Not loaded |
+| audioState.src | "" | ❌ Not set |
+| hasText | false | ❌ No content |
 
-### 🎯 诊断结论
-useEffect 依赖错误导致内容未加载。依赖 `[chapter?.id]` 应为 `[chapter?.number]`
+### 🎯 Diagnosis Conclusion
+useEffect dependency error causing content not to load. Dependency `[chapter?.id]` should be `[chapter?.number]`
 
-### 🔧 建议修复
-修改 Player.tsx 第 45 行，将 useEffect 依赖从 `[chapter?.id]` 改为 `[chapter?.number]`
+### 🔧 Suggested Fix
+Modify Player.tsx line 45, change useEffect dependency from `[chapter?.id]` to `[chapter?.number]`
 ```
 
 ### Example 2: Universal mode (no BB)
@@ -140,7 +140,7 @@ $cnx-bb-debug --file urls.txt
 ## Workflow
 
 ```
-User: "调试一下页面"
+User: "Debug the page"
     │
     ▼
 ┌─────────────────────────────────────┐
@@ -177,7 +177,7 @@ User: "调试一下页面"
 └─────────────────────────────────────┘
 ```
 
-**Note:** 默认自动调用 `$cnx-bb-analyzer` 分析。使用 `--no-analyze` 跳过分析仅收集数据。
+**Note:** Auto-calls `$cnx-bb-analyzer` for analysis by default. Use `--no-analyze` to skip analysis and only collect data.
 
 ## Data Format
 
@@ -303,7 +303,7 @@ The injected collector:
 After `$cnx-bb-debug` finds issues:
 
 ```bash
-# User: "修复这个问题"
+# User: "Fix this issue"
 # → Automatically create FIX-XXX in backlog
 # → $cnx-fix-build FIX-XXX
 

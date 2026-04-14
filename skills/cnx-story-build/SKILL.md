@@ -6,15 +6,17 @@ description: Execute User Story from backlog. Reads US from BACKLOG.md, splits i
 
 # Story Ship (TCR Edition)
 
-执行 `BACKLOG.md` 中已有的 `US-XXX`，按 TCR 做端到端交付。
+> Follows the Architecture Constraints, Development Discipline, and Engineering Common Sense defined in the project AGENTS.md.
+
+Execute an existing `US-XXX` from `BACKLOG.md` with end-to-end delivery via TCR.
 
 ## Trigger
 
 Use when:
 
-- 已经有明确的 `US-XXX`
-- 需要从 backlog 读取 Story 并继续开发
-- 目标是完整交付，而不是只做分析或局部实验
+- There is a clearly defined `US-XXX`
+- A Story needs to be read from the backlog and development continued
+- The goal is complete delivery, not just analysis or local experimentation
 
 **Workflow:**
 1. Read BACKLOG.md index → Find US row → Follow link to `docs/features/<feature>.md`
@@ -24,26 +26,14 @@ Use when:
 
 Do not use for:
 
-- 单个 bug / 热修 / 小改动（用 `cnx-fix-build`）
-- 只有一句模糊需求、还没有 US（用 `cnx-roll-build`）
-- 纯调研、不落代码的任务
+- Single bug / hotfix / small change (use `cnx-fix-build`)
+- Only a vague one-line requirement with no US yet (use `cnx-roll-build`)
+- Pure research tasks that don't produce code
 
-## Workspace Configuration
-
-文档结构（两层分离）:
-
-```
-BACKLOG.md                        # US 索引页（状态 + 一句话 + 链接）
-docs/features/
-  <feature>.md                    # US 详情（AC / Files / Dependencies）
-  <feature>-plan.md               # 设计文档（why / how）
-```
-
-**读取 US 规则:**
-1. 在 BACKLOG.md 索引表中找到 US 行，获取链接路径
-2. 读取对应的 `docs/features/<feature>.md` 获取完整 AC / Files / Dependencies
-3. 如有 Plan 文档（`<feature>-plan.md`），一并读取作为背景
-4. **禁止**从 `~/.kimi/` 读取任何项目相关文档
+**Reading a US:**
+1. Find the US row in BACKLOG.md index, follow the link.
+2. Read `docs/features/<feature>.md` for full AC / Files / Dependencies.
+3. If a plan doc (`<feature>-plan.md`) exists, read it for context.
 
 ## Hard Rules
 
@@ -106,56 +96,56 @@ For each loop, the agent must produce the artifacts listed below and then execut
 ### 2. Split into Actions
    - write 2-6 candidate Actions
    - pick the smallest shippable Action
-   - **粒度约束**: 每个 Action 应在 2-5 分钟内可完成，超过则继续拆分
-   - **禁止占位符**: Action 描述必须具体到可直接执行，禁止 "TBD"、"待定"、"后续补充" 等模糊表述
+   - **Granularity constraint**: Each Action should be completable within 2-5 minutes; if it takes longer, split further
+   - **No placeholders**: Action descriptions must be specific enough to execute directly; vague phrasing like "TBD", "to be determined", or "to be added later" is prohibited
 
-#### 2.5 Parallel Dispatch (自动判断)
+#### 2.5 Parallel Dispatch (auto-determined)
 
-拆完 Actions 后，检查是否可以并行：
+After splitting Actions, check if they can run in parallel:
 
 ```
-冲突检测:
-  ├── 列出每个 Action 涉及的文件
-  ├── 同一文件 → 不可并行，必须串行
-  ├── 同一目录不同文件 → 可以并行
-  └── 不同目录 → 安全并行
+Conflict detection:
+  ├── List files involved in each Action
+  ├── Same file → cannot parallelize, must run sequentially
+  ├── Same directory, different files → can parallelize
+  └── Different directories → safe to parallelize
 ```
 
-**如果 2+ Actions 可并行，自动启用 Worktree 隔离：**
+**If 2+ Actions can run in parallel, automatically enable Worktree isolation:**
 
 ```bash
-# 为每个独立 Action 创建 worktree
+# Create a worktree for each independent Action
 git worktree add .worktrees/{action-id} -b dispatch/{action-id}
 ```
 
-- 每个子代理在自己的 worktree 中执行 TCR
-- 子代理 Brief 必须**自包含**（不继承主会话上下文）：
-  - 要做什么（Action 描述 + AC）
-  - 在哪做（文件路径）
-  - 怎么验证（测试命令）
-  - 不要做什么（scope 边界）
-- 全部完成后逐个 review → merge 回 main → 跑完整集成测试 → 清理 worktrees
+- Each sub-agent executes TCR in its own worktree
+- Sub-agent briefs must be **self-contained** (do not inherit main session context):
+  - What to do (Action description + AC)
+  - Where to do it (file paths)
+  - How to verify (test commands)
+  - What not to do (scope boundary)
+- After all complete: review each → merge back to main → run full integration tests → clean up worktrees
 
-**状态通知（必须）：** 并行执行期间，向用户报告进度：
+**Status notifications (required):** Report progress to the user during parallel execution:
 
 ```
-🔀 Parallel Dispatch: 3 Actions 可并行，启动子代理
+🔀 Parallel Dispatch: 3 Actions can run in parallel, launching sub-agents
 
-  Agent 1 [Action: 登录 API]     ⏳ 执行中...
-  Agent 2 [Action: 注册 API]     ⏳ 执行中...
-  Agent 3 [Action: 个人资料页]    ⏳ 执行中...
+  Agent 1 [Action: Login API]      ⏳ Running...
+  Agent 2 [Action: Registration API] ⏳ Running...
+  Agent 3 [Action: Profile page]   ⏳ Running...
 
-  --- 子代理完成时逐个更新 ---
+  --- Updated as each sub-agent completes ---
 
-  Agent 1 [Action: 登录 API]     ✅ 完成 (3 TCR commits)
-  Agent 2 [Action: 注册 API]     ✅ 完成 (2 TCR commits)
-  Agent 3 [Action: 个人资料页]    ❌ 失败 → 需人工介入
+  Agent 1 [Action: Login API]      ✅ Done (3 TCR commits)
+  Agent 2 [Action: Registration API] ✅ Done (2 TCR commits)
+  Agent 3 [Action: Profile page]   ❌ Failed → needs manual intervention
 
-🔀 Merge: 2/3 成功，合并中...
-🧪 集成测试: 运行中...
+🔀 Merge: 2/3 succeeded, merging...
+🧪 Integration tests: running...
 ```
 
-**不满足并行条件时，按原有串行流程逐个执行 Actions。**
+**When parallel conditions are not met, execute Actions sequentially using the standard serial flow.**
 
 ### 3. Define verification
    - test matrix (at least: happy path + one edge/failure/regression where relevant)
@@ -254,12 +244,12 @@ Add to `package.json`:
 ```bash
 cat > .git/hooks/pre-push << 'EOF'
 #!/bin/bash
-echo "🔍 运行本地 CI 检查..."
+echo "🔍 Running local CI checks..."
 if ! npm run ci:local 2>/dev/null && ! (npm run lint && npm run build); then
-    echo "❌ CI 检查失败，推送已阻止"
+    echo "❌ CI check failed, push blocked"
     exit 1
 fi
-echo "✅ CI 检查通过"
+echo "✅ CI check passed"
 EOF
 chmod +x .git/hooks/pre-push
 ```
@@ -350,62 +340,62 @@ Perform the agreed verification in the runtime environment:
 
 ### 11.5. Verification Gate (MANDATORY)
 
-**在标记 DONE 之前，必须通过验证门禁。**
+**Before marking as DONE, the verification gate must be passed.**
 
-这不是走过场——必须提供**新鲜证据**证明功能正常，不能凭假设或记忆声称完成。
+This is not a formality — **fresh evidence** must be provided to prove the feature works. Claiming completion based on assumptions or memory is not acceptable.
 
 ```
 🚦 Verification Gate
    
-   Evidence checklist (每条都必须有实际输出):
-   ├── [ ] 测试通过: 贴出 test run 的实际输出（不是"之前跑过了"）
-   ├── [ ] 构建成功: 贴出 build 输出
-   ├── [ ] 线上验证: 截图 / curl 输出 / 日志片段
-   └── [ ] 无回归: 至少验证一条已有功能仍正常
+   Evidence checklist (each item must have actual output):
+   ├── [ ] Tests pass: paste actual test run output (not "ran it earlier")
+   ├── [ ] Build succeeds: paste build output
+   ├── [ ] Online verification: screenshot / curl output / log excerpt
+   └── [ ] No regression: verify at least one existing feature still works
    
    Gate Decision:
-   ├── ✅ 全部有证据 → 可以标记 DONE
-   └── ❌ 任何一条缺证据 → 补齐后再过 Gate
+   ├── ✅ All items have evidence → Can mark as DONE
+   └── ❌ Any item lacks evidence → Provide evidence before passing the gate
 ```
 
-**Hard Rule**: "我确认测试通过了"不算证据。必须是**这次刚跑的**命令输出。
+**Hard Rule**: "I confirm tests passed" does not count as evidence. It must be **freshly run** command output from this session.
 
 ### 12. Write back status/backlog (REQUIRED)
 
-两处都必须更新，缺一不可：
+Both locations must be updated — neither can be skipped:
 
-**① 更新 BACKLOG.md 索引表（Status 列）:**
+**① Update BACKLOG.md index table (Status column):**
 
 ```markdown
 | [US-{ID}](docs/features/<feature>.md#us-{id}) | {Title} | ✅ Done |
 ```
 
-将对应行的 Status 从 `📋 Todo` 改为 `✅ Done`。
+Change the Status of the corresponding row from `📋 Todo` to `✅ Done`.
 
-**② 更新 `docs/features/<feature>.md` US 段落:**
+**② Update `docs/features/<feature>.md` US section:**
 
 ```markdown
-## US-{ID} {Story 名称} ✅
+## US-{ID} {Story name} ✅
 
 **Completed**: {YYYY-MM-DD}
 
 **AC:**
-- [x] {完成的验收标准1}
-- [x] {完成的验收标准2}
+- [x] {completed acceptance criteria 1}
+- [x] {completed acceptance criteria 2}
 
 **Files:**
-- `{新增/修改的文件1}`
-- `{新增/修改的文件2}`
+- `{added/modified file 1}`
+- `{added/modified file 2}`
 ```
 
-- 标题加 ✅
-- 补 `**Completed**` 日期
-- AC 从 `[ ]` 改为 `[x]`
-- Files 更新为实际变更文件
+- Add ✅ to the title
+- Add `**Completed**` date
+- Change AC from `[ ]` to `[x]`
+- Update Files to reflect actual changed files
 
 **Must also update:**
-- `progress/status.md` - 当前 Action 完成状态（如存在）
-- BACKLOG.md 底部 Stats 计数
+- `progress/status.md` - current Action completion status (if it exists)
+- BACKLOG.md bottom Stats count
 
 **If BACKLOG.md doesn't exist, create it with the index structure.**
 

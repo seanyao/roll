@@ -241,6 +241,15 @@ my-project/
 
 其余模板（`frontend-only`、`cli`、`backend-service`）的差异仅在交互层——`BACKLOG.md`、`AGENTS.md`、`docs/features/`、`tests/`、`.github/workflows/` 对所有类型保持一致。
 
+目录结构背后编码了四个架构约束：
+
+| 模式 | 体现 | 说明 |
+|------|------|------|
+| **Domain Driven** | `src/domains/` | 业务逻辑与框架解耦，领域模型不依赖 HTTP 层 |
+| **EDA（事件驱动）** | `src/domains/events/` | 跨域通信通过事件而非直接调用，降低耦合 |
+| **API / CLI 分离** | `app/api/` + `bin/` | 交互入口与业务逻辑独立，同一领域可同时支持 Web 和 CLI |
+| **Stateless** | 无服务端状态假设 | 面向 Edge/Serverless 部署，水平扩展无需会话同步 |
+
 ### 4.3 TCR 驱动开发：`$cnx-story-build`
 
 这是 CNX 的核心执行单元。其工程意义在于：**不依赖 AI 的自述来判断代码正确性，而是以自动化测试的通过状态作为提交的唯一准则**。
@@ -572,6 +581,8 @@ graph LR
 | `$cnx-sentinel` | 巡检 | 巡检策略 | 健康报告 / FIX 条目 |
 | `$cnx-bb-debug` | 调试 | URL | 诊断 JSON + 截图 |
 | `$cnx-bb-analyzer` | 诊断 | 诊断 JSON | 根因分析 + 修复建议 |
+| `$cnx-fetch` | 情报 | URL / 关键词 | 网页抓取、搜索、爬取结果 |
+| `$cnx-probe` | 监控 | 目标地址 | 节点发现、健康检查报告 |
 
 ## 附录 B：CLI 命令速查
 

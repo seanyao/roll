@@ -17,5 +17,5 @@
 | [US-INIT-001](docs/features/init-ux.md#us-init-001) | Add Kimi to tool selection menu (UI only, reuses AGENTS.md) | ✅ Done |
 | [US-INIT-002](docs/features/init-ux.md#us-init-002) | Simplify `init` — current dir only, remove batch refresh | ✅ Done |
 | [US-INIT-003](docs/features/init-ux.md#us-init-003) | 3-way conflict resolution for convention files (O/K/M) | ✅ Done |
-| [US-INIT-004](docs/features/init-ux.md#us-init-004) | Scaffold new projects via CLI (no AI agent needed) | 📋 Todo |
-| [US-INIT-005](docs/features/init-ux.md#us-init-005) | Interactive per-component scaffold for legacy projects | 📋 Todo |
+| [US-INIT-004](docs/features/init-ux.md#us-init-004) | Scaffold new projects via CLI (no AI agent needed) | ✅ Done |
+| [US-INIT-005](docs/features/init-ux.md#us-init-005) | Interactive per-component scaffold for legacy projects | ✅ Done |

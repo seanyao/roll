@@ -97,74 +97,50 @@ For each file (AGENTS.md / .claude/CLAUDE.md / GEMINI.md / .cursor-rules):
 
 **Merge** = keep the existing content as-is, append any WK sections that are missing at the bottom.
 
-Run `wukong init . <type> <tools>` to generate the base convention files, then apply the above logic.
+Run `wukong init [type]` to generate convention files and scaffold the project structure.
+The CLI handles both new and legacy projects — no manual file creation needed.
 
 ---
 
 ## Step 4A: Full Scaffold Mode (new projects)
 
-Create the complete WK project structure:
+**Delegated to CLI** — `wukong init` detects a fresh directory and offers to scaffold automatically:
 
 ```
-my-project/
-│
-├── BACKLOG.md              # Story backlog (primary workspace)
-├── CHANGELOG.md            # Release history
-├── README.md               # Project introduction
-│
-├── AGENTS.md               # Skill routing & conventions
-└── .github/
-    ├── workflows/
-    │   ├── ci.yml          # CI/CD pipeline
-    │   └── sentinel.yml    # Scheduled patrol
-    └── wk-sentinel-config.yml
-│
-├── docs/
-│   ├── setup.md
-│   ├── architecture.md
-│   ├── conventions.md
-│   └── plans/
-│
-├── tests/
-│   ├── unit/
-│   ├── e2e/
-│   └── regression/
-│
-├── .env.example
-├── vercel.json
-│
-├── src/                    # Frontend
-│   ├── components/ui/
-│   ├── domains/
-│   ├── shared/
-│   ├── App.tsx
-│   └── main.tsx
-│
-├── api/                    # Backend
-│   ├── index.ts
-│   ├── routes/
-│   ├── services/
-│   ├── models/
-│   └── types.ts
-│
-├── cli/                    # CLI tool
-│   ├── index.ts
-│   └── commands/
-│
-└── schema/                 # Data contracts
-    └── index.ts
+  Scaffold fullstack project structure? [Y/n]:
 ```
+
+The CLI creates the following structure per project type:
+
+| Type | Created |
+|------|---------|
+| fullstack | `src/` (components/ui, domains, shared), `api/` (routes, services, models), `tests/`, `docs/`, BACKLOG.md, .env.example, .gitignore |
+| frontend-only | `src/`, `tests/`, `docs/`, BACKLOG.md, .env.example, .gitignore |
+| backend-service | `api/`, `tests/`, `docs/`, BACKLOG.md, .env.example, .gitignore |
+| cli | `cmd/`, `lib/`, `tests/`, `docs/`, BACKLOG.md, .gitignore |
+
+Each directory gets a `.gitkeep` so it appears in git. Template files (BACKLOG.md, .env.example) get starter content.
 
 ---
 
 ## Step 4B: Merge Mode (legacy projects)
 
+**Delegated to CLI** — `wukong init` detects existing source code and enters interactive scaffold mode, asking y/N per component with benefit labels:
+
+```
+  Add BACKLOG.md  (track stories & bugs in one place)  [Y/n]:
+  Add docs/features/  (design docs live next to code)  [Y/n]:
+  Add tests/ scaffold  (unit/ e2e/ structure ready to fill)  [Y/n]:
+  Add .env.example  (document required env vars for teammates)  [Y/n]:
+  Add .github/workflows/ci.yml  (automated CI on every push)  [Y/n]:
+  Add .github/workflows/sentinel.yml  (scheduled patrol every 6h)  [Y/n]:
+```
+
 Do NOT touch existing source code or directory structure.
 
-1. Run `wukong init . <detected-type> <detected-tools>` to generate convention files
-2. Handle each convention file with the overwrite/keep/merge logic above
-3. Scan existing directory structure (depth ≤ 3, exclude node_modules/.git/dist/build)
-4. Append a `## Project Structure` block to AGENTS.md (update if already exists, don't duplicate):
+For legacy projects, also scan and append a `## Project Structure` block to AGENTS.md:
+1. Scan existing directory structure (depth ≤ 3, exclude node_modules/.git/dist/build)
+2. Append a `## Project Structure` block to AGENTS.md (update if already exists, don't duplicate):
 
 ```markdown
 ## Project Structure (detected by $wk-init)

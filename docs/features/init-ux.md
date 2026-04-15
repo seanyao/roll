@@ -76,32 +76,31 @@
 ---
 
 <a id="us-init-004"></a>
-## US-INIT-004 Scaffold new projects via CLI 📋
+## US-INIT-004 Scaffold new projects via CLI ✅
 
 **Created**: 2026-04-16
+**Completed**: 2026-04-16
 
 - As a developer starting a new project
 - I want `wukong init` to scaffold the full directory structure after writing convention files
 - So that I don't need an AI agent session just to get a standard skeleton
 
 **AC:**
-- [ ] Triggered only when cwd has no existing source structure (no package.json / go.mod / src/ / api/)
-- [ ] After convention files written, prompts scaffold phase
-- [ ] Scaffold creates per project type (fullstack example):
-  - `BACKLOG.md`, `CHANGELOG.md`, `README.md`
-  - `docs/features/`, `docs/plans/`
+- [x] Triggered only when cwd has no existing source structure (no package.json / go.mod / src/ / api/)
+- [x] After convention files written, prompts scaffold phase
+- [x] Scaffold creates per project type (fullstack example):
+  - `BACKLOG.md`, `docs/features/`, `docs/plans/`
   - `src/components/ui/`, `src/domains/`, `src/shared/`
   - `api/routes/`, `api/services/`, `api/models/`
   - `tests/unit/`, `tests/e2e/`
   - `.env.example`, `.gitignore`
-- [ ] Each dir gets a `.gitkeep`; template files (BACKLOG.md, .env.example) get starter content
-- [ ] Scaffold output matches `wk-init` skill Step 4A structure (single source of truth)
-- [ ] Skill `wk-init` Step 4A updated to call `wukong init` rather than recreate the structure itself
+- [x] Each dir gets a `.gitkeep`; template files (BACKLOG.md, .env.example) get starter content
+- [x] Scaffold output matches `wk-init` skill Step 4A structure (single source of truth)
+- [x] Skill `wk-init` Step 4A updated to delegate to CLI
 
 **Files:**
-- `bin/wukong` — `scaffold_new_project` new function, called from `cmd_init`
-- `conventions/templates/*/scaffold/` — optional: per-type starter file templates
-- `skills/wk-init/SKILL.md` — Step 4A updated to delegate to CLI
+- `bin/wukong` — `is_fresh_project`, `_mkscaffold`, `_write_backlog`, `_write_gitignore`, `_write_env_example`, `scaffold_new_project`
+- `skills/wk-init/SKILL.md` — Step 4A/4B updated to delegate to CLI
 
 **Dependencies:**
 - Depends on: US-INIT-002
@@ -109,7 +108,9 @@
 ---
 
 <a id="us-init-005"></a>
-## US-INIT-005 Interactive scaffold for legacy projects 📋
+## US-INIT-005 Interactive scaffold for legacy projects ✅
+
+**Completed**: 2026-04-16
 
 **Created**: 2026-04-16
 
@@ -118,23 +119,15 @@
 - So that I can selectively adopt WK structure without breaking existing code
 
 **AC:**
-- [ ] Triggered when cwd has existing source (package.json / src/ / etc.) but no AGENTS.md
-- [ ] After convention files written, enters interactive scaffold mode
-- [ ] Asks each component separately, shows benefit, user answers y/N:
-  ```
-  Add BACKLOG.md?  (track stories & bugs in one place)  [Y/n]
-  Add docs/features/?  (design docs live next to code)  [Y/n]
-  Add tests/ scaffold?  (unit/ e2e/ regression/ structure)  [Y/n]
-  Add .env.example?  (document required env vars)  [Y/n]
-  Add .github/workflows/ci.yml?  (automated CI on push)  [Y/n]
-  Add .github/workflows/sentinel.yml?  (scheduled patrol every 6h)  [Y/n]
-  ```
-- [ ] Each selected item is created; skipped items are silently ignored
-- [ ] Summary printed at end: "Added: BACKLOG.md, docs/features/, tests/"
-- [ ] Does NOT touch existing src/, api/, or any file not in the above list
+- [x] Triggered when cwd has existing source (package.json / src/ / etc.) but no AGENTS.md
+- [x] After convention files written, enters interactive scaffold mode
+- [x] Asks each component separately, shows benefit, user answers y/N
+- [x] Each selected item is created; skipped items are silently ignored
+- [x] Summary printed at end: "Added: BACKLOG.md, docs/, tests/"
+- [x] Does NOT touch existing src/, api/, or any file not in the above list
 
 **Files:**
-- `bin/wukong` — `scaffold_legacy_project` new function, called from `cmd_init`
+- `bin/wukong` — `scaffold_legacy_project` function, called from `cmd_init`
 
 **Dependencies:**
 - Depends on: US-INIT-002, US-INIT-004 (shared scaffold helpers)

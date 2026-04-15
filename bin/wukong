@@ -114,6 +114,8 @@ _pull_skills() {
   fi
 
   mkdir -p "$WK_HOME/skills"
+
+  # Copy/update skills from repo → ~/.wukong/skills/
   for skill_dir in "$REPO_ROOT"/skills/*/; do
     if [[ -d "$skill_dir" ]]; then
       local skill_name
@@ -122,6 +124,19 @@ _pull_skills() {
       for f in "$skill_dir"*; do
         [[ -f "$f" ]] && cp "$f" "$WK_HOME/skills/$skill_name/$(basename "$f")"
       done
+    fi
+  done
+
+  # Prune skills that no longer exist in repo (source of truth)
+  for installed_dir in "$WK_HOME/skills"/*/; do
+    [[ -d "$installed_dir" ]] || continue
+    local installed_name
+    installed_name="$(basename "$installed_dir")"
+    if [[ ! -d "$REPO_ROOT/skills/$installed_name" ]]; then
+      local bak="${installed_dir%/}.bak"
+      [[ -d "$bak" ]] && rm -rf "$bak"
+      mv "$installed_dir" "$bak"
+      info "Removed stale skill (backed up to .bak): $installed_name  已删除过时技能（已备份为 .bak）: $installed_name"
     fi
   done
 }
@@ -251,7 +266,19 @@ _link_skills() {
       warn "Skipped ~/${ai_name}/skills (created path resolves to repo — refusing to write)  已跳过 ~/${ai_name}/skills（创建路径解析到仓库 — 拒绝写入）"
       continue
     fi
-    local linked=0 repaired=0
+    local linked=0 repaired=0 pruned=0
+
+    # Prune stale wk-* symlinks pointing to skills no longer in ~/.wukong/skills/
+    for link in "$skills_dir"/wk-*; do
+      [[ -L "$link" ]] || continue
+      local link_target
+      link_target="$(readlink "$link")"
+      # Only remove symlinks we own (pointing into our skills dir)
+      if [[ "$link_target" == "$WK_HOME/skills/"* ]] && [[ ! -d "$link" ]]; then
+        rm "$link"
+        pruned=$((pruned + 1))
+      fi
+    done
 
     for skill_dir in "$WK_HOME/skills"/*/; do
       [[ -d "$skill_dir" ]] || continue
@@ -273,8 +300,8 @@ _link_skills() {
       fi
       # real file/dir at that path: skip — never touch user content
     done
-    if [[ $((linked + repaired)) -gt 0 ]]; then
-      ok "Skills linked in ~/${ai_name}/skills (+${linked} new, ~${repaired} repaired)  已在 ~/${ai_name}/skills 中创建软链接（新增 +${linked}，修复 ~${repaired}）"
+    if [[ $((linked + repaired + pruned)) -gt 0 ]]; then
+      ok "Skills linked in ~/${ai_name}/skills (+${linked} new, ~${repaired} repaired, -${pruned} pruned)  已在 ~/${ai_name}/skills 中创建软链接（新增 +${linked}，修复 ~${repaired}，清理 -${pruned}）"
     fi
   done
 }
@@ -1098,7 +1125,8 @@ cmd_status() {
   local total_skills=0
   local wk_skills_real
   if [[ -d "$WK_HOME/skills" ]]; then
-    total_skills=$(find "$WK_HOME/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+    # Count only wk-* skill dirs to match the linked_count scope below
+    total_skills=$(find "$WK_HOME/skills" -maxdepth 1 -mindepth 1 -type d -name "wk-*" | wc -l | tr -d ' ')
     wk_skills_real="$(canonical_dir "$WK_HOME/skills" 2>/dev/null || true)"
   fi
   for ai_dir in "${ai_dirs[@]}"; do
@@ -1170,12 +1198,22 @@ check_sync_status() {
   local dst="$3"
 
   local display="${dst/#$HOME/~}"
+  local dst_dir
+  dst_dir="$(dirname "$dst")"
+  local wk_file="$dst_dir/wk.md"
+
+  # Sync writes content to {dir}/wk.md and appends @wk.md to the main config.
+  # So "in sync" means: wk.md exists + matches source + main config contains @wk.md.
   if [[ ! -f "$dst" ]]; then
     echo -e "  ${RED}-${NC} $name: $display (not synced / 未同步)"
-  elif diff -q "$src" "$dst" &>/dev/null 2>&1; then
-    echo -e "  ${GREEN}=${NC} $name: $display (in sync / 已同步)"
+  elif [[ ! -f "$wk_file" ]]; then
+    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — wk.md missing / wk.md 缺失)"
+  elif ! diff -q "$src" "$wk_file" &>/dev/null 2>&1; then
+    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — wk.md outdated / wk.md 已过期)"
+  elif ! grep -qF "@wk.md" "$dst" 2>/dev/null; then
+    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — @wk.md not in config / 未包含 @wk.md)"
   else
-    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync / 不同步)"
+    echo -e "  ${GREEN}=${NC} $name: $display (in sync / 已同步)"
   fi
 }
 

@@ -1,4 +1,4 @@
-# Cybernetix (CNX) Engineering Methodology: A Standardized AI Agent Delivery Framework
+# Wukong Engineering Methodology: A Standardized AI Agent Delivery Framework
 
 > **Version:** 1.0
 > **Date:** 2026-04-15
@@ -10,9 +10,9 @@
 
 As AI coding assistants evolve from point tools into team infrastructure, engineering organizations face an underappreciated challenge: **inconsistent behavior across AI clients (Claude Code, Gemini CLI, Cursor, Codex), fragmented environment configuration, and the absence of auditable quality gates on deliverables**. One developer writes code with Claude that passes local tests; another uses Cursor and bypasses those same tests — not because of a capability gap between the models, but because the two received entirely different engineering constraints.
 
-Cybernetix (CNX) is an **instruction and workflow management framework for AI Agents**. It does not invent new methodology. Instead, it encodes proven software engineering practices (Scrum, TDD, TCR, SRE) as standardized, AI-executable Skill definitions, and enforces cross-client configuration consistency through a CLI tool.
+Wukong is an **instruction and workflow management framework for AI Agents**. It does not invent new methodology. Instead, it encodes proven software engineering practices (Scrum, TDD, TCR, SRE) as standardized, AI-executable Skill definitions, and enforces cross-client configuration consistency through a CLI tool.
 
-This document describes CNX's three-loop engineering architecture and its corresponding technical implementation.
+This document describes Wukong's three-loop engineering architecture and its corresponding technical implementation.
 
 ---
 
@@ -87,7 +87,7 @@ CNX uses the `wukong` CLI to centralize configuration management and distribute 
 On first run, the CLI performs two operations:
 
 1. **Establish a Single Source of Truth**: Copies global conventions (`conventions/global/`) and skill definitions (`skills/`) from the repository into `~/.wukong/`, making it the sole authoritative configuration source on the machine.
-2. **Per-skill symlinks**: Creates individual symlinks for each `wk-*` skill into each AI client's skills directory (`~/.claude/skills/wk-*`, `~/.gemini/skills/wk-*`, etc.). Existing user skills are untouched — CNX skills are added alongside.
+2. **Per-skill symlinks**: Creates individual symlinks for each `wk-*` skill into each AI client's skills directory (`~/.claude/skills/wk-*`, `~/.gemini/skills/wk-*`, etc.). Existing user skills are untouched — Wukong skills are added alongside.
 
 Setup never modifies any AI tool configuration files or global git settings. It is fully non-invasive and safe to re-run.
 
@@ -95,17 +95,17 @@ Setup never modifies any AI tool configuration files or global git settings. It 
 
 Distributes content from `~/.wukong/` to each AI client's configuration path based on the selected scope.
 
-- `conventions` (default): uses `@include` append mode — writes CNX conventions to `{ai_dir}/cnx.md`, then appends a single `@wk.md` line to the user's main config. Existing content is never overwritten.
+- `conventions` (default): uses `@include` append mode — writes WK conventions to `{ai_dir}/wk.md`, then appends a single `@wk.md` line to the user's main config. Existing content is never overwritten.
 - `skills`: refreshes skills from the repo into the local cache and creates/repairs per-skill symlinks for each client
 - `all`: runs both conventions and skills
 
-Append `--force` (or `-f`) to force-rewrite `cnx.md` or rebuild symlinks.
+Append `--force` (or `-f`) to force-rewrite `wk.md` or rebuild symlinks.
 
 ```
 ~/.wukong/conventions/global/
-├── AGENTS.md        → ~/.kimi/cnx.md (+ @wk.md appended to AGENTS.md)
-├── CLAUDE.md        → ~/.claude/cnx.md (+ @wk.md appended to CLAUDE.md)
-├── GEMINI.md        → ~/.gemini/cnx.md (+ @wk.md appended to GEMINI.md)
+├── AGENTS.md        → ~/.kimi/wk.md (+ @wk.md appended to AGENTS.md)
+├── CLAUDE.md        → ~/.claude/wk.md (+ @wk.md appended to CLAUDE.md)
+├── GEMINI.md        → ~/.gemini/wk.md (+ @wk.md appended to GEMINI.md)
 └── .cursor-rules    → (project-level distribution)
 ```
 
@@ -115,7 +115,7 @@ Installs a global `prepare-commit-msg` hook that automatically detects which AI 
 
 **2.2.3 Project-Level Configuration (`wukong init`)**
 
-When generating convention files for a specific project, CNX applies a **Global + Template merge strategy**:
+When generating convention files for a specific project, Wukong applies a **Global + Template merge strategy**:
 
 ```
 Final AGENTS.md = Global AGENTS.md (organization-level constraints)
@@ -140,7 +140,7 @@ Project Instance         ← AGENTS.md (constraints) + .claude/CLAUDE.md (client
 
 ### 3.1 Methodology Inheritance
 
-| Classical Methodology | CNX Implementation |
+| Classical Methodology | Wukong Implementation |
 |----------------------|--------------------|
 | HCD (Human-Centered Design) | `$wk-research`: Research before design; data-driven decision-making |
 | BDD (Behavior-Driven Development) | `$wk-design`: Requirements expressed as Acceptance Criteria |
@@ -206,7 +206,7 @@ This separation keeps BACKLOG.md concise and readable as a progress dashboard, w
 
 ### 4.1 Methodology Inheritance
 
-| Classical Methodology | CNX Implementation |
+| Classical Methodology | Wukong Implementation |
 |----------------------|--------------------|
 | TDD (Test-Driven Development) | Tests written first; RED → GREEN → Refactor |
 | TCR (Test && Commit ∥ Revert) | `$wk-story-build`: commit on pass, revert on failure |
@@ -422,7 +422,7 @@ After each successful deployment, two mechanisms ensure deliverables remain trac
 
 ### 5.1 Methodology Inheritance
 
-| Classical Methodology | CNX Implementation |
+| Classical Methodology | Wukong Implementation |
 |----------------------|--------------------|
 | SRE (Site Reliability Engineering) | `$wk-sentinel`: Sampling-based automated patrol |
 | Chaos Engineering | Randomized patrol strategy simulating unpredictable check patterns |
@@ -493,7 +493,7 @@ Executes a fix for a single issue — lighter-weight than `$wk-story-build`, but
 
 ## 6. Engineering Baseline: Engineering Common Sense
 
-CNX defines 8 non-negotiable engineering baselines that apply across all three loops. These are not "best practice suggestions" — they are mandatory checks in the Test Design Review phase of every Story:
+Wukong defines 8 non-negotiable engineering baselines that apply across all three loops. These are not "best practice suggestions" — they are mandatory checks in the Test Design Review phase of every Story:
 
 | # | Baseline | Definition | Anti-Pattern |
 |---|----------|-----------|--------------|
@@ -510,7 +510,7 @@ CNX defines 8 non-negotiable engineering baselines that apply across all three l
 
 ## 7. Passive Support Skills
 
-Beyond the active Skills in the three loops, CNX includes a set of passively triggered support skills:
+Beyond the active Skills in the three loops, Wukong includes a set of passively triggered support skills:
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
@@ -523,7 +523,7 @@ Beyond the active Skills in the three loops, CNX includes a set of passively tri
 
 ## 8. Relationship to Classical Methodologies
 
-CNX is not a new methodology. It encodes proven engineering practices as standardized instructions that AI Agents can understand and execute.
+Wukong is not a new methodology. It encodes proven engineering practices as standardized instructions that AI Agents can understand and execute.
 
 ```mermaid
 graph LR
@@ -537,7 +537,7 @@ graph LR
         CE["Chaos Engineering<br/>Random Fault Injection"]
     end
 
-    subgraph "CNX Implementation"
+    subgraph "Wukong Implementation"
         R["$wk-research<br/>HV Analysis"]
         D["$wk-design<br/>INVEST Stories"]
         SB["$wk-story-build<br/>TCR Micro-steps"]
@@ -557,7 +557,7 @@ graph LR
     SRE -->|"Live forensics"| BB
 ```
 
-The key distinction lies in the shift of execution subject: these methodologies originally depended on engineers' personal discipline (humans tire, humans cut corners). CNX hardens them into instruction constraints for AI Agents — an Agent will never "skip the tests just this once," because that branch does not exist in the Skill definition.
+The key distinction lies in the shift of execution subject: these methodologies originally depended on engineers' personal discipline (humans tire, humans cut corners). Wukong hardens them into instruction constraints for AI Agents — an Agent will never "skip the tests just this once," because that branch does not exist in the Skill definition.
 
 ---
 
@@ -601,10 +601,10 @@ The key distinction lies in the shift of execution subject: these methodologies 
 | Command | Purpose |
 |---------|---------|
 | `wukong setup` | First-time initialization of `~/.wukong/`, mount skills (non-invasive) |
-| `wukong sync conventions` | Opt-in: append CNX conventions via `@include` (never overwrites existing files) |
+| `wukong sync conventions` | Opt-in: append WK conventions via `@include` (never overwrites existing files) |
 | `wukong sync skills` | Refresh skills and repair per-skill symlinks |
 | `wukong sync all` | Run both conventions and skills sync |
 | `wukong hooks install` | Opt-in: install global git hook (requires confirmation) |
-| `wukong init [dir] [type] [tools]` | Generate project convention files (merges Global + Template) |
+| `wukong init [type]` | Generate project convention files in cwd (merges Global + Template) |
 | `wukong reset` | Reset `~/.wukong/` from the repository source, then sync |
 | `wukong status` | Display current configuration state, sync status, and skill links |

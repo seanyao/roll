@@ -554,8 +554,20 @@ cmd_init() {
   ok "Convention files created for ${BOLD}$project_type${NC} project."
   echo ""
   info "Created: $created_files"
+
+  # ── Scaffold phase ──────────────────────────────────────────────────────────
+  if is_fresh_project "$project_dir"; then
+    echo ""
+    echo -n "  Scaffold ${BOLD}$project_type${NC} project structure? [Y/n]: "
+    read -r _scaffold_ans
+    if [[ "${_scaffold_ans:-Y}" =~ ^[Yy]$ ]]; then
+      echo ""
+      scaffold_new_project "$project_dir" "$project_type"
+    fi
+  else
+    scaffold_legacy_project "$project_dir"
+  fi
   echo ""
-  info "Tip: use ${BOLD}\$wk-init${NC} in your AI coding agent to scaffold the full project structure."
 }
 
 # ─── Helper: merge global preamble + template into output ────────────────────
@@ -655,6 +667,203 @@ scan_project_type_from_files() {
     echo "backend-service"
   else
     echo "unknown"
+  fi
+}
+
+# ─── Helper: true when cwd has no existing source code ───────────────────────
+is_fresh_project() {
+  local dir="${1:-.}"
+  ! ( [[ -f "$dir/package.json" ]] || [[ -f "$dir/go.mod" ]] || \
+      [[ -f "$dir/Cargo.toml" ]] || [[ -f "$dir/requirements.txt" ]] || \
+      [[ -f "$dir/pyproject.toml" ]] || \
+      [[ -d "$dir/src" ]] || [[ -d "$dir/api" ]] || [[ -d "$dir/app" ]] )
+}
+
+# ─── Helper: make a scaffold dir + .gitkeep ───────────────────────────────────
+_mkscaffold() { mkdir -p "$1"; touch "$1/.gitkeep"; }
+
+# ─── Helper: write starter BACKLOG.md (no-op if exists) ──────────────────────
+_write_backlog() {
+  [[ -f "$1" ]] && return
+  cat > "$1" << 'EOF'
+# Project Backlog
+
+## Epic: Initial Setup
+| Story | Description | Status |
+|-------|-------------|--------|
+
+## Bug Fixes
+| ID | Problem | Status |
+|----|---------|--------|
+EOF
+}
+
+# ─── Helper: write starter .gitignore (no-op if exists) ──────────────────────
+_write_gitignore() {
+  [[ -f "$1" ]] && return
+  cat > "$1" << 'EOF'
+node_modules/
+dist/
+build/
+.env
+*.local
+.DS_Store
+*.log
+EOF
+}
+
+# ─── Helper: write starter .env.example (no-op if exists) ────────────────────
+_write_env_example() {
+  [[ -f "$1" ]] && return
+  cat > "$1" << 'EOF'
+# Environment Variables — copy to .env and fill in values
+
+# Application
+# NODE_ENV=development
+# PORT=3000
+
+# Database
+# DATABASE_URL=postgresql://user:pass@localhost:5432/db
+
+# Auth
+# JWT_SECRET=your-secret-key
+EOF
+}
+
+# ─── Scaffold: full structure for new projects (US-INIT-004) ──────────────────
+scaffold_new_project() {
+  local dir="$1"
+  local type="$2"
+
+  info "Scaffolding ${BOLD}$type${NC} project structure..."
+  echo ""
+
+  # Common: docs + workflow backbone
+  _mkscaffold "$dir/docs/features"
+  _mkscaffold "$dir/docs/plans"
+  _write_backlog  "$dir/BACKLOG.md"
+  _write_gitignore "$dir/.gitignore"
+  local created="docs/, BACKLOG.md, .gitignore"
+
+  case "$type" in
+    fullstack)
+      _mkscaffold "$dir/src/components/ui"
+      _mkscaffold "$dir/src/domains"
+      _mkscaffold "$dir/src/shared"
+      _mkscaffold "$dir/api/routes"
+      _mkscaffold "$dir/api/services"
+      _mkscaffold "$dir/api/models"
+      _mkscaffold "$dir/tests/unit"
+      _mkscaffold "$dir/tests/e2e"
+      _write_env_example "$dir/.env.example"
+      created+=", src/, api/, tests/, .env.example"
+      ;;
+    frontend-only)
+      _mkscaffold "$dir/src/components/ui"
+      _mkscaffold "$dir/src/domains"
+      _mkscaffold "$dir/src/shared"
+      _mkscaffold "$dir/tests/unit"
+      _mkscaffold "$dir/tests/e2e"
+      _write_env_example "$dir/.env.example"
+      created+=", src/, tests/, .env.example"
+      ;;
+    backend-service)
+      _mkscaffold "$dir/api/routes"
+      _mkscaffold "$dir/api/services"
+      _mkscaffold "$dir/api/models"
+      _mkscaffold "$dir/tests/unit"
+      _mkscaffold "$dir/tests/e2e"
+      _write_env_example "$dir/.env.example"
+      created+=", api/, tests/, .env.example"
+      ;;
+    cli)
+      _mkscaffold "$dir/cmd"
+      _mkscaffold "$dir/lib"
+      _mkscaffold "$dir/tests/unit"
+      created+=", cmd/, lib/, tests/"
+      ;;
+  esac
+
+  ok "Scaffolded: $created"
+}
+
+# ─── Scaffold: interactive per-component for legacy projects (US-INIT-005) ────
+scaffold_legacy_project() {
+  local dir="$1"
+  local -a added=()
+
+  echo ""
+  info "Existing project detected — add Wukong workflow files?"
+  echo ""
+
+  _ask() {
+    echo -n "  Add ${BOLD}$1${NC}  ($2)  [Y/n]: "
+    read -r _ans
+    [[ "${_ans:-Y}" =~ ^[Yy]$ ]]
+  }
+
+  if _ask "BACKLOG.md"              "track stories & bugs in one place"; then
+    _write_backlog "$dir/BACKLOG.md"
+    added+=("BACKLOG.md")
+  fi
+
+  if _ask "docs/features/"          "design docs live next to code"; then
+    _mkscaffold "$dir/docs/features"
+    _mkscaffold "$dir/docs/plans"
+    added+=("docs/")
+  fi
+
+  if _ask "tests/ scaffold"         "unit/ e2e/ structure ready to fill"; then
+    _mkscaffold "$dir/tests/unit"
+    _mkscaffold "$dir/tests/e2e"
+    added+=("tests/")
+  fi
+
+  if _ask ".env.example"            "document required env vars for teammates"; then
+    _write_env_example "$dir/.env.example"
+    added+=(".env.example")
+  fi
+
+  if _ask ".github/workflows/ci.yml"       "automated CI on every push"; then
+    mkdir -p "$dir/.github/workflows"
+    cat > "$dir/.github/workflows/ci.yml" << 'EOF'
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test -- --run
+EOF
+    added+=(".github/workflows/ci.yml")
+  fi
+
+  if _ask ".github/workflows/sentinel.yml" "scheduled patrol every 6h"; then
+    mkdir -p "$dir/.github/workflows"
+    cat > "$dir/.github/workflows/sentinel.yml" << 'EOF'
+name: Sentinel Patrol
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+jobs:
+  patrol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run sentinel
+        run: echo "Configure wk-sentinel patrol here"
+EOF
+    added+=(".github/workflows/sentinel.yml")
+  fi
+
+  echo ""
+  if [[ ${#added[@]} -gt 0 ]]; then
+    ok "Added: ${added[*]}"
+  else
+    info "Nothing added."
   fi
 }
 

@@ -90,23 +90,38 @@ else
   warn "~/.wukong/config.yaml not found — skipping"
 fi
 
-# ─── Step 4: Remove old cnx-* skill symlinks ─────────────────────────────────
-step "Step 4: Remove stale cnx-* skill symlinks"
+# ─── Step 4: Remove stale skill symlinks ─────────────────────────────────────
+step "Step 4: Remove stale skill symlinks"
 AI_DIRS=(~/.claude ~/.gemini ~/.kimi ~/.codex ~/.cursor)
 for ai_dir in "${AI_DIRS[@]}"; do
   ai_dir=$(eval echo "$ai_dir")
-  [[ -d "$ai_dir/skills" ]] || continue
-  old_links=$(find "$ai_dir/skills" -maxdepth 1 -type l -name "cnx-*" 2>/dev/null || true)
+
+  # Case A: whole-dir symlink pointing to old ~/.cybernetix/skills (now dangling)
+  skills_dir="$ai_dir/skills"
+  if [[ -L "$skills_dir" ]]; then
+    target="$(readlink "$skills_dir")"
+    real="$(cd "$skills_dir" 2>/dev/null && pwd -P || true)"
+    if [[ -z "$real" ]]; then
+      info "Removing dangling symlink ${skills_dir/#$HOME/~} -> ${target/#$HOME/~}"
+      run "rm '$skills_dir'"
+      removed=$((removed + 1))
+    fi
+    continue  # whole-dir symlink handled, skip per-skill scan
+  fi
+
+  # Case B: per-skill cnx-* symlinks inside a real skills dir
+  [[ -d "$skills_dir" ]] || continue
+  old_links=$(find "$skills_dir" -maxdepth 1 -type l -name "cnx-*" 2>/dev/null || true)
   if [[ -n "$old_links" ]]; then
     count=$(echo "$old_links" | wc -l | tr -d ' ')
-    info "Removing $count cnx-* symlinks from ${ai_dir/#$HOME/~}/skills/"
+    info "Removing $count cnx-* symlinks from ${skills_dir/#$HOME/~}/"
     while IFS= read -r link; do
       run "rm '$link'"
     done <<< "$old_links"
     removed=$((removed + count))
   fi
 done
-ok "Old cnx-* symlinks removed"
+ok "Stale skill symlinks removed"
 
 # ─── Step 5: Install wukong binary symlink ───────────────────────────────────
 step "Step 5: Install wukong binary"

@@ -224,15 +224,21 @@ _link_skills() {
       continue
     fi
 
-    # Handle legacy whole-dir symlink (still works; skip per-skill linking)
+    # Handle legacy whole-dir symlink
     if [[ -L "$skills_dir" ]]; then
       local skills_target
       skills_target="$(readlink "$skills_dir")"
       if [[ -n "$skills_real" && "$skills_real" == "$wk_skills_real" ]]; then
-        continue  # Old whole-dir symlink to WK skills — still functional
+        continue  # Whole-dir symlink to WK skills — still functional
       fi
-      warn "Skipped ~/${ai_name}/skills -> ${skills_target/#$HOME/~} (unknown symlink target)"
-      continue
+      # Dangling or stale symlink (e.g. old ~/.cybernetix/skills) — remove and recreate as per-skill links
+      if [[ -z "$skills_real" ]]; then
+        info "Removing dangling symlink ~/${ai_name}/skills -> ${skills_target/#$HOME/~}"
+        rm "$skills_dir"
+      else
+        warn "Skipped ~/${ai_name}/skills -> ${skills_target/#$HOME/~} (unknown symlink target)"
+        continue
+      fi
     fi
 
     mkdir -p "$skills_dir"

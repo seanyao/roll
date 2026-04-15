@@ -4,7 +4,7 @@ OpenClaw adaptation layer for Cybernetix - Integrates the CNX workflow into the 
 
 ## What Is This?
 
-`cnx-oc` is the **OpenClaw-specific variant** of Cybernetix, providing:
+`wk-oc` is the **OpenClaw-specific variant** of Cybernetix, providing:
 - A unified `$cnx` command entry point
 - Seamless integration with the OpenClaw agent
 - Simplified skill invocation
@@ -12,7 +12,7 @@ OpenClaw adaptation layer for Cybernetix - Integrates the CNX workflow into the 
 ## Directory Structure
 
 ```
-variants/cnx-oc/
+variants/wk-oc/
 ├── README.md              # This file
 ├── skills/
 │   └── cnx/               # OpenClaw skill
@@ -25,7 +25,7 @@ variants/cnx-oc/
 
 ```bash
 # Create symlinks (recommended)
-ln -s ~/workspace/cybernetix/variants/cnx-oc/skills/cnx \
+ln -s ~/workspace/cybernetix/variants/wk-oc/skills/cnx \
   ~/.openclaw/workspace/skills/cnx
 
 # Also link tools
@@ -49,7 +49,7 @@ $cnx probe find orin                  # Node discovery
 
 ## Syncing with Upstream
 
-When cybernetix is updated, `cnx-oc` automatically gets the updates:
+When cybernetix is updated, `wk-oc` automatically gets the updates:
 
 ```bash
 cd ~/workspace/cybernetix

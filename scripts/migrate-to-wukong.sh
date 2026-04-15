@@ -123,6 +123,26 @@ for ai_dir in "${AI_DIRS[@]}"; do
 done
 ok "Stale skill symlinks removed"
 
+# ─── Step 4b: Remove cnx-* skill directories from ~/.wukong/skills/ ──────────
+step "Step 4b: Remove cnx-* skill dirs from ~/.wukong/skills/"
+WK_SKILLS_DIR="$HOME/.wukong/skills"
+if [[ -d "$WK_SKILLS_DIR" ]]; then
+  old_skill_dirs=$(find "$WK_SKILLS_DIR" -maxdepth 1 -type d -name "cnx-*" 2>/dev/null || true)
+  if [[ -n "$old_skill_dirs" ]]; then
+    count=$(echo "$old_skill_dirs" | wc -l | tr -d ' ')
+    info "Removing $count cnx-* skill dirs from ~/.wukong/skills/"
+    while IFS= read -r dir; do
+      run "rm -rf '$dir'"
+    done <<< "$old_skill_dirs"
+    removed=$((removed + count))
+    ok "Removed $count cnx-* skill dirs"
+  else
+    ok "No cnx-* skill dirs found — already clean"
+  fi
+else
+  info "~/.wukong/skills/ not found — skipping"
+fi
+
 # ─── Step 5: Install wukong binary symlink ───────────────────────────────────
 step "Step 5: Install wukong binary"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

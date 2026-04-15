@@ -576,6 +576,7 @@ detect_project_type() {
   local content
   content="$(cat "$agents_file")"
 
+  # Exact template markers (most reliable)
   if echo "$content" | grep -qi "Fullstack Web"; then
     echo "fullstack"
   elif echo "$content" | grep -qi "Backend Service"; then
@@ -583,6 +584,15 @@ detect_project_type() {
   elif echo "$content" | grep -qi "Frontend Only"; then
     echo "frontend-only"
   elif echo "$content" | grep -qi "CLI Tool"; then
+    echo "cli"
+  # Fallback: infer from common stack keywords
+  elif echo "$content" | grep -qiE "(React|Vue|Angular|Vite|Next\.js|Nuxt|SPA|Tailwind).*(Express|FastAPI|NestJS|Rails|Django|Flask|Spring|tRPC|GraphQL.*server)"; then
+    echo "fullstack"
+  elif echo "$content" | grep -qiE "(React|Vue|Angular|Vite|Next\.js|Nuxt|SPA|Tailwind|Webpack|static site)"; then
+    echo "frontend-only"
+  elif echo "$content" | grep -qiE "(Express|FastAPI|NestJS|Rails|Django|Flask|Spring|microservice|API service|backend|server)"; then
+    echo "backend-service"
+  elif echo "$content" | grep -qiE "(CLI|command.line|command-line|terminal|script|argparse|yargs|cobra|clap)"; then
     echo "cli"
   else
     echo "unknown"

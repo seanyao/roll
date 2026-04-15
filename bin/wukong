@@ -127,7 +127,8 @@ _pull_skills() {
     fi
   done
 
-  # Prune skills that no longer exist in repo (source of truth)
+  # Prune skills that no longer exist in repo.
+  # ~/.wukong/skills/ is wukong's controlled namespace — safe to clean up.
   for installed_dir in "$WK_HOME/skills"/*/; do
     [[ -d "$installed_dir" ]] || continue
     local installed_name

@@ -13,6 +13,6 @@
 
 - No server, no frontend. CLI tool only.
 - Test commands by running them in Bash, not just unit tests.
-- Use `$cnx-design` to plan command structure and options before implementation.
+- Use `$wk-design` to plan command structure and options before implementation.
 - Verify `--help` output is clear and complete for each command.
 - Run `npm run build && node dist/index.js --help` before pushing.

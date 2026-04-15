@@ -85,10 +85,10 @@ When a project has Cybernetix (CNX) workflow configured:
 ### Skill Selection
 
 ```
-Uncertain approach?        → $cnx-design
-One-sentence vague request → $cnx-roll-build
-Have a US-XXX ID?          → $cnx-story-build
-Single bug fix?            → $cnx-fix-build
-High-risk logic?           → $cnx-spar
-Page/production issue?     → $cnx-bb-debug
+Uncertain approach?        → $wk-design
+One-sentence vague request → $wk-roll-build
+Have a US-XXX ID?          → $wk-story-build
+Single bug fix?            → $wk-fix-build
+High-risk logic?           → $wk-spar
+Page/production issue?     → $wk-bb-debug
 ```

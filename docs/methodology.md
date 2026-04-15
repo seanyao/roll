@@ -597,7 +597,7 @@ graph LR
 | `$wk-design` | 设计 | 需求描述 | BACKLOG.md + docs/features/ |
 | `$wk-init` | 初始化 | 项目名 | 标准化目录结构 + CI 配置 |
 | `$wk-story-build` | 实现 | Story ID | 已部署代码 + 验证证据 |
-| `$wk-fly` | 快速实现 | 一句话需求 | 自动拆分 → 交付 |
+| `$wk-fly-build` | 快速实现 | 一句话需求 | 自动拆分 → 交付 |
 | `$wk-spar` | 防御性实现 | 功能描述 | 攻防测试套件 + 实现代码 |
 | `$wk-fix-build` | 修复 | Fix ID | 修复代码 + 回归测试 |
 | `$wk-sentinel` | 巡检 | 巡检策略 | 健康报告 / FIX 条目 |

@@ -7,7 +7,7 @@ Quickly select the right skill or tool.
 | User Intent | Skill | Description |
 |---------|-----------|------|
 | **"Not sure how to do it"** / **"There are several options"** | `wk-design` | Explore solutions, compare options, human decision-making |
-| **"Help me build a..."** (unclear requirements) | `wk-fly` | One-sentence request, AI auto-clarifies -> plans -> implements |
+| **"Help me build a..."** (unclear requirements) | `wk-fly-build` | One-sentence request, AI auto-clarifies -> plans -> implements |
 | **"Implement US-001"** (with a clear story) | `wk-story-build` | Execute per BACKLOG.md, full delivery |
 | **"This logic is critical"** / **"Involves payment"** | `wk-spar` | Adversarial TDD, activate for high-risk scenarios |
 | **"Fix a bug"** / **"Change some copy"** | `wk-fix-build` | Quick fix, no full workflow |
@@ -61,7 +61,7 @@ User Input
     | No
 +----------------------+
 | "One-sentence        |
-|  request?"           |--> wk-fly
+|  request?"           |--> wk-fly-build
 +----------------------+
     | No
 +----------------------+
@@ -92,7 +92,7 @@ User Input
 | Skill | Trigger Keywords |
 |-------|-----------|
 | `wk-design` | "discuss", "compare options", "how to choose", "trade-offs", "not sure what to use", "design", "plan" |
-| `wk-fly` | "help me build", "add a feature", "change this", "refactor" |
+| `wk-fly-build` | "help me build", "add a feature", "change this", "refactor" |
 | `wk-story-build` | "implement US-", "do this story", "complete Action" |
 | `wk-fix-build` | "fix bug", "change copy", "adjust color", "error" |
 | `wk-design` | "plan", "split", "write stories", "requirements analysis" |

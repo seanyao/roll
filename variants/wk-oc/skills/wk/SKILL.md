@@ -231,7 +231,7 @@ export WK_WORKSPACE=~/workspace/wukong
 - `wk-spar` - Adversarial TDD (high-risk logic)
 - `wk-story-build` - Story delivery
 - `wk-fix-build` - Bug fix
-- `wk-fly` - Quick delivery
+- `wk-fly-build` - Quick delivery
 - `wk-.code-review` - Code review
 - `wk-init` - Project initialization
 - `wk-.changelog` - Changelog

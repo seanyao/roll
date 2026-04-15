@@ -258,7 +258,7 @@ jobs:
 | Plan | `$wk-design "requirement"` | Plan design, split into Stories |
 | Do | `$wk-story-build US-XXX` | Develop a Story |
 | Do | `$wk-fix-build FIX-XXX` | Fix a Bug |
-| Do | `$wk-fly "one-liner"` | Quick implementation |
+| Do | `$wk-fly-build "one-liner"` | Quick implementation |
 | Check | `$wk-sentinel patrol` | Scheduled patrol |
 | Check | `$wk-bb-debug URL` | Deep diagnosis |
 

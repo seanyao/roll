@@ -32,7 +32,7 @@ plans:
 - Split into Stories
 - Write to BACKLOG.md
 
-### Build → $wk-story-build / $wk-fix-build / $wk-fly
+### Build → $wk-story-build / $wk-fix-build / $wk-fly-build
 - Read BACKLOG and execute
 - TCR development (independent Actions auto-parallelized + Worktree isolation)
 - CI/CD deployment

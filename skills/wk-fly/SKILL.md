@@ -1,5 +1,5 @@
 ---
-name: wk-roll-build
+name: wk-fly
 description: Convert vague one-sentence request into stories, insert into BACKLOG.md, then execute like wk-story-build. Auto-clarifies, plans, splits into US/Actions, delivers via TCR workflow.
 ---
 

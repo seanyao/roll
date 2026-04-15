@@ -33,7 +33,7 @@ case $COMMAND in
     show_skill "wk-fix-build"
     ;;
   roll)
-    show_skill "wk-roll-build"
+    show_skill "wk-fly"
     ;;
   review)
     show_skill "wk-.code-review"

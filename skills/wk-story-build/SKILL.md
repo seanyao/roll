@@ -26,7 +26,7 @@ Use when:
 Do not use for:
 
 - Single bug / hotfix / small change (use `wk-fix-build`)
-- Only a vague one-line requirement with no US yet (use `wk-roll-build`)
+- Only a vague one-line requirement with no US yet (use `wk-fly`)
 - Pure research tasks that don't produce code
 
 **Reading a US:**

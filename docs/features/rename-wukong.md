@@ -52,7 +52,7 @@
   - `wk-fix-build` → `wk-fix-build`
   - `wk-init` → `wk-init`
   - `wk-research` → `wk-research`
-  - `wk-roll-build` → `wk-roll-build`
+  - `wk-fly` → `wk-fly`
   - `wk-sentinel` → `wk-sentinel`
   - `wk-spar` → `wk-spar`
   - `wk-story-build` → `wk-story-build`

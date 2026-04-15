@@ -1,7 +1,7 @@
 ---
 hidden: true
 name: wk-.yeah
-description: Celebration ceremony after build workflow completion 🎉 Outputs fireworks after wk-story-build / wk-fix-build / wk-roll-build finishes successfully.
+description: Celebration ceremony after build workflow completion 🎉 Outputs fireworks after wk-story-build / wk-fix-build / wk-fly finishes successfully.
 ---
 
 # WK Yeah! 🎉
@@ -12,7 +12,7 @@ Celebration ceremony after a successful build completion.
 
 - After `$wk-story-build` completes US development
 - After `$wk-fix-build` completes a bug fix
-- After `$wk-roll-build` completes a quick implementation
+- After `$wk-fly` completes a quick implementation
 - When any `$wk-*` build workflow finishes successfully
 
 ## Output

@@ -71,7 +71,7 @@ git push
 
 ## Integration
 
-After successful deploy in `$wk-story-build` / `$wk-fix-build` / `$wk-roll-build`:
+After successful deploy in `$wk-story-build` / `$wk-fix-build` / `$wk-fly`:
 
 ```markdown
 **Post-Deploy:**

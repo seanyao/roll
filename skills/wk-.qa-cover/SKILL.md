@@ -6,7 +6,7 @@ description: QA coverage reference for build skills. Defines test pyramid (unit/
 
 # QA Cover
 
-This is a **reference skill** used by `wk-story-build`, `wk-fix-build`, and `wk-roll-build` for quality assurance and test coverage.
+This is a **reference skill** used by `wk-story-build`, `wk-fix-build`, and `wk-fly` for quality assurance and test coverage.
 
 ## When to Apply
 

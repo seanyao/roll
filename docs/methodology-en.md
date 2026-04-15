@@ -598,7 +598,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 | `$wk-design` | Design | Requirements description | BACKLOG.md + docs/features/ |
 | `$wk-init` | Initialization | Project name | Standardized directory structure + CI config |
 | `$wk-story-build` | Implementation | Story ID | Deployed code + verification evidence |
-| `$wk-roll-build` | Rapid implementation | One-sentence requirement | Auto-decompose → deliver |
+| `$wk-fly` | Rapid implementation | One-sentence requirement | Auto-decompose → deliver |
 | `$wk-spar` | Defensive implementation | Feature description | Adversarial test suite + implementation code |
 | `$wk-fix-build` | Bug fix | Fix ID | Fix code + regression test |
 | `$wk-sentinel` | Patrol | Patrol strategy | Health report / FIX entries |

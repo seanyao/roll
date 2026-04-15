@@ -21,7 +21,7 @@ TCR Loop:
 
 ## When Triggered
 
-- **Auto-triggered**: After each TCR micro-step in `$wk-story-build` / `$wk-fix-build` / `$wk-roll-build`
+- **Auto-triggered**: After each TCR micro-step in `$wk-story-build` / `$wk-fix-build` / `$wk-fly`
 - **Manual trigger**: When the user wants to review current changes
 
 ## Review Scope

@@ -7,7 +7,7 @@
   ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ 
 ```
 
-> AI-Native Development Workflow — _Let's roll, no sprints!_
+> AI-Native Development Workflow — _Move fast, no sprints._
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -129,7 +129,7 @@ Design → Build → Check → Fix → Loop
 | Scenario | Command |
 |----------|---------|
 | Uncertain approach, need discussion | `$wk-design "topic"` |
-| One-sentence request | `$wk-roll-build "add a ..."` |
+| One-sentence request | `$wk-fly "add a ..."` |
 | Execute an existing Story | `$wk-story-build US-001` |
 | Bug fix / small change | `$wk-fix-build FIX-001` |
 | High-risk logic (payments/auth) | `$wk-spar "feature description"` |
@@ -151,7 +151,7 @@ $wk-init
 $wk-design "user login feature"         # Plan → produce BACKLOG Stories
 $wk-story-build US-001                  # Develop → TCR → CI → Deploy
 $wk-fix-build FIX-001                   # Fix
-$wk-roll-build "add search to admin"    # One-sentence → auto-split → deliver
+$wk-fly "add search to admin"    # One-sentence → auto-split → deliver
 ```
 
 ### Full Skill List
@@ -162,7 +162,7 @@ $wk-roll-build "add search to admin"    # One-sentence → auto-split → delive
 | `$wk-story-build` | BUILD | Execute Story (with parallel dispatch) |
 | `$wk-spar` | BUILD | Adversarial TDD |
 | `$wk-fix-build` | BUILD/FIX | Bug fix |
-| `$wk-roll-build` | DESIGN+BUILD | One-sentence quick implementation |
+| `$wk-fly` | DESIGN+BUILD | One-sentence quick implementation |
 | `$wk-sentinel` | CHECK | Scheduled patrol |
 | `$wk-bb-debug` | CHECK | Deep page diagnostics |
 | `$wk-bb-analyzer` | CHECK | Diagnostic report analysis |

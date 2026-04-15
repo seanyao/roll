@@ -86,7 +86,7 @@ When a project has Wukong (WK) workflow configured:
 
 ```
 Uncertain approach?        → $wk-design
-One-sentence vague request → $wk-roll-build
+One-sentence vague request → $wk-fly
 Have a US-XXX ID?          → $wk-story-build
 Single bug fix?            → $wk-fix-build
 High-risk logic?           → $wk-spar

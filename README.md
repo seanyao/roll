@@ -35,35 +35,39 @@ Unified management of behavioral conventions for Claude Code / Kimi Code / Gemin
 | Command | Use Case |
 |---------|----------|
 | `cybernetix setup` | First-time initialization of `~/.cybernetix/`, link skills to AI tools |
-| `cybernetix sync` | Distribute conventions and refresh skills for each AI tool |
-| `cybernetix update` | Open editor to modify conventions, auto-sync on save |
+| `cybernetix sync` | Sync conventions to AI tool config paths (default scope) |
+| `cybernetix sync skills` | Refresh skills only from repo source |
+| `cybernetix sync all` | Sync both conventions and skills |
+| `cybernetix sync --force` | Force overwrite without prompting |
+| `cybernetix update` | Open editor to modify conventions, auto-sync conventions on save |
 | `cybernetix init [dir] [type] [tools]` | Generate convention files for a project |
 | `cybernetix refresh [dir]` | Auto-detect and re-merge project conventions from templates |
-| `cybernetix reset` | Reset global conventions and skills from repo source |
+| `cybernetix reset` | Reset local cache from repo source, force-sync all |
 | `cybernetix status` | View current state, sync status, and skill links |
 
 ### Steps
 
 ```bash
 # 1. New machine — one-time setup
-cybernetix setup          # Create ~/.cybernetix/, link skills to AI tools
+cybernetix setup
 
-# 2. Daily updates — sync conventions and skills from repo
-cybernetix sync           # One-stop command to refresh everything
+# 2. Daily updates — sync conventions from repo
+cybernetix sync           # conventions only (default)
+cybernetix sync all       # conventions + skills
 
-# 3. New project — choose project type and AI tools
+# 3. New project — generate convention files
 cybernetix init . fullstack claude       # Fullstack project, Claude only
 cybernetix init my-app cli claude,cursor # CLI project, Claude + Cursor
 cybernetix init .                        # Interactive selection
-```
-# 3. Modify global conventions
-cybernetix update         # Edit → auto sync
+
+# 4. Modify global conventions
+cybernetix update         # Edit → auto-sync conventions
 # Or edit manually, then:
 vim ~/.cybernetix/conventions/global/AGENTS.md
 cybernetix sync
 
-# 4. Broke something? Reset
-cybernetix reset          # Restore defaults from repo, auto sync
+# 5. Broke something? Reset
+cybernetix reset          # Restore defaults from repo, force-sync all
 ```
 
 ### Layering

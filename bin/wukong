@@ -411,7 +411,7 @@ cmd_init() {
   local project_dir
   project_dir="$(pwd)"
 
-  # ── Resolve "auto" type argument ──────────────────────────────────────────
+  # ── Explicit "auto" arg: non-interactive scan (for scripts / CI) ──────────
   if [[ "$project_type" == "auto" ]]; then
     info "Scanning project files..."
     project_type="$(scan_project_type_from_files "$project_dir")"
@@ -423,48 +423,66 @@ cmd_init() {
     fi
   fi
 
-  # ── Auto-refresh (no explicit type, AGENTS.md exists in cwd) ─────────────
+  # ── Interactive mode: detect first, then ask keep-or-switch ───────────────
   if [[ -z "$project_type" ]]; then
+    local detected=""
+
+    # Try AGENTS.md first, then file scan
     if [[ -f "$project_dir/AGENTS.md" ]]; then
-      info "Existing Wukong project detected. Re-merging from latest templates..."
+      detected="$(detect_project_type "$project_dir")"
+    fi
+    if [[ -z "$detected" || "$detected" == "unknown" ]]; then
+      detected="$(scan_project_type_from_files "$project_dir")"
+    fi
+
+    _pick_override() {
+      echo ""
+      echo -e "${BOLD}Select project type:${NC}"
+      echo ""
+      echo "  1) fullstack        React + API + CLI"
+      echo "  2) frontend-only    React SPA, no backend"
+      echo "  3) backend-service  API/microservice, no frontend"
+      echo "  4) cli              Command-line tool"
+      echo ""
+      echo -n "Choice [1-4]: "
+      read -r choice
+      case "$choice" in
+        1) echo "fullstack" ;;
+        2) echo "frontend-only" ;;
+        3) echo "backend-service" ;;
+        4) echo "cli" ;;
+        *) err "Invalid choice: $choice"; exit 1 ;;
+      esac
+    }
+
+    if [[ -n "$detected" && "$detected" != "unknown" ]]; then
+      echo ""
+      echo -e "  Detected: ${BOLD}$detected${NC}"
+      echo -n "  Keep it? [Y/n] or override [1-4]: "
+      read -r answer
+      case "$answer" in
+        ""|y|Y) project_type="$detected" ;;
+        1) project_type="fullstack" ;;
+        2) project_type="frontend-only" ;;
+        3) project_type="backend-service" ;;
+        4) project_type="cli" ;;
+        n|N) project_type="$(_pick_override)" ;;
+        *) err "Invalid choice: $answer"; exit 1 ;;
+      esac
+    else
+      # Truly unknown: show full menu
+      project_type="$(_pick_override)"
+    fi
+
+    # If AGENTS.md already exists and user kept the same type, just re-merge
+    if [[ -f "$project_dir/AGENTS.md" && "$project_type" == "$detected" ]]; then
+      info "Re-merging from latest templates..."
       echo ""
       refresh_project "$project_dir"
       echo ""
       ok "Done."
       return
     fi
-  fi
-
-  # ── New project mode ──────────────────────────────────────────────────────
-  if [[ -z "$project_type" ]]; then
-    echo ""
-    echo -e "${BOLD}Select project type:${NC}"
-    echo ""
-    echo "  1) fullstack        React + API + CLI (default)"
-    echo "  2) frontend-only    React SPA, no backend"
-    echo "  3) backend-service  API/microservice, no frontend"
-    echo "  4) cli              Command-line tool"
-    echo "  5) auto             Scan project files and decide"
-    echo ""
-    echo -n "Choice [1-5]: "
-    read -r choice
-    case "$choice" in
-      1|"") project_type="fullstack" ;;
-      2)    project_type="frontend-only" ;;
-      3)    project_type="backend-service" ;;
-      4)    project_type="cli" ;;
-      5)
-        info "Scanning project files..."
-        project_type="$(scan_project_type_from_files "$project_dir")"
-        if [[ "$project_type" == "unknown" ]]; then
-          warn "Cannot determine project type from files. Defaulting to 'fullstack'."
-          project_type="fullstack"
-        else
-          ok "Detected: ${BOLD}$project_type${NC}"
-        fi
-        ;;
-      *)    err "Invalid choice: $choice"; exit 1 ;;
-    esac
   fi
 
   # AI tool selection

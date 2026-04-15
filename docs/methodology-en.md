@@ -84,29 +84,34 @@ CNX uses the `cybernetix` CLI to centralize configuration management and distrib
 
 **2.2.1 Skill Mounting (`cybernetix setup`)**
 
-On first run, the CLI performs three operations:
+On first run, the CLI performs two operations:
 
 1. **Establish a Single Source of Truth**: Copies global conventions (`conventions/global/`) and skill definitions (`skills/`) from the repository into `~/.cybernetix/`, making it the sole authoritative configuration source on the machine.
-2. **Symlink mounting**: Uses filesystem symlinks to mount `~/.cybernetix/skills/` into each AI client's configuration directory (`~/.claude/skills`, `~/.gemini/skills`, `~/.kimi/skills`, etc.). All clients share one canonical set of skill definitions — a change in one place propagates everywhere.
-3. **Git Hook injection**: Installs a global `prepare-commit-msg` hook that automatically detects which AI client authored the current commit (via environment variables) and stamps it (e.g., `[claude code]`, `[gemini cli]`), enabling audit tracing in multi-agent workflows.
+2. **Per-skill symlinks**: Creates individual symlinks for each `cnx-*` skill into each AI client's skills directory (`~/.claude/skills/cnx-*`, `~/.gemini/skills/cnx-*`, etc.). Existing user skills are untouched — CNX skills are added alongside.
+
+Setup never modifies any AI tool configuration files or global git settings. It is fully non-invasive and safe to re-run.
 
 **2.2.2 Configuration Sync (`cybernetix sync [scope]`)**
 
 Distributes content from `~/.cybernetix/` to each AI client's configuration path based on the selected scope.
 
-- `conventions` (default): distributes convention files from `conventions/global/`
-- `skills`: refreshes skills from the repo into the local cache and creates/repairs symlinks for each client
+- `conventions` (default): uses `@include` append mode — writes CNX conventions to `{ai_dir}/cnx.md`, then appends a single `@cnx.md` line to the user's main config. Existing content is never overwritten.
+- `skills`: refreshes skills from the repo into the local cache and creates/repairs per-skill symlinks for each client
 - `all`: runs both conventions and skills
 
-Append `--force` (or `-f`) to overwrite target files or force symlink recreation.
+Append `--force` (or `-f`) to force-rewrite `cnx.md` or rebuild symlinks.
 
 ```
 ~/.cybernetix/conventions/global/
-├── AGENTS.md        → ~/.kimi/AGENTS.md, ~/.codex/AGENTS.md
-├── CLAUDE.md        → ~/.claude/CLAUDE.md
-├── GEMINI.md        → ~/.gemini/GEMINI.md
+├── AGENTS.md        → ~/.kimi/cnx.md (+ @cnx.md appended to AGENTS.md)
+├── CLAUDE.md        → ~/.claude/cnx.md (+ @cnx.md appended to CLAUDE.md)
+├── GEMINI.md        → ~/.gemini/cnx.md (+ @cnx.md appended to GEMINI.md)
 └── .cursor-rules    → (project-level distribution)
 ```
+
+**Git Hook (optional — `cybernetix hooks install`)**
+
+Installs a global `prepare-commit-msg` hook that automatically detects which AI client authored the current commit and stamps it (e.g., `[claude code]`, `[gemini cli]`), enabling audit tracing in multi-agent workflows. This is an opt-in operation that modifies global git configuration — it shows the current state and requires explicit confirmation before proceeding.
 
 **2.2.3 Project-Level Configuration (`cybernetix init`)**
 
@@ -595,9 +600,11 @@ The key distinction lies in the shift of execution subject: these methodologies 
 
 | Command | Purpose |
 |---------|---------|
-| `cybernetix setup` | First-time initialization of `~/.cybernetix/`, mount skills, inject Git Hooks |
-| `cybernetix sync [scope]` | Distribute conventions or skills to AI client config paths (scope: conventions/skills/all) |
+| `cybernetix setup` | First-time initialization of `~/.cybernetix/`, mount skills (non-invasive) |
+| `cybernetix sync conventions` | Opt-in: append CNX conventions via `@include` (never overwrites existing files) |
+| `cybernetix sync skills` | Refresh skills and repair per-skill symlinks |
+| `cybernetix sync all` | Run both conventions and skills sync |
+| `cybernetix hooks install` | Opt-in: install global git hook (requires confirmation) |
 | `cybernetix init [dir] [type] [tools]` | Generate project convention files (merges Global + Template) |
-| `cybernetix refresh [dir]` | Detect project type and re-merge convention files from the latest templates |
 | `cybernetix reset` | Reset `~/.cybernetix/` from the repository source, then sync |
 | `cybernetix status` | Display current configuration state, sync status, and skill links |

@@ -180,69 +180,85 @@ YAML
     ok "Created: ~/.cybernetix/config.yaml"
   fi
 
-  # Install global git hook
-  info "Installing global git hook..."
-  local hooks_dir="$HOME/.config/git/hooks"
-  local hook_src="$REPO_ROOT/hooks/prepare-commit-msg"
-  local hook_dst="$hooks_dir/prepare-commit-msg"
-  if [[ -f "$hook_src" ]]; then
-    mkdir -p "$hooks_dir"
-    safe_copy "$hook_src" "$hook_dst" "$force"
-    chmod +x "$hook_dst"
-    git config --global core.hooksPath "$hooks_dir"
-    ok "Global git hook installed: AI client auto-detected on every commit"
-  else
-    warn "Hook source not found: $hook_src"
-  fi
 }
 
-# ─── Internal: create or repair skill symlinks ────────────────────────────────
+# ─── Internal: create or repair per-skill symlinks (non-destructive) ─────────
 _link_skills() {
   local force="${1:-false}"
   local ai_dirs=(~/.claude ~/.gemini ~/.kimi ~/.codex ~/.cursor)
 
   for ai_dir in "${ai_dirs[@]}"; do
     ai_dir=$(eval echo "$ai_dir")
-    if [[ -d "$ai_dir" ]]; then
-      local target_link="$ai_dir/skills"
-      if [[ ! -e "$target_link" ]]; then
-        ln -s "$CNX_HOME/skills" "$target_link"
-        ok "Linked skills to ${target_link/#$HOME/~}"
-      elif [[ -L "$target_link" ]]; then
+    [[ -d "$ai_dir" ]] || continue
+
+    mkdir -p "$ai_dir/skills"
+    local linked=0 repaired=0
+
+    for skill_dir in "$CNX_HOME/skills"/*/; do
+      [[ -d "$skill_dir" ]] || continue
+      local skill_name
+      skill_name="$(basename "$skill_dir")"
+      local skill_link="$ai_dir/skills/$skill_name"
+
+      if [[ -L "$skill_link" ]]; then
         local current_target
-        current_target="$(readlink "$target_link")"
-        if [[ "$current_target" != "$CNX_HOME/skills" ]]; then
-          if [[ "$force" == "true" ]]; then
-            rm "$target_link"
-            ln -s "$CNX_HOME/skills" "$target_link"
-            ok "Updated link: ${target_link/#$HOME/~}"
-          else
-            warn "Symlink ${target_link/#$HOME/~} exists but points to $current_target"
-            echo -n "  Overwrite symlink? [y/N] "
-            read -r answer
-            if [[ "$answer" =~ ^[Yy]$ ]]; then
-              rm "$target_link"
-              ln -s "$CNX_HOME/skills" "$target_link"
-              ok "Updated link: ${target_link/#$HOME/~}"
-            fi
-          fi
-        else
-          ok "Link exists: ${target_link/#$HOME/~}"
+        current_target="$(readlink "$skill_link")"
+        if [[ "$current_target" != "$skill_dir" ]]; then
+          ln -sf "$skill_dir" "$skill_link"
+          repaired=$((repaired + 1))
         fi
-      else
-        if [[ "$force" == "true" ]]; then
-          rm -rf "$target_link"
-          ln -s "$CNX_HOME/skills" "$target_link"
-          ok "Replaced with symlink: ${target_link/#$HOME/~}"
-        else
-          warn "Directory or file exists at ${target_link/#$HOME/~}, skipping symlink"
-        fi
+        # correct symlink: skip silently
+      elif [[ ! -e "$skill_link" ]]; then
+        ln -s "$skill_dir" "$skill_link"
+        linked=$((linked + 1))
       fi
+      # real file/dir at that path: skip — never touch user content
+    done
+
+    local ai_name
+    ai_name=$(basename "$ai_dir")
+    if [[ $((linked + repaired)) -gt 0 ]]; then
+      ok "Skills linked in ~/${ai_name}/skills (+${linked} new, ~${repaired} repaired)"
     fi
   done
 }
 
-# ─── Internal: sync conventions to AI tool paths ──────────────────────────────
+# ─── Internal: sync conventions via @include — never overwrites user files ─────
+# Writes CNX content to {ai_dir}/cnx.md, appends @cnx.md to main config.
+_sync_convention_for_tool() {
+  local src="$1"       # source: ~/.cybernetix/conventions/global/CLAUDE.md
+  local main_dst="$2"  # target: ~/.claude/CLAUDE.md
+  local force="$3"
+
+  [[ -f "$src" ]] || return
+  local dst_dir
+  dst_dir="$(dirname "$main_dst")"
+
+  # Only proceed if the AI tool directory already exists (except Claude, always create)
+  if [[ "$dst_dir" != "$HOME/.claude" ]] && [[ ! -d "$dst_dir" ]]; then
+    return
+  fi
+  mkdir -p "$dst_dir"
+
+  # Write/update cnx.md — this is our file, always safe to overwrite
+  local cnx_file="$dst_dir/cnx.md"
+  if [[ "$force" == "true" ]] || ! diff -q "$src" "$cnx_file" &>/dev/null 2>&1; then
+    cp "$src" "$cnx_file"
+    ok "Wrote: ${cnx_file/#$HOME/~}"
+  fi
+
+  # Append @cnx.md include to main config — never overwrite existing content
+  if [[ ! -f "$main_dst" ]]; then
+    printf '@cnx.md\n' > "$main_dst"
+    ok "Created: ${main_dst/#$HOME/~}"
+  elif ! grep -qF "@cnx.md" "$main_dst" 2>/dev/null; then
+    printf '\n@cnx.md\n' >> "$main_dst"
+    ok "Appended @cnx.md to: ${main_dst/#$HOME/~}"
+  else
+    ok "Already included: ${main_dst/#$HOME/~}"
+  fi
+}
+
 _sync_conventions() {
   local force="${1:-false}"
 
@@ -252,16 +268,10 @@ _sync_conventions() {
   codex_target="$(config_get sync_codex ~/.codex/AGENTS.md)"
   gemini_target="$(config_get sync_gemini ~/.gemini/GEMINI.md)"
 
-  if [[ -f "$CNX_GLOBAL/CLAUDE.md" ]]; then
-    safe_copy "$CNX_GLOBAL/CLAUDE.md" "$claude_target" "$force"
-  fi
-  if [[ -f "$CNX_GLOBAL/AGENTS.md" ]]; then
-    safe_copy "$CNX_GLOBAL/AGENTS.md" "$kimi_target" "$force"
-    safe_copy "$CNX_GLOBAL/AGENTS.md" "$codex_target" "$force"
-  fi
-  if [[ -f "$CNX_GLOBAL/GEMINI.md" ]]; then
-    safe_copy "$CNX_GLOBAL/GEMINI.md" "$gemini_target" "$force"
-  fi
+  _sync_convention_for_tool "$CNX_GLOBAL/CLAUDE.md"  "$claude_target"  "$force"
+  _sync_convention_for_tool "$CNX_GLOBAL/AGENTS.md"  "$kimi_target"    "$force"
+  _sync_convention_for_tool "$CNX_GLOBAL/AGENTS.md"  "$codex_target"   "$force"
+  _sync_convention_for_tool "$CNX_GLOBAL/GEMINI.md"  "$gemini_target"  "$force"
 }
 
 # ─── Internal: sync skills (pull + link) ──────────────────────────────────────
@@ -283,19 +293,16 @@ cmd_setup() {
   echo ""
 
   _install_local
+  echo ""
+  _sync_skills
 
   echo ""
-  ok "Local cache ready. Syncing to AI tools..."
-  echo ""
-  cmd_sync all
-
-  echo ""
-  ok "Setup complete. Directory: ~/.cybernetix/"
+  ok "Setup complete. Skills installed in ~/.cybernetix/"
   echo ""
   info "Next steps:"
-  echo "  1. Edit global conventions:  ${BOLD}vim ~/.cybernetix/conventions/global/AGENTS.md${NC}"
-  echo "  2. Sync changes:             ${BOLD}cybernetix sync${NC}"
-  echo "  3. Init a new project:       ${BOLD}cybernetix init${NC}"
+  echo "  Init a project:          ${BOLD}cybernetix init${NC}"
+  echo "  Add global conventions:  ${BOLD}cybernetix sync conventions${NC}"
+  echo "  Install git hook:        ${BOLD}cybernetix hooks install${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -603,6 +610,60 @@ refresh_project() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: hooks <subcommand>
+# Manage the global git hook (opt-in — modifies git global config)
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_hooks() {
+  local subcmd="${1:-install}"
+
+  case "$subcmd" in
+    install)
+      local hooks_dir="$HOME/.config/git/hooks"
+      local hook_src="$REPO_ROOT/hooks/prepare-commit-msg"
+      local hook_dst="$hooks_dir/prepare-commit-msg"
+
+      if [[ ! -f "$hook_src" ]]; then
+        err "Hook source not found: $hook_src"
+        exit 1
+      fi
+
+      local current_hooks_path
+      current_hooks_path=$(git config --global core.hooksPath 2>/dev/null || echo "(not set)")
+
+      echo ""
+      warn "This will modify your global git configuration:"
+      echo "  git config --global core.hooksPath $hooks_dir"
+      echo ""
+      echo "  Current value: $current_hooks_path"
+      echo ""
+      if [[ "$current_hooks_path" != "(not set)" ]] && [[ "$current_hooks_path" != "$hooks_dir" ]]; then
+        warn "WARNING: Hooks at '$current_hooks_path' will stop running after this change."
+        echo ""
+      fi
+      echo -n "  Proceed? [y/N] "
+      read -r answer
+      [[ "$answer" =~ ^[Yy]$ ]] || { info "Aborted."; return; }
+
+      mkdir -p "$hooks_dir"
+      cp "$hook_src" "$hook_dst"
+      chmod +x "$hook_dst"
+      git config --global core.hooksPath "$hooks_dir"
+      ok "Global git hook installed (AI client auto-detected on every commit)"
+      ;;
+    remove)
+      git config --global --unset core.hooksPath 2>/dev/null && \
+        ok "Removed core.hooksPath from global git config" || \
+        info "core.hooksPath was not set"
+      ;;
+    *)
+      err "Unknown hooks subcommand: $subcmd"
+      echo "Usage: cybernetix hooks [install|remove]"
+      exit 1
+      ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: reset
 # Re-copy conventions and skills from repo source, then sync all with force
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -675,26 +736,29 @@ cmd_status() {
   echo ""
   echo -e "${BOLD}Skill symlinks:${NC}"
   local ai_dirs=(~/.claude ~/.gemini ~/.kimi ~/.codex ~/.cursor)
+  local total_skills=0
+  if [[ -d "$CNX_HOME/skills" ]]; then
+    total_skills=$(find "$CNX_HOME/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+  fi
   for ai_dir in "${ai_dirs[@]}"; do
     ai_dir=$(eval echo "$ai_dir")
-    if [[ -d "$ai_dir" ]]; then
-      local name
-      name=$(basename "$ai_dir" | sed 's/^\.//')
-      name=$(echo "$name" | tr '[:lower:]' '[:upper:]' | cut -c1)$(echo "$name" | cut -c2-)
-      local target_link="$ai_dir/skills"
-      if [[ -L "$target_link" ]]; then
-        local current_target
-        current_target="$(readlink "$target_link")"
-        if [[ "$current_target" == "$CNX_HOME/skills" ]]; then
-          echo -e "  ${GREEN}=${NC} $name: ${target_link/#$HOME/~} (in sync)"
-        else
-          echo -e "  ${YELLOW}~${NC} $name: ${target_link/#$HOME/~} (points to $current_target)"
-        fi
-      elif [[ -e "$target_link" ]]; then
-        echo -e "  ${RED}!${NC} $name: ${target_link/#$HOME/~} (exists but not a link)"
+    [[ -d "$ai_dir" ]] || continue
+    local name
+    name=$(basename "$ai_dir" | sed 's/^\.//')
+    name=$(echo "$name" | tr '[:lower:]' '[:upper:]' | cut -c1)$(echo "$name" | cut -c2-)
+    local skills_dir="$ai_dir/skills"
+    if [[ -d "$skills_dir" ]]; then
+      local linked_count
+      linked_count=$(find "$skills_dir" -maxdepth 1 -mindepth 1 -type l -name "cnx-*" 2>/dev/null | wc -l | tr -d ' ')
+      if [[ "$linked_count" -eq "$total_skills" ]] && [[ "$total_skills" -gt 0 ]]; then
+        echo -e "  ${GREEN}=${NC} $name: ~/${name,,}/skills ($linked_count/$total_skills skills linked)"
+      elif [[ "$linked_count" -gt 0 ]]; then
+        echo -e "  ${YELLOW}~${NC} $name: ~/${name,,}/skills ($linked_count/$total_skills skills linked)"
       else
-        echo -e "  ${RED}-${NC} $name: ${target_link/#$HOME/~} (not linked)"
+        echo -e "  ${RED}-${NC} $name: ~/${name,,}/skills (0 cnx skills linked)"
       fi
+    else
+      echo -e "  ${RED}-${NC} $name: ~/${name,,}/skills (not found)"
     fi
   done
 
@@ -707,9 +771,9 @@ cmd_status() {
     echo -e "  ${GREEN}+${NC} prepare-commit-msg (global, AI client auto-detect)"
   elif [[ -f "$hook_dst" ]]; then
     echo -e "  ${YELLOW}~${NC} prepare-commit-msg exists but core.hooksPath not set"
-    echo -e "      run: git config --global core.hooksPath ~/.config/git/hooks"
+    echo -e "      run: cybernetix hooks install"
   else
-    echo -e "  ${RED}-${NC} not installed — run 'cybernetix setup'"
+    echo -e "  ${RED}-${NC} not installed (optional) — run 'cybernetix hooks install'"
   fi
 
   echo ""
@@ -749,21 +813,22 @@ usage() {
   echo "Usage: cybernetix <command> [options]"
   echo ""
   echo "Commands:"
-  echo "  setup              Initialize ~/.cybernetix/ on this machine"
-  echo "  sync [scope] [-f]  Distribute to AI tool config paths"
-  echo "  init [dir] [type]  Initialize or refresh project conventions"
-  echo "  reset              Reset ~/.cybernetix/ from repo, then force-sync"
-  echo "  status             Show current state"
+  echo "  setup                  Initialize ~/.cybernetix/ + install skills"
+  echo "  sync [scope] [-f]      Distribute to AI tool config paths"
+  echo "  init [dir] [type]      Initialize or refresh project conventions"
+  echo "  hooks [install|remove] Manage global git hook (opt-in)"
+  echo "  reset                  Reset ~/.cybernetix/ from repo, then force-sync"
+  echo "  status                 Show current state"
   echo ""
   echo "Sync scopes: conventions (default) | skills | all"
   echo "Init types:  fullstack | frontend-only | backend-service | cli"
   echo "Init tools:  claude,gemini,cursor,all"
   echo ""
   echo "Examples:"
-  echo "  cybernetix setup                    # First-time setup"
-  echo "  cybernetix sync                     # Sync conventions"
-  echo "  cybernetix sync skills -f           # Force rebuild skill symlinks"
-  echo "  cybernetix sync all                 # Sync everything"
+  echo "  cybernetix setup                    # First-time setup (non-invasive)"
+  echo "  cybernetix sync conventions         # Opt-in: add CNX conventions via @include"
+  echo "  cybernetix sync skills -f           # Rebuild skill symlinks"
+  echo "  cybernetix hooks install            # Opt-in: global git hook"
   echo "  cybernetix init . fullstack claude  # New project"
   echo "  cybernetix init .                   # Refresh existing project"
   echo "  cybernetix init ~/projects          # Batch refresh all sub-projects"
@@ -777,6 +842,7 @@ main() {
     setup)         cmd_setup "$@" ;;
     sync)          cmd_sync "$@" ;;
     init)          cmd_init "$@" ;;
+    hooks)         cmd_hooks "$@" ;;
     reset)         cmd_reset "$@" ;;
     status)        cmd_status "$@" ;;
     version|--version|-v) echo "cybernetix v${VERSION}" ;;

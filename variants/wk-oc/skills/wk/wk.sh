@@ -32,7 +32,7 @@ case $COMMAND in
   fix)
     show_skill "wk-fix-build"
     ;;
-  roll)
+  fly)
     show_skill "wk-fly-build"
     ;;
   review)
@@ -94,7 +94,7 @@ COMMANDS:
   design      Discuss + plan     $wk design "user login feature"
   build       Execute Story      $wk build US-001
   fix         Fix Bug            $wk fix "login button unresponsive"
-  roll        One-line delivery  $wk roll "add dark mode toggle"
+  fly         One-line delivery  $wk fly "add dark mode toggle"
   review      Code review        $wk review
   fetch       Single page scrape $wk fetch https://example.com
   crawl       Full site crawl    $wk crawl https://docs.example.com
@@ -111,6 +111,7 @@ SCENARIOS:
     Design → $wk design "requirement"
     Execute → $wk build US-001
     Review → $wk review
+    Quick → $wk fly "one-liner"
     Release → $wk changelog
 
 WORKFLOW:

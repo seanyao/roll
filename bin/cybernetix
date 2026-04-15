@@ -40,7 +40,6 @@ warn()  { echo -e "${YELLOW}[cnx]${NC} $*"; }
 err()   { echo -e "${RED}[cnx]${NC} $*" >&2; }
 
 # ─── Helper: read config value ───────────────────────────────────────────────
-# Simple YAML reader — no dependencies. Handles flat key: value pairs.
 config_get() {
   local key="$1"
   local default="${2:-}"
@@ -48,7 +47,6 @@ config_get() {
     local val
     val=$(grep -E "^${key}:" "$CNX_CONFIG" 2>/dev/null | head -1 | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*$//')
     if [[ -n "$val" ]]; then
-      # Expand ~ to $HOME
       echo "${val/#\~/$HOME}"
       return
     fi
@@ -71,7 +69,6 @@ safe_copy() {
   mkdir -p "$dst_dir"
 
   if [[ -f "$dst" ]] && [[ "$force" != "true" ]]; then
-    # Check if content is identical
     if diff -q "$src" "$dst" &>/dev/null; then
       return  # identical, skip silently
     fi
@@ -296,14 +293,14 @@ cmd_setup() {
   ok "Setup complete. Directory: ~/.cybernetix/"
   echo ""
   info "Next steps:"
-  echo "  1. Edit global conventions:  ${BOLD}cybernetix update${NC}"
-  echo "  2. Sync to AI tools:         ${BOLD}cybernetix sync${NC}"
+  echo "  1. Edit global conventions:  ${BOLD}vim ~/.cybernetix/conventions/global/AGENTS.md${NC}"
+  echo "  2. Sync changes:             ${BOLD}cybernetix sync${NC}"
   echo "  3. Init a new project:       ${BOLD}cybernetix init${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: sync [scope] [--force]
-# Distribute global conventions and skills to each AI tool's config path
+# Distribute global conventions and/or skills to each AI tool's config path
 # Scopes: conventions (default), skills, all
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_sync() {
@@ -338,39 +335,10 @@ cmd_sync() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: update
-# Open global conventions for editing, then sync conventions
-# ═══════════════════════════════════════════════════════════════════════════════
-cmd_update() {
-  if [[ ! -d "$CNX_GLOBAL" ]]; then
-    err "No global conventions found. Run 'cybernetix setup' first."
-    exit 1
-  fi
-
-  local editor
-  editor="$(config_get editor "${EDITOR:-vim}")"
-  editor=$(eval echo "$editor")
-
-  info "Opening global conventions in $editor..."
-  info "Directory: ~/.cybernetix/conventions/global/"
-  echo ""
-
-  if command -v "$editor" &>/dev/null; then
-    "$editor" "$CNX_GLOBAL"
-  else
-    err "Editor not found: $editor"
-    err "Set your editor: export EDITOR=code (or vim, nano, etc.)"
-    exit 1
-  fi
-
-  echo ""
-  info "Editor closed. Running sync conventions..."
-  cmd_sync conventions
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: init
-# Initialize a project with convention files from a template
+# COMMAND: init [dir] [type] [tools]
+# Initialize a project with convention files from a template.
+# Smart mode: if no type given and AGENTS.md already exists → auto-refresh.
+# Batch mode: if no type given and dir contains sub-projects → refresh all.
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_init() {
   if [[ ! -d "$CNX_TEMPLATES" ]]; then
@@ -382,14 +350,61 @@ cmd_init() {
   local project_type="${2:-}"
   local tools_arg="${3:-}"
 
-  # Interactive project type selection if not provided
+  # ── Auto-refresh / batch mode (no explicit type) ──────────────────────────
+  if [[ -z "$project_type" ]]; then
+    local abs_dir
+    abs_dir="$(cd "$project_dir" 2>/dev/null && pwd)" || { err "Directory not found: $project_dir"; exit 1; }
+
+    # Single project refresh: dir itself has AGENTS.md
+    if [[ -f "$abs_dir/AGENTS.md" ]]; then
+      info "Existing CNX project detected. Re-merging from latest templates..."
+      echo ""
+      refresh_project "$abs_dir"
+      echo ""
+      ok "Done."
+      return
+    fi
+
+    # Batch refresh: scan subdirectories for CNX projects
+    local has_sub_projects
+    has_sub_projects=$(find "$abs_dir" -maxdepth 2 -name "AGENTS.md" -type f 2>/dev/null \
+      | grep -v "/.cybernetix/\|/conventions/\|/template" | head -1)
+    if [[ -n "$has_sub_projects" ]]; then
+      info "Scanning ${BOLD}$abs_dir${NC} for CNX projects..."
+      echo ""
+      local found=0 updated=0 skipped=0
+      while IFS= read -r agents_file; do
+        local pdir
+        pdir="$(dirname "$agents_file")"
+        case "$pdir" in
+          */.cybernetix/*|*/conventions/*|*/template*) continue ;;
+        esac
+        found=$((found + 1))
+        if refresh_project "$pdir"; then
+          updated=$((updated + 1))
+        else
+          skipped=$((skipped + 1))
+        fi
+        echo ""
+      done < <(find "$abs_dir" -maxdepth 2 -name "AGENTS.md" -type f 2>/dev/null | sort)
+      if [[ $found -eq 0 ]]; then
+        warn "No CNX projects found in $abs_dir"
+        info "Looking for directories with AGENTS.md (depth <= 2)"
+      else
+        ok "Done: ${BOLD}$found${NC} projects found, ${BOLD}$updated${NC} refreshed, ${BOLD}$skipped${NC} skipped."
+      fi
+      return
+    fi
+  fi
+
+  # ── New project mode ──────────────────────────────────────────────────────
   if [[ -z "$project_type" ]]; then
     echo ""
     echo -e "${BOLD}Select project type:${NC}"
     echo ""
     echo "  1) fullstack        React + API + CLI (default)"
     echo "  2) frontend-only    React SPA, no backend"
-    echo "  3) backend-service   API/microservice, no frontend"
+    echo "  3) backend-service  API/microservice, no frontend"
     echo "  4) cli              Command-line tool"
     echo ""
     echo -n "Choice [1-4]: "
@@ -403,11 +418,10 @@ cmd_init() {
     esac
   fi
 
-  # AI tool selection — only generate files for tools you actually use
+  # AI tool selection
   local use_claude=false use_gemini=false use_cursor=false
 
   if [[ -n "$tools_arg" ]]; then
-    # Parse comma-separated tool list: --tools=claude,gemini
     IFS=',' read -ra tool_list <<< "$tools_arg"
     for t in "${tool_list[@]}"; do
       case "$t" in
@@ -447,7 +461,7 @@ cmd_init() {
     exit 1
   fi
 
-  # Resolve project directory
+  # Resolve project directory (create if new named project)
   if [[ "$project_dir" != "." ]]; then
     mkdir -p "$project_dir"
   fi
@@ -456,10 +470,8 @@ cmd_init() {
   info "Initializing ${BOLD}$project_type${NC} conventions in: $project_dir"
   echo ""
 
-  # AGENTS.md → project root (master conventions, tool-agnostic)
   merge_convention "AGENTS.md" "$tpl_dir" "$project_dir" "AGENTS.md"
 
-  # Tool-specific files go into each tool's hidden directory
   local created_files="AGENTS.md"
   if [[ "$use_claude" == "true" ]]; then
     mkdir -p "$project_dir/.claude"
@@ -480,11 +492,10 @@ cmd_init() {
   echo ""
   info "Created: $created_files"
   echo ""
-  info "Tip: use ${BOLD}\$cnx-init${NC} to scaffold the full project structure."
+  info "Tip: use ${BOLD}\$cnx-init${NC} in your AI coding agent to scaffold the full project structure."
 }
 
 # ─── Helper: merge global preamble + template into output ────────────────────
-# Args: source_filename tpl_dir out_dir display_name
 merge_convention() {
   local filename="$1"
   local tpl_dir="$2"
@@ -498,7 +509,6 @@ merge_convention() {
     return
   fi
 
-  # Build merged file: global content + separator + template content
   local merged
   merged="$(cat "$global_file" 2>/dev/null || true)"
   merged+=$'\n\n'
@@ -593,64 +603,6 @@ refresh_project() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: refresh
-# Auto-detect project type & tools, re-merge with latest templates
-# Single project: cybernetix refresh .
-# Batch: cybernetix refresh ~/CodeSpace/
-# ═══════════════════════════════════════════════════════════════════════════════
-cmd_refresh() {
-  local target="${1:-.}"
-  target="$(cd "$target" 2>/dev/null && pwd)" || { err "Directory not found: $1"; exit 1; }
-
-  if [[ ! -d "$CNX_GLOBAL" ]]; then
-    err "~/.cybernetix/ not set up. Run: cybernetix setup"
-    exit 1
-  fi
-
-  # Single project mode: target dir itself has AGENTS.md
-  if [[ -f "$target/AGENTS.md" ]]; then
-    info "Refreshing single project..."
-    echo ""
-    refresh_project "$target"
-    echo ""
-    ok "Done."
-    return
-  fi
-
-  # Batch mode: scan subdirectories for CNX projects
-  info "Scanning ${BOLD}$target${NC} for CNX projects..."
-  echo ""
-
-  local found=0 updated=0 skipped=0
-
-  while IFS= read -r agents_file; do
-    local project_dir
-    project_dir="$(dirname "$agents_file")"
-
-    # Skip cybernetix repo itself and template directories
-    case "$project_dir" in
-      */.cybernetix/*|*/conventions/*|*/template*) continue ;;
-    esac
-
-    found=$((found + 1))
-    if refresh_project "$project_dir"; then
-      updated=$((updated + 1))
-    else
-      skipped=$((skipped + 1))
-    fi
-    echo ""
-  done < <(find "$target" -maxdepth 2 -name "AGENTS.md" -type f 2>/dev/null | sort)
-
-  if [[ $found -eq 0 ]]; then
-    warn "No CNX projects found in $target"
-    info "Looking for directories with AGENTS.md (depth <= 2)"
-    return
-  fi
-
-  ok "Done: ${BOLD}$found${NC} projects found, ${BOLD}$updated${NC} refreshed, ${BOLD}$skipped${NC} skipped."
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: reset
 # Re-copy conventions and skills from repo source, then sync all with force
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -678,7 +630,6 @@ cmd_status() {
   echo -e "${BOLD}Cybernetix Convention Status${NC}"
   echo ""
 
-  # Check ~/.cybernetix
   if [[ -d "$CNX_HOME" ]]; then
     ok "~/.cybernetix/ exists"
   else
@@ -686,7 +637,6 @@ cmd_status() {
     return
   fi
 
-  # Check global conventions
   echo ""
   echo -e "${BOLD}Global conventions:${NC}"
   for f in AGENTS.md CLAUDE.md GEMINI.md .cursor-rules; do
@@ -697,19 +647,17 @@ cmd_status() {
     fi
   done
 
-  # Check skills
   echo ""
   echo -e "${BOLD}Global skills:${NC}"
   if [[ -d "$CNX_HOME/skills" ]]; then
     local count
     count=$(find "$CNX_HOME/skills" -maxdepth 1 -type d | wc -l | tr -d ' ')
-    count=$((count - 1)) # Subtract . itself
+    count=$((count - 1))
     echo -e "  ${GREEN}+${NC} ~/.cybernetix/skills ($count skills installed)"
   else
     echo -e "  ${RED}-${NC} ~/.cybernetix/skills (missing)"
   fi
 
-  # Check sync targets
   echo ""
   echo -e "${BOLD}Sync targets:${NC}"
 
@@ -724,7 +672,6 @@ cmd_status() {
   check_sync_status "Codex"       "$CNX_GLOBAL/AGENTS.md"  "$codex_target"
   check_sync_status "Gemini CLI"  "$CNX_GLOBAL/GEMINI.md"  "$gemini_target"
 
-  # Check skill symlinks
   echo ""
   echo -e "${BOLD}Skill symlinks:${NC}"
   local ai_dirs=(~/.claude ~/.gemini ~/.kimi ~/.codex ~/.cursor)
@@ -733,7 +680,6 @@ cmd_status() {
     if [[ -d "$ai_dir" ]]; then
       local name
       name=$(basename "$ai_dir" | sed 's/^\.//')
-      # Use tr for capitalization to support older bash versions
       name=$(echo "$name" | tr '[:lower:]' '[:upper:]' | cut -c1)$(echo "$name" | cut -c2-)
       local target_link="$ai_dir/skills"
       if [[ -L "$target_link" ]]; then
@@ -752,7 +698,6 @@ cmd_status() {
     fi
   done
 
-  # Check global git hook
   echo ""
   echo -e "${BOLD}Git hook:${NC}"
   local hook_dst="$HOME/.config/git/hooks/prepare-commit-msg"
@@ -767,7 +712,6 @@ cmd_status() {
     echo -e "  ${RED}-${NC} not installed — run 'cybernetix setup'"
   fi
 
-  # Check templates
   echo ""
   echo -e "${BOLD}Templates:${NC}"
   for tpl in fullstack frontend-only backend-service cli; do
@@ -807,12 +751,11 @@ usage() {
   echo "Commands:"
   echo "  setup              Initialize ~/.cybernetix/ on this machine"
   echo "  sync [scope] [-f]  Distribute to AI tool config paths"
-  echo "  update             Edit global conventions, then sync"
-  echo "  init [dir] [type]  Initialize project with convention files"
+  echo "  init [dir] [type]  Initialize or refresh project conventions"
   echo "  reset              Reset ~/.cybernetix/ from repo, then force-sync"
   echo "  status             Show current state"
   echo ""
-  echo "Sync scopes: conventions | skills | all"
+  echo "Sync scopes: conventions (default) | skills | all"
   echo "Init types:  fullstack | frontend-only | backend-service | cli"
   echo "Init tools:  claude,gemini,cursor,all"
   echo ""
@@ -822,6 +765,8 @@ usage() {
   echo "  cybernetix sync skills -f           # Force rebuild skill symlinks"
   echo "  cybernetix sync all                 # Sync everything"
   echo "  cybernetix init . fullstack claude  # New project"
+  echo "  cybernetix init .                   # Refresh existing project"
+  echo "  cybernetix init ~/projects          # Batch refresh all sub-projects"
 }
 
 main() {
@@ -831,8 +776,6 @@ main() {
   case "$cmd" in
     setup)         cmd_setup "$@" ;;
     sync)          cmd_sync "$@" ;;
-    update)        cmd_update "$@" ;;
-
     init)          cmd_init "$@" ;;
     reset)         cmd_reset "$@" ;;
     status)        cmd_status "$@" ;;

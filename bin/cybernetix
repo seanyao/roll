@@ -237,7 +237,8 @@ _link_skills() {
         local current_target
         current_target="$(readlink "$skill_link")"
         if [[ "$current_target" != "$skill_dir" ]]; then
-          ln -sf "$skill_dir" "$skill_link"
+          rm -f "$skill_link"
+          ln -s "$skill_dir" "$skill_link"
           repaired=$((repaired + 1))
         fi
         # correct symlink: skip silently

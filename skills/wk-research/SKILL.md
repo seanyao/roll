@@ -1,5 +1,4 @@
 ---
-hidden: true
 name: wk-research
 description: |
   Horizontal-Vertical (HV) Analysis deep research skill. A systematic framework for researching products, companies, concepts, technologies, or people.

@@ -1,5 +1,4 @@
 ---
-hidden: true
 name: wk-bb-debug
 description: Universal web debugger using Playwright. Works with or without Black Box (BB) integration. Auto-detects diagnostic capability, collects console/network/DOM data, analyzes issues, and suggests fixes.
 ---

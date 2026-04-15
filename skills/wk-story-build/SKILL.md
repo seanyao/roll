@@ -1,5 +1,4 @@
 ---
-hidden: true
 name: wk-story-build
 description: Execute User Story from backlog. Reads US from BACKLOG.md, splits into Actions, delivers via TCR workflow through commit + push + CI + deploy + verification. Updates backlog status on completion.
 ---

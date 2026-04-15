@@ -1,5 +1,4 @@
 ---
-hidden: true
 name: wk-fix-build
 description: Execute bugfix/hotfix from backlog. Reads FIX/BUG from BACKLOG.md, delivers via TCR workflow. Lighter than story-build, focused on single-issue fixes.
 ---

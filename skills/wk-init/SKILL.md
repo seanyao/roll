@@ -1,5 +1,4 @@
 ---
-hidden: true
 name: wk-init
 description: Initialize a new AI-Coding project with complete CNX workflow support. Detects existing project state and adapts: full scaffold for new projects, smart adoption for legacy projects, refresh for already-CNX projects.
 ---

@@ -1,5 +1,4 @@
 ---
-hidden: true
 name: wk-bb-analyzer
 description: Analyze diagnostic reports from wk-bb-debug. Reads BB diagnostic JSON files (native BB or universal mode) and provides structured analysis of app state, errors, API responses, and performance issues.
 ---

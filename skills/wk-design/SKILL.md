@@ -1,5 +1,4 @@
 ---
-hidden: true
 name: wk-design
 description: Unified entry for discussion, design and planning. Explores options when uncertain, designs solutions, splits into INVEST-compliant user stories, and writes to BACKLOG.md. Use when user wants to discuss approaches, design solutions, plan features, or create stories.
 ---

@@ -374,16 +374,13 @@ _sync_convention_for_tool() {
 _sync_conventions() {
   local force="${1:-false}"
 
-  local claude_target kimi_target codex_target gemini_target
-  claude_target="$(config_get sync_claude ~/.claude/CLAUDE.md)"
-  kimi_target="$(config_get sync_kimi ~/.kimi/AGENTS.md)"
-  codex_target="$(config_get sync_codex ~/.codex/AGENTS.md)"
-  gemini_target="$(config_get sync_gemini ~/.gemini/GEMINI.md)"
-
-  _sync_convention_for_tool "$WK_GLOBAL/CLAUDE.md"  "$claude_target"  "$force"
-  _sync_convention_for_tool "$WK_GLOBAL/AGENTS.md"  "$kimi_target"    "$force"
-  _sync_convention_for_tool "$WK_GLOBAL/AGENTS.md"  "$codex_target"   "$force"
-  _sync_convention_for_tool "$WK_GLOBAL/GEMINI.md"  "$gemini_target"  "$force"
+  while IFS= read -r entry; do
+    local ai_dir config_file src_file
+    ai_dir="$(_ai_dir "$entry")"
+    config_file="$(_ai_config "$entry")"
+    src_file="$(_ai_src "$entry")"
+    _sync_convention_for_tool "$WK_GLOBAL/$src_file" "$ai_dir/$config_file" "$force"
+  done < <(_get_ai_tools)
 }
 
 # ─── Internal: sync skills (pull + link) ──────────────────────────────────────
@@ -519,6 +516,22 @@ _select_tools() {
   fi
 }
 
+# ─── Helper: non-interactive auto-scan mode (CI / scripts) ───────────────────
+# Scans project files to resolve type; echoes the resolved type.
+_init_auto() {
+  local project_dir="$1"
+  info "Scanning project files...  正在扫描项目文件..."
+  local detected_type
+  detected_type="$(scan_project_type_from_files "$project_dir")"
+  if [[ "$detected_type" == "unknown" ]]; then
+    warn "Cannot determine project type from files. Defaulting to 'fullstack'.  无法从文件判断项目类型，默认使用 'fullstack'。"
+    echo "fullstack"
+  else
+    ok "Detected: ${BOLD}$detected_type${NC}  已检测到: ${BOLD}$detected_type${NC}"
+    echo "$detected_type"
+  fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: init [type] [tools]
 # Initialize a project with convention files from a template.
@@ -538,14 +551,7 @@ cmd_init() {
 
   # ── Explicit "auto" arg: non-interactive scan (for scripts / CI) ──────────
   if [[ "$project_type" == "auto" ]]; then
-    info "Scanning project files...  正在扫描项目文件..."
-    project_type="$(scan_project_type_from_files "$project_dir")"
-    if [[ "$project_type" == "unknown" ]]; then
-      warn "Cannot determine project type from files. Defaulting to 'fullstack'.  无法从文件判断项目类型，默认使用 'fullstack'。"
-      project_type="fullstack"
-    else
-      ok "Detected: ${BOLD}$project_type${NC}  已检测到: ${BOLD}$project_type${NC}"
-    fi
+    project_type="$(_init_auto "$project_dir")"
   fi
 
   # ── Interactive mode: detect first, then ask keep-or-switch ───────────────

@@ -48,9 +48,10 @@
 ---
 
 <a id="us-ref-002"></a>
-## US-REF-002 command 级集成测试 📋
+## US-REF-002 command 级集成测试 ✅
 
 **Created**: 2026-04-16  
+**Completed**: 2026-04-16  
 **Plan**: [refactor-plan.md](refactor-plan.md)
 
 - As a contributor to Wukong
@@ -58,24 +59,28 @@
 - So that command-level regressions are caught before any refactoring lands
 
 **AC:**
-- [ ] `cmd_setup` 集成测试：`~/.wukong/` 目录结构正确生成，幂等（运行两次结果一致）
-- [ ] `cmd_sync conventions` 集成测试：`wk.md` 写入目标目录，`@wk.md` 追加到主配置
-- [ ] `cmd_sync skills` 集成测试：skill symlinks 正确创建，stale symlinks 被清理
-- [ ] `cmd_init` 集成测试覆盖三路径：fresh 项目、legacy 项目、refresh（已有 AGENTS.md）
-- [ ] `cmd_init` 集成测试验证 scaffold 不创建 `docs/plans/` 目录
-- [ ] `cmd_status` 集成测试：输出包含正确的 sync 状态文字
-- [ ] 所有测试使用临时目录，不影响真实 `~/.wukong/`
+- [x] `cmd_setup` 集成测试：`~/.wukong/` 目录结构正确生成，幂等（运行两次结果一致）
+- [x] `cmd_sync conventions` 集成测试：`wk.md` 写入目标目录，`@wk.md` 追加到主配置
+- [x] `cmd_sync skills` 集成测试：skill symlinks 正确创建，stale symlinks 被清理
+- [x] `cmd_init` 集成测试覆盖三路径：fresh 项目、legacy 项目、refresh（已有 AGENTS.md）
+- [x] `cmd_init` 集成测试验证 scaffold 不创建 `docs/plans/` 目录
+- [x] `cmd_status` 集成测试：输出包含正确的 sync 状态文字
+- [x] 所有测试使用临时目录，不影响真实 `~/.wukong/`
 
 **Files:**
-- `tests/integration/cmd_setup.bats` (新建)
-- `tests/integration/cmd_sync.bats` (新建)
-- `tests/integration/cmd_init.bats` (新建)
-- `tests/integration/cmd_status.bats` (新建)
-- `tests/fixtures/projects/` (补充集成测试用的项目 fixture)
+- `tests/integration/helpers.bash` (新建：共享 helper)
+- `tests/integration/cmd_setup.bats` (新建：13 tests)
+- `tests/integration/cmd_sync.bats` (新建：8 tests)
+- `tests/integration/cmd_init.bats` (新建：13 tests)
+- `tests/integration/cmd_status.bats` (新建：5 tests)
+- `bin/wukong` (WK_HOME overridable + git config exit code fix)
 
 **Dependencies:**
 - Depends on: US-REF-001（bats 框架已就绪）
 - Depended on by: US-REF-003, US-REF-004, US-REF-005
+
+**TCR Stats**: 6 micro-commits（含 4 parallel agents）  
+**Bonus**: 顺手修复 `cmd_status` 中 git config exit code 导致 set -e abort 的 Bug
 
 ---
 
@@ -167,9 +172,10 @@
 ---
 
 <a id="us-ref-006"></a>
-## US-REF-006 删除 docs/plans/ scaffold — 对齐 AGENTS.md 约定 📋
+## US-REF-006 删除 docs/plans/ scaffold — 对齐 AGENTS.md 约定 ✅
 
 **Created**: 2026-04-16  
+**Completed**: 2026-04-16  
 **Plan**: [refactor-plan.md](refactor-plan.md)
 
 - As a user initializing a new project with Wukong
@@ -177,10 +183,10 @@
 - So that I don't get a misleading docs/plans/ directory that contradicts the documented structure
 
 **AC:**
-- [ ] `scaffold_new_project()` 不再创建 `docs/plans/` 目录（删除 `bin/wukong:822` 那行）
-- [ ] `wukong init fullstack/frontend-only/backend-service/cli` 后，只有 `docs/features/` 存在
-- [ ] 集成测试验证 scaffold 后无 `docs/plans/` 目录（在 US-REF-002 的 `cmd_init.bats` 中已覆盖）
-- [ ] 无任何文档引用 `docs/plans/` 作为存放路径（扫描并修正）
+- [x] `scaffold_new_project()` 不再创建 `docs/plans/` 目录（删除 `bin/wukong` 中那行）
+- [x] `wukong init fullstack/frontend-only/backend-service/cli` 后，只有 `docs/features/` 存在
+- [x] 集成测试验证 scaffold 后无 `docs/plans/` 目录（cmd_init.bats test #3 绿灯）
+- [x] 无任何文档引用 `docs/plans/` 作为存放路径（refactor-plan.md 已更新）
 
 **Files:**
 - `bin/wukong:822` (删除 `_mkscaffold "$dir/docs/plans"`)

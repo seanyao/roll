@@ -1,0 +1,1300 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Roll — AI Agent Convention Manager
+# Single source of truth for how all AI coding agents behave.
+
+VERSION="0.5.0"
+ROLL_HOME="${ROLL_HOME:-${HOME}/.roll}"
+ROLL_CONFIG="${ROLL_HOME}/config.yaml"
+ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
+ROLL_TEMPLATES="${ROLL_HOME}/conventions/templates"
+
+# Find repo root (resolve symlinks so it works from ~/.local/bin/roll)
+_source="${BASH_SOURCE[0]}"
+while [[ -L "$_source" ]]; do
+  _dir="$(cd "$(dirname "$_source")" && pwd)"
+  _source="$(readlink "$_source")"
+  [[ "$_source" != /* ]] && _source="$_dir/$_source"
+done
+SCRIPT_DIR="$(cd "$(dirname "$_source")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+REPO_CONVENTIONS="${REPO_ROOT}/conventions"
+
+# Colors
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
+
+# Respect NO_COLOR
+if [[ -n "${NO_COLOR:-}" ]]; then
+  RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
+fi
+
+info()  { echo -e "${CYAN}[roll]${NC} $*"; }
+ok()    { echo -e "${GREEN}[roll]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[roll]${NC} $*"; }
+err()   { echo -e "${RED}[roll]${NC} $*" >&2; }
+
+# Tracks merge actions across a single init run; reset before each batch
+_WK_MERGE_SUMMARY=()
+
+canonical_dir() {
+  local path="$1"
+  [[ -d "$path" ]] || return 1
+  (cd "$path" >/dev/null 2>&1 && pwd -P)
+}
+
+# Return a human-readable name for an AI tool dir.
+# Handles nested paths like ~/.openclaw/workspace → "openclaw".
+ai_tool_name() {
+  local dir="$1"
+  local bn
+  bn="$(basename "$dir" | sed 's/^\.//')"
+  if [[ "$bn" == "workspace" ]]; then
+    bn="$(basename "$(dirname "$dir")" | sed 's/^\.//')"
+  fi
+  echo "$bn"
+}
+
+lower_name() {
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+# ─── Helper: read config value ───────────────────────────────────────────────
+config_get() {
+  local key="$1"
+  local default="${2:-}"
+  if [[ -f "$ROLL_CONFIG" ]]; then
+    local val
+    val=$(grep -E "^${key}:" "$ROLL_CONFIG" 2>/dev/null | head -1 | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    if [[ -n "$val" ]]; then
+      echo "${val/#\~/$HOME}"
+      return
+    fi
+  fi
+  echo "${default/#\~/$HOME}"
+}
+
+# ─── Helpers: read ai_* entries from config ──────────────────────────────────
+# Returns one "dir|config_file|convention_src" line per ai_* key in config.yaml
+_get_ai_tools() {
+  grep -E "^ai_[a-z]+:" "$ROLL_CONFIG" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | while IFS= read -r entry; do
+    echo "${entry/#\~/$HOME}"
+  done
+}
+
+# Extract fields from a "<dir>|<config>|<src>" entry
+_ai_dir()    { echo "$1" | cut -d'|' -f1; }
+_ai_config() { echo "$1" | cut -d'|' -f2; }
+_ai_src()    { echo "$1" | cut -d'|' -f3; }
+
+# ─── Helper: safe copy with overwrite prompt ─────────────────────────────────
+safe_copy() {
+  local src="$1"
+  local dst="$2"
+  local force="${3:-false}"
+
+  if [[ ! -f "$src" ]]; then
+    return
+  fi
+
+  local dst_dir
+  dst_dir="$(dirname "$dst")"
+  mkdir -p "$dst_dir"
+
+  if [[ -f "$dst" ]] && [[ "$force" != "true" ]]; then
+    if diff -q "$src" "$dst" &>/dev/null; then
+      return  # identical, skip silently
+    fi
+    echo ""
+    warn "File exists and differs: ${dst/#$HOME/~}  文件已存在且内容不同: ${dst/#$HOME/~}"
+    echo -e "  ${BOLD}Overwrite?${NC} [y/N/d(iff)] "
+    read -r answer
+    case "$answer" in
+      d|D|diff)
+        diff --color=auto "$dst" "$src" || true
+        echo ""
+        echo -e "  ${BOLD}Overwrite?${NC} [y/N] "
+        read -r answer2
+        [[ "$answer2" =~ ^[Yy]$ ]] || { info "Skipped: ${dst/#$HOME/\~}  已跳过: ${dst/#$HOME/\~}"; return; }
+        ;;
+      y|Y) ;;
+      *) info "Skipped: ${dst/#$HOME/~}  已跳过: ${dst/#$HOME/~}"; return ;;
+    esac
+  fi
+
+  cp "$src" "$dst"
+  ok "Wrote: ${dst/#$HOME/~}  已写入: ${dst/#$HOME/~}"
+}
+
+# ─── Internal: pull skills from repo → ~/.roll/skills ──────────────────────
+_pull_skills() {
+  if [[ ! -d "$REPO_ROOT/skills" ]]; then
+    err "Skills source not found at: $REPO_ROOT/skills  技能源目录未找到: $REPO_ROOT/skills"
+    return 1
+  fi
+
+  mkdir -p "$ROLL_HOME/skills"
+
+  # Copy/update skills from repo → ~/.roll/skills/
+  for skill_dir in "$REPO_ROOT"/skills/*/; do
+    if [[ -d "$skill_dir" ]]; then
+      local skill_name
+      skill_name="$(basename "$skill_dir")"
+      mkdir -p "$ROLL_HOME/skills/$skill_name"
+      for f in "$skill_dir"*; do
+        [[ -f "$f" ]] && cp "$f" "$ROLL_HOME/skills/$skill_name/$(basename "$f")"
+      done
+    fi
+  done
+
+  # Prune skills that no longer exist in repo.
+  # ~/.roll/skills/ is roll's controlled namespace — safe to clean up.
+  for installed_dir in "$ROLL_HOME/skills"/*/; do
+    [[ -d "$installed_dir" ]] || continue
+    local installed_name
+    installed_name="$(basename "$installed_dir")"
+    if [[ ! -d "$REPO_ROOT/skills/$installed_name" ]]; then
+      rm -rf "$installed_dir"
+      info "Removed stale skill: $installed_name  已删除过时技能: $installed_name"
+    fi
+  done
+}
+
+# ─── Internal: pull conventions from repo → ~/.roll/conventions ────────────
+_pull_conventions() {
+  local force="${1:-false}"
+
+  if [[ ! -d "$REPO_CONVENTIONS" ]]; then
+    err "Convention source not found at: $REPO_CONVENTIONS  约定源文件未找到: $REPO_CONVENTIONS"
+    return 1
+  fi
+
+  mkdir -p "$ROLL_GLOBAL"
+  mkdir -p "$ROLL_TEMPLATES"/{fullstack,frontend-only,backend-service,cli}
+
+  info "Copying global conventions...  正在复制全局约定..."
+  for f in "$REPO_CONVENTIONS"/global/*; do
+    [[ -f "$f" ]] && safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")" "$force"
+  done
+  for f in "$REPO_CONVENTIONS"/global/.*; do
+    [[ -f "$f" ]] && [[ "$(basename "$f")" != "." ]] && [[ "$(basename "$f")" != ".." ]] && \
+      safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")" "$force"
+  done
+
+  info "Copying project templates...  正在复制项目模板..."
+  for tpl_dir in "$REPO_CONVENTIONS"/templates/*/; do
+    local tpl_name
+    tpl_name="$(basename "$tpl_dir")"
+    for f in "$tpl_dir"*; do
+      [[ -f "$f" ]] && safe_copy "$f" "$ROLL_TEMPLATES/$tpl_name/$(basename "$f")" "$force"
+    done
+    for f in "$tpl_dir".*; do
+      [[ -f "$f" ]] && [[ "$(basename "$f")" != "." ]] && [[ "$(basename "$f")" != ".." ]] && \
+        safe_copy "$f" "$ROLL_TEMPLATES/$tpl_name/$(basename "$f")" "$force"
+    done
+  done
+}
+
+# ─── Internal: install local cache from repo source ───────────────────────────
+_install_local() {
+  local force="${1:-false}"
+
+  if [[ ! -d "$REPO_CONVENTIONS" ]]; then
+    err "Convention source not found at: $REPO_CONVENTIONS  约定源文件未找到: $REPO_CONVENTIONS"
+    err "Run this from the roll repo, or symlink bin/roll to PATH.  请在 roll 仓库目录下运行，或将 bin/roll 软链接到 PATH。"
+    exit 1
+  fi
+
+  _pull_conventions "$force"
+  _pull_skills
+
+  # Recreate config if it has no ai_* entries (covers legacy sync_* format and blank/broken configs)
+  if [[ -f "$ROLL_CONFIG" ]] && ! grep -qE "^ai_[a-z]+:" "$ROLL_CONFIG" 2>/dev/null; then
+    warn "Config has no ai_* entries — recreating with defaults (backup saved)  配置无 ai_* 条目，将重建（已备份）"
+    cp "$ROLL_CONFIG" "${ROLL_CONFIG}.bak"
+    info "Backup saved: ~/.roll/config.yaml.bak  备份已保存: ~/.roll/config.yaml.bak"
+    rm "$ROLL_CONFIG"
+  fi
+
+  # Create config if it doesn't exist
+  if [[ ! -f "$ROLL_CONFIG" ]]; then
+    info "Creating default config...  正在创建默认配置..."
+    cat > "$ROLL_CONFIG" << 'YAML'
+# Roll Configuration
+# Edit this file, then run `roll sync` to apply.
+
+# AI tools — each entry controls both convention sync and skill linking
+# Format: <name>: <dir>|<config_file>|<convention_src>
+ai_claude: ~/.claude|CLAUDE.md|CLAUDE.md
+ai_gemini: ~/.gemini|GEMINI.md|GEMINI.md
+ai_kimi: ~/.kimi|AGENTS.md|AGENTS.md
+ai_codex: ~/.codex|AGENTS.md|AGENTS.md
+ai_cursor: ~/.cursor|.cursor-rules|.cursor-rules
+ai_openclaw: ~/.openclaw/workspace|AGENTS.md|AGENTS.md
+
+# User preferences
+default_language: zh
+default_project_type: fullstack
+editor: ${EDITOR:-vim}
+YAML
+    ok "Created: ~/.roll/config.yaml  已创建: ~/.roll/config.yaml"
+  fi
+
+}
+
+# ─── Internal: create or repair per-skill symlinks (non-destructive) ─────────
+_link_skills() {
+  local force="${1:-false}"
+  local wk_skills_real repo_skills_real
+  wk_skills_real="$(canonical_dir "$ROLL_HOME/skills" 2>/dev/null || true)"
+  repo_skills_real="$(canonical_dir "$REPO_ROOT/skills" 2>/dev/null || true)"
+
+  while IFS= read -r entry; do
+    local ai_dir
+    ai_dir="$(_ai_dir "$entry")"
+    [[ -d "$ai_dir" ]] || continue
+
+    local ai_name ai_dir_real skills_dir
+    ai_name="$(ai_tool_name "$ai_dir")"
+    ai_dir_real="$(canonical_dir "$ai_dir" 2>/dev/null || true)"
+    skills_dir="$ai_dir/skills"
+
+    if [[ -n "$ai_dir_real" && \
+          ( "$ai_dir_real" == "$REPO_ROOT" || "$ai_dir_real" == "$REPO_ROOT"/* ) ]]; then
+      warn "Skipped ~/${ai_name} (resolves to repo — refusing to manage skills inside roll worktree)  已跳过 ~/${ai_name}（解析到仓库目录 — 拒绝在 roll worktree 内管理技能）"
+      continue
+    fi
+
+    # Guard: resolve ALL symlink chains — block writing anywhere inside the repo
+    local skills_real
+    skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
+    if [[ -n "$skills_real" && -n "$repo_skills_real" && \
+          ( "$skills_real" == "$repo_skills_real" || "$skills_real" == "$repo_skills_real"/* ) ]]; then
+      warn "Skipped ~/${ai_name}/skills (resolves to repo — check if ~/$(lower_name "$ai_name") symlinks to roll repo)  已跳过 ~/${ai_name}/skills（解析到仓库 — 检查 ~/$(lower_name "$ai_name") 是否软链接到 roll 仓库）"
+      continue
+    fi
+
+    # Handle legacy whole-dir symlink
+    if [[ -L "$skills_dir" ]]; then
+      local skills_target
+      skills_target="$(readlink "$skills_dir")"
+      if [[ -n "$skills_real" && "$skills_real" == "$wk_skills_real" ]]; then
+        continue  # Whole-dir symlink to WK skills — still functional
+      fi
+      # Dangling or legacy whole-dir symlink — remove and recreate as per-skill links
+      if [[ -z "$skills_real" ]] || \
+         [[ "$skills_target" == *"cybernetix"* ]] || \
+         [[ "$skills_target" == *"wukong"* ]]; then
+        info "Removing legacy symlink ~/${ai_name}/skills -> ${skills_target/#$HOME/~}  正在移除遗留软链接 ~/${ai_name}/skills -> ${skills_target/#$HOME/~}"
+        rm "$skills_dir"
+      else
+        warn "Skipped ~/${ai_name}/skills -> ${skills_target/#$HOME/~} (unknown symlink target)  已跳过 ~/${ai_name}/skills -> ${skills_target/#$HOME/~}（未知软链接目标）"
+        continue
+      fi
+    fi
+
+    mkdir -p "$skills_dir"
+    skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
+    if [[ -n "$skills_real" && -n "$repo_skills_real" && \
+          ( "$skills_real" == "$repo_skills_real" || "$skills_real" == "$repo_skills_real"/* ) ]]; then
+      warn "Skipped ~/${ai_name}/skills (created path resolves to repo — refusing to write)  已跳过 ~/${ai_name}/skills（创建路径解析到仓库 — 拒绝写入）"
+      continue
+    fi
+    local linked=0 repaired=0 pruned=0
+
+    # Prune stale roll-* symlinks pointing to skills no longer in ~/.roll/skills/
+    for link in "$skills_dir"/roll-*; do
+      [[ -L "$link" ]] || continue
+      local link_target
+      link_target="$(readlink "$link")"
+      # Only remove symlinks we own (pointing into our skills dir)
+      if [[ "$link_target" == "$ROLL_HOME/skills/"* ]] && [[ ! -d "$link" ]]; then
+        rm "$link"
+        pruned=$((pruned + 1))
+      fi
+    done
+
+    for skill_dir in "$ROLL_HOME/skills"/*/; do
+      [[ -d "$skill_dir" ]] || continue
+      local skill_name
+      skill_name="$(basename "$skill_dir")"
+      local skill_link="$skills_dir/$skill_name"
+
+      if [[ -L "$skill_link" ]]; then
+        local current_target
+        current_target="$(readlink "$skill_link")"
+        if [[ "$current_target" != "$skill_dir" ]]; then
+          ln -sf "$skill_dir" "$skill_link"
+          repaired=$((repaired + 1))
+        fi
+        # correct symlink: skip silently
+      elif [[ ! -e "$skill_link" ]]; then
+        ln -s "$skill_dir" "$skill_link"
+        linked=$((linked + 1))
+      fi
+      # real file/dir at that path: skip — never touch user content
+    done
+    if [[ $((linked + repaired + pruned)) -gt 0 ]]; then
+      ok "Skills linked in ~/${ai_name}/skills (+${linked} new, ~${repaired} repaired, -${pruned} pruned)  已在 ~/${ai_name}/skills 中创建软链接（新增 +${linked}，修复 ~${repaired}，清理 -${pruned}）"
+    fi
+  done < <(_get_ai_tools)
+}
+
+# ─── Internal: sync conventions via @include — never overwrites user files ─────
+# Writes WK content to {ai_dir}/roll.md, appends @roll.md to main config.
+_sync_convention_for_tool() {
+  local src="$1"       # source: ~/.roll/conventions/global/CLAUDE.md
+  local main_dst="$2"  # target: ~/.claude/CLAUDE.md
+  local force="$3"
+
+  [[ -f "$src" ]] || return
+  local dst_dir
+  dst_dir="$(dirname "$main_dst")"
+
+  # Only proceed if the AI tool directory already exists (except Claude, always create)
+  if [[ "$dst_dir" != "$HOME/.claude" ]] && [[ ! -d "$dst_dir" ]]; then
+    return
+  fi
+  mkdir -p "$dst_dir"
+
+  # Write/update roll.md — this is our file, always safe to overwrite
+  local wk_file="$dst_dir/roll.md"
+  if [[ "$force" == "true" ]] || ! diff -q "$src" "$wk_file" &>/dev/null 2>&1; then
+    cp "$src" "$wk_file"
+    ok "Wrote: ${wk_file/#$HOME/~}  已写入: ${wk_file/#$HOME/~}"
+  fi
+
+  # Append @roll.md include to main config — never overwrite existing content
+  if [[ ! -f "$main_dst" ]]; then
+    printf '@roll.md\n' > "$main_dst"
+    ok "Created: ${main_dst/#$HOME/~}  已创建: ${main_dst/#$HOME/~}"
+  elif ! grep -qF "@roll.md" "$main_dst" 2>/dev/null; then
+    printf '\n@roll.md\n' >> "$main_dst"
+    ok "Appended @roll.md to: ${main_dst/#$HOME/~}  已将 @roll.md 追加至: ${main_dst/#$HOME/~}"
+  else
+    ok "Already included: ${main_dst/#$HOME/~}  已包含: ${main_dst/#$HOME/~}"
+  fi
+}
+
+_sync_conventions() {
+  local force="${1:-false}"
+
+  while IFS= read -r entry; do
+    local ai_dir config_file src_file
+    ai_dir="$(_ai_dir "$entry")"
+    config_file="$(_ai_config "$entry")"
+    src_file="$(_ai_src "$entry")"
+    _sync_convention_for_tool "$ROLL_GLOBAL/$src_file" "$ai_dir/$config_file" "$force"
+  done < <(_get_ai_tools)
+}
+
+# ─── Internal: sync skills (pull + link) ──────────────────────────────────────
+_sync_skills() {
+  local force="${1:-false}"
+  info "Updating skills...  正在更新技能..."
+  _pull_skills
+  ok "Skills updated in ~/.roll/skills  技能已更新至 ~/.roll/skills"
+  info "Creating skill symlinks for AI tools...  正在为 AI 工具创建技能软链接..."
+  _link_skills "$force"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: setup [--force]
+# Initialize ~/.roll/ and sync everything to AI tools in one step
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_setup() {
+  local force=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force|-f) force=true; shift ;;
+      *) err "Unknown argument: $1  未知参数: $1"; exit 1 ;;
+    esac
+  done
+
+  info "Setting up Roll on this machine...  正在初始化 Roll..."
+  echo ""
+
+  _install_local "$force"
+  echo ""
+  info "Syncing to AI tools...  正在同步到 AI 工具..."
+  _sync_conventions "$force"
+  echo ""
+  _sync_skills "$force"
+
+  echo ""
+  ok "Setup complete.  初始化完成。"
+
+  # Offer git hook install if not already installed (interactive terminals only)
+  local hook_dst="$HOME/.config/git/hooks/prepare-commit-msg"
+  local hooks_path
+  hooks_path=$(git config --global core.hooksPath 2>/dev/null || true)
+  if [[ -t 0 ]] && { [[ ! -f "$hook_dst" ]] || [[ "$hooks_path" != "$HOME/.config/git/hooks" ]]; }; then
+    echo ""
+    echo -n "  Install global git hook (tags commits with AI client)? [y/N] "
+    read -r _hook_ans
+    if [[ "${_hook_ans:-N}" =~ ^[Yy]$ ]]; then
+      cmd_hook install
+    fi
+  fi
+
+  echo ""
+  info "Next: run ${BOLD}roll init${NC} inside a project to initialize it.  下一步：在项目目录运行 roll init"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: sync [--force]
+# Full pipeline: repo → ~/.roll/ → AI tool config paths
+# Pulls latest conventions from repo, then distributes to all AI tools.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_sync() {
+  if [[ ! -d "$ROLL_HOME" ]]; then
+    err "~/.roll/ not found. Run 'roll setup' first.  ~/.roll/ 不存在，请先运行 'roll setup'。"
+    exit 1
+  fi
+
+  local force=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force|-f) force=true; shift ;;
+      *) err "Unknown sync argument: $1  未知同步参数: $1"; exit 1 ;;
+    esac
+  done
+
+  info "Syncing from repo to AI tools...  正在从仓库同步到 AI 工具..."
+  echo ""
+  _pull_conventions "$force"
+  echo ""
+  _sync_conventions "$force"
+  echo ""
+  _sync_skills "$force"
+  echo ""
+  ok "Sync complete.  同步完成。"
+}
+
+# ─── Helper: merge global AGENTS.md into project (no type prompt) ────────────
+# Fresh project: copies global AGENTS.md.
+# Existing AGENTS.md: appends any ## sections missing from global.
+_merge_global_to_project() {
+  local project_dir="$1"
+  local src="$ROLL_GLOBAL/AGENTS.md"
+  local dst="$project_dir/AGENTS.md"
+
+  [[ -f "$src" ]] || { warn "Global AGENTS.md not found at ${src/#$HOME/~}"; return; }
+
+  if [[ ! -f "$dst" ]]; then
+    cp "$src" "$dst"
+    ok "Created: AGENTS.md"
+    _WK_MERGE_SUMMARY+=("created|AGENTS.md")
+    return
+  fi
+
+  if diff -q "$src" "$dst" &>/dev/null; then
+    _WK_MERGE_SUMMARY+=("unchanged|AGENTS.md")
+    return
+  fi
+
+  # Section-merge: append any ## sections from global missing in project
+  local added=0 cur_h="" cur_b=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^##\  ]]; then
+      if [[ -n "$cur_h" ]] && ! grep -qF "$cur_h" "$dst" 2>/dev/null; then
+        printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$dst"
+        added=$((added + 1))
+      fi
+      cur_h="$line"; cur_b=""
+    elif [[ -n "$cur_h" ]]; then
+      cur_b+="$line"$'\n'
+    fi
+  done < "$src"
+  if [[ -n "$cur_h" ]] && ! grep -qF "$cur_h" "$dst" 2>/dev/null; then
+    printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$dst"
+    added=$((added + 1))
+  fi
+
+  if [[ $added -gt 0 ]]; then
+    ok "Merged: AGENTS.md ($added new sections)"
+    _WK_MERGE_SUMMARY+=("merged|AGENTS.md")
+  else
+    _WK_MERGE_SUMMARY+=("unchanged|AGENTS.md")
+  fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: init
+# Initialize or re-merge a project. Always operates on the current directory.
+# Fresh project: creates AGENTS.md + BACKLOG.md + docs/features/
+# Existing AGENTS.md: re-merges global conventions (section-level, non-destructive)
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_init() {
+  if [[ ! -d "$ROLL_TEMPLATES" ]]; then
+    err "No templates found. Run 'roll setup' first.  未找到模板，请先运行 'roll setup'。"
+    exit 1
+  fi
+
+  local project_dir
+  project_dir="$(pwd)"
+  _WK_MERGE_SUMMARY=()
+
+  if [[ -f "$project_dir/AGENTS.md" ]]; then
+    info "Re-merging global conventions...  正在重新合并全局约定..."
+    _merge_global_to_project "$project_dir"
+    print_merge_summary
+    echo ""
+    ok "Done.  完成。"
+  else
+    _merge_global_to_project "$project_dir"
+    _write_backlog "$project_dir/BACKLOG.md"
+    mkdir -p "$project_dir/docs/features"
+    print_merge_summary
+    echo ""
+    ok "Initialized.  已初始化。"
+  fi
+}
+
+# ─── Helper: merge global preamble + template into output ────────────────────
+merge_convention() {
+  local filename="$1"
+  local tpl_dir="$2"
+  local out_dir="$3"
+  local display="${4:-$filename}"
+  local global_file="$ROLL_GLOBAL/$filename"
+  local tpl_file="$tpl_dir/$filename"
+  local out_file="$out_dir/$filename"
+
+  if [[ ! -f "$tpl_file" ]]; then
+    return
+  fi
+
+  local merged
+  merged="$(cat "$global_file" 2>/dev/null || true)"
+  merged+=$'\n\n'
+  merged+="---"
+  merged+=$'\n\n'
+  merged+="$(cat "$tpl_file")"
+
+  if [[ -f "$out_file" ]]; then
+    if diff -q <(echo "$merged") "$out_file" &>/dev/null; then
+      _WK_MERGE_SUMMARY+=("unchanged|$display")
+      return  # identical, nothing to do
+    fi
+    warn "File exists: $display  文件已存在: $display"
+    echo -n "  [o] Overwrite  [k] Keep  [M] Merge (default): "
+    read -r answer
+    answer="${answer:-M}"
+    case "$answer" in
+      o|O)
+        echo "$merged" > "$out_file"
+        ok "Overwritten: $display  已覆盖: $display"
+        _WK_MERGE_SUMMARY+=("overwritten|$display")
+        return
+        ;;
+      k|K)
+        info "Kept: $display  已保留: $display"
+        _WK_MERGE_SUMMARY+=("kept|$display")
+        return
+        ;;
+      m|M|"")
+        # Merge: for each ## section in template:
+        #   - if missing in output → append
+        #   - if present but content differs → show diff, prompt [u/k]
+        #   - if present and identical → skip
+
+        # Helper: extract a section's body (lines after heading until next ## or EOF)
+        # Usage: _extract_section "$file" "$heading"
+        _extract_section() {
+          local file="$1"
+          local heading="$2"
+          local in_section=false
+          local body=""
+          while IFS= read -r ln; do
+            if [[ "$ln" == "$heading" ]]; then
+              in_section=true
+              continue
+            fi
+            if [[ "$in_section" == "true" ]]; then
+              if [[ "$ln" =~ ^##\  ]]; then
+                break
+              fi
+              body+="$ln"$'\n'
+            fi
+          done < "$file"
+          printf '%s' "$body"
+        }
+
+        local current_heading=""
+        local current_body=""
+
+        # _process_section: check/append/update a completed section
+        _process_section() {
+          local heading="$1"
+          local body="$2"
+          local out="$3"
+          if ! grep -qF "$heading" "$out" 2>/dev/null; then
+            # Section missing → append
+            printf '\n%s\n%s' "$heading" "$body" >> "$out"
+          else
+            # Section exists → compare content
+            local existing
+            existing="$(_extract_section "$out" "$heading")"
+            if [[ "$body" != "$existing" ]]; then
+              echo ""
+              warn "Section \"$heading\" exists but content differs:"
+              diff <(printf '%s' "$existing") <(printf '%s' "$body") || true
+              echo -n "  [u] update with template  [k] keep mine (default): "
+              local sec_ans
+              read -r sec_ans
+              sec_ans="${sec_ans:-k}"
+              if [[ "$sec_ans" == "u" || "$sec_ans" == "U" ]]; then
+                # Replace existing section with template section
+                local tmp_out
+                tmp_out="$(mktemp)"
+                local skip=false
+                while IFS= read -r fline; do
+                  if [[ "$fline" == "$heading" ]]; then
+                    skip=true
+                    printf '%s\n%s' "$heading" "$body" >> "$tmp_out"
+                    continue
+                  fi
+                  if [[ "$skip" == "true" ]]; then
+                    if [[ "$fline" =~ ^##\  ]]; then
+                      skip=false
+                      printf '%s\n' "$fline" >> "$tmp_out"
+                    fi
+                    continue
+                  fi
+                  printf '%s\n' "$fline" >> "$tmp_out"
+                done < "$out"
+                mv "$tmp_out" "$out"
+              fi
+            fi
+          fi
+        }
+
+        # Parse template sections, reading from file (not herestring) to keep stdin free
+        # for interactive user prompts inside _process_section
+        local tpl_sections=()
+        local tpl_bodies=()
+        local cur_h="" cur_b=""
+        while IFS= read -r line; do
+          if [[ "$line" =~ ^##\  ]]; then
+            if [[ -n "$cur_h" ]]; then
+              tpl_sections+=("$cur_h")
+              tpl_bodies+=("$cur_b")
+            fi
+            cur_h="$line"
+            cur_b=""
+          elif [[ -n "$cur_h" ]]; then
+            cur_b+="$line"$'\n'
+          fi
+        done < "$tpl_file"
+        # Capture last section
+        if [[ -n "$cur_h" ]]; then
+          tpl_sections+=("$cur_h")
+          tpl_bodies+=("$cur_b")
+        fi
+
+        # Now process sections (stdin is free for user input)
+        local i
+        for (( i=0; i<${#tpl_sections[@]}; i++ )); do
+          _process_section "${tpl_sections[$i]}" "${tpl_bodies[$i]}" "$out_file"
+        done
+
+        ok "Merged: $display  已合并: $display"
+        _WK_MERGE_SUMMARY+=("merged|$display")
+        return
+        ;;
+    esac
+  fi
+
+  echo "$merged" > "$out_file"
+  ok "Created: $display  已创建: $display"
+  _WK_MERGE_SUMMARY+=("created|$display")
+}
+
+# ─── Helper: print a tidy summary of merge actions ───────────────────────────
+print_merge_summary() {
+  if [[ ${#_WK_MERGE_SUMMARY[@]} -eq 0 ]]; then
+    return
+  fi
+  echo ""
+  echo "  ┌─ 操作摘要 Summary ──────────────────────────────────┐"
+  for entry in "${_WK_MERGE_SUMMARY[@]}"; do
+    local action="${entry%%|*}"
+    local file="${entry##*|}"
+    case "$action" in
+      merged)      printf "  │  ${GREEN}✦ merged${NC}      %-30s│\n" "$file" ;;
+      created)     printf "  │  ${GREEN}+ created${NC}     %-30s│\n" "$file" ;;
+      overwritten) printf "  │  ${YELLOW}↺ overwritten${NC} %-30s│\n" "$file" ;;
+      kept)        printf "  │  ${CYAN}· kept${NC}        %-30s│\n" "$file" ;;
+      unchanged)   printf "  │    unchanged    %-30s│\n" "$file" ;;
+    esac
+  done
+  echo "  └─────────────────────────────────────────────────────┘"
+}
+
+# ─── Helper: auto-detect project type by scanning project files ──────────────
+scan_project_type_from_files() {
+  local dir="${1:-.}"
+  local has_frontend=false
+  local has_backend=false
+  local has_cli=false
+
+  # Frontend signals
+  if [[ -f "$dir/package.json" ]]; then
+    grep -qiE '"react"|"vue"|"next"|"nuxt"|"vite"|"svelte"' "$dir/package.json" 2>/dev/null \
+      && has_frontend=true
+  fi
+  [[ -d "$dir/src" || -d "$dir/app" || -d "$dir/pages" || -d "$dir/components" ]] \
+    && has_frontend=true
+
+  # Backend/API signals
+  [[ -d "$dir/server" || -d "$dir/api" || -d "$dir/backend" ]] && has_backend=true
+  [[ -f "$dir/go.mod" || -f "$dir/main.go" || -f "$dir/main.py" || -f "$dir/app.py" \
+    || -f "$dir/Cargo.toml" || -f "$dir/requirements.txt" || -f "$dir/pyproject.toml" ]] \
+    && has_backend=true
+  # DB/ORM/server-side deps in package.json → backend signal
+  if [[ -f "$dir/package.json" ]]; then
+    grep -qiE '"prisma"|"@prisma/client"|"typeorm"|"sequelize"|"mongoose"|"drizzle-orm"|"@neondatabase/serverless"|"pg"|"mysql2"|"mongodb"|"redis"|"ioredis"|"express"|"fastify"|"koa"|"hapi"|"@hapi/hapi"|"apollo-server"|"graphql-yoga"|"trpc"' "$dir/package.json" 2>/dev/null \
+      && has_backend=true
+  fi
+  # Prisma schema file is a definitive backend signal
+  [[ -f "$dir/prisma/schema.prisma" ]] && has_backend=true
+
+  # CLI signals (bin/ with executables, or cmd/ layout common in Go CLIs)
+  [[ -d "$dir/bin" || -d "$dir/cmd" ]] && has_cli=true
+
+  # Determine type
+  if $has_frontend && $has_backend; then
+    echo "fullstack"
+  elif $has_frontend && ! $has_backend; then
+    echo "frontend-only"
+  elif $has_cli && ! $has_frontend; then
+    echo "cli"
+  elif $has_backend && ! $has_frontend; then
+    echo "backend-service"
+  else
+    echo "unknown"
+  fi
+}
+
+# ─── Helper: true when cwd has no existing source code ───────────────────────
+is_fresh_project() {
+  local dir="${1:-.}"
+  ! ( [[ -f "$dir/package.json" ]] || [[ -f "$dir/go.mod" ]] || \
+      [[ -f "$dir/Cargo.toml" ]] || [[ -f "$dir/requirements.txt" ]] || \
+      [[ -f "$dir/pyproject.toml" ]] || \
+      [[ -d "$dir/src" ]] || [[ -d "$dir/api" ]] || [[ -d "$dir/app" ]] )
+}
+
+# ─── Helper: make a scaffold dir + .gitkeep ───────────────────────────────────
+_mkscaffold() { mkdir -p "$1"; touch "$1/.gitkeep"; }
+
+# ─── Helper: write starter BACKLOG.md (no-op if exists) ──────────────────────
+_write_backlog() {
+  [[ -f "$1" ]] && return
+  cat > "$1" << 'EOF'
+# Project Backlog
+
+## Epic: Initial Setup
+| Story | Description | Status |
+|-------|-------------|--------|
+
+## Bug Fixes
+| ID | Problem | Status |
+|----|---------|--------|
+EOF
+}
+
+# ─── Helper: write starter .gitignore (no-op if exists) ──────────────────────
+_write_gitignore() {
+  [[ -f "$1" ]] && return
+  cat > "$1" << 'EOF'
+node_modules/
+dist/
+build/
+.env
+*.local
+.DS_Store
+*.log
+EOF
+}
+
+# ─── Helper: write starter .env.example (no-op if exists) ────────────────────
+_write_env_example() {
+  [[ -f "$1" ]] && return
+  cat > "$1" << 'EOF'
+# Environment Variables — copy to .env and fill in values
+
+# Application
+# NODE_ENV=development
+# PORT=3000
+
+# Database
+# DATABASE_URL=postgresql://user:pass@localhost:5432/db
+
+# Auth
+# JWT_SECRET=your-secret-key
+EOF
+}
+
+# ─── Helper: detect project type from existing AGENTS.md ─────────────────────
+detect_project_type() {
+  local agents_file="$1/AGENTS.md"
+  [[ -f "$agents_file" ]] || { echo "unknown"; return; }
+
+  local content
+  content="$(cat "$agents_file")"
+
+  if echo "$content" | grep -qi "Fullstack Web"; then
+    echo "fullstack"
+  elif echo "$content" | grep -qi "Backend Service"; then
+    echo "backend-service"
+  elif echo "$content" | grep -qi "Frontend Only"; then
+    echo "frontend-only"
+  elif echo "$content" | grep -qi "CLI Tool"; then
+    echo "cli"
+  else
+    # AGENTS.md exists but has no type marker — fall back to file-based scan
+    scan_project_type_from_files "$1"
+  fi
+}
+
+# ─── Helper: detect AI tools from existing convention files ──────────────────
+detect_tools() {
+  local dir="$1"
+  local tools=""
+  [[ -f "$dir/.claude/CLAUDE.md" ]] && tools+="claude,"
+  [[ -f "$dir/GEMINI.md" ]] && tools+="gemini,"
+  [[ -f "$dir/.cursor-rules" ]] && tools+="cursor,"
+  echo "${tools%,}"
+}
+
+# ─── Helper: refresh a single project ────────────────────────────────────────
+refresh_project() {
+  local project_dir="$1"
+  local project_name
+  project_name="$(basename "$project_dir")"
+
+  local ptype
+  ptype="$(detect_project_type "$project_dir")"
+
+  if [[ "$ptype" == "unknown" ]]; then
+    warn "  ${BOLD}$project_name${NC}: cannot detect project type — skipping  无法检测项目类型 — 已跳过"
+    return 1
+  fi
+
+  local tools
+  tools="$(detect_tools "$project_dir")"
+
+  local tpl_dir="$ROLL_TEMPLATES/$ptype"
+  if [[ ! -d "$tpl_dir" ]]; then
+    warn "  ${BOLD}$project_name${NC}: template '$ptype' not found — skipping  模板 '$ptype' 未找到 — 已跳过"
+    return 1
+  fi
+
+  info "  ${BOLD}$project_name${NC} ($ptype | ${tools:-AGENTS.md only})  正在处理: ${BOLD}$project_name${NC}"
+
+  merge_convention "AGENTS.md" "$tpl_dir" "$project_dir" "  AGENTS.md"
+
+  if echo "$tools" | grep -q "claude"; then
+    mkdir -p "$project_dir/.claude"
+    merge_convention "CLAUDE.md" "$tpl_dir" "$project_dir/.claude" "  .claude/CLAUDE.md"
+  fi
+  if echo "$tools" | grep -q "gemini"; then
+    merge_convention "GEMINI.md" "$tpl_dir" "$project_dir" "  GEMINI.md"
+  fi
+  if echo "$tools" | grep -q "cursor"; then
+    merge_convention ".cursor-rules" "$tpl_dir" "$project_dir" "  .cursor-rules"
+  fi
+
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: hooks <subcommand>
+# Manage the global git hook (opt-in — modifies git global config)
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_hook() {
+  local subcmd="${1:-install}"
+
+  case "$subcmd" in
+    install)
+      local hooks_dir="$HOME/.config/git/hooks"
+      local hook_src="$REPO_ROOT/hooks/prepare-commit-msg"
+      local hook_dst="$hooks_dir/prepare-commit-msg"
+
+      if [[ ! -f "$hook_src" ]]; then
+        err "Hook source not found: $hook_src  Hook 源文件未找到: $hook_src"
+        exit 1
+      fi
+
+      local current_hooks_path
+      current_hooks_path=$(git config --global core.hooksPath 2>/dev/null || echo "(not set)")
+
+      echo ""
+      warn "This will modify your global git configuration:  此操作将修改您的全局 git 配置："
+      echo "  git config --global core.hooksPath $hooks_dir"
+      echo ""
+      echo "  Current value: $current_hooks_path  当前值: $current_hooks_path"
+      echo ""
+      if [[ "$current_hooks_path" != "(not set)" ]] && [[ "$current_hooks_path" != "$hooks_dir" ]]; then
+        warn "WARNING: Hooks at '$current_hooks_path' will stop running after this change.  警告：此更改后 '$current_hooks_path' 处的 hooks 将不再运行。"
+        echo ""
+      fi
+      echo -n "  Proceed? [y/N] "
+      read -r answer
+      [[ "$answer" =~ ^[Yy]$ ]] || { info "Aborted.  已取消。"; return; }
+
+      mkdir -p "$hooks_dir"
+      cp "$hook_src" "$hook_dst"
+      chmod +x "$hook_dst"
+      git config --global core.hooksPath "$hooks_dir"
+      ok "Global git hook installed (AI client auto-detected on every commit)  全局 git hook 已安装（每次提交自动检测 AI 客户端）"
+      ;;
+    remove)
+      git config --global --unset core.hooksPath 2>/dev/null && \
+        ok "Removed core.hooksPath from global git config  已从全局 git 配置中移除 core.hooksPath" || \
+        info "core.hooksPath was not set  core.hooksPath 未设置"
+      ;;
+    *)
+      err "Unknown hooks subcommand: $subcmd  未知 hooks 子命令: $subcmd"
+      echo "Usage: roll hook [install|remove]  用法: roll hook [install|remove]"
+      exit 1
+      ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: reset
+# Re-copy conventions and skills from repo source, force-sync everything
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_reset() {
+  warn "This will overwrite ~/.roll/conventions/ and skills with repo defaults.  此操作将用仓库默认值覆盖 ~/.roll/conventions/ 和技能。"
+  echo -n "  Continue? [y/N] "
+  read -r answer
+  [[ "$answer" =~ ^[Yy]$ ]] || { info "Aborted.  已取消。"; return; }
+
+  echo ""
+  info "Resetting and force-syncing...  正在重置并强制同步..."
+  cmd_setup --force
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: clean
+# Remove legacy ~/.cybernetix/ and ~/.wukong/ remnants after migration
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_clean() {
+  local found=false
+
+  echo -e "${BOLD}Roll Legacy Cleanup  清理旧版遗留文件${NC}"
+  echo ""
+
+  # Detect what exists
+  for legacy_dir in "$HOME/.cybernetix" "$HOME/.wukong"; do
+    [[ -d "$legacy_dir" ]] && found=true
+  done
+  for legacy_bin in "$HOME/.local/bin/cybernetix" "$HOME/.local/bin/wukong"; do
+    { [[ -L "$legacy_bin" ]] || [[ -f "$legacy_bin" ]]; } && found=true
+  done
+  # Old skill symlinks
+  local ai_dirs=("$HOME/.claude" "$HOME/.gemini" "$HOME/.kimi" "$HOME/.codex" "$HOME/.cursor")
+  for ai_dir in "${ai_dirs[@]}"; do
+    local skills_dir="$ai_dir/skills"
+    [[ -d "$skills_dir" ]] || continue
+    if find "$skills_dir" -maxdepth 1 -type l \( -name "wk-*" -o -name "cnx-*" \) 2>/dev/null | grep -q .; then
+      found=true
+    fi
+  done
+
+  if [[ "$found" == "false" ]]; then
+    ok "Nothing to clean — no legacy files found.  未发现遗留文件。"
+    return
+  fi
+
+  # Show what will be removed
+  info "Found legacy items to remove:  发现以下遗留文件："
+  echo ""
+  for d in "$HOME/.cybernetix" "$HOME/.wukong"; do
+    [[ -d "$d" ]] && echo -e "  ${RED}✕${NC} ${d/#$HOME/~}/"
+  done
+  for b in "$HOME/.local/bin/cybernetix" "$HOME/.local/bin/wukong"; do
+    { [[ -L "$b" ]] || [[ -f "$b" ]]; } && echo -e "  ${RED}✕${NC} ${b/#$HOME/~}"
+  done
+  for ai_dir in "${ai_dirs[@]}"; do
+    local skills_dir="$ai_dir/skills"
+    [[ -d "$skills_dir" ]] || continue
+    local old_links
+    old_links=$(find "$skills_dir" -maxdepth 1 -type l \( -name "wk-*" -o -name "cnx-*" \) 2>/dev/null || true)
+    if [[ -n "$old_links" ]]; then
+      local count
+      count=$(echo "$old_links" | wc -l | tr -d ' ')
+      echo -e "  ${RED}✕${NC} ${skills_dir/#$HOME/~}/ ($count legacy symlinks)"
+    fi
+  done
+
+  echo ""
+  echo -n "  Remove all of the above? [y/N] "
+  read -r answer
+  [[ "$answer" =~ ^[Yy]$ ]] || { info "Aborted.  已取消。"; return; }
+
+  echo ""
+  local removed=0
+
+  # Remove legacy home dirs
+  for d in "$HOME/.cybernetix" "$HOME/.wukong"; do
+    if [[ -d "$d" ]]; then
+      rm -rf "$d"
+      ok "Removed: ${d/#$HOME/~}  已删除: ${d/#$HOME/~}"
+      removed=$((removed + 1))
+    fi
+  done
+
+  # Remove legacy binaries
+  for b in "$HOME/.local/bin/cybernetix" "$HOME/.local/bin/wukong"; do
+    if [[ -L "$b" ]] || [[ -f "$b" ]]; then
+      rm -f "$b"
+      ok "Removed: ${b/#$HOME/~}  已删除: ${b/#$HOME/~}"
+      removed=$((removed + 1))
+    fi
+  done
+
+  # Remove legacy skill symlinks
+  for ai_dir in "${ai_dirs[@]}"; do
+    local skills_dir="$ai_dir/skills"
+    [[ -d "$skills_dir" ]] || continue
+    local old_links
+    old_links=$(find "$skills_dir" -maxdepth 1 -type l \( -name "wk-*" -o -name "cnx-*" \) 2>/dev/null || true)
+    if [[ -n "$old_links" ]]; then
+      while IFS= read -r link; do rm -f "$link"; done <<< "$old_links"
+      local count
+      count=$(echo "$old_links" | wc -l | tr -d ' ')
+      ok "Removed $count legacy symlinks from ${skills_dir/#$HOME/~}  已删除 $count 个遗留软链接"
+      removed=$((removed + count))
+    fi
+  done
+
+  echo ""
+  ok "Cleaned $removed legacy items.  已清理 $removed 个遗留文件。"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: status
+# Show current state of conventions
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_status() {
+  echo -e "${BOLD}Roll Convention Status  Roll 约定状态${NC}"
+  echo ""
+
+  if [[ -d "$ROLL_HOME" ]]; then
+    ok "~/.roll/ exists  ~/.roll/ 已存在"
+  else
+    err "~/.roll/ not found — run 'roll setup'  ~/.roll/ 不存在 — 请运行 'roll setup'"
+    return
+  fi
+
+  echo ""
+  echo -e "${BOLD}Global conventions:  全局约定${NC}"
+  for f in AGENTS.md CLAUDE.md GEMINI.md .cursor-rules; do
+    if [[ -f "$ROLL_GLOBAL/$f" ]]; then
+      echo -e "  ${GREEN}+${NC} $f"
+    else
+      echo -e "  ${RED}-${NC} $f (missing / 缺失)"
+    fi
+  done
+
+  echo ""
+  echo -e "${BOLD}Global skills:  全局技能${NC}"
+  if [[ -d "$ROLL_HOME/skills" ]]; then
+    local count
+    count=$(find "$ROLL_HOME/skills" -maxdepth 1 -type d | wc -l | tr -d ' ')
+    count=$((count - 1))
+    echo -e "  ${GREEN}+${NC} ~/.roll/skills ($count skills installed / 已安装 $count 个技能)"
+  else
+    echo -e "  ${RED}-${NC} ~/.roll/skills (missing / 缺失)"
+  fi
+
+  echo ""
+  echo -e "${BOLD}Sync targets:  同步目标${NC}"
+
+  local _sync_found=0
+  while IFS= read -r _entry; do
+    _sync_found=1
+    local _ai_d _cfg _src _tool_name
+    _ai_d="$(_ai_dir "$_entry")"
+    _cfg="$(_ai_config "$_entry")"
+    _src="$(_ai_src "$_entry")"
+    _tool_name="$(ai_tool_name "$_ai_d")"
+    check_sync_status "$_tool_name" "$ROLL_GLOBAL/$_src" "$_ai_d/$_cfg"
+  done < <(_get_ai_tools)
+  if [[ "$_sync_found" -eq 0 ]]; then
+    warn "No AI tools configured — check ~/.roll/config.yaml  未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
+    info "Add ai_* entries or run 'roll setup' to restore defaults.  添加 ai_* 条目或运行 'roll setup' 恢复默认配置。"
+  fi
+
+  echo ""
+  echo -e "${BOLD}Skill symlinks:  技能软链接${NC}"
+  local total_skills=0
+  local wk_skills_real
+  if [[ -d "$ROLL_HOME/skills" ]]; then
+    # Count roll-* skill dirs to match the linked_count scope below
+    total_skills=$(find "$ROLL_HOME/skills" -maxdepth 1 -mindepth 1 -type d -name "roll-*" | wc -l | tr -d ' ')
+    wk_skills_real="$(canonical_dir "$ROLL_HOME/skills" 2>/dev/null || true)"
+  fi
+  local _skills_found=0
+  while IFS= read -r _entry; do
+    local ai_dir
+    ai_dir="$(_ai_dir "$_entry")"
+    [[ -d "$ai_dir" ]] || continue
+    _skills_found=1
+    local name name_lower
+    name="$(ai_tool_name "$ai_dir")"
+    name="$(echo "$name" | tr '[:lower:]' '[:upper:]' | cut -c1)$(echo "$name" | cut -c2-)"
+    name_lower="$(lower_name "$name")"
+    local skills_dir="$ai_dir/skills"
+    if [[ -d "$skills_dir" ]]; then
+      if [[ -L "$skills_dir" ]]; then
+        local skills_target skills_real
+        skills_target="$(readlink "$skills_dir")"
+        skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
+        local skills_display="${skills_dir/#$HOME/~}"
+        if [[ -n "$skills_real" && "$skills_real" == "$wk_skills_real" ]]; then
+          echo -e "  ${GREEN}=${NC} $name: $skills_display -> ~/.roll/skills (mounted / 已挂载)"
+        else
+          echo -e "  ${YELLOW}~${NC} $name: $skills_display -> ${skills_target/#$HOME/~} (symlinked dir)"
+        fi
+        continue
+      fi
+
+      local linked_count skills_display
+      skills_display="${skills_dir/#$HOME/~}"
+      linked_count=$(find "$skills_dir" -maxdepth 1 -mindepth 1 -type l -name "roll-*" 2>/dev/null | wc -l | tr -d ' ')
+      if [[ "$linked_count" -eq "$total_skills" ]] && [[ "$total_skills" -gt 0 ]]; then
+        echo -e "  ${GREEN}=${NC} $name: $skills_display ($linked_count/$total_skills skills linked)"
+      elif [[ "$linked_count" -gt 0 ]]; then
+        echo -e "  ${YELLOW}~${NC} $name: $skills_display ($linked_count/$total_skills skills linked)"
+      else
+        echo -e "  ${RED}-${NC} $name: $skills_display (no roll-* skills linked / 未链接 roll-* 技能)"
+      fi
+    else
+      echo -e "  ${RED}-${NC} $name: ${skills_dir/#$HOME/~} (not found / 未找到)"
+    fi
+  done < <(_get_ai_tools)
+  if [[ "$_skills_found" -eq 0 ]]; then
+    warn "No AI tools configured — check ~/.roll/config.yaml  未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
+  fi
+
+  echo ""
+  echo -e "${BOLD}Git hook:  Git Hook${NC}"
+  local hook_dst="$HOME/.config/git/hooks/prepare-commit-msg"
+  local hooks_path
+  hooks_path=$(git config --global core.hooksPath 2>/dev/null || true)
+  if [[ -f "$hook_dst" ]] && [[ "$hooks_path" == "$HOME/.config/git/hooks" ]]; then
+    echo -e "  ${GREEN}+${NC} prepare-commit-msg (global, AI client auto-detect / 全局，自动检测 AI 客户端)"
+  elif [[ -f "$hook_dst" ]]; then
+    echo -e "  ${YELLOW}~${NC} prepare-commit-msg exists but core.hooksPath not set  prepare-commit-msg 已存在，但 core.hooksPath 未设置"
+    echo -e "      run: roll hook install  运行: roll hook install"
+  else
+    echo -e "  ${RED}-${NC} not installed (optional) — run 'roll hook install'  未安装（可选）— 运行 'roll hook install'"
+  fi
+
+  echo ""
+  echo -e "${BOLD}Templates:  模板${NC}"
+  for tpl in fullstack frontend-only backend-service cli; do
+    if [[ -d "$ROLL_TEMPLATES/$tpl" ]]; then
+      local count
+      count=$(find "$ROLL_TEMPLATES/$tpl" -type f | wc -l | tr -d ' ')
+      echo -e "  ${GREEN}+${NC} $tpl ($count files)"
+    else
+      echo -e "  ${RED}-${NC} $tpl (missing / 缺失)"
+    fi
+  done
+}
+
+check_sync_status() {
+  local name="$1"
+  local src="$2"
+  local dst="$3"
+
+  local display="${dst/#$HOME/~}"
+  local dst_dir
+  dst_dir="$(dirname "$dst")"
+  local wk_file="$dst_dir/roll.md"
+
+  # Sync writes content to {dir}/roll.md and appends @roll.md to the main config.
+  # So "in sync" means: roll.md exists + matches source + main config contains @roll.md.
+  if [[ ! -f "$dst" ]]; then
+    echo -e "  ${RED}-${NC} $name: $display (not synced / 未同步)"
+  elif [[ ! -f "$wk_file" ]]; then
+    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — roll.md missing / roll.md 缺失)"
+  elif ! diff -q "$src" "$wk_file" &>/dev/null 2>&1; then
+    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — roll.md outdated / roll.md 已过期)"
+  elif ! grep -qF "@roll.md" "$dst" 2>/dev/null; then
+    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — @roll.md not in config / 未包含 @roll.md)"
+  else
+    echo -e "  ${GREEN}=${NC} $name: $display (in sync / 已同步)"
+  fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════════
+usage() {
+  echo -e "${CYAN} ██████╗  ██████╗ ██╗     ██╗     ${NC}"
+  echo -e "${CYAN} ██╔══██╗██╔═══██╗██║     ██║     ${NC}"
+  echo -e "${CYAN} ██████╔╝██║   ██║██║     ██║     ${NC}"
+  echo -e "${CYAN} ██╔══██╗██║   ██║██║     ██║     ${NC}"
+  echo -e "${CYAN} ██║  ██║╚██████╔╝███████╗███████╗${NC}"
+  echo -e "${CYAN} ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}v${VERSION}${NC} — Roll out features with AI agents"
+  echo ""
+  echo "Usage: roll <command> [options]"
+  echo "用法:  roll <command> [options]"
+  echo ""
+  echo "Commands:"
+  echo "  setup [-f]             [Machine] First-time install: init ~/.roll/ + sync   首次安装：初始化 ~/.roll/ 并同步"
+  echo "  sync [-f]              [Everyday] repo → ~/.roll/ → AI tools               日常更新：从仓库拉取并同步到所有工具"
+  echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
+  echo "  hook [install|remove]  [Optional] Manage global git hook                  管理全局 git hook"
+  echo "  status                 [Diagnostic] Show current state                    显示当前状态"
+  echo "  reset                  [Recovery] Force-rebuild from repo source           强制从仓库源重建"
+  echo "  clean                  [Legacy] Remove ~/.wukong/ ~/.cybernetix/ remnants  清理遗留文件"
+  echo ""
+  echo "Examples / 示例:"
+  echo "  roll setup                    # New machine: first-time install             新机器：首次安装"
+  echo "  roll sync                     # Pull latest from repo + sync to AI tools   拉取最新并同步到 AI 工具"
+  echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
+  echo "  roll hook install             # Optional: tag commits with AI client       可选：提交时标记 AI 工具"
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+
+  case "$cmd" in
+    setup)         cmd_setup "$@" ;;
+    sync)          cmd_sync "$@" ;;
+    init)          cmd_init "$@" ;;
+    hook)         cmd_hook "$@" ;;
+    reset)         cmd_reset "$@" ;;
+    clean)         cmd_clean "$@" ;;
+    status)        cmd_status "$@" ;;
+    version|--version|-v) echo "roll v${VERSION}" ;;
+    help|--help|-h|"") usage ;;
+    *)
+      err "Unknown command: $cmd  未知命令: $cmd"
+      echo ""
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

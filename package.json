@@ -1,0 +1,33 @@
+{
+  "name": "roll",
+  "version": "0.5.0",
+  "description": "Roll — Roll out features with AI agents",
+  "scripts": {
+    "test": "find tests/unit tests/integration -name '*.bats' | sort | xargs ./tests/helpers/bats-core/bin/bats"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "development-workflow",
+    "skills",
+    "agent-first"
+  ],
+  "homepage": "https://github.com/seanyao/roll",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/seanyao/roll.git"
+  },
+  "bin": {
+    "roll": "./bin/roll"
+  },
+  "license": "MIT",
+  "author": "Sean Yao <seanyao@gmail.com>",
+  "files": [
+    "bin/",
+    "conventions/",
+    "skills/",
+    "tools/",
+    "template/",
+    "README.md"
+  ]
+}

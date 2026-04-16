@@ -1,0 +1,15 @@
+{
+  "name": "smart-web-fetch",
+  "version": "1.0.0",
+  "description": "Intelligent web fetching with automatic Tavily → Scrapling fallback",
+  "main": "smart-web-fetch.js",
+  "bin": {
+    "smart-web-fetch": "./smart-web-fetch.js"
+  },
+  "scripts": {
+    "test": "node smart-web-fetch.js fetch https://example.com"
+  },
+  "keywords": ["web-scraping", "tavily", "scrapling", "fallback"],
+  "author": "R0_lobster",
+  "license": "MIT"
+}

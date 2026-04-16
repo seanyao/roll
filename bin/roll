@@ -448,7 +448,8 @@ cmd_setup() {
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: sync [--force]
-# Distribute global conventions and skills to each AI tool's config path
+# Full pipeline: repo → ~/.roll/ → AI tool config paths
+# Pulls latest conventions from repo, then distributes to all AI tools.
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_sync() {
   if [[ ! -d "$ROLL_HOME" ]]; then
@@ -464,7 +465,9 @@ cmd_sync() {
     esac
   done
 
-  info "Syncing conventions and skills...  正在同步约定与技能..."
+  info "Syncing from repo to AI tools...  正在从仓库同步到 AI 工具..."
+  echo ""
+  _pull_conventions "$force"
   echo ""
   _sync_conventions "$force"
   echo ""
@@ -1254,8 +1257,8 @@ usage() {
   echo "用法:  roll <command> [options]"
   echo ""
   echo "Commands:"
-  echo "  setup [-f]             [Machine] Install ~/.roll/ + sync to all AI tools   安装并同步到所有 AI 工具"
-  echo "  sync [-f]              [Machine] Re-sync conventions + skills              重新同步约定与技能"
+  echo "  setup [-f]             [Machine] First-time install: init ~/.roll/ + sync   首次安装：初始化 ~/.roll/ 并同步"
+  echo "  sync [-f]              [Everyday] repo → ~/.roll/ → AI tools               日常更新：从仓库拉取并同步到所有工具"
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
   echo "  hook [install|remove]  [Optional] Manage global git hook                  管理全局 git hook"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
@@ -1263,8 +1266,8 @@ usage() {
   echo "  clean                  [Legacy] Remove ~/.wukong/ ~/.cybernetix/ remnants  清理遗留文件"
   echo ""
   echo "Examples / 示例:"
-  echo "  roll setup                    # New machine: install + sync everything     新机器：安装并同步所有"
-  echo "  roll sync                     # Re-sync after editing config.yaml          编辑配置后重新同步"
+  echo "  roll setup                    # New machine: first-time install             新机器：首次安装"
+  echo "  roll sync                     # Pull latest from repo + sync to AI tools   拉取最新并同步到 AI 工具"
   echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
   echo "  roll hook install             # Optional: tag commits with AI client       可选：提交时标记 AI 工具"
 }

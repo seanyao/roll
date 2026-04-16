@@ -92,13 +92,12 @@ On first run, the CLI performs two operations:
 
 Setup never modifies any AI tool configuration files or global git settings. It is fully non-invasive and safe to re-run.
 
-**2.2.2 Configuration Sync (`roll sync [scope]`)**
+**2.2.2 Configuration Sync (`roll sync [-f]`)**
 
-Distributes content from `~/.roll/` to each AI client's configuration path based on the selected scope.
+Distributes content from `~/.roll/` to each AI client's configuration path — conventions and skills in one step.
 
-- `conventions` (default): uses `@include` append mode — writes WK conventions to `{ai_dir}/wk.md`, then appends a single `@wk.md` line to the user's main config. Existing content is never overwritten.
-- `skills`: refreshes skills from the repo into the local cache and creates/repairs per-skill symlinks for each client
-- `all`: runs both conventions and skills
+- **Conventions**: uses `@include` append mode — writes Roll conventions to `{ai_dir}/wk.md`, then appends a single `@wk.md` line to the user's main config. Existing content is never overwritten.
+- **Skills**: refreshes skills from the repo into the local cache and creates/repairs per-skill symlinks for each client.
 
 Append `--force` (or `-f`) to force-rewrite `wk.md` or rebuild symlinks.
 

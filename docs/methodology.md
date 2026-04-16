@@ -50,7 +50,6 @@ graph TB
     A4 -->|"Story 流入"| B2
     B6 -->|"交付完成"| C1
     C5 -->|"问题升级"| A2
-    C4 -->|"新需求发现"| A2
 
     style A1 fill:#e8f4fd,stroke:#2196F3
     style A2 fill:#e8f4fd,stroke:#2196F3
@@ -91,21 +90,20 @@ Roll 通过 `roll` CLI 工具实现配置的集中管理与原子化分发。
 
 setup 不修改任何 AI 工具的配置文件，也不改变全局 git 配置，保证零侵入。
 
-**2.2.2 配置同步 (`roll sync [scope]`)**
+**2.2.2 配置同步 (`roll sync [-f]`)**
 
-将 `~/.roll/` 中的内容按 scope 分发到各 AI 客户端配置路径。
+将 `~/.roll/` 中的约定与技能一步分发到各 AI 客户端配置路径。
 
-- `conventions`（默认）：以 `@include` 追加模式分发约定文件 — 将 Roll 约定写入 `{ai_dir}/roll.md`，并在用户主配置末尾追加一行 `@roll.md`，原有内容永远不被覆盖
-- `skills`：从仓库刷新 skills 到本地缓存，并创建/修复各客户端的 per-skill symlink
-- `all`：conventions + skills 一并执行
+- **约定**：以 `@include` 追加模式分发 — 将 Roll 约定写入 `{ai_dir}/wk.md`，并在用户主配置末尾追加一行 `@wk.md`，原有内容永远不被覆盖。
+- **技能**：从仓库刷新 skills 到本地缓存，并创建/修复各客户端的 per-skill symlink。
 
-加上 `--force`（或 `-f`）可强制重写 `roll.md` 或重建 symlink。
+加上 `--force`（或 `-f`）可强制重写 `wk.md` 或重建 symlink。
 
 ```
 ~/.roll/conventions/global/
-├── AGENTS.md        → ~/.kimi/roll.md (+ @roll.md appended to AGENTS.md)
-├── CLAUDE.md        → ~/.claude/roll.md (+ @roll.md appended to CLAUDE.md)
-├── GEMINI.md        → ~/.gemini/roll.md (+ @roll.md appended to GEMINI.md)
+├── AGENTS.md        → ~/.kimi/wk.md (+ @wk.md appended to AGENTS.md)
+├── CLAUDE.md        → ~/.claude/wk.md (+ @wk.md appended to CLAUDE.md)
+├── GEMINI.md        → ~/.gemini/wk.md (+ @wk.md appended to GEMINI.md)
 └── .cursor-rules    → (项目级分发)
 ```
 

@@ -24,12 +24,12 @@
 ### Feature: rename-roll
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-ROLL-001](docs/features/rename-roll.md#us-roll-001) | Rename CLI binary `roll` + all internal wukong paths + tests | 📋 Todo |
-| [US-ROLL-002](docs/features/rename-roll.md#us-roll-002) | Rename wk-* skills → roll-*, delete wk-.yeah + wk-init | 📋 Todo |
-| [US-ROLL-003](docs/features/rename-roll.md#us-roll-003) | Update README + docs + migration script for existing users | 📋 Todo |
-| [US-ROLL-004](docs/features/rename-roll.md#us-roll-004) | Merge roll-debug (bb-debug + bb-analyzer → one skill) | 📋 Todo |
-| [US-ROLL-005](docs/features/rename-roll.md#us-roll-005) | Implement roll-build — unified delivery entry (fly + story merged) | 📋 Todo |
-| [US-ROLL-006](docs/features/rename-roll.md#us-roll-006) | Fold wk-init into `roll init` CLI, remove standalone skill | 📋 Todo |
+| [US-ROLL-001](docs/features/rename-roll.md#us-roll-001) | Rename CLI binary `roll` + all internal wukong paths + tests | ✅ Done  |
+| [US-ROLL-002](docs/features/rename-roll.md#us-roll-002) | Rename wk-* skills → roll-*, delete wk-.yeah + wk-init | ✅ Done |
+| [US-ROLL-003](docs/features/rename-roll.md#us-roll-003) | Update README + docs + migration script for existing users | ✅ Done |
+| [US-ROLL-004](docs/features/rename-roll.md#us-roll-004) | Merge roll-debug (bb-debug + bb-analyzer → one skill) | ✅ Done |
+| [US-ROLL-005](docs/features/rename-roll.md#us-roll-005) | Implement roll-build — unified delivery entry (fly + story merged) | ✅ Done |
+| [US-ROLL-006](docs/features/rename-roll.md#us-roll-006) | Fold wk-init into `roll init` CLI, remove standalone skill | ✅ Done |
 
 ## Epic: Engineering Discipline Refactor
 ### Feature: refactor

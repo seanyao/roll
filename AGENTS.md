@@ -160,3 +160,23 @@ tests/
 - `docs/features/<feature>.md` = US details (AC, Files, Dependencies).
 - `docs/features/<feature>-plan.md` = architecture design doc (optional).
 - Never write project docs to `~/.kimi/` or any global config directory.
+
+## Roll Workflow
+
+### Development Discipline
+
+- **TCR mandatory**: All code changes follow Test → Green = Commit / Red = Revert. No WIP commits.
+- **Action granularity**: Each Action independently deployable, completable in 2–5 min. No placeholders (no TBD/TODO/pending).
+- **Verification Gate**: Before marking done, provide fresh evidence (test output, screenshot, curl). "I confirmed it works" is not evidence.
+- **Complete delivery**: push to GitHub + CI passes + deployed online. Local-only done is not done.
+
+### Skill Selection
+
+```
+Uncertain approach?        → $roll-design
+Want to ship something?    → $roll-build  (handles US-XXX, FIX-XXX, or vague ideas)
+Single bug fix?            → $roll-fix
+High-risk logic?           → $roll-spar
+Page/production issue?     → $roll-debug
+Initialize new project?    → roll init  (CLI command, not a skill)
+```

@@ -532,6 +532,19 @@ _init_auto() {
   fi
 }
 
+# ─── Helper: re-merge an already-initialized project from latest templates ───
+# Called when AGENTS.md exists and user keeps the detected type.
+_init_refresh() {
+  local project_dir="$1"
+  info "Re-merging from latest templates...  正在从最新模板重新合并..."
+  echo ""
+  _WK_MERGE_SUMMARY=()
+  refresh_project "$project_dir"
+  print_merge_summary
+  echo ""
+  ok "Done.  完成。"
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: init [type] [tools]
 # Initialize a project with convention files from a template.
@@ -587,13 +600,7 @@ cmd_init() {
 
     # If AGENTS.md already exists and user kept the same type, just re-merge
     if [[ -f "$project_dir/AGENTS.md" && "$project_type" == "$detected" ]]; then
-      info "Re-merging from latest templates...  正在从最新模板重新合并..."
-      echo ""
-      _WK_MERGE_SUMMARY=()
-      refresh_project "$project_dir"
-      print_merge_summary
-      echo ""
-      ok "Done.  完成。"
+      _init_refresh "$project_dir"
       return
     fi
   fi
@@ -1161,20 +1168,17 @@ cmd_status() {
   echo ""
   echo -e "${BOLD}Sync targets:  同步目标${NC}"
 
-  local claude_target kimi_target codex_target gemini_target
-  claude_target="$(config_get sync_claude ~/.claude/CLAUDE.md)"
-  kimi_target="$(config_get sync_kimi ~/.kimi/AGENTS.md)"
-  codex_target="$(config_get sync_codex ~/.codex/AGENTS.md)"
-  gemini_target="$(config_get sync_gemini ~/.gemini/GEMINI.md)"
-
-  check_sync_status "Claude Code" "$WK_GLOBAL/CLAUDE.md" "$claude_target"
-  check_sync_status "Kimi Code"   "$WK_GLOBAL/AGENTS.md"  "$kimi_target"
-  check_sync_status "Codex"       "$WK_GLOBAL/AGENTS.md"  "$codex_target"
-  check_sync_status "Gemini CLI"  "$WK_GLOBAL/GEMINI.md"  "$gemini_target"
+  while IFS= read -r _entry; do
+    local _ai_d _cfg _src _tool_name
+    _ai_d="$(_ai_dir "$_entry")"
+    _cfg="$(_ai_config "$_entry")"
+    _src="$(_ai_src "$_entry")"
+    _tool_name="$(ai_tool_name "$_ai_d")"
+    check_sync_status "$_tool_name" "$WK_GLOBAL/$_src" "$_ai_d/$_cfg"
+  done < <(_get_ai_tools)
 
   echo ""
   echo -e "${BOLD}Skill symlinks:  技能软链接${NC}"
-  local ai_dirs=(~/.claude ~/.gemini ~/.kimi ~/.codex ~/.cursor ~/.openclaw/workspace)
   local total_skills=0
   local wk_skills_real
   if [[ -d "$WK_HOME/skills" ]]; then
@@ -1182,8 +1186,9 @@ cmd_status() {
     total_skills=$(find "$WK_HOME/skills" -maxdepth 1 -mindepth 1 -type d -name "wk-*" | wc -l | tr -d ' ')
     wk_skills_real="$(canonical_dir "$WK_HOME/skills" 2>/dev/null || true)"
   fi
-  for ai_dir in "${ai_dirs[@]}"; do
-    ai_dir=$(eval echo "$ai_dir")
+  while IFS= read -r _entry; do
+    local ai_dir
+    ai_dir="$(_ai_dir "$_entry")"
     [[ -d "$ai_dir" ]] || continue
     local name name_lower
     name="$(ai_tool_name "$ai_dir")"
@@ -1217,7 +1222,7 @@ cmd_status() {
     else
       echo -e "  ${RED}-${NC} $name: ${skills_dir/#$HOME/~} (not found / 未找到)"
     fi
-  done
+  done < <(_get_ai_tools)
 
   echo ""
   echo -e "${BOLD}Git hook:  Git Hook${NC}"

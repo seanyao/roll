@@ -211,6 +211,15 @@ _install_local() {
   _pull_conventions
   _pull_skills
 
+  # Migrate legacy sync_* format to ai_* format
+  if [[ -f "$ROLL_CONFIG" ]] && grep -qE "^sync_[a-z]+:" "$ROLL_CONFIG" 2>/dev/null && \
+     ! grep -qE "^ai_[a-z]+:" "$ROLL_CONFIG" 2>/dev/null; then
+    warn "Migrating config from legacy sync_* format to ai_* format...  正在将配置从旧版 sync_* 格式迁移到 ai_* 格式..."
+    cp "$ROLL_CONFIG" "${ROLL_CONFIG}.bak"
+    info "Backup saved: ~/.roll/config.yaml.bak  备份已保存: ~/.roll/config.yaml.bak"
+    rm "$ROLL_CONFIG"
+  fi
+
   # Create config if it doesn't exist
   if [[ ! -f "$ROLL_CONFIG" ]]; then
     info "Creating default config...  正在创建默认配置..."
@@ -448,196 +457,59 @@ cmd_sync() {
   ok "Sync complete.  同步完成。"
 }
 
-# ─── Helper: show full type menu and return chosen type ──────────────────────
-_select_project_type() {
-  echo ""
-  echo -e "${BOLD}Select project type:${NC}"
-  echo ""
-  echo "  1) fullstack        React + API + CLI"
-  echo "  2) frontend-only    React SPA, no backend"
-  echo "  3) backend-service  API/microservice, no frontend"
-  echo "  4) cli              Command-line tool"
-  echo ""
-  echo -n "Choice [1-4]: "
-  read -r choice
-  case "$choice" in
-    1) echo "fullstack" ;;
-    2) echo "frontend-only" ;;
-    3) echo "backend-service" ;;
-    4) echo "cli" ;;
-    *) err "Invalid choice: $choice  无效选择: $choice"; exit 1 ;;
-  esac
-}
-
-# ─── Helper: resolve AI tool flags from arg or interactive prompt ─────────────
-# Sets _WK_USE_CLAUDE / _WK_USE_GEMINI / _WK_USE_CURSOR in caller's scope.
-# Usage: _select_tools "<tools_arg>"   (empty string = interactive)
-_select_tools() {
-  local tools_arg="${1:-}"
-  _WK_USE_CLAUDE=false
-  _WK_USE_GEMINI=false
-  _WK_USE_CURSOR=false
-
-  if [[ -n "$tools_arg" ]]; then
-    IFS=',' read -ra tool_list <<< "$tools_arg"
-    for t in "${tool_list[@]}"; do
-      case "$t" in
-        claude) _WK_USE_CLAUDE=true ;;
-        gemini) _WK_USE_GEMINI=true ;;
-        cursor) _WK_USE_CURSOR=true ;;
-        all)    _WK_USE_CLAUDE=true; _WK_USE_GEMINI=true; _WK_USE_CURSOR=true ;;
-        *) warn "Unknown tool: $t  未知工具: $t" ;;
-      esac
-    done
-  else
-    echo ""
-    echo -e "${BOLD}Which AI tools do you use?${NC} (space-separated, or 'a' for all)"
-    echo ""
-    echo "  c) Claude Code"
-    echo "  g) Gemini CLI"
-    echo "  k) Kimi        (uses AGENTS.md)"
-    echo "  r) Cursor IDE"
-    echo "  a) All of the above"
-    echo ""
-    echo -n "Choice [c/g/k/r/a] (default: c): "
-    read -r tool_choice
-    tool_choice="${tool_choice:-c}"
-    for ch in $tool_choice; do
-      case "$ch" in
-        c) _WK_USE_CLAUDE=true ;;
-        g) _WK_USE_GEMINI=true ;;
-        k) ;;  # Kimi reuses AGENTS.md — no extra file needed
-        r) _WK_USE_CURSOR=true ;;
-        a) _WK_USE_CLAUDE=true; _WK_USE_GEMINI=true; _WK_USE_CURSOR=true ;;
-      esac
-    done
-  fi
-}
-
-# ─── Helper: non-interactive auto-scan mode (CI / scripts) ───────────────────
-# Scans project files to resolve type; echoes the resolved type.
-_init_auto() {
+# ─── Helper: merge global AGENTS.md into project (no type prompt) ────────────
+# Fresh project: copies global AGENTS.md.
+# Existing AGENTS.md: appends any ## sections missing from global.
+_merge_global_to_project() {
   local project_dir="$1"
-  info "Scanning project files...  正在扫描项目文件..."
-  local detected_type
-  detected_type="$(scan_project_type_from_files "$project_dir")"
-  if [[ "$detected_type" == "unknown" ]]; then
-    warn "Cannot determine project type from files. Defaulting to 'fullstack'.  无法从文件判断项目类型，默认使用 'fullstack'。"
-    echo "fullstack"
-  else
-    ok "Detected: ${BOLD}$detected_type${NC}  已检测到: ${BOLD}$detected_type${NC}"
-    echo "$detected_type"
-  fi
-}
+  local src="$ROLL_GLOBAL/AGENTS.md"
+  local dst="$project_dir/AGENTS.md"
 
-# ─── Helper: re-merge an already-initialized project from latest templates ───
-# Called when AGENTS.md exists and user keeps the detected type.
-_init_refresh() {
-  local project_dir="$1"
-  info "Re-merging from latest templates...  正在从最新模板重新合并..."
-  echo ""
-  _WK_MERGE_SUMMARY=()
-  refresh_project "$project_dir"
-  print_merge_summary
-  echo ""
-  ok "Done.  完成。"
-}
+  [[ -f "$src" ]] || { warn "Global AGENTS.md not found at ${src/#$HOME/~}"; return; }
 
-# ─── Helper: full new/switch init — tool selection + merge conventions + scaffold
-# Expects tools_arg resolved; sets _WK_USE_* via _select_tools then merges.
-_init_new() {
-  local project_dir="$1"
-  local project_type="$2"
-
-  local tpl_dir="$ROLL_TEMPLATES/$project_type"
-  if [[ ! -d "$tpl_dir" ]]; then
-    err "Template not found: $project_type  模板未找到: $project_type"
-    err "Available: fullstack, frontend-only, backend-service, cli, auto  可用类型: fullstack, frontend-only, backend-service, cli, auto"
-    exit 1
+  if [[ ! -f "$dst" ]]; then
+    cp "$src" "$dst"
+    ok "Created: AGENTS.md"
+    _WK_MERGE_SUMMARY+=("created|AGENTS.md")
+    return
   fi
 
-  info "Initializing ${BOLD}$project_type${NC} conventions in: $project_dir  正在初始化 ${BOLD}$project_type${NC} 约定，目录: $project_dir"
-  echo ""
-
-  _WK_MERGE_SUMMARY=()
-  merge_convention "AGENTS.md" "$tpl_dir" "$project_dir" "AGENTS.md"
-
-  if [[ "$_WK_USE_CLAUDE" == "true" ]]; then
-    mkdir -p "$project_dir/.claude"
-    merge_convention "CLAUDE.md" "$tpl_dir" "$project_dir/.claude" ".claude/CLAUDE.md"
-  fi
-  if [[ "$_WK_USE_GEMINI" == "true" ]]; then
-    merge_convention "GEMINI.md" "$tpl_dir" "$project_dir" "GEMINI.md"
-  fi
-  if [[ "$_WK_USE_CURSOR" == "true" ]]; then
-    merge_convention ".cursor-rules" "$tpl_dir" "$project_dir" ".cursor-rules"
+  if diff -q "$src" "$dst" &>/dev/null; then
+    _WK_MERGE_SUMMARY+=("unchanged|AGENTS.md")
+    return
   fi
 
-  ok "Convention files initialized for ${BOLD}$project_type${NC} project.  已为 ${BOLD}$project_type${NC} 项目初始化约定文件。"
-  print_merge_summary
-
-  # ── Scaffold phase ───────────────────────────────────────────────────────
-  if is_fresh_project "$project_dir"; then
-    echo ""
-    echo -n "  Scaffold ${BOLD}$project_type${NC} project structure? [Y/n]: "
-    read -r _scaffold_ans
-    if [[ "${_scaffold_ans:-Y}" =~ ^[Yy]$ ]]; then
-      echo ""
-      scaffold_new_project "$project_dir" "$project_type"
+  # Section-merge: append any ## sections from global missing in project
+  local added=0 cur_h="" cur_b=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^##\  ]]; then
+      if [[ -n "$cur_h" ]] && ! grep -qF "$cur_h" "$dst" 2>/dev/null; then
+        printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$dst"
+        added=$((added + 1))
+      fi
+      cur_h="$line"; cur_b=""
+    elif [[ -n "$cur_h" ]]; then
+      cur_b+="$line"$'\n'
     fi
+  done < "$src"
+  if [[ -n "$cur_h" ]] && ! grep -qF "$cur_h" "$dst" 2>/dev/null; then
+    printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$dst"
+    added=$((added + 1))
+  fi
+
+  if [[ $added -gt 0 ]]; then
+    ok "Merged: AGENTS.md ($added new sections)"
+    _WK_MERGE_SUMMARY+=("merged|AGENTS.md")
   else
-    scaffold_legacy_project "$project_dir"
-  fi
-  echo ""
-}
-
-# ─── Helper: interactive type detection + keep-or-switch prompt ──────────────
-# Detects project type (AGENTS.md then file scan), prompts user to keep/switch.
-# Sets _WK_RESOLVED_TYPE to chosen type.
-# Sets _WK_DO_REFRESH=true when AGENTS.md exists and user kept the same type.
-_detect_and_prompt_type() {
-  local project_dir="$1"
-  _WK_DO_REFRESH=false
-  local detected=""
-
-  # Try AGENTS.md first, then file scan
-  if [[ -f "$project_dir/AGENTS.md" ]]; then
-    detected="$(detect_project_type "$project_dir")"
-  fi
-  if [[ -z "$detected" || "$detected" == "unknown" ]]; then
-    detected="$(scan_project_type_from_files "$project_dir")"
-  fi
-
-  if [[ -n "$detected" && "$detected" != "unknown" ]]; then
-    echo ""
-    echo -e "  Detected: ${BOLD}$detected${NC}"
-    echo -n "  Keep it? [Y/n] or override [1-4]: "
-    read -r answer
-    case "$answer" in
-      ""|y|Y) _WK_RESOLVED_TYPE="$detected" ;;
-      1) _WK_RESOLVED_TYPE="fullstack" ;;
-      2) _WK_RESOLVED_TYPE="frontend-only" ;;
-      3) _WK_RESOLVED_TYPE="backend-service" ;;
-      4) _WK_RESOLVED_TYPE="cli" ;;
-      n|N) _WK_RESOLVED_TYPE="$(_select_project_type)" ;;
-      *) err "Invalid choice: $answer  无效选择: $answer"; exit 1 ;;
-    esac
-  else
-    # Truly unknown: show full menu
-    _WK_RESOLVED_TYPE="$(_select_project_type)"
-  fi
-
-  # If AGENTS.md already exists and user kept the same type → refresh path
-  if [[ -f "$project_dir/AGENTS.md" && "$_WK_RESOLVED_TYPE" == "$detected" ]]; then
-    _WK_DO_REFRESH=true
+    _WK_MERGE_SUMMARY+=("unchanged|AGENTS.md")
   fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: init [type] [tools]
-# Initialize a project with convention files from a template.
-# Always operates on the current directory (cwd).
-# Smart mode: if no type given and AGENTS.md already exists → auto-refresh.
+# COMMAND: init
+# Initialize or re-merge a project. Always operates on the current directory.
+# Fresh project: creates AGENTS.md + BACKLOG.md + docs/features/
+# Existing AGENTS.md: re-merges global conventions (section-level, non-destructive)
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_init() {
   if [[ ! -d "$ROLL_TEMPLATES" ]]; then
@@ -645,29 +517,24 @@ cmd_init() {
     exit 1
   fi
 
-  local project_type="${1:-}"
-  local tools_arg="${2:-}"
   local project_dir
   project_dir="$(pwd)"
+  _WK_MERGE_SUMMARY=()
 
-  # ── Explicit "auto" arg: non-interactive scan (for scripts / CI) ──────────
-  if [[ "$project_type" == "auto" ]]; then
-    project_type="$(_init_auto "$project_dir")"
+  if [[ -f "$project_dir/AGENTS.md" ]]; then
+    info "Re-merging global conventions...  正在重新合并全局约定..."
+    _merge_global_to_project "$project_dir"
+    print_merge_summary
+    echo ""
+    ok "Done. Run 'roll sync' to update AI tool configs.  完成。运行 'roll sync' 以更新 AI 工具配置。"
+  else
+    _merge_global_to_project "$project_dir"
+    _write_backlog "$project_dir/BACKLOG.md"
+    mkdir -p "$project_dir/docs/features"
+    print_merge_summary
+    echo ""
+    ok "Initialized. Next: roll sync  已初始化。下一步：roll sync"
   fi
-
-  # ── Interactive mode: detect first, then ask keep-or-switch ───────────────
-  if [[ -z "$project_type" ]]; then
-    _detect_and_prompt_type "$project_dir"
-    if [[ "$_WK_DO_REFRESH" == "true" ]]; then
-      _init_refresh "$project_dir"
-      return
-    fi
-    project_type="$_WK_RESOLVED_TYPE"
-  fi
-
-  # AI tool selection + full init
-  _select_tools "$tools_arg"
-  _init_new "$project_dir" "$project_type"
 }
 
 # ─── Helper: merge global preamble + template into output ────────────────────
@@ -954,142 +821,6 @@ _write_env_example() {
 # Auth
 # JWT_SECRET=your-secret-key
 EOF
-}
-
-# ─── Scaffold: full structure for new projects (US-INIT-004) ──────────────────
-scaffold_new_project() {
-  local dir="$1"
-  local type="$2"
-
-  info "Scaffolding ${BOLD}$type${NC} project structure...  正在生成 ${BOLD}$type${NC} 项目结构..."
-  echo ""
-
-  # Common: docs + workflow backbone
-  _mkscaffold "$dir/docs/features"
-  _write_backlog  "$dir/BACKLOG.md"
-  _write_gitignore "$dir/.gitignore"
-  local created="docs/, BACKLOG.md, .gitignore"
-
-  case "$type" in
-    fullstack)
-      _mkscaffold "$dir/src/components/ui"
-      _mkscaffold "$dir/src/domains"
-      _mkscaffold "$dir/src/shared"
-      _mkscaffold "$dir/api/routes"
-      _mkscaffold "$dir/api/services"
-      _mkscaffold "$dir/api/models"
-      _mkscaffold "$dir/tests/unit"
-      _mkscaffold "$dir/tests/e2e"
-      _write_env_example "$dir/.env.example"
-      created+=", src/, api/, tests/, .env.example"
-      ;;
-    frontend-only)
-      _mkscaffold "$dir/src/components/ui"
-      _mkscaffold "$dir/src/domains"
-      _mkscaffold "$dir/src/shared"
-      _mkscaffold "$dir/tests/unit"
-      _mkscaffold "$dir/tests/e2e"
-      _write_env_example "$dir/.env.example"
-      created+=", src/, tests/, .env.example"
-      ;;
-    backend-service)
-      _mkscaffold "$dir/api/routes"
-      _mkscaffold "$dir/api/services"
-      _mkscaffold "$dir/api/models"
-      _mkscaffold "$dir/tests/unit"
-      _mkscaffold "$dir/tests/e2e"
-      _write_env_example "$dir/.env.example"
-      created+=", api/, tests/, .env.example"
-      ;;
-    cli)
-      _mkscaffold "$dir/cmd"
-      _mkscaffold "$dir/lib"
-      _mkscaffold "$dir/tests/unit"
-      created+=", cmd/, lib/, tests/"
-      ;;
-  esac
-
-  ok "Scaffolded: $created  已生成: $created"
-}
-
-# ─── Scaffold: interactive per-component for legacy projects (US-INIT-005) ────
-scaffold_legacy_project() {
-  local dir="$1"
-  local -a added=()
-
-  echo ""
-  info "Existing project detected — add Roll workflow files?  检测到已有项目 — 是否添加 Roll 工作流文件？"
-  echo ""
-
-  _ask() {
-    echo -n "  Add ${BOLD}$1${NC}  ($2)  [Y/n]: "
-    read -r _ans
-    [[ "${_ans:-Y}" =~ ^[Yy]$ ]]
-  }
-
-  if _ask "BACKLOG.md"              "track stories & bugs in one place"; then
-    _write_backlog "$dir/BACKLOG.md"
-    added+=("BACKLOG.md")
-  fi
-
-  if _ask "docs/features/"          "design docs live next to code"; then
-    _mkscaffold "$dir/docs/features"
-    _mkscaffold "$dir/docs/plans"
-    added+=("docs/")
-  fi
-
-  if _ask "tests/ scaffold"         "unit/ e2e/ structure ready to fill"; then
-    _mkscaffold "$dir/tests/unit"
-    _mkscaffold "$dir/tests/e2e"
-    added+=("tests/")
-  fi
-
-  if _ask ".env.example"            "document required env vars for teammates"; then
-    _write_env_example "$dir/.env.example"
-    added+=(".env.example")
-  fi
-
-  if _ask ".github/workflows/ci.yml"       "automated CI on every push"; then
-    mkdir -p "$dir/.github/workflows"
-    cat > "$dir/.github/workflows/ci.yml" << 'EOF'
-name: CI
-on: [push, pull_request]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm ci
-      - run: npm test -- --run
-EOF
-    added+=(".github/workflows/ci.yml")
-  fi
-
-  if _ask ".github/workflows/sentinel.yml" "scheduled patrol every 6h"; then
-    mkdir -p "$dir/.github/workflows"
-    cat > "$dir/.github/workflows/sentinel.yml" << 'EOF'
-name: Sentinel Patrol
-on:
-  schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
-jobs:
-  patrol:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run sentinel
-        run: echo "Configure wk-sentinel patrol here"
-EOF
-    added+=(".github/workflows/sentinel.yml")
-  fi
-
-  echo ""
-  if [[ ${#added[@]} -gt 0 ]]; then
-    ok "Added: ${added[*]}  已添加: ${added[*]}"
-  else
-    info "Nothing added.  未添加任何文件。"
-  fi
 }
 
 # ─── Helper: detect project type from existing AGENTS.md ─────────────────────
@@ -1503,7 +1234,7 @@ usage() {
   echo "Commands:"
   echo "  setup                  Initialize ~/.roll/ + install skills          初始化 ~/.roll/ + 安装技能"
   echo "  sync [scope] [-f]      Distribute to AI tool config paths              分发约定到各 AI 工具配置路径"
-  echo "  init [type]            Initialize or refresh project conventions (cwd) 初始化或刷新项目约定（当前目录）"
+  echo "  init                   Initialize or re-merge project conventions (cwd) 初始化或重新合并项目约定（当前目录）"
   echo "  hook [install|remove] Manage global git hook (opt-in)                管理全局 git hook（可选安装）"
   echo "  reset                  Reset ~/.roll/ from repo, then force-sync     从仓库重置 ~/.roll/，再强制同步"
   echo "  status                 Show current state                              显示当前状态"
@@ -1512,19 +1243,12 @@ usage() {
   echo "Sync scopes: conventions (default) | skills | all"
   echo "同步范围:    conventions（默认）| skills | all"
   echo ""
-  echo "Init types:  fullstack | frontend-only | backend-service | cli | auto"
-  echo "初始化类型:  fullstack | frontend-only | backend-service | cli | auto"
-  echo ""
-  echo "Init tools:  claude,gemini,cursor,all"
-  echo "初始化工具:  claude,gemini,cursor,all"
-  echo ""
   echo "Examples / 示例:"
   echo "  roll setup                    # First-time setup (non-invasive)         首次安装（非破坏性）"
   echo "  roll sync conventions         # Opt-in: add WK conventions via @include  可选：通过 @include 添加约定"
   echo "  roll sync skills -f           # Rebuild skill symlinks                   重建技能软链接"
   echo "  roll hook install            # Opt-in: global git hook                  可选：全局 git hook"
-  echo "  roll init fullstack           # New project (cwd)                        新项目（当前目录）"
-  echo "  roll init                     # Refresh existing project (cwd)           刷新已有项目（当前目录）"
+  echo "  roll init                     # New or re-merge project (cwd)             新建或重新合并（当前目录）"
 }
 
 main() {

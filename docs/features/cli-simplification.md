@@ -37,9 +37,10 @@
 ---
 
 <a id="us-cli-002"></a>
-## US-CLI-002 conventions/templates 重新定位為 skills 參考資料 📋
+## US-CLI-002 conventions/templates 重新定位為 skills 參考資料 ✅
 
 **Created**: 2026-04-16
+**Completed**: 2026-04-16
 **Plan**: [cli-simplification-plan.md](cli-simplification-plan.md)
 
 - As a skill (AI agent) executing a story
@@ -47,17 +48,18 @@
 - So that I can infer the right patterns without the user having to declare their project type
 
 **AC:**
-- [ ] 每個 `conventions/templates/<type>/AGENTS.md` 頂部加說明：`# Reference Template — used by skills, not by users`
-- [ ] `conventions/global/AGENTS.md` 移除所有「類型選擇」相關說明（已由 roll init 負責的部分）
-- [ ] README.md 更新：`roll init` 段落移除 type 參數說明，改為「無參數，即時完成」
-- [ ] `roll --help` init 那行更新，移除 `[type]` 參數
-- [ ] `npm test` 全部通過
+- [x] 每個 `conventions/templates/<type>/AGENTS.md` 頂部加說明 note（Reference Template blockquote）
+- [x] `conventions/global/AGENTS.md` — no type-selection content found, no changes needed
+- [x] README.md 更新：`roll init` 段落移除 type 參數說明，改為「無參數，即時完成」；移除 `$roll-init` 相關 rows；更新 Project Structure 段落
+- [x] `roll --help` init 那行 — already updated in US-CLI-001, no changes needed
+- [x] bats tests pass (6/6)
 
 **Files:**
-- `conventions/templates/*/AGENTS.md`（加說明 header）
-- `conventions/global/AGENTS.md`（清理）
-- `README.md`（更新 init 說明）
-- `bin/roll`（usage() 裡 init 那行）
+- `conventions/templates/fullstack/AGENTS.md`（加 Reference Template note）
+- `conventions/templates/frontend-only/AGENTS.md`（加 Reference Template note）
+- `conventions/templates/backend-service/AGENTS.md`（加 Reference Template note）
+- `conventions/templates/cli/AGENTS.md`（加 Reference Template note）
+- `README.md`（更新 init 說明，移除 $roll-init，更新 Project Structure）
 
 **Dependencies:**
 - Depends on: US-CLI-001

@@ -159,10 +159,8 @@ _pull_skills() {
     local installed_name
     installed_name="$(basename "$installed_dir")"
     if [[ ! -d "$REPO_ROOT/skills/$installed_name" ]]; then
-      local bak="${installed_dir%/}.bak"
-      [[ -d "$bak" ]] && rm -rf "$bak"
-      mv "$installed_dir" "$bak"
-      info "Removed stale skill (backed up to .bak): $installed_name  已删除过时技能（已备份为 .bak）: $installed_name"
+      rm -rf "$installed_dir"
+      info "Removed stale skill: $installed_name  已删除过时技能: $installed_name"
     fi
   done
 }

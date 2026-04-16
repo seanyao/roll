@@ -417,14 +417,13 @@ cmd_setup() {
   echo ""
   info "Next steps:  后续步骤："
   echo "  Init a project:          ${BOLD}roll init${NC}                 初始化项目"
-  echo "  Add global conventions:  ${BOLD}roll sync conventions${NC}     添加全局约定"
+  echo "  Sync conventions + skills: ${BOLD}roll sync${NC}                 同步约定与技能"
   echo "  Install git hook:        ${BOLD}roll hook install${NC}        安装 git hook"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: sync [scope] [--force]
-# Distribute global conventions and/or skills to each AI tool's config path
-# Scopes: conventions (default), skills, all
+# COMMAND: sync [--force]
+# Distribute global conventions and skills to each AI tool's config path
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_sync() {
   if [[ ! -d "$ROLL_HOME" ]]; then
@@ -432,27 +431,19 @@ cmd_sync() {
     exit 1
   fi
 
-  local scope="conventions"
   local force=false
-
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force|-f) force=true; shift ;;
-      conventions|skills|all) scope="$1"; shift ;;
       *) err "Unknown sync argument: $1  未知同步参数: $1"; exit 1 ;;
     esac
   done
 
-  info "Syncing ${scope}...  正在同步 ${scope}..."
+  info "Syncing conventions and skills...  正在同步约定与技能..."
   echo ""
-
-  if [[ "$scope" == "conventions" || "$scope" == "all" ]]; then
-    _sync_conventions "$force"
-  fi
-  if [[ "$scope" == "skills" || "$scope" == "all" ]]; then
-    _sync_skills "$force"
-  fi
-
+  _sync_conventions "$force"
+  echo ""
+  _sync_skills "$force"
   echo ""
   ok "Sync complete.  同步完成。"
 }
@@ -967,7 +958,7 @@ cmd_reset() {
   echo ""
   ok "Reset complete. Force-syncing to AI tools...  重置完成，正在强制同步到 AI 工具..."
   echo ""
-  cmd_sync all --force
+  cmd_sync --force
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1233,20 +1224,17 @@ usage() {
   echo ""
   echo "Commands:"
   echo "  setup                  Initialize ~/.roll/ + install skills          初始化 ~/.roll/ + 安装技能"
-  echo "  sync [scope] [-f]      Distribute to AI tool config paths              分发约定到各 AI 工具配置路径"
+  echo "  sync [-f]              Sync conventions + skills to AI tool config paths 同步约定与技能到各 AI 工具配置路径"
   echo "  init                   Initialize or re-merge project conventions (cwd) 初始化或重新合并项目约定（当前目录）"
   echo "  hook [install|remove] Manage global git hook (opt-in)                管理全局 git hook（可选安装）"
   echo "  reset                  Reset ~/.roll/ from repo, then force-sync     从仓库重置 ~/.roll/，再强制同步"
   echo "  status                 Show current state                              显示当前状态"
   echo "  clean                  Remove legacy ~/.wukong/ ~/.cybernetix/ remnants  清理旧版遗留文件"
   echo ""
-  echo "Sync scopes: conventions (default) | skills | all"
-  echo "同步范围:    conventions（默认）| skills | all"
-  echo ""
   echo "Examples / 示例:"
   echo "  roll setup                    # First-time setup (non-invasive)         首次安装（非破坏性）"
-  echo "  roll sync conventions         # Opt-in: add WK conventions via @include  可选：通过 @include 添加约定"
-  echo "  roll sync skills -f           # Rebuild skill symlinks                   重建技能软链接"
+  echo "  roll sync                     # Sync conventions + skills to AI tools      同步约定与技能到 AI 工具"
+  echo "  roll sync -f                  # Force-overwrite existing convention files 强制覆盖已有约定文件"
   echo "  roll hook install            # Opt-in: global git hook                  可选：全局 git hook"
   echo "  roll init                     # New or re-merge project (cwd)             新建或重新合并（当前目录）"
 }

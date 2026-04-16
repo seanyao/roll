@@ -580,9 +580,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 | Command | Purpose |
 |---------|---------|
 | `roll setup` | First-time initialization of `~/.roll/`, mount skills (non-invasive) |
-| `roll sync conventions` | Opt-in: append WK conventions via `@include` (never overwrites existing files) |
-| `roll sync skills` | Refresh skills and repair per-skill symlinks |
-| `roll sync all` | Run both conventions and skills sync |
+| `roll sync` | Sync conventions to AI tool configs + refresh skill symlinks |
 | `roll hook install` | Opt-in: install global git hook (requires confirmation) |
 | `roll init` | Create AGENTS.md + BACKLOG.md + docs/features/ in cwd (no prompts); re-merges if AGENTS.md exists |
 | `roll reset` | Reset `~/.roll/` from the repository source, then sync |

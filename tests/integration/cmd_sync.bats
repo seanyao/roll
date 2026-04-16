@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Integration tests for: roll sync [scope]
-# Tests convention file syncing, skill symlink creation, idempotency,
-# and conditional directory handling.
+# Integration tests for: roll sync [-f]
+# Tests convention file syncing, skill symlink creation, and idempotency.
+# roll sync always syncs both conventions and skills in one step.
 
 load helpers
 
@@ -15,71 +15,66 @@ teardown() {
   integration_teardown
 }
 
-# ─── sync conventions: wk.md written ─────────────────────────────────────────
+# ─── sync: conventions written ────────────────────────────────────────────────
 
-@test "sync conventions: wk.md is written to ~/.claude/" {
-  run_wk sync conventions
+@test "sync: wk.md is written to ~/.claude/" {
+  run_wk sync
   [ "$status" -eq 0 ]
   [ -f "${TEST_TMP}/.claude/wk.md" ]
 }
 
-@test "sync conventions: wk.md content matches WK_HOME/conventions/global/CLAUDE.md" {
-  run_wk sync conventions
+@test "sync: wk.md content matches ROLL_HOME/conventions/global/CLAUDE.md" {
+  run_wk sync
   [ "$status" -eq 0 ]
   diff "${ROLL_HOME}/conventions/global/CLAUDE.md" "${TEST_TMP}/.claude/wk.md"
 }
 
-# ─── sync conventions: @wk.md appended to CLAUDE.md ─────────────────────────
+# ─── sync: @wk.md appended to CLAUDE.md ──────────────────────────────────────
 
-@test "sync conventions: @wk.md is present in ~/.claude/CLAUDE.md" {
-  run_wk sync conventions
+@test "sync: @wk.md is present in ~/.claude/CLAUDE.md" {
+  run_wk sync
   [ "$status" -eq 0 ]
   [ -f "${TEST_TMP}/.claude/CLAUDE.md" ]
   grep -qF "@wk.md" "${TEST_TMP}/.claude/CLAUDE.md"
 }
 
-# ─── sync conventions: idempotent (@wk.md not duplicated) ────────────────────
+# ─── sync: idempotent (@wk.md not duplicated) ────────────────────────────────
 
-@test "sync conventions: @wk.md is not duplicated when synced twice" {
-  run_wk sync conventions
+@test "sync: @wk.md is not duplicated when synced twice" {
+  run_wk sync
   [ "$status" -eq 0 ]
-  run_wk sync conventions
+  run_wk sync
   [ "$status" -eq 0 ]
   local count
   count=$(grep -cF "@wk.md" "${TEST_TMP}/.claude/CLAUDE.md")
   [ "$count" -eq 1 ]
 }
 
-# ─── sync conventions: missing AI tool dir is not created ────────────────────
+# ─── sync: missing AI tool dir is not created ────────────────────────────────
 
-@test "sync conventions: absent ~/.gemini/ is not recreated by sync" {
+@test "sync: absent ~/.gemini/ is not recreated by sync" {
   rm -rf "${TEST_TMP}/.gemini"
-  run_wk sync conventions
+  run_wk sync
   [ "$status" -eq 0 ]
   [ ! -d "${TEST_TMP}/.gemini" ]
 }
 
-# ─── sync skills: symlinks exist ─────────────────────────────────────────────
+# ─── sync: skill symlinks exist ──────────────────────────────────────────────
 
-@test "sync skills: ~/.claude/skills/ contains roll-* symlinks" {
-  run_wk sync skills
+@test "sync: ~/.claude/skills/ contains roll-* symlinks" {
+  run_wk sync
   [ "$status" -eq 0 ]
   local count
   count=$(find "${TEST_TMP}/.claude/skills" -maxdepth 1 -mindepth 1 -type l -name "roll-*" | wc -l | tr -d ' ')
   [ "$count" -gt 0 ]
 }
 
-# ─── sync all: conventions and skills both applied ────────────────────────────
+# ─── sync: both conventions and skills applied in one call ───────────────────
 
-@test "sync all: wk.md exists after sync all" {
-  run_wk sync all
+@test "sync: wk.md and roll-* symlinks both exist after single sync" {
+  run_wk sync
   [ "$status" -eq 0 ]
   [ -f "${TEST_TMP}/.claude/wk.md" ]
-}
-
-@test "sync all: roll-* skill symlinks exist after sync all" {
-  run_wk sync all
-  [ "$status" -eq 0 ]
   local count
   count=$(find "${TEST_TMP}/.claude/skills" -maxdepth 1 -mindepth 1 -type l -name "roll-*" | wc -l | tr -d ' ')
   [ "$count" -gt 0 ]

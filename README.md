@@ -50,9 +50,7 @@ Unified management of behavioral conventions for Claude Code / Kimi Code / Gemin
 | Command | Use Case |
 |---------|----------|
 | `roll setup` | First-time setup: pull local cache + link skills (non-invasive) |
-| `roll sync conventions` | Opt-in: add Roll conventions via `@include` (never overwrites existing files) |
-| `roll sync skills` | Refresh skills and repair per-skill symlinks |
-| `roll sync all` | Sync both conventions and skills |
+| `roll sync` | Sync conventions to AI tool configs + refresh skill symlinks |
 | `roll hook install` | Opt-in: install global git hook for AI client auto-detection |
 | `roll init` | New project: create AGENTS.md + BACKLOG.md + docs/features/ (cwd); existing: re-merge global conventions |
 | `roll reset` | Reset local cache from repo source, then force-sync |
@@ -72,8 +70,8 @@ roll init              # Creates AGENTS.md + BACKLOG.md + docs/features/
 # 3. Refresh existing project (re-merge from latest templates)
 roll init              # Re-merges global conventions into existing AGENTS.md
 
-# 4. Optional: add Roll global conventions (appends @roll.md, never overwrites)
-roll sync conventions
+# 4. Optional: sync Roll conventions to AI tool configs
+roll sync
 
 # 5. Optional: install global git hook for AI client tagging
 roll hook install

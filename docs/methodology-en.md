@@ -1,4 +1,4 @@
-# Wukong Engineering Methodology: A Standardized AI Agent Delivery Framework
+# Roll Engineering Methodology: A Standardized AI Agent Delivery Framework
 
 > **Version:** 1.0
 > **Date:** 2026-04-15
@@ -10,41 +10,41 @@
 
 As AI coding assistants evolve from point tools into team infrastructure, engineering organizations face an underappreciated challenge: **inconsistent behavior across AI clients (Claude Code, Gemini CLI, Cursor, Codex), fragmented environment configuration, and the absence of auditable quality gates on deliverables**. One developer writes code with Claude that passes local tests; another uses Cursor and bypasses those same tests — not because of a capability gap between the models, but because the two received entirely different engineering constraints.
 
-Wukong is an **instruction and workflow management framework for AI Agents**. It does not invent new methodology. Instead, it encodes proven software engineering practices (Scrum, TDD, TCR, SRE) as standardized, AI-executable Skill definitions, and enforces cross-client configuration consistency through a CLI tool.
+Roll is an **instruction and workflow management framework for AI Agents**. It does not invent new methodology. Instead, it encodes proven software engineering practices (Scrum, TDD, TCR, SRE) as standardized, AI-executable Skill definitions, and enforces cross-client configuration consistency through a CLI tool.
 
-This document describes Wukong's three-loop engineering architecture and its corresponding technical implementation.
+This document describes Roll's three-loop engineering architecture and its corresponding technical implementation.
 
-The name is the design philosophy: Wukong (悟空), the shape-shifting trickster, gains discipline from the golden headband (_金箍_) without losing any of his power. Wukong the framework takes the same position — AI Agent capability is not diminished by constraint. Standardized constraints are precisely what make that capability composable and transferable at team scale.
+The name is the design philosophy: Roll (悟空), the shape-shifting trickster, gains discipline from the golden headband (_金箍_) without losing any of his power. Roll the framework takes the same position — AI Agent capability is not diminished by constraint. Standardized constraints are precisely what make that capability composable and transferable at team scale.
 
 ---
 
 ## 1. Architecture Overview: Three Interlocking Loops
 
-Wukong decomposes the software delivery lifecycle into three loops, each independently operable yet mutually reinforcing. Every loop inherits a set of classical methodologies and automates their execution through concrete Skills.
+Roll decomposes the software delivery lifecycle into three loops, each independently operable yet mutually reinforcing. Every loop inherits a set of classical methodologies and automates their execution through concrete Skills.
 
 ```mermaid
 graph TB
     subgraph "Loop A: Research & Design"
-        A1["$wk-research<br/>HV Research & Analysis"] --> A2["$wk-design<br/>Requirements → INVEST Stories"]
+        A1["$roll-research<br/>HV Research & Analysis"] --> A2["$roll-design<br/>Requirements → INVEST Stories"]
         A2 --> A3["BACKLOG.md<br/>Status Index"]
         A3 --> A4["docs/features/<br/>Acceptance Criteria & Design"]
     end
 
     subgraph "Loop B: Implementation & Iteration"
-        B1["$wk-init<br/>Project Scaffold"] --> B2["$wk-story-build<br/>TCR-Driven Development"]
-        B2 --> B3["$wk-.code-review<br/>Pre-commit Review"]
+        B1["$roll-init<br/>Project Scaffold"] --> B2["$roll-story-build<br/>TCR-Driven Development"]
+        B2 --> B3["$roll-.code-review<br/>Pre-commit Review"]
         B3 --> B4["CI / Deploy"]
         B4 --> B5["Verification Gate<br/>Live Evidence Required"]
-        B5 --> B6["$wk-.changelog<br/>Change Log"]
-        B2 -.->|High-risk path| B7["$wk-spar<br/>Adversarial TDD"]
+        B5 --> B6["$roll-.changelog<br/>Change Log"]
+        B2 -.->|High-risk path| B7["$roll-spar<br/>Adversarial TDD"]
         B7 --> B3
     end
 
     subgraph "Loop C: Observability & Maintenance"
-        C1["$wk-sentinel<br/>Randomized Patrol"] --> C2{"Anomaly?"}
-        C2 -->|Yes| C3["$wk-bb-debug<br/>Live Forensics"]
-        C3 --> C4["$wk-bb-analyzer<br/>Root Cause Analysis"]
-        C4 --> C5["$wk-fix-build<br/>Regression Fix"]
+        C1["$roll-sentinel<br/>Randomized Patrol"] --> C2{"Anomaly?"}
+        C2 -->|Yes| C3["$roll-bb-debug<br/>Live Forensics"]
+        C3 --> C4["$roll-bb-analyzer<br/>Root Cause Analysis"]
+        C4 --> C5["$roll-fix-build<br/>Regression Fix"]
         C5 --> C1
         C2 -->|No| C1
     end
@@ -82,20 +82,20 @@ In environments where multiple AI clients coexist, each client has its own confi
 
 ### 2.2 Technical Implementation
 
-Wukong uses the `wukong` CLI to centralize configuration management and distribute it atomically.
+Roll uses the `roll` CLI to centralize configuration management and distribute it atomically.
 
-**2.2.1 Skill Mounting (`wukong setup`)**
+**2.2.1 Skill Mounting (`roll setup`)**
 
 On first run, the CLI performs two operations:
 
-1. **Establish a Single Source of Truth**: Copies global conventions (`conventions/global/`) and skill definitions (`skills/`) from the repository into `~/.wukong/`, making it the sole authoritative configuration source on the machine.
-2. **Per-skill symlinks**: Creates individual symlinks for each `wk-*` skill into each AI client's skills directory (`~/.claude/skills/wk-*`, `~/.gemini/skills/wk-*`, etc.). Existing user skills are untouched — Wukong skills are added alongside.
+1. **Establish a Single Source of Truth**: Copies global conventions (`conventions/global/`) and skill definitions (`skills/`) from the repository into `~/.roll/`, making it the sole authoritative configuration source on the machine.
+2. **Per-skill symlinks**: Creates individual symlinks for each `wk-*` skill into each AI client's skills directory (`~/.claude/skills/wk-*`, `~/.gemini/skills/wk-*`, etc.). Existing user skills are untouched — Roll skills are added alongside.
 
 Setup never modifies any AI tool configuration files or global git settings. It is fully non-invasive and safe to re-run.
 
-**2.2.2 Configuration Sync (`wukong sync [scope]`)**
+**2.2.2 Configuration Sync (`roll sync [scope]`)**
 
-Distributes content from `~/.wukong/` to each AI client's configuration path based on the selected scope.
+Distributes content from `~/.roll/` to each AI client's configuration path based on the selected scope.
 
 - `conventions` (default): uses `@include` append mode — writes WK conventions to `{ai_dir}/wk.md`, then appends a single `@wk.md` line to the user's main config. Existing content is never overwritten.
 - `skills`: refreshes skills from the repo into the local cache and creates/repairs per-skill symlinks for each client
@@ -104,20 +104,20 @@ Distributes content from `~/.wukong/` to each AI client's configuration path bas
 Append `--force` (or `-f`) to force-rewrite `wk.md` or rebuild symlinks.
 
 ```
-~/.wukong/conventions/global/
+~/.roll/conventions/global/
 ├── AGENTS.md        → ~/.kimi/wk.md (+ @wk.md appended to AGENTS.md)
 ├── CLAUDE.md        → ~/.claude/wk.md (+ @wk.md appended to CLAUDE.md)
 ├── GEMINI.md        → ~/.gemini/wk.md (+ @wk.md appended to GEMINI.md)
 └── .cursor-rules    → (project-level distribution)
 ```
 
-**Git Hook (optional — `wukong hooks install`)**
+**Git Hook (optional — `roll hooks install`)**
 
 Installs a global `prepare-commit-msg` hook that automatically detects which AI client authored the current commit and stamps it (e.g., `[claude code]`, `[gemini cli]`), enabling audit tracing in multi-agent workflows. This is an opt-in operation that modifies global git configuration — it shows the current state and requires explicit confirmation before proceeding.
 
-**2.2.3 Project-Level Configuration (`wukong init`)**
+**2.2.3 Project-Level Configuration (`roll init`)**
 
-When generating convention files for a specific project, Wukong applies a **Global + Template merge strategy**:
+When generating convention files for a specific project, Roll applies a **Global + Template merge strategy**:
 
 ```
 Final AGENTS.md = Global AGENTS.md (organization-level constraints)
@@ -142,16 +142,16 @@ Project Instance         ← AGENTS.md (constraints) + .claude/CLAUDE.md (client
 
 ### 3.1 Methodology Inheritance
 
-| Classical Methodology | Wukong Implementation |
+| Classical Methodology | Roll Implementation |
 |----------------------|--------------------|
-| HCD (Human-Centered Design) | `$wk-research`: Research before design; data-driven decision-making |
-| BDD (Behavior-Driven Development) | `$wk-design`: Requirements expressed as Acceptance Criteria |
+| HCD (Human-Centered Design) | `$roll-research`: Research before design; data-driven decision-making |
+| BDD (Behavior-Driven Development) | `$roll-design`: Requirements expressed as Acceptance Criteria |
 | Scrum Backlog | `BACKLOG.md` + `docs/features/`: Two-tier index structure |
 | INVEST Principles | Mandatory constraints on Story decomposition |
 
-### 3.2 Research-Driven Design: `$wk-research`
+### 3.2 Research-Driven Design: `$roll-research`
 
-Structured research precedes requirements definition, preventing design decisions made on gut instinct alone. `$wk-research` implements **HV Analysis (Horizontal-Vertical Analysis)**:
+Structured research precedes requirements definition, preventing design decisions made on gut instinct alone. `$roll-research` implements **HV Analysis (Horizontal-Vertical Analysis)**:
 
 - **Vertical Axis**: Traces the full evolutionary arc of the subject — from its origins to the present — along a timeline. Produces a narrative analysis of 6,000–15,000 words, covering key inflection points, technology iterations, and market shifts.
 - **Horizontal Axis**: Performs systematic benchmarking against comparable products and solutions at the current point in time. Produces a comparative analysis of 3,000–10,000 words, covering feature matrices, technology approaches, and positioning differences.
@@ -161,11 +161,11 @@ Research follows a strict source priority hierarchy: **primary sources > industr
 
 The final output is a structured Markdown report that can be converted to a PDF with cover page and table of contents using the built-in `md_to_pdf.py` script (powered by WeasyPrint).
 
-> **Scenario**: TaskFlow plans to add an "organization-level permission management" module. Before writing a single line, `$wk-research` conducts an HV analysis on "B2B SaaS permission models" — the vertical axis traces the ACL → RBAC → ABAC → ReBAC evolution, while the horizontal axis compares how Linear, Notion, and GitHub each implement permissions.
+> **Scenario**: TaskFlow plans to add an "organization-level permission management" module. Before writing a single line, `$roll-research` conducts an HV analysis on "B2B SaaS permission models" — the vertical axis traces the ACL → RBAC → ABAC → ReBAC evolution, while the horizontal axis compares how Linear, Notion, and GitHub each implement permissions.
 >
-> The cross-axis insight: after 2023, mainstream products universally layered resource-level fine-grained controls on top of RBAC — pure RBAC has become the minimum viable bar. This finding directly shaped how `$wk-design` decomposed Stories downstream, averting a rework cycle that would have surfaced only after delivery.
+> The cross-axis insight: after 2023, mainstream products universally layered resource-level fine-grained controls on top of RBAC — pure RBAC has become the minimum viable bar. This finding directly shaped how `$roll-design` decomposed Stories downstream, averting a rework cycle that would have surfaced only after delivery.
 
-### 3.3 Requirement Atomization: `$wk-design`
+### 3.3 Requirement Atomization: `$roll-design`
 
 Translates research findings and business requirements into instruction contracts that AI can execute. The core output is User Stories that conform to the **INVEST principles**:
 
@@ -178,7 +178,7 @@ Translates research findings and business requirements into instruction contract
 | **S**mall | A single Story can be completed within one session cycle |
 | **T**estable | Each Story includes verifiable acceptance criteria |
 
-> **Scenario**: A product manager's raw requirement is "admins should be able to see everyone's activity logs." `$wk-design` decomposes this into three independent Stories: US-007 (write audit events), US-008 (audit list UI with filtering), and US-009 (export audit data as CSV).
+> **Scenario**: A product manager's raw requirement is "admins should be able to see everyone's activity logs." `$roll-design` decomposes this into three independent Stories: US-007 (write audit events), US-008 (audit list UI with filtering), and US-009 (export audit data as CSV).
 >
 > Each Story carries its own acceptance criteria — US-007's AC includes "create/delete/modify operations all generate audit events" and "events include actor ID, timestamp, and change diff." The export capability, which was buried implicitly in the original requirement, is surfaced as an explicit standalone Story rather than hidden in implementation details.
 
@@ -202,7 +202,7 @@ Translates research findings and business requirements into instruction contract
 
 This separation keeps BACKLOG.md concise and readable as a progress dashboard, while detailed design lives in a dedicated location.
 
-> **Design principle — Markdown as Code**: In Wukong, `BACKLOG.md` and `docs/features/` are not documentation artifacts generated after development — they are the input that drives development. A Story does not exist until it has a Markdown file. A Story is not done until its Verification Gate evidence is committed. The file system is the single source of truth; there is no separate project management tool to stay in sync with.
+> **Design principle — Markdown as Code**: In Roll, `BACKLOG.md` and `docs/features/` are not documentation artifacts generated after development — they are the input that drives development. A Story does not exist until it has a Markdown file. A Story is not done until its Verification Gate evidence is committed. The file system is the single source of truth; there is no separate project management tool to stay in sync with.
 
 ---
 
@@ -210,18 +210,18 @@ This separation keeps BACKLOG.md concise and readable as a progress dashboard, w
 
 ### 4.1 Methodology Inheritance
 
-| Classical Methodology | Wukong Implementation |
+| Classical Methodology | Roll Implementation |
 |----------------------|--------------------|
 | TDD (Test-Driven Development) | Tests written first; RED → GREEN → Refactor |
-| TCR (Test && Commit ∥ Revert) | `$wk-story-build`: commit on pass, revert on failure |
+| TCR (Test && Commit ∥ Revert) | `$roll-story-build`: commit on pass, revert on failure |
 | DevOps / CI-CD | Objective arbitration layer: CI is the final authority on "deliverable"; minute-level feedback loops compress defect discovery cost |
-| Defensive Programming | `$wk-spar`: adversarial TDD for high-risk paths |
+| Defensive Programming | `$roll-spar`: adversarial TDD for high-risk paths |
 
-### 4.2 Project Scaffolding: `$wk-init`
+### 4.2 Project Scaffolding: `$roll-init`
 
 Standardizes project directory structure and CI configuration, eliminating the randomness of building from scratch.
 
-`$wk-init` applies the **Global + Template merge strategy** (see 2.2.3). Differences across project types primarily manifest in the **interaction layer**: frontend projects have a component tree and routing layer; CLI projects have command registration and interactive input; pure backend services have only an API interface layer. The complete structures for each template are as follows:
+`$roll-init` applies the **Global + Template merge strategy** (see 2.2.3). Differences across project types primarily manifest in the **interaction layer**: frontend projects have a component tree and routing layer; CLI projects have command registration and interactive input; pure backend services have only an API interface layer. The complete structures for each template are as follows:
 
 **`fullstack` template:**
 
@@ -266,9 +266,9 @@ The directory structure encodes four architectural constraints:
 | **API / CLI Separation** | `app/api/` + `bin/` | Interaction entry points are independent from business logic; the same domain can serve both Web and CLI simultaneously |
 | **Stateless** | No server-side session assumptions | Designed for Edge/Serverless deployment; horizontal scaling requires no session synchronization |
 
-### 4.3 TCR-Driven Development: `$wk-story-build`
+### 4.3 TCR-Driven Development: `$roll-story-build`
 
-This is Wukong's core execution unit. Its engineering significance lies in a fundamental shift: **correctness is not determined by the AI's own assertions, but exclusively by the pass/fail status of automated tests**.
+This is Roll's core execution unit. Its engineering significance lies in a fundamental shift: **correctness is not determined by the AI's own assertions, but exclusively by the pass/fail status of automated tests**.
 
 **TCR (Test && Commit || Revert) execution flow:**
 
@@ -288,7 +288,7 @@ This is Wukong's core execution unit. Its engineering significance lies in a fun
 │            PASS                                      │
 │              │                                       │
 │              ▼                                       │
-│  4. $wk-.code-review (self-review gate)             │
+│  4. $roll-.code-review (self-review gate)             │
 │              │                                       │
 │              ▼                                       │
 │  5. git commit (micro-commit)                        │
@@ -304,7 +304,7 @@ Each Action is constrained to **2–5 minutes** of scope. The engineering ration
 - **Errors do not compound**: Failing logic cannot be depended on by subsequent code, preventing hidden debt from accumulating in the codebase.
 - **Observable progress**: The micro-commit sequence is itself a real-time record of delivery progress.
 
-**The complete delivery pipeline** — `$wk-story-build` does not stop at local tests passing. It requires completing the full end-to-end delivery chain:
+**The complete delivery pipeline** — `$roll-story-build` does not stop at local tests passing. It requires completing the full end-to-end delivery chain:
 
 ```
 TCR Micro-commits → git push → CI Pass → Deploy → Verification Gate
@@ -322,7 +322,7 @@ The **Verification Gate** is the final checkpoint: it requires **live evidence**
 
 ### 4.4 Continuous Integration / Continuous Delivery: The Fast Feedback Infrastructure
 
-CI/CD is not an "add-on" to Wukong — it is the **objective arbitration layer** for all of Loop B. Passing tests locally is a necessary condition, not a sufficient one. Local environments carry implicit dependencies, uncommitted state, and machine-specific configuration. CI re-executes the same code in a clean, deterministic environment, making it the final authority on whether something is truly deliverable.
+CI/CD is not an "add-on" to Roll — it is the **objective arbitration layer** for all of Loop B. Passing tests locally is a necessary condition, not a sufficient one. Local environments carry implicit dependencies, uncommitted state, and machine-specific configuration. CI re-executes the same code in a clean, deterministic environment, making it the final authority on whether something is truly deliverable.
 
 **4.4.1 CI as Objective Arbiter**
 
@@ -349,7 +349,7 @@ If any check fails, the deployment pipeline halts automatically. There is no "de
 
 The later a defect is discovered, the more expensive it is to fix — this is not folk wisdom, it is an empirically supported engineering finding. A bug caught within 5 minutes of commit costs roughly the same as initial development to fix. Caught in a test environment, the cost multiplies by 10. Caught in production, by 100.
 
-Wukong's TCR + CI combination compresses the feedback window to **minutes**:
+Roll's TCR + CI combination compresses the feedback window to **minutes**:
 
 ```
 micro-commit (2–5 min granularity)
@@ -363,7 +363,7 @@ The micro-step granularity constraint (2–5 min/Action) delivers a second benef
 
 **4.4.3 Two Independent Workflow Pipelines**
 
-The CI configuration generated by `$wk-init` contains two independent pipelines corresponding to different trigger scenarios:
+The CI configuration generated by `$roll-init` contains two independent pipelines corresponding to different trigger scenarios:
 
 ```
 .github/workflows/
@@ -372,7 +372,7 @@ The CI configuration generated by `$wk-init` contains two independent pipelines 
 │                   # GREEN → unlocks CD deployment permission
 │
 └── sentinel.yml    # Triggered by cron schedule (unattended)
-                    # Runs $wk-sentinel patrol tasks
+                    # Runs $roll-sentinel patrol tasks
                     # Provides the observability infrastructure for Loop C
 ```
 
@@ -394,9 +394,9 @@ Without CD there is no verifiable target, rendering the Verification Gate meanin
 
 ---
 
-### 4.5 Adversarial TDD: `$wk-spar`
+### 4.5 Adversarial TDD: `$roll-spar`
 
-For high-risk paths — authorization, payments, data integrity — standard TDD coverage is insufficient. Tests and implementation are written by the same Agent, creating cognitive blind spots. `$wk-spar` introduces an adversarial mechanism:
+For high-risk paths — authorization, payments, data integrity — standard TDD coverage is insufficient. Tests and implementation are written by the same Agent, creating cognitive blind spots. `$roll-spar` introduces an adversarial mechanism:
 
 | Role | Responsibility | Constraint |
 |------|---------------|------------|
@@ -405,9 +405,9 @@ For high-risk paths — authorization, payments, data integrity — standard TDD
 
 The adversarial cycle continues until the Attacker cannot produce a new RED test for two consecutive rounds, or all predefined scenarios are covered (maximum 5 rounds). Each round's results are committed independently, keeping the adversarial process fully traceable.
 
-Automatic trigger signals: when a Story touches authentication/authorization, payment/billing, data integrity validation, complex state machines, or historically high-defect modules, `$wk-story-build` automatically routes the Action to `$wk-spar`.
+Automatic trigger signals: when a Story touches authentication/authorization, payment/billing, data integrity validation, complex state machines, or historically high-defect modules, `$roll-story-build` automatically routes the Action to `$roll-spar`.
 
-> **Scenario**: US-010 (organization member permission changes) triggers the `$wk-spar` auto-route.
+> **Scenario**: US-010 (organization member permission changes) triggers the `$roll-spar` auto-route.
 >
 > The Attacker's first round produces 3 RED tests: a regular member escalating privileges to modify another's role, whether an admin can continue operating after demoting themselves, and concurrent requests simultaneously modifying the same user's role. After the Defender implements passing code for all three, the Attacker's second round adds: if a role change succeeds at the DB level but the notification fails, does the permission atomically roll back?
 >
@@ -417,7 +417,7 @@ Automatic trigger signals: when a Story touches authentication/authorization, pa
 
 After each successful deployment, two mechanisms ensure deliverables remain traceable:
 
-- **`$wk-.changelog`**: Automatically extracts completed Stories from BACKLOG.md, filters out internal technical details, and generates a user-facing changelog.
+- **`$roll-.changelog`**: Automatically extracts completed Stories from BACKLOG.md, filters out internal technical details, and generates a user-facing changelog.
 - **Git Hook (AI source tagging)**: The global `prepare-commit-msg` hook auto-detects the active AI client (via environment variables `CLAUDE_CODE`, `GEMINI_CLI`, `KIMI_CODE`, etc.) and injects a source tag into the commit message (e.g., `[claude code]`, `[gemini cli]`). In multi-Agent workflows, `git log` shows the actual executor of every commit at a glance.
 
 ---
@@ -426,16 +426,16 @@ After each successful deployment, two mechanisms ensure deliverables remain trac
 
 ### 5.1 Methodology Inheritance
 
-| Classical Methodology | Wukong Implementation |
+| Classical Methodology | Roll Implementation |
 |----------------------|--------------------|
-| SRE (Site Reliability Engineering) | `$wk-sentinel`: Sampling-based automated patrol |
+| SRE (Site Reliability Engineering) | `$roll-sentinel`: Sampling-based automated patrol |
 | Chaos Engineering | Randomized patrol strategy simulating unpredictable check patterns |
-| Digital Forensics | `$wk-bb-debug`: Automated on-scene evidence collection |
-| Root Cause Analysis (RCA) | `$wk-bb-analyzer`: Structured diagnostic reports |
+| Digital Forensics | `$roll-bb-debug`: Automated on-scene evidence collection |
+| Root Cause Analysis (RCA) | `$roll-bb-analyzer`: Structured diagnostic reports |
 
-### 5.2 Randomized Patrol: `$wk-sentinel`
+### 5.2 Randomized Patrol: `$roll-sentinel`
 
-`$wk-sentinel` provides continuous health monitoring for delivered features. Its core design philosophy is **probabilistic sampling over exhaustive regression**, striking a balance between cost and coverage.
+`$roll-sentinel` provides continuous health monitoring for delivered features. Its core design philosophy is **probabilistic sampling over exhaustive regression**, striking a balance between cost and coverage.
 
 **Patrol strategy matrix:**
 
@@ -448,15 +448,15 @@ After each successful deployment, two mechanisms ensure deliverables remain trac
 
 **Uncertainty handling** — avoiding false positives: a single failure does not trigger an alert; three consecutive failures are required to flag an anomaly.
 
-**Hot-spot detection** — adaptive weighting: Stories that fail repeatedly automatically receive increased sampling weight. Issues discovered by patrol automatically create `FIX-XXX` Backlog entries for `$wk-fix-build` to handle.
+**Hot-spot detection** — adaptive weighting: Stories that fail repeatedly automatically receive increased sampling weight. Issues discovered by patrol automatically create `FIX-XXX` Backlog entries for `$roll-fix-build` to handle.
 
 Patrol runs via GitHub Actions `cron` scheduling, providing unattended continuous monitoring.
 
-> **Scenario**: Following the TaskFlow v1.3 release, `$wk-sentinel` runs on the Intensive strategy. On the second sample, the patrol case for US-007 (audit write) fails — audit events exist but the `timestamp` field is empty. A single failure does not trigger an alert.
+> **Scenario**: Following the TaskFlow v1.3 release, `$roll-sentinel` runs on the Intensive strategy. On the second sample, the patrol case for US-007 (audit write) fails — audit events exist but the `timestamp` field is empty. A single failure does not trigger an alert.
 >
 > On the fourth sample, the same case fails for the third consecutive time, crossing the threshold. `FIX-012: audit event timestamp is null` is automatically created and written to the Backlog, and US-007's sampling weight is automatically promoted to the next tier.
 
-### 5.3 Automated Forensics: `$wk-bb-debug`
+### 5.3 Automated Forensics: `$roll-bb-debug`
 
 A Playwright-based end-to-end debugger supporting two operating modes:
 
@@ -473,31 +473,31 @@ Data dimensions collected automatically:
 | Performance | Load times, resource timing, interaction latency |
 | Screenshot | Visual snapshot of the current page state |
 
-### 5.4 Root Cause Diagnosis: `$wk-bb-analyzer`
+### 5.4 Root Cause Diagnosis: `$roll-bb-analyzer`
 
-Consumes the diagnostic JSON produced by `$wk-bb-debug` and performs structured multi-dimensional analysis (content state, network failures, DOM rendering anomalies, performance bottlenecks), outputting diagnostic conclusions and remediation recommendations.
+Consumes the diagnostic JSON produced by `$roll-bb-debug` and performs structured multi-dimensional analysis (content state, network failures, DOM rendering anomalies, performance bottlenecks), outputting diagnostic conclusions and remediation recommendations.
 
-> **Scenario (cont.)**: `$wk-bb-debug` runs forensics on the audit list page. The Network dimension captures `GET /api/audit` returning 200 but with `timestamp` as `null`; the Console dimension simultaneously shows `[warn] AuditEvent serializer: missing timestamp`.
+> **Scenario (cont.)**: `$roll-bb-debug` runs forensics on the audit list page. The Network dimension captures `GET /api/audit` returning 200 but with `timestamp` as `null`; the Console dimension simultaneously shows `[warn] AuditEvent serializer: missing timestamp`.
 >
-> `$wk-bb-analyzer` consumes the diagnostic JSON and isolates the root cause: the v1.3 ORM upgrade introduced a field alias change that was not reflected in the serialization layer, breaking the `created_at` → `timestamp` mapping. The fix direction is clear; handed off to `$wk-fix-build`.
+> `$roll-bb-analyzer` consumes the diagnostic JSON and isolates the root cause: the v1.3 ORM upgrade introduced a field alias change that was not reflected in the serialization layer, breaking the `created_at` → `timestamp` mapping. The fix direction is clear; handed off to `$roll-fix-build`.
 
-### 5.5 Regression Repair: `$wk-fix-build`
+### 5.5 Regression Repair: `$roll-fix-build`
 
-Executes a fix for a single issue — lighter-weight than `$wk-story-build`, but held to the same quality standards:
+Executes a fix for a single issue — lighter-weight than `$roll-story-build`, but held to the same quality standards:
 
 - **Mandatory regression tests**: Every fix patch must include a regression test case targeting the specific issue, preventing recurrence.
 - **Scope constraint**: One Fix handles one issue. If the fix reveals a scope wider than expected, it escalates to a User Story and re-enters Loop A.
 - **Same quality gates**: Verification Gate, CI Pass, and production verification all apply equally.
 
-> **Scenario (cont.)**: `$wk-fix-build` executes FIX-012, with scope strictly limited to the serialization layer field mapping. A regression test is added (asserting `timestamp` is non-null and conforms to ISO 8601 format).
+> **Scenario (cont.)**: `$roll-fix-build` executes FIX-012, with scope strictly limited to the serialization layer field mapping. A regression test is added (asserting `timestamp` is non-null and conforms to ISO 8601 format).
 >
-> 1 commit, CI GREEN, post-deployment Verification Gate confirms the audit list timestamps have recovered, FIX-012 closed. On the next `$wk-sentinel` sample cycle, the check passes and US-007's sampling weight returns to baseline.
+> 1 commit, CI GREEN, post-deployment Verification Gate confirms the audit list timestamps have recovered, FIX-012 closed. On the next `$roll-sentinel` sample cycle, the check passes and US-007's sampling weight returns to baseline.
 
 ---
 
 ## 6. Engineering Baseline: Engineering Common Sense
 
-Wukong defines 9 non-negotiable engineering baselines that apply across all three loops. These are not "best practice suggestions" — they are mandatory checks in the Test Design Review phase of every Story:
+Roll defines 9 non-negotiable engineering baselines that apply across all three loops. These are not "best practice suggestions" — they are mandatory checks in the Test Design Review phase of every Story:
 
 | # | Baseline | Definition | Anti-Pattern |
 |---|----------|-----------|--------------|
@@ -521,20 +521,20 @@ The full menu is a fallback, not the default entry point. An `--auto` / `auto` a
 
 ## 7. Passive Support Skills
 
-Beyond the active Skills in the three loops, Wukong includes a set of passively triggered support skills:
+Beyond the active Skills in the three loops, Roll includes a set of passively triggered support skills:
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `$wk-.echo` | When user input is ambiguous or contradictory | Restates intent and resolves ambiguity before proceeding, avoiding wasted compute on a misunderstood instruction |
-| `$wk-.code-review` | After each TCR micro-step completes | Multi-dimensional self-review (security, maintainability, performance, scope); a Critical finding blocks the commit |
-| `$wk-.qa-cover` | During the Test Design Review phase | Defines the test pyramid (Unit > E2E > Visual > Smoke) and enforces coverage thresholds |
-| `$wk-.changelog` | After a successful deployment | Extracts completed items from BACKLOG and generates a user-readable changelog |
+| `$roll-.echo` | When user input is ambiguous or contradictory | Restates intent and resolves ambiguity before proceeding, avoiding wasted compute on a misunderstood instruction |
+| `$roll-.code-review` | After each TCR micro-step completes | Multi-dimensional self-review (security, maintainability, performance, scope); a Critical finding blocks the commit |
+| `$roll-.qa-cover` | During the Test Design Review phase | Defines the test pyramid (Unit > E2E > Visual > Smoke) and enforces coverage thresholds |
+| `$roll-.changelog` | After a successful deployment | Extracts completed items from BACKLOG and generates a user-readable changelog |
 
 ---
 
 ## 8. Relationship to Classical Methodologies
 
-Wukong is not a new methodology. It encodes proven engineering practices as standardized instructions that AI Agents can understand and execute.
+Roll is not a new methodology. It encodes proven engineering practices as standardized instructions that AI Agents can understand and execute.
 
 ```mermaid
 graph LR
@@ -548,13 +548,13 @@ graph LR
         CE["Chaos Engineering<br/>Random Fault Injection"]
     end
 
-    subgraph "Wukong Implementation"
-        R["$wk-research<br/>HV Analysis"]
-        D["$wk-design<br/>INVEST Stories"]
-        SB["$wk-story-build<br/>TCR Micro-steps"]
-        SP["$wk-spar<br/>Adversarial TDD"]
-        SE["$wk-sentinel<br/>Randomized Patrol"]
-        BB["$wk-bb-debug<br/>Auto Forensics"]
+    subgraph "Roll Implementation"
+        R["$roll-research<br/>HV Analysis"]
+        D["$roll-design<br/>INVEST Stories"]
+        SB["$roll-story-build<br/>TCR Micro-steps"]
+        SP["$roll-spar<br/>Adversarial TDD"]
+        SE["$roll-sentinel<br/>Randomized Patrol"]
+        BB["$roll-bb-debug<br/>Auto Forensics"]
     end
 
     HCD -->|"Research first"| R
@@ -568,7 +568,7 @@ graph LR
     SRE -->|"Live forensics"| BB
 ```
 
-The key distinction lies in the shift of execution subject: these methodologies originally depended on engineers' personal discipline (humans tire, humans cut corners). Wukong hardens them into instruction constraints for AI Agents — an Agent will never "skip the tests just this once," because that branch does not exist in the Skill definition.
+The key distinction lies in the shift of execution subject: these methodologies originally depended on engineers' personal discipline (humans tire, humans cut corners). Roll hardens them into instruction constraints for AI Agents — an Agent will never "skip the tests just this once," because that branch does not exist in the Skill definition.
 
 ---
 
@@ -578,15 +578,15 @@ The key distinction lies in the shift of execution subject: these methodologies 
 
 - Feedback-driven continuous delivery loop (Design → Build → Check → Fix)
 - A standardized skill set of 14 Skills + 2 Tools
-- Cross-AI-client configuration consistency management (`wukong` CLI)
+- Cross-AI-client configuration consistency management (`roll` CLI)
 - TCR micro-commits + Verification Gate quality assurance mechanism
 - Multi-Agent audit tracing via Git Hooks
 
 **Current Limitations:**
 
-- **Multi-Agent coordination overhead**: `$wk-story-build` evaluates Action dependencies to determine whether to launch parallel sub-Agents, but cross-Agent state synchronization and conflict resolution currently depend on conventions rather than enforced protocols, incurring coordination overhead in high-concurrency scenarios.
+- **Multi-Agent coordination overhead**: `$roll-story-build` evaluates Action dependencies to determine whether to launch parallel sub-Agents, but cross-Agent state synchronization and conflict resolution currently depend on conventions rather than enforced protocols, incurring coordination overhead in high-concurrency scenarios.
 - **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models.
-- **Patrol coverage**: `$wk-sentinel`'s sampling strategy effectively controls cost, but it does not provide the same coverage guarantee as exhaustive regression testing.
+- **Patrol coverage**: `$roll-sentinel`'s sampling strategy effectively controls cost, but it does not provide the same coverage guarantee as exhaustive regression testing.
 
 ---
 
@@ -594,28 +594,28 @@ The key distinction lies in the shift of execution subject: these methodologies 
 
 | Skill | Phase | Input | Output |
 |-------|-------|-------|--------|
-| `$wk-research` | Research | Research topic | Markdown / PDF research report |
-| `$wk-design` | Design | Requirements description | BACKLOG.md + docs/features/ |
-| `$wk-init` | Initialization | Project name | Standardized directory structure + CI config |
-| `$wk-story-build` | Implementation | Story ID | Deployed code + verification evidence |
-| `$wk-fly-build` | Rapid implementation | One-sentence requirement | Auto-decompose → deliver |
-| `$wk-spar` | Defensive implementation | Feature description | Adversarial test suite + implementation code |
-| `$wk-fix-build` | Bug fix | Fix ID | Fix code + regression test |
-| `$wk-sentinel` | Patrol | Patrol strategy | Health report / FIX entries |
-| `$wk-bb-debug` | Debugging | URL | Diagnostic JSON + screenshots |
-| `$wk-bb-analyzer` | Diagnosis | Diagnostic JSON | Root cause analysis + remediation recommendations |
-| `$wk-fetch` | Intelligence | URL / keyword | Web fetch, search, crawl results |
-| `$wk-probe` | Monitoring | Target address | Node discovery, health check report |
+| `$roll-research` | Research | Research topic | Markdown / PDF research report |
+| `$roll-design` | Design | Requirements description | BACKLOG.md + docs/features/ |
+| `$roll-init` | Initialization | Project name | Standardized directory structure + CI config |
+| `$roll-story-build` | Implementation | Story ID | Deployed code + verification evidence |
+| `$roll-fly-build` | Rapid implementation | One-sentence requirement | Auto-decompose → deliver |
+| `$roll-spar` | Defensive implementation | Feature description | Adversarial test suite + implementation code |
+| `$roll-fix-build` | Bug fix | Fix ID | Fix code + regression test |
+| `$roll-sentinel` | Patrol | Patrol strategy | Health report / FIX entries |
+| `$roll-bb-debug` | Debugging | URL | Diagnostic JSON + screenshots |
+| `$roll-bb-analyzer` | Diagnosis | Diagnostic JSON | Root cause analysis + remediation recommendations |
+| `$roll-fetch` | Intelligence | URL / keyword | Web fetch, search, crawl results |
+| `$roll-probe` | Monitoring | Target address | Node discovery, health check report |
 
 ## Appendix B: CLI Command Quick Reference
 
 | Command | Purpose |
 |---------|---------|
-| `wukong setup` | First-time initialization of `~/.wukong/`, mount skills (non-invasive) |
-| `wukong sync conventions` | Opt-in: append WK conventions via `@include` (never overwrites existing files) |
-| `wukong sync skills` | Refresh skills and repair per-skill symlinks |
-| `wukong sync all` | Run both conventions and skills sync |
-| `wukong hooks install` | Opt-in: install global git hook (requires confirmation) |
-| `wukong init [type]` | Generate project convention files in cwd (merges Global + Template) |
-| `wukong reset` | Reset `~/.wukong/` from the repository source, then sync |
-| `wukong status` | Display current configuration state, sync status, and skill links |
+| `roll setup` | First-time initialization of `~/.roll/`, mount skills (non-invasive) |
+| `roll sync conventions` | Opt-in: append WK conventions via `@include` (never overwrites existing files) |
+| `roll sync skills` | Refresh skills and repair per-skill symlinks |
+| `roll sync all` | Run both conventions and skills sync |
+| `roll hooks install` | Opt-in: install global git hook (requires confirmation) |
+| `roll init [type]` | Generate project convention files in cwd (merges Global + Template) |
+| `roll reset` | Reset `~/.roll/` from the repository source, then sync |
+| `roll status` | Display current configuration state, sync status, and skill links |

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  source "${BATS_TEST_DIRNAME}/../../bin/wukong"
+  source "${BATS_TEST_DIRNAME}/../../bin/roll"
   TEST_TMP="$(mktemp -d)"
   TPL_DIR="$TEST_TMP/tpl"
   OUT_DIR="$TEST_TMP/out"

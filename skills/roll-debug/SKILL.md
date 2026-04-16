@@ -420,9 +420,9 @@ After `$roll-debug` finds issues:
 ```bash
 # For a single-file bug fix
 # → Create FIX-XXX in backlog
-# → $wk-fix-build FIX-XXX
+# → $roll-fix FIX-XXX
 
 # For a complex multi-step fix
 # → Create US-XXX in backlog
-# → $wk-story-build US-XXX
+# → $roll-story US-XXX
 ```

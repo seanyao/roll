@@ -61,11 +61,11 @@ teardown() {
 
 # ─── sync skills: symlinks exist ─────────────────────────────────────────────
 
-@test "sync skills: ~/.claude/skills/ contains wk-* symlinks" {
+@test "sync skills: ~/.claude/skills/ contains roll-* symlinks" {
   run_wk sync skills
   [ "$status" -eq 0 ]
   local count
-  count=$(find "${TEST_TMP}/.claude/skills" -maxdepth 1 -mindepth 1 -type l -name "wk-*" | wc -l | tr -d ' ')
+  count=$(find "${TEST_TMP}/.claude/skills" -maxdepth 1 -mindepth 1 -type l -name "roll-*" | wc -l | tr -d ' ')
   [ "$count" -gt 0 ]
 }
 
@@ -77,10 +77,10 @@ teardown() {
   [ -f "${TEST_TMP}/.claude/wk.md" ]
 }
 
-@test "sync all: wk-* skill symlinks exist after sync all" {
+@test "sync all: roll-* skill symlinks exist after sync all" {
   run_wk sync all
   [ "$status" -eq 0 ]
   local count
-  count=$(find "${TEST_TMP}/.claude/skills" -maxdepth 1 -mindepth 1 -type l -name "wk-*" | wc -l | tr -d ' ')
+  count=$(find "${TEST_TMP}/.claude/skills" -maxdepth 1 -mindepth 1 -type l -name "roll-*" | wc -l | tr -d ' ')
   [ "$count" -gt 0 ]
 }

@@ -78,19 +78,19 @@ teardown() {
   [ -d "${TEST_TMP}/.claude/skills" ]
 }
 
-@test "setup: ~/.claude/skills/ contains wk-* symlinks" {
+@test "setup: ~/.claude/skills/ contains roll-* symlinks" {
   run_wk setup
   [ "$status" -eq 0 ]
   local count
-  count=$(find "${TEST_TMP}/.claude/skills" -maxdepth 1 -mindepth 1 -type l -name "wk-*" | wc -l | tr -d ' ')
+  count=$(find "${TEST_TMP}/.claude/skills" -maxdepth 1 -mindepth 1 -type l -name "roll-*" | wc -l | tr -d ' ')
   [ "$count" -gt 0 ]
 }
 
-@test "setup: wk-* symlinks in ~/.claude/skills/ point to ~/.roll/skills/" {
+@test "setup: roll-* symlinks in ~/.claude/skills/ point to ~/.roll/skills/" {
   run_wk setup
   [ "$status" -eq 0 ]
   local broken=0
-  for link in "${TEST_TMP}/.claude/skills"/wk-*; do
+  for link in "${TEST_TMP}/.claude/skills"/roll-*; do
     [ -L "$link" ] || continue
     local target
     target="$(readlink "$link")"
@@ -105,7 +105,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -d "${TEST_TMP}/.gemini/skills" ]
   local count
-  count=$(find "${TEST_TMP}/.gemini/skills" -maxdepth 1 -mindepth 1 -type l -name "wk-*" | wc -l | tr -d ' ')
+  count=$(find "${TEST_TMP}/.gemini/skills" -maxdepth 1 -mindepth 1 -type l -name "roll-*" | wc -l | tr -d ' ')
   [ "$count" -gt 0 ]
 }
 

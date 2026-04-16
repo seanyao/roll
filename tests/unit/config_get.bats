@@ -2,10 +2,10 @@
 
 # Load the script (sourcing defines all functions without executing main)
 setup() {
-  source "${BATS_TEST_DIRNAME}/../../bin/wukong"
+  source "${BATS_TEST_DIRNAME}/../../bin/roll"
   # Override WK_CONFIG after sourcing — the script assigns WK_CONFIG on load,
   # so we must set it afterwards to point at our fixture.
-  export WK_CONFIG="${BATS_TEST_DIRNAME}/../fixtures/configs/basic.yaml"
+  export ROLL_CONFIG="${BATS_TEST_DIRNAME}/../fixtures/configs/basic.yaml"
 }
 
 @test "config_get: returns value for existing key" {
@@ -27,7 +27,7 @@ setup() {
 }
 
 @test "config_get: returns default when config file missing" {
-  export WK_CONFIG="/tmp/wukong_nonexistent_config_$$.yaml"
+  export ROLL_CONFIG="/tmp/wukong_nonexistent_config_$$.yaml"
   run config_get "editor" "default_editor"
   [ "$status" -eq 0 ]
   [ "$output" = "default_editor" ]

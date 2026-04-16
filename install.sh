@@ -2,11 +2,11 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_SRC="$REPO_DIR/bin/wukong"
+BIN_SRC="$REPO_DIR/bin/roll"
 BIN_DIR="$HOME/.local/bin"
-BIN_DST="$BIN_DIR/wukong"
+BIN_DST="$BIN_DIR/roll"
 
-echo "[wk] Installing Wukong from: $REPO_DIR"
+echo "[roll] Installing Roll from: $REPO_DIR"
 
 # 1. Grant execute permission
 chmod +x "$BIN_SRC"
@@ -16,7 +16,7 @@ mkdir -p "$BIN_DIR"
 
 # 3. Symlink into PATH
 ln -sf "$BIN_SRC" "$BIN_DST"
-echo "[wk] Linked: $BIN_DST -> $BIN_SRC"
+echo "[roll] Linked: $BIN_DST -> $BIN_SRC"
 
 # 4. Ensure ~/.local/bin is in PATH (for current session and future shells)
 if ! echo "$PATH" | grep -q "$BIN_DIR"; then
@@ -30,9 +30,9 @@ if ! echo "$PATH" | grep -q "$BIN_DIR"; then
     EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH"'
     if ! grep -qF "$EXPORT_LINE" "$SHELL_RC" 2>/dev/null; then
       echo "" >> "$SHELL_RC"
-      echo "# Added by wukong install" >> "$SHELL_RC"
+      echo "# Added by roll install" >> "$SHELL_RC"
       echo "$EXPORT_LINE" >> "$SHELL_RC"
-      echo "[wk] Added PATH entry to $SHELL_RC"
+      echo "[roll] Added PATH entry to $SHELL_RC"
     fi
   fi
 
@@ -42,4 +42,4 @@ fi
 
 # 5. Run first-time setup
 echo ""
-wukong setup
+roll setup

@@ -31,6 +31,14 @@
 | [US-ROLL-005](docs/features/rename-roll.md#us-roll-005) | Implement roll-build — unified delivery entry (fly + story merged) | ✅ Done |
 | [US-ROLL-006](docs/features/rename-roll.md#us-roll-006) | Fold wk-init into `roll init` CLI, remove standalone skill | ✅ Done |
 
+## Epic: CLI Simplification
+### Feature: cli-simplification
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CLI-001](docs/features/cli-simplification.md#us-cli-001) | 精簡 cmd_init() — 移除類型/scaffold，三步極簡 init | 📋 Todo |
+| [US-CLI-002](docs/features/cli-simplification.md#us-cli-002) | conventions/templates 重新定位為 skills 參考資料 | 📋 Todo |
+| [US-CLI-003](docs/features/cli-simplification.md#us-cli-003) | skills 加入 Project Context Rule — 觀察再行動 | 📋 Todo |
+
 ## Epic: Engineering Discipline Refactor
 ### Feature: refactor
 | Story | Description | Status |

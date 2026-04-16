@@ -578,7 +578,7 @@ graph LR
 
 | 命令 | 作用 |
 |------|------|
-| `roll setup` | 首次初始化 `~/.roll/`，挂载技能（零侵入） |
+| `roll setup` | 一步完成 `~/.roll/` 初始化 + 约定与技能同步到 AI 工具 |
 | `roll sync` | 同步约定到 AI 工具配置 + 刷新技能软链接 |
 | `roll hook install` | 可选：安装全局 git hook（需用户确认） |
 | `roll init` | 在当前目录创建 AGENTS.md + BACKLOG.md + docs/features/（无提示）；已有 AGENTS.md 则重新合并 |

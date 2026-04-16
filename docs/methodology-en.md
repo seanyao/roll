@@ -579,7 +579,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 
 | Command | Purpose |
 |---------|---------|
-| `roll setup` | First-time initialization of `~/.roll/`, mount skills (non-invasive) |
+| `roll setup` | Install ~/.roll/ + sync conventions and skills to AI tools in one step |
 | `roll sync` | Sync conventions to AI tool configs + refresh skill symlinks |
 | `roll hook install` | Opt-in: install global git hook (requires confirmation) |
 | `roll init` | Create AGENTS.md + BACKLOG.md + docs/features/ in cwd (no prompts); re-merges if AGENTS.md exists |

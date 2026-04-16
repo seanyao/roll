@@ -49,7 +49,7 @@ Unified management of behavioral conventions for Claude Code / Kimi Code / Gemin
 
 | Command | Use Case |
 |---------|----------|
-| `roll setup` | First-time setup: pull local cache + link skills (non-invasive) |
+| `roll setup` | Install ~/.roll/ + sync conventions and skills to all AI tools |
 | `roll sync` | Sync conventions to AI tool configs + refresh skill symlinks |
 | `roll hook install` | Opt-in: install global git hook for AI client auto-detection |
 | `roll init` | New project: create AGENTS.md + BACKLOG.md + docs/features/ (cwd); existing: re-merge global conventions |
@@ -59,24 +59,20 @@ Unified management of behavioral conventions for Claude Code / Kimi Code / Gemin
 ### Steps
 
 ```bash
-# 1. Install (one command — non-invasive, zero decisions required)
+# 1. Install
 bash install.sh
-# → CLI linked to PATH, roll-* skills linked into ~/.claude/skills/ etc.
 
-# 2. New project — create workflow files instantly (run from project root)
+# 2. New project
 cd my-app
-roll init              # Creates AGENTS.md + BACKLOG.md + docs/features/
+roll init
 
-# 3. Refresh existing project (re-merge from latest templates)
-roll init              # Re-merges global conventions into existing AGENTS.md
-
-# 4. Optional: sync Roll conventions to AI tool configs
+# 3. Optional: sync Roll conventions to AI tool configs (if you edit config.yaml)
 roll sync
 
-# 5. Optional: install global git hook for AI client tagging
+# 4. Optional: git hook
 roll hook install
 
-# 6. Broke something? Reset
+# 5. Broke something? Reset
 roll reset
 ```
 

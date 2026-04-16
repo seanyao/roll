@@ -7,8 +7,7 @@ Quickly select the right skill or tool.
 | User Intent | Skill | Description |
 |---------|-----------|------|
 | **"Not sure how to do it"** / **"There are several options"** | `roll-design` | Explore solutions, compare options, human decision-making |
-| **"Help me build a..."** (unclear requirements) | `roll-build` | One-sentence request, AI auto-clarifies -> plans -> implements |
-| **"Implement US-001"** (with a clear story) | `roll-build` | Execute per BACKLOG.md, full delivery |
+| **"Help me build a..."** / **"Implement US-001"** / **"Fix FIX-001"** | `roll-build` | Universal entry: US-XXX story mode, FIX-XXX fix mode, or free-text fly mode — all in one skill |
 | **"This logic is critical"** / **"Involves payment"** | `roll-spar` | Adversarial TDD, activate for high-risk scenarios |
 | **"Fix a bug"** / **"Change some copy"** | `roll-fix` | Quick fix, no full workflow |
 | **"Plan requirements"** / **"Split into stories"** | `roll-design` | Plan only, no implementation, outputs BACKLOG.md |

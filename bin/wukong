@@ -1191,7 +1191,7 @@ cmd_status() {
   echo -e "${BOLD}Git hook:  Git Hook${NC}"
   local hook_dst="$HOME/.config/git/hooks/prepare-commit-msg"
   local hooks_path
-  hooks_path=$(git config --global core.hooksPath 2>/dev/null)
+  hooks_path=$(git config --global core.hooksPath 2>/dev/null || true)
   if [[ -f "$hook_dst" ]] && [[ "$hooks_path" == "$HOME/.config/git/hooks" ]]; then
     echo -e "  ${GREEN}+${NC} prepare-commit-msg (global, AI client auto-detect / 全局，自动检测 AI 客户端)"
   elif [[ -f "$hook_dst" ]]; then

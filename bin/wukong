@@ -653,21 +653,111 @@ merge_convention() {
         return
         ;;
       m|M|"")
-        # Merge: append missing ## sections from template
-        local existing
-        existing="$(cat "$out_file")"
-        local appended=false
+        # Merge: for each ## section in template:
+        #   - if missing in output → append
+        #   - if present but content differs → show diff, prompt [u/k]
+        #   - if present and identical → skip
+
+        # Helper: extract a section's body (lines after heading until next ## or EOF)
+        # Usage: _extract_section "$file" "$heading"
+        _extract_section() {
+          local file="$1"
+          local heading="$2"
+          local in_section=false
+          local body=""
+          while IFS= read -r ln; do
+            if [[ "$ln" == "$heading" ]]; then
+              in_section=true
+              continue
+            fi
+            if [[ "$in_section" == "true" ]]; then
+              if [[ "$ln" =~ ^##\  ]]; then
+                break
+              fi
+              body+="$ln"$'\n'
+            fi
+          done < "$file"
+          printf '%s' "$body"
+        }
+
+        local current_heading=""
+        local current_body=""
+
+        # _process_section: check/append/update a completed section
+        _process_section() {
+          local heading="$1"
+          local body="$2"
+          local out="$3"
+          if ! grep -qF "$heading" "$out" 2>/dev/null; then
+            # Section missing → append
+            printf '\n%s\n%s' "$heading" "$body" >> "$out"
+          else
+            # Section exists → compare content
+            local existing
+            existing="$(_extract_section "$out" "$heading")"
+            if [[ "$body" != "$existing" ]]; then
+              echo ""
+              warn "Section \"$heading\" exists but content differs:"
+              diff <(printf '%s' "$existing") <(printf '%s' "$body") || true
+              echo -n "  [u] update with template  [k] keep mine (default): "
+              local sec_ans
+              read -r sec_ans </dev/stdin
+              sec_ans="${sec_ans:-k}"
+              if [[ "$sec_ans" == "u" || "$sec_ans" == "U" ]]; then
+                # Replace existing section with template section
+                local tmp_out
+                tmp_out="$(mktemp)"
+                local skip=false
+                while IFS= read -r fline; do
+                  if [[ "$fline" == "$heading" ]]; then
+                    skip=true
+                    printf '%s\n%s' "$heading" "$body" >> "$tmp_out"
+                    continue
+                  fi
+                  if [[ "$skip" == "true" ]]; then
+                    if [[ "$fline" =~ ^##\  ]]; then
+                      skip=false
+                      printf '%s\n' "$fline" >> "$tmp_out"
+                    fi
+                    continue
+                  fi
+                  printf '%s\n' "$fline" >> "$tmp_out"
+                done < "$out"
+                mv "$tmp_out" "$out"
+              fi
+            fi
+          fi
+        }
+
+        # Parse template sections, reading from file (not herestring) to keep stdin free
+        # for interactive user prompts inside _process_section
+        local tpl_sections=()
+        local tpl_bodies=()
+        local cur_h="" cur_b=""
         while IFS= read -r line; do
           if [[ "$line" =~ ^##\  ]]; then
-            local heading="${line}"
-            if ! grep -qF "$heading" "$out_file" 2>/dev/null; then
-              printf '\n%s\n' "$heading" >> "$out_file"
-              appended=true
+            if [[ -n "$cur_h" ]]; then
+              tpl_sections+=("$cur_h")
+              tpl_bodies+=("$cur_b")
             fi
-          elif [[ "$appended" == "true" ]]; then
-            printf '%s\n' "$line" >> "$out_file"
+            cur_h="$line"
+            cur_b=""
+          elif [[ -n "$cur_h" ]]; then
+            cur_b+="$line"$'\n'
           fi
-        done <<< "$(cat "$tpl_file")"
+        done < "$tpl_file"
+        # Capture last section
+        if [[ -n "$cur_h" ]]; then
+          tpl_sections+=("$cur_h")
+          tpl_bodies+=("$cur_b")
+        fi
+
+        # Now process sections (stdin is free for user input)
+        local i
+        for (( i=0; i<${#tpl_sections[@]}; i++ )); do
+          _process_section "${tpl_sections[$i]}" "${tpl_bodies[$i]}" "$out_file"
+        done
+
         ok "Merged: $display  已合并: $display"
         _WK_MERGE_SUMMARY+=("merged|$display")
         return

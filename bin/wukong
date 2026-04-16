@@ -816,7 +816,6 @@ scaffold_new_project() {
 
   # Common: docs + workflow backbone
   _mkscaffold "$dir/docs/features"
-  _mkscaffold "$dir/docs/plans"
   _write_backlog  "$dir/BACKLOG.md"
   _write_gitignore "$dir/.gitignore"
   local created="docs/, BACKLOG.md, .gitignore"

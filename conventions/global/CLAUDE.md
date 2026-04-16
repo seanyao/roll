@@ -17,7 +17,7 @@
 
 ## Claude Code-Specific
 
-- When a project has WK skills, use them (`$wk-design`, `$wk-story-build`, etc.).
+- When a project has Roll skills, use them (`$roll-design`, `$roll-story`, etc.).
 - Use plan mode for complex multi-step tasks before executing.
 - Prefer Edit tool over Bash for file modifications.
 - Use Agent tool with worktree isolation for parallel independent subtasks.

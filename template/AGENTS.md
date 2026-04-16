@@ -27,21 +27,21 @@ plans:
 
 ## Workflow
 
-### Design → $wk-design
+### Design → $roll-design
 - Solution exploration, architecture design
 - Split into Stories
 - Write to BACKLOG.md
 
-### Build → $wk-story-build / $wk-fix-build / $wk-fly-build
+### Build → $roll-story-build / $roll-fix-build / $roll-fly-build
 - Read BACKLOG and execute
 - TCR development (independent Actions auto-parallelized + Worktree isolation)
 - CI/CD deployment
 
-### Check → $wk-sentinel / $wk-bb-debug
+### Check → $roll-sentinel / $roll-bb-debug
 - Sentinel: Scheduled patrol
-- wk-bb-debug: Deep diagnosis
+- $roll-bb-debug: Deep diagnosis
 
-### Fix → $wk-fix-build / $wk-design
+### Fix → $roll-fix-build / $roll-design
 - Fix issues
 - Or re-plan
 

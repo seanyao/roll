@@ -11,6 +11,6 @@
 ## Claude Code Notes
 
 - No backend in this project. All data via external API consumption.
-- Use `$wk-design` to plan component architecture and state management.
+- Use `$roll-design` to plan component architecture and state management.
 - Start dev server and verify UI changes in browser before reporting done.
 - Run `npm run build` to verify production bundle compiles before pushing.

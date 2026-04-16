@@ -12,7 +12,7 @@
 ## Claude Code Notes
 
 - No frontend in this project. API-only service.
-- Use `$wk-design` to plan API contracts and data models before implementation.
+- Use `$roll-design` to plan API contracts and data models before implementation.
 - Write integration tests that hit real endpoints (supertest), not mocked handlers.
 - Verify health check endpoint responds before reporting deploy as done.
 - Run `npm run build && npm run test` before pushing.

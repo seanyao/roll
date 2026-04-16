@@ -1,5 +1,5 @@
 # Cybernetix Configuration
-# Edit this file, then run `wukong sync` to apply.
+# Edit this file, then run `roll sync` to apply.
 
 # Sync targets: where global conventions are distributed to.
 # These are the default paths for each AI tool's global config.

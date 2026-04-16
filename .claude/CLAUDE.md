@@ -17,7 +17,7 @@
 
 ## Claude Code-Specific
 
-- When a project has CNX skills, use them (`$wk-design`, `$wk-story-build`, etc.).
+- When a project has Roll skills, use them (`$roll-design`, `$roll-story`, etc.).
 - Use plan mode for complex multi-step tasks before executing.
 - Prefer Edit tool over Bash for file modifications.
 - Use Agent tool with worktree isolation for parallel independent subtasks.
@@ -48,6 +48,6 @@
 
 - No server, no frontend. CLI tool only.
 - Test commands by running them in Bash, not just unit tests.
-- Use `$wk-design` to plan command structure and options before implementation.
+- Use `$roll-design` to plan command structure and options before implementation.
 - Verify `--help` output is clear and complete for each command.
 - Run `npm run build && node dist/index.js --help` before pushing.

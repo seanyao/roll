@@ -34,10 +34,10 @@ if [[ -n "${NO_COLOR:-}" ]]; then
   RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
 fi
 
-info()  { echo -e "${CYAN}[wk]${NC} $*"; }
-ok()    { echo -e "${GREEN}[wk]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[wk]${NC} $*"; }
-err()   { echo -e "${RED}[wk]${NC} $*" >&2; }
+info()  { echo -e "${CYAN}[roll]${NC} $*"; }
+ok()    { echo -e "${GREEN}[roll]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[roll]${NC} $*"; }
+err()   { echo -e "${RED}[roll]${NC} $*" >&2; }
 
 # Tracks merge actions across a single init run; reset before each batch
 _WK_MERGE_SUMMARY=()

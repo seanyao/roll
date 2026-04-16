@@ -1,12 +1,12 @@
 ---
 hidden: true
-name: wk-probe
-description: Node discovery and health check for Wukong environment. Find machines on LAN by name, check node health, verify OpenClaw Gateway status. Use when user asks to find a machine, check node status, diagnose gateway issues, or verify node connectivity.
+name: roll-probe
+description: Node discovery and health check for Roll environment. Find machines on LAN by name, check node health, verify OpenClaw Gateway status. Use when user asks to find a machine, check node status, diagnose gateway issues, or verify node connectivity.
 ---
 
-# WK Probe
+# Roll Probe
 
-**Node discovery and health check tool** - for node management and status diagnosis in Wukong environments.
+**Node discovery and health check tool** - for node management and status diagnosis in Roll environments.
 
 ## Capabilities
 
@@ -25,13 +25,13 @@ description: Node discovery and health check for Wukong environment. Find machin
 
 ```bash
 # Discover machines
-$wk-checker find <machine-name>
+$roll-checker find <machine-name>
 
 # Check node health
-$wk-checker health <hostname>
+$roll-checker health <hostname>
 
 # Full diagnosis
-$wk-checker diagnose <machine-name>
+$roll-checker diagnose <machine-name>
 ```
 
 ## Node Discovery

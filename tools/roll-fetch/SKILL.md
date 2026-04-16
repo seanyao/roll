@@ -1,10 +1,10 @@
 ---
 hidden: true
-name: wk-fetch
+name: roll-fetch
 description: Web page fetching and crawling for AI agents. Extract content from URLs for research, documentation, and competitive analysis.
 ---
 
-# WK Fetch - Web Content Extraction
+# Roll Fetch - Web Content Extraction
 
 Extract content from web pages for research and analysis.
 

@@ -1,6 +1,6 @@
 ---
 name: roll-build
-description: Universal delivery skill. Handles any input: a US-XXX ID executes from BACKLOG via TCR; a FIX-XXX redirects to roll-fix; any other text auto-clarifies, designs, and ships as a new Story.
+description: "Universal delivery skill. Handles any input: a US-XXX ID executes from BACKLOG via TCR; a FIX-XXX redirects to roll-fix; any other text auto-clarifies, designs, and ships as a new Story."
 ---
 
 # Roll Build (Universal Delivery)

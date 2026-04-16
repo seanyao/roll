@@ -281,6 +281,5 @@ else
   info "Next steps:"
   echo "  1. Reload shell:  source ${RC_FILE/#$HOME/~}  (or open new terminal)"
   echo "  2. Verify:        roll status"
-  echo ""
-  info "Manual: update any project CLAUDE.md still referencing @cnx.md or @wk.md → @roll.md"
+  echo "  3. Update projects: cd <project> && roll init  (re-merges latest conventions)"
 fi

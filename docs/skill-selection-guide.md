@@ -67,10 +67,10 @@ User Input
 
 | Skill | Trigger Keywords |
 |-------|-----------|
-| `roll-design` | "discuss", "compare options", "how to choose", "trade-offs", "not sure what to use", "design", "plan", "split", "write stories", "requirements analysis" |
-| `roll-build` | "help me build", "add a feature", "change this", "refactor", "implement US-", "do this story", "complete Action", "parallel", "develop simultaneously" |
-| `roll-fix` | "fix bug", "change copy", "adjust color", "error", "FIX-", "BUG-" |
-| `roll-spar` | "adversarial", "attack-defense", "high-risk", "critical logic", "payment", "permissions", "security" |
-| `roll-sentinel` | "patrol", "check production", "regression test" |
-| `roll-debug` | "debug", "diagnose", "page has issues", "black-box analysis" |
-| `roll-research` | "deep research", "research this", "competitive analysis", "HV analysis", "deep dive" |
+| `roll-design` | "discuss", "compare options", "how to choose", "trade-offs", "not sure what to use", "design", "plan", "split", "write stories", "requirements analysis" / 讨论、比较方案、怎么选、权衡、不确定用哪个、设计、规划、拆分、写故事、需求分析 |
+| `roll-build` | "help me build", "add a feature", "change this", "refactor", "implement US-", "do this story", "complete Action", "parallel", "develop simultaneously" / 帮我做、加个功能、改一下、重构、实现 US-、做这个 story、做这个需求 |
+| `roll-fix` | "fix bug", "change copy", "adjust color", "error", "FIX-", "BUG-" / 修个 bug、改文案、调颜色、报错了、修复 |
+| `roll-spar` | "adversarial", "attack-defense", "high-risk", "critical logic", "payment", "permissions", "security" / 对抗式、攻防、高风险、核心逻辑、支付、权限、安全 |
+| `roll-sentinel` | "patrol", "check production", "regression test" / 巡检、检查生产环境、回归测试 |
+| `roll-debug` | "debug", "diagnose", "page has issues", "black-box analysis" / 调试、诊断、页面有问题、排查 |
+| `roll-research` | "deep research", "research this", "competitive analysis", "HV analysis", "deep dive" / 深度调研、研究一下、竞品分析、HV 分析、深入了解 |

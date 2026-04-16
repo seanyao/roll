@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # Integration tests for: roll setup
 # Tests WK_HOME directory creation, convention/skill installation, symlink linking,
-# and config.yaml generation.
+# config.yaml generation, and convention sync to AI tool configs.
 
 load helpers
 
@@ -120,6 +120,21 @@ teardown() {
 
   # The custom content must still be present
   grep -q "custom: value" "${ROLL_HOME}/config.yaml"
+}
+
+# ─── Scenario 5: setup syncs conventions to AI tool configs ──────────────────
+
+@test "setup: syncs conventions — wk.md written to ~/.claude/" {
+  run_wk setup
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/.claude/wk.md" ]
+}
+
+@test "setup: syncs conventions — @wk.md appended to ~/.claude/CLAUDE.md" {
+  run_wk setup
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/.claude/CLAUDE.md" ]
+  grep -qF "@wk.md" "${TEST_TMP}/.claude/CLAUDE.md"
 }
 
 @test "setup: preserves entire content of pre-existing config.yaml" {

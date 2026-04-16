@@ -401,24 +401,34 @@ _sync_skills() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: setup
-# Initialize ~/.roll/ on a new machine
+# COMMAND: setup [--force]
+# Initialize ~/.roll/ and sync everything to AI tools in one step
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_setup() {
+  local force=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force|-f) force=true; shift ;;
+      *) err "Unknown argument: $1  未知参数: $1"; exit 1 ;;
+    esac
+  done
+
   info "Setting up Roll on this machine...  正在初始化 Roll..."
   echo ""
 
-  _install_local
+  _install_local "$force"
   echo ""
-  _sync_skills
+  info "Syncing to AI tools...  正在同步到 AI 工具..."
+  _sync_conventions "$force"
+  echo ""
+  _sync_skills "$force"
 
   echo ""
-  ok "Setup complete. Skills installed in ~/.roll/  初始化完成。技能已安装至 ~/.roll/"
+  ok "Setup complete.  初始化完成。"
   echo ""
   info "Next steps:  后续步骤："
-  echo "  Init a project:          ${BOLD}roll init${NC}                 初始化项目"
-  echo "  Sync conventions + skills: ${BOLD}roll sync${NC}                 同步约定与技能"
-  echo "  Install git hook:        ${BOLD}roll hook install${NC}        安装 git hook"
+  echo "  Init a project:   ${BOLD}roll init${NC}              初始化项目"
+  echo "  Install git hook: ${BOLD}roll hook install${NC}  安装 git hook（可选）"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -943,7 +953,7 @@ cmd_hook() {
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: reset
-# Re-copy conventions and skills from repo source, then sync all with force
+# Re-copy conventions and skills from repo source, force-sync everything
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_reset() {
   warn "This will overwrite ~/.roll/conventions/ and skills with repo defaults.  此操作将用仓库默认值覆盖 ~/.roll/conventions/ 和技能。"
@@ -952,13 +962,8 @@ cmd_reset() {
   [[ "$answer" =~ ^[Yy]$ ]] || { info "Aborted.  已取消。"; return; }
 
   echo ""
-  info "Resetting local cache from repo...  正在从仓库重置本地缓存..."
-  _install_local true
-
-  echo ""
-  ok "Reset complete. Force-syncing to AI tools...  重置完成，正在强制同步到 AI 工具..."
-  echo ""
-  cmd_sync --force
+  info "Resetting and force-syncing...  正在重置并强制同步..."
+  cmd_setup --force
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1223,20 +1228,19 @@ usage() {
   echo "用法:  roll <command> [options]"
   echo ""
   echo "Commands:"
-  echo "  setup                  Initialize ~/.roll/ + install skills          初始化 ~/.roll/ + 安装技能"
-  echo "  sync [-f]              Sync conventions + skills to AI tool config paths 同步约定与技能到各 AI 工具配置路径"
-  echo "  init                   Initialize or re-merge project conventions (cwd) 初始化或重新合并项目约定（当前目录）"
-  echo "  hook [install|remove] Manage global git hook (opt-in)                管理全局 git hook（可选安装）"
-  echo "  reset                  Reset ~/.roll/ from repo, then force-sync     从仓库重置 ~/.roll/，再强制同步"
-  echo "  status                 Show current state                              显示当前状态"
-  echo "  clean                  Remove legacy ~/.wukong/ ~/.cybernetix/ remnants  清理旧版遗留文件"
+  echo "  setup [-f]             [Machine] Install ~/.roll/ + sync to all AI tools   安装并同步到所有 AI 工具"
+  echo "  sync [-f]              [Machine] Re-sync conventions + skills              重新同步约定与技能"
+  echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
+  echo "  hook [install|remove]  [Optional] Manage global git hook                  管理全局 git hook"
+  echo "  status                 [Diagnostic] Show current state                    显示当前状态"
+  echo "  reset                  [Recovery] Force-rebuild from repo source           强制从仓库源重建"
+  echo "  clean                  [Legacy] Remove ~/.wukong/ ~/.cybernetix/ remnants  清理遗留文件"
   echo ""
   echo "Examples / 示例:"
-  echo "  roll setup                    # First-time setup (non-invasive)         首次安装（非破坏性）"
-  echo "  roll sync                     # Sync conventions + skills to AI tools      同步约定与技能到 AI 工具"
-  echo "  roll sync -f                  # Force-overwrite existing convention files 强制覆盖已有约定文件"
-  echo "  roll hook install            # Opt-in: global git hook                  可选：全局 git hook"
-  echo "  roll init                     # New or re-merge project (cwd)             新建或重新合并（当前目录）"
+  echo "  roll setup                    # New machine: install + sync everything     新机器：安装并同步所有"
+  echo "  roll sync                     # Re-sync after editing config.yaml          编辑配置后重新同步"
+  echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
+  echo "  roll hook install             # Optional: tag commits with AI client       可选：提交时标记 AI 工具"
 }
 
 main() {

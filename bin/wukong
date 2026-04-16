@@ -593,6 +593,48 @@ _init_new() {
   echo ""
 }
 
+# ─── Helper: interactive type detection + keep-or-switch prompt ──────────────
+# Detects project type (AGENTS.md then file scan), prompts user to keep/switch.
+# Sets _WK_RESOLVED_TYPE to chosen type.
+# Sets _WK_DO_REFRESH=true when AGENTS.md exists and user kept the same type.
+_detect_and_prompt_type() {
+  local project_dir="$1"
+  _WK_DO_REFRESH=false
+  local detected=""
+
+  # Try AGENTS.md first, then file scan
+  if [[ -f "$project_dir/AGENTS.md" ]]; then
+    detected="$(detect_project_type "$project_dir")"
+  fi
+  if [[ -z "$detected" || "$detected" == "unknown" ]]; then
+    detected="$(scan_project_type_from_files "$project_dir")"
+  fi
+
+  if [[ -n "$detected" && "$detected" != "unknown" ]]; then
+    echo ""
+    echo -e "  Detected: ${BOLD}$detected${NC}"
+    echo -n "  Keep it? [Y/n] or override [1-4]: "
+    read -r answer
+    case "$answer" in
+      ""|y|Y) _WK_RESOLVED_TYPE="$detected" ;;
+      1) _WK_RESOLVED_TYPE="fullstack" ;;
+      2) _WK_RESOLVED_TYPE="frontend-only" ;;
+      3) _WK_RESOLVED_TYPE="backend-service" ;;
+      4) _WK_RESOLVED_TYPE="cli" ;;
+      n|N) _WK_RESOLVED_TYPE="$(_select_project_type)" ;;
+      *) err "Invalid choice: $answer  无效选择: $answer"; exit 1 ;;
+    esac
+  else
+    # Truly unknown: show full menu
+    _WK_RESOLVED_TYPE="$(_select_project_type)"
+  fi
+
+  # If AGENTS.md already exists and user kept the same type → refresh path
+  if [[ -f "$project_dir/AGENTS.md" && "$_WK_RESOLVED_TYPE" == "$detected" ]]; then
+    _WK_DO_REFRESH=true
+  fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: init [type] [tools]
 # Initialize a project with convention files from a template.
@@ -617,40 +659,12 @@ cmd_init() {
 
   # ── Interactive mode: detect first, then ask keep-or-switch ───────────────
   if [[ -z "$project_type" ]]; then
-    local detected=""
-
-    # Try AGENTS.md first, then file scan
-    if [[ -f "$project_dir/AGENTS.md" ]]; then
-      detected="$(detect_project_type "$project_dir")"
-    fi
-    if [[ -z "$detected" || "$detected" == "unknown" ]]; then
-      detected="$(scan_project_type_from_files "$project_dir")"
-    fi
-
-    if [[ -n "$detected" && "$detected" != "unknown" ]]; then
-      echo ""
-      echo -e "  Detected: ${BOLD}$detected${NC}"
-      echo -n "  Keep it? [Y/n] or override [1-4]: "
-      read -r answer
-      case "$answer" in
-        ""|y|Y) project_type="$detected" ;;
-        1) project_type="fullstack" ;;
-        2) project_type="frontend-only" ;;
-        3) project_type="backend-service" ;;
-        4) project_type="cli" ;;
-        n|N) project_type="$(_select_project_type)" ;;
-        *) err "Invalid choice: $answer  无效选择: $answer"; exit 1 ;;
-      esac
-    else
-      # Truly unknown: show full menu
-      project_type="$(_select_project_type)"
-    fi
-
-    # If AGENTS.md already exists and user kept the same type, just re-merge
-    if [[ -f "$project_dir/AGENTS.md" && "$project_type" == "$detected" ]]; then
+    _detect_and_prompt_type "$project_dir"
+    if [[ "$_WK_DO_REFRESH" == "true" ]]; then
       _init_refresh "$project_dir"
       return
     fi
+    project_type="$_WK_RESOLVED_TYPE"
   fi
 
   # AI tool selection + full init

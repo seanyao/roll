@@ -167,6 +167,8 @@ _pull_skills() {
 
 # ─── Internal: pull conventions from repo → ~/.roll/conventions ────────────
 _pull_conventions() {
+  local force="${1:-false}"
+
   if [[ ! -d "$REPO_CONVENTIONS" ]]; then
     err "Convention source not found at: $REPO_CONVENTIONS  约定源文件未找到: $REPO_CONVENTIONS"
     return 1
@@ -177,11 +179,11 @@ _pull_conventions() {
 
   info "Copying global conventions...  正在复制全局约定..."
   for f in "$REPO_CONVENTIONS"/global/*; do
-    [[ -f "$f" ]] && safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")"
+    [[ -f "$f" ]] && safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")" "$force"
   done
   for f in "$REPO_CONVENTIONS"/global/.*; do
     [[ -f "$f" ]] && [[ "$(basename "$f")" != "." ]] && [[ "$(basename "$f")" != ".." ]] && \
-      safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")"
+      safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")" "$force"
   done
 
   info "Copying project templates...  正在复制项目模板..."
@@ -189,11 +191,11 @@ _pull_conventions() {
     local tpl_name
     tpl_name="$(basename "$tpl_dir")"
     for f in "$tpl_dir"*; do
-      [[ -f "$f" ]] && safe_copy "$f" "$ROLL_TEMPLATES/$tpl_name/$(basename "$f")"
+      [[ -f "$f" ]] && safe_copy "$f" "$ROLL_TEMPLATES/$tpl_name/$(basename "$f")" "$force"
     done
     for f in "$tpl_dir".*; do
       [[ -f "$f" ]] && [[ "$(basename "$f")" != "." ]] && [[ "$(basename "$f")" != ".." ]] && \
-        safe_copy "$f" "$ROLL_TEMPLATES/$tpl_name/$(basename "$f")"
+        safe_copy "$f" "$ROLL_TEMPLATES/$tpl_name/$(basename "$f")" "$force"
     done
   done
 }
@@ -208,7 +210,7 @@ _install_local() {
     exit 1
   fi
 
-  _pull_conventions
+  _pull_conventions "$force"
   _pull_skills
 
   # Migrate legacy sync_* format to ai_* format
@@ -1115,7 +1117,9 @@ cmd_status() {
   echo ""
   echo -e "${BOLD}Sync targets:  同步目标${NC}"
 
+  local _sync_found=0
   while IFS= read -r _entry; do
+    _sync_found=1
     local _ai_d _cfg _src _tool_name
     _ai_d="$(_ai_dir "$_entry")"
     _cfg="$(_ai_config "$_entry")"
@@ -1123,6 +1127,10 @@ cmd_status() {
     _tool_name="$(ai_tool_name "$_ai_d")"
     check_sync_status "$_tool_name" "$ROLL_GLOBAL/$_src" "$_ai_d/$_cfg"
   done < <(_get_ai_tools)
+  if [[ "$_sync_found" -eq 0 ]]; then
+    warn "No AI tools configured — check ~/.roll/config.yaml  未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
+    info "Add ai_* entries or run 'roll setup' to restore defaults.  添加 ai_* 条目或运行 'roll setup' 恢复默认配置。"
+  fi
 
   echo ""
   echo -e "${BOLD}Skill symlinks:  技能软链接${NC}"
@@ -1133,10 +1141,12 @@ cmd_status() {
     total_skills=$(find "$ROLL_HOME/skills" -maxdepth 1 -mindepth 1 -type d -name "roll-*" | wc -l | tr -d ' ')
     wk_skills_real="$(canonical_dir "$ROLL_HOME/skills" 2>/dev/null || true)"
   fi
+  local _skills_found=0
   while IFS= read -r _entry; do
     local ai_dir
     ai_dir="$(_ai_dir "$_entry")"
     [[ -d "$ai_dir" ]] || continue
+    _skills_found=1
     local name name_lower
     name="$(ai_tool_name "$ai_dir")"
     name="$(echo "$name" | tr '[:lower:]' '[:upper:]' | cut -c1)$(echo "$name" | cut -c2-)"
@@ -1170,6 +1180,9 @@ cmd_status() {
       echo -e "  ${RED}-${NC} $name: ${skills_dir/#$HOME/~} (not found / 未找到)"
     fi
   done < <(_get_ai_tools)
+  if [[ "$_skills_found" -eq 0 ]]; then
+    warn "No AI tools configured — check ~/.roll/config.yaml  未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
+  fi
 
   echo ""
   echo -e "${BOLD}Git hook:  Git Hook${NC}"

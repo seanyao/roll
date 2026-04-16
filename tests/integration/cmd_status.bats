@@ -43,7 +43,7 @@ teardown() {
   run_wk setup
   [ "$status" -eq 0 ]
 
-  run_wk sync conventions
+  run_wk sync
   [ "$status" -eq 0 ]
 
   run_wk status

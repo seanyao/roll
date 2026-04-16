@@ -185,6 +185,31 @@ else
   [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
 fi
 
+# ─── Step 6b: Add ~/.local/bin to shell PATH (persistent) ────────────────────
+step "Step 6b: Ensure ~/.local/bin is in PATH"
+# Detect the shell rc file
+SHELL_NAME="$(basename "${SHELL:-}")"
+case "$SHELL_NAME" in
+  zsh)  RC_FILE="$HOME/.zshrc" ;;
+  bash) RC_FILE="${BASH_ENV:-${HOME}/.bash_profile}" ;;
+  *)    RC_FILE="$HOME/.profile" ;;
+esac
+
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+
+if [[ -f "$RC_FILE" ]] && grep -qF '.local/bin' "$RC_FILE" 2>/dev/null; then
+  ok "PATH already configured in $RC_FILE"
+  skipped=$((skipped + 1))
+else
+  info "Adding $PATH_LINE to $RC_FILE"
+  run "printf '\n# Added by migrate-to-roll\n%s\n' '$PATH_LINE' >> '$RC_FILE'"
+  ok "Updated $RC_FILE — roll will be available in new terminals"
+  migrated=$((migrated + 1))
+fi
+
+# Source for the current session
+[[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
+
 # ─── Step 7: Install roll-* skill symlinks ────────────────────────────────────
 step "Step 7: Install roll-* skill symlinks"
 if command -v roll &>/dev/null; then
@@ -192,8 +217,7 @@ if command -v roll &>/dev/null; then
   ok "roll-* skill symlinks installed"
 else
   warn "'roll' not found in PATH."
-  info "Add to your shell rc: export PATH=\"\$HOME/.local/bin:\$PATH\""
-  info "Then run: roll sync skills"
+  info "Run: source ~/${RC_FILE/#$HOME\//} && roll sync skills"
   skipped=$((skipped + 1))
 fi
 
@@ -243,8 +267,9 @@ if [[ "$DRY_RUN" == "true" ]]; then
 else
   ok "Migration complete!"
   echo ""
-  info "Next: verify with  roll status"
-  info "Reload shell:       source ~/.zshrc  (or open new terminal)"
+  info "Next steps:"
+  echo "  1. Reload shell:  source ${RC_FILE/#$HOME/~}  (or open new terminal)"
+  echo "  2. Verify:        roll status"
   echo ""
-  info "Manual: update any project CLAUDE.md that still references @cnx.md or @wk.md → @roll.md"
+  info "Manual: update any project CLAUDE.md still referencing @cnx.md or @wk.md → @roll.md"
 fi

@@ -70,7 +70,16 @@ User: "Help me design the user system" / "What approach should we use for search
     │
     ▼
 ┌─────────────────────────────┐
-│ 0. Discuss (when uncertain) │  ← Automatically triggered when approach is uncertain
+│ 0. Clarify (when vague)     │  ← Automatically triggered when input is under-specified
+│    - Summarize intent        │
+│    - Assess complexity       │
+│    - Ask 3–5 targeted Qs    │
+│    - Wait for user reply     │
+└─────────────┬───────────────┘
+              │ Intent clear
+              ▼
+┌─────────────────────────────┐
+│ 1. Discuss (when uncertain) │  ← Automatically triggered when approach is uncertain
 │    - List 2-4 viable options │
 │    - Each: approach + pros/cons │
 │    - Comparison matrix       │
@@ -80,7 +89,7 @@ User: "Help me design the user system" / "What approach should we use for search
               │ Approach confirmed
               ▼
 ┌─────────────────────────────┐
-│ 1. Understand & Analyze     │
+│ 2. Understand & Analyze     │
 │    - Requirement analysis    │
 │    - Feasibility assessment  │
 │    - Technical solution design │
@@ -88,7 +97,7 @@ User: "Help me design the user system" / "What approach should we use for search
               │
               ▼
 ┌─────────────────────────────┐
-│ 2. Solution Design          │
+│ 3. Solution Design          │
 │    - Architecture design     │
 │    - Module decomposition    │
 │    - Dependency analysis     │
@@ -98,7 +107,7 @@ User: "Help me design the user system" / "What approach should we use for search
               │
               ▼
 ┌─────────────────────────────┐
-│ 3. Split into Stories       │
+│ 4. Split into Stories       │
 │    - INVEST principles       │
 │    - DDD domain splitting    │
 │    - Priority ordering       │
@@ -106,7 +115,7 @@ User: "Help me design the user system" / "What approach should we use for search
               │
               ▼
 ┌─────────────────────────────┐
-│ 4. Write to BACKLOG.md      │
+│ 5. Write to BACKLOG.md      │
 │    - Create US-XXX           │
 │    - Define AC               │
 │    - Link design documents   │
@@ -119,6 +128,33 @@ User: "Help me design the user system" / "What approach should we use for search
     │
     └── No  ──→ Wait for user confirmation
 ```
+
+**Clarify phase trigger conditions** — automatically enters if any of these are met:
+- Input is a single vague sentence without clear scope
+- Missing clear boundaries (what / who / when / where)
+- Contains ambiguous terms like "优化一下", "改一下", "加个东西", "做个设计"
+- Could be interpreted in multiple ways
+
+**Clarify phase output format:**
+
+```
+🎯 Clarified Intent: {1-2 sentences}
+
+📏 Complexity: {small|medium|large}
+
+❓ Open Questions:
+1. {question 1}
+2. {question 2}
+3. {question 3}
+...
+
+➡️  Please answer the questions above and I'll proceed to design.
+```
+
+**Clarify phase rules:**
+- Do **not** start designing until the user replies.
+- Never announce "I'm using clarify." Just do it naturally.
+- If the input is already clear enough, skip silently and proceed to Discuss or Analyze.
 
 **Discuss phase trigger conditions** — automatically enters if any of these are met:
 - User is explicitly asking "how to choose" or "what approach to use"

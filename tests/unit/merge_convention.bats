@@ -6,7 +6,7 @@ setup() {
   TPL_DIR="$TEST_TMP/tpl"
   OUT_DIR="$TEST_TMP/out"
   mkdir -p "$TPL_DIR" "$OUT_DIR"
-  _WK_MERGE_SUMMARY=()
+  _ROLL_MERGE_SUMMARY=()
 }
 
 teardown() {

@@ -40,7 +40,7 @@ warn()  { echo -e "${YELLOW}[roll]${NC} $*"; }
 err()   { echo -e "${RED}[roll]${NC} $*" >&2; }
 
 # Tracks merge actions across a single init run; reset before each batch
-_WK_MERGE_SUMMARY=()
+_ROLL_MERGE_SUMMARY=()
 
 canonical_dir() {
   local path="$1"
@@ -489,12 +489,12 @@ _merge_global_to_project() {
   if [[ ! -f "$dst" ]]; then
     cp "$src" "$dst"
     ok "Created: AGENTS.md"
-    _WK_MERGE_SUMMARY+=("created|AGENTS.md")
+    _ROLL_MERGE_SUMMARY+=("created|AGENTS.md")
     return
   fi
 
   if diff -q "$src" "$dst" &>/dev/null; then
-    _WK_MERGE_SUMMARY+=("unchanged|AGENTS.md")
+    _ROLL_MERGE_SUMMARY+=("unchanged|AGENTS.md")
     return
   fi
 
@@ -518,9 +518,9 @@ _merge_global_to_project() {
 
   if [[ $added -gt 0 ]]; then
     ok "Merged: AGENTS.md ($added new sections)"
-    _WK_MERGE_SUMMARY+=("merged|AGENTS.md")
+    _ROLL_MERGE_SUMMARY+=("merged|AGENTS.md")
   else
-    _WK_MERGE_SUMMARY+=("unchanged|AGENTS.md")
+    _ROLL_MERGE_SUMMARY+=("unchanged|AGENTS.md")
   fi
 }
 
@@ -538,7 +538,7 @@ cmd_init() {
 
   local project_dir
   project_dir="$(pwd)"
-  _WK_MERGE_SUMMARY=()
+  _ROLL_MERGE_SUMMARY=()
 
   if [[ -f "$project_dir/AGENTS.md" ]]; then
     info "Re-merging global conventions...  正在重新合并全局约定..."
@@ -579,7 +579,7 @@ merge_convention() {
 
   if [[ -f "$out_file" ]]; then
     if diff -q <(echo "$merged") "$out_file" &>/dev/null; then
-      _WK_MERGE_SUMMARY+=("unchanged|$display")
+      _ROLL_MERGE_SUMMARY+=("unchanged|$display")
       return  # identical, nothing to do
     fi
     warn "File exists: $display  文件已存在: $display"
@@ -590,12 +590,12 @@ merge_convention() {
       o|O)
         echo "$merged" > "$out_file"
         ok "Overwritten: $display  已覆盖: $display"
-        _WK_MERGE_SUMMARY+=("overwritten|$display")
+        _ROLL_MERGE_SUMMARY+=("overwritten|$display")
         return
         ;;
       k|K)
         info "Kept: $display  已保留: $display"
-        _WK_MERGE_SUMMARY+=("kept|$display")
+        _ROLL_MERGE_SUMMARY+=("kept|$display")
         return
         ;;
       m|M|"")
@@ -705,7 +705,7 @@ merge_convention() {
         done
 
         ok "Merged: $display  已合并: $display"
-        _WK_MERGE_SUMMARY+=("merged|$display")
+        _ROLL_MERGE_SUMMARY+=("merged|$display")
         return
         ;;
     esac
@@ -713,17 +713,17 @@ merge_convention() {
 
   echo "$merged" > "$out_file"
   ok "Created: $display  已创建: $display"
-  _WK_MERGE_SUMMARY+=("created|$display")
+  _ROLL_MERGE_SUMMARY+=("created|$display")
 }
 
 # ─── Helper: print a tidy summary of merge actions ───────────────────────────
 print_merge_summary() {
-  if [[ ${#_WK_MERGE_SUMMARY[@]} -eq 0 ]]; then
+  if [[ ${#_ROLL_MERGE_SUMMARY[@]} -eq 0 ]]; then
     return
   fi
   echo ""
   echo "  ┌─ 操作摘要 Summary ──────────────────────────────────┐"
-  for entry in "${_WK_MERGE_SUMMARY[@]}"; do
+  for entry in "${_ROLL_MERGE_SUMMARY[@]}"; do
     local action="${entry%%|*}"
     local file="${entry##*|}"
     case "$action" in

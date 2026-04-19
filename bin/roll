@@ -10,7 +10,7 @@ ROLL_CONFIG="${ROLL_HOME}/config.yaml"
 ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
 ROLL_TEMPLATES="${ROLL_HOME}/conventions/templates"
 
-# Find repo root (resolve symlinks so it works from ~/.local/bin/roll)
+# Find package root (resolve symlinks so it works from ~/.local/bin/roll or npm global bin)
 _source="${BASH_SOURCE[0]}"
 while [[ -L "$_source" ]]; do
   _dir="$(cd "$(dirname "$_source")" && pwd)"
@@ -18,8 +18,8 @@ while [[ -L "$_source" ]]; do
   [[ "$_source" != /* ]] && _source="$_dir/$_source"
 done
 SCRIPT_DIR="$(cd "$(dirname "$_source")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-REPO_CONVENTIONS="${REPO_ROOT}/conventions"
+ROLL_PKG_DIR="$(dirname "$SCRIPT_DIR")"
+ROLL_PKG_CONVENTIONS="${ROLL_PKG_DIR}/conventions"
 
 # Colors
 RED=$'\033[0;31m'
@@ -133,15 +133,15 @@ safe_copy() {
 
 # ─── Internal: pull skills from repo → ~/.roll/skills ──────────────────────
 _pull_skills() {
-  if [[ ! -d "$REPO_ROOT/skills" ]]; then
-    err "Skills source not found at: $REPO_ROOT/skills  技能源目录未找到: $REPO_ROOT/skills"
+  if [[ ! -d "$ROLL_PKG_DIR/skills" ]]; then
+    err "Skills source not found at: $ROLL_PKG_DIR/skills  技能源目录未找到: $ROLL_PKG_DIR/skills"
     return 1
   fi
 
   mkdir -p "$ROLL_HOME/skills"
 
   # Copy/update skills from repo → ~/.roll/skills/
-  for skill_dir in "$REPO_ROOT"/skills/*/; do
+  for skill_dir in "$ROLL_PKG_DIR"/skills/*/; do
     if [[ -d "$skill_dir" ]]; then
       local skill_name
       skill_name="$(basename "$skill_dir")"
@@ -158,7 +158,7 @@ _pull_skills() {
     [[ -d "$installed_dir" ]] || continue
     local installed_name
     installed_name="$(basename "$installed_dir")"
-    if [[ ! -d "$REPO_ROOT/skills/$installed_name" ]]; then
+    if [[ ! -d "$ROLL_PKG_DIR/skills/$installed_name" ]]; then
       rm -rf "$installed_dir"
       info "Removed stale skill: $installed_name  已删除过时技能: $installed_name"
     fi
@@ -169,8 +169,8 @@ _pull_skills() {
 _pull_conventions() {
   local force="${1:-false}"
 
-  if [[ ! -d "$REPO_CONVENTIONS" ]]; then
-    err "Convention source not found at: $REPO_CONVENTIONS  约定源文件未找到: $REPO_CONVENTIONS"
+  if [[ ! -d "$ROLL_PKG_CONVENTIONS" ]]; then
+    err "Convention source not found at: $ROLL_PKG_CONVENTIONS  约定源文件未找到: $ROLL_PKG_CONVENTIONS"
     return 1
   fi
 
@@ -178,16 +178,16 @@ _pull_conventions() {
   mkdir -p "$ROLL_TEMPLATES"/{fullstack,frontend-only,backend-service,cli}
 
   info "Copying global conventions...  正在复制全局约定..."
-  for f in "$REPO_CONVENTIONS"/global/*; do
+  for f in "$ROLL_PKG_CONVENTIONS"/global/*; do
     [[ -f "$f" ]] && safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")" "$force"
   done
-  for f in "$REPO_CONVENTIONS"/global/.*; do
+  for f in "$ROLL_PKG_CONVENTIONS"/global/.*; do
     [[ -f "$f" ]] && [[ "$(basename "$f")" != "." ]] && [[ "$(basename "$f")" != ".." ]] && \
       safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")" "$force"
   done
 
   info "Copying project templates...  正在复制项目模板..."
-  for tpl_dir in "$REPO_CONVENTIONS"/templates/*/; do
+  for tpl_dir in "$ROLL_PKG_CONVENTIONS"/templates/*/; do
     local tpl_name
     tpl_name="$(basename "$tpl_dir")"
     for f in "$tpl_dir"*; do
@@ -204,8 +204,8 @@ _pull_conventions() {
 _install_local() {
   local force="${1:-false}"
 
-  if [[ ! -d "$REPO_CONVENTIONS" ]]; then
-    err "Convention source not found at: $REPO_CONVENTIONS  约定源文件未找到: $REPO_CONVENTIONS"
+  if [[ ! -d "$ROLL_PKG_CONVENTIONS" ]]; then
+    err "Convention source not found at: $ROLL_PKG_CONVENTIONS  约定源文件未找到: $ROLL_PKG_CONVENTIONS"
     err "Run this from the roll repo, or symlink bin/roll to PATH.  请在 roll 仓库目录下运行，或将 bin/roll 软链接到 PATH。"
     exit 1
   fi
@@ -250,9 +250,9 @@ YAML
 # ─── Internal: create or repair per-skill symlinks (non-destructive) ─────────
 _link_skills() {
   local force="${1:-false}"
-  local wk_skills_real repo_skills_real
+  local wk_skills_real pkg_skills_real
   wk_skills_real="$(canonical_dir "$ROLL_HOME/skills" 2>/dev/null || true)"
-  repo_skills_real="$(canonical_dir "$REPO_ROOT/skills" 2>/dev/null || true)"
+  pkg_skills_real="$(canonical_dir "$ROLL_PKG_DIR/skills" 2>/dev/null || true)"
 
   while IFS= read -r entry; do
     local ai_dir
@@ -265,7 +265,7 @@ _link_skills() {
     skills_dir="$ai_dir/skills"
 
     if [[ -n "$ai_dir_real" && \
-          ( "$ai_dir_real" == "$REPO_ROOT" || "$ai_dir_real" == "$REPO_ROOT"/* ) ]]; then
+          ( "$ai_dir_real" == "$ROLL_PKG_DIR" || "$ai_dir_real" == "$ROLL_PKG_DIR"/* ) ]]; then
       warn "Skipped ~/${ai_name} (resolves to repo — refusing to manage skills inside roll worktree)  已跳过 ~/${ai_name}（解析到仓库目录 — 拒绝在 roll worktree 内管理技能）"
       continue
     fi
@@ -273,8 +273,8 @@ _link_skills() {
     # Guard: resolve ALL symlink chains — block writing anywhere inside the repo
     local skills_real
     skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
-    if [[ -n "$skills_real" && -n "$repo_skills_real" && \
-          ( "$skills_real" == "$repo_skills_real" || "$skills_real" == "$repo_skills_real"/* ) ]]; then
+    if [[ -n "$skills_real" && -n "$pkg_skills_real" && \
+          ( "$skills_real" == "$pkg_skills_real" || "$skills_real" == "$pkg_skills_real"/* ) ]]; then
       warn "Skipped ~/${ai_name}/skills (resolves to repo — check if ~/$(lower_name "$ai_name") symlinks to roll repo)  已跳过 ~/${ai_name}/skills（解析到仓库 — 检查 ~/$(lower_name "$ai_name") 是否软链接到 roll 仓库）"
       continue
     fi
@@ -300,8 +300,8 @@ _link_skills() {
 
     mkdir -p "$skills_dir"
     skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
-    if [[ -n "$skills_real" && -n "$repo_skills_real" && \
-          ( "$skills_real" == "$repo_skills_real" || "$skills_real" == "$repo_skills_real"/* ) ]]; then
+    if [[ -n "$skills_real" && -n "$pkg_skills_real" && \
+          ( "$skills_real" == "$pkg_skills_real" || "$skills_real" == "$pkg_skills_real"/* ) ]]; then
       warn "Skipped ~/${ai_name}/skills (created path resolves to repo — refusing to write)  已跳过 ~/${ai_name}/skills（创建路径解析到仓库 — 拒绝写入）"
       continue
     fi
@@ -944,7 +944,7 @@ cmd_hook() {
   case "$subcmd" in
     install)
       local hooks_dir="$HOME/.config/git/hooks"
-      local hook_src="$REPO_ROOT/hooks/prepare-commit-msg"
+      local hook_src="$ROLL_PKG_DIR/hooks/prepare-commit-msg"
       local hook_dst="$hooks_dir/prepare-commit-msg"
 
       if [[ ! -f "$hook_src" ]]; then

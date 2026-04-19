@@ -1004,6 +1004,31 @@ cmd_reset() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: update
+# Update roll to latest version (npm update or git pull), then re-sync
+# ═══════════════════════════════════════════════════════════════════════════════
+_is_git_install() {
+  git -C "$ROLL_PKG_DIR" rev-parse --git-dir &>/dev/null 2>&1
+}
+
+cmd_update() {
+  info "Current version: roll v${VERSION}  当前版本: roll v${VERSION}"
+  echo ""
+
+  if _is_git_install; then
+    info "Git install detected — pulling latest...  检测到 Git 安装，正在拉取最新代码..."
+    git -C "$ROLL_PKG_DIR" pull
+  else
+    info "npm install detected — updating package...  检测到 npm 安装，正在更新包..."
+    npm update -g roll
+  fi
+
+  echo ""
+  info "Re-syncing to AI tools...  正在重新同步到 AI 工具..."
+  cmd_sync
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: clean
 # Remove legacy ~/.cybernetix/ and ~/.wukong/ remnants after migration
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1277,16 +1302,17 @@ usage() {
   echo ""
   echo "Commands:"
   echo "  setup [-f]             [Machine] First-time install: init ~/.roll/ + sync   首次安装：初始化 ~/.roll/ 并同步"
-  echo "  sync [-f]              [Everyday] repo → ~/.roll/ → AI tools               日常更新：从仓库拉取并同步到所有工具"
+  echo "  update                 [Upgrade] Update roll to latest + re-sync           更新 roll 到最新版本并重新同步"
+  echo "  sync [-f]              [Everyday] package → ~/.roll/ → AI tools            日常同步：从包同步到所有工具"
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
   echo "  hook [install|remove]  [Optional] Manage global git hook                  管理全局 git hook"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
-  echo "  reset                  [Recovery] Force-rebuild from repo source           强制从仓库源重建"
+  echo "  reset                  [Recovery] Force-rebuild from package source        强制从包源重建"
   echo "  clean                  [Legacy] Remove ~/.wukong/ ~/.cybernetix/ remnants  清理遗留文件"
   echo ""
   echo "Examples / 示例:"
   echo "  roll setup                    # New machine: first-time install             新机器：首次安装"
-  echo "  roll sync                     # Pull latest from repo + sync to AI tools   拉取最新并同步到 AI 工具"
+  echo "  roll update                   # Get latest version + sync to AI tools      更新到最新版本并同步"
   echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
   echo "  roll hook install             # Optional: tag commits with AI client       可选：提交时标记 AI 工具"
 }
@@ -1300,6 +1326,7 @@ main() {
     sync)          cmd_sync "$@" ;;
     init)          cmd_init "$@" ;;
     hook)         cmd_hook "$@" ;;
+    update)        cmd_update "$@" ;;
     reset)         cmd_reset "$@" ;;
     clean)         cmd_clean "$@" ;;
     status)        cmd_status "$@" ;;

@@ -38,14 +38,19 @@ Before commands and skills, read the Engineering Methodology — it explains the
 ## Installation
 
 ```bash
-git clone https://github.com/seanyao/roll.git
-cd roll
-./install.sh
+npm install -g @seanyao/roll
+roll setup
 ```
 
-The installer symlinks `roll` into `~/.local/bin`, adds it to PATH, and runs `roll setup` (creates `~/.roll/` and syncs conventions + skills to all detected AI tools).
+**Requirements:** bash 4+, Node.js 16+
 
-**Requirements:** bash 4+, git
+To update:
+
+```bash
+roll update
+```
+
+> **For contributors** (working on roll itself): `git clone https://github.com/seanyao/roll.git && cd roll && ./install.sh`
 
 ---
 
@@ -58,6 +63,7 @@ Unified behavioral conventions for Claude Code / Gemini CLI / Cursor / Codex —
 | Command | Description |
 |---------|-------------|
 | `roll setup` | First-time install: create `~/.roll/` + sync to all AI tools |
+| `roll update` | Update roll to latest version + re-sync |
 | `roll sync` | Re-sync conventions and skill symlinks to all AI tools |
 | `roll init` | New project: create `AGENTS.md` + `BACKLOG.md` + `docs/features/` |
 | `roll hook install` | Optional: global git hook for AI client auto-detection |

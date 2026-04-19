@@ -1,5 +1,5 @@
 {
-  "name": "roll",
+  "name": "@seanyao/roll",
   "version": "0.5.0",
   "description": "Roll — Roll out features with AI agents",
   "scripts": {

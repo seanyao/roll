@@ -1020,7 +1020,7 @@ cmd_update() {
     git -C "$ROLL_PKG_DIR" pull
   else
     info "npm install detected — updating package...  检测到 npm 安装，正在更新包..."
-    npm update -g roll
+    npm update -g @seanyao/roll
   fi
 
   echo ""

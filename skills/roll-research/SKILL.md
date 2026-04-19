@@ -1,19 +1,14 @@
 ---
 name: roll-research
 description: |
-  Horizontal-Vertical (HV) Analysis deep research skill. A systematic framework for researching products, companies, concepts, technologies, or people.
-  Core approach: dual-axis analysis — the vertical axis traces the complete lifecycle from origin to present (as a narrative), the horizontal axis performs systematic comparison with competitors/peers at the current point in time, then cross-axis insights emerge from combining both perspectives. Final output is a professionally formatted PDF research report.
-  Trigger phrases include: deep research, research this, analyze this, competitive analysis, help me understand, what's the deal with, help me figure out, do a deep dive, HV analysis.
-  Even if the user just says "help me look into XX" or "what's the story behind XX", as long as the context implies a need for systematic deep research (not a simple definition), this skill should be triggered.
-  Do not use for: simple definitions (user just asks "what is XX"), short-form content writing, or pure title/summary generation.
+  HV (Horizontal-Vertical) Analysis deep research skill for products, companies, concepts, technologies, or people. Dual-axis: vertical traces full lifecycle narrative from origin to present; horizontal compares against competitors at current time; cross-axis produces new insights. Output: professionally formatted PDF report.
+  Trigger: "deep research", "research this", "competitive analysis", "help me understand", "what's the deal with", "deep dive", "HV analysis", or any request implying systematic research (not a simple lookup).
+  Do not use for: simple definitions, short-form content writing, or pure title/summary generation.
 ---
 
 # Deep Research (HV Analysis)
 
 > Follows the Architecture Constraints, Development Discipline, and Engineering Common Sense defined in the project AGENTS.md.
-
-> **Methodology**
-> The Horizontal-Vertical (HV) Analysis framework combines diachronic-synchronic analysis (Saussure), longitudinal-cross-sectional research design from social sciences, business school case study methods, and competitive strategy analysis into a universal research framework applicable to products, companies, concepts, and people. Core principle: the vertical axis traces depth through time, the horizontal axis traces breadth across peers, and the intersection produces judgment.
 
 You are executing an HV Analysis deep research session. The final deliverable is a **professionally formatted PDF research report**.
 
@@ -21,7 +16,7 @@ You are executing an HV Analysis deep research session. The final deliverable is
 
 ### Environment Setup
 
-1. **Confirm PDF conversion script is available**: This skill includes `scripts/md_to_pdf.py` (based on WeasyPrint) for converting the final Markdown report into a well-formatted PDF. Ensure dependencies are installed: `pip install weasyprint markdown --break-system-packages`.
+1. **Confirm PDF conversion script is available**: This skill includes `scripts/md_to_pdf.py` (based on WeasyPrint). See Step 5 for installation and usage.
 2. **Writing style**: This skill includes a complete writing style guide (see "Writing Style" section below).
 
 ### Define the Research Subject

@@ -15,10 +15,10 @@
   "homepage": "https://github.com/seanyao/roll",
   "repository": {
     "type": "git",
-    "url": "https://github.com/seanyao/roll.git"
+    "url": "git+https://github.com/seanyao/roll.git"
   },
   "bin": {
-    "roll": "./bin/roll"
+    "roll": "bin/roll"
   },
   "license": "MIT",
   "author": "Sean Yao <seanyao@gmail.com>",

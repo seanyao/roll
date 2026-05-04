@@ -30,9 +30,13 @@ $roll-notes 今天的 code review 给了很好的反馈
 
 1. **Determine file path**: `notes/YYYY-MM-DD.md` relative to project root
 2. **Get current time**: Use `Asia/Shanghai` timezone (`TZ=Asia/Shanghai date`)
-3. **Append**: Add new entry at end of file — never overwrite existing content
-4. **Create if missing**: If file doesn't exist, create with a `# YYYY-MM-DD — <one-line summary>` header
-5. **Free format**: Paragraph, list, code block — whatever fits the moment
+3. **Read existing entries for style**: Before writing, read the last 2–3 entries
+   in the same file. Analyze their style: heading format, voice/tone,
+   paragraph structure, emoji usage, code block conventions, sign-off pattern.
+   New entries must continue this style — do not invent new structural patterns.
+4. **Append**: Add new entry at end of file — never overwrite existing content
+5. **Create if missing**: If file doesn't exist, create with a `# YYYY-MM-DD — <one-line summary>` header
+6. **Free format**: Paragraph, list, code block — whatever fits the moment
 
 ## File format
 
@@ -78,6 +82,10 @@ $roll-notes 今天的 code review 给了很好的反馈
 
 ## Rules
 
+- **Style continuity**: Match the EXACT style, tone, and formatting of previous
+  entries in the same file. Do not invent new structural patterns or section
+  headers. If the file already has entries, analyze them first and confirm your
+  understanding of their style before writing.
 - **No planning**: Never write "明日待办" or "下一步"
 - **No summaries**: Never write "今日收获" or "经验教训"
 - **Pure record**: What happened, as-is — honest, immediate, rough is fine

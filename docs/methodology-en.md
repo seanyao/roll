@@ -580,6 +580,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 | Command | Purpose |
 |---------|---------|
 | `roll setup` | First-time install on this machine, or re-sync after editing config (use `--force` to overwrite local cache) |
+| `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via setup |
 | `roll init` | Create AGENTS.md + BACKLOG.md + docs/features/ in cwd; re-merges if AGENTS.md exists |
 | `roll hook install` | Opt-in: install global git hook that tags commits with the active AI client |
 | `roll status` | Display current sync status, skill links, and detected AI tools |

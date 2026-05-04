@@ -541,6 +541,27 @@ cmd_setup() {
   info "Next: run ${BOLD}roll init${NC} inside a project to initialize it.  下一步：在项目目录运行 roll init"
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: update
+# Thin wrapper: upgrade the npm-installed package, then re-sync via setup.
+# Equivalent to: npm install -g @seanyao/roll@latest && roll setup
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_update() {
+  info "Current version: roll v${VERSION}  当前版本: roll v${VERSION}"
+  info "Upgrading via npm...  正在通过 npm 升级..."
+  echo ""
+
+  if ! npm install -g @seanyao/roll@latest; then
+    err "npm install failed. Check network/proxy and try again.  npm 安装失败，请检查网络/代理后重试。"
+    exit 1
+  fi
+
+  echo ""
+  info "Re-syncing to AI tools...  正在重新同步到 AI 工具..."
+  echo ""
+  cmd_setup
+}
+
 # ─── Helper: merge global AGENTS.md into project (no type prompt) ────────────
 # Fresh project: copies global AGENTS.md.
 # Existing AGENTS.md: appends any ## sections missing from global.
@@ -1179,12 +1200,14 @@ usage() {
   echo ""
   echo "Commands:"
   echo "  setup [-f]             [Machine] First-time install or re-sync             首次安装或重新同步"
+  echo "  update                 [Upgrade] npm install latest + re-sync             一键升级到最新版"
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
   echo "  hook [install|remove]  [Optional] Manage global git hook                  管理全局 git hook"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
   echo ""
   echo "Examples / 示例:"
-  echo "  roll setup                    # New machine, or re-sync after npm update    新机器或更新后重新同步"
+  echo "  roll setup                    # New machine: first-time install            新机器首次安装"
+  echo "  roll update                   # Upgrade to latest version + re-sync         升级到最新版并重新同步"
   echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
   echo "  roll hook install             # Optional: tag commits with AI client       可选：提交时标记 AI 工具"
 }
@@ -1195,6 +1218,7 @@ main() {
 
   case "$cmd" in
     setup)         cmd_setup "$@" ;;
+    update)        cmd_update "$@" ;;
     init)          cmd_init "$@" ;;
     hook)          cmd_hook "$@" ;;
     status)        cmd_status "$@" ;;
@@ -1233,7 +1257,7 @@ _notify_update() {
   local latest; latest=$(awk '{print $2}' "$cache" 2>/dev/null || true)
   [[ -z "$latest" || "$latest" == "$VERSION" ]] && return
   echo ""
-  warn "v${latest} available — run 'npm install -g @seanyao/roll@latest && roll setup' to upgrade  有新版本 v${latest} — 运行 'npm install -g @seanyao/roll@latest && roll setup' 升级"
+  warn "v${latest} available — run 'roll update' to upgrade  有新版本 v${latest} — 运行 'roll update' 升级"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

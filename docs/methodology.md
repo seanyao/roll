@@ -578,6 +578,7 @@ graph LR
 | 命令 | 作用 |
 |------|------|
 | `roll setup` | 首次安装或重新同步：初始化 `~/.roll/` 并把约定与技能分发到所有 AI 工具（加 `--force` 覆盖本地缓存） |
+| `roll update` | 一键升级：`npm install -g @seanyao/roll@latest` + 重新执行 setup |
 | `roll init` | 在项目目录创建 AGENTS.md + BACKLOG.md + docs/features/；已有 AGENTS.md 则重新合并 |
 | `roll hook install` | 可选：安装全局 git hook，自动用 AI 客户端名标注 commit |
 | `roll status` | 显示同步状态、技能软链接、检测到的 AI 工具 |

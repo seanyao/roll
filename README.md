@@ -48,8 +48,7 @@ roll setup
 To update:
 
 ```bash
-npm install -g @seanyao/roll@latest
-roll setup
+roll update
 ```
 
 > **For contributors** (working on roll itself): `git clone https://github.com/seanyao/roll.git && cd roll && ./install.sh`
@@ -65,6 +64,7 @@ Unified behavioral conventions for Claude Code / Gemini CLI / Cursor / Codex —
 | Command | Description |
 |---------|-------------|
 | `roll setup` | First-time install on this machine, or re-sync after editing `~/.roll/config.yaml` (use `--force` to overwrite local cache) |
+| `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via `roll setup` |
 | `roll init` | New project: create `AGENTS.md` + `BACKLOG.md` + `docs/features/` |
 | `roll hook install` | Optional: global git hook that tags commits with the active AI client |
 | `roll status` | Show sync state, skill links, and detected AI tools |
@@ -80,8 +80,8 @@ roll setup
 cd my-app
 roll init
 
-# 3. Re-sync after editing ~/.roll/config.yaml or after upgrading
-roll setup
+# 3. Upgrade to a new release
+roll update
 
 # 4. Optional: tag commits with AI client name
 roll hook install

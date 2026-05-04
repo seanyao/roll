@@ -215,3 +215,30 @@ another_key: 42"
   [ "$status" -eq 0 ]
   [ ! -d "${TEST_TMP}/.trae" ]
 }
+
+# ─── setup: sync correctness (merged from removed cmd_sync.bats) ──────────────
+
+@test "setup: synced roll.md content matches ROLL_HOME/conventions/global/CLAUDE.md" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+  diff "${ROLL_HOME}/conventions/global/CLAUDE.md" "${TEST_TMP}/.claude/roll.md"
+}
+
+@test "setup: @roll.md is not duplicated when setup runs twice" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+  run_roll setup
+  [ "$status" -eq 0 ]
+  local count
+  count=$(grep -cF "@roll.md" "${TEST_TMP}/.claude/CLAUDE.md")
+  [ "$count" -eq 1 ]
+}
+
+@test "setup: absent ~/.gemini/ is not recreated by setup" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+  rm -rf "${TEST_TMP}/.gemini"
+  run_roll setup
+  [ "$status" -eq 0 ]
+  [ ! -d "${TEST_TMP}/.gemini" ]
+}

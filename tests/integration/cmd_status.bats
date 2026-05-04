@@ -39,11 +39,8 @@ teardown() {
 
 # ─── Scenario 3: after sync conventions — Claude shows in sync ───────────────
 
-@test "status: shows 'in sync' for Claude Code after sync conventions" {
+@test "status: shows 'in sync' for Claude Code after setup" {
   run_roll setup
-  [ "$status" -eq 0 ]
-
-  run_roll sync
   [ "$status" -eq 0 ]
 
   run_roll status

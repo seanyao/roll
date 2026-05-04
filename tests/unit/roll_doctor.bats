@@ -6,8 +6,10 @@
 }
 
 @test "roll-doctor SKILL.md has valid YAML frontmatter" {
+  # Extract the frontmatter block (between the two leading --- markers)
   local frontmatter
-  frontmatter=$(head -5 "${BATS_TEST_DIRNAME}/../../skills/roll-doctor/SKILL.md")
+  frontmatter=$(awk '/^---$/{n++; if(n==2) exit; next} n==1' \
+    "${BATS_TEST_DIRNAME}/../../skills/roll-doctor/SKILL.md")
   echo "$frontmatter" | grep -q '^name:'
   echo "$frontmatter" | grep -q '^description:'
 }

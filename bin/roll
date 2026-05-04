@@ -291,7 +291,7 @@ _install_local() {
     info "Creating default config...  正在创建默认配置..."
     cat > "$ROLL_CONFIG" << 'YAML'
 # Roll Configuration
-# Edit this file, then run `roll sync` to apply.
+# Edit this file, then run `roll setup` to apply.
 
 # AI tools — each entry controls both convention sync and skill linking
 # Format: <name>: <dir>|<config_file>|<convention_src>
@@ -512,37 +512,6 @@ cmd_setup() {
 
   echo ""
   info "Next: run ${BOLD}roll init${NC} inside a project to initialize it.  下一步：在项目目录运行 roll init"
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: sync [--force]
-# Full pipeline: repo → ~/.roll/ → AI tool config paths
-# Pulls latest conventions from repo, then distributes to all AI tools.
-# ═══════════════════════════════════════════════════════════════════════════════
-cmd_sync() {
-  if [[ ! -d "$ROLL_HOME" ]]; then
-    err "~/.roll/ not found. Run 'roll setup' first.  ~/.roll/ 不存在，请先运行 'roll setup'。"
-    exit 1
-  fi
-
-  local force=false
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --force|-f) force=true; shift ;;
-      *) err "Unknown sync argument: $1  未知同步参数: $1"; exit 1 ;;
-    esac
-  done
-
-  info "Syncing from repo to AI tools...  正在从仓库同步到 AI 工具..."
-  echo ""
-  _pull_conventions "$force"
-  _ensure_config_entries
-  echo ""
-  _sync_conventions "$force"
-  echo ""
-  _sync_skills "$force"
-  echo ""
-  ok "Sync complete.  同步完成。"
 }
 
 # ─── Helper: merge global AGENTS.md into project (no type prompt) ────────────
@@ -1008,46 +977,6 @@ cmd_hook() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: reset
-# Re-copy conventions and skills from repo source, force-sync everything
-# ═══════════════════════════════════════════════════════════════════════════════
-cmd_reset() {
-  warn "This will overwrite ~/.roll/conventions/ and skills with repo defaults.  此操作将用仓库默认值覆盖 ~/.roll/conventions/ 和技能。"
-  echo -n "  Continue? [y/N] "
-  read -r answer
-  [[ "$answer" =~ ^[Yy]$ ]] || { info "Aborted.  已取消。"; return; }
-
-  echo ""
-  info "Resetting and force-syncing...  正在重置并强制同步..."
-  cmd_setup --force
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: update
-# Update roll to latest version (npm update or git pull), then re-sync
-# ═══════════════════════════════════════════════════════════════════════════════
-_is_git_install() {
-  [[ -d "$ROLL_PKG_DIR/.git" ]]
-}
-
-cmd_update() {
-  info "Current version: roll v${VERSION}  当前版本: roll v${VERSION}"
-  echo ""
-
-  if _is_git_install; then
-    info "Git install detected — pulling latest...  检测到 Git 安装，正在拉取最新代码..."
-    git -C "$ROLL_PKG_DIR" pull
-  else
-    info "npm install detected — updating package...  检测到 npm 安装，正在更新包..."
-    npm update -g @seanyao/roll
-  fi
-
-  echo ""
-  info "Re-syncing to AI tools...  正在重新同步到 AI 工具..."
-  cmd_sync
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: status
 # Show current state of conventions
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1222,17 +1151,13 @@ usage() {
   echo "用法:  roll <command> [options]"
   echo ""
   echo "Commands:"
-  echo "  setup [-f]             [Machine] First-time install: init ~/.roll/ + sync   首次安装：初始化 ~/.roll/ 并同步"
-  echo "  update                 [Upgrade] Update roll to latest + re-sync           更新 roll 到最新版本并重新同步"
-  echo "  sync [-f]              [Everyday] package → ~/.roll/ → AI tools            日常同步：从包同步到所有工具"
+  echo "  setup [-f]             [Machine] First-time install or re-sync             首次安装或重新同步"
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
   echo "  hook [install|remove]  [Optional] Manage global git hook                  管理全局 git hook"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
-  echo "  reset                  [Recovery] Force-rebuild from package source        强制从包源重建"
   echo ""
   echo "Examples / 示例:"
-  echo "  roll setup                    # New machine: first-time install             新机器：首次安装"
-  echo "  roll update                   # Get latest version + sync to AI tools      更新到最新版本并同步"
+  echo "  roll setup                    # New machine, or re-sync after npm update    新机器或更新后重新同步"
   echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
   echo "  roll hook install             # Optional: tag commits with AI client       可选：提交时标记 AI 工具"
 }
@@ -1243,11 +1168,8 @@ main() {
 
   case "$cmd" in
     setup)         cmd_setup "$@" ;;
-    sync)          cmd_sync "$@" ;;
     init)          cmd_init "$@" ;;
-    hook)         cmd_hook "$@" ;;
-    update)        cmd_update "$@" ;;
-    reset)         cmd_reset "$@" ;;
+    hook)          cmd_hook "$@" ;;
     status)        cmd_status "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h|"") usage ;;
@@ -1284,7 +1206,7 @@ _notify_update() {
   local latest; latest=$(awk '{print $2}' "$cache" 2>/dev/null || true)
   [[ -z "$latest" || "$latest" == "$VERSION" ]] && return
   echo ""
-  warn "v${latest} available — run 'roll update' to upgrade  有新版本 v${latest} — 运行 'roll update' 升级"
+  warn "v${latest} available — run 'npm install -g @seanyao/roll@latest && roll setup' to upgrade  有新版本 v${latest} — 运行 'npm install -g @seanyao/roll@latest && roll setup' 升级"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

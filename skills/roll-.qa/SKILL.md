@@ -2,6 +2,7 @@
 hidden: true
 name: roll-.qa
 license: MIT
+allowed-tools: "Read"
 description: QA coverage reference for build skills. Defines test pyramid (unit/E2E/visual/smoke), coverage requirements, and CI gates. Ensures quality assurance across all testing layers.
 ---
 

@@ -2,6 +2,7 @@
 name: roll-release
 license: MIT
 model: haiku
+allowed-tools: "Read, Edit, Bash(git:*), Bash(npm:*), Bash(sed:*), Bash(date:*)"
 description: "Release skill for roll maintainers. Calculates next version (YYYY.MMDD.N format, auto-increments N from today's git tags), updates VERSION in bin/roll and package.json, commits, tags, and pushes to trigger npm auto-publish via GitHub Actions. Trigger: release, publish, 发版, 发布新版本."
 ---
 

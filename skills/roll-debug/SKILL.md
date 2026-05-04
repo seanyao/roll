@@ -1,6 +1,7 @@
 ---
 name: roll-debug
 license: MIT
+allowed-tools: "Read, Edit, Write, Bash, Agent"
 description: Universal web debugger. Mounts a Black Box (BB) diagnostic probe on any page, collects rich diagnostics, analyzes root causes, and suggests fixes. Cleans up after itself.
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: roll-sentinel
 license: MIT
+allowed-tools: "Read, Edit, Write, Bash, WebFetch"
 description: Smart patrol inspector for production systems. Scheduled randomized sampling checks based on BACKLOG requirements. Cost-controlled AI validation with intelligent spot-checking logic.
 ---
 

@@ -2,6 +2,7 @@
 name: roll-design
 license: MIT
 model: sonnet
+allowed-tools: "Read, Edit, Write, Glob, Grep, Bash(git:*), WebSearch, WebFetch, Skill"
 description: Unified entry for discussion, design and planning. Explores options when uncertain, designs solutions, splits into INVEST-compliant user stories, and writes to BACKLOG.md. Use when user wants to discuss approaches, design solutions, plan features, or create stories.
 ---
 

@@ -48,3 +48,16 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-REL-001](docs/features/roll-release.md#us-rel-001) | Add roll-release skill — one-command publish flow | 📋 Todo |
+
+## 🐛 Bug Fixes
+| ID | Description | Status |
+|----|-------------|--------|
+| FIX-001 | bin/roll `_pull_skills` / `_sync_convention_for_tool` 应改为 rsync --delete 模式，否则未来删文件会在用户机器留下幽灵文件 | 📋 Todo |
+| FIX-002 | `AGENTS.md` ## 4. CLI 段写 `src/index.ts`，但实际入口是 `bin/roll`（bash 脚本） | 📋 Todo |
+| FIX-003 | `GEMINI.md` Stack 段写 Node.js / commander / Vitest，实际是 bash + bats | 📋 Todo |
+
+## 💡 Ideas
+| ID | Description | Status |
+|----|-------------|--------|
+| IDEA-001 | Identity 自动从 git config 读取，不在 conventions 或 AGENTS.md 里写死个人邮箱（防止 npm 发布后泄露给所有用户） | 📋 Todo |
+| IDEA-002 | 实测验证 `model:` / `allowed-tools:` SKILL.md frontmatter 字段在各 AI 客户端（Claude Code/Cursor/Codex）是否被识别和生效 | 📋 Todo |

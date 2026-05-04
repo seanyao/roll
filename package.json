@@ -21,7 +21,7 @@
     "roll": "bin/roll"
   },
   "license": "MIT",
-  "author": "Sean Yao <seanyao@gmail.com>",
+  "author": "Sean Yao <sean.dlut@gmail.com>",
   "files": [
     "bin/",
     "conventions/",

@@ -48,7 +48,8 @@ roll setup
 To update:
 
 ```bash
-roll update
+npm install -g @seanyao/roll@latest
+roll setup
 ```
 
 > **For contributors** (working on roll itself): `git clone https://github.com/seanyao/roll.git && cd roll && ./install.sh`
@@ -63,26 +64,24 @@ Unified behavioral conventions for Claude Code / Gemini CLI / Cursor / Codex —
 
 | Command | Description |
 |---------|-------------|
-| `roll setup` | First-time install: create `~/.roll/` + sync to all AI tools |
-| `roll update` | Update roll to latest version + re-sync |
-| `roll sync` | Re-sync conventions and skill symlinks to all AI tools |
+| `roll setup` | First-time install on this machine, or re-sync after editing `~/.roll/config.yaml` (use `--force` to overwrite local cache) |
 | `roll init` | New project: create `AGENTS.md` + `BACKLOG.md` + `docs/features/` |
-| `roll hook install` | Optional: global git hook for AI client auto-detection |
-| `roll reset` | Force-rebuild local cache from repo source, then re-sync |
+| `roll hook install` | Optional: global git hook that tags commits with the active AI client |
 | `roll status` | Show sync state, skill links, and detected AI tools |
 
 ### Typical Flow
 
 ```bash
-# 1. Install
-./install.sh
+# 1. Install on this machine
+npm install -g @seanyao/roll
+roll setup
 
 # 2. Initialize a project (run from project root)
 cd my-app
 roll init
 
-# 3. Re-sync after editing ~/.roll/config.yaml
-roll sync
+# 3. Re-sync after editing ~/.roll/config.yaml or after upgrading
+roll setup
 
 # 4. Optional: tag commits with AI client name
 roll hook install
@@ -120,7 +119,7 @@ Global conventions are additive and never overwrite existing files. Project conv
 
 ## Skill System
 
-Skills are instructions that encode proven engineering practices into a form AI agents can reliably follow. They live in `~/.roll/skills/` and are symlinked into each AI client's skill directory on `roll sync`.
+Skills are instructions that encode proven engineering practices into a form AI agents can reliably follow. They live in `~/.roll/skills/` and are symlinked into each AI client's skill directory on `roll setup`.
 
 ### Workflow
 

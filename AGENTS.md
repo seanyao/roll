@@ -1,6 +1,10 @@
-# Agent Conventions
+# Roll Project — Internal Conventions
 
-> Global conventions for AI agents. Focus on outcomes.
+> ⚠️ **This file is for developers working ON Roll itself.**
+> The user-facing baseline — distributed via `roll sync` to `~/.codex/AGENTS.md`,
+> `~/.kimi/AGENTS.md`, etc. — lives at [conventions/global/AGENTS.md](conventions/global/AGENTS.md).
+
+> Focus on outcomes.
 
 ## 1. Communication
 - Respond in user's language. Code/Git/Comments: English. UI: Chinese.

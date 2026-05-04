@@ -19,6 +19,7 @@
 ## 2. Code
 - **TS**: Strict, no `any`. Functional hooks. Early returns.
 - **Git**: No force-push main. No `--no-verify`. No secrets in git.
+- **Identity**: When you need the user's name or email, read it dynamically — `git config user.name` / `git config user.email`. **Never hardcode personal data** (names, emails, machine paths, personal repo URLs) into files that get committed or shipped via npm. Author/repo metadata in `package.json` is the only allowed exception.
 - **Behavior**: No unrelated refactoring. No speculative abstractions.
 - **File ops**: Prefer targeted edits over full file rewrites. Verify file exists before modifying.
 

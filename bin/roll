@@ -196,6 +196,27 @@ safe_copy() {
   ok "Wrote: ${dst/#$HOME/~}  已写入: ${dst/#$HOME/~}"
 }
 
+# ─── Internal: prune files in $1 that no longer exist in $2 ──────────────────
+# Used to clean up stale files left behind when a previous version had them
+# but the current package no longer ships them.
+_prune_dir() {
+  local installed_dir="$1"
+  local source_dir="$2"
+  local label="${3:-file}"
+  [[ -d "$installed_dir" ]] || return 0
+
+  local installed_f installed_fname
+  for installed_f in "$installed_dir"/* "$installed_dir"/.*; do
+    [[ -f "$installed_f" ]] || continue
+    installed_fname="$(basename "$installed_f")"
+    [[ "$installed_fname" == "." || "$installed_fname" == ".." ]] && continue
+    if [[ ! -f "$source_dir/$installed_fname" ]]; then
+      rm -f "$installed_f"
+      info "Removed stale $label: ${installed_dir##*/}/$installed_fname  已删除过时$label: ${installed_dir##*/}/$installed_fname"
+    fi
+  done
+}
+
 # ─── Internal: pull skills from repo → ~/.roll/skills ──────────────────────
 _pull_skills() {
   if [[ ! -d "$ROLL_PKG_DIR/skills" ]]; then
@@ -214,6 +235,8 @@ _pull_skills() {
       for f in "$skill_dir"*; do
         [[ -f "$f" ]] && cp "$f" "$ROLL_HOME/skills/$skill_name/$(basename "$f")"
       done
+      # File-level prune (dir-level prune below catches whole-skill removals)
+      _prune_dir "$ROLL_HOME/skills/$skill_name" "$skill_dir" "skill file"
     fi
   done
 
@@ -250,6 +273,8 @@ _pull_conventions() {
     [[ -f "$f" ]] && [[ "$(basename "$f")" != "." ]] && [[ "$(basename "$f")" != ".." ]] && \
       safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")" "$force"
   done
+  # Prune stale files in ~/.roll/conventions/global/
+  _prune_dir "$ROLL_GLOBAL" "$ROLL_PKG_CONVENTIONS/global" "convention"
 
   info "Copying project templates...  正在复制项目模板..."
   for tpl_dir in "$ROLL_PKG_CONVENTIONS"/templates/*/; do
@@ -262,6 +287,8 @@ _pull_conventions() {
       [[ -f "$f" ]] && [[ "$(basename "$f")" != "." ]] && [[ "$(basename "$f")" != ".." ]] && \
         safe_copy "$f" "$ROLL_TEMPLATES/$tpl_name/$(basename "$f")" "$force"
     done
+    # Prune stale files in this template dir
+    _prune_dir "$ROLL_TEMPLATES/$tpl_name" "$tpl_dir" "template file"
   done
 }
 

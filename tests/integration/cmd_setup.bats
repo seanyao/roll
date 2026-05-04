@@ -242,3 +242,48 @@ another_key: 42"
   [ "$status" -eq 0 ]
   [ ! -d "${TEST_TMP}/.gemini" ]
 }
+
+# ─── setup: stale-file prune (FIX-001) ────────────────────────────────────────
+# Simulate the case where a prior version had a file that the current package
+# no longer ships. The file lives in ROLL_HOME but has no source counterpart;
+# the next setup must remove it instead of leaving it as a ghost.
+
+@test "setup: prunes a ghost file inside a skill directory" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  # Inject a ghost file with no counterpart in the package source
+  local ghost="${ROLL_HOME}/skills/roll-design/ghost-file.md"
+  echo "stale" > "$ghost"
+  [ -f "$ghost" ]
+
+  run_roll setup
+  [ "$status" -eq 0 ]
+  [ ! -f "$ghost" ]
+}
+
+@test "setup: prunes a ghost file in conventions/global/" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  local ghost="${ROLL_HOME}/conventions/global/ghost-rule.md"
+  echo "stale" > "$ghost"
+  [ -f "$ghost" ]
+
+  run_roll setup
+  [ "$status" -eq 0 ]
+  [ ! -f "$ghost" ]
+}
+
+@test "setup: prunes a ghost file inside a project-type template" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  local ghost="${ROLL_HOME}/conventions/templates/fullstack/ghost-template.md"
+  echo "stale" > "$ghost"
+  [ -f "$ghost" ]
+
+  run_roll setup
+  [ "$status" -eq 0 ]
+  [ ! -f "$ghost" ]
+}

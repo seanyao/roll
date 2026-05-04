@@ -9,13 +9,13 @@
 
 ## 2. Standards
 - **TS**: Strict, no `any`. Functional hooks.
-- **Rules**: [engineering-common-sense.md](file:///Users/seanclaw/Workspace/roll/docs/practices/engineering-common-sense.md).
+- **Rules**: [engineering-common-sense.md](docs/practices/engineering-common-sense.md).
 - **Test**: Unit >80%, E2E for flows. Test before push.
 
 ## 3. Workflow
 - **TCR**: Test -> Green = Commit / Red = Revert. No WIP.
 - **Backlog**: Work stems from `BACKLOG.md`.
-- **Docs**: [skill-selection-guide.md](file:///Users/seanclaw/Workspace/roll/docs/skill-selection-guide.md), [methodology.md](file:///Users/seanclaw/Workspace/roll/docs/methodology.md).
+- **Docs**: [skill-selection-guide.md](docs/skill-selection-guide.md), [methodology.md](docs/methodology.md).
 
 ## 4. CLI
 - **Entry**: `src/index.ts`, `commands/` per file.

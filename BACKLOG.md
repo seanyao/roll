@@ -37,6 +37,12 @@
 | [US-TRAE-001](docs/features/trae-support.md#us-trae-001) | Add project_rules.md convention files (global + 4 templates) | ✅ Done |
 | [US-TRAE-002](docs/features/trae-support.md#us-trae-002) | bin/roll integration — detect Trae, refresh project, config template | ✅ Done |
 
+## Epic: Diagnostics
+### Feature: roll-debug
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-DEBUG-001](docs/features/roll-debug.md#us-debug-001) | Add BB Injection mode — mount BB on pages without native integration | 📋 Todo |
+
 ## Epic: Release Management
 ### Feature: roll-release
 | Story | Description | Status |

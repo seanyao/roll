@@ -1,16 +1,19 @@
 ---
 name: roll-debug
 license: MIT
-description: Universal web debugger. Collects diagnostics (console/network/DOM) via Playwright, analyzes root causes, and suggests fixes. Works with or without Black Box (BB) integration.
+description: Universal web debugger. Mounts a Black Box (BB) diagnostic probe on any page, collects rich diagnostics, analyzes root causes, and suggests fixes. Cleans up after itself.
 ---
 
 # Roll Debug
 
-Universal web debugging tool that combines diagnostic collection and analysis into a single workflow: **Diagnose → Analyze → Suggest Fix**.
+Web debugging tool that treats the **Black Box (BB) as a diagnostic probe** — mounted when needed, unmounted when done. Combines diagnostic collection and analysis into a single workflow: **Mount → Collect → Analyze → Unmount**.
 
-Two collection modes:
-- **Native BB Mode**: Page has Black Box integrated; click button to collect rich diagnostic data
-- **Universal Diagnostic Mode**: Page has no BB; use Playwright to directly collect console/network/DOM/screenshot data
+## Philosophy
+
+- BB is a **diagnostic probe**, not a product feature. Pages do not need to integrate BB natively.
+- For any web diagnosis, **mount BB first** (unless already present).
+- The entire lifecycle is **explicit and visible**: you see when BB mounts, when it collects, and when it unmounts.
+- A visible **BB button** appears on the page during diagnosis so you always know the probe is active.
 
 ## When to Use
 
@@ -31,14 +34,17 @@ Two collection modes:
 ## Quick Start
 
 ```bash
-# Full workflow: collect + analyze + suggest fix (recommended)
+# Full workflow: mount + collect + analyze + unmount (recommended)
 $roll-debug https://example.com/page
 
 # Collect data only, skip analysis
 $roll-debug https://example.com/page --no-analyze
 
-# Force universal diagnostic mode (no BB)
+# Skip BB mount, use built-in universal collector
 $roll-debug https://example.com/page --universal
+
+# Use a custom BB SDK instead of the built-in stub
+$roll-debug https://example.com/page --bb-sdk-url https://cdn.example.com/bb.js
 
 # Collect + analyze + auto-fix
 $roll-debug https://example.com/page --fix
@@ -51,44 +57,21 @@ $roll-debug https://site.com/page1,https://site.com/page2
 $roll-debug --file urls.txt
 ```
 
-## Two Collection Modes
-
-### Mode 1: Native BB (Page has Black Box integrated)
-
-```
-Page with BB  →  Playwright clicks BB button  →  Download diagnostic JSON
-```
-
-Requirements:
-- Page has `[data-testid="bb-toggle"]` button
-- Or exposes `window.__BB_DATA__`
-- Or stores data in `localStorage.bb_diagnostic`
-
-### Mode 2: Universal Diagnostic (No BB required)
-
-```
-Any page  →  Playwright injects collector  →  Gather console/network/DOM/screenshot
-```
-
-Collects:
-- Console logs (error/warn/info)
-- Network requests (failed XHR/fetch, slow requests)
-- DOM state (key elements visibility, HTML length)
-- Screenshot (full page + viewport)
-- Performance metrics (load time, FCP, LCP, render blocking)
-- JavaScript errors with stack traces
-
-## Full Workflow
+## BB Probe Lifecycle
 
 ```
 User: "Debug the page"
     │
     ▼
 ┌─────────────────────────────────────┐
-│ 1. Auto-detect collection mode      │
-│    ├── Try BB button → found?       │
-│    ├── Try window.__BB_DATA__?      │
-│    └── Fallback to Universal        │
+│ 1. Mount BB Probe                   │
+│    ├── Check: page already has BB?  │
+│    │   ├── Yes → reuse existing     │
+│    │   └── No  → inject BB          │
+│    │       ├── Built-in stub (default)
+│    │       └── Custom SDK (--bb-sdk-url)
+│    ├── Wait for initialization      │
+│    └── BB button appears on page    │
 └──────────────────┬──────────────────┘
                    │
                    ▼
@@ -97,6 +80,7 @@ User: "Debug the page"
 │    ├── Console logs                 │
 │    ├── Network requests             │
 │    ├── DOM state                    │
+│    ├── Performance metrics          │
 │    └── Screenshot                   │
 └──────────────────┬──────────────────┘
                    │
@@ -111,40 +95,82 @@ User: "Debug the page"
                    │
                    ▼
 ┌─────────────────────────────────────┐
-│ 4. Suggest (or apply) fix           │
-│    ├── Actionable fix suggestions   │
-│    ├── Auto-fix via TCR (--fix)     │
-│    └── Deploy & verify              │
-└─────────────────────────────────────┘
+│ 4. Unmount BB Probe                 │
+│    ├── Restore console/fetch/XHR    │
+│    ├── Remove BB button from DOM    │
+│    ├── Delete window.__BB_DATA__    │
+│    └── Page state fully restored    │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+    Fix suggestions (or --fix to apply)
 ```
+
+## Collection Modes
+
+### Mode 1: Mounted BB (Default)
+
+BB probe is mounted on the page — either reused from an existing BB or freshly injected.
+
+**Visual indicator**: a red circular **BB** button appears at the bottom-right of the page.
+
+**Data collected via BB interface**:
+- Console logs (error/warn/info)
+- Network requests (failed XHR/fetch, slow requests)
+- DOM state (key elements visibility, HTML length)
+- Performance metrics (load time, FCP, LCP)
+- JavaScript errors with stack traces
+
+**BB Sources**:
+
+| Source | When Used | Capability |
+|--------|-----------|------------|
+| Existing native BB | Page already has `[data-testid="bb-toggle"]` or `window.__BB_DATA__` | Full app-specific metrics (contentState, audioState, etc.) |
+| Built-in stub | Default when no BB present | Generic metrics (console, network, DOM, performance, errors) |
+| Custom SDK | `--bb-sdk-url` provided | Determined by the SDK implementation |
+
+### Mode 2: Universal Diagnostic (No BB)
+
+When `--universal` is passed, skip BB mount entirely. Use Playwright's built-in event listeners directly.
+
+```bash
+$roll-debug https://example.com/page --universal
+```
+
+Useful when:
+- You explicitly do not want to modify the page state
+- The page has strict CSP that blocks script injection
+- You need a quick check without probe overhead
 
 ## Usage Examples
 
-### Example 1: Full auto-detect + analyze (default)
+### Example 1: Full auto-mount + analyze (default)
 
 ```bash
 $roll-debug https://yyy.up.railway.app/story/cars/chapter/1
 
-Detecting diagnostic capability...
-├── BB found: [data-testid="bb-toggle"]
-└── Using: Native BB mode
-
-Collecting data...
-├── Console: 3 errors, 5 warnings
-├── Network: 2 failed requests
-├── DOM: #app rendered, .content empty
-└── Screenshot: saved to /tmp/bb-screenshot.png
+🔍 Diagnosing https://yyy.up.railway.app/story/cars/chapter/1
+📡 Mounting BB probe...
+   ├── Source: built-in stub
+   └── Status: ready (320ms)
+   └── BB button visible on page ✓
+📊 Collecting data via BB...
+   ├── Console: 3 errors, 5 warnings
+   ├── Network: 2 failed requests
+   ├── DOM: #app rendered, .content empty
+   └── Screenshot: saved to /tmp/bb-screenshot.png
+🔬 Analyzing...
+🧹 Unmounting BB probe... done
+   └── Page state restored ✓
 
 Report: /tmp/bb-report.json
-
-Analyzing...
 
 ## Diagnostic Analysis Report
 
 ### Basic Info
 | Field | Value |
 |-------|-------|
-| Diagnostic Mode | native-bb |
+| Diagnostic Mode | mounted-bb (stub) |
 | Page URL | https://yyy.up.railway.app/story/cars/chapter/1 |
 
 ### Key Findings
@@ -165,58 +191,58 @@ Modify Player.tsx line 45, change useEffect dependency
 from `[chapter?.id]` to `[chapter?.number]`
 ```
 
-### Example 2: Universal mode (no BB)
+### Example 2: Reuse existing native BB
+
+```bash
+$roll-debug https://example.com/page
+
+🔍 Diagnosing https://example.com/page
+📡 Mounting BB probe...
+   ├── Native BB detected
+   └── Reusing existing probe
+📊 Collecting data via BB...
+   ├── Console: 0 errors
+   ├── Network: 0 failed
+   └── DOM: fully rendered
+🔬 Analyzing...
+🧹 Unmounting BB probe... skipped
+   └── Native BB left intact
+
+No issues found. Page is healthy.
+```
+
+### Example 3: Universal mode (no BB mount)
 
 ```bash
 $roll-debug https://example.com --universal
 
-Universal diagnostic mode (no BB required)
-
-Collected:
-├── Console Errors: 2
-│   ├── TypeError: Cannot read property 'id' of undefined
-│   │   at Player.tsx:45
-│   └── ReferenceError: AudioContext is not defined
-├── Failed Network: 1
-│   └── GET https://api.example.com/data 404
-├── DOM State:
-│   ├── body.innerHTML length: 2340
-│   ├── #root: rendered
-│   ├── .loading: still visible (timeout?)
-│   └── .error-message: visible
-├── Performance:
-│   ├── DOMContentLoaded: 1.2s
-│   ├── First Contentful Paint: 2.3s
-│   └── Largest Contentful Paint: 4.5s
-└── Screenshot: /tmp/bb-screenshot.png
+🔍 Diagnosing https://example.com (universal mode)
+📡 BB mount skipped (--universal)
+📊 Collecting data via Playwright events...
+   ├── Console Errors: 2
+   │   ├── TypeError: Cannot read property 'id' of undefined
+   │   │   at Player.tsx:45
+   │   └── ReferenceError: AudioContext is not defined
+   ├── Failed Network: 1
+   │   └── GET https://api.example.com/data 404
+   └── Screenshot: /tmp/bb-screenshot.png
+🔬 Analyzing...
 
 Report: /tmp/bb-report.json
-
-Analyzing...
 
 ### Key Findings
 | Metric | Value | Status |
 |--------|-------|--------|
 | Console Errors | 2 | Critical |
 | Network Failed | 1 | Critical |
-| DOM Rendering | Partial | Warning |
-| Load Time (LCP) | 4.5s | Slow |
-
-### Diagnosis Conclusion
-API endpoint returning 404 causes content not to load.
-AudioContext undefined suggests missing polyfill or browser incompatibility.
-
-### Suggested Fix
-1. Fix API route for /data endpoint (404)
-2. Add AudioContext polyfill or guard with `typeof AudioContext !== 'undefined'`
 ```
 
-### Example 3: Analyze existing report file
+### Example 4: Analyze existing report file
 
 ```bash
 $roll-debug --report /tmp/bb-report.json
 
-Reading report: /tmp/bb-report.json (mode: universal)
+Reading report: /tmp/bb-report.json (mode: mounted-bb)
 
 ### Key Findings
 ...
@@ -226,11 +252,13 @@ Reading report: /tmp/bb-report.json (mode: universal)
 
 | Format | Source | Description |
 |--------|--------|-------------|
-| Native BB | Page with Black Box | `window.__BB_DATA__` or `localStorage.bb_diagnostic` |
-| Universal | Playwright collector | Injected collector data |
+| Mounted BB (stub) | Injected built-in stub | `window.__BB_DATA__` via injectable-bb.js |
+| Mounted BB (native) | Page with existing Black Box | `window.__BB_DATA__` or `localStorage.bb_diagnostic` |
+| Mounted BB (custom) | Custom SDK via `--bb-sdk-url` | Determined by SDK |
+| Universal | Playwright native events | Direct event listener data |
 | Legacy | Old diagnostic files | Backward compatible |
 
-### Native BB Mode Fields
+### Mounted BB Mode Fields
 
 ```javascript
 const bbData = report.diagnostic.bbData;
@@ -240,6 +268,11 @@ bbData.audioState?.src
 bbData.audioState?.error
 bbData.hasAudio
 bbData.errors
+bbData.console.errors
+bbData.console.warnings
+bbData.network.failed
+bbData.dom.keyElements
+bbData.performance.loadComplete
 ```
 
 ### Universal Mode Fields
@@ -255,7 +288,6 @@ d.dom['#root']
 d.dom.htmlLength
 d.performance.loadComplete
 d.performance.domContentLoaded
-d.errors
 ```
 
 ## Analysis Report Template
@@ -266,7 +298,8 @@ d.errors
 ### Basic Info
 | Field | Value |
 |-------|-------|
-| Diagnostic Mode | {native-bb / universal} |
+| Diagnostic Mode | {mounted-bb / universal} |
+| BB Source | {native / stub / custom-sdk} |
 | Page URL | {url} |
 | Collected At | {timestamp} |
 
@@ -309,62 +342,123 @@ d.errors
 
 ## Implementation Notes
 
-### Universal Mode Injection
-
-When page has no BB, inject a lightweight collector via `page.evaluate()`:
+### BB Mount Flow (Playwright)
 
 ```javascript
-window.__ROLL_DEBUG_COLLECTOR__ = {
-  console: [],
-  network: [],
-  errors: [],
+// Pseudocode for AI agent execution
+async function diagnose(page, url, args) {
+  log(`🔍 Diagnosing ${url}`);
 
-  init() {
-    // Hook console methods
-    ['error', 'warn', 'log', 'info'].forEach(method => {
-      const original = console[method];
-      console[method] = (...args) => {
-        this.console.push({method, args, timestamp: Date.now()});
-        original.apply(console, args);
-      };
-    });
+  // Step 1: Mount
+  const bbState = await mountBB(page, args);
+  log(`📡 Mounting BB probe...`);
+  log(`   ├── Source: ${bbState.source}`); // native / stub / custom
+  log(`   └── Status: ${bbState.ready ? 'ready' : 'failed'}`);
 
-    // Hook fetch/XHR for network interception
-
-    // Listen for JS errors
-    window.addEventListener('error', e => {
-      this.errors.push({message: e.message, stack: e.error?.stack});
-    });
-  },
-
-  getData() {
-    return {
-      console: this.console,
-      network: this.network,
-      errors: this.errors,
-      dom: this.captureDOM(),
-      performance: this.capturePerformance()
-    };
+  if (bbState.ready && bbState.source !== 'native') {
+    log(`   └── BB button visible on page ✓`);
   }
-};
+
+  // Step 2: Collect
+  log(`📊 Collecting data via BB...`);
+  const data = await collectViaBB(page);
+
+  // Step 3: Analyze
+  log(`🔬 Analyzing...`);
+  const analysis = await analyze(data);
+
+  // Step 4: Unmount (unless native BB)
+  if (bbState.source !== 'native') {
+    log(`🧹 Unmounting BB probe...`);
+    const ok = await page.evaluate(() => window.__BB_UNMOUNT__?.());
+    log(`   └── ${ok ? 'done' : 'failed'}`);
+    log(`   └── Page state restored ✓`);
+  } else {
+    log(`🧹 Unmounting BB probe... skipped`);
+    log(`   └── Native BB left intact`);
+  }
+
+  return analysis;
+}
+
+async function mountBB(page, args) {
+  // Check for existing BB
+  const hasNative = await page.evaluate(() =>
+    !!document.querySelector('[data-testid="bb-toggle"]') || !!window.__BB_DATA__
+  );
+  if (hasNative) {
+    return { source: 'native', ready: true };
+  }
+
+  if (args.universal) {
+    return { source: 'universal', ready: false };
+  }
+
+  // Inject BB
+  try {
+    if (args.bbSdkUrl) {
+      await page.addScriptTag({ url: args.bbSdkUrl });
+    } else {
+      const stubPath = path.join(__dirname, 'injectable-bb.js');
+      await page.addScriptTag({ path: stubPath });
+    }
+
+    // Poll for readiness
+    const ready = await poll(
+      () => page.evaluate(() => !!window.__BB_DATA__),
+      { timeout: 5000, interval: 200 }
+    );
+
+    return { source: args.bbSdkUrl ? 'custom' : 'stub', ready };
+  } catch (e) {
+    return { source: 'stub', ready: false, error: e.message };
+  }
+}
 ```
 
-The injected collector only exists in the Playwright browser context — no cleanup needed.
+### Built-in Stub (`injectable-bb.js`)
+
+The stub is injected via `page.addScriptTag({ path })` when no native BB exists.
+
+**Capabilities**:
+- Hooks `console.*` with internal error firewall (stub bugs never leak to page)
+- Hooks `fetch` and `XMLHttpRequest` transparently — original behavior fully preserved
+- Listens for `error` and `unhandledrejection`
+- Captures Performance Navigation Timing + FCP + LCP
+- Captures DOM state (title, HTML length, key element visibility)
+- Renders a visible **BB** button on the page
+
+**Cleanup**:
+- `window.__BB_UNMOUNT__()` restores all modified globals to their original references
+- Removes the BB button from DOM
+- Deletes `window.__BB_DATA__` and `window.__BB_UNMOUNT__`
+
+### Universal Mode (No BB)
+
+When `--universal` is used, collect via Playwright native events:
+
+```javascript
+page.on('console', msg => ...);
+page.on('requestfailed', req => ...);
+page.on('response', res => ...);
+page.on('pageerror', err => ...);
+```
+
+No page state is modified.
 
 ## Data Output Formats
 
-### Native BB Mode
+### Mounted BB Mode
 
 ```json
 {
-  "mode": "native-bb",
+  "mode": "mounted-bb",
+  "bbSource": "stub",
   "timestamp": "2024-01-15T10:30:00Z",
   "url": "https://example.com/page",
   "bbData": {},
-  "collected": {
-    "console": [],
-    "network": []
-  }
+  "mountedAt": 1705315800000,
+  "unmountedAt": 1705315805000
 }
 ```
 
@@ -389,7 +483,7 @@ The injected collector only exists in the Playwright browser context — no clea
       "title": "Page Title",
       "htmlLength": 2340,
       "keyElements": {
-        "#root": {"exists": true, "visible": true, "children": 5},
+        "#root": {"exists": true, "visible": true, "text": "..."},
         ".error": {"exists": false}
       }
     },
@@ -409,16 +503,26 @@ The injected collector only exists in the Playwright browser context — no clea
 
 ## Capability Comparison
 
-| Feature | Native BB Mode | Universal Mode |
-|---------|---------------|----------------|
-| Requires BB integration | Yes | No |
-| Console logs | Yes | Yes |
-| Network data | Yes | Yes |
-| DOM state | Detailed | Key elements |
-| App-specific metrics | Yes | No |
-| Screenshot | Yes | Yes |
-| Performance metrics | Yes | Yes |
-| Works on any site | No | Yes |
+| Feature | Mounted BB (stub) | Mounted BB (native) | Universal |
+|---------|-------------------|---------------------|-----------|
+| Page modification | Yes (mount/unmount) | No (already there) | No |
+| Visible BB button | Yes | If native has one | No |
+| Console logs | Yes | Yes | Yes |
+| Network data | Yes | Yes | Yes |
+| DOM state | Detailed | Detailed | Key elements |
+| App-specific metrics | No | Yes | No |
+| Screenshot | Yes | Yes | Yes |
+| Performance metrics | Yes | Yes | Yes |
+| Works offline | Yes | Yes | Yes |
+| Cleanup on exit | Yes (full restore) | N/A | N/A |
+
+## Safety & Cleanup Guarantees
+
+1. **Stub errors are firewalled** — every hook wraps its internal logic in try/catch. A bug in the stub cannot crash the page.
+2. **Original behavior preserved** — fetch/XHR wrappers return the exact same values/throw the exact same errors as the originals.
+3. **Full unmount** — `__BB_UNMOUNT__()` restores console, fetch, XHR, removes listeners, removes DOM element, and deletes globals.
+4. **Native BB untouched** — if a page already has BB, it is reused but never unmounted.
+5. **CSP fallback** — if script injection fails (CSP), automatically falls back to Universal mode.
 
 ## Integration with Build Skills
 

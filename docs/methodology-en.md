@@ -32,7 +32,7 @@ graph TB
 
     subgraph "Loop B: Implementation & Iteration"
         B1["roll init<br/>CLI Command"] --> B2["$roll-build<br/>TCR-Driven Development"]
-        B2 --> B3["$roll-.code-review<br/>Pre-commit Review"]
+        B2 --> B3["$roll-.review<br/>Pre-commit Review"]
         B3 --> B4["CI / Deploy"]
         B4 --> B5["Verification Gate<br/>Live Evidence Required"]
         B5 --> B6["$roll-.changelog<br/>Change Log"]
@@ -92,7 +92,7 @@ On first run, the CLI performs two operations:
 
 Setup never modifies any AI tool configuration files or global git settings. It is fully non-invasive and safe to re-run.
 
-**2.2.2 Configuration Sync (`roll sync [-f]`)**
+**2.2.2 Configuration Sync (rolled into `roll setup` — one command for everything)**
 
 Distributes content from `~/.roll/` to each AI client's configuration path — conventions and skills in one step.
 
@@ -229,7 +229,7 @@ my-project/
 └── docs/features/       # Story details & design documents
 ```
 
-Three files. Under 5 seconds. Then `roll sync` to distribute conventions to AI tool configs.
+Three files. Under 5 seconds. Run `roll setup` again to distribute conventions and skills to AI tool configs.
 
 **Existing project (re-merge):**
 
@@ -263,7 +263,7 @@ This is Roll's core execution unit. Its engineering significance lies in a funda
 │            PASS                                      │
 │              │                                       │
 │              ▼                                       │
-│  4. $roll-.code-review (self-review gate)             │
+│  4. $roll-.review (self-review gate)                  │
 │              │                                       │
 │              ▼                                       │
 │  5. git commit (micro-commit)                        │
@@ -498,8 +498,9 @@ Beyond the active Skills in the three loops, Roll includes a set of passively tr
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
 | `$roll-.echo` | When user input is ambiguous or contradictory | Restates intent and resolves ambiguity before proceeding, avoiding wasted compute on a misunderstood instruction |
-| `$roll-.code-review` | After each TCR micro-step completes | Multi-dimensional self-review (security, maintainability, performance, scope); a Critical finding blocks the commit |
-| `$roll-.qa-cover` | During the Test Design Review phase | Defines the test pyramid (Unit > E2E > Visual > Smoke) and enforces coverage thresholds |
+| `$roll-.clarify` | When the request needs scope boundaries (what/who/where) | Summarizes intent and asks 3–5 targeted questions before design begins |
+| `$roll-.review` | After each TCR micro-step completes | Multi-dimensional self-review (security, maintainability, performance, scope); a Critical finding blocks the commit |
+| `$roll-.qa` | During the Test Design Review phase | Defines the test pyramid (Unit > E2E > Visual > Smoke) and enforces coverage thresholds |
 | `$roll-.changelog` | After a successful deployment | Extracts completed items from BACKLOG and generates a user-readable changelog |
 
 ---
@@ -549,7 +550,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 **Validated:**
 
 - Feedback-driven continuous delivery loop (Design → Build → Check → Fix)
-- A standardized skill set of 14 Skills + 2 Tools
+- A standardized skill set of 16 Skills (11 active + 5 passive support)
 - Cross-AI-client configuration consistency management (`roll` CLI)
 - TCR micro-commits + Verification Gate quality assurance mechanism
 - Multi-Agent audit tracing via Git Hooks
@@ -557,7 +558,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 **Current Limitations:**
 
 - **Multi-Agent coordination overhead**: `$roll-build` evaluates Action dependencies to determine whether to launch parallel sub-Agents, but cross-Agent state synchronization and conflict resolution currently depend on conventions rather than enforced protocols, incurring coordination overhead in high-concurrency scenarios.
-- **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models.
+- **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models. Each Skill now pins a model in its frontmatter (`model:` — e.g. Opus for `roll-research`, Haiku for `roll-jot`) and declares a tool allowlist (`allowed-tools:`), mitigating precision drift and accidental tool misuse, though both fields still depend on the client honoring them.
 - **Patrol coverage**: `$roll-sentinel`'s sampling strategy effectively controls cost, but it does not provide the same coverage guarantee as exhaustive regression testing.
 
 ---
@@ -578,9 +579,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 
 | Command | Purpose |
 |---------|---------|
-| `roll setup` | Install ~/.roll/ + sync conventions and skills to AI tools in one step |
-| `roll sync` | Sync conventions to AI tool configs + refresh skill symlinks |
-| `roll hook install` | Opt-in: install global git hook (requires confirmation) |
-| `roll init` | Create AGENTS.md + BACKLOG.md + docs/features/ in cwd (no prompts); re-merges if AGENTS.md exists |
-| `roll reset` | Reset `~/.roll/` from the repository source, then sync |
-| `roll status` | Display current configuration state, sync status, and skill links |
+| `roll setup` | First-time install on this machine, or re-sync after editing config (use `--force` to overwrite local cache) |
+| `roll init` | Create AGENTS.md + BACKLOG.md + docs/features/ in cwd; re-merges if AGENTS.md exists |
+| `roll hook install` | Opt-in: install global git hook that tags commits with the active AI client |
+| `roll status` | Display current sync status, skill links, and detected AI tools |

@@ -20,6 +20,7 @@
 - **TS**: Strict, no `any`. Functional hooks. Early returns.
 - **Git**: No force-push main. No `--no-verify`. No secrets in git.
 - **Behavior**: No unrelated refactoring. No speculative abstractions.
+- **File ops**: Prefer targeted edits over full file rewrites. Verify file exists before modifying.
 
 ## 3. Engineering
 - **Idempotency**: Same op N times = same result.
@@ -35,6 +36,10 @@
     user (e.g., specific CLI tool, remote server, hardware platform).
 - **Workspace**: `BACKLOG.md` index. `docs/features/` for details.
 - **Done**: Push + CI passes + deployed. Local-only is not done.
+- **Commit message format**:
+  - Format: `<type>: <description>` (Git Hook may auto-prepend type prefix)
+  - Types: `Story N`, `Fix`, `Refactor`, `Docs`, `Chore`
+  - TCR micro-commits use `tcr:` prefix instead
 
 ## 5. Refactoring & Renames
 
@@ -49,3 +54,21 @@ is sufficient. Execute in order:
 6. **Shell environment** — remind user to reload or restart sessions
 
 Confirm each phase clean before proceeding to the next.
+
+## 6. Configuration & External Services
+- **Config file editing** (YAML/TOML/JSON with schema):
+  1. Find official documentation or a verified working example first
+  2. Do not guess syntax
+  3. If no docs found after 2 searches, ask user for a reference config
+  4. Maximum 2 syntax attempts before escalating to research mode
+- **External services** (npm publishing, proxy, auth-dependent deploy):
+  - Stop after 2 failed attempts and ask user for preferred fallback
+  - Do not continue iterating on auth/proxy debugging without explicit direction
+  - If OIDC/token issues persist, immediately fallback to manual with explanation
+
+## 7. Frontend Default Stack
+- React + shadcn/ui + Tailwind CSS is the default.
+- Use shadcn/ui components first. Custom components only when shadcn doesn't cover it.
+- `components/ui/` is shadcn-generated — never edit manually.
+- Tailwind utility classes only. No inline styles, no CSS modules.
+- Icons: Lucide React.

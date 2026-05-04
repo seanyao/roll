@@ -2,6 +2,7 @@
 hidden: true
 name: roll-.review
 license: MIT
+model: sonnet
 description: Self code review step in the TCR workflow. Runs after each micro-step is completed and before commit, checking code quality, security, and design issues.
 ---
 

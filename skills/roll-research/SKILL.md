@@ -1,6 +1,7 @@
 ---
 name: roll-research
 license: MIT
+model: opus
 description: |
   HV (Horizontal-Vertical) Analysis deep research skill for products, companies, concepts, technologies, or people. Dual-axis: vertical traces full lifecycle narrative from origin to present; horizontal compares against competitors at current time; cross-axis produces new insights. Output: professionally formatted PDF report.
   Trigger: "deep research", "research this", "competitive analysis", "help me understand", "what's the deal with", "deep dive", "HV analysis", or any request implying systematic research (not a simple lookup).

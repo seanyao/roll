@@ -1,6 +1,7 @@
 ---
 name: roll-spar
 license: MIT
+model: sonnet
 description: Adversarial TDD mode with Attacker/Defender agents. Attacker writes tests to break the system, Defender writes minimal code to pass. Use for high-risk logic like auth, payments, data integrity, or complex state machines.
 ---
 

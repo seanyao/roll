@@ -1,6 +1,7 @@
 ---
 name: roll-notes
 license: MIT
+model: haiku
 description: "Project diary skill. Records development moments — successes, failures, discoveries — appended chronologically to a daily notes file."
 ---
 

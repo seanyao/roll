@@ -1,6 +1,7 @@
 ---
 name: roll-doctor
 license: MIT
+model: haiku
 description: "Diagnose Roll toolchain health. Checks skill files, YAML frontmatter, symlinks, conventions sync, template integrity, and config validity."
 ---
 

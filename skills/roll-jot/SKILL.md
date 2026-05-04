@@ -1,6 +1,7 @@
 ---
 name: roll-jot
 license: MIT
+model: haiku
 description: "Fast backlog capture. Analyzes a short description, classifies it as bug or idea, and appends it to BACKLOG.md with an auto-incremented ID."
 ---
 

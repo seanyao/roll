@@ -4,10 +4,9 @@
 
 ## Stack
 
-- Node.js / TypeScript
-- CLI framework: commander or citty
-- Testing: Vitest + execa (CLI integration tests)
-- Distribution: npm package with bin entry
+- Runtime / Language: {e.g. Node.js / TypeScript, Go, Python, Bash}
+- Test framework: {e.g. Vitest, pytest, bats}
+- Distribution: {e.g. npm, Homebrew, binary release}
 
 ## Claude Code Notes
 
@@ -15,4 +14,3 @@
 - Test commands by running them in Bash, not just unit tests.
 - Use `$roll-design` to plan command structure and options before implementation.
 - Verify `--help` output is clear and complete for each command.
-- Run `npm run build && node dist/index.js --help` before pushing.

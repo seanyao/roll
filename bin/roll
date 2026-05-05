@@ -572,15 +572,35 @@ _merge_global_to_project() {
 
   [[ -f "$src" ]] || { warn "Global AGENTS.md not found at ${src/#$HOME/~}"; return; }
 
+  # Detect project type — controls which sections are included
+  local project_type skip_frontend=false
+  project_type="$(scan_project_type_from_files "$project_dir")"
+  case "$project_type" in
+    cli|backend-service|unknown) skip_frontend=true ;;
+  esac
+
   if [[ ! -f "$dst" ]]; then
-    cp "$src" "$dst"
+    # Fresh create: write sections filtered by project type
+    local fc_h="" fc_b="" fc_pre=true fc_want=true
+    while IFS= read -r fc_line; do
+      if [[ "$fc_line" =~ ^##\  ]]; then
+        if [[ -n "$fc_h" && "$fc_want" == "true" ]]; then
+          printf '%s\n%s' "$fc_h" "$fc_b" >> "$dst"
+        fi
+        fc_h="$fc_line"; fc_b=""; fc_pre=false
+        fc_want=true
+        [[ "$skip_frontend" == "true" && "$fc_h" == "## 7. Frontend Default Stack" ]] && fc_want=false
+      elif [[ "$fc_pre" == "true" ]]; then
+        printf '%s\n' "$fc_line" >> "$dst"
+      else
+        fc_b+="$fc_line"$'\n'
+      fi
+    done < "$src"
+    if [[ -n "$fc_h" && "$fc_want" == "true" ]]; then
+      printf '%s\n%s' "$fc_h" "$fc_b" >> "$dst"
+    fi
     ok "Created: AGENTS.md"
     _ROLL_MERGE_SUMMARY+=("created|AGENTS.md")
-    return
-  fi
-
-  if diff -q "$src" "$dst" &>/dev/null; then
-    _ROLL_MERGE_SUMMARY+=("unchanged|AGENTS.md")
     return
   fi
 
@@ -589,8 +609,12 @@ _merge_global_to_project() {
   while IFS= read -r line; do
     if [[ "$line" =~ ^##\  ]]; then
       if [[ -n "$cur_h" ]] && ! grep -qF "$cur_h" "$dst" 2>/dev/null; then
-        printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$dst"
-        added=$((added + 1))
+        local skip_sec=false
+        [[ "$skip_frontend" == "true" && "$cur_h" == "## 7. Frontend Default Stack" ]] && skip_sec=true
+        if [[ "$skip_sec" == "false" ]]; then
+          printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$dst"
+          added=$((added + 1))
+        fi
       fi
       cur_h="$line"; cur_b=""
     elif [[ -n "$cur_h" ]]; then
@@ -598,8 +622,12 @@ _merge_global_to_project() {
     fi
   done < "$src"
   if [[ -n "$cur_h" ]] && ! grep -qF "$cur_h" "$dst" 2>/dev/null; then
-    printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$dst"
-    added=$((added + 1))
+    local skip_sec=false
+    [[ "$skip_frontend" == "true" && "$cur_h" == "## 7. Frontend Default Stack" ]] && skip_sec=true
+    if [[ "$skip_sec" == "false" ]]; then
+      printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$dst"
+      added=$((added + 1))
+    fi
   fi
 
   if [[ $added -gt 0 ]]; then
@@ -607,6 +635,52 @@ _merge_global_to_project() {
     _ROLL_MERGE_SUMMARY+=("merged|AGENTS.md")
   else
     _ROLL_MERGE_SUMMARY+=("unchanged|AGENTS.md")
+  fi
+}
+
+_merge_claude_to_project() {
+  local project_dir="$1"
+  local project_type
+  project_type="$(scan_project_type_from_files "$project_dir")"
+
+  local tpl_file="$ROLL_TEMPLATES/$project_type/CLAUDE.md"
+  [[ -f "$tpl_file" ]] || return 0  # No template for this project type
+
+  local claude_dir="$project_dir/.claude"
+  local out_file="$claude_dir/CLAUDE.md"
+
+  mkdir -p "$claude_dir"
+
+  if [[ ! -f "$out_file" ]]; then
+    cp "$tpl_file" "$out_file"
+    ok "Created: .claude/CLAUDE.md"
+    _ROLL_MERGE_SUMMARY+=("created|.claude/CLAUDE.md")
+    return
+  fi
+
+  # Append any ## sections from template missing in project file
+  local added=0 cur_h="" cur_b=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^##\  ]]; then
+      if [[ -n "$cur_h" ]] && ! grep -qF "$cur_h" "$out_file" 2>/dev/null; then
+        printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$out_file"
+        added=$((added + 1))
+      fi
+      cur_h="$line"; cur_b=""
+    elif [[ -n "$cur_h" ]]; then
+      cur_b+="$line"$'\n'
+    fi
+  done < "$tpl_file"
+  if [[ -n "$cur_h" ]] && ! grep -qF "$cur_h" "$out_file" 2>/dev/null; then
+    printf '\n%s\n%s' "$cur_h" "$cur_b" >> "$out_file"
+    added=$((added + 1))
+  fi
+
+  if [[ $added -gt 0 ]]; then
+    ok "Merged: .claude/CLAUDE.md ($added new sections)"
+    _ROLL_MERGE_SUMMARY+=("merged|.claude/CLAUDE.md")
+  else
+    _ROLL_MERGE_SUMMARY+=("unchanged|.claude/CLAUDE.md")
   fi
 }
 
@@ -633,6 +707,7 @@ cmd_init() {
   fi
 
   _merge_global_to_project "$project_dir"
+  _merge_claude_to_project "$project_dir"
   _write_backlog "$project_dir/BACKLOG.md"
   _ensure_features_dir "$project_dir/docs/features"
   print_merge_summary

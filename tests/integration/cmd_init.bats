@@ -85,6 +85,47 @@ roll_init() {
   [[ "$output" == *"Initialized"* ]]
 }
 
+# ─── Project-type-aware AGENTS.md merge ──────────────────────────────────────
+
+@test "init: skips Frontend Default Stack for cli project" {
+  mkdir -p "${PROJECT_DIR}/bin"
+  run roll_init
+  [ "$status" -eq 0 ]
+  run grep -q "## 7. Frontend Default Stack" "${PROJECT_DIR}/AGENTS.md"
+  [ "$status" -ne 0 ]
+}
+
+@test "init: includes Frontend Default Stack for frontend project" {
+  mkdir -p "${PROJECT_DIR}/src"
+  run roll_init
+  [ "$status" -eq 0 ]
+  grep -q "## 7. Frontend Default Stack" "${PROJECT_DIR}/AGENTS.md"
+}
+
+# ─── .claude/CLAUDE.md merge ─────────────────────────────────────────────────
+
+@test "init: creates .claude/CLAUDE.md for cli project" {
+  mkdir -p "${PROJECT_DIR}/bin"
+  run roll_init
+  [ "$status" -eq 0 ]
+  [ -f "${PROJECT_DIR}/.claude/CLAUDE.md" ]
+}
+
+@test "init: .claude/CLAUDE.md creation is idempotent" {
+  mkdir -p "${PROJECT_DIR}/bin"
+  run roll_init
+  [ "$status" -eq 0 ]
+  run roll_init
+  [ "$status" -eq 0 ]
+  [ -f "${PROJECT_DIR}/.claude/CLAUDE.md" ]
+}
+
+@test "init: skips .claude/CLAUDE.md for unknown project type" {
+  run roll_init
+  [ "$status" -eq 0 ]
+  [ ! -f "${PROJECT_DIR}/.claude/CLAUDE.md" ]
+}
+
 # ─── Error path ────────────────────────────────────────────────────────────────
 
 @test "init: exits non-zero when templates not found (setup not run)" {

@@ -3,6 +3,7 @@
 > Baseline for AI-agent-friendly projects. Extend with project-specific rules.
 
 ## 1. Communication
+- Always respond in Chinese (Simplified) unless the user writes in another language.
 - User's language. Code/Git/Comments: English. UI: Chinese.
 - Concise. No summaries/code-walking. Implementation invisible.
 - Strategy (Why) OK; Tactics (How) NO. Outcomes only.

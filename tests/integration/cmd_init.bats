@@ -126,6 +126,52 @@ roll_init() {
   [ ! -f "${PROJECT_DIR}/.claude/CLAUDE.md" ]
 }
 
+# ─── opencode sync ────────────────────────────────────────────────────────────
+
+@test "init: syncs AGENTS.md to opencode dir when binary exists" {
+  mkdir -p "${TEST_TMP}/.opencode/bin"
+  touch "${TEST_TMP}/.opencode/bin/opencode"
+  chmod +x "${TEST_TMP}/.opencode/bin/opencode"
+
+  run roll_init
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/.config/opencode/roll.md" ]
+}
+
+@test "init: appends @roll.md to opencode AGENTS.md when binary exists" {
+  mkdir -p "${TEST_TMP}/.opencode/bin"
+  touch "${TEST_TMP}/.opencode/bin/opencode"
+  chmod +x "${TEST_TMP}/.opencode/bin/opencode"
+
+  run roll_init
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/.config/opencode/AGENTS.md" ]
+  grep -qF "@roll.md" "${TEST_TMP}/.config/opencode/AGENTS.md"
+}
+
+@test "init: opencode sync is idempotent" {
+  mkdir -p "${TEST_TMP}/.opencode/bin"
+  touch "${TEST_TMP}/.opencode/bin/opencode"
+  chmod +x "${TEST_TMP}/.opencode/bin/opencode"
+
+  run roll_init
+  [ "$status" -eq 0 ]
+  run roll_init
+  [ "$status" -eq 0 ]
+  local count
+  count=$(grep -cF "@roll.md" "${TEST_TMP}/.config/opencode/AGENTS.md")
+  [ "$count" -eq 1 ]
+}
+
+@test "init: does not create opencode dir when opencode is not installed" {
+  if command -v opencode &>/dev/null; then
+    skip "opencode is installed on this system"
+  fi
+  run roll_init
+  [ "$status" -eq 0 ]
+  [ ! -f "${TEST_TMP}/.config/opencode/roll.md" ]
+}
+
 # ─── Error path ────────────────────────────────────────────────────────────────
 
 @test "init: exits non-zero when templates not found (setup not run)" {

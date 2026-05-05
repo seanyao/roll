@@ -1,11 +1,5 @@
 # Project Backlog
 
-## Epic: Demo
-### Feature: hello-world
-| Story | Description | Status |
-|-------|-------------|--------|
-| [US-HELLO-001](docs/features/hello-world.md#us-hello-001) | Hello World demo story to verify roll-design workflow | 📋 Todo |
-
 ## Epic: CLI Simplification
 ### Feature: cli-simplification
 | Story | Description | Status |
@@ -41,13 +35,13 @@
 ### Feature: roll-debug
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-DEBUG-001](docs/features/roll-debug.md#us-debug-001) | Add BB Injection mode — mount BB on pages without native integration | 📋 Todo |
+| [US-DEBUG-001](docs/features/roll-debug.md#us-debug-001) | Add BB Injection mode — mount BB on pages without native integration | ✅ Done |
 
 ## Epic: Release Management
 ### Feature: roll-release
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-REL-001](docs/features/roll-release.md#us-rel-001) | Add roll-release skill — one-command publish flow | 📋 Todo |
+| [US-REL-001](docs/features/roll-release.md#us-rel-001) | Add roll-release skill — one-command publish flow | ✅ Done |
 
 ## 🐛 Bug Fixes
 | ID | Description | Status |
@@ -60,4 +54,3 @@
 | ID | Description | Status |
 |----|-------------|--------|
 | IDEA-001 | conventions/global/AGENTS.md 加 Identity 规则：从 git config 读取，禁止硬编码个人数据 | ✅ Done |
-| IDEA-002 | 实测验证 `model:` / `allowed-tools:` SKILL.md frontmatter 字段在各 AI 客户端（Claude Code/Cursor/Codex）是否被识别和生效 | 📋 Todo |

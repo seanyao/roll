@@ -64,28 +64,6 @@ lower_name() {
   echo "$1" | tr '[:upper:]' '[:lower:]'
 }
 
-# Detect AI client by walking the process tree (innermost match wins).
-# Returns empty string if no known AI client is found.
-_detect_ai_client() {
-  local pid=$$ depth=0 cmd
-  while [[ "$pid" -gt 1 ]] && [[ "$depth" -lt 15 ]]; do
-    cmd=$(ps -p "$pid" -o comm= 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
-    case "$cmd" in
-      *opencode*) echo "opencode"; return ;;
-      *claude*)   echo "claude code"; return ;;
-      *kimi*)     echo "kimi cli"; return ;;
-      *gemini*)   echo "gemini cli"; return ;;
-      *codex*)    echo "codex"; return ;;
-      *cursor*)   echo "cursor"; return ;;
-    esac
-    local ppid
-    ppid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ' || true)
-    [[ "$ppid" == "$pid" ]] && break
-    pid=$ppid
-    depth=$((depth + 1))
-  done
-  echo ""
-}
 
 # Check if an AI tool is actually installed.
 # Most tools create their own config dir; Trae on macOS uses Library/Application Support

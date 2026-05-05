@@ -30,6 +30,10 @@
 - **Testing**: Unit >80%. E2E for flows. No DB mocks.
 
 ## 4. Workflow
+- **Scope Gate**: Only implement what is explicitly listed in the AC. Nothing more.
+  - Requests made in conversation are NOT AC — capture with `roll-jot` first.
+  - Any new Story/Fix requires design doc + user confirmation before TCR starts.
+  - Do not commit without user approval unless explicitly told to auto-commit.
 - **TCR**: Test -> Green = Commit / Red = Revert. No WIP commits.
   - Before implementing: confirm exact files, test strategy, and commit message
     draft with user. Do not write code until approved.

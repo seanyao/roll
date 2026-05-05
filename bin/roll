@@ -753,49 +753,6 @@ cmd_init() {
   fi
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: commit
-# Run git commit with auto-detected Co-authored-by trailers for AI attribution.
-# Usage: roll commit -m "msg" [--client <name>] [--model <name>]
-# ═══════════════════════════════════════════════════════════════════════════════
-cmd_commit() {
-  local msg="" client="" model=""
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      -m|--message) msg="$2"; shift 2 ;;
-      --client)     client="$2"; shift 2 ;;
-      --model)      model="$2"; shift 2 ;;
-      *) err "Unknown argument: $1  未知参数: $1"; exit 1 ;;
-    esac
-  done
-
-  [[ -z "$msg" ]] && { err "Message required (-m).  需要提交信息 (-m)。"; exit 1; }
-
-  # Detect client: CLI arg > env var > process tree
-  [[ -z "$client" ]] && client="${ROLL_AI_CLIENT:-}"
-  [[ -z "$client" ]] && client="$(_detect_ai_client)"
-
-  # Detect model: CLI arg > env var > fallback
-  [[ -z "$model" ]] && model="${ROLL_AI_MODEL:-}"
-  [[ -z "$model" ]] && model="unknown"
-
-  # Build Co-authored-by trailers
-  local trailers=""
-  if [[ -n "$client" ]]; then
-    trailers+="Co-authored-by: $client <$client@ai>"$'\n'
-  fi
-  trailers+="Co-authored-by: $model <$model@ai>"
-
-  local full_msg="$msg"$'\n\n'"$trailers"
-
-  info "Committing: $msg  提交: $msg"
-  [[ -n "$client" ]] && info "Client: $client"
-  info "Model: $model"
-  echo ""
-
-  git commit --no-verify -m "$full_msg"
-}
 
 # ─── Helper: merge global preamble + template into output ────────────────────
 merge_convention() {
@@ -1354,7 +1311,6 @@ usage() {
   echo "  setup [-f]             [Machine] First-time install or re-sync             首次安装或重新同步"
   echo "  update                 [Upgrade] npm install latest + re-sync             一键升级到最新版"
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
-  echo "  commit -m <msg>        [Git]    Commit with AI Co-authored-by trailers     提交并添加 AI 署名"
   echo "  hook [install|remove]  [Optional] Manage global git hook                  管理全局 git hook"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
   echo ""
@@ -1373,7 +1329,6 @@ main() {
     setup)         cmd_setup "$@" ;;
     update)        cmd_update "$@" ;;
     init)          cmd_init "$@" ;;
-    commit)        cmd_commit "$@" ;;
     hook)          cmd_hook "$@" ;;
     status)        cmd_status "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;

@@ -30,31 +30,6 @@
 - Depends on: —
 - Depended on by: —
 
-<a id="us-opencode-002"></a>
-## US-OPENCODE-002 Add `roll commit` — auto Co-authored-by trailer for AI commits ✅
-
-**Created**: 2026-05-06
-**Completed**: 2026-05-06
-
-- As an AI coding agent making git commits
-- I want `roll commit` to auto-append `Co-authored-by: <client> <...>` and `Co-authored-by: <model> <...>` trailers
-- So that every commit preserves attribution without manual effort
-
-**AC:**
-- [x] `roll commit -m "msg"` runs `git commit` and appends `Co-authored-by:` trailers
-- [x] Client detection: CLI `--client` arg > `ROLL_AI_CLIENT` env var > process tree detection
-- [x] Model detection: CLI `--model` arg > `ROLL_AI_MODEL` env var > fallback "unknown"
-- [x] Trailer format: `Co-authored-by: <client> <<client>@ai>` and `Co-authored-by: <model> <<model>@ai>`
-- [x] No `[client name]` prefix in commit message (replaced by Co-authored-by)
-- [x] `npm test` passes
-
-**Files:**
-- `bin/roll`
-- `tests/unit/cmd_commit.bats`
-
-**Dependencies:**
-- Depends on: —
-- Depended on by: —
 
 **Notes:**
 - opencode 全局指令文件路径：`~/.config/opencode/AGENTS.md`

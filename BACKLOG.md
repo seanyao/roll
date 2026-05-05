@@ -35,7 +35,6 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-OPENCODE-001](docs/features/opencode-support.md#us-opencode-001) | bin/roll integration — detect opencode, sync global AGENTS.md | ✅ Done |
-| [US-OPENCODE-002](docs/features/opencode-support.md#us-opencode-002) | Add `roll commit` — auto Co-authored-by trailer for AI commits | ✅ Done |
 
 ## Epic: Diagnostics
 ### Feature: roll-debug

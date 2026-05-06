@@ -1,27 +1,30 @@
 #!/bin/sh
-# Dynamically prefix commit messages with the AI client that made the commit.
+# Append Co-Authored-By trailer to commits made by AI coding agents.
 # Detection order: process tree (innermost wins) → env vars → git config fallback
 
 COMMIT_MSG_FILE=$1
-FIRST_LINE=$(head -1 "$COMMIT_MSG_FILE")
+COMMIT_SOURCE=${2:-}
 
-# Skip merge commits and commits that already have a bracket prefix
-echo "$FIRST_LINE" | grep -qE "^Merge|^\[" && exit 0
+# Skip merge and squash commits
+case "$COMMIT_SOURCE" in
+  merge|squash) exit 0 ;;
+esac
+
+head -1 "$COMMIT_MSG_FILE" | grep -qE "^Merge " && exit 0
 
 # ─── Detect AI client ────────────────────────────────────────────────────────
 detect_ai_client() {
-  # 1. Walk the process tree — innermost matching process wins.
-  #    This correctly handles "Claude Code running inside Kimi shell" etc.
   pid=$$
   depth=0
   while [ "$pid" -gt 1 ] && [ "$depth" -lt 15 ]; do
     cmd=$(ps -p "$pid" -o comm= 2>/dev/null | tr '[:upper:]' '[:lower:]')
     case "$cmd" in
-      *claude*) echo "claude code"; return ;;
-      *kimi*)   echo "kimi cli";    return ;;
-      *gemini*) echo "gemini cli";  return ;;
-      *codex*)  echo "codex";       return ;;
-      *cursor*) echo "cursor";      return ;;
+      *claude*)   echo "claude";   return ;;
+      *kimi*)     echo "kimi";     return ;;
+      *gemini*)   echo "gemini";   return ;;
+      *codex*)    echo "codex";    return ;;
+      *cursor*)   echo "cursor";   return ;;
+      *deepseek*) echo "deepseek"; return ;;
     esac
     ppid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
     [ "$ppid" = "$pid" ] && break
@@ -29,23 +32,40 @@ detect_ai_client() {
     depth=$((depth + 1))
   done
 
-  # 2. Env var fallback (check most specific first)
-  [ -n "$CLAUDECODE" ]       && echo "claude code" && return
-  [ -n "$KIMI_CLI" ]         && echo "kimi cli"    && return
-  [ -n "$GEMINI_CLI_TOOL" ]  && echo "gemini cli"  && return
-  [ -n "$CODEX_CLI" ]        && echo "codex"       && return
-  [ -n "$CURSOR_TRACE" ]     && echo "cursor"      && return
+  [ -n "$CLAUDECODE" ]       && echo "claude"   && return
+  [ -n "$KIMI_CLI" ]         && echo "kimi"     && return
+  [ -n "$GEMINI_CLI_TOOL" ]  && echo "gemini"   && return
+  [ -n "$CODEX_CLI" ]        && echo "codex"    && return
+  [ -n "$CURSOR_TRACE" ]     && echo "cursor"   && return
+  [ -n "$DEEPSEEK_CLI" ]     && echo "deepseek" && return
 
-  # 3. Per-repo or global git config: git config commit.aiClient "my tool"
   git config --get commit.aiClient 2>/dev/null && return
-
-  # 4. Not an AI commit — no prefix
   echo ""
 }
 
-CLIENT=$(detect_ai_client)
+# ─── Map client → Co-Authored-By trailer ─────────────────────────────────────
+# Override model version via: git config --global commit.aiModel "Claude Opus 4.7"
+client_coauthor() {
+  local model
+  model=$(git config --get commit.aiModel 2>/dev/null)
+  case "$1" in
+    claude)   echo "Co-Authored-By: ${model:-Claude Sonnet 4.6} <noreply@anthropic.com>" ;;
+    kimi)     echo "Co-Authored-By: ${model:-Moonshot Kimi 2.6} <noreply@moonshot.ai>" ;;
+    gemini)   echo "Co-Authored-By: ${model:-Google Gemini 3.0} <noreply@google.com>" ;;
+    codex)    echo "Co-Authored-By: ${model:-OpenAI Codex 5.4} <noreply@openai.com>" ;;
+    cursor)   echo "Co-Authored-By: ${model:-Cursor Agent} <noreply@cursor.com>" ;;
+    deepseek) echo "Co-Authored-By: ${model:-Deepseek V4 Flash} <noreply@deepseek.com>" ;;
+    *)        echo "" ;;
+  esac
+}
 
+CLIENT=$(detect_ai_client)
 [ -z "$CLIENT" ] && exit 0
 
-printf '[%s] %s\n%s' "$CLIENT" "$FIRST_LINE" "$(tail -n +2 "$COMMIT_MSG_FILE")" > "$COMMIT_MSG_FILE.tmp"
-mv "$COMMIT_MSG_FILE.tmp" "$COMMIT_MSG_FILE"
+TRAILER=$(client_coauthor "$CLIENT")
+[ -z "$TRAILER" ] && exit 0
+
+# Idempotent: skip if trailer already present (e.g. on --amend)
+grep -qF "$TRAILER" "$COMMIT_MSG_FILE" && exit 0
+
+git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"

@@ -537,7 +537,7 @@ cmd_setup() {
   hooks_path=$(git config --global core.hooksPath 2>/dev/null || true)
   if [[ -t 0 ]] && { [[ ! -f "$hook_dst" ]] || [[ "$hooks_path" != "$HOME/.config/git/hooks" ]]; }; then
     echo ""
-    echo -n "  Install global git hook (tags commits with AI client)? [y/N] "
+    echo -n "  Install global git hook (adds Co-Authored-By trailer on AI commits)? [y/N] "
     read -r _hook_ans
     if [[ "${_hook_ans:-N}" =~ ^[Yy]$ ]]; then
       cmd_hook install
@@ -1096,7 +1096,7 @@ cmd_hook() {
       cp "$hook_src" "$hook_dst"
       chmod +x "$hook_dst"
       git config --global core.hooksPath "$hooks_dir"
-      ok "Global git hook installed (AI client auto-detected on every commit)  全局 git hook 已安装（每次提交自动检测 AI 客户端）"
+      ok "Global git hook installed (Co-Authored-By trailer added on AI commits)  全局 git hook 已安装（AI 提交自动附加 Co-Authored-By）"
       ;;
     remove)
       git config --global --unset core.hooksPath 2>/dev/null && \
@@ -1223,7 +1223,7 @@ cmd_status() {
   local hooks_path
   hooks_path=$(git config --global core.hooksPath 2>/dev/null || true)
   if [[ -f "$hook_dst" ]] && [[ "$hooks_path" == "$HOME/.config/git/hooks" ]]; then
-    echo -e "  ${GREEN}+${NC} prepare-commit-msg (global, AI client auto-detect / 全局，自动检测 AI 客户端)"
+    echo -e "  ${GREEN}+${NC} prepare-commit-msg (global, Co-Authored-By trailer / 全局，自动附加 Co-Authored-By)"
   elif [[ -f "$hook_dst" ]]; then
     echo -e "  ${YELLOW}~${NC} prepare-commit-msg exists but core.hooksPath not set  prepare-commit-msg 已存在，但 core.hooksPath 未设置"
     echo -e "      run: roll hook install  运行: roll hook install"

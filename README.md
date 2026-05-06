@@ -66,7 +66,7 @@ Unified behavioral conventions for Claude Code / Gemini CLI / Cursor / Codex —
 | `roll setup` | First-time install on this machine, or re-sync after editing `~/.roll/config.yaml` (use `--force` to overwrite local cache) |
 | `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via `roll setup` |
 | `roll init` | New project: create `AGENTS.md` + `BACKLOG.md` + `docs/features/` |
-| `roll hook install` | Optional: global git hook that tags commits with the active AI client |
+
 | `roll status` | Show sync state, skill links, and detected AI tools |
 
 ### Typical Flow
@@ -83,8 +83,7 @@ roll init
 # 3. Upgrade to a new release
 roll update
 
-# 4. Optional: tag commits with AI client name
-roll hook install
+
 ```
 
 ### How Convention Layering Works

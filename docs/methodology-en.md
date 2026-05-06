@@ -109,10 +109,6 @@ Append `--force` (or `-f`) to force-rewrite `roll.md` or rebuild symlinks.
 └── .cursor-rules    → (project-level distribution)
 ```
 
-**Git Hook (optional — `roll hook install`)**
-
-Installs a global `prepare-commit-msg` hook that automatically detects which AI client authored the current commit and stamps it (e.g., `[claude code]`, `[gemini cli]`), enabling audit tracing in multi-agent workflows. This is an opt-in operation that modifies global git configuration — it shows the current state and requires explicit confirmation before proceeding.
-
 **2.2.3 Project-Level Configuration (`roll init`)**
 
 `roll init` creates three workflow files in the current directory — instantly, with no prompts:
@@ -393,7 +389,7 @@ Automatic trigger signals: when a Story touches authentication/authorization, pa
 After each successful deployment, two mechanisms ensure deliverables remain traceable:
 
 - **`$roll-.changelog`**: Automatically extracts completed Stories from BACKLOG.md, filters out internal technical details, and generates a user-facing changelog.
-- **Git Hook (AI source tagging)**: The global `prepare-commit-msg` hook auto-detects the active AI client (via environment variables `CLAUDE_CODE`, `GEMINI_CLI`, `KIMI_CODE`, etc.) and injects a source tag into the commit message (e.g., `[claude code]`, `[gemini cli]`). In multi-Agent workflows, `git log` shows the actual executor of every commit at a glance.
+- **`Co-Authored-By` trailer (AI source tagging)**: AI tools (Claude Code, Codex, Cursor, etc.) natively append a `Co-Authored-By: <Model> <email>` trailer on commit. In multi-Agent workflows, `git log` shows the actual executor of every commit at a glance.
 
 ---
 
@@ -553,7 +549,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 - A standardized skill set of 16 Skills (11 active + 5 passive support)
 - Cross-AI-client configuration consistency management (`roll` CLI)
 - TCR micro-commits + Verification Gate quality assurance mechanism
-- Multi-Agent audit tracing via Git Hooks
+- Multi-Agent audit tracing via `Co-Authored-By` trailers (written natively by each AI tool)
 
 **Current Limitations:**
 
@@ -582,5 +578,5 @@ The key distinction lies in the shift of execution subject: these methodologies 
 | `roll setup` | First-time install on this machine, or re-sync after editing config (use `--force` to overwrite local cache) |
 | `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via setup |
 | `roll init` | Create AGENTS.md + BACKLOG.md + docs/features/ in cwd; re-merges if AGENTS.md exists |
-| `roll hook install` | Opt-in: install global git hook that tags commits with the active AI client |
+
 | `roll status` | Display current sync status, skill links, and detected AI tools |

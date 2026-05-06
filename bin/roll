@@ -531,19 +531,6 @@ cmd_setup() {
   echo ""
   ok "Setup complete.  初始化完成。"
 
-  # Offer git hook install if not already installed (interactive terminals only)
-  local hook_dst="$HOME/.config/git/hooks/prepare-commit-msg"
-  local hooks_path
-  hooks_path=$(git config --global core.hooksPath 2>/dev/null || true)
-  if [[ -t 0 ]] && { [[ ! -f "$hook_dst" ]] || [[ "$hooks_path" != "$HOME/.config/git/hooks" ]]; }; then
-    echo ""
-    echo -n "  Install global git hook (adds Co-Authored-By trailer on AI commits)? [y/N] "
-    read -r _hook_ans
-    if [[ "${_hook_ans:-N}" =~ ^[Yy]$ ]]; then
-      cmd_hook install
-    fi
-  fi
-
   echo ""
   info "Next: run ${BOLD}roll init${NC} inside a project to initialize it.  下一步：在项目目录运行 roll init"
 }
@@ -1056,61 +1043,6 @@ detect_project_type() {
   fi
 }
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: hooks <subcommand>
-# Manage the global git hook (opt-in — modifies git global config)
-# ═══════════════════════════════════════════════════════════════════════════════
-cmd_hook() {
-  local subcmd="${1:-install}"
-
-  case "$subcmd" in
-    install)
-      local hooks_dir="$HOME/.config/git/hooks"
-      local hook_src="$ROLL_PKG_DIR/hooks/prepare-commit-msg"
-      local hook_dst="$hooks_dir/prepare-commit-msg"
-
-      if [[ ! -f "$hook_src" ]]; then
-        err "Hook source not found: $hook_src  Hook 源文件未找到: $hook_src"
-        exit 1
-      fi
-
-      local current_hooks_path
-      current_hooks_path=$(git config --global core.hooksPath 2>/dev/null || echo "(not set)")
-
-      echo ""
-      warn "This will modify your global git configuration:  此操作将修改您的全局 git 配置："
-      echo "  git config --global core.hooksPath $hooks_dir"
-      echo ""
-      echo "  Current value: $current_hooks_path  当前值: $current_hooks_path"
-      echo ""
-      if [[ "$current_hooks_path" != "(not set)" ]] && [[ "$current_hooks_path" != "$hooks_dir" ]]; then
-        warn "WARNING: Hooks at '$current_hooks_path' will stop running after this change.  警告：此更改后 '$current_hooks_path' 处的 hooks 将不再运行。"
-        echo ""
-      fi
-      echo -n "  Proceed? [y/N] "
-      read -r answer
-      [[ "$answer" =~ ^[Yy]$ ]] || { info "Aborted.  已取消。"; return; }
-
-      mkdir -p "$hooks_dir"
-      cp "$hook_src" "$hook_dst"
-      chmod +x "$hook_dst"
-      git config --global core.hooksPath "$hooks_dir"
-      ok "Global git hook installed (Co-Authored-By trailer added on AI commits)  全局 git hook 已安装（AI 提交自动附加 Co-Authored-By）"
-      ;;
-    remove)
-      git config --global --unset core.hooksPath 2>/dev/null && \
-        ok "Removed core.hooksPath from global git config  已从全局 git 配置中移除 core.hooksPath" || \
-        info "core.hooksPath was not set  core.hooksPath 未设置"
-      ;;
-    *)
-      err "Unknown hooks subcommand: $subcmd  未知 hooks 子命令: $subcmd"
-      echo "Usage: roll hook [install|remove]  用法: roll hook [install|remove]"
-      exit 1
-      ;;
-  esac
-}
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: status
 # Show current state of conventions
@@ -1218,20 +1150,6 @@ cmd_status() {
   fi
 
   echo ""
-  echo -e "${BOLD}Git hook:  Git Hook${NC}"
-  local hook_dst="$HOME/.config/git/hooks/prepare-commit-msg"
-  local hooks_path
-  hooks_path=$(git config --global core.hooksPath 2>/dev/null || true)
-  if [[ -f "$hook_dst" ]] && [[ "$hooks_path" == "$HOME/.config/git/hooks" ]]; then
-    echo -e "  ${GREEN}+${NC} prepare-commit-msg (global, Co-Authored-By trailer / 全局，自动附加 Co-Authored-By)"
-  elif [[ -f "$hook_dst" ]]; then
-    echo -e "  ${YELLOW}~${NC} prepare-commit-msg exists but core.hooksPath not set  prepare-commit-msg 已存在，但 core.hooksPath 未设置"
-    echo -e "      run: roll hook install  运行: roll hook install"
-  else
-    echo -e "  ${RED}-${NC} not installed (optional) — run 'roll hook install'  未安装（可选）— 运行 'roll hook install'"
-  fi
-
-  echo ""
   echo -e "${BOLD}Templates:  模板${NC}"
   for tpl in fullstack frontend-only backend-service cli; do
     if [[ -d "$ROLL_TEMPLATES/$tpl" ]]; then
@@ -1289,14 +1207,13 @@ usage() {
   echo "  setup [-f]             [Machine] First-time install or re-sync             首次安装或重新同步"
   echo "  update                 [Upgrade] npm install latest + re-sync             一键升级到最新版"
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
-  echo "  hook [install|remove]  [Optional] Manage global git hook                  管理全局 git hook"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
   echo ""
   echo "Examples / 示例:"
   echo "  roll setup                    # New machine: first-time install            新机器首次安装"
   echo "  roll update                   # Upgrade to latest version + re-sync         升级到最新版并重新同步"
   echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
-  echo "  roll hook install             # Optional: tag commits with AI client       可选：提交时标记 AI 工具"
+
 }
 
 main() {
@@ -1307,7 +1224,6 @@ main() {
     setup)         cmd_setup "$@" ;;
     update)        cmd_update "$@" ;;
     init)          cmd_init "$@" ;;
-    hook)          cmd_hook "$@" ;;
     status)        cmd_status "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h|"") usage ;;

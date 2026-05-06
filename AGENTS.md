@@ -51,7 +51,7 @@
 - **Workspace**: `BACKLOG.md` index. `docs/features/` for details.
 - **Done**: Push + CI passes + deployed. Local-only is not done.
 - **Commit message format**:
-  - Format: `<type>: <description>` (Git Hook may auto-prepend type prefix)
+  - Format: `<type>: <description>`
   - Types: `Story N`, `Fix`, `Refactor`, `Docs`, `Chore`
   - TCR micro-commits use `tcr:` prefix instead
 

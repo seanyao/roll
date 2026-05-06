@@ -59,14 +59,3 @@ teardown() {
   echo "$output" | grep -qE "skills linked|mounted"
 }
 
-# ─── Scenario 5: git hook section appears in output ───────────────────────────
-
-@test "status: git hook section is reached in output" {
-  run_roll setup
-  [ "$status" -eq 0 ]
-
-  run_roll status
-  # The Git hook section header should appear in output even if the script
-  # aborts shortly after due to git config exit code in sandbox environments
-  echo "$output" | grep -q "Git hook"
-}

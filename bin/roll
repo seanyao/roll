@@ -49,13 +49,19 @@ canonical_dir() {
 }
 
 # Return a human-readable name for an AI tool dir.
-# Handles nested paths like ~/.openclaw/workspace → "openclaw".
+# Handles nested paths like ~/.openclaw/workspace → "openclaw", ~/.pi/agent → "pi".
 ai_tool_name() {
   local dir="$1"
   local bn
   bn="$(basename "$dir" | sed 's/^\.//')"
   if [[ "$bn" == "workspace" ]]; then
     bn="$(basename "$(dirname "$dir")" | sed 's/^\.//')"
+  elif [[ "$bn" == "agent" ]]; then
+    local parent
+    parent="$(basename "$(dirname "$dir")")"
+    if [[ "$parent" == ".pi" ]]; then
+      bn="pi"
+    fi
   fi
   echo "$bn"
 }
@@ -82,6 +88,10 @@ _is_ai_installed() {
     opencode)
       [[ -x "$HOME/.opencode/bin/opencode" ]]
       return
+      ;;
+    agent)
+      # ~/.pi/agent → check for pi CLI
+      command -v pi &>/dev/null && return
       ;;
   esac
   return 1
@@ -124,6 +134,7 @@ _ensure_config_entries() {
     "ai_trae:~/.trae|user_rules.md|project_rules.md"
     "ai_opencode:~/.config/opencode|AGENTS.md|AGENTS.md"
     "ai_openclaw:~/.openclaw/workspace|AGENTS.md|AGENTS.md"
+    "ai_pi:~/.pi/agent|AGENTS.md|AGENTS.md"
   )
 
   local added=0
@@ -336,6 +347,7 @@ ai_cursor: ~/.cursor|.cursor-rules|.cursor-rules
 ai_trae: ~/.trae|user_rules.md|project_rules.md
 ai_opencode: ~/.config/opencode|AGENTS.md|AGENTS.md
 ai_openclaw: ~/.openclaw/workspace|AGENTS.md|AGENTS.md
+ai_pi: ~/.pi/agent|AGENTS.md|AGENTS.md
 
 # User preferences
 default_language: zh

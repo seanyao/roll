@@ -38,3 +38,9 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$output" = "kimi" ]
 }
+
+@test "ai_tool_name: ~/.pi/agent → pi (agent uses parent dir)" {
+  run ai_tool_name "$HOME/.pi/agent"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pi" ]
+}

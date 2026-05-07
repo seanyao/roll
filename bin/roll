@@ -132,7 +132,6 @@ _ensure_config_entries() {
     "ai_opencode:~/.config/opencode|AGENTS.md|AGENTS.md"
     "ai_openclaw:~/.openclaw/workspace|AGENTS.md|AGENTS.md"
     "ai_pi:~/.pi/agent|AGENTS.md|AGENTS.md"
-    "ai_deepseek:~/.deepseek|AGENTS.md|AGENTS.md"
   )
 
   local added=0
@@ -346,7 +345,6 @@ ai_trae: ~/.trae|user_rules.md|project_rules.md
 ai_opencode: ~/.config/opencode|AGENTS.md|AGENTS.md
 ai_openclaw: ~/.openclaw/workspace|AGENTS.md|AGENTS.md
 ai_pi: ~/.pi/agent|AGENTS.md|AGENTS.md
-ai_deepseek: ~/.deepseek|AGENTS.md|AGENTS.md
 
 # User preferences
 default_language: zh

@@ -44,3 +44,24 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$output" = "pi" ]
 }
+
+@test "_is_ai_installed: ~/.pi/agent returns 0 when pi CLI is present" {
+  pi_stub="$TEST_TMP/bin/pi"
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\n' > "$pi_stub"
+  chmod +x "$pi_stub"
+  PATH="$TEST_TMP/bin:$PATH" run _is_ai_installed "$TEST_TMP/.pi/agent"
+  [ "$status" -eq 0 ]
+}
+
+@test "_is_ai_installed: ~/.pi/agent returns 1 when pi CLI is absent" {
+  local fake_pi_agent="$TEST_TMP/.pi/agent"
+  PATH="/usr/bin:/bin" run _is_ai_installed "$fake_pi_agent"
+  [ "$status" -eq 1 ]
+}
+
+@test "_is_ai_installed: non-pi agent dir does not trigger pi check" {
+  agent_dir="$TEST_TMP/.other/agent"
+  PATH="/usr/bin:/bin" run _is_ai_installed "$agent_dir"
+  [ "$status" -eq 1 ]
+}

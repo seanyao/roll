@@ -56,12 +56,8 @@ ai_tool_name() {
   bn="$(basename "$dir" | sed 's/^\.//')"
   if [[ "$bn" == "workspace" ]]; then
     bn="$(basename "$(dirname "$dir")" | sed 's/^\.//')"
-  elif [[ "$bn" == "agent" ]]; then
-    local parent
-    parent="$(basename "$(dirname "$dir")")"
-    if [[ "$parent" == ".pi" ]]; then
-      bn="pi"
-    fi
+  elif [[ "$bn" == "agent" || "$bn" == "workspace" ]]; then
+    bn="$(basename "$(dirname "$dir")" | sed 's/^\.//')"
   fi
   echo "$bn"
 }
@@ -90,8 +86,9 @@ _is_ai_installed() {
       return
       ;;
     agent)
-      # ~/.pi/agent → check for pi CLI
-      command -v pi &>/dev/null && return
+      if [[ "$(basename "$(dirname "$ai_dir")")" == ".pi" ]]; then
+        command -v pi &>/dev/null && return
+      fi
       ;;
   esac
   return 1

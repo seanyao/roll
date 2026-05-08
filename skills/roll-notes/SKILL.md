@@ -1,7 +1,6 @@
 ---
 name: roll-notes
 license: MIT
-model: haiku
 allowed-tools: "Read, Edit, Write, Bash(date:*)"
 description: "Project diary skill. Records development moments — successes, failures, discoveries — appended chronologically to a daily notes file."
 ---

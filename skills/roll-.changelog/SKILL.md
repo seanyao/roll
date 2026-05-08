@@ -2,7 +2,6 @@
 hidden: true
 name: roll-.changelog
 license: MIT
-model: haiku
 allowed-tools: "Read, Edit, Write, Bash(git:*)"
 description: After build completion, extracts completed Stories from BACKLOG.md to generate CHANGELOG.md. Auto-triggered after successful deploy, keeping the external changelog in sync with the internal backlog.
 ---

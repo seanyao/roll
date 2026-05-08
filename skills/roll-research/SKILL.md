@@ -1,7 +1,6 @@
 ---
 name: roll-research
 license: MIT
-model: opus
 allowed-tools: "WebFetch, WebSearch, Read, Write, Bash(python3:*), Bash(curl:*), Bash(pip:*), Agent"
 description: |
   HV (Horizontal-Vertical) Analysis deep research skill for products, companies, concepts, technologies, or people. Dual-axis: vertical traces full lifecycle narrative from origin to present; horizontal compares against competitors at current time; cross-axis produces new insights. Output: professionally formatted PDF report.

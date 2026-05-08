@@ -173,6 +173,33 @@ Proceed to the **Shared TCR Workflow** (Phase 4 onward).
 
 The following phases apply to both Story mode and Fly mode after planning is complete.
 
+### Phase 3.5: Peer Review Gate
+
+After planning is complete, before entering Test Design Review, assess whether the plan warrants peer review:
+
+**Auto-trigger `$roll-peer` when any of the following is true:**
+- Plan affects **>3 files** or **crosses modules**
+- **Architecture decisions** or non-obvious trade-offs are involved
+- **Destructive / irreversible operations** (deletions, migrations, production deploys)
+- **High-risk signal words** detected in user request ("critical / important / don't break / 关键 / 别搞砸")
+- User explicitly requests peer review ("/peer", "叫上 peer")
+
+**With 10s opt-out:**
+```
+Plan affects N files across M modules. Estimated peer review: 2–3 rounds, ~X tokens.
+Press Enter to launch peer review, or type 'n' to skip. Auto-executing in 10s...
+```
+
+**After peer review result:**
+- **AGREE** → proceed to Phase 4 (Test Design Review)
+- **REFINE** → incorporate feedback, regenerate plan, re-run Phase 3.5
+- **OBJECT** → consider alternative plan, re-run Phase 3.5 with revised proposal
+- **ESCALATE** → present both proposals to user for final decision before proceeding
+
+**Never trigger:**
+- Single-file changes or well-defined fixes
+- Plans with no cross-module impact and no architecture decisions
+
 ### Phase 4: Test Design Review
 
 Before writing implementation code:

@@ -12,6 +12,13 @@ description: |
 
 > Follows the Architecture Constraints, Development Discipline, and Engineering Common Sense defined in the project AGENTS.md.
 
+## Credits
+
+The HV (Horizontal-Vertical) Analysis framework and the `references/schema.json`
+used by this skill are derived from **[khazix-skills](https://github.com/KKKKhazix/khazix-skills)**
+by 数字生命卡兹克 (Digital Life Khazix), used under the MIT License.
+Copyright (c) 2026 数字生命卡兹克.
+
 You are executing an HV Analysis deep research session. The final deliverable is a **professionally formatted PDF research report**.
 
 ## Prerequisites

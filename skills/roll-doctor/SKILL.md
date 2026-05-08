@@ -112,6 +112,30 @@ Check:
 - File exists and is valid YAML
 - Has required `ai_tool_name` or `ai_claude` entries
 
+### 7. Peer Review
+
+```bash
+# Peer state directory
+ls -la ~/.roll/.peer-state/ 2>/dev/null || echo "missing"
+
+# Peer config in config.yaml
+grep "peer_" ~/.roll/config.yaml 2>/dev/null || echo "no peer config"
+
+# Available peer CLIs
+for tool in claude kimi pi codex; do
+  command -v "$tool" &>/dev/null && echo "✓ $tool" || echo "✗ $tool"
+done
+
+# roll-peer skill
+ls ~/.roll/skills/roll-peer/SKILL.md 2>/dev/null || echo "missing"
+```
+
+Check:
+- `~/.roll/.peer-state/` exists and is writable
+- `~/.roll/config.yaml` contains `peer_call_timeout` (default: 180)
+- At least one peer CLI (claude / kimi / pi) is installed
+- `roll-peer` skill exists
+
 ## Report Format
 
 ```
@@ -123,6 +147,7 @@ Check:
 [✓/✗] Conventions sync
 [✓/✗] Templates integrity
 [✓/✗] Config
+[✓/✗] Peer Review
 
 ---
 Issues found: N

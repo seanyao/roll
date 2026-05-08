@@ -1,3 +1,7 @@
+// Copyright (c) 2026 数字生命卡兹克 (Digital Life Khazix)
+// Released under the MIT License: https://github.com/KKKKhazix/khazix-skills/blob/main/LICENSE
+// This file contains substantial portions of the Horizontal-Vertical Analysis Framework
+// from khazix-skills (https://github.com/KKKKhazix/khazix-skills).
 {
   "$schema": "Horizontal-Vertical Analysis Framework",
   "version": "1.0",

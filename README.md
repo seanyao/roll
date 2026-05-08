@@ -192,7 +192,7 @@ For larger changes, open an issue first to discuss the approach.
 
 Roll builds on ideas and inspiration from the open-source community:
 
-- **[khazix-skills](https://github.com/KKKKhazix/khazix-skills)** by Digital Life Khazix — The HV Analysis (Horizontal-Vertical Analysis) deep research framework that powers `$roll-research` was adapted from this project.
+- **[khazix-skills](https://github.com/KKKKhazix/khazix-skills)** by Digital Life Khazix — The HV Analysis (Horizontal-Vertical Analysis) deep research framework and schema used by `$roll-research` are derived from this project, used under the MIT License. Copyright (c) 2026 数字生命卡兹克.
 - **[superpowers](https://github.com/obra/superpowers)** by Jesse Vincent — A composable skills library for AI coding agents that informed several workflow patterns in Roll.
 
 ---

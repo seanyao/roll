@@ -540,6 +540,11 @@ cmd_setup() {
   _sync_skills "$force"
 
   echo ""
+  info "Setting up peer review state...  正在初始化 peer review 状态..."
+  _peer_ensure_state_dir
+  ok "Peer state directory ready.  Peer 状态目录已就绪。"
+
+  echo ""
   ok "Setup complete.  初始化完成。"
 
   echo ""
@@ -1221,6 +1226,416 @@ check_sync_status() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PEER REVIEW
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_PEER_STATE_DIR="${ROLL_HOME}/.peer-state"
+
+_peer_ensure_state_dir() {
+  mkdir -p "$_PEER_STATE_DIR"
+  mkdir -p "${_PEER_STATE_DIR}/logs"
+}
+
+_peer_state_file() {
+  local pair="$1"
+  local key="$2"
+  echo "${_PEER_STATE_DIR}/${pair}_${key}"
+}
+
+_peer_get_state() {
+  local pair="$1"
+  local key="$2"
+  local file
+  file="$(_peer_state_file "$pair" "$key")"
+  if [[ -f "$file" ]]; then
+    cat "$file"
+  else
+    echo ""
+  fi
+}
+
+_peer_set_state() {
+  local pair="$1"
+  local key="$2"
+  local val="$3"
+  _peer_ensure_state_dir
+  printf '%s\n' "$val" > "$(_peer_state_file "$pair" "$key")"
+}
+
+_peer_normalize_pair() {
+  local from="$1"
+  local to="$2"
+  printf '%s→%s\n' "$from" "$to"
+}
+
+_peer_detect_peers() {
+  local peers=""
+  for tool in claude kimi pi codex opencode cursor; do
+    if command -v "$tool" &>/dev/null; then
+      peers="${peers}${peers:+ }${tool}"
+    fi
+  done
+  printf '%s\n' "$peers"
+}
+
+_peer_route() {
+  local from="$1"
+  local tag="${2:-default}"
+
+  local map_val
+  map_val="$(config_get "peer_capability_map_${tag}" "")"
+  if [[ -z "$map_val" ]]; then
+    map_val="$(config_get "peer_capability_map_default" "kimi claude pi")"
+  fi
+
+  local installed
+  installed="$(_peer_detect_peers)"
+
+  local candidate
+  for candidate in $map_val; do
+    [[ "$candidate" == "$from" ]] && continue
+    if echo "$installed" | grep -qw "$candidate"; then
+      local pair status
+      pair="$(_peer_normalize_pair "$from" "$candidate")"
+      status="$(_peer_get_state "$pair" "status")"
+      if [[ "$status" != "abandoned" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    fi
+  done
+
+  printf '%s\n' ""
+  return 1
+}
+
+_peer_call() {
+  local to="$1"
+  local prompt="$2"
+  local output=""
+  local stderr_log
+  stderr_log="${_PEER_STATE_DIR}/logs/.last_stderr.log"
+  local call_timeout
+  call_timeout="$(config_get "peer_call_timeout" "180")"
+
+  info "Peer call timeout: ${call_timeout}s  Peer 调用超时: ${call_timeout}s"
+
+  case "$to" in
+    claude)
+      output="$(claude -p --output-format text "$prompt" 2>"$stderr_log" || true)"
+      ;;
+    kimi)
+      output="$(kimi --quiet -p "$prompt" 2>"$stderr_log" || true)"
+      ;;
+    pi)
+      output="$(pi -p --mode text "$prompt" 2>"$stderr_log" || true)"
+      ;;
+    *)
+      err "Unsupported peer: $to  不支持的 peer: $to"
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "$output"
+}
+
+_peer_parse_resolution() {
+  local output="$1"
+  local resolution
+  # Match AGREE/REFINE/OBJECT/ESCALATE near line start (only non-letters before it)
+  # Covers: **AGREE**, ### 结论：AGREE, - AGREE:, * REFINE, OBJECT — ...
+  resolution="$(printf '%s\n' "$output" | grep -oiE '^[^a-zA-Z]*\b(AGREE|REFINE|OBJECT|ESCALATE)\b' | head -1 | grep -oiE '\b(AGREE|REFINE|OBJECT|ESCALATE)\b' | tr '[:lower:]' '[:upper:]')"
+  printf '%s\n' "$resolution"
+}
+
+_peer_update_state() {
+  local pair="$1"
+  local outcome="$2"
+  local streak=0
+
+  local prev_streak
+  prev_streak="$(_peer_get_state "$pair" "streak")"
+  if [[ "$prev_streak" =~ ^[0-9]+$ ]]; then
+    streak="$prev_streak"
+  fi
+
+  if [[ "$outcome" == "AGREE" ]]; then
+    streak=0
+    _peer_set_state "$pair" "status" "active"
+  else
+    streak=$((streak + 1))
+    if [[ "$streak" -ge 3 ]]; then
+      _peer_set_state "$pair" "status" "abandoned"
+    else
+      _peer_set_state "$pair" "status" "degraded"
+    fi
+  fi
+
+  _peer_set_state "$pair" "streak" "$streak"
+  _peer_set_state "$pair" "last_outcome" "$outcome"
+  _peer_set_state "$pair" "last_time" "$(date -Iseconds)"
+}
+
+cmd_peer() {
+  local from_tool=""
+  local to_tool=""
+  local round=1
+  local tag="default"
+  local context_file=""
+  local yolo=false
+  local subcmd=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from) from_tool="$2"; shift 2 ;;
+      --to) to_tool="$2"; shift 2 ;;
+      --round) round="$2"; shift 2 ;;
+      --tag) tag="$2"; shift 2 ;;
+      --context) context_file="$2"; shift 2 ;;
+      --yes|--yolo) yolo=true; shift ;;
+      status) subcmd="status"; shift ;;
+      reset) subcmd="reset"; shift; break ;;
+      help|--help|-h) subcmd="help"; shift ;;
+      *) err "Unknown option: $1  未知选项: $1"; exit 1 ;;
+    esac
+  done
+
+  case "$subcmd" in
+    status) cmd_peer_status; return ;;
+    reset) cmd_peer_reset "$@"; return ;;
+    help) cmd_peer_help; return ;;
+  esac
+
+  if [[ -z "$from_tool" ]]; then
+    err "--from is required.  必须指定 --from。"
+    echo ""
+    cmd_peer_help
+    exit 1
+  fi
+
+  if [[ -z "$to_tool" ]]; then
+    to_tool="$(_peer_route "$from_tool" "$tag")"
+    if [[ -z "$to_tool" ]]; then
+      err "No available peer found for tag '$tag'.  未找到 tag '$tag' 的可用 peer。"
+      echo ""
+      info "Installed peers: $(_peer_detect_peers)"
+      info "Capability map: $(config_get "peer_capability_map_${tag}" "$(config_get "peer_capability_map_default" "kimi claude pi")")"
+      exit 1
+    fi
+    info "Auto-selected peer: $to_tool  自动选择 peer: $to_tool"
+  fi
+
+  local pair
+  pair="$(_peer_normalize_pair "$from_tool" "$to_tool")"
+
+  local status
+  status="$(_peer_get_state "$pair" "status")"
+  if [[ "$status" == "abandoned" ]]; then
+    err "Peer pair $pair is abandoned. Run 'roll peer reset $from_tool $to_tool' to restore.  Peer 对 $pair 已废弃。运行 'roll peer reset $from_tool $to_tool' 恢复。"
+    exit 1
+  fi
+
+  if [[ "$yolo" != "true" ]]; then
+    local opt_out
+    opt_out="$(config_get "peer_opt_out_seconds" "10")"
+    info "Launching peer review: $from_tool → $to_tool (round $round, tag: $tag)"
+    info "Press Enter to proceed or type 'n' to abort. Auto-executing in ${opt_out}s..."
+    info "启动 peer review: $from_tool → $to_tool (第 $round 轮, tag: $tag)"
+    info "按 Enter 执行或输入 n 取消。${opt_out} 秒后自动执行..."
+
+    local answer=""
+    if IFS= read -r -t "$opt_out" answer 2>/dev/null; then
+      if [[ "$answer" == "n" || "$answer" == "N" ]]; then
+        info "Peer review aborted by user.  用户取消 peer review。"
+        exit 0
+      fi
+    fi
+  fi
+
+  local context=""
+  if [[ -n "$context_file" && -f "$context_file" ]]; then
+    context="$(cat "$context_file")"
+  fi
+
+  local prompt
+  prompt="[PEER_REVIEW round=${round} tool=${from_tool}→${to_tool}]\n\n${context}"
+
+  _peer_ensure_state_dir
+  local log_file
+  log_file="${_PEER_STATE_DIR}/logs/$(date +%Y%m%d_%H%M%S)_${from_tool}_${to_tool}.md"
+  {
+    echo "# Peer Review Log"
+    echo ""
+    echo "- **From**: $from_tool"
+    echo "- **To**: $to_tool"
+    echo "- **Round**: $round"
+    echo "- **Tag**: $tag"
+    echo "- **Time**: $(date -Iseconds)"
+    echo ""
+    echo "## Prompt"
+    echo ""
+    echo '```'
+    printf '%s\n' "$prompt"
+    echo '```'
+    echo ""
+    echo "## Response"
+    echo ""
+  } > "$log_file"
+
+  info "Calling $to_tool...  调用 $to_tool..."
+  local response
+  response="$(_peer_call "$to_tool" "$prompt")"
+
+  local stderr_log
+  stderr_log="${_PEER_STATE_DIR}/logs/.last_stderr.log"
+  if [[ -f "$stderr_log" && -s "$stderr_log" ]]; then
+    echo ""
+    echo -e "${BOLD}Peer stderr  Peer 标准错误:${NC}"
+    cat "$stderr_log"
+    echo ""
+  fi
+
+  printf '%s\n' "$response" >> "$log_file"
+
+  local resolution
+  resolution="$(_peer_parse_resolution "$response")"
+
+  if [[ -z "$resolution" ]]; then
+    warn "Could not parse resolution from peer response.  无法解析 peer 响应中的决议状态。"
+    resolution="UNKNOWN"
+  fi
+
+  _peer_update_state "$pair" "$resolution"
+
+  echo ""
+  echo -e "${BOLD}Peer Review Result  Peer Review 结果${NC}"
+  echo "  Pair: $pair"
+  echo "  Round: $round"
+  echo "  Resolution: $resolution"
+  echo ""
+
+  case "$resolution" in
+    AGREE)
+      ok "Consensus reached. Proceed with execution.  达成共识，继续执行。"
+      ;;
+    REFINE|OBJECT)
+      if [[ "$round" -ge 3 ]]; then
+        warn "Max rounds reached. Escalating to user.  达到最大轮数，升级给用户。"
+      else
+        info "Peer requests $resolution. Continue to round $((round + 1)).  Peer 请求 $resolution，继续第 $((round + 1)) 轮。"
+      fi
+      ;;
+    ESCALATE|UNKNOWN)
+      warn "Peer review escalated or failed. Human decision required.  Peer review 升级或失败，需要人类决策。"
+      ;;
+  esac
+
+  echo ""
+  info "Log: $log_file"
+
+  case "$resolution" in
+    AGREE) exit 0 ;;
+    REFINE|OBJECT) exit 2 ;;
+    *) exit 1 ;;
+  esac
+}
+
+cmd_peer_status() {
+  _peer_ensure_state_dir
+  echo -e "${BOLD}Peer Review Status  Peer Review 状态${NC}"
+  echo ""
+
+  local found=0
+  local status_file
+  for status_file in "$_PEER_STATE_DIR"/*_status; do
+    [[ -f "$status_file" ]] || continue
+    found=1
+    local pair status streak last_outcome last_time
+    pair="$(basename "$status_file" | sed 's/_status$//')"
+    status="$(_peer_get_state "$pair" "status")"
+    streak="$(_peer_get_state "$pair" "streak")"
+    last_outcome="$(_peer_get_state "$pair" "last_outcome")"
+    last_time="$(_peer_get_state "$pair" "last_time")"
+
+    local sc="$GREEN"
+    [[ "$status" == "degraded" ]] && sc="$YELLOW"
+    [[ "$status" == "abandoned" ]] && sc="$RED"
+
+    echo -e "  ${sc}${pair}${NC}"
+    echo "    Status: ${status:-active}"
+    echo "    Streak: ${streak:-0}"
+    echo "    Last: ${last_outcome:-none} @ ${last_time:-never}"
+    echo ""
+  done
+
+  if [[ "$found" -eq 0 ]]; then
+    info "No peer review history yet.  暂无 peer review 记录。"
+  fi
+
+  echo ""
+  info "Installed peers: $(_peer_detect_peers)"
+}
+
+cmd_peer_reset() {
+  local target_pair=""
+  local reset_all=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all) reset_all=true; shift ;;
+      --from|--to|--round|--tag|--context|--yes|--yolo|status|reset|help|--help|-h) shift ;;
+      *)
+        if [[ -z "$target_pair" ]]; then
+          target_pair="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  _peer_ensure_state_dir
+
+  if [[ "$reset_all" == "true" ]]; then
+    rm -f "$_PEER_STATE_DIR"/*_status
+    rm -f "$_PEER_STATE_DIR"/*_streak
+    rm -f "$_PEER_STATE_DIR"/*_last_outcome
+    rm -f "$_PEER_STATE_DIR"/*_last_time
+    ok "All peer states reset.  所有 peer 状态已重置。"
+    return
+  fi
+
+  if [[ -z "$target_pair" ]]; then
+    err "Usage: roll peer reset <from>→<to> | --all  用法: roll peer reset <from>→<to> | --all"
+    exit 1
+  fi
+
+  rm -f "$(_peer_state_file "$target_pair" "status")"
+  rm -f "$(_peer_state_file "$target_pair" "streak")"
+  rm -f "$(_peer_state_file "$target_pair" "last_outcome")"
+  rm -f "$(_peer_state_file "$target_pair" "last_time")"
+  ok "Peer state reset: $target_pair  Peer 状态已重置: $target_pair"
+}
+
+cmd_peer_help() {
+  echo -e "${BOLD}roll peer — Cross-Agent Peer Review${NC}"
+  echo ""
+  echo "Usage: roll peer [options]  用法: roll peer [选项]"
+  echo ""
+  echo "Options:"
+  echo "  --from <tool>       Originating agent (kimi, claude, pi)  发起方"
+  echo "  --to <tool>         Target peer (auto-detected if omitted)  对端 peer（省略则自动选择）"
+  echo "  --round <N>         Current round (default: 1)  当前轮数"
+  echo "  --tag <type>        Task type for routing (architecture, security, test...)  任务类型"
+  echo "  --context <file>    Context file to send to peer  上下文文件"
+  echo "  --yes, --yolo       Skip opt-out prompt  跳过确认提示"
+  echo ""
+  echo "Subcommands:"
+  echo "  status              Show peer review state  显示状态"
+  echo "  reset <pair|--all>  Reset peer state  重置状态"
+  echo "  help                Show this help  显示帮助"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 usage() {
@@ -1241,6 +1656,7 @@ usage() {
   echo "  update                 [Upgrade] npm install latest + re-sync             一键升级到最新版"
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
+  echo "  peer                   [Peer Review] Cross-agent negotiation               跨 Agent 协商对审"
   echo ""
   echo "Examples / 示例:"
   echo "  roll setup                    # New machine: first-time install            新机器首次安装"
@@ -1258,6 +1674,7 @@ main() {
     update)        cmd_update "$@" ;;
     init)          cmd_init "$@" ;;
     status)        cmd_status "$@" ;;
+    peer)          cmd_peer "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h|"") usage ;;
     *)

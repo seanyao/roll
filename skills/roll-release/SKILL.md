@@ -38,14 +38,29 @@ Then calculate:
 ```bash
 today=$(date +%Y.%-m%d)
 last_n=$(git tag | grep "^v${today}\." | sed "s/^v${today}\.//" | sort -n | tail -1)
-n=$(( ${last_n:-0} + 1 ))
-version="${today}.${n}"
+
+# Reuse tag if latest today's tag already points to HEAD (e.g. npm publish failed, retrying)
+if [[ -n "$last_n" ]]; then
+  last_tag="v${today}.${last_n}"
+  if [[ "$(git rev-list -n1 "$last_tag")" == "$(git rev-parse HEAD)" ]]; then
+    version="${today}.${last_n}"
+    echo "♻️  Reusing ${last_tag} — same commit, skipping version bump"
+    # Skip Steps 2-4, jump directly to Step 5 (GitHub Release) or Step 6 (npm publish)
+  else
+    n=$(( last_n + 1 ))
+    version="${today}.${n}"
+  fi
+else
+  version="${today}.1"
+fi
 ```
 
 Show the proposed version to the user:
 ```
 Recent tags: v2026.419.1  v2026.419.2  v2026.420.3
-Proposed version: 2026.420.4
+Proposed version: 2026.420.4        ← new version (code changed since last tag)
+  — or —
+♻️  Reusing v2026.420.3             ← same commit, retry after npm failure
 Proceed? [y/N]
 ```
 

@@ -49,7 +49,7 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-DEBUG-001](docs/features/roll-debug.md#us-debug-001) | Add BB Injection mode — mount BB on pages without native integration | ✅ Done |
-| [US-DEBUG-002](docs/features/roll-debug.md#us-debug-002) | roll-debug auto-fix — diagnose then auto-TCR when fixable | 📋 Todo |
+| [US-DEBUG-002](docs/features/roll-debug.md#us-debug-002) | roll-debug auto-fix — diagnose then auto-TCR when fixable | ✅ Done |
 
 ## Epic: Release Management
 ### Feature: roll-release

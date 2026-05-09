@@ -30,8 +30,9 @@
 ---
 
 <a id="us-debug-002"></a>
-## US-DEBUG-002 roll-debug auto-fix — diagnose then auto-TCR when fixable
+## US-DEBUG-002 roll-debug auto-fix — diagnose then auto-TCR when fixable ✅
 
+**Completed**: 2026-05-10
 **Created**: 2026-05-10
 
 - As a developer debugging a broken page
@@ -39,14 +40,14 @@
 - So that diagnosis and repair happen in one continuous flow without manual handoff
 
 **AC:**
-- [ ] After diagnosis, roll-debug assesses if root cause is in project source and fixable
-- [ ] If fixable (single-file, bounded): auto-enters roll-fix's TCR workflow (test → fix → review → commit → push → CI → deploy)
-- [ ] If complex (cross-module, architectural): creates US-XXX, suggests `$roll-build`
-- [ ] If external (third-party API, infra): reports findings only with suggested actions
-- [ ] After successful fix: re-mounts BB probe, re-verifies the issue is resolved on the page
-- [ ] All roll-fix quality gates preserved (TCR, roll-.review, push, CI)
-- [ ] Integration section in SKILL.md rewritten to reflect auto-fix behavior and escalation paths
-- [ ] Tells user what was found and what was done (or why it couldn't auto-fix)
+- [x] After diagnosis, roll-debug assesses if root cause is in project source and fixable
+- [x] If fixable (single-file, bounded): auto-enters roll-fix's TCR workflow (test → fix → review → commit → push → CI → deploy)
+- [x] If complex (cross-module, architectural): creates US-XXX, suggests `$roll-build`
+- [x] If external (third-party API, infra): reports findings only with suggested actions
+- [x] After successful fix: re-mounts BB probe, re-verifies the issue is resolved on the page
+- [x] All roll-fix quality gates preserved (TCR, roll-.review, push, CI)
+- [x] Integration section in SKILL.md rewritten to reflect auto-fix behavior and escalation paths
+- [x] Tells user what was found and what was done (or why it couldn't auto-fix)
 
 **Files:**
 - `skills/roll-debug/SKILL.md`

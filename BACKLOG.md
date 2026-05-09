@@ -40,7 +40,7 @@
 ### Feature: e2e-lifecycle
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-QA-001](docs/features/e2e-lifecycle.md#us-qa-001) | roll-build Phase 5.5 — E2E Deposit after TCR | 📋 Todo |
+| [US-QA-001](docs/features/e2e-lifecycle.md#us-qa-001) | roll-build Phase 5.5 — E2E Deposit after TCR | ✅ Done |
 | [US-QA-002](docs/features/e2e-lifecycle.md#us-qa-002) | Template CI add E2E gating step | 📋 Todo |
 | [US-QA-003](docs/features/e2e-lifecycle.md#us-qa-003) | roll-.qa add CI failure triage guidance | 📋 Todo |
 

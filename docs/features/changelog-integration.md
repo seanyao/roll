@@ -25,8 +25,9 @@
 ---
 
 <a id="us-cl-002"></a>
-## US-CL-002 roll-.changelog support first-time creation with backfill
+## US-CL-002 roll-.changelog support first-time creation with backfill ✅
 
+**Completed**: 2026-05-10
 **Created**: 2026-05-10
 **Plan**: [changelog-integration-plan.md](changelog-integration-plan.md)
 
@@ -35,9 +36,9 @@
 - So that the changelog is complete from day one, not missing earlier work
 
 **AC:**
-- [ ] When `CHANGELOG.md` exists: append current deploy's changes (existing behavior)
-- [ ] When `CHANGELOG.md` does not exist: create it, extract all ✅ Done Stories from BACKLOG.md, write entries grouped by completion date in reverse chronological order
-- [ ] Workflow section documents both paths (create vs append)
+- [x] When `CHANGELOG.md` exists: append current deploy's changes (existing behavior)
+- [x] When `CHANGELOG.md` does not exist: create it, extract all ✅ Done Stories from BACKLOG.md, write entries grouped by completion date in reverse chronological order
+- [x] Workflow section documents both paths (create vs append)
 
 **Files:**
 - `skills/roll-.changelog/SKILL.md`

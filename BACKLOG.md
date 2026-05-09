@@ -62,7 +62,7 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-CL-001](docs/features/changelog-integration.md#us-cl-001) | roll-build auto-trigger changelog after deploy | ✅ Done |
-| [US-CL-002](docs/features/changelog-integration.md#us-cl-002) | roll-.changelog support first-time creation with backfill | 📋 Todo |
+| [US-CL-002](docs/features/changelog-integration.md#us-cl-002) | roll-.changelog support first-time creation with backfill | ✅ Done |
 
 ## 🐛 Bug Fixes
 | ID | Description | Status |

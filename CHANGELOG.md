@@ -7,6 +7,7 @@
 - **Added**: roll-debug 自动修复 — 诊断后若根因在项目源码内，自动进入 TCR 修复流程并回验
 - **Added**: Changelog 自动生成 — 每次部署后自动更新，首次运行时回填全部历史记录
 - **Fixed**: roll-release 补齐 GitHub Release 创建步骤 — 修复版本更新提醒从不生效的问题，并回填全部 40 个历史 tag
+- **Added**: roll status/update 显示最近更新 — 运行 `roll status` 或 `roll update` 时展示最近 3 个版本的 changelog
 
 ## 2026.05.09
 - **Added**: roll-peer 跨 Agent 代码评审 — 支持 Claude Code、Kimi CLI、DeepSeek TUI、Codex CLI 多工具协同评审 (by @seanyao)

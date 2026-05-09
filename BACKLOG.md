@@ -113,5 +113,5 @@
 | ID | Description | Status |
 |----|-------------|--------|
 | IDEA-001 | conventions/global/AGENTS.md 加 Identity 规则：从 git config 读取，禁止硬编码个人数据 | ✅ Done |
-| IDEA-002 | roll CLI 启动时显示最近三个版本的 changelog 内容 | 📋 Todo |
+| IDEA-002 | roll CLI 启动时显示最近三个版本的 changelog 内容 | ✅ Done |
 | IDEA-003 | 技能审计 P0 — 名称对齐、清理过时引用、补 When Not to Use、统一 license (PR #3 by @sealfe) | ✅ Done |

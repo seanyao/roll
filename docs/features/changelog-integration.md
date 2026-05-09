@@ -1,6 +1,7 @@
 <a id="us-cl-001"></a>
-## US-CL-001 roll-build auto-trigger changelog after deploy
+## US-CL-001 roll-build auto-trigger changelog after deploy ✅
 
+**Completed**: 2026-05-10
 **Created**: 2026-05-10
 **Plan**: [changelog-integration-plan.md](changelog-integration-plan.md)
 
@@ -9,9 +10,9 @@
 - So that CHANGELOG.md stays in sync with delivered work without manual effort
 
 **AC:**
-- [ ] Phase 12 (Report & Celebrate) includes `$roll-.changelog` call after deploy verification
-- [ ] Trigger happens automatically, no user action needed
-- [ ] roll-fix also triggers `$roll-.changelog` after successful deploy
+- [x] Phase 12 (Report & Celebrate) includes `$roll-.changelog` call after deploy verification
+- [x] Trigger happens automatically, no user action needed
+- [x] roll-fix also triggers `$roll-.changelog` after successful deploy
 
 **Files:**
 - `skills/roll-build/SKILL.md`

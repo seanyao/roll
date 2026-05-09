@@ -52,7 +52,7 @@
 - **Fixed**: 模板中 $roll-story 过时引用 — 统一替换为 $roll-build (PR #4)
 
 ## 2026.04.29
-- **Improved**: roll-notes 叙事风格 — 强化写作规范，确保笔记保持统一的叙事语调 (by @Yaxuan via Kimi CLI)
+- **Improved**: roll-notes 叙事风格 — 强化写作规范，确保笔记保持统一的叙事语调 (by @Sean via Kimi CLI)
 
 ## 2026.04.24
 - **Added**: Trae IDE 支持 — 生成 project_rules.md 规则文件，`roll` 命令自动检测 Trae 并同步配置
@@ -82,5 +82,5 @@
 - **Added**: roll-.clarify 集成到 roll-design 工作流 — 模糊输入时自动触发澄清
 - **Improved**: CLI 精简 — 三步极简 init，约定文件转为技能参考，技能自动读取项目上下文
 - **Fixed**: roll init 工作流文件缺失 — 补全初始化所需的模板文件 (PR #1 by @leoliu198998-ui)
-- **Fixed**: roll-build 技能 YAML 描述引号修复 (by @Yaxuan via Kimi CLI)
-- **Fixed**: 通信规则同步和优化 — 对齐全局约定源，抑制实现细节噪音 (by @Yaxuan via Kimi CLI)
+- **Fixed**: roll-build 技能 YAML 描述引号修复 (by @Sean via Kimi CLI)
+- **Fixed**: 通信规则同步和优化 — 对齐全局约定源，抑制实现细节噪音 (by @Sean via Kimi CLI)

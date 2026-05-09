@@ -57,6 +57,13 @@
 |-------|-------------|--------|
 | [US-REL-001](docs/features/roll-release.md#us-rel-001) | Add roll-release skill — one-command publish flow | ✅ Done |
 
+## Epic: Changelog
+### Feature: changelog-integration
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CL-001](docs/features/changelog-integration.md#us-cl-001) | roll-build auto-trigger changelog after deploy | 📋 Todo |
+| [US-CL-002](docs/features/changelog-integration.md#us-cl-002) | roll-.changelog support first-time creation with backfill | 📋 Todo |
+
 ## 🐛 Bug Fixes
 | ID | Description | Status |
 |----|-------------|--------|

@@ -30,3 +30,6 @@ jobs:
       
       - name: Test
         run: npm run test -- --run
+
+      - name: E2E Tests
+        run: npm run test:e2e --if-present

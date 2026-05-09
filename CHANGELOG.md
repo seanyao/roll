@@ -7,22 +7,71 @@
 - **Added**: roll-debug 自动修复 — 诊断后若根因在项目源码内，自动进入 TCR 修复流程并回验
 - **Added**: Changelog 自动生成 — 每次部署后自动更新，首次运行时回填全部历史记录
 
+## 2026.05.09
+- **Added**: roll-peer 跨 Agent 代码评审 — 支持 Claude Code、Kimi CLI、DeepSeek TUI、Codex CLI 多工具协同评审 (by @seanyao)
+- **Added**: DeepSeek TUI 和 Codex CLI 支持 — roll-peer 新增两个 AI 工具后端 (PR #6 by @leoliu198998-ui)
+- **Added**: Claude GitHub Actions — PR Assistant 和 Code Review 自动化工作流 (PR #8)
+- **Fixed**: roll-peer DeepSeek serve 探测 — 修复 pipefail 和 grep 范围问题，避免误判 (PR #9, #10)
+
+## 2026.05.08
+- **Improved**: 技能清单瘦身 — 移除所有技能 YAML 中的 model 字段，简化配置
+
+## 2026.05.07
+- **Added**: Pi (pi-coding-agent) 支持 — 新增 AI 工具检测和集成
+- **Added**: DeepSeek TUI 支持 — 新增 ai_deepseek 检测和配置同步 (PR #5 by @leoliu198998-ui)
+- **Improved**: roll-design DDD 建模 — 增加战略设计（Context Map）和战术建模（Aggregate/Entity/VO）能力
+- **Fixed**: roll update 版本校验 — npm install 后验证实际安装版本，CDN 不一致时自动重试
+- **Fixed**: AI 工具检测加固 — 修复 pi 工具检测逻辑，补充 _is_ai_installed 测试用例
+
 ## 2026.05.06
 - **Added**: OpenCode 集成 — 检测 opencode 环境，自动同步全局 AGENTS.md 规则文件
+- **Added**: roll-bipo-onboard 技能 — 新员工入职引导流程技能，含 bats 测试
+- **Improved**: Git 提交归属 — 用 Co-Authored-By trailer 替代 [client] 前缀，更标准的多 AI 工具归属方式
+- **Improved**: AGENTS.md 加入 Scope Gate — 防止技能执行时越界修改不相关文件
 
 ## 2026.05.05
+- **Added**: 技能权限声明 — 每个技能声明 allowed-tools，约束 AI 工具可用范围
+- **Added**: 技能模型绑定 — 每个技能绑定最适合的 AI 模型，平衡性能和质量
+- **Added**: Identity 约定 — 从 git config 读取身份信息，禁止在约定文件中硬编码个人数据
+- **Improved**: CLI 命令精简 — 收敛为 setup / init / hook / status 四个核心命令
+- **Improved**: 约定文件重构 — 公共规则提取到 conventions/global/AGENTS.md，工具专属文件瘦身
 - **Fixed**: 同步时清理已删除文件，防止用户机器残留幽灵文件
 - **Fixed**: 修正 AGENTS.md 中过时的文件路径引用
 - **Fixed**: 修正 GEMINI.md 中技术栈描述错误
+- **Fixed**: 修正遗留的 Wukong 品牌引用为 Roll
+- **Fixed**: package.json 作者邮箱修正
 
 ## 2026.05.04
 - **Added**: BB 注入模式 — 对未集成 Black Box 的页面自动注入诊断探针，统一数据采集接口
+- **Added**: roll-doctor 技能 — 一键诊断开发工具链健康状态（Node、npm、git、AI 工具等）
+- **Improved**: roll-notes 写作风格 — 强制叙事体写作，保持风格一致性
+- **Improved**: 约定文件更新 — 整合 insights 建议到全局约定中
+
+## 2026.05.03
+- **Fixed**: npm publish 代理冲突 — 发布前清除代理环境变量，避免网络错误
+- **Fixed**: 模板中 $roll-story 过时引用 — 统一替换为 $roll-build (PR #4)
+
+## 2026.04.29
+- **Improved**: roll-notes 叙事风格 — 强化写作规范，确保笔记保持统一的叙事语调 (by @Yaxuan via Kimi CLI)
 
 ## 2026.04.24
 - **Added**: Trae IDE 支持 — 生成 project_rules.md 规则文件，`roll` 命令自动检测 Trae 并同步配置
+- **Fixed**: 同步函数容错 — 源文件不存在时正常返回，避免 set -e 崩溃
+- **Fixed**: Trae 检测和配置迁移 — 修复 ai_* 配置项缺失时的检测逻辑
+
+## 2026.04.22
+- **Improved**: 技能审计 P0 — 名称对齐、清理过时引用、补充 When Not to Use 段、统一 license 声明 (PR #3 by @sealfe)
+
+## 2026.04.21
+- **Added**: roll-notes 技能 — 开发过程中随手记录想法和笔记，叙事体写作
+- **Improved**: 品牌清理 — 清除遗留的旧品牌引用，移除废弃的 roll-probe 技能和 clean 命令
+- **Fixed**: git 安装检测 — 直接检查 .git 目录，避免在 nvm 环境下误判
+- **Fixed**: roll-release YAML 描述引号修复
 
 ## 2026.04.20
 - **Added**: roll-release — 一条命令完成版本号、changelog、tag、npm publish 全流程
+- **Fixed**: uninstall.sh 同时清理真实目录和符号链接
+- **Fixed**: npm 发布 token 切换为 classic automation token，修复 CI 发布失败
 
 ## 2026.04.19
 - **Added**: npm 分发 — 开发/运行时路径分离、`roll update` 自动更新、后台版本检查提醒、npm 发布基础设施
@@ -30,6 +79,8 @@
 ## 2026.04.17
 - **Added**: roll-jot — 一句话快速记录 bug 或想法到 backlog，不打断当前工作
 - **Added**: roll-.clarify — 遇到模糊需求时自动追问，确保开工前意图清晰
-
-## 2026.04.16
+- **Added**: roll-.clarify 集成到 roll-design 工作流 — 模糊输入时自动触发澄清
 - **Improved**: CLI 精简 — 三步极简 init，约定文件转为技能参考，技能自动读取项目上下文
+- **Fixed**: roll init 工作流文件缺失 — 补全初始化所需的模板文件 (PR #1 by @leoliu198998-ui)
+- **Fixed**: roll-build 技能 YAML 描述引号修复 (by @Yaxuan via Kimi CLI)
+- **Fixed**: 通信规则同步和优化 — 对齐全局约定源，抑制实现细节噪音 (by @Yaxuan via Kimi CLI)

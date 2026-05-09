@@ -58,6 +58,20 @@ Create mode:
 - UX improvements (layout, interaction enhancements)
 - Performance/reliability improvements
 
+**Description format:** `功能名 — 做了什么 + 用在什么场景`，一句话，精简。
+
+Good:
+```
+- **Added**: roll-jot — 一句话快速记录 bug 或想法到 backlog，不打断当前工作
+- **Fixed**: 同步时清理已删除文件，防止用户机器残留幽灵文件
+```
+
+Bad:
+```
+- **Added**: Add roll-jot skill for fast backlog capture
+- **Fixed**: Sync prunes stale files to prevent ghost files
+```
+
 ### 4. Version Number Format
 
 ```

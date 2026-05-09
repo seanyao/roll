@@ -81,11 +81,22 @@ git push && git push --tags
 
 ### Step 5: Create GitHub Release
 
-Extract the current version's changelog entries and create a GitHub Release:
+**This step is mandatory.** Without it, `roll` update notifications will not work.
+
+Convert version to changelog date, extract notes, then create the release:
 
 ```bash
-# Extract release notes from CHANGELOG.md (current version's section)
-notes=$(sed -n "/^## ${version}$/,/^## /{ /^## ${version}$/d; /^## /d; p; }" CHANGELOG.md)
+# Convert version (2026.510.3) to changelog date (2026.05.10)
+_year=$(echo "${version}" | cut -d. -f1)
+_mmdd=$(echo "${version}" | cut -d. -f2)
+if [ ${#_mmdd} -eq 3 ]; then
+  _cl_date="${_year}.0${_mmdd:0:1}.${_mmdd:1:2}"
+else
+  _cl_date="${_year}.${_mmdd:0:2}.${_mmdd:2:2}"
+fi
+
+# Extract release notes from CHANGELOG.md
+notes=$(sed -n "/^## ${_cl_date}$/,/^## /{ /^## ${_cl_date}$/d; /^## /d; p; }" CHANGELOG.md | sed '/^[[:space:]]*$/d')
 
 gh release create "v${version}" \
   --title "v${version}" \

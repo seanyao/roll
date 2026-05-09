@@ -28,8 +28,9 @@
 ---
 
 <a id="us-qa-002"></a>
-## US-QA-002 Template CI add E2E gating step
+## US-QA-002 Template CI add E2E gating step ✅
 
+**Completed**: 2026-05-10
 **Created**: 2026-05-10
 **Plan**: [e2e-lifecycle-plan.md](e2e-lifecycle-plan.md)
 
@@ -38,9 +39,9 @@
 - So that regressions are caught automatically before merge
 
 **AC:**
-- [ ] `template/.github/workflows/ci.yml` includes E2E test step after unit tests
-- [ ] E2E step runs the project's existing test command (e.g., `npm run test:e2e`)
-- [ ] Step fails gracefully if no E2E tests exist yet (does not block projects without E2E)
+- [x] `template/.github/workflows/ci.yml` includes E2E test step after unit tests
+- [x] E2E step runs the project's existing test command (e.g., `npm run test:e2e`)
+- [x] Step fails gracefully if no E2E tests exist yet (does not block projects without E2E)
 
 **Files:**
 - `template/.github/workflows/ci.yml`

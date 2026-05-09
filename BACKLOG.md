@@ -14,6 +14,10 @@
 |-------|-------------|--------|
 | [US-SKILL-001](docs/features/new-skills.md#us-skill-001) | Add `roll-jot` — fast backlog capture for bugs and ideas | ✅ Done |
 | [US-SKILL-002](docs/features/new-skills.md#us-skill-002) | Add `roll-.clarify` — passive scope clarification for vague build requests | ✅ Done |
+| [US-SKILL-003](docs/features/new-skills.md#us-skill-003) | Add `roll-notes` — 开发过程随手记录想法和笔记 | ✅ Done |
+| [US-SKILL-004](docs/features/new-skills.md#us-skill-004) | Add `roll-doctor` — 一键诊断开发工具链健康状态 | ✅ Done |
+| [US-SKILL-005](docs/features/new-skills.md#us-skill-005) | Add `roll-peer` — 跨 Agent 代码评审（Claude/Kimi/DeepSeek/Codex） | ✅ Done |
+| [US-SKILL-006](docs/features/new-skills.md#us-skill-006) | Add `roll-bipo-onboard` — 新员工入职引导流程 | ✅ Done |
 
 ## Epic: Distribution
 ### Feature: npm-distribution
@@ -36,6 +40,13 @@
 |-------|-------------|--------|
 | [US-OPENCODE-001](docs/features/opencode-support.md#us-opencode-001) | bin/roll integration — detect opencode, sync global AGENTS.md | ✅ Done |
 
+### Feature: ai-tools
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-AI-001](docs/features/ai-tools.md#us-ai-001) | DeepSeek TUI 支持 — ai_deepseek 检测和配置同步 (PR #5 by @leoliu198998-ui) | ✅ Done |
+| [US-AI-002](docs/features/ai-tools.md#us-ai-002) | Pi (pi-coding-agent) 支持 — AI 工具检测和集成 | ✅ Done |
+| [US-AI-003](docs/features/ai-tools.md#us-ai-003) | roll-peer 新增 DeepSeek TUI 和 Codex CLI 后端 (PR #6 by @leoliu198998-ui) | ✅ Done |
+
 ## Epic: QA & Testing
 ### Feature: e2e-lifecycle
 | Story | Description | Status |
@@ -57,6 +68,21 @@
 |-------|-------------|--------|
 | [US-REL-001](docs/features/roll-release.md#us-rel-001) | Add roll-release skill — one-command publish flow | ✅ Done |
 
+## Epic: Engineering Infrastructure
+### Feature: skill-harness
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-INFRA-001](docs/features/skill-harness.md#us-infra-001) | 技能权限声明 — 每个技能声明 allowed-tools 约束可用范围 | ✅ Done |
+| [US-INFRA-002](docs/features/skill-harness.md#us-infra-002) | Identity 约定 — 从 git config 读取身份信息，禁止硬编码 | ✅ Done |
+| [US-INFRA-003](docs/features/skill-harness.md#us-infra-003) | Co-Authored-By 归属 — 用 trailer 替代 [client] 前缀，标准化多 AI 工具归属 | ✅ Done |
+| [US-INFRA-004](docs/features/skill-harness.md#us-infra-004) | AGENTS.md Scope Gate — 防止技能执行时越界修改不相关文件 | ✅ Done |
+| [US-INFRA-005](docs/features/skill-harness.md#us-infra-005) | roll-design DDD 增强 — 战略设计（Context Map）和战术建模（Aggregate/Entity/VO） | ✅ Done |
+
+### Feature: github-actions
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-GHA-001](docs/features/github-actions.md#us-gha-001) | Claude GitHub Actions — PR Assistant 和 Code Review 自动化工作流 (PR #8) | ✅ Done |
+
 ## Epic: Changelog
 ### Feature: changelog-integration
 | Story | Description | Status |
@@ -70,9 +96,21 @@
 | FIX-001 | bin/roll sync 加 file-level prune（防止未来删文件在用户机器留幽灵） | ✅ Done |
 | FIX-002 | `AGENTS.md` 修正 src/index.ts → bin/roll 等过时引用 | ✅ Done |
 | FIX-003 | `GEMINI.md` Stack 段修正：Node.js/commander/Vitest → bash + bats | ✅ Done |
+| FIX-004 | npm publish 代理冲突 — 发布前清除代理环境变量 | ✅ Done |
+| FIX-005 | 模板中 $roll-story 过时引用统一替换为 $roll-build (PR #4) | ✅ Done |
+| FIX-006 | git 安装检测 — 直接检查 .git 目录，避免 nvm 环境下误判 | ✅ Done |
+| FIX-007 | roll-release YAML 描述引号修复 | ✅ Done |
+| FIX-008 | Trae 检测容错 — 源文件不存在时正常返回，修复 set -e 崩溃 | ✅ Done |
+| FIX-009 | roll update 版本校验 — npm install 后验证版本，CDN 不一致时重试 | ✅ Done |
+| FIX-010 | uninstall.sh 同时清理真实目录和符号链接 | ✅ Done |
+| FIX-011 | AI 工具检测加固 — 修复 pi 工具检测逻辑，补充测试用例 | ✅ Done |
+| FIX-012 | roll-peer DeepSeek serve 探测 — pipefail 和 grep 范围修复 (PR #9, #10) | ✅ Done |
+| FIX-013 | roll init 工作流文件缺失 — 补全初始化所需模板文件 (PR #1 by @leoliu198998-ui) | ✅ Done |
+| FIX-014 | roll-build 技能 YAML 描述引号修复 (by @Sean via Kimi CLI) | ✅ Done |
 
 ## 💡 Ideas
 | ID | Description | Status |
 |----|-------------|--------|
 | IDEA-001 | conventions/global/AGENTS.md 加 Identity 规则：从 git config 读取，禁止硬编码个人数据 | ✅ Done |
 | IDEA-002 | roll CLI 启动时显示最近三个版本的 changelog 内容 | 📋 Todo |
+| IDEA-003 | 技能审计 P0 — 名称对齐、清理过时引用、补 When Not to Use、统一 license (PR #3 by @sealfe) | ✅ Done |

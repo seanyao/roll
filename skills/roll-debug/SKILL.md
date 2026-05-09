@@ -2,12 +2,12 @@
 name: roll-debug
 license: MIT
 allowed-tools: "Read, Edit, Write, Bash, Agent"
-description: Universal web debugger. Mounts a Black Box (BB) diagnostic probe on any page, collects rich diagnostics, analyzes root causes, and suggests fixes. Cleans up after itself.
+description: Universal web debugger. Mounts a Black Box (BB) diagnostic probe on any page, collects rich diagnostics, analyzes root causes, and auto-fixes when the root cause is in project source. Cleans up after itself.
 ---
 
 # Roll Debug
 
-Web debugging tool that treats the **Black Box (BB) as a diagnostic probe** — mounted when needed, unmounted when done. Combines diagnostic collection and analysis into a single workflow: **Mount → Collect → Analyze → Unmount**.
+Web debugging tool that treats the **Black Box (BB) as a diagnostic probe** — mounted when needed, unmounted when done. Combines diagnostic collection, analysis, and auto-repair into a single workflow: **Mount → Collect → Analyze → Unmount → Auto-Fix (when fixable) → Re-verify**.
 
 ## Philosophy
 
@@ -46,9 +46,6 @@ $roll-debug https://example.com/page --universal
 
 # Use a custom BB SDK instead of the built-in stub
 $roll-debug https://example.com/page --bb-sdk-url https://cdn.example.com/bb.js
-
-# Collect + analyze + auto-fix
-$roll-debug https://example.com/page --fix
 
 # Analyze an existing report file (skip collection)
 $roll-debug --report /tmp/bb-report.json
@@ -104,7 +101,37 @@ User: "Debug the page"
 └──────────────────┬──────────────────┘
                    │
                    ▼
-    Fix suggestions (or --fix to apply)
+┌─────────────────────────────────────┐
+│ 5. Auto-Fix Decision Gate           │
+│    ├── Assess root cause location   │
+│    │   and fixability               │
+│    ├── Fixable?                     │
+│    │   ├── Yes (single-file,        │
+│    │   │   bounded scope)           │
+│    │   │   → enter $roll-fix TCR    │
+│    │   │     workflow automatically │
+│    │   ├── Complex (cross-module,   │
+│    │   │   architectural)           │
+│    │   │   → create US-XXX          │
+│    │   │   → suggest $roll-build    │
+│    │   └── External (third-party    │
+│    │       API, infra)              │
+│    │       → report findings only   │
+│    └── Tell user what was found     │
+│        and what was done            │
+└──────────────────┬──────────────────┘
+                   │ (if auto-fixed)
+                   ▼
+┌─────────────────────────────────────┐
+│ 6. Re-verify (after fix)            │
+│    ├── Re-mount BB probe            │
+│    ├── Collect + analyze again      │
+│    ├── Confirm issue is resolved    │
+│    └── Unmount BB probe             │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+    Report to user (findings + actions taken)
 ```
 
 ## Collection Modes
@@ -187,9 +214,27 @@ Report: /tmp/bb-report.json
 useEffect dependency error causing content not to load.
 Dependency `[chapter?.id]` should be `[chapter?.number]`
 
-### Suggested Fix
-Modify Player.tsx line 45, change useEffect dependency
-from `[chapter?.id]` to `[chapter?.number]`
+### Auto-Fix
+Root cause is in project source (Player.tsx:45), single-file, bounded scope.
+Entering $roll-fix TCR workflow...
+
+🧪 Test: added regression test for chapter content loading
+🔧 Fix: Player.tsx:45 — useEffect dep [chapter?.id] → [chapter?.number]
+✅ TCR: test green, committed
+🔍 Review: $roll-.review passed
+📤 Push: origin/main
+⏳ CI: green
+🚀 Deploy: https://yyy.up.railway.app
+
+🔄 Re-verifying...
+📡 Re-mounting BB probe...
+📊 Collecting data...
+   ├── Console: 0 errors
+   ├── contentLength: 2340
+   └── hasText: true
+🧹 Unmounting BB probe... done
+
+✅ Issue resolved. Content now loads correctly.
 ```
 
 ### Example 2: Reuse existing native BB
@@ -525,16 +570,38 @@ No page state is modified.
 4. **Native BB untouched** — if a page already has BB, it is reused but never unmounted.
 5. **CSP fallback** — if script injection fails (CSP), automatically falls back to Universal mode.
 
-## Integration with Build Skills
+## Auto-Fix Behavior
 
-After `$roll-debug` finds issues:
+After diagnosis, roll-debug automatically assesses whether the root cause can be fixed — **no flag needed**. The decision is context-driven:
 
-```bash
-# For a single-file bug fix
-# → Create FIX-XXX in backlog
-# → $roll-fix FIX-XXX
-
-# For a complex multi-step fix
-# → Create US-XXX in backlog
-# → $roll-build US-XXX
 ```
+Root cause identified
+    │
+    ├── In project source + single-file + bounded scope
+    │   └── AUTO-FIX: enter $roll-fix TCR workflow
+    │       ├── Write regression test (RED)
+    │       ├── Apply fix (GREEN)
+    │       ├── TCR commit
+    │       ├── $roll-.review staged
+    │       ├── Push → CI → Deploy
+    │       └── Re-mount BB → re-verify on page
+    │
+    ├── In project source + cross-module / architectural
+    │   └── ESCALATE: create US-XXX in BACKLOG.md
+    │       ├── Suggest: $roll-build US-XXX
+    │       └── Report diagnosis findings
+    │
+    └── External (third-party API, infra, CDN, DNS)
+        └── REPORT ONLY
+            ├── What was found
+            └── Suggested actions (manual or external)
+```
+
+**Quality gates preserved**: When auto-fixing, all `$roll-fix` quality gates apply — TCR, `$roll-.review`, push, CI, deploy. No shortcuts.
+
+**Re-verification**: After a successful auto-fix, roll-debug re-mounts the BB probe on the same page and re-runs diagnosis to confirm the issue is actually resolved. If the issue persists, it reports the remaining findings.
+
+**User communication**: roll-debug always tells the user:
+- What was found (root cause, severity)
+- What was done (auto-fixed / escalated / reported)
+- Why (fixability assessment reasoning)

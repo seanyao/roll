@@ -53,8 +53,9 @@
 ---
 
 <a id="us-qa-003"></a>
-## US-QA-003 roll-.qa add CI failure triage guidance
+## US-QA-003 roll-.qa add CI failure triage guidance ✅
 
+**Completed**: 2026-05-10
 **Created**: 2026-05-10
 **Plan**: [e2e-lifecycle-plan.md](e2e-lifecycle-plan.md)
 
@@ -63,10 +64,10 @@
 - So that CI failures become actionable BACKLOG items instead of vague red badges
 
 **AC:**
-- [ ] New "CI Failure Triage" section added to roll-.qa SKILL.md
-- [ ] Guidance on reading CI logs and classifying failure severity (Critical/High/Medium/Low)
-- [ ] Guidance on creating FIX-XXX entries from CI failures
-- [ ] Reference to roll-fix for execution
+- [x] New "CI Failure Triage" section added to roll-.qa SKILL.md
+- [x] Guidance on reading CI logs and classifying failure severity (Critical/High/Medium/Low)
+- [x] Guidance on creating FIX-XXX entries from CI failures
+- [x] Reference to roll-fix for execution
 
 **Files:**
 - `skills/roll-.qa/SKILL.md`

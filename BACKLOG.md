@@ -75,3 +75,4 @@
 | ID | Description | Status |
 |----|-------------|--------|
 | IDEA-001 | conventions/global/AGENTS.md 加 Identity 规则：从 git config 读取，禁止硬编码个人数据 | ✅ Done |
+| IDEA-002 | roll CLI 启动时显示最近三个版本的 changelog 内容 | 📋 Todo |

@@ -1202,8 +1202,6 @@ cmd_status() {
     fi
   done
 
-  echo ""
-  _show_changelog
 }
 
 check_sync_status() {
@@ -1682,7 +1680,8 @@ main() {
     status)        cmd_status "$@" ;;
     peer)          cmd_peer "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
-    help|--help|-h|"") usage ;;
+    help|--help|-h) usage ;;
+    "") usage; _show_changelog ;;
     *)
       err "Unknown command: $cmd  未知命令: $cmd"
       echo ""

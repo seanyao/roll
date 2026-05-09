@@ -107,6 +107,7 @@
 | FIX-012 | roll-peer DeepSeek serve 探测 — pipefail 和 grep 范围修复 (PR #9, #10) | ✅ Done |
 | FIX-013 | roll init 工作流文件缺失 — 补全初始化所需模板文件 (PR #1 by @leoliu198998-ui) | ✅ Done |
 | FIX-014 | roll-build 技能 YAML 描述引号修复 (by @Sean via Kimi CLI) | ✅ Done |
+| FIX-015 | roll-release 缺少 GitHub Release 创建步骤 — 导致版本检查从不生效 | 📋 Todo |
 
 ## 💡 Ideas
 | ID | Description | Status |

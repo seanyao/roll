@@ -140,11 +140,11 @@ Rules:
 ```yaml
 peer:
   capability_map:
-    architecture: [claude, kimi, pi]
-    security: [claude, pi, kimi]
-    test: [codex, kimi, claude]
-    refactor: [kimi, claude, pi]
-    default: [kimi, claude, pi]
+    architecture: [claude, deepseek, kimi, pi]
+    security: [claude, deepseek, pi, kimi]
+    test: [codex, kimi, deepseek, claude]
+    refactor: [deepseek, kimi, claude, pi]
+    default: [deepseek, kimi, claude, pi]
 ```
 
 ### Adaptive Adjustment
@@ -159,6 +159,25 @@ If `streak` for a peer pair reaches the configured threshold (default: 3 consecu
 ### Peer Detection
 
 The bridge script detects installed peers via `command -v <tool>`. Only installed tools are considered. The current running tool is excluded (`exclude_self: true`).
+
+For `deepseek`, also check if serve mode is available as a more reliable alternative:
+```bash
+command -v deepseek && deepseek serve --http --dry-run 2>/dev/null && echo "serve_mode"
+```
+If serve mode is available, prefer HTTP transport over direct CLI invocation.
+
+### Peer Invocation Reference
+
+| Peer | Non-interactive command | Reliability | Notes |
+|------|------------------------|-------------|-------|
+| `claude` | `claude -p "<prompt>"` | ✅ High | Native, stable |
+| `deepseek` | `deepseek "<prompt>"` | ✅ Good | No TTY dependency |
+| `deepseek` (serve) | `curl localhost:<port>/v1/...` | ✅ High | Start with `deepseek serve --http`; preferred over direct CLI |
+| `kimi` | `kimi --quiet "<prompt>"` | ⚠️ Unverified | Verify non-interactive support before use |
+| `codex` | `codex exec --json --output-last-message "<prompt>"` | ⚠️ Unstable | Known CI failures due to Ink/TTY (issues [#1080](https://github.com/openai/codex/issues/1080), [#1340](https://github.com/openai/codex/issues/1340)); use only as fallback |
+| `pi` | `pi -p "<prompt>"` | ⚠️ Unverified | Verify non-interactive support before use |
+
+**CLI vs. API Key**: `claude`, `deepseek`, `kimi`, `codex` CLIs authenticate via existing subscription accounts — no separate API key required. This is the primary advantage of CLI transport over the MCP/HTTP approach.
 
 ## Workflow Integration
 
@@ -202,10 +221,11 @@ peer:
   call_timeout: 180        # seconds per round; configure based on your API latency
   fallback: file_mailbox    # direct_cli | file_mailbox | auto
   capability_map:
-    architecture: [claude, kimi, pi]
-    security: [claude, pi, kimi]
-    test: [codex, kimi, claude]
-    default: [kimi, claude, pi]
+    architecture: [claude, deepseek, kimi, pi]
+    security: [claude, deepseek, pi, kimi]
+    test: [codex, kimi, deepseek, claude]
+    refactor: [deepseek, kimi, claude, pi]
+    default: [deepseek, kimi, claude, pi]
   adaptive:
     streak_threshold: 3
     min_samples: 3
@@ -213,7 +233,9 @@ peer:
 
 ## Limitations
 
-1. **Reverse link reliability**: Direct CLI calls (`claude -p`, `kimi --quiet`, `pi -p`) are preferred. If API gateways block non-interactive endpoints, fallback to file mailbox (`~/.shared/roll/peer/mailbox/`).
-2. **Cost**: Every peer review consumes tokens on both sides. Only trigger for tasks where the cost of a wrong decision exceeds the cost of peer review.
+1. **Reverse link reliability**: Direct CLI calls are preferred. Reliability varies by tool — see Peer Invocation Reference table. If a peer fails consistently, the adaptive streak tracker marks it `abandoned` and falls back to the next candidate. File mailbox (`~/.shared/roll/peer/mailbox/`) is the last-resort fallback.
+   - `deepseek serve --http` is the most reliable option when available — prefer it over direct `deepseek` CLI invocation.
+   - `codex exec` has known TTY/Ink issues in non-interactive environments; treat as low-priority fallback.
+2. **Cost**: Every peer review consumes tokens on both sides. Only trigger for tasks where the cost of a wrong decision exceeds the cost of peer review. DeepSeek is the most cost-effective peer for general use.
 3. **Context window**: Large project handoff cards may consume significant context. Keep file pointers concise.
-4. **Tool differences**: Kimi, Claude, and Pi handle skills and AGENTS.md differently. The peer may interpret the same protocol slightly differently. This is expected and acceptable.
+4. **Tool differences**: Claude, DeepSeek, Kimi, Codex, and Pi interpret skills and AGENTS.md differently. The peer may apply the protocol slightly differently. This is expected and acceptable — the protocol is designed to tolerate variation.

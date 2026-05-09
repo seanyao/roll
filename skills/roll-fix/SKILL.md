@@ -318,7 +318,13 @@ Change the Status of the corresponding row from `📋 Todo` to `✅ Done`.
 - Change AC (if any) from `[ ]` to `[x]`
 - Update Files to reflect actual changed files
 
-### 12. Report
+### 12. Update Changelog
+
+```bash
+$roll-.changelog
+```
+
+### 13. Report
 
 Summarize:
 - shipped fix/enhancement
@@ -327,6 +333,7 @@ Summarize:
 - verification results
 - any residual risk
 - **BACKLOG.md updated** ✅
+- **CHANGELOG.md updated** ✅
 
 ## Required Artifacts
 

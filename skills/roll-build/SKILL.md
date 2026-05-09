@@ -490,6 +490,7 @@ git push
 📊 TCR Stats: <success rate, revert count if any>
 📋 Review Gate: <self-review findings summary>
 📝 BACKLOG: <US-ID> marked ✅ Done
+📄 CHANGELOG: $roll-.changelog → updated
 
 🎉 Shipped.
 
@@ -563,6 +564,7 @@ Before creating any file or directory:
 - [ ] **Verification Gate passed** (fresh evidence for tests, build, deploy, no regression)
 - [ ] **BACKLOG.md index status updated** (📋 → ✅, REQUIRED)
 - [ ] **`docs/features/<feature>.md` US section updated** (Completed date + [x] ACs, REQUIRED)
+- [ ] **CHANGELOG.md updated** via `$roll-.changelog`
 - [ ] Summary reported to user
 
 ---

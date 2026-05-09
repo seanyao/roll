@@ -28,6 +28,7 @@
     "skills/",
     "tools/",
     "template/",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ]
 }

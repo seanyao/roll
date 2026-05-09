@@ -592,6 +592,9 @@ cmd_update() {
   info "Re-syncing to AI tools...  正在重新同步到 AI 工具..."
   echo ""
   cmd_setup
+
+  echo ""
+  _show_changelog
 }
 
 # ─── Helper: merge global AGENTS.md into project (no type prompt) ────────────
@@ -1198,6 +1201,9 @@ cmd_status() {
       echo -e "  ${RED}-${NC} $tpl (missing / 缺失)"
     fi
   done
+
+  echo ""
+  _show_changelog
 }
 
 check_sync_status() {
@@ -1684,6 +1690,27 @@ main() {
       exit 1
       ;;
   esac
+}
+
+# ─── Show recent changelog entries ────────────────────────────────────────────
+_show_changelog() {
+  local changelog="${ROLL_PKG_DIR}/CHANGELOG.md"
+  [[ -f "$changelog" ]] || return 0
+
+  echo -e "${BOLD}Recent Changes  最近更新:${NC}"
+
+  local count=0 in_section=false
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^##\  ]]; then
+      (( ++count > 3 )) && break
+      in_section=true
+      echo ""
+      echo -e "  ${CYAN}${line#\#\# }${NC}"
+    elif [[ "$in_section" == true && -n "$line" ]]; then
+      echo "    $line"
+    fi
+  done < "$changelog"
+  echo ""
 }
 
 # ─── Version check (background, non-blocking, 24h cache) ─────────────────────

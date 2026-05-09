@@ -205,6 +205,52 @@ If project lacks Playwright setup:
 4. Run to create baseline
 5. Commit as separate "test infrastructure" change
 
+## CI Failure Triage
+
+When CI goes red, triage the failure into an actionable item instead of ignoring it.
+
+### Step 1: Read the CI Log
+
+```
+CI failure
+    │
+    ├── Which step failed? (lint / build / test / e2e)
+    ├── What is the error message?
+    ├── Is it reproducible locally?
+    └── Is it flaky (passes on retry)?
+```
+
+### Step 2: Classify Severity
+
+| Severity | Signal | Action |
+|----------|--------|--------|
+| Critical | Build or core tests fail, blocks all merges | Fix immediately via `$roll-fix` |
+| High | E2E test fails on a key user flow | Create FIX-XXX, fix within current sprint |
+| Medium | Visual regression, non-critical test failure | Create FIX-XXX, prioritize in backlog |
+| Low | Lint warning, flaky test (passes on retry) | Create FIX-XXX or IDEA-XXX, fix when convenient |
+
+### Step 3: Create Backlog Entry
+
+```bash
+# For fixable bugs — create FIX entry
+$roll-jot fix "CI: {step} fails — {root cause summary}"
+
+# For flaky/environmental issues — create IDEA entry
+$roll-jot idea "CI: investigate flaky {test name}"
+```
+
+### Step 4: Execute Fix
+
+```
+FIX-XXX created
+    │
+    ├── Critical / High → $roll-fix FIX-XXX (immediate)
+    ├── Medium → schedule in backlog, $roll-fix when ready
+    └── Low → backlog, fix opportunistically
+```
+
+All fixes go through `$roll-fix` TCR workflow — test, fix, review, commit, push, CI green.
+
 ## References
 
 - [Playwright Docs](https://playwright.dev/)

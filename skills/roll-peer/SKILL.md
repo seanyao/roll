@@ -162,7 +162,8 @@ The bridge script detects installed peers via `command -v <tool>`. Only installe
 
 For `deepseek`, also check if serve mode is available as a more reliable alternative:
 ```bash
-command -v deepseek && deepseek serve --http --dry-run 2>/dev/null && echo "serve_mode"
+# Use --help probe instead of --dry-run (which is not a standard deepseek flag)
+command -v deepseek && deepseek serve --help 2>/dev/null | grep -q "http" && echo "serve_mode"
 ```
 If serve mode is available, prefer HTTP transport over direct CLI invocation.
 
@@ -174,7 +175,7 @@ If serve mode is available, prefer HTTP transport over direct CLI invocation.
 | `deepseek` | `deepseek "<prompt>"` | ✅ Good | No TTY dependency |
 | `deepseek` (serve) | `curl localhost:<port>/v1/...` | ✅ High | Start with `deepseek serve --http`; preferred over direct CLI |
 | `kimi` | `kimi --quiet "<prompt>"` | ⚠️ Unverified | Verify non-interactive support before use |
-| `codex` | `codex exec --json --output-last-message "<prompt>"` | ⚠️ Unstable | Known CI failures due to Ink/TTY (issues [#1080](https://github.com/openai/codex/issues/1080), [#1340](https://github.com/openai/codex/issues/1340)); use only as fallback |
+| `codex` | `codex exec --json --output-last-message "<prompt>"` | ⚠️ Unstable | Flags unverified against current CLI version. Known CI failures due to Ink/TTY (issues [#1080](https://github.com/openai/codex/issues/1080), [#1340](https://github.com/openai/codex/issues/1340)); use only as fallback |
 | `pi` | `pi -p "<prompt>"` | ⚠️ Unverified | Verify non-interactive support before use |
 
 **CLI vs. API Key**: `claude`, `deepseek`, `kimi`, `codex` CLIs authenticate via existing subscription accounts — no separate API key required. This is the primary advantage of CLI transport over the MCP/HTTP approach.

@@ -1,7 +1,7 @@
 ---
 name: roll-release
 license: MIT
-allowed-tools: "Read, Edit, Bash(git:*), Bash(npm:*), Bash(sed:*), Bash(date:*)"
+allowed-tools: "Read, Edit, Bash(git:*), Bash(npm:*), Bash(sed:*), Bash(date:*), Bash(gh:*)"
 description: "Release skill for roll maintainers. Calculates next version (YYYY.MMDD.N format, auto-increments N from today's git tags), updates VERSION in bin/roll and package.json, commits, tags, and pushes to trigger npm auto-publish via GitHub Actions. Trigger: release, publish, 发版, 发布新版本."
 ---
 
@@ -79,7 +79,22 @@ git tag "v${version}"
 git push && git push --tags
 ```
 
-### Step 5: Publish to npm
+### Step 5: Create GitHub Release
+
+Extract the current version's changelog entries and create a GitHub Release:
+
+```bash
+# Extract release notes from CHANGELOG.md (current version's section)
+notes=$(sed -n "/^## ${version}$/,/^## /{ /^## ${version}$/d; /^## /d; p; }" CHANGELOG.md)
+
+gh release create "v${version}" \
+  --title "v${version}" \
+  --notes "${notes:-Release v${version}}"
+```
+
+This enables the background update check in `bin/roll` (`_check_update_async`), which queries the GitHub Releases API.
+
+### Step 6: Publish to npm
 
 ```bash
 npm publish --access public
@@ -87,13 +102,14 @@ npm publish --access public
 
 This will open a browser for 2FA verification. Wait for it to complete before continuing.
 
-### Step 6: Confirm
+### Step 7: Confirm
 
 After publish, show:
 ```
 ✅ Released v{version}
 🏷  Tag: v{version} pushed to origin
 📦 npm published: {package_name}@{version}   # package name read from package.json
+🐙 GitHub Release: https://github.com/{owner}/{repo}/releases/tag/v{version}
 🔗 https://www.npmjs.com/package/{package_name}
 ```
 

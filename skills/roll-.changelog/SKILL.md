@@ -89,11 +89,11 @@ YYYY.MM.DD-2
 # Changelog
 
 ## 2026.05.10
-- **Added**: <latest completed feature>
-- **Fixed**: <latest resolved bug>
+- **Added**: E2E 自动沉淀 — 每个 Story 交付时自动写一个端到端测试，项目逐步积累可回放的 E2E 套件
+- **Fixed**: 同步时清理已删除文件，防止用户机器残留幽灵文件
 
 ## 2026.05.04
-- **Added**: <earlier completed feature>
+- **Added**: BB 注入模式 — 对未集成 Black Box 的页面自动注入诊断探针，统一数据采集接口
 
 ## 2026.04.28
 - ...
@@ -103,10 +103,10 @@ YYYY.MM.DD-2
 ```markdown
 # Changelog
 
-## 2026.05.10    ← new entry prepended at top
-- **Added**: <just-deployed feature>
+## 2026.05.10    ← 新条目插入顶部
+- **Added**: Changelog 自动生成 — 每次部署后自动更新，首次运行时回填全部历史记录
 
-## 2026.05.04    ← existing entries unchanged
+## 2026.05.04    ← 已有条目不动
 - ...
 ```
 

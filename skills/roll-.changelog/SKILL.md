@@ -58,6 +58,8 @@ Create mode:
 - UX improvements (layout, interaction enhancements)
 - Performance/reliability improvements
 
+**语言：中文。** 所有 changelog 条目必须用中文撰写。
+
 **Description format:** `功能名 — 做了什么 + 用在什么场景`，一句话，精简。
 
 Good:

@@ -26,3 +26,31 @@
 **Dependencies:**
 - Depends on: none
 - Depended on by: none
+
+---
+
+<a id="us-debug-002"></a>
+## US-DEBUG-002 roll-debug auto-fix — diagnose then auto-TCR when fixable
+
+**Created**: 2026-05-10
+
+- As a developer debugging a broken page
+- I want roll-debug to automatically fix the issue when the root cause is in project source code
+- So that diagnosis and repair happen in one continuous flow without manual handoff
+
+**AC:**
+- [ ] After diagnosis, roll-debug assesses if root cause is in project source and fixable
+- [ ] If fixable (single-file, bounded): auto-enters roll-fix's TCR workflow (test → fix → review → commit → push → CI → deploy)
+- [ ] If complex (cross-module, architectural): creates US-XXX, suggests `$roll-build`
+- [ ] If external (third-party API, infra): reports findings only with suggested actions
+- [ ] After successful fix: re-mounts BB probe, re-verifies the issue is resolved on the page
+- [ ] All roll-fix quality gates preserved (TCR, roll-.review, push, CI)
+- [ ] Integration section in SKILL.md rewritten to reflect auto-fix behavior and escalation paths
+- [ ] Tells user what was found and what was done (or why it couldn't auto-fix)
+
+**Files:**
+- `skills/roll-debug/SKILL.md`
+
+**Dependencies:**
+- Depends on: none
+- Depended on by: none

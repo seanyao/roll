@@ -263,6 +263,35 @@ MICRO-STEP {N}: {description of smallest testable change}
 
 Accumulate 3–5 micro-commits per Action. Each commit is a guaranteed working state.
 
+### Phase 5.5: E2E Deposit
+
+After TCR micro-steps pass, deposit an E2E test for this Story's core user flow.
+
+```
+E2E DEPOSIT
+
+   Step 1: Detect
+      └── Read project's existing E2E infrastructure
+          (test directories, config files, framework, naming conventions)
+
+   Step 2: Write
+      └── One E2E test covering the Story's golden path
+          (the critical user journey this Story delivers)
+
+   Step 3: Run
+      └── Execute the new E2E test
+
+   Step 4: TCR
+      ├── ✅ GREEN → git commit -m "tcr: e2e deposit for {story}"
+      └── ❌ RED   → Fix via TCR cycle until green
+```
+
+**Rules:**
+- Follow whatever E2E patterns the project already uses — framework, directory, naming
+- If no E2E infrastructure exists, reference `$roll-.qa` "Missing Test Infrastructure" section to bootstrap minimally, then deposit
+- One test per Story — covers the golden path, not exhaustive edge cases (those are unit/integration from Phase 5)
+- Each deposited E2E becomes a replayable case: CI runs it on every push, Sentinel can sample it against production
+
 ### Phase 6: Pre-Push CI Gate
 
 After all micro-steps, run full CI locally before pushing:
@@ -523,6 +552,7 @@ Before creating any file or directory:
 - [ ] Story and Action clearly defined
 - [ ] Test design reviewed and approved
 - [ ] **TCR cycles completed** (all micro-steps via Test && Commit)
+- [ ] **E2E deposited** (golden path test for this Story, committed via TCR)
 - [ ] All commits are green states (no broken commits)
 - [ ] Local CI checks passed (format + lint + build + test)
 - [ ] Self-code-review passed, blocking issues fixed via TCR
@@ -599,5 +629,6 @@ The agent must explicitly produce (in text) before or during execution:
 - **Test Design**: scenarios, edge cases, test types
 - **Test Design Review**: coverage validation result
 - **TCR Log**: micro-step descriptions and commit count
+- **E2E Deposit**: golden path E2E test file for this Story
 - **Quality Review**: post-TCR code review result
 - **Deployment target**: where it will be verified

@@ -36,11 +36,20 @@
 |-------|-------------|--------|
 | [US-OPENCODE-001](docs/features/opencode-support.md#us-opencode-001) | bin/roll integration — detect opencode, sync global AGENTS.md | ✅ Done |
 
+## Epic: QA & Testing
+### Feature: e2e-lifecycle
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-QA-001](docs/features/e2e-lifecycle.md#us-qa-001) | roll-build Phase 5.5 — E2E Deposit after TCR | 📋 Todo |
+| [US-QA-002](docs/features/e2e-lifecycle.md#us-qa-002) | Template CI add E2E gating step | 📋 Todo |
+| [US-QA-003](docs/features/e2e-lifecycle.md#us-qa-003) | roll-.qa add CI failure triage guidance | 📋 Todo |
+
 ## Epic: Diagnostics
 ### Feature: roll-debug
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-DEBUG-001](docs/features/roll-debug.md#us-debug-001) | Add BB Injection mode — mount BB on pages without native integration | ✅ Done |
+| [US-DEBUG-002](docs/features/roll-debug.md#us-debug-002) | roll-debug auto-fix — diagnose then auto-TCR when fixable | 📋 Todo |
 
 ## Epic: Release Management
 ### Feature: roll-release

@@ -2310,6 +2310,16 @@ _dashboard() {
   fi
   if $_dash_loop_enabled; then
     echo -e "  Loop  ${GREEN}● on${NC}   Agent: ${CYAN}${agent}${NC}"
+    if [[ "$(uname)" == "Darwin" ]]; then
+      for svc_info in "loop:hourly" "dream:03:00" "brief:09:00"; do
+        local svc="${svc_info%%:*}" schedule="${svc_info#*:}"
+        if _launchd_is_loaded "$(_launchd_label "$svc" "$project_path")"; then
+          printf "    ${GREEN}%-8s ● enabled${NC}  (%s)\n" "$svc" "$schedule"
+        else
+          printf "    ${YELLOW}%-8s ○ disabled${NC} (%s)\n" "$svc" "$schedule"
+        fi
+      done
+    fi
   else
     echo -e "  Loop  ${YELLOW}○ off${NC}   run: roll loop on"
   fi

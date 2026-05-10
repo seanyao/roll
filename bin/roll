@@ -2018,6 +2018,51 @@ _loop_reset() {
   fi
 }
 
+# Count `tcr:` prefixed commits in the current git repo since started_at timestamp.
+_loop_tcr_count() {
+  local started_at="$1"
+  git log --oneline --since="${started_at}" 2>/dev/null \
+    | awk '/^[a-f0-9]+ tcr:/{n++} END{print n+0}'
+}
+
+# Verify TCR rhythm after a story completes. Returns 0 if ok, 1 if no TCR commits.
+# On failure: reverts story in BACKLOG.md to 📋 Todo and writes ALERT.
+_loop_enforce_tcr() {
+  local story_id="$1"
+  local started_at="${2:-}"
+
+  [[ -z "$started_at" ]] && return 0
+
+  local count; count=$(_loop_tcr_count "$started_at")
+
+  if [[ "$count" -eq 0 ]]; then
+    # Revert story status
+    if [[ -f "BACKLOG.md" ]]; then
+      local tmp; tmp=$(mktemp)
+      sed "/\[${story_id}\]/s/ | ✅ Done |/ | 📋 Todo |/" BACKLOG.md > "$tmp" \
+        && mv "$tmp" BACKLOG.md
+    fi
+
+    # Write ALERT
+    mkdir -p "$(dirname "$_LOOP_ALERT")"
+    cat > "$_LOOP_ALERT" << EOF
+# ALERT — TCR check failed
+
+**Time**: $(date '+%Y-%m-%d %H:%M')
+**Story**: ${story_id}
+**Reason**: zero tcr: commits since story start (${started_at})
+
+**Action required** (choose one):
+- Add TCR commits and re-run: \`roll loop now\`
+- Take over manually: \`\$roll-build ${story_id}\`
+- Reset and retry: \`roll loop reset\` then \`roll loop now\`
+EOF
+    return 1
+  fi
+
+  return 0
+}
+
 _loop_monitor() {
   local interval="${1:-3}"
   local project_path; project_path=$(pwd -P)

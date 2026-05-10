@@ -1760,7 +1760,12 @@ _launchd_plist_path() {
 
 _write_launchd_plist() {
   local plist_path="$1" label="$2" project_path="$3"
-  local minute="$4" hour="$5" roll_bin="$6" subcmd="$7" log_dir="$8"
+  local minute="$4" hour="$5" runner_script="$6"
+
+  local hour_xml=""
+  [[ -n "$hour" ]] && hour_xml="    <key>Hour</key>
+    <integer>${hour}</integer>
+"
 
   local content
   content="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
@@ -1773,20 +1778,13 @@ _write_launchd_plist() {
   <array>
     <string>/bin/bash</string>
     <string>-l</string>
-    <string>-c</string>
-    <string>cd \"${project_path}\" ; \"${roll_bin}\" ${subcmd} >> \"${log_dir}/cron.log\" 2>&amp;1</string>
+    <string>${runner_script}</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Minute</key>
     <integer>${minute}</integer>
-    <key>Hour</key>
-    <integer>${hour}</integer>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>${log_dir}/launchd.out</string>
-  <key>StandardErrorPath</key>
-  <string>${log_dir}/launchd.err</string>
+${hour_xml}  </dict>
   <key>WorkingDirectory</key>
   <string>${project_path}</string>
 </dict>
@@ -1796,6 +1794,13 @@ _write_launchd_plist() {
     return 0
   fi
   printf '%s\n' "$content" > "$plist_path"
+}
+
+_write_runner_script() {
+  local script_path="$1" project_path="$2" cmd="$3" log_path="$4"
+  mkdir -p "$(dirname "$script_path")"
+  printf '#!/bin/bash -l\ncd "%s" && %s >> "%s" 2>&1\n' "$project_path" "$cmd" "$log_path" > "$script_path"
+  chmod +x "$script_path"
 }
 
 _launchd_is_loaded() {

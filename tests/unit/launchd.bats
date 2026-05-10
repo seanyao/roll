@@ -60,15 +60,14 @@ setup() {
   local plist="${tmp_dir}/test.plist"
   local label="com.roll.loop.test"
   local proj="/tmp/proj"
-  local roll_bin="/usr/local/bin/roll"
-  local log_dir="${tmp_dir}"
+  local runner="${tmp_dir}/run.sh"
 
-  _write_launchd_plist "$plist" "$label" "$proj" "0" "1" "$roll_bin" "loop now" "$log_dir"
+  _write_launchd_plist "$plist" "$label" "$proj" "0" "1" "$runner"
   local mtime1; mtime1=$(stat -f "%m" "$plist" 2>/dev/null || stat -c "%Y" "$plist")
 
   # Small sleep to ensure mtime would change if file is rewritten
   sleep 1
-  _write_launchd_plist "$plist" "$label" "$proj" "0" "1" "$roll_bin" "loop now" "$log_dir"
+  _write_launchd_plist "$plist" "$label" "$proj" "0" "1" "$runner"
   local mtime2; mtime2=$(stat -f "%m" "$plist" 2>/dev/null || stat -c "%Y" "$plist")
 
   [ "$mtime1" = "$mtime2" ]
@@ -78,13 +77,35 @@ setup() {
 @test "_write_launchd_plist: creates valid plist XML" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
+  local runner="${tmp_dir}/run.sh"
 
-  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "0" "1" \
-    "/usr/local/bin/roll" "loop now" "$tmp_dir"
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "0" "1" "$runner"
 
   [ -f "$plist" ]
   grep -q "com.roll.loop.test" "$plist"
   grep -q "StartCalendarInterval" "$plist"
   grep -q "<integer>0</integer>" "$plist"
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_launchd_plist: hourly plist omits Hour key" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local plist="${tmp_dir}/test.plist"
+
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "0" "" "${tmp_dir}/run.sh"
+
+  ! grep -q "<key>Hour</key>" "$plist"
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_runner_script: creates executable script" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local script="${tmp_dir}/run.sh"
+
+  _write_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log"
+
+  [ -f "$script" ]
+  [ -x "$script" ]
+  grep -q "/tmp/proj" "$script"
   rm -rf "$tmp_dir"
 }

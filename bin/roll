@@ -1834,6 +1834,21 @@ _write_runner_script() {
   chmod +x "$script_path"
 }
 
+# Like _write_runner_script but prepends an active window guard.
+# Silently exits when current hour is outside [active_start, active_end).
+_write_loop_runner_script() {
+  local script_path="$1" project_path="$2" cmd="$3" log_path="$4"
+  local active_start="${5:-10}" active_end="${6:-18}"
+  mkdir -p "$(dirname "$script_path")"
+  cat > "$script_path" << SCRIPT
+#!/bin/bash -l
+h=\$(printf '%d' "\$(date +%H)")
+if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
+cd "${project_path}" && ${cmd} >> "${log_path}" 2>&1
+SCRIPT
+  chmod +x "$script_path"
+}
+
 _launchd_is_loaded() {
   launchctl list "$1" &>/dev/null 2>&1
 }

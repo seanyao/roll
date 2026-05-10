@@ -110,6 +110,19 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
+@test "_write_loop_runner_script: creates executable script with active window check" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local script="${tmp_dir}/run.sh"
+
+  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18"
+
+  [ -f "$script" ]
+  [ -x "$script" ]
+  grep -q "10" "$script"
+  grep -q "18" "$script"
+  rm -rf "$tmp_dir"
+}
+
 # ─── _config_read_int ─────────────────────────────────────────────────────────
 
 @test "_config_read_int: returns default when key absent" {

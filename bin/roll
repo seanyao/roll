@@ -2158,10 +2158,24 @@ _loop_monitor() {
     # Services status (three services on macOS, single on Linux)
     echo -e "  ${BOLD}Services  服务状态${NC}   Agent: ${CYAN}${agent}${NC}"
     if [[ "$(uname)" == "Darwin" ]]; then
-      local svc_info svc schedule
-      for svc_info in "loop:hourly" "dream:03:00" "brief:09:00"; do
-        svc="${svc_info%%:*}"
-        schedule="${svc_info#*:}"
+      local active_start active_end loop_minute dream_hour dream_minute brief_hour brief_minute
+      active_start=$(_config_read_int "loop_active_start" "10")
+      active_end=$(_config_read_int "loop_active_end" "18")
+      loop_minute=$(_config_read_int "loop_minute" "$(_loop_derive_minute "$project_path" 0)")
+      dream_hour=$(_config_read_int "loop_dream_hour" "3")
+      dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
+      brief_hour=$(_config_read_int "loop_brief_hour" "9")
+      brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
+
+      local loop_sched dream_sched brief_sched
+      loop_sched=$(printf "every hour :%02d  active %02d:00–%02d:00" "$loop_minute" "$active_start" "$active_end")
+      dream_sched=$(printf "%02d:%02d" "$dream_hour" "$dream_minute")
+      brief_sched=$(printf "%02d:%02d" "$brief_hour" "$brief_minute")
+
+      local svcs=("loop" "dream" "brief")
+      local scheds=("$loop_sched" "$dream_sched" "$brief_sched")
+      for i in "${!svcs[@]}"; do
+        local svc="${svcs[$i]}" schedule="${scheds[$i]}"
         if _launchd_is_loaded "$(_launchd_label "$svc" "$project_path")"; then
           printf "    ${GREEN}%-8s ● enabled${NC}   (%s)\n" "$svc" "$schedule"
         else

@@ -1947,6 +1947,15 @@ _loop_on() {
   local project_path; project_path=$(pwd -P)
   local agent; agent=$(_project_agent)
 
+  local active_start active_end loop_minute dream_hour dream_minute brief_hour brief_minute
+  active_start=$(_config_read_int "loop_active_start" "10")
+  active_end=$(_config_read_int "loop_active_end" "18")
+  loop_minute=$(_config_read_int "loop_minute" "$(_loop_derive_minute "$project_path" 0)")
+  dream_hour=$(_config_read_int "loop_dream_hour" "3")
+  dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
+  brief_hour=$(_config_read_int "loop_brief_hour" "9")
+  brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
+
   if [[ "$(uname)" == "Darwin" ]]; then
     _install_launchd_plists "$project_path" >/dev/null
 
@@ -1964,9 +1973,10 @@ _loop_on() {
     fi
 
     ok "Loop enabled  已启用"
-    echo "  • roll-loop   every hour :00    每小时整点"
-    echo "  • roll-.dream nightly at 03:00  每晚 03:00"
-    echo "  • roll-brief  daily at 09:00    每天 09:00"
+    printf "  • roll-loop   every hour :%02d  active %02d:00–%02d:00  每小时 :%02d（窗口 %02d:00–%02d:00）\n" \
+      "$loop_minute" "$active_start" "$active_end" "$loop_minute" "$active_start" "$active_end"
+    printf "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d\n" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
+    printf "  • roll-brief  daily at %02d:%02d  每天 %02d:%02d\n" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
     echo "  • Agent: ${agent}  (change: roll agent use <name>)"
     return 0
   fi
@@ -1986,15 +1996,16 @@ _loop_on() {
 
   (
     crontab -l 2>/dev/null
-    echo "0 * * * * ${loop_cmd} ${_LOOP_TAG}:${project_path}"
-    echo "0 1 * * * ${dream_cmd} ${_LOOP_TAG}:${project_path}"
-    echo "0 8 * * * ${brief_cmd} ${_LOOP_TAG}:${project_path}"
+    printf "%d * * * * %s %s:%s\n" "$loop_minute" "$loop_cmd" "$_LOOP_TAG" "$project_path"
+    printf "%d %d * * * %s %s:%s\n" "$dream_minute" "$dream_hour" "$dream_cmd" "$_LOOP_TAG" "$project_path"
+    printf "%d %d * * * %s %s:%s\n" "$brief_minute" "$brief_hour" "$brief_cmd" "$_LOOP_TAG" "$project_path"
   ) | crontab -
 
   ok "Loop enabled  已启用"
-  echo "  • roll-loop   every hour :00    每小时整点"
-  echo "  • roll-.dream nightly at 03:00  每晚 03:00"
-  echo "  • roll-brief  daily at 09:00    每天 09:00"
+  printf "  • roll-loop   every hour :%02d  active %02d:00–%02d:00  每小时 :%02d（窗口 %02d:00–%02d:00）\n" \
+    "$loop_minute" "$active_start" "$active_end" "$loop_minute" "$active_start" "$active_end"
+  printf "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d\n" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
+  printf "  • roll-brief  daily at %02d:%02d  每天 %02d:%02d\n" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
   echo "  • Agent: ${agent}  (change: roll agent use <name>)"
 }
 

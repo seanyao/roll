@@ -78,7 +78,7 @@ roll update
 | `roll brief` | 🤖 展示最新简报（超过 24h 自动重新生成） |
 | `roll peer` | 🤖 跨 Agent 代码评审与协商 |
 | `roll release` | 🤖 同步日志 + 版本号 + tag + npm publish + GitHub Release |
-| `roll`_（无参数，在项目目录）_ | Dashboard：loop 状态、待办数量、最新简报摘要 |
+| `roll` _（无参数，在项目目录）_ | Dashboard：loop 状态、待办数量、最新简报摘要 |
 
 ### 典型流程
 
@@ -184,7 +184,7 @@ roll agent use kimi           # 本项目所有 🤖 命令改用 kimi
 | 技能 | 说明 |
 |------|------|
 | `$roll-sentinel` | 随机化生产巡检，自适应热点权重 |
-| `$roll-debug` | 基于 Playwright 的现场取证 + 根因分析 |
+| `$roll-debug` | 深度页面诊断 + 根因分析（Black Box 探针） |
 
 **自主演化（可选，通过 `roll loop on` 启用）**
 

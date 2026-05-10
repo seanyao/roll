@@ -387,7 +387,15 @@ Without CD there is no verifiable target, rendering the Verification Gate meanin
 
 ---
 
-### 4.5 Adversarial TDD: `$roll-spar`
+### 4.5 Cross-Agent Code Review: `$roll-peer`
+
+`$roll-peer` implements bilateral negotiation-style code review across AI clients. Supports arbitrary pairing between Claude, Kimi, DeepSeek, and Codex.
+
+How it works: the initiating agent submits a change summary and diff; the receiving agent independently reviews and issues an APPROVE / REFINE / OBJECT verdict. REFINE triggers revision and re-review; OBJECT escalates to discussion. The entire process is managed via `roll peer` CLI, with state persisted locally and full history/reset support.
+
+Automatic trigger: `$roll-design` optionally invokes `$roll-peer` during direction review and plan review phases, where a different agent challenges the chosen direction or complete plan.
+
+### 4.6 Adversarial TDD: `$roll-spar`
 
 For high-risk paths — authorization, payments, data integrity — standard TDD coverage is insufficient. Tests and implementation are written by the same Agent, creating cognitive blind spots. `$roll-spar` introduces an adversarial mechanism:
 
@@ -406,7 +414,7 @@ Automatic trigger signals: when a Story touches authentication/authorization, pa
 >
 > On round three, the Attacker cannot produce any new RED tests — the adversarial session ends. Test coverage on the permission module rises from the typical TDD baseline of 71% to 93%.
 
-### 4.6 Delivery Traceability
+### 4.7 Delivery Traceability
 
 After each successful deployment, two mechanisms ensure deliverables remain traceable:
 
@@ -587,23 +595,28 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 
 ### 9.2 Components
 
-**`roll-loop`** — Runs hourly via local cron. Scans BACKLOG for `📋 Todo` items and routes them: `US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`. Caps items per run to limit blast radius. Triggers `roll-brief` when a Feature completes.
+**`roll-loop`** — Runs hourly via macOS launchd (Linux: crontab). Scans BACKLOG for `📋 Todo` items and routes them: `US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`. Caps items per run to limit blast radius. Triggers `roll-brief` when a Feature completes. Built-in TCR enforcement: after a story completes, checks for `tcr:` micro-commits — if zero are found, reverts the story to Todo with an ALERT, preventing agents from skipping the TCR rhythm.
 
-**`roll-.dream`** — Runs nightly (01:00 local) via local cron. Scans the codebase for dead code, architectural drift against `docs/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `docs/dream/YYYY-MM-DD.md`.
+**`roll-.dream`** — Runs nightly (03:00 local) via macOS launchd (Linux: crontab). Scans the codebase for dead code, architectural drift against `docs/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `docs/dream/YYYY-MM-DD.md`.
 
-**`roll-brief`** — Three trigger modes: Feature completion (via roll-loop), daily morning (08:00), or on-demand (`roll brief`). Produces an owner-facing digest: what's done, what's pending, escalations, and a release-readiness verdict. Distinct from `roll-.changelog` (user-facing release notes).
+**`roll-brief`** — Three trigger modes: Feature completion (via roll-loop), daily morning (09:00, via launchd), or on-demand (`roll brief`). Produces an owner-facing digest: what's done, what's pending, escalations, and a release-readiness verdict. Distinct from `roll-.changelog` (user-facing release notes).
 
-### 9.3 Why Local Cron, Not GitHub Actions
+### 9.3 Why Local Scheduling, Not GitHub Actions
 
 GitHub Actions runs on remote servers with no access to the local codebase, local test runner, or local agent CLI. The TCR loop — which is the core of `$roll-build` — requires local execution. Using GitHub Actions would mean the agent could only read the repo as a snapshot, not run tests, not observe the dev environment.
 
-Local cron invokes the agent CLI directly in the project directory:
+On macOS, Roll uses **launchd** (plists installed to `~/Library/LaunchAgents/`); on Linux, crontab. `roll loop on` automatically installs scheduling for all three services (loop/dream/brief); `roll loop off` removes them.
 
 ```bash
-0 * * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
+# macOS launchd plists (auto-generated, no manual editing needed)
+~/Library/LaunchAgents/com.roll.loop.<project-slug>.plist
+~/Library/LaunchAgents/com.roll.dream.<project-slug>.plist
+~/Library/LaunchAgents/com.roll.brief.<project-slug>.plist
 ```
 
-If the agent supports native scheduling (Claude Code hooks, opencode scheduled tasks), that is preferred over raw cron for cleaner lifecycle management.
+`roll loop monitor` provides a real-time `top`-like view of all three services: launchd status, current execution state, pending queue, alerts, and live log tail.
+
+If the agent supports native scheduling (Claude Code hooks, opencode scheduled tasks), that is preferred over raw launchd/cron for cleaner lifecycle management.
 
 ### 9.4 Per-Project Agent Configuration
 
@@ -647,7 +660,7 @@ roll                      # project dashboard (in project dir): loop status + br
 **Validated:**
 
 - Feedback-driven continuous delivery loop (Design → Build → Check → Fix)
-- A standardized skill set of 16 Skills (11 active + 5 passive support)
+- A standardized skill set of 20 Skills (12 active + 8 passive support)
 - Cross-AI-client configuration consistency management (`roll` CLI)
 - TCR micro-commits + Verification Gate quality assurance mechanism
 - Multi-Agent audit tracing via `Co-Authored-By` trailers (written natively by each AI tool)
@@ -669,15 +682,28 @@ roll                      # project dashboard (in project dir): loop status + br
 | `$roll-build` | Implementation | Story ID / one-sentence requirement | Deployed code + verification evidence |
 | `$roll-spar` | Defensive implementation | Feature description | Adversarial test suite + implementation code |
 | `$roll-fix` | Bug fix | Fix ID | Fix code + regression test |
+| `$roll-release` | Release | — | Version + tag + npm publish + GitHub Release |
+| `$roll-peer` | Code review | Change diff | APPROVE / REFINE / OBJECT verdict |
 | `$roll-sentinel` | Patrol | Patrol strategy | Health report / FIX entries |
-| `$roll-debug` | Debugging & Diagnosis | URL / Diagnostic JSON | Root cause analysis + remediation recommendations |
+| `$roll-debug` | Debugging & Diagnosis | URL | Diagnostic JSON + screenshots + root cause analysis |
+| `$roll-loop` | Autonomous execution | BACKLOG todos | Completed Story / Fix / Refactor |
+| `$roll-.dream` | Autonomous scan | Codebase | REFACTOR entries + scan log |
+| `$roll-brief` | Briefing | Project state | Owner-facing digest + release readiness verdict |
 
 ## Appendix B: CLI Command Quick Reference
 
+Commands fall into two categories: bash commands run pure shell logic; agent commands (🤖) launch a full AI agent session to execute a SKILL.md.
+
 | Command | Purpose |
 |---------|---------|
-| `roll setup` | First-time install on this machine, or re-sync after editing config (use `--force` to overwrite local cache) |
+| `roll setup [-f]` | First-time install on this machine, or re-sync (use `--force` to overwrite local cache) |
 | `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via setup |
 | `roll init` | Create AGENTS.md + BACKLOG.md + docs/features/ in cwd; re-merges if AGENTS.md exists |
-
 | `roll status` | Display current sync status, skill links, and detected AI tools |
+| `roll backlog` | Show all pending tasks from BACKLOG.md |
+| `roll agent [use <name>\|list]` | Per-project agent selection — affects all 🤖 commands |
+| `roll loop <on\|off\|now\|status\|monitor\|resume\|reset>` | 🤖 Manage the autonomous BACKLOG executor (three-service: loop/dream/brief) |
+| `roll brief` | 🤖 Show latest owner brief (regenerate if stale >24h) |
+| `roll peer` | 🤖 Cross-agent code review and negotiation |
+| `roll release` | 🤖 Sync changelog + version bump + tag + npm publish + GitHub Release |
+| `roll` (no args, in project dir) | Dashboard: loop status, pending count, latest brief summary |

@@ -184,7 +184,7 @@ Research → Design → Build → Check → Fix → (loop)
 | Skill | Description |
 |-------|-------------|
 | `$roll-sentinel` | Randomized production patrol with adaptive hot-spot weighting |
-| `$roll-debug` | Playwright-based live forensics + root cause analysis |
+| `$roll-debug` | Deep page diagnostics + root cause analysis (Black Box probe) |
 
 **Autonomous Evolution (optional, via `roll loop on`)**
 

@@ -385,7 +385,15 @@ CI PASS
 
 ---
 
-### 4.5 对抗式 TDD：`$roll-spar`
+### 4.5 跨 Agent 代码评审：`$roll-peer`
+
+`$roll-peer` 实现跨 AI 客户端的双边协商式代码评审。支持 Claude、Kimi、DeepSeek、Codex 之间的任意配对。
+
+工作模式：发起方 agent 提交变更摘要和 diff，接收方 agent 独立审查并给出 APPROVE / REFINE / OBJECT 决议。REFINE 触发修改后重审，OBJECT 升级为讨论。整个过程通过 `roll peer` CLI 管理，状态持久化在本地，支持查看历史和重置。
+
+自动触发场景：`$roll-design` 在方向评审和方案评审阶段可选触发 `$roll-peer`，由不同 agent 对设计方向或完整方案进行质疑。
+
+### 4.6 对抗式 TDD：`$roll-spar`
 
 在鉴权、支付、数据完整性等高风险路径上，标准 TDD 的覆盖度不够——测试和实现由同一个 Agent 编写，存在认知盲区。`$roll-spar` 引入对抗机制：
 
@@ -404,7 +412,7 @@ CI PASS
 >
 > 第三轮 Attacker 无法写出新的 RED 测试，对抗结束。权限模块的测试覆盖率从常规 TDD 的 71% 提升至 93%。
 
-### 4.6 交付沉淀
+### 4.7 交付沉淀
 
 每次成功部署后，两个机制确保交付物的可追溯性：
 
@@ -669,18 +677,31 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 |-------|------|------|------|
 | `$roll-research` | 调研 | 研究主题 | Markdown/PDF 调研报告 |
 | `$roll-design` | 设计 | 需求描述 | BACKLOG.md + docs/features/ |
-| `$roll-build` | 实现 / 快速实现 | Story ID 或一句话需求 | 已部署代码 + 验证证据 |
+| `$roll-build` | 实现 | Story ID 或一句话需求 | 已部署代码 + 验证证据 |
 | `$roll-spar` | 防御性实现 | 功能描述 | 攻防测试套件 + 实现代码 |
 | `$roll-fix` | 修复 | Fix ID | 修复代码 + 回归测试 |
+| `$roll-release` | 发布 | — | 版本号 + tag + npm publish + GitHub Release |
+| `$roll-peer` | 评审 | 变更 diff | APPROVE / REFINE / OBJECT 决议 |
 | `$roll-sentinel` | 巡检 | 巡检策略 | 健康报告 / FIX 条目 |
 | `$roll-debug` | 调试 + 诊断 | URL | 诊断 JSON + 截图 + 根因分析 |
+| `$roll-loop` | 自主执行 | BACKLOG 待办 | 已完成的 Story / Fix / Refactor |
+| `$roll-.dream` | 自主巡检 | 代码库 | REFACTOR 条目 + 巡检日志 |
+| `$roll-brief` | 简报 | 项目状态 | Owner 面简报 + 发布就绪建议 |
 
 ## 附录 B：CLI 命令速查
 
+命令分两类：bash 命令执行纯 shell 逻辑；agent 命令（🤖）启动完整 AI agent 会话执行 SKILL.md。
+
 | 命令 | 作用 |
 |------|------|
-| `roll setup` | 首次安装或重新同步：初始化 `~/.roll/` 并把约定与技能分发到所有 AI 工具（加 `--force` 覆盖本地缓存） |
+| `roll setup [-f]` | 首次安装或重新同步：初始化 `~/.roll/` 并把约定与技能分发到所有 AI 工具（加 `--force` 覆盖本地缓存） |
 | `roll update` | 一键升级：`npm install -g @seanyao/roll@latest` + 重新执行 setup |
 | `roll init` | 在项目目录创建 AGENTS.md + BACKLOG.md + docs/features/；已有 AGENTS.md 则重新合并 |
-
 | `roll status` | 显示同步状态、技能软链接、检测到的 AI 工具 |
+| `roll backlog` | 显示 BACKLOG.md 中所有待处理任务 |
+| `roll agent [use <name>\|list]` | 切换项目 agent——影响所有 🤖 命令 |
+| `roll loop <on\|off\|now\|status\|monitor\|resume\|reset>` | 🤖 管理自主 BACKLOG 执行器（三服务：loop/dream/brief） |
+| `roll brief` | 🤖 展示最新简报（超过 24h 自动重新生成） |
+| `roll peer` | 🤖 跨 Agent 代码评审与协商 |
+| `roll release` | 🤖 同步日志 + 版本号 + tag + npm publish + GitHub Release |
+| `roll`（无参数，在项目目录） | Dashboard：loop 状态、待办数量、最新简报摘要 |

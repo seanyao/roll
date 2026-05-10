@@ -1,5 +1,8 @@
 # Changelog
 
+## v2026.510.10
+- **Fixed**: release.sh changelog 同步时序修复 — 修正条件逻辑和执行顺序，确保每次发版时 changelog 正确更新
+
 ## v2026.510.9
 - **Fixed**: CHANGELOG 改版本号分组 — 每个 release 独立 section，GitHub Release 增量内容提取正确
 - **Fixed**: release.yml 加 fetch-depth: 0，确保历史 tag 在 workflow 中可见

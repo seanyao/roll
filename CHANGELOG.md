@@ -1,5 +1,9 @@
 # Changelog
 
+## v2026.511.3
+- **Fixed**: loop/dream/brief 多项目运行隔离 — 共享 run.sh 导致所有项目的 loop 在同一目录执行，改为每个项目独立 runner 脚本（run-{slug}.sh），彻底隔离多项目并发执行环境
+- **Fixed**: roll release 自发版拦截 — 在 roll 自身项目执行 `roll release` 时自动拦截并提示改用 scripts/release.sh，防止误操作绕过 2FA
+
 ## v2026.511.2
 - **Added**: roll loop monitor 三服务状态 — 监控台新增 loop/dream/brief 三个 launchd 服务的运行状态、调度时间和实时 log tail，一屏掌握全局执行情况
 - **Fixed**: dashboard 多处展示问题 — 修复 pending_count 算术错误、brief 内联显示 release readiness、移除底部冗余命令列表

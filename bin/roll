@@ -2341,7 +2341,7 @@ _dashboard() {
   # Backlog summary
   if [[ -f "BACKLOG.md" ]]; then
     local pending_count
-    pending_count=$(grep -cF '| 📋 Todo |' "BACKLOG.md" 2>/dev/null) || pending_count=0
+    pending_count=$(grep -E '^\| (\[US-|FIX-|REFACTOR-)' "BACKLOG.md" 2>/dev/null | grep -cF '| 📋 Todo |') || pending_count=0
     if (( pending_count > 0 )); then
       echo -e "  Backlog  ${YELLOW}${pending_count} pending${NC}   run: roll backlog"
     else

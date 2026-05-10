@@ -48,3 +48,9 @@ NPMEOF
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "_notify_update: exits 0 when update cache is missing" {
+  ROLL_HOME="$TEST_TMP/no-roll-home"
+  run _notify_update
+  [ "$status" -eq 0 ]
+}

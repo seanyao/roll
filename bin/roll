@@ -2460,7 +2460,7 @@ _check_update_async() {
 
 _notify_update() {
   local cache="${ROLL_HOME}/.update-check"
-  [[ -f "$cache" ]] || return
+  [[ -f "$cache" ]] || return 0
   local latest; latest=$(awk '{print $2}' "$cache" 2>/dev/null || true)
   [[ -z "$latest" || "$latest" == "$VERSION" ]] && return
   local newer; newer=$(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1)

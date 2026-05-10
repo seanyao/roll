@@ -85,8 +85,8 @@ EOF
   local monitor_body
   monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   echo "$monitor_body" | grep -q '"loop:hourly"'
-  echo "$monitor_body" | grep -q '"dream:01:00"'
-  echo "$monitor_body" | grep -q '"brief:08:00"'
+  echo "$monitor_body" | grep -q '"dream:03:00"'
+  echo "$monitor_body" | grep -q '"brief:09:00"'
 }
 
 @test "loop monitor: log tail reads from launchd.log (not cron.log)" {

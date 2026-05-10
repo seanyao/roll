@@ -175,7 +175,7 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: dream plist fires at hour 1" {
+@test "_install_launchd_plists: dream plist fires at hour 3" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -186,11 +186,11 @@ setup() {
 
   local dream_plist; dream_plist=$(_launchd_plist_path "dream" "$proj")
   grep -q "<key>Hour</key>" "$dream_plist"
-  grep -A1 "<key>Hour</key>" "$dream_plist" | grep -q "<integer>1</integer>"
+  grep -A1 "<key>Hour</key>" "$dream_plist" | grep -q "<integer>3</integer>"
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: brief plist fires at hour 8" {
+@test "_install_launchd_plists: brief plist fires at hour 9" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -201,6 +201,6 @@ setup() {
 
   local brief_plist; brief_plist=$(_launchd_plist_path "brief" "$proj")
   grep -q "<key>Hour</key>" "$brief_plist"
-  grep -A1 "<key>Hour</key>" "$brief_plist" | grep -q "<integer>8</integer>"
+  grep -A1 "<key>Hour</key>" "$brief_plist" | grep -q "<integer>9</integer>"
   rm -rf "$tmp_dir"
 }

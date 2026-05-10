@@ -110,6 +110,51 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
+# ─── _config_read_int ─────────────────────────────────────────────────────────
+
+@test "_config_read_int: returns default when key absent" {
+  local tmp; tmp=$(mktemp)
+  ROLL_CONFIG="$tmp"
+  run _config_read_int "loop_active_start" "10"
+  [ "$status" -eq 0 ]
+  [ "$output" = "10" ]
+  rm -f "$tmp"
+}
+
+@test "_config_read_int: returns value from config" {
+  local tmp; tmp=$(mktemp)
+  echo "loop_active_start: 8" > "$tmp"
+  ROLL_CONFIG="$tmp"
+  run _config_read_int "loop_active_start" "10"
+  [ "$status" -eq 0 ]
+  [ "$output" = "8" ]
+  rm -f "$tmp"
+}
+
+# ─── _loop_derive_minute ──────────────────────────────────────────────────────
+
+@test "_loop_derive_minute: result is in range 1-55" {
+  local m; m=$(_loop_derive_minute "/Users/sean/myproject" 0)
+  [ "$m" -ge 1 ]
+  [ "$m" -le 55 ]
+}
+
+@test "_loop_derive_minute: different project paths give different minutes" {
+  local m1; m1=$(_loop_derive_minute "/Users/sean/project-alpha" 0)
+  local m2; m2=$(_loop_derive_minute "/Users/sean/project-beta" 0)
+  [ "$m1" != "$m2" ]
+}
+
+@test "_loop_derive_minute: same project offsets 0/2/4 all differ" {
+  local m0 m2 m4
+  m0=$(_loop_derive_minute "/Users/sean/project-testX" 0)
+  m2=$(_loop_derive_minute "/Users/sean/project-testX" 2)
+  m4=$(_loop_derive_minute "/Users/sean/project-testX" 4)
+  [ "$m0" != "$m2" ]
+  [ "$m0" != "$m4" ]
+  [ "$m2" != "$m4" ]
+}
+
 # ─── _install_launchd_plists ──────────────────────────────────────────────────
 
 @test "_install_launchd_plists: creates three plist files" {

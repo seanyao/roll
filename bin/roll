@@ -1757,6 +1757,28 @@ _project_slug() {
   printf '%s' "${base}-${hash}"
 }
 
+_config_read_int() {
+  local key="$1" default="$2"
+  local val
+  val=$(grep "^${key}:" "$ROLL_CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '"' | head -1)
+  if [[ "$val" =~ ^[0-9]+$ ]]; then echo "$val"; else echo "$default"; fi
+}
+
+# Derive a minute in [1,55] from project path hash + offset so different projects
+# and different services within a project don't fire at the same time.
+# Offsets used: loop=0, dream=2, brief=4 → always three distinct values (2<55).
+_loop_derive_minute() {
+  local project_path="$1" offset="${2:-0}"
+  local hash_hex
+  if command -v md5 &>/dev/null; then
+    hash_hex=$(printf '%s' "$project_path" | md5 | cut -c1-6)
+  else
+    hash_hex=$(printf '%s' "$project_path" | md5sum | cut -c1-6)
+  fi
+  local hash_dec; hash_dec=$(printf '%d' "0x${hash_hex}")
+  echo $(( (hash_dec + offset) % 55 + 1 ))
+}
+
 _launchd_label() {
   local service="$1" project_path="$2"
   printf 'com.roll.%s.%s' "$service" "$(_project_slug "$project_path")"

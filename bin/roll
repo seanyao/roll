@@ -1837,7 +1837,8 @@ _install_launchd_plists() {
     local hour="${hours[$i]}"
     local label; label=$(_launchd_label "$svc" "$project_path")
     local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
-    local runner="${shared}/${svc}/run.sh"
+    local slug; slug=$(_project_slug "$project_path")
+    local runner="${shared}/${svc}/run-${slug}.sh"
     local log="${shared}/${svc}/cron.log"
     local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
 
@@ -1958,6 +1959,10 @@ _loop_off() {
     if ! $any_loaded; then
       warn "Loop not enabled for this project  当前项目 loop 未启用"; return 0
     fi
+    local slug; slug=$(_project_slug "$project_path")
+    for svc in loop dream brief; do
+      rm -f "${_SHARED_ROOT}/${svc}/run-${slug}.sh"
+    done
     ok "Loop disabled  已停用"
     return 0
   fi

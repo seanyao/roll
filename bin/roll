@@ -1977,7 +1977,11 @@ _loop_now() {
   info "Triggering loop cycle...  正在触发一个周期..."
   local log_file="${_SHARED_ROOT}/loop/launchd.log"
   mkdir -p "$(dirname "$log_file")"
-  _agent_run_skill "roll-loop" | tee -a "$log_file"
+  _agent_run_skill "roll-loop" 2>&1 | tee -a "$log_file" || true
+  # Reset stale running state if skill exited without cleanup (e.g. API error, SIGKILL)
+  if [[ -f "$_LOOP_STATE" ]] && grep -q "^status: running" "$_LOOP_STATE" 2>/dev/null; then
+    printf "status: idle\n" > "$_LOOP_STATE"
+  fi
 }
 
 _loop_status() {
@@ -2135,9 +2139,9 @@ _loop_monitor() {
     if [[ -f "$backlog" ]]; then
       local queue_count=0
       local fix_pending us_pending refactor_pending
-      fix_pending=$(grep -E '^\| FIX-' "$backlog" | grep '📋 Todo' || true)
-      us_pending=$(grep -E '^\| \[US-' "$backlog" | grep '📋 Todo' || true)
-      refactor_pending=$(grep -E '^\| REFACTOR-' "$backlog" | grep '📋 Todo' || true)
+      fix_pending=$(grep -E '^\| FIX-' "$backlog" | grep -F '| 📋 Todo |' || true)
+      us_pending=$(grep -E '^\| \[US-' "$backlog" | grep -F '| 📋 Todo |' || true)
+      refactor_pending=$(grep -E '^\| REFACTOR-' "$backlog" | grep -F '| 📋 Todo |' || true)
 
       # FIX first (priority)
       while IFS= read -r line; do
@@ -2233,9 +2237,9 @@ cmd_backlog() {
 
   local us_items fix_items refactor_items total=0
 
-  us_items=$(grep -E '^\| \[US-' "$backlog" | grep '📋 Todo' || true)
-  fix_items=$(grep -E '^\| FIX-' "$backlog" | grep '📋 Todo' || true)
-  refactor_items=$(grep -E '^\| REFACTOR-' "$backlog" | grep '📋 Todo' || true)
+  us_items=$(grep -E '^\| \[US-' "$backlog" | grep -F '| 📋 Todo |' || true)
+  fix_items=$(grep -E '^\| FIX-' "$backlog" | grep -F '| 📋 Todo |' || true)
+  refactor_items=$(grep -E '^\| REFACTOR-' "$backlog" | grep -F '| 📋 Todo |' || true)
 
   local us_count fix_count refactor_count
   us_count=$(echo "$us_items" | grep -c . || true)
@@ -2298,7 +2302,13 @@ _dashboard() {
 
   echo -e "\n  ${BOLD}${CYAN}${project_name}${NC}  ${YELLOW}v${VERSION}${NC}\n"
 
-  if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
+  local _dash_loop_enabled=false
+  if [[ "$(uname)" == "Darwin" ]]; then
+    _launchd_is_loaded "$(_launchd_label "loop" "$project_path")" && _dash_loop_enabled=true
+  else
+    crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && _dash_loop_enabled=true
+  fi
+  if $_dash_loop_enabled; then
     echo -e "  Loop  ${GREEN}● on${NC}   Agent: ${CYAN}${agent}${NC}"
   else
     echo -e "  Loop  ${YELLOW}○ off${NC}   run: roll loop on"
@@ -2308,7 +2318,7 @@ _dashboard() {
   # Backlog summary
   if [[ -f "BACKLOG.md" ]]; then
     local pending_count
-    pending_count=$(grep -c '📋 Todo' "BACKLOG.md" 2>/dev/null || echo 0)
+    pending_count=$(grep -cF '| 📋 Todo |' "BACKLOG.md" 2>/dev/null || echo 0)
     if (( pending_count > 0 )); then
       echo -e "  Backlog  ${YELLOW}${pending_count} pending${NC}   run: roll backlog"
     else

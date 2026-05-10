@@ -1975,7 +1975,9 @@ _loop_now() {
     warn "Loop already running  loop 正在运行中"; return 0
   fi
   info "Triggering loop cycle...  正在触发一个周期..."
-  _agent_run_skill "roll-loop"
+  local log_file="${_SHARED_ROOT}/loop/launchd.log"
+  mkdir -p "$(dirname "$log_file")"
+  _agent_run_skill "roll-loop" | tee -a "$log_file"
 }
 
 _loop_status() {
@@ -2080,7 +2082,13 @@ _loop_monitor() {
     echo -e "\n  ${BOLD}${CYAN}roll loop monitor${NC}  ${YELLOW}${project_name}${NC}  ${now}  (Ctrl-C to exit)\n"
 
     # Scheduler status
-    if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
+    local loop_enabled=false
+    if [[ "$(uname)" == "Darwin" ]]; then
+      _launchd_is_loaded "$(_launchd_label "loop" "$project_path")" && loop_enabled=true
+    else
+      crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_enabled=true
+    fi
+    if $loop_enabled; then
       echo -e "  Scheduler  ${GREEN}● enabled${NC}   Agent: ${CYAN}${agent}${NC}"
     else
       echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"

@@ -17,23 +17,15 @@ jobs:
         id: notes
         run: |
           TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
-          # Convert v2026.510.5 → 2026.05.10 to match CHANGELOG date headers
-          YEAR=$(echo "$VERSION" | cut -d. -f1)
-          MMDD=$(echo "$VERSION" | cut -d. -f2)
-          if [ ${#MMDD} -eq 3 ]; then
-            MONTH=$(echo "$MMDD" | cut -c1)
-            DAY=$(echo "$MMDD" | cut -c2-3)
-          else
-            MONTH=$(echo "$MMDD" | cut -c1-2)
-            DAY=$(echo "$MMDD" | cut -c3-4)
+          PREV_TAG=$(git tag --sort=-version:refname | grep "^v" | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            git log --pretty=format:"- %s" "${PREV_TAG}..${TAG}" \
+              | grep -v "^\- \[release\]" \
+              > release_notes.txt
           fi
-          DATE_KEY="${YEAR}.$(printf '%02d' "$MONTH").${DAY}"
-          NOTES=$(awk "/^## ${DATE_KEY}/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
-          if [ -z "$NOTES" ]; then
-            NOTES="Release ${TAG}"
+          if [ ! -s release_notes.txt ]; then
+            echo "Release ${TAG}" > release_notes.txt
           fi
-          echo "$NOTES" > release_notes.txt
 
       - name: Create GitHub Release
         env:

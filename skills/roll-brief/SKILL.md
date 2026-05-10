@@ -144,37 +144,21 @@ If there are escalations, print them prominently so they're impossible to miss.
 
 ## Scheduler Configuration
 
-### GitHub Actions (daily morning)
+roll-brief runs **locally**, triggered either by roll-loop (on Feature
+completion) or by local cron (daily morning). The agent reads local
+BACKLOG state and git history directly.
 
-```yaml
-# .github/workflows/roll-brief.yml
-name: Roll Brief
-on:
-  schedule:
-    - cron: '0 0 * * *'  # 08:00 CST = 00:00 UTC
-  workflow_dispatch:
-
-jobs:
-  brief:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Generate brief
-        run: claude -p "$(cat ~/.roll/skills/roll-brief/SKILL.md)"
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      - name: Commit brief
-        run: |
-          git config user.name "roll-brief"
-          git config user.email "roll@auto"
-          git add docs/briefs/
-          git diff --staged --quiet || git commit -m "chore: daily brief $(date +%Y-%m-%d)"
-          git push
-```
-
-### Local cron
+### Local cron (daily morning)
 
 ```bash
-# 08:00 every morning
+# 08:00 every morning (adjust to your timezone)
 0 8 * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-brief/SKILL.md)"
 ```
+
+Installed automatically via `roll loop install` alongside roll-loop and
+roll-.dream. The agent command respects `~/.roll/config.yaml → loop.primary_agent`.
+
+### Triggered by roll-loop
+
+When roll-loop detects a Feature is fully complete, it invokes roll-brief
+automatically — no separate cron entry needed for that trigger.

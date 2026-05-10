@@ -157,7 +157,6 @@ reason: "both primary (claude) and fallback (deepseek) unavailable"
 ```
 
 3. Write alert file to `~/.shared/roll/loop/ALERT.md`
-4. If GitHub Actions: fail the workflow step so the owner sees a red check
 
 ## Resuming After Pause
 
@@ -169,47 +168,46 @@ roll loop reset    # clear state and start fresh next scheduled run
 
 ## Scheduler Configuration
 
-### GitHub Actions (recommended)
+roll-loop runs **locally** — it needs access to the local codebase, local
+test runner, and local agent CLI. GitHub Actions runs on remote servers and
+cannot fulfill these requirements.
 
-```yaml
-# .github/workflows/roll-loop.yml
-name: Roll Loop
-on:
-  schedule:
-    - cron: '0 * * * *'  # every hour
-  workflow_dispatch:       # manual trigger / resume
+### Local cron (default)
 
-jobs:
-  loop:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+Install once with `roll loop install`:
 
-      - name: Restore loop state
-        run: mkdir -p ~/.shared/roll/loop/
+```bash
+# What roll loop install writes to crontab:
+0 * * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)" >> ~/.shared/roll/loop/cron.log 2>&1
+```
 
-      - name: Run roll-loop
-        run: claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}   # fallback
+The agent invoked (`claude`, `kimi`, `deepseek`, etc.) is read from
+`~/.roll/config.yaml → loop.primary_agent`. The command is agent-agnostic:
 
-      - name: Commit changes
-        run: |
-          git config user.name "roll-loop"
-          git config user.email "roll@auto"
-          git add -A
-          git diff --staged --quiet || git commit -m "chore: roll-loop run $(date +%Y-%m-%dT%H:%M)"
-          git push
+```bash
+# claude
+claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
 
-      - name: Check for alerts
-        run: |
-          if [ -f ~/.shared/roll/loop/ALERT.md ]; then
-            cat ~/.shared/roll/loop/ALERT.md
-            exit 1   # fail the workflow so owner sees it
-          fi
+# kimi
+kimi --quiet "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
+
+# deepseek
+deepseek "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
+```
+
+### Agent with native scheduling support
+
+Some agents support scheduled prompts natively (e.g., Claude Code hooks,
+opencode scheduled tasks). If your agent supports it, prefer that over cron
+— the agent handles its own lifecycle and the setup is cleaner.
+
+Consult your agent's documentation for scheduling configuration.
+
+### Manual run (for testing)
+
+```bash
+roll loop run      # execute one cycle immediately
+roll loop status   # show current state without running
 ```
 
 ### Local cron

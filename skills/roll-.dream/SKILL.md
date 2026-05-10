@@ -140,33 +140,22 @@ Always write a log, even when no REFACTOR entries are created:
 
 ## Scheduler Configuration
 
-### GitHub Actions (recommended)
+roll-.dream runs **locally** — it reads the local codebase directly.
 
-```yaml
-# .github/workflows/roll-dream.yml
-name: Roll Dream
-on:
-  schedule:
-    - cron: '0 1 * * *'  # 01:00 UTC every night
-  workflow_dispatch:       # allow manual trigger for testing
-
-jobs:
-  dream:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run roll-.dream
-        run: claude -p "$(cat ~/.roll/skills/roll-.dream/SKILL.md)"
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-```
-
-### Local cron
+### Local cron (default)
 
 ```bash
-# Run at 01:00 every night
+# Run at 01:00 every night (adjust to your timezone)
 0 1 * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-.dream/SKILL.md)" >> ~/.shared/roll/dream/cron.log 2>&1
 ```
+
+Installed automatically via `roll loop install` alongside roll-loop.
+The agent command is read from `~/.roll/config.yaml → loop.primary_agent`.
+
+### Agent with native scheduling support
+
+If your agent (Claude Code, opencode, etc.) supports scheduled prompts
+natively, prefer that over cron for cleaner lifecycle management.
 
 ## Failure Handling
 

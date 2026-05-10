@@ -435,6 +435,14 @@ Domain: Order Context > Order Aggregate > OrderItem Entity
 - More than 2 viable technical paths exist
 - Requirement involves an unfamiliar tech stack or new domain
 
+**Gate rule** — after presenting options and recommendation, always end with this explicit prompt and **wait for user reply before proceeding**:
+
+```
+➡️  Continue to solution design, or keep exploring?
+```
+
+Do **not** infer "approach confirmed" from the user's reaction to the comparison. Only proceed to Step 2 (Analyze) when the user explicitly says to continue (e.g., "yes", "proceed", "go ahead", "design it").
+
 **Can stop at any time** — if after discussion the user says "let's not do it" or "let me think about it", there's no need to continue to the planning phase.
 
 ---

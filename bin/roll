@@ -1944,6 +1944,7 @@ usage() {
   echo "  loop <on|off|now|status|resume|reset>  [Autonomous] Manage scheduled BACKLOG executor  管理自主执行循环"
   echo "  brief                  [Digest] Show latest owner brief (regenerate if stale)  展示最新简报"
   echo "  agent [use <name>|list]   [Config] Per-project agent selection            切换项目 agent"
+  echo "  release                [Publish] Sync changelog + version bump + npm publish  同步日志并发版"
   echo ""
   echo "Examples / 示例:"
   echo "  roll setup                    # New machine: first-time install            新机器首次安装"
@@ -2025,9 +2026,12 @@ _notify_update() {
   [[ -f "$cache" ]] || return
   local latest; latest=$(awk '{print $2}' "$cache" 2>/dev/null || true)
   [[ -z "$latest" || "$latest" == "$VERSION" ]] && return
-  # Only notify if latest is strictly newer than running version
   local newer; newer=$(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1)
-  [[ "$newer" == "$VERSION" ]] && return
+  if [[ "$newer" == "$VERSION" ]]; then
+    # Running version is newer than cached — stale cache, clear it
+    rm -f "$cache"
+    return
+  fi
   echo ""
   warn "v${latest} available — run 'roll update' to upgrade  有新版本 v${latest} — 运行 'roll update' 升级"
 }

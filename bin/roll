@@ -1891,18 +1891,43 @@ cmd_loop() {
 _loop_on() {
   local project_path; project_path=$(pwd -P)
   local agent; agent=$(_project_agent)
-  local sd="${ROLL_HOME}/skills"
 
+  if [[ "$(uname)" == "Darwin" ]]; then
+    _install_launchd_plists "$project_path" >/dev/null
+
+    local all_loaded=true
+    for svc in loop dream brief; do
+      local label; label=$(_launchd_label "$svc" "$project_path")
+      if ! _launchd_is_loaded "$label"; then
+        all_loaded=false
+        launchctl load "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+      fi
+    done
+
+    if $all_loaded; then
+      warn "Loop already enabled for this project  当前项目 loop 已启用"; return 0
+    fi
+
+    ok "Loop enabled  已启用"
+    echo "  • roll-loop   every hour :00    每小时整点"
+    echo "  • roll-.dream nightly at 01:00  每晚 01:00"
+    echo "  • roll-brief  daily at 08:00    每天 08:00"
+    echo "  • Agent: ${agent}  (change: roll agent use <name>)"
+    return 0
+  fi
+
+  # Linux: crontab
+  local sd="${ROLL_HOME}/skills"
   if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
     warn "Loop already enabled for this project  当前项目 loop 已启用"; return 0
   fi
 
-  mkdir -p ~/.shared/roll/{loop,dream,brief}
+  mkdir -p "${_SHARED_ROOT}/loop" "${_SHARED_ROOT}/dream" "${_SHARED_ROOT}/brief"
 
   local loop_cmd dream_cmd brief_cmd
-  loop_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-loop/SKILL.md") >> ~/.shared/roll/loop/cron.log 2>&1"
-  dream_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-.dream/SKILL.md") >> ~/.shared/roll/dream/cron.log 2>&1"
-  brief_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-brief/SKILL.md") >> ~/.shared/roll/brief/cron.log 2>&1"
+  loop_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-loop/SKILL.md") >> ${_SHARED_ROOT}/loop/cron.log 2>&1"
+  dream_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-.dream/SKILL.md") >> ${_SHARED_ROOT}/dream/cron.log 2>&1"
+  brief_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-brief/SKILL.md") >> ${_SHARED_ROOT}/brief/cron.log 2>&1"
 
   (
     crontab -l 2>/dev/null
@@ -1920,6 +1945,24 @@ _loop_on() {
 
 _loop_off() {
   local project_path; project_path=$(pwd -P)
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    local any_loaded=false
+    for svc in loop dream brief; do
+      local label; label=$(_launchd_label "$svc" "$project_path")
+      if _launchd_is_loaded "$label"; then
+        any_loaded=true
+        launchctl unload "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+      fi
+    done
+    if ! $any_loaded; then
+      warn "Loop not enabled for this project  当前项目 loop 未启用"; return 0
+    fi
+    ok "Loop disabled  已停用"
+    return 0
+  fi
+
+  # Linux: crontab
   if ! crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
     warn "Loop not enabled for this project  当前项目 loop 未启用"; return 0
   fi
@@ -1939,7 +1982,13 @@ _loop_status() {
   local project_path; project_path=$(pwd -P)
   local agent; agent=$(_project_agent)
   echo ""
-  if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
+  local loop_enabled=false
+  if [[ "$(uname)" == "Darwin" ]]; then
+    _launchd_is_loaded "$(_launchd_label "loop" "$project_path")" && loop_enabled=true
+  else
+    crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_enabled=true
+  fi
+  if $loop_enabled; then
     echo -e "  Scheduler  ${GREEN}● enabled${NC}   Agent: ${CYAN}${agent}${NC}"
   else
     echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"

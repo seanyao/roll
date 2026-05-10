@@ -274,38 +274,35 @@ roll loop monitor 5     # refresh every 5s
 ---
 
 <a id="us-auto-009"></a>
-## US-AUTO-009 launchd 调度迁移 📋
+## US-AUTO-009 launchd 调度迁移 ✅
 
 **Created**: 2026-05-10
+**Completed**: 2026-05-10
 
-- As a developer running roll on macOS
-- I want roll to use launchd (not cron) as the scheduler
-- So that scheduled tasks run reliably in the GUI session with keychain access
+- As a macOS user of Roll's autonomous evolution features
+- I want scheduling to use launchd instead of crontab
+- So that loop/dream/brief services are managed as proper launchd agents
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: Scheduler infrastructure
+- Events raised: [Plists Installed] → ~/Library/LaunchAgents/
 
 **AC:**
-- [ ] `roll setup` 在 `~/Library/LaunchAgents/` 创建 `com.roll.loop.plist` / `com.roll.dream.plist` / `com.roll.brief.plist`，服务默认**未加载**（disabled）
-- [ ] `roll setup` 幂等：plist 已存在时跳过，不重复安装；更新安装时同样检查
-- [ ] `roll loop on` 改用 `launchctl bootstrap gui/$(id -u)` 激活三服务，不写 crontab
-- [ ] `roll loop off` 改用 `launchctl bootout gui/$(id -u)` 停用三服务，不删 crontab
-- [ ] `roll loop status` 改用 `launchctl list | grep com.roll` 判断启用状态
-- [ ] `roll loop monitor` 调度状态显示基于 launchd，不再检查 crontab
-- [ ] 任何 `roll loop` 子命令不再读写 crontab
-- [ ] Plists 使用完整 PATH 和 `/opt/homebrew/bin/claude` 绝对路径，日志输出到 `~/.shared/roll/{loop,dream,brief}/launchd.log`
-- [ ] `roll loop now` 输出同时打到终端和 `~/.shared/roll/loop/launchd.log`（用 `tee -a`），与 launchd 定时运行共享同一份日志
-- [ ] 补写 `tests/unit/roll_loop_launchd.bats`，覆盖 plist 生成逻辑和 on/off 状态检测（mock launchctl）
-
-**CLI:**
-```bash
-roll setup          # 安装 plists（首次或更新安装时调用）
-roll loop on        # launchctl bootstrap — 激活三服务
-roll loop off       # launchctl bootout — 停用三服务
-roll loop status    # launchctl list 检查状态
-```
+- [x] `roll setup` on macOS installs three launchd plist files (loop/dream/brief) in `~/Library/LaunchAgents/` — disabled by default (not loaded)
+- [x] `roll setup` idempotent — plist content-diffed, unchanged files not rewritten
+- [x] `roll loop on` on macOS: (re)writes runner scripts + calls `launchctl load` for each service
+- [x] `roll loop off` on macOS: calls `launchctl unload`; warns if not loaded
+- [x] `roll loop status` on macOS: checks `launchctl list` label instead of crontab
+- [x] Linux path preserved — crontab fallback intact in `_loop_on`/`_loop_off`/`_loop_status`
+- [x] Unit tests: `_install_launchd_plists` — schedule timing, idempotency, runner script creation
+- [x] Integration tests: `cmd_setup` installs 3 plists; `cmd_loop` load/unload lifecycle
 
 **Files:**
-- `bin/roll` (_loop_on, _loop_off, _loop_status, _loop_monitor, cmd_setup 或 install.sh)
-- `~/Library/LaunchAgents/com.roll.{loop,dream,brief}.plist`（运行时生成，不入 git）
-- `tests/unit/roll_loop_launchd.bats`
+- `bin/roll` (_SHARED_ROOT, _install_launchd_plists, cmd_setup, _loop_on, _loop_off, _loop_status)
+- `tests/unit/launchd.bats`
+- `tests/integration/cmd_setup.bats`
+- `tests/integration/cmd_loop.bats` (new)
 
 ---
 

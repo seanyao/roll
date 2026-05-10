@@ -4,7 +4,7 @@ set -euo pipefail
 # Roll — AI Agent Convention Manager
 # Single source of truth for how all AI coding agents behave.
 
-VERSION="2026.511.2"
+VERSION="2026.511.3"
 ROLL_HOME="${ROLL_HOME:-${HOME}/.roll}"
 ROLL_CONFIG="${ROLL_HOME}/config.yaml"
 ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
@@ -2226,6 +2226,12 @@ cmd_brief() {
 }
 
 cmd_release() {
+  local pkg; pkg=$(node -p "require('./package.json').name" 2>/dev/null || true)
+  if [[ "$pkg" == "@seanyao/roll" ]]; then
+    err "roll 自身发版请用 scripts/release.sh（npm publish 需要人工 2FA）"
+    echo "  Run: scripts/release.sh"
+    exit 1
+  fi
   _agent_run_skill "roll-release"
 }
 

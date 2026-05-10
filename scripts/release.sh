@@ -20,6 +20,40 @@ echo ""
 read -p "Publish ${TAG}? [y/N] " confirm
 [[ "$confirm" == [yY] ]] || { echo "Aborted."; exit 0; }
 
+# ── Sync CHANGELOG.md from BACKLOG via configured agent ──────────────────────
+_detect_agent() {
+  if [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml 2>/dev/null; then
+    grep "^agent:" .roll.yaml | awk '{print $2}' | tr -d '"' | head -1
+  elif [[ -f "${HOME}/.roll/config.yaml" ]] && grep -q "primary_agent:" "${HOME}/.roll/config.yaml" 2>/dev/null; then
+    grep "primary_agent:" "${HOME}/.roll/config.yaml" | awk '{print $2}' | tr -d '"' | head -1
+  else
+    echo "claude"
+  fi
+}
+
+_run_changelog_skill() {
+  local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"
+  [[ -f "$skill_file" ]] || { echo "Warning: roll-.changelog skill not found, skipping."; return; }
+  local agent; agent=$(_detect_agent)
+  # Strip YAML frontmatter before passing to agent
+  local content; content=$(awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' "$skill_file")
+  echo "Syncing CHANGELOG.md via ${agent}..."
+  case "$agent" in
+    claude)   claude -p "$content" ;;
+    kimi)     kimi --quiet -p "$content" ;;
+    deepseek) deepseek "$content" ;;
+    pi)       pi -p "$content" ;;
+    codex)    codex exec "$content" ;;
+    opencode) opencode run "$content" ;;
+    *) echo "Error: Unknown agent '${agent}'. Run: roll agent use <name>"; exit 1 ;;
+  esac
+}
+
+LAST_TAG=$(git tag --sort=-version:refname | grep "^v" | head -1)
+if [[ -n "$LAST_TAG" ]] && ! git diff "${LAST_TAG}..HEAD" --name-only | grep -q "CHANGELOG.md"; then
+  _run_changelog_skill
+fi
+
 # Update package.json
 node -e "
   const fs = require('fs');

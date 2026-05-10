@@ -219,6 +219,75 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
+@test "_install_launchd_plists: custom loop_minute from config overrides hash" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local cfg; cfg=$(mktemp); echo "loop_minute: 7" > "$cfg"; ROLL_CONFIG="$cfg"
+
+  _install_launchd_plists "$proj"
+
+  local loop_plist; loop_plist=$(_launchd_plist_path "loop" "$proj")
+  grep -A1 "<key>Minute</key>" "$loop_plist" | grep -q "<integer>7</integer>"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}
+
+@test "_install_launchd_plists: two different projects get different default loop_minute" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  mkdir -p "${tmp_dir}/projA" "${tmp_dir}/projB"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  ROLL_CONFIG=$(mktemp)
+
+  _install_launchd_plists "${tmp_dir}/projA"
+  _install_launchd_plists "${tmp_dir}/projB"
+
+  local pA pB mA mB
+  pA=$(_launchd_plist_path "loop" "${tmp_dir}/projA")
+  pB=$(_launchd_plist_path "loop" "${tmp_dir}/projB")
+  mA=$(grep -A1 "<key>Minute</key>" "$pA" | grep -o "[0-9]*" | head -1)
+  mB=$(grep -A1 "<key>Minute</key>" "$pB" | grep -o "[0-9]*" | head -1)
+  [ "$mA" != "$mB" ]
+  rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
+}
+
+@test "_install_launchd_plists: same project loop/dream/brief minutes all differ" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  ROLL_CONFIG=$(mktemp)
+
+  _install_launchd_plists "$proj"
+
+  local lm dm bm
+  lm=$(grep -A1 "<key>Minute</key>" "$(_launchd_plist_path "loop" "$proj")" | grep -o "[0-9]*" | head -1)
+  dm=$(grep -A1 "<key>Minute</key>" "$(_launchd_plist_path "dream" "$proj")" | grep -o "[0-9]*" | head -1)
+  bm=$(grep -A1 "<key>Minute</key>" "$(_launchd_plist_path "brief" "$proj")" | grep -o "[0-9]*" | head -1)
+  [ "$lm" != "$dm" ]
+  [ "$lm" != "$bm" ]
+  [ "$dm" != "$bm" ]
+  rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
+}
+
+@test "_install_launchd_plists: loop runner contains active window bounds" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local cfg; cfg=$(mktemp)
+  printf 'loop_active_start: 10\nloop_active_end: 18\n' > "$cfg"; ROLL_CONFIG="$cfg"
+
+  _install_launchd_plists "$proj"
+
+  local slug; slug=$(_project_slug "$proj")
+  local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
+  grep -q "10" "$runner"
+  grep -q "18" "$runner"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}
+
 @test "_install_launchd_plists: loop plist is hourly (no Hour key)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"

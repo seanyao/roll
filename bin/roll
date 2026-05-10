@@ -1332,7 +1332,16 @@ _peer_call() {
       output="$(kimi --quiet -p "$prompt" 2>"$stderr_log" || true)"
       ;;
     pi)
-      output="$(pi -p --mode text "$prompt" 2>"$stderr_log" || true)"
+      output="$(pi -p "$prompt" 2>"$stderr_log" || true)"
+      ;;
+    deepseek)
+      output="$(deepseek "$prompt" 2>"$stderr_log" || true)"
+      ;;
+    codex)
+      output="$(codex exec --json --output-last-message "$prompt" 2>"$stderr_log" || true)"
+      ;;
+    opencode)
+      output="$(opencode run "$prompt" 2>"$stderr_log" || true)"
       ;;
     *)
       err "Unsupported peer: $to  不支持的 peer: $to"
@@ -1662,7 +1671,10 @@ _agent_run_skill() {
     claude)   claude -p "$(cat "$skill_file")" ;;
     kimi)     kimi --quiet "$(cat "$skill_file")" ;;
     deepseek) deepseek "$(cat "$skill_file")" ;;
-    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek>"; return 1 ;;
+    pi)       pi -p "$(cat "$skill_file")" ;;
+    codex)    codex exec --json --output-last-message "$(cat "$skill_file")" ;;
+    opencode) opencode run "$(cat "$skill_file")" ;;
+    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; return 1 ;;
   esac
 }
 
@@ -1671,7 +1683,7 @@ cmd_agent() {
   case "$subcmd" in
     use)
       local name="${1:-}"
-      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek>"; exit 1; }
+      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; exit 1; }
       command -v "$name" &>/dev/null || warn "${name} not found in PATH — setting anyway  未找到，仍写入配置"
       if [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml; then
         local tmp; tmp=$(mktemp) && sed "s/^agent:.*/agent: ${name}/" .roll.yaml > "$tmp" && mv "$tmp" .roll.yaml
@@ -1721,7 +1733,10 @@ _agent_skill_cmd() {
     claude)   echo "claude -p \"\$(cat '${skill_path}')\"" ;;
     kimi)     echo "kimi --quiet \"\$(cat '${skill_path}')\"" ;;
     deepseek) echo "deepseek \"\$(cat '${skill_path}')\"" ;;
-    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek>"; return 1 ;;
+    pi)       echo "pi -p \"\$(cat '${skill_path}')\"" ;;
+    codex)    echo "codex exec --json --output-last-message \"\$(cat '${skill_path}')\"" ;;
+    opencode) echo "opencode run \"\$(cat '${skill_path}')\"" ;;
+    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; return 1 ;;
   esac
 }
 

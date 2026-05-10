@@ -35,7 +35,7 @@
 **Completed**: 2026-05-10
 **Created**: 2026-05-10
 
-- As a developer debugging a broken page
+- As a product engineer debugging a broken page
 - I want roll-debug to automatically fix the issue when the root cause is in project source code
 - So that diagnosis and repair happen in one continuous flow without manual handoff
 

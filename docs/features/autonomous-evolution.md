@@ -11,7 +11,7 @@
 **Created**: 2026-05-10
 **Completed**: 2026-05-10
 
-- As a developer using roll-build
+- As a product engineer using roll-build
 - I want architectural strain detected during Story implementation to be automatically flagged
 - So that REFACTOR entries accumulate in BACKLOG without interrupting current work
 
@@ -140,7 +140,7 @@
 **Created**: 2026-05-10
 **Completed**: 2026-05-10
 
-- As a developer using Roll's autonomous evolution features
+- As a product engineer using Roll's autonomous evolution features
 - I want the CLI commands and per-project config to be documented
 - So that I can manage the loop without guessing at the interface
 
@@ -219,7 +219,7 @@ agent: claude   # claude | kimi | deepseek | opencode | ...
 **Created**: 2026-05-10
 **Completed**: 2026-05-10
 
-- As a developer using Roll's autonomous execution
+- As a product engineer using Roll's autonomous execution
 - I want a `roll backlog` command that shows all pending tasks
 - So that I can check what's queued without opening BACKLOG.md manually
 
@@ -337,7 +337,7 @@ roll loop monitor 5     # refresh every 5s
 **Created**: 2026-05-10
 **Completed**: 2026-05-11
 
-- As a developer on macOS running autonomous loop
+- As a product engineer on macOS running autonomous loop
 - I want `roll loop monitor` to show all three launchd service states and a live log tail
 - So that I can see the full scheduler health and recent activity in one view without leaving the terminal
 
@@ -364,25 +364,66 @@ roll loop monitor 5     # 5 秒刷新间隔
 
 **Created**: 2026-05-11
 
-- As a developer using roll's autonomous loop
+- As a product engineer using roll's autonomous loop
 - I want to configure loop schedule times and default agent in `~/.roll/config.yaml`
 - So that I can adjust them without editing `bin/roll` source code
 
 **AC:**
-- [ ] `~/.roll/config.yaml` 支持 `loop_dream_hour`（整数，默认 3）和 `loop_brief_hour`（整数，默认 9）两个字段，使用 24 小时制，以机器本地时区为准（launchd `StartCalendarInterval` 本身即为本地时区）
-- [ ] `_install_launchd_plists` 从配置读取这两个值；字段缺失时回退默认值，行为与当前一致
-- [ ] `roll loop on` 输出的时间提示从配置读取，与实际 plist 一致（不再硬编码）
-- [ ] `roll loop monitor` 三服务状态行的时间标注从配置读取
-- [ ] `roll setup` 写入初始 `~/.roll/config.yaml` 时加入带注释的 schedule 示例段：
+- [ ] `~/.roll/config.yaml` 支持以下调度字段，使用 24 小时制，以机器本地时区为准：
+  - `loop_minute`（整数）— roll-loop 触发分钟，每小时执行
+  - `loop_dream_hour`（整数，默认 3）— roll-.dream 触发小时
+  - `loop_dream_minute`（整数）— roll-.dream 触发分钟
+  - `loop_brief_hour`（整数，默认 9）— roll-brief 触发小时
+  - `loop_brief_minute`（整数）— roll-brief 触发分钟
+- [ ] **minute 字段未配置时，从项目路径 hash 推导默认值**，而非硬编码：
+  - `_project_slug` 已有 md5 hash（6 位 hex），取其数值 `% 55 + 1` 得到 1–55 范围的分钟数（避开 :00）
+  - 三个服务在此基础上各加固定偏移（+0 / +2 / +4 分钟，mod 55 + 1），保证同一项目内也不同时触发
+  - 效果：不同项目自动分散到不同分钟，无需用户配置；需要固定时间再手动指定
+- [ ] `_install_launchd_plists` 从配置读取 hour/minute；未配置时用上述 hash 推导逻辑
+- [ ] `roll loop on` 输出的时间提示显示实际使用的分钟值（hash 推导或配置值）
+- [ ] `roll loop monitor` 三服务状态行的时间标注同上
+- [ ] `roll setup` 写入初始 `~/.roll/config.yaml` 时加入带注释的 schedule 示例段（minute 字段注释掉，说明留空即自动分散）：
   ```yaml
-  # Loop schedule (hours in 24h format)
+  # Loop schedule (24h format)
+  # loop_minute: 5        # omit to auto-derive from project hash (avoids contention)
   loop_dream_hour: 3
+  # loop_dream_minute: 10 # omit to auto-derive
   loop_brief_hour: 9
+  # loop_brief_minute: 15 # omit to auto-derive
   primary_agent: claude
   ```
 - [ ] `primary_agent` 字段写入 `roll setup` 初始模板（代码路径已有读取逻辑，补模板）
-- [ ] 单元测试：`_install_launchd_plists` 覆盖使用自定义 `loop_dream_hour` / `loop_brief_hour` 的场景
+- [ ] 单元测试：`_install_launchd_plists` 覆盖以下场景：
+  - 自定义 hour/minute 覆盖 hash 推导
+  - 两个不同路径项目的默认 minute 不相同
+  - 同一项目三个服务的默认 minute 各不相同
 
 **Files:**
 - `bin/roll` (`_install_launchd_plists`, `_loop_on`, `_loop_monitor`, `cmd_setup`)
 - `tests/unit/launchd.bats`（补自定义时间用例）
+
+---
+
+<a id="us-auto-013"></a>
+## US-AUTO-013 roll-propose — 主动发起产品需求提案 📋
+
+**Created**: 2026-05-11
+
+- As a product engineer working with roll
+- I want to actively invoke `$roll-propose` to generate product-level feature proposals
+- So that I can get structured US drafts ready for review without writing them from scratch
+
+**背景：**
+roll-dream 负责技术/架构层面的内省（从执行经验里提炼改进信号）。产品视角的需求发现是另一种思维——想象用户场景、识别功能空白、提出新方向——不依赖执行经验，应由人主动发起而非被动调度。
+
+**AC:**
+- [ ] `$roll-propose` skill 存在，可通过 Claude Code 主动调用
+- [ ] 运行时读取 `BACKLOG.md`、最近 commits、现有 skills 列表，作为上下文
+- [ ] 产出 1–3 条 proposed US，每条包含：动机（why）、目标用户场景、AC 草稿
+- [ ] 写入项目根目录 `PROPOSALS.md`（追加，带时间戳），不直接写入 BACKLOG
+- [ ] `PROPOSALS.md` 格式明确标注"待审批"状态，与正式 US 物理隔离
+- [ ] 人工审批后手动将条目移入 BACKLOG；拒绝时可在 PROPOSALS.md 标注拒绝原因（防止重复提出相似提案）
+- [ ] skill 提示词引导 agent 从"用户视角"而非"技术视角"思考，避免与 roll-dream 重叠
+
+**Files:**
+- `skills/roll-propose/SKILL.md`（新建）

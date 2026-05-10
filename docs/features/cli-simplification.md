@@ -11,7 +11,7 @@
 **Completed**: 2026-04-16
 **Plan**: [cli-simplification-plan.md](cli-simplification-plan.md)
 
-- As a developer starting a new project
+- As a product engineer starting a new project
 - I want `roll init` to just set up workflow files without asking questions
 - So that I can start working in under 5 seconds with zero friction
 
@@ -74,7 +74,7 @@
 **Completed**: 2026-04-16
 **Plan**: [cli-simplification-plan.md](cli-simplification-plan.md)
 
-- As a developer using `$roll-build` or `$roll-design`
+- As a product engineer using `$roll-build` or `$roll-design`
 - I want skills to infer project structure from existing files
 - So that they create files in the right place without me having to explain the project type
 

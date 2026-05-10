@@ -6,7 +6,7 @@
 **Created**: 2026-05-10
 **Plan**: [e2e-lifecycle-plan.md](e2e-lifecycle-plan.md)
 
-- As a developer using roll-build
+- As a product engineer using roll-build
 - I want each Story to automatically deposit an E2E test for its core user flow
 - So that the project accumulates a replayable E2E suite as a natural byproduct of delivery
 
@@ -34,7 +34,7 @@
 **Created**: 2026-05-10
 **Plan**: [e2e-lifecycle-plan.md](e2e-lifecycle-plan.md)
 
-- As a developer using a Roll-managed project
+- As a product engineer using a Roll-managed project
 - I want CI to run E2E tests on every push
 - So that regressions are caught automatically before merge
 
@@ -59,7 +59,7 @@
 **Created**: 2026-05-10
 **Plan**: [e2e-lifecycle-plan.md](e2e-lifecycle-plan.md)
 
-- As a developer whose CI just went red
+- As a product engineer whose CI just went red
 - I want roll-.qa to guide me on triaging failures and routing them to roll-fix
 - So that CI failures become actionable BACKLOG items instead of vague red badges
 

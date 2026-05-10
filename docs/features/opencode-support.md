@@ -11,7 +11,7 @@
 **Completed**: 2026-05-06
 **Plan**: [opencode-support-plan.md](opencode-support-plan.md)
 
-- As a developer using opencode on a Roll-managed project
+- As a product engineer using opencode on a Roll-managed project
 - I want Roll to detect opencode and sync conventions to `~/.config/opencode/AGENTS.md`
 - So that opencode reads Roll conventions automatically as global instructions
 

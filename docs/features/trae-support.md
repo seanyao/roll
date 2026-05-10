@@ -10,7 +10,7 @@
 **Created**: 2026-04-24
 **Plan**: [trae-support-plan.md](trae-support-plan.md)
 
-- As a developer using Trae IDE on a Roll-managed project
+- As a product engineer using Trae IDE on a Roll-managed project
 - I want Roll convention files for Trae to exist in global and all templates
 - So that `roll init` and `roll sync` can generate `.trae/rules/project_rules.md`
 
@@ -41,7 +41,7 @@
 **Created**: 2026-04-24
 **Plan**: [trae-support-plan.md](trae-support-plan.md)
 
-- As a developer running `roll init` or `roll refresh` on a Trae project
+- As a product engineer running `roll init` or `roll refresh` on a Trae project
 - I want Roll to detect Trae and generate `.trae/rules/project_rules.md`
 - So that Trae Solo reads Roll conventions automatically
 

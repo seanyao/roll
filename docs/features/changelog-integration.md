@@ -5,7 +5,7 @@
 **Created**: 2026-05-10
 **Plan**: [changelog-integration-plan.md](changelog-integration-plan.md)
 
-- As a developer using roll-build
+- As a product engineer using roll-build
 - I want changelog to be generated automatically after every successful deploy
 - So that CHANGELOG.md stays in sync with delivered work without manual effort
 
@@ -31,7 +31,7 @@
 **Created**: 2026-05-10
 **Plan**: [changelog-integration-plan.md](changelog-integration-plan.md)
 
-- As a developer whose project has no CHANGELOG.md yet
+- As a product engineer whose project has no CHANGELOG.md yet
 - I want roll-.changelog to create the file and backfill all historical completed Stories
 - So that the changelog is complete from day one, not missing earlier work
 

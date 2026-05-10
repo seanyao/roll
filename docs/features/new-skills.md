@@ -43,7 +43,7 @@
 **Created**: 2026-05-10
 **Completed**: 2026-05-10
 
-- As a developer capturing backlog items
+- As a product engineer capturing backlog items
 - I want the capture skill named `roll-idea` instead of `roll-jot`
 - So that the command name is semantically aligned with the `IDEA-NNN` ID format it produces
 

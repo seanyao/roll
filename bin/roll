@@ -1669,7 +1669,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   case "$agent" in
     claude)   claude -p "$(cat "$skill_file")" ;;
-    kimi)     kimi --quiet "$(cat "$skill_file")" ;;
+    kimi)     kimi --quiet -p "$(cat "$skill_file")" ;;
     deepseek) deepseek "$(cat "$skill_file")" ;;
     pi)       pi -p "$(cat "$skill_file")" ;;
     codex)    codex exec --json --output-last-message "$(cat "$skill_file")" ;;
@@ -1731,7 +1731,7 @@ _agent_skill_cmd() {
   local agent; agent=$(_project_agent)
   case "$agent" in
     claude)   echo "claude -p \"\$(cat '${skill_path}')\"" ;;
-    kimi)     echo "kimi --quiet \"\$(cat '${skill_path}')\"" ;;
+    kimi)     echo "kimi --quiet -p \"\$(cat '${skill_path}')\"" ;;
     deepseek) echo "deepseek \"\$(cat '${skill_path}')\"" ;;
     pi)       echo "pi -p \"\$(cat '${skill_path}')\"" ;;
     codex)    echo "codex exec --json --output-last-message \"\$(cat '${skill_path}')\"" ;;

@@ -170,12 +170,13 @@ If serve mode is available, prefer HTTP transport over direct CLI invocation.
 
 | Peer | Non-interactive command | Reliability | Notes |
 |------|------------------------|-------------|-------|
-| `claude` | `claude -p "<prompt>"` | ✅ High | Native, stable |
-| `deepseek` | `deepseek "<prompt>"` | ✅ Good | No TTY dependency |
+| `claude` | `claude -p "<prompt>"` | ✅ Verified | Native, stable |
+| `deepseek` | `deepseek "<prompt>"` | ✅ Verified | No TTY dependency |
 | `deepseek` (serve) | `curl localhost:<port>/v1/...` | ✅ High | Start with `deepseek serve --http`; preferred over direct CLI |
-| `kimi` | `kimi --quiet "<prompt>"` | ⚠️ Unverified | Verify non-interactive support before use |
-| `codex` | `codex exec --json --output-last-message "<prompt>"` | ⚠️ Unstable | Known CI failures due to Ink/TTY (issues [#1080](https://github.com/openai/codex/issues/1080), [#1340](https://github.com/openai/codex/issues/1340)); use only as fallback |
-| `pi` | `pi -p "<prompt>"` | ⚠️ Unverified | Verify non-interactive support before use |
+| `kimi` | `kimi --quiet -p "<prompt>"` | ✅ Verified | `--quiet` is alias for `--print --output-format text --final-message-only`; prompt via `-p` |
+| `pi` | `pi -p "<prompt>"` | ✅ Verified | Clean non-interactive output |
+| `opencode` | `opencode run "<prompt>"` | ✅ Verified | Works non-interactively |
+| `codex` | `codex exec "<prompt>"` | ⚠️ Auth required | Token must be valid; re-login with `codex login` if expired |
 
 **CLI vs. API Key**: `claude`, `deepseek`, `kimi`, `codex` CLIs authenticate via existing subscription accounts — no separate API key required. This is the primary advantage of CLI transport over the MCP/HTTP approach.
 

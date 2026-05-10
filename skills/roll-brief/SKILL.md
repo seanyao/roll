@@ -155,7 +155,7 @@ BACKLOG state and git history directly.
 0 8 * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-brief/SKILL.md)"
 ```
 
-Installed automatically via `roll loop install` alongside roll-loop and
+Installed automatically via `roll loop on` alongside roll-loop and
 roll-.dream. The agent command respects `~/.roll/config.yaml → loop.primary_agent`.
 
 ### Triggered by roll-loop

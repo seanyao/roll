@@ -2081,17 +2081,25 @@ _loop_monitor() {
 
     echo -e "\n  ${BOLD}${CYAN}roll loop monitor${NC}  ${YELLOW}${project_name}${NC}  ${now}  (Ctrl-C to exit)\n"
 
-    # Scheduler status
-    local loop_enabled=false
+    # Services status (three services on macOS, single on Linux)
+    echo -e "  ${BOLD}Services  服务状态${NC}   Agent: ${CYAN}${agent}${NC}"
     if [[ "$(uname)" == "Darwin" ]]; then
-      _launchd_is_loaded "$(_launchd_label "loop" "$project_path")" && loop_enabled=true
+      local svc_info svc schedule
+      for svc_info in "loop:hourly" "dream:01:00" "brief:08:00"; do
+        svc="${svc_info%%:*}"
+        schedule="${svc_info#*:}"
+        if _launchd_is_loaded "$(_launchd_label "$svc" "$project_path")"; then
+          printf "    ${GREEN}%-8s ● enabled${NC}   (%s)\n" "$svc" "$schedule"
+        else
+          printf "    ${YELLOW}%-8s ○ disabled${NC}  (%s)\n" "$svc" "$schedule"
+        fi
+      done
     else
-      crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_enabled=true
-    fi
-    if $loop_enabled; then
-      echo -e "  Scheduler  ${GREEN}● enabled${NC}   Agent: ${CYAN}${agent}${NC}"
-    else
-      echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"
+      if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
+        echo -e "    ${GREEN}loop     ● enabled${NC}"
+      else
+        echo -e "    ${YELLOW}loop     ○ disabled${NC}   run: roll loop on"
+      fi
     fi
 
     # Current state
@@ -2166,12 +2174,15 @@ _loop_monitor() {
       echo "    BACKLOG.md not found"
     fi
 
-    # Recent history from cron.log
-    local log_file="${HOME}/.shared/roll/loop/cron.log"
+    # Log tail (launchd.log)
+    local log_file="${_SHARED_ROOT}/loop/launchd.log"
+    echo ""
+    echo -e "  ─────────────────────────────────────────────────────"
+    echo -e "  ${BOLD}Log Tail  实时日志${NC}  (~/.shared/roll/loop/launchd.log, last 10 lines)"
     if [[ -f "$log_file" && -s "$log_file" ]]; then
-      echo ""
-      echo -e "  ${BOLD}Recent Activity  最近活动${NC}  (last 5 lines)"
-      tail -5 "$log_file" | sed 's/^/    /'
+      tail -10 "$log_file" | sed 's/^/    /'
+    else
+      echo -e "    ${YELLOW}(no log yet)${NC}"
     fi
 
     echo ""

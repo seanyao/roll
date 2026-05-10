@@ -1851,6 +1851,12 @@ cmd_release() {
     err "scripts/release.sh not found — run this command from the roll project root."
     exit 1
   fi
+  # Sync CHANGELOG.md before releasing, using the configured agent
+  local last_tag; last_tag=$(git tag --sort=-version:refname | grep "^v" | head -1)
+  if [[ -n "$last_tag" ]] && ! git diff "${last_tag}..HEAD" --name-only | grep -q "CHANGELOG.md"; then
+    info "CHANGELOG.md not updated since ${last_tag}, syncing via $(_project_agent)..."
+    _agent_run_skill "roll-.changelog"
+  fi
   bash "$script" "$@"
 }
 

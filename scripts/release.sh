@@ -20,21 +20,6 @@ echo ""
 read -p "Publish ${TAG}? [y/N] " confirm
 [[ "$confirm" == [yY] ]] || { echo "Aborted."; exit 0; }
 
-# Auto-sync CHANGELOG.md from BACKLOG if stale since last tag
-LAST_TAG=$(git tag --sort=-version:refname | grep "^v" | head -1)
-CHANGELOG_DIRTY=false
-if [ -n "$LAST_TAG" ] && ! git diff "${LAST_TAG}..HEAD" --name-only | grep -q "CHANGELOG.md"; then
-  echo ""
-  echo "CHANGELOG.md not updated since ${LAST_TAG}, syncing from BACKLOG..."
-  if command -v claude &>/dev/null; then
-    claude -p 'Update CHANGELOG.md by running $roll-.changelog — extract completed BACKLOG items and append to CHANGELOG.md. Do NOT git commit or push, just update the file.'
-    CHANGELOG_DIRTY=true
-  else
-    echo "Error: claude CLI not found. Cannot sync CHANGELOG.md — install Claude Code and retry."
-    exit 1
-  fi
-fi
-
 # Update package.json
 node -e "
   const fs = require('fs');
@@ -46,9 +31,9 @@ node -e "
 # Update VERSION in bin/roll
 sed -i.bak "s/^VERSION=.*/VERSION=\"${VERSION}\"/" bin/roll && rm bin/roll.bak
 
-# Commit (include CHANGELOG.md if it was updated)
+# Commit (include CHANGELOG.md if it was updated by cmd_release)
 git add package.json bin/roll
-if [ "$CHANGELOG_DIRTY" = true ] && [ -n "$(git diff HEAD -- CHANGELOG.md)" ]; then
+if [ -n "$(git diff HEAD -- CHANGELOG.md)" ]; then
   git add CHANGELOG.md
 fi
 git commit -m "[release] ${TAG}"

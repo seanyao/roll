@@ -1,5 +1,12 @@
 # Changelog
 
+## v2026.511.2
+- **Added**: roll loop monitor 三服务状态 — 监控台新增 loop/dream/brief 三个 launchd 服务的运行状态、调度时间和实时 log tail，一屏掌握全局执行情况
+- **Fixed**: dashboard 多处展示问题 — 修复 pending_count 算术错误、brief 内联显示 release readiness、移除底部冗余命令列表
+- **Fixed**: loop 异常退出后 state 未重置 — 防止 queue 卡住导致后续任务无法执行
+- **Fixed**: CI 稳定性 — 修复 _notify_update 裸返回和时间断言，消除环境差异引起的随机失败
+- **Improved**: roll-brief 输出格式 — 序号命名、省略空 section、元信息格式精简，减少无效噪音
+
 ## v2026.511.1
 - **Changed**: roll loop 调度器切换到 launchd（macOS）— `roll setup` 自动安装 loop/dream/brief 三个 launchd 服务（默认关闭），`roll loop on/off/status` 统一走 launchctl 管理，幂等安装，Linux 保留 crontab 回退路径
 - **Added**: roll-loop TCR 硬校验 — 故事完成后自动统计 `tcr:` 微提交数量，为 0 时将故事状态回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏

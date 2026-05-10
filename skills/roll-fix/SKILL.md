@@ -320,6 +320,8 @@ Change the Status of the corresponding row from `📋 Todo` to `✅ Done`.
 
 ### 12. Update Changelog
 
+**Mandatory** — release notes depend on this step. Do not skip.
+
 ```bash
 $roll-.changelog
 ```

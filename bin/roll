@@ -1845,6 +1845,17 @@ cmd_brief() {
   [[ -f "$latest" ]] && cat "$latest"
 }
 
+cmd_release() {
+  local script="scripts/release.sh"
+  if [[ ! -f "$script" ]]; then
+    err "scripts/release.sh not found — run this command from the roll project root."
+    exit 1
+  fi
+  bash "$script" "$@"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 _dashboard() {
   local project_path; project_path=$(pwd -P)
   local project_name; project_name=$(basename "$project_path")
@@ -1927,6 +1938,7 @@ main() {
     loop)          cmd_loop "$@" ;;
     brief)         cmd_brief "$@" ;;
     agent)         cmd_agent "$@" ;;
+    release)       cmd_release "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) usage ;;
     "") [[ -f "BACKLOG.md" ]] && _dashboard || { usage; _show_changelog; } ;;

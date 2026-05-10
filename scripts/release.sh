@@ -30,7 +30,8 @@ if [ -n "$LAST_TAG" ] && ! git diff "${LAST_TAG}..HEAD" --name-only | grep -q "C
     claude -p 'Update CHANGELOG.md by running $roll-.changelog — extract completed BACKLOG items and append to CHANGELOG.md. Do NOT git commit or push, just update the file.'
     CHANGELOG_DIRTY=true
   else
-    echo "Warning: claude CLI not found, skipping CHANGELOG sync."
+    echo "Error: claude CLI not found. Cannot sync CHANGELOG.md — install Claude Code and retry."
+    exit 1
   fi
 fi
 

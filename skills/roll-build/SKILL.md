@@ -517,6 +517,9 @@ git push
 
 ### Phase 12: Report & Celebrate
 
+**Before reporting, run `$roll-.changelog`** to sync completed Story to CHANGELOG.md.
+This is mandatory — release notes depend on it.
+
 ```
 ✅ Pushed to GitHub: origin/main
 🚀 Deployed: <url>
@@ -601,7 +604,7 @@ Before creating any file or directory:
 - [ ] **Verification Gate passed** (fresh evidence for tests, build, deploy, no regression)
 - [ ] **BACKLOG.md index status updated** (📋 → ✅, REQUIRED)
 - [ ] **`docs/features/<feature>.md` US section updated** (Completed date + [x] ACs, REQUIRED)
-- [ ] **CHANGELOG.md updated** via `$roll-.changelog`
+- [ ] **CHANGELOG.md updated** via `$roll-.changelog` (REQUIRED)
 - [ ] Summary reported to user
 
 ---

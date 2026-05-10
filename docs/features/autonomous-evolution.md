@@ -356,3 +356,33 @@ roll loop monitor 5     # 5 秒刷新间隔
 **Files:**
 - `bin/roll` (_loop_monitor)
 - `tests/unit/roll_loop_monitor.bats`
+
+---
+
+<a id="us-auto-012"></a>
+## US-AUTO-012 loop 调度时间和 agent 移入配置文件 📋
+
+**Created**: 2026-05-11
+
+- As a developer using roll's autonomous loop
+- I want to configure loop schedule times and default agent in `~/.roll/config.yaml`
+- So that I can adjust them without editing `bin/roll` source code
+
+**AC:**
+- [ ] `~/.roll/config.yaml` 支持 `loop_dream_hour`（整数，默认 3）和 `loop_brief_hour`（整数，默认 9）两个字段，使用 24 小时制，以机器本地时区为准（launchd `StartCalendarInterval` 本身即为本地时区）
+- [ ] `_install_launchd_plists` 从配置读取这两个值；字段缺失时回退默认值，行为与当前一致
+- [ ] `roll loop on` 输出的时间提示从配置读取，与实际 plist 一致（不再硬编码）
+- [ ] `roll loop monitor` 三服务状态行的时间标注从配置读取
+- [ ] `roll setup` 写入初始 `~/.roll/config.yaml` 时加入带注释的 schedule 示例段：
+  ```yaml
+  # Loop schedule (hours in 24h format)
+  loop_dream_hour: 3
+  loop_brief_hour: 9
+  primary_agent: claude
+  ```
+- [ ] `primary_agent` 字段写入 `roll setup` 初始模板（代码路径已有读取逻辑，补模板）
+- [ ] 单元测试：`_install_launchd_plists` 覆盖使用自定义 `loop_dream_hour` / `loop_brief_hour` 的场景
+
+**Files:**
+- `bin/roll` (`_install_launchd_plists`, `_loop_on`, `_loop_monitor`, `cmd_setup`)
+- `tests/unit/launchd.bats`（补自定义时间用例）

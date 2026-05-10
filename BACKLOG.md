@@ -126,7 +126,7 @@
 ## ♻️ Refactor
 | ID | Description | Status |
 |----|-------------|--------|
-| REFACTOR-001 | 测试任务：添加 Hello World 测试文件，验证 22:00 自动执行 | 📋 Todo |
+| REFACTOR-001 | 测试任务：添加 Hello World 测试文件，验证 22:00 自动执行 | ✅ Done |
 
 ## 💡 Ideas
 | ID | Description | Status |

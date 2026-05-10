@@ -30,3 +30,6 @@ npm-debug.log*
 
 # Claude Code agent worktrees (auto-created, should not be tracked)
 .claude/worktrees/
+
+# Private release scripts (contain personal npm credentials/workflow)
+scripts/release.sh

@@ -49,11 +49,6 @@ _run_changelog_skill() {
   esac
 }
 
-LAST_TAG=$(git tag --sort=-version:refname | grep "^v" | head -1)
-if [[ -n "$LAST_TAG" ]] && ! git diff "${LAST_TAG}..HEAD" --name-only | grep -q "CHANGELOG.md"; then
-  _run_changelog_skill
-fi
-
 # Update package.json
 node -e "
   const fs = require('fs');
@@ -64,6 +59,11 @@ node -e "
 
 # Update VERSION in bin/roll
 sed -i.bak "s/^VERSION=.*/VERSION=\"${VERSION}\"/" bin/roll && rm bin/roll.bak
+
+# Sync CHANGELOG.md: only run skill if section for this version is missing
+if ! grep -q "^## v${VERSION}" CHANGELOG.md 2>/dev/null; then
+  _run_changelog_skill
+fi
 
 # Commit (include CHANGELOG.md if it was updated by cmd_release)
 git add package.json bin/roll

@@ -76,11 +76,22 @@ Bad:
 
 ### 4. Version Number Format
 
+Determine the current version being released:
+
+```bash
+VERSION=$(node -e "process.stdout.write(require('./package.json').version)" 2>/dev/null \
+  || git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
 ```
-YYYY.MM.DD
-YYYY.MM.DD-1  (multiple releases on the same day)
-YYYY.MM.DD-2
+
+`package.json` is the authoritative source — it is updated before this skill runs. Fall back to git tags only if `package.json` is unavailable.
+
+The CHANGELOG section header uses the full version string with a `v` prefix:
+
 ```
+## v${VERSION}
+```
+
+For the human-readable date display within entries, use `YYYY.MM.DD` format.
 
 ### 5. Generate CHANGELOG.md
 

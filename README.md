@@ -146,7 +146,7 @@ Research → Design → Build → Check → Fix → (loop)
 | Skill | Phase | Description |
 |-------|-------|-------------|
 | `$roll-build` | DESIGN+BUILD | Universal entry: Story ID, fix ID, or free-text fly mode |
-| `$roll-design` | DESIGN | Explore approaches → design solution → write Stories to BACKLOG |
+| `$roll-design` | DESIGN | Multi-turn discuss → [peer review] → DDD model → solution design → [peer review] → write Stories to BACKLOG |
 | `$roll-fix` | FIX | Bug fix / hotfix from BACKLOG |
 | `$roll-jot` | Support | Fast capture a bug or idea into BACKLOG.md |
 | `$roll-spar` | BUILD | Adversarial TDD — Attacker writes tests, Defender writes code |

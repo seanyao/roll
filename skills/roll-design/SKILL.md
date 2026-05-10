@@ -144,6 +144,13 @@ User Input
               │ Approach confirmed
               ▼
 ┌─────────────────────────────┐
+│ [peer] Direction Review     │  ← if complexity=large or cross-context; 10s opt-out
+│    Skill("roll-peer",       │
+│      tag="architecture")    │
+└─────────────┬───────────────┘
+              │ AGREE / skipped
+              ▼
+┌─────────────────────────────┐
 │ 2. Analyze + DDD Depth      │  ← Detect scope: Greenfield / Story / Fix
 │    - Requirement analysis    │
 │    - Feasibility assessment  │
@@ -206,6 +213,12 @@ User Input
               │      model.md                           │
               └──────────────────┬──────────────────────┘
                                  │
+                                 ▼
+              ┌─────────────────────────────────────────┐
+              │ [peer] Plan Review                       │  ← if complexity=large; 10s opt-out
+              │    Skill("roll-peer", tag="architecture")│
+              └──────────────────┬──────────────────────┘
+                                 │ AGREE / skipped
                                  ▼
               ┌─────────────────────────────────────────┐
               │ 4. Split into Stories                    │
@@ -435,6 +448,60 @@ Domain: Order Context > Order Aggregate > OrderItem Entity
 - More than 2 viable technical paths exist
 - Requirement involves an unfamiliar tech stack or new domain
 
+### How to Conduct the Discussion
+
+Discuss is **multi-turn by default**. The goal is to reach clarity together, not to produce a complete comparison matrix in one shot.
+
+**Step 1 — Understand before proposing**
+
+Before listing options, make sure the core problem is clear. If context is thin, ask 1–2 focused questions first:
+
+```
+Before I lay out the options — can you tell me [specific constraint / scale / existing system boundary]?
+```
+
+Only skip this if the context is already rich enough to reason from.
+
+**Step 2 — Offer an opinionated starting point, not a menu**
+
+Don't dump 4 options at once. Lead with a concrete recommendation and the key tradeoff:
+
+```
+My read: go with X. The main tradeoff is [Y vs Z]. Want me to walk through why, or should I compare against [alternative] first?
+```
+
+Then wait. Let the user redirect.
+
+**Step 3 — Follow the thread**
+
+If the user wants to dig into a specific option or challenge an assumption, stay on that thread. Don't pivot back to the full comparison until the current thread is resolved.
+
+**Step 4 — Surface hidden assumptions explicitly**
+
+When a direction starts to crystallize, name the assumptions holding it up:
+
+```
+This only holds if [assumption]. Is that true for your situation?
+```
+
+**Step 5 — Name convergence before triggering the gate**
+
+When the discussion reaches a clear conclusion, summarize it explicitly before asking to proceed:
+
+```
+Looks like we've landed on: [decision]. The key reasons: [1–2 points].
+```
+
+Then trigger the gate.
+
+**Gate rule** — after convergence is named, always end with this explicit prompt and **wait for user reply before proceeding**:
+
+```
+➡️  Continue to solution design, or keep exploring?
+```
+
+Do **not** infer "approach confirmed" from the user's reaction to the comparison. Only proceed to Step 2 (Analyze) when the user explicitly says to continue (e.g., "yes", "proceed", "go ahead", "design it").
+
 **Can stop at any time** — if after discussion the user says "let's not do it" or "let me think about it", there's no need to continue to the planning phase.
 
 ---
@@ -558,6 +625,24 @@ $roll-debug discovers issue → Suggest creating FIX
 $roll-design --fix "fix login API 404" → Create FIX-AUTH-001
 $roll-fix FIX-AUTH-001 → Quick fix
 ```
+
+### With roll-peer
+
+Two checkpoints, both with 10s opt-out:
+
+```
+1. After Discuss — Direction Review
+   Approach confirmed → [peer, tag=architecture] → challenge the direction before DDD
+   Trigger: complexity=large OR requirement touches multiple Bounded Contexts
+
+2. After Solution Design — Plan Review
+   Plan written → [peer, tag=architecture] → full plan review before story split
+   Trigger: complexity=large (greenfield always qualifies)
+```
+
+On AGREE or user skip → continue to the next step normally.
+On REFINE/OBJECT → incorporate feedback, regenerate the relevant output, re-trigger peer.
+On ESCALATE → present both proposals to user for final call.
 
 ---
 

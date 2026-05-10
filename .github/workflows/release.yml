@@ -19,8 +19,12 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           PREV_TAG=$(git tag --sort=-version:refname | grep "^v" | sed -n '2p')
           if [ -n "$PREV_TAG" ]; then
-            git log --pretty=format:"- %s" "${PREV_TAG}..${TAG}" \
-              | grep -v "^\- \[release\]" \
+            # Diff CHANGELOG.md between tags — only lines added in this release
+            git diff "${PREV_TAG}..${TAG}" -- CHANGELOG.md \
+              | grep "^+" \
+              | grep -v "^+++" \
+              | sed 's/^+//' \
+              | grep -v "^#\|^$" \
               > release_notes.txt
           fi
           if [ ! -s release_notes.txt ]; then

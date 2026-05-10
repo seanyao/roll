@@ -149,7 +149,7 @@ roll-.dream runs **locally** — it reads the local codebase directly.
 0 1 * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-.dream/SKILL.md)" >> ~/.shared/roll/dream/cron.log 2>&1
 ```
 
-Installed automatically via `roll loop install` alongside roll-loop.
+Installed automatically via `roll loop on` alongside roll-loop.
 The agent command is read from `~/.roll/config.yaml → loop.primary_agent`.
 
 ### Agent with native scheduling support

@@ -1674,7 +1674,7 @@ cmd_agent() {
       [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek>"; exit 1; }
       command -v "$name" &>/dev/null || warn "${name} not found in PATH — setting anyway  未找到，仍写入配置"
       if [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml; then
-        sed -i "s/^agent:.*/agent: ${name}/" .roll.yaml
+        local tmp; tmp=$(mktemp) && sed "s/^agent:.*/agent: ${name}/" .roll.yaml > "$tmp" && mv "$tmp" .roll.yaml
       else
         echo "agent: ${name}" >> .roll.yaml
       fi
@@ -1714,6 +1714,17 @@ _LOOP_TAG="# roll-loop"
 _LOOP_STATE="${HOME}/.shared/roll/loop/state.yaml"
 _LOOP_ALERT="${HOME}/.shared/roll/loop/ALERT.md"
 
+_agent_skill_cmd() {
+  local skill_path="$1"
+  local agent; agent=$(_project_agent)
+  case "$agent" in
+    claude)   echo "claude -p \"\$(cat '${skill_path}')\"" ;;
+    kimi)     echo "kimi --quiet \"\$(cat '${skill_path}')\"" ;;
+    deepseek) echo "deepseek \"\$(cat '${skill_path}')\"" ;;
+    *)        echo "claude -p \"\$(cat '${skill_path}')\"" ;;
+  esac
+}
+
 cmd_loop() {
   local subcmd="${1:-status}"; shift || true
   case "$subcmd" in
@@ -1721,7 +1732,9 @@ cmd_loop() {
     off)    _loop_off ;;
     now)    _loop_now ;;
     status) _loop_status ;;
-    *) err "Usage: roll loop <on|off|now|status>"; exit 1 ;;
+    resume) _loop_resume ;;
+    reset)  _loop_reset ;;
+    *) err "Usage: roll loop <on|off|now|status|resume|reset>"; exit 1 ;;
   esac
 }
 
@@ -1737,9 +1750,9 @@ _loop_on() {
   mkdir -p ~/.shared/roll/{loop,dream,brief}
 
   local loop_cmd dream_cmd brief_cmd
-  loop_cmd="cd \"${project_path}\" && ${agent} -p \"\$(cat ${sd}/roll-loop/SKILL.md)\" >> ~/.shared/roll/loop/cron.log 2>&1"
-  dream_cmd="cd \"${project_path}\" && ${agent} -p \"\$(cat ${sd}/roll-.dream/SKILL.md)\" >> ~/.shared/roll/dream/cron.log 2>&1"
-  brief_cmd="cd \"${project_path}\" && ${agent} -p \"\$(cat ${sd}/roll-brief/SKILL.md)\" >> ~/.shared/roll/brief/cron.log 2>&1"
+  loop_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-loop/SKILL.md") >> ~/.shared/roll/loop/cron.log 2>&1"
+  dream_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-.dream/SKILL.md") >> ~/.shared/roll/dream/cron.log 2>&1"
+  brief_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-brief/SKILL.md") >> ~/.shared/roll/brief/cron.log 2>&1"
 
   (
     crontab -l 2>/dev/null
@@ -1784,6 +1797,26 @@ _loop_status() {
   [[ -f "$_LOOP_ALERT" ]] && { echo ""; echo -e "  ${RED}⚠ ALERT:${NC}"; sed 's/^/    /' "$_LOOP_ALERT"; }
   [[ -f "$_LOOP_STATE" ]] && { echo ""; echo "  State:"; sed 's/^/    /' "$_LOOP_STATE"; }
   echo ""
+}
+
+_loop_resume() {
+  if [[ ! -f "$_LOOP_STATE" ]]; then
+    warn "No loop state found — nothing to resume  未找到 loop 状态，无需恢复"; return 0
+  fi
+  if grep -q "status: running" "$_LOOP_STATE" 2>/dev/null; then
+    warn "Loop already running  loop 正在运行中"; return 0
+  fi
+  info "Resuming loop from last state...  正在从上次状态恢复..."
+  _agent_run_skill "roll-loop"
+}
+
+_loop_reset() {
+  if [[ -f "$_LOOP_STATE" ]]; then
+    rm -f "$_LOOP_STATE"
+    ok "Loop state cleared — will start fresh on next run  loop 状态已清除，下次运行将重新开始"
+  else
+    info "No loop state to clear  无 loop 状态可清除"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1841,7 +1874,7 @@ _dashboard() {
   fi
 
   echo ""
-  echo "  roll loop on|off|now|status · roll brief · roll agent use <name>"
+  echo "  roll loop on|off|now|status|resume|reset · roll brief · roll agent use <name>"
   echo ""
 }
 
@@ -1867,7 +1900,7 @@ usage() {
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
   echo "  peer                   [Peer Review] Cross-agent negotiation               跨 Agent 协商对审"
-  echo "  loop <on|off|now|status>  [Autonomous] Manage scheduled BACKLOG executor  管理自主执行循环"
+  echo "  loop <on|off|now|status|resume|reset>  [Autonomous] Manage scheduled BACKLOG executor  管理自主执行循环"
   echo "  brief                  [Digest] Show latest owner brief (regenerate if stale)  展示最新简报"
   echo "  agent [use <name>|list]   [Config] Per-project agent selection            切换项目 agent"
   echo ""

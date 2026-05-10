@@ -174,10 +174,10 @@ cannot fulfill these requirements.
 
 ### Local cron (default)
 
-Install once with `roll loop install`:
+Install once with `roll loop on`:
 
 ```bash
-# What roll loop install writes to crontab:
+# What roll loop on writes to crontab:
 0 * * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)" >> ~/.shared/roll/loop/cron.log 2>&1
 ```
 

@@ -1,0 +1,42 @@
+name: Roll Loop
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # every hour
+  workflow_dispatch:       # manual trigger / resume
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Roll
+        run: npm install -g @seanyao/roll
+
+      - name: Restore loop state
+        run: mkdir -p ~/.shared/roll/loop/
+
+      - name: Run roll-loop
+        run: claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+      - name: Commit changes
+        run: |
+          git config user.name "roll-loop"
+          git config user.email "roll@auto"
+          git add -A
+          git diff --staged --quiet || git commit -m "chore: roll-loop $(date +%Y-%m-%dT%H:%M)"
+          git push
+
+      - name: Check for alerts
+        run: |
+          if [ -f ~/.shared/roll/loop/ALERT.md ]; then
+            echo "::error::roll-loop paused — see ALERT.md"
+            cat ~/.shared/roll/loop/ALERT.md
+            exit 1
+          fi

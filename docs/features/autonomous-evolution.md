@@ -371,6 +371,8 @@ roll loop monitor 5     # 5 秒刷新间隔
 **AC:**
 - [ ] `~/.roll/config.yaml` 支持以下调度字段，使用 24 小时制，以机器本地时区为准：
   - `loop_minute`（整数）— roll-loop 触发分钟，每小时执行
+  - `loop_active_start`（整数，默认 **10**）— loop 每日最早触发小时（含）
+  - `loop_active_end`（整数，默认 **18**）— loop 每日最晚触发小时（不含）
   - `loop_dream_hour`（整数，默认 3）— roll-.dream 触发小时
   - `loop_dream_minute`（整数）— roll-.dream 触发分钟
   - `loop_brief_hour`（整数，默认 9）— roll-brief 触发小时
@@ -379,12 +381,15 @@ roll loop monitor 5     # 5 秒刷新间隔
   - `_project_slug` 已有 md5 hash（6 位 hex），取其数值 `% 55 + 1` 得到 1–55 范围的分钟数（避开 :00）
   - 三个服务在此基础上各加固定偏移（+0 / +2 / +4 分钟，mod 55 + 1），保证同一项目内也不同时触发
   - 效果：不同项目自动分散到不同分钟，无需用户配置；需要固定时间再手动指定
+- [ ] **active window 实现**：loop runner script 在执行前检查当前小时是否在 `[loop_active_start, loop_active_end)` 范围内；不在窗口内则静默退出（不写 state，不计为错误）
 - [ ] `_install_launchd_plists` 从配置读取 hour/minute；未配置时用上述 hash 推导逻辑
-- [ ] `roll loop on` 输出的时间提示显示实际使用的分钟值（hash 推导或配置值）
-- [ ] `roll loop monitor` 三服务状态行的时间标注同上
-- [ ] `roll setup` 写入初始 `~/.roll/config.yaml` 时加入带注释的 schedule 示例段（minute 字段注释掉，说明留空即自动分散）：
+- [ ] `roll loop on` 输出的时间提示显示实际使用的分钟值和 active window
+- [ ] `roll loop monitor` 三服务状态行的时间标注同上，loop 行额外显示 active window
+- [ ] `roll setup` 写入初始 `~/.roll/config.yaml` 时加入带注释的 schedule 示例段：
   ```yaml
   # Loop schedule (24h format)
+  loop_active_start: 10   # loop only runs during active window (after human reviews brief)
+  loop_active_end: 18
   # loop_minute: 5        # omit to auto-derive from project hash (avoids contention)
   loop_dream_hour: 3
   # loop_dream_minute: 10 # omit to auto-derive
@@ -397,10 +402,11 @@ roll loop monitor 5     # 5 秒刷新间隔
   - 自定义 hour/minute 覆盖 hash 推导
   - 两个不同路径项目的默认 minute 不相同
   - 同一项目三个服务的默认 minute 各不相同
+  - active window 边界：窗口内触发，窗口外静默退出
 
 **Files:**
-- `bin/roll` (`_install_launchd_plists`, `_loop_on`, `_loop_monitor`, `cmd_setup`)
-- `tests/unit/launchd.bats`（补自定义时间用例）
+- `bin/roll` (`_install_launchd_plists`, `_loop_on`, `_loop_monitor`, `cmd_setup`, `_write_runner_script`)
+- `tests/unit/launchd.bats`（补自定义时间 + active window 用例）
 
 ---
 

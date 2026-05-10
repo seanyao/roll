@@ -78,6 +78,36 @@ EOF
   echo "$monitor_body" | grep -q "_launchd_is_loaded"
 }
 
+# ─── Three-service status display (US-AUTO-011) ──────────────────────────────
+
+@test "loop monitor: shows three service lines (loop, dream, brief) on macOS" {
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
+  local monitor_body
+  monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$monitor_body" | grep -q '"loop:hourly"'
+  echo "$monitor_body" | grep -q '"dream:01:00"'
+  echo "$monitor_body" | grep -q '"brief:08:00"'
+}
+
+@test "loop monitor: log tail reads from launchd.log (not cron.log)" {
+  local monitor_body
+  monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$monitor_body" | grep -q "launchd.log"
+  echo "$monitor_body" | grep -vq "cron.log"
+}
+
+@test "loop monitor: log tail shows last 10 lines" {
+  local monitor_body
+  monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$monitor_body" | grep -q "tail -10"
+}
+
+@test "loop monitor: log tail section has a separator and header" {
+  local monitor_body
+  monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$monitor_body" | grep -q "Log Tail"
+}
+
 # ─── Queue ordering ───────────────────────────────────────────────────────────
 
 @test "loop monitor: queue shows FIX items before US items" {

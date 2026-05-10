@@ -9,6 +9,8 @@
 
 > Roll out features with AI agents — _Move fast, no sprints._
 
+**[中文版 README](README_CN.md)**
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/@seanyao/roll.svg)](https://www.npmjs.com/package/@seanyao/roll)
 [![CI](https://github.com/seanyao/roll/actions/workflows/ci.yml/badge.svg)](https://github.com/seanyao/roll/actions/workflows/ci.yml)
@@ -17,20 +19,21 @@
 
 ## What is Roll?
 
-Roll solves a specific problem: when developers on the same team use different AI clients (Claude Code, Cursor, Gemini CLI, Codex), each agent operates under different engineering constraints. One developer's Claude runs tests another's Cursor never even considers.
+Roll solves a specific problem: when developers on the same team use different AI clients (Claude Code, Cursor, Gemini CLI, Kimi, Codex, DeepSeek, Pi, OpenCode, Trae), each agent operates under different engineering constraints. One developer's Claude runs tests another's Cursor never even considers.
 
-Roll fixes this through two mechanisms:
+Roll fixes this through three mechanisms:
 
-1. **Convention CLI** — a single source of engineering conventions distributed to every AI client on the machine (`~/.claude/`, `~/.cursor/`, `~/.gemini/`, etc.)
-2. **Skill System** — proven engineering practices (TDD, TCR, SRE, INVEST) encoded as instructions that any AI agent can follow
+1. **Convention CLI** — a single source of engineering conventions distributed to every AI client on the machine (`~/.claude/`, `~/.cursor/`, `~/.gemini/`, `~/.kimi/`, `~/.codex/`, `~/.deepseek/`, etc.)
+2. **Skill System** — 20 proven engineering practices (TDD, TCR, SRE, INVEST, DDD) encoded as instructions that any AI agent can follow
+3. **Autonomous Evolution** — an optional layer that lets the agent work unattended: `roll-loop` executes BACKLOG items hourly, `roll-.dream` scans code health nightly, and `roll-brief` briefs the human each morning. The human retains sole authority over releases.
 
-The result: any agent, any client, same constraints.
+The result: any agent, any client, same constraints — and optionally, continuous autonomous delivery.
 
 ---
 
 ## Start Here
 
-Before commands and skills, read the Engineering Methodology — it explains the three-loop architecture (Research → Build → Observe), why each skill exists, and how they connect into a complete delivery system.
+Before commands and skills, read the Engineering Methodology — it explains the three-loop architecture (Research → Build → Observe), the autonomous evolution layer, why each skill exists, and how they connect into a complete delivery system.
 
 **[English](docs/methodology-en.md)** · **[中文](docs/methodology.md)**
 
@@ -57,17 +60,25 @@ roll update
 
 ## Convention Management
 
-Unified behavioral conventions for Claude Code / Gemini CLI / Cursor / Codex — all from one source.
+Unified behavioral conventions for Claude Code / Gemini CLI / Cursor / Kimi / Codex / DeepSeek / Pi / OpenCode / Trae — all from one source.
 
 ### Commands
 
+Commands fall into two categories: **bash commands** run pure shell logic; **agent commands** (marked with 🤖) launch a full AI agent session to execute a SKILL.md.
+
 | Command | Description |
 |---------|-------------|
-| `roll setup` | First-time install on this machine, or re-sync after editing `~/.roll/config.yaml` (use `--force` to overwrite local cache) |
-| `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via `roll setup` |
+| `roll setup [-f]` | First-time install on this machine, or re-sync (use `--force` to overwrite local cache) |
+| `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via setup |
 | `roll init` | New project: create `AGENTS.md` + `BACKLOG.md` + `docs/features/` |
-
 | `roll status` | Show sync state, skill links, and detected AI tools |
+| `roll backlog` | Show all pending tasks from BACKLOG.md |
+| `roll agent [use <name>\|list]` | Per-project agent selection — affects all 🤖 commands |
+| `roll loop <on\|off\|now\|status\|monitor\|resume\|reset>` | 🤖 Manage the autonomous BACKLOG executor (three-service: loop/dream/brief) |
+| `roll brief` | 🤖 Show latest owner brief (regenerate if stale >24h) |
+| `roll peer` | 🤖 Cross-agent code review and negotiation |
+| `roll release` | 🤖 Sync changelog + version bump + tag + npm publish + GitHub Release |
+| `roll` _(no args, in project dir)_ | Dashboard: loop status, pending count, latest brief summary |
 
 ### Typical Flow
 
@@ -83,7 +94,13 @@ roll init
 # 3. Upgrade to a new release
 roll update
 
+# 4. Enable autonomous evolution (optional)
+roll loop on                  # three services: loop (hourly) + dream (nightly) + brief (daily)
+roll loop monitor             # real-time top-like dashboard
+roll brief                    # read the latest digest
 
+# 5. Switch agent per project
+roll agent use kimi           # all 🤖 commands now use kimi for this project
 ```
 
 ### How Convention Layering Works
@@ -137,29 +154,90 @@ Research → Design → Build → Check → Fix → (loop)
 | Fast backlog capture (bug / idea) | `$roll-idea "description"` |
 | High-risk logic (payments, auth, state machines) | `$roll-spar "feature"` |
 | Deep research (product / company / tech) | `$roll-research "subject"` |
+| Cross-agent code review | `$roll-peer` |
 | Patrol production for regressions | `$roll-sentinel patrol` |
 | Debug a broken page | `$roll-debug <URL>` |
 | Record a dev moment / diary entry | `$roll-notes "just fixed that nasty bug"` |
+| Let the agent work overnight | `roll loop on` |
 
 ### Full Skill List
 
-| Skill | Phase | Description |
-|-------|-------|-------------|
-| `$roll-build` | DESIGN+BUILD | Universal entry: Story ID, fix ID, or free-text fly mode |
-| `$roll-design` | DESIGN | Multi-turn discuss → [peer review] → DDD model → solution design → [peer review] → write Stories to BACKLOG |
-| `$roll-fix` | FIX | Bug fix / hotfix from BACKLOG |
-| `$roll-idea` | Support | Fast capture a bug or idea into BACKLOG.md |
-| `$roll-spar` | BUILD | Adversarial TDD — Attacker writes tests, Defender writes code |
-| `$roll-sentinel` | CHECK | Scheduled production patrol |
-| `$roll-debug` | CHECK | Deep page diagnostics + root cause analysis |
-| `$roll-research` | RESEARCH | HV Analysis framework, outputs PDF report |
-| `$roll-release` | RELEASE | One-command publish: auto version (YYYY.MMDD.N) → tag → npm publish |
-| `$roll-.review` | Support | Pre-commit self code review |
-| `$roll-.qa` | Support | Test pyramid and coverage standards reference |
-| `$roll-.changelog` | Support | Auto-generate CHANGELOG from BACKLOG |
-| `$roll-.echo` | Support | Passive intent clarification |
-| `$roll-.clarify` | Support | Passive scope clarification for vague build requests |
-| `$roll-notes` | Support | Project diary — append dev moments to `notes/YYYY-MM-DD.md` |
+**Loop A — Research & Design**
+
+| Skill | Description |
+|-------|-------------|
+| `$roll-research` | HV Analysis (Horizontal-Vertical) deep research framework, outputs PDF report |
+| `$roll-design` | Multi-turn discuss → [peer review] → DDD model → solution design → [peer review] → write Stories to BACKLOG |
+
+**Loop B — Implementation & Iteration**
+
+| Skill | Description |
+|-------|-------------|
+| `$roll-build` | Universal entry: Story ID, fix ID, or free-text fly mode. TCR-driven micro-commits |
+| `$roll-spar` | Adversarial TDD — Attacker writes tests, Defender writes code |
+| `$roll-fix` | Bug fix / hotfix from BACKLOG |
+| `$roll-release` | One-command publish: auto version (YYYY.MMDD.N) → tag → npm publish → GitHub Release |
+| `$roll-peer` | Cross-agent code review — Claude / Kimi / DeepSeek / Codex bilateral negotiation |
+
+**Loop C — Observability & Maintenance**
+
+| Skill | Description |
+|-------|-------------|
+| `$roll-sentinel` | Randomized production patrol with adaptive hot-spot weighting |
+| `$roll-debug` | Playwright-based live forensics + root cause analysis |
+
+**Autonomous Evolution (optional, via `roll loop on`)**
+
+| Skill | Description |
+|-------|-------------|
+| `$roll-loop` | Hourly BACKLOG executor — routes US/FIX/REFACTOR to the right skill, enforces TCR |
+| `$roll-.dream` | Nightly code health scan — dead code, architectural drift → REFACTOR entries |
+| `$roll-brief` | Owner-facing digest — what's done, what's pending, release readiness verdict |
+
+**Passive Support**
+
+| Skill | Description |
+|-------|-------------|
+| `$roll-.review` | Pre-commit multi-dimensional self code review |
+| `$roll-.qa` | Test pyramid and coverage standards reference |
+| `$roll-.changelog` | Auto-generate CHANGELOG from BACKLOG |
+| `$roll-.echo` | Passive intent clarification |
+| `$roll-.clarify` | Passive scope clarification for vague build requests |
+| `$roll-idea` | Fast capture a bug or idea into BACKLOG.md |
+| `$roll-notes` | Project diary — append dev moments to `notes/YYYY-MM-DD.md` |
+| `$roll-doctor` | One-command dev toolchain health check |
+
+---
+
+## Autonomous Evolution
+
+Off by default. Enable with `roll loop on` to let the agent work unattended on your project.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Base layer (always active)                             │
+│  $roll-design → $roll-build → $roll-fix → $roll-spar   │
+│  Human drives every action                              │
+├─────────────────────────────────────────────────────────┤
+│  Autonomous layer (opt-in: roll loop on)                │
+│  roll-loop   — hourly BACKLOG executor                  │
+│  roll-.dream — nightly code health scan                 │
+│  roll-brief  — daily morning digest + release readiness │
+│  Human reviews briefs; retains sole release authority   │
+└─────────────────────────────────────────────────────────┘
+```
+
+Three services are scheduled via macOS launchd (Linux: crontab) and managed as a unit:
+
+- **roll-loop** runs hourly, picks up `📋 Todo` items from BACKLOG, routes them (`US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`), and enforces TCR discipline — if a story completes with zero `tcr:` micro-commits, it reverts to Todo with an ALERT.
+- **roll-.dream** runs nightly, scanning for dead code, architectural drift, and refactoring opportunities. Outputs `REFACTOR-XXX` entries to BACKLOG.
+- **roll-brief** runs each morning (or on-demand via `roll brief`), producing an owner-facing digest with a release-readiness verdict.
+
+The autonomous layer **never** invokes `roll-release`. Production deployment is always a human decision.
+
+Use `roll loop monitor` for a real-time `top`-like view of all three services: launchd status, current execution state, pending queue, alerts, and live log tail.
+
+Per-project agent configuration: `roll agent use <name>` writes `.roll.yaml` so each project can use a different AI client (claude / kimi / deepseek / pi / codex / opencode). Lookup order: `.roll.yaml` → `~/.roll/config.yaml` → `claude` (default).
 
 ---
 

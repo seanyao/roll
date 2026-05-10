@@ -585,21 +585,26 @@ graph LR
 
 ### 9.2 各组件
 
-**`roll-loop`** — 通过本地 cron 每小时运行。扫描 BACKLOG 中 `📋 Todo` 条目并按类型路由：`US-XXX → $roll-build`、`FIX-XXX → $roll-fix`、`REFACTOR-XXX → $roll-build`。每次执行有条目上限，控制影响范围。Feature 全部完成时自动触发 `roll-brief`。
+**`roll-loop`** — 通过 macOS launchd（Linux: crontab）每小时运行。扫描 BACKLOG 中 `📋 Todo` 条目并按类型路由：`US-XXX → $roll-build`、`FIX-XXX → $roll-fix`、`REFACTOR-XXX → $roll-build`。每次执行有条目上限，控制影响范围。Feature 全部完成时自动触发 `roll-brief`。内置 TCR 硬校验：Story 完成后检查 `tcr:` 微提交数量，为 0 时将 Story 回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏。
 
-**`roll-.dream`** — 通过本地 cron 每晚 01:00 运行。扫描代码库中的死代码、对照 `docs/domain/` 检测架构漂移、识别可修剪的抽象和可提炼的模式。产出 `REFACTOR-XXX` 条目写入 BACKLOG，巡检日志写入 `docs/dream/YYYY-MM-DD.md`。
+**`roll-.dream`** — 通过 macOS launchd（Linux: crontab）每晚 03:00 运行。扫描代码库中的死代码、对照 `docs/domain/` 检测架构漂移、识别可修剪的抽象和可提炼的模式。产出 `REFACTOR-XXX` 条目写入 BACKLOG，巡检日志写入 `docs/dream/YYYY-MM-DD.md`。
 
-**`roll-brief`** — 三种触发模式：Feature 完成时（由 roll-loop 触发）、每日早晨（08:00）、按需（`roll brief`）。产出 owner 面简报：已完成内容、待处理队列、需升级的事项、发布就绪建议。有别于 `roll-.changelog`（用户面发布说明）。
+**`roll-brief`** — 三种触发模式：Feature 完成时（由 roll-loop 触发）、每日早晨（09:00，通过 launchd 调度）、按需（`roll brief`）。产出 owner 面简报：已完成内容、待处理队列、需升级的事项、发布就绪建议。有别于 `roll-.changelog`（用户面发布说明）。
 
-### 9.3 为什么用本地 cron，而非 GitHub Actions
+### 9.3 为什么用本地调度，而非 GitHub Actions
 
 GitHub Actions 在远程服务器上运行，无法访问本地代码库、本地测试运行器或本地 agent CLI。`$roll-build` 的核心是 TCR 循环，必须在本地执行。使用 GitHub Actions 意味着 agent 只能以快照方式读取仓库，无法运行测试，无法感知开发环境。
 
-本地 cron 直接在项目目录调用 agent CLI：
+macOS 上使用 **launchd**（plist 安装到 `~/Library/LaunchAgents/`），Linux 上使用 crontab。`roll loop on` 自动安装三个服务（loop/dream/brief）的调度配置，`roll loop off` 卸载。
 
 ```bash
-0 * * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
+# macOS launchd plist 示例（自动生成，无需手动编写）
+~/Library/LaunchAgents/com.roll.loop.<project-slug>.plist
+~/Library/LaunchAgents/com.roll.dream.<project-slug>.plist
+~/Library/LaunchAgents/com.roll.brief.<project-slug>.plist
 ```
+
+`roll loop monitor` 提供类似 `top` 的实时面板，显示三服务 launchd 状态、当前执行状态、待办队列、告警和实时日志。
 
 如果使用的 agent 支持原生调度（如 Claude Code hooks、opencode 定时任务），优先使用原生调度，生命周期管理更干净。
 
@@ -645,7 +650,7 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 **已验证**：
 
 - 反馈驱动的持续交付闭环（Design → Build → Check → Fix）
-- 16 个 Skill 的标准化技能集（11 个主动 + 5 个被动支撑）
+- 20 个 Skill 的标准化技能集（12 个主动 + 8 个被动支撑）
 - 跨 AI 客户端的配置一致性管理（`roll` CLI）
 - TCR 微步提交 + 验证门禁的质量保障机制
 - `Co-Authored-By` trailer 实现的多 Agent 审计追踪（由各 AI 工具原生写入）

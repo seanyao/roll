@@ -1,5 +1,8 @@
 # Changelog
 
+## v2026.511.4
+- **Fixed**: roll init 自动重建 launchd runner scripts — 升级 roll 后直接跑 `roll init` 即可迁移到独立 runner，无需手动执行 roll setup 或 roll loop on
+
 ## v2026.511.3
 - **Fixed**: loop/dream/brief 多项目运行隔离 — 共享 run.sh 导致所有项目的 loop 在同一目录执行，改为每个项目独立 runner 脚本（run-{slug}.sh），彻底隔离多项目并发执行环境
 - **Fixed**: roll release 自发版拦截 — 在 roll 自身项目执行 `roll release` 时自动拦截并提示改用 scripts/release.sh，防止误操作绕过 2FA

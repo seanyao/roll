@@ -307,25 +307,27 @@ roll loop monitor 5     # refresh every 5s
 ---
 
 <a id="us-auto-010"></a>
-## US-AUTO-010 roll-loop TCR 硬校验 📋
+## US-AUTO-010 roll-loop TCR 硬校验 ✅
 
 **Created**: 2026-05-10
+**Completed**: 2026-05-10
 
 - As a product owner relying on autonomous execution
 - I want roll-loop to verify TCR rhythm after each story completes
 - So that no story is marked Done without at least one `tcr:` micro-commit
 
 **AC:**
-- [ ] roll-loop 在每条故事完成后（Step 4 Post-Item Cleanup），执行 `git log --oneline` 检查自该故事开始时间以来的 `tcr:` 前缀提交数量
-- [ ] 数量 == 0：将 BACKLOG.md 中该故事状态从 ✅ Done 回退为 📋 Todo，写 ALERT 到 `~/.shared/roll/loop/ALERT.md`
-- [ ] ALERT 内容包含：故事 ID、检测时间、原因 "zero TCR commits since story start"、建议操作（手动补 TCR 或 `roll loop reset` 后重跑）
-- [ ] 数量 > 0：正常流程继续，状态保持 ✅ Done
-- [ ] 检查逻辑写入 `skills/roll-loop/SKILL.md` Step 4 节
-- [ ] 补写验证测试：mock git log 输出，覆盖 TCR 存在 / 不存在两个分支
+- [x] roll-loop 在每条故事完成后（Step 4 Post-Item Cleanup），执行 `git log --oneline` 检查自该故事开始时间以来的 `tcr:` 前缀提交数量
+- [x] 数量 == 0：将 BACKLOG.md 中该故事状态从 ✅ Done 回退为 📋 Todo，写 ALERT 到 `~/.shared/roll/loop/ALERT.md`
+- [x] ALERT 内容包含：故事 ID、检测时间、原因 "zero TCR commits since story start"、建议操作（手动补 TCR 或 `roll loop reset` 后重跑）
+- [x] 数量 > 0：正常流程继续，状态保持 ✅ Done
+- [x] 检查逻辑写入 `skills/roll-loop/SKILL.md` Step 4 节
+- [x] 补写验证测试：覆盖 TCR 存在 / 不存在两个分支（`tests/unit/loop_tcr.bats`，8 用例）
 
 **Files:**
+- `bin/roll` (`_loop_tcr_count`, `_loop_enforce_tcr`)
 - `skills/roll-loop/SKILL.md`（Step 4 补充 TCR 校验逻辑）
-- `tests/unit/roll_loop_tcr_check.bats`
+- `tests/unit/loop_tcr.bats`（8 测试用例）
 
 ---
 

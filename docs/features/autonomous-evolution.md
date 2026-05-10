@@ -270,3 +270,61 @@ roll loop monitor 5     # refresh every 5s
 
 **Files:**
 - `bin/roll` (_loop_monitor, cmd_loop routing, usage)
+
+---
+
+<a id="us-auto-009"></a>
+## US-AUTO-009 launchd 调度迁移 📋
+
+**Created**: 2026-05-10
+
+- As a developer running roll on macOS
+- I want roll to use launchd (not cron) as the scheduler
+- So that scheduled tasks run reliably in the GUI session with keychain access
+
+**AC:**
+- [ ] `roll setup` 在 `~/Library/LaunchAgents/` 创建 `com.roll.loop.plist` / `com.roll.dream.plist` / `com.roll.brief.plist`，服务默认**未加载**（disabled）
+- [ ] `roll setup` 幂等：plist 已存在时跳过，不重复安装；更新安装时同样检查
+- [ ] `roll loop on` 改用 `launchctl bootstrap gui/$(id -u)` 激活三服务，不写 crontab
+- [ ] `roll loop off` 改用 `launchctl bootout gui/$(id -u)` 停用三服务，不删 crontab
+- [ ] `roll loop status` 改用 `launchctl list | grep com.roll` 判断启用状态
+- [ ] `roll loop monitor` 调度状态显示基于 launchd，不再检查 crontab
+- [ ] 任何 `roll loop` 子命令不再读写 crontab
+- [ ] Plists 使用完整 PATH 和 `/opt/homebrew/bin/claude` 绝对路径，日志输出到 `~/.shared/roll/{loop,dream,brief}/launchd.log`
+- [ ] 补写 `tests/unit/roll_loop_launchd.bats`，覆盖 plist 生成逻辑和 on/off 状态检测（mock launchctl）
+
+**CLI:**
+```bash
+roll setup          # 安装 plists（首次或更新安装时调用）
+roll loop on        # launchctl bootstrap — 激活三服务
+roll loop off       # launchctl bootout — 停用三服务
+roll loop status    # launchctl list 检查状态
+```
+
+**Files:**
+- `bin/roll` (_loop_on, _loop_off, _loop_status, _loop_monitor, cmd_setup 或 install.sh)
+- `~/Library/LaunchAgents/com.roll.{loop,dream,brief}.plist`（运行时生成，不入 git）
+- `tests/unit/roll_loop_launchd.bats`
+
+---
+
+<a id="us-auto-010"></a>
+## US-AUTO-010 roll-loop TCR 硬校验 📋
+
+**Created**: 2026-05-10
+
+- As a product owner relying on autonomous execution
+- I want roll-loop to verify TCR rhythm after each story completes
+- So that no story is marked Done without at least one `tcr:` micro-commit
+
+**AC:**
+- [ ] roll-loop 在每条故事完成后（Step 4 Post-Item Cleanup），执行 `git log --oneline` 检查自该故事开始时间以来的 `tcr:` 前缀提交数量
+- [ ] 数量 == 0：将 BACKLOG.md 中该故事状态从 ✅ Done 回退为 📋 Todo，写 ALERT 到 `~/.shared/roll/loop/ALERT.md`
+- [ ] ALERT 内容包含：故事 ID、检测时间、原因 "zero TCR commits since story start"、建议操作（手动补 TCR 或 `roll loop reset` 后重跑）
+- [ ] 数量 > 0：正常流程继续，状态保持 ✅ Done
+- [ ] 检查逻辑写入 `skills/roll-loop/SKILL.md` Step 4 节
+- [ ] 补写验证测试：mock git log 输出，覆盖 TCR 存在 / 不存在两个分支
+
+**Files:**
+- `skills/roll-loop/SKILL.md`（Step 4 补充 TCR 校验逻辑）
+- `tests/unit/roll_loop_tcr_check.bats`

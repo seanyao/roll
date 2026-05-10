@@ -2332,10 +2332,10 @@ _dashboard() {
     local mod_time now age
     mod_time=$(stat -c %Y "$latest" 2>/dev/null || stat -f %m "$latest" 2>/dev/null || echo 0)
     now=$(date +%s); age=$(( (now - mod_time) / 3600 ))
-    echo -e "\n  Brief  ${CYAN}$(basename "$latest")${NC}  (${age}h ago)"
-    grep -A1 "## Release Readiness" "$latest" 2>/dev/null | tail -1 | sed 's/^/  /'
-    echo ""
-    echo "  run: roll brief   for full brief"
+    local readiness; readiness=$(awk '/^## Release Readiness/{found=1;next} found && /[^[:space:]]/{gsub(/\*\*/,""); print; exit}' "$latest" 2>/dev/null || true)
+    local done_count; done_count=$(grep -c '| Story\|| Fix\|| Refactor' "$latest" 2>/dev/null) || done_count=0
+    echo -e "\n  Brief  (${age}h ago)  ${readiness:+${CYAN}${readiness}${NC}}"
+    [[ "$done_count" -gt 0 ]] && echo -e "  This cycle: ${done_count} items completed"
   else
     echo -e "\n  No brief yet — run: roll brief"
   fi

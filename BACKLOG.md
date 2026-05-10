@@ -123,6 +123,7 @@
 | [US-AUTO-007](docs/features/autonomous-evolution.md#us-auto-007) | roll backlog 命令 — 快速查看当前项目未完成任务清单，无需打开 BACKLOG.md 文件 | ✅ Done |
 | [US-AUTO-008](docs/features/autonomous-evolution.md#us-auto-008) | roll loop 监控台 — 类似 top 命令，实时查看当前项目的 loop 状态、队列、执行历史，loop 跑完后有迹可查 | ✅ Done |
 | [US-AUTO-009](docs/features/autonomous-evolution.md#us-auto-009) | roll setup 时安装 launchd plists — 三服务默认关闭，用户主动 loop on 才激活；更新安装时幂等检查不重复安装 | 📋 Todo |
+| [US-AUTO-010](docs/features/autonomous-evolution.md#us-auto-010) | roll-loop TCR 硬校验 — 故事完成后检查 tcr: 微提交数量，为 0 时将故事回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏 | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |

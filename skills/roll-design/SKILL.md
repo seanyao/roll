@@ -144,6 +144,13 @@ User Input
               │ Approach confirmed
               ▼
 ┌─────────────────────────────┐
+│ [peer] Direction Review     │  ← if complexity=large or cross-context; 10s opt-out
+│    Skill("roll-peer",       │
+│      tag="architecture")    │
+└─────────────┬───────────────┘
+              │ AGREE / skipped
+              ▼
+┌─────────────────────────────┐
 │ 2. Analyze + DDD Depth      │  ← Detect scope: Greenfield / Story / Fix
 │    - Requirement analysis    │
 │    - Feasibility assessment  │
@@ -206,6 +213,12 @@ User Input
               │      model.md                           │
               └──────────────────┬──────────────────────┘
                                  │
+                                 ▼
+              ┌─────────────────────────────────────────┐
+              │ [peer] Plan Review                       │  ← if complexity=large; 10s opt-out
+              │    Skill("roll-peer", tag="architecture")│
+              └──────────────────┬──────────────────────┘
+                                 │ AGREE / skipped
                                  ▼
               ┌─────────────────────────────────────────┐
               │ 4. Split into Stories                    │
@@ -612,6 +625,24 @@ $roll-debug discovers issue → Suggest creating FIX
 $roll-design --fix "fix login API 404" → Create FIX-AUTH-001
 $roll-fix FIX-AUTH-001 → Quick fix
 ```
+
+### With roll-peer
+
+Two checkpoints, both with 10s opt-out:
+
+```
+1. After Discuss — Direction Review
+   Approach confirmed → [peer, tag=architecture] → challenge the direction before DDD
+   Trigger: complexity=large OR requirement touches multiple Bounded Contexts
+
+2. After Solution Design — Plan Review
+   Plan written → [peer, tag=architecture] → full plan review before story split
+   Trigger: complexity=large (greenfield always qualifies)
+```
+
+On AGREE or user skip → continue to the next step normally.
+On REFINE/OBJECT → incorporate feedback, regenerate the relevant output, re-trigger peer.
+On ESCALATE → present both proposals to user for final call.
 
 ---
 

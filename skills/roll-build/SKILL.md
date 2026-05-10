@@ -263,6 +263,43 @@ MICRO-STEP {N}: {description of smallest testable change}
 
 Accumulate 3–5 micro-commits per Action. Each commit is a guaranteed working state.
 
+#### Architectural Friction Signal (non-blocking)
+
+While implementing, watch for these signals:
+
+- This Action requires touching code in 3+ unrelated modules
+- The existing module boundary has to be bent or bypassed to make this work
+- A data structure or interface needs to change in a way that ripples across contexts
+- The implementation feels "wrong" even when the test passes
+
+When any signal appears, **do not stop — flag it**:
+
+```bash
+# 1. Append to BACKLOG.md under ## ♻️ Refactor
+# REFACTOR-XXX | <one-line description> | 📋 Todo
+
+# 2. Append a brief entry to docs/features/refactor-log.md
+```
+
+**REFACTOR entry format in BACKLOG.md:**
+
+```markdown
+| REFACTOR-001 | Extract payment boundary — leaking into Order module during US-AUTH-003 | 📋 Todo |
+```
+
+**refactor-log.md entry format:**
+
+```markdown
+## REFACTOR-001 Extract payment boundary
+
+**Flagged**: {YYYY-MM-DD} during US-XXX
+**Signal**: {which friction signal triggered this}
+**Observation**: {1–3 sentences describing what felt wrong}
+**Suggested scope**: {rough sense of what a fix would touch}
+```
+
+Then continue implementing the current Story normally.
+
 ### Phase 5.5: E2E Deposit
 
 After TCR micro-steps pass, deposit an E2E test for this Story's core user flow.

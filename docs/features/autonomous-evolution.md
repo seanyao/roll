@@ -127,3 +127,82 @@
 
 **Dependencies:**
 - Depends on: US-AUTO-001, US-AUTO-002, US-AUTO-003（loop 执行这三者的产出）
+
+---
+
+<a id="us-auto-005"></a>
+## US-AUTO-005 CLI 管理层文档化 ✅
+
+**Created**: 2026-05-10
+**Completed**: 2026-05-10
+
+- As a developer using Roll's autonomous evolution features
+- I want the CLI commands and per-project config to be documented
+- So that I can manage the loop without guessing at the interface
+
+**AC:**
+- [x] BACKLOG.md 补 US-AUTO-005 / US-AUTO-006 条目
+- [x] autonomous-evolution.md 补 CLI 管理层说明（roll loop/brief/agent）
+- [x] `.roll.yaml` per-project agent 配置约定记录在 feature doc
+- [x] IDEA-004 roll-brief 推送渠道写入 BACKLOG Ideas
+
+**CLI 管理命令（已实现于 bin/roll）:**
+
+```bash
+# 自主循环管理（本项目）
+roll loop on              # 启用调度（写入 crontab：loop 每小时 + dream 01:00 + brief 08:00）
+roll loop off             # 停用调度（移除 crontab 条目）
+roll loop now             # 立即触发一个周期（有中断则自动恢复）
+roll loop status          # 查看调度状态 + 当前 state.yaml + ALERT
+
+# 简报
+roll brief                # 展示最新简报；超过 24h 自动重新生成
+
+# Agent 切换（per-project）
+roll agent use <name>     # 设置当前项目的 agent（写入 .roll.yaml）
+roll agent list           # 列出已安装的 agent
+roll agent                # 查看当前项目使用的 agent
+
+# 无参数时（在项目目录）
+roll                      # 展示项目 dashboard：loop 状态 + 最新 brief 摘要
+```
+
+**`.roll.yaml` 约定（per-project agent 配置）:**
+
+```yaml
+# .roll.yaml — 项目根目录，per-project 配置
+# 覆盖 ~/.roll/config.yaml 的全局 agent 设置
+agent: claude   # claude | kimi | deepseek | opencode | ...
+```
+
+- 由 `roll agent use <name>` 自动写入，也可手动编辑
+- 按需加入 `.gitignore`（个人偏好）或提交（团队统一）
+- 全局回退：`~/.roll/config.yaml → loop.primary_agent`，再回退到 `claude`
+
+**Files:**
+- `bin/roll`（新增 cmd_loop / cmd_brief / cmd_agent / _dashboard）
+- `BACKLOG.md`
+- `docs/features/autonomous-evolution.md`
+
+---
+
+<a id="us-auto-006"></a>
+## US-AUTO-006 Methodology 自主演化章节 ✅
+
+**Created**: 2026-05-10
+**Completed**: 2026-05-10
+
+- As a Roll user
+- I want the methodology documentation to explain the autonomous evolution layer
+- So that I understand it's optional, how local cron works, and the three-layer architecture
+
+**AC:**
+- [x] methodology-en.md 新增 Loop D 自主演化章节
+- [x] methodology.md 同步中文版
+- [x] 说明三层架构（基础层 / 自主层 / 反思层）及其可选性
+- [x] 说明本地 cron 优于 GitHub Actions 的原因
+- [x] 说明 dashboard 行为（roll 无参数）
+
+**Files:**
+- `docs/methodology-en.md`
+- `docs/methodology.md`

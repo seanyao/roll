@@ -67,6 +67,8 @@ How the three loops interact:
 - **Loop B → Loop C**: Each deployment automatically brings new deliverables under the patrol loop's monitoring scope.
 - **Loop C → Loop A**: Issues found during patrol that exceed the scope of a quick fix escalate back to the design loop for reassessment.
 
+**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items hourly; `roll-.dream` scans code health nightly and produces `REFACTOR` entries; `roll-brief` briefs the human each morning. The human retains sole authority over `roll-release`. See §9 for details.
+
 ---
 
 ## 2. Global Configuration Management (Configuration Infrastructure)
@@ -561,7 +563,86 @@ The key distinction lies in the shift of execution subject: these methodologies 
 
 ---
 
-## 9. Limitations and Current State
+## 9. Autonomous Evolution Layer (Optional)
+
+### 9.1 Design Principle
+
+The three-loop architecture (Loop A → B → C) describes how a human developer works *with* Roll. The autonomous evolution layer is a **separate, optional overlay** that lets the agent continue working without the human present — picking up pending BACKLOG items, reflecting on code health nightly, and briefing the human each morning.
+
+It is off by default. Enabling it requires an explicit `roll loop on`.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Base layer (always active)                             │
+│  $roll-design → $roll-build → $roll-fix → $roll-spar   │
+│  Human drives every action                              │
+├─────────────────────────────────────────────────────────┤
+│  Autonomous layer (opt-in: roll loop on)                │
+│  roll-loop   — hourly BACKLOG executor                  │
+│  roll-.dream — nightly code health scan                 │
+│  roll-brief  — morning digest + release readiness       │
+│  Human reviews briefs; retains release authority        │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 9.2 Components
+
+**`roll-loop`** — Runs hourly via local cron. Scans BACKLOG for `📋 Todo` items and routes them: `US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`. Caps items per run to limit blast radius. Triggers `roll-brief` when a Feature completes.
+
+**`roll-.dream`** — Runs nightly (01:00 local) via local cron. Scans the codebase for dead code, architectural drift against `docs/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `docs/dream/YYYY-MM-DD.md`.
+
+**`roll-brief`** — Three trigger modes: Feature completion (via roll-loop), daily morning (08:00), or on-demand (`roll brief`). Produces an owner-facing digest: what's done, what's pending, escalations, and a release-readiness verdict. Distinct from `roll-.changelog` (user-facing release notes).
+
+### 9.3 Why Local Cron, Not GitHub Actions
+
+GitHub Actions runs on remote servers with no access to the local codebase, local test runner, or local agent CLI. The TCR loop — which is the core of `$roll-build` — requires local execution. Using GitHub Actions would mean the agent could only read the repo as a snapshot, not run tests, not observe the dev environment.
+
+Local cron invokes the agent CLI directly in the project directory:
+
+```bash
+0 * * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
+```
+
+If the agent supports native scheduling (Claude Code hooks, opencode scheduled tasks), that is preferred over raw cron for cleaner lifecycle management.
+
+### 9.4 Per-Project Agent Configuration
+
+When multiple projects use Roll, each can use a different agent. `roll agent use <name>` writes a `.roll.yaml` file in the project root:
+
+```yaml
+# .roll.yaml
+agent: kimi   # overrides ~/.roll/config.yaml for this project
+```
+
+The lookup order is: `.roll.yaml` (project) → `~/.roll/config.yaml` (global) → `claude` (default).
+
+Commit `.roll.yaml` if the team should share the same agent preference; add it to `.gitignore` for personal preference.
+
+### 9.5 Human Authority
+
+The autonomous layer **never** invokes `roll-release`. Production deployment is always a human decision, made after reviewing the morning brief and optionally inspecting the diff. The brief provides:
+
+- What the agent completed since the last brief
+- Any escalations that require human input
+- A release-readiness signal (heuristic, not a gate)
+
+This keeps the human informed without requiring them to be present for every step.
+
+### 9.6 CLI Management
+
+```bash
+roll loop on|off          # enable / disable scheduled execution for this project
+roll loop now             # trigger one cycle immediately
+roll loop status          # show scheduler state + any ALERT
+roll brief                # show latest brief (regenerate if >24h stale)
+roll agent use <name>     # switch this project's agent
+roll agent list           # show installed agents
+roll                      # project dashboard (in project dir): loop status + brief summary
+```
+
+---
+
+## 10. Limitations and Current State
 
 **Validated:**
 

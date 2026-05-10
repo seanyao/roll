@@ -117,6 +117,8 @@
 | [US-AUTO-002](docs/features/autonomous-evolution.md#us-auto-002) | roll-.dream — 每晚代码/架构健康巡检，产出 REFACTOR 条目 | ✅ Done |
 | [US-AUTO-003](docs/features/autonomous-evolution.md#us-auto-003) | roll-brief — Feature完成/每日晨报/按需简报，含发布就绪建议 | ✅ Done |
 | [US-AUTO-004](docs/features/autonomous-evolution.md#us-auto-004) | roll-loop — BACKLOG 自主执行器 + 调度器 + 跨Agent路由 + 失败处理 | ✅ Done |
+| [US-AUTO-005](docs/features/autonomous-evolution.md#us-auto-005) | CLI 管理层文档化 — roll loop/brief/agent + .roll.yaml 约定 | ✅ Done |
+| [US-AUTO-006](docs/features/autonomous-evolution.md#us-auto-006) | Methodology 自主演化章节（中英双语）— 可选层原则 + 三层架构 | ✅ Done |
 
 ## ♻️ Refactor
 | ID | Description | Status |

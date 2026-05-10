@@ -2248,20 +2248,23 @@ cmd_backlog() {
     return 1
   fi
 
-  local us_items fix_items refactor_items total=0
+  local us_items fix_items refactor_items idea_items total=0
 
   us_items=$(grep -E '^\| \[US-' "$backlog" | grep -F '| 📋 Todo |' || true)
   fix_items=$(grep -E '^\| FIX-' "$backlog" | grep -F '| 📋 Todo |' || true)
   refactor_items=$(grep -E '^\| REFACTOR-' "$backlog" | grep -F '| 📋 Todo |' || true)
+  idea_items=$(grep -E '^\| IDEA-' "$backlog" | grep -F '| 📋 Todo |' || true)
 
-  local us_count fix_count refactor_count
+  local us_count fix_count refactor_count idea_count
   us_count=$(echo "$us_items" | grep -c . || true)
   fix_count=$(echo "$fix_items" | grep -c . || true)
   refactor_count=$(echo "$refactor_items" | grep -c . || true)
+  idea_count=$(echo "$idea_items" | grep -c . || true)
   [[ -z "$us_items" ]] && us_count=0
   [[ -z "$fix_items" ]] && fix_count=0
   [[ -z "$refactor_items" ]] && refactor_count=0
-  total=$(( us_count + fix_count + refactor_count ))
+  [[ -z "$idea_items" ]] && idea_count=0
+  total=$(( us_count + fix_count + refactor_count + idea_count ))
 
   echo ""
   echo -e "  ${BOLD}Pending Backlog  待处理任务${NC}  (${total} items)"
@@ -2297,6 +2300,17 @@ cmd_backlog() {
       desc=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//')
       printf "    %-16s  %s\n" "$id" "$desc"
     done <<< "$refactor_items"
+    echo ""
+  fi
+
+  if [[ $idea_count -gt 0 ]]; then
+    echo -e "  ${NC}Ideas  创意  (${idea_count})"
+    while IFS= read -r line; do
+      local id desc
+      id=$(echo "$line" | awk -F'|' '{print $2}' | tr -d ' ')
+      desc=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//')
+      printf "    %-14s  %s\n" "$id" "$desc"
+    done <<< "$idea_items"
     echo ""
   fi
 
@@ -2341,7 +2355,7 @@ _dashboard() {
   # Backlog summary
   if [[ -f "BACKLOG.md" ]]; then
     local pending_count
-    pending_count=$(grep -E '^\| (\[US-|FIX-|REFACTOR-)' "BACKLOG.md" 2>/dev/null | grep -cF '| 📋 Todo |') || pending_count=0
+    pending_count=$(grep -cF '| 📋 Todo |' "BACKLOG.md" 2>/dev/null) || pending_count=0
     if (( pending_count > 0 )); then
       echo -e "  Backlog  ${YELLOW}${pending_count} pending${NC}   run: roll backlog"
     else

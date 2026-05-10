@@ -109,6 +109,21 @@
 | FIX-014 | roll-build 技能 YAML 描述引号修复 (by @Sean via Kimi CLI) | ✅ Done |
 | FIX-015 | roll-release 缺少 GitHub Release 创建步骤 — 导致版本检查从不生效 | ✅ Done |
 
+## Epic: Autonomous Evolution
+### Feature: autonomous-evolution
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-AUTO-001](docs/features/autonomous-evolution.md#us-auto-001) | roll-build 架构摩擦信号 — 实现遇阻时自动标记 REFACTOR 到 BACKLOG | ✅ Done |
+| [US-AUTO-002](docs/features/autonomous-evolution.md#us-auto-002) | roll-.dream — 每晚代码/架构健康巡检，产出 REFACTOR 条目 | ✅ Done |
+| [US-AUTO-003](docs/features/autonomous-evolution.md#us-auto-003) | roll-brief — Feature完成/每日晨报/按需简报，含发布就绪建议 | ✅ Done |
+| [US-AUTO-004](docs/features/autonomous-evolution.md#us-auto-004) | roll-loop — BACKLOG 自主执行器 + 调度器 + 跨Agent路由 + 失败处理 | ✅ Done |
+| [US-AUTO-005](docs/features/autonomous-evolution.md#us-auto-005) | CLI 管理层文档化 — roll loop/brief/agent + .roll.yaml 约定 | ✅ Done |
+| [US-AUTO-006](docs/features/autonomous-evolution.md#us-auto-006) | Methodology 自主演化章节（中英双语）— 可选层原则 + 三层架构 | ✅ Done |
+
+## ♻️ Refactor
+| ID | Description | Status |
+|----|-------------|--------|
+
 ## 💡 Ideas
 | ID | Description | Status |
 |----|-------------|--------|

@@ -65,6 +65,8 @@ graph TB
 - **Loop B → Loop C**：每次部署完成后，巡检闭环自动纳入新交付物进行监控。
 - **Loop C → Loop A**：巡检发现的问题若超出修复范围，升级回设计闭环重新评估。
 
+**可选自主层**（通过 `roll loop on` 启用）：`roll-loop` 每小时执行 BACKLOG 待办；`roll-.dream` 每晚扫描代码健康并产出 `REFACTOR` 条目；`roll-brief` 每天早晨向人类简报。人类保留 `roll-release` 的唯一权力。详见 §9。
+
 ---
 
 ## 2. 全局配置管理 (Configuration Infrastructure)
@@ -559,7 +561,86 @@ graph LR
 
 ---
 
-## 9. 局限性与当前状态
+## 9. 自主演化层（可选）
+
+### 9.1 设计原则
+
+三环架构（Loop A → B → C）描述的是人类开发者*与* Roll 协作的方式。自主演化层是一个**独立的可选叠加层**，让 agent 在无人值守的情况下继续工作——自动执行 BACKLOG 待办、每晚反思代码健康状态、每天早晨向人类简报。
+
+默认关闭，需显式执行 `roll loop on` 启用。
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  基础层（始终激活）                                      │
+│  $roll-design → $roll-build → $roll-fix → $roll-spar   │
+│  人类驱动每一个动作                                      │
+├─────────────────────────────────────────────────────────┤
+│  自主层（可选：roll loop on）                            │
+│  roll-loop   — 每小时 BACKLOG 执行器                    │
+│  roll-.dream — 每晚代码健康巡检                          │
+│  roll-brief  — 每日晨报 + 发布就绪建议                   │
+│  人类审阅简报；保留发布权                                 │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 9.2 各组件
+
+**`roll-loop`** — 通过本地 cron 每小时运行。扫描 BACKLOG 中 `📋 Todo` 条目并按类型路由：`US-XXX → $roll-build`、`FIX-XXX → $roll-fix`、`REFACTOR-XXX → $roll-build`。每次执行有条目上限，控制影响范围。Feature 全部完成时自动触发 `roll-brief`。
+
+**`roll-.dream`** — 通过本地 cron 每晚 01:00 运行。扫描代码库中的死代码、对照 `docs/domain/` 检测架构漂移、识别可修剪的抽象和可提炼的模式。产出 `REFACTOR-XXX` 条目写入 BACKLOG，巡检日志写入 `docs/dream/YYYY-MM-DD.md`。
+
+**`roll-brief`** — 三种触发模式：Feature 完成时（由 roll-loop 触发）、每日早晨（08:00）、按需（`roll brief`）。产出 owner 面简报：已完成内容、待处理队列、需升级的事项、发布就绪建议。有别于 `roll-.changelog`（用户面发布说明）。
+
+### 9.3 为什么用本地 cron，而非 GitHub Actions
+
+GitHub Actions 在远程服务器上运行，无法访问本地代码库、本地测试运行器或本地 agent CLI。`$roll-build` 的核心是 TCR 循环，必须在本地执行。使用 GitHub Actions 意味着 agent 只能以快照方式读取仓库，无法运行测试，无法感知开发环境。
+
+本地 cron 直接在项目目录调用 agent CLI：
+
+```bash
+0 * * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
+```
+
+如果使用的 agent 支持原生调度（如 Claude Code hooks、opencode 定时任务），优先使用原生调度，生命周期管理更干净。
+
+### 9.4 Per-Project Agent 配置
+
+多个项目同时使用 Roll 时，每个项目可以独立配置 agent。`roll agent use <name>` 在项目根目录写入 `.roll.yaml`：
+
+```yaml
+# .roll.yaml
+agent: kimi   # 覆盖 ~/.roll/config.yaml 中的全局设置
+```
+
+查找顺序：`.roll.yaml`（项目）→ `~/.roll/config.yaml`（全局）→ `claude`（默认）。
+
+团队希望统一 agent 时提交 `.roll.yaml`；个人偏好则加入 `.gitignore`。
+
+### 9.5 人类保留的权力
+
+自主层**永远不会**调用 `roll-release`。生产环境发布始终由人类决定——在查阅晨报、按需检查 diff 之后。简报提供：
+
+- 上次简报以来 agent 完成的内容
+- 需要人类介入的升级事项
+- 发布就绪信号（启发式判断，非强制门禁）
+
+这保证了人类始终知情，而不需要全程在场。
+
+### 9.6 CLI 管理
+
+```bash
+roll loop on|off          # 启用 / 停用当前项目的定时执行
+roll loop now             # 立即触发一个周期
+roll loop status          # 查看调度状态 + 任何 ALERT
+roll brief                # 展示最新简报（超过 24h 自动重新生成）
+roll agent use <name>     # 切换当前项目的 agent
+roll agent list           # 列出已安装的 agent
+roll                      # 项目 dashboard（在项目目录）：loop 状态 + 简报摘要
+```
+
+---
+
+## 10. 局限性与当前状态
 
 **已验证**：
 

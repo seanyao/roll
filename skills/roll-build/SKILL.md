@@ -654,7 +654,7 @@ When complex state management is error-prone → consider full reset + re-initia
 roll-build   → ship anything (new idea, US-ID, free-text request)
 roll-fix     → fix a specific known bug (FIX-XXX / BUG-XXX)
 roll-design  → plan and design before building (no code output)
-roll-jot     → fast capture a bug or idea into BACKLOG.md
+roll-idea    → fast capture a bug or idea into BACKLOG.md
 roll-.clarify → passive scope clarification for vague build requests
 ```
 

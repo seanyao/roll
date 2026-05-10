@@ -122,10 +122,13 @@
 | [US-AUTO-006](docs/features/autonomous-evolution.md#us-auto-006) | Methodology 自主演化章节（中英双语）— 可选层原则 + 三层架构 | ✅ Done |
 | [US-AUTO-007](docs/features/autonomous-evolution.md#us-auto-007) | roll backlog 命令 — 快速查看当前项目未完成任务清单，无需打开 BACKLOG.md 文件 | ✅ Done |
 | [US-AUTO-008](docs/features/autonomous-evolution.md#us-auto-008) | roll loop 监控台 — 类似 top 命令，实时查看当前项目的 loop 状态、队列、执行历史，loop 跑完后有迹可查 | ✅ Done |
+| [US-AUTO-009](docs/features/autonomous-evolution.md#us-auto-009) | roll setup 时安装 launchd plists — 三服务默认关闭，用户主动 loop on 才激活；更新安装时幂等检查不重复安装 | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |
 |----|-------------|--------|
+| REFACTOR-001 | US-AUTO-007 roll backlog 补 TCR — 遗漏测试，严格按 TCR 节奏补写 cmd_backlog 行为用例 | 📋 Todo |
+| REFACTOR-002 | US-AUTO-008 roll loop monitor 补 TCR — 遗漏测试，严格按 TCR 节奏补写 _loop_monitor 冒烟用例 | 📋 Todo |
 
 ## 💡 Ideas
 | ID | Description | Status |

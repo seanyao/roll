@@ -1640,6 +1640,212 @@ cmd_peer_help() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# AGENT — per-project agent configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_project_agent() {
+  if [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml 2>/dev/null; then
+    grep "^agent:" .roll.yaml | awk '{print $2}' | tr -d '"' | head -1
+  elif [[ -f "$ROLL_CONFIG" ]] && grep -q "primary_agent:" "$ROLL_CONFIG" 2>/dev/null; then
+    grep "primary_agent:" "$ROLL_CONFIG" | awk '{print $2}' | tr -d '"' | head -1
+  else
+    echo "claude"
+  fi
+}
+
+_agent_run_skill() {
+  local skill="$1"
+  local agent; agent=$(_project_agent)
+  local skill_file="${ROLL_HOME}/skills/${skill}/SKILL.md"
+  [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
+  case "$agent" in
+    claude)   claude -p "$(cat "$skill_file")" ;;
+    kimi)     kimi --quiet "$(cat "$skill_file")" ;;
+    deepseek) deepseek "$(cat "$skill_file")" ;;
+    *)        warn "Unknown agent '${agent}', falling back to claude"; claude -p "$(cat "$skill_file")" ;;
+  esac
+}
+
+cmd_agent() {
+  local subcmd="${1:-}"; shift || true
+  case "$subcmd" in
+    use)
+      local name="${1:-}"
+      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek>"; exit 1; }
+      command -v "$name" &>/dev/null || warn "${name} not found in PATH — setting anyway  未找到，仍写入配置"
+      if [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml; then
+        sed -i "s/^agent:.*/agent: ${name}/" .roll.yaml
+      else
+        echo "agent: ${name}" >> .roll.yaml
+      fi
+      ok "Agent set to ${name} for this project  当前项目 agent 已设为 ${name}"
+      local project_path; project_path=$(pwd -P)
+      crontab -l 2>/dev/null | grep -q "roll-loop:${project_path}" && \
+        info "Takes effect on next scheduled run — or: roll loop now"
+      ;;
+    list)
+      echo ""; echo "  Available agents  可用 agent:"; echo ""
+      local current; current=$(_project_agent)
+      for a in claude kimi deepseek opencode codex pi; do
+        if command -v "$a" &>/dev/null; then
+          [[ "$a" == "$current" ]] && echo -e "    ${GREEN}✓ ${a}${NC}  (current)" \
+                                   || echo -e "    ${GREEN}✓ ${a}${NC}"
+        else
+          echo -e "    ${YELLOW}✗ ${a}${NC}  (not installed)"
+        fi
+      done; echo ""
+      ;;
+    "")
+      local agent; agent=$(_project_agent)
+      local src="global"; [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml 2>/dev/null && src="project (.roll.yaml)"
+      echo -e "\n  Agent  ${CYAN}${agent}${NC}  (${src})\n"
+      echo "  roll agent use <name>   — switch agent for this project"
+      echo "  roll agent list         — show installed agents"; echo ""
+      ;;
+    *) err "Unknown subcommand: $subcmd"; echo "Usage: roll agent [use <name>|list]"; exit 1 ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOOP — autonomous BACKLOG executor management
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_LOOP_TAG="# roll-loop"
+_LOOP_STATE="${HOME}/.shared/roll/loop/state.yaml"
+_LOOP_ALERT="${HOME}/.shared/roll/loop/ALERT.md"
+
+cmd_loop() {
+  local subcmd="${1:-status}"; shift || true
+  case "$subcmd" in
+    on)     _loop_on ;;
+    off)    _loop_off ;;
+    now)    _loop_now ;;
+    status) _loop_status ;;
+    *) err "Usage: roll loop <on|off|now|status>"; exit 1 ;;
+  esac
+}
+
+_loop_on() {
+  local project_path; project_path=$(pwd -P)
+  local agent; agent=$(_project_agent)
+  local sd="${ROLL_HOME}/skills"
+
+  if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
+    warn "Loop already enabled for this project  当前项目 loop 已启用"; return 0
+  fi
+
+  mkdir -p ~/.shared/roll/{loop,dream,brief}
+
+  local loop_cmd dream_cmd brief_cmd
+  loop_cmd="cd \"${project_path}\" && ${agent} -p \"\$(cat ${sd}/roll-loop/SKILL.md)\" >> ~/.shared/roll/loop/cron.log 2>&1"
+  dream_cmd="cd \"${project_path}\" && ${agent} -p \"\$(cat ${sd}/roll-.dream/SKILL.md)\" >> ~/.shared/roll/dream/cron.log 2>&1"
+  brief_cmd="cd \"${project_path}\" && ${agent} -p \"\$(cat ${sd}/roll-brief/SKILL.md)\" >> ~/.shared/roll/brief/cron.log 2>&1"
+
+  (
+    crontab -l 2>/dev/null
+    echo "0 * * * * ${loop_cmd} ${_LOOP_TAG}:${project_path}"
+    echo "0 1 * * * ${dream_cmd} ${_LOOP_TAG}:${project_path}"
+    echo "0 8 * * * ${brief_cmd} ${_LOOP_TAG}:${project_path}"
+  ) | crontab -
+
+  ok "Loop enabled  已启用"
+  echo "  • roll-loop   every hour :00    每小时整点"
+  echo "  • roll-.dream nightly at 01:00  每晚 01:00"
+  echo "  • roll-brief  daily at 08:00    每天 08:00"
+  echo "  • Agent: ${agent}  (change: roll agent use <name>)"
+}
+
+_loop_off() {
+  local project_path; project_path=$(pwd -P)
+  if ! crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
+    warn "Loop not enabled for this project  当前项目 loop 未启用"; return 0
+  fi
+  crontab -l 2>/dev/null | grep -v "${_LOOP_TAG}:${project_path}" | crontab -
+  ok "Loop disabled  已停用"
+}
+
+_loop_now() {
+  if [[ -f "$_LOOP_STATE" ]] && grep -q "status: running" "$_LOOP_STATE" 2>/dev/null; then
+    warn "Loop already running  loop 正在运行中"; return 0
+  fi
+  info "Triggering loop cycle...  正在触发一个周期..."
+  _agent_run_skill "roll-loop"
+}
+
+_loop_status() {
+  local project_path; project_path=$(pwd -P)
+  local agent; agent=$(_project_agent)
+  echo ""
+  if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
+    echo -e "  Scheduler  ${GREEN}● enabled${NC}   Agent: ${CYAN}${agent}${NC}"
+  else
+    echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"
+  fi
+  [[ -f "$_LOOP_ALERT" ]] && { echo ""; echo -e "  ${RED}⚠ ALERT:${NC}"; sed 's/^/    /' "$_LOOP_ALERT"; }
+  [[ -f "$_LOOP_STATE" ]] && { echo ""; echo "  State:"; sed 's/^/    /' "$_LOOP_STATE"; }
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BRIEF — owner-facing project digest
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_brief() {
+  local briefs_dir="docs/briefs"
+  local latest; latest=$(ls "${briefs_dir}"/*.md 2>/dev/null | sort | tail -1 || true)
+
+  if [[ -z "$latest" ]]; then
+    info "No brief yet — generating...  暂无简报，正在生成..."
+    _agent_run_skill "roll-brief"
+    latest=$(ls "${briefs_dir}"/*.md 2>/dev/null | sort | tail -1 || true)
+  else
+    local mod_time now age
+    mod_time=$(stat -c %Y "$latest" 2>/dev/null || stat -f %m "$latest" 2>/dev/null || echo 0)
+    now=$(date +%s); age=$(( now - mod_time ))
+    if (( age > 86400 )); then
+      info "Brief is $(( age / 3600 ))h old — regenerating...  简报已 $(( age / 3600 )) 小时未更新，重新生成..."
+      _agent_run_skill "roll-brief"
+      latest=$(ls "${briefs_dir}"/*.md 2>/dev/null | sort | tail -1 || true)
+    fi
+  fi
+
+  [[ -f "$latest" ]] && cat "$latest"
+}
+
+_dashboard() {
+  local project_path; project_path=$(pwd -P)
+  local project_name; project_name=$(basename "$project_path")
+  local agent; agent=$(_project_agent)
+
+  echo -e "\n  ${BOLD}${CYAN}${project_name}${NC}  ${YELLOW}v${VERSION}${NC}\n"
+
+  if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
+    echo -e "  Loop  ${GREEN}● on${NC}   Agent: ${CYAN}${agent}${NC}"
+  else
+    echo -e "  Loop  ${YELLOW}○ off${NC}   run: roll loop on"
+  fi
+  [[ -f "$_LOOP_ALERT" ]] && echo -e "  ${RED}⚠ ALERT — run: roll loop status${NC}"
+
+  local briefs_dir="docs/briefs"
+  local latest; latest=$(ls "${briefs_dir}"/*.md 2>/dev/null | sort | tail -1 || true)
+  if [[ -n "$latest" ]]; then
+    local mod_time now age
+    mod_time=$(stat -c %Y "$latest" 2>/dev/null || stat -f %m "$latest" 2>/dev/null || echo 0)
+    now=$(date +%s); age=$(( (now - mod_time) / 3600 ))
+    echo -e "\n  Brief  ${CYAN}$(basename "$latest")${NC}  (${age}h ago)"
+    grep -A1 "## Release Readiness" "$latest" 2>/dev/null | tail -1 | sed 's/^/  /'
+    echo ""
+    echo "  run: roll brief   for full brief"
+  else
+    echo -e "\n  No brief yet — run: roll brief"
+  fi
+
+  echo ""
+  echo "  roll loop on|off|now|status · roll brief · roll agent use <name>"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 usage() {
@@ -1661,11 +1867,17 @@ usage() {
   echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
   echo "  peer                   [Peer Review] Cross-agent negotiation               跨 Agent 协商对审"
+  echo "  loop <on|off|now|status>  [Autonomous] Manage scheduled BACKLOG executor  管理自主执行循环"
+  echo "  brief                  [Digest] Show latest owner brief (regenerate if stale)  展示最新简报"
+  echo "  agent [use <name>|list]   [Config] Per-project agent selection            切换项目 agent"
   echo ""
   echo "Examples / 示例:"
   echo "  roll setup                    # New machine: first-time install            新机器首次安装"
   echo "  roll update                   # Upgrade to latest version + re-sync         升级到最新版并重新同步"
   echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
+  echo "  roll loop on                  # Enable autonomous loop (cron)              启用自主执行循环"
+  echo "  roll brief                    # Show latest brief                          查看最新简报"
+  echo "  roll agent use kimi           # Switch this project to kimi               切换当前项目到 kimi"
 
 }
 
@@ -1679,9 +1891,12 @@ main() {
     init)          cmd_init "$@" ;;
     status)        cmd_status "$@" ;;
     peer)          cmd_peer "$@" ;;
+    loop)          cmd_loop "$@" ;;
+    brief)         cmd_brief "$@" ;;
+    agent)         cmd_agent "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) usage ;;
-    "") usage; _show_changelog ;;
+    "") [[ -f "BACKLOG.md" ]] && _dashboard || { usage; _show_changelog; } ;;
     *)
       err "Unknown command: $cmd  未知命令: $cmd"
       echo ""

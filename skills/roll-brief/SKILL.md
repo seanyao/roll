@@ -95,52 +95,51 @@ A simple heuristic — not a gate, just a signal for the human:
 
 ### Step 4 — Write Brief
 
-Output to `docs/briefs/YYYY-MM-DD-HH.md`:
+Output to `docs/briefs/YYYY-MM-DD-HH.md`，全部用中文输出：
 
 ```markdown
-# Brief {YYYY-MM-DD HH:mm}
+# 简报 {YYYY-MM-DD HH:mm}
 
-## What's Done
-| ID | Description | Type |
+## 已完成
+| 编号 | 描述 | 类型 |
 |----|-------------|------|
-| US-XXX | {title} | Story |
-| FIX-XXX | {title} | Fix |
-| REFACTOR-XXX | {title} | Refactor |
+| US-XXX | {标题} | 用户故事 |
+| FIX-XXX | {标题} | 缺陷修复 |
+| REFACTOR-XXX | {标题} | 重构 |
 
-## In Progress
-| ID | Description |
+## 进行中
+| 编号 | 描述 |
 |----|-------------|
-| US-XXX | {title} — started {date} |
+| US-XXX | {标题} — 开始于 {date} |
 
-## Queue ({N} items)
-| ID | Description | Priority |
+## 待处理队列（{N} 项）
+| 编号 | 描述 | 优先级 |
 |----|-------------|----------|
-| US-XXX | {title} | high |
+| US-XXX | {标题} | 高 |
 
-## Overnight Dream Findings
-{summary from docs/dream/ since last brief, or "No new findings."}
+## 夜间巡检发现
+{来自 docs/dream/ 的摘要，无则写"暂无新发现。"}
 
-## Escalations Requiring Human Input
-{any alerts, or "None — agent operating normally."}
+## 需要人工介入的升级事项
+{任何告警，无则写"无 — agent 运行正常。"}
 
-## Release Readiness
-{✅ Release candidate / ⚠️ Hold — reason}
+## 发布就绪状态
+{✅ 可发布 / ⚠️ 暂缓 — 原因}
 
 ---
-*Next scheduled brief: {datetime}*
+*下次定时简报：{datetime}*
 ```
 
 ### Step 5 — Notify
 
-After writing the file, print the brief path so it's visible in the terminal
-or CI log:
+写完文件后在终端或 CI 日志中打印简报路径：
 
 ```
-📋 Brief written: docs/briefs/2026-05-10-08.md
-   Release readiness: ✅ Release candidate
+📋 简报已生成：docs/briefs/2026-05-10-08.md
+   发布就绪：✅ 可发布
 ```
 
-If there are escalations, print them prominently so they're impossible to miss.
+有升级事项时须显著打印，不得遗漏。
 
 ## Scheduler Configuration
 

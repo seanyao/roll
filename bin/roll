@@ -1729,6 +1729,7 @@ cmd_agent() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _LOOP_TAG="# roll-loop"
+_SHARED_ROOT="${HOME}/.shared/roll"
 _LOOP_STATE="${HOME}/.shared/roll/loop/state.yaml"
 _LOOP_ALERT="${HOME}/.shared/roll/loop/ALERT.md"
 _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
@@ -1805,6 +1806,50 @@ _write_runner_script() {
 
 _launchd_is_loaded() {
   launchctl list "$1" &>/dev/null 2>&1
+}
+
+# Install launchd plist files (disabled by default) and runner scripts for
+# a given project path. Idempotent — skips unchanged files. Does NOT load.
+_install_launchd_plists() {
+  local project_path="$1"
+  local sd="${ROLL_HOME}/skills"
+  local shared="${_SHARED_ROOT}"
+
+  mkdir -p "$_LAUNCHD_DIR"
+  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief"
+
+  local services=("loop" "dream" "brief")
+  local skill_names=("roll-loop" "roll-.dream" "roll-brief")
+  local minutes=("0" "0" "0")
+  local hours=("" "1" "8")
+
+  local updated=0
+  for i in "${!services[@]}"; do
+    local svc="${services[$i]}"
+    local skill="${skill_names[$i]}"
+    local minute="${minutes[$i]}"
+    local hour="${hours[$i]}"
+    local label; label=$(_launchd_label "$svc" "$project_path")
+    local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
+    local runner="${shared}/${svc}/run.sh"
+    local log="${shared}/${svc}/cron.log"
+    local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
+
+    _write_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log"
+
+    local before=""
+    [[ -f "$plist" ]] && before=$(cat "$plist")
+    _write_launchd_plist "$plist" "$label" "$project_path" "$minute" "$hour" "$runner"
+    local after; after=$(cat "$plist")
+    [[ "$before" != "$after" ]] && updated=$((updated + 1))
+  done
+
+  if [[ $updated -gt 0 ]]; then
+    ok "Launchd plists installed (${updated} updated)  LaunchAgents 已安装"
+    echo "  Run: roll loop on  to activate  运行 roll loop on 激活"
+  else
+    ok "Launchd plists up to date  LaunchAgents 无需更新"
+  fi
 }
 
 _agent_skill_cmd() {

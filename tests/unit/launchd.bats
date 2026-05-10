@@ -109,3 +109,98 @@ setup() {
   grep -q "/tmp/proj" "$script"
   rm -rf "$tmp_dir"
 }
+
+# ─── _install_launchd_plists ──────────────────────────────────────────────────
+
+@test "_install_launchd_plists: creates three plist files" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"
+  mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+
+  _install_launchd_plists "$proj"
+
+  [ -f "$(_launchd_plist_path "loop" "$proj")" ]
+  [ -f "$(_launchd_plist_path "dream" "$proj")" ]
+  [ -f "$(_launchd_plist_path "brief" "$proj")" ]
+  rm -rf "$tmp_dir"
+}
+
+@test "_install_launchd_plists: creates three runner scripts" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"
+  mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+
+  _install_launchd_plists "$proj"
+
+  [ -x "${_SHARED_ROOT}/loop/run.sh" ]
+  [ -x "${_SHARED_ROOT}/dream/run.sh" ]
+  [ -x "${_SHARED_ROOT}/brief/run.sh" ]
+  rm -rf "$tmp_dir"
+}
+
+@test "_install_launchd_plists: idempotent — no plist mtime change on second call" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"
+  mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+
+  _install_launchd_plists "$proj"
+  local plist; plist=$(_launchd_plist_path "loop" "$proj")
+  local mtime1; mtime1=$(stat -f "%m" "$plist" 2>/dev/null || stat -c "%Y" "$plist")
+
+  sleep 1
+  _install_launchd_plists "$proj"
+  local mtime2; mtime2=$(stat -f "%m" "$plist" 2>/dev/null || stat -c "%Y" "$plist")
+
+  [ "$mtime1" = "$mtime2" ]
+  rm -rf "$tmp_dir"
+}
+
+@test "_install_launchd_plists: loop plist is hourly (no Hour key)" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"
+  mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+
+  _install_launchd_plists "$proj"
+
+  local loop_plist; loop_plist=$(_launchd_plist_path "loop" "$proj")
+  ! grep -q "<key>Hour</key>" "$loop_plist"
+  rm -rf "$tmp_dir"
+}
+
+@test "_install_launchd_plists: dream plist fires at hour 1" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"
+  mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+
+  _install_launchd_plists "$proj"
+
+  local dream_plist; dream_plist=$(_launchd_plist_path "dream" "$proj")
+  grep -q "<key>Hour</key>" "$dream_plist"
+  grep -A1 "<key>Hour</key>" "$dream_plist" | grep -q "<integer>1</integer>"
+  rm -rf "$tmp_dir"
+}
+
+@test "_install_launchd_plists: brief plist fires at hour 8" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"
+  mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+
+  _install_launchd_plists "$proj"
+
+  local brief_plist; brief_plist=$(_launchd_plist_path "brief" "$proj")
+  grep -q "<key>Hour</key>" "$brief_plist"
+  grep -A1 "<key>Hour</key>" "$brief_plist" | grep -q "<integer>8</integer>"
+  rm -rf "$tmp_dir"
+}

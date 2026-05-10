@@ -1,13 +1,24 @@
 # Changelog
 
 ## 2026.05.10
+- **Added**: roll-loop — BACKLOG 自主执行器，支持调度、跨 Agent 路由和失败处理，让 AI 自主推进项目任务
+- **Added**: roll-brief — Feature完成汇报、每日晨报、按需简报，一句话掌握项目状态和发布就绪情况
+- **Added**: roll-.dream — 每晚代码架构健康巡检，自动产出 REFACTOR 条目，架构问题持续浮出水面
+- **Added**: roll-build 架构摩擦信号 — 实现遇阻时自动向 BACKLOG 写入 REFACTOR 标记，技术债持续可见
 - **Added**: E2E 自动沉淀 — 每个 Story 交付时自动写一个端到端测试，项目逐步积累可回放的 E2E 套件
 - **Added**: CI E2E 门禁 — 模板 CI 每次推送自动跑 E2E 测试，没有 E2E 时静默跳过不阻塞
 - **Added**: CI 红灯分诊 — 按严重程度分类 CI 失败，自动路由到 backlog 变成可执行的修复项
 - **Added**: roll-debug 自动修复 — 诊断后若根因在项目源码内，自动进入 TCR 修复流程并回验
 - **Added**: Changelog 自动生成 — 每次部署后自动更新，首次运行时回填全部历史记录
-- **Fixed**: roll-release 补齐 GitHub Release 创建步骤 — 修复版本更新提醒从不生效的问题，并回填全部 40 个历史 tag
 - **Added**: roll status/update 显示最近更新 — 运行 `roll status` 或 `roll update` 时展示最近 3 个版本的 changelog
+- **Fixed**: roll-release 补齐 GitHub Release 创建步骤 — 修复版本更新提醒从不生效的问题，并回填全部 40 个历史 tag
+- **Fixed**: Agent 调用层统一 — 移除所有 claude -p 硬编码，统一 agent 抽象层，支持 Claude/Kimi/Pi/Codex/OpenCode
+- **Fixed**: Kimi CLI 解析修复 — 剥离 YAML frontmatter 中的 `---` 分隔符，避免 Kimi 调用时解析崩溃
+- **Fixed**: 版本比较改用 sort -V，防止旧版本号被误判为最新
+- **Fixed**: dashboard 命令列表补全，`roll --help` 现在展示全部可用命令
+- **Fixed**: `roll release` 命令补全到 usage() 帮助中
+- **Fixed**: 版本更新后主动清缓存 — 检测到当前运行版本更新时自动清缓存，避免旧版本幽灵提示
+- **Fixed**: release.sh 自洽 — 内联 agent 检测和 changelog 同步，发版流程不再依赖外部调用
 
 ## 2026.05.09
 - **Added**: roll-peer 跨 Agent 代码评审 — 支持 Claude Code、Kimi CLI、DeepSeek TUI、Codex CLI 多工具协同评审 (by @seanyao)

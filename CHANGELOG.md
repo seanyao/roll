@@ -2,6 +2,7 @@
 
 ## v2026.510.10
 - **Fixed**: release.sh changelog 同步时序修复 — 修正条件逻辑和执行顺序，确保每次发版时 changelog 正确更新
+- **Added**: roll-loop 22:00 自动执行验证 — 新增 hello_world.bats 作为 loop 定时执行的端到端存档，可回放确认调度器正常工作
 
 ## v2026.510.9
 - **Fixed**: CHANGELOG 改版本号分组 — 每个 release 独立 section，GitHub Release 增量内容提取正确

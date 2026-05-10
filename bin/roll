@@ -1662,18 +1662,24 @@ _project_agent() {
   fi
 }
 
+_skill_content() {
+  # Strip YAML frontmatter (---...---) — it's roll-internal metadata, not agent instructions
+  awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' "$1"
+}
+
 _agent_run_skill() {
   local skill="$1"
   local agent; agent=$(_project_agent)
   local skill_file="${ROLL_HOME}/skills/${skill}/SKILL.md"
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
+  local content; content=$(_skill_content "$skill_file")
   case "$agent" in
-    claude)   claude -p "$(cat "$skill_file")" ;;
-    kimi)     kimi --quiet -p "$(cat "$skill_file")" ;;
-    deepseek) deepseek "$(cat "$skill_file")" ;;
-    pi)       pi -p "$(cat "$skill_file")" ;;
-    codex)    codex exec --json --output-last-message "$(cat "$skill_file")" ;;
-    opencode) opencode run "$(cat "$skill_file")" ;;
+    claude)   claude -p "$content" ;;
+    kimi)     kimi --quiet -p "$content" ;;
+    deepseek) deepseek "$content" ;;
+    pi)       pi -p "$content" ;;
+    codex)    codex exec "$content" ;;
+    opencode) opencode run "$content" ;;
     *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; return 1 ;;
   esac
 }
@@ -1729,13 +1735,15 @@ _LOOP_ALERT="${HOME}/.shared/roll/loop/ALERT.md"
 _agent_skill_cmd() {
   local skill_path="$1"
   local agent; agent=$(_project_agent)
+  # Strip YAML frontmatter inline for cron commands
+  local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
   case "$agent" in
-    claude)   echo "claude -p \"\$(cat '${skill_path}')\"" ;;
-    kimi)     echo "kimi --quiet -p \"\$(cat '${skill_path}')\"" ;;
-    deepseek) echo "deepseek \"\$(cat '${skill_path}')\"" ;;
-    pi)       echo "pi -p \"\$(cat '${skill_path}')\"" ;;
-    codex)    echo "codex exec --json --output-last-message \"\$(cat '${skill_path}')\"" ;;
-    opencode) echo "opencode run \"\$(cat '${skill_path}')\"" ;;
+    claude)   echo "claude -p \"\$(${strip})\"" ;;
+    kimi)     echo "kimi --quiet -p \"\$(${strip})\"" ;;
+    deepseek) echo "deepseek \"\$(${strip})\"" ;;
+    pi)       echo "pi -p \"\$(${strip})\"" ;;
+    codex)    echo "codex exec \"\$(${strip})\"" ;;
+    opencode) echo "opencode run \"\$(${strip})\"" ;;
     *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; return 1 ;;
   esac
 }
@@ -1906,7 +1914,8 @@ _dashboard() {
   fi
 
   echo ""
-  echo "  roll loop on|off|now|status|resume|reset · roll brief · roll agent use <name>"
+  echo "  loop <on|off|now|status|resume|reset>  ·  brief  ·  agent use <name>  ·  release"
+  echo "  setup  ·  update  ·  init  ·  status  ·  peer  ·  help"
   echo ""
 }
 
@@ -2016,6 +2025,9 @@ _notify_update() {
   [[ -f "$cache" ]] || return
   local latest; latest=$(awk '{print $2}' "$cache" 2>/dev/null || true)
   [[ -z "$latest" || "$latest" == "$VERSION" ]] && return
+  # Only notify if latest is strictly newer than running version
+  local newer; newer=$(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1)
+  [[ "$newer" == "$VERSION" ]] && return
   echo ""
   warn "v${latest} available — run 'roll update' to upgrade  有新版本 v${latest} — 运行 'roll update' 升级"
 }

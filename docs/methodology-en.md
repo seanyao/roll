@@ -160,9 +160,29 @@ The final output is a structured Markdown report that can be converted to a PDF 
 >
 > The cross-axis insight: after 2023, mainstream products universally layered resource-level fine-grained controls on top of RBAC — pure RBAC has become the minimum viable bar. This finding directly shaped how `$roll-design` decomposed Stories downstream, averting a rework cycle that would have surfaced only after delivery.
 
-### 3.3 Requirement Atomization: `$roll-design`
+### 3.3 From Idea to BACKLOG: `$roll-design`
 
-Translates research findings and business requirements into instruction contracts that AI can execute. The core output is User Stories that conform to the **INVEST principles**:
+Translates raw ideas and business requirements into executable instruction contracts. The journey from an undeveloped thought to a BACKLOG Story follows a staged, gate-controlled flow:
+
+```
+Clarify → Discuss → [peer: direction] → Analyze+DDD → Design → [peer: plan] → Split → Write
+```
+
+**Clarify** — When input is vague, `$roll-design` summarizes intent, assesses complexity, and asks 3–5 targeted questions. Nothing proceeds until the scope is clear.
+
+**Discuss** — When the approach is uncertain, the skill enters a multi-turn conversation. It leads with an opinionated recommendation rather than a full comparison menu, follows the user's thread when they want to dig into a specific option, and explicitly surfaces hidden assumptions. The discussion runs as many rounds as needed. When a direction crystallizes, the skill names the conclusion and asks — *"Continue to solution design, or keep exploring?"* — then waits for an explicit answer before moving on.
+
+**Direction Review** (`$roll-peer`, optional) — For large-scope or cross-context decisions, a peer agent challenges the chosen direction before any DDD modeling begins. 10-second opt-out window. On REFINE/OBJECT, the discussion resumes.
+
+**Analyze + DDD** — Scope is assessed and DDD depth is calibrated automatically: full Event Storming for greenfield projects, a Domain Slice for new features, a Domain Tag for bug fixes.
+
+**Solution Design** — Architecture and module decomposition written to `docs/features/<feature>-plan.md`. Greenfield Tactical Models (Aggregates, Entities, Invariants, Domain Events) written to `docs/domain/`.
+
+**Plan Review** (`$roll-peer`, optional) — For large-scope work, a peer agent reviews the complete plan before Stories are split. Same opt-out behavior.
+
+**Split + Write** — The plan is decomposed into INVEST-compliant User Stories, written to `docs/features/<feature>.md` with full AC, and indexed in `BACKLOG.md`. The human confirms before `$roll-build` is invoked.
+
+The core output is User Stories that conform to the **INVEST principles**:
 
 | Principle | Requirement |
 |-----------|-------------|
@@ -173,7 +193,7 @@ Translates research findings and business requirements into instruction contract
 | **S**mall | A single Story can be completed within one session cycle |
 | **T**estable | Each Story includes verifiable acceptance criteria |
 
-> **Scenario**: A product manager's raw requirement is "admins should be able to see everyone's activity logs." `$roll-design` decomposes this into three independent Stories: US-007 (write audit events), US-008 (audit list UI with filtering), and US-009 (export audit data as CSV).
+> **Scenario**: A product manager says "admins should be able to see everyone's activity logs." During Discuss, the skill asks: "Is this for compliance or operational monitoring? That changes whether we need tamper-proof storage." After direction is confirmed, `$roll-design` decomposes the requirement into three independent Stories: US-007 (write audit events), US-008 (audit list UI with filtering), and US-009 (export audit data as CSV).
 >
 > Each Story carries its own acceptance criteria — US-007's AC includes "create/delete/modify operations all generate audit events" and "events include actor ID, timestamp, and change diff." The export capability, which was buried implicitly in the original requirement, is surfaced as an explicit standalone Story rather than hidden in implementation details.
 

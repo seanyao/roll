@@ -758,6 +758,8 @@ cmd_init() {
   _sync_conventions
   echo ""
 
+  _install_launchd_plists "$project_dir"
+
   if [[ "$has_agents" == "true" ]]; then
     ok "Done.  完成。"
   else

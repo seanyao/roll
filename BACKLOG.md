@@ -124,7 +124,7 @@
 | [US-AUTO-008](docs/features/autonomous-evolution.md#us-auto-008) | roll loop 监控台 — 类似 top 命令，实时查看当前项目的 loop 状态、队列、执行历史，loop 跑完后有迹可查 | ✅ Done |
 | [US-AUTO-009](docs/features/autonomous-evolution.md#us-auto-009) | launchd 调度迁移 — roll setup 安装 plists（默认关闭，幂等）；roll loop on/off/status/monitor 全面切换到 launchd，废弃 crontab | ✅ Done |
 | [US-AUTO-010](docs/features/autonomous-evolution.md#us-auto-010) | roll-loop TCR 硬校验 — 故事完成后检查 tcr: 微提交数量，为 0 时将故事回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏 | ✅ Done |
-| [US-AUTO-011](docs/features/autonomous-evolution.md#us-auto-011) | roll loop monitor 增强 — 显示三服务 launchd 状态（loop/dream/brief）+ 实时 log tail | 📋 Todo |
+| [US-AUTO-011](docs/features/autonomous-evolution.md#us-auto-011) | roll loop monitor 增强 — 显示三服务 launchd 状态（loop/dream/brief）+ 实时 log tail | ✅ Done |
 
 ## ♻️ Refactor
 | ID | Description | Status |

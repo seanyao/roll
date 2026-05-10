@@ -332,19 +332,20 @@ roll loop monitor 5     # refresh every 5s
 ---
 
 <a id="us-auto-011"></a>
-## US-AUTO-011 roll loop monitor 增强 📋
+## US-AUTO-011 roll loop monitor 增强 ✅
 
 **Created**: 2026-05-10
+**Completed**: 2026-05-11
 
 - As a developer on macOS running autonomous loop
 - I want `roll loop monitor` to show all three launchd service states and a live log tail
 - So that I can see the full scheduler health and recent activity in one view without leaving the terminal
 
 **AC:**
-- [ ] 显示三行 launchd 服务状态：loop（每小时）/ dream（每晚 01:00）/ brief（每天 08:00），每行显示 ● enabled / ○ disabled
-- [ ] 每次刷新周期（默认 3s）末尾显示 `~/.shared/roll/loop/launchd.log` 最后 10 行（实时 log tail）
-- [ ] log tail 区域与队列区域有明确分隔标题
-- [ ] 补写 / 更新 `tests/unit/roll_loop_monitor.bats`，覆盖三服务状态行和 log tail 渲染逻辑
+- [x] 显示三行 launchd 服务状态：loop（每小时）/ dream（每晚 01:00）/ brief（每天 08:00），每行显示 ● enabled / ○ disabled
+- [x] 每次刷新周期（默认 3s）末尾显示 `~/.shared/roll/loop/launchd.log` 最后 10 行（实时 log tail）
+- [x] log tail 区域与队列区域有明确分隔标题
+- [x] 补写 / 更新 `tests/unit/roll_loop_monitor.bats`，覆盖三服务状态行和 log tail 渲染逻辑
 
 **CLI:**
 ```bash

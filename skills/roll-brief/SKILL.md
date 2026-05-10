@@ -150,13 +150,8 @@ BACKLOG state and git history directly.
 
 ### Local cron (daily morning)
 
-```bash
-# 08:00 every morning (adjust to your timezone)
-0 8 * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-brief/SKILL.md)"
-```
-
-Installed automatically via `roll loop on` alongside roll-loop and
-roll-.dream. The agent command respects `~/.roll/config.yaml → loop.primary_agent`.
+Installed automatically via `roll loop on` alongside roll-loop and roll-.dream.
+The cron entry is generated using the configured agent — no manual cron editing needed.
 
 ### Triggered by roll-loop
 

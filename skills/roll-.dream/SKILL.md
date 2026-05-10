@@ -144,18 +144,8 @@ roll-.dream runs **locally** — it reads the local codebase directly.
 
 ### Local cron (default)
 
-```bash
-# Run at 01:00 every night (adjust to your timezone)
-0 1 * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-.dream/SKILL.md)" >> ~/.shared/roll/dream/cron.log 2>&1
-```
-
-Installed automatically via `roll loop on` alongside roll-loop.
-The agent command is read from `~/.roll/config.yaml → loop.primary_agent`.
-
-### Agent with native scheduling support
-
-If your agent (Claude Code, opencode, etc.) supports scheduled prompts
-natively, prefer that over cron for cleaner lifecycle management.
+Installed automatically via `roll loop on` alongside roll-loop and roll-brief.
+The cron entry is generated using the configured agent — no manual cron editing needed.
 
 ## Failure Handling
 

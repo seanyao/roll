@@ -174,47 +174,20 @@ cannot fulfill these requirements.
 
 ### Local cron (default)
 
-Install once with `roll loop on`:
+Install once with `roll loop on` — it reads the configured agent from
+`.roll.yaml` or `~/.roll/config.yaml` and writes the correct cron entry
+automatically. No agent-specific command needed.
 
 ```bash
-# What roll loop on writes to crontab:
-0 * * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)" >> ~/.shared/roll/loop/cron.log 2>&1
+roll loop on      # install cron for loop + dream + brief
+roll loop off     # remove cron entries
+roll loop status  # show current state
 ```
-
-The agent invoked (`claude`, `kimi`, `deepseek`, etc.) is read from
-`~/.roll/config.yaml → loop.primary_agent`. The command is agent-agnostic:
-
-```bash
-# claude
-claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
-
-# kimi
-kimi --quiet "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
-
-# deepseek
-deepseek "$(cat ~/.roll/skills/roll-loop/SKILL.md)"
-```
-
-### Agent with native scheduling support
-
-Some agents support scheduled prompts natively (e.g., Claude Code hooks,
-opencode scheduled tasks). If your agent supports it, prefer that over cron
-— the agent handles its own lifecycle and the setup is cleaner.
-
-Consult your agent's documentation for scheduling configuration.
 
 ### Manual run (for testing)
 
 ```bash
-roll loop run      # execute one cycle immediately
-roll loop status   # show current state without running
-```
-
-### Local cron
-
-```bash
-# Every hour
-0 * * * * cd /path/to/project && claude -p "$(cat ~/.roll/skills/roll-loop/SKILL.md)" >> ~/.shared/roll/loop/cron.log 2>&1
+roll loop now     # execute one cycle immediately
 ```
 
 ## Integration Map

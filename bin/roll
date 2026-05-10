@@ -1662,7 +1662,7 @@ _agent_run_skill() {
     claude)   claude -p "$(cat "$skill_file")" ;;
     kimi)     kimi --quiet "$(cat "$skill_file")" ;;
     deepseek) deepseek "$(cat "$skill_file")" ;;
-    *)        warn "Unknown agent '${agent}', falling back to claude"; claude -p "$(cat "$skill_file")" ;;
+    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek>"; return 1 ;;
   esac
 }
 
@@ -1721,7 +1721,7 @@ _agent_skill_cmd() {
     claude)   echo "claude -p \"\$(cat '${skill_path}')\"" ;;
     kimi)     echo "kimi --quiet \"\$(cat '${skill_path}')\"" ;;
     deepseek) echo "deepseek \"\$(cat '${skill_path}')\"" ;;
-    *)        echo "claude -p \"\$(cat '${skill_path}')\"" ;;
+    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek>"; return 1 ;;
   esac
 }
 

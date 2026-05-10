@@ -1731,6 +1731,76 @@ cmd_agent() {
 _LOOP_TAG="# roll-loop"
 _LOOP_STATE="${HOME}/.shared/roll/loop/state.yaml"
 _LOOP_ALERT="${HOME}/.shared/roll/loop/ALERT.md"
+_LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
+
+# Returns a filesystem-safe slug combining the project basename and a 6-char
+# hash of the full path, ensuring uniqueness across sibling dirs with same name.
+_project_slug() {
+  local path="$1"
+  local base; base=$(basename "$path")
+  local hash
+  if command -v md5 &>/dev/null; then
+    hash=$(printf '%s' "$path" | md5 | cut -c1-6)
+  else
+    hash=$(printf '%s' "$path" | md5sum | cut -c1-6)
+  fi
+  base=$(printf '%s' "$base" | tr -cs '[:alnum:]' '-' | sed 's/-*$//')
+  printf '%s' "${base}-${hash}"
+}
+
+_launchd_label() {
+  local service="$1" project_path="$2"
+  printf 'com.roll.%s.%s' "$service" "$(_project_slug "$project_path")"
+}
+
+_launchd_plist_path() {
+  local service="$1" project_path="$2"
+  printf '%s/%s.plist' "$_LAUNCHD_DIR" "$(_launchd_label "$service" "$project_path")"
+}
+
+_write_launchd_plist() {
+  local plist_path="$1" label="$2" project_path="$3"
+  local minute="$4" hour="$5" roll_bin="$6" subcmd="$7" log_dir="$8"
+
+  local content
+  content="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<plist version=\"1.0\">
+<dict>
+  <key>Label</key>
+  <string>${label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-l</string>
+    <string>-c</string>
+    <string>cd \"${project_path}\" ; \"${roll_bin}\" ${subcmd} >> \"${log_dir}/cron.log\" 2>&amp;1</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Minute</key>
+    <integer>${minute}</integer>
+    <key>Hour</key>
+    <integer>${hour}</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${log_dir}/launchd.out</string>
+  <key>StandardErrorPath</key>
+  <string>${log_dir}/launchd.err</string>
+  <key>WorkingDirectory</key>
+  <string>${project_path}</string>
+</dict>
+</plist>"
+
+  if [[ -f "$plist_path" ]] && [[ "$(cat "$plist_path")" == "$content" ]]; then
+    return 0
+  fi
+  printf '%s\n' "$content" > "$plist_path"
+}
+
+_launchd_is_loaded() {
+  launchctl list "$1" &>/dev/null 2>&1
+}
 
 _agent_skill_cmd() {
   local skill_path="$1"

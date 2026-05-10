@@ -435,7 +435,53 @@ Domain: Order Context > Order Aggregate > OrderItem Entity
 - More than 2 viable technical paths exist
 - Requirement involves an unfamiliar tech stack or new domain
 
-**Gate rule** — after presenting options and recommendation, always end with this explicit prompt and **wait for user reply before proceeding**:
+### How to Conduct the Discussion
+
+Discuss is **multi-turn by default**. The goal is to reach clarity together, not to produce a complete comparison matrix in one shot.
+
+**Step 1 — Understand before proposing**
+
+Before listing options, make sure the core problem is clear. If context is thin, ask 1–2 focused questions first:
+
+```
+Before I lay out the options — can you tell me [specific constraint / scale / existing system boundary]?
+```
+
+Only skip this if the context is already rich enough to reason from.
+
+**Step 2 — Offer an opinionated starting point, not a menu**
+
+Don't dump 4 options at once. Lead with a concrete recommendation and the key tradeoff:
+
+```
+My read: go with X. The main tradeoff is [Y vs Z]. Want me to walk through why, or should I compare against [alternative] first?
+```
+
+Then wait. Let the user redirect.
+
+**Step 3 — Follow the thread**
+
+If the user wants to dig into a specific option or challenge an assumption, stay on that thread. Don't pivot back to the full comparison until the current thread is resolved.
+
+**Step 4 — Surface hidden assumptions explicitly**
+
+When a direction starts to crystallize, name the assumptions holding it up:
+
+```
+This only holds if [assumption]. Is that true for your situation?
+```
+
+**Step 5 — Name convergence before triggering the gate**
+
+When the discussion reaches a clear conclusion, summarize it explicitly before asking to proceed:
+
+```
+Looks like we've landed on: [decision]. The key reasons: [1–2 points].
+```
+
+Then trigger the gate.
+
+**Gate rule** — after convergence is named, always end with this explicit prompt and **wait for user reply before proceeding**:
 
 ```
 ➡️  Continue to solution design, or keep exploring?

@@ -210,3 +210,63 @@ agent: claude   # claude | kimi | deepseek | opencode | ...
 **Files:**
 - `docs/methodology-en.md`
 - `docs/methodology.md`
+
+---
+
+<a id="us-auto-007"></a>
+## US-AUTO-007 roll backlog 命令 ✅
+
+**Created**: 2026-05-10
+**Completed**: 2026-05-10
+
+- As a developer using Roll's autonomous execution
+- I want a `roll backlog` command that shows all pending tasks
+- So that I can check what's queued without opening BACKLOG.md manually
+
+**AC:**
+- [x] `roll backlog` reads BACKLOG.md and prints all 📋 Todo items
+- [x] Groups by type: Bug Fixes (FIX-XXX, red), User Stories (US-XXX, cyan), Refactors (REFACTOR-XXX, yellow)
+- [x] Bug fixes listed first (highest priority)
+- [x] Shows total count in header
+- [x] Shows "backlog is clear" when nothing pending
+- [x] Errors clearly if BACKLOG.md not found
+- [x] Added to `roll --help` and `usage()` output
+- [x] Added to dashboard (`roll loop monitor` queue section)
+
+**CLI:**
+```bash
+roll backlog    # show pending tasks grouped by type
+```
+
+**Files:**
+- `bin/roll` (cmd_backlog, usage, main routing)
+
+---
+
+<a id="us-auto-008"></a>
+## US-AUTO-008 roll loop monitor ✅
+
+**Created**: 2026-05-10
+**Completed**: 2026-05-10
+
+- As a human overseeing autonomous execution
+- I want a live `roll loop monitor` dashboard like `top`
+- So that I can see the loop's current state, queue, and recent history at a glance
+
+**AC:**
+- [x] `roll loop monitor [interval]` — refreshing terminal view (default: 3s interval)
+- [x] Shows: scheduler enabled/disabled + agent, current execution state (running/paused/idle), ALERT if present
+- [x] Shows pending queue from BACKLOG.md (FIX first, then US, then REFACTOR), color-coded
+- [x] Shows last 5 lines of `~/.shared/roll/loop/cron.log` as recent activity
+- [x] Ctrl-C to exit cleanly
+- [x] Optional interval argument: `roll loop monitor 5` for 5-second refresh
+- [x] Added to `cmd_loop` routing and `usage()` output
+
+**CLI:**
+```bash
+roll loop monitor       # live dashboard, refresh every 3s
+roll loop monitor 5     # refresh every 5s
+```
+
+**Files:**
+- `bin/roll` (_loop_monitor, cmd_loop routing, usage)

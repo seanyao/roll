@@ -653,7 +653,7 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 **当前局限**：
 
 - **多 Agent 协调成本**：`$roll-build` 会根据 Action 的依赖关系判断是否启动并行子 Agent，但跨 Agent 的状态同步与冲突处理目前依赖约定而非强制协议，在高并发场景下仍有协调开销。
-- **框架耦合**：技能定义以 Markdown 格式编写，依赖 AI 客户端对自然语言指令的理解能力——不同模型的执行精度存在差异。每个 Skill 在 frontmatter 中按需 pin 模型（如 `roll-research` 用 Opus、`roll-jot` 用 Haiku），并以 `allowed-tools` 声明工具白名单，缓解了精度漂移与工具误用，但仍依赖客户端尊重这两个字段。
+- **框架耦合**：技能定义以 Markdown 格式编写，依赖 AI 客户端对自然语言指令的理解能力——不同模型的执行精度存在差异。每个 Skill 在 frontmatter 中按需 pin 模型（如 `roll-research` 用 Opus、`roll-idea` 用 Haiku），并以 `allowed-tools` 声明工具白名单，缓解了精度漂移与工具误用，但仍依赖客户端尊重这两个字段。
 - **巡检覆盖率**：`$roll-sentinel` 的采样策略有效降低了成本，但不等同于全量回归测试的覆盖保障。
 
 ---

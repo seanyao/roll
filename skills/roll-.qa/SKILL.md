@@ -233,10 +233,10 @@ CI failure
 
 ```bash
 # For fixable bugs — create FIX entry
-$roll-jot fix "CI: {step} fails — {root cause summary}"
+$roll-idea fix "CI: {step} fails — {root cause summary}"
 
 # For flaky/environmental issues — create IDEA entry
-$roll-jot idea "CI: investigate flaky {test name}"
+$roll-idea idea "CI: investigate flaky {test name}"
 ```
 
 ### Step 4: Execute Fix

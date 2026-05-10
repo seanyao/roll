@@ -1,22 +1,22 @@
 ---
-name: roll-jot
+name: roll-idea
 license: MIT
 allowed-tools: "Read, Edit"
 description: "Fast backlog capture. Analyzes a short description, classifies it as bug or idea, and appends it to BACKLOG.md with an auto-incremented ID."
 ---
 
-# roll-jot
+# roll-idea
 
 > One-liner in, backlog entry out. No questions asked.
 
 ## Trigger
 
-User explicitly invokes `roll-jot` with a free-text description.
+User explicitly invokes `roll-idea` with a free-text description.
 
 ```
-$roll-jot 评价页面的星星也要纳入到 draft 的 scope 里
-$roll-jot 手机端星星指标一行一个从上往下排
-$roll-jot 给 HOD 加一个批量导出 PDF 的功能
+$roll-idea 评价页面的星星也要纳入到 draft 的 scope 里
+$roll-idea 手机端星星指标一行一个从上往下排
+$roll-idea 给 HOD 加一个批量导出 PDF 的功能
 ```
 
 ## When Not to Use

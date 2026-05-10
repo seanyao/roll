@@ -29,7 +29,7 @@ Discuss approaches, design architecture, plan requirements, and write to `BACKLO
 
 ## When Not to Use
 
-- One-liner capture of ideas or bugs (use `$roll-jot`)
+- One-liner capture of ideas or bugs (use `$roll-idea`)
 - Executing an already-split US-XXX (use `$roll-build`)
 - Fixing a well-defined FIX-XXX (use `$roll-fix`)
 

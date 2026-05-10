@@ -655,7 +655,7 @@ roll                      # project dashboard (in project dir): loop status + br
 **Current Limitations:**
 
 - **Multi-Agent coordination overhead**: `$roll-build` evaluates Action dependencies to determine whether to launch parallel sub-Agents, but cross-Agent state synchronization and conflict resolution currently depend on conventions rather than enforced protocols, incurring coordination overhead in high-concurrency scenarios.
-- **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models. Each Skill now pins a model in its frontmatter (`model:` — e.g. Opus for `roll-research`, Haiku for `roll-jot`) and declares a tool allowlist (`allowed-tools:`), mitigating precision drift and accidental tool misuse, though both fields still depend on the client honoring them.
+- **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models. Each Skill now pins a model in its frontmatter (`model:` — e.g. Opus for `roll-research`, Haiku for `roll-idea`) and declares a tool allowlist (`allowed-tools:`), mitigating precision drift and accidental tool misuse, though both fields still depend on the client honoring them.
 - **Patrol coverage**: `$roll-sentinel`'s sampling strategy effectively controls cost, but it does not provide the same coverage guarantee as exhaustive regression testing.
 
 ---

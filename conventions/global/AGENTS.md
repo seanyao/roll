@@ -31,7 +31,7 @@
 
 ## 4. Workflow
 - **Scope Gate**: Only implement what is explicitly listed in the AC. Nothing more.
-  - Requests made in conversation are NOT AC — capture with `roll-jot` first.
+  - Requests made in conversation are NOT AC — capture with `roll-idea` first.
   - Any new Story/Fix requires design doc + user confirmation before TCR starts.
   - Do not commit without user approval unless explicitly told to auto-commit.
 - **TCR**: Test -> Green = Commit / Red = Revert. No WIP commits.

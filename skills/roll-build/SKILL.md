@@ -18,7 +18,7 @@ One entry point. Any input. Full delivery.
 Input received
   ├── matches "US-[A-Z]+-[0-9]+"  → Story mode: read BACKLOG → TCR workflow
   ├── matches "FIX-[A-Z]+-[0-9]+" → redirect to $roll-fix
-  ├── matches "IDEA-[0-9]+"       → redirect to $roll-jot (lookup and expand)
+  ├── matches "IDEA-[0-9]+"       → redirect to $roll-idea (lookup and expand)
   └── anything else               → Fly mode: clarify → design → execute
 ```
 

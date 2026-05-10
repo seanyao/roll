@@ -18,6 +18,7 @@
 | [US-SKILL-004](docs/features/new-skills.md#us-skill-004) | Add `roll-doctor` — 一键诊断开发工具链健康状态 | ✅ Done |
 | [US-SKILL-005](docs/features/new-skills.md#us-skill-005) | Add `roll-peer` — 跨 Agent 代码评审（Claude/Kimi/DeepSeek/Codex） | ✅ Done |
 | [US-SKILL-006](docs/features/new-skills.md#us-skill-006) | Add `roll-bipo-onboard` — 新员工入职引导流程 | ✅ Done |
+| [US-SKILL-007](docs/features/new-skills.md#us-skill-007) | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | ✅ Done |
 
 ## Epic: Distribution
 ### Feature: npm-distribution
@@ -119,6 +120,8 @@
 | [US-AUTO-004](docs/features/autonomous-evolution.md#us-auto-004) | roll-loop — BACKLOG 自主执行器 + 调度器 + 跨Agent路由 + 失败处理 | ✅ Done |
 | [US-AUTO-005](docs/features/autonomous-evolution.md#us-auto-005) | CLI 管理层文档化 — roll loop/brief/agent + .roll.yaml 约定 | ✅ Done |
 | [US-AUTO-006](docs/features/autonomous-evolution.md#us-auto-006) | Methodology 自主演化章节（中英双语）— 可选层原则 + 三层架构 | ✅ Done |
+| [US-AUTO-007](docs/features/autonomous-evolution.md#us-auto-007) | roll backlog 命令 — 快速查看当前项目未完成任务清单，无需打开 BACKLOG.md 文件 | ✅ Done |
+| [US-AUTO-008](docs/features/autonomous-evolution.md#us-auto-008) | roll loop 监控台 — 类似 top 命令，实时查看当前项目的 loop 状态、队列、执行历史，loop 跑完后有迹可查 | ✅ Done |
 
 ## ♻️ Refactor
 | ID | Description | Status |
@@ -130,6 +133,6 @@
 | IDEA-001 | conventions/global/AGENTS.md 加 Identity 规则：从 git config 读取，禁止硬编码个人数据 | ✅ Done |
 | IDEA-002 | roll CLI 启动时显示最近三个版本的 changelog 内容 | ✅ Done |
 | IDEA-003 | 技能审计 P0 — 名称对齐、清理过时引用、补 When Not to Use、统一 license (PR #3 by @sealfe) | ✅ Done |
-| IDEA-004 | roll loop 监控台 — 类似 top 命令，实时查看当前项目的 loop 状态、队列、执行历史，loop 跑完后有迹可查 | 📋 Todo |
-| IDEA-005 | roll backlog 命令 — 快速查看当前项目未完成任务清单，无需打开 BACKLOG.md 文件 | 📋 Todo |
-| IDEA-006 | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | 📋 Todo |
+| IDEA-004 | roll loop 监控台 — 类似 top 命令，实时查看当前项目的 loop 状态、队列、执行历史，loop 跑完后有迹可查 | ✅ Done → US-AUTO-008 |
+| IDEA-005 | roll backlog 命令 — 快速查看当前项目未完成任务清单，无需打开 BACKLOG.md 文件 | ✅ Done → US-AUTO-007 |
+| IDEA-006 | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | ✅ Done → US-SKILL-007 |

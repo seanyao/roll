@@ -22,7 +22,7 @@ Auto-invoked by `roll-build` (Fly mode) when the user input is:
 ## When Not to Use
 
 - Intent is already clear and actionable
-- User gives a specific command with a skill trigger (e.g. `$roll-jot ...`)
+- User gives a specific command with a skill trigger (e.g. `$roll-idea ...`)
 - User is answering a clarification question you just asked
 - The task is simple enough that misinterpretation risk is negligible
 - User messy thoughts need restatement rather than questioning (use `$roll-.echo`)

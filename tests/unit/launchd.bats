@@ -194,9 +194,10 @@ setup() {
 
   _install_launchd_plists "$proj"
 
-  [ -x "${_SHARED_ROOT}/loop/run.sh" ]
-  [ -x "${_SHARED_ROOT}/dream/run.sh" ]
-  [ -x "${_SHARED_ROOT}/brief/run.sh" ]
+  local slug; slug=$(_project_slug "$proj")
+  [ -x "${_SHARED_ROOT}/loop/run-${slug}.sh" ]
+  [ -x "${_SHARED_ROOT}/dream/run-${slug}.sh" ]
+  [ -x "${_SHARED_ROOT}/brief/run-${slug}.sh" ]
   rm -rf "$tmp_dir"
 }
 

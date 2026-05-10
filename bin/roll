@@ -352,6 +352,17 @@ ai_deepseek: ~/.deepseek|AGENTS.md|AGENTS.md
 default_language: zh
 default_project_type: fullstack
 editor: ${EDITOR:-vim}
+
+# Loop schedule (24h format, machine local timezone)
+# Minute fields auto-derive from project path hash when omitted — avoids contention across projects.
+loop_active_start: 10   # loop only fires inside this window (after human reviews brief)
+loop_active_end: 18
+# loop_minute: 5        # omit to auto-derive from project hash
+loop_dream_hour: 3
+# loop_dream_minute: 10 # omit to auto-derive
+loop_brief_hour: 9
+# loop_brief_minute: 15 # omit to auto-derive
+primary_agent: claude
 YAML
     ok "Created: ~/.roll/config.yaml  已创建: ~/.roll/config.yaml"
   fi

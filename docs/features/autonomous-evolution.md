@@ -291,6 +291,7 @@ roll loop monitor 5     # refresh every 5s
 - [ ] `roll loop monitor` 调度状态显示基于 launchd，不再检查 crontab
 - [ ] 任何 `roll loop` 子命令不再读写 crontab
 - [ ] Plists 使用完整 PATH 和 `/opt/homebrew/bin/claude` 绝对路径，日志输出到 `~/.shared/roll/{loop,dream,brief}/launchd.log`
+- [ ] `roll loop now` 输出同时打到终端和 `~/.shared/roll/loop/launchd.log`（用 `tee -a`），与 launchd 定时运行共享同一份日志
 - [ ] 补写 `tests/unit/roll_loop_launchd.bats`，覆盖 plist 生成逻辑和 on/off 状态检测（mock launchctl）
 
 **CLI:**

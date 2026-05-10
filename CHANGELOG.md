@@ -1,5 +1,10 @@
 # Changelog
 
+## v2026.511.1
+- **Changed**: roll loop 调度器切换到 launchd（macOS）— `roll setup` 自动安装 loop/dream/brief 三个 launchd 服务（默认关闭），`roll loop on/off/status` 统一走 launchctl 管理，幂等安装，Linux 保留 crontab 回退路径
+- **Added**: roll-loop TCR 硬校验 — 故事完成后自动统计 `tcr:` 微提交数量，为 0 时将故事状态回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏
+- **Fixed**: CI 测试环境兼容 — 移除依赖本地 state.yaml 的 hello_world.bats，修复 GitHub Actions 持续失败
+
 ## v2026.510.10
 - **Fixed**: release.sh changelog 同步时序修复 — 修正条件逻辑和执行顺序，确保每次发版时 changelog 正确更新
 - **Added**: roll-loop 22:00 自动执行验证 — 新增 hello_world.bats 作为 loop 定时执行的端到端存档，可回放确认调度器正常工作

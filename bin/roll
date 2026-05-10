@@ -1827,7 +1827,7 @@ _install_launchd_plists() {
   local services=("loop" "dream" "brief")
   local skill_names=("roll-loop" "roll-.dream" "roll-brief")
   local minutes=("0" "0" "0")
-  local hours=("" "1" "8")
+  local hours=("" "3" "9")
 
   local updated=0
   for i in "${!services[@]}"; do
@@ -1910,8 +1910,8 @@ _loop_on() {
 
     ok "Loop enabled  已启用"
     echo "  • roll-loop   every hour :00    每小时整点"
-    echo "  • roll-.dream nightly at 01:00  每晚 01:00"
-    echo "  • roll-brief  daily at 08:00    每天 08:00"
+    echo "  • roll-.dream nightly at 03:00  每晚 03:00"
+    echo "  • roll-brief  daily at 09:00    每天 09:00"
     echo "  • Agent: ${agent}  (change: roll agent use <name>)"
     return 0
   fi
@@ -1938,8 +1938,8 @@ _loop_on() {
 
   ok "Loop enabled  已启用"
   echo "  • roll-loop   every hour :00    每小时整点"
-  echo "  • roll-.dream nightly at 01:00  每晚 01:00"
-  echo "  • roll-brief  daily at 08:00    每天 08:00"
+  echo "  • roll-.dream nightly at 03:00  每晚 03:00"
+  echo "  • roll-brief  daily at 09:00    每天 09:00"
   echo "  • Agent: ${agent}  (change: roll agent use <name>)"
 }
 
@@ -2089,7 +2089,7 @@ _loop_monitor() {
     echo -e "  ${BOLD}Services  服务状态${NC}   Agent: ${CYAN}${agent}${NC}"
     if [[ "$(uname)" == "Darwin" ]]; then
       local svc_info svc schedule
-      for svc_info in "loop:hourly" "dream:01:00" "brief:08:00"; do
+      for svc_info in "loop:hourly" "dream:03:00" "brief:09:00"; do
         svc="${svc_info%%:*}"
         schedule="${svc_info#*:}"
         if _launchd_is_loaded "$(_launchd_label "$svc" "$project_path")"; then

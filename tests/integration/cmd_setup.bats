@@ -287,3 +287,46 @@ another_key: 42"
   [ "$status" -eq 0 ]
   [ ! -f "$ghost" ]
 }
+
+# ─── Scenario 8: launchd plist installation (macOS only) ─────────────────────
+
+@test "setup (macOS): installs three launchd plist files" {
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
+
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  local launchd_dir="${TEST_TMP}/Library/LaunchAgents"
+  [ -d "$launchd_dir" ]
+  local count
+  count=$(find "$launchd_dir" -maxdepth 1 -name "com.roll.*.plist" | wc -l | tr -d ' ')
+  [ "$count" -eq 3 ]
+}
+
+@test "setup (macOS): plist files are not loaded after setup (disabled by default)" {
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
+
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  local launchd_dir="${TEST_TMP}/Library/LaunchAgents"
+  for plist in "${launchd_dir}"/com.roll.*.plist; do
+    [ -f "$plist" ]
+    local label; label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+    ! launchctl list "$label" &>/dev/null
+  done
+}
+
+@test "setup (macOS): running setup twice does not duplicate plists (idempotent)" {
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
+
+  run_roll setup
+  [ "$status" -eq 0 ]
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  local launchd_dir="${TEST_TMP}/Library/LaunchAgents"
+  local count
+  count=$(find "$launchd_dir" -maxdepth 1 -name "com.roll.*.plist" | wc -l | tr -d ' ')
+  [ "$count" -eq 3 ]
+}

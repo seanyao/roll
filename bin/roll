@@ -544,6 +544,12 @@ cmd_setup() {
   _peer_ensure_state_dir
   ok "Peer state directory ready.  Peer 状态目录已就绪。"
 
+  if [[ "$(uname)" == "Darwin" ]]; then
+    echo ""
+    info "Installing launchd plists...  正在安装 LaunchAgents..."
+    _install_launchd_plists "$(pwd -P)"
+  fi
+
   echo ""
   ok "Setup complete.  初始化完成。"
 

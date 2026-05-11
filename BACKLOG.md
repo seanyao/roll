@@ -170,7 +170,7 @@
 | REFACTOR-002 | US-AUTO-008 roll loop monitor 补 TCR — 遗漏测试，严格按 TCR 节奏补写 _loop_monitor 冒烟用例 | ✅ Done |
 | REFACTOR-003 | 删除 bin/roll 中两个死代码函数 `is_fresh_project()`、`_mkscaffold()` 及孤儿测试文件 is_fresh_project.bats — flagged by dream 2026-05-11 | ✅ Done |
 | REFACTOR-004 | 修复 `_write_backlog()` + `_ensure_features_dir()` 使用 `_WK_MERGE_SUMMARY` 而非 `_ROLL_MERGE_SUMMARY`，导致 roll init 摘要中静默丢失 BACKLOG/docs/features 条目 — flagged by dream 2026-05-11 | ✅ Done |
-| REFACTOR-005 | 提取 `_for_each_ai_tool()` 辅助函数消除 AI 客户端迭代逻辑的 4 处重复（bin/roll:~365, ~497, ~1136 等） — flagged by dream 2026-05-11 | 🔨 In Progress |
+| REFACTOR-005 | 提取 `_for_each_ai_tool()` 辅助函数消除 AI 客户端迭代逻辑的 4 处重复（bin/roll:~365, ~497, ~1136 等） — flagged by dream 2026-05-11 | ✅ Done |
 | REFACTOR-006 | CI 测试套件提速 — 当前 377 个 bats 测试在 CI (ubuntu) 约需 5+ 分钟，排查：重复覆盖的用例、可并行的文件组、慢测试根因（integration/cmd_setup.bats 尤慢）；目标：CI 时间减半，不降低覆盖率 | 📋 Todo |
 | REFACTOR-007 | 新建 `tests/unit/helpers.bash` — 消除 22 个单元测试文件中重复的 source/mktemp/rm/NO_COLOR 样板，参照 tests/integration/helpers.bash 模式 — flagged by dream 2026-05-12 | 📋 Todo |
 

@@ -56,3 +56,15 @@ Architectural friction signals flagged during story execution.
 **Observation**: `_WK_MERGE_SUMMARY` 是未声明的孤儿变量（从未被初始化或读取），实际上等于写入 /dev/null。用户看到 `[roll] Created: BACKLOG.md` 的 ok 输出，却在摘要框里找不到对应条目，行为不一致。
 
 **Scope**: `bin/roll` 4 处 `_WK_MERGE_SUMMARY` → `_ROLL_MERGE_SUMMARY`；`tests/integration/cmd_init.bats` 追加 2 条摘要框回归测试
+
+---
+
+## REFACTOR-005 提取 _for_each_ai_tool 辅助函数 ✅
+
+**Flagged**: 2026-05-11 (dream scan)
+**Completed**: 2026-05-12
+**Signal**: `while IFS= read -r entry; do ... done < <(_get_ai_tools)` 模式在 bin/roll 中出现 4 次，且每次都有相同的 `_ai_dir/$_ai_config/$_ai_src` 变量提取样板。
+
+**Observation**: 4 处循环中 2 处（`_sync_conventions` 和 cmd_status 的 sync targets 展示）循环体简单，可以安全提取为回调。另外 2 处（`_link_skills` 和 cmd_status skills 展示）循环体超过 30 行且引用闭包变量，提取为回调反而增加间接层而非减少复杂度，保留原始形式更清晰。
+
+**Scope**: `bin/roll` 新增 `_for_each_ai_tool callback [args...]` helper（+12 行）；`_sync_conventions` 重构为 `_sync_one_tool` + `_for_each_ai_tool` 调用；`tests/unit/for_each_ai_tool.bats` 新增 6 条单元测试

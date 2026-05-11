@@ -1422,9 +1422,70 @@ _peer_route() {
   return 1
 }
 
+# Open a terminal window attached to the given tmux session (peer auto-attach).
+# No-ops when muted, non-macOS, or tmux unavailable. Mirrors loop popup logic.
+_peer_auto_attach() {
+  local session="$1"
+  [ "$(uname)" = "Darwin" ] || return 0
+  [ -f "$_LOOP_MUTE_FILE" ] && return 0
+  local terminal_pref
+  terminal_pref=$(_config_read_string "loop_attach_terminal" "")
+  if [[ -z "$terminal_pref" ]]; then
+    case "${TERM_PROGRAM:-}" in
+      ghostty)   terminal_pref="ghostty" ;;
+      iTerm.app) terminal_pref="iTerm2" ;;
+      *)         terminal_pref="Terminal" ;;
+    esac
+  fi
+  local launched=0
+  if [[ "$terminal_pref" = "ghostty" || "$terminal_pref" = "Ghostty" ]]; then
+    open -na Ghostty.app --args -e "tmux attach -t $session" >/dev/null 2>&1 && launched=1 || true
+  fi
+  if [[ $launched -eq 0 ]] && { [[ "$terminal_pref" = "iTerm2" || "$terminal_pref" = "iTerm" ]] || [[ -d "/Applications/iTerm.app" ]]; }; then
+    osascript \
+      -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \
+      -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t $session\"" \
+      -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 \
+      && launched=1 || true
+  fi
+  if [[ $launched -eq 0 ]] && [[ -d "/Applications/Ghostty.app" ]]; then
+    open -na Ghostty.app --args -e "tmux attach -t $session" >/dev/null 2>&1 && launched=1 || true
+  fi
+  if [[ $launched -eq 0 ]] && command -v osascript >/dev/null 2>&1; then
+    osascript \
+      -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \
+      -e "tell application \"Terminal\" to do script \"tmux attach -t $session\"" \
+      -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
+  fi
+}
+
+# Dispatch a peer CLI command inside an existing tmux session (window 0).
+# Writes stdout to out_file, stderr to err_file. Blocks until done or timeout.
+_peer_dispatch_in_tmux() {
+  local session="$1" cmd_str="$2" out_file="$3" err_file="$4" timeout="${5:-180}"
+  local done_file="${out_file}.done"
+  local inner
+  inner=$(mktemp /tmp/roll-peer-inner-XXXXXX.sh)
+  {
+    printf '#!/bin/bash -l\n'
+    printf 'export PATH="/opt/homebrew/bin:$PATH"\n'
+    printf '%s > %q 2> %q || true\n' "$cmd_str" "$out_file" "$err_file"
+    printf 'touch %q\n' "$done_file"
+  } > "$inner"
+  chmod +x "$inner"
+  tmux send-keys -t "${session}:0" "bash ${inner}; rm -f ${inner}" Enter
+  local elapsed=0
+  while [ ! -f "$done_file" ] && [ "$elapsed" -lt "$timeout" ]; do
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  rm -f "$done_file"
+}
+
 _peer_call() {
   local to="$1"
   local prompt="$2"
+  local session="${3:-}"
   local output=""
   local stderr_log
   stderr_log="${_PEER_STATE_DIR}/logs/.last_stderr.log"
@@ -1433,30 +1494,50 @@ _peer_call() {
 
   info "Peer call timeout: ${call_timeout}s  Peer 调用超时: ${call_timeout}s"
 
-  case "$to" in
-    claude)
-      output="$(claude -p --output-format text "$prompt" 2>"$stderr_log" || true)"
-      ;;
-    kimi)
-      output="$(kimi --quiet -p "$prompt" 2>"$stderr_log" || true)"
-      ;;
-    pi)
-      output="$(pi -p "$prompt" 2>"$stderr_log" || true)"
-      ;;
-    deepseek)
-      output="$(deepseek "$prompt" 2>"$stderr_log" || true)"
-      ;;
-    codex)
-      output="$(codex exec --json --output-last-message "$prompt" 2>"$stderr_log" || true)"
-      ;;
-    opencode)
-      output="$(opencode run "$prompt" 2>"$stderr_log" || true)"
-      ;;
-    *)
-      err "Unsupported peer: $to  不支持的 peer: $to"
-      return 1
-      ;;
-  esac
+  if [[ -n "$session" ]] && command -v tmux >/dev/null 2>&1 && tmux has-session -t "$session" 2>/dev/null; then
+    local out_file
+    out_file=$(mktemp)
+    local cmd_str
+    case "$to" in
+      claude)   cmd_str="claude -p --output-format text $(printf %q "$prompt")" ;;
+      kimi)     cmd_str="kimi --quiet -p $(printf %q "$prompt")" ;;
+      pi)       cmd_str="pi -p $(printf %q "$prompt")" ;;
+      deepseek) cmd_str="deepseek $(printf %q "$prompt")" ;;
+      codex)    cmd_str="codex exec --json --output-last-message $(printf %q "$prompt")" ;;
+      opencode) cmd_str="opencode run $(printf %q "$prompt")" ;;
+      *)
+        err "Unsupported peer: $to  不支持的 peer: $to"
+        return 1 ;;
+    esac
+    _peer_dispatch_in_tmux "$session" "$cmd_str" "$out_file" "$stderr_log" "$call_timeout"
+    output="$(cat "$out_file" 2>/dev/null || true)"
+    rm -f "$out_file"
+  else
+    case "$to" in
+      claude)
+        output="$(claude -p --output-format text "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      kimi)
+        output="$(kimi --quiet -p "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      pi)
+        output="$(pi -p "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      deepseek)
+        output="$(deepseek "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      codex)
+        output="$(codex exec --json --output-last-message "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      opencode)
+        output="$(opencode run "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      *)
+        err "Unsupported peer: $to  不支持的 peer: $to"
+        return 1
+        ;;
+    esac
+  fi
 
   printf '%s\n' "$output"
 }
@@ -1582,6 +1663,15 @@ cmd_peer() {
   local prompt
   prompt="[PEER_REVIEW round=${round} tool=${from_tool}→${to_tool}]\n\n${context}"
 
+  local peer_session=""
+  if command -v tmux >/dev/null 2>&1; then
+    peer_session="roll-peer-${from_tool}-${to_tool}"
+    if ! tmux has-session -t "$peer_session" 2>/dev/null; then
+      tmux new-session -d -s "$peer_session" -x 200 -y 50
+      _peer_auto_attach "$peer_session"
+    fi
+  fi
+
   _peer_ensure_state_dir
   local log_file
   log_file="${_PEER_STATE_DIR}/logs/$(date +%Y%m%d_%H%M%S)_${from_tool}_${to_tool}.md"
@@ -1606,7 +1696,7 @@ cmd_peer() {
 
   info "Calling $to_tool...  调用 $to_tool..."
   local response
-  response="$(_peer_call "$to_tool" "$prompt")"
+  response="$(_peer_call "$to_tool" "$prompt" "$peer_session")"
 
   local stderr_log
   stderr_log="${_PEER_STATE_DIR}/logs/.last_stderr.log"

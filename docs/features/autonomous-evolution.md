@@ -525,19 +525,20 @@ loop 从 📋 Todo 直接跳到 ✅ Done，中间状态不写回 BACKLOG。brief
 ---
 
 <a id="us-auto-017"></a>
-## US-AUTO-017 roll-.dream 日志改为中文输出 📋
+## US-AUTO-017 roll-.dream 日志改为中文输出 ✅
 
 **Created**: 2026-05-11
+**Completed**: 2026-05-11
 
 - As a product engineer reading morning dream reports
 - I want dream logs to be in Chinese
 - So that the language is consistent with roll-brief and readable without context switching
 
 **AC:**
-- [ ] `skills/roll-.dream/SKILL.md` 的 Dream Log 输出模板改为中文（标题、section 名、固定文案）
-- [ ] 内容描述（发现的代码问题）也用中文表述
-- [ ] 格式结构保持不变（Summary / 死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 创建的 REFACTOR 条目）
-- [ ] BACKLOG.md 追加的 REFACTOR 条目描述本身也改为中文（现已是中文，保持不变）
+- [x] `skills/roll-.dream/SKILL.md` 的 Dream Log 输出模板改为中文（标题、section 名、固定文案）
+- [x] 内容描述（发现的代码问题）也用中文表述
+- [x] 格式结构保持不变（Summary / 死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 创建的 REFACTOR 条目）
+- [x] BACKLOG.md 追加的 REFACTOR 条目描述本身也改为中文（现已是中文，保持不变）
 
 **Files:**
 - `skills/roll-.dream/SKILL.md`（Output 模板 + 固定文案全部中文化）

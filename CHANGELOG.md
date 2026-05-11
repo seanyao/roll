@@ -3,6 +3,7 @@
 ## v2026.511.9
 - **Added**: `roll loop runs` 每次 loop 运行的快速可见性 — 单次 loop 结束追加一行 JSON 到 `~/.shared/roll/loop/runs.jsonl`（含 ts/project/run_id/status/built/skipped/alerts/tcr_count/duration_sec），新命令 `roll loop runs [N] [--all]` 倒序显示最近 N 次（默认 10），不必等次日早报就能查到中间 13 次 loop 各干了啥。
 - **Added**: loop 跑在 tmux session + `roll loop attach` 实时观看 — runner script 自动把 claude 包进 detached tmux session `roll-loop-<slug>`，输出同时 pipe 到 `cron.log`；执行 `roll loop attach` 可随时 attach 上去看它打字、写文件、commit，Ctrl-B D 分离后 loop 继续跑；未装 tmux 时自动 fallback 到原 headless 模式，零依赖回退。
+- **Improved**: roll-.dream 日志改为中文输出 — Dream Log 输出模板（概要 / 死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 创建的 REFACTOR 条目）和"未发现 / 部分完成"等固定文案全部中文化，与 roll-brief 风格对齐，晨间扫一眼不再需要在中英文之间切换语境。
 
 ## v2026.511.8
 - **Fixed**: 集成测试 launchd ghost 泄漏 — `integration_teardown` 在删除 TEST_TMP 之前，先 `launchctl bootout` 该沙箱里被 `roll loop on` 注册到 user gui domain 的所有 `com.roll.*` 服务，避免删 plist 后 launchd 仍保留指向不存在路径的 ghost 注册。

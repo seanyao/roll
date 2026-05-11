@@ -63,7 +63,31 @@ Read `BACKLOG.md`. Collect all rows where Status = `📋 Todo`, in order:
 
 Priority: FIX-XXX first (bugs block progress), then US-XXX, then REFACTOR-XXX.
 
+**Skip rows with Status = `🔨 In Progress`**. These are currently being executed by:
+- Another concurrent executor (human via `$roll-build`, peer agent)
+- An earlier loop iteration that hasn't finished yet (rare; should be guarded by LOCK)
+- A previous interrupted run (the resume logic in Step 1 will pick these up)
+
 Cap at `max_items_per_run` to limit blast radius per cycle.
+
+### Concurrency Safety
+
+Loop has two layers of concurrency protection:
+
+1. **Per-project LOCK** (enforced by runner script, see `bin/roll:_write_loop_runner_script`):
+   - LOCK file path: `~/.shared/roll/loop/.LOCK-<project-slug>`
+   - On launch: if LOCK exists and the PID inside is alive → exit 0 (previous loop still running)
+   - On launch: if LOCK exists but PID is dead → clean up stale LOCK and continue
+   - On exit (normal or via trap): LOCK is removed
+   - One LOCK per project — different projects' loops run independently
+
+2. **🔨 In Progress story status** (enforced here):
+   - Before picking a story, check its status is `📋 Todo`
+   - Skip any `🔨 In Progress` row (someone else is on it)
+   - Mark each story `🔨 In Progress` BEFORE invoking the executor skill (see Step 3)
+   - On completion: update to `✅ Done`; on TCR failure: revert to `📋 Todo`
+
+Together these mean: only one loop runs at a time per project (LOCK), and within a loop, stories already claimed by humans or peer agents are skipped (status check).
 
 ### Step 3 — Route and Execute
 

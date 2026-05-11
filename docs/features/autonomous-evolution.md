@@ -688,6 +688,67 @@ LOCK 文件路径采用 per-project：`<runner-dir>/.LOCK-<slug>`（每项目独
 
 ---
 
+<a id="us-auto-024"></a>
+## US-AUTO-024 `roll loop runs` — 每次 loop 运行的快速可见性 📋
+
+**Created**: 2026-05-11
+
+- As a developer running roll in autonomous mode
+- I want to see what each loop iteration just did without waiting for the next morning's brief
+- So that I can pull a quick digest at any time of day and stay aware of what loop has executed
+
+**背景：**
+loop 每小时跑一次（active window 10:00–24:00，每天 14 次），但 brief 每天只有早上 9 点一次。中间 13 次 loop 的产出对人不可见，要看必须翻 `cron.log`（嘈杂）或 `git log`（碎片化）。需要一个**拉式 per-run 摘要**：单次 loop 结束写一行结构化数据，新命令 `roll loop runs` 显示最近 N 次。
+
+**与 brief 的关系：**
+两者解决不同问题，并行存在：
+
+```
+brief    每日 1 次，叙事 + 跨日聚合 + 发布建议      "早上花 3 分钟读懂昨天"
+runs     按需查看，事件 + 单次小结 + 立即可用      "中午想知道刚才那次干了啥"
+```
+
+**AC:**
+- [ ] loop SKILL.md Step 5 末尾 append 一行 JSON 到 `~/.shared/roll/loop/runs.jsonl`
+- [ ] 单行字段：`{ts, project, run_id, status, built, skipped, alerts, tcr_count, duration_sec}`
+  - `status`: `built` / `idle` / `failed`
+  - `built`: 已完成的 story id 列表（如 `["US-AUTO-017","FIX-016"]`）
+  - `skipped`: 因为 🔨 In Progress 被跳过的 story id 列表
+  - `alerts`: 触发的 ALERT 数量
+  - `tcr_count`: 本次 loop 累计的 `tcr:` 提交数
+  - `duration_sec`: loop 启动到结束的秒数
+- [ ] 新命令 `roll loop runs [N]` —— 显示最近 N 条（默认 10），按时间倒序
+- [ ] 输出格式示例：
+  ```
+  19:11  ✅ built US-AUTO-017, US-AUTO-018  (2 items, 14 tcr, 28m)
+  18:11  ○ idle — no Todo items
+  17:11  ○ idle — no Todo items
+  16:11  ✗ FAILED — claude API error
+  ```
+- [ ] `roll loop runs` 仅显示**当前项目**的运行（按 project 字段过滤）
+- [ ] `roll loop runs --all` 显示所有项目的运行（聚合视图）
+- [ ] runs.jsonl 文件 append-only，永不删除（历史保留；若需要清理由人手动 truncate）
+
+**Non-goals:**
+- 不做推送通知（desktop notify）；先拉式起步，避免一天 14 次通知疲劳
+- 不替代 brief；brief 继续每日 09:00 跑，承担叙事与发布建议
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: LoopScheduler
+- New Entity: LoopRun（一次 loop 运行的事件记录）
+- Files touched: SKILL.md prompt + bin/roll 命令分派
+
+**Files:**
+- `skills/roll-loop/SKILL.md`（Step 5 写入 runs.jsonl 指令）
+- `bin/roll`（新增 `_loop_runs` 函数 + `runs` 子命令分派 + `--all` flag）
+- `tests/unit/roll_loop_runs.bats`（命令分派 + 输出格式契约 + JSONL 解析）
+
+**Dependencies:**
+- Depends on: US-AUTO-016（loop 已会标记 🔨，runs 需要从 BACKLOG 行为还原 built/skipped 列表）
+
+---
+
 <a id="us-auto-023"></a>
 ## US-AUTO-023 `roll loop pause / resume` — 人工模式切换 📋
 

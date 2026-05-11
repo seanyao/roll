@@ -124,10 +124,82 @@ docs/domain/                        # DDD domain model (greenfield / cross-featu
 3. Plan file: `docs/features/<feature>-plan.md` (create if it doesn't exist)
 4. BACKLOG.md index row goes under the corresponding Epic > Feature group
 
+## Non-Interactive Mode
+
+Activated by explicit flags or auto-detected high-confidence input. Skips Clarify and Discuss, writes stories directly to BACKLOG as `📋 Todo`, no confirm gate.
+
+### `--from-file <path>`
+
+```
+Input: structured requirement file (plain text or markdown)
+
+Expected file contents (minimum viable):
+  - Description: what to build (1–3 sentences)
+  - Expected AC: measurable outcomes (bullet list)
+  - [Optional] Domain hint, priority, dependencies
+
+Execution path:
+  [Read file] → [Analyze] → [DDD Slice] → [Solution Design] → [Split Stories]
+      → [Write BACKLOG 📋 Todo] → Done (no Clarify, no Discuss, no confirm gate)
+```
+
+Input file example (`docs/requirements/auth-req.md`):
+```markdown
+## Requirement: session timeout warning
+
+Description: Show a countdown modal 60 seconds before session expires.
+Users can click "Stay logged in" to extend, or let it expire naturally.
+
+Expected AC:
+- Modal appears at T-60s with countdown timer
+- "Stay logged in" sends a keepalive and dismisses modal
+- Expiry after countdown logs user out and redirects to /login
+- Works across all authenticated pages
+```
+
+### `--from-idea IDEA-NNN`
+
+```
+Input: IDEA-NNN identifier from BACKLOG.md
+
+Execution path:
+  [Read BACKLOG.md IDEA-NNN row] → [Analyze] → [DDD Slice] → [Split Stories]
+      → [Write BACKLOG 📋 Todo] → [Annotate IDEA row: → US-XXX] → Done
+
+IDEA annotation: append `→ US-XXX` to the IDEA row's Description column.
+Example: | IDEA-009 | ... | ✅ Done → US-AUTO-021 |
+```
+
+### High-Confidence Auto-Detection
+
+When input is not a flag-based mode but already contains all three of: **clear verb**, **explicit scope**, and **verifiable acceptance signal**, skip Clarify automatically. At most retain Discuss (only if approach has genuine divergence).
+
+High-confidence signals (all three must be present):
+- Clear verb: add / remove / fix / rename / migrate / split / extract / support ...
+- Explicit scope: named file, command, module, endpoint, or UI element
+- Acceptance signal: "so that X", "when Y then Z", measurable outcome described
+
+Examples:
+```bash
+# High confidence — skip Clarify:
+$roll-design "add --dry-run flag to roll loop on that prints plist without installing"
+$roll-design "rename cmd_status() to cmd_overview() in bin/roll and update all callers"
+
+# Low confidence — enter Clarify:
+$roll-design "improve the status command"
+$roll-design "make loop better"
+```
+
+---
+
 ## Workflow
 
 ```
 User Input
+    │
+    ├── --from-file <path>  ──→  [Read file] → Step 2 (Analyze) → Steps 3–5 → BACKLOG 📋 → Done
+    ├── --from-idea IDEA-N  ──→  [Read BACKLOG IDEA] → Step 2 → Steps 3–5 → BACKLOG 📋 → Annotate IDEA → Done
+    ├── high-confidence str ──→  Step 2 (Analyze) directly (skip Clarify, keep Discuss if divergence)
     │
     ▼
 ┌─────────────────────────────┐

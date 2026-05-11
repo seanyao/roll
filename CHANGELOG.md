@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Added**: `roll status` 新增所有项目的 loop 状态一览 — 调度时间、待办数、是否在跑
 - **Fixed**: `roll loop attach` 不再黑屏，AI 干活过程实时可见
 
 ## v2026.511.7

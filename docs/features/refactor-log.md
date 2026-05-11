@@ -33,3 +33,14 @@ Architectural friction signals flagged during story execution.
 - [x] 所有已有测试不退化（148 用例）
 
 **Scope**: `tests/unit/roll_loop_monitor.bats` 新增；`bin/roll` 修复 `_loop_monitor` crontab→launchd 检测、`_loop_now` 加 tee 双输出
+
+---
+
+## REFACTOR-003 删除死代码 is_fresh_project() / _mkscaffold() ✅
+
+**Flagged**: 2026-05-11 (dream scan)
+**Completed**: 2026-05-12
+**Signal**: 两个函数仅有定义无任何调用方，孤儿测试文件 is_fresh_project.bats 独立存在
+**Observation**: is_fresh_project() 是 cmd_init() 简化前的遗留物，_mkscaffold() 同源；保留只增加阅读噪音。
+
+**Scope**: `bin/roll` 删除两函数及其注释；`tests/unit/is_fresh_project.bats` 删除；`tests/unit/sanity.bats` 追加回归 guard

@@ -1783,7 +1783,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
   case "$agent" in
-    claude)   claude --verbose -p "$content" ;;
+    claude)   claude -p --output-format stream-json "$content" ;;
     kimi)     kimi --quiet -p "$content" ;;
     deepseek) deepseek "$content" ;;
     pi)       pi -p "$content" ;;
@@ -1955,10 +1955,10 @@ _write_loop_runner_script() {
   mkdir -p "$(dirname "$script_path")"
 
   local inner_path="${script_path%.sh}-inner.sh"
-  # Inject --verbose into `claude -p` so the tmux-attach view shows live
-  # tool-use and reasoning events (loop is launchd-triggered, the user is
-  # not driving it — visibility is required, not optional).
-  local cmd_verbose="${cmd/claude -p/claude --verbose -p}"
+  # Use stream-json output so the tmux-attach view shows live tool-use and
+  # text events as they arrive. --verbose alone does nothing in -p mode;
+  # stream-json is the flag that actually enables realtime streaming.
+  local cmd_verbose="${cmd/claude -p/claude -p --verbose --output-format stream-json}"
   cat > "$inner_path" << INNER
 #!/bin/bash -l
 export PATH="/opt/homebrew/bin:\$PATH"
@@ -2309,8 +2309,8 @@ _loop_test() {
     "$log" "$active_start" "$active_end" "$terminal_pref"
 
   info "Starting smoke test (real claude, trivial prompt)...  正在运行 smoke 测试（真实 claude）..."
-  info "Watch for: tmux session + terminal popup + --verbose streaming output"
-  info "观察：tmux 会话 + 终端弹窗 + --verbose 流式输出"
+  info "Watch for: tmux session + terminal popup + stream-json events flowing"
+  info "观察：tmux 会话 + 终端弹窗 + stream-json 事件流"
 
   local start_time; start_time=$(date +%s)
   ROLL_LOOP_FORCE=1 bash "$test_runner"

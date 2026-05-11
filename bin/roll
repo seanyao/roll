@@ -1856,6 +1856,14 @@ _write_loop_runner_script() {
 h=\$(printf '%d' "\$(date +%H)")
 if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
 LOCK="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
+if [ -f "\$LOCK" ]; then
+  prev_pid=\$(head -1 "\$LOCK" 2>/dev/null || echo "")
+  if [ -n "\$prev_pid" ] && kill -0 "\$prev_pid" 2>/dev/null; then
+    echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] loop already running (PID \$prev_pid), skipping" >> "${log_path}"
+    exit 0
+  fi
+  rm -f "\$LOCK"
+fi
 echo "\$\$" > "\$LOCK"
 trap 'rm -f "\$LOCK"' EXIT
 cd "${project_path}" && ${cmd} >> "${log_path}" 2>&1

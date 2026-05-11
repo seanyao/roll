@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **Fixed**: `roll loop attach` 不再黑屏，AI 干活过程实时可见
+
 ## v2026.511.7
 - **Added**: loop 跑起来时自动弹出一个终端窗口，看 AI 实时干活
 - **Added**: `roll loop mute` 关掉自动弹窗，`roll loop unmute` 恢复

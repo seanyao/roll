@@ -109,6 +109,7 @@
 | FIX-013 | roll init 工作流文件缺失 — 补全初始化所需模板文件 (PR #1 by @leoliu198998-ui) | ✅ Done |
 | FIX-014 | roll-build 技能 YAML 描述引号修复 (by @Sean via Kimi CLI) | ✅ Done |
 | FIX-015 | roll-release 缺少 GitHub Release 创建步骤 — 导致版本检查从不生效 | ✅ Done |
+| FIX-016 | 集成测试泄漏 launchd ghost 服务 — `cmd_loop.bats` 中 `roll loop on` 通过 `launchctl load -w` 注册到全局 gui domain，TEST_TMP 清理后注册仍保留，导致 60+ ghost 累积；teardown 需先 bootout 再删 TEST_TMP | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

@@ -929,3 +929,38 @@ US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"o
 
 **Dependencies:**
 - Depends on: US-AUTO-022（pause 期间如有 LOCK 残留需清理）
+
+---
+
+<a id="us-auto-027"></a>
+## US-AUTO-027 peer 调用 auto-attach — visibility for cross-agent negotiation 📋
+
+**Created**: 2026-05-11
+**Split from**: US-AUTO-026 (peer 当前没有 tmux 基建，单独成 story 实现)
+
+- As a developer with cross-agent peer review enabled
+- I want to see peer negotiations in real time the same way I see loop runs
+- So that the auto-attach visibility model is consistent across all autonomous activity
+
+**核心理念：**
+US-AUTO-026 把 loop 的可见性反转成 "default push, opt-out mute"，但 peer 没有 tmux 基建（`_peer_call` 当前直接调 CLI 内联），所以 mute 文件 + osascript 弹窗只对 loop 生效。这条 story 把 peer 也接入同一模型。
+
+**AC:**
+- [ ] `_peer_call` 启动 tmux session（命名 `roll-peer-<from>-<to>` 或类似）包裹 CLI 调用
+- [ ] 未 mute（`~/.shared/roll/mute` 不存在）时调用 osascript 背景弹窗 attach tmux session
+- [ ] CLI 输出捕获到 tmux 内 + log，与 loop 模式一致
+- [ ] peer review 多轮调用复用同一 session 或合理隔离（决策：一次 review 一个 session，3 轮在同一窗口内）
+- [ ] 测试：`_peer_call` 体内含 tmux 调用 + mute 检测
+- [ ] mute/unmute 复用 `roll loop mute/unmute`（一个开关控制所有自主活动，不分 loop/peer）
+
+**Non-goals:**
+- 不为每个 peer 调用单独开窗口（噪声过大）—— 一次 review 一个 session
+- 不改 peer 协议本身
+
+**Domain Model:**
+- Context: Autonomous Evolution / Peer Review
+- Aggregate: PeerNegotiator
+- Files touched: `bin/roll`（`_peer_call`、可能新增 `_peer_run_in_tmux` 助手）
+
+**Dependencies:**
+- Depends on: US-AUTO-026（mute 文件约定 + osascript 模式）

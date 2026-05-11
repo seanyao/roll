@@ -517,16 +517,14 @@ _sync_convention_for_tool() {
   fi
 }
 
+_sync_one_tool() {
+  local _entry="$1" _ai_dir="$2" _cfg="$3" _src="$4" force="$5"
+  _sync_convention_for_tool "$ROLL_GLOBAL/$_src" "$_ai_dir/$_cfg" "$force"
+}
+
 _sync_conventions() {
   local force="${1:-false}"
-
-  while IFS= read -r entry; do
-    local ai_dir config_file src_file
-    ai_dir="$(_ai_dir "$entry")"
-    config_file="$(_ai_config "$entry")"
-    src_file="$(_ai_src "$entry")"
-    _sync_convention_for_tool "$ROLL_GLOBAL/$src_file" "$ai_dir/$config_file" "$force"
-  done < <(_get_ai_tools)
+  _for_each_ai_tool _sync_one_tool "$force"
 }
 
 # ─── Internal: sync skills (pull + link) ──────────────────────────────────────

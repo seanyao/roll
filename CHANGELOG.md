@@ -1,5 +1,9 @@
 # Changelog
 
+## v2026.511.5
+- **Fixed**: launchd plist 自动 reload — plist 内容变更且服务已加载时自动 unload + reload，升级 roll 后 loop 服务立即生效，无需手动重启
+- **Improved**: roll loop status/monitor 三态展示 — 区分 ● 运行中 / ⚠ 已安装未加载 / ○ 未安装，并给出对应的自愈操作提示
+
 ## v2026.511.4
 - **Fixed**: roll init 自动重建 launchd runner scripts — 升级 roll 后直接跑 `roll init` 即可迁移到独立 runner，无需手动执行 roll setup 或 roll loop on
 

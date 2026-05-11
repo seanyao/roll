@@ -85,6 +85,20 @@ roll_init() {
   [[ "$output" == *"Initialized"* ]]
 }
 
+@test "init: summary box includes BACKLOG.md on fresh project" {
+  run roll_init
+  [ "$status" -eq 0 ]
+  # The summary box line looks like: "│  + created     BACKLOG.md"
+  [[ "$output" == *"created"*"BACKLOG.md"* ]]
+}
+
+@test "init: summary box includes docs/features on fresh project" {
+  run roll_init
+  [ "$status" -eq 0 ]
+  # The summary box line looks like: "│  + created     docs/features/"
+  [[ "$output" == *"created"*"docs/features"* ]]
+}
+
 # ─── Project-type-aware AGENTS.md merge ──────────────────────────────────────
 
 @test "init: skips Frontend Default Stack for cli project" {

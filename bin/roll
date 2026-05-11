@@ -1041,7 +1041,7 @@ scan_project_type_from_files() {
 # ─── Helper: write starter BACKLOG.md (no-op if exists) ──────────────────────
 _write_backlog() {
   if [[ -f "$1" ]]; then
-    _WK_MERGE_SUMMARY+=("unchanged|BACKLOG.md")
+    _ROLL_MERGE_SUMMARY+=("unchanged|BACKLOG.md")
     return
   fi
   cat > "$1" << 'EOF'
@@ -1056,18 +1056,18 @@ _write_backlog() {
 |----|---------|--------|
 EOF
   ok "Created: BACKLOG.md"
-  _WK_MERGE_SUMMARY+=("created|BACKLOG.md")
+  _ROLL_MERGE_SUMMARY+=("created|BACKLOG.md")
 }
 
 _ensure_features_dir() {
   if [[ -d "$1" ]]; then
-    _WK_MERGE_SUMMARY+=("unchanged|docs/features/")
+    _ROLL_MERGE_SUMMARY+=("unchanged|docs/features/")
     return
   fi
 
   mkdir -p "$1"
   ok "Created: docs/features/"
-  _WK_MERGE_SUMMARY+=("created|docs/features/")
+  _ROLL_MERGE_SUMMARY+=("created|docs/features/")
 }
 
 # ─── Helper: write starter .gitignore (no-op if exists) ──────────────────────

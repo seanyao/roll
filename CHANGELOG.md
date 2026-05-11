@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+- **Added**: BACKLOG 支持 block / defer / unblock 状态管理 — 标记卡住的任务不再占队列
+- **Fixed**: 自动弹窗现在能识别 Ghostty 和 iTerm2，不再强制弹出 Terminal.app
+- **Fixed**: loop 检测到上一轮还在跑时自动跳过，不重复启动
+
 ## v2026.512.1
 - **Added**: `roll loop pause` / `roll loop resume` — 想自己上手时一键暂停 loop，做完再恢复
 - **Added**: `roll status` 新增所有项目的 loop 状态一览 — 调度时间、待办数、是否在跑

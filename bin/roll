@@ -1964,7 +1964,7 @@ _write_loop_runner_script() {
 export PATH="/opt/homebrew/bin:\$PATH"
 FMT="${fmt_script}"
 if [ -f "\$FMT" ]; then
-  cd "${project_path}" && ${cmd_verbose} | python3 "\$FMT"
+  ( cd "${project_path}" && ${cmd_verbose} ) | python3 "\$FMT"
 else
   cd "${project_path}" && ${cmd_verbose}
 fi

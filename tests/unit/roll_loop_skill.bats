@@ -24,3 +24,16 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   # Orphan recovery must reference both 🔨 status and state.yaml cross-check
   grep -qE 'orphan.*🔨|🔨.*orphan' "$SKILL_FILE"
 }
+
+@test "roll-loop SKILL.md: runs.jsonl schema is strictly defined (FIX-018)" {
+  # Strict schema warning must be present
+  grep -qF 'Strict schema contract' "$SKILL_FILE"
+  # status enum locked, synonyms forbidden
+  grep -qF 'No synonyms' "$SKILL_FILE"
+  # ts must be UTC Z (not local timezone)
+  grep -qE 'UTC.*Z|Z suffix' "$SKILL_FILE"
+  # alerts must be array of strings (not number)
+  grep -qE 'alerts.*array|Always array, never number' "$SKILL_FILE"
+  # project must be slug (not full path)
+  grep -qE 'project.*slug|slug.*NOT the absolute path' "$SKILL_FILE"
+}

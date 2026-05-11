@@ -154,23 +154,52 @@ last_run_outcome: success
 ```
 
 Then append a JSONL record to `~/.shared/roll/loop/runs.jsonl` for per-iteration
-visibility (one line per cycle, append-only — never delete or rewrite earlier lines):
+visibility (one line per cycle, append-only — never delete or rewrite earlier lines).
+
+**⚠️ Strict schema contract — do NOT deviate.** Every field has exactly one
+canonical form. Synonyms like `"success"`, `"noop"`, `"completed"` are forbidden
+for `status`. Numbers and arrays cannot be interchanged. UTC `Z` suffix only,
+no timezone offsets.
+
+**Canonical record (copy this exact shape, fill in real values):**
+
+```json
+{"ts":"2026-05-11T11:46:43Z","project":"roll-d9dfa0","run_id":"loop-20260511-1911","status":"built","built":["US-AUTO-024","US-AUTO-025"],"skipped":[],"alerts":[],"tcr_count":5,"duration_sec":2080}
+```
+
+**Field contract — types are enforced**:
+
+| Field | Type | Format / Enum |
+|---|---|---|
+| `ts` | string | ISO 8601 **UTC** with `Z` suffix. Get via `date -u +%Y-%m-%dT%H:%M:%SZ`. Never use `+08:00` or other offsets. |
+| `project` | string | Project **slug** only (e.g. `roll-d9dfa0`), NOT the absolute path. Derive from `basename` of plist label or `_project_slug` output. |
+| `run_id` | string | Matches `state.yaml` `run_id` exactly. Format: `loop-YYYYMMDD-HHMM`. |
+| `status` | enum | Exactly one of: `built` (≥1 story shipped), `idle` (no Todo items found), `failed` (paused/error). **No synonyms.** |
+| `built` | array&lt;string&gt; | Story ids completed this cycle. `[]` when none. **Always array, never null/number.** |
+| `skipped` | array&lt;string&gt; | Story ids skipped because they were `🔨 In Progress`. `[]` when none. **Always array.** |
+| `alerts` | array&lt;string&gt; | Newly raised ALERT identifiers/tags this cycle. `[]` when none. **Always array, never number.** |
+| `tcr_count` | integer | Total `tcr:` prefix commits made this cycle. `0` when none. |
+| `duration_sec` | integer | Seconds from cycle start to completion. Integer only, no decimals. |
+
+Optional field, only when `status == "failed"`:
+- `reason` (string): short human-readable explanation.
+
+**Write recipe:**
 
 ```bash
-ts=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
-project=$(pwd -P)
-# duration_sec = now - cycle_start_epoch (track at Step 1)
+ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+project=$(basename "$(pwd)" | sed 's/.*-//')  # or use _project_slug if available
+# duration_sec = cycle_end_epoch - cycle_start_epoch (track at Step 1)
 # tcr_count = git log --oneline --since="<cycle_start>" | grep -c '^[a-f0-9]* tcr:'
-# built/skipped are arrays of story ids (use [] when empty)
 
 jq -nc \
   --arg ts "$ts" \
   --arg project "$project" \
-  --arg run_id "<run_id>" \
-  --arg status "<built|idle|failed>" \
+  --arg run_id "$run_id" \
+  --arg status "built" \
   --argjson built '["US-AUTO-024"]' \
   --argjson skipped '[]' \
-  --argjson alerts 0 \
+  --argjson alerts '[]' \
   --argjson tcr_count 14 \
   --argjson duration_sec 1680 \
   '{ts:$ts, project:$project, run_id:$run_id, status:$status,
@@ -178,18 +207,6 @@ jq -nc \
     tcr_count:$tcr_count, duration_sec:$duration_sec}' \
   >> ~/.shared/roll/loop/runs.jsonl
 ```
-
-**Field contract** (`ts, project, run_id, status, built, skipped, alerts, tcr_count, duration_sec`):
-- `ts`: ISO timestamp at cycle completion
-- `project`: absolute project path (`pwd -P`)
-- `run_id`: matches `state.yaml` `run_id`
-- `status`: `built` when ≥1 story completed, `idle` when no Todo items found, `failed` when paused/error
-- `built`: array of story ids completed this cycle (e.g. `["US-AUTO-017","FIX-016"]`)
-- `skipped`: array of story ids skipped because they were 🔨 In Progress
-- `alerts`: count of new ALERTs written this cycle
-- `tcr_count`: total `tcr:` prefix commits made this cycle
-- `duration_sec`: integer seconds from cycle start to completion
-- On `failed` add a `reason` field with a short human-readable string
 
 The companion read-side is `roll loop runs [N] [--all]` — shows the most recent
 N records (default 10) for the current project, or across all projects with `--all`.

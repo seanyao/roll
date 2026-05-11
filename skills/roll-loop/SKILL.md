@@ -276,6 +276,19 @@ roll loop status  # show current state
 roll loop now     # execute one cycle immediately
 ```
 
+### Live attach (transparency)
+
+When `tmux` is installed (recommended), each loop iteration runs inside a
+detached tmux session named `roll-loop-<slug>`. Watch it work in real time:
+
+```bash
+roll loop attach  # exec tmux attach -t roll-loop-<slug>
+```
+
+Press `Ctrl-B D` to detach — the loop continues running uninterrupted. If
+tmux is not installed, the runner falls back to headless execution and
+`attach` reports that no session exists.
+
 ## Integration Map
 
 ```

@@ -45,3 +45,28 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-.dream/SKILL.md"
   grep -qF '扫描项' "$SKILL_FILE"
   grep -qF '发现' "$SKILL_FILE"
 }
+
+# US-AUTO-018: explicit commit step in Output section
+@test "roll-.dream SKILL.md: Output section has Commit subsection" {
+  grep -qE '^### Commit' "$SKILL_FILE"
+}
+
+@test "roll-.dream SKILL.md: stages BACKLOG and dream log in same git add" {
+  grep -qF 'git add BACKLOG.md docs/dream/YYYY-MM-DD.md' "$SKILL_FILE"
+}
+
+@test "roll-.dream SKILL.md: commit message for findings — chore: dream scan + N REFACTOR entries" {
+  grep -qF 'chore: dream scan YYYY-MM-DD — {N} REFACTOR entries' "$SKILL_FILE"
+}
+
+@test "roll-.dream SKILL.md: commit message for no findings — chore: dream scan + no findings" {
+  grep -qF 'chore: dream scan YYYY-MM-DD — no findings' "$SKILL_FILE"
+}
+
+@test "roll-.dream SKILL.md: rule — same-commit invariant for BACKLOG + dream log" {
+  grep -qE '同一个 commit|同一 commit|single commit' "$SKILL_FILE"
+}
+
+@test "roll-.dream SKILL.md: rule — do not commit when write fails" {
+  grep -qE '写文件失败时.*不.*commit|写入失败.*不.*commit' "$SKILL_FILE"
+}

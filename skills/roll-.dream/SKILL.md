@@ -140,6 +140,22 @@ without context switching:
 {列表 或 "无。"}
 ```
 
+### Commit
+
+扫描完成后立即提交，把 dream 发现纳入 git 历史，便于晨报追溯：
+
+```bash
+git add BACKLOG.md docs/dream/YYYY-MM-DD.md
+# 有 REFACTOR 条目时：
+git commit -m "chore: dream scan YYYY-MM-DD — {N} REFACTOR entries"
+# 无发现时：
+git commit -m "chore: dream scan YYYY-MM-DD — no findings"
+```
+
+- BACKLOG.md 和 dream 日志必须在**同一个 commit** 里入库，避免出现"REFACTOR 已加但日志找不到"或反过来的撕裂状态
+- 写文件失败时不要执行 commit；保持工作区干净，由调度器负责重试
+- 仅 `BACKLOG.md` 和 `docs/dream/YYYY-MM-DD.md` 入 commit，不要顺带带入其他无关变更
+
 ## Scheduler Configuration
 
 roll-.dream runs **locally** — it reads the local codebase directly.

@@ -2662,11 +2662,12 @@ _loop_runs() {
   fi
 
   local project_path; project_path=$(pwd -P)
+  local project_slug; project_slug=$(_project_slug "$project_path")
   local filtered
   if $all_flag; then
     filtered=$(cat "$_LOOP_RUNS")
   else
-    filtered=$(jq -c --arg p "$project_path" 'select(.project == $p)' "$_LOOP_RUNS")
+    filtered=$(jq -c --arg p "$project_slug" 'select(.project == $p)' "$_LOOP_RUNS")
   fi
 
   if [[ -z "$filtered" ]]; then

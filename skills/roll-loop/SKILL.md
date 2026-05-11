@@ -196,7 +196,7 @@ Optional field, only when `status == "failed"`:
 
 ```bash
 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-project=$(basename "$(pwd)" | sed 's/.*-//')  # or use _project_slug if available
+project=$(_project_slug "$(pwd -P)")  # must match roll loop runs filter
 # duration_sec = cycle_end_epoch - cycle_start_epoch (track at Step 1)
 # tcr_count = git log --oneline --since="<cycle_start>" | grep -c '^[a-f0-9]* tcr:'
 

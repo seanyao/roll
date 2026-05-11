@@ -47,7 +47,7 @@ EOF
 # ─── Project filtering ────────────────────────────────────────────────────────
 
 @test "_loop_runs: shows entries matching current project" {
-  local proj; proj=$(pwd -P)
+  local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
 {"ts":"2026-05-11T19:11:00+08:00","project":"${proj}","run_id":"loop-A","status":"built","built":["US-AUTO-024"],"skipped":[],"alerts":0,"tcr_count":3,"duration_sec":1680}
 EOF
@@ -59,9 +59,9 @@ EOF
 }
 
 @test "_loop_runs: filters out entries from other projects (default)" {
-  local proj; proj=$(pwd -P)
+  local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
-{"ts":"2026-05-11T19:11:00+08:00","project":"/elsewhere","run_id":"loop-X","status":"built","built":["US-OTHER-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":120}
+{"ts":"2026-05-11T19:11:00+08:00","project":"other-aaaaaa","run_id":"loop-X","status":"built","built":["US-OTHER-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":120}
 {"ts":"2026-05-11T19:12:00+08:00","project":"${proj}","run_id":"loop-Y","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":10}
 EOF
   run _loop_runs
@@ -84,7 +84,7 @@ EOF
 # ─── Ordering & limit ─────────────────────────────────────────────────────────
 
 @test "_loop_runs: lists entries in reverse chronological order (newest first)" {
-  local proj; proj=$(pwd -P)
+  local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
 {"ts":"2026-05-11T10:00:00+08:00","project":"${proj}","run_id":"loop-OLD","status":"built","built":["US-X-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":60}
 {"ts":"2026-05-11T19:00:00+08:00","project":"${proj}","run_id":"loop-NEW","status":"built","built":["US-X-002"],"skipped":[],"alerts":0,"tcr_count":2,"duration_sec":120}
@@ -99,7 +99,7 @@ EOF
 }
 
 @test "_loop_runs N: respects N argument (default 10)" {
-  local proj; proj=$(pwd -P)
+  local proj; proj=$(_project_slug "$(pwd -P)")
   : > "$_LOOP_RUNS"
   for i in $(seq 1 5); do
     printf '{"ts":"2026-05-11T19:%02d:00+08:00","project":"%s","run_id":"loop-%d","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}\n' \
@@ -114,7 +114,7 @@ EOF
 # ─── Status formatting ────────────────────────────────────────────────────────
 
 @test "_loop_runs: built status shows ✅, story ids, count, tcr, duration" {
-  local proj; proj=$(pwd -P)
+  local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
 {"ts":"2026-05-11T19:11:00+08:00","project":"${proj}","run_id":"loop-A","status":"built","built":["US-AUTO-024","US-AUTO-025"],"skipped":[],"alerts":0,"tcr_count":14,"duration_sec":1680}
 EOF
@@ -129,7 +129,7 @@ EOF
 }
 
 @test "_loop_runs: idle status shows ○ and 'no Todo items'" {
-  local proj; proj=$(pwd -P)
+  local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
 {"ts":"2026-05-11T18:11:00+08:00","project":"${proj}","run_id":"loop-A","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}
 EOF
@@ -140,7 +140,7 @@ EOF
 }
 
 @test "_loop_runs: failed status shows ✗ and reason" {
-  local proj; proj=$(pwd -P)
+  local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
 {"ts":"2026-05-11T17:11:00+08:00","project":"${proj}","run_id":"loop-A","status":"failed","built":[],"skipped":[],"alerts":1,"tcr_count":0,"duration_sec":30,"reason":"claude API error"}
 EOF
@@ -161,4 +161,18 @@ EOF
   grep -qE 'ts.*project.*run_id|run_id.*status.*built|built.*tcr_count' "$SKILL_FILE"
   grep -qF 'tcr_count' "$SKILL_FILE"
   grep -qF 'duration_sec' "$SKILL_FILE"
+}
+
+@test "SKILL.md write recipe uses _project_slug (matches _loop_runs filter)" {
+  grep -qE '_project_slug' "$SKILL_FILE"
+}
+
+@test "write-read contract: slug written by skill recipe is readable by _loop_runs" {
+  local proj; proj=$(_project_slug "$(pwd -P)")
+  cat > "$_LOOP_RUNS" <<EOF
+{"ts":"2026-05-11T19:00:00Z","project":"${proj}","run_id":"loop-contract","status":"built","built":["US-CONTRACT-001"],"skipped":[],"alerts":[],"tcr_count":1,"duration_sec":60}
+EOF
+  run _loop_runs
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"US-CONTRACT-001"* ]]
 }

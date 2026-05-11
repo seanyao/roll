@@ -1940,7 +1940,7 @@ if command -v tmux >/dev/null 2>&1; then
   if [ ! -f "\$HOME/.shared/roll/mute" ] && [ "\$(uname)" = "Darwin" ]; then
     case "${terminal_pref}" in
       ghostty|Ghostty)
-        (/Applications/Ghostty.app/Contents/MacOS/ghostty +new-window --command="tmux attach -t \$SESSION" >/dev/null 2>&1) &
+        (open -na Ghostty.app --args -e tmux attach -t \$SESSION >/dev/null 2>&1) &
         ;;
       iTerm2|iTerm)
         (osascript \\
@@ -2248,7 +2248,7 @@ _loop_test() {
 
   info "Generating test runner...  正在生成测试启动脚本..."
   _write_loop_runner_script "$test_runner" "$project_path" \
-    'claude -p "Reply with a single word: hello"' \
+    'claude -p "Reply with a single word: hello"; sleep 10' \
     "$log" "$active_start" "$active_end" "$terminal_pref"
 
   info "Starting smoke test (real claude, trivial prompt)...  正在运行 smoke 测试（真实 claude）..."

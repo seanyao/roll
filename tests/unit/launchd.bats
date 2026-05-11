@@ -127,7 +127,7 @@ setup() {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local script="${tmp_dir}/run.sh"
   _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18" "ghostty"
-  grep -qF 'ghostty +new-window' "$script"
+  grep -qF 'open -na Ghostty.app --args -e tmux attach' "$script"
   rm -rf "$tmp_dir"
 }
 

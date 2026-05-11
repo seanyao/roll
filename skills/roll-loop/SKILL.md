@@ -91,7 +91,14 @@ Together these mean: only one loop runs at a time per project (LOCK), and within
 
 ### Step 3 — Route and Execute
 
-For each item:
+For each item, **before invoking the executor skill**, mark the story 🔨 In Progress in BACKLOG.md so brief and peer agents can see it's being worked on:
+
+1. Edit BACKLOG.md: change the row's Status column from `📋 Todo` to `🔨 In Progress`.
+2. Commit: `git commit -am "chore: mark US-XXX in progress"` (use the actual story id).
+
+This commit is what makes the work visible — without it, tcr micro-commits during execution are invisible to `roll-brief`.
+
+Then invoke the executor:
 
 ```
 Item type         → Skill invoked
@@ -101,7 +108,9 @@ FIX-XXX           → Skill("roll-fix", "FIX-XXX")
 REFACTOR-XXX      → Skill("roll-build", "REFACTOR-XXX")
 ```
 
-Before invoking, write current item to state file:
+The executor will update the row to `✅ Done` on success (it transitions from `🔨 In Progress` → `✅ Done`, same Edit logic as from `📋 Todo`).
+
+Before invoking, also write current item to state file:
 
 ```yaml
 # ~/.shared/roll/loop/state.yaml

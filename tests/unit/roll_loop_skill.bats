@@ -12,3 +12,8 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   grep -qF 'Concurrency Safety' "$SKILL_FILE"
   grep -qF '.LOCK-' "$SKILL_FILE"
 }
+
+@test "roll-loop SKILL.md: Step 3 marks story 🔨 In Progress before invoking executor" {
+  grep -qF '🔨 In Progress' "$SKILL_FILE"
+  grep -qE 'chore: mark.*in.progress' "$SKILL_FILE"
+}

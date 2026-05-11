@@ -125,8 +125,13 @@
 | [US-AUTO-009](docs/features/autonomous-evolution.md#us-auto-009) | launchd 调度迁移 — roll setup 安装 plists（默认关闭，幂等）；roll loop on/off/status/monitor 全面切换到 launchd，废弃 crontab | ✅ Done |
 | [US-AUTO-010](docs/features/autonomous-evolution.md#us-auto-010) | roll-loop TCR 硬校验 — 故事完成后检查 tcr: 微提交数量，为 0 时将故事回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏 | ✅ Done |
 | [US-AUTO-011](docs/features/autonomous-evolution.md#us-auto-011) | roll loop monitor 增强 — 显示三服务 launchd 状态（loop/dream/brief）+ 实时 log tail | ✅ Done |
-| [US-AUTO-012](docs/features/autonomous-evolution.md#us-auto-012) | loop 调度时间和 agent 移入 ~/.roll/config.yaml — 默认错开整点（:05/:10/:15），可配 hour/minute，免改源码 | 📋 Todo |
+| [US-AUTO-012](docs/features/autonomous-evolution.md#us-auto-012) | loop 调度时间和 agent 移入 ~/.roll/config.yaml — 默认错开整点（:05/:10/:15），可配 hour/minute，免改源码 | ✅ Done |
 | [US-AUTO-013](docs/features/autonomous-evolution.md#us-auto-013) | roll-propose skill — 人主动发起，从产品视角生成 1-3 条 proposed US 写入 PROPOSALS.md 等待审批 | 📋 Todo |
+| [US-AUTO-014](docs/features/autonomous-evolution.md#us-auto-014) | `_install_launchd_plists` 变更自动 reload — plist 内容变化且服务已加载时自动 unload + reload，消除静默失效 | 📋 Todo |
+| [US-AUTO-015](docs/features/autonomous-evolution.md#us-auto-015) | `roll loop status/monitor` 三态展示 — 区分 ● loaded / ⚠ installed-not-loaded / ○ not-installed，含自愈提示 | 📋 Todo |
+| [US-AUTO-016](docs/features/autonomous-evolution.md#us-auto-016) | loop 执行 story 前标记 🔨 In Progress — brief 可感知进行中状态，tcr 微提交不再对 brief 不可见 | 📋 Todo |
+| [US-AUTO-017](docs/features/autonomous-evolution.md#us-auto-017) | roll-.dream 日志改为中文输出 — 与 roll-brief 语言风格对齐 | 📋 Todo |
+| [US-AUTO-018](docs/features/autonomous-evolution.md#us-auto-018) | roll-brief 和 roll-.dream 生成文档后自动 git commit — brief 显式化 commit；dream 标准化现有隐式行为 | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |

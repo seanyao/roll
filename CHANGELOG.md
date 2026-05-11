@@ -1,5 +1,10 @@
 # Changelog
 
+## v2026.511.6
+- **Added**: Loop 并发安全 — runner script 启动时写入 per-project LOCK 文件并检测重入；活跃 PID 已存在则跳过本次，残留死 LOCK 自动清理；正常/异常退出均通过 trap 清掉 LOCK。彻底防止两个 loop 实例同时启动造成的 BACKLOG/git 冲突。
+- **Added**: roll-loop SKILL 显式声明 skip-🔨 In Progress 语义 — claude 扫 BACKLOG 时跳过已被人工或 peer agent 标记的执行中条目，为人机协同和多 agent 协作奠定基础。
+- **Fixed**: 5 个 pre-existing 测试失败 — `run_roll` helper 切换到 TEST_TMP 作为 cwd 避免 slug 冲突；loop status 测试匹配三态显示新文案；dashboard 测试匹配 `_launchd_svc_state` + array 派生 schedule 的新结构。
+
 ## v2026.511.5
 - **Fixed**: launchd plist 自动 reload — plist 内容变更且服务已加载时自动 unload + reload，升级 roll 后 loop 服务立即生效，无需手动重启
 - **Improved**: roll loop status/monitor 三态展示 — 区分 ● 运行中 / ⚠ 已安装未加载 / ○ 未安装，并给出对应的自愈操作提示

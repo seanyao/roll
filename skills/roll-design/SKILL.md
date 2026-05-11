@@ -50,6 +50,12 @@ $roll-design --from-plan docs/features/auth-plan.md
 
 # Directly create a Story (auto-detected as User Story → Slice DDD)
 $roll-design "user login feature"
+
+# Non-interactive: read structured input file, skip Clarify/Discuss, write BACKLOG
+$roll-design --from-file docs/requirements/auth-req.md
+
+# Promote IDEA to Story: read BACKLOG IDEA-NNN, produce US-XXX, annotate IDEA
+$roll-design --from-idea IDEA-009
 ```
 
 ## DDD Depth Scale

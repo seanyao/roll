@@ -1,6 +1,9 @@
 # Changelog
 
-## v2026.511.10
+## v2026.511.11
+- **Added**: loop 默认 auto-attach 弹窗 — 每次 loop 触发时，runner script 自动通过 osascript 开一个背景 Terminal 窗口 `tmux attach -t roll-loop-<slug>`，看 claude 实时打字干活；弹窗用 `delay 0.3` + 还原前一个 frontmost app 做到不抢焦点，tmux session 结束窗口保留供回看，关掉窗口 loop 仍在 tmux 里继续跑。
+- **Added**: `roll loop mute` / `roll loop unmute` 一键开关 — 不想看弹窗时 `roll loop mute` 创建 `~/.shared/roll/mute` 标记文件即刻静音，`unmute` 删掉它恢复；mute 状态对所有项目生效（一个开关治整机），`roll loop status` 新增 `Auto-attach  live | muted` 一行实时显示。
+- **Added**: tmux 升级为 `roll setup` 必装依赖 — 新增 `_ensure_tmux` helper：macOS 自动 `brew install tmux`（无 brew 给手动命令），Linux/其他系统打印对应包管理器安装指引；任何失败路径都返回 0，不阻塞 setup 主流程。
 - **Fixed**: launchd runner 缺 brew PATH 导致 hook 子进程报 `node: command not found` — launchd 默认 PATH 不含 `/opt/homebrew/bin`，claude 通过 `sh -c` 调 SessionEnd hook 时找不到 node；inner runner 模板显式 `export PATH="/opt/homebrew/bin:$PATH"` 让整条 fork 链都能拿到 brew 工具。
 - **Fixed**: runs.jsonl schema 漂移 — 早期 claude 在 status/ts/alerts/project 字段自由发挥（`built` vs `success` vs `noop`、UTC vs `+08:00`、number vs array、全路径 vs slug）。SKILL Step 5 改为"严格契约"：ts 强制 UTC Z 后缀、project 用 slug、alerts/built/skipped 永远是数组、status 限定 `built/idle/failed` 三个 enum 无同义词；contract test 锁死关键不变量留在 prompt 里。
 

@@ -59,3 +59,23 @@ GUIDE_DIR="${BATS_TEST_DIRNAME}/../../docs/guide/en"
 @test "peer.md explains roll peer command" {
   grep -qF 'roll peer' "${GUIDE_DIR}/peer.md"
 }
+
+# ─── E2E golden path: cross-references and doc completeness ──────────────────
+
+@test "e2e: overview.md links to loop.md, dream.md, peer.md" {
+  grep -qF 'loop.md' "${GUIDE_DIR}/overview.md"
+  grep -qF 'dream.md' "${GUIDE_DIR}/overview.md"
+  grep -qF 'peer.md' "${GUIDE_DIR}/overview.md"
+}
+
+@test "e2e: loop.md covers tmux session naming roll-loop-" {
+  grep -qF 'roll-loop-' "${GUIDE_DIR}/loop.md"
+}
+
+@test "e2e: dream.md mentions docs/dream/ output directory" {
+  grep -qF 'docs/dream/' "${GUIDE_DIR}/dream.md"
+}
+
+@test "e2e: peer.md covers mute shared with loop" {
+  grep -qiE 'mute|~/.shared/roll/mute' "${GUIDE_DIR}/peer.md"
+}

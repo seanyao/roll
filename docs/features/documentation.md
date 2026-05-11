@@ -66,8 +66,9 @@
 ---
 
 <a id="us-doc-003"></a>
-## US-DOC-003 建立 docs/domain/ + DDD context-map + autonomous-operation 领域模型 📋
+## US-DOC-003 建立 docs/domain/ + DDD context-map + autonomous-operation 领域模型 ✅
 
+**Completed**: 2026-05-11
 **Created**: 2026-05-12
 
 - As an engineer or AI agent reading the codebase
@@ -75,13 +76,14 @@
 - So that I understand architectural boundaries before making changes
 
 **AC:**
-- [ ] `docs/domain/context-map.md` — 5 个 Bounded Context（Convention Management / Skill Delivery / Autonomous Operation / Observability / Distribution）定义 + 关系图（U/D / ACL / PL 标注）
-- [ ] `docs/domain/autonomous-operation.md` — Loop/Dream/Peer 的 Aggregate 模型、统一语言词汇表、Domain Events、跨 context 影响
-- [ ] 两个文件英文撰写，内容从代码库反向提取（bin/roll + SKILL.md）
+- [x] `docs/domain/context-map.md` — 5 个 Bounded Context（Convention Management / Skill Delivery / Autonomous Operation / Observability / Distribution）定义 + 关系图（U/D / ACL / PL 标注）
+- [x] `docs/domain/autonomous-operation.md` — Loop/Dream/Peer 的 Aggregate 模型、统一语言词汇表、Domain Events、跨 context 影响
+- [x] 两个文件英文撰写，内容从代码库反向提取（bin/roll + SKILL.md）
 
 **Files:**
 - `docs/domain/context-map.md` (new)
 - `docs/domain/autonomous-operation.md` (new)
+- `tests/unit/roll_doc_domain.bats` (new, 16 tests)
 
 **Dependencies:**
 - Independent (can run in parallel with US-DOC-001)

@@ -1751,6 +1751,7 @@ _LOOP_TAG="# roll-loop"
 _SHARED_ROOT="${HOME}/.shared/roll"
 _LOOP_STATE="${HOME}/.shared/roll/loop/state.yaml"
 _LOOP_ALERT="${HOME}/.shared/roll/loop/ALERT.md"
+_LOOP_RUNS="${HOME}/.shared/roll/loop/runs.jsonl"
 _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
 
 # Returns a filesystem-safe slug combining the project basename and a 6-char
@@ -1978,9 +1979,10 @@ cmd_loop() {
     now)     _loop_now ;;
     status)  _loop_status ;;
     monitor) _loop_monitor "${1:-3}" ;;
+    runs)    _loop_runs "$@" ;;
     resume)  _loop_resume ;;
     reset)   _loop_reset ;;
-    *) err "Usage: roll loop <on|off|now|status|monitor|resume|reset>"; exit 1 ;;
+    *) err "Usage: roll loop <on|off|now|status|monitor|runs|resume|reset>"; exit 1 ;;
   esac
 }
 
@@ -2141,6 +2143,102 @@ _loop_reset() {
   else
     info "No loop state to clear  无 loop 状态可清除"
   fi
+}
+
+# Pretty-print a duration in seconds as "Xs" / "Ym" / "Yh Zm".
+_loop_runs_dur() {
+  local s="${1:-0}"
+  if [[ "$s" -lt 60 ]]; then printf "%ds" "$s"
+  elif [[ "$s" -lt 3600 ]]; then printf "%dm" "$((s / 60))"
+  else printf "%dh %dm" "$((s / 3600))" "$(((s % 3600) / 60))"
+  fi
+}
+
+# Format a single JSONL run record for display.
+_loop_runs_format_line() {
+  local line="$1" show_project="$2"
+  command -v jq >/dev/null 2>&1 || { echo "  (jq required)"; return 0; }
+
+  local ts status project tcr duration alerts run_id reason built_count built_csv skipped_count
+  ts=$(jq -r '.ts // ""' <<<"$line")
+  status=$(jq -r '.status // ""' <<<"$line")
+  project=$(jq -r '.project // ""' <<<"$line")
+  tcr=$(jq -r '.tcr_count // 0' <<<"$line")
+  duration=$(jq -r '.duration_sec // 0' <<<"$line")
+  alerts=$(jq -r '.alerts // 0' <<<"$line")
+  run_id=$(jq -r '.run_id // ""' <<<"$line")
+  reason=$(jq -r '.reason // ""' <<<"$line")
+  built_count=$(jq -r '(.built // []) | length' <<<"$line")
+  built_csv=$(jq -r '(.built // []) | join(", ")' <<<"$line")
+  skipped_count=$(jq -r '(.skipped // []) | length' <<<"$line")
+
+  local hhmm; hhmm=$(printf "%s" "$ts" | sed -E 's/.*T([0-9]{2}):([0-9]{2}).*/\1:\2/')
+  local prefix=""
+  if [[ "$show_project" == "true" ]]; then
+    prefix="[$(basename "$project")] "
+  fi
+
+  case "$status" in
+    built)
+      local skipped_note=""
+      [[ "$skipped_count" -gt 0 ]] && skipped_note=", ${skipped_count} skipped"
+      printf "  %s  %s✅ built %s  (%d items, %d tcr%s, %s)\n" \
+        "$hhmm" "$prefix" "$built_csv" "$built_count" "$tcr" "$skipped_note" "$(_loop_runs_dur "$duration")"
+      ;;
+    idle)
+      printf "  %s  %s○ idle — no Todo items\n" "$hhmm" "$prefix"
+      ;;
+    failed)
+      local msg="${reason:-unknown}"
+      printf "  %s  %s✗ FAILED — %s\n" "$hhmm" "$prefix" "$msg"
+      ;;
+    *)
+      printf "  %s  %s? %s\n" "$hhmm" "$prefix" "$status"
+      ;;
+  esac
+}
+
+# `roll loop runs [N] [--all]` — show recent loop iteration summaries.
+_loop_runs() {
+  local n=10 all_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all) all_flag=true; shift ;;
+      [0-9]*) n="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
+    echo "No loop runs yet  尚无 loop 运行记录"
+    return 0
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    err "jq required for 'roll loop runs'  需要 jq"
+    return 1
+  fi
+
+  local project_path; project_path=$(pwd -P)
+  local filtered
+  if $all_flag; then
+    filtered=$(cat "$_LOOP_RUNS")
+  else
+    filtered=$(jq -c --arg p "$project_path" 'select(.project == $p)' "$_LOOP_RUNS")
+  fi
+
+  if [[ -z "$filtered" ]]; then
+    echo "No loop runs for current project  当前项目尚无 loop 运行记录"
+    return 0
+  fi
+
+  local reversed; reversed=$(printf "%s\n" "$filtered" | awk '{a[NR]=$0} END{for(i=NR; i>=1; i--) print a[i]}')
+  local recent; recent=$(printf "%s\n" "$reversed" | head -n "$n")
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    _loop_runs_format_line "$line" "$all_flag"
+  done <<<"$recent"
 }
 
 # Count `tcr:` prefixed commits in the current git repo since started_at timestamp.

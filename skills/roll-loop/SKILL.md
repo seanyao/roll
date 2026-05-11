@@ -57,6 +57,14 @@ if [ -f "$STATE_FILE" ] && grep -q "status: interrupted" "$STATE_FILE"; then
 fi
 ```
 
+**Orphan 🔨 recovery** — clean up stories left in `🔨 In Progress` by a crashed previous run:
+
+1. Scan BACKLOG.md for all rows whose Status column contains `🔨 In Progress`.
+2. For each such story, check `state.yaml`:
+   - If `current_item` matches the story id AND `status: running` → this is the resume case (handled above), leave it.
+   - Otherwise → this is an **orphan 🔨** (the loop that marked it crashed before finishing). Revert the status back to `📋 Todo`, commit `chore: revert orphan 🔨 US-XXX to 📋`, and append a line to `~/.shared/roll/loop/ALERT.md` recording the orphan id and time so the next brief surfaces it.
+3. After orphan sweep, proceed to Step 2 (Scan BACKLOG) — the reverted stories will be picked up normally if they're top of the queue.
+
 ### Step 2 — Scan BACKLOG
 
 Read `BACKLOG.md`. Collect all rows where Status = `📋 Todo`, in order:

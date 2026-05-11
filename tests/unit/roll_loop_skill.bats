@@ -17,3 +17,10 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   grep -qF '🔨 In Progress' "$SKILL_FILE"
   grep -qE 'chore: mark.*in.progress' "$SKILL_FILE"
 }
+
+@test "roll-loop SKILL.md: Step 1 recovers orphan 🔨 entries on startup" {
+  grep -qF 'orphan' "$SKILL_FILE"
+  grep -qF 'ALERT' "$SKILL_FILE"
+  # Orphan recovery must reference both 🔨 status and state.yaml cross-check
+  grep -qE 'orphan.*🔨|🔨.*orphan' "$SKILL_FILE"
+}

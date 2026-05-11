@@ -509,16 +509,20 @@ For Fly mode: first append an index row under the appropriate Epic > Feature gro
 
 If the US section does not yet exist, create the full section (AC / Files / Dependencies).
 
+**Before committing, run `$roll-.changelog`** to stage CHANGELOG.md — then include
+it in the completion commit so no separate changelog commit is created.
+
 ```bash
-git add BACKLOG.md docs/features/
+# 1. Stage changelog (roll-.changelog stages CHANGELOG.md only, does not commit)
+$roll-.changelog
+
+# 2. Commit BACKLOG + feature doc + CHANGELOG.md together
+git add BACKLOG.md docs/features/ CHANGELOG.md
 git commit -m "docs: mark {US-ID} as completed"
 git push
 ```
 
 ### Phase 12: Report & Celebrate
-
-**Before reporting, run `$roll-.changelog`** to sync completed Story to CHANGELOG.md.
-This is mandatory — release notes depend on it.
 
 ```
 ✅ Pushed to GitHub: origin/main
@@ -530,7 +534,7 @@ This is mandatory — release notes depend on it.
 📊 TCR Stats: <success rate, revert count if any>
 📋 Review Gate: <self-review findings summary>
 📝 BACKLOG: <US-ID> marked ✅ Done
-📄 CHANGELOG: $roll-.changelog → updated
+📄 CHANGELOG: bundled into completion commit (Phase 11)
 
 🎉 Shipped.
 
@@ -604,7 +608,7 @@ Before creating any file or directory:
 - [ ] **Verification Gate passed** (fresh evidence for tests, build, deploy, no regression)
 - [ ] **BACKLOG.md index status updated** (📋 → ✅, REQUIRED)
 - [ ] **`docs/features/<feature>.md` US section updated** (Completed date + [x] ACs, REQUIRED)
-- [ ] **CHANGELOG.md updated** via `$roll-.changelog` (REQUIRED)
+- [ ] **CHANGELOG.md staged and bundled** into completion commit via `$roll-.changelog` in Phase 11 (REQUIRED)
 - [ ] Summary reported to user
 
 ---

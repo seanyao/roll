@@ -152,11 +152,20 @@ version numbers like `v2026.511.8`. Just write to `## Unreleased`.
 
 **Ordering**: Unreleased always at top. Below it, released versions in reverse chronological order.
 
-### 6. Commit Update
+### 6. Stage Update
+
+**Normal path (called from `$roll-build` or `$roll-fix`)**: stage only — the
+caller's completion commit will pick up CHANGELOG.md.
 
 ```bash
 git add CHANGELOG.md
-git commit -m "docs: update changelog for release $(date +%Y.%m.%d)"
+```
+
+**Standalone / manual path** (called outside a roll-build session): stage and commit.
+
+```bash
+git add CHANGELOG.md
+git commit -m "chore: sync changelog"
 git push
 ```
 

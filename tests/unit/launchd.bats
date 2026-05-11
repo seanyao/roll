@@ -123,6 +123,38 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
+@test "_write_loop_runner_script: terminal=ghostty embeds ghostty dispatch" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local script="${tmp_dir}/run.sh"
+  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18" "ghostty"
+  grep -qF 'ghostty +new-window' "$script"
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_loop_runner_script: terminal=iTerm2 embeds iTerm2 dispatch" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local script="${tmp_dir}/run.sh"
+  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18" "iTerm2"
+  grep -qF 'iTerm2' "$script"
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_loop_runner_script: terminal=Terminal uses osascript Terminal" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local script="${tmp_dir}/run.sh"
+  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18" "Terminal"
+  grep -qF 'tell application \"Terminal\"' "$script"
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_loop_runner_script: no terminal arg defaults to Terminal osascript" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local script="${tmp_dir}/run.sh"
+  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18"
+  grep -qF 'tell application \"Terminal\"' "$script"
+  rm -rf "$tmp_dir"
+}
+
 # ─── _config_read_int ─────────────────────────────────────────────────────────
 
 @test "_config_read_int: returns default when key absent" {

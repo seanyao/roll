@@ -1887,7 +1887,7 @@ _write_runner_script() {
 # Falls back to headless execution when tmux is not installed.
 _write_loop_runner_script() {
   local script_path="$1" project_path="$2" cmd="$3" log_path="$4"
-  local active_start="${5:-10}" active_end="${6:-18}"
+  local active_start="${5:-10}" active_end="${6:-18}" terminal_pref="${7:-Terminal}"
   mkdir -p "$(dirname "$script_path")"
 
   local inner_path="${script_path%.sh}-inner.sh"
@@ -1930,14 +1930,30 @@ if command -v tmux >/dev/null 2>&1; then
   # Auto-attach popup: when not muted, spawn a Terminal window attached to the
   # tmux session so the user can watch the loop work in real time. Best-effort
   # focus retention: capture the current frontmost app and re-activate after.
-  if [ ! -f "\$HOME/.shared/roll/mute" ] && [ "\$(uname)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
-    (osascript \\
-      -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
-      -e "tell application \"Terminal\" to do script \"tmux attach -t \$SESSION\"" \\
-      -e 'delay 0.3' \\
-      -e 'try' \\
-      -e 'tell application _prev to activate' \\
-      -e 'end try' >/dev/null 2>&1) &
+  if [ ! -f "\$HOME/.shared/roll/mute" ] && [ "\$(uname)" = "Darwin" ]; then
+    case "${terminal_pref}" in
+      ghostty|Ghostty)
+        (/Applications/Ghostty.app/Contents/MacOS/ghostty +new-window --command="tmux attach -t \$SESSION" >/dev/null 2>&1) &
+        ;;
+      iTerm2|iTerm)
+        (osascript \\
+          -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
+          -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t \$SESSION\"" \\
+          -e 'delay 0.3' \\
+          -e 'try' \\
+          -e 'tell application _prev to activate' \\
+          -e 'end try' >/dev/null 2>&1) &
+        ;;
+      *)
+        command -v osascript >/dev/null 2>&1 && (osascript \\
+          -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
+          -e "tell application \"Terminal\" to do script \"tmux attach -t \$SESSION\"" \\
+          -e 'delay 0.3' \\
+          -e 'try' \\
+          -e 'tell application _prev to activate' \\
+          -e 'end try' >/dev/null 2>&1) &
+        ;;
+    esac
   fi
   while tmux has-session -t "\$SESSION" 2>/dev/null; do sleep 5; done
 else

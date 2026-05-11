@@ -644,9 +644,10 @@ $roll-design 当前全程同步，有多个人类等待点（Clarify/Discuss/Con
 ---
 
 <a id="us-auto-022"></a>
-## US-AUTO-022 Loop 并发安全 — per-loop LOCK + skip-if-🔨 📋
+## US-AUTO-022 Loop 并发安全 — per-loop LOCK + skip-if-🔨 ✅
 
 **Created**: 2026-05-11
+**Completed**: 2026-05-11
 
 - As a developer running roll in autonomous mode
 - I want the loop to be safe against concurrent execution
@@ -655,26 +656,31 @@ $roll-design 当前全程同步，有多个人类等待点（Clarify/Discuss/Con
 **背景：**
 launchd 按时间触发 loop，如果上一次 loop 还在跑，新触发的实例需要感知并退出。同时 loop 在选 story 时需要跳过已被标记为 🔨 In Progress 的条目，支持人工介入和未来多 agent 协作场景。
 
+**实现细节：**
+LOCK 文件路径采用 per-project：`<runner-dir>/.LOCK-<slug>`（每项目独立，roll 和 APE-PR 的 loop 不互锁）。运行时由 runner script 通过 `$0` 自推导，无需额外参数。
+
 **AC:**
-- [ ] loop 启动时写入 `~/.shared/roll/loop/LOCK`（含 PID + 启动时间）
-- [ ] loop 启动时检查 LOCK：PID 存活 → 打日志"loop already running, skipping" → 退出 0
-- [ ] loop 启动时检查 LOCK：PID 已死（残留） → 清理 LOCK → 继续执行
-- [ ] loop 正常结束 / 异常退出时均删除 LOCK（trap ERR/EXIT）
-- [ ] loop 扫描 BACKLOG 选 story 时，跳过状态为 🔨 In Progress 的条目
-- [ ] 测试：两个 loop 实例并发，第二个检测到 LOCK 后退出，第一个正常完成
+- [x] loop 启动时写入 `~/.shared/roll/loop/.LOCK-<slug>`（含 PID）
+- [x] loop 启动时检查 LOCK：PID 存活 → 写"loop already running, skipping"到 log → 退出 0
+- [x] loop 启动时检查 LOCK：PID 已死（残留） → 清理 LOCK → 继续执行
+- [x] loop 正常结束 / 异常退出时删除 LOCK（trap EXIT）
+- [x] SKILL.md 说明扫 BACKLOG 时跳过 🔨 In Progress 条目（供 claude 遵循）
+- [x] 测试：两个 loop 实例并发，第二个检测到 LOCK 后退出 0，第一个正常完成
+- [x] 测试：陈旧 LOCK（PID 已死）被自动清理后正常执行
 
 **Domain Model:**
 - Context: Autonomous Evolution
 - Aggregate: LoopScheduler
-- Files touched: `skills/roll-loop/SKILL.md`、`bin/roll`（runner script 生成逻辑）
+- Files touched: `bin/roll`（runner script 生成）、`skills/roll-loop/SKILL.md`
 
 **Files:**
-- `skills/roll-loop/SKILL.md`（LOCK 机制 + skip 逻辑）
-- `bin/roll`（`_write_loop_runner_script` 中加 LOCK 检测）
-- `tests/unit/roll_loop_lock.bats`
+- `bin/roll`（`_write_loop_runner_script` 中加 LOCK 检测 + trap）
+- `skills/roll-loop/SKILL.md`（Step 2 skip 🔨 + Concurrency Safety 段）
+- `tests/unit/roll_loop_lock.bats`（5 个测试：3 unit grep + 2 行为集成）
+- `tests/unit/roll_loop_skill.bats`（2 个测试：SKILL.md 内容契约）
 
 **Dependencies:**
-- Depended on by: US-AUTO-016（依赖 LOCK 存在后，🔨 标记才有意义）
+- Depended on by: US-AUTO-016（🔨 标记需要 LOCK 才能保证不重复执行）
 
 ---
 

@@ -151,6 +151,19 @@ A simple heuristic — not a gate, just a signal for the human:
 **Epic: {Name}** — {done}/{total} ✅
 ```
 
+### Step 4.5 — Commit Brief
+
+写完文件后立即提交，让简报进入 git 历史，便于后续追溯与跨会话审计：
+
+```bash
+git add docs/briefs/YYYY-MM-DD-NN.md
+git commit -m "docs: roll-brief YYYY-MM-DD-NN — {触发原因}"
+```
+
+- 触发原因来自调用上下文（Feature 完成 / 每日 / 手动 / `--feature` / `--since`），用一句话填入
+- 写文件失败时不要执行 commit；保持工作区干净，由调用方处理重试
+- 仅 `docs/briefs/` 下新文件入 commit，不要顺带带入其他无关变更
+
 ### Step 5 — Notify
 
 写完文件后在终端或 CI 日志中打印简报路径：

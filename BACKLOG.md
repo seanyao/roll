@@ -150,6 +150,17 @@
 | [US-AUTO-023](docs/features/autonomous-evolution.md#us-auto-023) | `roll loop pause/resume` 人工模式切换 — 轻量暂停调度（保留 plist），支持纯人工/人机协同/纯自主三种模式 | ✅ Done |
 | [US-AUTO-027](docs/features/autonomous-evolution.md#us-auto-027) | peer 调用 auto-attach — 把 `_peer_call` 也包到 tmux session 里，未 mute 时弹窗看 peer 跨 agent 协商（split from US-AUTO-026 因 peer 当前没有 tmux 基建） | 📋 Todo |
 
+## Epic: Documentation
+### Feature: documentation
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-DOC-001](docs/features/documentation.md#us-doc-001) | 建立 `docs/guide/en/` + 反向补写 loop/dream/peer 英文用户指南（价值点、场景、命令参考） | 📋 Todo |
+| [US-DOC-002](docs/features/documentation.md#us-doc-002) | 建立 `docs/guide/zh/` + 中文版 loop/dream/peer 用户指南（镜像 EN，华语用户主阅读层） | 📋 Todo |
+| [US-DOC-003](docs/features/documentation.md#us-doc-003) | 建立 `docs/domain/` + DDD context-map + autonomous-operation 领域模型（英文，工程层） | 📋 Todo |
+| [US-DOC-004](docs/features/documentation.md#us-doc-004) | 迁移现有散落文档至新结构：methodology×2 → guide/，skill-selection-guide → guide/，loop-autorun-verification → practices/ | 📋 Todo |
+| [US-DOC-005](docs/features/documentation.md#us-doc-005) | README 精简重构（≤120行 + doc index）+ AGENTS.md 新增 Documentation Conventions 章节 | 📋 Todo |
+| [US-DOC-006](docs/features/documentation.md#us-doc-006) | 扩展 roll-.dream 文档覆盖度巡检 + brief 展示 doc coverage（缺 EN guide / 缺 ZH 翻译 / 文件落错目录） | 📋 Todo |
+
 ## ♻️ Refactor
 | ID | Description | Status |
 |----|-------------|--------|
@@ -170,6 +181,6 @@
 | IDEA-006 | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | ✅ Done → US-SKILL-007 |
 | IDEA-007 | loop 调度时间和默认 agent 移入配置文件（.roll.yaml 或 ~/.roll/config.yaml），方便用户调整而不需要改 bin/roll 源码 | ✅ Done → US-AUTO-012 |
 | IDEA-008 | roll dashboard 重设计 — 当前布局不完整，需要重新规划整体布局、信息密度、交互方式，作为项目入口的体验应该更好 | 📋 Todo |
-| IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | 📋 Todo |
+| IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | ✅ Done → US-DOC-001..006 |
 | IDEA-010 | `roll status` 增加全局 loop 概览区块 — 在现有 convention/skills 状态后追加本机所有项目的 loop 服务状态、调度时间和 backlog 待办数 | ✅ Done → US-AUTO-021 |
 | IDEA-011 | 基于开源 PI 自研 Coding Agent — 将 Harness Engineering Skills 和管理层内建进去，摆脱第三方 Coding Agent 适配依赖，获得完整自主控制权 | 📋 Todo |

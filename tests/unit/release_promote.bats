@@ -1,13 +1,15 @@
 #!/usr/bin/env bats
-# Tests for _promote_unreleased — release.sh promotes ## Unreleased to ## v<VERSION>
-# (FIX-019: release.sh is the sole authority on version numbers)
+# Tests for _promote_unreleased / _ensure_unreleased — defined in bin/roll
+# (FIX-019: release.sh is the sole authority on version numbers;
+#  helper functions live in bin/roll so they are tracked and testable on CI)
 
-RELEASE_SH="${BATS_TEST_DIRNAME}/../../scripts/release.sh"
+ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
 
 setup() {
   _tmp=$(mktemp -d)
   _orig_dir="$PWD"
   cd "$_tmp"
+  source "$ROLL_BIN"
 }
 
 teardown() {
@@ -15,8 +17,8 @@ teardown() {
   rm -rf "$_tmp"
 }
 
-@test "release.sh is sourceable without executing main" {
-  run bash -c "source '$RELEASE_SH' && type _promote_unreleased | head -1"
+@test "bin/roll exposes _promote_unreleased as a function" {
+  run bash -c "source '$ROLL_BIN' && type _promote_unreleased | head -1"
   [ "$status" -eq 0 ]
   [[ "$output" == *"_promote_unreleased is a function"* ]]
 }
@@ -32,7 +34,7 @@ teardown() {
 ## v2026.511.7
 - old stuff
 EOF
-  bash -c "source '$RELEASE_SH' && _promote_unreleased '2026.999.1' '$_tmp/CHANGELOG.md'"
+  _promote_unreleased '2026.999.1' "$_tmp/CHANGELOG.md"
   grep -q '^## v2026.999.1$' CHANGELOG.md
   ! grep -q '^## Unreleased' CHANGELOG.md
 }
@@ -49,7 +51,7 @@ EOF
 ## v2026.511.7
 - old
 EOF
-  bash -c "source '$RELEASE_SH' && _promote_unreleased '2026.999.2' '$_tmp/CHANGELOG.md'"
+  _promote_unreleased '2026.999.2' "$_tmp/CHANGELOG.md"
   grep -q 'alpha' CHANGELOG.md
   grep -q 'beta' CHANGELOG.md
   grep -q 'gamma' CHANGELOG.md
@@ -63,13 +65,13 @@ EOF
 - old
 EOF
   local before; before=$(cat CHANGELOG.md)
-  bash -c "source '$RELEASE_SH' && _promote_unreleased '2026.999.3' '$_tmp/CHANGELOG.md'"
+  _promote_unreleased '2026.999.3' "$_tmp/CHANGELOG.md"
   local after; after=$(cat CHANGELOG.md)
   [ "$before" = "$after" ]
 }
 
 @test "_promote_unreleased: no-op when file missing (no crash)" {
-  bash -c "source '$RELEASE_SH' && _promote_unreleased '2026.999.4' '$_tmp/does-not-exist.md'"
+  _promote_unreleased '2026.999.4' "$_tmp/does-not-exist.md"
 }
 
 @test "_promote_unreleased: handles single Unreleased line (no bullets)" {
@@ -81,7 +83,7 @@ EOF
 ## v2026.511.7
 - old
 EOF
-  bash -c "source '$RELEASE_SH' && _promote_unreleased '2026.999.5' '$_tmp/CHANGELOG.md'"
+  _promote_unreleased '2026.999.5' "$_tmp/CHANGELOG.md"
   grep -q '^## v2026.999.5$' CHANGELOG.md
   ! grep -q '^## Unreleased' CHANGELOG.md
 }
@@ -93,7 +95,7 @@ EOF
 ## v2026.511.7
 - old
 EOF
-  bash -c "source '$RELEASE_SH' && _ensure_unreleased '$_tmp/CHANGELOG.md'"
+  _ensure_unreleased "$_tmp/CHANGELOG.md"
   grep -q '^## Unreleased$' CHANGELOG.md
   # Unreleased must appear before the latest released section
   local urel_line vrel_line
@@ -113,7 +115,7 @@ EOF
 - old
 EOF
   local before; before=$(cat CHANGELOG.md)
-  bash -c "source '$RELEASE_SH' && _ensure_unreleased '$_tmp/CHANGELOG.md'"
+  _ensure_unreleased "$_tmp/CHANGELOG.md"
   local after; after=$(cat CHANGELOG.md)
   [ "$before" = "$after" ]
   # foo bullet still there

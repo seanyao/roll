@@ -113,29 +113,31 @@ complexity or prevent future bugs. Ignore cosmetic issues.
 
 ### Dream Log (docs/dream/YYYY-MM-DD.md)
 
-Always write a log, even when no REFACTOR entries are created:
+Always write a log, even when no REFACTOR entries are created. Output uses
+Chinese to align with roll-brief style — easier for the morning reader to scan
+without context switching:
 
 ```markdown
 # Dream Log {YYYY-MM-DD}
 
-## Summary
-- Scans run: Dead Code / Architectural Drift / Pruning / Patterns
-- Findings: {N} flagged, {M} REFACTOR entries created
+## 概要
+- 扫描项：死代码 / 架构漂移 / 裁剪候选 / 新兴模式
+- 发现：{N} 项标记，{M} 个 REFACTOR 条目已创建
 
-## Dead Code
-{finding or "Nothing flagged."}
+## 死代码
+{发现内容 或 "未发现死代码。"}
 
-## Architectural Drift
-{finding or "No drift detected."}
+## 架构漂移
+{发现内容 或 "未发现架构漂移。"}
 
-## Pruning Candidates
-{finding or "Nothing flagged."}
+## 裁剪候选
+{发现内容 或 "未发现可裁剪项。"}
 
-## Emerging Patterns
-{finding or "No patterns detected."}
+## 新兴模式
+{发现内容 或 "未发现可提取的重复模式。"}
 
-## REFACTOR Entries Created
-{list or "None."}
+## 创建的 REFACTOR 条目
+{列表 或 "无。"}
 ```
 
 ## Scheduler Configuration
@@ -151,7 +153,7 @@ The cron entry is generated using the configured agent — no manual cron editin
 
 If the scan fails partway through:
 
-1. Write partial results to `docs/dream/YYYY-MM-DD.md` with a `## Status: PARTIAL` header
+1. Write partial results to `docs/dream/YYYY-MM-DD.md` with a `## 状态：部分完成` header
 2. Do not write incomplete REFACTOR entries to BACKLOG
 3. Log the error to `~/.shared/roll/dream/error.log`
 

@@ -2146,6 +2146,12 @@ _loop_status() {
       echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"
     fi
   fi
+  echo ""
+  if [[ -f "$_LOOP_MUTE_FILE" ]]; then
+    echo -e "  Auto-attach  ${YELLOW}muted${NC}   run: roll loop unmute"
+  else
+    echo -e "  Auto-attach  ${GREEN}live${NC}    run: roll loop mute"
+  fi
   [[ -f "$_LOOP_ALERT" ]] && { echo ""; echo -e "  ${RED}⚠ ALERT:${NC}"; sed 's/^/    /' "$_LOOP_ALERT"; }
   [[ -f "$_LOOP_STATE" ]] && { echo ""; echo "  State:"; sed 's/^/    /' "$_LOOP_STATE"; }
   echo ""

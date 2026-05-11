@@ -1752,6 +1752,7 @@ _SHARED_ROOT="${HOME}/.shared/roll"
 _LOOP_STATE="${HOME}/.shared/roll/loop/state.yaml"
 _LOOP_ALERT="${HOME}/.shared/roll/loop/ALERT.md"
 _LOOP_RUNS="${HOME}/.shared/roll/loop/runs.jsonl"
+_LOOP_MUTE_FILE="${HOME}/.shared/roll/mute"
 _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
 
 # Returns a filesystem-safe slug combining the project basename and a 6-char
@@ -2003,9 +2004,11 @@ cmd_loop() {
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
     attach)  _loop_attach ;;
+    mute)    _loop_mute ;;
+    unmute)  _loop_unmute ;;
     resume)  _loop_resume ;;
     reset)   _loop_reset ;;
-    *) err "Usage: roll loop <on|off|now|status|monitor|runs|attach|resume|reset>"; exit 1 ;;
+    *) err "Usage: roll loop <on|off|now|status|monitor|runs|attach|mute|unmute|resume|reset>"; exit 1 ;;
   esac
 }
 
@@ -2166,6 +2169,21 @@ _loop_reset() {
   else
     info "No loop state to clear  无 loop 状态可清除"
   fi
+}
+
+# Suppress the auto-attach popup. When the marker file exists, runner scripts
+# skip the osascript Terminal-popup step on next fire. Loop output still goes
+# to tmux + log; users can run `roll loop attach` manually.
+_loop_mute() {
+  mkdir -p "$(dirname "$_LOOP_MUTE_FILE")"
+  : > "$_LOOP_MUTE_FILE"
+  ok "🔇 muted — auto-attach disabled  已静音，自动弹窗已关闭"
+}
+
+# Re-enable the auto-attach popup.
+_loop_unmute() {
+  rm -f "$_LOOP_MUTE_FILE"
+  ok "🔔 unmuted — auto-attach live  已恢复，自动弹窗已开启"
 }
 
 # Attach to the tmux session a running loop iteration writes to. Returns 1 when

@@ -101,54 +101,56 @@ CHANGELOG 是给**使用者**看的，不是给维护者看的。一句话讲清
 - **Fixed**: 多个 loop 实例不会再互相打架（重复触发自动跳过）
 ```
 
-### 4. Version Number Format
+### 4. Section Header — Always `## Unreleased`
 
-Determine the current version being released:
-
-```bash
-VERSION=$(node -e "process.stdout.write(require('./package.json').version)" 2>/dev/null \
-  || git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
-```
-
-`package.json` is the authoritative source — it is updated before this skill runs. Fall back to git tags only if `package.json` is unavailable.
-
-The CHANGELOG section header uses the full version string with a `v` prefix:
+**⚠️ do NOT guess version numbers.** Only `scripts/release.sh` assigns concrete
+versions, and it only does so at the moment of a real release. Until then,
+every new bullet goes under `## Unreleased` at the top of CHANGELOG.md.
 
 ```
-## v${VERSION}
+## Unreleased
+- **Added**: ...new entries here...
+- **Fixed**: ...
 ```
 
-For the human-readable date display within entries, use `YYYY.MM.DD` format.
+When `release.sh` runs, it renames `## Unreleased` to `## v{N}` (where N is
+computed from git tags) — that's the single moment a version label gets
+assigned.
+
+Do NOT read `package.json` version, do NOT call `git describe`, do NOT invent
+version numbers like `v2026.511.8`. Just write to `## Unreleased`.
 
 ### 5. Generate CHANGELOG.md
 
-**Create mode** (first time):
+**Create mode** (first time, no CHANGELOG.md yet):
 ```markdown
 # Changelog
+
+## Unreleased
+- **Added**: ...current deploy's entries...
 
 ## 2026.05.10
-- **Added**: E2E 自动沉淀 — 每个 Story 交付时自动写一个端到端测试，项目逐步积累可回放的 E2E 套件
-- **Fixed**: 同步时清理已删除文件，防止用户机器残留幽灵文件
-
-## 2026.05.04
-- **Added**: BB 注入模式 — 对未集成 Black Box 的页面自动注入诊断探针，统一数据采集接口
-
-## 2026.04.28
-- ...
+- **Added**: ...historical entries from completed Stories before today...
 ```
 
-**Append mode** (subsequent):
+**Append mode** (most common — CHANGELOG.md exists):
+
+1. Find `## Unreleased` heading at the top of CHANGELOG.md.
+2. If it exists → append new bullets under it (do NOT create a new section).
+3. If it doesn't exist → insert a fresh `## Unreleased` at the very top (right after the `# Changelog` title) with the new bullets.
+
 ```markdown
 # Changelog
 
-## 2026.05.10    ← 新条目插入顶部
-- **Added**: Changelog 自动生成 — 每次部署后自动更新，首次运行时回填全部历史记录
+## Unreleased
+- **Added**: ...just-deployed entry appended here...
+- **Fixed**: ...another just-deployed entry...
 
-## 2026.05.04    ← 已有条目不动
+## v2026.05.07      ← previous releases left untouched
 - ...
 ```
 
-**Ordering**: Most recent version first (reverse chronological)
+**Ordering**: Unreleased always at top. Below it, released versions in reverse chronological order.
 
 ### 6. Commit Update
 

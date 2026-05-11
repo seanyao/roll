@@ -147,7 +147,7 @@
 | [US-AUTO-020](docs/features/autonomous-evolution.md#us-auto-020) | roll-design + roll-loop SKILL 文档补充 — Confirm 语义澄清 + 紧急绕过路径说明 | ✅ Done |
 | [US-AUTO-021](docs/features/autonomous-evolution.md#us-auto-021) | `roll status` 增加全局 loop 概览区块 — 展示本机所有项目的 loop 状态、调度时间、backlog 待办数 | ✅ Done |
 | [US-AUTO-022](docs/features/autonomous-evolution.md#us-auto-022) | Loop 并发安全 — per-loop LOCK 防重入 + 选 story 跳过 🔨 In Progress，支持人工介入和多 agent 协作 | ✅ Done |
-| [US-AUTO-023](docs/features/autonomous-evolution.md#us-auto-023) | `roll loop pause/resume` 人工模式切换 — 轻量暂停调度（保留 plist），支持纯人工/人机协同/纯自主三种模式 | 🔨 In Progress |
+| [US-AUTO-023](docs/features/autonomous-evolution.md#us-auto-023) | `roll loop pause/resume` 人工模式切换 — 轻量暂停调度（保留 plist），支持纯人工/人机协同/纯自主三种模式 | ✅ Done |
 | [US-AUTO-027](docs/features/autonomous-evolution.md#us-auto-027) | peer 调用 auto-attach — 把 `_peer_call` 也包到 tmux session 里，未 mute 时弹窗看 peer 跨 agent 协商（split from US-AUTO-026 因 peer 当前没有 tmux 基建） | 📋 Todo |
 
 ## ♻️ Refactor

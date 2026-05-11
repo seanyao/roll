@@ -899,9 +899,10 @@ US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"o
 ---
 
 <a id="us-auto-023"></a>
-## US-AUTO-023 `roll loop pause / resume` — 人工模式切换 📋
+## US-AUTO-023 `roll loop pause / resume` — 人工模式切换 ✅
 
 **Created**: 2026-05-11
+**Completed**: 2026-05-11
 
 - As a developer who wants to work manually without loop interference
 - I want a lightweight pause/resume for the loop schedule
@@ -915,11 +916,11 @@ US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"o
 ```
 
 **AC:**
-- [ ] `roll loop pause`：向 launchd 设置 disabled（不删 plist），写入 pause 原因和时间到 state file
-- [ ] `roll loop resume`：清除 disabled，恢复调度；与现有 resume（中断恢复）语义合并或明确区分
-- [ ] `roll` dashboard 展示 pause 状态：`Loop  ⏸ paused   run: roll loop resume`
-- [ ] `roll loop status` 展示 pause 原因和暂停时长
-- [ ] macOS / Linux 均支持（launchd / crontab 两路）
+- [x] `roll loop pause`：向 launchd 设置 disabled（不删 plist），写入 pause 原因和时间到 state file
+- [x] `roll loop resume`：清除 disabled，恢复调度；区分 scheduler-resume（手动 pause 后恢复）与 interrupt-resume（崩溃后恢复）
+- [x] `roll` dashboard 展示 pause 状态：`Loop  ⏸ paused   run: roll loop resume`
+- [x] `roll loop status` 展示 pause 时长（计算 paused_at 到现在）
+- [x] macOS / Linux 均支持（macOS: launchctl unload/load；Linux: PAUSE marker file in runner script）
 
 **Domain Model:**
 - Context: Autonomous Evolution
@@ -927,8 +928,8 @@ US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"o
 - Files touched: `bin/roll`（`_loop_pause`、`_loop_resume`）、dashboard 展示
 
 **Files:**
-- `bin/roll`（新增 `_loop_pause`，更新 `_loop_resume`、`_cmd_dashboard`）
-- `tests/unit/roll_loop_pause.bats`
+- `bin/roll`（`_loop_pause`、`_loop_resume`、`_dashboard`、`_loop_status`、`_write_loop_runner_script`）
+- `tests/unit/roll_loop_pause.bats`（14 test cases）
 
 **Dependencies:**
 - Depends on: US-AUTO-022（pause 期间如有 LOCK 残留需清理）

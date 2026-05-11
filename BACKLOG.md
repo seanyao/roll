@@ -154,7 +154,7 @@
 ### Feature: documentation
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-DOC-001](docs/features/documentation.md#us-doc-001) | 建立 `docs/guide/en/` + 反向补写 loop/dream/peer 英文用户指南（价值点、场景、命令参考） | 🔨 In Progress |
+| [US-DOC-001](docs/features/documentation.md#us-doc-001) | 建立 `docs/guide/en/` + 反向补写 loop/dream/peer 英文用户指南（价值点、场景、命令参考） | ✅ Done |
 | [US-DOC-002](docs/features/documentation.md#us-doc-002) | 建立 `docs/guide/zh/` + 中文版 loop/dream/peer 用户指南（镜像 EN，华语用户主阅读层） | 📋 Todo |
 | [US-DOC-003](docs/features/documentation.md#us-doc-003) | 建立 `docs/domain/` + DDD context-map + autonomous-operation 领域模型（英文，工程层） | 📋 Todo |
 | [US-DOC-004](docs/features/documentation.md#us-doc-004) | 迁移现有散落文档至新结构：methodology×2 → guide/，skill-selection-guide → guide/，loop-autorun-verification → practices/ | 📋 Todo |

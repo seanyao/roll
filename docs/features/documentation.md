@@ -7,26 +7,28 @@
 ---
 
 <a id="us-doc-001"></a>
-## US-DOC-001 建立 docs/guide/en/ + 反向补写 loop/dream/peer 英文用户指南 📋
+## US-DOC-001 建立 docs/guide/en/ + 反向补写 loop/dream/peer 英文用户指南 ✅
 
 **Created**: 2026-05-12
+**Completed**: 2026-05-12
 
 - As a developer or international user
 - I want clear English documentation for loop, dream, and peer
 - So that I understand the value, when to use each, and all available commands
 
 **AC:**
-- [ ] `docs/guide/en/overview.md` — What is roll, the three-layer autonomous model (human / loop / dream+peer), quick orientation
-- [ ] `docs/guide/en/loop.md` — Value prop, how it works (tmux+launchd), active window, LOCK, state machine, all `roll loop` subcommands with examples
-- [ ] `docs/guide/en/dream.md` — What dream does nightly, REFACTOR item generation, output files, how to read dream logs
-- [ ] `docs/guide/en/peer.md` — Cross-agent review protocol, AGREE/REFINE/OBJECT/ESCALATE states, capability map, when it auto-triggers, how to invoke manually
-- [ ] `docs/guide/en/` directory created, all four files committed
+- [x] `docs/guide/en/overview.md` — What is roll, the three-layer autonomous model (human / loop / dream+peer), quick orientation
+- [x] `docs/guide/en/loop.md` — Value prop, how it works (tmux+launchd), active window, LOCK, state machine, all `roll loop` subcommands with examples
+- [x] `docs/guide/en/dream.md` — What dream does nightly, REFACTOR item generation, output files, how to read dream logs
+- [x] `docs/guide/en/peer.md` — Cross-agent review protocol, AGREE/REFINE/OBJECT/ESCALATE states, capability map, when it auto-triggers, how to invoke manually
+- [x] `docs/guide/en/` directory created, all four files committed
 
 **Files:**
 - `docs/guide/en/overview.md` (new)
 - `docs/guide/en/loop.md` (new)
 - `docs/guide/en/dream.md` (new)
 - `docs/guide/en/peer.md` (new)
+- `tests/unit/roll_doc_guide_en.bats` (new, 16 tests)
 
 **Dependencies:**
 - Depended on by: US-DOC-002, US-DOC-004, US-DOC-005

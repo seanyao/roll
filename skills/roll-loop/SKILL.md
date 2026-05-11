@@ -185,7 +185,7 @@ final report in `cron.log` instead.
 | Field | Type | Format / Enum |
 |---|---|---|
 | `ts` | string | ISO 8601 **UTC** with `Z` suffix. Get via `date -u +%Y-%m-%dT%H:%M:%SZ`. Never use `+08:00` or other offsets. |
-| `project` | string | Project **slug** only (e.g. `roll-d9dfa0`), NOT the absolute path. Derive from `basename` of plist label or `_project_slug` output. |
+| `project` | string | Project **slug** only (e.g. `roll-d9dfa0`), NOT the absolute path and NOT plain `basename`. Compute via: `p=$(pwd -P); base=$(basename "$p" | tr -cs '[:alnum:]' '-' | sed 's/-*$//'); hash=$(printf '%s' "$p" | md5 | cut -c1-6 2>/dev/null || printf '%s' "$p" | md5sum | cut -c1-6); echo "${base}-${hash}"` |
 | `run_id` | string | Matches `state.yaml` `run_id` exactly. Format: `loop-YYYYMMDD-HHMM`. |
 | `status` | enum | Exactly one of: `built` (≥1 story shipped), `idle` (no Todo items found), `failed` (paused/error). **No synonyms.** |
 | `built` | array&lt;string&gt; | Story ids completed this cycle. `[]` when none. **Always array, never null/number.** |
@@ -201,7 +201,11 @@ Optional field, only when `status == "failed"`:
 
 ```bash
 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-project=$(_project_slug "$(pwd -P)")  # must match roll loop runs filter
+# Compute project slug — do NOT use plain `basename`, must include md5 hash suffix
+_p=$(pwd -P)
+_base=$(basename "$_p" | tr -cs '[:alnum:]' '-' | sed 's/-*$//')
+_hash=$(printf '%s' "$_p" | md5 | cut -c1-6 2>/dev/null || printf '%s' "$_p" | md5sum | cut -c1-6)
+project="${_base}-${_hash}"  # e.g. roll-d9dfa0 — must match roll loop runs filter
 # duration_sec = cycle_end_epoch - cycle_start_epoch (track at Step 1)
 # tcr_count = git log --oneline --since="<cycle_start>" | grep -c '^[a-f0-9]* tcr:'
 

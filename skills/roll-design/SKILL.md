@@ -48,8 +48,8 @@ $roll-design "user system design"
 # Split Stories from an existing Plan
 $roll-design --from-plan docs/features/auth-plan.md
 
-# Directly create a Story
-$roll-design --story "user login feature"
+# Directly create a Story (auto-detected as User Story → Slice DDD)
+$roll-design "user login feature"
 ```
 
 ## DDD Depth Scale
@@ -622,7 +622,7 @@ $roll-build US-AUTH-001 → TCR → CI/CD → Deploy
 
 ```
 $roll-debug discovers issue → Suggest creating FIX
-$roll-design --fix "fix login API 404" → Create FIX-AUTH-001
+$roll-design "fix login API 404" → Create FIX-AUTH-001  ← auto-detected as Bug Fix
 $roll-fix FIX-AUTH-001 → Quick fix
 ```
 

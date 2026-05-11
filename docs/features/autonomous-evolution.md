@@ -821,6 +821,76 @@ fi
 
 ---
 
+<a id="us-auto-026"></a>
+## US-AUTO-026 默认 auto-attach + 极简 mute/unmute — context-aware 可见性 📋
+
+**Created**: 2026-05-11
+
+- As a developer with active autonomous loops
+- I want loop and peer to be visible by default — a Terminal window automatically appears when they run, without me having to type anything
+- So that I can "watch it happen" while working on other things, and only suppress this when I genuinely don't want to see (one toggle)
+
+**核心理念：**
+US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"opt-in pull"反转成"default push, opt-out mute"——让显性化成为默认，符合"我就喜欢看着它自动发生"的直觉。
+
+**三档体验**（同一架构下）：
+
+```
+档 1  默认 auto-attach     loop / peer 一触发，背景弹一个 Terminal 窗口
+                          窗口内直接是 tmux attach 视图，看 claude 实时干活
+                          窗口不抢焦点（osascript activate=false）
+                          tmux session 结束后窗口保留最终输出供回看
+
+档 2  mute（不弹）          roll loop mute   一键关弹窗
+                          loop / peer 照常在 tmux 里跑，结果照常入库
+                          想看可手动 roll loop attach 接入
+
+档 3  unmute（恢复）        roll loop unmute  恢复弹窗
+```
+
+**与 US-AUTO-024（runs）和 US-AUTO-025（attach）的关系：**
+
+```
+024 runs       事后摘要      "刚才几次都干了啥"
+025 attach     手动接入      "我现在主动想看一眼"
+026 auto-push  默认弹出      "不用我操心，弹出来就在那"
+```
+
+三者互补，共用同一 tmux session 基建，可独立 mute/unmute 切换风格。
+
+**AC:**
+- [ ] 默认行为：loop runner 启动 tmux session 后，若 `~/.shared/roll/mute` 不存在，调用 osascript 开一个新 Terminal 窗口执行 `tmux attach -t <session>`
+- [ ] osascript 调用使用 `activate false`（或等效方式）让新窗口在背景出现，不抢当前焦点
+- [ ] peer 调用时同样行为：bridge 启动 tmux session 后若未 mute，背景弹窗 attach
+- [ ] `roll loop mute`：创建 `~/.shared/roll/mute`（空文件即可）；输出"🔇 muted"
+- [ ] `roll loop unmute`：删除 `~/.shared/roll/mute`；输出"🔔 unmuted"
+- [ ] mute 状态在 `roll loop status` 和 dashboard 显示一行：`Auto-attach: muted / live`
+- [ ] tmux session 结束后窗口不自动关闭（用户可读最终输出，⌘W 关闭）
+- [ ] 测试：runner script 含 osascript 调用 + mute 文件存在性检测；mute/unmute 命令存在并正确读写
+
+**Non-goals:**
+- 不做 mute duration（2h / today / until 22:00）—— 一个开关足够，复杂度收敛
+- 不做窗口管理（多项目时怎么排列）—— 每个 tmux session 独立一个窗口，让用户的 WM / 系统多桌面处理
+- 不做"focus-aware"（开会自动 mute）—— 用户自己 mute 就好，避免误判
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: LoopScheduler + PeerNegotiator（共享 visibility 策略）
+- New entity: MuteState（单文件，二元）
+- Files touched: runner script template、peer bridge、新 `_loop_mute`/`_loop_unmute` 函数
+
+**Files:**
+- `bin/roll`（`_write_loop_runner_script` 加 osascript 调用 + mute 检测；新 `_loop_mute` / `_loop_unmute` 子命令）
+- `~/.shared/roll/peer/` 相关 bridge 脚本（同样的 osascript + mute 检测逻辑）
+- `tests/unit/roll_loop_mute.bats`
+- `skills/roll-loop/SKILL.md`（说明默认 auto-attach 行为）
+- `skills/roll-peer/SKILL.md`（同上）
+
+**Dependencies:**
+- Depends on: US-AUTO-025（tmux 基建必须先有）
+
+---
+
 <a id="us-auto-023"></a>
 ## US-AUTO-023 `roll loop pause / resume` — 人工模式切换 📋
 

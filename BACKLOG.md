@@ -118,6 +118,7 @@
 | FIX-021 | `roll loop now` 行为应与 launchd 服务完全一致 — 当前走 _agent_run_skill 旁路，没 tmux 弹窗、没 LOCK、没 --verbose；改为直接调 runner script（设 ROLL_LOOP_FORCE 绕过 active-window 检查），并把 "Triggering loop cycle" 翻译成 "正在启动新的循环..." | ✅ Done |
 | FIX-022 | auto-attach 硬编码 Terminal.app，忽略用户实际终端 — 装了 Ghostty/iTerm/WezTerm 的用户被强制弹 Terminal.app 多余窗口；应检测 TERM_PROGRAM + 读 config `loop_attach_terminal` 偏好，分别用 `ghostty +new-window`、iTerm AppleScript、Terminal osascript 等正确方式 | ✅ Done |
 | FIX-023 | loop 可视化链路无 smoke 测试 — 真跑 backlog 太慢且依赖 BACKLOG 有内容；加 `roll loop test` 用**真 claude** 跑个 trivial prompt（如 `-p "Reply: hello"`），5-10 秒验证整条链路（tmux/弹窗/--verbose 流式/PATH/SessionEnd hook/LOCK/state 收尾）。**开发阶段必须真 claude**（唯一能验"链路真工作"）；**之后回归测试**可加 `--mock` flag 走 echo+sleep 假 claude（快、不烧 token，仅作链路退化检测）；FIX-021 端到端验证依赖此 | ✅ Done |
+| FIX-024 | roll-build/roll-loop 在 CI 绿之前就标 ✅ Done — Phase 11 应在 `gh run watch` 确认当前 commit CI 通过后才写回 BACKLOG；需加 `roll ci [--wait]` 命令轮询 `gh run list` 状态，roll-loop 标完 Done 前强制调用；CI 红则保持 🔨 In Progress 并写 ALERT | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

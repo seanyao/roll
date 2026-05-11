@@ -99,3 +99,35 @@ teardown() {
   [[ "$output" == *"Auto-attach"* ]]
   [[ "$output" == *"muted"* ]]
 }
+
+# ─── Auto-attach injected into runner script ──────────────────────────────────
+
+@test "_write_loop_runner_script: runner contains osascript Terminal popup" {
+  local script="${_tmp}/run-test.sh"
+  _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
+  grep -qF 'osascript' "$script"
+  grep -qF 'Terminal' "$script"
+  grep -qF 'tmux attach' "$script"
+}
+
+@test "_write_loop_runner_script: runner skips osascript when mute file exists" {
+  local script="${_tmp}/run-test.sh"
+  _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
+  # The runner checks for the mute marker before firing osascript
+  grep -qF '.shared/roll/mute' "$script"
+}
+
+@test "_write_loop_runner_script: osascript is fired in background (no blocking)" {
+  local script="${_tmp}/run-test.sh"
+  _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
+  # The osascript pipeline must end with & so it doesn't block the runner
+  grep -qE 'osascript.*&[[:space:]]*$|osascript[^&]*\\\\$' "$script" || \
+    grep -qE 'end try.*>.*2>.*&' "$script" || \
+    grep -qE '\)[[:space:]]*&[[:space:]]*$' "$script"
+}
+
+@test "_write_loop_runner_script: osascript uses tmux session variable for attach target" {
+  local script="${_tmp}/run-test.sh"
+  _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
+  grep -qF 'tmux attach -t' "$script"
+}

@@ -332,3 +332,50 @@ setup() {
   grep -A1 "<key>Hour</key>" "$brief_plist" | grep -q "<integer>9</integer>"
   rm -rf "$tmp_dir"
 }
+
+@test "_install_launchd_plists: content changed + service loaded → reload triggered" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local reload_log="${tmp_dir}/launchctl_calls.log"
+
+  # Install with first config
+  local cfg; cfg=$(mktemp); echo "loop_minute: 11" > "$cfg"; ROLL_CONFIG="$cfg"
+  _install_launchd_plists "$proj"
+
+  # Simulate service is loaded and capture launchctl calls
+  _launchd_is_loaded() { return 0; }
+  launchctl() { echo "$*" >> "$reload_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  # Change config so plist content changes
+  echo "loop_minute: 22" > "$cfg"
+  _install_launchd_plists "$proj"
+
+  grep -q "unload" "$reload_log"
+  grep -q "load" "$reload_log"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}
+
+@test "_install_launchd_plists: content unchanged → reload not triggered" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local reload_log="${tmp_dir}/launchctl_calls.log"
+
+  local cfg; cfg=$(mktemp); echo "loop_minute: 11" > "$cfg"; ROLL_CONFIG="$cfg"
+  _install_launchd_plists "$proj"
+
+  # Simulate service is loaded and capture launchctl calls
+  _launchd_is_loaded() { return 0; }
+  launchctl() { echo "$*" >> "$reload_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  # Second install with same config — no content change
+  _install_launchd_plists "$proj"
+
+  [ ! -f "$reload_log" ] || ! grep -q "unload" "$reload_log"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}

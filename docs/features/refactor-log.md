@@ -68,3 +68,17 @@ Architectural friction signals flagged during story execution.
 **Observation**: 4 处循环中 2 处（`_sync_conventions` 和 cmd_status 的 sync targets 展示）循环体简单，可以安全提取为回调。另外 2 处（`_link_skills` 和 cmd_status skills 展示）循环体超过 30 行且引用闭包变量，提取为回调反而增加间接层而非减少复杂度，保留原始形式更清晰。
 
 **Scope**: `bin/roll` 新增 `_for_each_ai_tool callback [args...]` helper（+12 行）；`_sync_conventions` 重构为 `_sync_one_tool` + `_for_each_ai_tool` 调用；`tests/unit/for_each_ai_tool.bats` 新增 6 条单元测试
+
+---
+
+## REFACTOR-006 CI 测试套件提速 — 并行文件执行 ✅
+
+**Flagged**: 2026-05-11 (dream scan)
+**Completed**: 2026-05-12
+**Signal**: CI ubuntu 上 475 个 bats 测试串行执行需 5+ 分钟，根因是 cmd_setup.bats（51s）和 cmd_init.bats（34s）各自串行执行，每个测试都调用一次 `roll setup`（~2s/次）。
+
+**Observation**: bats 内置 `--jobs N` 并行标志，需要 GNU parallel。各测试文件已通过 `mktemp -d` 隔离 TEST_TMP，并行执行无共享状态风险。新增 `tests/run.sh` 自动检测 parallel 可用性：有则 `--jobs 4 --no-parallelize-within-files`，无则降级为串行。CI workflow 新增 `apt-get install -y parallel`。
+
+**Expected speedup**: wall time ≈ max(cmd_setup=51s, cmd_init=34s) + overhead ≈ 55s，相较串行 ~170s 加速 3x；CI ubuntu 上预期从 5+ 分钟降至约 90s。
+
+**Scope**: `tests/run.sh`（新建）；`package.json` test 脚本改为 `bash tests/run.sh`；`.github/workflows/ci.yml` 新增 parallel 安装步骤；`tests/unit/test_runner.bats`（新建，4 条测试）

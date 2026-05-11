@@ -36,26 +36,28 @@
 ---
 
 <a id="us-doc-002"></a>
-## US-DOC-002 建立 docs/guide/zh/ + 中文版 loop/dream/peer 用户指南 📋
+## US-DOC-002 建立 docs/guide/zh/ + 中文版 loop/dream/peer 用户指南 ✅
 
 **Created**: 2026-05-12
+**Completed**: 2026-05-12
 
 - As a Chinese-speaking user
 - I want native Chinese documentation for loop, dream, and peer
 - So that I can understand the full capability without reading English
 
 **AC:**
-- [ ] `docs/guide/zh/overview.md` — 中文版系统概述，三层自主模型说明
-- [ ] `docs/guide/zh/loop.md` — 中文版 loop 指南：价值点、工作原理、活跃窗口、LOCK、状态机、所有子命令示例
-- [ ] `docs/guide/zh/dream.md` — 中文版 dream 指南：夜间巡检、REFACTOR 条目生成、日志读取
-- [ ] `docs/guide/zh/peer.md` — 中文版 peer 指南：跨 agent 协商协议、三态说明、触发条件、手动调用
-- [ ] ZH 内容语义与 EN 正本一致，不独立发散
+- [x] `docs/guide/zh/overview.md` — 中文版系统概述，三层自主模型说明
+- [x] `docs/guide/zh/loop.md` — 中文版 loop 指南：价值点、工作原理、活跃窗口、LOCK、状态机、所有子命令示例
+- [x] `docs/guide/zh/dream.md` — 中文版 dream 指南：夜间巡检、REFACTOR 条目生成、日志读取
+- [x] `docs/guide/zh/peer.md` — 中文版 peer 指南：跨 agent 协商协议、三态说明、触发条件、手动调用
+- [x] ZH 内容语义与 EN 正本一致，不独立发散
 
 **Files:**
 - `docs/guide/zh/overview.md` (new)
 - `docs/guide/zh/loop.md` (new)
 - `docs/guide/zh/dream.md` (new)
 - `docs/guide/zh/peer.md` (new)
+- `tests/unit/roll_doc_guide_zh.bats` (new, 15 tests)
 
 **Dependencies:**
 - Depends on: US-DOC-001 (EN must exist first as source of truth)

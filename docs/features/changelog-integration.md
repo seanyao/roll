@@ -46,3 +46,25 @@
 **Dependencies:**
 - Depends on: US-CL-001 (needs the trigger to be wired)
 - Depended on by: none
+
+<a id="us-cl-003"></a>
+## US-CL-003 消除独立的 changelog commit — 并入 story 完成提交 📋
+
+**Created**: 2026-05-12
+
+- As a developer reading git log
+- I want changelog updates to be part of the story completion commit
+- So that `docs: update changelog for release YYYY.MM.DD` 这类噪音 commit 不再出现
+
+**AC:**
+- [ ] `roll-.changelog` Step 6 移除 `git commit` / `git push`，只做 `git add CHANGELOG.md`（stage 不提交）
+- [ ] `roll-build` Phase 11 的完成 commit（`docs: mark US-XXX as completed`）自动包含已 stage 的 CHANGELOG.md
+- [ ] git log 中不再出现单独的 `docs: update changelog for ...` commit
+- [ ] 若 `roll-.changelog` 在无 roll-build 上下文中独立触发（手动），则保留一次独立 commit，消息改为 `chore: sync changelog`（去掉日期）
+
+**Files:**
+- `skills/roll-.changelog/SKILL.md` — 移除 Step 6 的 commit/push，改为仅 stage
+- `skills/roll-build/SKILL.md` — Phase 11 commit 前确认 CHANGELOG.md 已 stage
+
+**Dependencies:**
+- Depends on: US-CL-001, US-CL-002

@@ -1,5 +1,8 @@
 # Changelog
 
+## v2026.511.8
+- **Fixed**: 集成测试 launchd ghost 泄漏 — `integration_teardown` 在删除 TEST_TMP 之前，先 `launchctl bootout` 该沙箱里被 `roll loop on` 注册到 user gui domain 的所有 `com.roll.*` 服务，避免删 plist 后 launchd 仍保留指向不存在路径的 ghost 注册。
+
 ## v2026.511.7
 - **Added**: loop 执行 story 前显式标记 🔨 In Progress — roll-loop SKILL 在调用 executor 之前先把 BACKLOG 中的故事状态从 📋 Todo 改为 🔨 In Progress 并提交 `chore: mark US-XXX in progress`，brief 简报和 peer agent 都能即时感知正在进行的工作，tcr 微提交不再"对 brief 不可见"。
 - **Added**: loop 启动时孤儿 🔨 自愈 — 扫描 BACKLOG 中无对应 state.yaml running item 的 🔨 条目，视为上次崩溃残留，自动 revert 回 📋 Todo 并写 ALERT，避免被"卡"在错误的中间状态里。

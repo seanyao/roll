@@ -26,3 +26,10 @@ teardown() {
   grep -qF 'echo "$$"' "$script_path"
   grep -qF '.LOCK-' "$script_path"
 }
+
+@test "_write_loop_runner_script: traps EXIT to remove LOCK" {
+  local script_path="${_test_dir}/run-test-abc123.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 18
+  grep -qF "trap 'rm -f" "$script_path"
+  grep -qF "EXIT" "$script_path"
+}

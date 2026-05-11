@@ -1857,6 +1857,7 @@ h=\$(printf '%d' "\$(date +%H)")
 if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
 LOCK="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
 echo "\$\$" > "\$LOCK"
+trap 'rm -f "\$LOCK"' EXIT
 cd "${project_path}" && ${cmd} >> "${log_path}" 2>&1
 SCRIPT
   chmod +x "$script_path"

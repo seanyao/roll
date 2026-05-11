@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.512.5
 - **Fixed**: loop 遇到 API 错误时自动重试，不再直接中断
 
 ## v2026.512.3

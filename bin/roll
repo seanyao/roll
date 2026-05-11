@@ -531,6 +531,35 @@ _sync_skills() {
 # COMMAND: setup [--force]
 # Initialize ~/.roll/ and sync everything to AI tools in one step
 # ═══════════════════════════════════════════════════════════════════════════════
+# Ensures tmux is available (US-AUTO-026 promoted it from soft to required
+# dependency for visible loop runs). On macOS attempts `brew install tmux`
+# when brew exists; elsewhere prints the install command. Never fails the
+# setup main flow — returns 0 even if install was not possible so the rest
+# of `roll setup` proceeds.
+_ensure_tmux() {
+  if command -v tmux >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local os; os="$(uname)"
+  if [[ "$os" == "Darwin" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      info "tmux not found — installing via brew...  未安装 tmux，正在通过 brew 安装..."
+      if brew install tmux >/dev/null 2>&1; then
+        ok "tmux installed.  tmux 已安装。"
+        return 0
+      fi
+      warn "brew install tmux failed — install manually: brew install tmux  brew 安装失败，请手动 'brew install tmux'"
+      return 0
+    fi
+    warn "tmux required but brew not available — install manually: brew install tmux  缺少 brew，请手动 'brew install tmux'"
+    return 0
+  fi
+
+  warn "tmux required — install via your package manager (e.g. apt install tmux / pacman -S tmux)  请用系统包管理器安装 tmux"
+  return 0
+}
+
 cmd_setup() {
   local force=false
   while [[ $# -gt 0 ]]; do
@@ -554,6 +583,10 @@ cmd_setup() {
   info "Setting up peer review state...  正在初始化 peer review 状态..."
   _peer_ensure_state_dir
   ok "Peer state directory ready.  Peer 状态目录已就绪。"
+
+  echo ""
+  info "Ensuring tmux is installed (required for visible loop runs)...  正在确认 tmux 已安装..."
+  _ensure_tmux
 
   if [[ "$(uname)" == "Darwin" ]]; then
     echo ""

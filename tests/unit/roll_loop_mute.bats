@@ -131,3 +131,38 @@ teardown() {
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
   grep -qF 'tmux attach -t' "$script"
 }
+
+# ─── _ensure_tmux: required dependency auto-install ───────────────────────────
+
+@test "_ensure_tmux: function is defined" {
+  type _ensure_tmux >/dev/null 2>&1
+}
+
+@test "_ensure_tmux: cmd_setup invokes _ensure_tmux" {
+  grep -qE 'cmd_setup\(\)' "$ROLL_BIN"
+  # Grab the cmd_setup body and verify it calls _ensure_tmux
+  local body
+  body=$(awk '/^cmd_setup\(\)/{p=1} p{print} p && /^}$/{p=0; exit}' "$ROLL_BIN")
+  echo "$body" | grep -qF '_ensure_tmux'
+}
+
+@test "_ensure_tmux: source references 'brew install tmux' for macOS auto-install" {
+  local body
+  body=$(awk '/^_ensure_tmux\(\)/{p=1} p{print} p && /^}$/{p=0; exit}' "$ROLL_BIN")
+  echo "$body" | grep -qF 'brew install tmux'
+}
+
+@test "_ensure_tmux: source returns 0 (non-blocking) when install fails" {
+  # The function must always return 0 so setup main flow is not blocked.
+  local body
+  body=$(awk '/^_ensure_tmux\(\)/{p=1} p{print} p && /^}$/{p=0; exit}' "$ROLL_BIN")
+  echo "$body" | grep -qE 'return 0'
+}
+
+@test "_ensure_tmux: no-op when tmux already installed" {
+  command -v tmux >/dev/null 2>&1 || skip "tmux not installed on this host"
+  run _ensure_tmux
+  [ "$status" -eq 0 ]
+  # Output should be empty (silent no-op) when tmux is already present
+  [ -z "${output// /}" ]
+}

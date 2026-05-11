@@ -495,7 +495,11 @@ Domain: Order Context > Order Aggregate > OrderItem Entity
 
 ## Clarify Phase
 
-**Trigger conditions** — automatically enters if any of these are met:
+**Skip conditions** — silently skip Clarify when any of these hold:
+- Input uses `--from-file` or `--from-idea` flag (non-interactive mode)
+- Input is high-confidence (clear verb + explicit scope + acceptance signal — see Non-Interactive Mode)
+
+**Trigger conditions** — automatically enters if none of the skip conditions hold AND any of these are met:
 - Input is a single vague sentence without clear scope
 - Missing clear boundaries (what / who / when / where)
 - Contains ambiguous terms like "优化一下", "改一下", "加个东西", "做个设计"

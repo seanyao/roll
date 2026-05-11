@@ -1859,6 +1859,7 @@ _write_loop_runner_script() {
   local inner_path="${script_path%.sh}-inner.sh"
   cat > "$inner_path" << INNER
 #!/bin/bash -l
+export PATH="/opt/homebrew/bin:\$PATH"
 cd "${project_path}" && ${cmd}
 INNER
   chmod +x "$inner_path"

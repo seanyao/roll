@@ -1,0 +1,134 @@
+#!/usr/bin/env bats
+# Tests for roll loop pause / resume (US-AUTO-023)
+
+ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
+
+setup() {
+  source "$ROLL_BIN"
+  _orig_dir="$PWD"
+  _test_dir=$(mktemp -d)
+  cd "$_test_dir"
+  export _LOOP_STATE="${_test_dir}/state.yaml"
+}
+
+teardown() {
+  cd "$_orig_dir"
+  rm -rf "$_test_dir"
+}
+
+# ─── Dispatch routing ─────────────────────────────────────────────────────────
+
+@test "cmd_loop: 'pause' subcommand is wired in dispatch table" {
+  local body
+  body=$(awk '/^cmd_loop\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qE '\bpause\)'
+}
+
+@test "cmd_loop: 'resume' subcommand is wired in dispatch table" {
+  local body
+  body=$(awk '/^cmd_loop\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qE '\bresume\)'
+}
+
+# ─── _loop_pause function body ────────────────────────────────────────────────
+
+@test "_loop_pause: function exists in bin/roll" {
+  grep -qF '_loop_pause()' "$ROLL_BIN"
+}
+
+@test "_loop_pause: references launchctl unload (macOS path)" {
+  local body
+  body=$(awk '/^_loop_pause\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qF 'launchctl'
+}
+
+@test "_loop_pause: writes status: paused to state file" {
+  local body
+  body=$(awk '/^_loop_pause\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qF 'status: paused'
+}
+
+@test "_loop_pause: writes paused_at timestamp to state file" {
+  local body
+  body=$(awk '/^_loop_pause\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -q 'paused_at'
+}
+
+# ─── _loop_pause state file behavior ─────────────────────────────────────────
+
+@test "_loop_pause: state file contains 'status: paused' after invocation (mocked launchd)" {
+  # Override launchd helpers to no-op
+  _launchd_is_loaded() { return 0; }
+  _launchd_plist_path() { echo "/tmp/fake.plist"; }
+  launchctl() { return 0; }
+  _project_slug() { echo "test-abc123"; }
+
+  _loop_pause
+  grep -q "status: paused" "$_LOOP_STATE"
+}
+
+@test "_loop_pause: state file contains 'paused_at' after invocation (mocked launchd)" {
+  _launchd_is_loaded() { return 0; }
+  _launchd_plist_path() { echo "/tmp/fake.plist"; }
+  launchctl() { return 0; }
+  _project_slug() { echo "test-abc123"; }
+
+  _loop_pause
+  grep -q "paused_at:" "$_LOOP_STATE"
+}
+
+# ─── _loop_resume scheduler path ─────────────────────────────────────────────
+
+@test "_loop_resume: handles 'status: paused' state (scheduler resume)" {
+  local body
+  body=$(awk '/^_loop_resume\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -q 'paused'
+}
+
+@test "_loop_resume: re-enables launchd when state is paused (macOS)" {
+  local body
+  body=$(awk '/^_loop_resume\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # Must reference launchctl load for scheduler resume
+  echo "$body" | grep -qF 'launchctl load'
+}
+
+@test "_loop_resume: clears paused state after scheduler resume (mocked launchd)" {
+  # Pre-write a paused state
+  cat > "$_LOOP_STATE" << 'EOF'
+status: paused
+paused_at: "2026-05-11T10:00:00Z"
+paused_reason: manual
+EOF
+  _launchd_is_loaded() { return 1; }
+  _launchd_plist_path() { echo "/tmp/fake.plist"; }
+  _launchd_label() { echo "com.roll.loop.test-abc"; }
+  launchctl() { return 0; }
+  _project_slug() { echo "test-abc"; }
+
+  _loop_resume
+  ! grep -q "status: paused" "$_LOOP_STATE"
+}
+
+# ─── Dashboard ─────────────────────────────────────────────────────────────────
+
+@test "_dashboard: references paused state display" {
+  local body
+  body=$(awk '/^_dashboard\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qE '⏸|paused'
+}
+
+# ─── _loop_status ─────────────────────────────────────────────────────────────
+
+@test "_loop_status: references pause display" {
+  local body
+  body=$(awk '/^_loop_status\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qE '⏸|paused'
+}
+
+# ─── Linux: runner script PAUSE check ────────────────────────────────────────
+
+@test "_write_loop_runner_script: generated script checks PAUSE marker file" {
+  local script_path="${_test_dir}/run-test-pause.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 18
+  grep -qE 'PAUSE' "$script_path"
+}

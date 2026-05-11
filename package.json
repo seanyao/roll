@@ -25,6 +25,7 @@
   "files": [
     "bin/",
     "conventions/",
+    "lib/",
     "skills/",
     "tools/",
     "template/",

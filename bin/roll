@@ -1955,17 +1955,23 @@ _write_loop_runner_script() {
   mkdir -p "$(dirname "$script_path")"
 
   local inner_path="${script_path%.sh}-inner.sh"
-  # Use stream-json output so the tmux-attach view shows live tool-use and
-  # text events as they arrive. --verbose alone does nothing in -p mode;
-  # stream-json is the flag that actually enables realtime streaming.
+  # Use stream-json + formatter: --verbose alone does nothing in -p mode;
+  # stream-json enables realtime streaming; loop-fmt.py humanizes the events.
+  local fmt_script="${ROLL_PKG_DIR}/lib/loop-fmt.py"
   local cmd_verbose="${cmd/claude -p/claude -p --verbose --output-format stream-json}"
   cat > "$inner_path" << INNER
 #!/bin/bash -l
 export PATH="/opt/homebrew/bin:\$PATH"
-cd "${project_path}" && ${cmd_verbose}
+FMT="${fmt_script}"
+if [ -f "\$FMT" ]; then
+  cd "${project_path}" && ${cmd_verbose} | python3 "\$FMT"
+else
+  cd "${project_path}" && ${cmd_verbose}
+fi
 INNER
   chmod +x "$inner_path"
 
+  local slug; slug=$(_project_slug "$project_path")
   cat > "$script_path" << SCRIPT
 #!/bin/bash -l
 # Active-window check — skipped when ROLL_LOOP_FORCE is set (manual 'roll loop now')
@@ -1973,6 +1979,9 @@ if [ -z "\$ROLL_LOOP_FORCE" ]; then
   h=\$(printf '%d' "\$(date +%H)")
   if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
 fi
+# Pause check — 'roll loop pause' creates this marker to suspend scheduling
+PAUSE="\$HOME/.shared/roll/loop/PAUSE-${slug}"
+if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
 LOCK="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
 SESSION="roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')"
 INNER_SCRIPT="${inner_path}"
@@ -2150,9 +2159,10 @@ cmd_loop() {
     attach)  _loop_attach ;;
     mute)    _loop_mute ;;
     unmute)  _loop_unmute ;;
+    pause)   _loop_pause ;;
     resume)  _loop_resume ;;
     reset)   _loop_reset ;;
-    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|attach|mute|unmute|resume|reset>"; exit 1 ;;
+    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|attach|mute|unmute|pause|resume|reset>"; exit 1 ;;
   esac
 }
 
@@ -2328,21 +2338,37 @@ _loop_test() {
 _loop_status() {
   local project_path; project_path=$(pwd -P)
   local agent; agent=$(_project_agent)
+  local _is_paused=false
+  [[ -f "$_LOOP_STATE" ]] && grep -q "^status: paused" "$_LOOP_STATE" 2>/dev/null && _is_paused=true
   echo ""
   if [[ "$(uname)" == "Darwin" ]]; then
     echo -e "  Services   Agent: ${CYAN}${agent}${NC}"
     for svc in loop dream brief; do
       local state; state=$(_launchd_svc_state "$svc" "$project_path")
-      case "$state" in
-        enabled)       echo -e "    ${GREEN}${svc}     ● enabled${NC}" ;;
-        installed-off) echo -e "    ${YELLOW}${svc}     ⚠ installed/off${NC}   run: roll loop on" ;;
-        not-installed) echo -e "    ${RED}${svc}     ○ not installed${NC}   run: roll setup" ;;
-      esac
+      if [[ "$svc" == "loop" ]] && $_is_paused; then
+        local _paused_at; _paused_at=$(grep '^paused_at:' "$_LOOP_STATE" 2>/dev/null | awk '{print $2}' | tr -d '"')
+        local _dur=""
+        if [[ -n "$_paused_at" ]]; then
+          local _pe _ne _sec
+          _pe=$(date -d "$_paused_at" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$_paused_at" +%s 2>/dev/null || echo 0)
+          _ne=$(date +%s); _sec=$(( _ne - _pe ))
+          _dur="  ($(( _sec / 3600 ))h $(( (_sec % 3600) / 60 ))m ago)"
+        fi
+        echo -e "    ${YELLOW}loop     ⏸ paused${NC}${_dur}   run: roll loop resume"
+      else
+        case "$state" in
+          enabled)       echo -e "    ${GREEN}${svc}     ● enabled${NC}" ;;
+          installed-off) echo -e "    ${YELLOW}${svc}     ⚠ installed/off${NC}   run: roll loop on" ;;
+          not-installed) echo -e "    ${RED}${svc}     ○ not installed${NC}   run: roll setup" ;;
+        esac
+      fi
     done
   else
     local loop_enabled=false
     crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_enabled=true
-    if $loop_enabled; then
+    if $_is_paused; then
+      echo -e "  Scheduler  ${YELLOW}⏸ paused${NC}   run: roll loop resume"
+    elif $loop_enabled; then
       echo -e "  Scheduler  ${GREEN}● enabled${NC}   Agent: ${CYAN}${agent}${NC}"
     else
       echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"
@@ -2359,7 +2385,47 @@ _loop_status() {
   echo ""
 }
 
+_loop_pause() {
+  local project_path; project_path=$(pwd -P)
+  local paused_at; paused_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    local label; label=$(_launchd_label "loop" "$project_path")
+    if ! _launchd_is_loaded "$label"; then
+      warn "Loop not enabled — nothing to pause  loop 未启用，无需暂停"; return 0
+    fi
+    launchctl unload -w "$(_launchd_plist_path "loop" "$project_path")" 2>/dev/null || true
+  else
+    local slug; slug=$(_project_slug "$project_path")
+    touch "${_SHARED_ROOT}/loop/PAUSE-${slug}"
+  fi
+
+  mkdir -p "$(dirname "$_LOOP_STATE")"
+  printf 'status: paused\npaused_at: "%s"\npaused_reason: manual\n' "$paused_at" > "$_LOOP_STATE"
+  ok "Loop paused  已暂停   run: roll loop resume"
+}
+
 _loop_resume() {
+  local project_path; project_path=$(pwd -P)
+
+  # Scheduler resume: loop was manually paused via `roll loop pause`
+  if [[ -f "$_LOOP_STATE" ]] && grep -q "^status: paused" "$_LOOP_STATE" 2>/dev/null; then
+    if [[ "$(uname)" == "Darwin" ]]; then
+      local label; label=$(_launchd_label "loop" "$project_path")
+      local plist; plist=$(_launchd_plist_path "loop" "$project_path")
+      if [[ -f "$plist" ]]; then
+        launchctl load -w "$plist" 2>/dev/null || true
+      fi
+    else
+      local slug; slug=$(_project_slug "$project_path")
+      rm -f "${_SHARED_ROOT}/loop/PAUSE-${slug}"
+    fi
+    printf "status: idle\n" > "$_LOOP_STATE"
+    ok "Loop resumed  已恢复"
+    return 0
+  fi
+
+  # Interrupt resume: loop was running a Story and crashed
   if [[ ! -f "$_LOOP_STATE" ]]; then
     warn "No loop state found — nothing to resume  未找到 loop 状态，无需恢复"; return 0
   fi
@@ -2824,13 +2890,18 @@ _dashboard() {
 
   echo -e "\n  ${BOLD}${CYAN}${project_name}${NC}  ${YELLOW}v${VERSION}${NC}\n"
 
+  local _dash_loop_paused=false
+  [[ -f "$_LOOP_STATE" ]] && grep -q "^status: paused" "$_LOOP_STATE" 2>/dev/null && _dash_loop_paused=true
+
   local _dash_loop_enabled=false
   if [[ "$(uname)" == "Darwin" ]]; then
     _launchd_is_loaded "$(_launchd_label "loop" "$project_path")" && _dash_loop_enabled=true
   else
     crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && _dash_loop_enabled=true
   fi
-  if $_dash_loop_enabled; then
+  if $_dash_loop_paused; then
+    echo -e "  Loop  ${YELLOW}⏸ paused${NC}   run: roll loop resume"
+  elif $_dash_loop_enabled; then
     echo -e "  Loop  ${GREEN}● on${NC}   Agent: ${CYAN}${agent}${NC}"
     if [[ "$(uname)" == "Darwin" ]]; then
       local active_start active_end loop_minute dream_hour dream_minute brief_hour brief_minute

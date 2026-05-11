@@ -1,46 +1,39 @@
 # Changelog
 
 ## v2026.511.7
-- **Added**: loop 默认 auto-attach 弹窗 — 每次 loop 触发时，runner script 自动通过 osascript 开一个背景 Terminal 窗口 `tmux attach -t roll-loop-<slug>`，看 claude 实时打字干活；弹窗用 `delay 0.3` + 还原前一个 frontmost app 做到不抢焦点，tmux session 结束窗口保留供回看，关掉窗口 loop 仍在 tmux 里继续跑。
-- **Added**: `roll loop mute` / `roll loop unmute` 一键开关 — 不想看弹窗时 `roll loop mute` 创建 `~/.shared/roll/mute` 标记文件即刻静音，`unmute` 删掉它恢复；mute 状态对所有项目生效（一个开关治整机），`roll loop status` 新增 `Auto-attach  live | muted` 一行实时显示。
-- **Added**: tmux 升级为 `roll setup` 必装依赖 — 新增 `_ensure_tmux` helper：macOS 自动 `brew install tmux`（无 brew 给手动命令），Linux/其他系统打印对应包管理器安装指引；任何失败路径都返回 0，不阻塞 setup 主流程。
-- **Added**: `roll loop runs` 每次 loop 运行的快速可见性 — 单次 loop 结束追加一行 JSON 到 `~/.shared/roll/loop/runs.jsonl`（含 ts/project/run_id/status/built/skipped/alerts/tcr_count/duration_sec），新命令 `roll loop runs [N] [--all]` 倒序显示最近 N 次（默认 10），不必等次日早报就能查到中间 13 次 loop 各干了啥。
-- **Added**: loop 跑在 tmux session + `roll loop attach` 实时观看 — runner script 自动把 claude 包进 detached tmux session `roll-loop-<slug>`，输出同时 pipe 到 `cron.log`；执行 `roll loop attach` 可随时 attach 上去看它打字、写文件、commit，Ctrl-B D 分离后 loop 继续跑。
-- **Added**: loop 执行 story 前显式标记 🔨 In Progress — roll-loop SKILL 在调用 executor 之前先把 BACKLOG 中的故事状态从 📋 Todo 改为 🔨 In Progress 并提交 `chore: mark US-XXX in progress`，brief 简报和 peer agent 都能即时感知正在进行的工作。
-- **Added**: loop 启动时孤儿 🔨 自愈 — 扫描 BACKLOG 中无对应 state.yaml running item 的 🔨 条目，视为上次崩溃残留，自动 revert 回 📋 Todo 并写 ALERT，避免被"卡"在错误的中间状态里。
-- **Improved**: roll-build / roll-fix SKILL 状态转换段更新 — 显式接受 📋 Todo 或 🔨 In Progress 作为 ✅ Done 前置状态，loop 触发链路状态过渡更稳健。
-- **Improved**: roll-.dream 日志改为中文输出 — Dream Log 输出模板和"未发现 / 部分完成"等固定文案全部中文化，与 roll-brief 风格对齐。
-- **Fixed**: 集成测试 launchd ghost 泄漏 — `integration_teardown` 在删除 TEST_TMP 之前，先 `launchctl bootout` 该沙箱里被 `roll loop on` 注册到 user gui domain 的所有 `com.roll.*` 服务，避免删 plist 后 launchd 仍保留指向不存在路径的 ghost 注册。
-- **Fixed**: launchd runner 缺 brew PATH 导致 hook 子进程报 `node: command not found` — launchd 默认 PATH 不含 `/opt/homebrew/bin`，claude 通过 `sh -c` 调 SessionEnd hook 时找不到 node；inner runner 模板显式 `export PATH="/opt/homebrew/bin:$PATH"` 让整条 fork 链都能拿到 brew 工具。
-- **Fixed**: runs.jsonl schema 漂移 — 早期 claude 在 status/ts/alerts/project 字段自由发挥；SKILL Step 5 改为"严格契约"：ts 强制 UTC Z 后缀、project 用 slug、alerts/built/skipped 永远是数组、status 限定 `built/idle/failed` 三个 enum 无同义词，并禁止额外字段。
+- **Added**: loop 跑起来时自动弹出一个终端窗口，看 AI 实时干活
+- **Added**: `roll loop mute` 关掉自动弹窗，`roll loop unmute` 恢复
+- **Added**: `roll loop runs` — 查看 loop 最近几次都跑了什么
+- **Added**: `roll loop attach` — 随时接入正在跑的 loop 现场围观
+- **Added**: BACKLOG 任务执行中会实时显示 🔨 进度，不用等做完才知道
+- **Added**: `roll setup` 自动安装 tmux（macOS 通过 brew）
+- **Improved**: 代码巡检（dream）报告改为中文输出
+- **Fixed**: loop 在某些情况下完成后不正常退出
+- **Fixed**: loop 中途崩溃后下次启动会自动清理残留状态
 
 ## v2026.511.6
-- **Added**: Loop 并发安全 — runner script 启动时写入 per-project LOCK 文件并检测重入；活跃 PID 已存在则跳过本次，残留死 LOCK 自动清理；正常/异常退出均通过 trap 清掉 LOCK。彻底防止两个 loop 实例同时启动造成的 BACKLOG/git 冲突。
-- **Added**: roll-loop SKILL 显式声明 skip-🔨 In Progress 语义 — claude 扫 BACKLOG 时跳过已被人工或 peer agent 标记的执行中条目，为人机协同和多 agent 协作奠定基础。
-- **Fixed**: 5 个 pre-existing 测试失败 — `run_roll` helper 切换到 TEST_TMP 作为 cwd 避免 slug 冲突；loop status 测试匹配三态显示新文案；dashboard 测试匹配 `_launchd_svc_state` + array 派生 schedule 的新结构。
+- **Fixed**: 多个 loop 实例不会再因为定时重复触发而互相打架
 
 ## v2026.511.5
-- **Fixed**: launchd plist 自动 reload — plist 内容变更且服务已加载时自动 unload + reload，升级 roll 后 loop 服务立即生效，无需手动重启
-- **Improved**: roll loop status/monitor 三态展示 — 区分 ● 运行中 / ⚠ 已安装未加载 / ○ 未安装，并给出对应的自愈操作提示
+- **Fixed**: 升级 roll 后 loop 服务自动生效，无需手动重启
+- **Improved**: `roll loop status` 三态显示，看得清是真没装、装了没启、还是在跑
 
 ## v2026.511.4
-- **Fixed**: roll init 自动重建 launchd runner scripts — 升级 roll 后直接跑 `roll init` 即可迁移到独立 runner，无需手动执行 roll setup 或 roll loop on
+- **Fixed**: 升级 roll 后 `roll init` 自动迁移 loop 配置，少一步手动操作
 
 ## v2026.511.3
-- **Fixed**: loop/dream/brief 多项目运行隔离 — 共享 run.sh 导致所有项目的 loop 在同一目录执行，改为每个项目独立 runner 脚本（run-{slug}.sh），彻底隔离多项目并发执行环境
-- **Fixed**: roll release 自发版拦截 — 在 roll 自身项目执行 `roll release` 时自动拦截并提示改用 scripts/release.sh，防止误操作绕过 2FA
+- **Fixed**: 多个项目同时跑 loop，互不干扰
+- **Fixed**: 在 roll 项目里运行 `roll release` 会提示改用 `scripts/release.sh`
 
 ## v2026.511.2
-- **Added**: roll loop monitor 三服务状态 — 监控台新增 loop/dream/brief 三个 launchd 服务的运行状态、调度时间和实时 log tail，一屏掌握全局执行情况
-- **Fixed**: dashboard 多处展示问题 — 修复 pending_count 算术错误、brief 内联显示 release readiness、移除底部冗余命令列表
-- **Fixed**: loop 异常退出后 state 未重置 — 防止 queue 卡住导致后续任务无法执行
-- **Fixed**: CI 稳定性 — 修复 _notify_update 裸返回和时间断言，消除环境差异引起的随机失败
-- **Improved**: roll-brief 输出格式 — 序号命名、省略空 section、元信息格式精简，减少无效噪音
+- **Added**: `roll loop monitor` — 一屏看 loop/dream/brief 三个调度服务状态
+- **Fixed**: dashboard 待办数、release 状态显示问题
+- **Fixed**: loop 异常退出后队列卡住不再继续执行
+- **Improved**: 简报输出更精简，去掉空白段落和冗余信息
 
 ## v2026.511.1
-- **Changed**: roll loop 调度器切换到 launchd（macOS）— `roll setup` 自动安装 loop/dream/brief 三个 launchd 服务（默认关闭），`roll loop on/off/status` 统一走 launchctl 管理，幂等安装，Linux 保留 crontab 回退路径
-- **Added**: roll-loop TCR 硬校验 — 故事完成后自动统计 `tcr:` 微提交数量，为 0 时将故事状态回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏
-- **Fixed**: CI 测试环境兼容 — 移除依赖本地 state.yaml 的 hello_world.bats，修复 GitHub Actions 持续失败
+- **Changed**: macOS 上 loop 调度切换到 launchd，比 crontab 更稳定
+- **Added**: agent 跳过 TCR 节奏时自动拦回 Todo，强制重做
 
 ## v2026.510.10
 - **Fixed**: release.sh changelog 同步时序修复 — 修正条件逻辑和执行顺序，确保每次发版时 changelog 正确更新

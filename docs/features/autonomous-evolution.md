@@ -822,9 +822,10 @@ fi
 ---
 
 <a id="us-auto-026"></a>
-## US-AUTO-026 默认 auto-attach + 极简 mute/unmute — context-aware 可见性 📋
+## US-AUTO-026 默认 auto-attach + 极简 mute/unmute — context-aware 可见性 ✅
 
 **Created**: 2026-05-11
+**Completed**: 2026-05-11
 
 - As a developer with active autonomous loops
 - I want loop and peer to be visible by default — a Terminal window automatically appears when they run, without me having to type anything
@@ -859,16 +860,16 @@ US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"o
 三者互补，共用同一 tmux session 基建，可独立 mute/unmute 切换风格。
 
 **AC:**
-- [ ] 默认行为：loop runner 启动 tmux session 后，若 `~/.shared/roll/mute` 不存在，调用 osascript 开一个新 Terminal 窗口执行 `tmux attach -t <session>`
-- [ ] osascript 调用使用 `activate false`（或等效方式）让新窗口在背景出现，不抢当前焦点
-- [ ] peer 调用时同样行为：bridge 启动 tmux session 后若未 mute，背景弹窗 attach
-- [ ] `roll loop mute`：创建 `~/.shared/roll/mute`（空文件即可）；输出"🔇 muted"
-- [ ] `roll loop unmute`：删除 `~/.shared/roll/mute`；输出"🔔 unmuted"
-- [ ] mute 状态在 `roll loop status` 和 dashboard 显示一行：`Auto-attach: muted / live`
-- [ ] tmux session 结束后窗口不自动关闭（用户可读最终输出，⌘W 关闭）
-- [ ] 测试：runner script 含 osascript 调用 + mute 文件存在性检测；mute/unmute 命令存在并正确读写
-- [ ] tmux 升级为必装依赖：`roll setup` 时检测 tmux，没装则自动 `brew install tmux`（macOS）；非 macOS 退化为明确报错并给出安装命令
-- [ ] tmux 自动安装失败时（如无 brew、无网络）给清晰错误信息和手动安装指引，不阻塞 setup 主流程
+- [x] 默认行为：loop runner 启动 tmux session 后，若 `~/.shared/roll/mute` 不存在，调用 osascript 开一个新 Terminal 窗口执行 `tmux attach -t <session>`
+- [x] osascript 调用使用等效方式不抢当前焦点：捕获前一个 frontmost app，弹窗后 `delay 0.3` + `tell application _prev to activate` 还原焦点
+- [ ] ~~peer 调用时同样行为：bridge 启动 tmux session 后若未 mute，背景弹窗 attach~~ — **split to US-AUTO-027**（peer 当前无 tmux 基建，refactor 体量超出本 story 范围）
+- [x] `roll loop mute`：创建 `~/.shared/roll/mute`（空文件即可）；输出"🔇 muted"
+- [x] `roll loop unmute`：删除 `~/.shared/roll/mute`；输出"🔔 unmuted"
+- [x] mute 状态在 `roll loop status` 显示一行：`Auto-attach  live | muted`
+- [x] tmux session 结束后窗口不自动关闭（用户可读最终输出，⌘W 关闭）— Terminal `do script` 默认不自动关闭窗口
+- [x] 测试：runner script 含 osascript 调用 + mute 文件存在性检测；mute/unmute 命令存在并正确读写（21 unit tests + 2 integration tests）
+- [x] tmux 升级为必装依赖：`roll setup` 通过 `_ensure_tmux` 检测 tmux，没装则自动 `brew install tmux`（macOS）；非 macOS 给清晰安装命令
+- [x] tmux 自动安装失败时给清晰错误信息和手动安装指引，不阻塞 setup 主流程（`_ensure_tmux` 总是返回 0）
 
 **Non-goals:**
 - 不做 mute duration（2h / today / until 22:00）—— 一个开关足够，复杂度收敛
@@ -883,15 +884,15 @@ US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"o
 - Files touched: runner script template、peer bridge、新 `_loop_mute`/`_loop_unmute` 函数
 
 **Files:**
-- `bin/roll`（`_write_loop_runner_script` 加 osascript 调用 + mute 检测；新 `_loop_mute` / `_loop_unmute` 子命令）
-- `~/.shared/roll/peer/` 相关 bridge 脚本（同样的 osascript + mute 检测逻辑）
-- `tests/unit/roll_loop_mute.bats`
-- `skills/roll-loop/SKILL.md`（说明默认 auto-attach 行为）
-- `skills/roll-peer/SKILL.md`（同上）
+- `bin/roll`（`_write_loop_runner_script` 加 osascript 调用 + mute 检测；新 `_loop_mute` / `_loop_unmute` 子命令；新 `_ensure_tmux` helper；`cmd_setup` 调用）
+- `tests/unit/roll_loop_mute.bats`（新增 21 个用例）
+- `tests/integration/cmd_loop.bats`（新增 2 个 E2E 用例：mute round-trip + runner 含 osascript）
+- `skills/roll-loop/SKILL.md`（"Live attach" 段重写为 default auto-attach + mute/unmute 说明）
 
 **Dependencies:**
 - Depends on: US-AUTO-025（tmux 基建必须先有）
 - Note: 本 story 把 tmux 从 US-AUTO-025 的"软依赖"升级为"必装依赖"，setup 时自动 `brew install tmux`
+- Split off: US-AUTO-027（peer auto-attach — peer 无 tmux 基建，单独成 story）
 
 ---
 

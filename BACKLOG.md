@@ -90,7 +90,7 @@
 |-------|-------------|--------|
 | [US-CL-001](docs/features/changelog-integration.md#us-cl-001) | roll-build auto-trigger changelog after deploy | ✅ Done |
 | [US-CL-002](docs/features/changelog-integration.md#us-cl-002) | roll-.changelog support first-time creation with backfill | ✅ Done |
-| [US-CL-003](docs/features/changelog-integration.md#us-cl-003) | 消除独立的 changelog commit — 并入 story 完成提交 | 📋 Todo |
+| [US-CL-003](docs/features/changelog-integration.md#us-cl-003) | 消除独立的 changelog commit — 并入 story 完成提交 | 🔨 In Progress |
 
 ## 🐛 Bug Fixes
 | ID | Description | Status |

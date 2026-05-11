@@ -2004,29 +2004,29 @@ if command -v tmux >/dev/null 2>&1; then
   # tmux session so the user can watch the loop work in real time. Best-effort
   # focus retention: capture the current frontmost app and re-activate after.
   if [ ! -f "\$HOME/.shared/roll/mute" ] && [ "\$(uname)" = "Darwin" ]; then
-    case "${terminal_pref}" in
-      ghostty|Ghostty)
-        (open -na Ghostty.app --args -e tmux attach -t \$SESSION >/dev/null 2>&1) &
-        ;;
-      iTerm2|iTerm)
-        (osascript \\
-          -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
-          -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t \$SESSION\"" \\
-          -e 'delay 0.3' \\
-          -e 'try' \\
-          -e 'tell application _prev to activate' \\
-          -e 'end try' >/dev/null 2>&1) &
-        ;;
-      *)
-        command -v osascript >/dev/null 2>&1 && (osascript \\
-          -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
-          -e "tell application \"Terminal\" to do script \"tmux attach -t \$SESSION\"" \\
-          -e 'delay 0.3' \\
-          -e 'try' \\
-          -e 'tell application _prev to activate' \\
-          -e 'end try' >/dev/null 2>&1) &
-        ;;
-    esac
+    # Runtime terminal detection: try preferred first, fallback through installed apps.
+    # open -na returns non-zero when app not found, so || chain works as fallback.
+    _PREF="${terminal_pref}"
+    _launched=0
+    if [ "\$_PREF" = "ghostty" ] || [ "\$_PREF" = "Ghostty" ]; then
+      open -na Ghostty.app --args -e tmux attach -t \$SESSION >/dev/null 2>&1 && _launched=1 || true
+    fi
+    if [ "\$_launched" -eq 0 ] && { [ "\$_PREF" = "iTerm2" ] || [ "\$_PREF" = "iTerm" ] || [ -d "/Applications/iTerm.app" ]; }; then
+      osascript \\
+        -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
+        -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t \$SESSION\"" \\
+        -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 \\
+        && _launched=1 || true
+    fi
+    if [ "\$_launched" -eq 0 ] && [ -d "/Applications/Ghostty.app" ]; then
+      open -na Ghostty.app --args -e tmux attach -t \$SESSION >/dev/null 2>&1 && _launched=1 || true
+    fi
+    if [ "\$_launched" -eq 0 ] && command -v osascript >/dev/null 2>&1; then
+      osascript \\
+        -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
+        -e "tell application \"Terminal\" to do script \"tmux attach -t \$SESSION\"" \\
+        -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
+    fi
   fi
   while tmux has-session -t "\$SESSION" 2>/dev/null; do sleep 5; done
 else

@@ -1038,18 +1038,6 @@ scan_project_type_from_files() {
   fi
 }
 
-# ─── Helper: true when cwd has no existing source code ───────────────────────
-is_fresh_project() {
-  local dir="${1:-.}"
-  ! ( [[ -f "$dir/package.json" ]] || [[ -f "$dir/go.mod" ]] || \
-      [[ -f "$dir/Cargo.toml" ]] || [[ -f "$dir/requirements.txt" ]] || \
-      [[ -f "$dir/pyproject.toml" ]] || \
-      [[ -d "$dir/src" ]] || [[ -d "$dir/api" ]] || [[ -d "$dir/app" ]] )
-}
-
-# ─── Helper: make a scaffold dir + .gitkeep ───────────────────────────────────
-_mkscaffold() { mkdir -p "$1"; touch "$1/.gitkeep"; }
-
 # ─── Helper: write starter BACKLOG.md (no-op if exists) ──────────────────────
 _write_backlog() {
   if [[ -f "$1" ]]; then

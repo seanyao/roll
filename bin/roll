@@ -1864,6 +1864,19 @@ _launchd_is_loaded() {
   launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep -qF "\"$1\" => enabled"
 }
 
+_launchd_svc_state() {
+  local svc="$1" project_path="$2"
+  local label; label=$(_launchd_label "$svc" "$project_path")
+  local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
+  if _launchd_is_loaded "$label"; then
+    echo "enabled"
+  elif [[ -f "$plist" ]]; then
+    echo "installed-off"
+  else
+    echo "not-installed"
+  fi
+}
+
 # Install launchd plist files (disabled by default) and runner scripts for
 # a given project path. Idempotent — skips unchanged files. Does NOT load.
 # Schedule times are read from ~/.roll/config.yaml; missing fields are
@@ -2075,16 +2088,24 @@ _loop_status() {
   local project_path; project_path=$(pwd -P)
   local agent; agent=$(_project_agent)
   echo ""
-  local loop_enabled=false
   if [[ "$(uname)" == "Darwin" ]]; then
-    _launchd_is_loaded "$(_launchd_label "loop" "$project_path")" && loop_enabled=true
+    echo -e "  Services   Agent: ${CYAN}${agent}${NC}"
+    for svc in loop dream brief; do
+      local state; state=$(_launchd_svc_state "$svc" "$project_path")
+      case "$state" in
+        enabled)       echo -e "    ${GREEN}${svc}     ● enabled${NC}" ;;
+        installed-off) echo -e "    ${YELLOW}${svc}     ⚠ installed/off${NC}   run: roll loop on" ;;
+        not-installed) echo -e "    ${RED}${svc}     ○ not installed${NC}   run: roll setup" ;;
+      esac
+    done
   else
+    local loop_enabled=false
     crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_enabled=true
-  fi
-  if $loop_enabled; then
-    echo -e "  Scheduler  ${GREEN}● enabled${NC}   Agent: ${CYAN}${agent}${NC}"
-  else
-    echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"
+    if $loop_enabled; then
+      echo -e "  Scheduler  ${GREEN}● enabled${NC}   Agent: ${CYAN}${agent}${NC}"
+    else
+      echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"
+    fi
   fi
   [[ -f "$_LOOP_ALERT" ]] && { echo ""; echo -e "  ${RED}⚠ ALERT:${NC}"; sed 's/^/    /' "$_LOOP_ALERT"; }
   [[ -f "$_LOOP_STATE" ]] && { echo ""; echo "  State:"; sed 's/^/    /' "$_LOOP_STATE"; }
@@ -2193,11 +2214,12 @@ _loop_monitor() {
       local scheds=("$loop_sched" "$dream_sched" "$brief_sched")
       for i in "${!svcs[@]}"; do
         local svc="${svcs[$i]}" schedule="${scheds[$i]}"
-        if _launchd_is_loaded "$(_launchd_label "$svc" "$project_path")"; then
-          printf "    ${GREEN}%-8s ● enabled${NC}   (%s)\n" "$svc" "$schedule"
-        else
-          printf "    ${YELLOW}%-8s ○ disabled${NC}  (%s)\n" "$svc" "$schedule"
-        fi
+        local state; state=$(_launchd_svc_state "$svc" "$project_path")
+        case "$state" in
+          enabled)       printf "    ${GREEN}%-8s ● enabled${NC}       (%s)\n" "$svc" "$schedule" ;;
+          installed-off) printf "    ${YELLOW}%-8s ⚠ installed/off${NC}  (%s)  run: roll loop on\n" "$svc" "$schedule" ;;
+          not-installed) printf "    ${RED}%-8s ○ not installed${NC}  (%s)  run: roll setup\n" "$svc" "$schedule" ;;
+        esac
       done
     else
       if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then

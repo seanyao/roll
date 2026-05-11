@@ -70,23 +70,70 @@ EOF
 
 # ─── Scheduler detection (macOS: launchd, not crontab) ───────────────────────
 
-@test "loop monitor: scheduler detection uses _launchd_is_loaded on macOS" {
+@test "loop monitor: scheduler detection uses _launchd_svc_state on macOS" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
-  # _loop_monitor must call _launchd_is_loaded (macOS path)
   local monitor_body
   monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$monitor_body" | grep -q "_launchd_is_loaded"
+  echo "$monitor_body" | grep -q "_launchd_svc_state"
 }
 
-# ─── Three-service status display (US-AUTO-011) ──────────────────────────────
+# ─── Three-service status display (US-AUTO-011 / US-AUTO-015) ────────────────
 
 @test "loop monitor: shows three service lines (loop, dream, brief) on macOS" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   local monitor_body
   monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$monitor_body" | grep -q '"loop:hourly"'
-  echo "$monitor_body" | grep -q '"dream:03:00"'
-  echo "$monitor_body" | grep -q '"brief:09:00"'
+  echo "$monitor_body" | grep -q '_launchd_svc_state'
+  echo "$monitor_body" | grep -q '"loop"'
+  echo "$monitor_body" | grep -q '"dream"'
+  echo "$monitor_body" | grep -q '"brief"'
+}
+
+@test "loop monitor: installed/off state shows repair command" {
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
+  local monitor_body
+  monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$monitor_body" | grep -q 'roll loop on'
+}
+
+@test "loop monitor: not-installed state shows setup command" {
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
+  local monitor_body
+  monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$monitor_body" | grep -q 'roll setup'
+}
+
+@test "_launchd_svc_state: loaded service returns enabled" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _launchd_is_loaded() { return 0; }
+  local state; state=$(_launchd_svc_state "loop" "$proj")
+  [ "$state" = "enabled" ]
+  rm -rf "$tmp_dir"
+}
+
+@test "_launchd_svc_state: plist exists but not loaded returns installed-off" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  mkdir -p "${tmp_dir}/LaunchAgents"
+  _launchd_is_loaded() { return 1; }
+  local label; label=$(_launchd_label "loop" "$proj")
+  touch "${tmp_dir}/LaunchAgents/${label}.plist"
+  local state; state=$(_launchd_svc_state "loop" "$proj")
+  [ "$state" = "installed-off" ]
+  rm -rf "$tmp_dir"
+}
+
+@test "_launchd_svc_state: no plist file returns not-installed" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _launchd_is_loaded() { return 1; }
+  local state; state=$(_launchd_svc_state "loop" "$proj")
+  [ "$state" = "not-installed" ]
+  rm -rf "$tmp_dir"
 }
 
 @test "loop monitor: log tail reads from launchd.log (not cron.log)" {

@@ -44,3 +44,15 @@ Architectural friction signals flagged during story execution.
 **Observation**: is_fresh_project() 是 cmd_init() 简化前的遗留物，_mkscaffold() 同源；保留只增加阅读噪音。
 
 **Scope**: `bin/roll` 删除两函数及其注释；`tests/unit/is_fresh_project.bats` 删除；`tests/unit/sanity.bats` 追加回归 guard
+
+---
+
+## REFACTOR-004 修复 _write_backlog/_ensure_features_dir 使用错误变量名 ✅
+
+**Flagged**: 2026-05-11 (dream scan)
+**Completed**: 2026-05-12
+**Signal**: `_write_backlog()` 和 `_ensure_features_dir()` 向 `_WK_MERGE_SUMMARY` 追加条目，但 `print_merge_summary()` 只读 `_ROLL_MERGE_SUMMARY`，导致 `roll init` 摘要框中 BACKLOG.md 和 docs/features/ 静默缺失。
+
+**Observation**: `_WK_MERGE_SUMMARY` 是未声明的孤儿变量（从未被初始化或读取），实际上等于写入 /dev/null。用户看到 `[roll] Created: BACKLOG.md` 的 ok 输出，却在摘要框里找不到对应条目，行为不一致。
+
+**Scope**: `bin/roll` 4 处 `_WK_MERGE_SUMMARY` → `_ROLL_MERGE_SUMMARY`；`tests/integration/cmd_init.bats` 追加 2 条摘要框回归测试

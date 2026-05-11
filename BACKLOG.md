@@ -116,7 +116,7 @@
 | FIX-020 | loop 执行过程必须可视化（必要项，不是 nice-to-have）— loop 是 launchd 非人触发，attach 窗口长时间空白等于"AI 在干啥完全黑盒"；inner runner 给 claude 加 `--verbose` 让工具调用、思考阶段事件实时输出，看得见才能信任 | ✅ Done |
 | FIX-021 | `roll loop now` 行为应与 launchd 服务完全一致 — 当前走 _agent_run_skill 旁路，没 tmux 弹窗、没 LOCK、没 --verbose；改为直接调 runner script（设 ROLL_LOOP_FORCE 绕过 active-window 检查），并把 "Triggering loop cycle" 翻译成 "正在启动新的循环..." | ⚠️ Code done, no E2E 验证 |
 | FIX-022 | auto-attach 硬编码 Terminal.app，忽略用户实际终端 — 装了 Ghostty/iTerm/WezTerm 的用户被强制弹 Terminal.app 多余窗口；应检测 TERM_PROGRAM + 读 config `loop_attach_terminal` 偏好，分别用 `ghostty +new-window`、iTerm AppleScript、Terminal osascript 等正确方式 | 📋 Todo |
-| FIX-023 | loop 可视化链路无法稳定测试 — claude API 5xx 时无法判断是基础设施 bug 还是 AI 行为；加 `roll loop test` 命令用假 claude（echo + sleep）跑一遍 10 秒内验证 tmux/弹窗/PATH/LOCK/state 收尾整条链路，不烧 API；FIX-021 应在 FIX-023 完成后回头补端到端验证 | 📋 Todo |
+| FIX-023 | loop 可视化链路无 smoke 测试 — 真跑 backlog 太慢且依赖 BACKLOG 有内容；加 `roll loop test` 用**真 claude** 跑个 trivial prompt（如 `-p "Reply: hello"`），5-10 秒验证整条链路（tmux/弹窗/--verbose 流式/PATH/SessionEnd hook/LOCK/state 收尾），不撞 BACKLOG 但用真 API（API 挂了就该挂，不要假装基础设施 OK）；FIX-021 端到端验证依赖此 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

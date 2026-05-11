@@ -622,9 +622,10 @@ $roll-design 当前全程同步，有多个人类等待点（Clarify/Discuss/Con
 ---
 
 <a id="us-auto-021"></a>
-## US-AUTO-021 `roll status` 增加全局 loop 概览区块 📋
+## US-AUTO-021 `roll status` 增加全局 loop 概览区块 ✅
 
 **Created**: 2026-05-11
+**Completed**: 2026-05-11
 **Promoted from**: IDEA-010
 
 - As a developer managing multiple projects with roll
@@ -632,11 +633,11 @@ $roll-design 当前全程同步，有多个人类等待点（Clarify/Discuss/Con
 - So that I can see the health of all autonomous loops in one command without cd-ing into each project
 
 **AC:**
-- [ ] `roll status` 在现有 convention/skills 区块后追加 "Loop Overview" 区块
-- [ ] 扫描 `~/Library/LaunchAgents/com.roll.loop.*.plist`，提取项目路径和 slug
-- [ ] 每个项目显示：项目名、loop 状态（● on / ○ off）、实际调度时间（从 plist 读取）、backlog 待办数（扫描对应项目的 BACKLOG.md）
-- [ ] 项目路径不存在时显示 `(path missing)` 而非报错
-- [ ] 无任何已注册项目时跳过该区块（不输出空表格）
+- [x] `roll status` 在现有 convention/skills 区块后追加 "Loop Overview" 区块
+- [x] 扫描 `~/Library/LaunchAgents/com.roll.loop.*.plist`，提取项目路径和 slug
+- [x] 每个项目显示：项目名、loop 状态（● on / ○ off）、实际调度时间（从 plist 读取）、backlog 待办数（扫描对应项目的 BACKLOG.md）
+- [x] 项目路径不存在时显示 `(path missing)` 而非报错
+- [x] 无任何已注册项目时跳过该区块（不输出空表格）
 
 **Domain Model:**
 - Context: Autonomous Evolution
@@ -644,8 +645,8 @@ $roll-design 当前全程同步，有多个人类等待点（Clarify/Discuss/Con
 - Files touched: `bin/roll` → `cmd_status`
 
 **Files:**
-- `bin/roll`（`cmd_status` 函数）
-- `tests/unit/roll_status.bats`（新增 loop overview 测试用例）
+- `bin/roll`（`_status_loop_overview` + `cmd_status` call）
+- `tests/unit/roll_status.bats`（8 test cases covering all ACs）
 
 ---
 

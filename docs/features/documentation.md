@@ -92,21 +92,22 @@
 ---
 
 <a id="us-doc-004"></a>
-## US-DOC-004 迁移现有散落文档到新结构 📋
+## US-DOC-004 迁移现有散落文档到新结构 ✅
 
 **Created**: 2026-05-12
+**Completed**: 2026-05-12
 
 - As a contributor navigating the repo
 - I want existing documentation to live in the correct location under the new structure
 - So that the docs directory is clean and predictable
 
 **AC:**
-- [ ] `docs/methodology.md` (ZH) → `docs/guide/zh/methodology.md`
-- [ ] `docs/methodology-en.md` (EN) → `docs/guide/en/methodology.md`
-- [ ] `docs/skill-selection-guide.md` → `docs/guide/en/skills.md` + `docs/guide/zh/skills.md`（内容按语言拆分）
-- [ ] `docs/loop-autorun-verification.md` → `docs/practices/loop-autorun-verification.md`
-- [ ] `docs/` 根目录不再有散落的 `.md` 文件（briefs/ dream/ guide/ domain/ features/ practices/ 之外）
-- [ ] 所有移动的文件原路径留 redirect 注释或直接删除（不保留空壳）
+- [x] `docs/methodology.md` (ZH) → `docs/guide/zh/methodology.md`
+- [x] `docs/methodology-en.md` (EN) → `docs/guide/en/methodology.md`
+- [x] `docs/skill-selection-guide.md` → `docs/guide/en/skills.md` + `docs/guide/zh/skills.md`（内容按语言拆分）
+- [x] `docs/loop-autorun-verification.md` → `docs/practices/loop-autorun-verification.md`
+- [x] `docs/` 根目录不再有散落的 `.md` 文件（briefs/ dream/ guide/ domain/ features/ practices/ 之外）
+- [x] 所有移动的文件原路径留 redirect 注释或直接删除（不保留空壳）
 
 **Files:**
 - `docs/guide/en/methodology.md` (moved)

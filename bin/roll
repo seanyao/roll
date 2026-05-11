@@ -1913,7 +1913,13 @@ _install_launchd_plists() {
     [[ -f "$plist" ]] && before=$(cat "$plist")
     _write_launchd_plist "$plist" "$label" "$project_path" "$minute" "$hour" "$runner"
     local after; after=$(cat "$plist")
-    [[ "$before" != "$after" ]] && updated=$((updated + 1))
+    if [[ "$before" != "$after" ]]; then
+      updated=$((updated + 1))
+      if _launchd_is_loaded "$label"; then
+        launchctl unload "$plist" 2>/dev/null || true
+        launchctl load "$plist" 2>/dev/null || true
+      fi
+    fi
   done
 
   if [[ $updated -gt 0 ]]; then
@@ -1975,7 +1981,7 @@ _loop_on() {
       local label; label=$(_launchd_label "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
         all_loaded=false
-        launchctl load "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+        launchctl load -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
       fi
     done
 
@@ -2029,7 +2035,7 @@ _loop_off() {
       local label; label=$(_launchd_label "$svc" "$project_path")
       if _launchd_is_loaded "$label"; then
         any_loaded=true
-        launchctl unload "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+        launchctl unload -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
       fi
     done
     if ! $any_loaded; then

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.512.1
 - **Added**: `roll loop pause` / `roll loop resume` — 想自己上手时一键暂停 loop，做完再恢复
 - **Added**: `roll status` 新增所有项目的 loop 状态一览 — 调度时间、待办数、是否在跑
 - **Fixed**: `roll loop attach` 不再黑屏，AI 干活过程实时可见

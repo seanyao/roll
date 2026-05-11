@@ -101,6 +101,19 @@ CHANGELOG 是给**使用者**看的，不是给维护者看的。一句话讲清
 - **Fixed**: 多个 loop 实例不会再互相打架（重复触发自动跳过）
 ```
 
+❌ 说机制不说现象（Fix 类最常犯）：
+```
+- **Fixed**: `roll loop runs` 过滤条件从完整路径改为 slug，历史记录不再因路径不匹配而消失
+- **Fixed**: `roll-loop` skill 写入 `runs.jsonl` 时 project slug 计算方式明确，避免写成 bare basename
+```
+
+✅ 直接说用户看到了什么：
+```
+- **Fixed**: `roll loop runs` 不再报"当前项目尚无运行记录"，历史记录正常显示
+```
+
+Fix 类句式参考：`<命令/功能> 不再 <之前的坏现象>`，或 `<命令/功能> 现在 <正常表现>`。内部有几个 bug 导致这一个现象，合并成一条。
+
 ### 4. Section Header — Always `## Unreleased`
 
 **⚠️ do NOT guess version numbers.** Only `scripts/release.sh` assigns concrete

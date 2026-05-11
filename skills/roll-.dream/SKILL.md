@@ -97,6 +97,46 @@ Find repeated structures that warrant extraction:
 Flag: any pattern appearing 3+ times that could be extracted into a shared
 utility or convention.
 
+### Scan 5 — Doc Coverage Check
+
+Check documentation structure against the conventions in `AGENTS.md § Documentation Conventions`.
+
+**Check A — BACKLOG Done stories missing guide/en/ docs:**
+
+Scan BACKLOG.md for features with multiple ✅ Done stories. For each feature epic, check whether a corresponding `docs/guide/en/<topic>.md` exists. If a feature has ≥3 Done stories and no guide doc, flag it.
+
+**Check B — guide/en/ files missing guide/zh/ translations:**
+
+```bash
+for f in docs/guide/en/*.md; do
+  base=$(basename "$f")
+  [ ! -f "docs/guide/zh/$base" ] && echo "missing ZH: $base"
+done
+```
+
+Flag any `docs/guide/en/<topic>.md` that has no matching `docs/guide/zh/<topic>.md`, provided the EN file has existed since before the most recent git tag (i.e., at least one release cycle old).
+
+**Check C — stray files in docs/ root (根目录散落文件):**
+
+```bash
+find docs/ -maxdepth 1 -name '*.md' 2>/dev/null
+```
+
+Flag any `.md` file directly in `docs/` root (allowed subdirs: `guide/`, `domain/`, `features/`, `practices/`, `briefs/`, `dream/`).
+
+**REFACTOR entry format for doc findings:**
+
+```markdown
+| REFACTOR-XXX | docs: {具体缺口描述} — flagged by dream {YYYY-MM-DD} | 📋 Todo |
+```
+
+**Dream log section** — add after existing sections:
+
+```markdown
+## 文档覆盖度
+{发现内容 或 "文档结构符合规范，无缺口。"}
+```
+
 ## Output
 
 ### REFACTOR Entry (BACKLOG.md)
@@ -121,7 +161,7 @@ without context switching:
 # Dream Log {YYYY-MM-DD}
 
 ## 概要
-- 扫描项：死代码 / 架构漂移 / 裁剪候选 / 新兴模式
+- 扫描项：死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 文档覆盖度
 - 发现：{N} 项标记，{M} 个 REFACTOR 条目已创建
 
 ## 死代码

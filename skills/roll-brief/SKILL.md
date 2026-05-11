@@ -78,6 +78,9 @@ From BACKLOG.md and git log, classify all items since last brief:
 - **Queue**: items still 📋 Todo (ordered by priority)
 - **Dream findings**: any REFACTOR entries added by roll-.dream since last brief
 - **Escalations**: any ALERT files in `~/.shared/roll/loop/` or `~/.shared/roll/dream/`
+- **Doc coverage**: compute from `docs/guide/en/` and `docs/guide/zh/`:
+  - EN coverage = number of files in `docs/guide/en/`
+  - ZH translation rate = files in `docs/guide/zh/` ÷ files in `docs/guide/en/` × 100%
 
 ### Step 3 — Assess Release Readiness
 
@@ -131,6 +134,12 @@ A simple heuristic — not a gate, just a signal for the human:
 <!-- 仅当有 ESCALATE 告警时输出 -->
 ## 需人工介入
 {告警内容}
+
+<!-- 始终输出 doc coverage 数字；若无缺口写"覆盖完整" -->
+## 文档覆盖度
+- guide/en: {N} 个文档
+- ZH 翻译率：{M}/{N}（{%}）
+- {缺口列表 或 "覆盖完整，无缺口。"}
 
 ## 发版就绪
 {✅ 可发版 / ⚠️ 暂缓 — 原因}

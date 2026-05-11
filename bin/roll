@@ -1726,7 +1726,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
   case "$agent" in
-    claude)   claude -p "$content" ;;
+    claude)   claude --verbose -p "$content" ;;
     kimi)     kimi --quiet -p "$content" ;;
     deepseek) deepseek "$content" ;;
     pi)       pi -p "$content" ;;

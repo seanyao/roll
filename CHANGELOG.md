@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.512.6
 - **Added**: peer review 现在也会自动弹出终端窗口，实时观察跨 AI 协商过程（mute 关闭同一开关）
 - **Added**: `docs/guide/en/` — loop/dream/peer 英文用户指南上线，覆盖所有子命令和使用场景
 - **Added**: `docs/guide/zh/` — loop/dream/peer 中文用户指南上线，内容与英文版语义一致

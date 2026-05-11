@@ -134,6 +134,7 @@
 | [US-AUTO-018](docs/features/autonomous-evolution.md#us-auto-018) | roll-brief 和 roll-.dream 生成文档后自动 git commit — brief 显式化 commit；dream 标准化现有隐式行为 | 📋 Todo |
 | [US-AUTO-019](docs/features/autonomous-evolution.md#us-auto-019) | $roll-design 非交互模式 + IDEA 晋升路径 — --from-file / --from-idea，人可离线丢需求等 loop 执行 | 📋 Todo |
 | [US-AUTO-020](docs/features/autonomous-evolution.md#us-auto-020) | roll-design + roll-loop SKILL 文档补充 — Confirm 语义澄清 + 紧急绕过路径说明 | 📋 Todo |
+| [US-AUTO-021](docs/features/autonomous-evolution.md#us-auto-021) | `roll status` 增加全局 loop 概览区块 — 展示本机所有项目的 loop 状态、调度时间、backlog 待办数 | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |
@@ -156,3 +157,4 @@
 | IDEA-007 | loop 调度时间和默认 agent 移入配置文件（.roll.yaml 或 ~/.roll/config.yaml），方便用户调整而不需要改 bin/roll 源码 | ✅ Done → US-AUTO-012 |
 | IDEA-008 | roll dashboard 重设计 — 当前布局不完整，需要重新规划整体布局、信息密度、交互方式，作为项目入口的体验应该更好 | 📋 Todo |
 | IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | 📋 Todo |
+| IDEA-010 | `roll status` 增加全局 loop 概览区块 — 在现有 convention/skills 状态后追加本机所有项目的 loop 服务状态、调度时间和 backlog 待办数 | ✅ Done → US-AUTO-021 |

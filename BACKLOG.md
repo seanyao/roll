@@ -143,7 +143,7 @@
 | [US-AUTO-017](docs/features/autonomous-evolution.md#us-auto-017) | roll-.dream 日志改为中文输出 — 与 roll-brief 语言风格对齐 | ✅ Done |
 | [US-AUTO-026](docs/features/autonomous-evolution.md#us-auto-026) | 默认 auto-attach + 极简 mute/unmute — loop/peer 一触发就自动背景弹窗看实时 tmux，roll loop mute 一键关 | ✅ Done |
 | [US-AUTO-018](docs/features/autonomous-evolution.md#us-auto-018) | roll-brief 和 roll-.dream 生成文档后自动 git commit — brief 显式化 commit；dream 标准化现有隐式行为 | ✅ Done |
-| [US-AUTO-019](docs/features/autonomous-evolution.md#us-auto-019) | $roll-design 非交互模式 + IDEA 晋升路径 — --from-file / --from-idea，人可离线丢需求等 loop 执行 | 🔨 In Progress |
+| [US-AUTO-019](docs/features/autonomous-evolution.md#us-auto-019) | $roll-design 非交互模式 + IDEA 晋升路径 — --from-file / --from-idea，人可离线丢需求等 loop 执行 | ✅ Done |
 | [US-AUTO-020](docs/features/autonomous-evolution.md#us-auto-020) | roll-design + roll-loop SKILL 文档补充 — Confirm 语义澄清 + 紧急绕过路径说明 | ✅ Done |
 | [US-AUTO-021](docs/features/autonomous-evolution.md#us-auto-021) | `roll status` 增加全局 loop 概览区块 — 展示本机所有项目的 loop 状态、调度时间、backlog 待办数 | 📋 Todo |
 | [US-AUTO-022](docs/features/autonomous-evolution.md#us-auto-022) | Loop 并发安全 — per-loop LOCK 防重入 + 选 story 跳过 🔨 In Progress，支持人工介入和多 agent 协作 | ✅ Done |

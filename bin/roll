@@ -1810,6 +1810,13 @@ _config_read_int() {
   if [[ "$val" =~ ^[0-9]+$ ]]; then echo "$val"; else echo "$default"; fi
 }
 
+_config_read_string() {
+  local key="$1" default="$2"
+  local val
+  val=$(grep "^${key}:" "$ROLL_CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '"' | head -1)
+  if [[ -n "$val" ]]; then echo "$val"; else echo "$default"; fi
+}
+
 # Derive a minute in [1,55] from project path hash + offset so different projects
 # and different services within a project don't fire at the same time.
 # Offsets used: loop=0, dream=2, brief=4 → always three distinct values (2<55).
@@ -2001,6 +2008,17 @@ _install_launchd_plists() {
   brief_hour=$(_config_read_int "loop_brief_hour" "9")
   brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
 
+  # Terminal preference: config wins, then TERM_PROGRAM env, then "Terminal"
+  local terminal_pref
+  terminal_pref=$(_config_read_string "loop_attach_terminal" "")
+  if [[ -z "$terminal_pref" ]]; then
+    case "${TERM_PROGRAM:-}" in
+      ghostty)    terminal_pref="ghostty" ;;
+      iTerm.app)  terminal_pref="iTerm2" ;;
+      *)          terminal_pref="Terminal" ;;
+    esac
+  fi
+
   local services=("loop" "dream" "brief")
   local skill_names=("roll-loop" "roll-.dream" "roll-brief")
   local minutes=("$loop_minute" "$dream_minute" "$brief_minute")
@@ -2020,7 +2038,7 @@ _install_launchd_plists() {
     local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
 
     if [[ "$svc" == "loop" ]]; then
-      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log" "$active_start" "$active_end"
+      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log" "$active_start" "$active_end" "$terminal_pref"
     else
       _write_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log"
     fi

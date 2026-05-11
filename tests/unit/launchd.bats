@@ -411,3 +411,61 @@ setup() {
   [ ! -f "$reload_log" ] || ! grep -q "unload" "$reload_log"
   rm -rf "$tmp_dir"; rm -f "$cfg"
 }
+
+# ─── terminal preference in _install_launchd_plists ───────────────────────────
+
+@test "_install_launchd_plists: loop_attach_terminal=ghostty bakes ghostty case value into runner" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local cfg; cfg=$(mktemp)
+  printf 'loop_attach_terminal: ghostty\n' > "$cfg"; ROLL_CONFIG="$cfg"
+
+  _install_launchd_plists "$proj"
+
+  local slug; slug=$(_project_slug "$proj")
+  local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
+  # Check the case SWITCH VALUE is "ghostty", not just that the ghostty branch text exists
+  grep -qE 'case "ghostty"' "$runner"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}
+
+@test "_install_launchd_plists: TERM_PROGRAM=ghostty bakes ghostty case value when no config override" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local cfg; cfg=$(mktemp)
+  printf '' > "$cfg"; ROLL_CONFIG="$cfg"
+
+  local saved_TERM_PROGRAM="${TERM_PROGRAM:-}"
+  TERM_PROGRAM=ghostty
+  _install_launchd_plists "$proj"
+  TERM_PROGRAM="$saved_TERM_PROGRAM"
+
+  local slug; slug=$(_project_slug "$proj")
+  local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
+  grep -qE 'case "ghostty"' "$runner"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}
+
+@test "_install_launchd_plists: config loop_attach_terminal wins over TERM_PROGRAM" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local cfg; cfg=$(mktemp)
+  printf 'loop_attach_terminal: Terminal\n' > "$cfg"; ROLL_CONFIG="$cfg"
+
+  local saved_TERM_PROGRAM="${TERM_PROGRAM:-}"
+  TERM_PROGRAM=ghostty
+  _install_launchd_plists "$proj"
+  TERM_PROGRAM="$saved_TERM_PROGRAM"
+
+  local slug; slug=$(_project_slug "$proj")
+  local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
+  # Case value should be "Terminal" even though TERM_PROGRAM is ghostty
+  grep -qE 'case "Terminal"' "$runner"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}

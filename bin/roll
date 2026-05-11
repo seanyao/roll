@@ -2690,6 +2690,86 @@ _loop_tcr_count() {
     | awk '/^[a-f0-9]+ tcr:/{n++} END{print n+0}'
 }
 
+# Poll gh run list until current commit's CI completes.
+# Returns 0 on success or when gh is unavailable (graceful skip).
+# Returns 1 on CI failure or timeout.
+_ci_wait() {
+  local timeout="${1:-300}"
+  local interval=15
+  local elapsed=0
+
+  command -v gh &>/dev/null || { warn "gh not installed — skipping CI gate  gh 未安装，跳过 CI 检查"; return 0; }
+
+  local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "Not a git repo  非 git 仓库"; return 1; }
+  local short; short=$(git rev-parse --short HEAD 2>/dev/null)
+
+  ok "Waiting for CI on ${short}  等待 CI: ${short}"
+
+  while (( elapsed < timeout )); do
+    local runs
+    runs=$(gh run list --commit "$commit" --json status,conclusion 2>/dev/null) || {
+      warn "gh run list failed — skipping CI gate"
+      return 0
+    }
+
+    if [[ -z "$runs" || "$runs" == "[]" ]]; then
+      (( elapsed == 0 )) && echo "  No CI runs found yet, waiting...  尚无 CI 记录，等待触发..."
+      sleep "$interval"
+      elapsed=$(( elapsed + interval ))
+      continue
+    fi
+
+    local pending
+    pending=$(echo "$runs" | jq -r '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo "0")
+
+    if [[ "$pending" -gt 0 ]]; then
+      printf "  ⏳ CI running (%ds)...  CI 运行中（%ds）...\n" "$elapsed" "$elapsed"
+      sleep "$interval"
+      elapsed=$(( elapsed + interval ))
+      continue
+    fi
+
+    local failed
+    failed=$(echo "$runs" | jq -r '[.[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != null)] | length' 2>/dev/null || echo "0")
+
+    if [[ "$failed" -gt 0 ]]; then
+      err "CI failed for ${short}  CI 失败: ${short}"
+      return 1
+    fi
+
+    ok "CI passed  CI 通过"
+    return 0
+  done
+
+  warn "CI timed out after ${timeout}s  CI 等待超时（${timeout}s）"
+  return 1
+}
+
+# CI gate before marking a story Done.
+# On CI failure: writes ALERT, returns 1 (caller keeps story 🔨 In Progress).
+# When gh unavailable: returns 0 (graceful skip).
+_loop_enforce_ci() {
+  local story_id="$1"
+
+  _ci_wait 300 && return 0
+
+  mkdir -p "$(dirname "$_LOOP_ALERT")"
+  cat > "$_LOOP_ALERT" << EOF
+# ALERT — CI gate failed
+
+**Time**: $(date '+%Y-%m-%d %H:%M')
+**Story**: ${story_id}
+**Commit**: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+**Reason**: CI did not pass — story kept as 🔨 In Progress  CI 未通过，故事保持进行中
+
+**Action required** (choose one):
+- Fix CI and re-run: \`roll loop now\`
+- Take over manually: \`\$roll-build ${story_id}\`
+- Reset and retry: \`roll loop reset\` then \`roll loop now\`
+EOF
+  return 1
+}
+
 # Verify TCR rhythm after a story completes. Returns 0 if ok, 1 if no TCR commits.
 # On failure: reverts story in BACKLOG.md to 📋 Todo and writes ALERT.
 _loop_enforce_tcr() {
@@ -2973,6 +3053,38 @@ _backlog_extract_id() {
   fi
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CI — check or wait for current commit's CI status
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_ci() {
+  local wait_mode=false
+  local timeout=300
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --wait) wait_mode=true; shift ;;
+      --timeout=*) timeout="${1#*=}"; shift ;;
+      *) err "Usage: roll ci [--wait] [--timeout=N]  用法: roll ci [--wait] [--timeout=N]"; exit 1 ;;
+    esac
+  done
+
+  if $wait_mode; then
+    _ci_wait "$timeout"
+    return
+  fi
+
+  command -v gh &>/dev/null || { warn "gh not installed  gh 未安装"; return 0; }
+  local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "Not a git repo  非 git 仓库"; return 1; }
+  local runs
+  runs=$(gh run list --commit "$commit" --json status,conclusion,name 2>/dev/null) || { warn "gh run list failed"; return 0; }
+  if [[ -z "$runs" || "$runs" == "[]" ]]; then
+    echo "No CI runs for $(git rev-parse --short HEAD)  当前提交无 CI 记录"
+    return 0
+  fi
+  echo "$runs" | jq -r '.[] | "\(.name): \(.status)/\(.conclusion)"'
+}
+
 cmd_backlog() {
   local backlog="BACKLOG.md"
   if [[ ! -f "$backlog" ]]; then
@@ -3253,6 +3365,7 @@ usage() {
   echo "  backlog unblock <pat>         Restore matching items to 📋 Todo   恢复为待处理"
   echo "  agent [use <name>|list]   [Config] Per-project agent selection            切换项目 agent"
   echo "  release                [Publish] Sync changelog + version bump + npm publish  同步日志并发版"
+  echo "  ci [--wait]            [CI] Show or wait for current commit's CI status       查看/等待 CI 状态"
   echo ""
   echo "Examples / 示例:"
   echo "  roll setup                    # New machine: first-time install            新机器首次安装"
@@ -3282,6 +3395,7 @@ main() {
     backlog)       cmd_backlog "$@" ;;
     agent)         cmd_agent "$@" ;;
     release)       cmd_release "$@" ;;
+    ci)            cmd_ci "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) usage ;;
     "") [[ -f "BACKLOG.md" ]] && _dashboard || { usage; _show_changelog; } ;;

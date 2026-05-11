@@ -114,7 +114,9 @@
 | FIX-018 | runs.jsonl schema 漂移 — 三条记录三种风格（project 全路径/slug、ts UTC/+08:00、alerts number/array、status built/success/noop）；SKILL Step 5 契约不严格，claude 自由发挥；需固定字段类型和 enum | ✅ Done |
 | FIX-019 | roll-.changelog 凭感觉填版本号 — loop 在 build/fix 后调用 changelog skill，claude 假设下一个版本号（v2026.511.8/9/11）写进 CHANGELOG.md，但 release.sh 才是版本号的唯一发布权威；导致 CHANGELOG 出现假节，release.sh 后还可能继续被绑架；roll-build/fix/changelog 改为只写 `## Unreleased` 节，release.sh 在拿到真实 N 后把 Unreleased 提升为 vX.Y.Z | ✅ Done |
 | FIX-020 | loop 执行过程必须可视化（必要项，不是 nice-to-have）— loop 是 launchd 非人触发，attach 窗口长时间空白等于"AI 在干啥完全黑盒"；inner runner 给 claude 加 `--verbose` 让工具调用、思考阶段事件实时输出，看得见才能信任 | ✅ Done |
-| FIX-021 | `roll loop now` 行为应与 launchd 服务完全一致 — 当前走 _agent_run_skill 旁路，没 tmux 弹窗、没 LOCK、没 --verbose；改为直接调 runner script（设 ROLL_LOOP_FORCE 绕过 active-window 检查），并把 "Triggering loop cycle" 翻译成 "正在启动新的循环..." | ✅ Done |
+| FIX-021 | `roll loop now` 行为应与 launchd 服务完全一致 — 当前走 _agent_run_skill 旁路，没 tmux 弹窗、没 LOCK、没 --verbose；改为直接调 runner script（设 ROLL_LOOP_FORCE 绕过 active-window 检查），并把 "Triggering loop cycle" 翻译成 "正在启动新的循环..." | ⚠️ Code done, no E2E 验证 |
+| FIX-022 | auto-attach 硬编码 Terminal.app，忽略用户实际终端 — 装了 Ghostty/iTerm/WezTerm 的用户被强制弹 Terminal.app 多余窗口；应检测 TERM_PROGRAM + 读 config `loop_attach_terminal` 偏好，分别用 `ghostty +new-window`、iTerm AppleScript、Terminal osascript 等正确方式 | 📋 Todo |
+| FIX-023 | loop 可视化链路无法稳定测试 — claude API 5xx 时无法判断是基础设施 bug 还是 AI 行为；加 `roll loop test` 命令用假 claude（echo + sleep）跑一遍 10 秒内验证 tmux/弹窗/PATH/LOCK/state 收尾整条链路，不烧 API；FIX-021 应在 FIX-023 完成后回头补端到端验证 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

@@ -1994,6 +1994,13 @@ if [ -f "\$LOCK" ]; then
   fi
   rm -f "\$LOCK"
 fi
+# Guard against stale-LOCK case: if the tmux session is already alive,
+# a previous runner's LOCK was removed (e.g. parent terminal closed) but
+# the work is still in progress — don't kill it.
+if command -v tmux >/dev/null 2>&1 && tmux has-session -t "\$SESSION" 2>/dev/null; then
+  echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] tmux session \$SESSION still active, skipping" >> "\$LOG"
+  exit 0
+fi
 echo "\$\$" > "\$LOCK"
 trap 'rm -f "\$LOCK"' EXIT
 if command -v tmux >/dev/null 2>&1; then

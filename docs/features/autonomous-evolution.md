@@ -640,3 +640,75 @@ $roll-design 当前全程同步，有多个人类等待点（Clarify/Discuss/Con
 **Files:**
 - `bin/roll`（`cmd_status` 函数）
 - `tests/unit/roll_status.bats`（新增 loop overview 测试用例）
+
+---
+
+<a id="us-auto-022"></a>
+## US-AUTO-022 Loop 并发安全 — per-loop LOCK + skip-if-🔨 📋
+
+**Created**: 2026-05-11
+
+- As a developer running roll in autonomous mode
+- I want the loop to be safe against concurrent execution
+- So that two loop instances never process the same story, and human/agent manual execution doesn't conflict with a running loop
+
+**背景：**
+launchd 按时间触发 loop，如果上一次 loop 还在跑，新触发的实例需要感知并退出。同时 loop 在选 story 时需要跳过已被标记为 🔨 In Progress 的条目，支持人工介入和未来多 agent 协作场景。
+
+**AC:**
+- [ ] loop 启动时写入 `~/.shared/roll/loop/LOCK`（含 PID + 启动时间）
+- [ ] loop 启动时检查 LOCK：PID 存活 → 打日志"loop already running, skipping" → 退出 0
+- [ ] loop 启动时检查 LOCK：PID 已死（残留） → 清理 LOCK → 继续执行
+- [ ] loop 正常结束 / 异常退出时均删除 LOCK（trap ERR/EXIT）
+- [ ] loop 扫描 BACKLOG 选 story 时，跳过状态为 🔨 In Progress 的条目
+- [ ] 测试：两个 loop 实例并发，第二个检测到 LOCK 后退出，第一个正常完成
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: LoopScheduler
+- Files touched: `skills/roll-loop/SKILL.md`、`bin/roll`（runner script 生成逻辑）
+
+**Files:**
+- `skills/roll-loop/SKILL.md`（LOCK 机制 + skip 逻辑）
+- `bin/roll`（`_write_loop_runner_script` 中加 LOCK 检测）
+- `tests/unit/roll_loop_lock.bats`
+
+**Dependencies:**
+- Depended on by: US-AUTO-016（依赖 LOCK 存在后，🔨 标记才有意义）
+
+---
+
+<a id="us-auto-023"></a>
+## US-AUTO-023 `roll loop pause / resume` — 人工模式切换 📋
+
+**Created**: 2026-05-11
+
+- As a developer who wants to work manually without loop interference
+- I want a lightweight pause/resume for the loop schedule
+- So that I can switch between autonomous mode, human mode, and collaborative mode without full off/on cycle
+
+**三种操作模式：**
+```
+纯自主模式   loop on，人不介入，只审 brief
+人机协同     loop on，人随时插入，靠 🔨 协调（US-AUTO-022 保障）
+纯人工模式   loop pause，人独占 repo，resume 恢复
+```
+
+**AC:**
+- [ ] `roll loop pause`：向 launchd 设置 disabled（不删 plist），写入 pause 原因和时间到 state file
+- [ ] `roll loop resume`：清除 disabled，恢复调度；与现有 resume（中断恢复）语义合并或明确区分
+- [ ] `roll` dashboard 展示 pause 状态：`Loop  ⏸ paused   run: roll loop resume`
+- [ ] `roll loop status` 展示 pause 原因和暂停时长
+- [ ] macOS / Linux 均支持（launchd / crontab 两路）
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: LoopScheduler
+- Files touched: `bin/roll`（`_loop_pause`、`_loop_resume`）、dashboard 展示
+
+**Files:**
+- `bin/roll`（新增 `_loop_pause`，更新 `_loop_resume`、`_cmd_dashboard`）
+- `tests/unit/roll_loop_pause.bats`
+
+**Dependencies:**
+- Depends on: US-AUTO-022（pause 期间如有 LOCK 残留需清理）

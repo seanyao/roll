@@ -163,22 +163,23 @@
 ---
 
 <a id="us-doc-006"></a>
-## US-DOC-006 扩展 roll-.dream：文档覆盖度巡检 + brief 展示 doc coverage 📋
+## US-DOC-006 扩展 roll-.dream：文档覆盖度巡检 + brief 展示 doc coverage ✅
 
 **Created**: 2026-05-12
+**Completed**: 2026-05-12
 
 - As a maintainer
 - I want dream to automatically detect documentation gaps each night
 - So that missing or misplaced docs surface as REFACTOR items without manual auditing
 
 **AC:**
-- [ ] `roll-.dream/SKILL.md` 新增 Doc Coverage Check 步骤：
-  - [ ] 扫描 BACKLOG.md ✅ Done stories → 检查 `docs/guide/en/` 有无对应文档 → 缺失生成 REFACTOR
-  - [ ] 扫描 `docs/guide/en/` 文件 → 检查 `docs/guide/zh/` 有无对应翻译 → 缺失超过一个 release 周期生成 REFACTOR
-  - [ ] 检查 `docs/` 根目录有无不符合 AGENTS.md Documentation Conventions 的新文件 → 生成 REFACTOR
-- [ ] REFACTOR 格式：`docs: <具体缺口描述> — flagged by dream <date>`
-- [ ] `roll-brief/SKILL.md` 新增 Doc Coverage 区块：展示 guide/en 覆盖率、ZH 翻译率
-- [ ] dream 日志写入 doc coverage 检查结果摘要
+- [x] `roll-.dream/SKILL.md` 新增 Doc Coverage Check 步骤：
+  - [x] 扫描 BACKLOG.md ✅ Done stories → 检查 `docs/guide/en/` 有无对应文档 → 缺失生成 REFACTOR
+  - [x] 扫描 `docs/guide/en/` 文件 → 检查 `docs/guide/zh/` 有无对应翻译 → 缺失超过一个 release 周期生成 REFACTOR
+  - [x] 检查 `docs/` 根目录有无不符合 AGENTS.md Documentation Conventions 的新文件 → 生成 REFACTOR
+- [x] REFACTOR 格式：`docs: <具体缺口描述> — flagged by dream <date>`
+- [x] `roll-brief/SKILL.md` 新增 Doc Coverage 区块：展示 guide/en 覆盖率、ZH 翻译率
+- [x] dream 日志写入 doc coverage 检查结果摘要
 
 **Files:**
 - `skills/roll-.dream/SKILL.md` (modified)

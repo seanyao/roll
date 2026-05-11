@@ -45,3 +45,30 @@ teardown() {
   # The window check should be skippable when ROLL_LOOP_FORCE is non-empty
   grep -qF 'ROLL_LOOP_FORCE' "$script_path"
 }
+
+# ─── roll loop test (FIX-023) ─────────────────────────────────────────────────
+
+@test "cmd_loop: 'test' subcommand is recognized in dispatch table" {
+  local body
+  body=$(awk '/^cmd_loop\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qE '\btest\)'
+}
+
+@test "_loop_test: function exists in bin/roll" {
+  grep -qF '_loop_test()' "$ROLL_BIN"
+}
+
+@test "_loop_test: uses _write_loop_runner_script with a trivial claude prompt" {
+  local body
+  body=$(awk '/^_loop_test\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # Must reuse the same runner infrastructure (not bypass it)
+  echo "$body" | grep -qF '_write_loop_runner_script'
+  # Must use a trivial prompt — not the full skill
+  echo "$body" | grep -qiE 'hello|trivial|Reply'
+}
+
+@test "_loop_test: sets ROLL_LOOP_FORCE to bypass active-window check" {
+  local body
+  body=$(awk '/^_loop_test\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qF 'ROLL_LOOP_FORCE'
+}

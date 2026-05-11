@@ -3,7 +3,7 @@
   "version": "2026.512.6",
   "description": "Roll — Roll out features with AI agents",
   "scripts": {
-    "test": "find tests/unit tests/integration -name '*.bats' | sort | xargs ./tests/helpers/bats-core/bin/bats"
+    "test": "bash tests/run.sh"
   },
   "keywords": [
     "ai",

@@ -15,5 +15,8 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install GNU parallel
+        run: sudo apt-get install -y parallel
+
       - name: Run bats tests
         run: npm test

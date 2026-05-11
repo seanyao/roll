@@ -296,7 +296,7 @@ Both locations must be updated — neither can be skipped:
 | [FIX-{ID}](docs/features/<feature>.md#fix-{id}) | {Title} | ✅ Done |
 ```
 
-Change the Status of the corresponding row from `📋 Todo` to `✅ Done`.
+Change the Status of the corresponding row from `📋 Todo` or `🔨 In Progress` (whichever the row currently shows) to `✅ Done`. When invoked by `roll-loop`, the row will already be `🔨 In Progress` — that is the expected starting state.
 
 **② Update `docs/features/<feature>.md` FIX section:**
 

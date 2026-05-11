@@ -483,7 +483,7 @@ Both locations must be updated — neither can be skipped:
 | [US-{ID}](docs/features/<feature>.md#us-{id}) | {Title} | ✅ Done |
 ```
 
-Change the Status from `📋 Todo` to `✅ Done`.
+Change the Status from `📋 Todo` or `🔨 In Progress` (whichever the row currently shows) to `✅ Done`. When invoked by `roll-loop`, the row will already be `🔨 In Progress` — that is the expected starting state, and the transition is the same Edit operation.
 For Fly mode: first append an index row under the appropriate Epic > Feature group, then mark it done.
 
 **② Update `docs/features/<feature>.md` US section:**

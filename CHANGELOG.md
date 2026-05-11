@@ -8,6 +8,7 @@
 - **Fixed**: `roll loop runs` 不再报"当前项目尚无运行记录"，历史记录正常显示
 - **Added**: 文档目录重组 — methodology、skill 选择指南、loop 验证记录迁移至 `docs/guide/` 和 `docs/practices/`，根目录不再有散落文件
 - **Added**: README 大幅精简并新增文档导航索引 — 首页更清晰，所有指南一表可查
+- **Added**: dream 每晚自动检测文档缺口，brief 新增文档覆盖率数字
 
 ## v2026.512.6
 - **Added**: peer review 现在也会自动弹出终端窗口，实时观察跨 AI 协商过程（mute 关闭同一开关）

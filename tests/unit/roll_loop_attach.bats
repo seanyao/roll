@@ -89,6 +89,21 @@ teardown() {
   [ -x "$inner" ]
 }
 
+@test "_write_loop_runner_script: inner script retries up to 3 times on failure" {
+  local script="${_tmp}/run-test.sh"
+  _write_loop_runner_script "$script" "/some/project" "echo INNER_PAYLOAD" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-test-inner.sh"
+  grep -qF 'for _attempt in 1 2 3' "$inner"
+  grep -qF 'sleep 30' "$inner"
+}
+
+@test "_write_loop_runner_script: inner script uses pipefail for pipe exit propagation" {
+  local script="${_tmp}/run-test.sh"
+  _write_loop_runner_script "$script" "/some/project" "echo INNER_PAYLOAD" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-test-inner.sh"
+  grep -qF 'set -o pipefail' "$inner"
+}
+
 @test "_write_loop_runner_script: runner references the inner script path" {
   local script="${_tmp}/run-test.sh"
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24

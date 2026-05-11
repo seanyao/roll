@@ -1961,13 +1961,22 @@ _write_loop_runner_script() {
   local cmd_verbose="${cmd/claude -p/claude -p --verbose --output-format stream-json}"
   cat > "$inner_path" << INNER
 #!/bin/bash -l
+set -o pipefail
 export PATH="/opt/homebrew/bin:\$PATH"
 FMT="${fmt_script}"
-if [ -f "\$FMT" ]; then
-  ( cd "${project_path}" && ${cmd_verbose} ) | python3 "\$FMT"
-else
-  cd "${project_path}" && ${cmd_verbose}
-fi
+for _attempt in 1 2 3; do
+  if [ -f "\$FMT" ]; then
+    ( cd "${project_path}" && ${cmd_verbose} ) | python3 "\$FMT"
+  else
+    ( cd "${project_path}" && ${cmd_verbose} )
+  fi
+  _exit=\$?
+  [ "\$_exit" -eq 0 ] && break
+  if [ "\$_attempt" -lt 3 ]; then
+    echo "[loop] claude exited \$_exit (attempt \$_attempt/3) — retrying in 30s..."
+    sleep 30
+  fi
+done
 INNER
   chmod +x "$inner_path"
 

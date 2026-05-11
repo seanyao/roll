@@ -1861,7 +1861,7 @@ SCRIPT
 }
 
 _launchd_is_loaded() {
-  launchctl list "$1" &>/dev/null 2>&1
+  launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep -qF "\"$1\" => enabled"
 }
 
 # Install launchd plist files (disabled by default) and runner scripts for

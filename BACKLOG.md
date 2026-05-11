@@ -114,7 +114,7 @@
 | FIX-018 | runs.jsonl schema 漂移 — 三条记录三种风格（project 全路径/slug、ts UTC/+08:00、alerts number/array、status built/success/noop）；SKILL Step 5 契约不严格，claude 自由发挥；需固定字段类型和 enum | ✅ Done |
 | FIX-019 | roll-.changelog 凭感觉填版本号 — loop 在 build/fix 后调用 changelog skill，claude 假设下一个版本号（v2026.511.8/9/11）写进 CHANGELOG.md，但 release.sh 才是版本号的唯一发布权威；导致 CHANGELOG 出现假节，release.sh 后还可能继续被绑架；roll-build/fix/changelog 改为只写 `## Unreleased` 节，release.sh 在拿到真实 N 后把 Unreleased 提升为 vX.Y.Z | ✅ Done |
 | FIX-020 | loop 执行过程必须可视化（必要项，不是 nice-to-have）— loop 是 launchd 非人触发，attach 窗口长时间空白等于"AI 在干啥完全黑盒"；inner runner 给 claude 加 `--verbose` 让工具调用、思考阶段事件实时输出，看得见才能信任 | ✅ Done |
-| FIX-021 | `roll loop now` 行为应与 launchd 服务完全一致 — 当前走 _agent_run_skill 旁路，没 tmux 弹窗、没 LOCK、没 --verbose；改为直接调 runner script（设 ROLL_LOOP_FORCE 绕过 active-window 检查），并把 "Triggering loop cycle" 翻译成 "正在启动新的循环..." | 📋 Todo |
+| FIX-021 | `roll loop now` 行为应与 launchd 服务完全一致 — 当前走 _agent_run_skill 旁路，没 tmux 弹窗、没 LOCK、没 --verbose；改为直接调 runner script（设 ROLL_LOOP_FORCE 绕过 active-window 检查），并把 "Triggering loop cycle" 翻译成 "正在启动新的循环..." | ✅ Done |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -140,7 +140,7 @@
 | [US-AUTO-025](docs/features/autonomous-evolution.md#us-auto-025) | loop 在 tmux session 里跑 + `roll loop attach` 实时观看 — 让 loop 从看不见的子进程变成可随时 attach 的活终端 | ✅ Done |
 | [US-AUTO-017](docs/features/autonomous-evolution.md#us-auto-017) | roll-.dream 日志改为中文输出 — 与 roll-brief 语言风格对齐 | ✅ Done |
 | [US-AUTO-026](docs/features/autonomous-evolution.md#us-auto-026) | 默认 auto-attach + 极简 mute/unmute — loop/peer 一触发就自动背景弹窗看实时 tmux，roll loop mute 一键关 | ✅ Done |
-| [US-AUTO-018](docs/features/autonomous-evolution.md#us-auto-018) | roll-brief 和 roll-.dream 生成文档后自动 git commit — brief 显式化 commit；dream 标准化现有隐式行为 | 🔨 In Progress |
+| [US-AUTO-018](docs/features/autonomous-evolution.md#us-auto-018) | roll-brief 和 roll-.dream 生成文档后自动 git commit — brief 显式化 commit；dream 标准化现有隐式行为 | ✅ Done |
 | [US-AUTO-019](docs/features/autonomous-evolution.md#us-auto-019) | $roll-design 非交互模式 + IDEA 晋升路径 — --from-file / --from-idea，人可离线丢需求等 loop 执行 | 📋 Todo |
 | [US-AUTO-020](docs/features/autonomous-evolution.md#us-auto-020) | roll-design + roll-loop SKILL 文档补充 — Confirm 语义澄清 + 紧急绕过路径说明 | 📋 Todo |
 | [US-AUTO-021](docs/features/autonomous-evolution.md#us-auto-021) | `roll status` 增加全局 loop 概览区块 — 展示本机所有项目的 loop 状态、调度时间、backlog 待办数 | 📋 Todo |

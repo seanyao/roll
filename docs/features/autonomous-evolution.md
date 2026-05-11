@@ -867,11 +867,14 @@ US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"o
 - [ ] mute 状态在 `roll loop status` 和 dashboard 显示一行：`Auto-attach: muted / live`
 - [ ] tmux session 结束后窗口不自动关闭（用户可读最终输出，⌘W 关闭）
 - [ ] 测试：runner script 含 osascript 调用 + mute 文件存在性检测；mute/unmute 命令存在并正确读写
+- [ ] tmux 升级为必装依赖：`roll setup` 时检测 tmux，没装则自动 `brew install tmux`（macOS）；非 macOS 退化为明确报错并给出安装命令
+- [ ] tmux 自动安装失败时（如无 brew、无网络）给清晰错误信息和手动安装指引，不阻塞 setup 主流程
 
 **Non-goals:**
 - 不做 mute duration（2h / today / until 22:00）—— 一个开关足够，复杂度收敛
 - 不做窗口管理（多项目时怎么排列）—— 每个 tmux session 独立一个窗口，让用户的 WM / 系统多桌面处理
 - 不做"focus-aware"（开会自动 mute）—— 用户自己 mute 就好，避免误判
+- 不做 Linux 自动安装（包管理器差异大、可能要 sudo）—— 只给安装命令，让人手动跑
 
 **Domain Model:**
 - Context: Autonomous Evolution
@@ -888,6 +891,7 @@ US-AUTO-025 提供了 tmux 基建（可 attach）。026 把可见性的 UX 从"o
 
 **Dependencies:**
 - Depends on: US-AUTO-025（tmux 基建必须先有）
+- Note: 本 story 把 tmux 从 US-AUTO-025 的"软依赖"升级为"必装依赖"，setup 时自动 `brew install tmux`
 
 ---
 

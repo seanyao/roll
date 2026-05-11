@@ -2501,6 +2501,7 @@ _loop_pause() {
     launchctl unload -w "$(_launchd_plist_path "loop" "$project_path")" 2>/dev/null || true
   else
     local slug; slug=$(_project_slug "$project_path")
+    mkdir -p "${_SHARED_ROOT}/loop"
     touch "${_SHARED_ROOT}/loop/PAUSE-${slug}"
   fi
 

@@ -19,6 +19,8 @@ RELEASE_SH="${BATS_TEST_DIRNAME}/../../scripts/release.sh"
   ! grep -qF "git describe --tags --abbrev=0" "$SKILL_FILE"
 }
 
-@test "scripts/release.sh: promotes ## Unreleased to ## v{VERSION}" {
-  grep -qE 'Unreleased.*v\$\{VERSION\}|sed.*Unreleased.*v\$\{VERSION\}|## Unreleased' "$RELEASE_SH"
+@test "bin/roll: _promote_unreleased replaces ## Unreleased with ## v{VERSION}" {
+  local ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
+  grep -qF '_promote_unreleased()' "$ROLL_BIN"
+  grep -qE 'sed.*Unreleased.*v\$\{version\}|## Unreleased' "$ROLL_BIN"
 }

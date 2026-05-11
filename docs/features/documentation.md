@@ -127,9 +127,10 @@
 ---
 
 <a id="us-doc-005"></a>
-## US-DOC-005 README 精简重构 + AGENTS.md Documentation Conventions 章节 📋
+## US-DOC-005 README 精简重构 + AGENTS.md Documentation Conventions 章节 ✅
 
 **Created**: 2026-05-12
+**Completed**: 2026-05-12
 
 - As a new user landing on GitHub or npm
 - I want a README that orients me in 30 seconds and points me to the right docs
@@ -140,15 +141,15 @@
 - So that I know where to put new docs and which language to use
 
 **AC:**
-- [ ] `README.md` (EN) 精简至 ≤ 120 行：一句话定义 + 核心价值点×3 + 30秒 Quick Start + Documentation Index 表格
-- [ ] `README_CN.md` (ZH) 同等精简，结构镜像 EN
-- [ ] Documentation Index 表格包含所有 guide/en/ 和 guide/zh/ 文件的双语入口
-- [ ] `AGENTS.md` 新增 `## Documentation Conventions` 章节，包含：
-  - [ ] 目录用途说明（guide/en, guide/zh, domain, features, practices）
-  - [ ] 语言规则（EN 正本 → ZH 导出，domain/ 仅 EN，features/ 仅 EN）
-  - [ ] 新文档落地规则（按类型 → 对应目录）
-  - [ ] README 职责边界（导航枢纽，不写内容）
-  - [ ] 维护工作流（EN first → ZH after）
+- [x] `README.md` (EN) 精简至 ≤ 120 行：一句话定义 + 核心价值点×3 + 30秒 Quick Start + Documentation Index 表格
+- [x] `README_CN.md` (ZH) 同等精简，结构镜像 EN
+- [x] Documentation Index 表格包含所有 guide/en/ 和 guide/zh/ 文件的双语入口
+- [x] `AGENTS.md` 新增 `## Documentation Conventions` 章节，包含：
+  - [x] 目录用途说明（guide/en, guide/zh, domain, features, practices）
+  - [x] 语言规则（EN 正本 → ZH 导出，domain/ 仅 EN，features/ 仅 EN）
+  - [x] 新文档落地规则（按类型 → 对应目录）
+  - [x] README 职责边界（导航枢纽，不写内容）
+  - [x] 维护工作流（EN first → ZH after）
 
 **Files:**
 - `README.md` (modified)

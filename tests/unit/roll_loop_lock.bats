@@ -40,3 +40,50 @@ teardown() {
   grep -qF 'kill -0' "$script_path"
   grep -qF "loop already running" "$script_path"
 }
+
+@test "runner script: concurrent invocations — second instance skips" {
+  local script_path="${_test_dir}/run-test-concurrent.sh"
+  local log="${_test_dir}/run.log"
+  local marker="${_test_dir}/marker"
+  # Use a command that writes a marker then sleeps; we'll count markers
+  local cmd="echo marker >> '${marker}' && sleep 2"
+  # Pass active window covering current hour so the script runs
+  _write_loop_runner_script "$script_path" "${_test_dir}" "$cmd" "$log" 0 24
+
+  # Start first instance in background
+  bash "$script_path" &
+  local pid1=$!
+  sleep 0.3  # let it acquire LOCK
+
+  # Second instance should detect LOCK and exit immediately
+  bash "$script_path"
+  local second_exit=$?
+
+  # Wait for first to finish
+  wait "$pid1"
+
+  # Only one marker (first instance ran the cmd, second skipped)
+  [ "$second_exit" -eq 0 ]
+  [ -f "$marker" ]
+  local count; count=$(wc -l < "$marker" | tr -d ' ')
+  [ "$count" -eq 1 ]
+  grep -qF "loop already running" "$log"
+}
+
+@test "runner script: stale LOCK with dead PID is cleaned up" {
+  local script_path="${_test_dir}/run-test-stale.sh"
+  local log="${_test_dir}/run.log"
+  local marker="${_test_dir}/marker"
+  local cmd="echo marker >> '${marker}'"
+  _write_loop_runner_script "$script_path" "${_test_dir}" "$cmd" "$log" 0 24
+
+  # Plant a stale LOCK with a PID that does not exist (99999 unlikely on this host)
+  echo "99999" > "${_test_dir}/.LOCK-test-stale"
+
+  bash "$script_path"
+  local exit_code=$?
+
+  [ "$exit_code" -eq 0 ]
+  [ -f "$marker" ]  # command actually ran (stale LOCK was cleaned)
+  [ ! -f "${_test_dir}/.LOCK-test-stale" ]  # trap removed LOCK on exit
+}

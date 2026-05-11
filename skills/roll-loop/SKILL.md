@@ -153,6 +153,47 @@ last_run_items: [US-AUTH-003, FIX-007]
 last_run_outcome: success
 ```
 
+Then append a JSONL record to `~/.shared/roll/loop/runs.jsonl` for per-iteration
+visibility (one line per cycle, append-only — never delete or rewrite earlier lines):
+
+```bash
+ts=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
+project=$(pwd -P)
+# duration_sec = now - cycle_start_epoch (track at Step 1)
+# tcr_count = git log --oneline --since="<cycle_start>" | grep -c '^[a-f0-9]* tcr:'
+# built/skipped are arrays of story ids (use [] when empty)
+
+jq -nc \
+  --arg ts "$ts" \
+  --arg project "$project" \
+  --arg run_id "<run_id>" \
+  --arg status "<built|idle|failed>" \
+  --argjson built '["US-AUTO-024"]' \
+  --argjson skipped '[]' \
+  --argjson alerts 0 \
+  --argjson tcr_count 14 \
+  --argjson duration_sec 1680 \
+  '{ts:$ts, project:$project, run_id:$run_id, status:$status,
+    built:$built, skipped:$skipped, alerts:$alerts,
+    tcr_count:$tcr_count, duration_sec:$duration_sec}' \
+  >> ~/.shared/roll/loop/runs.jsonl
+```
+
+**Field contract** (`ts, project, run_id, status, built, skipped, alerts, tcr_count, duration_sec`):
+- `ts`: ISO timestamp at cycle completion
+- `project`: absolute project path (`pwd -P`)
+- `run_id`: matches `state.yaml` `run_id`
+- `status`: `built` when ≥1 story completed, `idle` when no Todo items found, `failed` when paused/error
+- `built`: array of story ids completed this cycle (e.g. `["US-AUTO-017","FIX-016"]`)
+- `skipped`: array of story ids skipped because they were 🔨 In Progress
+- `alerts`: count of new ALERTs written this cycle
+- `tcr_count`: total `tcr:` prefix commits made this cycle
+- `duration_sec`: integer seconds from cycle start to completion
+- On `failed` add a `reason` field with a short human-readable string
+
+The companion read-side is `roll loop runs [N] [--all]` — shows the most recent
+N records (default 10) for the current project, or across all projects with `--all`.
+
 ## Failure Handling
 
 ### Network Error (transient)

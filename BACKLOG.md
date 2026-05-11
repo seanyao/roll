@@ -127,7 +127,7 @@
 | [US-AUTO-011](docs/features/autonomous-evolution.md#us-auto-011) | roll loop monitor 增强 — 显示三服务 launchd 状态（loop/dream/brief）+ 实时 log tail | ✅ Done |
 | [US-AUTO-012](docs/features/autonomous-evolution.md#us-auto-012) | loop 调度时间和 agent 移入 ~/.roll/config.yaml — 默认错开整点（:05/:10/:15），可配 hour/minute，免改源码 | ✅ Done |
 | [US-AUTO-013](docs/features/autonomous-evolution.md#us-auto-013) | roll-propose skill — 人主动发起，从产品视角生成 1-3 条 proposed US 写入 PROPOSALS.md 等待审批 | ✅ Done |
-| [US-AUTO-014](docs/features/autonomous-evolution.md#us-auto-014) | `_install_launchd_plists` 变更自动 reload — plist 内容变化且服务已加载时自动 unload + reload，消除静默失效 | 📋 Todo |
+| [US-AUTO-014](docs/features/autonomous-evolution.md#us-auto-014) | `_install_launchd_plists` 变更自动 reload — plist 内容变化且服务已加载时自动 unload + reload，消除静默失效 | ✅ Done |
 | [US-AUTO-015](docs/features/autonomous-evolution.md#us-auto-015) | `roll loop status/monitor` 三态展示 — 区分 ● loaded / ⚠ installed-not-loaded / ○ not-installed，含自愈提示 | 📋 Todo |
 | [US-AUTO-016](docs/features/autonomous-evolution.md#us-auto-016) | loop 执行 story 前标记 🔨 In Progress — brief 可感知进行中状态，tcr 微提交不再对 brief 不可见 | 📋 Todo |
 | [US-AUTO-017](docs/features/autonomous-evolution.md#us-auto-017) | roll-.dream 日志改为中文输出 — 与 roll-brief 语言风格对齐 | 📋 Todo |
@@ -155,3 +155,4 @@
 | IDEA-006 | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | ✅ Done → US-SKILL-007 |
 | IDEA-007 | loop 调度时间和默认 agent 移入配置文件（.roll.yaml 或 ~/.roll/config.yaml），方便用户调整而不需要改 bin/roll 源码 | ✅ Done → US-AUTO-012 |
 | IDEA-008 | roll dashboard 重设计 — 当前布局不完整，需要重新规划整体布局、信息密度、交互方式，作为项目入口的体验应该更好 | 📋 Todo |
+| IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | 📋 Todo |

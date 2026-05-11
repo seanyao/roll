@@ -117,6 +117,18 @@ _get_ai_tools() {
   done
 }
 
+# Iterate all configured AI tools, calling: callback entry ai_dir ai_config ai_src [extra_args...]
+_for_each_ai_tool() {
+  local _feach_cb="$1"; shift
+  while IFS= read -r _feach_entry; do
+    "$_feach_cb" "$_feach_entry" \
+      "$(_ai_dir "$_feach_entry")" \
+      "$(_ai_config "$_feach_entry")" \
+      "$(_ai_src "$_feach_entry")" \
+      "$@"
+  done < <(_get_ai_tools)
+}
+
 # Add any ai_* keys from the default set that are missing from the user's config.
 # Non-destructive: never removes or modifies existing entries.
 _ensure_config_entries() {

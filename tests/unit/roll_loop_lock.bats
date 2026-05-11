@@ -12,10 +12,15 @@ setup() {
   source "$ROLL_BIN"
   _orig_dir="$PWD"
   _test_dir=$(mktemp -d)
+  # Suppress auto-attach popup so tests don't spawn real terminal windows
+  mkdir -p "${_test_dir}/.shared/roll"
+  touch "${_test_dir}/.shared/roll/mute"
   cd "$_test_dir"
 }
 
 teardown() {
+  tmux kill-session -t "roll-loop-test-concurrent" 2>/dev/null || true
+  tmux kill-session -t "roll-loop-test-stale" 2>/dev/null || true
   cd "$_orig_dir"
   rm -rf "$_test_dir"
 }
@@ -51,12 +56,12 @@ teardown() {
   _write_loop_runner_script "$script_path" "${_test_dir}" "$cmd" "$log" 0 24
 
   # Start first instance in background
-  bash "$script_path" &
+  HOME="${_test_dir}" bash "$script_path" &
   local pid1=$!
   sleep 0.3  # let it acquire LOCK
 
   # Second instance should detect LOCK and exit immediately
-  bash "$script_path"
+  HOME="${_test_dir}" bash "$script_path"
   local second_exit=$?
 
   # Wait for first to finish
@@ -80,7 +85,7 @@ teardown() {
   # Plant a stale LOCK with a PID that does not exist (99999 unlikely on this host)
   echo "99999" > "${_test_dir}/.LOCK-test-stale"
 
-  bash "$script_path"
+  HOME="${_test_dir}" bash "$script_path"
   local exit_code=$?
 
   [ "$exit_code" -eq 0 ]

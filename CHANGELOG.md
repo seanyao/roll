@@ -2,6 +2,7 @@
 
 ## Unreleased
 - **Added**: peer review 现在也会自动弹出终端窗口，实时观察跨 AI 协商过程（mute 关闭同一开关）
+- **Added**: `docs/guide/en/` — loop/dream/peer 英文用户指南上线，覆盖所有子命令和使用场景
 
 ## v2026.512.5
 - **Fixed**: loop 遇到 API 错误时自动重试，不再直接中断

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.512.3
 - **Added**: BACKLOG 支持 block / defer / unblock 状态管理 — 标记卡住的任务不再占队列
 - **Fixed**: 自动弹窗现在能识别 Ghostty 和 iTerm2，不再强制弹出 Terminal.app
 - **Fixed**: loop 检测到上一轮还在跑时自动跳过，不重复启动

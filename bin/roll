@@ -1848,26 +1848,47 @@ _write_runner_script() {
 
 # Like _write_runner_script but prepends an active window guard.
 # Silently exits when current hour is outside [active_start, active_end).
+# When tmux is available, wraps the inner command in a detached tmux session
+# named `roll-loop-<slug>` so `roll loop attach` can watch in real time.
+# Falls back to headless execution when tmux is not installed.
 _write_loop_runner_script() {
   local script_path="$1" project_path="$2" cmd="$3" log_path="$4"
   local active_start="${5:-10}" active_end="${6:-18}"
   mkdir -p "$(dirname "$script_path")"
+
+  local inner_path="${script_path%.sh}-inner.sh"
+  cat > "$inner_path" << INNER
+#!/bin/bash -l
+cd "${project_path}" && ${cmd}
+INNER
+  chmod +x "$inner_path"
+
   cat > "$script_path" << SCRIPT
 #!/bin/bash -l
 h=\$(printf '%d' "\$(date +%H)")
 if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
 LOCK="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
+SESSION="roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')"
+INNER_SCRIPT="${inner_path}"
+LOG="${log_path}"
 if [ -f "\$LOCK" ]; then
   prev_pid=\$(head -1 "\$LOCK" 2>/dev/null || echo "")
   if [ -n "\$prev_pid" ] && kill -0 "\$prev_pid" 2>/dev/null; then
-    echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] loop already running (PID \$prev_pid), skipping" >> "${log_path}"
+    echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] loop already running (PID \$prev_pid), skipping" >> "\$LOG"
     exit 0
   fi
   rm -f "\$LOCK"
 fi
 echo "\$\$" > "\$LOCK"
 trap 'rm -f "\$LOCK"' EXIT
-cd "${project_path}" && ${cmd} >> "${log_path}" 2>&1
+if command -v tmux >/dev/null 2>&1; then
+  tmux kill-session -t "\$SESSION" 2>/dev/null || true
+  tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
+  tmux pipe-pane -t "\$SESSION" "cat >> \"\$LOG\""
+  while tmux has-session -t "\$SESSION" 2>/dev/null; do sleep 5; done
+else
+  bash "\$INNER_SCRIPT" >> "\$LOG" 2>&1
+fi
 SCRIPT
   chmod +x "$script_path"
 }
@@ -1980,9 +2001,10 @@ cmd_loop() {
     status)  _loop_status ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
+    attach)  _loop_attach ;;
     resume)  _loop_resume ;;
     reset)   _loop_reset ;;
-    *) err "Usage: roll loop <on|off|now|status|monitor|runs|resume|reset>"; exit 1 ;;
+    *) err "Usage: roll loop <on|off|now|status|monitor|runs|attach|resume|reset>"; exit 1 ;;
   esac
 }
 
@@ -2143,6 +2165,27 @@ _loop_reset() {
   else
     info "No loop state to clear  无 loop 状态可清除"
   fi
+}
+
+# Attach to the tmux session a running loop iteration writes to. Returns 1 when
+# tmux is missing or no session exists for the current project.
+_loop_attach() {
+  local project_path; project_path=$(pwd -P)
+  local slug; slug=$(_project_slug "$project_path")
+  local session="roll-loop-${slug}"
+
+  if ! command -v tmux >/dev/null 2>&1; then
+    warn "tmux not installed — install with 'brew install tmux'  请先安装 tmux"
+    return 1
+  fi
+
+  if ! tmux has-session -t "$session" 2>/dev/null; then
+    info "No running loop session for this project  当前项目无运行中的 loop"
+    info "Wait for next scheduled fire, or run: roll loop now"
+    return 1
+  fi
+
+  exec tmux attach -t "$session"
 }
 
 # Pretty-print a duration in seconds as "Xs" / "Ym" / "Yh Zm".

@@ -20,8 +20,23 @@ integration_setup() {
 }
 
 # Cleans up the temp tree after each test.
+# IMPORTANT: bootout any roll services the test loaded into the user's launchd
+# domain (via `roll loop on`) BEFORE deleting TEST_TMP. Otherwise the launchd
+# registration outlives the plist file, leaving a ghost service whose path no
+# longer exists. See FIX-016.
 integration_teardown() {
-  [[ -n "${TEST_TMP:-}" ]] && rm -rf "$TEST_TMP"
+  if [[ -n "${TEST_TMP:-}" ]]; then
+    if [[ "$(uname)" == "Darwin" ]] && [[ -d "${TEST_TMP}/Library/LaunchAgents" ]]; then
+      for plist in "${TEST_TMP}/Library/LaunchAgents"/com.roll.*.plist; do
+        [[ -f "$plist" ]] || continue
+        local label
+        label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' \
+                | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+        [[ -n "$label" ]] && launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+      done
+    fi
+    rm -rf "$TEST_TMP"
+  fi
 }
 
 # Run roll with TEST_TMP as HOME and cwd so ~ expansions resolve inside the

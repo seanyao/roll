@@ -240,8 +240,13 @@ User Input
                        │
                        ├── Yes ──→ $roll-build US-XXX
                        │
-                       └── No  ──→ Wait for user confirmation
+                       └── No  ──→ Story 已写入 BACKLOG 为 📋 Todo
+                                   loop 下轮将自动执行
+                                   （选 No 仅跳过立即执行）
 ```
+
+**Gate 语义澄清**：选 `No` 不是放弃，story 已经入 BACKLOG，下轮 loop 会自动 pickup
+（次日 / `roll loop now`）。若想完全搁置，请显式把状态改为 🚫 Hold。
 
 ---
 

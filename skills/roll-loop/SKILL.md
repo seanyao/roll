@@ -32,6 +32,11 @@ sole authority over `roll-release`.
 - Any Story marked 🚫 Hold or flagged for human review
 - Destructive operations outside normal skill scope
 
+**Human bypass path** — roll-loop 是默认调度器，不垄断执行权。任何时刻人可直接
+`$roll-build US-XXX` 或 `$roll-fix FIX-XXX` 绕过 loop 立即执行（紧急 bug、中断插入、
+故事评审等场景）。loop 通过 LOCK 和 `🔨 In Progress` 状态识别并跳过人正在做的故事，
+人机并行不会撞车（见 Concurrency Safety）。
+
 ## Configuration
 
 ```yaml

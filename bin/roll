@@ -1306,7 +1306,7 @@ _status_loop_overview() {
 
     local todo_count=0
     if [[ -z "$path_note" && -f "${proj_path}/BACKLOG.md" ]]; then
-      todo_count=$(grep -c '📋 Todo' "${proj_path}/BACKLOG.md" 2>/dev/null || echo 0)
+      todo_count=$(grep -c '📋 Todo' "${proj_path}/BACKLOG.md" 2>/dev/null; true)
     fi
 
     echo -e "  ${state_icon} ${proj_name}${path_note}   ${schedule}   ${todo_count} pending"

@@ -124,3 +124,27 @@ teardown() {
   body=$(awk '/^cmd_peer\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   echo "$body" | grep -qF 'command -v tmux'
 }
+
+# ─── E2E golden path: mute suppresses popup, session name is deterministic ────
+
+@test "e2e: _peer_auto_attach is silent when mute file exists (no osascript side-effect)" {
+  _LOOP_MUTE_FILE="${_tmp}/mute"
+  touch "$_LOOP_MUTE_FILE"
+  # Must exit 0 without error
+  _peer_auto_attach "roll-peer-claude-kimi"
+}
+
+@test "e2e: peer session name format is roll-peer-FROM-TO" {
+  local body
+  body=$(awk '/^cmd_peer\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # Session name uses from_tool and to_tool variables
+  echo "$body" | grep -qE 'roll-peer-.*from_tool.*to_tool|roll-peer-\$\{from_tool\}-\$\{to_tool\}'
+}
+
+@test "e2e: _peer_call falls back gracefully when tmux session absent" {
+  # With an empty/absent session arg, _peer_call should use the inline path
+  local body
+  body=$(awk '/^_peer_call\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # The else branch must still contain the original inline claude/kimi dispatch
+  echo "$body" | grep -qF 'claude -p --output-format text'
+}

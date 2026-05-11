@@ -1,24 +1,18 @@
 # Changelog
 
-## v2026.511.11
+## v2026.511.7
 - **Added**: loop 默认 auto-attach 弹窗 — 每次 loop 触发时，runner script 自动通过 osascript 开一个背景 Terminal 窗口 `tmux attach -t roll-loop-<slug>`，看 claude 实时打字干活；弹窗用 `delay 0.3` + 还原前一个 frontmost app 做到不抢焦点，tmux session 结束窗口保留供回看，关掉窗口 loop 仍在 tmux 里继续跑。
 - **Added**: `roll loop mute` / `roll loop unmute` 一键开关 — 不想看弹窗时 `roll loop mute` 创建 `~/.shared/roll/mute` 标记文件即刻静音，`unmute` 删掉它恢复；mute 状态对所有项目生效（一个开关治整机），`roll loop status` 新增 `Auto-attach  live | muted` 一行实时显示。
 - **Added**: tmux 升级为 `roll setup` 必装依赖 — 新增 `_ensure_tmux` helper：macOS 自动 `brew install tmux`（无 brew 给手动命令），Linux/其他系统打印对应包管理器安装指引；任何失败路径都返回 0，不阻塞 setup 主流程。
-- **Fixed**: launchd runner 缺 brew PATH 导致 hook 子进程报 `node: command not found` — launchd 默认 PATH 不含 `/opt/homebrew/bin`，claude 通过 `sh -c` 调 SessionEnd hook 时找不到 node；inner runner 模板显式 `export PATH="/opt/homebrew/bin:$PATH"` 让整条 fork 链都能拿到 brew 工具。
-- **Fixed**: runs.jsonl schema 漂移 — 早期 claude 在 status/ts/alerts/project 字段自由发挥（`built` vs `success` vs `noop`、UTC vs `+08:00`、number vs array、全路径 vs slug）。SKILL Step 5 改为"严格契约"：ts 强制 UTC Z 后缀、project 用 slug、alerts/built/skipped 永远是数组、status 限定 `built/idle/failed` 三个 enum 无同义词；contract test 锁死关键不变量留在 prompt 里。
-
-## v2026.511.9
 - **Added**: `roll loop runs` 每次 loop 运行的快速可见性 — 单次 loop 结束追加一行 JSON 到 `~/.shared/roll/loop/runs.jsonl`（含 ts/project/run_id/status/built/skipped/alerts/tcr_count/duration_sec），新命令 `roll loop runs [N] [--all]` 倒序显示最近 N 次（默认 10），不必等次日早报就能查到中间 13 次 loop 各干了啥。
-- **Added**: loop 跑在 tmux session + `roll loop attach` 实时观看 — runner script 自动把 claude 包进 detached tmux session `roll-loop-<slug>`，输出同时 pipe 到 `cron.log`；执行 `roll loop attach` 可随时 attach 上去看它打字、写文件、commit，Ctrl-B D 分离后 loop 继续跑；未装 tmux 时自动 fallback 到原 headless 模式，零依赖回退。
-- **Improved**: roll-.dream 日志改为中文输出 — Dream Log 输出模板（概要 / 死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 创建的 REFACTOR 条目）和"未发现 / 部分完成"等固定文案全部中文化，与 roll-brief 风格对齐，晨间扫一眼不再需要在中英文之间切换语境。
-
-## v2026.511.8
-- **Fixed**: 集成测试 launchd ghost 泄漏 — `integration_teardown` 在删除 TEST_TMP 之前，先 `launchctl bootout` 该沙箱里被 `roll loop on` 注册到 user gui domain 的所有 `com.roll.*` 服务，避免删 plist 后 launchd 仍保留指向不存在路径的 ghost 注册。
-
-## v2026.511.7
-- **Added**: loop 执行 story 前显式标记 🔨 In Progress — roll-loop SKILL 在调用 executor 之前先把 BACKLOG 中的故事状态从 📋 Todo 改为 🔨 In Progress 并提交 `chore: mark US-XXX in progress`，brief 简报和 peer agent 都能即时感知正在进行的工作，tcr 微提交不再"对 brief 不可见"。
+- **Added**: loop 跑在 tmux session + `roll loop attach` 实时观看 — runner script 自动把 claude 包进 detached tmux session `roll-loop-<slug>`，输出同时 pipe 到 `cron.log`；执行 `roll loop attach` 可随时 attach 上去看它打字、写文件、commit，Ctrl-B D 分离后 loop 继续跑。
+- **Added**: loop 执行 story 前显式标记 🔨 In Progress — roll-loop SKILL 在调用 executor 之前先把 BACKLOG 中的故事状态从 📋 Todo 改为 🔨 In Progress 并提交 `chore: mark US-XXX in progress`，brief 简报和 peer agent 都能即时感知正在进行的工作。
 - **Added**: loop 启动时孤儿 🔨 自愈 — 扫描 BACKLOG 中无对应 state.yaml running item 的 🔨 条目，视为上次崩溃残留，自动 revert 回 📋 Todo 并写 ALERT，避免被"卡"在错误的中间状态里。
 - **Improved**: roll-build / roll-fix SKILL 状态转换段更新 — 显式接受 📋 Todo 或 🔨 In Progress 作为 ✅ Done 前置状态，loop 触发链路状态过渡更稳健。
+- **Improved**: roll-.dream 日志改为中文输出 — Dream Log 输出模板和"未发现 / 部分完成"等固定文案全部中文化，与 roll-brief 风格对齐。
+- **Fixed**: 集成测试 launchd ghost 泄漏 — `integration_teardown` 在删除 TEST_TMP 之前，先 `launchctl bootout` 该沙箱里被 `roll loop on` 注册到 user gui domain 的所有 `com.roll.*` 服务，避免删 plist 后 launchd 仍保留指向不存在路径的 ghost 注册。
+- **Fixed**: launchd runner 缺 brew PATH 导致 hook 子进程报 `node: command not found` — launchd 默认 PATH 不含 `/opt/homebrew/bin`，claude 通过 `sh -c` 调 SessionEnd hook 时找不到 node；inner runner 模板显式 `export PATH="/opt/homebrew/bin:$PATH"` 让整条 fork 链都能拿到 brew 工具。
+- **Fixed**: runs.jsonl schema 漂移 — 早期 claude 在 status/ts/alerts/project 字段自由发挥；SKILL Step 5 改为"严格契约"：ts 强制 UTC Z 后缀、project 用 slug、alerts/built/skipped 永远是数组、status 限定 `built/idle/failed` 三个 enum 无同义词，并禁止额外字段。
 
 ## v2026.511.6
 - **Added**: Loop 并发安全 — runner script 启动时写入 per-project LOCK 文件并检测重入；活跃 PID 已存在则跳过本次，残留死 LOCK 自动清理；正常/异常退出均通过 trap 清掉 LOCK。彻底防止两个 loop 实例同时启动造成的 BACKLOG/git 冲突。

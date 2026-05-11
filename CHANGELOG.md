@@ -3,6 +3,7 @@
 ## Unreleased
 - **Added**: `roll ci [--wait]` — 查看当前提交的 CI 状态，或等待 CI 跑完再继续
 - **Fixed**: loop 现在会等 CI 通过后才标记故事完成，CI 失败则保持进行中并发出提醒
+- **Fixed**: changelog 更新不再产生独立 commit，并入故事完成提交，git log 更干净
 
 ## v2026.512.6
 - **Added**: peer review 现在也会自动弹出终端窗口，实时观察跨 AI 协商过程（mute 关闭同一开关）

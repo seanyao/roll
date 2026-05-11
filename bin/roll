@@ -1904,8 +1904,11 @@ INNER
 
   cat > "$script_path" << SCRIPT
 #!/bin/bash -l
-h=\$(printf '%d' "\$(date +%H)")
-if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
+# Active-window check — skipped when ROLL_LOOP_FORCE is set (manual 'roll loop now')
+if [ -z "\$ROLL_LOOP_FORCE" ]; then
+  h=\$(printf '%d' "\$(date +%H)")
+  if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
+fi
 LOCK="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
 SESSION="roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')"
 INNER_SCRIPT="${inner_path}"
@@ -2162,11 +2165,20 @@ _loop_now() {
   if [[ -f "$_LOOP_STATE" ]] && grep -q "status: running" "$_LOOP_STATE" 2>/dev/null; then
     warn "Loop already running  loop 正在运行中"; return 0
   fi
-  info "Triggering loop cycle...  正在触发一个周期..."
-  local log_file="${_SHARED_ROOT}/loop/launchd.log"
-  mkdir -p "$(dirname "$log_file")"
-  _agent_run_skill "roll-loop" 2>&1 | tee -a "$log_file" || true
-  # Reset stale running state if skill exited without cleanup (e.g. API error, SIGKILL)
+  # Invoke the SAME runner script that launchd would invoke — same tmux,
+  # same --verbose, same LOCK, same auto-attach popup. ROLL_LOOP_FORCE
+  # bypasses only the active-window check (manual triggers aren't time-gated).
+  local project_path; project_path=$(pwd -P)
+  local slug; slug=$(_project_slug "$project_path")
+  local runner="${_SHARED_ROOT}/loop/run-${slug}.sh"
+  if [[ ! -f "$runner" ]]; then
+    err "Runner script not found: ${runner}"
+    err "Run 'roll setup' or 'roll loop on' first to generate it."
+    return 1
+  fi
+  info "Starting new loop cycle...  正在启动新的循环..."
+  ROLL_LOOP_FORCE=1 bash "$runner"
+  # Reset stale running state if the cycle exited without cleanup (e.g. API error, SIGKILL)
   if [[ -f "$_LOOP_STATE" ]] && grep -q "^status: running" "$_LOOP_STATE" 2>/dev/null; then
     printf "status: idle\n" > "$_LOOP_STATE"
   fi

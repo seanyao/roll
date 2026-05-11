@@ -1,0 +1,47 @@
+#!/usr/bin/env bats
+# Tests for _loop_now behavior parity with launchd-triggered service (FIX-021)
+# loop now must walk the SAME path as the scheduled service: runner script →
+# tmux session → claude --verbose -p → osascript popup. ROLL_LOOP_FORCE bypasses
+# only the active-window guard so the manual invocation isn't time-gated.
+
+ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
+
+setup() {
+  source "$ROLL_BIN"
+  _orig_dir="$PWD"
+  _test_dir=$(mktemp -d)
+  cd "$_test_dir"
+}
+
+teardown() {
+  cd "$_orig_dir"
+  rm -rf "$_test_dir"
+}
+
+@test "_loop_now: invokes the project runner script (not _agent_run_skill)" {
+  local body
+  body=$(awk '/^_loop_now\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # No more direct _agent_run_skill call in the loop now path
+  ! echo "$body" | grep -qF "_agent_run_skill \"roll-loop\""
+  # Should reference the runner script path
+  echo "$body" | grep -qE 'run-.*\.sh|_SHARED_ROOT.*loop/run|runner'
+}
+
+@test "_loop_now: sets ROLL_LOOP_FORCE to bypass active-window check" {
+  local body
+  body=$(awk '/^_loop_now\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qF 'ROLL_LOOP_FORCE'
+}
+
+@test "_loop_now: emits Chinese-correct startup message" {
+  local body
+  body=$(awk '/^_loop_now\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qF '正在启动新的循环'
+}
+
+@test "_write_loop_runner_script: active-window check honors ROLL_LOOP_FORCE" {
+  local script_path="${_test_dir}/run-test-force.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 18
+  # The window check should be skippable when ROLL_LOOP_FORCE is non-empty
+  grep -qF 'ROLL_LOOP_FORCE' "$script_path"
+}

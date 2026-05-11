@@ -412,9 +412,10 @@ roll loop monitor 5     # 5 秒刷新间隔
 ---
 
 <a id="us-auto-013"></a>
-## US-AUTO-013 roll-propose — 主动发起产品需求提案 📋
+## US-AUTO-013 roll-propose — 主动发起产品需求提案 ✅
 
 **Created**: 2026-05-11
+**Completed**: 2026-05-11
 
 - As a product engineer working with roll
 - I want to actively invoke `$roll-propose` to generate product-level feature proposals
@@ -424,13 +425,13 @@ roll loop monitor 5     # 5 秒刷新间隔
 roll-dream 负责技术/架构层面的内省（从执行经验里提炼改进信号）。产品视角的需求发现是另一种思维——想象用户场景、识别功能空白、提出新方向——不依赖执行经验，应由人主动发起而非被动调度。
 
 **AC:**
-- [ ] `$roll-propose` skill 存在，可通过 Claude Code 主动调用
-- [ ] 运行时读取 `BACKLOG.md`、最近 commits、现有 skills 列表，作为上下文
-- [ ] 产出 1–3 条 proposed US，每条包含：动机（why）、目标用户场景、AC 草稿
-- [ ] 写入项目根目录 `PROPOSALS.md`（追加，带时间戳），不直接写入 BACKLOG
-- [ ] `PROPOSALS.md` 格式明确标注"待审批"状态，与正式 US 物理隔离
-- [ ] 人工审批后手动将条目移入 BACKLOG；拒绝时可在 PROPOSALS.md 标注拒绝原因（防止重复提出相似提案）
-- [ ] skill 提示词引导 agent 从"用户视角"而非"技术视角"思考，避免与 roll-dream 重叠
+- [x] `$roll-propose` skill 存在，可通过 Claude Code 主动调用
+- [x] 运行时读取 `BACKLOG.md`、最近 commits、现有 skills 列表，作为上下文
+- [x] 产出 1–3 条 proposed US，每条包含：动机（why）、目标用户场景、AC 草稿
+- [x] 写入项目根目录 `PROPOSALS.md`（追加，带时间戳），不直接写入 BACKLOG
+- [x] `PROPOSALS.md` 格式明确标注"待审批"状态，与正式 US 物理隔离
+- [x] 人工审批后手动将条目移入 BACKLOG；拒绝时可在 PROPOSALS.md 标注拒绝原因（防止重复提出相似提案）
+- [x] skill 提示词引导 agent 从"用户视角"而非"技术视角"思考，避免与 roll-dream 重叠
 
 **Files:**
 - `skills/roll-propose/SKILL.md`（新建）

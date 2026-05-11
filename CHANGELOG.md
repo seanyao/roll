@@ -5,8 +5,7 @@
 - **Fixed**: loop 现在会等 CI 通过后才标记故事完成，CI 失败则保持进行中并发出提醒
 - **Fixed**: changelog 更新不再产生独立 commit，并入故事完成提交，git log 更干净
 - **Added**: `docs/domain/` — Roll 架构的 DDD 领域模型文档（5 个 Bounded Context + 自治操作 Aggregate 设计）
-- **Fixed**: `roll loop runs` 过滤条件从完整路径改为 slug，历史记录不再因路径不匹配而消失
-- **Fixed**: `roll-loop` skill 写入 `runs.jsonl` 时 project slug 计算方式明确，避免写成 bare basename
+- **Fixed**: `roll loop runs` 不再报"当前项目尚无运行记录"，历史记录正常显示
 
 ## v2026.512.6
 - **Added**: peer review 现在也会自动弹出终端窗口，实时观察跨 AI 协商过程（mute 关闭同一开关）

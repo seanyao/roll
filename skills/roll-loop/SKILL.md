@@ -278,16 +278,35 @@ roll loop now     # execute one cycle immediately
 
 ### Live attach (transparency)
 
-When `tmux` is installed (recommended), each loop iteration runs inside a
-detached tmux session named `roll-loop-<slug>`. Watch it work in real time:
+Each loop iteration runs inside a detached tmux session named
+`roll-loop-<slug>` (tmux is a required dependency — `roll setup` auto-installs
+it via Homebrew on macOS, or prints the install command elsewhere).
+
+**Default — auto-attach popup**: when the loop fires, a background Terminal
+window pops up running `tmux attach -t roll-loop-<slug>`. You can watch the
+agent work in real time without typing anything. The popup is best-effort
+focus-retaining (it captures the previously-active app and restores focus
+after the window appears) and the tmux session keeps running even if you
+close the window.
+
+**Manual attach** (any time):
 
 ```bash
-roll loop attach  # exec tmux attach -t roll-loop-<slug>
+roll loop attach   # exec tmux attach -t roll-loop-<slug>
 ```
 
-Press `Ctrl-B D` to detach — the loop continues running uninterrupted. If
-tmux is not installed, the runner falls back to headless execution and
-`attach` reports that no session exists.
+Press `Ctrl-B D` to detach — the loop continues running uninterrupted.
+
+**Mute / unmute the popup**:
+
+```bash
+roll loop mute     # 🔇 — suppress auto-attach popup (loop still runs in tmux)
+roll loop unmute   # 🔔 — re-enable the popup
+```
+
+Mute state is a single marker file at `~/.shared/roll/mute` and is shared
+across all projects on this machine. Check the current state with
+`roll loop status` — it shows an `Auto-attach: live | muted` line.
 
 ## Integration Map
 

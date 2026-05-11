@@ -166,3 +166,13 @@ teardown() {
   # Output should be empty (silent no-op) when tmux is already present
   [ -z "${output// /}" ]
 }
+
+# ─── SKILL.md doc contract ────────────────────────────────────────────────────
+
+@test "roll-loop SKILL doc mentions roll loop mute" {
+  grep -q 'roll loop mute' "${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
+}
+
+@test "roll-loop SKILL doc mentions auto-attach popup behavior" {
+  grep -qi 'auto-attach' "${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
+}

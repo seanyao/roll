@@ -24,8 +24,10 @@ integration_teardown() {
   [[ -n "${TEST_TMP:-}" ]] && rm -rf "$TEST_TMP"
 }
 
-# Run roll with TEST_TMP as HOME so ~ expansions resolve inside sandbox.
+# Run roll with TEST_TMP as HOME and cwd so ~ expansions resolve inside the
+# sandbox AND project-slug-derived labels are unique (don't collide with the
+# developer's real loaded services).
 # Usage: run_roll <cmd> [args...]
 run_roll() {
-  ROLL_HOME="${ROLL_HOME}" HOME="${TEST_TMP}" run bash "$ROLL_BIN" "$@"
+  ROLL_HOME="${ROLL_HOME}" HOME="${TEST_TMP}" run bash -c "cd \"${TEST_TMP}\" && bash \"$ROLL_BIN\" \"\$@\"" -- "$@"
 }

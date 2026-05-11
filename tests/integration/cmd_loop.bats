@@ -72,11 +72,12 @@ teardown() {
   [[ "$output" == *"not enabled"* ]] || [[ "$output" == *"未启用"* ]]
 }
 
-@test "loop status (macOS): shows disabled when not loaded" {
+@test "loop status (macOS): shows off-state when not loaded" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   run_roll loop status
   [ "$status" -eq 0 ]
-  [[ "$output" == *"disabled"* ]] || [[ "$output" == *"未启用"* ]]
+  # Three-state display (US-AUTO-015): not installed | installed/off | enabled
+  [[ "$output" == *"not installed"* ]] || [[ "$output" == *"installed/off"* ]] || [[ "$output" == *"未启用"* ]]
 }
 
 @test "loop status (macOS): shows enabled after loop on" {

@@ -1,5 +1,10 @@
 # Changelog
 
+## v2026.511.7
+- **Added**: loop 执行 story 前显式标记 🔨 In Progress — roll-loop SKILL 在调用 executor 之前先把 BACKLOG 中的故事状态从 📋 Todo 改为 🔨 In Progress 并提交 `chore: mark US-XXX in progress`，brief 简报和 peer agent 都能即时感知正在进行的工作，tcr 微提交不再"对 brief 不可见"。
+- **Added**: loop 启动时孤儿 🔨 自愈 — 扫描 BACKLOG 中无对应 state.yaml running item 的 🔨 条目，视为上次崩溃残留，自动 revert 回 📋 Todo 并写 ALERT，避免被"卡"在错误的中间状态里。
+- **Improved**: roll-build / roll-fix SKILL 状态转换段更新 — 显式接受 📋 Todo 或 🔨 In Progress 作为 ✅ Done 前置状态，loop 触发链路状态过渡更稳健。
+
 ## v2026.511.6
 - **Added**: Loop 并发安全 — runner script 启动时写入 per-project LOCK 文件并检测重入；活跃 PID 已存在则跳过本次，残留死 LOCK 自动清理；正常/异常退出均通过 trap 清掉 LOCK。彻底防止两个 loop 实例同时启动造成的 BACKLOG/git 冲突。
 - **Added**: roll-loop SKILL 显式声明 skip-🔨 In Progress 语义 — claude 扫 BACKLOG 时跳过已被人工或 peer agent 标记的执行中条目，为人机协同和多 agent 协作奠定基础。

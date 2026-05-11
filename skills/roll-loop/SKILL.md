@@ -159,7 +159,10 @@ visibility (one line per cycle, append-only — never delete or rewrite earlier 
 **⚠️ Strict schema contract — do NOT deviate.** Every field has exactly one
 canonical form. Synonyms like `"success"`, `"noop"`, `"completed"` are forbidden
 for `status`. Numbers and arrays cannot be interchanged. UTC `Z` suffix only,
-no timezone offsets.
+no timezone offsets. **No extra fields** — emit only the keys listed below (plus
+optional `reason` when `status="failed"`); do not add `note`, `comment`,
+`details`, `info`, etc. If you feel the urge to annotate, put it in the cycle's
+final report in `cron.log` instead.
 
 **Canonical record (copy this exact shape, fill in real values):**
 

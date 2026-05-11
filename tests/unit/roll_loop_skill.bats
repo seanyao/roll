@@ -36,4 +36,7 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   grep -qE 'alerts.*array|Always array, never number' "$SKILL_FILE"
   # project must be slug (not full path)
   grep -qE 'project.*slug|slug.*NOT the absolute path' "$SKILL_FILE"
+  # no extra fields allowed — note/comment/details/info forbidden
+  grep -qF 'No extra fields' "$SKILL_FILE"
+  grep -qE 'note.*comment.*details|do not add `note`' "$SKILL_FILE"
 }

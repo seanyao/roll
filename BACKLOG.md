@@ -160,3 +160,4 @@
 | IDEA-008 | roll dashboard 重设计 — 当前布局不完整，需要重新规划整体布局、信息密度、交互方式，作为项目入口的体验应该更好 | 📋 Todo |
 | IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | 📋 Todo |
 | IDEA-010 | `roll status` 增加全局 loop 概览区块 — 在现有 convention/skills 状态后追加本机所有项目的 loop 服务状态、调度时间和 backlog 待办数 | ✅ Done → US-AUTO-021 |
+| IDEA-011 | 基于开源 PI 自研 Coding Agent — 将 Harness Engineering Skills 和管理层内建进去，摆脱第三方 Coding Agent 适配依赖，获得完整自主控制权 | 📋 Todo |

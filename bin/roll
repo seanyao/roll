@@ -1254,6 +1254,63 @@ cmd_status() {
     fi
   done
 
+  _status_loop_overview
+}
+
+_status_loop_overview() {
+  [[ "$(uname)" != "Darwin" ]] && return 0
+
+  local plists=()
+  while IFS= read -r p; do
+    [[ -f "$p" ]] && plists+=("$p")
+  done < <(ls "${_LAUNCHD_DIR}"/com.roll.loop.*.plist 2>/dev/null)
+
+  [[ "${#plists[@]}" -eq 0 ]] && return 0
+
+  echo ""
+  echo -e "${BOLD}Loop Overview:  所有项目 loop 状态${NC}"
+
+  for plist in "${plists[@]}"; do
+    local label; label=$(basename "$plist" .plist)
+
+    local proj_path
+    proj_path=$(awk '/<key>WorkingDirectory<\/key>/{f=1;next} f{gsub(/^[[:space:]]*<string>|<\/string>[[:space:]]*$/,"");print;exit}' "$plist" 2>/dev/null)
+
+    local proj_name path_note=""
+    if [[ -n "$proj_path" && -d "$proj_path" ]]; then
+      proj_name=$(basename "$proj_path")
+    elif [[ -n "$proj_path" ]]; then
+      proj_name=$(basename "$proj_path")
+      path_note=" (path missing)"
+    else
+      proj_name="(unknown)"
+    fi
+
+    local state_icon
+    if _launchd_is_loaded "$label"; then
+      state_icon="${GREEN}●${NC}"
+    else
+      state_icon="${RED}○${NC}"
+    fi
+
+    local minute hour schedule
+    minute=$(awk '/<key>Minute<\/key>/{f=1;next} f{gsub(/^[[:space:]]*<integer>|<\/integer>[[:space:]]*$/,"");print;exit}' "$plist" 2>/dev/null)
+    hour=$(awk '/<key>Hour<\/key>/{f=1;next} f{gsub(/^[[:space:]]*<integer>|<\/integer>[[:space:]]*$/,"");print;exit}' "$plist" 2>/dev/null)
+    if [[ -n "$hour" && -n "$minute" ]]; then
+      schedule=$(printf "%02d:%02d" "$hour" "$minute")
+    elif [[ -n "$minute" ]]; then
+      schedule=":$(printf '%02d' "$minute")"
+    else
+      schedule="?"
+    fi
+
+    local todo_count=0
+    if [[ -z "$path_note" && -f "${proj_path}/BACKLOG.md" ]]; then
+      todo_count=$(grep -c '📋 Todo' "${proj_path}/BACKLOG.md" 2>/dev/null || echo 0)
+    fi
+
+    echo -e "  ${state_icon} ${proj_name}${path_note}   ${schedule}   ${todo_count} pending"
+  done
 }
 
 check_sync_status() {

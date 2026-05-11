@@ -15,3 +15,9 @@ FIX_SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-fix/SKILL.md"
   grep -qF '🔨 In Progress' "$FIX_SKILL"
   grep -qE '📋 Todo.*or.*🔨|🔨.*or.*📋' "$FIX_SKILL"
 }
+
+@test "roll-brief SKILL.md: surfaces in-progress items in dedicated section" {
+  local brief_skill="${BATS_TEST_DIRNAME}/../../skills/roll-brief/SKILL.md"
+  grep -qF '🔨' "$brief_skill"
+  grep -qF '进行中' "$brief_skill"
+}

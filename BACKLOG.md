@@ -135,7 +135,7 @@
 | [US-AUTO-024](docs/features/autonomous-evolution.md#us-auto-024) | `roll loop runs` 每次 loop 运行的快速可见性 — 单次 loop 结束写 JSONL，新命令显示最近 N 次摘要 | ✅ Done |
 | [US-AUTO-025](docs/features/autonomous-evolution.md#us-auto-025) | loop 在 tmux session 里跑 + `roll loop attach` 实时观看 — 让 loop 从看不见的子进程变成可随时 attach 的活终端 | ✅ Done |
 | [US-AUTO-017](docs/features/autonomous-evolution.md#us-auto-017) | roll-.dream 日志改为中文输出 — 与 roll-brief 语言风格对齐 | ✅ Done |
-| [US-AUTO-026](docs/features/autonomous-evolution.md#us-auto-026) | 默认 auto-attach + 极简 mute/unmute — loop/peer 一触发就自动背景弹窗看实时 tmux，roll loop mute 一键关 | 📋 Todo |
+| [US-AUTO-026](docs/features/autonomous-evolution.md#us-auto-026) | 默认 auto-attach + 极简 mute/unmute — loop/peer 一触发就自动背景弹窗看实时 tmux，roll loop mute 一键关 | 🔨 In Progress |
 | [US-AUTO-018](docs/features/autonomous-evolution.md#us-auto-018) | roll-brief 和 roll-.dream 生成文档后自动 git commit — brief 显式化 commit；dream 标准化现有隐式行为 | 📋 Todo |
 | [US-AUTO-019](docs/features/autonomous-evolution.md#us-auto-019) | $roll-design 非交互模式 + IDEA 晋升路径 — --from-file / --from-idea，人可离线丢需求等 loop 执行 | 📋 Todo |
 | [US-AUTO-020](docs/features/autonomous-evolution.md#us-auto-020) | roll-design + roll-loop SKILL 文档补充 — Confirm 语义澄清 + 紧急绕过路径说明 | 📋 Todo |

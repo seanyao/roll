@@ -87,3 +87,49 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"enabled"* ]] || [[ "$output" == *"已启用"* ]]
 }
+
+# ─── loop mute / unmute (US-AUTO-026 golden path E2E) ────────────────────────
+
+@test "loop mute → unmute round-trip: file appears then disappears" {
+  local mute_file="${TEST_TMP}/.shared/roll/mute"
+
+  [ ! -f "$mute_file" ]
+
+  run_roll loop mute
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"muted"* ]] || [[ "$output" == *"已静音"* ]]
+  [ -f "$mute_file" ]
+
+  run_roll loop status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Auto-attach"* ]]
+  [[ "$output" == *"muted"* ]]
+
+  run_roll loop unmute
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unmuted"* ]] || [[ "$output" == *"已恢复"* ]]
+  [ ! -f "$mute_file" ]
+
+  run_roll loop status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Auto-attach"* ]]
+  [[ "$output" == *"live"* ]]
+}
+
+@test "loop runner script contains auto-attach osascript with mute check" {
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS-only auto-attach path"
+
+  # Setup writes both an outer runner (run-<slug>.sh, contains tmux + osascript)
+  # and an inner runner (run-<slug>-inner.sh, contains the agent command).
+  # Pick the outer one only.
+  local runner=""
+  for f in "${TEST_TMP}/.shared/roll/loop/run-"*.sh; do
+    [[ -f "$f" && "$f" != *-inner.sh ]] && runner="$f" && break
+  done
+  [ -n "$runner" ]
+  [ -f "$runner" ]
+
+  grep -qF 'osascript' "$runner"
+  grep -qF '.shared/roll/mute' "$runner"
+  grep -qF 'tmux attach' "$runner"
+}

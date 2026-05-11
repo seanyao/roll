@@ -38,3 +38,21 @@ teardown() {
   [[ -n "$export_line" && -n "$cmd_line" ]]
   [[ "$export_line" -lt "$cmd_line" ]]
 }
+
+@test "_write_loop_runner_script: cmd is augmented with claude --verbose for attach visibility" {
+  local script_path="${_test_dir}/run-test-verbose.sh"
+  # The agent_cmd typically starts with claude -p; inner runner should rewrite
+  # to claude --verbose -p so the tmux attach view shows live progress.
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p \"prompt\"" "/tmp/log" 10 24
+  local inner_script="${script_path%.sh}-inner.sh"
+  grep -qE 'claude --verbose -p|claude -p .* --verbose|--verbose' "$inner_script"
+}
+
+@test "_write_loop_runner_script: non-claude cmds (kimi/deepseek) are NOT modified" {
+  # --verbose injection must be claude-specific; other agents shouldn't get it
+  local script_path="${_test_dir}/run-test-kimi.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "kimi --quiet -p \"prompt\"" "/tmp/log" 10 24
+  local inner_script="${script_path%.sh}-inner.sh"
+  ! grep -qF 'kimi --verbose' "$inner_script"
+  grep -qF 'kimi --quiet -p' "$inner_script"
+}

@@ -113,6 +113,7 @@
 | FIX-017 | launchd runner 缺 brew PATH 导致 hook 子进程报 `node: command not found` — launchd 默认 PATH 不含 `/opt/homebrew/bin`，claude 通过 `sh -c` 调 SessionEnd hook 时 node 找不到；runner script 模板需显式 `export PATH="/opt/homebrew/bin:$PATH"` 让子进程链都能拿到 | ✅ Done |
 | FIX-018 | runs.jsonl schema 漂移 — 三条记录三种风格（project 全路径/slug、ts UTC/+08:00、alerts number/array、status built/success/noop）；SKILL Step 5 契约不严格，claude 自由发挥；需固定字段类型和 enum | ✅ Done |
 | FIX-019 | roll-.changelog 凭感觉填版本号 — loop 在 build/fix 后调用 changelog skill，claude 假设下一个版本号（v2026.511.8/9/11）写进 CHANGELOG.md，但 release.sh 才是版本号的唯一发布权威；导致 CHANGELOG 出现假节，release.sh 后还可能继续被绑架；roll-build/fix/changelog 改为只写 `## Unreleased` 节，release.sh 在拿到真实 N 后把 Unreleased 提升为 vX.Y.Z | 🔨 In Progress |
+| FIX-020 | loop 执行过程必须可视化（必要项，不是 nice-to-have）— loop 是 launchd 非人触发，attach 窗口长时间空白等于"AI 在干啥完全黑盒"；inner runner 给 claude 加 `--verbose` 让工具调用、思考阶段事件实时输出，看得见才能信任 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

@@ -1891,10 +1891,14 @@ _write_loop_runner_script() {
   mkdir -p "$(dirname "$script_path")"
 
   local inner_path="${script_path%.sh}-inner.sh"
+  # Inject --verbose into `claude -p` so the tmux-attach view shows live
+  # tool-use and reasoning events (loop is launchd-triggered, the user is
+  # not driving it — visibility is required, not optional).
+  local cmd_verbose="${cmd/claude -p/claude --verbose -p}"
   cat > "$inner_path" << INNER
 #!/bin/bash -l
 export PATH="/opt/homebrew/bin:\$PATH"
-cd "${project_path}" && ${cmd}
+cd "${project_path}" && ${cmd_verbose}
 INNER
   chmod +x "$inner_path"
 

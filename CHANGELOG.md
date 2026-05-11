@@ -2,6 +2,7 @@
 
 ## v2026.511.10
 - **Fixed**: launchd runner 缺 brew PATH 导致 hook 子进程报 `node: command not found` — launchd 默认 PATH 不含 `/opt/homebrew/bin`，claude 通过 `sh -c` 调 SessionEnd hook 时找不到 node；inner runner 模板显式 `export PATH="/opt/homebrew/bin:$PATH"` 让整条 fork 链都能拿到 brew 工具。
+- **Fixed**: runs.jsonl schema 漂移 — 早期 claude 在 status/ts/alerts/project 字段自由发挥（`built` vs `success` vs `noop`、UTC vs `+08:00`、number vs array、全路径 vs slug）。SKILL Step 5 改为"严格契约"：ts 强制 UTC Z 后缀、project 用 slug、alerts/built/skipped 永远是数组、status 限定 `built/idle/failed` 三个 enum 无同义词；contract test 锁死关键不变量留在 prompt 里。
 
 ## v2026.511.9
 - **Added**: `roll loop runs` 每次 loop 运行的快速可见性 — 单次 loop 结束追加一行 JSON 到 `~/.shared/roll/loop/runs.jsonl`（含 ts/project/run_id/status/built/skipped/alerts/tcr_count/duration_sec），新命令 `roll loop runs [N] [--all]` 倒序显示最近 N 次（默认 10），不必等次日早报就能查到中间 13 次 loop 各干了啥。

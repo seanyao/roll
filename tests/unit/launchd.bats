@@ -365,7 +365,7 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: content changed + service loaded → reload triggered" {
+@test "_install_launchd_plists: content changed + service loaded → reload via bootout+bootstrap (FIX-027)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
@@ -385,8 +385,37 @@ setup() {
   echo "loop_minute: 22" > "$cfg"
   _install_launchd_plists "$proj"
 
-  grep -q "unload" "$reload_log"
-  grep -q "load" "$reload_log"
+  # FIX-027: reload must use bootout/bootstrap (doesn't touch overrides db),
+  # not unload/load no-`-w` (which wipes the label's enabled flag on Sonoma+).
+  grep -q "bootout" "$reload_log"
+  grep -q "bootstrap" "$reload_log"
+  ! grep -qE '^unload ' "$reload_log"
+  ! grep -qE '^load ' "$reload_log"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}
+
+@test "_install_launchd_plists: bootout targets gui/<uid>/<label> and bootstrap targets gui/<uid> <plist> (FIX-027)" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local reload_log="${tmp_dir}/launchctl_calls.log"
+
+  local cfg; cfg=$(mktemp); echo "loop_minute: 11" > "$cfg"; ROLL_CONFIG="$cfg"
+  _install_launchd_plists "$proj"
+
+  _launchd_is_loaded() { return 0; }
+  launchctl() { echo "$*" >> "$reload_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  echo "loop_minute: 22" > "$cfg"
+  _install_launchd_plists "$proj"
+
+  local uid; uid=$(id -u)
+  local label; label=$(_launchd_label "loop" "$proj")
+  local plist; plist=$(_launchd_plist_path "loop" "$proj")
+  grep -qF "bootout gui/${uid}/${label}" "$reload_log"
+  grep -qF "bootstrap gui/${uid} ${plist}" "$reload_log"
   rm -rf "$tmp_dir"; rm -f "$cfg"
 }
 

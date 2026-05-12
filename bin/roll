@@ -2220,8 +2220,13 @@ _install_launchd_plists() {
     if [[ "$before" != "$after" ]]; then
       updated=$((updated + 1))
       if _launchd_is_loaded "$label"; then
-        launchctl unload "$plist" 2>/dev/null || true
-        launchctl load "$plist" 2>/dev/null || true
+        # FIX-027: use bootout/bootstrap so we don't disturb the label's
+        # enabled flag in the launchd overrides db (which legacy
+        # unload/load no-`-w` wipes on macOS Sonoma+, causing
+        # `roll loop status` to falsely report off after `roll update`).
+        local uid; uid=$(id -u)
+        launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+        launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
       fi
     fi
   done

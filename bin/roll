@@ -2595,11 +2595,12 @@ _loop_runs_dur() {
 }
 
 # Format a single JSONL run record for display.
+# Reads _LOOP_RUNS_BACKLOG global for ID→description lookup (set by _loop_runs).
 _loop_runs_format_line() {
   local line="$1" show_project="$2" is_darwin="$3"
   command -v jq >/dev/null 2>&1 || { echo "  (jq required)"; return 0; }
 
-  local ts status project tcr duration alerts run_id reason built_count built_csv skipped_count
+  local ts status project tcr duration alerts run_id reason built_count skipped_count
   ts=$(jq -r '.ts // ""' <<<"$line")
   status=$(jq -r '.status // ""' <<<"$line")
   project=$(jq -r '.project // ""' <<<"$line")
@@ -2609,7 +2610,6 @@ _loop_runs_format_line() {
   run_id=$(jq -r '.run_id // ""' <<<"$line")
   reason=$(jq -r '.reason // ""' <<<"$line")
   built_count=$(jq -r '(.built // []) | length' <<<"$line")
-  built_csv=$(jq -r '(.built // []) | join(", ")' <<<"$line")
   skipped_count=$(jq -r '(.skipped // []) | length' <<<"$line")
 
   local hhmm epoch=""
@@ -2629,8 +2629,29 @@ _loop_runs_format_line() {
     built)
       local skipped_note=""
       [[ "$skipped_count" -gt 0 ]] && skipped_note=", ${skipped_count} skipped"
-      printf "  %s  %s✅ built %s  (%d items, %d tcr%s, %s)\n" \
-        "$hhmm" "$prefix" "$built_csv" "$built_count" "$tcr" "$skipped_note" "$(_loop_runs_dur "$duration")"
+      local items_word; [[ "$built_count" -eq 1 ]] && items_word="item" || items_word="items"
+      printf "  %s  %s✅ built %d %s (%d tcr%s, %s)\n" \
+        "$hhmm" "$prefix" "$built_count" "$items_word" "$tcr" "$skipped_note" "$(_loop_runs_dur "$duration")"
+      local id desc
+      while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+        desc=""
+        if [[ -n "$_LOOP_RUNS_BACKLOG" ]]; then
+          desc=$(printf "%s\n" "$_LOOP_RUNS_BACKLOG" | awk -F'|' -v id="$id" '
+            NF >= 3 {
+              cell = $2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", cell)
+              if (cell == id || cell ~ "^\\[" id "\\]") {
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3; exit
+              }
+            }')
+        fi
+        if [[ -n "$desc" ]]; then
+          [[ ${#desc} -gt 72 ]] && desc="${desc:0:69}..."
+          printf "    • %-14s %s\n" "$id" "$desc"
+        else
+          printf "    • %s\n" "$id"
+        fi
+      done < <(jq -r '(.built // []) | .[]' <<<"$line")
       ;;
     idle)
       printf "  %s  %s○ idle — no Todo items\n" "$hhmm" "$prefix"
@@ -2686,10 +2707,14 @@ _loop_runs() {
   local _is_darwin=""
   [[ "$(uname)" == "Darwin" ]] && _is_darwin="1"
 
+  _LOOP_RUNS_BACKLOG=""
+  [[ -f "$project_path/BACKLOG.md" ]] && _LOOP_RUNS_BACKLOG=$(cat "$project_path/BACKLOG.md")
+
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     _loop_runs_format_line "$line" "$all_flag" "$_is_darwin"
   done <<<"$recent"
+  unset _LOOP_RUNS_BACKLOG
 }
 
 # Send a macOS system notification. No-op when muted, non-macOS, or osascript unavailable.

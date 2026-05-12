@@ -5,19 +5,12 @@
 # tools become unreachable. Runner template must export PATH explicitly so
 # every child process in the chain can find node/claude/etc.
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _test_dir=$(mktemp -d)
-  cd "$_test_dir"
+  unit_setup_cd
+  _test_dir="$TEST_TMP"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_test_dir"
-}
+teardown() { unit_teardown_cd; }
 
 @test "_write_loop_runner_script: inner script exports /opt/homebrew/bin in PATH" {
   local script_path="${_test_dir}/run-test-path.sh"

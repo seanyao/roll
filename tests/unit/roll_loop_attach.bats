@@ -1,19 +1,12 @@
 #!/usr/bin/env bats
 # Tests for roll loop attach + tmux-wrapped runner (US-AUTO-025)
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _tmp=$(mktemp -d)
-  cd "$_tmp"
+  unit_setup_cd
+  _tmp="$TEST_TMP"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_tmp"
-}
+teardown() { unit_teardown_cd; }
 
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 

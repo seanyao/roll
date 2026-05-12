@@ -3,19 +3,12 @@
 # (FIX-019: release.sh is the sole authority on version numbers;
 #  helper functions live in bin/roll so they are tracked and testable on CI)
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
+load helpers
 setup() {
-  _tmp=$(mktemp -d)
-  _orig_dir="$PWD"
-  cd "$_tmp"
-  source "$ROLL_BIN"
+  unit_setup_cd
+  _tmp="$TEST_TMP"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_tmp"
-}
+teardown() { unit_teardown_cd; }
 
 @test "bin/roll exposes _promote_unreleased as a function" {
   run bash -c "source '$ROLL_BIN' && type _promote_unreleased | head -1"

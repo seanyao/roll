@@ -4,19 +4,12 @@
 # tmux session → claude --verbose -p → osascript popup. ROLL_LOOP_FORCE bypasses
 # only the active-window guard so the manual invocation isn't time-gated.
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _test_dir=$(mktemp -d)
-  cd "$_test_dir"
+  unit_setup_cd
+  _test_dir="$TEST_TMP"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_test_dir"
-}
+teardown() { unit_teardown_cd; }
 
 @test "_loop_now: invokes the project runner script (not _agent_run_skill)" {
   local body

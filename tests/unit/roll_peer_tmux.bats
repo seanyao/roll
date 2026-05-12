@@ -1,19 +1,12 @@
 #!/usr/bin/env bats
 # Tests for US-AUTO-027: peer _peer_call tmux dispatch + auto-attach popup
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _tmp=$(mktemp -d)
-  cd "$_tmp"
+  unit_setup_cd
+  _tmp="$TEST_TMP"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_tmp"
-}
+teardown() { unit_teardown_cd; }
 
 # ─── _peer_auto_attach ─────────────────────────────────────────────────────────
 

@@ -178,7 +178,7 @@
 ### Feature: alert-lifecycle
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-ALERT-001](docs/features/alert-lifecycle.md#us-alert-001) | `roll alert` 命令 — ALERT 查看 / ack / resolve 生命周期管理，与 brief/status 告警计数联动 | 🔨 In Progress |
+| [US-ALERT-001](docs/features/alert-lifecycle.md#us-alert-001) | `roll alert` 命令 — ALERT 查看 / ack / resolve 生命周期管理，与 brief/status 告警计数联动 | ✅ Done |
 
 ## Epic: 自主循环可观测性
 ### Feature: notifications

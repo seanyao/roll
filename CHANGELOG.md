@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Added**: `roll alert` — 查看、确认、清除 loop 告警，不用再去翻 loop status
 - **Added**: `roll ci [--wait]` — 查看当前提交的 CI 状态，或等待 CI 跑完再继续
 - **Fixed**: loop 现在会等 CI 通过后才标记故事完成，CI 失败则保持进行中并发出提醒
 - **Fixed**: changelog 更新不再产生独立 commit，并入故事完成提交，git log 更干净

@@ -45,3 +45,7 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-.dream/SKILL.md"
 @test "roll-.dream SKILL.md: description frontmatter updated to mention doc freshness" {
   grep -qiE 'doc.freshness|文档新鲜度|staleness' "$SKILL"
 }
+
+@test "roll-.dream Scan 6: synced to installed skill at ~/.roll" {
+  grep -qE 'Scan 6' "${HOME}/.roll/skills/roll-.dream/SKILL.md"
+}

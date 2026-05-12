@@ -184,7 +184,7 @@
 ### Feature: notifications
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-NOTIFY-001](docs/features/notifications.md#us-notify-001) | macOS 系统通知推送 — loop story 完成 / ALERT 写入时主动触达，与 `roll loop mute` 联动，无 macOS 环境静默降级 | 📋 Todo |
+| [US-NOTIFY-001](docs/features/notifications.md#us-notify-001) | macOS 系统通知推送 — loop story 完成 / ALERT 写入时主动触达，与 `roll loop mute` 联动，无 macOS 环境静默降级 | 🔨 In Progress |
 
 ## 💡 Ideas
 | ID | Description | Status |

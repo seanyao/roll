@@ -1709,7 +1709,7 @@ cmd_peer() {
 
   printf '%s\n' "$response" >> "$log_file"
 
-  local resolution
+  local resolution=""
   resolution="$(_peer_parse_resolution "$response")"
 
   if [[ -z "$resolution" ]]; then
@@ -1734,7 +1734,7 @@ cmd_peer() {
       if [[ "$round" -ge 3 ]]; then
         warn "Max rounds reached. Escalating to user.  达到最大轮数，升级给用户。"
       else
-        info "Peer requests $resolution. Continue to round $((round + 1)).  Peer 请求 $resolution，继续第 $((round + 1)) 轮。"
+        info "Peer requests ${resolution}. Continue to round $((round + 1)).  Peer 请求 ${resolution}，继续第 $((round + 1)) 轮。"
       fi
       ;;
     ESCALATE|UNKNOWN)

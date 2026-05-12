@@ -3,6 +3,7 @@
 ## Unreleased
 - **Changed**: CI 测试运行器 (`tests/run.sh`) 动态检测核数（`nproc`/`sysctl`）替换硬编码 `--jobs 4`，可用 `ROLL_TEST_JOBS` 覆盖；bats-core submodule 缺失时给出清晰报错
 - **Changed**: GitHub Actions CI 跳过 docs-only PR（`paths-ignore: **.md, docs/**`），文档改动不再触发全套 bats
+- **Fixed**: `roll peer` 在 REFINE/OBJECT 退出路径上的 "resolution: unbound variable" 风险 — cmd_peer 显式初始化 `local resolution=""`，并补齐 AGREE/REFINE/OBJECT/ESCALATE/UNKNOWN 五条退出路径的回归测试
 
 ## v2026.512.8
 - **Added**: `$roll-doc` — legacy 项目文档自动化技能：四阶段扫描（索引 + 缺口分析 + 草稿补全 + 报告），支持 `--dry-run` / `--force`，适用任何项目

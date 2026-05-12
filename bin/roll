@@ -2776,6 +2776,7 @@ _loop_enforce_ci() {
 - Take over manually: \`\$roll-build ${story_id}\`
 - Reset and retry: \`roll loop reset\` then \`roll loop now\`
 EOF
+  _notify "roll ⚠ CI Failed" "${story_id}: CI did not pass"
   return 1
 }
 
@@ -2811,6 +2812,7 @@ _loop_enforce_tcr() {
 - Take over manually: \`\$roll-build ${story_id}\`
 - Reset and retry: \`roll loop reset\` then \`roll loop now\`
 EOF
+    _notify "roll ⚠ TCR Failed" "${story_id}: no tcr: commits found"
     return 1
   fi
 

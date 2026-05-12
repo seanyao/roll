@@ -59,3 +59,8 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
 @test "roll-doc SKILL.md: idempotency rule documented" {
   grep -qiE 'no.op|idempoten' "$SKILL"
 }
+
+@test "roll-doc skill: synced to ~/.roll/skills and linked in Claude" {
+  [ -f "${HOME}/.roll/skills/roll-doc/SKILL.md" ]
+  [ -L "${HOME}/.claude/skills/roll-doc" ]
+}

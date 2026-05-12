@@ -52,6 +52,75 @@ teardown() { unit_teardown_cd; }
   echo "$body" | grep -qE '\-\-commit'
 }
 
+# ─── _gh_repo_slug helper (FIX-026) ───────────────────────────────────────────
+
+@test "_gh_repo_slug: function exists in bin/roll" {
+  grep -qF '_gh_repo_slug()' "$ROLL_BIN"
+}
+
+@test "_gh_repo_slug: parses SSH URL git@github.com:owner/repo.git" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  run _gh_repo_slug
+  [ "$status" -eq 0 ]
+  [ "$output" = "seanyao/Roll" ]
+}
+
+@test "_gh_repo_slug: parses HTTPS URL https://github.com/owner/repo.git" {
+  git remote add origin "https://github.com/seanyao/Roll.git"
+  run _gh_repo_slug
+  [ "$status" -eq 0 ]
+  [ "$output" = "seanyao/Roll" ]
+}
+
+@test "_gh_repo_slug: parses HTTPS URL without .git suffix" {
+  git remote add origin "https://github.com/seanyao/Roll"
+  run _gh_repo_slug
+  [ "$status" -eq 0 ]
+  [ "$output" = "seanyao/Roll" ]
+}
+
+@test "_gh_repo_slug: returns non-zero when no origin remote" {
+  run _gh_repo_slug
+  [ "$status" -ne 0 ]
+}
+
+@test "_gh_repo_slug: returns non-zero for non-github remote" {
+  git remote add origin "git@gitlab.com:foo/bar.git"
+  run _gh_repo_slug
+  [ "$status" -ne 0 ]
+}
+
+# ─── _ci_wait uses -R flag (FIX-026) ──────────────────────────────────────────
+
+@test "_ci_wait: passes -R <slug> to gh run list (bypass SSH config rewrite)" {
+  local body
+  body=$(awk '/^_ci_wait\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # The gh call must include -R so it doesn't depend on auto-detection
+  # which breaks when ~/.ssh/config rewrites github.com → IP.
+  echo "$body" | grep -qE 'gh +(-R|--repo) +'
+}
+
+@test "_ci_wait: differentiates gh-not-installed (skip) from gh-failure (block)" {
+  # gh installed but commands fail → should NOT graceful skip
+  # gh missing entirely → should graceful skip
+  local body
+  body=$(awk '/^_ci_wait\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # Must NOT have the old "gh run list failed — skipping CI gate" return 0 pattern
+  # for actual call failures (we keep the "command -v gh" check at top).
+  ! echo "$body" | grep -qE 'gh run list failed.*\n.*return 0' ||
+    echo "$body" | grep -qE 'gh run list failed.*return 1'
+}
+
+@test "_ci_wait: returns 1 when gh installed but call fails (gh repo unreachable)" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "test" -q
+  # gh installed (command -v gh succeeds), but gh call fails (e.g. auth, network)
+  gh() { return 1; }
+  export -f gh
+  run _ci_wait 5
+  [ "$status" -eq 1 ]
+}
+
 # ─── _loop_enforce_ci function ────────────────────────────────────────────────
 
 @test "_loop_enforce_ci: function exists in bin/roll" {

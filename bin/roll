@@ -2734,9 +2734,27 @@ _loop_tcr_count() {
     | awk '/^[a-f0-9]+ tcr:/{n++} END{print n+0}'
 }
 
+# Parse origin remote URL → "owner/repo" for GitHub repos.
+# Returns non-zero if no origin, or origin is not github.com.
+# Decoupled from `gh` auto-detection so SSH config host rewrites don't break it.
+_gh_repo_slug() {
+  local url
+  url=$(git config --get remote.origin.url 2>/dev/null) || return 1
+  case "$url" in
+    git@github.com:*)          url="${url#git@github.com:}" ;;
+    ssh://git@github.com/*)    url="${url#ssh://git@github.com/}" ;;
+    https://github.com/*)      url="${url#https://github.com/}" ;;
+    http://github.com/*)       url="${url#http://github.com/}" ;;
+    *)                         return 1 ;;
+  esac
+  url="${url%.git}"
+  [[ -z "$url" ]] && return 1
+  printf "%s\n" "$url"
+}
+
 # Poll gh run list until current commit's CI completes.
-# Returns 0 on success or when gh is unavailable (graceful skip).
-# Returns 1 on CI failure or timeout.
+# Returns 0 on success (or when gh binary missing — graceful skip).
+# Returns 1 on CI failure, timeout, or any gh call failure.
 _ci_wait() {
   local timeout="${1:-300}"
   local interval=15
@@ -2747,13 +2765,20 @@ _ci_wait() {
   local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "Not a git repo  非 git 仓库"; return 1; }
   local short; short=$(git rev-parse --short HEAD 2>/dev/null)
 
-  ok "Waiting for CI on ${short}  等待 CI: ${short}"
+  # Resolve owner/repo from git remote so we don't depend on gh's auto-detection,
+  # which breaks when ~/.ssh/config rewrites `Host github.com` → IP address.
+  local repo_slug; repo_slug=$(_gh_repo_slug) || {
+    err "Cannot determine GitHub repo from origin remote  无法从 origin 推导 GitHub 仓库"
+    return 1
+  }
+
+  ok "Waiting for CI on ${short} (${repo_slug})  等待 CI: ${short}"
 
   while (( elapsed < timeout )); do
     local runs
-    runs=$(gh run list --commit "$commit" --json status,conclusion 2>/dev/null) || {
-      warn "gh run list failed — skipping CI gate"
-      return 0
+    runs=$(gh -R "$repo_slug" run list --commit "$commit" --json status,conclusion 2>&1) || {
+      err "gh run list failed for ${repo_slug}@${short}: ${runs}  gh 调用失败"
+      return 1
     }
 
     if [[ -z "$runs" || "$runs" == "[]" ]]; then

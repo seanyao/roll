@@ -3054,6 +3054,56 @@ _backlog_extract_id() {
 # ═══════════════════════════════════════════════════════════════════════════════
 # CI — check or wait for current commit's CI status
 # ═══════════════════════════════════════════════════════════════════════════════
+# ALERT — view / ack / resolve loop alert lifecycle
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_alert() {
+  local subcmd="${1:-list}"
+  shift || true
+
+  case "$subcmd" in
+    list|"")
+      if [[ ! -f "$_LOOP_ALERT" ]]; then
+        ok "No active alerts  暂无告警"
+        return 0
+      fi
+      echo -e "${BOLD}Active Alert  当前告警${NC}"
+      echo ""
+      cat "$_LOOP_ALERT"
+      echo ""
+      echo -e "  Run '${CYAN}roll alert ack${NC}' to acknowledge, '${CYAN}roll alert resolve${NC}' to clear."
+      echo -e "  运行 'roll alert ack' 确认告警，'roll alert resolve' 清除告警。"
+      ;;
+    ack)
+      if [[ ! -f "$_LOOP_ALERT" ]]; then
+        warn "No active alerts to acknowledge  暂无待确认告警"
+        return 0
+      fi
+      local ts; ts=$(date '+%Y-%m-%d %H:%M:%S')
+      {
+        echo ""
+        echo "**Acknowledged**: ${ts}"
+      } >> "$_LOOP_ALERT"
+      ok "Alert acknowledged at ${ts}  告警已确认"
+      ;;
+    resolve|clear)
+      if [[ ! -f "$_LOOP_ALERT" ]]; then
+        ok "No active alerts  暂无告警"
+        return 0
+      fi
+      rm -f "$_LOOP_ALERT"
+      ok "Alert resolved and cleared  告警已解决并清除"
+      ;;
+    *)
+      err "Unknown subcommand: $subcmd  未知子命令: $subcmd"
+      echo "  Usage: roll alert [list|ack|resolve]"
+      echo "  用法: roll alert [list|ack|resolve]"
+      return 1
+      ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_ci() {
   local wait_mode=false

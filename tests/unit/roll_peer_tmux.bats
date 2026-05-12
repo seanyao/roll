@@ -105,6 +105,15 @@ teardown() { unit_teardown_cd; }
   echo "$body" | grep -qF '_peer_auto_attach'
 }
 
+@test "cmd_peer: _peer_auto_attach is gated by list-clients (re-attaches on subsequent rounds)" {
+  # Regression: previously _peer_auto_attach was nested inside `if ! has-session`
+  # so rounds 2+ silently reused the session without popping. The fix gates on
+  # `tmux list-clients` being empty so each round re-attaches if no window open.
+  local body
+  body=$(awk '/^cmd_peer\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qF 'tmux list-clients'
+}
+
 @test "cmd_peer: passes session name to _peer_call" {
   local body
   body=$(awk '/^cmd_peer\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")

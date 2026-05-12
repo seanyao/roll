@@ -1666,6 +1666,8 @@ cmd_peer() {
     peer_session="roll-peer-${from_tool}-${to_tool}"
     if ! tmux has-session -t "$peer_session" 2>/dev/null; then
       tmux new-session -d -s "$peer_session" -x 200 -y 50
+    fi
+    if [ -z "$(tmux list-clients -t "$peer_session" 2>/dev/null)" ]; then
       _peer_auto_attach "$peer_session"
     fi
   fi

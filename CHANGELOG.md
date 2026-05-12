@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Changed**: `roll`（无参）dashboard 重设计 — 自治优先六块布局：① Identity（项目名 + 版本 + agent + git 状态）② AI 自治主视觉（Loop / Dream / Peer 三层 + 四道防线，框线高亮）③ Pipeline 全景（Idea/Backlog/Build/Verify/Release 五段计数）④ Current Focus · DoD（in-progress story 的 [AC] [CI] 信号，其余 4 项标注待接入）⑤ Human × AI 介入区（ALERT/PROPOSAL/Release ready，空时显示"AI 自驱中"）⑥ Schedules & Last Brief。把"AI 自动跑什么"放第一眼，不再埋在 `roll loop status` 子命令里
 - **Changed**: CI 测试运行器 (`tests/run.sh`) 动态检测核数（`nproc`/`sysctl`）替换硬编码 `--jobs 4`，可用 `ROLL_TEST_JOBS` 覆盖；bats-core submodule 缺失时给出清晰报错
 - **Changed**: GitHub Actions CI 跳过 docs-only PR（`paths-ignore: **.md, docs/**`），文档改动不再触发全套 bats
 - **Fixed**: `roll peer` 在 REFINE/OBJECT 退出路径上的 "resolution: unbound variable" 风险 — cmd_peer 显式初始化 `local resolution=""`，并补齐 AGREE/REFINE/OBJECT/ESCALATE/UNKNOWN 五条退出路径的回归测试

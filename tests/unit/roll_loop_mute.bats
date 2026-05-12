@@ -1,23 +1,15 @@
 #!/usr/bin/env bats
 # Tests for roll loop mute/unmute + auto-attach runner injection (US-AUTO-026)
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _tmp=$(mktemp -d)
-  cd "$_tmp"
-  # Redirect shared roots into the temp dir so tests don't touch ~/.shared
-  _SHARED_ROOT="${_tmp}/.shared/roll"
+  unit_setup_cd
+  _tmp="$TEST_TMP"
+  _SHARED_ROOT="${TEST_TMP}/.shared/roll"
   _LOOP_MUTE_FILE="${_SHARED_ROOT}/mute"
   mkdir -p "$_SHARED_ROOT"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_tmp"
-}
+teardown() { unit_teardown_cd; }
 
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 

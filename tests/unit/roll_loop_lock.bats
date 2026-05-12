@@ -6,23 +6,17 @@
 #   2. Set a trap to remove the LOCK on exit (normal or error)
 #   3. Detect an existing LOCK: alive PID → exit 0; dead PID → clean and continue
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _test_dir=$(mktemp -d)
-  # Suppress auto-attach popup so tests don't spawn real terminal windows
-  mkdir -p "${_test_dir}/.shared/roll"
-  touch "${_test_dir}/.shared/roll/mute"
-  cd "$_test_dir"
+  unit_setup_cd
+  _test_dir="$TEST_TMP"
+  mkdir -p "${TEST_TMP}/.shared/roll"
+  touch "${TEST_TMP}/.shared/roll/mute"
 }
-
 teardown() {
   tmux kill-session -t "roll-loop-test-concurrent" 2>/dev/null || true
   tmux kill-session -t "roll-loop-test-stale" 2>/dev/null || true
-  cd "$_orig_dir"
-  rm -rf "$_test_dir"
+  unit_teardown_cd
 }
 
 @test "_write_loop_runner_script: writes LOCK file with current PID" {

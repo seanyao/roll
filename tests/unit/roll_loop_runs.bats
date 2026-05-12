@@ -1,21 +1,15 @@
 #!/usr/bin/env bats
 # Tests for roll loop runs — per-iteration visibility (US-AUTO-024)
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
 SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
 
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _tmp=$(mktemp -d)
-  _LOOP_RUNS="${_tmp}/runs.jsonl"
-  cd "$_tmp"
+  unit_setup_cd
+  _tmp="$TEST_TMP"
+  _LOOP_RUNS="${TEST_TMP}/runs.jsonl"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_tmp"
-}
+teardown() { unit_teardown_cd; }
 
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 

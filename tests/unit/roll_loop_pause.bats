@@ -1,20 +1,13 @@
 #!/usr/bin/env bats
 # Tests for roll loop pause / resume (US-AUTO-023)
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _test_dir=$(mktemp -d)
-  cd "$_test_dir"
-  export _LOOP_STATE="${_test_dir}/state.yaml"
+  unit_setup_cd
+  _test_dir="$TEST_TMP"
+  export _LOOP_STATE="${TEST_TMP}/state.yaml"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_test_dir"
-}
+teardown() { unit_teardown_cd; }
 
 # ─── Dispatch routing ─────────────────────────────────────────────────────────
 

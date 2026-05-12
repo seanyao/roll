@@ -3,6 +3,7 @@
 ## Unreleased
 - **Added**: `$roll-doc` — legacy 项目文档自动化技能：四阶段扫描（索引 + 缺口分析 + 草稿补全 + 报告），支持 `--dry-run` / `--force`，适用任何项目
 - **Added**: `roll-.dream` Scan 6 — 文档新鲜度检测（滞后文档 / 未记录 ENV 变量 / 架构文档缺失），依赖 roll-doc，发现写入 REFACTOR 条目
+- **Fixed**: loop CI gate 在 SSH config 改写 github.com 为 IP 的环境下失灵 — `gh` 自动识别失败被静默吞掉，loop 把 "gh 出错" 误判为 "gh 未装"，在 CI 红的情况下继续把 story 标 ✅ Done；现从 git remote 推导 `owner/repo` 强制传 `-R`，gh 调用失败 = ALERT，loop 起跑前先验 HEAD CI 红绿，红则拒绝 build
 
 ## v2026.512.7
 - **Added**: `roll alert` — 查看、确认、清除 loop 告警，不用再去翻 loop status

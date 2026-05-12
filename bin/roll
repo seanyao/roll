@@ -2596,7 +2596,7 @@ _loop_runs_dur() {
 
 # Format a single JSONL run record for display.
 _loop_runs_format_line() {
-  local line="$1" show_project="$2"
+  local line="$1" show_project="$2" is_darwin="$3"
   command -v jq >/dev/null 2>&1 || { echo "  (jq required)"; return 0; }
 
   local ts status project tcr duration alerts run_id reason built_count built_csv skipped_count
@@ -2612,7 +2612,14 @@ _loop_runs_format_line() {
   built_csv=$(jq -r '(.built // []) | join(", ")' <<<"$line")
   skipped_count=$(jq -r '(.skipped // []) | length' <<<"$line")
 
-  local hhmm; hhmm=$(printf "%s" "$ts" | sed -E 's/.*T([0-9]{2}):([0-9]{2}).*/\1:\2/')
+  local hhmm epoch=""
+  if [[ "$is_darwin" == "1" ]]; then
+    epoch=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$ts" "+%s" 2>/dev/null) || epoch=""
+    [[ -n "$epoch" ]] && hhmm=$(date -j -f "%s" "$epoch" "+%H:%M" 2>/dev/null) || hhmm=""
+  else
+    hhmm=$(date -d "$ts" "+%H:%M" 2>/dev/null) || hhmm=""
+  fi
+  [[ -z "$hhmm" ]] && hhmm=$(printf "%s" "$ts" | sed -E 's/.*T([0-9]{2}):([0-9]{2}).*/\1:\2/')
   local prefix=""
   if [[ "$show_project" == "true" ]]; then
     prefix="[$(basename "$project")] "
@@ -2676,9 +2683,12 @@ _loop_runs() {
   local reversed; reversed=$(printf "%s\n" "$filtered" | awk '{a[NR]=$0} END{for(i=NR; i>=1; i--) print a[i]}')
   local recent; recent=$(printf "%s\n" "$reversed" | head -n "$n")
 
+  local _is_darwin=""
+  [[ "$(uname)" == "Darwin" ]] && _is_darwin="1"
+
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    _loop_runs_format_line "$line" "$all_flag"
+    _loop_runs_format_line "$line" "$all_flag" "$_is_darwin"
   done <<<"$recent"
 }
 

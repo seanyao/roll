@@ -105,6 +105,18 @@ EOF
   [ "$count" -eq 2 ]
 }
 
+# ─── Timezone conversion ──────────────────────────────────────────────────────
+
+@test "_loop_runs: UTC Z-suffix timestamps convert to local time" {
+  local proj; proj=$(_project_slug "$(pwd -P)")
+  cat > "$_LOOP_RUNS" <<EOF
+{"ts":"2026-05-11T03:00:00Z","project":"${proj}","run_id":"loop-utc","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}
+EOF
+  TZ=Asia/Shanghai run _loop_runs
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"11:00"* ]]
+}
+
 # ─── Status formatting ────────────────────────────────────────────────────────
 
 @test "_loop_runs: built status shows ✅, story ids, count, tcr, duration" {

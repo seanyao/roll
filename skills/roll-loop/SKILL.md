@@ -201,7 +201,9 @@ Optional field, only when `status == "failed"`:
 
 ```bash
 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-# Compute project slug — do NOT use plain `basename`, must include md5 hash suffix
+# Compute project slug — inlined equivalent of bin/roll's _project_slug
+# (Claude sessions can't call roll's internal functions, so we inline).
+# Must produce identical output to _project_slug to match `roll loop runs` filter.
 _p=$(pwd -P)
 _base=$(basename "$_p" | tr -cs '[:alnum:]' '-' | sed 's/-*$//')
 _hash=$(printf '%s' "$_p" | md5 | cut -c1-6 2>/dev/null || printf '%s' "$_p" | md5sum | cut -c1-6)

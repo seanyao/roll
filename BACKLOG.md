@@ -155,6 +155,9 @@
 | [US-AUTO-023](docs/features/autonomous-evolution.md#us-auto-023) | `roll loop pause/resume` 人工模式切换 — 轻量暂停调度（保留 plist），支持纯人工/人机协同/纯自主三种模式 | ✅ Done |
 | [US-AUTO-028](docs/features/autonomous-evolution.md#us-auto-028) | `roll-.dream` Scan 6 — 文档新鲜度持续监测（滞后文档/隐性约定/模块漂移 → REFACTOR → loop） `depends-on:US-SKILL-008` | ✅ Done |
 | [US-AUTO-027](docs/features/autonomous-evolution.md#us-auto-027) | peer 调用 auto-attach — 把 `_peer_call` 也包到 tmux session 里，未 mute 时弹窗看 peer 跨 agent 协商（split from US-AUTO-026 因 peer 当前没有 tmux 基建） | ✅ Done |
+| [US-AUTO-029](docs/features/autonomous-evolution.md#us-auto-029) | `roll` dashboard 重设计 — 自治优先布局（三层 × 四道防线主视觉 + Pipeline 全景 + Current Focus DoD + Human×AI 介入区），把 AI 在自动跑什么放第一眼 | 📋 Todo |
+| [US-AUTO-030](docs/features/autonomous-evolution.md#us-auto-030) | dashboard DoD checklist — Prod 部署回填信号源（`roll release` 完成后把部署状态写入 in-progress story 元数据，dashboard 可读） | ⏸ Deferred |
+| [US-AUTO-031](docs/features/autonomous-evolution.md#us-auto-031) | dashboard DoD checklist — Sentinel 接管状态信号源（`$roll-sentinel` 运行结果映射到 dashboard 可读位置，体现"AI 接管生产"防线） | ⏸ Deferred |
 
 ## Epic: Documentation
 ### Feature: documentation
@@ -201,8 +204,10 @@
 | IDEA-005 | roll backlog 命令 — 快速查看当前项目未完成任务清单，无需打开 BACKLOG.md 文件 | ✅ Done → US-AUTO-007 |
 | IDEA-006 | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | ✅ Done → US-SKILL-007 |
 | IDEA-007 | loop 调度时间和默认 agent 移入配置文件（.roll.yaml 或 ~/.roll/config.yaml），方便用户调整而不需要改 bin/roll 源码 | ✅ Done → US-AUTO-012 |
-| IDEA-008 | roll dashboard 重设计 — 当前布局不完整，需要重新规划整体布局、信息密度、交互方式，作为项目入口的体验应该更好 | 📋 Todo |
+| IDEA-008 | roll dashboard 重设计 — 当前布局不完整，需要重新规划整体布局、信息密度、交互方式，作为项目入口的体验应该更好 | ✅ Done → US-AUTO-029 |
 | IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | ✅ Done → US-DOC-001..006 |
 | IDEA-010 | `roll status` 增加全局 loop 概览区块 — 在现有 convention/skills 状态后追加本机所有项目的 loop 服务状态、调度时间和 backlog 待办数 | ✅ Done → US-AUTO-021 |
 | IDEA-011 | 基于开源 PI 自研 Coding Agent — 将 Harness Engineering Skills 和管理层内建进去，摆脱第三方 Coding Agent 适配依赖，获得完整自主控制权 | 📋 Todo |
 | IDEA-012 | Legacy 项目文档自治 — 三层体系：① `roll-doc-index` 整合散落文档生成可寻址索引；② `roll-doc-fill` 从 codebase 反向推导缺失文档（架构/编码规范/API 契约）；③ `roll-.dream` 新增 Scan 6（文档新鲜度）持续检测滞后/隐性约定/模块漂移，产出 REFACTOR 条目走 loop 自动维护，结果汇入 brief | ✅ Done → US-SKILL-008, US-AUTO-028 |
+| IDEA-013 | dashboard DoD checklist — UAT 信号源定义（UAT 在 Roll 体系下如何采集？人验？测试环境部署成功？需先定义概念再选实现路径） | ⏸ Deferred |
+| IDEA-014 | dashboard DoD checklist — Evidence "活证据"信号源定义（Roll 海报含"活证据·24/7 巡逻"，但落地未设计；可能与 sentinel 数据流耦合） | ⏸ Deferred |

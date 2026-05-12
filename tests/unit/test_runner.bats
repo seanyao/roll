@@ -34,3 +34,14 @@ teardown() {
   grep -q "unit" "$RUNNER"
   grep -q "integration" "$RUNNER"
 }
+
+@test "run.sh: detects CPU count dynamically (no hardcoded --jobs 4)" {
+  # REFACTOR-008 Phase 1: jobs count must come from nproc/sysctl, not hardcoded
+  ! grep -qE "\-\-jobs[[:space:]]+4([[:space:]]|$)" "$RUNNER"
+  grep -qE "nproc|hw\.ncpu" "$RUNNER"
+}
+
+@test "run.sh: guards against missing bats binary (submodule not init)" {
+  # REFACTOR-008 Phase 1: clear error when bats-core submodule missing
+  grep -qE "(\[ ?-x .*BATS|command -v .*BATS|bats.*not found|submodule)" "$RUNNER"
+}

@@ -1007,3 +1007,131 @@ US-AUTO-026 把 loop 的可见性反转成 "default push, opt-out mute"，但 pe
 
 **Dependencies:**
 - Depends on: US-SKILL-008 (Scan 6 only activates after roll-doc is deployed; strict dependency, no fallback)
+
+---
+
+<a id="us-auto-029"></a>
+## US-AUTO-029 `roll` dashboard 重设计 — 自治优先布局 📋
+
+**Created**: 2026-05-12
+**Promoted from**: IDEA-008
+
+- As a developer opening a project that runs Roll
+- I want the no-arg `roll` command to show "what the AI is autonomously doing" first
+- So that Roll 的自治性是项目入口的第一眼信号，不是埋在 `roll loop status` 子命令里
+
+**核心理念：**
+
+Dashboard 是项目入口的「定格画面」（静态打印，非实时刷新——实时刷新归 `roll loop monitor`）。设计原则：**自治优先**。Roll 的卖点是"AI 自驱 + 三层自治 + 四道防线"，dashboard 必须把这些方法论可视化，让用户一眼看到"AI 在跑什么、什么时候跑、防线是否到位"，而不是"我有多少待办"。
+
+**Domain Model:**
+- Context: Autonomous Evolution / Visualization
+- Aggregate: ProjectDashboard
+- Reads from: `_LOOP_STATE`, `_LOOP_ALERT`, `BACKLOG.md`, `docs/briefs/*.md`, `runs.jsonl`, launchd 服务状态, `roll ci` 状态
+- 无新数据写入，纯呈现层
+
+**布局（六块，自上而下）：**
+
+```
+① Identity (单行)
+   roll · v2026.512.8 · agent claude · git ✓
+
+╔══ ② 🤖 AI 自治 — 三层 × 四道防线 (主视觉) ═══════════════╗
+║  Loop Layer   ● enabled  every :08  active 10:00–18:00   ║
+║               Now: 🔨 US-AUTO-029                         ║
+║               last TCR 12min ago · 4 micro-commits today ║
+║  Dream Layer  ● enabled  03:10                            ║
+║               Last scan 6h ago → 2 REFACTOR queued        ║
+║  Peer Layer   ● ready    on complexity=large              ║
+║               Last call 2d ago · AGREE                    ║
+║  ─ 四道防线 ─                                              ║
+║  TCR ● 12min   Spar ○   Auto Review ●   Sentinel ○ off    ║
+╚══════════════════════════════════════════════════════════╝
+
+③ 📦 Pipeline 全景
+   Idea 3 ▸ Backlog 8 ▸ Build 1🔨 ▸ Verify 0 ▸ Release 0
+
+④ 📊 Current Focus · DoD (仅显示已接入信号)
+   🔨 US-AUTO-029
+    [✓ AC]  [○ CI]
+    其余 4 项 DoD 信号源待接入：see US-AUTO-030/031, IDEA-013/014
+
+⑤ 👤 需要你介入  (空时显示 "✓ AI 自驱中 — 无需介入")
+   ⚠ 2 ALERT          run: roll alert
+   📋 1 PROPOSAL      run: roll backlog
+   ✓ Release ready    run: roll release
+
+⑥ ⏰ Schedules & Last Brief
+   loop :08 · dream 03:10 · brief 09:15
+   Brief 6h ago — "Release ready: 3 items"
+```
+
+**AC:**
+- [ ] **① Identity 行**：项目名 + `v${VERSION}` + agent + git working tree 状态（clean/dirty）
+- [ ] **② AI 自治区块（主视觉）**：
+  - Loop Layer：launchd 状态（enabled/installed-off/not-installed）+ 调度（`every :NN active HH:00–HH:00`）+ Now 行（in-progress story 标题）+ last TCR 时间（读 `git log --grep="^tcr:"`）+ 今日 tcr commit 计数
+  - Dream Layer：launchd 状态 + 调度 + 最近 dream 日志时间 + 产出 REFACTOR 计数
+  - Peer Layer：ready 静态 + last `_peer_call` 时间 + 结果（AGREE/REFINE/OBJECT/ESCALATE）
+  - 四道防线行：TCR/Spar/Auto Review/Sentinel 四项，` ● 时间` 或 ` ○ off`
+  - 视觉权重最高（框线 `╔══╗` 或缩进强化）
+- [ ] **③ Pipeline 全景**：5 段计数横排（Idea/Backlog/Build/Verify/Release），in-progress 段高亮
+  - Idea = `IDEA-NNN` 状态 `📋 Todo` 行数
+  - Backlog = US/FIX/REFACTOR 状态 `📋 Todo` 行数
+  - Build = `🔨 In Progress` 行数
+  - Verify = 暂占位 0（信号源同 DoD UAT，待 IDEA-013 解锁后填充）
+  - Release = 暂占位 0（信号源同 DoD Prod，待 US-AUTO-030 解锁后填充）
+- [ ] **④ Current Focus · DoD**：仅当 Build 段 > 0 时显示。DoD checklist 只渲染 [AC] [CI]（其余 4 项不渲染，并在最后一行用 dim 文字注明"其余 DoD 信号源待接入：see US-AUTO-030/031, IDEA-013/014"）
+  - [AC] 信号源：当前 story 的 `[x]` checkbox 完成度（读 `docs/features/<feature>.md#<us-id>`），全部勾选→ ✓，否则 ○
+  - [CI] 信号源：调用 `roll ci`（HEAD commit 的 CI 状态），success → ✓，pending/failure → ○ / ✗
+- [ ] **⑤ Human × AI 区块**：ALERT / PROPOSAL（PROPOSALS.md 待审计数）/ Release ready（brief 摘要包含此关键词时）；三者都为空时显示 `✓ AI 自驱中 — 无需介入`
+- [ ] **⑥ Schedules & Last Brief**：三服务调度紧凑一行 + last brief 时间 + brief 第一行摘要
+- [ ] 非 macOS 环境降级：launchd 块换 cron 状态，schedules 块对应调整
+- [ ] 无 BACKLOG.md 时仍可运行（显示 usage + changelog 当前逻辑保留）
+- [ ] `tests/unit/roll_dashboard.bats` 覆盖六块的渲染分支（包括空状态/降级路径）
+
+**Non-goals:**
+- 实时刷新——归 `roll loop monitor`
+- TUI 按键交互——违反"定格画面"定位
+- UAT/Evidence/Prod/Sentinel 信号源接入——延后到 US-AUTO-030/031 + IDEA-013/014
+
+**Files:**
+- `bin/roll`：`_dashboard()` 函数（~3421 行）重写
+- `tests/unit/roll_dashboard.bats`：更新覆盖
+
+**Dependencies:**
+- 现有读源：`_LOOP_STATE`、`_LOOP_ALERT`、`_launchd_svc_state`、`_config_read_int`、`_loop_derive_minute`、`roll ci`、`docs/briefs/*.md`、`runs.jsonl`、`PROPOSALS.md`（如存在）
+- Follow-up（不阻塞本 story）：US-AUTO-030（Prod 信号）、US-AUTO-031（Sentinel 信号）、IDEA-013（UAT）、IDEA-014（Evidence）
+
+---
+
+<a id="us-auto-030"></a>
+## US-AUTO-030 dashboard DoD — Prod 部署回填信号源 ⏸ Deferred
+
+**Created**: 2026-05-12
+**Deferred reason**: Dashboard MVP（US-AUTO-029）只渲染 [AC] [CI]；Prod 信号源需先确定回填位置（in-progress story 元数据 vs runs.jsonl vs 新增 deploys.jsonl），不阻塞 dashboard 上线。
+
+- As Roll 用户
+- I want `roll release` 完成后 dashboard 能反映"Prod 已部署"
+- So that DoD 的 [Prod] 信号能从占位 `—` 升级为 `✓`，方法论闭环可视化
+
+**Open questions:**
+- 回填位置：写入 in-progress story 行（需 Markdown 解析）？写 `runs.jsonl` 增加 `deploy` 事件？新增 `deploys.jsonl`？
+- 多次发版同一 story 怎么算（首次部署即 ✓？最后一次？）
+- non-npm 项目（无 release 概念）的降级路径
+
+---
+
+<a id="us-auto-031"></a>
+## US-AUTO-031 dashboard DoD — Sentinel 接管状态信号源 ⏸ Deferred
+
+**Created**: 2026-05-12
+**Deferred reason**: `$roll-sentinel` skill 已存在，但运行结果与 dashboard 的连接（数据格式 + 时效窗口）需单独设计。不阻塞 dashboard MVP。
+
+- As Roll 用户
+- I want dashboard 显示"Sentinel 接管中"状态（含最近巡检时间 + 异常计数）
+- So that 方法论"Sentinel 24/7 巡逻"承诺有可视化证据
+
+**Open questions:**
+- Sentinel 运行结果存哪里（log 文件 / sentinel.jsonl / brief）
+- "接管中"的判定窗口（最近 24h 有巡检？最近 7d？）
+- 异常告警与现有 `_LOOP_ALERT` 是否合并

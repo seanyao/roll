@@ -22,7 +22,7 @@
 Roll is an autonomous delivery system for software teams — AI agents pick stories from your BACKLOG, execute them with encoded engineering discipline, and ship continuously while you stay focused on what to build next.
 
 **Two core values:**
-1. **Autonomous delivery** — `roll loop on` runs BACKLOG items hourly; Dream surfaces maintenance tasks nightly; humans retain sole release authority
+1. **Autonomous delivery** — `roll loop on` runs BACKLOG items hourly; Dream (nightly code-health scan) surfaces maintenance tasks; humans retain sole release authority
 2. **Skill-driven execution** — 20+ skills encode TDD, TCR, and INVEST practices as reliable, repeatable workflows any agent can follow
 
 _Works with Claude, Cursor, Codex, or your own agent._

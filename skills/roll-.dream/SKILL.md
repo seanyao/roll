@@ -6,8 +6,9 @@ allowed-tools: "Read, Glob, Grep, Bash(git:*), Write, Edit"
 description: |
   Nightly code and architecture health scan. Passively triggered by scheduler
   (cron or GitHub Actions), not invoked by users directly. Detects dead code,
-  architectural drift from domain model, pruning candidates, and emerging patterns.
-  Outputs REFACTOR entries to BACKLOG.md and a daily log to docs/dream/.
+  architectural drift from domain model, pruning candidates, emerging patterns,
+  doc coverage gaps, and doc staleness (文档新鲜度). Outputs REFACTOR entries
+  to BACKLOG.md and a daily log to docs/dream/.
   Distinct from roll-sentinel: sentinel monitors runtime behavior; dream reviews
   code structure and architectural health.
 ---
@@ -33,7 +34,7 @@ in the morning brief.
 
 ## Scan Logic
 
-Run all four scans every night. Each scan is independent.
+Run all six scans every night. Each scan is independent.
 
 ### Scan 1 — Dead Code
 
@@ -67,6 +68,8 @@ Compare current code structure against the domain model in `docs/domain/`:
 Flag: modules that import directly from a different Bounded Context without
 an Anti-Corruption Layer, or module names that have diverged from the
 Ubiquitous Language.
+
+**Distinction from Scan 6C**: Scan 2 flags *import boundary violations* (cross-context coupling). Scan 6C flags *missing documentation entries* (module exists but has no entry in `docs/domain/*.md`). Never double-flag — Scan 2 and Scan 6C are orthogonal checks.
 
 ### Scan 3 — Pruning Candidates
 
@@ -137,6 +140,77 @@ Flag any `.md` file directly in `docs/` root (allowed subdirs: `guide/`, `domain
 {发现内容 或 "文档结构符合规范，无缺口。"}
 ```
 
+### Scan 6 — 文档新鲜度 (Doc Freshness)
+
+**Dependency gate**: Skip Scan 6 entirely when `$roll-doc` (US-SKILL-008) is not yet deployed.
+Check: `[ -f "$ROLL_HOME/skills/roll-doc/SKILL.md" ]`. If absent, log "Scan 6 skipped — roll-doc not deployed" in the dream log and stop. No fallback.
+
+When deployed, each finding produces a REFACTOR entry with `$roll-doc` as execution hint:
+```markdown
+| REFACTOR-XXX | docs: <description> — flagged by dream <date> (hint: $roll-doc) | 📋 Todo |
+```
+
+#### Check A — Stale Docs
+
+Flag source files whose owning doc is >30 days stale:
+
+```bash
+# For each file listed in docs/features/*.md or README.md "## Files:" sections:
+#   owner_doc_commit = git log -1 --format="%ci" -- <doc_file>
+#   source_commit    = git log -1 --format="%ci" -- <source_file>
+#   lag_days = (source_commit - owner_doc_commit) in days
+#   if lag_days > 30 AND doc contains at least one specific file path reference → flag
+```
+
+The "owner doc" for a source file is the nearest `README.md` or `docs/features/*.md` that lists the file path in a `## Files:` section. Skip docs that contain only conceptual descriptions (no specific file path references) — they cannot be objectively stale.
+
+#### Check B — Undocumented ENV Vars
+
+Flag environment variables that appear frequently in source but have no documentation:
+
+```bash
+# Detect ENV var patterns in non-test source files:
+patterns=(
+  'process\.env\.[A-Z_]+'        # Node.js
+  'os\.getenv\("[A-Z_]+"\)'      # Python
+  'ENV\["[A-Z_]+"\]'             # Ruby
+)
+# For each matched variable name:
+#   count occurrences across all source files
+#   if count >= 5 AND zero mentions in any .md file → flag
+```
+
+Flag variables appearing ≥5× in source with zero mentions in any `.md`.
+"Other convention signals" (comment clusters, module structure templates) are explicitly deferred — too vague for deterministic detection.
+
+#### Check C — Existence Drift
+
+Find module directories that exist in code but are absent from architecture docs.
+This is distinct from Scan 2 (which checks *import violations*) — Scan 6C checks *documentation existence*:
+
+```bash
+# Walk all non-excluded directories
+# For each dir with >= 3 non-hidden, non-.md source files:
+#   check if any docs/domain/*.md contains the directory name
+#   if not found → flag as "existence drift"
+```
+
+Exclusions: `node_modules/`, `.git/`, `dist/`, `build/`, `.shared/`, `docs/`, `tests/`.
+
+Flag directories with ≥3 source files and zero name-match in `docs/domain/*.md`.
+
+#### Dream Log Section
+
+Add after `## 文档覆盖度` section:
+
+```markdown
+## 文档新鲜度
+- 滞后文档：{N} 个（超过 30 天未更新但绑定了代码文件）
+- 未记录 ENV 变量：{N} 个（出现 ≥5 次但无文档）
+- 架构文档缺失模块：{N} 个（≥3 个源文件的目录未出现在 docs/domain/）
+{发现内容列表 或 "文档新鲜度良好，无滞后或缺失项。"}
+```
+
 ## Output
 
 ### REFACTOR Entry (BACKLOG.md)
@@ -161,7 +235,7 @@ without context switching:
 # Dream Log {YYYY-MM-DD}
 
 ## 概要
-- 扫描项：死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 文档覆盖度
+- 扫描项：死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 文档覆盖度 / 文档新鲜度
 - 发现：{N} 项标记，{M} 个 REFACTOR 条目已创建
 
 ## 死代码
@@ -175,6 +249,15 @@ without context switching:
 
 ## 新兴模式
 {发现内容 或 "未发现可提取的重复模式。"}
+
+## 文档覆盖度
+{发现内容 或 "文档结构符合规范，无缺口。"}
+
+## 文档新鲜度
+- 滞后文档：{N} 个
+- 未记录 ENV 变量：{N} 个
+- 架构文档缺失模块：{N} 个
+{发现内容 或 "文档新鲜度良好，无滞后或缺失项。"}
 
 ## 创建的 REFACTOR 条目
 {列表 或 "无。"}

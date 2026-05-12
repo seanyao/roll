@@ -19,12 +19,13 @@
 
 ## What is Roll?
 
-Roll is an instruction and workflow framework for AI agents — it encodes proven engineering practices (TDD, TCR, SRE, INVEST) as skills any agent can follow, distributes unified conventions to every AI client on your machine, and optionally lets the agent work unattended via an autonomous evolution layer.
+Roll is an autonomous delivery system for software teams — AI agents pick stories from your BACKLOG, execute them with encoded engineering discipline, and ship continuously while you stay focused on what to build next.
 
-**Three core values:**
-1. **Any agent, same constraints** — Claude, Cursor, Kimi, DeepSeek, Codex all receive identical engineering guardrails
-2. **Skill system** — 20 skills encode research → design → build → check → fix as reliable, repeatable workflows
-3. **Autonomous evolution** — `roll loop on` runs BACKLOG items hourly; humans retain sole release authority
+**Two core values:**
+1. **Autonomous delivery** — `roll loop on` runs BACKLOG items hourly; Dream surfaces maintenance tasks nightly; humans retain sole release authority
+2. **Skill-driven execution** — 20+ skills encode TDD, TCR, and INVEST practices as reliable, repeatable workflows any agent can follow
+
+_Works with Claude, Cursor, Codex, or your own agent._
 
 ---
 

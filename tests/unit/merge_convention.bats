@@ -1,17 +1,14 @@
 #!/usr/bin/env bats
 
+load helpers
 setup() {
-  source "${BATS_TEST_DIRNAME}/../../bin/roll"
-  TEST_TMP="$(mktemp -d)"
+  unit_setup
   TPL_DIR="$TEST_TMP/tpl"
   OUT_DIR="$TEST_TMP/out"
   mkdir -p "$TPL_DIR" "$OUT_DIR"
   _ROLL_MERGE_SUMMARY=()
 }
-
-teardown() {
-  rm -rf "$TEST_TMP"
-}
+teardown() { unit_teardown; }
 
 @test "merge: section with different content prompts and updates when user selects u" {
   # Template has ## Foo with content A

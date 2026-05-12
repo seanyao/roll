@@ -1,14 +1,11 @@
 #!/usr/bin/env bats
 
+load helpers
 setup() {
-  source "${BATS_TEST_DIRNAME}/../../bin/roll"
-  TEST_TMP="$(mktemp -d)"
+  unit_setup
   mkdir -p "$TEST_TMP/bin" "$TEST_TMP/modules/@seanyao/roll/bin"
 }
-
-teardown() {
-  rm -rf "$TEST_TMP"
-}
+teardown() { unit_teardown; }
 
 _make_npm_stub() {
   local registry_ver="$1"

@@ -1,15 +1,12 @@
 #!/usr/bin/env bats
 # Unit tests for _for_each_ai_tool helper (REFACTOR-005)
 
+load helpers
 setup() {
-  source "${BATS_TEST_DIRNAME}/../../bin/roll"
-  TEST_TMP="$(mktemp -d)"
+  unit_setup
   ROLL_CONFIG="$TEST_TMP/config.yaml"
 }
-
-teardown() {
-  rm -rf "$TEST_TMP"
-}
+teardown() { unit_teardown; }
 
 # Helper: write a minimal config with two AI tool entries
 _write_two_tool_config() {

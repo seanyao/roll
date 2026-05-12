@@ -177,6 +177,7 @@
 | REFACTOR-005 | 提取 `_for_each_ai_tool()` 辅助函数消除 AI 客户端迭代逻辑的 4 处重复（bin/roll:~365, ~497, ~1136 等） — flagged by dream 2026-05-11 | ✅ Done |
 | REFACTOR-006 | CI 测试套件提速 — 当前 377 个 bats 测试在 CI (ubuntu) 约需 5+ 分钟，排查：重复覆盖的用例、可并行的文件组、慢测试根因（integration/cmd_setup.bats 尤慢）；目标：CI 时间减半，不降低覆盖率 | ✅ Done |
 | REFACTOR-007 | 新建 `tests/unit/helpers.bash` — 消除 22 个单元测试文件中重复的 source/mktemp/rm/NO_COLOR 样板，参照 tests/integration/helpers.bash 模式 — flagged by dream 2026-05-12 | ✅ Done |
+| REFACTOR-008 | CI 测试二轮精简 — 当前 553 用例 / 57 bats 文件，本地 4 并发 4'21"，CI 预估 5-7min，反馈闭环偏长。**Phase 1 调度优化**：`bats --jobs $(nproc)` 用满 runner 核数；ci.yml 拆并行 job (lint / test-unit / test-integration)；`paths-ignore` 跳过 docs-only PR；bats-core helpers 路径校验。**Phase 2 测试分层**：`bats --timing` 跑一次产出 top 20 慢用例清单；把"内容存在性 / YAML frontmatter / 文件结构"类用例（主要在 roll_doc_*、roll_*_skill.bats）从 bats 迁到 `roll doctor` lint 或合并删除；审计 11 个 `roll_loop_*.bats` 跨文件覆盖重叠；`integration/cmd_setup.bats` 29 用例拆分 + 共用 fixture。**目标**：PR CI ≤ 2min（docs-only 0min），push main 全量 ≤ 4min，覆盖率不降（用例数减少但 critical path 全保留）。**验收**：Phase 1 PR 后 gh run 实测；Phase 2 完成后用例数减少 ≥ 25%，主链路 bats 文件清单不少。 | 🔨 In Progress |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

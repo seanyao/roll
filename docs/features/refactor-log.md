@@ -82,3 +82,21 @@ Architectural friction signals flagged during story execution.
 **Expected speedup**: wall time ≈ max(cmd_setup=51s, cmd_init=34s) + overhead ≈ 55s，相较串行 ~170s 加速 3x；CI ubuntu 上预期从 5+ 分钟降至约 90s。
 
 **Scope**: `tests/run.sh`（新建）；`package.json` test 脚本改为 `bash tests/run.sh`；`.github/workflows/ci.yml` 新增 parallel 安装步骤；`tests/unit/test_runner.bats`（新建，4 条测试）
+
+---
+
+## REFACTOR-007 新建 tests/unit/helpers.bash 消除单元测试重复样板 ✅
+
+**Flagged**: 2026-05-12 (dream scan)
+**Completed**: 2026-05-12
+**Signal**: 22 个单元测试文件中重复 `source bin/roll`、`mktemp -d`、`rm -rf`、`NO_COLOR=1` 样板，维护摩擦高，模式不统一
+
+**Observation**: 参照 `tests/integration/helpers.bash` 模式，建立对等的 `tests/unit/helpers.bash`，提供 `unit_setup`/`unit_teardown`（基础）和 `unit_setup_cd`/`unit_teardown_cd`（含 cd 的变体）。14 个文件改用 `load helpers`，削减重复代码约 100 行。
+
+**AC:**
+- [x] `tests/unit/helpers.bash` 新建，定义 `unit_setup`/`unit_teardown`/`unit_setup_cd`/`unit_teardown_cd`
+- [x] `tests/unit/unit_helpers.bats` 新建，12 条测试覆盖结构 + 行为
+- [x] 14 个单元测试文件改用 `load helpers`（ai_tool_name、detect_project_type、scan_project_type、merge_convention、update_version_check、for_each_ai_tool、roll_loop_attach、roll_loop_now、roll_loop_path、roll_peer_tmux、release_promote、roll_loop_pause、roll_loop_runs、roll_loop_mute、roll_loop_lock、loop_tcr、roll_ci）
+- [x] 全套 487 条测试通过，无退化（1 条预存失败：roll_loop_runs 第 29 条）
+
+**Scope**: `tests/unit/helpers.bash`（新建）；`tests/unit/unit_helpers.bats`（新建）；14 个 bats 文件（setup/teardown 替换，不涉及 bin/roll）

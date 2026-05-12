@@ -1437,7 +1437,7 @@ _peer_auto_attach() {
   fi
   local launched=0
   if [[ "$terminal_pref" = "ghostty" || "$terminal_pref" = "Ghostty" ]]; then
-    open -na Ghostty.app --args -e "tmux attach -t $session" >/dev/null 2>&1 && launched=1 || true
+    open -na Ghostty.app --args -e tmux attach -t "$session" >/dev/null 2>&1 && launched=1 || true
   fi
   if [[ $launched -eq 0 ]] && { [[ "$terminal_pref" = "iTerm2" || "$terminal_pref" = "iTerm" ]] || [[ -d "/Applications/iTerm.app" ]]; }; then
     osascript \
@@ -1447,7 +1447,7 @@ _peer_auto_attach() {
       && launched=1 || true
   fi
   if [[ $launched -eq 0 ]] && [[ -d "/Applications/Ghostty.app" ]]; then
-    open -na Ghostty.app --args -e "tmux attach -t $session" >/dev/null 2>&1 && launched=1 || true
+    open -na Ghostty.app --args -e tmux attach -t "$session" >/dev/null 2>&1 && launched=1 || true
   fi
   if [[ $launched -eq 0 ]] && command -v osascript >/dev/null 2>&1; then
     osascript \

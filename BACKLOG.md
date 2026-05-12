@@ -158,7 +158,7 @@
 | [US-AUTO-023](docs/features/autonomous-evolution.md#us-auto-023) | `roll loop pause/resume` 人工模式切换 — 轻量暂停调度（保留 plist），支持纯人工/人机协同/纯自主三种模式 | ✅ Done |
 | [US-AUTO-028](docs/features/autonomous-evolution.md#us-auto-028) | `roll-.dream` Scan 6 — 文档新鲜度持续监测（滞后文档/隐性约定/模块漂移 → REFACTOR → loop） `depends-on:US-SKILL-008` | ✅ Done |
 | [US-AUTO-027](docs/features/autonomous-evolution.md#us-auto-027) | peer 调用 auto-attach — 把 `_peer_call` 也包到 tmux session 里，未 mute 时弹窗看 peer 跨 agent 协商（split from US-AUTO-026 因 peer 当前没有 tmux 基建） | ✅ Done |
-| [US-AUTO-029](docs/features/autonomous-evolution.md#us-auto-029) | `roll` dashboard 重设计 — 自治优先布局（三层 × 四道防线主视觉 + Pipeline 全景 + Current Focus DoD + Human×AI 介入区），把 AI 在自动跑什么放第一眼 | 📋 Todo |
+| [US-AUTO-029](docs/features/autonomous-evolution.md#us-auto-029) | `roll` dashboard 重设计 — 自治优先布局（三层 × 四道防线主视觉 + Pipeline 全景 + Current Focus DoD + Human×AI 介入区），把 AI 在自动跑什么放第一眼 | 🔨 In Progress |
 | [US-AUTO-030](docs/features/autonomous-evolution.md#us-auto-030) | dashboard DoD checklist — Prod 部署回填信号源（`roll release` 完成后把部署状态写入 in-progress story 元数据，dashboard 可读） | ⏸ Deferred |
 | [US-AUTO-031](docs/features/autonomous-evolution.md#us-auto-031) | dashboard DoD checklist — Sentinel 接管状态信号源（`$roll-sentinel` 运行结果映射到 dashboard 可读位置，体现"AI 接管生产"防线） | ⏸ Deferred |
 | [US-AUTO-032](docs/features/autonomous-evolution.md#us-auto-032) | loop 在 worktree 里跑 — 每个 story 起 `~/.shared/roll/worktrees/<slug>-<US>` worktree + `loop/<US>` 分支隔离 TCR；成功 + CI 绿 → `git merge --ff-only` 回 main → push → 删 worktree+branch；失败保留 worktree + ALERT；plist/runner 路径不变（控制面常驻 main）；处理重试时分支已存在的幂等性；submodule 协同测试 | 📋 Todo |

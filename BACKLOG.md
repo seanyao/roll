@@ -18,6 +18,7 @@
 | [US-SKILL-004](docs/features/new-skills.md#us-skill-004) | Add `roll-doctor` — 一键诊断开发工具链健康状态 | ✅ Done |
 | [US-SKILL-005](docs/features/new-skills.md#us-skill-005) | Add `roll-peer` — 跨 Agent 代码评审（Claude/Kimi/DeepSeek/Codex） | ✅ Done |
 | [US-SKILL-006](docs/features/new-skills.md#us-skill-006) | Add `roll-bipo-onboard` — 新员工入职引导流程 | ✅ Done |
+| [US-SKILL-008](docs/features/new-skills.md#us-skill-008) | Add `roll-doc` — legacy 项目文档自动化（扫描索引 + 缺口补全一体，project-driven） | 📋 Todo |
 | [US-SKILL-007](docs/features/new-skills.md#us-skill-007) | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | ✅ Done |
 
 ## Epic: Distribution
@@ -151,6 +152,7 @@
 | [US-AUTO-021](docs/features/autonomous-evolution.md#us-auto-021) | `roll status` 增加全局 loop 概览区块 — 展示本机所有项目的 loop 状态、调度时间、backlog 待办数 | ✅ Done |
 | [US-AUTO-022](docs/features/autonomous-evolution.md#us-auto-022) | Loop 并发安全 — per-loop LOCK 防重入 + 选 story 跳过 🔨 In Progress，支持人工介入和多 agent 协作 | ✅ Done |
 | [US-AUTO-023](docs/features/autonomous-evolution.md#us-auto-023) | `roll loop pause/resume` 人工模式切换 — 轻量暂停调度（保留 plist），支持纯人工/人机协同/纯自主三种模式 | ✅ Done |
+| [US-AUTO-028](docs/features/autonomous-evolution.md#us-auto-028) | `roll-.dream` Scan 6 — 文档新鲜度持续监测（滞后文档/隐性约定/模块漂移 → REFACTOR → loop） `depends-on:US-SKILL-008` | 📋 Todo |
 | [US-AUTO-027](docs/features/autonomous-evolution.md#us-auto-027) | peer 调用 auto-attach — 把 `_peer_call` 也包到 tmux session 里，未 mute 时弹窗看 peer 跨 agent 协商（split from US-AUTO-026 因 peer 当前没有 tmux 基建） | ✅ Done |
 
 ## Epic: Documentation
@@ -201,4 +203,4 @@
 | IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | ✅ Done → US-DOC-001..006 |
 | IDEA-010 | `roll status` 增加全局 loop 概览区块 — 在现有 convention/skills 状态后追加本机所有项目的 loop 服务状态、调度时间和 backlog 待办数 | ✅ Done → US-AUTO-021 |
 | IDEA-011 | 基于开源 PI 自研 Coding Agent — 将 Harness Engineering Skills 和管理层内建进去，摆脱第三方 Coding Agent 适配依赖，获得完整自主控制权 | 📋 Todo |
-| IDEA-012 | Legacy 项目文档自治 — 三层体系：① `roll-doc-index` 整合散落文档生成可寻址索引；② `roll-doc-fill` 从 codebase 反向推导缺失文档（架构/编码规范/API 契约）；③ `roll-.dream` 新增 Scan 6（文档新鲜度）持续检测滞后/隐性约定/模块漂移，产出 REFACTOR 条目走 loop 自动维护，结果汇入 brief | 📋 Todo |
+| IDEA-012 | Legacy 项目文档自治 — 三层体系：① `roll-doc-index` 整合散落文档生成可寻址索引；② `roll-doc-fill` 从 codebase 反向推导缺失文档（架构/编码规范/API 契约）；③ `roll-.dream` 新增 Scan 6（文档新鲜度）持续检测滞后/隐性约定/模块漂移，产出 REFACTOR 条目走 loop 自动维护，结果汇入 brief | ✅ Done → US-SKILL-008, US-AUTO-028 |

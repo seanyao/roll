@@ -970,3 +970,38 @@ US-AUTO-026 把 loop 的可见性反转成 "default push, opt-out mute"，但 pe
 
 **Dependencies:**
 - Depends on: US-AUTO-026（mute 文件约定 + osascript 模式）
+
+---
+
+<a id="us-auto-028"></a>
+## US-AUTO-028 `roll-.dream` Scan 6 — 文档新鲜度持续监测 📋
+
+**Created**: 2026-05-12
+**Plan**: [legacy-doc-automation-plan.md](legacy-doc-automation-plan.md)
+
+- As a project maintainer running roll on a long-lived codebase
+- I want dream's nightly scan to detect stale docs and undocumented conventions automatically
+- So that documentation debt surfaces as REFACTOR entries in BACKLOG and gets fixed by loop without human reminders
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: DreamScanner owns [DocStalenessCheck]
+- Events raised: [DocStalenessFound] → REFACTOR entry written → loop pickup
+
+**AC:**
+- [ ] `roll-.dream` SKILL.md gains Scan 6 with three checks:
+  - **A. Stale docs**: mapping = nearest `README.md` or `docs/features/*.md` that lists the file in its `## Files:` section; flag when owning doc's last commit is >30 days older than the code file's last commit AND doc contains at least one specific file path reference (not conceptual-only)
+  - **B. Undocumented ENV vars**: grep for `process\.env\.[A-Z_]+` / `os\.getenv("[A-Z_]+"` / `ENV\["[A-Z_]+"` patterns; flag each variable appearing ≥5× in source with zero mentions in any `.md`; other "convention" signals (comment clusters, module structure) explicitly deferred — too vague for deterministic detection
+  - **C. Existence drift** (distinct from Scan 2): module dirs with ≥3 source files and zero name-match in `docs/domain/*.md` — this is an *existence* check; Scan 2 remains responsible for *import boundary* violations
+- [ ] Scan 2 and Scan 6C never double-flag: Scan 2 flags cross-context imports; Scan 6C flags missing documentation entry
+- [ ] Each finding produces a `REFACTOR-XXX` entry: `docs: <description> — flagged by dream <date>`
+- [ ] Dream log gains `## 文档新鲜度` section: counts for stale docs / undocumented ENV vars / undocumented modules
+- [ ] Scan 6 is **skipped entirely** when US-SKILL-008 (`$roll-doc`) is not yet deployed — no fallback to `$roll-build` (avoids confusion in loop); dependency is strict
+- [ ] Once US-SKILL-008 deployed: REFACTOR entries carry `$roll-doc` as execution hint
+- [ ] Scan 6 findings flow into brief via existing dream log → brief pipeline
+
+**Files:**
+- `skills/roll-.dream/SKILL.md` (add Scan 6 section + update log template + update description frontmatter)
+
+**Dependencies:**
+- Depends on: US-SKILL-008 (Scan 6 only activates after roll-doc is deployed; strict dependency, no fallback)

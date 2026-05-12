@@ -100,3 +100,24 @@ Architectural friction signals flagged during story execution.
 - [x] 全套 487 条测试通过，无退化（1 条预存失败：roll_loop_runs 第 29 条）
 
 **Scope**: `tests/unit/helpers.bash`（新建）；`tests/unit/unit_helpers.bats`（新建）；14 个 bats 文件（setup/teardown 替换，不涉及 bin/roll）
+
+---
+
+## REFACTOR-008 CI 测试二轮精简 Phase 1A ✅
+
+**Flagged**: 2026-05-12
+**Completed**: 2026-05-12
+**Signal**: 553 用例 / 57 bats 文件，本地 4 并发约 4'21"，CI 5-7min，反馈闭环偏长，PR 提交后等待时间长。
+**Observation**: REFACTOR-006 已做并行化但 `--jobs 4` 硬编码，未利用更多核数；docs-only PR 也跑全套测试浪费时间；submodule 未初始化时报错隐晦。
+
+**AC:**
+- [x] `tests/run.sh` 用 `nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4` 动态检测核数
+- [x] `ROLL_TEST_JOBS` 环境变量覆盖支持
+- [x] bats-core 缺失保护（`[ ! -x "$BATS" ]` → 清晰报错 + hint）
+- [x] `.github/workflows/ci.yml` `paths-ignore: ['**.md', 'docs/**']` 在 push 和 pull_request 两处
+- [x] `tests/unit/test_runner.bats` 加 2 条新测试覆盖动态检测和 submodule guard
+- [x] 全套 555 用例通过，CI 在 e87fe4a 30s 内绿（含 setup）
+
+**Scope**: `tests/run.sh`、`.github/workflows/ci.yml`、`tests/unit/test_runner.bats`
+
+**拆出**: ci.yml lint/test-unit/test-integration job split + Phase 2 测试分层 → REFACTOR-009

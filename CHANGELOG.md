@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- **Changed**: CI 测试运行器 (`tests/run.sh`) 动态检测核数（`nproc`/`sysctl`）替换硬编码 `--jobs 4`，可用 `ROLL_TEST_JOBS` 覆盖；bats-core submodule 缺失时给出清晰报错
+- **Changed**: GitHub Actions CI 跳过 docs-only PR（`paths-ignore: **.md, docs/**`），文档改动不再触发全套 bats
+
 ## v2026.512.8
 - **Added**: `$roll-doc` — legacy 项目文档自动化技能：四阶段扫描（索引 + 缺口分析 + 草稿补全 + 报告），支持 `--dry-run` / `--force`，适用任何项目
 - **Added**: `roll-.dream` Scan 6 — 文档新鲜度检测（滞后文档 / 未记录 ENV 变量 / 架构文档缺失），依赖 roll-doc，发现写入 REFACTOR 条目

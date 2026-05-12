@@ -4,6 +4,98 @@
 > 拒绝时在条目末尾注明拒绝原因，防止 Agent 重复提出相似提案。
 
 ---
+proposed: 2026-05-12 14:30
+status: approved
+approved_id: US-ALERT-001
+---
+
+## PROPOSAL: `roll alert` 命令 — ALERT 生命周期管理
+
+**Motivation (why):**
+Loop 在遇到阻塞或 TCR 校验失败时会向 BACKLOG.md 写入 ALERT 注释，但之后没有任何专门的管理机制。用户需要手动翻阅 BACKLOG.md 才能发现告警，确认和关闭也全靠人工编辑。随着项目运行时间增长，ALERT 会悄无声息地积累成"死角"。
+
+**Target scenario:**
+```bash
+# 查看当前所有未确认告警
+roll alert
+
+# 输出示例：
+#   ⚠ 2 open alerts
+#   [ALERT] US-AUTO-010  TCR 微提交数为 0，故事已回退 📋 Todo  (2026-05-11 03:12)
+#   [ALERT] FIX-016      launchd ghost 服务清理失败，teardown 需手动 bootout  (2026-05-10 22:05)
+#
+#   运行 roll alert ack <ID> 确认，roll alert resolve <ID> 标记已解决
+
+# 确认（我看到了，稍后处理）
+roll alert ack US-AUTO-010
+
+# 解决（问题已处理）
+roll alert resolve FIX-016 "已手动 bootout 并更新 teardown"
+
+# roll brief 和 roll status 中告警摘要只显示 open/acked 状态，resolved 不再重复提示
+```
+
+**Acceptance Criteria (draft):**
+- [ ] `roll alert` 列出 BACKLOG.md 中所有 `[ALERT]` 注释，按时间倒序，标记状态（open / acked / resolved）
+- [ ] `roll alert ack <pat>` 在 ALERT 注释行追加 `[acked: YYYY-MM-DD]` 标记
+- [ ] `roll alert resolve <pat> [message]` 追加 `[resolved: YYYY-MM-DD message]` 并将行样式从 ⚠ 改为 ✓
+- [ ] `roll status` 和 `roll-brief` 只计入 open+acked 告警数，已 resolved 不计入
+- [ ] `roll loop runs` 摘要中告警列仅展示 open 状态
+
+**Suggested ID:** US-ALERT-001
+**Suggested Epic / Feature:** Backlog 生命周期管理
+**Estimated complexity:** M（bin/roll 新命令 + BACKLOG 解析/标注 + brief/status 联动）
+
+---
+
+---
+proposed: 2026-05-12 14:30
+status: approved
+approved_id: US-NOTIFY-001
+---
+
+## PROPOSAL: macOS 系统通知推送 — loop 关键事件主动触达
+
+**Motivation (why):**
+Loop 是后台自主运行的，当它在凌晨完成一个 Story 或因 TCR 失败触发 ALERT 时，用户必须主动去 `roll loop runs` 或 `roll status` 才能发现。真正的"自主"应该是"完成了主动告诉你"，而不是"你去问才知道"。当前 auto-attach tmux 解决的是"我在看"的场景，但无法覆盖"我不在但想知道结果"的场景。
+
+**Target scenario:**
+```bash
+# 默认行为（无需配置）：loop 每次完成 story 或写入 ALERT，
+# 发一条 macOS 系统通知（Notification Center）
+
+# 通知示例：
+#   🎉 Roll Loop  [roll]
+#   US-AUTO-027 完成 — peer 调用 auto-attach
+#
+#   ⚠ Roll Alert  [roll]
+#   US-AUTO-010 TCR 校验失败，已回退 Todo
+
+# 可在 ~/.roll/config.yaml 控制通知级别
+# notifications:
+#   story_done: true      # 故事完成
+#   alert: true           # 新 ALERT
+#   brief_ready: false    # 每日简报生成（默认关）
+#   channel: macos        # macos | off | webhook（扩展点）
+
+# 临时静音（与 roll loop mute 联动）
+roll loop mute           # 同时静音 auto-attach 和系统通知
+roll loop mute --notify  # 仅静音系统通知，保留 attach
+```
+
+**Acceptance Criteria (draft):**
+- [ ] loop runner script 在 story 完成时调用 `osascript -e 'display notification ...'`（无需安装额外工具）
+- [ ] loop runner 在写入 ALERT 时同样触发通知
+- [ ] `~/.roll/config.yaml` 支持 `notifications.story_done` / `notifications.alert` 布尔开关
+- [ ] `roll loop mute` 已存在，扩展其作用范围到通知静音（或加 `--notify` flag 独立控制）
+- [ ] `roll-brief` skill 支持可选的 brief_ready 通知（默认关闭）
+- [ ] 无 macOS 环境（CI / Linux）时静默降级，不报错
+
+**Suggested ID:** US-NOTIFY-001
+**Suggested Epic / Feature:** 自主循环可观测性
+**Estimated complexity:** S-M（runner script 扩展 + config.yaml 读取 + mute 联动）
+
+---
 proposed: 2026-05-12 01:15
 status: pending
 ---

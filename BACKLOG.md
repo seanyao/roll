@@ -174,6 +174,18 @@
 | REFACTOR-006 | CI 测试套件提速 — 当前 377 个 bats 测试在 CI (ubuntu) 约需 5+ 分钟，排查：重复覆盖的用例、可并行的文件组、慢测试根因（integration/cmd_setup.bats 尤慢）；目标：CI 时间减半，不降低覆盖率 | ✅ Done |
 | REFACTOR-007 | 新建 `tests/unit/helpers.bash` — 消除 22 个单元测试文件中重复的 source/mktemp/rm/NO_COLOR 样板，参照 tests/integration/helpers.bash 模式 — flagged by dream 2026-05-12 | ✅ Done |
 
+## Epic: Backlog 生命周期管理
+### Feature: alert-lifecycle
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-ALERT-001](docs/features/alert-lifecycle.md#us-alert-001) | `roll alert` 命令 — ALERT 查看 / ack / resolve 生命周期管理，与 brief/status 告警计数联动 | 🔨 In Progress |
+
+## Epic: 自主循环可观测性
+### Feature: notifications
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-NOTIFY-001](docs/features/notifications.md#us-notify-001) | macOS 系统通知推送 — loop story 完成 / ALERT 写入时主动触达，与 `roll loop mute` 联动，无 macOS 环境静默降级 | 📋 Todo |
+
 ## 💡 Ideas
 | ID | Description | Status |
 |----|-------------|--------|

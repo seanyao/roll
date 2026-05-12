@@ -142,11 +142,18 @@ After each item completes:
    - Count `tcr:` prefix commits since `started_at` via `git log --oneline --since=<started_at>`
    - Count == 0 → revert story status in BACKLOG.md from ✅ Done → 📋 Todo; write ALERT to `~/.shared/roll/loop/ALERT.md` with story ID, time, reason "zero tcr: commits since story start", and suggested actions (`roll loop now` / `$roll-build <id>` / `roll loop reset`)
    - Count > 0 → continue normally
-2. **CI Gate** — call `roll ci --wait` (or `_loop_enforce_ci <story_id>`):
-   - Polls `gh run list --commit <HEAD>` until all CI runs complete
+2. **CI Gate** — **MUST** invoke `roll ci --wait` (the `_loop_enforce_ci`
+   wrapper). **Do NOT call `gh` directly** (no `gh run list`, no `gh run watch`,
+   no ad-hoc shell checks): `roll ci --wait` is the only sanctioned entry —
+   it derives `owner/repo` from the git remote and uses `gh -R <slug>`, which
+   is required to work through `~/.ssh/config` host rewrites that break gh's
+   auto-detection.
    - CI passes → continue normally
-   - CI fails or times out → keep story as `🔨 In Progress` (do NOT mark ✅ Done); write ALERT; skip to next story
-   - `gh` not installed → skip gracefully (return 0)
+   - CI fails / times out / `gh` call fails → keep story as `🔨 In Progress`
+     (do NOT mark ✅ Done); write ALERT; skip to next story
+   - `gh` binary not installed (`command -v gh` fails) → skip gracefully
+     (return 0). Any other `gh` error is **not** "gh unavailable" — it is a
+     hard failure and must block the gate.
 3. Update state file: `status: idle`
 4. Check if a Feature is now fully complete (all its Stories ✅)
 5. If yes and `brief_on_feature_complete: true` → invoke `Skill("roll-brief")`

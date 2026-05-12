@@ -22,6 +22,24 @@ LOOP_SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   grep -qE 'gh.*not installed|graceful' "$LOOP_SKILL"
 }
 
+# ─── FIX-026: SKILL must forbid raw gh calls in CI gate ──────────────────────
+
+@test "roll-loop SKILL.md: CI gate forbids raw gh run list (must use roll ci)" {
+  # Loop's CI gate must be invoked via `roll ci --wait` or `_loop_enforce_ci`,
+  # never raw `gh run list` (which bypasses _gh_repo_slug + -R flag and breaks
+  # under SSH config host rewrites).
+  local ci_section
+  ci_section=$(awk '/CI Gate/,/^### /' "$LOOP_SKILL")
+  # The CI gate description should NOT mention `gh run list` as the invocation
+  # method — it should reference the wrapper instead.
+  ! echo "$ci_section" | grep -qE 'Polls.*gh run list' ||
+    echo "$ci_section" | grep -qE 'roll ci --wait.*invokes|wrapper'
+}
+
+@test "roll-loop SKILL.md: CI gate explicitly forbids ad-hoc gh checks" {
+  grep -qiE 'do not call .?gh.? directly|never call .?gh.? directly|must use roll ci|MUST NOT.*gh ' "$LOOP_SKILL"
+}
+
 # ─── _loop_enforce_ci integration with BACKLOG ────────────────────────────────
 
 setup() {

@@ -63,12 +63,12 @@ setup() {
   local runner="${tmp_dir}/run.sh"
 
   _write_launchd_plist "$plist" "$label" "$proj" "0" "1" "$runner"
-  local mtime1; mtime1=$(stat -f "%m" "$plist" 2>/dev/null || stat -c "%Y" "$plist")
+  local mtime1; mtime1=$(stat -c "%Y" "$plist" 2>/dev/null || stat -f "%m" "$plist")
 
   # Small sleep to ensure mtime would change if file is rewritten
   sleep 1
   _write_launchd_plist "$plist" "$label" "$proj" "0" "1" "$runner"
-  local mtime2; mtime2=$(stat -f "%m" "$plist" 2>/dev/null || stat -c "%Y" "$plist")
+  local mtime2; mtime2=$(stat -c "%Y" "$plist" 2>/dev/null || stat -f "%m" "$plist")
 
   [ "$mtime1" = "$mtime2" ]
   rm -rf "$tmp_dir"
@@ -242,11 +242,11 @@ setup() {
 
   _install_launchd_plists "$proj"
   local plist; plist=$(_launchd_plist_path "loop" "$proj")
-  local mtime1; mtime1=$(stat -f "%m" "$plist" 2>/dev/null || stat -c "%Y" "$plist")
+  local mtime1; mtime1=$(stat -c "%Y" "$plist" 2>/dev/null || stat -f "%m" "$plist")
 
   sleep 1
   _install_launchd_plists "$proj"
-  local mtime2; mtime2=$(stat -f "%m" "$plist" 2>/dev/null || stat -c "%Y" "$plist")
+  local mtime2; mtime2=$(stat -c "%Y" "$plist" 2>/dev/null || stat -f "%m" "$plist")
 
   [ "$mtime1" = "$mtime2" ]
   rm -rf "$tmp_dir"

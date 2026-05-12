@@ -18,5 +18,8 @@ jobs:
       - name: Install GNU parallel
         run: sudo apt-get install -y parallel
 
+      - name: Bootstrap ~/.roll and ~/.claude/skills (sync skills for tests that check installed locations)
+        run: bash bin/roll setup
+
       - name: Run bats tests
         run: npm test

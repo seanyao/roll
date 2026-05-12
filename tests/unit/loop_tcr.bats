@@ -1,24 +1,16 @@
 #!/usr/bin/env bats
 # Tests for _loop_tcr_count / _loop_enforce_tcr — TCR enforcement (US-AUTO-010)
 
-ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-
-# Source bin/roll in a context where it won't try to execute main.
+load helpers
 setup() {
-  source "$ROLL_BIN"
-  _orig_dir="$PWD"
-  _test_repo=$(mktemp -d)
-  cd "$_test_repo"
+  unit_setup_cd
+  _test_repo="$TEST_TMP"
   git init -q
   git config user.email "test@roll.dev"
   git config user.name "Test"
-  _LOOP_ALERT="${_test_repo}/.alert"
+  _LOOP_ALERT="${TEST_TMP}/.alert"
 }
-
-teardown() {
-  cd "$_orig_dir"
-  rm -rf "$_test_repo"
-}
+teardown() { unit_teardown_cd; }
 
 # ─── _loop_tcr_count ──────────────────────────────────────────────────────────
 

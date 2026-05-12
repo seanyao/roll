@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ROLL — AI Agent 工程化交付框架</title>
+<title>ROLL — AI Agent Engineering Delivery Framework</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Noto+Sans+SC:wght@300;400;500;600;700;900&display=swap');
 
@@ -20,8 +20,6 @@
     --orange: #f59e0b;
     --red: #ef4444;
     --cyan: #06b6d4;
-    --purple: #a855f7;
-    --purple-light: #c084fc;
     --border: rgba(255,255,255,0.06);
     --radius: 16px;
   }
@@ -75,70 +73,81 @@
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   }
   h2 {
-    font-size: 38px; font-weight: 700; line-height: 1.2;
+    font-size: 36px; font-weight: 700; line-height: 1.2;
     color: var(--text-bright); margin-bottom: 10px; text-align: center;
   }
-  h3 { font-size: 20px; font-weight: 600; color: var(--text-bright); margin-bottom: 6px; }
+  h3 { font-size: 18px; font-weight: 600; color: var(--text-bright); margin-bottom: 6px; }
 
   .subtitle {
     font-size: 18px; color: var(--text-dim); line-height: 1.6;
     text-align: center; max-width: 700px;
   }
   .section-desc {
-    font-size: 17px; color: var(--text-dim); line-height: 1.7;
-    max-width: 800px; margin-bottom: 28px; text-align: center;
+    font-size: 16px; color: var(--text-dim); line-height: 1.7;
+    max-width: 800px; margin-bottom: 24px; text-align: center;
   }
 
-  .cards { display: grid; gap: 16px; width: 100%; max-width: 1100px; }
+  .zh {
+    font-family: 'Noto Sans SC', system-ui, sans-serif;
+    font-size: 0.82em; color: rgba(136,136,160,0.65);
+    font-weight: 400;
+  }
+  .zh-line {
+    font-family: 'Noto Sans SC', system-ui, sans-serif;
+    font-size: 13px; color: rgba(136,136,160,0.5);
+    font-weight: 400; display: block; margin-top: 3px;
+  }
+
+  .cards { display: grid; gap: 14px; width: 100%; max-width: 1100px; }
   .cards-2 { grid-template-columns: 1fr 1fr; }
   .cards-3 { grid-template-columns: 1fr 1fr 1fr; }
   .cards-4 { grid-template-columns: 1fr 1fr; }
-  .cards-4-row { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .cards-5 { grid-template-columns: repeat(5, 1fr); }
 
   .card {
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 24px 22px;
+    border-radius: var(--radius); padding: 22px 20px;
     transition: all 0.3s ease;
   }
   .card:hover { background: var(--bg-card-hover); transform: translateY(-2px); }
-  .card p { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+  .card p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
 
   .metric-row {
-    display: flex; gap: 20px; width: 100%; max-width: 1000px;
+    display: flex; gap: 16px; width: 100%; max-width: 1000px;
     justify-content: center; margin-top: 8px;
   }
   .metric {
-    text-align: center; padding: 22px 16px;
+    text-align: center; padding: 20px 14px;
     background: var(--bg-card); border: 1px solid var(--border);
     border-radius: var(--radius); flex: 1;
   }
-  .metric .number { font-size: 40px; font-weight: 800; line-height: 1; margin-bottom: 6px; }
-  .metric .label { font-size: 13px; color: var(--text-dim); font-weight: 500; }
+  .metric .number { font-size: 36px; font-weight: 800; line-height: 1; margin-bottom: 6px; }
+  .metric .label { font-size: 12px; color: var(--text-dim); font-weight: 500; }
 
   .compare {
     display: grid; grid-template-columns: 1fr 50px 1fr;
     gap: 0; width: 100%; max-width: 1000px; align-items: start;
   }
-  .compare-col { padding: 24px 22px; border-radius: var(--radius); }
+  .compare-col { padding: 22px 20px; border-radius: var(--radius); }
   .compare-before { background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.15); }
   .compare-after { background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.15); }
   .compare-arrow {
     display: flex; align-items: center; justify-content: center;
     font-size: 24px; color: var(--text-dim); padding-top: 36px;
   }
-  .compare-col h3 { margin-bottom: 16px; font-size: 16px; }
+  .compare-col h3 { margin-bottom: 14px; font-size: 15px; }
   .compare-item {
     display: flex; align-items: flex-start; gap: 8px;
-    margin-bottom: 12px; font-size: 14px; line-height: 1.5; color: var(--text);
+    margin-bottom: 10px; font-size: 13px; line-height: 1.5; color: var(--text);
   }
-  .compare-item .icon { flex-shrink: 0; font-size: 14px; margin-top: 2px; }
+  .compare-item .icon { flex-shrink: 0; font-size: 13px; margin-top: 2px; }
 
   .loop-diagram {
-    display: flex; gap: 16px; width: 100%; max-width: 1100px;
+    display: flex; gap: 14px; width: 100%; max-width: 1100px;
     justify-content: center; margin-top: 4px;
   }
   .loop-card {
-    flex: 1; padding: 22px 20px; border-radius: var(--radius);
+    flex: 1; padding: 20px 18px; border-radius: var(--radius);
     background: var(--bg-card); border: 1px solid var(--border);
     position: relative; overflow: hidden;
   }
@@ -150,11 +159,11 @@
   .loop-a .loop-label { color: var(--accent-light); }
   .loop-b .loop-label { color: var(--green); }
   .loop-c .loop-label { color: var(--orange); }
-  .loop-card h3 { font-size: 17px; margin-bottom: 8px; }
-  .loop-card p { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin-bottom: 8px; }
-  .loop-skills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .loop-card h3 { font-size: 16px; margin-bottom: 8px; }
+  .loop-card p { font-size: 12px; color: var(--text-dim); line-height: 1.55; margin-bottom: 6px; }
+  .loop-skills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .skill-tag {
-    font-size: 11px; padding: 3px 8px; border-radius: 5px;
+    font-size: 10px; padding: 3px 7px; border-radius: 5px;
     font-weight: 600; font-family: 'SF Mono', 'Fira Code', monospace;
   }
   .loop-a .skill-tag { background: rgba(99,102,241,0.15); color: var(--accent-light); }
@@ -162,14 +171,14 @@
   .loop-c .skill-tag { background: rgba(245,158,11,0.15); color: var(--orange); }
 
   .flow-row {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; gap: 8px;
     flex-wrap: wrap; justify-content: center;
   }
   .flow-step {
-    padding: 12px 18px; border-radius: 10px;
-    font-size: 14px; font-weight: 600;
+    padding: 10px 16px; border-radius: 10px;
+    font-size: 13px; font-weight: 600;
   }
-  .flow-arrow { font-size: 18px; color: var(--text-dim); }
+  .flow-arrow { font-size: 16px; color: var(--text-dim); }
   .flow-branch { display: flex; flex-direction: column; gap: 6px; align-items: center; }
 
   .timeline {
@@ -179,125 +188,133 @@
     content: ''; position: absolute; left: 12px; top: 0; bottom: 0;
     width: 2px; background: var(--border);
   }
-  .timeline-item { position: relative; margin-bottom: 22px; padding-left: 24px; }
+  .timeline-item { position: relative; margin-bottom: 18px; padding-left: 24px; }
   .timeline-item::before {
     content: ''; position: absolute; left: -30px; top: 5px;
     width: 10px; height: 10px; border-radius: 50%;
     background: var(--accent); box-shadow: 0 0 10px rgba(99,102,241,0.3);
   }
-  .timeline-item h4 { font-size: 15px; font-weight: 600; color: var(--text-bright); margin-bottom: 3px; }
-  .timeline-item p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+  .timeline-item h4 { font-size: 14px; font-weight: 600; color: var(--text-bright); margin-bottom: 3px; }
+  .timeline-item p { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
 
   .quote-block {
     border-left: 3px solid var(--accent);
-    padding: 16px 24px; margin: 16px 0;
+    padding: 14px 22px; margin: 14px 0;
     background: rgba(99,102,241,0.06);
     border-radius: 0 10px 10px 0; max-width: 700px;
   }
-  .quote-block p { font-size: 16px; font-style: italic; color: var(--text); line-height: 1.6; }
-  .quote-block .attr { font-size: 13px; color: var(--text-dim); font-style: normal; margin-top: 6px; }
+  .quote-block p { font-size: 15px; font-style: italic; color: var(--text); line-height: 1.6; }
 
   .highlight-box {
     background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.1));
     border: 1px solid rgba(99,102,241,0.2);
-    border-radius: var(--radius); padding: 24px 28px; max-width: 800px; text-align: center;
+    border-radius: var(--radius); padding: 22px 26px; max-width: 800px; text-align: center;
   }
-  .highlight-box p { font-size: 15px; color: var(--text-dim); line-height: 1.6; }
+  .highlight-box p { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
 
   .analogy {
     background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.15);
-    border-radius: var(--radius); padding: 18px 22px; max-width: 800px; margin-top: 16px;
+    border-radius: var(--radius); padding: 16px 20px; max-width: 800px; margin-top: 14px;
   }
   .analogy-label {
     font-size: 11px; font-weight: 700; color: var(--orange);
     text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 5px;
   }
-  .analogy p { font-size: 15px; line-height: 1.6; color: var(--text); }
+  .analogy p { font-size: 14px; line-height: 1.6; color: var(--text); }
+
+  /* Pipeline bar */
+  .pipeline-bar {
+    display: flex; gap: 4px; width: 100%; max-width: 1000px; margin-top: 8px;
+  }
+  .pipe-stage {
+    flex: 1; text-align: center; padding: 14px 8px; border-radius: 12px;
+  }
+  .pipe-stage h4 { font-size: 16px; font-weight: 700; }
+  .pipe-stage p { font-size: 11px; color: var(--text-dim); margin-top: 4px; line-height: 1.4; }
+  .pipe-idea { background: rgba(99,102,241,0.08); border: 1.5px solid rgba(99,102,241,0.3); }
+  .pipe-idea h4 { color: var(--accent-light); }
+  .pipe-backlog { background: rgba(99,102,241,0.08); border: 1.5px solid rgba(99,102,241,0.3); }
+  .pipe-backlog h4 { color: var(--accent-light); }
+  .pipe-build { background: rgba(34,197,94,0.08); border: 1.5px solid rgba(34,197,94,0.3); }
+  .pipe-build h4 { color: var(--green); }
+  .pipe-verify { background: rgba(245,158,11,0.08); border: 1.5px solid rgba(245,158,11,0.3); }
+  .pipe-verify h4 { color: var(--orange); }
+  .pipe-release { background: rgba(6,182,212,0.08); border: 1.5px solid rgba(6,182,212,0.3); }
+  .pipe-release h4 { color: var(--cyan); }
+  .pipe-arrow { display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--text-dim); padding: 0 2px; }
+
+  /* Human-AI bar */
+  .hai-bar {
+    display: flex; gap: 4px; width: 100%; max-width: 1000px; margin-top: 8px;
+  }
+  .hai-zone {
+    text-align: center; padding: 12px 8px; border-radius: 10px;
+  }
+  .hai-zone .emoji { font-size: 18px; }
+  .hai-zone h4 { font-size: 14px; font-weight: 700; margin-top: 4px; }
+  .hai-zone p { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .hai-human { flex: 2; background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.15); }
+  .hai-human h4 { color: var(--accent-light); }
+  .hai-ai { flex: 2; background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.15); }
+  .hai-ai h4 { color: var(--green); }
+  .hai-push { flex: 1; background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.15); }
+  .hai-push h4 { color: var(--orange); }
 
   /* Skill table */
   .skill-table {
     width: 100%; max-width: 1060px; border-collapse: collapse; margin-top: 8px;
   }
   .skill-table th {
-    text-align: left; font-size: 12px; font-weight: 700; color: var(--text-dim);
+    text-align: left; font-size: 11px; font-weight: 700; color: var(--text-dim);
     text-transform: uppercase; letter-spacing: 0.06em;
-    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
   }
   .skill-table td {
-    padding: 10px 12px; font-size: 14px; color: var(--text);
+    padding: 8px 10px; font-size: 13px; color: var(--text);
     border-bottom: 1px solid var(--border); vertical-align: top;
   }
   .skill-table tr:hover td { background: rgba(255,255,255,0.02); }
   .skill-table .skill-name {
     font-family: 'SF Mono', 'Fira Code', monospace; font-weight: 600;
-    font-size: 13px; white-space: nowrap;
+    font-size: 12px; white-space: nowrap;
   }
   .skill-table .phase-tag {
-    font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600;
+    font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 600;
     display: inline-block;
   }
   .phase-research { background: rgba(99,102,241,0.15); color: var(--accent-light); }
   .phase-design { background: rgba(99,102,241,0.15); color: var(--accent-light); }
   .phase-build { background: rgba(34,197,94,0.15); color: var(--green); }
   .phase-check { background: rgba(245,158,11,0.15); color: var(--orange); }
+  .phase-auto { background: rgba(6,182,212,0.15); color: var(--cyan); }
   .phase-support { background: rgba(255,255,255,0.06); color: var(--text-dim); }
-  .phase-auto { background: rgba(168,85,247,0.15); color: var(--purple-light); }
 
-  /* Structure tree */
+  /* Autonomous layers */
+  .auto-layers {
+    display: flex; gap: 12px; width: 100%; max-width: 1000px; margin-top: 8px;
+  }
+  .auto-layer {
+    flex: 1; text-align: center; padding: 18px 12px; border-radius: var(--radius);
+    background: var(--bg-card); border: 1px solid var(--border);
+  }
+  .auto-layer .al-icon { font-size: 28px; }
+  .auto-layer h4 { font-size: 14px; font-weight: 700; color: var(--text-bright); margin-top: 6px; }
+  .auto-layer p { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
+  .auto-layer .al-skills {
+    font-size: 10px; color: var(--text-dim); margin-top: 8px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
   .tree {
     font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 14px; line-height: 1.7; color: var(--text);
+    font-size: 13px; line-height: 1.7; color: var(--text);
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 22px 26px;
+    border-radius: var(--radius); padding: 20px 24px;
     max-width: 700px; width: 100%;
   }
   .tree .comment { color: var(--text-dim); }
   .tree .file { color: var(--cyan); }
   .tree .dir { color: var(--accent-light); }
-
-  /* Vision cinematic opener */
-  .vision-text {
-    font-size: 22px; line-height: 1.8; color: var(--text);
-    max-width: 760px; text-align: left; letter-spacing: 0.01em;
-  }
-  .vision-text strong { color: var(--text-bright); }
-  .vision-punch {
-    font-size: 28px; font-weight: 700; color: var(--text-bright);
-    margin-top: 36px; text-align: center;
-    background: linear-gradient(135deg, var(--accent-light), var(--cyan));
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  }
-
-  /* Layer number badges */
-  .layer-badge {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px; border-radius: 50%;
-    font-size: 16px; font-weight: 800; margin-bottom: 10px;
-  }
-  .layer-badge-1 { background: rgba(99,102,241,0.2); color: var(--accent-light); }
-  .layer-badge-2 { background: rgba(34,197,94,0.2); color: var(--green); }
-  .layer-badge-3 { background: rgba(168,85,247,0.2); color: var(--purple-light); }
-
-  /* Climax slide special styling */
-  .climax-reveal {
-    background: linear-gradient(135deg, rgba(168,85,247,0.08), rgba(99,102,241,0.08));
-    border: 1px solid rgba(168,85,247,0.2);
-    border-radius: var(--radius); padding: 20px 26px; max-width: 800px;
-    text-align: center; margin-bottom: 20px;
-  }
-  .climax-reveal p {
-    font-size: 17px; color: var(--text); line-height: 1.7; font-style: italic;
-  }
-
-  .climax-highlight {
-    background: linear-gradient(135deg, rgba(168,85,247,0.15), rgba(99,102,241,0.15));
-    border: 2px solid rgba(168,85,247,0.4);
-    border-radius: var(--radius); padding: 28px 32px; max-width: 800px; text-align: center;
-    box-shadow: 0 0 40px rgba(168,85,247,0.1);
-  }
-  .climax-highlight p {
-    font-size: 16px; color: var(--text); line-height: 1.7;
-  }
 
   .nav {
     position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
@@ -331,19 +348,19 @@
   .slide.active .fade-in:nth-child(4) { animation-delay: 0.24s; }
   .slide.active .fade-in:nth-child(5) { animation-delay: 0.32s; }
   .slide.active .fade-in:nth-child(6) { animation-delay: 0.40s; }
-  .slide.active .fade-in:nth-child(7) { animation-delay: 0.48s; }
   @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
 
   @media (max-width: 900px) {
     .slide { padding: 36px 24px 72px; }
     h1 { font-size: 32px; } h2 { font-size: 26px; }
-    .cards-3, .cards-2, .cards-4-row { grid-template-columns: 1fr 1fr; }
+    .cards-3, .cards-2, .cards-5 { grid-template-columns: 1fr; }
     .compare { grid-template-columns: 1fr; }
     .compare-arrow { transform: rotate(90deg); padding: 0; }
     .loop-diagram { flex-direction: column; }
     .metric-row { flex-direction: column; }
-    .vision-text { font-size: 17px; }
-    .vision-punch { font-size: 22px; }
+    .pipeline-bar { flex-direction: column; }
+    .hai-bar { flex-direction: column; }
+    .auto-layers { flex-direction: column; }
   }
   .slide::-webkit-scrollbar { width: 4px; }
   .slide::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
@@ -354,7 +371,7 @@
 <div id="progress-bar"></div>
 <div class="slides-container" id="slides">
 
-<!-- ═══ 0: Cover ═══ -->
+<!-- 0: Cover -->
 <div class="slide active" data-slide="0">
   <div class="fade-in" style="margin-bottom: 16px;">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="60 40 280 140" width="320" height="160">
@@ -363,703 +380,796 @@
     </svg>
   </div>
   <p class="subtitle fade-in" style="font-size: 22px; color: var(--text); font-weight: 500; margin-bottom: 6px;">
-    AI Agent 工程化交付框架
+    AI Agent Engineering Delivery Framework
   </p>
   <p class="subtitle fade-in" style="font-size: 15px;">
     Roll out features with AI agents — Move fast, no sprints.
   </p>
   <div class="fade-in" style="margin-top: 40px;">
-    <p style="font-size: 13px; color: var(--text-dim);">2026</p>
+    <p style="font-size: 13px; color: var(--text-dim);">BIPO · 2026</p>
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════
-     ACT 1: 愿景开场 + 背景铺垫
-     ═══════════════════════════════════════════════════════ -->
-
-<!-- ═══ 1: 开篇愿景 ═══ -->
+<!-- 1: Context — A Shift is Happening -->
 <div class="slide" data-slide="1">
-  <div class="fade-in" style="max-width: 800px; padding: 20px 0;">
-    <p class="vision-text">
-      想象一下这样的早晨：<br><br>
-      你到办公室，打开电脑，一份简报已经在等你——<br>
-      昨晚 AI 把 <strong>3 个功能需求</strong>全部交付了，<br>
-      凌晨自动做了一次代码体检，发现了一处可以精简的模块，<br>
-      CI 全绿，测试覆盖率 <strong>94%</strong>。<br><br>
-      简报最后一行写着：<strong>「建议发版。」</strong><br><br>
-      你点了一下确认。完成。
-    </p>
-  </div>
-  <div class="fade-in">
-    <p class="vision-punch">这不是未来。这是 ROLL 今天已经在做的事。</p>
-  </div>
-  <span class="slide-number">01 / 18</span>
-</div>
-
-<!-- ═══ 2: 但要做到这一点…… ═══ -->
-<div class="slide" data-slide="2">
-  <span class="tag fade-in">前提条件</span>
-  <h2 class="fade-in">但要做到这一点……</h2>
+  <span class="tag fade-in">Context</span>
+  <h2 class="fade-in">A Shift is Happening</h2>
   <p class="section-desc fade-in">
-    要让 AI 无人值守地工作，你必须先解决<strong style="color:var(--text-bright)">三个问题</strong>：
-  </p>
-  <div class="cards cards-3 fade-in" style="margin-top: 8px;">
-    <div class="card" style="border-top: 3px solid var(--accent-light); text-align: center; padding: 32px 22px;">
-      <div class="layer-badge layer-badge-1">1</div>
-      <h3 style="font-size: 18px; margin-bottom: 10px;">产出必须一致</h3>
-      <p style="font-size: 15px;">不管谁来用 AI，<br>产出标准都一样。<br><br>
-      <strong style="color:var(--accent-light)">约束问题</strong></p>
-    </div>
-    <div class="card" style="border-top: 3px solid var(--green); text-align: center; padding: 32px 22px;">
-      <div class="layer-badge layer-badge-2">2</div>
-      <h3 style="font-size: 18px; margin-bottom: 10px;">质量必须自动保障</h3>
-      <p style="font-size: 15px;">不能靠人盯着，<br>系统自己验证自己。<br><br>
-      <strong style="color:var(--green)">质量问题</strong></p>
-    </div>
-    <div class="card" style="border-top: 3px solid var(--purple-light); text-align: center; padding: 32px 22px;">
-      <div class="layer-badge layer-badge-3">3</div>
-      <h3 style="font-size: 18px; margin-bottom: 10px;">流程必须闭环</h3>
-      <p style="font-size: 15px;">做完了要有证据，<br>全程可追溯可审计。<br><br>
-      <strong style="color:var(--purple-light)">信任问题</strong></p>
-    </div>
-  </div>
-  <div class="highlight-box fade-in" style="margin-top: 24px;">
-    <p style="font-size: 16px; color: var(--text);">
-      解决这三个问题，AI 才能从「工具」变成「员工」。<br>
-      <strong style="color:var(--text-bright)">接下来，我们逐一拆解。</strong>
-    </p>
-  </div>
-  <span class="slide-number">02 / 18</span>
-</div>
-
-<!-- ═══ 3: 背景——变化 ═══ -->
-<div class="slide" data-slide="3">
-  <span class="tag fade-in">背景</span>
-  <h2 class="fade-in">一个正在发生的变化</h2>
-  <p class="section-desc fade-in">
-    AI 编程工具已经从「帮你补全几行代码」进化到「替你完成整个功能模块」。<br>
-    开发者的角色正在从<strong style="color:var(--text-bright)">写代码的人</strong>变成<strong style="color:var(--text-bright)">指挥 AI 的人</strong>。
+    AI coding tools have evolved from "auto-completing a few lines" to "delivering entire features."<br>
+    The developer's role is shifting from <strong style="color:var(--text-bright)">writing code</strong> to <strong style="color:var(--text-bright)">directing AI</strong>.
   </p>
   <div class="cards cards-2 fade-in" style="margin-top: 8px;">
     <div class="card">
-      <h3 style="font-size:17px;">以前：人写代码</h3>
-      <p>开发者亲手写每一行代码。质量取决于个人技术水平和经验。<br>
-      公司通过<strong style="color:var(--text-bright)">架构规范、代码审查、QA 流程</strong>来约束人，保证产出一致。</p>
+      <h3 style="font-size:16px;">Before: Humans Write Code</h3>
+      <p>Developers write every line themselves. Quality depends on individual skill and experience.<br>
+      Companies constrain people through <strong style="color:var(--text-bright)">architecture standards, code reviews, and QA processes</strong>.</p>
     </div>
     <div class="card">
-      <h3 style="font-size:17px;">现在：AI 写代码，人做决策</h3>
-      <p>AI 执行具体编码工作。但同一个 AI 工具、同一个模型，<br>
-      <strong style="color:var(--text-bright)">不同的人用出来的效果天差地别</strong>。</p>
+      <h3 style="font-size:16px;">Now: AI Writes Code, Humans Decide</h3>
+      <p>AI handles the actual coding. But with the same AI tool, the same model —<br>
+      <strong style="color:var(--text-bright)">different people get dramatically different results</strong>.</p>
     </div>
   </div>
   <div class="quote-block fade-in" style="margin-top: 16px;">
-    <p>问题不是「该用哪个 AI 工具」——统一到一个就行了。<br>
-    真正的问题是：AI 成了主要执行者，但<strong style="color:var(--text-bright)">针对 AI 的约束体系几乎为零</strong>。<br>
-    给它的提示词不同，产出就不同。架构规范、模块边界、禁区——它一概不知。</p>
+    <p>The problem isn't "which AI tool to use" — just pick one and standardize.<br>
+    The problem is: <strong style="color:var(--text-bright)">why does the same tool produce great results for some and garbage for others?</strong></p>
   </div>
-  <span class="slide-number">03 / 18</span>
+  <span class="slide-number">01 / 19</span>
 </div>
 
-<!-- ═══ 4: TDD + TCR ═══ -->
-<div class="slide" data-slide="4">
-  <span class="tag fade-in">基础知识</span>
-  <h2 class="fade-in">先了解基础：先定标准，再写代码</h2>
+<!-- 2: Core Problem — The Constraint Gap -->
+<div class="slide" data-slide="2">
+  <span class="tag fade-in">Core Problem</span>
+  <h2 class="fade-in">The Constraint System<br>Hasn't Caught Up</h2>
   <p class="section-desc fade-in">
-    <strong style="color:var(--text-bright)">TDD（测试驱动开发）</strong>：先写验收标准，再写代码让标准通过。<br>
-    <strong style="color:var(--text-bright)">TCR（Test && Commit || Revert）</strong>：TDD 的升级版——通过就保存，不过就撤回。
+    We used to have an entire system to constrain <em>people</em> — architecture standards, processes, code reviews.<br>
+    Now AI is the primary executor, but <strong style="color:var(--text-bright)">the constraint system for AI is almost nonexistent</strong>.
   </p>
-  <div class="compare fade-in" style="margin-bottom: 16px;">
-    <div class="compare-col compare-before">
-      <h3 style="color: var(--red);">传统：先写后测</h3>
-      <div class="compare-item"><span class="icon">1.</span><span>开发者写代码</span></div>
-      <div class="compare-item"><span class="icon">2.</span><span>写完交给 QA</span></div>
-      <div class="compare-item"><span class="icon">3.</span><span>QA 发现 Bug → 打回修改</span></div>
-      <div style="margin-top:10px;padding:8px 10px;background:rgba(239,68,68,0.1);border-radius:8px;font-size:13px;color:#f87171;">
-        Bug 发现得越晚，修起来越贵
-      </div>
+  <div class="cards cards-2 fade-in" style="margin-top: 8px;">
+    <div class="card" style="border-left: 3px solid var(--accent-light);">
+      <h3 style="font-size:15px;">1. Architecture Constraints</h3>
+      <p>AI doesn't know your architecture conventions, module boundaries, or forbidden zones. <strong style="color:var(--text-bright)">Different prompts = different outputs.</strong></p>
     </div>
-    <div class="compare-arrow">→</div>
-    <div class="compare-col compare-after">
-      <h3 style="color: var(--green);">TDD + TCR：边写边验</h3>
-      <div class="compare-item"><span class="icon">1.</span><span>先写验收标准（自动化测试）</span></div>
-      <div class="compare-item"><span class="icon">2.</span><span>写代码让标准通过</span></div>
-      <div class="compare-item"><span class="icon">3.</span><span>通过 → 自动提交 ｜ 失败 → 自动撤回</span></div>
-      <div style="margin-top:10px;padding:8px 10px;background:rgba(34,197,94,0.1);border-radius:8px;font-size:13px;color:var(--green);">
-        Bug 在写的同时就被消灭，修复成本趋近于零
-      </div>
-    </div>
-  </div>
-  <div class="cards cards-3 fade-in">
-    <div class="card" style="text-align:center;border-color:rgba(34,197,94,0.2);">
-      <div style="font-size:32px;font-weight:800;color:var(--green);">2-5 分钟</div>
-      <p style="margin-top:6px;">每一步的颗粒度<br>失败最多损失 5 分钟</p>
-    </div>
-    <div class="card" style="text-align:center;border-color:rgba(6,182,212,0.2);">
-      <div style="font-size:32px;font-weight:800;color:var(--cyan);">100%</div>
-      <p style="margin-top:6px;">每次保存都是验证过的<br>代码始终可运行</p>
-    </div>
-    <div class="card" style="text-align:center;border-color:rgba(99,102,241,0.2);">
-      <div style="font-size:32px;font-weight:800;color:var(--accent-light);">全自动</div>
-      <p style="margin-top:6px;">AI 自主执行<br>无需人工干预</p>
-    </div>
-  </div>
-  <span class="slide-number">04 / 18</span>
-</div>
-
-<!-- ═══ 5: 思想渊源——极限编程 ═══ -->
-<div class="slide" data-slide="5">
-  <span class="tag fade-in">思想渊源</span>
-  <h2 class="fade-in">这些思路从哪来的？</h2>
-  <p class="section-desc fade-in">
-    TDD 和 TCR 都来自<strong style="color:var(--text-bright)">极限编程（Extreme Programming, XP）</strong>这个流派——<br>
-    它的核心理念是：好的工程实践不应该偶尔做，而应该<strong style="color:var(--text-bright)">极致地、时刻在做</strong>。
-  </p>
-  <div class="cards cards-2 fade-in">
-    <div class="card">
-      <h3 style="font-size:16px;">XP 的核心原则</h3>
-      <p><strong style="color:var(--text-bright)">如果测试有用，就时刻在测试</strong>（TDD）<br>
-      <strong style="color:var(--text-bright)">如果集成有用，就时刻在集成</strong>（持续集成/CI）<br>
-      <strong style="color:var(--text-bright)">如果反馈有用，就把反馈周期压到最短</strong>（TCR）<br>
-      <strong style="color:var(--text-bright)">如果代码审查有用，就实时审查</strong>（结对编程/自动审查）</p>
-    </div>
-    <div class="card">
-      <h3 style="font-size:16px;">为什么 AI 时代更需要这些</h3>
-      <p>人会偷懒——「这次先不写测试了」。AI 不会。<br>
-      人会疲倦——连续工作 8 小时后质量下降。AI 不会。<br>
-      <strong style="color:var(--text-bright)">XP 以前靠人的纪律性执行，现在可以靠 AI 的机械性执行。</strong><br>
-      ROLL 就是把这些经典实践固化为 AI 的工作指令。</p>
-    </div>
-  </div>
-  <div class="highlight-box fade-in" style="margin-top: 20px;">
-    <p style="font-size: 16px; color: var(--text);">
-      <strong>ROLL 不发明新方法论</strong>。它把 TDD、TCR、Scrum、SRE 等经过 20 年验证的工程实践，<br>
-      编码为 AI 能理解、能执行的标准化指令。AI 不会「这次先跳过测试」，因为指令里不存在这个分支。
-    </p>
-  </div>
-  <span class="slide-number">05 / 18</span>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════
-     ACT 2: ROLL 解决方案 — 三层递进
-     ═══════════════════════════════════════════════════════ -->
-
-<!-- ═══ 6: ROLL 是什么 ═══ -->
-<div class="slide" data-slide="6">
-  <span class="tag fade-in">解决方案</span>
-  <h2 class="fade-in">ROLL 就是让这个愿景成为可能的系统</h2>
-  <p class="section-desc fade-in">
-    一句话：给所有 AI 编程工具装上<strong style="color:var(--text-bright)">统一的工作标准和质检流程</strong>的管理框架。
-  </p>
-  <div class="cards cards-3 fade-in">
-    <div class="card" style="text-align:center;">
-      <div style="font-size:32px;margin-bottom:8px;">📐</div>
-      <h3 style="font-size:16px;">Convention Manager</h3>
-      <p>一条命令 <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:12px;">roll setup</code>，把工程规范同步到 Claude、Cursor、Gemini、Kimi、Codex 等 9 个 AI 工具</p>
-    </div>
-    <div class="card" style="text-align:center;">
-      <div style="font-size:32px;margin-bottom:8px;">🔧</div>
-      <h3 style="font-size:16px;">Skill System</h3>
-      <p>20 个标准化技能，覆盖调研、设计、开发、测试、审查、巡检、修复、自治全流程</p>
-    </div>
-    <div class="card" style="text-align:center;">
-      <div style="font-size:32px;margin-bottom:8px;">🔄</div>
-      <h3 style="font-size:16px;">Three-Loop Delivery</h3>
-      <p>设计→实现→巡检 三环闭合，每个环节有质量门禁，上一个环的产出是下一个环的输入</p>
-    </div>
-  </div>
-  <div class="analogy fade-in">
-    <div class="analogy-label">打个比方</div>
-    <p>AI 工具是「工人」，ROLL 是「施工规范 + 质检体系 + 监理」。<br>
-    工人换谁来干都行，但每一步都有标准、有验收、有记录。</p>
-  </div>
-  <span class="slide-number">06 / 18</span>
-</div>
-
-<!-- ═══ 7: 三层递进论点 ═══ -->
-<div class="slide" data-slide="7">
-  <span class="tag fade-in">体系架构</span>
-  <h2 class="fade-in">三层递进，逐步实现 AI 自治</h2>
-  <p class="section-desc fade-in">
-    不是一个工具，而是一个<strong style="color:var(--text-bright)">逐层升级的工程体系</strong>。<br>
-    每一层解决一个核心问题，层层叠加，最终实现无人值守交付。
-  </p>
-  <div class="cards cards-3 fade-in" style="margin-top: 8px;">
-    <div class="card" style="text-align:center; border-top: 3px solid var(--accent-light);">
-      <div class="layer-badge layer-badge-1">1</div>
-      <h3 style="font-size:18px; color:var(--accent-light);">约束层</h3>
-      <p style="font-size:15px; margin-top:8px;">让产出一致</p>
-      <p style="margin-top:10px;">统一 9 个 AI 工具的工作标准。<br>不管谁来用 AI，规范都一样。</p>
-    </div>
-    <div class="card" style="text-align:center; border-top: 3px solid var(--green);">
-      <div class="layer-badge layer-badge-2">2</div>
-      <h3 style="font-size:18px; color:var(--green);">质量层</h3>
-      <p style="font-size:15px; margin-top:8px;">让错误无处藏身</p>
-      <p style="margin-top:10px;">TCR 微步验证 + 四道自动防线。<br>Bug 在产生的一刻就被消灭。</p>
-    </div>
-    <div class="card" style="text-align:center; border-top: 3px solid var(--purple-light);">
-      <div class="layer-badge layer-badge-3">3</div>
-      <h3 style="font-size:18px; color:var(--purple-light);">自治层</h3>
-      <p style="font-size:15px; margin-top:8px;">让 AI 自己值班</p>
-      <p style="margin-top:10px;">7×24 无人值守执行。<br>人只需要决定什么时候发版。</p>
-    </div>
-  </div>
-  <div class="analogy fade-in">
-    <div class="analogy-label">递进逻辑</div>
-    <p>没有约束层，AI 产出不一致，质量层无从验证。<br>
-    没有质量层，错误不可控，自治层不敢开启。<br>
-    <strong style="color:var(--text-bright)">三层缺一不可，但可以逐步启用。</strong></p>
-  </div>
-  <span class="slide-number">07 / 18</span>
-</div>
-
-<!-- ═══ 8: 约束层 ═══ -->
-<div class="slide" data-slide="8">
-  <span class="tag fade-in" style="background:rgba(99,102,241,0.12);color:var(--accent-light);">第一层 · 约束</span>
-  <h2 class="fade-in">一条命令统一标准</h2>
-  <p class="section-desc fade-in">
-    <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:14px;">roll setup</code> 做的事：把同一套工程规范写入 9 个 AI 工具的配置目录。
-  </p>
-  <div class="flow-row fade-in" style="margin-bottom: 20px;">
-    <div class="flow-step" style="background:rgba(99,102,241,0.12);color:var(--accent-light);">
-      ~/.roll/<br><span style="font-size:11px;">统一配置源</span>
-    </div>
-    <div class="flow-arrow">→</div>
-    <div class="flow-branch" style="gap:4px;">
-      <div class="flow-step" style="background:rgba(255,255,255,0.04);color:var(--text);font-size:13px;padding:8px 14px;">~/.claude/ → CLAUDE.md + skills/</div>
-      <div class="flow-step" style="background:rgba(255,255,255,0.04);color:var(--text);font-size:13px;padding:8px 14px;">~/.gemini/ → GEMINI.md + skills/</div>
-      <div class="flow-step" style="background:rgba(255,255,255,0.04);color:var(--text);font-size:13px;padding:8px 14px;">~/.cursor/ → rules + skills/</div>
-      <div class="flow-step" style="background:rgba(255,255,255,0.04);color:var(--text);font-size:13px;padding:8px 14px;">~/.kimi/ ~/.codex/ ~/.trae/ ... 共 9 个</div>
-    </div>
-  </div>
-  <div class="tree fade-in" style="margin-bottom: 16px;">
-    <span class="dir">my-project/</span><br>
-    ├── <span class="file">AGENTS.md</span> <span class="comment">&nbsp;&nbsp;← 工程约束（所有 AI 工具共享的工作标准）</span><br>
-    ├── <span class="file">BACKLOG.md</span> <span class="comment">&nbsp;&nbsp;← 任务看板（Story 状态索引）</span><br>
-    ├── <span class="dir">docs/features/</span> <span class="comment">&nbsp;&nbsp;← 每个 Story 的详细设计 + 验收标准</span><br>
-    └── <span class="dir">.github/workflows/</span> <span class="comment">&nbsp;&nbsp;← CI 门禁 + 定时巡检</span>
-  </div>
-  <div class="cards cards-3 fade-in">
-    <div class="card" style="padding:16px 18px;">
-      <h3 style="font-size:14px;">零侵入</h3>
-      <p style="font-size:13px;">不覆盖已有配置。Roll 的规范写入独立文件，通过 @include 追加引用。</p>
-    </div>
-    <div class="card" style="padding:16px 18px;">
-      <h3 style="font-size:14px;">技能软链接</h3>
-      <p style="font-size:13px;">每个 skill 以符号链接挂载到各 AI 工具目录。更新后 setup 即可全员升级。</p>
-    </div>
-    <div class="card" style="padding:16px 18px;">
-      <h3 style="font-size:14px;">Markdown 即数据库</h3>
-      <p style="font-size:13px;">不需要 Jira、不需要 Notion。文件系统是唯一数据源，Git 是版本管理。</p>
-    </div>
-  </div>
-  <span class="slide-number">08 / 18</span>
-</div>
-
-<!-- ═══ 9: 三环架构 ═══ -->
-<div class="slide" data-slide="9">
-  <span class="tag fade-in">架构</span>
-  <h2 class="fade-in">三环闭合：从需求到运维</h2>
-  <p class="section-desc fade-in" style="margin-bottom: 16px;">
-    每个环节有专属的 AI 技能。环与环之间有明确的交接物。
-  </p>
-  <div class="loop-diagram fade-in">
-    <div class="loop-card loop-a">
-      <div class="loop-label">Loop A · 调研与设计</div>
-      <h3>想清楚</h3>
-      <p>竞品调研（HV 分析）→ 方案设计 → 需求拆解为符合 INVEST 原则的 User Story → 写入 BACKLOG.md</p>
-      <p style="color:var(--accent-light);font-size:12px;font-weight:600;">产出：BACKLOG.md + docs/features/</p>
-      <div class="loop-skills">
-        <span class="skill-tag">$roll-research</span>
-        <span class="skill-tag">$roll-design</span>
-      </div>
-    </div>
-    <div class="loop-card loop-b">
-      <div class="loop-label">Loop B · 实现与集成</div>
-      <h3>做扎实</h3>
-      <p>TCR 微步交付（2-5 分钟/步）→ 自动代码审查 → CI 质量门禁 → 部署 → 鲜活证据验收</p>
-      <p style="color:var(--green);font-size:12px;font-weight:600;">高风险路径自动路由到攻防测试</p>
-      <div class="loop-skills">
-        <span class="skill-tag">$roll-build</span>
-        <span class="skill-tag">$roll-spar</span>
-        <span class="skill-tag">$roll-.review</span>
-      </div>
-    </div>
-    <div class="loop-card loop-c">
-      <div class="loop-label">Loop C · 监控与维护</div>
-      <h3>盯住了</h3>
-      <p>随机抽样巡检（概率采样，成本可控）→ 异常取证与根因分析 → 自动创建修复任务 → 闭环</p>
-      <p style="color:var(--orange);font-size:12px;font-weight:600;">超出修复范围的问题升级回 Loop A</p>
-      <div class="loop-skills">
-        <span class="skill-tag">$roll-sentinel</span>
-        <span class="skill-tag">$roll-debug</span>
-        <span class="skill-tag">$roll-fix</span>
-      </div>
-    </div>
-  </div>
-  <div style="margin-top:14px;font-size:13px;color:var(--text-dim);text-align:center;" class="fade-in">
-    Loop A 产出 Story → 流入 Loop B 执行 ｜ Loop B 部署完成 → Loop C 自动巡检 ｜ Loop C 发现超范围问题 → 回到 Loop A 重新设计
-  </div>
-  <span class="slide-number">09 / 18</span>
-</div>
-
-<!-- ═══ 10: Skill 全景 ═══ -->
-<div class="slide" data-slide="10">
-  <span class="tag fade-in">技能体系</span>
-  <h2 class="fade-in">ROLL 的 20 个技能</h2>
-  <p class="section-desc fade-in" style="margin-bottom: 12px;">
-    每个技能对应一个明确的工作环节，AI 根据输入自动路由到对应技能。
-  </p>
-  <table class="skill-table fade-in">
-    <thead>
-      <tr><th>技能</th><th>阶段</th><th>做什么</th><th>输入 → 输出</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td class="skill-name">$roll-research</td>
-        <td><span class="phase-tag phase-research">调研</span></td>
-        <td>HV 分析（纵轴时间线 + 横轴竞品对比）</td>
-        <td>研究主题 → PDF 报告</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-design</td>
-        <td><span class="phase-tag phase-design">设计</span></td>
-        <td>方案探讨、需求拆解、INVEST Story 创建</td>
-        <td>模糊需求 → BACKLOG + Feature Docs</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-build</td>
-        <td><span class="phase-tag phase-build">实现</span></td>
-        <td>万能入口：Story ID / Fix ID / 一句话 → TCR 交付</td>
-        <td>US-XXX / 一句话 → 部署上线</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-spar</td>
-        <td><span class="phase-tag phase-build">实现</span></td>
-        <td>攻防对练：Attacker 写攻击测试，Defender 修复</td>
-        <td>高风险模块 → 加固后的代码</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-fix</td>
-        <td><span class="phase-tag phase-build">修复</span></td>
-        <td>单 Bug 修复 + 强制回归测试</td>
-        <td>FIX-XXX → 修复 + 回归测试</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-sentinel</td>
-        <td><span class="phase-tag phase-check">巡检</span></td>
-        <td>随机采样巡检，连续失败才告警</td>
-        <td>BACKLOG → 健康报告 / 修复任务</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-debug</td>
-        <td><span class="phase-tag phase-check">诊断</span></td>
-        <td>现场取证（Console/Network/DOM/性能）+ 根因</td>
-        <td>URL → 诊断报告 + 修复建议</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-doctor</td>
-        <td><span class="phase-tag phase-support">维护</span></td>
-        <td>ROLL 自身健康检查（symlink/配置/技能状态）</td>
-        <td>运行诊断 → 修复建议</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-loop</td>
-        <td><span class="phase-tag phase-auto">自治</span></td>
-        <td>每小时扫描 BACKLOG，自动路由执行 Story/Fix</td>
-        <td>BACKLOG → 无人值守交付</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-.dream</td>
-        <td><span class="phase-tag phase-auto">自治</span></td>
-        <td>凌晨代码健康扫描：死代码、架构偏移、重构机会</td>
-        <td>代码库 → REFACTOR-XXX 任务</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-brief</td>
-        <td><span class="phase-tag phase-auto">自治</span></td>
-        <td>每日中文简报：完成了什么、还剩什么、要不要发版</td>
-        <td>项目状态 → 老板简报</td>
-      </tr>
-      <tr>
-        <td class="skill-name">$roll-peer</td>
-        <td><span class="phase-tag phase-check">审查</span></td>
-        <td>跨 Agent 互审：Claude 写的代码让 Kimi/DeepSeek 审</td>
-        <td>代码变更 → 独立审查意见</td>
-      </tr>
-      <tr>
-        <td class="skill-name" style="color:var(--text-dim);">+ 8 个支撑技能</td>
-        <td><span class="phase-tag phase-support">支撑</span></td>
-        <td colspan="2" style="color:var(--text-dim);">代码自审 (.review)、变更日志 (.changelog)、测试标准 (.qa)、快速记录 (idea)、意图澄清 (.clarify/.echo)、开发日志 (notes)、一键发布 (release)</td>
-      </tr>
-    </tbody>
-  </table>
-  <span class="slide-number">10 / 18</span>
-</div>
-
-<!-- ═══ 11: 质量层——四道防线 ═══ -->
-<div class="slide" data-slide="11">
-  <span class="tag fade-in" style="background:rgba(34,197,94,0.12);color:var(--green);">第二层 · 质量</span>
-  <h2 class="fade-in">四道防线，错误不过夜</h2>
-  <p class="section-desc fade-in" style="margin-bottom: 12px;">
-    每一道都是自动化的。不依赖人的耐心和记忆力。
-  </p>
-  <div class="cards cards-4 fade-in">
-    <div class="card" style="border-left:3px solid var(--green);">
-      <h3 style="font-size:15px;">第一道：TCR 微步验证 + 硬执行</h3>
-      <p>每 2-5 分钟验证一次。先定标准再写代码，不达标自动撤回。<strong style="color:var(--text-bright)">Bug 在产生的那一刻就被消灭。</strong><br>硬执行机制：AI 如果跳过 TCR 纪律，Story 自动回退到 Todo 并触发告警。</p>
-    </div>
-    <div class="card" style="border-left:3px solid var(--cyan);">
-      <h3 style="font-size:15px;">第二道：$roll-spar 攻防对练</h3>
-      <p>支付、认证等关键模块，自动启用「红蓝对抗」。一个 AI 当黑客找漏洞，一个 AI 当安全专家堵漏洞。最多 5 轮。</p>
-    </div>
-    <div class="card" style="border-left:3px solid var(--accent-light);">
-      <h3 style="font-size:15px;">第三道：$roll-.review 自动审查</h3>
-      <p>代码提交前自动检查 6 个维度：正确性、安全性、可维护性、性能、可测试性、范围。严重问题直接阻断。</p>
-    </div>
-    <div class="card" style="border-left:3px solid var(--orange);">
-      <h3 style="font-size:15px;">第四道：$roll-sentinel 生产巡检</h3>
-      <p>上线后 7×24 随机抽查。连续 3 次失败才告警（防误报）。异常自动创建修复任务，问题在用户投诉前解决。</p>
-    </div>
-  </div>
-  <div class="analogy fade-in">
-    <div class="analogy-label">完整交付链（$roll-build）</div>
-    <p>读取 Story → 拆解 Action → TCR 微步循环 → 本地 CI 门禁 → 推送远程 CI（客观仲裁）→ 部署 + 鲜活证据验收 → 回写 BACKLOG 状态。<strong style="color:var(--text-bright)">AI 说「我确认过了」不算数——必须提供截图、curl 响应等真实证据。</strong></p>
-  </div>
-  <span class="slide-number">11 / 18</span>
-</div>
-
-<!-- ═══ 12: Scrum QA vs ROLL ═══ -->
-<div class="slide" data-slide="12">
-  <span class="tag fade-in" style="background:rgba(6,182,212,0.12);color:var(--cyan);">关键对比</span>
-  <h2 class="fade-in">Scrum QA vs. ROLL 自动质保</h2>
-  <p class="section-desc fade-in">
-    不是说不需要质量管理了，而是<strong style="color:var(--text-bright)">实现方式升级了</strong>。
-  </p>
-  <div class="compare fade-in">
-    <div class="compare-col compare-before">
-      <h3 style="color:var(--red);">Scrum QA（传统）</h3>
-      <div class="compare-item"><span class="icon">🐌</span><span>开发做完 → 等 QA 排期测试</span></div>
-      <div class="compare-item"><span class="icon">🐌</span><span>Bug 在测试阶段才暴露</span></div>
-      <div class="compare-item"><span class="icon">🐌</span><span>手工回归测试，费时、遗漏</span></div>
-      <div class="compare-item"><span class="icon">🐌</span><span>上线后靠用户反馈发现问题</span></div>
-      <div class="compare-item"><span class="icon">🐌</span><span>QA 人力 = 交付瓶颈</span></div>
-      <div class="compare-item"><span class="icon">🐌</span><span>质量依赖个人责任心</span></div>
-    </div>
-    <div class="compare-arrow">→</div>
-    <div class="compare-col compare-after">
-      <h3 style="color:var(--green);">ROLL 自动质保</h3>
-      <div class="compare-item"><span class="icon">⚡</span><span>边写边验，Bug 在产生时就被拦截</span></div>
-      <div class="compare-item"><span class="icon">⚡</span><span>修复成本趋近于零（最多 5 分钟）</span></div>
-      <div class="compare-item"><span class="icon">⚡</span><span>自动回归 + 7×24 巡检</span></div>
-      <div class="compare-item"><span class="icon">⚡</span><span>比用户更早发现问题（Sentinel）</span></div>
-      <div class="compare-item"><span class="icon">⚡</span><span>质量保障是加速器不是瓶颈</span></div>
-      <div class="compare-item"><span class="icon">⚡</span><span>标准内建于系统，不靠个人</span></div>
-    </div>
-  </div>
-  <div class="highlight-box fade-in" style="margin-top: 16px;">
-    <p style="font-size: 17px; color: var(--text-bright); font-weight: 600;">
-      核心变化是从「事后人工检查」变成「实时自动验证」
-    </p>
-    <p style="font-size: 14px; color: var(--text-dim); margin-top: 6px;">
-      从「招更多人去测」变成「建更好的系统去验」。
-    </p>
-  </div>
-  <span class="slide-number">12 / 18</span>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════
-     ACT 3: 自治层高潮 + 证据 + 总结
-     ═══════════════════════════════════════════════════════ -->
-
-<!-- ═══ 13: 自治层——回到开篇的愿景 (CLIMAX) ═══ -->
-<div class="slide" data-slide="13">
-  <span class="tag fade-in" style="background:rgba(168,85,247,0.15);color:var(--purple-light);">第三层 · 自治 — 高潮</span>
-  <h2 class="fade-in" style="font-size: 36px;">前面所有的约束和质量机制，<br>都是为了一件事——</h2>
-  <div class="climax-reveal fade-in">
-    <p><strong style="color:var(--purple-light); font-size: 22px;">让你放心把方向盘交给 AI。</strong></p>
-  </div>
-  <p class="section-desc fade-in" style="margin-bottom: 14px;">
-    还记得开头描述的那个早晨吗？开启 <code style="background:rgba(168,85,247,0.15);padding:2px 8px;border-radius:4px;font-size:14px;color:var(--purple-light);">roll loop on</code> 后，三个服务 7×24 自动运行。
-  </p>
-  <div class="loop-diagram fade-in">
-    <div class="loop-card" style="border-top: 3px solid #c084fc;">
-      <div class="loop-label" style="color:#c084fc;">ROLL-LOOP · 每小时</div>
-      <h3>自动执行</h3>
-      <p>每小时扫描 BACKLOG.md，按优先级自动路由：FIX 优先 → Story → Refactor。主 Agent 失败自动切换备用 Agent。</p>
-      <p style="color:#c084fc;font-size:12px;font-weight:600;">← 这就是「昨晚 AI 把 3 个功能需求全部交付了」</p>
-    </div>
-    <div class="loop-card" style="border-top: 3px solid #a78bfa;">
-      <div class="loop-label" style="color:#a78bfa;">ROLL-.DREAM · 凌晨 3:00</div>
-      <h3>代码体检</h3>
-      <p>夜间自动扫描代码库健康状况：死代码检测、架构偏移分析、可精简模块、新兴设计模式识别。</p>
-      <p style="color:#a78bfa;font-size:12px;font-weight:600;">← 这就是「发现了一处可以精简的模块」</p>
-    </div>
-    <div class="loop-card" style="border-top: 3px solid #8b5cf6;">
-      <div class="loop-label" style="color:#8b5cf6;">ROLL-BRIEF · 每天 9:00</div>
-      <h3>老板简报</h3>
-      <p>每天早上生成一份中文简报：昨天完成了什么、队列里还剩什么、有没有升级事项、能不能发版。</p>
-      <p style="color:#8b5cf6;font-size:12px;font-weight:600;">← 这就是「简报最后一行：建议发版」</p>
-    </div>
-  </div>
-  <div class="climax-highlight fade-in" style="margin-top: 20px;">
-    <p style="font-size: 16px; color: var(--text);">
-      <strong>关键边界：发版权始终在人手里。</strong><br>
-      AI 可以自动研究、设计、开发、测试、巡检、修复——<br>
-      但 <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;">roll release</code> 只有人能执行。<br><br>
-      <span style="font-size: 20px; font-weight: 800; color: var(--purple-light);">人只需要做一件事：决定什么时候发版。</span>
-    </p>
-  </div>
-  <span class="slide-number">13 / 18</span>
-</div>
-
-<!-- ═══ 14: 两层架构 ═══ -->
-<div class="slide" data-slide="14">
-  <span class="tag fade-in" style="background:rgba(168,85,247,0.12);color:#c084fc;">架构全景</span>
-  <h2 class="fade-in">两层架构：人驱动 + AI 自治</h2>
-  <p class="section-desc fade-in" style="margin-bottom: 16px;">
-    基础层始终在运行。自治层按需开启——一条命令切换。<strong style="color:var(--text-bright)">渐进式采用，没有全有或全无。</strong>
-  </p>
-  <div class="cards cards-2 fade-in">
-    <div class="card" style="border: 1px solid rgba(99,102,241,0.3); padding: 28px 24px;">
-      <h3 style="font-size:17px; margin-bottom: 12px;">基础层（始终运行）</h3>
-      <p style="font-size:15px; line-height:1.7;">人主动触发每一步操作<br><br>
-      <strong style="color:var(--text-bright)">$roll-design</strong> → 需求拆解<br>
-      <strong style="color:var(--text-bright)">$roll-build</strong> → TCR 交付<br>
-      <strong style="color:var(--text-bright)">$roll-sentinel</strong> → 巡检<br>
-      <strong style="color:var(--text-bright)">$roll-peer</strong> → 跨 Agent 互审<br><br>
-      <span style="color:var(--accent-light); font-size:13px;">= 约束层 + 质量层<br>适合：项目初期、需要深度参与的阶段</span></p>
-    </div>
-    <div class="card" style="border: 1px solid rgba(168,85,247,0.3); padding: 28px 24px;">
-      <h3 style="font-size:17px; margin-bottom: 12px;">自治层（可选开启）</h3>
-      <p style="font-size:15px; line-height:1.7;">AI 7×24 无人值守工作<br><br>
-      <strong style="color:#c084fc;">roll-loop</strong> → 每小时自动消化 BACKLOG<br>
-      <strong style="color:#c084fc;">roll-.dream</strong> → 凌晨代码体检<br>
-      <strong style="color:#c084fc;">roll-brief</strong> → 早九简报 + 即时汇报<br><br>
-      <span style="color:#c084fc; font-size:13px;">= 基础层 + 自治服务<br>适合：稳定迭代、日常维护、需要快速交付的阶段</span></p>
-    </div>
-  </div>
-  <div class="analogy fade-in">
-    <div class="analogy-label">打个比方</div>
-    <p>基础层 = 你亲自开车，ROLL 是导航和仪表盘。<br>
-    自治层 = 开启自动驾驶，你看路况报告决定要不要接管。<br>
-    <strong style="color:var(--text-bright)">方向盘始终在你手里。</strong></p>
-  </div>
-  <span class="slide-number">14 / 18</span>
-</div>
-
-<!-- ═══ 15: 实战时间线 ═══ -->
-<div class="slide" data-slide="15">
-  <span class="tag fade-in">实战场景</span>
-  <h2 class="fade-in">一个功能的完整旅程</h2>
-  <p class="section-desc fade-in" style="margin-bottom: 12px;">
-    以「用户登录」功能为例——从需求到自治交付的全链路。
-  </p>
-  <div class="timeline fade-in">
-    <div class="timeline-item">
-      <h4>9:00 — $roll-design 拆解需求</h4>
-      <p>输入「做一个登录功能」→ AI 自动拆解为 3 个 Story（账号密码、OAuth 登录、记住密码），每个有验收标准 → 写入 BACKLOG.md + docs/features/login.md</p>
-    </div>
-    <div class="timeline-item">
-      <h4>9:30 — $roll-build 开始 TCR 交付</h4>
-      <p>按微步节奏推进。每 3 分钟验证+提交一次。30 分钟后 Story 1 完成，12 条测试全过。共 8 个 micro-commit，每个都是可运行状态。</p>
-    </div>
-    <div class="timeline-item">
-      <h4>10:00 — $roll-spar 自动触发（检测到认证模块）</h4>
-      <p>Attacker 尝试 SQL 注入、暴力破解、Session 劫持。Defender 逐一修复。5 轮后测试覆盖率从 71% → 93%。</p>
-    </div>
-    <div class="timeline-item">
-      <h4>10:30 — CI 通过 → 部署 → 验证门禁</h4>
-      <p>自动审查通过，CI 全绿，部署上线。截图 + curl 响应存档。BACKLOG 状态更新为 Done。</p>
-    </div>
-    <div class="timeline-item">
-      <h4>第二天 — $roll-sentinel 巡检发现异常</h4>
-      <p>OAuth 接口响应变慢（连续 3 次采样失败），自动创建 FIX-012 → $roll-fix 修复 + 回归测试 → 关闭。比用户投诉早了 2 天。</p>
-    </div>
-    <div class="timeline-item" style="border-left: 2px solid rgba(168,85,247,0.3);">
-      <h4 style="color:#c084fc;">开启自治后 — roll-loop 接管日常</h4>
-      <p>新需求写入 BACKLOG 后无需手动触发。roll-loop 每小时自动扫描并执行。凌晨 roll-.dream 发现一处死代码 → 自动生成 REFACTOR-003。早上 9 点 roll-brief 送来简报：「3 个 Story 已完成，1 个重构排队中，建议发版。」</p>
-    </div>
-  </div>
-  <span class="slide-number">15 / 18</span>
-</div>
-
-<!-- ═══ 16: 巡检策略 ═══ -->
-<div class="slide" data-slide="16">
-  <span class="tag fade-in" style="background:rgba(245,158,11,0.12);color:var(--orange);">运维策略</span>
-  <h2 class="fade-in">巡检策略：成本可控，覆盖充分</h2>
-  <p class="section-desc fade-in" style="margin-bottom: 16px;">
-    不是全量回归——那太贵了。而是像安保巡逻一样<strong style="color:var(--text-bright)">随机抽查，智能加权</strong>。
-  </p>
-  <div class="cards cards-3 fade-in">
-    <div class="card" style="border-top:3px solid var(--green); text-align:center; padding:28px 22px;">
-      <div style="font-size:28px;margin-bottom:8px;">🟢</div>
-      <h3 style="font-size:16px;">日常巡检（Light）</h3>
-      <p style="font-size:15px;">5 次/天<br>随机采样覆盖核心功能</p>
-    </div>
-    <div class="card" style="border-top:3px solid var(--orange); text-align:center; padding:28px 22px;">
-      <div style="font-size:28px;margin-bottom:8px;">🟡</div>
-      <h3 style="font-size:16px;">发版巡检（Intensive）</h3>
-      <p style="font-size:15px;">20 次/小时<br>发版后密集监控 2 小时</p>
-    </div>
-    <div class="card" style="border-top:3px solid var(--red); text-align:center; padding:28px 22px;">
-      <div style="font-size:28px;margin-bottom:8px;">🔴</div>
-      <h3 style="font-size:16px;">全面回归（Full）</h3>
-      <p style="font-size:15px;">每周一次<br>全量覆盖所有已交付功能</p>
+    <div class="card" style="border-left: 3px solid var(--green);">
+      <h3 style="font-size:15px;">2. Methodology Application</h3>
+      <p>Constraints must be <strong style="color:var(--text-bright)">built into the project</strong> so AI follows them automatically — not documents people read once.</p>
     </div>
   </div>
   <div class="highlight-box fade-in" style="margin-top: 20px;">
     <p style="font-size: 15px; color: var(--text);">
-      <strong>智能加权：</strong>频繁出问题的功能自动提升巡检权重。<br>
-      连续 3 次采样失败才触发告警（防误报），异常自动创建修复任务。<br>
-      <strong style="color:var(--text-bright)">问题在用户投诉前解决。</strong>
+      <strong>ROLL solves a <em>people</em> problem</strong> <span class="zh">本质上解决的是「人」的问题</span><br>
+      ROLL bakes constraints and methodology into the project, so <strong style="color:var(--text-bright)">output quality is consistent regardless of who's driving</strong>.
     </p>
   </div>
-  <span class="slide-number">16 / 18</span>
+  <span class="slide-number">02 / 19</span>
 </div>
 
-<!-- ═══ 17: 总结 ═══ -->
-<div class="slide" data-slide="17">
-  <span class="tag fade-in">总结</span>
-  <h2 class="fade-in" style="font-size: 34px;">ROLL 的核心逻辑</h2>
-  <div class="highlight-box fade-in" style="margin-top: 20px; margin-bottom: 24px; max-width: 860px;">
-    <p style="font-size: 18px; color: var(--text-bright); font-weight: 600; line-height: 1.7;">
-      把 20 年验证过的工程实践（TDD / TCR / CI / SRE）<br>
-      固化为 AI Agent 的标准工作指令，<br>
-      再让 AI Agent 7×24 自主执行、自我体检、自动汇报。<br>
-      <span style="color:var(--purple-light);">人只需要做一件事：决定什么时候发版。</span>
+<!-- 3: What is ROLL -->
+<div class="slide" data-slide="3">
+  <span class="tag fade-in">Solution</span>
+  <h2 class="fade-in">What ROLL Actually Is</h2>
+  <p class="section-desc fade-in">
+    An <strong style="color:var(--text-bright)">autonomous delivery system</strong> for software teams — AI agents pick stories from your BACKLOG,<br>
+    execute them with encoded engineering discipline, and ship continuously while you stay focused on <em>what to build next</em>.
+  </p>
+  <div class="cards cards-2 fade-in" style="max-width:860px;">
+    <div class="card" style="border-left:3px solid var(--green);">
+      <div style="font-size:28px;margin-bottom:8px;">🔄</div>
+      <h3 style="font-size:15px;">Autonomous Delivery</h3>
+      <p><code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:11px;">roll loop on</code> runs BACKLOG items hourly. Dream scans code health nightly and surfaces maintenance tasks. <strong style="color:var(--text-bright)">Humans retain sole release authority</strong> — the system never ships to production without your approval.</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--accent-light);">
+      <div style="font-size:28px;margin-bottom:8px;">🔧</div>
+      <h3 style="font-size:15px;">Skill-Driven Execution</h3>
+      <p>22 skills encode TDD, TCR, and INVEST practices as <strong style="color:var(--text-bright)">reliable, repeatable workflows any agent can follow</strong>. Works with Claude, Cursor, Codex, or your own agent — swap the tool, keep the discipline.</p>
+    </div>
+  </div>
+  <div class="analogy fade-in">
+    <div class="analogy-label">In One Sentence</div>
+    <p>ROLL turns a BACKLOG into shipped code continuously. Engineering practices are encoded as executable skills — <strong style="color:var(--text-bright)">reliable enough for an agent to run unattended, disciplined enough to ship production code</strong>.</p>
+  </div>
+  <span class="slide-number">03 / 19</span>
+</div>
+
+<!-- 4: The Pipeline -->
+<div class="slide" data-slide="4">
+  <span class="tag fade-in">Pipeline</span>
+  <h2 class="fade-in">The Delivery Pipeline</h2>
+  <p class="section-desc fade-in">
+    From raw idea to production — five stages, three loops, one continuous flow.
+  </p>
+  <div class="pipeline-bar fade-in">
+    <div class="pipe-stage pipe-idea">
+      <h4>Idea</h4>
+      <p>Raw thought<br>Anyone can submit</p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-stage pipe-backlog">
+      <h4>Backlog</h4>
+      <p>AC ready<br>Feature Doc done</p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-stage pipe-build">
+      <h4>Build</h4>
+      <p>TCR micro-steps<br>Spar · Review · CI</p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-stage pipe-verify">
+      <h4>Verify</h4>
+      <p>Deploy to Test/UAT<br>Live Evidence</p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-stage pipe-release">
+      <h4>Release</h4>
+      <p>Deploy to Prod<br>Sentinel takes over</p>
+    </div>
+  </div>
+  <div style="margin-top:16px;width:100%;max-width:1000px;" class="fade-in">
+    <div class="loops" style="display:flex;gap:4px;">
+      <div style="flex:2;text-align:center;padding:8px;border-radius:8px;border:1px dashed rgba(99,102,241,0.3);background:rgba(99,102,241,0.04);">
+        <span style="font-size:12px;font-weight:700;color:var(--accent-light);">Loop A · Think It Through</span>
+        <span class="zh-line">想清楚</span>
+      </div>
+      <div style="flex:2;text-align:center;padding:8px;border-radius:8px;border:1px dashed rgba(34,197,94,0.3);background:rgba(34,197,94,0.04);">
+        <span style="font-size:12px;font-weight:700;color:var(--green);">Loop B · Build It Right</span>
+        <span class="zh-line">做扎实</span>
+      </div>
+      <div style="flex:1;text-align:center;padding:8px;border-radius:8px;border:1px dashed rgba(245,158,11,0.3);background:rgba(245,158,11,0.04);">
+        <span style="font-size:12px;font-weight:700;color:var(--orange);">Loop C · Keep Watch</span>
+        <span class="zh-line">盯住了</span>
+      </div>
+    </div>
+  </div>
+  <div class="fade-in" style="margin-top:12px;padding:8px 16px;border:1.5px dashed var(--red);border-radius:8px;max-width:600px;">
+    <p style="font-size:12px;color:var(--red);text-align:center;font-weight:600;">↩ Loop C finds issues → auto-creates new Idea → back to Pipeline</p>
+  </div>
+  <span class="slide-number">04 / 19</span>
+</div>
+
+<!-- 5: Human × AI Collaboration -->
+<div class="slide" data-slide="5">
+  <span class="tag fade-in">Collaboration</span>
+  <h2 class="fade-in">Human × AI:<br>Who Drives Each Phase?</h2>
+  <p class="section-desc fade-in">
+    The two ends need human judgment. The middle runs on autopilot.
+  </p>
+  <div class="hai-bar fade-in">
+    <div class="hai-zone hai-human">
+      <div class="emoji">🧑‍💻 → 🤖</div>
+      <h4>Human Asks AI</h4>
+      <p>"Help me research this, break it into Stories"</p>
+      <p style="margin-top:6px;font-size:10px;color:var(--accent-light);">Idea → Backlog</p>
+    </div>
+    <div class="hai-zone hai-ai">
+      <div class="emoji">🤖 ⚡</div>
+      <h4>AI Self-Drives</h4>
+      <p>ROLL Loop auto-delivers. No babysitting needed.</p>
+      <p style="margin-top:6px;font-size:10px;color:var(--green);">Backlog → Build → Verify</p>
+    </div>
+    <div class="hai-zone hai-push">
+      <div class="emoji">🤖 → 🧑‍💻</div>
+      <h4>AI Nudges Human</h4>
+      <p>"UAT passed. Ship it?"</p>
+      <p style="margin-top:6px;font-size:10px;color:var(--orange);">Verify → Release</p>
+    </div>
+  </div>
+  <div class="highlight-box fade-in" style="margin-top: 20px;">
+    <p style="font-size: 14px; color: var(--text);">
+      <strong>The more automated the middle is, the more humans can focus on the two ends</strong> — deciding <em>what</em> to build and <em>when</em> to ship. These are judgment calls AI shouldn't make alone.
     </p>
   </div>
-  <div class="cards cards-4-row fade-in" style="max-width: 960px;">
+  <span class="slide-number">05 / 19</span>
+</div>
+
+<!-- 6: Loop A — DDD + Design -->
+<div class="slide" data-slide="6">
+  <span class="tag fade-in" style="background:rgba(99,102,241,0.12);color:var(--accent-light);">Loop A</span>
+  <h2 class="fade-in">Loop A: Think It Through <span class="zh">想清楚</span></h2>
+  <p class="section-desc fade-in">
+    From vague idea to executable Backlog — powered by DDD and structured design.
+  </p>
+  <div class="timeline fade-in">
+    <div class="timeline-item">
+      <h4>1. DDD Domain Modeling</h4>
+      <p>Establish Bounded Contexts, Ubiquitous Language, and Context Maps. Ensure engineering speaks the same language as business.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>2. Research — $roll-research</h4>
+      <p>HV Analysis: vertical traces the full lifecycle, horizontal compares competitors. Cross-axis produces insights. Output: PDF report.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>3. Design — $roll-design</h4>
+      <p>Solution exploration with DDD modeling, architecture decisions, interface definitions, data models. When uncertain, explores multiple options before committing.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>4. Decompose + AC</h4>
+      <p>Break into INVEST-compliant User Stories with acceptance criteria. Write to BACKLOG.md + docs/features/. Each Story is independently deliverable.</p>
+    </div>
+  </div>
+  <div class="fade-in" style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
+    <span class="skill-tag" style="background:rgba(99,102,241,0.15);color:var(--accent-light);">$roll-research</span>
+    <span class="skill-tag" style="background:rgba(99,102,241,0.15);color:var(--accent-light);">$roll-design</span>
+    <span class="skill-tag" style="background:rgba(99,102,241,0.15);color:var(--accent-light);">$roll-idea</span>
+    <span class="skill-tag" style="background:rgba(99,102,241,0.15);color:var(--accent-light);">$roll-propose</span>
+  </div>
+  <span class="slide-number">06 / 19</span>
+</div>
+
+<!-- 7: Backlog — The Work Items -->
+<div class="slide" data-slide="7">
+  <span class="tag fade-in">Backlog</span>
+  <h2 class="fade-in">Backlog: The Single Source of Truth</h2>
+  <p class="section-desc fade-in">
+    Everything flows through BACKLOG.md — four work item types, each with different Loop A depth.
+  </p>
+  <div class="cards cards-4 fade-in">
+    <div class="card" style="border-left: 3px solid var(--accent-light);">
+      <h3 style="font-size:15px;color:var(--accent-light);">User Story</h3>
+      <p>Business requirements, product features. Full Loop A: DDD → Research → Design → AC. The heaviest investment upfront.</p>
+      <p style="margin-top:6px;font-size:11px;color:var(--accent-light);">ID: US-XXX</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--cyan);">
+      <h3 style="font-size:15px;color:var(--cyan);">Refactor</h3>
+      <p>Tech debt, architecture improvements. Often generated by $roll-.dream's nightly scans. Medium Loop A: impact analysis → plan → AC.</p>
+      <p style="margin-top:6px;font-size:11px;color:var(--cyan);">ID: REFACTOR-XXX</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--red);">
+      <h3 style="font-size:15px;color:var(--red);">Fix</h3>
+      <p>Bug fixes, Sentinel alerts, user reports. Light Loop A: locate root cause → AC. Fast path from diagnosis to delivery.</p>
+      <p style="margin-top:6px;font-size:11px;color:var(--red);">ID: FIX-XXX</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--orange);">
+      <h3 style="font-size:15px;color:var(--orange);">Spike</h3>
+      <p>Exploratory research. Loop A only — the output is knowledge, not code. May produce new User Stories or Refactors.</p>
+      <p style="margin-top:6px;font-size:11px;color:var(--orange);">ID: SPIKE-XXX</p>
+    </div>
+  </div>
+  <div class="analogy fade-in">
+    <div class="analogy-label">Priority Order</div>
+    <p>FIX (bugs first) > US (user stories) > REFACTOR (tech debt). Automated by <strong style="color:var(--text-bright)">$roll-loop</strong> — the autonomous executor scans BACKLOG hourly and routes each item to the right skill.</p>
+  </div>
+  <span class="slide-number">07 / 19</span>
+</div>
+
+<!-- 8: TDD & TCR Fundamentals -->
+<div class="slide" data-slide="8">
+  <span class="tag fade-in">Fundamentals</span>
+  <h2 class="fade-in">TDD + TCR: The Build Rhythm</h2>
+  <p class="section-desc fade-in">
+    <strong style="color:var(--text-bright)">Test-Driven Development</strong> writes the standard first.<br>
+    <strong style="color:var(--text-bright)">TCR (Test && Commit || Revert)</strong> enforces it mechanically.
+  </p>
+  <div class="flow-row fade-in" style="margin-bottom: 16px;">
+    <div class="flow-step" style="background:rgba(239,68,68,0.12);color:#f87171;">1. Write Test</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="background:rgba(99,102,241,0.12);color:var(--accent-light);">2. Write Code</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="background:rgba(255,255,255,0.06);color:var(--text);">3. Auto-Verify</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-branch">
+      <div class="flow-step" style="background:rgba(34,197,94,0.12);color:#4ade80;">✅ Pass → Auto-Commit</div>
+      <div class="flow-step" style="background:rgba(239,68,68,0.12);color:#f87171;">❌ Fail → Auto-Revert</div>
+    </div>
+  </div>
+  <div class="cards cards-3 fade-in">
+    <div class="card" style="text-align:center;border-color:rgba(34,197,94,0.2);">
+      <div style="font-size:28px;font-weight:800;color:var(--green);">2-5 min</div>
+      <p style="margin-top:6px;">Per micro-step<br>Worst case: lose 5 minutes</p>
+    </div>
+    <div class="card" style="text-align:center;border-color:rgba(6,182,212,0.2);">
+      <div style="font-size:28px;font-weight:800;color:var(--cyan);">100%</div>
+      <p style="margin-top:6px;">Every save is verified<br>Code is always runnable</p>
+    </div>
+    <div class="card" style="text-align:center;border-color:rgba(99,102,241,0.2);">
+      <div style="font-size:28px;font-weight:800;color:var(--accent-light);">Fully Auto</div>
+      <p style="margin-top:6px;">AI executes autonomously<br>No human babysitting</p>
+    </div>
+  </div>
+  <span class="slide-number">08 / 19</span>
+</div>
+
+<!-- 9: Loop B — Build & Integrate -->
+<div class="slide" data-slide="9">
+  <span class="tag fade-in" style="background:rgba(34,197,94,0.12);color:var(--green);">Loop B</span>
+  <h2 class="fade-in">Loop B: Build It Right <span class="zh">做扎实</span></h2>
+  <p class="section-desc fade-in">
+    The full delivery pipeline — from Backlog item to verified deployment.
+  </p>
+  <div class="timeline fade-in">
+    <div class="timeline-item">
+      <h4>1. Read Story → Break into Actions (2-5 min each)</h4>
+      <p>Decompose into minimal deliverable Actions. Independent Actions run in parallel.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>2. TCR Micro-Loop (per Action)</h4>
+      <p>Write test (RED) → Write code (GREEN) → Self-review ($roll-.review) → Auto-commit. Fail = auto-revert.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>3. Local CI Gate</h4>
+      <p>Lint + type check + full test suite + build. All must pass before push.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>4. Push → Remote CI (Objective Arbiter)</h4>
+      <p>CI re-verifies in a clean environment — the final ruling on "shippable."</p>
+    </div>
+    <div class="timeline-item">
+      <h4>5. Deploy to Test/UAT → Verification Gate</h4>
+      <p><strong style="color:var(--text-bright)">Live Evidence</strong> required — screenshots, curl responses, test outputs. AI saying "I checked, it works" doesn't count.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>6. Release → Deploy to Production</h4>
+      <p>Human approves. BACKLOG status: ✅ Done. Sentinel takes over monitoring.</p>
+    </div>
+  </div>
+  <span class="slide-number">09 / 19</span>
+</div>
+
+<!-- 10: Four Lines of Defense -->
+<div class="slide" data-slide="10">
+  <span class="tag fade-in" style="background:rgba(245,158,11,0.12);color:var(--orange);">Quality System</span>
+  <h2 class="fade-in">Four Lines of Defense</h2>
+  <p class="section-desc fade-in">
+    Every layer is automated. None depend on human patience or memory.
+  </p>
+  <div class="cards cards-4 fade-in">
+    <div class="card" style="border-left:3px solid var(--green);">
+      <h3 style="font-size:14px;">L1: TCR Micro-Verification</h3>
+      <p>Verify every 2-5 minutes. Define the standard before writing code — auto-revert if it fails. <strong style="color:var(--text-bright)">Bugs are eliminated the instant they appear.</strong></p>
+      <p style="margin-top:6px;font-size:10px;font-family:monospace;color:var(--green);">$roll-build</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--red);">
+      <h3 style="font-size:14px;">L2: Spar Adversarial Drill</h3>
+      <p>For critical modules (payments, auth), red-blue testing. One AI attacks, another defends. Max 5 rounds of escalating intensity.</p>
+      <p style="margin-top:6px;font-size:10px;font-family:monospace;color:var(--red);">$roll-spar</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--accent-light);">
+      <h3 style="font-size:14px;">L3: Auto Review</h3>
+      <p><strong style="color:var(--text-bright)">Self Review</strong> — per-commit 6-dimension check.<br>
+      <strong style="color:var(--text-bright)">Peer Review</strong> — cross-agent negotiation for risky decisions.<br>
+      <strong style="color:var(--text-bright)">Dream</strong> — nightly code health scan (6 dimensions).</p>
+      <p style="margin-top:6px;font-size:10px;font-family:monospace;color:var(--accent-light);">$roll-.review · $roll-peer · $roll-.dream</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--orange);">
+      <h3 style="font-size:14px;">L4: Sentinel Production Patrol</h3>
+      <p>24/7 random-sample monitoring. Alerts only after 3 consecutive failures (false-positive prevention). Auto-creates fix tasks.</p>
+      <p style="margin-top:6px;font-size:10px;font-family:monospace;color:var(--orange);">$roll-sentinel</p>
+    </div>
+  </div>
+  <span class="slide-number">10 / 19</span>
+</div>
+
+<!-- 11: Loop C — Monitor & Maintain -->
+<div class="slide" data-slide="11">
+  <span class="tag fade-in" style="background:rgba(245,158,11,0.12);color:var(--orange);">Loop C</span>
+  <h2 class="fade-in">Loop C: Keep Watch <span class="zh">盯住了</span></h2>
+  <p class="section-desc fade-in">
+    Two complementary monitors: Sentinel watches runtime, Dream watches code structure.
+  </p>
+  <div class="cards cards-2 fade-in">
+    <div class="card" style="border-top: 3px solid var(--orange);">
+      <h3 style="font-size:15px;color:var(--orange);">$roll-sentinel — Runtime Patrol</h3>
+      <p>Random-sample monitoring of production systems. Cost-controlled AI validation with intelligent spot-checking.</p>
+      <p style="margin-top:8px;"><strong style="color:var(--text-bright);">Patrol Modes:</strong></p>
+      <p>Light: 5 checks/day · Intensive: 20 checks/hour (post-release) · Full sweep: weekly</p>
+      <p style="margin-top:8px;"><strong style="color:var(--text-bright);">Output:</strong> FIX-XXX entries in BACKLOG.md</p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--accent-light);">
+      <h3 style="font-size:15px;color:var(--accent-light);">$roll-.dream — Nightly Health Scan</h3>
+      <p>Runs at 3am. Six dimensions of code health analysis:</p>
+      <p style="margin-top:8px;">1. Dead Code · 2. Architectural Drift · 3. Pruning Candidates · 4. Emerging Patterns · 5. Doc Coverage · 6. Doc Freshness</p>
+      <p style="margin-top:8px;"><strong style="color:var(--text-bright);">Output:</strong> REFACTOR-XXX entries in BACKLOG.md</p>
+    </div>
+  </div>
+  <div class="highlight-box fade-in" style="margin-top: 16px;">
+    <p style="font-size: 14px; color: var(--text);">
+      <strong>Sentinel monitors behavior. Dream monitors structure.</strong><br>
+      Together they ensure both runtime health and code quality degrade detection — before users notice.
+    </p>
+  </div>
+  <span class="slide-number">11 / 19</span>
+</div>
+
+<!-- 12: Three-Layer Autonomous Model -->
+<div class="slide" data-slide="12">
+  <span class="tag fade-in" style="background:rgba(6,182,212,0.12);color:var(--cyan);">Autonomous</span>
+  <h2 class="fade-in">Three-Layer Autonomous Model</h2>
+  <p class="section-desc fade-in">
+    ROLL operates at three levels of autonomy, each with clear boundaries.
+  </p>
+  <div class="auto-layers fade-in">
+    <div class="auto-layer">
+      <div class="al-icon">🧑‍💻</div>
+      <h4>Human Layer</h4>
+      <p>Set goals, review proposals, approve releases. The judgment calls.</p>
+      <div class="al-skills">roll-release · roll-propose</div>
+    </div>
+    <div class="auto-layer">
+      <div class="al-icon">🔄</div>
+      <h4>Loop Layer</h4>
+      <p>Scans BACKLOG hourly (10am–6pm). Auto-routes each item to the right skill. FIX > US > REFACTOR.</p>
+      <div class="al-skills">roll-loop · roll-brief</div>
+    </div>
+    <div class="auto-layer">
+      <div class="al-icon">🌙</div>
+      <h4>Dream Layer</h4>
+      <p>3am nightly code health scan. 6 dimensions. Generates REFACTOR entries autonomously.</p>
+      <div class="al-skills">roll-.dream</div>
+    </div>
+    <div class="auto-layer">
+      <div class="al-icon">🤝</div>
+      <h4>Peer Layer</h4>
+      <p>Cross-agent negotiation for high-risk decisions. Up to 3 rounds. No consensus → escalate to human.</p>
+      <div class="al-skills">roll-peer</div>
+    </div>
+  </div>
+  <div class="analogy fade-in">
+    <div class="analogy-label">Design Principle</div>
+    <p>Humans set direction and approve releases. Everything else — building, reviewing, monitoring, refactoring — can run autonomously. <strong style="color:var(--text-bright)">The system never ships to production without human approval.</strong></p>
+  </div>
+  <span class="slide-number">12 / 19</span>
+</div>
+
+<!-- 13: All 22 Skills -->
+<div class="slide" data-slide="13">
+  <span class="tag fade-in">Skill System</span>
+  <h2 class="fade-in">ROLL's 22 Skills</h2>
+  <p class="section-desc fade-in" style="margin-bottom: 10px;">
+    13 Core + 4 Autonomous + 5 Support — each maps to a specific phase.
+  </p>
+  <table class="skill-table fade-in">
+    <thead>
+      <tr><th>Skill</th><th>Tier</th><th>What It Does</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="skill-name">$roll-research</td><td><span class="phase-tag phase-research">Research</span></td><td>HV analysis — timeline + competitive landscape → PDF report</td></tr>
+      <tr><td class="skill-name">$roll-design</td><td><span class="phase-tag phase-design">Design</span></td><td>DDD modeling, solution design, INVEST story breakdown</td></tr>
+      <tr><td class="skill-name">$roll-idea</td><td><span class="phase-tag phase-design">Capture</span></td><td>Fast backlog capture — one-liner in, classified BACKLOG entry out</td></tr>
+      <tr><td class="skill-name">$roll-propose</td><td><span class="phase-tag phase-design">Propose</span></td><td>Generate 1-3 structured US drafts → PROPOSALS.md for human review</td></tr>
+      <tr><td class="skill-name">$roll-build</td><td><span class="phase-tag phase-build">Build</span></td><td>Universal entry: US-XXX / FIX-XXX / plain text → TCR delivery</td></tr>
+      <tr><td class="skill-name">$roll-spar</td><td><span class="phase-tag phase-build">Adversarial</span></td><td>Red-blue drill: Attacker writes exploits, Defender patches</td></tr>
+      <tr><td class="skill-name">$roll-fix</td><td><span class="phase-tag phase-build">Fix</span></td><td>Single-bug fix + mandatory regression test</td></tr>
+      <tr><td class="skill-name">$roll-debug</td><td><span class="phase-tag phase-check">Diagnose</span></td><td>Black Box probe: Console/Network/DOM/Perf → root cause</td></tr>
+      <tr><td class="skill-name">$roll-sentinel</td><td><span class="phase-tag phase-check">Patrol</span></td><td>Production random-sample monitoring, 3-strike alerting</td></tr>
+      <tr><td class="skill-name">$roll-doc</td><td><span class="phase-tag phase-support">Document</span></td><td>Auto-scan, index, gap analysis, fill for project docs</td></tr>
+      <tr><td class="skill-name">$roll-notes</td><td><span class="phase-tag phase-support">Journal</span></td><td>Project diary — records dev moments chronologically</td></tr>
+      <tr><td class="skill-name">$roll-doctor</td><td><span class="phase-tag phase-support">Maintain</span></td><td>ROLL self-health check (symlinks/config/skill status)</td></tr>
+      <tr><td class="skill-name">$roll-release</td><td><span class="phase-tag phase-support">Release</span></td><td>Version bump, tag, push — triggers npm auto-publish</td></tr>
+      <tr><td class="skill-name" style="color:var(--cyan);">$roll-loop</td><td><span class="phase-tag phase-auto">Auto</span></td><td>Hourly BACKLOG executor — routes items to skills</td></tr>
+      <tr><td class="skill-name" style="color:var(--cyan);">$roll-peer</td><td><span class="phase-tag phase-auto">Auto</span></td><td>Cross-agent peer review, up to 3 negotiation rounds</td></tr>
+      <tr><td class="skill-name" style="color:var(--cyan);">$roll-brief</td><td><span class="phase-tag phase-auto">Auto</span></td><td>Owner-facing briefing: done, in-progress, queue, escalations</td></tr>
+      <tr><td class="skill-name" style="color:var(--cyan);">$roll-.dream</td><td><span class="phase-tag phase-auto">Auto</span></td><td>Nightly 6-dimension code health scan → REFACTOR entries</td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.review</td><td><span class="phase-tag phase-support">Hidden</span></td><td>Per-commit self-review: correctness, security, maintainability</td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.changelog</td><td><span class="phase-tag phase-support">Hidden</span></td><td>Auto-generates CHANGELOG.md from completed stories</td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.qa</td><td><span class="phase-tag phase-support">Hidden</span></td><td>Test pyramid standards: unit/E2E/visual/smoke + CI gates</td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.echo</td><td><span class="phase-tag phase-support">Hidden</span></td><td>Passive intent clarification for vague inputs</td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.clarify</td><td><span class="phase-tag phase-support">Hidden</span></td><td>Scope clarification for under-specified Fly mode inputs</td></tr>
+    </tbody>
+  </table>
+  <span class="slide-number">13 / 19</span>
+</div>
+
+<!-- 14: Scrum QA vs ROLL -->
+<div class="slide" data-slide="14">
+  <span class="tag fade-in" style="background:rgba(6,182,212,0.12);color:var(--cyan);">Comparison</span>
+  <h2 class="fade-in">Scrum QA vs. ROLL Auto-QA</h2>
+  <p class="section-desc fade-in">
+    Quality assurance isn't removed — <strong style="color:var(--text-bright)">the implementation is upgraded</strong>.
+  </p>
+  <div class="compare fade-in">
+    <div class="compare-col compare-before">
+      <h3 style="color:var(--red);">Scrum QA (Traditional)</h3>
+      <div class="compare-item"><span class="icon">🐌</span><span>Dev finishes → wait for QA availability</span></div>
+      <div class="compare-item"><span class="icon">🐌</span><span>Bugs surface only in test phase</span></div>
+      <div class="compare-item"><span class="icon">🐌</span><span>Manual regression — slow, error-prone</span></div>
+      <div class="compare-item"><span class="icon">🐌</span><span>Post-ship issues found by user complaints</span></div>
+      <div class="compare-item"><span class="icon">🐌</span><span>Quality depends on individual diligence</span></div>
+    </div>
+    <div class="compare-arrow">→</div>
+    <div class="compare-col compare-after">
+      <h3 style="color:var(--green);">ROLL Auto-QA</h3>
+      <div class="compare-item"><span class="icon">⚡</span><span>Test while writing — bugs caught at birth</span></div>
+      <div class="compare-item"><span class="icon">⚡</span><span>Fix cost approaches zero (max 5 min loss)</span></div>
+      <div class="compare-item"><span class="icon">⚡</span><span>Auto regression + nightly Dream scans</span></div>
+      <div class="compare-item"><span class="icon">⚡</span><span>Issues found before users notice (Sentinel)</span></div>
+      <div class="compare-item"><span class="icon">⚡</span><span>Standards built into the system, not people</span></div>
+    </div>
+  </div>
+  <span class="slide-number">14 / 19</span>
+</div>
+
+<!-- 15: Project Structure -->
+<div class="slide" data-slide="15">
+  <span class="tag fade-in">Structure</span>
+  <h2 class="fade-in">What a ROLL-Managed Project Looks Like</h2>
+  <p class="section-desc fade-in">
+    <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:13px;">roll init</code> — one command, 5 seconds.
+  </p>
+  <div class="tree fade-in">
+    <span class="dir">my-project/</span><br>
+    ├── <span class="file">AGENTS.md</span> <span class="comment">&nbsp;&nbsp;← Engineering conventions (shared by all AI tools)</span><br>
+    ├── <span class="file">BACKLOG.md</span> <span class="comment">&nbsp;&nbsp;← Single source of truth (US / FIX / REFACTOR / SPIKE)</span><br>
+    ├── <span class="file">PROPOSALS.md</span> <span class="comment">&nbsp;&nbsp;← AI-generated proposals awaiting human review</span><br>
+    ├── <span class="dir">docs/features/</span> <span class="comment">&nbsp;&nbsp;← Story details + acceptance criteria</span><br>
+    ├── <span class="dir">docs/domain/</span> <span class="comment">&nbsp;&nbsp;← DDD context maps + ubiquitous language</span><br>
+    ├── <span class="dir">docs/dream/</span> <span class="comment">&nbsp;&nbsp;← Nightly health scan reports</span><br>
+    ├── <span class="dir">.github/workflows/</span><br>
+    │&nbsp;&nbsp;&nbsp;├── <span class="file">ci.yml</span> <span class="comment">&nbsp;&nbsp;← Auto quality gate on every commit</span><br>
+    │&nbsp;&nbsp;&nbsp;└── <span class="file">sentinel.yml</span> <span class="comment">&nbsp;&nbsp;← Scheduled production patrols</span><br>
+    └── <span class="comment">... source code</span>
+  </div>
+  <span class="slide-number">15 / 19</span>
+</div>
+
+<!-- 16: Convention Sync -->
+<div class="slide" data-slide="16">
+  <span class="tag fade-in">Configuration</span>
+  <h2 class="fade-in">One Command, Every AI Tool Aligned</h2>
+  <p class="section-desc fade-in">
+    <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:13px;">roll setup</code> syncs conventions to all AI tools simultaneously.
+  </p>
+  <div class="flow-row fade-in" style="margin-bottom: 18px;">
+    <div class="flow-step" style="background:rgba(99,102,241,0.12);color:var(--accent-light);">
+      ~/.roll/<br><span style="font-size:10px;">Unified config</span>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-branch" style="gap:4px;">
+      <div class="flow-step" style="background:rgba(255,255,255,0.04);color:var(--text);font-size:12px;padding:6px 12px;">~/.claude/ → CLAUDE.md + skills/</div>
+      <div class="flow-step" style="background:rgba(255,255,255,0.04);color:var(--text);font-size:12px;padding:6px 12px;">~/.gemini/ → GEMINI.md + skills/</div>
+      <div class="flow-step" style="background:rgba(255,255,255,0.04);color:var(--text);font-size:12px;padding:6px 12px;">~/.cursor/ → rules + skills/</div>
+      <div class="flow-step" style="background:rgba(255,255,255,0.04);color:var(--text);font-size:12px;padding:6px 12px;">~/.kimi/ ~/.trae/ ...</div>
+    </div>
+  </div>
+  <div class="cards cards-3 fade-in">
+    <div class="card" style="padding:16px;">
+      <h3 style="font-size:14px;">Zero Intrusion</h3>
+      <p style="font-size:12px;">Never overwrites existing configs. Writes to its own file, appends via @include.</p>
+    </div>
+    <div class="card" style="padding:16px;">
+      <h3 style="font-size:14px;">Symlinked Skills</h3>
+      <p style="font-size:12px;">Update ROLL, re-run setup — every AI tool upgrades in seconds.</p>
+    </div>
+    <div class="card" style="padding:16px;">
+      <h3 style="font-size:14px;">3 CLI Commands</h3>
+      <p style="font-size:12px;"><strong>roll setup</strong> · <strong>roll init</strong> · <strong>roll update</strong></p>
+    </div>
+  </div>
+  <span class="slide-number">16 / 19</span>
+</div>
+
+<!-- 17: Real-World Walkthrough -->
+<div class="slide" data-slide="17">
+  <span class="tag fade-in">Walkthrough</span>
+  <h2 class="fade-in">A Feature's Complete Journey</h2>
+  <p class="section-desc fade-in" style="margin-bottom: 10px;">
+    Example: building a "User Login" feature across all three loops.
+  </p>
+  <div class="timeline fade-in">
+    <div class="timeline-item">
+      <h4>9:00 AM — Idea enters the Pipeline</h4>
+      <p>PM submits: "We need user login." $roll-design runs DDD modeling, decomposes into 3 Stories (password auth, OAuth, remember me), writes AC. Idea → Backlog.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>9:30 AM — $roll-loop picks up US-001</h4>
+      <p>$roll-build starts TCR delivery. Micro-step rhythm: verify + commit every 3 minutes. 12 tests passing in 30 min. 8 micro-commits.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>10:00 AM — $roll-spar auto-triggers</h4>
+      <p>Auth module detected as high-risk. Attacker attempts SQL injection, brute force, session hijacking. Defender patches. 5 rounds, coverage: 71% → 93%.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>10:15 AM — $roll-peer reviews the design</h4>
+      <p>Cross-agent negotiation flags a session management concern. 2 rounds of discussion. Consensus reached, implementation adjusted.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>10:30 AM — CI green → Deploy to UAT → Evidence</h4>
+      <p>Screenshots + curl responses captured. Verify stage complete. AI nudges: "UAT passed. Ready to release?"</p>
+    </div>
+    <div class="timeline-item">
+      <h4>10:45 AM — Human approves → Release to Prod</h4>
+      <p>Deployed. BACKLOG status: ✅ Done. $roll-sentinel begins monitoring.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>3:00 AM — $roll-.dream runs nightly scan</h4>
+      <p>Detects emerging pattern: 3 similar auth helpers could be extracted. Creates REFACTOR-015 in BACKLOG.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>Next Day — $roll-sentinel catches anomaly</h4>
+      <p>OAuth endpoint response time degrading (3 consecutive failures). Auto-creates FIX-012. $roll-fix patches + regression test. Resolved before users notice.</p>
+    </div>
+  </div>
+  <span class="slide-number">17 / 19</span>
+</div>
+
+<!-- 18: Framework Overview -->
+<div class="slide" data-slide="18">
+  <span class="tag fade-in" style="background:rgba(6,182,212,0.12);color:var(--cyan);">Full Picture</span>
+  <h2 class="fade-in" style="font-size: 28px;">APE × ROLL Framework</h2>
+  <p class="section-desc fade-in" style="font-size:13px;margin-bottom:12px;">
+    Pipeline · Loops · Human×AI · Four Defenses · Three-Layer Autonomy — everything on one page.
+  </p>
+
+  <!-- Vision bar -->
+  <div class="fade-in" style="display:flex;gap:6px;width:100%;max-width:900px;margin-bottom:10px;">
+    <div style="flex:1;text-align:center;padding:6px;border-radius:8px;border:1px solid rgba(34,197,94,0.2);">
+      <div style="font-size:14px;">⚡</div><div style="font-size:12px;font-weight:800;color:var(--green);">快 Fast</div>
+      <div style="font-size:8px;color:var(--text-dim);">需求到生产：小时级</div>
+    </div>
+    <div style="flex:1;text-align:center;padding:6px;border-radius:8px;border:1px solid rgba(6,182,212,0.2);">
+      <div style="font-size:14px;">🛡️</div><div style="font-size:12px;font-weight:800;color:var(--cyan);">稳 Solid</div>
+      <div style="font-size:8px;color:var(--text-dim);">四道防线 · 活证据</div>
+    </div>
+    <div style="flex:1;text-align:center;padding:6px;border-radius:8px;border:1px solid rgba(245,158,11,0.2);">
+      <div style="font-size:14px;">🤝</div><div style="font-size:12px;font-weight:800;color:var(--orange);">齐 Aligned</div>
+      <div style="font-size:8px;color:var(--text-dim);">22 Skills · 标准即代码</div>
+    </div>
+  </div>
+
+  <!-- Pipeline × Loops — integrated columns -->
+  <div class="fade-in" style="display:flex;gap:4px;width:100%;max-width:900px;align-items:stretch;">
+    <!-- Loop A -->
+    <div style="flex:2;border-radius:10px;border:1.5px solid rgba(99,102,241,0.25);overflow:hidden;display:flex;flex-direction:column;">
+      <div style="background:rgba(99,102,241,0.1);padding:4px 8px;text-align:center;">
+        <span style="font-size:11px;font-weight:700;color:var(--accent-light);">Loop A · 想清楚</span>
+      </div>
+      <div style="padding:6px;flex:1;display:flex;flex-direction:column;gap:3px;background:rgba(99,102,241,0.03);">
+        <div style="border-radius:7px;padding:6px 8px;background:rgba(99,102,241,0.06);">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-light);">Idea</div>
+          <div style="font-size:8px;color:var(--text-dim);margin-top:2px;">任何人可提 · 业务 · 产品 · 工程师</div>
+        </div>
+        <div style="text-align:center;font-size:9px;color:var(--text-dim);">↓ DDD → Research → Design → AC</div>
+        <div style="border-radius:7px;padding:6px 8px;background:rgba(99,102,241,0.06);">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-light);">Backlog</div>
+          <div style="font-size:8px;color:var(--text-dim);margin-top:2px;">AC 就绪 · Feature Doc 完成</div>
+          <div style="display:flex;gap:3px;margin-top:3px;flex-wrap:wrap;">
+            <span style="font-size:7px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(99,102,241,0.12);color:var(--accent-light);">User Story</span>
+            <span style="font-size:7px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(6,182,212,0.12);color:var(--cyan);">Refactor</span>
+            <span style="font-size:7px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(239,68,68,0.12);color:var(--red);">Fix</span>
+            <span style="font-size:7px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(245,158,11,0.12);color:var(--orange);">Spike</span>
+          </div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:3px;font-family:monospace;">research · design · idea · propose</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;font-size:14px;color:var(--text-dim);">→</div>
+    <!-- Loop B -->
+    <div style="flex:2;border-radius:10px;border:1.5px solid rgba(34,197,94,0.25);overflow:hidden;display:flex;flex-direction:column;">
+      <div style="background:rgba(34,197,94,0.1);padding:4px 8px;text-align:center;">
+        <span style="font-size:11px;font-weight:700;color:var(--green);">Loop B · 做扎实</span>
+      </div>
+      <div style="padding:6px;flex:1;display:flex;flex-direction:column;gap:3px;background:rgba(34,197,94,0.03);">
+        <div style="border-radius:7px;padding:6px 8px;background:rgba(34,197,94,0.06);">
+          <div style="font-size:13px;font-weight:700;color:var(--green);">Build</div>
+          <div style="font-size:8px;color:var(--text-dim);margin-top:2px;">TCR 微步 2-5min · Spar · Review · CI</div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:3px;font-family:monospace;">build · spar · fix · .review · peer · .qa</div>
+        </div>
+        <div style="text-align:center;font-size:9px;color:var(--text-dim);">↓ CI 绿灯 · 代码合并</div>
+        <div style="border-radius:7px;padding:6px 8px;background:rgba(34,197,94,0.06);">
+          <div style="font-size:13px;font-weight:700;color:var(--green);">Verify</div>
+          <div style="font-size:8px;color:var(--text-dim);margin-top:2px;">Deploy to Test/UAT · 活证据采集</div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:3px;font-family:monospace;">debug</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;font-size:14px;color:var(--text-dim);">→</div>
+    <!-- Loop C -->
+    <div style="flex:1;border-radius:10px;border:1.5px solid rgba(245,158,11,0.25);overflow:hidden;display:flex;flex-direction:column;">
+      <div style="background:rgba(245,158,11,0.1);padding:4px 8px;text-align:center;">
+        <span style="font-size:11px;font-weight:700;color:var(--orange);">Loop C · 盯住了</span>
+      </div>
+      <div style="padding:6px;flex:1;display:flex;flex-direction:column;gap:3px;background:rgba(245,158,11,0.03);">
+        <div style="border-radius:7px;padding:6px 8px;background:rgba(245,158,11,0.06);flex:1;">
+          <div style="font-size:13px;font-weight:700;color:var(--orange);">Release</div>
+          <div style="font-size:8px;color:var(--text-dim);margin-top:2px;">Deploy to Prod<br>Sentinel 运行时巡逻<br>Dream 夜间代码扫描</div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:3px;font-family:monospace;">sentinel · .dream</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Human × AI row -->
+  <div class="fade-in" style="display:flex;gap:4px;width:100%;max-width:900px;margin-top:6px;">
+    <div style="flex:2;text-align:center;padding:5px;border-radius:6px;background:rgba(99,102,241,0.04);border:1px solid rgba(99,102,241,0.1);">
+      <span style="font-size:11px;">🧑‍💻→🤖</span> <span style="font-size:10px;font-weight:700;color:var(--accent-light);">人找 AI</span>
+    </div>
+    <div style="flex:2;text-align:center;padding:5px;border-radius:6px;background:rgba(34,197,94,0.04);border:1px solid rgba(34,197,94,0.1);">
+      <span style="font-size:11px;">🤖⚡</span> <span style="font-size:10px;font-weight:700;color:var(--green);">AI 自驱</span>
+    </div>
+    <div style="flex:1;text-align:center;padding:5px;border-radius:6px;background:rgba(245,158,11,0.04);border:1px solid rgba(245,158,11,0.1);">
+      <span style="font-size:11px;">🤖→🧑‍💻</span> <span style="font-size:10px;font-weight:700;color:var(--orange);">AI 催人</span>
+    </div>
+  </div>
+
+  <!-- Feedback loop -->
+  <div class="fade-in" style="border:1.5px dashed var(--red);border-radius:6px;padding:3px 12px;margin-top:4px;text-align:center;max-width:600px;">
+    <span style="font-size:9px;color:var(--red);font-weight:600;">↩ Loop C 发现问题 → 自动创建新 Idea → 重新进入 Pipeline</span>
+  </div>
+
+  <!-- Bottom row: Defenses + Autonomous -->
+  <div class="fade-in" style="display:flex;gap:16px;width:100%;max-width:900px;margin-top:10px;">
+    <!-- Four Defenses -->
+    <div style="flex:1;">
+      <div style="font-size:9px;font-weight:700;color:var(--text-dim);margin-bottom:4px;letter-spacing:0.05em;">FOUR LINES OF DEFENSE</div>
+      <div style="display:flex;gap:3px;">
+        <div style="flex:1;text-align:center;padding:5px 3px;border-radius:6px;border:1px solid var(--border);border-top:2px solid var(--green);">
+          <div style="font-size:9px;font-weight:700;">L1 · TCR</div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:2px;">2-5min 验证</div>
+        </div>
+        <div style="flex:1;text-align:center;padding:5px 3px;border-radius:6px;border:1px solid var(--border);border-top:2px solid var(--red);">
+          <div style="font-size:9px;font-weight:700;">L2 · Spar</div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:2px;">红蓝对抗</div>
+        </div>
+        <div style="flex:1;text-align:center;padding:5px 3px;border-radius:6px;border:1px solid var(--border);border-top:2px solid var(--accent-light);">
+          <div style="font-size:9px;font-weight:700;">L3 · Review</div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:2px;">Self·Peer·Dream</div>
+        </div>
+        <div style="flex:1;text-align:center;padding:5px 3px;border-radius:6px;border:1px solid var(--border);border-top:2px solid var(--orange);">
+          <div style="font-size:9px;font-weight:700;">L4 · Sentinel</div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:2px;">生产巡逻</div>
+        </div>
+      </div>
+    </div>
+    <!-- Three-Layer Autonomous -->
+    <div style="flex:1;">
+      <div style="font-size:9px;font-weight:700;color:var(--text-dim);margin-bottom:4px;letter-spacing:0.05em;">THREE-LAYER AUTONOMOUS</div>
+      <div style="display:flex;gap:3px;">
+        <div style="flex:1;text-align:center;padding:5px 3px;border-radius:6px;border:1px solid var(--border);">
+          <div style="font-size:12px;">🧑‍💻</div><div style="font-size:8px;font-weight:700;">Human</div>
+          <div style="font-size:7px;color:var(--text-dim);">目标·审批·发版</div>
+        </div>
+        <div style="flex:1;text-align:center;padding:5px 3px;border-radius:6px;border:1px solid var(--border);">
+          <div style="font-size:12px;">🔄</div><div style="font-size:8px;font-weight:700;">Loop</div>
+          <div style="font-size:7px;color:var(--text-dim);">每小时执行</div>
+        </div>
+        <div style="flex:1;text-align:center;padding:5px 3px;border-radius:6px;border:1px solid var(--border);">
+          <div style="font-size:12px;">🌙</div><div style="font-size:8px;font-weight:700;">Dream</div>
+          <div style="font-size:7px;color:var(--text-dim);">凌晨 3 点体检</div>
+        </div>
+        <div style="flex:1;text-align:center;padding:5px 3px;border-radius:6px;border:1px solid var(--border);">
+          <div style="font-size:12px;">🤝</div><div style="font-size:8px;font-weight:700;">Peer</div>
+          <div style="font-size:7px;color:var(--text-dim);">跨 Agent 协商</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <span class="slide-number">18 / 19</span>
+</div>
+
+<!-- 19: Summary -->
+<div class="slide" data-slide="19">
+  <span class="tag fade-in">Summary</span>
+  <h2 class="fade-in" style="font-size: 32px;">ROLL's Core Logic</h2>
+  <div class="highlight-box fade-in" style="margin-top: 18px; margin-bottom: 20px; max-width: 860px;">
+    <p style="font-size: 17px; color: var(--text-bright); font-weight: 600; line-height: 1.7;">
+      Take 20 years of proven engineering practices (TDD / TCR / CI / DDD / SRE)<br>
+      and encode them as standardized AI Agent work instructions.<br>
+      AI won't cut corners, won't get tired, won't "skip the tests this time" —<br>
+      <span style="color:var(--accent-light);">because that branch doesn't exist in its instructions.</span>
+    </p>
+  </div>
+  <div class="cards cards-3 fade-in" style="max-width: 860px;">
     <div class="card" style="text-align:center;border-top:3px solid var(--green);">
-      <div style="font-size:28px;margin-bottom:6px;">⚡</div>
-      <h3 style="color:var(--green);font-size:16px;">快</h3>
-      <p>需求到上线：小时级<br>零返工微步交付<br>新人 5 分钟上手</p>
+      <div style="font-size:24px;margin-bottom:6px;">⚡</div>
+      <h3 style="color:var(--green);font-size:15px;">Fast <span class="zh">快</span></h3>
+      <p>Requirement to production: hours<br>Zero-rework micro-step delivery<br>New dev onboards in 5 minutes</p>
     </div>
     <div class="card" style="text-align:center;border-top:3px solid var(--cyan);">
-      <div style="font-size:28px;margin-bottom:6px;">🛡️</div>
-      <h3 style="color:var(--cyan);font-size:16px;">稳</h3>
-      <p>四道自动防线 + TCR 硬执行<br>鲜活证据验收<br>跨 Agent 互审</p>
+      <div style="font-size:24px;margin-bottom:6px;">🛡️</div>
+      <h3 style="color:var(--cyan);font-size:15px;">Solid <span class="zh">稳</span></h3>
+      <p>Four automated defense lines<br>Live evidence verification<br>Sentinel + Dream 24/7 watch</p>
     </div>
     <div class="card" style="text-align:center;border-top:3px solid var(--orange);">
-      <div style="font-size:28px;margin-bottom:6px;">🤝</div>
-      <h3 style="color:var(--orange);font-size:16px;">齐</h3>
-      <p>一条命令同步 9 个 AI 工具<br>规范即代码，可审计<br>知识沉淀在系统中</p>
-    </div>
-    <div class="card" style="text-align:center;border-top:3px solid var(--purple-light);">
-      <div style="font-size:28px;margin-bottom:6px;">🤖</div>
-      <h3 style="color:var(--purple-light);font-size:16px;">自</h3>
-      <p>AI 7×24 无人值守<br>凌晨代码体检<br>早九老板简报</p>
+      <div style="font-size:24px;margin-bottom:6px;">🤝</div>
+      <h3 style="color:var(--orange);font-size:15px;">Aligned <span class="zh">齐</span></h3>
+      <p>22 skills, one unified system<br>Three-layer autonomy<br>Human decides, AI delivers</p>
     </div>
   </div>
-  <div class="fade-in" style="margin-top: 20px; text-align: center;">
-    <p style="font-size: 17px; color: var(--text); font-weight: 500; margin-bottom: 8px;">
-      这不是未来——<span style="background: linear-gradient(135deg, var(--accent-light), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 700;">这是今天。</span>
-    </p>
+  <div class="fade-in" style="margin-top: 24px; text-align: center;">
     <p style="font-size: 13px; color: var(--text-dim);">
-      @seanyao/roll · MIT · v2026.511.2 · npm install -g @seanyao/roll
+      @seanyao/roll · MIT · 22 Skills · npm install -g @seanyao/roll
     </p>
   </div>
-  <span class="slide-number">17 / 18</span>
+  <span class="slide-number">19 / 19</span>
 </div>
 
 </div>
@@ -1067,12 +1177,12 @@
 <!-- Nav -->
 <div class="nav">
   <button class="nav-btn" id="btn-prev" onclick="navigate(-1)">‹</button>
-  <span class="nav-info" id="nav-info">1 / 18</span>
+  <span class="nav-info" id="nav-info">1 / 19</span>
   <button class="nav-btn" id="btn-next" onclick="navigate(1)">›</button>
 </div>
 <div class="key-hint">
-  <span><kbd>←</kbd> <kbd>→</kbd> 翻页</span>
-  <span><kbd>F</kbd> 全屏</span>
+  <span><kbd>←</kbd> <kbd>→</kbd> Navigate</span>
+  <span><kbd>F</kbd> Fullscreen</span>
 </div>
 
 <script>

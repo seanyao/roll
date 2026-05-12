@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.512.7
 - **Added**: `roll alert` — 查看、确认、清除 loop 告警，不用再去翻 loop status
 - **Added**: macOS 系统通知 — story 完成或告警写入时自动弹通知，静音模式下不打扰
 - **Added**: `roll ci [--wait]` — 查看当前提交的 CI 状态，或等待 CI 跑完再继续

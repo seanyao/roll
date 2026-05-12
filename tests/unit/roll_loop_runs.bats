@@ -8,6 +8,8 @@ setup() {
   unit_setup_cd
   _tmp="$TEST_TMP"
   _LOOP_RUNS="${TEST_TMP}/runs.jsonl"
+  # Pin timezone so UTC-Z fixtures convert deterministically across runners (CI=UTC, mac=CST).
+  export TZ=UTC
 }
 teardown() { unit_teardown_cd; }
 
@@ -31,7 +33,7 @@ teardown() { unit_teardown_cd; }
 
 @test "_loop_runs: shows 'no runs for current project' when file has only other projects" {
   cat > "$_LOOP_RUNS" <<'EOF'
-{"ts":"2026-05-11T19:11:00+08:00","project":"/some/other/path","run_id":"loop-1","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}
+{"ts":"2026-05-11T19:11:00Z","project":"/some/other/path","run_id":"loop-1","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}
 EOF
   run _loop_runs
   [ "$status" -eq 0 ]
@@ -43,7 +45,7 @@ EOF
 @test "_loop_runs: shows entries matching current project" {
   local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
-{"ts":"2026-05-11T19:11:00+08:00","project":"${proj}","run_id":"loop-A","status":"built","built":["US-AUTO-024"],"skipped":[],"alerts":0,"tcr_count":3,"duration_sec":1680}
+{"ts":"2026-05-11T19:11:00Z","project":"${proj}","run_id":"loop-A","status":"built","built":["US-AUTO-024"],"skipped":[],"alerts":0,"tcr_count":3,"duration_sec":1680}
 EOF
   run _loop_runs
   [ "$status" -eq 0 ]
@@ -55,8 +57,8 @@ EOF
 @test "_loop_runs: filters out entries from other projects (default)" {
   local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
-{"ts":"2026-05-11T19:11:00+08:00","project":"other-aaaaaa","run_id":"loop-X","status":"built","built":["US-OTHER-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":120}
-{"ts":"2026-05-11T19:12:00+08:00","project":"${proj}","run_id":"loop-Y","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":10}
+{"ts":"2026-05-11T19:11:00Z","project":"other-aaaaaa","run_id":"loop-X","status":"built","built":["US-OTHER-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":120}
+{"ts":"2026-05-11T19:12:00Z","project":"${proj}","run_id":"loop-Y","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":10}
 EOF
   run _loop_runs
   [ "$status" -eq 0 ]
@@ -66,8 +68,8 @@ EOF
 
 @test "_loop_runs --all: shows entries from all projects" {
   cat > "$_LOOP_RUNS" <<'EOF'
-{"ts":"2026-05-11T19:11:00+08:00","project":"/a/projA","run_id":"loop-A","status":"built","built":["US-A-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":60}
-{"ts":"2026-05-11T19:12:00+08:00","project":"/b/projB","run_id":"loop-B","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}
+{"ts":"2026-05-11T19:11:00Z","project":"/a/projA","run_id":"loop-A","status":"built","built":["US-A-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":60}
+{"ts":"2026-05-11T19:12:00Z","project":"/b/projB","run_id":"loop-B","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}
 EOF
   run _loop_runs --all
   [ "$status" -eq 0 ]
@@ -80,8 +82,8 @@ EOF
 @test "_loop_runs: lists entries in reverse chronological order (newest first)" {
   local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
-{"ts":"2026-05-11T10:00:00+08:00","project":"${proj}","run_id":"loop-OLD","status":"built","built":["US-X-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":60}
-{"ts":"2026-05-11T19:00:00+08:00","project":"${proj}","run_id":"loop-NEW","status":"built","built":["US-X-002"],"skipped":[],"alerts":0,"tcr_count":2,"duration_sec":120}
+{"ts":"2026-05-11T10:00:00Z","project":"${proj}","run_id":"loop-OLD","status":"built","built":["US-X-001"],"skipped":[],"alerts":0,"tcr_count":1,"duration_sec":60}
+{"ts":"2026-05-11T19:00:00Z","project":"${proj}","run_id":"loop-NEW","status":"built","built":["US-X-002"],"skipped":[],"alerts":0,"tcr_count":2,"duration_sec":120}
 EOF
   run _loop_runs
   [ "$status" -eq 0 ]
@@ -96,7 +98,7 @@ EOF
   local proj; proj=$(_project_slug "$(pwd -P)")
   : > "$_LOOP_RUNS"
   for i in $(seq 1 5); do
-    printf '{"ts":"2026-05-11T19:%02d:00+08:00","project":"%s","run_id":"loop-%d","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}\n' \
+    printf '{"ts":"2026-05-11T19:%02d:00Z","project":"%s","run_id":"loop-%d","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}\n' \
       "$i" "$proj" "$i" >> "$_LOOP_RUNS"
   done
   run _loop_runs 2
@@ -122,7 +124,7 @@ EOF
 @test "_loop_runs: built status shows ✅, story ids, count, tcr, duration" {
   local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
-{"ts":"2026-05-11T19:11:00+08:00","project":"${proj}","run_id":"loop-A","status":"built","built":["US-AUTO-024","US-AUTO-025"],"skipped":[],"alerts":0,"tcr_count":14,"duration_sec":1680}
+{"ts":"2026-05-11T19:11:00Z","project":"${proj}","run_id":"loop-A","status":"built","built":["US-AUTO-024","US-AUTO-025"],"skipped":[],"alerts":0,"tcr_count":14,"duration_sec":1680}
 EOF
   run _loop_runs
   [ "$status" -eq 0 ]
@@ -137,7 +139,7 @@ EOF
 @test "_loop_runs: idle status shows ○ and 'no Todo items'" {
   local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
-{"ts":"2026-05-11T18:11:00+08:00","project":"${proj}","run_id":"loop-A","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}
+{"ts":"2026-05-11T18:11:00Z","project":"${proj}","run_id":"loop-A","status":"idle","built":[],"skipped":[],"alerts":0,"tcr_count":0,"duration_sec":5}
 EOF
   run _loop_runs
   [ "$status" -eq 0 ]
@@ -148,7 +150,7 @@ EOF
 @test "_loop_runs: failed status shows ✗ and reason" {
   local proj; proj=$(_project_slug "$(pwd -P)")
   cat > "$_LOOP_RUNS" <<EOF
-{"ts":"2026-05-11T17:11:00+08:00","project":"${proj}","run_id":"loop-A","status":"failed","built":[],"skipped":[],"alerts":1,"tcr_count":0,"duration_sec":30,"reason":"claude API error"}
+{"ts":"2026-05-11T17:11:00Z","project":"${proj}","run_id":"loop-A","status":"failed","built":[],"skipped":[],"alerts":1,"tcr_count":0,"duration_sec":30,"reason":"claude API error"}
 EOF
   run _loop_runs
   [ "$status" -eq 0 ]

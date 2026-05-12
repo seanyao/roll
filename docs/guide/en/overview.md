@@ -1,8 +1,8 @@
 # Roll — Overview
 
-Roll is an AI agent framework that turns a BACKLOG into shipped code autonomously.
-It encodes engineering practices (TCR, INVEST stories, code review) as executable skills,
-and adds a three-layer autonomous operation model on top.
+Roll is an autonomous delivery system that turns a BACKLOG into shipped code continuously.
+Engineering practices (TCR, INVEST stories, code review) are encoded as executable skills —
+reliable enough for an agent to run unattended, disciplined enough to ship production code.
 
 ## Three-Layer Autonomous Model
 

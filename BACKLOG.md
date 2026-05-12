@@ -18,7 +18,7 @@
 | [US-SKILL-004](docs/features/new-skills.md#us-skill-004) | Add `roll-doctor` — 一键诊断开发工具链健康状态 | ✅ Done |
 | [US-SKILL-005](docs/features/new-skills.md#us-skill-005) | Add `roll-peer` — 跨 Agent 代码评审（Claude/Kimi/DeepSeek/Codex） | ✅ Done |
 | [US-SKILL-006](docs/features/new-skills.md#us-skill-006) | Add `roll-bipo-onboard` — 新员工入职引导流程 | ✅ Done |
-| [US-SKILL-008](docs/features/new-skills.md#us-skill-008) | Add `roll-doc` — legacy 项目文档自动化（扫描索引 + 缺口补全一体，project-driven） | 📋 Todo |
+| [US-SKILL-008](docs/features/new-skills.md#us-skill-008) | Add `roll-doc` — legacy 项目文档自动化（扫描索引 + 缺口补全一体，project-driven） | 🔨 In Progress |
 | [US-SKILL-007](docs/features/new-skills.md#us-skill-007) | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | ✅ Done |
 
 ## Epic: Distribution

@@ -2264,7 +2264,8 @@ cmd_loop() {
     pause)   _loop_pause ;;
     resume)  _loop_resume ;;
     reset)   _loop_reset ;;
-    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|attach|mute|unmute|pause|resume|reset>"; exit 1 ;;
+    notify)  _notify "${1:-roll}" "${2:-}" ;;
+    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|attach|mute|unmute|pause|resume|reset|notify>"; exit 1 ;;
   esac
 }
 
@@ -2679,6 +2680,16 @@ _loop_runs() {
     [[ -z "$line" ]] && continue
     _loop_runs_format_line "$line" "$all_flag"
   done <<<"$recent"
+}
+
+# Send a macOS system notification. No-op when muted, non-macOS, or osascript unavailable.
+_notify() {
+  local title="${1:-roll}"
+  local body="${2:-}"
+  [ "$(uname)" = "Darwin" ] || return 0
+  [ -f "$_LOOP_MUTE_FILE" ] && return 0
+  command -v osascript >/dev/null 2>&1 || return 0
+  osascript -e "display notification \"${body}\" with title \"${title}\"" >/dev/null 2>&1 || true
 }
 
 # Count `tcr:` prefixed commits in the current git repo since started_at timestamp.

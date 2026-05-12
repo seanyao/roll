@@ -68,7 +68,21 @@ fi
 2. For each such story, check `state.yaml`:
    - If `current_item` matches the story id AND `status: running` → this is the resume case (handled above), leave it.
    - Otherwise → this is an **orphan 🔨** (the loop that marked it crashed before finishing). Revert the status back to `📋 Todo`, commit `chore: revert orphan 🔨 US-XXX to 📋`, and append a line to `~/.shared/roll/loop/ALERT.md` recording the orphan id and time so the next brief surfaces it.
-3. After orphan sweep, proceed to Step 2 (Scan BACKLOG) — the reverted stories will be picked up normally if they're top of the queue.
+3. After orphan sweep, proceed to Step 1.5 (Pre-run CI health check) before scanning.
+
+### Step 1.5 — Pre-run CI Health Check
+
+Call `_loop_precheck_ci` before scanning BACKLOG. This is a **defensive gate**
+against building on a broken base — if the most recent commit on the branch
+has red CI, the loop must not stack new commits on top (which would create the
+exact stuck-red state FIX-026 traces to).
+
+- HEAD CI green / pending / no-run-yet → proceed to Step 2.
+- HEAD CI red → write ALERT, **do not pick up any stories this cycle**,
+  exit cleanly. The next cycle will retry; the human must fix CI manually
+  (typically by reverting or pushing a green commit) before the loop resumes.
+- `gh` missing or repo unparseable → graceful skip (`_loop_precheck_ci`
+  returns 0); the post-build `_loop_enforce_ci` remains the strict gate.
 
 ### Step 2 — Scan BACKLOG
 

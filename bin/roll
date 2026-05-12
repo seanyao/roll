@@ -2814,6 +2814,46 @@ _ci_wait() {
   return 1
 }
 
+# Pre-run CI health check — call before picking up new stories.
+# Refuses to build on a red base (HEAD CI failed). Lenient on unknown states
+# (gh missing, repo unparseable, no runs yet) — the post-build _loop_enforce_ci
+# is the strict gate.
+# Returns 0: ok to proceed (green / pending / unknown / no gh).
+# Returns 1: HEAD CI is definitively red → ALERT written, do not build.
+_loop_precheck_ci() {
+  command -v gh &>/dev/null || return 0
+
+  local commit; commit=$(git rev-parse HEAD 2>/dev/null) || return 0
+  local slug; slug=$(_gh_repo_slug) || return 0
+
+  local runs
+  runs=$(gh -R "$slug" run list --commit "$commit" --json conclusion 2>/dev/null) || return 0
+  [[ -z "$runs" || "$runs" == "[]" ]] && return 0
+
+  local failed
+  failed=$(echo "$runs" | jq -r '[.[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "skipped")] | length' 2>/dev/null || echo "0")
+
+  if [[ "$failed" -gt 0 ]]; then
+    local short; short=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+    err "Pre-run CI check: HEAD CI is red — refuse to build on broken base (${short})  HEAD CI 红，拒绝在破损的基础上构建"
+    mkdir -p "$(dirname "$_LOOP_ALERT")"
+    cat > "$_LOOP_ALERT" << EOF
+# ALERT — Pre-run CI check failed (red base)
+
+**Time**: $(date '+%Y-%m-%d %H:%M')
+**Commit**: ${short}
+**Reason**: HEAD CI is red — loop refused to build on a broken base  HEAD CI 红，loop 拒绝在破损的基础上构建
+
+**Action required**:
+- Investigate and fix CI: \`gh -R $(_gh_repo_slug) run list --commit ${commit}\`
+- After fixing and pushing green commit: \`roll loop now\`
+EOF
+    _notify "roll ⚠ CI red" "loop refused to build on broken base (${short})"
+    return 1
+  fi
+  return 0
+}
+
 # CI gate before marking a story Done.
 # On CI failure: writes ALERT, returns 1 (caller keeps story 🔨 In Progress).
 # When gh unavailable: returns 0 (graceful skip).

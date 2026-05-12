@@ -84,3 +84,59 @@ teardown() {
 
   grep -qE 'Action required' "$_LOOP_ALERT"
 }
+
+# ─── FIX-026: pre-run CI health check ─────────────────────────────────────────
+
+@test "_loop_precheck_ci: function exists in bin/roll" {
+  grep -qF '_loop_precheck_ci()' "$ROLL_BIN"
+}
+
+@test "_loop_precheck_ci: returns 0 when gh is not installed (graceful)" {
+  command() {
+    if [[ "$1" == "-v" && "$2" == "gh" ]]; then return 1; fi
+    builtin command "$@"
+  }
+  run _loop_precheck_ci
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_precheck_ci: returns 0 when no CI runs exist for HEAD yet" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo "[]"; return 0; }
+  export -f gh
+  run _loop_precheck_ci
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_precheck_ci: returns 0 when HEAD CI is success" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"success"}]'; return 0; }
+  export -f gh
+  run _loop_precheck_ci
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_precheck_ci: returns 1 when HEAD CI is failure" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"failure"}]'; return 0; }
+  export -f gh
+  run _loop_precheck_ci
+  [ "$status" -eq 1 ]
+}
+
+@test "_loop_precheck_ci: writes ALERT when HEAD CI is red" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"failure"}]'; return 0; }
+  export -f gh
+  _loop_precheck_ci || true
+  [ -f "$_LOOP_ALERT" ]
+  grep -qE 'red|失败|broken base' "$_LOOP_ALERT"
+}
+
+@test "roll-loop SKILL.md: Step 1 documents pre-run CI health check" {
+  grep -qiE 'pre-run CI|precheck.*CI|head ci.*red|broken base' "$LOOP_SKILL"
+}

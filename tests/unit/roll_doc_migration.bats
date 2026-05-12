@@ -52,7 +52,7 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
   grep -qiE "three.*(loop|interlocking)|loop.*a.*loop.*b.*loop.*c" "${GUIDE_EN}/methodology.md"
 }
 
-@test "ZH methodology covers 三层工程闭环" {
+@test "ZH methodology covers 3-layer engineering loop" {
   grep -qF "三层" "${GUIDE_ZH}/methodology.md"
 }
 

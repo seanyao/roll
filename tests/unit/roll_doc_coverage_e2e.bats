@@ -18,11 +18,11 @@ BRIEF_SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-brief/SKILL.md"
   grep -qiE "Check C" "${DREAM_SKILL}"
 }
 
-@test "e2e: roll-.dream dream log template includes 文档覆盖度 section" {
+@test "e2e: roll-.dream dream log template includes doc-coverage section" {
   grep -qF '文档覆盖度' "${DREAM_SKILL}"
 }
 
-@test "e2e: roll-brief template outputs 文档覆盖度 block in briefs" {
+@test "e2e: roll-brief template outputs doc-coverage block in briefs" {
   grep -qF '文档覆盖度' "${BRIEF_SKILL}"
   grep -qF 'guide/en' "${BRIEF_SKILL}"
   grep -qF 'ZH 翻译率' "${BRIEF_SKILL}"

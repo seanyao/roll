@@ -201,5 +201,4 @@
 | IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | ✅ Done → US-DOC-001..006 |
 | IDEA-010 | `roll status` 增加全局 loop 概览区块 — 在现有 convention/skills 状态后追加本机所有项目的 loop 服务状态、调度时间和 backlog 待办数 | ✅ Done → US-AUTO-021 |
 | IDEA-011 | 基于开源 PI 自研 Coding Agent — 将 Harness Engineering Skills 和管理层内建进去，摆脱第三方 Coding Agent 适配依赖，获得完整自主控制权 | 📋 Todo |
-| IDEA-012 | `roll-doc-index` skill — 扫描 legacy 项目所有散落文档（含代码注释约定），在 docs/ 下生成统一 doc index，为后续上下文生成提供可寻址的文档地图 | 📋 Todo |
-| IDEA-013 | `roll-doc-fill` skill — 检测 legacy 项目中缺失的关键文档（架构说明、编码规范、API 契约等），从 codebase 反向推导生成草稿，codebase → knowledge base 转化 | 📋 Todo |
+| IDEA-012 | Legacy 项目文档自治 — 三层体系：① `roll-doc-index` 整合散落文档生成可寻址索引；② `roll-doc-fill` 从 codebase 反向推导缺失文档（架构/编码规范/API 契约）；③ `roll-.dream` 新增 Scan 6（文档新鲜度）持续检测滞后/隐性约定/模块漂移，产出 REFACTOR 条目走 loop 自动维护，结果汇入 brief | 📋 Todo |

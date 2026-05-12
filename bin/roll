@@ -2482,7 +2482,7 @@ _loop_status() {
   else
     echo -e "  Auto-attach  ${GREEN}live${NC}    run: roll loop mute"
   fi
-  [[ -f "$_LOOP_ALERT" ]] && { echo ""; echo -e "  ${RED}⚠ ALERT:${NC}"; sed 's/^/    /' "$_LOOP_ALERT"; }
+  [[ -f "$_LOOP_ALERT" ]] && { echo ""; echo -e "  ${RED}⚠ ALERT${NC}  (${CYAN}roll alert${NC} to manage)"; sed 's/^/    /' "$_LOOP_ALERT"; }
   [[ -f "$_LOOP_STATE" ]] && { echo ""; echo "  State:"; sed 's/^/    /' "$_LOOP_STATE"; }
   echo ""
 }
@@ -2880,7 +2880,7 @@ _loop_monitor() {
     # Alert
     if [[ -f "$_LOOP_ALERT" ]]; then
       echo ""
-      echo -e "  ${RED}⚠ ALERT:${NC}"
+      echo -e "  ${RED}⚠ ALERT${NC}  (${CYAN}roll alert${NC} to manage)"
       sed 's/^/    /' "$_LOOP_ALERT"
     fi
 
@@ -3353,7 +3353,7 @@ _dashboard() {
   else
     echo -e "  Loop  ${YELLOW}○ off${NC}   run: roll loop on"
   fi
-  [[ -f "$_LOOP_ALERT" ]] && echo -e "  ${RED}⚠ ALERT — run: roll loop status${NC}"
+  [[ -f "$_LOOP_ALERT" ]] && echo -e "  ${RED}⚠ ALERT — run: roll alert${NC}"
 
   # Backlog summary
   if [[ -f "BACKLOG.md" ]]; then
@@ -3441,6 +3441,7 @@ main() {
     loop)          cmd_loop "$@" ;;
     brief)         cmd_brief "$@" ;;
     backlog)       cmd_backlog "$@" ;;
+    alert)         cmd_alert "$@" ;;
     agent)         cmd_agent "$@" ;;
     release)       cmd_release "$@" ;;
     ci)            cmd_ci "$@" ;;

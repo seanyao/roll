@@ -1,13 +1,8 @@
 #!/usr/bin/env bats
 
-setup() {
-  source "${BATS_TEST_DIRNAME}/../../bin/roll"
-  TEST_TMP="$(mktemp -d)"
-}
-
-teardown() {
-  rm -rf "$TEST_TMP"
-}
+load helpers
+setup() { unit_setup; }
+teardown() { unit_teardown; }
 
 @test "ai_tool_name: ~/.claude → claude (strips leading dot)" {
   run ai_tool_name "$HOME/.claude"

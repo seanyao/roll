@@ -1,13 +1,8 @@
 #!/usr/bin/env bats
 
-setup() {
-  source "${BATS_TEST_DIRNAME}/../../bin/roll"
-  TEST_TMP="$(mktemp -d)"
-}
-
-teardown() {
-  rm -rf "$TEST_TMP"
-}
+load helpers
+setup() { unit_setup; }
+teardown() { unit_teardown; }
 
 @test "scan: empty dir → unknown" {
   run scan_project_type_from_files "$TEST_TMP"

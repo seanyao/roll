@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **Added**: `$roll-doc` — legacy 项目文档自动化技能：四阶段扫描（索引 + 缺口分析 + 草稿补全 + 报告），支持 `--dry-run` / `--force`，适用任何项目
+
 ## v2026.512.7
 - **Added**: `roll alert` — 查看、确认、清除 loop 告警，不用再去翻 loop status
 - **Added**: macOS 系统通知 — story 完成或告警写入时自动弹通知，静音模式下不打扰

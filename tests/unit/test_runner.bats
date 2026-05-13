@@ -45,3 +45,14 @@ teardown() {
   # REFACTOR-008 Phase 1: clear error when bats-core submodule missing
   grep -qE "(\[ ?-x .*BATS|command -v .*BATS|bats.*not found|submodule)" "$RUNNER"
 }
+
+@test "run.sh: accepts optional dir args (REFACTOR-009 Phase 1B)" {
+  # When invoked with args, must scan only those dirs instead of defaults.
+  # The script handles "$@" before falling back to the default unit + integration scan.
+  grep -qE '(\$\{?#\}?|\$#)' "$RUNNER"
+}
+
+@test "run.sh: passes optional args to find scan paths" {
+  # When SCAN_PATHS is set from "$@", find should consume it as an array.
+  grep -qE 'SCAN_PATHS' "$RUNNER"
+}

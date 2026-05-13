@@ -10,7 +10,15 @@ if [ ! -x "$BATS" ]; then
   exit 1
 fi
 
-FILES=$(find "$(dirname "$0")/unit" "$(dirname "$0")/integration" -name '*.bats' | sort)
+# REFACTOR-009 Phase 1B: optional args override the default scan paths,
+# so CI can run `bash tests/run.sh tests/unit` and `tests/integration` in parallel jobs.
+if [ "$#" -gt 0 ]; then
+  SCAN_PATHS=("$@")
+else
+  SCAN_PATHS=("$(dirname "$0")/unit" "$(dirname "$0")/integration")
+fi
+
+FILES=$(find "${SCAN_PATHS[@]}" -name '*.bats' | sort)
 
 # REFACTOR-008 Phase 1: detect CPU count dynamically instead of hardcoded 4.
 JOBS="${ROLL_TEST_JOBS:-}"

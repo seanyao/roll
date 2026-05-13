@@ -180,6 +180,47 @@ Violation tags emitted by `_changelog_lint_bullet`:
    `~/.shared/roll/loop/ALERT.md` describing what couldn't be fixed.
    Never block the whole release on style — let the human take the wheel.
 
+### 5.5 Self-Audit — Stage Gate
+
+The mechanical linter in Step 5.4 catches **blacklist** patterns; the audit
+gate in this step is a **whitelist** of 5 boolean checks that the bullet must
+satisfy before it can be staged. Stricter (30-char cap vs 50) and shape-aware
+(requires the user-facing `—` or `不再`/`现在` sentence pattern).
+
+```bash
+accepted=$(_changelog_audit_gate "$draft1" "$rewrite1" "$rewrite2")
+# Exit 0: stdout = first clean candidate
+# Exit 1: stdout = ⚠️-prefixed last candidate; ALERT was written
+```
+
+5 boolean checks evaluated by `_changelog_audit_bullet`:
+
+| Tag | Trigger |
+|---|---|
+| `over-length-30` | visible chars > 30 (bypassed if bullet has a backticked user command) |
+| `internal-id` | backtick content contains `_` or `()` |
+| `path-or-suffix` | `.md/.sh/.yml/.ts/.bats` or `docs/bin/tests/scripts/` outside backticks |
+| `phase-step` | `Phase N` or `Step N` |
+| `bad-shape` | none of `—`, `不再`, `现在` present |
+
+**3-round retry envelope**:
+1. Round 1 = original draft; if pass → stage immediately
+2. Round 2 = rewrite based on violations from round 1
+3. Round 3 = second rewrite if round 2 also failed
+4. All 3 failed → keep last candidate prefixed with `⚠️ `, append ALERT to
+   `~/.shared/roll/loop/ALERT.md`. **Never block the stage** — let the human
+   reviewer take the wheel. The loop must keep moving.
+
+**Audit log**: every round (pass or fail) appends one JSONL line to
+`~/.shared/roll/loop/changelog-audit.jsonl`:
+
+```json
+{"ts":"2026-05-13T13:50:00Z","verdict":"fail","round":1,"bullet":"...","reasons":["over-length-30","bad-shape"]}
+```
+
+Useful when reviewing whether the agent actually iterated or just rubber-stamped
+its own first draft. Set `ROLL_CHANGELOG_AUDIT_LOG` to redirect (tests only).
+
 ### 5. Generate CHANGELOG.md
 
 **Create mode** (first time, no CHANGELOG.md yet):

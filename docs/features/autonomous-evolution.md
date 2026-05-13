@@ -1257,3 +1257,78 @@ runner 起跑
 **Dependencies:**
 - 与 US-AUTO-032（worktree）自然契合：worktree 本已在 `loop/<US>` 分支上，本 Story 只需在完成时建 PR 而非 ff-only merge
 - 前提：GitHub repo 开启 "Allow auto-merge"（Settings → General → Allow auto-merge）
+
+## US-AUTO-034 loop 扫开放 PR 自动跳过需人工故事 📋
+
+**Created**: 2026-05-13
+
+- As a Roll user with one or more open PRs awaiting review
+- I want loop to detect stories that are already represented by an open PR and skip them this cycle
+- So that loop never duplicates or conflicts with work that's currently in a human review window
+
+**Domain Model:**
+- Context: Autonomous Evolution / Loop Execution
+- Aggregate: `LoopRunner` gains a read responsibility `PendingPRSet`
+- Events raised: [StorySkipped reason=pending-pr] → ALERT + runs.jsonl `skipped`
+- Invariants:
+  - 任一开放 PR 的 `title`、`body` 或 `headRefName` 中匹配 story id 正则 → 该 story 本轮必须 skip
+  - `gh` 不可用（未装 / 仓库不可解析 / 网络失败）→ 返回空集合，loop 不阻塞
+  - skip 决策只发生在 Step 2 选择阶段，不影响已 `🔨 In Progress` 的故事
+
+**Background:**
+当前 loop Step 2 仅按 BACKLOG `📋 Todo` 状态选 story，不查 GitHub PR。如果 story 已经在
+开放 PR 中（典型：US-AUTO-033 落地后，loop 自己推的 PR 在等 CI；或人手动开了 hotfix PR），
+loop 会再次领取并构建，产生重复 commit 或冲突。本 Story 把 GitHub 开放 PR 作为「人/peer
+正在介入」的强信号，loop 主动避让。
+
+**Flow:**
+
+```
+Step 1.5 CI 健康检查 通过
+   ↓
+[Step 1.6 拉取开放 PR 集合]  ── gh pr list --state open --json title,body,headRefName
+   ↓
+   └─ 抽取所有 (US|FIX|REFACTOR)-[A-Z]+-[0-9]+ 命中 → PendingPRSet
+   ↓
+Step 2 扫 BACKLOG
+   ↓
+   对每行 📋 Todo:
+   ├─ story_id ∈ PendingPRSet ──→ skip + 写 ALERT + 加入 runs.jsonl skipped[]
+   └─ story_id ∉ PendingPRSet ──→ 正常领取
+```
+
+**AC:**
+- [ ] `bin/roll` 新增 `_loop_pending_pr_stories()`：
+  - `gh pr list --state open --json title,body,headRefName -R "$slug"`
+  - 用 `jq` 把三个字段拼成单行文本，用 `grep -oE '(US|FIX|REFACTOR)-[A-Z]+-[0-9]+'` 抽取
+  - 输出去重后的 story id 集合（空白分隔）
+- [ ] `gh` 未安装 / 仓库不可解析 / 调用失败 → 输出空字符串、`return 0`（lenient）
+- [ ] `skills/roll-loop/SKILL.md` 在 Step 1.5 之后、Step 2 之前插入 Step 1.6「Scan Open PRs」，调用 `_loop_pending_pr_stories` 写入 `_LOOP_PENDING_PRS` 变量
+- [ ] Step 2 扫 BACKLOG 时：若 story id 在 `_LOOP_PENDING_PRS` 中 → skip，记录到本轮 `skipped[]`，同时 append 一行到 `_LOOP_ALERT`（不是新文件）
+- [ ] runs.jsonl `skipped` 数组（已有 schema 字段，无需新加列）正确包含跳过的 story id
+- [ ] 单测 `tests/unit/roll_loop_pr_skip.bats` 覆盖 3 路径：
+  - 无开放 PR → PendingPRSet 空 → 正常领取所有 📋
+  - PR title 命中 → 该 story skip
+  - PR headRef（分支名）命中 → 该 story skip
+- [ ] 集成测试 `tests/integration/cmd_loop.bats` 加一个用例：mock `gh pr list` 返回固定 JSON，断言 BACKLOG 中匹配的 story 未被标 🔨
+
+**Non-goals:**
+- 不引入 BACKLOG 列扩张（不加 `depends-on: PR#N` 字段）— 用 title/body/branch 匹配足够，避免 schema 变动
+- 不处理已 close/merged 的 PR — 只看 `--state open`
+- 不做反向探测（story id 在远端但本地 BACKLOG 没有）— 超出本 Story scope
+- 不与 US-AUTO-033 的 PR 自动创建做强耦合 — 即使 US-AUTO-033 未落地，本 Story 也独立有用（人手开的 PR 也能保护）
+
+**Files:**
+- `bin/roll`：`_loop_pending_pr_stories` 新函数（放在 `_loop_precheck_ci` 附近）
+- `skills/roll-loop/SKILL.md`：Step 1.6 新增 + Step 2 增加过滤分支
+- `tests/unit/roll_loop_pr_skip.bats`（新增）
+- `tests/integration/cmd_loop.bats`（加 1 个用例）
+
+**Risks:**
+- `gh pr list` 速率限制 — 单次调用一个端点，正常用户量级远低于阈值；ALERT 文案保留「调用失败 → lenient」路径
+- 误命中 — 若 PR title 里写「fixes US-AUTH-003 by adding US-AUTH-004」，US-AUTH-004 会被误跳过；这是设计上故意保守（宁可错过一轮也不冲撞人）
+
+**Dependencies:**
+- 依赖：现有 `_LOOP_ALERT` 机制 + runs.jsonl `skipped` schema（FIX-018 已固定）
+- 与 FIX-030（pre-flight fetch）独立，可并行交付
+- 与 US-AUTO-032（worktree）独立，落地顺序无关

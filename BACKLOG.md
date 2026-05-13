@@ -234,3 +234,4 @@
 | IDEA-013 | dashboard 完成度检查项 — UAT 信号源定义（怎么采集、谁来验，概念待定） | ⏸ Deferred |
 | IDEA-014 | dashboard 完成度检查项 — "活证据"信号源定义（与 sentinel 数据流可能有关联，设计待定） | ⏸ Deferred |
 | IDEA-015 | loop 在独立目录（worktree）里跑，避免污染主干正在编辑的代码 — 拆为 US-AUTO-036 + US-AUTO-037 落地 | ✅ Done → US-AUTO-036, US-AUTO-037 |
+| IDEA-016 | PR 生命周期管理迁移到 GitHub Actions — 评审触发、CI 绿后 auto-merge、rebase 失败诊断、stale 清理全部由 GitHub Actions event-driven 处理；Loop 只检查自己开的未收口故事。需先验证 US-AUTO-034 落地效果再做设计。 | ⏸ Deferred |

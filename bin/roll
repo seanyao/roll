@@ -3127,7 +3127,7 @@ _changelog_lint_bullet() {
     echo "internal-word"
   fi
   local len
-  len=$(LC_ALL=C.UTF-8 printf '%s' "$bullet" | LC_ALL=C.UTF-8 wc -m | tr -d ' ')
+  len=$(printf '%s' "$bullet" | LC_ALL=C.UTF-8 wc -m | tr -d ' ')
   if [ "${len:-0}" -gt 50 ]; then
     echo "over-length"
   fi

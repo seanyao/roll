@@ -216,6 +216,10 @@ _setup_origin_main() {
 
 @test "_loop_publish_doc_pr: returns 2 when gh not installed" {
   _install_git_wrapper
+  command() {
+    if [ "$1" = "-v" ] && [ "$2" = "gh" ]; then return 1; fi
+    builtin command "$@"
+  }
   run _loop_publish_doc_pr "loop/cycle-test"
   [ "$status" -eq 2 ]
 }

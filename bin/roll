@@ -2123,6 +2123,9 @@ WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0
 cd "${project_path}" 2>/dev/null || true
+# US-AUTO-038: snapshot orphan claude/* branches before claude runs so the
+# post-claude cleanup can diff and delete only this session's additions.
+CLAUDE_BRANCH_SNAPSHOT="\$(_claude_remote_snapshot "${project_path}")"
 if _worktree_fetch_origin main \\
    && _worktree_create "\$WT" "\$BRANCH" "origin/main"; then
   _USE_WORKTREE=1
@@ -2147,6 +2150,11 @@ for _attempt in 1 2 3; do
     sleep 30
   fi
 done
+
+# US-AUTO-038: diff snapshot vs current and delete any claude/* branches this
+# session pushed to origin. Runs regardless of claude's exit code (cleanup is
+# orthogonal to success/failure) and is silent on non-GitHub / unreachable.
+_claude_cleanup_new_branches "\$CLAUDE_BRANCH_SNAPSHOT" "${project_path}" || true
 
 # Post-claude: publish cycle branch. Doc-only changes (BACKLOG/docs) merge
 # immediately via --admin; code changes use auto-merge (CI gate required).
@@ -3630,6 +3638,44 @@ _worktree_merge_back() {
     _worktree_alert "push origin main failed after merging ${branch}"
     return 1
   fi
+  return 0
+}
+
+# _claude_remote_snapshot [repo]
+#   Echo the current set of remote `claude/*` branch names (sans
+#   refs/heads/), one per line, sorted. Silent on remote unreachable / no
+#   remote / no matches — empty stdout, exit 0.
+_claude_remote_snapshot() {
+  local repo="${1:-.}"
+  git -C "$repo" ls-remote --heads origin 'refs/heads/claude/*' 2>/dev/null \
+    | awk '{print $2}' \
+    | sed 's|^refs/heads/||' \
+    | sort
+}
+
+# _claude_cleanup_new_branches <prior> [repo]
+#   Delete remote `claude/*` branches present now but absent from <prior>
+#   (newline-separated list, as emitted by _claude_remote_snapshot). Skips
+#   silently when origin is not a GitHub remote. Each successful delete logs
+#   one INFO line; failures are silently ignored so the loop's main flow is
+#   never derailed.
+_claude_cleanup_new_branches() {
+  local prior="$1"
+  local repo="${2:-.}"
+  local url; url=$(git -C "$repo" remote get-url origin 2>/dev/null)
+  [[ "$url" == *github.com* ]] || return 0
+  local current; current=$(_claude_remote_snapshot "$repo")
+  [ -z "$current" ] && return 0
+  local prior_sorted; prior_sorted=$(printf '%s\n' "$prior" | sort -u)
+  local new_branches
+  new_branches=$(comm -13 <(printf '%s\n' "$prior_sorted") <(printf '%s\n' "$current"))
+  [ -z "$new_branches" ] && return 0
+  while IFS= read -r branch; do
+    [ -z "$branch" ] && continue
+    if git -C "$repo" push origin --delete "$branch" 2>/dev/null; then
+      echo "[loop] deleted stale claude branch: $branch"
+    fi
+  done <<< "$new_branches"
   return 0
 }
 

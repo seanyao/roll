@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Changelog 历史版本全部重新整理：按主题分组、合并同类项、用词更贴近用户视角，附 `[loop]` / `[dream]` 归因标记
+- Changelog Skill 新增 Release Notes 生成规范：分组规则、条目合并、归因标签、措辞原则
+- README 新增 Evolution 章节，梳理 Roll 从工具到自主交付系统的演进脉络
+
 ## v2026.514.1
 
 ### 自动化流水线

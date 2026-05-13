@@ -1526,22 +1526,27 @@ Claude Code agent sessions 工作时会推 `claude/<name>-<id>` 分支到 remote
 
 根本原因：`claude/*` 是 agent 的临时工作分支，不属于 loop 流水线，没有任何清理机制。
 
+**设计决策：事件驱动，不做定期扫描**
+
+~~原方案~~ 在 loop 起跑时定期扫描全量 `claude/*` 分支并按"age > 7天"等启发式规则删除。这个方案有两个问题：(1) 时机启发式脆弱——跑得慢的 session 超过阈值就会被误删；(2) 治标不治本——分支在产生的地方就应该被清理。
+
+**正确做法**：在 `inner.sh` 里，Claude 启动前记录一次 remote `claude/*` 快照，Claude 退出后把本次 session 新增的 `claude/*` 分支立刻删除。时机精准，无启发式，无延迟。
+
 **AC:**
-- [ ] loop 每轮起跑前（pre-claude phase），调用 `_loop_cleanup_claude_branches` 扫描 remote `claude/*` 分支
-- [ ] 对每个分支，若其 tip commit 已被 `origin/main` 包含（`git merge-base --is-ancestor <sha> origin/main`）→ `git push origin --delete <branch>`（已合入，安全删除）
-- [ ] 对每个分支，若 tip **未**合入 main，但 tip commit 时间距今 > 7 天且该分支无 open PR（`gh pr list --head <branch> --state open`）→ 同样删除（废弃 session）
-- [ ] 若分支 tip commit 时间距今 ≤ 2 小时 → 跳过（可能是正在运行的 session，不误删）
-- [ ] 每次删除记一行日志（branch name、原因：merged/stale）到标准 INFO 输出
-- [ ] 非 GitHub remote 或 `gh` 未安装时，`_loop_cleanup_claude_branches` 静默返回 0（兼容本地 / CI）
-- [ ] `tests/unit/roll_loop_cleanup.bats` 覆盖：已合入删除 / 超期无 PR 删除 / 活跃（≤2h）跳过 / 非 github 跳过 / 幂等（分支不存在时不报错）共 5 条用例
+- [ ] `inner.sh` 在 `claude` 进程启动前，执行 `git ls-remote --heads origin 'refs/heads/claude/*'` 记录当前快照（branch → sha 列表）到临时变量
+- [ ] `claude` 进程退出后（无论成功/失败），再次执行同一命令取新快照，diff 出本次 session 新增的 `claude/*` 分支
+- [ ] 对每个新增分支执行 `git push origin --delete <branch>`，记一行 INFO 日志（branch name）
+- [ ] 若删除失败（分支已不存在等），静默忽略（幂等）
+- [ ] 非 GitHub remote 或远端不可达时，整段逻辑静默跳过，不影响主流程
+- [ ] `tests/unit/roll_loop_cleanup.bats` 覆盖：新增分支被删 / 原有分支不被动 / 远端不可达跳过 / claude 失败时仍触发清理 / delete 失败（分支已不存在）静默忽略 共 5 条用例
 
 **Non-goals:**
-- `loop/*` 分支清理（US-AUTO-033 的 `--delete-branch` 已处理）
+- 历史堆积的孤立分支（首次部署后一次性手动清理即可，不进代码）
 - 非 `claude/*` 前缀的 feature/fix 分支（可能是人工创建的，不动）
-- Branch protection rules 变更
+- `loop/*` 分支清理（US-AUTO-033 的 `--delete-branch` 已处理）
 
 **Files:**
-- `bin/roll` — 新增 `_loop_cleanup_claude_branches` helper；在 `_write_loop_runner_script` pre-claude 段调用
+- `bin/roll` — `_write_loop_runner_script` 在 pre-claude 段加快照、post-claude 段加 diff+delete（约 10 行）
 - `tests/unit/roll_loop_cleanup.bats` — 5 条用例
 
 **Dependencies:**

@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Added**: loop 依赖闸门 — BACKLOG 行末尾的 `` `depends-on:US-X,US-Y` `` 和 `` `manual-only:true` `` 标签从此具有强制力；loop 选 story 前先用 `_loop_check_depends_on` / `_loop_is_manual_only` 两个 helper 过一遍，未满足依赖或带 manual-only 标的 story 直接跳过并写 `skipped` runs.jsonl 记录，不再需要靠人盯标签
 - **Fixed**: loop 并发保护补丁 — 2026-05-13 14:37 实测同 runner 下出现并发 claude 会话同时改 state.yaml / BACKLOG / git；inner script 现新增二级 LOCK（PID + start-ts 4h 双校验），守住 claude 调用现场，外层 LOCK 即使被旁路也兜底
 - **Changed**: CI 拆 unit / integration 双 job 并行 — `tests/run.sh` 接受可选目录参数；`.github/workflows/ci.yml` 用 `strategy.matrix` 把 509 unit + 70 integration 用例分到两个 runner 并行跑（REFACTOR-009 Phase 1B）；Phase 2 测试瘦身拆到 REFACTOR-010
 - **Changed**: `roll`（无参）dashboard 重设计 — 自治优先六块布局：① Identity（项目名 + 版本 + agent + git 状态）② AI 自治主视觉（Loop / Dream / Peer 三层 + 四道防线，框线高亮）③ Pipeline 全景（Idea/Backlog/Build/Verify/Release 五段计数）④ Current Focus · DoD（in-progress story 的 [AC] [CI] 信号，其余 4 项标注待接入）⑤ Human × AI 介入区（ALERT/PROPOSAL/Release ready，空时显示"AI 自驱中"）⑥ Schedules & Last Brief。把"AI 自动跑什么"放第一眼，不再埋在 `roll loop status` 子命令里

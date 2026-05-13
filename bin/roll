@@ -2053,6 +2053,24 @@ _write_loop_runner_script() {
 #!/bin/bash -l
 set -o pipefail
 export PATH="/opt/homebrew/bin:\$PATH"
+# FIX-031: inner-level LOCK (PID + start-ts) — outer runner.sh LOCK can be
+# bypassed (recovery / retry / direct invocation); this guards the actual
+# claude invocation so a second session can't run under the same project.
+INNER_LOCK="\$(dirname "\$0")/.INNER-LOCK-\$(basename "\$0" -inner.sh | sed 's/^run-//')"
+if [ -f "\$INNER_LOCK" ]; then
+  _prev_pid=""; _prev_ts=""
+  IFS=: read -r _prev_pid _prev_ts < "\$INNER_LOCK" 2>/dev/null || true
+  _now=\$(date -u +%s)
+  if [ -n "\$_prev_pid" ] && [ -n "\$_prev_ts" ] \\
+     && kill -0 "\$_prev_pid" 2>/dev/null \\
+     && [ "\$((_now - _prev_ts))" -lt 14400 ]; then
+    echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] inner loop already running (PID \$_prev_pid), skipping"
+    exit 0
+  fi
+  rm -f "\$INNER_LOCK"
+fi
+printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$INNER_LOCK"
+trap 'rm -f "\$INNER_LOCK"' EXIT
 FMT="${fmt_script}"
 for _attempt in 1 2 3; do
   if [ -f "\$FMT" ]; then

@@ -3057,6 +3057,28 @@ _worktree_cleanup() {
   return 0
 }
 
+# _worktree_fetch_origin <branch>
+#   `git fetch origin <branch>` quietly. Lenient on failure: a missing
+#   remote / network blip must not derail the loop, so we return 0 even
+#   when fetch fails (the loop's later ff-only check is the strict gate).
+_worktree_fetch_origin() {
+  local branch="$1"
+  if ! git fetch origin "$branch" --quiet 2>/dev/null; then
+    echo "[worktree] fetch origin ${branch} failed (lenient, continuing)" >&2
+  fi
+  return 0
+}
+
+# _worktree_submodule_init <path>
+#   Run `git submodule update --init --recursive` inside the worktree at
+#   <path> so its working tree is materially complete. Runs in a subshell
+#   (cd is local) so the caller's cwd and the parent worktree's submodule
+#   state are untouched. Returns submodule update's exit code.
+_worktree_submodule_init() {
+  local path="$1"
+  ( cd "$path" && git submodule update --init --recursive --quiet )
+}
+
 _loop_monitor() {
   local interval="${1:-3}"
   local project_path; project_path=$(pwd -P)

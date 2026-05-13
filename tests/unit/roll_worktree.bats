@@ -115,3 +115,64 @@ teardown() {
   [ -f "$_LOOP_ALERT" ]
   grep -qF "sample failure message" "$_LOOP_ALERT"
 }
+
+# --- _worktree_fetch_origin ---
+
+@test "_worktree_fetch_origin: succeeds when origin has the branch" {
+  run _worktree_fetch_origin "main"
+  [ "$status" -eq 0 ]
+}
+
+@test "_worktree_fetch_origin: lenient — returns 0 even when fetch fails" {
+  # Break origin so fetch fails (origin URL points nowhere)
+  git remote set-url origin "${TEST_TMP}/does-not-exist.git"
+  run _worktree_fetch_origin "main"
+  [ "$status" -eq 0 ]
+}
+
+# --- _worktree_submodule_init ---
+
+@test "_worktree_submodule_init: works inside worktree and leaves main intact (coexistence)" {
+  # Build a tiny submodule upstream
+  cd "$TEST_TMP"
+  git init -q --bare submod.git
+  git clone -q submod.git submod_seed
+  ( cd submod_seed \
+      && git config user.email t@t && git config user.name t && git config commit.gpgsign false \
+      && git commit --allow-empty -m "submod-init" -q \
+      && git branch -m main 2>/dev/null \
+      && git push -q -u origin main )
+  rm -rf submod_seed
+
+  # Add the submodule to main repo. file:// transport is restricted by
+  # default in modern git, so we opt in via `-c protocol.file.allow=always`
+  # for the test fixture commands. The helper under test does NOT receive
+  # this flag — it relies on the worktree inheriting from main's persisted
+  # config below.
+  cd "${TEST_TMP}/repo"
+  git config protocol.file.allow always
+  git -c protocol.file.allow=always submodule add -q "${TEST_TMP}/submod.git" deps/submod
+  git commit -q -m "add submod"
+  git push -q
+
+  # Init main's submodule + record its HEAD
+  git -c protocol.file.allow=always submodule update --init --recursive --quiet
+  [ -d deps/submod/.git ] || [ -f deps/submod/.git ]
+  local main_submod_head; main_submod_head=$(cd deps/submod && git rev-parse HEAD)
+
+  # Spin up a worktree, run the helper. file:// transport is only used to
+  # avoid spinning up a real remote in tests, so inject the protocol allowlist
+  # via env (production submodules use https — no env needed).
+  local wt; wt=$(_worktree_path "test" "US-SUB")
+  _worktree_create "$wt" "loop/US-SUB" "main"
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always \
+    run _worktree_submodule_init "$wt"
+  [ "$status" -eq 0 ]
+
+  # Worktree has submodule materialised
+  [ -d "$wt/deps/submod/.git" ] || [ -f "$wt/deps/submod/.git" ]
+
+  # Main's submodule is unaffected (same HEAD, working tree intact)
+  local main_submod_after; main_submod_after=$(cd deps/submod && git rev-parse HEAD)
+  [ "$main_submod_head" = "$main_submod_after" ]
+}

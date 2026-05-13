@@ -27,6 +27,16 @@ Roll is an autonomous delivery system for software teams — AI agents pick stor
 
 _Works with Claude, Cursor, Codex, or your own agent._
 
+## Evolution
+
+Roll didn't start as a framework. It started as a question: *what if the AI didn't just write code, but actually shipped it?*
+
+Early versions just pushed engineering conventions to whichever AI tool you were running. Then came multi-agent support — Kimi, DeepSeek, Codex, Trae — and `roll-peer`, which let one AI challenge another's decisions before anything landed on `main`.
+
+The real shift was `roll loop`: stories running back-to-back without human prompting, `roll-.dream` filing its own refactor tickets after nightly scans, the system generating its own work queue. What followed was building enough trust to leave it running overnight — worktree isolation, CI + AI review double gates, real-time visibility into what the agent was actually doing.
+
+The goal from here: full delivery, end to end — with humans on the loop, not in it.
+
 ---
 
 ## Quick Start (30 seconds)
@@ -71,22 +81,6 @@ roll loop on        # optional: let the agent work unattended
 | `roll brief` | 🤖 Show latest owner digest |
 | `roll peer` | 🤖 Cross-agent code review |
 | `roll release` | 🤖 Version + tag + npm publish + GitHub Release |
-
----
-
-## Evolution
-
-Roll didn't start as a framework. It started as a question: *what if the AI didn't just write code, but actually shipped it?*
-
-The first version was almost embarrassingly small — a way to push engineering conventions to whatever AI tool you happened to be running. But it needed to be trustworthy before it could be useful, so the early weeks went into making Roll self-maintaining: one-command releases, self-updating installs, a clean npm presence.
-
-The next step was making Roll genuinely multi-agent. Kimi, DeepSeek, Codex, Trae — each integrated with its own skill preferences and model bindings. `roll-peer` came from a simple insight: agents shouldn't just review their own work. Have one AI challenge another's design decisions before anything lands on `main`. That turned out to be the first glimpse of what Roll was actually becoming.
-
-The real shift happened when `roll loop` went live. Stories started running back-to-back without any human prompt. `roll-.dream` began filing its own refactor tickets after nightly scans. The system had started generating its own work queue — not just executing tasks, but surfacing the next ones.
-
-What followed was learning to trust that autonomy: real-time terminal windows, worktree isolation so loop runs never touch your in-progress work, a CI + AI review double gate so nothing merges until it's actually ready. The kind of loop you can leave running overnight and wake up to something mergeable.
-
-The goal from here: full delivery, end to end — with humans on the loop, not in it.
 
 ---
 

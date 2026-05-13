@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.513.1
 - **Added**: loop worktree 隔离 Phase 2 — `_write_loop_runner_script` 现在让每轮 cron 在独立的 `loop/cycle-<ts>-<pid>` worktree 里跑 claude，结束后 ff-merge 回 main + 自动清理；失败保留 worktree + 写 ALERT。loop 不再吞 main 的 WIP，多轮之间也完全隔离。claude 仍保留 story selection 权（SKILL.md 不变）
 - **Added**: loop worktree 隔离 Phase 1 — `bin/roll` 新增 7 个 `_worktree_*` helpers（path / create 幂等 / cleanup / fetch lenient / submodule init / merge_back ff-only / alert），覆盖 loop 在独立 worktree 跑 story 的完整生命周期；零行 runner.sh 改动，loop 自己也能跑；US-AUTO-037 (manual-only) 之后把这些 helpers 接入 `_write_loop_runner_script`
 - **Added**: loop 依赖闸门 — BACKLOG 行末尾的 `` `depends-on:US-X,US-Y` `` 和 `` `manual-only:true` `` 标签从此具有强制力；loop 选 story 前先用 `_loop_check_depends_on` / `_loop_is_manual_only` 两个 helper 过一遍，未满足依赖或带 manual-only 标的 story 直接跳过并写 `skipped` runs.jsonl 记录，不再需要靠人盯标签

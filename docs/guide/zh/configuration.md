@@ -39,7 +39,7 @@ ROLL_CONFIG=/tmp/test-config.yaml roll agent use kimi
 ## 验证
 
 `roll status` 会打印解析后的路径，便于确认覆盖是否生效；
-`roll doctor` 会在解析后的 `ROLL_HOME` 下检查目录结构。
+通过 `$roll-doctor` 技能可以诊断解析后的 `ROLL_HOME` 下的目录结构问题。
 
 ## 相关文档
 

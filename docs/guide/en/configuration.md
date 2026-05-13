@@ -41,8 +41,8 @@ ROLL_CONFIG=/tmp/test-config.yaml roll agent use kimi
 ## Verifying
 
 `roll status` prints the resolved paths so you can confirm overrides took
-effect. `roll doctor` checks the directory structure under the resolved
-`ROLL_HOME`.
+effect. Invoke the `roll-doctor` skill (`$roll-doctor`) to diagnose
+directory structure issues under the resolved `ROLL_HOME`.
 
 ## See Also
 

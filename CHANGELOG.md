@@ -48,115 +48,77 @@
 - `roll peer` 协商退出时偶发的崩溃修掉了 `[loop]`
 
 ## v2026.512.8
-- **Added**: `$roll-doc` — 扫描任意项目的文档现状，找出缺口并生成草稿，支持 `--dry-run`
-- **Added**: `roll-.dream` Scan 6 — 每晚检测文档是否跟代码脱节，发现问题自动写进重构待办
-- **Fixed**: 某些 SSH 配置下 loop 把"CI 查询失败"误判为"CI 工具未安装"，导致测试没过就标任务完成
 
-## v2026.512.7
-- **Added**: `roll alert` — 查看、确认、清除 loop 告警，不用再去翻 loop status
-- **Added**: macOS 系统通知 — story 完成或告警写入时自动弹通知，静音模式下不打扰
-- **Added**: `roll ci [--wait]` — 查看当前提交的 CI 状态，或等待 CI 跑完再继续
-- **Fixed**: loop 现在会等 CI 通过后才标记故事完成，CI 失败则保持进行中并发出提醒
-- **Fixed**: changelog 更新不再产生独立 commit，并入故事完成提交，git log 更干净
-- **Added**: `docs/domain/` — Roll 架构领域模型文档
-- **Fixed**: `roll loop runs` 不再报"当前项目尚无运行记录"，历史记录正常显示
-- **Added**: 文档目录重组 — 散落文档统一迁移至 `docs/guide/` 和 `docs/practices/`
-- **Added**: README 精简，新增文档导航索引
-- **Added**: dream 每晚自动检测文档缺口，brief 新增文档覆盖率数字
+### 掌控感更强了
 
-## v2026.512.6
-- **Added**: peer review 现在也会自动弹出终端窗口，实时观察跨 AI 协商过程（mute 关闭同一开关）
-- **Added**: `docs/guide/en/` — loop/dream/peer 英文用户指南上线，覆盖所有子命令和使用场景
-- **Added**: `docs/guide/zh/` — loop/dream/peer 中文用户指南上线，内容与英文版语义一致
+Loop 已经能跑、能看了——这一批让你对它有更多控制权：
 
-## v2026.512.5
-- **Fixed**: loop 遇到 API 错误时自动重试，不再直接中断
+- `roll loop pause` / `roll loop resume` — 想自己上手时一键暂停，做完再让 AI 接着跑 `[loop]`
+- `roll alert` — 集中查看、确认、清除 loop 产生的告警，不用翻 loop status `[loop]`
+- macOS 系统通知 — story 完成或有新告警时自动弹通知，静音模式下不打扰 `[loop]`
+- `roll ci [--wait]` — 查看当前 CI 状态，或等 CI 跑完再继续手头的事
 
-## v2026.512.3
-- **Added**: BACKLOG 支持 block / defer / unblock 状态管理 — 标记卡住的任务不再占队列
-- **Fixed**: 自动弹窗现在能识别 Ghostty 和 iTerm2，不再强制弹出 Terminal.app
-- **Fixed**: loop 检测到上一轮还在跑时自动跳过，不重复启动
+### Loop 更聪明了
 
-## v2026.512.1
-- **Added**: `roll loop pause` / `roll loop resume` — 想自己上手时一键暂停 loop，做完再恢复
-- **Added**: `roll status` 新增所有项目的 loop 状态一览 — 调度时间、待办数、是否在跑
-- **Fixed**: `roll loop attach` 不再黑屏，AI 干活过程实时可见
+- Loop 现在等 CI 通过后才标 story 完成，CI 红了会保持进行中并发出提醒 `[loop]`
+- API 出错时自动重试，不再直接中断 `[loop]`
+- 弹窗认识 Ghostty 和 iTerm2 了，不再强制弹 Terminal.app `[loop]`
+- BACKLOG 支持 `block` / `defer` — 卡住的任务标一下就不占队列了
 
-## v2026.511.7
-- **Added**: loop 跑起来时自动弹出一个终端窗口，看 AI 实时干活
-- **Added**: `roll loop mute` 关掉自动弹窗，`roll loop unmute` 恢复
-- **Added**: `roll loop runs` — 查看 loop 最近几次都跑了什么
-- **Added**: `roll loop attach` — 随时接入正在跑的 loop 现场围观
-- **Added**: BACKLOG 任务执行中会实时显示 🔨 进度，不用等做完才知道
-- **Added**: `roll setup` 自动安装 tmux（macOS 通过 brew）
-- **Improved**: 代码巡检（dream）报告改为中文输出
-- **Fixed**: loop 在某些情况下完成后不正常退出
-- **Fixed**: loop 中途崩溃后下次启动会自动清理残留状态
+### 文档体系上线
 
-## v2026.511.6
-- **Fixed**: 多个 loop 实例不会再因为定时重复触发而互相打架
+- loop / dream / peer 中英文用户指南全部上线，覆盖所有子命令和使用场景 `[dream]`
+- `$roll-doc` — 扫描任意项目的文档现状，找出缺口并生成草稿 `[dream]`
+- Dream 每晚检测文档是否跟代码脱节，发现问题写进重构待办 `[dream]`
+- `roll status` 新增跨项目 loop 状态一览
 
-## v2026.511.5
-- **Fixed**: 升级 roll 后 loop 服务自动生效，无需手动重启
-- **Improved**: `roll loop status` 三态显示，看得清是真没装、装了没启、还是在跑
+## v2026.511.8
 
-## v2026.511.4
-- **Fixed**: 升级 roll 后 `roll init` 自动迁移 loop 配置，少一步手动操作
+### 终于能看到 Loop 在做什么了
 
-## v2026.511.3
-- **Fixed**: 多个项目同时跑 loop，互不干扰
-- **Fixed**: 在 roll 项目里运行 `roll release` 会提示改用 `scripts/release.sh`
+Loop 上线后最大的感受是「不知道它在干啥」——这一批更新专门解决这个问题：
 
-## v2026.511.2
-- **Added**: `roll loop monitor` — 一屏看 loop/dream/brief 三个调度服务状态
-- **Fixed**: dashboard 待办数、release 状态显示问题
-- **Fixed**: loop 异常退出后队列卡住不再继续执行
-- **Improved**: 简报输出更精简，去掉空白段落和冗余信息
+- Loop 开跑时自动弹出终端窗口，AI 干活的过程实时可见 `[loop]`
+- `roll loop attach` — 随时接入正在跑的 loop 现场 `[loop]`
+- `roll loop runs` — 查看 loop 最近几次跑了什么、完成了哪些 `[loop]`
+- BACKLOG 任务执行中实时显示进度标记，不用等做完才知道 `[loop]`
+- 不想被打扰时，`roll loop mute` 关掉弹窗，`roll loop unmute` 恢复
 
-## v2026.511.1
-- **Changed**: macOS 上 loop 调度切换到 launchd，比 crontab 更稳定
-- **Added**: agent 跳过 TCR 节奏时自动拦回 Todo，强制重做
+### Loop 更稳了
+
+- macOS 上调度从 crontab 换成 launchd，重启后不丢 `[loop]`
+- 升级 roll 后 loop 服务自动生效，不用手动重启 `[loop]`
+- 多个项目同时跑 loop，互不干扰 `[loop]`
+- 崩溃或异常退出后，下次启动自动清理残留状态 `[loop]`
+- 并发触发时自动跳过，不重复执行 `[loop]`
+
+### 其他改进
+
+- `roll loop monitor` — 一屏查看 loop / dream / brief 三个服务状态
+- `roll loop status` 三态显示：没装 / 装了没启 / 正在跑，一眼看清
+- `roll init` 升级后自动迁移 loop 配置，少一步手动操作
 
 ## v2026.510.10
-- **Fixed**: release.sh changelog 同步时序修复 — 修正条件逻辑和执行顺序，确保每次发版时 changelog 正确更新
-- **Added**: roll-loop 22:00 自动执行验证 — 新增 hello_world.bats 作为 loop 定时执行的端到端存档，可回放确认调度器正常工作
 
-## v2026.510.9
-- **Fixed**: CHANGELOG 改版本号分组 — 每个 release 独立 section，GitHub Release 增量内容提取正确
-- **Fixed**: release.yml 加 fetch-depth: 0，确保历史 tag 在 workflow 中可见
+### Loop、Dream、Brief 首次亮相
 
-## v2026.510.8
-- **Fixed**: release.sh 自洽 — 发版流程不依赖外部调用
-- **Fixed**: `roll release` 改为独立调用 roll-release skill，与 release.sh 解耦
-- **Fixed**: GitHub Release workflow 加 fetch-depth: 0，确保历史 tag 可见
+Roll 从「技能编排工具」变成了「自主执行系统」——三个新组件同步上线：
 
-## v2026.510.7
-- **Fixed**: 版本比较改用 sort -V，防止旧版本号被误判为最新
-- **Fixed**: 版本更新后主动清缓存 — 检测到运行版本更新时自动清缓存，避免旧版本幽灵提示
-- **Fixed**: Kimi CLI 解析修复 — 剥离 YAML frontmatter 中的 `---` 分隔符，避免调用时解析崩溃
-- **Fixed**: dashboard 命令列表补全，`roll --help` 现在展示全部可用命令
-- **Added**: `roll release` 命令补全到 usage() 帮助中
+- `roll loop` — 让 AI 自动调度 BACKLOG，Story 一个接一个跑，不用你盯着
+- `roll brief` — 每天早上自动整理昨天做了什么，帮你快速恢复上下文
+- `roll-.dream` — 每晚自动巡检代码和架构，把发现的问题写成可执行的待办
 
-## v2026.510.6
-- **Fixed**: Agent 调用层统一 — 移除所有 claude -p 硬编码，统一 agent 抽象层，支持 Claude/Kimi/Pi/Codex/OpenCode
-- **Fixed**: pi/codex/opencode 支持补全 — _agent_run_skill/_peer_call 穷举所有 agent，未知 agent 给明确错误
-- **Fixed**: kimi 非交互调用语法修正为 kimi --quiet -p，经实测验证
-- **Fixed**: roll-build / roll-fix Phase 12 强制触发 roll-.changelog，确保 CHANGELOG 与 BACKLOG 同步
-- **Added**: roll release 命令 — 在 roll CLI 内直接调用 roll-release skill
-- **Added**: GitHub Release 自动创建 — tag push 后由 workflow 从 CHANGELOG diff 提取内容
+### 自动化能力
 
-## v2026.510.5
-- **Added**: roll-loop — BACKLOG 自主执行器，支持调度、跨 Agent 路由和失败处理，让 AI 自主推进项目任务
-- **Added**: roll-brief — Feature完成汇报、每日晨报、按需简报，一句话掌握项目状态和发布就绪情况
-- **Added**: roll-.dream — 每晚代码架构健康巡检，自动产出 REFACTOR 条目，架构问题持续浮出水面
-- **Added**: roll-build 架构摩擦信号 — 实现遇阻时自动向 BACKLOG 写入 REFACTOR 标记，技术债持续可见
-- **Added**: E2E 自动沉淀 — 每个 Story 交付时自动写一个端到端测试，项目逐步积累可回放的 E2E 套件
-- **Added**: CI E2E 门禁 — 模板 CI 每次推送自动跑 E2E 测试，没有 E2E 时静默跳过不阻塞
-- **Added**: CI 红灯分诊 — 按严重程度分类 CI 失败，自动路由到 backlog 变成可执行的修复项
-- **Added**: roll-debug 自动修复 — 诊断后若根因在项目源码内，自动进入 TCR 修复流程并回验
-- **Added**: Changelog 自动生成 — 每次部署后自动更新，首次运行时回填全部历史记录
-- **Added**: roll status/update 显示最近更新 — 运行 `roll status` 或 `roll update` 时展示最近 3 个版本的 changelog
-- **Fixed**: roll-release 补齐 GitHub Release 创建步骤 — 修复版本更新提醒从不生效的问题
+- 每个 Story 交付时自动沉淀一个 E2E 测试，项目逐步积累可回放的验收套件 `[loop]`
+- CI 失败会自动分诊，按严重程度路由成 backlog 里可执行的修复项 `[loop]`
+- `roll debug` 诊断出根因在源码内时，自动进入修复流程并回验 `[loop]`
+- Changelog 每次部署后自动更新，不再需要手动整理 `[loop]`
+
+### 可见性
+
+- `roll status` / `roll update` 运行后展示最近几个版本的更新内容
+- `roll release` 命令 — 在 CLI 里直接触发发布，不用记路径
 
 ## 2026.05.09
 - **Added**: roll-peer 跨 Agent 代码评审 — 支持 Claude Code、Kimi CLI、DeepSeek TUI、Codex CLI 多工具协同评审 (by @seanyao)

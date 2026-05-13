@@ -63,6 +63,8 @@ sed -i.bak "s/^VERSION=.*/VERSION=\"${VERSION}\"/" bin/roll && rm bin/roll.bak
 # Sync CHANGELOG.md: only run skill if section for this version is missing
 if ! grep -q "^## v${VERSION}" CHANGELOG.md 2>/dev/null; then
   _run_changelog_skill
+  # Rename ## Unreleased → ## v{VERSION}
+  sed -i.bak "s/^## Unreleased$/## v${VERSION}/" CHANGELOG.md && rm CHANGELOG.md.bak
 fi
 
 # Commit (include CHANGELOG.md if it was updated by cmd_release)

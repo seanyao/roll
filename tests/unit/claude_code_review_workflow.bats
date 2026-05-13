@@ -19,3 +19,18 @@ WF="${BATS_TEST_DIRNAME}/../../.github/workflows/claude-code-review.yml"
   # When escape hatch fires, the workflow auto-approves so merge is not blocked.
   grep -qE 'gh pr review .* --approve' "$WF"
 }
+
+@test "claude-code-review.yml: prompt instructs --request-changes for issues" {
+  grep -qE 'gh pr review.*--request-changes' "$WF"
+}
+
+@test "claude-code-review.yml: prompt has UNCERTAIN path with _LOOP_ALERT marker" {
+  grep -qF 'UNCERTAIN' "$WF"
+  grep -qF '_LOOP_ALERT' "$WF"
+}
+
+@test "claude-code-review.yml: failure mode forbids approve/request-changes" {
+  # Tool-call failures must NOT silently approve or silently request-changes.
+  # The reviewer should comment-only and let the CI gate decide.
+  grep -qE 'do NOT.*approve' "$WF"
+}

@@ -95,6 +95,25 @@ Priority: FIX-XXX first (bugs block progress), then US-XXX, then REFACTOR-XXX.
 - An earlier loop iteration that hasn't finished yet (rare; should be guarded by LOCK)
 - A previous interrupted run (the resume logic in Step 1 will pick these up)
 
+**Dependency gate** (FIX-032). For each `📋 Todo` candidate, before picking:
+
+```bash
+# Source bin/roll once per cycle, then call the helpers per candidate.
+source "$(command -v roll)"
+
+bash -c 'source "$(command -v roll)"; _loop_is_manual_only "<story-id>" BACKLOG.md'
+#   exit 0 → row has `manual-only:true` → SKIP this story, log to runs.jsonl
+#            `skipped`, append INFO line ("manual-only — requires $roll-build")
+
+bash -c 'source "$(command -v roll)"; _loop_check_depends_on "<story-id>" BACKLOG.md'
+#   exit 0 → all `depends-on:US-X,US-Y` are ✅ Done → eligible
+#   exit 1 → stdout lists unsatisfied dep IDs; SKIP this story, log to
+#            runs.jsonl `skipped` with reason "depends-on: <unsatisfied>"
+```
+
+Move to the next candidate when skipping. The two gates are pure functions
+over BACKLOG.md text — no side effects, no LOCK interaction.
+
 Cap at `max_items_per_run` to limit blast radius per cycle.
 
 ### Concurrency Safety

@@ -33,6 +33,16 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   grep -qE '紧急|emergency|中断插入|interrupt' "$SKILL_FILE"
 }
 
+@test "roll-loop SKILL.md: Step 2 documents dependency gate (FIX-032)" {
+  # Must mention the two helpers added in FIX-032 + how the loop uses them
+  grep -qF '_loop_check_depends_on' "$SKILL_FILE"
+  grep -qF '_loop_is_manual_only' "$SKILL_FILE"
+  grep -qE 'depends-on|Dependency gate' "$SKILL_FILE"
+  grep -qF 'manual-only' "$SKILL_FILE"
+  # On skip, must be logged to runs.jsonl as `skipped`
+  grep -qE 'skipped.*depends-on|runs\.jsonl.*skipped' "$SKILL_FILE"
+}
+
 @test "roll-loop SKILL.md: runs.jsonl schema is strictly defined (FIX-018)" {
   # Strict schema warning must be present
   grep -qF 'Strict schema contract' "$SKILL_FILE"

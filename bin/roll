@@ -2944,6 +2944,70 @@ EOF
   return 0
 }
 
+# FIX-032: dependency gate — parses BACKLOG inline tags so the loop SKILL
+# can enforce them at Step 2 (story pickup). Pure functions, no side effects.
+#
+# BACKLOG row format (relevant fragments):
+#   | [US-AUTO-033](...) | desc `depends-on:US-AUTO-037` `manual-only:true` | 📋 Todo |
+#   | FIX-100 | desc `depends-on:US-A,US-B` | 📋 Todo |
+#
+# Row matching is anchored on `^| [?<id>\b` so a story-id appearing in some
+# other row's depends-on list is not mistaken for the row that defines it.
+
+# _loop_check_depends_on <story-id> [backlog-path]
+#   Exit 0: all listed depends-on are ✅ Done, or no depends-on tag present.
+#   Exit 1: any dep not ✅ Done, story-id not found, or backlog missing.
+#   Stdout (on exit 1 due to unsatisfied deps): space-separated unsatisfied IDs.
+_loop_check_depends_on() {
+  local id="$1"
+  local backlog="${2:-BACKLOG.md}"
+  [ -n "$id" ] || return 1
+  [ -f "$backlog" ] || return 1
+
+  local row
+  row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
+  [ -n "$row" ] || return 1
+
+  local deps
+  deps=$(echo "$row" | grep -oE 'depends-on:[A-Z][A-Z0-9,-]+' | head -1 | sed 's/depends-on://')
+  [ -n "$deps" ] || return 0
+
+  local unsatisfied=""
+  local dep
+  local IFS_save="$IFS"
+  IFS=','
+  for dep in $deps; do
+    local dep_row
+    dep_row=$(grep -E "^\| \[?${dep}[]| ]" "$backlog" | head -1)
+    if [ -z "$dep_row" ] || ! echo "$dep_row" | grep -qF '✅ Done'; then
+      unsatisfied="${unsatisfied:+$unsatisfied }${dep}"
+    fi
+  done
+  IFS="$IFS_save"
+
+  if [ -n "$unsatisfied" ]; then
+    echo "$unsatisfied"
+    return 1
+  fi
+  return 0
+}
+
+# _loop_is_manual_only <story-id> [backlog-path]
+#   Exit 0: story's own row carries `manual-only:true`.
+#   Exit 1: tag absent, story-id not found, or backlog missing.
+_loop_is_manual_only() {
+  local id="$1"
+  local backlog="${2:-BACKLOG.md}"
+  [ -n "$id" ] || return 1
+  [ -f "$backlog" ] || return 1
+
+  local row
+  row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
+  [ -n "$row" ] || return 1
+
+  echo "$row" | grep -qE 'manual-only:true'
+}
+
 _loop_monitor() {
   local interval="${1:-3}"
   local project_path; project_path=$(pwd -P)

@@ -1503,9 +1503,10 @@ fi
 ---
 
 <a id="us-auto-038"></a>
-## US-AUTO-038 清理孤立 `claude/*` session 分支 📋
+## US-AUTO-038 清理孤立 `claude/*` session 分支 ✅
 
 **Created**: 2026-05-13
+**Completed**: 2026-05-13
 
 - As a product owner looking at the GitHub repo
 - I want stale Claude Code session branches to be cleaned up automatically
@@ -1528,12 +1529,12 @@ Claude Code agent sessions 工作时会推 `claude/<name>-<id>` 分支到 remote
 **正确做法**：在 `inner.sh` 里，Claude 启动前记录一次 remote `claude/*` 快照，Claude 退出后把本次 session 新增的 `claude/*` 分支立刻删除。时机精准，无启发式，无延迟。
 
 **AC:**
-- [ ] `inner.sh` 在 `claude` 进程启动前，执行 `git ls-remote --heads origin 'refs/heads/claude/*'` 记录当前快照（branch → sha 列表）到临时变量
-- [ ] `claude` 进程退出后（无论成功/失败），再次执行同一命令取新快照，diff 出本次 session 新增的 `claude/*` 分支
-- [ ] 对每个新增分支执行 `git push origin --delete <branch>`，记一行 INFO 日志（branch name）
-- [ ] 若删除失败（分支已不存在等），静默忽略（幂等）
-- [ ] 非 GitHub remote 或远端不可达时，整段逻辑静默跳过，不影响主流程
-- [ ] `tests/unit/roll_loop_cleanup.bats` 覆盖：新增分支被删 / 原有分支不被动 / 远端不可达跳过 / claude 失败时仍触发清理 / delete 失败（分支已不存在）静默忽略 共 5 条用例
+- [x] `inner.sh` 在 `claude` 进程启动前，执行 `git ls-remote --heads origin 'refs/heads/claude/*'` 记录当前快照（branch → sha 列表）到临时变量
+- [x] `claude` 进程退出后（无论成功/失败），再次执行同一命令取新快照，diff 出本次 session 新增的 `claude/*` 分支
+- [x] 对每个新增分支执行 `git push origin --delete <branch>`，记一行 INFO 日志（branch name）
+- [x] 若删除失败（分支已不存在等），静默忽略（幂等）
+- [x] 非 GitHub remote 或远端不可达时，整段逻辑静默跳过，不影响主流程
+- [x] `tests/unit/roll_loop_cleanup.bats` 覆盖：新增分支被删 / 原有分支不被动 / 非 GitHub 跳过 / cleanup wired AFTER 重试循环（即 claude 失败时仍触发）/ delete 失败静默忽略 共 5 条用例 + 2 条 snapshot helper 用例
 
 **Non-goals:**
 - 历史堆积的孤立分支（首次部署后一次性手动清理即可，不进代码）

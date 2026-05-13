@@ -178,7 +178,7 @@
 | [US-AUTO-035](docs/features/autonomous-evolution.md#us-auto-035) | AI 代码评审可批准或打回 PR，与 CI 形成合并双门；紧急情况可用环境变量跳过 `depends-on:US-AUTO-033` | ✅ Done |
 | [US-AUTO-036](docs/features/autonomous-evolution.md#us-auto-036) | worktree 隔离 Phase 1 — 加 7 个辅助函数 + 单元测试，不改动 runner | ✅ Done |
 | [US-AUTO-037](docs/features/autonomous-evolution.md#us-auto-037) | worktree 隔离 Phase 2 — runner 接入辅助函数，每轮在独立目录跑，完成后合回主干 `depends-on:US-AUTO-036` `manual-only:true` | ✅ Done |
-| [US-AUTO-038](docs/features/autonomous-evolution.md#us-auto-038) | 清理遗留的 `claude/*` 临时分支 — 每次 claude 会话结束后立即删除，不做定期扫描 `depends-on:US-AUTO-033` | 📋 Todo |
+| [US-AUTO-038](docs/features/autonomous-evolution.md#us-auto-038) | 清理遗留的 `claude/*` 临时分支 — 每次 claude 会话结束后立即删除，不做定期扫描 `depends-on:US-AUTO-033` | ✅ Done |
 
 ## Epic: Documentation
 ### Feature: documentation

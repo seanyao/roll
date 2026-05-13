@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.514.2
 
 - Changelog 历史版本全部重新整理：按主题分组、合并同类项、用词更贴近用户视角，附 `[loop]` / `[dream]` 归因标记
 - Changelog Skill 新增 Release Notes 生成规范：分组规则、条目合并、归因标签、措辞原则

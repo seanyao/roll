@@ -1209,3 +1209,51 @@ runner 起跑
 **Dependencies:**
 - 依赖：现有 `_LOOP_ALERT` 机制（不引入新 alert log）
 - Depended on by: 未来跨 story 并发 US、worktree GC FIX
+
+---
+
+<a id="us-auto-033"></a>
+## US-AUTO-033 loop 自动建 PR + GitHub Auto-merge 📋
+
+**Created**: 2026-05-13
+
+- As a product owner using roll-loop
+- I want completed stories to automatically create a PR and enable auto-merge
+- So that merged-to-main is fully autonomous once CI passes, with no manual steps
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: Story delivery pipeline
+- Events raised: [StoryPRCreated] → GitHub auto-merge → [StoryMergedToMain]
+
+**Background:**
+当前 roll-build Phase 8 直接 `git push origin main`，人工介入为零但绕过了 PR 审计链。
+另一个问题是：每次 loop push 分支后，GitHub 会在仓库首页显示 "Compare & pull request" banner，
+需要人手动点击或让 agent 操作。本 Story 把 PR 创建和 auto-merge 纳入 loop 自动流程，
+人完全不需要介入，同时保留 PR 作为审计和 rollback 入口。
+
+**AC:**
+- [ ] roll-build Phase 8 改为推到 feature 分支（`loop/<US-ID>`），不再直接推 main
+- [ ] CI 通过后（Phase 9），用 `gh pr create` 自动建 PR：
+  - title: `{US-ID}: {story description}`
+  - body: 包含 story AC 摘要、TCR micro-commit 数量、CI 状态
+  - base: `main`，head: `loop/<US-ID>`
+- [ ] PR 创建后立即执行 `gh pr merge --auto --squash`，开启 GitHub auto-merge
+- [ ] GitHub auto-merge 要求 repo 开启 "Allow auto-merge" 设置（在 repo Settings → General）；`roll setup` 或文档中说明此前提
+- [ ] CI 失败时不建 PR，走现有 ALERT 路径
+- [ ] loop 跑完后 `roll loop runs` 展示中加一列：PR URL（若已建）
+- [ ] 幂等：同一 `loop/<US-ID>` 分支若 PR 已存在，不重复创建，复用已有 PR URL
+
+**Non-goals:**
+- PR review 流程（require review / approve）→ 目标是全自动，不加人工审批
+- 多 base branch 支持 → 固定 main
+- PR label / assignee / milestone → 后续可扩展
+
+**Files:**
+- `skills/roll-build/SKILL.md`（Phase 8 改推分支，Phase 9 后加 PR 创建步骤）
+- `bin/roll`（`_loop_runs_format_line` 加 PR URL 列）
+- `docs/guide/en/methodology.md`（说明 PR + auto-merge 是 loop 交付终态）
+
+**Dependencies:**
+- 与 US-AUTO-032（worktree）自然契合：worktree 本已在 `loop/<US>` 分支上，本 Story 只需在完成时建 PR 而非 ff-only merge
+- 前提：GitHub repo 开启 "Allow auto-merge"（Settings → General → Allow auto-merge）

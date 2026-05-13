@@ -313,6 +313,8 @@ The **Verification Gate** is the final checkpoint: it requires **live evidence**
 >
 > 4 micro-commits total, zero manual intervention throughout. CI triggers all GREEN, auto-deploys to staging. Verification Gate collects evidence: `curl /api/audit` returns the correct event list, screenshot archived, US-007 closed.
 
+**Mechanical TCR enforcement** — The TCR contract is enforced by a pre-commit hook, not by convention alone. When `npm test` passes, the test runner writes a proof-of-pass record containing a Unix timestamp and the current working tree hash (`git write-tree`). Before any commit, the hook verifies two conditions: (1) the proof is no older than 60 seconds, and (2) the tree hash matches the current working tree. If either fails, the commit is blocked. This makes it physically impossible to commit untested code — rewriting commit messages after the fact cannot bypass it because the working tree hash would no longer match.
+
 ### 4.4 Continuous Integration / Continuous Delivery: The Fast Feedback Infrastructure
 
 CI/CD is not an "add-on" to Roll — it is the **objective arbitration layer** for all of Loop B. Passing tests locally is a necessary condition, not a sufficient one. Local environments carry implicit dependencies, uncommitted state, and machine-specific configuration. CI re-executes the same code in a clean, deterministic environment, making it the final authority on whether something is truly deliverable.

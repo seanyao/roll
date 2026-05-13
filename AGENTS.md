@@ -15,6 +15,7 @@
 - **Bash**: `set -euo pipefail`. All variables quoted. shellcheck-clean.
 - **Rules**: [engineering-common-sense.md](docs/practices/engineering-common-sense.md).
 - **Test**: bats coverage for `cmd_*` and helpers. Run `npm test` before push.
+- **Git hooks**: After cloning, run `git config core.hooksPath hooks` once to activate TCR pre-commit enforcement. The hook blocks any commit where tests did not pass on the exact code being committed.
 
 ## 3. Workflow
 - **TCR**: Test -> Green = Commit / Red = Revert. No WIP.

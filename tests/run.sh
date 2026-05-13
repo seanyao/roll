@@ -25,3 +25,16 @@ else
   # shellcheck disable=SC2086
   echo "$FILES" | xargs "$BATS"
 fi
+
+# Write proof-of-pass for pre-commit hook (US-INFRA-006).
+# Records timestamp + working tree hash so the hook can verify tests ran on
+# exactly the code being committed, not a prior or modified version.
+_REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$_REPO_ROOT" ]; then
+  mkdir -p "$_REPO_ROOT/.roll"
+  _TREE="$(git -C "$_REPO_ROOT" write-tree 2>/dev/null || true)"
+  if [ -n "$_TREE" ]; then
+    printf '{"ts":%s,"tree":"%s"}\n' "$(date +%s)" "$_TREE" \
+      > "$_REPO_ROOT/.roll/last-test-pass"
+  fi
+fi

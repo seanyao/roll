@@ -33,3 +33,6 @@ npm-debug.log*
 
 # Private release scripts (contain personal npm credentials/workflow)
 scripts/release.sh
+
+# TCR proof-of-pass record (local only, written by tests/run.sh)
+.roll/

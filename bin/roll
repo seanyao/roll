@@ -609,6 +609,36 @@ cmd_setup() {
 
   echo ""
   info "Next: run ${BOLD}roll init${NC} inside a project to initialize it.  下一步：在项目目录运行 roll init"
+
+  echo ""
+  _print_pr_pipeline_hint
+}
+
+# ─── PR pipeline hint ────────────────────────────────────────────────────────
+# US-AUTO-035: print the one-time branch-protection command that flips repo
+# from path A (CI gate only) to path C (CI + AI review double gate). Reading
+# this hint is opt-in; the command is destructive (changes branch protection)
+# so it is never run automatically.
+_print_pr_pipeline_hint() {
+  cat <<'HINT'
+
+  Optional — enable AI review as a hard merge gate (path C).
+  可选 —— 启用 AI 评审作为合并双门（路径 C）。
+
+  Run once per repo (requires admin token), then claude-code-review.yml
+  approvals become a required merge gate alongside CI:
+  每个仓库执行一次（需要管理员 token），之后 claude-code-review.yml 的
+  approve 将与 CI 一起成为合并必经的双门：
+
+      gh api -X PATCH repos/<owner>/<repo>/branches/main/protection \
+        -f required_pull_request_reviews.required_approving_review_count=1
+
+  Escape hatch: add [skip-ai-review] to a PR body, or include
+  SKIP_AI_REVIEW in any commit message, to bypass AI review for that PR.
+  紧急通道：在 PR body 加 [skip-ai-review]，或在任一 commit message
+  里包含 SKIP_AI_REVIEW，可对该 PR 绕过 AI 评审。
+
+HINT
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

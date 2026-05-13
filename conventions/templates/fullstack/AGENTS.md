@@ -27,3 +27,8 @@ api/
 - **TCR**: Mandatory.
 - **Testing**: Unit >80%, E2E for critical flows.
 - **Workspace**: `BACKLOG.md` + `docs/features/`.
+
+## 5. Where to Look
+- **Domain model**: `docs/domain/context-map.md` — Bounded Contexts and relationships
+- **Story details**: `docs/features/` — AC, implementation specs, dependencies
+- **Design decisions**: `docs/domain/` — DDD models, architecture records

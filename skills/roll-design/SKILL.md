@@ -491,6 +491,19 @@ OrderPricingService:
 Domain: Order Context > Order Aggregate > OrderItem Entity
 ```
 
+### AGENTS.md Where to Look — 指针维护
+
+After completing any Domain Slice (User Story level), check if the project's `AGENTS.md` has a `## Where to Look` section with a `docs/domain/` pointer. If missing, append one line:
+
+```markdown
+- **Domain model**: `docs/domain/context-map.md` — Bounded Contexts and relationships
+```
+
+Rules:
+- Idempotent: only append if the pointer line is not already present
+- Do not modify any other content in AGENTS.md
+- Skip silently if `docs/domain/` does not yet exist for this project
+
 ---
 
 ## Clarify Phase
@@ -505,10 +518,20 @@ Domain: Order Context > Order Aggregate > OrderItem Entity
 - Contains ambiguous terms like "优化一下", "改一下", "加个东西", "做个设计"
 - Could be interpreted in multiple ways
 
+**Pre-Clarify: three-step product localization (always run first, silently)**
+
+Before listing questions, internally determine:
+1. **产品端 (product end)**: web / mobile / API / CLI / other — which surface does this touch?
+2. **角色 (role)**: who initiates this action? (end user / admin / system / external)
+3. **业务域 (domain)**: which business domain does this belong to?
+
+Already-localized dimensions become context prefix in the output, not open questions.
+
 **Output format:**
 
 ```
 🎯 Clarified Intent: {1-2 sentences}
+🗺  Context: {product end} · {role} · {domain}   ← omit if all three are unknown
 
 📏 Complexity: {small|medium|large}
 

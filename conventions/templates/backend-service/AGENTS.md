@@ -25,3 +25,8 @@ src/
 - **TCR**: Mandatory.
 - **Security**: Input validation (zod), Rate limiting, Secrets rotation.
 - **Workspace**: `BACKLOG.md` + `docs/features/`.
+
+## 5. Where to Look
+- **Domain model**: `docs/domain/context-map.md` — Bounded Contexts and relationships
+- **Story details**: `docs/features/` — AC, implementation specs, dependencies
+- **Design decisions**: `docs/domain/` — DDD models, architecture records

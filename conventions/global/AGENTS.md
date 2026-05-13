@@ -87,3 +87,9 @@ Confirm each phase clean before proceeding to the next.
 - `components/ui/` is shadcn-generated — never edit manually.
 - Tailwind utility classes only. No inline styles, no CSS modules.
 - Icons: Lucide React.
+
+## 8. Where to Look
+- **Domain model**: `docs/domain/context-map.md` — Bounded Contexts and relationships
+- **Story details**: `docs/features/` — AC, implementation specs, dependencies
+- **Design decisions**: `docs/domain/` — DDD models, architecture records
+- When `docs/domain/` or `docs/features/` don't exist yet, run `$roll-doc` to bootstrap.

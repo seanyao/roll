@@ -176,3 +176,53 @@ teardown() {
   local main_submod_after; main_submod_after=$(cd deps/submod && git rev-parse HEAD)
   [ "$main_submod_head" = "$main_submod_after" ]
 }
+
+# --- _worktree_merge_back ---
+
+@test "_worktree_merge_back: ff-only success — worktree commit reaches main and origin" {
+  local wt; wt=$(_worktree_path "test" "US-FF")
+  _worktree_create "$wt" "loop/US-FF" "main"
+
+  # Make a commit on the worktree's branch
+  ( cd "$wt" \
+      && echo "hello" > new.txt \
+      && git add new.txt \
+      && git commit -q -m "work commit" )
+
+  local main_head_before; main_head_before=$(git rev-parse HEAD)
+
+  # Caller is on main; merge_back ff-merges loop branch + pushes
+  run _worktree_merge_back "loop/US-FF"
+  [ "$status" -eq 0 ]
+
+  # Main has advanced (got the worktree's commit)
+  local main_head_after; main_head_after=$(git rev-parse HEAD)
+  [ "$main_head_before" != "$main_head_after" ]
+  [ -f new.txt ]
+
+  # Origin has the new commit too
+  git fetch origin --quiet
+  local origin_main; origin_main=$(git rev-parse origin/main)
+  [ "$main_head_after" = "$origin_main" ]
+}
+
+@test "_worktree_merge_back: ff-only failure when main diverged — alert written, returns 1" {
+  local wt; wt=$(_worktree_path "test" "US-DIV")
+  _worktree_create "$wt" "loop/US-DIV" "main"
+
+  # Worktree commit
+  ( cd "$wt" \
+      && echo "from worktree" > wt.txt \
+      && git add wt.txt \
+      && git commit -q -m "worktree work" )
+
+  # Divergent commit on main, pushed to origin so pull --ff-only is a no-op
+  echo "from main" > main.txt && git add main.txt && git commit -q -m "main work"
+  git push -q origin main
+
+  run _worktree_merge_back "loop/US-DIV"
+  [ "$status" -eq 1 ]
+
+  [ -f "$_LOOP_ALERT" ]
+  grep -qE 'ff-only|merge' "$_LOOP_ALERT"
+}

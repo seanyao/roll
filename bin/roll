@@ -3079,6 +3079,30 @@ _worktree_submodule_init() {
   ( cd "$path" && git submodule update --init --recursive --quiet )
 }
 
+# _worktree_merge_back <branch>
+#   Caller must be in the main worktree (cwd = main). Steps:
+#     1. git pull --ff-only origin main   (sync local main with remote)
+#     2. git merge --ff-only <branch>     (linear merge of loop branch)
+#     3. git push origin main             (publish)
+#   Any failure → write to $_LOOP_ALERT and return 1 (worktree is left
+#   in place by the caller for human inspection, per US-AUTO-036 non-goal).
+_worktree_merge_back() {
+  local branch="$1"
+  if ! git pull --ff-only origin main --quiet 2>/dev/null; then
+    _worktree_alert "pull --ff-only origin main failed (remote diverged?)"
+    return 1
+  fi
+  if ! git merge --ff-only "$branch" --quiet 2>/dev/null; then
+    _worktree_alert "merge --ff-only ${branch} failed (not fast-forwardable from main)"
+    return 1
+  fi
+  if ! git push origin main --quiet 2>/dev/null; then
+    _worktree_alert "push origin main failed after merging ${branch}"
+    return 1
+  fi
+  return 0
+}
+
 _loop_monitor() {
   local interval="${1:-3}"
   local project_path; project_path=$(pwd -P)

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 约定与导航
+
+- `$roll-design` 澄清需求前先自己定位产品端和业务域，问你的问题少了
+- `$roll-doc` 为已有项目生成 AGENTS.md 导航骨架 — 新接入 Roll 不再从空白出发
+
 ### 自动化流水线
 
 - loop 每轮先消化开放 PR 再领新 backlog — 把队列里的 PR 当成首类工作，不是绕开的障碍 `[loop]`

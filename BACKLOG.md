@@ -85,6 +85,13 @@
 |-------|-------------|--------|
 | [US-GHA-001](docs/features/github-actions.md#us-gha-001) | Claude GitHub Actions — PR Assistant 和 Code Review 自动化工作流 (PR #8) | ✅ Done |
 
+### Feature: convention-management
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CONV-001](docs/features/convention-management.md#us-conv-001) | 全局约定加入 Goal-Driven Execution 规则 — 执行前先定义可验证目标，消除模糊任务 | ✅ Done |
+| [US-CONV-002](docs/features/convention-management.md#us-conv-002) | AGENTS.md 加入 "Where to Look" 导航段，roll-design 维护指针 — 任意 agent 进入项目即可导航到 docs/domain/ | ✅ Done |
+| [US-CONV-003](docs/features/convention-management.md#us-conv-003) | roll-doc 为存量项目生成 AGENTS.md 导航结构 — legacy 项目不再从空白模板出发 `depends-on:US-CONV-002` | ✅ Done |
+
 ### Feature: agent-compliance
 | Story | Description | Status |
 |-------|-------------|--------|

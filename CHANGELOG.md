@@ -1,16 +1,15 @@
 # Changelog
 
 ## v2026.513.1
-- **Added**: loop worktree 隔离 Phase 2 — `_write_loop_runner_script` 现在让每轮 cron 在独立的 `loop/cycle-<ts>-<pid>` worktree 里跑 claude，结束后 ff-merge 回 main + 自动清理；失败保留 worktree + 写 ALERT。loop 不再吞 main 的 WIP，多轮之间也完全隔离。claude 仍保留 story selection 权（SKILL.md 不变）
-- **Added**: loop worktree 隔离 Phase 1 — `bin/roll` 新增 7 个 `_worktree_*` helpers（path / create 幂等 / cleanup / fetch lenient / submodule init / merge_back ff-only / alert），覆盖 loop 在独立 worktree 跑 story 的完整生命周期；零行 runner.sh 改动，loop 自己也能跑；US-AUTO-037 (manual-only) 之后把这些 helpers 接入 `_write_loop_runner_script`
-- **Added**: loop 依赖闸门 — BACKLOG 行末尾的 `` `depends-on:US-X,US-Y` `` 和 `` `manual-only:true` `` 标签从此具有强制力；loop 选 story 前先用 `_loop_check_depends_on` / `_loop_is_manual_only` 两个 helper 过一遍，未满足依赖或带 manual-only 标的 story 直接跳过并写 `skipped` runs.jsonl 记录，不再需要靠人盯标签
-- **Fixed**: loop 并发保护补丁 — 2026-05-13 14:37 实测同 runner 下出现并发 claude 会话同时改 state.yaml / BACKLOG / git；inner script 现新增二级 LOCK（PID + start-ts 4h 双校验），守住 claude 调用现场，外层 LOCK 即使被旁路也兜底
-- **Changed**: CI 拆 unit / integration 双 job 并行 — `tests/run.sh` 接受可选目录参数；`.github/workflows/ci.yml` 用 `strategy.matrix` 把 509 unit + 70 integration 用例分到两个 runner 并行跑（REFACTOR-009 Phase 1B）；Phase 2 测试瘦身拆到 REFACTOR-010
-- **Changed**: `roll`（无参）dashboard 重设计 — 自治优先六块布局：① Identity（项目名 + 版本 + agent + git 状态）② AI 自治主视觉（Loop / Dream / Peer 三层 + 四道防线，框线高亮）③ Pipeline 全景（Idea/Backlog/Build/Verify/Release 五段计数）④ Current Focus · DoD（in-progress story 的 [AC] [CI] 信号，其余 4 项标注待接入）⑤ Human × AI 介入区（ALERT/PROPOSAL/Release ready，空时显示"AI 自驱中"）⑥ Schedules & Last Brief。把"AI 自动跑什么"放第一眼，不再埋在 `roll loop status` 子命令里
-- **Changed**: CI 测试运行器 (`tests/run.sh`) 动态检测核数（`nproc`/`sysctl`）替换硬编码 `--jobs 4`，可用 `ROLL_TEST_JOBS` 覆盖；bats-core submodule 缺失时给出清晰报错
-- **Changed**: GitHub Actions CI 跳过 docs-only PR（`paths-ignore: **.md, docs/**`），文档改动不再触发全套 bats
-- **Fixed**: `roll peer` 在 REFINE/OBJECT 退出路径上的 "resolution: unbound variable" 风险 — cmd_peer 显式初始化 `local resolution=""`，并补齐 AGREE/REFINE/OBJECT/ESCALATE/UNKNOWN 五条退出路径的回归测试
-- **Fixed**: `roll update` 后 `roll loop status` 误报 off — `_install_launchd_plists` reload 路径改用 `launchctl bootout` + `bootstrap`（不动 overrides db），消除 macOS Sonoma+ 上 no-`-w` unload/load 把 label `enabled` 标记吞掉的副作用；不再需要手动 `roll loop on` 恢复
+- **Added**: loop 现在每轮跑在独立的 worktree 里，结束自动合回 main 并清理；跑挂时保留现场目录方便排查 — 再也不会吞掉 main 上你正在改的代码
+- **Added**: BACKLOG 上的 `depends-on:` 和 `manual-only:true` 标签从此有强制力，loop 选 story 前会过一遍，依赖没满足或标 manual-only 的直接跳过，不用人盯
+- **Fixed**: loop 多了一道并发保护 — 偶发的同一个 runner 下两个 claude 同时改状态的情况彻底堵住
+- **Changed**: CI 把 unit 和 integration 测试拆到两个 runner 并行跑，墙钟时间显著下降
+- **Changed**: `roll`（不带参数）的 dashboard 重新设计 — AI 在自动跑什么放第一眼，自治三层 + 四道防线 + Pipeline 全景 + 当前焦点 + 介入区一屏看完，不用再去 `roll loop status` 子命令翻
+- **Changed**: 测试运行器自动按机器核数并行，不再写死 4 个 job
+- **Changed**: 纯文档改动不再触发 CI 跑全套测试，文档 PR 合并节奏更快
+- **Fixed**: `roll peer` 在 REFINE / OBJECT 收尾时偶发的 "unbound variable" 崩溃
+- **Fixed**: `roll update` 后 `roll loop status` 不再误报 off，不用手动 `roll loop on` 恢复
 
 ## v2026.512.8
 - **Added**: `$roll-doc` — legacy 项目文档自动化技能：四阶段扫描（索引 + 缺口分析 + 草稿补全 + 报告），支持 `--dry-run` / `--force`，适用任何项目

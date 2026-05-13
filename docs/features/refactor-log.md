@@ -159,3 +159,20 @@ Architectural friction signals flagged during story execution.
 
 **Actual reduction**: 24 个测试（738 → 714，3.2%）
 **25% 目标缺口**: 需要 per-test timing 工具识别 top-20 慢测试；当前测试套件无 timing instrumentation，建议 Phase 3 先加 `--time` 可观测性
+
+---
+
+## REFACTOR-011 session 清理补 local worktree prune ✅
+
+**Flagged**: 2026-05-14 by dream scan
+**Completed**: 2026-05-14
+**Signal**: session 清理只删远端分支，`.claude/worktrees/` 累积 3 个孤儿 worktree
+
+**Observation**: `_claude_cleanup_new_branches` 在每次 loop 结束后清理 remote claude/* 分支，但对应的本地 worktree（`.claude/worktrees/<name>/`）和本地分支没有被清理。`git worktree list` 随时间增长，也占用磁盘。
+
+**Fix**:
+- 新增 `_claude_cleanup_stale_worktrees [project_path]`：扫描 `.claude/worktrees/`，对已合并到 main 的 branch 执行 `git worktree remove --force` + `rm -rf` + `git branch -D`；最后 `git worktree prune`
+- 在 `_write_loop_runner_script` 的 inner script 中，紧跟 `_claude_cleanup_new_branches` 之后调用
+- 清理了本项目积累的 3 个孤儿 worktree（`laughing-elion-c2b123`、`loving-diffie-01c26d`、`vibrant-poitras-233d52`）
+
+**Files**: `bin/roll`, `tests/unit/roll_worktree.bats`, `tests/unit/roll_loop_cleanup.bats`

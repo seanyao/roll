@@ -4,7 +4,7 @@ set -euo pipefail
 # Roll — AI Agent Convention Manager
 # Single source of truth for how all AI coding agents behave.
 
-VERSION="2026.514.2"
+VERSION="2026.514.3"
 ROLL_HOME="${ROLL_HOME:-${HOME}/.roll}"
 ROLL_CONFIG="${ROLL_HOME}/config.yaml"
 ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
@@ -1903,7 +1903,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
   case "$agent" in
-    claude)   claude -p --output-format stream-json "$content" ;;
+    claude)   claude -p --output-format text "$content" ;;
     kimi)     kimi --quiet -p "$content" ;;
     deepseek) deepseek "$content" ;;
     pi)       pi -p "$content" ;;
@@ -2123,9 +2123,6 @@ WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0
 cd "${project_path}" 2>/dev/null || true
-# US-AUTO-038: snapshot orphan claude/* branches before claude runs so the
-# post-claude cleanup can diff and delete only this session's additions.
-CLAUDE_BRANCH_SNAPSHOT="\$(_claude_remote_snapshot "${project_path}")"
 if _worktree_fetch_origin main \\
    && _worktree_create "\$WT" "\$BRANCH" "origin/main"; then
   _USE_WORKTREE=1
@@ -2150,11 +2147,6 @@ for _attempt in 1 2 3; do
     sleep 30
   fi
 done
-
-# US-AUTO-038: diff snapshot vs current and delete any claude/* branches this
-# session pushed to origin. Runs regardless of claude's exit code (cleanup is
-# orthogonal to success/failure) and is silent on non-GitHub / unreachable.
-_claude_cleanup_new_branches "\$CLAUDE_BRANCH_SNAPSHOT" "${project_path}" || true
 
 # Post-claude: publish cycle branch. Doc-only changes (BACKLOG/docs) merge
 # immediately via --admin; code changes use auto-merge (CI gate required).
@@ -2971,13 +2963,71 @@ _loop_precheck_ci() {
 **Reason**: HEAD CI is red — loop refused to build on a broken base  HEAD CI 红，loop 拒绝在破损的基础上构建
 
 **Action required**:
-- Investigate and fix CI: \`gh -R $(_gh_repo_slug) run list --commit ${commit}\`
+- Investigate and fix CI: \`gh -R ${slug} run list --commit ${commit}\`
 - After fixing and pushing green commit: \`roll loop now\`
 EOF
+    _loop_diagnose_open_prs "$slug" >> "$_LOOP_ALERT"
     _notify "roll ⚠ CI red" "loop refused to build on broken base (${short})"
     return 1
   fi
   return 0
+}
+
+# _loop_diagnose_open_prs <slug>
+#   Appended to ALERT when CI is red on HEAD.
+#   For each open PR targeting main: lists CI failing tests + changed files,
+#   flags whether failures look unrelated to the PR's own changes.
+_loop_diagnose_open_prs() {
+  local slug="$1"
+  local prs
+  prs=$(gh -R "$slug" pr list --base main --state open --json number,title,headRefName \
+    --jq '.[] | [.number|tostring, .headRefName, .title] | @tsv' 2>/dev/null) || return 0
+  [[ -z "$prs" ]] && return 0
+
+  printf '\n## Open PRs (potential fixes)\n'
+  while IFS=$'\t' read -r pr_num branch pr_title; do
+    printf '\nPR #%s: %s\n' "$pr_num" "$pr_title"
+
+    # Files changed in this PR
+    local changed_files
+    changed_files=$(gh -R "$slug" pr diff "$pr_num" --name-only 2>/dev/null | head -10) || changed_files="(unable to fetch)"
+    printf '  Changed: %s\n' "$(echo "$changed_files" | tr '\n' ' ')"
+
+    # Latest CI run on the PR branch
+    local run_id conclusion
+    run_id=$(gh -R "$slug" run list --branch "$branch" --json databaseId,conclusion \
+      --jq '[.[] | select(.conclusion != null)] | first | .databaseId' 2>/dev/null) || run_id=""
+    conclusion=$(gh -R "$slug" run list --branch "$branch" --json databaseId,conclusion \
+      --jq '[.[] | select(.conclusion != null)] | first | .conclusion' 2>/dev/null) || conclusion="unknown"
+
+    if [[ "$conclusion" == "success" ]]; then
+      printf '  CI: green — blocked only by branch protection (safe to merge)\n'
+      printf '  Suggest: gh pr merge %s --admin\n' "$pr_num"
+    elif [[ -n "$run_id" ]]; then
+      local failing_tests
+      failing_tests=$(gh -R "$slug" run view "$run_id" --log-failed 2>/dev/null \
+        | grep -oP '(?<=not ok \d{1,4} ).*' | head -8) || failing_tests="(unable to fetch)"
+
+      printf '  CI: %s\n' "$conclusion"
+      printf '  Failing tests:\n'
+      while IFS= read -r t; do
+        [[ -n "$t" ]] && printf '    - %s\n' "$t"
+      done <<< "$failing_tests"
+
+      # Heuristic: if no failing test mentions a changed file, flag as likely unrelated
+      local related=0
+      while IFS= read -r f; do
+        local base; base=$(basename "$f")
+        echo "$failing_tests" | grep -qi "$base" && { related=1; break; }
+      done <<< "$changed_files"
+      if [[ "$related" -eq 0 ]]; then
+        printf '  Note: failing tests appear UNRELATED to changed files — consider manual merge\n'
+        printf '  Suggest: gh pr merge %s --admin  (verify tests manually first)\n' "$pr_num"
+      else
+        printf '  Note: failing tests may relate to PR changes — investigate before merging\n'
+      fi
+    fi
+  done <<< "$prs"
 }
 
 # CI gate before marking a story Done.
@@ -3580,52 +3630,6 @@ _worktree_merge_back() {
     _worktree_alert "push origin main failed after merging ${branch}"
     return 1
   fi
-  return 0
-}
-
-# US-AUTO-038: orphan claude/* branch hygiene.
-#
-# Each Claude Code session pushes `claude/<name>-<id>` work branches to origin.
-# US-AUTO-033's auto-PR mechanism only covers `loop/cycle-*` branches; the
-# claude/* ones never become PRs and accumulate as stale refs that GitHub
-# surfaces with a "Compare & pull request" banner. Cleanup is event-driven:
-# snapshot pre-claude, diff post-claude, delete the additions.
-
-# _claude_remote_snapshot [repo]
-#   Echo the current set of remote `claude/*` branch names (sans
-#   refs/heads/), one per line, sorted. Silent on remote unreachable / no
-#   remote / no matches — empty stdout, exit 0.
-_claude_remote_snapshot() {
-  local repo="${1:-.}"
-  git -C "$repo" ls-remote --heads origin 'refs/heads/claude/*' 2>/dev/null \
-    | awk '{print $2}' \
-    | sed 's|^refs/heads/||' \
-    | sort
-}
-
-# _claude_cleanup_new_branches <prior> [repo]
-#   Delete remote `claude/*` branches present now but absent from <prior>
-#   (newline-separated list, as emitted by _claude_remote_snapshot). Skips
-#   silently when origin is not a GitHub remote. Each successful delete logs
-#   one INFO line; failures are silently ignored so the loop's main flow is
-#   never derailed.
-_claude_cleanup_new_branches() {
-  local prior="$1"
-  local repo="${2:-.}"
-  local url; url=$(git -C "$repo" remote get-url origin 2>/dev/null)
-  [[ "$url" == *github.com* ]] || return 0
-  local current; current=$(_claude_remote_snapshot "$repo")
-  [ -z "$current" ] && return 0
-  local prior_sorted; prior_sorted=$(printf '%s\n' "$prior" | sort -u)
-  local new_branches
-  new_branches=$(comm -13 <(printf '%s\n' "$prior_sorted") <(printf '%s\n' "$current"))
-  [ -z "$new_branches" ] && return 0
-  while IFS= read -r branch; do
-    [ -z "$branch" ] && continue
-    if git -C "$repo" push origin --delete "$branch" 2>/dev/null; then
-      echo "[loop] deleted stale claude branch: $branch"
-    fi
-  done <<< "$new_branches"
   return 0
 }
 

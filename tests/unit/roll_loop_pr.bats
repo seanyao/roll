@@ -96,9 +96,16 @@ EOF
 
 @test "_loop_publish_pr: returns 2 + ALERT when gh not installed" {
   _install_git_wrapper
-  # Ensure no gh on PATH
-  PATH=$(echo "$PATH" | tr ':' '\n' | grep -vE '/(homebrew|usr/local|opt)/bin' | tr '\n' ':' | sed 's/:$//')
-  export PATH="$MOCKBIN:$PATH"
+  # Strip the dir(s) containing the real `gh` binary from PATH so command -v
+  # gh fails — but keep the rest of PATH intact so grep / rm / bats teardown
+  # still work. Portable across macOS (/opt/homebrew/bin) and Linux (/usr/bin).
+  local gh_path; gh_path=$(command -v gh 2>/dev/null || true)
+  local gh_dir; gh_dir=$(dirname "$gh_path" 2>/dev/null || echo "")
+  local stripped="$PATH"
+  if [ -n "$gh_dir" ]; then
+    stripped=$(echo "$PATH" | tr ':' '\n' | grep -v -F -x "$gh_dir" | tr '\n' ':' | sed 's/:$//')
+  fi
+  PATH="$MOCKBIN:$stripped"
   run _loop_publish_pr "loop/cycle-test"
   [ "$status" -eq 2 ]
   grep -q "gh not installed" "$_LOOP_ALERT"

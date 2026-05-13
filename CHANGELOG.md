@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- **Fixed**: dashboard 不再在已发版后还显示 "✓ Release ready"——只有 tag 之后存在非 docs/chore 的可发版提交时才亮，光是文档改写不会再让它误报
+- **Fixed**: dashboard 上 "📋 N PROPOSAL" 的动作提示改成 `see: PROPOSALS.md`，原先指向的 `roll backlog` 只看 BACKLOG.md，点过去看不到 PROPOSAL，逻辑断头
+
 ## v2026.513.1
 - **Added**: loop 现在每轮跑在独立的 worktree 里，结束自动合回 main 并清理；跑挂时保留现场目录方便排查 — 再也不会吞掉 main 上你正在改的代码
 - **Added**: BACKLOG 上的 `depends-on:` 和 `manual-only:true` 标签从此有强制力，loop 选 story 前会过一遍，依赖没满足或标 manual-only 的直接跳过，不用人盯

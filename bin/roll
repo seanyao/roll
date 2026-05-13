@@ -2123,6 +2123,9 @@ WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0
 cd "${project_path}" 2>/dev/null || true
+# US-AUTO-038: snapshot orphan claude/* branches before claude runs so the
+# post-claude cleanup can diff and delete only this session's additions.
+CLAUDE_BRANCH_SNAPSHOT="\$(_claude_remote_snapshot "${project_path}")"
 if _worktree_fetch_origin main \\
    && _worktree_create "\$WT" "\$BRANCH" "origin/main"; then
   _USE_WORKTREE=1
@@ -2147,6 +2150,11 @@ for _attempt in 1 2 3; do
     sleep 30
   fi
 done
+
+# US-AUTO-038: diff snapshot vs current and delete any claude/* branches this
+# session pushed to origin. Runs regardless of claude's exit code (cleanup is
+# orthogonal to success/failure) and is silent on non-GitHub / unreachable.
+_claude_cleanup_new_branches "\$CLAUDE_BRANCH_SNAPSHOT" "${project_path}" || true
 
 # Post-claude: publish cycle branch. Doc-only changes (BACKLOG/docs) merge
 # immediately via --admin; code changes use auto-merge (CI gate required).

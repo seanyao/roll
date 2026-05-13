@@ -176,3 +176,17 @@ Architectural friction signals flagged during story execution.
 - 清理了本项目积累的 3 个孤儿 worktree（`laughing-elion-c2b123`、`loving-diffie-01c26d`、`vibrant-poitras-233d52`）
 
 **Files**: `bin/roll`, `tests/unit/roll_worktree.bats`, `tests/unit/roll_loop_cleanup.bats`
+
+---
+
+## REFACTOR-012 release.sh 消除 _detect_agent 双维护 ✅
+
+**Flagged**: 2026-05-14 by dream scan
+**Completed**: 2026-05-14
+**Signal**: `scripts/release.sh` 自定义了 `_detect_agent()` 与 `bin/roll` 的 `_project_agent()` 逻辑完全重复
+
+**Observation**: 两处各自 grep `.roll.yaml`/`~/.roll/config.yaml`；一处改了另一处不知道，配置字段变动时会悄无声息地漂移。
+
+**Fix**: `release.sh` 改为在执行前 `source "${REPO_ROOT}/bin/roll"`，直接调用 `_project_agent()`；顺带把内联 frontmatter 剥离逻辑替换为 `_skill_content()`，消除第二个重复。
+
+**Files**: `scripts/release.sh`, `tests/unit/release_promote.bats`

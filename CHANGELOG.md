@@ -4,6 +4,7 @@
 
 - **Fixed**: 上版 `claude/*` 临时分支清理意外失效 — 现已恢复 `[loop]`
 - **Fixed**: loop session 结束后本地 worktree 不再积累，`git worktree list` 保持干净 `[loop]`
+- **Fixed**: 发版脚本不再维护独立的 agent 检测逻辑，配置变更时两处不再悄悄漂移
 
 ## v2026.514.3
 

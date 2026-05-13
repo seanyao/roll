@@ -115,27 +115,70 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_loop_pr_inbox: skips self-authored loop/* PR without invoking review" {
-  # Mock gh to return one self-loop PR.
-  cat > "${TEST_TMP}/gh-stub" <<'EOF'
-#!/bin/bash
-if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
-  echo '[{"number":1,"headRefName":"loop/cycle-x","author":{"login":"seanyao"}}]'
-  exit 0
-fi
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  echo '{"reviews":[],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
-  exit 0
-fi
-exit 0
-EOF
-  chmod +x "${TEST_TMP}/gh-stub"
-  PATH="${TEST_TMP}:$PATH"
-  gh() { "${TEST_TMP}/gh-stub" "$@"; }
-  export -f gh
+  git remote add origin git@github.com:test/repo.git
+  # Override _gh_repo_slug rather than relying on remote URL parsing.
+  _gh_repo_slug() { echo "test/repo"; }
+  gh() {
+    # Strip leading "-R <slug>" so the mock pattern-matches on the subcommand.
+    if [ "$1" = "-R" ]; then shift 2; fi
+    if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+      echo '[{"number":1,"headRefName":"loop/cycle-x","author":{"login":"seanyao"}}]'
+      return 0
+    fi
+    if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+      echo '{"reviews":[],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
+      return 0
+    fi
+    return 0
+  }
+  _loop_pr_review_external() { touch "${TEST_TMP}/review-fired"; }
 
-  # Spy: review-hook should NOT fire on self-PR.
-  _loop_pr_review_external() { touch "${TEST_TMP}/review-fired"; return 0; }
-  export -f _loop_pr_review_external
+  run _loop_pr_inbox
+  [ "$status" -eq 0 ]
+  [ ! -f "${TEST_TMP}/review-fired" ]
+}
+
+@test "_loop_pr_inbox: eligible external PR invokes review hook" {
+  git remote add origin git@github.com:test/repo.git
+  _gh_repo_slug() { echo "test/repo"; }
+  gh() {
+    # Strip leading "-R <slug>" so the mock pattern-matches on the subcommand.
+    if [ "$1" = "-R" ]; then shift 2; fi
+    if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+      echo '[{"number":42,"headRefName":"feat/foo","author":{"login":"contrib"}}]'
+      return 0
+    fi
+    if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+      echo '{"reviews":[],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
+      return 0
+    fi
+    return 0
+  }
+  _loop_pr_review_external() { echo "$1" > "${TEST_TMP}/review-fired"; }
+
+  run _loop_pr_inbox
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/review-fired" ]
+  [ "$(cat "${TEST_TMP}/review-fired")" = "42" ]
+}
+
+@test "_loop_pr_inbox: blocked_human_request_changes skips review" {
+  git remote add origin git@github.com:test/repo.git
+  _gh_repo_slug() { echo "test/repo"; }
+  gh() {
+    # Strip leading "-R <slug>" so the mock pattern-matches on the subcommand.
+    if [ "$1" = "-R" ]; then shift 2; fi
+    if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+      echo '[{"number":5,"headRefName":"feat/foo","author":{"login":"contrib"}}]'
+      return 0
+    fi
+    if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+      echo '{"reviews":[{"authorAssociation":"COLLABORATOR","state":"CHANGES_REQUESTED"}],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
+      return 0
+    fi
+    return 0
+  }
+  _loop_pr_review_external() { touch "${TEST_TMP}/review-fired"; }
 
   run _loop_pr_inbox
   [ "$status" -eq 0 ]

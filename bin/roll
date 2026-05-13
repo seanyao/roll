@@ -2148,15 +2148,20 @@ for _attempt in 1 2 3; do
   fi
 done
 
-# Post-claude: US-AUTO-033 — publish cycle branch as a PR with auto-merge.
+# Post-claude: publish cycle branch. Doc-only changes (BACKLOG/docs) merge
+# immediately via --admin; code changes use auto-merge (CI gate required).
 # When \`gh\` is unavailable, fall back to the legacy ff-merge path.
 if [ "\$_USE_WORKTREE" = "1" ]; then
   if [ "\$_exit" -eq 0 ]; then
-    ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" )
+    if ( cd "\$WT" && _loop_is_doc_only_change ); then
+      ( cd "\$WT" && _loop_publish_doc_pr "\$BRANCH" "doc: loop cycle \${CYCLE_ID}" )
+    else
+      ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" )
+    fi
     _publish_status=\$?
     if [ "\$_publish_status" -eq 0 ]; then
       _worktree_cleanup "\$WT" "\$BRANCH"
-      echo "[loop] cycle \${CYCLE_ID}: PR opened with auto-merge; worktree cleaned"
+      echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
     elif [ "\$_publish_status" -eq 2 ]; then
       if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
         _worktree_cleanup "\$WT" "\$BRANCH"
@@ -3402,6 +3407,58 @@ _loop_publish_pr() {
   fi
   gh -R "$slug" pr merge "$branch" --auto --squash --delete-branch >/dev/null 2>&1 \
     || _worktree_alert "_loop_publish_pr: gh pr merge --auto failed for ${branch} (PR ${pr_url} left open)"
+  echo "$pr_url"
+  return 0
+}
+
+# _loop_is_doc_only_change
+#   Returns 0 if every file changed since origin/main is doc-only
+#   (BACKLOG.md, CHANGELOG.md, PROPOSALS.md, docs/, .claude/).
+#   Returns 1 if any code file changed or there are no changes.
+_loop_is_doc_only_change() {
+  local changed
+  changed=$(git diff --name-only origin/main HEAD 2>/dev/null) || return 1
+  [ -z "$changed" ] && return 1
+  echo "$changed" | grep -qvE '^(BACKLOG\.md|CHANGELOG\.md|PROPOSALS\.md|docs/|\.claude/)' && return 1
+  return 0
+}
+
+# _loop_publish_doc_pr <branch> [title]
+#   Like _loop_publish_pr but merges immediately with --admin (no CI wait).
+#   For doc-only changes where CI is not meaningful.
+_loop_publish_doc_pr() {
+  local branch="$1"
+  local title="${2:-doc update ${branch#loop/}}"
+  if ! command -v gh >/dev/null 2>&1; then
+    _worktree_alert "_loop_publish_doc_pr: gh not installed; cannot publish PR for ${branch}"
+    return 2
+  fi
+  local slug; slug=$(_gh_repo_slug 2>/dev/null) || slug=""
+  if [ -z "$slug" ]; then
+    _worktree_alert "_loop_publish_doc_pr: origin remote is not a github repo; cannot publish PR for ${branch}"
+    return 2
+  fi
+  if ! git push origin "$branch" --quiet 2>/dev/null; then
+    _worktree_alert "_loop_publish_doc_pr: push origin ${branch} failed"
+    return 1
+  fi
+  local pr_url
+  pr_url=$(gh -R "$slug" pr view "$branch" --json url -q .url 2>/dev/null) || pr_url=""
+  if [ -z "$pr_url" ]; then
+    local body
+    body=$(printf 'Doc-only update by roll-loop cycle.\n\n- Branch: %s\n- Files: BACKLOG / docs only\n\nMerging immediately — no CI gate needed for doc-only changes.' "$branch")
+    pr_url=$(gh -R "$slug" pr create --base main --head "$branch" \
+      --title "$title" --body "$body" 2>/dev/null) || pr_url=""
+    if [ -z "$pr_url" ]; then
+      _worktree_alert "_loop_publish_doc_pr: gh pr create failed for ${branch}"
+      return 1
+    fi
+  fi
+  if ! gh -R "$slug" pr merge "$branch" --admin --squash --delete-branch >/dev/null 2>&1; then
+    _worktree_alert "_loop_publish_doc_pr: gh pr merge --admin failed for ${branch} (PR ${pr_url} left open)"
+    echo "$pr_url"
+    return 1
+  fi
   echo "$pr_url"
   return 0
 }

@@ -176,3 +176,62 @@ EOF
   [ "$status" -eq 0 ]
   grep -qE 'gh -R test/repo' "$GH_LOG"
 }
+
+# --- _loop_is_doc_only_change ---
+
+_setup_origin_main() {
+  # Point origin/main at the root commit so git diff origin/main HEAD works
+  local root; root=$(git rev-list --max-parents=0 HEAD)
+  git update-ref refs/remotes/origin/main "$root"
+}
+
+@test "_loop_is_doc_only_change: returns 0 when only BACKLOG.md changed" {
+  _setup_origin_main
+  git checkout -q -b loop/cycle-doc
+  echo "new" > BACKLOG.md
+  git -c user.email=t@t -c user.name=t add BACKLOG.md
+  git -c user.email=t@t -c user.name=t commit -q -m "doc"
+  run _loop_is_doc_only_change
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_is_doc_only_change: returns 1 when a code file changed" {
+  _setup_origin_main
+  git checkout -q -b loop/cycle-code
+  mkdir -p bin && echo "#!/bin/bash" > bin/roll
+  git -c user.email=t@t -c user.name=t add bin/roll
+  git -c user.email=t@t -c user.name=t commit -q -m "code"
+  run _loop_is_doc_only_change
+  [ "$status" -eq 1 ]
+}
+
+@test "_loop_is_doc_only_change: returns 1 when no changes vs origin/main" {
+  _setup_origin_main
+  git checkout -q -b loop/cycle-empty
+  run _loop_is_doc_only_change
+  [ "$status" -eq 1 ]
+}
+
+# --- _loop_publish_doc_pr ---
+
+@test "_loop_publish_doc_pr: returns 2 when gh not installed" {
+  _install_git_wrapper
+  run _loop_publish_doc_pr "loop/cycle-test"
+  [ "$status" -eq 2 ]
+}
+
+@test "_loop_publish_doc_pr: uses --admin instead of --auto" {
+  _install_git_wrapper
+  _install_gh "" "https://github.com/test/repo/pull/9" 0
+  run _loop_publish_doc_pr "loop/cycle-test" "doc: test"
+  [ "$status" -eq 0 ]
+  grep -q -- "--admin" "$GH_LOG"
+  ! grep -q -- "--auto" "$GH_LOG"
+}
+
+@test "_loop_publish_doc_pr: returns 1 when gh pr merge --admin fails" {
+  _install_git_wrapper
+  _install_gh "" "https://github.com/test/repo/pull/9" 1
+  run _loop_publish_doc_pr "loop/cycle-test" "doc: test"
+  [ "$status" -eq 1 ]
+}

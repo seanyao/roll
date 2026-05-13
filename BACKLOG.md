@@ -99,7 +99,7 @@
 | [US-CL-002](docs/features/changelog-integration.md#us-cl-002) | roll-.changelog support first-time creation with backfill | ✅ Done |
 | [US-CL-003](docs/features/changelog-integration.md#us-cl-003) | 消除独立的 changelog commit — 并入 story 完成提交 | ✅ Done |
 | [US-CL-004](docs/features/changelog-integration.md#us-cl-004) | changelog 风格守门 Phase 1 — 机械 linter（黑名单 grep）+ 把最近 3 个已发布版本的 bullets 作为 in-context few-shot 锚点；4a12ccf 实证过的 10 条技术黑话草稿应全部被挡回重写 | ✅ Done |
-| [US-CL-005](docs/features/changelog-integration.md#us-cl-005) | changelog 风格守门 Phase 2 — stage 前自审 gate，5 条布尔 checklist 逐条判定，最多 3 轮重写后仍失败则 ALERT；自审日志写 jsonl 便于事后回看 agent 是否糊弄 `depends-on:US-CL-004` | 📋 Todo |
+| [US-CL-005](docs/features/changelog-integration.md#us-cl-005) | changelog 风格守门 Phase 2 — stage 前自审 gate，5 条布尔 checklist 逐条判定，最多 3 轮重写后仍失败则 ALERT；自审日志写 jsonl 便于事后回看 agent 是否糊弄 `depends-on:US-CL-004` | 🔨 In Progress |
 
 ## 🐛 Bug Fixes
 | ID | Description | Status |

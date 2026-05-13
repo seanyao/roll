@@ -2118,15 +2118,26 @@ for _attempt in 1 2 3; do
   fi
 done
 
-# Post-claude: merge back if we used an isolated worktree.
+# Post-claude: US-AUTO-033 — publish cycle branch as a PR with auto-merge.
+# When \`gh\` is unavailable, fall back to the legacy ff-merge path.
 if [ "\$_USE_WORKTREE" = "1" ]; then
   if [ "\$_exit" -eq 0 ]; then
-    if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
+    ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" )
+    _publish_status=\$?
+    if [ "\$_publish_status" -eq 0 ]; then
       _worktree_cleanup "\$WT" "\$BRANCH"
-      echo "[loop] cycle \${CYCLE_ID}: merged and cleaned up"
+      echo "[loop] cycle \${CYCLE_ID}: PR opened with auto-merge; worktree cleaned"
+    elif [ "\$_publish_status" -eq 2 ]; then
+      if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
+        _worktree_cleanup "\$WT" "\$BRANCH"
+        echo "[loop] cycle \${CYCLE_ID}: gh unavailable; merged via ff and cleaned up"
+      else
+        _worktree_alert "cycle \${CYCLE_ID}: gh unavailable AND merge_back failed; worktree preserved at \$WT"
+        echo "[loop] cycle \${CYCLE_ID}: gh+merge_back both failed; worktree preserved at \$WT"
+      fi
     else
-      _worktree_alert "cycle \${CYCLE_ID}: merge_back failed; worktree preserved at \$WT (branch \$BRANCH)"
-      echo "[loop] cycle \${CYCLE_ID}: merge_back failed; worktree preserved at \$WT"
+      _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
+      echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
     fi
   else
     _worktree_alert "cycle \${CYCLE_ID}: claude exited \$_exit; worktree preserved at \$WT (branch \$BRANCH)"
@@ -3228,41 +3239,30 @@ _loop_publish_pr() {
     _worktree_alert "_loop_publish_pr: gh not installed; cannot publish PR for ${branch}"
     return 2
   fi
+  local slug; slug=$(_gh_repo_slug 2>/dev/null) || slug=""
+  if [ -z "$slug" ]; then
+    _worktree_alert "_loop_publish_pr: origin remote is not a github repo; cannot publish PR for ${branch}"
+    return 2
+  fi
   if ! git push origin "$branch" --quiet 2>/dev/null; then
     _worktree_alert "_loop_publish_pr: push origin ${branch} failed"
     return 1
   fi
-  local slug; slug=$(_gh_repo_slug 2>/dev/null) || slug=""
   local pr_url
-  if [ -n "$slug" ]; then
-    pr_url=$(gh -R "$slug" pr view "$branch" --json url -q .url 2>/dev/null) || pr_url=""
-  else
-    pr_url=$(gh pr view "$branch" --json url -q .url 2>/dev/null) || pr_url=""
-  fi
+  pr_url=$(gh -R "$slug" pr view "$branch" --json url -q .url 2>/dev/null) || pr_url=""
   if [ -z "$pr_url" ]; then
     local body
     body=$(printf 'Auto-opened by roll-loop cycle.\n\n- Branch: %s\n- TCR micro-commits: %s\n\nThis PR will auto-merge once required checks pass.' \
       "$branch" "$(git rev-list --count origin/main.."$branch" 2>/dev/null || echo '?')")
-    if [ -n "$slug" ]; then
-      pr_url=$(gh -R "$slug" pr create --base main --head "$branch" \
-        --title "$title" --body "$body" 2>/dev/null) || pr_url=""
-    else
-      pr_url=$(gh pr create --base main --head "$branch" \
-        --title "$title" --body "$body" 2>/dev/null) || pr_url=""
-    fi
+    pr_url=$(gh -R "$slug" pr create --base main --head "$branch" \
+      --title "$title" --body "$body" 2>/dev/null) || pr_url=""
     if [ -z "$pr_url" ]; then
       _worktree_alert "_loop_publish_pr: gh pr create failed for ${branch}"
       return 1
     fi
   fi
-  local merge_args=(pr merge "$branch" --auto --squash --delete-branch)
-  if [ -n "$slug" ]; then
-    gh -R "$slug" "${merge_args[@]}" >/dev/null 2>&1 \
-      || _worktree_alert "_loop_publish_pr: gh pr merge --auto failed for ${branch} (PR ${pr_url} left open)"
-  else
-    gh "${merge_args[@]}" >/dev/null 2>&1 \
-      || _worktree_alert "_loop_publish_pr: gh pr merge --auto failed for ${branch} (PR ${pr_url} left open)"
-  fi
+  gh -R "$slug" pr merge "$branch" --auto --squash --delete-branch >/dev/null 2>&1 \
+    || _worktree_alert "_loop_publish_pr: gh pr merge --auto failed for ${branch} (PR ${pr_url} left open)"
   echo "$pr_url"
   return 0
 }

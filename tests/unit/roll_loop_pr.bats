@@ -153,6 +153,17 @@ EOF
   grep -q "auto failed" "$_LOOP_ALERT"
 }
 
+@test "_loop_publish_pr: returns 2 + ALERT when origin is not a github remote" {
+  _install_git_wrapper
+  _install_gh "" "https://github.com/test/repo/pull/1" 0
+  # Point origin at a non-github URL
+  git remote set-url origin file:///tmp/nonexistent.git
+  run _loop_publish_pr "loop/cycle-test"
+  [ "$status" -eq 2 ]
+  grep -q "not a github repo" "$_LOOP_ALERT"
+  ! grep -q "pr create" "$GH_LOG"
+}
+
 @test "_loop_publish_pr: passes -R slug to gh when origin parseable" {
   _install_git_wrapper
   _install_gh "" "https://github.com/test/repo/pull/3" 0

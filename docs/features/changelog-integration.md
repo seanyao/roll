@@ -114,8 +114,9 @@
 ---
 
 <a id="us-cl-005"></a>
-## US-CL-005 changelog 风格守门 Phase 2 — 自审 gate 📋
+## US-CL-005 changelog 风格守门 Phase 2 — 自审 gate ✅
 
+**Completed**: 2026-05-13
 **Created**: 2026-05-13
 
 - As a roll 用户
@@ -129,21 +130,21 @@
 - Cross-context: 无
 
 **AC:**
-- [ ] `roll-.changelog` skill 在 Step 5 生成 / Step 5.4 lint 通过之后、Step 6 stage 之前加 Step 5.5 "Self-Audit"
-- [ ] checklist 为布尔判定（5 项均通过才算 pass）：
+- [x] `roll-.changelog` skill 在 Step 5 生成 / Step 5.4 lint 通过之后、Step 6 stage 之前加 Step 5.5 "Self-Audit"
+- [x] checklist 为布尔判定（5 项均通过才算 pass）：
   - 字符数 ≤ 30（除非引用了用户命令）
   - 无内部标识符（函数名 / 字段名 / 配置键）
   - 无文件路径 / 后缀
   - 无 "Phase N" / "Step N" / 阶段编号
   - 句式符合"功能名 — 用户能做什么 / 不再被什么坑"或"功能名 不再 / 现在 …"
-- [ ] 任一为否 → 重写该条；累计 3 轮仍失败 → 写 ALERT（含被卡条目原文）+ 保留 `## Unreleased` 加 ⚠️ 标记，不阻断 stage（避免阻塞 loop）
-- [ ] 自审输出结构化日志（每条 bullet 的 5 项判定结果），写入 `~/.shared/roll/loop/changelog-audit.jsonl`，便于事后回看 agent 是不是在糊弄
-- [ ] 单元测试覆盖：5 条 checklist 的各 pass / fail 分支；3 轮重试上限；ALERT 写入路径
+- [x] 任一为否 → 重写该条；累计 3 轮仍失败 → 写 ALERT（含被卡条目原文）+ 保留 `## Unreleased` 加 ⚠️ 标记，不阻断 stage（避免阻塞 loop）
+- [x] 自审输出结构化日志（每条 bullet 的 5 项判定结果），写入 `~/.shared/roll/loop/changelog-audit.jsonl`，便于事后回看 agent 是不是在糊弄
+- [x] 单元测试覆盖：5 条 checklist 的各 pass / fail 分支；3 轮重试上限；ALERT 写入路径
 
 **Files:**
 - `skills/roll-.changelog/SKILL.md` — 加 Step 5.5（self-audit）
-- `bin/roll` — 加 `_changelog_audit_log` helper（写 jsonl）
-- `tests/unit/roll_changelog_audit.bats` — 新增
+- `bin/roll` — 加 `_changelog_audit_bullet` + `_changelog_audit_log` + `_changelog_audit_gate` helpers
+- `tests/unit/roll_changelog_audit.bats` — 23 用例
 
 **Dependencies:**
 - Depends on: US-CL-004（linter + few-shot 先落地，audit 才有锚点参考）

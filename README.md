@@ -74,6 +74,31 @@ roll loop on        # optional: let the agent work unattended
 
 ---
 
+## Evolution
+
+Roll didn't start as a framework. It started as a question: *what if the AI didn't just write code, but actually shipped it?*
+
+**Getting the basics shipped (Apr 2026)**
+The first milestone was making Roll self-maintaining: npm-distributed, self-updating, with a one-command release flow that handles versioning, changelogs, tagging, and publishing. Before building anything ambitious, the toolchain had to be trustworthy.
+
+**A multi-agent ecosystem (late Apr – early May)**
+Roll expanded beyond Claude to support Kimi, DeepSeek, Codex, and Trae — each skill able to declare which tools and models it prefers. The bigger shift was social: `roll-peer` enabled cross-agent code review, so agents could challenge each other's decisions before anything landed on `main`. GitHub Actions brought that discipline into CI.
+
+**Autonomous execution unlocked (May 10)**
+`roll loop` made the leap from "AI assists" to "AI delivers." Stories run back-to-back without human prompting. `roll-.dream` runs nightly architecture health checks and files its own refactor tickets. The system started generating its own work queue.
+
+**Making the machine visible (May 11–12)**
+Autonomous execution is only useful if you can trust it. This phase added real-time terminal windows, loop monitoring, macOS notifications, CI status queries, and a daily briefing digest — everything needed to see what the AI is doing without having to babysit it.
+
+**A reliable delivery pipeline (May 13–14)**
+The final piece was correctness under pressure: worktree isolation prevents stories from colliding on `main`, `depends-on:` constraints enforce sequencing, and auto-merge gates on both CI green *and* AI code review approval. The pipeline now catches its own mistakes.
+
+---
+
+**Where we're heading:** The autonomous execution layer keeps deepening — the goal is a system where AI handles the full delivery loop end-to-end, and humans stay in the loop only for direction and release sign-off.
+
+---
+
 ## Contributing
 
 PRs welcome. Keep them focused on one thing. For larger changes, open an issue first.

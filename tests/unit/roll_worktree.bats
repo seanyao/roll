@@ -225,3 +225,32 @@ teardown() {
   [ -f "$_LOOP_ALERT" ]
   grep -qE 'ff-only|merge' "$_LOOP_ALERT"
 }
+
+# --- _claude_cleanup_stale_worktrees (REFACTOR-011) ---
+
+@test "_claude_cleanup_stale_worktrees: merged branch worktree is removed" {
+  local wt_dir="${TEST_TMP}/repo/.claude/worktrees"
+  mkdir -p "$wt_dir"
+  git worktree add "$wt_dir/merged-wt" -b "claude/merged-test" -q
+  # Branch at same HEAD as main → merge-base --is-ancestor returns 0
+  run _claude_cleanup_stale_worktrees "${TEST_TMP}/repo"
+  [ "$status" -eq 0 ]
+  [ ! -d "$wt_dir/merged-wt" ]
+  run git branch
+  [[ "$output" != *"claude/merged-test"* ]]
+}
+
+@test "_claude_cleanup_stale_worktrees: active (ahead-of-main) worktree is preserved" {
+  local wt_dir="${TEST_TMP}/repo/.claude/worktrees"
+  mkdir -p "$wt_dir"
+  git worktree add "$wt_dir/active-wt" -b "claude/active-test" -q
+  git -C "$wt_dir/active-wt" commit --allow-empty -m "wip" -q
+  run _claude_cleanup_stale_worktrees "${TEST_TMP}/repo"
+  [ "$status" -eq 0 ]
+  [ -d "$wt_dir/active-wt" ]
+}
+
+@test "_claude_cleanup_stale_worktrees: missing .claude/worktrees dir is silent return 0" {
+  run _claude_cleanup_stale_worktrees "${TEST_TMP}/repo"
+  [ "$status" -eq 0 ]
+}

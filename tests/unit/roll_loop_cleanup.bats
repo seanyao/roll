@@ -136,3 +136,18 @@ teardown() {
   run cat "$PUSH_CALLS"
   [ "$output" = "claude/doomed" ]
 }
+
+# --- _claude_cleanup_stale_worktrees (wiring only — behaviour tested in roll_worktree.bats) ---
+
+@test "_claude_cleanup_stale_worktrees: wired in runner script alongside branch cleanup" {
+  local script_path="${TEST_TMP}/run-test.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p go" "/tmp/log" 0 24
+  local inner_path="${script_path%.sh}-inner.sh"
+  grep -qF '_claude_cleanup_stale_worktrees' "$inner_path"
+  # Must appear after the retry loop
+  local loop_end_line stale_wt_line
+  loop_end_line=$(grep -n '^done$' "$inner_path" | head -1 | cut -d: -f1)
+  stale_wt_line=$(grep -n '_claude_cleanup_stale_worktrees' "$inner_path" | head -1 | cut -d: -f1)
+  [ -n "$stale_wt_line" ]
+  [ "$stale_wt_line" -gt "$loop_end_line" ]
+}

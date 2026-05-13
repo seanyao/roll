@@ -2155,6 +2155,9 @@ done
 # session pushed to origin. Runs regardless of claude's exit code (cleanup is
 # orthogonal to success/failure) and is silent on non-GitHub / unreachable.
 _claude_cleanup_new_branches "\$CLAUDE_BRANCH_SNAPSHOT" "${project_path}" || true
+# REFACTOR-011: also prune local .claude/worktrees/ entries whose branch has
+# been merged to main (remote-branch cleanup above doesn't touch local worktrees).
+_claude_cleanup_stale_worktrees "${project_path}" || true
 
 # Post-claude: publish cycle branch. Doc-only changes (BACKLOG/docs) merge
 # immediately via --admin; code changes use auto-merge (CI gate required).
@@ -3676,6 +3679,37 @@ _claude_cleanup_new_branches() {
       echo "[loop] deleted stale claude branch: $branch"
     fi
   done <<< "$new_branches"
+  return 0
+}
+
+# _claude_cleanup_stale_worktrees [project_path]
+#   Remove local worktrees under <project_path>/.claude/worktrees/ whose
+#   branch has been fully merged into main (merge-base --is-ancestor). Active
+#   worktrees (branch ahead of main) are preserved. Runs `git worktree prune`
+#   afterwards to clear stale metadata. Silent on missing directory or any
+#   individual failure so the loop's main flow is never derailed.
+_claude_cleanup_stale_worktrees() {
+  local project_path="${1:-.}"
+  local wt_dir="${project_path}/.claude/worktrees"
+  [ -d "$wt_dir" ] || return 0
+  local entry branch
+  for entry in "$wt_dir"/*/; do
+    [ -d "$entry" ] || continue
+    branch=$(git -C "$project_path" worktree list --porcelain 2>/dev/null \
+      | awk -v p="${entry%/}" '
+          /^worktree / { cur=$2; flag=(cur==p) }
+          /^branch /   && flag { sub(/^refs\/heads\//, "", $2); print $2; flag=0 }
+        ')
+    [ -z "$branch" ] && branch=$(git -C "$entry" symbolic-ref --short HEAD 2>/dev/null)
+    [ -z "$branch" ] && continue
+    if git -C "$project_path" merge-base --is-ancestor "$branch" main 2>/dev/null; then
+      git -C "$project_path" worktree remove --force "$entry" 2>/dev/null || true
+      rm -rf "$entry" 2>/dev/null || true
+      git -C "$project_path" branch -D "$branch" 2>/dev/null || true
+      echo "[loop] removed stale worktree: $branch"
+    fi
+  done
+  git -C "$project_path" worktree prune 2>/dev/null || true
   return 0
 }
 

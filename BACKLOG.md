@@ -221,7 +221,6 @@
 | IDEA-008 | roll dashboard 重设计 — 当前布局不完整，需要重新规划整体布局、信息密度、交互方式，作为项目入口的体验应该更好 | ✅ Done → US-AUTO-029 |
 | IDEA-009 | 文档语言分层规则 — 模型消化/产出的内容用英文，向人披露的信息用中文，解决当前中英混杂问题 | ✅ Done → US-DOC-001..006 |
 | IDEA-010 | `roll status` 增加全局 loop 概览区块 — 在现有 convention/skills 状态后追加本机所有项目的 loop 服务状态、调度时间和 backlog 待办数 | ✅ Done → US-AUTO-021 |
-| IDEA-011 | 基于开源 PI 自研 Coding Agent — 将 Harness Engineering Skills 和管理层内建进去，摆脱第三方 Coding Agent 适配依赖，获得完整自主控制权 | 📋 Todo |
 | IDEA-012 | Legacy 项目文档自治 — 三层体系：① `roll-doc-index` 整合散落文档生成可寻址索引；② `roll-doc-fill` 从 codebase 反向推导缺失文档（架构/编码规范/API 契约）；③ `roll-.dream` 新增 Scan 6（文档新鲜度）持续检测滞后/隐性约定/模块漂移，产出 REFACTOR 条目走 loop 自动维护，结果汇入 brief | ✅ Done → US-SKILL-008, US-AUTO-028 |
 | IDEA-013 | dashboard DoD checklist — UAT 信号源定义（UAT 在 Roll 体系下如何采集？人验？测试环境部署成功？需先定义概念再选实现路径） | ⏸ Deferred |
 | IDEA-014 | dashboard DoD checklist — Evidence "活证据"信号源定义（Roll 海报含"活证据·24/7 巡逻"，但落地未设计；可能与 sentinel 数据流耦合） | ⏸ Deferred |

@@ -174,7 +174,7 @@
 | [US-AUTO-031](docs/features/autonomous-evolution.md#us-auto-031) | dashboard 完成度检查项 — 接入 `$roll-sentinel` 的运行状态信号 | ⏸ Deferred |
 | [US-AUTO-032](docs/features/autonomous-evolution.md#us-auto-032) | loop 在独立 worktree 里跑 — 拆为 US-AUTO-036（辅助函数）+ US-AUTO-037（接入 runner） | ✅ Done → US-AUTO-036, US-AUTO-037 |
 | [US-AUTO-033](docs/features/autonomous-evolution.md#us-auto-033) | loop 完成任务后自动开 PR + auto-merge，CI 绿自动合入，无需人工介入 `depends-on:US-AUTO-037` | ✅ Done |
-| [US-AUTO-034](docs/features/autonomous-evolution.md#us-auto-034) | loop 每轮先处理未合入的 PR（自有等合/外部评审/卡住的尝试 rebase），再去领新任务 `depends-on:US-AUTO-033,US-AUTO-035` | 🔨 In Progress |
+| [US-AUTO-034](docs/features/autonomous-evolution.md#us-auto-034) | loop 每轮先处理未合入的 PR（自有等合/外部评审/卡住的尝试 rebase），再去领新任务 `depends-on:US-AUTO-033,US-AUTO-035` | ✅ Done |
 | [US-AUTO-035](docs/features/autonomous-evolution.md#us-auto-035) | AI 代码评审可批准或打回 PR，与 CI 形成合并双门；紧急情况可用环境变量跳过 `depends-on:US-AUTO-033` | ✅ Done |
 | [US-AUTO-036](docs/features/autonomous-evolution.md#us-auto-036) | worktree 隔离 Phase 1 — 加 7 个辅助函数 + 单元测试，不改动 runner | ✅ Done |
 | [US-AUTO-037](docs/features/autonomous-evolution.md#us-auto-037) | worktree 隔离 Phase 2 — runner 接入辅助函数，每轮在独立目录跑，完成后合回主干 `depends-on:US-AUTO-036` `manual-only:true` | ✅ Done |

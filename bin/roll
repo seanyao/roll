@@ -3228,6 +3228,40 @@ _changelog_audit_log() {
     >> "$log"
 }
 
+# _changelog_audit_gate <round1> [<round2> <round3>]
+#   Run up to 3 candidate bullets through _changelog_audit_bullet.
+#   First clean candidate wins: print bullet to stdout, exit 0.
+#   All 3 failed: print ⚠️-prefixed last candidate, append ALERT, exit 1.
+#   Each round writes a _changelog_audit_log record.
+_changelog_audit_gate() {
+  local i=0 last=""
+  for candidate in "$@"; do
+    i=$((i + 1))
+    last="$candidate"
+    local viols
+    # shellcheck disable=SC2207
+    viols=( $(_changelog_audit_bullet "$candidate") )
+    if [ "${#viols[@]}" -eq 0 ]; then
+      _changelog_audit_log pass "$i" "$candidate"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    _changelog_audit_log fail "$i" "$candidate" "${viols[@]}"
+    [ "$i" -ge 3 ] && break
+  done
+  # All 3 rounds failed (or fewer if caller passed < 3).
+  mkdir -p "$(dirname "$_LOOP_ALERT")" 2>/dev/null
+  {
+    echo ""
+    echo "# ALERT — changelog audit failed after $i rounds"
+    echo "**Time**: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "**Bullet**: $last"
+    echo "**Action**: kept under \`## Unreleased\` with ⚠️ prefix; human review recommended."
+  } >> "$_LOOP_ALERT"
+  printf '⚠️ %s\n' "$last"
+  return 1
+}
+
 # US-AUTO-036: worktree helpers (loop-safe pure additions).
 #
 # Phase 1 of worktree isolation — these helpers are NOT yet called by

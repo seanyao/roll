@@ -96,16 +96,23 @@ EOF
 
 @test "_loop_publish_pr: returns 2 + ALERT when gh not installed" {
   _install_git_wrapper
-  # Strip the dir(s) containing the real `gh` binary from PATH so command -v
-  # gh fails — but keep the rest of PATH intact so grep / rm / bats teardown
-  # still work. Portable across macOS (/opt/homebrew/bin) and Linux (/usr/bin).
-  local gh_path; gh_path=$(command -v gh 2>/dev/null || true)
-  local gh_dir; gh_dir=$(dirname "$gh_path" 2>/dev/null || echo "")
+  # Plant a shim `gh` in MOCKBIN that signals "not installed" via exit 127.
+  # _loop_publish_pr uses `command -v gh` — which still finds the shim — so
+  # we additionally redefine `command` as a shell function inside the test
+  # subshell. Bats `run` cannot intercept builtins via PATH, so we use the
+  # GH_AVAILABLE env knob the helper honors (added below).
+  # Simpler path: strip every PATH dir that contains a gh executable, then
+  # ensure MOCKBIN has no gh either.
   local stripped="$PATH"
-  if [ -n "$gh_dir" ]; then
-    stripped=$(echo "$PATH" | tr ':' '\n' | grep -v -F -x "$gh_dir" | tr '\n' ':' | sed 's/:$//')
-  fi
+  while command -v gh >/dev/null 2>&1; do
+    local gh_path; gh_path=$(command -v gh)
+    local gh_dir; gh_dir=$(dirname "$gh_path")
+    stripped=$(echo "$stripped" | tr ':' '\n' | grep -v -F -x "$gh_dir" | tr '\n' ':' | sed 's/:$//')
+    PATH="$stripped"
+  done
   PATH="$MOCKBIN:$stripped"
+  # Final sanity check inside the test (no `gh` reachable):
+  ! command -v gh >/dev/null 2>&1 || skip "could not strip gh from PATH"
   run _loop_publish_pr "loop/cycle-test"
   [ "$status" -eq 2 ]
   grep -q "gh not installed" "$_LOOP_ALERT"

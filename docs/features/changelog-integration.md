@@ -73,8 +73,9 @@
 ---
 
 <a id="us-cl-004"></a>
-## US-CL-004 changelog 风格守门 Phase 1 — 机械 linter + few-shot 锚点 📋
+## US-CL-004 changelog 风格守门 Phase 1 — 机械 linter + few-shot 锚点 ✅
 
+**Completed**: 2026-05-13
 **Created**: 2026-05-13
 
 - As a roll 用户
@@ -90,16 +91,16 @@
 **Background**：`roll-.changelog` SKILL.md 已写明完整风格规则（30 字、不写实现细节、❌/✅ 对照），但 loop 跑完 build 时 agent 上下文里全是刚写的函数名 / Phase / 文件路径，照抄最省力，规则被忽略。4a12ccf 实证：v2026.513.1 全部 9 条要人工重写。
 
 **AC:**
-- [ ] `roll-.changelog` skill 加 Step 5.4 "Mechanical Lint"：对每条 draft bullet 跑黑名单 grep，命中任一即视为违规
+- [x] `roll-.changelog` skill 加 Step 5.4 "Mechanical Lint"：对每条 draft bullet 跑黑名单 grep，命中任一即视为违规
   - 反引号包裹的标识符含 `_` 或 `()`（如 `` `_write_loop_runner_script` `` / `` `fn()` ``）
   - 含文件后缀 `.md` / `.sh` / `.yml` / `.ts` / `.bats`（除非作为用户命令的一部分）
   - 含 "Phase \d" / "Step \d" / "Helper" / "Schema" / "Fixture" / "Refactor" 这类内部词
   - 单条字符数 > 50（中文按字符计）
   - 含目录路径片段 `docs/` / `bin/` / `tests/` / `scripts/`
-- [ ] 命中后 skill 把违规清单 + 原文回给 agent，要求重写；最多 2 轮，仍不过则保留该条但前面加 `⚠️ ` 标记，写 ALERT 让人介入
-- [ ] skill 加 Step 5.3 "Style Anchors"：动态读 `CHANGELOG.md` 顶部最近 3 个 `## v` 节的全部 bullets（截断到总 1500 字），插入到 Step 5 生成阶段的上下文里作为 in-context 示例
-- [ ] 单元测试覆盖 linter 每条黑名单规则（命中 / 不命中分支）
-- [ ] 回归测试：把 4a12ccf 之前的 10 条草稿喂进 linter，应全部命中并要求重写
+- [x] 命中后 skill 把违规清单 + 原文回给 agent，要求重写；最多 2 轮，仍不过则保留该条但前面加 `⚠️ ` 标记，写 ALERT 让人介入
+- [x] skill 加 Step 5.3 "Style Anchors"：动态读 `CHANGELOG.md` 顶部最近 3 个 `## v` 节的全部 bullets（截断到总 1500 字），插入到 Step 5 生成阶段的上下文里作为 in-context 示例
+- [x] 单元测试覆盖 linter 每条黑名单规则（命中 / 不命中分支）
+- [x] 回归测试：把 4a12ccf 之前的 10 条草稿喂进 linter，应全部命中并要求重写
 
 **Files:**
 - `skills/roll-.changelog/SKILL.md` — 加 Step 5.3（style anchors）+ Step 5.4（mechanical lint）

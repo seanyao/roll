@@ -3,6 +3,8 @@
 ## Unreleased
 - **Fixed**: dashboard 不再在已发版后还显示 "✓ Release ready"——只有 tag 之后存在非 docs/chore 的可发版提交时才亮，光是文档改写不会再让它误报
 - **Fixed**: dashboard 上 "📋 N PROPOSAL" 的动作提示改成 `see: PROPOSALS.md`，原先指向的 `roll backlog` 只看 BACKLOG.md，点过去看不到 PROPOSAL，逻辑断头
+- **Added**: changelog 生成时自动挡掉技术黑话
+- **Added**: 写 changelog 时会先参考最近几次发布的风格
 
 ## v2026.513.1
 - **Added**: loop 现在每轮跑在独立的 worktree 里，结束自动合回 main 并清理；跑挂时保留现场目录方便排查 — 再也不会吞掉 main 上你正在改的代码

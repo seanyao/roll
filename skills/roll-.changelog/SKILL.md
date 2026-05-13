@@ -133,6 +133,53 @@ assigned.
 Do NOT read `package.json` version, do NOT call `git describe`, do NOT invent
 version numbers like `v2026.511.8`. Just write to `## Unreleased`.
 
+### 5.3 Style Anchors — In-Context Few-Shot
+
+Before drafting bullets, pull the most recent 3 published versions' bullets as
+in-context examples so the agent doesn't write from a blank slate (the blank
+slate is where the technical-jargon habit comes from — the agent is fresh
+from writing function names and just copies them over).
+
+```bash
+_changelog_style_anchors CHANGELOG.md
+```
+
+Output is the concatenated bullet lines from the last 3 `## v...` sections,
+capped at 1500 characters. Use them as a style reference when drafting — pay
+attention to length, voice ("不再被…坑" / "现在 …"), and absence of internal
+names.
+
+### 5.4 Mechanical Lint — Hard Gate
+
+After drafting bullets, run each through the mechanical linter. Any non-empty
+output means the bullet violates at least one blacklist rule and must be
+rewritten.
+
+```bash
+for bullet in "${draft_bullets[@]}"; do
+  violations=$(_changelog_lint_bullet "$bullet")
+  [ -n "$violations" ] && needs_rewrite+=("$bullet :: $violations")
+done
+```
+
+Violation tags emitted by `_changelog_lint_bullet`:
+
+| Tag | Trigger | Why it's noise to users |
+|---|---|---|
+| `backtick-identifier` | `…` contains `_` or `()` | Internal symbol names mean nothing to users |
+| `file-suffix` | `.md/.sh/.yml/.ts/.bats` outside backticks | File paths are maintainer concern |
+| `internal-word` | Phase N / Step N / Helper / Schema / Fixture / Refactor | Workflow/design vocabulary, not user-facing |
+| `over-length` | > 50 visible chars | Too long = probably explaining implementation |
+| `path-fragment` | `docs/` / `bin/` / `tests/` / `scripts/` outside backticks | Source-tree layout is maintainer concern |
+
+**Rewrite loop (max 2 rounds)**:
+1. Show the agent the violation list + original bullet → request rewrite
+2. Re-lint the rewrite
+3. If still violating after 2 rewrites → **keep the bullet but prefix `⚠️ `** so
+   the human reviewer can spot it, AND append a line to
+   `~/.shared/roll/loop/ALERT.md` describing what couldn't be fixed.
+   Never block the whole release on style — let the human take the wheel.
+
 ### 5. Generate CHANGELOG.md
 
 **Create mode** (first time, no CHANGELOG.md yet):

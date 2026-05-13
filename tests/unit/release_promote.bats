@@ -114,3 +114,13 @@ EOF
   # foo bullet still there
   grep -q 'foo' CHANGELOG.md
 }
+
+# --- REFACTOR-012: release.sh must not define its own _detect_agent ---
+
+@test "release.sh: does not define _detect_agent (uses bin/roll _project_agent instead)" {
+  ! grep -qF '_detect_agent()' "${BATS_TEST_DIRNAME}/../../scripts/release.sh"
+}
+
+@test "release.sh: sources bin/roll to get _project_agent" {
+  grep -qE '^\s*(source|\.)\s+.*bin/roll' "${BATS_TEST_DIRNAME}/../../scripts/release.sh"
+}

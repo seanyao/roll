@@ -21,22 +21,17 @@ read -p "Publish ${TAG}? [y/N] " confirm
 [[ "$confirm" == [yY] ]] || { echo "Aborted."; exit 0; }
 
 # ── Sync CHANGELOG.md from BACKLOG via configured agent ──────────────────────
-_detect_agent() {
-  if [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml 2>/dev/null; then
-    grep "^agent:" .roll.yaml | awk '{print $2}' | tr -d '"' | head -1
-  elif [[ -f "${HOME}/.roll/config.yaml" ]] && grep -q "primary_agent:" "${HOME}/.roll/config.yaml" 2>/dev/null; then
-    grep "primary_agent:" "${HOME}/.roll/config.yaml" | awk '{print $2}' | tr -d '"' | head -1
-  else
-    echo "claude"
-  fi
-}
+# Source bin/roll for shared helpers (_project_agent, _skill_content).
+# main() is guarded by BASH_SOURCE == $0, so sourcing is safe.
+set +e
+source "${REPO_ROOT}/bin/roll" 2>/dev/null
+set -e
 
 _run_changelog_skill() {
   local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"
   [[ -f "$skill_file" ]] || { echo "Warning: roll-.changelog skill not found, skipping."; return; }
-  local agent; agent=$(_detect_agent)
-  # Strip YAML frontmatter before passing to agent
-  local content; content=$(awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' "$skill_file")
+  local agent; agent=$(_project_agent)
+  local content; content=$(_skill_content "$skill_file")
   echo "Syncing CHANGELOG.md via ${agent}..."
   case "$agent" in
     claude)   claude -p "$content" ;;

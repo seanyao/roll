@@ -16,6 +16,11 @@ jobs:
   test:
     if: "!startsWith(github.event.head_commit.message, '[release]')"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, integration]
+    name: test-${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,5 +32,5 @@ jobs:
       - name: Bootstrap ~/.roll and ~/.claude/skills (sync skills for tests that check installed locations)
         run: bash bin/roll setup
 
-      - name: Run bats tests
-        run: npm test
+      - name: Run bats tests (${{ matrix.suite }})
+        run: bash tests/run.sh tests/${{ matrix.suite }}

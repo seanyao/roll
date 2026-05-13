@@ -21,18 +21,18 @@ setup() {
   _orig_dir="$PWD"
   cd "$TEST_TMP"
 
-  # Bare upstream + local clone so fetch/push are exercisable without a real remote.
-  git init -q --bare upstream.git
-  git clone -q upstream.git repo
+  # Bare upstream + local clone so fetch/push are exercisable without a real
+  # remote. `init.defaultBranch=main` pins both bare and local to `main` on
+  # every OS — ubuntu's older git still defaults to `master`, which left the
+  # bare repo's HEAD dangling and broke submodule add (see CI run 25789742946).
+  git -c init.defaultBranch=main init -q --bare upstream.git
+  git -c init.defaultBranch=main clone -q upstream.git repo
   cd repo
   git config user.email "test@example.com"
   git config user.name "Test"
   git config commit.gpgsign false
   git commit --allow-empty -m "init" -q
-  git push -q origin master 2>/dev/null || git push -q origin main 2>/dev/null || true
-  # Pin to main for predictability
-  git branch -m main 2>/dev/null || true
-  git push -q -u origin main 2>/dev/null || true
+  git push -q -u origin main
 
   # Override roll's shared dirs to land inside TEST_TMP
   _SHARED_ROOT="${TEST_TMP}/shared"
@@ -133,14 +133,13 @@ teardown() {
 # --- _worktree_submodule_init ---
 
 @test "_worktree_submodule_init: works inside worktree and leaves main intact (coexistence)" {
-  # Build a tiny submodule upstream
+  # Build a tiny submodule upstream (pin to main — see setup() comment)
   cd "$TEST_TMP"
-  git init -q --bare submod.git
-  git clone -q submod.git submod_seed
+  git -c init.defaultBranch=main init -q --bare submod.git
+  git -c init.defaultBranch=main clone -q submod.git submod_seed
   ( cd submod_seed \
       && git config user.email t@t && git config user.name t && git config commit.gpgsign false \
       && git commit --allow-empty -m "submod-init" -q \
-      && git branch -m main 2>/dev/null \
       && git push -q -u origin main )
   rm -rf submod_seed
 

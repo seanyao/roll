@@ -3008,6 +3008,55 @@ _loop_is_manual_only() {
   echo "$row" | grep -qE 'manual-only:true'
 }
 
+# US-AUTO-036: worktree helpers (loop-safe pure additions).
+#
+# Phase 1 of worktree isolation — these helpers are NOT yet called by
+# runner.sh. US-AUTO-037 (manual-only) wires them into
+# _write_loop_runner_script. Do not delete or inline; they are unit-tested
+# in tests/unit/roll_worktree.bats.
+
+# _worktree_path <slug> <us-id>
+#   Echoes the canonical worktree directory for a (project, story) pair.
+_worktree_path() {
+  echo "${_SHARED_ROOT}/worktrees/${1}-${2}"
+}
+
+# _worktree_alert <msg>
+#   Append a timestamped line to $_LOOP_ALERT. Used by failure paths in
+#   _worktree_merge_back to surface stuck worktrees.
+_worktree_alert() {
+  mkdir -p "$(dirname "$_LOOP_ALERT")" 2>/dev/null
+  printf '[%s] worktree: %s\n' "$(date -u +%FT%TZ)" "$1" >> "$_LOOP_ALERT"
+}
+
+# _worktree_create <path> <branch> <base>
+#   Create a worktree at <path> on a new branch <branch> rooted at <base>.
+#   Idempotent: if <branch> already exists locally (from a prior failed
+#   run) it is deleted first so `git worktree add -b` does not error.
+_worktree_create() {
+  local path="$1" branch="$2" base="$3"
+  mkdir -p "$(dirname "$path")"
+  if [ -e "$path" ]; then
+    git worktree remove --force "$path" 2>/dev/null || true
+    rm -rf "$path" 2>/dev/null || true
+  fi
+  if git show-ref --verify --quiet "refs/heads/${branch}"; then
+    git branch -D "$branch" >/dev/null 2>&1 || true
+  fi
+  git worktree add "$path" -b "$branch" "$base"
+}
+
+# _worktree_cleanup <path> <branch>
+#   Remove the worktree at <path> and delete <branch>. Tolerant when
+#   either is already absent so retries / partial-failure rollback is safe.
+_worktree_cleanup() {
+  local path="$1" branch="$2"
+  git worktree remove --force "$path" 2>/dev/null || true
+  rm -rf "$path" 2>/dev/null || true
+  git branch -D "$branch" 2>/dev/null || true
+  return 0
+}
+
 _loop_monitor() {
   local interval="${1:-3}"
   local project_path; project_path=$(pwd -P)

@@ -284,8 +284,10 @@ When any signal appears, **do not stop — flag it**:
 **REFACTOR entry format in BACKLOG.md:**
 
 ```markdown
-| REFACTOR-001 | Extract payment boundary — leaking into Order module during US-AUTH-003 | 📋 Todo |
+| REFACTOR-001 | {one-line plain-language description} | 📋 Todo |
 ```
+
+描述写法：参见 AGENTS.md "Backlog descriptions" 规则。说清楚"什么需要改"以及"不改会怎样"，技术细节写在 `docs/features/refactor-log.md`。
 
 **refactor-log.md entry format:**
 

@@ -74,7 +74,11 @@ Generate between 1 and 3 proposals. For each:
 
 ```
 ## PROPOSAL: {Short title}
+```
 
+`{Short title}` 写法：用户看得懂的一句话，说清楚"加什么"或"解决什么问题"。不用技术术语，不提内部实现。这句话批准后会直接成为 BACKLOG 里的描述。
+
+```
 **Motivation (why):**
 One to two sentences from the user's perspective explaining the pain or opportunity.
 

@@ -625,6 +625,8 @@ DOMAIN_DIR="docs/domain/"
 | [US-{DOMAIN}-{N}](docs/features/<feature>.md#us-{domain}-{n}) | {one-line description} | 📋 Todo |
 ```
 
+`{one-line description}` 写法：用户能读懂的一句话，说清楚"能做什么"或"解决了什么麻烦"。不写实现细节、文件路径、函数名。细节和 AC 写在 `docs/features/` 里。写好了可以直接当 CHANGELOG 条目用。
+
 Note: `{DOMAIN}` maps to the Bounded Context name identified in DDD analysis.
 
 **US section in docs/features/\<feature\>.md (full details):**

@@ -22,9 +22,9 @@
 - **Fixed**: `roll update` 后 `roll loop status` 不再误报 off，不用手动 `roll loop on` 恢复
 
 ## v2026.512.8
-- **Added**: `$roll-doc` — legacy 项目文档自动化技能：四阶段扫描（索引 + 缺口分析 + 草稿补全 + 报告），支持 `--dry-run` / `--force`，适用任何项目
-- **Added**: `roll-.dream` Scan 6 — 文档新鲜度检测（滞后文档 / 未记录 ENV 变量 / 架构文档缺失），依赖 roll-doc，发现写入 REFACTOR 条目
-- **Fixed**: loop CI gate 在 SSH config 改写 github.com 为 IP 的环境下失灵 — `gh` 自动识别失败被静默吞掉，loop 把 "gh 出错" 误判为 "gh 未装"，在 CI 红的情况下继续把 story 标 ✅ Done；现从 git remote 推导 `owner/repo` 强制传 `-R`，gh 调用失败 = ALERT，loop 起跑前先验 HEAD CI 红绿，红则拒绝 build
+- **Added**: `$roll-doc` — 扫描任意项目的文档现状，找出缺口并生成草稿，支持 `--dry-run`
+- **Added**: `roll-.dream` Scan 6 — 每晚检测文档是否跟代码脱节，发现问题自动写进重构待办
+- **Fixed**: 某些 SSH 配置下 loop 把"CI 查询失败"误判为"CI 工具未安装"，导致测试没过就标任务完成
 
 ## v2026.512.7
 - **Added**: `roll alert` — 查看、确认、清除 loop 告警，不用再去翻 loop status
@@ -32,10 +32,10 @@
 - **Added**: `roll ci [--wait]` — 查看当前提交的 CI 状态，或等待 CI 跑完再继续
 - **Fixed**: loop 现在会等 CI 通过后才标记故事完成，CI 失败则保持进行中并发出提醒
 - **Fixed**: changelog 更新不再产生独立 commit，并入故事完成提交，git log 更干净
-- **Added**: `docs/domain/` — Roll 架构的 DDD 领域模型文档（5 个 Bounded Context + 自治操作 Aggregate 设计）
+- **Added**: `docs/domain/` — Roll 架构领域模型文档
 - **Fixed**: `roll loop runs` 不再报"当前项目尚无运行记录"，历史记录正常显示
-- **Added**: 文档目录重组 — methodology、skill 选择指南、loop 验证记录迁移至 `docs/guide/` 和 `docs/practices/`，根目录不再有散落文件
-- **Added**: README 大幅精简并新增文档导航索引 — 首页更清晰，所有指南一表可查
+- **Added**: 文档目录重组 — 散落文档统一迁移至 `docs/guide/` 和 `docs/practices/`
+- **Added**: README 精简，新增文档导航索引
 - **Added**: dream 每晚自动检测文档缺口，brief 新增文档覆盖率数字
 
 ## v2026.512.6
@@ -100,8 +100,8 @@
 - **Fixed**: release.yml 加 fetch-depth: 0，确保历史 tag 在 workflow 中可见
 
 ## v2026.510.8
-- **Fixed**: release.sh 自洽 — 内联 agent 检测和 changelog 同步，发版流程不依赖外部调用
-- **Fixed**: roll release 命令重构 — 改为独立调用 roll-release skill，与 scripts/release.sh 解耦
+- **Fixed**: release.sh 自洽 — 发版流程不依赖外部调用
+- **Fixed**: `roll release` 改为独立调用 roll-release skill，与 release.sh 解耦
 - **Fixed**: GitHub Release workflow 加 fetch-depth: 0，确保历史 tag 可见
 
 ## v2026.510.7

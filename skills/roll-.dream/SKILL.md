@@ -222,6 +222,8 @@ section of BACKLOG.md:
 | REFACTOR-XXX | {one-line description} — flagged by dream {YYYY-MM-DD} | 📋 Todo |
 ```
 
+`{one-line description}` 写法：一句人话说清楚"什么地方需要改"以及"不改会怎样"。不写函数名、文件路径、技术方案。例：`loop 状态读取逻辑分散在多处，修一处容易遗漏另一处`。
+
 **Threshold**: only flag items where the fix would meaningfully reduce
 complexity or prevent future bugs. Ignore cosmetic issues.
 

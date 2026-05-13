@@ -40,6 +40,12 @@
   - Before claiming completion: verify in the target environment mentioned by
     user (e.g., specific CLI tool, remote server, hardware platform).
 - **Workspace**: `BACKLOG.md` index. `docs/features/` for details.
+- **Backlog descriptions** (US, FIX, REFACTOR, IDEA, PROPOSAL): one sentence in plain language.
+  Say what changed and why it matters — not how it works internally.
+  No file paths, function names, parameter lists, or architecture jargon.
+  `depends-on:` and `manual-only:` functional tags are allowed; `Domain:` annotation tags are not.
+  Technical details and AC go in `docs/features/`.
+  A well-written BACKLOG description can be used directly as a CHANGELOG entry.
 - **Done**: Push + CI passes + deployed. Local-only is not done.
 - **Commit message format**:
   - Format: `<type>: <description>` (Git Hook may auto-prepend type prefix)

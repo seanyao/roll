@@ -47,6 +47,14 @@ Create mode:
 
 CHANGELOG 是给**使用者**看的，不是给维护者看的。一句话讲清"用户能做什么 / 不再被什么坑"，能不写就不写。
 
+**BACKLOG 描述写好了，CHANGELOG 就是复制 + 过滤，不是重写。**
+如果 BACKLOG 描述已经是人话、一句话、说用户价值，直接用它（去掉 `depends-on:` / `manual-only:` 等功能性标签）。
+只有 BACKLOG 描述包含实现细节或技术黑话时，才需要改写。
+
+**FIX 条目的 filter 规则**：BACKLOG 的 FIX 描述通常是 `<用户症状> — <修复手段>` 结构。
+CHANGELOG 只取破折号前的用户症状，丢弃破折号后的修复手段。
+例：`roll update 后 loop 状态误报 off — reload 改用 bootout+bootstrap` → CHANGELOG 只写 `roll update 后 loop 状态不再误报 off`。
+
 **完全跳过（不写入 CHANGELOG）：**
 - 测试基建（teardown 清理、test isolation、bats helper、CI 时序）
 - prompt / SKILL.md 内部契约（schema 锁定、enum 强制、contract test）
@@ -62,9 +70,9 @@ CHANGELOG 是给**使用者**看的，不是给维护者看的。一句话讲清
 - 看得见的体验变化（布局、文案、速度、可见性）
 - 影响安装、升级、配置的改动
 
-**写法约束：**
+**写法约束（BACKLOG 描述不符合时才介入改写）：**
 
-1. **一行，30 字以内**。超了就是太啰嗦。
+1. **一行**。超了就是太啰嗦。
 2. **不写实现细节**：禁止文件路径、函数名、字段列表、命令参数、配置键名。
 3. **不写数字细节**："3 个服务"、"60+ ghost" 这种内部状态不写。
 4. **说人话**：避免 "幂等"、"trap"、"epoch" 等技术黑话；说"做两次效果一样"、"异常退出也会清理"、"启动时间"。

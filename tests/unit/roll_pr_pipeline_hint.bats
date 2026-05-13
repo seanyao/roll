@@ -25,9 +25,12 @@ teardown() { unit_teardown; }
   # Project convention (AGENTS.md): bilingual output uses separate lines.
   run _print_pr_pipeline_hint
   [ "$status" -eq 0 ]
-  # At least one English line and one Chinese line.
-  echo "$output" | grep -qE '[A-Za-z]'
-  echo "$output" | grep -qE '[一-龥]'
+  # At least one English line and one Chinese line. Literal anchors keep this
+  # portable across locales (the regex class [一-龥] is brittle on CI shells
+  # without a UTF-8 grep locale).
+  [[ "$output" == *"required_pull_request_reviews"* ]]
+  [[ "$output" == *"可选"* ]]
+  [[ "$output" == *"紧急通道"* ]]
 }
 
 @test "cmd_setup output references the PR-pipeline hint" {

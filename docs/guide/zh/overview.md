@@ -65,3 +65,4 @@ Loop 按如下顺序选取故事：
 - [loop.md](loop.md) — 调度、所有子命令、tmux 可见性
 - [dream.md](dream.md) — 夜间代码健康巡检和 REFACTOR 生成
 - [peer.md](peer.md) — 跨 Agent 评审协议
+- [configuration.md](configuration.md) — `ROLL_HOME` / `ROLL_CONFIG` / `ROLL_GLOBAL` 覆盖

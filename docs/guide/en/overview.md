@@ -65,3 +65,4 @@ You can bypass loop entirely: `$roll-build US-XXX` executes any story immediatel
 - [loop.md](loop.md) — Scheduling, subcommands, tmux visibility
 - [dream.md](dream.md) — Nightly code health and REFACTOR generation
 - [peer.md](peer.md) — Cross-agent review protocol
+- [configuration.md](configuration.md) — `ROLL_HOME` / `ROLL_CONFIG` / `ROLL_GLOBAL` overrides

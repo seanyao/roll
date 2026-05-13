@@ -3,26 +3,6 @@
 
 GUIDE_DIR="${BATS_TEST_DIRNAME}/../../docs/guide/en"
 
-@test "docs/guide/en/ directory exists" {
-  [ -d "$GUIDE_DIR" ]
-}
-
-@test "overview.md exists" {
-  [ -f "${GUIDE_DIR}/overview.md" ]
-}
-
-@test "loop.md exists" {
-  [ -f "${GUIDE_DIR}/loop.md" ]
-}
-
-@test "dream.md exists" {
-  [ -f "${GUIDE_DIR}/dream.md" ]
-}
-
-@test "peer.md exists" {
-  [ -f "${GUIDE_DIR}/peer.md" ]
-}
-
 @test "overview.md covers three-layer model" {
   grep -qi "three.layer\|autonomous layer\|loop.*dream.*peer\|human.*loop.*dream" "${GUIDE_DIR}/overview.md"
 }

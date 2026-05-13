@@ -2861,64 +2861,6 @@ EOF
   return 0
 }
 
-# Pre-run remote sync — call before Step 1.5 (CI precheck) and Step 2 scan.
-# Defensive gate against building on stale code: if origin has commits the
-# local branch doesn't, the loop must not stack new TCR commits on a divergent
-# base (which would force-push conflicts or red CI). Refer to FIX-030.
-# Returns 0: ok to proceed (in-sync, fast-forwarded, or lenient skip).
-# Returns 1: behind + dirty (or ff refused) → ALERT written, do not build.
-_loop_precheck_remote() {
-  # Lenient when outside a git repo or no origin configured.
-  git rev-parse --git-dir &>/dev/null || return 0
-  git remote get-url origin &>/dev/null || return 0
-
-  local branch
-  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || return 0
-  [[ -z "$branch" || "$branch" == "HEAD" ]] && return 0
-
-  # Fetch — lenient on network / auth failures (next cycle will retry).
-  if ! git fetch origin "$branch" --quiet 2>/dev/null; then
-    return 0
-  fi
-
-  # Origin may not have this branch (e.g. local-only feature branch).
-  git rev-parse --verify "origin/${branch}" &>/dev/null || return 0
-
-  local behind
-  behind=$(git rev-list --count "HEAD..origin/${branch}" 2>/dev/null || echo 0)
-
-  if [[ "$behind" -eq 0 ]]; then
-    return 0
-  fi
-
-  # Behind: check working tree. Clean → fast-forward. Dirty → ALERT.
-  if [[ -z "$(git status --porcelain 2>/dev/null)" ]]; then
-    if git pull --ff-only origin "$branch" --quiet 2>/dev/null; then
-      info "Pre-run remote sync: fast-forwarded ${behind} commit(s) from origin/${branch}  快进合并远端 ${behind} 个提交"
-      return 0
-    fi
-  fi
-
-  mkdir -p "$(dirname "$_LOOP_ALERT")"
-  cat > "$_LOOP_ALERT" << EOF
-# ALERT — Pre-run remote sync failed
-
-**Time**: $(date '+%Y-%m-%d %H:%M')
-**Branch**: ${branch}
-**Behind**: ${behind} commit(s) behind origin/${branch}
-**Reason**: working tree dirty (or branches diverged) — cannot fast-forward; loop refused to build on stale base
-工作区有未提交修改（或分支已分叉），无法快进合并，loop 拒绝在过期的基础上构建
-
-**Action required** (choose one):
-- Commit or stash local changes, then \`git pull --ff-only origin ${branch}\` and \`roll loop now\`
-- Manually rebase: \`git pull --rebase origin ${branch}\` and \`roll loop now\`
-- Reset and retry: \`roll loop reset\` then \`roll loop now\`
-EOF
-  _notify "roll ⚠ Remote sync failed" "behind ${behind} on ${branch}, working tree dirty"
-  err "Pre-run remote sync: ${behind} commit(s) behind origin/${branch} and working tree dirty  远端落后 + 工作区脏，拒绝构建"
-  return 1
-}
-
 # CI gate before marking a story Done.
 # On CI failure: writes ALERT, returns 1 (caller keeps story 🔨 In Progress).
 # When gh unavailable: returns 0 (graceful skip).

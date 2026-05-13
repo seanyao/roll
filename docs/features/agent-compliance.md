@@ -1,75 +1,80 @@
 # Agent Compliance
 
 > Epic: Engineering Infrastructure
-> 确保所有 AI Agent（尤其 Kimi CLI）严格遵循 TCR 节奏和 Roll 执行纪律。
+> 用机械校验替代软规则，物理拦截 agent 绕过 TCR 的作弊路径。
 > 来源：GitHub Issues #16、#17（zhangyaxuan，2026-05-13）
 
 ---
 
 <a id="us-infra-006"></a>
-## US-INFRA-006 AGENTS.md 执行纪律加固 📋
+## US-INFRA-006 Test runner 写 proof-of-pass 📋
 
 **Created**: 2026-05-13
 
-- As a project maintainer
-- I want agent convention files to include explicit stop conditions and non-negotiable TCR rules
-- So that any AI agent working on this project cannot bypass the workflow without violating a written constraint
+- As a developer enforcing TCR
+- I want the test runner to record a proof-of-pass after each successful run
+- So that a pre-commit hook can verify tests were run on exactly the code being committed
 
 **Domain Model:**
 - Context: Engineering Infrastructure
-- Aggregate: Agent Convention
-- Events raised: [ConventionViolationDetected] → agent must stop
+- Aggregate: TCR Enforcement
+- Events raised: [TestsPassed] → `.roll/last-test-pass` written
 
 **Background:**
-GitHub Issue #17 报告 Kimi 将所有代码一次性写完后事后拆 commit 伪造 TCR；
-Issue #16 指出当前 AGENTS.md 有约束规则但缺乏"违反则停止"的明确指令。
+Issue #17 显示 Kimi 将所有代码写完后事后拆 commit 伪造 TCR。
+软规则（AGENTS.md）无法拦截，需要机械校验。
+本 Story 是校验链路的数据源。
 
 **AC:**
-- [ ] `AGENTS.md`（项目根）Workflow 节增加「执行纪律」子节，包含：
-  - 开工前：AC 明确 + design doc 存在，否则 **停止**
-  - TCR 强制：每个 micro-step 必须在 green 后立即 commit，不允许 working tree 积压多步改动
-  - 禁止：未通过 `npm test` 提交；禁止事后拆 commit
-  - 完工必须：同步更新 `BACKLOG.md` 和 `docs/features/` 对应文件，缺一不可
-- [ ] `conventions/global/AGENTS.md`（分发模板）同步加入相同纪律节，确保下游项目也受约束
+- [ ] `tests/run.sh` 全量通过后，写入 `.roll/last-test-pass`，格式：
+  ```json
+  {"ts": <unix-epoch-seconds>, "tree": "<git-write-tree-output>"}
+  ```
+  `tree` 为写入时刻的 working tree hash（`git write-tree`），用于对齐"测试的代码 == 提交的代码"
+- [ ] 测试失败时不写入（或删除已有文件）
+- [ ] `.roll/last-test-pass` 加入 `.gitignore`，不进版本库
+- [ ] `tests/run.sh` 保持 set -euo pipefail 兼容，写入失败不影响测试退出码
 
 **Files:**
-- `AGENTS.md`
-- `conventions/global/AGENTS.md`
+- `tests/run.sh`
+- `.gitignore`
 
 **Dependencies:**
-- Triggered by: GitHub Issues #16, #17
-- Related: US-INFRA-007
+- Depended on by: US-INFRA-007
 
 ---
 
 <a id="us-infra-007"></a>
-## US-INFRA-007 创建 .kimi/AGENTS.md — Kimi 专属前置执行规则 📋
+## US-INFRA-007 Pre-commit hook 验证 proof-of-pass 📋
 
 **Created**: 2026-05-13
 
-- As a project maintainer
-- I want a .kimi/AGENTS.md that Kimi CLI reads with priority
-- So that Kimi receives stricter pre-flight checks and cannot skip TCR without violating a written rule
+- As a developer enforcing TCR
+- I want a pre-commit hook that blocks commits unless tests just passed on the exact same code
+- So that no agent can commit code that hasn't been verified by the test suite
 
 **Domain Model:**
 - Context: Engineering Infrastructure
-- Aggregate: Agent Convention
-- Events raised: [KimiPreflightFailed] → agent must stop and ask user
-
-**Background:**
-Kimi CLI 优先读取项目中的 `.kimi/AGENTS.md`。当前该文件不存在，
-意味着 Kimi 缺乏项目级强制约束，只读全局配置。
+- Aggregate: TCR Enforcement
+- Events raised: [CommitBlocked] → agent must run `npm test` first
 
 **AC:**
-- [ ] 创建 `.kimi/AGENTS.md`，包含：
-  - 开工三步自检：① 读 `BACKLOG.md` 找当前 US → ② 读 `docs/features/*.md` 确认 AC 完整 → ③ AC 有歧义则停止并问用户
-  - 每次 action 前：列出将修改的文件（≤5 个）+ 测试策略，等用户确认后才写代码
-  - TCR checklist：Test → Green → `git commit -m "tcr: ..."` / Red → `git checkout -- .` → 重新设计；不允许 working tree 积压多步改动
-  - 禁止行为清单：未经用户确认写代码 / 事后拆 commit / 跳过 `npm test` / 一个 commit 混入多个 US 改动
+- [ ] 新建 `hooks/pre-commit`（纳入版本库），校验两个条件：
+  1. `.roll/last-test-pass` 的 `ts` 在 60 秒内（测试刚跑过）
+  2. `.roll/last-test-pass` 的 `tree` == 当前 `git write-tree`（测试的是同一份代码）
+- [ ] 任一条件不满足时，输出清晰错误并以非零退出码拒绝 commit：
+  ```
+  ✗ Commit blocked: tests not verified on current code.
+  ✗ 提交被拒绝：当前代码未经测试验证。
+  Run: npm test
+  ```
+- [ ] hook 本身不执行任何测试（毫秒级，不影响 TCR 节奏）
+- [ ] 项目根加 `git config core.hooksPath hooks`，使 hook 对所有 agent 生效（在 README 或 AGENTS.md 中注明需执行此配置）
+- [ ] `hooks/pre-commit` 有可执行权限（chmod +x）
 
 **Files:**
-- `.kimi/AGENTS.md`（新建）
+- `hooks/pre-commit`（新建目录 + 文件）
+- `AGENTS.md`（加一行：初始化项目需执行 `git config core.hooksPath hooks`）
 
 **Dependencies:**
-- Triggered by: GitHub Issues #16, #17
-- Related: US-INFRA-006
+- Depends on: US-INFRA-006

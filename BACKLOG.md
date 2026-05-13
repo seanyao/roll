@@ -88,8 +88,8 @@
 ### Feature: agent-compliance
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-INFRA-006](docs/features/agent-compliance.md#us-infra-006) | AGENTS.md 执行纪律加固 — 明确 Stop 条件 + TCR 强制约束，防止 agent 事后补 commit (Issues #16, #17) | 📋 Todo |
-| [US-INFRA-007](docs/features/agent-compliance.md#us-infra-007) | 创建 .kimi/AGENTS.md — Kimi 专属前置检查清单，强制三步自检 + 每步确认 (Issues #16, #17) | 📋 Todo |
+| [US-INFRA-006](docs/features/agent-compliance.md#us-infra-006) | Test runner 写 proof-of-pass — 测试通过后记录 ts + tree hash 到 `.roll/last-test-pass` (Issues #16, #17) | 📋 Todo |
+| [US-INFRA-007](docs/features/agent-compliance.md#us-infra-007) | Pre-commit hook 验证 proof-of-pass — 60s 内 + tree hash 吻合才放行，物理拦截未经测试的 commit (Issues #16, #17) | 📋 Todo |
 
 ## Epic: Changelog
 ### Feature: changelog-integration

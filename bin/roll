@@ -2048,7 +2048,13 @@ _write_loop_runner_script() {
   # Use stream-json + formatter: --verbose alone does nothing in -p mode;
   # stream-json enables realtime streaming; loop-fmt.py humanizes the events.
   local fmt_script="${ROLL_PKG_DIR}/lib/loop-fmt.py"
+  local roll_bin="${ROLL_PKG_DIR}/bin/roll"
   local cmd_verbose="${cmd/claude -p/claude -p --verbose --output-format stream-json}"
+  # US-AUTO-037: strip leading `cd "<path>" && ` (callers like
+  # _install_launchd_plists prepend it). The runner now manages cwd itself
+  # — pointing at the worktree when isolation succeeds, project_path otherwise.
+  local claude_cmd; claude_cmd="${cmd_verbose#cd \"*\" && }"
+  local slug; slug=$(_project_slug "$project_path")
   cat > "$inner_path" << INNER
 #!/bin/bash -l
 set -o pipefail
@@ -2071,12 +2077,35 @@ if [ -f "\$INNER_LOCK" ]; then
 fi
 printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$INNER_LOCK"
 trap 'rm -f "\$INNER_LOCK"' EXIT
+
+# US-AUTO-037: pull in worktree helpers (US-AUTO-036). Sourcing bin/roll is
+# safe — its main() only runs when invoked directly (BASH_SOURCE == \$0).
+source "${roll_bin}"
+
+# Pre-claude: try to create a per-cycle isolated worktree on origin/main.
+# On any failure (no remote, no main, etc.) fall back to running in the
+# project's main tree (degraded — no isolation, like pre-037 behavior).
+CYCLE_ID="\$(date -u +%Y%m%d-%H%M%S)-\$\$"
+WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
+BRANCH="loop/cycle-\${CYCLE_ID}"
+_USE_WORKTREE=0
+cd "${project_path}" 2>/dev/null || true
+if _worktree_fetch_origin main \\
+   && _worktree_create "\$WT" "\$BRANCH" "origin/main"; then
+  _USE_WORKTREE=1
+  _worktree_submodule_init "\$WT" 2>/dev/null || true
+  echo "[loop] cycle \${CYCLE_ID}: worktree \$WT on \$BRANCH"
+else
+  echo "[loop] cycle \${CYCLE_ID}: worktree setup failed; running in main tree (no isolation)"
+  WT="${project_path}"
+fi
+
 FMT="${fmt_script}"
 for _attempt in 1 2 3; do
   if [ -f "\$FMT" ]; then
-    ( cd "${project_path}" && ${cmd_verbose} ) | python3 "\$FMT"
+    ( cd "\$WT" && ${claude_cmd} ) | python3 "\$FMT"
   else
-    ( cd "${project_path}" && ${cmd_verbose} )
+    ( cd "\$WT" && ${claude_cmd} )
   fi
   _exit=\$?
   [ "\$_exit" -eq 0 ] && break
@@ -2085,10 +2114,25 @@ for _attempt in 1 2 3; do
     sleep 30
   fi
 done
+
+# Post-claude: merge back if we used an isolated worktree.
+if [ "\$_USE_WORKTREE" = "1" ]; then
+  if [ "\$_exit" -eq 0 ]; then
+    if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
+      _worktree_cleanup "\$WT" "\$BRANCH"
+      echo "[loop] cycle \${CYCLE_ID}: merged and cleaned up"
+    else
+      _worktree_alert "cycle \${CYCLE_ID}: merge_back failed; worktree preserved at \$WT (branch \$BRANCH)"
+      echo "[loop] cycle \${CYCLE_ID}: merge_back failed; worktree preserved at \$WT"
+    fi
+  else
+    _worktree_alert "cycle \${CYCLE_ID}: claude exited \$_exit; worktree preserved at \$WT (branch \$BRANCH)"
+    echo "[loop] cycle \${CYCLE_ID}: claude failed (exit \$_exit); worktree preserved at \$WT"
+  fi
+fi
 INNER
   chmod +x "$inner_path"
 
-  local slug; slug=$(_project_slug "$project_path")
   cat > "$script_path" << SCRIPT
 #!/bin/bash -l
 # Active-window check — skipped when ROLL_LOOP_FORCE is set (manual 'roll loop now')

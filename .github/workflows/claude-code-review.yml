@@ -6,6 +6,8 @@ on:
 
 jobs:
   claude-review:
+    # Loop-generated PRs (loop/*) skip AI review — TCR + CI is sufficient.
+    if: "!startsWith(github.head_ref, 'loop/')"
     runs-on: ubuntu-latest
     permissions:
       contents: read

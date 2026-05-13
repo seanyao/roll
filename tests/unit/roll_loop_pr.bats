@@ -228,3 +228,10 @@ _setup_origin_main() {
   grep -q -- "--admin" "$GH_LOG"
   ! grep -q -- "--auto" "$GH_LOG"
 }
+
+@test "_loop_publish_doc_pr: returns 1 when gh pr merge --admin fails" {
+  _install_git_wrapper
+  _install_gh "" "https://github.com/test/repo/pull/9" 1
+  run _loop_publish_doc_pr "loop/cycle-test" "doc: test"
+  [ "$status" -eq 1 ]
+}

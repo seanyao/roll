@@ -3454,8 +3454,11 @@ _loop_publish_doc_pr() {
       return 1
     fi
   fi
-  gh -R "$slug" pr merge "$branch" --admin --squash --delete-branch >/dev/null 2>&1 \
-    || _worktree_alert "_loop_publish_doc_pr: gh pr merge --admin failed for ${branch} (PR ${pr_url} left open)"
+  if ! gh -R "$slug" pr merge "$branch" --admin --squash --delete-branch >/dev/null 2>&1; then
+    _worktree_alert "_loop_publish_doc_pr: gh pr merge --admin failed for ${branch} (PR ${pr_url} left open)"
+    echo "$pr_url"
+    return 1
+  fi
   echo "$pr_url"
   return 0
 }

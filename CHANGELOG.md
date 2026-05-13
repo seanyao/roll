@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed**: 上版 `claude/*` 临时分支清理意外失效 — 现已恢复 `[loop]`
+
 ## v2026.514.3
 
 ### 约定与导航

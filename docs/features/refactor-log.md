@@ -144,3 +144,18 @@ Architectural friction signals flagged during story execution.
 - composite action 抽取（当前 setup 步骤只有 3 步，抽取没显著收益；待 Phase 2 加 lint job 再一起抽）
 - `lint` job（依赖 `roll doctor`，目前未建）
 - Phase 2 测试瘦身（top 20 慢用例迁移、roll_loop_* 跨文件去重、cmd_setup.bats 拆分）
+
+## REFACTOR-010 CI 测试三轮精简 Phase 2 ✅
+
+**Flagged**: 2026-05-10 (from e2e-lifecycle-plan.md)
+**Completed**: 2026-05-14
+**Signal**: 738 个测试中存在迁移期残留测试和跨文件重复 existence 检查
+
+**Observation**:
+- `roll_loop_cleanup.bats` 7 个测试全 FAIL —— 发版 commit fa41d11 意外删除了 US-AUTO-038 刚加入的 `_claude_remote_snapshot`/`_claude_cleanup_new_branches` 两个函数，已恢复
+- `roll_doc_migration.bats` 14 个测试：existence 检查已被 roll_doc_structure.bats 覆盖，content 检查已被 guide_en/zh.bats 覆盖，整个文件是迁移期产物，已删除
+- `roll_doc_guide_en/zh.bats` 各 5 个纯文件存在性测试：与 roll_doc_structure.bats 重复，已删除
+- `loop_tcr.bats` 3 个预存在失败（与 git --since 日期格式有关），不在本次修复范围
+
+**Actual reduction**: 24 个测试（738 → 714，3.2%）
+**25% 目标缺口**: 需要 per-test timing 工具识别 top-20 慢测试；当前测试套件无 timing instrumentation，建议 Phase 3 先加 `--time` 可观测性

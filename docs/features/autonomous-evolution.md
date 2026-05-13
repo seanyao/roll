@@ -1362,9 +1362,10 @@ claude-code-review action 触发
 - 前提：repo 开启 `required_pull_request_reviews=1`（落地时同步操作）
 - Depended on by: US-AUTO-034 (PR-first inbox 调用本 Story 的 review 机制)
 
-## US-AUTO-036 worktree 隔离 Phase 1：helpers + 单测（loop-safe） 📋
+## US-AUTO-036 worktree 隔离 Phase 1：helpers + 单测（loop-safe） ✅
 
 **Created**: 2026-05-13
+**Completed**: 2026-05-13
 **Split from**: US-AUTO-032
 
 - As the loop runtime that should not break by changing the runner that spawned it
@@ -1390,12 +1391,12 @@ claude-code-review action 触发
 - `_worktree_merge_back <branch>` → 回 main → `git pull --ff-only` → `git merge --ff-only <branch>` → `git push`，失败写 `_LOOP_ALERT`
 
 **AC:**
-- [ ] 上述 6 个 helper 函数全部加入 `bin/roll`，函数注释含「loop-safe / 不被 runner 调用」说明
-- [ ] 新增 `tests/unit/roll_worktree.bats` 覆盖 7 路径：
+- [x] 上述 6 个 helper 函数全部加入 `bin/roll`（外加 `_worktree_alert` 共 7 个），函数注释含「loop-safe / 不被 runner 调用」说明
+- [x] 新增 `tests/unit/roll_worktree.bats` 覆盖 7 路径：
   - create-fresh / create-with-existing-branch (幂等) / cleanup / fetch-success / fetch-failed-lenient / merge-back-ff-success / merge-back-ff-failure-alert
-- [ ] submodule 协同测试：单测中模拟 main 工作区已 init `tests/helpers/bats-core`，确认 worktree 内 `_worktree_submodule_init` 不破坏 main 工作区
-- [ ] **零行 runner.sh 变更**——通过 `git diff --name-only` 断言 PR 不包含 `_write_loop_runner_script` 函数体改动
-- [ ] **零行 launchd plist / cron 变更**
+- [x] submodule 协同测试：单测搭建 file:// 子模块，main 已 init，验证 worktree 内 `_worktree_submodule_init` 不破坏 main 工作区
+- [x] **零行 runner.sh 变更**——`_write_loop_runner_script` 函数体未触碰，diff 仅在 `_worktree_*` 新命名空间
+- [x] **零行 launchd plist / cron 变更**
 
 **Non-goals:**
 - 不接入 runner（那是 US-AUTO-037）
@@ -1403,11 +1404,16 @@ claude-code-review action 触发
 - 不删除原 worktree 失败时遗留——靠 ALERT 提示人查目录，自动 GC 走 `roll-doctor` 另一个 FIX
 
 **Files:**
-- `bin/roll`：新增 `_worktree_*` 函数族
-- `tests/unit/roll_worktree.bats`（新增）
+- `bin/roll`：新增 `_worktree_*` 函数族（7 个 helpers）
+- `tests/unit/roll_worktree.bats`（新增，11 个用例）
 
 **Risks:**
 - helpers 写好了但暂时无人调用，可能被未来重构误删——加注释「Phase 1 of worktree; called by Phase 2 (US-AUTO-037)」防误删
+
+**Delivery notes (2026-05-13):**
+- 3 个 TCR commits: lifecycle (6499c3d) / fetch+submodule (9bb4757) / merge_back (41e424e) + 1 CI fixture fix (`init.defaultBranch=main` for ubuntu)
+- CI 绿（test-unit + test-integration）on commit 41e424e+1
+- `git diff origin/main..HEAD bin/roll` 仅两块 hunk，全部位于 `_worktree_*` 块内（~line 3008+, 3079+），`_write_loop_runner_script` (~line 2042) 零改动
 
 **Dependencies:**
 - 无前置依赖（纯加法）

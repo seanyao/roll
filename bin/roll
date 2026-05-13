@@ -3205,6 +3205,29 @@ _changelog_audit_bullet() {
   return 0
 }
 
+# _changelog_audit_log <verdict> <round> <bullet> [<reason>...]
+#   Append a JSONL record to the audit log. Path overridable via
+#   ROLL_CHANGELOG_AUDIT_LOG (tests use this to stay out of $HOME).
+_changelog_audit_log() {
+  local verdict="$1" round="$2" bullet="$3"
+  shift 3
+  local log="${ROLL_CHANGELOG_AUDIT_LOG:-${_SHARED_ROOT}/loop/changelog-audit.jsonl}"
+  mkdir -p "$(dirname "$log")"
+  local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local reasons_json='[]'
+  if [ "$#" -gt 0 ]; then
+    reasons_json=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
+  fi
+  jq -nc \
+    --arg ts "$ts" \
+    --arg verdict "$verdict" \
+    --argjson round "$round" \
+    --arg bullet "$bullet" \
+    --argjson reasons "$reasons_json" \
+    '{ts:$ts, verdict:$verdict, round:$round, bullet:$bullet, reasons:$reasons}' \
+    >> "$log"
+}
+
 # US-AUTO-036: worktree helpers (loop-safe pure additions).
 #
 # Phase 1 of worktree isolation — these helpers are NOT yet called by

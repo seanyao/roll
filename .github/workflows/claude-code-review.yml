@@ -3,21 +3,9 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,16 +17,72 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      # Escape hatch — emergency hotfix path.
+      # PR body containing [skip-ai-review] OR any commit message containing
+      # SKIP_AI_REVIEW bypasses the AI gate. CI gate still applies.
+      - name: Check escape hatch
+        id: escape
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          skip=false
+          reason=""
+          if printf '%s' "$PR_BODY" | grep -qF '[skip-ai-review]'; then
+            skip=true
+            reason='PR body contains [skip-ai-review]'
+          fi
+          if [ "$skip" = "false" ]; then
+            if gh pr view "$PR_NUMBER" --json commits \
+                --jq '.commits[].messageHeadline,.commits[].messageBody' \
+                2>/dev/null | grep -qF 'SKIP_AI_REVIEW'; then
+              skip=true
+              reason='commit message contains SKIP_AI_REVIEW'
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+      - name: Auto-approve (escape hatch)
+        if: steps.escape.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REASON: ${{ steps.escape.outputs.reason }}
+        run: |
+          gh pr review "$PR_NUMBER" --approve \
+            --body "🟢 AI review skipped — ${REASON}. CI gate alone applies."
 
       - name: Run Claude Code Review
+        if: steps.escape.outputs.skip != 'true'
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          prompt: |
+            Review PR ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+            using /code-review:code-review.
 
+            After review, decide ONE of:
+
+            - APPROVE — code is acceptable. Run:
+              gh pr review ${{ github.event.pull_request.number }} --approve --body "<summary>"
+
+            - REQUEST_CHANGES — concrete issues found. Run:
+              gh pr review ${{ github.event.pull_request.number }} --request-changes --body "<issue list>"
+
+            - UNCERTAIN — ambiguous, cross-cutting, or large refactor where you
+              are not confident. Do NOT run --approve or --request-changes. Post
+              a normal comment summarising your concerns and include the literal
+              marker line:
+                _LOOP_ALERT: AI review uncertain for PR ${{ github.event.pull_request.number }}
+
+            Failure mode: if any tool call errors out, post a normal comment
+            explaining the failure but do NOT --approve and do NOT
+            --request-changes. CI gate alone will then decide merge.
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md

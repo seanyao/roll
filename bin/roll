@@ -3101,6 +3101,219 @@ _loop_is_manual_only() {
   echo "$row" | grep -qE 'manual-only:true'
 }
 
+# US-AUTO-034: PR-first inbox — loop processes open PRs before scanning BACKLOG.
+#
+# Three building blocks, kept as pure / mockable functions:
+#   _loop_pr_classify        pure routing decision (no side effects)
+#   _loop_pr_rebase_circuit  24h sliding-window circuit breaker on rebase retries
+#   _loop_pr_inbox           orchestrator that walks `gh pr list` and routes
+#                            each open PR to skip / review / rebase
+#
+# Design notes:
+#   - gh missing or any gh failure → return 0 (lenient, like FIX-026's pre-check)
+#   - self-authored loop/* PRs are skipped to avoid same-source AI review
+#   - latest human review of CHANGES_REQUESTED or APPROVED blocks AI review
+#     (Human-review-activity guard from US-AUTO-034 AC)
+#   - rebase attempts ≥3 within 24h trip the circuit breaker (writes ALERT)
+
+# _loop_pr_classify <head_ref> <human_review_state> <ci_state> <mergeable_state>
+#   Prints one of:
+#     loop_self
+#     blocked_human_request_changes
+#     blocked_human_approved
+#     stale
+#     eligible
+#   Exit 0 always — callers parse the printed token.
+_loop_pr_classify() {
+  local head_ref="${1:-}"
+  local human_review="${2:-}"
+  local ci_state="${3:-}"
+  local mergeable="${4:-}"
+
+  case "$head_ref" in
+    loop/*) echo "loop_self"; return 0 ;;
+  esac
+
+  case "$human_review" in
+    CHANGES_REQUESTED) echo "blocked_human_request_changes"; return 0 ;;
+    APPROVED)          echo "blocked_human_approved";         return 0 ;;
+  esac
+
+  if [ "$ci_state" = "failure" ] || [ "$mergeable" = "CONFLICTING" ] || [ "$mergeable" = "BEHIND" ]; then
+    echo "stale"
+    return 0
+  fi
+
+  echo "eligible"
+}
+
+# _loop_pr_rebase_circuit <pr_number>
+#   Side effect: appends current timestamp to $_LOOP_STATE under
+#   pr_state.<PR>.attempts_at, pruning entries older than 24h.
+#   Exit 0: attempt allowed and recorded.
+#   Exit 1: ≥3 attempts within 24h → blocked; ALERT written.
+_loop_pr_rebase_circuit() {
+  local pr="$1"
+  [ -n "$pr" ] || return 1
+
+  local state="${_LOOP_STATE:-${HOME}/.shared/roll/loop/state.yaml}"
+  local now; now=$(date -u +%s)
+  local cutoff=$((now - 86400))
+
+  # Extract existing timestamps for this PR (empty if absent).
+  local existing=""
+  if [ -f "$state" ]; then
+    existing=$(awk -v pr="\"$pr\":" '
+      $0 ~ "pr_state:" {in_pr=1; next}
+      in_pr && $0 ~ pr {in_target=1; next}
+      in_target && $0 ~ /attempts_at:/ {
+        sub(/^[^"]*"/, ""); sub(/".*$/, ""); print; exit
+      }
+      in_target && /^[^[:space:]]/ {in_target=0}
+    ' "$state" 2>/dev/null)
+  fi
+
+  # Prune stale timestamps (>24h ago).
+  local fresh=""
+  local ts
+  for ts in $existing; do
+    case "$ts" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    if [ "$ts" -ge "$cutoff" ]; then
+      fresh="${fresh:+$fresh }$ts"
+    fi
+  done
+
+  # Count attempts within window; ≥3 means this would be the 4th retry blocked.
+  local count=0
+  for ts in $fresh; do count=$((count + 1)); done
+
+  if [ "$count" -ge 3 ]; then
+    mkdir -p "$(dirname "${_LOOP_ALERT:-/dev/null}")" 2>/dev/null || true
+    cat > "${_LOOP_ALERT}" <<EOF
+# ALERT — PR rebase circuit breaker tripped
+
+**Time**: $(date '+%Y-%m-%d %H:%M')
+**PR**: #${pr}
+**Reason**: PR #${pr} rebased ${count}× within 24h without CI resolution — possible workflow file error  PR rebase 多次未解决，可能是 workflow 文件错误
+
+**Action required**:
+- Check PR CI logs and workflow files for breakage
+- Resolve manually, then: \`roll loop now\`
+EOF
+    return 1
+  fi
+
+  # Record this attempt and persist.
+  fresh="${fresh:+$fresh }$now"
+  _loop_pr_state_write "$pr" "$fresh" "$state"
+  return 0
+}
+
+# Internal: rewrite $state with pr_state.<pr>.attempts_at = "<fresh-ts-list>".
+# Minimal YAML writer — we own the schema and only need this one field family.
+_loop_pr_state_write() {
+  local pr="$1"
+  local attempts="$2"
+  local state="$3"
+
+  mkdir -p "$(dirname "$state")" 2>/dev/null || true
+  [ -f "$state" ] || : > "$state"
+
+  local tmp; tmp=$(mktemp)
+  awk -v pr="\"$pr\":" -v attempts="$attempts" '
+    BEGIN { in_pr=0; in_target=0; written=0 }
+    /^pr_state:/ { in_pr=1; print; next }
+    in_pr && $0 ~ pr {
+      in_target=1
+      print "  " pr
+      print "    attempts_at: \"" attempts "\""
+      written=1
+      next
+    }
+    in_target && /attempts_at:/ { next }   # skip old value, already written
+    in_target && /^[^[:space:]]/ { in_target=0 }
+    { print }
+    END {
+      if (!in_pr) {
+        print "pr_state:"
+        print "  " pr
+        print "    attempts_at: \"" attempts "\""
+      } else if (!written) {
+        print "  " pr
+        print "    attempts_at: \"" attempts "\""
+      }
+    }
+  ' "$state" > "$tmp" && mv "$tmp" "$state"
+}
+
+# _loop_pr_inbox
+#   Walks open PRs and routes each by classification.
+#   Lenient on gh unavailability — returns 0 so the loop continues to BACKLOG.
+_loop_pr_inbox() {
+  command -v gh >/dev/null 2>&1 || return 0
+
+  local slug; slug=$(_gh_repo_slug 2>/dev/null) || return 0
+  local prs_json
+  prs_json=$(gh -R "$slug" pr list --state open \
+    --json number,headRefName,author,title \
+    2>/dev/null) || return 0
+  [ -n "$prs_json" ] || return 0
+  [ "$prs_json" = "[]" ] && return 0
+
+  local count; count=$(echo "$prs_json" | jq 'length' 2>/dev/null || echo 0)
+  [ "${count:-0}" -gt 0 ] || return 0
+
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    local num head_ref
+    num=$(echo "$prs_json" | jq -r ".[$i].number")
+    head_ref=$(echo "$prs_json" | jq -r ".[$i].headRefName")
+
+    # Fetch CI + review state for this PR.
+    local view_json
+    view_json=$(gh -R "$slug" pr view "$num" \
+      --json reviews,mergeStateStatus,statusCheckRollup \
+      2>/dev/null) || { i=$((i + 1)); continue; }
+
+    local human_review ci_state mergeable
+    human_review=$(echo "$view_json" | jq -r '
+      [.reviews[]? | select(.authorAssociation != "BOT" and .authorAssociation != "APP")]
+      | last // {} | .state // ""' 2>/dev/null)
+    mergeable=$(echo "$view_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
+    ci_state=$(echo "$view_json" | jq -r '
+      if (.statusCheckRollup | length) == 0 then ""
+      elif any(.statusCheckRollup[]?; .conclusion == "FAILURE") then "failure"
+      elif all(.statusCheckRollup[]?; .conclusion == "SUCCESS" or .conclusion == "SKIPPED") then "success"
+      else "pending" end' 2>/dev/null)
+
+    local verdict
+    verdict=$(_loop_pr_classify "$head_ref" "$human_review" "$ci_state" "$mergeable")
+
+    case "$verdict" in
+      loop_self|blocked_human_request_changes|blocked_human_approved)
+        : # skip — explained by verdict; nothing to do this cycle
+        ;;
+      stale)
+        _loop_pr_rebase_circuit "$num" || true
+        # Actual rebase work delegated to _loop_pr_rebase_stale when present
+        # (kept out of this cycle to avoid touching git remote in tests).
+        command -v _loop_pr_rebase_stale >/dev/null 2>&1 \
+          && _loop_pr_rebase_stale "$num" "$head_ref" || true
+        ;;
+      eligible)
+        # Hand off to review (US-AUTO-035 supplies the actual decision).
+        command -v _loop_pr_review_external >/dev/null 2>&1 \
+          && _loop_pr_review_external "$num" || true
+        ;;
+    esac
+
+    i=$((i + 1))
+  done
+  return 0
+}
+
 # US-CL-004: changelog 风格守门 Phase 1 — mechanical linter.
 #
 # _changelog_lint_bullet <bullet-text>

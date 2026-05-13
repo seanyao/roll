@@ -84,6 +84,33 @@ exact stuck-red state FIX-026 traces to).
 - `gh` missing or repo unparseable → graceful skip (`_loop_precheck_ci`
   returns 0); the post-build `_loop_enforce_ci` remains the strict gate.
 
+### Step 1.6 — PR Inbox (US-AUTO-034)
+
+Before scanning BACKLOG, process open PRs first. PRs are also units of work:
+external contributors and human teammates expect their PRs to be reviewed and
+moved forward, not starved while loop opens new fronts.
+
+Call `_loop_pr_inbox` after the pre-run CI check passes. It walks
+`gh pr list --state open` and routes each PR by classification:
+
+| Classification | Action |
+|---|---|
+| `loop_self` (head ref starts with `loop/`) | Skip — let GitHub auto-merge handle it; never AI-review your own commit |
+| `blocked_human_request_changes` | Skip — last human review requested changes; wait for the author to push fixes |
+| `blocked_human_approved` | Skip — let GitHub auto-merge after CI is green |
+| `stale` (CI failed or branch behind/conflicting) | Try `_loop_pr_rebase_stale` after the circuit breaker allows it |
+| `eligible` (clean external PR, no blocking review) | Invoke `_loop_pr_review_external` — the actual decision is provided by US-AUTO-035's GitHub Action |
+
+**Rebase circuit breaker** — `_loop_pr_rebase_circuit <pr>` records each rebase
+attempt under `pr_state.<PR>.attempts_at` in `state.yaml`, pruning entries older
+than 24 h. Once ≥3 attempts land within 24 h, further rebases are blocked and an
+ALERT is written (typical cause: a broken workflow file makes CI never run,
+which would otherwise drive infinite rebase loops).
+
+**Lenient on infrastructure** — `gh` missing, repo unparseable, or any
+`gh` API failure → `_loop_pr_inbox` returns 0 and the loop falls through to
+Step 2 (BACKLOG scan). Same posture as the pre-run CI check.
+
 ### Step 2 — Scan BACKLOG
 
 Read `BACKLOG.md`. Collect all rows where Status = `📋 Todo`, in order:

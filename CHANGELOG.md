@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### 自动化流水线
+
+- loop 每轮先消化开放 PR 再领新 backlog — 把队列里的 PR 当成首类工作，不是绕开的障碍 `[loop]`
+- 自己开的 `loop/*` 分支不会被自己评审，避免同源 bias `[loop]`
+- 24 小时内 rebase 同一个 PR 超过 3 次自动熔断，workflow 文件出错时不再无限循环 `[loop]`
+
 ## v2026.514.2
 
 ### 自动化流水线

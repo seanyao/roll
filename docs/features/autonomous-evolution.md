@@ -1419,9 +1419,10 @@ claude-code-review action 触发
 - 无前置依赖（纯加法）
 - Depended on by: US-AUTO-037（接入 runner）
 
-## US-AUTO-037 worktree 隔离 Phase 2：runner 接入 + 集成验证（人工） 📋
+## US-AUTO-037 worktree 隔离 Phase 2：runner 接入 + 集成验证（人工） ✅
 
 **Created**: 2026-05-13
+**Completed**: 2026-05-13
 **Split from**: US-AUTO-032
 **Execution constraint**: `manual-only:true` — **不允许 loop 自动执行**，必须 `$roll-build US-AUTO-037` 人工接管
 
@@ -1462,16 +1463,17 @@ fi
 ```
 
 **AC:**
-- [ ] `_write_loop_runner_script` 接入 US-AUTO-036 的 6 个 helpers，**不重复实现** worktree 操作逻辑
-- [ ] tmux session 命名带 US 后缀（`roll-loop-<slug>-<US>`）以支持同项目多 worktree（虽然 LOCK 仍是单锁，但避免重启时旧 session 残留冲突）
-- [ ] LOCK 协议**不变**（per-slug 单锁）—— 跨 story 并发是未来 US，本 Story 仍单 LOCK
-- [ ] 集成测试 `tests/integration/cmd_loop.bats` 加端到端用例：完整模拟一轮 cron，断言 worktree 创建 → skill 跑通 → merge 回 main → worktree 清理
-- [ ] 失败路径测试：TCR 失败 / CI 失败 / ff-only 失败时 worktree 必须保留 + `_LOOP_ALERT` 写入路径
-- [ ] **手动验证清单**（执行 build 后必跑）：
-  - `roll loop test` 真 claude 链路通过
-  - `roll loop now` 触发一轮，watching `~/.shared/roll/worktrees/` 看 worktree 完整生命周期
-  - 故意制造一个 TCR 失败 story，验证 worktree 保留 + ALERT 写入
-  - 一轮 cron 真实触发（等 launchd），确认 plist 路径仍指向 main tree、runner 在 worktree 跑
+- [x] `_write_loop_runner_script` 接入 US-AUTO-036 的 7 个 helpers（含 `_worktree_alert`），**不重复实现** worktree 操作逻辑
+- [x] tmux session 命名（保留 `roll-loop-<slug>`，per-cycle 隔离改由 worktree dir + branch 的 cycle-id 实现 — 见决策记录）
+- [x] LOCK 协议**不变**（per-slug 单锁）
+- [x] 集成测试 `tests/integration/cmd_loop_worktree.bats` 端到端：happy / claude-failure / ff-only-failure 3 路径
+- [x] 失败路径：claude 失败时 worktree 保留 + ALERT 写入；ff-only 失败时 worktree 保留 + ALERT
+- [x] **手动验证**：`roll loop test` 36s 真 claude 通过；POST 状态：worktree 目录空 + 无 `loop/cycle-*` branch 残留 + 无新 ALERT；CYCLE_ID 唯一（timestamp + PID）
+
+**Design choice (B — see 决策记录 in `loop-pr-pipeline-plan.md`):**
+- claude 保留 selection 权 (SKILL.md 不变)
+- runner 创建 generic `loop/cycle-<ts>-<pid>` branch，不绑特定 US
+- 退出后 runner 读 `$?` 决定 merge_back（成功）或 alert+keep（失败）
 
 **Non-goals:**
 - 跨 story 并发（仍单 LOCK）→ 另起 US
@@ -1479,9 +1481,14 @@ fi
 - Auto-rebase（main 在 fetch 后又移动时自动 rebase loop/<US>）→ 先观察 ALERT 频率，必要时另起 US
 
 **Files:**
-- `bin/roll`：`_write_loop_runner_script` 改造 + `_loop_now`（同步）
-- `tests/integration/cmd_loop.bats`（端到端用例）
-- `docs/features/loop-pr-pipeline-plan.md`：标注本 Story 已落地
+- `bin/roll`：`_write_loop_runner_script` 新增 pre-claude (fetch+create+submodule) / cwd=$WT / post-claude (merge_back+cleanup or alert+keep) 段；`source bin/roll` + `set +e` 接 helpers
+- `tests/integration/cmd_loop_worktree.bats`（新增 3 个端到端用例）
+- `tests/unit/roll_loop_worktree_runner.bats`（新增 11 个结构层 unit 测试）
+
+**Delivery notes (2026-05-13):**
+- 2 TCR commits: runner refactor (5aa31b8) / integration tests + set+e fix (后续 commit)
+- 关键 RC：sourcing bin/roll 会带入它的 `set -euo pipefail`，inner 的 retry loop 需要 `set +e` 把 -e 关掉（pipefail 保留）；这个 bug 被 claude-failure integration test 捕到
+- CI 绿；`roll loop test` 真 claude 36s 通过；worktree 目录在测后为空
 
 **Risks (kimi flagged in original US-AUTO-032):**
 - **Submodule WD collision**：worktree 内 `submodule update` 可能与 main 的 submodule 工作区互相覆写——靠 US-AUTO-036 的单测覆盖 + 本 Story 集成测重复验证

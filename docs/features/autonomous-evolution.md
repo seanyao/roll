@@ -1538,7 +1538,7 @@ Claude Code agent sessions 工作时会推 `claude/<name>-<id>` 分支到 remote
 - [ ] 对每个新增分支执行 `git push origin --delete <branch>`，记一行 INFO 日志（branch name）
 - [ ] 若删除失败（分支已不存在等），静默忽略（幂等）
 - [ ] 非 GitHub remote 或远端不可达时，整段逻辑静默跳过，不影响主流程
-- [ ] `tests/unit/roll_loop_cleanup.bats` 覆盖：新增分支被删 / 原有分支不被动 / 远端不可达跳过 / claude 失败时仍触发清理 共 4 条用例
+- [ ] `tests/unit/roll_loop_cleanup.bats` 覆盖：新增分支被删 / 原有分支不被动 / 远端不可达跳过 / claude 失败时仍触发清理 / delete 失败（分支已不存在）静默忽略 共 5 条用例
 
 **Non-goals:**
 - 历史堆积的孤立分支（首次部署后一次性手动清理即可，不进代码）
@@ -1547,7 +1547,7 @@ Claude Code agent sessions 工作时会推 `claude/<name>-<id>` 分支到 remote
 
 **Files:**
 - `bin/roll` — `_write_loop_runner_script` 在 pre-claude 段加快照、post-claude 段加 diff+delete（约 10 行）
-- `tests/unit/roll_loop_cleanup.bats` — 4 条用例
+- `tests/unit/roll_loop_cleanup.bats` — 5 条用例
 
 **Dependencies:**
 - `depends-on:US-AUTO-033` — auto-PR 机制先就位，确认 `loop/*` 分支已由平台自动清理后，再动 `claude/*`

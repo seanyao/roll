@@ -3208,6 +3208,65 @@ _worktree_merge_back() {
   return 0
 }
 
+# US-AUTO-033: publish a loop cycle branch as a GitHub PR with auto-merge.
+#
+# _loop_publish_pr <branch> [title]
+#   Caller's cwd: a tree where <branch> exists locally.
+#   Steps:
+#     1. git push origin <branch>
+#     2. gh pr view <branch>  → reuse if a PR is already open
+#     3. gh pr create --base main --head <branch> ...
+#     4. gh pr merge <branch> --auto --squash --delete-branch
+#   Stdout: PR URL (always, even on idempotent reuse).
+#   Exit 0 on success / idempotent reuse; non-zero on push or create failure.
+#   On auto-merge failure: still returns 0 (PR exists; human can take over).
+#   When `gh` is not installed: returns 2 — runner script's fallback path.
+_loop_publish_pr() {
+  local branch="$1"
+  local title="${2:-loop cycle ${branch#loop/}}"
+  if ! command -v gh >/dev/null 2>&1; then
+    _worktree_alert "_loop_publish_pr: gh not installed; cannot publish PR for ${branch}"
+    return 2
+  fi
+  if ! git push origin "$branch" --quiet 2>/dev/null; then
+    _worktree_alert "_loop_publish_pr: push origin ${branch} failed"
+    return 1
+  fi
+  local slug; slug=$(_gh_repo_slug 2>/dev/null) || slug=""
+  local pr_url
+  if [ -n "$slug" ]; then
+    pr_url=$(gh -R "$slug" pr view "$branch" --json url -q .url 2>/dev/null) || pr_url=""
+  else
+    pr_url=$(gh pr view "$branch" --json url -q .url 2>/dev/null) || pr_url=""
+  fi
+  if [ -z "$pr_url" ]; then
+    local body
+    body=$(printf 'Auto-opened by roll-loop cycle.\n\n- Branch: %s\n- TCR micro-commits: %s\n\nThis PR will auto-merge once required checks pass.' \
+      "$branch" "$(git rev-list --count origin/main.."$branch" 2>/dev/null || echo '?')")
+    if [ -n "$slug" ]; then
+      pr_url=$(gh -R "$slug" pr create --base main --head "$branch" \
+        --title "$title" --body "$body" 2>/dev/null) || pr_url=""
+    else
+      pr_url=$(gh pr create --base main --head "$branch" \
+        --title "$title" --body "$body" 2>/dev/null) || pr_url=""
+    fi
+    if [ -z "$pr_url" ]; then
+      _worktree_alert "_loop_publish_pr: gh pr create failed for ${branch}"
+      return 1
+    fi
+  fi
+  local merge_args=(pr merge "$branch" --auto --squash --delete-branch)
+  if [ -n "$slug" ]; then
+    gh -R "$slug" "${merge_args[@]}" >/dev/null 2>&1 \
+      || _worktree_alert "_loop_publish_pr: gh pr merge --auto failed for ${branch} (PR ${pr_url} left open)"
+  else
+    gh "${merge_args[@]}" >/dev/null 2>&1 \
+      || _worktree_alert "_loop_publish_pr: gh pr merge --auto failed for ${branch} (PR ${pr_url} left open)"
+  fi
+  echo "$pr_url"
+  return 0
+}
+
 _loop_monitor() {
   local interval="${1:-3}"
   local project_path; project_path=$(pwd -P)

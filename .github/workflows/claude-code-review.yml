@@ -1,13 +1,14 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
 
 jobs:
   claude-review:
-    # Loop-generated PRs (loop/*) skip AI review — TCR + CI is sufficient.
-    if: "!startsWith(github.head_ref, 'loop/')"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,45 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Escape hatch — emergency hotfix path.
-      # PR body containing [skip-ai-review] OR any commit message containing
-      # SKIP_AI_REVIEW bypasses the AI gate. CI gate still applies.
-      - name: Check escape hatch
-        id: escape
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          skip=false
-          reason=""
-          if printf '%s' "$PR_BODY" | grep -qF '[skip-ai-review]'; then
-            skip=true
-            reason='PR body contains [skip-ai-review]'
-          fi
-          if [ "$skip" = "false" ]; then
-            if gh pr view "$PR_NUMBER" --json commits \
-                --jq '.commits[].messageHeadline,.commits[].messageBody' \
-                2>/dev/null | grep -qF 'SKIP_AI_REVIEW'; then
-              skip=true
-              reason='commit message contains SKIP_AI_REVIEW'
-            fi
-          fi
-          echo "skip=$skip" >> "$GITHUB_OUTPUT"
-          echo "reason=$reason" >> "$GITHUB_OUTPUT"
-
-      - name: Auto-approve (escape hatch)
-        if: steps.escape.outputs.skip == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REASON: ${{ steps.escape.outputs.reason }}
-        run: |
-          gh pr review "$PR_NUMBER" --approve \
-            --body "🟢 AI review skipped — ${REASON}. CI gate alone applies."
-
       - name: Run Claude Code Review
-        if: steps.escape.outputs.skip != 'true'
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
@@ -67,24 +30,16 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: |
-            Review PR ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+            Review PR ${{ github.repository }}/pull/${{ github.event.inputs.pr_number }}
             using /code-review:code-review.
 
             After review, decide ONE of:
 
             - APPROVE — code is acceptable. Run:
-              gh pr review ${{ github.event.pull_request.number }} --approve --body "<summary>"
+              gh pr review ${{ github.event.inputs.pr_number }} --approve --body "<summary>"
 
             - REQUEST_CHANGES — concrete issues found. Run:
-              gh pr review ${{ github.event.pull_request.number }} --request-changes --body "<issue list>"
+              gh pr review ${{ github.event.inputs.pr_number }} --request-changes --body "<issue list>"
 
-            - UNCERTAIN — ambiguous, cross-cutting, or large refactor where you
-              are not confident. Do NOT run --approve or --request-changes. Post
-              a normal comment summarising your concerns and include the literal
-              marker line:
-                _LOOP_ALERT: AI review uncertain for PR ${{ github.event.pull_request.number }}
-
-            Failure mode: if any tool call errors out, post a normal comment
-            explaining the failure but do NOT --approve and do NOT
-            --request-changes. CI gate alone will then decide merge.
+            - UNCERTAIN — not confident. Post a comment summarising concerns.
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md

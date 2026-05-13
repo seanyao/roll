@@ -121,3 +121,26 @@ Architectural friction signals flagged during story execution.
 **Scope**: `tests/run.sh`、`.github/workflows/ci.yml`、`tests/unit/test_runner.bats`
 
 **拆出**: ci.yml lint/test-unit/test-integration job split + Phase 2 测试分层 → REFACTOR-009
+
+---
+
+## REFACTOR-009 CI 测试二轮精简 Phase 1B ✅
+
+**Flagged**: 2026-05-12
+**Completed**: 2026-05-13
+**Signal**: REFACTOR-008 把测试加速一轮后仍单 job 串行跑 ~579 用例，unit 与 integration 没有任何资源争用却互相等待。
+**Observation**: GitHub Actions matrix 几乎零成本就能把这两个套件平行跑到两个 runner，且 `tests/run.sh` 只缺一个简单的 "可选目录参数" 入口。
+
+**AC:**
+- [x] `tests/run.sh` 接受可选目录参数（`$@` → `SCAN_PATHS` 数组；无参时回落到 unit+integration），向后兼容
+- [x] `tests/unit/test_runner.bats` 加 2 条测试覆盖参数支持
+- [x] `.github/workflows/ci.yml` 用 `strategy.matrix: suite: [unit, integration]`，`fail-fast: false`，job 命名 `test-${{ matrix.suite }}`
+- [x] 本地双套件分别跑通：unit 509 / integration 70，全绿
+- [x] 拆 Phase 2 → REFACTOR-010
+
+**Scope**: `tests/run.sh`、`.github/workflows/ci.yml`、`tests/unit/test_runner.bats`
+
+**未做（明确切到 REFACTOR-010）**:
+- composite action 抽取（当前 setup 步骤只有 3 步，抽取没显著收益；待 Phase 2 加 lint job 再一起抽）
+- `lint` job（依赖 `roll doctor`，目前未建）
+- Phase 2 测试瘦身（top 20 慢用例迁移、roll_loop_* 跨文件去重、cmd_setup.bats 拆分）

@@ -96,23 +96,14 @@ EOF
 
 @test "_loop_publish_pr: returns 2 + ALERT when gh not installed" {
   _install_git_wrapper
-  # Plant a shim `gh` in MOCKBIN that signals "not installed" via exit 127.
-  # _loop_publish_pr uses `command -v gh` — which still finds the shim — so
-  # we additionally redefine `command` as a shell function inside the test
-  # subshell. Bats `run` cannot intercept builtins via PATH, so we use the
-  # GH_AVAILABLE env knob the helper honors (added below).
-  # Simpler path: strip every PATH dir that contains a gh executable, then
-  # ensure MOCKBIN has no gh either.
-  local stripped="$PATH"
-  while command -v gh >/dev/null 2>&1; do
-    local gh_path; gh_path=$(command -v gh)
-    local gh_dir; gh_dir=$(dirname "$gh_path")
-    stripped=$(echo "$stripped" | tr ':' '\n' | grep -v -F -x "$gh_dir" | tr '\n' ':' | sed 's/:$//')
-    PATH="$stripped"
-  done
-  PATH="$MOCKBIN:$stripped"
-  # Final sanity check inside the test (no `gh` reachable):
-  ! command -v gh >/dev/null 2>&1 || skip "could not strip gh from PATH"
+  # Override `command` as a shell function so `command -v gh` returns 1
+  # within the helper's invocation. PATH manipulation isn't portable here
+  # (CI runners have gh in multiple dirs and stripping all of them also
+  # removes grep/rm).
+  command() {
+    if [ "$1" = "-v" ] && [ "$2" = "gh" ]; then return 1; fi
+    builtin command "$@"
+  }
   run _loop_publish_pr "loop/cycle-test"
   [ "$status" -eq 2 ]
   grep -q "gh not installed" "$_LOOP_ALERT"

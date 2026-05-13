@@ -1,25 +1,51 @@
 # Changelog
 
 ## Unreleased
-- **Fixed**: dashboard 不再在已发版后还显示 "✓ Release ready"——只有 tag 之后存在非 docs/chore 的可发版提交时才亮，光是文档改写不会再让它误报
-- **Fixed**: dashboard 上 "📋 N PROPOSAL" 的动作提示改成 `see: PROPOSALS.md`，原先指向的 `roll backlog` 只看 BACKLOG.md，点过去看不到 PROPOSAL，逻辑断头
-- **Added**: changelog 生成时自动挡掉技术黑话
-- **Added**: 写 changelog 时会先参考最近几次发布的风格
-- **Added**: 故事跑完自动开 PR + auto-merge，CI 绿就合
-- **Added**: 完成的故事不再直接 push main，留下 PR 作为审计入口
-- **Added**: AI 代码评审可以批准 / 打回 PR — 配合 CI 形成合并双门；紧急 hotfix 在 PR body 加 `[skip-ai-review]` 即可绕开
-- **Added**: changelog 现在自审挡黑话
+
+## v2026.514.1
+
+### 自动化流水线
+
+- 故事跑完自动开 PR，CI 过了就合入主分支 — 你不需要盯着，审计记录也完整保留 `[loop]`
+- AI 评审现在有实权：可以批准或打回 PR，配合 CI 形成双重把关；真的很急可以在 PR 描述里加 `[skip-ai-review]` 临时绕过 `[loop]`
+- 散落的 session 分支自动清理，远端仓库不再越来越乱 `[loop]`
+
+### Changelog 开始管自己
+
+- 生成时自动过滤技术黑话，并对照历史风格保持表达一致 `[loop]`
+- 写入前有一道自审：行文不达标就退回重写，不进 changelog `[loop]`
+
+### 可见性
+
+- Peer review 协商现在对所有 agent 实时可见，不再只是 claude 专属
+- "Release ready" 只有真的有东西可发时才会亮，纯文档改动不再误报 `[loop]`
+- PROPOSAL 的提示指向了实际有内容的地方 `[loop]`
+
+### 其他
+
+- 纯文档改动直接合 main，不等 CI，合并更快
 
 ## v2026.513.1
-- **Added**: loop 现在每轮跑在独立的 worktree 里，结束自动合回 main 并清理；跑挂时保留现场目录方便排查 — 再也不会吞掉 main 上你正在改的代码
-- **Added**: BACKLOG 上的 `depends-on:` 和 `manual-only:true` 标签从此有强制力，loop 选 story 前会过一遍，依赖没满足或标 manual-only 的直接跳过，不用人盯
-- **Fixed**: loop 多了一道并发保护 — 偶发的同一个 runner 下两个 claude 同时改状态的情况彻底堵住
-- **Changed**: CI 把 unit 和 integration 测试拆到两个 runner 并行跑，墙钟时间显著下降
-- **Changed**: `roll`（不带参数）的 dashboard 重新设计 — AI 在自动跑什么放第一眼，自治三层 + 四道防线 + Pipeline 全景 + 当前焦点 + 介入区一屏看完，不用再去 `roll loop status` 子命令翻
-- **Changed**: 测试运行器自动按机器核数并行，不再写死 4 个 job
-- **Changed**: 纯文档改动不再触发 CI 跑全套测试，文档 PR 合并节奏更快
-- **Fixed**: `roll peer` 在 REFINE / OBJECT 收尾时偶发的 "unbound variable" 崩溃
-- **Fixed**: `roll update` 后 `roll loop status` 不再误报 off，不用手动 `roll loop on` 恢复
+
+### Loop 更可靠了
+
+- 每轮 story 在独立工作区里跑，完了自动合回来清理；跑挂时现场保留，不会碰主分支上你正在改的东西 `[loop]`
+- `depends-on:` 和 `manual-only:` 标签现在真的有用 — Loop 自己会跳过条件没满足的任务，不用再盯着 `[loop]`
+- 同时只有一个 Loop 在跑，并发写入的问题修掉了 `[loop]`
+- `roll update` 之后 loop 状态不再误报 off `[loop]`
+
+### 测试和 CI
+
+- Unit 和集成测试并行执行，机器有多少核就用多少，等待时间降下来了 `[dream]`
+- 纯文档改动不触发 CI 全套测试，合并更快 `[dream]`
+
+### Dashboard
+
+- 重新设计：三层自治状态 + 四道防线 + Pipeline 全景 + 当前焦点 + 介入区，一屏看完 AI 正在做什么 `[loop]`
+
+### 修复
+
+- `roll peer` 协商退出时偶发的崩溃修掉了 `[loop]`
 
 ## v2026.512.8
 - **Added**: `$roll-doc` — 扫描任意项目的文档现状，找出缺口并生成草稿，支持 `--dry-run`

@@ -168,6 +168,7 @@
 | [US-AUTO-030](docs/features/autonomous-evolution.md#us-auto-030) | dashboard DoD checklist — Prod 部署回填信号源（`roll release` 完成后把部署状态写入 in-progress story 元数据，dashboard 可读） | ⏸ Deferred |
 | [US-AUTO-031](docs/features/autonomous-evolution.md#us-auto-031) | dashboard DoD checklist — Sentinel 接管状态信号源（`$roll-sentinel` 运行结果映射到 dashboard 可读位置，体现"AI 接管生产"防线） | ⏸ Deferred |
 | [US-AUTO-032](docs/features/autonomous-evolution.md#us-auto-032) | loop 在 worktree 里跑 — 每个 story 起 `~/.shared/roll/worktrees/<slug>-<US>` worktree + `loop/<US>` 分支隔离 TCR；成功 + CI 绿 → `git merge --ff-only` 回 main → push → 删 worktree+branch；失败保留 worktree + ALERT；plist/runner 路径不变（控制面常驻 main）；处理重试时分支已存在的幂等性；submodule 协同测试 | 📋 Todo |
+| [US-AUTO-033](docs/features/autonomous-evolution.md#us-auto-033) | loop 自动建 PR + GitHub Auto-merge — story 完成后推 `loop/<US>` 分支，自动 `gh pr create` + `gh pr merge --auto --squash`，CI 绿自动合并，人零介入 | 📋 Todo |
 
 ## Epic: Documentation
 ### Feature: documentation

@@ -180,6 +180,33 @@ If serve mode is available, prefer HTTP transport over direct CLI invocation.
 
 **CLI vs. API Key**: `claude`, `deepseek`, `kimi`, `codex` CLIs authenticate via existing subscription accounts — no separate API key required. This is the primary advantage of CLI transport over the MCP/HTTP approach.
 
+## Inline Display Mode (Manual Triggers)
+
+When peer review is manually triggered by a human (via `/peer`, "叫上 peer", etc.), the executing agent **must display each round inline in the current conversation**. This applies regardless of which agent is executing — Claude, DeepSeek, Kimi, PI, or any other.
+
+**Per-round display format:**
+
+```
+─── Peer Review · Round N ───────────────────────────────
+→ Sending to [peer]:
+{full message sent to peer}
+
+← [peer] responds:
+{peer's full response, verbatim}
+
+◆ My analysis: {Claude/executing agent's reaction and position for this round}
+─────────────────────────────────────────────────────────
+```
+
+**Rules:**
+- Peer CLI calls must be **synchronous** (do NOT use background/async execution).
+- Show the outgoing message **before** calling the peer, so the user sees what's being asked.
+- Relay the peer's response **verbatim** before adding your own analysis.
+- If a peer call fails or times out, report it immediately inline and either retry or ESCALATE.
+- Negotiation log is still written to `~/.shared/roll/peer/logs/` as usual.
+
+**Why inline, not tmux:** When a human manually triggers peer review inside an agent's interactive session, the conversation IS the visible interface. tmux auto-attach is only relevant for CLI-launched background sessions (`bin/roll peer`), not for skill invocations.
+
 ## Workflow Integration
 
 ### `roll-build` Plan Mode

@@ -3156,7 +3156,7 @@ _changelog_style_anchors() {
     /^## v/ { ver++; if (ver > 3) exit; printing = 1; next }
     /^## /  { printing = 0 }
     printing && /^- / { print }
-  ' "$changelog" | head -c 1500
+  ' "$changelog" | head -c 1500 || true
 }
 
 # US-CL-005: changelog 风格守门 Phase 2 — self-audit gate.

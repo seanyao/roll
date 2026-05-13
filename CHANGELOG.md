@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fixed**: loop 并发保护补丁 — 2026-05-13 14:37 实测同 runner 下出现并发 claude 会话同时改 state.yaml / BACKLOG / git；inner script 现新增二级 LOCK（PID + start-ts 4h 双校验），守住 claude 调用现场，外层 LOCK 即使被旁路也兜底
 - **Changed**: CI 拆 unit / integration 双 job 并行 — `tests/run.sh` 接受可选目录参数；`.github/workflows/ci.yml` 用 `strategy.matrix` 把 509 unit + 70 integration 用例分到两个 runner 并行跑（REFACTOR-009 Phase 1B）；Phase 2 测试瘦身拆到 REFACTOR-010
 - **Changed**: `roll`（无参）dashboard 重设计 — 自治优先六块布局：① Identity（项目名 + 版本 + agent + git 状态）② AI 自治主视觉（Loop / Dream / Peer 三层 + 四道防线，框线高亮）③ Pipeline 全景（Idea/Backlog/Build/Verify/Release 五段计数）④ Current Focus · DoD（in-progress story 的 [AC] [CI] 信号，其余 4 项标注待接入）⑤ Human × AI 介入区（ALERT/PROPOSAL/Release ready，空时显示"AI 自驱中"）⑥ Schedules & Last Brief。把"AI 自动跑什么"放第一眼，不再埋在 `roll loop status` 子命令里
 - **Changed**: CI 测试运行器 (`tests/run.sh`) 动态检测核数（`nproc`/`sysctl`）替换硬编码 `--jobs 4`，可用 `ROLL_TEST_JOBS` 覆盖；bats-core submodule 缺失时给出清晰报错

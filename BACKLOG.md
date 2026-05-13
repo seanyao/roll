@@ -88,8 +88,8 @@
 ### Feature: agent-compliance
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-INFRA-006](docs/features/agent-compliance.md#us-infra-006) | Test runner 写 proof-of-pass — 测试通过后记录 ts + tree hash 到 `.roll/last-test-pass` (Issues #16, #17) | 📋 Todo |
-| [US-INFRA-007](docs/features/agent-compliance.md#us-infra-007) | Pre-commit hook 验证 proof-of-pass — 60s 内 + tree hash 吻合才放行，物理拦截未经测试的 commit (Issues #16, #17) | 📋 Todo |
+| [US-INFRA-006](docs/features/agent-compliance.md#us-infra-006) | Test runner 写 proof-of-pass — 测试通过后记录 ts + tree hash 到 `.roll/last-test-pass` (Issues #16, #17) | ✅ Done |
+| [US-INFRA-007](docs/features/agent-compliance.md#us-infra-007) | Pre-commit hook 验证 proof-of-pass — 60s 内 + tree hash 吻合才放行，物理拦截未经测试的 commit (Issues #16, #17) | ✅ Done |
 
 ## Epic: Changelog
 ### Feature: changelog-integration

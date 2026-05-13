@@ -7,9 +7,10 @@
 ---
 
 <a id="us-infra-006"></a>
-## US-INFRA-006 Test runner 写 proof-of-pass 📋
+## US-INFRA-006 Test runner 写 proof-of-pass ✅
 
 **Created**: 2026-05-13
+**Completed**: 2026-05-13
 
 - As a developer enforcing TCR
 - I want the test runner to record a proof-of-pass after each successful run
@@ -45,9 +46,10 @@ Issue #17 显示 Kimi 将所有代码写完后事后拆 commit 伪造 TCR。
 ---
 
 <a id="us-infra-007"></a>
-## US-INFRA-007 Pre-commit hook 验证 proof-of-pass 📋
+## US-INFRA-007 Pre-commit hook 验证 proof-of-pass ✅
 
 **Created**: 2026-05-13
+**Completed**: 2026-05-13
 
 - As a developer enforcing TCR
 - I want a pre-commit hook that blocks commits unless tests just passed on the exact same code
@@ -75,6 +77,7 @@ Issue #17 显示 Kimi 将所有代码写完后事后拆 commit 伪造 TCR。
 **Files:**
 - `hooks/pre-commit`（新建目录 + 文件）
 - `AGENTS.md`（加一行：初始化项目需执行 `git config core.hooksPath hooks`）
+- `docs/guide/en/methodology.md`（4.3 TCR 流程图后补一段：TCR 现为机械保证，说明 proof-of-pass 机制）
 
 **Dependencies:**
 - Depends on: US-INFRA-006

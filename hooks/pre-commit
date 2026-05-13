@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROOF="$(git rev-parse --show-toplevel)/.roll/last-test-pass"
+
+_fail() {
+  echo "✗ Commit blocked: $1" >&2
+  echo "✗ 提交被拒绝：$2" >&2
+  echo "Run: npm test" >&2
+  exit 1
+}
+
+if [ ! -f "$PROOF" ]; then
+  _fail "tests not verified on current code." "当前代码未经测试验证。"
+fi
+
+TS=$(grep -o '"ts":[0-9]*' "$PROOF" | grep -o '[0-9]*' || true)
+TREE=$(grep -o '"tree":"[^"]*"' "$PROOF" | sed 's/"tree":"//;s/"//' || true)
+
+if [ -z "$TS" ] || [ -z "$TREE" ]; then
+  _fail "proof-of-pass record is malformed." "测试证明文件格式错误。"
+fi
+
+NOW=$(date +%s)
+ELAPSED=$(( NOW - TS ))
+if [ "$ELAPSED" -gt 60 ]; then
+  _fail "last test run was ${ELAPSED}s ago (limit: 60s)." \
+        "上次测试已过 ${ELAPSED} 秒（限制：60 秒）。"
+fi
+
+CURRENT_TREE=$(git write-tree)
+if [ "$TREE" != "$CURRENT_TREE" ]; then
+  _fail "code changed since last test run." "测试后代码已改动。"
+fi

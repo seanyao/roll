@@ -34,6 +34,10 @@
   - Requests made in conversation are NOT AC — capture with `roll-idea` first.
   - Any new Story/Fix requires design doc + user confirmation before TCR starts.
   - Do not commit without user approval unless explicitly told to auto-commit.
+- **Goal First**: Before any implementation, state verifiable success criteria.
+  Transform vague tasks: "add validation" → "write test for invalid input, then make it pass".
+  Multi-step work: list steps with verify checkpoints (step → verify: how to check).
+  Weak criteria ("make it work") require human clarification before starting.
 - **TCR**: Test -> Green = Commit / Red = Revert. No WIP commits.
   - Before implementing: confirm exact files, test strategy, and commit message
     draft with user. Do not write code until approved.

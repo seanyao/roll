@@ -3807,8 +3807,20 @@ _dash_proposal_count() {
   grep '^## PROPOSAL' PROPOSALS.md 2>/dev/null | wc -l | tr -d ' '
 }
 
-# ⑤ Release-ready signal — true if latest brief contains 可发版 or "Release ready".
+# ⑤ Release-ready signal — true iff there are releasable commits since the
+# latest tag AND the latest brief signals 可发版/Release ready. Releasable =
+# any commit since the latest tag whose subject does NOT start with the
+# release-irrelevant prefixes `docs:` or `chore:`. Prevents the flag from
+# sticking on after a release when only docs rewrites land on top of the tag
+# (FIX-033 symptom 2).
 _dash_release_ready() {
+  local latest_tag
+  latest_tag=$(git describe --tags --abbrev=0 2>/dev/null) || return 1
+  local commits_with_code
+  commits_with_code=$(git log "${latest_tag}..HEAD" --pretty=format:%s 2>/dev/null \
+    | grep -cvE '^(docs|chore)(\([^)]*\))?:[[:space:]]' 2>/dev/null \
+    || echo 0)
+  [[ "${commits_with_code:-0}" -gt 0 ]] || return 1
   local latest
   latest=$(ls docs/briefs/*.md 2>/dev/null | sort | tail -1 || true)
   [[ -z "$latest" ]] && return 1
@@ -3988,7 +4000,7 @@ _dashboard() {
     printf "    ${GREEN}✓ AI 自驱中 — 无需介入${NC}\n"
   else
     (( alerts > 0 )) && printf "    ${RED}⚠ %s ALERT${NC}          run: roll alert\n" "$alerts"
-    (( proposals > 0 )) && printf "    ${YELLOW}📋 %s PROPOSAL${NC}      run: roll backlog\n" "$proposals"
+    (( proposals > 0 )) && printf "    ${YELLOW}📋 %s PROPOSAL${NC}      see: PROPOSALS.md\n" "$proposals"
     $release_ready && printf "    ${GREEN}✓ Release ready${NC}    run: roll release\n"
   fi
   echo ""

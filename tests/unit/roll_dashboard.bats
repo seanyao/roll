@@ -135,13 +135,79 @@ EOF
   echo "$out" | grep -qE "ALERT.*roll alert"
 }
 
-@test "dashboard: Human×AI surfaces PROPOSAL count" {
+@test "dashboard: Human×AI surfaces PROPOSAL count with PROPOSALS.md hint" {
+  # FIX-033 symptom 3: hint must point to PROPOSALS.md (not `roll backlog`,
+  # which lists BACKLOG.md and never surfaces PROPOSALS entries).
   cat > PROPOSALS.md <<'EOF'
 ## PROPOSAL: foo
 status: pending
 EOF
   local out; out=$(_dashboard)
-  echo "$out" | grep -qE "PROPOSAL.*roll backlog"
+  echo "$out" | grep -qE "PROPOSAL.*PROPOSALS\.md"
+  ! echo "$out" | grep -qE "PROPOSAL.*roll backlog"
+}
+
+# ─── _dash_release_ready — FIX-033 symptom 2 ────────────────────────────────
+
+@test "_dash_release_ready: false when no tag exists (fresh repo)" {
+  mkdir -p docs/briefs
+  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+## 发版就绪
+✅ 可发版
+EOF
+  run _dash_release_ready
+  [ "$status" -ne 0 ]
+}
+
+@test "_dash_release_ready: false when only docs/chore commits since latest tag" {
+  git -c user.email=t@t -c user.name=t tag v0.1.0
+  echo "doc" > a.md
+  git add a.md
+  git -c user.email=t@t -c user.name=t commit -q -m "docs: rewrite changelog"
+  echo "chore" > b.txt
+  git add b.txt
+  git -c user.email=t@t -c user.name=t commit -q -m "chore: bump deps"
+  mkdir -p docs/briefs
+  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+## 发版就绪
+✅ 可发版
+EOF
+  run _dash_release_ready
+  [ "$status" -ne 0 ]
+}
+
+@test "_dash_release_ready: false when zero commits since latest tag" {
+  git -c user.email=t@t -c user.name=t tag v0.1.0
+  mkdir -p docs/briefs
+  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+## 发版就绪
+✅ 可发版
+EOF
+  run _dash_release_ready
+  [ "$status" -ne 0 ]
+}
+
+@test "_dash_release_ready: true when feat commit since tag AND brief signals ready" {
+  git -c user.email=t@t -c user.name=t tag v0.1.0
+  echo "feat" > a.txt
+  git add a.txt
+  git -c user.email=t@t -c user.name=t commit -q -m "feat: shiny new thing"
+  mkdir -p docs/briefs
+  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+## 发版就绪
+✅ 可发版
+EOF
+  run _dash_release_ready
+  [ "$status" -eq 0 ]
+}
+
+@test "_dash_release_ready: false when feat commit since tag but no ready brief" {
+  git -c user.email=t@t -c user.name=t tag v0.1.0
+  echo "feat" > a.txt
+  git add a.txt
+  git -c user.email=t@t -c user.name=t commit -q -m "feat: shiny new thing"
+  run _dash_release_ready
+  [ "$status" -ne 0 ]
 }
 
 # ─── Block ⑥ Schedules & Last Brief ─────────────────────────────────────────

@@ -85,6 +85,12 @@
 |-------|-------------|--------|
 | [US-GHA-001](docs/features/github-actions.md#us-gha-001) | Claude GitHub Actions — PR Assistant 和 Code Review 自动化工作流 (PR #8) | ✅ Done |
 
+### Feature: agent-compliance
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-INFRA-006](docs/features/agent-compliance.md#us-infra-006) | AGENTS.md 执行纪律加固 — 明确 Stop 条件 + TCR 强制约束，防止 agent 事后补 commit (Issues #16, #17) | 📋 Todo |
+| [US-INFRA-007](docs/features/agent-compliance.md#us-infra-007) | 创建 .kimi/AGENTS.md — Kimi 专属前置检查清单，强制三步自检 + 每步确认 (Issues #16, #17) | 📋 Todo |
+
 ## Epic: Changelog
 ### Feature: changelog-integration
 | Story | Description | Status |

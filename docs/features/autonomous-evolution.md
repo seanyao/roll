@@ -1504,3 +1504,45 @@ fi
 **Dependencies:**
 - `depends-on:US-AUTO-036` — helpers 必须先到位
 - 前提：`manual-only:true` 标签——roll-loop SKILL Step 2 选 story 时必须**跳过**所有 `manual-only:true` 的故事
+
+---
+
+<a id="us-auto-038"></a>
+## US-AUTO-038 清理孤立 `claude/*` session 分支 📋
+
+**Created**: 2026-05-13
+
+- As a product owner looking at the GitHub repo
+- I want stale Claude Code session branches to be cleaned up automatically
+- So that GitHub stops showing "Compare & pull request" banners for branches that will never become PRs, and the branch list stays tidy
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: LoopRunner adds `BranchHygiene` responsibility
+- Events raised: [StaleBranchDeleted] · [ActiveBranchSkipped]
+
+**Background:**
+Claude Code agent sessions 工作时会推 `claude/<name>-<id>` 分支到 remote（例如 `claude/magical-hawking-yDvj3`）。US-AUTO-033 的 auto-PR 机制只覆盖 `loop/cycle-*` 分支；`claude/*` 分支从不建 PR，却长期留在 remote。GitHub 对近期有推送但无 open PR 的分支会持续显示"Compare & pull request"的黄色 banner，造成视觉噪音和误导（repo 首页可见）。截至 2026-05-13，repo 已积累 10+ 条此类孤立分支。
+
+根本原因：`claude/*` 是 agent 的临时工作分支，不属于 loop 流水线，没有任何清理机制。
+
+**AC:**
+- [ ] loop 每轮起跑前（pre-claude phase），调用 `_loop_cleanup_claude_branches` 扫描 remote `claude/*` 分支
+- [ ] 对每个分支，若其 tip commit 已被 `origin/main` 包含（`git merge-base --is-ancestor <sha> origin/main`）→ `git push origin --delete <branch>`（已合入，安全删除）
+- [ ] 对每个分支，若 tip **未**合入 main，但 tip commit 时间距今 > 7 天且该分支无 open PR（`gh pr list --head <branch> --state open`）→ 同样删除（废弃 session）
+- [ ] 若分支 tip commit 时间距今 ≤ 2 小时 → 跳过（可能是正在运行的 session，不误删）
+- [ ] 每次删除记一行日志（branch name、原因：merged/stale）到标准 INFO 输出
+- [ ] 非 GitHub remote 或 `gh` 未安装时，`_loop_cleanup_claude_branches` 静默返回 0（兼容本地 / CI）
+- [ ] `tests/unit/roll_loop_cleanup.bats` 覆盖：已合入删除 / 超期无 PR 删除 / 活跃（≤2h）跳过 / 非 github 跳过 / 幂等（分支不存在时不报错）共 5 条用例
+
+**Non-goals:**
+- `loop/*` 分支清理（US-AUTO-033 的 `--delete-branch` 已处理）
+- 非 `claude/*` 前缀的 feature/fix 分支（可能是人工创建的，不动）
+- Branch protection rules 变更
+
+**Files:**
+- `bin/roll` — 新增 `_loop_cleanup_claude_branches` helper；在 `_write_loop_runner_script` pre-claude 段调用
+- `tests/unit/roll_loop_cleanup.bats` — 5 条用例
+
+**Dependencies:**
+- `depends-on:US-AUTO-033` — auto-PR 机制先就位，确认 `loop/*` 分支已由平台自动清理后，再动 `claude/*`

@@ -7,7 +7,7 @@
  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝
 ```
 
-> 用 AI Agent 交付功能 — _快速推进，无需冲刺。_
+> _Agents, roll out._
 
 **[English README](README.md)**
 

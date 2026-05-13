@@ -7,7 +7,7 @@
  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝
 ```
 
-> Roll out features with AI agents — _Move fast, no sprints._
+> _Agents, roll out._
 
 **[中文版 README](README_CN.md)**
 

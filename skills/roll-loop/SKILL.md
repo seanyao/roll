@@ -68,7 +68,24 @@ fi
 2. For each such story, check `state.yaml`:
    - If `current_item` matches the story id AND `status: running` → this is the resume case (handled above), leave it.
    - Otherwise → this is an **orphan 🔨** (the loop that marked it crashed before finishing). Revert the status back to `📋 Todo`, commit `chore: revert orphan 🔨 US-XXX to 📋`, and append a line to `~/.shared/roll/loop/ALERT.md` recording the orphan id and time so the next brief surfaces it.
-3. After orphan sweep, proceed to Step 1.5 (Pre-run CI health check) before scanning.
+3. After orphan sweep, proceed to Step 1.4 (Pre-run Remote Sync) and Step 1.5 (Pre-run CI health check) before scanning.
+
+### Step 1.4 — Pre-run Remote Sync
+
+Call `_loop_precheck_remote` before the CI precheck. This is a **defensive gate**
+against building on stale code — if `origin/<branch>` has commits the local
+branch doesn't, the loop must not stack new TCR commits on a divergent base
+(which would force-push conflicts, red CI, or quietly overwrite a teammate or
+peer agent's work).
+
+- In sync with `origin/<branch>` → proceed to Step 1.5.
+- Behind + clean working tree → `git pull --ff-only` and proceed.
+- Behind + dirty working tree (or branches diverged so `--ff-only` refuses) →
+  write ALERT, **do not pick up any stories this cycle**, exit cleanly.
+  Human must commit/stash/rebase, then re-run `roll loop now`.
+- `git fetch` fails (network / auth) → graceful skip (`_loop_precheck_remote`
+  returns 0); the next cycle retries. Local-only branches (no `origin/<branch>`),
+  detached HEAD, and missing `origin` remote are also lenient skips.
 
 ### Step 1.5 — Pre-run CI Health Check
 

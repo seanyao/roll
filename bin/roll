@@ -3575,6 +3575,52 @@ _worktree_merge_back() {
   return 0
 }
 
+# US-AUTO-038: orphan claude/* branch hygiene.
+#
+# Each Claude Code session pushes `claude/<name>-<id>` work branches to origin.
+# US-AUTO-033's auto-PR mechanism only covers `loop/cycle-*` branches; the
+# claude/* ones never become PRs and accumulate as stale refs that GitHub
+# surfaces with a "Compare & pull request" banner. Cleanup is event-driven:
+# snapshot pre-claude, diff post-claude, delete the additions.
+
+# _claude_remote_snapshot [repo]
+#   Echo the current set of remote `claude/*` branch names (sans
+#   refs/heads/), one per line, sorted. Silent on remote unreachable / no
+#   remote / no matches — empty stdout, exit 0.
+_claude_remote_snapshot() {
+  local repo="${1:-.}"
+  git -C "$repo" ls-remote --heads origin 'refs/heads/claude/*' 2>/dev/null \
+    | awk '{print $2}' \
+    | sed 's|^refs/heads/||' \
+    | sort
+}
+
+# _claude_cleanup_new_branches <prior> [repo]
+#   Delete remote `claude/*` branches present now but absent from <prior>
+#   (newline-separated list, as emitted by _claude_remote_snapshot). Skips
+#   silently when origin is not a GitHub remote. Each successful delete logs
+#   one INFO line; failures are silently ignored so the loop's main flow is
+#   never derailed.
+_claude_cleanup_new_branches() {
+  local prior="$1"
+  local repo="${2:-.}"
+  local url; url=$(git -C "$repo" remote get-url origin 2>/dev/null)
+  [[ "$url" == *github.com* ]] || return 0
+  local current; current=$(_claude_remote_snapshot "$repo")
+  [ -z "$current" ] && return 0
+  local prior_sorted; prior_sorted=$(printf '%s\n' "$prior" | sort -u)
+  local new_branches
+  new_branches=$(comm -13 <(printf '%s\n' "$prior_sorted") <(printf '%s\n' "$current"))
+  [ -z "$new_branches" ] && return 0
+  while IFS= read -r branch; do
+    [ -z "$branch" ] && continue
+    if git -C "$repo" push origin --delete "$branch" 2>/dev/null; then
+      echo "[loop] deleted stale claude branch: $branch"
+    fi
+  done <<< "$new_branches"
+  return 0
+}
+
 # US-AUTO-033: publish a loop cycle branch as a GitHub PR with auto-merge.
 #
 # _loop_publish_pr <branch> [title]

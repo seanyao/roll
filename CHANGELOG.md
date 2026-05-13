@@ -7,6 +7,7 @@
 - **Added**: 写 changelog 时会先参考最近几次发布的风格
 - **Added**: 故事跑完自动开 PR + auto-merge，CI 绿就合
 - **Added**: 完成的故事不再直接 push main，留下 PR 作为审计入口
+- **Added**: AI 代码评审可以批准 / 打回 PR — 配合 CI 形成合并双门；紧急 hotfix 在 PR body 加 `[skip-ai-review]` 即可绕开
 
 ## v2026.513.1
 - **Added**: loop 现在每轮跑在独立的 worktree 里，结束自动合回 main 并清理；跑挂时保留现场目录方便排查 — 再也不会吞掉 main 上你正在改的代码

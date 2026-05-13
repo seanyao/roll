@@ -26,7 +26,7 @@ jobs:
               | grep "^+" \
               | grep -v "^+++" \
               | sed 's/^+//' \
-              | grep -v "^#\|^$" \
+              | grep -v "^## \|^$" \
               > release_notes.txt
           fi
           if [ ! -s release_notes.txt ]; then

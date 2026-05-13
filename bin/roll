@@ -3055,6 +3055,64 @@ _loop_is_manual_only() {
   echo "$row" | grep -qE 'manual-only:true'
 }
 
+# US-CL-004: changelog 风格守门 Phase 1 — mechanical linter.
+#
+# _changelog_lint_bullet <bullet-text>
+#   Stdout: one violation tag per line; empty = bullet passes.
+#   Exit:   0 always (callers read the output stream, not the exit code).
+#
+# Violation tags:
+#   backtick-identifier  `…` contains `_` or `()`  (e.g. `_foo`, `bar()`)
+#   file-suffix          `.md`/`.sh`/`.yml`/`.ts`/`.bats` outside backticks
+#   internal-word        Phase N / Step N / Helper / Schema / Fixture / Refactor
+#   over-length          > 50 visible chars (UTF-8 codepoints; 中文按字符计)
+#   path-fragment        docs/ / bin/ / tests/ / scripts/ outside backticks
+#
+# Backticks are treated as the "user-quoted" zone — content there is assumed
+# to be a real user command (e.g. `roll edit notes.md`) and is excluded from
+# the file-suffix / path-fragment checks.
+_changelog_lint_bullet() {
+  local bullet="$1"
+  local stripped
+  stripped=$(printf '%s' "$bullet" | sed -E 's/`[^`]*`//g')
+
+  if printf '%s' "$bullet" | grep -qE '`[^`]*(_|\(\))[^`]*`'; then
+    echo "backtick-identifier"
+  fi
+  if printf '%s' "$stripped" | grep -qE '\.(md|sh|yml|ts|bats)([^A-Za-z0-9]|$)'; then
+    echo "file-suffix"
+  fi
+  if printf '%s' "$bullet" | grep -qE '(Phase|Step)[[:space:]]+[0-9]+|Helper|Schema|Fixture|Refactor'; then
+    echo "internal-word"
+  fi
+  local len
+  len=$(LC_ALL=en_US.UTF-8 printf '%s' "$bullet" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')
+  if [ "${len:-0}" -gt 50 ]; then
+    echo "over-length"
+  fi
+  if printf '%s' "$stripped" | grep -qE '(^|[^A-Za-z0-9_])(docs|bin|tests|scripts)/'; then
+    echo "path-fragment"
+  fi
+  return 0
+}
+
+# US-CL-004: changelog few-shot style anchors — extract bullets from the
+# most recent 3 published `## v...` sections of CHANGELOG.md (skipping
+# `## Unreleased`). Cap at ~1500 chars so the agent's context stays lean.
+#
+# _changelog_style_anchors [changelog-path]
+#   Stdout: concatenated bullet lines from the last 3 released versions.
+#   Exit:   0 (empty output when no CHANGELOG.md or no released sections).
+_changelog_style_anchors() {
+  local changelog="${1:-CHANGELOG.md}"
+  [ -f "$changelog" ] || return 0
+  awk '
+    /^## v/ { ver++; if (ver > 3) exit; printing = 1; next }
+    /^## /  { printing = 0 }
+    printing && /^- / { print }
+  ' "$changelog" | head -c 1500
+}
+
 # US-AUTO-036: worktree helpers (loop-safe pure additions).
 #
 # Phase 1 of worktree isolation — these helpers are NOT yet called by

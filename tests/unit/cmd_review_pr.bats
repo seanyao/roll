@@ -54,3 +54,11 @@ After re-reading:
   local body="Normal PR body without the tag"
   ! echo "$body" | grep -qF '[skip-ai-review]'
 }
+
+# ─── cmd_review_pr error paths ────────────────────────────────────────────────
+
+@test "cmd_review_pr: missing PR number → error exit 1" {
+  run cmd_review_pr
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Usage: roll review-pr"* ]]
+}

@@ -126,6 +126,15 @@ agent 输出结构化结论：
 PR 路由到 `_loop_pr_review_external`，后者调用 `roll review-pr`。
 loop 自身的 PR（`loop/*` 分支）被跳过，避免 same-source bias。
 
+**Stale PR 自动 rebase：** 被分类为 `stale`（CI 失败或分支落后/冲突）的 PR
+会通过 `_loop_pr_rebase_stale` 自动 rebase 到 `origin/main`。断路器限制
+24 小时内最多 rebase 3 次，超过后写 ALERT。Fork PR 因无写权限直接跳过并写 ALERT。
+
+**Bot 评审检测：** 如果 GitHub Actions bot 已经评审过 PR
+（例如通过可选的 GHA 工作流），`_loop_pr_inbox` 会让步：
+- Bot `APPROVED` → 跳过，让 auto-merge 自行推进
+- Bot `CHANGES_REQUESTED` → 写 ALERT（loop PR 被 GHA reviewer 打回）
+
 ## Session 清理
 
 每轮 loop 结束时，会自动清理本地残留的 worktree：

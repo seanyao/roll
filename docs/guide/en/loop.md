@@ -126,6 +126,16 @@ auto-approve without invoking the agent.
 `eligible` PRs to `_loop_pr_review_external`, which calls `roll review-pr`.
 Loop's own PRs (`loop/*` branches) are skipped to avoid same-source bias.
 
+**Stale PR rebase:** PRs classified as `stale` (CI failed or branch behind/conflicting)
+are automatically rebased onto `origin/main` via `_loop_pr_rebase_stale`. A circuit
+breaker limits rebase attempts to 3 within 24 hours — after that, an ALERT is raised.
+Fork PRs are skipped (no write access) with an ALERT.
+
+**Bot review detection:** If a GitHub Actions bot has already reviewed the PR
+(e.g. via the optional GHA workflow), `_loop_pr_inbox` defers:
+- Bot `APPROVED` → skip, let auto-merge proceed
+- Bot `CHANGES_REQUESTED` → write ALERT (loop PR rejected by GHA reviewer)
+
 ## Session Cleanup
 
 At the end of every cycle, loop automatically prunes stale local worktrees:

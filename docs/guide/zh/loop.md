@@ -99,6 +99,17 @@ loop 看到 `🔨 In Progress` 标记就会自动跳过。
 
 ALERT 条目会在下次 `roll loop monitor` 和 `roll-brief` 输出中显示。
 
+## Session 清理
+
+每轮 loop 结束时，会自动清理本地残留的 worktree：
+
+- `.claude/worktrees/` 下，分支已完全合入 `main` 的目录会被删除
+  （`git worktree remove --force` + `git branch -D`）。
+- 随后执行 `git worktree prune` 清理元数据。
+
+这样可以保持 `git worktree list` 干净，防止 `.claude/worktrees/` 随时间积累。
+分支仍领先于 `main` 的活跃 worktree 不受影响。
+
 ## 状态文件
 
 | 文件 | 内容 |

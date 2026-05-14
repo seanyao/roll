@@ -62,6 +62,7 @@ roll loop on        # optional: let the agent work unattended
 | Loop (autonomous executor) | [guide/en/loop.md](docs/guide/en/loop.md) | [guide/zh/loop.md](docs/guide/zh/loop.md) |
 | Dream (nightly health scan) | [guide/en/dream.md](docs/guide/en/dream.md) | [guide/zh/dream.md](docs/guide/zh/dream.md) |
 | Peer (cross-agent review) | [guide/en/peer.md](docs/guide/en/peer.md) | [guide/zh/peer.md](docs/guide/zh/peer.md) |
+| Configuration (env vars) | [guide/en/configuration.md](docs/guide/en/configuration.md) | [guide/zh/configuration.md](docs/guide/zh/configuration.md) |
 | Skill selection guide | [guide/en/skills.md](docs/guide/en/skills.md) | [guide/zh/skills.md](docs/guide/zh/skills.md) |
 | Domain model (DDD) | [domain/context-map.md](docs/domain/context-map.md) | — |
 | Engineering common sense | [practices/engineering-common-sense.md](docs/practices/engineering-common-sense.md) | — |

@@ -99,6 +99,18 @@ Loop sees the `🔨 In Progress` marker and skips it.
 
 ALERT entries surface in the next `roll loop monitor` and `roll-brief` output.
 
+## Session Cleanup
+
+At the end of every cycle, loop automatically prunes stale local worktrees:
+
+- Any directory under `.claude/worktrees/` whose branch has been fully merged
+  into `main` is removed (`git worktree remove --force` + `git branch -D`).
+- `git worktree prune` runs afterward to clear stale metadata.
+
+This keeps `git worktree list` clean and prevents `.claude/worktrees/` from
+accumulating old entries over time. Active worktrees (branches ahead of `main`)
+are left untouched.
+
 ## State Files
 
 | File | Content |

@@ -19,16 +19,10 @@ jobs:
         id: notes
         run: |
           TAG="${GITHUB_REF_NAME}"
-          PREV_TAG=$(git tag --sort=-version:refname | grep "^v" | sed -n '2p')
-          if [ -n "$PREV_TAG" ]; then
-            # Diff CHANGELOG.md between tags — only lines added in this release
-            git diff "${PREV_TAG}..${TAG}" -- CHANGELOG.md \
-              | grep "^+" \
-              | grep -v "^+++" \
-              | sed 's/^+//' \
-              | grep -v "^## \|^$" \
-              > release_notes.txt || true
-          fi
+          # Extract the section for this tag directly from CHANGELOG.md.
+          # awk: start after "## <TAG>", stop at next "## " heading.
+          awk "/^## ${TAG}/{found=1; next} found && /^## /{exit} found && NF{print}" \
+            CHANGELOG.md > release_notes.txt || true
           if [ ! -s release_notes.txt ]; then
             echo "Release ${TAG}" > release_notes.txt
           fi

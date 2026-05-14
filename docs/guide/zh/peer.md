@@ -83,6 +83,10 @@ peer_capability_map_architecture: "claude kimi"
 与 loop 一样，peer review 在 tmux session（`roll-peer-<from>-<to>`）里运行。
 未静音时，终端窗口自动弹出，你可以实时看到跨 AI 协商过程。
 
+Session 在多轮协商期间保持存活，你可以用一个窗口看完整个多轮协商。
+终态决议（AGREE、ESCALATE、UNKNOWN、或 round ≥ 3）后，session 会自动清理 ——
+tmux session 被终止，终端窗口随后关闭。
+
 `mute` 文件（`~/.shared/roll/mute`）对 loop 和 peer 同时生效。
 `roll loop mute` / `roll loop unmute` 控制所有自主活动的弹窗。
 

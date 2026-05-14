@@ -83,6 +83,11 @@ Loop skips agents that are not installed on the current machine.
 Like loop, peer review runs inside a tmux session (`roll-peer-<from>-<to>`).
 When not muted, a terminal window opens so you can watch the negotiation in real time.
 
+The session stays alive across rounds so you can watch the entire multi-round negotiation
+in one window. After a terminal resolution (AGREE, ESCALATE, UNKNOWN, or round ≥ 3),
+the session is automatically cleaned up — the tmux session is killed and the terminal
+window closes.
+
 The `mute` file (`~/.shared/roll/mute`) controls popup for both loop and peer.
 `roll loop mute` / `roll loop unmute` applies to all autonomous activity.
 

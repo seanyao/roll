@@ -99,6 +99,33 @@ Loop sees the `🔨 In Progress` marker and skips it.
 
 ALERT entries surface in the next `roll loop monitor` and `roll-brief` output.
 
+## PR Inbox & Review
+
+Each loop cycle processes open PRs before picking new stories.
+
+**Review command:**
+
+```bash
+roll review-pr <number>   # AI review using the project's configured agent
+```
+
+The command fetches the PR title, body, and diff via `gh`, renders a review
+prompt, and routes it to whatever agent `_project_agent()` returns (Claude,
+Kimi, DeepSeek, etc.). The agent outputs a structured verdict:
+
+| Verdict | Action |
+|---------|--------|
+| `APPROVE` | `gh pr review --approve` |
+| `REQUEST_CHANGES` | `gh pr review --request-changes` with reason |
+| `UNCERTAIN` | Writes an ALERT — human decides |
+
+**Escape hatch:** Add `[skip-ai-review]` anywhere in the PR body to
+auto-approve without invoking the agent.
+
+**How the loop uses it:** `_loop_pr_inbox` classifies each open PR and routes
+`eligible` PRs to `_loop_pr_review_external`, which calls `roll review-pr`.
+Loop's own PRs (`loop/*` branches) are skipped to avoid same-source bias.
+
 ## Session Cleanup
 
 At the end of every cycle, loop automatically prunes stale local worktrees:

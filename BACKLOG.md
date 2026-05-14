@@ -88,7 +88,7 @@
 ### Feature: pr-lifecycle
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-PR-001](docs/features/pr-lifecycle.md#us-pr-001) | PR 评审不再绑定特定 AI 或 git 平台 — 任何 agent、任何 git 平台均可用 `roll review-pr` 触发评审 `peer-review:kimi,pi,gemini` | 📋 Todo |
+| [US-PR-001](docs/features/pr-lifecycle.md#us-pr-001) | PR 评审不再绑定特定 AI 或 git 平台 — 任何 agent、任何 git 平台均可用 `roll review-pr` 触发评审 `peer-review:kimi,pi,gemini` | ✅ Done |
 | [US-PR-002](docs/features/pr-lifecycle.md#us-pr-002) | loop 调度自动处理开放 PR — 外部贡献者的 PR 自动评审，卡住的 PR 自动 rebase，不再需要人工介入 `depends-on:US-PR-001` | 📋 Todo |
 | [US-PR-003](docs/features/pr-lifecycle.md#us-pr-003) | GitHub 项目可选秒级 PR 评审 — 安装一个 workflow 文件后外部 PR 开即触发，无需等待 loop 下一轮调度 `depends-on:US-PR-001` | 📋 Todo |
 
@@ -193,8 +193,8 @@
 | [US-AUTO-036](docs/features/autonomous-evolution.md#us-auto-036) | worktree 隔离 Phase 1 — 加 7 个辅助函数 + 单元测试，不改动 runner | ✅ Done |
 | [US-AUTO-037](docs/features/autonomous-evolution.md#us-auto-037) | worktree 隔离 Phase 2 — runner 接入辅助函数，每轮在独立目录跑，完成后合回主干 `depends-on:US-AUTO-036` `manual-only:true` | ✅ Done |
 | [US-AUTO-038](docs/features/autonomous-evolution.md#us-auto-038) | 清理遗留的 `claude/*` 临时分支 — 每次 claude 会话结束后立即删除，不做定期扫描 `depends-on:US-AUTO-033` | ✅ Done |
-| [US-AUTO-039](docs/features/peer-tmux-cleanup.md#us-auto-039) | Peer 完成后自动清理 tmux session 和终端窗口 — 终态决议杀 session，非终态留给下一轮复用 | 📋 Todo |
-| [US-AUTO-040](docs/features/autonomous-evolution.md#us-auto-040) | 统一临时分支 GC — `loop/cycle-*` 兜底清理，回收 PR auto-merge 路径未能删除的已合入分支 `depends-on:US-AUTO-038` | 📋 Todo |
+| [US-AUTO-039](docs/features/peer-tmux-cleanup.md#us-auto-039) | Peer 完成后自动清理 tmux session 和终端窗口 — 终态决议杀 session，非终态留给下一轮复用 | ✅ Done |
+| [US-AUTO-040](docs/features/autonomous-evolution.md#us-auto-040) | 统一临时分支 GC — `loop/cycle-*` 兜底清理，回收 PR auto-merge 路径未能删除的已合入分支 `depends-on:US-AUTO-038` | ✅ Done |
 
 ## Epic: Documentation
 ### Feature: documentation

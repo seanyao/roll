@@ -1,7 +1,8 @@
 <a id="us-pr-001"></a>
-## US-PR-001 `roll review-pr` — agent-agnostic PR 评审命令 📋
+## US-PR-001 `roll review-pr` — agent-agnostic PR 评审命令 ✅
 
 **Created**: 2026-05-15
+**Completed**: 2026-05-15
 **Plan**: [pr-lifecycle-plan.md](pr-lifecycle-plan.md)
 **Peer Review Required**: kimi, pi, gemini（3 次，进入实现前必须全部 AGREE）
 
@@ -15,23 +16,23 @@
 - Events raised: [PRApproved] / [PRChangesRequested] / [PRReviewUncertain] → `_loop_pr_inbox`
 
 **AC:**
-- [ ] `roll review-pr <number>` 命令存在，读取 `_project_agent()` 决定使用哪个 agent
-- [ ] 通过 `gh pr view <number> --json title,body,diff` 获取 PR context
-- [ ] 创建 temp skill 文件（`mktemp`），将 PR context 注入 `skills/roll-review-pr/SKILL.md` 的占位符（`{{PR_TITLE}}` `{{PR_BODY}}` `{{PR_DIFF}}`）；temp file 在命令结束时清理
-- [ ] 调用 `_agent_run_skill`（不改其签名），传入 temp skill 路径
-- [ ] 解析 agent 输出的结构化 verdict footer：
+- [x] `roll review-pr <number>` 命令存在，读取 `_project_agent()` 决定使用哪个 agent
+- [x] 通过 `gh pr view <number> --json title,body,diff` 获取 PR context
+- [x] 创建 temp skill 文件（`mktemp`），将 PR context 注入 `skills/roll-review-pr/SKILL.md` 的占位符（`{{PR_TITLE}}` `{{PR_BODY}}` `{{PR_DIFF}}`）；temp file 在命令结束时清理
+- [x] 调用 agent（镜像 `_agent_run_skill` 路由逻辑，不改其签名），渲染后的 prompt 路由到配置的 agent
+- [x] 解析 agent 输出的结构化 verdict footer：
   - `<!--VERDICT:APPROVE-->` → `gh pr review <number> --approve`
   - `<!--VERDICT:REQUEST_CHANGES:reason-->` → `gh pr review <number> --request-changes -b "reason"`
   - `<!--VERDICT:UNCERTAIN:reason-->` → 写 ALERT，不提交 review
-- [ ] escape hatch：PR body 含 `[skip-ai-review]` → 直接 approve，不调 agent
-- [ ] `skills/roll-review-pr/SKILL.md` 存在，包含 3-state 评审指令和 verdict footer 格式说明
-- [ ] 单元测试：verdict 解析（APPROVE / REQUEST_CHANGES / UNCERTAIN / skip-ai-review）
+- [x] escape hatch：PR body 含 `[skip-ai-review]` → 直接 approve，不调 agent
+- [x] `skills/roll-review-pr/SKILL.md` 存在，包含 3-state 评审指令和 verdict footer 格式说明
+- [x] 单元测试：verdict 解析（APPROVE / REQUEST_CHANGES / UNCERTAIN / skip-ai-review）
 
 **Files:**
-- `bin/roll` — 新增 `cmd_review_pr()` + `roll review-pr` dispatcher 入口（+~40 行）
+- `bin/roll` — 新增 `cmd_review_pr()` + `_parse_review_verdict()` + dispatcher 入口
 - `skills/roll-review-pr/SKILL.md` ← 新增
-- `tests/unit/cmd_review_pr.bats` ← 新增
-- `docs/guide/en/loop.md` — 新增 "PR Inbox & Review" 章节（`roll review-pr` 用法、agent-agnostic 说明、escape hatch）
+- `tests/unit/cmd_review_pr.bats` ← 新增（8 tests）
+- `docs/guide/en/loop.md` — 新增 "PR Inbox & Review" 章节
 - `docs/guide/zh/loop.md` — 同上，中文版
 
 **Dependencies:**

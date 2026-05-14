@@ -31,6 +31,14 @@ case "$1" in
   remote)
     if [ "$2" = "get-url" ]; then echo "$REMOTE_URL"; fi
     ;;
+  merge-base)
+    # merge-base --is-ancestor <branch> origin/main
+    local branch="$3"
+    if [ -n "$MERGED_BRANCHES" ] && echo "$MERGED_BRANCHES" | grep -qF "$branch"; then
+      exit 0
+    fi
+    exit 1
+    ;;
   push)
     # push origin --delete <branch>
     branch="$4"
@@ -49,7 +57,7 @@ setup() {
 }
 
 teardown() {
-  unset PUSH_SHOULD_FAIL REMOTE_URL LSREMOTE_OUT PUSH_CALLS
+  unset PUSH_SHOULD_FAIL REMOTE_URL LSREMOTE_OUT PUSH_CALLS MERGED_BRANCHES
   unit_teardown_cd
 }
 
@@ -150,4 +158,51 @@ teardown() {
   stale_wt_line=$(grep -n '_claude_cleanup_stale_worktrees' "$inner_path" | head -1 | cut -d: -f1)
   [ -n "$stale_wt_line" ]
   [ "$stale_wt_line" -gt "$loop_end_line" ]
+}
+
+# --- _loop_cleanup_stale_cycle_branches (US-AUTO-040) ---
+
+@test "_loop_cleanup_stale_cycle_branches: deletes merged loop/cycle-* branch" {
+  printf 'sha1\trefs/heads/loop/cycle-20260514-0800\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES="loop/cycle-20260514-0800"
+  : > "$PUSH_CALLS"
+  run _loop_cleanup_stale_cycle_branches .
+  [ "$status" -eq 0 ]
+  run cat "$PUSH_CALLS"
+  [ "$output" = "loop/cycle-20260514-0800" ]
+}
+
+@test "_loop_cleanup_stale_cycle_branches: skips branch ahead of main" {
+  printf 'sha1\trefs/heads/loop/cycle-20260514-0900\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES=""
+  : > "$PUSH_CALLS"
+  run _loop_cleanup_stale_cycle_branches .
+  [ "$status" -eq 0 ]
+  [ ! -s "$PUSH_CALLS" ]
+}
+
+@test "_loop_cleanup_stale_cycle_branches: skips non-GitHub remote" {
+  export REMOTE_URL="https://gitlab.example.com/owner/repo.git"
+  printf 'sha1\trefs/heads/loop/cycle-20260514-1000\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES="loop/cycle-20260514-1000"
+  : > "$PUSH_CALLS"
+  run _loop_cleanup_stale_cycle_branches .
+  [ "$status" -eq 0 ]
+  [ ! -s "$PUSH_CALLS" ]
+}
+
+@test "_loop_cleanup_stale_cycle_branches: idempotent — delete failure silent" {
+  export PUSH_SHOULD_FAIL=1
+  printf 'sha1\trefs/heads/loop/cycle-20260514-1100\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES="loop/cycle-20260514-1100"
+  : > "$PUSH_CALLS"
+  run _loop_cleanup_stale_cycle_branches .
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_cleanup_stale_cycle_branches: wired into inner.sh after PR publish" {
+  local script_path="${TEST_TMP}/run-test.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p go" "/tmp/log" 0 24
+  local inner_path="${script_path%.sh}-inner.sh"
+  grep -qF '_loop_cleanup_stale_cycle_branches' "$inner_path"
 }

@@ -194,7 +194,7 @@
 | [US-AUTO-037](docs/features/autonomous-evolution.md#us-auto-037) | worktree 隔离 Phase 2 — runner 接入辅助函数，每轮在独立目录跑，完成后合回主干 `depends-on:US-AUTO-036` `manual-only:true` | ✅ Done |
 | [US-AUTO-038](docs/features/autonomous-evolution.md#us-auto-038) | 清理遗留的 `claude/*` 临时分支 — 每次 claude 会话结束后立即删除，不做定期扫描 `depends-on:US-AUTO-033` | ✅ Done |
 | [US-AUTO-039](docs/features/peer-tmux-cleanup.md#us-auto-039) | Peer 完成后自动清理 tmux session 和终端窗口 — 终态决议杀 session，非终态留给下一轮复用 | ✅ Done |
-| [US-AUTO-040](docs/features/autonomous-evolution.md#us-auto-040) | 统一临时分支 GC — `loop/cycle-*` 兜底清理，回收 PR auto-merge 路径未能删除的已合入分支 `depends-on:US-AUTO-038` | 📋 Todo |
+| [US-AUTO-040](docs/features/autonomous-evolution.md#us-auto-040) | 统一临时分支 GC — `loop/cycle-*` 兜底清理，回收 PR auto-merge 路径未能删除的已合入分支 `depends-on:US-AUTO-038` | 🔨 In Progress |
 
 ## Epic: Documentation
 ### Feature: documentation

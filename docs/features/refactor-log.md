@@ -190,3 +190,20 @@ Architectural friction signals flagged during story execution.
 **Fix**: `release.sh` 改为在执行前 `source "${REPO_ROOT}/bin/roll"`，直接调用 `_project_agent()`；顺带把内联 frontmatter 剥离逻辑替换为 `_skill_content()`，消除第二个重复。
 
 **Files**: `scripts/release.sh`, `tests/unit/release_promote.bats`
+
+---
+
+## REFACTOR-013 docs: ROLL_HOME / ROLL_CONFIG / ROLL_GLOBAL ✅
+
+**Flagged**: 2026-05-14 (dream scan)
+**Completed**: 2026-05-14
+**Signal**: `ROLL_CONFIG`/`ROLL_GLOBAL` 在 bin/roll 中分别引用 18 / 9 次，`docs/` 中无任何提及。用户无法发现这两个配置入口。
+**Observation**: 三个变量都派生自 `ROLL_HOME`，但默认值、覆盖语义、典型用法都没有用户可读的文档。CI/沙箱/团队 convention 切换场景全靠源码考古。
+
+**AC:**
+- [x] 新增 `docs/guide/en/configuration.md` 和 `docs/guide/zh/configuration.md`
+- [x] 列出 `ROLL_HOME` / `ROLL_CONFIG` / `ROLL_GLOBAL` 的默认值、用途、覆盖示例
+- [x] `docs/guide/en/overview.md` 和 `zh/overview.md` 加入 `configuration.md` 链接
+- [x] 新增 `tests/unit/roll_doc_configuration.bats` 锁定文档内容不变量
+
+**Scope**: `docs/guide/en/configuration.md`、`docs/guide/zh/configuration.md`、`docs/guide/{en,zh}/overview.md`、`tests/unit/roll_doc_configuration.bats`

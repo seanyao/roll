@@ -213,7 +213,7 @@
 | REFACTOR-010 | CI 测试三轮精简 Phase 2 — 找出慢测试，把文件结构检查类用例迁移到 `roll doctor`，目标减少 25% 用例数 | ✅ Done |
 | REFACTOR-011 | session 清理只删远端分支，本地 worktree 未 `git worktree remove` — `.claude/worktrees/` 长期积累，`git worktree list` 越来越嘈杂 — flagged by dream 2026-05-14 | ✅ Done |
 | REFACTOR-012 | `scripts/release.sh` 中 `_detect_agent()` 与 `bin/roll config_get()` 双维护 config 读取逻辑 — config schema 变更时两处静默漂移 — flagged by dream 2026-05-14 | ✅ Done |
-| REFACTOR-013 | docs: `$ROLL_CONFIG` / `$ROLL_GLOBAL` 在 bin/roll 中分别引用 18 / 9 次，docs/ 中无任何提及 — 用户无法发现这两个配置入口 — flagged by dream 2026-05-14 (hint: $roll-doc) | 📋 Todo |
+| REFACTOR-013 | docs: `$ROLL_CONFIG` / `$ROLL_GLOBAL` 在 bin/roll 中分别引用 18 / 9 次，docs/ 中无任何提及 — 用户无法发现这两个配置入口 — flagged by dream 2026-05-14 (hint: $roll-doc) | ✅ Done |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

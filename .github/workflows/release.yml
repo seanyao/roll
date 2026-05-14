@@ -27,7 +27,7 @@ jobs:
               | grep -v "^+++" \
               | sed 's/^+//' \
               | grep -v "^## \|^$" \
-              > release_notes.txt
+              > release_notes.txt || true
           fi
           if [ ! -s release_notes.txt ]; then
             echo "Release ${TAG}" > release_notes.txt

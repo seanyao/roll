@@ -1539,7 +1539,7 @@ Claude Code agent sessions 工作时会推 `claude/<name>-<id>` 分支到 remote
 **Non-goals:**
 - 历史堆积的孤立分支（首次部署后一次性手动清理即可，不进代码）
 - 非 `claude/*` 前缀的 feature/fix 分支（可能是人工创建的，不动）
-- `loop/*` 分支清理（US-AUTO-033 的 `--delete-branch` 已处理）
+- `loop/*` 分支清理（~~US-AUTO-033 的 `--delete-branch` 已处理~~ → US-AUTO-040 兜底 GC）
 
 **Files:**
 - `bin/roll` — `_write_loop_runner_script` 在 pre-claude 段加快照、post-claude 段加 diff+delete（约 10 行）
@@ -1547,3 +1547,48 @@ Claude Code agent sessions 工作时会推 `claude/<name>-<id>` 分支到 remote
 
 **Dependencies:**
 - `depends-on:US-AUTO-033` — auto-PR 机制先就位，确认 `loop/*` 分支已由平台自动清理后，再动 `claude/*`
+
+---
+
+<a id="us-auto-040"></a>
+## US-AUTO-040 统一临时分支 GC — `loop/cycle-*` 兜底清理 📋
+
+**Created**: 2026-05-15
+**Plan**: [branch-hygiene-plan.md](branch-hygiene-plan.md)
+
+- As a product owner looking at the GitHub repo
+- I want stale `loop/cycle-*` branches cleaned up automatically when PR auto-merge fails to delete them
+- So that the branch list stays tidy and doesn't accumulate zombie branches
+
+**Domain Model:**
+- Context: Autonomous Evolution
+- Aggregate: LoopRunner — `BranchHygiene` responsibility expands from `claude/*` only → all loop-created temporary branches
+- Events raised: [StaleCycleBranchDeleted]
+
+**Background:**
+US-AUTO-033 为 `loop/cycle-*` 分支设计的清理路径是：PR auto-merge → `gh pr merge --delete-branch`。这条路径有 4 个串行依赖（claude 正常退出 → `gh` 可用 → `gh pr create` 成功 → auto-merge 触发），**每一个都是单点故障**。截至 2026-05-14，remote 已积累 16 条僵尸分支，其中 12 条已合入 main 但因 PR 路径失败未被删除。
+
+US-AUTO-038 为 `claude/*` 分支设计了事件驱动的快照对比清理，但明确排除了 `loop/*`。本 Story 弥补这个盲区：在每次 cycle 结尾增加一个确定性的 GC 扫描，回收 PR 路径未能删除的已合入分支。
+
+**设计：兜底 GC，不替代 PR 路径**
+
+PR auto-merge `--delete-branch` 仍然是主清理路径。新增的 GC 是兜底层（defense-in-depth）：
+- 如果 PR 路径成功 → 分支已不存在 → GC 扫描零匹配 → 零开销
+- 如果 PR 路径失败 → GC 回收残留
+
+**算法：** `merge-base --is-ancestor` 精确判断已合入，非启发式。**不删未合入分支**（可能含有效工作，待人工检查）。
+
+**AC:**
+- [ ] `bin/roll` 新增 `_loop_cleanup_stale_cycle_branches` 函数 — 扫描远程 `loop/cycle-*`，删除已合入 main 的分支
+- [ ] 函数在 inner.sh 模板中 `_claude_cleanup_stale_worktrees` 之后调用，每次 cycle 无条件执行
+- [ ] 非 GitHub remote 或远端不可达时静默跳过
+- [ ] 只删 `merge-base --is-ancestor` 确认已合入的分支；未合入的保留
+- [ ] 删除失败静默忽略（幂等）
+- [ ] `tests/unit/roll_loop_cleanup.bats` 覆盖：已合入删除 / 未合入跳过 / 非 GitHub 跳过 / 幂等 / 模板接线 共 5 条
+
+**Files:**
+- `bin/roll` — 新增 `_loop_cleanup_stale_cycle_branches` + 在模板中接线（约 23 行）
+- `tests/unit/roll_loop_cleanup.bats` — 5 条用例
+
+**Dependencies:**
+- `depends-on:US-AUTO-038` — `claude/*` 清理已就位，本 Story 在其基础上扩展

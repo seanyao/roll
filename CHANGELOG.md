@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **New**: `roll review-pr <number>` — agent-agnostic AI 代码评审，任意 agent（Claude/Kimi/DeepSeek 等）均可评审任意 git 平台的 PR；PR body 加 `[skip-ai-review]` 可跳过 `[pr]`
+
 ## v2026.514.5
 
 - **Fixed**: 上版 `claude/*` 临时分支清理意外失效 — 现已恢复 `[loop]`

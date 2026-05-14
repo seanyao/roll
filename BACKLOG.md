@@ -89,7 +89,7 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-PR-001](docs/features/pr-lifecycle.md#us-pr-001) | PR 评审不再绑定特定 AI 或 git 平台 — 任何 agent、任何 git 平台均可用 `roll review-pr` 触发评审 `peer-review:kimi,pi,gemini` | ✅ Done |
-| [US-PR-002](docs/features/pr-lifecycle.md#us-pr-002) | loop 调度自动处理开放 PR — 外部贡献者的 PR 自动评审，卡住的 PR 自动 rebase，不再需要人工介入 `depends-on:US-PR-001` | 🔨 In Progress |
+| [US-PR-002](docs/features/pr-lifecycle.md#us-pr-002) | loop 调度自动处理开放 PR — 外部贡献者的 PR 自动评审，卡住的 PR 自动 rebase，不再需要人工介入 `depends-on:US-PR-001` | ✅ Done |
 | [US-PR-003](docs/features/pr-lifecycle.md#us-pr-003) | GitHub 项目可选秒级 PR 评审 — 安装一个 workflow 文件后外部 PR 开即触发，无需等待 loop 下一轮调度 `depends-on:US-PR-001` | 📋 Todo |
 
 ### Feature: convention-management

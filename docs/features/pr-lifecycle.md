@@ -46,9 +46,10 @@
 ---
 
 <a id="us-pr-002"></a>
-## US-PR-002 实现 `_loop_pr_review_external` + `_loop_pr_rebase_stale` 📋
+## US-PR-002 实现 `_loop_pr_review_external` + `_loop_pr_rebase_stale` ✅
 
 **Created**: 2026-05-15
+**Completed**: 2026-05-15
 **Plan**: [pr-lifecycle-plan.md](pr-lifecycle-plan.md)
 
 - As a Roll autonomous loop
@@ -60,23 +61,23 @@
 - Aggregate: `LoopRunner` — fills `_loop_pr_review_external` + `_loop_pr_rebase_stale` hooks
 
 **AC:**
-- [ ] `_loop_pr_review_external <number>` 实现：调用 `roll review-pr <number>`（US-PR-001）
-- [ ] `_loop_pr_rebase_stale <number> <head_ref>` 实现：
+- [x] `_loop_pr_review_external <number>` 实现：调用 `roll review-pr <number>`（US-PR-001）
+- [x] `_loop_pr_rebase_stale <number> <head_ref>` 实现：
   - `git fetch origin && git rebase origin/main` on the PR branch
   - push 成功 → 写 INFO log，等下一轮 cron 重新评估
   - push 失败（conflict）→ 写 ALERT 含 PR 链接 + "请手动 rebase"
   - fork PR（`head.repo.fork == true`）→ 无写权限，写 ALERT 跳过
-- [ ] `_loop_pr_inbox` 中 bot review 检测（来自 Kimi peer review）：
+- [x] `_loop_pr_inbox` 中 bot review 检测（来自 Kimi peer review）：
   - 在 verdict 判断前提取 `github-actions[bot]` 的最新 review state
   - APPROVED → `continue`（GHA 已处理，让 auto-merge 推进）
   - CHANGES_REQUESTED → 写 ALERT，`continue`（loop 自有 PR 被打回是高信号事件）
   - `_loop_pr_classify` 签名不变
-- [ ] 单元测试：`_loop_pr_review_external` 调用路径；`_loop_pr_rebase_stale` stale/fork/conflict 路径
+- [x] 单元测试：`_loop_pr_review_external` 调用路径；`_loop_pr_rebase_stale` stale/fork/conflict 路径
 
 **Files:**
-- `bin/roll` — 实现 `_loop_pr_review_external`（+~10 行）、`_loop_pr_rebase_stale`（+~25 行）、`_loop_pr_inbox` bot 检测（+~10 行）
-- `tests/unit/loop_pr_inbox_bot.bats` ← 新增
-- `docs/guide/en/loop.md` — 补充 stale PR rebase 行为说明
+- `bin/roll` — 实现 `_loop_pr_review_external`（+10 行）、`_loop_pr_rebase_stale`（+40 行）、`_loop_pr_inbox` bot 检测（+10 行）
+- `tests/unit/loop_pr_inbox_bot.bats` ← 新增（9 tests）
+- `docs/guide/en/loop.md` — 补充 stale PR rebase + bot review 行为说明
 - `docs/guide/zh/loop.md` — 同上，中文版
 
 **Dependencies:**

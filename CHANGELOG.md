@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.514.5
 
 - **Fixed**: 上版 `claude/*` 临时分支清理意外失效 — 现已恢复 `[loop]`
 - **Fixed**: loop session 结束后本地 worktree 不再积累，`git worktree list` 保持干净 `[loop]`

@@ -64,6 +64,7 @@ roll loop on        # 可选：让 agent 无人值守工作
 | Peer（跨 Agent 评审） | [guide/en/peer.md](docs/guide/en/peer.md) | [guide/zh/peer.md](docs/guide/zh/peer.md) |
 | 配置（环境变量） | [guide/en/configuration.md](docs/guide/en/configuration.md) | [guide/zh/configuration.md](docs/guide/zh/configuration.md) |
 | 技能选择指南 | [guide/en/skills.md](docs/guide/en/skills.md) | [guide/zh/skills.md](docs/guide/zh/skills.md) |
+| 常见问题（排障） | [guide/en/faq.md](docs/guide/en/faq.md) | [guide/zh/faq.md](docs/guide/zh/faq.md) |
 | 领域模型（DDD） | [domain/context-map.md](docs/domain/context-map.md) | — |
 | 工程常识 | [practices/engineering-common-sense.md](docs/practices/engineering-common-sense.md) | — |
 

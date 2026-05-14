@@ -1,0 +1,59 @@
+# Roll — Event-driven PR Review (optional accelerator)
+#
+# This workflow triggers AI code review on every PR open/update.
+# Without it, Roll still works — _loop_pr_inbox reviews PRs each loop cycle.
+# With it, contributors get feedback in seconds instead of waiting for the
+# next cron schedule.
+#
+# Install:
+#   cp templates/workflows/pr-review-event.yml .github/workflows/
+#
+# Only GitHub-hosted repos are supported. Fork PRs are skipped (no write access).
+#
+# Secrets: set only the API key for your configured agent (see .roll.yaml).
+#   - ANTHROPIC_API_KEY (for Claude)
+#   - KIMI_API_KEY (for Kimi)
+#   - DEEPSEEK_API_KEY (for DeepSeek)
+# You do NOT need all keys — just the one matching your project's primary_agent.
+
+name: PR Review (event-driven)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.head.repo.fork == false &&
+      !contains(github.event.pull_request.body, '[skip-ai-review]')
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Roll CLI
+        run: npm install -g @seanyao/roll@latest
+
+      # Uncomment the agent CLI your project uses:
+      # - name: Install Claude CLI
+      #   run: npm install -g @anthropic-ai/claude-code
+      # - name: Install Kimi CLI
+      #   run: pip install kimi-cli
+      # - name: Install DeepSeek CLI
+      #   run: pip install deepseek-cli
+
+      - name: Review PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Set the API key for your configured agent:
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          # DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: roll review-pr ${{ github.event.pull_request.number }}

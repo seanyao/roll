@@ -614,6 +614,7 @@ cmd_setup() {
 
   echo ""
   _print_pr_pipeline_hint
+  _print_pr_event_hint
 }
 
 # ─── PR pipeline hint ────────────────────────────────────────────────────────
@@ -639,6 +640,24 @@ _print_pr_pipeline_hint() {
   SKIP_AI_REVIEW in any commit message, to bypass AI review for that PR.
   紧急通道：在 PR body 加 [skip-ai-review]，或在任一 commit message
   里包含 SKIP_AI_REVIEW，可对该 PR 绕过 AI 评审。
+
+HINT
+}
+
+_print_pr_event_hint() {
+  cat <<'HINT'
+
+  Optional — enable event-driven PR review (seconds-fast, GitHub only).
+  可选 —— 启用事件驱动 PR 评审（秒级响应，仅限 GitHub）。
+
+  Without this, Roll reviews PRs each loop cycle (~1h). With it,
+  contributors get AI feedback on PR open/update immediately.
+  不安装也行 — loop 每轮会兜底评审。安装后 PR 一开即触发 AI 评审。
+
+      cp templates/workflows/pr-review-event.yml .github/workflows/
+
+  Then set the API key secret for your configured agent in GitHub repo settings.
+  然后在 GitHub 仓库设置中添加你配置的 agent 对应的 API key secret。
 
 HINT
 }

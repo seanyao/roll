@@ -135,6 +135,21 @@ loop 自身的 PR（`loop/*` 分支）被跳过，避免 same-source bias。
 - Bot `APPROVED` → 跳过，让 auto-merge 自行推进
 - Bot `CHANGES_REQUESTED` → 写 ALERT（loop PR 被 GHA reviewer 打回）
 
+### 可选：事件驱动 PR 评审（GHA）
+
+默认情况下，`_loop_pr_inbox` 在每轮 loop 中评审 eligible PR（最多延迟约 1 小时）。
+如果希望 GitHub 仓库的 PR 秒级得到反馈，安装事件驱动工作流：
+
+```bash
+cp templates/workflows/pr-review-event.yml .github/workflows/
+```
+
+此工作流在 PR 打开/更新时自动触发 `roll review-pr`。Fork PR 和
+body 中包含 `[skip-ai-review]` 的 PR 会被自动跳过。模板只需要一个
+API key secret — 你配置的 agent 对应的那个。
+
+两种模式共存：GHA 工作流提供即时反馈，`_loop_pr_inbox` 作为安全网兜底。
+
 ## Session 清理
 
 每轮 loop 结束时，会自动清理本地残留的 worktree：

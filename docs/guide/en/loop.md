@@ -136,6 +136,23 @@ Fork PRs are skipped (no write access) with an ALERT.
 - Bot `APPROVED` → skip, let auto-merge proceed
 - Bot `CHANGES_REQUESTED` → write ALERT (loop PR rejected by GHA reviewer)
 
+### Optional: Event-driven PR review (GHA)
+
+Without extra setup, `_loop_pr_inbox` reviews eligible PRs each loop cycle
+(up to ~1 hour delay). For seconds-fast feedback on GitHub-hosted repos,
+install the event-driven workflow:
+
+```bash
+cp templates/workflows/pr-review-event.yml .github/workflows/
+```
+
+This triggers `roll review-pr` on every PR open/update. Fork PRs and PRs
+with `[skip-ai-review]` in the body are automatically skipped. The template
+requires only one API key secret — the one matching your configured agent.
+
+The two modes coexist: the GHA workflow provides instant feedback, and
+`_loop_pr_inbox` acts as a safety net if the workflow is not installed.
+
 ## Session Cleanup
 
 At the end of every cycle, loop automatically prunes stale local worktrees:

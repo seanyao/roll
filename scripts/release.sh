@@ -23,9 +23,14 @@ read -p "Publish ${TAG}? [y/N] " confirm
 # ── Sync CHANGELOG.md from BACKLOG via configured agent ──────────────────────
 # Source bin/roll for shared helpers (_project_agent, _skill_content).
 # main() is guarded by BASH_SOURCE == $0, so sourcing is safe.
+_RELEASE_VERSION="${VERSION}"
+_RELEASE_TAG="${TAG}"
 set +e
-source "${REPO_ROOT}/bin/roll" 2>/dev/null
+source "${REPO_ROOT}/bin/roll" 2>/dev/null  # sets VERSION to current installed version
 set -e
+VERSION="${_RELEASE_VERSION}"  # restore release version (source clobbers it)
+TAG="${_RELEASE_TAG}"
+unset _RELEASE_VERSION _RELEASE_TAG
 
 _run_changelog_skill() {
   local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"

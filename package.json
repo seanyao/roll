@@ -1,0 +1,35 @@
+{
+  "name": "@seanyao/roll",
+  "version": "2026.514.3",
+  "description": "Roll — Roll out features with AI agents",
+  "scripts": {
+    "test": "bash tests/run.sh"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "development-workflow",
+    "skills",
+    "agent-first"
+  ],
+  "homepage": "https://github.com/seanyao/roll",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seanyao/roll.git"
+  },
+  "bin": {
+    "roll": "bin/roll"
+  },
+  "license": "MIT",
+  "author": "Sean Yao <sean.dlut@gmail.com>",
+  "files": [
+    "bin/",
+    "conventions/",
+    "lib/",
+    "skills/",
+    "tools/",
+    "template/",
+    "README.md",
+    "CHANGELOG.md"
+  ]
+}

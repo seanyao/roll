@@ -191,9 +191,10 @@
 ---
 
 <a id="us-doc-007"></a>
-## US-DOC-007 Roll FAQ — 全 AI 自治开发常见问题解答 📋
+## US-DOC-007 Roll FAQ — 全 AI 自治开发常见问题解答 ✅
 
 **Created**: 2026-05-15
+**Completed**: 2026-05-15
 
 - As a product engineer using Roll to manage projects with fully autonomous AI delivery
 - I want a bilingual FAQ that answers the most common "why is this happening / what do I do" questions
@@ -204,7 +205,7 @@
 - Aggregate: `GuideDoc` — `docs/guide/en/faq.md` (EN source) + `docs/guide/zh/faq.md` (ZH mirror)
 
 **AC:**
-- [ ] `docs/guide/en/faq.md` 存在，覆盖以下场景（每条：现象 → 原因简述 → 解决方案）：
+- [x] `docs/guide/en/faq.md` 存在，覆盖以下场景（每条：现象 → 原因简述 → 解决方案）：
   - Loop 卡住不动 / 一直显示 In Progress
   - Loop 跑完但 BACKLOG 没有更新
   - Agent 评审打回了自己的 PR（CHANGES_REQUESTED）
@@ -215,14 +216,17 @@
   - 如何临时暂停 loop 而不卸载调度
   - 如何看 loop 做了什么（日志 / runs / brief）
   - 什么情况下需要人工介入，什么情况下 loop 会自己恢复
-- [ ] 每条 FAQ 包含「原理一句话」，帮助用户建立心智模型，而不只是给步骤
-- [ ] `docs/guide/zh/faq.md` 是 EN 版的完整中文翻译，结构与内容一一对应
-- [ ] 两个文件均加入 AGENTS.md `Where to Look` 的 guide 指针（如尚未存在）
-- [ ] README 或 docs 索引中有指向 FAQ 的链接
+- [x] 每条 FAQ 包含「原理一句话」，帮助用户建立心智模型，而不只是给步骤
+- [x] `docs/guide/zh/faq.md` 是 EN 版的完整中文翻译，结构与内容一一对应
+- [x] 两个文件均加入 AGENTS.md `Where to Look` 的 guide 指针（如尚未存在）
+- [x] README 或 docs 索引中有指向 FAQ 的链接
 
 **Files:**
-- `docs/guide/en/faq.md` ← 新增（EN source）
-- `docs/guide/zh/faq.md` ← 新增（ZH mirror，EN 写完后翻译）
+- `docs/guide/en/faq.md` (new)
+- `docs/guide/zh/faq.md` (new)
+- `tests/unit/roll_doc_faq.bats` (new, 16 tests)
+- `README.md` (modified — docs index)
+- `README_CN.md` (modified — docs index)
 
 **Dependencies:**
 - Depends on: US-DOC-001, US-DOC-002（guide/ 目录结构已就位）

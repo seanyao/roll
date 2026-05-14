@@ -206,7 +206,7 @@
 | [US-DOC-004](docs/features/documentation.md#us-doc-004) | 迁移现有散落文档至新结构：methodology×2 → guide/，skill-selection-guide → guide/，loop-autorun-verification → practices/ | ✅ Done |
 | [US-DOC-005](docs/features/documentation.md#us-doc-005) | README 精简重构（≤120行 + doc index）+ AGENTS.md 新增 Documentation Conventions 章节 | ✅ Done |
 | [US-DOC-006](docs/features/documentation.md#us-doc-006) | 扩展 roll-.dream 文档覆盖度巡检 + brief 展示 doc coverage（缺 EN guide / 缺 ZH 翻译 / 文件落错目录） | ✅ Done |
-| [US-DOC-007](docs/features/documentation.md#us-doc-007) | Roll FAQ 双语指南 — 覆盖全 AI 自治开发 10 大常见场景，每条含原因与解决方案，帮用户不读源码也能自助排障 | 📋 Todo |
+| [US-DOC-007](docs/features/documentation.md#us-doc-007) | Roll FAQ 双语指南 — 覆盖全 AI 自治开发 10 大常见场景，每条含原因与解决方案，帮用户不读源码也能自助排障 | ✅ Done |
 
 ## ♻️ Refactor
 | ID | Description | Status |

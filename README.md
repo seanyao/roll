@@ -64,6 +64,7 @@ roll loop on        # optional: let the agent work unattended
 | Peer (cross-agent review) | [guide/en/peer.md](docs/guide/en/peer.md) | [guide/zh/peer.md](docs/guide/zh/peer.md) |
 | Configuration (env vars) | [guide/en/configuration.md](docs/guide/en/configuration.md) | [guide/zh/configuration.md](docs/guide/zh/configuration.md) |
 | Skill selection guide | [guide/en/skills.md](docs/guide/en/skills.md) | [guide/zh/skills.md](docs/guide/zh/skills.md) |
+| FAQ (troubleshooting) | [guide/en/faq.md](docs/guide/en/faq.md) | [guide/zh/faq.md](docs/guide/zh/faq.md) |
 | Domain model (DDD) | [domain/context-map.md](docs/domain/context-map.md) | — |
 | Engineering common sense | [practices/engineering-common-sense.md](docs/practices/engineering-common-sense.md) | — |
 

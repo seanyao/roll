@@ -99,6 +99,33 @@ loop 看到 `🔨 In Progress` 标记就会自动跳过。
 
 ALERT 条目会在下次 `roll loop monitor` 和 `roll-brief` 输出中显示。
 
+## PR 收件箱与评审
+
+每轮 loop 会在领取新故事前先处理未合入的 PR。
+
+**评审命令：**
+
+```bash
+roll review-pr <number>   # 使用项目配置的 agent 对 PR 进行 AI 评审
+```
+
+命令通过 `gh` 获取 PR 标题、正文和 diff，渲染评审 prompt，路由到
+`_project_agent()` 返回的 agent（Claude、Kimi、DeepSeek 等）。
+agent 输出结构化结论：
+
+| 结论 | 动作 |
+|------|------|
+| `APPROVE` | `gh pr review --approve` |
+| `REQUEST_CHANGES` | `gh pr review --request-changes` 附带原因 |
+| `UNCERTAIN` | 写 ALERT — 人工决定 |
+
+**跳过评审：** 在 PR body 中任意位置加入 `[skip-ai-review]` 即可自动批准，
+不调用 agent。
+
+**loop 如何使用：** `_loop_pr_inbox` 对每个 open PR 分类，将 `eligible`
+PR 路由到 `_loop_pr_review_external`，后者调用 `roll review-pr`。
+loop 自身的 PR（`loop/*` 分支）被跳过，避免 same-source bias。
+
 ## Session 清理
 
 每轮 loop 结束时，会自动清理本地残留的 worktree：

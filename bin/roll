@@ -1929,8 +1929,12 @@ cmd_agent() {
       fi
       ok "Agent set to ${name} for this project  当前项目 agent 已设为 ${name}"
       local project_path; project_path=$(pwd -P)
-      crontab -l 2>/dev/null | grep -q "roll-loop:${project_path}" && \
-        info "Takes effect on next scheduled run — or: roll loop now"
+      local slug; slug=$(_project_slug "$project_path")
+      local runner="${_SHARED_ROOT}/loop/run-${slug}.sh"
+      if [[ -f "$runner" ]]; then
+        _install_launchd_plists "$project_path" >/dev/null
+        ok "Loop runner scripts regenerated for new agent  已为新 agent 重新生成 loop 脚本"
+      fi
       ;;
     list)
       echo ""; echo "  Available agents  可用 agent:"; echo ""

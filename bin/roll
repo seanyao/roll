@@ -1898,6 +1898,17 @@ _skill_content() {
   awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' "$1"
 }
 
+_parse_review_verdict() {
+  local output="$1"
+  local line
+  line=$(echo "$output" | grep -o '<!--VERDICT:[^>]*-->' | tail -1)
+  [ -n "$line" ] || return 0
+  local type reason
+  type=$(echo "$line" | sed -E 's/<!--VERDICT:([A-Z_]+)(:.*)?-->/\1/')
+  reason=$(echo "$line" | sed -E 's/<!--VERDICT:[A-Z_]+:?//; s/-->//' | sed 's/^ *//')
+  echo "${type}${reason:+:${reason}}"
+}
+
 _agent_run_skill() {
   local skill="$1"
   local agent; agent=$(_project_agent)

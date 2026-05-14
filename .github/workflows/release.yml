@@ -19,10 +19,12 @@ jobs:
         id: notes
         run: |
           TAG="${GITHUB_REF_NAME}"
-          # Extract the section for this tag directly from CHANGELOG.md.
-          # awk: start after "## <TAG>", stop at next "## " heading.
-          awk "/^## ${TAG}/{found=1; next} found && /^## /{exit} found && NF{print}" \
-            CHANGELOG.md > release_notes.txt || true
+          # Prefer release_notes.txt committed by release.sh (Section 7 grouped format).
+          # Fall back to awk-extracting the raw CHANGELOG.md section if not present.
+          if [ ! -s release_notes.txt ]; then
+            awk "/^## ${TAG}/{found=1; next} found && /^## /{exit} found && NF{print}" \
+              CHANGELOG.md > release_notes.txt || true
+          fi
           if [ ! -s release_notes.txt ]; then
             echo "Release ${TAG}" > release_notes.txt
           fi

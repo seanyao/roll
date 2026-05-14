@@ -614,6 +614,7 @@ cmd_setup() {
 
   echo ""
   _print_pr_pipeline_hint
+  _print_pr_event_hint
 }
 
 # ─── PR pipeline hint ────────────────────────────────────────────────────────
@@ -639,6 +640,24 @@ _print_pr_pipeline_hint() {
   SKIP_AI_REVIEW in any commit message, to bypass AI review for that PR.
   紧急通道：在 PR body 加 [skip-ai-review]，或在任一 commit message
   里包含 SKIP_AI_REVIEW，可对该 PR 绕过 AI 评审。
+
+HINT
+}
+
+_print_pr_event_hint() {
+  cat <<'HINT'
+
+  Optional — enable event-driven PR review (seconds-fast, GitHub only).
+  可选 —— 启用事件驱动 PR 评审（秒级响应，仅限 GitHub）。
+
+  Without this, Roll reviews PRs each loop cycle (~1h). With it,
+  contributors get AI feedback on PR open/update immediately.
+  不安装也行 — loop 每轮会兜底评审。安装后 PR 一开即触发 AI 评审。
+
+      cp templates/workflows/pr-review-event.yml .github/workflows/
+
+  Then set the API key secret for your configured agent in GitHub repo settings.
+  然后在 GitHub 仓库设置中添加你配置的 agent 对应的 API key secret。
 
 HINT
 }
@@ -3443,6 +3462,55 @@ _loop_pr_state_write() {
   ' "$state" > "$tmp" && mv "$tmp" "$state"
 }
 
+# _loop_pr_review_external <pr_number>
+#   Calls cmd_review_pr (US-PR-001) to run AI review on an eligible external PR.
+#   Lenient: errors are logged but do not fail the loop.
+_loop_pr_review_external() {
+  local pr="$1"
+  [ -n "$pr" ] || return 0
+  cmd_review_pr "$pr" 2>&1 || {
+    warn "review-pr failed for PR #${pr} (non-fatal)"
+    return 0
+  }
+}
+
+# _loop_pr_rebase_stale <pr_number> <head_ref>
+#   Attempts to rebase a stale PR onto origin/main and push.
+#   Fork PRs are skipped (no write access). Conflicts write ALERT.
+_loop_pr_rebase_stale() {
+  local pr="$1" head_ref="$2"
+  [ -n "$pr" ] && [ -n "$head_ref" ] || return 0
+
+  local slug; slug=$(_gh_repo_slug 2>/dev/null) || return 0
+
+  local pr_json
+  pr_json=$(gh -R "$slug" pr view "$pr" --json headRepository,headRepositoryOwner,isCrossRepository 2>/dev/null) || return 0
+  local is_fork
+  is_fork=$(echo "$pr_json" | jq -r '.isCrossRepository // false' 2>/dev/null)
+  if [ "$is_fork" = "true" ]; then
+    local alert="${_LOOP_ALERT:-${HOME}/.shared/roll/loop/ALERT.md}"
+    mkdir -p "$(dirname "$alert")" 2>/dev/null || true
+    printf '[%s] PR #%s: fork PR — cannot rebase (no write access)\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr" >> "$alert"
+    return 0
+  fi
+
+  git fetch origin "$head_ref" 2>/dev/null || return 0
+  if git checkout "$head_ref" 2>/dev/null \
+     && git rebase origin/main 2>/dev/null \
+     && git push origin "$head_ref" 2>/dev/null; then
+    info "PR #${pr}: rebased ${head_ref} onto origin/main"
+  else
+    git rebase --abort 2>/dev/null || true
+    git checkout - 2>/dev/null || true
+    local alert="${_LOOP_ALERT:-${HOME}/.shared/roll/loop/ALERT.md}"
+    mkdir -p "$(dirname "$alert")" 2>/dev/null || true
+    printf '[%s] PR #%s: rebase conflict on %s — please rebase manually\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr" "$head_ref" >> "$alert"
+  fi
+  return 0
+}
+
 # _loop_pr_inbox
 #   Walks open PRs and routes each by classification.
 #   Lenient on gh unavailability — returns 0 so the loop continues to BACKLOG.
@@ -3472,9 +3540,12 @@ _loop_pr_inbox() {
       --json reviews,mergeStateStatus,statusCheckRollup \
       2>/dev/null) || { i=$((i + 1)); continue; }
 
-    local human_review ci_state mergeable
+    local human_review ci_state mergeable bot_review
     human_review=$(echo "$view_json" | jq -r '
       [.reviews[]? | select(.authorAssociation != "BOT" and .authorAssociation != "APP")]
+      | last // {} | .state // ""' 2>/dev/null)
+    bot_review=$(echo "$view_json" | jq -r '
+      [.reviews[]? | select(.authorAssociation == "BOT" or .authorAssociation == "APP")]
       | last // {} | .state // ""' 2>/dev/null)
     mergeable=$(echo "$view_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
     ci_state=$(echo "$view_json" | jq -r '
@@ -3482,6 +3553,17 @@ _loop_pr_inbox() {
       elif any(.statusCheckRollup[]?; .conclusion == "FAILURE") then "failure"
       elif all(.statusCheckRollup[]?; .conclusion == "SUCCESS" or .conclusion == "SKIPPED") then "success"
       else "pending" end' 2>/dev/null)
+
+    # Bot review gate: if a GHA workflow already handled this PR, defer to it.
+    if [ "$bot_review" = "APPROVED" ]; then
+      i=$((i + 1)); continue
+    elif [ "$bot_review" = "CHANGES_REQUESTED" ]; then
+      local alert="${_LOOP_ALERT:-${HOME}/.shared/roll/loop/ALERT.md}"
+      mkdir -p "$(dirname "$alert")" 2>/dev/null || true
+      printf '[%s] PR #%s: bot review CHANGES_REQUESTED — loop PR rejected by GHA reviewer\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$num" >> "$alert"
+      i=$((i + 1)); continue
+    fi
 
     local verdict
     verdict=$(_loop_pr_classify "$head_ref" "$human_review" "$ci_state" "$mergeable")
@@ -3492,15 +3574,10 @@ _loop_pr_inbox() {
         ;;
       stale)
         _loop_pr_rebase_circuit "$num" || true
-        # Actual rebase work delegated to _loop_pr_rebase_stale when present
-        # (kept out of this cycle to avoid touching git remote in tests).
-        command -v _loop_pr_rebase_stale >/dev/null 2>&1 \
-          && _loop_pr_rebase_stale "$num" "$head_ref" || true
+        _loop_pr_rebase_stale "$num" "$head_ref" || true
         ;;
       eligible)
-        # Hand off to review (US-AUTO-035 supplies the actual decision).
-        command -v _loop_pr_review_external >/dev/null 2>&1 \
-          && _loop_pr_review_external "$num" || true
+        _loop_pr_review_external "$num" || true
         ;;
     esac
 

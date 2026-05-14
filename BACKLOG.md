@@ -85,6 +85,13 @@
 |-------|-------------|--------|
 | [US-GHA-001](docs/features/github-actions.md#us-gha-001) | Claude GitHub Actions — PR Assistant 和 Code Review 自动化工作流 (PR #8) | ✅ Done |
 
+### Feature: pr-lifecycle
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-PR-001](docs/features/pr-lifecycle.md#us-pr-001) | PR 评审不再绑定特定 AI 或 git 平台 — 任何 agent、任何 git 平台均可用 `roll review-pr` 触发评审 `peer-review:kimi,pi,gemini` | 📋 Todo |
+| [US-PR-002](docs/features/pr-lifecycle.md#us-pr-002) | loop 调度自动处理开放 PR — 外部贡献者的 PR 自动评审，卡住的 PR 自动 rebase，不再需要人工介入 `depends-on:US-PR-001` | 📋 Todo |
+| [US-PR-003](docs/features/pr-lifecycle.md#us-pr-003) | GitHub 项目可选秒级 PR 评审 — 安装一个 workflow 文件后外部 PR 开即触发，无需等待 loop 下一轮调度 `depends-on:US-PR-001` | 📋 Todo |
+
 ### Feature: convention-management
 | Story | Description | Status |
 |-------|-------------|--------|
@@ -186,6 +193,7 @@
 | [US-AUTO-036](docs/features/autonomous-evolution.md#us-auto-036) | worktree 隔离 Phase 1 — 加 7 个辅助函数 + 单元测试，不改动 runner | ✅ Done |
 | [US-AUTO-037](docs/features/autonomous-evolution.md#us-auto-037) | worktree 隔离 Phase 2 — runner 接入辅助函数，每轮在独立目录跑，完成后合回主干 `depends-on:US-AUTO-036` `manual-only:true` | ✅ Done |
 | [US-AUTO-038](docs/features/autonomous-evolution.md#us-auto-038) | 清理遗留的 `claude/*` 临时分支 — 每次 claude 会话结束后立即删除，不做定期扫描 `depends-on:US-AUTO-033` | ✅ Done |
+| [US-AUTO-039](docs/features/peer-tmux-cleanup.md#us-auto-039) | Peer 完成后自动清理 tmux session 和终端窗口 — 终态决议杀 session，非终态留给下一轮复用 | 📋 Todo |
 
 ## Epic: Documentation
 ### Feature: documentation
@@ -197,6 +205,7 @@
 | [US-DOC-004](docs/features/documentation.md#us-doc-004) | 迁移现有散落文档至新结构：methodology×2 → guide/，skill-selection-guide → guide/，loop-autorun-verification → practices/ | ✅ Done |
 | [US-DOC-005](docs/features/documentation.md#us-doc-005) | README 精简重构（≤120行 + doc index）+ AGENTS.md 新增 Documentation Conventions 章节 | ✅ Done |
 | [US-DOC-006](docs/features/documentation.md#us-doc-006) | 扩展 roll-.dream 文档覆盖度巡检 + brief 展示 doc coverage（缺 EN guide / 缺 ZH 翻译 / 文件落错目录） | ✅ Done |
+| [US-DOC-007](docs/features/documentation.md#us-doc-007) | Roll FAQ 双语指南 — 覆盖全 AI 自治开发 10 大常见场景，每条含原因与解决方案，帮用户不读源码也能自助排障 | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |
@@ -244,4 +253,5 @@
 | IDEA-013 | dashboard 完成度检查项 — UAT 信号源定义（怎么采集、谁来验，概念待定） | ⏸ Deferred |
 | IDEA-014 | dashboard 完成度检查项 — "活证据"信号源定义（与 sentinel 数据流可能有关联，设计待定） | ⏸ Deferred |
 | IDEA-015 | loop 在独立目录（worktree）里跑，避免污染主干正在编辑的代码 — 拆为 US-AUTO-036 + US-AUTO-037 落地 | ✅ Done → US-AUTO-036, US-AUTO-037 |
-| IDEA-016 | PR 生命周期管理迁移到 GitHub Actions — 评审触发、CI 绿后 auto-merge、rebase 失败诊断、stale 清理全部由 GitHub Actions event-driven 处理；Loop 只检查自己开的未收口故事。需先验证 US-AUTO-034 落地效果再做设计。 | ⏸ Deferred |
+| IDEA-016 | PR 生命周期管理迁移到 GitHub Actions — 评审触发、CI 绿后 auto-merge、rebase 失败诊断、stale 清理全部由 GitHub Actions event-driven 处理；Loop 只检查自己开的未收口故事。需先验证 US-AUTO-034 落地效果再做设计。 | ✅ Done → US-GHA-002 |
+| IDEA-017 | FAQ 文档 — 面向产品工程师用户，覆盖全 AI 自治开发场景下的常见问题：典型场景、解决方案与简明原理解释（loop 卡住、agent 切换、PR 冲突、多项目并行、权限问题等） | ✅ Done → US-DOC-007 |

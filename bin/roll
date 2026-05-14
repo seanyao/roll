@@ -2313,6 +2313,9 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
     echo "[loop] cycle \${CYCLE_ID}: claude failed (exit \$_exit); worktree preserved at \$WT"
   fi
 fi
+
+# US-AUTO-040: fallback GC — delete remote loop/cycle-* branches already merged to main.
+_loop_cleanup_stale_cycle_branches "${project_path}" || true
 INNER
   chmod +x "$inner_path"
 
@@ -3833,6 +3836,28 @@ _claude_cleanup_stale_worktrees() {
     fi
   done
   git -C "$project_path" worktree prune 2>/dev/null || true
+  return 0
+}
+
+_loop_cleanup_stale_cycle_branches() {
+  local project_path="${1:-.}"
+  local url; url=$(git -C "$project_path" remote get-url origin 2>/dev/null) || return 0
+  [[ "$url" == *github.com* ]] || return 0
+
+  local branches
+  branches=$(git -C "$project_path" ls-remote --heads origin 'refs/heads/loop/cycle-*' 2>/dev/null \
+    | awk '{print $2}' | sed 's|^refs/heads/||')
+  [ -z "$branches" ] && return 0
+
+  while IFS= read -r branch; do
+    [ -z "$branch" ] && continue
+    if ! git -C "$project_path" merge-base --is-ancestor "$branch" origin/main 2>/dev/null; then
+      continue
+    fi
+    if git -C "$project_path" push origin --delete "$branch" 2>/dev/null; then
+      echo "[loop] deleted stale cycle branch: $branch"
+    fi
+  done <<< "$branches"
   return 0
 }
 

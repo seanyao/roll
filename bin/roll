@@ -1777,6 +1777,16 @@ cmd_peer() {
   echo ""
   info "Log: $log_file"
 
+  local _should_kill=true
+  case "$resolution" in
+    REFINE|OBJECT) [[ "$round" -lt 3 ]] && _should_kill=false ;;
+  esac
+  if [[ "$_should_kill" == "true" ]] && [[ -n "$peer_session" ]] \
+     && command -v tmux >/dev/null 2>&1 \
+     && tmux has-session -t "$peer_session" 2>/dev/null; then
+    tmux kill-session -t "$peer_session" 2>/dev/null || true
+  fi
+
   case "$resolution" in
     AGREE) exit 0 ;;
     REFINE|OBJECT) exit 2 ;;

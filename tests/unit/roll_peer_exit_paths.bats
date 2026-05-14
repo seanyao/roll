@@ -11,10 +11,13 @@ setup() {
   _PEER_STATE_DIR="$HOME/.shared/roll/peer"
 
   # Stub tmux so cmd_peer's tmux session creation succeeds without side effects.
+  TMUX_KILL_LOG="$TEST_TMP/tmux_kill.log"
+  : > "$TMUX_KILL_LOG"
   tmux() {
     case "${1:-}" in
-      has-session) return 1 ;;
+      has-session) return 0 ;;
       list-clients) echo "" ;;
+      kill-session) echo "$*" >> "$TMUX_KILL_LOG"; return 0 ;;
       *) return 0 ;;
     esac
   }
@@ -82,4 +85,48 @@ _run_peer_with_response() {
   [[ "$output" != *"unbound variable"* ]]
   [[ "$output" == *"Max rounds reached"* ]]
   [ "$status" -eq 2 ]
+}
+
+# ─── tmux session cleanup (US-AUTO-039) ──────────────────────────────────────
+
+@test "cmd_peer: AGREE kills tmux session" {
+  : > "$TMUX_KILL_LOG"
+  _run_peer_with_response "**AGREE** with the approach."
+  grep -q "kill-session" "$TMUX_KILL_LOG"
+}
+
+@test "cmd_peer: ESCALATE kills tmux session" {
+  : > "$TMUX_KILL_LOG"
+  _run_peer_with_response "**ESCALATE** this needs human review."
+  grep -q "kill-session" "$TMUX_KILL_LOG"
+}
+
+@test "cmd_peer: UNKNOWN kills tmux session" {
+  : > "$TMUX_KILL_LOG"
+  _run_peer_with_response "No resolution keyword here."
+  grep -q "kill-session" "$TMUX_KILL_LOG"
+}
+
+@test "cmd_peer: REFINE round=3 kills tmux session" {
+  : > "$TMUX_KILL_LOG"
+  printf '**REFINE** still needs work.\n' > "$PEER_RESPONSE_FILE"
+  _peer_call() { cat "$PEER_RESPONSE_FILE"; }
+  export -f _peer_call
+  run cmd_peer --from claude --to kimi --round 3 --yolo
+  grep -q "kill-session" "$TMUX_KILL_LOG"
+}
+
+@test "cmd_peer: REFINE round=1 preserves tmux session" {
+  : > "$TMUX_KILL_LOG"
+  _run_peer_with_response "**REFINE** the error handling needs work."
+  ! grep -q "kill-session" "$TMUX_KILL_LOG"
+}
+
+@test "cmd_peer: OBJECT round=2 preserves tmux session" {
+  : > "$TMUX_KILL_LOG"
+  printf '**OBJECT** to the proposed change.\n' > "$PEER_RESPONSE_FILE"
+  _peer_call() { cat "$PEER_RESPONSE_FILE"; }
+  export -f _peer_call
+  run cmd_peer --from claude --to kimi --round 2 --yolo
+  ! grep -q "kill-session" "$TMUX_KILL_LOG"
 }

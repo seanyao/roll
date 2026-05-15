@@ -150,6 +150,9 @@
 | FIX-031 | loop 同时跑两个 claude 会话互相踩数据 — inner script 加第二道锁（进程号 + 启动时间双校验）| ✅ Done |
 | FIX-032 | loop 选任务时不理会 `depends-on:` 和 `manual-only:` 标签 — 加过滤逻辑，依赖未完成或标记手动的任务直接跳过 | ✅ Done |
 | FIX-033 | dashboard 显示的状态与各子命令不一致（4 处同时出错）— 对齐状态读取逻辑，修 release-ready 判断和 PROPOSAL 计数 | ✅ Done |
+| FIX-034 | `roll loop runs` 始终显示 "No loop runs" — loop 在 worktree 里运行时写入的 project 标识与主目录不一致 | 📋 Todo |
+| FIX-035 | idle cycle 产生的 worktree 永不清理，长期堆积 — loop 无任务时应直接回收隔离目录而非尝试发布 | 📋 Todo |
+| FIX-036 | `cmd_peer` REFINE round=1 时 session 被意外 kill，后续轮次找不到 session — round=1 入口处的 kill 应仅清理已存在的 stale session | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -195,6 +198,7 @@
 | [US-AUTO-038](docs/features/autonomous-evolution.md#us-auto-038) | 清理遗留的 `claude/*` 临时分支 — 每次 claude 会话结束后立即删除，不做定期扫描 `depends-on:US-AUTO-033` | ✅ Done |
 | [US-AUTO-039](docs/features/peer-tmux-cleanup.md#us-auto-039) | Peer 完成后自动清理 tmux session 和终端窗口 — 终态决议杀 session，非终态留给下一轮复用 | ✅ Done |
 | [US-AUTO-040](docs/features/autonomous-evolution.md#us-auto-040) | 统一临时分支 GC — `loop/cycle-*` 兜底清理，回收 PR auto-merge 路径未能删除的已合入分支 `depends-on:US-AUTO-038` | ✅ Done |
+| [US-AUTO-041](docs/features/autonomous-evolution.md#us-auto-041) | loop 自动修复 story 引入的 CI 红 — 不再每次 CI 红都停下等人，loop 先尝试自修，修不好再写 ALERT 通知 | 📋 Todo |
 
 ## Epic: Documentation
 ### Feature: documentation

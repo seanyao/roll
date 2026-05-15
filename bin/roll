@@ -1715,9 +1715,6 @@ cmd_peer() {
   local peer_session=""
   if command -v tmux >/dev/null 2>&1; then
     peer_session="roll-peer-${from_tool}-${to_tool}"
-    if [[ "${round:-1}" -le 1 ]]; then
-      tmux kill-session -t "$peer_session" 2>/dev/null || true
-    fi
     if ! tmux has-session -t "$peer_session" 2>/dev/null; then
       tmux new-session -d -s "$peer_session" -x 200 -y 50
     fi

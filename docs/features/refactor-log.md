@@ -207,3 +207,58 @@ Architectural friction signals flagged during story execution.
 - [x] 新增 `tests/unit/roll_doc_configuration.bats` 锁定文档内容不变量
 
 **Scope**: `docs/guide/en/configuration.md`、`docs/guide/zh/configuration.md`、`docs/guide/{en,zh}/overview.md`、`tests/unit/roll_doc_configuration.bats`
+
+---
+
+## REFACTOR-014 删除三个未调用的初始化辅助函数 ✅
+
+**Flagged**: 2026-05-15 by dream scan
+**Completed**: 2026-05-15
+**Signal**: 死代码 — 三个函数从未被生产代码调用
+
+**Observation**:
+- `_write_gitignore()` (原 L1135) 和 `_write_env_example()` (原 L1149)：init 简化时剩余的残骸，无任何调用点，无测试
+- `detect_project_type()` (原 L1167)：有 8 个单元测试，但无生产调用者；cli-simplification-plan.md 标注为"供 refresh_project 使用"，但 refresh_project 从未实现，过去两次 dream 扫描（05-11、05-12）都选择保留，05-15 正式清除
+
+**Fix**: 从 bin/roll 删除三个函数（83 行）；删除孤儿测试文件 `tests/unit/detect_project_type.bats`（8 个测试）。测试从 778 → 770，全绿。
+
+**Files**: `bin/roll`, `tests/unit/detect_project_type.bats`
+
+---
+
+## REFACTOR-015 删除不可达的 tools/roll-fetch 模块 ✅
+
+**Flagged**: 2026-05-15 by dream scan
+**Completed**: 2026-05-15
+**Signal**: 死代码 — 整个模块随 npm 发布但任何用户路径均无法到达
+
+**Observation**:
+- `tools/roll-fetch/` 包含 `SKILL.md`（`hidden: true`）和 `smart-web-fetch.js`
+- `bin/roll` 只处理 `skills/` 目录，从不查找 `tools/`，所以用户无法通过 `roll` 命令触发
+- `package.json` 的 `files` 数组显式包含 `"tools/"`，导致 3 个文件随 npm 包发布
+- 自身内部也有死代码：`tryLLMNative()` 是占位空壳，`isBlockedOrLowQuality` 参数未使用，`calculateQualityScore` 结果无分支消费
+
+**Fix**: 从 `package.json` 的 `files` 数组移除 `"tools/"`，删除 `tools/roll-fetch/` 目录（756 行）。
+
+**Files**: `package.json`, `tools/roll-fetch/` (deleted)
+
+---
+
+## REFACTOR-016 统一配置读取 — 删除 _config_read_string，_config_read_int 改为薄包装器 ✅
+
+**Flagged**: 2026-05-15 by dream scan
+**Completed**: 2026-05-15
+**Signal**: 配置读取双实现 — sed（config_get）vs awk（_config_read_string），`~` 展开行为不一致
+
+**Observation**:
+- `config_get`（L98）用 sed 解析，展开 `~`，有 5 个调用点（peer settings）
+- `_config_read_string`（旧 L2078）用 awk 解析，不展开 `~`，3 个调用点（均为 `loop_attach_terminal`）
+- `_config_read_int`（旧 L2071）同 awk 实现但加整数验证，14 个调用点
+- 两套解析逻辑并存：改 config 格式时需同时考虑 sed 和 awk 行为
+
+**Fix**: 
+- 3 处 `_config_read_string` 调用替换为 `config_get`，删除函数（loop_attach_terminal 不含路径，~展开无副作用）
+- `_config_read_int` 内部改用 `config_get` 解析，保留整数验证逻辑
+- 现在只有一条 YAML 解析路径：`config_get`
+
+**Files**: `bin/roll`

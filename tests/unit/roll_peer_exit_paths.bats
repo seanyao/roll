@@ -119,7 +119,13 @@ _run_peer_with_response() {
 @test "cmd_peer: REFINE round=1 preserves tmux session" {
   : > "$TMUX_KILL_LOG"
   _run_peer_with_response "**REFINE** the error handling needs work."
-  ! grep -q "kill-session" "$TMUX_KILL_LOG"
+  if grep -q "kill-session" "$TMUX_KILL_LOG"; then
+    echo "# DEBUG: kill-session found in log:" >&2
+    cat "$TMUX_KILL_LOG" >&2
+    echo "# DEBUG: cmd_peer output was:" >&2
+    echo "$output" >&2
+    return 1
+  fi
 }
 
 @test "cmd_peer: OBJECT round=2 preserves tmux session" {
@@ -128,5 +134,11 @@ _run_peer_with_response() {
   _peer_call() { cat "$PEER_RESPONSE_FILE"; }
   export -f _peer_call
   run cmd_peer --from claude --to kimi --round 2 --yolo
-  ! grep -q "kill-session" "$TMUX_KILL_LOG"
+  if grep -q "kill-session" "$TMUX_KILL_LOG"; then
+    echo "# DEBUG: kill-session found in log:" >&2
+    cat "$TMUX_KILL_LOG" >&2
+    echo "# DEBUG: cmd_peer output was:" >&2
+    echo "$output" >&2
+    return 1
+  fi
 }

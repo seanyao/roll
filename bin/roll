@@ -1131,60 +1131,6 @@ _ensure_features_dir() {
   _ROLL_MERGE_SUMMARY+=("created|docs/features/")
 }
 
-# ─── Helper: write starter .gitignore (no-op if exists) ──────────────────────
-_write_gitignore() {
-  [[ -f "$1" ]] && return
-  cat > "$1" << 'EOF'
-node_modules/
-dist/
-build/
-.env
-*.local
-.DS_Store
-*.log
-EOF
-}
-
-# ─── Helper: write starter .env.example (no-op if exists) ────────────────────
-_write_env_example() {
-  [[ -f "$1" ]] && return
-  cat > "$1" << 'EOF'
-# Environment Variables — copy to .env and fill in values
-
-# Application
-# NODE_ENV=development
-# PORT=3000
-
-# Database
-# DATABASE_URL=postgresql://user:pass@localhost:5432/db
-
-# Auth
-# JWT_SECRET=your-secret-key
-EOF
-}
-
-# ─── Helper: detect project type from existing AGENTS.md ─────────────────────
-detect_project_type() {
-  local agents_file="$1/AGENTS.md"
-  [[ -f "$agents_file" ]] || { echo "unknown"; return; }
-
-  local content
-  content="$(cat "$agents_file")"
-
-  if echo "$content" | grep -qi "Fullstack Web"; then
-    echo "fullstack"
-  elif echo "$content" | grep -qi "Backend Service"; then
-    echo "backend-service"
-  elif echo "$content" | grep -qi "Frontend Only"; then
-    echo "frontend-only"
-  elif echo "$content" | grep -qi "CLI Tool"; then
-    echo "cli"
-  else
-    # AGENTS.md exists but has no type marker — fall back to file-based scan
-    scan_project_type_from_files "$1"
-  fi
-}
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: status
 # Show current state of conventions
@@ -1478,7 +1424,7 @@ _peer_auto_attach() {
   [ "$(uname)" = "Darwin" ] || return 0
   [ -f "$_LOOP_MUTE_FILE" ] && return 0
   local terminal_pref
-  terminal_pref=$(_config_read_string "loop_attach_terminal" "")
+  terminal_pref=$(config_get "loop_attach_terminal" "")
   if [[ -z "$terminal_pref" ]]; then
     case "${TERM_PROGRAM:-}" in
       ghostty)   terminal_pref="ghostty" ;;
@@ -2125,15 +2071,8 @@ _project_slug() {
 _config_read_int() {
   local key="$1" default="$2"
   local val
-  val=$(grep "^${key}:" "$ROLL_CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '"' | head -1)
+  val=$(config_get "$key" "")
   if [[ "$val" =~ ^[0-9]+$ ]]; then echo "$val"; else echo "$default"; fi
-}
-
-_config_read_string() {
-  local key="$1" default="$2"
-  local val
-  val=$(grep "^${key}:" "$ROLL_CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '"' | head -1)
-  if [[ -n "$val" ]]; then echo "$val"; else echo "$default"; fi
 }
 
 # Derive a minute in [1,55] from project path hash + offset so different projects
@@ -2449,7 +2388,7 @@ _install_launchd_plists() {
 
   # Terminal preference: config wins, then TERM_PROGRAM env, then "Terminal"
   local terminal_pref
-  terminal_pref=$(_config_read_string "loop_attach_terminal" "")
+  terminal_pref=$(config_get "loop_attach_terminal" "")
   if [[ -z "$terminal_pref" ]]; then
     case "${TERM_PROGRAM:-}" in
       ghostty)    terminal_pref="ghostty" ;;
@@ -2679,7 +2618,7 @@ _loop_test() {
 
   # Detect terminal pref same way _install_launchd_plists does
   local terminal_pref
-  terminal_pref=$(_config_read_string "loop_attach_terminal" "")
+  terminal_pref=$(config_get "loop_attach_terminal" "")
   if [[ -z "$terminal_pref" ]]; then
     case "${TERM_PROGRAM:-}" in
       ghostty)    terminal_pref="ghostty" ;;

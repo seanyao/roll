@@ -2311,6 +2311,8 @@ INNER
 
   cat > "$script_path" << SCRIPT
 #!/bin/bash -l
+# caffeinate: prevent idle sleep from killing claude during cycles
+caffeinate -i -w \$\$ &
 # Active-window check — skipped when ROLL_LOOP_FORCE is set (manual 'roll loop now')
 if [ -z "\$ROLL_LOOP_FORCE" ]; then
   h=\$(printf '%d' "\$(date +%H)")

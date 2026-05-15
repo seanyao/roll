@@ -164,3 +164,9 @@ teardown() {
   # heartbeat file pattern
   grep -qF '.heartbeat-' "$script"
 }
+
+@test "_write_loop_runner_script: outer script starts caffeinate to prevent sleep" {
+  local script="${_tmp}/run-tG.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  grep -qF 'caffeinate' "$script"
+}

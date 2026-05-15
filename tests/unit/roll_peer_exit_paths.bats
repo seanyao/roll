@@ -142,3 +142,33 @@ _run_peer_with_response() {
     return 1
   fi
 }
+
+@test "cmd_peer: REFINE round=2 preserves tmux session" {
+  : > "$TMUX_KILL_LOG"
+  printf '**REFINE** still needs refinement.\n' > "$PEER_RESPONSE_FILE"
+  _peer_call() { cat "$PEER_RESPONSE_FILE"; }
+  export -f _peer_call
+  run cmd_peer --from claude --to kimi --round 2 --yolo
+  if grep -q "kill-session" "$TMUX_KILL_LOG"; then
+    echo "# DEBUG: kill-session found in log:" >&2
+    cat "$TMUX_KILL_LOG" >&2
+    echo "# DEBUG: cmd_peer output was:" >&2
+    echo "$output" >&2
+    return 1
+  fi
+}
+
+# Regression: FIX-036 — entry-level kill must not fire on round=1 when a session
+# already exists (e.g. session preserved from a previous REFINE and then re-invoked).
+@test "cmd_peer: existing session not killed at entry when round=1 starts (FIX-036)" {
+  : > "$TMUX_KILL_LOG"
+  # has-session returns 0 → session already exists (simulates preserved REFINE session)
+  # AGREE response → only the exit-path kill should fire; any kill before _peer_call
+  # would mean the entry kill regressed.
+  # We check the kill count: exactly one kill (at exit for AGREE), not two.
+  _run_peer_with_response "**AGREE** with the approach."
+  local kills
+  kills=$(grep -c "kill-session" "$TMUX_KILL_LOG" || true)
+  # Exactly one kill (exit-path for AGREE) — any additional kill = entry-kill regression
+  [ "$kills" -eq 1 ]
+}

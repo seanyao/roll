@@ -1131,28 +1131,6 @@ _ensure_features_dir() {
   _ROLL_MERGE_SUMMARY+=("created|docs/features/")
 }
 
-# ─── Helper: detect project type from existing AGENTS.md ─────────────────────
-detect_project_type() {
-  local agents_file="$1/AGENTS.md"
-  [[ -f "$agents_file" ]] || { echo "unknown"; return; }
-
-  local content
-  content="$(cat "$agents_file")"
-
-  if echo "$content" | grep -qi "Fullstack Web"; then
-    echo "fullstack"
-  elif echo "$content" | grep -qi "Backend Service"; then
-    echo "backend-service"
-  elif echo "$content" | grep -qi "Frontend Only"; then
-    echo "frontend-only"
-  elif echo "$content" | grep -qi "CLI Tool"; then
-    echo "cli"
-  else
-    # AGENTS.md exists but has no type marker — fall back to file-based scan
-    scan_project_type_from_files "$1"
-  fi
-}
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: status
 # Show current state of conventions

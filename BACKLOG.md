@@ -150,8 +150,9 @@
 | FIX-031 | loop 同时跑两个 claude 会话互相踩数据 — inner script 加第二道锁（进程号 + 启动时间双校验）| ✅ Done |
 | FIX-032 | loop 选任务时不理会 `depends-on:` 和 `manual-only:` 标签 — 加过滤逻辑，依赖未完成或标记手动的任务直接跳过 | ✅ Done |
 | FIX-033 | dashboard 显示的状态与各子命令不一致（4 处同时出错）— 对齐状态读取逻辑，修 release-ready 判断和 PROPOSAL 计数 | ✅ Done |
-| FIX-034 | `roll loop runs` 始终显示 "No loop runs" — loop 在 worktree 里运行时写入的 project 标识与主目录不一致 | 🔨 In Progress |
-| FIX-035 | idle cycle 产生的 worktree 永不清理，长期堆积 — loop 无任务时应直接回收隔离目录而非尝试发布 | 📋 Todo |
+| FIX-034 | `roll loop runs` 始终显示 "No loop runs" — loop 在 worktree 里运行时写入的 project 标识与主目录不一致 | ✅ Done |
+| FIX-035 | idle cycle 产生的 worktree 永不清理，长期堆积 — loop 无任务时应直接回收隔离目录而非尝试发布 | ✅ Done |
+| FIX-036 | `cmd_peer` REFINE round=1 时 session 被意外 kill，后续轮次找不到 session — round=1 入口处的 kill 应仅清理已存在的 stale session | 📋 Todo |
 | FIX-037 | loop 孤儿状态检测与自愈 — cycle 启动时检测 state.yaml 孤儿 running + 清理 stale LOCK，防止循环因中断永久卡死 | 📋 Todo |
 | FIX-038 | heartbeat 机制 — inner script 每 60s 写心跳时间戳，outer script 检测 stale 状态（30min 超时可配），防止 PID 重用误判 | 📋 Todo |
 | FIX-039 | publish 优雅降级 — PR 和 merge-back 都失败时将 orphan 分支 push + tag 到 origin 再清理 worktree，确保代码不丢失 | 📋 Todo |

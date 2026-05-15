@@ -1131,38 +1131,6 @@ _ensure_features_dir() {
   _ROLL_MERGE_SUMMARY+=("created|docs/features/")
 }
 
-# ─── Helper: write starter .gitignore (no-op if exists) ──────────────────────
-_write_gitignore() {
-  [[ -f "$1" ]] && return
-  cat > "$1" << 'EOF'
-node_modules/
-dist/
-build/
-.env
-*.local
-.DS_Store
-*.log
-EOF
-}
-
-# ─── Helper: write starter .env.example (no-op if exists) ────────────────────
-_write_env_example() {
-  [[ -f "$1" ]] && return
-  cat > "$1" << 'EOF'
-# Environment Variables — copy to .env and fill in values
-
-# Application
-# NODE_ENV=development
-# PORT=3000
-
-# Database
-# DATABASE_URL=postgresql://user:pass@localhost:5432/db
-
-# Auth
-# JWT_SECRET=your-secret-key
-EOF
-}
-
 # ─── Helper: detect project type from existing AGENTS.md ─────────────────────
 detect_project_type() {
   local agents_file="$1/AGENTS.md"

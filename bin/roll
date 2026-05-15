@@ -1424,7 +1424,7 @@ _peer_auto_attach() {
   [ "$(uname)" = "Darwin" ] || return 0
   [ -f "$_LOOP_MUTE_FILE" ] && return 0
   local terminal_pref
-  terminal_pref=$(_config_read_string "loop_attach_terminal" "")
+  terminal_pref=$(config_get "loop_attach_terminal" "")
   if [[ -z "$terminal_pref" ]]; then
     case "${TERM_PROGRAM:-}" in
       ghostty)   terminal_pref="ghostty" ;;
@@ -2075,13 +2075,6 @@ _config_read_int() {
   if [[ "$val" =~ ^[0-9]+$ ]]; then echo "$val"; else echo "$default"; fi
 }
 
-_config_read_string() {
-  local key="$1" default="$2"
-  local val
-  val=$(grep "^${key}:" "$ROLL_CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '"' | head -1)
-  if [[ -n "$val" ]]; then echo "$val"; else echo "$default"; fi
-}
-
 # Derive a minute in [1,55] from project path hash + offset so different projects
 # and different services within a project don't fire at the same time.
 # Offsets used: loop=0, dream=2, brief=4 → always three distinct values (2<55).
@@ -2395,7 +2388,7 @@ _install_launchd_plists() {
 
   # Terminal preference: config wins, then TERM_PROGRAM env, then "Terminal"
   local terminal_pref
-  terminal_pref=$(_config_read_string "loop_attach_terminal" "")
+  terminal_pref=$(config_get "loop_attach_terminal" "")
   if [[ -z "$terminal_pref" ]]; then
     case "${TERM_PROGRAM:-}" in
       ghostty)    terminal_pref="ghostty" ;;
@@ -2625,7 +2618,7 @@ _loop_test() {
 
   # Detect terminal pref same way _install_launchd_plists does
   local terminal_pref
-  terminal_pref=$(_config_read_string "loop_attach_terminal" "")
+  terminal_pref=$(config_get "loop_attach_terminal" "")
   if [[ -z "$terminal_pref" ]]; then
     case "${TERM_PROGRAM:-}" in
       ghostty)    terminal_pref="ghostty" ;;

@@ -35,3 +35,18 @@
 **Dependencies:**
 - Depends on: FIX-028 (peer exit paths 不崩溃，清理逻辑 base)
 - Depended on by: (none)
+
+<a id="fix-036"></a>
+## FIX-036 cmd_peer REFINE round=1 session 被意外 kill ✅
+
+**Fixed**: 2026-05-16
+
+**Problem**: `cmd_peer` had an unconditional `tmux kill-session` at round=1 entry (`if [[ "${round:-1}" -le 1 ]]`). When a REFINE-preserved session existed and `roll peer --round 1` was re-invoked (e.g., fresh peer review on the same pair), the entry kill destroyed the live session before the new review started.
+
+**Root Cause**: Entry-level kill was too broad — it killed any session on round=1, regardless of whether the session was actively being reused for a multi-round negotiation.
+
+**Solution**: Removed the unconditional entry-level `kill-session`. The exit-path `_should_kill` logic already handles all cleanup correctly (REFINE/OBJECT round < 3 → preserve; all terminal resolutions → kill). Added regression tests: REFINE round=2 preservation and FIX-036 entry-kill guard.
+
+**Files:**
+- `bin/roll` — removed 3-line entry-level `kill-session` block at `cmd_peer()` entry
+- `tests/unit/roll_peer_exit_paths.bats` — added 3 regression tests (REFINE round=2 preserve, OBJECT round=2 preserve, FIX-036 entry-kill guard)

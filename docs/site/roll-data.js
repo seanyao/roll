@@ -1,0 +1,334 @@
+// English + Chinese content for the Roll site. Sourced from:
+//   docs/guide/en/* and docs/guide/zh/* in the Roll repo.
+
+window.RollData = (function () {
+
+  // ─── EN ──────────────────────────────────────────────────────────────────
+  const EN = {
+    UI: {
+      nav: [
+        { id: "how",      label: "How it works" },
+        { id: "features", label: "Features" },
+        { id: "journey",  label: "Journey" },
+        { id: "guides",   label: "Docs" },
+      ],
+      githubLabel: "GitHub",
+      installCopy: { idle: "copy", done: "copied" },
+      tagsLegend: "Badge legend",
+      badgeLabels: { core: "core", highlight: "highlight", new: "new" },
+      heroCaption: "one cycle, real output",
+      cycleStatus: "loop running · cycle #047",
+      terminalLive: "live",
+      featureGroupsLabel: "Feature groups",
+      footerTag: "Agents, roll out.",
+    },
+    HERO: {
+      version: "v2026.515.1",
+      tagline: "It just works.",
+      sub2: "Write a goal. Ship it autonomously.",
+      sub: "Write a goal in BACKLOG. Roll picks it up hourly, executes it in an isolated worktree, opens a PR, waits for green CI — and ships. You stay on the loop, not in it.",
+      install: "npm install -g @seanyao/roll",
+      ctas: [
+        { label: "Read the guide", href: "#guides", primary: false },
+        { label: "View on GitHub", href: "https://github.com/seanyao/roll", primary: false, external: true },
+      ],
+      meta: ["MIT licensed", "Node 16+", "Works with Claude · Cursor · Codex · Kimi"],
+    },
+    TERMINAL: [
+      { kind: "prompt", text: "roll loop on" },
+      { kind: "ok",     text: "launchd scheduled",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
+      { kind: "ok",     text: "tmux session",       detail: "roll-loop-roll · attach with `roll loop attach`" },
+      { kind: "ok",     text: "active window",      detail: "10:00 – 18:00 · idle outside" },
+      { kind: "blank" },
+      { kind: "stamp",  time: "11:05:02", text: "cycle #047 — picking story" },
+      { kind: "step",   arrow: "story", label: "US-128", text: "PR inbox · GHA bot detection · peer required" },
+      { kind: "step",   arrow: "peer",  label: "claude → kimi", text: "round 1/3 · AGREE" },
+      { kind: "step",   arrow: "build", label: "13 TCR commits", text: "4m 12s · zero-diff reverts: 0" },
+      { kind: "step",   arrow: "ci",    label: "green",  text: "Acceptance Check · 12/12 ✓", ok: true },
+      { kind: "step",   arrow: "pr",    label: "#312",   text: "auto-merged · loop/cycle-047", ok: true },
+      { kind: "blank" },
+      { kind: "stamp",  time: "11:09:18", text: "cycle #047 — done · idle until 12:05", muted: true },
+      { kind: "cursor" },
+    ],
+    WHY: {
+      label: "Why roll",
+      title: "Software has changed. AI now does the coding.",
+      sub: "AI tools can write, test, and ship entire features — not auto-complete a line. Engineers spend more time deciding what to build than typing it. The bottleneck moved.",
+      cards: [
+        { title: "The opportunity", body: "AI can deliver features in hours instead of weeks. Teams move faster, respond to customer needs sooner, and ship more frequently." },
+        { title: "The challenge",   body: "Without a system, AI output is inconsistent. Two engineers using the same AI tool can ship wildly different quality. Roll is the system that fixes that." },
+      ],
+      quote: "Roll gives every AI tool the same work standards, so output quality is consistent — regardless of who's driving.",
+    },
+    HOW: {
+      label: "Three layers",
+      title: "Humans set the goals.\nThe system handles everything in between.",
+      sub: "Roll runs on three autonomous layers with clear boundaries. You sign off on what to ship and when. The rest is automated.",
+      layers: [
+        { glyph: "human", name: "Human", sub: "On the loop, not in it.",
+          body: "You set goals in BACKLOG, review PRs that the system opens, and approve releases. The system never ships to production without human sign-off.",
+          owns: ["BACKLOG", "Release approval", "Architectural calls"] },
+        { glyph: "loop",  name: "Loop",  sub: "Every hour, on the :05.",
+          body: "Picks the top story, executes $roll-build in an isolated worktree, commits in TCR micro-steps, opens a PR, waits for green CI, auto-merges.",
+          owns: ["Story execution", "PR inbox", "Worktree isolation"] },
+        { glyph: "dream", name: "Dream", sub: "Nightly, 03:10.",
+          body: "Scans the codebase for dead code, doc gaps, and architectural drift. Files REFACTOR-NNN entries into BACKLOG for loop to pick up the next morning.",
+          owns: ["Code health scan", "REFACTOR queue", "Doc coverage"] },
+      ],
+      analogy: {
+        label: "The analogy",
+        body: "Like a smart building. You set the temperature; the system handles heating, cooling, and overnight maintenance on its own schedule. You stay in control of the decisions that matter.",
+      },
+    },
+    FEATURES_HEADING: {
+      label: "Features",
+      title: "Everything roll can do, grouped by scenario.",
+      sub: "Sourced from the project's overview guide.",
+    },
+    FEATURE_GROUPS: [
+      { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
+        { name: "roll loop on",        mono: true, desc: "AI picks stories from BACKLOG and executes hourly in an isolated worktree.", badges: ["core"] },
+        { name: "roll loop monitor",   mono: true, desc: "Live dashboard for loop, dream and brief service status, queues and recent runs.", badges: ["core"] },
+        { name: "roll loop attach",    mono: true, desc: "Attach to the live tmux session and watch AI work in real time.", badges: ["highlight"] },
+        { name: "roll loop pause / resume", mono: true, desc: "Hand-code yourself; let the system resume when you're done.", badges: [] },
+      ]},
+      { id: "quality", title: "Quality Gates", blurb: "Four nets, caught while building.", features: [
+        { name: "Peer Review",       desc: "A second AI agent challenges the plan or diff before any risky build. AGREE → REFINE → OBJECT → ESCALATE.", badges: ["core", "highlight"] },
+        { name: "Self-Review",       desc: "Post-commit self-check runs on each micro-commit before the next test runs.", badges: [] },
+        { name: "Acceptance Check",  desc: "ACs verified against the story definition after every build — not just \"it compiles\".", badges: [] },
+        { name: "CI Gate",           desc: "Loop waits for green CI; red CI halts the loop and writes an ALERT entry.", badges: ["core"] },
+        { name: "TCR Discipline",    desc: "No commit without passing tests; zero-diff commits revert automatically.", badges: ["core"] },
+      ]},
+      { id: "dream", title: "Nightly Dream", blurb: "Maintenance, on its own.", features: [
+        { name: "Code Health Scan", desc: "Detects dead code, architectural drift, and over-engineering candidates.", badges: ["highlight"] },
+        { name: "Doc Coverage",     desc: "Flags missing guides, stale docs and undocumented ENV vars across the project.", badges: [] },
+        { name: "REFACTOR Queue",   desc: "Writes REFACTOR-NNN entries to BACKLOG so loop picks them up next morning.", badges: [] },
+      ]},
+      { id: "lifecycle", title: "Story Lifecycle", blurb: "Idea to merged PR, in one flow.", features: [
+        { name: "$roll-idea",   mono: true, desc: "One-liner capture — instant FIX or IDEA backlog entry.", badges: ["core"] },
+        { name: "$roll-design", mono: true, desc: "DDD-backed planning: clarify → design → split into INVEST stories.", badges: ["core"] },
+        { name: "$roll-build",  mono: true, desc: "TCR story execution → worktree → PR → auto-merge.", badges: ["core"] },
+        { name: "$roll-fix",    mono: true, desc: "Fast-path bug fix — same CI gate, lighter ceremony.", badges: [] },
+      ]},
+      { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
+        { name: "roll status",     mono: true, desc: "Project health: backlog queue, loop state, CI, release-ready verdict.", badges: ["core"] },
+        { name: "roll loop runs",  mono: true, desc: "Per-cycle history with outcome, TCR count, and duration.", badges: [] },
+        { name: "roll alert",      mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
+        { name: "roll brief",      mono: true, desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
+      ]},
+      { id: "skills", title: "On-Demand Skills", blurb: "Specialized agents you can summon.", features: [
+        { name: "$roll-debug",    mono: true, desc: "Mount a diagnostic probe, trace root cause, auto-fix if source-traceable.", badges: [] },
+        { name: "$roll-doc",      mono: true, desc: "Scan any project for doc gaps and generate the missing documentation.", badges: [] },
+        { name: "$roll-sentinel", mono: true, desc: "Spot-check production against BACKLOG acceptance criteria on a schedule.", badges: [] },
+        { name: "$roll-doctor",   mono: true, desc: "Diagnose the dev toolchain — node, npm, git, AI CLI installs.", badges: [] },
+      ]},
+      { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
+        { name: "Fallback Routing", desc: "Primary agent down or rate-limited → automatic failover to the configured peer.", badges: ["highlight"] },
+        { name: "roll peer", mono: true, desc: "Structured negotiation: propose → challenge → refine, up to 3 rounds.", badges: ["core"] },
+        { name: "PR Inbox",  desc: "External PRs get AI review before merge; stale PRs auto-rebase onto main.", badges: ["new"] },
+        { name: "roll review-pr", mono: true, desc: "On-demand AI review for any PR, any agent, any git host.", badges: ["new"] },
+      ]},
+    ],
+    JOURNEY: {
+      label: "A feature's journey",
+      title: "Morning to live, before lunch.",
+      sub: "One real cycle: \"users need password reset.\" From idea to monitored production in under two hours.",
+      steps: [
+        { time: "09:00", title: "Idea submitted",       body: "Captured as a one-liner. AI researches, designs, and splits into INVEST stories with acceptance criteria.", tag: "idea" },
+        { time: "09:30", title: "Building begins",      body: "Loop picks the top story. $roll-build executes in an isolated worktree, committing in TCR micro-steps.", tag: "build" },
+        { time: "10:00", title: "Security peer review", body: "Risky build triggers peer. claude → kimi negotiate the plan over up to three rounds. AGREE.", tag: "peer" },
+        { time: "10:30", title: "Verified",             body: "Acceptance Check confirms ACs are met. Screenshots and test output collected as proof of life.", tag: "verify" },
+        { time: "10:45", title: "Live",                 body: "Human approves the PR. Auto-merge to main. Sentinel begins spot-checking production every cycle.", tag: "ship" },
+        { time: "03:00", title: "Nightly scan queues improvements", body: "Dream finds a small refactor opportunity in the new code. Files REFACTOR-013 for tomorrow.", tag: "dream" },
+      ],
+    },
+    NUMBERS: {
+      label: "Roll at a glance",
+      stats: [
+        { value: "20+",  label: "Standardized skills" },
+        { value: "4",    label: "Quality safety nets" },
+        { value: "24/7", label: "Automated monitoring" },
+        { value: "Hrs",  label: "Idea → production" },
+      ],
+    },
+    GUIDES: {
+      label: "Documentation",
+      title: "Read the manual.",
+      sub: "Six guides, one to a concept. Start with Overview if you've never run roll before.",
+      tiles: [
+        { name: "Overview",      path: "docs/guide/en/overview.md",      desc: "Quick start, three-layer model, complete feature list." },
+        { name: "Loop",          path: "docs/guide/en/loop.md",          desc: "Scheduling, subcommands, tmux visibility, PR inbox." },
+        { name: "Dream",         path: "docs/guide/en/dream.md",         desc: "Nightly code health scan and REFACTOR generation." },
+        { name: "Peer",          path: "docs/guide/en/peer.md",          desc: "Cross-agent review protocol — AGREE / REFINE / OBJECT / ESCALATE." },
+        { name: "Skills",        path: "docs/guide/en/skills.md",        desc: "Skill catalog and the decision tree for picking the right one." },
+        { name: "Configuration", path: "docs/guide/en/configuration.md", desc: "Environment variables, active window, capability map." },
+      ],
+    },
+  };
+
+  // ─── ZH ──────────────────────────────────────────────────────────────────
+  const ZH = {
+    UI: {
+      nav: [
+        { id: "how",      label: "工作原理" },
+        { id: "features", label: "功能" },
+        { id: "journey",  label: "一天的故事" },
+        { id: "guides",   label: "文档" },
+      ],
+      githubLabel: "GitHub",
+      installCopy: { idle: "复制", done: "已复制" },
+      tagsLegend: "标签说明",
+      badgeLabels: { core: "核心", highlight: "重点", new: "新增" },
+      heroCaption: "一轮循环 · 真实输出",
+      cycleStatus: "loop 运行中 · 第 #047 轮",
+      terminalLive: "实时",
+      featureGroupsLabel: "功能分组",
+      footerTag: "Agents, roll out.",
+    },
+    HERO: {
+      version: "v2026.515.1",
+      tagline: "It just works.",
+      sub2: "把目标写下来。让它自主交付。",
+      sub: "把目标写进 BACKLOG。Roll 每小时领取一个，在隔离的 worktree 里执行、开 PR、等 CI 绿、自动合入。你掌舵，不掌桨。",
+      install: "npm install -g @seanyao/roll",
+      ctas: [
+        { label: "查看文档", href: "#guides", primary: false },
+        { label: "GitHub",  href: "https://github.com/seanyao/roll", primary: false, external: true },
+      ],
+      meta: ["MIT 协议", "Node 16+", "支持 Claude · Cursor · Codex · Kimi"],
+    },
+    // Terminal stays mostly English — these are real CLI outputs.
+    TERMINAL: [
+      { kind: "prompt", text: "roll loop on" },
+      { kind: "ok",     text: "launchd 已调度",        detail: "loop :05/hr · dream 03:10 · brief 09:00" },
+      { kind: "ok",     text: "tmux 会话就绪",          detail: "roll-loop-roll · roll loop attach 可接入" },
+      { kind: "ok",     text: "活跃窗口",              detail: "10:00 – 18:00 · 窗外静默" },
+      { kind: "blank" },
+      { kind: "stamp",  time: "11:05:02", text: "cycle #047 — 摘取故事" },
+      { kind: "step",   arrow: "story", label: "US-128", text: "PR 收件箱 · GHA 机器人检测 · 需 peer" },
+      { kind: "step",   arrow: "peer",  label: "claude → kimi", text: "第 1/3 轮 · AGREE" },
+      { kind: "step",   arrow: "build", label: "13 次 TCR 提交", text: "4 分 12 秒 · 空 diff 回滚: 0" },
+      { kind: "step",   arrow: "ci",    label: "绿灯",  text: "验收检查 · 12/12 ✓", ok: true },
+      { kind: "step",   arrow: "pr",    label: "#312",  text: "已自动合入 · loop/cycle-047", ok: true },
+      { kind: "blank" },
+      { kind: "stamp",  time: "11:09:18", text: "cycle #047 — 完成 · 静默至 12:05", muted: true },
+      { kind: "cursor" },
+    ],
+    WHY: {
+      label: "为什么是 Roll",
+      title: "软件已经变了。AI 现在自己写代码。",
+      sub: "AI 工具能够写、测、发完整功能,而不只是补全一行。工程师把时间花在「决定做什么」上,而不是敲键盘。瓶颈搬家了。",
+      cards: [
+        { title: "机会", body: "AI 能把功能交付周期从几周压到几小时。团队反应更快、迭代更勤、贴近客户需求。" },
+        { title: "挑战", body: "没有系统约束的话,AI 输出参差不齐。同样的工具,不同的人能跑出完全不同的质量。Roll 就是那套系统。" },
+      ],
+      quote: "Roll 给每一个 AI 工具同样的工作标准,所以无论谁在驾驶,产出质量都一致。",
+    },
+    HOW: {
+      label: "三层架构",
+      title: "人定目标。\n之间的一切交给系统。",
+      sub: "Roll 跑在三个自主层上,边界清晰。「发什么、什么时候发」你拍板,中间过程全自动。",
+      layers: [
+        { glyph: "human", name: "Human", sub: "掌舵,不掌桨。",
+          body: "你在 BACKLOG 写目标、审系统开出的 PR、批准发布。没有人点头之前,任何东西都不会上生产。",
+          owns: ["BACKLOG", "发布批准", "架构决策"] },
+        { glyph: "loop",  name: "Loop",  sub: "每小时的第 5 分钟。",
+          body: "摘取最高优先级故事,在隔离 worktree 里 $roll-build 执行,TCR 微提交,开 PR,等 CI 绿,自动合入。",
+          owns: ["故事执行", "PR 收件箱", "Worktree 隔离"] },
+        { glyph: "dream", name: "Dream", sub: "凌晨 03:10。",
+          body: "扫描代码库,找死代码、文档缺口、架构漂移。将 REFACTOR-NNN 写入 BACKLOG,次日由 loop 领取。",
+          owns: ["代码健康巡检", "REFACTOR 队列", "文档覆盖率"] },
+      ],
+      analogy: {
+        label: "类比",
+        body: "像一栋智能楼宇。你设定温度,系统按自己的节奏调度供暖、制冷、夜间维护。决定权始终在你手里。",
+      },
+    },
+    FEATURES_HEADING: {
+      label: "功能",
+      title: "Roll 能做的一切,按场景分组。",
+      sub: "内容来自项目的 Overview 指南。",
+    },
+    FEATURE_GROUPS: [
+      { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
+        { name: "roll loop on",        mono: true, desc: "AI 从 BACKLOG 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },
+        { name: "roll loop monitor",   mono: true, desc: "实时看板:loop / dream / brief 服务状态、队列、最近执行。", badges: ["core"] },
+        { name: "roll loop attach",    mono: true, desc: "接入实时 tmux 会话,观看 AI 现场工作。", badges: ["highlight"] },
+        { name: "roll loop pause / resume", mono: true, desc: "需要手动改时暂停,改完再让系统接力。", badges: [] },
+      ]},
+      { id: "quality", title: "质量门禁", blurb: "四张网,边做边接。", features: [
+        { name: "Peer 评审",      desc: "第二个 AI agent 在高风险构建前挑战方案或 diff。AGREE → REFINE → OBJECT → ESCALATE。", badges: ["core", "highlight"] },
+        { name: "自检",          desc: "每个微提交之后、下一次测试之前自动跑一遍 post-commit 检查。", badges: [] },
+        { name: "验收检查",       desc: "每次构建结束按故事定义逐条核对 AC——不只是「能编译」。", badges: [] },
+        { name: "CI 门禁",        desc: "Loop 等 CI 绿;红则停循环并写入 ALERT。", badges: ["core"] },
+        { name: "TCR 纪律",       desc: "测试不过不准提交;空 diff 提交自动回滚。", badges: ["core"] },
+      ]},
+      { id: "dream", title: "夜间 Dream", blurb: "维护自己跑。", features: [
+        { name: "代码健康扫描", desc: "识别死代码、架构漂移、过度工程候选项。", badges: ["highlight"] },
+        { name: "文档覆盖率",   desc: "标记缺失指南、过时文档、未记录的 ENV 变量。", badges: [] },
+        { name: "REFACTOR 队列", desc: "把 REFACTOR-NNN 写进 BACKLOG,次日 loop 自己拣。", badges: [] },
+      ]},
+      { id: "lifecycle", title: "故事生命周期", blurb: "从想法到合入,同一条流。", features: [
+        { name: "$roll-idea",   mono: true, desc: "一行捕获——即时生成 FIX 或 IDEA 条目。", badges: ["core"] },
+        { name: "$roll-design", mono: true, desc: "DDD 驱动规划:澄清 → 设计 → 拆成 INVEST 故事。", badges: ["core"] },
+        { name: "$roll-build",  mono: true, desc: "TCR 故事执行 → worktree → PR → 自动合入。", badges: ["core"] },
+        { name: "$roll-fix",    mono: true, desc: "Bug 修复快车道——同样的 CI 门禁,流程更轻。", badges: [] },
+      ]},
+      { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
+        { name: "roll status",     mono: true, desc: "项目健康:backlog 队列、loop 状态、CI、发布就绪判断。", badges: ["core"] },
+        { name: "roll loop runs",  mono: true, desc: "每轮执行记录,含结果、TCR 次数、耗时。", badges: [] },
+        { name: "roll alert",      mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
+        { name: "roll brief",      mono: true, desc: "每日摘要:已发布、进行中、下一优先级。", badges: ["highlight"] },
+      ]},
+      { id: "skills", title: "按需技能", blurb: "可召唤的专项 agent。", features: [
+        { name: "$roll-debug",    mono: true, desc: "挂载诊断探针,追根因,可溯源则直接修。", badges: [] },
+        { name: "$roll-doc",      mono: true, desc: "扫描任意项目的文档缺口,补齐缺失文档。", badges: [] },
+        { name: "$roll-sentinel", mono: true, desc: "按计划对照 BACKLOG 验收标准点检生产环境。", badges: [] },
+        { name: "$roll-doctor",   mono: true, desc: "诊断开发工具链——node、npm、git、AI CLI。", badges: [] },
+      ]},
+      { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
+        { name: "故障转移", desc: "主 agent 宕机或限流 → 自动切换到配置的备用。", badges: ["highlight"] },
+        { name: "roll peer", mono: true, desc: "结构化协商:提案 → 挑战 → 精炼,最多三轮。", badges: ["core"] },
+        { name: "PR 收件箱",  desc: "外部 PR 先经 AI 评审再合入;过时 PR 自动 rebase。", badges: ["new"] },
+        { name: "roll review-pr", mono: true, desc: "对任意 PR 按需发起 AI 评审,任意 agent、任意 git 平台。", badges: ["new"] },
+      ]},
+    ],
+    JOURNEY: {
+      label: "一个功能的旅程",
+      title: "从早上到上线,午饭之前。",
+      sub: "一轮真实循环:「用户需要密码重置」。从想法到生产巡检,不到两小时。",
+      steps: [
+        { time: "09:00", title: "想法提交",          body: "一行捕获。AI 调研、设计、按 INVEST 拆故事,附验收标准。", tag: "idea" },
+        { time: "09:30", title: "开始构建",          body: "Loop 摘取最高优先级故事。$roll-build 在隔离 worktree 里跑,TCR 微提交。", tag: "build" },
+        { time: "10:00", title: "安全 Peer 评审",     body: "高风险构建触发 peer。claude → kimi 至多三轮协商方案。AGREE。", tag: "peer" },
+        { time: "10:30", title: "验证通过",          body: "验收检查确认 AC 全部满足。截图、测试输出作为「活体证据」入档。", tag: "verify" },
+        { time: "10:45", title: "上线",              body: "人审批 PR。自动合入 main。Sentinel 开始每轮点检生产环境。", tag: "ship" },
+        { time: "03:00", title: "夜检排上改进项",      body: "Dream 在新代码里发现一处小重构机会,写入 REFACTOR-013,明天再做。", tag: "dream" },
+      ],
+    },
+    NUMBERS: {
+      label: "Roll 一览",
+      stats: [
+        { value: "20+",  label: "标准化技能" },
+        { value: "4",    label: "质量安全网" },
+        { value: "24/7", label: "自动化监控" },
+        { value: "小时",  label: "想法 → 生产" },
+      ],
+    },
+    GUIDES: {
+      label: "文档",
+      title: "去看说明书。",
+      sub: "六篇指南,一篇一个概念。第一次跑 Roll,从 Overview 开始。",
+      tiles: [
+        { name: "概述",   path: "docs/guide/zh/overview.md",      desc: "快速开始、三层模型、完整功能列表。" },
+        { name: "Loop",  path: "docs/guide/zh/loop.md",          desc: "调度、子命令、tmux 可见性、PR 收件箱。" },
+        { name: "Dream", path: "docs/guide/zh/dream.md",         desc: "夜间代码健康巡检与 REFACTOR 生成。" },
+        { name: "Peer",  path: "docs/guide/zh/peer.md",          desc: "跨 Agent 评审协议 — AGREE / REFINE / OBJECT / ESCALATE。" },
+        { name: "技能",   path: "docs/guide/zh/skills.md",        desc: "技能目录与选用决策树。" },
+        { name: "配置",   path: "docs/guide/zh/configuration.md", desc: "环境变量、活跃窗口、能力路由表。" },
+      ],
+    },
+  };
+
+  return { EN, ZH };
+})();

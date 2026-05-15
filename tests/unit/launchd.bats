@@ -31,6 +31,28 @@ setup() {
   [ "$s1" != "$s2" ]
 }
 
+@test "_project_slug: resolves to main worktree when git-common-dir returns absolute path" {
+  # Simulate a git worktree: git-common-dir returns the main tree's absolute .git path.
+  # The worktree basename (cycleXYZ-roll) differs from the main basename (mainproj-fix034)
+  # so without the fix the slugs would be distinct and the assertion would fail.
+  local fake_main="/tmp/mainproj-fix034"
+  mkdir -p "$fake_main"
+  git() {
+    if [[ "${*}" == *"--git-common-dir"* ]]; then
+      printf '%s/.git\n' "$fake_main"
+      return 0
+    fi
+    command git "$@"
+  }
+  run _project_slug "/some/worktrees/cycleXYZ-roll"
+  rm -rf "$fake_main"
+  [ "$status" -eq 0 ]
+  # with fix: slug is based on main tree basename
+  [[ "$output" == mainproj-fix034-* ]]
+  # without fix it would start with "cycleXYZ-roll-"
+  [[ "$output" != cycleXYZ-* ]]
+}
+
 # ─── _launchd_label ───────────────────────────────────────────────────────────
 
 @test "_launchd_label: format is com.roll.<service>.<slug>" {

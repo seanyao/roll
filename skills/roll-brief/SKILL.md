@@ -167,6 +167,7 @@ A simple heuristic — not a gate, just a signal for the human:
 ```bash
 git add docs/briefs/YYYY-MM-DD-NN.md
 git commit -m "docs: roll-brief YYYY-MM-DD-NN — {触发原因}"
+git push origin main
 ```
 
 - 触发原因来自调用上下文（Feature 完成 / 每日 / 手动 / `--feature` / `--since`），用一句话填入

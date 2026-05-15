@@ -275,6 +275,7 @@ git add BACKLOG.md docs/dream/YYYY-MM-DD.md
 git commit -m "chore: dream scan YYYY-MM-DD — {N} REFACTOR entries"
 # 无发现时：
 git commit -m "chore: dream scan YYYY-MM-DD — no findings"
+git push origin main
 ```
 
 - BACKLOG.md 和 dream 日志必须在**同一个 commit** 里入库，避免出现"REFACTOR 已加但日志找不到"或反过来的撕裂状态

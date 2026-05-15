@@ -2071,7 +2071,7 @@ _project_slug() {
 _config_read_int() {
   local key="$1" default="$2"
   local val
-  val=$(grep "^${key}:" "$ROLL_CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '"' | head -1)
+  val=$(config_get "$key" "")
   if [[ "$val" =~ ^[0-9]+$ ]]; then echo "$val"; else echo "$default"; fi
 }
 

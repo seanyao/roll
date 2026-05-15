@@ -2195,7 +2195,15 @@ if [ -f "\$INNER_LOCK" ]; then
   rm -f "\$INNER_LOCK"
 fi
 printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$INNER_LOCK"
-trap 'rm -f "\$INNER_LOCK"' EXIT
+# FIX-038: background heartbeat writer — outer script uses this as primary liveness signal
+# to detect stale execution without relying on PID reuse heuristics.
+HEARTBEAT_FILE="${HOME}/.shared/roll/loop/.heartbeat-${slug}"
+_heartbeat_writer() {
+  while true; do echo "\$(date -u +%s)" > "\$HEARTBEAT_FILE"; sleep 60; done
+}
+_heartbeat_writer &
+_HEARTBEAT_PID=\$!
+trap 'kill "\${_HEARTBEAT_PID}" 2>/dev/null; rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"' EXIT
 
 # US-AUTO-037: pull in worktree helpers (US-AUTO-036). Sourcing bin/roll is
 # safe — its main() only runs when invoked directly (BASH_SOURCE == \$0).
@@ -2307,18 +2315,38 @@ if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
 # but no LOCK process or tmux session exists, the previous cycle was killed
 # (e.g. SIGKILL / sleep / terminal close). Heal state to idle so the next
 # cycle can proceed normally; write ALERT for transparency.
+# FIX-038: heartbeat is the primary liveness signal (avoids PID reuse race);
+# LOCK pid check is secondary fallback for backward compatibility.
+HEARTBEAT_TIMEOUT="\${ROLL_HEARTBEAT_TIMEOUT:-1800}"
 STATE_FILE="${HOME}/.shared/roll/loop/state.yaml"
 if [ -f "\$STATE_FILE" ]; then
   _state=\$(grep '^status:' "\$STATE_FILE" | awk '{print \$2}' 2>/dev/null || echo "")
   if [ "\$_state" = "running" ]; then
-    _lock_file="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
     _still_active=false
-    if [ -f "\$_lock_file" ]; then
-      _lock_pid=\$(head -1 "\$_lock_file" 2>/dev/null || echo "")
-      [ -n "\$_lock_pid" ] && kill -0 "\$_lock_pid" 2>/dev/null && _still_active=true
+    # FIX-038: heartbeat is primary signal
+    _heartbeat_file="${HOME}/.shared/roll/loop/.heartbeat-${slug}"
+    if [ -f "\$_heartbeat_file" ]; then
+      _hb_ts=\$(cat "\$_heartbeat_file" 2>/dev/null || echo "0")
+      _now=\$(date -u +%s)
+      _hb_age=\$(( _now - _hb_ts ))
+      if [ "\$_hb_age" -lt "\$HEARTBEAT_TIMEOUT" ]; then
+        _still_active=true
+      fi
     fi
-    if [ "\$_still_active" = false ] && ! tmux has-session -t "roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')" 2>/dev/null; then
-      echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-037: orphan state detected (status=running, no active process) — healing to idle" >> "\$LOG"
+    # Fallback: LOCK pid check (for cycles without heartbeat, e.g. pre-FIX-038)
+    if [ "\$_still_active" = false ]; then
+      _lock_file="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
+      if [ -f "\$_lock_file" ]; then
+        _lock_pid=\$(head -1 "\$_lock_file" 2>/dev/null || echo "")
+        [ -n "\$_lock_pid" ] && kill -0 "\$_lock_pid" 2>/dev/null && _still_active=true
+      fi
+    fi
+    # Final: tmux session check
+    if [ "\$_still_active" = false ]; then
+      command -v tmux >/dev/null 2>&1 && tmux has-session -t "roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')" 2>/dev/null && _still_active=true
+    fi
+    if [ "\$_still_active" = false ]; then
+      echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-037: orphan state detected (status=running, heartbeat stale or missing) — healing to idle" >> "\$LOG"
       echo "status: idle" > "\${STATE_FILE}.tmp" && mv "\${STATE_FILE}.tmp" "\$STATE_FILE"
       rm -f "\$_lock_file" 2>/dev/null || true
       _alert_file="\$(dirname "\$0")/ALERT.md"

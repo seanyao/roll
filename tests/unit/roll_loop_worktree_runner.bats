@@ -137,3 +137,30 @@ teardown() {
   # ALERT written on heal
   grep -qF 'ALERT.md' "$script"
 }
+
+@test "_write_loop_runner_script: FIX-038 inner script writes heartbeat every 60s" {
+  local script="${_tmp}/run-tE.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-tE-inner.sh"
+  # Heartbeat background writer present
+  grep -qF 'HEARTBEAT_FILE' "$inner"
+  grep -qF 'sleep 60' "$inner"
+  grep -qF '_heartbeat_writer' "$inner"
+  # Cleans up heartbeat PID on EXIT
+  grep -qF '_HEARTBEAT_PID' "$inner"
+  grep -qF 'HEARTBEAT_FILE' "$inner"
+  grep -qF 'trap' "$inner"
+}
+
+@test "_write_loop_runner_script: FIX-038 outer script checks heartbeat as primary liveness" {
+  local script="${_tmp}/run-tF.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  # Heartbeat timeout configurable via env var
+  grep -qF 'ROLL_HEARTBEAT_TIMEOUT' "$script"
+  # Heartbeat is primary, LOCK pid fallback exists
+  grep -qF 'heartbeat is primary' "$script"
+  # LOCK pid fallback still present
+  grep -qF '_lock_file' "$script"
+  # heartbeat file pattern
+  grep -qF '.heartbeat-' "$script"
+}

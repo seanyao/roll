@@ -1715,6 +1715,9 @@ cmd_peer() {
   local peer_session=""
   if command -v tmux >/dev/null 2>&1; then
     peer_session="roll-peer-${from_tool}-${to_tool}"
+    if [[ "${round:-1}" -le 1 ]]; then
+      tmux kill-session -t "$peer_session" 2>/dev/null || true
+    fi
     if ! tmux has-session -t "$peer_session" 2>/dev/null; then
       tmux new-session -d -s "$peer_session" -x 200 -y 50
     fi
@@ -2370,7 +2373,9 @@ fi
 echo "\$\$" > "\$LOCK"
 trap 'rm -f "\$LOCK"' EXIT
 if command -v tmux >/dev/null 2>&1; then
-  tmux kill-session -t "\$SESSION" 2>/dev/null || true
+  tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^roll-loop-" | while read _s; do
+    tmux kill-session -t "\$_s" 2>/dev/null || true
+  done
   tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
   tmux pipe-pane -t "\$SESSION" "cat >> \"\$LOG\""
   # Auto-attach popup: when not muted, spawn a Terminal window attached to the

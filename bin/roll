@@ -2057,6 +2057,14 @@ _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
 # hash of the full path, ensuring uniqueness across sibling dirs with same name.
 _project_slug() {
   local path="$1"
+  # FIX-034: when inside a git worktree, git-common-dir returns the main tree's
+  # absolute .git path; resolve to the main tree so worktree and main-tree runs
+  # produce the same slug.
+  local _common
+  _common=$(git -C "$path" rev-parse --git-common-dir 2>/dev/null)
+  if [[ -n "$_common" && "$_common" == *"/.git" ]]; then
+    path="${_common%/.git}"
+  fi
   local base; base=$(basename "$path")
   local hash
   if command -v md5 &>/dev/null; then

@@ -123,3 +123,17 @@ teardown() {
   # idle path calls cleanup without publish
   grep -qE 'idle.*no new commits|no new commits.*idle' "$inner"
 }
+
+@test "_write_loop_runner_script: FIX-037 outer script contains orphan state detection" {
+  local script="${_tmp}/run-tD.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  # FIX-037 detection lives in the OUTER script (runner), not the inner
+  grep -qF 'FIX-037: orphan state detection' "$script"
+  # Checks state.yaml status field
+  grep -qF "grep '^status:'" "$script"
+  # Atomic write pattern: echo to .tmp then mv
+  grep -qF '.tmp' "$script"
+  grep -qF '&& mv' "$script"
+  # ALERT written on heal
+  grep -qF 'ALERT.md' "$script"
+}

@@ -2303,6 +2303,30 @@ fi
 # Pause check — 'roll loop pause' creates this marker to suspend scheduling
 PAUSE="\$HOME/.shared/roll/loop/PAUSE-${slug}"
 if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
+# FIX-037: orphan state detection & self-heal — if state.yaml says running
+# but no LOCK process or tmux session exists, the previous cycle was killed
+# (e.g. SIGKILL / sleep / terminal close). Heal state to idle so the next
+# cycle can proceed normally; write ALERT for transparency.
+STATE_FILE="${HOME}/.shared/roll/loop/state.yaml"
+if [ -f "\$STATE_FILE" ]; then
+  _state=\$(grep '^status:' "\$STATE_FILE" | awk '{print \$2}' 2>/dev/null || echo "")
+  if [ "\$_state" = "running" ]; then
+    _lock_file="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
+    _still_active=false
+    if [ -f "\$_lock_file" ]; then
+      _lock_pid=\$(head -1 "\$_lock_file" 2>/dev/null || echo "")
+      [ -n "\$_lock_pid" ] && kill -0 "\$_lock_pid" 2>/dev/null && _still_active=true
+    fi
+    if [ "\$_still_active" = false ] && ! tmux has-session -t "roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')" 2>/dev/null; then
+      echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-037: orphan state detected (status=running, no active process) — healing to idle" >> "\$LOG"
+      echo "status: idle" > "\${STATE_FILE}.tmp" && mv "\${STATE_FILE}.tmp" "\$STATE_FILE"
+      rm -f "\$_lock_file" 2>/dev/null || true
+      _alert_file="\$(dirname "\$0")/ALERT.md"
+      echo "\$(date '+%Y-%m-%dT%H:%M:%S%z') | FIX-037 auto-heal | Orphan state detected and cleared (status=running → idle)" >> "\$_alert_file" 2>/dev/null || true
+      echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-037: healed to idle, ALERT written" >> "\$LOG"
+    fi
+  fi
+fi
 LOCK="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
 SESSION="roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')"
 INNER_SCRIPT="${inner_path}"

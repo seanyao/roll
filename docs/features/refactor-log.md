@@ -223,3 +223,21 @@ Architectural friction signals flagged during story execution.
 **Fix**: 从 bin/roll 删除三个函数（83 行）；删除孤儿测试文件 `tests/unit/detect_project_type.bats`（8 个测试）。测试从 778 → 770，全绿。
 
 **Files**: `bin/roll`, `tests/unit/detect_project_type.bats`
+
+---
+
+## REFACTOR-015 删除不可达的 tools/roll-fetch 模块 ✅
+
+**Flagged**: 2026-05-15 by dream scan
+**Completed**: 2026-05-15
+**Signal**: 死代码 — 整个模块随 npm 发布但任何用户路径均无法到达
+
+**Observation**:
+- `tools/roll-fetch/` 包含 `SKILL.md`（`hidden: true`）和 `smart-web-fetch.js`
+- `bin/roll` 只处理 `skills/` 目录，从不查找 `tools/`，所以用户无法通过 `roll` 命令触发
+- `package.json` 的 `files` 数组显式包含 `"tools/"`，导致 3 个文件随 npm 包发布
+- 自身内部也有死代码：`tryLLMNative()` 是占位空壳，`isBlockedOrLowQuality` 参数未使用，`calculateQualityScore` 结果无分支消费
+
+**Fix**: 从 `package.json` 的 `files` 数组移除 `"tools/"`，删除 `tools/roll-fetch/` 目录（756 行）。
+
+**Files**: `package.json`, `tools/roll-fetch/` (deleted)

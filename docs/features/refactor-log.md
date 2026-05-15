@@ -207,3 +207,19 @@ Architectural friction signals flagged during story execution.
 - [x] 新增 `tests/unit/roll_doc_configuration.bats` 锁定文档内容不变量
 
 **Scope**: `docs/guide/en/configuration.md`、`docs/guide/zh/configuration.md`、`docs/guide/{en,zh}/overview.md`、`tests/unit/roll_doc_configuration.bats`
+
+---
+
+## REFACTOR-014 删除三个未调用的初始化辅助函数 ✅
+
+**Flagged**: 2026-05-15 by dream scan
+**Completed**: 2026-05-15
+**Signal**: 死代码 — 三个函数从未被生产代码调用
+
+**Observation**:
+- `_write_gitignore()` (原 L1135) 和 `_write_env_example()` (原 L1149)：init 简化时剩余的残骸，无任何调用点，无测试
+- `detect_project_type()` (原 L1167)：有 8 个单元测试，但无生产调用者；cli-simplification-plan.md 标注为"供 refresh_project 使用"，但 refresh_project 从未实现，过去两次 dream 扫描（05-11、05-12）都选择保留，05-15 正式清除
+
+**Fix**: 从 bin/roll 删除三个函数（83 行）；删除孤儿测试文件 `tests/unit/detect_project_type.bats`（8 个测试）。测试从 778 → 770，全绿。
+
+**Files**: `bin/roll`, `tests/unit/detect_project_type.bats`

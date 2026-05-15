@@ -230,7 +230,7 @@
 | REFACTOR-011 | session 清理只删远端分支，本地 worktree 未 `git worktree remove` — `.claude/worktrees/` 长期积累，`git worktree list` 越来越嘈杂 — flagged by dream 2026-05-14 | ✅ Done |
 | REFACTOR-012 | `scripts/release.sh` 中 `_detect_agent()` 与 `bin/roll config_get()` 双维护 config 读取逻辑 — config schema 变更时两处静默漂移 — flagged by dream 2026-05-14 | ✅ Done |
 | REFACTOR-013 | docs: `$ROLL_CONFIG` / `$ROLL_GLOBAL` 在 bin/roll 中分别引用 18 / 9 次，docs/ 中无任何提及 — 用户无法发现这两个配置入口 — flagged by dream 2026-05-14 (hint: $roll-doc) | ✅ Done |
-| REFACTOR-014 | 初始化辅助函数中有三个从未被调用，积累为死代码增加维护噪音 — flagged by dream 2026-05-15 | 🔨 In Progress |
+| REFACTOR-014 | 初始化辅助函数中有三个从未被调用，积累为死代码增加维护噪音 — flagged by dream 2026-05-15 | ✅ Done |
 | REFACTOR-015 | 一个工具模块随 npm 发布但整条链路不可达，用户无法调用，增加包体积和维护混淆 — flagged by dream 2026-05-15 | 📋 Todo |
 | REFACTOR-016 | 配置值读取存在两套功能重复但行为不一致的实现，改一处容易遗漏另一处导致行为分叉 — flagged by dream 2026-05-15 | 📋 Todo |
 | REFACTOR-017 | agent 命令分发逻辑在 6 处以 case 块形式重复，新增 agent 时需同步全部副本否则运行时失败 — flagged by dream 2026-05-15 | 📋 Todo |

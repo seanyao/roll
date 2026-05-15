@@ -113,3 +113,13 @@ teardown() {
   # Regression guard: retry logic survives the worktree wrap
   grep -qF 'for _attempt in 1 2 3' "$inner"
 }
+
+@test "_write_loop_runner_script: idle cycle skips publish and cleans worktree directly" {
+  local script="${_tmp}/run-tC.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-tC-inner.sh"
+  # FIX-035: idle check counts commits ahead of origin/main
+  grep -qE 'git log origin/main\.\.HEAD' "$inner"
+  # idle path calls cleanup without publish
+  grep -qE 'idle.*no new commits|no new commits.*idle' "$inner"
+}

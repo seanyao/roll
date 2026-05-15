@@ -2253,26 +2253,34 @@ _claude_cleanup_stale_worktrees "${project_path}" || true
 # When \`gh\` is unavailable, fall back to the legacy ff-merge path.
 if [ "\$_USE_WORKTREE" = "1" ]; then
   if [ "\$_exit" -eq 0 ]; then
-    if ( cd "\$WT" && _loop_is_doc_only_change ); then
-      ( cd "\$WT" && _loop_publish_doc_pr "\$BRANCH" "doc: loop cycle \${CYCLE_ID}" )
-    else
-      ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" )
-    fi
-    _publish_status=\$?
-    if [ "\$_publish_status" -eq 0 ]; then
+    # FIX-035: idle cycle — no commits ahead of origin/main means nothing was
+    # built; skip publish and reclaim the worktree immediately.
+    _cycle_commits=\$(cd "\$WT" && git log origin/main..HEAD --oneline 2>/dev/null | wc -l | tr -d ' ')
+    if [ "\$_cycle_commits" -eq 0 ]; then
       _worktree_cleanup "\$WT" "\$BRANCH"
-      echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
-    elif [ "\$_publish_status" -eq 2 ]; then
-      if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
-        _worktree_cleanup "\$WT" "\$BRANCH"
-        echo "[loop] cycle \${CYCLE_ID}: gh unavailable; merged via ff and cleaned up"
-      else
-        _worktree_alert "cycle \${CYCLE_ID}: gh unavailable AND merge_back failed; worktree preserved at \$WT"
-        echo "[loop] cycle \${CYCLE_ID}: gh+merge_back both failed; worktree preserved at \$WT"
-      fi
+      echo "[loop] cycle \${CYCLE_ID}: idle (no new commits); worktree cleaned"
     else
-      _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
-      echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
+      if ( cd "\$WT" && _loop_is_doc_only_change ); then
+        ( cd "\$WT" && _loop_publish_doc_pr "\$BRANCH" "doc: loop cycle \${CYCLE_ID}" )
+      else
+        ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" )
+      fi
+      _publish_status=\$?
+      if [ "\$_publish_status" -eq 0 ]; then
+        _worktree_cleanup "\$WT" "\$BRANCH"
+        echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
+      elif [ "\$_publish_status" -eq 2 ]; then
+        if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
+          _worktree_cleanup "\$WT" "\$BRANCH"
+          echo "[loop] cycle \${CYCLE_ID}: gh unavailable; merged via ff and cleaned up"
+        else
+          _worktree_alert "cycle \${CYCLE_ID}: gh unavailable AND merge_back failed; worktree preserved at \$WT"
+          echo "[loop] cycle \${CYCLE_ID}: gh+merge_back both failed; worktree preserved at \$WT"
+        fi
+      else
+        _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
+        echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
+      fi
     fi
   else
     _worktree_alert "cycle \${CYCLE_ID}: claude exited \$_exit; worktree preserved at \$WT (branch \$BRANCH)"

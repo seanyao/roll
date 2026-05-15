@@ -1,0 +1,19 @@
+Generating release notes via claude...
+### 自动化流水线
+
+- Loop 的 PR inbox 终于从"看看"变成"做事" — eligible PR 自动触发 AI 评审，stale 自动 rebase，fork 和冲突写 ALERT；bot 已评审的 PR 不会被重复打扰 `[loop]`
+- 晨报和夜检生成后自动推送，你不需要手动补 commit `[loop]`
+- 已合入 main 的 `loop/cycle-*` 分支自动清理，远程不再堆僵尸 `[loop]`
+- 可选：PR 一开就触发 AI 评审的 GitHub Actions 模板，不装也行，loop 每轮兜底 `[pr]`
+
+### 新功能
+
+- `roll review-pr <number>` — 任意 agent（Claude / Kimi / DeepSeek 等）都能评审任意平台的 PR；PR body 加 `[skip-ai-review]` 可跳过 `[pr]`
+
+### 稳定性
+
+- `roll peer` 协商结束后 tmux session 不再残留 `[peer]`
+
+### 文档
+
+- 双语 FAQ 上线 — 10 个自治交付常见场景，loop 卡住、PR 冲突、agent 切换都有解答 `[docs]`

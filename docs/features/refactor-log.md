@@ -241,3 +241,24 @@ Architectural friction signals flagged during story execution.
 **Fix**: 从 `package.json` 的 `files` 数组移除 `"tools/"`，删除 `tools/roll-fetch/` 目录（756 行）。
 
 **Files**: `package.json`, `tools/roll-fetch/` (deleted)
+
+---
+
+## REFACTOR-016 统一配置读取 — 删除 _config_read_string，_config_read_int 改为薄包装器 ✅
+
+**Flagged**: 2026-05-15 by dream scan
+**Completed**: 2026-05-15
+**Signal**: 配置读取双实现 — sed（config_get）vs awk（_config_read_string），`~` 展开行为不一致
+
+**Observation**:
+- `config_get`（L98）用 sed 解析，展开 `~`，有 5 个调用点（peer settings）
+- `_config_read_string`（旧 L2078）用 awk 解析，不展开 `~`，3 个调用点（均为 `loop_attach_terminal`）
+- `_config_read_int`（旧 L2071）同 awk 实现但加整数验证，14 个调用点
+- 两套解析逻辑并存：改 config 格式时需同时考虑 sed 和 awk 行为
+
+**Fix**: 
+- 3 处 `_config_read_string` 调用替换为 `config_get`，删除函数（loop_attach_terminal 不含路径，~展开无副作用）
+- `_config_read_int` 内部改用 `config_get` 解析，保留整数验证逻辑
+- 现在只有一条 YAML 解析路径：`config_get`
+
+**Files**: `bin/roll`

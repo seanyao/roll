@@ -2261,9 +2261,9 @@ _claude_cleanup_stale_worktrees "${project_path}" || true
 # When \`gh\` is unavailable, fall back to the legacy ff-merge path.
 if [ "\$_USE_WORKTREE" = "1" ]; then
   if [ "\$_exit" -eq 0 ]; then
-    # FIX-035: idle cycle — no commits ahead of origin/main means nothing was
-    # built; skip publish and reclaim the worktree immediately.
-    _cycle_commits=\$(cd "\$WT" && git log origin/main..HEAD --oneline 2>/dev/null | wc -l | tr -d ' ')
+    # Idle cycle — no commits ahead of origin/main means nothing was built;
+    # skip publish and reclaim the worktree immediately.
+    _cycle_commits=\$(cd "\$WT" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
     if [ "\$_cycle_commits" -eq 0 ]; then
       _worktree_cleanup "\$WT" "\$BRANCH"
       echo "[loop] cycle \${CYCLE_ID}: idle (no new commits); worktree cleaned"

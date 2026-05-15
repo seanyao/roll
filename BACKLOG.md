@@ -156,6 +156,7 @@
 | FIX-038 | heartbeat 机制 — inner script 每 60s 写心跳时间戳，outer script 检测 stale 状态（30min 超时可配），防止 PID 重用误判 | ✅ Done |
 | FIX-039 | publish 优雅降级 — PR 和 merge-back 都失败时将 orphan 分支 push + tag 到 origin 再清理 worktree，确保代码不丢失 | 📋 Todo |
 | FIX-040 | orphan worktree 恢复扫描 — cycle 启动时扫描孤立 worktree，按时序依次 recover 并 publish，清理已恢复的 worktree | 📋 Todo |
+| FIX-036 | `cmd_peer` REFINE round=1 时 session 被意外 kill，后续轮次找不到 session — round=1 入口处的 kill 应仅清理已存在的 stale session | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

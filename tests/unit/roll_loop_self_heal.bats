@@ -59,6 +59,17 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "_loop_reset: clears the heal directory" {
+  mkdir -p "$ROLL_LOOP_DIR/heal"
+  echo 1 > "$ROLL_LOOP_DIR/heal/US-AUTO-999.count"
+  echo 2 > "$ROLL_LOOP_DIR/heal/US-AUTO-888.count"
+  # _loop_reset reads $_LOOP_STATE (file-only check); set to nonexistent path
+  export _LOOP_STATE="${TEST_TMP}/nonexistent_state"
+  run _loop_reset
+  [ "$status" -eq 0 ]
+  [ ! -d "$ROLL_LOOP_DIR/heal" ]
+}
+
 @test "_loop_self_heal_ci: ROLL_LOOP_HEAL_MAX=3 allows third attempt" {
   export ROLL_LOOP_HEAL_MAX=3
   mkdir -p "$ROLL_LOOP_DIR/heal"

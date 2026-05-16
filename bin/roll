@@ -2922,6 +2922,9 @@ _loop_reset() {
   else
     info "No loop state to clear  无 loop 状态可清除"
   fi
+  # US-AUTO-041: clear any in-flight CI self-heal counters
+  local heal_dir="${ROLL_LOOP_DIR:-${HOME}/.shared/roll/loop}/heal"
+  [[ -d "$heal_dir" ]] && rm -rf "$heal_dir"
 }
 
 # Suppress the auto-attach popup. When the marker file exists, runner scripts

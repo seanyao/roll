@@ -2224,6 +2224,35 @@ WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0
 cd "${project_path}" 2>/dev/null || true
+# FIX-040: orphan worktree recovery — scan for worktrees left by previous failed
+# cycles (publish failed or inner script was SIGKILL'd). Attempt to publish each
+# before starting the new cycle. Glob is chronological via timestamp in name.
+for _orphan_wt in "\${_SHARED_ROOT}/worktrees/${slug}-cycle-"*; do
+  [ -d "\$_orphan_wt" ] || continue
+  # Confirm it's a real worktree directory (not glob literal when no matches)
+  [ -d "\${_orphan_wt}/.git" ] || [ -f "\${_orphan_wt}/.git" ] || continue
+  _orphan_branch=\$(cd "\$_orphan_wt" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  [ -z "\$_orphan_branch" ] && continue
+  _orphan_commits=\$(cd "\$_orphan_wt" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+  if [ "\$_orphan_commits" -gt 0 ]; then
+    echo "[loop] FIX-040: recovering orphan worktree \$_orphan_wt (branch \$_orphan_branch, \${_orphan_commits} commits)"
+    _orphan_ok=0
+    if ( cd "\$_orphan_wt" && _loop_is_doc_only_change ); then
+      ( cd "\$_orphan_wt" && _loop_publish_doc_pr "\$_orphan_branch" "doc: recover orphan \${_orphan_branch}" ) && _orphan_ok=1
+    else
+      ( cd "\$_orphan_wt" && _loop_publish_pr "\$_orphan_branch" "recover orphan \${_orphan_branch}" ) && _orphan_ok=1
+    fi
+    if [ "\$_orphan_ok" -eq 1 ]; then
+      _worktree_cleanup "\$_orphan_wt" "\$_orphan_branch"
+      echo "[loop] FIX-040: orphan recovered and cleaned: \$_orphan_branch"
+    else
+      echo "[loop] FIX-040: orphan recovery publish failed for \$_orphan_branch — leaving preserved"
+    fi
+  else
+    echo "[loop] FIX-040: orphan worktree \$_orphan_wt has no commits; cleaning up"
+    _worktree_cleanup "\$_orphan_wt" "\$_orphan_branch"
+  fi
+done
 # US-AUTO-038: snapshot orphan claude/* branches before claude runs so the
 # post-claude cleanup can diff and delete only this session's additions.
 CLAUDE_BRANCH_SNAPSHOT="\$(_claude_remote_snapshot "${project_path}")"
@@ -2286,12 +2315,34 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
           _worktree_cleanup "\$WT" "\$BRANCH"
           echo "[loop] cycle \${CYCLE_ID}: gh unavailable; merged via ff and cleaned up"
         else
-          _worktree_alert "cycle \${CYCLE_ID}: gh unavailable AND merge_back failed; worktree preserved at \$WT"
-          echo "[loop] cycle \${CYCLE_ID}: gh+merge_back both failed; worktree preserved at \$WT"
+          # FIX-039: gh unavailable + merge_back failed — push orphan branch+tag to origin
+          # as final safety net so code is never local-only before worktree cleanup.
+          _orphan_tag="loop-orphan-\${CYCLE_ID}"
+          if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \
+               && git tag "\$_orphan_tag" 2>/dev/null \
+               && git push origin "\$_orphan_tag" 2>/dev/null ); then
+            _worktree_cleanup "\$WT" "\$BRANCH"
+            _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
+            echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
+          else
+            _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back+push all failed; worktree preserved at \$WT"
+            echo "[loop] cycle \${CYCLE_ID}: all publish paths failed; worktree preserved at \$WT"
+          fi
         fi
       else
-        _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
-        echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
+        # FIX-039: PR publish failed — push orphan branch+tag to origin as safety net.
+        # (_loop_publish_pr may have already pushed the branch; git push is idempotent.)
+        _orphan_tag="loop-orphan-\${CYCLE_ID}"
+        if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \
+             && git tag "\$_orphan_tag" 2>/dev/null \
+             && git push origin "\$_orphan_tag" 2>/dev/null ); then
+          _worktree_cleanup "\$WT" "\$BRANCH"
+          _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
+          echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
+        else
+          _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
+          echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
+        fi
       fi
     fi
   else
@@ -2383,7 +2434,7 @@ fi
 echo "\$\$" > "\$LOCK"
 trap 'rm -f "\$LOCK"' EXIT
 if command -v tmux >/dev/null 2>&1; then
-  tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^roll-loop-" | while read _s; do
+  tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^roll-loop-${slug}\$" | while read _s; do
     tmux kill-session -t "\$_s" 2>/dev/null || true
   done
   tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
@@ -2656,14 +2707,40 @@ _loop_off() {
 }
 
 _loop_now() {
+  local project_path; project_path=$(pwd -P)
+  local slug; slug=$(_project_slug "$project_path")
+  # BUG-2 fix: if state=running, verify liveness before bailing — mirrors FIX-037 so
+  # that `roll loop now` can manually recover a stuck loop without waiting for launchd.
   if [[ -f "$_LOOP_STATE" ]] && grep -q "status: running" "$_LOOP_STATE" 2>/dev/null; then
-    warn "Loop already running  loop 正在运行中"; return 0
+    local _alive=false
+    local _hb_file="${_SHARED_ROOT}/loop/.heartbeat-${slug}"
+    if [[ -f "$_hb_file" ]]; then
+      local _ts; _ts=$(cat "$_hb_file" 2>/dev/null || echo "")
+      if [[ "$_ts" =~ ^[0-9]+$ ]]; then
+        local _age=$(( $(date -u +%s) - _ts ))
+        [[ $_age -lt 1800 ]] && _alive=true
+      fi
+    fi
+    if [[ "$_alive" = false ]]; then
+      local _lock="${_SHARED_ROOT}/loop/.LOCK-${slug}"
+      if [[ -f "$_lock" ]]; then
+        local _pid; _pid=$(head -1 "$_lock" 2>/dev/null || echo "")
+        [[ -n "$_pid" ]] && kill -0 "$_pid" 2>/dev/null && _alive=true
+      fi
+    fi
+    if [[ "$_alive" = false ]]; then
+      command -v tmux >/dev/null 2>&1 && tmux has-session -t "roll-loop-${slug}" 2>/dev/null && _alive=true
+    fi
+    if [[ "$_alive" = true ]]; then
+      warn "Loop already running  loop 正在运行中"; return 0
+    fi
+    info "Stale running state detected — healing before new cycle  检测到孤儿状态，正在修复..."
+    printf "status: idle\n" > "$_LOOP_STATE"
+    rm -f "${_SHARED_ROOT}/loop/.LOCK-${slug}" 2>/dev/null || true
   fi
   # Invoke the SAME runner script that launchd would invoke — same tmux,
   # same --verbose, same LOCK, same auto-attach popup. ROLL_LOOP_FORCE
   # bypasses only the active-window check (manual triggers aren't time-gated).
-  local project_path; project_path=$(pwd -P)
-  local slug; slug=$(_project_slug "$project_path")
   local runner="${_SHARED_ROOT}/loop/run-${slug}.sh"
   if [[ ! -f "$runner" ]]; then
     err "Runner script not found: ${runner}"

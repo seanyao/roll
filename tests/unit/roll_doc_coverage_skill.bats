@@ -40,3 +40,21 @@ BRIEF_SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-brief/SKILL.md"
 @test "roll-brief shows guide/zh translation rate" {
   grep -qiE "guide/zh.*translat|ZH.*翻译率|翻译.*ZH|guide/zh" "${BRIEF_SKILL}"
 }
+
+# ─── US-DOC-009: features.md freshness scan ──────────────────────────────────
+
+@test "roll-.dream Scan 5 checks features.md coverage" {
+  grep -qiE "features\.md.*coverage|features\.md.*新鲜度|features\.md.*freshness|Check D|features\.md.*Feature" "${DREAM_SKILL}"
+}
+
+@test "roll-.dream describes matching BACKLOG Feature groups against features.md" {
+  grep -qiE "Feature.*BACKLOG.*features\.md|BACKLOG.*Feature.*features\.md|feature.*group|Feature.*Done.*features\.md" "${DREAM_SKILL}"
+}
+
+@test "roll-.dream REFACTOR entry references features.md when catalog is stale" {
+  grep -qiE "features\.md.*REFACTOR|REFACTOR.*features\.md|features\.md.*功能目录|功能目录.*features\.md" "${DREAM_SKILL}"
+}
+
+@test "roll-.dream dream log doc-coverage section includes features.md line" {
+  grep -qiE "features\.md.*覆盖|覆盖.*features\.md|features\.md.*功能区" "${DREAM_SKILL}"
+}

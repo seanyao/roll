@@ -195,6 +195,13 @@ For each item, **before invoking the executor skill**, mark the story 🔨 In Pr
 
 This commit is what makes the work visible — without it, tcr micro-commits during execution are invisible to `roll-brief`.
 
+选定故事后，调用 `_loop_event` 发出 story 事件，让 monitor 和 attach 能渲染当前进度：
+
+```bash
+# 选定故事后立即 emit（在调用 executor skill 之前）
+_loop_event story "$US_ID" "$story_title" ""
+```
+
 Then invoke the executor:
 
 ```

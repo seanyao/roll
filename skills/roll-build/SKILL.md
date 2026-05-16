@@ -302,6 +302,13 @@ When any signal appears, **do not stop — flag it**:
 
 Then continue implementing the current Story normally.
 
+**Event emission** — after all TCR micro-steps for a Story complete, emit a `build` event so the cycle event stream reflects the work done:
+
+```bash
+# _tcr_count = number of "tcr:" prefix commits made during this Story
+_loop_event build "$US_ID" "${_tcr_count} commits" "" 2>/dev/null || true
+```
+
 ### Phase 5.5: E2E Deposit
 
 After TCR micro-steps pass, deposit an E2E test for this Story's core user flow.

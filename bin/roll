@@ -2724,6 +2724,7 @@ cmd_loop() {
     status)  _loop_status ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
+    events)  _loop_event_log "${1:-20}" ;;
     attach)  _loop_attach ;;
     mute)    _loop_mute ;;
     unmute)  _loop_unmute ;;
@@ -2731,7 +2732,7 @@ cmd_loop() {
     resume)  _loop_resume ;;
     reset)   _loop_reset ;;
     notify)  _notify "${1:-roll}" "${2:-}" ;;
-    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|attach|mute|unmute|pause|resume|reset|notify>"; exit 1 ;;
+    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|pause|resume|reset|notify>"; exit 1 ;;
   esac
 }
 
@@ -4439,9 +4440,55 @@ _loop_monitor() {
       echo -e "    ${YELLOW}(no log yet)${NC}"
     fi
 
+    # Event stream (US-LOOP-001): last 10 events from NDJSON event file
+    local slug; slug=$(_project_slug "$project_path")
+    local evfile="${_SHARED_ROOT}/loop/events-${slug}.ndjson"
+    echo ""
+    echo -e "  ─────────────────────────────────────────────────────"
+    echo -e "  ${BOLD}Cycle Events  事件流${NC}  (last 10)"
+    if [[ -f "$evfile" && -s "$evfile" ]]; then
+      tail -n 10 "$evfile" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    try:
+        e = json.loads(line)
+        stage = e.get('stage','')
+        label = e.get('label','')
+        detail = e.get('detail','')
+        outcome = e.get('outcome','')
+        ts = e.get('ts','')
+        print(f'    {ts}  {stage:<14}  {label:<22}  {detail}  {outcome}')
+    except: pass
+" 2>/dev/null || tail -n 10 "$evfile" | sed 's/^/    /'
+    else
+      echo -e "    ${YELLOW}(no events yet — events are emitted after the first cycle)${NC}"
+    fi
+
     echo ""
     sleep "$interval"
   done
+}
+
+# _loop_event_log: show last N events from the project's NDJSON event file.
+# Used by: roll loop events [N]
+_loop_event_log() {
+  local n="${1:-20}"
+  local project_path; project_path=$(pwd -P)
+  local slug; slug=$(_project_slug "$project_path")
+  local evfile="${_SHARED_ROOT}/loop/events-${slug}.ndjson"
+  if [ ! -f "$evfile" ]; then
+    echo "[monitor] No event log found for project: $slug"
+    return 1
+  fi
+  # Show last N events, formatted
+  tail -n "$n" "$evfile" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    try:
+        e = json.loads(line)
+        print(f\"  {e.get('ts','')}  {e.get('stage',''):12s}  {e.get('label',''):20s}  {e.get('detail','')}  {e.get('outcome','')}\")
+    except: pass
+"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

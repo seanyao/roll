@@ -240,7 +240,7 @@
 | REFACTOR-014 | 初始化辅助函数中有三个从未被调用，积累为死代码增加维护噪音 — flagged by dream 2026-05-15 | ✅ Done |
 | REFACTOR-015 | 一个工具模块随 npm 发布但整条链路不可达，用户无法调用，增加包体积和维护混淆 — flagged by dream 2026-05-15 | ✅ Done |
 | REFACTOR-016 | 配置值读取存在两套功能重复但行为不一致的实现，改一处容易遗漏另一处导致行为分叉 — flagged by dream 2026-05-15 | ✅ Done |
-| REFACTOR-017 | agent 命令分发逻辑在 6 处以 case 块形式重复，新增 agent 时需同步全部副本否则运行时失败 — flagged by dream 2026-05-15 | 📋 Todo |
+| REFACTOR-017 | agent 命令分发逻辑在 6 处以 case 块形式重复，新增 agent 时需同步全部副本否则运行时失败 — flagged by dream 2026-05-15 | ✅ Done |
 | REFACTOR-018 | gh/commit/slug 前置检查在 7 个函数中重复且错误处理方式各异，统一行为需逐个排查 — flagged by dream 2026-05-15 | 📋 Todo |
 | REFACTOR-019 | docs: 7 个已完成 ≥3 story 的功能区缺少用户指南，新用户无法从文档体系了解这些功能 — flagged by dream 2026-05-15 (hint: $roll-doc) | 📋 Todo |
 | REFACTOR-020 | 抽 `_loop_is_active()` — liveness 判断在三处重复（_loop_now / FIX-037 heal / LOCK 守卫），需要可单测 | ✅ Done |

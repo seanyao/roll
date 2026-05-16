@@ -2303,6 +2303,11 @@ for _orphan_wt in "\${_SHARED_ROOT}/worktrees/${slug}-cycle-"*; do
   _orphan_commits=\$(cd "\$_orphan_wt" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
   if [ "\$_orphan_commits" -gt 0 ]; then
     echo "[loop] FIX-040: recovering orphan worktree \$_orphan_wt (branch \$_orphan_branch, \${_orphan_commits} commits)"
+    # FIX-045: rebase onto origin/main before publishing — avoids BEHIND state on GitHub
+    if ! ( cd "\$_orphan_wt" && git fetch origin main 2>/dev/null && git rebase origin/main 2>/dev/null ); then
+      echo "[loop] FIX-045: orphan \$_orphan_branch rebase failed — skipping recovery (conflict or network error)"
+      continue
+    fi
     _orphan_ok=0
     if ( cd "\$_orphan_wt" && _loop_is_doc_only_change ); then
       ( cd "\$_orphan_wt" && _loop_publish_doc_pr "\$_orphan_branch" "doc: recover orphan \${_orphan_branch}" ) && _orphan_ok=1

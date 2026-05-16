@@ -166,6 +166,18 @@ teardown() {
   grep -qF '.heartbeat-' "$script"
 }
 
+@test "_write_loop_runner_script: FIX-045 orphan recovery rebases onto origin/main before publish" {
+  local script="${_tmp}/run-fix045.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-fix045-inner.sh"
+  # Rebase onto origin/main must appear in orphan recovery section
+  grep -qF 'git rebase origin/main' "$inner"
+  # Fetch must precede rebase
+  grep -qF 'git fetch origin main' "$inner"
+  # On rebase failure, recovery is skipped (continue) with a log message
+  grep -qF 'FIX-045' "$inner"
+}
+
 @test "_write_loop_runner_script: outer script starts caffeinate to prevent sleep" {
   local script="${_tmp}/run-tG.sh"
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24

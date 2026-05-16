@@ -3264,6 +3264,9 @@ _gh_repo_slug() {
   printf "%s\n" "$url"
 }
 
+# Returns 0 if gh CLI is installed and executable, 1 otherwise.
+_gh_available() { command -v gh >/dev/null 2>&1; }
+
 # Poll gh run list until current commit's CI completes.
 # Returns 0 on success (or when gh binary missing — graceful skip).
 # Returns 1 on CI failure, timeout, or any gh call failure.

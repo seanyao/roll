@@ -131,20 +131,25 @@ _make_inner() {
 
 # --- ff-only failure path ---
 
-@test "worktree e2e: ff-only failure (main diverged) — worktree preserved, ALERT written" {
+@test "worktree e2e: ff-only failure (main diverged) — FIX-039 pushes orphan branch+tag, worktree cleaned, ALERT written" {
   # Plan: worktree makes commit A on loop/cycle-<id>; meanwhile main+origin
-  # gets a divergent commit B. merge_back's `pull --ff-only origin main`
-  # advances local main to B, then `merge --ff-only loop/cycle-<id>` fails
-  # because B is not on the cycle branch.
+  # gets a divergent commit B. merge_back's ff-only merge fails.
+  # FIX-039 then pushes the orphan branch+tag to origin as safety net and
+  # cleans up the worktree — so code is never local-only.
   local inner; inner=$(_make_inner 'git commit --allow-empty -m "worktree work" && cd '"${_project}"' && git commit --allow-empty -m "divergent main work" && git push -q origin main')
 
   HOME="$TEST_TMP" bash "$inner"
 
-  # Worktree preserved
+  # FIX-039: worktree is cleaned (push to origin succeeded)
   local wt_count; wt_count=$(find "${_SHARED_ROOT}/worktrees" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-  [ "$wt_count" -ge 1 ]
+  [ "$wt_count" -eq 0 ]
 
-  # ALERT written with the right reason
+  # FIX-039: orphan branch is on origin
+  cd "$_project"
+  git fetch origin --quiet
+  git branch -r | grep -qE 'origin/loop/cycle-'
+
+  # ALERT written — merge_back failure recorded (from _worktree_merge_back)
   [ -f "$_LOOP_ALERT" ]
   grep -qE 'merge_back failed|ff-only|merge --ff-only' "$_LOOP_ALERT"
 }

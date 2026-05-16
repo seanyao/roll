@@ -2303,6 +2303,11 @@ for _orphan_wt in "\${_SHARED_ROOT}/worktrees/${slug}-cycle-"*; do
   _orphan_commits=\$(cd "\$_orphan_wt" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
   if [ "\$_orphan_commits" -gt 0 ]; then
     echo "[loop] FIX-040: recovering orphan worktree \$_orphan_wt (branch \$_orphan_branch, \${_orphan_commits} commits)"
+    # FIX-045: rebase onto origin/main before publishing — avoids BEHIND state on GitHub
+    if ! ( cd "\$_orphan_wt" && git fetch origin main 2>/dev/null && git rebase origin/main 2>/dev/null ); then
+      echo "[loop] FIX-045: orphan \$_orphan_branch rebase failed — skipping recovery (conflict or network error)"
+      continue
+    fi
     _orphan_ok=0
     if ( cd "\$_orphan_wt" && _loop_is_doc_only_change ); then
       ( cd "\$_orphan_wt" && _loop_publish_doc_pr "\$_orphan_branch" "doc: recover orphan \${_orphan_branch}" ) && _orphan_ok=1
@@ -2393,13 +2398,21 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       _loop_event idle "\${CYCLE_ID}" "" "" || true
       echo "[loop] cycle \${CYCLE_ID}: idle (no new commits); worktree cleaned"
     else
-      if ( cd "\$WT" && _loop_is_doc_only_change ); then
+      _is_doc_only=0
+      ( cd "\$WT" && _loop_is_doc_only_change ) && _is_doc_only=1
+      if [ "\$_is_doc_only" -eq 1 ]; then
         ( cd "\$WT" && _loop_publish_doc_pr "\$BRANCH" "doc: loop cycle \${CYCLE_ID}" )
       else
         ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" )
       fi
       _publish_status=\$?
       if [ "\$_publish_status" -eq 0 ]; then
+        # FIX-047: CI green ≠ delivered — wait for actual PR merge before cycle complete
+        if [ "\$_is_doc_only" -eq 0 ]; then
+          if ! ( cd "\$WT" && _loop_wait_pr_merge "\$BRANCH" ); then
+            _worktree_alert "cycle \${CYCLE_ID}: FIX-047: PR not merged within timeout — code may not be in main (BRANCH=\${BRANCH})"
+          fi
+        fi
         _worktree_cleanup "\$WT" "\$BRANCH"
         _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true
         echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
@@ -3281,6 +3294,17 @@ _ci_wait() {
     }
 
     if [[ -z "$runs" || "$runs" == "[]" ]]; then
+      # FIX-046: CI only fires on pull_request events — without a PR, runs will never appear.
+      # Check if an open PR exists; if not, skip the gate gracefully.
+      local _branch; _branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+      if [[ -n "$_branch" ]]; then
+        local _pr_json; _pr_json=$(gh -R "$repo_slug" pr list --head "$_branch" --state open --json number 2>/dev/null || echo "1")
+        local _pr_count; _pr_count=$(echo "$_pr_json" | jq 'length' 2>/dev/null || echo "1")
+        if [[ "$_pr_count" == "0" ]]; then
+          warn "No open PR for ${_branch} — CI not triggered; skipping CI gate  当前分支无 PR，CI 未触发，跳过"
+          return 0
+        fi
+      fi
       (( elapsed == 0 )) && echo "  No CI runs found yet, waiting...  尚无 CI 记录，等待触发..."
       sleep "$interval"
       elapsed=$(( elapsed + interval ))
@@ -4251,6 +4275,30 @@ _loop_publish_pr() {
   _loop_event pr "$branch" "$pr_url" "ok" 2>/dev/null || true
   echo "$pr_url"
   return 0
+}
+
+# _loop_wait_pr_merge <branch>
+#   FIX-047: poll GitHub until PR for <branch> is merged (confirms delivery).
+#   Returns 0: merged. Returns 1: CLOSED or timeout.
+#   Gracefully skips (returns 0) when gh is unavailable or slug unparseable.
+#   Timeout: ROLL_PR_MERGE_TIMEOUT (default 600s).
+_loop_wait_pr_merge() {
+  local branch="$1"
+  local timeout="${ROLL_PR_MERGE_TIMEOUT:-600}"
+  local interval=30
+  local elapsed=0
+  command -v gh >/dev/null 2>&1 || return 0
+  local slug; slug=$(_gh_repo_slug 2>/dev/null) || return 0
+  while (( elapsed < timeout )); do
+    local state; state=$(gh -R "$slug" pr view "$branch" --json state -q .state 2>/dev/null || echo "UNKNOWN")
+    case "$state" in
+      MERGED) return 0 ;;
+      CLOSED) return 1 ;;
+    esac
+    sleep "$interval"
+    elapsed=$(( elapsed + interval ))
+  done
+  return 1
 }
 
 # _loop_is_doc_only_change

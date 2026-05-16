@@ -161,9 +161,9 @@
 | FIX-042 | outer runner 的 tmux kill-all 误杀其他项目的 loop session — 匹配模式限定到当前项目 slug | ✅ Done |
 | FIX-043 | `roll loop now` 在 state=running 时直接退出，绕过 FIX-037 heal，手动触发无法自愈孤儿 — bail 之前先做 liveness 检查 | ✅ Done |
 | FIX-044 | loop cycle 完成后未写入 runs.jsonl — Step 5 Run Summary 漏执行，`roll loop runs` 看不到刚跑完的记录 | ✅ Done |
-| FIX-045 | 恢复孤儿分支时不 rebase — 分支从创建起就落后 main，auto-merge 被 GitHub BEHIND 状态卡住 | 📋 Todo |
-| FIX-046 | `roll ci --wait` 在 PR 未创建时死等 — CI 只触发于 PR event，无 PR 则永远等不到 check run | 📋 Todo |
-| FIX-047 | loop 在 PR 合入 main 之前标 Done — CI 绿不代表已交付，分支没合进去代码就丢了 | 📋 Todo |
+| FIX-045 | 恢复孤儿分支时不 rebase — 分支从创建起就落后 main，auto-merge 被 GitHub BEHIND 状态卡住 | ✅ Done |
+| FIX-046 | `roll ci --wait` 在 PR 未创建时死等 — CI 只触发于 PR event，无 PR 则永远等不到 check run | ✅ Done |
+| FIX-047 | loop 在 PR 合入 main 之前标 Done — CI 绿不代表已交付，分支没合进去代码就丢了 | ✅ Done |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -226,7 +226,7 @@
 | [US-DOC-008](docs/features/documentation.md#us-doc-008) | features.md 作为产品视角的 Feature SOT，发版时自动整体同步与项目当前状态保持一致 | ✅ Done |
 | [US-DOC-009](docs/features/documentation.md#us-doc-009) | dream 夜检 features.md 新鲜度 — 检测功能目录是否覆盖近期完成的 story，落后时写 REFACTOR 条目 | ✅ Done |
 | [US-DOC-010](docs/features/documentation.md#us-doc-010) | features.md 结构和完整性校验移出 integration CI，改为只在 release 时检查 — 现在每个 feature PR 都要求 features.md 同步更新，但 features.md 只在发版时才由 release.sh 重写，导致正常 loop PR 也会被 CI 挡住 | ✅ Done |
-| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | 🔨 In Progress |
+| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |

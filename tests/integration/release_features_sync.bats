@@ -59,17 +59,3 @@ teardown() { integration_teardown 2>/dev/null || true; }
   grep -qE "^## 维护说明" "$FEATURES_MD"
 }
 
-@test "bootstrap docs/features.md mentions every BACKLOG ### Feature group" {
-  # Each '### Feature: <name>' in BACKLOG should produce a presence in features.md
-  # (link or plain mention by name). Allow either docs/features/<name>.md link
-  # or plain-text occurrence of the feature name.
-  local missing=0
-  while IFS= read -r feat; do
-    # feat is like "cli-simplification"; check link or plain mention
-    if ! grep -qE "docs/features/${feat}\.md|${feat}" "$FEATURES_MD"; then
-      echo "missing: $feat"
-      missing=$((missing + 1))
-    fi
-  done < <(grep -oE '^### Feature: [a-z0-9-]+' "${BATS_TEST_DIRNAME}/../../BACKLOG.md" | sed 's|^### Feature: ||')
-  [ "$missing" -eq 0 ]
-}

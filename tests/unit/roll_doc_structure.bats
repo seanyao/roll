@@ -31,3 +31,11 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
 @test "e2e: docs/practices/ has loop-autorun-verification.md" {
   [ -f "${DOCS}/practices/loop-autorun-verification.md" ]
 }
+
+# US-DOC-010: features.md catalog completeness vs BACKLOG is a release-time check only.
+# If this assertion is present in integration CI, any loop PR adding a new Feature group
+# will fail CI (features.md is only rewritten at release time by release.sh).
+@test "integration CI does not check features.md catalog completeness against BACKLOG" {
+  local ci_test="${BATS_TEST_DIRNAME}/../integration/release_features_sync.bats"
+  ! grep -qF "mentions every BACKLOG" "$ci_test"
+}

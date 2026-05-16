@@ -294,3 +294,29 @@
 
 **Dependencies:**
 - Depends on: US-DOC-008（dream reads features.md produced by release.sh）
+
+---
+
+<a id="us-doc-010"></a>
+## US-DOC-010 features.md 完整性校验移出 integration CI ✅
+
+**Created**: 2026-05-16
+**Completed**: 2026-05-17
+
+- As a loop contributor
+- I want features.md catalog completeness to only be checked at release time
+- So that regular loop PRs adding new Feature groups don't fail CI before the release rewrite runs
+
+**AC:**
+- [x] `tests/integration/release_features_sync.bats` 中 "mentions every BACKLOG ### Feature group" 测试移除
+- [x] `tests/unit/roll_doc_structure.bats` 新增策略断言：验证 integration CI 不再检查 features.md 对 BACKLOG 的完整性
+- [x] 剩余 7 个 release_features_sync 测试（release.sh 布线 + SKILL.md 结构）仍全部通过
+- [x] features.md 完整性由 `scripts/release.sh` 的 `_run_features_sync_skill` 步骤和 dream Check D 夜检共同保障
+
+**Files:**
+- `tests/integration/release_features_sync.bats` (modified — completeness test removed)
+- `tests/unit/roll_doc_structure.bats` (modified — CI policy assertion added)
+- `docs/features/documentation.md` (this section)
+
+**Dependencies:**
+- Depends on: US-DOC-008（features.md 必须存在才有意义）

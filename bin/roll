@@ -4254,15 +4254,10 @@ _loop_cleanup_stale_cycle_branches() {
 _loop_publish_pr() {
   local branch="$1"
   local title="${2:-loop cycle ${branch#loop/}}"
-  if ! _gh_available; then
-    _worktree_alert "_loop_publish_pr: gh not installed; cannot publish PR for ${branch}"
+  local slug; _gh_resolve slug || {
+    _worktree_alert "_loop_publish_pr: gh not installed or origin is not a github repo; cannot publish PR for ${branch}"
     return 2
-  fi
-  local slug; slug=$(_gh_repo_slug 2>/dev/null) || slug=""
-  if [ -z "$slug" ]; then
-    _worktree_alert "_loop_publish_pr: origin remote is not a github repo; cannot publish PR for ${branch}"
-    return 2
-  fi
+  }
   local _push_err
   _push_err=$(git push origin "$branch" 2>&1) || {
     _worktree_alert "_loop_publish_pr: push origin ${branch} failed: ${_push_err}"
@@ -4329,15 +4324,10 @@ _loop_is_doc_only_change() {
 _loop_publish_doc_pr() {
   local branch="$1"
   local title="${2:-doc update ${branch#loop/}}"
-  if ! _gh_available; then
-    _worktree_alert "_loop_publish_doc_pr: gh not installed; cannot publish PR for ${branch}"
+  local slug; _gh_resolve slug || {
+    _worktree_alert "_loop_publish_doc_pr: gh not installed or origin is not a github repo; cannot publish PR for ${branch}"
     return 2
-  fi
-  local slug; slug=$(_gh_repo_slug 2>/dev/null) || slug=""
-  if [ -z "$slug" ]; then
-    _worktree_alert "_loop_publish_doc_pr: origin remote is not a github repo; cannot publish PR for ${branch}"
-    return 2
-  fi
+  }
   if ! git push origin "$branch" --quiet 2>/dev/null; then
     _worktree_alert "_loop_publish_doc_pr: push origin ${branch} failed"
     return 1

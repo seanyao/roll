@@ -52,6 +52,16 @@
   A well-written BACKLOG description can be used directly as a CHANGELOG entry.
 - **Convention layering**: project-level convention files extend the global SOT — see §9 below.
 - **Done**: Push + CI passes + deployed. Local-only is not done.
+- **Post-push verification** (universal — applies to any push to main, regardless of which
+  skill drove the work):
+  - After every push, wait for the triggered CI run and verify status (`gh run watch`
+    or equivalent). Do not move on, switch tasks, or claim completion until CI is green.
+  - Before pushing any new code commit, verify the **previous** code-changing push's CI
+    is green. Never stack new code commits on top of a red CI (this is the failure
+    mode FIX-026 / `_loop_precheck_ci` exists to prevent for the loop — humans need
+    the same discipline). docs-only commits (matching CI `paths-ignore`) don't reset
+    the gate either way.
+  - If CI is red, the next action is **fix or revert**, not "queue something else".
 - **Commit message format**:
   - Format: `<type>: <description>` (Git Hook may auto-prepend type prefix)
   - Types: `Story N`, `Fix`, `Refactor`, `Docs`, `Chore`

@@ -261,6 +261,17 @@
 |-------|-------------|--------|
 | [US-NOTIFY-001](docs/features/notifications.md#us-notify-001) | macOS 系统通知推送 — loop story 完成 / ALERT 写入时主动触达，与 `roll loop mute` 联动，无 macOS 环境静默降级 | ✅ Done |
 
+### Feature: cycle-event-stream
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-LOOP-001](docs/features/cycle-event-stream.md#us-loop-001) | 看 loop 干活像看 CI pipeline — 每轮自动周期的故事选取、跨 agent 评审、micro-commit 提交、CI 检查、PR 合并都是带颜色的事件流，attach 和 monitor 直接渲染 | 📋 Todo |
+
+## Epic: Marketing & Site
+### Feature: landing-page
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-WEB-001](docs/features/landing-page.md#us-web-001) | 首屏动画讲清"装好就忘了它"的三层自治故事 — 一次开关、47 分钟时间快进、自动 fire 一轮交付，6 秒内 grok 整个产品 `depends-on:US-LOOP-001` | 📋 Todo |
+
 ## 💡 Ideas
 | ID | Description | Status |
 |----|-------------|--------|

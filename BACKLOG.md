@@ -245,6 +245,7 @@
 | REFACTOR-019 | docs: 7 个已完成 ≥3 story 的功能区缺少用户指南，新用户无法从文档体系了解这些功能 — flagged by dream 2026-05-15 (hint: $roll-doc) | 📋 Todo |
 | REFACTOR-020 | 抽 `_loop_is_active()` — liveness 判断在三处重复（_loop_now / FIX-037 heal / LOCK 守卫），需要可单测 | ✅ Done |
 | REFACTOR-021 | release changelog 双管线 — `roll update` 直读 CHANGELOG.md，GitHub release notes 走独立 AI 重写后的 release_notes.txt，两套格式漂移；后者还混入 release.sh 状态 echo（stdout 泄漏入捕获文件）和 prompt 经 argv 截断后的 AI 自述 — flagged by user 2026-05-16 (hint: $roll-release / $roll-.changelog) | 📋 Todo |
+| REFACTOR-022 | 引入 simplify 三轴代码审查（Reuse / Quality / Efficiency）—— `roll-.review` checklist 内联补充三轴维度（每个 TCR 微步骤零成本自检），`roll-build` Phase 7 升级为三 agent 并行重审（每个 US 收尾一次大粒度 diff 审查）— flagged by user 2026-05-17 (hint: $roll-.review / $roll-build) | 📋 Todo |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

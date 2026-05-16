@@ -25,7 +25,8 @@ teardown() {
 }
 
 @test "_loop_self_heal_ci: second call allowed, counter bumped to 2" {
-  echo 1 > "$ROLL_LOOP_DIR/heal/US-AUTO-999.count" || mkdir -p "$ROLL_LOOP_DIR/heal" && echo 1 > "$ROLL_LOOP_DIR/heal/US-AUTO-999.count"
+  mkdir -p "$ROLL_LOOP_DIR/heal"
+  echo 1 > "$ROLL_LOOP_DIR/heal/US-AUTO-999.count"
   run _loop_self_heal_ci US-AUTO-999
   [ "$status" -eq 0 ]
   [ "$(cat "$ROLL_LOOP_DIR/heal/US-AUTO-999.count")" = "2" ]

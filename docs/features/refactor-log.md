@@ -262,3 +262,192 @@ Architectural friction signals flagged during story execution.
 - 现在只有一条 YAML 解析路径：`config_get`
 
 **Files**: `bin/roll`
+
+---
+
+## REFACTOR-022 引入 simplify 三轴代码审查到 roll-.review + roll-build 📋
+
+**Flagged**: 2026-05-17 by user
+**Source**: Claude Code 2.1.143 内置 `/simplify` skill（prompt 原文见文末附录）
+
+**Motivation**: Simplify 是 Claude Code 内置 skill，只有使用 Claude Code 的用户能享受。Roll 是跨 agent 的元工具（Kimi / DeepSeek / Codex / Gemini / Pi 等），把 simplify 的三轴审查能力内化到 roll-* skill 后，**所有 agent 的用户都能在 TCR 流程中受益** —— 不再依赖某家 IDE 的内置功能。这与 roll 既有的跨 agent 定位一致（参见 roll-peer / roll-review-pr）。
+
+**Signal**: 现有 `roll-.review` 六维 checklist（Correctness / Security / Maintainability / Performance / Testability / Scope）覆盖宽但条目偏抽象，缺少可执行的"反模式清单"。Simplify skill 用三个并行 sub-agent 对 diff 做 Reuse / Quality / Efficiency 三轴扫描，每轴都有具体可勾选的反模式（如"参数 sprawl"、"TOCTOU 存在性预检"、"N+1 模式"），适合直接借鉴。
+
+**Observation**:
+- `roll-.review` 每个 TCR 微步骤 commit 前都跑一次 —— 一个 US 可能 10+ 次调用，**承受不了**三 sub-agent 并行的 token 开销
+- `roll-build` Phase 7（Pre-Push Code Review）每个 US 收尾才跑一次 —— 是 simplify 三 agent 并行原本就为之设计的形态（大粒度累积 diff + 多视角并行）
+- 跨微步骤累积才显现的问题（如重复抽象、跨文件 copy-paste、参数 sprawl 蔓延）正是单步 review 抓不到、大粒度重审能抓到的盲区
+
+**Design — 双层嵌入**:
+
+### Layer 1: roll-.review 内联 checklist（每 TCR 步，零额外成本）
+
+在 `skills/roll-.review/SKILL.md` 的 "Review Dimensions" 段增加 simplify 三轴维度（作为 inline checklist，**不**调起 sub-agent）：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Reuse 维度（高优先级）                                  │
+│    □ 新写的函数是否重复了既有 utility / helper          │
+│    □ 内联逻辑（字符串、路径、环境检查）是否有现成工具    │
+│                                                          │
+│  Quality 维度（替换原 Maintainability 的具体化）         │
+│    □ 冗余 state（可派生的缓存值、可直接调用的 observer） │
+│    □ 参数 sprawl（加新参数 vs 重构既有函数）            │
+│    □ 微变体 copy-paste（应抽共享抽象）                   │
+│    □ 抽象漏接（暴露内部细节 / 越过边界）                 │
+│    □ Stringly-typed（用裸串而非常量 / 联合类型）         │
+│    □ JSX 嵌套冗余（包装容器无布局价值）                  │
+│    □ 嵌套条件 ≥3 层（应早返回 / lookup / cascade）       │
+│    □ 无谓注释（解释 WHAT / 描述本次改动 / 引用调用方）   │
+│                                                          │
+│  Efficiency 维度（替换原 Performance 的具体化）          │
+│    □ 重复计算 / 文件读取 / 网络调用 / N+1                │
+│    □ 错失并发（独立操作串行执行）                        │
+│    □ 热路径膨胀（启动 / per-request 加阻塞工作）         │
+│    □ 循环里的无变化 update（缺 change-detection guard）  │
+│    □ TOCTOU 存在性预检（应直接操作 + 错误处理）          │
+│    □ 内存（无界数据结构 / 漏 cleanup / listener 泄漏）   │
+│    □ 操作过宽（读整文件取一段 / 加载全集只为筛一项）     │
+└─────────────────────────────────────────────────────────┘
+```
+
+原 6 维不删，但 Maintainability / Performance 两维下挂这些具体条目；Reuse 作为新增第 7 维。
+
+### Layer 2: roll-build Phase 7 升级（每 US 一次，三 agent 并行）
+
+`skills/roll-build/SKILL.md` 的 Phase 7 当前内容是 `$roll-.review staged`。升级为：
+
+```
+Phase 7: Pre-Push Code Review (Three-Axis Deep Review)
+
+输入: git diff main...HEAD（整个 Story 的累积 diff）
+
+并行调起三个 Agent（subagent_type=general-purpose，每个传入完整 diff）:
+  - Agent 1: Reuse Review     → 找既有 utility 替代
+  - Agent 2: Quality Review   → 8 条反模式扫描
+  - Agent 3: Efficiency Review → 7 条反模式扫描
+
+聚合三方发现 → 修复（false positive 直接 skip，不辩论）→ 汇总修了什么
+
+通过后才进入 Phase 8: Commit & Push
+```
+
+每个 agent 的具体 prompt 直接引用文末附录（保持与 Claude Code 原版同源，便于将来跟随官方更新）。
+
+**AC**:
+- [ ] `skills/roll-.review/SKILL.md` "Review Dimensions" 段扩展为 6+1 维（新增 Reuse），Maintainability / Performance 下挂 simplify 反模式条目
+- [ ] `skills/roll-.review/SKILL.md` 的 Output Format 示例增加一条三轴维度命中
+- [ ] `skills/roll-build/SKILL.md` Phase 7 重写为三 agent 并行重审，diff 范围改为 `main...HEAD`
+- [ ] `skills/roll-build/SKILL.md` Phase 7 与 Phase 3.5（Peer Review Gate）的顺序与职责分工明确（peer 关注架构/方向，三轴关注实现质量）
+- [ ] 新增 `tests/unit/roll_review_dimensions.bats` 或等效用例，覆盖 review 输出中新增维度的条目存在性
+- [ ] CHANGELOG 与 `docs/features/refactor-log.md` 同步更新
+
+**Files**:
+- `skills/roll-.review/SKILL.md`（修改）
+- `skills/roll-build/SKILL.md`（修改 Phase 7）
+- `tests/unit/roll_review_dimensions.bats`（新增 / 测试覆盖）
+- `docs/features/refactor-log.md`（本条目）
+
+**非目标 / 不在本次范围**:
+- 不改 `roll-.dream`（夜检定位是架构漂移与死代码，与 diff-based review 不重叠）
+- 不替换原 6 维，只扩充
+- Phase 7 三 agent 调度失败时不阻塞 push —— 退化为 `roll-.review staged`（保留 fallback）
+
+---
+
+### Appendix: Simplify Skill Prompt 原文
+
+> 来源：Claude Code 2.1.143 内置 `/simplify` skill（从二进制 strings 提取）。落盘存档以防上游变更后无法回溯。
+
+```text
+# Simplify: Code Review and Cleanup
+
+Review all changed files for reuse, quality, and efficiency. Fix any issues found.
+
+## Phase 1: Identify Changes
+
+Run `git diff` (or `git diff HEAD` if there are staged changes) to see what
+changed. If there are no git changes, review the most recently modified files
+that the user mentioned or that you edited earlier in this conversation.
+
+## Phase 2: Launch Three Review Agents in Parallel
+
+Use the Agent tool to launch all three agents concurrently in a single
+message. Pass each agent the full diff so it has the complete context.
+
+### Agent 1: Code Reuse Review
+
+For each change:
+
+1. **Search for existing utilities and helpers** that could replace newly
+   written code. Look for similar patterns elsewhere in the codebase — common
+   locations are utility directories, shared modules, and files adjacent to
+   the changed ones.
+2. **Flag any new function that duplicates existing functionality.** Suggest
+   the existing function to use instead.
+3. **Flag any inline logic that could use an existing utility** — hand-rolled
+   string manipulation, manual path handling, custom environment checks,
+   ad-hoc type guards, and similar patterns are common candidates.
+
+### Agent 2: Code Quality Review
+
+Review the same changes for hacky patterns:
+
+1. **Redundant state**: state that duplicates existing state, cached values
+   that could be derived, observers/effects that could be direct calls
+2. **Parameter sprawl**: adding new parameters to a function instead of
+   generalizing or restructuring existing ones
+3. **Copy-paste with slight variation**: near-duplicate code blocks that
+   should be unified with a shared abstraction
+4. **Leaky abstractions**: exposing internal details that should be
+   encapsulated, or breaking existing abstraction boundaries
+5. **Stringly-typed code**: using raw strings where constants, enums (string
+   unions), or branded types already exist in the codebase
+6. **Unnecessary JSX nesting**: wrapper Boxes/elements that add no layout
+   value — check if inner component props (flexShrink, alignItems, etc.)
+   already provide the needed behavior
+7. **Nested conditionals**: ternary chains (`a ? x : b ? y : ...`), nested
+   if/else, or nested switch 3+ levels deep — flatten with early returns,
+   guard clauses, a lookup table, or an if/else-if cascade
+8. **Unnecessary comments**: comments explaining WHAT the code does
+   (well-named identifiers already do that), narrating the change, or
+   referencing the task/caller — delete; keep only non-obvious WHY (hidden
+   constraints, subtle invariants, workarounds)
+
+### Agent 3: Efficiency Review
+
+Review the same changes for efficiency:
+
+1. **Unnecessary work**: redundant computations, repeated file reads,
+   duplicate network/API calls, N+1 patterns
+2. **Missed concurrency**: independent operations run sequentially when they
+   could run in parallel
+3. **Hot-path bloat**: new blocking work added to startup or
+   per-request/per-render hot paths
+4. **Recurring no-op updates**: state/store updates inside polling loops,
+   intervals, or event handlers that fire unconditionally — add a
+   change-detection guard so downstream consumers aren't notified when
+   nothing changed. Also: if a wrapper function takes an updater/reducer
+   callback, verify it honors same-reference returns (or whatever the "no
+   change" signal is) — otherwise callers' early-return no-ops are silently
+   defeated
+5. **Unnecessary existence checks**: pre-checking file/resource existence
+   before operating (TOCTOU anti-pattern) — operate directly and handle the
+   error
+6. **Memory**: unbounded data structures, missing cleanup, event listener
+   leaks
+7. **Overly broad operations**: reading entire files when only a portion is
+   needed, loading all items when filtering for one
+
+## Phase 3: Fix Issues
+
+Wait for all three agents to complete. Aggregate their findings and fix each
+issue directly. If a finding is a false positive or not worth addressing,
+note it and move on — do not argue with the finding, just skip it.
+
+When done, briefly summarize what was fixed (or confirm the code was already
+clean).
+```
+
+**Slash-arg 行为**：`/simplify <text>` 调用时，`<text>` 作为 `## Additional Focus` 追加到 prompt 末尾，三个 agent 都会拿到 —— roll-build Phase 7 应保留此入口，允许 US 收尾时指定本次审查的侧重点。

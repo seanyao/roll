@@ -37,16 +37,9 @@ _run_changelog_skill() {
   [[ -f "$skill_file" ]] || { echo "Warning: roll-.changelog skill not found, skipping."; return; }
   local agent; agent=$(_project_agent)
   local content; content=$(_skill_content "$skill_file")
-  echo "Syncing CHANGELOG.md via ${agent}..."
-  case "$agent" in
-    claude)   claude -p "$content" ;;
-    kimi)     kimi --quiet -p "$content" ;;
-    deepseek) deepseek "$content" ;;
-    pi)       pi -p "$content" ;;
-    codex)    codex exec "$content" ;;
-    opencode) opencode run "$content" ;;
-    *) echo "Error: Unknown agent '${agent}'. Run: roll agent use <name>"; exit 1 ;;
-  esac
+  echo "Syncing CHANGELOG.md via ${agent}..." >&2
+  _agent_argv "$agent" plain "$content" || { echo "Error: Unknown agent '${agent}'. Run: roll agent use <name>"; exit 1; }
+  "${_AGENT_ARGV[@]}"
 }
 
 _run_release_notes_skill() {
@@ -77,16 +70,9 @@ _run_release_notes_skill() {
 当前版本（v${VERSION}）的 CHANGELOG 条目：
 ${changelog_section}"
 
-  echo "Generating release notes via ${agent}..."
-  case "$agent" in
-    claude)   claude -p "$prompt" ;;
-    kimi)     kimi --quiet -p "$prompt" ;;
-    deepseek) deepseek "$prompt" ;;
-    pi)       pi -p "$prompt" ;;
-    codex)    codex exec "$prompt" ;;
-    opencode) opencode run "$prompt" ;;
-    *) echo "Warning: Unknown agent '${agent}', skipping release notes."; return 1 ;;
-  esac
+  echo "Generating release notes via ${agent}..." >&2
+  _agent_argv "$agent" plain "$prompt" || { echo "Warning: Unknown agent '${agent}', skipping release notes."; return 1; }
+  "${_AGENT_ARGV[@]}"
 }
 
 # Update package.json
@@ -116,18 +102,21 @@ else
     CHANGELOG.md > release_notes.txt || true
 fi
 
-# US-DOC-008: rewrite docs/features.md as product-level SOT.
-# Reads BACKLOG + docs/features/ + current features.md, AI emits the full
-# rewritten file to stdout. Prompt goes via stdin to avoid argv truncation.
+# Rewrites docs/features.md as product-level SOT. Reads BACKLOG +
+# docs/features/ + current features.md, agent emits the full rewritten file
+# to stdout.
 _run_features_sync_skill() {
   local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"
   [[ -f "$skill_file" ]] || return 1
-  local agent; agent=$(_project_agent)
+  local agent="$1"
   local skill_content; skill_content=$(_skill_content "$skill_file")
   local backlog_content; backlog_content=$(<BACKLOG.md)
   local current_features=""
   [[ -f docs/features.md ]] && current_features=$(<docs/features.md)
-  local features_dir_listing; features_dir_listing=$(ls docs/features/ 2>/dev/null | grep -v -- "-plan\.md$\|^refactor-log\.md$")
+  local features_dir_listing
+  features_dir_listing=$(printf '%s\n' docs/features/*.md \
+    | sed 's|^docs/features/||' \
+    | grep -vE '(-plan\.md$|^refactor-log\.md$)' || true)
   local prompt="${skill_content}
 
 ---
@@ -147,42 +136,35 @@ ${features_dir_listing}
 ### 当前 BACKLOG.md：
 ${backlog_content}"
 
-  # NOTE: stdin-fed prompt is REFACTOR-021's scope (covers all three skills
-  # uniformly); for now stay consistent with _run_changelog_skill (argv-based).
-  case "$agent" in
-    claude)   claude -p --output-format text "$prompt" ;;
-    kimi)     kimi --quiet -p "$prompt" ;;
-    deepseek) deepseek "$prompt" ;;
-    pi)       pi -p "$prompt" ;;
-    codex)    codex exec "$prompt" ;;
-    opencode) opencode run "$prompt" ;;
-    *) return 1 ;;
-  esac
+  _agent_argv "$agent" text "$prompt" || return 1
+  "${_AGENT_ARGV[@]}"
 }
 
-echo "Rewriting docs/features.md via $(_project_agent)..." >&2
+_release_agent=$(_project_agent)
+echo "Rewriting docs/features.md via ${_release_agent}..." >&2
 _tmp_features=$(mktemp)
-if _run_features_sync_skill > "$_tmp_features" 2>/dev/null && [ -s "$_tmp_features" ]; then
-  # only stage if content actually changed
+_tmp_features_err=$(mktemp)
+if _run_features_sync_skill "$_release_agent" >"$_tmp_features" 2>"$_tmp_features_err" && [ -s "$_tmp_features" ]; then
   if ! cmp -s docs/features.md "$_tmp_features" 2>/dev/null; then
     mv "$_tmp_features" docs/features.md
     echo "docs/features.md updated." >&2
   else
     rm -f "$_tmp_features"
   fi
+  rm -f "$_tmp_features_err"
 else
   rm -f "$_tmp_features"
   echo "Warning: features sync skipped (skill returned empty)." >&2
+  if [ -s "$_tmp_features_err" ]; then
+    echo "  agent stderr (first 3 lines):" >&2
+    head -3 "$_tmp_features_err" | sed 's/^/    /' >&2
+  fi
+  rm -f "$_tmp_features_err"
 fi
 
-# Commit (include CHANGELOG.md, release_notes.txt, features.md if updated)
-git add package.json bin/roll release_notes.txt
-if [ -n "$(git diff HEAD -- CHANGELOG.md)" ]; then
-  git add CHANGELOG.md
-fi
-if [ -n "$(git diff HEAD -- docs/features.md)" ]; then
-  git add docs/features.md
-fi
+# Stage release artefacts. git add is a no-op for unchanged files, so the
+# two doc paths can be staged unconditionally.
+git add package.json bin/roll release_notes.txt CHANGELOG.md docs/features.md
 git commit -m "[release] ${TAG}"
 git tag "${TAG}"
 git push && git push --tags

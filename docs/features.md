@@ -3,7 +3,7 @@
 > 产品视角的功能索引。Story 是构建单位、Changelog 是发布单位，
 > 这里描述的是 roll 当前**作为产品**所提供的能力。
 >
-> 每次发版时由 `roll-release` 自动重写本文件，使之与 BACKLOG 和
+> 每次发版时由 `scripts/release.sh` 自动重写本文件，使之与 BACKLOG 和
 > `docs/features/` 的真实状态保持一致。
 
 ---

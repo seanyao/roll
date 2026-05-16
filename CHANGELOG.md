@@ -170,7 +170,6 @@ Roll 从「技能编排工具」变成了「自主执行系统」——三个新
 
 ## 2026.05.06
 - **Added**: OpenCode 集成 — 检测 opencode 环境，自动同步全局 AGENTS.md 规则文件
-- **Added**: roll-bipo-onboard 技能 — 新员工入职引导流程技能，含 bats 测试
 - **Improved**: Git 提交归属 — 用 Co-Authored-By trailer 替代 [client] 前缀，更标准的多 AI 工具归属方式
 - **Improved**: AGENTS.md 加入 Scope Gate — 防止技能执行时越界修改不相关文件
 

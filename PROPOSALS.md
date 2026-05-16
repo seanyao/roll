@@ -328,7 +328,7 @@ roll fleet
 #   Roll Fleet  项目总览
 #
 #   ● roll          loop on   7 pending   2 blocked   last brief: 今天 08:00
-#   ● bipo-backend  loop on   3 pending   0 blocked   last brief: 今天 07:58
+#   ● api-server    loop on   3 pending   0 blocked   last brief: 今天 07:58
 #   ○ my-side-proj  loop off  12 pending  —           last brief: 3天前
 #   ⚠ openclaw      loop on   0 pending   —           ALERT: 1 orphan 🔨
 #

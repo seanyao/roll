@@ -2243,6 +2243,13 @@ _write_loop_runner_script() {
   # _install_launchd_plists prepend it). The runner now manages cwd itself
   # — pointing at the worktree when isolation succeeds, project_path otherwise.
   local claude_cmd; claude_cmd="${cmd_verbose#cd \"*\" && }"
+  # FIX-048: Claude Code resolves project root from the worktree's .git file to
+  # the main repo, placing worktree absolute paths outside its sandbox. Inject
+  # --add-dir "$WT" so the worktree directory is explicitly allowed. Only applies
+  # to claude (the --output-format stream-json flag is exclusive to claude runs).
+  if [[ "$claude_cmd" == *"--output-format stream-json"* ]]; then
+    claude_cmd="${claude_cmd/--output-format stream-json/--output-format stream-json --add-dir \"\$WT\"}"
+  fi
   local slug; slug=$(_project_slug "$project_path")
   cat > "$inner_path" << INNER
 #!/bin/bash -l

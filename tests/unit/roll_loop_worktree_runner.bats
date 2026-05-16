@@ -62,14 +62,15 @@ teardown() {
   grep -qE 'cd "\$WT"' "$inner"
 }
 
-@test "_write_loop_runner_script: inner script falls back to main tree when worktree setup fails" {
+@test "_write_loop_runner_script: inner script skips cycle (exit 0) when worktree setup fails" {
   local script="${_tmp}/run-t6.sh"
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
   local inner="${_tmp}/run-t6-inner.sh"
-  # Fallback branch sets WT to project_path so the loop still runs (degraded)
-  grep -qE 'WT="\${project_path|WT=.*\$\{project_path|WT=.*/some/project' "$inner"
-  # And the warning is logged
-  grep -qE 'worktree.*failed|no isolation' "$inner"
+  # P3 fix: no fallback to main tree — cycle is skipped to avoid running without isolation
+  ! grep -qE 'WT="\$\{project_path|WT=.*/some/project' "$inner"
+  # Skips via exit 0 and writes ALERT
+  grep -qE 'exit 0' "$inner"
+  grep -qE 'worktree.*failed|no isolation|skipping cycle' "$inner"
 }
 
 @test "_write_loop_runner_script: inner script calls _worktree_merge_back on claude success" {

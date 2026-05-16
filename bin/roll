@@ -2262,8 +2262,12 @@ if _worktree_fetch_origin main \\
   _worktree_submodule_init "\$WT" 2>/dev/null || true
   echo "[loop] cycle \${CYCLE_ID}: worktree \$WT on \$BRANCH"
 else
-  echo "[loop] cycle \${CYCLE_ID}: worktree setup failed; running in main tree (no isolation)"
-  WT="${project_path}"
+  # P3 fix: skip the cycle entirely when worktree isolation fails.
+  # --dangerously-skip-permissions is only safe paired with worktree isolation;
+  # falling back to the main tree without isolation is unacceptable.
+  _worktree_alert "cycle \${CYCLE_ID}: worktree setup failed — skipping cycle to avoid running without isolation"
+  echo "[loop] cycle \${CYCLE_ID}: worktree setup failed; skipping cycle (no isolation)"
+  exit 0
 fi
 
 FMT="${fmt_script}"

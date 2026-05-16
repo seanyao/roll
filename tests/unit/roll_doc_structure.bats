@@ -5,7 +5,8 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
 
 @test "e2e: docs/ root has no stray .md files outside allowed subdirs" {
   # Allowed subdirs: briefs/ dream/ guide/ domain/ features/ practices/
-  stray=$(find "$DOCS" -maxdepth 1 -name '*.md' 2>/dev/null)
+  # Allowed root files: features.md (US-DOC-008 product Feature SOT).
+  stray=$(find "$DOCS" -maxdepth 1 -name '*.md' ! -name 'features.md' 2>/dev/null)
   [ -z "$stray" ]
 }
 

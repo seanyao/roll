@@ -87,8 +87,9 @@ teardown() { unit_teardown_cd; }
 @test "_peer_call: falls back to inline when no session arg" {
   local body
   body=$(awk '/^_peer_call\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  # Fallback branch still contains the original inline dispatch patterns
-  echo "$body" | grep -qE 'claude -p|kimi --quiet'
+  # The non-tmux else branch must still dispatch the call (post-REFACTOR-017
+  # this goes through _agent_argv, not inline case-blocks).
+  echo "$body" | grep -qE '_agent_argv .* peer'
 }
 
 # ─── cmd_peer session setup ───────────────────────────────────────────────────
@@ -144,9 +145,14 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "e2e: _peer_call falls back gracefully when tmux session absent" {
-  # With an empty/absent session arg, _peer_call should use the inline path
+  # With an empty/absent session arg, _peer_call should use the inline path.
+  # Post-REFACTOR-017 the literal `claude -p --output-format text` lives in
+  # _agent_argv (peer mode); _peer_call invokes it via _agent_argv "$to" peer.
   local body
   body=$(awk '/^_peer_call\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  # The else branch must still contain the original inline claude/kimi dispatch
-  echo "$body" | grep -qF 'claude -p --output-format text'
+  echo "$body" | grep -qE '_agent_argv .* peer'
+  # And the underlying helper must produce the canonical claude peer cmd.
+  local helper
+  helper=$(awk '/^_agent_argv\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$helper" | grep -qF 'claude -p --output-format text'
 }

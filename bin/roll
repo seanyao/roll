@@ -2049,9 +2049,9 @@ cmd_agent() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _LOOP_TAG="# roll-loop"
-_SHARED_ROOT="${HOME}/.shared/roll"
-_LOOP_STATE="${HOME}/.shared/roll/loop/state.yaml"
-_LOOP_ALERT="${HOME}/.shared/roll/loop/ALERT.md"
+: "${_SHARED_ROOT:=${HOME}/.shared/roll}"
+: "${_LOOP_STATE:=${_SHARED_ROOT}/loop/state.yaml}"
+: "${_LOOP_ALERT:=${_SHARED_ROOT}/loop/ALERT.md}"
 _LOOP_RUNS="${HOME}/.shared/roll/loop/runs.jsonl"
 _LOOP_MUTE_FILE="${HOME}/.shared/roll/mute"
 _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"

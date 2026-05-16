@@ -291,3 +291,5 @@
 | IDEA-015 | loop 在独立目录（worktree）里跑，避免污染主干正在编辑的代码 — 拆为 US-AUTO-036 + US-AUTO-037 落地 | ✅ Done → US-AUTO-036, US-AUTO-037 |
 | IDEA-016 | PR 生命周期管理迁移到 GitHub Actions — 评审触发、CI 绿后 auto-merge、rebase 失败诊断、stale 清理全部由 GitHub Actions event-driven 处理；Loop 只检查自己开的未收口故事。需先验证 US-AUTO-034 落地效果再做设计。 | ✅ Done → US-GHA-002 |
 | IDEA-017 | FAQ 文档 — 面向产品工程师用户，覆盖全 AI 自治开发场景下的常见问题：典型场景、解决方案与简明原理解释（loop 卡住、agent 切换、PR 冲突、多项目并行、权限问题等） | ✅ Done → US-DOC-007 |
+| IDEA-018 | cycle 事件粒度简化 — 现在的 cycle 事件流划得太细，"规划中"和"正常"两个状态就够用，"进行中"的子事件没必要 — flagged by user 2026-05-17 | 📋 Todo |
+| IDEA-019 | launchd 默认 loop_minute 测试 flaky — hash mod 55 容易碰撞，相邻两个项目偶尔会拿到同一分钟 — flagged by simplify CI debugging 2026-05-17 | 📋 Todo |

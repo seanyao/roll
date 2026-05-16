@@ -1493,45 +1493,20 @@ _peer_call() {
     local out_file
     out_file=$(mktemp)
     local cmd_str
-    case "$to" in
-      claude)   cmd_str="claude -p --output-format text $(printf %q "$prompt")" ;;
-      kimi)     cmd_str="kimi --quiet -p $(printf %q "$prompt")" ;;
-      pi)       cmd_str="pi -p $(printf %q "$prompt")" ;;
-      deepseek) cmd_str="deepseek $(printf %q "$prompt")" ;;
-      codex)    cmd_str="codex exec --json --output-last-message $(printf %q "$prompt")" ;;
-      opencode) cmd_str="opencode run $(printf %q "$prompt")" ;;
-      *)
-        err "Unsupported peer: $to  不支持的 peer: $to"
-        return 1 ;;
-    esac
+    cmd_str=$(_agent_cmd_str "$to" peer "$prompt") || {
+      err "Unsupported peer: $to  不支持的 peer: $to"
+      rm -f "$out_file"
+      return 1
+    }
     _peer_dispatch_in_tmux "$session" "$cmd_str" "$out_file" "$stderr_log" "$call_timeout"
     output="$(cat "$out_file" 2>/dev/null || true)"
     rm -f "$out_file"
   else
-    case "$to" in
-      claude)
-        output="$(claude -p --output-format text "$prompt" 2>"$stderr_log" || true)"
-        ;;
-      kimi)
-        output="$(kimi --quiet -p "$prompt" 2>"$stderr_log" || true)"
-        ;;
-      pi)
-        output="$(pi -p "$prompt" 2>"$stderr_log" || true)"
-        ;;
-      deepseek)
-        output="$(deepseek "$prompt" 2>"$stderr_log" || true)"
-        ;;
-      codex)
-        output="$(codex exec --json --output-last-message "$prompt" 2>"$stderr_log" || true)"
-        ;;
-      opencode)
-        output="$(opencode run "$prompt" 2>"$stderr_log" || true)"
-        ;;
-      *)
-        err "Unsupported peer: $to  不支持的 peer: $to"
-        return 1
-        ;;
-    esac
+    _agent_argv "$to" peer "$prompt" || {
+      err "Unsupported peer: $to  不支持的 peer: $to"
+      return 1
+    }
+    output="$("${_AGENT_ARGV[@]}" 2>"$stderr_log" || true)"
   fi
 
   printf '%s\n' "$output"
@@ -1994,15 +1969,8 @@ cmd_review_pr() {
   local agent; agent=$(_project_agent)
   local output
   info "Reviewing PR #${pr_number} with ${agent}..."
-  case "$agent" in
-    claude)   output=$(claude -p --output-format text "$prompt" 2>/dev/null) ;;
-    kimi)     output=$(kimi --quiet -p "$prompt" 2>/dev/null) ;;
-    deepseek) output=$(deepseek "$prompt" 2>/dev/null) ;;
-    pi)       output=$(pi -p "$prompt" 2>/dev/null) ;;
-    codex)    output=$(codex exec "$prompt" 2>/dev/null) ;;
-    opencode) output=$(opencode run "$prompt" 2>/dev/null) ;;
-    *)        err "Unknown agent '${agent}'"; return 1 ;;
-  esac
+  _agent_argv "$agent" text "$prompt" || { err "Unknown agent '${agent}'"; return 1; }
+  output=$("${_AGENT_ARGV[@]}" 2>/dev/null)
 
   echo "$output"
 

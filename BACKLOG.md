@@ -226,7 +226,7 @@
 | [US-DOC-008](docs/features/documentation.md#us-doc-008) | features.md 作为产品视角的 Feature SOT，发版时自动整体同步与项目当前状态保持一致 | ✅ Done |
 | [US-DOC-009](docs/features/documentation.md#us-doc-009) | dream 夜检 features.md 新鲜度 — 检测功能目录是否覆盖近期完成的 story，落后时写 REFACTOR 条目 | ✅ Done |
 | [US-DOC-010](docs/features/documentation.md#us-doc-010) | features.md 结构和完整性校验移出 integration CI，改为只在 release 时检查 — 现在每个 feature PR 都要求 features.md 同步更新，但 features.md 只在发版时才由 release.sh 重写，导致正常 loop PR 也会被 CI 挡住 | ✅ Done |
-| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | 🔨 In Progress |
+| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | ✅ Done |
 
 ## ♻️ Refactor
 | ID | Description | Status |

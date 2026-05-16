@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Added**: `features.md` 现在区分已上线和规划中的功能 — 一眼看出哪些能用
 - **Fixed**: 恢复孤儿 worktree 时 PR 不再被 BEHIND 状态卡住 `[loop]`
 - **Fixed**: 无 PR 时 `roll ci --wait` 不再一直等到超时 `[loop]`
 - **Fixed**: loop 现在等 PR 合入 main 才算交付，不再 CI 绿就认为代码进了主干 `[loop]`

@@ -218,7 +218,7 @@
 | [US-DOC-005](docs/features/documentation.md#us-doc-005) | README 精简重构（≤120行 + doc index）+ AGENTS.md 新增 Documentation Conventions 章节 | ✅ Done |
 | [US-DOC-006](docs/features/documentation.md#us-doc-006) | 扩展 roll-.dream 文档覆盖度巡检 + brief 展示 doc coverage（缺 EN guide / 缺 ZH 翻译 / 文件落错目录） | ✅ Done |
 | [US-DOC-007](docs/features/documentation.md#us-doc-007) | Roll FAQ 双语指南 — 覆盖全 AI 自治开发 10 大常见场景，每条含原因与解决方案，帮用户不读源码也能自助排障 | ✅ Done |
-| [US-DOC-008](docs/features/documentation.md#us-doc-008) | features.md 在每次 changelog 生成后自动同步最新动态区块，保持功能目录与发版内容实时对齐 | 📋 Todo |
+| [US-DOC-008](docs/features/documentation.md#us-doc-008) | features.md 作为产品视角的 Feature SOT，发版时自动整体同步与项目当前状态保持一致 | ✅ Done |
 | [US-DOC-009](docs/features/documentation.md#us-doc-009) | dream 夜检 features.md 新鲜度 — 检测功能目录是否覆盖近期完成的 story，落后时写 REFACTOR 条目 | 📋 Todo |
 
 ## ♻️ Refactor

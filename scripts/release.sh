@@ -116,10 +116,72 @@ else
     CHANGELOG.md > release_notes.txt || true
 fi
 
-# Commit (include CHANGELOG.md and release_notes.txt if updated)
+# US-DOC-008: rewrite docs/features.md as product-level SOT.
+# Reads BACKLOG + docs/features/ + current features.md, AI emits the full
+# rewritten file to stdout. Prompt goes via stdin to avoid argv truncation.
+_run_features_sync_skill() {
+  local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"
+  [[ -f "$skill_file" ]] || return 1
+  local agent; agent=$(_project_agent)
+  local skill_content; skill_content=$(_skill_content "$skill_file")
+  local backlog_content; backlog_content=$(<BACKLOG.md)
+  local current_features=""
+  [[ -f docs/features.md ]] && current_features=$(<docs/features.md)
+  local features_dir_listing; features_dir_listing=$(ls docs/features/ 2>/dev/null | grep -v -- "-plan\.md$\|^refactor-log\.md$")
+  local prompt="${skill_content}
+
+---
+
+## 当前任务：重写 docs/features.md（Section 8）
+
+按 Section 8 规则把整个 docs/features.md 写出来。只输出 Markdown 正文，无任何额外说明。
+
+当前版本：v${VERSION}
+
+### 当前 docs/features.md：
+${current_features}
+
+### 当前 docs/features/ 目录（仅文件名）：
+${features_dir_listing}
+
+### 当前 BACKLOG.md：
+${backlog_content}"
+
+  # NOTE: stdin-fed prompt is REFACTOR-021's scope (covers all three skills
+  # uniformly); for now stay consistent with _run_changelog_skill (argv-based).
+  case "$agent" in
+    claude)   claude -p --output-format text "$prompt" ;;
+    kimi)     kimi --quiet -p "$prompt" ;;
+    deepseek) deepseek "$prompt" ;;
+    pi)       pi -p "$prompt" ;;
+    codex)    codex exec "$prompt" ;;
+    opencode) opencode run "$prompt" ;;
+    *) return 1 ;;
+  esac
+}
+
+echo "Rewriting docs/features.md via $(_project_agent)..." >&2
+_tmp_features=$(mktemp)
+if _run_features_sync_skill > "$_tmp_features" 2>/dev/null && [ -s "$_tmp_features" ]; then
+  # only stage if content actually changed
+  if ! cmp -s docs/features.md "$_tmp_features" 2>/dev/null; then
+    mv "$_tmp_features" docs/features.md
+    echo "docs/features.md updated." >&2
+  else
+    rm -f "$_tmp_features"
+  fi
+else
+  rm -f "$_tmp_features"
+  echo "Warning: features sync skipped (skill returned empty)." >&2
+fi
+
+# Commit (include CHANGELOG.md, release_notes.txt, features.md if updated)
 git add package.json bin/roll release_notes.txt
 if [ -n "$(git diff HEAD -- CHANGELOG.md)" ]; then
   git add CHANGELOG.md
+fi
+if [ -n "$(git diff HEAD -- docs/features.md)" ]; then
+  git add docs/features.md
 fi
 git commit -m "[release] ${TAG}"
 git tag "${TAG}"

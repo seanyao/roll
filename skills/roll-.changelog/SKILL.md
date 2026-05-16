@@ -357,3 +357,75 @@ After successful deploy in `$roll-build` / `$roll-fix`:
 ```
 
 不需要 `**Added**` / `**Fixed**` 前缀，分组标题已经承担了语义分类的职责。
+
+## 8. features.md 重写模式（产品 SOT）
+
+US-DOC-008 — `scripts/release.sh` 在 changelog/release-notes 生成完后会再
+调一次本 skill，请求"整体重写 `docs/features.md`"。这次调用的语义和上面
+两种完全不同：**不是基于本版 Story 增量**，而是基于**项目整体当前状态**。
+
+### 8.1 何时触发
+
+release.sh 完成 changelog/release-notes 写盘后，喂一段以
+`## 当前任务：重写 docs/features.md（Section 8）` 开头的 prompt。
+
+### 8.2 输入
+
+prompt 会包含：
+- 当前 `docs/features.md`（可能为空，可能上一版本的）
+- 当前 `BACKLOG.md` 全文（Epic / Feature 分组结构）
+- 当前 `docs/features/` 目录清单
+- 当前版本号
+
+### 8.3 输出契约
+
+把整个 `docs/features.md` 写出来。结构固定为三段：
+
+```
+# Roll — Features
+
+> 说明段（保留原文）
+
+---
+
+## ✨ Core Highlights
+
+- **<Feature 名>** — 1 句话产品级描述
+- **<Feature 名>** — 1 句话产品级描述
+- ...（3-5 条）
+
+---
+
+## Features by Epic
+
+### <Epic 名>
+- [<Feature 名>](docs/features/<file>.md) — 1 句话描述
+- <Feature 名> — 1 句话描述（缺 deep doc 时不加链接）
+
+### <Epic 名>
+- ...
+
+---
+
+## 维护说明（保留原文）
+```
+
+### 8.4 规则
+
+- **Catalog 必须列出 BACKLOG 中所有 `### Feature:` 出现的 Feature 名**
+  （即使没有 deep doc 也要列）
+- Feature 名跟 `docs/features/<file>.md` 文件名一致时，加链接到该 md
+- 没有对应 deep doc 的 Feature，**只写 plain text 不加链接**
+- 描述写 1 句话 **产品视角**：用户能用它做什么，避免实现细节
+- 分组用 BACKLOG 的 Epic 名，原序，不重排
+- Core Highlights 从所有 Features 里挑 3-5 个最能代表产品定位的，
+  描述用 bold 标 Feature 名后接说明；不照搬 catalog 文案
+- **不**写 "Recent Activity" 类区块——features.md 是 SOT，全量当下状态
+- **不**写版本号、不引用 changelog 条目
+- 说明段（顶部 quote）和维护说明（尾部）原文保留，不要重新生成措辞
+
+### 8.5 失败安全
+
+如果 prompt 信息不足（BACKLOG 解析失败等），**不要部分写入** —— 输出原
+文件内容即可。release.sh 会捕获 stdout 后比较：内容未变就不 stage。
+

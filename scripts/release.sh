@@ -20,9 +20,7 @@ echo ""
 read -p "Publish ${TAG}? [y/N] " confirm
 [[ "$confirm" == [yY] ]] || { echo "Aborted."; exit 0; }
 
-# ── Sync CHANGELOG.md from BACKLOG via configured agent ──────────────────────
-# Source bin/roll for shared helpers (_project_agent, _skill_content).
-# main() is guarded by BASH_SOURCE == $0, so sourcing is safe.
+# ── Source bin/roll for shared helpers ───────────────────────────────────────
 _RELEASE_VERSION="${VERSION}"
 _RELEASE_TAG="${TAG}"
 set +e
@@ -32,100 +30,76 @@ VERSION="${_RELEASE_VERSION}"  # restore release version (source clobbers it)
 TAG="${_RELEASE_TAG}"
 unset _RELEASE_VERSION _RELEASE_TAG
 
-# Shared bypass helper now lives in bin/roll as _agent_bypass_claude_perms
-# (sourced above). It splices --dangerously-skip-permissions into claude argv
-# so Claude Code 2.1.x's pre-write approval UX doesn't block the non-
-# interactive `claude -p` invocations in this script.
-
-_run_changelog_skill() {
-  local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"
-  [[ -f "$skill_file" ]] || { echo "Warning: roll-.changelog skill not found, skipping."; return; }
-  local agent; agent=$(_project_agent)
-  local content; content=$(_skill_content "$skill_file")
-  echo "Syncing CHANGELOG.md via ${agent}..." >&2
-  _agent_argv "$agent" plain "$content" || { echo "Error: Unknown agent '${agent}'. Run: roll agent use <name>"; exit 1; }
-  _agent_bypass_claude_perms
-  "${_AGENT_ARGV[@]}"
+# ── Compact BACKLOG summary (~2KB vs 36KB full file) ─────────────────────────
+# Emits Epic > Feature hierarchy with done/todo counts per feature.
+_backlog_summary() {
+  awk '
+    /^## Epic:/{
+      gsub(/^## Epic: /,""); epic=$0
+    }
+    /^### Feature:/{
+      if (feat != "") printf "  Feature: %s — %d Done, %d Todo\n", feat, done, todo
+      gsub(/^### Feature: /,""); feat=$0; done=0; todo=0
+      if (epic != last_epic) { printf "Epic: %s\n", epic; last_epic=epic }
+    }
+    /✅ Done/{ done++ }
+    /📋 Todo/{ todo++ }
+    /🔨 In Progress/{ todo++ }
+    END{ if (feat != "") printf "  Feature: %s — %d Done, %d Todo\n", feat, done, todo }
+  ' BACKLOG.md
 }
 
-_run_release_notes_skill() {
+# ── AI call 1: sync CHANGELOG.md + generate release notes (one call) ─────────
+# Sends only SKILL.md sections 1-7 (strips the features.md section 8).
+# The agent edits CHANGELOG.md via file tools; its stdout response = release notes.
+_run_changelog_and_notes() {
   local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"
-  [[ -f "$skill_file" ]] || { echo "Warning: roll-.changelog skill not found, skipping release notes."; return 1; }
+  [[ -f "$skill_file" ]] || { echo "Warning: roll-.changelog skill not found, skipping." >&2; return 1; }
   local agent; agent=$(_project_agent)
-  local skill_content; skill_content=$(_skill_content "$skill_file")
 
-  # Extract the just-written changelog section for this version
-  local changelog_section
-  changelog_section=$(awk "/^## v${VERSION}/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
+  # Sections 1-7 only — drop Section 8 (features.md rewrite, handled separately)
+  local skill_content; skill_content=$(awk '/^## 8\. features\.md/{exit} {print}' "$skill_file")
 
   local prompt="${skill_content}
 
 ---
 
-## 当前任务：生成 GitHub Release Notes（Section 7）
+## 当前任务：更新 CHANGELOG.md + 输出 GitHub Release Notes（一次回复）
 
-按照上方 Section 7 的分组规则（自动化流水线 / 可见性 / 稳定性 / 工程和测试 / 新功能 / 约定与导航）
-和措辞原则，把下面的 CHANGELOG 条目整理成 Release Notes 格式。
+**步骤一**：按 Section 1-5 规则将当前版本（v${VERSION}）的新条目补入 CHANGELOG.md
+（已有 ## Unreleased 则追加；无则创建；Section 4 规定只写 ## Unreleased，不写版本号）。
 
-规则：
-- 按用户感知分组，每组加 ### 标题
-- 每条末尾加 \`[loop]\` / \`[dream]\` 归因标签（无法确定来源则不加）
-- 去掉 **Added** / **Fixed** 前缀，分组标题已承担语义分类
-- 只输出 Markdown 正文，不要任何额外说明
+**步骤二**：完成步骤一后，按 Section 7 规则将当前 ## Unreleased 的条目整理为
+GitHub Release Notes，直接输出 Markdown 正文到 stdout，不含任何额外说明或标题。
 
-当前版本（v${VERSION}）的 CHANGELOG 条目：
-${changelog_section}"
+当前 CHANGELOG.md（前 100 行）：
+$(head -100 CHANGELOG.md 2>/dev/null || true)
 
-  echo "Generating release notes via ${agent}..." >&2
-  _agent_argv "$agent" plain "$prompt" || { echo "Warning: Unknown agent '${agent}', skipping release notes."; return 1; }
+当前 BACKLOG.md ✅ Done 条目（最近 40 条）：
+$(grep '✅ Done' BACKLOG.md | tail -40)"
+
+  echo "Syncing CHANGELOG.md and generating release notes via ${agent}..." >&2
+  _agent_argv "$agent" plain "$prompt" || { echo "Error: Unknown agent '${agent}'." >&2; return 1; }
   _agent_bypass_claude_perms
   "${_AGENT_ARGV[@]}"
 }
 
-# Update package.json
-node -e "
-  const fs = require('fs');
-  const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  p.version = '${VERSION}';
-  fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
-"
-
-# Update VERSION in bin/roll
-sed -i.bak "s/^VERSION=.*/VERSION=\"${VERSION}\"/" bin/roll && rm bin/roll.bak
-
-# Sync CHANGELOG.md: only run skill if section for this version is missing
-if ! grep -q "^## v${VERSION}" CHANGELOG.md 2>/dev/null; then
-  _run_changelog_skill
-  # Rename ## Unreleased → ## v{VERSION}
-  sed -i.bak "s/^## Unreleased$/## v${VERSION}/" CHANGELOG.md && rm CHANGELOG.md.bak
-fi
-
-# Generate GitHub Release Notes (Section 7 grouped format) → release_notes.txt
-if _run_release_notes_skill > release_notes.txt 2>/dev/null && [ -s release_notes.txt ]; then
-  # Strip markdown code fences the model sometimes wraps output in
-  sed -i.bak '/^```/d' release_notes.txt && rm release_notes.txt.bak
-  echo "release_notes.txt generated."
-else
-  # fallback: extract raw section from CHANGELOG.md
-  awk "/^## v${VERSION}/{found=1; next} found && /^## /{exit} found && NF{print}" \
-    CHANGELOG.md > release_notes.txt || true
-fi
-
-# Rewrites docs/features.md as product-level SOT. Reads BACKLOG +
-# docs/features/ + current features.md, agent emits the full rewritten file
-# to stdout.
+# ── AI call 2: rewrite docs/features.md (section 8 only + compact BACKLOG) ──
 _run_features_sync_skill() {
   local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"
   [[ -f "$skill_file" ]] || return 1
   local agent="$1"
-  local skill_content; skill_content=$(_skill_content "$skill_file")
-  local backlog_content; backlog_content=$(<BACKLOG.md)
+
+  # Section 8 only — features.md rewrite rules
+  local skill_content; skill_content=$(awk '/^## 8\. features\.md/{found=1} found{print}' "$skill_file")
+
   local current_features=""
   [[ -f docs/features.md ]] && current_features=$(<docs/features.md)
   local features_dir_listing
   features_dir_listing=$(printf '%s\n' docs/features/*.md \
     | sed 's|^docs/features/||' \
     | grep -vE '(-plan\.md$|^refactor-log\.md$)' || true)
+
   local prompt="${skill_content}
 
 ---
@@ -142,14 +116,45 @@ ${current_features}
 ### 当前 docs/features/ 目录（仅文件名）：
 ${features_dir_listing}
 
-### 当前 BACKLOG.md：
-${backlog_content}"
+### 当前 BACKLOG 结构摘要（Epic / Feature / 完成度）：
+$(_backlog_summary)"
 
   _agent_argv "$agent" text "$prompt" || return 1
   _agent_bypass_claude_perms
   "${_AGENT_ARGV[@]}"
 }
 
+# Update package.json
+node -e "
+  const fs = require('fs');
+  const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  p.version = '${VERSION}';
+  fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+"
+
+# Update VERSION in bin/roll
+sed -i.bak "s/^VERSION=.*/VERSION=\"${VERSION}\"/" bin/roll && rm bin/roll.bak
+
+# ── AI call 1: sync CHANGELOG + generate release notes (one combined call) ───
+if ! grep -q "^## v${VERSION}" CHANGELOG.md 2>/dev/null; then
+  if _run_changelog_and_notes > release_notes.txt 2>/dev/null && [ -s release_notes.txt ]; then
+    sed -i.bak '/^```/d' release_notes.txt && rm release_notes.txt.bak
+    echo "release_notes.txt generated."
+    # Promote ## Unreleased → ## v{VERSION} now that changelog is updated
+    sed -i.bak "s/^## Unreleased$/## v${VERSION}/" CHANGELOG.md && rm CHANGELOG.md.bak
+  else
+    # Fallback: extract raw section from existing CHANGELOG.md
+    awk "/^## Unreleased/{found=1; next} found && /^## /{exit} found && NF{print}" \
+      CHANGELOG.md > release_notes.txt || true
+    sed -i.bak "s/^## Unreleased$/## v${VERSION}/" CHANGELOG.md && rm CHANGELOG.md.bak
+  fi
+else
+  # Changelog already has this version — generate release notes from it
+  awk "/^## v${VERSION}/{found=1; next} found && /^## /{exit} found && NF{print}" \
+    CHANGELOG.md > release_notes.txt || true
+fi
+
+# ── AI call 2: rewrite docs/features.md ──────────────────────────────────────
 _release_agent=$(_project_agent)
 echo "Rewriting docs/features.md via ${_release_agent}..." >&2
 _tmp_features=$(mktemp)
@@ -172,8 +177,7 @@ else
   rm -f "$_tmp_features_err"
 fi
 
-# Stage release artefacts. git add is a no-op for unchanged files, so the
-# two doc paths can be staged unconditionally.
+# Stage release artefacts. git add is a no-op for unchanged files.
 git add package.json bin/roll release_notes.txt CHANGELOG.md docs/features.md
 git commit -m "[release] ${TAG}"
 git tag "${TAG}"

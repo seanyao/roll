@@ -3286,6 +3286,17 @@ _ci_wait() {
     }
 
     if [[ -z "$runs" || "$runs" == "[]" ]]; then
+      # FIX-046: CI only fires on pull_request events — without a PR, runs will never appear.
+      # Check if an open PR exists; if not, skip the gate gracefully.
+      local _branch; _branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+      if [[ -n "$_branch" ]]; then
+        local _pr_json; _pr_json=$(gh -R "$repo_slug" pr list --head "$_branch" --state open --json number 2>/dev/null || echo "1")
+        local _pr_count; _pr_count=$(echo "$_pr_json" | jq 'length' 2>/dev/null || echo "1")
+        if [[ "$_pr_count" == "0" ]]; then
+          warn "No open PR for ${_branch} — CI not triggered; skipping CI gate  当前分支无 PR，CI 未触发，跳过"
+          return 0
+        fi
+      fi
       (( elapsed == 0 )) && echo "  No CI runs found yet, waiting...  尚无 CI 记录，等待触发..."
       sleep "$interval"
       elapsed=$(( elapsed + interval ))

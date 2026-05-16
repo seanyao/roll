@@ -122,6 +122,41 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 1 ]
 }
 
+# ─── FIX-046: skip CI wait when no PR exists ─────────────────────────────────
+
+@test "_ci_wait: FIX-046 returns 0 immediately when no CI runs and no open PR" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "tcr: test" -q
+  # gh: run list returns empty (no CI runs), pr list returns empty (no PR)
+  gh() {
+    case "$*" in
+      *"run list"*) echo "[]" ;;
+      *"pr list"*)  echo "[]" ;;
+      *)            return 1  ;;
+    esac
+  }
+  export -f gh
+  run _ci_wait 30
+  [ "$status" -eq 0 ]
+}
+
+@test "_ci_wait: FIX-046 continues waiting when no CI runs but PR exists" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "tcr: test" -q
+  # gh: run list empty (no CI yet), pr list returns 1 (PR exists)
+  gh() {
+    case "$*" in
+      *"run list"*) echo "[]"         ;;
+      *"pr list"*)  echo '[{"number":1}]' ;;
+      *)            return 1           ;;
+    esac
+  }
+  export -f gh
+  # Should NOT return 0 immediately — must wait (will timeout with status 1)
+  run _ci_wait 1
+  [ "$status" -eq 1 ]
+}
+
 # ─── _loop_enforce_ci function ────────────────────────────────────────────────
 
 @test "_loop_enforce_ci: function exists in bin/roll" {

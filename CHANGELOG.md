@@ -3,6 +3,16 @@
 ## v2026.517.1
 
 - **New**: loop 自动修复 story 引入的 CI 红 — 不再每次 CI 红都停下等人，修不好才写 ALERT `[loop]`
+- **New**: Roll 官网上线 — 装、用、原理一站讲清楚
+- **Fixed**: mac 休眠不再打断 loop cycle — 全程保持唤醒 `[loop]`
+- **Fixed**: agent 假死时 loop 自动接管，不再无限挂起 `[loop]`
+- **Fixed**: PR / 合并失败时 — loop 仍能把代码备份到独立分支不丢失 `[loop]`
+- **Fixed**: loop 启动时自动恢复上一轮中断的工作，意外中断的代码不再失踪 `[loop]`
+- **Fixed**: `roll loop now` 现在卡住状态也会先自愈再启动 `[loop]`
+- **Fixed**: 自治 loop 不再被权限弹窗卡住 `[loop]`
+- **Fixed**: `roll peer` 多轮 review 不再中途断线 `[peer]`
+- **Fixed**: `roll loop runs` 现在跨子目录都能显示历史 `[loop]`
+- **Fixed**: loop 空跑也会清理 worktree，不再随时间堆积 `[loop]`
 
 ## v2026.515.1
 

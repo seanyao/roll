@@ -32,6 +32,17 @@ VERSION="${_RELEASE_VERSION}"  # restore release version (source clobbers it)
 TAG="${_RELEASE_TAG}"
 unset _RELEASE_VERSION _RELEASE_TAG
 
+# Splice --dangerously-skip-permissions into claude argv. release.sh is
+# human-triggered with full intent; without this flag, Claude Code 2.1.x's
+# pre-write approval UX blocks the non-interactive `claude -p` invocations
+# (sub-claude shows the proposed diff in stdout, waits for an approval
+# that can never arrive in pipe mode, and the edit silently never happens).
+# No-op for non-claude agents.
+_release_bypass_claude_perms() {
+  [[ "${_AGENT_ARGV[0]}" == "claude" ]] || return 0
+  _AGENT_ARGV=("${_AGENT_ARGV[@]:0:2}" --dangerously-skip-permissions "${_AGENT_ARGV[@]:2}")
+}
+
 _run_changelog_skill() {
   local skill_file="${REPO_ROOT}/skills/roll-.changelog/SKILL.md"
   [[ -f "$skill_file" ]] || { echo "Warning: roll-.changelog skill not found, skipping."; return; }
@@ -39,6 +50,7 @@ _run_changelog_skill() {
   local content; content=$(_skill_content "$skill_file")
   echo "Syncing CHANGELOG.md via ${agent}..." >&2
   _agent_argv "$agent" plain "$content" || { echo "Error: Unknown agent '${agent}'. Run: roll agent use <name>"; exit 1; }
+  _release_bypass_claude_perms
   "${_AGENT_ARGV[@]}"
 }
 
@@ -72,6 +84,7 @@ ${changelog_section}"
 
   echo "Generating release notes via ${agent}..." >&2
   _agent_argv "$agent" plain "$prompt" || { echo "Warning: Unknown agent '${agent}', skipping release notes."; return 1; }
+  _release_bypass_claude_perms
   "${_AGENT_ARGV[@]}"
 }
 
@@ -137,6 +150,7 @@ ${features_dir_listing}
 ${backlog_content}"
 
   _agent_argv "$agent" text "$prompt" || return 1
+  _release_bypass_claude_perms
   "${_AGENT_ARGV[@]}"
 }
 

@@ -78,3 +78,32 @@
 **Files:**
 - `lib/loop-fmt.py` — 完整重写，实现 3-tier state machine（`LoopFmt` class）
 - `tests/unit/loop_fmt.bats` — 30 条单元测试，覆盖全部 tier 和边界情况
+
+---
+
+<a id="us-loop-003"></a>
+## US-LOOP-003 loop 等待期间显示 spinner 动画 ✅
+
+**Created**: 2026-05-17
+**Completed**: 2026-05-17
+
+- As a roll 用户 watching loop in tmux
+- I want spinner animation feedback during the 3 long-wait moments
+- So that the output doesn't appear frozen while story execution, CI, or PR merge is in progress
+
+**AC:**
+- [x] `lib/loop-fmt.py` 新增 `Spinner` class：background thread 用 `\r` 动态更新当前行（⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ 帧序列）
+- [x] Wait point 1 — Skill("roll-build"/"roll-fix") 调用后：spinner 显示 "executing story..."
+- [x] Wait point 2 — `roll ci`/`npm run ci`/`ci:local` 命令后：spinner 显示 "waiting for CI..."
+- [x] Wait point 3 — `gh pr create/merge` 命令后：spinner 显示 "merging PR..."
+- [x] 三个 spinner 在 result 到来时自动 stop（清除当前行）
+- [x] `LOOP_FMT_NO_SPIN=1` 关闭动画，输出静态 ⏳ 行（供测试确定性）
+- [x] 4 个新测试全部通过（含回归：原有 30 条仍全绿）
+
+**Files:**
+- `lib/loop-fmt.py` (modified — Spinner class + 3 wait-point wiring)
+- `tests/unit/loop_fmt.bats` (modified — 4 new spinner tests)
+- `CHANGELOG.md` (modified — Unreleased entry added)
+
+**Dependencies:**
+- Depends on: US-LOOP-002（loop-fmt.py 基础架构）

@@ -178,6 +178,18 @@ teardown() {
   grep -qF 'FIX-045' "$inner"
 }
 
+@test "_write_loop_runner_script: FIX-047 inner script waits for PR merge after non-doc publish" {
+  local script="${_tmp}/run-fix047.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-fix047-inner.sh"
+  # Must call _loop_wait_pr_merge for non-doc code changes
+  grep -qF '_loop_wait_pr_merge' "$inner"
+  # Must have FIX-047 annotation
+  grep -qF 'FIX-047' "$inner"
+  # Must track doc-only flag to skip wait for doc-only PRs (admin merge = immediate)
+  grep -qF '_is_doc_only' "$inner"
+}
+
 @test "_write_loop_runner_script: outer script starts caffeinate to prevent sleep" {
   local script="${_tmp}/run-tG.sh"
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24

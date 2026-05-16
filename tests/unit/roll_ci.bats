@@ -157,6 +157,49 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 1 ]
 }
 
+# ─── _loop_wait_pr_merge function (FIX-047) ──────────────────────────────────
+
+@test "_loop_wait_pr_merge: function exists in bin/roll" {
+  grep -qF '_loop_wait_pr_merge()' "$ROLL_BIN"
+}
+
+@test "_loop_wait_pr_merge: returns 0 when PR state is MERGED" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() {
+    case "$*" in
+      *"pr view"*) echo "MERGED" ;;
+      *)           return 1      ;;
+    esac
+  }
+  export -f gh
+  run _loop_wait_pr_merge "loop/cycle-test"
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_wait_pr_merge: returns 1 when PR state is CLOSED" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() {
+    case "$*" in
+      *"pr view"*) echo "CLOSED" ;;
+      *)           return 1      ;;
+    esac
+  }
+  export -f gh
+  run _loop_wait_pr_merge "loop/cycle-test"
+  [ "$status" -eq 1 ]
+}
+
+@test "_loop_wait_pr_merge: returns 0 when gh not installed (graceful skip)" {
+  command() {
+    if [[ "$1" == "-v" && "$2" == "gh" ]]; then return 1; fi
+    builtin command "$@"
+  }
+  run _loop_wait_pr_merge "loop/cycle-test"
+  [ "$status" -eq 0 ]
+}
+
 # ─── _loop_enforce_ci function ────────────────────────────────────────────────
 
 @test "_loop_enforce_ci: function exists in bin/roll" {

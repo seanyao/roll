@@ -159,6 +159,7 @@
 | FIX-041 | loop cycle 内 claude 频繁被 permission/sandbox 拦截后空退 — runner 调 claude 时 bypass permission 检查，worktree 隔离已限制 blast radius | ✅ Done |
 | FIX-042 | outer runner 的 tmux kill-all 误杀其他项目的 loop session — 匹配模式限定到当前项目 slug | ✅ Done |
 | FIX-043 | `roll loop now` 在 state=running 时直接退出，绕过 FIX-037 heal，手动触发无法自愈孤儿 — bail 之前先做 liveness 检查 | ✅ Done |
+| FIX-044 | loop cycle 完成后未写入 runs.jsonl — Step 5 Run Summary 漏执行，`roll loop runs` 看不到刚跑完的记录 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -293,3 +294,4 @@
 | IDEA-017 | FAQ 文档 — 面向产品工程师用户，覆盖全 AI 自治开发场景下的常见问题：典型场景、解决方案与简明原理解释（loop 卡住、agent 切换、PR 冲突、多项目并行、权限问题等） | ✅ Done → US-DOC-007 |
 | IDEA-018 | cycle 事件粒度简化 — 现在的 cycle 事件流划得太细，"规划中"和"正常"两个状态就够用，"进行中"的子事件没必要 — flagged by user 2026-05-17 | 📋 Todo |
 | IDEA-019 | launchd 默认 loop_minute 测试 flaky — hash mod 55 容易碰撞，相邻两个项目偶尔会拿到同一分钟 — flagged by simplify CI debugging 2026-05-17 | 📋 Todo |
+| IDEA-020 | loop tmux 输出精简与视觉层次设计 — 当前信息量过大、关键节点不突出、换行排版混乱；需设计精简方案：过滤低信号噪音，用视觉层次突出 Step 切换、CI gate、TCR commit、story 完成等关键事件，让用户扫一眼即知当前阶段与健康状态 | 📋 Todo |

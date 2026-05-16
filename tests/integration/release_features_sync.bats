@@ -27,8 +27,11 @@ teardown() { integration_teardown 2>/dev/null || true; }
   [ "$sync_line" -lt "$commit_line" ]
 }
 
-@test "release.sh only stages features.md when it actually changed" {
-  grep -qE 'git diff HEAD -- docs/features\.md' "$RELEASE_SH"
+@test "release.sh stages docs/features.md in the release commit" {
+  # git add is a no-op for unchanged files, so staging is unconditional —
+  # the safe-default cmp check (next test) prevents a bad AI write from
+  # producing a "changed" file in the first place.
+  grep -qE 'git add .* docs/features\.md' "$RELEASE_SH"
 }
 
 @test "release.sh feature sync is safe-by-default (no partial write)" {

@@ -2328,6 +2328,7 @@ if _worktree_fetch_origin main \\
   _USE_WORKTREE=1
   _worktree_submodule_init "\$WT" 2>/dev/null || true
   echo "[loop] cycle \${CYCLE_ID}: worktree \$WT on \$BRANCH"
+  _loop_event cycle_start "\${CYCLE_ID}" "" "" || true
 else
   # P3 fix: skip the cycle entirely when worktree isolation fails.
   # --dangerously-skip-permissions is only safe paired with worktree isolation;
@@ -2389,6 +2390,7 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
     _cycle_commits=\$(cd "\$WT" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
     if [ "\$_cycle_commits" -eq 0 ]; then
       _worktree_cleanup "\$WT" "\$BRANCH"
+      _loop_event idle "\${CYCLE_ID}" "" "" || true
       echo "[loop] cycle \${CYCLE_ID}: idle (no new commits); worktree cleaned"
     else
       if ( cd "\$WT" && _loop_is_doc_only_change ); then
@@ -2399,6 +2401,7 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       _publish_status=\$?
       if [ "\$_publish_status" -eq 0 ]; then
         _worktree_cleanup "\$WT" "\$BRANCH"
+        _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true
         echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
       elif [ "\$_publish_status" -eq 2 ]; then
         if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
@@ -3412,8 +3415,12 @@ _loop_diagnose_open_prs() {
 # When gh unavailable: returns 0 (graceful skip).
 _loop_enforce_ci() {
   local story_id="$1"
-
-  _ci_wait 300 && return 0
+  local _ci_result
+  if _ci_wait 300; then
+    _loop_event ci "$story_id" "" "ok" 2>/dev/null || true
+    return 0
+  fi
+  _loop_event ci "$story_id" "" "red" 2>/dev/null || true
 
   mkdir -p "$(dirname "$_LOOP_ALERT")"
   cat > "$_LOOP_ALERT" << EOF
@@ -4240,6 +4247,7 @@ _loop_publish_pr() {
   fi
   gh -R "$slug" pr merge "$branch" --auto --squash --delete-branch >/dev/null 2>&1 \
     || _worktree_alert "_loop_publish_pr: gh pr merge --auto failed for ${branch} (PR ${pr_url} left open)"
+  _loop_event pr "$branch" "$pr_url" "ok" 2>/dev/null || true
   echo "$pr_url"
   return 0
 }

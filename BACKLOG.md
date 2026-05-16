@@ -284,7 +284,7 @@
 ### Feature: landing-page
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-WEB-001](docs/features/landing-page.md#us-web-001) | 首屏动画讲清"装好就忘了它"的三层自治故事 — 一次开关、47 分钟时间快进、自动 fire 一轮交付，6 秒内 grok 整个产品 `depends-on:US-LOOP-001` | 🔨 In Progress |
+| [US-WEB-001](docs/features/landing-page.md#us-web-001) | 首屏动画讲清"装好就忘了它"的三层自治故事 — 一次开关、47 分钟时间快进、自动 fire 一轮交付，6 秒内 grok 整个产品 `depends-on:US-LOOP-001` | ✅ Done |
 
 ## 💡 Ideas
 | ID | Description | Status |

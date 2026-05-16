@@ -38,15 +38,8 @@ _run_changelog_skill() {
   local agent; agent=$(_project_agent)
   local content; content=$(_skill_content "$skill_file")
   echo "Syncing CHANGELOG.md via ${agent}..."
-  case "$agent" in
-    claude)   claude -p "$content" ;;
-    kimi)     kimi --quiet -p "$content" ;;
-    deepseek) deepseek "$content" ;;
-    pi)       pi -p "$content" ;;
-    codex)    codex exec "$content" ;;
-    opencode) opencode run "$content" ;;
-    *) echo "Error: Unknown agent '${agent}'. Run: roll agent use <name>"; exit 1 ;;
-  esac
+  _agent_argv "$agent" plain "$content" || { echo "Error: Unknown agent '${agent}'. Run: roll agent use <name>"; exit 1; }
+  "${_AGENT_ARGV[@]}"
 }
 
 _run_release_notes_skill() {
@@ -78,15 +71,8 @@ _run_release_notes_skill() {
 ${changelog_section}"
 
   echo "Generating release notes via ${agent}..."
-  case "$agent" in
-    claude)   claude -p "$prompt" ;;
-    kimi)     kimi --quiet -p "$prompt" ;;
-    deepseek) deepseek "$prompt" ;;
-    pi)       pi -p "$prompt" ;;
-    codex)    codex exec "$prompt" ;;
-    opencode) opencode run "$prompt" ;;
-    *) echo "Warning: Unknown agent '${agent}', skipping release notes."; return 1 ;;
-  esac
+  _agent_argv "$agent" plain "$prompt" || { echo "Warning: Unknown agent '${agent}', skipping release notes."; return 1; }
+  "${_AGENT_ARGV[@]}"
 }
 
 # Update package.json

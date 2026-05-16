@@ -2073,7 +2073,7 @@ _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
 # Returns a filesystem-safe slug combining the project basename and a 6-char
 # hash of the full path, ensuring uniqueness across sibling dirs with same name.
 _project_slug() {
-  local path="$1"
+  local path="${1:-$(pwd -P 2>/dev/null || pwd)}"
   # FIX-034: when inside a git worktree, git-common-dir returns the main tree's
   # absolute .git path; resolve to the main tree so worktree and main-tree runs
   # produce the same slug.
@@ -2113,6 +2113,55 @@ _loop_derive_minute() {
   fi
   local hash_dec; hash_dec=$(printf '%d' "0x${hash_hex}")
   echo $(( (hash_dec + offset) % 55 + 1 ))
+}
+
+# US-LOOP-001: structured event emission for cycle observability.
+# Writes a tab-separated line to stdout (for tmux/attach display) and appends
+# a JSON line to the per-project NDJSON event file under _SHARED_ROOT/loop/.
+# Args: <stage> <label> <detail> <outcome>
+_loop_event() {
+  local stage="$1" label="$2" detail="$3" outcome="$4"
+  local ts slug evfile json
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  evfile="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/events-${slug}.ndjson"
+  mkdir -p "$(dirname "$evfile")"
+
+  # stdout: tab-separated for tmux display
+  printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$stage" "$label" "$detail" "$outcome"
+
+  # JSON line appended to NDJSON file; serialized with flock (Linux) or
+  # lockf (macOS/BSD) — fall back to unguarded append when neither is available.
+  json=$(printf '{"ts":"%s","stage":"%s","label":"%s","detail":"%s","outcome":"%s"}\n' \
+    "$ts" "$stage" "$label" "$detail" "$outcome")
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock -x 9
+      printf '%s\n' "$json" >> "$evfile"
+    ) 9>>"${evfile}.lock"
+  elif command -v lockf >/dev/null 2>&1; then
+    lockf -s "${evfile}.lock" sh -c "printf '%s\n' $(printf '%q' "$json") >> $(printf '%q' "$evfile")"
+  else
+    printf '%s\n' "$json" >> "$evfile"
+  fi
+
+  # File rotation: if >10MB, rotate keeping last 5
+  _loop_event_rotate "$evfile"
+}
+
+_loop_event_rotate() {
+  local f="$1"
+  local size
+  size=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo 0)
+  if [ "$size" -gt 10485760 ]; then
+    # rotate: .4→remove, .3→.4, .2→.3, .1→.2, current→.1
+    rm -f "${f}.4"
+    for i in 3 2 1; do
+      [ -f "${f}.$i" ] && mv "${f}.$i" "${f}.$((i+1))"
+    done
+    mv "$f" "${f}.1"
+    touch "$f"
+  fi
 }
 
 _launchd_label() {

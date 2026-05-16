@@ -1,0 +1,49 @@
+#!/usr/bin/env bats
+load helpers
+setup()    { unit_setup_cd; }
+teardown() { unit_teardown_cd; }
+
+@test "_loop_event: writes tab-separated line to stdout" {
+  _SHARED_ROOT="$TEST_TMP"
+  run _loop_event "tcr" "a3f1b2" "add token validation" "ok"
+  [[ "$output" == *$'\t'"tcr"$'\t'* ]]
+}
+
+@test "_loop_event: creates NDJSON file" {
+  _SHARED_ROOT="$TEST_TMP"
+  _loop_event "tcr" "abc123" "test commit" "ok"
+  local slug; slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  [ -f "$TEST_TMP/loop/events-${slug}.ndjson" ]
+}
+
+@test "_loop_event: NDJSON line is valid JSON" {
+  _SHARED_ROOT="$TEST_TMP"
+  _loop_event "tcr" "abc123" "test commit" "ok"
+  local slug; slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  local f="$TEST_TMP/loop/events-${slug}.ndjson"
+  python3 -c "import json,sys; [json.loads(l) for l in open('$f') if l.strip()]"
+}
+
+@test "_loop_event: JSON has required fields" {
+  _SHARED_ROOT="$TEST_TMP"
+  _loop_event "ci" "green" "43s · 26 tests" "ok"
+  local slug; slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  local f="$TEST_TMP/loop/events-${slug}.ndjson"
+  python3 -c "
+import json
+e = json.loads(open('$f').read().strip())
+assert 'ts' in e and 'stage' in e and 'label' in e
+"
+}
+
+@test "_loop_event_rotate: rotates file when over 10MB" {
+  _SHARED_ROOT="$TEST_TMP"
+  local slug; slug=$(_project_slug 2>/dev/null || echo "testproj")
+  local f="$TEST_TMP/loop/events-${slug}.ndjson"
+  mkdir -p "$(dirname "$f")"
+  # create 11MB file
+  dd if=/dev/zero bs=1024 count=11264 2>/dev/null > "$f"
+  _loop_event_rotate "$f"
+  [ -f "${f}.1" ]
+  [ ! -s "$f" ] || [ "$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f")" -lt 10485760 ]
+}

@@ -19,7 +19,7 @@
 
 ## 3. Workflow
 - **TCR**: Test -> Green = Commit / Red = Revert. No WIP.
-- **Backlog**: Work stems from `BACKLOG.md`.
+- **Backlog**: Work stems from `BACKLOG.md`. **Row format is governed by [conventions/global/AGENTS.md §4 Backlog descriptions](conventions/global/AGENTS.md)** — one sentence in plain language, no file paths / function names / architecture jargon; implementation goes in `docs/features/`. The rule applies equally when working ON Roll as when using Roll.
 - **Docs**: [guide/en/skills.md](docs/guide/en/skills.md), [guide/en/methodology.md](docs/guide/en/methodology.md).
 
 ## 4. CLI

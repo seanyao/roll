@@ -3358,10 +3358,9 @@ _ci_wait() {
 # Returns 0: ok to proceed (green / pending / unknown / no gh).
 # Returns 1: HEAD CI is definitively red → ALERT written, do not build.
 _loop_precheck_ci() {
-  _gh_available || return 0
+  local slug; _gh_resolve slug || return 0
 
   local commit; commit=$(git rev-parse HEAD 2>/dev/null) || return 0
-  local slug; slug=$(_gh_repo_slug) || return 0
 
   local runs
   runs=$(gh -R "$slug" run list --commit "$commit" --json conclusion 2>/dev/null) || return 0
@@ -3784,7 +3783,7 @@ _loop_pr_rebase_stale() {
   local pr="$1" head_ref="$2"
   [ -n "$pr" ] && [ -n "$head_ref" ] || return 0
 
-  local slug; slug=$(_gh_repo_slug 2>/dev/null) || return 0
+  local slug; _gh_resolve slug || return 0
 
   local pr_json
   pr_json=$(gh -R "$slug" pr view "$pr" --json headRepository,headRepositoryOwner,isCrossRepository 2>/dev/null) || return 0
@@ -3818,9 +3817,7 @@ _loop_pr_rebase_stale() {
 #   Walks open PRs and routes each by classification.
 #   Lenient on gh unavailability — returns 0 so the loop continues to BACKLOG.
 _loop_pr_inbox() {
-  _gh_available || return 0
-
-  local slug; slug=$(_gh_repo_slug 2>/dev/null) || return 0
+  local slug; _gh_resolve slug || return 0
   local prs_json
   prs_json=$(gh -R "$slug" pr list --state open \
     --json number,headRefName,author,title \
@@ -4301,8 +4298,7 @@ _loop_wait_pr_merge() {
   local timeout="${ROLL_PR_MERGE_TIMEOUT:-600}"
   local interval=30
   local elapsed=0
-  _gh_available || return 0
-  local slug; slug=$(_gh_repo_slug 2>/dev/null) || return 0
+  local slug; _gh_resolve slug || return 0
   while (( elapsed < timeout )); do
     local state; state=$(gh -R "$slug" pr view "$branch" --json state -q .state 2>/dev/null || echo "UNKNOWN")
     case "$state" in

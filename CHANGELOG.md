@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **New**: loop 自动修复 story 引入的 CI 红 — 不再每次 CI 红都停下等人，修不好才写 ALERT `[loop]`
+
 ## v2026.515.1
 
 - **New**: `roll brief` / `roll dream` 生成文档后自动提交推送 — 每次晨报和夜检不再需要手动 commit `[loop]`

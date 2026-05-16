@@ -204,7 +204,7 @@
 | [US-AUTO-038](docs/features/autonomous-evolution.md#us-auto-038) | 清理遗留的 `claude/*` 临时分支 — 每次 claude 会话结束后立即删除，不做定期扫描 `depends-on:US-AUTO-033` | ✅ Done |
 | [US-AUTO-039](docs/features/peer-tmux-cleanup.md#us-auto-039) | Peer 完成后自动清理 tmux session 和终端窗口 — 终态决议杀 session，非终态留给下一轮复用 | ✅ Done |
 | [US-AUTO-040](docs/features/autonomous-evolution.md#us-auto-040) | 统一临时分支 GC — `loop/cycle-*` 兜底清理，回收 PR auto-merge 路径未能删除的已合入分支 `depends-on:US-AUTO-038` | ✅ Done |
-| [US-AUTO-041](docs/features/autonomous-evolution.md#us-auto-041) | loop 自动修复 story 引入的 CI 红 — 不再每次 CI 红都停下等人，loop 先尝试自修，修不好再写 ALERT 通知 | 📋 Todo |
+| [US-AUTO-041](docs/features/autonomous-evolution.md#us-auto-041) | loop 自动修复 story 引入的 CI 红 — 不再每次 CI 红都停下等人，loop 先尝试自修，修不好再写 ALERT 通知 | 🔨 In Progress |
 | US-AUTO-043 | loop runner 加 `caffeinate -i -w $$` 防 macOS idle sleep 中断 cycle — 外层 runner 持有 assertion 覆盖整个 cycle 生命周期 | ✅ Done |
 
 ## Epic: Documentation

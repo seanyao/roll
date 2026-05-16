@@ -1,4 +1,3 @@
-Generating release notes via claude...
-### 自动化流水线
+## 自动化流水线
 
-- 自治 loop 不再因权限弹窗卡住，遇到环境限制也会被提前告知，能继续把活干完 `[loop]`
+- 你不用再盯着 CI 红了，loop 会自己尝试修复，实在修不动才喊人 `[loop]`

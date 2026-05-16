@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.517.1
 
 - **New**: loop 自动修复 story 引入的 CI 红 — 不再每次 CI 红都停下等人，修不好才写 ALERT `[loop]`
 

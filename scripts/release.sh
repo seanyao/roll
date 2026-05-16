@@ -135,15 +135,8 @@ ${backlog_content}"
 
   # NOTE: stdin-fed prompt is REFACTOR-021's scope (covers all three skills
   # uniformly); for now stay consistent with _run_changelog_skill (argv-based).
-  case "$agent" in
-    claude)   claude -p --output-format text "$prompt" ;;
-    kimi)     kimi --quiet -p "$prompt" ;;
-    deepseek) deepseek "$prompt" ;;
-    pi)       pi -p "$prompt" ;;
-    codex)    codex exec "$prompt" ;;
-    opencode) opencode run "$prompt" ;;
-    *) return 1 ;;
-  esac
+  _agent_argv "$agent" text "$prompt" || return 1
+  "${_AGENT_ARGV[@]}"
 }
 
 echo "Rewriting docs/features.md via $(_project_agent)..." >&2

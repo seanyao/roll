@@ -90,3 +90,41 @@ teardown() { unit_teardown; }
   run _agent_cmd_str bogus text "p"
   [ "$status" -eq 1 ]
 }
+
+# _agent_skill_cmd: emits a cron-ready shell string with $(strip-frontmatter) inline.
+# We stub _project_agent and exercise each agent shape.
+@test "_agent_skill_cmd kimi → kimi --quiet -p \"\$(awk ...)\"" {
+  _project_agent() { echo kimi; }
+  run _agent_skill_cmd "/tmp/skill.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == kimi\ --quiet\ -p\ \"\$\(awk* ]]
+  case "$output" in *"'/tmp/skill.md')\""*) :;; *) false;; esac
+}
+
+@test "_agent_skill_cmd codex → codex exec \"\$(awk ...)\"" {
+  _project_agent() { echo codex; }
+  run _agent_skill_cmd "/tmp/skill.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == codex\ exec\ \"\$\(awk* ]]
+}
+
+@test "_agent_skill_cmd opencode → opencode run \"\$(awk ...)\"" {
+  _project_agent() { echo opencode; }
+  run _agent_skill_cmd "/tmp/skill.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == opencode\ run\ \"\$\(awk* ]]
+}
+
+@test "_agent_skill_cmd claude → uses resolved absolute claude path" {
+  _project_agent() { echo claude; }
+  run _agent_skill_cmd "/tmp/skill.md"
+  [ "$status" -eq 0 ]
+  # Output begins with either /…/claude or literal claude, followed by -p
+  [[ "$output" == *claude\ -p\ \"\$\(awk* ]]
+}
+
+@test "_agent_skill_cmd unknown agent returns 1" {
+  _project_agent() { echo bogus; }
+  run _agent_skill_cmd "/tmp/skill.md"
+  [ "$status" -eq 1 ]
+}

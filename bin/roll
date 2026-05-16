@@ -2585,15 +2585,18 @@ _agent_skill_cmd() {
   local agent; agent=$(_project_agent)
   # Strip YAML frontmatter inline for cron commands
   local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
-  case "$agent" in
-    claude)   local _bin; _bin=$(command -v claude 2>/dev/null || echo "claude"); echo "${_bin} -p \"\$(${strip})\"" ;;
-    kimi)     echo "kimi --quiet -p \"\$(${strip})\"" ;;
-    deepseek) echo "deepseek \"\$(${strip})\"" ;;
-    pi)       echo "pi -p \"\$(${strip})\"" ;;
-    codex)    echo "codex exec \"\$(${strip})\"" ;;
-    opencode) echo "opencode run \"\$(${strip})\"" ;;
-    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; return 1 ;;
-  esac
+  _agent_argv "$agent" plain "__PROMPT__" || {
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
+    return 1
+  }
+  # In cron context, use absolute claude path so a fresh shell can find it.
+  [[ "$agent" == "claude" ]] && _AGENT_ARGV[0]="$(command -v claude 2>/dev/null || echo claude)"
+  # Drop the prompt sentinel (always last), re-emit head args + quoted $(strip).
+  local out="${_AGENT_ARGV[0]}" i prompt_idx=$((${#_AGENT_ARGV[@]} - 1))
+  for ((i = 1; i < prompt_idx; i++)); do
+    out+=" ${_AGENT_ARGV[i]}"
+  done
+  echo "${out} \"\$(${strip})\""
 }
 
 cmd_loop() {

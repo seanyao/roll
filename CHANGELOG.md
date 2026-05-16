@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **New**: dream 现在察觉功能目录过期 — 落后时不再悄悄无人知晓 `[dream]`
+
 ## v2026.517.2
 - **Fixed**: `roll loop runs` 现在能看到刚跑完的循环记录（不再无历史） `[loop]`
 - **Fixed**: `roll dream`、`roll brief`、`roll loop` 的定时任务不再被 Claude 升级后的弹窗拦住，悄悄失效

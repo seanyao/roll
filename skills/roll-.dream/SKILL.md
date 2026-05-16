@@ -127,6 +127,18 @@ find docs/ -maxdepth 1 -name '*.md' 2>/dev/null
 
 Flag any `.md` file directly in `docs/` root (allowed subdirs: `guide/`, `domain/`, `features/`, `practices/`, `briefs/`, `dream/`).
 
+**Check D — features.md Feature Coverage (US-DOC-009):**
+
+Dependency gate: skip when `docs/features.md` does not exist.
+
+Parse BACKLOG.md for all `### Feature: <name>` groups that contain ≥1 ✅ Done story. Parse `docs/features.md` for Feature names. If any Feature group with Done stories is absent from `docs/features.md`, the catalog is stale — flag as REFACTOR:
+
+```markdown
+| REFACTOR-XXX | features.md 功能目录落后于 BACKLOG，N 个已完成功能区未收录，用户无法通过产品目录发现这些功能 — flagged by dream YYYY-MM-DD | 📋 Todo |
+```
+
+The catalog is auto-updated by `scripts/release.sh` at release time (Section 8 of roll-.changelog). Between releases, this check surfaces the coverage gap so it isn't silently skipped.
+
 **REFACTOR entry format for doc findings:**
 
 ```markdown
@@ -137,7 +149,8 @@ Flag any `.md` file directly in `docs/` root (allowed subdirs: `guide/`, `domain
 
 ```markdown
 ## 文档覆盖度
-{发现内容 或 "文档结构符合规范，无缺口。"}
+- features.md 功能区覆盖：{N}/{M} 个已完成功能区已收录（缺失：{列表 或 "无"}）
+{其他发现内容 或 "文档结构符合规范，无缺口。"}
 ```
 
 ### Scan 6 — 文档新鲜度 (Doc Freshness)

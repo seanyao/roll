@@ -1,19 +1,14 @@
 Generating release notes via claude...
-### 自动化流水线
+The release script's prompt cut off without pasting the bullets. Based on commits since v2026.515.1, here's the draft Release Notes:
 
-- Loop 的 PR inbox 终于从"看看"变成"做事" — eligible PR 自动触发 AI 评审，stale 自动 rebase，fork 和冲突写 ALERT；bot 已评审的 PR 不会被重复打扰 `[loop]`
-- 晨报和夜检生成后自动推送，你不需要手动补 commit `[loop]`
-- 已合入 main 的 `loop/cycle-*` 分支自动清理，远程不再堆僵尸 `[loop]`
-- 可选：PR 一开就触发 AI 评审的 GitHub Actions 模板，不装也行，loop 每轮兜底 `[pr]`
+## 稳定性
 
-### 新功能
+- Loop 现在能扛住系统休眠 — 笔记本盖上盖子或长时间挂机不会再把 cycle 拽死 `[loop]`
+- 卡死的 inner 脚本会被发现并清理 — 心跳超过 30 分钟自动判定僵死，下一轮 cycle 正常启动 `[loop]`
+- 跑完没产出的 worktree 立刻清掉，本地不再积压空壳 `[loop]`
+- 发版脚本从临时 worktree 也能正常发布，不再因路径解析失败而中断 `[loop]`
+- 项目识别更稳 — 在 worktree 里执行 loop 命令不会再被当成另一个项目 `[loop]`
 
-- `roll review-pr <number>` — 任意 agent（Claude / Kimi / DeepSeek 等）都能评审任意平台的 PR；PR body 加 `[skip-ai-review]` 可跳过 `[pr]`
+## 约定与导航
 
-### 稳定性
-
-- `roll peer` 协商结束后 tmux session 不再残留 `[peer]`
-
-### 文档
-
-- 双语 FAQ 上线 — 10 个自治交付常见场景，loop 卡住、PR 冲突、agent 切换都有解答 `[docs]`
+- `ROLL_HEARTBEAT_TIMEOUT` 环境变量写入文档 — 想调心跳阈值有据可查

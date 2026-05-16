@@ -232,12 +232,44 @@ After each item completes:
    it derives `owner/repo` from the git remote and uses `gh -R <slug>`, which
    is required to work through `~/.ssh/config` host rewrites that break gh's
    auto-detection.
-   - CI passes → continue normally
-   - CI fails / times out / `gh` call fails → keep story as `🔨 In Progress`
-     (do NOT mark ✅ Done); write ALERT; skip to next story
+   - CI passes → call `_loop_clear_heal_state <story_id>` (idempotent) and
+     continue normally
+   - CI fails / times out / `gh` call fails → enter **CI self-heal** (US-AUTO-041)
    - `gh` binary not installed (`command -v gh` fails) → skip gracefully
      (return 0). Any other `gh` error is **not** "gh unavailable" — it is a
      hard failure and must block the gate.
+
+   **CI self-heal (US-AUTO-041)** — bounded auto-fix before ALERT:
+
+   ```
+   shell: _loop_self_heal_ci <story_id>
+     ├── exit 0 → heal attempt allowed (counter incremented)
+     │   1. Capture failure summary:
+     │      gh run view --log-failed --repo <slug> $(gh run list --commit HEAD \
+     │        --json databaseId,conclusion -L 5 | jq -r '.[] | select(.conclusion=="failure") | .databaseId' | head -1) \
+     │        2>/dev/null | head -200 > /tmp/roll-heal-<story_id>.log
+     │   2. Invoke Skill("roll-fix") with brief:
+     │      "CI red after <story_id>. Failing run logs at /tmp/roll-heal-<story_id>.log.
+     │       Diagnose root cause, fix via TCR, commit, push. Do NOT change <story_id>'s
+     │       BACKLOG status — it stays ✅ Done. The fix is a follow-up."
+     │   3. After roll-fix completes, return to step 2 (CI Gate) — re-run
+     │      `roll ci --wait`. The counter prevents infinite loops.
+     │
+     └── exit 1 → heal exhausted (>=ROLL_LOOP_HEAL_MAX, default 2) or disabled
+                  (ROLL_LOOP_NO_HEAL=1):
+         1. Keep story as ✅ Done (commits are already on main — CI red is a
+            follow-up problem, not a story-failure)
+         2. Write ALERT to `~/.shared/roll/loop/ALERT.md` with:
+            - story ID, time, commit SHA
+            - heal attempts made (read counter from
+              `${ROLL_LOOP_DIR:-~/.shared/roll/loop}/heal/<story_id>.count`)
+            - last failure summary (head of /tmp/roll-heal-<story_id>.log)
+            - suggested actions: `$roll-fix` manually / inspect CI / `roll loop reset`
+         3. Skip to next story.
+   ```
+
+   **Bypass for debugging / cost control:** set `ROLL_LOOP_NO_HEAL=1` to restore
+   pre-US-AUTO-041 fail-fast behaviour.
 3. Update state file: `status: idle`
 4. Check if a Feature is now fully complete (all its Stories ✅)
 5. If yes and `brief_on_feature_complete: true` → invoke `Skill("roll-brief")`

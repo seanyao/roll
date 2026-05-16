@@ -2168,7 +2168,11 @@ _write_loop_runner_script() {
   # stream-json enables realtime streaming; loop-fmt.py humanizes the events.
   local fmt_script="${ROLL_PKG_DIR}/lib/loop-fmt.py"
   local roll_bin="${ROLL_PKG_DIR}/bin/roll"
-  local cmd_verbose="${cmd/claude -p/claude -p --verbose --output-format stream-json}"
+  # FIX-041: loop cycle is autonomous — permission prompts and sandbox path
+  # restrictions only cause the cycle to burn turns asking for approvals
+  # it cannot receive. Bypass all permission checks for the inner claude
+  # invocation. Worktree isolation contains the blast radius.
+  local cmd_verbose="${cmd/claude -p/claude -p --verbose --dangerously-skip-permissions --output-format stream-json}"
   # US-AUTO-037: strip leading `cd "<path>" && ` (callers like
   # _install_launchd_plists prepend it). The runner now manages cwd itself
   # — pointing at the worktree when isolation succeeds, project_path otherwise.

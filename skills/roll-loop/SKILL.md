@@ -37,6 +37,30 @@ sole authority over `roll-release`.
 故事评审等场景）。loop 通过 LOCK 和 `🔨 In Progress` 状态识别并跳过人正在做的故事，
 人机并行不会撞车（见 Concurrency Safety）。
 
+## Environment Constraints (autonomous loop)
+
+You are running inside an autonomous cycle. No human is watching this turn.
+Adapt commands to the constraints below — otherwise you will burn turns on
+denied operations and the cycle will idle-exit.
+
+- **No `AskUserQuestion`**: no human can answer. If you genuinely cannot
+  proceed without a decision, write an entry to `${HOME}/.shared/roll/loop/ALERT.md`
+  describing what's needed and exit cleanly.
+- **Avoid compound bash**: each `Bash` call must run a single command.
+  No `cmd1 && cmd2`, no `cmd1 ; cmd2`, no pipes (`|`), no `$(...)` /
+  backtick subshells, no `bash -c '...'` with nested quoting. These are
+  rejected by static analysis before they run. Chain operations as
+  separate Bash calls and read intermediate output yourself.
+- **Prefer Read/Edit over cat/sed**: use the `Read` tool for any file
+  lookup, `Edit` for modifications. They cross sandbox boundaries that
+  `cat` / `ls` / `sed` cannot.
+- **CWD-relative paths first**: the cycle's CWD is the per-cycle worktree.
+  Files inside it (BACKLOG.md, bin/roll, tests/, docs/) are always
+  accessible. Files at `~/.shared/roll/...` are reachable via the `Read`
+  tool but not via shell commands.
+- **Skill invocation is the work**: route US/REFACTOR via `$roll-build`,
+  FIX via `$roll-fix`. Do not try to re-implement those flows inline.
+
 ## Configuration
 
 ```yaml

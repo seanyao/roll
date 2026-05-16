@@ -231,3 +231,38 @@
 **Dependencies:**
 - Depends on: US-DOC-001, US-DOC-002（guide/ 目录结构已就位）
 - Depended on by: 无
+
+---
+
+<a id="us-doc-008"></a>
+## US-DOC-008 建立 docs/features.md SOT + 发版时自动同步 📋
+
+**Created**: 2026-05-16
+
+- As a roll user / contributor
+- I want a single product-facing catalog that lists every Feature roll currently provides
+- So that I can understand the product at a Feature granularity (not Story granularity), and the catalog stays in sync with what actually ships
+
+**Concept clarification:**
+- Story = 构建视角，发布单位，多对一映射到 Changelog 条目
+- Changelog = 发版时面向用户的一句话总结，按版本组织
+- Feature = 产品视角，写给用户看；体量比 Epic 小，跨多个 Story；features.md 是 Feature 层的 SOT
+
+**AC:**
+- [ ] `docs/features.md` 存在，结构：✨ Core Highlights → Features by Domain（按 Epic 分组）
+- [ ] Catalog 列出仓库中**所有** Feature（不限于有 deep doc 的）；缺 deep doc 的 Feature 仅 plain text，不加链接
+- [ ] Core Highlights 由 AI 自动产出（不手工维护）
+- [ ] `scripts/release.sh` 在 `_run_changelog_skill` 之后调用新的 features 同步步骤，AI 整体重写 `docs/features.md` 使其与当前 BACKLOG / docs/features/ 状态一致
+- [ ] AI 调用通过 stdin 喂 prompt（沿用 REFACTOR-021 方向，避免 argv 截断）
+- [ ] `skills/roll-.changelog/SKILL.md` 包含 features.md 重写规则段落
+- [ ] BACKLOG.md 索引行 anchor 链接有效
+
+**Files:**
+- `docs/features.md` (new)
+- `scripts/release.sh` (modified)
+- `skills/roll-.changelog/SKILL.md` (extended)
+- `docs/features/documentation.md` (this section)
+- `tests/integration/release_features_sync.bats` (new)
+
+**Dependencies:**
+- Depended on by: US-DOC-009（dream 新鲜度巡检读 features.md）

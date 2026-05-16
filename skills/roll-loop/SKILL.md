@@ -7,7 +7,7 @@ description: |
   Actions), scans BACKLOG.md for 📋 Todo items, and routes each to the
   appropriate skill: US-XXX → $roll-build, FIX-XXX → $roll-fix,
   REFACTOR-XXX → $roll-build. Handles agent fallback on token/network failure.
-  Never executes roll-release autonomously — release is always a human decision.
+  Never cuts a release autonomously — release is always a human decision.
   Triggers roll-brief when a Feature completes.
 ---
 
@@ -18,7 +18,7 @@ description: |
 
 Runs on a schedule. Picks up pending BACKLOG items and executes them without
 human intervention. The human stays informed via `roll-brief` and retains
-sole authority over `roll-release`.
+sole authority over releases.
 
 ## Execution Boundary
 
@@ -28,7 +28,7 @@ sole authority over `roll-release`.
 - REFACTOR-XXX (Refactors) → `$roll-build`
 
 **What roll-loop never executes:**
-- `roll-release` — production deployment is always a human decision
+- Releases — production deployment is always a human decision (requires 2FA in real terminal)
 - Any Story marked 🚫 Hold or flagged for human review
 - Destructive operations outside normal skill scope
 

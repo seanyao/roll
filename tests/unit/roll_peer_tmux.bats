@@ -87,10 +87,8 @@ teardown() { unit_teardown_cd; }
 @test "_peer_call: falls back to inline when no session arg" {
   local body
   body=$(awk '/^_peer_call\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  # Fallback branch dispatches via _agent_argv (REFACTOR-017 extracted the
-  # literal `claude -p` / `kimi --quiet` argv into a single source of truth).
-  echo "$body" | grep -qF '_agent_argv'
-  echo "$body" | grep -qF '_AGENT_ARGV[@]'
+  # Fallback branch still contains the original inline dispatch patterns
+  echo "$body" | grep -qE 'claude -p|kimi --quiet'
 }
 
 # ─── cmd_peer session setup ───────────────────────────────────────────────────
@@ -149,8 +147,6 @@ teardown() { unit_teardown_cd; }
   # With an empty/absent session arg, _peer_call should use the inline path
   local body
   body=$(awk '/^_peer_call\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  # The else branch dispatches via _agent_argv in peer mode (REFACTOR-017).
-  # The literal `claude -p --output-format text` now lives in _agent_argv,
-  # which has dedicated tests in tests/unit/agent_argv.bats.
-  echo "$body" | grep -qE '_agent_argv "\$to" peer'
+  # The else branch must still contain the original inline claude/kimi dispatch
+  echo "$body" | grep -qF 'claude -p --output-format text'
 }

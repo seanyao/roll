@@ -1493,20 +1493,45 @@ _peer_call() {
     local out_file
     out_file=$(mktemp)
     local cmd_str
-    cmd_str=$(_agent_cmd_str "$to" peer "$prompt") || {
-      err "Unsupported peer: $to  不支持的 peer: $to"
-      rm -f "$out_file"
-      return 1
-    }
+    case "$to" in
+      claude)   cmd_str="claude -p --output-format text $(printf %q "$prompt")" ;;
+      kimi)     cmd_str="kimi --quiet -p $(printf %q "$prompt")" ;;
+      pi)       cmd_str="pi -p $(printf %q "$prompt")" ;;
+      deepseek) cmd_str="deepseek $(printf %q "$prompt")" ;;
+      codex)    cmd_str="codex exec --json --output-last-message $(printf %q "$prompt")" ;;
+      opencode) cmd_str="opencode run $(printf %q "$prompt")" ;;
+      *)
+        err "Unsupported peer: $to  不支持的 peer: $to"
+        return 1 ;;
+    esac
     _peer_dispatch_in_tmux "$session" "$cmd_str" "$out_file" "$stderr_log" "$call_timeout"
     output="$(cat "$out_file" 2>/dev/null || true)"
     rm -f "$out_file"
   else
-    _agent_argv "$to" peer "$prompt" || {
-      err "Unsupported peer: $to  不支持的 peer: $to"
-      return 1
-    }
-    output="$("${_AGENT_ARGV[@]}" 2>"$stderr_log" || true)"
+    case "$to" in
+      claude)
+        output="$(claude -p --output-format text "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      kimi)
+        output="$(kimi --quiet -p "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      pi)
+        output="$(pi -p "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      deepseek)
+        output="$(deepseek "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      codex)
+        output="$(codex exec --json --output-last-message "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      opencode)
+        output="$(opencode run "$prompt" 2>"$stderr_log" || true)"
+        ;;
+      *)
+        err "Unsupported peer: $to  不支持的 peer: $to"
+        return 1
+        ;;
+    esac
   fi
 
   printf '%s\n' "$output"
@@ -1859,57 +1884,21 @@ _parse_review_verdict() {
   echo "${type}${reason:+:${reason}}"
 }
 
-# REFACTOR-017: single source of truth for agent invocation argv.
-# Sets the global _AGENT_ARGV array to the command + args for (agent, mode, prompt).
-# Modes:
-#   text  — structured text (claude --output-format text; codex exec)
-#   plain — default output (claude -p; codex exec)
-#   peer  — peer protocol (claude --output-format text; codex --json --output-last-message)
-# Returns 1 on unknown agent. Adding a new agent only needs an entry here.
-_agent_argv() {
-  local agent="$1" mode="$2" prompt="$3"
-  case "$agent" in
-    claude)
-      case "$mode" in
-        text|peer) _AGENT_ARGV=(claude -p --output-format text "$prompt") ;;
-        *)         _AGENT_ARGV=(claude -p "$prompt") ;;
-      esac ;;
-    kimi)     _AGENT_ARGV=(kimi --quiet -p "$prompt") ;;
-    deepseek) _AGENT_ARGV=(deepseek "$prompt") ;;
-    pi)       _AGENT_ARGV=(pi -p "$prompt") ;;
-    codex)
-      case "$mode" in
-        peer) _AGENT_ARGV=(codex exec --json --output-last-message "$prompt") ;;
-        *)    _AGENT_ARGV=(codex exec "$prompt") ;;
-      esac ;;
-    opencode) _AGENT_ARGV=(opencode run "$prompt") ;;
-    *) return 1 ;;
-  esac
-}
-
-# Build a printf %q-escaped command string for (agent, mode, prompt).
-# Used where the command must be passed as a string (e.g. tmux send-keys).
-_agent_cmd_str() {
-  _agent_argv "$@" || return 1
-  local i out
-  printf -v out '%q' "${_AGENT_ARGV[0]}"
-  for ((i = 1; i < ${#_AGENT_ARGV[@]}; i++)); do
-    printf -v out '%s %q' "$out" "${_AGENT_ARGV[i]}"
-  done
-  printf '%s' "$out"
-}
-
 _agent_run_skill() {
   local skill="$1"
   local agent; agent=$(_project_agent)
   local skill_file="${ROLL_HOME}/skills/${skill}/SKILL.md"
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
-  _agent_argv "$agent" text "$content" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
-    return 1
-  }
-  "${_AGENT_ARGV[@]}"
+  case "$agent" in
+    claude)   claude -p --output-format text "$content" ;;
+    kimi)     kimi --quiet -p "$content" ;;
+    deepseek) deepseek "$content" ;;
+    pi)       pi -p "$content" ;;
+    codex)    codex exec "$content" ;;
+    opencode) opencode run "$content" ;;
+    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; return 1 ;;
+  esac
 }
 
 cmd_review_pr() {
@@ -1969,8 +1958,15 @@ cmd_review_pr() {
   local agent; agent=$(_project_agent)
   local output
   info "Reviewing PR #${pr_number} with ${agent}..."
-  _agent_argv "$agent" text "$prompt" || { err "Unknown agent '${agent}'"; return 1; }
-  output=$("${_AGENT_ARGV[@]}" 2>/dev/null)
+  case "$agent" in
+    claude)   output=$(claude -p --output-format text "$prompt" 2>/dev/null) ;;
+    kimi)     output=$(kimi --quiet -p "$prompt" 2>/dev/null) ;;
+    deepseek) output=$(deepseek "$prompt" 2>/dev/null) ;;
+    pi)       output=$(pi -p "$prompt" 2>/dev/null) ;;
+    codex)    output=$(codex exec "$prompt" 2>/dev/null) ;;
+    opencode) output=$(opencode run "$prompt" 2>/dev/null) ;;
+    *)        err "Unknown agent '${agent}'"; return 1 ;;
+  esac
 
   echo "$output"
 
@@ -2585,18 +2581,15 @@ _agent_skill_cmd() {
   local agent; agent=$(_project_agent)
   # Strip YAML frontmatter inline for cron commands
   local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
-  _agent_argv "$agent" plain "__PROMPT__" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
-    return 1
-  }
-  # In cron context, use absolute claude path so a fresh shell can find it.
-  [[ "$agent" == "claude" ]] && _AGENT_ARGV[0]="$(command -v claude 2>/dev/null || echo claude)"
-  # Drop the prompt sentinel (always last), re-emit head args + quoted $(strip).
-  local out="${_AGENT_ARGV[0]}" i prompt_idx=$((${#_AGENT_ARGV[@]} - 1))
-  for ((i = 1; i < prompt_idx; i++)); do
-    out+=" ${_AGENT_ARGV[i]}"
-  done
-  echo "${out} \"\$(${strip})\""
+  case "$agent" in
+    claude)   local _bin; _bin=$(command -v claude 2>/dev/null || echo "claude"); echo "${_bin} -p \"\$(${strip})\"" ;;
+    kimi)     echo "kimi --quiet -p \"\$(${strip})\"" ;;
+    deepseek) echo "deepseek \"\$(${strip})\"" ;;
+    pi)       echo "pi -p \"\$(${strip})\"" ;;
+    codex)    echo "codex exec \"\$(${strip})\"" ;;
+    opencode) echo "opencode run \"\$(${strip})\"" ;;
+    *)        err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; return 1 ;;
+  esac
 }
 
 cmd_loop() {
@@ -4342,16 +4335,6 @@ p.write_text("".join(out))
 PYEOF
 }
 
-cmd_release() {
-  local pkg; pkg=$(node -p "require('./package.json').name" 2>/dev/null || true)
-  if [[ "$pkg" == "@seanyao/roll" ]]; then
-    err "roll 自身发版请用 scripts/release.sh（npm publish 需要人工 2FA）"
-    echo "  Run: scripts/release.sh"
-    exit 1
-  fi
-  _agent_run_skill "roll-release"
-}
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKLOG — show pending tasks / manage status
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -5048,7 +5031,6 @@ usage() {
   echo "  backlog defer <pat> [reason]  Mark matching items as ⏸ Deferred  标记为已推迟"
   echo "  backlog unblock <pat>         Restore matching items to 📋 Todo   恢复为待处理"
   echo "  agent [use <name>|list]   [Config] Per-project agent selection            切换项目 agent"
-  echo "  release                [Publish] Sync changelog + version bump + npm publish  同步日志并发版"
   echo "  ci [--wait]            [CI] Show or wait for current commit's CI status       查看/等待 CI 状态"
   echo "  review-pr <number>     [PR Review] AI-powered code review for a PR           AI 代码评审"
   echo ""
@@ -5080,7 +5062,6 @@ main() {
     backlog)       cmd_backlog "$@" ;;
     alert)         cmd_alert "$@" ;;
     agent)         cmd_agent "$@" ;;
-    release)       cmd_release "$@" ;;
     ci)            cmd_ci "$@" ;;
     review-pr)     cmd_review_pr "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;

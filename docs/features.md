@@ -48,7 +48,7 @@
 - [Agent Compliance](docs/features/agent-compliance.md) — proof-of-pass + pre-commit hook，物理拦截未测试 commit
 
 ### Release & Changelog
-- [roll-release](docs/features/roll-release.md) — 一键发版 skill，自动算版本号
+- [Release Script](docs/features/roll-release.md) — `scripts/release.sh` 一键发版（人触发，npm 2FA 走真终端），自动算版本号 / 写 VERSION / 同步 CHANGELOG / release_notes / features.md
 - [Changelog Integration](docs/features/changelog-integration.md) — AI 生成 changelog，风格守门，自审重写
 
 ### Documentation

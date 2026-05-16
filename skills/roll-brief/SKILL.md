@@ -17,7 +17,7 @@ description: |
 > Common Sense defined in the project AGENTS.md.
 
 Owner-facing digest of autonomous agent activity. Gives the human everything
-needed to decide whether to run `roll-release` — without having to read every
+needed to decide whether to cut a new release — without having to read every
 commit or diff.
 
 ## Distinct from roll-.changelog

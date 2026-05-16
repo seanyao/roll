@@ -19,7 +19,7 @@ After successful Build & Deploy, extracts completed Stories from BACKLOG.md to g
 
 - Generating commit messages or PR descriptions — this skill only runs post-deploy
 - Recording dev diary / moments (use `$roll-notes`)
-- Bumping package version (use `$roll-release`)
+- Bumping package version (use the project's release script, e.g. `scripts/release.sh`)
 
 ## Workflow
 

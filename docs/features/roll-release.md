@@ -1,7 +1,12 @@
-# Feature: roll-release
+# Feature: Release Script
+
+> **2026-05-16 update**: The `roll-release` skill and `roll release` CLI subcommand
+> have been removed. Release flow is now 100% script-driven via `scripts/release.sh`
+> — npm publish requires real-terminal 2FA, which a skill cannot orchestrate.
+> US-REL-001 below is kept as historical record.
 
 <a id="us-rel-001"></a>
-## US-REL-001 Add roll-release skill — one-command publish flow ✅
+## US-REL-001 Add roll-release skill — one-command publish flow ✅ (superseded)
 
 **Created**: 2026-04-19
 **Completed**: 2026-04-20

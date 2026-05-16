@@ -203,6 +203,7 @@
 | [US-AUTO-039](docs/features/peer-tmux-cleanup.md#us-auto-039) | Peer 完成后自动清理 tmux session 和终端窗口 — 终态决议杀 session，非终态留给下一轮复用 | ✅ Done |
 | [US-AUTO-040](docs/features/autonomous-evolution.md#us-auto-040) | 统一临时分支 GC — `loop/cycle-*` 兜底清理，回收 PR auto-merge 路径未能删除的已合入分支 `depends-on:US-AUTO-038` | ✅ Done |
 | [US-AUTO-041](docs/features/autonomous-evolution.md#us-auto-041) | loop 自动修复 story 引入的 CI 红 — 不再每次 CI 红都停下等人，loop 先尝试自修，修不好再写 ALERT 通知 | 📋 Todo |
+| US-AUTO-043 | loop runner 加 `caffeinate -i -w $$` 防 macOS idle sleep 中断 cycle — 外层 runner 持有 assertion 覆盖整个 cycle 生命周期 | ✅ Done |
 
 ## Epic: Documentation
 ### Feature: documentation
@@ -240,6 +241,7 @@
 | REFACTOR-017 | agent 命令分发逻辑在 6 处以 case 块形式重复，新增 agent 时需同步全部副本否则运行时失败 — flagged by dream 2026-05-15 | 📋 Todo |
 | REFACTOR-018 | gh/commit/slug 前置检查在 7 个函数中重复且错误处理方式各异，统一行为需逐个排查 — flagged by dream 2026-05-15 | 📋 Todo |
 | REFACTOR-019 | docs: 7 个已完成 ≥3 story 的功能区缺少用户指南，新用户无法从文档体系了解这些功能 — flagged by dream 2026-05-15 (hint: $roll-doc) | 📋 Todo |
+| REFACTOR-020 | 抽 `_loop_is_active()` — FIX-037 heal block 4 层嵌套 + `_still_active` 状态翻转横跨 FIX-037/038，liveness 判断当前嵌在 heredoc 里无法单测；抽函数后可被 bats `source` 单测 `depends-on:FIX-039` (FIX-039/040 会改 publish 流程并复用 state contract，等主题包闭环再做避免重复重构) — flagged by simplify review 2026-05-16 | 📋 Todo |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

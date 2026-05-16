@@ -269,7 +269,7 @@ function Numbers() {
 function Guides() {
   const t = useT();
   const g = t.GUIDES;
-  const glyphs = ["book", "cycle", "moon2", "swap", "list", "gear"];
+  const glyphs = ["book", "cycle", "moon", "swap", "list", "gear"];
   return (
     <section className="r-section" id="guides">
       <div className="r-container">

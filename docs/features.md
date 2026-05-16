@@ -41,6 +41,7 @@
 - [Autonomous Evolution](docs/features/autonomous-evolution.md) — roll-loop 自治 BACKLOG 执行器：调度、worktree 隔离、PR 自动合并、孤儿恢复、心跳
 - [PR Lifecycle](docs/features/pr-lifecycle.md) — agent-agnostic PR 评审、loop PR inbox、可选秒级 webhook
 - [Peer-tmux Cleanup](docs/features/peer-tmux-cleanup.md) — peer 终态后 tmux session 自动清理
+- [Cycle Event Stream](docs/features/cycle-event-stream.md) — runner / SKILL 发结构化事件，`roll loop attach/monitor` 像 CI pipeline 一样可视化每一轮
 
 ### Quality & Diagnostics
 - [E2E Lifecycle](docs/features/e2e-lifecycle.md) — Story 完成后 E2E Deposit，CI E2E gating，失败诊断
@@ -53,6 +54,9 @@
 
 ### Documentation
 - [Documentation](docs/features/documentation.md) — 双语分层文档（guide / domain / features），dream 巡检文档覆盖度
+
+### Web Presence
+- [Landing Page](docs/features/landing-page.md) — 首屏动画 6 秒内讲清三层自治产品故事
 
 ### Engineering Infrastructure
 - skill-harness — 技能权限声明、Identity 约定、Co-Authored-By 归属、Scope Gate、DDD 增强

@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **Fixed**: 恢复孤儿 worktree 时 PR 不再被 BEHIND 状态卡住 `[loop]`
+
 ## v2026.517.3
 - **New**: dream 现在察觉功能目录过期 — 落后时不再悄悄无人知晓 `[dream]`
 - **New**: `roll loop events` — 查看 loop 每轮的详细事件流，任务选择、评审结果、CI 状态、合并全都有迹可查 `[loop]`

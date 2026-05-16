@@ -163,6 +163,7 @@
 | FIX-044 | loop cycle 完成后未写入 runs.jsonl — Step 5 Run Summary 漏执行，`roll loop runs` 看不到刚跑完的记录 | ✅ Done |
 | FIX-045 | 恢复孤儿分支时不 rebase — 分支从创建起就落后 main，auto-merge 被 GitHub BEHIND 状态卡住 | 📋 Todo |
 | FIX-046 | `roll ci --wait` 在 PR 未创建时死等 — CI 只触发于 PR event，无 PR 则永远等不到 check run | 📋 Todo |
+| FIX-047 | loop 在 PR 合入 main 之前标 Done — CI 绿不代表已交付，分支没合进去代码就丢了 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

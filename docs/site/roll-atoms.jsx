@@ -137,46 +137,151 @@ function InstallSnippet({ command }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Terminal — animated log of a real loop cycle
+// Terminal — dual-frame state machine: Frame A (install) → Transition → Frame B (cycle)
+// Falls back to sequential revealer when FRAME_A is not in the i18n data.
 // ─────────────────────────────────────────────────────────────────────────────
+
+function parseNdjson(text) {
+  if (!text) return [];
+  return text.trim().split('\n').map(line => {
+    try {
+      const ev = JSON.parse(line);
+      const hm = ev.ts ? ev.ts.slice(11, 16) : '';
+      switch (ev.stage) {
+        case 'cycle_start': return { kind: 'stamp', time: hm, text: `cycle #${ev.label} — picking story` };
+        case 'story':       return { kind: 'step', arrow: 'story', label: ev.label, text: ev.detail };
+        case 'build':       return { kind: 'step', arrow: 'build', label: ev.label, text: ev.detail, ok: ev.outcome === 'ok' };
+        case 'peer':        return { kind: 'step', arrow: 'peer',  label: ev.label, text: ev.detail };
+        case 'ci':          return { kind: 'step', arrow: 'ci',    label: ev.label, text: ev.detail, ok: ev.outcome === 'ok' };
+        case 'pr':          return { kind: 'step', arrow: 'pr',    label: ev.label, text: ev.detail, ok: ev.outcome === 'ok' };
+        case 'cycle_end':   return { kind: 'stamp', time: hm, text: `cycle #${ev.label} — done · ${ev.detail}`, muted: true };
+        default:            return null;
+      }
+    } catch { return null; }
+  }).filter(Boolean).concat([{ kind: 'cursor' }]);
+}
+
+const _CLOCK_TICKS  = ['10:23', '10:30', '10:44', '10:55', '11:05'];
+const _GHOST_LINES  = ['· waiting for next cycle', '· idle until 11:05', '· no stories pending'];
+const _REVEAL_DELAY = (line) => !line ? 380 : line.kind === 'blank' ? 120 : line.kind === 'stamp' ? 700 : 380;
+
 function Terminal({ lines, animate = true }) {
   const t = useT();
-  const liveLabel = t?.UI?.terminalLive ?? "live";
-  const [count, setCount] = useState(animate ? 0 : lines.length);
-  const timerRef = useRef(null);
+  const liveLabel  = t?.UI?.terminalLive ?? 'live';
+  const frameAData = t?.FRAME_A ?? null;
+  const isDual     = !!frameAData && animate;
+  const noMotion   = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
+  // ── Dual-frame state ──────────────────────────────────────────────────────
+  const [phase,       setPhase]       = useState('frameA');
+  const [revealCount, setRevealCount] = useState(0);
+  const [clockIdx,    setClockIdx]    = useState(0);
+
+  // ── Legacy state ──────────────────────────────────────────────────────────
+  const [legacyCount, setLegacyCount] = useState(animate ? 0 : (lines?.length ?? 0));
+
+  const timerRef    = useRef(null);
+  const frameBRef   = useRef(null);
+  if (isDual && !frameBRef.current) {
+    frameBRef.current = parseNdjson(window.RollData?.CYCLE_NDJSON ?? '');
+  }
+
+  // ── Dual-frame effect ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!animate) { setCount(lines.length); return; }
+    if (!isDual) return;
+    clearTimeout(timerRef.current);
+    const fa = frameAData || [];
+    const fb = frameBRef.current || [];
+
+    if (phase === 'frameA') {
+      if (revealCount < fa.length) {
+        const delay = revealCount === 0 ? 500 : _REVEAL_DELAY(fa[revealCount]);
+        timerRef.current = setTimeout(() => setRevealCount(c => c + 1), delay);
+      } else {
+        timerRef.current = setTimeout(() => { setPhase('transition'); setClockIdx(0); }, 800);
+      }
+    } else if (phase === 'transition') {
+      if (noMotion) {
+        timerRef.current = setTimeout(() => { setPhase('frameB'); setRevealCount(0); }, 50);
+      } else {
+        const tick = Math.floor(1200 / _CLOCK_TICKS.length);
+        if (clockIdx < _CLOCK_TICKS.length - 1) {
+          timerRef.current = setTimeout(() => setClockIdx(i => i + 1), tick);
+        } else {
+          timerRef.current = setTimeout(() => { setPhase('frameB'); setRevealCount(0); }, tick);
+        }
+      }
+    } else if (phase === 'frameB') {
+      if (revealCount < fb.length) {
+        timerRef.current = setTimeout(() => setRevealCount(c => c + 1), 180);
+      } else {
+        timerRef.current = setTimeout(() => setPhase('hold'), 200);
+      }
+    } else if (phase === 'hold') {
+      timerRef.current = setTimeout(() => { setPhase('frameA'); setRevealCount(0); setClockIdx(0); }, 2000);
+    }
+    return () => clearTimeout(timerRef.current);
+  }, [isDual, phase, revealCount, clockIdx]);
+
+  // ── Legacy effect ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isDual || !animate) return;
+    const all = lines || [];
     let i = 0;
-    setCount(0);
+    setLegacyCount(0);
     const tick = () => {
       i += 1;
-      setCount(i);
-      if (i < lines.length) {
-        const next = lines[i];
-        const delay = next.kind === "blank" ? 120 : next.kind === "stamp" ? 700 : 380;
-        timerRef.current = setTimeout(tick, delay);
+      setLegacyCount(i);
+      if (i < all.length) {
+        timerRef.current = setTimeout(tick, _REVEAL_DELAY(all[i]));
       }
     };
     timerRef.current = setTimeout(tick, 500);
     return () => clearTimeout(timerRef.current);
-  }, [animate, lines]);
+  }, [isDual, animate, lines]);
 
-  const shown = lines.slice(0, count);
+  // ── Render ────────────────────────────────────────────────────────────────
+  let bodyLines = [];
+  let isTransition = false;
+  let pulseGreen   = false;
+  let chromeTitle  = 'roll-loop-roll · tmux';
+
+  if (!isDual) {
+    bodyLines  = (lines || []).slice(0, legacyCount);
+    pulseGreen = true;
+  } else if (phase === 'frameA') {
+    bodyLines   = (frameAData || []).slice(0, revealCount);
+    chromeTitle = 'roll · install';
+  } else if (phase === 'transition') {
+    bodyLines   = frameAData || [];
+    isTransition = !noMotion;
+    chromeTitle = 'roll · idle';
+  } else {
+    const fb = frameBRef.current || [];
+    bodyLines   = fb.slice(0, phase === 'hold' ? fb.length : revealCount);
+    pulseGreen  = true;
+    chromeTitle = 'roll-loop-roll · cycle #047';
+  }
 
   return (
     <div className="r-terminal" role="img" aria-label="Roll loop terminal session">
       <div className="r-terminal-chrome">
         <span className="r-terminal-dot" style={{ background: "#ff5f57" }} />
         <span className="r-terminal-dot" style={{ background: "#febc2e" }} />
-        <span className="r-terminal-dot" style={{ background: "#28c840" }} />
-        <span className="r-terminal-title">roll-loop-roll · tmux</span>
+        <span className="r-terminal-dot" style={{ background: pulseGreen ? "#28c840" : "#555" }} />
+        <span className="r-terminal-title">{chromeTitle}</span>
         <span className="r-terminal-status">
           <span className="r-pulse" /> {liveLabel}
         </span>
       </div>
-      <div className="r-terminal-body">
-        {shown.map((l, i) => <TerminalLine key={i} line={l} />)}
+      <div className={`r-terminal-body${isTransition ? ' is-dim' : ''}`}>
+        {bodyLines.map((l, i) => <TerminalLine key={i} line={l} />)}
+        {isTransition && _GHOST_LINES.map((g, i) => (
+          <div key={i} className="r-tl-ghost" style={{ animationDelay: `${i * 220}ms` }}>{g}</div>
+        ))}
+        {isTransition && (
+          <div className="r-terminal-clock">{_CLOCK_TICKS[clockIdx]}</div>
+        )}
       </div>
     </div>
   );

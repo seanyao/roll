@@ -3267,6 +3267,17 @@ _gh_repo_slug() {
 # Returns 0 if gh CLI is installed and executable, 1 otherwise.
 _gh_available() { command -v gh >/dev/null 2>&1; }
 
+# Resolve the GitHub owner/repo slug and set <outvar> to it.
+# Returns 0 on success. Returns 1 (no output) if gh is unavailable or the
+# remote is not a GitHub URL — caller decides how to handle failure.
+_gh_resolve() {
+  local _outvar="$1"
+  _gh_available || return 1
+  local _slug
+  _slug=$(_gh_repo_slug 2>/dev/null) || return 1
+  printf -v "$_outvar" '%s' "$_slug"
+}
+
 # Poll gh run list until current commit's CI completes.
 # Returns 0 on success (or when gh binary missing — graceful skip).
 # Returns 1 on CI failure, timeout, or any gh call failure.

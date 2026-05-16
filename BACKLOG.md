@@ -68,6 +68,7 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-REL-001](docs/features/roll-release.md#us-rel-001) | Add roll-release skill — one-command publish flow（已废弃，2026-05-16 移除，发版改走 `scripts/release.sh`） | ✅ Done |
+| [US-REL-002](docs/features/roll-release.md#us-rel-002) | 发版脚本 AI 调用瘦身 — 三步合两步，token 砍七成 | 📋 Todo |
 
 ## Epic: Engineering Infrastructure
 ### Feature: skill-harness

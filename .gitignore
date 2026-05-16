@@ -34,8 +34,5 @@ npm-debug.log*
 # Claude Code runtime artifacts (PID locks, transient state)
 .claude/*.lock
 
-# Private release scripts (contain personal npm credentials/workflow)
-scripts/release.sh
-
 # TCR proof-of-pass record (local only, written by tests/run.sh)
 .roll/

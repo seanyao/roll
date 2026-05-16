@@ -262,28 +262,3 @@ Architectural friction signals flagged during story execution.
 - 现在只有一条 YAML 解析路径：`config_get`
 
 **Files**: `bin/roll`
-
----
-
-## REFACTOR-017 统一 agent 命令分发 — 抽出 _agent_argv / _agent_cmd_str ✅
-
-**Flagged**: 2026-05-15 by dream scan
-**Completed**: 2026-05-16
-**Signal**: agent 命令分发 case 块在 7 处重复（dream 报告 6 处，实测含 `_agent_skill_cmd` 共 7 处），新增 agent 需逐处同步否则运行时失败
-
-**Observation**:
-- `bin/roll`: `_agent_run_skill`、`cmd_review_pr`、`_peer_call`（tmux 与非 tmux 两分支）、`_agent_skill_cmd` 共 5 处
-- `scripts/release.sh`: `_run_changelog_skill`、`_run_release_notes_skill`、`_run_features_sync_skill` 共 3 处
-- 每处维护 claude/kimi/deepseek/pi/codex/opencode 6 个映射 + 一个 default 错误分支
-- 三种参数形态混杂：claude 默认 `claude -p` vs `claude -p --output-format text` vs codex `exec` vs `exec --json --output-last-message`
-- 新增 agent 需改 7 处源代码且容易遗漏；改变 claude 默认参数也要扫 7 处
-
-**Fix**:
-- 新增 `_agent_argv <agent> <mode> <prompt>` 把 (agent, mode) → argv 表达成单一查表，结果写入全局数组 `_AGENT_ARGV`
-- 模式：`text`（结构化输出）、`plain`（默认输出）、`peer`（peer 协议）
-- 新增 `_agent_cmd_str` 在需要把命令作为字符串传出去（如 tmux send-keys）的场景下复用同一张表
-- 7 处分发点全部改为 `_agent_argv … || { err; return 1; }` + `"${_AGENT_ARGV[@]}"`
-- `_agent_skill_cmd` 因要在 cron 字符串里保留 `"$(strip-frontmatter)"` 子 shell，单独处理 prompt 槽位但仍读同一张表
-- 新增 18 条单测覆盖 (agent × mode) 全组合 + `_agent_skill_cmd` 输出格式
-
-**Files**: `bin/roll`, `scripts/release.sh`, `tests/unit/agent_argv.bats` (new), `tests/unit/roll_peer_tmux.bats` (structural tests updated)

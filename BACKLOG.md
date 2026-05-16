@@ -223,9 +223,9 @@
 | [US-DOC-006](docs/features/documentation.md#us-doc-006) | 扩展 roll-.dream 文档覆盖度巡检 + brief 展示 doc coverage（缺 EN guide / 缺 ZH 翻译 / 文件落错目录） | ✅ Done |
 | [US-DOC-007](docs/features/documentation.md#us-doc-007) | Roll FAQ 双语指南 — 覆盖全 AI 自治开发 10 大常见场景，每条含原因与解决方案，帮用户不读源码也能自助排障 | ✅ Done |
 | [US-DOC-008](docs/features/documentation.md#us-doc-008) | features.md 作为产品视角的 Feature SOT，发版时自动整体同步与项目当前状态保持一致 | ✅ Done |
-| [US-DOC-009](docs/features/documentation.md#us-doc-009) | dream 夜检 features.md 新鲜度 — 检测功能目录是否覆盖近期完成的 story，落后时写 REFACTOR 条目 | 📋 Todo |
-| US-DOC-010 | features.md 结构和完整性校验移出 integration CI，改为只在 release 时检查 — 现在每个 feature PR 都要求 features.md 同步更新，但 features.md 只在发版时才由 release.sh 重写，导致正常 loop PR 也会被 CI 挡住 | 📋 Todo |
-| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | 📋 Todo |
+| [US-DOC-009](docs/features/documentation.md#us-doc-009) | dream 夜检 features.md 新鲜度 — 检测功能目录是否覆盖近期完成的 story，落后时写 REFACTOR 条目 | ✅ Done |
+| [US-DOC-010](docs/features/documentation.md#us-doc-010) | features.md 结构和完整性校验移出 integration CI，改为只在 release 时检查 — 现在每个 feature PR 都要求 features.md 同步更新，但 features.md 只在发版时才由 release.sh 重写，导致正常 loop PR 也会被 CI 挡住 | ✅ Done |
+| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | 🔨 In Progress |
 
 ## ♻️ Refactor
 | ID | Description | Status |

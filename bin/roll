@@ -2237,6 +2237,7 @@ set +e
 # On any failure (no remote, no main, etc.) fall back to running in the
 # project's main tree (degraded — no isolation, like pre-037 behavior).
 CYCLE_ID="\$(date -u +%Y%m%d-%H%M%S)-\$\$"
+CYCLE_START=\$(date -u +%s)
 WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0
@@ -2301,6 +2302,25 @@ for _attempt in 1 2 3; do
     sleep 30
   fi
 done
+
+# FIX-044: capture cycle data from worktree before cleanup removes it
+_cycle_tcr=0
+_cycle_status="idle"
+_cycle_built="[]"
+if [ "\$_USE_WORKTREE" = "1" ]; then
+  if [ "\$_exit" -ne 0 ]; then
+    _cycle_status="failed"
+  else
+    _cycle_commits_pre=\$(cd "\$WT" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+    if [ "\$_cycle_commits_pre" -gt 0 ]; then
+      _cycle_status="built"
+      _cycle_tcr=\$(cd "\$WT" && git log --oneline origin/main..HEAD -- 2>/dev/null | grep -c ' tcr:' || echo 0)
+      if command -v jq >/dev/null 2>&1; then
+        _cycle_built=\$(cd "\$WT" && git diff origin/main -- BACKLOG.md 2>/dev/null | grep '✅ Done' | grep -oE '\[[A-Z]+-[0-9]+\]' | sed 's/^.//;s/.\$//' | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")
+      fi
+    fi
+  fi
+fi
 
 # US-AUTO-038: diff snapshot vs current and delete any claude/* branches this
 # session pushed to origin. Runs regardless of claude's exit code (cleanup is
@@ -2374,6 +2394,32 @@ fi
 
 # US-AUTO-040: fallback GC — delete remote loop/cycle-* branches already merged to main.
 _loop_cleanup_stale_cycle_branches "${project_path}" || true
+
+# FIX-044 / Step 5: Write loop cycle run summary to runs.jsonl
+# Deterministic — runs in shell regardless of whether agent executes SKILL.md Step 5.
+# Idempotent: skips if a record for this run_id already exists (agent may also write).
+_runs_dst="${HOME}/.shared/roll/loop/runs.jsonl"
+mkdir -p "\$(dirname "\$_runs_dst")"
+_cycle_end=\$(date -u +%s)
+_cycle_dur=\$(( _cycle_end - CYCLE_START ))
+_ts=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+_run_id="loop-\${CYCLE_ID%-*}"
+if command -v jq >/dev/null 2>&1 && ! grep -qF "\"run_id\":\"\$_run_id\"" "\$_runs_dst" 2>/dev/null; then
+  jq -nc \\
+    --arg ts "\$_ts" \\
+    --arg project "${slug}" \\
+    --arg run_id "\$_run_id" \\
+    --arg status "\$_cycle_status" \\
+    --argjson built "\$_cycle_built" \\
+    --argjson skipped '[]' \\
+    --argjson alerts '[]' \\
+    --argjson tcr_count "\$_cycle_tcr" \\
+    --argjson duration_sec "\$_cycle_dur" \\
+    '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
+      built:\$built, skipped:\$skipped, alerts:\$alerts,
+      tcr_count:\$tcr_count, duration_sec:\$duration_sec}' \\
+    >> "\$_runs_dst" 2>/dev/null || true
+fi
 INNER
   chmod +x "$inner_path"
 

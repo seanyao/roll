@@ -159,7 +159,7 @@
 | FIX-041 | loop cycle 内 claude 频繁被 permission/sandbox 拦截后空退 — runner 调 claude 时 bypass permission 检查，worktree 隔离已限制 blast radius | ✅ Done |
 | FIX-042 | outer runner 的 tmux kill-all 误杀其他项目的 loop session — 匹配模式限定到当前项目 slug | ✅ Done |
 | FIX-043 | `roll loop now` 在 state=running 时直接退出，绕过 FIX-037 heal，手动触发无法自愈孤儿 — bail 之前先做 liveness 检查 | ✅ Done |
-| FIX-044 | loop cycle 完成后未写入 runs.jsonl — Step 5 Run Summary 漏执行，`roll loop runs` 看不到刚跑完的记录 | 📋 Todo |
+| FIX-044 | loop cycle 完成后未写入 runs.jsonl — Step 5 Run Summary 漏执行，`roll loop runs` 看不到刚跑完的记录 | ✅ Done |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -221,6 +221,8 @@
 | [US-DOC-007](docs/features/documentation.md#us-doc-007) | Roll FAQ 双语指南 — 覆盖全 AI 自治开发 10 大常见场景，每条含原因与解决方案，帮用户不读源码也能自助排障 | ✅ Done |
 | [US-DOC-008](docs/features/documentation.md#us-doc-008) | features.md 作为产品视角的 Feature SOT，发版时自动整体同步与项目当前状态保持一致 | ✅ Done |
 | [US-DOC-009](docs/features/documentation.md#us-doc-009) | dream 夜检 features.md 新鲜度 — 检测功能目录是否覆盖近期完成的 story，落后时写 REFACTOR 条目 | 📋 Todo |
+| US-DOC-010 | features.md 结构和完整性校验移出 integration CI，改为只在 release 时检查 — 现在每个 feature PR 都要求 features.md 同步更新，但 features.md 只在发版时才由 release.sh 重写，导致正常 loop PR 也会被 CI 挡住 | 📋 Todo |
+| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |
@@ -266,6 +268,7 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-LOOP-001](docs/features/cycle-event-stream.md#us-loop-001) | 看 loop 干活像看 CI pipeline — 每轮自动周期的故事选取、跨 agent 评审、micro-commit 提交、CI 检查、PR 合并都是带颜色的事件流，attach 和 monitor 直接渲染 | 📋 Todo |
+| [US-LOOP-002](docs/features/cycle-event-stream.md#us-loop-002) | loop tmux 输出体现方法论掌控力 — 压制噪音，用真实数据突出 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate，每个检查点有证据不是口说 | 📋 Todo |
 
 ## Epic: Marketing & Site
 ### Feature: landing-page
@@ -292,6 +295,6 @@
 | IDEA-015 | loop 在独立目录（worktree）里跑，避免污染主干正在编辑的代码 — 拆为 US-AUTO-036 + US-AUTO-037 落地 | ✅ Done → US-AUTO-036, US-AUTO-037 |
 | IDEA-016 | PR 生命周期管理迁移到 GitHub Actions — 评审触发、CI 绿后 auto-merge、rebase 失败诊断、stale 清理全部由 GitHub Actions event-driven 处理；Loop 只检查自己开的未收口故事。需先验证 US-AUTO-034 落地效果再做设计。 | ✅ Done → US-GHA-002 |
 | IDEA-017 | FAQ 文档 — 面向产品工程师用户，覆盖全 AI 自治开发场景下的常见问题：典型场景、解决方案与简明原理解释（loop 卡住、agent 切换、PR 冲突、多项目并行、权限问题等） | ✅ Done → US-DOC-007 |
-| IDEA-018 | cycle 事件粒度简化 — 现在的 cycle 事件流划得太细，"规划中"和"正常"两个状态就够用，"进行中"的子事件没必要 — flagged by user 2026-05-17 | 📋 Todo |
+| IDEA-018 | features.md 区分"正常"和"规划中" — 已有 Done story 的 feature 正常展示，全部 story 仍为 Todo 的 feature 应标记为"规划中"，不能混在一起平铺 | ✅ Done → US-DOC-011 |
 | IDEA-019 | launchd 默认 loop_minute 测试 flaky — hash mod 55 容易碰撞，相邻两个项目偶尔会拿到同一分钟 — flagged by simplify CI debugging 2026-05-17 | 📋 Todo |
-| IDEA-020 | loop tmux 输出精简与视觉层次设计 — 当前信息量过大、关键节点不突出、换行排版混乱；需设计精简方案：过滤低信号噪音，用视觉层次突出 Step 切换、CI gate、TCR commit、story 完成等关键事件，让用户扫一眼即知当前阶段与健康状态 | 📋 Todo |
+| IDEA-020 | loop tmux 输出精简与视觉层次设计 — 当前信息量过大、关键节点不突出、换行排版混乱；需设计精简方案：过滤低信号噪音，用视觉层次突出 Step 切换、CI gate、TCR commit、story 完成等关键事件，让用户扫一眼即知当前阶段与健康状态 | ✅ Done → US-LOOP-002 |

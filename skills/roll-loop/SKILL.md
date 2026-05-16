@@ -276,6 +276,11 @@ After each item completes:
 
 ### Step 5 — Write Run Summary
 
+> **FIX-044**: The inner runner script (`_write_loop_runner_script` in `bin/roll`)
+> now appends this record deterministically at cycle end. The shell write is the
+> authoritative record; the agent should still emit a run summary in the cycle's
+> final report for `cron.log` visibility.
+
 After all items in this cycle:
 
 ```yaml

@@ -50,3 +50,30 @@
 - Producer: cycle runner（boundary 事件）+ 三个 SKILL（domain 事件）
 - Consumer: `roll loop attach`（tmux 直读）/ `roll loop monitor`（NDJSON 渲染）/ landing page Terminal 组件（fixture 回放）
 - Integration test: `tests/integration/cmd_loop_event.bats`
+
+---
+
+<a id="us-loop-002"></a>
+## ✅ US-LOOP-002 loop tmux 输出体现方法论掌控力
+
+**Created**: 2026-05-17
+**Completed**: 2026-05-17
+
+- As a roll 用户
+- I want `roll loop attach` 的 tmux 输出压制 agent 自言自语噪音，用真实数据突出每个关键检查点
+- So that 扫一眼就能确认 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate、PR 合并全部有据可查而非口说
+
+**AC:**
+- [x] `lib/loop-fmt.py` 实现 3-tier 状态机：Tier 3 抑制、Tier 2 灰色 `✏ path`、Tier 1 信号行
+- [x] Tier 3 完全压制：`system/init`、thinking block、Read/Glob/Grep tool call、普通 Bash、非错误 tool result
+- [x] Tier 2 静默输出 Edit/Write：`  ✏ <path>`（深灰，无额外空行）
+- [x] Tier 1 stamp：`[loop] cycle N:` 明文 → `HH:MM:SS  cycle #N — picking story`；`result` event → 静音 done 行
+- [x] Tier 1 step：tcr commit 含 hash + 消息 + 测试数量；story skill 含 US-ID；peer 含 verdict；ci 含 green/red；pr 含编号
+- [x] 错误 tool result → `→  error  tool  <first line of error>`
+- [x] `result` event `error_max_turns` → `→  error  max-turns  Xs`
+- [x] ANSI 颜色：深灰时间戳/箭头/detail，cyan 分类，white 标识，green ok 状态，red 错误状态
+- [x] 30 条 fixture-driven bats 单元测试全部通过（`tests/unit/loop_fmt.bats`）
+
+**Files:**
+- `lib/loop-fmt.py` — 完整重写，实现 3-tier state machine（`LoopFmt` class）
+- `tests/unit/loop_fmt.bats` — 30 条单元测试，覆盖全部 tier 和边界情况

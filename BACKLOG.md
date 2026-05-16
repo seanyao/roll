@@ -268,7 +268,7 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-LOOP-001](docs/features/cycle-event-stream.md#us-loop-001) | 看 loop 干活像看 CI pipeline — 每轮自动周期的故事选取、跨 agent 评审、micro-commit 提交、CI 检查、PR 合并都是带颜色的事件流，attach 和 monitor 直接渲染 | 📋 Todo |
-| [US-LOOP-002](docs/features/cycle-event-stream.md#us-loop-002) | loop tmux 输出体现方法论掌控力 — 压制噪音，用真实数据突出 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate，每个检查点有证据不是口说 | 📋 Todo |
+| [US-LOOP-002](docs/features/cycle-event-stream.md#us-loop-002) | loop tmux 输出体现方法论掌控力 — 压制噪音，用真实数据突出 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate，每个检查点有证据不是口说 | ✅ Done |
 
 ## Epic: Marketing & Site
 ### Feature: landing-page

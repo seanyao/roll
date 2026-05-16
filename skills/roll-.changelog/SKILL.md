@@ -416,6 +416,10 @@ prompt 会包含：
   （即使没有 deep doc 也要列）
 - Feature 名跟 `docs/features/<file>.md` 文件名一致时，加链接到该 md
 - 没有对应 deep doc 的 Feature，**只写 plain text 不加链接**
+- **Planning distinction（US-DOC-011）**：
+  - 该 Feature 下**所有** Story 均为 `📋 Todo` → 在描述末尾追加 `*(规划中)*`
+  - 只要有 **≥1 个** `✅ Done` Story → 正常展示，**不加**任何标记
+  - 一眼可见：规划中的 Feature 在每个 Epic 分组的末尾列出
 - 描述写 1 句话 **产品视角**：用户能用它做什么，避免实现细节
 - 分组用 BACKLOG 的 Epic 名，原序，不重排
 - Core Highlights 从所有 Features 里挑 3-5 个最能代表产品定位的，

@@ -74,7 +74,7 @@
   双语分层文档（guide / domain / features），dream 巡检文档覆盖度
 
 ### Web Presence
-- [Landing Page](docs/features/landing-page.md) — Above-the-fold animation tells the three-layer autonomous product story in under 6 seconds
+- [Landing Page](docs/features/landing-page.md) — Above-the-fold animation tells the three-layer autonomous product story in under 6 seconds *(规划中)*
   首屏动画 6 秒内讲清三层自治产品故事
 
 ### Engineering Infrastructure

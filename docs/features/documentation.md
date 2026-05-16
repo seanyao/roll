@@ -320,3 +320,30 @@
 
 **Dependencies:**
 - Depends on: US-DOC-008（features.md 必须存在才有意义）
+
+---
+
+<a id="us-doc-011"></a>
+## US-DOC-011 features.md 区分"正常"和"规划中" ✅
+
+**Created**: 2026-05-17
+**Completed**: 2026-05-17
+
+- As a user or AI reading docs/features.md
+- I want features where all Stories are still Todo to be visually distinguished
+- So that I can tell at a glance what's shipped vs what's planned
+
+**AC:**
+- [x] `docs/features.md` 中全部 Story 均为 `📋 Todo` 的 Feature 在描述末尾追加 `*(规划中)*`
+- [x] 只要有 ≥1 个 `✅ Done` Story 的 Feature 正常展示，不加任何标记
+- [x] `skills/roll-.changelog/SKILL.md` Section 8.4 包含 planning distinction 规则，供 release 时 AI 重写遵循
+- [x] `tests/unit/roll_doc_structure.bats` 新增 3 个测试验证规划中标记和规则存在
+
+**Files:**
+- `docs/features.md` (modified — Landing Page marked 规划中)
+- `skills/roll-.changelog/SKILL.md` (modified — Section 8.4 planning distinction rule added)
+- `tests/unit/roll_doc_structure.bats` (modified — 3 new tests)
+- `CHANGELOG.md` (modified — Unreleased entry added)
+
+**Dependencies:**
+- Depends on: US-DOC-008（features.md 必须存在）

@@ -39,3 +39,18 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
   local ci_test="${BATS_TEST_DIRNAME}/../integration/release_features_sync.bats"
   ! grep -qF "mentions every BACKLOG" "$ci_test"
 }
+
+# US-DOC-011: features.md distinguishes planning-stage features (all-Todo) from shipped ones
+
+@test "features.md marks all-Todo features with planning marker" {
+  grep -qF "规划中" "${DOCS}/features.md"
+}
+
+@test "features.md Landing Page entry has planning marker (all stories are Todo)" {
+  grep -i "landing.page\|landing page" "${DOCS}/features.md" | grep -q "规划中"
+}
+
+@test "changelog SKILL.md Section 8.4 contains planning distinction rule" {
+  local skill="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
+  grep -q "规划中" "$skill"
+}

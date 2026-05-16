@@ -226,7 +226,7 @@
 | [US-DOC-008](docs/features/documentation.md#us-doc-008) | features.md 作为产品视角的 Feature SOT，发版时自动整体同步与项目当前状态保持一致 | ✅ Done |
 | [US-DOC-009](docs/features/documentation.md#us-doc-009) | dream 夜检 features.md 新鲜度 — 检测功能目录是否覆盖近期完成的 story，落后时写 REFACTOR 条目 | ✅ Done |
 | [US-DOC-010](docs/features/documentation.md#us-doc-010) | features.md 结构和完整性校验移出 integration CI，改为只在 release 时检查 — 现在每个 feature PR 都要求 features.md 同步更新，但 features.md 只在发版时才由 release.sh 重写，导致正常 loop PR 也会被 CI 挡住 | ✅ Done |
-| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | 📋 Todo |
+| [US-DOC-011](docs/features/documentation.md#us-doc-011) | features.md 区分"正常"和"规划中" — 全部 story 仍为 Todo 的 feature 标记为规划中，只要有一个 Done 就正常展示，两种状态一眼可见 | ✅ Done |
 
 ## ♻️ Refactor
 | ID | Description | Status |
@@ -278,13 +278,13 @@
 |-------|-------------|--------|
 | [US-LOOP-001](docs/features/cycle-event-stream.md#us-loop-001) | 看 loop 干活像看 CI pipeline — 每轮自动周期的故事选取、跨 agent 评审、micro-commit 提交、CI 检查、PR 合并都是带颜色的事件流，attach 和 monitor 直接渲染 | ✅ Done |
 | [US-LOOP-002](docs/features/cycle-event-stream.md#us-loop-002) | loop tmux 输出体现方法论掌控力 — 压制噪音，用真实数据突出 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate，每个检查点有证据不是口说 | ✅ Done |
-| [US-LOOP-003](docs/features/cycle-event-stream.md#us-loop-003) | loop 等待期间显示 spinner 动画，story 执行、CI 运行、PR 合并三个等待点都有反馈，不再看起来像卡住 | 📋 Todo |
+| [US-LOOP-003](docs/features/cycle-event-stream.md#us-loop-003) | loop 等待期间显示 spinner 动画，story 执行、CI 运行、PR 合并三个等待点都有反馈，不再看起来像卡住 | ✅ Done |
 
 ## Epic: Marketing & Site
 ### Feature: landing-page
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-WEB-001](docs/features/landing-page.md#us-web-001) | 首屏动画讲清"装好就忘了它"的三层自治故事 — 一次开关、47 分钟时间快进、自动 fire 一轮交付，6 秒内 grok 整个产品 `depends-on:US-LOOP-001` | 📋 Todo |
+| [US-WEB-001](docs/features/landing-page.md#us-web-001) | 首屏动画讲清"装好就忘了它"的三层自治故事 — 一次开关、47 分钟时间快进、自动 fire 一轮交付，6 秒内 grok 整个产品 `depends-on:US-LOOP-001` | ✅ Done |
 
 ## 💡 Ideas
 | ID | Description | Status |

@@ -632,6 +632,50 @@ button { font-family: inherit; }
 }
 @keyframes r-blink { to { visibility: hidden; } }
 
+/* ── TERMINAL DUAL-FRAME ANIMATION ──────────────────────────────────────── */
+.r-terminal-body { position: relative; }
+.r-terminal-body.is-dim {
+  opacity: 0.18;
+  transition: opacity 0.25s ease;
+}
+.r-tl-ghost {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #52525b;
+  opacity: 0;
+  animation: r-ghost-float 700ms ease both;
+  padding-left: 2px;
+  line-height: 1.7;
+}
+@keyframes r-ghost-float {
+  0%   { opacity: 0;    transform: translateY(3px); }
+  30%  { opacity: 0.5;  transform: translateY(0);   }
+  70%  { opacity: 0.35; transform: translateY(-2px); }
+  100% { opacity: 0;    transform: translateY(-6px); }
+}
+.r-terminal-clock {
+  position: absolute;
+  bottom: 14px;
+  right: 18px;
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 500;
+  color: #52525b;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .r-terminal-body.is-dim { transition: none; opacity: 0.5; }
+  .r-tl-ghost             { animation: none; opacity: 0.3; }
+  .r-terminal-clock       { transition: none; }
+  .r-tl                   { animation: none; }
+}
+@media (max-width: 640px) {
+  .r-terminal-body.is-dim { opacity: 1; }
+  .r-terminal-clock       { display: none; }
+}
+
 /* ── WHY ─────────────────────────────────────────────────────────────────── */
 .r-why-grid {
   display: grid;

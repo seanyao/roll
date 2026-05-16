@@ -3,6 +3,17 @@
 
 window.RollData = (function () {
 
+  // Shared fixture — raw cycle log, language-independent (produced by US-LOOP-001)
+  const CYCLE_NDJSON = [
+    '{"ts":"2026-05-17T11:05:02Z","stage":"cycle_start","label":"047","detail":"","outcome":""}',
+    '{"ts":"2026-05-17T11:05:03Z","stage":"story","label":"US-AUTH-003","detail":"user login with OAuth","outcome":""}',
+    '{"ts":"2026-05-17T11:06:10Z","stage":"build","label":"2 commits","detail":"tcr micro-steps","outcome":"ok"}',
+    '{"ts":"2026-05-17T11:07:45Z","stage":"peer","label":"1/3","detail":"AGREE","outcome":"agree"}',
+    '{"ts":"2026-05-17T11:08:01Z","stage":"ci","label":"green","detail":"43s · 26 tests","outcome":"ok"}',
+    '{"ts":"2026-05-17T11:08:30Z","stage":"pr","label":"#312","detail":"auto-merged · loop/cycle-047","outcome":"ok"}',
+    '{"ts":"2026-05-17T11:09:18Z","stage":"cycle_end","label":"047","detail":"2 tcr · 6m 12s","outcome":"done"}',
+  ].join('\n');
+
   // ─── EN ──────────────────────────────────────────────────────────────────
   const EN = {
     UI: {
@@ -48,6 +59,13 @@ window.RollData = (function () {
       { kind: "step",   arrow: "pr",    label: "#312",   text: "auto-merged · loop/cycle-047", ok: true },
       { kind: "blank" },
       { kind: "stamp",  time: "11:09:18", text: "cycle #047 — done · idle until 12:05", muted: true },
+      { kind: "cursor" },
+    ],
+    FRAME_A: [
+      { kind: "prompt", text: "roll loop on" },
+      { kind: "ok",     text: "launchd scheduled",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
+      { kind: "ok",     text: "tmux session",       detail: "roll-loop-roll · attach with `roll loop attach`" },
+      { kind: "ok",     text: "active window",      detail: "10:00 – 18:00 · idle outside" },
       { kind: "cursor" },
     ],
     WHY: {
@@ -214,6 +232,13 @@ window.RollData = (function () {
       { kind: "stamp",  time: "11:09:18", text: "cycle #047 — 完成 · 静默至 12:05", muted: true },
       { kind: "cursor" },
     ],
+    FRAME_A: [
+      { kind: "prompt", text: "roll loop on" },
+      { kind: "ok",     text: "launchd 已调度",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
+      { kind: "ok",     text: "tmux 会话就绪",    detail: "roll-loop-roll · roll loop attach 可接入" },
+      { kind: "ok",     text: "活跃窗口",        detail: "10:00 – 18:00 · 窗外静默" },
+      { kind: "cursor" },
+    ],
     WHY: {
       label: "为什么是 Roll",
       title: "软件已经变了。AI 现在自己写代码。",
@@ -330,5 +355,5 @@ window.RollData = (function () {
     },
   };
 
-  return { EN, ZH };
+  return { EN, ZH, CYCLE_NDJSON };
 })();

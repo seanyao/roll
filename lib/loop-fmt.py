@@ -9,14 +9,76 @@ Tier 1 (signal):     tcr commit, story skill, peer verdict, ci gate, pr merge, e
 import sys
 import json
 import re
+import os
+import threading
+import time
 from datetime import datetime, timezone
+
+_SPIN_ENABLED = os.environ.get("LOOP_FMT_NO_SPIN", "0") != "1"
+SPIN_FRAMES   = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 DARK_GRAY = "\033[90m"
 CYAN      = "\033[36m"
 WHITE     = "\033[97m"
 GREEN     = "\033[32m"
 RED       = "\033[31m"
+YELLOW    = "\033[33m"
 RESET     = "\033[0m"
+
+
+class Spinner:
+    """Animated wait indicator for long-running operations.
+
+    In production (LOOP_FMT_NO_SPIN=0): background thread writes frames using \\r.
+    In test mode  (LOOP_FMT_NO_SPIN=1): writes a static ⏳ line to stdout instead.
+    """
+    def __init__(self):
+        self._thread  = None
+        self._running = False
+        self._label   = ""
+        self._lock    = threading.Lock()
+
+    @property
+    def active(self):
+        return self._running
+
+    def start(self, label):
+        with self._lock:
+            if self._running:
+                self._label = label  # update without restart
+                return
+            self._label   = label
+            self._running = True
+        if _SPIN_ENABLED:
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+        else:
+            sys.stdout.write(f"  {YELLOW}⏳ {label}...{RESET}\n")
+            sys.stdout.flush()
+
+    def stop(self):
+        with self._lock:
+            was_running   = self._running
+            self._running = False
+        if self._thread:
+            self._thread.join(timeout=0.3)
+            self._thread = None
+        if _SPIN_ENABLED and was_running:
+            sys.stdout.write(f"\r{' ' * 60}\r")
+            sys.stdout.flush()
+
+    def _run(self):
+        i = 0
+        while self._running:
+            with self._lock:
+                label = self._label
+            frame = SPIN_FRAMES[i % len(SPIN_FRAMES)]
+            sys.stdout.write(f"\r  {YELLOW}{frame} {label}...{RESET}")
+            sys.stdout.flush()
+            time.sleep(0.12)
+            i += 1
+        sys.stdout.write(f"\r{' ' * 60}\r")
+        sys.stdout.flush()
 
 SUPPRESS_TOOLS = {"Read", "Glob", "Grep", "ReadMcpResourceTool", "ListMcpResourcesTool",
                   "WebFetch", "WebSearch", "TaskCreate", "TaskGet", "TaskList",
@@ -45,13 +107,15 @@ def stamp(text, muted=False):
 
 class LoopFmt:
     def __init__(self):
-        self.last_bash_cmd = ""
-        self.tcr_count = 0
+        self.last_bash_cmd   = ""
+        self.tcr_count       = 0
         self.last_test_count = None
-        self.cycle_num = None
-        self.pending_commit = False
-        self.pending_pr = False
-        self.pending_ci = False
+        self.cycle_num       = None
+        self.pending_commit  = False
+        self.pending_pr      = False
+        self.pending_ci      = False
+        self.pending_story   = False
+        self.spinner         = Spinner()
 
     def _extract_cycle_num(self, text):
         m = re.search(r'cycle[#\s]+(\d+)', text, re.IGNORECASE)
@@ -139,8 +203,10 @@ class LoopFmt:
                 self.pending_commit = True
             elif re.search(r'gh pr (create|merge)', cmd):
                 self.pending_pr = True
-            elif re.search(r'(roll ci|npm run ci|ci:local)', cmd):
+                self.spinner.start("merging PR")
+            elif re.search(r'(roll ci|npm run ci|_ci_wait|ci:local)', cmd):
                 self.pending_ci = True
+                self.spinner.start("waiting for CI")
             return  # Wait for result
 
         if name == "Skill":
@@ -151,6 +217,8 @@ class LoopFmt:
                 print()
                 print(stamp(f"cycle #{self.cycle_num or '?'} — picking story"))
                 print(step("story", us_id, trunc(args, 60)))
+                self.pending_story = True
+                self.spinner.start("executing story")
             return
 
         # All other tools (Agent, ToolSearch, etc.): suppress
@@ -189,7 +257,13 @@ class LoopFmt:
                     print(step("tcr", commit_hash, f"{commit_msg}{test_part}"))
                 return
 
+            if self.pending_story:
+                self.pending_story = False
+                self.spinner.stop()
+                return  # story result content suppressed; TCR events showed the work
+
             if self.pending_pr:
+                self.spinner.stop()
                 self.pending_pr = False
                 m = re.search(r'#(\d+)', text)
                 if m:
@@ -201,6 +275,7 @@ class LoopFmt:
                 return
 
             if self.pending_ci:
+                self.spinner.stop()
                 self.pending_ci = False
                 has_green = re.search(r'(green|pass|success|all tests)', text, re.IGNORECASE)
                 has_red   = re.search(r'(red|fail|error)', text, re.IGNORECASE)

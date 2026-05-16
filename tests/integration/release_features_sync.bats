@@ -59,3 +59,39 @@ teardown() { integration_teardown 2>/dev/null || true; }
   grep -qE "^## 维护说明" "$FEATURES_MD"
 }
 
+# ─── US-REL-002: AI call optimisation E2E golden path ────────────────────────
+
+@test "release.sh golden path: _run_changelog_and_notes is called in main body" {
+  # Verify the combined call is wired in the main flow (not just defined)
+  local defn_line; defn_line=$(grep -n "_run_changelog_and_notes()" "$RELEASE_SH" | head -1 | cut -d: -f1)
+  local call_line; call_line=$(grep -n "_run_changelog_and_notes " "$RELEASE_SH" | grep -v "^${defn_line}:" | head -1 | cut -d: -f1)
+  [ -n "$call_line" ]
+  [ "$call_line" -gt "$defn_line" ]
+}
+
+@test "release.sh golden path: _backlog_summary is called inside _run_features_sync_skill" {
+  local start; start=$(grep -n "_run_features_sync_skill()" "$RELEASE_SH" | head -1 | cut -d: -f1)
+  local end_line; end_line=$(awk "NR>$start && /^\}$/{print NR; exit}" "$RELEASE_SH")
+  local body; body=$(sed -n "${start},${end_line}p" "$RELEASE_SH")
+  echo "$body" | grep -q '_backlog_summary'
+}
+
+@test "release.sh golden path: total AI agent calls is 2 not 3" {
+  local count; count=$(grep -c '_agent_argv ' "$RELEASE_SH" || true)
+  [ "$count" -eq 2 ]
+}
+
+@test "bootstrap docs/features.md mentions every BACKLOG ### Feature group" {
+  # Each '### Feature: <name>' in BACKLOG should produce a presence in features.md
+  # (link or plain mention by name). Allow either docs/features/<name>.md link
+  # or plain-text occurrence of the feature name.
+  local missing=0
+  while IFS= read -r feat; do
+    # feat is like "cli-simplification"; check link or plain mention
+    if ! grep -qE "docs/features/${feat}\.md|${feat}" "$FEATURES_MD"; then
+      echo "missing: $feat"
+      missing=$((missing + 1))
+    fi
+  done < <(grep -oE '^### Feature: [a-z0-9-]+' "${BATS_TEST_DIRNAME}/../../BACKLOG.md" | sed 's|^### Feature: ||')
+  [ "$missing" -eq 0 ]
+}

@@ -246,6 +246,8 @@
 | REFACTOR-020 | 抽 `_loop_is_active()` — liveness 判断在三处重复（_loop_now / FIX-037 heal / LOCK 守卫），需要可单测 | ✅ Done |
 | REFACTOR-021 | release changelog 双管线 — `roll update` 直读 CHANGELOG.md，GitHub release notes 走独立 AI 重写后的 release_notes.txt，两套格式漂移；后者还混入 release.sh 状态 echo（stdout 泄漏入捕获文件）和 prompt 经 argv 截断后的 AI 自述 — flagged by user 2026-05-16 (hint: $roll-release / $roll-.changelog) | 📋 Todo |
 | REFACTOR-022 | 引入 simplify 三轴代码审查（Reuse / Quality / Efficiency）—— `roll-.review` checklist 内联补充三轴维度（每个 TCR 微步骤零成本自检），`roll-build` Phase 7 升级为三 agent 并行重审（每个 US 收尾一次大粒度 diff 审查）— flagged by user 2026-05-17 (hint: $roll-.review / $roll-build) | 📋 Todo |
+| REFACTOR-023 | US-AUTO-041 心跳计数作为独立 state surface（`~/.shared/roll/loop/heal/<id>.count`）—— 与 state.yaml 并行的第二份状态，写于 `_loop_self_heal_ci`、清理依赖 SKILL 显式调用 `_loop_clear_heal_state`；CI 转绿后若 SKILL 漏调清理则文件长期堆积。应并入 state.yaml 的 per-story record（参照 `pr_state` 先例），由 state 写入路径统一管理 — flagged by simplify review 2026-05-17 | 📋 Todo |
+| REFACTOR-024 | `skills/roll-loop/SKILL.md` 里 `_loop_self_heal_ci` 章节用三层嵌套 ASCII 树（`├──`/`└──`/`│`）描述两种 exit code 下的子流程，可读性差且 Markdown 渲染不佳 —— 拆为两个并列的编号清单（"If exit 0 (heal allowed): …" / "If exit 1 (exhausted): …"），同内容半数视觉嵌套 — flagged by simplify review 2026-05-17 | 📋 Todo |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

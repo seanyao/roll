@@ -2304,6 +2304,15 @@ for _orphan_wt in "\${_SHARED_ROOT}/worktrees/${slug}-cycle-"*; do
   if [ "\$_orphan_commits" -gt 0 ]; then
     echo "[loop] FIX-040: recovering orphan worktree \$_orphan_wt (branch \$_orphan_branch, \${_orphan_commits} commits)"
     _orphan_ok=0
+    # FIX-045: rebase onto origin/main before publishing — orphan branch was created
+    # from a past main tip and is always behind; GitHub blocks auto-merge on BEHIND branches.
+    if ( cd "\$_orphan_wt" && git fetch origin main && git rebase origin/main ); then
+      echo "[loop] FIX-045: orphan rebased onto origin/main: \$_orphan_branch"
+    else
+      ( cd "\$_orphan_wt" && git rebase --abort 2>/dev/null || true )
+      echo "[loop] FIX-045: orphan rebase conflict for \$_orphan_branch — skipping, leaving preserved"
+      continue
+    fi
     if ( cd "\$_orphan_wt" && _loop_is_doc_only_change ); then
       ( cd "\$_orphan_wt" && _loop_publish_doc_pr "\$_orphan_branch" "doc: recover orphan \${_orphan_branch}" ) && _orphan_ok=1
     else

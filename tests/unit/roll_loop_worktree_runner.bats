@@ -172,6 +172,16 @@ teardown() {
   grep -qF 'caffeinate' "$script"
 }
 
+@test "_write_loop_runner_script: FIX-045 orphan recovery fetches and rebases before publishing" {
+  local script="${_tmp}/run-tFIX045.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-tFIX045-inner.sh"
+  # Must fetch latest main before rebasing the orphan branch
+  grep -qF 'git fetch origin main' "$inner"
+  # Must rebase onto origin/main before _loop_publish_pr so GitHub does not block auto-merge
+  grep -qF 'git rebase origin/main' "$inner"
+}
+
 @test "_write_loop_runner_script: inner script has single EXIT trap that cleans lock + heartbeat" {
   local script="${_tmp}/run-tH.sh"
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24

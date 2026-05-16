@@ -34,23 +34,26 @@
 - `.github/workflows/publish.yml` must exist (already done in US-DIST-004)
 
 <a id="us-rel-002"></a>
-## US-REL-002 发版脚本 AI 调用瘦身 📋
+## US-REL-002 发版脚本 AI 调用瘦身 ✅
 
 **Created**: 2026-05-17
+**Completed**: 2026-05-17
 
 - As a Roll 维护者
 - I want 发版时 `scripts/release.sh` 的 AI 调用更快更省
 - So that 每次发版不再干等三次 claude 串行响应
 
 **AC:**
-- [ ] changelog 同步和 release notes 生成合并为一次 AI 调用（原来两次串行）
-- [ ] features.md 重写的 prompt 不再内联 BACKLOG 全文（36KB → ~2KB 结构摘要）
-- [ ] 每次 AI 调用只发送 SKILL.md 中该任务需要的 section，不传全量 16KB
-- [ ] 最终产物（CHANGELOG.md、release_notes.txt、docs/features.md）内容不变
-- [ ] `release.sh` 端到端执行时间显著缩短，AI 调用从 3 次降为 2 次
+- [x] changelog 同步和 release notes 生成合并为一次 AI 调用（原来两次串行）
+- [x] features.md 重写的 prompt 不再内联 BACKLOG 全文（36KB → ~2KB 结构摘要）
+- [x] 每次 AI 调用只发送 SKILL.md 中该任务需要的 section，不传全量 16KB
+- [x] 最终产物（CHANGELOG.md、release_notes.txt、docs/features.md）内容不变
+- [x] `release.sh` 端到端执行时间显著缩短，AI 调用从 3 次降为 2 次
 
 **Files:**
 - `scripts/release.sh`
+- `tests/unit/release_ai_calls.bats` (new)
+- `tests/integration/release_features_sync.bats` (E2E deposit added)
 
 **Dependencies:**
 - 无（纯脚本内部重构，不影响接口）

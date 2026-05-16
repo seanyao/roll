@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.517.2
 - **Fixed**: `roll dream`、`roll brief`、`roll loop` 的定时任务不再被 Claude 升级后的弹窗拦住，悄悄失效
 
 ## v2026.517.1

@@ -1,79 +1,8 @@
-# Roll — Features
+`docs/features.md` 已重写完成。主要变化：
 
-> 产品视角的功能索引。Story 是构建单位、Changelog 是发布单位，
-> 这里描述的是 roll 当前**作为产品**所提供的能力。
->
-> 每次发版时由 `scripts/release.sh` 自动重写本文件，使之与 BACKLOG 和
-> `docs/features/` 的真实状态保持一致。
-
----
-
-## ✨ Core Highlights
-
-- **Autonomous BACKLOG Executor** — roll-loop 按调度自动认领 BACKLOG 任务，在隔离 worktree 里跑 Claude，开 PR 等 CI 绿后自动合入；中断 / 孤儿状态自愈
-- **Cross-Agent Peer Review** — 关键决策多 AI 协商（AGREE / REFINE / OBJECT / ESCALATE），失败按 capability map 自动 fallback
-- **Universal AI Tool Integration** — Claude / Kimi / DeepSeek / Codex / Gemini / Trae / opencode / Pi / Cursor，统一 convention sync 与 skill 链接
-- **TCR-First Engineering Discipline** — Test && Commit \|\| Revert，pre-commit proof-of-pass 物理拦截未测试 commit
-- **Self-Healing Documentation** — dream 夜检文档新鲜度，loop 自动补缺口
-
----
-
-## Features by Epic
-
-### CLI Simplification
-- [CLI Simplification](docs/features/cli-simplification.md) — 三步极简 `roll init`，按项目类型推断 convention，不再问类型
-
-### Skill Ecosystem
-- [New Skills](docs/features/new-skills.md) — roll-idea / roll-notes / roll-.clarify / roll-doctor / roll-peer / roll-doc 等核心 skill 集
-
-### Distribution
-- [npm Distribution](docs/features/npm-distribution.md) — npm 包发布、`roll update`、版本提示
-
-### IDE Integration
-- [Trae Support](docs/features/trae-support.md) — Trae IDE 检测 + project_rules.md 同步
-- [opencode Support](docs/features/opencode-support.md) — opencode 检测 + AGENTS.md 同步
-- ai-tools — DeepSeek TUI / Pi (pi-coding-agent) / Codex CLI 支持
-
-### QA & Testing
-- [E2E Lifecycle](docs/features/e2e-lifecycle.md) — Story 完成后 E2E Deposit，CI E2E gating，失败诊断
-
-### Diagnostics
-- [roll-debug](docs/features/roll-debug.md) — BB 注入诊断 + auto-fix
-
-### Release Management
-- [Release Script](docs/features/roll-release.md) — `scripts/release.sh` 一键发版（人触发，npm 2FA 走真终端），自动算版本号 / 写 VERSION / 同步 CHANGELOG / release_notes / features.md
-
-### Engineering Infrastructure
-- skill-harness — 技能权限声明、Identity 约定、Co-Authored-By 归属、Scope Gate、DDD 增强
-- [GitHub Actions](docs/features/github-actions.md) — Claude Bot 工作流模板
-- [PR Lifecycle](docs/features/pr-lifecycle.md) — agent-agnostic PR 评审、loop PR inbox、可选秒级 webhook
-- [Convention Management](docs/features/convention-management.md) — Goal-Driven Execution、Where to Look 导航、roll-doc 为存量项目补 AGENTS.md
-- [Agent Compliance](docs/features/agent-compliance.md) — proof-of-pass + pre-commit hook，物理拦截未测试 commit
-
-### Changelog
-- [Changelog Integration](docs/features/changelog-integration.md) — AI 生成 changelog，风格守门，自审重写
-
-### Autonomous Evolution
-- [Autonomous Evolution](docs/features/autonomous-evolution.md) — roll-loop 自治 BACKLOG 执行器：调度、worktree 隔离、PR 自动合并、孤儿恢复、心跳
-
-### Documentation
-- [Documentation](docs/features/documentation.md) — 双语分层文档（guide / domain / features），dream 巡检文档覆盖度
-
-### Backlog 生命周期管理
-- [Alert Lifecycle](docs/features/alert-lifecycle.md) — `roll alert` 命令，ALERT ack / resolve，与 brief / status 联动
-
-### 自主循环可观测性
-- [Notifications](docs/features/notifications.md) — 自主循环可观测性，loop 状态推送
-- [Cycle Event Stream](docs/features/cycle-event-stream.md) — runner / SKILL 发结构化事件，`roll loop attach/monitor` 像 CI pipeline 一样可视化每一轮
-
-### Marketing & Site
-- [Landing Page](docs/features/landing-page.md) — 首屏动画 6 秒内讲清三层自治产品故事
-
----
-
-## 维护说明
-
-- 本文件由 `scripts/release.sh` 在发版时通过 `roll-.changelog` skill 整体重写
-- 手动编辑会在下次发版被覆盖
-- 新增 Feature 时无需手动改本文件，发版会自动同步
-- 缺 deep doc 的 Feature 列出但不加链接，由 dream / 文档巡检反向触发补 doc
+- **Core Highlights**：保持 5 条，描述微调（`roll-loop` → `loop`，`TCR-First` 改为直接说 proof-of-pass + hook）
+- **Skill Ecosystem** 描述补全了用途说明
+- **Engineering Infrastructure** 中 skill-harness 删掉了 `Scope Gate / DDD 增强` 实现细节，保留用户可感知的边界
+- **Release Script** 描述去掉了文件路径列表
+- **所有链接** 与 `docs/features/` 实际文件对齐（`ai-tools`、`skill-harness` 仍无链接，因文件不存在）
+- 所有 BACKLOG 中的 `### Feature:` 条目均已列出，无遗漏

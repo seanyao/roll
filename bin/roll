@@ -3275,7 +3275,7 @@ _ci_wait() {
   local interval=15
   local elapsed=0
 
-  command -v gh &>/dev/null || { warn "gh not installed — skipping CI gate  gh 未安装，跳过 CI 检查"; return 0; }
+  _gh_available || { warn "gh not installed — skipping CI gate  gh 未安装，跳过 CI 检查"; return 0; }
 
   local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "Not a git repo  非 git 仓库"; return 1; }
   local short; short=$(git rev-parse --short HEAD 2>/dev/null)
@@ -3347,7 +3347,7 @@ _ci_wait() {
 # Returns 0: ok to proceed (green / pending / unknown / no gh).
 # Returns 1: HEAD CI is definitively red → ALERT written, do not build.
 _loop_precheck_ci() {
-  command -v gh &>/dev/null || return 0
+  _gh_available || return 0
 
   local commit; commit=$(git rev-parse HEAD 2>/dev/null) || return 0
   local slug; slug=$(_gh_repo_slug) || return 0
@@ -3807,7 +3807,7 @@ _loop_pr_rebase_stale() {
 #   Walks open PRs and routes each by classification.
 #   Lenient on gh unavailability — returns 0 so the loop continues to BACKLOG.
 _loop_pr_inbox() {
-  command -v gh >/dev/null 2>&1 || return 0
+  _gh_available || return 0
 
   local slug; slug=$(_gh_repo_slug 2>/dev/null) || return 0
   local prs_json
@@ -4246,7 +4246,7 @@ _loop_cleanup_stale_cycle_branches() {
 _loop_publish_pr() {
   local branch="$1"
   local title="${2:-loop cycle ${branch#loop/}}"
-  if ! command -v gh >/dev/null 2>&1; then
+  if ! _gh_available; then
     _worktree_alert "_loop_publish_pr: gh not installed; cannot publish PR for ${branch}"
     return 2
   fi
@@ -4290,7 +4290,7 @@ _loop_wait_pr_merge() {
   local timeout="${ROLL_PR_MERGE_TIMEOUT:-600}"
   local interval=30
   local elapsed=0
-  command -v gh >/dev/null 2>&1 || return 0
+  _gh_available || return 0
   local slug; slug=$(_gh_repo_slug 2>/dev/null) || return 0
   while (( elapsed < timeout )); do
     local state; state=$(gh -R "$slug" pr view "$branch" --json state -q .state 2>/dev/null || echo "UNKNOWN")
@@ -4322,7 +4322,7 @@ _loop_is_doc_only_change() {
 _loop_publish_doc_pr() {
   local branch="$1"
   local title="${2:-doc update ${branch#loop/}}"
-  if ! command -v gh >/dev/null 2>&1; then
+  if ! _gh_available; then
     _worktree_alert "_loop_publish_doc_pr: gh not installed; cannot publish PR for ${branch}"
     return 2
   fi
@@ -4708,7 +4708,7 @@ cmd_ci() {
     return
   fi
 
-  command -v gh &>/dev/null || { warn "gh not installed  gh 未安装"; return 0; }
+  _gh_available || { warn "gh not installed  gh 未安装"; return 0; }
   local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "Not a git repo  非 git 仓库"; return 1; }
   local runs
   runs=$(gh run list --commit "$commit" --json status,conclusion,name 2>/dev/null) || { warn "gh run list failed"; return 0; }
@@ -5013,7 +5013,7 @@ _dash_ac_completion() {
 # ④ DoD CI signal — query gh for HEAD's most-recent run conclusion.
 # Returns: success | pending | failure | none
 _dash_ci_status() {
-  command -v gh &>/dev/null || { echo "none"; return; }
+  _gh_available || { echo "none"; return; }
   local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { echo "none"; return; }
   local slug; slug=$(_gh_repo_slug 2>/dev/null) || true
   local out

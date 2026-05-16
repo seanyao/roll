@@ -2203,15 +2203,7 @@ _heartbeat_writer() {
 }
 _heartbeat_writer &
 _HEARTBEAT_PID=\$!
-# US-AUTO-043: prevent macOS idle sleep from killing the cycle mid-run.
-# caffeinate assertion releases automatically when the inner script exits.
-if command -v caffeinate >/dev/null 2>&1; then
-  caffeinate -i &
-  _CAFFEIN_PID=\$!
-  trap 'kill "\${_CAFFEIN_PID}" 2>/dev/null; kill "\${_HEARTBEAT_PID}" 2>/dev/null; rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"' EXIT
-else
-  trap 'kill "\${_HEARTBEAT_PID}" 2>/dev/null; rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"' EXIT
-fi
+trap 'kill "\${_HEARTBEAT_PID}" 2>/dev/null; rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"' EXIT
 
 # US-AUTO-037: pull in worktree helpers (US-AUTO-036). Sourcing bin/roll is
 # safe — its main() only runs when invoked directly (BASH_SOURCE == \$0).

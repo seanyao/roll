@@ -170,3 +170,14 @@ teardown() {
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
   grep -qF 'caffeinate' "$script"
 }
+
+@test "_write_loop_runner_script: inner script has single EXIT trap that cleans lock + heartbeat" {
+  local script="${_tmp}/run-tH.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-tH-inner.sh"
+  # Inner relies on outer caffeinate — no inner caffeinate assertion should leak in.
+  ! grep -qF 'caffeinate' "$inner"
+  # Single EXIT trap, covering both INNER_LOCK and HEARTBEAT_FILE cleanup.
+  [ "$(grep -c "trap .* EXIT" "$inner")" -eq 1 ]
+  grep -qE "trap .*INNER_LOCK.*HEARTBEAT_FILE.* EXIT" "$inner"
+}

@@ -31,6 +31,9 @@ npm-debug.log*
 # Claude Code agent worktrees (auto-created, should not be tracked)
 .claude/worktrees/
 
+# Claude Code runtime artifacts (PID locks, transient state)
+.claude/*.lock
+
 # Private release scripts (contain personal npm credentials/workflow)
 scripts/release.sh
 

@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roll Loop — 运行机制</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #06091a;
+  color: #c8d8f0;
+  font-family: -apple-system, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  min-height: 100vh;
+  padding: 28px 36px 40px;
+}
+
+h1 {
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(120deg, #60a5fa 0%, #a78bfa 55%, #f472b6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 5px;
+}
+
+.subtitle {
+  color: #3a5070;
+  font-size: 0.82rem;
+  margin-bottom: 22px;
+}
+
+/* ── Scenario bar ── */
+.scenario-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn {
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: 1px solid #18253d;
+  background: #0b1225;
+  color: #4a6880;
+  cursor: pointer;
+  font-size: 0.79rem;
+  font-family: inherit;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+.btn:hover { border-color: #2a4a7a; color: #80a8d0; }
+.btn.active {
+  border-color: #3b82f6;
+  color: #60a5fa;
+  background: rgba(59,130,246,0.10);
+}
+.btn-replay {
+  margin-left: auto;
+  border-color: #1e3050;
+  color: #3a5870;
+  font-size: 0.75rem;
+  padding: 6px 12px;
+}
+.btn-replay:hover { border-color: #3b82f6; color: #60a5fa; }
+
+/* ── Main viz ── */
+.viz-wrap {
+  background: #070b1c;
+  border: 1px solid #131c35;
+  border-radius: 16px;
+  padding: 18px 22px 14px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+svg { display: block; width: 100%; max-width: 960px; margin: 0 auto; }
+
+/* ── Description ── */
+.desc {
+  background: #070b1c;
+  border: 1px solid #131c35;
+  border-radius: 12px;
+  padding: 16px 20px;
+  font-size: 0.83rem;
+  line-height: 1.75;
+  color: #4a6880;
+  min-height: 72px;
+  transition: opacity 0.25s ease;
+}
+.desc strong { color: #93c5fd; font-weight: 600; }
+.tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: 'SF Mono', 'Fira Mono', monospace;
+  margin: 0 2px;
+}
+.tg { background: rgba(16,185,129,.15); color: #34d399; }
+.tb { background: rgba(59,130,246,.15); color: #60a5fa; }
+.to { background: rgba(245,158,11,.15); color: #fbbf24; }
+.tr { background: rgba(239,68,68,.15); color: #f87171; }
+.tp { background: rgba(139,92,246,.15); color: #c4b5fd; }
+
+/* ── Legend ── */
+.legend {
+  display: flex;
+  gap: 18px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: #3a5070;
+}
+.legend-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<h1>Roll Loop 运行机制</h1>
+<p class="subtitle">选择场景，观察各组件如何协同工作</p>
+
+<div class="scenario-bar">
+  <button class="btn active"  onclick="pick('normal',    this)">① 正常周期</button>
+  <button class="btn"         onclick="pick('concurrent',this)">② 并发阻断</button>
+  <button class="btn"         onclick="pick('orphan',    this)">③ 孤儿自愈</button>
+  <button class="btn"         onclick="pick('p3',        this)">④ 隔离失败跳过</button>
+  <button class="btn"         onclick="pick('publish',   this)">⑤ 发布降级</button>
+  <button class="btn btn-replay" onclick="replay()">↺ 重播</button>
+</div>
+
+<div class="viz-wrap">
+<svg id="svg" viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg">
+<defs>
+
+<!-- Arrow markers -->
+<marker id="arr-blue" markerWidth="7" markerHeight="5" refX="5" refY="2.5" orient="auto">
+  <polygon points="0 0,7 2.5,0 5" fill="#3b82f6" opacity="0.7"/>
+</marker>
+<marker id="arr-green" markerWidth="7" markerHeight="5" refX="5" refY="2.5" orient="auto">
+  <polygon points="0 0,7 2.5,0 5" fill="#10b981" opacity="0.7"/>
+</marker>
+<marker id="arr-orange" markerWidth="7" markerHeight="5" refX="5" refY="2.5" orient="auto">
+  <polygon points="0 0,7 2.5,0 5" fill="#f59e0b" opacity="0.7"/>
+</marker>
+<marker id="arr-red" markerWidth="7" markerHeight="5" refX="5" refY="2.5" orient="auto">
+  <polygon points="0 0,7 2.5,0 5" fill="#ef4444" opacity="0.7"/>
+</marker>
+<marker id="arr-purple" markerWidth="7" markerHeight="5" refX="5" refY="2.5" orient="auto">
+  <polygon points="0 0,7 2.5,0 5" fill="#8b5cf6" opacity="0.7"/>
+</marker>
+
+<!-- Filters -->
+<filter id="glow-b" x="-50%" y="-50%" width="200%" height="200%">
+  <feGaussianBlur stdDeviation="4" result="b"/>
+  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter>
+<filter id="glow-g" x="-50%" y="-50%" width="200%" height="200%">
+  <feGaussianBlur stdDeviation="4" result="b"/>
+  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter>
+<filter id="glow-o" x="-50%" y="-50%" width="200%" height="200%">
+  <feGaussianBlur stdDeviation="4" result="b"/>
+  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter>
+<filter id="glow-r" x="-50%" y="-50%" width="200%" height="200%">
+  <feGaussianBlur stdDeviation="4" result="b"/>
+  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter>
+
+<!-- Subtle grid -->
+<pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+  <path d="M36 0L0 0 0 36" fill="none" stroke="#0c1428" stroke-width="0.6"/>
+</pattern>
+
+</defs>
+
+<!-- Grid bg -->
+<rect width="900" height="480" fill="url(#grid)"/>
+
+<!-- ═══════════════════════════════════════
+     STATIC CONNECTOR PATHS (dim)
+══════════════════════════════════════════ -->
+<!-- cron → outer -->
+<path d="M130 88 L130 118" stroke="#12263d" stroke-width="1.5" stroke-dasharray="5,3" fill="none"/>
+<!-- outer → inner -->
+<path d="M130 200 L130 230" stroke="#12263d" stroke-width="1.5" stroke-dasharray="5,3" fill="none"/>
+<!-- inner → worktree -->
+<path d="M235 268 C260 268 265 255 288 255" stroke="#12263d" stroke-width="1.5" stroke-dasharray="5,3" fill="none"/>
+<!-- worktree/claude → origin -->
+<path d="M615 200 C645 200 650 160 665 155" stroke="#12263d" stroke-width="1.5" stroke-dasharray="5,3" fill="none"/>
+<path d="M510 248 C560 230 620 165 665 148" stroke="#0e1f30" stroke-width="1" stroke-dasharray="4,4" fill="none"/>
+<!-- failure → alert -->
+<path d="M235 160 C480 160 610 385 695 410" stroke="#0e1f30" stroke-width="1" stroke-dasharray="3,5" fill="none"/>
+<path d="M235 270 C480 270 610 390 695 415" stroke="#0e1f30" stroke-width="1" stroke-dasharray="3,5" fill="none"/>
+<!-- outer → state.yaml -->
+<path d="M75 200 C48 270 52 360 70 385" stroke="#0e1f30" stroke-width="1" stroke-dasharray="3,5" fill="none"/>
+
+<!-- ═══════════════════════════════════════
+     ANIMATION PATHS (invisible, for JS)
+══════════════════════════════════════════ -->
+<path id="P_cron_outer"    d="M130 88 L130 118"                              fill="none" stroke="none"/>
+<path id="P_outer_inner"   d="M130 200 L130 230"                             fill="none" stroke="none"/>
+<path id="P_inner_wt"      d="M235 268 C260 268 265 255 288 255"             fill="none" stroke="none"/>
+<path id="P_wt_origin"     d="M615 205 C648 205 655 160 665 152"             fill="none" stroke="none"/>
+<path id="P_claude_origin" d="M510 248 C570 228 628 165 665 148"             fill="none" stroke="none"/>
+<path id="P_outer_alert"   d="M235 158 C490 158 615 385 695 412"             fill="none" stroke="none"/>
+<path id="P_inner_alert"   d="M235 270 C490 270 615 390 695 417"             fill="none" stroke="none"/>
+<path id="P_outer_state"   d="M75 200 C48 270 52 360 70 385"                 fill="none" stroke="none"/>
+<path id="P_wt_origin_2"   d="M615 215 C648 215 658 168 665 160"             fill="none" stroke="none"/>
+
+<!-- ═══════════════════════════════════════
+     CRON
+══════════════════════════════════════════ -->
+<g id="C_cron">
+  <circle id="G_cron" cx="130" cy="55" r="34" fill="none" stroke="#3b82f6" stroke-width="1.5" opacity="0"/>
+  <circle cx="130" cy="55" r="30" fill="#090f28" stroke="#162040" stroke-width="1.5"/>
+  <!-- clock face -->
+  <circle cx="130" cy="55" r="20" fill="none" stroke="#1a2f50" stroke-width="1"/>
+  <circle cx="130" cy="55" r="2.5" fill="#2a4a7a"/>
+  <!-- hands -->
+  <line id="cron_h" x1="130" y1="55" x2="130" y2="43" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round"/>
+  <line id="cron_m" x1="130" y1="55" x2="143" y2="55" stroke="#60a5fa" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- ticks -->
+  <line x1="130" y1="37" x2="130" y2="40" stroke="#1e3560" stroke-width="1.5"/>
+  <line x1="130" y1="70" x2="130" y2="73" stroke="#1e3560" stroke-width="1.5"/>
+  <line x1="112" y1="55" x2="115" y2="55" stroke="#1e3560" stroke-width="1.5"/>
+  <line x1="145" y1="55" x2="148" y2="55" stroke="#1e3560" stroke-width="1.5"/>
+  <text x="130" y="101" text-anchor="middle" fill="#3a5878" font-size="10.5" font-weight="700" letter-spacing=".05em">CRON</text>
+  <text x="130" y="113" text-anchor="middle" fill="#1e3050" font-size="8.5">launchd / system</text>
+</g>
+
+<!-- ═══════════════════════════════════════
+     OUTER.SH
+══════════════════════════════════════════ -->
+<g id="C_outer">
+  <rect id="G_outer" x="35" y="115" width="200" height="80" rx="10"
+        fill="none" stroke="#3b82f6" stroke-width="1.5" opacity="0"/>
+  <rect x="38" y="118" width="196" height="77" rx="9" fill="#090f28" stroke="#162040" stroke-width="1.5"/>
+  <!-- header band -->
+  <rect x="38" y="118" width="196" height="24" rx="9" fill="#0d1a38"/>
+  <rect x="38" y="130" width="196" height="12" fill="#0d1a38"/>
+  <text x="56" y="133" fill="#3a5878" font-size="9" font-weight="700" letter-spacing=".07em">OUTER RUNNER</text>
+  <text x="225" y="133" text-anchor="end" fill="#2a4060" font-size="8.5">.sh</text>
+  <!-- LOCK pill -->
+  <g id="LOCK_pill">
+    <rect x="50" y="150" width="60" height="19" rx="5" fill="#0b1830" stroke="#18304a" stroke-width="1"/>
+    <text id="LOCK_txt" x="80" y="163" text-anchor="middle" fill="#2a4878" font-size="8.5">🔒 LOCK</text>
+  </g>
+  <!-- liveness pill -->
+  <rect x="118" y="150" width="108" height="19" rx="5" fill="#0b1830" stroke="#18304a" stroke-width="1"/>
+  <text x="172" y="163" text-anchor="middle" fill="#2a4878" font-size="8.5">♥ · PID · tmux</text>
+  <text x="48" y="207" fill="#101e36" font-size="8">active-window · orphan-detect (FIX-037)</text>
+</g>
+
+<!-- ═══════════════════════════════════════
+     INNER.SH
+══════════════════════════════════════════ -->
+<g id="C_inner">
+  <rect id="G_inner" x="35" y="228" width="200" height="83" rx="10"
+        fill="none" stroke="#8b5cf6" stroke-width="1.5" opacity="0"/>
+  <rect x="38" y="231" width="196" height="80" rx="9" fill="#0c0920" stroke="#22184a" stroke-width="1.5"/>
+  <!-- header band -->
+  <rect x="38" y="231" width="196" height="24" rx="9" fill="#120d30"/>
+  <rect x="38" y="243" width="196" height="12" fill="#120d30"/>
+  <text x="56" y="246" fill="#4a3890" font-size="9" font-weight="700" letter-spacing=".07em">INNER SCRIPT</text>
+  <text x="225" y="246" text-anchor="end" fill="#2a1860" font-size="8.5">-inner.sh</text>
+  <!-- INNER_LOCK pill -->
+  <rect x="50" y="263" width="78" height="19" rx="5" fill="#0b0820" stroke="#1e1545" stroke-width="1"/>
+  <text x="89" y="276" text-anchor="middle" fill="#3a2878" font-size="8.5">🔒 INNER_LOCK</text>
+  <!-- heartbeat pill -->
+  <rect id="HB_pill" x="136" y="263" width="90" height="19" rx="5" fill="#0b0820" stroke="#1e1545" stroke-width="1"/>
+  <text id="HB_txt" x="181" y="276" text-anchor="middle" fill="#3a2878" font-size="8.5">♥ 60 s HB</text>
+  <text x="48" y="322" fill="#100e24" font-size="8">FIX-031 · FIX-038 · FIX-040 · worktree helpers</text>
+</g>
+
+<!-- ═══════════════════════════════════════
+     WORKTREE SANDBOX
+══════════════════════════════════════════ -->
+<g id="C_wt">
+  <rect id="G_wt" x="288" y="142" width="330" height="228" rx="13"
+        fill="#080e1a" stroke="#18304a" stroke-width="1.5" stroke-dasharray="9,4"/>
+  <text x="302" y="162" fill="#1a3550" font-size="10" font-weight="700" letter-spacing=".05em">WORKTREE SANDBOX</text>
+  <text x="302" y="174" fill="#102030" font-size="8">git worktree add  ·  branch: loop/cycle-YYYYMMDD-HHmmss-PID</text>
+  <!-- base label -->
+  <rect x="498" y="148" width="110" height="17" rx="5" fill="#0b1828" stroke="#173040" stroke-width="1"/>
+  <text x="553" y="160" text-anchor="middle" fill="#204060" font-size="8">forked from origin/main</text>
+
+  <!-- CLAUDE box -->
+  <g id="C_claude">
+    <rect id="G_claude" x="310" y="195" width="205" height="140" rx="9"
+          fill="none" stroke="#10b981" stroke-width="1.5" opacity="0"/>
+    <rect x="313" y="198" width="202" height="137" rx="8" fill="#060f0c" stroke="#0d2a1e" stroke-width="1.5"/>
+    <!-- header -->
+    <rect x="313" y="198" width="202" height="24" rx="8" fill="#091a13"/>
+    <rect x="313" y="210" width="202" height="12" fill="#091a13"/>
+    <text x="332" y="213" fill="#155a38" font-size="9" font-weight="700" letter-spacing=".07em">CLAUDE</text>
+    <text x="506" y="213" text-anchor="end" fill="#0d3020" font-size="7.5">--dangerously-skip-permissions</text>
+    <!-- retry badge -->
+    <rect x="325" y="232" width="64" height="16" rx="4" fill="#060f0c" stroke="#0d2a1e" stroke-width="1"/>
+    <text x="357" y="244" text-anchor="middle" fill="#145030" font-size="8">retry ≤ 3</text>
+    <!-- activity bars -->
+    <rect id="bar1" x="325" y="258" width="118" height="5" rx="2" fill="#0a2015" opacity=".6"/>
+    <rect id="bar2" x="325" y="270" width="80"  height="5" rx="2" fill="#0a2015" opacity=".4"/>
+    <rect id="bar3" x="325" y="282" width="150" height="5" rx="2" fill="#0a2015" opacity=".5"/>
+    <rect id="bar4" x="325" y="294" width="95"  height="5" rx="2" fill="#0a2015" opacity=".3"/>
+    <rect id="bar5" x="325" y="306" width="130" height="5" rx="2" fill="#0a2015" opacity=".4"/>
+    <!-- working dot -->
+    <circle id="work_dot" cx="494" cy="217" r="4" fill="#10b981" opacity="0"/>
+  </g>
+</g>
+
+<!-- ═══════════════════════════════════════
+     ORIGIN / MAIN  (cylinder)
+══════════════════════════════════════════ -->
+<g id="C_origin">
+  <ellipse id="G_origin" cx="760" cy="130" rx="82" ry="17"
+           fill="none" stroke="#10b981" stroke-width="1.5" opacity="0"/>
+  <!-- body -->
+  <rect x="678" y="130" width="164" height="62" fill="#060f0c" stroke="none"/>
+  <line x1="678" y1="130" x2="678" y2="192" stroke="#0d2a1e" stroke-width="1.5"/>
+  <line x1="842" y1="130" x2="842" y2="192" stroke="#0d2a1e" stroke-width="1.5"/>
+  <!-- top oval -->
+  <ellipse cx="760" cy="130" rx="82" ry="17" fill="#091a13" stroke="#0d2a1e" stroke-width="1.5"/>
+  <!-- bottom oval -->
+  <ellipse cx="760" cy="192" rx="82" ry="17" fill="#060f0c" stroke="#0d2a1e" stroke-width="1.5"/>
+  <!-- content -->
+  <text x="760" y="157" text-anchor="middle" fill="#155a38" font-size="14">⬡</text>
+  <text x="760" y="175" text-anchor="middle" fill="#155a38" font-size="10" font-weight="700" letter-spacing=".05em">ORIGIN / MAIN</text>
+  <text x="760" y="189" text-anchor="middle" fill="#0a2015" font-size="8">github.com/…/Roll</text>
+</g>
+
+<!-- ═══════════════════════════════════════
+     ALERT.MD
+══════════════════════════════════════════ -->
+<g id="C_alert">
+  <polygon id="G_alert" points="760,368 703,460 817,460"
+           fill="none" stroke="#ef4444" stroke-width="1.5" opacity="0"/>
+  <polygon points="760,373 708,460 812,460" fill="#120605" stroke="#2d0a05" stroke-width="1.5"/>
+  <text x="760" y="436" text-anchor="middle" fill="#6a2008" font-size="22">⚠</text>
+  <text x="760" y="453" text-anchor="middle" fill="#6a2008" font-size="9" font-weight="700" letter-spacing=".05em">ALERT.md</text>
+  <text x="760" y="466" text-anchor="middle" fill="#3a1004" font-size="7.5">~/.shared/roll/loop/</text>
+</g>
+
+<!-- ═══════════════════════════════════════
+     STATE.YAML
+══════════════════════════════════════════ -->
+<g id="C_state">
+  <rect x="48" y="382" width="148" height="52" rx="8" fill="#090a1c" stroke="#12183a" stroke-width="1.5"/>
+  <text x="122" y="401" text-anchor="middle" fill="#22285a" font-size="9" font-weight="700" letter-spacing=".05em">state.yaml</text>
+  <text id="state_val" x="122" y="417" text-anchor="middle" fill="#161b40" font-size="8.5">status: idle</text>
+  <text x="122" y="430" text-anchor="middle" fill="#0e1230" font-size="7.5">FIX-037 · orphan detection</text>
+</g>
+
+<!-- ═══════════════════════════════════════
+     PARTICLE LAYER
+══════════════════════════════════════════ -->
+<g id="particles"/>
+
+<!-- ═══════════════════════════════════════
+     RESULT BANNER
+══════════════════════════════════════════ -->
+<g id="banner" opacity="0">
+  <rect x="295" y="448" width="330" height="26" rx="8" fill="#080e1a" stroke="#10b981" stroke-width="1.5"/>
+  <text id="banner_txt" x="460" y="465" text-anchor="middle" font-size="10.5" font-weight="600" fill="#10b981"/>
+</g>
+
+</svg>
+</div><!-- /viz-wrap -->
+
+<div class="desc" id="desc">
+  <strong>① 正常周期</strong> — cron 触发后，<span class="tag tb">OUTER.sh</span> 确认 state.yaml = idle、写 LOCK，
+  tmux 中启动 <span class="tag tp">INNER.sh</span>。INNER 建立心跳，创建隔离
+  <span class="tag tb">worktree</span>（分支 loop/cycle-…），claude 在沙盒中工作并提交，
+  最后 gh PR 推送到 <span class="tag tg">origin/main</span>，worktree 与分支清理完毕。
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>正常控制流</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>成功 / 提交 / 发布</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>inner 脚本活动</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>警告 / 降级路径</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>失败 / 阻断</div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────
+// ENGINE
+// ──────────────────────────────────────────────
+const PL = document.getElementById('particles');
+let timers = [], rafs = [], stopped = false;
+
+function reset() {
+  stopped = true;
+  timers.forEach(clearTimeout); timers = [];
+  rafs.forEach(cancelAnimationFrame); rafs = [];
+  PL.innerHTML = '';
+  stopped = false;
+
+  const glows = ['G_cron','G_outer','G_inner','G_claude','G_origin','G_alert','G_wt'];
+  glows.forEach(id => { const e=document.getElementById(id); if(e){ e.setAttribute('opacity','0'); } });
+
+  setTxt('state_val', 'status: idle', '#161b40');
+  setTxt('HB_txt', '♥ 60 s HB', '#3a2878');
+  document.getElementById('HB_pill').querySelector('rect').setAttribute('stroke','#1e1545');
+  setTxt('LOCK_txt', '🔒 LOCK', '#2a4878');
+  document.getElementById('LOCK_pill').querySelector('rect').setAttribute('fill','#0b1830');
+  document.getElementById('LOCK_pill').querySelector('rect').setAttribute('stroke','#18304a');
+
+  const bars = ['bar1','bar2','bar3','bar4','bar5'];
+  const fills = ['#0a2015','#0a2015','#0a2015','#0a2015','#0a2015'];
+  bars.forEach((id,i) => { const e=document.getElementById(id); if(e) e.setAttribute('fill',fills[i]); });
+  document.getElementById('work_dot').setAttribute('opacity','0');
+
+  document.getElementById('G_wt').setAttribute('stroke','#18304a');
+  document.getElementById('G_wt').setAttribute('stroke-dasharray','9,4');
+  document.getElementById('G_wt').setAttribute('opacity','0');
+
+  document.getElementById('banner').setAttribute('opacity','0');
+}
+
+function wait(ms) {
+  if (stopped) return Promise.resolve();
+  return new Promise(res => {
+    const t = setTimeout(res, ms);
+    timers.push(t);
+  });
+}
+
+function glow(id, color='#3b82f6', alpha='0.55') {
+  const e = document.getElementById(id);
+  if (!e) return;
+  e.setAttribute('stroke', color);
+  e.setAttribute('opacity', alpha);
+}
+function unglow(id) {
+  const e = document.getElementById(id);
+  if (e) e.setAttribute('opacity','0');
+}
+function setTxt(id, txt, color) {
+  const e = document.getElementById(id);
+  if (!e) return;
+  if (txt  !== undefined) e.textContent = txt;
+  if (color !== undefined) e.setAttribute('fill', color);
+}
+
+function particle(pathId, color, dur=700, r=5) {
+  if (stopped) return;
+  const path = document.getElementById(pathId);
+  if (!path) return;
+  const len = path.getTotalLength();
+  const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+  c.setAttribute('r', r);
+  c.setAttribute('fill', color);
+  PL.appendChild(c);
+
+  const t0 = performance.now();
+  let rafId;
+  function frame(now) {
+    if (stopped) { c.remove(); return; }
+    const p = Math.min((now - t0) / dur, 1);
+    const ease = p < .5 ? 2*p*p : -1+(4-2*p)*p;
+    const pt = path.getPointAtLength(len * ease);
+    c.setAttribute('cx', pt.x);
+    c.setAttribute('cy', pt.y);
+    const alpha = p < .12 ? p/.12 : p > .88 ? (1-p)/.12 : 1;
+    c.setAttribute('opacity', (alpha * 0.92).toFixed(2));
+    if (p < 1) { rafId = requestAnimationFrame(frame); rafs.push(rafId); }
+    else c.remove();
+  }
+  rafId = requestAnimationFrame(frame);
+  rafs.push(rafId);
+}
+
+function stream(pathId, color, total=1000, interval=280, r=5) {
+  let elapsed = 0;
+  const fire = () => {
+    if (stopped || elapsed >= total) return;
+    particle(pathId, color, Math.min(750, total - elapsed), r);
+    elapsed += interval;
+    const t = setTimeout(fire, interval);
+    timers.push(t);
+  };
+  fire();
+}
+
+function banner(txt, color='#10b981') {
+  const e = document.getElementById('banner');
+  const t = document.getElementById('banner_txt');
+  e.querySelector('rect').setAttribute('stroke', color);
+  t.textContent = txt;
+  t.setAttribute('fill', color);
+  e.setAttribute('opacity','1');
+}
+
+function claudeActive() {
+  const cols = ['#1a5535','#124028','#163a2a','#0f3020','#143325'];
+  ['bar1','bar2','bar3','bar4','bar5'].forEach((id,i) => {
+    const e = document.getElementById(id);
+    if (e) e.setAttribute('fill', cols[i]);
+  });
+  document.getElementById('work_dot').setAttribute('opacity','1');
+}
+
+function animateClock() {
+  const h = document.getElementById('cron_h');
+  const m = document.getElementById('cron_m');
+  let deg = 0;
+  const tick = () => {
+    if (stopped) return;
+    deg += 6;
+    const rad = (deg - 90) * Math.PI / 180;
+    const mrad = (deg * 6 - 90) * Math.PI / 180;
+    h.setAttribute('x2', (130 + 12 * Math.cos(rad)).toFixed(1));
+    h.setAttribute('y2', (55  + 12 * Math.sin(rad)).toFixed(1));
+    m.setAttribute('x2', (130 + 16 * Math.cos(mrad)).toFixed(1));
+    m.setAttribute('y2', (55  + 16 * Math.sin(mrad)).toFixed(1));
+    const t = setTimeout(tick, 100);
+    timers.push(t);
+  };
+  tick();
+}
+
+// ──────────────────────────────────────────────
+// SCENARIOS
+// ──────────────────────────────────────────────
+const SCENARIOS = {
+
+  normal: async () => {
+    await wait(300);
+    animateClock();
+    glow('G_cron', '#3b82f6', '0.5');
+    await wait(500);
+
+    // cron → outer
+    stream('P_cron_outer', '#3b82f6', 700, 240, 5);
+    await wait(800);
+
+    // outer: check state.yaml
+    glow('G_outer', '#3b82f6', '0.5');
+    particle('P_outer_state', '#3b82f6', 700, 3);
+    setTxt('state_val', 'status: idle ✓', '#3b82f6');
+    await wait(900);
+
+    // outer → inner
+    stream('P_outer_inner', '#3b82f6', 700, 240, 5);
+    await wait(800);
+
+    // inner activates
+    glow('G_inner', '#8b5cf6', '0.5');
+    setTxt('HB_txt', '♥ 60 s HB ●', '#c4b5fd');
+    document.getElementById('HB_pill').querySelector('rect').setAttribute('stroke','#5a3ab0');
+    setTxt('state_val', 'status: running', '#a78bfa');
+    await wait(600);
+
+    // inner → worktree
+    stream('P_inner_wt', '#8b5cf6', 800, 260, 5);
+    await wait(900);
+
+    // worktree & claude activate
+    glow('G_wt', '#3b82f6', '0.18');
+    document.getElementById('G_wt').setAttribute('stroke-dasharray','9,4');
+    glow('G_claude', '#10b981', '0.45');
+    claudeActive();
+    await wait(1000);
+
+    // claude commits → origin (repeat)
+    stream('P_claude_origin', '#10b981', 1400, 320, 4);
+    await wait(800);
+
+    // publish: worktree → origin PR
+    stream('P_wt_origin', '#10b981', 900, 280, 5);
+    glow('G_origin', '#10b981', '0.55');
+    await wait(1000);
+
+    // cleanup
+    document.getElementById('G_wt').setAttribute('stroke','#18304a');
+    unglow('G_claude');
+    unglow('G_inner');
+    unglow('G_outer');
+    unglow('G_cron');
+    setTxt('state_val', 'status: idle', '#3b82f6');
+    await wait(400);
+    banner('✓ cycle 完成 — worktree 已清理，PR 已推送至 origin');
+  },
+
+  concurrent: async () => {
+    await wait(300);
+    // First instance already running
+    glow('G_outer', '#3b82f6', '0.35');
+    glow('G_inner', '#8b5cf6', '0.35');
+    glow('G_claude', '#10b981', '0.25');
+    glow('G_wt', '#3b82f6', '0.12');
+    claudeActive();
+    setTxt('state_val', 'status: running', '#a78bfa');
+    setTxt('LOCK_txt', '🔒 PID 1234', '#60a5fa');
+    await wait(900);
+
+    // Second cron fires
+    animateClock();
+    glow('G_cron', '#f59e0b', '0.55');
+    await wait(500);
+    stream('P_cron_outer', '#f59e0b', 600, 200, 5);
+    await wait(700);
+
+    // OUTER reads LOCK → PID alive → blocked
+    const lockRect = document.getElementById('LOCK_pill').querySelector('rect');
+    lockRect.setAttribute('fill','#2d0808');
+    lockRect.setAttribute('stroke','#8b2020');
+    setTxt('LOCK_txt', '🔒 BLOCKED', '#f87171');
+
+    // tiny particles bounce at LOCK
+    particle('P_outer_state', '#ef4444', 500, 4);
+    await wait(400);
+
+    banner('✓ 第二实例被 LOCK 阻断 (kill -0 PID 存活 → exit 0)', '#f59e0b');
+  },
+
+  orphan: async () => {
+    await wait(300);
+    // State stuck at running — nothing alive
+    setTxt('state_val', 'status: running ← 残留', '#f59e0b');
+    await wait(700);
+
+    // New cron fires
+    animateClock();
+    glow('G_cron', '#3b82f6', '0.5');
+    await wait(500);
+    stream('P_cron_outer', '#3b82f6', 600, 200, 5);
+    await wait(700);
+
+    // Outer reads state → starts 3-level check
+    glow('G_outer', '#f59e0b', '0.55');
+    particle('P_outer_state', '#f59e0b', 750, 4);
+    await wait(900);
+
+    // All 3 checks fail (pause for drama)
+    setTxt('state_val', 'status: running ← ♥ stale', '#f59e0b');
+    await wait(600);
+    setTxt('state_val', 'status: running ← PID dead', '#f59e0b');
+    await wait(600);
+    setTxt('state_val', 'status: running ← no tmux', '#f59e0b');
+    await wait(700);
+
+    // FIX-037: heal
+    setTxt('state_val', 'status: idle ← FIX-037 自愈', '#10b981');
+    glow('G_outer', '#10b981', '0.5');
+    await wait(400);
+
+    // Write ALERT
+    stream('P_outer_alert', '#f59e0b', 800, 250, 4);
+    await wait(800);
+    glow('G_alert', '#f59e0b', '0.45');
+    await wait(500);
+
+    // Then normal cycle proceeds
+    stream('P_outer_inner', '#3b82f6', 600, 200, 5);
+    await wait(700);
+    glow('G_inner', '#8b5cf6', '0.4');
+
+    banner('✓ FIX-037: 孤儿状态自愈 — 已写 ALERT，新 cycle 继续', '#10b981');
+  },
+
+  p3: async () => {
+    await wait(300);
+    animateClock();
+    glow('G_cron', '#3b82f6', '0.5');
+    await wait(500);
+    stream('P_cron_outer', '#3b82f6', 600, 200, 5);
+    await wait(700);
+    glow('G_outer', '#3b82f6', '0.45');
+    await wait(500);
+    stream('P_outer_inner', '#3b82f6', 600, 200, 5);
+    await wait(700);
+    glow('G_inner', '#8b5cf6', '0.45');
+    setTxt('state_val', 'status: running', '#a78bfa');
+    await wait(600);
+
+    // Try worktree → FAIL
+    stream('P_inner_wt', '#ef4444', 600, 200, 5);
+    await wait(700);
+
+    // Worktree border flashes red
+    document.getElementById('G_wt').setAttribute('stroke','#ef4444');
+    document.getElementById('G_wt').setAttribute('stroke-dasharray','4,7');
+    document.getElementById('G_wt').setAttribute('opacity','0.4');
+    await wait(500);
+
+    // Write ALERT
+    stream('P_inner_alert', '#ef4444', 700, 200, 4);
+    await wait(700);
+    glow('G_alert', '#ef4444', '0.55');
+    await wait(400);
+
+    // Reset worktree border → exit 0
+    document.getElementById('G_wt').setAttribute('stroke','#18304a');
+    document.getElementById('G_wt').setAttribute('stroke-dasharray','9,4');
+    document.getElementById('G_wt').setAttribute('opacity','0');
+    unglow('G_inner'); unglow('G_outer'); unglow('G_cron');
+    setTxt('state_val', 'status: idle', '#161b40');
+    await wait(300);
+
+    banner('⚠ worktree 隔离失败 → 写 ALERT → exit 0 跳过 cycle (P3)', '#ef4444');
+  },
+
+  publish: async () => {
+    await wait(300);
+    // Claude already done with work
+    glow('G_outer', '#3b82f6', '0.3');
+    glow('G_inner', '#8b5cf6', '0.3');
+    glow('G_wt', '#3b82f6', '0.12');
+    glow('G_claude', '#10b981', '0.35');
+    claudeActive();
+    setTxt('state_val', 'status: running', '#a78bfa');
+    setTxt('HB_txt', '♥ 60 s HB ●', '#c4b5fd');
+    await wait(800);
+
+    // Attempt 1: gh PR → FAIL
+    document.getElementById('G_wt').setAttribute('stroke','#10b981');
+    stream('P_wt_origin', '#10b981', 700, 220, 5);
+    await wait(500);
+    glow('G_origin', '#ef4444', '0.35');
+    await wait(600);
+    // X mark flash at origin
+    unglow('G_origin');
+    await wait(400);
+
+    // Attempt 2: merge_back → FAIL
+    stream('P_wt_origin_2', '#f59e0b', 700, 220, 5);
+    glow('G_origin', '#f59e0b', '0.3');
+    await wait(700);
+    unglow('G_origin');
+    await wait(400);
+
+    // FIX-039: push orphan branch + tag as last resort
+    stream('P_wt_origin', '#f59e0b', 1000, 280, 6);
+    glow('G_origin', '#f59e0b', '0.5');
+    await wait(1100);
+
+    // Write ALERT
+    stream('P_inner_alert', '#f59e0b', 700, 220, 4);
+    await wait(700);
+    glow('G_alert', '#f59e0b', '0.45');
+    await wait(400);
+
+    // Cleanup worktree
+    document.getElementById('G_wt').setAttribute('stroke','#18304a');
+    unglow('G_claude');
+    setTxt('state_val', 'status: idle', '#3b82f6');
+    await wait(300);
+
+    banner('⚠ FIX-039: gh+merge_back 均失败 → 孤儿 branch+tag 推至 origin → worktree 已清', '#f59e0b');
+  }
+};
+
+// ──────────────────────────────────────────────
+// DESCRIPTIONS
+// ──────────────────────────────────────────────
+const DESCS = {
+  normal: `<strong>① 正常周期</strong> — cron 触发后，<span class="tag tb">OUTER.sh</span> 确认 state.yaml = idle、写 LOCK，
+    tmux 中启动 <span class="tag tp">INNER.sh</span>。INNER 写心跳（FIX-038），创建隔离
+    <span class="tag tb">worktree</span>（分支 loop/cycle-YYYYMMDD-HHmmss-PID，从 origin/main fork），
+    claude 在沙盒中工作并提交，最后 gh PR 推送到 <span class="tag tg">origin/main</span>，worktree 与分支清理完毕。`,
+
+  concurrent: `<strong>② 并发阻断</strong> — 第一个实例正在运行，<span class="tag tb">OUTER.sh</span> 持有 LOCK（写入 PID）。
+    第二个 cron 触发时，新实例读取 LOCK → <code>kill -0 PID</code> 确认进程存活 → 直接 <span class="tag to">exit 0</span> 退出。
+    <span class="tag tp">INNER_LOCK</span>（FIX-031）是第二道防线：即使 OUTER LOCK 被绕过，claude 也不会并发启动。`,
+
+  orphan: `<strong>③ 孤儿自愈（FIX-037）</strong> — state.yaml 残留 <code>status: running</code>（inner crash 或被 SIGKILL 导致），
+    但新 cron 时三重检测全失败：<span class="tag to">heartbeat 过期</span> → LOCK PID 不存在 → tmux session 消失。
+    <span class="tag tb">OUTER.sh</span> 判定孤儿状态，自动将 status 重置为 idle，写 ALERT 通知人工，然后启动新 cycle。`,
+
+  p3: `<strong>④ 隔离失败跳过（P3）</strong> — INNER 尝试 <code>_worktree_create</code> 但失败（无远端、push 权限、网络抖动…）。
+    由于 <code>--dangerously-skip-permissions</code> 只有在 worktree 沙盒中才安全，
+    <strong>不能降级到主目录无隔离执行</strong>。P3 直接 <span class="tag tr">exit 0 跳过本次 cycle</span>
+    并写 ALERT，下一个调度周期重试，彻底避免风险操作。`,
+
+  publish: `<strong>⑤ 发布降级（FIX-039）</strong> — claude 成功完成，但发布路径逐步失败：
+    <span class="tag tr">gh PR 失败</span>（未安装 / auth 错误）→ 回退 <code>_worktree_merge_back</code>（ff-only 本地合并）→
+    <span class="tag tr">merge 也失败</span>（main 已分叉）→ 最后
+    <span class="tag to">FIX-039</span> 将 worktree 分支 + 带时间戳的 tag 直推 origin 作为安全底线，
+    清理 worktree。<strong>代码永远不会只留在本地</strong>。`
+};
+
+// ──────────────────────────────────────────────
+// WIRING
+// ──────────────────────────────────────────────
+let currentScenario = 'normal';
+let currentBtn = null;
+
+function pick(name, btn) {
+  currentScenario = name;
+  document.querySelectorAll('.btn:not(.btn-replay)').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentBtn = btn;
+  run(name);
+}
+
+function replay() {
+  if (currentBtn) run(currentScenario);
+}
+
+function run(name) {
+  reset();
+  const desc = document.getElementById('desc');
+  desc.style.opacity = '0.3';
+  const t1 = setTimeout(() => {
+    desc.innerHTML = DESCS[name] || '';
+    desc.style.opacity = '1';
+  }, 220);
+  timers.push(t1);
+  const t2 = setTimeout(() => {
+    if (SCENARIOS[name]) SCENARIOS[name]();
+  }, 350);
+  timers.push(t2);
+}
+
+// Start
+window.addEventListener('load', () => {
+  currentBtn = document.querySelector('.btn.active');
+  run('normal');
+});
+</script>
+</body>
+</html>

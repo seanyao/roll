@@ -267,3 +267,30 @@
 
 **Dependencies:**
 - Depended on by: US-DOC-009（dream 新鲜度巡检读 features.md）
+
+---
+
+<a id="us-doc-009"></a>
+## US-DOC-009 dream 夜检 features.md 新鲜度 ✅
+
+**Created**: 2026-05-16
+**Completed**: 2026-05-16
+
+- As a maintainer
+- I want dream to detect when `docs/features.md` falls behind the BACKLOG
+- So that the product feature catalog doesn't silently drift out of sync between releases
+
+**AC:**
+- [x] `skills/roll-.dream/SKILL.md` Scan 5 includes Check D — features.md Feature Coverage
+- [x] Check D parses BACKLOG.md for `### Feature:` groups with ≥1 ✅ Done story and verifies each appears in `docs/features.md`
+- [x] Missing features produce a REFACTOR entry: `features.md 功能目录落后于 BACKLOG，N 个已完成功能区未收录 — flagged by dream YYYY-MM-DD`
+- [x] Dream log `## 文档覆盖度` section includes a `features.md 功能区覆盖：N/M` line
+- [x] Dependency gate: skip Check D when `docs/features.md` does not exist
+
+**Files:**
+- `skills/roll-.dream/SKILL.md` (modified — Check D added to Scan 5)
+- `tests/unit/roll_doc_coverage_skill.bats` (modified — 4 new tests)
+- `docs/features/documentation.md` (this section)
+
+**Dependencies:**
+- Depends on: US-DOC-008（dream reads features.md produced by release.sh）

@@ -1898,6 +1898,20 @@ _agent_cmd_str() {
   printf '%s' "$out"
 }
 
+# Splice --dangerously-skip-permissions into _AGENT_ARGV for claude. Used by
+# trusted, human-triggered, or autonomous flows that should not be blocked by
+# Claude Code's pre-write "approve diff" UX (which silently never gets
+# approved in `claude -p` pipe mode). No-op for non-claude agents and for
+# already-bypassed argvs.
+_agent_bypass_claude_perms() {
+  [[ "${_AGENT_ARGV[0]}" == "claude" ]] || return 0
+  local arg
+  for arg in "${_AGENT_ARGV[@]}"; do
+    [[ "$arg" == "--dangerously-skip-permissions" ]] && return 0
+  done
+  _AGENT_ARGV=("${_AGENT_ARGV[@]:0:2}" --dangerously-skip-permissions "${_AGENT_ARGV[@]:2}")
+}
+
 _agent_run_skill() {
   local skill="$1"
   local agent; agent=$(_project_agent)
@@ -2587,6 +2601,11 @@ _agent_skill_cmd() {
     err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
     return 1
   }
+  # Cron-installed skills (dream / brief / loop) run autonomously and need to
+  # Edit files (docs/dream/, docs/briefs/, BACKLOG, etc.). Claude Code 2.1.x's
+  # pre-write approval UX silently blocks `claude -p` from applying edits in
+  # non-interactive pipe mode — bypass it for the cron context.
+  _agent_bypass_claude_perms
   # In cron context, use absolute claude path so a fresh shell can find it.
   [[ "$agent" == "claude" ]] && _AGENT_ARGV[0]="$(command -v claude 2>/dev/null || echo claude)"
   # Drop the prompt sentinel (always last), re-emit head args + quoted $(strip).

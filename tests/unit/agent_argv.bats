@@ -119,8 +119,8 @@ teardown() { unit_teardown; }
   _project_agent() { echo claude; }
   run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 0 ]
-  # Output begins with either /…/claude or literal claude, followed by -p
-  [[ "$output" == *claude\ -p\ \"\$\(awk* ]]
+  # Output begins with either /…/claude or literal claude, then -p, then bypass flag
+  [[ "$output" == *claude\ -p\ --dangerously-skip-permissions\ \"\$\(awk* ]]
 }
 
 @test "_agent_skill_cmd unknown agent returns 1" {

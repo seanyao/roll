@@ -102,6 +102,8 @@ fi
 
 # Generate GitHub Release Notes (Section 7 grouped format) → release_notes.txt
 if _run_release_notes_skill > release_notes.txt 2>/dev/null && [ -s release_notes.txt ]; then
+  # Strip markdown code fences the model sometimes wraps output in
+  sed -i.bak '/^```/d' release_notes.txt && rm release_notes.txt.bak
   echo "release_notes.txt generated."
 else
   # fallback: extract raw section from CHANGELOG.md

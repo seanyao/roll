@@ -68,6 +68,7 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-REL-001](docs/features/roll-release.md#us-rel-001) | Add roll-release skill — one-command publish flow（已废弃，2026-05-16 移除，发版改走 `scripts/release.sh`） | ✅ Done |
+| [US-REL-002](docs/features/roll-release.md#us-rel-002) | 发版脚本 AI 调用瘦身 — 三步合两步，token 砍七成 | 📋 Todo |
 
 ## Epic: Engineering Infrastructure
 ### Feature: skill-harness
@@ -160,6 +161,8 @@
 | FIX-042 | outer runner 的 tmux kill-all 误杀其他项目的 loop session — 匹配模式限定到当前项目 slug | ✅ Done |
 | FIX-043 | `roll loop now` 在 state=running 时直接退出，绕过 FIX-037 heal，手动触发无法自愈孤儿 — bail 之前先做 liveness 检查 | ✅ Done |
 | FIX-044 | loop cycle 完成后未写入 runs.jsonl — Step 5 Run Summary 漏执行，`roll loop runs` 看不到刚跑完的记录 | ✅ Done |
+| FIX-045 | 恢复孤儿分支时不 rebase — 分支从创建起就落后 main，auto-merge 被 GitHub BEHIND 状态卡住 | 📋 Todo |
+| FIX-046 | `roll ci --wait` 在 PR 未创建时死等 — CI 只触发于 PR event，无 PR 则永远等不到 check run | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -251,6 +254,11 @@
 | REFACTOR-022 | 引入 simplify 三轴代码审查（Reuse / Quality / Efficiency）—— `roll-.review` checklist 内联补充三轴维度（每个 TCR 微步骤零成本自检），`roll-build` Phase 7 升级为三 agent 并行重审（每个 US 收尾一次大粒度 diff 审查）— flagged by user 2026-05-17 (hint: $roll-.review / $roll-build) | 📋 Todo |
 | REFACTOR-023 | CI 自愈的失败次数另存一处，自愈成功后若漏清理就长期堆积 — 合并到主状态记录由统一路径管理 — flagged by simplify review 2026-05-17 | 📋 Todo |
 | REFACTOR-024 | roll-loop 指南里 CI 自愈流程用三层嵌套 ASCII 树画，可读性差 — 拆为两个并列编号子流程 — flagged by simplify review 2026-05-17 | 📋 Todo |
+| REFACTOR-025 | convention 文件合并有一个大型实现分支从未被执行到，维护者很难判断这段代码是否仍有意义，修相关逻辑时容易误踩 — flagged by dream 2026-05-17 | 📋 Todo |
+| REFACTOR-026 | 故事完成后的 TCR 提交数校验逻辑已实现但未接入执行路径，loop 可在不经 TCR 的情况下将故事标记为 Done，违背核心纪律 — flagged by dream 2026-05-17 | 📋 Todo |
+| REFACTOR-027 | loop 启动前的 CI 状态预检逻辑已实现但未接入，loop 可以在 CI 红的情况下启动并叠加新 story — flagged by dream 2026-05-17 | 📋 Todo |
+| REFACTOR-028 | BACKLOG 展示时四种条目类型使用了结构完全一样的解析循环，格式变更需同步四处且容易遗漏 — flagged by dream 2026-05-17 | 📋 Todo |
+| REFACTOR-029 | docs: ROLL_MERGE_SUMMARY 等四个配置变量在代码中频繁引用但文档完全缺失，用户和贡献者无法发现这些配置入口 — flagged by dream 2026-05-17 (hint: $roll-doc) | 📋 Todo |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle
@@ -267,8 +275,9 @@
 ### Feature: cycle-event-stream
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-LOOP-001](docs/features/cycle-event-stream.md#us-loop-001) | 看 loop 干活像看 CI pipeline — 每轮自动周期的故事选取、跨 agent 评审、micro-commit 提交、CI 检查、PR 合并都是带颜色的事件流，attach 和 monitor 直接渲染 | 📋 Todo |
+| [US-LOOP-001](docs/features/cycle-event-stream.md#us-loop-001) | 看 loop 干活像看 CI pipeline — 每轮自动周期的故事选取、跨 agent 评审、micro-commit 提交、CI 检查、PR 合并都是带颜色的事件流，attach 和 monitor 直接渲染 | ✅ Done |
 | [US-LOOP-002](docs/features/cycle-event-stream.md#us-loop-002) | loop tmux 输出体现方法论掌控力 — 压制噪音，用真实数据突出 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate，每个检查点有证据不是口说 | ✅ Done |
+| [US-LOOP-003](docs/features/cycle-event-stream.md#us-loop-003) | loop 等待期间显示 spinner 动画，story 执行、CI 运行、PR 合并三个等待点都有反馈，不再看起来像卡住 | 📋 Todo |
 
 ## Epic: Marketing & Site
 ### Feature: landing-page
@@ -298,3 +307,4 @@
 | IDEA-018 | features.md 区分"正常"和"规划中" — 已有 Done story 的 feature 正常展示，全部 story 仍为 Todo 的 feature 应标记为"规划中"，不能混在一起平铺 | ✅ Done → US-DOC-011 |
 | IDEA-019 | launchd 默认 loop_minute 测试 flaky — hash mod 55 容易碰撞，相邻两个项目偶尔会拿到同一分钟 — flagged by simplify CI debugging 2026-05-17 | 📋 Todo |
 | IDEA-020 | loop tmux 输出精简与视觉层次设计 — 当前信息量过大、关键节点不突出、换行排版混乱；需设计精简方案：过滤低信号噪音，用视觉层次突出 Step 切换、CI gate、TCR commit、story 完成等关键事件，让用户扫一眼即知当前阶段与健康状态 | ✅ Done → US-LOOP-002 |
+| IDEA-021 | loop 等待期间加 spinner 动画 — 当 agent 正在执行 story 时，tmux 输出缺少 loading 状态反馈，看起来像卡住；在每个 → 事件行之后、下一个事件行出现之前，显示一个简单的 spinner 动画表示"正在处理中" | ✅ Done → US-LOOP-003 |

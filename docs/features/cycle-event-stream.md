@@ -1,9 +1,10 @@
 # Feature: cycle-event-stream
 
 <a id="us-loop-001"></a>
-## US-LOOP-001 cycle 结构化事件流 — runner / SKILL emit 标签事件，monitor 与 attach 直接渲染 📋
+## ✅ US-LOOP-001 cycle 结构化事件流 — runner / SKILL emit 标签事件，monitor 与 attach 直接渲染
 
 **Created**: 2026-05-17
+**Completed**: 2026-05-17
 **Plan**: [cycle-event-stream-plan.md](cycle-event-stream-plan.md)
 
 - As a roll 用户
@@ -17,20 +18,20 @@
 - Cross-context: roll-loop / roll-build / roll-peer 三个 SKILL 需协同 emit
 
 **AC:**
-- [ ] 新增 `_loop_event` shell helper（bin/roll）：参数 `<stage> <label> <detail> <outcome>`，同时输出到 stdout（tab-sep）和 `~/.shared/roll/loop/events-<slug>.ndjson`（JSON）
-- [ ] helper 使用 `flock` 串行化 NDJSON 追加，避免并发触发的事件交错
-- [ ] cycle runner 在 worktree 创建后 emit `cycle_start`，idle 路径 emit `idle`，发布完成 emit `cycle_end`
-- [ ] roll-loop SKILL 选定 story 时调用 helper emit `story` 事件
-- [ ] roll-peer SKILL 每轮协商完成 emit `peer` 事件（含 round N/M 和 outcome）
-- [ ] roll-build SKILL 整个 TCR 阶段完成 emit `build` 事件（含提交数 / 耗时 / zero-diff revert 计数）
-- [ ] `_loop_enforce_ci` 旁 emit `ci` 事件（green / red / heal-attempting）
-- [ ] `_loop_publish_pr` 旁 emit `pr` 事件（auto-merged / failed）
-- [ ] `events-<slug>.ndjson` 单文件超过 10MB 自动轮转，保留最近 5 份
+- [x] 新增 `_loop_event` shell helper（bin/roll）：参数 `<stage> <label> <detail> <outcome>`，同时输出到 stdout（tab-sep）和 `~/.shared/roll/loop/events-<slug>.ndjson`（JSON）
+- [x] helper 使用 `flock` 串行化 NDJSON 追加，避免并发触发的事件交错（macOS 降级为 `lockf`，两者均不可用时直接 append）
+- [x] cycle runner 在 worktree 创建后 emit `cycle_start`，idle 路径 emit `idle`，发布完成 emit `cycle_end`
+- [x] roll-loop SKILL 选定 story 时调用 helper emit `story` 事件
+- [x] roll-peer SKILL 每轮协商完成 emit `peer` 事件（含 round N/M 和 outcome）
+- [x] roll-build SKILL 整个 TCR 阶段完成 emit `build` 事件（含提交数 / 耗时 / zero-diff revert 计数）
+- [x] `_loop_enforce_ci` 旁 emit `ci` 事件（green / red / heal-attempting）
+- [x] `_loop_publish_pr` 旁 emit `pr` 事件（auto-merged / failed）
+- [x] `events-<slug>.ndjson` 单文件超过 10MB 自动轮转，保留最近 5 份
 - [ ] `roll loop attach` 接入 tmux 看到的事件行以颜色区分 stage（绿 ok / 红 fail / 黄 warn / 灰 idle）
-- [ ] `roll loop monitor` 读 NDJSON 渲染当前 cycle 进度条 + stage 标记
-- [ ] 录制一份样本 NDJSON 文件（典型成功 cycle 一轮），存于 `docs/site/cycle-sample.ndjson`，作为 landing page 动画的 fixture
-- [ ] 单元测试覆盖 helper 函数的 stdout/NDJSON 写入、flock 串行化、文件轮转
-- [ ] 集成测试覆盖 `loop test` 跑完后 events-*.ndjson 字段完整性
+- [x] `roll loop monitor` 读 NDJSON 渲染当前 cycle 进度条 + stage 标记（新增 events section + `roll loop events [N]` 子命令）
+- [x] 录制一份样本 NDJSON 文件（典型成功 cycle 一轮），存于 `docs/site/cycle-sample.ndjson`，作为 landing page 动画的 fixture
+- [x] 单元测试覆盖 helper 函数的 stdout/NDJSON 写入、flock 串行化、文件轮转
+- [x] 集成测试覆盖 `loop test` 跑完后 events-*.ndjson 字段完整性
 
 **Files:**
 - `bin/roll` — 新增 `_loop_event` helper、轮转逻辑；现有 echo `[loop]` 处补 helper 调用

@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## v2026.517.3
 - **New**: dream 现在察觉功能目录过期 — 落后时不再悄悄无人知晓 `[dream]`
+- **New**: `roll loop events` — 查看 loop 每轮的详细事件流，任务选择、评审结果、CI 状态、合并全都有迹可查 `[loop]`
+- **Improved**: loop 实时输出不再一眼看不出重点 — TCR 纪律、评审决议、CI gate 突出显示，工具日志不再喧宾夺主 `[loop]`
 
 ## v2026.517.2
 - **Fixed**: `roll loop runs` 现在能看到刚跑完的循环记录（不再无历史） `[loop]`

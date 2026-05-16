@@ -45,3 +45,10 @@ teardown() { unit_teardown; }
   echo "$$" > "$_SHARED_ROOT/loop/.LOCK-proj"
   _loop_is_active "proj"
 }
+
+@test "_loop_is_active: ROLL_HEARTBEAT_TIMEOUT extends stale threshold" {
+  # heartbeat 2000s old: dead under default 1800s, alive under 3600s
+  printf '%s\n' "$(( $(date -u +%s) - 2000 ))" > "$_SHARED_ROOT/loop/.heartbeat-proj"
+  ! _loop_is_active "proj"
+  ROLL_HEARTBEAT_TIMEOUT=3600 _loop_is_active "proj"
+}

@@ -2713,15 +2713,16 @@ _loop_off() {
 _loop_is_active() {
   # Three-level liveness probe used by FIX-037 heal and `roll loop now`.
   # Returns 0 if any signal says the cycle is alive, 1 if all signals are dead.
-  # Heartbeat is primary (FIX-038, 30min stale threshold); LOCK PID and tmux
-  # session are fallbacks for pre-heartbeat installs and edge cases.
+  # Heartbeat is primary (FIX-038); LOCK PID and tmux session are fallbacks.
+  # ROLL_HEARTBEAT_TIMEOUT (default 1800s) matches the outer heredoc's threshold.
   local slug="${1:?slug required}"
+  local timeout="${ROLL_HEARTBEAT_TIMEOUT:-1800}"
   local hb_file="${_SHARED_ROOT}/loop/.heartbeat-${slug}"
   if [[ -f "$hb_file" ]]; then
     local ts; ts=$(cat "$hb_file" 2>/dev/null || echo "")
     if [[ "$ts" =~ ^[0-9]+$ ]]; then
       local age=$(( $(date -u +%s) - ts ))
-      [[ $age -lt 1800 ]] && return 0
+      [[ $age -lt $timeout ]] && return 0
     fi
   fi
   local lock="${_SHARED_ROOT}/loop/.LOCK-${slug}"

@@ -2710,32 +2710,36 @@ _loop_off() {
   ok "Loop disabled  已停用"
 }
 
+_loop_is_active() {
+  # Three-level liveness probe used by FIX-037 heal and `roll loop now`.
+  # Returns 0 if any signal says the cycle is alive, 1 if all signals are dead.
+  # Heartbeat is primary (FIX-038, 30min stale threshold); LOCK PID and tmux
+  # session are fallbacks for pre-heartbeat installs and edge cases.
+  local slug="${1:?slug required}"
+  local hb_file="${_SHARED_ROOT}/loop/.heartbeat-${slug}"
+  if [[ -f "$hb_file" ]]; then
+    local ts; ts=$(cat "$hb_file" 2>/dev/null || echo "")
+    if [[ "$ts" =~ ^[0-9]+$ ]]; then
+      local age=$(( $(date -u +%s) - ts ))
+      [[ $age -lt 1800 ]] && return 0
+    fi
+  fi
+  local lock="${_SHARED_ROOT}/loop/.LOCK-${slug}"
+  if [[ -f "$lock" ]]; then
+    local pid; pid=$(head -1 "$lock" 2>/dev/null || echo "")
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && return 0
+  fi
+  command -v tmux >/dev/null 2>&1 && tmux has-session -t "roll-loop-${slug}" 2>/dev/null && return 0
+  return 1
+}
+
 _loop_now() {
   local project_path; project_path=$(pwd -P)
   local slug; slug=$(_project_slug "$project_path")
-  # BUG-2 fix: if state=running, verify liveness before bailing — mirrors FIX-037 so
-  # that `roll loop now` can manually recover a stuck loop without waiting for launchd.
+  # Manual `roll loop now` must not bypass FIX-037 heal: if state says running
+  # but no live signal exists, this trigger is the canonical recovery point.
   if [[ -f "$_LOOP_STATE" ]] && grep -q "status: running" "$_LOOP_STATE" 2>/dev/null; then
-    local _alive=false
-    local _hb_file="${_SHARED_ROOT}/loop/.heartbeat-${slug}"
-    if [[ -f "$_hb_file" ]]; then
-      local _ts; _ts=$(cat "$_hb_file" 2>/dev/null || echo "")
-      if [[ "$_ts" =~ ^[0-9]+$ ]]; then
-        local _age=$(( $(date -u +%s) - _ts ))
-        [[ $_age -lt 1800 ]] && _alive=true
-      fi
-    fi
-    if [[ "$_alive" = false ]]; then
-      local _lock="${_SHARED_ROOT}/loop/.LOCK-${slug}"
-      if [[ -f "$_lock" ]]; then
-        local _pid; _pid=$(head -1 "$_lock" 2>/dev/null || echo "")
-        [[ -n "$_pid" ]] && kill -0 "$_pid" 2>/dev/null && _alive=true
-      fi
-    fi
-    if [[ "$_alive" = false ]]; then
-      command -v tmux >/dev/null 2>&1 && tmux has-session -t "roll-loop-${slug}" 2>/dev/null && _alive=true
-    fi
-    if [[ "$_alive" = true ]]; then
+    if _loop_is_active "$slug"; then
       warn "Loop already running  loop 正在运行中"; return 0
     fi
     info "Stale running state detected — healing before new cycle  检测到孤儿状态，正在修复..."

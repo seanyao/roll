@@ -156,6 +156,9 @@
 | FIX-038 | heartbeat 机制 — inner script 每 60s 写心跳时间戳，outer script 检测 stale 状态（30min 超时可配），防止 PID 重用误判 | ✅ Done |
 | FIX-039 | publish 优雅降级 — PR 和 merge-back 都失败时将 orphan 分支 push + tag 到 origin 再清理 worktree，确保代码不丢失 | ✅ Done |
 | FIX-040 | orphan worktree 恢复扫描 — cycle 启动时扫描孤立 worktree，按时序依次 recover 并 publish，清理已恢复的 worktree | ✅ Done |
+| FIX-041 | loop cycle 内 claude 频繁被 permission/sandbox 拦截后空退 — runner 调 claude 时 bypass permission 检查，worktree 隔离已限制 blast radius | ✅ Done |
+| FIX-042 | outer runner 的 tmux kill-all 误杀其他项目的 loop session — 匹配模式限定到当前项目 slug | ✅ Done |
+| FIX-043 | `roll loop now` 在 state=running 时直接退出，绕过 FIX-037 heal，手动触发无法自愈孤儿 — bail 之前先做 liveness 检查 | ✅ Done |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -240,7 +243,7 @@
 | REFACTOR-017 | agent 命令分发逻辑在 6 处以 case 块形式重复，新增 agent 时需同步全部副本否则运行时失败 — flagged by dream 2026-05-15 | 📋 Todo |
 | REFACTOR-018 | gh/commit/slug 前置检查在 7 个函数中重复且错误处理方式各异，统一行为需逐个排查 — flagged by dream 2026-05-15 | 📋 Todo |
 | REFACTOR-019 | docs: 7 个已完成 ≥3 story 的功能区缺少用户指南，新用户无法从文档体系了解这些功能 — flagged by dream 2026-05-15 (hint: $roll-doc) | 📋 Todo |
-| REFACTOR-020 | 抽 `_loop_is_active()` — FIX-037 heal block 4 层嵌套 + `_still_active` 状态翻转横跨 FIX-037/038，liveness 判断当前嵌在 heredoc 里无法单测；抽函数后可被 bats `source` 单测 `depends-on:FIX-039` (FIX-039/040 会改 publish 流程并复用 state contract，等主题包闭环再做避免重复重构) — flagged by simplify review 2026-05-16 | 📋 Todo |
+| REFACTOR-020 | 抽 `_loop_is_active()` — liveness 判断在三处重复（_loop_now / FIX-037 heal / LOCK 守卫），需要可单测 | ✅ Done |
 | REFACTOR-021 | release changelog 双管线 — `roll update` 直读 CHANGELOG.md，GitHub release notes 走独立 AI 重写后的 release_notes.txt，两套格式漂移；后者还混入 release.sh 状态 echo（stdout 泄漏入捕获文件）和 prompt 经 argv 截断后的 AI 自述 — flagged by user 2026-05-16 (hint: $roll-release / $roll-.changelog) | 📋 Todo |
 
 ## Epic: Backlog 生命周期管理

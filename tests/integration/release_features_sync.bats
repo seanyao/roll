@@ -81,7 +81,7 @@ teardown() { integration_teardown 2>/dev/null || true; }
   [ "$count" -eq 2 ]
 }
 
-@test "bootstrap docs/features.md mentions every BACKLOG ### Feature group" {
+@test "bootstrap docs/features.md covers each BACKLOG ### Feature group" {
   # Each '### Feature: <name>' in BACKLOG should produce a presence in features.md
   # (link or plain mention by name). Allow either docs/features/<name>.md link
   # or plain-text occurrence of the feature name.

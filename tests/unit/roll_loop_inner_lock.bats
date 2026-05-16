@@ -14,6 +14,18 @@ load helpers
 setup() {
   unit_setup_cd
   _test_dir="$TEST_TMP"
+  # Behaviour tests execute the generated inner.sh, which post-P3 requires a
+  # valid git repo with origin/main so _worktree_create succeeds instead of
+  # exiting early (skipping the test command).
+  git -c init.defaultBranch=main init -q --bare "${_test_dir}/.upstream.git"
+  git -c init.defaultBranch=main init -q
+  git remote add origin "${_test_dir}/.upstream.git"
+  git config user.email "test@roll.dev"
+  git config user.name "Test"
+  git config commit.gpgsign false
+  git config protocol.file.allow always
+  git commit --allow-empty -q -m "initial"
+  git push -q origin main
 }
 teardown() {
   unit_teardown_cd

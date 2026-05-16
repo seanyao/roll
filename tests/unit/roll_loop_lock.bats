@@ -12,6 +12,17 @@ setup() {
   _test_dir="$TEST_TMP"
   mkdir -p "${TEST_TMP}/.shared/roll"
   touch "${TEST_TMP}/.shared/roll/mute"
+  # Behaviour tests execute the outer runner.sh, which invokes the inner script
+  # that post-P3 requires a valid git repo with origin/main for _worktree_create.
+  git -c init.defaultBranch=main init -q --bare "${_test_dir}/.upstream.git"
+  git -c init.defaultBranch=main init -q
+  git remote add origin "${_test_dir}/.upstream.git"
+  git config user.email "test@roll.dev"
+  git config user.name "Test"
+  git config commit.gpgsign false
+  git config protocol.file.allow always
+  git commit --allow-empty -q -m "initial"
+  git push -q origin main
 }
 teardown() {
   tmux kill-session -t "roll-loop-test-concurrent" 2>/dev/null || true

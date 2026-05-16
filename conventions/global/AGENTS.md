@@ -50,6 +50,14 @@
   `depends-on:` and `manual-only:` functional tags are allowed; `Domain:` annotation tags are not.
   Technical details and AC go in `docs/features/`.
   A well-written BACKLOG description can be used directly as a CHANGELOG entry.
+- **Convention layering**: this file is the **single source of truth** for cross-project rules
+  (BACKLOG row format, identity, TCR, commit messages, …).
+  A project-level `AGENTS.md` (if any) **must declare it extends this file** —
+  e.g., a one-line foundation note at the top pointing at `~/.<agent>/AGENTS.md`.
+  Project-level files carry only **project-specific** rules (stack, structure, domain) —
+  never duplicate or re-state cross-project rules, because copies drift.
+  When you find yourself wanting to re-state a rule from this file in a project AGENTS.md,
+  add a pointer instead.
 - **Done**: Push + CI passes + deployed. Local-only is not done.
 - **Commit message format**:
   - Format: `<type>: <description>` (Git Hook may auto-prepend type prefix)

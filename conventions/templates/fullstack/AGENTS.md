@@ -1,6 +1,11 @@
 # Project Conventions — Fullstack Web
 
 > Reference for skills to infer fullstack project conventions.
+>
+> **Foundation**: extends the shared rules in `~/.<agent>/AGENTS.md`
+> (installed by `roll setup`). For BACKLOG row format, identity, TCR
+> rhythm, and other cross-project rules, see that file's §4. Only
+> project-specific stack / structure / domain rules live below.
 
 ## 1. Stack
 - **Frontend**: React 18+ / TS / Vite / Tailwind / shadcn/ui.

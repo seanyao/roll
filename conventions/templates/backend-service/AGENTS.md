@@ -1,6 +1,11 @@
 # Project Conventions — Backend Service
 
 > Reference for skills to infer backend project conventions.
+>
+> **Foundation**: extends the shared rules in `~/.<agent>/AGENTS.md`
+> (installed by `roll setup`). For BACKLOG row format, identity, TCR
+> rhythm, and other cross-project rules, see that file's §4. Only
+> project-specific stack / structure / domain rules live below.
 
 ## 1. Design
 - **API**: RESTful `/api/{res}/{id}`. Structured JSON errors.

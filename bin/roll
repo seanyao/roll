@@ -2597,7 +2597,8 @@ _install_launchd_plists() {
     local label; label=$(_launchd_label "$svc" "$project_path")
     local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
     local runner="${shared}/${svc}/run-${slug}.sh"
-    local log="${shared}/${svc}/cron.log"
+    # FIX-052: per-project cron log so concurrent projects don't interleave.
+    local log="${shared}/${svc}/cron-${slug}.log"
     local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
 
     if [[ "$svc" == "loop" ]]; then
@@ -2725,10 +2726,12 @@ _loop_on() {
 
   mkdir -p "${_SHARED_ROOT}/loop" "${_SHARED_ROOT}/dream" "${_SHARED_ROOT}/brief"
 
+  # FIX-052: per-project cron logs so concurrent projects don't interleave.
+  local slug; slug=$(_project_slug "$project_path")
   local loop_cmd dream_cmd brief_cmd
-  loop_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-loop/SKILL.md") >> ${_SHARED_ROOT}/loop/cron.log 2>&1"
-  dream_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-.dream/SKILL.md") >> ${_SHARED_ROOT}/dream/cron.log 2>&1"
-  brief_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-brief/SKILL.md") >> ${_SHARED_ROOT}/brief/cron.log 2>&1"
+  loop_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-loop/SKILL.md") >> ${_SHARED_ROOT}/loop/cron-${slug}.log 2>&1"
+  dream_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-.dream/SKILL.md") >> ${_SHARED_ROOT}/dream/cron-${slug}.log 2>&1"
+  brief_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-brief/SKILL.md") >> ${_SHARED_ROOT}/brief/cron-${slug}.log 2>&1"
 
   (
     crontab -l 2>/dev/null
@@ -2839,7 +2842,8 @@ _loop_test() {
     err "Run 'roll loop on' first to generate it."
     return 1
   fi
-  local log="${_SHARED_ROOT}/loop/cron.log"
+  # FIX-052: per-project log so test cycle output doesn't mix with other projects'.
+  local log="${_SHARED_ROOT}/loop/cron-${slug}.log"
   local test_runner="${_SHARED_ROOT}/loop/run-${slug}-test.sh"
 
   # Detect terminal pref same way _install_launchd_plists does

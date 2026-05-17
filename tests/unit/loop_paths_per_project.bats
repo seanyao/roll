@@ -92,3 +92,10 @@ teardown() { unit_teardown; }
   # ~/.shared/roll/loop/mute-<slug>.
   ! grep -nE '/\.shared/roll/mute"' "$ROLL_BIN"
 }
+
+@test "bin/roll: no shared cron.log path (each project gets its own cron-<slug>.log)" {
+  # Multiple projects writing to the same cron.log interleaves their cycle
+  # output. Per-project log keeps each project's record clean and aligns with
+  # the "no cross-project loop state" rule.
+  ! grep -nE '/cron\.log' "$ROLL_BIN"
+}

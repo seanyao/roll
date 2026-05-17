@@ -2,6 +2,14 @@
 
 Architectural friction signals flagged during story execution.
 
+## REFACTOR-027 接入 _loop_precheck_ci 启动前 CI 预检 ✅
+
+**Flagged**: 2026-05-17 by dream
+**Completed**: 2026-05-17
+**Signal**: `_loop_precheck_ci()` 已实现（约 14 行）但从未被任何执行路径调用，loop 可在 HEAD CI 红的情况下启动并叠加新 story。
+**Fix**: 在 `cmd_loop` 中新增 `precheck-ci` 子命令，调用 `_loop_precheck_ci`；更新 `skills/roll-loop/SKILL.md` Step 1.5 改为 `roll loop precheck-ci`；新增 2 个 CLI 路由单元测试。
+**Files**: `bin/roll`, `tests/unit/roll_loop_ci_gate.bats`, `skills/roll-loop/SKILL.md`
+
 ## REFACTOR-026 接入 _loop_enforce_tcr TCR 校验 ✅
 
 **Flagged**: 2026-05-17 by dream

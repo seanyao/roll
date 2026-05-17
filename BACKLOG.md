@@ -255,7 +255,7 @@
 | REFACTOR-022 | 引入 simplify 三轴代码审查（Reuse / Quality / Efficiency）—— `roll-.review` checklist 内联补充三轴维度（每个 TCR 微步骤零成本自检），`roll-build` Phase 7 升级为三 agent 并行重审（每个 US 收尾一次大粒度 diff 审查）— flagged by user 2026-05-17 (hint: $roll-.review / $roll-build) | ✅ Done |
 | REFACTOR-023 | CI 自愈的失败次数另存一处，自愈成功后若漏清理就长期堆积 — 合并到主状态记录由统一路径管理 — flagged by simplify review 2026-05-17 | ✅ Done |
 | REFACTOR-024 | roll-loop 指南里 CI 自愈流程用三层嵌套 ASCII 树画，可读性差 — 拆为两个并列编号子流程 — flagged by simplify review 2026-05-17 | ✅ Done |
-| REFACTOR-025 | convention 文件合并有一个大型实现分支从未被执行到，维护者很难判断这段代码是否仍有意义，修相关逻辑时容易误踩 — flagged by dream 2026-05-17 | 🔨 In Progress |
+| REFACTOR-025 | convention 文件合并有一个大型实现分支从未被执行到，维护者很难判断这段代码是否仍有意义，修相关逻辑时容易误踩 — flagged by dream 2026-05-17 | ✅ Done |
 | REFACTOR-026 | 故事完成后的 TCR 提交数校验逻辑已实现但未接入执行路径，loop 可在不经 TCR 的情况下将故事标记为 Done，违背核心纪律 — flagged by dream 2026-05-17 | 📋 Todo |
 | REFACTOR-027 | loop 启动前的 CI 状态预检逻辑已实现但未接入，loop 可以在 CI 红的情况下启动并叠加新 story — flagged by dream 2026-05-17 | 📋 Todo |
 | REFACTOR-028 | BACKLOG 展示时四种条目类型使用了结构完全一样的解析循环，格式变更需同步四处且容易遗漏 — flagged by dream 2026-05-17 | 📋 Todo |

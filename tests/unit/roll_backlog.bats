@@ -75,6 +75,46 @@ EOF
   [ "$fix_pos" -lt "$us_pos" ]
 }
 
+@test "backlog: pending REFACTOR item shows Refactors section" {
+  _make_backlog
+  echo "| REFACTOR-001 | Pending refactor | 📋 Todo |" >> "$TEST_DIR/BACKLOG.md"
+  cd "$TEST_DIR"
+  run bash "$ROLL_BIN" backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"REFACTOR-001"* ]]
+  [[ "$output" == *"Refactors"* ]]
+  [[ "$output" == *"Pending refactor"* ]]
+}
+
+@test "backlog: pending IDEA item shows Ideas section" {
+  _make_backlog
+  echo "| IDEA-001 | Pending idea | 📋 Todo |" >> "$TEST_DIR/BACKLOG.md"
+  cd "$TEST_DIR"
+  run bash "$ROLL_BIN" backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"IDEA-001"* ]]
+  [[ "$output" == *"Ideas"* ]]
+  [[ "$output" == *"Pending idea"* ]]
+}
+
+@test "backlog: four group types all render in priority order FIX→US→REFACTOR→IDEA" {
+  _make_backlog
+  echo "| IDEA-009 | An idea | 📋 Todo |" >> "$TEST_DIR/BACKLOG.md"
+  echo "| REFACTOR-009 | A refactor | 📋 Todo |" >> "$TEST_DIR/BACKLOG.md"
+  echo "| [US-TEST-009](docs/features/test.md) | A story | 📋 Todo |" >> "$TEST_DIR/BACKLOG.md"
+  echo "| FIX-009 | A fix | 📋 Todo |" >> "$TEST_DIR/BACKLOG.md"
+  cd "$TEST_DIR"
+  run bash "$ROLL_BIN" backlog
+  [ "$status" -eq 0 ]
+  fix_pos=$(echo "$output" | grep -n "FIX-009" | cut -d: -f1)
+  us_pos=$(echo "$output" | grep -n "US-TEST-009" | cut -d: -f1)
+  refactor_pos=$(echo "$output" | grep -n "REFACTOR-009" | cut -d: -f1)
+  idea_pos=$(echo "$output" | grep -n "IDEA-009" | cut -d: -f1)
+  [ "$fix_pos" -lt "$us_pos" ]
+  [ "$us_pos" -lt "$refactor_pos" ]
+  [ "$refactor_pos" -lt "$idea_pos" ]
+}
+
 @test "backlog: missing BACKLOG.md exits non-zero with error" {
   cd "$TEST_DIR"
   run bash "$ROLL_BIN" backlog

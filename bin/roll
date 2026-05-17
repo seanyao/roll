@@ -4614,6 +4614,23 @@ _backlog_extract_id() {
   fi
 }
 
+# Render one pending-group section (FIX / US / REFACTOR / IDEA) — all four
+# types share identical row structure, so they share one render path. Format
+# changes only need to happen here.
+#   $1 title (EN + ZH)   $2 ANSI color   $3 count   $4 id column width   $5 items text
+_backlog_render_group() {
+  local title="$1" color="$2" count="$3" width="$4" items="$5"
+  echo -e "  ${color}${title}  (${count})${NC}"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local id desc
+    id=$(_backlog_extract_id "$line")
+    desc=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//')
+    printf "    %-${width}s  %s\n" "$id" "$desc"
+  done <<< "$items"
+  echo ""
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CI — check or wait for current commit's CI status
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4769,49 +4786,10 @@ cmd_backlog() {
   echo -e "  ${BOLD}Pending Backlog  待处理任务${NC}  (${total} items)"
   echo ""
 
-  if [[ $fix_count -gt 0 ]]; then
-    echo -e "  ${RED}Bug Fixes  缺陷修复  (${fix_count})${NC}"
-    while IFS= read -r line; do
-      local id desc
-      id=$(echo "$line" | awk -F'|' '{print $2}' | tr -d ' ')
-      desc=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//')
-      printf "    %-12s  %s\n" "$id" "$desc"
-    done <<< "$fix_items"
-    echo ""
-  fi
-
-  if [[ $us_count -gt 0 ]]; then
-    echo -e "  ${CYAN}User Stories  用户故事  (${us_count})${NC}"
-    while IFS= read -r line; do
-      local id desc
-      id=$(echo "$line" | sed 's/.*\[\(US-[^]]*\)\].*/\1/')
-      desc=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//')
-      printf "    %-14s  %s\n" "$id" "$desc"
-    done <<< "$us_items"
-    echo ""
-  fi
-
-  if [[ $refactor_count -gt 0 ]]; then
-    echo -e "  ${YELLOW}Refactors  重构  (${refactor_count})${NC}"
-    while IFS= read -r line; do
-      local id desc
-      id=$(echo "$line" | awk -F'|' '{print $2}' | tr -d ' ')
-      desc=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//')
-      printf "    %-16s  %s\n" "$id" "$desc"
-    done <<< "$refactor_items"
-    echo ""
-  fi
-
-  if [[ $idea_count -gt 0 ]]; then
-    echo -e "  ${NC}Ideas  创意  (${idea_count})"
-    while IFS= read -r line; do
-      local id desc
-      id=$(echo "$line" | awk -F'|' '{print $2}' | tr -d ' ')
-      desc=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//')
-      printf "    %-14s  %s\n" "$id" "$desc"
-    done <<< "$idea_items"
-    echo ""
-  fi
+  [[ $fix_count -gt 0 ]]      && _backlog_render_group "Bug Fixes  缺陷修复"   "$RED"    "$fix_count"      12 "$fix_items"
+  [[ $us_count -gt 0 ]]       && _backlog_render_group "User Stories  用户故事" "$CYAN"   "$us_count"       14 "$us_items"
+  [[ $refactor_count -gt 0 ]] && _backlog_render_group "Refactors  重构"        "$YELLOW" "$refactor_count" 16 "$refactor_items"
+  [[ $idea_count -gt 0 ]]     && _backlog_render_group "Ideas  创意"            "$NC"     "$idea_count"     14 "$idea_items"
 
   if [[ $total -eq 0 ]]; then
     echo -e "  ${GREEN}✓ Nothing pending — backlog is clear  暂无待处理任务${NC}"

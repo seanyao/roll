@@ -76,6 +76,8 @@
 ### Autonomous Evolution
 - [autonomous-evolution](docs/features/autonomous-evolution.md) — roll-loop autonomous BACKLOG executor: scheduling, worktree isolation, auto PR merge, orphan recovery, heartbeat
   roll-loop 自治 BACKLOG 执行器：调度、worktree 隔离、PR 自动合并、孤儿恢复、心跳
+- [upstream-watch](docs/features/upstream-watch.md) — dream nightly scans upstream AI CLI release notes; breaking changes open FIX into BACKLOG, behavior changes raise ALERT *(规划中)*
+  dream 每晚巡检上游 AI CLI release notes；破坏性变更开 FIX 入 BACKLOG，行为变更写 ALERT
 
 ### Documentation
 - [documentation](docs/features/documentation.md) — Bilingual layered docs (guide / domain / features), dream scans for coverage

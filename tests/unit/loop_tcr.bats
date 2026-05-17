@@ -99,3 +99,24 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 0 ]
   grep -q "✅ Done" BACKLOG.md
 }
+
+@test "roll loop enforce-tcr: CLI subcommand routes to _loop_enforce_tcr (empty started_at skips)" {
+  printf '| [US-TEST-001](x.md) | test | ✅ Done |\n' > BACKLOG.md
+
+  # Empty started_at → _loop_enforce_tcr returns 0 immediately (no TCR check)
+  run "$ROLL_BIN" loop enforce-tcr "US-TEST-001" ""
+  [ "$status" -eq 0 ]
+  grep -q "✅ Done" BACKLOG.md
+}
+
+@test "roll loop enforce-tcr: CLI subcommand reverts story when no tcr commits" {
+  printf '| [US-TEST-001](x.md) | test | ✅ Done |\n' > BACKLOG.md
+
+  local started_at="2026-01-01T00:00:00Z"
+  GIT_COMMITTER_DATE="2026-01-02T00:00:00Z" git commit \
+    --date="2026-01-02T00:00:00Z" --allow-empty -m "chore: nothing" -q
+
+  run "$ROLL_BIN" loop enforce-tcr "US-TEST-001" "$started_at"
+  [ "$status" -eq 1 ]
+  grep -q "📋 Todo" BACKLOG.md
+}

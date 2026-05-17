@@ -229,7 +229,7 @@ run_id: loop-20260510-0200
 
 After each item completes:
 
-1. **TCR 硬校验** — call `_loop_enforce_tcr <story_id> <started_at>`:
+1. **TCR 硬校验** — call `roll loop enforce-tcr <story_id> <started_at>`:
    - Count `tcr:` prefix commits since `started_at` via `git log --oneline --since=<started_at>`
    - Count == 0 → revert story status in BACKLOG.md from ✅ Done → 📋 Todo; write ALERT to `~/.shared/roll/loop/ALERT.md` with story ID, time, reason "zero tcr: commits since story start", and suggested actions (`roll loop now` / `$roll-build <id>` / `roll loop reset`)
    - Count > 0 → continue normally

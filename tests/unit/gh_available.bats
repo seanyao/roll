@@ -53,3 +53,36 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 0 ]
   [ "$output" = "none" ]
 }
+
+# _gh_resolve tests
+
+@test "_gh_resolve: function exists in bin/roll" {
+  grep -qF '_gh_resolve()' "$ROLL_BIN"
+}
+
+@test "_gh_resolve: returns 1 when gh is not available" {
+  _gh_available() { return 1; }
+  run _gh_resolve slug
+  [ "$status" -eq 1 ]
+}
+
+@test "_gh_resolve: returns 1 when origin is not a github remote" {
+  _gh_available() { return 0; }
+  _gh_repo_slug() { return 1; }
+  run _gh_resolve slug
+  [ "$status" -eq 1 ]
+}
+
+@test "_gh_resolve: returns 0 and sets outvar on success" {
+  _gh_available() { return 0; }
+  _gh_repo_slug() { echo "owner/repo"; }
+  local myslug=""
+  _gh_resolve myslug
+  [ "$myslug" = "owner/repo" ]
+}
+
+@test "_gh_resolve: produces no output on failure" {
+  _gh_available() { return 1; }
+  run _gh_resolve slug
+  [ -z "$output" ]
+}

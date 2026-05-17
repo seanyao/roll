@@ -1,3 +1,4 @@
+```
 # Roll — Features
 
 > 产品视角的功能索引。Story 是构建单位、Changelog 是发布单位，
@@ -103,3 +104,4 @@
 - 手动编辑会在下次发版被覆盖
 - 新增 Feature 时无需手动改本文件，发版会自动同步
 - 缺 deep doc 的 Feature 列出但不加链接，由 dream / 文档巡检反向触发补 doc
+```

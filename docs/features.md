@@ -66,6 +66,9 @@
 - [notifications](features/notifications.md) — 自治循环可观测性，loop 状态推送
 - [cycle-event-stream](features/cycle-event-stream.md) — runner / SKILL 发结构化事件，`roll loop attach/monitor` 像 CI pipeline 一样可视化每一轮
 
+### CLI 视觉系统 *(规划中)*
+- [cli-redesign](features/cli-redesign.md) — 整个 roll CLI 输出统一为同一套终端语言（语义色、字形、EN/ZH 双行、三段式 IA），从 `roll loop status` 开始逐步铺到 home / status / backlog / brief / setup / init / peer / --help
+
 ### 营销与官网
 - [landing-page](features/landing-page.md) — 首屏动画 6 秒内讲清三层自治产品故事
 

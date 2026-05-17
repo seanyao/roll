@@ -113,8 +113,10 @@ EOF
 # ─── _loop_status ─────────────────────────────────────────────────────────────
 
 @test "_loop_status: references pause display" {
+  # After US-VIEW-001 the v1 implementation lives in _legacy_loop_status;
+  # the v2 Python renderer reads paused state via roll-loop-status.py.
   local body
-  body=$(awk '/^_loop_status\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  body=$(awk '/^_legacy_loop_status\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   echo "$body" | grep -qE '⏸|paused'
 }
 

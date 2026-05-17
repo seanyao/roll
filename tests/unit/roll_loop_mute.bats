@@ -78,7 +78,7 @@ teardown() { unit_teardown_cd; }
 # ─── _loop_status mute line ───────────────────────────────────────────────────
 
 @test "_loop_status: shows 'Auto-attach' line — live when not muted" {
-  run _loop_status
+  run _legacy_loop_status
   [ "$status" -eq 0 ]
   [[ "$output" == *"Auto-attach"* ]]
   [[ "$output" == *"live"* ]]
@@ -86,7 +86,7 @@ teardown() { unit_teardown_cd; }
 
 @test "_loop_status: shows 'Auto-attach' line — muted when mute file exists" {
   touch "$_LOOP_MUTE_FILE"
-  run _loop_status
+  run _legacy_loop_status
   [ "$status" -eq 0 ]
   [[ "$output" == *"Auto-attach"* ]]
   [[ "$output" == *"muted"* ]]

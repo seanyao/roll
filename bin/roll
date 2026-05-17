@@ -1928,14 +1928,6 @@ cmd_agent() {
 # LOOP — autonomous BACKLOG executor management
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_LOOP_TAG="# roll-loop"
-: "${_SHARED_ROOT:=${HOME}/.shared/roll}"
-: "${_LOOP_STATE:=${_SHARED_ROOT}/loop/state.yaml}"
-: "${_LOOP_ALERT:=${_SHARED_ROOT}/loop/ALERT.md}"
-_LOOP_RUNS="${HOME}/.shared/roll/loop/runs.jsonl"
-_LOOP_MUTE_FILE="${HOME}/.shared/roll/mute"
-_LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
-
 # Returns a filesystem-safe slug combining the project basename and a 6-char
 # hash of the full path, ensuring uniqueness across sibling dirs with same name.
 _project_slug() {
@@ -1958,6 +1950,19 @@ _project_slug() {
   base=$(printf '%s' "$base" | tr -cs '[:alnum:]' '-' | sed 's/-*$//')
   printf '%s' "${base}-${hash}"
 }
+
+_LOOP_TAG="# roll-loop"
+: "${_SHARED_ROOT:=${HOME}/.shared/roll}"
+# FIX-052: per-project loop state — ALERT/state/mute were globally shared,
+# causing one project's alerts to surface in another project's session and
+# letting concurrent cycles overwrite each other's state. Align with the
+# existing events-/run-/LOCK-/heartbeat-<slug> namespacing.
+: "${_LOOP_PROJ_SLUG:=$(_project_slug 2>/dev/null || echo default)}"
+: "${_LOOP_STATE:=${_SHARED_ROOT}/loop/state-${_LOOP_PROJ_SLUG}.yaml}"
+: "${_LOOP_ALERT:=${_SHARED_ROOT}/loop/ALERT-${_LOOP_PROJ_SLUG}.md}"
+_LOOP_RUNS="${HOME}/.shared/roll/loop/runs.jsonl"
+: "${_LOOP_MUTE_FILE:=${_SHARED_ROOT}/loop/mute-${_LOOP_PROJ_SLUG}}"
+_LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
 
 _config_read_int() {
   local key="$1" default="$2"

@@ -16,6 +16,7 @@ shared conventions.
 | `ROLL_LOOP_NO_HEAL` | `0` | Set to `1` to disable post-build CI self-heal and restore fail-fast behaviour. Useful for debugging or when you want to cap autonomous spend per cycle. |
 | `ROLL_LOOP_HEAL_MAX` | `2` | Maximum number of CI self-heal attempts per story after the build commits land. Raise it for noisy CI environments; lower it to fail faster. |
 | `ROLL_PR_MERGE_TIMEOUT` | `600` (seconds) | How long `_loop_wait_pr_merge` waits for an opened PR to merge (or fail) before giving up and writing an ALERT. Raise it on slow CI; lower it for fast pipelines. |
+| `ROLL_LOOP_NO_POPUP` | unset | When set to any non-empty value, the runner does **not** auto-spawn a macOS Terminal/Ghostty window running `tmux attach`. For tests and headless batch runs — the popup outlives the killed tmux session and clutters the desktop. |
 
 `ROLL_CONFIG` and `ROLL_GLOBAL` derive from `ROLL_HOME`, so usually you only
 need to override `ROLL_HOME` to relocate everything together.

@@ -2510,7 +2510,7 @@ if command -v tmux >/dev/null 2>&1; then
   # Auto-attach popup: when not muted, spawn a Terminal window attached to the
   # tmux session so the user can watch the loop work in real time. Best-effort
   # focus retention: capture the current frontmost app and re-activate after.
-  if [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
+  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
     # Runtime terminal detection: try preferred first, fallback through installed apps.
     # open -na returns non-zero when app not found, so || chain works as fallback.
     _launched=0

@@ -22,6 +22,9 @@ DOCS_ZH="${BATS_TEST_DIRNAME}/../../docs/guide/zh/configuration.md"
 @test "configuration.md (en) documents ROLL_PR_MERGE_TIMEOUT" {
   grep -q "ROLL_PR_MERGE_TIMEOUT" "${DOCS_EN}"
 }
+@test "configuration.md (en) documents ROLL_LOOP_NO_POPUP" {
+  grep -q "ROLL_LOOP_NO_POPUP" "${DOCS_EN}"
+}
 
 @test "configuration.md (zh) documents ROLL_LOOP_FORCE" {
   grep -q "ROLL_LOOP_FORCE" "${DOCS_ZH}"
@@ -34,4 +37,7 @@ DOCS_ZH="${BATS_TEST_DIRNAME}/../../docs/guide/zh/configuration.md"
 }
 @test "configuration.md (zh) documents ROLL_PR_MERGE_TIMEOUT" {
   grep -q "ROLL_PR_MERGE_TIMEOUT" "${DOCS_ZH}"
+}
+@test "configuration.md (zh) documents ROLL_LOOP_NO_POPUP" {
+  grep -q "ROLL_LOOP_NO_POPUP" "${DOCS_ZH}"
 }

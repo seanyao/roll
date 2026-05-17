@@ -12,6 +12,10 @@ setup() {
   _test_dir="$TEST_TMP"
   mkdir -p "${TEST_TMP}/.shared/roll"
   touch "${TEST_TMP}/.shared/roll/mute"
+  # Suppress the macOS Terminal/Ghostty popup the runner script otherwise
+  # spawns for `tmux attach -t roll-loop-test-*`; the popped window outlives
+  # the killed tmux session and clutters the user's desktop.
+  export ROLL_LOOP_NO_POPUP=1
   # Behaviour tests execute the outer runner.sh, which invokes the inner script
   # that post-P3 requires a valid git repo with origin/main for _worktree_create.
   git -c init.defaultBranch=main init -q --bare "${_test_dir}/.upstream.git"
@@ -35,6 +39,12 @@ teardown() {
   _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 18
   grep -qF 'echo "$$"' "$script_path"
   grep -qF '.LOCK-' "$script_path"
+}
+
+@test "_write_loop_runner_script: popup branch is guarded by ROLL_LOOP_NO_POPUP" {
+  local script_path="${_test_dir}/run-test-abc123.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 18
+  grep -qF 'ROLL_LOOP_NO_POPUP' "$script_path"
 }
 
 @test "_write_loop_runner_script: traps EXIT to remove LOCK" {

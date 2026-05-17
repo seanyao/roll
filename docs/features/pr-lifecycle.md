@@ -131,9 +131,10 @@
 
 
 <a id="us-pr-004"></a>
-## US-PR-004 PR 评审两档开关从 setup/update 提示挪到 doctor 📋
+## US-PR-004 PR 评审两档开关从 setup/update 提示挪到 doctor ✅
 
 **Created**: 2026-05-17
+**Completed**: 2026-05-18
 
 - As a user who already enabled the PR review extras (or who hasn't and doesn't want to)
 - I want `roll setup` / `roll update` 不再每次都打印两段"可选启用"提示
@@ -147,23 +148,24 @@
 - Aggregate: `DoctorReport`（roll doctor 当前输出聚合）
 
 **AC:**
-- [ ] `cmd_setup` 末尾**不再**调用 `_print_pr_pipeline_hint` / `_print_pr_event_hint`
-- [ ] `cmd_update` 末尾输出干净（不打印两段 PR 提示，只打 setup 结果 + changelog）
-- [ ] `roll doctor` 输出新增一节"PR 评审两档开关"（或英文等价标题），仅在当前工作目录是 git repo 时显示
-- [ ] 该节探测当前 repo 状态：
+- [x] `cmd_setup` 末尾**不再**调用 `_print_pr_pipeline_hint` / `_print_pr_event_hint`
+- [x] `cmd_update` 末尾输出干净（不打印两段 PR 提示，只打 setup 结果 + changelog）
+- [x] `roll doctor` 输出新增一节"PR 评审两档开关"（或英文等价标题），仅在当前工作目录是 git repo 时显示
+- [x] 该节探测当前 repo 状态：
   - 分支保护中 `required_pull_request_reviews.required_approving_review_count >= 1` → 显示"✅ AI 评审双门已启用"
   - 否则 → 显示"⚪ 双门未启用"+ `_print_pr_pipeline_hint` 的安装命令
   - `.github/workflows/pr-review-event.yml` 存在 → 显示"✅ 事件驱动 PR 评审已安装"
   - 否则 → 显示"⚪ 事件驱动 PR 评审未安装"+ `_print_pr_event_hint` 的安装命令
-- [ ] 在非 repo 目录跑 `roll doctor` 时，整节静默跳过（不显示"未启用"）
-- [ ] 分支保护探测失败（无 `gh` / 未登录 / 网络错）时，仅显示"⚪ 状态未知（需要 gh auth）"+ 安装命令，不报错退出
-- [ ] `_print_pr_pipeline_hint` / `_print_pr_event_hint` 函数保留（doctor 复用其安装命令文本），只是调用点变化
-- [ ] 新增 bats 测试覆盖：cmd_setup 不再调用两个 hint；cmd_doctor 在 git repo 内调用两个 hint；非 repo 目录下不调用
+- [x] 在非 repo 目录跑 `roll doctor` 时，整节静默跳过（不显示"未启用"）
+- [x] 分支保护探测失败（无 `gh` / 未登录 / 网络错）时，仅显示"⚪ 状态未知（需要 gh auth）"+ 安装命令，不报错退出
+- [x] `_print_pr_pipeline_hint` / `_print_pr_event_hint` 函数保留（doctor 复用其安装命令文本），只是调用点变化
+- [x] 新增 bats 测试覆盖：cmd_setup 不再调用两个 hint；cmd_doctor 在 git repo 内调用两个 hint；非 repo 目录下不调用
 
 **Files:**
-- `bin/roll` — 移除 `cmd_setup` 的两行调用；`cmd_doctor` 新增 PR 评审节
-- `tests/unit/roll_doctor.bats`（如已存在）/ 新增测试文件
-- `tests/unit/roll_setup.bats` 相关断言更新
+- `bin/roll` — 移除 `cmd_setup` 末尾两个 hint 调用；新增 `cmd_doctor` 子命令 + `_doctor_pr_section` / `_doctor_branch_protection_state` / `_doctor_event_workflow_state` 三个辅助函数；`main()` dispatcher 注册 `doctor`
+- `tests/unit/roll_doctor_pr_section.bats` ← 新增（10 tests）
+- `tests/unit/roll_pr_pipeline_hint.bats` — 翻转两条 cmd_setup 断言为"不再打印"，新增 cmd_update 不漏打的回归测试
+- `tests/integration/cmd_doctor.bats` ← 新增（3 tests，金路径 E2E）
 
 **Dependencies:**
 - Depends on: US-PR-001（review-pr 命令）/ US-PR-003（event workflow 模板）

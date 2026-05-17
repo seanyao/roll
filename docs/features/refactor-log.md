@@ -469,3 +469,15 @@ clean).
 - `tests/unit/roll_loop_self_heal.bats` 全面更新：12 条测试反映新行为
 
 **Files**: `bin/roll`, `tests/unit/roll_loop_self_heal.bats`
+
+---
+
+## REFACTOR-024 roll-loop SKILL.md CI 自愈流程可读性改进 ✅
+
+**Flagged**: 2026-05-17 by simplify review
+**Completed**: 2026-05-17
+**Signal**: CI 自愈流程用三层嵌套 ASCII 树呈现（`│   1. Capture...`），分支与编号步骤混排，代码块内嵌在树节点里，可读性差。
+
+**Fix**: 将嵌套树替换为两个并列编号子流程（Path A — 允许/Path B — 耗尽），代码块独立成段。同步移除已被 REFACTOR-023 废弃的 `heal/<story_id>.count` 路径引用，改为 `state.yaml` 中的 `heal_count:` 字段。
+
+**Files**: `skills/roll-loop/SKILL.md`, `tests/unit/roll_loop_self_heal_doc.bats`（新增）

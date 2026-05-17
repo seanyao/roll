@@ -200,7 +200,11 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     }.get(outcome, ("muted", "·"))
     time_str = cy["start"].astimezone().strftime("%H:%M")
     cr = cy.get("cron") or {}
-    dur = f"{cr.get('duration_s', 0)//60}m" if cr else "—"
+    # duration prefers the explicit cy["duration_s"] (computed from event
+    # timestamps or runs.jsonl) so it shows for all completed cycles, not
+    # only the one that happens to be in the latest cron.log dump.
+    dur_s = cy.get("duration_s") or cr.get("duration_s") or 0
+    dur = fmt_dur(dur_s) if dur_s else "—"
     cost = f"${cr.get('cost', 0):.2f}" if cr else "—"
     sid = cy.get("story") or "—"
     title_en = backlog.get(sid, "") if sid != "—" else ""

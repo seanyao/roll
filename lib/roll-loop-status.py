@@ -211,11 +211,9 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
     cycles.sort(key=lambda x: x["start"], reverse=True)
 
     # Match cron-log entries by HH:MM:SS proximity to the inner cycle-done
-    # signal (within ±120s). cron.log lines are emitted by
-    # lib/loop-fmt.py::now_hms() right when the inner runner prints "cycle
-    # done", which is close to the pr event timestamp. cycle_end is emitted
-    # later by the outer wrapper (after publish + cleanup) and may be 10+
-    # minutes off, so prefer pr_ts when present.
+    # signal (within ±120s). cron.log is overwritten each cycle, so only the
+    # most recent cycle gets a cron entry — but it carries the only cost we
+    # have. duration_s falls back to (end - start) for every other cycle.
     for cy in cycles:
         anchor = cy.get("pr_ts") or cy.get("end") or cy.get("start")
         target = anchor.hour * 3600 + anchor.minute * 60 + anchor.second
@@ -230,10 +228,64 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
                 best = cr
         if best and best_dt <= 120:
             cy["cron"] = best
+
+        # Compute duration from event timestamps when cron didn't match.
+        if cy.get("end") and cy.get("start"):
+            cy["duration_s"] = int((cy["end"] - cy["start"]).total_seconds())
+        elif cy.get("cron"):
+            cy["duration_s"] = cy["cron"]["duration_s"]
+
         # Default outcome if missing (e.g. cycle never ended → still running, or crashed).
         if not cy.get("outcome"):
             cy["outcome"] = "running" if not cy.get("end") else "unknown"
     return cycles
+
+def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
+    """Map run_id → run row for the current project (filters out other slugs
+    sharing ~/.shared/roll/loop/runs.jsonl). Coverage may be incomplete for
+    pre-FIX-044 cycles."""
+    path = shared_root() / "loop" / "runs.jsonl"
+    if not path.exists():
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    with path.open(errors="ignore") as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            if r.get("project") != slug:
+                continue
+            rid = r.get("run_id", "")
+            if rid:
+                out[rid] = r
+    return out
+
+def merge_runs_into_cycles(cycles: List[Dict[str, Any]], runs: Dict[str, Dict[str, Any]]) -> None:
+    """Attach tcr_count + built stories from runs.jsonl onto matching cycles.
+    Match key: cycle label `20260517-084804-59225` ←→ run_id `loop-20260517-084804`
+    (run_id drops the trailing pid/seq segment)."""
+    for cy in cycles:
+        lbl = cy.get("label", "")
+        # cycle label format: YYYYMMDD-HHMMSS-PID; run_id format: loop-YYYYMMDD-HHMM(SS)
+        parts = lbl.split("-")
+        if len(parts) < 2:
+            continue
+        date_part, time_part = parts[0], parts[1]
+        # try long match first (loop-YYYYMMDD-HHMMSS), then short (loop-YYYYMMDD-HHMM)
+        for candidate in (f"loop-{date_part}-{time_part}", f"loop-{date_part}-{time_part[:4]}"):
+            r = runs.get(candidate)
+            if r:
+                cy["tcr_count"] = r.get("tcr_count", 0)
+                cy["built"] = r.get("built", [])
+                cy["duration_s"] = cy.get("duration_s") or r.get("duration_sec", 0) or None
+                # Prefer runs.jsonl status if our outcome was vacuous
+                if cy.get("outcome") in ("unknown", "running") and r.get("status"):
+                    cy["outcome"] = r["status"]
+                # Pick up story from built[] if we don't have one
+                if not cy.get("story") and r.get("built"):
+                    cy["story"] = r["built"][0]
+                break
 
 # ════════════════════════════════════════════════════════════════════════════
 # Rollup math — by day buckets in LOCAL time
@@ -251,20 +303,26 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
     for cy in day_cycles:
         if cy.get("outcome") == "fail":
             r["failed"] += 1
+        if cy.get("duration_s"):
+            r["duration_s"] += cy["duration_s"]
         if cy.get("pr") and cy["pr"].startswith("http"):
             r["prs"] += 1
         cr = cy.get("cron")
         if cr:
-            r["duration_s"] += cr["duration_s"]
+            # cron.log only ever covers the most recent cycle (it's
+            # overwritten per run), so cost is best-effort historical
+            # coverage. Duration already came from event timestamps above.
             r["cost"] += cr["cost"]
     return r
 
 # ════════════════════════════════════════════════════════════════════════════
 # Render
 # ════════════════════════════════════════════════════════════════════════════
-def render(events, cron, state, backlog, *, days=3, lang="both", now=None):
+def render(events, cron, state, backlog, *, days=3, lang="both", now=None, runs=None):
     now = now or datetime.now(timezone.utc).astimezone()
     cycles = aggregate(events, cron)
+    if runs:
+        merge_runs_into_cycles(cycles, runs)
     by_day = bucket_by_day(cycles)
     days_keys = sorted(by_day.keys(), reverse=True)[:days]
 
@@ -300,11 +358,22 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None):
                 c("dim", "next run ") + c("fg", _next_cron_hint(state), bold=True))
         eb_zh = c("dim", f"  闲置 · 距下一轮 {_next_cron_hint(state, zh=True)}")
 
-    last = cycles[0] if cycles else None
+    # 'last' = most recent *completed* cycle (skip ones still running so the
+    # eyebrow doesn't show ✗ + '—' for the in-flight cycle the top-line is
+    # already announcing).
+    last = next((cy for cy in cycles if cy.get("outcome") != "running"), None) \
+           or (cycles[0] if cycles else None)
     if last:
         story = last.get("story") or "—"
         title = backlog.get(story, "") if story != "—" else ""
-        glyph = c("green", "✓", bold=True) if last["outcome"] == "done" else c("red", "✗", bold=True)
+        glyph_c, glyph_ch = {
+            "done":    ("green",  "✓"),
+            "ok":      ("green",  "✓"),
+            "idle":    ("muted",  "·"),
+            "fail":    ("red",    "✗"),
+            "running": ("purple", "⏵"),
+        }.get(last["outcome"], ("muted", "·"))
+        glyph = c(glyph_c, glyph_ch, bold=True)
         eb_r = (c("dim", "last ") + glyph + " " +
                 c("fg", last["start"].astimezone().strftime("%H:%M")) + "  " +
                 c("blue", story, bold=True) + "  " +
@@ -471,14 +540,16 @@ def main(argv=None):
 
     if args.demo:
         events, cron, state, backlog = _demo_data()
+        runs = {}
     else:
         slug = project_slug()
         events  = load_events(slug, args.days)
         cron    = load_cron_log(slug)
         state   = load_state(slug)
         backlog = load_backlog()
+        runs    = load_runs(slug)
 
-    render(events, cron, state, backlog, days=args.days, lang=lang)
+    render(events, cron, state, backlog, days=args.days, lang=lang, runs=runs)
 
 if __name__ == "__main__":
     try:

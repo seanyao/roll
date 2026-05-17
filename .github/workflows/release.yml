@@ -29,10 +29,42 @@ jobs:
             echo "Release ${TAG}" > release_notes.txt
           fi
 
-      - name: Create GitHub Release
+      - name: Create or merge same-day GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
+          TAG="${GITHUB_REF_NAME}"
+          # Same-day prefix: v2026.517.5 -> v2026.517
+          DAY_PREFIX="${TAG%.*}"
+
+          # Find existing releases for today (excluding the just-pushed tag, in case
+          # the workflow somehow re-ran on an existing tag).
+          EXISTING=$(gh release list --limit 50 \
+            --json tagName --jq ".[].tagName | select(startswith(\"${DAY_PREFIX}.\")) | select(. != \"${TAG}\")")
+
+          NEW_NOTES=$(cat release_notes.txt)
+          MERGED_NOTES="## ${TAG}
+
+${NEW_NOTES}"
+
+          if [ -n "$EXISTING" ]; then
+            # Pick the latest same-day release (highest N) as the source of prior notes.
+            PREV_TAG=$(echo "$EXISTING" | sort -t. -k3 -n | tail -1)
+            PREV_NOTES=$(gh release view "$PREV_TAG" --json body --jq .body)
+
+            MERGED_NOTES="## ${TAG}
+
+${NEW_NOTES}
+
+${PREV_NOTES}"
+
+            # Delete all same-day prior releases (keep their git tags intact).
+            echo "$EXISTING" | while read -r old; do
+              [ -n "$old" ] && gh release delete "$old" --yes
+            done
+          fi
+
+          printf '%s' "$MERGED_NOTES" > release_notes.txt
+          gh release create "${TAG}" \
+            --title "${TAG}" \
             --notes-file release_notes.txt

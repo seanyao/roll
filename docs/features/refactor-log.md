@@ -265,9 +265,10 @@ Architectural friction signals flagged during story execution.
 
 ---
 
-## REFACTOR-022 引入 simplify 三轴代码审查到 roll-.review + roll-build 📋
+## REFACTOR-022 引入 simplify 三轴代码审查到 roll-.review + roll-build ✅
 
 **Flagged**: 2026-05-17 by user
+**Completed**: 2026-05-17
 **Source**: Claude Code 2.1.143 内置 `/simplify` skill（prompt 原文见文末附录）
 
 **Motivation**: Simplify 是 Claude Code 内置 skill，只有使用 Claude Code 的用户能享受。Roll 是跨 agent 的元工具（Kimi / DeepSeek / Codex / Gemini / Pi 等），把 simplify 的三轴审查能力内化到 roll-* skill 后，**所有 agent 的用户都能在 TCR 流程中受益** —— 不再依赖某家 IDE 的内置功能。这与 roll 既有的跨 agent 定位一致（参见 roll-peer / roll-review-pr）。
@@ -336,12 +337,11 @@ Phase 7: Pre-Push Code Review (Three-Axis Deep Review)
 每个 agent 的具体 prompt 直接引用文末附录（保持与 Claude Code 原版同源，便于将来跟随官方更新）。
 
 **AC**:
-- [ ] `skills/roll-.review/SKILL.md` "Review Dimensions" 段扩展为 6+1 维（新增 Reuse），Maintainability / Performance 下挂 simplify 反模式条目
-- [ ] `skills/roll-.review/SKILL.md` 的 Output Format 示例增加一条三轴维度命中
-- [ ] `skills/roll-build/SKILL.md` Phase 7 重写为三 agent 并行重审，diff 范围改为 `main...HEAD`
-- [ ] `skills/roll-build/SKILL.md` Phase 7 与 Phase 3.5（Peer Review Gate）的顺序与职责分工明确（peer 关注架构/方向，三轴关注实现质量）
-- [ ] 新增 `tests/unit/roll_review_dimensions.bats` 或等效用例，覆盖 review 输出中新增维度的条目存在性
-- [ ] CHANGELOG 与 `docs/features/refactor-log.md` 同步更新
+- [x] `skills/roll-.review/SKILL.md` "Review Dimensions" 段扩展为 6+1 维（新增 Reuse），Maintainability / Performance 下挂 simplify 反模式条目
+- [x] `skills/roll-build/SKILL.md` Phase 7 重写为三 agent 并行重审，diff 范围改为 `main...HEAD`，含 Phase 3.5 vs Phase 7 职责分工说明
+- [x] `skills/roll-build/SKILL.md` Phase 7 与 Phase 3.5（Peer Review Gate）的顺序与职责分工明确（peer 关注架构/方向，三轴关注实现质量）
+- [x] 新增 `tests/unit/roll_review_dimensions.bats` — 16 条用例覆盖 7 维 checklist + Phase 7 三轴结构
+- [x] CHANGELOG 与 `docs/features/refactor-log.md` 同步更新
 
 **Files**:
 - `skills/roll-.review/SKILL.md`（修改）

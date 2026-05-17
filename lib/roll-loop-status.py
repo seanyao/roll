@@ -311,15 +311,16 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None):
     section_head("ROLLUP", "近 " + str(days) + " 天", "↑ today vs yesterday · 今日 vs 昨日")
     print()
 
-    # column widths: name(14) val(6) gap(2) delta(10) yest(10) -2d(8) gap(3) trend(rest)
-    cols = days_keys + [""] * (3 - len(days_keys))  # pad to at least 3 columns
-    today_key = cols[0] if cols else None
-    yest_key  = cols[1] if len(cols) > 1 else None
-    d2_key    = cols[2] if len(cols) > 2 else None
+    # Bug C: today_key is derived from `now` (real today in local TZ), not
+    # from sorted(by_day)[0]. If today has 0 cycles, the Today column shows 0
+    # and yesterday's data stays under Yesterday — matching the day-band below.
+    today_key = now.strftime("%Y-%m-%d")
+    yest_key  = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    d2_key    = (now - timedelta(days=2)).strftime("%Y-%m-%d")
 
-    today = rollup_for_day(by_day.get(today_key, [])) if today_key else empty_rollup()
-    yest  = rollup_for_day(by_day.get(yest_key, []))  if yest_key  else empty_rollup()
-    d2    = rollup_for_day(by_day.get(d2_key, []))    if d2_key    else empty_rollup()
+    today = rollup_for_day(by_day.get(today_key, []))
+    yest  = rollup_for_day(by_day.get(yest_key, []))
+    d2    = rollup_for_day(by_day.get(d2_key, []))
 
     # column headers
     hdr_en = ("  " + c("muted", pad("", 14)) +

@@ -5127,8 +5127,8 @@ _dash_release_ready() {
   latest_tag=$(git describe --tags --abbrev=0 2>/dev/null) || return 1
   local commits_with_code
   commits_with_code=$(git log "${latest_tag}..HEAD" --pretty=format:%s 2>/dev/null \
-    | grep -cvE '^(docs|chore)(\([^)]*\))?:[[:space:]]' 2>/dev/null \
-    || echo 0)
+    | grep -vE '^(docs|chore)(\([^)]*\))?:[[:space:]]' \
+    | wc -l | tr -d ' ')
   [[ "${commits_with_code:-0}" -gt 0 ]] || return 1
   local latest
   latest=$(ls docs/briefs/*.md 2>/dev/null | sort | tail -1 || true)

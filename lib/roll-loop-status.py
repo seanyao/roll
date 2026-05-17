@@ -630,15 +630,19 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
     # 'failed' stays loud because a fail is a real alert regardless.
     is_partial = today["cycles"] < yest["cycles"]
 
-    # column headers — 'trend' hint removed (we don't emit a trend column);
-    # 'Today' tagged with (in progress) when partial.
-    today_label = "Today" + ("  (in progress)" if is_partial else "")
+    # column headers — 'trend' hint removed (we don't emit a trend column).
+    # 'in progress' indicator stays on the day band + muted deltas, not the
+    # column header (cramming '(in progress)' into 18 chars collides with
+    # the Yesterday column).
+    # Today column spans 22 cols = value(8) + gap(2) + delta(12), matching
+    # the metric row geometry exactly so Yesterday and −2d line up under
+    # their data — fixes the "yesterday/−2d squished" misalignment.
     hdr_en = ("  " + c("muted", pad("", 14)) +
-              c("fg", pad(today_label, 18), bold=True) +
+              c("fg", pad("Today", 22), bold=True) +
               c("dim", pad("Yesterday", 10)) +
               c("muted", pad("−2d", 8)))
     hdr_zh = ("  " + c("muted", pad("", 14)) +
-              c("dim", pad("今日" + ("·进行中" if is_partial else ""), 18)) +
+              c("dim", pad("今日", 22)) +
               c("muted", pad("昨日", 10)) +
               c("muted", pad("前天", 8)))
     bilingual(hdr_en, hdr_zh)

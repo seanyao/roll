@@ -158,14 +158,18 @@ def metric(name: str, t: int, y: int, d2: int, kind: str, *,
            partial: bool = False) -> None:
     """Print one metric row. When `partial=True` the delta is rendered in
     muted gray instead of green/red — today's incomplete, so a 'down −23'
-    against yesterday's full day would otherwise read as an alarm."""
+    against yesterday's full day would otherwise read as an alarm.
+
+    Column geometry (kept in lockstep with the header in roll-loop-status):
+      indent 2 · name 14 · today_value 8 · gap 2 · delta 12 · yest 10 · d2 8
+    """
     delta_text, delta_c = fmt_delta(float(t), float(y), kind=kind)
     if partial and delta_c not in ("muted",):
         delta_c = "muted"
     yest_str = f"{y}" + (f" {yest_suffix}" if yest_suffix else "")
     print("  " +
           c("dim", pad(name, 14)) +
-          c("fg", pad(str(t), 6, "r"), bold=True) + "  " +
+          c("fg", pad(str(t), 8, "r"), bold=True) + "  " +
           c(delta_c, pad(delta_text, 12), bold=(delta_c != "muted")) +
           c(yest_color, pad(yest_str, 10), bold=bool(yest_suffix)) +
           c("muted", pad(str(d2), 8)))
@@ -179,7 +183,7 @@ def metric_dur(name: str, t: int, y: int, d2: int, *, partial: bool = False) -> 
         delta_c = "muted"
     print("  " +
           c("dim", pad(name, 14)) +
-          c("fg", pad(fmt_dur(t), 6, "r"), bold=True) + "  " +
+          c("fg", pad(fmt_dur(t), 8, "r"), bold=True) + "  " +
           c(delta_c, pad(delta_text, 12), bold=(delta_c != "muted")) +
           c("dim", pad(fmt_dur(y), 10)) +
           c("muted", pad(fmt_dur(d2), 8)))
@@ -214,7 +218,7 @@ def metric_tokens(name: str, t: int, y: int, d2: int, *, partial: bool = False) 
         delta_c = "muted"
     print("  " +
           c("dim", pad(name, 14)) +
-          c("fg", pad(fmt_tokens(t), 6, "r"), bold=True) + "  " +
+          c("fg", pad(fmt_tokens(t), 8, "r"), bold=True) + "  " +
           c(delta_c, pad(delta_text, 12), bold=(delta_c != "muted")) +
           c("dim", pad(fmt_tokens(y), 10)) +
           c("muted", pad(fmt_tokens(d2), 8)))

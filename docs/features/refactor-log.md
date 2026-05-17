@@ -2,6 +2,14 @@
 
 Architectural friction signals flagged during story execution.
 
+## REFACTOR-026 接入 _loop_enforce_tcr TCR 校验 ✅
+
+**Flagged**: 2026-05-17 by dream
+**Completed**: 2026-05-17
+**Signal**: `_loop_enforce_tcr()` 已实现并经过单元测试，但无执行路径调用它，loop 可绕过 TCR 纪律将故事标记完成。
+**Fix**: 在 `cmd_loop` 中新增 `enforce-tcr` 子命令，调用 `_loop_enforce_tcr`；更新 `skills/roll-loop/SKILL.md` Step 4 改为 `roll loop enforce-tcr <story_id> <started_at>`；新增 2 个 CLI 路由单元测试。
+**Files**: `bin/roll`, `tests/unit/loop_tcr.bats`, `skills/roll-loop/SKILL.md`
+
 ## REFACTOR-001 US-AUTO-007 roll backlog 补 TCR 测试 ✅
 
 **Flagged**: 2026-05-10

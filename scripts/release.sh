@@ -211,6 +211,9 @@ echo "Rewriting docs/features.md via ${_release_agent}..." >&2
 _tmp_features=$(mktemp)
 _tmp_features_err=$(mktemp)
 if _run_features_sync_skill "$_release_agent" >"$_tmp_features" 2>"$_tmp_features_err" && [ -s "$_tmp_features" ]; then
+  # Strip leading/trailing ``` code fences the agent sometimes wraps around
+  # the whole document (same defensive strip we apply to release_notes.txt).
+  sed -i.bak -e '1{/^```/d;}' -e '${/^```$/d;}' "$_tmp_features" && rm -f "${_tmp_features}.bak"
   if ! cmp -s docs/features.md "$_tmp_features" 2>/dev/null; then
     mv "$_tmp_features" docs/features.md
     echo "docs/features.md updated." >&2

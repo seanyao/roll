@@ -89,16 +89,23 @@ def fmt_dur(s: int) -> str:
     return f"{s // 3600}h {(s % 3600) // 60}m"
 
 def fmt_tokens(n: int) -> str:
-    """Format a token count with k / m / b unit scaling, 1 decimal place."""
+    """Format a token count with K / M / B unit scaling, 1 decimal place.
+    Uppercase suffix disambiguates from duration's lowercase m / h on the
+    same row (e.g. "19m  6.7M" reads cleanly as 19 minutes + 6.7M tokens)."""
     if not n:
         return "—"
     if n < 1_000:
         return str(int(n))
     if n < 1_000_000:
-        return f"{n / 1_000:.1f}k".replace(".0k", "k")
+        return f"{n / 1_000:.1f}K".replace(".0K", "K")
     if n < 1_000_000_000:
-        return f"{n / 1_000_000:.1f}m".replace(".0m", "m")
-    return f"{n / 1_000_000_000:.1f}b".replace(".0b", "b")
+        return f"{n / 1_000_000:.1f}M".replace(".0M", "M")
+    return f"{n / 1_000_000_000:.1f}B".replace(".0B", "B")
+
+# Subtle red wash for the entire failure row — doubles up the color signal
+# so a fail can't be missed even when scanning at 2x speed. Used by
+# cycle_row when outcome=fail.
+BG_FAIL = "\033[48;2;55;15;15m"
 
 def fmt_delta(today: float, yest: float, *, kind: str, unit: str = "") -> Tuple[str, str]:
     """Return (delta_string, semantic_color). kind ∈ {'up_good','up_bad','any'}.
@@ -147,8 +154,14 @@ def section_head(en: str, zh: str, hint: str) -> None:
     print(row(left, c("muted", hint)))
 
 def metric(name: str, t: int, y: int, d2: int, kind: str, *,
-           yest_color: str = "dim", yest_suffix: str = "") -> None:
+           yest_color: str = "dim", yest_suffix: str = "",
+           partial: bool = False) -> None:
+    """Print one metric row. When `partial=True` the delta is rendered in
+    muted gray instead of green/red — today's incomplete, so a 'down −23'
+    against yesterday's full day would otherwise read as an alarm."""
     delta_text, delta_c = fmt_delta(float(t), float(y), kind=kind)
+    if partial and delta_c not in ("muted",):
+        delta_c = "muted"
     yest_str = f"{y}" + (f" {yest_suffix}" if yest_suffix else "")
     print("  " +
           c("dim", pad(name, 14)) +
@@ -157,11 +170,13 @@ def metric(name: str, t: int, y: int, d2: int, kind: str, *,
           c(yest_color, pad(yest_str, 10), bold=bool(yest_suffix)) +
           c("muted", pad(str(d2), 8)))
 
-def metric_dur(name: str, t: int, y: int, d2: int) -> None:
+def metric_dur(name: str, t: int, y: int, d2: int, *, partial: bool = False) -> None:
     # work in whole minutes for the delta so it reads naturally (▲ +14m)
     t_m = t // 60
     y_m = y // 60
     delta_text, delta_c = fmt_delta(float(t_m), float(y_m), kind="up_bad", unit="m")
+    if partial and delta_c not in ("muted",):
+        delta_c = "muted"
     print("  " +
           c("dim", pad(name, 14)) +
           c("fg", pad(fmt_dur(t), 6, "r"), bold=True) + "  " +
@@ -169,8 +184,10 @@ def metric_dur(name: str, t: int, y: int, d2: int) -> None:
           c("dim", pad(fmt_dur(y), 10)) +
           c("muted", pad(fmt_dur(d2), 8)))
 
-def metric_dollar(name: str, t: float, y: float, d2: float) -> None:
+def metric_dollar(name: str, t: float, y: float, d2: float, *, partial: bool = False) -> None:
     delta_text, delta_c = fmt_delta(t, y, kind="up_bad", unit="$")
+    if partial and delta_c not in ("muted",):
+        delta_c = "muted"
     print("  " +
           c("dim", pad(name, 14)) +
           c("fg", pad(f"${t:.2f}", 8, "r"), bold=True) + "  " +
@@ -178,7 +195,7 @@ def metric_dollar(name: str, t: float, y: float, d2: float) -> None:
           c("dim", pad(f"${y:.2f}", 10)) +
           c("muted", pad(f"${d2:.2f}", 8)))
 
-def metric_tokens(name: str, t: int, y: int, d2: int) -> None:
+def metric_tokens(name: str, t: int, y: int, d2: int, *, partial: bool = False) -> None:
     # Compose the delta string with token-unit scaling so a 200M increase
     # doesn't print '+200000000'.
     if y == 0 and t == 0:
@@ -193,6 +210,8 @@ def metric_tokens(name: str, t: int, y: int, d2: int) -> None:
         sign = "+" if diff > 0 else "−"
         delta_text = f"{arrow} {sign}{fmt_tokens(abs(diff))}"
         delta_c = "red" if diff > 0 else "green"
+    if partial and delta_c not in ("muted",):
+        delta_c = "muted"
     print("  " +
           c("dim", pad(name, 14)) +
           c("fg", pad(fmt_tokens(t), 6, "r"), bold=True) + "  " +
@@ -200,7 +219,8 @@ def metric_tokens(name: str, t: int, y: int, d2: int) -> None:
           c("dim", pad(fmt_tokens(y), 10)) +
           c("muted", pad(fmt_tokens(d2), 8)))
 
-def day_band(day_key: str, n_total: int, n_failed: int, now: datetime) -> None:
+def day_band(day_key: str, n_total: int, n_failed: int, now: datetime, *,
+             in_progress: bool = False) -> None:
     from datetime import timedelta
     today = now.strftime("%Y-%m-%d")
     yest  = (now - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -215,11 +235,20 @@ def day_band(day_key: str, n_total: int, n_failed: int, now: datetime) -> None:
     weekday_zh = ["周一","周二","周三","周四","周五","周六","周日"][
         datetime.strptime(day_key, "%Y-%m-%d").weekday()]
     count_str = f"{n_total} cycles" + (f" · {n_failed} failed" if n_failed else " · 0 failed")
+    if in_progress:
+        count_str += "  ·  " + "in progress"
     left = ("  " + c("faint", "─ ") +
             c("fg", label, bold=True) +
             c("muted", " · ") + c("dim", day_key) +
             c("muted", " · ") + c("dim", f"{weekday} · {weekday_zh}") + " ")
-    right = "  " + c("dim", count_str)
+    if in_progress:
+        right_inner = (c("dim", f"{n_total} cycles") +
+                       (c("dim", f" · {n_failed} failed") if n_failed
+                        else c("dim", " · 0 failed")) +
+                       c("muted", "  ·  ") + c("amber", "in progress"))
+    else:
+        right_inner = c("dim", count_str)
+    right = "  " + right_inner
     dashes = max(2, COLS - strw(left) - strw(right))
     print(left + c("faint", "─" * dashes) + right)
 
@@ -237,7 +266,11 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     # duration prefers the explicit cy["duration_s"] (computed from event
     # timestamps or runs.jsonl) so it shows for all completed cycles, not
     # only the one that happens to be in the latest cron.log dump.
+    # For a currently-running cycle, show wall-clock elapsed (now - start).
     dur_s = cy.get("duration_s") or cr.get("duration_s") or 0
+    if outcome == "running" and not dur_s and cy.get("start"):
+        from datetime import datetime as _dt, timezone as _tz
+        dur_s = int((_dt.now(_tz.utc) - cy["start"]).total_seconds())
     dur = fmt_dur(dur_s) if dur_s else "—"
     tok = fmt_tokens(cy.get("tokens") or 0)
     # cost prefers the backfilled list-price; falls back to cron.log when
@@ -261,7 +294,7 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     time_c  = "red" if outcome == "fail" else "fg"
     sid_c   = "red" if outcome == "fail" else "blue"
 
-    print(
+    inner = (
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
         c("muted", pad(dur, 4, "r")) + "  " +
@@ -269,5 +302,25 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         c("muted", pad(cost, 7, "r")) + "   " +
         c(sid_c, ids_str, bold=True)
     )
-    if outcome == "fail" and cy.get("fail_detail"):
-        print(" " * 8 + c("dim", "→ ") + c("amber", f"roll loop show {cy['label']}"))
+    # Subtle red bg on failure rows so a fail can't be missed at a glance.
+    if outcome == "fail" and USE_COLOR:
+        # Every inner c(...) span ends with \033[0m which terminates the bg
+        # too. Re-paint the bg after every internal reset so the wash spans
+        # the whole row, not just the first colored cell. Then pad to full
+        # width so the bg extends edge-to-edge before the final reset.
+        line_pad = max(0, COLS - strw(inner))
+        inner_padded = inner + " " * line_pad
+        print(BG_FAIL + inner_padded.replace(RESET, RESET + BG_FAIL) + RESET)
+        # Always emit the drill hint for fails — fail_detail is often missing
+        # because not every fail path goes through the test / build stages.
+        hint = " " * 8 + c("dim", "→ ") + c("amber", f"roll loop show {cy['label']}")
+        if cy.get("fail_detail"):
+            hint += c("muted", "   ") + c("dim", cy["fail_detail"])
+        hint_pad = max(0, COLS - strw(hint))
+        hint_padded = hint + " " * hint_pad
+        print(BG_FAIL + hint_padded.replace(RESET, RESET + BG_FAIL) + RESET)
+    else:
+        print(inner)
+        if outcome == "fail" and cy.get("fail_detail"):
+            # NO_COLOR path: drill hint still useful for diagnosis.
+            print(" " * 8 + "→ " + f"roll loop show {cy['label']}")

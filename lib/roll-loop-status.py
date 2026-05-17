@@ -575,11 +575,13 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
                 c("dim", "next run ") + c("fg", _next_cron_hint(state), bold=True))
         eb_zh = c("dim", f"  闲置 · 距下一轮 {_next_cron_hint(state, zh=True)}")
 
-    # 'last' = most recent *completed* cycle (skip ones still running so the
-    # eyebrow doesn't show ✗ + '—' for the in-flight cycle the top-line is
-    # already announcing).
-    last = next((cy for cy in cycles if cy.get("outcome") != "running"), None) \
-           or (cycles[0] if cycles else None)
+    # 'last' = the most recent cycle the user can act on — skip cycles that
+    # are still running (the running banner already announces those) and skip
+    # idle cycles (they picked no story, so 'last · 23:48 —' carries no info).
+    last = next(
+        (cy for cy in cycles if cy.get("outcome") not in ("running", "idle")),
+        None,
+    ) or (cycles[0] if cycles else None)
     if last:
         story = last.get("story") or "—"
         title = backlog.get(story, "") if story != "—" else ""
@@ -599,8 +601,9 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
         eb_r = c("muted", "no cycles yet")
     print(row(eb_l, eb_r))
     if lang != "en" and last:
-        zh_title = ""  # BACKLOG.md is single-language; leave ZH side as the running indicator only
-        print(eb_zh + " " * max(0, COLS - strw(eb_zh) - strw(eb_r)) + c("dim", ""))
+        # ZH eyebrow row is left-aligned only — mirroring the EN right side
+        # would duplicate signal without adding info.
+        print(eb_zh)
     print()
 
     print(c("faint", "─" * COLS))
@@ -621,26 +624,35 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
     yest  = rollup_for_day(by_day.get(yest_key, []))
     d2    = rollup_for_day(by_day.get(d2_key, []))
 
-    # column headers
+    # 'partial' = today is still in progress — today's cycle count is under
+    # yesterday's, so a 'down −23' delta against yesterday's full-day count
+    # would otherwise read as a regression. Mute delta colors when partial;
+    # 'failed' stays loud because a fail is a real alert regardless.
+    is_partial = today["cycles"] < yest["cycles"]
+
+    # column headers — 'trend' hint removed (we don't emit a trend column);
+    # 'Today' tagged with (in progress) when partial.
+    today_label = "Today" + ("  (in progress)" if is_partial else "")
     hdr_en = ("  " + c("muted", pad("", 14)) +
-              c("fg", pad("Today", 18), bold=True) +
+              c("fg", pad(today_label, 18), bold=True) +
               c("dim", pad("Yesterday", 10)) +
-              c("muted", pad("−2d", 8)) + "   " +
-              c("muted", "trend · 趋势"))
+              c("muted", pad("−2d", 8)))
     hdr_zh = ("  " + c("muted", pad("", 14)) +
-              c("dim", pad("今日", 18)) +
+              c("dim", pad("今日" + ("·进行中" if is_partial else ""), 18)) +
               c("muted", pad("昨日", 10)) +
               c("muted", pad("前天", 8)))
     bilingual(hdr_en, hdr_zh)
 
-    metric("cycles",    today["cycles"],    yest["cycles"],    d2["cycles"],    "up_good")
-    metric("merged PRs", today["prs"],      yest["prs"],       d2["prs"],       "up_good")
-    metric("failed",    today["failed"],    yest["failed"],    d2["failed"],    "up_bad",
+    metric("cycles",     today["cycles"],     yest["cycles"],     d2["cycles"],     "up_good", partial=is_partial)
+    metric("merged PRs", today["prs"],        yest["prs"],        d2["prs"],        "up_good", partial=is_partial)
+    # Failures stay loud — do NOT pass partial=True. A regression today is
+    # a real alert even when comparing to a full yesterday.
+    metric("failed",     today["failed"],     yest["failed"],     d2["failed"],     "up_bad",
            yest_color="amber" if yest["failed"] > 0 else "dim",
            yest_suffix="⚠" if yest["failed"] > 0 else "")
-    metric_dur("duration", today["duration_s"], yest["duration_s"], d2["duration_s"])
-    metric_tokens("tokens", today["tokens"], yest["tokens"], d2["tokens"])
-    metric_dollar("cost", today["cost"], yest["cost"], d2["cost"])
+    metric_dur("duration", today["duration_s"], yest["duration_s"], d2["duration_s"], partial=is_partial)
+    metric_tokens("tokens", today["tokens"],    yest["tokens"],    d2["tokens"],     partial=is_partial)
+    metric_dollar("cost",   today["cost"],      yest["cost"],      d2["cost"],       partial=is_partial)
 
     print()
     print(c("faint", "─" * COLS))
@@ -662,7 +674,8 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
             continue
         day_band(day_key, len(day_cycles),
                  sum(1 for c0 in day_cycles if c0["outcome"] == "fail"),
-                 now)
+                 now,
+                 in_progress=(day_key == today_key and is_partial))
         for cy in day_cycles:
             cycle_row(cy, backlog)
         print()

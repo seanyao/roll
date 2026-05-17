@@ -128,3 +128,48 @@
 **Non-goals:**
 - 不支持 Gitee / self-hosted git（平台专属，超出本 Story 范围）
 - 不替换 `claude-code-review.yml` 的 `workflow_dispatch` 模式（两者并存）
+
+
+<a id="us-pr-004"></a>
+## US-PR-004 PR 评审两档开关从 setup/update 提示挪到 doctor 📋
+
+**Created**: 2026-05-17
+
+- As a user who already enabled the PR review extras (or who hasn't and doesn't want to)
+- I want `roll setup` / `roll update` 不再每次都打印两段"可选启用"提示
+- So that 升级时屏幕干净，需要看时主动跑 `roll doctor`
+
+**Background:**
+`bin/roll:616-617` 的 `_print_pr_pipeline_hint` + `_print_pr_event_hint` 当前在 `cmd_setup` 末尾打印；`cmd_update` 又调 `cmd_setup`，所以每次 `roll update` 都会重复打两屏"如何启用 AI 双门 / 如何装事件 workflow"——已经装过的人看烦了。讨论后定方案 3+1 组合：把两段挪到 `roll doctor`，并在 doctor 内做仓库状态探测，仅对未启用项显示安装指令。
+
+**Domain Model:**
+- Context: CLI / Diagnostics
+- Aggregate: `DoctorReport`（roll doctor 当前输出聚合）
+
+**AC:**
+- [ ] `cmd_setup` 末尾**不再**调用 `_print_pr_pipeline_hint` / `_print_pr_event_hint`
+- [ ] `cmd_update` 末尾输出干净（不打印两段 PR 提示，只打 setup 结果 + changelog）
+- [ ] `roll doctor` 输出新增一节"PR 评审两档开关"（或英文等价标题），仅在当前工作目录是 git repo 时显示
+- [ ] 该节探测当前 repo 状态：
+  - 分支保护中 `required_pull_request_reviews.required_approving_review_count >= 1` → 显示"✅ AI 评审双门已启用"
+  - 否则 → 显示"⚪ 双门未启用"+ `_print_pr_pipeline_hint` 的安装命令
+  - `.github/workflows/pr-review-event.yml` 存在 → 显示"✅ 事件驱动 PR 评审已安装"
+  - 否则 → 显示"⚪ 事件驱动 PR 评审未安装"+ `_print_pr_event_hint` 的安装命令
+- [ ] 在非 repo 目录跑 `roll doctor` 时，整节静默跳过（不显示"未启用"）
+- [ ] 分支保护探测失败（无 `gh` / 未登录 / 网络错）时，仅显示"⚪ 状态未知（需要 gh auth）"+ 安装命令，不报错退出
+- [ ] `_print_pr_pipeline_hint` / `_print_pr_event_hint` 函数保留（doctor 复用其安装命令文本），只是调用点变化
+- [ ] 新增 bats 测试覆盖：cmd_setup 不再调用两个 hint；cmd_doctor 在 git repo 内调用两个 hint；非 repo 目录下不调用
+
+**Files:**
+- `bin/roll` — 移除 `cmd_setup` 的两行调用；`cmd_doctor` 新增 PR 评审节
+- `tests/unit/roll_doctor.bats`（如已存在）/ 新增测试文件
+- `tests/unit/roll_setup.bats` 相关断言更新
+
+**Dependencies:**
+- Depends on: US-PR-001（review-pr 命令）/ US-PR-003（event workflow 模板）
+- Depended on by: 无
+
+**Non-goals:**
+- 不引入"看过一次"的状态文件标记
+- 不在 `roll update` 路径下做仓库状态探测（doctor 才负责诊断）
+- 不修改 `_print_pr_pipeline_hint` / `_print_pr_event_hint` 函数体的文案（仅调用点迁移）

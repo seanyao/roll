@@ -104,7 +104,9 @@ def load_cron_log(slug: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     with path.open(errors="ignore") as f:
         for line in f:
-            m = _CRON_PAT.match(line.strip())
+            # Bug D: cron.log lines are written with ANSI color escapes
+            # (\033[90m...\033[0m). Strip them before regex matching.
+            m = _CRON_PAT.match(roll_render.strip_ansi(line).strip())
             if m:
                 out.append({
                     "hhmm": m.group(1),

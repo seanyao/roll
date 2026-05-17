@@ -1869,7 +1869,8 @@ cmd_review_pr() {
       ;;
     UNCERTAIN)
       warn "PR #${pr_number}: UNCERTAIN — ${vreason}"
-      local alert_file="${ROLL_LOOP_DIR:-${HOME}/.shared/roll/loop}/ALERT.md"
+      # FIX-052: write to per-project ALERT (was global ALERT.md).
+      local alert_file="$_LOOP_ALERT"
       mkdir -p "$(dirname "$alert_file")"
       printf '[%s] PR #%s: AI review UNCERTAIN — %s\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr_number" "$vreason" >> "$alert_file"
@@ -2501,7 +2502,7 @@ if command -v tmux >/dev/null 2>&1; then
   # Auto-attach popup: when not muted, spawn a Terminal window attached to the
   # tmux session so the user can watch the loop work in real time. Best-effort
   # focus retention: capture the current frontmost app and re-activate after.
-  if [ ! -f "\$HOME/.shared/roll/mute" ] && [ "\$(uname)" = "Darwin" ]; then
+  if [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
     # Runtime terminal detection: try preferred first, fallback through installed apps.
     # open -na returns non-zero when app not found, so || chain works as fallback.
     _launched=0
@@ -3424,7 +3425,7 @@ _loop_self_heal_ci() {
   [[ -z "$story_id" ]] && return 1
   [[ "${ROLL_LOOP_NO_HEAL:-0}" == "1" ]] && return 1
   local max="${ROLL_LOOP_HEAL_MAX:-2}"
-  local state="${_LOOP_STATE:-${HOME}/.shared/roll/loop/state.yaml}"
+  local state="$_LOOP_STATE"
   local current=0
   if [[ -f "$state" ]]; then
     local raw; raw=$(grep '^heal_count:' "$state" 2>/dev/null | awk '{print $2}')
@@ -3448,7 +3449,7 @@ _loop_self_heal_ci() {
 _loop_clear_heal_state() {
   local story_id="$1"
   [[ -z "$story_id" ]] && return 0
-  local state="${_LOOP_STATE:-${HOME}/.shared/roll/loop/state.yaml}"
+  local state="$_LOOP_STATE"
   [[ ! -f "$state" ]] && return 0
   local tmp; tmp=$(mktemp)
   grep -v '^heal_count:' "$state" > "$tmp"
@@ -3614,7 +3615,7 @@ _loop_pr_rebase_circuit() {
   local pr="$1"
   [ -n "$pr" ] || return 1
 
-  local state="${_LOOP_STATE:-${HOME}/.shared/roll/loop/state.yaml}"
+  local state="$_LOOP_STATE"
   local now; now=$(date -u +%s)
   local cutoff=$((now - 86400))
 
@@ -3732,7 +3733,7 @@ _loop_pr_rebase_stale() {
   local is_fork
   is_fork=$(echo "$pr_json" | jq -r '.isCrossRepository // false' 2>/dev/null)
   if [ "$is_fork" = "true" ]; then
-    local alert="${_LOOP_ALERT:-${HOME}/.shared/roll/loop/ALERT.md}"
+    local alert="$_LOOP_ALERT"
     mkdir -p "$(dirname "$alert")" 2>/dev/null || true
     printf '[%s] PR #%s: fork PR — cannot rebase (no write access)\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr" >> "$alert"
@@ -3747,7 +3748,7 @@ _loop_pr_rebase_stale() {
   else
     git rebase --abort 2>/dev/null || true
     git checkout - 2>/dev/null || true
-    local alert="${_LOOP_ALERT:-${HOME}/.shared/roll/loop/ALERT.md}"
+    local alert="$_LOOP_ALERT"
     mkdir -p "$(dirname "$alert")" 2>/dev/null || true
     printf '[%s] PR #%s: rebase conflict on %s — please rebase manually\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr" "$head_ref" >> "$alert"
@@ -3808,7 +3809,7 @@ _loop_pr_inbox() {
       fi
       i=$((i + 1)); continue
     elif [ "$bot_review" = "CHANGES_REQUESTED" ]; then
-      local alert="${_LOOP_ALERT:-${HOME}/.shared/roll/loop/ALERT.md}"
+      local alert="$_LOOP_ALERT"
       mkdir -p "$(dirname "$alert")" 2>/dev/null || true
       printf '[%s] PR #%s: bot review CHANGES_REQUESTED — loop PR rejected by GHA reviewer\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$num" >> "$alert"

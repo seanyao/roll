@@ -74,3 +74,21 @@ teardown() { unit_teardown; }
   grep -qE '_alert_file=".*/ALERT-[^"]+\.md"' "$script_path"
   ! grep -qE '_alert_file=".*/ALERT\.md"' "$script_path"
 }
+
+# ── no remaining legacy hardcoded shared paths in bin/roll ────────────────────
+
+@test "bin/roll: no legacy hardcoded shared ALERT.md path remains" {
+  # Any literal "/.shared/roll/loop/ALERT.md" (no slug) would re-introduce
+  # cross-project bleed. Acceptable patterns must include the slug suffix.
+  ! grep -nE '/\.shared/roll/loop/ALERT\.md' "$ROLL_BIN"
+}
+
+@test "bin/roll: no legacy hardcoded shared state.yaml path remains" {
+  ! grep -nE '/\.shared/roll/loop/state\.yaml' "$ROLL_BIN"
+}
+
+@test "bin/roll: no legacy hardcoded shared mute path remains" {
+  # Old default lived at ~/.shared/roll/mute (outside loop/). New default is
+  # ~/.shared/roll/loop/mute-<slug>.
+  ! grep -nE '/\.shared/roll/mute"' "$ROLL_BIN"
+}

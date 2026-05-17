@@ -2,6 +2,14 @@
 
 Architectural friction signals flagged during story execution.
 
+## REFACTOR-028 折叠 BACKLOG 四组渲染循环 ✅
+
+**Flagged**: 2026-05-17 by dream
+**Completed**: 2026-05-17
+**Signal**: `cmd_backlog` 中 Story / FIX / REFACTOR / IDEA 四组使用结构完全一样的解析循环，仅分组前缀和过滤条件不同；任何格式变更（emoji、缩进、链接形式）需要同步四处且容易遗漏。
+**Fix**: 抽出单一渲染函数接收 group 名 + 过滤断言，四个调用点收敛为一行参数化调用；新增 bats 用例覆盖各组输出形态不退化。
+**Files**: `bin/roll`, `tests/unit/roll_backlog.bats`
+
 ## REFACTOR-027 接入 _loop_precheck_ci 启动前 CI 预检 ✅
 
 **Flagged**: 2026-05-17 by dream

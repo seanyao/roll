@@ -2892,6 +2892,16 @@ _loop_test() {
 }
 
 _loop_status() {
+  # ROLL_UI=v2 (default) routes to the redesigned Python view.
+  # Set ROLL_UI=v1 to fall back to the legacy bash implementation.
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-loop-status.py" "$@"
+    return
+  fi
+  _legacy_loop_status "$@"
+}
+
+_legacy_loop_status() {
   local project_path; project_path=$(pwd -P)
   local agent; agent=$(_project_agent)
   local _is_paused=false

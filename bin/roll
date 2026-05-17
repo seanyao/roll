@@ -3747,6 +3747,45 @@ _loop_pr_inbox() {
   return 0
 }
 
+# FIX-048: report story IDs already claimed by open loop/* PRs so a new cycle
+# can skip them before scanning BACKLOG. Without this gate, a cycle launched
+# before the previous cycle's PR merges would re-pick the same Todo story
+# (its worktree branches from main, where the 🔨 mark is not yet visible).
+#
+# _loop_pr_claimed_stories
+#   Stdout: one story ID per line, deduped. Empty when nothing claimed.
+#   Exit:   0 always (lenient: gh missing / API failure → empty output).
+_loop_pr_claimed_stories() {
+  local slug; _gh_resolve slug || return 0
+  local branches
+  branches=$(gh -R "$slug" pr list --state open \
+    --json headRefName \
+    --jq '.[] | select(.headRefName | startswith("loop/")) | .headRefName' \
+    2>/dev/null) || return 0
+  [ -n "$branches" ] || return 0
+
+  local branch claimed=""
+  while IFS= read -r branch; do
+    [ -n "$branch" ] || continue
+    local content
+    content=$(gh -R "$slug" api \
+      "repos/${slug}/contents/BACKLOG.md?ref=${branch}" \
+      -H "Accept: application/vnd.github.raw" 2>/dev/null) || continue
+    [ -n "$content" ] || continue
+    local ids
+    ids=$(printf '%s\n' "$content" \
+      | awk -F'|' '/🔨 In Progress/ {
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+          sub(/^\[/, "", $2)
+          sub(/\].*$/, "", $2)
+          if ($2 != "") print $2
+        }')
+    [ -n "$ids" ] && claimed="${claimed}${ids}"$'\n'
+  done <<< "$branches"
+
+  printf '%s' "$claimed" | awk 'NF' | sort -u
+}
+
 # US-CL-004: changelog 风格守门 Phase 1 — mechanical linter.
 #
 # _changelog_lint_bullet <bullet-text>

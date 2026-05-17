@@ -19,8 +19,8 @@
   主流 AI 工具统一 convention sync 与 skill 链接
 - **TCR-First Engineering Discipline** — Test && Commit || Revert; pre-commit proof-of-pass physically blocks untested commits
   proof-of-pass pre-commit hook 物理拦截未测试提交
-- **Self-Healing Documentation** — dream nightly scans for doc freshness; loop auto-fills gaps
-  dream 夜检文档新鲜度，loop 自动补缺口
+- **Cycle Event Stream** — runner and skills emit structured events so each autonomous loop cycle can be replayed like a CI pipeline
+  runner 与 skill 发结构化事件，每一轮自主循环像 CI pipeline 一样可回放
 
 ---
 

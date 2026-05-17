@@ -451,3 +451,21 @@ clean).
 ```
 
 **Slash-arg 行为**：`/simplify <text>` 调用时，`<text>` 作为 `## Additional Focus` 追加到 prompt 末尾，三个 agent 都会拿到 —— roll-build Phase 7 应保留此入口，允许 US 收尾时指定本次审查的侧重点。
+
+---
+
+## REFACTOR-023 CI 自愈计数器合并入 state.yaml ✅
+
+**Flagged**: 2026-05-17 by simplify review
+**Completed**: 2026-05-17
+**Signal**: `_loop_self_heal_ci()` 写入 `heal/<story>.count` 独立文件；自愈成功后若漏调 `_loop_clear_heal_state()`，count 文件长期堆积；与 `state.yaml` 生命周期脱钩。
+
+**Observation**: CI 自愈计数与主状态记录（state.yaml）分开存储导致两个清理路径不同步。heal/ 文件只在 `_loop_clear_heal_state()` 或 `roll loop reset` 时删除；如果 loop 在 CI 变绿后、调 clear 前崩溃，文件永久残留。将计数并入 state.yaml 后，state.yaml 被覆盖/删除即自动清理，无需额外维护。
+
+**Fix**:
+- `_loop_self_heal_ci()` 改为读写 `state.yaml` 的 `heal_count:` 字段（不再 mkdir heal/）
+- `_loop_clear_heal_state()` 改为从 state.yaml 中移除 `heal_count:` 行
+- `_loop_reset()` 保留 `rm -rf heal/` 以清理历史遗留文件
+- `tests/unit/roll_loop_self_heal.bats` 全面更新：12 条测试反映新行为
+
+**Files**: `bin/roll`, `tests/unit/roll_loop_self_heal.bats`

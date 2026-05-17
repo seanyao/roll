@@ -265,9 +265,10 @@ Architectural friction signals flagged during story execution.
 
 ---
 
-## REFACTOR-022 引入 simplify 三轴代码审查到 roll-.review + roll-build 📋
+## REFACTOR-022 引入 simplify 三轴代码审查到 roll-.review + roll-build ✅
 
 **Flagged**: 2026-05-17 by user
+**Completed**: 2026-05-17
 **Source**: Claude Code 2.1.143 内置 `/simplify` skill（prompt 原文见文末附录）
 
 **Motivation**: Simplify 是 Claude Code 内置 skill，只有使用 Claude Code 的用户能享受。Roll 是跨 agent 的元工具（Kimi / DeepSeek / Codex / Gemini / Pi 等），把 simplify 的三轴审查能力内化到 roll-* skill 后，**所有 agent 的用户都能在 TCR 流程中受益** —— 不再依赖某家 IDE 的内置功能。这与 roll 既有的跨 agent 定位一致（参见 roll-peer / roll-review-pr）。
@@ -336,12 +337,11 @@ Phase 7: Pre-Push Code Review (Three-Axis Deep Review)
 每个 agent 的具体 prompt 直接引用文末附录（保持与 Claude Code 原版同源，便于将来跟随官方更新）。
 
 **AC**:
-- [ ] `skills/roll-.review/SKILL.md` "Review Dimensions" 段扩展为 6+1 维（新增 Reuse），Maintainability / Performance 下挂 simplify 反模式条目
-- [ ] `skills/roll-.review/SKILL.md` 的 Output Format 示例增加一条三轴维度命中
-- [ ] `skills/roll-build/SKILL.md` Phase 7 重写为三 agent 并行重审，diff 范围改为 `main...HEAD`
-- [ ] `skills/roll-build/SKILL.md` Phase 7 与 Phase 3.5（Peer Review Gate）的顺序与职责分工明确（peer 关注架构/方向，三轴关注实现质量）
-- [ ] 新增 `tests/unit/roll_review_dimensions.bats` 或等效用例，覆盖 review 输出中新增维度的条目存在性
-- [ ] CHANGELOG 与 `docs/features/refactor-log.md` 同步更新
+- [x] `skills/roll-.review/SKILL.md` "Review Dimensions" 段扩展为 6+1 维（新增 Reuse），Maintainability / Performance 下挂 simplify 反模式条目
+- [x] `skills/roll-build/SKILL.md` Phase 7 重写为三 agent 并行重审，diff 范围改为 `main...HEAD`，含 Phase 3.5 vs Phase 7 职责分工说明
+- [x] `skills/roll-build/SKILL.md` Phase 7 与 Phase 3.5（Peer Review Gate）的顺序与职责分工明确（peer 关注架构/方向，三轴关注实现质量）
+- [x] 新增 `tests/unit/roll_review_dimensions.bats` — 16 条用例覆盖 7 维 checklist + Phase 7 三轴结构
+- [x] CHANGELOG 与 `docs/features/refactor-log.md` 同步更新
 
 **Files**:
 - `skills/roll-.review/SKILL.md`（修改）
@@ -451,3 +451,33 @@ clean).
 ```
 
 **Slash-arg 行为**：`/simplify <text>` 调用时，`<text>` 作为 `## Additional Focus` 追加到 prompt 末尾，三个 agent 都会拿到 —— roll-build Phase 7 应保留此入口，允许 US 收尾时指定本次审查的侧重点。
+
+---
+
+## REFACTOR-023 CI 自愈计数器合并入 state.yaml ✅
+
+**Flagged**: 2026-05-17 by simplify review
+**Completed**: 2026-05-17
+**Signal**: `_loop_self_heal_ci()` 写入 `heal/<story>.count` 独立文件；自愈成功后若漏调 `_loop_clear_heal_state()`，count 文件长期堆积；与 `state.yaml` 生命周期脱钩。
+
+**Observation**: CI 自愈计数与主状态记录（state.yaml）分开存储导致两个清理路径不同步。heal/ 文件只在 `_loop_clear_heal_state()` 或 `roll loop reset` 时删除；如果 loop 在 CI 变绿后、调 clear 前崩溃，文件永久残留。将计数并入 state.yaml 后，state.yaml 被覆盖/删除即自动清理，无需额外维护。
+
+**Fix**:
+- `_loop_self_heal_ci()` 改为读写 `state.yaml` 的 `heal_count:` 字段（不再 mkdir heal/）
+- `_loop_clear_heal_state()` 改为从 state.yaml 中移除 `heal_count:` 行
+- `_loop_reset()` 保留 `rm -rf heal/` 以清理历史遗留文件
+- `tests/unit/roll_loop_self_heal.bats` 全面更新：12 条测试反映新行为
+
+**Files**: `bin/roll`, `tests/unit/roll_loop_self_heal.bats`
+
+---
+
+## REFACTOR-024 roll-loop SKILL.md CI 自愈流程可读性改进 ✅
+
+**Flagged**: 2026-05-17 by simplify review
+**Completed**: 2026-05-17
+**Signal**: CI 自愈流程用三层嵌套 ASCII 树呈现（`│   1. Capture...`），分支与编号步骤混排，代码块内嵌在树节点里，可读性差。
+
+**Fix**: 将嵌套树替换为两个并列编号子流程（Path A — 允许/Path B — 耗尽），代码块独立成段。同步移除已被 REFACTOR-023 废弃的 `heal/<story_id>.count` 路径引用，改为 `state.yaml` 中的 `heal_count:` 字段。
+
+**Files**: `skills/roll-loop/SKILL.md`, `tests/unit/roll_loop_self_heal_doc.bats`（新增）

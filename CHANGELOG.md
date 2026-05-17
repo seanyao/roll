@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Improved**: `roll-build` story 收尾三角度并行深审（重用/质量/效率），自检清单新增参数膨胀、N+1 等具体反模式
 - **New**: 七个功能区补上中英双语用户指南 — 现在都能从文档里找到了 `[dream]`
 - **Improved**: 官网首屏动画 — 6 秒内演示装好到自动交付的完整流程 `[loop]`
 - **Added**: `features.md` 现在区分已上线和规划中的功能 — 一眼看出哪些能用

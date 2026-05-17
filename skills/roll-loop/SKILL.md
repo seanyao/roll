@@ -246,34 +246,36 @@ After each item completes:
      (return 0). Any other `gh` error is **not** "gh unavailable" — it is a
      hard failure and must block the gate.
 
-   **CI self-heal (US-AUTO-041)** — bounded auto-fix before ALERT:
+   **CI self-heal (US-AUTO-041)** — bounded auto-fix before ALERT.
 
-   ```
-   shell: _loop_self_heal_ci <story_id>
-     ├── exit 0 → heal attempt allowed (counter incremented)
-     │   1. Capture failure summary:
-     │      gh run view --log-failed --repo <slug> $(gh run list --commit HEAD \
-     │        --json databaseId,conclusion -L 5 | jq -r '.[] | select(.conclusion=="failure") | .databaseId' | head -1) \
-     │        2>/dev/null | head -200 > /tmp/roll-heal-<story_id>.log
-     │   2. Invoke Skill("roll-fix") with brief:
-     │      "CI red after <story_id>. Failing run logs at /tmp/roll-heal-<story_id>.log.
-     │       Diagnose root cause, fix via TCR, commit, push. Do NOT change <story_id>'s
-     │       BACKLOG status — it stays ✅ Done. The fix is a follow-up."
-     │   3. After roll-fix completes, return to step 2 (CI Gate) — re-run
-     │      `roll ci --wait`. The counter prevents infinite loops.
-     │
-     └── exit 1 → heal exhausted (>=ROLL_LOOP_HEAL_MAX, default 2) or disabled
-                  (ROLL_LOOP_NO_HEAL=1):
-         1. Keep story as ✅ Done (commits are already on main — CI red is a
-            follow-up problem, not a story-failure)
-         2. Write ALERT to `~/.shared/roll/loop/ALERT.md` with:
-            - story ID, time, commit SHA
-            - heal attempts made (read counter from
-              `${ROLL_LOOP_DIR:-~/.shared/roll/loop}/heal/<story_id>.count`)
-            - last failure summary (head of /tmp/roll-heal-<story_id>.log)
-            - suggested actions: `$roll-fix` manually / inspect CI / `roll loop reset`
-         3. Skip to next story.
-   ```
+   Call `_loop_self_heal_ci <story_id>` to check if another attempt is permitted.
+
+   **Path A — attempt allowed (exit 0, counter incremented in `state.yaml`):**
+
+   1. Capture failure summary:
+      ```
+      gh run view --log-failed --repo <slug> \
+        $(gh run list --commit HEAD --json databaseId,conclusion -L 5 \
+          | jq -r '.[] | select(.conclusion=="failure") | .databaseId' | head -1) \
+        2>/dev/null | head -200 > /tmp/roll-heal-<story_id>.log
+      ```
+   2. Invoke `Skill("roll-fix")` with brief:
+      `"CI red after <story_id>. Failing run logs at /tmp/roll-heal-<story_id>.log.
+      Diagnose root cause, fix via TCR, commit, push. Do NOT change <story_id>'s
+      BACKLOG status — it stays ✅ Done. The fix is a follow-up."`
+   3. After `roll-fix` completes, return to step 2 (CI Gate) — re-run `roll ci --wait`.
+      The counter in `state.yaml` prevents infinite loops.
+
+   **Path B — heal exhausted (≥`ROLL_LOOP_HEAL_MAX`, default 2) or disabled (`ROLL_LOOP_NO_HEAL=1`) (exit 1):**
+
+   1. Keep story as ✅ Done — commits are already on main; CI red is a follow-up
+      problem, not a story failure.
+   2. Write ALERT to `~/.shared/roll/loop/ALERT.md` with:
+      - story ID, time, commit SHA
+      - heal attempts made (read `heal_count:` from `state.yaml`)
+      - last failure summary (head of `/tmp/roll-heal-<story_id>.log`)
+      - suggested actions: `$roll-fix` manually / inspect CI / `roll loop reset`
+   3. Skip to next story.
 
    **Bypass for debugging / cost control:** set `ROLL_LOOP_NO_HEAL=1` to restore
    pre-US-AUTO-041 fail-fast behaviour.

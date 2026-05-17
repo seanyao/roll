@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Improved
+
+- **配置变量文档补齐** — `ROLL_TEMPLATES` / `ROLL_PKG_CONVENTIONS` / `ROLL_LOOP_FORCE` 和内部状态 `_ROLL_MERGE_SUMMARY` 进配置指南，用户和贡献者不读源码也能发现这些入口
+
 ### Fixed
 
 - **`features.md` 规划中标记不再依赖 AI 自觉** — 发版脚本 AI 重写后跑机械校验自动补齐 `*(规划中)*`，规则落到 shell 里不再可能被 prompt 漂移悄悄抹掉

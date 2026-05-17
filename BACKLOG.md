@@ -263,7 +263,7 @@
 | REFACTOR-026 | 故事完成后的 TCR 提交数校验逻辑已实现但未接入执行路径，loop 可在不经 TCR 的情况下将故事标记为 Done，违背核心纪律 — flagged by dream 2026-05-17 | ✅ Done |
 | REFACTOR-027 | loop 启动前的 CI 状态预检逻辑已实现但未接入，loop 可以在 CI 红的情况下启动并叠加新 story — flagged by dream 2026-05-17 | ✅ Done |
 | REFACTOR-028 | BACKLOG 展示时四种条目类型使用了结构完全一样的解析循环，格式变更需同步四处且容易遗漏 — flagged by dream 2026-05-17 | ✅ Done |
-| REFACTOR-029 | docs: ROLL_MERGE_SUMMARY 等四个配置变量在代码中频繁引用但文档完全缺失，用户和贡献者无法发现这些配置入口 — flagged by dream 2026-05-17 (hint: $roll-doc) | 🔨 In Progress |
+| REFACTOR-029 | docs: ROLL_MERGE_SUMMARY 等四个配置变量在代码中频繁引用但文档完全缺失，用户和贡献者无法发现这些配置入口 — flagged by dream 2026-05-17 (hint: $roll-doc) | ✅ Done |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

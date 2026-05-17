@@ -424,6 +424,7 @@ prompt 会包含：
     `_enforce_planning_markers`，即使本规则被 AI 漏掉也会自动补 `*(规划中)*`；
     规则的权威实现是 release.sh 里的纯 shell 函数，prompt 这条只是软提示
 - 描述写 1 句话 **产品视角**：用户能用它做什么，避免实现细节
+- **语言：单一中文**。Feature 名（如 `roll-loop` / `Cross-Agent Peer Review`）和命令、环境变量等术语保留英文原样；描述句一律中文。**不要**在条目下追加英文翻译行（早期 v517.x 双语混排版式已废弃，理由：扫读困难、维护翻倍、与 `docs/guide/en|zh/` 平行目录约定不一致；英文受众走 site 端 i18n）
 - 分组用 BACKLOG 的 Epic 名，原序，不重排
 - Core Highlights 从所有 Features 里挑 3-5 个最能代表产品定位的，
   描述用 bold 标 Feature 名后接说明；不照搬 catalog 文案

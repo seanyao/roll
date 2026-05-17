@@ -982,7 +982,6 @@ _write_features_md() {
 # Features
 
 > 产品视角的功能索引。每次发版时更新，使之与 BACKLOG 保持一致。
-> Product-level feature index. Updated at release to stay in sync with BACKLOG.
 
 ---
 

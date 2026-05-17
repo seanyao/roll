@@ -91,6 +91,10 @@ teardown() {
 # ─── loop mute / unmute (US-AUTO-026 golden path E2E) ────────────────────────
 
 @test "loop mute → unmute round-trip: file appears then disappears" {
+  # US-VIEW-001: mute / Auto-attach line is only rendered by the v1 bash
+  # implementation. The v2 Python view does not show mute state yet
+  # (tracked separately). Pin v1 for this round-trip check.
+  export ROLL_UI=v1
   # FIX-052: per-project mute path (was global ${HOME}/.shared/roll/mute).
   local mute_file; mute_file=$(roll_loop_path mute)
 

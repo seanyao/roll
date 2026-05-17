@@ -60,7 +60,9 @@ $1
 }
 
 @test "fmt_delta: up_bad with growth flags red" {
-  run run_py 'print(roll_render.fmt_delta(15.0, 10.0, kind="up_bad", unit="\$"))'
+  # chr(36) = '$', avoids shell/python escaping mismatch when running under
+  # bats on different bash versions.
+  run run_py "print(roll_render.fmt_delta(15.0, 10.0, kind='up_bad', unit=chr(36)))"
   [ "$status" -eq 0 ]
   [[ "$output" == *'+$5.00'* ]]
   [[ "$output" == *"'red'"* ]]

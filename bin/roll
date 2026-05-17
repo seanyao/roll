@@ -1302,7 +1302,10 @@ _peer_dispatch_in_tmux() {
   inner=$(mktemp /tmp/roll-peer-inner-XXXXXX.sh)
   {
     printf '#!/bin/bash -l\n'
-    printf 'export PATH="/opt/homebrew/bin:$PATH"\n'
+    # FIX-050: portable PATH assembly (was hardcoded /opt/homebrew/bin)
+    printf 'for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "$HOME/.local/bin"; do\n'
+    printf '  case ":$PATH:" in *":$_d:"*) ;; *) [ -d "$_d" ] && PATH="$_d:$PATH" ;; esac\n'
+    printf 'done; export PATH\n'
     printf '%s > %q 2> %q || true\n' "$cmd_str" "$out_file" "$err_file"
     printf 'touch %q\n' "$done_file"
   } > "$inner"
@@ -2003,6 +2006,28 @@ _loop_event_rotate() {
   fi
 }
 
+# FIX-050: probe brew prefix + common tool dirs to build a PATH that survives
+# launchd/cron's bare-env launch. Setup-time companion to the runtime
+# assembly snippet embedded in runner scripts.
+_detect_path_prepend() {
+  local dirs=() seen="" d out=""
+  if command -v brew >/dev/null 2>&1; then
+    local bp; bp=$(brew --prefix 2>/dev/null || true)
+    [[ -n "$bp" && -d "$bp/bin" ]] && dirs+=("$bp/bin")
+  fi
+  [[ -d /opt/homebrew/bin ]] && dirs+=("/opt/homebrew/bin")
+  [[ -d /usr/local/bin ]] && dirs+=("/usr/local/bin")
+  [[ -d /opt/local/bin ]] && dirs+=("/opt/local/bin")
+  [[ -d "$HOME/.local/bin" ]] && dirs+=("$HOME/.local/bin")
+  dirs+=("/usr/bin" "/bin" "/usr/sbin" "/sbin")
+  for d in "${dirs[@]}"; do
+    case ":$seen:" in *":$d:"*) continue ;; esac
+    seen="$seen:$d"
+    [[ -z "$out" ]] && out="$d" || out="$out:$d"
+  done
+  printf '%s' "$out"
+}
+
 _launchd_label() {
   local service="$1" project_path="$2"
   printf 'com.roll.%s.%s' "$service" "$(_project_slug "$project_path")"
@@ -2022,6 +2047,11 @@ _write_launchd_plist() {
     <integer>${hour}</integer>
 "
 
+  # FIX-050: bake PATH into the plist so launchd-spawned bash can find tmux,
+  # claude, node, etc. The runner script also re-asserts PATH at runtime as
+  # a second layer (covers stale plists where brew was installed after setup).
+  local path_value; path_value=$(_detect_path_prepend)
+
   local content
   content="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
@@ -2035,6 +2065,11 @@ _write_launchd_plist() {
     <string>-l</string>
     <string>${runner_script}</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${path_value}</string>
+  </dict>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Minute</key>
@@ -2093,7 +2128,13 @@ _write_loop_runner_script() {
   cat > "$inner_path" << INNER
 #!/bin/bash -l
 set -o pipefail
-export PATH="/opt/homebrew/bin:\$PATH"
+# FIX-050: portable PATH assembly — launchd/cron deliver a bare PATH that
+# misses brew-installed tools (tmux, claude, node, …). Iterate candidate
+# dirs; only prepend when present and not already in PATH. Idempotent.
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin"; do
+  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
+done
+export PATH
 # FIX-031: inner-level LOCK (PID + start-ts) — outer runner.sh LOCK can be
 # bypassed (recovery / retry / direct invocation); this guards the actual
 # claude invocation so a second session can't run under the same project.
@@ -2336,6 +2377,13 @@ INNER
 
   cat > "$script_path" << SCRIPT
 #!/bin/bash -l
+# FIX-050: portable PATH assembly before any brew-tool lookup (tmux, caffeinate
+# on some systems, claude). Mirrors the inner script's bootstrap so even when
+# launchd's plist EnvironmentVariables is stale, the runner self-repairs.
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin"; do
+  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
+done
+export PATH
 # caffeinate: prevent idle sleep from killing claude during cycles
 caffeinate -i -w \$\$ &
 # Active-window check — skipped when ROLL_LOOP_FORCE is set (manual 'roll loop now')

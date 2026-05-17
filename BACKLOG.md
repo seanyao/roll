@@ -285,6 +285,20 @@
 | [US-LOOP-002](docs/features/cycle-event-stream.md#us-loop-002) | loop tmux 输出体现方法论掌控力 — 压制噪音，用真实数据突出 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate，每个检查点有证据不是口说 | ✅ Done |
 | [US-LOOP-003](docs/features/cycle-event-stream.md#us-loop-003) | loop 等待期间显示 spinner 动画，story 执行、CI 运行、PR 合并三个等待点都有反馈，不再看起来像卡住 | ✅ Done |
 
+## Epic: CLI 视觉系统
+### Feature: cli-redesign
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-VIEW-001](docs/features/cli-redesign.md#us-view-001) | 修 `roll loop` 真实数据下 PR 数 / 耗时 / 成本全空、22 轮永远显示运行中、今天列错塞昨天数据这 4 个 bug，顺手把渲染原语抽出来给后面 8 条命令复用 | ✅ Done |
+| [US-VIEW-002](docs/features/cli-redesign.md#us-view-002) | `roll` 裸命令打出一屏总览 — 现在在干啥、三层是否启用、四道防线状态、Pipeline 各阶段计数、当前 build 的 DoD、需要你介入的告警 / 提案 / 待发版 | 📋 Todo |
+| [US-VIEW-003](docs/features/cli-redesign.md#us-view-003) | `roll --help` 不再用 6 行 ASCII 大字 banner 占满屏幕，命令按日常 / 项目 / 全局三类分组，每条带中英文双行说明 | 📋 Todo |
+| [US-VIEW-004](docs/features/cli-redesign.md#us-view-004) | `roll status` 一行总览同步是否健康，分块显示全局约定文件、AI 客户端 sync 表、项目模板、本项目状态，drift 行就地给修复命令 | 📋 Todo |
+| [US-VIEW-005](docs/features/cli-redesign.md#us-view-005) | `roll backlog` 按缺陷 / 故事 / 重构 / 想法四组分类显示 Todo，正在做的一条用紫色 pulse 高亮，Blocked / Deferred 区块带原因 | 📋 Todo |
+| [US-VIEW-006](docs/features/cli-redesign.md#us-view-006) | `roll brief` 把最新简报渲染成三段：核心数字摘要 + 亮点 PR 列表 + 待决策清单，每条决策有琥珀编号、不会被忽略 | 📋 Todo |
+| [US-VIEW-007](docs/features/cli-redesign.md#us-view-007) | `roll setup` 把首装 / 重同步流程从滚屏日志改成 6 步编号进度，drift 的客户端就地给一键修复命令 | 📋 Todo |
+| [US-VIEW-008](docs/features/cli-redesign.md#us-view-008) | `roll init` 把项目初始化做成 6 步编号流程，新建文件用绿色 `+`、合并已有文件用琥珀 `~`，结尾给三步上手指南 | 📋 Todo |
+| [US-VIEW-009](docs/features/cli-redesign.md#us-view-009) | `roll peer` 把跨 Agent 对审日志渲染成回合制 transcript — 每轮谁提出 concern / nit / ack / block 一目了然，最后给绿色 verdict | 📋 Todo |
+
 ## Epic: Marketing & Site
 ### Feature: landing-page
 | Story | Description | Status |
@@ -314,5 +328,7 @@
 | IDEA-020 | loop tmux 输出精简与视觉层次设计 — 当前信息量过大、关键节点不突出、换行排版混乱；需设计精简方案：过滤低信号噪音，用视觉层次突出 Step 切换、CI gate、TCR commit、story 完成等关键事件，让用户扫一眼即知当前阶段与健康状态 | ✅ Done → US-LOOP-002 |
 | IDEA-021 | loop 等待期间加 spinner 动画 — 当 agent 正在执行 story 时，tmux 输出缺少 loading 状态反馈，看起来像卡住；在每个 → 事件行之后、下一个事件行出现之前，显示一个简单的 spinner 动画表示"正在处理中" | ✅ Done → US-LOOP-003 |
 | IDEA-022 | `roll update` 末尾两段「可选启用 AI 双闸门 / 秒级 PR 评审」每次都重复打，已经装过的人被反复刷屏 — 需要先讨论方案：探测仓库已启用就不打 / 用户看过一次记标记不再打 / 整段挪到 `roll doctor` 让用户主动看，三选一 | ✅ Done → US-PR-004 |
-| IDEA-023 | 想一眼看到 loop 健康度 — 今天 / 最近几天跑了几轮、解决了哪几个待办、累计花了多久和多少 token、有没有失败的 — 现在 `roll loop runs` 是按时间倒序的扁平列表，看不到按天总账，也没有 token 与成本数字；`tmp-*` 测试项目还把真项目淹没；需要按天聚合、过滤测试副产物、附耗时和成本，最近 3 天显示足够 | 📋 Todo |
+| IDEA-023 | 想一眼看到 loop 健康度 — 今天 / 最近几天跑了几轮、解决了哪几个待办、累计花了多久和多少 token、有没有失败的 — 现在 `roll loop runs` 是按时间倒序的扁平列表，看不到按天总账，也没有 token 与成本数字；`tmp-*` 测试项目还把真项目淹没；需要按天聚合、过滤测试副产物、附耗时和成本，最近 3 天显示足够 | ✅ Done → US-VIEW-001 |
 | IDEA-024 | 上游 AI CLI 升级影响 Roll 承载层的早期预警 — 出了产品 BACKLOG 范围，归入 roll-meta 私有 repo（Roll 自身关心、roll-using 项目无关） | ✅ Done → roll-meta/US-WATCH-001/002/003 |
+| IDEA-025 | dashboard cost 列现在用的是 claude 上报的 `total_cost_usd`（含订阅折扣，不反映 list price）— 想看真实成本需要把每轮 cycle 的 input/output tokens 打到 events.ndjson，按当前模型 list 单价 × token 量重算，不算优惠、价格用美金 | 📋 Todo |
+| IDEA-026 | 同一项目在不同机器上跑 loop 时记录会各自存各自的、互相看不见 — 把每轮 cycle 的 events/cron/state 推到云端集中存（按 git remote 而不是本地路径定项目身份），所有机器读同一份，跨机器跑也能在 dashboard 里看到合并后的全貌 | 📋 Todo |

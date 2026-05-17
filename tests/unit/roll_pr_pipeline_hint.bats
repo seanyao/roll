@@ -33,10 +33,8 @@ teardown() { unit_teardown; }
   [[ "$output" == *"紧急通道"* ]]
 }
 
-@test "cmd_setup output references the PR-pipeline hint" {
-  # Smoke check that cmd_setup ends with the hint. Avoid full side effects
-  # by stubbing the internal helpers — only the hint function should reach
-  # stdout for our assertion.
+@test "cmd_setup output does NOT reprint the PR-pipeline hint (moved to doctor)" {
+  # US-PR-004: hints moved out of setup; setup now stays terse on upgrade.
   _install_local() { :; }
   _sync_conventions() { :; }
   _sync_skills() { :; }
@@ -46,5 +44,18 @@ teardown() { unit_teardown; }
 
   run cmd_setup
   [ "$status" -eq 0 ]
-  [[ "$output" == *"required_pull_request_reviews"* ]]
+  [[ "$output" != *"required_pull_request_reviews"* ]]
+}
+
+@test "cmd_setup output does NOT reprint the PR-event hint (moved to doctor)" {
+  _install_local() { :; }
+  _sync_conventions() { :; }
+  _sync_skills() { :; }
+  _peer_ensure_state_dir() { :; }
+  _ensure_tmux() { :; }
+  _install_launchd_plists() { :; }
+
+  run cmd_setup
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"pr-review-event.yml"* ]]
 }

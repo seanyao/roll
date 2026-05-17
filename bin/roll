@@ -611,10 +611,7 @@ cmd_setup() {
 
   echo ""
   info "Next: run ${BOLD}roll init${NC} inside a project to initialize it.  下一步：在项目目录运行 roll init"
-
-  echo ""
-  _print_pr_pipeline_hint
-  _print_pr_event_hint
+  info "Optional gates: run ${BOLD}roll doctor${NC} inside a repo to see which PR review extras are still off.  可选闸门：在仓库内运行 roll doctor 查看 PR 评审两档开关状态"
 }
 
 # ─── PR pipeline hint ────────────────────────────────────────────────────────

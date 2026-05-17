@@ -335,3 +335,5 @@
 | IDEA-025 | dashboard cost 列现在用的是 claude 上报的 `total_cost_usd`（含订阅折扣，不反映 list price）— 想看真实成本需要把每轮 cycle 的 input/output tokens 打到 events.ndjson，按当前模型 list 单价 × token 量重算，不算优惠、价格用美金 | 📋 Todo |
 | IDEA-026 | 同一项目在不同机器上跑 loop 时记录会各自存各自的、互相看不见 — 把每轮 cycle 的 events/cron/state 推到云端集中存（按 git remote 而不是本地路径定项目身份），所有机器读同一份，跨机器跑也能在 dashboard 里看到合并后的全貌 | 📋 Todo |
 | IDEA-027 | cycle cost 每轮都从历史里消失 — `cron-<slug>.log` 是单 cycle 临时日志、每轮覆写，dashboard 看历史时除了最新一轮其他全是 `—`；让 inner runner 在结束时把 `total_cost_usd`（claude 上报）也写到 `events-<slug>.ndjson` 的 `cycle_end` 事件 detail 里，dashboard 直接读事件流，cron.log 只剩 tmux 实时显示职责 | 📋 Todo |
+| IDEA-028 | events.ndjson 在某些路径上漏发 `pr` / `cycle_end` 事件，导致 dashboard 把已经合入主干的 cycle 误判为 "running"（这次靠 git log 兜回来）— 审计 inner / outer runner 所有出口（成功合入、orphan 恢复、超时 bail、crash 自愈、PR 失败 fallback），保证每条路径都发对应的终结事件，把 reader 侧的 git log salvage 退化为兜底 | 📋 Todo |
+| IDEA-029 | `runs.jsonl` 的 `project` 字段在 worktree 里跑 cycle 时被写成 `{slug}-cycle-XXX` 甚至裸 `Roll`，导致 dashboard 按 slug 过滤会漏掉历史记录（这次靠宽松匹配兜回来）— 写入前先 resolve 到主项目 slug（与 events 路径一致），消除多机匹配脏数据 | 📋 Todo |

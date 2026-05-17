@@ -140,3 +140,18 @@ teardown() {
 @test "roll-loop SKILL.md: Step 1 documents pre-run CI health check" {
   grep -qiE 'pre-run CI|precheck.*CI|head ci.*red|broken base' "$LOOP_SKILL"
 }
+
+@test "roll loop precheck-ci: CLI subcommand routes to _loop_precheck_ci (no gh → ok)" {
+  # gh not installed → _loop_precheck_ci returns 0 gracefully
+  run "$ROLL_BIN" loop precheck-ci
+  [ "$status" -eq 0 ]
+}
+
+@test "roll loop precheck-ci: CLI subcommand returns 1 when HEAD CI is red" {
+  git remote add origin "git@github.com:seanyao/Roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"failure"}]'; return 0; }
+  export -f gh
+  run "$ROLL_BIN" loop precheck-ci
+  [ "$status" -eq 1 ]
+}

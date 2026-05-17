@@ -167,15 +167,9 @@
 | FIX-048 | 两个 cycle 隔不到 PR 合入时间就启动，会双取同一个 Todo 故事造成重复 PR 与合并冲突 — 新 cycle 启动前扫一遍 OPEN 的 loop PR，把已认领的故事加入 skip 列表；只覆盖"PR 已 push 未合"窗口（"cycle 跑到一半未 push"由 LOCK 保护）；GitHub 不可达时降级为乐观取（不阻塞 cycle）并写 ALERT 提示 | ✅ Done |
 | FIX-050 | loop 被系统定时器拉起时拿到的环境路径是裸的，找不到 brew 装的工具（如 tmux），导致没有弹窗、未来同类工具缺失还会一个个冒出来 — 两层兜底：①setup 时探测 brew 前缀并写入 macOS 定时任务配置；②runner 脚本启动时再跑一段跨平台路径拼装（覆盖 Linux cron 用户与 plist 过期场景）；inner 脚本里散落的硬编码一并撤掉；setup/update 后请重跑 setup 让配置生效 | ✅ Done |
 | FIX-051 | 发版脚本通过 AI 重写 features.md 时会丢「规划中」标记规则，每次发版都可能再次失守、把全员 Todo 的功能误显示为已上线 — 把规则从 AI prompt 搬到机械校验：release 后跑 lint，或直接由脚本生成标记不交给 AI | ✅ Done |
+| FIX-052 | loop 状态文件 ALERT/state/mute 在共享目录里没分项目，一个项目的告警会串到另一个项目的会话里、两个项目的 cycle 状态还会互相覆盖 — 跟现有 events/runner 一样按项目命名，每个命令只读当前项目对应的那份；旧数据按项目搬好不丢 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
-### Feature: upstream-watch
-| Story | Description | Status |
-|-------|-------------|--------|
-| [US-WATCH-001](docs/features/upstream-watch.md#us-watch-001) | 上游 AI CLI 升级早期预警 MVP — dream 每晚扫一次 Claude Code 的 release notes，AI 用关注维度清单对照，有破坏性变更就开 FIX 入 BACKLOG，行为变更写 ALERT 提醒人 | 📋 Todo |
-| [US-WATCH-002](docs/features/upstream-watch.md#us-watch-002) | 上游 CLI 监视扩展到另外七家 — Kimi、DeepSeek、Codex、Gemini、Pi、opencode、Trae 都纳入扫描，每家配套独立来源与 fallback | 📋 Todo |
-| [US-WATCH-003](docs/features/upstream-watch.md#us-watch-003) | 上游 CLI 监视加固 — 同一变更不重复开 FIX、外部接口限流时优雅退避、关注维度清单独立可版本化迭代 | 📋 Todo |
-
 ### Feature: autonomous-evolution
 | Story | Description | Status |
 |-------|-------------|--------|
@@ -321,4 +315,4 @@
 | IDEA-021 | loop 等待期间加 spinner 动画 — 当 agent 正在执行 story 时，tmux 输出缺少 loading 状态反馈，看起来像卡住；在每个 → 事件行之后、下一个事件行出现之前，显示一个简单的 spinner 动画表示"正在处理中" | ✅ Done → US-LOOP-003 |
 | IDEA-022 | `roll update` 末尾两段「可选启用 AI 双闸门 / 秒级 PR 评审」每次都重复打，已经装过的人被反复刷屏 — 需要先讨论方案：探测仓库已启用就不打 / 用户看过一次记标记不再打 / 整段挪到 `roll doctor` 让用户主动看，三选一 | 📋 Todo |
 | IDEA-023 | 想一眼看到 loop 健康度 — 今天 / 最近几天跑了几轮、解决了哪几个待办、累计花了多久和多少 token、有没有失败的 — 现在 `roll loop runs` 是按时间倒序的扁平列表，看不到按天总账，也没有 token 与成本数字；`tmp-*` 测试项目还把真项目淹没；需要按天聚合、过滤测试副产物、附耗时和成本，最近 3 天显示足够 | 📋 Todo |
-| IDEA-024 | 这两天踩的几个坑（权限弹窗、PATH、prompt 格式变化）都源自 Claude Code 等上游 AI CLI 升级 —— 我们没有任何机制能提前感知，每次都要等掉坑里再回头排查 —— 需要个定时任务，自动拉取支持的几家 AI CLI（Claude、Kimi、DeepSeek、Codex、Gemini）的 release notes，AI 评估有没有可能影响 Roll 的承载层（hook、permission、stream-json、agent 调用约定等），有影响就开 FIX 或写 ALERT 提醒人 | ✅ Done → US-WATCH-001 / US-WATCH-002 / US-WATCH-003 |
+| IDEA-024 | 上游 AI CLI 升级影响 Roll 承载层的早期预警 — 已移至 [roll-meta/BACKLOG.md](roll-meta/BACKLOG.md)（Roll 自身关心、roll-using 项目无关，不在产品 BACKLOG 范围） | ➡️ Moved to roll-meta |

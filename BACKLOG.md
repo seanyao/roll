@@ -248,7 +248,7 @@
 | REFACTOR-015 | 一个工具模块随 npm 发布但整条链路不可达，用户无法调用，增加包体积和维护混淆 — flagged by dream 2026-05-15 | ✅ Done |
 | REFACTOR-016 | 配置值读取存在两套功能重复但行为不一致的实现，改一处容易遗漏另一处导致行为分叉 — flagged by dream 2026-05-15 | ✅ Done |
 | REFACTOR-017 | agent 命令分发逻辑在 6 处以 case 块形式重复，新增 agent 时需同步全部副本否则运行时失败 — flagged by dream 2026-05-15 | ✅ Done |
-| REFACTOR-018 | gh/commit/slug 前置检查在 7 个函数中重复且错误处理方式各异，统一行为需逐个排查 — flagged by dream 2026-05-15 | 🔨 In Progress |
+| REFACTOR-018 | gh/commit/slug 前置检查在 7 个函数中重复且错误处理方式各异，统一行为需逐个排查 — flagged by dream 2026-05-15 | ✅ Done |
 | REFACTOR-019 | docs: 7 个已完成 ≥3 story 的功能区缺少用户指南，新用户无法从文档体系了解这些功能 — flagged by dream 2026-05-15 (hint: $roll-doc) | 📋 Todo |
 | REFACTOR-020 | 抽 `_loop_is_active()` — liveness 判断在三处重复（_loop_now / FIX-037 heal / LOCK 守卫），需要可单测 | ✅ Done |
 | REFACTOR-021 | release changelog 双管线 — `roll update` 直读 CHANGELOG.md，GitHub release notes 走独立 AI 重写后的 release_notes.txt，两套格式漂移；后者还混入 release.sh 状态 echo（stdout 泄漏入捕获文件）和 prompt 经 argv 截断后的 AI 自述 — flagged by user 2026-05-16 (hint: $roll-release / $roll-.changelog) | 📋 Todo |

@@ -3789,6 +3789,14 @@ _loop_pr_inbox() {
 
     # Bot review gate: if a GHA workflow already handled this PR, defer to it.
     if [ "$bot_review" = "APPROVED" ]; then
+      # All gates cleared (bot-approved + CI green + no conflicts) → merge directly.
+      # Relying on repo-level auto-merge being configured is not reliable; loop
+      # owns the decision here since it already ran the review.
+      if [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ]; then
+        gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1 \
+          && info "PR #${num}: bot-approved + CI green — merged" \
+          || warn "PR #${num}: merge failed (bot-approved + CI green) — left open"
+      fi
       i=$((i + 1)); continue
     elif [ "$bot_review" = "CHANGES_REQUESTED" ]; then
       local alert="${_LOOP_ALERT:-${HOME}/.shared/roll/loop/ALERT.md}"

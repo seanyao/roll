@@ -40,14 +40,26 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
   ! grep -qF "mentions every BACKLOG" "$ci_test"
 }
 
-# US-DOC-011: features.md distinguishes planning-stage features (all-Todo) from shipped ones
-
-@test "features.md marks all-Todo features with planning marker" {
-  grep -qF "规划中" "${DOCS}/features.md"
-}
-
-@test "features.md Landing Page entry has planning marker (all stories are Todo)" {
-  grep -i "landing.page\|landing page" "${DOCS}/features.md" | grep -q "规划中"
+# US-DOC-011: features.md distinguishes planning-stage features (all-Todo) from shipped ones.
+# Data-driven: scan BACKLOG for any Feature whose stories are entirely 📋 Todo / 🔨 In Progress,
+# and require features.md to mark each such Feature with 规划中. When no Feature is all-Todo
+# (i.e. every Feature has shipped at least one story), the test passes trivially.
+@test "features.md marks each all-Todo Feature with planning marker" {
+  local backlog="${BATS_TEST_DIRNAME}/../../BACKLOG.md"
+  local features="${DOCS}/features.md"
+  local missing=""
+  while IFS= read -r line; do
+    [ -n "$line" ] && ! grep -i "${line}" "$features" | grep -q "规划中" && missing="${missing}\n${line}"
+  done < <(awk '
+    /^### Feature:/ {
+      if (name != "" && todo > 0 && done == 0) print name
+      name = $0; sub(/^### Feature: */, "", name); todo = 0; done = 0; next
+    }
+    /✅ Done/ { done++ }
+    /📋 Todo|🔨 In Progress/ { todo++ }
+    END { if (name != "" && todo > 0 && done == 0) print name }
+  ' "$backlog")
+  [ -z "$missing" ] || { echo -e "All-Todo Features missing 规划中 marker in features.md:${missing}"; false; }
 }
 
 @test "changelog SKILL.md Section 8.4 contains planning distinction rule" {

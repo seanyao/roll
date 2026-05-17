@@ -509,3 +509,18 @@ clean).
 **Fix**: 删除 `merge_convention()` 及其注释头（bin/roll 删除 ~160 行），删除孤立测试文件 `tests/unit/merge_convention.bats`，在 `tests/unit/sanity.bats` 新增回归守卫（防止同类死代码悄然重现）。
 
 **Files**: `bin/roll`（删除函数），`tests/unit/merge_convention.bats`（删除），`tests/unit/sanity.bats`（新增 guard）
+
+---
+
+## REFACTOR-029 documentation gap for user-overridable ROLL_* env vars ✅
+
+**Flagged**: 2026-05-17 by dream scan
+**Completed**: 2026-05-17
+**Signal**: dream 报告 4 个 `ROLL_*` 标识符在 docs/ 中完全缺失或严重欠文档。深查后区分：
+- `_ROLL_MERGE_SUMMARY` 是 `bin/roll` 内部累加器（下划线前缀），不是用户配置；
+- `ROLL_PKG_CONVENTIONS` / `ROLL_TEMPLATES` 是从 `ROLL_HOME` 派生的路径变量，不直接接受用户覆盖；
+- 真正用户可设置但 `docs/guide/{en,zh}/configuration.md` 漏掉的，是 `ROLL_LOOP_FORCE` / `ROLL_LOOP_NO_HEAL` / `ROLL_LOOP_HEAL_MAX` / `ROLL_PR_MERGE_TIMEOUT` 这 4 个 loop / PR 运行时旋钮。
+
+**Fix**: 在 EN + ZH configuration.md 表格中补齐这 4 个环境变量（默认值、用途、什么时候要调）。新增 `tests/unit/docs_configuration_env_vars.bats` 守卫，下次 README 漂移时 CI 会直接挂。
+
+**Files**: `docs/guide/en/configuration.md`, `docs/guide/zh/configuration.md`, `tests/unit/docs_configuration_env_vars.bats`（新增）

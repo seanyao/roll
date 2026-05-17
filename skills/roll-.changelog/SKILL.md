@@ -420,6 +420,9 @@ prompt 会包含：
   - 该 Feature 下**所有** Story 均为 `📋 Todo` → 在描述末尾追加 `*(规划中)*`
   - 只要有 **≥1 个** `✅ Done` Story → 正常展示，**不加**任何标记
   - 一眼可见：规划中的 Feature 在每个 Epic 分组的末尾列出
+  - **FIX-051 兜底**：`scripts/release.sh` 在 AI 重写后会跑机械校验
+    `_enforce_planning_markers`，即使本规则被 AI 漏掉也会自动补 `*(规划中)*`；
+    规则的权威实现是 release.sh 里的纯 shell 函数，prompt 这条只是软提示
 - 描述写 1 句话 **产品视角**：用户能用它做什么，避免实现细节
 - 分组用 BACKLOG 的 Epic 名，原序，不重排
 - Core Highlights 从所有 Features 里挑 3-5 个最能代表产品定位的，

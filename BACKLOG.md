@@ -166,7 +166,7 @@
 | FIX-047 | loop 在 PR 合入 main 之前标 Done — CI 绿不代表已交付，分支没合进去代码就丢了 | ✅ Done |
 | FIX-048 | 两个 cycle 隔不到 PR 合入时间就启动，会双取同一个 Todo 故事造成重复 PR 与合并冲突 — 新 cycle 启动前扫一遍 OPEN 的 loop PR，把已认领的故事加入 skip 列表；只覆盖"PR 已 push 未合"窗口（"cycle 跑到一半未 push"由 LOCK 保护）；GitHub 不可达时降级为乐观取（不阻塞 cycle）并写 ALERT 提示 | ✅ Done |
 | FIX-050 | loop 被系统定时器拉起时拿到的环境路径是裸的，找不到 brew 装的工具（如 tmux），导致没有弹窗、未来同类工具缺失还会一个个冒出来 — 两层兜底：①setup 时探测 brew 前缀并写入 macOS 定时任务配置；②runner 脚本启动时再跑一段跨平台路径拼装（覆盖 Linux cron 用户与 plist 过期场景）；inner 脚本里散落的硬编码一并撤掉；setup/update 后请重跑 setup 让配置生效 | ✅ Done |
-| FIX-051 | 发版脚本通过 AI 重写 features.md 时会丢「规划中」标记规则，每次发版都可能再次失守、把全员 Todo 的功能误显示为已上线 — 把规则从 AI prompt 搬到机械校验：release 后跑 lint，或直接由脚本生成标记不交给 AI | 📋 Todo |
+| FIX-051 | 发版脚本通过 AI 重写 features.md 时会丢「规划中」标记规则，每次发版都可能再次失守、把全员 Todo 的功能误显示为已上线 — 把规则从 AI prompt 搬到机械校验：release 后跑 lint，或直接由脚本生成标记不交给 AI | ✅ Done |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

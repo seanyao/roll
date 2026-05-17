@@ -48,3 +48,29 @@ teardown() { unit_teardown; }
   [[ "$_LOOP_STATE" == "${_SHARED_ROOT}/loop/"* ]]
   [[ "$_LOOP_MUTE_FILE" == "${_SHARED_ROOT}/loop/"* ]]
 }
+
+# ── generated runner scripts embed per-project state paths ────────────────────
+
+@test "_write_loop_runner_script: outer script's STATE_FILE includes slug suffix" {
+  local out_dir="${TEST_TMP}/loop"
+  mkdir -p "$out_dir"
+  local script_path="${out_dir}/run-projx-abc123.sh"
+  _write_loop_runner_script "$script_path" "/tmp/projx-fix052" "echo hi" "/tmp/log" 0 24
+  [ -f "$script_path" ]
+  # Per-project STATE_FILE; legacy global state.yaml must not appear.
+  grep -qE 'STATE_FILE="[^"]+/state-[^"]+\.yaml"' "$script_path"
+  ! grep -q 'STATE_FILE=".*/state\.yaml"' "$script_path"
+}
+
+@test "_write_loop_runner_script: outer script's heal _alert_file includes slug suffix" {
+  local out_dir="${TEST_TMP}/loop"
+  mkdir -p "$out_dir"
+  local script_path="${out_dir}/run-projy-def456.sh"
+  _write_loop_runner_script "$script_path" "/tmp/projy-fix052" "echo hi" "/tmp/log" 0 24
+  [ -f "$script_path" ]
+  # _alert_file used by FIX-037 auto-heal must target ALERT-<slug>.md, not the
+  # legacy global ALERT.md. Path contains nested quotes from $(dirname "$0"),
+  # so just check the suffix shape.
+  grep -qE '_alert_file=".*/ALERT-[^"]+\.md"' "$script_path"
+  ! grep -qE '_alert_file=".*/ALERT\.md"' "$script_path"
+}

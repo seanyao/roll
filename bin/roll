@@ -2430,7 +2430,9 @@ if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
 # FIX-038: heartbeat is the primary liveness signal (avoids PID reuse race);
 # LOCK pid check is secondary fallback for backward compatibility.
 HEARTBEAT_TIMEOUT="\${ROLL_HEARTBEAT_TIMEOUT:-1800}"
-STATE_FILE="${HOME}/.shared/roll/loop/state.yaml"
+# FIX-052: per-project STATE_FILE (was global state.yaml — caused two projects
+# to clobber each other's cycle state).
+STATE_FILE="${HOME}/.shared/roll/loop/state-${slug}.yaml"
 if [ -f "\$STATE_FILE" ]; then
   _state=\$(grep '^status:' "\$STATE_FILE" | awk '{print \$2}' 2>/dev/null || echo "")
   if [ "\$_state" = "running" ]; then
@@ -2461,7 +2463,9 @@ if [ -f "\$STATE_FILE" ]; then
       echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-037: orphan state detected (status=running, heartbeat stale or missing) — healing to idle" >> "\$LOG"
       echo "status: idle" > "\${STATE_FILE}.tmp" && mv "\${STATE_FILE}.tmp" "\$STATE_FILE"
       rm -f "\$_lock_file" 2>/dev/null || true
-      _alert_file="\$(dirname "\$0")/ALERT.md"
+      # FIX-052: per-project ALERT file (was shared ALERT.md — caused R0
+      # auto-heal entries to surface in Roll's alert view).
+      _alert_file="\$(dirname "\$0")/ALERT-${slug}.md"
       echo "\$(date '+%Y-%m-%dT%H:%M:%S%z') | FIX-037 auto-heal | Orphan state detected and cleared (status=running → idle)" >> "\$_alert_file" 2>/dev/null || true
       echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-037: healed to idle, ALERT written" >> "\$LOG"
     fi

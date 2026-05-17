@@ -17,3 +17,8 @@
   run grep -c "is_fresh_project\|_mkscaffold" "${BATS_TEST_DIRNAME}/../../bin/roll"
   [ "$output" = "0" ]
 }
+
+@test "dead code removed: merge_convention does not exist in bin/roll" {
+  run grep -c "^merge_convention()" "${BATS_TEST_DIRNAME}/../../bin/roll"
+  [ "$output" = "0" ]
+}

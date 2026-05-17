@@ -1,5 +1,11 @@
 # Changelog
 
+## v2026.518.3
+
+### Fixed
+
+- **autonomous loop 跑测试时狂开 Ghostty 窗口** — `_write_loop_runner_script` 生成的 outer runner 在 popup 分支只检查 `ROLL_LOOP_NO_POPUP` / mute 文件 / Darwin；当 loop 的执行 agent 跑 bats 跑到 `_loop_test` 这类需要执行生成脚本的测试时，每个 test case 都会真的弹一个 Ghostty 窗口，一轮 cycle 累出 80+ 个孤儿窗口。popup 守卫追加 `BATS_TEST_NUMBER` 判定，任何 bats 上下文里自动跳过 popup `[loop]`
+
 ## v2026.518.2
 
 ### Fixed

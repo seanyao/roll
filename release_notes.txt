@@ -1,3 +1,2 @@
 ### Fixed
-- **`roll loop status` dashboard 崩溃 / 列对齐** — `_dash_release_ready` 用 `grep -c` 在零匹配时返回 "0" + 非零退出码再被 `|| echo 0` 追加一个 "0"，拼成 "0\n0" 让 `[[ -gt ]]` 报语法错；改用 `grep | wc -l | tr -d ' '` 单值返回。Today 表头去掉 "(in progress)" 后缀（曾溢出到 Yesterday 列），数值列宽 6→8 让指标行对齐表头 `[loop]`
-- **v2026.518.1 在刚发版的仓库里 dashboard 不可用** — 上面那个崩溃在 HEAD == latest tag、或 tag 之后只有 docs/chore commit 的仓库中必触发；本版作为追加修复，升到 v2026.518.2 即恢复 `[release]`
+- **autonomous loop 跑测试时狂开 Ghostty 窗口** — `_write_loop_runner_script` 生成的 outer runner 在 popup 分支只检查 `ROLL_LOOP_NO_POPUP` / mute 文件 / Darwin；当 loop 的执行 agent 跑 bats 跑到 `_loop_test` 这类需要执行生成脚本的测试时，每个 test case 都会真的弹一个 Ghostty 窗口，一轮 cycle 累出 80+ 个孤儿窗口。popup 守卫追加 `BATS_TEST_NUMBER` 判定，任何 bats 上下文里自动跳过 popup `[loop]`

@@ -186,9 +186,17 @@ if ! grep -q "^## v${VERSION}" CHANGELOG.md 2>/dev/null; then
     # Promote ## Unreleased → ## v{VERSION} now that changelog is updated
     sed -i.bak "s/^## Unreleased$/## v${VERSION}/" CHANGELOG.md && rm CHANGELOG.md.bak
   else
-    # Fallback: extract raw section from existing CHANGELOG.md
+    # Fallback: extract raw section from existing ## Unreleased.
+    # If no Unreleased section exists, abort — releasing without real notes
+    # causes the GitHub Actions same-day-merge step to snowball prior bodies.
     awk "/^## Unreleased/{found=1; next} found && /^## /{exit} found && NF{print}" \
       CHANGELOG.md > release_notes.txt || true
+    if [ ! -s release_notes.txt ]; then
+      echo "❌ Release aborted: AI changelog step failed and CHANGELOG.md has no ## Unreleased section." >&2
+      echo "   Add a ## Unreleased block with this version's notes, or rerun when the agent is available." >&2
+      rm -f release_notes.txt
+      exit 1
+    fi
     sed -i.bak "s/^## Unreleased$/## v${VERSION}/" CHANGELOG.md && rm CHANGELOG.md.bak
   fi
 else

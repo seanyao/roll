@@ -21,13 +21,16 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           # Prefer release_notes.txt committed by release.sh (Section 7 grouped format).
           # Fall back to awk-extracting the raw CHANGELOG.md section if not present.
+          NOTES_FALLBACK=0
           if [ ! -s release_notes.txt ]; then
             awk "/^## ${TAG}/{found=1; next} found && /^## /{exit} found && NF{print}" \
               CHANGELOG.md > release_notes.txt || true
           fi
           if [ ! -s release_notes.txt ]; then
             echo "Release ${TAG}" > release_notes.txt
+            NOTES_FALLBACK=1
           fi
+          echo "fallback=${NOTES_FALLBACK}" >> "$GITHUB_OUTPUT"
 
       - name: Create or merge same-day GitHub Release
         env:
@@ -45,6 +48,14 @@ jobs:
           NEW_NOTES=$(cat release_notes.txt)
           MERGED=$(mktemp)
           printf '## %s\n\n%s\n' "$TAG" "$NEW_NOTES" > "$MERGED"
+
+          # Skip same-day merge if our notes are just the "Release ${TAG}" fallback.
+          # Merging an empty/fallback body with prior releases produces the snowball
+          # effect where each new release accumulates every earlier same-day body.
+          if [ "${{ steps.notes.outputs.fallback }}" = "1" ]; then
+            EXISTING=""
+            echo "⚠️  release_notes.txt is fallback-only; skipping same-day merge to avoid body snowball." >&2
+          fi
 
           if [ -n "$EXISTING" ]; then
             # Pick the latest same-day release (highest N) as the source of prior notes.

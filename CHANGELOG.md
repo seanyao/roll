@@ -1,5 +1,19 @@
 # Changelog
 
+## v2026.517.9
+
+### Improved
+
+- **`roll-loop` 环境变量文档化** — `ROLL_LOOP_FORCE` / `ROLL_LOOP_NO_HEAL` / `ROLL_LOOP_HEAL_MAX` / `ROLL_LOOP_PR_MERGE_TIMEOUT` 四个配置项补入中英双语 configuration 指南，并加 bats 测试守护 `[loop]`
+
+## v2026.517.8
+
+> 空版本：发版脚本 AI 调用失败 fallback 未拦截，导致无实际内容的 tag 被推出。缺陷已在 v2026.517.9 之后修复（release.sh 和 release.yml 双重校验）。
+
+## v2026.517.7
+
+> 空版本：原因同 v2026.517.8。
+
 ## v2026.517.6
 
 ### Fixed

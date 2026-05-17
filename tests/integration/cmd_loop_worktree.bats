@@ -19,7 +19,6 @@ setup() {
   # Override roll's shared dirs so they land inside TEST_TMP, not real ~/.shared
   export HOME="$TEST_TMP"
   _SHARED_ROOT="${TEST_TMP}/.shared/roll"
-  _LOOP_ALERT="${_SHARED_ROOT}/loop/ALERT.md"
   mkdir -p "${_SHARED_ROOT}/loop" "${_SHARED_ROOT}/worktrees"
 
   # Source bin/roll to get _write_loop_runner_script + _worktree_path
@@ -28,7 +27,6 @@ setup() {
   source "$ROLL_BIN"
   # Re-apply shared dir overrides AFTER source (which sets them from HOME at source time)
   _SHARED_ROOT="${TEST_TMP}/.shared/roll"
-  _LOOP_ALERT="${_SHARED_ROOT}/loop/ALERT.md"
 
   # Build a tiny git fixture
   cd "$TEST_TMP"
@@ -45,6 +43,9 @@ setup() {
   git push -q -u origin main
 
   _project="${TEST_TMP}/project"
+  # FIX-052: _LOOP_ALERT is per-project — derive it from the project's slug
+  # so it matches the path the runner's _alert_file writes to.
+  _LOOP_ALERT="${_SHARED_ROOT}/loop/ALERT-$(_project_slug "$_project").md"
 }
 
 teardown() {

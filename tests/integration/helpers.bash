@@ -46,3 +46,19 @@ integration_teardown() {
 run_roll() {
   ROLL_HOME="${ROLL_HOME}" HOME="${TEST_TMP}" run bash -c "cd \"${TEST_TMP}\" && bash \"$ROLL_BIN\" \"\$@\"" -- "$@"
 }
+
+# FIX-052: returns the per-project loop state path bin/roll would use given
+# the test's TEST_TMP cwd (or an explicit project path argument).
+# Usage: roll_loop_path <alert|state|mute|cron> [project_path]
+# Mirrors bin/roll's _project_slug + per-project file naming so integration
+# tests don't need to duplicate the slug algorithm.
+roll_loop_path() {
+  local kind="$1" proj="${2:-$TEST_TMP}"
+  bash -c "cd \"$proj\" 2>/dev/null && HOME=\"$TEST_TMP\" source \"$ROLL_BIN\" && \
+    case \"$kind\" in \
+      alert) printf '%s\\n' \"\$_LOOP_ALERT\" ;; \
+      state) printf '%s\\n' \"\$_LOOP_STATE\" ;; \
+      mute)  printf '%s\\n' \"\$_LOOP_MUTE_FILE\" ;; \
+      cron)  printf '%s/loop/cron-%s.log\\n' \"\$_SHARED_ROOT\" \"\$_LOOP_PROJ_SLUG\" ;; \
+    esac" 2>/dev/null
+}

@@ -9,9 +9,10 @@ setup()    { integration_setup; }
 teardown() { integration_teardown; }
 
 _make_alert_file() {
-  local alert_dir="${TEST_TMP}/.shared/roll/loop"
-  mkdir -p "$alert_dir"
-  cat > "${alert_dir}/ALERT.md" << 'EOF'
+  # FIX-052: per-project ALERT path (was global ALERT.md before the namespace fix).
+  local alert_path; alert_path=$(roll_loop_path alert)
+  mkdir -p "$(dirname "$alert_path")"
+  cat > "$alert_path" << 'EOF'
 # ALERT — CI gate failed
 
 **Time**: 2026-05-12 10:00
@@ -37,12 +38,12 @@ EOF
   _make_alert_file
   run_roll alert ack
   [ "$status" -eq 0 ]
-  grep -q "Acknowledged" "${TEST_TMP}/.shared/roll/loop/ALERT.md"
+  grep -q "Acknowledged" "$(roll_loop_path alert)"
 }
 
 @test "roll alert resolve: removes alert file" {
   _make_alert_file
   run_roll alert resolve
   [ "$status" -eq 0 ]
-  [ ! -f "${TEST_TMP}/.shared/roll/loop/ALERT.md" ]
+  [ ! -f "$(roll_loop_path alert)" ]
 }

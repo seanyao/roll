@@ -2199,6 +2199,15 @@ trap 'kill "\${_HEARTBEAT_PID}" 2>/dev/null; rm -f "\$INNER_LOCK" "\$HEARTBEAT_F
 source "${roll_bin}"
 set +e
 
+# FIX-052: bin/roll initializes loop state paths from cwd at source time, but
+# the inner script may be launched from anywhere. Override to this project's
+# slug (baked at template generation) so helpers like _worktree_alert write
+# to the correct project's ALERT-<slug>.md / state-<slug>.yaml / mute-<slug>.
+_LOOP_PROJ_SLUG="${slug}"
+_LOOP_ALERT="\${_SHARED_ROOT}/loop/ALERT-${slug}.md"
+_LOOP_STATE="\${_SHARED_ROOT}/loop/state-${slug}.yaml"
+_LOOP_MUTE_FILE="\${_SHARED_ROOT}/loop/mute-${slug}"
+
 # Pre-claude: try to create a per-cycle isolated worktree on origin/main.
 # On any failure (no remote, no main, etc.) fall back to running in the
 # project's main tree (degraded — no isolation, like pre-037 behavior).

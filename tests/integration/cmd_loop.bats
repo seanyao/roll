@@ -91,7 +91,8 @@ teardown() {
 # ─── loop mute / unmute (US-AUTO-026 golden path E2E) ────────────────────────
 
 @test "loop mute → unmute round-trip: file appears then disappears" {
-  local mute_file="${TEST_TMP}/.shared/roll/mute"
+  # FIX-052: per-project mute path (was global ${HOME}/.shared/roll/mute).
+  local mute_file; mute_file=$(roll_loop_path mute)
 
   [ ! -f "$mute_file" ]
 
@@ -130,6 +131,7 @@ teardown() {
   [ -f "$runner" ]
 
   grep -qF 'osascript' "$runner"
-  grep -qF '.shared/roll/mute' "$runner"
+  # FIX-052: mute is per-project (.shared/roll/loop/mute-<slug>).
+  grep -qE '\.shared/roll/loop/mute-' "$runner"
   grep -qF 'tmux attach' "$runner"
 }

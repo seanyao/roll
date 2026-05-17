@@ -105,8 +105,9 @@ teardown() { unit_teardown_cd; }
 @test "_write_loop_runner_script: runner skips osascript when mute file exists" {
   local script="${_tmp}/run-test.sh"
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
-  # The runner checks for the mute marker before firing osascript
-  grep -qF '.shared/roll/mute' "$script"
+  # The runner checks for the mute marker before firing osascript.
+  # FIX-052: mute is per-project (.shared/roll/loop/mute-<slug>).
+  grep -qE '\.shared/roll/loop/mute-' "$script"
 }
 
 @test "_write_loop_runner_script: osascript is fired in background (no blocking)" {

@@ -47,6 +47,16 @@ teardown() {
   grep -qF 'ROLL_LOOP_NO_POPUP' "$script_path"
 }
 
+@test "_write_loop_runner_script: popup branch is guarded by BATS_TEST_NUMBER" {
+  # Reason: when the loop's executor agent runs bats unit tests that exercise
+  # _loop_test / _write_loop_runner_script and then *execute* the generated
+  # script, the popup branch would spawn a real Ghostty/Terminal window per
+  # test case — observed as 80+ orphan terminal windows after one cycle.
+  local script_path="${_test_dir}/run-test-abc123.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 18
+  grep -qF 'BATS_TEST_NUMBER' "$script_path"
+}
+
 @test "_write_loop_runner_script: traps EXIT to remove LOCK" {
   local script_path="${_test_dir}/run-test-abc123.sh"
   _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 18

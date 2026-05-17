@@ -286,6 +286,7 @@
 | [US-LOOP-001](docs/features/cycle-event-stream.md#us-loop-001) | 看 loop 干活像看 CI pipeline — 每轮自动周期的故事选取、跨 agent 评审、micro-commit 提交、CI 检查、PR 合并都是带颜色的事件流，attach 和 monitor 直接渲染 | ✅ Done |
 | [US-LOOP-002](docs/features/cycle-event-stream.md#us-loop-002) | loop tmux 输出体现方法论掌控力 — 压制噪音，用真实数据突出 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate，每个检查点有证据不是口说 | ✅ Done |
 | [US-LOOP-003](docs/features/cycle-event-stream.md#us-loop-003) | loop 等待期间显示 spinner 动画，story 执行、CI 运行、PR 合并三个等待点都有反馈，不再看起来像卡住 | ✅ Done |
+| [US-LOOP-004](docs/features/cycle-event-stream.md#us-loop-004) | loop 每轮跑完把成本、token、耗时、模型名写进永久事件流，dashboard 看历史不再只有最新一轮，多机器 / 多项目对账可加总 | 📋 Todo |
 
 ## Epic: CLI 视觉系统
 ### Feature: cli-redesign
@@ -300,6 +301,7 @@
 | [US-VIEW-007](docs/features/cli-redesign.md#us-view-007) | `roll setup` 把首装 / 重同步流程从滚屏日志改成 6 步编号进度，drift 的客户端就地给一键修复命令 | 📋 Todo |
 | [US-VIEW-008](docs/features/cli-redesign.md#us-view-008) | `roll init` 把项目初始化做成 6 步编号流程，新建文件用绿色 `+`、合并已有文件用琥珀 `~`，结尾给三步上手指南 | 📋 Todo |
 | [US-VIEW-009](docs/features/cli-redesign.md#us-view-009) | `roll peer` 把跨 Agent 对审日志渲染成回合制 transcript — 每轮谁提出 concern / nit / ack / block 一目了然，最后给绿色 verdict | 📋 Todo |
+| [US-VIEW-010](docs/features/cli-redesign.md#us-view-010) | dashboard 上每轮 cycle 的成本按模型公开单价 × 实际 token 用量算出来，不再受订阅折扣干扰，多项目 / 多账号可以横向对比和加总 | 📋 Todo |
 
 ## Epic: Marketing & Site
 ### Feature: landing-page
@@ -332,8 +334,8 @@
 | IDEA-022 | `roll update` 末尾两段「可选启用 AI 双闸门 / 秒级 PR 评审」每次都重复打，已经装过的人被反复刷屏 — 需要先讨论方案：探测仓库已启用就不打 / 用户看过一次记标记不再打 / 整段挪到 `roll doctor` 让用户主动看，三选一 | ✅ Done → US-PR-004 |
 | IDEA-023 | 想一眼看到 loop 健康度 — 今天 / 最近几天跑了几轮、解决了哪几个待办、累计花了多久和多少 token、有没有失败的 — 现在 `roll loop runs` 是按时间倒序的扁平列表，看不到按天总账，也没有 token 与成本数字；`tmp-*` 测试项目还把真项目淹没；需要按天聚合、过滤测试副产物、附耗时和成本，最近 3 天显示足够 | ✅ Done → US-VIEW-001 |
 | IDEA-024 | 上游 AI CLI 升级影响 Roll 承载层的早期预警 — 出了产品 BACKLOG 范围，归入 roll-meta 私有 repo（Roll 自身关心、roll-using 项目无关） | ✅ Done → roll-meta/US-WATCH-001/002/003 |
-| IDEA-025 | dashboard cost 列现在用的是 claude 上报的 `total_cost_usd`（含订阅折扣，不反映 list price）— 想看真实成本需要把每轮 cycle 的 input/output tokens 打到 events.ndjson，按当前模型 list 单价 × token 量重算，不算优惠、价格用美金 | 📋 Todo |
-| IDEA-026 | 同一项目在不同机器上跑 loop 时记录会各自存各自的、互相看不见 — 把每轮 cycle 的 events/cron/state 推到云端集中存（按 git remote 而不是本地路径定项目身份），所有机器读同一份，跨机器跑也能在 dashboard 里看到合并后的全貌 | 📋 Todo |
-| IDEA-027 | cycle cost 每轮都从历史里消失 — `cron-<slug>.log` 是单 cycle 临时日志、每轮覆写，dashboard 看历史时除了最新一轮其他全是 `—`；让 inner runner 在结束时把 `total_cost_usd`（claude 上报）也写到 `events-<slug>.ndjson` 的 `cycle_end` 事件 detail 里，dashboard 直接读事件流，cron.log 只剩 tmux 实时显示职责 | 📋 Todo |
-| IDEA-028 | events.ndjson 在某些路径上漏发 `pr` / `cycle_end` 事件，导致 dashboard 把已经合入主干的 cycle 误判为 "running"（这次靠 git log 兜回来）— 审计 inner / outer runner 所有出口（成功合入、orphan 恢复、超时 bail、crash 自愈、PR 失败 fallback），保证每条路径都发对应的终结事件，把 reader 侧的 git log salvage 退化为兜底 | 📋 Todo |
-| IDEA-029 | `runs.jsonl` 的 `project` 字段在 worktree 里跑 cycle 时被写成 `{slug}-cycle-XXX` 甚至裸 `Roll`，导致 dashboard 按 slug 过滤会漏掉历史记录（这次靠宽松匹配兜回来）— 写入前先 resolve 到主项目 slug（与 events 路径一致），消除多机匹配脏数据 | 📋 Todo |
+| IDEA-025 | loop dashboard 上看到的每轮成本是 AI 客户端上报的折后价（含订阅 / 抵扣，不反映真实开销）— 改成按当前模型公开单价 × 实际用量自己算一遍，让每个项目的成本可对齐、可加总、按美金计价 | 📋 Todo → US-VIEW-010 |
+| IDEA-026 | 同一项目在不同机器上跑 loop 时记录各存各的、互相看不见 — 把每轮 cycle 数据推到云端按项目集中存，按代码仓库身份认项目（而不是本地目录），所有机器看同一份合并后的进度 | 📋 Todo |
+| IDEA-027 | loop dashboard 现在只能看到最新一轮的成本和耗时，再往前的历史都丢了 — 因为这些数字写在一份每轮被新数据覆盖的临时日志里；改成结束时把成本 / 耗时写进永久事件流，历史也能完整看到，顺带打开按天、按故事汇总成本的可能 | 📋 Todo → US-LOOP-004 |
+| IDEA-028 | loop 跑完一轮在某些情况下不会写下"结束"标记，dashboard 看到这些轮就以为还在跑，其实早就合到主干了 — 审计 loop 的所有结束路径（合并成功、孤儿恢复、超时退出、崩溃自愈、PR 失败兜底）每条都补上结束记录，dashboard 不再需要去 git 历史里反查 | 📋 Todo |
+| IDEA-029 | loop 在隔离工作目录里跑出来的运行记录被错认成另一个项目身份，dashboard 按项目筛选时会漏掉这部分历史 — 写入时统一回主项目身份，让一个项目的记录不被切碎 | 📋 Todo |

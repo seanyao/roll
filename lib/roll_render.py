@@ -153,7 +153,7 @@ def metric(name: str, t: int, y: int, d2: int, kind: str, *,
     print("  " +
           c("dim", pad(name, 14)) +
           c("fg", pad(str(t), 6, "r"), bold=True) + "  " +
-          c(delta_c, pad(delta_text, 10), bold=(delta_c != "muted")) +
+          c(delta_c, pad(delta_text, 12), bold=(delta_c != "muted")) +
           c(yest_color, pad(yest_str, 10), bold=bool(yest_suffix)) +
           c("muted", pad(str(d2), 8)))
 
@@ -165,7 +165,7 @@ def metric_dur(name: str, t: int, y: int, d2: int) -> None:
     print("  " +
           c("dim", pad(name, 14)) +
           c("fg", pad(fmt_dur(t), 6, "r"), bold=True) + "  " +
-          c(delta_c, pad(delta_text, 10), bold=(delta_c != "muted")) +
+          c(delta_c, pad(delta_text, 12), bold=(delta_c != "muted")) +
           c("dim", pad(fmt_dur(y), 10)) +
           c("muted", pad(fmt_dur(d2), 8)))
 
@@ -173,17 +173,30 @@ def metric_dollar(name: str, t: float, y: float, d2: float) -> None:
     delta_text, delta_c = fmt_delta(t, y, kind="up_bad", unit="$")
     print("  " +
           c("dim", pad(name, 14)) +
-          c("fg", pad(f"${t:.2f}", 6, "r"), bold=True) + "  " +
-          c(delta_c, pad(delta_text, 10), bold=(delta_c != "muted")) +
+          c("fg", pad(f"${t:.2f}", 8, "r"), bold=True) + "  " +
+          c(delta_c, pad(delta_text, 12), bold=(delta_c != "muted")) +
           c("dim", pad(f"${y:.2f}", 10)) +
           c("muted", pad(f"${d2:.2f}", 8)))
 
 def metric_tokens(name: str, t: int, y: int, d2: int) -> None:
-    delta_text, delta_c = fmt_delta(float(t), float(y), kind="up_bad")
+    # Compose the delta string with token-unit scaling so a 200M increase
+    # doesn't print '+200000000'.
+    if y == 0 and t == 0:
+        delta_text, delta_c = "—", "muted"
+    elif y == 0:
+        delta_text, delta_c = "▲ new", "amber"
+    elif t == y:
+        delta_text, delta_c = "=", "muted"
+    else:
+        diff = t - y
+        arrow = "▲" if diff > 0 else "▼"
+        sign = "+" if diff > 0 else "−"
+        delta_text = f"{arrow} {sign}{fmt_tokens(abs(diff))}"
+        delta_c = "red" if diff > 0 else "green"
     print("  " +
           c("dim", pad(name, 14)) +
           c("fg", pad(fmt_tokens(t), 6, "r"), bold=True) + "  " +
-          c(delta_c, pad(delta_text, 10), bold=(delta_c != "muted")) +
+          c(delta_c, pad(delta_text, 12), bold=(delta_c != "muted")) +
           c("dim", pad(fmt_tokens(y), 10)) +
           c("muted", pad(fmt_tokens(d2), 8)))
 
@@ -227,7 +240,14 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     dur_s = cy.get("duration_s") or cr.get("duration_s") or 0
     dur = fmt_dur(dur_s) if dur_s else "—"
     tok = fmt_tokens(cy.get("tokens") or 0)
-    cost = f"${cr.get('cost', 0):.2f}" if cr else "—"
+    # cost prefers the backfilled list-price; falls back to cron.log when
+    # the claude session log isn't available (only the latest cycle).
+    if cy.get("cost_list") is not None:
+        cost = f"${cy['cost_list']:.2f}"
+    elif cr:
+        cost = f"${cr.get('cost', 0):.2f}"
+    else:
+        cost = "—"
     sid = cy.get("story") or "—"
     built = cy.get("built") or ([sid] if sid != "—" else [])
     # Join multiple stories with " | ". Drop empties and dedupe in order.
@@ -245,8 +265,8 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
         c("muted", pad(dur, 4, "r")) + "  " +
-        c("muted", pad(tok, 5, "r")) + "  " +
-        c("muted", pad(cost, 6, "r")) + "   " +
+        c("muted", pad(tok, 6, "r")) + "  " +
+        c("muted", pad(cost, 7, "r")) + "   " +
         c(sid_c, ids_str, bold=True)
     )
     if outcome == "fail" and cy.get("fail_detail"):

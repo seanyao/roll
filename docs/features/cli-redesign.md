@@ -275,3 +275,35 @@
 
 **Dependencies:**
 - Depends on: US-VIEW-001
+
+---
+
+<a id="us-view-010"></a>
+## US-VIEW-010 dashboard 用模型公开单价算成本 📋
+
+**Created**: 2026-05-18
+**Plan**: [loop-cost-telemetry-plan.md](loop-cost-telemetry-plan.md)
+
+- As a Roll user
+- I want dashboard 上每轮 cycle 的成本是按模型公开单价 × 实际 token 用量算出来的真实开销
+- So that 不同项目、不同账号之间可以横向对比、加总，不受订阅 / 抵扣干扰
+
+**Domain Model:**
+- Context: View Rendering
+- Cross-context: Cycle Event Stream（消费 cycle_end 含 token + model 的 detail）
+
+**AC:**
+- [ ] dashboard 优先读取 cycle_end 事件 detail 里的 model + tokens；找不到时显示 `—`
+- [ ] 新增模型单价表（input / output / cache_create / cache_read，per million tokens，USD）；未知模型 fallback 到 sonnet 单价并 warn
+- [ ] cost 列从此显示 list-price 计算结果，不再使用 AI 客户端上报的 total_cost_usd
+- [ ] token 列从此有真实数字（用 k/m/b 计量）
+- [ ] rollup（今日 / 昨日 / 前天）的 cost / tokens 都从事件流加总
+- [ ] 老数据（detail 是字符串）保持兼容：cost / tokens 显示 `—`，但不破坏其他列
+
+**Files:**
+- `lib/model_prices.py`（新建：单价表 + compute_list_cost）
+- `lib/roll-loop-status.py`（解析 cycle_end detail，调单价表）
+- `tests/unit/roll_render.bats`（新增单价表 + cost 计算回归）
+
+**Dependencies:**
+- Depends on: US-LOOP-004

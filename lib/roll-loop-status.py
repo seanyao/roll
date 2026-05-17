@@ -240,6 +240,92 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
             cy["outcome"] = "running" if not cy.get("end") else "unknown"
     return cycles
 
+def load_claude_session_usage(label: str, slug: str) -> Optional[Dict[str, Any]]:
+    """Backfill from claude's own session log when events stream lacks
+    token / cost data. Each cycle runs in a worktree whose path Claude maps
+    to ~/.claude/projects/-<escaped-worktree-path>/<uuid>.jsonl. Sum tokens
+    across all assistant turns; pick model from any; pull total_cost_usd
+    from the trailing result event.
+
+    Returns {model, input_tokens, output_tokens, cache_creation_tokens,
+             cache_read_tokens, cost_reported_usd, duration_ms} or None."""
+    # Worktree path: /Users/seanyao/.shared/roll/worktrees/<slug>-cycle-<label>/
+    # Claude project dir mirrors that path with '/' → '-' + leading '-'.
+    worktree_path = f"/Users/{os.environ.get('USER', 'seanyao')}/.shared/roll/worktrees/{slug}-cycle-{label}"
+    # Claude escapes both '/' and '.' to '-' in the project dir name.
+    proj_name = "-" + worktree_path.replace("/", "-").replace(".", "-").lstrip("-")
+    proj_dir = Path.home() / ".claude" / "projects" / proj_name
+    if not proj_dir.exists():
+        return None
+    # Take the largest .jsonl in that dir (one cycle = one session).
+    jsonls = sorted(proj_dir.glob("*.jsonl"), key=lambda p: p.stat().st_size, reverse=True)
+    if not jsonls:
+        return None
+    path = jsonls[0]
+
+    sums = {"input_tokens": 0, "output_tokens": 0,
+            "cache_creation_tokens": 0, "cache_read_tokens": 0}
+    model = None
+    cost = None
+    duration_ms = None
+    with path.open(errors="ignore") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except Exception:
+                continue
+            # result event has total_cost_usd + duration_ms
+            if e.get("type") == "result":
+                cost = e.get("total_cost_usd") or cost
+                duration_ms = e.get("duration_ms") or duration_ms
+                continue
+            # assistant turns carry per-message usage
+            msg = e.get("message") or {}
+            usage = msg.get("usage") or {}
+            if not usage:
+                continue
+            if msg.get("model") and not model:
+                model = msg["model"]
+            sums["input_tokens"]          += int(usage.get("input_tokens") or 0)
+            sums["output_tokens"]         += int(usage.get("output_tokens") or 0)
+            sums["cache_creation_tokens"] += int(usage.get("cache_creation_input_tokens") or 0)
+            sums["cache_read_tokens"]     += int(usage.get("cache_read_input_tokens") or 0)
+    if sums["input_tokens"] == 0 and sums["output_tokens"] == 0:
+        return None
+    return {"model": model, **sums,
+            "cost_reported_usd": cost, "duration_ms": duration_ms}
+
+def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str) -> None:
+    """For each cycle missing token data, try to recover from claude's own
+    session log. Populates cy['tokens'], cy['cost_list'], cy['model']."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("model_prices",
+                                                   os.path.join(_LIB_DIR, "model_prices.py"))
+    mp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mp)
+    for cy in cycles:
+        if cy.get("tokens"):  # already populated by future events writer
+            continue
+        u = load_claude_session_usage(cy.get("label", ""), slug)
+        if not u:
+            continue
+        cy["tokens"] = mp.total_tokens(
+            input_tokens=u["input_tokens"],
+            output_tokens=u["output_tokens"],
+            cache_creation_tokens=u["cache_creation_tokens"],
+            cache_read_tokens=u["cache_read_tokens"],
+        )
+        cy["model"] = u["model"]
+        cy["cost_list"] = mp.compute_list_cost(
+            u["model"],
+            input_tokens=u["input_tokens"],
+            output_tokens=u["output_tokens"],
+            cache_creation_tokens=u["cache_creation_tokens"],
+            cache_read_tokens=u["cache_read_tokens"],
+        )
+        if u.get("duration_ms") and not cy.get("duration_s"):
+            cy["duration_s"] = int(u["duration_ms"] / 1000)
+
 def load_pr_merges_from_git(days: int) -> Dict[str, Dict[str, Any]]:
     """Repair fallback: when events.ndjson dropped the pr / cycle_end events
     for a cycle (events writer regressions), git log still has the merge
@@ -403,25 +489,27 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
             r["tokens"] += cy["tokens"]
         if cy.get("pr") and cy["pr"].startswith("http"):
             r["prs"] += 1
-        cr = cy.get("cron")
-        if cr:
-            # cron.log only ever covers the most recent cycle (it's
-            # overwritten per run), so cost is best-effort historical
-            # coverage. Duration already came from event timestamps above.
-            r["cost"] += cr["cost"]
+        if cy.get("cost_list") is not None:
+            r["cost"] += cy["cost_list"]
+        elif cy.get("cron"):
+            # No claude session backfill available — fall back to whatever
+            # cron.log carries (best-effort, only the latest cycle).
+            r["cost"] += cy["cron"]["cost"]
     return r
 
 # ════════════════════════════════════════════════════════════════════════════
 # Render
 # ════════════════════════════════════════════════════════════════════════════
 def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
-           runs=None, git_merges=None):
+           runs=None, git_merges=None, claude_slug=None):
     now = now or datetime.now(timezone.utc).astimezone()
     cycles = aggregate(events, cron)
     if runs:
         merge_runs_into_cycles(cycles, runs)
     if git_merges:
         repair_orphan_cycles_from_git(cycles, git_merges)
+    if claude_slug:
+        backfill_usage_from_claude_sessions(cycles, claude_slug)
     by_day = bucket_by_day(cycles)
     days_keys = sorted(by_day.keys(), reverse=True)[:days]
 
@@ -652,7 +740,8 @@ def main(argv=None):
         git_merges = load_pr_merges_from_git(args.days)
 
     render(events, cron, state, backlog, days=args.days, lang=lang,
-           runs=runs, git_merges=git_merges)
+           runs=runs, git_merges=git_merges,
+           claude_slug=None if args.demo else slug)
 
 if __name__ == "__main__":
     try:

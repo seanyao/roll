@@ -107,3 +107,34 @@
 
 **Dependencies:**
 - Depends on: US-LOOP-002（loop-fmt.py 基础架构）
+
+---
+
+<a id="us-loop-004"></a>
+## US-LOOP-004 把每轮 cycle 的成本、token、耗时写进事件流 📋
+
+**Created**: 2026-05-18
+**Plan**: [loop-cost-telemetry-plan.md](loop-cost-telemetry-plan.md)
+
+- As a Roll user / dashboard reader
+- I want 每轮 cycle 的真实成本数字（token / 上报成本 / 耗时 / 模型名）能永久保留
+- So that dashboard 看历史不再 `—`，多机器 / 多项目对账可加总
+
+**Domain Model:**
+- Context: Cycle Event Stream
+- Aggregate: Cycle Event (Root) gets enriched detail payload on cycle_end
+- Cross-context: View Rendering 消费
+
+**AC:**
+- [ ] cycle 结束时 cycle_end 事件的 detail 段含 model / tokens (input/output/cache_creation/cache_read) / cost_reported_usd / duration_ms
+- [ ] 新数据用 JSON detail；老数据（字符串 detail）保持可解析，dashboard 不崩
+- [ ] cron.log 的"cycle done"行保留（tmux 显示需要），但不再是 dashboard 的成本来源
+- [ ] idle cycle（没跑 claude）不强求 token 字段，cost=0
+- [ ] 至少跑一轮真实 loop 验证：events.ndjson 新 cycle_end 携带完整 detail
+
+**Files:**
+- `lib/loop-fmt.py`（result 事件解析 + 写 sidecar）
+- `bin/roll`（生成 inner runner 时把 sidecar 拼进 cycle_end 事件）
+
+**Dependencies:**
+- Depended on by: US-VIEW-010

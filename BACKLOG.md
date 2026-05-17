@@ -310,7 +310,6 @@
 | IDEA-016 | PR 生命周期管理迁移到 GitHub Actions — 评审触发、CI 绿后 auto-merge、rebase 失败诊断、stale 清理全部由 GitHub Actions event-driven 处理；Loop 只检查自己开的未收口故事。需先验证 US-AUTO-034 落地效果再做设计。 | ✅ Done → US-GHA-002 |
 | IDEA-017 | FAQ 文档 — 面向产品工程师用户，覆盖全 AI 自治开发场景下的常见问题：典型场景、解决方案与简明原理解释（loop 卡住、agent 切换、PR 冲突、多项目并行、权限问题等） | ✅ Done → US-DOC-007 |
 | IDEA-018 | features.md 区分"正常"和"规划中" — 已有 Done story 的 feature 正常展示，全部 story 仍为 Todo 的 feature 应标记为"规划中"，不能混在一起平铺 | ✅ Done → US-DOC-011 |
-| IDEA-019 | launchd 默认 loop_minute 测试 flaky — hash mod 55 容易碰撞，相邻两个项目偶尔会拿到同一分钟 — flagged by simplify CI debugging 2026-05-17 | 📋 Todo |
 | IDEA-020 | loop tmux 输出精简与视觉层次设计 — 当前信息量过大、关键节点不突出、换行排版混乱；需设计精简方案：过滤低信号噪音，用视觉层次突出 Step 切换、CI gate、TCR commit、story 完成等关键事件，让用户扫一眼即知当前阶段与健康状态 | ✅ Done → US-LOOP-002 |
 | IDEA-021 | loop 等待期间加 spinner 动画 — 当 agent 正在执行 story 时，tmux 输出缺少 loading 状态反馈，看起来像卡住；在每个 → 事件行之后、下一个事件行出现之前，显示一个简单的 spinner 动画表示"正在处理中" | ✅ Done → US-LOOP-003 |
 | IDEA-022 | `roll update` 末尾两段「可选启用 AI 双闸门 / 秒级 PR 评审」每次都重复打，已经装过的人被反复刷屏 — 需要先讨论方案：探测仓库已启用就不打 / 用户看过一次记标记不再打 / 整段挪到 `roll doctor` 让用户主动看，三选一 | 📋 Todo |

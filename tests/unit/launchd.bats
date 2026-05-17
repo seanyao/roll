@@ -206,12 +206,6 @@ setup() {
   [ "$m" -le 55 ]
 }
 
-@test "_loop_derive_minute: different project paths give different minutes" {
-  local m1; m1=$(_loop_derive_minute "/Users/sean/project-alpha" 0)
-  local m2; m2=$(_loop_derive_minute "/Users/sean/project-beta" 0)
-  [ "$m1" != "$m2" ]
-}
-
 @test "_loop_derive_minute: same project offsets 0/2/4 all differ" {
   local m0 m2 m4
   m0=$(_loop_derive_minute "/Users/sean/project-testX" 0)

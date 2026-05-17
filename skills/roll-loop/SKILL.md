@@ -146,6 +146,19 @@ Priority: FIX-XXX first (bugs block progress), then US-XXX, then REFACTOR-XXX.
 - An earlier loop iteration that hasn't finished yet (rare; should be guarded by LOCK)
 - A previous interrupted run (the resume logic in Step 1 will pick these up)
 
+**In-flight PR gate** (FIX-048). Before picking, also exclude stories already
+claimed by an **open `loop/*` PR**. Each cycle's worktree is branched from
+`origin/main`, so a story another cycle has marked 🔨 In Progress is invisible
+locally until that cycle's PR merges. Without this gate, two cycles started
+back-to-back will both pick the same Todo row and produce duplicate PRs.
+
+```bash
+bash -c 'source "$(command -v roll)"; _loop_pr_claimed_stories'
+#   stdout: one story ID per line (deduped) — these are claimed by open
+#           loop/* PRs on the remote. SKIP any candidate whose ID appears.
+#   exit 0 always (lenient: gh missing / API error → empty output).
+```
+
 **Dependency gate** (FIX-032). For each `📋 Todo` candidate, before picking:
 
 ```bash

@@ -43,8 +43,8 @@ if _LIB_DIR not in sys.path:
 import roll_render
 from roll_render import (
     PAL, BOLD, RESET, COLS, c, strw, pad, row,
-    fmt_dur, fmt_delta, trunc, empty_rollup,
-    section_head, metric, metric_dur, metric_dollar,
+    fmt_dur, fmt_delta, fmt_tokens, trunc, empty_rollup,
+    section_head, metric, metric_dur, metric_dollar, metric_tokens,
     day_band, cycle_row,
 )
 
@@ -399,6 +399,8 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
             r["failed"] += 1
         if cy.get("duration_s"):
             r["duration_s"] += cy["duration_s"]
+        if cy.get("tokens"):
+            r["tokens"] += cy["tokens"]
         if cy.get("pr") and cy["pr"].startswith("http"):
             r["prs"] += 1
         cr = cy.get("cron")
@@ -519,6 +521,7 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
            yest_color="amber" if yest["failed"] > 0 else "dim",
            yest_suffix="⚠" if yest["failed"] > 0 else "")
     metric_dur("duration", today["duration_s"], yest["duration_s"], d2["duration_s"])
+    metric_tokens("tokens", today["tokens"], yest["tokens"], d2["tokens"])
     metric_dollar("cost", today["cost"], yest["cost"], d2["cost"])
 
     print()
@@ -527,7 +530,7 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
 
     # ── Recent cycles ───────────────────────────────────────────────────────
     section_head("RECENT", f"最近 {len(cycles)} 个 cycle",
-                 "t · time   Δ · duration   $ · cost   id · backlog")
+                 "t · time   Δ · duration   tok · tokens   $ · cost   id · backlog")
     print()
 
     if not cycles:

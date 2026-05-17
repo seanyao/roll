@@ -88,6 +88,18 @@ def fmt_dur(s: int) -> str:
         return f"{s // 60}m"
     return f"{s // 3600}h {(s % 3600) // 60}m"
 
+def fmt_tokens(n: int) -> str:
+    """Format a token count with k / m / b unit scaling, 1 decimal place."""
+    if not n:
+        return "—"
+    if n < 1_000:
+        return str(int(n))
+    if n < 1_000_000:
+        return f"{n / 1_000:.1f}k".replace(".0k", "k")
+    if n < 1_000_000_000:
+        return f"{n / 1_000_000:.1f}m".replace(".0m", "m")
+    return f"{n / 1_000_000_000:.1f}b".replace(".0b", "b")
+
 def fmt_delta(today: float, yest: float, *, kind: str, unit: str = "") -> Tuple[str, str]:
     """Return (delta_string, semantic_color). kind ∈ {'up_good','up_bad','any'}.
     `unit`: '' → plain int, '$' → currency, 'm' → minutes (caller pre-converts)."""
@@ -166,6 +178,15 @@ def metric_dollar(name: str, t: float, y: float, d2: float) -> None:
           c("dim", pad(f"${y:.2f}", 10)) +
           c("muted", pad(f"${d2:.2f}", 8)))
 
+def metric_tokens(name: str, t: int, y: int, d2: int) -> None:
+    delta_text, delta_c = fmt_delta(float(t), float(y), kind="up_bad")
+    print("  " +
+          c("dim", pad(name, 14)) +
+          c("fg", pad(fmt_tokens(t), 6, "r"), bold=True) + "  " +
+          c(delta_c, pad(delta_text, 10), bold=(delta_c != "muted")) +
+          c("dim", pad(fmt_tokens(y), 10)) +
+          c("muted", pad(fmt_tokens(d2), 8)))
+
 def day_band(day_key: str, n_total: int, n_failed: int, now: datetime) -> None:
     from datetime import timedelta
     today = now.strftime("%Y-%m-%d")
@@ -205,6 +226,7 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     # only the one that happens to be in the latest cron.log dump.
     dur_s = cy.get("duration_s") or cr.get("duration_s") or 0
     dur = fmt_dur(dur_s) if dur_s else "—"
+    tok = fmt_tokens(cy.get("tokens") or 0)
     cost = f"${cr.get('cost', 0):.2f}" if cr else "—"
     sid = cy.get("story") or "—"
     built = cy.get("built") or ([sid] if sid != "—" else [])
@@ -223,6 +245,7 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
         c("muted", pad(dur, 4, "r")) + "  " +
+        c("muted", pad(tok, 5, "r")) + "  " +
         c("muted", pad(cost, 6, "r")) + "   " +
         c(sid_c, ids_str, bold=True)
     )

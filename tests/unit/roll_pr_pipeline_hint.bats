@@ -59,3 +59,22 @@ teardown() { unit_teardown; }
   [ "$status" -eq 0 ]
   [[ "$output" != *"pr-review-event.yml"* ]]
 }
+
+@test "cmd_update path stays terse — no PR hints leaked through cmd_setup" {
+  # cmd_update calls cmd_setup. The historical bug (IDEA-022): both hints
+  # were reprinted on every `roll update`. US-PR-004 moves them to doctor.
+  _install_local() { :; }
+  _sync_conventions() { :; }
+  _sync_skills() { :; }
+  _peer_ensure_state_dir() { :; }
+  _ensure_tmux() { :; }
+  _install_launchd_plists() { :; }
+  npm() { return 0; }  # stub npm install / view
+  _check_installed_version_or_retry() { :; }
+  _show_changelog() { :; }
+
+  run cmd_update
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"required_pull_request_reviews"* ]]
+  [[ "$output" != *"pr-review-event.yml"* ]]
+}

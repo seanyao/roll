@@ -179,6 +179,12 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
         elif stage == "cycle_end":
             cy["end"] = e["_ts"]
             cy["outcome"] = e.get("outcome", "done")
+        elif stage == "idle":
+            # Bug B: cycles that find no Todo emit 'idle' instead of 'cycle_end'.
+            # Treat as terminal with a distinct outcome so they stop showing
+            # as 'still running' forever.
+            cy["end"] = e["_ts"]
+            cy["outcome"] = "idle"
         elif stage == "pr":
             cy["pr"] = detail
             sid = _extract_story_id(detail) or _extract_story_id(lbl)

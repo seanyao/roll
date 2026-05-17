@@ -25,71 +25,75 @@
 
 ## Features by Epic
 
-### CLI & Project Lifecycle
-- [CLI Simplification](docs/features/cli-simplification.md) — Three-step `roll init`, auto-detects project type, no more interactive type prompts
+### CLI Simplification
+- [cli-simplification](docs/features/cli-simplification.md) — Three-step `roll init`, auto-detects project type, no more interactive type prompts
   三步极简 `roll init`，按项目类型推断 convention，不再问类型
-- [npm Distribution](docs/features/npm-distribution.md) — npm package publish, `roll update`, and version nudge
-  npm 包发布、`roll update`、版本提示
-- [Hello World](docs/features/hello-world.md) — Shortest path to get a new user running
-  新用户最短上手路径
 
 ### Skill Ecosystem
-- [New Skills](docs/features/new-skills.md) — roll-idea / roll-notes / roll-.clarify / roll-doctor / roll-peer / roll-doc and other core skills
+- [new-skills](docs/features/new-skills.md) — roll-idea / roll-notes / roll-.clarify / roll-doctor / roll-peer / roll-doc and other core skills
   roll-idea / roll-notes / roll-.clarify / roll-doctor / roll-peer / roll-doc 等核心 skill 集
 
-### Multi-IDE & AI Tool Integration
-- [Trae Support](docs/features/trae-support.md) — Trae IDE detection and project_rules.md sync
+### Distribution
+- [npm-distribution](docs/features/npm-distribution.md) — npm package publish, `roll update`, and version nudge
+  npm 包发布、`roll update`、版本提示
+
+### IDE Integration
+- [trae-support](docs/features/trae-support.md) — Trae IDE detection and project_rules.md sync
   Trae IDE 检测 + project_rules.md 同步
-- [opencode Support](docs/features/opencode-support.md) — opencode detection and AGENTS.md sync
+- [opencode-support](docs/features/opencode-support.md) — opencode detection and AGENTS.md sync
   opencode 检测 + AGENTS.md 同步
 - ai-tools — DeepSeek TUI / Pi (pi-coding-agent) / Codex CLI support
   DeepSeek TUI / Pi / Codex CLI 接入支持
 
-### Autonomous Operation
-- [Autonomous Evolution](docs/features/autonomous-evolution.md) — roll-loop autonomous BACKLOG executor: scheduling, worktree isolation, auto PR merge, orphan recovery, heartbeat
-  roll-loop 自治 BACKLOG 执行器：调度、worktree 隔离、PR 自动合并、孤儿恢复、心跳
-- [PR Lifecycle](docs/features/pr-lifecycle.md) — Agent-agnostic PR review, loop PR inbox, optional sub-second webhook
-  agent-agnostic PR 评审、loop PR inbox、可选秒级 webhook
-- [Peer-tmux Cleanup](docs/features/peer-tmux-cleanup.md) — tmux session auto-cleanup after peer reaches terminal state
-  peer 终态后 tmux session 自动清理
-- [Cycle Event Stream](docs/features/cycle-event-stream.md) — runner / SKILL emit structured events; `roll loop attach/monitor` visualizes each cycle like a CI pipeline
-  runner / SKILL 发结构化事件，`roll loop attach/monitor` 像 CI pipeline 一样可视化每一轮
-
-### Quality & Diagnostics
-- [E2E Lifecycle](docs/features/e2e-lifecycle.md) — E2E deposit on Story completion, CI E2E gating, failure diagnosis
+### QA & Testing
+- [e2e-lifecycle](docs/features/e2e-lifecycle.md) — E2E deposit on Story completion, CI E2E gating, failure diagnosis
   Story 完成后 E2E Deposit，CI E2E gating，失败诊断
+
+### Diagnostics
 - [roll-debug](docs/features/roll-debug.md) — Black Box injection diagnostics and auto-fix
   BB 注入诊断 + auto-fix
-- [Agent Compliance](docs/features/agent-compliance.md) — proof-of-pass + pre-commit hook physically blocks untested commits
-  proof-of-pass + pre-commit hook 物理拦截未测试提交
 
-### Release & Changelog
-- [Release Script](docs/features/roll-release.md) — `scripts/release.sh` one-command release (human-triggered, npm 2FA through real terminal), auto version bump / VERSION write / CHANGELOG sync / release_notes / features.md
+### Release Management
+- [roll-release](docs/features/roll-release.md) — `scripts/release.sh` one-command release (human-triggered, npm 2FA through real terminal), auto version bump / VERSION write / CHANGELOG sync / release_notes / features.md
   `scripts/release.sh` 一键发版（人触发，npm 2FA 走真终端），自动算版本号 / 写 VERSION / 同步 CHANGELOG / release_notes / features.md
-- [Changelog Integration](docs/features/changelog-integration.md) — AI-generated changelog with style gating and self-review rewrite
-  AI 生成 changelog，风格守门，自审重写
-
-### Documentation
-- [Documentation](docs/features/documentation.md) — Bilingual layered docs (guide / domain / features), dream scans for coverage
-  双语分层文档（guide / domain / features），dream 巡检文档覆盖度
-
-### Web Presence
-- [Landing Page](docs/features/landing-page.md) — Above-the-fold animation tells the three-layer autonomous product story in under 6 seconds *(规划中)*
-  首屏动画 6 秒内讲清三层自治产品故事
 
 ### Engineering Infrastructure
 - skill-harness — Skill permission declarations, Identity convention, Co-Authored-By attribution, Scope Gate
   技能权限声明、Identity 约定、Co-Authored-By 归属、Scope Gate
-- [GitHub Actions](docs/features/github-actions.md) — Claude Bot workflow templates
+- [github-actions](docs/features/github-actions.md) — Claude Bot workflow templates
   Claude Bot 工作流模板
-- [Convention Management](docs/features/convention-management.md) — Goal-Driven Execution, Where to Look navigation, roll-doc fills AGENTS.md for legacy projects
+- [pr-lifecycle](docs/features/pr-lifecycle.md) — Agent-agnostic PR review, loop PR inbox, optional sub-second webhook
+  agent-agnostic PR 评审、loop PR inbox、可选秒级 webhook
+- [convention-management](docs/features/convention-management.md) — Goal-Driven Execution, Where to Look navigation, roll-doc fills AGENTS.md for legacy projects
   Goal-Driven Execution、Where to Look 导航、roll-doc 为存量项目补 AGENTS.md
+- [agent-compliance](docs/features/agent-compliance.md) — proof-of-pass + pre-commit hook physically blocks untested commits
+  proof-of-pass + pre-commit hook 物理拦截未测试提交
 
-### Observability
-- [Alert Lifecycle](docs/features/alert-lifecycle.md) — `roll alert` command, ALERT ack / resolve, linked to brief / status
+### Changelog
+- [changelog-integration](docs/features/changelog-integration.md) — AI-generated changelog with style gating and self-review rewrite
+  AI 生成 changelog，风格守门，自审重写
+
+### Autonomous Evolution
+- [autonomous-evolution](docs/features/autonomous-evolution.md) — roll-loop autonomous BACKLOG executor: scheduling, worktree isolation, auto PR merge, orphan recovery, heartbeat
+  roll-loop 自治 BACKLOG 执行器：调度、worktree 隔离、PR 自动合并、孤儿恢复、心跳
+
+### Documentation
+- [documentation](docs/features/documentation.md) — Bilingual layered docs (guide / domain / features), dream scans for coverage
+  双语分层文档（guide / domain / features），dream 巡检文档覆盖度
+
+### Backlog 生命周期管理
+- [alert-lifecycle](docs/features/alert-lifecycle.md) — `roll alert` command, ALERT ack / resolve, linked to brief / status
   `roll alert` 命令，ALERT ack / resolve，与 brief / status 联动
-- [Notifications](docs/features/notifications.md) — Autonomous loop observability with loop status push
+
+### 自主循环可观测性
+- [notifications](docs/features/notifications.md) — Autonomous loop observability with loop status push
   自主循环可观测性，loop 状态推送
+- [cycle-event-stream](docs/features/cycle-event-stream.md) — runner / SKILL emit structured events; `roll loop attach/monitor` visualizes each cycle like a CI pipeline
+  runner / SKILL 发结构化事件，`roll loop attach/monitor` 像 CI pipeline 一样可视化每一轮
+
+### Marketing & Site
+- [landing-page](docs/features/landing-page.md) — Above-the-fold animation tells the three-layer autonomous product story in under 6 seconds
+  首屏动画 6 秒内讲清三层自治产品故事
 
 ---
 

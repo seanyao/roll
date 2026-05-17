@@ -153,6 +153,13 @@ def _extract_story_id(ev_detail: str) -> Optional[str]:
     m = _STORY_ID_PAT.search(ev_detail)
     return m.group(1) if m else None
 
+def normalize_cycle_label(lbl: str) -> str:
+    """Strip the 'loop/cycle-' branch-name prefix so pr events bucket with
+    their cycle_start/end siblings (Bug A — see plan §3)."""
+    if lbl.startswith("loop/cycle-"):
+        return lbl[len("loop/cycle-"):]
+    return lbl
+
 def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Build a per-cycle list (newest first), tmp-* filtered."""
     by_label: Dict[str, Dict[str, Any]] = defaultdict(
@@ -160,7 +167,7 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
                  "pr": None, "label": None, "fail_detail": None}
     )
     for e in events:
-        lbl = e.get("label", "")
+        lbl = normalize_cycle_label(e.get("label", ""))
         if not lbl or lbl.startswith("tmp-"):
             continue
         cy = by_label[lbl]

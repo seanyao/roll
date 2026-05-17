@@ -378,33 +378,51 @@ EOF
 chmod +x .git/hooks/pre-push
 ```
 
-### Phase 7: Pre-Push Code Review
+### Phase 7: Pre-Push Code Review (Three-Axis Deep Review)
+
+This phase runs **once per Story** (not per micro-step) on the full accumulated diff.
+Per-micro-step review uses `$roll-.review staged` inline checklist (zero extra cost).
+
+**Phase 3.5 vs Phase 7 split**: Phase 3.5 (Peer Review) focuses on architectural direction
+and approach before coding begins. Phase 7 focuses on implementation quality after all
+micro-steps are done — catching issues that only appear at diff scale (parameter sprawl
+across files, copy-paste patterns, cross-file N+1, etc.).
 
 ```bash
-$roll-.review staged
+# Capture full Story diff
+git diff main...HEAD
 ```
 
-**Review output:**
+**Launch three review agents in parallel** (each receives the full diff):
+
 ```
-🔍 Self Review Report
-├── Scope: X files (+Y/-Z lines)
-├── 🔴 Critical: N issues (must fix)
-├── 🟡 Warnings: N issues (should fix)
-├── 🟢 Suggestions: N items (optional)
-└── ✅ Passed dimensions: [Quality, Design, Scope, ...]
+Agent 1: Reuse Review
+  → Search for existing utilities / helpers the new code could use instead
+  → Flag any new function that duplicates existing functionality
+  → Flag inline logic replaceable by existing tools
+
+Agent 2: Quality Review
+  → Redundant state, Parameter sprawl, Copy-paste near-duplicate,
+     Leaky abstraction, Stringly-typed, JSX nesting,
+     Nested conditionals ≥3 deep, Unnecessary comments
+
+Agent 3: Efficiency Review
+  → Redundant computation / N+1, Missed concurrency,
+     Hot-path bloat, Loop no-op updates, TOCTOU existence pre-check,
+     Memory leaks, Overly broad operations
 ```
 
-**Review dimensions** (correctness guaranteed by TCR):
-- 🎯 **Quality**: Naming clarity, DRY, function size, readability
-- 📐 **Design**: Architecture, abstraction level, separation of concerns
-- ⚠️ **Scope**: No opportunistic changes
-- 📝 **Documentation**: Comments where needed
+Wait for all three agents to complete. Aggregate findings → fix each issue
+(false positives: note and skip, no debate) → summarize what was fixed.
+
+**Fallback**: If parallel agent invocation fails, run `$roll-.review staged` on
+the full diff as a single-pass fallback — do not skip review entirely.
 
 **Decision:**
 ```
 🔴 Critical > 0 → Fix via new TCR cycle → Re-review
 🟡 Warnings > 0 → Fix if quick (< 5 min) or document
-🟢 Suggestions / ✅ All clear → Proceed to push
+🟢 Suggestions / ✅ All clear → Proceed to Phase 8
 ```
 
 ### Phase 8: Commit & Push

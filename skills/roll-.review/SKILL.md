@@ -45,7 +45,9 @@ $roll-.review unstaged
 $roll-.review files src/utils.ts
 ```
 
-## Review Dimensions (6 Core Dimensions)
+## Review Dimensions (7 Core Dimensions)
+
+Original 6 dimensions plus Reuse (added in REFACTOR-022, simplify three-axis integration):
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -54,12 +56,41 @@ $roll-.review files src/utils.ts
 │  ✅ Correctness     - Logic is correct, no bugs         │
 │  ✅ Security        - No vulnerabilities, input valid.  │
 │  ✅ Maintainability - Clear naming, sound structure     │
+│     Quality anti-patterns (check each):                 │
+│       □ Redundant state / cached values that could be   │
+│         derived directly                                │
+│       □ Parameter sprawl — new param vs. restructure    │
+│       □ Copy-paste with slight variation (near-dup)     │
+│       □ Leaky abstraction — exposes internal details    │
+│       □ Stringly-typed — raw string where constant      │
+│         / enum exists                                   │
+│       □ Unnecessary JSX nesting (no layout value)       │
+│       □ Nested conditionals ≥3 deep (ternary chains,    │
+│         nested if/else) — flatten with early return     │
+│       □ Unnecessary comments explaining WHAT            │
 │  ✅ Performance     - No performance pitfalls           │
+│     Efficiency anti-patterns (check each):              │
+│       □ Redundant computation / repeated file read /    │
+│         duplicate API call / N+1 pattern                │
+│       □ Missed concurrency — independent ops sequential │
+│       □ Hot-path bloat — blocking work in startup or    │
+│         per-request path                                │
+│       □ Loop no-op updates — missing change-detection   │
+│         guard                                           │
+│       □ TOCTOU existence pre-check — operate directly + │
+│         handle error instead                            │
+│       □ Memory — unbounded structures / missing cleanup │
+│       □ Overly broad op — reading full file for a slice │
 │  ✅ Testability     - Easy to test, edge cases covered  │
 │  ✅ Scope           - Focused on current task, no       │
 │                       unrelated changes                 │
+│  ✅ Reuse           - No new code duplicating existing  │
+│     □ New function duplicates existing utility/helper   │
+│     □ Inline logic replaceable by existing tool         │
 └─────────────────────────────────────────────────────────┘
 ```
+
+**Usage in TCR**: Each micro-step review is a lightweight self-check against this checklist — no sub-agents, zero extra token cost. The three-axis deep review with parallel agents runs once per Story in `$roll-build` Phase 7.
 
 ## Severity Levels and Decisions
 

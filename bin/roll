@@ -641,6 +641,82 @@ _print_pr_pipeline_hint() {
 HINT
 }
 
+# ─── Doctor: PR review extras section (US-PR-004) ────────────────────────────
+# `roll doctor` is the single home for "things you could tune". The PR review
+# extras section probes whether the two optional gates are enabled and only
+# prints install commands for the ones that aren't, so users who already opted
+# in (or opted out) don't get spammed each upgrade.
+cmd_doctor() {
+  _doctor_pr_section
+}
+
+_doctor_pr_section() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  echo ""
+  echo "PR review extras  PR 评审两档开关"
+  echo ""
+
+  local protection_state event_state
+  protection_state="$(_doctor_branch_protection_state)"
+  event_state="$(_doctor_event_workflow_state)"
+
+  case "$protection_state" in
+    enabled)
+      echo "  ✅ AI review double gate enabled  AI 评审双门已启用"
+      ;;
+    disabled)
+      echo "  ⚪ AI review double gate not enabled  双门未启用"
+      _print_pr_pipeline_hint
+      ;;
+    *)
+      echo "  ⚪ AI review double gate state unknown — requires gh auth  状态未知（需要 gh auth）"
+      _print_pr_pipeline_hint
+      ;;
+  esac
+
+  case "$event_state" in
+    present)
+      echo "  ✅ Event-driven PR review installed  事件驱动 PR 评审已安装"
+      ;;
+    *)
+      echo "  ⚪ Event-driven PR review not installed  事件驱动 PR 评审未安装"
+      _print_pr_event_hint
+      ;;
+  esac
+}
+
+# Returns one of: enabled | disabled | unknown
+_doctor_branch_protection_state() {
+  command -v gh >/dev/null 2>&1 || { echo unknown; return; }
+
+  local slug
+  slug="$(gh repo view --json owner,name --jq '.owner.login + "/" + .name' 2>/dev/null)"
+  [[ -n "$slug" ]] || { echo unknown; return; }
+
+  local required
+  required="$(gh api "repos/${slug}/branches/main/protection" \
+    --jq '.required_pull_request_reviews.required_approving_review_count // 0' \
+    2>/dev/null)"
+
+  if [[ -z "$required" ]]; then
+    echo unknown
+  elif (( required >= 1 )); then
+    echo enabled
+  else
+    echo disabled
+  fi
+}
+
+# Returns one of: present | absent
+_doctor_event_workflow_state() {
+  if [[ -f ".github/workflows/pr-review-event.yml" ]]; then
+    echo present
+  else
+    echo absent
+  fi
+}
+
 _print_pr_event_hint() {
   cat <<'HINT'
 
@@ -5316,6 +5392,7 @@ main() {
     alert)         cmd_alert "$@" ;;
     agent)         cmd_agent "$@" ;;
     ci)            cmd_ci "$@" ;;
+    doctor)        cmd_doctor "$@" ;;
     review-pr)     cmd_review_pr "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) usage ;;

@@ -24,11 +24,17 @@ Usage:
 """
 
 from __future__ import annotations
-import argparse, hashlib, json, os, re, subprocess, sys
+import argparse, hashlib, json, os, re, subprocess, sys, time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+# Display TZ is fixed to Asia/Shanghai (UTC+8). Internal datetimes stay UTC;
+# only display conversions honor this. Set the process TZ so .astimezone()
+# without args resolves to Beijing time across all renderers.
+os.environ.setdefault("TZ", "Asia/Shanghai")
+time.tzset()
 
 # Shared rendering primitives — see lib/roll_render.py for the design system.
 _LIB_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -189,6 +195,7 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
             cy["outcome"] = "idle"
         elif stage == "pr":
             cy["pr"] = detail
+            cy["pr_ts"] = e["_ts"]  # used to match cron-log lines (inner cycle done)
             sid = _extract_story_id(detail) or _extract_story_id(lbl)
             if sid and not cy.get("story"):
                 cy["story"] = sid
@@ -203,11 +210,15 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
     cycles = [v for v in by_label.values() if v["start"]]
     cycles.sort(key=lambda x: x["start"], reverse=True)
 
-    # Match cron-log entries by HH:MM:SS proximity to cycle_end (within ±90s).
-    # Cron logs are local-time HH:MM:SS; events are UTC.
+    # Match cron-log entries by HH:MM:SS proximity to the inner cycle-done
+    # signal (within ±120s). cron.log lines are emitted by
+    # lib/loop-fmt.py::now_hms() right when the inner runner prints "cycle
+    # done", which is close to the pr event timestamp. cycle_end is emitted
+    # later by the outer wrapper (after publish + cleanup) and may be 10+
+    # minutes off, so prefer pr_ts when present.
     for cy in cycles:
-        end_local = (cy["end"] or cy["start"]).astimezone()
-        target = end_local.hour * 3600 + end_local.minute * 60 + end_local.second
+        anchor = cy.get("pr_ts") or cy.get("end") or cy.get("start")
+        target = anchor.hour * 3600 + anchor.minute * 60 + anchor.second
         best = None
         best_dt = 999
         for cr in cron:

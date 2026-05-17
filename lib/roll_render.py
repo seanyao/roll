@@ -207,18 +207,24 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     dur = fmt_dur(dur_s) if dur_s else "—"
     cost = f"${cr.get('cost', 0):.2f}" if cr else "—"
     sid = cy.get("story") or "—"
-    title_en = backlog.get(sid, "") if sid != "—" else ""
-    title_c = "red" if outcome == "fail" else "fg"
-    time_c = "red" if outcome == "fail" else "fg"
-    sid_c = "red" if outcome == "fail" else "blue"
+    built = cy.get("built") or ([sid] if sid != "—" else [])
+    # Join multiple stories with " | ". Drop empties and dedupe in order.
+    seen = set()
+    ids = []
+    for s in built:
+        if s and s not in seen:
+            seen.add(s)
+            ids.append(s)
+    ids_str = " | ".join(ids) if ids else sid
+    time_c  = "red" if outcome == "fail" else "fg"
+    sid_c   = "red" if outcome == "fail" else "blue"
 
     print(
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
         c("muted", pad(dur, 4, "r")) + "  " +
         c("muted", pad(cost, 6, "r")) + "   " +
-        c(sid_c, pad(sid, 10), bold=True) + "  " +
-        c(title_c, trunc(title_en, 58), bold=(outcome == "fail"))
+        c(sid_c, ids_str, bold=True)
     )
     if outcome == "fail" and cy.get("fail_detail"):
-        print(" " * 40 + c("dim", "→ ") + c("amber", f"roll loop show {cy['label']}"))
+        print(" " * 8 + c("dim", "→ ") + c("amber", f"roll loop show {cy['label']}"))

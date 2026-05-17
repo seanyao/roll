@@ -169,6 +169,8 @@
 | FIX-050 | loop 被系统定时器拉起时拿到的环境路径是裸的，找不到 brew 装的工具（如 tmux），导致没有弹窗、未来同类工具缺失还会一个个冒出来 — 两层兜底：①setup 时探测 brew 前缀并写入 macOS 定时任务配置；②runner 脚本启动时再跑一段跨平台路径拼装（覆盖 Linux cron 用户与 plist 过期场景）；inner 脚本里散落的硬编码一并撤掉；setup/update 后请重跑 setup 让配置生效 | ✅ Done |
 | FIX-051 | 发版脚本通过 AI 重写 features.md 时会丢「规划中」标记规则，每次发版都可能再次失守、把全员 Todo 的功能误显示为已上线 — 把规则从 AI prompt 搬到机械校验：release 后跑 lint，或直接由脚本生成标记不交给 AI | ✅ Done |
 | FIX-052 | loop 状态文件 ALERT/state/mute/cron.log 在共享目录里没分项目，一个项目的告警会串到另一个项目的会话里、两个项目的 cycle 状态还会互相覆盖、日志互相穿插 — 跟现有 events/runner 一样按项目命名，每个命令只读当前项目对应的那份；旧数据按项目搬好不丢 | ✅ Done |
+| FIX-054 | loop 跑起来不再自动弹出终端窗口让用户看进度 — 固定只用 macOS 自带的 Terminal.app，不再按用户的终端偏好挑来挑去，省得在新版 Ghostty 上弹窗假成功、备选方案也失效 | 📋 Todo |
+| FIX-055 | agent 跟用户对话统一走"说人话"风格 — 所有 roll 用户都拿到一致的沟通体验，不再因 agent 自由发挥而忽冷忽热 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -332,3 +334,4 @@
 | IDEA-024 | 上游 AI CLI 升级影响 Roll 承载层的早期预警 — 出了产品 BACKLOG 范围，归入 roll-meta 私有 repo（Roll 自身关心、roll-using 项目无关） | ✅ Done → roll-meta/US-WATCH-001/002/003 |
 | IDEA-025 | dashboard cost 列现在用的是 claude 上报的 `total_cost_usd`（含订阅折扣，不反映 list price）— 想看真实成本需要把每轮 cycle 的 input/output tokens 打到 events.ndjson，按当前模型 list 单价 × token 量重算，不算优惠、价格用美金 | 📋 Todo |
 | IDEA-026 | 同一项目在不同机器上跑 loop 时记录会各自存各自的、互相看不见 — 把每轮 cycle 的 events/cron/state 推到云端集中存（按 git remote 而不是本地路径定项目身份），所有机器读同一份，跨机器跑也能在 dashboard 里看到合并后的全貌 | 📋 Todo |
+| IDEA-027 | cycle cost 每轮都从历史里消失 — `cron-<slug>.log` 是单 cycle 临时日志、每轮覆写，dashboard 看历史时除了最新一轮其他全是 `—`；让 inner runner 在结束时把 `total_cost_usd`（claude 上报）也写到 `events-<slug>.ndjson` 的 `cycle_end` 事件 detail 里，dashboard 直接读事件流，cron.log 只剩 tmux 实时显示职责 | 📋 Todo |

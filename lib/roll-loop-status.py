@@ -240,13 +240,73 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
             cy["outcome"] = "running" if not cy.get("end") else "unknown"
     return cycles
 
+def load_pr_merges_from_git(days: int) -> Dict[str, Dict[str, Any]]:
+    """Repair fallback: when events.ndjson dropped the pr / cycle_end events
+    for a cycle (events writer regressions), git log still has the merge
+    commit `Merge pull request #N from seanyao/loop/cycle-LABEL`. Extract
+    PR number + story IDs from the merge subject + body so orphan cycles
+    can be reclassified done instead of permanently '⏵ running'."""
+    try:
+        out = subprocess.check_output(
+            ["git", "log", f"--since={days + 1} days ago",
+             "--grep=loop/cycle-", "--format=%H|||%s|||%b<<<END>>>"],
+            text=True, errors="ignore"
+        )
+    except Exception:
+        return {}
+    result: Dict[str, Dict[str, Any]] = {}
+    label_re  = re.compile(r"loop/cycle-([A-Za-z0-9-]+)")
+    pr_re     = re.compile(r"#(\d+)")
+    story_re  = re.compile(r"\b([A-Z]+-\d+)\b")
+    for chunk in out.split("<<<END>>>"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            _, subj, body = chunk.split("|||", 2)
+        except ValueError:
+            continue
+        text = f"{subj}\n{body}"
+        m = label_re.search(text)
+        if not m:
+            continue
+        label = m.group(1)
+        pr_m = pr_re.search(subj)
+        stories = []
+        for s in story_re.findall(text):
+            if s not in stories:
+                stories.append(s)
+        result[label] = {"pr": pr_m.group(1) if pr_m else None, "stories": stories}
+    return result
+
+def repair_orphan_cycles_from_git(cycles: List[Dict[str, Any]], git_merges: Dict[str, Dict[str, Any]]) -> None:
+    """Salvage data from git merges: for any cycle whose branch was merged,
+    promote 'running'/'unknown' outcomes to 'done' and back-fill the
+    built[] story list when events + runs.jsonl came up empty."""
+    for cy in cycles:
+        m = git_merges.get(cy.get("label", ""))
+        if not m:
+            continue
+        if cy.get("outcome") in ("running", "unknown"):
+            cy["outcome"] = "done"
+        if m["pr"] and not cy.get("pr"):
+            cy["pr"] = f"https://github.com/seanyao/Roll/pull/{m['pr']}"
+        # Fill stories when our existing sources didn't carry them. Filter
+        # to ones that actually appear in BACKLOG so we don't pull in stray
+        # tokens from the merge body (PR numbers, file paths, etc.).
+        if m["stories"] and not cy.get("built"):
+            cy["built"] = m["stories"]
+            cy["story"] = m["stories"][0]
+
 def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
     """Map run_id → run row for the current project (filters out other slugs
-    sharing ~/.shared/roll/loop/runs.jsonl). Coverage may be incomplete for
-    pre-FIX-044 cycles."""
+    sharing ~/.shared/roll/loop/runs.jsonl). Lenient slug matching salvages
+    entries written under buggy slugs (FIX-053): the bare project basename
+    (e.g. 'Roll') or worktree paths (e.g. '{slug}-cycle-XXX')."""
     path = shared_root() / "loop" / "runs.jsonl"
     if not path.exists():
         return {}
+    base = slug.split("-")[0]  # 'Roll-a43d1b' → 'Roll'
     out: Dict[str, Dict[str, Any]] = {}
     with path.open(errors="ignore") as f:
         for line in f:
@@ -254,7 +314,8 @@ def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
                 r = json.loads(line)
             except Exception:
                 continue
-            if r.get("project") != slug:
+            p = r.get("project", "")
+            if p != slug and p != base and not p.startswith(f"{slug}-cycle-"):
                 continue
             rid = r.get("run_id", "")
             if rid:
@@ -263,29 +324,62 @@ def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
 
 def merge_runs_into_cycles(cycles: List[Dict[str, Any]], runs: Dict[str, Dict[str, Any]]) -> None:
     """Attach tcr_count + built stories from runs.jsonl onto matching cycles.
-    Match key: cycle label `20260517-084804-59225` ←→ run_id `loop-20260517-084804`
-    (run_id drops the trailing pid/seq segment)."""
-    for cy in cycles:
-        lbl = cy.get("label", "")
-        # cycle label format: YYYYMMDD-HHMMSS-PID; run_id format: loop-YYYYMMDD-HHMM(SS)
-        parts = lbl.split("-")
-        if len(parts) < 2:
+
+    The runs.jsonl `run_id` field has inconsistent time format across writer
+    versions (sometimes UTC, sometimes Beijing local, sometimes with PID
+    suffix), so string matching is unreliable. Match by `ts` proximity
+    instead: each cycle gets the closest run whose ts is between this
+    cycle's start and the next-newer cycle's start (i.e. the run wrote out
+    before the next cycle began). Each run consumed exactly once."""
+    # Parse run timestamps once.
+    runs_list = []
+    for rid, r in runs.items():
+        try:
+            ts = datetime.fromisoformat(r["ts"].replace("Z", "+00:00"))
+            runs_list.append((ts, rid, r))
+        except Exception:
             continue
-        date_part, time_part = parts[0], parts[1]
-        # try long match first (loop-YYYYMMDD-HHMMSS), then short (loop-YYYYMMDD-HHMM)
-        for candidate in (f"loop-{date_part}-{time_part}", f"loop-{date_part}-{time_part[:4]}"):
-            r = runs.get(candidate)
-            if r:
-                cy["tcr_count"] = r.get("tcr_count", 0)
-                cy["built"] = r.get("built", [])
-                cy["duration_s"] = cy.get("duration_s") or r.get("duration_sec", 0) or None
-                # Prefer runs.jsonl status if our outcome was vacuous
-                if cy.get("outcome") in ("unknown", "running") and r.get("status"):
-                    cy["outcome"] = r["status"]
-                # Pick up story from built[] if we don't have one
-                if not cy.get("story") and r.get("built"):
-                    cy["story"] = r["built"][0]
+    runs_list.sort(key=lambda x: x[0])
+    consumed = set()
+
+    # Cycles arrive newest-first; pair each with the next-older to bound
+    # the matching window (so a cycle's run doesn't steal the next idle's).
+    for i, cy in enumerate(cycles):
+        start = cy["start"]
+        # next newer cycle in real time = the cycle just above us in list
+        next_start = cycles[i - 1]["start"] if i > 0 else start + timedelta(hours=2)
+        # If there's a cycle_end, also clamp to end + 30min as upper bound.
+        if cy.get("end"):
+            clamp = cy["end"] + timedelta(minutes=30)
+            window_end = min(next_start, clamp)
+        else:
+            window_end = next_start
+        best = None
+        for ts, rid, r in runs_list:
+            if rid in consumed:
+                continue
+            if ts < start:
+                continue
+            if ts >= window_end:
                 break
+            if best is None or ts < best[0]:
+                best = (ts, rid, r)
+        if not best:
+            continue
+        ts, rid, r = best
+        consumed.add(rid)
+        cy["tcr_count"] = r.get("tcr_count", 0)
+        cy["built"] = r.get("built", []) or []
+        # Duration: cap runs.jsonl's reported duration_sec by (runs_ts -
+        # cycle_start) since the field has been seen with garbage values.
+        if r.get("duration_sec"):
+            cap = int((ts - start).total_seconds())
+            cy["duration_s"] = min(r["duration_sec"], cap) if cap > 0 else r["duration_sec"]
+        # Outcome: runs.jsonl wins when events stream was vacuous.
+        if cy.get("outcome") in ("unknown", "running") and r.get("status"):
+            cy["outcome"] = {"built": "done", "interrupted": "fail"}.get(r["status"], r["status"])
+        if not cy.get("story") and r["built"]:
+            cy["story"] = r["built"][0]
 
 # ════════════════════════════════════════════════════════════════════════════
 # Rollup math — by day buckets in LOCAL time
@@ -318,11 +412,14 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
 # ════════════════════════════════════════════════════════════════════════════
 # Render
 # ════════════════════════════════════════════════════════════════════════════
-def render(events, cron, state, backlog, *, days=3, lang="both", now=None, runs=None):
+def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
+           runs=None, git_merges=None):
     now = now or datetime.now(timezone.utc).astimezone()
     cycles = aggregate(events, cron)
     if runs:
         merge_runs_into_cycles(cycles, runs)
+    if git_merges:
+        repair_orphan_cycles_from_git(cycles, git_merges)
     by_day = bucket_by_day(cycles)
     days_keys = sorted(by_day.keys(), reverse=True)[:days]
 
@@ -541,15 +638,18 @@ def main(argv=None):
     if args.demo:
         events, cron, state, backlog = _demo_data()
         runs = {}
+        git_merges = {}
     else:
         slug = project_slug()
-        events  = load_events(slug, args.days)
-        cron    = load_cron_log(slug)
-        state   = load_state(slug)
-        backlog = load_backlog()
-        runs    = load_runs(slug)
+        events     = load_events(slug, args.days)
+        cron       = load_cron_log(slug)
+        state      = load_state(slug)
+        backlog    = load_backlog()
+        runs       = load_runs(slug)
+        git_merges = load_pr_merges_from_git(args.days)
 
-    render(events, cron, state, backlog, days=args.days, lang=lang, runs=runs)
+    render(events, cron, state, backlog, days=args.days, lang=lang,
+           runs=runs, git_merges=git_merges)
 
 if __name__ == "__main__":
     try:

@@ -4,7 +4,8 @@
 
 ### Improved
 
-- **`roll loop status` 焕新** — 重设计的 dashboard 替换原本的扁平列表：按天 Today / Yesterday / −2d 分列总账（轮次、PR、耗时、成本、失败计数），下面每天分段列出 cycle 详情；idle / done / fail 用 `·` / `✓` / `✗` 区分，不再统统挂"运行中"；时间统一显示 UTC+8；同一 cycle 的 pr 事件与 cycle_start 不再被错切成两条；走 `ROLL_UI=v2` 默认开，`ROLL_UI=v1` 一键回退到旧实现 `[loop]`
+- **`roll loop status` 焕新** — 重设计的 dashboard 替换原本的扁平列表：按天 Today / Yesterday / −2d 分列总账（轮次、PR、耗时、tokens、成本、失败计数），下面每天分段列出 cycle 详情；idle / done / fail 用 `·` / `✓` / `✗` 区分，不再统统挂"运行中"；时间统一显示 UTC+8；同一 cycle 的 pr 事件与 cycle_start 不再被错切成两条；多 story cycle 用 `|` 连起来一行展示；走 `ROLL_UI=v2` 默认开，`ROLL_UI=v1` 一键回退到旧实现 `[loop]`
+- **loop 每轮成本和 token 真实可见** — 每个 cycle 结束时把模型用量（input / output / cache_creation / cache_read tokens、claude 上报的折后价、耗时）写进永久事件流，dashboard 按模型公开单价（list price）算出真实成本、按 k / m / b 显示 token，多机器 / 多项目可横向对比；历史 cycle 没写过这条事件的，自动从 claude 自己的会话日志里回灌一份 `[loop]`
 - **`roll update` 不再每次刷 PR 评审两档安装提示** — 两段安装命令挪到 `roll doctor`，在 git repo 内探测分支保护和事件 workflow 的当前状态，只对未启用项显示安装指令 `[pr]`
 
 ### Fixed

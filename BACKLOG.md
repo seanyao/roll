@@ -286,7 +286,7 @@
 | [US-LOOP-001](docs/features/cycle-event-stream.md#us-loop-001) | 看 loop 干活像看 CI pipeline — 每轮自动周期的故事选取、跨 agent 评审、micro-commit 提交、CI 检查、PR 合并都是带颜色的事件流，attach 和 monitor 直接渲染 | ✅ Done |
 | [US-LOOP-002](docs/features/cycle-event-stream.md#us-loop-002) | loop tmux 输出体现方法论掌控力 — 压制噪音，用真实数据突出 TCR 纪律（proof-of-pass）、peer 决议、CI 硬 gate，每个检查点有证据不是口说 | ✅ Done |
 | [US-LOOP-003](docs/features/cycle-event-stream.md#us-loop-003) | loop 等待期间显示 spinner 动画，story 执行、CI 运行、PR 合并三个等待点都有反馈，不再看起来像卡住 | ✅ Done |
-| [US-LOOP-004](docs/features/cycle-event-stream.md#us-loop-004) | loop 每轮跑完把成本、token、耗时、模型名写进永久事件流，dashboard 看历史不再只有最新一轮，多机器 / 多项目对账可加总 | 📋 Todo |
+| [US-LOOP-004](docs/features/cycle-event-stream.md#us-loop-004) | loop 每轮跑完把成本、token、耗时、模型名写进永久事件流，dashboard 看历史不再只有最新一轮，多机器 / 多项目对账可加总 | ✅ Done |
 
 ## Epic: CLI 视觉系统
 ### Feature: cli-redesign

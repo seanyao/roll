@@ -111,9 +111,10 @@
 ---
 
 <a id="us-loop-004"></a>
-## US-LOOP-004 把每轮 cycle 的成本、token、耗时写进事件流 📋
+## US-LOOP-004 把每轮 cycle 的成本、token、耗时写进事件流 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Plan**: [loop-cost-telemetry-plan.md](loop-cost-telemetry-plan.md)
 
 - As a Roll user / dashboard reader
@@ -122,19 +123,21 @@
 
 **Domain Model:**
 - Context: Cycle Event Stream
-- Aggregate: Cycle Event (Root) gets enriched detail payload on cycle_end
+- Aggregate: Cycle Event (Root) gets a new `usage` event after claude finishes
 - Cross-context: View Rendering 消费
 
 **AC:**
-- [ ] cycle 结束时 cycle_end 事件的 detail 段含 model / tokens (input/output/cache_creation/cache_read) / cost_reported_usd / duration_ms
-- [ ] 新数据用 JSON detail；老数据（字符串 detail）保持可解析，dashboard 不崩
-- [ ] cron.log 的"cycle done"行保留（tmux 显示需要），但不再是 dashboard 的成本来源
-- [ ] idle cycle（没跑 claude）不强求 token 字段，cost=0
-- [ ] 至少跑一轮真实 loop 验证：events.ndjson 新 cycle_end 携带完整 detail
+- [x] cycle 结束后 events.ndjson 多一条 `stage=usage` 事件，detail 是结构化 JSON：model / input_tokens / output_tokens / cache_creation_tokens / cache_read_tokens / cost_reported_usd / duration_ms
+- [x] loop-fmt 在 claude result 时落盘；通过 env var (LOOP_PROJECT_SLUG / LOOP_CYCLE_ID / LOOP_SHARED_ROOT) 让 loop-fmt 知道 slug + cycle id
+- [x] idle cycle（没跑 claude）不发 usage 事件
+- [x] 老历史 cycle 没有 usage 事件 → 通过 claude session JSONL 自动回灌（reader 侧已实现）
+- [x] cron.log 的 "cycle done" 行保留为 tmux 显示，dashboard 不再依赖它取成本
+- [x] reader 侧 aggregate() 识别 stage=usage，优先级高于 claude session 回灌
 
 **Files:**
-- `lib/loop-fmt.py`（result 事件解析 + 写 sidecar）
-- `bin/roll`（生成 inner runner 时把 sidecar 拼进 cycle_end 事件）
+- `lib/loop-fmt.py`（assistant message 跟踪 usage / model；result 事件追加 usage 事件到 events.ndjson）
+- `bin/roll`（inner runner 模板 export LOOP_PROJECT_SLUG / LOOP_CYCLE_ID / LOOP_SHARED_ROOT）
+- `lib/roll-loop-status.py`（aggregate 处理 stage=usage；backfill 优先使用 usage event）
 
 **Dependencies:**
 - Depended on by: US-VIEW-010

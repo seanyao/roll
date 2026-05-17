@@ -313,3 +313,5 @@
 | IDEA-020 | loop tmux 输出精简与视觉层次设计 — 当前信息量过大、关键节点不突出、换行排版混乱；需设计精简方案：过滤低信号噪音，用视觉层次突出 Step 切换、CI gate、TCR commit、story 完成等关键事件，让用户扫一眼即知当前阶段与健康状态 | ✅ Done → US-LOOP-002 |
 | IDEA-021 | loop 等待期间加 spinner 动画 — 当 agent 正在执行 story 时，tmux 输出缺少 loading 状态反馈，看起来像卡住；在每个 → 事件行之后、下一个事件行出现之前，显示一个简单的 spinner 动画表示"正在处理中" | ✅ Done → US-LOOP-003 |
 | IDEA-022 | `roll update` 末尾两段「可选启用 AI 双闸门 / 秒级 PR 评审」每次都重复打，已经装过的人被反复刷屏 — 需要先讨论方案：探测仓库已启用就不打 / 用户看过一次记标记不再打 / 整段挪到 `roll doctor` 让用户主动看，三选一 | 📋 Todo |
+| IDEA-023 | 想一眼看到 loop 健康度 — 今天 / 最近几天跑了几轮、解决了哪几个待办、累计花了多久和多少 token、有没有失败的 — 现在 `roll loop runs` 是按时间倒序的扁平列表，看不到按天总账，也没有 token 与成本数字；`tmp-*` 测试项目还把真项目淹没；需要按天聚合、过滤测试副产物、附耗时和成本，最近 3 天显示足够 | 📋 Todo |
+| IDEA-024 | 这两天踩的几个坑（权限弹窗、PATH、prompt 格式变化）都源自 Claude Code 等上游 AI CLI 升级 —— 我们没有任何机制能提前感知，每次都要等掉坑里再回头排查 —— 需要个定时任务，自动拉取支持的几家 AI CLI（Claude、Kimi、DeepSeek、Codex、Gemini）的 release notes，AI 评估有没有可能影响 Roll 的承载层（hook、permission、stream-json、agent 调用约定等），有影响就开 FIX 或写 ALERT 提醒人 | 📋 Todo |

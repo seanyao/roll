@@ -96,7 +96,7 @@ fi
 
 ### Step 1.5 — Pre-run CI Health Check
 
-Call `_loop_precheck_ci` before scanning BACKLOG. This is a **defensive gate**
+Call `roll loop precheck-ci` before scanning BACKLOG. This is a **defensive gate**
 against building on a broken base — if the most recent commit on the branch
 has red CI, the loop must not stack new commits on top (which would create the
 exact stuck-red state FIX-026 traces to).
@@ -105,7 +105,7 @@ exact stuck-red state FIX-026 traces to).
 - HEAD CI red → write ALERT, **do not pick up any stories this cycle**,
   exit cleanly. The next cycle will retry; the human must fix CI manually
   (typically by reverting or pushing a green commit) before the loop resumes.
-- `gh` missing or repo unparseable → graceful skip (`_loop_precheck_ci`
+- `gh` missing or repo unparseable → graceful skip (`roll loop precheck-ci`
   returns 0); the post-build `_loop_enforce_ci` remains the strict gate.
 
 ### Step 1.6 — PR Inbox (US-AUTO-034)

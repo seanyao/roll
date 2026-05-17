@@ -2592,7 +2592,8 @@ cmd_loop() {
     reset)   _loop_reset ;;
     notify)       _notify "${1:-roll}" "${2:-}" ;;
     enforce-tcr)  _loop_enforce_tcr "${1:-}" "${2:-}" ;;
-    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr>"; exit 1 ;;
+    precheck-ci)  _loop_precheck_ci ;;
+    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci>"; exit 1 ;;
   esac
 }
 

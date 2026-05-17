@@ -856,6 +856,7 @@ cmd_init() {
   _merge_claude_to_project "$project_dir"
   _write_backlog "$project_dir/BACKLOG.md"
   _ensure_features_dir "$project_dir/docs/features"
+  _write_features_md "$project_dir/docs/features.md"
   print_merge_summary
 
   echo ""
@@ -968,6 +969,29 @@ _ensure_features_dir() {
   mkdir -p "$1"
   ok "Created: docs/features/"
   _ROLL_MERGE_SUMMARY+=("created|docs/features/")
+}
+
+# ─── Helper: write starter docs/features.md (no-op if exists) ────────────────
+_write_features_md() {
+  if [[ -f "$1" ]]; then
+    _ROLL_MERGE_SUMMARY+=("unchanged|docs/features.md")
+    return
+  fi
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" << 'EOF'
+# Features
+
+> 产品视角的功能索引。每次发版时更新，使之与 BACKLOG 保持一致。
+> Product-level feature index. Updated at release to stay in sync with BACKLOG.
+
+---
+
+## Features by Epic
+
+<!-- Add feature entries here as epics are completed -->
+EOF
+  ok "Created: docs/features.md"
+  _ROLL_MERGE_SUMMARY+=("created|docs/features.md")
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3765,6 +3789,14 @@ _loop_pr_inbox() {
 
     # Bot review gate: if a GHA workflow already handled this PR, defer to it.
     if [ "$bot_review" = "APPROVED" ]; then
+      # All gates cleared (bot-approved + CI green + no conflicts) → merge directly.
+      # Relying on repo-level auto-merge being configured is not reliable; loop
+      # owns the decision here since it already ran the review.
+      if [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ]; then
+        gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1 \
+          && info "PR #${num}: bot-approved + CI green — merged" \
+          || warn "PR #${num}: merge failed (bot-approved + CI green) — left open"
+      fi
       i=$((i + 1)); continue
     elif [ "$bot_review" = "CHANGES_REQUESTED" ]; then
       local alert="${_LOOP_ALERT:-${HOME}/.shared/roll/loop/ALERT.md}"

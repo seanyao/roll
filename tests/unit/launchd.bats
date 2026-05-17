@@ -145,35 +145,34 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_write_loop_runner_script: terminal=ghostty embeds ghostty dispatch" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local script="${tmp_dir}/run.sh"
-  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18" "ghostty"
-  grep -qF 'open -na Ghostty.app --args -e tmux attach' "$script"
-  rm -rf "$tmp_dir"
-}
-
-@test "_write_loop_runner_script: terminal=iTerm2 embeds iTerm2 dispatch" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local script="${tmp_dir}/run.sh"
-  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18" "iTerm2"
-  grep -qF 'iTerm2' "$script"
-  rm -rf "$tmp_dir"
-}
-
-@test "_write_loop_runner_script: terminal=Terminal uses osascript Terminal" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local script="${tmp_dir}/run.sh"
-  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18" "Terminal"
-  grep -qF 'tell application \"Terminal\"' "$script"
-  rm -rf "$tmp_dir"
-}
-
-@test "_write_loop_runner_script: no terminal arg defaults to Terminal osascript" {
+@test "_write_loop_runner_script: always uses Terminal.app osascript" {
+  # FIX-054: terminal preference detection removed. Generated runner always
+  # dispatches the popup to macOS Terminal.app via osascript; no Ghostty /
+  # iTerm2 / config-driven cases remain.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local script="${tmp_dir}/run.sh"
   _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18"
   grep -qF 'tell application \"Terminal\"' "$script"
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_loop_runner_script: no Ghostty.app reference in runner body" {
+  # FIX-054: Ghostty branch removed entirely.
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local script="${tmp_dir}/run.sh"
+  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18"
+  run grep -F 'Ghostty.app' "$script"
+  [ "$status" -ne 0 ]
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_loop_runner_script: no iTerm2 reference in runner body" {
+  # FIX-054: iTerm2 branch removed entirely.
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local script="${tmp_dir}/run.sh"
+  _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18"
+  run grep -F 'iTerm2' "$script"
+  [ "$status" -ne 0 ]
   rm -rf "$tmp_dir"
 }
 
@@ -457,26 +456,11 @@ setup() {
   rm -rf "$tmp_dir"; rm -f "$cfg"
 }
 
-# ─── terminal preference in _install_launchd_plists ───────────────────────────
+# ─── terminal popup in generated runner (FIX-054: always Terminal.app) ───────
 
-@test "_install_launchd_plists: loop_attach_terminal=ghostty bakes ghostty case value into runner" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
-  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
-  _SHARED_ROOT="${tmp_dir}/shared"
-  local cfg; cfg=$(mktemp)
-  printf 'loop_attach_terminal: ghostty\n' > "$cfg"; ROLL_CONFIG="$cfg"
-
-  _install_launchd_plists "$proj"
-
-  local slug; slug=$(_project_slug "$proj")
-  local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
-  # Check the case SWITCH VALUE is "ghostty", not just that the ghostty branch text exists
-  grep -qE 'case "ghostty"' "$runner"
-  rm -rf "$tmp_dir"; rm -f "$cfg"
-}
-
-@test "_install_launchd_plists: TERM_PROGRAM=ghostty bakes ghostty case value when no config override" {
+@test "_install_launchd_plists: runner uses Terminal.app regardless of TERM_PROGRAM" {
+  # FIX-054: TERM_PROGRAM=ghostty must not change the generated runner — the
+  # popup target is hard-coded to macOS Terminal.app for predictability.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
@@ -491,26 +475,30 @@ setup() {
 
   local slug; slug=$(_project_slug "$proj")
   local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
-  grep -qE 'case "ghostty"' "$runner"
+  grep -qF 'tell application \"Terminal\"' "$runner"
+  run grep -F 'Ghostty.app' "$runner"
+  [ "$status" -ne 0 ]
+  run grep -F 'iTerm2' "$runner"
+  [ "$status" -ne 0 ]
   rm -rf "$tmp_dir"; rm -f "$cfg"
 }
 
-@test "_install_launchd_plists: config loop_attach_terminal wins over TERM_PROGRAM" {
+@test "_install_launchd_plists: ignores loop_attach_terminal config" {
+  # FIX-054: the loop_attach_terminal config key is no longer honored —
+  # generator always emits Terminal.app dispatch.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
   local cfg; cfg=$(mktemp)
-  printf 'loop_attach_terminal: Terminal\n' > "$cfg"; ROLL_CONFIG="$cfg"
+  printf 'loop_attach_terminal: ghostty\n' > "$cfg"; ROLL_CONFIG="$cfg"
 
-  local saved_TERM_PROGRAM="${TERM_PROGRAM:-}"
-  TERM_PROGRAM=ghostty
   _install_launchd_plists "$proj"
-  TERM_PROGRAM="$saved_TERM_PROGRAM"
 
   local slug; slug=$(_project_slug "$proj")
   local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
-  # Case value should be "Terminal" even though TERM_PROGRAM is ghostty
-  grep -qE 'case "Terminal"' "$runner"
+  run grep -F 'Ghostty.app' "$runner"
+  [ "$status" -ne 0 ]
+  grep -qF 'tell application \"Terminal\"' "$runner"
   rm -rf "$tmp_dir"; rm -f "$cfg"
 }

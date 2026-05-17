@@ -1352,41 +1352,20 @@ _peer_route() {
   return 1
 }
 
-# Open a terminal window attached to the given tmux session (peer auto-attach).
-# No-ops when muted, non-macOS, or tmux unavailable. Mirrors loop popup logic.
+# Open a Terminal.app window attached to the given tmux session (peer
+# auto-attach). No-ops when muted, non-macOS, or osascript unavailable.
+# FIX-054: terminal selection removed — always dispatches to macOS
+# Terminal.app for predictability (per-user detection silently failed on
+# Ghostty upgrades).
 _peer_auto_attach() {
   local session="$1"
   [ "$(uname)" = "Darwin" ] || return 0
   [ -f "$_LOOP_MUTE_FILE" ] && return 0
-  local terminal_pref
-  terminal_pref=$(config_get "loop_attach_terminal" "")
-  if [[ -z "$terminal_pref" ]]; then
-    case "${TERM_PROGRAM:-}" in
-      ghostty)   terminal_pref="ghostty" ;;
-      iTerm.app) terminal_pref="iTerm2" ;;
-      *)         terminal_pref="Terminal" ;;
-    esac
-  fi
-  local launched=0
-  if [[ "$terminal_pref" = "ghostty" || "$terminal_pref" = "Ghostty" ]]; then
-    open -na Ghostty.app --args -e tmux attach -t "$session" >/dev/null 2>&1 && launched=1 || true
-  fi
-  if [[ $launched -eq 0 ]] && { [[ "$terminal_pref" = "iTerm2" || "$terminal_pref" = "iTerm" ]] || [[ -d "/Applications/iTerm.app" ]]; }; then
-    osascript \
-      -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \
-      -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t $session\"" \
-      -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 \
-      && launched=1 || true
-  fi
-  if [[ $launched -eq 0 ]] && [[ -d "/Applications/Ghostty.app" ]]; then
-    open -na Ghostty.app --args -e tmux attach -t "$session" >/dev/null 2>&1 && launched=1 || true
-  fi
-  if [[ $launched -eq 0 ]] && command -v osascript >/dev/null 2>&1; then
-    osascript \
-      -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \
-      -e "tell application \"Terminal\" to do script \"tmux attach -t $session\"" \
-      -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
-  fi
+  command -v osascript >/dev/null 2>&1 || return 0
+  osascript \
+    -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \
+    -e "tell application \"Terminal\" to do script \"tmux attach -t $session\"" \
+    -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
 }
 
 # Dispatch a peer CLI command inside an existing tmux session (window 0).
@@ -2202,7 +2181,10 @@ _write_runner_script() {
 # Falls back to headless execution when tmux is not installed.
 _write_loop_runner_script() {
   local script_path="$1" project_path="$2" cmd="$3" log_path="$4"
-  local active_start="${5:-10}" active_end="${6:-18}" terminal_pref="${7:-Terminal}"
+  local active_start="${5:-10}" active_end="${6:-18}"
+  # FIX-054: terminal preference detection removed. Popup is hard-coded to
+  # macOS Terminal.app; the 7th positional arg, if any, is ignored for
+  # backwards compatibility with existing callers.
   mkdir -p "$(dirname "$script_path")"
 
   local inner_path="${script_path%.sh}-inner.sh"
@@ -2587,31 +2569,17 @@ if command -v tmux >/dev/null 2>&1; then
   done
   tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
   tmux pipe-pane -t "\$SESSION" "cat >> \"\$LOG\""
-  # Auto-attach popup: when not muted, spawn a Terminal window attached to the
-  # tmux session so the user can watch the loop work in real time. Best-effort
-  # focus retention: capture the current frontmost app and re-activate after.
-  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
-    # Runtime terminal detection: try preferred first, fallback through installed apps.
-    # open -na returns non-zero when app not found, so || chain works as fallback.
-    _launched=0
-    case "${terminal_pref}" in
-      ghostty|Ghostty)
-        open -na Ghostty.app --args -e tmux attach -t \$SESSION >/dev/null 2>&1 && _launched=1 || true
-        ;;
-      iTerm2|iTerm)
-        osascript \\
-          -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
-          -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t \$SESSION\"" \\
-          -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 \\
-          && _launched=1 || true
-        ;;
-    esac
-    if [ "\$_launched" -eq 0 ] && command -v osascript >/dev/null 2>&1; then
-      osascript \\
-        -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
-        -e "tell application \"Terminal\" to do script \"tmux attach -t \$SESSION\"" \\
-        -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
-    fi
+  # Auto-attach popup: when not muted, spawn a Terminal.app window attached
+  # to the tmux session so the user can watch the loop work in real time.
+  # FIX-054: terminal selection removed — fixed to macOS Terminal.app for
+  # predictability (per-user detection silently failed on Ghostty upgrades).
+  # Best-effort focus retention: capture the current frontmost app and
+  # re-activate after.
+  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
+    osascript \\
+      -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
+      -e "tell application \"Terminal\" to do script \"tmux attach -t \$SESSION\"" \\
+      -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
   fi
   while tmux has-session -t "\$SESSION" 2>/dev/null; do sleep 5; done
 else
@@ -2659,16 +2627,7 @@ _install_launchd_plists() {
   brief_hour=$(_config_read_int "loop_brief_hour" "9")
   brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
 
-  # Terminal preference: config wins, then TERM_PROGRAM env, then "Terminal"
-  local terminal_pref
-  terminal_pref=$(config_get "loop_attach_terminal" "")
-  if [[ -z "$terminal_pref" ]]; then
-    case "${TERM_PROGRAM:-}" in
-      ghostty)    terminal_pref="ghostty" ;;
-      iTerm.app)  terminal_pref="iTerm2" ;;
-      *)          terminal_pref="Terminal" ;;
-    esac
-  fi
+  # FIX-054: terminal preference removed — runner always uses Terminal.app.
 
   local services=("loop" "dream" "brief")
   local skill_names=("roll-loop" "roll-.dream" "roll-brief")
@@ -2690,7 +2649,7 @@ _install_launchd_plists() {
     local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
 
     if [[ "$svc" == "loop" ]]; then
-      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log" "$active_start" "$active_end" "$terminal_pref"
+      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log" "$active_start" "$active_end"
     else
       _write_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log"
     fi
@@ -2934,17 +2893,7 @@ _loop_test() {
   local log="${_SHARED_ROOT}/loop/cron-${slug}.log"
   local test_runner="${_SHARED_ROOT}/loop/run-${slug}-test.sh"
 
-  # Detect terminal pref same way _install_launchd_plists does
-  local terminal_pref
-  terminal_pref=$(config_get "loop_attach_terminal" "")
-  if [[ -z "$terminal_pref" ]]; then
-    case "${TERM_PROGRAM:-}" in
-      ghostty)    terminal_pref="ghostty" ;;
-      iTerm.app)  terminal_pref="iTerm2" ;;
-      *)          terminal_pref="Terminal" ;;
-    esac
-  fi
-
+  # FIX-054: terminal preference removed — runner always uses Terminal.app.
   local active_start active_end
   active_start=$(_config_read_int "loop_active_start" "10")
   active_end=$(_config_read_int "loop_active_end" "18")
@@ -2952,7 +2901,7 @@ _loop_test() {
   info "Generating test runner...  正在生成测试启动脚本..."
   _write_loop_runner_script "$test_runner" "$project_path" \
     'claude -p "Reply with a single word: hello"; sleep 10' \
-    "$log" "$active_start" "$active_end" "$terminal_pref"
+    "$log" "$active_start" "$active_end"
 
   info "Starting smoke test (real claude, trivial prompt)...  正在运行 smoke 测试（真实 claude）..."
   info "Watch for: tmux session + terminal popup + stream-json events flowing"

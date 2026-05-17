@@ -26,10 +26,20 @@ teardown() { unit_teardown_cd; }
   echo "$body" | grep -qF 'osascript'
 }
 
-@test "_peer_auto_attach: reads loop_attach_terminal config" {
+@test "_peer_auto_attach: no terminal-preference detection (FIX-054)" {
+  # FIX-054: dropped per-user terminal detection. Body must not branch on
+  # loop_attach_terminal config or TERM_PROGRAM env, and must not invoke
+  # Ghostty / iTerm2 dispatch — always macOS Terminal.app via osascript.
   local body
   body=$(awk '/^_peer_auto_attach\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$body" | grep -qF 'loop_attach_terminal'
+  run grep -F 'loop_attach_terminal' <<<"$body"
+  [ "$status" -ne 0 ]
+  run grep -F 'TERM_PROGRAM' <<<"$body"
+  [ "$status" -ne 0 ]
+  run grep -F 'Ghostty.app' <<<"$body"
+  [ "$status" -ne 0 ]
+  run grep -F 'iTerm2' <<<"$body"
+  [ "$status" -ne 0 ]
 }
 
 @test "_peer_auto_attach: no-ops when mute file exists" {

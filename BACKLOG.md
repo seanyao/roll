@@ -166,6 +166,7 @@
 | FIX-047 | loop 在 PR 合入 main 之前标 Done — CI 绿不代表已交付，分支没合进去代码就丢了 | ✅ Done |
 | FIX-048 | 两个 cycle 隔不到 PR 合入时间就启动，会双取同一个 Todo 故事造成重复 PR 与合并冲突 — 新 cycle 启动前没检查 OPEN 的 loop PR 里已认领的故事 | 📋 Todo |
 | FIX-049 | `roll update` 末尾两段「可选启用 AI 双闸门 / 秒级 PR 评审」提示每次都重复打，已经按提示装过的人也被反复刷屏 — 应该检测当前仓库已启用就别再打 | 📋 Todo |
+| FIX-050 | loop 被系统定时器拉起时拿到的环境路径是裸的，找不到 brew 装的工具（如 tmux），导致没有弹窗、未来同类工具缺失还会一个个冒出来 — 应该从系统级一次配齐路径，顺手清掉 runner 脚本里散落的临时硬编码 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

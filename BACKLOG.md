@@ -164,9 +164,8 @@
 | FIX-045 | 恢复孤儿分支时不 rebase — 分支从创建起就落后 main，auto-merge 被 GitHub BEHIND 状态卡住 | ✅ Done |
 | FIX-046 | `roll ci --wait` 在 PR 未创建时死等 — CI 只触发于 PR event，无 PR 则永远等不到 check run | ✅ Done |
 | FIX-047 | loop 在 PR 合入 main 之前标 Done — CI 绿不代表已交付，分支没合进去代码就丢了 | ✅ Done |
-| FIX-048 | 两个 cycle 隔不到 PR 合入时间就启动，会双取同一个 Todo 故事造成重复 PR 与合并冲突 — 新 cycle 启动前没检查 OPEN 的 loop PR 里已认领的故事 | 📋 Todo |
-| FIX-049 | `roll update` 末尾两段「可选启用 AI 双闸门 / 秒级 PR 评审」提示每次都重复打，已经按提示装过的人也被反复刷屏 — 应该检测当前仓库已启用就别再打 | 📋 Todo |
-| FIX-050 | loop 被系统定时器拉起时拿到的环境路径是裸的，找不到 brew 装的工具（如 tmux），导致没有弹窗、未来同类工具缺失还会一个个冒出来 — 应该从系统级一次配齐路径，顺手清掉 runner 脚本里散落的临时硬编码 | 📋 Todo |
+| FIX-048 | 两个 cycle 隔不到 PR 合入时间就启动，会双取同一个 Todo 故事造成重复 PR 与合并冲突 — 新 cycle 启动前扫一遍 OPEN 的 loop PR，把已认领的故事加入 skip 列表；只覆盖"PR 已 push 未合"窗口（"cycle 跑到一半未 push"由 LOCK 保护）；GitHub 不可达时降级为乐观取（不阻塞 cycle）并写 ALERT 提示 | 📋 Todo |
+| FIX-050 | loop 被系统定时器拉起时拿到的环境路径是裸的，找不到 brew 装的工具（如 tmux），导致没有弹窗、未来同类工具缺失还会一个个冒出来 — 两层兜底：①setup 时探测 brew 前缀并写入 macOS 定时任务配置；②runner 脚本启动时再跑一段跨平台路径拼装（覆盖 Linux cron 用户与 plist 过期场景）；inner 脚本里散落的硬编码一并撤掉；setup/update 后请重跑 setup 让配置生效 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -312,3 +311,4 @@
 | IDEA-019 | launchd 默认 loop_minute 测试 flaky — hash mod 55 容易碰撞，相邻两个项目偶尔会拿到同一分钟 — flagged by simplify CI debugging 2026-05-17 | 📋 Todo |
 | IDEA-020 | loop tmux 输出精简与视觉层次设计 — 当前信息量过大、关键节点不突出、换行排版混乱；需设计精简方案：过滤低信号噪音，用视觉层次突出 Step 切换、CI gate、TCR commit、story 完成等关键事件，让用户扫一眼即知当前阶段与健康状态 | ✅ Done → US-LOOP-002 |
 | IDEA-021 | loop 等待期间加 spinner 动画 — 当 agent 正在执行 story 时，tmux 输出缺少 loading 状态反馈，看起来像卡住；在每个 → 事件行之后、下一个事件行出现之前，显示一个简单的 spinner 动画表示"正在处理中" | ✅ Done → US-LOOP-003 |
+| IDEA-022 | `roll update` 末尾两段「可选启用 AI 双闸门 / 秒级 PR 评审」每次都重复打，已经装过的人被反复刷屏 — 需要先讨论方案：探测仓库已启用就不打 / 用户看过一次记标记不再打 / 整段挪到 `roll doctor` 让用户主动看，三选一 | 📋 Todo |

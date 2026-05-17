@@ -203,6 +203,12 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
             sid = _extract_story_id(detail)
             if sid:
                 cy["story"] = sid
+        elif stage == "usage":
+            # US-LOOP-004: loop-fmt emits this with full token / cost data.
+            # Detail is a dict (not the legacy string form).
+            d = e.get("detail") or {}
+            if isinstance(d, dict):
+                cy["usage_event"] = d
         elif stage in ("test", "build") and e.get("outcome") == "fail":
             cy["fail_detail"] = detail or stage
 
@@ -296,15 +302,39 @@ def load_claude_session_usage(label: str, slug: str) -> Optional[Dict[str, Any]]
             "cost_reported_usd": cost, "duration_ms": duration_ms}
 
 def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str) -> None:
-    """For each cycle missing token data, try to recover from claude's own
-    session log. Populates cy['tokens'], cy['cost_list'], cy['model']."""
+    """Populate cy['tokens'], cy['cost_list'], cy['model']. Two paths:
+      1. usage_event from events stream (US-LOOP-004 writer side) — authoritative
+      2. claude session JSONL backfill — for cycles that ran before the
+         writer existed, or on machines where events.ndjson got truncated
+    """
     import importlib.util
     spec = importlib.util.spec_from_file_location("model_prices",
                                                    os.path.join(_LIB_DIR, "model_prices.py"))
     mp = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mp)
     for cy in cycles:
-        if cy.get("tokens"):  # already populated by future events writer
+        # Path 1: usage event written by loop-fmt at result time.
+        ue = cy.get("usage_event")
+        if isinstance(ue, dict) and (ue.get("input_tokens") or ue.get("output_tokens")):
+            cy["tokens"] = mp.total_tokens(
+                input_tokens=ue.get("input_tokens", 0),
+                output_tokens=ue.get("output_tokens", 0),
+                cache_creation_tokens=ue.get("cache_creation_tokens", 0),
+                cache_read_tokens=ue.get("cache_read_tokens", 0),
+            )
+            cy["model"] = ue.get("model")
+            cy["cost_list"] = mp.compute_list_cost(
+                ue.get("model"),
+                input_tokens=ue.get("input_tokens", 0),
+                output_tokens=ue.get("output_tokens", 0),
+                cache_creation_tokens=ue.get("cache_creation_tokens", 0),
+                cache_read_tokens=ue.get("cache_read_tokens", 0),
+            )
+            if ue.get("duration_ms") and not cy.get("duration_s"):
+                cy["duration_s"] = int(ue["duration_ms"] / 1000)
+            continue
+        # Path 2: salvage from claude's own session log.
+        if cy.get("tokens"):
             continue
         u = load_claude_session_usage(cy.get("label", ""), slug)
         if not u:

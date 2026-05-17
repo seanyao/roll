@@ -116,6 +116,11 @@ class LoopFmt:
         self.pending_ci      = False
         self.pending_story   = False
         self.spinner         = Spinner()
+        # Track the most recent usage / model seen on assistant turns so
+        # the result event handler can emit a 'usage' event even when
+        # result.usage is missing.
+        self._last_usage     = None
+        self._last_model     = None
 
     def _extract_cycle_num(self, text):
         m = re.search(r'cycle[#\s]+(\d+)', text, re.IGNORECASE)
@@ -156,6 +161,12 @@ class LoopFmt:
 
     def _handle_assistant(self, ev):
         msg = ev.get("message", {})
+        # Remember the latest usage / model so the trailing result event
+        # can emit a 'usage' event even if result.usage is empty.
+        if msg.get("usage"):
+            self._last_usage = msg["usage"]
+        if msg.get("model"):
+            self._last_model = msg["model"]
         for blk in msg.get("content", []):
             btype = blk.get("type", "")
             if btype == "thinking":
@@ -317,6 +328,46 @@ class LoopFmt:
         else:
             cycle_str = f"cycle #{self.cycle_num}" if self.cycle_num else "cycle done"
             print(stamp(f"{cycle_str} — done · {detail}" if detail else f"{cycle_str} — done", muted=True))
+
+        # US-LOOP-004 partial: emit a per-cycle 'usage' event into the
+        # durable events.ndjson so dashboards don't have to rely on the
+        # cron.log (overwritten every cycle). Skips silently when the
+        # required env vars aren't set (e.g. running outside roll loop).
+        self._emit_usage_event(ev, dur_ms, cost_usd)
+
+    def _emit_usage_event(self, result_ev, dur_ms, cost_usd):
+        slug    = os.environ.get("LOOP_PROJECT_SLUG")
+        cycle   = os.environ.get("LOOP_CYCLE_ID")
+        shared  = os.environ.get("LOOP_SHARED_ROOT") or os.path.expanduser("~/.shared/roll")
+        if not (slug and cycle):
+            return
+        # Pull usage off the result event itself if present, otherwise off
+        # the most recent assistant turn we observed.
+        usage = (result_ev.get("usage") or self._last_usage or {})
+        model = result_ev.get("model") or self._last_model or ""
+        payload = {
+            "model": model,
+            "input_tokens":            int(usage.get("input_tokens") or 0),
+            "output_tokens":           int(usage.get("output_tokens") or 0),
+            "cache_creation_tokens":   int(usage.get("cache_creation_input_tokens") or 0),
+            "cache_read_tokens":       int(usage.get("cache_read_input_tokens") or 0),
+            "cost_reported_usd":       float(cost_usd or 0),
+            "duration_ms":             int(dur_ms or 0),
+        }
+        evfile = os.path.join(shared, "loop", f"events-{slug}.ndjson")
+        line = json.dumps({
+            "ts":      datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "stage":   "usage",
+            "label":   cycle,
+            "detail":  payload,
+            "outcome": "ok",
+        }) + "\n"
+        try:
+            os.makedirs(os.path.dirname(evfile), exist_ok=True)
+            with open(evfile, "a") as f:
+                f.write(line)
+        except Exception:
+            pass  # best-effort; never break tmux output
 
 
 def main():

@@ -2269,6 +2269,13 @@ else
 fi
 
 FMT="${fmt_script}"
+# US-LOOP-004: hand loop-fmt the slug + cycle id + shared root so it can
+# append a per-cycle 'usage' event into events-<slug>.ndjson with
+# tokens / cost / model / duration. Reader (roll loop status) consumes
+# that instead of having to scrape the overwritten cron.log.
+export LOOP_PROJECT_SLUG="${slug}"
+export LOOP_CYCLE_ID="\${CYCLE_ID}"
+export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
 for _attempt in 1 2 3; do
   if [ -f "\$FMT" ]; then
     ( cd "\$WT" && ${claude_cmd} ) | python3 "\$FMT"

@@ -81,7 +81,9 @@ $(grep '✅ Done' BACKLOG.md | tail -40)"
   echo "Syncing CHANGELOG.md and generating release notes via ${agent}..." >&2
   _agent_argv "$agent" plain "$prompt" || { echo "Error: Unknown agent '${agent}'." >&2; return 1; }
   _agent_bypass_claude_perms
-  "${_AGENT_ARGV[@]}"
+  "${_AGENT_ARGV[@]}" >/dev/null  # AI edits CHANGELOG.md via file tools; raw stdout discarded
+  # Extract release notes from the now-updated CHANGELOG.md (no format drift, no stdout pollution)
+  awk '/^## Unreleased/{found=1; next} found && /^## /{exit} found && NF{print}' CHANGELOG.md
 }
 
 # ── AI call 2: rewrite docs/features.md (section 8 only + compact BACKLOG) ──

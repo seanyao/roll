@@ -73,3 +73,14 @@ SKILL_MD="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
 @test "release.sh still has safe-by-default cmp check for features.md" {
   grep -qF "cmp -s docs/features.md" "$RELEASE_SH"
 }
+
+# ─── REFACTOR-021: release notes extracted from CHANGELOG.md, not AI stdout ──
+
+@test "_run_changelog_and_notes discards agent stdout and extracts notes from CHANGELOG.md" {
+  # Agent's raw stdout must be suppressed; release notes come from CHANGELOG.md via awk
+  local start; start=$(grep -n "_run_changelog_and_notes()" "$RELEASE_SH" | head -1 | cut -d: -f1)
+  local end_line; end_line=$(awk "NR>$start && /^\}$/{print NR; exit}" "$RELEASE_SH")
+  local body; body=$(sed -n "${start},${end_line}p" "$RELEASE_SH")
+  echo "$body" | grep -q '>/dev/null'
+  echo "$body" | grep -qE 'awk.*CHANGELOG|CHANGELOG.*awk'
+}

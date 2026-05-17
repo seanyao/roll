@@ -481,3 +481,15 @@ clean).
 **Fix**: 将嵌套树替换为两个并列编号子流程（Path A — 允许/Path B — 耗尽），代码块独立成段。同步移除已被 REFACTOR-023 废弃的 `heal/<story_id>.count` 路径引用，改为 `state.yaml` 中的 `heal_count:` 字段。
 
 **Files**: `skills/roll-loop/SKILL.md`, `tests/unit/roll_loop_self_heal_doc.bats`（新增）
+
+---
+
+## REFACTOR-025 删除 merge_convention() 死代码及测试 ✅
+
+**Flagged**: 2026-05-17 by dream scan
+**Completed**: 2026-05-17
+**Signal**: `merge_convention()`（~160 行）在 bin/roll 中定义，但从未被任何生产路径调用。`cmd_init()` 改用 `_merge_global_to_project()` 和 `_merge_claude_to_project()`（均为追加合并，非交互式）。原设计意图：供 `refresh_project()` 的 Trae 分支调用，但 `refresh_project()` 已被移除。
+
+**Fix**: 删除 `merge_convention()` 及其注释头（bin/roll 删除 ~160 行），删除孤立测试文件 `tests/unit/merge_convention.bats`，在 `tests/unit/sanity.bats` 新增回归守卫（防止同类死代码悄然重现）。
+
+**Files**: `bin/roll`（删除函数），`tests/unit/merge_convention.bats`（删除），`tests/unit/sanity.bats`（新增 guard）

@@ -3495,13 +3495,22 @@ _loop_self_heal_ci() {
   [[ -z "$story_id" ]] && return 1
   [[ "${ROLL_LOOP_NO_HEAL:-0}" == "1" ]] && return 1
   local max="${ROLL_LOOP_HEAL_MAX:-2}"
-  local dir; dir=$(_loop_heal_dir)
-  local counter="${dir}/${story_id}.count"
-  mkdir -p "$dir"
-  local current; current=$(<"$counter") 2>/dev/null || current=0
-  [[ "$current" =~ ^[0-9]+$ ]] || current=0
+  local state="${_LOOP_STATE:-${HOME}/.shared/roll/loop/state.yaml}"
+  local current=0
+  if [[ -f "$state" ]]; then
+    local raw; raw=$(grep '^heal_count:' "$state" 2>/dev/null | awk '{print $2}')
+    [[ "$raw" =~ ^[0-9]+$ ]] && current="$raw"
+  fi
   [[ "$current" -ge "$max" ]] && return 1
-  echo $((current + 1)) > "$counter"
+  local new=$((current + 1))
+  mkdir -p "$(dirname "$state")"
+  if grep -q '^heal_count:' "$state" 2>/dev/null; then
+    local tmp; tmp=$(mktemp)
+    sed "s/^heal_count:.*/heal_count: ${new}/" "$state" > "$tmp"
+    mv "$tmp" "$state"
+  else
+    echo "heal_count: ${new}" >> "$state"
+  fi
   return 0
 }
 
@@ -3510,7 +3519,11 @@ _loop_self_heal_ci() {
 _loop_clear_heal_state() {
   local story_id="$1"
   [[ -z "$story_id" ]] && return 0
-  rm -f "$(_loop_heal_dir)/${story_id}.count" 2>/dev/null
+  local state="${_LOOP_STATE:-${HOME}/.shared/roll/loop/state.yaml}"
+  [[ ! -f "$state" ]] && return 0
+  local tmp; tmp=$(mktemp)
+  grep -v '^heal_count:' "$state" > "$tmp"
+  mv "$tmp" "$state"
   return 0
 }
 

@@ -2807,6 +2807,10 @@ _LOOP_PROJ_SLUG="${slug}"
 _LOOP_ALERT="\${_SHARED_ROOT}/loop/ALERT-${slug}.md"
 _LOOP_STATE="\${_SHARED_ROOT}/loop/state-${slug}.yaml"
 _LOOP_MUTE_FILE="\${_SHARED_ROOT}/loop/mute-${slug}"
+# US-LOOP-006: ROLL_MAIN_SLUG is the canonical identity for any subprocess —
+# claude, loop-fmt.py, _loop_event in arbitrary cwd. _project_slug honors this
+# env var first, so writes never fragment into tmp-* / cycle-* phantom slugs.
+export ROLL_MAIN_SLUG="${slug}"
 
 # Pre-claude: try to create a per-cycle isolated worktree on origin/main.
 # On any failure (no remote, no main, etc.) fall back to running in the

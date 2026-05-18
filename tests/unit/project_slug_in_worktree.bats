@@ -40,3 +40,16 @@ teardown() {
   s2=$(_project_slug "/tmp/roll-loop006-bbb")
   [ "$s1" != "$s2" ]
 }
+
+# US-LOOP-006 AC1: cycle wrapper inner script must export ROLL_MAIN_SLUG so
+# subprocesses (claude / loop-fmt.py / _loop_event subshells) inherit the
+# main project identity regardless of where they cd to.
+@test "_write_loop_runner_script: inner script exports ROLL_MAIN_SLUG with main slug" {
+  ROLL_PKG_DIR="${BATS_TEST_DIRNAME}/../.."
+  local script="${TEST_TMP}/run-loop006.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${TEST_TMP}/log" 10 24
+  local inner="${TEST_TMP}/run-loop006-inner.sh"
+  # The exported value should be the same slug computed for the project_path
+  local expected; expected=$(_project_slug "/some/project")
+  grep -qE "export ROLL_MAIN_SLUG=\"${expected}\"" "$inner"
+}

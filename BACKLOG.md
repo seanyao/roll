@@ -297,6 +297,12 @@
 | [US-LOOP-003](docs/features/cycle-event-stream.md#us-loop-003) | loop 等待期间显示 spinner 动画，story 执行、CI 运行、PR 合并三个等待点都有反馈，不再看起来像卡住 | ✅ Done |
 | [US-LOOP-004](docs/features/cycle-event-stream.md#us-loop-004) | loop 每轮跑完把成本、token、耗时、模型名写进永久事件流，dashboard 看历史不再只有最新一轮，多机器 / 多项目对账可加总 | ✅ Done |
 
+### Feature: loop-write-integrity
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-LOOP-005](docs/features/loop-write-integrity.md#us-loop-005) | 每个 cycle 跑完都留下结束记号 — 把所有结束路径（合并成功、孤儿恢复、超时、崩溃自愈、PR 失败兜底）都补上结束信号，dashboard 不再把早已结束的 cycle 显示成"还在跑" | 📋 Todo |
+| [US-LOOP-006](docs/features/loop-write-integrity.md#us-loop-006) | cycle 不论在哪个工作目录跑，运行记录都统一归到主项目身份，dashboard 按项目筛选时拿到完整历史 | 📋 Todo |
+
 ## Epic: CLI 视觉系统
 ### Feature: cli-redesign
 | Story | Description | Status |
@@ -346,7 +352,7 @@
 | IDEA-025 | loop dashboard 上看到的每轮成本是 AI 客户端上报的折后价（含订阅 / 抵扣，不反映真实开销）— 改成按当前模型公开单价 × 实际用量自己算一遍，让每个项目的成本可对齐、可加总、按美金计价 | 📋 Todo → US-VIEW-010 |
 | IDEA-026 | 同一项目在不同机器上跑 loop 时记录各存各的、互相看不见 — 把每轮 cycle 数据推到云端按项目集中存，按代码仓库身份认项目（而不是本地目录），所有机器看同一份合并后的进度 | 📋 Todo |
 | IDEA-027 | loop dashboard 现在只能看到最新一轮的成本和耗时，再往前的历史都丢了 — 因为这些数字写在一份每轮被新数据覆盖的临时日志里；改成结束时把成本 / 耗时写进永久事件流，历史也能完整看到，顺带打开按天、按故事汇总成本的可能 | 📋 Todo → US-LOOP-004 |
-| IDEA-028 | loop 跑完一轮在某些情况下不会写下"结束"标记，dashboard 看到这些轮就以为还在跑，其实早就合到主干了 — 审计 loop 的所有结束路径（合并成功、孤儿恢复、超时退出、崩溃自愈、PR 失败兜底）每条都补上结束记录，dashboard 不再需要去 git 历史里反查 | 📋 Todo |
-| IDEA-029 | loop 在隔离工作目录里跑出来的运行记录被错认成另一个项目身份，dashboard 按项目筛选时会漏掉这部分历史 — 写入时统一回主项目身份，让一个项目的记录不被切碎 | 📋 Todo |
+| IDEA-028 | loop 跑完一轮在某些情况下不会写下"结束"标记，dashboard 看到这些轮就以为还在跑，其实早就合到主干了 — 审计 loop 的所有结束路径（合并成功、孤儿恢复、超时退出、崩溃自愈、PR 失败兜底）每条都补上结束记录，dashboard 不再需要去 git 历史里反查 | 📋 Todo → US-LOOP-005 |
+| IDEA-029 | loop 在隔离工作目录里跑出来的运行记录被错认成另一个项目身份，dashboard 按项目筛选时会漏掉这部分历史 — 写入时统一回主项目身份，让一个项目的记录不被切碎 | 📋 Todo → US-LOOP-006 |
 | IDEA-030 | 把 loop 里在做的事儿拆成独立的 loop（CI loop、PR loop、UX loop、Refactor loop 等），把工作打碎成短途连续接力赛，而不是一个马拉松；同时再加一个"巡检 loop"专门盯当前 loop 跑得正不正常（卡死、锁残留、wrapper 没退出、整点 cron 被自己挡掉 —— 像今天早上 03:23 那轮就是真实案例：业务做完了 wrapper 没退，5 小时整点全被 skip 了，没人巡检就根本发现不了） | 📋 Todo |
 | IDEA-031 | 本地测试套要 5-8 分钟，TCR 每轮都被拖死 —— 切成两层：本地只跑"必须本地"的快测试，1 分钟之内出绿/红；剩下的真 git、真 sleep、并发 behavior 全推到 CI，让开发只在本地等模板和契约级断言 | 📋 Todo |

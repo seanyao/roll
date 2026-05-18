@@ -64,7 +64,8 @@ teardown() { integration_teardown; }
   rm BACKLOG.md
   run_roll
   [ "$status" -eq 0 ]
-  # Without BACKLOG.md main() falls through to usage + changelog,
-  # NOT the dashboard. Golden behaviour: still exits 0, prints usage.
-  [[ "$output" == *"Usage:"* ]] || [[ "$output" == *"用法"* ]]
+  # Without BACKLOG.md main() falls through to _help + changelog.
+  # v2: "roll ·" wordmark + AUTONOMY; v1: "Usage:" or "用法"
+  [[ "$output" == *"roll ·"* ]] || [[ "$output" == *"AUTONOMY"* ]] \
+    || [[ "$output" == *"Usage:"* ]] || [[ "$output" == *"用法"* ]]
 }

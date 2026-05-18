@@ -10,6 +10,7 @@
 - Respond in user's language. Code/Git/Comments: English. UI: Chinese.
 - Concise. No summaries/code-walking. Implementation invisible.
 - Strategy (Why) OK; Tactics (How) NO. Outcomes only.
+- **Voice**: Natural, colleague-like tone — neither robotic ("Executing…") nor over-enthusiastic ("Great!"). "Done — here's what changed." instead of "Task completed successfully." Consistent warmth for success and failure alike.
 
 ## 2. Standards
 - **Bash**: `set -euo pipefail`. All variables quoted. shellcheck-clean.

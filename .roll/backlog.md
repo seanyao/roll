@@ -276,6 +276,9 @@
 | REFACTOR-031 | 同一个 macOS/Linux mtime 兼容写法在四处复制粘贴，平台兼容性如有调整需要四个地方同步改，容易漏 — flagged by dream 2026-05-18 | 📋 Todo |
 | REFACTOR-032 | docs: 产品功能目录漏收三个已经上线一段时间的功能区，用户从功能页找不到这些功能；发版时的自动重写脚本没能把它们补进去 — flagged by dream 2026-05-18 (hint: $roll-doc) | 📋 Todo |
 | REFACTOR-033 | docs: 仓库里有一个共享脚本目录承载了多个生产模块，但在架构文档里完全没出现，新人读完领域文档也不知道它的存在 — flagged by dream 2026-05-18 (hint: $roll-doc) | 📋 Todo |
+| REFACTOR-034 | docs: BACKLOG 里每条 Story 的链接都指向已经搬走的旧目录，点开是 404，新人通过 BACKLOG 浏览功能详情会被全部断链堵死 — flagged by dream 2026-05-19 (hint: $roll-doc) | 📋 Todo |
+| REFACTOR-035 | docs: 用户指南还在告诉读者功能详情、领域模型、夜检日志放在老目录，而实际位置已经搬走，按文档说的路径找不到任何东西 — flagged by dream 2026-05-19 (hint: $roll-doc) | 📋 Todo |
+| REFACTOR-036 | 本次夜检技能自身的扫描描述里还写着老目录路径，未来按文档复现夜检流程会扫到空目录、漏掉真实内容 — flagged by dream 2026-05-19 | 📋 Todo |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

@@ -353,7 +353,7 @@ def main() -> None:
     ap.add_argument("--zh",       action="store_true")
     args, _ = ap.parse_known_args()
 
-    if args.no_color or os.environ.get("NO_COLOR"):
+    if args.no_color or os.environ.get("NO_COLOR") or not sys.stdout.isatty():
         roll_render.USE_COLOR = False
 
     d = _demo_data() if args.demo else _live_data()

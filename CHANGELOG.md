@@ -5,6 +5,7 @@
 ### Improved
 
 - **`roll` 主页焕新** — 一屏看清 loop / dream / peer 状态、四道防线、Pipeline 进度和待你处理的事 `[loop]`
+- **`roll --help` 焕新** — 命令按日常 / 项目 / 全局三组分类，常用命令 ★ 高亮，不再被大字 ASCII banner 占屏 `[loop]`
 
 ### Fixed
 

@@ -51,7 +51,7 @@ teardown() { unit_teardown_cd; }
       cat <<'EOF'
 | FIX-048 | race description | 🔨 In Progress |
 | FIX-049 | another row | 📋 Todo |
-| [US-AUTO-033](docs/features/foo.md#us-auto-033) | a linked story | 🔨 In Progress |
+| [US-AUTO-033](.roll/features/foo.md#us-auto-033) | a linked story | 🔨 In Progress |
 EOF
       return 0
     fi

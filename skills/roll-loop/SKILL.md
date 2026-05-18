@@ -4,7 +4,7 @@ license: MIT
 allowed-tools: "Read, Glob, Grep, Write, Edit, Bash(git:*), Bash(cat:*), Skill"
 description: |
   Autonomous BACKLOG executor. Runs on a schedule (hourly via cron or GitHub
-  Actions), scans BACKLOG.md for 📋 Todo items, and routes each to the
+  Actions), scans .roll/backlog.md for 📋 Todo items, and routes each to the
   appropriate skill: US-XXX → $roll-build, FIX-XXX → $roll-fix,
   REFACTOR-XXX → $roll-build. Handles agent fallback on token/network failure.
   Never cuts a release autonomously — release is always a human decision.
@@ -55,7 +55,7 @@ denied operations and the cycle will idle-exit.
   lookup, `Edit` for modifications. They cross sandbox boundaries that
   `cat` / `ls` / `sed` cannot.
 - **CWD-relative paths first**: the cycle's CWD is the per-cycle worktree.
-  Files inside it (BACKLOG.md, bin/roll, tests/, docs/) are always
+  Files inside it (.roll/backlog.md, bin/roll, tests/, docs/) are always
   accessible. Files at `~/.shared/roll/...` are reachable via the `Read`
   tool but not via shell commands.
 - **Skill invocation is the work**: route US/REFACTOR via `$roll-build`,
@@ -88,7 +88,7 @@ fi
 
 **Orphan 🔨 recovery** — clean up stories left in `🔨 In Progress` by a crashed previous run:
 
-1. Scan BACKLOG.md for all rows whose Status column contains `🔨 In Progress`.
+1. Scan .roll/backlog.md for all rows whose Status column contains `🔨 In Progress`.
 2. For each such story, check `state.yaml`:
    - If `current_item` matches the story id AND `status: running` → this is the resume case (handled above), leave it.
    - Otherwise → this is an **orphan 🔨** (the loop that marked it crashed before finishing). Revert the status back to `📋 Todo`, commit `chore: revert orphan 🔨 US-XXX to 📋`, and append a line to `~/.shared/roll/loop/ALERT.md` recording the orphan id and time so the next brief surfaces it.
@@ -137,7 +137,7 @@ Step 2 (BACKLOG scan). Same posture as the pre-run CI check.
 
 ### Step 2 — Scan BACKLOG
 
-Read `BACKLOG.md`. Collect all rows where Status = `📋 Todo`, in order:
+Read `.roll/backlog.md`. Collect all rows where Status = `📋 Todo`, in order:
 
 Priority: FIX-XXX first (bugs block progress), then US-XXX, then REFACTOR-XXX.
 
@@ -165,18 +165,18 @@ bash -c 'source "$(command -v roll)"; _loop_pr_claimed_stories'
 # Source bin/roll once per cycle, then call the helpers per candidate.
 source "$(command -v roll)"
 
-bash -c 'source "$(command -v roll)"; _loop_is_manual_only "<story-id>" BACKLOG.md'
+bash -c 'source "$(command -v roll)"; _loop_is_manual_only "<story-id>" .roll/backlog.md'
 #   exit 0 → row has `manual-only:true` → SKIP this story, log to runs.jsonl
 #            `skipped`, append INFO line ("manual-only — requires $roll-build")
 
-bash -c 'source "$(command -v roll)"; _loop_check_depends_on "<story-id>" BACKLOG.md'
+bash -c 'source "$(command -v roll)"; _loop_check_depends_on "<story-id>" .roll/backlog.md'
 #   exit 0 → all `depends-on:US-X,US-Y` are ✅ Done → eligible
 #   exit 1 → stdout lists unsatisfied dep IDs; SKIP this story, log to
 #            runs.jsonl `skipped` with reason "depends-on: <unsatisfied>"
 ```
 
 Move to the next candidate when skipping. The two gates are pure functions
-over BACKLOG.md text — no side effects, no LOCK interaction.
+over .roll/backlog.md text — no side effects, no LOCK interaction.
 
 Cap at `max_items_per_run` to limit blast radius per cycle.
 
@@ -201,9 +201,9 @@ Together these mean: only one loop runs at a time per project (LOCK), and within
 
 ### Step 3 — Route and Execute
 
-For each item, **before invoking the executor skill**, mark the story 🔨 In Progress in BACKLOG.md so brief and peer agents can see it's being worked on:
+For each item, **before invoking the executor skill**, mark the story 🔨 In Progress in .roll/backlog.md so brief and peer agents can see it's being worked on:
 
-1. Edit BACKLOG.md: change the row's Status column from `📋 Todo` to `🔨 In Progress`.
+1. Edit .roll/backlog.md: change the row's Status column from `📋 Todo` to `🔨 In Progress`.
 2. Commit: `git commit -am "chore: mark US-XXX in progress"` (use the actual story id).
 
 This commit is what makes the work visible — without it, tcr micro-commits during execution are invisible to `roll-brief`.
@@ -244,7 +244,7 @@ After each item completes:
 
 1. **TCR 硬校验** — call `roll loop enforce-tcr <story_id> <started_at>`:
    - Count `tcr:` prefix commits since `started_at` via `git log --oneline --since=<started_at>`
-   - Count == 0 → revert story status in BACKLOG.md from ✅ Done → 📋 Todo; write ALERT to `~/.shared/roll/loop/ALERT.md` with story ID, time, reason "zero tcr: commits since story start", and suggested actions (`roll loop now` / `$roll-build <id>` / `roll loop reset`)
+   - Count == 0 → revert story status in .roll/backlog.md from ✅ Done → 📋 Todo; write ALERT to `~/.shared/roll/loop/ALERT.md` with story ID, time, reason "zero tcr: commits since story start", and suggested actions (`roll loop now` / `$roll-build <id>` / `roll loop reset`)
    - Count > 0 → continue normally
 2. **CI Gate** — **MUST** invoke `roll ci --wait` (the `_loop_enforce_ci`
    wrapper). **Do NOT call `gh` directly** (no `gh run list`, no `gh run watch`,
@@ -498,7 +498,7 @@ across all projects on this machine. Check the current state with
 
 ```
 roll-loop
-  ├── reads      BACKLOG.md
+  ├── reads      .roll/backlog.md
   ├── invokes    $roll-build (US-XXX, REFACTOR-XXX)
   ├── invokes    $roll-fix (FIX-XXX)
   ├── invokes    $roll-brief (on Feature completion)

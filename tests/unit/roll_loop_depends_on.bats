@@ -22,12 +22,12 @@ setup() {
 ### Feature: sample
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-AUTO-036](docs/features/foo.md#us-auto-036) | helpers + tests | ✅ Done |
-| [US-AUTO-037](docs/features/foo.md#us-auto-037) | runner integration `depends-on:US-AUTO-036` `manual-only:true` | 📋 Todo |
-| [US-AUTO-033](docs/features/foo.md#us-auto-033) | build PR + auto-merge `depends-on:US-AUTO-037` | 📋 Todo |
-| [US-AUTO-034](docs/features/foo.md#us-auto-034) | PR inbox first `depends-on:US-AUTO-033,US-AUTO-035` | 📋 Todo |
-| [US-AUTO-035](docs/features/foo.md#us-auto-035) | review approve `depends-on:US-AUTO-033` | ✅ Done |
-| [US-AUTO-100](docs/features/foo.md#us-auto-100) | no deps at all | 📋 Todo |
+| [US-AUTO-036](.roll/features/foo.md#us-auto-036) | helpers + tests | ✅ Done |
+| [US-AUTO-037](.roll/features/foo.md#us-auto-037) | runner integration `depends-on:US-AUTO-036` `manual-only:true` | 📋 Todo |
+| [US-AUTO-033](.roll/features/foo.md#us-auto-033) | build PR + auto-merge `depends-on:US-AUTO-037` | 📋 Todo |
+| [US-AUTO-034](.roll/features/foo.md#us-auto-034) | PR inbox first `depends-on:US-AUTO-033,US-AUTO-035` | 📋 Todo |
+| [US-AUTO-035](.roll/features/foo.md#us-auto-035) | review approve `depends-on:US-AUTO-033` | ✅ Done |
+| [US-AUTO-100](.roll/features/foo.md#us-auto-100) | no deps at all | 📋 Todo |
 
 ## 🐛 Bug Fixes
 | ID | Description | Status |
@@ -81,9 +81,9 @@ teardown() {
   [ "$status" -eq 1 ]
 }
 
-@test "_loop_check_depends_on: defaults to ./BACKLOG.md when backlog arg omitted" {
-  # Use the fixture backlog as cwd's BACKLOG.md
-  cp "$_backlog" "${TEST_TMP}/BACKLOG.md"
+@test "_loop_check_depends_on: defaults to ./.roll/backlog.md when backlog arg omitted" {
+  # Use the fixture backlog as cwd's .roll/backlog.md
+  cp "$_backlog" "${TEST_TMP}/.roll/backlog.md"
   cd "$TEST_TMP"
   run _loop_check_depends_on "US-AUTO-100"
   [ "$status" -eq 0 ]

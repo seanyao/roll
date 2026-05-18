@@ -21,11 +21,11 @@ setup() {
   git init -q .
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m "init"
   # Minimal BACKLOG so cwd is a "roll-managed project".
-  cat > BACKLOG.md <<'EOF'
+  cat > .roll/backlog.md <<'EOF'
 # Backlog
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-DEMO-001](docs/features/demo.md#us-demo-001) | demo todo | 📋 Todo |
+| [US-DEMO-001](.roll/features/demo.md#us-demo-001) | demo todo | 📋 Todo |
 EOF
 }
 
@@ -73,10 +73,10 @@ teardown() {
 
 @test "dashboard: Now line reflects in-progress story from BACKLOG" {
   # Mark a story 🔨 In Progress and confirm dashboard surfaces it.
-  cat > BACKLOG.md <<'EOF'
+  cat > .roll/backlog.md <<'EOF'
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-DEMO-007](docs/features/demo.md#us-demo-007) | demo wip | 🔨 In Progress |
+| [US-DEMO-007](.roll/features/demo.md#us-demo-007) | demo wip | 🔨 In Progress |
 EOF
   local out; out=$(_legacy_home)
   echo "$out" | grep -q "US-DEMO-007"
@@ -85,7 +85,7 @@ EOF
 # ─── Block ③ Pipeline 全景 ──────────────────────────────────────────────────
 
 @test "dashboard: Pipeline line shows five segments with counts" {
-  cat > BACKLOG.md <<'EOF'
+  cat > .roll/backlog.md <<'EOF'
 | ID | Description | Status |
 |----|-------------|--------|
 | IDEA-001 | i | 📋 Todo |
@@ -107,8 +107,8 @@ EOF
 # ─── Block ④ Current Focus · DoD ────────────────────────────────────────────
 
 @test "dashboard: Focus block renders when Build > 0" {
-  cat > BACKLOG.md <<'EOF'
-| [US-DEMO-9](docs/features/demo.md#us-demo-9) | demo | 🔨 In Progress |
+  cat > .roll/backlog.md <<'EOF'
+| [US-DEMO-9](.roll/features/demo.md#us-demo-9) | demo | 🔨 In Progress |
 EOF
   local out; out=$(_legacy_home)
   echo "$out" | grep -q "Current Focus"
@@ -135,10 +135,10 @@ EOF
   echo "$out" | grep -qE "ALERT.*roll alert"
 }
 
-@test "dashboard: Human×AI surfaces PROPOSAL count with PROPOSALS.md hint" {
-  # FIX-033 symptom 3: hint must point to PROPOSALS.md (not `roll backlog`,
-  # which lists BACKLOG.md and never surfaces PROPOSALS entries).
-  cat > PROPOSALS.md <<'EOF'
+@test "dashboard: Human×AI surfaces PROPOSAL count with .roll/proposals.md hint" {
+  # FIX-033 symptom 3: hint must point to .roll/proposals.md (not `roll backlog`,
+  # which lists .roll/backlog.md and never surfaces PROPOSALS entries).
+  cat > .roll/proposals.md <<'EOF'
 ## PROPOSAL: foo
 status: pending
 EOF
@@ -150,8 +150,8 @@ EOF
 # ─── _dash_release_ready — FIX-033 symptom 2 ────────────────────────────────
 
 @test "_dash_release_ready: false when no tag exists (fresh repo)" {
-  mkdir -p docs/briefs
-  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+  mkdir -p .roll/briefs
+  cat > .roll/briefs/2026-05-12-99.md <<'EOF'
 ## 发版就绪
 ✅ 可发版
 EOF
@@ -167,8 +167,8 @@ EOF
   echo "chore" > b.txt
   git add b.txt
   git -c user.email=t@t -c user.name=t commit -q -m "chore: bump deps"
-  mkdir -p docs/briefs
-  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+  mkdir -p .roll/briefs
+  cat > .roll/briefs/2026-05-12-99.md <<'EOF'
 ## 发版就绪
 ✅ 可发版
 EOF
@@ -178,8 +178,8 @@ EOF
 
 @test "_dash_release_ready: false when zero commits since latest tag" {
   git -c user.email=t@t -c user.name=t tag v0.1.0
-  mkdir -p docs/briefs
-  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+  mkdir -p .roll/briefs
+  cat > .roll/briefs/2026-05-12-99.md <<'EOF'
 ## 发版就绪
 ✅ 可发版
 EOF
@@ -192,8 +192,8 @@ EOF
   echo "feat" > a.txt
   git add a.txt
   git -c user.email=t@t -c user.name=t commit -q -m "feat: shiny new thing"
-  mkdir -p docs/briefs
-  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+  mkdir -p .roll/briefs
+  cat > .roll/briefs/2026-05-12-99.md <<'EOF'
 ## 发版就绪
 ✅ 可发版
 EOF
@@ -220,8 +220,8 @@ EOF
 }
 
 @test "dashboard: shows latest brief age + summary line" {
-  mkdir -p docs/briefs
-  cat > docs/briefs/2026-05-12-99.md <<'EOF'
+  mkdir -p .roll/briefs
+  cat > .roll/briefs/2026-05-12-99.md <<'EOF'
 # 简报 sample
 
 > 测试触发

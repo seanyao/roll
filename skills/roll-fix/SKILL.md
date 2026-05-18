@@ -1,7 +1,7 @@
 ---
 name: roll-fix
 license: MIT
-description: Execute bugfix/hotfix from backlog. Reads FIX/BUG from BACKLOG.md, delivers via TCR workflow. Lighter than roll-build, focused on single-issue fixes.
+description: Execute bugfix/hotfix from backlog. Reads FIX/BUG from .roll/backlog.md, delivers via TCR workflow. Lighter than roll-build, focused on single-issue fixes.
 ---
 
 # Fix Ship (TCR Edition)
@@ -19,10 +19,10 @@ Use when:
 - It does not need to be split into multiple Stories / Actions to deliver
 
 **Workflow:**
-1. Read BACKLOG.md index → Find FIX/BUG row → Follow link to `docs/features/<feature>.md`
+1. Read .roll/backlog.md index → Find FIX/BUG row → Follow link to `.roll/features/<feature>.md`
 2. Single Action (no splitting)
 3. Execute via TCR workflow
-4. Write back: update BACKLOG.md status column + update FIX section in Feature file
+4. Write back: update .roll/backlog.md status column + update FIX section in Feature file
 
 Do not use for:
 
@@ -290,15 +290,15 @@ Only update when Hard Rule #6 conditions are met (user requested, affects roadma
 
 Both locations must be updated — neither can be skipped:
 
-**① Update BACKLOG.md index row (Status column):**
+**① Update .roll/backlog.md index row (Status column):**
 
 ```markdown
-| [FIX-{ID}](docs/features/<feature>.md#fix-{id}) | {Title} | ✅ Done |
+| [FIX-{ID}](.roll/features/<feature>.md#fix-{id}) | {Title} | ✅ Done |
 ```
 
 Change the Status of the corresponding row from `📋 Todo` or `🔨 In Progress` (whichever the row currently shows) to `✅ Done`. When invoked by `roll-loop`, the row will already be `🔨 In Progress` — that is the expected starting state.
 
-**② Update `docs/features/<feature>.md` FIX section:**
+**② Update `.roll/features/<feature>.md` FIX section:**
 
 ```markdown
 ## FIX-{ID} {description} ✅
@@ -334,7 +334,7 @@ Summarize:
 - quality review outcome
 - verification results
 - any residual risk
-- **BACKLOG.md updated** ✅
+- **.roll/backlog.md updated** ✅
 - **CHANGELOG.md updated** ✅
 
 ## Required Artifacts

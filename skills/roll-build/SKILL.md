@@ -54,7 +54,7 @@ Activate when input is a `US-[A-Z]+-[0-9]+` identifier.
 
 ### Step 1: Read the Story
 
-1. Open `BACKLOG.md`, find the US row, follow the link to `docs/features/<feature>.md`
+1. Open `.roll/backlog.md`, find the US row, follow the link to `.roll/features/<feature>.md`
 2. Read the full AC / Files / Dependencies section
 3. If a plan doc (`<feature>-plan.md`) exists, read it for context
 
@@ -160,8 +160,8 @@ Wait for the user's response before editing files. If the user does not object w
 ### Phase 2: Create US / Actions
 
 - Use `$roll-design` to split vague request into INVEST-compliant User Stories
-- Insert US into `BACKLOG.md` under the relevant Epic > Feature group
-- If a new `docs/features/<feature>.md` is needed, create it
+- Insert US into `.roll/backlog.md` under the relevant Epic > Feature group
+- If a new `.roll/features/<feature>.md` is needed, create it
 
 After creation, switch to **Story mode** and execute the first US immediately.
 
@@ -275,19 +275,19 @@ While implementing, watch for these signals:
 When any signal appears, **do not stop — flag it**:
 
 ```bash
-# 1. Append to BACKLOG.md under ## ♻️ Refactor
+# 1. Append to .roll/backlog.md under ## ♻️ Refactor
 # REFACTOR-XXX | <one-line description> | 📋 Todo
 
-# 2. Append a brief entry to docs/features/refactor-log.md
+# 2. Append a brief entry to .roll/features/refactor-log.md
 ```
 
-**REFACTOR entry format in BACKLOG.md:**
+**REFACTOR entry format in .roll/backlog.md:**
 
 ```markdown
 | REFACTOR-001 | {one-line plain-language description} | 📋 Todo |
 ```
 
-描述写法：参见 AGENTS.md "Backlog descriptions" 规则。说清楚"什么需要改"以及"不改会怎样"，技术细节写在 `docs/features/refactor-log.md`。
+描述写法：参见 AGENTS.md "Backlog descriptions" 规则。说清楚"什么需要改"以及"不改会怎样"，技术细节写在 `.roll/features/refactor-log.md`。
 
 **refactor-log.md entry format:**
 
@@ -504,16 +504,16 @@ Follow the repo's deployment path (Vercel / Railway / etc.) and record the deplo
 
 Both locations must be updated — neither can be skipped:
 
-**① Update BACKLOG.md index row (Status column):**
+**① Update .roll/backlog.md index row (Status column):**
 
 ```markdown
-| [US-{ID}](docs/features/<feature>.md#us-{id}) | {Title} | ✅ Done |
+| [US-{ID}](.roll/features/<feature>.md#us-{id}) | {Title} | ✅ Done |
 ```
 
 Change the Status from `📋 Todo` or `🔨 In Progress` (whichever the row currently shows) to `✅ Done`. When invoked by `roll-loop`, the row will already be `🔨 In Progress` — that is the expected starting state, and the transition is the same Edit operation.
 For Fly mode: first append an index row under the appropriate Epic > Feature group, then mark it done.
 
-**② Update `docs/features/<feature>.md` US section:**
+**② Update `.roll/features/<feature>.md` US section:**
 
 ```markdown
 ## US-{ID} {Story Title} ✅
@@ -544,7 +544,7 @@ it in the completion commit so no separate changelog commit is created.
 $roll-.changelog
 
 # 2. Commit BACKLOG + feature doc + CHANGELOG.md together
-git add BACKLOG.md docs/features/ CHANGELOG.md
+git add .roll/backlog.md .roll/features/ CHANGELOG.md
 git commit -m "docs: mark {US-ID} as completed"
 git push
 ```
@@ -614,7 +614,7 @@ Before creating any file or directory:
    - No "while I'm here" refactors unless in a separate TCR cycle
 
 7. **Always update BACKLOG status**
-   - BACKLOG.md index row and `docs/features/<feature>.md` US section are both required
+   - .roll/backlog.md index row and `.roll/features/<feature>.md` US section are both required
    - Neither can be skipped
 
 ---
@@ -633,8 +633,8 @@ Before creating any file or directory:
 - [ ] Deployed to production
 - [ ] Online verification performed
 - [ ] **Verification Gate passed** (fresh evidence for tests, build, deploy, no regression)
-- [ ] **BACKLOG.md index status updated** (📋 → ✅, REQUIRED)
-- [ ] **`docs/features/<feature>.md` US section updated** (Completed date + [x] ACs, REQUIRED)
+- [ ] **.roll/backlog.md index status updated** (📋 → ✅, REQUIRED)
+- [ ] **`.roll/features/<feature>.md` US section updated** (Completed date + [x] ACs, REQUIRED)
 - [ ] **CHANGELOG.md staged and bundled** into completion commit via `$roll-.changelog` in Phase 11 (REQUIRED)
 - [ ] Summary reported to user
 
@@ -685,7 +685,7 @@ When complex state management is error-prone → consider full reset + re-initia
 roll-build   → ship anything (new idea, US-ID, free-text request)
 roll-fix     → fix a specific known bug (FIX-XXX / BUG-XXX)
 roll-design  → plan and design before building (no code output)
-roll-idea    → fast capture a bug or idea into BACKLOG.md
+roll-idea    → fast capture a bug or idea into .roll/backlog.md
 roll-.clarify → passive scope clarification for vague build requests
 ```
 

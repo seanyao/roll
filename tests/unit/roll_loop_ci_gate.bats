@@ -59,12 +59,12 @@ teardown() {
 }
 
 @test "_loop_enforce_ci: does not modify BACKLOG on success" {
-  printf '| [US-CI-001](x.md) | test | 🔨 In Progress |\n' > BACKLOG.md
+  printf '| [US-CI-001](x.md) | test | 🔨 In Progress |\n' > .roll/backlog.md
   _ci_wait() { return 0; }
 
   _loop_enforce_ci "US-CI-001"
 
-  grep -q "🔨 In Progress" BACKLOG.md
+  grep -q "🔨 In Progress" .roll/backlog.md
 }
 
 @test "_loop_enforce_ci: does not write ALERT on success" {

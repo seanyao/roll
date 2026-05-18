@@ -46,7 +46,7 @@ The goal from here: full delivery, end to end — with humans on the loop, not i
 npm install -g @seanyao/roll
 roll setup          # distribute conventions to all AI clients
 cd my-project
-roll init           # create AGENTS.md + BACKLOG.md + docs/features/
+roll init           # create AGENTS.md + .roll/backlog.md + .roll/features/
 roll loop on        # optional: let the agent work unattended
 ```
 
@@ -58,16 +58,16 @@ roll loop on        # optional: let the agent work unattended
 
 | Topic | English | 中文 |
 |-------|---------|------|
-| Overview & architecture | [guide/en/overview.md](docs/guide/en/overview.md) | [guide/zh/overview.md](docs/guide/zh/overview.md) |
-| Engineering methodology | [guide/en/methodology.md](docs/guide/en/methodology.md) | [guide/zh/methodology.md](docs/guide/zh/methodology.md) |
-| Loop (autonomous executor) | [guide/en/loop.md](docs/guide/en/loop.md) | [guide/zh/loop.md](docs/guide/zh/loop.md) |
-| Dream (nightly health scan) | [guide/en/dream.md](docs/guide/en/dream.md) | [guide/zh/dream.md](docs/guide/zh/dream.md) |
-| Peer (cross-agent review) | [guide/en/peer.md](docs/guide/en/peer.md) | [guide/zh/peer.md](docs/guide/zh/peer.md) |
-| Configuration (env vars) | [guide/en/configuration.md](docs/guide/en/configuration.md) | [guide/zh/configuration.md](docs/guide/zh/configuration.md) |
-| Skill selection guide | [guide/en/skills.md](docs/guide/en/skills.md) | [guide/zh/skills.md](docs/guide/zh/skills.md) |
-| FAQ (troubleshooting) | [guide/en/faq.md](docs/guide/en/faq.md) | [guide/zh/faq.md](docs/guide/zh/faq.md) |
-| Domain model (DDD) | [domain/context-map.md](docs/domain/context-map.md) | — |
-| Engineering common sense | [practices/engineering-common-sense.md](docs/practices/engineering-common-sense.md) | — |
+| Overview & architecture | [guide/en/overview.md](guide/en/overview.md) | [guide/zh/overview.md](guide/zh/overview.md) |
+| Engineering methodology | [guide/en/methodology.md](guide/en/methodology.md) | [guide/zh/methodology.md](guide/zh/methodology.md) |
+| Loop (autonomous executor) | [guide/en/loop.md](guide/en/loop.md) | [guide/zh/loop.md](guide/zh/loop.md) |
+| Dream (nightly health scan) | [guide/en/dream.md](guide/en/dream.md) | [guide/zh/dream.md](guide/zh/dream.md) |
+| Peer (cross-agent review) | [guide/en/peer.md](guide/en/peer.md) | [guide/zh/peer.md](guide/zh/peer.md) |
+| Configuration (env vars) | [guide/en/configuration.md](guide/en/configuration.md) | [guide/zh/configuration.md](guide/zh/configuration.md) |
+| Skill selection guide | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
+| FAQ (troubleshooting) | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
+| Domain model (DDD) | [domain/context-map.md](.roll/domain/context-map.md) | — |
+| Engineering common sense | [practices/engineering-common-sense.md](guide/en/practices/engineering-common-sense.md) | — |
 
 ---
 
@@ -77,9 +77,9 @@ roll loop on        # optional: let the agent work unattended
 |---------|-------------|
 | `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest version |
-| `roll init` | Initialize project: AGENTS.md + BACKLOG.md + docs/features/ |
+| `roll init` | Initialize project: AGENTS.md + .roll/backlog.md + .roll/features/ |
 | `roll status` | Show sync state, skill links, detected AI tools |
-| `roll backlog` | Show pending tasks from BACKLOG.md |
+| `roll backlog` | Show pending tasks from .roll/backlog.md |
 | `roll loop <on\|off\|now\|status\|monitor>` | 🤖 Manage autonomous executor |
 | `roll brief` | 🤖 Show latest owner digest |
 | `roll peer` | 🤖 Cross-agent code review |

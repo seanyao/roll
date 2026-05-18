@@ -7,7 +7,7 @@ setup() {
   TEST_DIR="$(mktemp -d)"
   export NO_COLOR=1
   export TERM=dumb
-  mkdir -p "${TEST_DIR}/docs/briefs"
+  mkdir -p "${TEST_DIR}/.roll/briefs"
 }
 
 teardown() {
@@ -15,7 +15,7 @@ teardown() {
 }
 
 _make_brief() {
-  cat > "${TEST_DIR}/docs/briefs/2026-05-17-01.md" << 'EOF'
+  cat > "${TEST_DIR}/.roll/briefs/2026-05-17-01.md" << 'EOF'
 # 简报 2026-05-17 12:00
 
 > 触发：手动 | 覆盖：2026-05-15 15:30 → 2026-05-17 12:00

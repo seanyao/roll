@@ -1,14 +1,14 @@
 #!/usr/bin/env bats
 # Verifies that every feature area with ≥3 completed stories has a user guide
-# in both docs/guide/en/ and docs/guide/zh/. (REFACTOR-019)
+# in both guide/en/ and guide/zh/. (REFACTOR-019)
 
 load helpers
 
 setup() { unit_setup; }
 teardown() { unit_teardown; }
 
-GUIDE_EN="${BATS_TEST_DIRNAME}/../../docs/guide/en"
-GUIDE_ZH="${BATS_TEST_DIRNAME}/../../docs/guide/zh"
+GUIDE_EN="${BATS_TEST_DIRNAME}/../../guide/en"
+GUIDE_ZH="${BATS_TEST_DIRNAME}/../../guide/zh"
 
 # 1. npm-distribution — installation & update workflow
 @test "guide en: installation.md exists" {

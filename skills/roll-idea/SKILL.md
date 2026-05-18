@@ -2,7 +2,7 @@
 name: roll-idea
 license: MIT
 allowed-tools: "Read, Edit"
-description: "Fast backlog capture. Analyzes a short description, classifies it as bug or idea, and appends it to BACKLOG.md with an auto-incremented ID."
+description: "Fast backlog capture. Analyzes a short description, classifies it as bug or idea, and appends it to .roll/backlog.md with an auto-incremented ID."
 ---
 
 # roll-idea
@@ -27,14 +27,14 @@ $roll-idea 给 HOD 加一个批量导出 PDF 的功能
 
 ## Behavior
 
-1. **Read** `BACKLOG.md` from the project root.
+1. **Read** `.roll/backlog.md` from the project root.
 2. **Classify** the input:
    - If it describes a defect, regression, broken behavior, or "也要/没/不/bug" → **bug**
    - Otherwise → **idea**
 3. **Assign ID**:
    - Bug → next `FIX-NNN`
    - Idea → next `IDEA-NNN`
-4. **Append** a new row to the appropriate table in `BACKLOG.md`:
+4. **Append** a new row to the appropriate table in `.roll/backlog.md`:
    - Bug → `## 🐛 Bug Fixes` table
    - Idea → `## 💡 Ideas` table (create the section if it doesn't exist)
 5. **Update stats** line if present (e.g. `Bug Fixes: N`, `Ideas: N`).
@@ -55,4 +55,4 @@ Text:   {description}
 - Do **not** ask the user for clarification.
 - If the description is vague, record it verbatim and append `(细节待确认)`.
 - Never modify existing entries — only append new rows.
-- If `BACKLOG.md` does not exist, report an error and stop.
+- If `.roll/backlog.md` does not exist, report an error and stop.

@@ -3,12 +3,12 @@ hidden: true
 name: roll-.changelog
 license: MIT
 allowed-tools: "Read, Edit, Write, Bash(git:*)"
-description: After build completion, extracts completed Stories from BACKLOG.md to generate CHANGELOG.md. Auto-triggered after successful deploy, keeping the external changelog in sync with the internal backlog.
+description: After build completion, extracts completed Stories from .roll/backlog.md to generate CHANGELOG.md. Auto-triggered after successful deploy, keeping the external changelog in sync with the internal backlog.
 ---
 
 # WK Generate Changelog
 
-After successful Build & Deploy, extracts completed Stories from BACKLOG.md to generate a user-friendly `CHANGELOG.md`.
+After successful Build & Deploy, extracts completed Stories from .roll/backlog.md to generate a user-friendly `CHANGELOG.md`.
 
 ## When Triggered
 
@@ -31,7 +31,7 @@ CHANGELOG.md exists?
     └── No  → Create mode (backfill all historical completed Stories)
 ```
 
-### 2. Read BACKLOG.md
+### 2. Read .roll/backlog.md
 
 ```
 Append mode:
@@ -39,7 +39,7 @@ Append mode:
 
 Create mode:
   Extract ALL Stories and Fixes with status ✅ Done.
-  Read each Story's docs/features/<feature>.md for Completed date.
+  Read each Story's .roll/features/<feature>.md for Completed date.
   Group entries by completion date, reverse chronological order.
 ```
 
@@ -361,25 +361,25 @@ After successful deploy in `$roll-build` / `$roll-fix`:
 ## 8. features.md 重写模式（产品 SOT）
 
 US-DOC-008 — `scripts/release.sh` 在 changelog/release-notes 生成完后会再
-调一次本 skill，请求"整体重写 `docs/features.md`"。这次调用的语义和上面
+调一次本 skill，请求"整体重写 `.roll/features.md`"。这次调用的语义和上面
 两种完全不同：**不是基于本版 Story 增量**，而是基于**项目整体当前状态**。
 
 ### 8.1 何时触发
 
 release.sh 完成 changelog/release-notes 写盘后，喂一段以
-`## 当前任务：重写 docs/features.md（Section 8）` 开头的 prompt。
+`## 当前任务：重写 .roll/features.md（Section 8）` 开头的 prompt。
 
 ### 8.2 输入
 
 prompt 会包含：
-- 当前 `docs/features.md`（可能为空，可能上一版本的）
-- 当前 `BACKLOG.md` 全文（Epic / Feature 分组结构）
-- 当前 `docs/features/` 目录清单
+- 当前 `.roll/features.md`（可能为空，可能上一版本的）
+- 当前 `.roll/backlog.md` 全文（Epic / Feature 分组结构）
+- 当前 `.roll/features/` 目录清单
 - 当前版本号
 
 ### 8.3 输出契约
 
-把整个 `docs/features.md` 写出来。结构固定为三段：
+把整个 `.roll/features.md` 写出来。结构固定为三段：
 
 ```
 # Roll — Features
@@ -399,7 +399,7 @@ prompt 会包含：
 ## Features by Epic
 
 ### <Epic 名>
-- [<Feature 名>](docs/features/<file>.md) — 1 句话描述
+- [<Feature 名>](.roll/features/<file>.md) — 1 句话描述
 - <Feature 名> — 1 句话描述（缺 deep doc 时不加链接）
 
 ### <Epic 名>
@@ -414,7 +414,7 @@ prompt 会包含：
 
 - **Catalog 必须列出 BACKLOG 中所有 `### Feature:` 出现的 Feature 名**
   （即使没有 deep doc 也要列）
-- Feature 名跟 `docs/features/<file>.md` 文件名一致时，加链接到该 md
+- Feature 名跟 `.roll/features/<file>.md` 文件名一致时，加链接到该 md
 - 没有对应 deep doc 的 Feature，**只写 plain text 不加链接**
 - **Planning distinction（US-DOC-011）**：
   - 该 Feature 下**所有** Story 均为 `📋 Todo` → 在描述末尾追加 `*(规划中)*`
@@ -424,7 +424,7 @@ prompt 会包含：
     `_enforce_planning_markers`，即使本规则被 AI 漏掉也会自动补 `*(规划中)*`；
     规则的权威实现是 release.sh 里的纯 shell 函数，prompt 这条只是软提示
 - 描述写 1 句话 **产品视角**：用户能用它做什么，避免实现细节
-- **语言：单一中文**。Feature 名（如 `roll-loop` / `Cross-Agent Peer Review`）和命令、环境变量等术语保留英文原样；描述句一律中文。**不要**在条目下追加英文翻译行（早期 v517.x 双语混排版式已废弃，理由：扫读困难、维护翻倍、与 `docs/guide/en|zh/` 平行目录约定不一致；英文受众走 site 端 i18n）
+- **语言：单一中文**。Feature 名（如 `roll-loop` / `Cross-Agent Peer Review`）和命令、环境变量等术语保留英文原样；描述句一律中文。**不要**在条目下追加英文翻译行（早期 v517.x 双语混排版式已废弃，理由：扫读困难、维护翻倍、与 `guide/en|zh/` 平行目录约定不一致；英文受众走 site 端 i18n）
 - 分组用 BACKLOG 的 Epic 名，原序，不重排
 - Core Highlights 从所有 Features 里挑 3-5 个最能代表产品定位的，
   描述用 bold 标 Feature 名后接说明；不照搬 catalog 文案

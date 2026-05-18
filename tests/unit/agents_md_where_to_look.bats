@@ -8,8 +8,8 @@ DESIGN_SKILL="${ROOT}/skills/roll-design/SKILL.md"
   grep -qF 'Where to Look' "${ROOT}/conventions/global/AGENTS.md"
 }
 
-@test "conventions/global/AGENTS.md: Where to Look points to docs/domain/" {
-  grep -qF 'docs/domain/' "${ROOT}/conventions/global/AGENTS.md"
+@test "conventions/global/AGENTS.md: Where to Look points to .roll/domain/" {
+  grep -qF '.roll/domain/' "${ROOT}/conventions/global/AGENTS.md"
 }
 
 @test "conventions/templates/cli/AGENTS.md: has Where to Look section" {

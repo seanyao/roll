@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # US-DOC-009: roll-.dream Scan 5 Check D — features.md freshness check.
 # Golden path: SKILL.md contains a complete, coherent Check D that describes
-# matching BACKLOG Feature groups against docs/features.md and emitting REFACTOR entries.
+# matching BACKLOG Feature groups against .roll/features.md and emitting REFACTOR entries.
 
 load helpers
 

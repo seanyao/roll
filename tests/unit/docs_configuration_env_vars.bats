@@ -1,14 +1,14 @@
 #!/usr/bin/env bats
 # Verifies that user-overridable environment variables referenced in bin/roll
-# are documented in docs/guide/{en,zh}/configuration.md (REFACTOR-029).
+# are documented in guide/{en,zh}/configuration.md (REFACTOR-029).
 
 load helpers
 
 setup() { unit_setup; }
 teardown() { unit_teardown; }
 
-DOCS_EN="${BATS_TEST_DIRNAME}/../../docs/guide/en/configuration.md"
-DOCS_ZH="${BATS_TEST_DIRNAME}/../../docs/guide/zh/configuration.md"
+DOCS_EN="${BATS_TEST_DIRNAME}/../../guide/en/configuration.md"
+DOCS_ZH="${BATS_TEST_DIRNAME}/../../guide/zh/configuration.md"
 
 @test "configuration.md (en) documents ROLL_LOOP_FORCE" {
   grep -q "ROLL_LOOP_FORCE" "${DOCS_EN}"

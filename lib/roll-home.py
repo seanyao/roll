@@ -145,7 +145,7 @@ def _peer_last() -> Optional[Tuple[str, int]]:
 
 def _backlog_counts() -> Tuple[int, int, int, str, str, str, int]:
     """(ideas, todo, in_progress, id, title, link, refactor_pending)."""
-    bl = Path("BACKLOG.md")
+    bl = Path(".roll/backlog.md")
     if not bl.exists():
         return (0, 0, 0, "", "", "", 0)
     ideas = todo = in_prog = refactors = 0
@@ -167,7 +167,7 @@ def _backlog_counts() -> Tuple[int, int, int, str, str, str, int]:
                 parts = [p.strip() for p in line.split("|")]
                 if len(parts) >= 4:
                     ip_title = parts[2][:60]
-                m2 = re.search(r"docs/features/[^\)]+", line)
+                m2 = re.search(r".roll/features/[^\)]+", line)
                 if m2:
                     ip_link = m2.group(0)
     return (ideas, todo, in_prog, ip_id, ip_title, ip_link, refactors)
@@ -179,13 +179,13 @@ def _alert_count(slug: str) -> int:
     return sum(1 for l in af.read_text(errors="ignore").splitlines() if l.startswith("# ALERT"))
 
 def _proposal_count() -> int:
-    p = Path("PROPOSALS.md")
+    p = Path(".roll/proposals.md")
     if not p.exists():
         return 0
     return sum(1 for l in p.read_text(errors="ignore").splitlines() if l.startswith("## PROPOSAL"))
 
 def _release_ready() -> bool:
-    briefs_dir = Path("docs/briefs")
+    briefs_dir = Path(".roll/briefs")
     if not briefs_dir.exists():
         return False
     try:
@@ -417,7 +417,7 @@ def render(d: Dict[str, Any]) -> None:
                   c("dim", "          run: ") + c("blue", "roll alert"))
         if proposals:
             print("  " + c("amber", "▤") + " " + c("amber", f"{proposals} PROPOSAL", bold=True) +
-                  c("dim", "      see: ") + c("blue", "PROPOSALS.md"))
+                  c("dim", "      see: ") + c("blue", ".roll/proposals.md"))
         if rr:
             print("  " + c("green", "✓") + " " + c("green", "Release ready", bold=True) +
                   c("dim", "    run: ") + c("blue", "roll release"))

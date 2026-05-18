@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # Unit tests for US-WEB-001 dual-frame Terminal hero animation
 
-SITE="${BATS_TEST_DIRNAME}/../../docs/site"
+SITE="${BATS_TEST_DIRNAME}/../../site"
 
 @test "roll-data.js exports FRAME_A constant" {
   grep -q "FRAME_A" "${SITE}/roll-data.js"

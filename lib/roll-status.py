@@ -293,8 +293,8 @@ def _render_this_project(d: Dict[str, Any]) -> None:
         print(line)
 
     _file_row("AGENTS.md",        d["project_has_agents"])
-    _file_row("BACKLOG.md",       d["project_has_backlog"])
-    _file_row("docs/features/",   d["project_features_count"] > 0,
+    _file_row(".roll/backlog.md",       d["project_has_backlog"])
+    _file_row(".roll/features/",   d["project_features_count"] > 0,
               f"{d['project_features_count']} feature docs")
 
     # Loop & dream launchd
@@ -329,14 +329,14 @@ def _live_data() -> Dict[str, Any]:
             "skills":   _ai_skill_count(e),
         })
     templates = [(t, _template_count(t)) for t in TEMPLATES]
-    feat_dir = Path("docs/features")
+    feat_dir = Path(".roll/features")
     return dict(
         conventions       = _global_conventions(),
         ai_clients        = ai_clients,
         templates         = templates,
         skills_installed  = _skills_installed(),
         project_has_agents  = Path("AGENTS.md").exists(),
-        project_has_backlog = Path("BACKLOG.md").exists(),
+        project_has_backlog = Path(".roll/backlog.md").exists(),
         project_features_count = sum(1 for _ in feat_dir.glob("*.md")) if feat_dir.exists() else 0,
         loop_state  = _launchd_state("loop", slug),
         dream_state = _launchd_state("dream", slug),

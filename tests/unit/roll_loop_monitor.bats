@@ -158,7 +158,7 @@ EOF
 # ─── Queue ordering ───────────────────────────────────────────────────────────
 
 @test "loop monitor: queue shows FIX items before US items" {
-  cat > "$TEST_DIR/BACKLOG.md" << 'EOF'
+  cat > "$TEST_DIR/.roll/backlog.md" << 'EOF'
 ## 🐛 Bug Fixes
 | ID | Description | Status |
 |----|-------------|--------|
@@ -173,13 +173,13 @@ EOF
   cd "$TEST_DIR"
   # The queue logic in _loop_monitor reads FIX before US (same as cmd_backlog)
   local fix_pending us_pending
-  fix_pending=$(grep -E '^\| FIX-' BACKLOG.md | grep '📋 Todo' || true)
-  us_pending=$(grep -E '^\| \[US-' BACKLOG.md | grep '📋 Todo' || true)
+  fix_pending=$(grep -E '^\| FIX-' .roll/backlog.md | grep '📋 Todo' || true)
+  us_pending=$(grep -E '^\| \[US-' .roll/backlog.md | grep '📋 Todo' || true)
   [[ -n "$fix_pending" ]]
   [[ -n "$us_pending" ]]
   # FIX should appear before US in normal priority ordering
   local fix_line us_line
-  fix_line=$(grep -n "FIX-099" BACKLOG.md | cut -d: -f1)
-  us_line=$(grep -n "US-TEST-099" BACKLOG.md | cut -d: -f1)
+  fix_line=$(grep -n "FIX-099" .roll/backlog.md | cut -d: -f1)
+  us_line=$(grep -n "US-TEST-099" .roll/backlog.md | cut -d: -f1)
   [ "$fix_line" -lt "$us_line" ]
 }

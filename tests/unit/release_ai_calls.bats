@@ -39,10 +39,10 @@ SKILL_MD="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
   grep -qE 'awk.*## 8|section.*8' "$RELEASE_SH"
 }
 
-@test "_run_features_sync_skill does NOT inline full BACKLOG.md content" {
-  # The old approach was: backlog_content=$(<BACKLOG.md)
+@test "_run_features_sync_skill does NOT inline full .roll/backlog.md content" {
+  # The old approach was: backlog_content=$(<.roll/backlog.md)
   # New approach uses _backlog_summary instead
-  ! grep -qF 'backlog_content=$(<BACKLOG.md)' "$RELEASE_SH"
+  ! grep -qF 'backlog_content=$(<.roll/backlog.md)' "$RELEASE_SH"
 }
 
 @test "_run_features_sync_skill calls _backlog_summary" {
@@ -66,12 +66,12 @@ SKILL_MD="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
   grep -qF "_run_features_sync_skill()" "$RELEASE_SH"
 }
 
-@test "release.sh still stages docs/features.md in the release commit" {
-  grep -qE 'git add .* docs/features\.md' "$RELEASE_SH"
+@test "release.sh still stages .roll/features.md in the release commit" {
+  grep -qE 'git add .* .roll/features\.md' "$RELEASE_SH"
 }
 
 @test "release.sh still has safe-by-default cmp check for features.md" {
-  grep -qF "cmp -s docs/features.md" "$RELEASE_SH"
+  grep -qF "cmp -s .roll/features.md" "$RELEASE_SH"
 }
 
 # ─── REFACTOR-021: release notes extracted from CHANGELOG.md, not AI stdout ──

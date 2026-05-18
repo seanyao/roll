@@ -15,8 +15,8 @@ teardown() {
 }
 
 _make_project_brief() {
-  mkdir -p "${TEST_TMP}/docs/briefs"
-  cat > "${TEST_TMP}/docs/briefs/2026-05-17-01.md" << 'EOF'
+  mkdir -p "${TEST_TMP}/.roll/briefs"
+  cat > "${TEST_TMP}/.roll/briefs/2026-05-17-01.md" << 'EOF'
 # 简报 2026-05-17 12:00
 
 > 触发：手动 | 覆盖：2026-05-15 15:30 → 2026-05-17 12:00

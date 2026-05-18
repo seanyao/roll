@@ -2,7 +2,7 @@
 """
 roll-backlog — v2 terminal view for `roll backlog`.
 
-Parses BACKLOG.md and renders items grouped by type:
+Parses .roll/backlog.md and renders items grouped by type:
   Bug Fixes (red) · User Stories (blue) · Refactors (amber) · Ideas (dim)
 
 In-progress items get a ⏵ purple marker.
@@ -215,7 +215,7 @@ def main() -> None:
     no_color = "--no-color" in args or not sys.stdout.isatty() or os.getenv("NO_COLOR")
     rr.USE_COLOR = not no_color
 
-    backlog = "BACKLOG.md"
+    backlog = ".roll/backlog.md"
     if not demo and not os.path.isfile(backlog):
         print(f"Error: {backlog} not found — run 'roll init' first", file=sys.stderr)
         sys.exit(1)
@@ -244,7 +244,7 @@ def _write_demo(path: str) -> None:
 ### Feature: autonomous-evolution
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-AUTO-042](docs/features/autonomous-evolution.md) | Loop cost telemetry — write model and token data per cycle | 📋 Todo |
+| [US-AUTO-042](.roll/features/autonomous-evolution.md) | Loop cost telemetry — write model and token data per cycle | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |

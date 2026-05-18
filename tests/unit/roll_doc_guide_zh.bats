@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Tests for US-DOC-002: docs/guide/zh/ Chinese user guides
+# Tests for US-DOC-002: guide/zh/ Chinese user guides
 
-GUIDE_DIR="${BATS_TEST_DIRNAME}/../../docs/guide/zh"
+GUIDE_DIR="${BATS_TEST_DIRNAME}/../../guide/zh"
 
 @test "zh overview.md covers three-layer autonomous model" {
   grep -qiE "三层|自主|loop.*dream.*peer|human.*loop" "${GUIDE_DIR}/overview.md"

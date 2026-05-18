@@ -9,7 +9,7 @@ setup() {
   integration_setup 2>/dev/null || true
   RELEASE_SH="${BATS_TEST_DIRNAME}/../../scripts/release.sh"
   SKILL_MD="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
-  FEATURES_MD="${BATS_TEST_DIRNAME}/../../docs/features.md"
+  FEATURES_MD="${BATS_TEST_DIRNAME}/../../.roll/features.md"
 }
 teardown() { integration_teardown 2>/dev/null || true; }
 
@@ -27,16 +27,16 @@ teardown() { integration_teardown 2>/dev/null || true; }
   [ "$sync_line" -lt "$commit_line" ]
 }
 
-@test "release.sh stages docs/features.md in the release commit" {
+@test "release.sh stages .roll/features.md in the release commit" {
   # git add is a no-op for unchanged files, so staging is unconditional —
   # the safe-default cmp check (next test) prevents a bad AI write from
   # producing a "changed" file in the first place.
-  grep -qE 'git add .* docs/features\.md' "$RELEASE_SH"
+  grep -qE 'git add .* .roll/features\.md' "$RELEASE_SH"
 }
 
 @test "release.sh feature sync is safe-by-default (no partial write)" {
   # uses cmp before mv so an empty / unchanged AI output doesn't truncate the file
-  grep -qF "cmp -s docs/features.md" "$RELEASE_SH"
+  grep -qF "cmp -s .roll/features.md" "$RELEASE_SH"
 }
 
 @test "roll-.changelog SKILL.md has Section 8 (features.md rewrite mode)" {
@@ -53,7 +53,7 @@ teardown() { integration_teardown 2>/dev/null || true; }
   rm -f /tmp/section8.txt
 }
 
-@test "bootstrap docs/features.md has the three required sections" {
+@test "bootstrap .roll/features.md has the three required sections" {
   grep -qE "^## ✨ Core Highlights" "$FEATURES_MD"
   grep -qE "^## Features by Epic" "$FEATURES_MD"
   grep -qE "^## 维护说明" "$FEATURES_MD"
@@ -81,17 +81,17 @@ teardown() { integration_teardown 2>/dev/null || true; }
   [ "$count" -eq 2 ]
 }
 
-@test "bootstrap docs/features.md covers each BACKLOG ### Feature group" {
+@test "bootstrap .roll/features.md covers each BACKLOG ### Feature group" {
   # Each '### Feature: <name>' in BACKLOG should produce a presence in features.md
-  # (link or plain mention by name). Allow either docs/features/<name>.md link
+  # (link or plain mention by name). Allow either .roll/features/<name>.md link
   # or plain-text occurrence of the feature name.
   local missing=0
   while IFS= read -r feat; do
     # feat is like "cli-simplification"; check link or plain mention
-    if ! grep -qE "docs/features/${feat}\.md|${feat}" "$FEATURES_MD"; then
+    if ! grep -qE ".roll/features/${feat}\.md|${feat}" "$FEATURES_MD"; then
       echo "missing: $feat"
       missing=$((missing + 1))
     fi
-  done < <(grep -oE '^### Feature: [a-z0-9-]+' "${BATS_TEST_DIRNAME}/../../BACKLOG.md" | sed 's|^### Feature: ||')
+  done < <(grep -oE '^### Feature: [a-z0-9-]+' "${BATS_TEST_DIRNAME}/../../.roll/backlog.md" | sed 's|^### Feature: ||')
   [ "$missing" -eq 0 ]
 }

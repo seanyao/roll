@@ -1,21 +1,21 @@
 #!/usr/bin/env bats
-# Tests for US-DOC-003: docs/domain/ DDD context map + autonomous-operation model
+# Tests for US-DOC-003: .roll/domain/ DDD context map + autonomous-operation model
 
-DOMAIN_DIR="${BATS_TEST_DIRNAME}/../../docs/domain"
+DOMAIN_DIR="${BATS_TEST_DIRNAME}/../../.roll/domain"
 CTX_MAP="${DOMAIN_DIR}/context-map.md"
 AUTO_OP="${DOMAIN_DIR}/autonomous-operation.md"
 
 # ─── Directory and file existence ─────────────────────────────────────────────
 
-@test "docs/domain/ directory exists" {
+@test ".roll/domain/ directory exists" {
   [ -d "$DOMAIN_DIR" ]
 }
 
-@test "docs/domain/context-map.md exists" {
+@test ".roll/domain/context-map.md exists" {
   [ -f "$CTX_MAP" ]
 }
 
-@test "docs/domain/autonomous-operation.md exists" {
+@test ".roll/domain/autonomous-operation.md exists" {
   [ -f "$AUTO_OP" ]
 }
 

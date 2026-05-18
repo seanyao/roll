@@ -2,8 +2,8 @@
 # Tests for REFACTOR-013: document $ROLL_CONFIG / $ROLL_GLOBAL / $ROLL_HOME
 # in user-facing docs so users can discover the override entry points.
 
-EN="${BATS_TEST_DIRNAME}/../../docs/guide/en/configuration.md"
-ZH="${BATS_TEST_DIRNAME}/../../docs/guide/zh/configuration.md"
+EN="${BATS_TEST_DIRNAME}/../../guide/en/configuration.md"
+ZH="${BATS_TEST_DIRNAME}/../../guide/zh/configuration.md"
 
 @test "EN configuration.md documents ROLL_HOME, ROLL_CONFIG, ROLL_GLOBAL" {
   grep -qF 'ROLL_HOME' "$EN"
@@ -32,9 +32,9 @@ ZH="${BATS_TEST_DIRNAME}/../../docs/guide/zh/configuration.md"
 }
 
 @test "EN overview.md links to configuration.md" {
-  grep -qF 'configuration.md' "${BATS_TEST_DIRNAME}/../../docs/guide/en/overview.md"
+  grep -qF 'configuration.md' "${BATS_TEST_DIRNAME}/../../guide/en/overview.md"
 }
 
 @test "ZH overview.md links to configuration.md" {
-  grep -qF 'configuration.md' "${BATS_TEST_DIRNAME}/../../docs/guide/zh/overview.md"
+  grep -qF 'configuration.md' "${BATS_TEST_DIRNAME}/../../guide/zh/overview.md"
 }

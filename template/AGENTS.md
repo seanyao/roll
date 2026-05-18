@@ -12,10 +12,10 @@
 - **Done**: Push + CI passes + deployed. Local-only is not done.
 
 ## 3. Roll Workflow
-- **Design**: `$roll-design` -> Stories -> `BACKLOG.md`
+- **Design**: `$roll-design` -> Stories -> `.roll/backlog.md`
 - **Build**: `$roll-build` / `$roll-fix` -> TCR (Green=Commit, Red=Revert)
 - **Patrol**: `$roll-sentinel` periodic + `$roll-debug` on failure
-- **Workspace**: `BACKLOG.md` index. `docs/features/<feat>.md` for details.
+- **Workspace**: `.roll/backlog.md` index. `.roll/features/<feat>.md` for details.
 
 ## 4. Architecture
 - **Schema First**: Define types before logic.

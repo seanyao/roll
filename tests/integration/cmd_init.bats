@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # Integration tests for: roll init (simplified — US-CLI-001)
 # New behavior: no type prompt, no tool prompt, no scaffold — 3-step init only.
-#   1. Fresh project  → creates AGENTS.md + BACKLOG.md + docs/features/
+#   1. Fresh project  → creates AGENTS.md + .roll/backlog.md + .roll/features/
 #   2. Existing AGENTS.md → re-merges global conventions (idempotent)
 
 load helpers
@@ -30,16 +30,16 @@ roll_init() {
   [ -f "${PROJECT_DIR}/AGENTS.md" ]
 }
 
-@test "init: creates BACKLOG.md in new project" {
+@test "init: creates .roll/backlog.md in new project" {
   run roll_init
   [ "$status" -eq 0 ]
-  [ -f "${PROJECT_DIR}/BACKLOG.md" ]
+  [ -f "${PROJECT_DIR}/.roll/backlog.md" ]
 }
 
-@test "init: creates docs/features/ in new project" {
+@test "init: creates .roll/features/ in new project" {
   run roll_init
   [ "$status" -eq 0 ]
-  [ -d "${PROJECT_DIR}/docs/features" ]
+  [ -d "${PROJECT_DIR}/.roll/features" ]
 }
 
 # ─── Happy path: re-merge (existing AGENTS.md) ────────────────────────────────
@@ -55,18 +55,18 @@ roll_init() {
   [ -f "${PROJECT_DIR}/AGENTS.md" ]
 }
 
-@test "init: backfills BACKLOG.md when AGENTS.md exists but backlog is missing" {
+@test "init: backfills .roll/backlog.md when AGENTS.md exists but backlog is missing" {
   run roll_init
   [ "$status" -eq 0 ]
-  rm -f "${PROJECT_DIR}/BACKLOG.md"
+  rm -f "${PROJECT_DIR}/.roll/backlog.md"
 
   run roll_init
   [ "$status" -eq 0 ]
   [ -f "${PROJECT_DIR}/AGENTS.md" ]
-  [ -f "${PROJECT_DIR}/BACKLOG.md" ]
+  [ -f "${PROJECT_DIR}/.roll/backlog.md" ]
 }
 
-@test "init: backfills docs/features when AGENTS.md exists but features dir is missing" {
+@test "init: backfills .roll/features when AGENTS.md exists but features dir is missing" {
   run roll_init
   [ "$status" -eq 0 ]
   rm -rf "${PROJECT_DIR}/docs"
@@ -74,7 +74,7 @@ roll_init() {
   run roll_init
   [ "$status" -eq 0 ]
   [ -f "${PROJECT_DIR}/AGENTS.md" ]
-  [ -d "${PROJECT_DIR}/docs/features" ]
+  [ -d "${PROJECT_DIR}/.roll/features" ]
 }
 
 # ─── UX: clean completion message ────────────────────────────────────────────
@@ -85,18 +85,18 @@ roll_init() {
   [[ "$output" == *"Initialized"* ]]
 }
 
-@test "init: summary box includes BACKLOG.md on fresh project" {
+@test "init: summary box includes .roll/backlog.md on fresh project" {
   run roll_init
   [ "$status" -eq 0 ]
-  # The summary box line looks like: "│  + created     BACKLOG.md"
-  [[ "$output" == *"created"*"BACKLOG.md"* ]]
+  # The summary box line looks like: "│  + created     .roll/backlog.md"
+  [[ "$output" == *"created"*".roll/backlog.md"* ]]
 }
 
-@test "init: summary box includes docs/features on fresh project" {
+@test "init: summary box includes .roll/features on fresh project" {
   run roll_init
   [ "$status" -eq 0 ]
-  # The summary box line looks like: "│  + created     docs/features/"
-  [[ "$output" == *"created"*"docs/features"* ]]
+  # The summary box line looks like: "│  + created     .roll/features/"
+  [[ "$output" == *"created"*".roll/features"* ]]
 }
 
 # ─── Project-type-aware AGENTS.md merge ──────────────────────────────────────

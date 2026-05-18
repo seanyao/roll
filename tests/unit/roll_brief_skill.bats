@@ -9,7 +9,7 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-brief/SKILL.md"
 }
 
 @test "roll-brief SKILL.md: stages the brief file with git add" {
-  grep -qF 'git add docs/briefs/YYYY-MM-DD-' "$SKILL_FILE"
+  grep -qF 'git add .roll/briefs/YYYY-MM-DD-' "$SKILL_FILE"
 }
 
 @test "roll-brief SKILL.md: commit message uses docs: prefix with file id and reason" {

@@ -18,8 +18,8 @@ ROOT="${BATS_TEST_DIRNAME}/../.."
   grep -qiE "documentation index|doc index|## docs|## documentation" "${ROOT}/README.md"
 }
 
-@test "README.md links to docs/guide/en/ files" {
-  grep -qF 'docs/guide/en/' "${ROOT}/README.md"
+@test "README.md links to guide/en/ files" {
+  grep -qF 'guide/en/' "${ROOT}/README.md"
 }
 
 # ─── README_CN.md constraints ────────────────────────────────────────────────
@@ -33,8 +33,8 @@ ROOT="${BATS_TEST_DIRNAME}/../.."
   grep -qiE "文档|docs" "${ROOT}/README_CN.md"
 }
 
-@test "README_CN.md links to docs/guide/zh/ files" {
-  grep -qF 'docs/guide/zh/' "${ROOT}/README_CN.md"
+@test "README_CN.md links to guide/zh/ files" {
+  grep -qF 'guide/zh/' "${ROOT}/README_CN.md"
 }
 
 # ─── AGENTS.md Documentation Conventions ────────────────────────────────────

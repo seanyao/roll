@@ -47,9 +47,9 @@
 |---|-------|------|------|
 | 001 | `.roll/` 目录约定 | ✅ Done（设计文档 + ADR-001 承载） | — |
 | 002 | 路径引用全量审查（产出 `path-audit.md`） | ✅ Done（464 字面引用 + 20 变量化 + 15 special cases，2 个 ambiguity 已决议） | 001 |
-| 003 | `roll migrate` 命令实现（dry-run + git mv + 三态幂等） | 📋 | 002 |
-| 004 | 结构强制检测 + 全局命令豁免 | 📋 | 003 |
-| 005 | Roll 自身 dogfood migrate（真正的"抽取 .roll/"动作）| 📋 | 003, 004 |
+| 003 | `roll migrate` 命令实现（dry-run + git mv + 三态幂等） | ✅ Done（13/13 tests pass） | 002 |
+| 004 | 结构强制检测 + 全局命令豁免 | ✅ Done（13/13 tests pass + `ROLL_SKIP_STRUCTURE_CHECK` 旁路）| 003 |
+| 005 | Roll 自身 dogfood migrate（真正的"抽取 .roll/"动作）| ✅ Done（migrate + sed 192 files + AGENTS.md §8 重写 + bump 2.0.0-rc.1）| 003, 004 |
 | 006 | Legacy 检测 + Agent 引导 | 📋 | 001 |
 | 007 | `onboard-plan.yaml` schema + Python 校验 | 📋 | 001 |
 | 008 | `$roll-onboard` 交互技能 | 📋 | 001, 007 |

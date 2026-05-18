@@ -10,7 +10,7 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
   [ -z "$stray" ]
 }
 
-@test "e2e: docs/guide/en/ has methodology, skills, plus original 4 guides" {
+@test "e2e: guide/en/ has methodology, skills, plus original 4 guides" {
   [ -f "${DOCS}/guide/en/overview.md" ]
   [ -f "${DOCS}/guide/en/loop.md" ]
   [ -f "${DOCS}/guide/en/dream.md" ]
@@ -19,7 +19,7 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
   [ -f "${DOCS}/guide/en/skills.md" ]
 }
 
-@test "e2e: docs/guide/zh/ has methodology, skills, plus original 4 guides" {
+@test "e2e: guide/zh/ has methodology, skills, plus original 4 guides" {
   [ -f "${DOCS}/guide/zh/overview.md" ]
   [ -f "${DOCS}/guide/zh/loop.md" ]
   [ -f "${DOCS}/guide/zh/dream.md" ]
@@ -28,7 +28,7 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
   [ -f "${DOCS}/guide/zh/skills.md" ]
 }
 
-@test "e2e: docs/practices/ has loop-autorun-verification.md" {
+@test "e2e: .roll/verification/ has loop-autorun-verification.md" {
   [ -f "${DOCS}/practices/loop-autorun-verification.md" ]
 }
 
@@ -45,7 +45,7 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
 # and require features.md to mark each such Feature with 规划中. When no Feature is all-Todo
 # (i.e. every Feature has shipped at least one story), the test passes trivially.
 @test "features.md marks each all-Todo Feature with planning marker" {
-  local backlog="${BATS_TEST_DIRNAME}/../../BACKLOG.md"
+  local backlog="${BATS_TEST_DIRNAME}/../../.roll/backlog.md"
   local features="${DOCS}/features.md"
   local missing=""
   while IFS= read -r line; do

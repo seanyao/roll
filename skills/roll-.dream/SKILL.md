@@ -8,7 +8,7 @@ description: |
   (cron or GitHub Actions), not invoked by users directly. Detects dead code,
   architectural drift from domain model, pruning candidates, emerging patterns,
   doc coverage gaps, and doc staleness (文档新鲜度). Outputs REFACTOR entries
-  to BACKLOG.md and a daily log to docs/dream/.
+  to .roll/backlog.md and a daily log to .roll/dream/.
   Distinct from roll-sentinel: sentinel monitors runtime behavior; dream reviews
   code structure and architectural health.
 ---
@@ -56,7 +56,7 @@ Flag: files or exports with zero references outside their own file.
 
 ### Scan 2 — Architectural Drift
 
-Compare current code structure against the domain model in `docs/domain/`:
+Compare current code structure against the domain model in `.roll/domain/`:
 
 ```bash
 # Read context-map.md and ubiquitous-language.md if they exist
@@ -69,7 +69,7 @@ Flag: modules that import directly from a different Bounded Context without
 an Anti-Corruption Layer, or module names that have diverged from the
 Ubiquitous Language.
 
-**Distinction from Scan 6C**: Scan 2 flags *import boundary violations* (cross-context coupling). Scan 6C flags *missing documentation entries* (module exists but has no entry in `docs/domain/*.md`). Never double-flag — Scan 2 and Scan 6C are orthogonal checks.
+**Distinction from Scan 6C**: Scan 2 flags *import boundary violations* (cross-context coupling). Scan 6C flags *missing documentation entries* (module exists but has no entry in `.roll/domain/*.md`). Never double-flag — Scan 2 and Scan 6C are orthogonal checks.
 
 ### Scan 3 — Pruning Candidates
 
@@ -106,18 +106,18 @@ Check documentation structure against the conventions in `AGENTS.md § Documenta
 
 **Check A — BACKLOG Done stories missing guide/en/ docs:**
 
-Scan BACKLOG.md for features with multiple ✅ Done stories. For each feature epic, check whether a corresponding `docs/guide/en/<topic>.md` exists. If a feature has ≥3 Done stories and no guide doc, flag it.
+Scan .roll/backlog.md for features with multiple ✅ Done stories. For each feature epic, check whether a corresponding `guide/en/<topic>.md` exists. If a feature has ≥3 Done stories and no guide doc, flag it.
 
 **Check B — guide/en/ files missing guide/zh/ translations:**
 
 ```bash
-for f in docs/guide/en/*.md; do
+for f in guide/en/*.md; do
   base=$(basename "$f")
-  [ ! -f "docs/guide/zh/$base" ] && echo "missing ZH: $base"
+  [ ! -f "guide/zh/$base" ] && echo "missing ZH: $base"
 done
 ```
 
-Flag any `docs/guide/en/<topic>.md` that has no matching `docs/guide/zh/<topic>.md`, provided the EN file has existed since before the most recent git tag (i.e., at least one release cycle old).
+Flag any `guide/en/<topic>.md` that has no matching `guide/zh/<topic>.md`, provided the EN file has existed since before the most recent git tag (i.e., at least one release cycle old).
 
 **Check C — stray files in docs/ root (根目录散落文件):**
 
@@ -129,9 +129,9 @@ Flag any `.md` file directly in `docs/` root (allowed subdirs: `guide/`, `domain
 
 **Check D — features.md Feature Coverage (US-DOC-009):**
 
-Dependency gate: skip when `docs/features.md` does not exist.
+Dependency gate: skip when `.roll/features.md` does not exist.
 
-Parse BACKLOG.md for all `### Feature: <name>` groups that contain ≥1 ✅ Done story. Parse `docs/features.md` for Feature names. If any Feature group with Done stories is absent from `docs/features.md`, the catalog is stale — flag as REFACTOR:
+Parse .roll/backlog.md for all `### Feature: <name>` groups that contain ≥1 ✅ Done story. Parse `.roll/features.md` for Feature names. If any Feature group with Done stories is absent from `.roll/features.md`, the catalog is stale — flag as REFACTOR:
 
 ```markdown
 | REFACTOR-XXX | features.md 功能目录落后于 BACKLOG，N 个已完成功能区未收录，用户无法通过产品目录发现这些功能 — flagged by dream YYYY-MM-DD | 📋 Todo |
@@ -168,14 +168,14 @@ When deployed, each finding produces a REFACTOR entry with `$roll-doc` as execut
 Flag source files whose owning doc is >30 days stale:
 
 ```bash
-# For each file listed in docs/features/*.md or README.md "## Files:" sections:
+# For each file listed in .roll/features/*.md or README.md "## Files:" sections:
 #   owner_doc_commit = git log -1 --format="%ci" -- <doc_file>
 #   source_commit    = git log -1 --format="%ci" -- <source_file>
 #   lag_days = (source_commit - owner_doc_commit) in days
 #   if lag_days > 30 AND doc contains at least one specific file path reference → flag
 ```
 
-The "owner doc" for a source file is the nearest `README.md` or `docs/features/*.md` that lists the file path in a `## Files:` section. Skip docs that contain only conceptual descriptions (no specific file path references) — they cannot be objectively stale.
+The "owner doc" for a source file is the nearest `README.md` or `.roll/features/*.md` that lists the file path in a `## Files:` section. Skip docs that contain only conceptual descriptions (no specific file path references) — they cannot be objectively stale.
 
 #### Check B — Undocumented ENV Vars
 
@@ -204,13 +204,13 @@ This is distinct from Scan 2 (which checks *import violations*) — Scan 6C chec
 ```bash
 # Walk all non-excluded directories
 # For each dir with >= 3 non-hidden, non-.md source files:
-#   check if any docs/domain/*.md contains the directory name
+#   check if any .roll/domain/*.md contains the directory name
 #   if not found → flag as "existence drift"
 ```
 
 Exclusions: `node_modules/`, `.git/`, `dist/`, `build/`, `.shared/`, `docs/`, `tests/`.
 
-Flag directories with ≥3 source files and zero name-match in `docs/domain/*.md`.
+Flag directories with ≥3 source files and zero name-match in `.roll/domain/*.md`.
 
 #### Dream Log Section
 
@@ -220,16 +220,16 @@ Add after `## 文档覆盖度` section:
 ## 文档新鲜度
 - 滞后文档：{N} 个（超过 30 天未更新但绑定了代码文件）
 - 未记录 ENV 变量：{N} 个（出现 ≥5 次但无文档）
-- 架构文档缺失模块：{N} 个（≥3 个源文件的目录未出现在 docs/domain/）
+- 架构文档缺失模块：{N} 个（≥3 个源文件的目录未出现在 .roll/domain/）
 {发现内容列表 或 "文档新鲜度良好，无滞后或缺失项。"}
 ```
 
 ## Output
 
-### REFACTOR Entry (BACKLOG.md)
+### REFACTOR Entry (.roll/backlog.md)
 
 For each finding that warrants action, append one row to the `## ♻️ Refactor`
-section of BACKLOG.md:
+section of .roll/backlog.md:
 
 ```markdown
 | REFACTOR-XXX | {one-line description} — flagged by dream {YYYY-MM-DD} | 📋 Todo |
@@ -240,7 +240,7 @@ section of BACKLOG.md:
 **Threshold**: only flag items where the fix would meaningfully reduce
 complexity or prevent future bugs. Ignore cosmetic issues.
 
-### Dream Log (docs/dream/YYYY-MM-DD.md)
+### Dream Log (.roll/dream/YYYY-MM-DD.md)
 
 Always write a log, even when no REFACTOR entries are created. Output uses
 Chinese to align with roll-brief style — easier for the morning reader to scan
@@ -283,7 +283,7 @@ without context switching:
 扫描完成后立即提交，把 dream 发现纳入 git 历史，便于晨报追溯：
 
 ```bash
-git add BACKLOG.md docs/dream/YYYY-MM-DD.md
+git add .roll/backlog.md .roll/dream/YYYY-MM-DD.md
 # 有 REFACTOR 条目时：
 git commit -m "chore: dream scan YYYY-MM-DD — {N} REFACTOR entries"
 # 无发现时：
@@ -291,9 +291,9 @@ git commit -m "chore: dream scan YYYY-MM-DD — no findings"
 git push origin main
 ```
 
-- BACKLOG.md 和 dream 日志必须在**同一个 commit** 里入库，避免出现"REFACTOR 已加但日志找不到"或反过来的撕裂状态
+- .roll/backlog.md 和 dream 日志必须在**同一个 commit** 里入库，避免出现"REFACTOR 已加但日志找不到"或反过来的撕裂状态
 - 写文件失败时不要执行 commit；保持工作区干净，由调度器负责重试
-- 仅 `BACKLOG.md` 和 `docs/dream/YYYY-MM-DD.md` 入 commit，不要顺带带入其他无关变更
+- 仅 `.roll/backlog.md` 和 `.roll/dream/YYYY-MM-DD.md` 入 commit，不要顺带带入其他无关变更
 
 ## Scheduler Configuration
 
@@ -308,7 +308,7 @@ The cron entry is generated using the configured agent — no manual cron editin
 
 If the scan fails partway through:
 
-1. Write partial results to `docs/dream/YYYY-MM-DD.md` with a `## 状态：部分完成` header
+1. Write partial results to `.roll/dream/YYYY-MM-DD.md` with a `## 状态：部分完成` header
 2. Do not write incomplete REFACTOR entries to BACKLOG
 3. Log the error to `~/.shared/roll/dream/error.log`
 

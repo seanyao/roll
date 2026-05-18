@@ -44,12 +44,12 @@
     draft with user. Do not write code until approved.
   - Before claiming completion: verify in the target environment mentioned by
     user (e.g., specific CLI tool, remote server, hardware platform).
-- **Workspace**: `BACKLOG.md` index. `docs/features/` for details.
+- **Workspace**: `.roll/backlog.md` index. `.roll/features/` for details.
 - **Backlog descriptions** (US, FIX, REFACTOR, IDEA, PROPOSAL): one sentence in plain language.
   Say what changed and why it matters — not how it works internally.
   No file paths, function names, parameter lists, or architecture jargon.
   `depends-on:` and `manual-only:` functional tags are allowed; `Domain:` annotation tags are not.
-  Technical details and AC go in `docs/features/`.
+  Technical details and AC go in `.roll/features/`.
   A well-written BACKLOG description can be used directly as a CHANGELOG entry.
 - **Convention layering**: project-level convention files extend the global SOT — see §9 below.
 - **Done**: Push + CI passes + deployed. Local-only is not done.
@@ -101,10 +101,10 @@ Confirm each phase clean before proceeding to the next.
 - Icons: Lucide React.
 
 ## 8. Where to Look
-- **Domain model**: `docs/domain/context-map.md` — Bounded Contexts and relationships
-- **Story details**: `docs/features/` — AC, implementation specs, dependencies
-- **Design decisions**: `docs/domain/` — DDD models, architecture records
-- When `docs/domain/` or `docs/features/` don't exist yet, run `$roll-doc` to bootstrap.
+- **Domain model**: `.roll/domain/context-map.md` — Bounded Contexts and relationships
+- **Story details**: `.roll/features/` — AC, implementation specs, dependencies
+- **Design decisions**: `.roll/domain/` — DDD models, architecture records
+- When `.roll/domain/` or `.roll/features/` don't exist yet, run `$roll-doc` to bootstrap.
 
 ## 9. Convention Architecture
 

@@ -13,12 +13,12 @@ setup() {
   cd "$TEST_TMP"
   git init -q .
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m "init"
-  cat > BACKLOG.md <<'EOF'
+  cat > .roll/backlog.md <<'EOF'
 # Backlog
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-DEMO-001](docs/features/demo.md#us-demo-001) | demo todo | 📋 Todo |
-| [US-DEMO-002](docs/features/demo.md#us-demo-002) | demo wip | 🔨 In Progress |
+| [US-DEMO-001](.roll/features/demo.md#us-demo-001) | demo todo | 📋 Todo |
+| [US-DEMO-002](.roll/features/demo.md#us-demo-002) | demo wip | 🔨 In Progress |
 EOF
 }
 
@@ -60,11 +60,11 @@ teardown() { integration_teardown; }
   [[ "$output" == *"Loop Layer"* ]] || [[ "$output" == *"Dream Layer"* ]]
 }
 
-@test "roll (no args): degrades gracefully when no BACKLOG.md" {
-  rm BACKLOG.md
+@test "roll (no args): degrades gracefully when no .roll/backlog.md" {
+  rm .roll/backlog.md
   run_roll
   [ "$status" -eq 0 ]
-  # Without BACKLOG.md main() falls through to _help + changelog.
+  # Without .roll/backlog.md main() falls through to _help + changelog.
   # v2: "roll ·" wordmark + AUTONOMY; v1: "Usage:" or "用法"
   [[ "$output" == *"roll ·"* ]] || [[ "$output" == *"AUTONOMY"* ]] \
     || [[ "$output" == *"Usage:"* ]] || [[ "$output" == *"用法"* ]]

@@ -18,7 +18,7 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-.dream/SKILL.md"
 }
 
 @test "roll-.dream SKILL.md: Scan 6 check C — existence drift (module dir with no domain doc)" {
-  grep -qiE 'existence drift|docs/domain' "$SKILL"
+  grep -qiE 'existence drift|.roll/domain' "$SKILL"
 }
 
 @test "roll-.dream SKILL.md: Scan 6 no double-flag with Scan 2 documented" {

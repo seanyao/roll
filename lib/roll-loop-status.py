@@ -6,7 +6,7 @@ Reads (all per-project, slug = <basename>-<md5_6chars> of project root):
   $ROLL_SHARED_ROOT/loop/events-<slug>.ndjson   structured per-cycle events
   $ROLL_SHARED_ROOT/loop/cron-<slug>.log        wall-clock dur + cost per cycle
   $ROLL_SHARED_ROOT/loop/state-<slug>.yaml      idle | running | paused
-  ./BACKLOG.md                                   story id → description
+  ./.roll/backlog.md                                   story id → description
 
 Writes (stdout):
   Static 100-col colored print, EN/ZH paired rows. Designed for a 5-10s glance,
@@ -137,8 +137,8 @@ def load_state(slug: str) -> Dict[str, str]:
     return out
 
 def load_backlog(project_root: Optional[Path] = None) -> Dict[str, str]:
-    """Map story id → description from BACKLOG.md table rows."""
-    path = (project_root or Path()) / "BACKLOG.md"
+    """Map story id → description from .roll/backlog.md table rows."""
+    path = (project_root or Path()) / ".roll/backlog.md"
     if not path.exists():
         return {}
     out: Dict[str, str] = {}

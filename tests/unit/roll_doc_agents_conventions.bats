@@ -4,11 +4,11 @@
 ROOT="${BATS_TEST_DIRNAME}/../.."
 
 @test "e2e: AGENTS.md Documentation Conventions lists all 7 doc directories" {
-  grep -qF 'docs/guide/en/' "${ROOT}/AGENTS.md"
-  grep -qF 'docs/guide/zh/' "${ROOT}/AGENTS.md"
-  grep -qF 'docs/domain/' "${ROOT}/AGENTS.md"
-  grep -qF 'docs/features/' "${ROOT}/AGENTS.md"
-  grep -qF 'docs/practices/' "${ROOT}/AGENTS.md"
+  grep -qF 'guide/en/' "${ROOT}/AGENTS.md"
+  grep -qF 'guide/zh/' "${ROOT}/AGENTS.md"
+  grep -qF '.roll/domain/' "${ROOT}/AGENTS.md"
+  grep -qF '.roll/features/' "${ROOT}/AGENTS.md"
+  grep -qF '.roll/verification/' "${ROOT}/AGENTS.md"
 }
 
 @test "e2e: README.md doc index covers all guide/en/ files" {

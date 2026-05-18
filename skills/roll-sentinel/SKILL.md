@@ -318,7 +318,7 @@ async function batchCheck(stories) {
 │     └── Decision: create FIX-AUDIO-015                      │
 │                                                             │
 │  5. Create Backlog Item                                     │
-│     └── Add FIX-AUDIO-015 to BACKLOG.md                     │
+│     └── Add FIX-AUDIO-015 to .roll/backlog.md                     │
 │     └── Status: 📋 Todo                                     │
 │     └── Awaiting human fix                                  │
 │                                                             │

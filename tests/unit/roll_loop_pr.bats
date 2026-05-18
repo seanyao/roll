@@ -185,11 +185,11 @@ _setup_origin_main() {
   git update-ref refs/remotes/origin/main "$root"
 }
 
-@test "_loop_is_doc_only_change: returns 0 when only BACKLOG.md changed" {
+@test "_loop_is_doc_only_change: returns 0 when only .roll/backlog.md changed" {
   _setup_origin_main
   git checkout -q -b loop/cycle-doc
-  echo "new" > BACKLOG.md
-  git -c user.email=t@t -c user.name=t add BACKLOG.md
+  echo "new" > .roll/backlog.md
+  git -c user.email=t@t -c user.name=t add .roll/backlog.md
   git -c user.email=t@t -c user.name=t commit -q -m "doc"
   run _loop_is_doc_only_change
   [ "$status" -eq 0 ]

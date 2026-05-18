@@ -587,7 +587,7 @@ Root cause identified
     │       └── Re-mount BB → re-verify on page
     │
     ├── In project source + cross-module / architectural
-    │   └── ESCALATE: create US-XXX in BACKLOG.md
+    │   └── ESCALATE: create US-XXX in .roll/backlog.md
     │       ├── Suggest: $roll-build US-XXX
     │       └── Report diagnosis findings
     │

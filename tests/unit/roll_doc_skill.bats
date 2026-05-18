@@ -41,8 +41,8 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
 @test "roll-doc SKILL.md: lists scan exclusions including node_modules and .git" {
   grep -qF 'node_modules' "$SKILL"
   grep -qF '.git' "$SKILL"
-  grep -qF 'docs/dream' "$SKILL"
-  grep -qF 'docs/briefs' "$SKILL"
+  grep -qF '.roll/dream' "$SKILL"
+  grep -qF '.roll/briefs' "$SKILL"
 }
 
 @test "roll-doc SKILL.md: documents convention file detection" {

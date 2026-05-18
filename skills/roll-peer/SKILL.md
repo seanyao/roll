@@ -244,7 +244,7 @@ When Attacker and Defender reach a stalemate (both tests pass but interpretation
 
 - **Negotiation log**: `~/.shared/roll/peer/logs/<timestamp>_<from>_<to>.md`
 - **State file**: `~/.shared/roll/peer/state.yaml`
-- **Decision record**: If AGREE, append summary to `docs/decisions/` or `BACKLOG.md` (optional)
+- **Decision record**: If AGREE, append summary to `docs/decisions/` or `.roll/backlog.md` (optional)
 
 ## Configuration
 

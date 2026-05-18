@@ -52,7 +52,7 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-.dream/SKILL.md"
 }
 
 @test "roll-.dream SKILL.md: stages BACKLOG and dream log in same git add" {
-  grep -qF 'git add BACKLOG.md docs/dream/YYYY-MM-DD.md' "$SKILL_FILE"
+  grep -qF 'git add .roll/backlog.md .roll/dream/YYYY-MM-DD.md' "$SKILL_FILE"
 }
 
 @test "roll-.dream SKILL.md: commit message for findings — chore: dream scan + N REFACTOR entries" {

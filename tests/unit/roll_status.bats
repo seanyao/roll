@@ -90,11 +90,11 @@ EOF
 
 # ─── Backlog todo count ───────────────────────────────────────────────────────
 
-@test "status loop overview: shows todo count from BACKLOG.md" {
+@test "status loop overview: shows todo count from .roll/backlog.md" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   mkdir -p "${TEST_DIR}/myproject"
   _make_loop_plist "myproject-abc123" "${TEST_DIR}/myproject" 5
-  cat > "${TEST_DIR}/myproject/BACKLOG.md" << 'BACKLOG'
+  cat > "${TEST_DIR}/myproject/.roll/backlog.md" << 'BACKLOG'
 | US-001 | Story one | 📋 Todo |
 | US-002 | Story two | 📋 Todo |
 | US-003 | Done item | ✅ Done |
@@ -103,7 +103,7 @@ BACKLOG
   echo "$output" | grep -q "2 pending"
 }
 
-@test "status loop overview: shows 0 pending when no BACKLOG.md" {
+@test "status loop overview: shows 0 pending when no .roll/backlog.md" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   mkdir -p "${TEST_DIR}/myproject"
   _make_loop_plist "myproject-abc123" "${TEST_DIR}/myproject" 5

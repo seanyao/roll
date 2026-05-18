@@ -28,9 +28,9 @@ src/
 ## 4. Discipline
 - **TCR**: Mandatory.
 - **Testing**: Unit (hooks/logic) >80%, E2E (Playwright).
-- **Workspace**: `BACKLOG.md` + `docs/features/`.
+- **Workspace**: `.roll/backlog.md` + `.roll/features/`.
 
 ## 5. Where to Look
-- **Domain model**: `docs/domain/context-map.md` — Bounded Contexts and relationships
-- **Story details**: `docs/features/` — AC, implementation specs, dependencies
-- **Design decisions**: `docs/domain/` — DDD models, architecture records
+- **Domain model**: `.roll/domain/context-map.md` — Bounded Contexts and relationships
+- **Story details**: `.roll/features/` — AC, implementation specs, dependencies
+- **Design decisions**: `.roll/domain/` — DDD models, architecture records

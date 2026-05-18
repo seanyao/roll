@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
-GUIDE_EN="${BATS_TEST_DIRNAME}/../../docs/guide/en"
-GUIDE_ZH="${BATS_TEST_DIRNAME}/../../docs/guide/zh"
+GUIDE_EN="${BATS_TEST_DIRNAME}/../../guide/en"
+GUIDE_ZH="${BATS_TEST_DIRNAME}/../../guide/zh"
 
 @test "faq.md exists in EN guide" {
   [ -f "${GUIDE_EN}/faq.md" ]

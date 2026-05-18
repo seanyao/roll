@@ -2,7 +2,7 @@
 """
 roll-brief — v2 terminal view for `roll brief`.
 
-Parses the latest docs/briefs/<date>.md and renders it as three sections:
+Parses the latest .roll/briefs/<date>.md and renders it as three sections:
   SUMMARY    — eyebrow + shipped/watch/decide counts
   HIGHLIGHTS — completed story list
   DECIDE     — action-required items with D1/D2/... numbering
@@ -269,7 +269,7 @@ def main() -> None:
     no_color = "--no-color" in args or not sys.stdout.isatty() or os.getenv("NO_COLOR")
     rr.USE_COLOR = not no_color
 
-    briefs_dir = "docs/briefs"
+    briefs_dir = ".roll/briefs"
     briefs = sorted(
         f for f in os.listdir(briefs_dir) if f.endswith(".md")
     ) if os.path.isdir(briefs_dir) else []

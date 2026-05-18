@@ -4,7 +4,7 @@ set -euo pipefail
 # Roll — AI Agent Convention Manager
 # Single source of truth for how all AI coding agents behave.
 
-VERSION="2026.518.4"
+VERSION="2.0.0-rc.1"
 ROLL_HOME="${ROLL_HOME:-${HOME}/.roll}"
 ROLL_CONFIG="${ROLL_HOME}/config.yaml"
 ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
@@ -913,7 +913,7 @@ _merge_claude_to_project() {
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: init
 # Initialize or re-merge a project. Always operates on the current directory.
-# Fresh project: creates AGENTS.md + BACKLOG.md + docs/features/
+# Fresh project: creates AGENTS.md + .roll/backlog.md + .roll/features/
 # Existing AGENTS.md: re-merges global conventions (section-level, non-destructive)
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_init() {
@@ -934,9 +934,9 @@ cmd_init() {
 
   _merge_global_to_project "$project_dir"
   _merge_claude_to_project "$project_dir"
-  _write_backlog "$project_dir/BACKLOG.md"
-  _ensure_features_dir "$project_dir/docs/features"
-  _write_features_md "$project_dir/docs/features.md"
+  _write_backlog "$project_dir/.roll/backlog.md"
+  _ensure_features_dir "$project_dir/.roll/features"
+  _write_features_md "$project_dir/.roll/features.md"
   print_merge_summary
 
   echo ""
@@ -957,9 +957,9 @@ cmd_init() {
 # cmd_migrate
 # US-ONBOARD-003: One-shot migration from old project layout to .roll/ structure.
 #
-# Moves process artifacts (BACKLOG.md, PROPOSALS.md, docs/features/, docs/briefs/,
-# docs/dream/, docs/design/, docs/domain/) into .roll/. Also relocates user docs
-# (docs/guide/ → guide/, docs/site/ → site/, docs/intro/ → site/slides/).
+# Moves process artifacts (.roll/backlog.md, .roll/proposals.md, .roll/features/, .roll/briefs/,
+# .roll/dream/, .roll/design/, .roll/domain/) into .roll/. Also relocates user docs
+# (guide/ → guide/, site/ → site/, site/slides/ → site/slides/).
 #
 # Three-state idempotency:
 #   - old-only:   execute migration via git mv (single atomic commit)
@@ -1060,7 +1060,11 @@ _migrate_build_moves() {
   # the same dir. Otherwise mkdir -p pre-creates the target, and git mv then
   # places the source INSIDE rather than renaming. Specifically:
   #   - docs/site → site   must precede docs/intro → site/slides
-  #   - docs/guide/en → guide/en  must precede docs/practices/* → guide/en/practices/
+  #   - docs/guide/en → guide/en  must precede docs/practices/engineering-common-sense.md
+  #
+  # IMPORTANT: the LEFT side of each mapping is a literal OLD path. These must
+  # NOT be sed'd during Story 5 code-ref migration — they drive the migration
+  # for OTHER projects (and self-migrate idempotency).
   cat << 'EOF'
 BACKLOG.md|.roll/backlog.md
 PROPOSALS.md|.roll/proposals.md
@@ -1130,10 +1134,10 @@ _migrate_help() {
   cat << 'EOF'
 Usage: roll migrate [--dry-run]
 
-Migrate this project's process artifacts (BACKLOG.md, PROPOSALS.md,
-docs/features/, docs/briefs/, docs/dream/, docs/design/, docs/domain/)
-into a .roll/ directory. Also relocates docs/guide/ → guide/,
-docs/site/ → site/, docs/intro/ → site/slides/.
+Migrate this project's process artifacts (.roll/backlog.md, .roll/proposals.md,
+.roll/features/, .roll/briefs/, .roll/dream/, .roll/design/, .roll/domain/)
+into a .roll/ directory. Also relocates guide/ → guide/,
+site/ → site/, site/slides/ → site/slides/.
 
 Options:
   --dry-run, -n   Show what would be moved without modifying files
@@ -1219,10 +1223,10 @@ scan_project_type_from_files() {
   fi
 }
 
-# ─── Helper: write starter BACKLOG.md (no-op if exists) ──────────────────────
+# ─── Helper: write starter .roll/backlog.md (no-op if exists) ──────────────────────
 _write_backlog() {
   if [[ -f "$1" ]]; then
-    _ROLL_MERGE_SUMMARY+=("unchanged|BACKLOG.md")
+    _ROLL_MERGE_SUMMARY+=("unchanged|.roll/backlog.md")
     return
   fi
   cat > "$1" << 'EOF'
@@ -1236,25 +1240,25 @@ _write_backlog() {
 | ID | Problem | Status |
 |----|---------|--------|
 EOF
-  ok "Created: BACKLOG.md"
-  _ROLL_MERGE_SUMMARY+=("created|BACKLOG.md")
+  ok "Created: .roll/backlog.md"
+  _ROLL_MERGE_SUMMARY+=("created|.roll/backlog.md")
 }
 
 _ensure_features_dir() {
   if [[ -d "$1" ]]; then
-    _ROLL_MERGE_SUMMARY+=("unchanged|docs/features/")
+    _ROLL_MERGE_SUMMARY+=("unchanged|.roll/features/")
     return
   fi
 
   mkdir -p "$1"
-  ok "Created: docs/features/"
-  _ROLL_MERGE_SUMMARY+=("created|docs/features/")
+  ok "Created: .roll/features/"
+  _ROLL_MERGE_SUMMARY+=("created|.roll/features/")
 }
 
-# ─── Helper: write starter docs/features.md (no-op if exists) ────────────────
+# ─── Helper: write starter .roll/features.md (no-op if exists) ────────────────
 _write_features_md() {
   if [[ -f "$1" ]]; then
-    _ROLL_MERGE_SUMMARY+=("unchanged|docs/features.md")
+    _ROLL_MERGE_SUMMARY+=("unchanged|.roll/features.md")
     return
   fi
   mkdir -p "$(dirname "$1")"
@@ -1269,8 +1273,8 @@ _write_features_md() {
 
 <!-- Add feature entries here as epics are completed -->
 EOF
-  ok "Created: docs/features.md"
-  _ROLL_MERGE_SUMMARY+=("created|docs/features.md")
+  ok "Created: .roll/features.md"
+  _ROLL_MERGE_SUMMARY+=("created|.roll/features.md")
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1450,8 +1454,8 @@ _status_loop_overview() {
     fi
 
     local todo_count=0
-    if [[ -z "$path_note" && -f "${proj_path}/BACKLOG.md" ]]; then
-      todo_count=$(grep -c '📋 Todo' "${proj_path}/BACKLOG.md" 2>/dev/null; true)
+    if [[ -z "$path_note" && -f "${proj_path}/.roll/backlog.md" ]]; then
+      todo_count=$(grep -c '📋 Todo' "${proj_path}/.roll/backlog.md" 2>/dev/null; true)
     fi
 
     echo -e "  ${state_icon} ${proj_name}${path_note}   ${schedule}   ${todo_count} pending"
@@ -2701,7 +2705,7 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       _cycle_status="built"
       _cycle_tcr=\$(cd "\$WT" && git log --oneline origin/main..HEAD -- 2>/dev/null | grep -c ' tcr:' || echo 0)
       if command -v jq >/dev/null 2>&1; then
-        _cycle_built=\$(cd "\$WT" && git diff origin/main -- BACKLOG.md 2>/dev/null | grep '✅ Done' | grep -oE '\[[A-Z]+-[0-9]+\]' | sed 's/^.//;s/.\$//' | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")
+        _cycle_built=\$(cd "\$WT" && git diff origin/main -- .roll/backlog.md 2>/dev/null | grep '✅ Done' | grep -oE '\[[A-Z]+-[0-9]+\]' | sed 's/^.//;s/.\$//' | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")
       fi
     fi
   fi
@@ -3053,7 +3057,7 @@ _agent_skill_cmd() {
     return 1
   }
   # Cron-installed skills (dream / brief / loop) run autonomously and need to
-  # Edit files (docs/dream/, docs/briefs/, BACKLOG, etc.). Claude Code 2.1.x's
+  # Edit files (.roll/dream/, .roll/briefs/, BACKLOG, etc.). Claude Code 2.1.x's
   # pre-write approval UX silently blocks `claude -p` from applying edits in
   # non-interactive pipe mode — bypass it for the cron context.
   _agent_bypass_claude_perms
@@ -3571,7 +3575,7 @@ _loop_runs() {
   [[ "$(uname)" == "Darwin" ]] && _is_darwin="1"
 
   _LOOP_RUNS_BACKLOG=""
-  [[ -f "$project_path/BACKLOG.md" ]] && _LOOP_RUNS_BACKLOG=$(cat "$project_path/BACKLOG.md")
+  [[ -f "$project_path/.roll/backlog.md" ]] && _LOOP_RUNS_BACKLOG=$(cat "$project_path/.roll/backlog.md")
 
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
@@ -3879,7 +3883,7 @@ _loop_clear_heal_state() {
 }
 
 # Verify TCR rhythm after a story completes. Returns 0 if ok, 1 if no TCR commits.
-# On failure: reverts story in BACKLOG.md to 📋 Todo and writes ALERT.
+# On failure: reverts story in .roll/backlog.md to 📋 Todo and writes ALERT.
 _loop_enforce_tcr() {
   local story_id="$1"
   local started_at="${2:-}"
@@ -3890,10 +3894,10 @@ _loop_enforce_tcr() {
 
   if [[ "$count" -eq 0 ]]; then
     # Revert story status
-    if [[ -f "BACKLOG.md" ]]; then
+    if [[ -f ".roll/backlog.md" ]]; then
       local tmp; tmp=$(mktemp)
-      sed "/\[${story_id}\]/s/ | ✅ Done |/ | 📋 Todo |/" BACKLOG.md > "$tmp" \
-        && mv "$tmp" BACKLOG.md
+      sed "/\[${story_id}\]/s/ | ✅ Done |/ | 📋 Todo |/" .roll/backlog.md > "$tmp" \
+        && mv "$tmp" .roll/backlog.md
     fi
 
     # Write ALERT
@@ -3933,7 +3937,7 @@ EOF
 #   Stdout (on exit 1 due to unsatisfied deps): space-separated unsatisfied IDs.
 _loop_check_depends_on() {
   local id="$1"
-  local backlog="${2:-BACKLOG.md}"
+  local backlog="${2:-.roll/backlog.md}"
   [ -n "$id" ] || return 1
   [ -f "$backlog" ] || return 1
 
@@ -3970,7 +3974,7 @@ _loop_check_depends_on() {
 #   Exit 1: tag absent, story-id not found, or backlog missing.
 _loop_is_manual_only() {
   local id="$1"
-  local backlog="${2:-BACKLOG.md}"
+  local backlog="${2:-.roll/backlog.md}"
   [ -n "$id" ] || return 1
   [ -f "$backlog" ] || return 1
 
@@ -4280,7 +4284,7 @@ _loop_pr_claimed_stories() {
     [ -n "$branch" ] || continue
     local content
     content=$(gh -R "$slug" api \
-      "repos/${slug}/contents/BACKLOG.md?ref=${branch}" \
+      "repos/${slug}/contents/.roll/backlog.md?ref=${branch}" \
       -H "Accept: application/vnd.github.raw" 2>/dev/null) || continue
     [ -n "$content" ] || continue
     local ids
@@ -4719,7 +4723,7 @@ _loop_wait_pr_merge() {
 
 # _loop_is_doc_only_change
 #   Returns 0 if every file changed since origin/main is doc-only
-#   (BACKLOG.md, CHANGELOG.md, PROPOSALS.md, docs/, .claude/).
+#   (.roll/backlog.md, CHANGELOG.md, .roll/proposals.md, docs/, .claude/).
 #   Returns 1 if any code file changed or there are no changes.
 _loop_is_doc_only_change() {
   local changed
@@ -4899,7 +4903,7 @@ _loop_monitor() {
     # Queue: pending items
     echo ""
     echo -e "  ${BOLD}Queue  待处理队列${NC}"
-    local backlog="BACKLOG.md"
+    local backlog=".roll/backlog.md"
     if [[ -f "$backlog" ]]; then
       local queue_count=0
       local fix_pending us_pending refactor_pending
@@ -4939,7 +4943,7 @@ _loop_monitor() {
 
       [[ $queue_count -eq 0 ]] && echo -e "    ${GREEN}✓ empty${NC}"
     else
-      echo "    BACKLOG.md not found"
+      echo "    .roll/backlog.md not found"
     fi
 
     # Log tail (launchd.log)
@@ -5009,7 +5013,7 @@ for line in sys.stdin:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_brief() {
-  local briefs_dir="docs/briefs"
+  local briefs_dir=".roll/briefs"
   local latest; latest=$(ls "${briefs_dir}"/*.md 2>/dev/null | sort | tail -1 || true)
 
   if [[ -z "$latest" ]]; then
@@ -5078,7 +5082,7 @@ PYEOF
 _backlog_set_status() {
   local pattern="$1"
   local new_status="$2"
-  local backlog="BACKLOG.md"
+  local backlog=".roll/backlog.md"
   python3 -c "
 import sys, re
 pattern, new_status, filename = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -5209,9 +5213,9 @@ cmd_ci() {
 }
 
 cmd_backlog() {
-  local backlog="BACKLOG.md"
+  local backlog=".roll/backlog.md"
   if [[ ! -f "$backlog" ]]; then
-    err "BACKLOG.md not found — run 'roll init' first  未找到 BACKLOG.md，请先运行 roll init"
+    err ".roll/backlog.md not found — run 'roll init' first  未找到 .roll/backlog.md，请先运行 roll init"
     return 1
   fi
 
@@ -5357,19 +5361,19 @@ _dash_git_status() {
   fi
 }
 
-# ② Loop layer: extract in-progress story id|title|feature-link from BACKLOG.md.
+# ② Loop layer: extract in-progress story id|title|feature-link from .roll/backlog.md.
 # Output empty if no row's *status column* is 🔨 In Progress (substring matches
 # anywhere on the row would catch description text that mentions the emoji).
 _dash_in_progress_story() {
-  [[ -f "BACKLOG.md" ]] || return 0
+  [[ -f ".roll/backlog.md" ]] || return 0
   local row
-  row=$(grep -F '| 🔨 In Progress |' BACKLOG.md | head -1) || return 0
+  row=$(grep -F '| 🔨 In Progress |' .roll/backlog.md | head -1) || return 0
   [[ -z "$row" ]] && return 0
   local id desc
   id=$(echo "$row" | grep -oE '(US|FIX|REFACTOR)-[A-Z]*-?[0-9]+' | head -1)
   desc=$(echo "$row" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//' | cut -c1-60)
   local link
-  link=$(echo "$row" | grep -oE 'docs/features/[^)]+' | head -1 || true)
+  link=$(echo "$row" | grep -oE '.roll/features/[^)]+' | head -1 || true)
   printf '%s|%s|%s' "$id" "$desc" "$link"
 }
 
@@ -5402,8 +5406,8 @@ _dash_last_dream_hours() {
 
 # ② Dream layer: count of REFACTOR-XXX rows currently 📋 Todo in BACKLOG.
 _dash_refactor_pending() {
-  [[ -f "BACKLOG.md" ]] || { echo 0; return; }
-  grep -E '^\| REFACTOR-' BACKLOG.md 2>/dev/null | grep -F '| 📋 Todo |' | wc -l | tr -d ' '
+  [[ -f ".roll/backlog.md" ]] || { echo 0; return; }
+  grep -E '^\| REFACTOR-' .roll/backlog.md 2>/dev/null | grep -F '| 📋 Todo |' | wc -l | tr -d ' '
 }
 
 # ② Peer layer: last result + days ago from peer log, empty if no log.
@@ -5423,11 +5427,11 @@ _dash_last_peer() {
 
 # ③ Pipeline counts → Idea Backlog Build (Verify/Release reserved).
 _dash_pipeline_counts() {
-  [[ -f "BACKLOG.md" ]] || { echo "0 0 0 0 0"; return; }
+  [[ -f ".roll/backlog.md" ]] || { echo "0 0 0 0 0"; return; }
   local idea backlog build
-  idea=$(grep -E '^\| IDEA-' BACKLOG.md 2>/dev/null | grep -F '| 📋 Todo |' | wc -l | tr -d ' ')
-  backlog=$(grep -E '^\| (\[?US-|FIX-|REFACTOR-)' BACKLOG.md 2>/dev/null | grep -F '| 📋 Todo |' | wc -l | tr -d ' ')
-  build=$(grep -F '| 🔨 In Progress |' BACKLOG.md 2>/dev/null | wc -l | tr -d ' ')
+  idea=$(grep -E '^\| IDEA-' .roll/backlog.md 2>/dev/null | grep -F '| 📋 Todo |' | wc -l | tr -d ' ')
+  backlog=$(grep -E '^\| (\[?US-|FIX-|REFACTOR-)' .roll/backlog.md 2>/dev/null | grep -F '| 📋 Todo |' | wc -l | tr -d ' ')
+  build=$(grep -F '| 🔨 In Progress |' .roll/backlog.md 2>/dev/null | wc -l | tr -d ' ')
   printf '%s %s %s 0 0' "$idea" "$backlog" "$build"
 }
 
@@ -5497,10 +5501,10 @@ _dash_alert_count() {
   grep '^# ALERT' "$_LOOP_ALERT" 2>/dev/null | wc -l | tr -d ' '
 }
 
-# ⑤ Pending proposal count — "## PROPOSAL:" entries in PROPOSALS.md.
+# ⑤ Pending proposal count — "## PROPOSAL:" entries in .roll/proposals.md.
 _dash_proposal_count() {
-  [[ -f "PROPOSALS.md" ]] || { echo 0; return; }
-  grep '^## PROPOSAL' PROPOSALS.md 2>/dev/null | wc -l | tr -d ' '
+  [[ -f ".roll/proposals.md" ]] || { echo 0; return; }
+  grep '^## PROPOSAL' .roll/proposals.md 2>/dev/null | wc -l | tr -d ' '
 }
 
 # ⑤ Release-ready signal — true iff there are releasable commits since the
@@ -5518,7 +5522,7 @@ _dash_release_ready() {
     | wc -l | tr -d ' ')
   [[ "${commits_with_code:-0}" -gt 0 ]] || return 1
   local latest
-  latest=$(ls docs/briefs/*.md 2>/dev/null | sort | tail -1 || true)
+  latest=$(ls .roll/briefs/*.md 2>/dev/null | sort | tail -1 || true)
   [[ -z "$latest" ]] && return 1
   grep -qE '✅ 可发版|Release ready' "$latest" 2>/dev/null
 }
@@ -5696,7 +5700,7 @@ _legacy_home() {
     printf "    ${GREEN}✓ AI 自驱中 — 无需介入${NC}\n"
   else
     (( alerts > 0 )) && printf "    ${RED}⚠ %s ALERT${NC}          run: roll alert\n" "$alerts"
-    (( proposals > 0 )) && printf "    ${YELLOW}📋 %s PROPOSAL${NC}      see: PROPOSALS.md\n" "$proposals"
+    (( proposals > 0 )) && printf "    ${YELLOW}📋 %s PROPOSAL${NC}      see: .roll/proposals.md\n" "$proposals"
     $release_ready && printf "    ${GREEN}✓ Release ready${NC}    run: roll release\n"
   fi
   echo ""
@@ -5705,7 +5709,7 @@ _legacy_home() {
   printf "  ${BOLD}⏰ Schedules & Last Brief${NC}\n"
   printf "    loop :%02d · dream %02d:%02d · brief %02d:%02d\n" \
     "$loop_minute" "$dream_hour" "$dream_minute" "$brief_hour" "$brief_minute"
-  local latest_brief; latest_brief=$(ls docs/briefs/*.md 2>/dev/null | sort | tail -1 || true)
+  local latest_brief; latest_brief=$(ls .roll/briefs/*.md 2>/dev/null | sort | tail -1 || true)
   if [[ -n "$latest_brief" ]]; then
     local mod_time now age summary
     mod_time=$(stat -c %Y "$latest_brief" 2>/dev/null || stat -f %m "$latest_brief" 2>/dev/null || echo 0)
@@ -5745,7 +5749,7 @@ _legacy_help() {
   echo "Commands:"
   echo "  setup [-f]             [Machine] First-time install or re-sync             首次安装或重新同步"
   echo "  update                 [Upgrade] npm install latest + re-sync             一键升级到最新版"
-  echo "  init                   [Project] Create AGENTS.md + BACKLOG.md + docs/     初始化项目工作流文件"
+  echo "  init                   [Project] Create AGENTS.md + .roll/backlog.md + docs/     初始化项目工作流文件"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
   echo "  peer                   [Peer Review] Cross-agent negotiation               跨 Agent 协商对审"
   echo "  loop <on|off|now|status|monitor|resume|reset>  [Autonomous] Manage scheduled BACKLOG executor  管理自主执行循环"
@@ -5817,7 +5821,9 @@ _check_structure() {
   # If new structure exists, allow
   [[ -d "$root/.roll" ]] && return 0
 
-  # Check for legacy structure markers
+  # Check for legacy structure markers (literal old-path strings — must NOT be
+  # rewritten during Story 5 code-ref migration; this is the detection logic
+  # for pre-2.0 user projects).
   if [[ -f "$root/BACKLOG.md" ]] \
      || [[ -f "$root/PROPOSALS.md" ]] \
      || [[ -d "$root/docs/features" ]] \
@@ -5866,7 +5872,7 @@ main() {
     review-pr)     cmd_review_pr "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
-    "") [[ -f "BACKLOG.md" ]] && _home || { _help; _show_changelog; } ;;
+    "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;
     *)
       err "Unknown command: $cmd  未知命令: $cmd"
       echo ""

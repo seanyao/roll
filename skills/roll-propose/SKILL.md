@@ -5,7 +5,7 @@ allowed-tools: "Read, Glob, Grep, Write, Bash(git:*)"
 description: |
   Human-triggered product proposal generator. Reads project context (BACKLOG,
   recent commits, existing skills) and generates 1–3 structured US drafts from
-  a user-facing perspective. Writes to PROPOSALS.md for human review — never
+  a user-facing perspective. Writes to .roll/proposals.md for human review — never
   directly to BACKLOG. Distinct from roll-.dream (which surfaces technical debt
   from execution experience); roll-propose thinks in user scenarios and feature
   gaps.
@@ -18,7 +18,7 @@ description: |
 
 Human-triggered skill for product-level feature ideation. Generates structured
 User Story drafts from a product/user perspective and queues them in
-PROPOSALS.md for human approval before entering BACKLOG.
+.roll/proposals.md for human approval before entering BACKLOG.
 
 ## Distinct from roll-.dream
 
@@ -26,7 +26,7 @@ PROPOSALS.md for human approval before entering BACKLOG.
 |---|---|---|
 | Triggered by | Human explicitly | Nightly schedule |
 | Perspective | User-facing / product scenarios | Code health / technical debt |
-| Output | PROPOSALS.md (pending approval) | BACKLOG (REFACTOR-XXX) |
+| Output | .roll/proposals.md (pending approval) | BACKLOG (REFACTOR-XXX) |
 | Thinking style | "What would users want next?" | "What is the code telling us?" |
 
 ## When to Use
@@ -49,8 +49,8 @@ $roll-propose 用户反馈里提到了XX  # provide a focus hint
 
 Read in parallel:
 
-1. `BACKLOG.md` — all existing US-XXX, FIX-XXX, REFACTOR-XXX, IDEA-XXX entries (both Todo and Done) to avoid proposing duplicates
-2. `PROPOSALS.md` (if exists) — already-proposed items (avoid re-proposing rejected or pending ones)
+1. `.roll/backlog.md` — all existing US-XXX, FIX-XXX, REFACTOR-XXX, IDEA-XXX entries (both Todo and Done) to avoid proposing duplicates
+2. `.roll/proposals.md` (if exists) — already-proposed items (avoid re-proposing rejected or pending ones)
 3. Recent 20 commits via `git log --oneline -20` — what has recently shipped
 4. `skills/` directory listing — what capabilities roll already has
 5. Optional: any focus hint passed by the user
@@ -97,9 +97,9 @@ Concrete usage example — what the user does, what they see, what they gain.
 
 Complexity guide: S = one skill file or small bin/roll change, M = skill + bin/roll + tests, L = multi-file + new infrastructure.
 
-### Step 4 — Write to PROPOSALS.md
+### Step 4 — Write to .roll/proposals.md
 
-Append to `PROPOSALS.md` in the project root (create if absent):
+Append to `.roll/proposals.md` in the project root (create if absent):
 
 ```markdown
 ---
@@ -115,25 +115,25 @@ Use `---` as separator between proposal batches. Never overwrite existing conten
 ### Step 5 — Report
 
 ```
-✅ roll-propose: {N} proposal(s) written to PROPOSALS.md
+✅ roll-propose: {N} proposal(s) written to .roll/proposals.md
 
-To approve: move the entry to BACKLOG.md and assign a US-XXX ID.
+To approve: move the entry to .roll/backlog.md and assign a US-XXX ID.
 To reject:  annotate with "Rejected: {reason}" to suppress future re-proposals.
 ```
 
 ## Output Rules
 
 - Write proposals in the same language as the project's primary documentation (Chinese for this project).
-- Never write directly to BACKLOG.md — PROPOSALS.md is the staging area.
-- If a similar proposal already exists in PROPOSALS.md (pending or rejected), note similarity and skip or merge rather than creating a duplicate.
+- Never write directly to .roll/backlog.md — .roll/proposals.md is the staging area.
+- If a similar proposal already exists in .roll/proposals.md (pending or rejected), note similarity and skip or merge rather than creating a duplicate.
 - Aim for 2 proposals by default; generate 1 if context is thin, 3 if focus hint suggests a rich area.
 
-## PROPOSALS.md Format
+## .roll/proposals.md Format
 
 ```markdown
 # Roll Proposals
 
-> 待审批提案。批准后手工移入 BACKLOG.md 并分配 US-XXX 编号。
+> 待审批提案。批准后手工移入 .roll/backlog.md 并分配 US-XXX 编号。
 > 拒绝时在条目末尾注明拒绝原因，防止 Agent 重复提出相似提案。
 
 ---

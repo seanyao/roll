@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Tests for US-DOC-001: docs/guide/en/ English user guides
+# Tests for US-DOC-001: guide/en/ English user guides
 
-GUIDE_DIR="${BATS_TEST_DIRNAME}/../../docs/guide/en"
+GUIDE_DIR="${BATS_TEST_DIRNAME}/../../guide/en"
 
 @test "overview.md covers three-layer model" {
   grep -qi "three.layer\|autonomous layer\|loop.*dream.*peer\|human.*loop.*dream" "${GUIDE_DIR}/overview.md"
@@ -52,8 +52,8 @@ GUIDE_DIR="${BATS_TEST_DIRNAME}/../../docs/guide/en"
   grep -qF 'roll-loop-' "${GUIDE_DIR}/loop.md"
 }
 
-@test "e2e: dream.md mentions docs/dream/ output directory" {
-  grep -qF 'docs/dream/' "${GUIDE_DIR}/dream.md"
+@test "e2e: dream.md mentions .roll/dream/ output directory" {
+  grep -qF '.roll/dream/' "${GUIDE_DIR}/dream.md"
 }
 
 @test "e2e: peer.md covers mute shared with loop" {

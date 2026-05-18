@@ -25,7 +25,7 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_changelog_lint_bullet: rejects file suffix .md outside backticks" {
-  run _changelog_lint_bullet "- **Added**: BACKLOG.md 加新栏"
+  run _changelog_lint_bullet "- **Added**: .roll/backlog.md 加新栏"
   echo "$output" | grep -q file-suffix
 }
 
@@ -96,7 +96,7 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_changelog_lint_bullet: rejects path fragment 'docs/'" {
-  run _changelog_lint_bullet "- **Added**: docs/features 新增 plan"
+  run _changelog_lint_bullet "- **Added**: .roll/features 新增 plan"
   echo "$output" | grep -q path-fragment
 }
 
@@ -128,7 +128,7 @@ teardown() { unit_teardown_cd; }
     '- **Added**: Step 5.4 mechanical lint Helper'
     '- **Changed**: Refactor 拆 ci.yml 为 matrix'
     '- **Fixed**: `_dash_release_ready` 加 tag gate'
-    '- **Added**: docs/features 新增 plan 文件'
+    '- **Added**: .roll/features 新增 plan 文件'
     '- **Fixed**: REFINE/OBJECT 路径未 local Helper 变量'
   )
   local hit=0 d

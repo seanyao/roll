@@ -15,8 +15,8 @@ teardown() {
 }
 
 _make_project_backlog() {
-  mkdir -p "${TEST_TMP}/docs/features"
-  cat > "${TEST_TMP}/BACKLOG.md" << 'EOF'
+  mkdir -p "${TEST_TMP}/.roll/features"
+  cat > "${TEST_TMP}/.roll/backlog.md" << 'EOF'
 # Project Backlog
 
 ## 🐛 Bug Fixes
@@ -30,8 +30,8 @@ _make_project_backlog() {
 ### Feature: core
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-CORE-001](docs/features/core.md) | Add core feature | 📋 Todo |
-| [US-CORE-002](docs/features/core.md) | Another core feature | ✅ Done |
+| [US-CORE-001](.roll/features/core.md) | Add core feature | 📋 Todo |
+| [US-CORE-002](.roll/features/core.md) | Another core feature | ✅ Done |
 
 ## ♻️ Refactor
 | ID | Description | Status |

@@ -74,7 +74,6 @@ def _hr() -> None:
 
 def _cmd_block(entries: list) -> None:
     """Render a command group — two lines per command (EN + ZH)."""
-    name_w = max(strw(e[0]) for e in entries) + 2
     for name, args, en_desc, zh_desc, star in entries:
         star_mark = c("amber", " ★") if star else "  "
         en_line = (

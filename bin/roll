@@ -5344,7 +5344,7 @@ _home() {
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
-usage() {
+_legacy_help() {
   echo -e "${CYAN} ██████╗  ██████╗ ██╗     ██╗     ${NC}"
   echo -e "${CYAN} ██╔══██╗██╔═══██╗██║     ██║     ${NC}"
   echo -e "${CYAN} ██████╔╝██║   ██║██║     ██║     ${NC}"
@@ -5386,6 +5386,14 @@ usage() {
 
 }
 
+_help() {
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-help.py" "$@"
+  else
+    _legacy_help "$@"
+  fi
+}
+
 main() {
   local cmd="${1:-}"
   shift || true
@@ -5405,8 +5413,8 @@ main() {
     doctor)        cmd_doctor "$@" ;;
     review-pr)     cmd_review_pr "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
-    help|--help|-h) usage ;;
-    "") [[ -f "BACKLOG.md" ]] && _home || { usage; _show_changelog; } ;;
+    help|--help|-h) _help "$@" ;;
+    "") [[ -f "BACKLOG.md" ]] && _home || { _help; _show_changelog; } ;;
     *)
       err "Unknown command: $cmd  未知命令: $cmd"
       echo ""

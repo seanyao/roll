@@ -50,11 +50,11 @@
 | 003 | `roll migrate` 命令实现（dry-run + git mv + 三态幂等） | ✅ Done（13/13 tests pass） | 002 |
 | 004 | 结构强制检测 + 全局命令豁免 | ✅ Done（13/13 tests pass + `ROLL_SKIP_STRUCTURE_CHECK` 旁路）| 003 |
 | 005 | Roll 自身 dogfood migrate（真正的"抽取 .roll/"动作）| ✅ Done（migrate + sed 192 files + AGENTS.md §8 重写 + bump 2.0.0-rc.1）| 003, 004 |
-| 006 | Legacy 检测 + Agent 引导 | 📋 | 001 |
-| 007 | `onboard-plan.yaml` schema + Python 校验 | 📋 | 001 |
-| 008 | `$roll-onboard` 交互技能 | 📋 | 001, 007 |
-| 009 | `roll init --apply`（含 .gitignore 写入） | 📋 | 001, 002, 007 |
-| 010 | 迁移指南 + 用户文档 | 📋 | 005 |
+| 006 | Legacy 检测 + Agent 引导 | ✅ Done（端到端验证：legacy 项目识别 + 10 agents 列出 + token 告知）| 001 |
+| 007 | `onboard-plan.yaml` schema + Python 校验 | ✅ Done（`lib/roll-plan-validate.py`，valid/stale/version-err 三态测试）| 001 |
+| 008 | `$roll-onboard` 交互技能 | ✅ Done（`skills/roll-onboard/SKILL.md`，含三组九问）| 001, 007 |
+| 009 | `roll init --apply`（含 .gitignore 写入） | ✅ Done（端到端：plan 校验 → 创建 .roll/ → 同步工具 → .gitignore）| 001, 002, 007 |
+| 010 | 迁移指南 + 用户文档 | ✅ Done（`guide/{en,zh}/migration-2.0.md` + `legacy-onboarding.md`）| 005 |
 | 011 | Roll `.roll/` → roll-meta（Phase 2） | ⏸ Deferred | 005 |
 
 **硬阻塞约束：** Story 002 完成前禁止动 `bin/roll` / `tests/` / `skills/` 等代码——所有路径修改必须基于 `path-audit.md`。

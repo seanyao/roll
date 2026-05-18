@@ -4751,7 +4751,17 @@ cmd_brief() {
     fi
   fi
 
-  [[ -f "$latest" ]] && cat "$latest"
+  if [[ ! -f "$latest" ]]; then
+    return 1
+  fi
+
+  # ── Display mode ──────────────────────────────────────────────────────────
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-brief.py" "$@"
+    return
+  fi
+
+  cat "$latest"
 }
 
 _promote_unreleased() {

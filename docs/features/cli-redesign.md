@@ -122,9 +122,10 @@
 ---
 
 <a id="us-view-004"></a>
-## US-VIEW-004 `roll status` 重设计 📋
+## US-VIEW-004 `roll status` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 3 · Reference frame: `StatusFrame` in `frames-roll-views.jsx`
 
 - As a Roll user
@@ -132,16 +133,19 @@
 - So that 一眼判断同步链路完整、能在 drift 时直接看到要敲哪条命令
 
 **AC:**
-- [ ] 顶部一行 `● healthy   X of Y AI clients in sync · N skills mounted · M templates present` 或 `! drift ...`
-- [ ] GLOBAL CONVENTIONS 段：AGENTS.md / CLAUDE.md / GEMINI.md / .cursor-rules / project_rules.md 等 `+` 绿色已存在 / `−` 红色缺失
-- [ ] AI CLIENTS 表：name / convention / path / sync / skills 五列；drift 行用 hl-warn 浅琥珀底色
-- [ ] drift 行下方接修复提示行（蓝色高亮 `roll setup -f <client>`）
-- [ ] PROJECT TEMPLATES 段：4 个模板的文件数横排
-- [ ] THIS PROJECT 段：AGENTS.md / BACKLOG.md / docs/features/ / loop · launchd / dream · launchd 五行 metric
+- [x] 顶部一行 `● healthy   X of Y AI clients in sync · N skills mounted · M templates present` 或 `! drift ...`
+- [x] GLOBAL CONVENTIONS 段：AGENTS.md / CLAUDE.md / GEMINI.md / .cursor-rules / project_rules.md 等 `+` 绿色已存在 / `−` 红色缺失
+- [x] AI CLIENTS 表：name / convention / path / sync / skills 五列；drift 行用 hl-warn 浅琥珀底色
+- [x] drift 行下方接修复提示行（蓝色高亮 `roll setup -f <client>`）
+- [x] PROJECT TEMPLATES 段：4 个模板的文件数横排
+- [x] THIS PROJECT 段：AGENTS.md / BACKLOG.md / docs/features/ / loop · launchd / dream · launchd 五行 metric
 
 **Files:**
 - `lib/roll-status.py`（新建）
-- `bin/roll`（`status` 的 dispatch 加 ROLL_UI 分支）
+- `bin/roll`（`cmd_status` dispatch 加 ROLL_UI 分支，`cmd_status` 重命名为 `_legacy_status`）
+- `tests/unit/roll_status_v2.bats`（新建，8 tests）
+- `tests/unit/roll_status.bats`（更新 ROLL_UI=v1 for legacy tests）
+- `tests/integration/cmd_status.bats`（更新 + v2 golden path test）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

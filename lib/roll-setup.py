@@ -8,7 +8,6 @@ import sys
 _LIB_DIR = os.path.dirname(os.path.realpath(__file__))
 if _LIB_DIR not in sys.path:
     sys.path.insert(0, _LIB_DIR)
-import roll_render as rr
 from roll_render import c, row, COLS
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -47,7 +46,7 @@ def render_demo() -> None:
     print()
     _divider()
     msg = c("green", "Setup complete")
-    print(f"  {msg}  —  run {c('bold', 'roll init')} inside a project to begin")
+    print(f"  {msg}  —  run {c('fg', 'roll init', bold=True)} inside a project to begin")
     _divider("═")
 
 

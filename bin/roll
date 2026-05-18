@@ -11,7 +11,7 @@ ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
 ROLL_TEMPLATES="${ROLL_HOME}/conventions/templates"
 
 # Find package root (resolve symlinks so it works from ~/.local/bin/roll or npm global bin)
-_source="${BASH_SOURCE[0]}"
+_source="${BASH_SOURCE[0]:-$0}"
 while [[ -L "$_source" ]]; do
   _dir="$(cd "$(dirname "$_source")" && pwd)"
   _source="$(readlink "$_source")"

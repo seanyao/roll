@@ -108,7 +108,7 @@
 | Phase 2 deferred 太久变成永久搁置 | 低 | 可接受——Phase 1 已足够价值 |
 | 主线 v1.x 与 v2 分支漂移 | 中 | 用户暂停主线；如必须改，每次 rebase 进 v2 |
 | Loop 在 main 上跑出新代码污染 v2 | 中 | 用户已确认暂停 loop on main |
-| 本地测试 baseline 不全绿（cmd_init 等约 57 个失败）| 中 | **2026-05-19 发现，与 v2 工作无关——main 上同样失败**。可能与本地 ENV / submodule 状态有关，需要单独排查；Story 003+ 改代码前要先解决，否则无法用本地测试验收 |
+| 本地测试 baseline 不全绿（cmd_init 等约 57 个失败）| 中 | **2026-05-19 发现，与 v2 工作无关——main 上同样失败**。根因初步定位：cmd_init/cmd_setup 在 bats sandbox 里 `_install_launchd_plists` 失败（exit 128），可能与 macOS launchd sandbox 隔离有关。决定**暂时绕过**：Story 003+ 改动后用"new failures vs baseline 57"的差值衡量退化，而非要求 100% 通过；单独排查作为独立 IDEA 跟踪 |
 
 ## 9. 下一步动作
 

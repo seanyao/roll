@@ -11,6 +11,11 @@ integration_setup() {
   export ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
   export ROLL_TEMPLATES="${ROLL_HOME}/conventions/templates"
 
+  # US-ONBOARD-004: existing tests use legacy structure fixtures (BACKLOG.md etc.)
+  # Bypass structure check until Story 5 migrates fixtures. New tests explicitly
+  # testing structure enforcement should unset this.
+  export ROLL_SKIP_STRUCTURE_CHECK=1
+
   # Fake AI client dirs so sync/link operations have targets
   mkdir -p "${TEST_TMP}/.claude"
   mkdir -p "${TEST_TMP}/.gemini"

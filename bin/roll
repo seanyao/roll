@@ -953,6 +953,206 @@ cmd_init() {
   fi
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# cmd_migrate
+# US-ONBOARD-003: One-shot migration from old project layout to .roll/ structure.
+#
+# Moves process artifacts (BACKLOG.md, PROPOSALS.md, docs/features/, docs/briefs/,
+# docs/dream/, docs/design/, docs/domain/) into .roll/. Also relocates user docs
+# (docs/guide/ → guide/, docs/site/ → site/, docs/intro/ → site/slides/).
+#
+# Three-state idempotency:
+#   - old-only:   execute migration via git mv (single atomic commit)
+#   - new-only:   no-op with "already migrated" message
+#   - both:       error with conflict list (manual resolution required)
+#   - neither:    no-op with "nothing to migrate"
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_migrate() {
+  local dry_run=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run|-n) dry_run=true; shift ;;
+      -h|--help) _migrate_help; return 0 ;;
+      *) err "Unknown arg: $1  未知参数: $1"; return 1 ;;
+    esac
+  done
+
+  # Must be in a git repo (git mv preserves history)
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    err "Not a git repository. roll migrate requires git.  当前目录不是 git 仓库。"
+    return 1
+  fi
+
+  # Build canonical migration plan (read from stdout to avoid bash 4.3+ nameref)
+  local -a moves=()
+  while IFS= read -r _line; do moves+=("$_line"); done < <(_migrate_build_moves)
+
+  # Detect state: do old paths exist? does .roll/ exist?
+  local has_old=false has_new=false
+  [[ -e .roll ]] && has_new=true
+  local m src
+  for m in "${moves[@]}"; do
+    src="${m%%|*}"
+    if [[ -e "$src" ]]; then
+      has_old=true
+      break
+    fi
+  done
+
+  # Three-state dispatch
+  if [[ "$has_new" == "true" && "$has_old" == "true" ]]; then
+    err "Both old and new structures exist (partial migration detected).  老结构与新结构同时存在（部分迁移）。"
+    echo "" >&2
+    echo "Conflicting paths:  冲突路径：" >&2
+    for m in "${moves[@]}"; do
+      src="${m%%|*}"
+      local tgt="${m##*|}"
+      if [[ -e "$src" && -e "$tgt" ]]; then
+        echo "  - $src  AND  $tgt  both exist" >&2
+      fi
+    done
+    echo "" >&2
+    err "Resolve manually then re-run.  请手动解决冲突后重新运行。"
+    return 1
+  fi
+
+  if [[ "$has_new" == "true" && "$has_old" == "false" ]]; then
+    ok "Already migrated. .roll/ exists, no old paths found.  已迁移，无需重复操作。"
+    return 0
+  fi
+
+  if [[ "$has_old" == "false" ]]; then
+    info "No old structure detected. Nothing to migrate.  未发现老结构，无需迁移。"
+    return 0
+  fi
+
+  # State: old-only — proceed. Filter to actually existing paths.
+  local -a active_moves=()
+  for m in "${moves[@]}"; do
+    src="${m%%|*}"
+    [[ -e "$src" ]] && active_moves+=("$m")
+  done
+
+  if [[ ${#active_moves[@]} -eq 0 ]]; then
+    warn "Old structure markers found but no migratable files.  未找到可迁移文件。"
+    return 0
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    _migrate_preview "${active_moves[@]}"
+    return 0
+  fi
+
+  # Real execution requires clean working tree (we'll create a single commit)
+  if ! git diff --quiet --ignore-submodules HEAD 2>/dev/null; then
+    err "Working tree not clean. Commit or stash changes before running migrate.  工作区有未提交改动，请先 commit 或 stash。"
+    return 1
+  fi
+
+  _migrate_execute "${active_moves[@]}"
+}
+
+# Build canonical migration plan as "src|target" pairs (one per line).
+# Single source of truth for what migrates where.
+# Returns via stdout (bash 3.2-compatible — no nameref).
+_migrate_build_moves() {
+  # Order matters: directory-renames must precede moves whose target_dir is
+  # the same dir. Otherwise mkdir -p pre-creates the target, and git mv then
+  # places the source INSIDE rather than renaming. Specifically:
+  #   - docs/site → site   must precede docs/intro → site/slides
+  #   - docs/guide/en → guide/en  must precede docs/practices/* → guide/en/practices/
+  cat << 'EOF'
+BACKLOG.md|.roll/backlog.md
+PROPOSALS.md|.roll/proposals.md
+docs/features.md|.roll/features.md
+docs/features|.roll/features
+docs/briefs|.roll/briefs
+docs/dream|.roll/dream
+docs/design|.roll/design
+docs/domain|.roll/domain
+docs/practices/loop-autorun-verification.md|.roll/verification/loop-autorun-verification.md
+docs/site|site
+docs/intro|site/slides
+docs/guide/en|guide/en
+docs/guide/zh|guide/zh
+docs/practices/engineering-common-sense.md|guide/en/practices/engineering-common-sense.md
+EOF
+}
+
+_migrate_preview() {
+  info "Migration preview (dry-run):  迁移预览（dry-run）"
+  echo ""
+  printf "  %-60s → %s\n" "Old path  老路径" "New path  新路径"
+  local sep; sep=$(printf '─%.0s' {1..100})
+  printf "  %s\n" "$sep"
+  local m
+  for m in "$@"; do
+    local src="${m%%|*}" tgt="${m##*|}"
+    printf "  %-60s → %s\n" "$src" "$tgt"
+  done
+  echo ""
+  info "Run without --dry-run to execute.  去掉 --dry-run 即可真实执行。"
+}
+
+_migrate_execute() {
+  info "Migrating ${#@} paths via git mv...  正在通过 git mv 迁移 ${#@} 个路径..."
+  local moved=0 m
+  for m in "$@"; do
+    local src="${m%%|*}" tgt="${m##*|}"
+    local target_dir; target_dir=$(dirname "$tgt")
+    [[ -d "$target_dir" ]] || mkdir -p "$target_dir"
+    git mv "$src" "$tgt" || {
+      err "git mv failed: $src → $tgt"
+      err "Aborting; previous moves are staged but not committed. Run 'git reset --hard' to undo.  已 stage 但未 commit，运行 'git reset --hard' 回滚。"
+      return 1
+    }
+    moved=$((moved + 1))
+  done
+  # Clean up empty docs/ shells
+  if [[ -d "docs" ]]; then
+    find docs -type d -empty -delete 2>/dev/null || true
+  fi
+  # Single atomic commit
+  git commit --quiet -m "Migrate project layout to .roll/ structure
+
+Atomic migration via 'roll migrate' command. Process artifacts moved
+from root and docs/ into .roll/; user docs relocated to guide/ and site/.
+
+Paths migrated: ${moved}"
+  ok "Migrated ${moved} paths in a single commit.  已在单 commit 中迁移 ${moved} 个路径。"
+  echo ""
+  echo "  Next steps  下一步："
+  echo "    git log -1                    # Inspect the migration commit"
+  echo "    roll status                   # Verify new structure"
+}
+
+_migrate_help() {
+  cat << 'EOF'
+Usage: roll migrate [--dry-run]
+
+Migrate this project's process artifacts (BACKLOG.md, PROPOSALS.md,
+docs/features/, docs/briefs/, docs/dream/, docs/design/, docs/domain/)
+into a .roll/ directory. Also relocates docs/guide/ → guide/,
+docs/site/ → site/, docs/intro/ → site/slides/.
+
+Options:
+  --dry-run, -n   Show what would be moved without modifying files
+  --help, -h      Show this help
+
+Three-state idempotency:
+  - Only old paths present  → migration executes (single atomic commit)
+  - Only .roll/ present     → no-op (already migrated)
+  - Both present            → error with conflict list (manual review)
+  - Neither                 → no-op (nothing to migrate)
+
+Preconditions:
+  - Current directory is a git repository
+  - Working tree is clean (commit or stash changes first)
+
+Uses git mv to preserve file history. On success, produces a single commit.
+EOF
+}
+
 # ─── Helper: print a tidy summary of merge actions ───────────────────────────
 print_merge_summary() {
   if [[ ${#_ROLL_MERGE_SUMMARY[@]} -eq 0 ]]; then
@@ -5579,14 +5779,81 @@ _help() {
   fi
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# _check_structure — US-ONBOARD-004
+#
+# Refuse to run project commands on legacy directory structure. Pushes users
+# toward `roll migrate` rather than letting commands silently operate on old
+# paths and produce confusing results.
+#
+# Exempt commands (always allowed regardless of structure):
+#   setup, update, version/--version/-v, help/--help/-h, migrate, doctor
+#   "" (no command — shows home/help)
+#   init — has its own structure-aware logic inside cmd_init
+#
+# Detection walks from pwd up to git root (or stays at pwd if not in a git repo).
+# Decision: old structure markers present AND no .roll/ → refuse.
+#
+# Bypass: ROLL_SKIP_STRUCTURE_CHECK=1 (used by integration tests until Story 5
+# migrates the test fixtures to new structure).
+# ═══════════════════════════════════════════════════════════════════════════════
+_check_structure() {
+  [[ "${ROLL_SKIP_STRUCTURE_CHECK:-0}" == "1" ]] && return 0
+
+  local cmd="$1"
+  case "$cmd" in
+    setup|update|migrate|doctor|version|--version|-v|help|--help|-h|"") return 0 ;;
+    init) return 0 ;;  # cmd_init handles its own structure logic
+  esac
+
+  # Determine project root: git root if available, else pwd
+  local root
+  if root=$(git rev-parse --show-toplevel 2>/dev/null); then
+    :
+  else
+    root="$(pwd -P)"
+  fi
+
+  # If new structure exists, allow
+  [[ -d "$root/.roll" ]] && return 0
+
+  # Check for legacy structure markers
+  if [[ -f "$root/BACKLOG.md" ]] \
+     || [[ -f "$root/PROPOSALS.md" ]] \
+     || [[ -d "$root/docs/features" ]] \
+     || [[ -d "$root/docs/briefs" ]] \
+     || [[ -d "$root/docs/dream" ]]; then
+    err "Legacy structure detected at: $root  发现老结构目录"
+    echo "" >&2
+    echo "  This project uses the pre-2.0 layout (BACKLOG.md / docs/*). Roll 2.0 requires" >&2
+    echo "  process artifacts to live in .roll/. Run the migration to upgrade:" >&2
+    echo "" >&2
+    echo "    roll migrate --dry-run       # Preview changes" >&2
+    echo "    roll migrate                 # Execute (single atomic commit)" >&2
+    echo "" >&2
+    echo "  Migration guide: ${ROLL_PKG_DIR}/guide/en/migration-2.0.md" >&2
+    echo "" >&2
+    echo "  To roll back to Roll 1.x temporarily:" >&2
+    echo "    npm install -g @seanyao/roll@1" >&2
+    exit 1
+  fi
+
+  # No structure detected — empty project or non-Roll dir. Allow.
+  return 0
+}
+
 main() {
   local cmd="${1:-}"
   shift || true
+
+  # US-ONBOARD-004: refuse to run project commands on legacy structure
+  _check_structure "$cmd"
 
   case "$cmd" in
     setup)         cmd_setup "$@" ;;
     update)        cmd_update "$@" ;;
     init)          cmd_init "$@" ;;
+    migrate)       cmd_migrate "$@" ;;
     status)        cmd_status "$@" ;;
     peer)          cmd_peer "$@" ;;
     loop)          cmd_loop "$@" ;;

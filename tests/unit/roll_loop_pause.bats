@@ -104,9 +104,9 @@ EOF
 
 # ─── Dashboard ─────────────────────────────────────────────────────────────────
 
-@test "_dashboard: references paused state display" {
+@test "_legacy_home: references paused state display" {
   local body
-  body=$(awk '/^_dashboard\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  body=$(awk '/^_legacy_home\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   echo "$body" | grep -qE '⏸|paused'
 }
 

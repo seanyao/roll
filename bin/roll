@@ -1070,7 +1070,7 @@ EOF
 # COMMAND: status
 # Show current state of conventions
 # ═══════════════════════════════════════════════════════════════════════════════
-cmd_status() {
+_legacy_status() {
   echo -e "${BOLD}Roll Convention Status  Roll 约定状态${NC}"
   echo ""
 
@@ -1185,6 +1185,14 @@ cmd_status() {
   done
 
   _status_loop_overview
+}
+
+cmd_status() {
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-status.py" "$@"
+  else
+    _legacy_status "$@"
+  fi
 }
 
 _status_loop_overview() {
@@ -4059,7 +4067,7 @@ _changelog_audit_bullet() {
   # Rule 1: length cap 30 (user-command in backticks bypasses this rule).
   if ! printf '%s' "$bullet" | grep -q '`'; then
     local len
-    len=$(LC_ALL=en_US.UTF-8 printf '%s' "$bullet" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')
+    len=$(printf '%s' "$bullet" | LC_ALL=C.UTF-8 wc -m | tr -d ' ')
     if [ "${len:-0}" -gt 30 ]; then
       echo "over-length-30"
     fi
@@ -4082,7 +4090,7 @@ _changelog_audit_bullet() {
   fi
 
   # Rule 5: required shape — em dash, 不再, or 现在.
-  if ! printf '%s' "$bullet" | grep -qE '—|不再|现在'; then
+  if ! printf '%s' "$bullet" | LC_ALL=C.UTF-8 grep -qE '—|不再|现在'; then
     echo "bad-shape"
   fi
 
@@ -5152,7 +5160,7 @@ _dash_brief_summary() {
   ' "$latest" 2>/dev/null | head -1 | cut -c1-60
 }
 
-_dashboard() {
+_legacy_home() {
   local project_path; project_path=$(pwd -P)
   local project_name; project_name=$(basename "$project_path")
   local agent; agent=$(_project_agent)
@@ -5333,10 +5341,18 @@ _dashboard() {
   echo ""
 }
 
+_home() {
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-home.py" "$@"
+  else
+    _legacy_home "$@"
+  fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
-usage() {
+_legacy_help() {
   echo -e "${CYAN} ██████╗  ██████╗ ██╗     ██╗     ${NC}"
   echo -e "${CYAN} ██╔══██╗██╔═══██╗██║     ██║     ${NC}"
   echo -e "${CYAN} ██████╔╝██║   ██║██║     ██║     ${NC}"
@@ -5378,6 +5394,14 @@ usage() {
 
 }
 
+_help() {
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-help.py" "$@"
+  else
+    _legacy_help "$@"
+  fi
+}
+
 main() {
   local cmd="${1:-}"
   shift || true
@@ -5397,8 +5421,8 @@ main() {
     doctor)        cmd_doctor "$@" ;;
     review-pr)     cmd_review_pr "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
-    help|--help|-h) usage ;;
-    "") [[ -f "BACKLOG.md" ]] && _dashboard || { usage; _show_changelog; } ;;
+    help|--help|-h) _help "$@" ;;
+    "") [[ -f "BACKLOG.md" ]] && _home || { _help; _show_changelog; } ;;
     *)
       err "Unknown command: $cmd  未知命令: $cmd"
       echo ""

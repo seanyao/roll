@@ -57,9 +57,10 @@
 ---
 
 <a id="us-view-002"></a>
-## US-VIEW-002 `roll` home dashboard 重设计 📋
+## US-VIEW-002 `roll` home dashboard 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Plan**: [cli-redesign-plan.md](cli-redesign-plan.md)
 **Wave**: 2 · Reference frame: `HomeFrame` in `frames-roll-home.jsx`
 
@@ -68,19 +69,21 @@
 - So that 每天进项目目录就敲一下 `roll` 能知道全貌
 
 **AC:**
-- [ ] 顶部 identity 行：`roll · Roll vYYYY.M.D` 左对齐 / `agent X · git ✓ branch · timestamp` 右对齐
-- [ ] Eyebrow：根据 `state.yaml` 显示 `⏵ now working <story> · stage <n/m>` 或 `● next HH:MM · in Nm Ss · last ✓ HH:MM <story>`
-- [ ] THREE LAYERS 段：Loop / Dream / Peer 三行，状态点 + 名称 + 状态词 + 调度 + last 事件（参考 `LayerRow`）
-- [ ] FOUR DEFENSES 段：TCR / Auto Review / Spar / Sentinel 四列（参考 `DefenseCell`）
-- [ ] PIPELINE 段：Idea ▸ Backlog ▸ Build ▸ Verify ▸ Release 五列计数 + `▲ in-flight` 标注（计数来自 BACKLOG.md）
-- [ ] CURRENT FOCUS · DoD 段：仅当 Build > 0 显示；8 个 DoD chip 占两行（AC / CI / TCR / Peer / Coverage / Docs / Spar / Branch）
-- [ ] NEED YOU 段：alert 数量、proposal 数量、release-ready 提示，跳转命令蓝色高亮
-- [ ] 底部 quick-nav 两行：`roll loop / backlog / brief / status / peer / --help`
-- [ ] 装饰性 emoji 与 ASCII banner 退役；BACKLOG 状态 emoji（📋🔨🔒⏸✅）保留
+- [x] 顶部 identity 行：`roll · Roll vYYYY.M.D` 左对齐 / `agent X · git ✓ branch · timestamp` 右对齐
+- [x] Eyebrow：根据 `state.yaml` 显示 `⏵ now working <story> · stage <n/m>` 或 `● next HH:MM · in Nm Ss · last ✓ HH:MM <story>`
+- [x] THREE LAYERS 段：Loop / Dream / Peer 三行，状态点 + 名称 + 状态词 + 调度 + last 事件（参考 `LayerRow`）
+- [x] FOUR DEFENSES 段：TCR / Auto Review / Spar / Sentinel 四列（参考 `DefenseCell`）
+- [x] PIPELINE 段：Idea ▸ Backlog ▸ Build ▸ Verify ▸ Release 五列计数 + `▲ in-flight` 标注（计数来自 BACKLOG.md）
+- [x] CURRENT FOCUS · DoD 段：仅当 Build > 0 显示；8 个 DoD chip 占两行（AC / CI / TCR / Peer / Coverage / Docs / Spar / Branch）
+- [x] NEED YOU 段：alert 数量、proposal 数量、release-ready 提示，跳转命令蓝色高亮
+- [x] 底部 quick-nav 两行：`roll loop / backlog / brief / status / peer / --help`
+- [x] 装饰性 emoji 与 ASCII banner 退役；BACKLOG 状态 emoji（📋🔨🔒⏸✅）保留
 
 **Files:**
 - `lib/roll-home.py`（新建）
-- `bin/roll`（裸 `roll` 命令的 dispatch 加 ROLL_UI 分支）
+- `bin/roll`（裸 `roll` 命令的 dispatch 加 ROLL_UI 分支，`_dashboard` 重命名为 `_legacy_home`）
+- `tests/unit/roll_home.bats`（新建，9 tests）
+- `tests/integration/cmd_dashboard.bats`（更新 golden path for v2）
 
 **Dependencies:**
 - Depends on: US-VIEW-001
@@ -88,9 +91,10 @@
 ---
 
 <a id="us-view-003"></a>
-## US-VIEW-003 `roll --help` 重设计 📋
+## US-VIEW-003 `roll --help` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 2 · Reference frame: `HelpFrame` in `frames-roll-home.jsx`
 
 - As a Roll user
@@ -98,17 +102,19 @@
 - So that 第一次看 help 就能立刻找到自己想敲的命令
 
 **AC:**
-- [ ] 顶部 wordmark 紧凑两行：`roll · autonomous delivery for software teams` + ZH 译文 + 版本号
-- [ ] `usage  roll <command> [options]` 单行
-- [ ] AUTONOMY 组（loop / brief / backlog / peer / alert）— 日常使用，前 3 个带 `★` 高亮
-- [ ] PROJECT 组（init / status / agent / ci / release / review-pr）— 项目内
-- [ ] MACHINE 组（setup / update / version）— 全局
-- [ ] 每条命令两行：英文一行（命令名蓝色 bold + args dim + 英文说明）+ 中文一行（dim）
-- [ ] 底部 examples 块（4 个常用场景）+ docs / issues 链接
+- [x] 顶部 wordmark 紧凑两行：`roll · autonomous delivery for software teams` + ZH 译文 + 版本号
+- [x] `usage  roll <command> [options]` 单行
+- [x] AUTONOMY 组（loop / brief / backlog / peer / alert）— 日常使用，前 3 个带 `★` 高亮
+- [x] PROJECT 组（init / status / agent / ci / release / review-pr）— 项目内
+- [x] MACHINE 组（setup / update / version）— 全局
+- [x] 每条命令两行：英文一行（命令名蓝色 bold + args dim + 英文说明）+ 中文一行（dim）
+- [x] 底部 examples 块（4 个常用场景）+ docs / issues 链接
 
 **Files:**
 - `lib/roll-help.py`（新建）
-- `bin/roll`（`--help` / `-h` 的 dispatch 加 ROLL_UI 分支）
+- `bin/roll`（`--help` / `-h` dispatch 加 ROLL_UI 分支，`usage()` 重命名为 `_legacy_help()`）
+- `tests/unit/roll_help.bats`（新建，9 tests）
+- `tests/integration/cmd_help.bats`（新建，3 E2E tests）
 
 **Dependencies:**
 - Depends on: US-VIEW-001
@@ -116,9 +122,10 @@
 ---
 
 <a id="us-view-004"></a>
-## US-VIEW-004 `roll status` 重设计 📋
+## US-VIEW-004 `roll status` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 3 · Reference frame: `StatusFrame` in `frames-roll-views.jsx`
 
 - As a Roll user
@@ -126,16 +133,19 @@
 - So that 一眼判断同步链路完整、能在 drift 时直接看到要敲哪条命令
 
 **AC:**
-- [ ] 顶部一行 `● healthy   X of Y AI clients in sync · N skills mounted · M templates present` 或 `! drift ...`
-- [ ] GLOBAL CONVENTIONS 段：AGENTS.md / CLAUDE.md / GEMINI.md / .cursor-rules / project_rules.md 等 `+` 绿色已存在 / `−` 红色缺失
-- [ ] AI CLIENTS 表：name / convention / path / sync / skills 五列；drift 行用 hl-warn 浅琥珀底色
-- [ ] drift 行下方接修复提示行（蓝色高亮 `roll setup -f <client>`）
-- [ ] PROJECT TEMPLATES 段：4 个模板的文件数横排
-- [ ] THIS PROJECT 段：AGENTS.md / BACKLOG.md / docs/features/ / loop · launchd / dream · launchd 五行 metric
+- [x] 顶部一行 `● healthy   X of Y AI clients in sync · N skills mounted · M templates present` 或 `! drift ...`
+- [x] GLOBAL CONVENTIONS 段：AGENTS.md / CLAUDE.md / GEMINI.md / .cursor-rules / project_rules.md 等 `+` 绿色已存在 / `−` 红色缺失
+- [x] AI CLIENTS 表：name / convention / path / sync / skills 五列；drift 行用 hl-warn 浅琥珀底色
+- [x] drift 行下方接修复提示行（蓝色高亮 `roll setup -f <client>`）
+- [x] PROJECT TEMPLATES 段：4 个模板的文件数横排
+- [x] THIS PROJECT 段：AGENTS.md / BACKLOG.md / docs/features/ / loop · launchd / dream · launchd 五行 metric
 
 **Files:**
 - `lib/roll-status.py`（新建）
-- `bin/roll`（`status` 的 dispatch 加 ROLL_UI 分支）
+- `bin/roll`（`cmd_status` dispatch 加 ROLL_UI 分支，`cmd_status` 重命名为 `_legacy_status`）
+- `tests/unit/roll_status_v2.bats`（新建，8 tests）
+- `tests/unit/roll_status.bats`（更新 ROLL_UI=v1 for legacy tests）
+- `tests/integration/cmd_status.bats`（更新 + v2 golden path test）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

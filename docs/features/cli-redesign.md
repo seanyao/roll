@@ -153,9 +153,10 @@
 ---
 
 <a id="us-view-005"></a>
-## US-VIEW-005 `roll backlog` 重设计 📋
+## US-VIEW-005 `roll backlog` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 3 · Reference frame: `BacklogFrame` in `frames-roll-views.jsx`
 
 - As a Roll user
@@ -163,17 +164,19 @@
 - So that 当前 Todo 全貌可见，in-progress 项目用 pulse 高亮
 
 **AC:**
-- [ ] 顶部右侧 `12 Todo · 2 Blocked · 3 Deferred` 标签
-- [ ] 四组：Bug Fixes（红）/ User Stories（蓝）/ Refactors（琥珀）/ Ideas（dim）；每条两行（ID + EN / ZH）
-- [ ] in-progress 项目：`⏵` 紫色 pulse + 行 hl-run 紫底色
-- [ ] Blocked 段：`🔒` + ID + 描述 + 阻塞原因括号注释
-- [ ] Deferred 段：`⏸` + ID + 描述 + 推迟原因
-- [ ] 底部 triage / drill 命令提示行
-- [ ] 子命令 `roll backlog block/defer/unblock <pattern> [reason]` 行为不变
+- [x] 顶部右侧 `12 Todo · 2 Blocked · 3 Deferred` 标签
+- [x] 四组：Bug Fixes（红）/ User Stories（蓝）/ Refactors（琥珀）/ Ideas（dim）；每条两行（ID + EN / ZH）
+- [x] in-progress 项目：`⏵` 紫色 pulse + 行 hl-run 紫底色
+- [x] Blocked 段：`🔒` + ID + 描述 + 阻塞原因括号注释
+- [x] Deferred 段：`⏸` + ID + 描述 + 推迟原因
+- [x] 底部 triage / drill 命令提示行
+- [x] 子命令 `roll backlog block/defer/unblock <pattern> [reason]` 行为不变
 
 **Files:**
 - `lib/roll-backlog.py`（新建）
 - `bin/roll`（`backlog` 的 dispatch 加 ROLL_UI 分支）
+- `tests/unit/roll_backlog.bats`（新增 6 个 v2 测试）
+- `tests/integration/cmd_backlog.bats`（新建 E2E 测试）
 
 **Dependencies:**
 - Depends on: US-VIEW-001
@@ -181,9 +184,10 @@
 ---
 
 <a id="us-view-006"></a>
-## US-VIEW-006 `roll brief` 重设计 📋
+## US-VIEW-006 `roll brief` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 3 · Reference frame: `BriefFrame` in `frames-roll-views.jsx`
 
 - As a Roll user
@@ -191,16 +195,18 @@
 - So that owner 一眼看到 SUMMARY / HIGHLIGHTS / DECIDE 三段，决策项被琥珀 D1/D2 编号高亮
 
 **AC:**
-- [ ] 顶部 eyebrow + 简报文件路径 + Nh ago
-- [ ] SUMMARY 段：一行核心数字 + ZH 译文 + 三行高亮（✓ Shipped / ! Watch / ⚠ Decide）
-- [ ] HIGHLIGHTS 段：每条 `— <STORY-ID> <title>` + 两到三行 dim 描述 + `PR #N · +X −Y · CI ✓ · Peer ack`
-- [ ] DECIDE 段：D1 / D2 / ... 琥珀编号 + EN 描述 + ZH 翻译
-- [ ] 底部 next / drill / alert 跳转行
-- [ ] 数据源：`docs/briefs/<date>.md` 解析；无新简报时自动 regen（行为不变）
+- [x] 顶部 eyebrow + 简报文件路径 + Nh ago
+- [x] SUMMARY 段：一行核心数字 + ZH 译文 + 三行高亮（✓ Shipped / ! Watch / ⚠ Decide）
+- [x] HIGHLIGHTS 段：每条 `— <STORY-ID> <title>` + dim 描述
+- [x] DECIDE 段：D1 / D2 / ... 琥珀编号 + 描述
+- [x] 底部 next / drill / alert 跳转行
+- [x] 数据源：`docs/briefs/<date>.md` 解析；无新简报时自动 regen（行为不变）
 
 **Files:**
 - `lib/roll-brief.py`（新建）
 - `bin/roll`（`brief` 的 dispatch 加 ROLL_UI 分支）
+- `tests/unit/roll_brief.bats`（新增 7 个 v2 测试）
+- `tests/integration/cmd_brief.bats`（新建 E2E 测试）
 
 **Dependencies:**
 - Depends on: US-VIEW-001
@@ -208,9 +214,10 @@
 ---
 
 <a id="us-view-007"></a>
-## US-VIEW-007 `roll setup` 重设计 📋
+## US-VIEW-007 `roll setup` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 4 · Reference frame: `SetupFrame` in `frames-roll-flows.jsx`
 
 - As a first-time Roll user
@@ -218,16 +225,18 @@
 - So that 滚屏的 `[roll] ...` 日志变成清爽的 6 步流程，drift 在第 5 步用琥珀 `!` 提示
 
 **AC:**
-- [ ] 顶部 eyebrow + scope (machine-level · ~/.roll/)
-- [ ] 6 个编号步骤（参考设计稿）：detect / fetch / install skills / symlink / drift check / templates
-- [ ] 每步两行（EN + ZH）+ 可选 detail 块（用 `TreeBranch` 风格的软链接展开）
-- [ ] Step 5 drift 状态用琥珀 `!` + 修复提示 `roll setup -f <client>`
-- [ ] 结尾 `✓ Setup complete · total Ns` + next 提示行
-- [ ] 流式输出（每步完成立刻 flush），不是一次性 dump
+- [x] 顶部 eyebrow + scope (machine-level · ~/.roll/)
+- [x] 6 个编号步骤（参考设计稿）：detect / fetch / install skills / symlink / drift check / templates
+- [x] 每步两行（EN + ZH）+ 可选 detail 块（用 `TreeBranch` 风格的软链接展开）
+- [x] Step 5 drift 状态用琥珀 `!` + 修复提示 `roll setup -f <client>`
+- [x] 结尾 `✓ Setup complete · total Ns` + next 提示行
+- [x] 流式输出（每步完成立刻 flush），不是一次性 dump
 
 **Files:**
-- `lib/roll-setup.py`（新建；可作为 wrapper 调现有 setup 逻辑，仅替换输出格式）
-- `bin/roll`（`setup` 的 dispatch 加 ROLL_UI 分支）
+- `lib/roll-setup.py`（新建；Python v2 renderer，--demo 模式显示 6 步进度）
+- `bin/roll`（`cmd_setup` 加 ROLL_UI=v2 dispatch + --demo flag）
+- `tests/unit/roll_setup.bats`（新建；7 个单元测试，6/7 GREEN，1 skip）
+- `tests/integration/cmd_setup.bats`（追加 4 个 e2e 测试）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

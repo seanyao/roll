@@ -330,3 +330,30 @@ another_key: 42"
   count=$(find "$launchd_dir" -maxdepth 1 -name "com.roll.*.plist" | wc -l | tr -d ' ')
   [ "$count" -eq 3 ]
 }
+
+# ─── US-VIEW-007: v2 SETUP view ──────────────────────────────────────────────
+
+@test "setup v2 e2e: --demo shows SETUP header" {
+  run_roll setup --demo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SETUP"* ]]
+}
+
+@test "setup v2 e2e: --demo shows numbered steps" {
+  run_roll setup --demo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1."* ]]
+  [[ "$output" == *"3."* ]]
+}
+
+@test "setup v2 e2e: --demo shows checkmarks for completed steps" {
+  run_roll setup --demo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"✓"* ]]
+}
+
+@test "setup v2 e2e: --demo shows 'Setup complete' footer" {
+  run_roll setup --demo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Setup complete"* ]]
+}

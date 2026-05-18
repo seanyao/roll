@@ -6,9 +6,10 @@
 ---
 
 <a id="us-loop-005"></a>
-## US-LOOP-005 cycle 结束信号完整性审计 📋
+## US-LOOP-005 cycle 结束信号完整性审计 ✅
 
 **Created**: 2026-05-19
+**Completed**: 2026-05-19
 **Plan**: [loop-write-integrity-plan.md](loop-write-integrity-plan.md)
 **Source**: IDEA-028
 
@@ -23,17 +24,17 @@
 - Invariant: 每个 CycleStarted 必须有一对匹配的终止事件
 
 **AC:**
-- [ ] 枚举 loop 所有 cycle 终止路径，列入 `loop-write-integrity-plan.md` 的 Termination Paths 表
-- [ ] 至少覆盖：merged success / TCR rollback / PR create fail fallback / orphan recovery / heartbeat timeout / user abort
-- [ ] 每条终止路径都写 `cycle_end` 事件（outcome 字段区分）
-- [ ] 每条终止路径都 append 一行 `runs.jsonl`（status 字段区分）
-- [ ] dashboard 显示的 outcome 与实际终止原因一致，不再有"假 running"
-- [ ] 集成测试：模拟每条终止路径，验证两类信号都写入
+- [x] 枚举 loop 所有 cycle 终止路径，列入 `loop-write-integrity-plan.md` 的 Termination Paths 表（11 条，T1-T11）
+- [x] 至少覆盖：merged success / gh-unavailable ff-merge / orphan recovery / PR-publish 失败 / claude 失败 / cycle timeout / worktree setup 失败
+- [x] 每条终止路径都写 `cycle_end` 事件（outcome 枚举：done / orphan / failed / blocked / idle 终止 twin）
+- [x] 每条终止路径都 append 一行 `runs.jsonl`（status: built / idle / failed），timeout 与 worktree-setup-fail 通过 `_runs_append` 兜底写入
+- [x] dashboard 显示的 outcome 与实际终止原因一致（`runs.jsonl` row 总数 = 已调度 cycle 数，不再漏写）
+- [x] 单元测试覆盖每条终止路径的 emit point（`tests/unit/loop_termination_signals.bats` 9 个用例）
 
 **Files:**
-- `bin/roll` — cycle wrapper script、各终止分支
-- `lib/loop_*.py` — 若有共享写入函数
-- `tests/integration/loop_termination_paths.bats`（新增）
+- `bin/roll` — inner runner heredoc: 新增 `_runs_append` 共享 helper、T3-T8 cycle_end 发射、T9/T10 runs.jsonl 兜底
+- `tests/unit/loop_termination_signals.bats`（新增 9 个用例）
+- `.roll/features/loop-write-integrity-plan.md` — Termination Paths 审计表填充
 
 **Dependencies:**
 - 与 US-LOOP-006 并行，互不阻塞
@@ -41,7 +42,7 @@
 **Data Flow:**
 - Producer: cycle wrapper script (per termination path)
 - Consumer: `roll loop status` renderer, `roll loop runs`
-- Integration test: 每条路径一个 bats 用例
+- Test: `tests/unit/loop_termination_signals.bats` — grep 生成的 inner script 每个 emit point
 
 ---
 

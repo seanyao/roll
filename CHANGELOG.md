@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Improved
+
+- **每一轮 loop 跑完都留下结束记号** — 合并成功、ff 兜底、孤儿 push、PR 失败、claude 失败、超时、worktree 准备失败 7 条路径全部补齐 `cycle_end` 事件 + `runs.jsonl` 记录，dashboard 不会再把早已结束的 cycle 显示成"还在跑" `[loop]`
+
 ## v2026.519.1
 
 ### Fixed

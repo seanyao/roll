@@ -5152,7 +5152,7 @@ _dash_brief_summary() {
   ' "$latest" 2>/dev/null | head -1 | cut -c1-60
 }
 
-_dashboard() {
+_legacy_home() {
   local project_path; project_path=$(pwd -P)
   local project_name; project_name=$(basename "$project_path")
   local agent; agent=$(_project_agent)
@@ -5333,6 +5333,14 @@ _dashboard() {
   echo ""
 }
 
+_home() {
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-home.py" "$@"
+  else
+    _legacy_home "$@"
+  fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -5398,7 +5406,7 @@ main() {
     review-pr)     cmd_review_pr "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) usage ;;
-    "") [[ -f "BACKLOG.md" ]] && _dashboard || { usage; _show_changelog; } ;;
+    "") [[ -f "BACKLOG.md" ]] && _home || { usage; _show_changelog; } ;;
     *)
       err "Unknown command: $cmd  未知命令: $cmd"
       echo ""

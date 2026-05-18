@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
-# Unit tests for lib/roll-home.py (US-VIEW-002)
+# Unit tests for lib/roll-home.py + _home dispatch (US-VIEW-002)
 
 LIB="${BATS_TEST_DIRNAME}/../../lib"
+ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
 
 @test "roll-home --demo --no-color: exits 0 and has identity line" {
   run python3 "${LIB}/roll-home.py" --demo --no-color
@@ -44,4 +45,14 @@ LIB="${BATS_TEST_DIRNAME}/../../lib"
   run python3 "${LIB}/roll-home.py" --demo --no-color
   [ "$status" -eq 0 ]
   [[ "$output" != *$'\033['* ]]
+}
+
+@test "_home dispatch: ROLL_UI=v2 routes to roll-home.py" {
+  body=$(awk '/^_home\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
+  [[ "$body" == *"roll-home.py"* ]]
+}
+
+@test "_home dispatch: ROLL_UI=v1 routes to _legacy_home" {
+  body=$(awk '/^_home\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
+  [[ "$body" == *"_legacy_home"* ]]
 }

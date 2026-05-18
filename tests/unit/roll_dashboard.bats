@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Unit tests for: _dashboard — 自治优先六块布局 (US-AUTO-029)
+# Unit tests for: _legacy_home — 自治优先六块布局 (US-AUTO-029)
 
 load helpers
 
@@ -38,7 +38,7 @@ teardown() {
 
 @test "dashboard: identity line shows name + version + agent + git status" {
   local out
-  out=$(_dashboard)
+  out=$(_legacy_home)
   echo "$out"
   echo "$out" | grep -q "$(basename "$PWD")"
   echo "$out" | grep -q "v${VERSION}"
@@ -48,14 +48,14 @@ teardown() {
 
 @test "dashboard: identity line marks dirty tree" {
   echo "wip" > untracked.txt
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -q "dirty"
 }
 
 # ─── Block ② AI 自治 ─────────────────────────────────────────────────────────
 
 @test "dashboard: AI 自治 block frames Loop / Dream / Peer" {
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out"
   echo "$out" | grep -q "AI 自治"
   echo "$out" | grep -q "Loop"
@@ -64,7 +64,7 @@ teardown() {
 }
 
 @test "dashboard: defenses row shows TCR / Spar / Auto Review / Sentinel" {
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -q "TCR"
   echo "$out" | grep -q "Spar"
   echo "$out" | grep -q "Auto Review"
@@ -78,7 +78,7 @@ teardown() {
 |-------|-------------|--------|
 | [US-DEMO-007](docs/features/demo.md#us-demo-007) | demo wip | 🔨 In Progress |
 EOF
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -q "US-DEMO-007"
 }
 
@@ -95,7 +95,7 @@ EOF
 | [US-DEMO-2](x.md) | s | 🔨 In Progress |
 | REFACTOR-1 | r | 📋 Todo |
 EOF
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out"
   echo "$out" | grep -qE "Idea[^0-9]*2"
   echo "$out" | grep -qE "Backlog[^0-9]*3"
@@ -110,7 +110,7 @@ EOF
   cat > BACKLOG.md <<'EOF'
 | [US-DEMO-9](docs/features/demo.md#us-demo-9) | demo | 🔨 In Progress |
 EOF
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -q "Current Focus"
   echo "$out" | grep -q "AC"
   echo "$out" | grep -q "CI"
@@ -118,20 +118,20 @@ EOF
 }
 
 @test "dashboard: Focus block hidden when no Build" {
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   ! echo "$out" | grep -q "Current Focus"
 }
 
 # ─── Block ⑤ Human × AI ─────────────────────────────────────────────────────
 
 @test "dashboard: Human×AI shows 自驱中 when no alerts/proposals/release" {
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -q "AI 自驱中"
 }
 
 @test "dashboard: Human×AI surfaces ALERT count" {
   echo "# ALERT — sample" > "$_LOOP_ALERT"
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -qE "ALERT.*roll alert"
 }
 
@@ -142,7 +142,7 @@ EOF
 ## PROPOSAL: foo
 status: pending
 EOF
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -qE "PROPOSAL.*PROPOSALS\.md"
   ! echo "$out" | grep -qE "PROPOSAL.*roll backlog"
 }
@@ -213,7 +213,7 @@ EOF
 # ─── Block ⑥ Schedules & Last Brief ─────────────────────────────────────────
 
 @test "dashboard: shows compact schedules line for three services" {
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -qE "loop[^A-Za-z0-9]+:[0-9]{2}"
   echo "$out" | grep -qE "dream[^A-Za-z0-9]+[0-9]{2}:[0-9]{2}"
   echo "$out" | grep -qE "brief[^A-Za-z0-9]+[0-9]{2}:[0-9]{2}"
@@ -229,7 +229,7 @@ EOF
 ## 发版就绪
 ✅ 可发版
 EOF
-  local out; out=$(_dashboard)
+  local out; out=$(_legacy_home)
   echo "$out" | grep -q "Brief"
   echo "$out" | grep -q "ago"
 }
@@ -238,7 +238,7 @@ EOF
 
 @test "dashboard: uses _loop_derive_minute and _launchd_svc_state on macOS branch" {
   local body
-  body=$(awk '/^_dashboard\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  body=$(awk '/^_legacy_home\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   echo "$body" | grep -q "_loop_derive_minute"
   echo "$body" | grep -q "_launchd_svc_state"
 }

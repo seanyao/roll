@@ -52,9 +52,11 @@ _enforce_planning_markers() {
 
   [[ -z "$all_todo" ]] && return 0
 
-  awk -v list="$all_todo" '
+  # Pass list via env var instead of -v: BSD awk on macOS rejects newlines
+  # inside -v values; ENVIRON access handles multi-line strings cleanly.
+  ROLL_PLANNING_LIST="$all_todo" awk '
     BEGIN {
-      n = split(list, arr, "\n")
+      n = split(ENVIRON["ROLL_PLANNING_LIST"], arr, "\n")
       for (i = 1; i <= n; i++) if (arr[i] != "") names[arr[i]] = 1
     }
     {

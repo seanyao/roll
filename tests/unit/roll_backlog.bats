@@ -120,3 +120,52 @@ EOF
   run bash "$ROLL_BIN" backlog
   [ "$status" -ne 0 ]
 }
+
+@test "backlog v2: ROLL_UI=v2 routes to Python implementation" {
+  _make_backlog
+  echo "| FIX-010 | A pending fix | 📋 Todo |" >> "$TEST_DIR/BACKLOG.md"
+  cd "$TEST_DIR"
+  run env ROLL_UI=v2 bash "$ROLL_BIN" backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FIX-010"* ]]
+  [[ "$output" == *"Bug Fixes"* ]]
+}
+
+@test "backlog v2: ROLL_UI=v1 uses legacy bash implementation" {
+  _make_backlog
+  echo "| FIX-011 | A pending fix for v1 | 📋 Todo |" >> "$TEST_DIR/BACKLOG.md"
+  cd "$TEST_DIR"
+  run env ROLL_UI=v1 bash "$ROLL_BIN" backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FIX-011"* ]]
+}
+
+@test "backlog v2: in-progress item shows pulse marker" {
+  _make_backlog
+  echo "| [US-TEST-020](docs/features/test.md) | Active story | 🔨 In Progress |" >> "$TEST_DIR/BACKLOG.md"
+  cd "$TEST_DIR"
+  run env ROLL_UI=v2 bash "$ROLL_BIN" backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"US-TEST-020"* ]]
+  [[ "$output" == *"⏵"* ]]
+}
+
+@test "backlog v2: blocked item shows lock emoji and reason" {
+  _make_backlog
+  echo "| FIX-012 | A blocked fix | 🔒 Blocked [waiting on infra] |" >> "$TEST_DIR/BACKLOG.md"
+  cd "$TEST_DIR"
+  run env ROLL_UI=v2 bash "$ROLL_BIN" backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FIX-012"* ]]
+  [[ "$output" == *"🔒"* ]]
+}
+
+@test "backlog v2: deferred item shows pause emoji" {
+  _make_backlog
+  echo "| IDEA-050 | Deferred idea | ⏸ Deferred [low priority] |" >> "$TEST_DIR/BACKLOG.md"
+  cd "$TEST_DIR"
+  run env ROLL_UI=v2 bash "$ROLL_BIN" backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"IDEA-050"* ]]
+  [[ "$output" == *"⏸"* ]]
+}

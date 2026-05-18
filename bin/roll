@@ -4958,6 +4958,10 @@ cmd_backlog() {
   esac
 
   # ── Display mode ──────────────────────────────────────────────────────────
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-backlog.py" "$@"
+    return
+  fi
   local DIM='\033[2m'
 
   local us_items fix_items refactor_items idea_items total=0

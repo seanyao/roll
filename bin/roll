@@ -2018,6 +2018,90 @@ _project_slug() {
   printf '%s' "${base}-${hash}"
 }
 
+# FIX-058: migrate loop state files when the per-project slug changed due to
+# FIX-056 (realpath case-normalization on macOS).  Called by
+# _install_launchd_plists before generating new runner/plist so existing state
+# (paused/running/etc.) is not silently lost.
+#
+# Usage: _slug_migrate_from_legacy <new_slug> [<loop_dir>] [<old_slug>]
+#   new_slug   — the correct slug computed by the current _project_slug
+#   loop_dir   — optional override of ${_SHARED_ROOT}/loop (for unit tests)
+#   old_slug   — optional explicit old slug (for unit tests; auto-computed otherwise)
+_slug_migrate_from_legacy() {
+  local new_slug="$1"
+  local loop_dir="${2:-${_SHARED_ROOT}/loop}"
+  local old_slug="${3:-}"
+
+  if [[ -z "$old_slug" ]]; then
+    [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return 0
+    # Compute the pre-FIX-056 slug: same algorithm but without realpath.
+    local raw_path; raw_path=$(pwd 2>/dev/null)
+    local _common
+    _common=$(git -C "$raw_path" rev-parse --git-common-dir 2>/dev/null)
+    if [[ -n "$_common" && "$_common" == *"/.git" ]]; then
+      raw_path="${_common%/.git}"
+    fi
+    local old_base; old_base=$(basename "$raw_path")
+    local old_hash
+    if command -v md5 &>/dev/null; then
+      old_hash=$(printf '%s' "$raw_path" | md5 | cut -c1-6)
+    else
+      old_hash=$(printf '%s' "$raw_path" | md5sum | cut -c1-6)
+    fi
+    old_base=$(printf '%s' "$old_base" | tr -cs '[:alnum:]' '-' | sed 's/-*$//')
+    old_slug="${old_base}-${old_hash}"
+  fi
+
+  [[ "$old_slug" == "$new_slug" ]] && return 0
+  [[ -f "${loop_dir}/state-${old_slug}.yaml" ]] || return 0
+
+  printf 'roll: migrating loop state %s → %s\n' "$old_slug" "$new_slug" >&2
+
+  mv "${loop_dir}/state-${old_slug}.yaml" "${loop_dir}/state-${new_slug}.yaml"
+
+  [[ -f "${loop_dir}/cron-${old_slug}.log" ]] && \
+    mv "${loop_dir}/cron-${old_slug}.log" "${loop_dir}/cron-${new_slug}.log"
+
+  if [[ -f "${loop_dir}/events-${old_slug}.ndjson" ]]; then
+    if [[ -f "${loop_dir}/events-${new_slug}.ndjson" ]]; then
+      cat "${loop_dir}/events-${old_slug}.ndjson" >> "${loop_dir}/events-${new_slug}.ndjson"
+      rm "${loop_dir}/events-${old_slug}.ndjson"
+    else
+      mv "${loop_dir}/events-${old_slug}.ndjson" "${loop_dir}/events-${new_slug}.ndjson"
+    fi
+  fi
+
+  local runs_file="${loop_dir}/runs.jsonl"
+  if [[ -f "$runs_file" ]]; then
+    local tmp; tmp=$(mktemp)
+    python3 - "$old_slug" "$new_slug" "$runs_file" > "$tmp" << 'PYEOF'
+import json, sys
+old, new, path = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path) as f:
+    for line in f:
+        line = line.rstrip('\n')
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+            if 'project' in d and old in str(d['project']):
+                d['project'] = str(d['project']).replace(old, new)
+            print(json.dumps(d))
+        except Exception:
+            print(line)
+PYEOF
+    mv "$tmp" "$runs_file"
+  fi
+
+  local old_plist=~/Library/LaunchAgents/com.roll.loop.${old_slug}.plist
+  if [[ -f "$old_plist" ]]; then
+    launchctl unload "$old_plist" 2>/dev/null || true
+    rm -f "$old_plist"
+  fi
+
+  rm -f "${loop_dir}/run-${old_slug}.sh" "${loop_dir}/run-${old_slug}-inner.sh"
+}
+
 _LOOP_TAG="# roll-loop"
 : "${_SHARED_ROOT:=${HOME}/.shared/roll}"
 # FIX-052: per-project loop state — ALERT/state/mute were globally shared,
@@ -2697,6 +2781,9 @@ _install_launchd_plists() {
 
   local updated=0
   local slug; slug=$(_project_slug "$project_path")
+  # FIX-058: after FIX-056 introduced realpath normalization, the slug for an
+  # existing project may have changed.  Migrate state before creating new files.
+  _slug_migrate_from_legacy "$slug" "${shared}/loop"
   for i in "${!services[@]}"; do
     local svc="${services[$i]}"
     local skill="${skill_names[$i]}"

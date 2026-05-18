@@ -154,3 +154,51 @@ print(m.group(1), m.group(2), m.group(3))   # today yest -2d
   # Today=0 (May 18 has no data), Yesterday=1 (May 17 cycle), -2d=0
   [[ "$output" == *"0 1 0"* ]]
 }
+
+# ─── cost_reported_usd regression (FIX-060) ──────────────────────────────────
+
+@test "Bug E: aggregate keeps cost_reported_usd from last usage event" {
+  run run_status '
+from datetime import datetime, timezone, timedelta
+ts = datetime(2026,5,18,10,0,0,tzinfo=timezone.utc)
+events = [
+  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "L5", "_ts": ts},
+  {"ts": ts.isoformat(), "stage": "usage", "label": "L5", "outcome": "ok",
+   "detail": {"input_tokens": 100, "output_tokens": 50,
+               "cache_creation_tokens": 0, "cache_read_tokens": 0,
+               "cost_reported_usd": 5.0}},
+  {"ts": ts.isoformat(), "stage": "usage", "label": "L5", "outcome": "ok",
+   "detail": {"input_tokens": 3, "output_tokens": 0,
+               "cache_creation_tokens": 0, "cache_read_tokens": 122089,
+               "cost_reported_usd": 9.25}},
+]
+cs = mod.aggregate(events, [])
+ue = cs[0].get("usage_event") or {}
+print(ue.get("cost_reported_usd"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"9.25"* ]]
+}
+
+@test "Bug E: backfill_usage uses cost_reported_usd instead of recomputing from last-event tokens" {
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,18,10,0,0,tzinfo=timezone.utc)
+cycles = [{
+    "label": "L5",
+    "start": ts,
+    "usage_event": {
+        "input_tokens": 3,
+        "output_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 122089,
+        "cost_reported_usd": 9.25,
+    },
+}]
+mod.backfill_usage_from_claude_sessions(cycles, "no-such-slug")
+print(round(cycles[0].get("cost_list", 0), 2))
+'
+  [ "$status" -eq 0 ]
+  # Must show 9.25 (cost_reported_usd), not ~0.04 (recomputed from 3 input tokens)
+  [[ "$output" == *"9.25"* ]]
+}

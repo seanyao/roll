@@ -574,12 +574,19 @@ _ensure_tmux() {
 
 cmd_setup() {
   local force=false
+  local demo=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force|-f) force=true; shift ;;
+      --demo)     demo=true;  shift ;;
       *) err "Unknown argument: $1  未知参数: $1"; exit 1 ;;
     esac
   done
+
+  if [[ "${ROLL_UI:-v2}" == "v2" ]] || [[ "$demo" == "true" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-setup.py" --demo
+    if [[ "$demo" == "true" ]]; then return; fi
+  fi
 
   info "Setting up Roll on this machine...  正在初始化 Roll..."
   echo ""

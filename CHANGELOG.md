@@ -15,6 +15,7 @@
 - **大小写不同路径进同一项目** — 不再被 loop 当成两个独立项目、LOCK 和状态不再分裂 `[loop]`
 - **loop 跑完一轮** — 不再挡死后续调度、卡到手动 kill `[loop]`
 - **binary 升级后 loop dashboard 回落 IDLE 问题** — 旧 binary 用不同路径大小写算出不同 slug，新 binary 启动时自动把旧 slug 的状态文件、日志、历史记录全部迁到新 slug，upgrade 无感无损 `[loop]`
+- **loop status 费用显示严重偏低** — `$9.25` 的 cycle 显示为 `$0.04`：读取了最后一次 API 调用的 token 数重新算价，改为直接用 `cost_reported_usd`（loop-fmt 写入的权威累计值） `[loop]`
 
 ## v2026.518.3
 

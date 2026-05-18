@@ -2793,6 +2793,38 @@ LOOP_CYCLE_TIMEOUT_SEC="\${ROLL_LOOP_CYCLE_TIMEOUT_SEC:-2700}"
 _CYCLE_TIMED_OUT=0
 _on_sigterm() { _CYCLE_TIMED_OUT=1; }
 trap '_on_sigterm' TERM
+# US-LOOP-005: idempotent runs.jsonl writer shared by normal exit, timeout
+# trap, and worktree-setup-failure early exit. Guards on jq + run_id dedupe so
+# multiple callers in the same cycle are safe.
+_runs_append() {
+  local _status="\$1"; local _tcr="\${2:-0}"; local _built="\${3:-[]}"
+  local _runs_dst="${HOME}/.shared/roll/loop/runs.jsonl"
+  command -v jq >/dev/null 2>&1 || return 0
+  local _cid="\${CYCLE_ID:-pre-cycle-\$\$}"
+  local _rid="loop-\${_cid%-*}"
+  grep -qF "\"run_id\":\"\$_rid\"" "\$_runs_dst" 2>/dev/null && return 0
+  mkdir -p "\$(dirname "\$_runs_dst")"
+  local _ts_now; _ts_now=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local _start="\${CYCLE_START:-\$(date -u +%s)}"
+  local _dur=\$(( \$(date -u +%s) - _start ))
+  [ "\$_dur" -lt 0 ] && _dur=0
+  jq -nc \\
+    --arg ts "\$_ts_now" \\
+    --arg project "${slug}" \\
+    --arg run_id "\$_rid" \\
+    --arg status "\$_status" \\
+    --arg cycle_id "\$_cid" \\
+    --argjson built "\$_built" \\
+    --argjson skipped '[]' \\
+    --argjson alerts '[]' \\
+    --argjson tcr_count "\$_tcr" \\
+    --argjson duration_sec "\$_dur" \\
+    '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
+      cycle_id:\$cycle_id,
+      built:\$built, skipped:\$skipped, alerts:\$alerts,
+      tcr_count:\$tcr_count, duration_sec:\$duration_sec}' \\
+    >> "\$_runs_dst" 2>/dev/null || true
+}
 _inner_cleanup() {
   local _rc=\$?
   # Kill heartbeat + every remaining background job (watchdog, orphan
@@ -2802,6 +2834,10 @@ _inner_cleanup() {
   for _pid in \$(jobs -p); do kill "\$_pid" 2>/dev/null; done
   if [ "\${_CYCLE_TIMED_OUT:-0}" -eq 1 ]; then
     _loop_event cycle_end "\${CYCLE_ID:-unknown}" "\${BRANCH:-}" "blocked" 2>/dev/null || true
+    # US-LOOP-005 T9: timeout path must also write runs.jsonl row so dashboard
+    # has a terminal record (cycle_end alone is insufficient — runs.jsonl is
+    # the canonical history feed for 'roll loop runs').
+    _runs_append "failed" 0 "[]" 2>/dev/null || true
     _worktree_alert "cycle \${CYCLE_ID:-unknown}: \${LOOP_CYCLE_TIMEOUT_SEC}s timeout — claude/python killed; in-progress story marked Blocked" 2>/dev/null || true
   fi
   rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"
@@ -2887,6 +2923,10 @@ else
   # falling back to the main tree without isolation is unacceptable.
   _worktree_alert "cycle \${CYCLE_ID}: worktree setup failed — skipping cycle to avoid running without isolation"
   echo "[loop] cycle \${CYCLE_ID}: worktree setup failed; skipping cycle (no isolation)"
+  # US-LOOP-005 T10: worktree-setup-failed path leaves no commits and never
+  # emits cycle_start, but dashboard still needs a runs.jsonl row marking the
+  # cycle as failed (otherwise the scheduled tick appears to have vanished).
+  _runs_append "failed" 0 "[]" 2>/dev/null || true
   exit 0
 fi
 
@@ -3043,31 +3083,9 @@ _loop_cleanup_stale_cycle_branches "${project_path}" || true
 
 # FIX-044 / Step 5: Write loop cycle run summary to runs.jsonl
 # Deterministic — runs in shell regardless of whether agent executes SKILL.md Step 5.
-# Idempotent: skips if a record for this run_id already exists (agent may also write).
-_runs_dst="${HOME}/.shared/roll/loop/runs.jsonl"
-mkdir -p "\$(dirname "\$_runs_dst")"
-_cycle_end=\$(date -u +%s)
-_cycle_dur=\$(( _cycle_end - CYCLE_START ))
-_ts=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
-_run_id="loop-\${CYCLE_ID%-*}"
-if command -v jq >/dev/null 2>&1 && ! grep -qF "\"run_id\":\"\$_run_id\"" "\$_runs_dst" 2>/dev/null; then
-  jq -nc \\
-    --arg ts "\$_ts" \\
-    --arg project "${slug}" \\
-    --arg run_id "\$_run_id" \\
-    --arg status "\$_cycle_status" \\
-    --arg cycle_id "\$CYCLE_ID" \\
-    --argjson built "\$_cycle_built" \\
-    --argjson skipped '[]' \\
-    --argjson alerts '[]' \\
-    --argjson tcr_count "\$_cycle_tcr" \\
-    --argjson duration_sec "\$_cycle_dur" \\
-    '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
-      cycle_id:\$cycle_id,
-      built:\$built, skipped:\$skipped, alerts:\$alerts,
-      tcr_count:\$tcr_count, duration_sec:\$duration_sec}' \\
-    >> "\$_runs_dst" 2>/dev/null || true
-fi
+# US-LOOP-005: now routed through _runs_append so timeout/worktree-setup-fail
+# share the same write logic. _runs_append is idempotent on run_id.
+_runs_append "\$_cycle_status" "\$_cycle_tcr" "\$_cycle_built" 2>/dev/null || true
 INNER
   chmod +x "$inner_path"
 

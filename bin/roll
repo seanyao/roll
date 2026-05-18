@@ -1435,6 +1435,7 @@ _write_backlog() {
     _ROLL_MERGE_SUMMARY+=("unchanged|.roll/backlog.md")
     return
   fi
+  mkdir -p "$(dirname "$1")"
   cat > "$1" << 'EOF'
 # Project Backlog
 

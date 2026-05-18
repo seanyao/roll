@@ -324,6 +324,34 @@
 |-------|-------------|--------|
 | [US-WEB-001](docs/features/landing-page.md#us-web-001) | 首屏动画讲清"装好就忘了它"的三层自治故事 — 一次开关、47 分钟时间快进、自动 fire 一轮交付，6 秒内 grok 整个产品 `depends-on:US-LOOP-001` | ✅ Done |
 
+## Epic: Legacy Project Onboarding + 项目管理剥离
+### Feature: directory-restructure
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-ONBOARD-001](docs/features/directory-restructure.md#us-onboard-001) | 制定过程文件与产品文件的目录归属标准，所有项目共享一套约定 | 📋 Todo |
+| [US-ONBOARD-002](docs/features/directory-restructure.md#us-onboard-002) | 找出代码库里每一处指向老目录结构的引用，产出完整清单作为后续改动的唯一依据 `depends-on:US-ONBOARD-001` | 📋 Todo |
+| [US-ONBOARD-003](docs/features/directory-restructure.md#us-onboard-003) | 一键把老项目结构迁到新结构，保留 git 历史，支持 dry-run 预览，断点可恢复 `depends-on:US-ONBOARD-002` | 📋 Todo |
+| [US-ONBOARD-004](docs/features/directory-restructure.md#us-onboard-004) | 新版 Roll 在老结构项目上拒绝运行并引导迁移，全局命令不受影响 `depends-on:US-ONBOARD-003` | 📋 Todo |
+| [US-ONBOARD-005](docs/features/directory-restructure.md#us-onboard-005) | 在 Roll 仓库跑 migrate + 发布 2.0 + GitHub 仓库改名 roll，CI 全绿才能 publish `depends-on:US-ONBOARD-003,US-ONBOARD-004` | 📋 Todo |
+
+### Feature: legacy-onboard
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-ONBOARD-006](docs/features/legacy-onboard.md#us-onboard-006) | `roll init` 检测到遗留项目后列出本机可用 AI agent，告知 token 消耗，引导去 agent 里完成 onboard `depends-on:US-ONBOARD-001` | 📋 Todo |
+| [US-ONBOARD-007](docs/features/legacy-onboard.md#us-onboard-007) | 定义 AI 产出、bash 消费的契约文件格式，含校验规则和过期机制 `depends-on:US-ONBOARD-001` | 📋 Todo |
+| [US-ONBOARD-008](docs/features/legacy-onboard.md#us-onboard-008) | `$roll-onboard` 交互技能 — 读懂项目后用九个问题完成认知校对，产出 onboard 计划 `depends-on:US-ONBOARD-001,US-ONBOARD-007` | 📋 Todo |
+| [US-ONBOARD-009](docs/features/legacy-onboard.md#us-onboard-009) | `roll init --apply` 读取 onboard 计划执行所有文件创建和配置，含 .gitignore 写入 `depends-on:US-ONBOARD-001,US-ONBOARD-002,US-ONBOARD-007` | 📋 Todo |
+
+### Feature: migration-guide
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-ONBOARD-010](docs/features/directory-restructure.md#us-onboard-010) | 迁移指南和 Legacy onboarding 用户文档，帮老用户顺利过渡到新结构 `depends-on:US-ONBOARD-005` | 📋 Todo |
+
+### Feature: roll-meta-migration
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-ONBOARD-011](docs/features/roll-meta-migration.md#us-onboard-011) | Roll 自身的 `.roll/` 整体迁入 roll-meta 私有仓库，实现产品代码和项目管理完全分仓，用户项目不受影响 `depends-on:US-ONBOARD-005` [deferred 2026-05-19: 先做 Phase 1 抽取，Phase 2 lift 等 Phase 1 全绿后再启动] | ⏸ Deferred |
+
 ## 💡 Ideas
 | ID | Description | Status |
 |----|-------------|--------|

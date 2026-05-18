@@ -344,3 +344,185 @@ roll fleet
 **Suggested ID:** 并入 IDEA-008 → 用 `$roll-design --from-idea IDEA-008` 拆分
 **Suggested Epic / Feature:** Dashboard 重设计
 **Estimated complexity:** M（作为 IDEA-008 的一个子 story）
+
+---
+
+# Architecture Decision Records — Legacy Onboard Epic
+
+> 以下 ADR 记录本 Epic 涉及的架构决策。通过后作为 Story 实施的约束。
+
+---
+proposed: 2026-05-18
+status: pending
+type: ADR
+---
+
+## ADR-001: `.roll/` 目录约定与内容归属规则
+
+**决策：**
+
+采用"过程对内、产品对外"原则重组目录。
+
+**归属规则：**
+
+| 归属 | 目录 | 内容 |
+|------|------|------|
+| 产品（根级） | `guide/en/`, `guide/zh/` | 用户文档，语言为顶层维度 |
+| 产品（根级） | `guide/{lang}/practices/` | 被 AGENTS.md 或 README 引用的工程规范 |
+| 产品（根级） | `site/` | 网站源码 |
+| 产品（根级） | `site/slides/` | 宣传/分发材料（HTML 介绍页等） |
+| 过程（`.roll/`） | `backlog.md`, `proposals.md` | 项目管理 |
+| 过程（`.roll/`） | `features/`, `features.md` | Story 详情与功能索引 |
+| 过程（`.roll/`） | `briefs/`, `dream/` | 自动产出的简报与巡检日志 |
+| 过程（`.roll/`） | `design/`, `domain/` | 设计过程与领域建模 |
+| 过程（`.roll/`） | `verification/` | 执行验证记录 |
+| 过程（`.roll/`） | `state/` | loop state、中间产物 |
+| 过程（`.roll/`） | `onboard-plan.yaml` | onboard 中间产物（skill→bash 契约） |
+
+**归属判据：** 被外部引用（AGENTS.md、README、用户文档）= 规范/产品 → 根级；自动产出或仅内部消费 = 过程 → `.roll/`。
+
+**结构细节：**
+- `docs/` 目录整体消失
+- `guide/` 顶层只有语言维度（`en/`, `zh/`），practices/faq 收入各语言子目录
+- `docs/INDEX.md` 不在迁移范围——是 `roll-doc` 未来产出物，默认写到 `.roll/index.md`
+- `docs/intro/`（HTML 宣传材料）→ `site/slides/`，不归 `guide/`
+- `docs/design/`（AGENTS.md §8 未列出的隐藏目录）归入 `.roll/design/`
+
+**可搬迁约束：** `.roll/` 必须是自包含单元。内部文件不允许外向相对路径（如 `../../bin/roll`）。Story 详情引用代码用符号名（函数名、命令名），不用文件路径。
+
+**两阶段模型：**
+- Phase 1（本 Epic）：`.roll/` 作为所有项目（含 Roll 自身）的过程目录标准约定
+- Phase 2（未来）：Roll 自身的 `.roll/` 内容迁入 `seanyao/roll-meta`（private），实现产品/过程完全分仓。用户项目不受影响，`.roll/` 仍是其永久住所
+- Phase 1 的设计必须满足 Phase 2 的搬迁前提——即可搬迁约束
+
+**考量的替代方案：**
+
+| 方案 | 被否理由 |
+|------|---------|
+| 保留 `docs/` 加子目录 | 过程与产品继续混在一个顶级目录里，新用户分不清 |
+| `.roll/` 扁平不分子目录 | 文件一多就乱，briefs/dream 等自动产出物淹没手动管理文件 |
+| `guide/` 下 practices/faq 与 en/zh 平铺 | 三种性质并列，语义不清；语言做顶层后消失 |
+| Roll 跳过 `.roll/` 直接搬 roll-meta | 不 dogfood 自己的约定；roll-meta 当前结构也需重组，两步并一步风险大 |
+
+---
+proposed: 2026-05-18
+status: pending
+type: ADR
+---
+
+## ADR-002: One-Shot 迁移策略（无双向兼容期）
+
+**决策：**
+
+发布 breaking-change 版本（2.0），一次性 major version 切换。
+
+- 新版 Roll 启动任何命令前检测项目结构
+- 检测到老结构 → 拒绝执行，提示 `roll migrate`
+- `roll migrate` 是原子操作：dry-run 预览 → 真实执行（`git mv` 保留历史）→ 单 commit
+- 旧版永远可用（npm 历史版本不消失）
+
+**`roll migrate` 三态幂等：**
+
+| 状态 | 行为 |
+|------|------|
+| 仅老路径存在 | 执行迁移 |
+| 仅 `.roll/` 存在 | no-op，输出"已迁移"提示 |
+| 两者并存（部分迁移） | 报错 + 列出残留路径，要求用户手动确认 |
+
+第三态覆盖真实失败模式：迁移中断、手动改动后重跑。
+
+**考量的替代方案：**
+
+| 方案 | 被否理由 |
+|------|---------|
+| 双向兼容期 | 每个路径读取点都需 wrapper + 冲突处理 + 双倍测试矩阵。早期项目，兼容成本 > 迁移收益 |
+| 渐进式 + deprecation 警告 | 社区碎片化——老新结构并存，skill 文档要写两套路径 |
+| 首次运行自动迁移 | 违反"不偷偷改文件"原则 |
+
+---
+proposed: 2026-05-18
+status: pending
+type: ADR
+---
+
+## ADR-003: `onboard-plan.yaml` — Skill/Bash 契约 Schema
+
+**决策：**
+
+`$roll-onboard` skill 产出 `.roll/onboard-plan.yaml`，`roll init --apply` 消费它执行所有副作用。AI 没有直接修改用户项目的能力。
+
+```yaml
+version: 1
+generated_at: "2026-05-18T14:30:00+08:00"
+
+project_understanding:
+  type: backend-service | frontend-only | fullstack | cli
+  description: "..."
+  domains: [...]
+  key_modules: [...]
+
+scope:
+  approved: [backlog, features, domain, briefs]
+  declined: [design]
+
+include_existing:
+  - README.md
+  - docs/architecture.md
+
+privacy:
+  gitignore_dot_roll: true    # Q7 用户在 skill 对话中的回答
+
+sync_targets: [claude, cursor]  # Q8
+enable_loop: false              # Q9
+```
+
+**设计约束：**
+- `version` 字段预留 schema 演化
+- `generated_at` 时间戳：bash 拒绝超过 24h 的 plan（防止 stale 项目理解）
+- `project_understanding` 由 skill 填写，bash 只读不校验语义
+- `scope` / `privacy` / `sync_targets` / `enable_loop` 均由用户在九问中确认，skill 记录原话
+- Plan 校验由 `lib/roll-plan-validate.py`（Python）执行：required fields + generated_at 时效 + version 兼容。bash 调用并检查 exit code，不原生解析 YAML
+- plan 不存在时输出明确引导："请先在 AI agent 里运行 `$roll-onboard`"
+- `.gitignore` 决策（Q7）由 skill 在对话流中询问，写入 plan；bash 读 plan 执行写入。bash 不再另行询问
+
+**考量的替代方案：**
+
+| 方案 | 被否理由 |
+|------|---------|
+| Skill 直接写文件 | AI 可能跳过安全检查、覆盖已有内容。bash 无法审计 |
+| JSON 格式 | YAML 更适合人工 review |
+| Bash `read` 询问替代 skill 九问 | 打断对话流，用户要在 shell 和 agent 之间切换回答问题 |
+| 多个中间文件 | 增加状态管理复杂度，一个文件足以表达全部决策 |
+
+---
+proposed: 2026-05-18
+status: pending
+type: ADR
+---
+
+## ADR-004: Bash/Skill 责任边界
+
+**决策：**
+
+```
+Bash 硬约束（不可绕过）          Skill 认知（AI 必须做）
+──────────────────────          ──────────────────────
+Legacy 检测、idempotency        读代码、理解项目
+"不碰已存在文件"检查             把发现讲给用户听
+plan 完整性校验                  生成 draft 内容（不落盘）
+roll-doc 写入模式                roll-doc --dry-run（只读）
+所有最终落盘文件                 主持三组九问（含 Q7 .gitignore）
+                                产出 onboard-plan.yaml
+```
+
+**关键区分：** 同一工具的两种调用模式属于不同责任域。`roll-doc --dry-run`（只读，取 gap 报告）归 skill；`roll-doc`（写入，生成 drafts）归 bash。
+
+**Q7 归属澄清：** `.gitignore` 询问在 skill 的九问对话中完成（Q7），用户回答写入 `onboard-plan.yaml`。bash 读 plan 中 `privacy.gitignore_dot_roll` 字段执行写入。原文档 §6"用 `read`"的含义是"bash 读取 plan 中用户已做的选择"，不是"bash 用 shell `read` 另行询问用户"。
+
+**考量的替代方案：**
+
+| 方案 | 被否理由 |
+|------|---------|
+| 全部归 skill | AI 可能擅自发挥——跳过 idempotency、不问就写 .gitignore |
+| 全部归 bash | 项目理解需要 AI 能力 |
+| Q7 由 bash 单独问 | 打断对话流，或造成用户回答两次。skill 记录 + bash 执行的分工已经保证了"AI 不替用户决定" |

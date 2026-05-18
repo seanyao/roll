@@ -169,7 +169,7 @@
 | FIX-050 | loop 被系统定时器拉起时拿到的环境路径是裸的，找不到 brew 装的工具（如 tmux），导致没有弹窗、未来同类工具缺失还会一个个冒出来 — 两层兜底：①setup 时探测 brew 前缀并写入 macOS 定时任务配置；②runner 脚本启动时再跑一段跨平台路径拼装（覆盖 Linux cron 用户与 plist 过期场景）；inner 脚本里散落的硬编码一并撤掉；setup/update 后请重跑 setup 让配置生效 | ✅ Done |
 | FIX-051 | 发版脚本通过 AI 重写 features.md 时会丢「规划中」标记规则，每次发版都可能再次失守、把全员 Todo 的功能误显示为已上线 — 把规则从 AI prompt 搬到机械校验：release 后跑 lint，或直接由脚本生成标记不交给 AI | ✅ Done |
 | FIX-052 | loop 状态文件 ALERT/state/mute/cron.log 在共享目录里没分项目，一个项目的告警会串到另一个项目的会话里、两个项目的 cycle 状态还会互相覆盖、日志互相穿插 — 跟现有 events/runner 一样按项目命名，每个命令只读当前项目对应的那份；旧数据按项目搬好不丢 | ✅ Done |
-| FIX-054 | loop 跑起来不再自动弹出终端窗口让用户看进度 — 固定只用 macOS 自带的 Terminal.app，不再按用户的终端偏好挑来挑去，省得在新版 Ghostty 上弹窗假成功、备选方案也失效 | 📋 Todo |
+| FIX-054 | loop 跑起来不再自动弹出终端窗口让用户看进度 — 固定只用 macOS 自带的 Terminal.app，不再按用户的终端偏好挑来挑去，省得在新版 Ghostty 上弹窗假成功、备选方案也失效 | ✅ Done |
 | FIX-055 | agent 跟用户对话统一走"说人话"风格 — 所有 roll 用户都拿到一致的沟通体验，不再因 agent 自由发挥而忽冷忽热 | 📋 Todo |
 | FIX-056 | 同一个项目如果从大小写不同的路径进去（macOS 默认能 cd 进去），会被 loop 当成两个独立项目：LOCK、状态、调度全分裂，互相不知道对方存在，违反了"每个项目只允许一个 loop"的核心约束 — 项目标识改为按规范化后的真实路径或 git 仓库根目录算，不再用目录名表面字符 | 📋 Todo |
 

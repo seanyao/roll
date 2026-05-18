@@ -300,7 +300,7 @@
 |-------|-------------|--------|
 | [US-VIEW-001](docs/features/cli-redesign.md#us-view-001) | 修 `roll loop` 真实数据下 PR 数 / 耗时 / 成本全空、22 轮永远显示运行中、今天列错塞昨天数据这 4 个 bug，顺手把渲染原语抽出来给后面 8 条命令复用 | ✅ Done |
 | [US-VIEW-002](docs/features/cli-redesign.md#us-view-002) | `roll` 裸命令打出一屏总览 — 现在在干啥、三层是否启用、四道防线状态、Pipeline 各阶段计数、当前 build 的 DoD、需要你介入的告警 / 提案 / 待发版 | ✅ Done |
-| [US-VIEW-003](docs/features/cli-redesign.md#us-view-003) | `roll --help` 不再用 6 行 ASCII 大字 banner 占满屏幕，命令按日常 / 项目 / 全局三类分组，每条带中英文双行说明 | 🔨 In Progress |
+| [US-VIEW-003](docs/features/cli-redesign.md#us-view-003) | `roll --help` 不再用 6 行 ASCII 大字 banner 占满屏幕，命令按日常 / 项目 / 全局三类分组，每条带中英文双行说明 | ✅ Done |
 | [US-VIEW-004](docs/features/cli-redesign.md#us-view-004) | `roll status` 一行总览同步是否健康，分块显示全局约定文件、AI 客户端 sync 表、项目模板、本项目状态，drift 行就地给修复命令 | 📋 Todo |
 | [US-VIEW-005](docs/features/cli-redesign.md#us-view-005) | `roll backlog` 按缺陷 / 故事 / 重构 / 想法四组分类显示 Todo，正在做的一条用紫色 pulse 高亮，Blocked / Deferred 区块带原因 | 📋 Todo |
 | [US-VIEW-006](docs/features/cli-redesign.md#us-view-006) | `roll brief` 把最新简报渲染成三段：核心数字摘要 + 亮点 PR 列表 + 待决策清单，每条决策有琥珀编号、不会被忽略 | 📋 Todo |

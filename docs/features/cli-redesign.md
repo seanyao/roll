@@ -91,9 +91,10 @@
 ---
 
 <a id="us-view-003"></a>
-## US-VIEW-003 `roll --help` 重设计 📋
+## US-VIEW-003 `roll --help` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 2 · Reference frame: `HelpFrame` in `frames-roll-home.jsx`
 
 - As a Roll user
@@ -101,17 +102,19 @@
 - So that 第一次看 help 就能立刻找到自己想敲的命令
 
 **AC:**
-- [ ] 顶部 wordmark 紧凑两行：`roll · autonomous delivery for software teams` + ZH 译文 + 版本号
-- [ ] `usage  roll <command> [options]` 单行
-- [ ] AUTONOMY 组（loop / brief / backlog / peer / alert）— 日常使用，前 3 个带 `★` 高亮
-- [ ] PROJECT 组（init / status / agent / ci / release / review-pr）— 项目内
-- [ ] MACHINE 组（setup / update / version）— 全局
-- [ ] 每条命令两行：英文一行（命令名蓝色 bold + args dim + 英文说明）+ 中文一行（dim）
-- [ ] 底部 examples 块（4 个常用场景）+ docs / issues 链接
+- [x] 顶部 wordmark 紧凑两行：`roll · autonomous delivery for software teams` + ZH 译文 + 版本号
+- [x] `usage  roll <command> [options]` 单行
+- [x] AUTONOMY 组（loop / brief / backlog / peer / alert）— 日常使用，前 3 个带 `★` 高亮
+- [x] PROJECT 组（init / status / agent / ci / release / review-pr）— 项目内
+- [x] MACHINE 组（setup / update / version）— 全局
+- [x] 每条命令两行：英文一行（命令名蓝色 bold + args dim + 英文说明）+ 中文一行（dim）
+- [x] 底部 examples 块（4 个常用场景）+ docs / issues 链接
 
 **Files:**
 - `lib/roll-help.py`（新建）
-- `bin/roll`（`--help` / `-h` 的 dispatch 加 ROLL_UI 分支）
+- `bin/roll`（`--help` / `-h` dispatch 加 ROLL_UI 分支，`usage()` 重命名为 `_legacy_help()`）
+- `tests/unit/roll_help.bats`（新建，9 tests）
+- `tests/integration/cmd_help.bats`（新建，3 E2E tests）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

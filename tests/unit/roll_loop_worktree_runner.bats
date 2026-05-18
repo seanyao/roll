@@ -98,6 +98,17 @@ teardown() {
   grep -qE 'preserved.*worktree|worktree.*preserved|worktree.*\$WT' "$inner"
 }
 
+@test "_write_loop_runner_script: FIX-060 runs.jsonl record includes cycle_id field" {
+  local script="${_tmp}/run-tFIX060.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-tFIX060-inner.sh"
+  # The runs.jsonl writer must thread CYCLE_ID through so _loop_backfill_merged
+  # can resolve the matching loop/cycle-<id> PR. Without this field the merge
+  # backfill scanner has no way to identify the branch.
+  grep -qE 'cycle_id[":[:space:]]*\$CYCLE_ID|--arg cycle_id' "$inner"
+  grep -qF 'cycle_id:' "$inner"
+}
+
 @test "_write_loop_runner_script: existing FIX-031 inner LOCK still present" {
   local script="${_tmp}/run-tA.sh"
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24

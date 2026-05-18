@@ -2605,12 +2605,14 @@ if command -v jq >/dev/null 2>&1 && ! grep -qF "\"run_id\":\"\$_run_id\"" "\$_ru
     --arg project "${slug}" \\
     --arg run_id "\$_run_id" \\
     --arg status "\$_cycle_status" \\
+    --arg cycle_id "\$CYCLE_ID" \\
     --argjson built "\$_cycle_built" \\
     --argjson skipped '[]' \\
     --argjson alerts '[]' \\
     --argjson tcr_count "\$_cycle_tcr" \\
     --argjson duration_sec "\$_cycle_dur" \\
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
+      cycle_id:\$cycle_id,
       built:\$built, skipped:\$skipped, alerts:\$alerts,
       tcr_count:\$tcr_count, duration_sec:\$duration_sec}' \\
     >> "\$_runs_dst" 2>/dev/null || true
@@ -3083,6 +3085,9 @@ _loop_test() {
 }
 
 _loop_status() {
+  # FIX-060: backfill merged PRs before rendering — independent of cycle ticks,
+  # so dashboard reflects merges that happened while loop was paused.
+  _loop_backfill_merged >/dev/null 2>&1 || true
   # ROLL_UI=v2 (default) routes to the redesigned Python view.
   # Set ROLL_UI=v1 to fall back to the legacy bash implementation.
   if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
@@ -3331,6 +3336,9 @@ _loop_runs() {
       *) shift ;;
     esac
   done
+
+  # FIX-060: refresh merged status before reading, so paused-window merges show up.
+  _loop_backfill_merged >/dev/null 2>&1 || true
 
   if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
     echo "No loop runs yet  尚无 loop 运行记录"
@@ -4553,6 +4561,60 @@ _loop_publish_doc_pr() {
     return 1
   fi
   echo "$pr_url"
+  return 0
+}
+
+# _loop_backfill_merged [runs_jsonl_path]
+#   FIX-060: independent PR-merge backfill. Walks runs.jsonl, finds entries
+#   with status:"built" and a cycle_id field, queries GitHub for the matching
+#   loop/cycle-<id> PR, and rewrites entries whose PR is MERGED to
+#   status:"merged" with merged_at + merge_commit fields.
+#
+#   Designed to run from the outer runner BEFORE the pause check, so the
+#   scan fires every scheduled tick even when the loop is paused — fixes
+#   the pre-FIX-060 behaviour where merge backfill only happened at next
+#   cycle startup and stalled forever during pause.
+#
+#   Lenient: returns 0 when gh is missing, slug is unresolvable, jq is
+#   missing, or runs.jsonl does not exist. Atomic rewrite via temp file.
+_loop_backfill_merged() {
+  local runs_path="${1:-${HOME}/.shared/roll/loop/runs.jsonl}"
+  [ -f "$runs_path" ] || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  local slug; _gh_resolve slug || return 0
+
+  local tmp="${runs_path}.tmp.$$"
+  : > "$tmp"
+  local line status cycle_id branch view_json state merged_at merge_commit
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    status=$(printf '%s' "$line" | jq -r '.status // ""' 2>/dev/null)
+    cycle_id=$(printf '%s' "$line" | jq -r '.cycle_id // ""' 2>/dev/null)
+    if [ "$status" != "built" ] || [ -z "$cycle_id" ]; then
+      printf '%s\n' "$line" >> "$tmp"
+      continue
+    fi
+    branch="loop/cycle-${cycle_id}"
+    view_json=$(gh -R "$slug" pr view "$branch" --json state,mergedAt,mergeCommit 2>/dev/null) || view_json=""
+    if [ -z "$view_json" ]; then
+      printf '%s\n' "$line" >> "$tmp"
+      continue
+    fi
+    state=$(printf '%s' "$view_json" | jq -r '.state // ""' 2>/dev/null)
+    if [ "$state" != "MERGED" ]; then
+      printf '%s\n' "$line" >> "$tmp"
+      continue
+    fi
+    merged_at=$(printf '%s' "$view_json" | jq -r '.mergedAt // ""' 2>/dev/null)
+    merge_commit=$(printf '%s' "$view_json" | jq -r '.mergeCommit.oid // ""' 2>/dev/null)
+    printf '%s' "$line" | jq -c \
+      --arg merged_at "$merged_at" \
+      --arg merge_commit "$merge_commit" \
+      '.status = "merged" | .merged_at = $merged_at | .merge_commit = $merge_commit' \
+      >> "$tmp" 2>/dev/null || printf '%s\n' "$line" >> "$tmp"
+  done < "$runs_path"
+  mv "$tmp" "$runs_path" 2>/dev/null || rm -f "$tmp"
   return 0
 }
 

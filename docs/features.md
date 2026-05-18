@@ -65,6 +65,7 @@
 ### 自主循环可观测性
 - [notifications](features/notifications.md) — 自治循环可观测性，loop 状态推送
 - [cycle-event-stream](features/cycle-event-stream.md) — runner / SKILL 发结构化事件，`roll loop attach/monitor` 像 CI pipeline 一样可视化每一轮
+- [loop-write-integrity](features/loop-write-integrity.md) — 每个 cycle 都留下结束记号，运行记录按主项目身份归档，dashboard 不再把已结束的 cycle 显示成"还在跑" *(规划中)*
 
 ### CLI 视觉系统
 - [cli-redesign](features/cli-redesign.md) — 统一 CLI 视觉语言：色板、图标、表格、动画的一致体验

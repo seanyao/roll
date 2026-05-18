@@ -483,6 +483,49 @@ setup() {
   rm -rf "$tmp_dir"; rm -f "$cfg"
 }
 
+@test "_install_launchd_plists: brand-new plist + not loaded → launchctl disable blocks FSEvents auto-load (FIX-059)" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local disable_log="${tmp_dir}/launchctl_calls.log"
+
+  # Label is NOT loaded — user has never run 'roll loop on'
+  _launchd_is_loaded() { return 1; }
+  launchctl() { echo "$*" >> "$disable_log"; }
+
+  _install_launchd_plists "$proj"
+
+  local uid; uid=$(id -u)
+  local loop_label; loop_label=$(_launchd_label "loop" "$proj")
+  local dream_label; dream_label=$(_launchd_label "dream" "$proj")
+  local brief_label; brief_label=$(_launchd_label "brief" "$proj")
+
+  grep -qF "disable gui/${uid}/${loop_label}" "$disable_log"
+  grep -qF "disable gui/${uid}/${dream_label}" "$disable_log"
+  grep -qF "disable gui/${uid}/${brief_label}" "$disable_log"
+  rm -rf "$tmp_dir"
+}
+
+@test "_install_launchd_plists: disable not called when label already loaded (FIX-059)" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local cfg; cfg=$(mktemp); echo "loop_minute: 11" > "$cfg"; ROLL_CONFIG="$cfg"
+  _install_launchd_plists "$proj"
+
+  local launchctl_log="${tmp_dir}/launchctl_calls.log"
+  _launchd_is_loaded() { return 0; }
+  launchctl() { echo "$*" >> "$launchctl_log"; }
+
+  echo "loop_minute: 22" > "$cfg"
+  _install_launchd_plists "$proj"
+
+  [ ! -f "$launchctl_log" ] || ! grep -q "^disable" "$launchctl_log"
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+}
+
 @test "_install_launchd_plists: ignores loop_attach_terminal config" {
   # FIX-054: the loop_attach_terminal config key is no longer honored —
   # generator always emits Terminal.app dispatch.

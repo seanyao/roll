@@ -2823,6 +2823,13 @@ _install_launchd_plists() {
         local uid; uid=$(id -u)
         launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
         launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
+      elif [[ -z "$before" ]]; then
+        # FIX-059: brand-new plist — macOS FSEvents auto-bootstraps any new
+        # file dropped in ~/Library/LaunchAgents/, so projects never enabled
+        # via 'roll loop on' would fire every hour. Immediately mark disabled
+        # in the overrides db to block that auto-load.
+        local uid; uid=$(id -u)
+        launchctl disable "gui/${uid}/${label}" 2>/dev/null || true
       fi
     fi
   done

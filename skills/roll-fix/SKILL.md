@@ -367,6 +367,31 @@ A minor change is only "done" when all are true:
 - [ ] Online verification performed
 - [ ] **Verification Gate passed** (fresh evidence for tests, build, fix confirmation, no regression)
 
+## Rubric
+
+Quality evaluation for a completed fix. Score each dimension independently.
+
+| 维度 | ❌ Miss (0) | ⚠️ Partial (1) | ✅ Hit (2) |
+|------|------------|----------------|-----------|
+| **根因定位** | 只修了表象，未说明根因 | 描述了直接原因 | 追溯根本原因并有代码/日志证据 |
+| **最小范围** | 改动超出 fix 边界，含机会主义修改 | 范围合理但有冗余改动 | 最小改动，非 fix 相关代码零触碰 |
+| **回归测试** | 无测试，或测试与 bug 无关 | 有测试但未复现原始 bug | 先写复现测试（RED）再修复（GREEN） |
+| **验证证据** | 仅声称通过，无实际输出 | 有部分截图/日志但不完整 | 贴出完整命令输出，覆盖 fix + 回归 |
+| **无新破坏** | CI 红，或已知回归未处理 | CI 绿但有 warning 未说明 | CI 全绿，覆盖率不降，warning 清零 |
+
+**评分解读**
+
+| 总分 | 结论 |
+|------|------|
+| 9–10 | Exemplary — 可作为参考案例 |
+| 7–8 | Acceptable — 可交付，有小瑕疵 |
+| 5–6 | Needs Work — 需补充证据或补测试 |
+| ≤ 4 | Redo — 根因或验证存在根本缺失 |
+
+> 用法：fix 完成后由 `$roll-eval`（或人工）对照此表打分，结果写入 `roll-notes`。
+
+---
+
 ## TCR Patterns for Common Fixes
 
 ### Pattern: Bug Fix with Regression Test

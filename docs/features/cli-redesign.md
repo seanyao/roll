@@ -153,9 +153,10 @@
 ---
 
 <a id="us-view-005"></a>
-## US-VIEW-005 `roll backlog` 重设计 📋
+## US-VIEW-005 `roll backlog` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 3 · Reference frame: `BacklogFrame` in `frames-roll-views.jsx`
 
 - As a Roll user
@@ -163,17 +164,19 @@
 - So that 当前 Todo 全貌可见，in-progress 项目用 pulse 高亮
 
 **AC:**
-- [ ] 顶部右侧 `12 Todo · 2 Blocked · 3 Deferred` 标签
-- [ ] 四组：Bug Fixes（红）/ User Stories（蓝）/ Refactors（琥珀）/ Ideas（dim）；每条两行（ID + EN / ZH）
-- [ ] in-progress 项目：`⏵` 紫色 pulse + 行 hl-run 紫底色
-- [ ] Blocked 段：`🔒` + ID + 描述 + 阻塞原因括号注释
-- [ ] Deferred 段：`⏸` + ID + 描述 + 推迟原因
-- [ ] 底部 triage / drill 命令提示行
-- [ ] 子命令 `roll backlog block/defer/unblock <pattern> [reason]` 行为不变
+- [x] 顶部右侧 `12 Todo · 2 Blocked · 3 Deferred` 标签
+- [x] 四组：Bug Fixes（红）/ User Stories（蓝）/ Refactors（琥珀）/ Ideas（dim）；每条两行（ID + EN / ZH）
+- [x] in-progress 项目：`⏵` 紫色 pulse + 行 hl-run 紫底色
+- [x] Blocked 段：`🔒` + ID + 描述 + 阻塞原因括号注释
+- [x] Deferred 段：`⏸` + ID + 描述 + 推迟原因
+- [x] 底部 triage / drill 命令提示行
+- [x] 子命令 `roll backlog block/defer/unblock <pattern> [reason]` 行为不变
 
 **Files:**
 - `lib/roll-backlog.py`（新建）
 - `bin/roll`（`backlog` 的 dispatch 加 ROLL_UI 分支）
+- `tests/unit/roll_backlog.bats`（新增 6 个 v2 测试）
+- `tests/integration/cmd_backlog.bats`（新建 E2E 测试）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

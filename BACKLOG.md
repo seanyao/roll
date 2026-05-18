@@ -304,7 +304,7 @@
 | [US-VIEW-002](docs/features/cli-redesign.md#us-view-002) | `roll` 裸命令打出一屏总览 — 现在在干啥、三层是否启用、四道防线状态、Pipeline 各阶段计数、当前 build 的 DoD、需要你介入的告警 / 提案 / 待发版 | ✅ Done |
 | [US-VIEW-003](docs/features/cli-redesign.md#us-view-003) | `roll --help` 不再用 6 行 ASCII 大字 banner 占满屏幕，命令按日常 / 项目 / 全局三类分组，每条带中英文双行说明 | ✅ Done |
 | [US-VIEW-004](docs/features/cli-redesign.md#us-view-004) | `roll status` 一行总览同步是否健康，分块显示全局约定文件、AI 客户端 sync 表、项目模板、本项目状态，drift 行就地给修复命令 | ✅ Done |
-| [US-VIEW-005](docs/features/cli-redesign.md#us-view-005) | `roll backlog` 按缺陷 / 故事 / 重构 / 想法四组分类显示 Todo，正在做的一条用紫色 pulse 高亮，Blocked / Deferred 区块带原因 | 🔨 In Progress |
+| [US-VIEW-005](docs/features/cli-redesign.md#us-view-005) | `roll backlog` 按缺陷 / 故事 / 重构 / 想法四组分类显示 Todo，正在做的一条用紫色 pulse 高亮，Blocked / Deferred 区块带原因 | ✅ Done |
 | [US-VIEW-006](docs/features/cli-redesign.md#us-view-006) | `roll brief` 把最新简报渲染成三段：核心数字摘要 + 亮点 PR 列表 + 待决策清单，每条决策有琥珀编号、不会被忽略 | 📋 Todo |
 | [US-VIEW-007](docs/features/cli-redesign.md#us-view-007) | `roll setup` 把首装 / 重同步流程从滚屏日志改成 6 步编号进度，drift 的客户端就地给一键修复命令 | 📋 Todo |
 | [US-VIEW-008](docs/features/cli-redesign.md#us-view-008) | `roll init` 把项目初始化做成 6 步编号流程，新建文件用绿色 `+`、合并已有文件用琥珀 `~`，结尾给三步上手指南 | 📋 Todo |

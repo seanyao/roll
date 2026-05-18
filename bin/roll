@@ -917,6 +917,23 @@ _merge_claude_to_project() {
 # Existing AGENTS.md: re-merges global conventions (section-level, non-destructive)
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_init() {
+  # US-VIEW-008: parse --demo before any side effects so the v2 renderer can
+  # run standalone (no templates, no project mutation).
+  local demo=false
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --demo) demo=true; shift ;;
+      *)      args+=("$1"); shift ;;
+    esac
+  done
+  set -- "${args[@]:-}"
+
+  if [[ "${ROLL_UI:-v2}" == "v2" ]] || [[ "$demo" == "true" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-init.py" --demo
+    if [[ "$demo" == "true" ]]; then return; fi
+  fi
+
   if [[ ! -d "$ROLL_TEMPLATES" ]]; then
     err "No templates found. Run 'roll setup' first.  未找到模板，请先运行 'roll setup'。"
     exit 1

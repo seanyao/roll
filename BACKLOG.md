@@ -328,7 +328,7 @@
 ### Feature: directory-restructure
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-ONBOARD-001](docs/features/directory-restructure.md#us-onboard-001) | 制定过程文件与产品文件的目录归属标准，所有项目共享一套约定 | 📋 Todo |
+| [US-ONBOARD-001](docs/features/directory-restructure.md#us-onboard-001) | 制定过程文件与产品文件的目录归属标准，所有项目共享一套约定 | ✅ Done |
 | [US-ONBOARD-002](docs/features/directory-restructure.md#us-onboard-002) | 找出代码库里每一处指向老目录结构的引用，产出完整清单作为后续改动的唯一依据 `depends-on:US-ONBOARD-001` | 📋 Todo |
 | [US-ONBOARD-003](docs/features/directory-restructure.md#us-onboard-003) | 一键把老项目结构迁到新结构，保留 git 历史，支持 dry-run 预览，断点可恢复 `depends-on:US-ONBOARD-002` | 📋 Todo |
 | [US-ONBOARD-004](docs/features/directory-restructure.md#us-onboard-004) | 新版 Roll 在老结构项目上拒绝运行并引导迁移，全局命令不受影响 `depends-on:US-ONBOARD-003` | 📋 Todo |

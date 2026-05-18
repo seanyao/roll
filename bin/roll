@@ -2409,6 +2409,15 @@ cmd_agent() {
 # Returns a filesystem-safe slug combining the project basename and a 6-char
 # hash of the full path, ensuring uniqueness across sibling dirs with same name.
 _project_slug() {
+  # US-LOOP-006: cycle wrapper exports ROLL_MAIN_SLUG so every subprocess —
+  # including those started from a worktree or a tmp cwd — writes events and
+  # runs.jsonl under the main project identity. Honor it ahead of any
+  # path-derived computation; an unset/empty value falls through to the
+  # legacy logic below.
+  if [[ -n "${ROLL_MAIN_SLUG:-}" ]]; then
+    printf '%s' "$ROLL_MAIN_SLUG"
+    return
+  fi
   local path="${1:-$(pwd -P 2>/dev/null || pwd)}"
   # FIX-056: normalize path to canonical case on macOS case-insensitive filesystem.
   # Two paths differing only in case point to the same directory; realpath

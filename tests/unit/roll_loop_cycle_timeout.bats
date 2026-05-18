@@ -1,0 +1,96 @@
+#!/usr/bin/env bats
+# FIX-057: cycle hard timeout — 45 minute SLA per loop cycle.
+#
+# After 45 minutes, the inner script kills claude / loop-fmt.py / all background
+# children, marks the in-progress backlog item as 🚧 Blocked, writes a
+# cycle_end event with outcome=blocked, and exits cleanly so the next cron
+# tick can proceed.
+
+load helpers
+
+setup() {
+  unit_setup_cd
+  _test_dir="$TEST_TMP"
+  git -c init.defaultBranch=main init -q --bare "${_test_dir}/.upstream.git"
+  git -c init.defaultBranch=main init -q
+  git remote add origin "${_test_dir}/.upstream.git"
+  git config user.email "test@roll.dev"
+  git config user.name "Test"
+  git config commit.gpgsign false
+  git config protocol.file.allow always
+  git commit --allow-empty -q -m "initial"
+  git push -q origin main
+}
+teardown() {
+  unit_teardown_cd
+}
+
+# --- Template structure tests ---
+
+@test "inner: declares ROLL_LOOP_CYCLE_TIMEOUT_SEC with 2700 default" {
+  local script_path="${_test_dir}/run-test-timeout.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  local inner="${script_path%.sh}-inner.sh"
+  grep -qE 'ROLL_LOOP_CYCLE_TIMEOUT_SEC.*:-2700' "$inner"
+}
+
+@test "inner: spawns a watchdog backgrounded with sleep + kill" {
+  local script_path="${_test_dir}/run-test-watchdog.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  local inner="${script_path%.sh}-inner.sh"
+  # Watchdog must be a backgrounded sleep + kill so it can fire while
+  # the foreground pipe (claude | python3 loop-fmt) is waiting.
+  grep -qE 'sleep "\$LOOP_CYCLE_TIMEOUT_SEC".*kill' "$inner"
+}
+
+@test "inner: EXIT trap kills all background jobs, not just heartbeat" {
+  local script_path="${_test_dir}/run-test-trap.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  local inner="${script_path%.sh}-inner.sh"
+  # Trap must iterate `jobs -p` (or equivalent) to kill stuck loop-fmt.py
+  # / publish subshells, not only the heartbeat writer.
+  grep -qE 'jobs -p' "$inner"
+}
+
+@test "inner: writes cycle_end with outcome=blocked on timeout" {
+  local script_path="${_test_dir}/run-test-blocked-event.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  local inner="${script_path%.sh}-inner.sh"
+  grep -qE 'cycle_end.*"blocked"' "$inner"
+}
+
+# --- Behaviour test: timeout actually fires ---
+
+@test "inner: timeout kills hanging pipe and exits within budget" {
+  local script_path="${_test_dir}/run-test-behave.sh"
+  # Stub claude with a script that sleeps far longer than the test timeout.
+  # The bin name must match so the cmd substitution in the template still works.
+  mkdir -p "${_test_dir}/stubbin"
+  cat > "${_test_dir}/stubbin/claude" <<'STUB'
+#!/bin/bash
+# Pretend to be claude -p; just hang.
+sleep 600
+STUB
+  chmod +x "${_test_dir}/stubbin/claude"
+
+  _write_loop_runner_script "$script_path" "${_test_dir}" "claude -p hi" "/tmp/log" 0 24
+  local inner="${script_path%.sh}-inner.sh"
+
+  # 3s timeout for the test. Run inner in background; expect it to exit
+  # on its own within ~15s. timeout(1) is not portable on macOS, so we poll.
+  ROLL_LOOP_CYCLE_TIMEOUT_SEC=3 \
+  PATH="${_test_dir}/stubbin:$PATH" \
+    bash "$inner" >/dev/null 2>&1 &
+  local inner_pid=$!
+  local waited=0
+  while kill -0 "$inner_pid" 2>/dev/null && [ "$waited" -lt 15 ]; do
+    sleep 1; waited=$((waited+1))
+  done
+  if kill -0 "$inner_pid" 2>/dev/null; then
+    kill -KILL "$inner_pid" 2>/dev/null
+    return 1   # inner did not exit within 15s — timeout did not fire
+  fi
+  # Lock file must be released.
+  local inner_lock="$(dirname "$inner")/.INNER-LOCK-$(basename "$inner" -inner.sh | sed 's/^run-//')"
+  [ ! -f "$inner_lock" ]
+}

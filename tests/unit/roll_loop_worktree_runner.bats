@@ -104,7 +104,10 @@ teardown() {
   local inner="${_tmp}/run-tA-inner.sh"
   # Regression guard: don't lose FIX-031's LOCK when adding US-AUTO-037
   grep -qF 'INNER_LOCK' "$inner"
-  grep -qE "trap.*INNER_LOCK.*EXIT" "$inner"
+  # FIX-057: trap was refactored into _inner_cleanup function — assert the
+  # EXIT trap exists and the cleanup logic still removes INNER_LOCK.
+  grep -qE "trap .* EXIT" "$inner"
+  grep -qE 'rm -f.*INNER_LOCK' "$inner"
 }
 
 @test "_write_loop_runner_script: existing retry-3-times loop still present" {
@@ -203,6 +206,8 @@ teardown() {
   # Inner relies on outer caffeinate — no inner caffeinate assertion should leak in.
   ! grep -qF 'caffeinate' "$inner"
   # Single EXIT trap, covering both INNER_LOCK and HEARTBEAT_FILE cleanup.
+  # FIX-057: trap was refactored into _inner_cleanup function; assert one
+  # EXIT trap exists and the cleanup logic touches both files.
   [ "$(grep -c "trap .* EXIT" "$inner")" -eq 1 ]
-  grep -qE "trap .*INNER_LOCK.*HEARTBEAT_FILE.* EXIT" "$inner"
+  grep -qE 'rm -f.*INNER_LOCK.*HEARTBEAT_FILE' "$inner"
 }

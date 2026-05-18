@@ -54,7 +54,11 @@ teardown() {
   local script_path="${_test_dir}/run-test-trap.sh"
   _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 18
   local inner="${script_path%.sh}-inner.sh"
-  grep -qE "trap.*INNER_LOCK.*EXIT" "$inner"
+  # FIX-057: trap was refactored into _inner_cleanup function — assert both
+  # the trap exists and the cleanup function references INNER_LOCK.
+  grep -qE "trap .* EXIT" "$inner"
+  grep -qF 'rm -f' "$inner"
+  grep -qF 'INNER_LOCK' "$inner"
 }
 
 @test "_write_loop_runner_script: inner script checks alive PID with kill -0" {

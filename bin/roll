@@ -1070,7 +1070,7 @@ EOF
 # COMMAND: status
 # Show current state of conventions
 # ═══════════════════════════════════════════════════════════════════════════════
-cmd_status() {
+_legacy_status() {
   echo -e "${BOLD}Roll Convention Status  Roll 约定状态${NC}"
   echo ""
 
@@ -1185,6 +1185,14 @@ cmd_status() {
   done
 
   _status_loop_overview
+}
+
+cmd_status() {
+  if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-status.py" "$@"
+  else
+    _legacy_status "$@"
+  fi
 }
 
 _status_loop_overview() {

@@ -300,7 +300,7 @@
 ### Feature: loop-write-integrity
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-LOOP-005](docs/features/loop-write-integrity.md#us-loop-005) | 每个 cycle 跑完都留下结束记号 — 把所有结束路径（合并成功、孤儿恢复、超时、崩溃自愈、PR 失败兜底）都补上结束信号，dashboard 不再把早已结束的 cycle 显示成"还在跑" | 📋 Todo |
+| [US-LOOP-005](docs/features/loop-write-integrity.md#us-loop-005) | 每个 cycle 跑完都留下结束记号 — 把所有结束路径（合并成功、孤儿恢复、超时、崩溃自愈、PR 失败兜底）都补上结束信号，dashboard 不再把早已结束的 cycle 显示成"还在跑" | 🔨 In Progress |
 | [US-LOOP-006](docs/features/loop-write-integrity.md#us-loop-006) | cycle 不论在哪个工作目录跑，运行记录都统一归到主项目身份，dashboard 按项目筛选时拿到完整历史 | 📋 Todo |
 
 ## Epic: CLI 视觉系统

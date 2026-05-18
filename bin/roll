@@ -2605,12 +2605,14 @@ if command -v jq >/dev/null 2>&1 && ! grep -qF "\"run_id\":\"\$_run_id\"" "\$_ru
     --arg project "${slug}" \\
     --arg run_id "\$_run_id" \\
     --arg status "\$_cycle_status" \\
+    --arg cycle_id "\$CYCLE_ID" \\
     --argjson built "\$_cycle_built" \\
     --argjson skipped '[]' \\
     --argjson alerts '[]' \\
     --argjson tcr_count "\$_cycle_tcr" \\
     --argjson duration_sec "\$_cycle_dur" \\
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
+      cycle_id:\$cycle_id,
       built:\$built, skipped:\$skipped, alerts:\$alerts,
       tcr_count:\$tcr_count, duration_sec:\$duration_sec}' \\
     >> "\$_runs_dst" 2>/dev/null || true

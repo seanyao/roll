@@ -214,9 +214,10 @@
 ---
 
 <a id="us-view-007"></a>
-## US-VIEW-007 `roll setup` 重设计 📋
+## US-VIEW-007 `roll setup` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 4 · Reference frame: `SetupFrame` in `frames-roll-flows.jsx`
 
 - As a first-time Roll user
@@ -224,16 +225,18 @@
 - So that 滚屏的 `[roll] ...` 日志变成清爽的 6 步流程，drift 在第 5 步用琥珀 `!` 提示
 
 **AC:**
-- [ ] 顶部 eyebrow + scope (machine-level · ~/.roll/)
-- [ ] 6 个编号步骤（参考设计稿）：detect / fetch / install skills / symlink / drift check / templates
-- [ ] 每步两行（EN + ZH）+ 可选 detail 块（用 `TreeBranch` 风格的软链接展开）
-- [ ] Step 5 drift 状态用琥珀 `!` + 修复提示 `roll setup -f <client>`
-- [ ] 结尾 `✓ Setup complete · total Ns` + next 提示行
-- [ ] 流式输出（每步完成立刻 flush），不是一次性 dump
+- [x] 顶部 eyebrow + scope (machine-level · ~/.roll/)
+- [x] 6 个编号步骤（参考设计稿）：detect / fetch / install skills / symlink / drift check / templates
+- [x] 每步两行（EN + ZH）+ 可选 detail 块（用 `TreeBranch` 风格的软链接展开）
+- [x] Step 5 drift 状态用琥珀 `!` + 修复提示 `roll setup -f <client>`
+- [x] 结尾 `✓ Setup complete · total Ns` + next 提示行
+- [x] 流式输出（每步完成立刻 flush），不是一次性 dump
 
 **Files:**
-- `lib/roll-setup.py`（新建；可作为 wrapper 调现有 setup 逻辑，仅替换输出格式）
-- `bin/roll`（`setup` 的 dispatch 加 ROLL_UI 分支）
+- `lib/roll-setup.py`（新建；Python v2 renderer，--demo 模式显示 6 步进度）
+- `bin/roll`（`cmd_setup` 加 ROLL_UI=v2 dispatch + --demo flag）
+- `tests/unit/roll_setup.bats`（新建；7 个单元测试，6/7 GREEN，1 skip）
+- `tests/integration/cmd_setup.bats`（追加 4 个 e2e 测试）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

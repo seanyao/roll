@@ -15,7 +15,9 @@ import re
 import sys
 from typing import List, NamedTuple, Optional
 
-sys.path.insert(0, os.path.dirname(__file__))
+_LIB_DIR = os.path.dirname(os.path.realpath(__file__))
+if _LIB_DIR not in sys.path:
+    sys.path.insert(0, _LIB_DIR)
 import roll_render as rr
 from roll_render import c, pad, row, trunc, strw, COLS
 
@@ -147,13 +149,14 @@ def render(path: str) -> None:
     items = parse_backlog(path)
     todo_fix, todo_us, todo_ref, todo_idea, in_progress, blocked, deferred = classify(items)
 
-    todo_total = len(todo_fix) + len(todo_us) + len(todo_ref) + len(todo_idea) + len(in_progress)
+    todo_total = len(todo_fix) + len(todo_us) + len(todo_ref) + len(todo_idea)
     blocked_count = len(blocked)
     deferred_count = len(deferred)
 
     # ── Header ──────────────────────────────────────────────────────────────
     print()
-    tags = c("fg", f"{todo_total} Todo", bold=True)
+    pending_total = todo_total + len(in_progress)
+    tags = c("fg", f"{pending_total} Pending", bold=True)
     if blocked_count:
         tags += c("muted", " · ") + c("amber", f"{blocked_count} Blocked")
     if deferred_count:
@@ -173,7 +176,7 @@ def render(path: str) -> None:
     _render_group("Refactors", "重构", "amber", todo_ref)
     _render_group("Ideas", "创意", "dim", todo_idea)
 
-    if todo_total == 0 and not in_progress:
+    if todo_total == 0 and len(in_progress) == 0:
         print(c("green", "  ✓ Nothing pending — backlog is clear  暂无待处理任务"))
         print()
 
@@ -219,11 +222,12 @@ def main() -> None:
 
     if demo:
         _write_demo(backlog)
-
-    render(backlog)
-
-    if demo:
-        os.unlink(backlog)
+        try:
+            render(backlog)
+        finally:
+            os.unlink(backlog)
+    else:
+        render(backlog)
 
 
 def _write_demo(path: str) -> None:

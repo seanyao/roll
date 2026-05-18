@@ -2960,6 +2960,8 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       elif [ "\$_publish_status" -eq 2 ]; then
         if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
           _worktree_cleanup "\$WT" "\$BRANCH"
+          # US-LOOP-005 T3: gh unavailable + ff merge_back OK → cycle_end done
+          _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true
           echo "[loop] cycle \${CYCLE_ID}: gh unavailable; merged via ff and cleaned up"
         else
           # FIX-039: gh unavailable + merge_back failed — push orphan branch+tag to origin
@@ -2969,9 +2971,13 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
                && git tag "\$_orphan_tag" 2>/dev/null \
                && git push origin "\$_orphan_tag" 2>/dev/null ); then
             _worktree_cleanup "\$WT" "\$BRANCH"
+            # US-LOOP-005 T4: gh unavailable + orphan push OK → cycle_end orphan
+            _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true
             _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
             echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
           else
+            # US-LOOP-005 T5: gh unavailable + all failed → cycle_end failed
+            _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true
             _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back+push all failed; worktree preserved at \$WT"
             echo "[loop] cycle \${CYCLE_ID}: all publish paths failed; worktree preserved at \$WT"
           fi
@@ -2984,15 +2990,21 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
              && git tag "\$_orphan_tag" 2>/dev/null \
              && git push origin "\$_orphan_tag" 2>/dev/null ); then
           _worktree_cleanup "\$WT" "\$BRANCH"
+          # US-LOOP-005 T6: PR publish failed + orphan push OK → cycle_end orphan
+          _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true
           _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
           echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
         else
+          # US-LOOP-005 T7: PR publish failed + orphan push failed → cycle_end failed
+          _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true
           _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
           echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
         fi
       fi
     fi
   else
+    # US-LOOP-005 T8: claude session failed after retry budget → cycle_end failed
+    _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true
     _worktree_alert "cycle \${CYCLE_ID}: claude exited \$_exit; worktree preserved at \$WT (branch \$BRANCH)"
     echo "[loop] cycle \${CYCLE_ID}: claude failed (exit \$_exit); worktree preserved at \$WT"
   fi

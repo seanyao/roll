@@ -143,17 +143,19 @@ def _peer_last() -> Optional[Tuple[str, int]]:
     except Exception:
         return None
 
-def _backlog_counts() -> Tuple[int, int, int, str, str, str]:
-    """(ideas, todo, in_progress, id, title, link)."""
+def _backlog_counts() -> Tuple[int, int, int, str, str, str, int]:
+    """(ideas, todo, in_progress, id, title, link, refactor_pending)."""
     bl = Path("BACKLOG.md")
     if not bl.exists():
-        return (0, 0, 0, "", "", "")
-    ideas = todo = in_prog = 0
+        return (0, 0, 0, "", "", "", 0)
+    ideas = todo = in_prog = refactors = 0
     ip_id = ip_title = ip_link = ""
     for line in bl.read_text(errors="ignore").splitlines():
         if "| 📋 Todo |" in line:
             if re.match(r"^\|\s*IDEA-", line):
                 ideas += 1
+            elif re.match(r"^\| REFACTOR-", line):
+                refactors += 1
             else:
                 todo += 1
         elif "| 🔨 In Progress |" in line:
@@ -168,7 +170,7 @@ def _backlog_counts() -> Tuple[int, int, int, str, str, str]:
                 m2 = re.search(r"docs/features/[^\)]+", line)
                 if m2:
                     ip_link = m2.group(0)
-    return (ideas, todo, in_prog, ip_id, ip_title, ip_link)
+    return (ideas, todo, in_prog, ip_id, ip_title, ip_link, refactors)
 
 def _alert_count(slug: str) -> int:
     af = _shared_root() / "loop" / f"ALERT-{slug}.md"
@@ -183,6 +185,9 @@ def _proposal_count() -> int:
     return sum(1 for l in p.read_text(errors="ignore").splitlines() if l.startswith("## PROPOSAL"))
 
 def _release_ready() -> bool:
+    briefs_dir = Path("docs/briefs")
+    if not briefs_dir.exists():
+        return False
     try:
         tag = subprocess.check_output(
             ["git", "describe", "--tags", "--abbrev=0"],
@@ -197,7 +202,7 @@ def _release_ready() -> bool:
             if l and not re.match(r"^(docs|chore)(\([^)]*\))?:", l)
         ):
             return False
-        briefs = sorted(Path("docs/briefs").glob("*.md")) if Path("docs/briefs").exists() else []
+        briefs = sorted(briefs_dir.glob("*.md"))
         if not briefs:
             return False
         return bool(re.search(r"✅ 可发版|Release ready", briefs[-1].read_text(errors="ignore")))
@@ -213,15 +218,6 @@ def _tcr_last_min() -> Optional[int]:
         return int((time.time() - int(ts)) / 60) if ts else None
     except Exception:
         return None
-
-def _refactor_pending() -> int:
-    bl = Path("BACKLOG.md")
-    if not bl.exists():
-        return 0
-    return sum(
-        1 for l in bl.read_text(errors="ignore").splitlines()
-        if re.match(r"^\| REFACTOR-", l) and "| 📋 Todo |" in l
-    )
 
 def _ac_completion(feature_link: str) -> Tuple[int, int]:
     if not feature_link:
@@ -455,7 +451,7 @@ def main() -> None:
         config  = _load_config()
         state   = _load_yaml_flat(_shared_root() / "loop" / f"state-{slug}.yaml")
         bra, gs = _git_info()
-        ideas, todo, in_prog, ip_id, ip_title, ip_link = _backlog_counts()
+        ideas, todo, in_prog, ip_id, ip_title, ip_link, refactor_pending = _backlog_counts()
         ac_done, ac_total = _ac_completion(ip_link) if in_prog else (0, 0)
 
         def _ci(k: str, default: int) -> int:
@@ -480,7 +476,7 @@ def main() -> None:
             dream_hour     = _ci("loop_dream_hour", 3),
             dream_minute   = _ci("loop_dream_minute", 12),
             dream_last_hours = _dream_last_hours(),
-            refactor_pending = _refactor_pending(),
+            refactor_pending = refactor_pending,
             peer_last      = _peer_last(),
             tcr_last_min   = _tcr_last_min(),
             ideas=ideas, todo=todo, in_progress=in_prog,

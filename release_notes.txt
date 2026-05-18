@@ -1,2 +1,14 @@
+### Improved
+- **`roll` 主页焕新** — 一屏看清 loop / dream / peer 状态、四道防线、Pipeline 进度和待你处理的事 `[loop]`
+- **`roll --help` 焕新** — 命令按日常 / 项目 / 全局三组分类，常用命令 ★ 高亮，不再被大字 ASCII banner 占屏 `[loop]`
+- **`roll status` 焕新** — 一行看健康总览，AI 客户端同步状态、约定文件清单、项目模板逐段展示，drift 行直接给修复命令 `[loop]`
+- **`roll backlog`** — 待办任务按缺陷 / 故事 / 重构 / 创意四类分组显示，进行中的条目紫色高亮，Blocked / Deferred 分区附带原因 `[loop]`
+- **`roll brief`** — 简报现在用终端三段式渲染：摘要数字、已完成亮点、待决策清单按 D1/D2 编号 `[loop]`
+- **`roll setup`** — 首次安装流程现在显示 6 步编号进度，每步完成打勾，结尾显示"Setup complete" `[loop]`
 ### Fixed
-- **autonomous loop 跑测试时狂开 Ghostty 窗口** — `_write_loop_runner_script` 生成的 outer runner 在 popup 分支只检查 `ROLL_LOOP_NO_POPUP` / mute 文件 / Darwin；当 loop 的执行 agent 跑 bats 跑到 `_loop_test` 这类需要执行生成脚本的测试时，每个 test case 都会真的弹一个 Ghostty 窗口，一轮 cycle 累出 80+ 个孤儿窗口。popup 守卫追加 `BATS_TEST_NUMBER` 判定，任何 bats 上下文里自动跳过 popup `[loop]`
+- **loop 弹窗现在固定走 Terminal.app** — 不再按终端偏好挑来挑去，省得在新版 Ghostty 上弹窗假成功、备选方案也失效 `[loop]`
+- **与 roll agent 对话** — 不再因工具不同而忽冷忽热 `[loop]`
+- **大小写不同路径进同一项目** — 不再被 loop 当成两个独立项目、LOCK 和状态不再分裂 `[loop]`
+- **loop 跑完一轮** — 不再挡死后续调度、卡到手动 kill `[loop]`
+- **binary 升级后 loop dashboard 回落 IDLE 问题** — 旧 binary 用不同路径大小写算出不同 slug，新 binary 启动时自动把旧 slug 的状态文件、日志、历史记录全部迁到新 slug，upgrade 无感无损 `[loop]`
+- **loop status 费用显示严重偏低** — `$9.25` 的 cycle 显示为 `$0.04`：读取了最后一次 API 调用的 token 数重新算价，改为直接用 `cost_reported_usd`（loop-fmt 写入的权威累计值） `[loop]`

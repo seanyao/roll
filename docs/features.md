@@ -12,9 +12,9 @@
 
 - **Autonomous BACKLOG Executor** — `roll-loop` 按调度自动认领 BACKLOG 任务，在隔离 worktree 里执行，CI 绿后自动合入，中断 / 孤儿状态自愈
 - **Cross-Agent Peer Review** — 关键决策走多 AI 协商（AGREE / REFINE / OBJECT / ESCALATE），失败按 capability map 自动 fallback
-- **Universal AI Tool Integration** — Claude / Kimi / DeepSeek / Codex / Gemini / Trae / opencode / Pi / Cursor 等主流 AI 工具统一 convention sync 与 skill 链接
 - **TCR-First Engineering Discipline** — Test && Commit || Revert；proof-of-pass pre-commit hook 物理拦截未测试提交
 - **Cycle Event Stream** — runner 与 skill 发结构化事件，每一轮自治循环像 CI pipeline 一样可回放
+- **Universal AI Tool Integration** — Claude / Kimi / DeepSeek / Codex / Gemini / Trae / opencode / Pi / Cursor 等主流 AI 工具统一 convention sync 与 skill 链接
 
 ---
 

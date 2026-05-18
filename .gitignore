@@ -34,5 +34,11 @@ npm-debug.log*
 # Claude Code runtime artifacts (PID locks, transient state)
 .claude/*.lock
 
-# TCR proof-of-pass record (local only, written by tests/run.sh)
-.roll/
+# .roll/ holds project process artifacts (backlog, features, briefs, dream, etc.)
+# These ARE tracked for Roll itself (open-source dogfood). Only runtime state
+# inside .roll/ is gitignored:
+#   - last-test-pass: TCR proof-of-pass record (written by tests/run.sh)
+#   - state/:         loop runtime state (PIDs, locks, cycle data)
+.roll/last-test-pass
+.roll/state/
+.roll/*.lock

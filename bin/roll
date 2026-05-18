@@ -2262,7 +2262,29 @@ _heartbeat_writer() {
 }
 _heartbeat_writer &
 _HEARTBEAT_PID=\$!
-trap 'kill "\${_HEARTBEAT_PID}" 2>/dev/null; rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"' EXIT
+# FIX-057: cycle hard timeout — 45 minute SLA per loop cycle. If a cycle runs
+# longer, kill claude / loop-fmt.py / all backgrounded children, mark the
+# in-progress backlog item Blocked (caller decides), and exit cleanly so the
+# next cron tick can proceed. Overridable via env for tests.
+LOOP_CYCLE_TIMEOUT_SEC="\${ROLL_LOOP_CYCLE_TIMEOUT_SEC:-2700}"
+_CYCLE_TIMED_OUT=0
+_on_sigterm() { _CYCLE_TIMED_OUT=1; }
+trap '_on_sigterm' TERM
+_inner_cleanup() {
+  local _rc=\$?
+  # Kill heartbeat + every remaining background job (watchdog, orphan
+  # loop-fmt.py, publish subshells) — bash's foreground 'wait' for the
+  # pipe has already returned by the time the EXIT trap runs.
+  kill "\${_HEARTBEAT_PID}" 2>/dev/null
+  for _pid in \$(jobs -p); do kill "\$_pid" 2>/dev/null; done
+  if [ "\${_CYCLE_TIMED_OUT:-0}" -eq 1 ]; then
+    _loop_event cycle_end "\${CYCLE_ID:-unknown}" "\${BRANCH:-}" "blocked" 2>/dev/null || true
+    _worktree_alert "cycle \${CYCLE_ID:-unknown}: \${LOOP_CYCLE_TIMEOUT_SEC}s timeout — claude/python killed; in-progress story marked Blocked" 2>/dev/null || true
+  fi
+  rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"
+  exit "\$_rc"
+}
+trap '_inner_cleanup' EXIT
 
 # US-AUTO-037: pull in worktree helpers (US-AUTO-036). Sourcing bin/roll is
 # safe — its main() only runs when invoked directly (BASH_SOURCE == \$0).
@@ -2350,18 +2372,31 @@ export LOOP_PROJECT_SLUG="${slug}"
 export LOOP_CYCLE_ID="\${CYCLE_ID}"
 export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
 for _attempt in 1 2 3; do
+  # FIX-057: watchdog — fires SIGTERM at the inner script (and its direct
+  # children) when the cycle exceeds LOOP_CYCLE_TIMEOUT_SEC.
+  ( sleep "\$LOOP_CYCLE_TIMEOUT_SEC" && pkill -TERM -P \$\$ 2>/dev/null; kill -TERM \$\$ 2>/dev/null ) &
+  _WATCHDOG_PID=\$!
   if [ -f "\$FMT" ]; then
     ( cd "\$WT" && ${claude_cmd} ) | python3 "\$FMT"
   else
     ( cd "\$WT" && ${claude_cmd} )
   fi
   _exit=\$?
+  kill "\$_WATCHDOG_PID" 2>/dev/null
+  wait "\$_WATCHDOG_PID" 2>/dev/null
+  [ "\$_CYCLE_TIMED_OUT" -eq 1 ] && break
   [ "\$_exit" -eq 0 ] && break
   if [ "\$_attempt" -lt 3 ]; then
     echo "[loop] claude exited \$_exit (attempt \$_attempt/3) — retrying in 30s..."
     sleep 30
   fi
 done
+
+# FIX-057: timed out — skip publish; EXIT trap writes cycle_end blocked + ALERT.
+if [ "\$_CYCLE_TIMED_OUT" -eq 1 ]; then
+  echo "[loop] cycle \${CYCLE_ID}: \${LOOP_CYCLE_TIMEOUT_SEC}s timeout — aborting cycle (worktree preserved at \$WT)"
+  exit 0
+fi
 
 # FIX-044: capture cycle data from worktree before cleanup removes it
 _cycle_tcr=0

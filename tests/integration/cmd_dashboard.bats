@@ -24,30 +24,40 @@ EOF
 
 teardown() { integration_teardown; }
 
-@test "roll (no args): prints six-block dashboard golden path" {
+@test "roll (no args): v2 home dashboard golden path (US-VIEW-002)" {
   run_roll
   [ "$status" -eq 0 ]
-  # ① Identity row
+  # Identity row
+  [[ "$output" == *"roll ·"* ]]
   [[ "$output" == *"agent"* ]]
   [[ "$output" == *"git"* ]]
-  # ② AI 自治 framed block
-  [[ "$output" == *"AI 自治"* ]]
-  [[ "$output" == *"Loop Layer"* ]]
-  [[ "$output" == *"Dream Layer"* ]]
-  [[ "$output" == *"Peer Layer"* ]]
-  [[ "$output" == *"四道防线"* ]]
-  # ③ Pipeline 全景
-  [[ "$output" == *"Pipeline"* ]]
-  [[ "$output" == *"Idea"* ]]
+  # THREE LAYERS section
+  [[ "$output" == *"THREE LAYERS"* ]]
+  [[ "$output" == *"Loop"* ]]
+  [[ "$output" == *"Dream"* ]]
+  [[ "$output" == *"Peer"* ]]
+  # FOUR DEFENSES section
+  [[ "$output" == *"FOUR DEFENSES"* ]]
+  # PIPELINE section
+  [[ "$output" == *"PIPELINE"* ]]
+  [[ "$output" == *"Ideas"* ]]
   [[ "$output" == *"Backlog"* ]]
   [[ "$output" == *"Build"* ]]
-  # ④ Current Focus DoD — surfaces in-progress story id
-  [[ "$output" == *"Current Focus"* ]]
+  # CURRENT FOCUS DoD — surfaces in-progress story id
+  [[ "$output" == *"CURRENT FOCUS"* ]]
   [[ "$output" == *"US-DEMO-002"* ]]
-  # ⑤ Human × AI — no alerts/proposals/release → 自驱中
+  # NEED YOU — no alerts → 自驱中
+  [[ "$output" == *"NEED YOU"* ]]
   [[ "$output" == *"AI 自驱中"* ]]
-  # ⑥ Schedules + brief block
-  [[ "$output" == *"Schedules"* ]]
+  # Quick-nav footer
+  [[ "$output" == *"roll --help"* ]]
+}
+
+@test "roll (no args): ROLL_UI=v1 falls back to legacy dashboard" {
+  ROLL_UI=v1 run_roll
+  [ "$status" -eq 0 ]
+  # Legacy dashboard markers (three layers as "Layer" rows, ASCII frame)
+  [[ "$output" == *"Loop Layer"* ]] || [[ "$output" == *"Dream Layer"* ]]
 }
 
 @test "roll (no args): degrades gracefully when no BACKLOG.md" {

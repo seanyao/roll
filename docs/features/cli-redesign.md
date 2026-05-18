@@ -57,9 +57,10 @@
 ---
 
 <a id="us-view-002"></a>
-## US-VIEW-002 `roll` home dashboard 重设计 📋
+## US-VIEW-002 `roll` home dashboard 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Plan**: [cli-redesign-plan.md](cli-redesign-plan.md)
 **Wave**: 2 · Reference frame: `HomeFrame` in `frames-roll-home.jsx`
 
@@ -68,19 +69,21 @@
 - So that 每天进项目目录就敲一下 `roll` 能知道全貌
 
 **AC:**
-- [ ] 顶部 identity 行：`roll · Roll vYYYY.M.D` 左对齐 / `agent X · git ✓ branch · timestamp` 右对齐
-- [ ] Eyebrow：根据 `state.yaml` 显示 `⏵ now working <story> · stage <n/m>` 或 `● next HH:MM · in Nm Ss · last ✓ HH:MM <story>`
-- [ ] THREE LAYERS 段：Loop / Dream / Peer 三行，状态点 + 名称 + 状态词 + 调度 + last 事件（参考 `LayerRow`）
-- [ ] FOUR DEFENSES 段：TCR / Auto Review / Spar / Sentinel 四列（参考 `DefenseCell`）
-- [ ] PIPELINE 段：Idea ▸ Backlog ▸ Build ▸ Verify ▸ Release 五列计数 + `▲ in-flight` 标注（计数来自 BACKLOG.md）
-- [ ] CURRENT FOCUS · DoD 段：仅当 Build > 0 显示；8 个 DoD chip 占两行（AC / CI / TCR / Peer / Coverage / Docs / Spar / Branch）
-- [ ] NEED YOU 段：alert 数量、proposal 数量、release-ready 提示，跳转命令蓝色高亮
-- [ ] 底部 quick-nav 两行：`roll loop / backlog / brief / status / peer / --help`
-- [ ] 装饰性 emoji 与 ASCII banner 退役；BACKLOG 状态 emoji（📋🔨🔒⏸✅）保留
+- [x] 顶部 identity 行：`roll · Roll vYYYY.M.D` 左对齐 / `agent X · git ✓ branch · timestamp` 右对齐
+- [x] Eyebrow：根据 `state.yaml` 显示 `⏵ now working <story> · stage <n/m>` 或 `● next HH:MM · in Nm Ss · last ✓ HH:MM <story>`
+- [x] THREE LAYERS 段：Loop / Dream / Peer 三行，状态点 + 名称 + 状态词 + 调度 + last 事件（参考 `LayerRow`）
+- [x] FOUR DEFENSES 段：TCR / Auto Review / Spar / Sentinel 四列（参考 `DefenseCell`）
+- [x] PIPELINE 段：Idea ▸ Backlog ▸ Build ▸ Verify ▸ Release 五列计数 + `▲ in-flight` 标注（计数来自 BACKLOG.md）
+- [x] CURRENT FOCUS · DoD 段：仅当 Build > 0 显示；8 个 DoD chip 占两行（AC / CI / TCR / Peer / Coverage / Docs / Spar / Branch）
+- [x] NEED YOU 段：alert 数量、proposal 数量、release-ready 提示，跳转命令蓝色高亮
+- [x] 底部 quick-nav 两行：`roll loop / backlog / brief / status / peer / --help`
+- [x] 装饰性 emoji 与 ASCII banner 退役；BACKLOG 状态 emoji（📋🔨🔒⏸✅）保留
 
 **Files:**
 - `lib/roll-home.py`（新建）
-- `bin/roll`（裸 `roll` 命令的 dispatch 加 ROLL_UI 分支）
+- `bin/roll`（裸 `roll` 命令的 dispatch 加 ROLL_UI 分支，`_dashboard` 重命名为 `_legacy_home`）
+- `tests/unit/roll_home.bats`（新建，9 tests）
+- `tests/integration/cmd_dashboard.bats`（更新 golden path for v2）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

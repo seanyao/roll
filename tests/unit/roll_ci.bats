@@ -60,24 +60,24 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_gh_repo_slug: parses SSH URL git@github.com:owner/repo.git" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   run _gh_repo_slug
   [ "$status" -eq 0 ]
-  [ "$output" = "seanyao/Roll" ]
+  [ "$output" = "seanyao/roll" ]
 }
 
 @test "_gh_repo_slug: parses HTTPS URL https://github.com/owner/repo.git" {
-  git remote add origin "https://github.com/seanyao/Roll.git"
+  git remote add origin "https://github.com/seanyao/roll.git"
   run _gh_repo_slug
   [ "$status" -eq 0 ]
-  [ "$output" = "seanyao/Roll" ]
+  [ "$output" = "seanyao/roll" ]
 }
 
 @test "_gh_repo_slug: parses HTTPS URL without .git suffix" {
-  git remote add origin "https://github.com/seanyao/Roll"
+  git remote add origin "https://github.com/seanyao/roll"
   run _gh_repo_slug
   [ "$status" -eq 0 ]
-  [ "$output" = "seanyao/Roll" ]
+  [ "$output" = "seanyao/roll" ]
 }
 
 @test "_gh_repo_slug: returns non-zero when no origin remote" {
@@ -113,7 +113,7 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_ci_wait: returns 1 when gh installed but call fails (gh repo unreachable)" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   # gh installed (command -v gh succeeds), but gh call fails (e.g. auth, network)
   gh() { return 1; }
@@ -125,7 +125,7 @@ teardown() { unit_teardown_cd; }
 # ─── FIX-046: skip CI wait when no PR exists ─────────────────────────────────
 
 @test "_ci_wait: FIX-046 returns 0 immediately when no CI runs and no open PR" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "tcr: test" -q
   # gh: run list returns empty (no CI runs), pr list returns empty (no PR)
   gh() {
@@ -141,7 +141,7 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_ci_wait: FIX-046 continues waiting when no CI runs but PR exists" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "tcr: test" -q
   # gh: run list empty (no CI yet), pr list returns 1 (PR exists)
   gh() {
@@ -164,7 +164,7 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_loop_wait_pr_merge: returns 0 when PR state is MERGED" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() {
     case "$*" in
@@ -178,7 +178,7 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_loop_wait_pr_merge: returns 1 when PR state is CLOSED" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() {
     case "$*" in

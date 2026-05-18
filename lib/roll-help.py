@@ -132,9 +132,9 @@ def render(version: str) -> None:
     for cmd, zh in EXAMPLES:
         print("  " + c("blue", cmd) + "  " + c("dim", zh))
     print()
-    print("  " + c("dim", "docs: ") + c("blue", "github.com/seanyao/Roll") +
+    print("  " + c("dim", "docs: ") + c("blue", "github.com/seanyao/roll") +
           c("muted", "  ·  ") +
-          c("dim", "issues: ") + c("blue", "github.com/seanyao/Roll/issues"))
+          c("dim", "issues: ") + c("blue", "github.com/seanyao/roll/issues"))
     print()
 
 # ════════════════════════════════════════════════════════════════════════════

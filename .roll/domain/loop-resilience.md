@@ -174,7 +174,7 @@ is stale, it's definitively orphan.
 ### R4: Robust gh Detection
 
 For `_loop_publish_pr`, ensure `gh` always works regardless of context.
-`_gh_repo_slug()` already extracts `seanyao/Roll` from the remote origin
+`_gh_repo_slug()` already extracts `seanyao/roll` from the remote origin
 URL, and `gh -R "$slug"` is already used throughout. The issue is that `gh`
 fails to auto-resolve the remote in worktree/launchd contexts.
 

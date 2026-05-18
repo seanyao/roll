@@ -50,6 +50,7 @@ setup() {
   git init -q
   git config user.email "test@roll.dev"
   git config user.name "Test"
+  mkdir -p .roll
   export _LOOP_ALERT="${_test_dir}/.alert"
 }
 
@@ -101,7 +102,7 @@ teardown() {
 }
 
 @test "_loop_precheck_ci: returns 0 when no CI runs exist for HEAD yet" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo "[]"; return 0; }
   export -f gh
@@ -110,7 +111,7 @@ teardown() {
 }
 
 @test "_loop_precheck_ci: returns 0 when HEAD CI is success" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"success"}]'; return 0; }
   export -f gh
@@ -119,7 +120,7 @@ teardown() {
 }
 
 @test "_loop_precheck_ci: returns 1 when HEAD CI is failure" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"failure"}]'; return 0; }
   export -f gh
@@ -128,7 +129,7 @@ teardown() {
 }
 
 @test "_loop_precheck_ci: writes ALERT when HEAD CI is red" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"failure"}]'; return 0; }
   export -f gh
@@ -148,7 +149,7 @@ teardown() {
 }
 
 @test "roll loop precheck-ci: CLI subcommand returns 1 when HEAD CI is red" {
-  git remote add origin "git@github.com:seanyao/Roll.git"
+  git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"failure"}]'; return 0; }
   export -f gh

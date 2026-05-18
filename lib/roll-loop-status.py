@@ -414,7 +414,7 @@ def repair_orphan_cycles_from_git(cycles: List[Dict[str, Any]], git_merges: Dict
         if cy.get("outcome") in ("running", "unknown"):
             cy["outcome"] = "done"
         if m["pr"] and not cy.get("pr"):
-            cy["pr"] = f"https://github.com/seanyao/Roll/pull/{m['pr']}"
+            cy["pr"] = f"https://github.com/seanyao/roll/pull/{m['pr']}"
         # Fill stories when our existing sources didn't carry them. Filter
         # to ones that actually appear in BACKLOG so we don't pull in stray
         # tokens from the merge body (PR numbers, file paths, etc.).

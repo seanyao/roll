@@ -13,7 +13,7 @@ import os
 import re
 import sys
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 _LIB_DIR = os.path.dirname(os.path.realpath(__file__))
 if _LIB_DIR not in sys.path:

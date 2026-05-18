@@ -174,7 +174,7 @@
 | FIX-056 | 同一个项目如果从大小写不同的路径进去（macOS 默认能 cd 进去），会被 loop 当成两个独立项目：LOCK、状态、调度全分裂，互相不知道对方存在，违反了"每个项目只允许一个 loop"的核心约束 — 项目标识改为按规范化后的真实路径或 git 仓库根目录算，不再用目录名表面字符 | ✅ Done |
 | FIX-057 | loop 跑完一轮后没真正结束，自己把后续整点全挡死，几个小时一动不动直到有人手动 kill —— 一轮跑完必须保证干净退出，不能再出现"业务做完但进程赖着不走" | ✅ Done |
 | FIX-058 | roll loop health 显示的状态和实际运行不符 — loop 是 per-project 管理的，每个项目的状态机（idle/running/done/failed）必须完整且独立，写入方和 dashboard 读取方必须对齐到同一个 per-project 状态源；目前某些项目首次启动后 dashboard 读不到状态回落成 IDLE，cycle 历史也不实时 | ✅ Done |
-| FIX-059 | roll setup 写入新 plist 时 macOS 会通过 FSEvents 自动 bootstrap 该 job，导致从未显式开启 loop 的项目也会每小时触发 loop cycle 并弹出终端窗口 — _install_launchd_plists 写完新 plist 后应对从未被显式启用的 label 立即执行 launchctl disable，阻止 macOS 自动加载 | 📋 Todo |
+| FIX-059 | roll setup 写入新 plist 时 macOS 会通过 FSEvents 自动 bootstrap 该 job，导致从未显式开启 loop 的项目也会每小时触发 loop cycle 并弹出终端窗口 — _install_launchd_plists 写完新 plist 后应对从未被显式启用的 label 立即执行 launchctl disable，阻止 macOS 自动加载 | ✅ Done |
 | FIX-060 | loop pause 后上一个 cycle 的 PR 合并了但 runs.jsonl 状态永远停在 built — merged 状态更新依赖下一个 cycle 启动时去轮询 GitHub，loop 一旦 paused 就永远等不到这次更新；应改为独立的 PR 状态扫描（不依赖下一个 cycle 才能回填） | 📋 Todo |
 
 ## Epic: Autonomous Evolution

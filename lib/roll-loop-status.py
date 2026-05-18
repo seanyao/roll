@@ -688,7 +688,7 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
                  sum(1 for c0 in day_cycles if c0["outcome"] == "fail"),
                  now,
                  in_progress=(day_key == today_key and is_partial))
-        for cy in day_cycles:
+        for cy in reversed(day_cycles):
             cycle_row(cy, backlog)
         print()
 

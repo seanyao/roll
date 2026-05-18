@@ -3085,6 +3085,9 @@ _loop_test() {
 }
 
 _loop_status() {
+  # FIX-060: backfill merged PRs before rendering — independent of cycle ticks,
+  # so dashboard reflects merges that happened while loop was paused.
+  _loop_backfill_merged >/dev/null 2>&1 || true
   # ROLL_UI=v2 (default) routes to the redesigned Python view.
   # Set ROLL_UI=v1 to fall back to the legacy bash implementation.
   if [[ "${ROLL_UI:-v2}" == "v2" ]]; then
@@ -3333,6 +3336,9 @@ _loop_runs() {
       *) shift ;;
     esac
   done
+
+  # FIX-060: refresh merged status before reading, so paused-window merges show up.
+  _loop_backfill_merged >/dev/null 2>&1 || true
 
   if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
     echo "No loop runs yet  尚无 loop 运行记录"

@@ -15,6 +15,17 @@ setup() {
 }
 teardown() { unit_teardown; }
 
+@test "_loop_status calls _loop_backfill_merged before rendering" {
+  # Caller hook: dashboard refresh must reconcile MERGED PRs even when loop is paused.
+  awk '/^_loop_status\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN" \
+    | grep -qE '_loop_backfill_merged'
+}
+
+@test "_loop_runs calls _loop_backfill_merged before reading runs.jsonl" {
+  awk '/^_loop_runs\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN" \
+    | grep -qE '_loop_backfill_merged'
+}
+
 @test "_loop_backfill_merged: no-op when gh missing" {
   echo '{"ts":"2026-05-18T10:00:00Z","project":"x","run_id":"loop-1","status":"built","cycle_id":"20260518-100000-1234"}' > "$_runs"
   _gh_resolve() { return 1; }

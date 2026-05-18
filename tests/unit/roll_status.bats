@@ -54,7 +54,7 @@ EOF
 
 @test "status loop overview: section skipped when no loop plists" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
-  run bash "$ROLL_BIN" status
+  ROLL_UI=v1 run bash "$ROLL_BIN" status
   [ "$status" -eq 0 ]
   ! echo "$output" | grep -q "Loop Overview"
 }
@@ -65,7 +65,7 @@ EOF
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   mkdir -p "${TEST_DIR}/myproject"
   _make_loop_plist "myproject-abc123" "${TEST_DIR}/myproject" 5
-  run bash "$ROLL_BIN" status
+  ROLL_UI=v1 run bash "$ROLL_BIN" status
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "Loop Overview"
 }
@@ -74,7 +74,7 @@ EOF
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   mkdir -p "${TEST_DIR}/myproject"
   _make_loop_plist "myproject-abc123" "${TEST_DIR}/myproject" 5
-  run bash "$ROLL_BIN" status
+  ROLL_UI=v1 run bash "$ROLL_BIN" status
   echo "$output" | grep -q "myproject"
 }
 
@@ -83,7 +83,7 @@ EOF
 @test "status loop overview: shows (path missing) when project dir absent" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   _make_loop_plist "gone-abc123" "${TEST_DIR}/nonexistent-dir" 5
-  run bash "$ROLL_BIN" status
+  ROLL_UI=v1 run bash "$ROLL_BIN" status
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "path missing"
 }
@@ -99,7 +99,7 @@ EOF
 | US-002 | Story two | 📋 Todo |
 | US-003 | Done item | ✅ Done |
 BACKLOG
-  run bash "$ROLL_BIN" status
+  ROLL_UI=v1 run bash "$ROLL_BIN" status
   echo "$output" | grep -q "2 pending"
 }
 
@@ -107,7 +107,7 @@ BACKLOG
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   mkdir -p "${TEST_DIR}/myproject"
   _make_loop_plist "myproject-abc123" "${TEST_DIR}/myproject" 5
-  run bash "$ROLL_BIN" status
+  ROLL_UI=v1 run bash "$ROLL_BIN" status
   echo "$output" | grep -q "0 pending"
 }
 
@@ -117,7 +117,7 @@ BACKLOG
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   mkdir -p "${TEST_DIR}/myproject"
   _make_loop_plist "myproject-abc123" "${TEST_DIR}/myproject" 15
-  run bash "$ROLL_BIN" status
+  ROLL_UI=v1 run bash "$ROLL_BIN" status
   echo "$output" | grep -q ":15"
 }
 
@@ -125,6 +125,6 @@ BACKLOG
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   mkdir -p "${TEST_DIR}/myproject"
   _make_loop_plist "myproject-abc123" "${TEST_DIR}/myproject" 30 3
-  run bash "$ROLL_BIN" status
+  ROLL_UI=v1 run bash "$ROLL_BIN" status
   echo "$output" | grep -q "03:30"
 }

@@ -59,6 +59,28 @@ teardown() {
   grep -qE 'cycle_end.*"blocked"' "$inner"
 }
 
+# --- Outer runner timeout (FIX-057 root: outer wait loop had no deadline) ---
+
+@test "outer: tmux wait loop has a deadline guarded by _OUTER_TIMEOUT" {
+  local script_path="${_test_dir}/run-test-outer-tmout.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  grep -qF '_OUTER_TIMEOUT' "$script_path"
+}
+
+@test "outer: tmux wait loop kills session on deadline breach" {
+  local script_path="${_test_dir}/run-test-outer-kill.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  # Must kill the session (not just break) so the tmux session is torn down
+  # even when remain-on-exit is set in the user's tmux config.
+  grep -qE 'tmux kill-session.*SESSION' "$script_path"
+}
+
+@test "outer: deadline uses ROLL_LOOP_CYCLE_TIMEOUT_SEC env var" {
+  local script_path="${_test_dir}/run-test-outer-envvar.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  grep -qE 'ROLL_LOOP_CYCLE_TIMEOUT_SEC.*2700' "$script_path"
+}
+
 # --- Behaviour test: timeout actually fires ---
 
 @test "inner: timeout kills hanging pipe and exits within budget" {

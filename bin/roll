@@ -1984,6 +1984,13 @@ cmd_agent() {
 # hash of the full path, ensuring uniqueness across sibling dirs with same name.
 _project_slug() {
   local path="${1:-$(pwd -P 2>/dev/null || pwd)}"
+  # FIX-056: normalize path to canonical case on macOS case-insensitive filesystem.
+  # Two paths differing only in case point to the same directory; realpath
+  # resolves both symlinks and case variations to the canonical filesystem path.
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    local _canon
+    _canon=$(realpath "$path" 2>/dev/null) && path="$_canon"
+  fi
   # FIX-034: when inside a git worktree, git-common-dir returns the main tree's
   # absolute .git path; resolve to the main tree so worktree and main-tree runs
   # produce the same slug.
@@ -2618,7 +2625,16 @@ if command -v tmux >/dev/null 2>&1; then
       -e "tell application \"Terminal\" to do script \"tmux attach -t \$SESSION\"" \\
       -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
   fi
-  while tmux has-session -t "\$SESSION" 2>/dev/null; do sleep 5; done
+  _OUTER_TIMEOUT=\$(( \${ROLL_LOOP_CYCLE_TIMEOUT_SEC:-2700} + 300 ))
+  _outer_wait_start=\$(date +%s)
+  while tmux has-session -t "\$SESSION" 2>/dev/null; do
+    sleep 5
+    if (( \$(date +%s) - _outer_wait_start > _OUTER_TIMEOUT )); then
+      echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-057: outer timeout (\${_OUTER_TIMEOUT}s) — killing tmux session \$SESSION" >> "\$LOG"
+      tmux kill-session -t "\$SESSION" 2>/dev/null || true
+      break
+    fi
+  done
 else
   bash "\$INNER_SCRIPT" >> "\$LOG" 2>&1
 fi

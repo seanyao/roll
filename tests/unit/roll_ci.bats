@@ -267,6 +267,6 @@ teardown() { unit_teardown_cd; }
 
 @test "usage: mentions 'roll ci' command" {
   local body
-  body=$(awk '/^usage\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  body=$(awk '/^usage\(\)|^_legacy_help\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   echo "$body" | grep -qE 'roll ci|ci '
 }

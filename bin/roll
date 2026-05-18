@@ -4067,7 +4067,7 @@ _changelog_audit_bullet() {
   # Rule 1: length cap 30 (user-command in backticks bypasses this rule).
   if ! printf '%s' "$bullet" | grep -q '`'; then
     local len
-    len=$(LC_ALL=en_US.UTF-8 printf '%s' "$bullet" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')
+    len=$(printf '%s' "$bullet" | LC_ALL=C.UTF-8 wc -m | tr -d ' ')
     if [ "${len:-0}" -gt 30 ]; then
       echo "over-length-30"
     fi
@@ -4090,7 +4090,7 @@ _changelog_audit_bullet() {
   fi
 
   # Rule 5: required shape — em dash, 不再, or 现在.
-  if ! printf '%s' "$bullet" | grep -qE '—|不再|现在'; then
+  if ! printf '%s' "$bullet" | LC_ALL=C.UTF-8 grep -qE '—|不再|现在'; then
     echo "bad-shape"
   fi
 

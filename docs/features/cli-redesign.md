@@ -184,9 +184,10 @@
 ---
 
 <a id="us-view-006"></a>
-## US-VIEW-006 `roll brief` 重设计 📋
+## US-VIEW-006 `roll brief` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-18
 **Wave**: 3 · Reference frame: `BriefFrame` in `frames-roll-views.jsx`
 
 - As a Roll user
@@ -194,16 +195,18 @@
 - So that owner 一眼看到 SUMMARY / HIGHLIGHTS / DECIDE 三段，决策项被琥珀 D1/D2 编号高亮
 
 **AC:**
-- [ ] 顶部 eyebrow + 简报文件路径 + Nh ago
-- [ ] SUMMARY 段：一行核心数字 + ZH 译文 + 三行高亮（✓ Shipped / ! Watch / ⚠ Decide）
-- [ ] HIGHLIGHTS 段：每条 `— <STORY-ID> <title>` + 两到三行 dim 描述 + `PR #N · +X −Y · CI ✓ · Peer ack`
-- [ ] DECIDE 段：D1 / D2 / ... 琥珀编号 + EN 描述 + ZH 翻译
-- [ ] 底部 next / drill / alert 跳转行
-- [ ] 数据源：`docs/briefs/<date>.md` 解析；无新简报时自动 regen（行为不变）
+- [x] 顶部 eyebrow + 简报文件路径 + Nh ago
+- [x] SUMMARY 段：一行核心数字 + ZH 译文 + 三行高亮（✓ Shipped / ! Watch / ⚠ Decide）
+- [x] HIGHLIGHTS 段：每条 `— <STORY-ID> <title>` + dim 描述
+- [x] DECIDE 段：D1 / D2 / ... 琥珀编号 + 描述
+- [x] 底部 next / drill / alert 跳转行
+- [x] 数据源：`docs/briefs/<date>.md` 解析；无新简报时自动 regen（行为不变）
 
 **Files:**
 - `lib/roll-brief.py`（新建）
 - `bin/roll`（`brief` 的 dispatch 加 ROLL_UI 分支）
+- `tests/unit/roll_brief.bats`（新增 7 个 v2 测试）
+- `tests/integration/cmd_brief.bats`（新建 E2E 测试）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

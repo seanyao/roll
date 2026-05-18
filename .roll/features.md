@@ -73,6 +73,12 @@
 ### Marketing & Site
 - [landing-page](features/landing-page.md) — 首屏动画 6 秒内讲清三层自治产品故事
 
+### Legacy Project Onboarding + 项目管理剥离
+- [directory-restructure](features/directory-restructure.md) — 把 roll 运行时状态、产物、配置统一收进 `.roll/`，主项目根目录保持干净
+- [roll-meta-migration](features/roll-meta-migration.md) — roll 自身从旧版结构迁移到 `.roll/` 新结构，提供 dogfood 验证
+- [legacy-onboard](features/legacy-onboard.md) — 给已有项目接入 roll：扫描存量代码、生成初始 BACKLOG 与 convention 文档 *(规划中)*
+- migration-guide — 为老用户提供从旧版升级到 `.roll/` 新结构的迁移手册 *(规划中)*
+
 ---
 
 ## 维护说明

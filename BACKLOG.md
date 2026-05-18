@@ -171,6 +171,7 @@
 | FIX-052 | loop 状态文件 ALERT/state/mute/cron.log 在共享目录里没分项目，一个项目的告警会串到另一个项目的会话里、两个项目的 cycle 状态还会互相覆盖、日志互相穿插 — 跟现有 events/runner 一样按项目命名，每个命令只读当前项目对应的那份；旧数据按项目搬好不丢 | ✅ Done |
 | FIX-054 | loop 跑起来不再自动弹出终端窗口让用户看进度 — 固定只用 macOS 自带的 Terminal.app，不再按用户的终端偏好挑来挑去，省得在新版 Ghostty 上弹窗假成功、备选方案也失效 | ✅ Done |
 | FIX-055 | agent 跟用户对话统一走"说人话"风格 — 所有 roll 用户都拿到一致的沟通体验，不再因 agent 自由发挥而忽冷忽热 | 📋 Todo |
+| FIX-056 | 同一个项目如果从大小写不同的路径进去（macOS 默认能 cd 进去），会被 loop 当成两个独立项目：LOCK、状态、调度全分裂，互相不知道对方存在，违反了"每个项目只允许一个 loop"的核心约束 — 项目标识改为按规范化后的真实路径或 git 仓库根目录算，不再用目录名表面字符 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -267,6 +268,10 @@
 | REFACTOR-027 | loop 启动前的 CI 状态预检逻辑已实现但未接入，loop 可以在 CI 红的情况下启动并叠加新 story — flagged by dream 2026-05-17 | ✅ Done |
 | REFACTOR-028 | BACKLOG 展示时四种条目类型使用了结构完全一样的解析循环，格式变更需同步四处且容易遗漏 — flagged by dream 2026-05-17 | ✅ Done |
 | REFACTOR-029 | docs: ROLL_MERGE_SUMMARY 等四个配置变量在代码中频繁引用但文档完全缺失，用户和贡献者无法发现这些配置入口 — flagged by dream 2026-05-17 (hint: $roll-doc) | ✅ Done |
+| REFACTOR-030 | 上一次重构遗留的四个 helper 函数和它们的单元测试仍留在仓库里但生产路径已经不再调用，其中两个还被技能文档当作现行协议描述，新维护者会误以为这些是活路径 — flagged by dream 2026-05-18 | 📋 Todo |
+| REFACTOR-031 | 同一个 macOS/Linux mtime 兼容写法在四处复制粘贴，平台兼容性如有调整需要四个地方同步改，容易漏 — flagged by dream 2026-05-18 | 📋 Todo |
+| REFACTOR-032 | docs: 产品功能目录漏收三个已经上线一段时间的功能区，用户从功能页找不到这些功能；发版时的自动重写脚本没能把它们补进去 — flagged by dream 2026-05-18 (hint: $roll-doc) | 📋 Todo |
+| REFACTOR-033 | docs: 仓库里有一个共享脚本目录承载了多个生产模块，但在架构文档里完全没出现，新人读完领域文档也不知道它的存在 — flagged by dream 2026-05-18 (hint: $roll-doc) | 📋 Todo |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle
@@ -339,3 +344,4 @@
 | IDEA-027 | loop dashboard 现在只能看到最新一轮的成本和耗时，再往前的历史都丢了 — 因为这些数字写在一份每轮被新数据覆盖的临时日志里；改成结束时把成本 / 耗时写进永久事件流，历史也能完整看到，顺带打开按天、按故事汇总成本的可能 | 📋 Todo → US-LOOP-004 |
 | IDEA-028 | loop 跑完一轮在某些情况下不会写下"结束"标记，dashboard 看到这些轮就以为还在跑，其实早就合到主干了 — 审计 loop 的所有结束路径（合并成功、孤儿恢复、超时退出、崩溃自愈、PR 失败兜底）每条都补上结束记录，dashboard 不再需要去 git 历史里反查 | 📋 Todo |
 | IDEA-029 | loop 在隔离工作目录里跑出来的运行记录被错认成另一个项目身份，dashboard 按项目筛选时会漏掉这部分历史 — 写入时统一回主项目身份，让一个项目的记录不被切碎 | 📋 Todo |
+| IDEA-030 | 把 loop 里在做的事儿拆成独立的 loop（CI loop、PR loop、UX loop、Refactor loop 等），把工作打碎成短途连续接力赛，而不是一个马拉松；同时再加一个"巡检 loop"专门盯当前 loop 跑得正不正常（卡死、锁残留、wrapper 没退出、整点 cron 被自己挡掉 —— 像今天早上 03:23 那轮就是真实案例：业务做完了 wrapper 没退，5 小时整点全被 skip 了，没人巡检就根本发现不了） | 📋 Todo |

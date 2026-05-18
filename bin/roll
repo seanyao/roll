@@ -2745,6 +2745,11 @@ for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin"; d
   case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
 done
 export PATH
+# US-LOOP-006: identity normalization — export the main-project slug so every
+# subprocess (claude, loop-fmt.py, _loop_event called from worktree / tmp cwd)
+# writes events and runs.jsonl under the main project, never under a worktree
+# or tmp basename. _project_slug honors ROLL_MAIN_SLUG ahead of path-derived logic.
+export ROLL_MAIN_SLUG="${slug}"
 # FIX-031: inner-level LOCK (PID + start-ts) — outer runner.sh LOCK can be
 # bypassed (recovery / retry / direct invocation); this guards the actual
 # claude invocation so a second session can't run under the same project.

@@ -21,6 +21,7 @@ setup() {
   git init -q .
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m "init"
   # Minimal BACKLOG so cwd is a "roll-managed project".
+  mkdir -p .roll
   cat > .roll/backlog.md <<'EOF'
 # Backlog
 | Story | Description | Status |

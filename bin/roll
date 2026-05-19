@@ -4543,7 +4543,7 @@ _changelog_lint_bullet() {
   if [ "${len:-0}" -gt 50 ]; then
     echo "over-length"
   fi
-  if printf '%s' "$stripped" | grep -qE '(^|[^A-Za-z0-9_])(docs|bin|tests|scripts)/'; then
+  if printf '%s' "$stripped" | grep -qE '(^|[^A-Za-z0-9_])(\.roll|docs|bin|tests|scripts)/'; then
     echo "path-fragment"
   fi
   return 0
@@ -4600,7 +4600,7 @@ _changelog_audit_bullet() {
 
   # Rule 3: file suffix / path fragment outside backticks.
   if printf '%s' "$stripped" | grep -qE '\.(md|sh|yml|ts|bats)([^A-Za-z0-9]|$)' \
-    || printf '%s' "$stripped" | grep -qE '(^|[^A-Za-z0-9_])(docs|bin|tests|scripts)/'; then
+    || printf '%s' "$stripped" | grep -qE '(^|[^A-Za-z0-9_])(\.roll|docs|bin|tests|scripts)/'; then
     echo "path-or-suffix"
   fi
 

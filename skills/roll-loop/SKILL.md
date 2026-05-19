@@ -208,11 +208,14 @@ For each item, **before invoking the executor skill**, mark the story 🔨 In Pr
 
 This commit is what makes the work visible — without it, tcr micro-commits during execution are invisible to `roll-brief`.
 
-选定故事后，调用 `_loop_event` 发出 story 事件，让 monitor 和 attach 能渲染当前进度：
+选定故事后，调用 `_loop_event` 发出 pick_todo 事件，让 dashboard / monitor / attach 都能把"这个 cycle 选了哪个 story"正确归类：
 
 ```bash
 # 选定故事后立即 emit（在调用 executor skill 之前）
-_loop_event story "$US_ID" "$story_title" ""
+# label 必须是 cycle_id（来自 bin/roll 注入的 LOOP_CYCLE_ID 环境变量），
+# 不是 US_ID — dashboard 按 label 聚类，US_ID 当 label 会让事件分到错的桶
+# 里，cycle 看起来"有 token 没 ID"。
+_loop_event pick_todo "$LOOP_CYCLE_ID" "$US_ID" ""
 ```
 
 Then invoke the executor:

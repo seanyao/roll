@@ -43,6 +43,16 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   grep -qE 'skipped.*depends-on|runs\.jsonl.*skipped' "$SKILL_FILE"
 }
 
+@test "roll-loop SKILL.md: pick_todo emit uses LOOP_CYCLE_ID as label (IDEA-028 follow-up)" {
+  # When the loop skill picks a story, it must emit pick_todo with the cycle
+  # id as label (not the US id). Dashboard aggregate() buckets events by
+  # label; if US_ID is used the event lands in a "FIX-065" bucket separate
+  # from the cycle bucket, and the cycle ends up "has tokens but no ID".
+  grep -qF '_loop_event pick_todo "$LOOP_CYCLE_ID" "$US_ID"' "$SKILL_FILE"
+  # And the prior wrong form must be gone.
+  ! grep -qE '_loop_event story "\$US_ID"' "$SKILL_FILE"
+}
+
 @test "roll-loop SKILL.md: runs.jsonl schema is strictly defined (FIX-018)" {
   # Strict schema warning must be present
   grep -qF 'Strict schema contract' "$SKILL_FILE"

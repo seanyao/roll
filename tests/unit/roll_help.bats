@@ -56,3 +56,12 @@ ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
   body=$(awk '/^_help\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
   [[ "$body" == *"_legacy_help"* ]]
 }
+
+# FIX-064: init's help description must reflect what cmd_init actually creates
+# (.roll/features/), not the pre-2.0 docs/ directory.
+@test "roll-help v2: init description shows .roll/features/ not docs/" {
+  run python3 "${LIB}/roll-help.py" --demo --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".roll/features/"* ]]
+  [[ "$output" != *"+ docs/"* ]]
+}

@@ -36,3 +36,12 @@ teardown() { integration_teardown; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"AUTONOMY"* ]]
 }
+
+# FIX-064: legacy help (ROLL_UI=v1) must describe the real artifacts
+# produced by cmd_init, matching the README and the v2 renderer.
+@test "roll --help (v1): init description shows .roll/features/ not docs/" {
+  ROLL_UI=v1 run_roll --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".roll/features/"* ]]
+  [[ "$output" != *"+ docs/"* ]]
+}

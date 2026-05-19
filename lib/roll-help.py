@@ -45,7 +45,7 @@ AUTONOMY = [
 ]
 
 PROJECT = [
-    ("init",      "",              "create AGENTS.md + .roll/backlog.md + docs/",              "初始化项目工作流文件",         False),
+    ("init",      "",              "create AGENTS.md + .roll/backlog.md + .roll/features/",    "初始化项目工作流文件",         False),
     ("status",    "",              "show current state and drift",                        "显示当前状态和漂移项",         False),
     ("agent",     "[use <name>]",  "per-project agent selection",                        "切换项目 agent",             False),
     ("ci",        "[--wait]",      "show or wait for current commit's CI status",         "查看 / 等待 CI 状态",        False),

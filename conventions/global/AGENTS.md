@@ -60,8 +60,9 @@
   - Before pushing any new code commit, verify the **previous** code-changing push's CI
     is green. Never stack new code commits on top of a red CI (this is the failure
     mode FIX-026 / `_loop_precheck_ci` exists to prevent for the loop — humans need
-    the same discipline). docs-only commits (matching CI `paths-ignore`) don't reset
-    the gate either way.
+    the same discipline). Every commit now triggers CI (US-POS-006 removed the
+    `paths-ignore` allow-list), so doc-only commits run CI too; treat their result
+    the same way as any other push.
   - If CI is red, the next action is **fix or revert**, not "queue something else".
 - **Commit message format**:
   - Format: `<type>: <description>` (Git Hook may auto-prepend type prefix)

@@ -277,7 +277,7 @@
 | REFACTOR-028 | BACKLOG 展示时四种条目类型使用了结构完全一样的解析循环，格式变更需同步四处且容易遗漏 — flagged by dream 2026-05-17 | ✅ Done |
 | REFACTOR-029 | docs: ROLL_MERGE_SUMMARY 等四个配置变量在代码中频繁引用但文档完全缺失，用户和贡献者无法发现这些配置入口 — flagged by dream 2026-05-17 (hint: $roll-doc) | ✅ Done |
 | REFACTOR-030 | 上一次重构遗留的四个 helper 函数和它们的单元测试仍留在仓库里但生产路径已经不再调用，其中两个还被技能文档当作现行协议描述，新维护者会误以为这些是活路径 — flagged by dream 2026-05-18 | 📋 Todo |
-| REFACTOR-031 | 同一个 macOS/Linux mtime 兼容写法在四处复制粘贴，平台兼容性如有调整需要四个地方同步改，容易漏 — flagged by dream 2026-05-18 | 📋 Todo |
+| REFACTOR-031 | 同一个 macOS/Linux mtime 兼容写法在四处复制粘贴，平台兼容性如有调整需要四个地方同步改，容易漏 — flagged by dream 2026-05-18 | 🔨 In Progress |
 | REFACTOR-032 | docs: 产品功能目录漏收三个已经上线一段时间的功能区，用户从功能页找不到这些功能；发版时的自动重写脚本没能把它们补进去 — flagged by dream 2026-05-18 (hint: $roll-doc) | ✅ Done |
 | REFACTOR-033 | docs: 仓库里有一个共享脚本目录承载了多个生产模块，但在架构文档里完全没出现，新人读完领域文档也不知道它的存在 — flagged by dream 2026-05-18 (hint: $roll-doc) | ✅ Done |
 | REFACTOR-034 | docs: BACKLOG 里每条 Story 的链接都指向已经搬走的旧目录，点开是 404，新人通过 BACKLOG 浏览功能详情会被全部断链堵死 — flagged by dream 2026-05-19 (hint: $roll-doc) | ✅ Done |

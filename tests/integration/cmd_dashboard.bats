@@ -13,6 +13,7 @@ setup() {
   cd "$TEST_TMP"
   git init -q .
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m "init"
+  mkdir -p .roll
   cat > .roll/backlog.md <<'EOF'
 # Backlog
 | Story | Description | Status |

@@ -7,6 +7,7 @@
 setup() {
   RELEASE_SH="${BATS_TEST_DIRNAME}/../../scripts/release.sh"
   TMP=$(mktemp -d)
+  mkdir -p "$TMP/.roll"
   # Load only _enforce_planning_markers from release.sh (no side effects).
   eval "$(awk '/^_enforce_planning_markers\(\) \{/{found=1} found{print} found && /^\}$/{exit}' "$RELEASE_SH")"
 }

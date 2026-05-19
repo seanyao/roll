@@ -8,6 +8,7 @@ setup() {
   git init -q
   git config user.email "test@roll.dev"
   git config user.name "Test"
+  mkdir -p .roll
   _LOOP_ALERT="${TEST_TMP}/.alert"
 }
 teardown() { unit_teardown_cd; }

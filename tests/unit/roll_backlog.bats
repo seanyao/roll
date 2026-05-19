@@ -6,6 +6,7 @@ FIXTURES_DIR="${BATS_TEST_DIRNAME}/../fixtures"
 
 setup() {
   TEST_DIR="$(mktemp -d)"
+  mkdir -p "$TEST_DIR/.roll"
   export HOME_ORIG="$HOME"
   # Suppress color codes in output
   export NO_COLOR=1

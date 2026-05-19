@@ -5,6 +5,7 @@ load helpers
 
 setup() {
   unit_setup_cd
+  mkdir -p .roll
   _UNIT_ORIG_HOME="$HOME"
   export HOME="$TEST_TMP/home"
   mkdir -p "$HOME/.shared/roll/loop"

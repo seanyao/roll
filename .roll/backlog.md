@@ -176,6 +176,8 @@
 | FIX-058 | roll loop health 显示的状态和实际运行不符 — loop 是 per-project 管理的，每个项目的状态机（idle/running/done/failed）必须完整且独立，写入方和 dashboard 读取方必须对齐到同一个 per-project 状态源；目前某些项目首次启动后 dashboard 读不到状态回落成 IDLE，cycle 历史也不实时 | ✅ Done |
 | FIX-059 | roll setup 写入新 plist 时 macOS 会通过 FSEvents 自动 bootstrap 该 job，导致从未显式开启 loop 的项目也会每小时触发 loop cycle 并弹出终端窗口 — _install_launchd_plists 写完新 plist 后应对从未被显式启用的 label 立即执行 launchctl disable，阻止 macOS 自动加载 | ✅ Done |
 | FIX-060 | loop pause 后上一个 cycle 的 PR 合并了但 runs.jsonl 状态永远停在 built — merged 状态更新依赖下一个 cycle 启动时去轮询 GitHub，loop 一旦 paused 就永远等不到这次更新；应改为独立的 PR 状态扫描（不依赖下一个 cycle 才能回填） | ✅ Done |
+| FIX-061 | 测试 fixture 缺 `mkdir -p .roll` 导致 CI 红 — Story 5 sed 把 `BACKLOG.md` 等改成 `.roll/backlog.md` 但忘了 `mkdir -p` 父目录，导致 `cmd_init.bats`、`loop_tcr.bats`、`release_planning_marker.bats` 等大量测试 fixture 在 sandbox 中崩；批量补齐 | ✅ Done |
+| FIX-062 | cycle / worktree 命名用 UTC 时间，本地（东八区）用户看到 `cycle-20260519-001104` 时容易误判为"8 小时前的旧 cycle"，实际是 30 分钟前 — 命名/显示应统一到本机时区，避免 UTC 与本地之差造成认知偏差 | 📋 Todo |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

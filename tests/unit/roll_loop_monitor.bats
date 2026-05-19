@@ -7,6 +7,7 @@ ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
 
 setup() {
   TEST_DIR="$(mktemp -d)"
+  mkdir -p "$TEST_DIR/.roll"
   export TERM=dumb
   # Source bin/roll to access internal functions
   # shellcheck disable=SC1090

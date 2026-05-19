@@ -36,6 +36,38 @@ assert 'ts' in e and 'stage' in e and 'label' in e
 "
 }
 
+@test "_loop_event: FIX-067 concurrent writers — all lines survive without a lock file" {
+  _SHARED_ROOT="$TEST_TMP"
+  local slug; slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  local f="$TEST_TMP/loop/events-${slug}.ndjson"
+
+  # Fork 20 writers; each appends one event. Atomic append must keep all 20
+  # whole lines (no interleaving, no missing rows) without any lockfile.
+  local pids=()
+  for i in $(seq 1 20); do
+    ( _loop_event "tcr" "id-$i" "concurrent write $i" "ok" >/dev/null ) &
+    pids+=("$!")
+  done
+  for p in "${pids[@]}"; do wait "$p"; done
+
+  [ -f "$f" ]
+  local count; count=$(wc -l < "$f")
+  [ "$count" -eq 20 ]
+  # No bare ".lock" sidecar should be created any more.
+  [ ! -f "${f}.lock" ]
+  # Each line is valid JSON
+  python3 -c "import json; [json.loads(l) for l in open('$f') if l.strip()]"
+}
+
+@test "_loop_event: FIX-067 no lockfile created on plain single write" {
+  _SHARED_ROOT="$TEST_TMP"
+  local slug; slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  local f="$TEST_TMP/loop/events-${slug}.ndjson"
+  _loop_event "ci" "green" "single write" "ok"
+  [ -f "$f" ]
+  [ ! -f "${f}.lock" ]
+}
+
 @test "_loop_event_rotate: rotates file when over 10MB" {
   _SHARED_ROOT="$TEST_TMP"
   local slug; slug=$(_project_slug 2>/dev/null || echo "testproj")

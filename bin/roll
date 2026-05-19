@@ -2667,20 +2667,16 @@ _loop_event() {
   # stdout: tab-separated for tmux display
   printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$stage" "$label" "$detail" "$outcome"
 
-  # JSON line appended to NDJSON file; serialized with flock (Linux) or
-  # lockf (macOS/BSD) — fall back to unguarded append when neither is available.
+  # JSON line appended to NDJSON file. FIX-067: drop the flock/lockf guard.
+  # POSIX requires write() ≤ PIPE_BUF (≥512 bytes, 4 KiB on Linux/macOS) to
+  # a file opened O_APPEND be atomic across concurrent writers, and a single
+  # JSONL event line is well under that limit. The old lockfile path could
+  # stall the EXIT trap added in FIX-066 when the lockfile state was
+  # inconsistent, leaving cycle_end unwritten when the outer SIGHUP fired —
+  # defeating FIX-066's whole purpose.
   json=$(printf '{"ts":"%s","stage":"%s","label":"%s","detail":"%s","outcome":"%s"}\n' \
     "$ts" "$stage" "$label" "$detail" "$outcome")
-  if command -v flock >/dev/null 2>&1; then
-    (
-      flock -x 9
-      printf '%s\n' "$json" >> "$evfile"
-    ) 9>>"${evfile}.lock"
-  elif command -v lockf >/dev/null 2>&1; then
-    lockf -s "${evfile}.lock" sh -c "printf '%s\n' $(printf '%q' "$json") >> $(printf '%q' "$evfile")"
-  else
-    printf '%s\n' "$json" >> "$evfile"
-  fi
+  printf '%s\n' "$json" >> "$evfile"
 
   # File rotation: if >10MB, rotate keeping last 5
   _loop_event_rotate "$evfile"

@@ -80,6 +80,14 @@ SKILL_MD="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
   grep -qF "cmp -s .roll/features.md" "$RELEASE_SH"
 }
 
+@test "release.sh is idempotent — commit / tag / npm publish each guarded for re-runs" {
+  # Re-running release.sh after a partial release must NOT die on "nothing to
+  # commit", "tag already exists", or "version already published".
+  grep -qF 'git diff --cached --quiet' "$RELEASE_SH"
+  grep -qE 'rev-parse[^#]*refs/tags/' "$RELEASE_SH"
+  grep -qE 'npm view[[:space:]]+"@seanyao/roll@' "$RELEASE_SH"
+}
+
 # ─── REFACTOR-021: release notes extracted from CHANGELOG.md, not AI stdout ──
 
 @test "_run_changelog_and_notes discards agent stdout and extracts notes from CHANGELOG.md" {

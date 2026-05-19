@@ -207,11 +207,25 @@ fi
 # features.md is committed separately below to avoid `git add` failing on an
 # ignored path under set -e.
 git add package.json bin/roll release_notes.txt CHANGELOG.md
-git commit -m "[release] ${TAG}"
-git tag "${TAG}"
-git push && git push --tags
 
-# Sync .roll/features.md into the nested roll-meta repo (best-effort).
+# Idempotent: skip commit when nothing staged (re-running after a prior
+# partial release where these files are already committed).
+if ! git diff --cached --quiet; then
+  git commit -m "[release] ${TAG}"
+else
+  echo "Outer repo already at ${TAG} — skipping commit."
+fi
+
+# Idempotent: only create tag if it doesn't exist locally yet.
+if ! git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
+  git tag "${TAG}"
+fi
+
+# push is naturally idempotent; --tags only sends new tags.
+git push
+git push --tags
+
+# Sync .roll/features.md into the nested roll-meta repo (best-effort, idempotent).
 if [ -d .roll/.git ] && [ -f .roll/features.md ]; then
   (
     cd .roll
@@ -223,11 +237,16 @@ if [ -d .roll/.git ] && [ -f .roll/features.md ]; then
   ) || echo "Warning: .roll/features.md sync to roll-meta failed — push manually from .roll/." >&2
 fi
 
-# Publish to npm (unset proxy vars — npm can reach registry.npmjs.org directly)
+# Publish to npm — idempotent. Skip when the version is already on the
+# registry (re-running after a prior partial release that already published).
 echo ""
-echo "Publishing to npm..."
-env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy \
-  npm publish --access public
+if npm view "@seanyao/roll@${VERSION}" version 2>/dev/null | grep -qx "${VERSION}"; then
+  echo "v${VERSION} already published to npm — skipping."
+else
+  echo "Publishing to npm..."
+  env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy \
+    npm publish --access public
+fi
 
 echo ""
 echo "✅ Released ${TAG}"

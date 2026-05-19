@@ -141,9 +141,10 @@ _run_features_sync_skill() {
   local current_features=""
   [[ -f .roll/features.md ]] && current_features=$(<.roll/features.md)
   local features_dir_listing
-  features_dir_listing=$(printf '%s\n' .roll/features/*.md \
+  features_dir_listing=$(find .roll/features -mindepth 2 -name '*.md' 2>/dev/null \
     | sed 's|^.roll/features/||' \
-    | grep -vE '(-plan\.md$|^refactor-log\.md$)' || true)
+    | grep -vE '(-plan\.md$|/refactor-log\.md$)' \
+    | sort || true)
 
   local prompt="${skill_content}
 

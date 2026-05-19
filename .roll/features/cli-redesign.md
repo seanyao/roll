@@ -320,7 +320,7 @@
 - [ ] token 列从此有真实数字（用 k/m/b 计量）
 - [ ] rollup（今日 / 昨日 / 前天）的 cost / tokens 都从事件流加总
 - [ ] 老数据（detail 是字符串）保持兼容：cost / tokens 显示 `—`，但不破坏其他列
-- [ ] **cycle row 新增 model 列**，显示每轮 cycle 使用的模型短名（`opus` / `sonnet` / `haiku`），未知模型显示 `?`；位置在 cost 列前；窄屏自动隐藏。这是 cost 列的语境注释——一眼看清"今日 91M tok / 昨日 148M tok 但今日 cost 反而高"是因为 model 换了
+- [ ] **cycle row 新增 model 列**，显示每轮 cycle 使用的模型名 + 版本（`opus-4-7` / `sonnet-4-6` / `haiku-4-5`），未知模型显示 `?`；位置在 cost 列前；窄屏自动隐藏。版本号必须带上——同系列跨版本（如 sonnet-4-5 → 4-6）单价 / 行为都会变，缺版本号就丢了对账依据。这是 cost 列的语境注释：一眼看清"今日 91M tok / 昨日 148M tok 但今日 cost 反而高"是因为 model 换了
 
 **Files:**
 - `lib/model_prices.py`（新建：单价表 + compute_list_cost + 模型短名映射）

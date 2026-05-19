@@ -82,3 +82,27 @@ teardown() { unit_teardown_cd; }
   awk '/_CYCLE_TIMED_OUT.*-eq 1/{f=1} f{print} /^[[:space:]]*}[[:space:]]*$/&&f{c++; if(c==1)exit}' "$_inner" \
     | grep -qE 'runs\.jsonl'
 }
+
+# --- IDEA-028 / FIX-066: EXIT-trap fallback for unexpected abort paths ---
+
+@test "FIX-066: EXIT trap emits cycle_end aborted when no completion path ran" {
+  # SIGKILL, set -e fire, ALERT-poisoning abort, etc. exit the inner script
+  # without going through any of the publish/merge_back/orphan emit sites.
+  # The EXIT trap must catch this and emit cycle_end + runs.jsonl row so the
+  # dashboard never shows a phantom "still running" cycle.
+  grep -qE 'cycle_end.*"aborted"' "$_inner"
+}
+
+@test "FIX-066: EXIT trap fallback writes runs.jsonl row" {
+  # Pair the cycle_end aborted emit with a runs_append "aborted" so the
+  # runs.jsonl feed also has a terminal row for the aborted cycle.
+  awk '/_CYCLE_END_WRITTEN:-0.*-eq 0/{f=1} f{print} /^[[:space:]]*fi[[:space:]]*$/&&f{exit}' "$_inner" \
+    | grep -qE '_runs_append "aborted"'
+}
+
+@test "FIX-066: each completion path sets _CYCLE_END_WRITTEN=1" {
+  # If a completion path emits cycle_end but doesn't set the flag, the EXIT
+  # trap will double-emit when the script finishes. Verify the flag set is
+  # present (presence is enough — exact count is brittle across refactors).
+  grep -q '_CYCLE_END_WRITTEN=1' "$_inner"
+}

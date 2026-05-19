@@ -4,7 +4,7 @@ set -euo pipefail
 # Roll — AI Agent Convention Manager
 # Single source of truth for how all AI coding agents behave.
 
-VERSION="2026.519.2"
+VERSION="2026.519.3"
 ROLL_HOME="${ROLL_HOME:-${HOME}/.roll}"
 ROLL_CONFIG="${ROLL_HOME}/config.yaml"
 ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
@@ -2343,7 +2343,13 @@ cmd_review_pr() {
   local output
   info "Reviewing PR #${pr_number} with ${agent}..."
   _agent_argv "$agent" text "$prompt" || { err "Unknown agent '${agent}'"; return 1; }
-  output=$("${_AGENT_ARGV[@]}" 2>/dev/null)
+  local _stderr_log; _stderr_log=$(mktemp)
+  output=$("${_AGENT_ARGV[@]}" 2>"$_stderr_log")
+  if [[ -z "$output" && -s "$_stderr_log" ]]; then
+    err "agent ${agent} produced no output. stderr (first 5 lines):"
+    head -5 "$_stderr_log" | sed 's/^/    /' >&2
+  fi
+  rm -f "$_stderr_log"
 
   echo "$output"
 
@@ -2847,6 +2853,11 @@ _HEARTBEAT_PID=\$!
 # next cron tick can proceed. Overridable via env for tests.
 LOOP_CYCLE_TIMEOUT_SEC="\${ROLL_LOOP_CYCLE_TIMEOUT_SEC:-2700}"
 _CYCLE_TIMED_OUT=0
+# IDEA-028 / FIX-066: track whether cycle_end has been emitted via any of the
+# explicit completion paths (publish/merge_back/orphan-push/claude-failed).
+# When zero, the EXIT trap emits a fallback so cycle_start never orphans the
+# dashboard into a phantom "still running" row.
+_CYCLE_END_WRITTEN=0
 _on_sigterm() { _CYCLE_TIMED_OUT=1; }
 trap '_on_sigterm' TERM
 # US-LOOP-005: idempotent runs.jsonl writer shared by normal exit, timeout
@@ -2890,11 +2901,20 @@ _inner_cleanup() {
   for _pid in \$(jobs -p); do kill "\$_pid" 2>/dev/null; done
   if [ "\${_CYCLE_TIMED_OUT:-0}" -eq 1 ]; then
     _loop_event cycle_end "\${CYCLE_ID:-unknown}" "\${BRANCH:-}" "blocked" 2>/dev/null || true
+    _CYCLE_END_WRITTEN=1
     # US-LOOP-005 T9: timeout path must also write runs.jsonl row so dashboard
     # has a terminal record (cycle_end alone is insufficient — runs.jsonl is
     # the canonical history feed for 'roll loop runs').
     _runs_append "failed" 0 "[]" 2>/dev/null || true
     _worktree_alert "cycle \${CYCLE_ID:-unknown}: \${LOOP_CYCLE_TIMEOUT_SEC}s timeout — claude/python killed; in-progress story marked Blocked" 2>/dev/null || true
+  fi
+  # IDEA-028 / FIX-066: catch every other abort (SIGKILL, set -e fire, ALERT
+  # poisoning that bypasses the retry budget, etc.). Without this, cycle_start
+  # is emitted but cycle_end never is, and dashboard renders the cycle as
+  # "still running" until the next successful cycle rolls past it.
+  if [ "\${_CYCLE_END_WRITTEN:-0}" -eq 0 ] && [ -n "\${CYCLE_ID:-}" ]; then
+    _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "aborted" 2>/dev/null || true
+    _runs_append "aborted" 0 "[]" 2>/dev/null || true
   fi
   rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"
   exit "\$_rc"
@@ -3079,13 +3099,13 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
           fi
         fi
         _worktree_cleanup "\$WT" "\$BRANCH"
-        _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true
+        _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true; _CYCLE_END_WRITTEN=1
         echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
       elif [ "\$_publish_status" -eq 2 ]; then
         if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
           _worktree_cleanup "\$WT" "\$BRANCH"
           # US-LOOP-005 T3: gh unavailable + ff merge_back OK → cycle_end done
-          _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true
+          _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true; _CYCLE_END_WRITTEN=1
           echo "[loop] cycle \${CYCLE_ID}: gh unavailable; merged via ff and cleaned up"
         else
           # FIX-039: gh unavailable + merge_back failed — push orphan branch+tag to origin
@@ -3096,12 +3116,12 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
                && git push origin "\$_orphan_tag" 2>/dev/null ); then
             _worktree_cleanup "\$WT" "\$BRANCH"
             # US-LOOP-005 T4: gh unavailable + orphan push OK → cycle_end orphan
-            _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true
+            _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true; _CYCLE_END_WRITTEN=1
             _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
             echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
           else
             # US-LOOP-005 T5: gh unavailable + all failed → cycle_end failed
-            _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true
+            _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
             _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back+push all failed; worktree preserved at \$WT"
             echo "[loop] cycle \${CYCLE_ID}: all publish paths failed; worktree preserved at \$WT"
           fi
@@ -3115,12 +3135,12 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
              && git push origin "\$_orphan_tag" 2>/dev/null ); then
           _worktree_cleanup "\$WT" "\$BRANCH"
           # US-LOOP-005 T6: PR publish failed + orphan push OK → cycle_end orphan
-          _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true
+          _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true; _CYCLE_END_WRITTEN=1
           _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
           echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
         else
           # US-LOOP-005 T7: PR publish failed + orphan push failed → cycle_end failed
-          _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true
+          _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
           _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
           echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
         fi
@@ -3128,7 +3148,7 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
     fi
   else
     # US-LOOP-005 T8: claude session failed after retry budget → cycle_end failed
-    _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true
+    _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
     _worktree_alert "cycle \${CYCLE_ID}: claude exited \$_exit; worktree preserved at \$WT (branch \$BRANCH)"
     echo "[loop] cycle \${CYCLE_ID}: claude failed (exit \$_exit); worktree preserved at \$WT"
   fi

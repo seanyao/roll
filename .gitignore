@@ -42,7 +42,9 @@ npm-debug.log*
 # Local staging clone of roll-meta for cross-repo Phase 2 work
 .roll-meta-remote/
 
-# Project-level per-machine agent preference (written by `roll agent use`).
-# Per-(project, machine) state — must not be tracked. Will migrate to
-# .roll/local.yaml (see REFACTOR in .roll/backlog.md).
+# Legacy project-level per-machine agent preference (written by older
+# `roll agent use`). Current location is `.roll/local.yaml`, already covered
+# by the `.roll/` rule above. Kept here so existing checkouts that still
+# carry `.roll.yaml` don't accidentally push it before the next
+# `roll agent use` migrates the value.
 .roll.yaml

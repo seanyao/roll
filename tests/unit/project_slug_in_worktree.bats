@@ -53,3 +53,14 @@ teardown() {
   local expected; expected=$(_project_slug "/some/project")
   grep -qE "export ROLL_MAIN_SLUG=\"${expected}\"" "$inner"
 }
+
+# FIX-070: worktree-internal helpers (_loop_mark_in_progress / _loop_mark_todo)
+# need to locate the main repo's backlog. Inner script must export
+# ROLL_MAIN_PROJECT so any subshell sourcing bin/roll can find it.
+@test "_write_loop_runner_script: FIX-070 inner script exports ROLL_MAIN_PROJECT with main path" {
+  ROLL_PKG_DIR="${BATS_TEST_DIRNAME}/../.."
+  local script="${TEST_TMP}/run-fix070.sh"
+  _write_loop_runner_script "$script" "/some/main/project" "claude -p hi" "${TEST_TMP}/log" 10 24
+  local inner="${TEST_TMP}/run-fix070-inner.sh"
+  grep -qF 'export ROLL_MAIN_PROJECT="/some/main/project"' "$inner"
+}

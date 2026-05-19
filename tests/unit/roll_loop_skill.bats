@@ -15,7 +15,11 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
 
 @test "roll-loop SKILL.md: Step 3 marks story 🔨 In Progress before invoking executor" {
   grep -qF '🔨 In Progress' "$SKILL_FILE"
-  grep -qE 'chore: mark.*in.progress' "$SKILL_FILE"
+  # FIX-070: the flow used to commit "chore: mark US-XXX in progress" but
+  # that commit was effectively empty because .roll/ is gitignored. Now the
+  # flow calls _loop_mark_in_progress, which writes directly to main's
+  # backlog without going through git.
+  grep -qF '_loop_mark_in_progress' "$SKILL_FILE"
 }
 
 @test "roll-loop SKILL.md: Step 1 recovers orphan 🔨 entries on startup" {

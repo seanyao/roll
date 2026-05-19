@@ -179,7 +179,7 @@
 | FIX-061 | 测试 fixture 缺 `mkdir -p .roll` 导致 CI 红 — Story 5 sed 把 `BACKLOG.md` 等改成 `.roll/backlog.md` 但忘了 `mkdir -p` 父目录，导致 `cmd_init.bats`、`loop_tcr.bats`、`release_planning_marker.bats` 等大量测试 fixture 在 sandbox 中崩；批量补齐 | ✅ Done |
 | FIX-062 | cycle / worktree 命名用 UTC 时间，本地（东八区）用户看到 `cycle-20260519-001104` 时容易误判为"8 小时前的旧 cycle"，实际是 30 分钟前 — 命名/显示应统一到本机时区，避免 UTC 与本地之差造成认知偏差 | ✅ Done |
 | FIX-063 | `roll loop status` 调度时刻显示三处不一致：THREE LAYERS 行 `every :38`、"next run" 显示 `09:48`、launchd plist 实际是 `Minute=11`，真实 cycle 也确实在 `:11` 触发——渲染层读了错误的 config 源 / 错误地推算下次触发时刻，用户对调度时间产生误判 | ✅ Done |
-| FIX-064 | `roll init` 的帮助文字还在说会创建一个 docs 目录，实际创建的是 `.roll/features/`——2.0 已经把 docs 拿掉了，用户照 help 去翻文件会扑空，help 文案得跟实际产物和 README 对齐 | 🔨 In Progress |
+| FIX-064 | `roll init` 的帮助文字还在说会创建一个 docs 目录，实际创建的是 `.roll/features/`——2.0 已经把 docs 拿掉了，用户照 help 去翻文件会扑空，help 文案得跟实际产物和 README 对齐 | ✅ Done |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution

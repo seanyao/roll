@@ -6,6 +6,10 @@
 
 - **`roll init`** — 初始化流程现在显示 6 步编号进度，新建文件用绿色 `+`、合并已有用琥珀 `~`，结尾给三步上手指南 `[loop]`
 
+### Fixed
+
+- **`roll --help` 中 `init` 描述** — 文案从 `+ docs/` 改为 `+ .roll/features/`，对齐 2.0 实际产物和 README；v2 (`lib/roll-help.py`) 与 legacy (`bin/roll`) 两份 help 同步修正 `[FIX-064]`
+
 ## v2026.519.1
 
 ### Major（大版本重构）

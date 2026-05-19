@@ -1,6 +1,7 @@
 # Loop Shared-State Isolation Contract
 
 > Origin: FIX-065 根因分析 — 2026-05-19 那次 cycle 跑 FIX-064 时被自己写的测试吓停。
+> 更广视角参见 [loop-architecture-lessons](../../design/loop-architecture-lessons.md) — 同期复盘 /goal 与 ralph-loop 对 roll-loop 的整体启示。
 
 ## 触发事件
 

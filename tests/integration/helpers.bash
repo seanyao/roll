@@ -6,6 +6,12 @@
 # Call in setup() of each integration test file.
 integration_setup() {
   TEST_TMP="$(mktemp -d)"
+  # FIX-065: pin _SHARED_ROOT to TEST_TMP so every subshell that sources
+  # bin/roll inherits the same loop state path. The auto-sandbox in bin/roll
+  # falls back to a per-PID dir which fragments state across subshells; pinning
+  # it here keeps alert/mute/state files visible to follow-up `roll` calls.
+  export _SHARED_ROOT="${TEST_TMP}/.shared/roll"
+  mkdir -p "${_SHARED_ROOT}/loop"
   export ROLL_HOME="${TEST_TMP}/.roll"
   export ROLL_CONFIG="${ROLL_HOME}/config.yaml"
   export ROLL_GLOBAL="${ROLL_HOME}/conventions/global"

@@ -2564,6 +2564,13 @@ _config_read_int() {
   if [[ "$val" =~ ^[0-9]+$ ]]; then echo "$val"; else echo "$default"; fi
 }
 
+# REFACTOR-031: cross-platform file mtime in epoch seconds.
+# Replaces the `stat -c %Y ... || stat -f %m ... || echo 0` pattern that was
+# copy-pasted in four places (dashboard age widgets, briefs, dream, peer).
+_file_mtime() {
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
+}
+
 # Derive a minute in [1,55] from project path hash + offset so different projects
 # and different services within a project don't fire at the same time.
 # Offsets used: loop=0, dream=2, brief=4 → always three distinct values (2<55).

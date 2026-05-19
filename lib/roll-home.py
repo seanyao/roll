@@ -116,6 +116,26 @@ def _launchd_svc_state(service: str, slug: str) -> str:
     except Exception:
         return "installed-off"
 
+def _read_plist_schedule(service: str, slug: str) -> Optional[Dict[str, int]]:
+    """FIX-063: read actual Minute/Hour from launchd plist (truth source).
+    Returns {'minute': N, 'hour': N|None} or None if plist missing.
+    Dashboard must reflect what launchd actually fires, not a hardcoded default.
+    """
+    label = f"com.roll.{service}.{slug}"
+    plist = Path(os.path.expanduser("~/Library/LaunchAgents")) / f"{label}.plist"
+    if not plist.exists():
+        return None
+    try:
+        text = plist.read_text(errors="ignore")
+    except Exception:
+        return None
+    # Parse <key>Minute</key><integer>N</integer> (and Hour)
+    m = re.search(r"<key>Minute</key>\s*<integer>(\d+)</integer>", text)
+    h = re.search(r"<key>Hour</key>\s*<integer>(\d+)</integer>", text)
+    if not m:
+        return None
+    return {"minute": int(m.group(1)), "hour": int(h.group(1)) if h else None}
+
 def _dream_last_hours() -> Optional[int]:
     log = _shared_root() / "dream" / "log.md"
     if not log.exists():
@@ -469,12 +489,12 @@ def main() -> None:
             timestamp      = datetime.now().strftime("%H:%M"),
             state          = state,
             loop_state     = _launchd_svc_state("loop", slug),
-            loop_minute    = _ci("loop_minute", 38),
+            loop_minute    = (_read_plist_schedule("loop", slug) or {}).get("minute") or _ci("loop_minute", 38),
             loop_active_start = _ci("loop_active_start", 10),
             loop_active_end   = _ci("loop_active_end", 18),
             dream_state    = _launchd_svc_state("dream", slug),
-            dream_hour     = _ci("loop_dream_hour", 3),
-            dream_minute   = _ci("loop_dream_minute", 12),
+            dream_hour     = (_read_plist_schedule("dream", slug) or {}).get("hour") or _ci("loop_dream_hour", 3),
+            dream_minute   = (_read_plist_schedule("dream", slug) or {}).get("minute") or _ci("loop_dream_minute", 12),
             dream_last_hours = _dream_last_hours(),
             refactor_pending = refactor_pending,
             peer_last      = _peer_last(),

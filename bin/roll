@@ -2868,8 +2868,8 @@ export ROLL_MAIN_SLUG="${slug}"
 # Pre-claude: try to create a per-cycle isolated worktree on origin/main.
 # On any failure (no remote, no main, etc.) fall back to running in the
 # project's main tree (degraded — no isolation, like pre-037 behavior).
-CYCLE_ID="\$(date -u +%Y%m%d-%H%M%S)-\$\$"
-CYCLE_START=\$(date -u +%s)
+CYCLE_ID="\$(date +%Y%m%d-%H%M%S)-\$\$"
+CYCLE_START=\$(date +%s)
 WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0

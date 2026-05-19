@@ -701,11 +701,27 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
           c("muted", "       ") +
           c("dim", "more   ") + c("blue", "roll loop --days 7"))
 
+def _read_plist_loop_minute() -> int:
+    """FIX-063: read actual loop Minute from launchd plist (truth source).
+    Falls back to 48 only when plist missing/unparseable.
+    """
+    import re as _re
+    slug = project_slug()
+    plist = Path(os.path.expanduser("~/Library/LaunchAgents")) / f"com.roll.loop.{slug}.plist"
+    if not plist.exists():
+        return 48
+    try:
+        text = plist.read_text(errors="ignore")
+    except Exception:
+        return 48
+    m = _re.search(r"<key>Minute</key>\s*<integer>(\d+)</integer>", text)
+    return int(m.group(1)) if m else 48
+
+
 def _next_cron_hint(state: Dict[str, str], zh: bool = False) -> str:
-    """Best-effort next-cron string. The real schedule lives in launchd/cron;
-    we only have access to last_run here, so we approximate to the next :48."""
+    """Compute next cron fire time from the actual launchd plist Minute (FIX-063)."""
     now = datetime.now().astimezone()
-    minute_target = 48  # bin/roll default; per-project may differ
+    minute_target = _read_plist_loop_minute()
     nxt = now.replace(minute=minute_target, second=0, microsecond=0)
     if nxt <= now:
         nxt += timedelta(hours=1)

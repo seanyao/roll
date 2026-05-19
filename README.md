@@ -7,8 +7,6 @@
  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝
 ```
 
-> _Agents, roll out._
-
 **[中文版 README](README_CN.md)**
 
 [![Website](https://img.shields.io/badge/Website-seanyao.github.io%2Froll-blue)](https://seanyao.github.io/roll/)
@@ -16,68 +14,50 @@
 [![npm version](https://img.shields.io/npm/v/@seanyao/roll.svg)](https://www.npmjs.com/package/@seanyao/roll)
 [![CI](https://github.com/seanyao/roll/actions/workflows/ci.yml/badge.svg)](https://github.com/seanyao/roll/actions/workflows/ci.yml)
 
----
+Roll — a CLI that lets AI agents pick up backlog items and ship them through your normal git + CI workflow. Works with Claude, Cursor, Codex, Kimi, and others.
 
-## What is Roll?
-
-Roll is an autonomous delivery system for software teams — AI agents pick stories from your BACKLOG, execute them with encoded engineering discipline, and ship continuously while you stay focused on what to build next.
-
-**Two core values:**
-1. **Autonomous delivery** — `roll loop on` runs BACKLOG items hourly; Dream (nightly code-health scan) surfaces maintenance tasks; humans retain sole release authority
-2. **Skill-driven execution** — 20+ skills encode TDD, TCR, and INVEST practices as reliable, repeatable workflows any agent can follow
-
-_Works with Claude, Cursor, Codex, or your own agent._
-
-## What's New in 2.0 (May 2026)
-
-Roll 2.0 introduces a **process/product split** to keep open-source projects clean:
-
-- **`.roll/` directory convention** — all process artifacts (backlog, features, briefs, dream logs) move out of root into `.roll/`. User-facing `guide/` and `site/` move up to root. Old `docs/` directory disappears.
-- **`roll migrate`** — one-command migration for projects on pre-2.0 layout. `git mv` preserves history, single atomic commit, three-state idempotent.
-- **`$roll-onboard`** — interactive skill for adopting Roll on legacy codebases without rewrites. AI reads your code, asks 9 questions in ≤ 3 minutes, produces a plan; `roll init --apply` executes it.
-- **Three adoption patterns** — `seed` (new project), `graft` (legacy, non-invasive), `replant` (legacy, clean rebuild). See [guide/en/patterns/](guide/en/patterns/).
-
-## Evolution
-
-Roll didn't start as a framework. It started as a question: *what if the AI didn't just write code, but actually shipped it?*
-
-Early versions just pushed engineering conventions to whichever AI tool you were running. Then came multi-agent support — Kimi, DeepSeek, Codex, Trae — and `roll-peer`, which let one AI challenge another's decisions before anything landed on `main`.
-
-The real shift was `roll loop`: stories running back-to-back without human prompting, `roll-.dream` filing its own refactor tickets after nightly scans, the system generating its own work queue. What followed was building enough trust to leave it running overnight — worktree isolation, CI + AI review double gates, real-time visibility into what the agent was actually doing.
-
-The goal from here: full delivery, end to end — with humans on the loop, not in it.
-
----
-
-## Quick Start (30 seconds)
+## Install
 
 ```bash
 npm install -g @seanyao/roll
-roll setup          # distribute conventions to all AI clients
-cd my-project
-roll init           # create AGENTS.md + .roll/backlog.md + .roll/features/
-roll loop on        # optional: let the agent work unattended
+roll setup
 ```
 
-**Requirements:** bash 4+, Node.js 16+
+Requirements: bash 4+, Node.js 16+.
 
----
+## Use
 
-## Adoption Paths
+```bash
+cd your-project
+roll init           # set up Roll here
+roll loop on        # let AI work through the backlog (optional)
+```
 
-Three ways to bring Roll into a project. Not sure which fits? Just run `roll init` — it detects legacy code and routes you to `$roll-onboard` automatically.
+`roll init` detects legacy code and routes you to `$roll-onboard` when appropriate.
 
-| Path | When to use | How to start |
-|------|-------------|--------------|
-| **Seed** | Brand-new project, starting from zero | `roll init` (the Quick Start path above) |
-| **Graft** | Existing codebase, keep current workflow intact | `roll init` → AI prompts `$roll-onboard` → 9 questions in ≤ 3 min → `roll init --apply` |
-| **Replant** | Existing codebase, ready to realign on Roll conventions | Same as Graft, choose "clean rebuild" during onboarding |
+## Commands
 
-Details: [seed](guide/en/patterns/seed-pattern.md) · [graft](guide/en/patterns/graft-pattern.md) · [replant](guide/en/patterns/replant-pattern.md)
+| Command | Description |
+|---------|-------------|
+| **Autonomy · daily use** | |
+| `roll loop <on\|off\|now\|status\|monitor>` | Manage the autonomous BACKLOG executor |
+| `roll brief` | Show latest owner brief |
+| `roll backlog [block\|defer\|lint\|…]` | View and manage pending tasks |
+| `roll peer` | Cross-agent negotiation & review |
+| `roll alert` | View / clear loop alerts |
+| **Project · per repo** | |
+| `roll init` | Set up Roll in this project |
+| `roll status` | Show current state and drift |
+| `roll agent [use <name>]` | Per-project agent selection |
+| `roll ci [--wait]` | Show or wait for current commit's CI status |
+| `roll release` | Run the release script (human-only) |
+| `roll review-pr <number>` | AI-powered code review for a PR |
+| **Machine · global** | |
+| `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
+| `roll update` | Upgrade to latest + re-sync |
+| `roll version` | Print installed roll version |
 
----
-
-## Documentation Index
+## Documentation
 
 | Topic | English | 中文 |
 |-------|---------|------|
@@ -90,49 +70,20 @@ Details: [seed](guide/en/patterns/seed-pattern.md) · [graft](guide/en/patterns/
 | Skill selection guide | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
 | FAQ (troubleshooting) | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
 | Adoption patterns | [guide/en/patterns/](guide/en/patterns/) | [guide/zh/patterns/](guide/zh/patterns/) |
-| Engineering common sense | [practices/engineering-common-sense.md](guide/en/practices/engineering-common-sense.md) | — |
-
----
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| **Autonomy · daily use** | |
-| `roll loop <on\|off\|now\|status\|monitor>` | 🤖 Manage the autonomous BACKLOG executor |
-| `roll brief` | 🤖 Show latest owner brief |
-| `roll backlog [block\|defer\|…]` | View and manage pending tasks |
-| `roll peer` | 🤖 Cross-agent negotiation & review |
-| `roll alert` | View / clear loop alerts |
-| **Project · per repo** | |
-| `roll init` | Create AGENTS.md + .roll/backlog.md + .roll/features/ |
-| `roll status` | Show current state and drift |
-| `roll agent [use <name>]` | Per-project agent selection (Claude / Cursor / Codex / Kimi / …) |
-| `roll ci [--wait]` | Show or wait for current commit's CI status |
-| `roll release` | 🤖 Run the release script (human-only) |
-| `roll review-pr <number>` | 🤖 AI-powered code review for a PR |
-| **Machine · global** | |
-| `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
-| `roll update` | Upgrade to latest + re-sync |
-| `roll version` | Print installed roll version |
-
----
 
 ## Contributing
 
-PRs welcome. Keep them focused on one thing. For larger changes, open an issue first.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, test setup, and PR conventions.
 
-1. `git clone https://github.com/seanyao/roll.git && cd roll && ./install.sh`
-2. Make changes with bats tests (`tests/`)
-3. Run `npm test` before pushing
+## Security
 
----
+See [SECURITY.md](SECURITY.md). Please report vulnerabilities privately, not through public issues.
 
 ## Acknowledgments
 
 - **[khazix-skills](https://github.com/KKKKhazix/khazix-skills)** by Digital Life Khazix — HV Analysis framework used by `$roll-research`, MIT License.
 - **[superpowers](https://github.com/obra/superpowers)** by Jesse Vincent — composable skills library that inspired several Roll workflow patterns.
 
----
+## License
 
-MIT License
+[MIT](LICENSE)

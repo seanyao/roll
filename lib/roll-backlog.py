@@ -244,7 +244,7 @@ def _write_demo(path: str) -> None:
 ### Feature: autonomous-evolution
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-AUTO-042](.roll/features/autonomous-evolution.md) | Loop cost telemetry — write model and token data per cycle | 📋 Todo |
+| [US-AUTO-042](.roll/features/autonomous-evolution/autonomous-evolution.md) | Loop cost telemetry — write model and token data per cycle | 📋 Todo |
 
 ## ♻️ Refactor
 | ID | Description | Status |

@@ -4936,7 +4936,9 @@ _loop_is_doc_only_change() {
   local changed
   changed=$(git diff --name-only origin/main HEAD 2>/dev/null) || return 1
   [ -z "$changed" ] && return 1
-  echo "$changed" | grep -qvE '^(BACKLOG\.md|CHANGELOG\.md|PROPOSALS\.md|docs/|\.claude/)' && return 1
+  # Post-Phase-1: process artifacts moved into .roll/; user-facing docs at guide/ + site/.
+  # Legacy paths (BACKLOG.md, PROPOSALS.md, docs/) kept as fallback for pre-2.0 projects.
+  echo "$changed" | grep -qvE '^(\.roll/|CHANGELOG\.md|guide/|site/|\.claude/|BACKLOG\.md|PROPOSALS\.md|docs/)' && return 1
   return 0
 }
 

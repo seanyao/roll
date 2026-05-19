@@ -83,6 +83,7 @@ teardown() {
 
 @test "_loop_check_depends_on: defaults to ./.roll/backlog.md when backlog arg omitted" {
   # Use the fixture backlog as cwd's .roll/backlog.md
+  mkdir -p "${TEST_TMP}/.roll"
   cp "$_backlog" "${TEST_TMP}/.roll/backlog.md"
   cd "$TEST_TMP"
   run _loop_check_depends_on "US-AUTO-100"

@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>ROLL — AI Agent Engineering Delivery Framework</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Noto+Sans+SC:wght@300;400;500;600;700;900&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --bg-card: #12121a;
+    --bg-card-hover: #1a1a28;
+    --bg-control: rgba(18,18,26,0.92);
+    --text: #e8e8ef;
+    --text-dim: #8888a0;
+    --text-bright: #ffffff;
+    --accent: #6366f1;
+    --accent-light: #818cf8;
+    --green: #22c55e;
+    --green-text: #4ade80;
+    --orange: #f59e0b;
+    --orange-text: #fbbf24;
+    --red: #ef4444;
+    --red-text: #f87171;
+    --cyan: #06b6d4;
+    --cyan-text: #22d3ee;
+    --border: rgba(255,255,255,0.06);
+    --border-strong: rgba(255,255,255,0.12);
+    --shadow: 0 4px 24px rgba(0,0,0,0.3);
+    --radius: 16px;
+  }
+
+  [data-theme="light"] {
+    --bg: #fafafc;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f3f4f8;
+    --bg-control: rgba(255,255,255,0.95);
+    --text: #1f2937;
+    --text-dim: #6b7280;
+    --text-bright: #0a0a0f;
+    --accent: #6366f1;
+    --accent-light: #4f46e5;
+    --green: #16a34a;
+    --green-text: #15803d;
+    --orange: #d97706;
+    --orange-text: #b45309;
+    --red: #dc2626;
+    --red-text: #b91c1c;
+    --cyan: #0891b2;
+    --cyan-text: #0e7490;
+    --border: rgba(15,23,42,0.08);
+    --border-strong: rgba(15,23,42,0.14);
+    --shadow: 0 4px 24px rgba(15,23,42,0.06);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    transition: background 0.3s ease, color 0.3s ease;
+  }
+
+  /* Language switching: only show the active language */
+  [data-lang="en"] .lang-zh { display: none !important; }
+  [data-lang="zh"] .lang-en { display: none !important; }
+
+  #progress-bar {
+    position: fixed; top: 0; left: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--cyan));
+    z-index: 1000; transition: width 0.4s ease;
+  }
+
+  .slides-container { position: relative; width: 100vw; height: 100vh; }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    padding: 64px 80px 96px;
+    opacity: 0; transform: translateY(30px);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    pointer-events: none; overflow-y: auto;
+  }
+  .slide.active { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .slide.exit-up { opacity: 0; transform: translateY(-30px); }
+
+  .slide-number {
+    position: absolute; top: 28px; right: 24px;
+    font-size: 13px; color: var(--text-dim); font-weight: 500;
+  }
+
+  .tag {
+    display: inline-block; padding: 5px 14px;
+    background: rgba(99,102,241,0.12); color: var(--accent-light);
+    border-radius: 20px; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 16px;
+  }
+  [data-theme="light"] .tag { background: rgba(99,102,241,0.1); }
+
+  h1 {
+    font-size: 52px; font-weight: 800; line-height: 1.15;
+    color: var(--text-bright); text-align: center; margin-bottom: 12px;
+  }
+  h1 .gradient {
+    background: linear-gradient(135deg, var(--accent-light), var(--cyan));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  h2 {
+    font-size: 34px; font-weight: 700; line-height: 1.25;
+    color: var(--text-bright); margin-bottom: 12px; text-align: center;
+  }
+  h3 { font-size: 18px; font-weight: 600; color: var(--text-bright); margin-bottom: 6px; }
+  strong { color: var(--text-bright); }
+
+  .subtitle {
+    font-size: 18px; color: var(--text-dim); line-height: 1.6;
+    text-align: center; max-width: 720px;
+  }
+  .section-desc {
+    font-size: 15px; color: var(--text-dim); line-height: 1.7;
+    max-width: 820px; margin-bottom: 24px; text-align: center;
+  }
+
+  .cards { display: grid; gap: 14px; width: 100%; max-width: 1100px; }
+  .cards-2 { grid-template-columns: 1fr 1fr; }
+  .cards-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .cards-4 { grid-template-columns: repeat(4, 1fr); }
+
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 20px;
+    transition: all 0.3s ease;
+    box-shadow: var(--shadow);
+  }
+  .card:hover { background: var(--bg-card-hover); transform: translateY(-2px); }
+  .card p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+  .card .small { font-size: 11px; }
+
+  .metric-row {
+    display: flex; gap: 14px; width: 100%; max-width: 1000px;
+    justify-content: center; margin-top: 8px;
+  }
+  .metric {
+    text-align: center; padding: 20px 14px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); flex: 1;
+    box-shadow: var(--shadow);
+  }
+  .metric .number { font-size: 32px; font-weight: 800; line-height: 1; margin-bottom: 6px; }
+  .metric .label { font-size: 12px; color: var(--text-dim); font-weight: 500; }
+
+  .compare {
+    display: grid; grid-template-columns: 1fr 50px 1fr;
+    gap: 0; width: 100%; max-width: 1000px; align-items: start;
+  }
+  .compare-col { padding: 22px 20px; border-radius: var(--radius); }
+  .compare-before { background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.18); }
+  .compare-after { background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.18); }
+  [data-theme="light"] .compare-before { background: rgba(239,68,68,0.04); }
+  [data-theme="light"] .compare-after { background: rgba(34,197,94,0.04); }
+  .compare-arrow {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; color: var(--text-dim); padding-top: 36px;
+  }
+  .compare-col h3 { margin-bottom: 14px; font-size: 15px; }
+  .compare-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    margin-bottom: 10px; font-size: 13px; line-height: 1.5; color: var(--text);
+  }
+  .compare-item .icon { flex-shrink: 0; font-size: 13px; margin-top: 2px; }
+
+  .pipeline-bar {
+    display: flex; gap: 4px; width: 100%; max-width: 1000px; margin-top: 8px;
+  }
+  .pipe-stage {
+    flex: 1; text-align: center; padding: 14px 8px; border-radius: 12px;
+  }
+  .pipe-stage h4 { font-size: 16px; font-weight: 700; }
+  .pipe-stage p { font-size: 11px; color: var(--text-dim); margin-top: 4px; line-height: 1.4; }
+  .pipe-idea, .pipe-backlog { background: rgba(99,102,241,0.08); border: 1.5px solid rgba(99,102,241,0.3); }
+  .pipe-idea h4, .pipe-backlog h4 { color: var(--accent-light); }
+  .pipe-build { background: rgba(34,197,94,0.08); border: 1.5px solid rgba(34,197,94,0.3); }
+  .pipe-build h4 { color: var(--green-text); }
+  .pipe-verify { background: rgba(245,158,11,0.08); border: 1.5px solid rgba(245,158,11,0.3); }
+  .pipe-verify h4 { color: var(--orange-text); }
+  .pipe-release { background: rgba(6,182,212,0.08); border: 1.5px solid rgba(6,182,212,0.3); }
+  .pipe-release h4 { color: var(--cyan-text); }
+  .pipe-arrow { display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--text-dim); padding: 0 2px; }
+
+  /* Human-AI bar */
+  .hai-bar { display: flex; gap: 4px; width: 100%; max-width: 1000px; margin-top: 8px; }
+  .hai-zone { text-align: center; padding: 14px 10px; border-radius: 12px; }
+  .hai-zone .emoji { font-size: 20px; }
+  .hai-zone h4 { font-size: 14px; font-weight: 700; margin-top: 4px; }
+  .hai-zone p { font-size: 11px; color: var(--text-dim); margin-top: 4px; line-height: 1.5; }
+  .hai-human { flex: 2; background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.18); }
+  .hai-human h4 { color: var(--accent-light); }
+  .hai-ai { flex: 2; background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.18); }
+  .hai-ai h4 { color: var(--green-text); }
+  .hai-push { flex: 1; background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.18); }
+  .hai-push h4 { color: var(--orange-text); }
+
+  .quote-block {
+    border-left: 3px solid var(--accent);
+    padding: 14px 22px; margin: 14px 0;
+    background: rgba(99,102,241,0.06);
+    border-radius: 0 10px 10px 0; max-width: 720px;
+  }
+  .quote-block p { font-size: 15px; font-style: italic; color: var(--text); line-height: 1.6; }
+
+  .highlight-box {
+    background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.1));
+    border: 1px solid rgba(99,102,241,0.2);
+    border-radius: var(--radius); padding: 20px 24px; max-width: 820px; text-align: center;
+  }
+  .highlight-box p { font-size: 14px; color: var(--text); line-height: 1.6; }
+
+  .analogy {
+    background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.18);
+    border-radius: var(--radius); padding: 14px 20px; max-width: 820px; margin-top: 14px;
+  }
+  .analogy-label {
+    font-size: 11px; font-weight: 700; color: var(--orange-text);
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 5px;
+  }
+  .analogy p { font-size: 13px; line-height: 1.6; color: var(--text); }
+
+  .flow-row {
+    display: flex; align-items: center; gap: 8px;
+    flex-wrap: wrap; justify-content: center;
+  }
+  .flow-step {
+    padding: 10px 16px; border-radius: 10px;
+    font-size: 13px; font-weight: 600;
+  }
+  .flow-arrow { font-size: 16px; color: var(--text-dim); }
+  .flow-branch { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+
+  .timeline {
+    width: 100%; max-width: 880px; position: relative; padding-left: 36px;
+  }
+  .timeline::before {
+    content: ''; position: absolute; left: 12px; top: 0; bottom: 0;
+    width: 2px; background: var(--border-strong);
+  }
+  .timeline-item { position: relative; margin-bottom: 14px; padding-left: 24px; }
+  .timeline-item::before {
+    content: ''; position: absolute; left: -30px; top: 5px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 10px rgba(99,102,241,0.3);
+  }
+  .timeline-item h4 { font-size: 14px; font-weight: 700; color: var(--text-bright); margin-bottom: 3px; }
+  .timeline-item p { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+
+  /* Skill table */
+  .skill-table {
+    width: 100%; max-width: 1060px; border-collapse: collapse; margin-top: 8px;
+  }
+  .skill-table th {
+    text-align: left; font-size: 11px; font-weight: 700; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 6px 10px; border-bottom: 1px solid var(--border-strong);
+  }
+  .skill-table td {
+    padding: 7px 10px; font-size: 12.5px; color: var(--text);
+    border-bottom: 1px solid var(--border); vertical-align: top;
+  }
+  [data-theme="dark"] .skill-table tr:hover td { background: rgba(255,255,255,0.02); }
+  [data-theme="light"] .skill-table tr:hover td { background: rgba(15,23,42,0.02); }
+  .skill-name {
+    font-family: 'SF Mono', 'Fira Code', monospace; font-weight: 600;
+    font-size: 12px; white-space: nowrap;
+  }
+  .phase-tag {
+    font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 600;
+    display: inline-block;
+  }
+  .phase-design { background: rgba(99,102,241,0.15); color: var(--accent-light); }
+  .phase-build { background: rgba(34,197,94,0.15); color: var(--green-text); }
+  .phase-check { background: rgba(245,158,11,0.15); color: var(--orange-text); }
+  .phase-auto { background: rgba(6,182,212,0.15); color: var(--cyan-text); }
+  .phase-support { background: rgba(255,255,255,0.06); color: var(--text-dim); }
+  [data-theme="light"] .phase-support { background: rgba(15,23,42,0.06); }
+
+  /* Autonomous layers */
+  .auto-layers {
+    display: flex; gap: 12px; width: 100%; max-width: 1000px; margin-top: 8px;
+  }
+  .auto-layer {
+    flex: 1; text-align: center; padding: 18px 14px; border-radius: var(--radius);
+    background: var(--bg-card); border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+  .auto-layer .al-icon { font-size: 28px; }
+  .auto-layer h4 { font-size: 14px; font-weight: 700; color: var(--text-bright); margin-top: 6px; }
+  .auto-layer p { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
+  .auto-layer .al-skills {
+    font-size: 10px; color: var(--text-dim); margin-top: 8px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  .tree {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px; line-height: 1.7; color: var(--text);
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 24px;
+    max-width: 720px; width: 100%;
+    box-shadow: var(--shadow);
+  }
+  .tree .comment { color: var(--text-dim); }
+  .tree .file { color: var(--cyan-text); }
+  .tree .dir { color: var(--accent-light); }
+
+  .skill-tag {
+    font-size: 11px; padding: 4px 8px; border-radius: 6px;
+    font-weight: 600; font-family: 'SF Mono', 'Fira Code', monospace;
+    background: rgba(99,102,241,0.15); color: var(--accent-light);
+  }
+
+  /* Loop overview pills */
+  .loops-row {
+    display: flex; gap: 4px; width: 100%; max-width: 1000px; margin-top: 12px;
+  }
+  .loop-pill {
+    flex: 1; text-align: center; padding: 8px 6px; border-radius: 8px;
+    border: 1px dashed;
+  }
+  .loop-pill.la { border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.04); }
+  .loop-pill.lb { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.04); }
+  .loop-pill.lc { border-color: rgba(245,158,11,0.4); background: rgba(245,158,11,0.04); }
+  .loop-pill h5 { font-size: 12px; font-weight: 700; }
+  .loop-pill.la h5 { color: var(--accent-light); }
+  .loop-pill.lb h5 { color: var(--green-text); }
+  .loop-pill.lc h5 { color: var(--orange-text); }
+  .loop-pill p { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+  /* Controls (theme + lang) */
+  .controls {
+    position: fixed; top: 18px; left: 18px;
+    display: flex; gap: 8px; z-index: 200;
+  }
+  .ctrl-btn {
+    background: var(--bg-control); backdrop-filter: blur(20px);
+    border: 1px solid var(--border-strong);
+    color: var(--text); font-size: 12px; font-weight: 600;
+    padding: 8px 14px; border-radius: 24px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    transition: all 0.2s;
+    min-height: 36px;
+  }
+  .ctrl-btn:hover { transform: translateY(-1px); border-color: var(--accent-light); }
+  .ctrl-btn svg { width: 14px; height: 14px; }
+  .ctrl-btn .label { font-size: 12px; }
+
+  /* Nav */
+  .nav {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px; z-index: 100;
+    background: var(--bg-control); backdrop-filter: blur(20px);
+    padding: 8px 18px; border-radius: 40px; border: 1px solid var(--border-strong);
+  }
+  .nav-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(127,127,127,0.08); border: 1px solid var(--border-strong);
+    color: var(--text); font-size: 18px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+  }
+  .nav-btn:hover { background: rgba(127,127,127,0.16); }
+  .nav-btn:disabled { opacity: 0.3; cursor: default; }
+  .nav-info { font-size: 12px; color: var(--text-dim); font-weight: 500; min-width: 50px; text-align: center; }
+
+  .key-hint {
+    position: fixed; bottom: 32px; right: 24px;
+    font-size: 11px; color: var(--text-dim); display: flex; gap: 10px; z-index: 100;
+  }
+  .key-hint kbd {
+    background: rgba(127,127,127,0.1); border: 1px solid var(--border-strong);
+    padding: 1px 6px; border-radius: 3px; font-family: inherit;
+  }
+
+  .fade-in { opacity: 0; transform: translateY(16px); }
+  .slide.active .fade-in { animation: fadeUp 0.5s ease forwards; }
+  .slide.active .fade-in:nth-child(2) { animation-delay: 0.06s; }
+  .slide.active .fade-in:nth-child(3) { animation-delay: 0.12s; }
+  .slide.active .fade-in:nth-child(4) { animation-delay: 0.18s; }
+  .slide.active .fade-in:nth-child(5) { animation-delay: 0.24s; }
+  .slide.active .fade-in:nth-child(6) { animation-delay: 0.30s; }
+  @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+  .slide::-webkit-scrollbar { width: 4px; }
+  .slide::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+
+  /* Mobile adaptation */
+  @media (max-width: 900px) {
+    .slide { padding: 64px 18px 110px; justify-content: flex-start; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 22px; line-height: 1.3; }
+    h3 { font-size: 15px; }
+    .subtitle { font-size: 15px; }
+    .section-desc { font-size: 13px; margin-bottom: 16px; }
+    .tag { font-size: 11px; padding: 4px 11px; margin-bottom: 12px; }
+    .cards-2, .cards-3, .cards-4 { grid-template-columns: 1fr; }
+    .compare { grid-template-columns: 1fr; gap: 12px; }
+    .compare-arrow { transform: rotate(90deg); padding: 0; }
+    .pipeline-bar { flex-direction: column; }
+    .pipe-arrow { transform: rotate(90deg); padding: 4px 0; }
+    .hai-bar { flex-direction: column; }
+    .auto-layers { flex-direction: column; }
+    .loops-row { flex-direction: column; }
+    .metric-row { flex-direction: column; }
+    .timeline { padding-left: 28px; }
+    .timeline-item { padding-left: 16px; }
+    .skill-table { font-size: 11px; }
+    .skill-table th:nth-child(2), .skill-table td:nth-child(2) { display: none; }
+    .slide-number { top: 16px; right: 16px; font-size: 11px; }
+    .controls { top: 12px; left: 12px; gap: 6px; }
+    .ctrl-btn { padding: 6px 10px; font-size: 11px; min-height: 32px; }
+    .ctrl-btn .label { display: none; }
+    .key-hint { display: none; }
+    .nav { bottom: 16px; padding: 6px 14px; }
+    .nav-btn { width: 32px; height: 32px; font-size: 16px; }
+    .tree { font-size: 11px; padding: 14px 16px; overflow-x: auto; white-space: pre; }
+    .quote-block { padding: 12px 16px; }
+    .quote-block p { font-size: 13px; }
+    .highlight-box { padding: 14px 16px; }
+    .highlight-box p { font-size: 13px; }
+    .flow-step { font-size: 12px; padding: 8px 12px; }
+    .auto-layer { padding: 14px 12px; }
+    .auto-layer .al-icon { font-size: 24px; }
+    .card { padding: 16px; }
+  }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 26px; }
+    h2 { font-size: 19px; }
+    .slide { padding: 60px 14px 100px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="progress-bar"></div>
+
+<!-- Controls -->
+<div class="controls">
+  <button class="ctrl-btn" id="btn-theme" onclick="toggleTheme()" aria-label="Toggle theme">
+    <span id="theme-icon">🌙</span>
+    <span class="label" id="theme-label">Dark</span>
+  </button>
+  <button class="ctrl-btn" id="btn-lang" onclick="toggleLang()" aria-label="Toggle language">
+    <span>🌐</span>
+    <span class="label" id="lang-label">EN</span>
+  </button>
+</div>
+
+<div class="slides-container" id="slides">
+
+<!-- 0: Cover -->
+<div class="slide active" data-slide="0">
+  <div class="fade-in" style="margin-bottom: 16px;">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="60 40 280 140" width="280" height="140">
+      <text x="200" y="130" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="96" font-weight="300" letter-spacing="-4" fill="currentColor" text-anchor="middle">roll</text>
+      <text x="200" y="168" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="13" font-weight="300" letter-spacing="1" fill="var(--text-dim)" text-anchor="middle">it just works.</text>
+    </svg>
+  </div>
+  <p class="subtitle fade-in" style="font-size: 22px; color: var(--text); font-weight: 500; margin-bottom: 6px;">
+    <span class="lang-en">AI Agent Engineering Delivery Framework</span>
+    <span class="lang-zh">AI Agent 工程化交付框架</span>
+  </p>
+  <p class="subtitle fade-in" style="font-size: 15px;">
+    <span class="lang-en">Roll out features with AI agents — move fast, no sprints.</span>
+    <span class="lang-zh">用 AI Agent 把功能滚出来 — 快速交付，无须排迭代。</span>
+  </p>
+  <div class="fade-in" style="margin-top: 36px;">
+    <p style="font-size: 12px; color: var(--text-dim);">
+      <span class="lang-en">@seanyao/roll · 2026</span>
+      <span class="lang-zh">@seanyao/roll · 2026</span>
+    </p>
+  </div>
+</div>
+
+<!-- 1: Context -->
+<div class="slide" data-slide="1">
+  <span class="tag fade-in"><span class="lang-en">Context</span><span class="lang-zh">背景</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">A Shift Is Happening</span>
+    <span class="lang-zh">一场变化正在发生</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">AI coding tools have evolved from "auto-completing a few lines" to "delivering whole features." The developer's role is shifting from <strong>writing code</strong> to <strong>directing AI</strong>.</span>
+    <span class="lang-zh">AI 编程工具已经从「自动补几行」演化到「交付整个功能」。开发者的角色正在从<strong>写代码</strong>转向<strong>指挥 AI</strong>。</span>
+  </p>
+  <div class="cards cards-2 fade-in" style="margin-top: 8px;">
+    <div class="card">
+      <h3 style="font-size:16px;">
+        <span class="lang-en">Before: Humans Write Code</span>
+        <span class="lang-zh">从前：人写代码</span>
+      </h3>
+      <p>
+        <span class="lang-en">Developers write every line themselves. Quality depends on individual skill. Companies constrain people through <strong>architecture standards, code reviews, QA processes</strong>.</span>
+        <span class="lang-zh">每一行都是人写的。质量取决于个人水平。公司靠<strong>架构规范、代码评审、QA 流程</strong>来约束人。</span>
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="font-size:16px;">
+        <span class="lang-en">Now: AI Writes Code, Humans Decide</span>
+        <span class="lang-zh">现在：AI 写代码，人做决策</span>
+      </h3>
+      <p>
+        <span class="lang-en">AI handles the actual coding. With the same tool and the same model, <strong>different people get dramatically different results</strong>.</span>
+        <span class="lang-zh">AI 负责实际编码。同一工具、同一模型，<strong>不同的人拿到天差地别的结果</strong>。</span>
+      </p>
+    </div>
+  </div>
+  <div class="quote-block fade-in" style="margin-top: 16px;">
+    <p>
+      <span class="lang-en">The problem isn't "which AI tool to use" — just pick one and standardize. The real question is: <strong>why does the same tool produce great results for some and garbage for others?</strong></span>
+      <span class="lang-zh">问题不在「该用哪款 AI 工具」——选一个并统一即可。真正的问题是：<strong>同一个工具，为什么有人产出精品，有人产出垃圾？</strong></span>
+    </p>
+  </div>
+  <span class="slide-number">01 / 18</span>
+</div>
+
+<!-- 2: Core problem -->
+<div class="slide" data-slide="2">
+  <span class="tag fade-in"><span class="lang-en">Core Problem</span><span class="lang-zh">核心问题</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">The Constraint System Hasn't Caught Up</span>
+    <span class="lang-zh">约束体系没跟上</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">We used to have an entire system to constrain <em>people</em> — architecture, processes, reviews. AI is the primary executor now, but <strong>the constraint system for AI is almost nonexistent</strong>.</span>
+    <span class="lang-zh">过去整套体系都在约束<em>人</em>——架构、流程、评审。现在 AI 是主要执行者，但<strong>面向 AI 的约束体系几乎是空白</strong>。</span>
+  </p>
+  <div class="cards cards-2 fade-in" style="margin-top: 8px;">
+    <div class="card" style="border-left: 3px solid var(--accent-light);">
+      <h3 style="font-size:15px;">
+        <span class="lang-en">1. Architecture Constraints</span>
+        <span class="lang-zh">1. 架构约束</span>
+      </h3>
+      <p>
+        <span class="lang-en">AI doesn't know your architecture conventions, module boundaries, or forbidden zones. <strong>Different prompts = different outputs.</strong></span>
+        <span class="lang-zh">AI 不了解你的架构规范、模块边界、禁区。<strong>不同 prompt = 不同输出。</strong></span>
+      </p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--green);">
+      <h3 style="font-size:15px;">
+        <span class="lang-en">2. Methodology as Code</span>
+        <span class="lang-zh">2. 方法论即代码</span>
+      </h3>
+      <p>
+        <span class="lang-en">Constraints must be <strong>built into the project</strong> so AI follows them automatically — not documents people read once.</span>
+        <span class="lang-zh">约束必须<strong>内建到项目里</strong>，让 AI 自动遵守——而不是人读过一遍就遗忘的文档。</span>
+      </p>
+    </div>
+  </div>
+  <div class="highlight-box fade-in" style="margin-top: 20px;">
+    <p>
+      <span class="lang-en"><strong>ROLL solves a <em>people</em> problem.</strong> By baking constraints and methodology into the project, output quality is consistent <strong>regardless of who's driving</strong>.</span>
+      <span class="lang-zh"><strong>ROLL 本质上解决的是「人」的问题。</strong>把约束和方法论嵌入项目，无论谁来开车，<strong>产出质量都保持一致</strong>。</span>
+    </p>
+  </div>
+  <span class="slide-number">02 / 18</span>
+</div>
+
+<!-- 3: What is ROLL -->
+<div class="slide" data-slide="3">
+  <span class="tag fade-in"><span class="lang-en">Solution</span><span class="lang-zh">解法</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">What ROLL Actually Is</span>
+    <span class="lang-zh">ROLL 到底是什么</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">An <strong>autonomous delivery system</strong> for software teams. AI agents pick stories from your BACKLOG, execute them with encoded engineering discipline, and ship continuously while you focus on <em>what to build next</em>.</span>
+    <span class="lang-zh">一套面向研发团队的<strong>自主交付系统</strong>。AI Agent 从 BACKLOG 拣选 Story，按内建的工程纪律执行，持续交付——让你专注在<em>下一个该做什么</em>上。</span>
+  </p>
+  <div class="cards cards-2 fade-in" style="max-width:880px;">
+    <div class="card" style="border-left:3px solid var(--green);">
+      <div style="font-size:26px;margin-bottom:6px;">🔄</div>
+      <h3 style="font-size:15px;">
+        <span class="lang-en">Autonomous Delivery</span>
+        <span class="lang-zh">自主交付</span>
+      </h3>
+      <p>
+        <span class="lang-en"><code>roll loop on</code> runs BACKLOG items hourly. Dream scans code health nightly. <strong>Humans retain sole release authority</strong>.</span>
+        <span class="lang-zh"><code>roll loop on</code> 每小时执行 BACKLOG。Dream 夜间扫描代码健康。<strong>发布权始终在人手里</strong>。</span>
+      </p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--accent-light);">
+      <div style="font-size:26px;margin-bottom:6px;">🔧</div>
+      <h3 style="font-size:15px;">
+        <span class="lang-en">Skill-Driven Execution</span>
+        <span class="lang-zh">技能驱动执行</span>
+      </h3>
+      <p>
+        <span class="lang-en">23 skills encode TDD, TCR, DDD, INVEST as <strong>repeatable workflows any agent can follow</strong>. Works with Claude, Cursor, Codex, Gemini — swap the tool, keep the discipline.</span>
+        <span class="lang-zh">23 个 Skill 把 TDD、TCR、DDD、INVEST 编码为<strong>任何 Agent 都能执行的可重复工作流</strong>。Claude、Cursor、Codex、Gemini 通用——换工具，留纪律。</span>
+      </p>
+    </div>
+  </div>
+  <div class="analogy fade-in">
+    <div class="analogy-label">
+      <span class="lang-en">In One Sentence</span>
+      <span class="lang-zh">一句话</span>
+    </div>
+    <p>
+      <span class="lang-en">ROLL turns a BACKLOG into shipped code continuously. Engineering practices are encoded as executable skills — <strong>reliable enough for an agent to run unattended, disciplined enough to ship production code</strong>.</span>
+      <span class="lang-zh">ROLL 持续把 BACKLOG 变成上线代码。工程实践被编码为可执行 Skill——<strong>可靠到 Agent 无人值守也能跑，严谨到能上生产</strong>。</span>
+    </p>
+  </div>
+  <span class="slide-number">03 / 18</span>
+</div>
+
+<!-- 4: The Pipeline -->
+<div class="slide" data-slide="4">
+  <span class="tag fade-in"><span class="lang-en">Pipeline</span><span class="lang-zh">交付流水线</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">The Delivery Pipeline</span>
+    <span class="lang-zh">完整的交付流水线</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">From raw idea to production — five stages, three loops, one continuous flow.</span>
+    <span class="lang-zh">从一个想法到生产环境——五个阶段、三个 Loop、一条持续流动的主线。</span>
+  </p>
+  <div class="pipeline-bar fade-in">
+    <div class="pipe-stage pipe-idea">
+      <h4>Idea</h4>
+      <p><span class="lang-en">Raw thought<br>Anyone can submit</span><span class="lang-zh">原始想法<br>任何人可提</span></p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-stage pipe-backlog">
+      <h4>Backlog</h4>
+      <p><span class="lang-en">AC ready<br>Feature doc done</span><span class="lang-zh">验收标准就绪<br>Feature 文档完成</span></p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-stage pipe-build">
+      <h4>Build</h4>
+      <p><span class="lang-en">TCR micro-steps<br>Spar · Review · CI</span><span class="lang-zh">TCR 微步<br>Spar · Review · CI</span></p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-stage pipe-verify">
+      <h4>Verify</h4>
+      <p><span class="lang-en">Deploy to Test/UAT<br>Live evidence</span><span class="lang-zh">部署到测试/UAT<br>采集活证据</span></p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-stage pipe-release">
+      <h4>Release</h4>
+      <p><span class="lang-en">Deploy to Prod<br>Sentinel takes over</span><span class="lang-zh">部署到生产<br>Sentinel 接管</span></p>
+    </div>
+  </div>
+
+  <div class="loops-row fade-in">
+    <div class="loop-pill la">
+      <h5><span class="lang-en">Loop A · Think It Through</span><span class="lang-zh">Loop A · 想清楚</span></h5>
+      <p><span class="lang-en">Idea → Backlog</span><span class="lang-zh">想法 → 待办</span></p>
+    </div>
+    <div class="loop-pill lb">
+      <h5><span class="lang-en">Loop B · Build It Right</span><span class="lang-zh">Loop B · 做扎实</span></h5>
+      <p><span class="lang-en">Backlog → Verify</span><span class="lang-zh">待办 → 验证</span></p>
+    </div>
+    <div class="loop-pill lc">
+      <h5><span class="lang-en">Loop C · Keep Watch</span><span class="lang-zh">Loop C · 盯住了</span></h5>
+      <p><span class="lang-en">Verify → Release → Patrol</span><span class="lang-zh">验证 → 发布 → 巡逻</span></p>
+    </div>
+  </div>
+
+  <div class="fade-in" style="margin-top:12px;padding:8px 16px;border:1.5px dashed var(--red);border-radius:8px;max-width:620px;">
+    <p style="font-size:12px;color:var(--red-text);text-align:center;font-weight:600;">
+      <span class="lang-en">↩ Loop C finds an issue → auto-creates new Idea → back to Pipeline</span>
+      <span class="lang-zh">↩ Loop C 发现问题 → 自动创建新 Idea → 重新进入流水线</span>
+    </p>
+  </div>
+  <span class="slide-number">04 / 18</span>
+</div>
+
+<!-- 5: Human × AI -->
+<div class="slide" data-slide="5">
+  <span class="tag fade-in"><span class="lang-en">Collaboration</span><span class="lang-zh">协作</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">Human × AI: Who Drives Each Phase?</span>
+    <span class="lang-zh">人机协作：每个阶段谁来开车</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">The two ends need human judgment. The middle runs on autopilot.</span>
+    <span class="lang-zh">两端需要人的判断，中间自动运行。</span>
+  </p>
+  <div class="hai-bar fade-in">
+    <div class="hai-zone hai-human">
+      <div class="emoji">🧑‍💻 → 🤖</div>
+      <h4><span class="lang-en">Human Asks AI</span><span class="lang-zh">人找 AI</span></h4>
+      <p><span class="lang-en">"Help me research this, break it into Stories"</span><span class="lang-zh">「帮我调研这个，拆成 Story」</span></p>
+      <p style="margin-top:6px;font-size:10px;color:var(--accent-light);">Idea → Backlog</p>
+    </div>
+    <div class="hai-zone hai-ai">
+      <div class="emoji">🤖 ⚡</div>
+      <h4><span class="lang-en">AI Self-Drives</span><span class="lang-zh">AI 自驱</span></h4>
+      <p><span class="lang-en">ROLL Loop auto-delivers. No babysitting needed.</span><span class="lang-zh">ROLL Loop 自动交付，无须看守。</span></p>
+      <p style="margin-top:6px;font-size:10px;color:var(--green-text);">Backlog → Build → Verify</p>
+    </div>
+    <div class="hai-zone hai-push">
+      <div class="emoji">🤖 → 🧑‍💻</div>
+      <h4><span class="lang-en">AI Nudges Human</span><span class="lang-zh">AI 催人</span></h4>
+      <p><span class="lang-en">"UAT passed. Ship it?"</span><span class="lang-zh">「UAT 已通过，发布吗？」</span></p>
+      <p style="margin-top:6px;font-size:10px;color:var(--orange-text);">Verify → Release</p>
+    </div>
+  </div>
+  <div class="highlight-box fade-in" style="margin-top: 20px;">
+    <p>
+      <span class="lang-en"><strong>The more automated the middle is, the more humans can focus on the two ends</strong> — deciding <em>what</em> to build and <em>when</em> to ship. These are judgment calls AI shouldn't make alone.</span>
+      <span class="lang-zh"><strong>中间越自动，人就越能聚焦两端</strong>——决定<em>做什么</em>、<em>什么时候上线</em>。这两个判断 AI 不应该单独做。</span>
+    </p>
+  </div>
+  <span class="slide-number">05 / 18</span>
+</div>
+
+<!-- 6: Loop A -->
+<div class="slide" data-slide="6">
+  <span class="tag fade-in" style="background:rgba(99,102,241,0.12);color:var(--accent-light);">
+    <span class="lang-en">Loop A</span><span class="lang-zh">Loop A</span>
+  </span>
+  <h2 class="fade-in">
+    <span class="lang-en">Loop A: Think It Through</span>
+    <span class="lang-zh">Loop A：想清楚</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">From vague idea to executable Backlog — powered by DDD and structured design.</span>
+    <span class="lang-zh">从模糊的想法到可执行的 Backlog——靠 DDD 和结构化设计驱动。</span>
+  </p>
+  <div class="timeline fade-in">
+    <div class="timeline-item">
+      <h4><span class="lang-en">1. DDD Domain Modeling</span><span class="lang-zh">1. DDD 领域建模</span></h4>
+      <p><span class="lang-en">Establish Bounded Contexts, Ubiquitous Language, Context Maps. Ensure engineering speaks the same language as business.</span><span class="lang-zh">建立限界上下文、统一语言、上下文映射。让工程和业务说同一种话。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">2. Research — $roll-research</span><span class="lang-zh">2. 调研 — $roll-research</span></h4>
+      <p><span class="lang-en">HV Analysis: vertical traces full lifecycle, horizontal compares competitors. Cross-axis produces insights. Output: PDF report.</span><span class="lang-zh">HV 分析：纵轴梳理全生命周期，横轴对比竞品，交叉产出洞察。输出 PDF 报告。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">3. Design — $roll-design</span><span class="lang-zh">3. 设计 — $roll-design</span></h4>
+      <p><span class="lang-en">Solution exploration with DDD modeling, architecture decisions, interface definitions, data models. Explores multiple options before committing.</span><span class="lang-zh">用 DDD 建模、架构决策、接口定义、数据模型来做方案探索。落定前先比较多个方案。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">4. Decompose + AC</span><span class="lang-zh">4. 拆分 + 验收标准</span></h4>
+      <p><span class="lang-en">Break into INVEST-compliant User Stories with acceptance criteria. Write to BACKLOG + features/. Each Story independently deliverable.</span><span class="lang-zh">拆成符合 INVEST 的 User Story，每个带验收标准。写入 BACKLOG + features/。每个 Story 都能独立交付。</span></p>
+    </div>
+  </div>
+  <div class="fade-in" style="margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
+    <span class="skill-tag">$roll-research</span>
+    <span class="skill-tag">$roll-design</span>
+    <span class="skill-tag">$roll-idea</span>
+    <span class="skill-tag">$roll-propose</span>
+    <span class="skill-tag">$roll-.clarify</span>
+    <span class="skill-tag">$roll-.echo</span>
+  </div>
+  <span class="slide-number">06 / 18</span>
+</div>
+
+<!-- 7: Backlog -->
+<div class="slide" data-slide="7">
+  <span class="tag fade-in"><span class="lang-en">Backlog</span><span class="lang-zh">待办</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">Backlog: The Single Source of Truth</span>
+    <span class="lang-zh">Backlog：唯一真相源</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">Everything flows through BACKLOG.md — four work item types, each with different Loop A depth.</span>
+    <span class="lang-zh">一切流经 BACKLOG.md——四种工作项类型，对应不同深度的 Loop A。</span>
+  </p>
+  <div class="cards cards-4 fade-in">
+    <div class="card" style="border-left: 3px solid var(--accent-light);">
+      <h3 style="font-size:14px;color:var(--accent-light);">User Story</h3>
+      <p><span class="lang-en">Business features. Full Loop A: DDD → Research → Design → AC. The heaviest investment.</span><span class="lang-zh">业务功能。完整 Loop A：DDD → 调研 → 设计 → AC。前期投入最重。</span></p>
+      <p style="margin-top:6px;font-size:11px;color:var(--accent-light);">ID: US-XXX</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--cyan);">
+      <h3 style="font-size:14px;color:var(--cyan-text);">Refactor</h3>
+      <p><span class="lang-en">Tech debt, architecture cleanup. Often surfaced by $roll-.dream nightly scans. Medium Loop A.</span><span class="lang-zh">技术债、架构改良。常由 $roll-.dream 夜间扫描产出。中等 Loop A。</span></p>
+      <p style="margin-top:6px;font-size:11px;color:var(--cyan-text);">ID: REFACTOR-XXX</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--red);">
+      <h3 style="font-size:14px;color:var(--red-text);">Fix</h3>
+      <p><span class="lang-en">Bug fixes, Sentinel alerts, user reports. Light Loop A: locate root cause → AC. Fast path.</span><span class="lang-zh">Bug 修复、Sentinel 告警、用户反馈。轻量 Loop A：定位根因 → AC。快速通道。</span></p>
+      <p style="margin-top:6px;font-size:11px;color:var(--red-text);">ID: FIX-XXX</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--orange);">
+      <h3 style="font-size:14px;color:var(--orange-text);">Spike</h3>
+      <p><span class="lang-en">Exploratory research. Loop A only — output is knowledge, not code. May spawn Stories or Refactors.</span><span class="lang-zh">探索性研究。只走 Loop A——产出的是知识不是代码。可能催生新的 Story 或 Refactor。</span></p>
+      <p style="margin-top:6px;font-size:11px;color:var(--orange-text);">ID: SPIKE-XXX</p>
+    </div>
+  </div>
+  <div class="analogy fade-in">
+    <div class="analogy-label"><span class="lang-en">Priority Order</span><span class="lang-zh">优先级顺序</span></div>
+    <p>
+      <span class="lang-en">FIX (bugs first) > US (user value) > REFACTOR (tech debt). Automated by <strong>$roll-loop</strong> — the autonomous executor scans BACKLOG hourly and routes each item to the right skill.</span>
+      <span class="lang-zh">FIX（先修 bug）> US（用户价值）> REFACTOR（技术债）。由 <strong>$roll-loop</strong> 自动执行——每小时扫描 BACKLOG，路由到对应的 Skill。</span>
+    </p>
+  </div>
+  <span class="slide-number">07 / 18</span>
+</div>
+
+<!-- 8: TDD + TCR -->
+<div class="slide" data-slide="8">
+  <span class="tag fade-in"><span class="lang-en">Fundamentals</span><span class="lang-zh">基本功</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">TDD + TCR: The Build Rhythm</span>
+    <span class="lang-zh">TDD + TCR：构建节拍</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en"><strong>Test-Driven Development</strong> writes the standard first. <strong>TCR (Test && Commit || Revert)</strong> enforces it mechanically.</span>
+    <span class="lang-zh"><strong>测试驱动开发</strong>先写下标准。<strong>TCR（测过则提交，未过则回滚）</strong>把标准机械化地执行。</span>
+  </p>
+  <div class="flow-row fade-in" style="margin-bottom: 16px;">
+    <div class="flow-step" style="background:rgba(239,68,68,0.12);color:var(--red-text);">
+      <span class="lang-en">1. Write Test</span><span class="lang-zh">1. 先写测试</span>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="background:rgba(99,102,241,0.12);color:var(--accent-light);">
+      <span class="lang-en">2. Write Code</span><span class="lang-zh">2. 写代码</span>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="background:rgba(127,127,127,0.08);color:var(--text);">
+      <span class="lang-en">3. Auto-Verify</span><span class="lang-zh">3. 自动验证</span>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-branch">
+      <div class="flow-step" style="background:rgba(34,197,94,0.12);color:var(--green-text);">
+        <span class="lang-en">✅ Pass → Auto-Commit</span><span class="lang-zh">✅ 通过 → 自动提交</span>
+      </div>
+      <div class="flow-step" style="background:rgba(239,68,68,0.12);color:var(--red-text);">
+        <span class="lang-en">❌ Fail → Auto-Revert</span><span class="lang-zh">❌ 失败 → 自动回滚</span>
+      </div>
+    </div>
+  </div>
+  <div class="metric-row fade-in">
+    <div class="metric" style="border-color:rgba(34,197,94,0.25);">
+      <div class="number" style="color:var(--green-text);">2-5 min</div>
+      <div class="label"><span class="lang-en">Per micro-step · worst case lose 5 minutes</span><span class="lang-zh">每个微步 · 最坏丢 5 分钟</span></div>
+    </div>
+    <div class="metric" style="border-color:rgba(6,182,212,0.25);">
+      <div class="number" style="color:var(--cyan-text);">100%</div>
+      <div class="label"><span class="lang-en">Every save verified · code always runnable</span><span class="lang-zh">每次保存都验证 · 代码始终可运行</span></div>
+    </div>
+    <div class="metric" style="border-color:rgba(99,102,241,0.25);">
+      <div class="number" style="color:var(--accent-light);font-size:24px;line-height:1.4;">
+        <span class="lang-en">Fully Auto</span><span class="lang-zh">完全自动</span>
+      </div>
+      <div class="label"><span class="lang-en">AI runs unattended · no babysitting</span><span class="lang-zh">AI 自主执行 · 无须看守</span></div>
+    </div>
+  </div>
+  <span class="slide-number">08 / 18</span>
+</div>
+
+<!-- 9: Loop B -->
+<div class="slide" data-slide="9">
+  <span class="tag fade-in" style="background:rgba(34,197,94,0.12);color:var(--green-text);">
+    <span class="lang-en">Loop B</span><span class="lang-zh">Loop B</span>
+  </span>
+  <h2 class="fade-in">
+    <span class="lang-en">Loop B: Build It Right</span>
+    <span class="lang-zh">Loop B：做扎实</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">The full delivery pipeline — from Backlog item to verified deployment.</span>
+    <span class="lang-zh">完整的交付流水线——从 Backlog 工作项到已验证的部署。</span>
+  </p>
+  <div class="timeline fade-in">
+    <div class="timeline-item">
+      <h4><span class="lang-en">1. Read Story → Break into Actions (2-5 min each)</span><span class="lang-zh">1. 读 Story → 拆成 Action（每个 2-5 分钟）</span></h4>
+      <p><span class="lang-en">Decompose into minimal deliverable Actions. Independent Actions can run in parallel.</span><span class="lang-zh">拆成最小可交付的 Action。独立 Action 可以并行。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">2. TCR Micro-Loop (per Action)</span><span class="lang-zh">2. TCR 微循环（每个 Action）</span></h4>
+      <p><span class="lang-en">RED test → GREEN code → self-review ($roll-.review) → auto-commit. Fail = auto-revert.</span><span class="lang-zh">写测试（RED）→ 写代码（GREEN）→ 自查（$roll-.review）→ 自动提交。失败 = 自动回滚。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">3. Local CI Gate</span><span class="lang-zh">3. 本地 CI 闸门</span></h4>
+      <p><span class="lang-en">Lint + type check + full test suite + build. All must pass before push.</span><span class="lang-zh">Lint + 类型检查 + 全量测试 + 构建。全过才能 push。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">4. Push → Remote CI (Objective Arbiter)</span><span class="lang-zh">4. Push → 远端 CI（客观裁判）</span></h4>
+      <p><span class="lang-en">CI re-verifies in a clean environment — the final ruling on "shippable."</span><span class="lang-zh">CI 在干净环境再验证一次——是否「可发布」的最终裁决。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">5. Deploy to Test/UAT → Live Evidence</span><span class="lang-zh">5. 部署到 Test/UAT → 采集活证据</span></h4>
+      <p><span class="lang-en"><strong>Screenshots, curl responses, test outputs</strong> required. "I checked, it works" doesn't count.</span><span class="lang-zh">必须采集<strong>截图、curl 响应、测试输出</strong>。AI 说「我检查过了」不算数。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">6. Release — Human Approves</span><span class="lang-zh">6. 发布 — 人工审批</span></h4>
+      <p><span class="lang-en">Human approves. BACKLOG status: ✅ Done. Sentinel takes over monitoring.</span><span class="lang-zh">人审批通过。BACKLOG 状态变 ✅ Done。Sentinel 接手监控。</span></p>
+    </div>
+  </div>
+  <span class="slide-number">09 / 18</span>
+</div>
+
+<!-- 10: Four Lines of Defense -->
+<div class="slide" data-slide="10">
+  <span class="tag fade-in" style="background:rgba(245,158,11,0.12);color:var(--orange-text);">
+    <span class="lang-en">Quality System</span><span class="lang-zh">质量体系</span>
+  </span>
+  <h2 class="fade-in">
+    <span class="lang-en">Four Lines of Defense</span>
+    <span class="lang-zh">四道防线</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">Every layer is automated. None depend on human patience or memory.</span>
+    <span class="lang-zh">每一层都是自动化的。不依赖任何人的耐心或记性。</span>
+  </p>
+  <div class="cards cards-4 fade-in">
+    <div class="card" style="border-left:3px solid var(--green);">
+      <h3 style="font-size:14px;">
+        <span class="lang-en">L1: TCR Micro-Verification</span>
+        <span class="lang-zh">L1：TCR 微验证</span>
+      </h3>
+      <p>
+        <span class="lang-en">Verify every 2-5 minutes. Define the standard before writing — auto-revert if it fails. <strong>Bugs eliminated the instant they appear.</strong></span>
+        <span class="lang-zh">每 2-5 分钟验证一次。先定标准再写代码——不过就回滚。<strong>Bug 一冒头就被消灭。</strong></span>
+      </p>
+      <p style="margin-top:6px;font-size:10px;font-family:monospace;color:var(--green-text);">$roll-build</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--red);">
+      <h3 style="font-size:14px;">
+        <span class="lang-en">L2: Spar Adversarial Drill</span>
+        <span class="lang-zh">L2：Spar 红蓝对抗</span>
+      </h3>
+      <p>
+        <span class="lang-en">For critical modules (payments, auth). One AI attacks, another defends. Up to 5 rounds of escalating intensity.</span>
+        <span class="lang-zh">面向关键模块（支付、认证）。一边 AI 攻击，另一边防御。最多 5 轮逐级升级。</span>
+      </p>
+      <p style="margin-top:6px;font-size:10px;font-family:monospace;color:var(--red-text);">$roll-spar</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--accent-light);">
+      <h3 style="font-size:14px;">
+        <span class="lang-en">L3: Multi-Stage Review</span>
+        <span class="lang-zh">L3：多阶段评审</span>
+      </h3>
+      <p>
+        <span class="lang-en"><strong>Self</strong> — per-commit 6-dim check.<br><strong>Peer</strong> — cross-agent negotiation.<br><strong>Dream</strong> — nightly code health scan.</span>
+        <span class="lang-zh"><strong>Self</strong>——每次提交 6 维自查。<br><strong>Peer</strong>——跨 Agent 协商。<br><strong>Dream</strong>——夜间代码健康扫描。</span>
+      </p>
+      <p style="margin-top:6px;font-size:10px;font-family:monospace;color:var(--accent-light);">$roll-.review · $roll-peer · $roll-.dream</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--orange);">
+      <h3 style="font-size:14px;">
+        <span class="lang-en">L4: Sentinel Production Patrol</span>
+        <span class="lang-zh">L4：Sentinel 生产巡逻</span>
+      </h3>
+      <p>
+        <span class="lang-en">24/7 random-sample monitoring. Alerts only after 3 consecutive failures. Auto-creates Fix tasks.</span>
+        <span class="lang-zh">7×24 抽样巡检。连续 3 次失败才告警（防误报）。自动创建 Fix 任务。</span>
+      </p>
+      <p style="margin-top:6px;font-size:10px;font-family:monospace;color:var(--orange-text);">$roll-sentinel</p>
+    </div>
+  </div>
+  <span class="slide-number">10 / 18</span>
+</div>
+
+<!-- 11: Loop C -->
+<div class="slide" data-slide="11">
+  <span class="tag fade-in" style="background:rgba(245,158,11,0.12);color:var(--orange-text);">
+    <span class="lang-en">Loop C</span><span class="lang-zh">Loop C</span>
+  </span>
+  <h2 class="fade-in">
+    <span class="lang-en">Loop C: Keep Watch</span>
+    <span class="lang-zh">Loop C：盯住了</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">Two complementary monitors: Sentinel watches runtime, Dream watches code structure.</span>
+    <span class="lang-zh">两位互补的守望者：Sentinel 盯运行时，Dream 盯代码结构。</span>
+  </p>
+  <div class="cards cards-2 fade-in">
+    <div class="card" style="border-top: 3px solid var(--orange);">
+      <h3 style="font-size:15px;color:var(--orange-text);">$roll-sentinel — <span class="lang-en">Runtime Patrol</span><span class="lang-zh">运行时巡逻</span></h3>
+      <p><span class="lang-en">Random-sample monitoring of production. Cost-controlled AI validation with intelligent spot-checking.</span><span class="lang-zh">对生产做抽样巡检。成本可控的 AI 验证 + 智能点检逻辑。</span></p>
+      <p style="margin-top:8px;"><strong><span class="lang-en">Patrol Modes:</span><span class="lang-zh">巡检模式：</span></strong></p>
+      <p><span class="lang-en">Light: 5/day · Intensive: 20/hr (post-release) · Full sweep: weekly</span><span class="lang-zh">轻量：每天 5 次 · 密集：发布后每小时 20 次 · 全量扫描：每周一次</span></p>
+      <p style="margin-top:8px;"><strong><span class="lang-en">Output:</span><span class="lang-zh">输出：</span></strong> <span class="lang-en">FIX-XXX entries in BACKLOG</span><span class="lang-zh">在 BACKLOG 中生成 FIX-XXX 条目</span></p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--accent-light);">
+      <h3 style="font-size:15px;color:var(--accent-light);">$roll-.dream — <span class="lang-en">Nightly Health Scan</span><span class="lang-zh">夜间健康扫描</span></h3>
+      <p><span class="lang-en">Runs at 3am. Six dimensions of code health:</span><span class="lang-zh">凌晨 3 点运行。代码健康的六个维度：</span></p>
+      <p style="margin-top:8px;"><span class="lang-en">1. Dead Code · 2. Architectural Drift · 3. Pruning Candidates · 4. Emerging Patterns · 5. Doc Coverage · 6. Doc Freshness</span><span class="lang-zh">1. 死代码 · 2. 架构漂移 · 3. 可裁剪项 · 4. 涌现模式 · 5. 文档覆盖 · 6. 文档新鲜度</span></p>
+      <p style="margin-top:8px;"><strong><span class="lang-en">Output:</span><span class="lang-zh">输出：</span></strong> <span class="lang-en">REFACTOR-XXX entries in BACKLOG</span><span class="lang-zh">在 BACKLOG 中生成 REFACTOR-XXX 条目</span></p>
+    </div>
+  </div>
+  <div class="highlight-box fade-in" style="margin-top: 16px;">
+    <p>
+      <span class="lang-en"><strong>Sentinel monitors behavior. Dream monitors structure.</strong> Together they detect both runtime degradation and code-quality decay — before users notice.</span>
+      <span class="lang-zh"><strong>Sentinel 盯行为，Dream 盯结构。</strong>两者合力，在用户发现之前就检出运行时退化和代码质量衰减。</span>
+    </p>
+  </div>
+  <span class="slide-number">11 / 18</span>
+</div>
+
+<!-- 12: Three-Layer Autonomous -->
+<div class="slide" data-slide="12">
+  <span class="tag fade-in" style="background:rgba(6,182,212,0.12);color:var(--cyan-text);">
+    <span class="lang-en">Autonomous</span><span class="lang-zh">自治</span>
+  </span>
+  <h2 class="fade-in">
+    <span class="lang-en">Three-Layer Autonomous Model</span>
+    <span class="lang-zh">三层自治模型</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">ROLL operates at three levels of autonomy, each with clear boundaries.</span>
+    <span class="lang-zh">ROLL 在三个自治层级运转，每层边界清晰。</span>
+  </p>
+  <div class="auto-layers fade-in">
+    <div class="auto-layer">
+      <div class="al-icon">🧑‍💻</div>
+      <h4><span class="lang-en">Human Layer</span><span class="lang-zh">人</span></h4>
+      <p><span class="lang-en">Set goals, review proposals, approve releases. The judgment calls.</span><span class="lang-zh">定目标、审方案、批发布。判断类决策。</span></p>
+      <div class="al-skills">roll-propose</div>
+    </div>
+    <div class="auto-layer">
+      <div class="al-icon">🔄</div>
+      <h4><span class="lang-en">Loop Layer</span><span class="lang-zh">Loop 层</span></h4>
+      <p><span class="lang-en">Hourly BACKLOG scan. Auto-routes each item to the right skill. FIX > US > REFACTOR.</span><span class="lang-zh">每小时扫描 BACKLOG，自动路由到对应 Skill。FIX > US > REFACTOR。</span></p>
+      <div class="al-skills">roll-loop · roll-brief</div>
+    </div>
+    <div class="auto-layer">
+      <div class="al-icon">🌙</div>
+      <h4><span class="lang-en">Dream Layer</span><span class="lang-zh">Dream 层</span></h4>
+      <p><span class="lang-en">3am nightly code health scan. 6 dimensions. Generates REFACTOR entries autonomously.</span><span class="lang-zh">凌晨 3 点代码健康扫描，6 个维度，自动产出 REFACTOR 条目。</span></p>
+      <div class="al-skills">roll-.dream</div>
+    </div>
+    <div class="auto-layer">
+      <div class="al-icon">🤝</div>
+      <h4><span class="lang-en">Peer Layer</span><span class="lang-zh">Peer 层</span></h4>
+      <p><span class="lang-en">Cross-agent negotiation on high-risk decisions. Up to 3 rounds. No consensus → escalate to human.</span><span class="lang-zh">高风险决策由跨 Agent 协商，最多 3 轮。达不成共识 → 升级给人。</span></p>
+      <div class="al-skills">roll-peer</div>
+    </div>
+  </div>
+  <div class="analogy fade-in">
+    <div class="analogy-label"><span class="lang-en">Design Principle</span><span class="lang-zh">设计原则</span></div>
+    <p>
+      <span class="lang-en">Humans set direction and approve releases. Everything else — building, reviewing, monitoring, refactoring — can run autonomously. <strong>The system never ships to production without human approval.</strong></span>
+      <span class="lang-zh">人设方向、批发布。其他一切——构建、评审、监控、重构——都可以自主运行。<strong>没有人的审批，系统不会上生产。</strong></span>
+    </p>
+  </div>
+  <span class="slide-number">12 / 18</span>
+</div>
+
+<!-- 13: All Skills -->
+<div class="slide" data-slide="13">
+  <span class="tag fade-in"><span class="lang-en">Skill System</span><span class="lang-zh">技能体系</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">ROLL's Skills, At a Glance</span>
+    <span class="lang-zh">ROLL 技能全景</span>
+  </h2>
+  <p class="section-desc fade-in" style="margin-bottom: 10px;">
+    <span class="lang-en">23 skills spanning design, build, check, autonomous, and support — each maps to a specific phase.</span>
+    <span class="lang-zh">23 个 Skill，覆盖设计、构建、校验、自治、支持——每个对应一个具体阶段。</span>
+  </p>
+  <table class="skill-table fade-in">
+    <thead>
+      <tr>
+        <th><span class="lang-en">Skill</span><span class="lang-zh">Skill</span></th>
+        <th><span class="lang-en">Tier</span><span class="lang-zh">分类</span></th>
+        <th><span class="lang-en">What It Does</span><span class="lang-zh">做什么</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="skill-name">$roll-research</td><td><span class="phase-tag phase-design"><span class="lang-en">Research</span><span class="lang-zh">调研</span></span></td><td><span class="lang-en">HV analysis — timeline + competitive landscape → PDF report</span><span class="lang-zh">HV 分析——时间线 + 竞品 → PDF 报告</span></td></tr>
+      <tr><td class="skill-name">$roll-design</td><td><span class="phase-tag phase-design"><span class="lang-en">Design</span><span class="lang-zh">设计</span></span></td><td><span class="lang-en">DDD modeling, solution design, INVEST story breakdown</span><span class="lang-zh">DDD 建模、方案设计、INVEST Story 拆分</span></td></tr>
+      <tr><td class="skill-name">$roll-idea</td><td><span class="phase-tag phase-design"><span class="lang-en">Capture</span><span class="lang-zh">捕获</span></span></td><td><span class="lang-en">Fast backlog capture — one-liner in, classified entry out</span><span class="lang-zh">快速收录——一句话进，分类条目出</span></td></tr>
+      <tr><td class="skill-name">$roll-propose</td><td><span class="phase-tag phase-design"><span class="lang-en">Propose</span><span class="lang-zh">提案</span></span></td><td><span class="lang-en">Generate 1-3 structured US drafts → proposals.md for human review</span><span class="lang-zh">生成 1-3 个结构化 US 草稿 → proposals.md 待人审</span></td></tr>
+      <tr><td class="skill-name">$roll-onboard</td><td><span class="phase-tag phase-design"><span class="lang-en">Onboard</span><span class="lang-zh">接入</span></span></td><td><span class="lang-en">Interactive onboarding for legacy projects — 9 Qs → onboard-plan.yaml</span><span class="lang-zh">老项目交互式接入——9 问 → onboard-plan.yaml</span></td></tr>
+      <tr><td class="skill-name">$roll-build</td><td><span class="phase-tag phase-build"><span class="lang-en">Build</span><span class="lang-zh">构建</span></span></td><td><span class="lang-en">Universal entry: US/FIX/plain text → TCR delivery</span><span class="lang-zh">通用入口：US / FIX / 自由文本 → TCR 交付</span></td></tr>
+      <tr><td class="skill-name">$roll-spar</td><td><span class="phase-tag phase-build"><span class="lang-en">Adversarial</span><span class="lang-zh">对抗</span></span></td><td><span class="lang-en">Red-blue drill: Attacker writes exploits, Defender patches</span><span class="lang-zh">红蓝对抗：攻方写漏洞测试，守方打补丁</span></td></tr>
+      <tr><td class="skill-name">$roll-fix</td><td><span class="phase-tag phase-build"><span class="lang-en">Fix</span><span class="lang-zh">修复</span></span></td><td><span class="lang-en">Single-bug fix + mandatory regression test</span><span class="lang-zh">单个 bug 修复 + 必备回归测试</span></td></tr>
+      <tr><td class="skill-name">$roll-debug</td><td><span class="phase-tag phase-check"><span class="lang-en">Diagnose</span><span class="lang-zh">诊断</span></span></td><td><span class="lang-en">Black Box probe: Console/Network/DOM/Perf → root cause</span><span class="lang-zh">黑盒探针：Console/Network/DOM/Perf → 根因</span></td></tr>
+      <tr><td class="skill-name">$roll-sentinel</td><td><span class="phase-tag phase-check"><span class="lang-en">Patrol</span><span class="lang-zh">巡逻</span></span></td><td><span class="lang-en">Production random-sample monitoring, 3-strike alerting</span><span class="lang-zh">生产抽样监控，连续三次失败才告警</span></td></tr>
+      <tr><td class="skill-name">$roll-review-pr</td><td><span class="phase-tag phase-check"><span class="lang-en">PR Review</span><span class="lang-zh">PR 评审</span></span></td><td><span class="lang-en">Agent-agnostic PR review with 3-state verdict</span><span class="lang-zh">跨 Agent 的 PR 评审 · 三态结论</span></td></tr>
+      <tr><td class="skill-name">$roll-doc</td><td><span class="phase-tag phase-support"><span class="lang-en">Document</span><span class="lang-zh">文档</span></span></td><td><span class="lang-en">Auto-scan, index, gap analysis, fill for project docs</span><span class="lang-zh">自动扫描、建索引、找缺口、补写项目文档</span></td></tr>
+      <tr><td class="skill-name">$roll-notes</td><td><span class="phase-tag phase-support"><span class="lang-en">Journal</span><span class="lang-zh">日志</span></span></td><td><span class="lang-en">Project diary — records dev moments chronologically</span><span class="lang-zh">项目日记——按时间记录开发瞬间</span></td></tr>
+      <tr><td class="skill-name">$roll-doctor</td><td><span class="phase-tag phase-support"><span class="lang-en">Maintain</span><span class="lang-zh">体检</span></span></td><td><span class="lang-en">ROLL self-health check (skills/symlinks/config/templates)</span><span class="lang-zh">ROLL 自身健康检查（Skill/链接/配置/模板）</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--cyan-text);">$roll-loop</td><td><span class="phase-tag phase-auto"><span class="lang-en">Auto</span><span class="lang-zh">自治</span></span></td><td><span class="lang-en">Hourly BACKLOG executor — routes items to skills</span><span class="lang-zh">每小时 BACKLOG 执行器——路由到对应 Skill</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--cyan-text);">$roll-peer</td><td><span class="phase-tag phase-auto"><span class="lang-en">Auto</span><span class="lang-zh">自治</span></span></td><td><span class="lang-en">Cross-agent peer review, up to 3 negotiation rounds</span><span class="lang-zh">跨 Agent 同行评审，最多 3 轮协商</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--cyan-text);">$roll-brief</td><td><span class="phase-tag phase-auto"><span class="lang-en">Auto</span><span class="lang-zh">自治</span></span></td><td><span class="lang-en">Owner-facing briefing: done, in-progress, queue, escalations</span><span class="lang-zh">面向负责人的简报：已完成、进行中、队列、待升级</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--cyan-text);">$roll-.dream</td><td><span class="phase-tag phase-auto"><span class="lang-en">Auto</span><span class="lang-zh">自治</span></span></td><td><span class="lang-en">Nightly 6-dimension code health scan → REFACTOR entries</span><span class="lang-zh">夜间 6 维代码健康扫描 → REFACTOR 条目</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.review</td><td><span class="phase-tag phase-support"><span class="lang-en">Hidden</span><span class="lang-zh">隐式</span></span></td><td><span class="lang-en">Per-commit self-review: correctness, security, maintainability</span><span class="lang-zh">每次提交自查：正确性、安全、可维护性</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.changelog</td><td><span class="phase-tag phase-support"><span class="lang-en">Hidden</span><span class="lang-zh">隐式</span></span></td><td><span class="lang-en">Auto-generates CHANGELOG.md from completed stories</span><span class="lang-zh">从已完成 Story 自动生成 CHANGELOG.md</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.qa</td><td><span class="phase-tag phase-support"><span class="lang-en">Hidden</span><span class="lang-zh">隐式</span></span></td><td><span class="lang-en">Test pyramid standards: unit/E2E/visual/smoke + CI gates</span><span class="lang-zh">测试金字塔标准：单元 / E2E / 视觉 / 冒烟 + CI 闸门</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.echo</td><td><span class="phase-tag phase-support"><span class="lang-en">Hidden</span><span class="lang-zh">隐式</span></span></td><td><span class="lang-en">Passive intent clarification for vague inputs</span><span class="lang-zh">面向模糊输入的被动意图澄清</span></td></tr>
+      <tr><td class="skill-name" style="color:var(--text-dim);">$roll-.clarify</td><td><span class="phase-tag phase-support"><span class="lang-en">Hidden</span><span class="lang-zh">隐式</span></span></td><td><span class="lang-en">Scope clarification for under-specified Fly-mode inputs</span><span class="lang-zh">Fly 模式下的范围澄清</span></td></tr>
+    </tbody>
+  </table>
+  <span class="slide-number">13 / 18</span>
+</div>
+
+<!-- 14: Scrum QA vs ROLL -->
+<div class="slide" data-slide="14">
+  <span class="tag fade-in" style="background:rgba(6,182,212,0.12);color:var(--cyan-text);">
+    <span class="lang-en">Comparison</span><span class="lang-zh">对比</span>
+  </span>
+  <h2 class="fade-in">
+    <span class="lang-en">Traditional QA vs. ROLL Auto-QA</span>
+    <span class="lang-zh">传统 QA vs. ROLL 自动 QA</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en">Quality assurance isn't removed — <strong>the implementation is upgraded</strong>.</span>
+    <span class="lang-zh">质量保障没有被去掉——<strong>是实现方式被升级了</strong>。</span>
+  </p>
+  <div class="compare fade-in">
+    <div class="compare-col compare-before">
+      <h3 style="color:var(--red-text);"><span class="lang-en">Traditional QA</span><span class="lang-zh">传统 QA</span></h3>
+      <div class="compare-item"><span class="icon">🐌</span><span><span class="lang-en">Dev finishes → wait for QA availability</span><span class="lang-zh">开发完成 → 等 QA 排期</span></span></div>
+      <div class="compare-item"><span class="icon">🐌</span><span><span class="lang-en">Bugs surface only in test phase</span><span class="lang-zh">Bug 在测试阶段才暴露</span></span></div>
+      <div class="compare-item"><span class="icon">🐌</span><span><span class="lang-en">Manual regression — slow, error-prone</span><span class="lang-zh">手工回归——慢、易错</span></span></div>
+      <div class="compare-item"><span class="icon">🐌</span><span><span class="lang-en">Post-ship issues found by user complaints</span><span class="lang-zh">上线问题靠用户投诉发现</span></span></div>
+      <div class="compare-item"><span class="icon">🐌</span><span><span class="lang-en">Quality depends on individual diligence</span><span class="lang-zh">质量取决于个人自觉</span></span></div>
+    </div>
+    <div class="compare-arrow">→</div>
+    <div class="compare-col compare-after">
+      <h3 style="color:var(--green-text);"><span class="lang-en">ROLL Auto-QA</span><span class="lang-zh">ROLL 自动 QA</span></h3>
+      <div class="compare-item"><span class="icon">⚡</span><span><span class="lang-en">Test while writing — bugs caught at birth</span><span class="lang-zh">边写边测——bug 出生即被抓</span></span></div>
+      <div class="compare-item"><span class="icon">⚡</span><span><span class="lang-en">Fix cost approaches zero (max 5-min loss)</span><span class="lang-zh">修复成本趋近零（最多损失 5 分钟）</span></span></div>
+      <div class="compare-item"><span class="icon">⚡</span><span><span class="lang-en">Auto regression + nightly Dream scans</span><span class="lang-zh">自动回归 + 每晚 Dream 扫描</span></span></div>
+      <div class="compare-item"><span class="icon">⚡</span><span><span class="lang-en">Issues found before users notice (Sentinel)</span><span class="lang-zh">用户察觉前就被 Sentinel 发现</span></span></div>
+      <div class="compare-item"><span class="icon">⚡</span><span><span class="lang-en">Standards built into the system, not people</span><span class="lang-zh">标准嵌进系统，不寄望于人</span></span></div>
+    </div>
+  </div>
+  <span class="slide-number">14 / 18</span>
+</div>
+
+<!-- 15: Project Structure -->
+<div class="slide" data-slide="15">
+  <span class="tag fade-in"><span class="lang-en">Structure</span><span class="lang-zh">项目结构</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">What a ROLL-Managed Project Looks Like</span>
+    <span class="lang-zh">ROLL 接管的项目长什么样</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en"><code>roll init</code> — one command, a few seconds.</span>
+    <span class="lang-zh"><code>roll init</code> — 一条命令，几秒钟。</span>
+  </p>
+  <div class="tree fade-in">
+    <span class="dir">my-project/</span><br>
+    ├── <span class="file">AGENTS.md</span> <span class="comment">&nbsp;&nbsp;<span class="lang-en">← Conventions shared across all AI tools</span><span class="lang-zh">← 所有 AI 工具共用的约定</span></span><br>
+    ├── <span class="dir">.roll/</span> <span class="comment">&nbsp;&nbsp;<span class="lang-en">← Process & internal docs</span><span class="lang-zh">← 过程与内部文档</span></span><br>
+    │&nbsp;&nbsp;&nbsp;├── <span class="file">backlog.md</span> <span class="comment"><span class="lang-en">← US / FIX / REFACTOR / SPIKE</span><span class="lang-zh">← US / FIX / REFACTOR / SPIKE</span></span><br>
+    │&nbsp;&nbsp;&nbsp;├── <span class="file">proposals.md</span> <span class="comment"><span class="lang-en">← AI proposals awaiting human review</span><span class="lang-zh">← 待人审的 AI 提案</span></span><br>
+    │&nbsp;&nbsp;&nbsp;├── <span class="dir">features/</span> <span class="comment"><span class="lang-en">← Story details + AC</span><span class="lang-zh">← Story 详情与验收标准</span></span><br>
+    │&nbsp;&nbsp;&nbsp;├── <span class="dir">domain/</span> <span class="comment"><span class="lang-en">← DDD context maps</span><span class="lang-zh">← DDD 上下文映射</span></span><br>
+    │&nbsp;&nbsp;&nbsp;├── <span class="dir">decisions/</span> <span class="comment"><span class="lang-en">← ADRs</span><span class="lang-zh">← 架构决策记录</span></span><br>
+    │&nbsp;&nbsp;&nbsp;├── <span class="dir">dream/</span> <span class="comment"><span class="lang-en">← Nightly health reports</span><span class="lang-zh">← 夜间健康报告</span></span><br>
+    │&nbsp;&nbsp;&nbsp;└── <span class="dir">briefs/</span> <span class="comment"><span class="lang-en">← Owner-facing digests</span><span class="lang-zh">← 面向负责人的简报</span></span><br>
+    ├── <span class="dir">.github/workflows/</span><br>
+    │&nbsp;&nbsp;&nbsp;├── <span class="file">ci.yml</span> <span class="comment"><span class="lang-en">← Quality gate on every commit</span><span class="lang-zh">← 每次提交的质量闸门</span></span><br>
+    │&nbsp;&nbsp;&nbsp;└── <span class="file">sentinel.yml</span> <span class="comment"><span class="lang-en">← Scheduled production patrols</span><span class="lang-zh">← 定时生产巡逻</span></span><br>
+    └── <span class="comment"><span class="lang-en">... source code</span><span class="lang-zh">... 源代码</span></span>
+  </div>
+  <span class="slide-number">15 / 18</span>
+</div>
+
+<!-- 16: Cross-Tool Conventions -->
+<div class="slide" data-slide="16">
+  <span class="tag fade-in"><span class="lang-en">Configuration</span><span class="lang-zh">配置</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">One Command, Every AI Tool Aligned</span>
+    <span class="lang-zh">一条命令，所有 AI 工具对齐</span>
+  </h2>
+  <p class="section-desc fade-in">
+    <span class="lang-en"><code>roll setup</code> syncs conventions and skills to every AI tool simultaneously.</span>
+    <span class="lang-zh"><code>roll setup</code> 把规范与 Skill 同步到所有 AI 工具。</span>
+  </p>
+  <div class="flow-row fade-in" style="margin-bottom: 18px;">
+    <div class="flow-step" style="background:rgba(99,102,241,0.12);color:var(--accent-light);">
+      ~/.roll/<br><span style="font-size:10px;"><span class="lang-en">Unified config</span><span class="lang-zh">统一配置</span></span>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-branch" style="gap:4px;">
+      <div class="flow-step" style="background:rgba(127,127,127,0.06);color:var(--text);font-size:12px;padding:6px 12px;">~/.claude/ → CLAUDE.md + skills/</div>
+      <div class="flow-step" style="background:rgba(127,127,127,0.06);color:var(--text);font-size:12px;padding:6px 12px;">~/.gemini/ → GEMINI.md + skills/</div>
+      <div class="flow-step" style="background:rgba(127,127,127,0.06);color:var(--text);font-size:12px;padding:6px 12px;">~/.cursor/ → rules + skills/</div>
+      <div class="flow-step" style="background:rgba(127,127,127,0.06);color:var(--text);font-size:12px;padding:6px 12px;">~/.codex/ ~/.kimi/ ...</div>
+    </div>
+  </div>
+  <div class="cards cards-3 fade-in">
+    <div class="card" style="padding:16px;">
+      <h3 style="font-size:14px;"><span class="lang-en">Zero Intrusion</span><span class="lang-zh">零侵入</span></h3>
+      <p style="font-size:12px;"><span class="lang-en">Never overwrites existing configs. Writes its own file and appends via @include.</span><span class="lang-zh">不覆盖已有配置。写自己的文件，通过 @include 引入。</span></p>
+    </div>
+    <div class="card" style="padding:16px;">
+      <h3 style="font-size:14px;"><span class="lang-en">Symlinked Skills</span><span class="lang-zh">软链 Skill</span></h3>
+      <p style="font-size:12px;"><span class="lang-en">Update ROLL, re-run setup — every AI tool upgrades in seconds.</span><span class="lang-zh">升级 ROLL 后重跑 setup，所有 AI 工具几秒内同步。</span></p>
+    </div>
+    <div class="card" style="padding:16px;">
+      <h3 style="font-size:14px;"><span class="lang-en">3 CLI Commands</span><span class="lang-zh">3 条 CLI 命令</span></h3>
+      <p style="font-size:12px;"><strong>roll setup</strong> · <strong>roll init</strong> · <strong>roll update</strong></p>
+    </div>
+  </div>
+  <span class="slide-number">16 / 18</span>
+</div>
+
+<!-- 17: Walkthrough -->
+<div class="slide" data-slide="17">
+  <span class="tag fade-in"><span class="lang-en">Walkthrough</span><span class="lang-zh">完整走查</span></span>
+  <h2 class="fade-in">
+    <span class="lang-en">A Feature's Complete Journey</span>
+    <span class="lang-zh">一个功能的完整旅程</span>
+  </h2>
+  <p class="section-desc fade-in" style="margin-bottom: 10px;">
+    <span class="lang-en">Example: shipping a "User Login" feature across all three loops.</span>
+    <span class="lang-zh">示例：把「用户登录」功能跑完三个 Loop。</span>
+  </p>
+  <div class="timeline fade-in">
+    <div class="timeline-item">
+      <h4><span class="lang-en">9:00 AM — Idea enters the Pipeline</span><span class="lang-zh">9:00 — 想法进入流水线</span></h4>
+      <p><span class="lang-en">PM submits: "We need user login." $roll-design runs DDD modeling, decomposes into 3 Stories (password, OAuth, remember-me), writes AC.</span><span class="lang-zh">PM 提需求：「要做用户登录」。$roll-design 做 DDD 建模，拆成 3 个 Story（密码、OAuth、记住我），写好 AC。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">9:30 AM — $roll-loop picks up US-001</span><span class="lang-zh">9:30 — $roll-loop 拣起 US-001</span></h4>
+      <p><span class="lang-en">$roll-build starts TCR delivery. Verify + commit every 3 minutes. 12 tests passing in 30 min. 8 micro-commits.</span><span class="lang-zh">$roll-build 启动 TCR 交付。每 3 分钟一次验证 + 提交。30 分钟跑过 12 个测试，8 次微提交。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">10:00 AM — $roll-spar auto-triggers</span><span class="lang-zh">10:00 — $roll-spar 自动触发</span></h4>
+      <p><span class="lang-en">Auth module flagged as high-risk. Attacker tries SQL injection, brute force, session hijacking. Defender patches. 5 rounds, coverage: 71% → 93%.</span><span class="lang-zh">认证模块被标记为高风险。攻方尝试 SQL 注入、暴力破解、会话劫持。守方打补丁。5 轮后覆盖率 71% → 93%。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">10:15 AM — $roll-peer reviews the design</span><span class="lang-zh">10:15 — $roll-peer 复核方案</span></h4>
+      <p><span class="lang-en">Cross-agent negotiation flags a session management concern. 2 rounds of discussion. Consensus reached, implementation adjusted.</span><span class="lang-zh">跨 Agent 协商发现一个会话管理问题。讨论 2 轮达成共识，调整实现。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">10:30 AM — CI green → UAT → Evidence captured</span><span class="lang-zh">10:30 — CI 全绿 → UAT → 采集活证据</span></h4>
+      <p><span class="lang-en">Screenshots + curl responses captured. Verify stage complete. AI nudges: "UAT passed. Ready to release?"</span><span class="lang-zh">截图 + curl 响应已采集，Verify 阶段完成。AI 提醒：「UAT 通过，准备发布？」</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">10:45 AM — Human approves → Release</span><span class="lang-zh">10:45 — 人审批 → 发布</span></h4>
+      <p><span class="lang-en">Deployed. BACKLOG status: ✅ Done. $roll-sentinel begins monitoring.</span><span class="lang-zh">已发布。BACKLOG 状态变 ✅ Done。$roll-sentinel 接手监控。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">3:00 AM — $roll-.dream nightly scan</span><span class="lang-zh">凌晨 3:00 — $roll-.dream 夜间扫描</span></h4>
+      <p><span class="lang-en">Detects an emerging pattern: 3 similar auth helpers could be extracted. Creates REFACTOR-015 in BACKLOG.</span><span class="lang-zh">检出涌现模式：3 处相似的认证辅助函数可抽取。创建 REFACTOR-015。</span></p>
+    </div>
+    <div class="timeline-item">
+      <h4><span class="lang-en">Next Day — $roll-sentinel catches anomaly</span><span class="lang-zh">次日 — $roll-sentinel 捕获异常</span></h4>
+      <p><span class="lang-en">OAuth endpoint response time degrading (3 consecutive failures). Auto-creates FIX-012. $roll-fix patches + regression test. Resolved before users notice.</span><span class="lang-zh">OAuth 端点响应变慢（连续 3 次失败）。自动创建 FIX-012。$roll-fix 修补 + 回归测试。用户察觉前已解决。</span></p>
+    </div>
+  </div>
+  <span class="slide-number">17 / 18</span>
+</div>
+
+<!-- 18: Summary -->
+<div class="slide" data-slide="18">
+  <span class="tag fade-in"><span class="lang-en">Summary</span><span class="lang-zh">总结</span></span>
+  <h2 class="fade-in" style="font-size: 32px;">
+    <span class="lang-en">ROLL's Core Logic</span>
+    <span class="lang-zh">ROLL 的核心逻辑</span>
+  </h2>
+  <div class="highlight-box fade-in" style="margin-top: 18px; margin-bottom: 20px; max-width: 880px;">
+    <p style="font-size: 16px; color: var(--text-bright); font-weight: 500; line-height: 1.7;">
+      <span class="lang-en">Take 20 years of proven engineering practices (TDD / TCR / CI / DDD / SRE)<br>and encode them as standardized AI Agent work instructions.<br>AI won't cut corners, won't get tired, won't "skip the tests this time" —<br><span style="color:var(--accent-light);">because that branch doesn't exist in its instructions.</span></span>
+      <span class="lang-zh">把 20 年沉淀的工程实践（TDD / TCR / CI / DDD / SRE）<br>编码为标准化的 AI Agent 工作指令。<br>AI 不会偷懒、不会疲惫、不会「这次先跳过测试」——<br><span style="color:var(--accent-light);">因为它的指令里根本没有那条分支。</span></span>
+    </p>
+  </div>
+  <div class="cards cards-3 fade-in" style="max-width: 880px;">
+    <div class="card" style="text-align:center;border-top:3px solid var(--green);">
+      <div style="font-size:24px;margin-bottom:6px;">⚡</div>
+      <h3 style="color:var(--green-text);font-size:15px;"><span class="lang-en">Fast · 快</span><span class="lang-zh">快</span></h3>
+      <p>
+        <span class="lang-en">Requirement to production: hours<br>Zero-rework micro-step delivery<br>New dev onboards in minutes</span>
+        <span class="lang-zh">需求到生产：小时级<br>零返工的微步交付<br>新人几分钟上手</span>
+      </p>
+    </div>
+    <div class="card" style="text-align:center;border-top:3px solid var(--cyan);">
+      <div style="font-size:24px;margin-bottom:6px;">🛡️</div>
+      <h3 style="color:var(--cyan-text);font-size:15px;"><span class="lang-en">Solid · 稳</span><span class="lang-zh">稳</span></h3>
+      <p>
+        <span class="lang-en">Four automated lines of defense<br>Live-evidence verification<br>Sentinel + Dream 24/7 watch</span>
+        <span class="lang-zh">四道自动化防线<br>活证据验证<br>Sentinel + Dream 7×24 守望</span>
+      </p>
+    </div>
+    <div class="card" style="text-align:center;border-top:3px solid var(--orange);">
+      <div style="font-size:24px;margin-bottom:6px;">🤝</div>
+      <h3 style="color:var(--orange-text);font-size:15px;"><span class="lang-en">Aligned · 齐</span><span class="lang-zh">齐</span></h3>
+      <p>
+        <span class="lang-en">23 skills, one unified system<br>Three-layer autonomy<br>Human decides, AI delivers</span>
+        <span class="lang-zh">23 个 Skill，统一一套体系<br>三层自治模型<br>人来决策，AI 来交付</span>
+      </p>
+    </div>
+  </div>
+  <div class="fade-in" style="margin-top: 24px; text-align: center;">
+    <p style="font-size: 13px; color: var(--text-dim);">
+      <span class="lang-en">@seanyao/roll · MIT · 23 skills · <code>npm install -g @seanyao/roll</code></span>
+      <span class="lang-zh">@seanyao/roll · MIT · 23 个 Skill · <code>npm install -g @seanyao/roll</code></span>
+    </p>
+  </div>
+  <span class="slide-number">18 / 18</span>
+</div>
+
+</div>
+
+<!-- Nav -->
+<div class="nav">
+  <button class="nav-btn" id="btn-prev" onclick="navigate(-1)" aria-label="Previous slide">‹</button>
+  <span class="nav-info" id="nav-info">1 / 18</span>
+  <button class="nav-btn" id="btn-next" onclick="navigate(1)" aria-label="Next slide">›</button>
+</div>
+<div class="key-hint">
+  <span><kbd>←</kbd> <kbd>→</kbd> <span class="lang-en">Navigate</span><span class="lang-zh">翻页</span></span>
+  <span><kbd>F</kbd> <span class="lang-en">Fullscreen</span><span class="lang-zh">全屏</span></span>
+  <span><kbd>T</kbd> <span class="lang-en">Theme</span><span class="lang-zh">主题</span></span>
+  <span><kbd>L</kbd> <span class="lang-en">Lang</span><span class="lang-zh">语言</span></span>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  function showSlide(i) {
+    slides.forEach((s, idx) => {
+      s.classList.remove('active', 'exit-up');
+      if (idx < i) s.classList.add('exit-up');
+    });
+    slides[i].classList.add('active');
+    document.getElementById('nav-info').textContent = `${i + 1} / ${total}`;
+    document.getElementById('btn-prev').disabled = i === 0;
+    document.getElementById('btn-next').disabled = i === total - 1;
+    document.getElementById('progress-bar').style.width = `${((i + 1) / total) * 100}%`;
+  }
+
+  function navigate(dir) {
+    const next = current + dir;
+    if (next >= 0 && next < total) { current = next; showSlide(current); }
+  }
+
+  // Theme toggle
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.getElementById('theme-icon').textContent = theme === 'dark' ? '🌙' : '☀️';
+    document.getElementById('theme-label').textContent = theme === 'dark' ? 'Dark' : 'Light';
+    try { localStorage.setItem('roll-slides-theme', theme); } catch (e) {}
+  }
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+    applyTheme(cur === 'dark' ? 'light' : 'dark');
+  }
+
+  // Language toggle
+  function applyLang(lang) {
+    document.documentElement.setAttribute('data-lang', lang);
+    document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
+    document.getElementById('lang-label').textContent = lang === 'en' ? 'EN' : '中文';
+    try { localStorage.setItem('roll-slides-lang', lang); } catch (e) {}
+  }
+  function toggleLang() {
+    const cur = document.documentElement.getAttribute('data-lang') || 'en';
+    applyLang(cur === 'en' ? 'zh' : 'en');
+  }
+
+  // Restore preferences
+  try {
+    const savedTheme = localStorage.getItem('roll-slides-theme');
+    if (savedTheme === 'light' || savedTheme === 'dark') applyTheme(savedTheme);
+    const savedLang = localStorage.getItem('roll-slides-lang');
+    if (savedLang === 'en' || savedLang === 'zh') applyLang(savedLang);
+    else {
+      // Auto-detect: prefer ZH if browser is Chinese
+      const nav = (navigator.language || '').toLowerCase();
+      if (nav.startsWith('zh')) applyLang('zh');
+    }
+  } catch (e) {}
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); navigate(1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); navigate(-1); }
+    else if (e.key === 'f' || e.key === 'F') {
+      document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    }
+    else if (e.key === 't' || e.key === 'T') { toggleTheme(); }
+    else if (e.key === 'l' || e.key === 'L') { toggleLang(); }
+  });
+
+  // Touch swipe
+  let tx = 0, ty = 0;
+  document.addEventListener('touchstart', e => {
+    tx = e.touches[0].clientX; ty = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    const dx = tx - e.changedTouches[0].clientX;
+    const dy = ty - e.changedTouches[0].clientY;
+    // Only treat as swipe when horizontal movement dominates and is significant
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) navigate(dx > 0 ? 1 : -1);
+  }, { passive: true });
+
+  showSlide(0);
+</script>
+</body>
+</html>

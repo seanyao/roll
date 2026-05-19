@@ -113,6 +113,80 @@ $1
   [ "$output" = "?" ]
 }
 
+@test "cycle_row: includes model column before cost (claude-opus-4-7-...)" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
+    "duration_s": 1080,
+    "tokens": 3_600_000,
+    "cost_list": 2.65,
+    "model": "claude-opus-4-7-20251001",
+    "story": "US-VIEW-010",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+i_model = out.find("opus-4-7")
+i_cost  = out.find("$2.65")
+i_id    = out.find("US-VIEW-010")
+print(i_model > 0, i_model < i_cost, i_cost < i_id)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True True"* ]]
+}
+
+@test "cycle_row: missing model renders em-dash placeholder, not omitted" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
+    "duration_s": 60,
+    "tokens": 1000,
+    "cost_list": 0.0,
+    "model": None,
+    "story": "US-X",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+# em-dash appears at least once in the row (model column reserves space)
+print("—" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
+@test "cycle_row: narrow screen (COLS<100) omits model column" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+roll_render.COLS = 80
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
+    "duration_s": 600,
+    "tokens": 2_000_000,
+    "cost_list": 1.20,
+    "model": "claude-sonnet-4-6",
+    "story": "US-X",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("sonnet-4-6" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"False"* ]]
+}
+
 # ─── roll-loop-status.py: 4 data bug regressions ────────────────────────────
 
 run_status() {

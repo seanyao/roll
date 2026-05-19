@@ -313,11 +313,17 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     time_c  = "red" if outcome == "fail" else "fg"
     sid_c   = "red" if outcome == "fail" else "blue"
 
+    model_label = fmt_model(cy.get("model"))
+    # Auto-hide model column on narrow screens — keeps the dashboard readable
+    # when terminal is < 100 cols (cost / story IDs are higher-priority).
+    show_model = COLS >= 100
+    model_seg = c("muted", pad(model_label, 11)) + " " if show_model else ""
     inner = (
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
         c("muted", pad(dur, 4, "r")) + "  " +
         c("muted", pad(tok, 6, "r")) + "  " +
+        model_seg +
         c("muted", pad(cost, 7, "r")) + "   " +
         c(sid_c, ids_str, bold=True)
     )

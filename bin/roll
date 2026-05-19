@@ -2545,6 +2545,35 @@ PYEOF
 }
 
 _LOOP_TAG="# roll-loop"
+# FIX-065: when sourced in a test context with no explicit override, route
+# shared state into a per-process /tmp path instead of falling back to
+# production ~/.shared/roll/. Without this safety net, tests that source
+# bin/roll (directly or via a generated inner runner under /var/folders/)
+# would write ALERT / state / events / runs.jsonl into the live loop
+# daemon's monitored directory and trigger false aborts.
+#
+# Test context is detected via three signals (any one is enough):
+#   1. BATS_TEST_FILENAME is set (works for direct test invocations)
+#   2. The caller's file path lives under /tmp or /var/folders (catches the
+#      generated runner-inner.sh path that bats subprocesses spawn —
+#      BATS_* env can be lost across `bash -l` + nested forks)
+#   3. PWD is under /tmp or /var/folders (catches helpers that cd'd in)
+if [ -z "${_SHARED_ROOT:-}" ]; then
+  _roll_in_test_ctx=0
+  if [ -n "${BATS_TEST_FILENAME:-}" ]; then
+    _roll_in_test_ctx=1
+  else
+    _roll_caller="${BASH_SOURCE[1]:-}"
+    case "$_roll_caller" in /tmp/*|/private/tmp/*|/var/folders/*) _roll_in_test_ctx=1 ;; esac
+    case "$PWD" in /tmp/*|/private/tmp/*|/var/folders/*) _roll_in_test_ctx=1 ;; esac
+  fi
+  if [ "$_roll_in_test_ctx" = 1 ]; then
+    _SHARED_ROOT="${TMPDIR:-/tmp}/roll-test-shared.$$"
+    mkdir -p "${_SHARED_ROOT}/loop"
+    export _SHARED_ROOT
+  fi
+  unset _roll_in_test_ctx _roll_caller
+fi
 : "${_SHARED_ROOT:=${HOME}/.shared/roll}"
 # FIX-052: per-project loop state — ALERT/state/mute were globally shared,
 # causing one project's alerts to surface in another project's session and
@@ -2553,7 +2582,9 @@ _LOOP_TAG="# roll-loop"
 : "${_LOOP_PROJ_SLUG:=$(_project_slug 2>/dev/null || echo default)}"
 : "${_LOOP_STATE:=${_SHARED_ROOT}/loop/state-${_LOOP_PROJ_SLUG}.yaml}"
 : "${_LOOP_ALERT:=${_SHARED_ROOT}/loop/ALERT-${_LOOP_PROJ_SLUG}.md}"
-_LOOP_RUNS="${HOME}/.shared/roll/loop/runs.jsonl"
+# FIX-065: was hardcoded to ${HOME}/.shared/roll/loop/runs.jsonl which ignored
+# _SHARED_ROOT overrides and silently leaked test runs.jsonl writes into prod.
+_LOOP_RUNS="${_SHARED_ROOT}/loop/runs.jsonl"
 : "${_LOOP_MUTE_FILE:=${_SHARED_ROOT}/loop/mute-${_LOOP_PROJ_SLUG}}"
 _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
 
@@ -2596,6 +2627,24 @@ _loop_event() {
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   slug=$(_project_slug 2>/dev/null || basename "$PWD")
   evfile="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/events-${slug}.ndjson"
+  # FIX-065 tripwire: in a test context (BATS or temp cwd), refuse to write
+  # into production ~/.shared/roll/. Catching this in code is the last line
+  # of defense if some unusual path bypassed the auto-sandbox at source-time.
+  # Skipped when HOME itself has been redirected to a sandbox dir — then
+  # $HOME/.shared/roll IS the sandbox, not prod.
+  case "${HOME:-}" in
+    /tmp/*|/private/tmp/*|*/var/folders/*|*/tmp.*) ;;
+    *)
+      if [ -n "${HOME:-}" ] && [ "${evfile#${HOME}/.shared/roll/}" != "$evfile" ]; then
+        case "${BATS_TEST_FILENAME:-}${PWD}" in
+          */tmp.*|*/var/folders/*|/tmp/*|/private/tmp/*|*.bats)
+            echo "[FIX-065] refusing prod _loop_event write: $evfile (test context)" >&2
+            return 1
+            ;;
+        esac
+      fi
+      ;;
+  esac
   mkdir -p "$(dirname "$evfile")"
 
   # stdout: tab-separated for tmux display
@@ -2786,7 +2835,7 @@ fi
 printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$INNER_LOCK"
 # FIX-038: background heartbeat writer — outer script uses this as primary liveness signal
 # to detect stale execution without relying on PID reuse heuristics.
-HEARTBEAT_FILE="${HOME}/.shared/roll/loop/.heartbeat-${slug}"
+HEARTBEAT_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
 _heartbeat_writer() {
   while true; do echo "\$(date -u +%s)" > "\$HEARTBEAT_FILE"; sleep 60; done
 }
@@ -2805,7 +2854,7 @@ trap '_on_sigterm' TERM
 # multiple callers in the same cycle are safe.
 _runs_append() {
   local _status="\$1"; local _tcr="\${2:-0}"; local _built="\${3:-[]}"
-  local _runs_dst="${HOME}/.shared/roll/loop/runs.jsonl"
+  local _runs_dst="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/runs.jsonl"
   command -v jq >/dev/null 2>&1 || return 0
   local _cid="\${CYCLE_ID:-pre-cycle-\$\$}"
   local _rid="loop-\${_cid%-*}"
@@ -3124,13 +3173,13 @@ if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
 HEARTBEAT_TIMEOUT="\${ROLL_HEARTBEAT_TIMEOUT:-1800}"
 # FIX-052: per-project STATE_FILE (was global state.yaml — caused two projects
 # to clobber each other's cycle state).
-STATE_FILE="${HOME}/.shared/roll/loop/state-${slug}.yaml"
+STATE_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/state-${slug}.yaml"
 if [ -f "\$STATE_FILE" ]; then
   _state=\$(grep '^status:' "\$STATE_FILE" | awk '{print \$2}' 2>/dev/null || echo "")
   if [ "\$_state" = "running" ]; then
     _still_active=false
     # FIX-038: heartbeat is primary signal
-    _heartbeat_file="${HOME}/.shared/roll/loop/.heartbeat-${slug}"
+    _heartbeat_file="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
     if [ -f "\$_heartbeat_file" ]; then
       _hb_ts=\$(cat "\$_heartbeat_file" 2>/dev/null || echo "0")
       _now=\$(date -u +%s)

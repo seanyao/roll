@@ -1,2 +1,8 @@
+### Major
+- **`.roll/` 拆为独立私有仓库** — 过程文件（backlog / brief / features / dream / domain / briefs）整体迁入嵌套私有 repo `roll-meta`，主仓只留产品文档。AGENTS.md 新增 §9 说明双 repo 协作约定 `[meta]`
 ### Improved
-- **`roll init`** — 初始化流程现在显示 6 步编号进度，新建文件用绿色 `+`、合并已有用琥珀 `~`，结尾给三步上手指南 `[loop]`
+- **`.roll/features/` 按 Epic 分组** — features 目录由扁平改为 Epic 子目录，附带 loop 架构经验文档 `[docs]`
+- **站点登陆页对齐 v2.0 架构** — `docs/site/` 文案与 2.0 实际产物对齐，去掉过期描述 `[docs]`
+### Fixed
+- **loop 异常退出** — dashboard 不再卡在"运行中"，崩溃 / 被 kill / 超时退出都会写下结束标记 `[loop]`
+- **`FIX-065` loop 共享状态隔离** — 测试运行的 loop 不再污染生产 backlog/brief，sandbox 化共享路径 `[loop]`

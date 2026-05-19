@@ -22,7 +22,7 @@
 - **同步**Roll 约定到你用的 AI 工具
 - 你得到的项目同时拥有：原来的工作流 + Roll 的项目管理能力
 
-Graft 是**完全可逆**的：`rm -rf .roll/` 就回到接入前的状态。
+Graft 是**完全可逆**的：跑 `roll offboard` 让 Roll 自己撤销它加进来的全部痕迹（见下文"怎么退出"）。
 
 ## 分步操作
 
@@ -111,19 +111,34 @@ Roll 只动它**自己的**文件：
 
 ## 怎么退出
 
-两个选项：
+`roll init --apply` 把它创建的每个文件、目录、`.gitignore` 行都记到了 `.roll/onboard-changeset.yaml`。`roll offboard` 命令读这份清单，撤销 onboard 时的全部改动。
 
-**轻量退出**（保留 Roll 安装，放弃这个项目的接入）：
+**先预演（默认）：**
 
 ```bash
-rm -rf .roll/ AGENTS.md
-# 如果 Roll 改过 .gitignore，也回滚
+cd your-project
+roll offboard
 ```
 
-**完全退出**（全局卸载 Roll）：
+这是 dry-run，不会真的删除。输出会列出清单中记录的所有产物，以及将要从 `.gitignore` 撤销的行。
+
+**确认后执行：**
 
 ```bash
-rm -rf .roll/ AGENTS.md
+roll offboard --confirm
+```
+
+Roll 不创建的文件 / 目录原封不动；你自己加到 `.gitignore` 的内容也保留。执行成功后，清单文件本身也会被删除。
+
+安全保障：
+
+- 找不到 `.roll/onboard-changeset.yaml`（比如较早版本的 Roll 没记录、或者这个项目从没跑过 `roll init --apply`），`roll offboard` 拒绝执行，并打印手动 `rm` 命令，不会自己猜。
+- 如果清单里的路径不在当前项目根目录下（跨项目串路径），`roll offboard` 也拒绝执行，并提示你切到正确目录再跑。
+
+**完全卸载（全机器）：**
+
+```bash
+roll offboard --confirm
 npm uninstall -g @seanyao/roll
 ```
 

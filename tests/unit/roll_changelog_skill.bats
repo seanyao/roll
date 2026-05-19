@@ -19,8 +19,11 @@ RELEASE_SH="${BATS_TEST_DIRNAME}/../../scripts/release.sh"
   ! grep -qF "git describe --tags --abbrev=0" "$SKILL_FILE"
 }
 
-@test "bin/roll: _promote_unreleased replaces ## Unreleased with ## v{VERSION}" {
+# REFACTOR-030: _promote_unreleased was removed (orphaned by REFACTOR-021).
+# scripts/release.sh now generates the version header directly from BACKLOG.
+# Assert the function is truly gone so it isn't quietly re-introduced.
+@test "bin/roll: _promote_unreleased helper has been removed (REFACTOR-030)" {
   local ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
-  grep -qF '_promote_unreleased()' "$ROLL_BIN"
-  grep -qE 'sed.*Unreleased.*v\$\{version\}|## Unreleased' "$ROLL_BIN"
+  ! grep -qE '^_promote_unreleased\(\)' "$ROLL_BIN"
+  ! grep -qE '^_ensure_unreleased\(\)'   "$ROLL_BIN"
 }

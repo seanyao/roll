@@ -264,8 +264,7 @@ After each item completes:
    it derives `owner/repo` from the git remote and uses `gh -R <slug>`, which
    is required to work through `~/.ssh/config` host rewrites that break gh's
    auto-detection.
-   - CI passes → call `_loop_clear_heal_state <story_id>` (idempotent) and
-     continue normally
+   - CI passes → clear any `heal_count:` entry in `~/.shared/roll/loop/state-<slug>.yaml` (idempotent — drop the line if present, no-op otherwise) and continue normally
    - CI fails / times out / `gh` call fails → enter **CI self-heal** (US-AUTO-041)
    - `gh` binary not installed (`command -v gh` fails) → skip gracefully
      (return 0). Any other `gh` error is **not** "gh unavailable" — it is a
@@ -273,9 +272,9 @@ After each item completes:
 
    **CI self-heal (US-AUTO-041)** — bounded auto-fix before ALERT.
 
-   Call `_loop_self_heal_ci <story_id>` to check if another attempt is permitted.
+   Read `heal_count:` from `~/.shared/roll/loop/state-<slug>.yaml`; treat a missing line as `0`. If the count is below `ROLL_LOOP_HEAL_MAX` (default 2) and `ROLL_LOOP_NO_HEAL` is not set, increment it and take Path A. Otherwise take Path B.
 
-   **Path A — attempt allowed (exit 0, counter incremented in `state.yaml`):**
+   **Path A — attempt allowed (counter incremented in `state.yaml`):**
 
    1. Capture failure summary:
       ```

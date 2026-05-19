@@ -4208,50 +4208,10 @@ _loop_heal_dir() {
   printf '%s\n' "${ROLL_LOOP_DIR:-${HOME}/.shared/roll/loop}/heal"
 }
 
-# Bounded CI self-heal gate. Called by the loop SKILL when the
-# post-build CI check goes red. Counter is per-story, persisted under
-# $ROLL_LOOP_DIR/heal/<story-id>.count, so retries survive cycle boundaries.
-#
-# Exit 0: another heal attempt is allowed (counter incremented). Caller should
-#         invoke roll-fix with the failure summary, then re-run the CI gate.
-# Exit 1: heal disabled (ROLL_LOOP_NO_HEAL=1) or exhausted (>= ROLL_LOOP_HEAL_MAX).
-#         Caller should write ALERT and stop.
-_loop_self_heal_ci() {
-  local story_id="$1"
-  [[ -z "$story_id" ]] && return 1
-  [[ "${ROLL_LOOP_NO_HEAL:-0}" == "1" ]] && return 1
-  local max="${ROLL_LOOP_HEAL_MAX:-2}"
-  local state="$_LOOP_STATE"
-  local current=0
-  if [[ -f "$state" ]]; then
-    local raw; raw=$(grep '^heal_count:' "$state" 2>/dev/null | awk '{print $2}')
-    [[ "$raw" =~ ^[0-9]+$ ]] && current="$raw"
-  fi
-  [[ "$current" -ge "$max" ]] && return 1
-  local new=$((current + 1))
-  mkdir -p "$(dirname "$state")"
-  if grep -q '^heal_count:' "$state" 2>/dev/null; then
-    local tmp; tmp=$(mktemp)
-    sed "s/^heal_count:.*/heal_count: ${new}/" "$state" > "$tmp"
-    mv "$tmp" "$state"
-  else
-    echo "heal_count: ${new}" >> "$state"
-  fi
-  return 0
-}
-
-# Reset per-story heal counter. Called when CI eventually turns green or by
-# `roll loop reset`. Idempotent.
-_loop_clear_heal_state() {
-  local story_id="$1"
-  [[ -z "$story_id" ]] && return 0
-  local state="$_LOOP_STATE"
-  [[ ! -f "$state" ]] && return 0
-  local tmp; tmp=$(mktemp)
-  grep -v '^heal_count:' "$state" > "$tmp"
-  mv "$tmp" "$state"
-  return 0
-}
+# REFACTOR-030: removed `_loop_self_heal_ci` and `_loop_clear_heal_state`.
+# REFACTOR-023 merged the CI self-heal counter into the main state.yaml flow,
+# but the two helpers themselves were left behind as dead code. Their job
+# now lives in the state.yaml read/write paths called from the loop runner.
 
 # Verify TCR rhythm after a story completes. Returns 0 if ok, 1 if no TCR commits.
 # On failure: reverts story in .roll/backlog.md to 📋 Todo and writes ALERT.
@@ -5485,34 +5445,11 @@ cmd_brief() {
   cat "$latest"
 }
 
-_promote_unreleased() {
-  local version="$1"
-  local changelog="$2"
-  [[ -f "$changelog" ]] || return 0
-  grep -q "^## Unreleased" "$changelog" || return 0
-  sed -i.bak "s/^## Unreleased$/## v${version}/" "$changelog" && rm "${changelog}.bak"
-}
-
-_ensure_unreleased() {
-  local changelog="$1"
-  [[ -f "$changelog" ]] || return 0
-  grep -q "^## Unreleased$" "$changelog" && return 0
-  python3 - "$changelog" <<'PYEOF'
-import sys, pathlib
-p = pathlib.Path(sys.argv[1])
-lines = p.read_text().splitlines(keepends=True)
-out = []
-inserted = False
-for line in lines:
-    out.append(line)
-    if not inserted and line.rstrip() == "# Changelog":
-        out.append("\n## Unreleased\n")
-        inserted = True
-if not inserted:
-    out.insert(0, "## Unreleased\n\n")
-p.write_text("".join(out))
-PYEOF
-}
+# REFACTOR-030: removed `_promote_unreleased` and `_ensure_unreleased`.
+# REFACTOR-021 collapsed the changelog double-pipeline so the release script
+# generates the version header directly from BACKLOG, leaving these two
+# helpers orphaned. Their behaviour is now part of the changelog renderer
+# called from scripts/release.sh.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKLOG — show pending tasks / manage status

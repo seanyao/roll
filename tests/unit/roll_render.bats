@@ -75,6 +75,44 @@ $1
   [[ "$output" == *"'green'"* ]]
 }
 
+# ─── fmt_model: cycle row model column (US-VIEW-010) ────────────────────────
+
+@test "fmt_model: opus with date suffix strips claude- prefix and date" {
+  run run_py 'print(roll_render.fmt_model("claude-opus-4-7-20251001"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "opus-4-7" ]
+}
+
+@test "fmt_model: sonnet without date suffix" {
+  run run_py 'print(roll_render.fmt_model("claude-sonnet-4-6"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "sonnet-4-6" ]
+}
+
+@test "fmt_model: haiku with date suffix" {
+  run run_py 'print(roll_render.fmt_model("claude-haiku-4-5-20251001"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "haiku-4-5" ]
+}
+
+@test "fmt_model: None returns em-dash" {
+  run run_py 'print(roll_render.fmt_model(None))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "—" ]
+}
+
+@test "fmt_model: empty string returns em-dash" {
+  run run_py 'print(roll_render.fmt_model(""))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "—" ]
+}
+
+@test "fmt_model: non-claude vendor returns question mark" {
+  run run_py 'print(roll_render.fmt_model("gpt-4-turbo"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "?" ]
+}
+
 # ─── roll-loop-status.py: 4 data bug regressions ────────────────────────────
 
 run_status() {

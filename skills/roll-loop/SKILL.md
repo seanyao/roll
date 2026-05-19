@@ -201,12 +201,21 @@ Together these mean: only one loop runs at a time per project (LOCK), and within
 
 ### Step 3 — Route and Execute
 
-For each item, **before invoking the executor skill**, mark the story 🔨 In Progress in .roll/backlog.md so brief and peer agents can see it's being worked on:
+For each item, **before invoking the executor skill**, mark the story 🔨 In Progress in the **main repo's** .roll/backlog.md so brief and peer agents can see it being worked on. The cycle worktree is gitignored at .roll/, so editing the worktree's own copy + committing carries no change back to main — write directly via the helper instead:
 
-1. Edit .roll/backlog.md: change the row's Status column from `📋 Todo` to `🔨 In Progress`.
-2. Commit: `git commit -am "chore: mark US-XXX in progress"` (use the actual story id).
+```bash
+bash -c 'source "$(command -v roll)"; _loop_mark_in_progress US-XXX'
+# Updates ${ROLL_MAIN_PROJECT}/.roll/backlog.md in place: flips the row
+# containing US-XXX from "📋 Todo" to "🔨 In Progress". Idempotent.
+```
 
-This commit is what makes the work visible — without it, tcr micro-commits during execution are invisible to `roll-brief`.
+If the executor fails (TCR aborts, CI red, etc.), revert the marker so the next cycle can re-pick the story:
+
+```bash
+bash -c 'source "$(command -v roll)"; _loop_mark_todo US-XXX'
+```
+
+Status flips happen in main directly — no per-cycle commit needed. `roll-brief` reads main's backlog, so the 🔨 marker is visible the moment the helper returns.
 
 选定故事后，调用 `_loop_event` 发出 pick_todo 事件，让 dashboard / monitor / attach 都能把"这个 cycle 选了哪个 story"正确归类：
 

@@ -2947,6 +2947,10 @@ _LOOP_MUTE_FILE="\${_SHARED_ROOT}/loop/mute-${slug}"
 # claude, loop-fmt.py, _loop_event in arbitrary cwd. _project_slug honors this
 # env var first, so writes never fragment into tmp-* / cycle-* phantom slugs.
 export ROLL_MAIN_SLUG="${slug}"
+# FIX-070: helpers that need to update the main repo's backlog (e.g. when a
+# worktree cycle marks a story 🔨 In Progress) read ROLL_MAIN_PROJECT to
+# locate it — the cycle's own cwd is the worktree, not main.
+export ROLL_MAIN_PROJECT="${project_path}"
 
 # Pre-claude: try to create a per-cycle isolated worktree on origin/main.
 # On any failure (no remote, no main, etc.) fall back to running in the
@@ -4627,6 +4631,50 @@ _loop_pr_inbox() {
     i=$((i + 1))
   done
   return 0
+}
+
+# FIX-070: flip a story row in the main repo's .roll/backlog.md between
+# 📋 Todo and 🔨 In Progress. The cycle worktree is gitignored at .roll/,
+# so editing the worktree copy + committing leaves no trace in git — and
+# main's backlog (which roll-brief reads) stays stale. These helpers write
+# directly to ${ROLL_MAIN_PROJECT}/.roll/backlog.md instead.
+#
+# _loop_mark_in_progress <story-id> [backlog-path]
+#   Replace "📋 Todo" with "🔨 In Progress" on the row containing <story-id>.
+#   No-op when backlog or row is missing (idempotent retries don't error).
+_loop_mark_in_progress() {
+  local story_id="$1"
+  local backlog="${2:-${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md}"
+  [ -n "$story_id" ] || return 1
+  [ -f "$backlog" ] || return 0
+  local tmp; tmp=$(mktemp "${backlog}.XXXXXX") || return 1
+  awk -v sid="$story_id" '
+    {
+      if (index($0, sid) > 0 && index($0, "📋 Todo") > 0) {
+        sub(/📋 Todo/, "🔨 In Progress")
+      }
+      print
+    }
+  ' "$backlog" > "$tmp" && mv "$tmp" "$backlog"
+}
+
+# _loop_mark_todo <story-id> [backlog-path]
+#   Revert a row from "🔨 In Progress" back to "📋 Todo". Called when a
+#   cycle's executor fails so the next cycle can pick the story up again.
+_loop_mark_todo() {
+  local story_id="$1"
+  local backlog="${2:-${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md}"
+  [ -n "$story_id" ] || return 1
+  [ -f "$backlog" ] || return 0
+  local tmp; tmp=$(mktemp "${backlog}.XXXXXX") || return 1
+  awk -v sid="$story_id" '
+    {
+      if (index($0, sid) > 0 && index($0, "🔨 In Progress") > 0) {
+        sub(/🔨 In Progress/, "📋 Todo")
+      }
+      print
+    }
+  ' "$backlog" > "$tmp" && mv "$tmp" "$backlog"
 }
 
 # FIX-048: report story IDs already claimed by open loop/* PRs so a new cycle

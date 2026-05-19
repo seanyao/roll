@@ -5605,6 +5605,69 @@ cmd_ci() {
   echo "$runs" | jq -r '.[] | "\(.name): \(.status)/\(.conclusion)"'
 }
 
+# REFACTOR-041: backlog description linter. The global convention bans file
+# paths, function names, filenames, and "architecture jargon" in description
+# columns — see conventions/global/AGENTS.md §4. This helper scans each row's
+# description column for those patterns and prints any findings. Phase 1 is
+# warn-only (always exit 0) so a noisy ramp-up doesn't block work; Phase 2
+# will switch to hard-fail. Output format mirrors a linter ("file:line:
+# message") so editors can navigate from it.
+_backlog_lint() {
+  local backlog="${1:-.roll/backlog.md}"
+  [ -f "$backlog" ] || { err "backlog not found: $backlog"; return 1; }
+
+  local violations=0
+  local lineno=0
+  while IFS= read -r line; do
+    lineno=$((lineno+1))
+    # Only data rows (start with "|"), skip header/separator/non-table
+    case "$line" in
+      \|*) ;;
+      *) continue ;;
+    esac
+    case "$line" in
+      *Story*Description*Status*|*'---'*) continue ;;
+    esac
+    local desc
+    desc=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//')
+    [ -n "$desc" ] || continue
+    # Strip the leading `[US-XXX](path)` link / bare `US-XXX` id — those are
+    # structural, not description prose.
+    local body
+    body=$(echo "$desc" \
+      | sed -E 's|^\[[A-Z]+-[0-9]+\]\([^)]*\)[[:space:]]*||' \
+      | sed -E 's|^[A-Z]+-[0-9]+[[:space:]]*||')
+    local issues=""
+    # Filenames: bare `something.ext` for common code/config extensions
+    if echo "$body" | grep -qE '\b[A-Za-z_][A-Za-z0-9_.-]*\.(sh|bash|yaml|yml|json|js|ts|tsx|py|rb|go|rs|c|cpp|h)\b'; then
+      issues="${issues:+${issues}, }filename"
+    fi
+    # Paths: directory/anything pattern not preceded by `(` (links already
+    # stripped above). Hyphens / dots / underscores allowed in path segments.
+    if echo "$body" | grep -qE '[A-Za-z_][A-Za-z0-9_.-]*/[A-Za-z0-9_./-]+'; then
+      issues="${issues:+${issues}, }path"
+    fi
+    # Function names: underscore-prefixed identifier or trailing parens
+    if echo "$body" | grep -qE '\b_[a-zA-Z][a-zA-Z0-9_]+\b|\b[A-Za-z_][A-Za-z0-9_]+\(\)'; then
+      issues="${issues:+${issues}, }function"
+    fi
+    if [ -n "$issues" ]; then
+      violations=$((violations+1))
+      printf '%s:%d: backlog description %s\n  %s\n' "$backlog" "$lineno" "$issues" "$desc"
+    fi
+  done < "$backlog"
+
+  echo ""
+  if [ "$violations" -gt 0 ]; then
+    echo "  ${violations} violation(s) — see conventions/global/AGENTS.md §4"
+    echo "  ${violations} 条违规 — Phase 1: warn-only, not blocking"
+  else
+    echo "  No violations  无违规"
+  fi
+  # Phase 1: warn-only. Exit 0 regardless.
+  return 0
+}
+
 cmd_backlog() {
   local backlog=".roll/backlog.md"
   if [[ ! -f "$backlog" ]]; then
@@ -5616,6 +5679,10 @@ cmd_backlog() {
 
   # ── Status management subcommands ─────────────────────────────────────────
   case "$subcmd" in
+    lint)
+      _backlog_lint "$backlog"
+      return
+      ;;
     block|defer|unblock|promote)
       local pattern="${2:-}"
       local reason="${3:-}"
@@ -6151,6 +6218,7 @@ _legacy_help() {
   echo "  backlog block <pat> [reason]  Mark matching items as 🔒 Blocked  标记为已阻塞"
   echo "  backlog defer <pat> [reason]  Mark matching items as ⏸ Deferred  标记为已推迟"
   echo "  backlog unblock <pat>         Restore matching items to 📋 Todo   恢复为待处理"
+  echo "  backlog lint                  Check descriptions for path/function/filename violations  检查描述合规"
   echo "  agent [use <name>|list]   [Config] Per-project agent selection            切换项目 agent"
   echo "  ci [--wait]            [CI] Show or wait for current commit's CI status       查看/等待 CI 状态"
   echo "  review-pr <number>     [PR Review] AI-powered code review for a PR           AI 代码评审"

@@ -11,7 +11,7 @@
 
 **[中文版 README](README_CN.md)**
 
-[![Website](https://img.shields.io/badge/Website-seanyao.github.io%2FRoll-blue)](https://seanyao.github.io/Roll/)
+[![Website](https://img.shields.io/badge/Website-seanyao.github.io%2Froll-blue)](https://seanyao.github.io/roll/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/@seanyao/roll.svg)](https://www.npmjs.com/package/@seanyao/roll)
 [![CI](https://github.com/seanyao/roll/actions/workflows/ci.yml/badge.svg)](https://github.com/seanyao/roll/actions/workflows/ci.yml)

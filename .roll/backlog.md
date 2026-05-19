@@ -278,9 +278,12 @@
 | REFACTOR-031 | 同一个 macOS/Linux mtime 兼容写法在四处复制粘贴，平台兼容性如有调整需要四个地方同步改，容易漏 — flagged by dream 2026-05-18 | 📋 Todo |
 | REFACTOR-032 | docs: 产品功能目录漏收三个已经上线一段时间的功能区，用户从功能页找不到这些功能；发版时的自动重写脚本没能把它们补进去 — flagged by dream 2026-05-18 (hint: $roll-doc) | 📋 Todo |
 | REFACTOR-033 | docs: 仓库里有一个共享脚本目录承载了多个生产模块，但在架构文档里完全没出现，新人读完领域文档也不知道它的存在 — flagged by dream 2026-05-18 (hint: $roll-doc) | 📋 Todo |
-| REFACTOR-034 | docs: BACKLOG 里每条 Story 的链接都指向已经搬走的旧目录，点开是 404，新人通过 BACKLOG 浏览功能详情会被全部断链堵死 — flagged by dream 2026-05-19 (hint: $roll-doc) | 📋 Todo |
-| REFACTOR-035 | docs: 用户指南还在告诉读者功能详情、领域模型、夜检日志放在老目录，而实际位置已经搬走，按文档说的路径找不到任何东西 — flagged by dream 2026-05-19 (hint: $roll-doc) | 📋 Todo |
-| REFACTOR-036 | 本次夜检技能自身的扫描描述里还写着老目录路径，未来按文档复现夜检流程会扫到空目录、漏掉真实内容 — flagged by dream 2026-05-19 | 📋 Todo |
+| REFACTOR-034 | docs: BACKLOG 里每条 Story 的链接都指向已经搬走的旧目录，点开是 404，新人通过 BACKLOG 浏览功能详情会被全部断链堵死 — flagged by dream 2026-05-19 (hint: $roll-doc) | ✅ Done |
+| REFACTOR-035 | docs: 用户指南还在告诉读者功能详情、领域模型、夜检日志放在老目录，而实际位置已经搬走，按文档说的路径找不到任何东西 — flagged by dream 2026-05-19 (hint: $roll-doc) | ✅ Done |
+| REFACTOR-036 | 本次夜检技能自身的扫描描述里还写着老目录路径，未来按文档复现夜检流程会扫到空目录、漏掉真实内容 — flagged by dream 2026-05-19 | ✅ Done |
+| REFACTOR-037 | docs: README + guide/{overview,project-setup,methodology,conventions} 还描述老的"BACKLOG.md 在根级"项目布局，没提 `.roll/` 约定、`roll migrate`、`$roll-onboard` 三个新能力——新用户读完文档不知道 2.0 的核心特性 | 📋 Todo |
+| REFACTOR-038 | docs: `conventions/global/AGENTS.md` 分发给所有用户项目，里面的"Where to Look"指针和"Workspace"段还指老路径——新用户 `roll setup` 之后拿到的全局约定是 pre-2.0 的描述 | 📋 Todo |
+| REFACTOR-039 | docs: README 没有 "What's new in 2.0" 入口，老用户升级后不知道为啥要 `roll migrate`、也不知道新能力——需要一段简短"2.0 brings X, Y, Z" + 链接到 migration-2.0.md | 📋 Todo |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

@@ -244,9 +244,10 @@
 ---
 
 <a id="us-view-008"></a>
-## US-VIEW-008 `roll init` 重设计 📋
+## US-VIEW-008 `roll init` 重设计 ✅
 
 **Created**: 2026-05-18
+**Completed**: 2026-05-19
 **Wave**: 4 · Reference frame: `InitFrame` in `frames-roll-flows.jsx`
 
 - As a project owner
@@ -254,15 +255,16 @@
 - So that 初始化时清楚每一步动了哪个文件，已有文件 merge 而不是覆盖时用 `~` 琥珀
 
 **AC:**
-- [ ] 顶部 eyebrow + 项目路径
-- [ ] 6 步流程，每步 `✓` 绿 / `!` 琥珀（merge）/ `✗` 红 / `⏵` 紫
-- [ ] 文件操作用 `+ filename` 绿色（新建）/ `~ filename` 琥珀（merge）
-- [ ] 结尾 `✓ Project ready` + NEXT 段三步（编辑 BACKLOG / 跑一轮 / 启用 loop）
-- [ ] 项目类型自动检测（package.json / Cargo.toml / pyproject.toml 等）— 行为不变
+- [x] 顶部 eyebrow + 项目路径
+- [x] 6 步流程，每步 `✓` 绿 / `!` 琥珀（merge）/ `✗` 红 / `⏵` 紫
+- [x] 文件操作用 `+ filename` 绿色（新建）/ `~ filename` 琥珀（merge）
+- [x] 结尾 `✓ Project ready` + NEXT 段三步（编辑 BACKLOG / 跑一轮 / 启用 loop）
+- [x] 项目类型自动检测（package.json / Cargo.toml / pyproject.toml 等）— 行为不变
 
 **Files:**
-- `lib/roll-init.py`（新建；wrapper 现有 init 逻辑）
-- `bin/roll`（`init` 的 dispatch 加 ROLL_UI 分支）
+- `lib/roll-init.py`（新建；v2 demo 渲染器，6 步编号 + `+`/`~` 文件标记 + NEXT 段）
+- `bin/roll`（`cmd_init` 加 `--demo` 解析 + ROLL_UI=v2 dispatch；v1 fallback 保留旧实现）
+- `tests/unit/roll_init.bats`（新建；7 个测试覆盖 demo 输出 + 路由）
 
 **Dependencies:**
 - Depends on: US-VIEW-001

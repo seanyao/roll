@@ -986,10 +986,16 @@ cmd_init() {
 
 # US-ONBOARD-006: Legacy detection
 # A project is "Legacy" if it has substantive code but no AGENTS.md to anchor
-# Roll conventions. Definition (per design doc §5.1): no AGENTS.md AND any of
-# src/ app/ lib/ pkg/ cmd/ contains ≥10 non-empty files.
+# Roll conventions. US-ONBOARD-012 widened the recogniser to cover non-canonical
+# layouts (WeChat mini-program, Python flat, Terraform, etc.) — any of:
+#   1. Classic layout: src/app/lib/pkg/cmd contains ≥10 non-empty files.
+#   2. A manifest of any common ecosystem at the project root.
+#   3. Git history exists (at least one commit on HEAD).
+# Either signal alone is enough; the AGENTS.md check happens earlier.
 _init_is_legacy_project() {
   local project_dir="$1"
+
+  # Signal 1 — classic source layout
   local dir count
   for dir in src app lib pkg cmd; do
     if [[ -d "$project_dir/$dir" ]]; then
@@ -999,6 +1005,29 @@ _init_is_legacy_project() {
       fi
     fi
   done
+
+  # Signal 2 — manifest file at project root
+  local manifest
+  for manifest in \
+      package.json pyproject.toml requirements.txt setup.py setup.cfg Pipfile \
+      go.mod Cargo.toml Gemfile pom.xml build.gradle build.gradle.kts \
+      Makefile Dockerfile docker-compose.yml docker-compose.yaml \
+      app.json project.config.json \
+      mix.exs composer.json deno.json deno.jsonc; do
+    [[ -f "$project_dir/$manifest" ]] && return 0
+  done
+  # Terraform: any *.tf at the root
+  if compgen -G "$project_dir/*.tf" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Signal 3 — git history exists
+  if [[ -d "$project_dir/.git" ]] || [[ -f "$project_dir/.git" ]]; then
+    if ( cd "$project_dir" && git rev-parse --verify HEAD >/dev/null 2>&1 ); then
+      return 0
+    fi
+  fi
+
   return 1
 }
 
@@ -1085,6 +1114,27 @@ _init_legacy_file_summary() {
       fi
     fi
   done
+  # US-ONBOARD-012: surface non-canonical signals in the summary too.
+  local manifest
+  for manifest in \
+      package.json pyproject.toml requirements.txt setup.py setup.cfg Pipfile \
+      go.mod Cargo.toml Gemfile pom.xml build.gradle build.gradle.kts \
+      Makefile Dockerfile docker-compose.yml docker-compose.yaml \
+      app.json project.config.json \
+      mix.exs composer.json deno.json deno.jsonc; do
+    if [[ -f "$project_dir/$manifest" ]]; then
+      parts+=("manifest: $manifest")
+      break
+    fi
+  done
+  if compgen -G "$project_dir/*.tf" >/dev/null 2>&1; then
+    parts+=("Terraform .tf files")
+  fi
+  if [[ ${#parts[@]} -eq 0 ]] \
+      && { [[ -d "$project_dir/.git" ]] || [[ -f "$project_dir/.git" ]]; } \
+      && ( cd "$project_dir" && git rev-parse --verify HEAD >/dev/null 2>&1 ); then
+    parts+=("git history present")
+  fi
   echo "no AGENTS.md, ${parts[*]}"
 }
 

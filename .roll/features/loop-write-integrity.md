@@ -46,9 +46,10 @@
 ---
 
 <a id="us-loop-006"></a>
-## US-LOOP-006 cycle 写入身份归一 📋
+## US-LOOP-006 cycle 写入身份归一 ✅
 
 **Created**: 2026-05-19
+**Completed**: 2026-05-19
 **Plan**: [loop-write-integrity-plan.md](loop-write-integrity-plan.md)
 **Source**: IDEA-029
 
@@ -63,14 +64,14 @@
 - Invariant: cycle 的 ProjectIdentity 与运行位置无关，恒等于主项目 slug
 
 **AC:**
-- [ ] cycle 启动时把主项目 slug 写入 `$ROLL_MAIN_SLUG` 环境变量，子进程继承
-- [ ] worktree 内调用 `_project_slug` 时优先使用 `$ROLL_MAIN_SLUG`；不存在时从 `git rev-parse --git-common-dir` 推主仓库根再算
-- [ ] events 写入路径恒为 `events-${main_slug}.ndjson`
-- [ ] runs.jsonl `project` 字段恒为 `${main_slug}` 或 `${main_slug}-cycle-...`，不再出现 `tmp-*`
-- [ ] 集成测试：在 worktree / tmp cwd 触发 cycle，断言所有写入都归到主项目 slug
+- [x] cycle 启动时把主项目 slug 写入 `$ROLL_MAIN_SLUG` 环境变量，子进程继承
+- [x] worktree 内调用 `_project_slug` 时优先使用 `$ROLL_MAIN_SLUG`；不存在时从 `git rev-parse --git-common-dir` 推主仓库根再算（FIX-034 已覆盖兜底）
+- [x] events 写入路径恒为 `events-${main_slug}.ndjson`
+- [x] runs.jsonl `project` 字段恒为 `${main_slug}`，不再出现 `tmp-*`
+- [x] 集成测试：在 worktree / tmp cwd 触发 `_loop_event`，断言所有写入都归到主项目 slug
 
 **Files:**
-- `bin/roll` — `_project_slug` 函数 + cycle wrapper 启动脚本
+- `bin/roll` — `_project_slug` ROLL_MAIN_SLUG 优先；`_write_loop_runner_script` inner 模板 export ROLL_MAIN_SLUG
 - `tests/unit/project_slug_in_worktree.bats`（新增）
 - `tests/integration/loop_identity_normalization.bats`（新增）
 

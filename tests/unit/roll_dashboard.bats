@@ -144,7 +144,7 @@ EOF
 status: pending
 EOF
   local out; out=$(_legacy_home)
-  echo "$out" | grep -qE "PROPOSAL.*PROPOSALS\.md"
+  echo "$out" | grep -qE "PROPOSAL.*\.roll/proposals\.md"
   ! echo "$out" | grep -qE "PROPOSAL.*roll backlog"
 }
 

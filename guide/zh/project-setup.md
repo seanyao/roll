@@ -44,7 +44,7 @@ roll loop on               # 开启自主执行
 | `CLAUDE.md` | Claude Code 项目指令 |
 | `AGENTS.md` | Agent 约定：领域模型、作用域、编码规范 |
 | `BACKLOG.md` | 故事跟踪（Epic / Feature / Story / Fix / Refactor） |
-| `docs/features/` | 每个 Feature 的深度文档 |
+| `.roll/features/` | 每个 Feature 的深度文档 |
 
 ## 幂等性
 

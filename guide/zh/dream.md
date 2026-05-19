@@ -8,7 +8,7 @@
 
 每晚 dream 完整扫描一次代码库，输出两份结果：
 
-1. **`docs/dream/YYYY-MM-DD.md`** — 中文详细报告（每晚一个文件）
+1. **`.roll/dream/YYYY-MM-DD.md`** — 中文详细报告（每晚一个文件）
 2. **BACKLOG.md 条目** — 可操作的 `REFACTOR-NNN` 条目追加到 `## ♻️ Refactor` 表格
 
 报告覆盖以下方面：
@@ -23,10 +23,10 @@
 
 ```bash
 # 查看最近 3 次报告
-ls -lt docs/dream/ | head -4
+ls -lt .roll/dream/ | head -4
 
 # 读取最新报告
-cat docs/dream/$(ls -1t docs/dream/ | head -1)
+cat .roll/dream/$(ls -1t .roll/dream/ | head -1)
 ```
 
 每个报告章节末尾有优先级分类：

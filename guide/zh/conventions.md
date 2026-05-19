@@ -34,8 +34,8 @@ Success Criteria: <可衡量的完成标准>
 
 | 概念 | 位置 |
 |------|------|
-| 领域模型 | `docs/domain/` |
-| Feature 规格 | `docs/features/<name>.md` |
+| 领域模型 | `.roll/domain/` |
+| Feature 规格 | `.roll/features/<name>.md` |
 | 用户指南 | `docs/guide/` |
 | 测试辅助函数 | `tests/unit/helpers.bash` |
 ```

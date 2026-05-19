@@ -266,7 +266,7 @@ primary agent failures, (3) pause + ALERT for everything else.
 - Merge conflict on PR → resolve manually, push
 - `gh` auth expired → `gh auth login`
 - Story keeps reverting (TCR count = 0 every attempt) → the story spec may be
-  unclear; rewrite the AC in `docs/features/` or execute manually via `$roll-build`
+  unclear; rewrite the AC in `.roll/features/` or execute manually via `$roll-build`
 
 **Rationale:** Loop optimizes for forward progress on clear work. When the work
 itself is ambiguous or the environment is broken, it stops and tells you rather

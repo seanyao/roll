@@ -38,8 +38,8 @@ The `AGENTS.md` navigation section maps concept names to file paths:
 
 | Concept | Location |
 |---------|----------|
-| Domain model | `docs/domain/` |
-| Feature specs | `docs/features/<name>.md` |
+| Domain model | `.roll/domain/` |
+| Feature specs | `.roll/features/<name>.md` |
 | User guides | `docs/guide/` |
 | Test helpers | `tests/unit/helpers.bash` |
 ```

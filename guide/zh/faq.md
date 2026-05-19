@@ -249,4 +249,4 @@ agent），但在遇到需要人类判断的结构性问题时会故意停下。
 - PR 合并冲突 → 手动解决，push
 - `gh` 认证过期 → `gh auth login`
 - 故事反复回退（每次 TCR 计数 = 0）→ 故事规格可能不清晰；重写
-  `docs/features/` 中的 AC 或通过 `$roll-build` 手动执行
+  `.roll/features/` 中的 AC 或通过 `$roll-build` 手动执行

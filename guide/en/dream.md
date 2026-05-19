@@ -8,7 +8,7 @@ dead code, and technical debt. It runs automatically at 3am (via launchd, instal
 
 Dream runs one full scan per night and produces two outputs:
 
-1. **`docs/dream/YYYY-MM-DD.md`** — detailed report in Chinese (one file per night)
+1. **`.roll/dream/YYYY-MM-DD.md`** — detailed report in Chinese (one file per night)
 2. **BACKLOG.md entries** — actionable `REFACTOR-NNN` items appended to the `## ♻️ Refactor` table
 
 The report covers:
@@ -23,10 +23,10 @@ The report covers:
 
 ```bash
 # See last 3 nights
-ls -lt docs/dream/ | head -4
+ls -lt .roll/dream/ | head -4
 
 # Read latest report
-cat docs/dream/$(ls -1t docs/dream/ | head -1)
+cat .roll/dream/$(ls -1t .roll/dream/ | head -1)
 ```
 
 Each report section ends with a priority classification:

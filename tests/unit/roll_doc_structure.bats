@@ -1,35 +1,40 @@
 #!/usr/bin/env bats
-# E2E golden path for US-DOC-004: docs/ root has no stray .md files
+# E2E golden path for US-DOC-004: project root has no stray docs *.md files
+# (post-Phase-1: docs/ removed, guide/ and site/ are root-level products,
+# process artifacts live in .roll/)
 
-DOCS="${BATS_TEST_DIRNAME}/../../docs"
+REPO_ROOT="${BATS_TEST_DIRNAME}/../../"
 
-@test "e2e: docs/ root has no stray .md files outside allowed subdirs" {
-  # Allowed subdirs: briefs/ dream/ guide/ domain/ features/ practices/
-  # Allowed root files: features.md (US-DOC-008 product Feature SOT).
-  stray=$(find "$DOCS" -maxdepth 1 -name '*.md' ! -name 'features.md' 2>/dev/null)
-  [ -z "$stray" ]
+@test "e2e: docs/ directory removed after Phase 1 migration" {
+  # After Phase 1, docs/ should not exist at all (process moved to .roll/,
+  # user-facing moved to guide/ + site/).
+  [ ! -d "${REPO_ROOT}/docs" ] || {
+    # Tolerate .DS_Store-only remnants on macOS dev hosts
+    stray=$(find "${REPO_ROOT}/docs" -type f ! -name '.DS_Store' 2>/dev/null)
+    [ -z "$stray" ]
+  }
 }
 
 @test "e2e: guide/en/ has methodology, skills, plus original 4 guides" {
-  [ -f "${DOCS}/guide/en/overview.md" ]
-  [ -f "${DOCS}/guide/en/loop.md" ]
-  [ -f "${DOCS}/guide/en/dream.md" ]
-  [ -f "${DOCS}/guide/en/peer.md" ]
-  [ -f "${DOCS}/guide/en/methodology.md" ]
-  [ -f "${DOCS}/guide/en/skills.md" ]
+  [ -f "${REPO_ROOT}/guide/en/overview.md" ]
+  [ -f "${REPO_ROOT}/guide/en/loop.md" ]
+  [ -f "${REPO_ROOT}/guide/en/dream.md" ]
+  [ -f "${REPO_ROOT}/guide/en/peer.md" ]
+  [ -f "${REPO_ROOT}/guide/en/methodology.md" ]
+  [ -f "${REPO_ROOT}/guide/en/skills.md" ]
 }
 
 @test "e2e: guide/zh/ has methodology, skills, plus original 4 guides" {
-  [ -f "${DOCS}/guide/zh/overview.md" ]
-  [ -f "${DOCS}/guide/zh/loop.md" ]
-  [ -f "${DOCS}/guide/zh/dream.md" ]
-  [ -f "${DOCS}/guide/zh/peer.md" ]
-  [ -f "${DOCS}/guide/zh/methodology.md" ]
-  [ -f "${DOCS}/guide/zh/skills.md" ]
+  [ -f "${REPO_ROOT}/guide/zh/overview.md" ]
+  [ -f "${REPO_ROOT}/guide/zh/loop.md" ]
+  [ -f "${REPO_ROOT}/guide/zh/dream.md" ]
+  [ -f "${REPO_ROOT}/guide/zh/peer.md" ]
+  [ -f "${REPO_ROOT}/guide/zh/methodology.md" ]
+  [ -f "${REPO_ROOT}/guide/zh/skills.md" ]
 }
 
 @test "e2e: .roll/verification/ has loop-autorun-verification.md" {
-  [ -f "${DOCS}/practices/loop-autorun-verification.md" ]
+  [ -f "${REPO_ROOT}/.roll/verification/loop-autorun-verification.md" ]
 }
 
 # US-DOC-010: features.md catalog completeness vs BACKLOG is a release-time check only.
@@ -46,7 +51,7 @@ DOCS="${BATS_TEST_DIRNAME}/../../docs"
 # (i.e. every Feature has shipped at least one story), the test passes trivially.
 @test "features.md marks each all-Todo Feature with planning marker" {
   local backlog="${BATS_TEST_DIRNAME}/../../.roll/backlog.md"
-  local features="${DOCS}/features.md"
+  local features="${REPO_ROOT}/.roll/features.md"
   local missing=""
   while IFS= read -r line; do
     [ -n "$line" ] && ! grep -i "${line}" "$features" | grep -q "规划中" && missing="${missing}\n${line}"

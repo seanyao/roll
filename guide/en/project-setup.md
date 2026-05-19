@@ -44,7 +44,7 @@ roll loop on               # enable autonomous execution
 | `CLAUDE.md` | Claude Code project instructions |
 | `AGENTS.md` | Agent conventions: domain model, scope, coding standards |
 | `BACKLOG.md` | Story tracking (Epic / Feature / Story / Fix / Refactor) |
-| `docs/features/` | Per-feature deep docs (one file per Feature) |
+| `.roll/features/` | Per-feature deep docs (one file per Feature) |
 
 ## Re-initializing
 

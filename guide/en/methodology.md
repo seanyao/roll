@@ -27,7 +27,7 @@ graph TB
     subgraph "Loop A: Research & Design"
         A1["$roll-research<br/>HV Research & Analysis"] --> A2["$roll-design<br/>Requirements → INVEST Stories"]
         A2 --> A3["BACKLOG.md<br/>Status Index"]
-        A3 --> A4["docs/features/<br/>Acceptance Criteria & Design"]
+        A3 --> A4[".roll/features/<br/>Acceptance Criteria & Design"]
     end
 
     subgraph "Loop B: Implementation & Iteration"
@@ -117,7 +117,7 @@ Append `--force` (or `-f`) to force-rewrite `roll.md` or rebuild symlinks.
 
 - `AGENTS.md` — global engineering constraints (copied from `~/.roll/conventions/global/`)
 - `BACKLOG.md` — empty task index
-- `docs/features/` — directory for story details and design documents
+- `.roll/features/` — directory for story details and design documents
 
 For **existing projects** (AGENTS.md already present), `roll init` re-merges the global conventions section-by-section, preserving all existing project-specific content.
 
@@ -143,7 +143,7 @@ Project Type (Template)  ← Reference only — consulted by $roll-build / $roll
 |----------------------|--------------------|
 | HCD (Human-Centered Design) | `$roll-research`: Research before design; data-driven decision-making |
 | BDD (Behavior-Driven Development) | `$roll-design`: Requirements expressed as Acceptance Criteria |
-| Scrum Backlog | `BACKLOG.md` + `docs/features/`: Two-tier index structure |
+| Scrum Backlog | `BACKLOG.md` + `.roll/features/`: Two-tier index structure |
 | INVEST Principles | Mandatory constraints on Story decomposition |
 
 ### 3.2 Research-Driven Design: `$roll-research`
@@ -178,11 +178,11 @@ Clarify → Discuss → [peer: direction] → Analyze+DDD → Design → [peer: 
 
 **Analyze + DDD** — Scope is assessed and DDD depth is calibrated automatically: full Event Storming for greenfield projects, a Domain Slice for new features, a Domain Tag for bug fixes.
 
-**Solution Design** — Architecture and module decomposition written to `docs/features/<feature>-plan.md`. Greenfield Tactical Models (Aggregates, Entities, Invariants, Domain Events) written to `docs/domain/`.
+**Solution Design** — Architecture and module decomposition written to `.roll/features/<feature>-plan.md`. Greenfield Tactical Models (Aggregates, Entities, Invariants, Domain Events) written to `.roll/domain/`.
 
 **Plan Review** (`$roll-peer`, optional) — For large-scope work, a peer agent reviews the complete plan before Stories are split. Same opt-out behavior.
 
-**Split + Write** — The plan is decomposed into INVEST-compliant User Stories, written to `docs/features/<feature>.md` with full AC, and indexed in `BACKLOG.md`. The human confirms before `$roll-build` is invoked.
+**Split + Write** — The plan is decomposed into INVEST-compliant User Stories, written to `.roll/features/<feature>.md` with full AC, and indexed in `BACKLOG.md`. The human confirms before `$roll-build` is invoked.
 
 The core output is User Stories that conform to the **INVEST principles**:
 
@@ -212,14 +212,14 @@ The core output is User Stories that conform to the **INVEST principles**:
 | US-003 | Audit logging        | 📋 Ready |
 ```
 
-**`docs/features/` (detailed design)** — each Story has two dedicated documents:
+**`.roll/features/` (detailed design)** — each Story has two dedicated documents:
 
 - `<feature>.md`: Full User Story including the Acceptance Criteria checklist.
 - `<feature>-plan.md`: Technical design document with architectural decisions and implementation approach.
 
 This separation keeps BACKLOG.md concise and readable as a progress dashboard, while detailed design lives in a dedicated location.
 
-> **Design principle — Markdown as Code**: In Roll, `BACKLOG.md` and `docs/features/` are not documentation artifacts generated after development — they are the input that drives development. A Story does not exist until it has a Markdown file. A Story is not done until its Verification Gate evidence is committed. The file system is the single source of truth; there is no separate project management tool to stay in sync with.
+> **Design principle — Markdown as Code**: In Roll, `BACKLOG.md` and `.roll/features/` are not documentation artifacts generated after development — they are the input that drives development. A Story does not exist until it has a Markdown file. A Story is not done until its Verification Gate evidence is committed. The file system is the single source of truth; there is no separate project management tool to stay in sync with.
 
 ---
 
@@ -244,7 +244,7 @@ Creates the minimal workflow scaffold needed to start a Roll-managed project —
 my-project/
 ├── AGENTS.md            # Engineering constraints (from global conventions)
 ├── BACKLOG.md           # Task index
-└── docs/features/       # Story details & design documents
+└── .roll/features/       # Story details & design documents
 ```
 
 Three files. Under 5 seconds. Run `roll setup` again to distribute conventions and skills to AI tool configs.
@@ -599,7 +599,7 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 
 **`roll-loop`** — Runs hourly via macOS launchd (Linux: crontab). Scans BACKLOG for `📋 Todo` items and routes them: `US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`. Caps items per run to limit blast radius. Triggers `roll-brief` when a Feature completes. Built-in TCR enforcement: after a story completes, checks for `tcr:` micro-commits — if zero are found, reverts the story to Todo with an ALERT, preventing agents from skipping the TCR rhythm.
 
-**`roll-.dream`** — Runs nightly (03:00 local) via macOS launchd (Linux: crontab). Scans the codebase for dead code, architectural drift against `docs/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `docs/dream/YYYY-MM-DD.md`.
+**`roll-.dream`** — Runs nightly (03:00 local) via macOS launchd (Linux: crontab). Scans the codebase for dead code, architectural drift against `.roll/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `.roll/dream/YYYY-MM-DD.md`.
 
 **`roll-brief`** — Three trigger modes: Feature completion (via roll-loop), daily morning (09:00, via launchd), or on-demand (`roll brief`). Produces an owner-facing digest: what's done, what's pending, escalations, and a release-readiness verdict. Distinct from `roll-.changelog` (user-facing release notes).
 
@@ -680,7 +680,7 @@ roll                      # project dashboard (in project dir): loop status + br
 | Skill | Phase | Input | Output |
 |-------|-------|-------|--------|
 | `$roll-research` | Research | Research topic | Markdown / PDF research report |
-| `$roll-design` | Design | Requirements description | BACKLOG.md + docs/features/ |
+| `$roll-design` | Design | Requirements description | BACKLOG.md + .roll/features/ |
 | `$roll-build` | Implementation | Story ID / one-sentence requirement | Deployed code + verification evidence |
 | `$roll-spar` | Defensive implementation | Feature description | Adversarial test suite + implementation code |
 | `$roll-fix` | Bug fix | Fix ID | Fix code + regression test |
@@ -700,7 +700,7 @@ Commands fall into two categories: bash commands run pure shell logic; agent com
 |---------|---------|
 | `roll setup [-f]` | First-time install on this machine, or re-sync (use `--force` to overwrite local cache) |
 | `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via setup |
-| `roll init` | Create AGENTS.md + BACKLOG.md + docs/features/ in cwd; re-merges if AGENTS.md exists |
+| `roll init` | Create AGENTS.md + BACKLOG.md + .roll/features/ in cwd; re-merges if AGENTS.md exists |
 | `roll status` | Display current sync status, skill links, and detected AI tools |
 | `roll backlog` | Show all pending tasks from BACKLOG.md |
 | `roll agent [use <name>\|list]` | Per-project agent selection — affects all 🤖 commands |

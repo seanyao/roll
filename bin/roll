@@ -3027,11 +3027,25 @@ export LOOP_PROJECT_SLUG="${slug}"
 export LOOP_CYCLE_ID="\${CYCLE_ID}"
 export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
 for _attempt in 1 2 3; do
-  # FIX-057: watchdog — fires SIGTERM at the inner script (and its direct
-  # children) when the cycle exceeds LOOP_CYCLE_TIMEOUT_SEC. Signal the inner
-  # script first so _on_sigterm sets _CYCLE_TIMED_OUT before pkill takes out
-  # the watchdog subshell itself (pkill -P \$\$ matches this subshell too).
-  ( sleep "\$LOOP_CYCLE_TIMEOUT_SEC" && { kill -TERM \$\$ 2>/dev/null; pkill -TERM -P \$\$ 2>/dev/null; } ) &
+  # FIX-068: defensive reset before each attempt — _CYCLE_TIMED_OUT carries
+  # the SIGTERM result of the previous attempt and would otherwise force an
+  # immediate break on a clean retry.
+  _CYCLE_TIMED_OUT=0
+  # FIX-057 + FIX-068: watchdog — fires SIGTERM at the inner script (and its
+  # direct children) when the cycle exceeds LOOP_CYCLE_TIMEOUT_SEC, then
+  # escalates to SIGKILL after a 5s grace period for any claude process
+  # still alive. claude lives inside a pipeline subshell, so pkill -P \$\$
+  # alone only catches the subshell, not claude itself; matching by the
+  # worktree path (which appears in claude's --add-dir arg, FIX-048) targets
+  # the cycle's claude uniquely without touching other projects' processes.
+  ( sleep "\$LOOP_CYCLE_TIMEOUT_SEC" && {
+      kill -TERM \$\$ 2>/dev/null
+      pkill -TERM -P \$\$ 2>/dev/null
+      pkill -TERM -f "\$WT" 2>/dev/null
+      sleep 5
+      pkill -KILL -P \$\$ 2>/dev/null
+      pkill -KILL -f "\$WT" 2>/dev/null
+    } ) &
   _WATCHDOG_PID=\$!
   if [ -f "\$FMT" ]; then
     ( cd "\$WT" && ${claude_cmd} ) | python3 "\$FMT"

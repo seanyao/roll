@@ -308,7 +308,7 @@
 ### Feature: loop-write-integrity
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-LOOP-005](.roll/features/loop-write-integrity.md#us-loop-005) | 每个 cycle 跑完都留下结束记号 — 把所有结束路径（合并成功、孤儿恢复、超时、崩溃自愈、PR 失败兜底）都补上结束信号，dashboard 不再把早已结束的 cycle 显示成"还在跑" | 📋 Todo |
+| [US-LOOP-005](.roll/features/loop-write-integrity.md#us-loop-005) | 每个 cycle 跑完都留下结束记号 — 把所有结束路径（合并成功、孤儿恢复、超时、崩溃自愈、PR 失败兜底）都补上结束信号，dashboard 不再把早已结束的 cycle 显示成"还在跑" | ✅ Done |
 | [US-LOOP-006](.roll/features/loop-write-integrity.md#us-loop-006) | cycle 不论在哪个工作目录跑，运行记录都统一归到主项目身份，dashboard 按项目筛选时拿到完整历史 | ✅ Done |
 
 ## Epic: CLI 视觉系统
@@ -337,23 +337,23 @@
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-ONBOARD-001](.roll/features/directory-restructure.md#us-onboard-001) | 制定过程文件与产品文件的目录归属标准，所有项目共享一套约定 | ✅ Done |
-| [US-ONBOARD-002](.roll/features/directory-restructure.md#us-onboard-002) | 找出代码库里每一处指向老目录结构的引用，产出完整清单作为后续改动的唯一依据 `depends-on:US-ONBOARD-001` | 📋 Todo |
-| [US-ONBOARD-003](.roll/features/directory-restructure.md#us-onboard-003) | 一键把老项目结构迁到新结构，保留 git 历史，支持 dry-run 预览，断点可恢复 `depends-on:US-ONBOARD-002` | 📋 Todo |
-| [US-ONBOARD-004](.roll/features/directory-restructure.md#us-onboard-004) | 新版 Roll 在老结构项目上拒绝运行并引导迁移，全局命令不受影响 `depends-on:US-ONBOARD-003` | 📋 Todo |
-| [US-ONBOARD-005](.roll/features/directory-restructure.md#us-onboard-005) | 在 Roll 仓库跑 migrate + 发布 2.0 + GitHub 仓库改名 roll，CI 全绿才能 publish `depends-on:US-ONBOARD-003,US-ONBOARD-004` | 📋 Todo |
+| [US-ONBOARD-002](.roll/features/directory-restructure.md#us-onboard-002) | 找出代码库里每一处指向老目录结构的引用，产出完整清单作为后续改动的唯一依据 `depends-on:US-ONBOARD-001` | ✅ Done |
+| [US-ONBOARD-003](.roll/features/directory-restructure.md#us-onboard-003) | 一键把老项目结构迁到新结构，保留 git 历史，支持 dry-run 预览，断点可恢复 `depends-on:US-ONBOARD-002` | ✅ Done |
+| [US-ONBOARD-004](.roll/features/directory-restructure.md#us-onboard-004) | 新版 Roll 在老结构项目上拒绝运行并引导迁移，全局命令不受影响 `depends-on:US-ONBOARD-003` | ✅ Done |
+| [US-ONBOARD-005](.roll/features/directory-restructure.md#us-onboard-005) | 在 Roll 仓库跑 migrate + 发布 2.0 + GitHub 仓库改名 roll，CI 全绿才能 publish `depends-on:US-ONBOARD-003,US-ONBOARD-004` | ✅ Done |
 
 ### Feature: legacy-onboard
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-ONBOARD-006](.roll/features/legacy-onboard.md#us-onboard-006) | `roll init` 检测到遗留项目后列出本机可用 AI agent，告知 token 消耗，引导去 agent 里完成 onboard `depends-on:US-ONBOARD-001` | 📋 Todo |
-| [US-ONBOARD-007](.roll/features/legacy-onboard.md#us-onboard-007) | 定义 AI 产出、bash 消费的契约文件格式，含校验规则和过期机制 `depends-on:US-ONBOARD-001` | 📋 Todo |
-| [US-ONBOARD-008](.roll/features/legacy-onboard.md#us-onboard-008) | `$roll-onboard` 交互技能 — 读懂项目后用九个问题完成认知校对，产出 onboard 计划 `depends-on:US-ONBOARD-001,US-ONBOARD-007` | 📋 Todo |
-| [US-ONBOARD-009](.roll/features/legacy-onboard.md#us-onboard-009) | `roll init --apply` 读取 onboard 计划执行所有文件创建和配置，含 .gitignore 写入 `depends-on:US-ONBOARD-001,US-ONBOARD-002,US-ONBOARD-007` | 📋 Todo |
+| [US-ONBOARD-006](.roll/features/legacy-onboard.md#us-onboard-006) | `roll init` 检测到遗留项目后列出本机可用 AI agent，告知 token 消耗，引导去 agent 里完成 onboard `depends-on:US-ONBOARD-001` | ✅ Done |
+| [US-ONBOARD-007](.roll/features/legacy-onboard.md#us-onboard-007) | 定义 AI 产出、bash 消费的契约文件格式，含校验规则和过期机制 `depends-on:US-ONBOARD-001` | ✅ Done |
+| [US-ONBOARD-008](.roll/features/legacy-onboard.md#us-onboard-008) | `$roll-onboard` 交互技能 — 读懂项目后用九个问题完成认知校对，产出 onboard 计划 `depends-on:US-ONBOARD-001,US-ONBOARD-007` | ✅ Done |
+| [US-ONBOARD-009](.roll/features/legacy-onboard.md#us-onboard-009) | `roll init --apply` 读取 onboard 计划执行所有文件创建和配置，含 .gitignore 写入 `depends-on:US-ONBOARD-001,US-ONBOARD-002,US-ONBOARD-007` | ✅ Done |
 
 ### Feature: migration-guide
 | Story | Description | Status |
 |-------|-------------|--------|
-| [US-ONBOARD-010](.roll/features/directory-restructure.md#us-onboard-010) | 迁移指南和 Legacy onboarding 用户文档，帮老用户顺利过渡到新结构 `depends-on:US-ONBOARD-005` | 📋 Todo |
+| [US-ONBOARD-010](.roll/features/directory-restructure.md#us-onboard-010) | 迁移指南和 Legacy onboarding 用户文档，帮老用户顺利过渡到新结构 `depends-on:US-ONBOARD-005` | ✅ Done |
 
 ### Feature: roll-meta-migration
 | Story | Description | Status |

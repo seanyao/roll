@@ -2,9 +2,28 @@
 
 ## v2026.519.1
 
+### Major（大版本重构）
+
+- **项目结构重组 — 过程文件迁入 `.roll/`** — Phase 1 of Legacy Onboard Epic。`BACKLOG.md`、`PROPOSALS.md`、`docs/{features,briefs,dream,design,domain}/` 全部搬入 `.roll/`；`docs/guide/`、`docs/site/`、`docs/intro/` 上移到根级。一次性 breaking change，迁移指南见 `guide/{en,zh}/migration-2.0.md` `[legacy-onboard]`
+- **新命令 `roll migrate`** — 老项目一键迁到新结构：dry-run 预览 + `git mv` 保留历史 + 单原子 commit + 三态幂等（仅老 / 仅新 / 并存） `[legacy-onboard]`
+- **新版 `roll init` 识别 Legacy 项目** — 检测到现有源码无 `AGENTS.md` 时引导用户进入 onboard 流程：列出本机 AI agent、显式告知 token 消耗、引导运行 `$roll-onboard` `[legacy-onboard]`
+- **新技能 `$roll-onboard`** — 三组九问 ≤ 3 分钟，AI 读懂项目后生成 `.roll/onboard-plan.yaml`，bash 侧 `roll init --apply` 执行 `[legacy-onboard]`
+- **新命令 `roll init --apply`** — 消费 onboard plan 创建 `.roll/` 结构，按用户选择写 `.gitignore`、同步 AI 工具约定 `[legacy-onboard]`
+- **结构强制检测** — 新版 Roll 在老结构项目上拒绝运行 + 引导 `roll migrate`（`setup` / `update` / `version` / `help` / `init` 豁免；`ROLL_SKIP_STRUCTURE_CHECK=1` 旁路） `[legacy-onboard]`
+
+### Improved
+
+- `AGENTS.md` §8 Documentation Conventions 重写匹配新目录结构，明确"过程默认对内、产品默认对外"原则 `[docs]`
+- `guide/{en,zh}/practices/` 收入工程规范文档（原 `docs/practices/engineering-common-sense.md`） `[docs]`
+- 新增 Python 校验器 `lib/roll-plan-validate.py`，验证 onboard plan 完整性、`generated_at` 24h 时效、版本兼容 `[legacy-onboard]`
+
 ### Fixed
 
 - **`roll setup` 后从未开启 loop 的项目** — 不再被 macOS 自动激活、每小时弹出终端窗口 `[loop]`
+- **`_write_backlog` 缺 `mkdir -p` 导致 `cmd_init` 在 `.roll/` 不存在时崩** `[legacy-onboard]`
+- **`release.sh` 多 feature 时 awk `newline in string` 错误** — macOS BSD awk 不容忍 `-v var=多行`；改用 `ENVIRON` 读取 `[release]`
+- **GitHub 仓库改名 Roll → roll** — 内部代码、测试 fixture、文档引用全部同步小写命名 `[chore]`
+- **`.roll/backlog.md` 和 `guide/*` 中残留 `docs/features` 等老路径引用** — Story 5 sed 漏覆盖 `.roll/` 和 `guide/` 文件，dream 巡检发现后补齐 `[legacy-onboard]`
 
 ## v2026.518.4
 

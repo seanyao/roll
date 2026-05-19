@@ -1,5 +1,5 @@
 // English + Chinese content for the Roll site. Sourced from:
-//   docs/guide/en/* and docs/guide/zh/* in the Roll repo.
+//   guide/en/* and guide/zh/* in the Roll repo (relocated from docs/guide/* in v2.0).
 
 window.RollData = (function () {
 
@@ -34,10 +34,10 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v2026.515.1",
+      version: "v2026.519.2",
       tagline: "It just works.",
       sub2: "Write a goal. Ship it autonomously.",
-      sub: "Write a goal in BACKLOG. Roll picks it up hourly, executes it in an isolated worktree, opens a PR, waits for green CI — and ships. You stay on the loop, not in it.",
+      sub: "Write a goal in Backlog. Roll picks it up hourly, executes it in an isolated worktree, opens a PR, waits for green CI — and ships. You stay on the loop, not in it.",
       install: "npm install -g @seanyao/roll",
       ctas: [
         { label: "Read the guide", href: "#guides", primary: false },
@@ -84,13 +84,13 @@ window.RollData = (function () {
       sub: "Roll runs on three autonomous layers with clear boundaries. You sign off on what to ship and when. The rest is automated.",
       layers: [
         { glyph: "human", name: "Human", sub: "On the loop, not in it.",
-          body: "You set goals in BACKLOG, review PRs that the system opens, and approve releases. The system never ships to production without human sign-off.",
-          owns: ["BACKLOG", "Release approval", "Architectural calls"] },
+          body: "You set goals in Backlog, review PRs that the system opens, and approve releases. The system never ships to production without human sign-off.",
+          owns: ["Backlog", "Release approval", "Architectural calls"] },
         { glyph: "loop",  name: "Loop",  sub: "Every hour, on the :05.",
           body: "Picks the top story, executes $roll-build in an isolated worktree, commits in TCR micro-steps, opens a PR, waits for green CI, auto-merges.",
           owns: ["Story execution", "PR inbox", "Worktree isolation"] },
         { glyph: "dream", name: "Dream", sub: "Nightly, 03:10.",
-          body: "Scans the codebase for dead code, doc gaps, and architectural drift. Files REFACTOR-NNN entries into BACKLOG for loop to pick up the next morning.",
+          body: "Scans the codebase for dead code, doc gaps, and architectural drift. Files REFACTOR-NNN entries into Backlog for loop to pick up the next morning.",
           owns: ["Code health scan", "REFACTOR queue", "Doc coverage"] },
       ],
       analogy: {
@@ -104,8 +104,13 @@ window.RollData = (function () {
       sub: "Sourced from the project's overview guide.",
     },
     FEATURE_GROUPS: [
+      { id: "adoption", title: "Adoption Paths", blurb: "Three ways to bring roll on board.", features: [
+        { name: "roll init",     mono: true, desc: "Fresh project bootstrap — creates AGENTS.md, .roll/backlog.md, .roll/features/.", badges: ["core"] },
+        { name: "$roll-onboard", mono: true, desc: "Existing codebase: 3-minute survey, then roll init --apply lays down the .roll/ structure without surprise edits.", badges: ["new", "highlight"] },
+        { name: "roll migrate",  mono: true, desc: "Upgrade a 1.x project: BACKLOG.md + docs/{features,briefs,dream,design,domain}/ → .roll/ in one atomic commit, git mv preserves history.", badges: ["new"] },
+      ]},
       { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
-        { name: "roll loop on",        mono: true, desc: "AI picks stories from BACKLOG and executes hourly in an isolated worktree.", badges: ["core"] },
+        { name: "roll loop on",        mono: true, desc: "AI picks stories from Backlog and executes hourly in an isolated worktree.", badges: ["core"] },
         { name: "roll loop monitor",   mono: true, desc: "Live dashboard for loop, dream and brief service status, queues and recent runs.", badges: ["core"] },
         { name: "roll loop attach",    mono: true, desc: "Attach to the live tmux session and watch AI work in real time.", badges: ["highlight"] },
         { name: "roll loop pause / resume", mono: true, desc: "Hand-code yourself; let the system resume when you're done.", badges: [] },
@@ -120,7 +125,7 @@ window.RollData = (function () {
       { id: "dream", title: "Nightly Dream", blurb: "Maintenance, on its own.", features: [
         { name: "Code Health Scan", desc: "Detects dead code, architectural drift, and over-engineering candidates.", badges: ["highlight"] },
         { name: "Doc Coverage",     desc: "Flags missing guides, stale docs and undocumented ENV vars across the project.", badges: [] },
-        { name: "REFACTOR Queue",   desc: "Writes REFACTOR-NNN entries to BACKLOG so loop picks them up next morning.", badges: [] },
+        { name: "REFACTOR Queue",   desc: "Writes REFACTOR-NNN entries to Backlog so loop picks them up next morning.", badges: [] },
       ]},
       { id: "lifecycle", title: "Story Lifecycle", blurb: "Idea to merged PR, in one flow.", features: [
         { name: "$roll-idea",   mono: true, desc: "One-liner capture — instant FIX or IDEA backlog entry.", badges: ["core"] },
@@ -137,7 +142,7 @@ window.RollData = (function () {
       { id: "skills", title: "On-Demand Skills", blurb: "Specialized agents you can summon.", features: [
         { name: "$roll-debug",    mono: true, desc: "Mount a diagnostic probe, trace root cause, auto-fix if source-traceable.", badges: [] },
         { name: "$roll-doc",      mono: true, desc: "Scan any project for doc gaps and generate the missing documentation.", badges: [] },
-        { name: "$roll-sentinel", mono: true, desc: "Spot-check production against BACKLOG acceptance criteria on a schedule.", badges: [] },
+        { name: "$roll-sentinel", mono: true, desc: "Spot-check production against Backlog acceptance criteria on a schedule.", badges: [] },
         { name: "$roll-doctor",   mono: true, desc: "Diagnose the dev toolchain — node, npm, git, AI CLI installs.", badges: [] },
       ]},
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
@@ -172,14 +177,16 @@ window.RollData = (function () {
     GUIDES: {
       label: "Documentation",
       title: "Read the manual.",
-      sub: "Six guides, one to a concept. Start with Overview if you've never run roll before.",
+      sub: "Start with Overview if you've never run roll before; Migration 2.0 if you're upgrading from 1.x.",
       tiles: [
-        { name: "Overview",      path: "docs/guide/en/overview.md",      desc: "Quick start, three-layer model, complete feature list." },
-        { name: "Loop",          path: "docs/guide/en/loop.md",          desc: "Scheduling, subcommands, tmux visibility, PR inbox." },
-        { name: "Dream",         path: "docs/guide/en/dream.md",         desc: "Nightly code health scan and REFACTOR generation." },
-        { name: "Peer",          path: "docs/guide/en/peer.md",          desc: "Cross-agent review protocol — AGREE / REFINE / OBJECT / ESCALATE." },
-        { name: "Skills",        path: "docs/guide/en/skills.md",        desc: "Skill catalog and the decision tree for picking the right one." },
-        { name: "Configuration", path: "docs/guide/en/configuration.md", desc: "Environment variables, active window, capability map." },
+        { name: "Overview",         path: "guide/en/overview.md",          desc: "Quick start, three-layer model, complete feature list." },
+        { name: "Methodology",      path: "guide/en/methodology.md",       desc: "Markdown-as-code, INVEST stories, two-tier .roll/backlog.md index." },
+        { name: "Loop",             path: "guide/en/loop.md",              desc: "Scheduling, subcommands, tmux visibility, PR inbox." },
+        { name: "Dream",            path: "guide/en/dream.md",             desc: "Nightly code health scan and REFACTOR generation." },
+        { name: "Peer",             path: "guide/en/peer.md",              desc: "Cross-agent review protocol — AGREE / REFINE / OBJECT / ESCALATE." },
+        { name: "Skills",           path: "guide/en/skills.md",            desc: "Skill catalog and the decision tree for picking the right one." },
+        { name: "Migration 2.0",    path: "guide/en/migration-2.0.md",     desc: "Upgrade an existing 1.x project: BACKLOG.md + docs/* → .roll/ in one atomic commit." },
+        { name: "Legacy Onboarding",path: "guide/en/legacy-onboarding.md", desc: "Bring roll into an existing codebase via $roll-onboard — 3-minute survey, no surprise edits." },
       ],
     },
   };
@@ -204,10 +211,10 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v2026.515.1",
+      version: "v2026.519.2",
       tagline: "It just works.",
       sub2: "把目标写下来。让它自主交付。",
-      sub: "把目标写进 BACKLOG。Roll 每小时领取一个，在隔离的 worktree 里执行、开 PR、等 CI 绿、自动合入。你掌舵，不掌桨。",
+      sub: "把目标写进 Backlog。Roll 每小时领取一个，在隔离的 worktree 里执行、开 PR、等 CI 绿、自动合入。你掌舵，不掌桨。",
       install: "npm install -g @seanyao/roll",
       ctas: [
         { label: "查看文档", href: "#guides", primary: false },
@@ -255,13 +262,13 @@ window.RollData = (function () {
       sub: "Roll 跑在三个自主层上,边界清晰。「发什么、什么时候发」你拍板,中间过程全自动。",
       layers: [
         { glyph: "human", name: "Human", sub: "掌舵,不掌桨。",
-          body: "你在 BACKLOG 写目标、审系统开出的 PR、批准发布。没有人点头之前,任何东西都不会上生产。",
-          owns: ["BACKLOG", "发布批准", "架构决策"] },
+          body: "你在 Backlog 写目标、审系统开出的 PR、批准发布。没有人点头之前,任何东西都不会上生产。",
+          owns: ["Backlog", "发布批准", "架构决策"] },
         { glyph: "loop",  name: "Loop",  sub: "每小时的第 5 分钟。",
           body: "摘取最高优先级故事,在隔离 worktree 里 $roll-build 执行,TCR 微提交,开 PR,等 CI 绿,自动合入。",
           owns: ["故事执行", "PR 收件箱", "Worktree 隔离"] },
         { glyph: "dream", name: "Dream", sub: "凌晨 03:10。",
-          body: "扫描代码库,找死代码、文档缺口、架构漂移。将 REFACTOR-NNN 写入 BACKLOG,次日由 loop 领取。",
+          body: "扫描代码库,找死代码、文档缺口、架构漂移。将 REFACTOR-NNN 写入 Backlog,次日由 loop 领取。",
           owns: ["代码健康巡检", "REFACTOR 队列", "文档覆盖率"] },
       ],
       analogy: {
@@ -275,8 +282,13 @@ window.RollData = (function () {
       sub: "内容来自项目的 Overview 指南。",
     },
     FEATURE_GROUPS: [
+      { id: "adoption", title: "接入路径", blurb: "三种方式把 roll 接进项目。", features: [
+        { name: "roll init",     mono: true, desc: "新项目脚手架——创建 AGENTS.md、.roll/backlog.md、.roll/features/。", badges: ["core"] },
+        { name: "$roll-onboard", mono: true, desc: "现有代码库:3 分钟问询,roll init --apply 落地 .roll/ 结构,不偷改任何源文件。", badges: ["new", "highlight"] },
+        { name: "roll migrate",  mono: true, desc: "升级 1.x 老项目:BACKLOG.md + docs/{features,briefs,dream,design,domain}/ 一次性迁入 .roll/,git mv 保留历史。", badges: ["new"] },
+      ]},
       { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
-        { name: "roll loop on",        mono: true, desc: "AI 从 BACKLOG 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },
+        { name: "roll loop on",        mono: true, desc: "AI 从 Backlog 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },
         { name: "roll loop monitor",   mono: true, desc: "实时看板:loop / dream / brief 服务状态、队列、最近执行。", badges: ["core"] },
         { name: "roll loop attach",    mono: true, desc: "接入实时 tmux 会话,观看 AI 现场工作。", badges: ["highlight"] },
         { name: "roll loop pause / resume", mono: true, desc: "需要手动改时暂停,改完再让系统接力。", badges: [] },
@@ -291,7 +303,7 @@ window.RollData = (function () {
       { id: "dream", title: "夜间 Dream", blurb: "维护自己跑。", features: [
         { name: "代码健康扫描", desc: "识别死代码、架构漂移、过度工程候选项。", badges: ["highlight"] },
         { name: "文档覆盖率",   desc: "标记缺失指南、过时文档、未记录的 ENV 变量。", badges: [] },
-        { name: "REFACTOR 队列", desc: "把 REFACTOR-NNN 写进 BACKLOG,次日 loop 自己拣。", badges: [] },
+        { name: "REFACTOR 队列", desc: "把 REFACTOR-NNN 写进 Backlog,次日 loop 自己拣。", badges: [] },
       ]},
       { id: "lifecycle", title: "故事生命周期", blurb: "从想法到合入,同一条流。", features: [
         { name: "$roll-idea",   mono: true, desc: "一行捕获——即时生成 FIX 或 IDEA 条目。", badges: ["core"] },
@@ -308,7 +320,7 @@ window.RollData = (function () {
       { id: "skills", title: "按需技能", blurb: "可召唤的专项 agent。", features: [
         { name: "$roll-debug",    mono: true, desc: "挂载诊断探针,追根因,可溯源则直接修。", badges: [] },
         { name: "$roll-doc",      mono: true, desc: "扫描任意项目的文档缺口,补齐缺失文档。", badges: [] },
-        { name: "$roll-sentinel", mono: true, desc: "按计划对照 BACKLOG 验收标准点检生产环境。", badges: [] },
+        { name: "$roll-sentinel", mono: true, desc: "按计划对照 Backlog 验收标准点检生产环境。", badges: [] },
         { name: "$roll-doctor",   mono: true, desc: "诊断开发工具链——node、npm、git、AI CLI。", badges: [] },
       ]},
       { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
@@ -343,14 +355,16 @@ window.RollData = (function () {
     GUIDES: {
       label: "文档",
       title: "去看说明书。",
-      sub: "六篇指南,一篇一个概念。第一次跑 Roll,从 Overview 开始。",
+      sub: "第一次跑 Roll 从「概述」开始；从 1.x 升级看「Migration 2.0」。",
       tiles: [
-        { name: "概述",   path: "docs/guide/zh/overview.md",      desc: "快速开始、三层模型、完整功能列表。" },
-        { name: "Loop",  path: "docs/guide/zh/loop.md",          desc: "调度、子命令、tmux 可见性、PR 收件箱。" },
-        { name: "Dream", path: "docs/guide/zh/dream.md",         desc: "夜间代码健康巡检与 REFACTOR 生成。" },
-        { name: "Peer",  path: "docs/guide/zh/peer.md",          desc: "跨 Agent 评审协议 — AGREE / REFINE / OBJECT / ESCALATE。" },
-        { name: "技能",   path: "docs/guide/zh/skills.md",        desc: "技能目录与选用决策树。" },
-        { name: "配置",   path: "docs/guide/zh/configuration.md", desc: "环境变量、活跃窗口、能力路由表。" },
+        { name: "概述",        path: "guide/zh/overview.md",          desc: "快速开始、三层模型、完整功能列表。" },
+        { name: "方法论",       path: "guide/zh/methodology.md",       desc: "Markdown 即代码、INVEST 故事、.roll/backlog.md 两层索引。" },
+        { name: "Loop",       path: "guide/zh/loop.md",              desc: "调度、子命令、tmux 可见性、PR 收件箱。" },
+        { name: "Dream",      path: "guide/zh/dream.md",             desc: "夜间代码健康巡检与 REFACTOR 生成。" },
+        { name: "Peer",       path: "guide/zh/peer.md",              desc: "跨 Agent 评审协议 — AGREE / REFINE / OBJECT / ESCALATE。" },
+        { name: "技能",        path: "guide/zh/skills.md",            desc: "技能目录与选用决策树。" },
+        { name: "Migration 2.0", path: "guide/zh/migration-2.0.md",  desc: "升级 1.x 老项目：BACKLOG.md + docs/* 一次性迁入 .roll/，单原子 commit。" },
+        { name: "老项目接入",    path: "guide/zh/legacy-onboarding.md", desc: "通过 $roll-onboard 把 roll 带进现有代码库——3 分钟问询，不偷改文件。" },
       ],
     },
   };

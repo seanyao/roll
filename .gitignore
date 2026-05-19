@@ -42,3 +42,4 @@ npm-debug.log*
 .roll/last-test-pass
 .roll/state/
 .roll/*.lock
+.roll/scratch/

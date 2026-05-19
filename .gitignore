@@ -41,3 +41,8 @@ npm-debug.log*
 
 # Local staging clone of roll-meta for cross-repo Phase 2 work
 .roll-meta-remote/
+
+# Project-level per-machine agent preference (written by `roll agent use`).
+# Per-(project, machine) state — must not be tracked. Will migrate to
+# .roll/local.yaml (see REFACTOR in .roll/backlog.md).
+.roll.yaml

@@ -128,3 +128,97 @@ Phase 4 — Report
 
 **Dependencies:**
 - Depended on by: US-AUTO-028 (dream Scan 6 references roll-doc as execution path)
+
+---
+
+<a id="us-skill-009"></a>
+## US-SKILL-009 Add `roll-eval` — 可组合的 skill 执行评分器 📋
+
+**Created**: 2026-05-19
+
+- As a developer who just ran a skill (e.g. roll-fix, roll-build)
+- I want to run `$roll-eval <skill-name>` to get a quantitative score
+- So that skill quality is measurable and comparable over time
+
+**Domain Model:**
+- Context: Skill Ecosystem
+- Aggregate: SkillRegistry owns [SkillDefinition(with Rubric), EvalRecord]
+- Events raised: [EvalCompleted] → roll-notes
+
+**How it works:**
+
+```
+$roll-eval <skill-name> [evidence-text]
+
+1. Read skills/<skill-name>/SKILL.md → extract ## Rubric table → dimensions[]
+2. Gather evidence:
+   - default: recent git diff (git diff HEAD~N or git log summary)
+   - arg:     inline execution description passed as second argument
+3. LLM-as-judge: score each dimension 0 (Miss) / 1 (Partial) / 2 (Hit)
+   with one-line justification per dimension
+4. Output score card to stdout
+5. Append result to roll-notes (skip with --no-notes)
+```
+
+**Score card output format:**
+
+```
+🎯 Eval: roll-fix  [2026-05-19]
+   Evidence: git diff HEAD~3..HEAD
+
+   | 维度      | 得分 | 说明                    |
+   |----------|------|------------------------|
+   | 根因定位   |  2   | 追溯到 locale 缺失根因   |
+   | 最小范围   |  2   | 4 行改动，无无关触碰      |
+   | 回归测试   |  1   | 未走 RED→GREEN 顺序      |
+   | 验证证据   |  2   | 贴出实际命令输出          |
+   | 无新破坏   |  2   | CI 全绿                 |
+
+   Total: 9/10 — Acceptable ✅
+   ⚠ Weakest: 回归测试 (1) — 下次先写复现测试再修
+```
+
+**AC:**
+- [ ] `$roll-eval <skill-name>` 读取对应 SKILL.md 的 `## Rubric` 段，若无 Rubric 则提示退出
+- [ ] 默认用 `git diff HEAD~5..HEAD` 作为证据，无 git 仓库时要求传入 evidence 参数
+- [ ] 每个 Rubric 维度输出 0/1/2 评分 + 一行理由
+- [ ] 输出 Total 分 + 四档 verdict（Exemplary/Acceptable/Needs Work/Redo）
+- [ ] 高亮最弱维度并给出改进提示
+- [ ] `--no-notes` 跳过写入 roll-notes
+- [ ] 若无 `--no-notes`，结果通过 `$roll-notes` 追加记录
+
+**Files:**
+- `skills/roll-eval/SKILL.md`
+- `tests/unit/roll_eval_skill.bats`
+
+**Dependencies:**
+- Depends on: roll-notes (写入评分记录)
+- Depended on by: US-SKILL-010
+
+---
+
+<a id="us-skill-010"></a>
+## US-SKILL-010 `roll-eval` 自动集成钩子 📋
+
+**Created**: 2026-05-19
+
+- As a developer using roll-fix or roll-build
+- I want eval to run automatically at the end of each execution
+- So that every delivery is scored without manual invocation
+
+**Domain Model:**
+- Context: Skill Ecosystem
+- Aggregate: SkillRegistry — EvalHook wired into SkillDefinition.reportStep
+
+**AC:**
+- [ ] roll-fix Step 13（Report）末尾自动调用 `$roll-eval roll-fix`
+- [ ] roll-build Phase 13（Report）末尾自动调用 `$roll-eval roll-build`（若 roll-build 有 Rubric）
+- [ ] score card 内联输出在 Report 段内，不额外开启新会话
+- [ ] 用户可通过环境变量 `ROLL_EVAL=0` 跳过自动评分
+
+**Files:**
+- `skills/roll-fix/SKILL.md` (Step 13 增加 eval 调用)
+- `skills/roll-build/SKILL.md` (同上，若有 Rubric)
+
+**Dependencies:**
+- Depends on: US-SKILL-009

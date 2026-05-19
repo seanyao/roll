@@ -19,6 +19,8 @@
 | [US-SKILL-005](docs/features/new-skills.md#us-skill-005) | Add `roll-peer` — 跨 Agent 代码评审（Claude/Kimi/DeepSeek/Codex） | ✅ Done |
 | [US-SKILL-008](docs/features/new-skills.md#us-skill-008) | Add `roll-doc` — legacy 项目文档自动化（扫描索引 + 缺口补全一体，project-driven） | ✅ Done |
 | [US-SKILL-007](docs/features/new-skills.md#us-skill-007) | roll-jot 改名为 roll-idea — 命令名与 IDEA-NNN 编号语义对齐，更直觉 | ✅ Done |
+| [US-SKILL-009](docs/features/new-skills.md#us-skill-009) | Add `roll-eval` — 可组合的 skill 执行评分器，读 Rubric 打分输出 score card | 📋 Todo |
+| [US-SKILL-010](docs/features/new-skills.md#us-skill-010) | `roll-eval` 自动集成钩子 — roll-fix / roll-build 完成后自动调用评分 | 📋 Todo |
 
 ## Epic: Distribution
 ### Feature: npm-distribution

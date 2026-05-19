@@ -5653,7 +5653,11 @@ _backlog_lint() {
     fi
     if [ -n "$issues" ]; then
       violations=$((violations+1))
-      printf '%s:%d: backlog description %s\n  %s\n' "$backlog" "$lineno" "$issues" "$desc"
+      # Extract the story id from column 2 so reports name the offending row.
+      local sid; sid=$(echo "$line" | awk -F'|' '{print $2}' \
+        | sed -E 's/^[[:space:]]*\[?([A-Z]+-[0-9]+).*/\1/' \
+        | tr -d '[:space:]')
+      printf '%s:%d: %s — %s\n  %s\n' "$backlog" "$lineno" "$sid" "$issues" "$desc"
     fi
   done < "$backlog"
 

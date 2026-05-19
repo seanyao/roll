@@ -37,9 +37,6 @@ Roll 2.0 introduces a **process/product split** to keep open-source projects cle
 - **`$roll-onboard`** — interactive skill for adopting Roll on legacy codebases without rewrites. AI reads your code, asks 9 questions in ≤ 3 minutes, produces a plan; `roll init --apply` executes it.
 - **Three adoption patterns** — `seed` (new project), `graft` (legacy, non-invasive), `replant` (legacy, clean rebuild). See [guide/en/patterns/](guide/en/patterns/).
 
-📖 Upgrading from 1.x? Read [guide/en/migration-2.0.md](guide/en/migration-2.0.md).
-📖 New legacy project? Read [guide/en/legacy-onboarding.md](guide/en/legacy-onboarding.md).
-
 ## Evolution
 
 Roll didn't start as a framework. It started as a question: *what if the AI didn't just write code, but actually shipped it?*
@@ -66,6 +63,20 @@ roll loop on        # optional: let the agent work unattended
 
 ---
 
+## Adoption Paths
+
+Three ways to bring Roll into a project. Not sure which fits? Just run `roll init` — it detects legacy code and routes you to `$roll-onboard` automatically.
+
+| Path | When to use | How to start |
+|------|-------------|--------------|
+| **Seed** | Brand-new project, starting from zero | `roll init` (the Quick Start path above) |
+| **Graft** | Existing codebase, keep current workflow intact | `roll init` → AI prompts `$roll-onboard` → 9 questions in ≤ 3 min → `roll init --apply` |
+| **Replant** | Existing codebase, ready to realign on Roll conventions | Same as Graft, choose "clean rebuild" during onboarding |
+
+Details: [seed](guide/en/patterns/seed-pattern.md) · [graft](guide/en/patterns/graft-pattern.md) · [replant](guide/en/patterns/replant-pattern.md)
+
+---
+
 ## Documentation Index
 
 | Topic | English | 中文 |
@@ -78,7 +89,7 @@ roll loop on        # optional: let the agent work unattended
 | Configuration (env vars) | [guide/en/configuration.md](guide/en/configuration.md) | [guide/zh/configuration.md](guide/zh/configuration.md) |
 | Skill selection guide | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
 | FAQ (troubleshooting) | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
-| Domain model (DDD) | [domain/context-map.md](.roll/domain/context-map.md) | — |
+| Adoption patterns | [guide/en/patterns/](guide/en/patterns/) | [guide/zh/patterns/](guide/zh/patterns/) |
 | Engineering common sense | [practices/engineering-common-sense.md](guide/en/practices/engineering-common-sense.md) | — |
 
 ---
@@ -87,15 +98,23 @@ roll loop on        # optional: let the agent work unattended
 
 | Command | Description |
 |---------|-------------|
+| **Autonomy · daily use** | |
+| `roll loop <on\|off\|now\|status\|monitor>` | 🤖 Manage the autonomous BACKLOG executor |
+| `roll brief` | 🤖 Show latest owner brief |
+| `roll backlog [block\|defer\|…]` | View and manage pending tasks |
+| `roll peer` | 🤖 Cross-agent negotiation & review |
+| `roll alert` | View / clear loop alerts |
+| **Project · per repo** | |
+| `roll init` | Create AGENTS.md + .roll/backlog.md + .roll/features/ |
+| `roll status` | Show current state and drift |
+| `roll agent [use <name>]` | Per-project agent selection (Claude / Cursor / Codex / Kimi / …) |
+| `roll ci [--wait]` | Show or wait for current commit's CI status |
+| `roll release` | 🤖 Run the release script (human-only) |
+| `roll review-pr <number>` | 🤖 AI-powered code review for a PR |
+| **Machine · global** | |
 | `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
-| `roll update` | Upgrade to latest version |
-| `roll init` | Initialize project: AGENTS.md + .roll/backlog.md + .roll/features/ |
-| `roll status` | Show sync state, skill links, detected AI tools |
-| `roll backlog` | Show pending tasks from .roll/backlog.md |
-| `roll loop <on\|off\|now\|status\|monitor>` | 🤖 Manage autonomous executor |
-| `roll brief` | 🤖 Show latest owner digest |
-| `roll peer` | 🤖 Cross-agent code review |
-| `roll release` | 🤖 Version + tag + npm publish + GitHub Release |
+| `roll update` | Upgrade to latest + re-sync |
+| `roll version` | Print installed roll version |
 
 ---
 

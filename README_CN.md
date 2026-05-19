@@ -37,9 +37,6 @@ Roll 2.0 引入**过程/产品分离**架构，让开源项目结构更清晰：
 - **`$roll-onboard`** — 遗留项目交互式接入技能。AI 读完代码 ≤ 3 分钟回答 9 个问题、产出 plan；`roll init --apply` 落盘。
 - **三种接入模式** — `seed`（新项目）、`graft`（遗留项目零侵入）、`replant`（遗留项目清账重建）。详见 [guide/zh/patterns/](guide/zh/patterns/)。
 
-📖 从 1.x 升级？阅读 [guide/zh/migration-2.0.md](guide/zh/migration-2.0.md)。
-📖 接入遗留项目？阅读 [guide/zh/legacy-onboarding.md](guide/zh/legacy-onboarding.md)。
-
 ## 演进
 
 Roll 不是从框架开始的，它从一个问题开始：*如果 AI 不只是写代码，而是真的把它交付出去，会怎样？*
@@ -66,6 +63,20 @@ roll loop on        # 可选：让 agent 无人值守工作
 
 ---
 
+## 接入路径
+
+把 Roll 引入项目有三种方式。拿不准走哪条？直接运行 `roll init`——它会检测遗留代码并自动路由到 `$roll-onboard`。
+
+| 路径 | 适用场景 | 起步方式 |
+|------|----------|----------|
+| **Seed（播种）** | 全新项目，从零开始 | `roll init`（上文"快速开始"路径） |
+| **Graft（嫁接）** | 已有代码库，保留当前工作流不动 | `roll init` → AI 提示运行 `$roll-onboard` → ≤ 3 分钟回答 9 个问题 → `roll init --apply` |
+| **Replant（重栽）** | 已有代码库，准备彻底对齐 Roll 约定 | 同 Graft，但在 onboard 时选择"clean rebuild"清账重建 |
+
+详情：[seed](guide/zh/patterns/seed-pattern.md) · [graft](guide/zh/patterns/graft-pattern.md) · [replant](guide/zh/patterns/replant-pattern.md)
+
+---
+
 ## 文档索引
 
 | 主题 | English | 中文 |
@@ -78,7 +89,7 @@ roll loop on        # 可选：让 agent 无人值守工作
 | 配置（环境变量） | [guide/en/configuration.md](guide/en/configuration.md) | [guide/zh/configuration.md](guide/zh/configuration.md) |
 | 技能选择指南 | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
 | 常见问题（排障） | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
-| 领域模型（DDD） | [domain/context-map.md](.roll/domain/context-map.md) | — |
+| 接入模式 | [guide/en/patterns/](guide/en/patterns/) | [guide/zh/patterns/](guide/zh/patterns/) |
 | 工程常识 | [practices/engineering-common-sense.md](guide/en/practices/engineering-common-sense.md) | — |
 
 ---
@@ -87,15 +98,23 @@ roll loop on        # 可选：让 agent 无人值守工作
 
 | 命令 | 说明 |
 |------|------|
-| `roll setup [-f]` | 首次安装或重新同步约定到所有 AI 客户端 |
-| `roll update` | 升级到最新版本 |
+| **Autonomy · 日常使用** | |
+| `roll loop <on\|off\|now\|status\|monitor>` | 🤖 管理自主 BACKLOG 执行循环 |
+| `roll brief` | 🤖 查看最新 owner 简报 |
+| `roll backlog [block\|defer\|…]` | 查看和管理待处理任务 |
+| `roll peer` | 🤖 跨 Agent 协商对审 |
+| `roll alert` | 查看 / 清除 loop 告警 |
+| **Project · 项目内** | |
 | `roll init` | 初始化项目：AGENTS.md + .roll/backlog.md + .roll/features/ |
-| `roll status` | 显示同步状态、技能链接、检测到的 AI 工具 |
-| `roll backlog` | 显示 .roll/backlog.md 中待处理任务 |
-| `roll loop <on\|off\|now\|status\|monitor>` | 🤖 管理自主执行器 |
-| `roll brief` | 🤖 显示最新 owner 简报 |
-| `roll peer` | 🤖 跨 Agent 代码评审 |
-| `roll release` | 🤖 版本号 + tag + npm publish + GitHub Release |
+| `roll status` | 显示当前状态和漂移项 |
+| `roll agent [use <name>]` | 切换当前项目使用的 agent（Claude / Cursor / Codex / Kimi / …） |
+| `roll ci [--wait]` | 查看 / 等待当前 commit 的 CI 状态 |
+| `roll release` | 🤖 执行发版脚本（仅人工） |
+| `roll review-pr <number>` | 🤖 对指定 PR 做 AI 代码评审 |
+| **Machine · 全局** | |
+| `roll setup [-f]` | 首次安装或重新同步约定到所有 AI 客户端 |
+| `roll update` | 升级到最新版本并重新同步 |
+| `roll version` | 显示已安装的 roll 版本 |
 
 ---
 

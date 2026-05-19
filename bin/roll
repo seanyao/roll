@@ -1916,6 +1916,9 @@ cmd_peer() {
   local context_file=""
   local yolo=false
   local subcmd=""
+  # US-VIEW-009: parse --demo before any side effects so the v2 renderer can
+  # run standalone (no peer state, no tmux session, no agent call).
+  local demo=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1925,12 +1928,20 @@ cmd_peer() {
       --tag) tag="$2"; shift 2 ;;
       --context) context_file="$2"; shift 2 ;;
       --yes|--yolo) yolo=true; shift ;;
+      --demo) demo=true; shift ;;
       status) subcmd="status"; shift ;;
       reset) subcmd="reset"; shift; break ;;
       help|--help|-h) subcmd="help"; shift ;;
       *) err "Unknown option: $1  未知选项: $1"; exit 1 ;;
     esac
   done
+
+  # US-VIEW-009: ROLL_UI=v2 (default) + --demo routes to the redesigned Python view.
+  # Set ROLL_UI=v1 to fall back to the legacy bash implementation.
+  if [[ "$demo" == "true" ]] && { [[ "${ROLL_UI:-v2}" == "v2" ]] || [[ "$demo" == "true" ]]; }; then
+    python3 "${ROLL_PKG_DIR}/lib/roll-peer.py" --demo
+    return
+  fi
 
   case "$subcmd" in
     status) cmd_peer_status; return ;;

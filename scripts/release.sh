@@ -57,8 +57,10 @@ _run_changelog_and_notes() {
   [[ -f "$skill_file" ]] || { echo "Warning: roll-.changelog skill not found, skipping." >&2; return 1; }
   local agent; agent=$(_project_agent)
 
-  # Sections 1-7 only — drop Section 8 (features.md rewrite, handled separately)
-  local skill_content; skill_content=$(awk '/^## 8\. features\.md/{exit} {print}' "$skill_file")
+  # Sections 1-7 only — drop SKILL.md YAML frontmatter (claude 2.1.144+ parses
+  # leading `---` as a CLI long-option and errors out) and drop Section 8
+  # (features.md rewrite, handled separately by _run_features_sync_skill).
+  local skill_content; skill_content=$(_skill_content "$skill_file" | awk '/^## 8\. features\.md/{exit} {print}')
 
   local prompt="${skill_content}
 
@@ -92,8 +94,10 @@ _run_features_sync_skill() {
   [[ -f "$skill_file" ]] || return 1
   local agent="$1"
 
-  # Section 8 only — features.md rewrite rules
-  local skill_content; skill_content=$(awk '/^## 8\. features\.md/{found=1} found{print}' "$skill_file")
+  # Section 8 only — features.md rewrite rules. Strip frontmatter via
+  # _skill_content for consistency (Section 8 doesn't start at line 1 so the
+  # leading-`---` claude-CLI hazard doesn't apply here, but keep it uniform).
+  local skill_content; skill_content=$(_skill_content "$skill_file" | awk '/^## 8\. features\.md/{found=1} found{print}')
 
   local current_features=""
   [[ -f .roll/features.md ]] && current_features=$(<.roll/features.md)
@@ -140,12 +144,19 @@ sed -i.bak "s/^VERSION=.*/VERSION=\"${VERSION}\"/" bin/roll && rm bin/roll.bak
 
 # ── AI call 1: sync CHANGELOG + generate release notes (one combined call) ───
 if ! grep -q "^## v${VERSION}" CHANGELOG.md 2>/dev/null; then
-  if _run_changelog_and_notes > release_notes.txt 2>/dev/null && [ -s release_notes.txt ]; then
+  _tmp_changelog_err=$(mktemp)
+  if _run_changelog_and_notes > release_notes.txt 2>"$_tmp_changelog_err" && [ -s release_notes.txt ]; then
     sed -i.bak '/^```/d' release_notes.txt && rm release_notes.txt.bak
     echo "release_notes.txt generated."
+    rm -f "$_tmp_changelog_err"
     # Promote ## Unreleased → ## v{VERSION} now that changelog is updated
     sed -i.bak "s/^## Unreleased$/## v${VERSION}/" CHANGELOG.md && rm CHANGELOG.md.bak
   else
+    if [ -s "$_tmp_changelog_err" ]; then
+      echo "  agent stderr (first 5 lines):" >&2
+      head -5 "$_tmp_changelog_err" | sed 's/^/    /' >&2
+    fi
+    rm -f "$_tmp_changelog_err"
     # Fallback: extract raw section from existing ## Unreleased.
     # If no Unreleased section exists, abort — releasing without real notes
     # causes the GitHub Actions same-day-merge step to snowball prior bodies.
@@ -191,11 +202,26 @@ else
   rm -f "$_tmp_features_err"
 fi
 
-# Stage release artefacts. git add is a no-op for unchanged files.
-git add package.json bin/roll release_notes.txt CHANGELOG.md .roll/features.md
+# Stage release artefacts in outer repo. git add is a no-op for unchanged files.
+# .roll/ is the nested private repo (roll-meta, gitignored here) — its
+# features.md is committed separately below to avoid `git add` failing on an
+# ignored path under set -e.
+git add package.json bin/roll release_notes.txt CHANGELOG.md
 git commit -m "[release] ${TAG}"
 git tag "${TAG}"
 git push && git push --tags
+
+# Sync .roll/features.md into the nested roll-meta repo (best-effort).
+if [ -d .roll/.git ] && [ -f .roll/features.md ]; then
+  (
+    cd .roll
+    git add features.md
+    if ! git diff --cached --quiet; then
+      git commit -m "[release] ${TAG}"
+      git push
+    fi
+  ) || echo "Warning: .roll/features.md sync to roll-meta failed — push manually from .roll/." >&2
+fi
 
 # Publish to npm (unset proxy vars — npm can reach registry.npmjs.org directly)
 echo ""

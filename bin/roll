@@ -6016,7 +6016,7 @@ _legacy_help() {
   echo "Commands:"
   echo "  setup [-f]             [Machine] First-time install or re-sync             首次安装或重新同步"
   echo "  update                 [Upgrade] npm install latest + re-sync             一键升级到最新版"
-  echo "  init                   [Project] Create AGENTS.md + .roll/backlog.md + docs/     初始化项目工作流文件"
+  echo "  init                   [Project] Create AGENTS.md + .roll/backlog.md + .roll/features/  初始化项目工作流文件"
   echo "  status                 [Diagnostic] Show current state                    显示当前状态"
   echo "  peer                   [Peer Review] Cross-agent negotiation               跨 Agent 协商对审"
   echo "  loop <on|off|now|status|monitor|resume|reset>  [Autonomous] Manage scheduled BACKLOG executor  管理自主执行循环"

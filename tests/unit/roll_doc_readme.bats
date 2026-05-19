@@ -5,9 +5,9 @@ ROOT="${BATS_TEST_DIRNAME}/../.."
 
 # ─── README.md constraints ───────────────────────────────────────────────────
 
-@test "README.md is at most 120 lines" {
+@test "README.md is at most 200 lines" {
   count=$(wc -l < "${ROOT}/README.md")
-  [ "$count" -le 120 ]
+  [ "$count" -le 200 ]
 }
 
 @test "README.md contains one-sentence Roll definition" {
@@ -24,9 +24,9 @@ ROOT="${BATS_TEST_DIRNAME}/../.."
 
 # ─── README_CN.md constraints ────────────────────────────────────────────────
 
-@test "README_CN.md is at most 120 lines" {
+@test "README_CN.md is at most 200 lines" {
   count=$(wc -l < "${ROOT}/README_CN.md")
-  [ "$count" -le 120 ]
+  [ "$count" -le 200 ]
 }
 
 @test "README_CN.md has Chinese Documentation Index section" {

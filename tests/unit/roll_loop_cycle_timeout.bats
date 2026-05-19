@@ -39,8 +39,41 @@ teardown() {
   _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
   local inner="${script_path%.sh}-inner.sh"
   # Watchdog must be a backgrounded sleep + kill so it can fire while
-  # the foreground pipe (claude | python3 loop-fmt) is waiting.
-  grep -qE 'sleep "\$LOOP_CYCLE_TIMEOUT_SEC".*kill' "$inner"
+  # the foreground pipe (claude | python3 loop-fmt) is waiting. Allow
+  # the sleep and the kill to be on adjacent lines (FIX-068 expanded the
+  # watchdog body into a multi-line block).
+  grep -qE 'sleep "\$LOOP_CYCLE_TIMEOUT_SEC"' "$inner"
+  grep -qE 'kill -TERM \$\$' "$inner"
+}
+
+@test "inner: FIX-068 watchdog targets claude by worktree path" {
+  local script_path="${_test_dir}/run-test-wt-match.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  local inner="${script_path%.sh}-inner.sh"
+  # Watchdog must signal claude itself, not just direct children of the
+  # inner shell. Match by worktree path ($WT) — unique per cycle so
+  # concurrent cycles in other projects are never touched.
+  grep -qE 'pkill -TERM -f "\$WT"' "$inner"
+}
+
+@test "inner: FIX-068 watchdog escalates to SIGKILL after grace period" {
+  local script_path="${_test_dir}/run-test-sigkill.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  local inner="${script_path%.sh}-inner.sh"
+  # If claude ignores SIGTERM (mid-tool-call, blocked syscall), the watchdog
+  # must escalate to SIGKILL so the cycle can't run past its budget.
+  grep -qE 'pkill -KILL -f "\$WT"' "$inner"
+  # Grace period before escalation
+  grep -qE 'sleep 5' "$inner"
+}
+
+@test "inner: FIX-068 _CYCLE_TIMED_OUT is reset at the start of each retry attempt" {
+  local script_path="${_test_dir}/run-test-reset.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p foo" "/tmp/log" 10 18
+  local inner="${script_path%.sh}-inner.sh"
+  # Without a reset, a SIGTERM in attempt 1 would force an immediate break
+  # on attempts 2 and 3 even when those attempts ran cleanly.
+  grep -qE '_CYCLE_TIMED_OUT=0' "$inner"
 }
 
 @test "inner: EXIT trap kills all background jobs, not just heartbeat" {

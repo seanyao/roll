@@ -328,6 +328,7 @@
 | [US-VIEW-008](.roll/features/cli-redesign.md#us-view-008) | `roll init` 把项目初始化做成 6 步编号流程，新建文件用绿色 `+`、合并已有文件用琥珀 `~`，结尾给三步上手指南 | ✅ Done |
 | [US-VIEW-009](.roll/features/cli-redesign.md#us-view-009) | `roll peer` 把跨 Agent 对审日志渲染成回合制 transcript — 每轮谁提出 concern / nit / ack / block 一目了然，最后给绿色 verdict | 📋 Todo |
 | [US-VIEW-010](.roll/features/cli-redesign.md#us-view-010) | dashboard 上每轮 cycle 的成本按模型公开单价 × 实际 token 用量算出来，不再受订阅折扣干扰，多项目 / 多账号可以横向对比和加总 | 📋 Todo |
+| [US-VIEW-011](.roll/features/cli-redesign.md#us-view-011) | loop dashboard 上 cycle 跑完但 PR 没合并的轮次也要看得见 — 每行带 PR 号和状态标记，区分合并 / 关闭 / 仍开，token 花了不能从视野里消失 | 📋 Todo |
 
 ## Epic: Marketing & Site
 ### Feature: landing-page

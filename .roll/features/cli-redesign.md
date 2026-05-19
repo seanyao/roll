@@ -328,3 +328,34 @@
 
 **Dependencies:**
 - Depends on: US-LOOP-004
+
+## US-VIEW-011 dashboard 显示 cycle 的 PR 落地状态 📋
+
+**Created**: 2026-05-19
+
+- As a Roll 用户
+- I want loop dashboard 上每一轮 cycle 都看得到 PR 号和它的落地状态（合并 / 关闭 / 仍开）
+- So that PR 被关掉没合并的轮次不会从视野里消失 — token 花了就要看见，方便点开排查为什么白跑
+
+**背景**:
+2026-05-19 13:11 那轮 cycle 跑完开了 PR #77（重复 fix FIX-064），被自动 close 掉没合并。当前 dashboard 行只显示 `✓ 13:11   17m   3.6M   $2.65   —`，看不出有 PR、更看不出 PR 被关掉了，3.6M token 像凭空消失。
+
+**Domain Model:**
+- Context: View Rendering + Cycle Event Stream
+- Cross-context: 需要 `pr` 事件携带 PR 落地状态（merged / closed / open），目前只有 `outcome: ok`
+
+**AC:**
+- [ ] `pr` 事件 outcome 字段新增三态：`merged` / `closed` / `open`；开 PR 时先写 `open`，后续在 cycle_end 前回查 GH API 写终态
+- [ ] dashboard cycle row 在 backlog id 之后追加 PR 标记：合并 = `#NN ✓`、关闭未合并 = `#NN ↩`、仍开 = `#NN …`；无 PR 的 cycle 行不变
+- [ ] cycle 完成但 PR 被关闭（白跑）的行 glyph 从 `✓` 改成 `⊘`，一眼区分"真交付"和"白跑"
+- [ ] rollup 区域的 `merged PRs` 计数保持现状（只计 merged），与 row 标记互补不冲突
+- [ ] 历史数据兼容：老 `pr` 事件只有 `outcome: ok` 时按 `open` 渲染，不破坏老 row
+
+**Files:**
+- `bin/roll`（开 PR 时写 `outcome: open`；cycle_end 前回查 GH 状态写终态事件）
+- `lib/roll-loop-status.py`（aggregate 解析 PR 状态、记 PR 号；outcome 派生 `⊘` 分支）
+- `lib/roll_render.py`（cycle_row 后缀 PR 标记 + glyph 分支）
+- `tests/unit/roll_render.bats`（merged / closed / open 三态 + 无 PR 的回归）
+
+**Dependencies:**
+- Depends on: US-LOOP-001（pr 事件流）

@@ -30,49 +30,6 @@ VERSION="${_RELEASE_VERSION}"  # restore release version (source clobbers it)
 TAG="${_RELEASE_TAG}"
 unset _RELEASE_VERSION _RELEASE_TAG
 
-# ── Planning-marker enforcement (US-DOC-011 mechanical guard, FIX-051) ───────
-# AI-rewritten features.md can silently drop the *(规划中)* marker that flags
-# all-Todo Features. Post-process the file mechanically so the rule no longer
-# depends on AI compliance.
-_enforce_planning_markers() {
-  local features="${1:-.roll/features.md}"
-  local backlog="${2:-.roll/backlog.md}"
-  [[ -f "$features" && -f "$backlog" ]] || return 0
-
-  local all_todo
-  all_todo=$(awk '
-    /^### Feature:/ {
-      if (name != "" && todo > 0 && done == 0) print name
-      name = $0; sub(/^### Feature: */, "", name); todo = 0; done = 0; next
-    }
-    /✅ Done/ { done++ }
-    /📋 Todo|🔨 In Progress/ { todo++ }
-    END { if (name != "" && todo > 0 && done == 0) print name }
-  ' "$backlog")
-
-  [[ -z "$all_todo" ]] && return 0
-
-  # Pass list via env var instead of -v: BSD awk on macOS rejects newlines
-  # inside -v values; ENVIRON access handles multi-line strings cleanly.
-  ROLL_PLANNING_LIST="$all_todo" awk '
-    BEGIN {
-      n = split(ENVIRON["ROLL_PLANNING_LIST"], arr, "\n")
-      for (i = 1; i <= n; i++) if (arr[i] != "") names[arr[i]] = 1
-    }
-    {
-      if ($0 ~ /^- / && $0 !~ /规划中/) {
-        for (name in names) {
-          if (index($0, "(.roll/features/" name ".md)") > 0 || $0 ~ ("^- " name " ")) {
-            print $0 " *(规划中)*"
-            next
-          }
-        }
-      }
-      print
-    }
-  ' "$features" > "${features}.tmp" && mv "${features}.tmp" "$features"
-}
-
 # ── Compact BACKLOG summary (~2KB vs 36KB full file) ─────────────────────────
 # Emits Epic > Feature hierarchy with done/todo counts per feature.
 _backlog_summary() {
@@ -233,11 +190,6 @@ else
   fi
   rm -f "$_tmp_features_err"
 fi
-
-# Mechanical guard for US-DOC-011 planning markers (FIX-051). Runs whether or
-# not the AI step actually rewrote the file — covers both new-AI-output and
-# pre-existing-content paths.
-_enforce_planning_markers .roll/features.md .roll/backlog.md
 
 # Stage release artefacts. git add is a no-op for unchanged files.
 git add package.json bin/roll release_notes.txt CHANGELOG.md .roll/features.md

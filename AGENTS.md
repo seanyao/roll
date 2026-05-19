@@ -142,3 +142,48 @@ Confirm each phase clean before proceeding to the next.
 1. Write or update `guide/en/<topic>.md`
 2. Reflect changes in `guide/zh/<topic>.md`
 3. Update Documentation Index tables in README.md and README_CN.md if new files were added
+
+## 9. Working with `.roll/` (nested private repo)
+
+> Maintainer-only. Roll itself dogfoods Roll, but the project meta (backlog,
+> proposals, features, briefs, dream, design, domain, verification) is private
+> and lives in [`seanyao/roll-meta`](https://github.com/seanyao/roll-meta).
+> This public repo gitignores all of `.roll/`.
+
+**Layout**
+- `~/Workspace/roll/` — outer working tree, tracks `seanyao/roll` (public)
+- `~/Workspace/roll/.roll/` — independent nested git repo, tracks `seanyao/roll-meta` (private)
+- Outer's `.gitignore` lists `.roll/`; only runtime files (`state/`, `scratch/`, `last-test-pass`, `*.lock`) are also gitignored *inside* the nested repo
+
+**Where to commit what**
+
+| 改动类型 | cwd 改动 | commit + push 去哪 |
+|---------|---------|-------------------|
+| 代码 / skills / tests / docs | 任意 | `cd ~/Workspace/roll` → roll (public) |
+| backlog / proposals / features | 任意 | `cd ~/Workspace/roll/.roll` → roll-meta (private) |
+| briefs / dream / design / domain | 任意 | `cd ~/Workspace/roll/.roll` → roll-meta (private) |
+
+**Daily-ops pitfalls (high frequency, easy to miss)**
+
+1. `git status` from outer `roll/` will NOT show `.roll/` changes — the outer git ignores them entirely. After editing backlog/features/etc., always also run `cd .roll && git status` (or you'll never push them).
+
+2. `git add -A` from outer roll/ does not reach into `.roll/`. Have to `cd` first.
+
+3. CI (GitHub Actions, the daemon loop, etc.) cannot see `.roll/`. Don't write tests that assume `.roll/<file>` exists at fresh-checkout time — use TMP/PROJECT_DIR fixtures, as the surviving `cmd_*.bats` tests do.
+
+4. `rg` / `find` / `grep` from outer roll/ root will *not* recurse into `.roll/` automatically (gitignored). To search backlog/etc., pass the path explicitly: `rg pattern .roll/`. Read tool / direct path access works as normal.
+
+5. `git worktree add` of outer roll/ creates a new working dir with an empty `.roll/`. To re-populate: `cd <worktree>/.roll && git init -b main && git remote add origin git@github.com:seanyao/roll-meta.git && git fetch && git reset --hard origin/main`.
+
+6. Do *not* `rm -rf .roll/` from outer roll/ to "clean up" — that destroys the nested `.git/` and its un-pushed history. To resync only working-tree content: `cd .roll && git reset --hard origin/main`.
+
+**New-machine setup**: see roll-meta's README §Setup. The short version:
+```
+git clone git@github.com:seanyao/roll.git
+cd roll/.roll
+git init -b main
+git remote add origin git@github.com:seanyao/roll-meta.git
+git fetch && git reset --hard origin/main
+```
+
+This dual-repo model is v2.0 onward. Pre-v2.0 (before commit `f03ddd6`), `.roll/` was tracked in the public repo.

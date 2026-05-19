@@ -177,8 +177,8 @@
 | FIX-059 | roll setup 写入新 plist 时 macOS 会通过 FSEvents 自动 bootstrap 该 job，导致从未显式开启 loop 的项目也会每小时触发 loop cycle 并弹出终端窗口 — _install_launchd_plists 写完新 plist 后应对从未被显式启用的 label 立即执行 launchctl disable，阻止 macOS 自动加载 | ✅ Done |
 | FIX-060 | loop pause 后上一个 cycle 的 PR 合并了但 runs.jsonl 状态永远停在 built — merged 状态更新依赖下一个 cycle 启动时去轮询 GitHub，loop 一旦 paused 就永远等不到这次更新；应改为独立的 PR 状态扫描（不依赖下一个 cycle 才能回填） | ✅ Done |
 | FIX-061 | 测试 fixture 缺 `mkdir -p .roll` 导致 CI 红 — Story 5 sed 把 `BACKLOG.md` 等改成 `.roll/backlog.md` 但忘了 `mkdir -p` 父目录，导致 `cmd_init.bats`、`loop_tcr.bats`、`release_planning_marker.bats` 等大量测试 fixture 在 sandbox 中崩；批量补齐 | ✅ Done |
-| FIX-062 | cycle / worktree 命名用 UTC 时间，本地（东八区）用户看到 `cycle-20260519-001104` 时容易误判为"8 小时前的旧 cycle"，实际是 30 分钟前 — 命名/显示应统一到本机时区，避免 UTC 与本地之差造成认知偏差 | 📋 Todo |
-| FIX-063 | `roll loop status` 调度时刻显示三处不一致：THREE LAYERS 行 `every :38`、"next run" 显示 `09:48`、launchd plist 实际是 `Minute=11`，真实 cycle 也确实在 `:11` 触发——渲染层读了错误的 config 源 / 错误地推算下次触发时刻，用户对调度时间产生误判 | 📋 Todo |
+| FIX-062 | cycle / worktree 命名用 UTC 时间，本地（东八区）用户看到 `cycle-20260519-001104` 时容易误判为"8 小时前的旧 cycle"，实际是 30 分钟前 — 命名/显示应统一到本机时区，避免 UTC 与本地之差造成认知偏差 | ✅ Done |
+| FIX-063 | `roll loop status` 调度时刻显示三处不一致：THREE LAYERS 行 `every :38`、"next run" 显示 `09:48`、launchd plist 实际是 `Minute=11`，真实 cycle 也确实在 `:11` 触发——渲染层读了错误的 config 源 / 错误地推算下次触发时刻，用户对调度时间产生误判 | ✅ Done |
 
 ## Epic: Autonomous Evolution
 ### Feature: autonomous-evolution
@@ -277,14 +277,14 @@
 | REFACTOR-029 | docs: ROLL_MERGE_SUMMARY 等四个配置变量在代码中频繁引用但文档完全缺失，用户和贡献者无法发现这些配置入口 — flagged by dream 2026-05-17 (hint: $roll-doc) | ✅ Done |
 | REFACTOR-030 | 上一次重构遗留的四个 helper 函数和它们的单元测试仍留在仓库里但生产路径已经不再调用，其中两个还被技能文档当作现行协议描述，新维护者会误以为这些是活路径 — flagged by dream 2026-05-18 | 📋 Todo |
 | REFACTOR-031 | 同一个 macOS/Linux mtime 兼容写法在四处复制粘贴，平台兼容性如有调整需要四个地方同步改，容易漏 — flagged by dream 2026-05-18 | 📋 Todo |
-| REFACTOR-032 | docs: 产品功能目录漏收三个已经上线一段时间的功能区，用户从功能页找不到这些功能；发版时的自动重写脚本没能把它们补进去 — flagged by dream 2026-05-18 (hint: $roll-doc) | 📋 Todo |
-| REFACTOR-033 | docs: 仓库里有一个共享脚本目录承载了多个生产模块，但在架构文档里完全没出现，新人读完领域文档也不知道它的存在 — flagged by dream 2026-05-18 (hint: $roll-doc) | 📋 Todo |
+| REFACTOR-032 | docs: 产品功能目录漏收三个已经上线一段时间的功能区，用户从功能页找不到这些功能；发版时的自动重写脚本没能把它们补进去 — flagged by dream 2026-05-18 (hint: $roll-doc) | ✅ Done |
+| REFACTOR-033 | docs: 仓库里有一个共享脚本目录承载了多个生产模块，但在架构文档里完全没出现，新人读完领域文档也不知道它的存在 — flagged by dream 2026-05-18 (hint: $roll-doc) | ✅ Done |
 | REFACTOR-034 | docs: BACKLOG 里每条 Story 的链接都指向已经搬走的旧目录，点开是 404，新人通过 BACKLOG 浏览功能详情会被全部断链堵死 — flagged by dream 2026-05-19 (hint: $roll-doc) | ✅ Done |
 | REFACTOR-035 | docs: 用户指南还在告诉读者功能详情、领域模型、夜检日志放在老目录，而实际位置已经搬走，按文档说的路径找不到任何东西 — flagged by dream 2026-05-19 (hint: $roll-doc) | ✅ Done |
 | REFACTOR-036 | 本次夜检技能自身的扫描描述里还写着老目录路径，未来按文档复现夜检流程会扫到空目录、漏掉真实内容 — flagged by dream 2026-05-19 | ✅ Done |
-| REFACTOR-037 | docs: README + guide/{overview,project-setup,methodology,conventions} 还描述老的"BACKLOG.md 在根级"项目布局，没提 `.roll/` 约定、`roll migrate`、`$roll-onboard` 三个新能力——新用户读完文档不知道 2.0 的核心特性 | 📋 Todo |
-| REFACTOR-038 | docs: `conventions/global/AGENTS.md` 分发给所有用户项目，里面的"Where to Look"指针和"Workspace"段还指老路径——新用户 `roll setup` 之后拿到的全局约定是 pre-2.0 的描述 | 📋 Todo |
-| REFACTOR-039 | docs: README 没有 "What's new in 2.0" 入口，老用户升级后不知道为啥要 `roll migrate`、也不知道新能力——需要一段简短"2.0 brings X, Y, Z" + 链接到 migration-2.0.md | 📋 Todo |
+| REFACTOR-037 | docs: README + guide/{overview,project-setup,methodology,conventions} 还描述老的"BACKLOG.md 在根级"项目布局，没提 `.roll/` 约定、`roll migrate`、`$roll-onboard` 三个新能力——新用户读完文档不知道 2.0 的核心特性 | ✅ Done |
+| REFACTOR-038 | docs: `conventions/global/AGENTS.md` 分发给所有用户项目，里面的"Where to Look"指针和"Workspace"段还指老路径——新用户 `roll setup` 之后拿到的全局约定是 pre-2.0 的描述 | ✅ Done |
+| REFACTOR-039 | docs: README 没有 "What's new in 2.0" 入口，老用户升级后不知道为啥要 `roll migrate`、也不知道新能力——需要一段简短"2.0 brings X, Y, Z" + 链接到 migration-2.0.md | ✅ Done |
 
 ## Epic: Backlog 生命周期管理
 ### Feature: alert-lifecycle

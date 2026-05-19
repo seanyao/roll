@@ -28,6 +28,18 @@ Roll is an autonomous delivery system for software teams — AI agents pick stor
 
 _Works with Claude, Cursor, Codex, or your own agent._
 
+## What's New in 2.0 (May 2026)
+
+Roll 2.0 introduces a **process/product split** to keep open-source projects clean:
+
+- **`.roll/` directory convention** — all process artifacts (backlog, features, briefs, dream logs) move out of root into `.roll/`. User-facing `guide/` and `site/` move up to root. Old `docs/` directory disappears.
+- **`roll migrate`** — one-command migration for projects on pre-2.0 layout. `git mv` preserves history, single atomic commit, three-state idempotent.
+- **`$roll-onboard`** — interactive skill for adopting Roll on legacy codebases without rewrites. AI reads your code, asks 9 questions in ≤ 3 minutes, produces a plan; `roll init --apply` executes it.
+- **Three adoption patterns** — `seed` (new project), `graft` (legacy, non-invasive), `replant` (legacy, clean rebuild). See [guide/en/patterns/](guide/en/patterns/).
+
+📖 Upgrading from 1.x? Read [guide/en/migration-2.0.md](guide/en/migration-2.0.md).
+📖 New legacy project? Read [guide/en/legacy-onboarding.md](guide/en/legacy-onboarding.md).
+
 ## Evolution
 
 Roll didn't start as a framework. It started as a question: *what if the AI didn't just write code, but actually shipped it?*

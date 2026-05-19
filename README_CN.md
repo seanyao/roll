@@ -28,6 +28,18 @@ Roll 是面向软件团队的自主交付系统——AI agent 从 BACKLOG 中取
 
 _支持 Claude、Cursor、Codex，或你自己的 agent。_
 
+## 2.0 新特性（2026-05）
+
+Roll 2.0 引入**过程/产品分离**架构，让开源项目结构更清晰：
+
+- **`.roll/` 目录约定** — 所有过程产物（backlog、features、briefs、dream 日志）从根级搬入 `.roll/`；用户文档 `guide/` 和 `site/` 上移到根级。旧 `docs/` 目录消失。
+- **`roll migrate`** — 老项目一键迁移到新结构。`git mv` 保留历史，单原子 commit，三态幂等。
+- **`$roll-onboard`** — 遗留项目交互式接入技能。AI 读完代码 ≤ 3 分钟回答 9 个问题、产出 plan；`roll init --apply` 落盘。
+- **三种接入模式** — `seed`（新项目）、`graft`（遗留项目零侵入）、`replant`（遗留项目清账重建）。详见 [guide/zh/patterns/](guide/zh/patterns/)。
+
+📖 从 1.x 升级？阅读 [guide/zh/migration-2.0.md](guide/zh/migration-2.0.md)。
+📖 接入遗留项目？阅读 [guide/zh/legacy-onboarding.md](guide/zh/legacy-onboarding.md)。
+
 ## 演进
 
 Roll 不是从框架开始的，它从一个问题开始：*如果 AI 不只是写代码，而是真的把它交付出去，会怎样？*

@@ -31,35 +31,51 @@ story.
 
 ## Where to Look
 
-The `AGENTS.md` navigation section maps concept names to file paths:
+The `AGENTS.md` navigation section maps concept names to file paths. Roll 2.0
+consolidates everything Roll touches under `.roll/`, so navigation is anchored
+there:
 
 ```markdown
 ## Where to Look
 
 | Concept | Location |
 |---------|----------|
-| Domain model | `.roll/domain/` |
+| Backlog index | `.roll/backlog.md` |
 | Feature specs | `.roll/features/<name>.md` |
-| User guides | `docs/guide/` |
+| Domain model | `.roll/domain/context-map.md` |
+| Architecture decisions | `.roll/decisions/` |
+| Autonomous output (briefs, dream) | `.roll/briefs/`, `.roll/dream/` |
+| User guides | `guide/en/`, `guide/zh/` |
 | Test helpers | `tests/unit/helpers.bash` |
 ```
+
+The contract: `AGENTS.md` lives at the project root (every AI client reads it
+first); everything it points into lives under `.roll/`. The root stays clean,
+and the navigation table is the single map agents need.
 
 `$roll-design` maintains this table as new docs and directories are added.
 Any agent entering the project can navigate to authoritative sources without
 scanning the whole tree.
 
-## Legacy Projects: `$roll-doc`
+## Legacy Projects: `$roll-onboard` and `$roll-doc`
 
-For projects with scattered docs and no `AGENTS.md`:
+For an existing codebase with no `.roll/` yet, the entry point is
+`$roll-onboard` (the **graft** adoption pattern). It scans the code, asks a
+focused set of cognition / scope / privacy questions, and writes
+`.roll/onboard-plan.yaml` as a reviewable contract. `roll init --apply` then
+turns that plan into the on-disk structure — see
+[legacy-onboarding.md](legacy-onboarding.md) and
+[patterns/](patterns/README.md).
+
+For projects that already have `AGENTS.md` but scattered docs:
 
 ```bash
 $roll-doc
 ```
 
-`roll-doc` scans the codebase, infers the domain structure, and writes an
-`AGENTS.md` with a populated navigation table. It also flags documentation
-gaps (missing architecture docs, undocumented public APIs) for `$roll-build`
-to fill.
+`roll-doc` infers the domain structure from existing code, refreshes the
+`Where to Look` navigation table, and flags documentation gaps (missing
+architecture docs, undocumented public APIs) for `$roll-build` to fill.
 
 ## Global Conventions
 

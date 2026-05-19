@@ -1,6 +1,6 @@
 # Roll — 概述
 
-Roll 是一个自主交付系统。把目标写进 BACKLOG，让 Roll 去执行。
+Roll 是一个自主交付系统。把目标写进 `.roll/backlog.md`，让 Roll 去执行。
 
 ## 快速开始
 
@@ -76,6 +76,37 @@ Roll 运行在三个自主层上：
 - PR 收件箱 — 外部 PR 先经 AI 评审再合入；过时 PR 自动 rebase `[new]`
 - `roll review-pr` — 对任意 PR 按需发起 AI 评审，可指定 agent `[new]`
 
+## 项目结构
+
+Roll 2.0 让项目根目录保持干净，所有 Roll 管理的产物都收进 `.roll/`：
+
+```
+my-project/
+├── AGENTS.md            # 工程约束（根目录 — Agent 第一读它）
+├── README.md            # 产品门面
+├── src/  tests/         # 业务代码
+└── .roll/               # Roll 接触的一切
+    ├── backlog.md       # Story / Fix / Refactor 索引
+    ├── features/        # 每个 Story 的 AC + plan 文档
+    ├── domain/          # DDD 模型、context map
+    ├── briefs/  dream/  # 自主层产出
+    └── decisions/       # ADR
+```
+
+从 2.0 之前的版本升级？看 [migration-2.0.md](migration-2.0.md) —— `roll
+migrate` 一次性把旧版 `BACKLOG.md`、`docs/features/`、`docs/domain/` 迁到
+新布局。
+
+## 选择接入模式
+
+Roll 支持三种接入模式，按项目起点选择 —— 决策树见
+[patterns/](patterns/README.md)：
+
+- **Seed（播种）** —— 空目录 + 产品愿景。从 day 1 就是 Roll 原生形态。
+- **Graft（嫁接）** —— 已有代码、零侵入。`$roll-onboard` 从现有项目反推
+  生成 `.roll/`。参见 [legacy-onboarding.md](legacy-onboarding.md)。
+- **Replant（翻种）** —— 历史包袱重。先反推规格，再按新规格重建。
+
 ## 指南目录
 
 | 主题 | 文档 |
@@ -84,5 +115,8 @@ Roll 运行在三个自主层上：
 | 夜间代码健康巡检与 REFACTOR 生成 | [dream.md](dream.md) |
 | 跨 Agent 评审协议 | [peer.md](peer.md) |
 | 完整技能目录 | [skills.md](skills.md) |
+| 接入模式（seed / graft / replant） | [patterns/](patterns/README.md) |
+| 给已有项目接入 Roll | [legacy-onboarding.md](legacy-onboarding.md) |
+| 从 2.0 之前版本升级 | [migration-2.0.md](migration-2.0.md) |
 | 常见场景与故障排查 | [faq.md](faq.md) |
 | 环境变量配置 | [configuration.md](configuration.md) |

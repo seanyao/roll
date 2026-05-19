@@ -27,30 +27,46 @@ Success Criteria: <可衡量的完成标准>
 
 ## Where to Look
 
-`AGENTS.md` 导航段将概念名映射到文件路径：
+`AGENTS.md` 导航段将概念名映射到文件路径。Roll 2.0 将所有 Roll 接触的内容
+统一收进 `.roll/`，导航也以此为锚点：
 
 ```markdown
 ## Where to Look
 
 | 概念 | 位置 |
 |------|------|
-| 领域模型 | `.roll/domain/` |
+| Backlog 索引 | `.roll/backlog.md` |
 | Feature 规格 | `.roll/features/<name>.md` |
-| 用户指南 | `docs/guide/` |
+| 领域模型 | `.roll/domain/context-map.md` |
+| 架构决策 | `.roll/decisions/` |
+| 自主层产出（briefs / dream） | `.roll/briefs/`、`.roll/dream/` |
+| 用户指南 | `guide/en/`、`guide/zh/` |
 | 测试辅助函数 | `tests/unit/helpers.bash` |
 ```
 
+约定如下：`AGENTS.md` 留在项目根目录（每个 AI 客户端的第一个读取点），它
+指向的一切都在 `.roll/` 之下。根目录保持干净，导航表就是 Agent 唯一需要
+的地图。
+
 `$roll-design` 在新增文档和目录时维护此表。任何进入项目的 Agent 无需扫描整棵树就能导航到权威来源。
 
-## 存量项目：`$roll-doc`
+## 存量项目：`$roll-onboard` 与 `$roll-doc`
 
-对于文档散落、没有 `AGENTS.md` 的项目：
+对于尚无 `.roll/` 的已有代码库，入口是 `$roll-onboard`（**graft（嫁接）**
+接入模式）：扫描代码、问一组聚焦的认知 / 范围 / 隐私问题、产出
+`.roll/onboard-plan.yaml` 作为可审阅的契约。审阅通过后执行
+`roll init --apply` 把方案落到磁盘 —— 见
+[legacy-onboarding.md](legacy-onboarding.md) 和
+[patterns/](patterns/README.md)。
+
+对于已有 `AGENTS.md` 但文档散落的项目：
 
 ```bash
 $roll-doc
 ```
 
-`roll-doc` 扫描代码库，推断领域结构，写入带导航表的 `AGENTS.md`，并标记文档缺口（缺少架构文档、未记录的公开 API）供 `$roll-build` 补全。
+`roll-doc` 从已有代码推断领域结构，刷新 `Where to Look` 导航表，并标记
+文档缺口（缺少架构文档、未记录的公开 API）供 `$roll-build` 补全。
 
 ## 全局约定
 

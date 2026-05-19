@@ -26,7 +26,7 @@ Roll decomposes the software delivery lifecycle into three loops, each independe
 graph TB
     subgraph "Loop A: Research & Design"
         A1["$roll-research<br/>HV Research & Analysis"] --> A2["$roll-design<br/>Requirements → INVEST Stories"]
-        A2 --> A3["BACKLOG.md<br/>Status Index"]
+        A2 --> A3[".roll/backlog.md<br/>Status Index"]
         A3 --> A4[".roll/features/<br/>Acceptance Criteria & Design"]
     end
 
@@ -116,7 +116,7 @@ Append `--force` (or `-f`) to force-rewrite `roll.md` or rebuild symlinks.
 `roll init` creates three workflow files in the current directory — instantly, with no prompts:
 
 - `AGENTS.md` — global engineering constraints (copied from `~/.roll/conventions/global/`)
-- `BACKLOG.md` — empty task index
+- `.roll/backlog.md` — empty task index
 - `.roll/features/` — directory for story details and design documents
 
 For **existing projects** (AGENTS.md already present), `roll init` re-merges the global conventions section-by-section, preserving all existing project-specific content.
@@ -143,7 +143,7 @@ Project Type (Template)  ← Reference only — consulted by $roll-build / $roll
 |----------------------|--------------------|
 | HCD (Human-Centered Design) | `$roll-research`: Research before design; data-driven decision-making |
 | BDD (Behavior-Driven Development) | `$roll-design`: Requirements expressed as Acceptance Criteria |
-| Scrum Backlog | `BACKLOG.md` + `.roll/features/`: Two-tier index structure |
+| Scrum Backlog | `.roll/backlog.md` + `.roll/features/`: Two-tier index structure |
 | INVEST Principles | Mandatory constraints on Story decomposition |
 
 ### 3.2 Research-Driven Design: `$roll-research`
@@ -182,7 +182,7 @@ Clarify → Discuss → [peer: direction] → Analyze+DDD → Design → [peer: 
 
 **Plan Review** (`$roll-peer`, optional) — For large-scope work, a peer agent reviews the complete plan before Stories are split. Same opt-out behavior.
 
-**Split + Write** — The plan is decomposed into INVEST-compliant User Stories, written to `.roll/features/<feature>.md` with full AC, and indexed in `BACKLOG.md`. The human confirms before `$roll-build` is invoked.
+**Split + Write** — The plan is decomposed into INVEST-compliant User Stories, written to `.roll/features/<feature>.md` with full AC, and indexed in `.roll/backlog.md`. The human confirms before `$roll-build` is invoked.
 
 The core output is User Stories that conform to the **INVEST principles**:
 
@@ -201,7 +201,7 @@ The core output is User Stories that conform to the **INVEST principles**:
 
 ### 3.4 Management Artifacts: Two-Tier Index Structure
 
-**`BACKLOG.md` (status index)** — the project's central state machine. Contains only Story ID, title, and status summary; implementation details are excluded:
+**`.roll/backlog.md` (status index)** — the project's central state machine. Contains only Story ID, title, and status summary; implementation details are excluded:
 
 ```markdown
 ## Stories
@@ -217,9 +217,9 @@ The core output is User Stories that conform to the **INVEST principles**:
 - `<feature>.md`: Full User Story including the Acceptance Criteria checklist.
 - `<feature>-plan.md`: Technical design document with architectural decisions and implementation approach.
 
-This separation keeps BACKLOG.md concise and readable as a progress dashboard, while detailed design lives in a dedicated location.
+This separation keeps `.roll/backlog.md` concise and readable as a progress dashboard, while detailed design lives in a dedicated location.
 
-> **Design principle — Markdown as Code**: In Roll, `BACKLOG.md` and `.roll/features/` are not documentation artifacts generated after development — they are the input that drives development. A Story does not exist until it has a Markdown file. A Story is not done until its Verification Gate evidence is committed. The file system is the single source of truth; there is no separate project management tool to stay in sync with.
+> **Design principle — Markdown as Code**: In Roll, `.roll/backlog.md` and `.roll/features/` are not documentation artifacts generated after development — they are the input that drives development. A Story does not exist until it has a Markdown file. A Story is not done until its Verification Gate evidence is committed. The file system is the single source of truth; there is no separate project management tool to stay in sync with.
 
 ---
 
@@ -236,15 +236,23 @@ This separation keeps BACKLOG.md concise and readable as a progress dashboard, w
 
 ### 4.2 Project Initialization: `roll init`
 
-Creates the minimal workflow scaffold needed to start a Roll-managed project — no questions asked, no type selection, no directory scaffold.
+Creates the minimal workflow scaffold needed to start a Roll-managed project. The exact behavior depends on the state of the current directory — see the three adoption patterns ([patterns/](patterns/README.md)):
+
+- **Seed** (empty dir): scaffold `AGENTS.md` + `.roll/` directly, no prompts.
+- **Graft** (existing legacy code, no `.roll/`): surfaces `$roll-onboard`, which scans the code, asks a short clarification set, and writes `.roll/onboard-plan.yaml` for review — see [legacy-onboarding.md](legacy-onboarding.md).
+- **Re-init** (`.roll/` already present): re-merges global conventions into `AGENTS.md`, preserves project-specific sections.
+
+Pre-2.0 projects (`BACKLOG.md` at root, `docs/features/`) should run `roll migrate` first — see [migration-2.0.md](migration-2.0.md).
 
 **What `roll init` creates:**
 
 ```
 my-project/
 ├── AGENTS.md            # Engineering constraints (from global conventions)
-├── BACKLOG.md           # Task index
-└── .roll/features/       # Story details & design documents
+└── .roll/
+    ├── backlog.md       # Task index
+    ├── features/        # Story details & design documents
+    └── domain/          # DDD models, context map
 ```
 
 Three files. Under 5 seconds. Run `roll setup` again to distribute conventions and skills to AI tool configs.
@@ -420,7 +428,7 @@ Automatic trigger signals: when a Story touches authentication/authorization, pa
 
 After each successful deployment, two mechanisms ensure deliverables remain traceable:
 
-- **`$roll-.changelog`**: Automatically extracts completed Stories from BACKLOG.md, filters out internal technical details, and generates a user-facing changelog.
+- **`$roll-.changelog`**: Automatically extracts completed Stories from `.roll/backlog.md`, filters out internal technical details, and generates a user-facing changelog.
 - **`Co-Authored-By` trailer (AI source tagging)**: AI tools (Claude Code, Codex, Cursor, etc.) natively append a `Co-Authored-By: <Model> <email>` trailer on commit. In multi-Agent workflows, `git log` shows the actual executor of every commit at a glance.
 
 ---
@@ -680,7 +688,7 @@ roll                      # project dashboard (in project dir): loop status + br
 | Skill | Phase | Input | Output |
 |-------|-------|-------|--------|
 | `$roll-research` | Research | Research topic | Markdown / PDF research report |
-| `$roll-design` | Design | Requirements description | BACKLOG.md + .roll/features/ |
+| `$roll-design` | Design | Requirements description | `.roll/backlog.md` + `.roll/features/` |
 | `$roll-build` | Implementation | Story ID / one-sentence requirement | Deployed code + verification evidence |
 | `$roll-spar` | Defensive implementation | Feature description | Adversarial test suite + implementation code |
 | `$roll-fix` | Bug fix | Fix ID | Fix code + regression test |
@@ -700,9 +708,9 @@ Commands fall into two categories: bash commands run pure shell logic; agent com
 |---------|---------|
 | `roll setup [-f]` | First-time install on this machine, or re-sync (use `--force` to overwrite local cache) |
 | `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via setup |
-| `roll init` | Create AGENTS.md + BACKLOG.md + .roll/features/ in cwd; re-merges if AGENTS.md exists |
+| `roll init` | Create `AGENTS.md` + `.roll/` scaffold (`backlog.md`, `features/`, `domain/`) in cwd; surfaces `$roll-onboard` for legacy code; re-merges if `AGENTS.md` exists |
 | `roll status` | Display current sync status, skill links, and detected AI tools |
-| `roll backlog` | Show all pending tasks from BACKLOG.md |
+| `roll backlog` | Show all pending tasks from `.roll/backlog.md` |
 | `roll agent [use <name>\|list]` | Per-project agent selection — affects all 🤖 commands |
 | `roll loop <on\|off\|now\|status\|monitor\|resume\|reset>` | 🤖 Manage the autonomous BACKLOG executor (three-service: loop/dream/brief) |
 | `roll brief` | 🤖 Show latest owner brief (regenerate if stale >24h) |

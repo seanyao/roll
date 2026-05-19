@@ -278,7 +278,7 @@ When any signal appears, **do not stop — flag it**:
 # 1. Append to .roll/backlog.md under ## ♻️ Refactor
 # REFACTOR-XXX | <one-line description> | 📋 Todo
 
-# 2. Append a brief entry to .roll/features/refactor-log.md
+# 2. Append a brief entry to .roll/features/autonomous-evolution/refactor-log.md
 ```
 
 **REFACTOR entry format in .roll/backlog.md:**
@@ -287,7 +287,7 @@ When any signal appears, **do not stop — flag it**:
 | REFACTOR-001 | {one-line plain-language description} | 📋 Todo |
 ```
 
-描述写法：参见 AGENTS.md "Backlog descriptions" 规则。说清楚"什么需要改"以及"不改会怎样"，技术细节写在 `.roll/features/refactor-log.md`。
+描述写法：参见 AGENTS.md "Backlog descriptions" 规则。说清楚"什么需要改"以及"不改会怎样"，技术细节写在 `.roll/features/autonomous-evolution/refactor-log.md`。
 
 **refactor-log.md entry format:**
 

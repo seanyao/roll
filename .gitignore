@@ -34,12 +34,10 @@ npm-debug.log*
 # Claude Code runtime artifacts (PID locks, transient state)
 .claude/*.lock
 
-# .roll/ holds project process artifacts (backlog, features, briefs, dream, etc.)
-# These ARE tracked for Roll itself (open-source dogfood). Only runtime state
-# inside .roll/ is gitignored:
-#   - last-test-pass: TCR proof-of-pass record (written by tests/run.sh)
-#   - state/:         loop runtime state (PIDs, locks, cycle data)
-.roll/last-test-pass
-.roll/state/
-.roll/*.lock
-.roll/scratch/
+# .roll/ persistent project meta migrated to private roll-meta repo
+# (github.com/seanyao/roll-meta, Phase 2 / US-ONBOARD-011).
+# Only runtime state remains in-repo locally, never committed.
+.roll/
+
+# Local staging clone of roll-meta for cross-repo Phase 2 work
+.roll-meta-remote/

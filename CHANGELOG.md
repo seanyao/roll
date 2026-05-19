@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.519.2
 
 ### Improved
 

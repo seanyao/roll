@@ -320,11 +320,13 @@
 - [ ] token 列从此有真实数字（用 k/m/b 计量）
 - [ ] rollup（今日 / 昨日 / 前天）的 cost / tokens 都从事件流加总
 - [ ] 老数据（detail 是字符串）保持兼容：cost / tokens 显示 `—`，但不破坏其他列
+- [ ] **cycle row 新增 model 列**，显示每轮 cycle 使用的模型短名（`opus` / `sonnet` / `haiku`），未知模型显示 `?`；位置在 cost 列前；窄屏自动隐藏。这是 cost 列的语境注释——一眼看清"今日 91M tok / 昨日 148M tok 但今日 cost 反而高"是因为 model 换了
 
 **Files:**
-- `lib/model_prices.py`（新建：单价表 + compute_list_cost）
+- `lib/model_prices.py`（新建：单价表 + compute_list_cost + 模型短名映射）
 - `lib/roll-loop-status.py`（解析 cycle_end detail，调单价表）
-- `tests/unit/roll_render.bats`（新增单价表 + cost 计算回归）
+- `lib/roll_render.py`（cycle_row 增加 model 列；窄屏判断）
+- `tests/unit/roll_render.bats`（新增单价表 + cost 计算 + model 列渲染回归）
 
 **Dependencies:**
 - Depends on: US-LOOP-004

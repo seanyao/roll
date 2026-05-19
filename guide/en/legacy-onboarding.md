@@ -22,7 +22,7 @@ This page covers **graft**. For seed vs. replant, see [adoption patterns](https:
 - **Syncs** Roll conventions to whichever AI tools you use
 - Leaves you with a project that has BOTH its original workflow AND Roll's project-management capabilities
 
-The graft is **fully reversible**: `rm -rf .roll/` and you're back to where you started.
+The graft is **fully reversible**: run `roll offboard` and Roll undoes exactly what it added (see [How to exit](#how-to-exit) below).
 
 ## Step by step
 
@@ -110,21 +110,36 @@ Roll only touches **its own** files inside your project:
 
 If you've already got a `CONTRIBUTING.md` or a `.github/` workflow, Roll won't reach into them. If you want Roll's workflow integrated with yours, that's a manual step you do later.
 
-## How to back out
+## How to exit
 
-Two options:
+`roll init --apply` records every file, directory, and `.gitignore` line it adds into `.roll/onboard-changeset.yaml`. The `roll offboard` command reads that record and undoes exactly those changes.
 
-**Light reversal** (keep Roll installed, drop adoption on this project):
+**Preview what will be undone (default):**
 
 ```bash
-rm -rf .roll/ AGENTS.md
-# also revert .gitignore if Roll modified it
+cd your-project
+roll offboard
 ```
 
-**Full reversal** (uninstall Roll globally):
+This is a dry-run — no files are removed. The output lists every artefact the changeset recorded and the `.gitignore` lines that will be reverted.
+
+**Apply the rollback:**
 
 ```bash
-rm -rf .roll/ AGENTS.md
+roll offboard --confirm
+```
+
+Files and directories that Roll did not create are left untouched. Lines you added to `.gitignore` yourself are preserved. The changeset file itself is removed at the end of a successful apply.
+
+Safety:
+
+- If `.roll/onboard-changeset.yaml` is missing (e.g. you ran an earlier Roll version that didn't track it, or the project was never onboarded with `roll init --apply`), `roll offboard` refuses and prints the manual `rm` commands instead. It will never guess.
+- If the changeset names paths that resolve outside the current project (cross-project contamination), `roll offboard` refuses and tells you to run it in the right directory.
+
+**Full uninstall (machine-wide):**
+
+```bash
+roll offboard --confirm
 npm uninstall -g @seanyao/roll
 ```
 

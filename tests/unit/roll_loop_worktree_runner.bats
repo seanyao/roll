@@ -54,6 +54,20 @@ teardown() {
   grep -qF '_worktree_submodule_init' "$inner"
 }
 
+@test "_write_loop_runner_script: FIX-069 inner script syncs .roll/ meta into worktree before claude" {
+  local script="${_tmp}/run-t4b.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-t4b-inner.sh"
+  grep -qF '_worktree_sync_meta' "$inner"
+  # Must fire after submodule init, before the cycle_start event is emitted.
+  # Match the event-emit line specifically (not the word "cycle_start" in comments).
+  local sync_line;  sync_line=$(grep -n  '_worktree_sync_meta'         "$inner" | head -1 | cut -d: -f1)
+  local sub_line;   sub_line=$(grep -n   '_worktree_submodule_init'    "$inner" | head -1 | cut -d: -f1)
+  local start_line; start_line=$(grep -n '_loop_event cycle_start'     "$inner" | head -1 | cut -d: -f1)
+  [ "$sub_line" -lt "$sync_line" ]
+  [ "$sync_line" -lt "$start_line" ]
+}
+
 @test "_write_loop_runner_script: inner script runs claude with cwd = worktree path" {
   local script="${_tmp}/run-t5.sh"
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24

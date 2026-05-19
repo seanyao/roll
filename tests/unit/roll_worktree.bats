@@ -176,6 +176,67 @@ teardown() {
   [ "$main_submod_head" = "$main_submod_after" ]
 }
 
+# --- _worktree_sync_meta (FIX-069) ---
+
+@test "_worktree_sync_meta: copies backlog/skills into worktree, excludes runtime state" {
+  local wt; wt=$(_worktree_path "test" "US-META")
+  _worktree_create "$wt" "loop/US-META" "main"
+
+  # Seed main's .roll/ with a mix of meta files and runtime artefacts
+  mkdir -p .roll/skills/roll-build .roll/conventions .roll/state .roll/scratch
+  echo "# Backlog" > .roll/backlog.md
+  echo "skill: roll-build" > .roll/skills/roll-build/SKILL.md
+  echo "convention" > .roll/conventions/global.md
+  echo "live-state" > .roll/state/state.yaml
+  echo "scratch" > .roll/scratch/draft.md
+  : > .roll/events.lock
+  echo "pass" > .roll/last-test-pass
+  echo '{"event":"x"}' > .roll/events.ndjson
+  echo '{"run":"y"}' > .roll/runs.jsonl
+
+  run _worktree_sync_meta "$wt"
+  [ "$status" -eq 0 ]
+
+  # Meta copied
+  [ -f "$wt/.roll/backlog.md" ]
+  [ -f "$wt/.roll/skills/roll-build/SKILL.md" ]
+  [ -f "$wt/.roll/conventions/global.md" ]
+
+  # Runtime artefacts excluded
+  [ ! -d "$wt/.roll/state" ]
+  [ ! -d "$wt/.roll/scratch" ]
+  [ ! -f "$wt/.roll/events.lock" ]
+  [ ! -f "$wt/.roll/last-test-pass" ]
+  [ ! -f "$wt/.roll/events.ndjson" ]
+  [ ! -f "$wt/.roll/runs.jsonl" ]
+}
+
+@test "_worktree_sync_meta: silent no-op when .roll/ absent in main repo" {
+  local wt; wt=$(_worktree_path "test" "US-NOMETA")
+  _worktree_create "$wt" "loop/US-NOMETA" "main"
+
+  # No .roll/ in main — helper must succeed without creating one in worktree
+  [ ! -d .roll ]
+  run _worktree_sync_meta "$wt"
+  [ "$status" -eq 0 ]
+  [ ! -d "$wt/.roll" ]
+}
+
+@test "_worktree_sync_meta: single-shot — later edits in main don't leak into worktree" {
+  local wt; wt=$(_worktree_path "test" "US-SNAPSHOT")
+  _worktree_create "$wt" "loop/US-SNAPSHOT" "main"
+
+  mkdir -p .roll
+  echo "v1" > .roll/backlog.md
+  _worktree_sync_meta "$wt"
+  [ "$(cat "$wt/.roll/backlog.md")" = "v1" ]
+
+  # Main edits backlog after the sync — worktree copy must NOT change
+  # (no background watcher, no symlink, no re-sync)
+  echo "v2" > .roll/backlog.md
+  [ "$(cat "$wt/.roll/backlog.md")" = "v1" ]
+}
+
 # --- _worktree_merge_back ---
 
 @test "_worktree_merge_back: ff-only success — worktree commit reaches main and origin" {

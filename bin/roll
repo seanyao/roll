@@ -3002,6 +3002,11 @@ if _worktree_fetch_origin main \\
    && _worktree_create "\$WT" "\$BRANCH" "origin/main"; then
   _USE_WORKTREE=1
   _worktree_submodule_init "\$WT" 2>/dev/null || true
+  # FIX-069: copy .roll/ meta (backlog, skills, conventions) into the
+  # worktree as a read-only reference. Without this the cycle no-ops
+  # because .roll/ is gitignored and the clean clone has no backlog
+  # for Claude to read or skill entry points to dispatch to.
+  _worktree_sync_meta "\$WT" 2>/dev/null || true
   echo "[loop] cycle \${CYCLE_ID}: worktree \$WT on \$BRANCH"
   _loop_event cycle_start "\${CYCLE_ID}" "" "" || true
 else
@@ -4888,6 +4893,30 @@ _worktree_fetch_origin() {
 _worktree_submodule_init() {
   local path="$1"
   ( cd "$path" && git submodule update --init --recursive --quiet )
+}
+
+# _worktree_sync_meta <path>
+#   FIX-069: Copy main repo's .roll/ meta (backlog, skills, conventions,
+#   features, decisions) into the cycle worktree as a read-only reference.
+#   Without this, the loop runs in a clean git clone with no .roll/ (it's
+#   gitignored), so Claude finds no backlog and no skill entry points —
+#   the whole cycle no-ops.
+#
+#   Excludes runtime state listed in .roll/.gitignore plus loop event/run
+#   logs, so the worktree never inherits main's live cycle state.
+#   Single-shot: never written back; the worktree copy is thrown away with
+#   the worktree itself.
+_worktree_sync_meta() {
+  local path="$1"
+  [ -d ".roll" ] || return 0
+  rsync -a \
+    --exclude='state/' \
+    --exclude='scratch/' \
+    --exclude='*.lock' \
+    --exclude='last-test-pass' \
+    --exclude='events.ndjson*' \
+    --exclude='runs.jsonl*' \
+    .roll/ "$path/.roll/" 2>/dev/null || true
 }
 
 # _worktree_merge_back <branch>

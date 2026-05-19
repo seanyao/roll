@@ -66,8 +66,14 @@ SKILL_MD="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
   grep -qF "_run_features_sync_skill()" "$RELEASE_SH"
 }
 
-@test "release.sh still stages .roll/features.md in the release commit" {
-  grep -qE 'git add .* .roll/features\.md' "$RELEASE_SH"
+@test "release.sh commits .roll/features.md inside the nested roll-meta repo" {
+  # .roll/ is a separate private repo (gitignored in the outer). features.md is
+  # staged + committed inside the nested repo, never via the outer `git add`
+  # (an outer `git add ... .roll/features.md` returns non-zero under newer git
+  # and kills release.sh under `set -e`).
+  grep -qE 'cd[[:space:]]+\.roll' "$RELEASE_SH"
+  grep -qE 'git add features\.md' "$RELEASE_SH"
+  ! grep -qE 'git add[^#]*\.roll/features\.md' "$RELEASE_SH"
 }
 
 @test "release.sh still has safe-by-default cmp check for features.md" {

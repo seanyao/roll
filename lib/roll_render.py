@@ -88,6 +88,21 @@ def fmt_dur(s: int) -> str:
         return f"{s // 60}m"
     return f"{s // 3600}h {(s % 3600) // 60}m"
 
+def fmt_model(model) -> str:
+    """Short label for the cycle row's model column.
+
+    `claude-opus-4-7-20251001` → `opus-4-7`
+    None / empty                → `—`
+    Non-claude vendor            → `?`
+    """
+    if not model:
+        return "—"
+    if not model.startswith("claude-"):
+        return "?"
+    s = model[len("claude-"):]
+    s = re.sub(r"-\d{6,8}$", "", s)
+    return s if s else "?"
+
 def fmt_tokens(n: int) -> str:
     """Format a token count with K / M / B unit scaling, 1 decimal place.
     Uppercase suffix disambiguates from duration's lowercase m / h on the
@@ -298,11 +313,17 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     time_c  = "red" if outcome == "fail" else "fg"
     sid_c   = "red" if outcome == "fail" else "blue"
 
+    model_label = fmt_model(cy.get("model"))
+    # Auto-hide model column on narrow screens — keeps the dashboard readable
+    # when terminal is < 100 cols (cost / story IDs are higher-priority).
+    show_model = COLS >= 100
+    model_seg = c("muted", pad(model_label, 11)) + " " if show_model else ""
     inner = (
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
         c("muted", pad(dur, 4, "r")) + "  " +
         c("muted", pad(tok, 6, "r")) + "  " +
+        model_seg +
         c("muted", pad(cost, 7, "r")) + "   " +
         c(sid_c, ids_str, bold=True)
     )

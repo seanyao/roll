@@ -75,6 +75,118 @@ $1
   [[ "$output" == *"'green'"* ]]
 }
 
+# ─── fmt_model: cycle row model column (US-VIEW-010) ────────────────────────
+
+@test "fmt_model: opus with date suffix strips claude- prefix and date" {
+  run run_py 'print(roll_render.fmt_model("claude-opus-4-7-20251001"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "opus-4-7" ]
+}
+
+@test "fmt_model: sonnet without date suffix" {
+  run run_py 'print(roll_render.fmt_model("claude-sonnet-4-6"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "sonnet-4-6" ]
+}
+
+@test "fmt_model: haiku with date suffix" {
+  run run_py 'print(roll_render.fmt_model("claude-haiku-4-5-20251001"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "haiku-4-5" ]
+}
+
+@test "fmt_model: None returns em-dash" {
+  run run_py 'print(roll_render.fmt_model(None))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "—" ]
+}
+
+@test "fmt_model: empty string returns em-dash" {
+  run run_py 'print(roll_render.fmt_model(""))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "—" ]
+}
+
+@test "fmt_model: non-claude vendor returns question mark" {
+  run run_py 'print(roll_render.fmt_model("gpt-4-turbo"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "?" ]
+}
+
+@test "cycle_row: includes model column before cost (claude-opus-4-7-...)" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
+    "duration_s": 1080,
+    "tokens": 3_600_000,
+    "cost_list": 2.65,
+    "model": "claude-opus-4-7-20251001",
+    "story": "US-VIEW-010",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+i_model = out.find("opus-4-7")
+i_cost  = out.find("$2.65")
+i_id    = out.find("US-VIEW-010")
+print(i_model > 0, i_model < i_cost, i_cost < i_id)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True True"* ]]
+}
+
+@test "cycle_row: missing model renders em-dash placeholder, not omitted" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
+    "duration_s": 60,
+    "tokens": 1000,
+    "cost_list": 0.0,
+    "model": None,
+    "story": "US-X",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+# em-dash appears at least once in the row (model column reserves space)
+print("—" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
+@test "cycle_row: narrow screen (COLS<100) omits model column" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+roll_render.COLS = 80
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
+    "duration_s": 600,
+    "tokens": 2_000_000,
+    "cost_list": 1.20,
+    "model": "claude-sonnet-4-6",
+    "story": "US-X",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("sonnet-4-6" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"False"* ]]
+}
+
 # ─── roll-loop-status.py: 4 data bug regressions ────────────────────────────
 
 run_status() {

@@ -3,9 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+    # US-POS-006: removed `paths-ignore: **.md / docs/**`. After the
+    # `.roll/`-to-roll-meta migration the public repo's markdown surface is
+    # small (README, install/use guides, AGENTS.md, skill SKILL.md files);
+    # any change to those is meaningful and must run CI — earlier we ignored
+    # them blindly and broken doc references shipped to main unnoticed.
   pull_request:
     branches: [main]
   workflow_dispatch:

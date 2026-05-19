@@ -56,3 +56,27 @@ ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
   body=$(awk '/^_help\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
   [[ "$body" == *"_legacy_help"* ]]
 }
+
+# FIX-064: init help must reference the actual artifact (.roll/features/),
+# not the legacy 1.x docs/ directory that no longer exists.
+@test "roll-help --demo --no-color: init description references .roll/features/" {
+  run python3 "${LIB}/roll-help.py" --demo --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".roll/features/"* ]]
+}
+
+@test "roll-help --demo --no-color: init description does not mention legacy docs/" {
+  run python3 "${LIB}/roll-help.py" --demo --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"+ docs/"* ]]
+}
+
+@test "_legacy_help: init description references .roll/features/" {
+  body=$(awk '/^_legacy_help\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
+  [[ "$body" == *".roll/features/"* ]]
+}
+
+@test "_legacy_help: init description does not mention legacy docs/" {
+  body=$(awk '/^_legacy_help\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
+  [[ "$body" != *"+ docs/"* ]]
+}

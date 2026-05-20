@@ -573,52 +573,81 @@ _ensure_tmux() {
 }
 
 cmd_setup() {
+  # FIX-073: --demo and ROLL_UI=v2 demo gate are removed. Setup always runs
+  # the real install flow and renders its outcome through the v2 UI.
   local force=false
-  local demo=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force|-f) force=true; shift ;;
-      --demo)     demo=true;  shift ;;
+      --demo)
+        err "Unknown flag: --demo (removed in FIX-073). Run 'roll setup' to perform the real setup.  未知参数：--demo 已废弃。请直接运行 'roll setup'。"
+        exit 2 ;;
       *) err "Unknown argument: $1  未知参数: $1"; exit 1 ;;
     esac
   done
 
-  if [[ "${ROLL_UI:-v2}" == "v2" ]] || [[ "$demo" == "true" ]]; then
-    python3 "${ROLL_PKG_DIR}/lib/roll-setup.py" --demo
-    if [[ "$demo" == "true" ]]; then return; fi
+  # Capture per-step outcomes for the v2 UI render at the end.
+  local steps_buf=()
+  _record() { steps_buf+=("$1|$2"); }
+
+  if _install_local "$force" >/dev/null 2>&1; then _record ok "Install templates & conventions to ~/.roll"
+  else _record fail "Install templates & conventions to ~/.roll"; fi
+
+  if _sync_conventions "$force" >/dev/null 2>&1; then _record ok "Sync conventions to AI tools"
+  else _record fail "Sync conventions to AI tools"; fi
+
+  if _sync_skills "$force" >/dev/null 2>&1; then _record ok "Install skills to ~/.claude"
+  else _record fail "Install skills to ~/.claude"; fi
+
+  if _peer_ensure_state_dir >/dev/null 2>&1; then _record ok "Initialize peer-review state directory"
+  else _record fail "Initialize peer-review state directory"; fi
+
+  if command -v tmux >/dev/null 2>&1; then
+    _record skip "Ensure tmux is installed (already present)"
+  else
+    if _ensure_tmux >/dev/null 2>&1 && command -v tmux >/dev/null 2>&1; then
+      _record ok "Ensure tmux is installed"
+    else
+      _record fail "Ensure tmux is installed"
+    fi
   fi
-
-  info "Setting up Roll on this machine...  正在初始化 Roll..."
-  echo ""
-
-  _install_local "$force"
-  echo ""
-  info "Syncing to AI tools...  正在同步到 AI 工具..."
-  _sync_conventions "$force"
-  echo ""
-  _sync_skills "$force"
-
-  echo ""
-  info "Setting up peer review state...  正在初始化 peer review 状态..."
-  _peer_ensure_state_dir
-  ok "Peer state directory ready.  Peer 状态目录已就绪。"
-
-  echo ""
-  info "Ensuring tmux is installed (required for visible loop runs)...  正在确认 tmux 已安装..."
-  _ensure_tmux
 
   if [[ "$(uname)" == "Darwin" ]]; then
-    echo ""
-    info "Installing launchd plists...  正在安装 LaunchAgents..."
-    _install_launchd_plists "$(pwd -P)"
+    if _install_launchd_plists "$(pwd -P)" >/dev/null 2>&1; then _record ok "Install launchd plists (macOS)"
+    else _record fail "Install launchd plists (macOS)"; fi
   fi
 
-  echo ""
-  ok "Setup complete.  初始化完成。"
+  _emit_setup_v2_ui "${steps_buf[@]}"
+}
 
-  echo ""
-  info "Next: run ${BOLD}roll init${NC} inside a project to initialize it.  下一步：在项目目录运行 roll init"
-  info "Optional gates: run ${BOLD}roll doctor${NC} inside a repo to see which PR review extras are still off.  可选闸门：在仓库内运行 roll doctor 查看 PR 评审两档开关状态"
+# FIX-073: Render the cmd_setup v2 UI from per-step outcomes captured above.
+_emit_setup_v2_ui() {
+  local color_flag=""
+  if [[ -n "${NO_COLOR:-}" ]] || ! [ -t 1 ]; then
+    color_flag="--no-color"
+  fi
+
+  python3 - "$@" <<'PY' \
+    | python3 "${ROLL_PKG_DIR}/lib/roll-setup.py" $color_flag
+import json, sys
+entries = sys.argv[1:]
+steps = []
+for i, entry in enumerate(entries, start=1):
+    status, _sep, label = entry.partition("|")
+    steps.append({"num": i, "label": label, "status": status})
+footer_status = "fail" if any(s["status"] == "fail" for s in steps) else "ok"
+payload = {
+    "header_label": "SETUP",
+    "subtitle":     "初始化",
+    "steps":        steps,
+    "footer": {
+        "status": footer_status,
+        "label":  "Setup complete" if footer_status == "ok" else "Setup incomplete",
+        "hint":   "run roll init inside a project" if footer_status == "ok" else None,
+    },
+}
+print(json.dumps(payload))
+PY
 }
 
 # ─── PR pipeline hint ────────────────────────────────────────────────────────
@@ -917,30 +946,15 @@ _merge_claude_to_project() {
 # Existing AGENTS.md: re-merges global conventions (section-level, non-destructive)
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_init() {
-  # US-VIEW-008: parse --demo before any side effects so the v2 renderer can
-  # run standalone (no templates, no project mutation).
-  local demo=false
-  local args=()
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --demo) demo=true; shift ;;
-      *)      args+=("$1"); shift ;;
-    esac
+  # FIX-073: --demo is removed (no more developer-preview path). Any unknown
+  # flag falls through to the legacy / --apply branches below, which surface
+  # their own error or no-op behaviour.
+  for arg in "$@"; do
+    if [[ "$arg" == "--demo" ]]; then
+      err "Unknown flag: --demo (removed in FIX-073). Run 'roll init' to scaffold a project for real.  未知参数：--demo 已废弃。请直接运行 'roll init'。"
+      exit 2
+    fi
   done
-  set -- "${args[@]:-}"
-
-  # FIX-071: the v2 demo renderer prints a fake "Project ready" footer with
-  # six "✓" steps regardless of what actually happens — fine when the user
-  # asks for it via --demo, dangerously misleading when run silently on every
-  # init. The misleading case was particularly bad on legacy-project init,
-  # which short-circuits into the onboard guide without creating any files
-  # but the demo had already promised the user the project was "ready".
-  # Restrict the v2 demo render to --demo only; the real init flow below
-  # produces its own output.
-  if [[ "$demo" == "true" ]]; then
-    python3 "${ROLL_PKG_DIR}/lib/roll-init.py" --demo
-    return
-  fi
 
   if [[ ! -d "$ROLL_TEMPLATES" ]]; then
     err "No templates found. Run 'roll setup' first.  未找到模板，请先运行 'roll setup'。"
@@ -961,7 +975,6 @@ cmd_init() {
 
   if [[ -f "$project_dir/AGENTS.md" ]]; then
     has_agents=true
-    info "Re-merging global conventions...  正在重新合并全局约定..."
   else
     # US-ONBOARD-006: legacy project detection — guide user through $roll-onboard
     # instead of blindly scaffolding files into an existing codebase.
@@ -971,25 +984,90 @@ cmd_init() {
     fi
   fi
 
-  _merge_global_to_project "$project_dir"
-  _merge_claude_to_project "$project_dir"
-  _write_backlog "$project_dir/.roll/backlog.md"
-  _ensure_features_dir "$project_dir/.roll/features"
-  _write_features_md "$project_dir/.roll/features.md"
-  print_merge_summary
+  # FIX-073: Suppress per-step echoes — outcomes are captured into
+  # _ROLL_MERGE_SUMMARY and rendered through the v2 UI below.
+  {
+    _merge_global_to_project "$project_dir"
+    _merge_claude_to_project "$project_dir"
+    _write_backlog "$project_dir/.roll/backlog.md"
+    _ensure_features_dir "$project_dir/.roll/features"
+    _write_features_md "$project_dir/.roll/features.md"
+  } >/dev/null
 
-  echo ""
-  info "Syncing conventions to AI tools...  正在同步约定到 AI 工具..."
-  _sync_conventions
-  echo ""
-
-  _install_launchd_plists "$project_dir"
-
-  if [[ "$has_agents" == "true" ]]; then
-    ok "Done.  完成。"
-  else
-    ok "Initialized.  已初始化。"
+  local sync_status="ok"
+  if ! _sync_conventions >/dev/null 2>&1; then
+    sync_status="fail"
   fi
+
+  _install_launchd_plists "$project_dir" >/dev/null 2>&1 || true
+
+  _emit_init_v2_ui "$project_dir" "$has_agents" "$sync_status"
+}
+
+# FIX-073: Build a real-data JSON payload from _ROLL_MERGE_SUMMARY and pipe it
+# to lib/roll-init.py for v2 UI rendering. Replaces the previous demo-only
+# render path.
+_emit_init_v2_ui() {
+  local project_dir="$1"
+  local has_agents="$2"
+  local sync_status="${3:-ok}"
+
+  local header_label="INIT" subtitle="项目初始化" footer_label="Initialized"
+  if [[ "$has_agents" == "true" ]]; then
+    header_label="REINIT"
+    subtitle="重新合并约定"
+    footer_label="Re-merged"
+  fi
+
+  local color_flag=""
+  if [[ -n "${NO_COLOR:-}" ]] || ! [ -t 1 ]; then
+    color_flag="--no-color"
+  fi
+
+  python3 - "$project_dir" "$header_label" "$subtitle" "$footer_label" "$sync_status" "${_ROLL_MERGE_SUMMARY[@]}" <<'PY' \
+    | python3 "${ROLL_PKG_DIR}/lib/roll-init.py" $color_flag
+import json, sys
+project_dir, header_label, subtitle, footer_label, sync_status, *summary = sys.argv[1:]
+STATUS = {"created":"ok","merged":"ok","unchanged":"skip","overwritten":"ok","kept":"skip"}
+OP = {"created":"+","merged":"~","unchanged":"·","overwritten":"~","kept":"·"}
+by_file = {}
+for entry in summary:
+    action, _sep, fname = entry.partition("|")
+    if fname:
+        by_file[fname] = action
+
+def step(num, label, fname):
+    act = by_file.get(fname)
+    if not act:
+        return {"num": num, "label": label, "status": "skip",
+                "note": "not modified"}
+    return {"num": num, "label": label, "status": STATUS.get(act, "ok"),
+            "files": [[OP.get(act, "·"), fname]]}
+
+steps = [
+    {"num": 1, "label": "Detect project type", "status": "ok"},
+    step(2, "Create AGENTS.md",           "AGENTS.md"),
+    step(3, "Create .roll/backlog.md",    ".roll/backlog.md"),
+    step(4, "Create .roll/features/",     ".roll/features/"),
+    step(5, "Merge existing CLAUDE.md",   ".claude/CLAUDE.md"),
+    {"num": 6, "label": "Link skills to AI clients", "status": sync_status},
+]
+footer_status = "fail" if any(s["status"] == "fail" for s in steps) else "ok"
+payload = {
+    "header_label": header_label,
+    "subtitle":     subtitle,
+    "project_path": project_dir,
+    "steps":        steps,
+    "footer":       {"status": footer_status,
+                     "label": footer_label if footer_status == "ok" else "Init incomplete"},
+    "next": [
+        ["Edit .roll/backlog.md",   "open the backlog and add your first US"],
+        ["Run roll loop now",       "execute one cycle manually to test the flow"],
+        ["Enable loop scheduling",  "roll loop on  — let it run hourly"],
+    ],
+}
+print(json.dumps(payload))
+PY
 }
 
 # US-ONBOARD-006: Legacy detection

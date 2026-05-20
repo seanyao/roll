@@ -318,25 +318,30 @@ print(ue.get("cost_reported_usd"))
   [[ "$output" == *"9.25"* ]]
 }
 
-@test "Bug E: backfill_usage uses cost_reported_usd instead of recomputing from last-event tokens" {
+@test "US-VIEW-010: backfill_usage always uses list-price (ignores cost_reported_usd)" {
   run run_status '
 from datetime import datetime, timezone
 ts = datetime(2026,5,18,10,0,0,tzinfo=timezone.utc)
+# Tokens here are SUMMED per-cycle totals (aggregate sums per-turn deltas now —
+# US-VIEW-010). List-price math over these tokens IS the true cycle cost, so
+# cost_reported_usd is no longer needed as a workaround and must be ignored.
 cycles = [{
     "label": "L5",
     "start": ts,
     "usage_event": {
-        "input_tokens": 3,
-        "output_tokens": 0,
+        "model": "claude-sonnet-4-6",
+        "input_tokens": 1000,
+        "output_tokens": 500,
         "cache_creation_tokens": 0,
         "cache_read_tokens": 122089,
         "cost_reported_usd": 9.25,
     },
 }]
 mod.backfill_usage_from_claude_sessions(cycles, "no-such-slug")
-print(round(cycles[0].get("cost_list", 0), 2))
+print(round(cycles[0].get("cost_list", 0), 4))
 '
   [ "$status" -eq 0 ]
-  # Must show 9.25 (cost_reported_usd), not ~0.04 (recomputed from 3 input tokens)
-  [[ "$output" == *"9.25"* ]]
+  # Sonnet-4-6 list price: 1000*3 + 500*15 + 122089*0.30 = 47126.7
+  # → 47126.7 / 1_000_000 ≈ 0.0471. Must NOT be 9.25.
+  [[ "$output" == *"0.0471"* ]]
 }

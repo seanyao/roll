@@ -9,8 +9,20 @@ TODAY=$(date +%Y)
 MMDD=$(date +%-m%d)  # e.g. 419 for April 19, 1201 for Dec 1
 VERSION_PREFIX="${TODAY}.${MMDD}"
 
-# Find highest N used today
-LATEST_N=$(git tag --list "v${VERSION_PREFIX}.*" | sed "s/v${VERSION_PREFIX}\.//" | sort -n | tail -1)
+# Find highest N used today.
+# Query the remote — a tag created on another machine and never fetched would
+# be invisible to a local `git tag --list`, causing N to repeat and the npm
+# publish to fail on duplicate version.
+LATEST_N=$(
+  {
+    git tag --list "v${VERSION_PREFIX}.*"
+    git ls-remote --tags origin "refs/tags/v${VERSION_PREFIX}.*" 2>/dev/null \
+      | awk '{print $2}' | sed 's|refs/tags/||'
+  } \
+  | sed "s/v${VERSION_PREFIX}\.//" \
+  | grep -E '^[0-9]+$' \
+  | sort -n | tail -1
+)
 N=$(( ${LATEST_N:-0} + 1 ))
 VERSION="${VERSION_PREFIX}.${N}"
 TAG="v${VERSION}"

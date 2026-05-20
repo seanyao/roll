@@ -388,3 +388,21 @@ another_key: 42"
   # Second run: that same step is now a no-op and must render ↷.
   grep -q '↷.*Install templates' "${TEST_TMP}/second-run.log"
 }
+
+# FIX-075: `roll setup -f` that genuinely overwrites a tampered file should
+# render that step with the `~` (forced) marker — visually distinct from a
+# fresh install's ✓ so the user can see "this was a forced refresh".
+@test "setup v2 e2e: -f marks overwritten steps with ~ (forced)" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  # Tamper with an installed convention file so -f has real work to overwrite.
+  echo "corrupted by test" > "${ROLL_HOME}/conventions/global/AGENTS.md"
+
+  run_roll setup -f
+  [ "$status" -eq 0 ]
+
+  # The install templates step's content snapshot differs (was reverted),
+  # and -f remaps "changed" → "forced" → ~.
+  echo "$output" | grep -q '~.*Install templates'
+}

@@ -103,10 +103,12 @@ EOF
   [[ "$output" == *"幻灯片"* ]]
 }
 
-@test "cmd_slides: 'new' subcommand reports not-implemented (placeholder for US-DECK-004)" {
-  run cmd_slides new "some topic"
+@test "cmd_slides: 'new' subcommand dispatches to cmd_slides_new (US-DECK-004)" {
+  # `new` with no topic must surface the new command's usage error, not a
+  # not-implemented stub. (Full wiring is exercised in roll_slides_new.bats.)
+  run cmd_slides new
   [ "$status" -ne 0 ]
-  [[ "$output" == *"DECK-004"* || "$output" == *"not implemented"* || "$output" == *"未实现"* ]]
+  [[ "$output" == *"topic"* || "$output" == *"Usage"* || "$output" == *"用法"* ]]
 }
 
 # 'list' and 'preview' subcommands are implemented in US-DECK-005 — see

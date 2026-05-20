@@ -46,6 +46,17 @@ teardown() {
   [[ "$output" == *"already present"* ]]
 }
 
+# FIX-075: forced overwrite marker distinguishes -f re-install from a no-op repeat.
+@test "setup v2: renderer marks forced step with ~" {
+  cd "$TEST_DIR"
+  payload='{"header_label":"SETUP","steps":[{"num":1,"label":"x","status":"forced","note":"overwrote existing"}],"footer":{"status":"ok","label":"Setup re-installed (forced)"}}'
+  run bash -c "echo '$payload' | python3 \"$ROLL_DIR/lib/roll-setup.py\""
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '~'
+  [[ "$output" == *"overwrote existing"* ]]
+  [[ "$output" == *"forced"* ]]
+}
+
 @test "setup v2: renderer exits non-zero on empty stdin (no demo fallback)" {
   cd "$TEST_DIR"
   run bash -c ": | python3 \"$ROLL_DIR/lib/roll-setup.py\""

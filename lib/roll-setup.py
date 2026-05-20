@@ -31,6 +31,8 @@ def _step_icon(status: str) -> str:
         return c("green", "✓")
     if status == "skip":
         return c("amber", "↷")
+    if status == "forced":
+        return c("blue", "~")
     if status == "fail":
         return c("red", "✗", bold=True)
     return c("dim", "·")

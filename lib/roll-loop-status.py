@@ -206,9 +206,19 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
         elif stage == "usage":
             # US-LOOP-004: loop-fmt emits this with full token / cost data.
             # Detail is a dict (not the legacy string form).
+            # US-VIEW-010: token counts are per-turn deltas — sum across events
+            # so list-price cost computed from totals matches actual API usage.
+            # Non-additive fields (model, cost_reported_usd, duration_ms) take
+            # the last value seen.
             d = e.get("detail") or {}
             if isinstance(d, dict):
-                cy["usage_event"] = d
+                prev = cy.get("usage_event") or {}
+                merged = dict(prev)
+                merged.update(d)
+                for k in ("input_tokens", "output_tokens",
+                          "cache_creation_tokens", "cache_read_tokens"):
+                    merged[k] = int(prev.get(k) or 0) + int(d.get(k) or 0)
+                cy["usage_event"] = merged
         elif stage in ("test", "build") and e.get("outcome") == "fail":
             cy["fail_detail"] = detail or stage
 
@@ -315,8 +325,7 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
     for cy in cycles:
         # Path 1: usage event written by loop-fmt at result time.
         ue = cy.get("usage_event")
-        if isinstance(ue, dict) and (ue.get("input_tokens") or ue.get("output_tokens")
-                                     or ue.get("cost_reported_usd")):
+        if isinstance(ue, dict) and (ue.get("input_tokens") or ue.get("output_tokens")):
             cy["tokens"] = mp.total_tokens(
                 input_tokens=ue.get("input_tokens", 0),
                 output_tokens=ue.get("output_tokens", 0),
@@ -324,20 +333,18 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
                 cache_read_tokens=ue.get("cache_read_tokens", 0),
             )
             cy["model"] = ue.get("model")
-            # FIX-060: cost_reported_usd is the authoritative cumulative session
-            # cost written by loop-fmt; use it directly instead of recomputing
-            # from the last individual API-call token counts (which would only
-            # reflect one small call and badly undercount the true cycle cost).
-            if ue.get("cost_reported_usd"):
-                cy["cost_list"] = float(ue["cost_reported_usd"])
-            else:
-                cy["cost_list"] = mp.compute_list_cost(
-                    ue.get("model"),
-                    input_tokens=ue.get("input_tokens", 0),
-                    output_tokens=ue.get("output_tokens", 0),
-                    cache_creation_tokens=ue.get("cache_creation_tokens", 0),
-                    cache_read_tokens=ue.get("cache_read_tokens", 0),
-                )
+            # US-VIEW-010: aggregate now sums per-turn usage tokens, so the
+            # totals in `ue` reflect the whole cycle. Always compute cost at
+            # list price for cross-account comparability — supersedes FIX-060
+            # which preferred cost_reported_usd as a workaround for
+            # last-event-only token counts (that root cause is now gone).
+            cy["cost_list"] = mp.compute_list_cost(
+                ue.get("model"),
+                input_tokens=ue.get("input_tokens", 0),
+                output_tokens=ue.get("output_tokens", 0),
+                cache_creation_tokens=ue.get("cache_creation_tokens", 0),
+                cache_read_tokens=ue.get("cache_read_tokens", 0),
+            )
             if ue.get("duration_ms") and not cy.get("duration_s"):
                 cy["duration_s"] = int(ue["duration_ms"] / 1000)
             continue

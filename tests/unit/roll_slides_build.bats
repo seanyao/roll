@@ -109,11 +109,8 @@ EOF
   [[ "$output" == *"DECK-004"* || "$output" == *"not implemented"* || "$output" == *"未实现"* ]]
 }
 
-@test "cmd_slides: 'list' subcommand reports not-implemented (placeholder for US-DECK-005)" {
-  run cmd_slides list
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"DECK-005"* || "$output" == *"not implemented"* || "$output" == *"未实现"* ]]
-}
+# 'list' and 'preview' subcommands are implemented in US-DECK-005 — see
+# tests/unit/roll_slides_list_preview.bats.
 
 # ─── build: error paths ──────────────────────────────────────────────────────
 

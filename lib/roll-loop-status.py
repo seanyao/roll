@@ -154,12 +154,30 @@ def load_backlog(project_root: Optional[Path] = None) -> Dict[str, str]:
 # Cycle aggregation — group events by cycle label; attach cron + story id
 # ════════════════════════════════════════════════════════════════════════════
 _STORY_ID_PAT = re.compile(r"\b([A-Z]+-\d+)\b")
+_PR_NUM_PAT = re.compile(r"/pull/(\d+)")
 
 def _extract_story_id(ev_detail: str) -> Optional[str]:
     if not ev_detail:
         return None
     m = _STORY_ID_PAT.search(ev_detail)
     return m.group(1) if m else None
+
+def _extract_pr_num(url: str) -> Optional[int]:
+    if not url:
+        return None
+    m = _PR_NUM_PAT.search(url)
+    return int(m.group(1)) if m else None
+
+def _normalize_pr_outcome(raw: str) -> str:
+    """US-VIEW-011: 3-state PR landing tracker.
+
+    Legacy events wrote 'ok' at PR creation; treat as 'open' so old rows
+    don't render as an unknown state. New events emit 'open' (PR created),
+    'merged' (auto-merge landed), or 'closed' (PR closed without merge).
+    """
+    if raw in ("merged", "closed", "open"):
+        return raw
+    return "open"
 
 def normalize_cycle_label(lbl: str) -> str:
     """Strip the 'loop/cycle-' branch-name prefix so pr events bucket with
@@ -196,6 +214,12 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
         elif stage == "pr":
             cy["pr"] = detail
             cy["pr_ts"] = e["_ts"]  # used to match cron-log lines (inner cycle done)
+            # US-VIEW-011: capture PR # and landing outcome. Later pr events
+            # win (open → merged/closed finalization in cycle_end path).
+            pr_num = _extract_pr_num(detail)
+            if pr_num is not None:
+                cy["pr_num"] = pr_num
+            cy["pr_outcome"] = _normalize_pr_outcome(e.get("outcome", ""))
             sid = _extract_story_id(detail) or _extract_story_id(lbl)
             if sid and not cy.get("story"):
                 cy["story"] = sid
@@ -422,6 +446,12 @@ def repair_orphan_cycles_from_git(cycles: List[Dict[str, Any]], git_merges: Dict
             cy["outcome"] = "done"
         if m["pr"] and not cy.get("pr"):
             cy["pr"] = f"https://github.com/seanyao/roll/pull/{m['pr']}"
+        # US-VIEW-011: a merge commit in git proves the PR landed.
+        # Promote pr_outcome to 'merged' even when no terminal pr event
+        # was emitted (older cycles, missed runs, events truncation).
+        if m["pr"]:
+            cy["pr_num"] = int(m["pr"])
+            cy["pr_outcome"] = "merged"
         # Fill stories when our existing sources didn't carry them. Filter
         # to ones that actually appear in BACKLOG so we don't pull in stray
         # tokens from the merge body (PR numbers, file paths, etc.).
@@ -532,7 +562,11 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
             r["duration_s"] += cy["duration_s"]
         if cy.get("tokens"):
             r["tokens"] += cy["tokens"]
-        if cy.get("pr") and cy["pr"].startswith("http"):
+        # US-VIEW-011: rollup only counts cycles whose PR actually merged.
+        # Backward compat: rows where pr_outcome is missing but pr URL exists
+        # (no `pr` event after the writer upgrade ran for that cycle) are
+        # treated conservatively as open — they shouldn't inflate merged count.
+        if cy.get("pr_outcome") == "merged":
             r["prs"] += 1
         if cy.get("cost_list") is not None:
             r["cost"] += cy["cost_list"]

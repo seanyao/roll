@@ -328,3 +328,167 @@ print("list-price")
   [ "$status" -eq 0 ]
   [[ "$output" == *"list-price"* ]]
 }
+
+# ─── US-VIEW-011: PR landing state per cycle ─────────────────────────────────
+
+_pr_aggregate_check() {
+  # Helper: feed cycle_start + pr event(s) + cycle_end, return (pr_outcome, pr_num).
+  local outcome="$1" extra="${2:-}"
+  run run_status "
+from datetime import datetime, timezone, timedelta
+ts = datetime(2026,5,20,10,0,0,tzinfo=timezone.utc)
+events = [
+  {'ts': ts.isoformat(), 'stage': 'cycle_start', 'label': 'L1', '_ts': ts},
+  {'ts': (ts+timedelta(seconds=60)).isoformat(), 'stage': 'pr',
+   'label': 'L1', 'detail': 'https://github.com/x/y/pull/42',
+   'outcome': '${outcome}', '_ts': ts+timedelta(seconds=60)},
+  ${extra}
+  {'ts': (ts+timedelta(seconds=120)).isoformat(), 'stage': 'cycle_end',
+   'label': 'L1', 'outcome': 'done', '_ts': ts+timedelta(seconds=120)},
+]
+cs = mod.aggregate(events, [])
+print(cs[0].get('pr_outcome'), cs[0].get('pr_num'))
+"
+}
+
+@test "US-VIEW-011 aggregate: outcome=merged captured + PR# parsed" {
+  _pr_aggregate_check "merged"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"merged 42"* ]]
+}
+
+@test "US-VIEW-011 aggregate: outcome=closed captured" {
+  _pr_aggregate_check "closed"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"closed 42"* ]]
+}
+
+@test "US-VIEW-011 aggregate: outcome=open captured" {
+  _pr_aggregate_check "open"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"open 42"* ]]
+}
+
+@test "US-VIEW-011 aggregate: legacy outcome=ok renders as open (backward compat)" {
+  _pr_aggregate_check "ok"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"open 42"* ]]
+}
+
+@test "US-VIEW-011 aggregate: later pr event overwrites earlier (open→merged)" {
+  _pr_aggregate_check "open" "
+  {'ts': (ts+timedelta(seconds=90)).isoformat(), 'stage': 'pr',
+   'label': 'L1', 'detail': 'https://github.com/x/y/pull/42',
+   'outcome': 'merged', '_ts': ts+timedelta(seconds=90)},"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"merged 42"* ]]
+}
+
+@test "US-VIEW-011 rollup: only merged outcome counts as merged PR" {
+  run run_status '
+from datetime import datetime, timezone, timedelta
+ts = datetime(2026,5,20,10,0,0,tzinfo=timezone.utc)
+def mkcy(lbl, oc, sec):
+  s = ts + timedelta(seconds=sec)
+  e = s + timedelta(seconds=30)
+  return [
+    {"ts": s.isoformat(), "stage": "cycle_start", "label": lbl, "_ts": s},
+    {"ts": e.isoformat(), "stage": "pr", "label": lbl,
+     "detail": "https://github.com/x/y/pull/1", "outcome": oc, "_ts": e},
+    {"ts": e.isoformat(), "stage": "cycle_end", "label": lbl,
+     "outcome": "done", "_ts": e},
+  ]
+events = mkcy("M", "merged", 0) + mkcy("C", "closed", 100) + mkcy("O", "open", 200)
+cs = mod.aggregate(events, [])
+r = mod.rollup_for_day(cs)
+print("prs=" + str(r["prs"]))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"prs=1"* ]]
+}
+
+@test "US-VIEW-011 cycle_row: pr_outcome=merged appends #NN with ✓" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,20,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "tokens": 1_000_000, "cost_list": 1.50,
+    "model": "claude-opus-4-7-20251001", "story": "US-VIEW-011",
+    "pr_num": 77, "pr_outcome": "merged",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+# id appears, then #77 ✓ after it; glyph stays ✓
+print("#77" in out, "#77 ✓" in out, out.lstrip().startswith("✓"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True True"* ]]
+}
+
+@test "US-VIEW-011 cycle_row: pr_outcome=closed appends #NN ↩ and glyph becomes ⊘" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,20,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "tokens": 1_000_000, "cost_list": 1.50,
+    "model": "claude-opus-4-7-20251001", "story": "US-VIEW-011",
+    "pr_num": 99, "pr_outcome": "closed",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+# closed PR: marker #99 ↩ and glyph ⊘ (not ✓)
+print("#99 ↩" in out, "⊘" in out, "✓" not in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True True"* ]]
+}
+
+@test "US-VIEW-011 cycle_row: pr_outcome=open appends #NN …" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,20,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "tokens": 1_000_000, "cost_list": 1.50,
+    "model": "claude-opus-4-7-20251001", "story": "US-VIEW-011",
+    "pr_num": 55, "pr_outcome": "open",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("#55 …" in out, out.lstrip().startswith("✓"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True"* ]]
+}
+
+@test "US-VIEW-011 cycle_row: no pr_num leaves row unchanged (no marker, no glyph swap)" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,20,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "tokens": 1_000_000, "cost_list": 1.50,
+    "model": "claude-opus-4-7-20251001", "story": "US-VIEW-011",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+# no PR markers anywhere
+print("#" not in out, "↩" not in out, "⊘" not in out, "…" not in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True True True"* ]]
+}

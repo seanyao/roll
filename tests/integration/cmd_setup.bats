@@ -331,29 +331,35 @@ another_key: 42"
   [ "$count" -eq 3 ]
 }
 
-# ─── US-VIEW-007: v2 SETUP view ──────────────────────────────────────────────
+# ─── FIX-073: v2 SETUP view backed by real data ──────────────────────────────
 
-@test "setup v2 e2e: --demo shows SETUP header" {
-  run_roll setup --demo
+@test "setup v2 e2e: bare 'roll setup' renders SETUP header from real outcomes" {
+  run_roll setup
   [ "$status" -eq 0 ]
   [[ "$output" == *"SETUP"* ]]
 }
 
-@test "setup v2 e2e: --demo shows numbered steps" {
-  run_roll setup --demo
+@test "setup v2 e2e: bare 'roll setup' renders numbered steps from real outcomes" {
+  run_roll setup
   [ "$status" -eq 0 ]
   [[ "$output" == *"1."* ]]
   [[ "$output" == *"3."* ]]
 }
 
-@test "setup v2 e2e: --demo shows checkmarks for completed steps" {
-  run_roll setup --demo
+@test "setup v2 e2e: bare 'roll setup' shows ✓ checkmarks for real successful steps" {
+  run_roll setup
   [ "$status" -eq 0 ]
   [[ "$output" == *"✓"* ]]
 }
 
-@test "setup v2 e2e: --demo shows 'Setup complete' footer" {
-  run_roll setup --demo
+@test "setup v2 e2e: bare 'roll setup' renders 'Setup complete' footer when real flow succeeds" {
+  run_roll setup
   [ "$status" -eq 0 ]
   [[ "$output" == *"Setup complete"* ]]
+}
+
+@test "setup v2 e2e: --demo flag is rejected (FIX-073 removed the demo path)" {
+  run_roll setup --demo
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--demo"* ]]
 }

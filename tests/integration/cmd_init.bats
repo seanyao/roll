@@ -85,18 +85,19 @@ roll_init() {
   [[ "$output" == *"Initialized"* ]]
 }
 
-@test "init: summary box includes .roll/backlog.md on fresh project" {
+@test "init: v2 UI shows .roll/backlog.md as a created step on fresh project (FIX-073)" {
   run roll_init
   [ "$status" -eq 0 ]
-  # The summary box line looks like: "│  + created     .roll/backlog.md"
-  [[ "$output" == *"created"*".roll/backlog.md"* ]]
+  # FIX-073 renderer prints ".roll/backlog.md" indented under its step header.
+  [[ "$output" == *".roll/backlog.md"* ]]
+  [[ "$output" == *"Create .roll/backlog.md"* ]]
 }
 
-@test "init: summary box includes .roll/features on fresh project" {
+@test "init: v2 UI shows .roll/features as a created step on fresh project (FIX-073)" {
   run roll_init
   [ "$status" -eq 0 ]
-  # The summary box line looks like: "│  + created     .roll/features/"
-  [[ "$output" == *"created"*".roll/features"* ]]
+  [[ "$output" == *".roll/features"* ]]
+  [[ "$output" == *"Create .roll/features"* ]]
 }
 
 # ─── Project-type-aware AGENTS.md merge ──────────────────────────────────────

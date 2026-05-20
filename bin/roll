@@ -3026,15 +3026,15 @@ _agent_run_skill() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SLIDES — deck.md → HTML rendering pipeline (US-DECK-003)
+# SLIDES — deck.md → HTML rendering pipeline (US-DECK-003 / 005)
 #
 #   roll slides build <slug>   render .roll/slides/<slug>/deck.md → .html, open
 #   roll slides new "<topic>"  (US-DECK-004 — placeholder here)
-#   roll slides list           (US-DECK-005 — placeholder here)
-#   roll slides preview <slug> (US-DECK-006 — placeholder here)
+#   roll slides list           list decks as a table (US-DECK-005)
+#   roll slides preview <slug> open .roll/slides/<slug>.html in browser (US-DECK-005)
 #
-# `build` is the only subcommand implemented in this story. The other branches
-# return a "not implemented yet" hint so downstream stories slot in cleanly.
+# `build` (DECK-003) + `list` / `preview` (DECK-005) are implemented; `new`
+# remains a not-implemented placeholder until DECK-004 lands.
 # ═══════════════════════════════════════════════════════════════════════════════
 _slides_help() {
   cat <<'EOF'
@@ -3048,11 +3048,11 @@ USAGE  用法
   roll slides new "<topic>" [--template <name>]
                           (US-DECK-004) Generate a new deck.md from a topic
                           根据主题生成新的 deck.md
-  roll slides list        (US-DECK-005) List all decks under .roll/slides/
-                          列出 .roll/slides/ 下的所有幻灯片
-  roll slides preview <slug>
-                          (US-DECK-006) Live-preview a deck while editing
-                          实时预览幻灯片
+  roll slides list        List all decks under .roll/slides/ as a table
+                          列出 .roll/slides/ 下所有幻灯片
+  roll slides preview <slug> [--no-open]
+                          Open .roll/slides/<slug>.html in the default browser
+                          在浏览器中打开已渲染的幻灯片
 
 OPTIONS  选项
   --no-open               Skip auto-opening the rendered HTML in a browser

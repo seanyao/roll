@@ -1199,8 +1199,9 @@ _init_is_legacy_project() {
 }
 
 # US-ONBOARD-006: Agent discovery + token consumption notice + onboard guidance.
-# Reuses _for_each_ai_tool to enumerate installed AI agents. Tells the user
-# which agent to open, why their tokens will be used, and what to do next.
+# US-ONBOARD-018: also auto-launches the chosen agent in interactive mode with
+# the $roll-onboard skill content pre-loaded as the initial prompt, then chains
+# into `roll init --apply` when the conversation ends successfully.
 _init_legacy_onboard_guide() {
   local project_dir="$1"
   local count_summary
@@ -1209,40 +1210,25 @@ _init_legacy_onboard_guide() {
   info "Detected: legacy project (${count_summary})  检测到遗留项目"
   echo ""
 
-  # Enumerate installed agents by parsing ROLL_CONFIG inline.
-  # Output format in config: ai_<name>: <dir>|<config>|<src>
-  local installed=()
-  local missing=()
-  local _key _value _name _dir
-  while IFS=: read -r _key _value; do
-    [[ "$_key" =~ ^ai_ ]] || continue
-    _name="${_key#ai_}"
-    _dir="${_value%%|*}"
-    _dir="${_dir# }"            # trim leading space
-    _dir="${_dir/#\~/$HOME}"    # expand ~
-    if [[ -d "$_dir" ]]; then
-      installed+=("$_name")
-    else
-      missing+=("$_name")
-    fi
-  done < "$ROLL_CONFIG"
+  # Discover installed agents (writes to globals: _ONBOARD_INSTALLED, _ONBOARD_MISSING).
+  _onboard_discover_agents
 
   echo "  Onboarding 需要一个 AI agent 来读懂这个项目。检测到："
   echo "  Onboarding requires an AI agent to read your code. Detected:"
   echo ""
   local n
-  if [[ ${#installed[@]} -gt 0 ]]; then
-    for n in "${installed[@]}"; do
+  if [[ ${#_ONBOARD_INSTALLED[@]} -gt 0 ]]; then
+    for n in "${_ONBOARD_INSTALLED[@]}"; do
       printf "    %b✓%b %s   (installed)\n" "${GREEN}" "${NC}" "$n"
     done
   fi
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    for n in "${missing[@]}"; do
+  if [[ ${#_ONBOARD_MISSING[@]} -gt 0 ]]; then
+    for n in "${_ONBOARD_MISSING[@]}"; do
       printf "    %b✗%b %s   (not found)\n" "${RED}" "${NC}" "$n"
     done
   fi
 
-  if [[ ${#installed[@]} -eq 0 ]]; then
+  if [[ ${#_ONBOARD_INSTALLED[@]} -eq 0 ]]; then
     echo ""
     err "No AI agent detected. Install one (e.g., 'claude', 'codex', 'kimi') and try again."
     err "未检测到 AI agent。请先安装 (如 claude / codex / kimi) 后重试。"
@@ -1256,17 +1242,169 @@ _init_legacy_onboard_guide() {
   echo "  代码与对话都留在你的 agent 工具里 —— Roll 本身不上传任何内容。"
   echo "  Your code and conversation stay in your agent — Roll never uploads anything."
   echo ""
-  echo "  下一步  Next step:"
+
+  # US-ONBOARD-018: select an agent. Single installed → auto-pick. Multiple
+  # installed → ask the user (or honour ROLL_ONBOARD_AGENT for non-interactive
+  # callers and tests).
+  local chosen
+  chosen=$(_onboard_select_agent "${_ONBOARD_INSTALLED[@]}") || return 1
+  [[ -n "$chosen" ]] || return 1
+
   echo ""
-  if [[ ${#installed[@]} -eq 1 ]]; then
-    echo "    Open ${installed[0]} and run:    $roll-onboard"
-  else
-    echo "    Open any installed agent and run:    \$roll-onboard"
+  info "Launching ${chosen}…  正在启动 ${chosen}…"
+  echo "  Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you."
+  echo "  在 agent 内用 /exit 结束（或 Ctrl-C）。退出后 Roll 会自动衔接 apply。"
+  echo ""
+
+  # US-ONBOARD-018: actually run the agent with the onboard prompt pre-loaded.
+  _run_onboard_agent "$chosen" "$project_dir"
+}
+
+# US-ONBOARD-018: discover installed AI agents from ROLL_CONFIG.
+# Populates global arrays _ONBOARD_INSTALLED and _ONBOARD_MISSING.
+# Extracted from _init_legacy_onboard_guide so it can be unit-tested.
+_onboard_discover_agents() {
+  _ONBOARD_INSTALLED=()
+  _ONBOARD_MISSING=()
+  local _key _value _name _dir
+  while IFS=: read -r _key _value; do
+    [[ "$_key" =~ ^ai_ ]] || continue
+    _name="${_key#ai_}"
+    _dir="${_value%%|*}"
+    _dir="${_dir# }"
+    _dir="${_dir/#\~/$HOME}"
+    if [[ -d "$_dir" ]]; then
+      _ONBOARD_INSTALLED+=("$_name")
+    else
+      _ONBOARD_MISSING+=("$_name")
+    fi
+  done < "$ROLL_CONFIG"
+}
+
+# US-ONBOARD-018: pick an agent for the onboard flow.
+# - $ROLL_ONBOARD_AGENT (env) wins if set and present in the candidate list.
+# - Single candidate → auto-pick (printed to stdout).
+# - Multiple candidates → prompt user for a number. Stdin EOF / invalid input → return 1.
+# Echoes the chosen agent name on stdout, nothing else.
+_onboard_select_agent() {
+  local -a candidates=("$@")
+  [[ ${#candidates[@]} -gt 0 ]] || return 1
+
+  # Explicit override (tests, CI, dotfile aliases).
+  if [[ -n "${ROLL_ONBOARD_AGENT:-}" ]]; then
+    local c
+    for c in "${candidates[@]}"; do
+      if [[ "$c" == "$ROLL_ONBOARD_AGENT" ]]; then
+        printf '%s\n' "$c"
+        return 0
+      fi
+    done
+    err "ROLL_ONBOARD_AGENT='${ROLL_ONBOARD_AGENT}' is not in installed agents." >&2
+    return 1
   fi
-  echo ""
-  echo "  完成对话后回到这里运行  After the conversation, return and run:"
-  echo "    roll init --apply"
-  echo ""
+
+  if [[ ${#candidates[@]} -eq 1 ]]; then
+    printf '%s\n' "${candidates[0]}"
+    return 0
+  fi
+
+  # Multi-agent: prompt the user. To stderr so stdout stays clean for the caller.
+  {
+    echo "  选一个 agent  Pick an agent:"
+    local i=1
+    for c in "${candidates[@]}"; do
+      printf "    %d) %s\n" "$i" "$c"
+      i=$((i + 1))
+    done
+    printf "  Enter number [1-%d]: " "${#candidates[@]}"
+  } >&2
+
+  local choice
+  if ! IFS= read -r choice; then
+    err "No input received. Aborting onboard.  未收到输入，已取消 onboard。" >&2
+    return 1
+  fi
+  if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#candidates[@]} )); then
+    err "Invalid choice: '${choice}'.  无效选择。" >&2
+    return 1
+  fi
+  printf '%s\n' "${candidates[$((choice - 1))]}"
+}
+
+# US-ONBOARD-018: compose the initial prompt for the onboard agent —
+# the $roll-onboard skill body (frontmatter stripped) plus a kickoff line.
+# Returns 1 if the skill file is missing.
+_onboard_initial_prompt() {
+  local skill_file="${ROLL_PKG_DIR}/skills/roll-onboard/SKILL.md"
+  [[ -f "$skill_file" ]] || {
+    err "Skill file missing: ${skill_file}" >&2
+    return 1
+  }
+  # Lead line orients the agent before the skill body. Keep it stable; tests
+  # match on this exact prefix.
+  printf '%s\n\n' "Run the \$roll-onboard skill below for this project. Follow it end-to-end and write .roll/onboard-plan.yaml when done."
+  _skill_content "$skill_file"
+}
+
+# US-ONBOARD-018: print retry / switch-agent guidance after a failed onboard run.
+# Extracted so we can unit-test the wording without spawning subprocesses.
+# $1 = chosen agent name, $2 = exit code from the agent.
+_onboard_failure_hint() {
+  local agent="$1" code="$2"
+  echo "" >&2
+  if [[ "$code" == "130" ]]; then
+    err "Onboard cancelled (Ctrl-C).  Onboard 已取消（Ctrl-C）。" >&2
+  else
+    err "Agent '${agent}' exited with code ${code}.  agent '${agent}' 异常退出 (code ${code})。" >&2
+  fi
+  echo "" >&2
+  echo "  下一步  Next step:" >&2
+  echo "    - 再试一次同一个 agent:  roll init" >&2
+  echo "    - retry the same agent:   roll init" >&2
+  echo "    - 换一个 agent:           ROLL_ONBOARD_AGENT=<name> roll init" >&2
+  echo "    - switch to another:      ROLL_ONBOARD_AGENT=<name> roll init" >&2
+  echo "" >&2
+}
+
+# US-ONBOARD-018: launch the chosen agent in interactive mode with the onboard
+# prompt pre-loaded, wait for it to exit, then branch:
+#   exit 0  + .roll/onboard-plan.yaml present → chain into roll init --apply
+#   exit 0  + plan missing                    → tell user to re-run if they want
+#   exit !0 (incl. 130 from SIGINT)           → print retry / switch-agent hint
+# $1 = chosen agent name, $2 = project dir
+_run_onboard_agent() {
+  local agent="$1" project_dir="$2"
+  local prompt
+  prompt=$(_onboard_initial_prompt) || return 1
+  _agent_argv "$agent" interactive "$prompt" || {
+    err "Agent '${agent}' has no interactive mode wired up.  agent '${agent}' 暂未接入 interactive 模式。" >&2
+    return 1
+  }
+
+  # Run attached to the user's tty so the agent's REPL gets stdin/stdout/stderr.
+  # `set -e` is active script-wide; suppress with `|| rc=$?` so the failure
+  # branch (SIGINT 130, agent error) can be handled instead of aborting init.
+  local rc=0
+  "${_AGENT_ARGV[@]}" || rc=$?
+
+  if [[ "$rc" -ne 0 ]]; then
+    _onboard_failure_hint "$agent" "$rc"
+    return "$rc"
+  fi
+
+  if [[ ! -f "${project_dir}/.roll/onboard-plan.yaml" ]]; then
+    echo "" >&2
+    err "Agent exited cleanly but did not write .roll/onboard-plan.yaml." >&2
+    err "agent 正常退出但未生成 .roll/onboard-plan.yaml。" >&2
+    echo "  Re-run \`roll init\` once you've completed the conversation." >&2
+    echo "  对话完成后再次运行 \`roll init\` 即可。" >&2
+    return 1
+  fi
+
+  # Plan present → chain into apply automatically.
+  echo "" >&2
+  info "Plan written. Running apply…  已写入 plan，正在执行 apply…"
+  ( cd "$project_dir" && _init_apply )
 }
 
 # Helper: human-readable summary of why this is detected as legacy.
@@ -2802,21 +2940,48 @@ _parse_review_verdict() {
 # Returns 1 on unknown agent. Adding a new agent only needs an entry here.
 _agent_argv() {
   local agent="$1" mode="$2" prompt="$3"
+  # US-ONBOARD-018: `interactive` mode launches the agent's REPL with the prompt
+  # pre-loaded as the first user message. The user can then converse normally,
+  # keep their tty, and exit with Ctrl-C or /exit. Used by `roll init` to auto-
+  # start the chosen agent for $roll-onboard without a copy-paste handoff.
+  # Convention: positional arg as initial prompt; no -p / exec / run / --quiet.
   case "$agent" in
     claude)
       case "$mode" in
-        text|peer) _AGENT_ARGV=(claude -p --output-format text "$prompt") ;;
-        *)         _AGENT_ARGV=(claude -p "$prompt") ;;
+        interactive) _AGENT_ARGV=(claude "$prompt") ;;
+        text|peer)   _AGENT_ARGV=(claude -p --output-format text "$prompt") ;;
+        *)           _AGENT_ARGV=(claude -p "$prompt") ;;
       esac ;;
-    kimi)     _AGENT_ARGV=(kimi --quiet -p "$prompt") ;;
-    deepseek) _AGENT_ARGV=(deepseek "$prompt") ;;
-    pi)       _AGENT_ARGV=(pi -p "$prompt") ;;
+    kimi)
+      case "$mode" in
+        interactive) _AGENT_ARGV=(kimi "$prompt") ;;
+        *)           _AGENT_ARGV=(kimi --quiet -p "$prompt") ;;
+      esac ;;
+    deepseek)
+      # deepseek has the same argv shape in both modes (positional prompt).
+      _AGENT_ARGV=(deepseek "$prompt") ;;
+    pi)
+      case "$mode" in
+        interactive) _AGENT_ARGV=(pi "$prompt") ;;
+        *)           _AGENT_ARGV=(pi -p "$prompt") ;;
+      esac ;;
     codex)
       case "$mode" in
-        peer) _AGENT_ARGV=(codex exec --json --output-last-message "$prompt") ;;
-        *)    _AGENT_ARGV=(codex exec "$prompt") ;;
+        interactive) _AGENT_ARGV=(codex "$prompt") ;;
+        peer)        _AGENT_ARGV=(codex exec --json --output-last-message "$prompt") ;;
+        *)           _AGENT_ARGV=(codex exec "$prompt") ;;
       esac ;;
-    opencode) _AGENT_ARGV=(opencode run "$prompt") ;;
+    opencode)
+      case "$mode" in
+        interactive) _AGENT_ARGV=(opencode "$prompt") ;;
+        *)           _AGENT_ARGV=(opencode run "$prompt") ;;
+      esac ;;
+    gemini)
+      # gemini integration is interactive-only for now (used by onboard flow).
+      case "$mode" in
+        interactive) _AGENT_ARGV=(gemini "$prompt") ;;
+        *) return 1 ;;
+      esac ;;
     *) return 1 ;;
   esac
 }

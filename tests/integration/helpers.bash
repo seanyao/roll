@@ -47,7 +47,15 @@ integration_teardown() {
         local label
         label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' \
                 | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
-        [[ -n "$label" ]] && launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+        if [[ -n "$label" ]]; then
+          launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+          # FIX-081: `_install_launchd_plists` writes `launchctl disable` on
+          # first install (FIX-059 auto-bootstrap guard) and that write lands
+          # in the host's /private/var/db disable list regardless of HOME
+          # sandbox. Without a symmetric enable, every test leaves a permanent
+          # `com.roll.*.tmp-*` ghost in the host's `launchctl print-disabled`.
+          launchctl enable "gui/$(id -u)/$label" 2>/dev/null || true
+        fi
       done
     fi
     rm -rf "$TEST_TMP"

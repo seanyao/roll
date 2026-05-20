@@ -4041,8 +4041,19 @@ _loop_off() {
       warn "Loop not enabled for this project  当前项目 loop 未启用"; return 0
     fi
     local slug; slug=$(_project_slug "$project_path")
+    local uid; uid=$(id -u)
     for svc in loop dream brief; do
       rm -f "${_SHARED_ROOT}/${svc}/run-${slug}.sh"
+      # FIX-081: reverse the FIX-059 auto-bootstrap guard. `_install_launchd_plists`
+      # writes `launchctl disable gui/<UID>/<label>` for every brand-new plist
+      # to block macOS FSEvents from auto-bootstrapping it. That write lands in
+      # the host's /private/var/db/com.apple.xpc.launchd/disabled.<UID>.plist —
+      # it ignores any HOME sandbox. Without a symmetric `enable` on teardown,
+      # every short-lived project leaves 3 permanent ghost labels in the host's
+      # disable list, polluting `launchctl print-disabled` forever even after
+      # the project dir, plists, and ~/.roll are gone.
+      local label; label=$(_launchd_label "$svc" "$project_path")
+      launchctl enable "gui/${uid}/${label}" 2>/dev/null || true
     done
     ok "Loop disabled  已停用"
     return 0

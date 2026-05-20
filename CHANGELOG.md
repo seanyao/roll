@@ -1,5 +1,20 @@
 # Changelog
 
+## v2026.521.1
+
+### Added
+
+- **dashboard cycle 行现在标出模型和按公开单价算的成本** — 跨账号 / 跨项目可以横向对比和加总，不再被订阅折扣藏掉真实开销 `[loop]`
+
+### Improved
+
+- **`roll setup` 重跑能看出"已是最新"还是"刷新了 X 项"** — 每步上报 changed / unchanged / failed，强制覆盖用 `~` 标出 `[loop]`
+- **`roll-peer` 评审第一轮要先独立判断** — 不再被评审方预设结论带跑，跨 agent 才真的是二次判断 `[loop]`
+
+### Fixed
+
+- **`roll init` 默认不再打"Project ready"假提示** — 老项目进引导分支时不再骗你说已就绪 `[legacy-onboard]`
+
 ## v2026.520.1
 
 ### Added

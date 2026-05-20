@@ -1,11 +1,7 @@
 ### Added
-- **`roll offboard`** — 一键清掉项目里的 Roll 痕迹，先 dry-run 预览、二次确认才动手；命名空间对不上直接拒绝，绝不跨项目误删 `[legacy-onboard]`
-- **`roll init` 现在认得出非典型布局的老项目** — 微信小程序、Python 平铺、Terraform 仓不再被当成空项目静默跳过引导 `[legacy-onboard]`
-- **onboard / offboard 用户指南** — 完整接入与退出流程文档上线，遗留项目页"怎么退出"段从手动 rm 改为指向新命令 `[docs]`
+- **dashboard cycle 行现在标出模型和按公开单价算的成本** — 跨账号 / 跨项目可以横向对比和加总，不再被订阅折扣藏掉真实开销 `[loop]`
 ### Improved
-- **公开 README 重写为给使用者看的** — 中英文 README 去掉自我推销语言，围绕安装 + 使用展开，新增贡献指南与漏洞报告说明 `[docs]`
-- **markdown 改动不再绕过 CI** — 文档量减下来之后，关键文档改动现在和代码一样要过 CI `[ci]`
-- **onboard 留下回退清单** — onboard 完事会记下动过哪些文件、在 AGENTS.md 哪段合并、加了哪些 launchd 调度，作为 offboard 的精准回退依据 `[legacy-onboard]`
+- **`roll setup` 重跑能看出"已是最新"还是"刷新了 X 项"** — 每步上报 changed / unchanged / failed，强制覆盖用 `~` 标出 `[loop]`
+- **`roll-peer` 评审第一轮要先独立判断** — 不再被评审方预设结论带跑，跨 agent 才真的是二次判断 `[loop]`
 ### Fixed
-- **loop 跑过 45 分钟预算时不再卡死** — watchdog 现在能稳定收掉超时的 claude，下一轮按时启动 `[loop]`
-- **loop worktree 里能看到主仓最新 backlog** — 每轮启动会先把主仓 `.roll/` 同步进 worktree，不再因为 meta 滞后让 loop 拿到旧待办 `[loop]`
+- **`roll init` 默认不再打"Project ready"假提示** — 老项目进引导分支时不再骗你说已就绪 `[legacy-onboard]`

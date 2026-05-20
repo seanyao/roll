@@ -17,7 +17,7 @@ Usage:
   python3 lib/roll-loop-status.py --days 7
   python3 lib/roll-loop-status.py --no-color
   python3 lib/roll-loop-status.py --en | --zh  # collapse bilingual rows
-  python3 lib/roll-loop-status.py --demo       # render with fixture data
+  ROLL_RENDER_FIXTURE=1 python3 lib/roll-loop-status.py   # render with fixture data (test only)
 
   Wire it in bin/roll under `loop status` (replace _loop_status with a call to
   this script).
@@ -740,9 +740,9 @@ def _next_cron_hint(state: Dict[str, str], zh: bool = False) -> str:
     return nxt.strftime("%H:%M") + f" · in {mins}m {secs:02d}s"
 
 # ════════════════════════════════════════════════════════════════════════════
-# Demo fixture — lets you preview the output without real data
+# Fixture data (test-only; opt in via ROLL_RENDER_FIXTURE=1)
 # ════════════════════════════════════════════════════════════════════════════
-def _demo_data():
+def _fixture_data():
     now = datetime.now(timezone.utc)
     events, cron = [], []
     cycle_id = 0
@@ -795,7 +795,6 @@ def main(argv=None):
     p.add_argument("--no-color", action="store_true", help="strip ANSI (also honors NO_COLOR=1)")
     p.add_argument("--en", action="store_true", help="EN rows only")
     p.add_argument("--zh", action="store_true", help="ZH rows only")
-    p.add_argument("--demo", action="store_true", help="render with fixture data")
     args = p.parse_args(argv)
 
     roll_render.USE_COLOR = (not args.no_color
@@ -804,10 +803,12 @@ def main(argv=None):
 
     lang = "en" if args.en else ("zh" if args.zh else "both")
 
-    if args.demo:
-        events, cron, state, backlog = _demo_data()
+    use_fixture = bool(os.environ.get("ROLL_RENDER_FIXTURE"))
+    if use_fixture:
+        events, cron, state, backlog = _fixture_data()
         runs = {}
         git_merges = {}
+        slug = None
     else:
         slug = project_slug()
         events     = load_events(slug, args.days)
@@ -819,7 +820,7 @@ def main(argv=None):
 
     render(events, cron, state, backlog, days=args.days, lang=lang,
            runs=runs, git_merges=git_merges,
-           claude_slug=None if args.demo else slug)
+           claude_slug=slug)
 
 if __name__ == "__main__":
     try:

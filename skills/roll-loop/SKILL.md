@@ -44,7 +44,7 @@ Adapt commands to the constraints below — otherwise you will burn turns on
 denied operations and the cycle will idle-exit.
 
 - **No `AskUserQuestion`**: no human can answer. If you genuinely cannot
-  proceed without a decision, write an entry to `${HOME}/.shared/roll/loop/ALERT.md`
+  proceed without a decision, write an entry to `${HOME}/.shared/roll/loop/ALERT-<slug>.md`
   describing what's needed and exit cleanly.
 - **Avoid compound bash**: each `Bash` call must run a single command.
   No `cmd1 && cmd2`, no `cmd1 ; cmd2`, no pipes (`|`), no `$(...)` /
@@ -58,6 +58,13 @@ denied operations and the cycle will idle-exit.
   Files inside it (.roll/backlog.md, bin/roll, tests/, docs/) are always
   accessible. Files at `~/.shared/roll/...` are reachable via the `Read`
   tool but not via shell commands.
+- **Quote every glob**: the `Bash` tool runs commands through the user's
+  login shell, which on macOS is typically `zsh`. zsh's default `nomatch`
+  aborts unquoted globs that find no match with `(eval):1: no matches
+  found: <pattern>` and exit 1, burning a turn on a meaningless error.
+  Quote literal globs (`ls 'tests/integration/helpers.*'`) or — better —
+  use the `Glob` tool, which is shell-agnostic and never aborts on empty
+  matches.
 - **Skill invocation is the work**: route US/REFACTOR via `$roll-build`,
   FIX via `$roll-fix`. Do not try to re-implement those flows inline.
 
@@ -75,23 +82,20 @@ loop:
 
 ## Workflow
 
-### Step 1 — Read State
+### Step 1 — Orphan 🔨 Recovery
 
-```bash
-STATE_FILE=~/.shared/roll/loop/state.yaml
-
-# If a previous run was interrupted, resume from state
-if [ -f "$STATE_FILE" ] && grep -q "status: interrupted" "$STATE_FILE"; then
-  # Resume the interrupted item first
-fi
-```
-
-**Orphan 🔨 recovery** — clean up stories left in `🔨 In Progress` by a crashed previous run:
+Process-level crash recovery (LOCK, heartbeat, retry budget) is handled by
+the runner in `bin/roll:_write_loop_runner_script` — the per-project LOCK
+guarantees only one cycle for this slug is alive when you start. So at
+this point, any `🔨 In Progress` row in `.roll/backlog.md` belongs to a
+previous cycle that crashed before flipping it back; reclaim it before
+scanning.
 
 1. Scan .roll/backlog.md for all rows whose Status column contains `🔨 In Progress`.
-2. For each such story, check `state.yaml`:
-   - If `current_item` matches the story id AND `status: running` → this is the resume case (handled above), leave it.
-   - Otherwise → this is an **orphan 🔨** (the loop that marked it crashed before finishing). Revert the status back to `📋 Todo`, commit `chore: revert orphan 🔨 US-XXX to 📋`, and append a line to `~/.shared/roll/loop/ALERT.md` recording the orphan id and time so the next brief surfaces it.
+2. For each row found: revert the status back to `📋 Todo`, commit
+   `chore: revert orphan 🔨 US-XXX to 📋`, and append a line to
+   `~/.shared/roll/loop/ALERT-<slug>.md` recording the orphan id and time
+   so the next brief surfaces it.
 3. After orphan sweep, proceed to Step 1.5 (Pre-run CI health check) before scanning.
 
 ### Step 1.5 — Pre-run CI Health Check
@@ -126,7 +130,8 @@ Call `_loop_pr_inbox` after the pre-run CI check passes. It walks
 | `eligible` (clean external PR, no blocking review) | Invoke `_loop_pr_review_external` — the actual decision is provided by US-AUTO-035's GitHub Action |
 
 **Rebase circuit breaker** — `_loop_pr_rebase_circuit <pr>` records each rebase
-attempt under `pr_state.<PR>.attempts_at` in `state.yaml`, pruning entries older
+attempt under `pr_state.<PR>.attempts_at` in the per-slug state file
+(`~/.shared/roll/loop/state-<slug>.yaml`, FIX-052), pruning entries older
 than 24 h. Once ≥3 attempts land within 24 h, further rebases are blocked and an
 ALERT is written (typical cause: a broken workflow file makes CI never run,
 which would otherwise drive infinite rebase loops).
@@ -239,10 +244,10 @@ REFACTOR-XXX      → Skill("roll-build", "REFACTOR-XXX")
 
 The executor will update the row to `✅ Done` on success (it transitions from `🔨 In Progress` → `✅ Done`, same Edit logic as from `📋 Todo`).
 
-Before invoking, also write current item to state file:
+Before invoking, also write current item to the per-slug state file
+(`~/.shared/roll/loop/state-<slug>.yaml`, FIX-052):
 
 ```yaml
-# ~/.shared/roll/loop/state.yaml
 status: running
 current_item: US-AUTO-004
 started_at: "2026-05-10T02:00:00+08:00"
@@ -256,7 +261,7 @@ After each item completes:
 
 1. **TCR 硬校验** — call `roll loop enforce-tcr <story_id> <started_at>`:
    - Count `tcr:` prefix commits since `started_at` via `git log --oneline --since=<started_at>`
-   - Count == 0 → revert story status in .roll/backlog.md from ✅ Done → 📋 Todo; write ALERT to `~/.shared/roll/loop/ALERT.md` with story ID, time, reason "zero tcr: commits since story start", and suggested actions (`roll loop now` / `$roll-build <id>` / `roll loop reset`)
+   - Count == 0 → revert story status in .roll/backlog.md from ✅ Done → 📋 Todo; write ALERT to `~/.shared/roll/loop/ALERT-<slug>.md` with story ID, time, reason "zero tcr: commits since story start", and suggested actions (`roll loop now` / `$roll-build <id>` / `roll loop reset`)
    - Count > 0 → continue normally
 2. **CI Gate** — **MUST** invoke `roll ci --wait` (the `_loop_enforce_ci`
    wrapper). **Do NOT call `gh` directly** (no `gh run list`, no `gh run watch`,
@@ -274,7 +279,7 @@ After each item completes:
 
    Read `heal_count:` from `~/.shared/roll/loop/state-<slug>.yaml`; treat a missing line as `0`. If the count is below `ROLL_LOOP_HEAL_MAX` (default 2) and `ROLL_LOOP_NO_HEAL` is not set, increment it and take Path A. Otherwise take Path B.
 
-   **Path A — attempt allowed (counter incremented in `state.yaml`):**
+   **Path A — attempt allowed (counter incremented in `state-<slug>.yaml`):**
 
    1. Capture failure summary:
       ```
@@ -288,15 +293,15 @@ After each item completes:
       Diagnose root cause, fix via TCR, commit, push. Do NOT change <story_id>'s
       BACKLOG status — it stays ✅ Done. The fix is a follow-up."`
    3. After `roll-fix` completes, return to step 2 (CI Gate) — re-run `roll ci --wait`.
-      The counter in `state.yaml` prevents infinite loops.
+      The counter in `state-<slug>.yaml` prevents infinite loops.
 
    **Path B — heal exhausted (≥`ROLL_LOOP_HEAL_MAX`, default 2) or disabled (`ROLL_LOOP_NO_HEAL=1`) (exit 1):**
 
    1. Keep story as ✅ Done — commits are already on main; CI red is a follow-up
       problem, not a story failure.
-   2. Write ALERT to `~/.shared/roll/loop/ALERT.md` with:
+   2. Write ALERT to `~/.shared/roll/loop/ALERT-<slug>.md` with:
       - story ID, time, commit SHA
-      - heal attempts made (read `heal_count:` from `state.yaml`)
+      - heal attempts made (read `heal_count:` from `state-<slug>.yaml`)
       - last failure summary (head of `/tmp/roll-heal-<story_id>.log`)
       - suggested actions: `$roll-fix` manually / inspect CI / `roll loop reset`
    3. Skip to next story.
@@ -317,7 +322,7 @@ After each item completes:
 After all items in this cycle:
 
 ```yaml
-# ~/.shared/roll/loop/state.yaml
+# ~/.shared/roll/loop/state-<slug>.yaml (FIX-052)
 status: idle
 last_run: "2026-05-10T02:15:00+08:00"
 last_run_items: [US-AUTH-003, FIX-007]
@@ -347,7 +352,7 @@ final report in `cron.log` instead.
 |---|---|---|
 | `ts` | string | ISO 8601 **UTC** with `Z` suffix. Get via `date -u +%Y-%m-%dT%H:%M:%SZ`. Never use `+08:00` or other offsets. |
 | `project` | string | Project **slug** only (e.g. `roll-d9dfa0`), NOT the absolute path and NOT plain `basename`. Compute via: `p=$(pwd -P); base=$(basename "$p" | tr -cs '[:alnum:]' '-' | sed 's/-*$//'); hash=$(printf '%s' "$p" | md5 | cut -c1-6 2>/dev/null || printf '%s' "$p" | md5sum | cut -c1-6); echo "${base}-${hash}"` |
-| `run_id` | string | Matches `state.yaml` `run_id` exactly. Format: `loop-YYYYMMDD-HHMM`. |
+| `run_id` | string | Matches `state-<slug>.yaml` `run_id` exactly. Format: `loop-YYYYMMDD-HHMM`. |
 | `status` | enum | Exactly one of: `built` (≥1 story shipped), `idle` (no Todo items found), `failed` (paused/error). **No synonyms.** |
 | `built` | array&lt;string&gt; | Story ids completed this cycle. `[]` when none. **Always array, never null/number.** |
 | `skipped` | array&lt;string&gt; | Story ids skipped because they were `🔨 In Progress`. `[]` when none. **Always array.** |
@@ -439,12 +444,12 @@ reason: "both primary (claude) and fallback (deepseek) unavailable"
 - Take over manually: `$roll-build US-AUTH-003`
 ```
 
-3. Write alert file to `~/.shared/roll/loop/ALERT.md`
+3. Write alert file to `~/.shared/roll/loop/ALERT-<slug>.md`
 
 ## Resuming After Pause
 
 ```bash
-roll loop resume   # picks up from state.yaml current_item
+roll loop resume   # picks up from state-<slug>.yaml current_item
 roll loop status   # show current state without running
 roll loop reset    # clear state and start fresh next scheduled run
 ```
@@ -514,6 +519,6 @@ roll-loop
   ├── invokes    $roll-fix (FIX-XXX)
   ├── invokes    $roll-brief (on Feature completion)
   ├── reads      ~/.roll/config.yaml (agent routing)
-  ├── writes     ~/.shared/roll/loop/state.yaml
-  └── writes     ~/.shared/roll/loop/ALERT.md (on failure)
+  ├── writes     ~/.shared/roll/loop/state-<slug>.yaml
+  └── writes     ~/.shared/roll/loop/ALERT-<slug>.md (on failure)
 ```

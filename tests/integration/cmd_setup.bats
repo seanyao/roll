@@ -406,3 +406,27 @@ another_key: 42"
   # and -f remaps "changed" → "forced" → ~.
   echo "$output" | grep -q '~.*Install templates'
 }
+
+# FIX-075: footer must distinguish first-run / no-op repeat / forced reinstall
+# so the user has a single line that summarises what just happened.
+@test "setup v2 e2e: re-run footer signals nothing was refreshed" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  run_roll setup
+  [ "$status" -eq 0 ]
+  # On a clean re-run all install/sync steps are unchanged. Footer should
+  # acknowledge "no changes" rather than the generic "Setup complete".
+  echo "$output" | grep -qE 'no changes|up to date|nothing to refresh'
+}
+
+@test "setup v2 e2e: forced reinstall footer signals -f did real work" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  echo "corrupted by test" > "${ROLL_HOME}/conventions/global/AGENTS.md"
+
+  run_roll setup -f
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE 'forced|re-installed'
+}

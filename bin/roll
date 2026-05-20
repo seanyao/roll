@@ -669,6 +669,9 @@ cmd_setup() {
 }
 
 # FIX-073: Render the cmd_setup v2 UI from per-step outcomes captured above.
+# FIX-075: footer composition depends on how many steps actually changed —
+#   all unchanged → "no changes"; some forced (~) → "re-installed (forced)";
+#   any failed → "Setup incomplete"; otherwise → "X items refreshed".
 _emit_setup_v2_ui() {
   local color_flag=""
   if [[ -n "${NO_COLOR:-}" ]] || ! [ -t 1 ]; then
@@ -683,15 +686,36 @@ steps = []
 for i, entry in enumerate(entries, start=1):
     status, _sep, label = entry.partition("|")
     steps.append({"num": i, "label": label, "status": status})
-footer_status = "fail" if any(s["status"] == "fail" for s in steps) else "ok"
+
+n_failed   = sum(1 for s in steps if s["status"] == "fail")
+n_forced   = sum(1 for s in steps if s["status"] == "forced")
+n_changed  = sum(1 for s in steps if s["status"] == "ok")
+
+if n_failed:
+    footer_status = "fail"
+    label = "Setup incomplete"
+    hint = None
+elif n_forced:
+    footer_status = "ok"
+    label = f"Setup re-installed (forced — {n_forced} item{'s' if n_forced != 1 else ''})"
+    hint = "run roll init inside a project"
+elif n_changed == 0:
+    footer_status = "ok"
+    label = "Setup complete (no changes)"
+    hint = "everything already up to date"
+else:
+    footer_status = "ok"
+    label = f"Setup complete ({n_changed} item{'s' if n_changed != 1 else ''} refreshed)"
+    hint = "run roll init inside a project"
+
 payload = {
     "header_label": "SETUP",
     "subtitle":     "初始化",
     "steps":        steps,
     "footer": {
         "status": footer_status,
-        "label":  "Setup complete" if footer_status == "ok" else "Setup incomplete",
-        "hint":   "run roll init inside a project" if footer_status == "ok" else None,
+        "label":  label,
+        "hint":   hint,
     },
 }
 print(json.dumps(payload))

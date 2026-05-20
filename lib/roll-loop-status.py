@@ -206,9 +206,19 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
         elif stage == "usage":
             # US-LOOP-004: loop-fmt emits this with full token / cost data.
             # Detail is a dict (not the legacy string form).
+            # US-VIEW-010: token counts are per-turn deltas — sum across events
+            # so list-price cost computed from totals matches actual API usage.
+            # Non-additive fields (model, cost_reported_usd, duration_ms) take
+            # the last value seen.
             d = e.get("detail") or {}
             if isinstance(d, dict):
-                cy["usage_event"] = d
+                prev = cy.get("usage_event") or {}
+                merged = dict(prev)
+                merged.update(d)
+                for k in ("input_tokens", "output_tokens",
+                          "cache_creation_tokens", "cache_read_tokens"):
+                    merged[k] = int(prev.get(k) or 0) + int(d.get(k) or 0)
+                cy["usage_event"] = merged
         elif stage in ("test", "build") and e.get("outcome") == "fail":
             cy["fail_detail"] = detail or stage
 

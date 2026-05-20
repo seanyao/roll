@@ -267,6 +267,32 @@ print(m.group(1), m.group(2), m.group(3))   # today yest -2d
   [[ "$output" == *"0 1 0"* ]]
 }
 
+# ─── US-VIEW-010: list-price cost (supersedes FIX-060 cost_reported_usd path) ──
+
+@test "US-VIEW-010: aggregate sums token counts across multiple usage events" {
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,18,10,0,0,tzinfo=timezone.utc)
+events = [
+  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "L6", "_ts": ts},
+  {"ts": ts.isoformat(), "stage": "usage", "label": "L6", "outcome": "ok",
+   "detail": {"model": "claude-sonnet-4-6",
+              "input_tokens": 100, "output_tokens": 50,
+              "cache_creation_tokens": 0, "cache_read_tokens": 0}},
+  {"ts": ts.isoformat(), "stage": "usage", "label": "L6", "outcome": "ok",
+   "detail": {"model": "claude-sonnet-4-6",
+              "input_tokens": 3, "output_tokens": 0,
+              "cache_creation_tokens": 0, "cache_read_tokens": 122089}},
+]
+cs = mod.aggregate(events, [])
+ue = cs[0].get("usage_event") or {}
+print(ue.get("input_tokens"), ue.get("output_tokens"), ue.get("cache_read_tokens"))
+'
+  [ "$status" -eq 0 ]
+  # Summed: 100+3 = 103 input, 50+0 = 50 output, 0+122089 = 122089 cache_read
+  [[ "$output" == *"103 50 122089"* ]]
+}
+
 # ─── cost_reported_usd regression (FIX-060) ──────────────────────────────────
 
 @test "Bug E: aggregate keeps cost_reported_usd from last usage event" {

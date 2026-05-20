@@ -42,6 +42,29 @@ roll_init() {
   [ -d "${PROJECT_DIR}/.roll/features" ]
 }
 
+# ─── US-ONBOARD-019: version stamp ──────────────────────────────────────────
+
+@test "init: writes .roll/.version stamp in new project (US-ONBOARD-019)" {
+  run roll_init
+  [ "$status" -eq 0 ]
+  [ -f "${PROJECT_DIR}/.roll/.version" ]
+  grep -q "^roll_version:" "${PROJECT_DIR}/.roll/.version"
+  grep -q "^installed_at:" "${PROJECT_DIR}/.roll/.version"
+}
+
+@test "init: .roll/.version stamp is idempotent — re-init preserves timestamp" {
+  run roll_init
+  [ "$status" -eq 0 ]
+  local first_content
+  first_content=$(cat "${PROJECT_DIR}/.roll/.version")
+  sleep 1
+  run roll_init
+  [ "$status" -eq 0 ]
+  local second_content
+  second_content=$(cat "${PROJECT_DIR}/.roll/.version")
+  [ "$first_content" = "$second_content" ]
+}
+
 # ─── Happy path: re-merge (existing AGENTS.md) ────────────────────────────────
 
 @test "init: re-merge exits 0 when AGENTS.md already exists" {

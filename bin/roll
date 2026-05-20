@@ -2860,6 +2860,220 @@ _agent_run_skill() {
   "${_AGENT_ARGV[@]}"
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SLIDES — deck.md → HTML rendering pipeline (US-DECK-003)
+#
+#   roll slides build <slug>   render .roll/slides/<slug>/deck.md → .html, open
+#   roll slides new "<topic>"  (US-DECK-004 — placeholder here)
+#   roll slides list           (US-DECK-005 — placeholder here)
+#   roll slides preview <slug> (US-DECK-006 — placeholder here)
+#
+# `build` is the only subcommand implemented in this story. The other branches
+# return a "not implemented yet" hint so downstream stories slot in cleanly.
+# ═══════════════════════════════════════════════════════════════════════════════
+_slides_help() {
+  cat <<'EOF'
+roll slides — deck.md → HTML rendering
+roll slides — 幻灯片 deck.md 渲染管线
+
+USAGE  用法
+  roll slides build <slug> [--no-open]
+                          Render .roll/slides/<slug>/deck.md → .roll/slides/<slug>.html
+                          渲染 deck.md 为 HTML 并自动打开浏览器
+  roll slides new "<topic>" [--template <name>]
+                          (US-DECK-004) Generate a new deck.md from a topic
+                          根据主题生成新的 deck.md
+  roll slides list        (US-DECK-005) List all decks under .roll/slides/
+                          列出 .roll/slides/ 下的所有幻灯片
+  roll slides preview <slug>
+                          (US-DECK-006) Live-preview a deck while editing
+                          实时预览幻灯片
+
+OPTIONS  选项
+  --no-open               Skip auto-opening the rendered HTML in a browser
+                          渲染后不自动打开浏览器
+  --help, -h              Show this help
+                          显示本帮助
+EOF
+}
+
+# Resolve the renderer / validator paths (shipped with the roll package).
+_slides_lib() {
+  printf '%s' "${ROLL_PKG_DIR}/lib"
+}
+
+# Resolve the template path for a given template name.
+# Returns 0 + prints the path if the template exists, else returns 1.
+_slides_template_path() {
+  local name="$1"
+  local tpl="${ROLL_PKG_DIR}/site/slides/templates/${name}.html"
+  if [[ -f "$tpl" ]]; then
+    printf '%s' "$tpl"
+    return 0
+  fi
+  return 1
+}
+
+# Read the `template:` value from a deck.md frontmatter. Defaults to
+# `introduction-v3` if the field is absent (validator will catch missing field
+# separately).
+_slides_template_for_deck() {
+  local deck="$1"
+  local tpl
+  tpl=$(awk '
+    /^---[[:space:]]*$/ { d++; if (d==2) exit; next }
+    d==1 && /^template:[[:space:]]*/ {
+      sub(/^template:[[:space:]]*/, "")
+      gsub(/^["'\'']|["'\'']$/, "")
+      print
+      exit
+    }
+  ' "$deck" 2>/dev/null)
+  [[ -n "$tpl" ]] || tpl="introduction-v3"
+  printf '%s' "$tpl"
+}
+
+# Ensure .roll/.gitignore contains `slides/*.html` so the per-build HTML
+# artefact is ignored by default. deck.md remains committable. Idempotent.
+_slides_ensure_gitignore() {
+  local gi=".roll/.gitignore"
+  mkdir -p ".roll"
+  if [[ -f "$gi" ]] && grep -qE '^slides/\*\.html$' "$gi" 2>/dev/null; then
+    return 0
+  fi
+  # Preserve a trailing newline before appending.
+  if [[ -f "$gi" ]] && [[ -s "$gi" ]] && [[ "$(tail -c 1 "$gi" 2>/dev/null)" != $'\n' ]]; then
+    printf '\n' >>"$gi"
+  fi
+  printf 'slides/*.html\n' >>"$gi"
+}
+
+# Pick the browser-open command for the current OS. Echoes the command name;
+# returns 1 if no opener is available (tests + headless CI).
+_slides_open_cmd() {
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) command -v open >/dev/null 2>&1 && { printf 'open'; return 0; } ;;
+    Linux)  command -v xdg-open >/dev/null 2>&1 && { printf 'xdg-open'; return 0; } ;;
+  esac
+  return 1
+}
+
+cmd_slides_build() {
+  local slug="" no_open=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-open) no_open=1; shift ;;
+      --help|-h) _slides_help; return 0 ;;
+      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      *)
+        if [[ -z "$slug" ]]; then
+          slug="$1"; shift
+        else
+          err "Unexpected argument: $1  多余参数: $1"; return 1
+        fi
+        ;;
+    esac
+  done
+
+  if [[ -z "$slug" ]]; then
+    err "Usage: roll slides build <slug> [--no-open]"
+    echo "用法: roll slides build <slug> [--no-open]" >&2
+    return 1
+  fi
+
+  local deck=".roll/slides/${slug}/deck.md"
+  if [[ ! -f "$deck" ]]; then
+    err "Deck not found: ${deck}"
+    echo "  未找到 deck 文件：${deck}" >&2
+    echo "  Hint: run 'roll slides new \"<topic>\"' to generate a new deck." >&2
+    echo "  提示：先运行 'roll slides new \"<主题>\"' 生成新的幻灯片。" >&2
+    return 1
+  fi
+
+  local lib_dir; lib_dir=$(_slides_lib)
+  local validator="${lib_dir}/slides-validate.py"
+  local renderer="${lib_dir}/slides-render.py"
+  if [[ ! -f "$validator" || ! -f "$renderer" ]]; then
+    err "Slides toolchain missing — re-run 'roll setup'  渲染工具缺失，请运行 roll setup"
+    return 1
+  fi
+
+  # 1. Validate first (fail-fast on AI-generated decks).
+  if ! python3 "$validator" "$deck"; then
+    err "deck.md validation failed — fix the issues above before building."
+    echo "  deck.md 校验失败，请先修复上方提示再重试。" >&2
+    return 1
+  fi
+
+  # 2. Resolve template + render.
+  local tpl_name; tpl_name=$(_slides_template_for_deck "$deck")
+  local tpl_path
+  if ! tpl_path=$(_slides_template_path "$tpl_name"); then
+    err "Template not found: ${tpl_name}  未找到模板：${tpl_name}"
+    return 1
+  fi
+
+  local out=".roll/slides/${slug}.html"
+  mkdir -p ".roll/slides"
+  if ! python3 "$renderer" "$deck" "$tpl_path" "$out"; then
+    err "Render failed for ${deck}  渲染失败：${deck}"
+    return 1
+  fi
+
+  # 3. Default-ignore the HTML artefact so it doesn't accidentally get committed.
+  _slides_ensure_gitignore
+
+  ok "Rendered → ${out}  渲染完成 → ${out}"
+
+  # 4. Auto-open browser unless suppressed (or running inside bats tests).
+  if [[ "$no_open" -eq 1 ]] || [[ -n "${BATS_TEST_NUMBER:-}" ]] || [[ -n "${ROLL_SLIDES_NO_OPEN:-}" ]]; then
+    return 0
+  fi
+  local opener
+  if opener=$(_slides_open_cmd); then
+    "$opener" "$out" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+cmd_slides() {
+  local subcmd="${1:-}"
+  shift || true
+  case "$subcmd" in
+    build)
+      cmd_slides_build "$@"
+      ;;
+    new)
+      err "roll slides new — not implemented yet (see US-DECK-004)"
+      echo "  尚未实现 — 详见 US-DECK-004。" >&2
+      return 1
+      ;;
+    list)
+      err "roll slides list — not implemented yet (see US-DECK-005)"
+      echo "  尚未实现 — 详见 US-DECK-005。" >&2
+      return 1
+      ;;
+    preview)
+      err "roll slides preview — not implemented yet (see US-DECK-006)"
+      echo "  尚未实现 — 详见 US-DECK-006。" >&2
+      return 1
+      ;;
+    --help|-h|help)
+      _slides_help
+      return 0
+      ;;
+    "")
+      _slides_help
+      return 1
+      ;;
+    *)
+      err "Unknown subcommand: ${subcmd}  未知子命令：${subcmd}"
+      _slides_help >&2
+      return 1
+      ;;
+  esac
+}
+
 cmd_review_pr() {
   local pr_number="${1:-}"
   [ -n "$pr_number" ] || { err "Usage: roll review-pr <number>"; return 1; }
@@ -6926,6 +7140,7 @@ main() {
     ci)            cmd_ci "$@" ;;
     doctor)        cmd_doctor "$@" ;;
     review-pr)     cmd_review_pr "$@" ;;
+    slides)        cmd_slides "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

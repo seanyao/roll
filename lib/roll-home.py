@@ -10,7 +10,7 @@ Usage:
   python3 lib/roll-home.py              # live data
   python3 lib/roll-home.py --no-color
   python3 lib/roll-home.py --en | --zh  # collapse bilingual rows
-  python3 lib/roll-home.py --demo       # render with fixture data
+  ROLL_RENDER_FIXTURE=1 python3 lib/roll-home.py   # render with fixture data (test only)
 """
 
 from __future__ import annotations
@@ -262,9 +262,9 @@ def _ac_completion(feature_link: str) -> Tuple[int, int]:
     return (done, total)
 
 # ════════════════════════════════════════════════════════════════════════════
-# Demo fixture
+# Fixture data (test-only; opt in via ROLL_RENDER_FIXTURE=1)
 # ════════════════════════════════════════════════════════════════════════════
-def _demo_data() -> Dict[str, Any]:
+def _fixture_data() -> Dict[str, Any]:
     return dict(
         project_name="myapp", version="2026.518.3",
         agent="claude", git_branch="main", git_status="✓",
@@ -455,7 +455,6 @@ def render(d: Dict[str, Any]) -> None:
 # ════════════════════════════════════════════════════════════════════════════
 def main() -> None:
     ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--demo",     action="store_true")
     ap.add_argument("--no-color", dest="no_color", action="store_true")
     ap.add_argument("--en",       action="store_true")
     ap.add_argument("--zh",       action="store_true")
@@ -464,8 +463,8 @@ def main() -> None:
     if args.no_color or os.environ.get("NO_COLOR") or not sys.stdout.isatty():
         roll_render.USE_COLOR = False
 
-    if args.demo:
-        d = _demo_data()
+    if os.environ.get("ROLL_RENDER_FIXTURE"):
+        d = _fixture_data()
     else:
         slug    = _project_slug()
         config  = _load_config()

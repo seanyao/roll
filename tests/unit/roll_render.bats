@@ -293,9 +293,11 @@ print(ue.get("input_tokens"), ue.get("output_tokens"), ue.get("cache_read_tokens
   [[ "$output" == *"103 50 122089"* ]]
 }
 
-# ─── cost_reported_usd regression (FIX-060) ──────────────────────────────────
+# ─── US-VIEW-010 AC #3: cost column never trusts cost_reported_usd ───────────
 
-@test "Bug E: aggregate keeps cost_reported_usd from last usage event" {
+@test "cost_list: last usage_event keeps cumulative tokens for list-price compute" {
+  # loop-fmt now writes cumulative tokens — aggregate keeps the last usage
+  # event since it is the cumulative snapshot.
   run run_status '
 from datetime import datetime, timezone, timedelta
 ts = datetime(2026,5,18,10,0,0,tzinfo=timezone.utc)
@@ -306,19 +308,21 @@ events = [
                "cache_creation_tokens": 0, "cache_read_tokens": 0,
                "cost_reported_usd": 5.0}},
   {"ts": ts.isoformat(), "stage": "usage", "label": "L5", "outcome": "ok",
-   "detail": {"input_tokens": 3, "output_tokens": 0,
-               "cache_creation_tokens": 0, "cache_read_tokens": 122089,
+   "detail": {"input_tokens": 1000, "output_tokens": 500,
+               "cache_creation_tokens": 200, "cache_read_tokens": 122089,
                "cost_reported_usd": 9.25}},
 ]
 cs = mod.aggregate(events, [])
 ue = cs[0].get("usage_event") or {}
-print(ue.get("cost_reported_usd"))
+print(ue.get("input_tokens"), ue.get("cache_read_tokens"))
 '
   [ "$status" -eq 0 ]
-  [[ "$output" == *"9.25"* ]]
+  [[ "$output" == *"1000 122089"* ]]
 }
 
 @test "US-VIEW-010: backfill_usage always uses list-price (ignores cost_reported_usd)" {
+  # AC #3 of US-VIEW-010: cost column shows list-price, NOT the AI client's
+  # reported total_cost_usd (which may include subscription discounts).
   run run_status '
 from datetime import datetime, timezone
 ts = datetime(2026,5,18,10,0,0,tzinfo=timezone.utc)
@@ -332,16 +336,20 @@ cycles = [{
         "model": "claude-sonnet-4-6",
         "input_tokens": 1000,
         "output_tokens": 500,
-        "cache_creation_tokens": 0,
+        "cache_creation_tokens": 200,
         "cache_read_tokens": 122089,
         "cost_reported_usd": 9.25,
     },
 }]
 mod.backfill_usage_from_claude_sessions(cycles, "no-such-slug")
-print(round(cycles[0].get("cost_list", 0), 4))
+# Sonnet-4-6 list price:
+#   1000*3 + 500*15 + 200*3.75 + 122089*0.30
+#   = 3000 + 7500 + 750 + 36626.7
+#   = 47876.7 / 1e6 = $0.0479 (NOT the reported $9.25 — that must be ignored)
+import math
+assert math.isclose(cycles[0]["cost_list"], 0.0479, abs_tol=0.001), cycles[0]["cost_list"]
+print("list-price")
 '
   [ "$status" -eq 0 ]
-  # Sonnet-4-6 list price: 1000*3 + 500*15 + 122089*0.30 = 47126.7
-  # → 47126.7 / 1_000_000 ≈ 0.0471. Must NOT be 9.25.
-  [[ "$output" == *"0.0471"* ]]
+  [[ "$output" == *"list-price"* ]]
 }

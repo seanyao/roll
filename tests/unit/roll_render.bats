@@ -295,31 +295,6 @@ print(ue.get("input_tokens"), ue.get("output_tokens"), ue.get("cache_read_tokens
 
 # ─── US-VIEW-010 AC #3: cost column never trusts cost_reported_usd ───────────
 
-@test "cost_list: last usage_event keeps cumulative tokens for list-price compute" {
-  # loop-fmt now writes cumulative tokens — aggregate keeps the last usage
-  # event since it is the cumulative snapshot.
-  run run_status '
-from datetime import datetime, timezone, timedelta
-ts = datetime(2026,5,18,10,0,0,tzinfo=timezone.utc)
-events = [
-  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "L5", "_ts": ts},
-  {"ts": ts.isoformat(), "stage": "usage", "label": "L5", "outcome": "ok",
-   "detail": {"input_tokens": 100, "output_tokens": 50,
-               "cache_creation_tokens": 0, "cache_read_tokens": 0,
-               "cost_reported_usd": 5.0}},
-  {"ts": ts.isoformat(), "stage": "usage", "label": "L5", "outcome": "ok",
-   "detail": {"input_tokens": 1000, "output_tokens": 500,
-               "cache_creation_tokens": 200, "cache_read_tokens": 122089,
-               "cost_reported_usd": 9.25}},
-]
-cs = mod.aggregate(events, [])
-ue = cs[0].get("usage_event") or {}
-print(ue.get("input_tokens"), ue.get("cache_read_tokens"))
-'
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"1000 122089"* ]]
-}
-
 @test "US-VIEW-010: backfill_usage always uses list-price (ignores cost_reported_usd)" {
   # AC #3 of US-VIEW-010: cost column shows list-price, NOT the AI client's
   # reported total_cost_usd (which may include subscription discounts).

@@ -116,10 +116,15 @@ class LoopFmt:
         self.pending_ci      = False
         self.pending_story   = False
         self.spinner         = Spinner()
-        # Track the most recent usage / model seen on assistant turns so
-        # the result event handler can emit a 'usage' event even when
-        # result.usage is missing.
-        self._last_usage     = None
+        # Accumulate token usage across all assistant turns in the cycle so
+        # the trailing result event can emit a 'usage' event carrying the
+        # cumulative totals (result.usage only carries the last turn's).
+        self._usage_totals   = {
+            "input_tokens":          0,
+            "output_tokens":         0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens":     0,
+        }
         self._last_model     = None
 
     def _extract_cycle_num(self, text):
@@ -161,10 +166,14 @@ class LoopFmt:
 
     def _handle_assistant(self, ev):
         msg = ev.get("message", {})
-        # Remember the latest usage / model so the trailing result event
-        # can emit a 'usage' event even if result.usage is empty.
-        if msg.get("usage"):
-            self._last_usage = msg["usage"]
+        # Sum token usage across turns; result.usage only carries the last
+        # turn so accumulating here is the only way to get cumulative totals.
+        u = msg.get("usage") or {}
+        if u:
+            self._usage_totals["input_tokens"]          += int(u.get("input_tokens") or 0)
+            self._usage_totals["output_tokens"]         += int(u.get("output_tokens") or 0)
+            self._usage_totals["cache_creation_tokens"] += int(u.get("cache_creation_input_tokens") or 0)
+            self._usage_totals["cache_read_tokens"]     += int(u.get("cache_read_input_tokens") or 0)
         if msg.get("model"):
             self._last_model = msg["model"]
         for blk in msg.get("content", []):
@@ -341,18 +350,17 @@ class LoopFmt:
         shared  = os.environ.get("LOOP_SHARED_ROOT") or os.path.expanduser("~/.shared/roll")
         if not (slug and cycle):
             return
-        # Pull usage off the result event itself if present, otherwise off
-        # the most recent assistant turn we observed.
-        usage = (result_ev.get("usage") or self._last_usage or {})
+        # Use the cumulative totals accumulated across all assistant turns;
+        # result.usage is per-turn (last only) so it would under-count badly.
         model = result_ev.get("model") or self._last_model or ""
         payload = {
-            "model": model,
-            "input_tokens":            int(usage.get("input_tokens") or 0),
-            "output_tokens":           int(usage.get("output_tokens") or 0),
-            "cache_creation_tokens":   int(usage.get("cache_creation_input_tokens") or 0),
-            "cache_read_tokens":       int(usage.get("cache_read_input_tokens") or 0),
-            "cost_reported_usd":       float(cost_usd or 0),
-            "duration_ms":             int(dur_ms or 0),
+            "model":                 model,
+            "input_tokens":          self._usage_totals["input_tokens"],
+            "output_tokens":         self._usage_totals["output_tokens"],
+            "cache_creation_tokens": self._usage_totals["cache_creation_tokens"],
+            "cache_read_tokens":     self._usage_totals["cache_read_tokens"],
+            "cost_reported_usd":     float(cost_usd or 0),
+            "duration_ms":           int(dur_ms or 0),
         }
         evfile = os.path.join(shared, "loop", f"events-{slug}.ndjson")
         line = json.dumps({

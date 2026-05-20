@@ -362,6 +362,23 @@ another_key: 42"
   [[ "$output" == *"Unknown"* ]] || [[ "$output" == *"未知参数"* ]]
 }
 
+# FIX-079: first run on a fresh ROLL_HOME / ~/.claude must mark the steps that
+# really did work with ✓. Two steps regressed under FIX-075 because the snapshot
+# only counted regular files: `_link_skills` only creates symlinks and
+# `_peer_ensure_state_dir` only creates directories, so both produced empty
+# before/after snapshots and rendered as ↷ even on a brand-new install.
+@test "setup v2 e2e: first run marks Install skills with ✓ (FIX-079)" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '✓.*Install skills'
+}
+
+@test "setup v2 e2e: first run marks Initialize peer-review with ✓ (FIX-079)" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '✓.*Initialize peer-review'
+}
+
 # FIX-075: re-running setup on an already-installed ROLL_HOME must mark
 # unchanged steps with ↷, not ✓. Specifically the install/sync steps that did
 # real work on first run should report no-op on the second run. (The tmux step

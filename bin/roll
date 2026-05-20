@@ -577,6 +577,10 @@ _ensure_tmux() {
 # a re-copy with identical content is recognised as a no-op even when the inner
 # helper rewrites the file. Watch is a colon-separated list of directories;
 # missing dirs are skipped silently.
+# FIX-079: also track symlinks (`_link_skills` only creates symlinks) and
+# directories (`_peer_ensure_state_dir` only creates dirs). Without these, a
+# step that did real work but produced no regular file would falsely render
+# as ↷ on a brand-new install.
 _setup_snapshot() {
   local watch="$1"
   local -a dirs
@@ -586,6 +590,10 @@ _setup_snapshot() {
     for d in "${dirs[@]}"; do
       [[ -d "$d" ]] || continue
       find "$d" -type f -print0 2>/dev/null | xargs -0 cksum 2>/dev/null
+      while IFS= read -r l; do
+        printf 'L %s -> %s\n' "$l" "$(readlink "$l")"
+      done < <(find "$d" -type l 2>/dev/null)
+      find "$d" -type d -print 2>/dev/null
     done
   } | sort
 }

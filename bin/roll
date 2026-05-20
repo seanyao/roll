@@ -572,6 +572,44 @@ _ensure_tmux() {
   return 0
 }
 
+# FIX-075: snapshot the content of watched directories so cmd_setup can detect
+# whether a step actually changed any file. Uses `cksum` (mtime-independent) so
+# a re-copy with identical content is recognised as a no-op even when the inner
+# helper rewrites the file. Watch is a colon-separated list of directories;
+# missing dirs are skipped silently.
+_setup_snapshot() {
+  local watch="$1"
+  local -a dirs
+  IFS=':' read -r -a dirs <<<"$watch"
+  local d
+  {
+    for d in "${dirs[@]}"; do
+      [[ -d "$d" ]] || continue
+      find "$d" -type f -print0 2>/dev/null | xargs -0 cksum 2>/dev/null
+    done
+  } | sort
+}
+
+# FIX-075: run a setup step and report changed/unchanged/failed via the global
+# _ROLL_SETUP_STATE. Caller passes the watch dir(s) plus the command + args.
+# stdout/stderr of the inner command are suppressed (same as the previous
+# pattern in cmd_setup) to keep the v2 UI render the only user-visible output.
+_run_setup_step() {
+  local watch="$1"; shift
+  local before after
+  before=$(_setup_snapshot "$watch")
+  if "$@" >/dev/null 2>&1; then
+    after=$(_setup_snapshot "$watch")
+    if [[ "$before" == "$after" ]]; then
+      _ROLL_SETUP_STATE="unchanged"
+    else
+      _ROLL_SETUP_STATE="changed"
+    fi
+  else
+    _ROLL_SETUP_STATE="failed"
+  fi
+}
+
 cmd_setup() {
   local force=false
   while [[ $# -gt 0 ]]; do
@@ -585,17 +623,32 @@ cmd_setup() {
   local steps_buf=()
   _record() { steps_buf+=("$1|$2"); }
 
-  if _install_local "$force" >/dev/null 2>&1; then _record ok "Install templates & conventions to ~/.roll"
-  else _record fail "Install templates & conventions to ~/.roll"; fi
+  # Map snapshot-detected state to v2 UI marker. -f rewrites "changed" to
+  # "forced" so the user can tell a forced reinstall apart from a fresh
+  # install — both produce diff'd files, only -f was explicitly requested.
+  _state_to_marker() {
+    local s="$1"
+    case "$s" in
+      changed)   [[ "$force" == "true" ]] && echo forced || echo ok ;;
+      unchanged) echo skip ;;
+      failed)    echo fail ;;
+      *)         echo fail ;;
+    esac
+  }
 
-  if _sync_conventions "$force" >/dev/null 2>&1; then _record ok "Sync conventions to AI tools"
-  else _record fail "Sync conventions to AI tools"; fi
+  local _ai_dirs="$HOME/.claude:$HOME/.gemini:$HOME/.kimi:$HOME/.codex:$HOME/.cursor:$HOME/.trae:$HOME/.config/opencode:$HOME/.openclaw:$HOME/.pi:$HOME/.deepseek"
 
-  if _sync_skills "$force" >/dev/null 2>&1; then _record ok "Install skills to ~/.claude"
-  else _record fail "Install skills to ~/.claude"; fi
+  _run_setup_step "$ROLL_HOME" _install_local "$force"
+  _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Install templates & conventions to ~/.roll"
 
-  if _peer_ensure_state_dir >/dev/null 2>&1; then _record ok "Initialize peer-review state directory"
-  else _record fail "Initialize peer-review state directory"; fi
+  _run_setup_step "$_ai_dirs" _sync_conventions "$force"
+  _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Sync conventions to AI tools"
+
+  _run_setup_step "$_ai_dirs" _sync_skills "$force"
+  _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Install skills to ~/.claude"
+
+  _run_setup_step "$ROLL_HOME/.peer-state" _peer_ensure_state_dir
+  _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Initialize peer-review state directory"
 
   if command -v tmux >/dev/null 2>&1; then
     _record skip "Ensure tmux is installed (already present)"
@@ -608,8 +661,8 @@ cmd_setup() {
   fi
 
   if [[ "$(uname)" == "Darwin" ]]; then
-    if _install_launchd_plists "$(pwd -P)" >/dev/null 2>&1; then _record ok "Install launchd plists (macOS)"
-    else _record fail "Install launchd plists (macOS)"; fi
+    _run_setup_step "$HOME/Library/LaunchAgents" _install_launchd_plists "$(pwd -P)"
+    _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Install launchd plists (macOS)"
   fi
 
   _emit_setup_v2_ui "${steps_buf[@]}"

@@ -367,3 +367,24 @@ another_key: 42"
   [ "$status" -ne 0 ]
   [[ "$output" == *"Unknown"* ]] || [[ "$output" == *"未知参数"* ]]
 }
+
+# FIX-075: re-running setup on an already-installed ROLL_HOME must mark
+# unchanged steps with ↷, not ✓. Specifically the install/sync steps that did
+# real work on first run should report no-op on the second run. (The tmux step
+# is independently ↷ on machines that already have tmux, so we assert against
+# a step that today always prints ✓.)
+@test "setup v2 e2e: re-running setup marks unchanged install steps with ↷" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+  echo "$output" > "${TEST_TMP}/first-run.log"
+
+  # First run: the install templates step must have done real work (✓).
+  grep -q '✓.*Install templates' "${TEST_TMP}/first-run.log"
+
+  run_roll setup
+  [ "$status" -eq 0 ]
+  echo "$output" > "${TEST_TMP}/second-run.log"
+
+  # Second run: that same step is now a no-op and must render ↷.
+  grep -q '↷.*Install templates' "${TEST_TMP}/second-run.log"
+}

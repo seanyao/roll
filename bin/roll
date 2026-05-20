@@ -100,7 +100,7 @@ config_get() {
   local default="${2:-}"
   if [[ -f "$ROLL_CONFIG" ]]; then
     local val
-    val=$(grep -E "^${key}:" "$ROLL_CONFIG" 2>/dev/null | head -1 | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    val=$(grep -E "^${key}:" "$ROLL_CONFIG" 2>/dev/null | head -1 | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*#.*$//' | sed 's/[[:space:]]*$//')
     if [[ -n "$val" ]]; then
       echo "${val/#\~/$HOME}"
       return

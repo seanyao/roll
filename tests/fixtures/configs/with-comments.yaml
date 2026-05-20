@@ -1,0 +1,6 @@
+# Test config — values carry inline `#` comments to verify config_get strips them.
+loop_active_start: 0    # 24h window
+editor: vim  # preferred editor
+ai_claude: ~/.claude|CLAUDE.md|CLAUDE.md  # paths separated by pipe
+nocomment: pureval
+empty_val:    # leading whitespace + comment

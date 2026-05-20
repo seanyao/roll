@@ -98,8 +98,9 @@ EOF
   run cmd_slides --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"build"* ]]
-  # Bilingual: must contain both English keyword and at least one CJK char.
-  [[ "$output" =~ [一-龥] ]]
+  # Bilingual: English keyword + a specific Chinese substring from _slides_help.
+  # (CJK Unicode ranges in bash regex are unreliable under the CI runner locale.)
+  [[ "$output" == *"幻灯片"* ]]
 }
 
 @test "cmd_slides: 'new' subcommand reports not-implemented (placeholder for US-DECK-004)" {
@@ -127,8 +128,9 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"does-not-exist"* ]]
   [[ "$output" == *"roll slides new"* ]]
-  # Bilingual hint
-  [[ "$output" =~ [一-龥] ]]
+  # Bilingual hint — match the exact ZH prefix the cmd emits.
+  # (CJK Unicode ranges in bash regex are unreliable under the CI runner locale.)
+  [[ "$output" == *"未找到"* ]]
 }
 
 @test "cmd_slides build: schema-invalid deck.md → non-zero exit + diagnostics" {

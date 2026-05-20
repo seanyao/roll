@@ -929,9 +929,17 @@ cmd_init() {
   done
   set -- "${args[@]:-}"
 
-  if [[ "${ROLL_UI:-v2}" == "v2" ]] || [[ "$demo" == "true" ]]; then
+  # FIX-071: the v2 demo renderer prints a fake "Project ready" footer with
+  # six "✓" steps regardless of what actually happens — fine when the user
+  # asks for it via --demo, dangerously misleading when run silently on every
+  # init. The misleading case was particularly bad on legacy-project init,
+  # which short-circuits into the onboard guide without creating any files
+  # but the demo had already promised the user the project was "ready".
+  # Restrict the v2 demo render to --demo only; the real init flow below
+  # produces its own output.
+  if [[ "$demo" == "true" ]]; then
     python3 "${ROLL_PKG_DIR}/lib/roll-init.py" --demo
-    if [[ "$demo" == "true" ]]; then return; fi
+    return
   fi
 
   if [[ ! -d "$ROLL_TEMPLATES" ]]; then

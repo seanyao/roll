@@ -13,6 +13,9 @@ VERSION_PREFIX="${TODAY}.${MMDD}"
 # Query the remote — a tag created on another machine and never fetched would
 # be invisible to a local `git tag --list`, causing N to repeat and the npm
 # publish to fail on duplicate version.
+#
+# `grep || true` is required: on the first release of a new day there are no
+# matching tags, grep exits 1, and `set -euo pipefail` would kill the script.
 LATEST_N=$(
   {
     git tag --list "v${VERSION_PREFIX}.*"
@@ -20,7 +23,7 @@ LATEST_N=$(
       | awk '{print $2}' | sed 's|refs/tags/||'
   } \
   | sed "s/v${VERSION_PREFIX}\.//" \
-  | grep -E '^[0-9]+$' \
+  | { grep -E '^[0-9]+$' || true; } \
   | sort -n | tail -1
 )
 N=$(( ${LATEST_N:-0} + 1 ))

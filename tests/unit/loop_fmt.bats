@@ -297,3 +297,27 @@ run_fmt_nospin() {
   [[ "$clean" == *"ci"* ]]
   [[ "$clean" == *"green"* ]]
 }
+
+# ─── US-VIEW-010: cumulative token accumulation across assistant turns ──────
+
+@test "Usage event: tokens accumulate across multiple assistant turns" {
+  local a1='{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":20,"cache_read_input_tokens":1000}}}'
+  local a2='{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":3,"output_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":2000}}}'
+  local res='{"type":"result","subtype":"success","duration_ms":1000,"total_cost_usd":0.5}'
+  EVDIR="$TEST_TMP"
+  LOOP_PROJECT_SLUG=test-slug LOOP_CYCLE_ID=test-cycle LOOP_SHARED_ROOT="$EVDIR" \
+    bash -c "printf '%s\n%s\n%s\n' '$a1' '$a2' '$res' | python3 '$LOOP_FMT'"
+  evfile="$EVDIR/loop/events-test-slug.ndjson"
+  [ -f "$evfile" ]
+  local usage_line; usage_line=$(grep '"stage": "usage"' "$evfile" | head -1)
+  [ -n "$usage_line" ]
+  # input_tokens should be 100+3=103, output 50+7=57, cache_creation 20, cache_read 3000
+  echo "$usage_line" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())['detail']
+assert d['input_tokens']         == 103, f\"input  expected 103, got {d['input_tokens']}\"
+assert d['output_tokens']        ==  57, f\"output expected 57, got {d['output_tokens']}\"
+assert d['cache_creation_tokens']==  20, f\"cache_create expected 20, got {d['cache_creation_tokens']}\"
+assert d['cache_read_tokens']    ==3000, f\"cache_read expected 3000, got {d['cache_read_tokens']}\"
+"
+}

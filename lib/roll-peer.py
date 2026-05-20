@@ -50,10 +50,11 @@ def _agent_c(name: str) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Demo data — illustrative cross-agent review: claude proposes, codex reviews
+# Fixture data (test-only; opt in via ROLL_RENDER_FIXTURE=1)
+# Illustrative cross-agent review: claude proposes, codex reviews
 # ════════════════════════════════════════════════════════════════════════════
 
-_DEMO_SUBJECT = {
+_FIXTURE_SUBJECT = {
     "story":     "US-AUTH-014",
     "title":     "Session refresh fallback when refresh-token API 5xx",
     "pr":        "#412",
@@ -63,7 +64,7 @@ _DEMO_SUBJECT = {
     "reviewer":  "codex",
 }
 
-_DEMO_ROUNDS = [
+_FIXTURE_ROUNDS = [
     {
         "n": 1,
         "hint": "first pass — proposer ships, reviewer probes",
@@ -93,13 +94,13 @@ _DEMO_ROUNDS = [
     },
 ]
 
-_DEMO_VERDICT = {
+_FIXTURE_VERDICT = {
     "outcome": "approved",
     "reason":  "2 rounds · 5 turns · all blocks resolved",
 }
 
-_DEMO_ARTIFACT = "~/.roll/.peer-state/logs/20260519_213700_claude_codex.md"
-_DEMO_NEXT = [
+_FIXTURE_ARTIFACT = "~/.roll/.peer-state/logs/20260519_213700_claude_codex.md"
+_FIXTURE_NEXT = [
     ("Continue execution",   "claude resumes work on US-AUTH-014"),
     ("Inspect log",          "open the artifact above to replay the transcript"),
 ]
@@ -205,19 +206,19 @@ def _footer(artifact: str, next_steps: list) -> None:
 # Top-level render
 # ════════════════════════════════════════════════════════════════════════════
 
-def render_demo() -> None:
-    _eyebrow(_DEMO_SUBJECT["trigger"])
+def render_fixture() -> None:
+    _eyebrow(_FIXTURE_SUBJECT["trigger"])
     _divider()
     print()
-    _subject(_DEMO_SUBJECT)
+    _subject(_FIXTURE_SUBJECT)
     print()
-    _pair_overview(_DEMO_SUBJECT)
-    for rd in _DEMO_ROUNDS:
+    _pair_overview(_FIXTURE_SUBJECT)
+    for rd in _FIXTURE_ROUNDS:
         _round_header(rd["n"], rd["hint"])
         for agent, weight, body in rd["turns"]:
             _turn(agent, weight, body)
-    _verdict(_DEMO_VERDICT)
-    _footer(_DEMO_ARTIFACT, _DEMO_NEXT)
+    _verdict(_FIXTURE_VERDICT)
+    _footer(_FIXTURE_ARTIFACT, _FIXTURE_NEXT)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -226,7 +227,6 @@ def render_demo() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--demo",     action="store_true")
     ap.add_argument("--no-color", dest="no_color", action="store_true")
     ap.add_argument("--en",       action="store_true")
     ap.add_argument("--zh",       action="store_true")
@@ -235,7 +235,17 @@ def main() -> None:
     if args.no_color or os.environ.get("NO_COLOR") or not sys.stdout.isatty():
         roll_render.USE_COLOR = False
 
-    render_demo()
+    # FIX-076: this standalone entrypoint only knows how to render the fixture
+    # transcript (for UI tests). Real peer review is orchestrated by bin/roll
+    # and never invokes this main(). Require an explicit opt-in so a stray
+    # `python3 lib/roll-peer.py` invocation can't masquerade as live output.
+    if not os.environ.get("ROLL_RENDER_FIXTURE"):
+        print("Error: lib/roll-peer.py only renders fixture data; "
+              "set ROLL_RENDER_FIXTURE=1 to use it (test-only).",
+              file=sys.stderr)
+        sys.exit(2)
+
+    render_fixture()
 
 
 if __name__ == "__main__":

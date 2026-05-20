@@ -126,6 +126,84 @@ teardown() {
   [[ "$output" == *"live"* ]]
 }
 
+# ─── FIX-081: launchd disable-list pollution ─────────────────────────────────
+
+@test "loop off (macOS): issues launchctl enable for all 3 services (FIX-081)" {
+  # FIX-081: `_install_launchd_plists` calls `launchctl disable gui/$UID/<label>`
+  # on first install (FIX-059 auto-bootstrap guard). That write lands in the
+  # host's /private/var/db/com.apple.xpc.launchd/disabled.<UID>.plist regardless
+  # of HOME sandbox. Without a symmetric `launchctl enable` on `_loop_off`,
+  # every short-lived project leaves 3 permanent ghost labels in the host's
+  # disable list — pollution that survives even after the project dir, plists,
+  # and ~/.roll are all deleted.
+  #
+  # We can't observe the real host disable db (would need to actually toggle
+  # it, which is exactly the pollution this fix prevents). Instead we shim
+  # `launchctl` on PATH and record every invocation, then assert that the
+  # `loop off` teardown path emits `enable gui/<uid>/<label>` for all 3
+  # services.
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
+
+  # Derive the slug bin/roll will compute for TEST_TMP so labels match.
+  # Mirror bin/roll's `_project_slug` algorithm rather than sourcing bin/roll
+  # (whose `set -euo pipefail` aborts when sourced under bats).
+  local slug uid canon base hash
+  canon=$(realpath "${TEST_TMP}")
+  base=$(basename "$canon")
+  hash=$(printf '%s' "$canon" | md5 | cut -c1-6)
+  base=$(printf '%s' "$base" | tr -cs '[:alnum:]' '-' | sed 's/-*$//')
+  slug="${base}-${hash}"
+  uid=$(id -u)
+
+  local shim_dir="${TEST_TMP}/shim"
+  local log="${TEST_TMP}/launchctl.log"
+  mkdir -p "$shim_dir"
+  cat > "${shim_dir}/launchctl" <<EOSHIM
+#!/usr/bin/env bash
+echo "\$@" >> "${log}"
+# Make _launchd_is_loaded (which greps \`print-disabled\` output for
+# "<label>" => enabled) succeed for our 3 com.roll.* labels so _loop_off
+# proceeds past the "not enabled" guard.
+case "\$1" in
+  print-disabled)
+    printf '\t"com.roll.loop.${slug}" => enabled\n'
+    printf '\t"com.roll.dream.${slug}" => enabled\n'
+    printf '\t"com.roll.brief.${slug}" => enabled\n'
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOSHIM
+  chmod +x "${shim_dir}/launchctl"
+
+  # Pre-seed the 3 plist files _loop_off expects to find (so the unload
+  # codepath has a target — content doesn't matter, the shim swallows it).
+  local launchd_dir="${TEST_TMP}/Library/LaunchAgents"
+  mkdir -p "$launchd_dir"
+  for svc in loop dream brief; do
+    : > "${launchd_dir}/com.roll.${svc}.${slug}.plist"
+  done
+
+  # Run `roll loop off` with the shim in front of PATH so the real launchctl
+  # is never touched. Direct invocation (not `run_roll`) — see other tests.
+  : > "$log"
+  PATH="${shim_dir}:$PATH" ROLL_HOME="${ROLL_HOME}" HOME="${TEST_TMP}" \
+    bash -c "cd \"${TEST_TMP}\" && bash \"$ROLL_BIN\" loop off" >/dev/null 2>&1 || true
+
+  # Assert that for each service we saw exactly the symmetric pair: an
+  # unload-or-bootout to take the service down, and an `enable` to clear
+  # the disable flag the FIX-059 install had set.
+  for svc in loop dream brief; do
+    local label="com.roll.${svc}.${slug}"
+    grep -qE "^enable gui/${uid}/${label}$" "$log" \
+      || { echo "MISSING: enable gui/${uid}/${label} in launchctl log:" >&2
+           cat "$log" >&2
+           false; }
+  done
+}
+
 @test "loop runner script contains auto-attach osascript with mute check" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS-only auto-attach path"
 

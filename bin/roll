@@ -3026,15 +3026,16 @@ _agent_run_skill() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SLIDES — deck.md → HTML rendering pipeline (US-DECK-003 / 005)
+# SLIDES — deck.md → HTML rendering pipeline (US-DECK-003 / 004 / 005)
 #
 #   roll slides build <slug>   render .roll/slides/<slug>/deck.md → .html, open
-#   roll slides new "<topic>"  (US-DECK-004 — placeholder here)
+#   roll slides new "<topic>"  invoke selected agent with roll-deck skill (US-DECK-004)
 #   roll slides list           list decks as a table (US-DECK-005)
 #   roll slides preview <slug> open .roll/slides/<slug>.html in browser (US-DECK-005)
 #
-# `build` (DECK-003) + `list` / `preview` (DECK-005) are implemented; `new`
-# remains a not-implemented placeholder until DECK-004 lands.
+# All four subcommands are implemented: `build` (DECK-003), `new` (DECK-004),
+# `list` / `preview` (DECK-005). The AI authoring step happens in `new`;
+# everything else is pure bash.
 # ═══════════════════════════════════════════════════════════════════════════════
 _slides_help() {
   cat <<'EOF'
@@ -3046,8 +3047,8 @@ USAGE  用法
                           Render .roll/slides/<slug>/deck.md → .roll/slides/<slug>.html
                           渲染 deck.md 为 HTML 并自动打开浏览器
   roll slides new "<topic>" [--template <name>]
-                          (US-DECK-004) Generate a new deck.md from a topic
-                          根据主题生成新的 deck.md
+                          Generate a new deck.md from a topic via the selected AI agent
+                          通过所选 AI agent 根据主题生成新的 deck.md
   roll slides list        List all decks under .roll/slides/ as a table
                           列出 .roll/slides/ 下所有幻灯片
   roll slides preview <slug> [--no-open]
@@ -3349,6 +3350,106 @@ cmd_slides_preview() {
   return 0
 }
 
+# ─── US-DECK-004 ─────────────────────────────────────────────────────────────
+# Turn a topic string into a kebab-case slug.
+# Lower-cases, replaces any run of non-alphanumerics with a single dash,
+# strips leading/trailing dashes. Matches the convention assumed by
+# `roll slides build <slug>` (lowercase kebab) and the schema.
+_slides_topic_slug() {
+  local topic="$1"
+  local slug
+  slug=$(printf '%s' "$topic" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')
+  # Strip leading/trailing dashes.
+  slug="${slug#-}"
+  slug="${slug%-}"
+  printf '%s' "$slug"
+}
+
+# `roll slides new "<topic>" [--template <name>]`
+# AI authoring entry point. Loads the `roll-deck` skill, builds a single text
+# prompt containing the skill body + topic + slug + template, and hands it
+# to the selected project agent. The agent is responsible for writing
+# `.roll/slides/<slug>/deck.md` (and nothing else). After the agent exits,
+# we print a bilingual hint pointing at `roll slides build <slug>`.
+cmd_slides_new() {
+  local topic="" template="introduction-v3"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --template)
+        [[ -n "${2:-}" ]] || { err "--template requires a value  --template 需要一个值"; return 1; }
+        template="$2"; shift 2 ;;
+      --template=*) template="${1#--template=}"; shift ;;
+      --help|-h) _slides_help; return 0 ;;
+      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      *)
+        if [[ -z "$topic" ]]; then
+          topic="$1"; shift
+        else
+          err "Unexpected argument: $1  多余参数: $1"; return 1
+        fi
+        ;;
+    esac
+  done
+
+  if [[ -z "$topic" ]]; then
+    err "Usage: roll slides new \"<topic>\" [--template <name>]"
+    echo "  用法：roll slides new \"<主题>\" [--template <模板名>]" >&2
+    return 1
+  fi
+
+  local slug; slug=$(_slides_topic_slug "$topic")
+  if [[ -z "$slug" ]]; then
+    err "Could not derive a slug from topic: $topic"
+    echo "  无法从主题派生 slug：$topic" >&2
+    return 1
+  fi
+
+  local skill_file="${ROLL_PKG_DIR}/skills/roll-deck/SKILL.md"
+  [[ -f "$skill_file" ]] || { err "Skill not found: ${skill_file}"; return 1; }
+  local skill_body; skill_body=$(_skill_content "$skill_file")
+
+  local agent; agent=$(_project_agent)
+
+  # Compose the full prompt: skill body + concrete task context. The agent
+  # reads the skill, then sees the topic / slug / template it must use.
+  local prompt
+  prompt="$(cat <<EOF
+${skill_body}
+
+---
+
+# Task
+
+topic: ${topic}
+slug: ${slug}
+template: ${template}
+target_file: .roll/slides/${slug}/deck.md
+
+Generate the 18-slide bilingual deck.md for the topic above, following the workflow and hard constraints in this skill. Write exactly one file: .roll/slides/${slug}/deck.md. Then print the bilingual "Next" hint.
+
+按本 skill 的工作流和硬约束生成 18 张双语 slide 的 deck.md。只写一个文件：.roll/slides/${slug}/deck.md，然后打印双语 "Next" 提示。
+EOF
+)"
+
+  _agent_argv "$agent" text "$prompt" || {
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
+    return 1
+  }
+
+  info "Launching ${agent} with roll-deck skill for topic: ${topic}"
+  info "启动 ${agent} 处理主题：${topic}"
+  "${_AGENT_ARGV[@]}"
+  local rc=$?
+
+  # Whether the agent succeeded or not, point the user at the next bash step.
+  # (Build will surface its own validation errors if deck.md is malformed.)
+  echo
+  echo "Next:  roll slides build ${slug}"
+  echo "下一步：roll slides build ${slug}"
+
+  return "$rc"
+}
+
 cmd_slides() {
   local subcmd="${1:-}"
   shift || true
@@ -3357,9 +3458,7 @@ cmd_slides() {
       cmd_slides_build "$@"
       ;;
     new)
-      err "roll slides new — not implemented yet (see US-DECK-004)"
-      echo "  尚未实现 — 详见 US-DECK-004。" >&2
-      return 1
+      cmd_slides_new "$@"
       ;;
     list)
       cmd_slides_list "$@"

@@ -211,51 +211,14 @@ def render(path: str) -> None:
 
 def main() -> None:
     args = sys.argv[1:]
-    demo = "--demo" in args
     no_color = "--no-color" in args or not sys.stdout.isatty() or os.getenv("NO_COLOR")
     rr.USE_COLOR = not no_color
 
     backlog = ".roll/backlog.md"
-    if not demo and not os.path.isfile(backlog):
+    if not os.path.isfile(backlog):
         print(f"Error: {backlog} not found — run 'roll init' first", file=sys.stderr)
         sys.exit(1)
-
-    if demo:
-        _write_demo(backlog)
-        try:
-            render(backlog)
-        finally:
-            os.unlink(backlog)
-    else:
-        render(backlog)
-
-
-def _write_demo(path: str) -> None:
-    with open(path, "w") as f:
-        f.write("""# Project Backlog
-
-## 🐛 Bug Fixes
-| ID | Description | Status |
-|----|-------------|--------|
-| FIX-042 | Fix outer runner tmux kill matching wrong session | 🔨 In Progress |
-| FIX-043 | Handle stale state in loop now command | 📋 Todo |
-
-## Epic: Autonomous Evolution
-### Feature: autonomous-evolution
-| Story | Description | Status |
-|-------|-------------|--------|
-| [US-AUTO-042](.roll/features/autonomous-evolution/autonomous-evolution.md) | Loop cost telemetry — write model and token data per cycle | 📋 Todo |
-
-## ♻️ Refactor
-| ID | Description | Status |
-|----|-------------|--------|
-| REFACTOR-010 | Simplify CI test parallelism strategy | 🔒 Blocked [waiting on CI infra] |
-
-## 💡 Ideas
-| ID | Description | Status |
-|----|-------------|--------|
-| IDEA-025 | Dashboard cost from list-price tokens | ⏸ Deferred [design pending] |
-""")
+    render(backlog)
 
 
 if __name__ == "__main__":

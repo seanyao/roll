@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
-# Unit tests for: roll setup v2 redesign (US-VIEW-007)
+# Unit tests for: roll setup v2 real-data UI (FIX-073)
 
 ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
+ROLL_DIR="${ROLL_BIN%/bin/roll}"
 
 setup() {
   TEST_DIR="$(mktemp -d)"
@@ -13,51 +14,57 @@ teardown() {
   rm -rf "$TEST_DIR"
 }
 
-@test "setup v2: ROLL_UI=v2 routes to Python implementation (--demo)" {
+# ─── roll-setup.py renderer: stdin JSON only ─────────────────────────────────
+
+@test "setup v2: renderer renders headers, steps, and footer from stdin JSON" {
   cd "$TEST_DIR"
-  run env ROLL_UI=v2 bash "$ROLL_BIN" setup --demo
+  payload='{"header_label":"SETUP","subtitle":"初始化","steps":[{"num":1,"label":"Detect platform & shell","status":"ok"},{"num":2,"label":"Install skills","status":"ok"}],"footer":{"status":"ok","label":"Setup complete","hint":"run roll init"}}'
+  run bash -c "echo '$payload' | python3 \"$ROLL_DIR/lib/roll-setup.py\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"SETUP"* ]]
+  [[ "$output" == *"Detect platform & shell"* ]]
+  [[ "$output" == *"Setup complete"* ]]
+  [[ "$output" == *"run roll init"* ]]
 }
 
-@test "setup v2: ROLL_UI=v1 uses legacy bash implementation" {
-  # v1 should print the old-style [roll] info messages
-  skip "v1 setup modifies machine state — tested via existing tests"
-}
-
-@test "setup v2: demo shows numbered steps" {
+@test "setup v2: renderer marks failed step with ✗ and incomplete footer" {
   cd "$TEST_DIR"
-  run env ROLL_UI=v2 bash "$ROLL_BIN" setup --demo
+  payload='{"header_label":"SETUP","steps":[{"num":1,"label":"x","status":"fail","error":"network"}],"footer":{"status":"fail","label":"Setup incomplete"}}'
+  run bash -c "echo '$payload' | python3 \"$ROLL_DIR/lib/roll-setup.py\""
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1."* ]] || [[ "$output" == *"  1 "* ]] || [[ "$output" == *"Step 1"* ]]
+  [[ "$output" == *"✗"* ]]
+  [[ "$output" == *"network"* ]]
+  [[ "$output" == *"Setup incomplete"* ]]
 }
 
-@test "setup v2: demo shows at least 3 steps" {
+@test "setup v2: renderer marks skipped step with ↷" {
   cd "$TEST_DIR"
-  run env ROLL_UI=v2 bash "$ROLL_BIN" setup --demo
+  payload='{"header_label":"SETUP","steps":[{"num":1,"label":"x","status":"skip","note":"already present"}],"footer":{"status":"ok","label":"Setup complete"}}'
+  run bash -c "echo '$payload' | python3 \"$ROLL_DIR/lib/roll-setup.py\""
   [ "$status" -eq 0 ]
-  # Should have multiple step entries
-  [[ "$output" == *"3."* ]] || echo "$output" | grep -qE "^\s+[3-9]\."
+  [[ "$output" == *"↷"* ]]
+  [[ "$output" == *"already present"* ]]
 }
 
-@test "setup v2: demo shows checkmarks for completed steps" {
+@test "setup v2: renderer exits non-zero on empty stdin (no demo fallback)" {
   cd "$TEST_DIR"
-  run env ROLL_UI=v2 bash "$ROLL_BIN" setup --demo
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"✓"* ]]
+  run bash -c ": | python3 \"$ROLL_DIR/lib/roll-setup.py\""
+  [ "$status" -ne 0 ]
 }
 
-@test "setup v2: demo shows 'Setup complete' in footer" {
+@test "setup v2: --no-color suppresses ANSI escapes" {
   cd "$TEST_DIR"
-  run env ROLL_UI=v2 bash "$ROLL_BIN" setup --demo
+  payload='{"header_label":"SETUP","steps":[{"num":1,"label":"x","status":"ok"}],"footer":{"status":"ok","label":"ok"}}'
+  run bash -c "echo '$payload' | python3 \"$ROLL_DIR/lib/roll-setup.py\" --no-color"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Setup complete"* ]] || [[ "$output" == *"complete"* ]]
+  [[ "$output" != *$'\033'* ]]
 }
 
-@test "setup v2: Python renderer runs standalone with --demo" {
+# ─── roll setup (bash entry) ─────────────────────────────────────────────────
+
+@test "setup: --demo flag is rejected (FIX-073 removes the demo path)" {
   cd "$TEST_DIR"
-  run python3 "${ROLL_BIN%/bin/roll}/lib/roll-setup.py" --demo
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"SETUP"* ]]
-  [[ "$output" == *"✓"* ]]
+  ROLL_PKG_DIR="$ROLL_DIR" run bash "$ROLL_BIN" setup --demo
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--demo"* ]]
 }

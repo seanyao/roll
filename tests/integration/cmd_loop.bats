@@ -4,6 +4,11 @@
 load helpers
 
 setup() {
+  # FIX-074: this file calls `run_roll loop on/off` which would mutate the
+  # host's launchd state if the test runs inside a real cycle (ROLL_MAIN_SLUG
+  # poisons _project_slug → label collapses to live service → cycle kills
+  # itself). Skip the whole file when CYCLE_ID is set.
+  require_not_in_real_loop
   integration_setup
   # Pre-install plists via setup so loop on/off have files to work with
   run_roll setup

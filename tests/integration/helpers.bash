@@ -2,6 +2,10 @@
 # Shared helpers for integration tests.
 # Load with: load helpers  (from a .bats file in tests/integration/)
 
+# US-QA-004: standardised precondition helpers (require_not_in_real_loop, ...)
+# shellcheck source=../preconditions.bash
+source "${BATS_TEST_DIRNAME}/../preconditions.bash"
+
 # Creates an isolated temp environment and sets all ROLL_ vars.
 # Call in setup() of each integration test file.
 integration_setup() {

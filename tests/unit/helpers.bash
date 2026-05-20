@@ -4,6 +4,10 @@
 
 ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
 
+# US-QA-004: standardised precondition helpers (require_not_in_real_loop, ...)
+# shellcheck source=../preconditions.bash
+source "${BATS_TEST_DIRNAME}/../preconditions.bash"
+
 # FIX-065: every test gets a sandboxed _SHARED_ROOT so any subprocess
 # invocation of bin/roll (which inherits the export) can never write its
 # ALERT / state / heartbeat / events / LOCK files into the real

@@ -6,6 +6,10 @@
 load helpers
 
 setup() {
+  # FIX-074: `run_roll setup` writes plists and calls `launchctl disable`
+  # (FIX-059 path). Inside a real cycle ROLL_MAIN_SLUG poisons the label, so the
+  # disable would hit the host's live service. Skip when CYCLE_ID is set.
+  require_not_in_real_loop
   integration_setup
 }
 

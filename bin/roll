@@ -1946,6 +1946,88 @@ _ensure_features_dir() {
   _ROLL_MERGE_SUMMARY+=("created|.roll/features/")
 }
 
+# US-ONBOARD-019: write a Roll version stamp under .roll/.version when a project
+# is onboarded. Going forward, this stamp is the canonical "this project was
+# onboarded with Roll" signal — it lets `_check_structure` distinguish a
+# genuine pre-2.0 Roll project (needs migrate) from a non-Roll project that
+# coincidentally has BACKLOG.md / docs/features/ from another tool.
+#
+# Idempotent: an existing stamp is never overwritten, so the original install
+# timestamp is preserved across re-runs of `roll init`.
+_write_version_stamp() {
+  local project_dir="$1"
+  local stamp_path="$project_dir/.roll/.version"
+  if [[ -f "$stamp_path" ]]; then
+    _ROLL_MERGE_SUMMARY+=("unchanged|.roll/.version")
+    return 0
+  fi
+  mkdir -p "$project_dir/.roll"
+  local installed_at; installed_at=$(date -u +%FT%TZ)
+  cat > "$stamp_path" <<EOF
+# Roll project version stamp — written by \`roll init\` (US-ONBOARD-019).
+# Used by \`_check_structure\` to recognise a previously-onboarded Roll project
+# without depending on directory-name heuristics.
+roll_version: "${VERSION}"
+installed_at: "${installed_at}"
+EOF
+  _ROLL_MERGE_SUMMARY+=("created|.roll/.version")
+  return 0
+}
+
+# US-ONBOARD-019: is <root> a Roll-onboarded project (current or pre-2.0)?
+#
+# Returns 0 (true) when at least one Roll-specific signal is present:
+#   1. .roll/.version stamp (post-019 onboard)
+#   2. BACKLOG.md with a Roll-1.x Story table or "Bug Fixes" section
+#   3. PROPOSALS.md with a Roll-style "## Proposal" heading
+#   4. docs/features/ containing US-/FIX-/REFACTOR- named .md files
+#   5. docs/briefs/ or docs/dream/ directory non-empty
+#
+# A bare BACKLOG.md/PROPOSALS.md from another tool, or a generic
+# docs/features/ folder, does NOT count — that's the bug US-ONBOARD-019
+# fixes (false-positive migrate prompts on non-Roll projects).
+_has_roll_signature() {
+  local root="$1"
+
+  # Signal 1 — post-019 version stamp
+  [[ -f "$root/.roll/.version" ]] && return 0
+
+  # Signal 2 — Roll-1.x BACKLOG.md content
+  if [[ -f "$root/BACKLOG.md" ]]; then
+    if grep -qE '^\| Story \| Description \| Status \|' "$root/BACKLOG.md" 2>/dev/null \
+       || grep -qE '^## Epic:' "$root/BACKLOG.md" 2>/dev/null \
+       || grep -qE '^\| ID \| Problem \| Status \|' "$root/BACKLOG.md" 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  # Signal 3 — Roll-style PROPOSALS.md
+  if [[ -f "$root/PROPOSALS.md" ]]; then
+    if grep -qE '^## Proposal' "$root/PROPOSALS.md" 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  # Signal 4 — Roll-named files under docs/features/
+  if [[ -d "$root/docs/features" ]]; then
+    if find "$root/docs/features" -maxdepth 2 -type f -name '*.md' 2>/dev/null \
+         | grep -qE '/(US|FIX|REFACTOR)-[0-9]+'; then
+      return 0
+    fi
+  fi
+
+  # Signal 5 — Roll-1.x process artefacts (docs/briefs/ docs/dream/)
+  local dir
+  for dir in docs/briefs docs/dream; do
+    if [[ -d "$root/$dir" ]] \
+       && [[ -n "$(find "$root/$dir" -mindepth 1 -maxdepth 2 -type f 2>/dev/null | head -1)" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 # ─── Helper: write starter .roll/features.md (no-op if exists) ────────────────
 _write_features_md() {
   if [[ -f "$1" ]]; then

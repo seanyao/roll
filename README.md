@@ -68,6 +68,7 @@ roll loop on        # let AI work through the backlog (optional)
 | Peer (cross-agent review) | [guide/en/peer.md](guide/en/peer.md) | [guide/zh/peer.md](guide/zh/peer.md) |
 | Configuration (env vars) | [guide/en/configuration.md](guide/en/configuration.md) | [guide/zh/configuration.md](guide/zh/configuration.md) |
 | Skill selection guide | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
+| Slides (deck generator) | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |
 | FAQ (troubleshooting) | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
 | Adoption patterns | [guide/en/patterns/](guide/en/patterns/) | [guide/zh/patterns/](guide/zh/patterns/) |
 

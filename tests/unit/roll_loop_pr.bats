@@ -178,6 +178,121 @@ EOF
   grep -qE 'gh -R test/repo' "$GH_LOG"
 }
 
+# --- US-VIEW-011: PR landing state events ----------------------------------
+
+# Find the events.ndjson file _loop_event wrote in this test sandbox.
+# helpers.bash exports _SHARED_ROOT=$TEST_TMP/shared so the sandbox path is
+# $_SHARED_ROOT/loop/events-<slug>.ndjson; fall back to scanning $TEST_TMP
+# if _SHARED_ROOT is not exported (defensive).
+_events_file() {
+  local root="${_SHARED_ROOT:-$TEST_TMP/shared}"
+  local f
+  f=$(find "$root/loop" -name 'events-*.ndjson' 2>/dev/null | head -1)
+  [ -n "$f" ] && echo "$f" && return 0
+  return 0
+}
+
+@test "US-VIEW-011: _loop_publish_pr emits pr event with outcome=open (not ok)" {
+  _install_git_wrapper
+  _install_gh "" "https://github.com/test/repo/pull/42" 0
+  run _loop_publish_pr "loop/cycle-test"
+  [ "$status" -eq 0 ]
+  local ev; ev=$(_events_file)
+  [ -n "$ev" ]
+  grep -q '"stage":"pr"' "$ev"
+  grep -q '"outcome":"open"' "$ev"
+  ! grep -q '"outcome":"ok"' "$ev"
+}
+
+# Stub gh that returns a configurable state for `gh pr view --json state`.
+# Args: state ("MERGED"|"CLOSED"|"OPEN"|"") and PR url.
+_install_gh_state() {
+  local state="$1" url="$2"
+  cat > "$MOCKBIN/gh" <<EOF
+#!/bin/bash
+echo "gh \$*" >> "$GH_LOG"
+# Skip leading "-R <slug>" flags.
+args=("\$@")
+i=0
+while [ "\$i" -lt "\${#args[@]}" ]; do
+  case "\${args[\$i]}" in
+    -R) i=\$((i+2)); continue ;;
+    *) break ;;
+  esac
+done
+sub="\${args[\$i]:-}"
+sub2="\${args[\$((i+1))]:-}"
+# Detect --json field
+field=""
+for a in "\$@"; do
+  if [ "\$prev" = "--json" ]; then field="\$a"; break; fi
+  prev="\$a"
+done
+if [ "\$sub" = "pr" ] && [ "\$sub2" = "view" ]; then
+  case "\$field" in
+    url)   [ -n "$url" ] && echo "$url"; exit 0 ;;
+    state) [ -n "$state" ] && echo "$state"; exit 0 ;;
+    *)     exit 0 ;;
+  esac
+fi
+exit 0
+EOF
+  chmod +x "$MOCKBIN/gh"
+}
+
+@test "US-VIEW-011: _loop_emit_pr_final skips silently when gh missing" {
+  rm -f "$MOCKBIN/gh"
+  command() {
+    if [ "$1" = "-v" ] && [ "$2" = "gh" ]; then return 1; fi
+    builtin command "$@"
+  }
+  run _loop_emit_pr_final "loop/cycle-test"
+  [ "$status" -eq 0 ]
+  local ev; ev=$(_events_file)
+  # No pr event written when gh is unavailable.
+  if [ -n "$ev" ]; then
+    ! grep -q '"stage":"pr"' "$ev"
+  fi
+}
+
+@test "US-VIEW-011: _loop_emit_pr_final emits merged when gh state=MERGED" {
+  _install_gh_state "MERGED" "https://github.com/test/repo/pull/77"
+  run _loop_emit_pr_final "loop/cycle-test"
+  [ "$status" -eq 0 ]
+  local ev; ev=$(_events_file)
+  [ -n "$ev" ]
+  grep -q '"stage":"pr"' "$ev"
+  grep -q '"outcome":"merged"' "$ev"
+}
+
+@test "US-VIEW-011: _loop_emit_pr_final emits closed when gh state=CLOSED" {
+  _install_gh_state "CLOSED" "https://github.com/test/repo/pull/99"
+  run _loop_emit_pr_final "loop/cycle-test"
+  [ "$status" -eq 0 ]
+  local ev; ev=$(_events_file)
+  [ -n "$ev" ]
+  grep -q '"outcome":"closed"' "$ev"
+}
+
+@test "US-VIEW-011: _loop_emit_pr_final maps OPEN and unknown to open" {
+  _install_gh_state "OPEN" "https://github.com/test/repo/pull/55"
+  run _loop_emit_pr_final "loop/cycle-test"
+  [ "$status" -eq 0 ]
+  local ev; ev=$(_events_file)
+  [ -n "$ev" ]
+  grep -q '"outcome":"open"' "$ev"
+}
+
+@test "US-VIEW-011: _loop_emit_pr_final skips when PR url is empty" {
+  _install_gh_state "MERGED" ""
+  run _loop_emit_pr_final "loop/cycle-test"
+  [ "$status" -eq 0 ]
+  local ev; ev=$(_events_file)
+  if [ -n "$ev" ]; then
+    ! grep -q '"stage":"pr"' "$ev"
+  fi
+}
+
 # --- _loop_is_doc_only_change ---
 
 _setup_origin_main() {

@@ -3940,7 +3940,7 @@ cmd_loop() {
     off)     _loop_off ;;
     now)     _loop_now ;;
     test)    _loop_test ;;
-    status)  _loop_status ;;
+    status)  _loop_status "$@" ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
     events)  _loop_event_log "${1:-20}" ;;

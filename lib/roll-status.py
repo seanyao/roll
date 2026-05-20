@@ -8,7 +8,7 @@ project templates, and this-project metrics.
 Usage:
   python3 lib/roll-status.py              # live data
   python3 lib/roll-status.py --no-color
-  python3 lib/roll-status.py --demo       # render with fixture data
+  ROLL_RENDER_FIXTURE=1 python3 lib/roll-status.py   # render with fixture data (test only)
 """
 
 from __future__ import annotations
@@ -149,9 +149,9 @@ def _launchd_state(service: str, slug: str) -> str:
         return "installed-off"
 
 # ════════════════════════════════════════════════════════════════════════════
-# Demo fixture
+# Fixture data (test-only; opt in via ROLL_RENDER_FIXTURE=1)
 # ════════════════════════════════════════════════════════════════════════════
-def _demo_data() -> Dict[str, Any]:
+def _fixture_data() -> Dict[str, Any]:
     return dict(
         conventions=[
             ("AGENTS.md", True), ("CLAUDE.md", True), ("GEMINI.md", False),
@@ -347,7 +347,6 @@ def _live_data() -> Dict[str, Any]:
 # ════════════════════════════════════════════════════════════════════════════
 def main() -> None:
     ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--demo",     action="store_true")
     ap.add_argument("--no-color", dest="no_color", action="store_true")
     ap.add_argument("--en",       action="store_true")
     ap.add_argument("--zh",       action="store_true")
@@ -356,7 +355,7 @@ def main() -> None:
     if args.no_color or os.environ.get("NO_COLOR") or not sys.stdout.isatty():
         roll_render.USE_COLOR = False
 
-    d = _demo_data() if args.demo else _live_data()
+    d = _fixture_data() if os.environ.get("ROLL_RENDER_FIXTURE") else _live_data()
 
     _render_health(d)
     _render_global_conventions(d["conventions"])

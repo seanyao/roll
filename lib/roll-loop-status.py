@@ -706,7 +706,7 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
           c("muted", "       ") +
           c("dim", "watch   ") + c("blue", "roll loop --watch") +
           c("muted", "       ") +
-          c("dim", "more   ") + c("blue", "roll loop --days 7"))
+          c("dim", "more   ") + c("blue", "roll loop status --days 7"))
 
 def _read_plist_loop_minute() -> int:
     """FIX-063: read actual loop Minute from launchd plist (truth source).

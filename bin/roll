@@ -1070,6 +1070,9 @@ cmd_init() {
     _write_backlog "$project_dir/.roll/backlog.md"
     _ensure_features_dir "$project_dir/.roll/features"
     _write_features_md "$project_dir/.roll/features.md"
+    # US-ONBOARD-019: stamp the project so legacy detection can recognise it
+    # as Roll-onboarded without depending on directory-name heuristics.
+    _write_version_stamp "$project_dir"
   } >/dev/null
 
   local sync_status="ok"
@@ -1423,6 +1426,15 @@ print(' '.join(p.get('scope', {}).get('approved', [])))
 
   _merge_global_to_project "$project_dir"
   _merge_claude_to_project "$project_dir"
+
+  # US-ONBOARD-019: stamp the project at onboard-apply time so subsequent
+  # invocations recognise it as Roll-onboarded (and offboard can sweep it).
+  local _stamp_existed=true
+  [[ -f "$project_dir/.roll/.version" ]] || _stamp_existed=false
+  _write_version_stamp "$project_dir"
+  if [[ "$_stamp_existed" == "false" ]] && [[ -f "$project_dir/.roll/.version" ]]; then
+    _onboard_changeset_record "$project_dir" "files_created" ".roll/.version"
+  fi
 
   # Create .roll/ artifacts based on scope.approved
   if [[ " $approved " == *" backlog "* ]]; then
@@ -6846,14 +6858,21 @@ _check_structure() {
   # If new structure exists, allow
   [[ -d "$root/.roll" ]] && return 0
 
-  # Check for legacy structure markers (literal old-path strings — must NOT be
-  # rewritten during Story 5 code-ref migration; this is the detection logic
-  # for pre-2.0 user projects).
+  # US-ONBOARD-019: only treat the directory as a legacy *Roll* project when an
+  # old-path marker is present AND a Roll-specific content signature confirms
+  # the project was actually onboarded with Roll. Otherwise we'd block any
+  # non-Roll repo that happens to ship a BACKLOG.md (Jira export, board dump,
+  # different tooling) or a generic docs/features/ folder.
+  local _has_old_path=false
   if [[ -f "$root/BACKLOG.md" ]] \
      || [[ -f "$root/PROPOSALS.md" ]] \
      || [[ -d "$root/docs/features" ]] \
      || [[ -d "$root/docs/briefs" ]] \
      || [[ -d "$root/docs/dream" ]]; then
+    _has_old_path=true
+  fi
+
+  if [[ "$_has_old_path" == "true" ]] && _has_roll_signature "$root"; then
     err "Legacy structure detected at: $root  发现老结构目录"
     echo "" >&2
     echo "  This project uses the pre-2.0 layout (BACKLOG.md / docs/*). Roll 2.0 requires" >&2

@@ -105,10 +105,66 @@ Rules:
 - Do not copy README text. List file pointers only.
 - Never include secrets, tokens, credentials, or `.env` content.
 - Even if logically a continuation, treat as round=1 if the peer has **no prior context**.
+- **Do NOT** prefill the peer with your own root-cause analysis, proposed fix, or leading questions — see the *Independent Judgment Rule* below. The handoff card is for context, not conclusions.
 
 ### Anti-Hallucination Rule
 
 When mentioning specific paths, function names, commands, line numbers, or tool results, **must cite the source** ("I read X at line Y"). If unverified, state "unverified" explicitly.
+
+### Independent Judgment Rule (round=1)
+
+The whole point of peer review is to surface a **second, independent** read. If
+the reviewer's own root-cause analysis, fix diff, and leading questions are sent
+to the peer up front, the peer can only AGREE inside the reviewer's frame — and
+that AGREE carries no signal. The reviewer **must complete their own analysis
+before opening round=1**; skipping that step turns peer review into a search for
+endorsement.
+
+Round=1 message **must NOT include**:
+
+- The reviewer's own root-cause analysis ("the bug is in function X at line Y because…").
+- The reviewer's own proposed fix, patch, or diff.
+- Leading questions of the form "do you agree with my conclusion on X?" / "is the change I made on Y safe?" — these lock the peer into the reviewer's framing.
+- Specific line numbers, function names, or branch points the reviewer has already identified as relevant — let the peer locate them.
+
+Round=1 message **should include**:
+
+- The Project Handoff Card (above).
+- Symptoms exactly as observed: the user's reported error, terminal output verbatim, the precise commands that triggered it.
+- Necessary external context: the goal of the work, the date / version under test, anything the peer cannot infer from the repo alone.
+- Key file pointers as **entry points** (paths only — let the peer choose what to read and how deep).
+- An open invitation: "independently identify the root cause, propose a fix, and call out any test gaps."
+
+After receiving the peer's round=1 reply, the reviewer **compares** their own
+conclusion to the peer's and routes the next action:
+
+| Reviewer's own conclusion vs. peer's conclusion | Next action |
+|---|---|
+| Same root cause + same fix direction | High confidence — AGREE and proceed to execution |
+| Same root cause, different fix direction | REFINE — open round=2 to reconcile the fix |
+| Different root cause | OBJECT — open round=2; at least one of the two analyses is wrong |
+| Peer asks for more context | REFINE — supply the missing context, then re-evaluate |
+
+#### Example (bad — endorsement-seeking)
+
+```
+Bug is in `cmd_init` at line 932 — the v2 demo renderer fires unconditionally.
+My fix: gate it behind `--demo`. Q1: is this over-killed? Q2: should I
+refactor the renderer instead? Q3: are the tests strong enough?
+```
+
+The peer can only AGREE or quibble inside the reviewer's framing.
+
+#### Example (good — independent analysis)
+
+```
+Symptoms: user ran `roll init` on /path/X and saw [verbatim terminal output A];
+then ran `roll backlog` and saw [verbatim terminal output B]. Project background:
+[project shape]. Entry points: `bin/roll`, `lib/roll-init.py`, `tests/`.
+Independently identify the root cause and propose a fix.
+```
+
+The peer reads, locates, and proposes on its own. The reviewer then compares.
 
 ## State Machine
 
@@ -208,8 +264,10 @@ When peer review is manually triggered by a human (via `/peer`, "叫上 peer", e
 
 **Rules:**
 - Peer CLI calls must be **synchronous** (do NOT use background/async execution).
+- The outgoing round=1 message must follow the *Independent Judgment Rule* above — no root-cause analysis, no fix diff, no leading questions.
 - Show the outgoing message **before** calling the peer, so the user sees what's being asked.
 - Relay the peer's response **verbatim** before adding your own analysis.
+- After the peer's reply, the reviewer's own analysis block must explicitly state whether the peer's root cause and fix direction match the reviewer's own (independent) conclusion — that comparison is what determines the next round's action.
 - If a peer call fails or times out, report it immediately inline and either retry or ESCALATE.
 - Negotiation log is still written to `~/.shared/roll/peer/logs/` as usual.
 

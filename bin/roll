@@ -3201,6 +3201,154 @@ cmd_slides_build() {
   return 0
 }
 
+# ─── US-DECK-005 ─────────────────────────────────────────────────────────────
+# Read a frontmatter field from deck.md. Returns empty string if absent.
+# Stops scanning at the closing `---` so YAML body keys can't leak through.
+_slides_frontmatter_field() {
+  local deck="$1" field="$2"
+  awk -v field="$field" '
+    /^---[[:space:]]*$/ { d++; if (d==2) exit; next }
+    d==1 {
+      pat = "^" field "[[:space:]]*:[[:space:]]*"
+      if ($0 ~ pat) {
+        sub(pat, "")
+        gsub(/^["'\'']|["'\'']$/, "")
+        print
+        exit
+      }
+    }
+  ' "$deck" 2>/dev/null
+}
+
+# Format a byte count for human-friendly display: 1234 → "1.2K", 2345678 → "2.2M".
+# Bash arithmetic only — no `bc`, no `numfmt` dependency.
+_slides_human_size() {
+  local bytes="${1:-0}"
+  if [[ "$bytes" -lt 1024 ]]; then
+    printf '%dB' "$bytes"
+  elif [[ "$bytes" -lt 1048576 ]]; then
+    local tenth=$(( (bytes * 10) / 1024 ))
+    printf '%d.%dK' "$((tenth / 10))" "$((tenth % 10))"
+  else
+    local tenth=$(( (bytes * 10) / 1048576 ))
+    printf '%d.%dM' "$((tenth / 10))" "$((tenth % 10))"
+  fi
+}
+
+cmd_slides_list() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h) _slides_help; return 0 ;;
+      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      *) err "Unexpected argument: $1  多余参数: $1"; return 1 ;;
+    esac
+  done
+
+  local slides_dir=".roll/slides"
+  if [[ ! -d "$slides_dir" ]]; then
+    info "No decks found under .roll/slides/  无幻灯片"
+    echo "  Hint: run 'roll slides new \"<topic>\"' to create one."
+    echo "  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。"
+    return 0
+  fi
+
+  local -a slugs=()
+  local d slug
+  shopt -s nullglob
+  for d in "$slides_dir"/*/; do
+    slug="${d%/}"
+    slug="${slug##*/}"
+    if [[ -f "${d}deck.md" ]]; then
+      slugs+=("$slug")
+    fi
+  done
+  shopt -u nullglob
+
+  if [[ "${#slugs[@]}" -eq 0 ]]; then
+    info "No decks found under .roll/slides/  无幻灯片"
+    echo "  Hint: run 'roll slides new \"<topic>\"' to create one."
+    echo "  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。"
+    return 0
+  fi
+
+  local -a sorted_slugs
+  IFS=$'\n' sorted_slugs=($(printf '%s\n' "${slugs[@]}" | sort))
+  unset IFS
+
+  printf '%-20s  %-20s  %-12s  %-12s  %-5s  %s\n' \
+    "slug" "template" "total_slides" "created" "built" "size"
+  printf '%-20s  %-20s  %-12s  %-12s  %-5s  %s\n' \
+    "----" "--------" "------------" "-------" "-----" "----"
+
+  local s deck html template total created built size bytes
+  for s in "${sorted_slugs[@]}"; do
+    deck="${slides_dir}/${s}/deck.md"
+    html="${slides_dir}/${s}.html"
+    template=$(_slides_frontmatter_field "$deck" "template")
+    [[ -z "$template" ]] && template="-"
+    total=$(_slides_frontmatter_field "$deck" "total_slides")
+    [[ -z "$total" ]] && total="-"
+    created=$(_slides_frontmatter_field "$deck" "created")
+    [[ -z "$created" ]] && created="-"
+    if [[ -f "$html" ]]; then
+      built="✓"
+      bytes=$(wc -c <"$html" 2>/dev/null | tr -d ' ')
+      [[ -z "$bytes" ]] && bytes=0
+      size=$(_slides_human_size "$bytes")
+    else
+      built="✗"
+      size="-"
+    fi
+    printf '%-20s  %-20s  %-12s  %-12s  %-5s  %s\n' \
+      "$s" "$template" "$total" "$created" "$built" "$size"
+  done
+  return 0
+}
+
+cmd_slides_preview() {
+  local slug="" no_open=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-open) no_open=1; shift ;;
+      --help|-h) _slides_help; return 0 ;;
+      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      *)
+        if [[ -z "$slug" ]]; then
+          slug="$1"; shift
+        else
+          err "Unexpected argument: $1  多余参数: $1"; return 1
+        fi
+        ;;
+    esac
+  done
+
+  if [[ -z "$slug" ]]; then
+    err "Usage: roll slides preview <slug> [--no-open]"
+    echo "用法: roll slides preview <slug> [--no-open]" >&2
+    return 1
+  fi
+
+  local html=".roll/slides/${slug}.html"
+  if [[ ! -f "$html" ]]; then
+    err "Rendered HTML not found: ${html}"
+    echo "  未找到已渲染的 HTML：${html}" >&2
+    echo "  Hint: run 'roll slides build ${slug}' first to render it." >&2
+    echo "  提示：先运行 'roll slides build ${slug}' 渲染幻灯片。" >&2
+    return 1
+  fi
+
+  ok "Preview → ${html}  打开预览 → ${html}"
+
+  if [[ "$no_open" -eq 1 ]] || [[ -n "${BATS_TEST_NUMBER:-}" ]] || [[ -n "${ROLL_SLIDES_NO_OPEN:-}" ]]; then
+    return 0
+  fi
+  local opener
+  if opener=$(_slides_open_cmd); then
+    "$opener" "$html" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
 cmd_slides() {
   local subcmd="${1:-}"
   shift || true
@@ -3214,14 +3362,10 @@ cmd_slides() {
       return 1
       ;;
     list)
-      err "roll slides list — not implemented yet (see US-DECK-005)"
-      echo "  尚未实现 — 详见 US-DECK-005。" >&2
-      return 1
+      cmd_slides_list "$@"
       ;;
     preview)
-      err "roll slides preview — not implemented yet (see US-DECK-006)"
-      echo "  尚未实现 — 详见 US-DECK-006。" >&2
-      return 1
+      cmd_slides_preview "$@"
       ;;
     --help|-h|help)
       _slides_help

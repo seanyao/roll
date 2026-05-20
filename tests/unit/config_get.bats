@@ -38,3 +38,34 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$output" = "default_for_empty" ]
 }
+
+# FIX-082: inline `#` comments must be stripped from the value so users can
+# annotate ~/.roll/config.yaml without silently falling back to defaults.
+
+@test "config_get: strips inline comment from numeric value (FIX-082)" {
+  export ROLL_CONFIG="${BATS_TEST_DIRNAME}/../fixtures/configs/with-comments.yaml"
+  run config_get "loop_active_start"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "config_get: strips inline comment from string value (FIX-082)" {
+  export ROLL_CONFIG="${BATS_TEST_DIRNAME}/../fixtures/configs/with-comments.yaml"
+  run config_get "editor"
+  [ "$status" -eq 0 ]
+  [ "$output" = "vim" ]
+}
+
+@test "config_get: strips inline comment from pipe-separated path (FIX-082)" {
+  export ROLL_CONFIG="${BATS_TEST_DIRNAME}/../fixtures/configs/with-comments.yaml"
+  run config_get "ai_claude"
+  [ "$status" -eq 0 ]
+  [ "$output" = "${HOME}/.claude|CLAUDE.md|CLAUDE.md" ]
+}
+
+@test "config_get: value without comment unchanged (FIX-082)" {
+  export ROLL_CONFIG="${BATS_TEST_DIRNAME}/../fixtures/configs/with-comments.yaml"
+  run config_get "nocomment"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pureval" ]
+}

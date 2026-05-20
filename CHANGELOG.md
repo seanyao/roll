@@ -1,5 +1,14 @@
 # Changelog
 
+## v2026.521.2
+
+### Fixed
+
+- **`roll setup` 不再在 macOS 后台活动列表里留下 ghost「bash」条目** — 改由 `roll init` 和 `roll loop on` 按需安装 `[loop]`
+- **`roll setup` 现在能正确显示哪些步骤真的装了** — 之前装好的 skills 和 peer 状态目录会被误标成"跳过" `[loop]`
+- **`roll loop status --days 7` 不再吞掉天数参数** — 之前永远只显示默认 3 天，dashboard 底部那条 "more" 提示也改成能直接复制跑通 `[loop]`
+- **loop 每轮起手不再刷一堆"找不到文件"报错** — 修了内部脚本里的旧路径，并让 agent 在 zsh 下不再被未匹配的通配符卡住 `[loop]`
+
 ## v2026.521.1
 
 ### Added

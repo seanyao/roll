@@ -7,7 +7,7 @@ Compact wordmark + grouped commands (AUTONOMY / PROJECT / MACHINE) + examples.
 Usage:
   python3 lib/roll-help.py              # live
   python3 lib/roll-help.py --no-color
-  python3 lib/roll-help.py --demo       # same as live, no fixture needed
+  python3 lib/roll-help.py              # static layout, no fixture needed
 """
 
 from __future__ import annotations
@@ -142,7 +142,6 @@ def render(version: str) -> None:
 # ════════════════════════════════════════════════════════════════════════════
 def main() -> None:
     ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--demo",     action="store_true")
     ap.add_argument("--no-color", dest="no_color", action="store_true")
     ap.add_argument("--en",       action="store_true")
     ap.add_argument("--zh",       action="store_true")

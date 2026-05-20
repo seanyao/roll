@@ -4,45 +4,45 @@
 LIB="${BATS_TEST_DIRNAME}/../../lib"
 ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
 
-@test "roll-help --demo --no-color: exits 0 and has wordmark" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help --no-color: exits 0 and has wordmark" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" == *"roll ·"* ]]
 }
 
-@test "roll-help --demo --no-color: includes AUTONOMY section" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help --no-color: includes AUTONOMY section" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" == *"AUTONOMY"* ]]
 }
 
-@test "roll-help --demo --no-color: includes PROJECT section" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help --no-color: includes PROJECT section" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" == *"PROJECT"* ]]
 }
 
-@test "roll-help --demo --no-color: includes MACHINE section" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help --no-color: includes MACHINE section" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" == *"MACHINE"* ]]
 }
 
-@test "roll-help --demo --no-color: loop command has star highlight" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help --no-color: loop command has star highlight" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" == *"★"* ]]
 }
 
-@test "roll-help --demo --no-color: includes examples block" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help --no-color: includes examples block" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" == *"roll loop"* ]]
   [[ "$output" == *"roll brief"* ]]
 }
 
-@test "roll-help --demo: --no-color suppresses ANSI escapes" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help: --no-color suppresses ANSI escapes" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" != *$'\033['* ]]
 }
@@ -59,14 +59,14 @@ ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
 
 # FIX-064: init help must reference the actual artifact (.roll/features/),
 # not the legacy 1.x docs/ directory that no longer exists.
-@test "roll-help --demo --no-color: init description references .roll/features/" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help --no-color: init description references .roll/features/" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" == *".roll/features/"* ]]
 }
 
-@test "roll-help --demo --no-color: init description does not mention legacy docs/" {
-  run python3 "${LIB}/roll-help.py" --demo --no-color
+@test "roll-help --no-color: init description does not mention legacy docs/" {
+  run python3 "${LIB}/roll-help.py" --no-color
   [ "$status" -eq 0 ]
   [[ "$output" != *"+ docs/"* ]]
 }

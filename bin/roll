@@ -577,6 +577,10 @@ _ensure_tmux() {
 # a re-copy with identical content is recognised as a no-op even when the inner
 # helper rewrites the file. Watch is a colon-separated list of directories;
 # missing dirs are skipped silently.
+# FIX-079: also track symlinks (`_link_skills` only creates symlinks) and
+# directories (`_peer_ensure_state_dir` only creates dirs). Without these, a
+# step that did real work but produced no regular file would falsely render
+# as ↷ on a brand-new install.
 _setup_snapshot() {
   local watch="$1"
   local -a dirs
@@ -586,6 +590,10 @@ _setup_snapshot() {
     for d in "${dirs[@]}"; do
       [[ -d "$d" ]] || continue
       find "$d" -type f -print0 2>/dev/null | xargs -0 cksum 2>/dev/null
+      while IFS= read -r l; do
+        printf 'L %s -> %s\n' "$l" "$(readlink "$l")"
+      done < <(find "$d" -type l 2>/dev/null)
+      find "$d" -type d -print 2>/dev/null
     done
   } | sort
 }
@@ -660,10 +668,9 @@ cmd_setup() {
     fi
   fi
 
-  if [[ "$(uname)" == "Darwin" ]]; then
-    _run_setup_step "$HOME/Library/LaunchAgents" _install_launchd_plists "$(pwd -P)"
-    _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Install launchd plists (macOS)"
-  fi
+  # FIX-078: launchd plist 安装从 setup 里拿掉——plist 是 per-project 资源，
+  # setup 是全局安装阶段，不应该给 cwd 留 disabled 的占位。需要时 cmd_init /
+  # _loop_on 各自会调 _install_launchd_plists。
 
   _emit_setup_v2_ui "${steps_buf[@]}"
 }

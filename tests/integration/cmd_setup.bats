@@ -292,36 +292,28 @@ another_key: 42"
   [ ! -f "$ghost" ]
 }
 
-# ─── Scenario 8: launchd plist installation (macOS only) ─────────────────────
+# ─── Scenario 8: setup does not install per-cwd launchd plists (FIX-078) ─────
+# FIX-078: roll setup no longer installs launchd plists for the cwd. Per-project
+# plists are created on demand by `roll init` and `roll loop on`, which are the
+# commands where the user explicitly opts into per-project automation. Asserts
+# that running setup leaves ~/Library/LaunchAgents clean.
 
-@test "setup (macOS): installs three launchd plist files" {
+@test "setup (macOS): does not install any launchd plist for cwd" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
 
   run_roll setup
   [ "$status" -eq 0 ]
 
   local launchd_dir="${TEST_TMP}/Library/LaunchAgents"
-  [ -d "$launchd_dir" ]
-  local count
-  count=$(find "$launchd_dir" -maxdepth 1 -name "com.roll.*.plist" | wc -l | tr -d ' ')
-  [ "$count" -eq 3 ]
+  # LaunchAgents dir may exist (created by other tools) or not — either is fine
+  if [[ -d "$launchd_dir" ]]; then
+    local count
+    count=$(find "$launchd_dir" -maxdepth 1 -name "com.roll.*.plist" | wc -l | tr -d ' ')
+    [ "$count" -eq 0 ]
+  fi
 }
 
-@test "setup (macOS): plist files are not loaded after setup (disabled by default)" {
-  [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
-
-  run_roll setup
-  [ "$status" -eq 0 ]
-
-  local launchd_dir="${TEST_TMP}/Library/LaunchAgents"
-  for plist in "${launchd_dir}"/com.roll.*.plist; do
-    [ -f "$plist" ]
-    local label; label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
-    ! launchctl list "$label" &>/dev/null
-  done
-}
-
-@test "setup (macOS): running setup twice does not duplicate plists (idempotent)" {
+@test "setup (macOS): running setup twice still installs no plist" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
 
   run_roll setup
@@ -330,9 +322,11 @@ another_key: 42"
   [ "$status" -eq 0 ]
 
   local launchd_dir="${TEST_TMP}/Library/LaunchAgents"
-  local count
-  count=$(find "$launchd_dir" -maxdepth 1 -name "com.roll.*.plist" | wc -l | tr -d ' ')
-  [ "$count" -eq 3 ]
+  if [[ -d "$launchd_dir" ]]; then
+    local count
+    count=$(find "$launchd_dir" -maxdepth 1 -name "com.roll.*.plist" | wc -l | tr -d ' ')
+    [ "$count" -eq 0 ]
+  fi
 }
 
 # ─── FIX-073: v2 SETUP view backed by real data ──────────────────────────────
@@ -366,6 +360,23 @@ another_key: 42"
   run_roll setup --bogus
   [ "$status" -ne 0 ]
   [[ "$output" == *"Unknown"* ]] || [[ "$output" == *"未知参数"* ]]
+}
+
+# FIX-079: first run on a fresh ROLL_HOME / ~/.claude must mark the steps that
+# really did work with ✓. Two steps regressed under FIX-075 because the snapshot
+# only counted regular files: `_link_skills` only creates symlinks and
+# `_peer_ensure_state_dir` only creates directories, so both produced empty
+# before/after snapshots and rendered as ↷ even on a brand-new install.
+@test "setup v2 e2e: first run marks Install skills with ✓ (FIX-079)" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '✓.*Install skills'
+}
+
+@test "setup v2 e2e: first run marks Initialize peer-review with ✓ (FIX-079)" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '✓.*Initialize peer-review'
 }
 
 # FIX-075: re-running setup on an already-installed ROLL_HOME must mark

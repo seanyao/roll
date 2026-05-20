@@ -55,13 +55,13 @@ teardown() {
 
 # ─── roll init (bash entry) ──────────────────────────────────────────────────
 
-@test "init: --demo flag is rejected (FIX-073 removes the demo path)" {
+@test "init: unknown flag is rejected" {
   cd "$TEST_DIR"
   ROLL_PKG_DIR="$ROLL_DIR" \
   ROLL_TEMPLATES="$ROLL_DIR/conventions/templates" \
-    run bash "$ROLL_BIN" init --demo
+    run bash "$ROLL_BIN" init --bogus
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--demo"* ]]
+  [[ "$output" == *"Unknown flag"* ]] || [[ "$output" == *"未知参数"* ]]
 }
 
 @test "init: bare 'roll init' on a fresh dir creates files AND renders v2 UI with real data" {

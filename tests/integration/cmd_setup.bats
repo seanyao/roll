@@ -362,8 +362,8 @@ another_key: 42"
   [[ "$output" == *"Setup complete"* ]]
 }
 
-@test "setup v2 e2e: --demo flag is rejected (FIX-073 removed the demo path)" {
-  run_roll setup --demo
+@test "setup v2 e2e: unknown flag is rejected" {
+  run_roll setup --bogus
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--demo"* ]]
+  [[ "$output" == *"Unknown"* ]] || [[ "$output" == *"未知参数"* ]]
 }

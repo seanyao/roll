@@ -95,12 +95,12 @@ _run_fixture() {
   [[ "$output" != *$'\033'* ]]
 }
 
-# FIX-076: `roll peer --demo` is rejected; user-facing CLI must not surface demo.
-@test "peer v2: roll peer --demo is rejected (FIX-076)" {
+# FIX-076: `roll peer --demo` is rejected as an unknown flag (no special handling).
+@test "peer v2: unknown flag is rejected" {
   cd "$TEST_DIR"
-  run env ROLL_UI=v2 bash "$ROLL_BIN" peer --demo
+  run env ROLL_UI=v2 bash "$ROLL_BIN" peer --bogus
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--demo"* ]]
+  [[ "$output" == *"Unknown"* ]] || [[ "$output" == *"未知选项"* ]]
 }
 
 # FIX-076: `python3 lib/roll-peer.py` without the opt-in env var must refuse to

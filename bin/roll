@@ -573,15 +573,10 @@ _ensure_tmux() {
 }
 
 cmd_setup() {
-  # FIX-073: --demo and ROLL_UI=v2 demo gate are removed. Setup always runs
-  # the real install flow and renders its outcome through the v2 UI.
   local force=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force|-f) force=true; shift ;;
-      --demo)
-        err "Unknown flag: --demo (removed in FIX-073). Run 'roll setup' to perform the real setup.  未知参数：--demo 已废弃。请直接运行 'roll setup'。"
-        exit 2 ;;
       *) err "Unknown argument: $1  未知参数: $1"; exit 1 ;;
     esac
   done
@@ -946,26 +941,25 @@ _merge_claude_to_project() {
 # Existing AGENTS.md: re-merges global conventions (section-level, non-destructive)
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_init() {
-  # FIX-073: --demo is removed (no more developer-preview path). Any unknown
-  # flag falls through to the legacy / --apply branches below, which surface
-  # their own error or no-op behaviour.
-  for arg in "$@"; do
-    if [[ "$arg" == "--demo" ]]; then
-      err "Unknown flag: --demo (removed in FIX-073). Run 'roll init' to scaffold a project for real.  未知参数：--demo 已废弃。请直接运行 'roll init'。"
-      exit 2
+  # US-ONBOARD-009: --apply consumes onboard-plan.yaml produced by $roll-onboard
+  if [[ "${1:-}" == "--apply" ]]; then
+    if [[ ! -d "$ROLL_TEMPLATES" ]]; then
+      err "No templates found. Run 'roll setup' first.  未找到模板，请先运行 'roll setup'。"
+      exit 1
     fi
-  done
+    shift
+    _init_apply "$@"
+    return $?
+  fi
+
+  if [[ "${1:-}" == -* ]]; then
+    err "Unknown flag: $1  未知参数: $1"
+    exit 1
+  fi
 
   if [[ ! -d "$ROLL_TEMPLATES" ]]; then
     err "No templates found. Run 'roll setup' first.  未找到模板，请先运行 'roll setup'。"
     exit 1
-  fi
-
-  # US-ONBOARD-009: --apply consumes onboard-plan.yaml produced by $roll-onboard
-  if [[ "${1:-}" == "--apply" ]]; then
-    shift
-    _init_apply "$@"
-    return $?
   fi
 
   local project_dir
@@ -2314,9 +2308,6 @@ cmd_peer() {
       --tag) tag="$2"; shift 2 ;;
       --context) context_file="$2"; shift 2 ;;
       --yes|--yolo) yolo=true; shift ;;
-      --demo)
-        err "Unknown flag: --demo (removed in FIX-076).  未知参数：--demo 已废弃。"
-        exit 2 ;;
       status) subcmd="status"; shift ;;
       reset) subcmd="reset"; shift; break ;;
       help|--help|-h) subcmd="help"; shift ;;

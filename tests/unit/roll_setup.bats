@@ -62,9 +62,9 @@ teardown() {
 
 # ─── roll setup (bash entry) ─────────────────────────────────────────────────
 
-@test "setup: --demo flag is rejected (FIX-073 removes the demo path)" {
+@test "setup: unknown flag is rejected" {
   cd "$TEST_DIR"
-  ROLL_PKG_DIR="$ROLL_DIR" run bash "$ROLL_BIN" setup --demo
+  ROLL_PKG_DIR="$ROLL_DIR" run bash "$ROLL_BIN" setup --bogus
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--demo"* ]]
+  [[ "$output" == *"Unknown"* ]] || [[ "$output" == *"未知参数"* ]]
 }

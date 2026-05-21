@@ -153,7 +153,7 @@ def load_backlog(project_root: Optional[Path] = None) -> Dict[str, str]:
 # ════════════════════════════════════════════════════════════════════════════
 # Cycle aggregation — group events by cycle label; attach cron + story id
 # ════════════════════════════════════════════════════════════════════════════
-_STORY_ID_PAT = re.compile(r"\b([A-Z]+-\d+)\b")
+_STORY_ID_PAT = re.compile(r"\b([A-Z]+(?:-[A-Z]+)*-\d+)\b")
 _PR_NUM_PAT = re.compile(r"/pull/(\d+)")
 
 def _extract_story_id(ev_detail: str) -> Optional[str]:

@@ -187,8 +187,14 @@ roll loop status --days 7        # 看过去 7 天每个周期的成本
 **不适合：**
 
 - 一次性脚本、扔掉的原型 —— 开销大于价值
-- 没测试的代码库 —— TCR 无门可守
 - 高度专门化领域（底层 OS、嵌入式、形式化验证）—— AI agent 在这些领域表现差
+
+**边界情形 —— 没测试的老代码库：** 这是个 bootstrap 问题，不是禁区。
+TCR 总得有**点东西**可守，所以零测试的仓库 day-one 跑不了 loop —— 但把
+这类代码库救回来正是 Roll 擅长的事。流程：先用 `$roll-onboard` 把现有
+代码逆向工程成 backlog，**先写 characterization-test story**（用测试把
+当前行为钉死，再动代码），有了这层网之后再在 TCR 下重构。前几条 story
+是 bootstrap，之后就和正常的 Roll 项目一样跑。
 
 ---
 

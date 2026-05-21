@@ -412,7 +412,7 @@ def load_pr_merges_from_git(days: int) -> Dict[str, Dict[str, Any]]:
     result: Dict[str, Dict[str, Any]] = {}
     label_re  = re.compile(r"loop/cycle-([A-Za-z0-9-]+)")
     pr_re     = re.compile(r"#(\d+)")
-    story_re  = re.compile(r"\b([A-Z]+-\d+)\b")
+    story_re  = re.compile(r"\b([A-Z]+(?:-[A-Z]+)*-\d+)\b")
     for chunk in out.split("<<<END>>>"):
         chunk = chunk.strip()
         if not chunk:

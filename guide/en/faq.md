@@ -1,100 +1,350 @@
-# Roll FAQ — Autonomous AI Delivery
+# Roll FAQ
 
-Answers to the most common "why is this happening" and "what do I do" questions
-when running Roll's autonomous delivery system. Each entry includes a one-line
-rationale so you can build a mental model, not just follow steps.
+Honest answers to the questions people actually ask, organized by where you are
+in your journey with Roll:
+
+- **[A. Getting Started](#a-getting-started)** — before/while you try Roll
+- **[B. How Roll Compares](#b-how-roll-compares)** — Roll vs. related projects
+- **[C. Operating Roll](#c-operating-roll)** — what to do when something gets stuck
 
 ---
 
-## 1. Loop is stuck — a story stays "In Progress" and nothing is moving
+## A. Getting Started
 
-**Symptoms:** `roll loop status` shows `running` or a story is stuck at
-`🔨 In Progress` in BACKLOG.md for longer than one cycle.
+### A1. Will Roll modify my code or break my main branch?
+
+**Short answer:** No, by design. Roll has four hard guardrails — your `main`
+stays yours.
+
+**Details:**
+
+- **TCR (`test && commit || revert`).** Every commit runs your tests. If tests
+  fail, the commit is reverted automatically. The agent literally cannot save
+  broken code.
+- **Feature branches, never `main`.** Agents work on branches like
+  `tcr/US-XXX-…`. `main` is untouched until a PR merges.
+- **PR-gated.** All output lands as a PR. You review and merge — Roll does not
+  auto-merge unless you explicitly enable it (and CI must still be green).
+- **CI is the last gate.** Your existing GitHub Actions / tests / lints must
+  pass. Roll runs *on top* of your CI, not around it.
+
+**Try it:**
+
+```bash
+roll build US-001          # run one story end-to-end, see the PR
+```
+
+You'll see exactly what Roll touches before you trust it with the loop.
+
+---
+
+### A2. I have an existing project — will Roll work, or will it pollute my code?
+
+**Short answer:** Yes, Roll has a dedicated onboarding flow for legacy code,
+and it only writes to its own directory.
+
+**Details:** `roll init` in an existing repo detects existing code and routes
+you to `$roll-onboard`. That skill reads your project, asks 9 questions across
+cognition / scope / privacy, and writes `.roll/onboard-plan.yaml` as a contract
+for `roll init --apply` to execute.
+
+What Roll adds to your repo:
+
+- `.roll/` — backlog, feature specs, config (commit this)
+- `.claude/skills/` or equivalent — symlinks to Roll skills (commit this)
+- A few entries in `.gitignore`
+
+What Roll does **not** touch: your source code, unless an agent is executing a
+story you wrote.
+
+---
+
+### A3. I don't want autonomous runs. Can I drive Roll manually, one story at a time?
+
+**Short answer:** Yes. The loop is opt-in.
+
+**Details:** Without `roll loop on`, Roll is a CLI + skill library. You write a
+story in `.roll/backlog.md`, then run one of:
+
+```bash
+roll build US-001          # execute a single user story end-to-end
+roll fix  FIX-002          # execute a single bugfix story
+```
+
+Each command runs design → TCR → PR → CI in your foreground; you review the
+diff before merging. When the workflow earns your trust, flip on
+`roll loop on` to let it pick stories itself.
+
+---
+
+### A4. What does Roll change on my system, and how do I uninstall cleanly?
+
+**Short answer:** Three places, and `./uninstall.sh` reverses all of them.
+
+**Details:**
+
+- **Global:** `~/.roll/` (your config, primary_agent), `~/.shared/roll/` (loop
+  state, `runs.jsonl`). The npm binary lives where your global npm packages do.
+- **Per project:** `.roll/`, plus symlinks under `.claude/skills/` (or
+  equivalent for other agents).
+- **Per project, only with `roll loop on`:** a `launchd` plist on macOS that
+  triggers cycles.
+
+To remove everything:
+
+```bash
+npm uninstall -g @seanyao/roll
+~/.roll/uninstall.sh --dry-run    # preview removals
+~/.roll/uninstall.sh              # actually remove
+```
+
+---
+
+### A5. How much does a Roll run cost? Can I see token usage?
+
+**Short answer:** Yes — the dashboard shows model + cost per cycle at public
+pricing.
+
+**Details:** Since `v2026.521.1`, `roll loop monitor` and `roll loop status`
+show the model used and a cost number computed at public per-token pricing.
+This is a comparable number, not your bill — your real cost depends on your
+subscription tier (Claude Pro, etc.).
+
+Typical ranges per story on Claude Opus 4.x: **$0.5 – $3**, depending on story
+complexity and how many TCR iterations the agent burned. Switching to Kimi /
+DeepSeek drops this 5–10× at the cost of slower convergence.
+
+**Try it:**
+
+```bash
+roll loop monitor                # live dashboard with cost column
+roll loop status --days 7        # last 7 days of cycles with cost
+```
+
+---
+
+### A6. Do I need to understand DDD / TCR / prompt engineering?
+
+**Short answer:** No, but knowing how to write a good user story helps.
+
+**Details:** Roll's methodology lives inside the skills, not in your head.
+`$roll-design` walks you through DDD-style decomposition; `$roll-build` runs
+TCR for you; the prompt engineering is encapsulated in the skill files (read
+or tweak them if you're curious).
+
+The one thing that matters in *your* head: **how clearly you describe what you
+want**. INVEST-shape stories (Independent, Negotiable, Valuable, Estimable,
+Small, Testable) work much better than "build me a feature." `$roll-design`
+helps you get there from a fuzzy idea.
+
+---
+
+### A7. How detailed should my user stories be? Will Roll cope with a bad one?
+
+**Short answer:** Detailed enough that *you* could code it. Fuzzy stories get
+caught and refined before `$roll-build` touches code.
+
+**Details:** A workable story has a value statement (`As X, I want Y, so that
+Z`), 2–5 acceptance criteria, and any non-obvious constraints. Don't dictate
+implementation — Roll figures that out.
+
+- **Too vague** → `$roll-build`'s `$roll-.clarify` phase surfaces the gaps and
+  stops, asking for input.
+- **Too complex** → the design phase suggests splitting into smaller stories.
+- **Vague-but-runnable** → the agent makes best-effort choices. Often fine for
+  prototypes, riskier for production.
+
+**Try it:** Run `$roll-design "add user logout"` and watch it expand a one-line
+idea into an INVEST-shaped story with ACs.
+
+---
+
+### A8. What kind of projects is Roll a good fit for? What isn't?
+
+**Good fit:**
+
+- Has a real test suite (TCR depends on it)
+- Uses git and a PR-based workflow
+- Has CI (GitHub Actions or equivalent)
+- Has work you can describe as 1–3 sentence stories
+- TypeScript / Python / Go / Bash codebases (best-supported today)
+
+**Bad fit:**
+
+- One-off scripts or throwaway prototypes — overhead > value
+- Codebases with no tests — TCR has nothing to gate on
+- Highly specialized domains (low-level OS, embedded, formal verification)
+  where AI agents underperform
+
+---
+
+### A9. Can I use Roll without CI or without GitHub Actions?
+
+**Short answer:** Yes, but you lose the CI gate. TCR and PR still work locally.
+
+**Details:** `roll ci --wait` looks for GitHub Actions on the current commit.
+If no CI is configured, Roll degrades gracefully: TCR remains the inner gate
+(tests must pass for a commit to stick), PRs are still created, but the loop
+won't wait on remote CI before marking a story done.
+
+For pure-local use (no GitHub), Roll still works as a methodology + skill
+layer — you just lose the "wait for green before next story" behavior.
+
+---
+
+### A10. Solo or team? How does multi-developer collaboration work?
+
+**Short answer:** Built for solo and pair work first; team usage is possible
+but pattern-by-pattern.
+
+**Details:**
+
+- **Solo:** the default. `.roll/backlog.md` is your personal queue.
+- **Pair:** commit `.roll/`; your teammate's Roll reads the same backlog. Locks
+  are per-machine, so two people running loop in parallel won't collide on
+  state but may race on the same story.
+- **Team:** treat `.roll/backlog.md` like any source file — coordinate via
+  PRs. `roll peer` exists for cross-agent review (one agent reviews another's
+  PR). Multi-developer loop coordination (who picks what next) is still a
+  rough edge.
+
+Realistic recommendation: in a team, run loop on your own branch/fork, merge
+PRs upstream like any human contributor.
+
+---
+
+## B. How Roll Compares
+
+### B1. vs. Claude Code's built-in `/loop`, skills, and tasks
+
+**What Claude Code already has:** Skills (custom commands), tasks (in-session
+todos), plan mode (review-before-execute), `/loop` (timer that fires a prompt
+on an interval).
+
+**Where Roll differs:**
+
+- **Persistent backlog in git.** Roll's `.roll/backlog.md` survives sessions,
+  restarts, and model swaps. Claude Code tasks live for one session.
+- **Delivery pipeline, not a scheduler.** `/loop` re-fires a prompt every N
+  minutes. Roll's loop selects the next ready story, runs DDD → TCR → PR → CI,
+  waits for green, then moves on.
+- **TCR as a hard gate.** Claude Code's skills are advisory; Roll enforces
+  `test && commit || revert` at commit time.
+- **Cross-agent.** The same backlog and skills run on Codex, Kimi, DeepSeek,
+  Pi, OpenCode. `/loop` only knows Claude.
+
+**Who picks what:**
+
+- Quick interactive sessions, ad-hoc work → Claude Code alone is plenty.
+- Long-running projects, unattended progress, hard CI gates → add Roll.
+
+Roll's `roll-*` skills *are* Claude Code skills. Roll layers on top of Claude
+Code; it doesn't replace it.
+
+---
+
+### B2. vs. [superpowers](https://github.com/obra/superpowers) (obra)
+
+**What superpowers does well:** A mature 7-stage methodology (brainstorm →
+worktree → plan → execute → test → review → finish), broad agent support
+(Claude Code, Cursor, Codex, Gemini, Copilot, Factory, OpenCode), strong
+RED-GREEN-REFACTOR enforcement, subagent-driven development. Roll's README
+already acknowledges it — several Roll workflow patterns were inspired by it.
+
+**Where Roll differs:**
+
+- **Persistent backlog + autonomous loop.** Superpowers is session-driven —
+  you initiate each cycle. Roll has `roll loop on` for unattended runs where
+  the next story is picked automatically.
+- **CI as a terminal gate.** Roll waits for GitHub Actions green before
+  marking a story Done; superpowers leaves CI integration to you.
+- **PR-centric output.** Every Roll story ends in a PR linked to your CI.
+  Superpowers is more flexible about output shape.
+
+**Who picks what:**
+
+- You want to drive each session yourself with a strong methodology behind
+  you → **superpowers**.
+- You want unattended forward progress on a backlog with hard CI gates →
+  **Roll**.
+
+You can also run Roll alongside superpowers — they overlap but don't conflict.
+
+---
+
+### B3. vs. [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex) (Yeachan Heo)
+
+**What oh-my-codex does well:** A sophisticated harness for Codex CLI — tmux
+HUD, hooks, agent teams (`$ralplan`, `$ralph`, `$ultragoal`), persistent state
+under `.omx/`, durable multi-goal execution via ledger checkpoints. 29k stars,
+very active.
+
+**Where Roll differs:**
+
+- **Not Codex-only.** Roll works with Claude / Codex / Kimi / DeepSeek / Pi /
+  OpenCode. oh-my-codex is intentionally Codex CLI focused.
+- **TCR as a hard gate.** oh-my-codex recommends clarification → planning →
+  execution but doesn't enforce TDD/TCR at the commit level.
+- **PR + CI as terminal output.** Roll's loop ends each story at "PR merged
+  when CI green." oh-my-codex ends at "agent says goal done."
+- **Methodology shape.** oh-my-codex emphasizes durable multi-goal execution
+  and parallel teams. Roll emphasizes single-story atomicity (one INVEST
+  story → one PR → green CI → next).
+
+**Who picks what:**
+
+- Heavy Codex CLI user; want hooks / tmux HUD / multi-agent teams →
+  **oh-my-codex**.
+- Want cross-agent portability and PR/CI as the success contract → **Roll**.
+
+---
+
+## C. Operating Roll
+
+### C1. Loop is stuck — a story stays "In Progress" and Done is never written
+
+**Symptoms:** `roll loop status` shows `running`, a story sits at
+`🔨 In Progress` in BACKLOG for longer than one cycle, or the agent ran
+successfully (TCR commits exist) but the story isn't marked `✅ Done`.
 
 **Why this happens:** Loop marks a story `🔨 In Progress` before invoking the
-build skill. If the agent crashes, the session times out, or CI blocks the gate,
-the story stays in that state. The next cycle's orphan recovery should revert it
-— but if the LOCK file also went stale, the next cycle may not start at all.
+build skill, and only writes `✅ Done` after two hard gates pass: (1) TCR
+commit count > 0, (2) CI green via `roll ci --wait`. If the agent crashes mid-
+cycle, the LOCK file goes stale, or CI fails, the story stays as-is — by
+design, to avoid false-positive completions.
 
-**Under the hood:** Each loop cycle acquires a per-project LOCK file
-(`~/.shared/roll/loop/.LOCK-<slug>`). If the PID inside the LOCK is dead, the
-next cycle cleans it up. But if the process is alive (e.g. a hung tmux session),
-the LOCK stays and no new cycle starts.
-
-**Fix:**
-
-```bash
-roll loop status          # check if LOCK exists and what PID holds it
-roll loop attach          # see what the agent is doing in the tmux session
-# If the tmux session is dead or hung:
-roll loop reset           # clear state + LOCK, start fresh next cycle
-roll loop now             # trigger a new cycle immediately
-```
-
----
-
-## 2. Loop finished but BACKLOG was not updated to Done
-
-**Symptoms:** The agent ran successfully (you saw TCR commits), but the story is
-still `🔨 In Progress` or was not marked `✅ Done`.
-
-**Why this happens:** The build skill updates BACKLOG at the end (Phase 11).
-If the agent session dies after TCR commits but before Phase 11, or if the CI
-gate fails, the story status is intentionally kept as-is. The loop does not mark
-Done unless both TCR and CI pass.
-
-**Under the hood:** The post-item cleanup runs two hard gates: (1) TCR commit
-count > 0, (2) CI green via `roll ci --wait`. Either gate failing prevents the
-Done transition — this is by design to avoid false-positive completions.
+**Under the hood:** Each cycle acquires a per-project LOCK
+(`~/.shared/roll/loop/.LOCK-<slug>`). A dead PID is auto-cleaned next cycle.
+A live but hung process (e.g. stuck tmux) keeps the LOCK and blocks new
+cycles.
 
 **Fix:**
 
 ```bash
-roll loop runs            # check the last cycle's outcome and alerts
-roll alert                # see if a CI or TCR alert was raised
-# If the code is actually done and tests pass:
-$roll-build US-XXX        # re-run the story manually to complete Phase 11
+roll loop status        # check LOCK + PID
+roll loop attach        # see what the agent is doing in tmux
+roll loop runs          # last cycle outcomes and alerts
+roll alert              # any CI or TCR alerts?
+roll loop reset         # clear state + LOCK if truly stuck
+roll loop now           # trigger a fresh cycle
+# If code is done and tests pass but Phase 11 didn't complete:
+$roll-build US-XXX      # finish the story manually
 ```
 
 ---
 
-## 3. Agent review rejected its own PR (CHANGES_REQUESTED)
-
-**Symptoms:** A loop-opened PR shows `CHANGES_REQUESTED` from the AI reviewer,
-blocking auto-merge.
-
-**Why this happens:** The AI code review workflow (US-AUTO-035) runs
-independently from the build agent. When the reviewer detects issues — even in
-code the loop itself wrote — it requests changes. This is intentional: the
-review agent acts as an independent quality gate.
-
-**Under the hood:** Loop classifies PRs in its inbox. A PR with
-`CHANGES_REQUESTED` by a human is classified as `blocked_human_request_changes`
-and skipped. If the review came from the AI workflow, the loop's next cycle
-will attempt to address the feedback or the human can intervene.
-
-**Fix:**
-
-```bash
-gh pr view <number>                # read the review comments
-gh pr review <number> --approve    # override if the feedback is wrong
-# Or let the loop's next cycle pick it up automatically
-```
-
----
-
-## 4. PR has merge conflicts or rebase failed
+### C2. PR has merge conflicts or rebase fails
 
 **Symptoms:** `gh pr checks` shows "This branch has conflicts" or
-`roll loop runs` reports a rebase failure alert.
+`roll loop runs` reports a rebase-failure alert.
 
-**Why this happens:** While the loop was building in a worktree, another commit
-landed on `main` that conflicts with the PR. The loop's PR inbox tries
-`_loop_pr_rebase_stale` but rebase fails when both sides touched the same lines.
+**Why this happens:** While the loop built in a worktree, another commit
+landed on `main` that conflicts with the PR. The loop's PR inbox tries to
+rebase; if both sides touched the same lines, rebase fails.
 
 **Under the hood:** A rebase circuit breaker tracks attempts per PR — after 3
-failed rebases within 24 hours, further attempts are blocked and an ALERT is
-written. This prevents infinite rebase loops when a structural conflict exists.
+failures within 24 hours, further attempts are blocked and an ALERT is
+written. This prevents infinite rebase loops on structural conflicts.
 
 **Fix:**
 
@@ -102,172 +352,88 @@ written. This prevents infinite rebase loops when a structural conflict exists.
 gh pr view <number>               # see which files conflict
 git fetch origin main
 git checkout <pr-branch>
-git rebase origin/main            # resolve conflicts manually
+git rebase origin/main            # resolve manually
 git push --force-with-lease
-# The PR will re-enter CI and merge when green
+# CI re-runs; PR auto-merges when green (if enabled)
 ```
 
 ---
 
-## 5. Switched agents but loop behavior changed unexpectedly
+### C3. How do I see what loop did and how much it cost?
 
-**Symptoms:** After running `roll agent use kimi` (or editing
-`~/.roll/config.yaml`), the loop works differently — slower, skips steps,
-or produces different commit patterns.
+**Symptoms:** Loop ran while you were away; you want a quick read of what
+happened and what it cost.
 
-**Why this happens:** Each agent (Claude, DeepSeek, Kimi) interprets skill
-prompts with different strengths. Claude tends to follow TCR strictly; others
-may batch more aggressively or interpret ACs differently. The skills are the
-same, but execution varies by model capability.
-
-**Under the hood:** `primary_agent` in `~/.roll/config.yaml` controls which CLI
-the loop invokes. The fallback agent kicks in only when the primary fails
-(token exhaustion, network error). Switching the primary changes the default
-for all future cycles.
-
-**Fix:**
-
-```bash
-cat ~/.roll/config.yaml            # verify which agent is configured
-roll loop runs                     # compare recent run quality
-# To revert:
-roll agent use claude              # or edit ~/.roll/config.yaml directly
-```
-
----
-
-## 6. Multiple projects running loop — are they interfering?
-
-**Symptoms:** Two projects both have `roll loop on`, and you suspect they're
-stepping on each other (skipping cycles, sharing state, or fighting for the
-agent).
-
-**Why this happens:** They shouldn't interfere. Each project has its own LOCK
-file (`~/.shared/roll/loop/.LOCK-<project-slug>`), its own `state.yaml` entries,
-and its own launchd plist. Loops are per-project and isolated.
-
-**Under the hood:** The LOCK file path includes a project slug derived from the
-absolute directory path (`basename + md5 hash`). Two projects with the same
-directory name on different paths still get different slugs and different locks.
-
-**Fix:**
-
-```bash
-roll loop status                   # run in each project directory
-# Confirm each shows its own scheduler, its own LOCK path
-ls ~/.shared/roll/loop/.LOCK-*     # see all active locks
-# If a stale lock from another project exists:
-roll loop reset                    # in the affected project
-```
-
----
-
-## 7. `gh` authentication failed or no PR write permission
-
-**Symptoms:** Loop writes an ALERT about `gh` failure, or PRs are not being
-created. `gh auth status` shows "not logged in" or missing scopes.
-
-**Why this happens:** Roll's CI gate and PR lifecycle rely on `gh` (GitHub CLI)
-being authenticated with `repo` scope. If the token expired, was revoked, or
-the repo is under an org that requires SSO authorization, `gh` calls fail.
-
-**Under the hood:** The loop's CI gate (`roll ci --wait`) uses `gh -R owner/repo`
-to check workflow runs. The PR creation step uses `gh pr create`. Both need a
-valid token. The loop treats a missing `gh` binary as a graceful skip, but an
-auth error is a hard failure that blocks the gate.
-
-**Fix:**
-
-```bash
-gh auth status                     # check current auth state
-gh auth login                      # re-authenticate
-gh auth refresh -s repo,workflow   # add missing scopes
-# For SSO-protected orgs:
-gh auth refresh -h github.com      # triggers SSO authorization flow
-```
-
----
-
-## 8. How to pause loop without uninstalling the scheduler
-
-**Symptoms:** You want the loop to stop picking up stories temporarily (e.g.,
-during a code freeze or manual work session) but keep the launchd plist
-installed so you can resume easily.
-
-**Why this happens:** `roll loop off` removes the launchd plist entirely,
-requiring `roll loop on` to reinstall. `roll loop pause` is lighter — it sets a
-marker that makes the loop exit immediately at the start of each cycle without
-doing any work.
-
-**Under the hood:** Pause writes a marker to `state.yaml` (`status: paused`).
-The loop runner checks this marker before acquiring the LOCK. The launchd
-scheduler still fires on schedule, but the runner exits in seconds.
-
-**Fix:**
-
-```bash
-roll loop pause                    # stop executing, keep scheduler
-roll loop status                   # confirms "paused"
-# When ready to resume:
-roll loop resume                   # clear pause marker
-roll loop now                      # optionally trigger a cycle right away
-```
-
----
-
-## 9. How to see what loop did (logs, runs, brief)
-
-**Symptoms:** Loop ran while you were away. You want to know what it did,
-whether it succeeded, and what changed.
-
-**Why this happens:** Loop writes structured records after every cycle, but
-there are multiple places to look depending on what you need.
+**Why this matters:** Roll writes structured records every cycle, but there
+are multiple surfaces depending on what you need.
 
 **Under the hood:** Each cycle appends a JSONL record to
-`~/.shared/roll/loop/runs.jsonl` with the story IDs, TCR commit count, duration,
-and outcome. `roll-brief` aggregates this into a human-readable summary. The
-tmux session retains the full agent conversation until the next cycle overwrites
-it.
+`~/.shared/roll/loop/runs.jsonl` with story ID, model, TCR commit count,
+duration, outcome, and cost (public pricing). `roll-brief` aggregates this
+into a human-readable digest. The tmux session retains the full agent
+conversation until the next cycle overwrites it.
 
-**How it works — the observability stack:**
+**The observability stack:**
 
 | What you want | Command |
 |---|---|
-| Last N cycle summaries | `roll loop runs` (default 10) |
-| Live dashboard | `roll loop monitor` |
-| Watch agent in real time | `roll loop attach` |
+| Last N cycle summaries + cost | `roll loop runs --days 7` |
+| Live dashboard with cost column | `roll loop monitor` |
+| Watch the agent in real time | `roll loop attach` |
 | Human-readable daily summary | `roll brief` |
 | Alerts that need attention | `roll alert` |
-| Full agent transcript | Attach to tmux session and scroll up |
+| Full agent transcript | `roll loop attach`, scroll up |
 
 ---
 
-## 10. When does loop need human help vs. auto-recover?
+### C4. Multiple projects running loop — are they interfering?
 
-**Symptoms:** You're not sure whether to intervene or wait for the next cycle.
+**Symptoms:** Two projects both have `roll loop on` and you suspect they're
+stepping on each other.
 
-**Why this happens:** Loop is designed to auto-recover from transient failures
-(network errors, token exhaustion with fallback agent) but intentionally stops
-on structural problems that need human judgment.
+**Why this happens:** They shouldn't. Each project gets its own LOCK file
+(`~/.shared/roll/loop/.LOCK-<project-slug>`), its own `state.yaml` entries,
+and its own launchd plist. The slug is `basename + md5(abs-path)`, so even
+two projects with the same directory name on different paths get different
+locks.
 
-**Under the hood:** The failure handling has three tiers: (1) retry with
-exponential backoff for network errors, (2) switch to fallback agent for
-primary agent failures, (3) pause + ALERT for everything else.
+**Fix:**
 
-**Auto-recovery (no human intervention needed):**
+```bash
+# Run in each project directory to see its scheduler + LOCK
+roll loop status
+
+# See all active locks across projects
+ls ~/.shared/roll/loop/.LOCK-*
+
+# If a stale lock from another project is blocking yours
+roll loop reset
+```
+
+---
+
+### C5. When does loop auto-recover vs. need a human?
+
+**Loop optimizes for forward progress on clear work. It pauses and tells you
+when the work is ambiguous or the environment is broken — never guesses.**
+
+**Auto-recovers (no human needed):**
+
 - Network timeout → retries with backoff (2s, 4s, 8s, 16s)
 - Primary agent token exhausted → switches to fallback agent
-- Stale LOCK from crashed process → next cycle cleans it up
-- Orphan `🔨 In Progress` from crashed loop → next cycle reverts to `📋 Todo`
+- Stale LOCK from a crashed process → next cycle cleans it up
+- Orphan `🔨 In Progress` from a crashed cycle → next cycle reverts to
+  `📋 Todo`
 
-**Manual intervention required:**
-- Both primary and fallback agents fail → `roll loop resume` after fixing
+**Needs you:**
+
+- Both primary and fallback agents fail → fix env, then `roll loop resume`
 - CI persistently red → fix the failing test/build, then `roll loop now`
 - Merge conflict on PR → resolve manually, push
 - `gh` auth expired → `gh auth login`
-- Story keeps reverting (TCR count = 0 every attempt) → the story spec may be
-  unclear; rewrite the AC in `.roll/features/` or execute manually via `$roll-build`
+- Story keeps reverting (TCR commit count = 0 every attempt) → the story
+  spec is likely unclear; rewrite ACs or run `$roll-build US-XXX` manually
+  to see where it stalls
 
-**Rationale:** Loop optimizes for forward progress on clear work. When the work
-itself is ambiguous or the environment is broken, it stops and tells you rather
-than guessing.
+For deeper operational topics (pause/resume, agent switching, gh scopes), see
+[loop.md](loop.md) and [configuration.md](configuration.md).

@@ -1,252 +1,401 @@
-# Roll 常见问题 — AI 自治交付
+# Roll 常见问题
 
-运行 Roll 自治交付系统时最常遇到的问题解答。每条包含一句原理说明，
-帮你建立心智模型，而不只是照着步骤操作。
+按你和 Roll 接触的阶段组织，给真实问题真实回答：
+
+- **[A. 上手 / 信任 / 安全](#a-上手--信任--安全)** —— 第一次接触前后会想的
+- **[B. 定位与对比](#b-定位与对比)** —— Roll 和同类项目的区别
+- **[C. 运行中常见问题](#c-运行中常见问题)** —— 跑起来后卡住怎么办
 
 ---
 
-## 1. Loop 卡住了 — 故事一直显示 In Progress
+## A. 上手 / 信任 / 安全
 
-**现象：** `roll loop status` 显示 `running`，或者 BACKLOG.md 中某个故事
-停留在 `🔨 In Progress` 超过一个周期。
+### A1. Roll 会不会改我代码、搞坏我的 main 分支？
 
-**原因：** Loop 在调用构建技能之前就把故事标记为 `🔨 In Progress`。如果
-agent 崩溃、会话超时或 CI 门控阻塞，故事就会停留在该状态。下一个周期的
-孤儿恢复机制应该会把它回退——但如果 LOCK 文件也变成僵死状态，下一个周期
-可能根本无法启动。
+**短答：** 不会。Roll 有四道硬护栏，main 还是你的 main。
 
-**原理：** 每个 loop 周期都会获取一个项目级的 LOCK 文件
-（`~/.shared/roll/loop/.LOCK-<slug>`）。如果 LOCK 里的 PID 已死，下一周期
-会自动清理它。但如果进程还活着（如挂起的 tmux 会话），LOCK 就会一直存在，
-阻止新周期启动。
+**细节：**
 
-**解决：**
+- **TCR（`test && commit || revert`）**：每次提交都跑你的测试。测试不过，
+  提交自动回滚。agent **不可能**把坏代码保存下来。
+- **永远在 feature 分支上工作**：agent 在 `tcr/US-XXX-…` 这类分支上跑，
+  `main` 在 PR 合并前一动不动。
+- **PR 闸门**：所有产出都是一个 PR。你 review 完再合 —— Roll **不**会
+  自动合并，除非你显式开启（即便开了，CI 必须绿）。
+- **CI 是最后一道闸**：你原来的 GitHub Actions / 测试 / lint 一个不少。
+  Roll 跑在你 CI **之上**，不绕过它。
+
+**试一下：**
 
 ```bash
-roll loop status          # 查看 LOCK 是否存在及持有者 PID
-roll loop attach          # 看看 agent 在 tmux 会话里做什么
-# 如果 tmux 会话已死或挂起：
-roll loop reset           # 清除 state + LOCK，下一周期重新开始
-roll loop now             # 立即触发一个新周期
+roll build US-001          # 跑一条故事，从头到尾看一遍 PR
+```
+
+把 loop 开起来之前，先用这种方式看清 Roll 到底碰了什么。
+
+---
+
+### A2. 我有一个老项目能用吗？会污染我现有代码吗？
+
+**短答：** 可以。Roll 对老项目有专门的 onboarding 流程，且只写自己的目录。
+
+**细节：** 在已有代码的仓库里跑 `roll init`，会自动检测并引你走
+`$roll-onboard`。这个 skill 会读你的项目，问 9 个关于认知 / 范围 / 隐私
+的问题，先写出 `.roll/onboard-plan.yaml` 作为契约，再由
+`roll init --apply` 实际动手。
+
+Roll 写到你仓库里的东西：
+
+- `.roll/` —— backlog、feature 规格、配置（要 commit）
+- `.claude/skills/` 或其他 agent 等价目录 —— Roll skill 的软链（要 commit）
+- `.gitignore` 加几行
+
+Roll **不会**碰你的源代码 —— 除非 agent 正在执行你写的某条 story。
+
+---
+
+### A3. 我不想让它自动跑，能手动一条条来吗？
+
+**短答：** 能。Loop 是 opt-in 的。
+
+**细节：** 不开 `roll loop on`，Roll 就是一套 CLI + skill 库。你在
+`.roll/backlog.md` 写一条 story，然后用：
+
+```bash
+roll build US-001          # 端到端跑一条 user story
+roll fix  FIX-002          # 端到端跑一条 bugfix
+```
+
+每条命令在你眼前跑完 design → TCR → PR → CI，你 review diff 后再合并。
+等你信任这套流程了，再 `roll loop on` 让它自己选 story。
+
+---
+
+### A4. 装上之后改了我哪些系统配置？怎么干净卸载？
+
+**短答：** 三个地方，`./uninstall.sh` 全部还原。
+
+**细节：**
+
+- **全局**：`~/.roll/`（你的 config、primary_agent）、`~/.shared/roll/`
+  （loop 状态、`runs.jsonl`）。npm 二进制放在 npm 全局目录里。
+- **每个项目**：`.roll/`，以及 `.claude/skills/`（或其他 agent 等价路径）
+  下指向 Roll skill 的软链。
+- **只在 `roll loop on` 之后**：macOS 上一个 `launchd` plist 用来触发周期。
+
+要完全卸载：
+
+```bash
+npm uninstall -g @seanyao/roll
+~/.roll/uninstall.sh --dry-run    # 预览会删什么
+~/.roll/uninstall.sh              # 实际执行
 ```
 
 ---
 
-## 2. Loop 跑完了但 BACKLOG 没有更新为 Done
+### A5. 跑一次大概多少 token？成本能看到吗？
 
-**现象：** Agent 正常运行过（能看到 TCR 提交），但故事仍然是
-`🔨 In Progress` 或者没有标记为 `✅ Done`。
+**短答：** 能。Dashboard 按公开单价显示每个周期的模型 + 成本。
 
-**原因：** 构建技能在最后阶段（Phase 11）才更新 BACKLOG。如果 agent 会话
-在 TCR 提交之后但在 Phase 11 之前中断，或者 CI 门控失败，故事状态会故意
-保持不变。Loop 只在 TCR 和 CI 都通过后才标记 Done。
+**细节：** 从 `v2026.521.1` 起，`roll loop monitor` 和 `roll loop status`
+会显示用的模型和按公开 per-token 单价算出来的成本。这是一个**横向可比**
+的数字，不是你的实际账单 —— 你的实际花费取决于你的订阅折扣（Claude Pro 等）。
 
-**原理：** 完成后清理阶段会运行两个硬门控：(1) TCR 提交数 > 0，(2) CI
-通过（`roll ci --wait`）。任一门控失败都会阻止 Done 状态转换——这是设计
-如此，避免假阳性的完成标记。
+Claude Opus 4.x 上典型单条 story 成本：**$0.5 – $3**，看故事复杂度和
+TCR 来回次数。切到 Kimi / DeepSeek 能便宜 5–10 倍，代价是收敛慢一点。
 
-**解决：**
+**试一下：**
 
 ```bash
-roll loop runs            # 查看上一个周期的结果和告警
-roll alert                # 查看是否有 CI 或 TCR 告警
-# 如果代码确实已完成且测试通过：
-$roll-build US-XXX        # 手动重新运行故事，完成 Phase 11
+roll loop monitor                # 实时 dashboard 带成本列
+roll loop status --days 7        # 看过去 7 天每个周期的成本
 ```
 
 ---
 
-## 3. Agent 评审打回了自己的 PR（CHANGES_REQUESTED）
+### A6. 我需要懂 DDD / TCR / Prompt 工程吗？
 
-**现象：** Loop 开的 PR 显示 AI 评审者标记了 `CHANGES_REQUESTED`，阻塞了
-自动合并。
+**短答：** 不需要。但**会写 user story** 帮助很大。
 
-**原因：** AI 代码评审工作流（US-AUTO-035）独立于构建 agent 运行。当评审者
-检测到问题时——即使是 loop 自己写的代码——也会请求修改。这是有意为之：
-评审 agent 充当独立的质量门控。
+**细节：** Roll 的方法论藏在 skill 里，不需要你脑子里装。`$roll-design`
+带你做 DDD 拆解；`$roll-build` 替你跑 TCR；prompt 工程封装在 skill 文件里
+（你好奇可以读或改）。
 
-**原理：** Loop 对 PR 收件箱进行分类。被人类标记 `CHANGES_REQUESTED` 的 PR
-归类为 `blocked_human_request_changes` 并跳过。如果评审来自 AI 工作流，
-loop 的下一个周期会尝试处理反馈，或者人可以介入。
+唯一需要你**脑子里有**的：**把你想要的东西讲清楚**。INVEST 形态的 story
+（独立、可协商、有价值、可估算、足够小、可测）比"帮我做个功能"效果好得多。
+`$roll-design` 帮你从模糊想法走到 INVEST。
+
+---
+
+### A7. User Story 应该写多细？写得不好它能跑通吗？
+
+**短答：** 细到**你自己**能照着写代码。太模糊的会被识别出来、refine 后再
+`$roll-build` 才动代码。
+
+**细节：** 一条可执行的 story 包含价值陈述（`As X, I want Y, so that Z`）、
+2–5 条验收标准（AC）、以及非显然的约束。**别**指定实现方式 —— Roll 自己来。
+
+- **太模糊** → `$roll-build` 里的 `$roll-.clarify` 阶段会停下来问你
+- **太复杂** → design 阶段会建议拆成更小的 story
+- **模糊但能跑** → agent 自己做选择，原型阶段可以接受，生产代码风险较大
+
+**试一下：** 运行 `$roll-design "加一个登出按钮"`，看它怎么把一句话扩成
+一条带 AC 的 INVEST story。
+
+---
+
+### A8. Roll 适合什么项目？什么不适合？
+
+**适合：**
+
+- 有真实的测试套件（TCR 依赖它）
+- 用 git + PR 工作流
+- 有 CI（GitHub Actions 或同类）
+- 能用 1–3 句话描述的需求
+- TypeScript / Python / Go / Bash 项目（当前支持最好）
+
+**不适合：**
+
+- 一次性脚本、扔掉的原型 —— 开销大于价值
+- 没测试的代码库 —— TCR 无门可守
+- 高度专门化领域（底层 OS、嵌入式、形式化验证）—— AI agent 在这些领域表现差
+
+---
+
+### A9. 没有 CI / 没有 GitHub Actions 也能用吗？
+
+**短答：** 能用，但失去 CI 闸门。TCR 和 PR 流程还在。
+
+**细节：** `roll ci --wait` 找当前 commit 上的 GitHub Actions。如果没配
+CI，Roll 优雅降级：TCR 仍是内层闸门（测试不过提交不留），PR 仍然创建，
+但 loop 不会等远程 CI 绿就标记 story 为 Done。
+
+纯本地用（不挂 GitHub），Roll 也能当方法论 + skill 层用 —— 只是失去
+"等绿了再下一条"的自动行为。
+
+---
+
+### A10. 单人用还是团队用？多人怎么协作？
+
+**短答：** 优先支持单人 / 结对；团队用法可行但需要按场景设计。
+
+**细节：**
+
+- **单人**：默认。`.roll/backlog.md` 是你的私人队列。
+- **结对**：把 `.roll/` 提交进 git，搭档的 Roll 读同一份 backlog。锁是
+  per-machine 的，两人都开 loop 不会撞状态，但可能抢同一条 story。
+- **团队**：`.roll/backlog.md` 当源代码对待，通过 PR 协作。`roll peer`
+  支持跨 agent 评审（一个 agent 评另一个 agent 的 PR）。多人 loop 的
+  "谁挑下一条"协调还是个粗糙边缘。
+
+务实建议：团队里在自己的分支 / fork 上跑 loop，PR 像普通贡献者一样合上去。
+
+---
+
+## B. 定位与对比
+
+### B1. 和 Claude Code 自带的 `/loop`、skills、tasks 是什么关系？
+
+**Claude Code 已经有什么：** Skills（自定义命令）、tasks（session 内 todo）、
+plan mode（执行前 review）、`/loop`（按时间间隔触发 prompt 的定时器）。
+
+**Roll 的差异：**
+
+- **Backlog 持久化在 git 里**。Roll 的 `.roll/backlog.md` 跨 session、
+  跨重启、跨模型都在。Claude Code 的 tasks 一个 session 就没了。
+- **是交付管线，不是定时器**。`/loop` 每 N 分钟重发一个 prompt。Roll 的
+  loop 选下一条 ready 的 story，走完 DDD → TCR → PR → CI，等绿了再下一条。
+- **TCR 是硬闸**。Claude Code 的 skill 是建议性的，Roll 在 commit 时刻
+  强制 `test && commit || revert`。
+- **跨 agent**。同一份 backlog 和 skill，可以在 Codex / Kimi / DeepSeek /
+  Pi / OpenCode 上跑。`/loop` 只认 Claude。
+
+**怎么选：**
+
+- 交互式 session，临时任务 → Claude Code 单独用就够
+- 长期项目，要无人值守推进、有 CI 闸 → 在 Claude Code 上加一层 Roll
+
+Roll 的 `roll-*` skill **本身就是** Claude Code skill。Roll 不替代
+Claude Code，它在上面叠一层。
+
+---
+
+### B2. 和 [superpowers](https://github.com/obra/superpowers)（obra）比？
+
+**superpowers 强在哪：** 成熟的 7 阶段方法论（brainstorm → worktree →
+plan → execute → test → review → finish），支持的 agent 很广（Claude
+Code / Cursor / Codex / Gemini / Copilot / Factory / OpenCode），强制
+RED-GREEN-REFACTOR，subagent 驱动开发。Roll README 已致谢 ——
+Roll 几个工作流模式从它借鉴而来。
+
+**Roll 的差异：**
+
+- **持久 backlog + 自动 loop**。superpowers 是 session 驱动 —— 每个周期
+  你自己启动。Roll 有 `roll loop on` 跑无人值守循环，自动挑下一条。
+- **CI 作为终态闸门**。Roll 等 GitHub Actions 绿了才标 Done；
+  superpowers 把 CI 集成留给你。
+- **PR-centric**。每条 Roll story 最后是一个挂上你 CI 的 PR；
+  superpowers 对产出形态更灵活。
+
+**怎么选：**
+
+- 你想自己驱动每个 session，要一套强方法论压阵 → **superpowers**
+- 你要在 backlog 上无人值守推进，要硬 CI 闸 → **Roll**
+
+也可以一起用 —— 两者有重叠但不冲突。
+
+---
+
+### B3. 和 [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)（Yeachan Heo）比？
+
+**oh-my-codex 强在哪：** 给 Codex CLI 的精致 harness —— tmux HUD、hooks、
+agent 团队（`$ralplan`、`$ralph`、`$ultragoal`）、`.omx/` 持久状态、
+基于 ledger checkpoint 的多目标续命。29k star，非常活跃（107 个 release）。
+
+**Roll 的差异：**
+
+- **不只 Codex**。Roll 支持 Claude / Codex / Kimi / DeepSeek / Pi /
+  OpenCode。oh-my-codex 有意聚焦 Codex CLI。
+- **TCR 是硬闸**。oh-my-codex 推荐 clarification → planning → execution
+  的流程，但**不**在 commit 层强制 TDD/TCR。
+- **PR + CI 是终态**。Roll 的 loop 每条 story 结束在"PR 合并 + CI 绿"。
+  oh-my-codex 结束在"agent 说目标完成"。
+- **方法论形态**。oh-my-codex 强调耐久的多目标执行和并行团队。Roll 强调
+  单 story 原子化（一条 INVEST story → 一个 PR → CI 绿 → 下一条）。
+
+**怎么选：**
+
+- 重度 Codex CLI 用户，想要 hooks / tmux HUD / 多 agent 团队 →
+  **oh-my-codex**
+- 想要跨 agent 可移植，把 PR/CI 当成成功契约 → **Roll**
+
+---
+
+## C. 运行中常见问题
+
+### C1. Loop 卡住了 —— 故事停在 "In Progress" / Done 没写上
+
+**现象：** `roll loop status` 显示 `running`，或者 BACKLOG 里某条 story
+停在 `🔨 In Progress` 超过一个周期，或者 agent 跑过了（能看到 TCR commit）
+但 story 没标 `✅ Done`。
+
+**原因：** Loop 在调用构建 skill **之前**就把 story 标为
+`🔨 In Progress`，只有两个硬门都过了才写 `✅ Done`：(1) TCR commit 数 > 0，
+(2) `roll ci --wait` 通过。任何一个挂了，story 就保持原状 —— 这是设计如此，
+避免假阳性的完成标记。
+
+**原理：** 每个周期获取一个项目级 LOCK
+（`~/.shared/roll/loop/.LOCK-<slug>`）。PID 已死的 LOCK 下个周期自动清理；
+进程还活着但挂起的（例如 tmux 卡死）会让 LOCK 一直在，阻止新周期启动。
 
 **解决：**
 
 ```bash
-gh pr view <number>                # 阅读评审意见
-gh pr review <number> --approve    # 如果反馈有误则覆盖
-# 或者让 loop 的下一个周期自动处理
+roll loop status        # 看 LOCK + 持有它的 PID
+roll loop attach        # 看 agent 在 tmux 里干什么
+roll loop runs          # 上一个周期的结果和告警
+roll alert              # 有没有 CI 或 TCR 告警
+roll loop reset         # 实在卡死了清状态 + LOCK
+roll loop now           # 立即触发新周期
+# 如果代码确实做完了、测试也过，但 Phase 11 没走完：
+$roll-build US-XXX      # 手动重跑这条 story
 ```
 
 ---
 
-## 4. PR 合并冲突 / Rebase 失败
+### C2. PR 有合并冲突 / Rebase 失败
 
-**现象：** `gh pr checks` 显示 "This branch has conflicts"，或者
-`roll loop runs` 报告了 rebase 失败告警。
+**现象：** `gh pr checks` 显示 "This branch has conflicts"，或
+`roll loop runs` 报告 rebase 失败告警。
 
-**原因：** Loop 在 worktree 中构建期间，另一个提交合入了 `main`，与 PR
-产生了冲突。Loop 的 PR 收件箱会尝试 `_loop_pr_rebase_stale`，但当双方
-修改了相同行时 rebase 会失败。
+**原因：** Loop 在 worktree 里构建期间，另一个 commit 合到了 `main`，
+和 PR 冲突。Loop 的 PR inbox 会尝试 rebase；如果双方动了同一行，rebase
+失败。
 
-**原理：** Rebase 熔断器会追踪每个 PR 的尝试次数——在 24 小时内失败 3 次后
-会阻止进一步尝试并写入 ALERT。这防止了结构性冲突导致的无限 rebase 循环。
+**原理：** Rebase 熔断器追踪每个 PR 的尝试次数 —— 24 小时内失败 3 次后
+阻止继续尝试并写 ALERT。这防止结构性冲突导致的无限 rebase 循环。
 
 **解决：**
 
 ```bash
-gh pr view <number>               # 查看哪些文件冲突
+gh pr view <number>               # 看哪些文件冲突
 git fetch origin main
 git checkout <pr-branch>
-git rebase origin/main            # 手动解决冲突
+git rebase origin/main            # 手动解决
 git push --force-with-lease
-# PR 将重新进入 CI，绿了自动合并
+# CI 重跑；如果开了自动合并，绿了自动 merge
 ```
 
 ---
 
-## 5. 切换 Agent 后 Loop 行为变了
+### C3. 怎么看 Loop 做了什么 + 花了多少钱？
 
-**现象：** 运行 `roll agent use kimi`（或编辑 `~/.roll/config.yaml`）后，
-loop 工作方式不同——更慢、跳过步骤或产生不同的提交模式。
+**现象：** Loop 在你不在时跑了，你想快速看清楚发生了什么、花了多少。
 
-**原因：** 每个 agent（Claude、DeepSeek、Kimi）解读技能提示的能力不同。
-Claude 倾向于严格遵循 TCR；其他 agent 可能批量操作更激进或对 AC 的理解
-有差异。技能是一样的，但执行效果因模型能力而异。
+**为什么重要：** Roll 每个周期都写结构化记录，但根据需求有多个查看入口。
 
-**原理：** `~/.roll/config.yaml` 中的 `primary_agent` 控制 loop 调用哪个
-CLI。后备 agent 仅在主 agent 失败（token 耗尽、网络错误）时启用。切换
-主 agent 会改变所有后续周期的默认行为。
+**原理：** 每个周期向 `~/.shared/roll/loop/runs.jsonl` 追加一条 JSONL，
+包含 story ID、模型、TCR commit 数、耗时、结果、成本（按公开单价）。
+`roll-brief` 把这些聚合成人类可读摘要。tmux 会话保留完整 agent 对话，
+直到下一个周期覆盖。
 
-**解决：**
+**观测入口：**
 
-```bash
-cat ~/.roll/config.yaml            # 确认当前配置的 agent
-roll loop runs                     # 对比最近的运行质量
-# 切回：
-roll agent use claude              # 或直接编辑 ~/.roll/config.yaml
-```
-
----
-
-## 6. 多个项目同时跑 Loop，互相干扰怎么办
-
-**现象：** 两个项目都开启了 `roll loop on`，怀疑它们相互影响（跳过周期、
-共享状态或争抢 agent）。
-
-**原因：** 它们不应该互相干扰。每个项目有自己的 LOCK 文件
-（`~/.shared/roll/loop/.LOCK-<project-slug>`）、自己的 `state.yaml` 条目
-和自己的 launchd plist。Loop 是按项目隔离的。
-
-**原理：** LOCK 文件路径包含一个项目 slug，由绝对目录路径的 basename +
-md5 hash 生成。即使两个项目目录名相同但路径不同，也会得到不同的 slug
-和不同的锁。
-
-**解决：**
-
-```bash
-roll loop status                   # 在每个项目目录中分别运行
-# 确认各自显示独立的调度器和 LOCK 路径
-ls ~/.shared/roll/loop/.LOCK-*     # 查看所有活跃的锁
-# 如果另一个项目的僵死锁存在：
-roll loop reset                    # 在受影响的项目中执行
-```
-
----
-
-## 7. `gh` 认证失败 / 没有 PR 写权限
-
-**现象：** Loop 写了关于 `gh` 失败的 ALERT，或者 PR 没有被创建。
-`gh auth status` 显示未登录或缺少权限范围。
-
-**原因：** Roll 的 CI 门控和 PR 生命周期依赖 `gh`（GitHub CLI）以 `repo`
-scope 认证。如果 token 过期、被撤销或仓库在需要 SSO 授权的组织下，`gh`
-调用就会失败。
-
-**原理：** Loop 的 CI 门控（`roll ci --wait`）使用 `gh -R owner/repo`
-检查工作流运行。PR 创建步骤使用 `gh pr create`。两者都需要有效 token。
-Loop 将缺少 `gh` 二进制视为优雅跳过，但认证错误是阻塞门控的硬失败。
-
-**解决：**
-
-```bash
-gh auth status                     # 检查当前认证状态
-gh auth login                      # 重新认证
-gh auth refresh -s repo,workflow   # 添加缺失的权限范围
-# 对于 SSO 保护的组织：
-gh auth refresh -h github.com      # 触发 SSO 授权流程
-```
-
----
-
-## 8. 如何暂停 Loop 而不卸载调度
-
-**现象：** 你想临时停止 loop 执行故事（例如代码冻结期间或手动工作时），
-但保留 launchd plist 以便轻松恢复。
-
-**原因：** `roll loop off` 会完全移除 launchd plist，需要 `roll loop on`
-重新安装。`roll loop pause` 更轻量——它设置一个标记让 loop 在每个周期
-开始时立即退出，不做任何工作。
-
-**原理：** Pause 在 `state.yaml` 中写入标记（`status: paused`）。Loop
-runner 在获取 LOCK 之前检查此标记。launchd 调度器仍按计划触发，但 runner
-在几秒内就退出了。
-
-**解决：**
-
-```bash
-roll loop pause                    # 停止执行，保留调度器
-roll loop status                   # 确认显示 "paused"
-# 准备恢复时：
-roll loop resume                   # 清除暂停标记
-roll loop now                      # 可选：立即触发一个周期
-```
-
----
-
-## 9. 如何查看 Loop 做了什么（日志 / runs / brief）
-
-**现象：** Loop 在你不在时运行了。你想知道它做了什么、是否成功、改了什么。
-
-**原因：** Loop 每个周期结束后都会写入结构化记录，但根据你需要的信息
-有不同的查看入口。
-
-**原理：** 每个周期会在 `~/.shared/roll/loop/runs.jsonl` 追加一条 JSONL
-记录，包含故事 ID、TCR 提交数、耗时和结果。`roll-brief` 将这些聚合成
-人类可读的摘要。tmux 会话保留完整的 agent 对话，直到下一个周期覆盖它。
-
-**查看方式：**
-
-| 你想知道什么 | 命令 |
+| 你想看什么 | 命令 |
 |---|---|
-| 最近 N 个周期摘要 | `roll loop runs`（默认 10 条） |
-| 实时仪表盘 | `roll loop monitor` |
-| 实时观看 agent 工作 | `roll loop attach` |
+| 最近 N 个周期摘要 + 成本 | `roll loop runs --days 7` |
+| 带成本列的实时 dashboard | `roll loop monitor` |
+| 实时看 agent 在做什么 | `roll loop attach` |
 | 人类可读的每日摘要 | `roll brief` |
 | 需要关注的告警 | `roll alert` |
-| 完整 agent 对话记录 | Attach 到 tmux 会话后上翻 |
+| 完整 agent 对话记录 | `roll loop attach` 后上翻 |
 
 ---
 
-## 10. 什么时候需要人工介入，什么时候 Loop 会自己恢复
+### C4. 多个项目同时跑 Loop 会互相干扰吗？
 
-**现象：** 不确定该介入还是等下一个周期。
+**现象：** 两个项目都开了 `roll loop on`，怀疑它们互相影响。
 
-**原因：** Loop 设计为自动恢复瞬态失败（网络错误、token 耗尽可切换后备
-agent），但在遇到需要人类判断的结构性问题时会故意停下。
+**原因：** 不会。每个项目有自己的 LOCK
+（`~/.shared/roll/loop/.LOCK-<project-slug>`）、自己的 `state.yaml`、自己
+的 launchd plist。Slug 由 `basename + md5(绝对路径)` 生成，即便两个项目
+目录名一样，路径不同也得不同 slug 和不同锁。
 
-**原理：** 失败处理有三层：(1) 网络错误用指数退避重试，(2) 主 agent
-失败切换到后备 agent，(3) 其他情况暂停 + 写 ALERT。
+**解决：**
 
-**自动恢复（无需人工介入）：**
-- 网络超时 → 退避重试（2s、4s、8s、16s）
-- 主 agent token 耗尽 → 切换到后备 agent
-- 崩溃进程留下的僵死 LOCK → 下一周期自动清理
-- 崩溃 loop 留下的孤儿 `🔨 In Progress` → 下一周期回退为 `📋 Todo`
+```bash
+# 在每个项目目录跑一下，看各自的 scheduler + LOCK
+roll loop status
 
-**需要人工介入：**
-- 主 agent 和后备 agent 都失败 → 修复后 `roll loop resume`
-- CI 持续红 → 修复失败的测试/构建，然后 `roll loop now`
+# 看所有活着的锁
+ls ~/.shared/roll/loop/.LOCK-*
+
+# 如果另一个项目留下的僵死锁挡住了你
+roll loop reset
+```
+
+---
+
+### C5. 什么时候自动恢复，什么时候要我介入？
+
+**Loop 的原则：清楚的工作往前推；模糊的工作或坏掉的环境停下来告诉你 ——
+不会猜。**
+
+**自动恢复（不需要你）：**
+
+- 网络超时 → 指数退避重试（2s、4s、8s、16s）
+- 主 agent token 耗尽 → 切到后备 agent
+- 崩溃进程留下的僵死 LOCK → 下个周期自动清理
+- 崩溃周期留下的孤儿 `🔨 In Progress` → 下个周期回退为 `📋 Todo`
+
+**需要你：**
+
+- 主 agent 和后备 agent 都失败 → 修环境后 `roll loop resume`
+- CI 持续红 → 修测试 / build，然后 `roll loop now`
 - PR 合并冲突 → 手动解决，push
 - `gh` 认证过期 → `gh auth login`
-- 故事反复回退（每次 TCR 计数 = 0）→ 故事规格可能不清晰；重写
-  `.roll/features/` 中的 AC 或通过 `$roll-build` 手动执行
+- Story 反复回滚（每次 TCR commit 数 = 0）→ story 规格不清晰；重写 AC
+  或 `$roll-build US-XXX` 手动跑一遍看在哪卡住
+
+更细的操作话题（pause/resume、切换 agent、gh scope 等）见
+[loop.md](loop.md) 和 [configuration.md](configuration.md)。

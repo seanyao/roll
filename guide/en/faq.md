@@ -208,9 +208,18 @@ idea into an INVEST-shaped story with ACs.
 **Bad fit:**
 
 - One-off scripts or throwaway prototypes — overhead > value
-- Codebases with no tests — TCR has nothing to gate on
 - Highly specialized domains (low-level OS, embedded, formal verification)
   where AI agents underperform
+
+**Edge case — legacy codebase with no tests:** This is a bootstrap problem,
+not a disqualifier. TCR needs *something* to gate on, so the loop can't run
+on a zero-test repo on day one — but recovering this kind of codebase is
+exactly what Roll is built to drive. Workflow: run `$roll-onboard` to
+reverse-engineer the existing code into a backlog, write
+**characterization-test stories first** (pin current behavior with tests
+before changing anything), then refactor under TCR once you have a net.
+The first few stories are the bootstrap; everything after that runs like
+any other Roll project.
 
 ---
 

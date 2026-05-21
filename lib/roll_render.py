@@ -273,6 +273,7 @@ def day_band(day_key: str, n_total: int, n_failed: int, now: datetime, *,
 
 def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     outcome = cy.get("outcome", "done")
+    pr_outcome = cy.get("pr_outcome")
     glyph_c, glyph = {
         "done":     ("green",  "✓"),
         "ok":       ("green",  "✓"),
@@ -280,6 +281,11 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         "running":  ("purple", "⏵"),
         "idle":     ("muted",  "·"),
     }.get(outcome, ("muted", "·"))
+    # US-VIEW-011: a completed cycle whose PR was closed without merging is
+    # a "wasted run" — flip the green ✓ to an amber ⊘ so it can't be
+    # mistaken for a real delivery when scanning the dashboard.
+    if outcome in ("done", "ok") and pr_outcome == "closed":
+        glyph_c, glyph = "amber", "⊘"
     time_str = cy["start"].astimezone().strftime("%H:%M")
     cr = cy.get("cron") or {}
     # duration prefers the explicit cy["duration_s"] (computed from event
@@ -318,6 +324,19 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     # when terminal is < 100 cols (cost / story IDs are higher-priority).
     show_model = COLS >= 100
     model_seg = c("muted", pad(model_label, 11)) + " " if show_model else ""
+    # US-VIEW-011: PR landing marker after the story id(s).
+    #   merged → "#NN ✓" green
+    #   closed → "#NN ↩" amber (paired with ⊘ glyph above)
+    #   open   → "#NN …" dim   (still landing; auto-merge or human pending)
+    pr_marker = ""
+    pr_num = cy.get("pr_num")
+    if pr_num is not None and pr_outcome:
+        mark_c, mark_sym = {
+            "merged": ("green", "✓"),
+            "closed": ("amber", "↩"),
+            "open":   ("dim",   "…"),
+        }.get(pr_outcome, ("dim", "…"))
+        pr_marker = " " + c(mark_c, f"#{pr_num} {mark_sym}")
     inner = (
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
@@ -325,7 +344,7 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         c("muted", pad(tok, 6, "r")) + "  " +
         model_seg +
         c("muted", pad(cost, 7, "r")) + "   " +
-        c(sid_c, ids_str, bold=True)
+        c(sid_c, ids_str, bold=True) + pr_marker
     )
     # Subtle red bg on failure rows so a fail can't be missed at a glance.
     if outcome == "fail" and USE_COLOR:

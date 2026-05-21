@@ -1,6 +1,6 @@
 {
   "name": "@seanyao/roll",
-  "version": "2026.521.2",
+  "version": "2026.521.3",
   "description": "Roll — Roll out features with AI agents",
   "scripts": {
     "test": "bash tests/run.sh"

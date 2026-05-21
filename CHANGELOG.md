@@ -1,5 +1,11 @@
 # Changelog
 
+## v2026.521.3
+
+### Added
+
+- **`roll slides`** — 给个主题，agent 自动写 18 张双语 slide 并渲染成 HTML 在浏览器里直接打开；`roll slides list` / `preview` 管理已有 deck
+
 ## v2026.521.2
 
 ### Fixed

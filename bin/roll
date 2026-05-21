@@ -106,11 +106,14 @@ _spin_setup() {
     return 0
   fi
   if [ -t 1 ]; then
+    # Interactive: spinner shares stdout with normal program output.
     exec 3>&1
-  elif [ -t 2 ]; then
-    exec 3>&2
   else
-    exec 3>/dev/null
+    # Non-interactive (stdout redirected to file / piped): route the spinner
+    # trail to stderr so it stays visible in CI logs and never pollutes the
+    # caller's redirected stdout (e.g. > release_notes.txt). FD 3 will be
+    # plain-text mode whenever stderr is also not a TTY.
+    exec 3>&2
   fi
 }
 

@@ -94,6 +94,120 @@ _is_ai_installed() {
   return 1
 }
 
+# ─── Spinner: TTY-aware status display for long-running steps (US-REL-003) ───
+# _spin_setup [off]
+#   Opens FD 3 for spinner output. Without args: FD 3 → stdout if interactive,
+#   else stderr (best-effort visibility for the operator). With "off": FD 3
+#   → /dev/null, silencing all _spin output (useful for scripts that drive
+#   release.sh in non-interactive contexts but still want exit codes).
+_spin_setup() {
+  if [ "${1:-}" = "off" ]; then
+    exec 3>/dev/null
+    return 0
+  fi
+  if [ -t 1 ]; then
+    exec 3>&1
+  elif [ -t 2 ]; then
+    exec 3>&2
+  else
+    exec 3>/dev/null
+  fi
+}
+
+# _spin <label> <cmd> [args...]
+#   Runs cmd with a status indicator written to FD 3 only. cmd's own
+#   stdout (FD 1) and stderr (FD 2) pass through untouched, so caller-side
+#   `>file` and `2>file` redirections on the _spin call behave normally.
+#
+#   FD 3 is a TTY (or ROLL_SPIN_FORCE_TTY=1):
+#     ⠋ label [Ns]  (refreshed ~10/s, line-cleared with \r\033[2K)
+#     final: ✓ label (Ns)   on success
+#            ✗ label (rc=N, Ns) on failure
+#
+#   FD 3 not a TTY (CI, pipes, `2>&1 | tee`):
+#     » label...   on start
+#     done label (Ns)            on success
+#     fail label (rc=N, Ns)      on failure
+#
+#   Returns wrapped cmd's exit code (transparent under `set -e` callers
+#   when used in `if`/`&&`/`||` contexts).
+_spin() {
+  local _label="$1"
+  shift
+
+  local _spin_tty=0
+  if [ "${ROLL_SPIN_FORCE_TTY:-}" = "1" ] || [ -t 3 ]; then
+    _spin_tty=1
+  fi
+
+  local _spin_start=$SECONDS
+  local _spin_pid=""
+
+  if [ "$_spin_tty" = "1" ]; then
+    # Bash 3.2-safe: indexed array of braille frames.
+    local _spin_frames
+    _spin_frames=( $'\xe2\xa0\x8b' $'\xe2\xa0\x99' $'\xe2\xa0\xb9' $'\xe2\xa0\xb8' $'\xe2\xa0\xbc' $'\xe2\xa0\xb4' $'\xe2\xa0\xa6' $'\xe2\xa0\xa7' $'\xe2\xa0\x87' $'\xe2\xa0\x8f' )
+    # Print initial frame at t=0 so users see something immediately.
+    printf '\r\033[2K%s %s [0s]' "${_spin_frames[0]}" "$_label" >&3 2>/dev/null || true
+    # Only animate when FD 3 is a real TTY — when force-on for tests, skip
+    # the background animator so the test gets deterministic output (the
+    # initial frame, the cleared final frame).
+    if [ -t 3 ]; then
+      (
+        set +e +u 2>/dev/null
+        local _i=1
+        local _t0=$_spin_start
+        while :; do
+          sleep 0.1
+          local _e=$(( SECONDS - _t0 ))
+          printf '\r\033[2K%s %s [%ds]' "${_spin_frames[$_i]}" "$_label" "$_e" >&3 2>/dev/null || true
+          _i=$(( (_i + 1) % 10 ))
+        done
+      ) &
+      _spin_pid=$!
+      # Kill spinner on Ctrl-C / SIGTERM / EXIT. Save no prior trap because
+      # release.sh and its callers install no traps of their own; if a
+      # future caller does, _spin's scope is short and traps are restored
+      # to default after reaping.
+      # shellcheck disable=SC2064
+      trap "kill ${_spin_pid} 2>/dev/null; wait ${_spin_pid} 2>/dev/null; trap - INT TERM EXIT; exit 130" INT TERM
+      # shellcheck disable=SC2064
+      trap "kill ${_spin_pid} 2>/dev/null; wait ${_spin_pid} 2>/dev/null" EXIT
+    fi
+  else
+    printf '» %s...\n' "$_label" >&3 2>/dev/null || true
+  fi
+
+  local _spin_rc=0
+  if [ "$#" -gt 0 ]; then
+    "$@" || _spin_rc=$?
+  fi
+
+  if [ -n "$_spin_pid" ]; then
+    kill "$_spin_pid" 2>/dev/null || true
+    wait "$_spin_pid" 2>/dev/null || true
+    trap - INT TERM EXIT
+  fi
+
+  local _spin_elapsed=$(( SECONDS - _spin_start ))
+
+  if [ "$_spin_tty" = "1" ]; then
+    if [ "$_spin_rc" -eq 0 ]; then
+      printf '\r\033[2K✓ %s (%ds)\n' "$_label" "$_spin_elapsed" >&3 2>/dev/null || true
+    else
+      printf '\r\033[2K✗ %s (rc=%d, %ds)\n' "$_label" "$_spin_rc" "$_spin_elapsed" >&3 2>/dev/null || true
+    fi
+  else
+    if [ "$_spin_rc" -eq 0 ]; then
+      printf 'done %s (%ds)\n' "$_label" "$_spin_elapsed" >&3 2>/dev/null || true
+    else
+      printf 'fail %s (rc=%d, %ds)\n' "$_label" "$_spin_rc" "$_spin_elapsed" >&3 2>/dev/null || true
+    fi
+  fi
+
+  return "$_spin_rc"
+}
+
 # ─── Helper: read config value ───────────────────────────────────────────────
 config_get() {
   local key="$1"

@@ -6157,6 +6157,14 @@ _worktree_sync_meta() {
     --exclude='events.ndjson*' \
     --exclude='runs.jsonl*' \
     .roll/ "$path/.roll/" 2>/dev/null || true
+  # FIX-085: hard-constrain the "skip 🔨 In Progress" rule from the runner
+  # side. SKILL.md tells the agent to skip 🔨 rows but agents don't always
+  # comply, so we strip those rows from the worktree's backlog copy — the
+  # agent literally can't pick a row it can't see. Main backlog untouched.
+  if [ -f "$path/.roll/backlog.md" ]; then
+    sed -i.bak '/| 🔨 In Progress |$/d' "$path/.roll/backlog.md" 2>/dev/null || true
+    rm -f "$path/.roll/backlog.md.bak"
+  fi
 }
 
 # _worktree_merge_back <branch>

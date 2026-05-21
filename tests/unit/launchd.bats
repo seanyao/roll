@@ -72,7 +72,10 @@ setup() {
 @test "_launchd_plist_path: path includes LaunchAgents dir" {
   run _launchd_plist_path "loop" "/Users/sean/myproject"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"/Library/LaunchAgents/"* ]]
+  # In bats context _LAUNCHD_DIR is sandboxed to ${_SHARED_ROOT}/LaunchAgents
+  # (FIX-087); in production it is ~/Library/LaunchAgents. Either way the
+  # path component "LaunchAgents" must appear.
+  [[ "$output" == *"/LaunchAgents/"* ]]
 }
 
 # ─── _write_launchd_plist idempotency ─────────────────────────────────────────

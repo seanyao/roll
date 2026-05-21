@@ -6,7 +6,7 @@ Roll 自动保持 `CHANGELOG.md` 同步，无需手动编写或更新。
 
 1. `$roll-build`（或 `$roll-fix`）交付故事并暂存 `CHANGELOG.md`。
 2. 故事完成提交中包含 `CHANGELOG.md`——不产生单独的 changelog commit。
-3. 发版时，`scripts/release.sh` 将 `## Unreleased` 重命名为版本标签。
+3. 发版时，Roll 的发布流程将 `## Unreleased` 重命名为版本标签。
 
 ## 写什么内容
 
@@ -28,7 +28,7 @@ Roll 自动保持 `CHANGELOG.md` 同步，无需手动编写或更新。
 
 ## `## Unreleased` 段
 
-所有新条目写入 `CHANGELOG.md` 顶部的 `## Unreleased`。Roll 永远不猜测版本号——只有 `scripts/release.sh` 在发版时赋予版本。
+所有新条目写入 `CHANGELOG.md` 顶部的 `## Unreleased`。Roll 永远不猜测版本号——只有 Roll 的发布流程在发版时赋予版本。
 
 ```markdown
 ## Unreleased

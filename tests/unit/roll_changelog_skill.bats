@@ -4,7 +4,6 @@
 # Only release.sh assigns concrete version numbers.
 
 SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
-RELEASE_SH="${BATS_TEST_DIRNAME}/../../scripts/release.sh"
 
 @test "roll-.changelog SKILL.md: writes to ## Unreleased section, not guessed version" {
   grep -qF '## Unreleased' "$SKILL_FILE"
@@ -20,8 +19,9 @@ RELEASE_SH="${BATS_TEST_DIRNAME}/../../scripts/release.sh"
 }
 
 # REFACTOR-030: _promote_unreleased was removed (orphaned by REFACTOR-021).
-# scripts/release.sh now generates the version header directly from BACKLOG.
-# Assert the function is truly gone so it isn't quietly re-introduced.
+# The release script (maintainer-private in roll-meta) now generates the
+# version header directly from BACKLOG. Assert the function is truly gone
+# so it isn't quietly re-introduced.
 @test "bin/roll: _promote_unreleased helper has been removed (REFACTOR-030)" {
   local ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
   ! grep -qE '^_promote_unreleased\(\)' "$ROLL_BIN"

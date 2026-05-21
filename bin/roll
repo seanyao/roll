@@ -6745,7 +6745,7 @@ cmd_brief() {
 # REFACTOR-021 collapsed the changelog double-pipeline so the release script
 # generates the version header directly from BACKLOG, leaving these two
 # helpers orphaned. Their behaviour is now part of the changelog renderer
-# called from scripts/release.sh.
+# called from the maintainer-private release script at roll-meta/ops/release.sh.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKLOG — show pending tasks / manage status

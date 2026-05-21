@@ -7,7 +7,7 @@ update it manually.
 
 1. `$roll-build` (or `$roll-fix`) delivers a story and stages `CHANGELOG.md`.
 2. The story completion commit includes `CHANGELOG.md` — no separate commit.
-3. On release, `scripts/release.sh` renames `## Unreleased` to the version tag.
+3. On release, Roll's release process renames `## Unreleased` to the version tag.
 
 ## What Gets Written
 
@@ -32,7 +32,7 @@ user-facing. Technical jargon triggers a rewrite loop.
 ## `## Unreleased` Section
 
 All new entries go under `## Unreleased` at the top of `CHANGELOG.md`.
-Roll never guesses version numbers — only `scripts/release.sh` assigns them
+Roll never guesses version numbers — only Roll's release process assigns them
 at release time.
 
 ```markdown

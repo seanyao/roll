@@ -11,30 +11,62 @@ in your journey with Roll:
 
 ## A. Getting Started
 
+> **Roll has two surfaces.** Keep them straight as you read this FAQ:
+>
+> - **CLI commands** — run in your terminal: `roll init`, `roll loop on`,
+>   `roll status`, `roll brief`, etc. These manage state, scheduling, and
+>   observability. They do not write code themselves.
+> - **Skills** — invoked inside your AI agent (Claude Code, Cursor, Codex,
+>   Pi, etc.): `$roll-build`, `$roll-design`, `$roll-fix`, `$roll-onboard`,
+>   etc. In Claude Code you type them as `/roll-build`; the `$` form is the
+>   tool-agnostic way we write them in docs. These are where the agent
+>   actually does work.
+>
+> When you see `roll loop on` in this FAQ, that's a shell command. When you
+> see `$roll-build US-001`, that's a skill you invoke from your agent's
+> prompt.
+
 ### A1. Will Roll modify my code or break my main branch?
 
-**Short answer:** No, by design. Roll has four hard guardrails — your `main`
-stays yours.
+**Short answer:** Roll has real guardrails, but the safety story differs
+between the two modes — be precise about which you're running.
 
-**Details:**
+**The universal guarantee — TCR.** Every commit runs your tests. If tests
+fail, the commit is reverted automatically. No broken-test commit can land,
+in either mode. This is the foundation everything else builds on.
 
-- **TCR (`test && commit || revert`).** Every commit runs your tests. If tests
-  fail, the commit is reverted automatically. The agent literally cannot save
-  broken code.
-- **Feature branches, never `main`.** Agents work on branches like
-  `tcr/US-XXX-…`. `main` is untouched until a PR merges.
-- **PR-gated.** All output lands as a PR. You review and merge — Roll does not
-  auto-merge unless you explicitly enable it (and CI must still be green).
-- **CI is the last gate.** Your existing GitHub Actions / tests / lints must
-  pass. Roll runs *on top* of your CI, not around it.
+**Manual mode (`$roll-build`, `$roll-fix`, etc., trunk-based):**
 
-**Try it:**
+- TCR micro-commits as the agent works
+- **Phase 6** runs your full CI locally before any push
+- **Phase 7** runs an agent-driven code review of the diff before push
+- **Phase 8** pushes to `main` directly — you're sitting in front of the
+  agent watching this happen and can stop it at any point
+- Your remote CI is the last net: if it goes red after push, you see it
+  immediately and fix or revert
 
-```bash
-roll build US-001          # run one story end-to-end, see the PR
+**Loop mode (`roll loop on`):**
+
+- Builds on a branch (`loop/cycle-${CYCLE_ID}`) in a worktree
+- Opens a PR with `gh pr create --base main`
+- Calls `gh pr merge --auto --squash --delete-branch` — the PR auto-merges
+  **only when your required CI checks pass**. CI is the gate, not human
+  review (by default)
+- To require human review before merge, configure required reviewers on
+  `main` in GitHub branch protection — `--auto` will then wait on you too
+
+**Either way:** everything is in git history. `git revert` and `git reset`
+work normally if you need to undo something.
+
+**Try it manually first:** Open your AI agent (Claude Code, Cursor, Pi,
+etc.) in your project and invoke the build skill on a single story:
+
+```text
+$roll-build US-001         # in Claude Code: /roll-build US-001
 ```
 
-You'll see exactly what Roll touches before you trust it with the loop.
+Watch design → TCR → local CI → review → push happen in front of you. See
+exactly what Roll touches before you trust it with the autonomous loop.
 
 ---
 
@@ -64,16 +96,20 @@ story you wrote.
 **Short answer:** Yes. The loop is opt-in.
 
 **Details:** Without `roll loop on`, Roll is a CLI + skill library. You write a
-story in `.roll/backlog.md`, then run one of:
+story in `.roll/backlog.md`, then invoke a skill from inside your AI agent:
 
-```bash
-roll build US-001          # execute a single user story end-to-end
-roll fix  FIX-002          # execute a single bugfix story
+```text
+$roll-build US-001         # execute a single user story end-to-end
+$roll-fix   FIX-002        # execute a single bugfix story
 ```
 
-Each command runs design → TCR → PR → CI in your foreground; you review the
-diff before merging. When the workflow earns your trust, flip on
-`roll loop on` to let it pick stories itself.
+(In Claude Code these are typed as `/roll-build US-001` and `/roll-fix FIX-002`.)
+
+Each invocation runs design → TCR → local CI gate → agent self-review → push
+to `main` in your foreground; you see every step and can stop at any point.
+When the workflow earns your trust, run `roll loop on` in your terminal to
+let it pick stories itself (loop mode goes through a PR instead of pushing
+to `main` directly — see A1).
 
 ---
 
@@ -377,7 +413,8 @@ conversation until the next cycle overwrites it.
 
 | What you want | Command |
 |---|---|
-| Last N cycle summaries + cost | `roll loop runs --days 7` |
+| Last N cycle summaries + cost | `roll loop status --days 7` |
+| Per-cycle JSONL records | `roll loop runs` |
 | Live dashboard with cost column | `roll loop monitor` |
 | Watch the agent in real time | `roll loop attach` |
 | Human-readable daily summary | `roll brief` |

@@ -20,7 +20,12 @@ GUIDE_ZH="${BATS_TEST_DIRNAME}/../../guide/zh"
 }
 
 @test "EN faq covers manual mode (no autonomous loop)" {
-  grep -qiE "manual|opt.in|one story at a time|roll build " "${GUIDE_EN}/faq.md"
+  grep -qiE "manual|opt.in|one story at a time|\\\$roll-build" "${GUIDE_EN}/faq.md"
+}
+
+@test "EN faq distinguishes CLI commands from skills" {
+  grep -qiE "two surfaces|CLI command.*skill|skill.*CLI command" "${GUIDE_EN}/faq.md"
+  grep -qF '$roll-build' "${GUIDE_EN}/faq.md"
 }
 
 @test "EN faq covers uninstall path" {

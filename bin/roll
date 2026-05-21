@@ -3810,7 +3810,40 @@ fi
 # _SHARED_ROOT overrides and silently leaked test runs.jsonl writes into prod.
 _LOOP_RUNS="${_SHARED_ROOT}/loop/runs.jsonl"
 : "${_LOOP_MUTE_FILE:=${_SHARED_ROOT}/loop/mute-${_LOOP_PROJ_SLUG}}"
-_LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
+# FIX-087: parallel to FIX-065's _SHARED_ROOT auto-sandbox above. Without this,
+# tests that source bin/roll (directly via BATS or indirectly via a runner-inner
+# fork under /tmp / /var/folders/) wrote plists into the developer's real
+# ~/Library/LaunchAgents/ while their runner paths lived in the sandbox. When
+# the sandbox got cleaned up, those plists outlived their runners and launchd
+# fired them every hour with EX_CONFIG, silently killing the autonomous loop.
+# Detection signals mirror the _SHARED_ROOT block; under a sandbox we route
+# _LAUNCHD_DIR into _SHARED_ROOT so a single teardown removes both.
+if [ -z "${_LAUNCHD_DIR:-}" ]; then
+  # When HOME itself is a sandbox dir (run_roll-style wrappers, roll_status
+  # setup, etc.) the default ${HOME}/Library/LaunchAgents is ALREADY in the
+  # sandbox — redirecting again would break tests that pre-seed plists under
+  # the sandboxed HOME. Only auto-sandbox when HOME points to a real user dir.
+  case "${HOME:-}" in
+    /tmp/*|/private/tmp/*|*/var/folders/*|*/tmp.*) ;;
+    *)
+      _roll_in_test_ctx=0
+      if [ -n "${BATS_TEST_FILENAME:-}" ]; then
+        _roll_in_test_ctx=1
+      else
+        _roll_caller="${BASH_SOURCE[1]:-}"
+        case "$_roll_caller" in /tmp/*|/private/tmp/*|/var/folders/*) _roll_in_test_ctx=1 ;; esac
+        case "$PWD" in /tmp/*|/private/tmp/*|/var/folders/*) _roll_in_test_ctx=1 ;; esac
+      fi
+      if [ "$_roll_in_test_ctx" = 1 ]; then
+        _LAUNCHD_DIR="${_SHARED_ROOT}/LaunchAgents"
+        mkdir -p "$_LAUNCHD_DIR"
+        export _LAUNCHD_DIR
+      fi
+      unset _roll_in_test_ctx _roll_caller
+      ;;
+  esac
+fi
+: "${_LAUNCHD_DIR:=${HOME}/Library/LaunchAgents}"
 
 _config_read_int() {
   local key="$1" default="$2"
@@ -3939,6 +3972,25 @@ _launchd_plist_path() {
 _write_launchd_plist() {
   local plist_path="$1" label="$2" project_path="$3"
   local minute="$4" hour="$5" runner_script="$6"
+
+  # FIX-087 tripwire: last line of defense if some caller explicitly set
+  # _LAUNCHD_DIR back to the real path (or built plist_path manually) while
+  # in a test context. Refuse rather than pollute the user's launchd domain.
+  # Skipped when HOME itself has been redirected to a sandbox dir — then
+  # $HOME/Library/LaunchAgents IS the sandbox, not prod.
+  case "${HOME:-}" in
+    /tmp/*|/private/tmp/*|*/var/folders/*|*/tmp.*) ;;
+    *)
+      if [ -n "${HOME:-}" ] && [ "${plist_path#${HOME}/Library/LaunchAgents/}" != "$plist_path" ]; then
+        case "${BATS_TEST_FILENAME:-}${PWD}" in
+          */tmp.*|*/var/folders/*|/tmp/*|/private/tmp/*|*.bats)
+            echo "[FIX-087] refusing prod plist write: $plist_path (test context)" >&2
+            return 1
+            ;;
+        esac
+      fi
+      ;;
+  esac
 
   local hour_xml=""
   [[ -n "$hour" ]] && hour_xml="    <key>Hour</key>

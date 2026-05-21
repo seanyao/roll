@@ -11,36 +11,40 @@ GUIDE_ZH="${BATS_TEST_DIRNAME}/../../guide/zh"
   [ -f "${GUIDE_ZH}/faq.md" ]
 }
 
+@test "EN faq covers safety guardrails for newcomers" {
+  grep -qiE "TCR|guardrail|never.*main|test && commit" "${GUIDE_EN}/faq.md"
+}
+
+@test "EN faq covers legacy project onboarding" {
+  grep -qiE "legacy|existing project|onboard" "${GUIDE_EN}/faq.md"
+}
+
+@test "EN faq covers manual mode (no autonomous loop)" {
+  grep -qiE "manual|opt.in|one story at a time|roll build " "${GUIDE_EN}/faq.md"
+}
+
+@test "EN faq covers uninstall path" {
+  grep -qiE "uninstall" "${GUIDE_EN}/faq.md"
+}
+
+@test "EN faq covers cost / token visibility" {
+  grep -qiE "cost|token|pricing" "${GUIDE_EN}/faq.md"
+}
+
+@test "EN faq covers comparison with related projects" {
+  grep -qiE "superpowers|oh-my-codex|claude code" "${GUIDE_EN}/faq.md"
+}
+
 @test "EN faq covers loop stuck / In Progress" {
   grep -qiE "stuck|in.progress|not moving" "${GUIDE_EN}/faq.md"
-}
-
-@test "EN faq covers BACKLOG not updated after loop" {
-  grep -qiE "backlog.*(not|didn).*(update|change)|not.*(mark|updat).*done" "${GUIDE_EN}/faq.md"
-}
-
-@test "EN faq covers agent review rejecting own PR" {
-  grep -qiE "CHANGES_REQUESTED|reject.*own|review.*own PR" "${GUIDE_EN}/faq.md"
 }
 
 @test "EN faq covers PR merge conflict / rebase failure" {
   grep -qiE "merge conflict|rebase.*(fail|error)" "${GUIDE_EN}/faq.md"
 }
 
-@test "EN faq covers switching agents" {
-  grep -qiE "roll agent use|switch.*agent|primary_agent" "${GUIDE_EN}/faq.md"
-}
-
 @test "EN faq covers multi-project loop interference" {
   grep -qiE "multiple project|multi.*project|interfere|per.project" "${GUIDE_EN}/faq.md"
-}
-
-@test "EN faq covers gh auth / PR permissions" {
-  grep -qiE "gh auth|authentication|PR.*permission|write.*access" "${GUIDE_EN}/faq.md"
-}
-
-@test "EN faq covers pausing loop" {
-  grep -qF "roll loop pause" "${GUIDE_EN}/faq.md"
 }
 
 @test "EN faq covers observability (logs / runs / brief)" {

@@ -92,7 +92,7 @@ EOF
 
 @test "status loop overview: shows todo count from .roll/backlog.md" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
-  mkdir -p "${TEST_DIR}/myproject"
+  mkdir -p "${TEST_DIR}/myproject/.roll"
   _make_loop_plist "myproject-abc123" "${TEST_DIR}/myproject" 5
   cat > "${TEST_DIR}/myproject/.roll/backlog.md" << 'BACKLOG'
 | US-001 | Story one | 📋 Todo |

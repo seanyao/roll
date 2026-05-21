@@ -69,10 +69,12 @@ setup() {
   [[ "$output" == *".plist" ]]
 }
 
-@test "_launchd_plist_path: path includes LaunchAgents dir" {
-  run _launchd_plist_path "loop" "/Users/sean/myproject"
+@test "_launchd_plist_path: path is _LAUNCHD_DIR/<label>.plist" {
+  local proj="/Users/sean/myproject"
+  local expected="${_LAUNCHD_DIR}/$(_launchd_label "loop" "$proj").plist"
+  run _launchd_plist_path "loop" "$proj"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"/Library/LaunchAgents/"* ]]
+  [ "$output" = "$expected" ]
 }
 
 # ─── _write_launchd_plist idempotency ─────────────────────────────────────────

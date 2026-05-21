@@ -4122,6 +4122,36 @@ _inner_cleanup() {
     _runs_append "failed" 0 "[]" 2>/dev/null || true
     _worktree_alert "cycle \${CYCLE_ID:-unknown}: \${LOOP_CYCLE_TIMEOUT_SEC}s timeout — claude/python killed; in-progress story marked Blocked" 2>/dev/null || true
   fi
+  # FIX-086: aborted-path orphan safety net. When the inner script is killed
+  # (e.g. SIGUSR1, parent process death) after claude has committed TCR work
+  # but before publish runs, the existing aborted fallback below writes
+  # cycle_end aborted and the commits are local-only — if the worktree is
+  # later cleaned up, the work is lost. Before falling through to aborted,
+  # detect unpushed commits in the worktree and push them as an orphan
+  # branch + tag (mirroring FIX-039's PR-publish-failed safety net). On
+  # push success → cycle_end orphan; on failure → fall through to aborted
+  # path below (no regression).
+  # Skip when _CYCLE_TIMED_OUT=1: 45-min hard timeout SIGKILLs claude mid-flight,
+  # so commits may not be atomic — keep human-in-loop via blocked path.
+  if [ "\${_CYCLE_END_WRITTEN:-0}" -eq 0 ] \\
+     && [ "\${_CYCLE_TIMED_OUT:-0}" -eq 0 ] \\
+     && [ "\${_USE_WORKTREE:-0}" = "1" ] \\
+     && [ -n "\${WT:-}" ] \\
+     && [ -d "\$WT" ] \\
+     && [ -n "\${CYCLE_ID:-}" ]; then
+    _unpushed=\$(cd "\$WT" && git rev-list --count "origin/main..HEAD" 2>/dev/null || echo 0)
+    if [ "\${_unpushed:-0}" -gt 0 ]; then
+      _orphan_tag="loop-orphan-\${CYCLE_ID}"
+      if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \\
+           && git tag "\$_orphan_tag" 2>/dev/null \\
+           && git push origin "\$_orphan_tag" 2>/dev/null ); then
+        _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "orphan" 2>/dev/null || true
+        _CYCLE_END_WRITTEN=1
+        _runs_append "orphan" 0 "[]" 2>/dev/null || true
+        _worktree_alert "cycle \${CYCLE_ID}: aborted with \${_unpushed} commits; FIX-086 pushed orphan tag \${_orphan_tag}" 2>/dev/null || true
+      fi
+    fi
+  fi
   # IDEA-028 / FIX-066: catch every other abort (SIGKILL, set -e fire, ALERT
   # poisoning that bypasses the retry budget, etc.). Without this, cycle_start
   # is emitted but cycle_end never is, and dashboard renders the cycle as

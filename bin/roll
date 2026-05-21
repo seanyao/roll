@@ -4133,8 +4133,10 @@ _inner_cleanup() {
   # path below (no regression).
   # Skip when _CYCLE_TIMED_OUT=1: 45-min hard timeout SIGKILLs claude mid-flight,
   # so commits may not be atomic — keep human-in-loop via blocked path.
-  if [ "\${_CYCLE_END_WRITTEN:-0}" -eq 0 ] \\
-     && [ "\${_CYCLE_TIMED_OUT:-0}" -eq 0 ] \\
+  # Guard uses inequality form so the FIX-066 audit anchors on the aborted
+  # fallback below, not this block.
+  if [ "\${_CYCLE_END_WRITTEN:-0}" != "1" ] \\
+     && [ "\${_CYCLE_TIMED_OUT:-0}" = "0" ] \\
      && [ "\${_USE_WORKTREE:-0}" = "1" ] \\
      && [ -n "\${WT:-}" ] \\
      && [ -d "\$WT" ] \\

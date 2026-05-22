@@ -31,14 +31,12 @@ print(m.project_slug('${TEST_TMP}'))
 "
 }
 
-@test "E2E US-VIEW-012: cycle row shows input/output tokens, cache values hidden" {
+@test "E2E US-VIEW-017: cycle row shows all 4 token components (in/cw↑ cr↓/out)" {
   local slug; slug=$(slug_for_cwd)
   local evfile="${ROLL_SHARED_ROOT}/loop/events-${slug}.ndjson"
   local ts1="2026-05-21T10:00:00Z"
   local ts2="2026-05-21T10:18:00Z"
-  # input=1.234M, output=567K → "1.2M/567K" must appear.
-  # cache_creation=9.876M (→ "9.9M") and cache_read=8.765M (→ "8.8M")
-  # are deliberately picked so any leakage into the row would be obvious.
+  # input=1.234M, output=567K, cache_write=9.876M (→9.9M↑), cache_read=8.765M (→8.8M↓)
   cat > "$evfile" <<EOF
 {"ts":"${ts1}","stage":"cycle_start","label":"LT","outcome":"ok","detail":""}
 {"ts":"${ts1}","stage":"usage","label":"LT","outcome":"ok","detail":{"model":"claude-opus-4-7","input_tokens":1234000,"output_tokens":567000,"cache_creation_tokens":9876000,"cache_read_tokens":8765000,"cost_reported_usd":0,"duration_ms":1080000}}
@@ -47,11 +45,14 @@ print(m.project_slug('${TEST_TMP}'))
 EOF
   run env NO_COLOR=1 ROLL_SHARED_ROOT="$ROLL_SHARED_ROOT" python3 "$STATUS" --no-color --days 30
   [ "$status" -eq 0 ]
-  # input/output rendered together as in/out
-  [[ "$output" == *"1.2M/567K"* ]]
-  # cache fields must not surface anywhere in the dashboard
-  [[ "$output" != *"9.9M"* ]]
-  [[ "$output" != *"8.8M"* ]]
+  # cycle row: 4-part format in/cw↑ cr↓/out
+  [[ "$output" == *"1.2M"* ]]
+  [[ "$output" == *"9.9M↑"* ]]
+  [[ "$output" == *"8.8M↓"* ]]
+  [[ "$output" == *"567K"* ]]
+  # rollup rows present
+  [[ "$output" == *"cache writes"* ]]
+  [[ "$output" == *"cache reads"* ]]
 }
 
 @test "FIX-095: status with no launchd plist renders 'not installed'" {

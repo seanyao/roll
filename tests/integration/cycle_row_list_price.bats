@@ -32,7 +32,8 @@ print(m.project_slug('${TEST_TMP}'))
 @test "E2E: cycle row shows opus-4-7 label and list-price cost from cumulative tokens" {
   local slug; slug=$(slug_for_cwd)
   local evfile="${ROLL_SHARED_ROOT}/loop/events-${slug}.ndjson"
-  # Cycle with 1M input + 1M output on opus → list price = 15 + 75 = $90.00
+  # Cycle with 1M input + 1M output on opus-4-7 → list price = 5 + 25 = $30.00
+  # (2026-05 repricing: Opus 4.5+ moved from $15/$75 to $5/$25, see lib/model_prices.py)
   local ts1="2026-05-19T22:37:00Z"
   local ts2="2026-05-19T22:55:00Z"
   cat > "$evfile" <<EOF
@@ -45,7 +46,7 @@ EOF
   [ "$status" -eq 0 ]
   # opus-4-7 model label appears in a cycle row
   [[ "$output" == *"opus-4-7"* ]]
-  # list-price cost ($90.00) appears, not the client-reported $12.34
-  [[ "$output" == *'$90.00'* ]]
+  # list-price cost ($30.00) appears, not the client-reported $12.34
+  [[ "$output" == *'$30.00'* ]]
   [[ "$output" != *'$12.34'* ]]
 }

@@ -208,4 +208,14 @@ setup() {
   [ "$status" -eq 0 ]
   # At least one matching unit test was selected.
   echo "$output" | grep -q "tests/unit/${picked_stem}"
+
+  # Pick an unrelated unit test (stem does NOT match) and assert it was not selected.
+  # Excludes empty results and the picked stem itself.
+  local unrelated
+  unrelated=$(ls tests/unit/*.bats 2>/dev/null \
+    | grep -v "tests/unit/${picked_stem}" \
+    | head -1)
+  if [ -n "$unrelated" ]; then
+    ! echo "$output" | grep -Fq "$unrelated"
+  fi
 }

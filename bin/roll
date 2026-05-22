@@ -7161,7 +7161,19 @@ cmd_ci() {
 # will switch to hard-fail. Output format mirrors a linter ("file:line:
 # message") so editors can navigate from it.
 _backlog_lint() {
-  local backlog="${1:-.roll/backlog.md}"
+  # FIX-102: --gate flag flips Phase 1 warn-only behavior to hard-fail.
+  # When passed, any violation makes the command exit 1 — used by the
+  # PreToolUse / Stop hook in ~/.claude/settings.json to actually block
+  # the assistant from leaving the backlog dirty.
+  local gate=0
+  local backlog=".roll/backlog.md"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --gate) gate=1 ;;
+      *) backlog="$1" ;;
+    esac
+    shift
+  done
   [ -f "$backlog" ] || { err "backlog not found: $backlog"; return 1; }
 
   local violations=0
@@ -7186,6 +7198,18 @@ _backlog_lint() {
       | sed -E 's|^\[[A-Z]+-[0-9]+\]\([^)]*\)[[:space:]]*||' \
       | sed -E 's|^[A-Z]+-[0-9]+[[:space:]]*||')
     local issues=""
+    # FIX-102: length check — backlog rows are an index page; descriptions
+    # must be one human sentence (≤120 chars). Longer = technical detail
+    # that belongs in the linked .roll/features/<epic>/<slug>.md.
+    if [ "${#body}" -gt 120 ]; then
+      issues="${issues:+${issues}, }length>${#body}"
+    fi
+    # FIX-102: code-fence check — backticks (`code`) signal technical jargon
+    # (commands, identifiers, paths). Keep description prose plain text;
+    # any code goes in the feature file.
+    if echo "$body" | grep -qF '`'; then
+      issues="${issues:+${issues}, }code-fence"
+    fi
     # Filenames: bare `something.ext` for common code/config extensions
     if echo "$body" | grep -qE '\b[A-Za-z_][A-Za-z0-9_.-]*\.(sh|bash|yaml|yml|json|js|ts|tsx|py|rb|go|rs|c|cpp|h)\b'; then
       issues="${issues:+${issues}, }filename"
@@ -7212,11 +7236,14 @@ _backlog_lint() {
   echo ""
   if [ "$violations" -gt 0 ]; then
     echo "  ${violations} violation(s) — see conventions/global/AGENTS.md §4"
+    if [ "$gate" = 1 ]; then
+      echo "  ${violations} 条违规 — --gate enabled, exiting 1"
+      return 1
+    fi
     echo "  ${violations} 条违规 — Phase 1: warn-only, not blocking"
   else
     echo "  No violations  无违规"
   fi
-  # Phase 1: warn-only. Exit 0 regardless.
   return 0
 }
 
@@ -7232,7 +7259,8 @@ cmd_backlog() {
   # ── Status management subcommands ─────────────────────────────────────────
   case "$subcmd" in
     lint)
-      _backlog_lint "$backlog"
+      shift
+      _backlog_lint "$@" "$backlog"
       return
       ;;
     block|defer|unblock|promote)

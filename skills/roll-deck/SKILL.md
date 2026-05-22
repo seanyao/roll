@@ -108,25 +108,17 @@ evidence:
 
 `total_slides` MUST match the number of `## Slide N` blocks. The validator (run by `roll slides build`) will reject mismatches.
 
-### 5. Prompt the user  提示用户
+### 5. Stop after writing  写完即停
 
-After writing, print a single bilingual block:
-
-```
-deck.md written → .roll/slides/<slug>/deck.md
-deck.md 已写入 → .roll/slides/<slug>/deck.md
-
-Next:  roll slides build <slug>
-下一步：roll slides build <slug>
-```
-
-Do not run `roll slides build` yourself — that is a deliberate human gate.
+Once `deck.md` is written, stop. Do not run `roll slides build` yourself — that
+is a deliberate human gate. The CLI prints the bilingual "Next" hint after the
+agent exits, so the agent should not duplicate it.
 
 ## Output format expectations
 
 - One file written: `.roll/slides/<slug>/deck.md`.
-- Final agent message ends with the bilingual "Next" hint above.
 - No HTML, no edits to any other file.
+- No "Next" hint in the agent's final message (the CLI prints it).
 
 ## Rules
 

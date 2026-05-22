@@ -460,6 +460,9 @@ EOF
   local state; state=$(_launchd_svc_state "loop" "$proj")
   [ "$state" = "stale" ]
 
+  rm -rf "$tmp_dir"
+}
+
 # ─── FIX-101: _launchctl_safe refuses to mutate launchd when sandboxed ──────
 
 @test "FIX-101: _launchctl_safe refuses mutating ops when _LAUNCHD_DIR is sandboxed (real binary path)" {
@@ -569,6 +572,8 @@ SHIM
   grep -q "bootstrap" "$launchctl_log"
 
   cd "$_UNIT_ORIG_DIR" 2>/dev/null || true
+  rm -rf "$tmp_dir"
+}
 
 @test "FIX-101: _launchctl_safe allows read-only ops regardless of sandbox state" {
   # Read-only subcommands (print, print-disabled, list, version) have no side

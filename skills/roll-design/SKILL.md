@@ -18,6 +18,10 @@ Discuss approaches, design architecture, plan requirements, and write to `.roll/
 - A solution needs to be designed before splitting into Stories
 - An existing plan needs to be written into `.roll/backlog.md`
 
+> **Doc-refresh discipline**: When splitting stories that change user-visible behavior, always append a closing "doc-refresh" story.
+> **文档刷新纪律**：拆出的 story 只要改变了用户可见行为，最后必须追加一张"文档刷新"收尾 story。
+> See [Doc Update Discipline](#doc-update-discipline) at the bottom of this file for the full rule.
+
 ## Use This Skill For
 
 - Approach exploration and comparison (discuss phase)
@@ -303,6 +307,11 @@ User Input
               │    - INVEST principles                   │
               │    - Bounded Context → US domain prefix  │
               │    - Priority ordering                   │
+              │    - **强制检查**: 若本批次任一 US 改了    │
+              │      用户可见行为（CLI 输出 / 命令参数 /  │
+              │      状态语义 / 错误提示），必须在末尾追加 │
+              │      一张 doc-refresh 收尾 story         │
+              │      （详见 Doc Update Discipline 一节）│
               └──────────────────┬──────────────────────┘
                                  │
                                  ▼
@@ -690,6 +699,39 @@ Note: `{DOMAIN}` maps to the Bounded Context name identified in DDD analysis.
 - Integration test: `tests/integration/{flow}.test.ts`
 ```
 
+### Closing Doc-Refresh Story Template — Phase N.M 收尾文档
+
+When any preceding US in the batch changes user-visible behavior, append this template story at the end of the batch. Wire it as `depends-on:` against every preceding user-facing US so it runs last.
+
+```markdown
+<a id="us-{domain}-{n}"></a>
+## US-{DOMAIN}-{N} Phase {N.M} 用户文档刷新（中英双轨） 📋
+
+**Created**: {YYYY-MM-DD}
+
+- As a roll user reading the docs
+- I want the user-facing documentation to match the new behavior shipped in this Phase
+- So that the next person reading the guide / README / `--help` does not hit a stale version
+
+**AC:**
+- [ ] Update each affected doc file listed below; **English line and Chinese line on separate lines**, never inline
+- [ ] `roll <cmd> --help` output reflects new flags / commands / status semantics (paste verified output)
+- [ ] README index links to any new guide pages
+- [ ] Error-message changes are mirrored in troubleshooting / FAQ sections
+- [ ] Verified: no doc page still describes the pre-Phase behavior
+
+**Files:**
+- `guide/en/{topic}.md`
+- `guide/zh/{topic}.md`
+- `README.md` (index entry)
+- `{any other user-facing doc touched by the Phase}`
+
+**Dependencies:**
+- Depends on: {every preceding user-facing US in this batch}
+- Worked example: 参考 `features/authoring/slide-deck-generator.md` 的 US-DECK-015 ——
+  roll slides Phase 1.5 把 6 张 user-visible US 末尾合并成一张 doc-refresh story 的范例。
+```
+
 ---
 
 ## INVEST Principles
@@ -768,3 +810,47 @@ Before creating any file or directory:
 4. **Follow what already exists** — introduce new patterns only when the current structure has no precedent
 
 > `roll init` no longer asks for project type. Skills are responsible for reading context and acting accordingly.
+
+---
+
+<a id="doc-update-discipline"></a>
+## Doc Update Discipline
+
+When `$roll-design` splits a feature into stories, **the closing tasking step is
+always a doc-refresh story whenever any preceding US changes user-visible
+behavior**. This is mandatory, not optional — without it, code ships and the
+docs silently drift to the previous version, and only the next user to read the
+guide notices.
+
+**When a separate doc-refresh story IS required (任一为真即触发)：**
+- 任一 US 改了 **CLI 输出**（新增/修改输出行、表头、颜色、emoji 语义）
+- 任一 US 改了 **命令参数**（新增/重命名 flag、改变 default、收紧/放宽校验）
+- 任一 US 改了 **状态语义**（backlog 状态、cycle 状态机、退出码含义）
+- 任一 US 改了 **错误提示** / 用户可读日志文案
+- 任一 US 新增/删除/重命名一个用户能直接调用的命令
+
+**When it can be skipped (纯内部变更，用户感知不到)：**
+- 纯内部重构（内部函数改名、模块边界调整、测试沙箱化）
+- CI / hooks / 工具链修复
+- 安全 / 隔离基础设施（沙箱配置、权限矩阵内部调整）
+- 测试基础设施 / fixture 数据更新
+
+**Checklist for the doc-refresh story (中英双语必需)：**
+- [ ] `guide/en/<topic>.md` — English guide updated
+- [ ] `guide/zh/<topic>.md` — Chinese guide updated
+- [ ] `README.md` index links to any new doc page
+- [ ] `--help` output snapshot matches new flags / commands / status semantics
+- [ ] Error-message strings reflected in troubleshooting / FAQ
+- [ ] **Bilingual rule**: English and Chinese on **separate lines**, never inline
+      （遵循 project CLAUDE.md 中 Bilingual Output Convention）
+
+**How to wire the doc-refresh story:**
+1. Place it **last** in the batch
+2. `depends-on:` lists **every** preceding user-facing US in the batch
+3. Title 用 "Phase N.M 用户文档刷新（中英双轨）" 模板（见 [Story Format](#story-format) 中的模板）
+4. Cite a worked example in its Dependencies note — current best reference is
+   `features/authoring/slide-deck-generator.md` US-DECK-015 (roll slides Phase 1.5)
+
+> Self-validation: this very skill was strengthened via US-SKILL-009; the
+> roll slides Phase 1.5 tasking (US-DECK-015) is the canonical worked example
+> of the discipline in action.

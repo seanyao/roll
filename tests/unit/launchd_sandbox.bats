@@ -173,6 +173,58 @@ teardown() { unit_teardown_cd; }
   rm -rf "$tmp_dir"
 }
 
+@test "FIX-093 tripwire: disabled-overrides db com.roll.* count unchanged after _install_launchd_plists in a sandbox" {
+  # End-to-end smoke for the FIX-093 fix:
+  #
+  # The historical leak was: tests called `_install_launchd_plists "$proj"`
+  # directly with `_LAUNCHD_DIR` and `_SHARED_ROOT` as sibling tmp dirs (so
+  # FIX-090's auto-detect didn't fire) and without exporting
+  # `_LAUNCHD_SKIP_REGISTRY=1` (so the explicit gate also didn't fire). The
+  # `launchctl disable gui/<UID>/<label>` writes inside _install_launchd_plists
+  # then hit the host's disabled-overrides db. Across ~years of test runs this
+  # accumulated 6000+ ghost `"com.roll.*" => enabled` entries — the originally-
+  # disable'd labels later flipped to `enabled` by FIX-081's symmetric cleanup,
+  # but never *removed*.
+  #
+  # FIX-093 added `export _LAUNCHD_SKIP_REGISTRY=1` to `unit_setup` and
+  # `unit_setup_cd` so every unit test gates `_install_launchd_plists`'s
+  # launchctl calls regardless of `_LAUNCHD_DIR` placement. This tripwire
+  # reproduces the exact leak path inside a subshell and asserts the host's
+  # disabled-overrides db is byte-identical before/after.
+  local disabled_db="/private/var/db/com.apple.xpc.launchd/disabled.$(id -u).plist"
+  [[ -r "$disabled_db" ]] || skip "disabled-overrides db not readable on this host"
+
+  local before
+  before=$(/usr/bin/plutil -convert xml1 -o - "$disabled_db" 2>/dev/null \
+           | grep -cE '<key>com\.roll\.' || true)
+
+  # Reproduce the historical leak scenario exactly: _LAUNCHD_DIR and
+  # _SHARED_ROOT are siblings (not parent/child), so FIX-090's auto-detect
+  # would NOT fire. With FIX-093's env gate exported by unit_setup_cd, the
+  # explicit `_LAUNCHD_SKIP_REGISTRY=1` MUST stop the launchctl calls.
+  local leak_tmp="${TEST_TMP}/leak-repro"
+  mkdir -p "${leak_tmp}/proj" "${leak_tmp}/LaunchAgents" "${leak_tmp}/shared/loop"
+  cd "$_UNIT_ORIG_DIR"
+  env -u _SHARED_ROOT -u _LAUNCHD_DIR bash -c "
+    export BATS_TEST_FILENAME='${BATS_TEST_FILENAME}'
+    export _LAUNCHD_DIR='${leak_tmp}/LaunchAgents'
+    export _SHARED_ROOT='${leak_tmp}/shared'
+    export _LAUNCHD_SKIP_REGISTRY=1
+    source '$ROLL_BIN' >/dev/null 2>&1 || true
+    _install_launchd_plists '${leak_tmp}/proj' >/dev/null 2>&1 || true
+  "
+
+  local after
+  after=$(/usr/bin/plutil -convert xml1 -o - "$disabled_db" 2>/dev/null \
+          | grep -cE '<key>com\.roll\.' || true)
+
+  if [ "$before" != "$after" ]; then
+    printf 'FIX-093 leak detected: com.roll.* keys in disabled.<UID>.plist went %s → %s\n' \
+      "$before" "$after" >&2
+    return 1
+  fi
+}
+
 @test "tripwire: real ~/Library/LaunchAgents/com.roll.* count unchanged after running roll setup in a sandbox" {
   # End-to-end smoke: invoke a real `roll setup` flow through a subprocess
   # whose env is fully sandboxed, then confirm the developer's real launchd

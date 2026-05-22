@@ -24,6 +24,13 @@ _sandbox_loop_state() {
 unit_setup() {
   TEST_TMP="$(mktemp -d)"
   _sandbox_loop_state
+  # FIX-093: gate every launchctl call inside _install_launchd_plists. Without
+  # this, tests that call _install_launchd_plists directly (e.g. launchd.bats)
+  # hit the host gui domain and leak ghost entries into
+  # /private/var/db/com.apple.xpc.launchd/disabled.<UID>.plist. FIX-090's
+  # auto-detect only fires when _LAUNCHD_DIR is under _SHARED_ROOT — many unit
+  # tests set them as siblings, so the env gate is the reliable lever.
+  export _LAUNCHD_SKIP_REGISTRY=1
   source "$ROLL_BIN"
   export NO_COLOR=1
   export TERM=dumb
@@ -39,6 +46,9 @@ unit_setup_cd() {
   _UNIT_ORIG_DIR="$PWD"
   TEST_TMP="$(mktemp -d)"
   _sandbox_loop_state
+  # FIX-093: see unit_setup above — gate launchctl calls so tests cannot leak
+  # ghost entries into the host's disabled overrides db.
+  export _LAUNCHD_SKIP_REGISTRY=1
   source "$ROLL_BIN"
   cd "$TEST_TMP"
   export NO_COLOR=1

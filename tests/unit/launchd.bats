@@ -2,6 +2,12 @@
 # Tests for launchd plist helpers (macOS loop scheduling)
 
 setup() {
+  # FIX-093: gate every `launchctl` call inside `_install_launchd_plists`.
+  # Without this, each of the 41 `_install_launchd_plists` calls in this file
+  # hits the host gui domain and leaks ghost entries into
+  # /private/var/db/com.apple.xpc.launchd/disabled.<UID>.plist — observed
+  # +111 ghost rows per full-suite run before the gate was added.
+  export _LAUNCHD_SKIP_REGISTRY=1
   source "${BATS_TEST_DIRNAME}/../../bin/roll"
 }
 
@@ -383,6 +389,9 @@ setup() {
 }
 
 @test "_install_launchd_plists: content changed + service loaded → reload via bootout+bootstrap (FIX-027)" {
+  # FIX-093: this test asserts launchctl was called with specific args; opt out
+  # of the unit_setup-wide skip so the function() override below catches them.
+  unset _LAUNCHD_SKIP_REGISTRY
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
@@ -412,6 +421,8 @@ setup() {
 }
 
 @test "_install_launchd_plists: bootout targets gui/<uid>/<label> and bootstrap targets gui/<uid> <plist> (FIX-027)" {
+  # FIX-093: see sibling FIX-027 test above — opt out so launchctl override fires.
+  unset _LAUNCHD_SKIP_REGISTRY
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
@@ -486,6 +497,9 @@ setup() {
 }
 
 @test "_install_launchd_plists: brand-new plist + not loaded → launchctl disable blocks FSEvents auto-load (FIX-059)" {
+  # FIX-093: this test asserts launchctl disable was emitted; opt out of the
+  # unit_setup gate so the function() override below catches the call.
+  unset _LAUNCHD_SKIP_REGISTRY
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"

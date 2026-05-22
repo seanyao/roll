@@ -45,6 +45,19 @@ integration_setup() {
 # domain (via `roll loop on`) BEFORE deleting TEST_TMP. Otherwise the launchd
 # registration outlives the plist file, leaving a ghost service whose path no
 # longer exists. See FIX-016.
+#
+# FIX-093: must use `/bin/launchctl` absolute path so the PATH shim that
+# cmd_loop.bats installs is bypassed — this teardown is defensive cleanup of
+# any *real* registration that escaped both `_LAUNCHD_SKIP_REGISTRY=1` and
+# the shim. Going through the shim here would be a no-op (its state is
+# already torn down with TEST_TMP) and would miss any actual leak.
+#
+# FIX-093: ALSO removed the symmetric `launchctl enable` call that FIX-081
+# added. `enable` on a never-disabled label can itself ADD a `"LABEL" =>
+# enabled` entry to the host's disabled-overrides db — which is exactly the
+# ghost pollution this whole patch series is trying to stop. With FIX-090 +
+# the unit_setup gate + the cmd_loop.bats shim, no test path should reach a
+# real `launchctl disable` anymore, so the symmetric enable is unnecessary.
 integration_teardown() {
   if [[ -n "${TEST_TMP:-}" ]]; then
     if [[ "$(uname)" == "Darwin" ]] && [[ -d "${TEST_TMP}/Library/LaunchAgents" ]]; then
@@ -54,13 +67,7 @@ integration_teardown() {
         label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' \
                 | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
         if [[ -n "$label" ]]; then
-          launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-          # FIX-081: `_install_launchd_plists` writes `launchctl disable` on
-          # first install (FIX-059 auto-bootstrap guard) and that write lands
-          # in the host's /private/var/db disable list regardless of HOME
-          # sandbox. Without a symmetric enable, every test leaves a permanent
-          # `com.roll.*.tmp-*` ghost in the host's `launchctl print-disabled`.
-          launchctl enable "gui/$(id -u)/$label" 2>/dev/null || true
+          /bin/launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
         fi
       done
     fi

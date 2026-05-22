@@ -225,6 +225,131 @@ teardown() { unit_teardown_cd; }
   fi
 }
 
+@test "FIX-097: _launchd_should_skip_registry returns 0 with _LAUNCHD_SKIP_REGISTRY=1" {
+  export _LAUNCHD_SKIP_REGISTRY=1
+  _launchd_should_skip_registry
+}
+
+@test "FIX-097: _launchd_should_skip_registry returns 0 when _LAUNCHD_DIR is under _SHARED_ROOT" {
+  unset _LAUNCHD_SKIP_REGISTRY
+  _SHARED_ROOT="${TEST_TMP}/shared"
+  _LAUNCHD_DIR="${_SHARED_ROOT}/LaunchAgents"
+  _launchd_should_skip_registry
+}
+
+@test "FIX-097: _launchd_should_skip_registry returns 1 when both env and path are production" {
+  unset _LAUNCHD_SKIP_REGISTRY
+  _SHARED_ROOT="${HOME}/.shared/roll"
+  _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
+  ! _launchd_should_skip_registry
+}
+
+@test "FIX-097: auto-sandbox block also exports _LAUNCHD_SKIP_REGISTRY=1 in a tmp-pathed subshell" {
+  # Simulate a user manually reproducing a bug from /private/tmp/<dir>: the
+  # auto-sandbox kicks in, but until FIX-097 the env gate was not flipped so
+  # _loop_on / _loop_off / _loop_pause / _loop_resume happily called real
+  # launchctl against the sandboxed plist path, leaking ghost agents.
+  local resolved
+  resolved=$(env -u _LAUNCHD_SKIP_REGISTRY -u _LAUNCHD_DIR -u _SHARED_ROOT bash -c "
+    export BATS_TEST_FILENAME='${BATS_TEST_FILENAME}'
+    source '$ROLL_BIN' >/dev/null 2>&1
+    printf %s \"\${_LAUNCHD_SKIP_REGISTRY:-}\"
+  ")
+  [ "$resolved" = "1" ]
+}
+
+@test "FIX-097: _loop_on in sandbox does NOT invoke real launchctl load" {
+  # Repro: user runs `roll loop on` from /private/tmp/<dir>. Without FIX-097,
+  # _install_launchd_plists's bootstrap was gated but the second pass inside
+  # _loop_on (the `launchctl load -w` block) was not — so plists got
+  # registered into gui/<uid>, becoming ghost agents when the tmp dir vanished.
+  cd "$_UNIT_ORIG_DIR"
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _SHARED_ROOT="${tmp_dir}/shared"; mkdir -p "${_SHARED_ROOT}/loop"
+  _LAUNCHD_DIR="${_SHARED_ROOT}/LaunchAgents"
+  local call_log="${tmp_dir}/launchctl_calls.log"
+  export _LAUNCHD_SKIP_REGISTRY=1
+
+  _launchd_is_loaded() { return 1; }   # force the load branch
+  launchctl() { echo "$*" >> "$call_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  cd "$proj"
+  _loop_on >/dev/null 2>&1 || true
+
+  if [[ -s "$call_log" ]]; then
+    printf 'FIX-097 leak: _loop_on invoked launchctl despite skip gate:\n%s\n' \
+      "$(cat "$call_log")" >&2
+    return 1
+  fi
+
+  rm -rf "$tmp_dir"
+  unset _LAUNCHD_SKIP_REGISTRY
+}
+
+@test "FIX-097: _loop_off in sandbox does NOT invoke real launchctl unload/enable" {
+  cd "$_UNIT_ORIG_DIR"
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _SHARED_ROOT="${tmp_dir}/shared"; mkdir -p "${_SHARED_ROOT}/loop"
+  _LAUNCHD_DIR="${_SHARED_ROOT}/LaunchAgents"
+  local call_log="${tmp_dir}/launchctl_calls.log"
+  export _LAUNCHD_SKIP_REGISTRY=1
+
+  _launchd_is_loaded() { return 0; }   # force the unload branch
+  launchctl() { echo "$*" >> "$call_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  cd "$proj"
+  _loop_off >/dev/null 2>&1 || true
+
+  if [[ -s "$call_log" ]]; then
+    printf 'FIX-097 leak: _loop_off invoked launchctl despite skip gate:\n%s\n' \
+      "$(cat "$call_log")" >&2
+    return 1
+  fi
+
+  rm -rf "$tmp_dir"
+  unset _LAUNCHD_SKIP_REGISTRY
+}
+
+@test "FIX-097: _doctor_launchd_stale_section reports plists pointing to vanished paths" {
+  cd "$_UNIT_ORIG_DIR"
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"; mkdir -p "$_LAUNCHD_DIR"
+
+  # Plant a stale plist whose WorkingDirectory points to a removed sandbox.
+  local vanished="${tmp_dir}/proj-that-was-deleted"
+  cat > "${_LAUNCHD_DIR}/com.roll.loop.stale-fix097.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.roll.loop.stale-fix097</string>
+  <key>WorkingDirectory</key><string>${vanished}</string>
+</dict>
+</plist>
+EOF
+  # And a live plist whose path still exists — must NOT be reported.
+  local live_proj="${tmp_dir}/proj-live"; mkdir -p "$live_proj"
+  cat > "${_LAUNCHD_DIR}/com.roll.loop.live-fix097.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.roll.loop.live-fix097</string>
+  <key>WorkingDirectory</key><string>${live_proj}</string>
+</dict>
+</plist>
+EOF
+
+  run _doctor_launchd_stale_section
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stale-fix097"* ]]
+  [[ "$output" != *"live-fix097"* ]]
+
+  rm -rf "$tmp_dir"
+}
+
 @test "tripwire: real ~/Library/LaunchAgents/com.roll.* count unchanged after running roll setup in a sandbox" {
   # End-to-end smoke: invoke a real `roll setup` flow through a subprocess
   # whose env is fully sandboxed, then confirm the developer's real launchd

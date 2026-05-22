@@ -892,6 +892,40 @@ HINT
 # in (or opted out) don't get spammed each upgrade.
 cmd_doctor() {
   _doctor_pr_section
+  _doctor_launchd_stale_section
+}
+
+# FIX-097: scan ${_LAUNCHD_DIR}/com.roll.*.plist for entries whose
+# WorkingDirectory no longer exists on disk. These are the ghost agents left
+# behind when a user manually reproduces a bug under /private/tmp/ or
+# /var/folders/ — the auto-sandbox redirects plist writes but launchctl
+# bootstrap (before this fix) registered them anyway. Print labels +
+# cleanup hint; never auto-delete (host launchctl state is user-owned).
+_doctor_launchd_stale_section() {
+  [[ "$(uname)" == "Darwin" ]] || return 0
+  local dir="${_LAUNCHD_DIR:-${HOME}/Library/LaunchAgents}"
+  [[ -d "$dir" ]] || return 0
+
+  local found=0 plist label wd
+  for plist in "$dir"/com.roll.*.plist; do
+    [[ -e "$plist" ]] || continue
+    wd=$(awk '
+      /<key>WorkingDirectory<\/key>/ { getline; gsub(/.*<string>|<\/string>.*/, ""); print; exit }
+    ' "$plist" 2>/dev/null)
+    [[ -n "$wd" ]] || continue
+    [[ -d "$wd" ]] && continue
+    if [[ "$found" -eq 0 ]]; then
+      echo ""
+      echo "Stale launchd plists  无效的 launchd 服务"
+      echo ""
+      found=1
+    fi
+    label=$(basename "$plist" .plist)
+    echo "  ⚠ ${label}"
+    echo "    WorkingDirectory missing: ${wd}"
+    echo "    路径已失效，可清理: launchctl bootout gui/$(id -u)/${label}; rm '${plist}'"
+  done
+  return 0
 }
 
 _doctor_pr_section() {
@@ -3978,6 +4012,13 @@ if [ -z "${_LAUNCHD_DIR:-}" ]; then
         _LAUNCHD_DIR="${_SHARED_ROOT}/LaunchAgents"
         mkdir -p "$_LAUNCHD_DIR"
         export _LAUNCHD_DIR
+        # FIX-097: same trigger that sandboxed the plist FILE path must also
+        # short-circuit every `launchctl bootstrap/load/unload/enable` against
+        # that path. Otherwise a user who reproduces a bug under /private/tmp/
+        # or /var/folders/ ends up with sandboxed plists registered in their
+        # real gui/<uid> domain — when the tmp dir is cleaned, the agents become
+        # ghosts that fire forever (the historical 23:13 CST Terminal popup).
+        export _LAUNCHD_SKIP_REGISTRY=1
       fi
       unset _roll_in_test_ctx _roll_caller
       ;;
@@ -4102,6 +4143,25 @@ _detect_path_prepend() {
 _launchd_label() {
   local service="$1" project_path="$2"
   printf 'com.roll.%s.%s' "$service" "$(_project_slug "$project_path")"
+}
+
+# FIX-097: central skip predicate consulted by every launchctl invocation that
+# operates on a plist path Roll wrote. Returns 0 (skip) when either:
+#   - explicit: _LAUNCHD_SKIP_REGISTRY=1 was exported (tests, future opt-out)
+#   - implicit: _LAUNCHD_DIR is a child of _SHARED_ROOT (auto-sandbox active)
+# Returns 1 (do not skip) in production.
+#
+# History: FIX-090 introduced the same logic INSIDE _install_launchd_plists.
+# FIX-097 hoists it to a helper because the bootstrap call inside
+# _install_launchd_plists was not the only leak: _loop_on / _loop_off /
+# _loop_pause / _loop_resume each had bare `launchctl load/unload/enable`
+# calls that bypassed the gate.
+_launchd_should_skip_registry() {
+  [[ "${_LAUNCHD_SKIP_REGISTRY:-}" == "1" ]] && return 0
+  case "${_LAUNCHD_DIR:-}/" in
+    "${_SHARED_ROOT:-/nonexistent}"/*) return 0 ;;
+  esac
+  return 1
 }
 
 _launchd_plist_path() {
@@ -4842,27 +4902,10 @@ _install_launchd_plists() {
     local after; after=$(cat "$plist")
     if [[ "$before" != "$after" ]]; then
       updated=$((updated + 1))
-      # FIX-090: gate launchctl writes so a sandboxed plist never gets
-      # registered into the user's REAL gui/<uid> domain. Without this,
-      # `launchctl bootstrap gui/<uid> <sandbox-plist>` outlives TEST_TMP
-      # cleanup as a zombie that either fails silently (EX_CONFIG) or, when
-      # the label collides with the dev's project slug, displaces the real
-      # registration and kills the autonomous loop. Two gate paths:
-      #   - explicit: integration_setup exports _LAUNCHD_SKIP_REGISTRY=1
-      #   - implicit: if _LAUNCHD_DIR was auto-sandboxed under _SHARED_ROOT
-      #     (FIX-087 inner-runner.sh re-source path) we infer skip — callers
-      #     that genuinely want the launchctl flow override _LAUNCHD_DIR to
-      #     a path outside _SHARED_ROOT (unit tests; production has no
-      #     _SHARED_ROOT match against ~/Library/LaunchAgents).
-      # See helpers.bash and tests/unit/launchd_sandbox.bats.
-      local _skip_reg="${_LAUNCHD_SKIP_REGISTRY:-}"
-      if [[ -z "$_skip_reg" ]]; then
-        case "${_LAUNCHD_DIR:-}/" in
-          "${_SHARED_ROOT:-/nonexistent}"/*) _skip_reg=1 ;;
-          *) _skip_reg=0 ;;
-        esac
-      fi
-      if [[ "$_skip_reg" != "1" ]]; then
+      # FIX-090/FIX-097: gate launchctl writes via central helper so a
+      # sandboxed plist never gets registered into the user's REAL gui/<uid>
+      # domain. See _launchd_should_skip_registry for the predicate rules.
+      if ! _launchd_should_skip_registry; then
         if _launchd_is_loaded "$label"; then
           # FIX-027: use bootout/bootstrap so we don't disturb the label's
           # enabled flag in the launchd overrides db (which legacy
@@ -4959,6 +5002,10 @@ _loop_on() {
       local label; label=$(_launchd_label "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
         all_loaded=false
+        # FIX-097: skip real launchctl when running against a sandboxed plist
+        # path — otherwise auto-sandbox (HOME under /tmp/ or /var/folders/)
+        # would register ghost agents into the real gui/<uid> domain.
+        _launchd_should_skip_registry && continue
         launchctl load -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
       fi
     done
@@ -5011,10 +5058,14 @@ _loop_off() {
 
   if [[ "$(uname)" == "Darwin" ]]; then
     local any_loaded=false
+    local _skip_off; _launchd_should_skip_registry && _skip_off=1 || _skip_off=0
     for svc in loop dream brief; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       if _launchd_is_loaded "$label"; then
         any_loaded=true
+        # FIX-097: skip real launchctl in sandbox to avoid touching the user's
+        # real launchd registry.
+        [[ "$_skip_off" == "1" ]] && continue
         launchctl unload -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
       fi
     done
@@ -5034,6 +5085,8 @@ _loop_off() {
       # disable list, polluting `launchctl print-disabled` forever even after
       # the project dir, plists, and ~/.roll are gone.
       local label; label=$(_launchd_label "$svc" "$project_path")
+      # FIX-097: same gate — never touch host launchctl from a sandbox.
+      [[ "$_skip_off" == "1" ]] && continue
       launchctl enable "gui/${uid}/${label}" 2>/dev/null || true
     done
     ok "Loop disabled  已停用"
@@ -5214,7 +5267,10 @@ _loop_pause() {
     if ! _launchd_is_loaded "$label"; then
       warn "Loop not enabled — nothing to pause  loop 未启用，无需暂停"; return 0
     fi
-    launchctl unload -w "$(_launchd_plist_path "loop" "$project_path")" 2>/dev/null || true
+    # FIX-097: never touch host launchctl from a sandboxed plist path.
+    if ! _launchd_should_skip_registry; then
+      launchctl unload -w "$(_launchd_plist_path "loop" "$project_path")" 2>/dev/null || true
+    fi
   else
     local slug; slug=$(_project_slug "$project_path")
     mkdir -p "${_SHARED_ROOT}/loop"
@@ -5234,7 +5290,8 @@ _loop_resume() {
     if [[ "$(uname)" == "Darwin" ]]; then
       local label; label=$(_launchd_label "loop" "$project_path")
       local plist; plist=$(_launchd_plist_path "loop" "$project_path")
-      if [[ -f "$plist" ]]; then
+      if [[ -f "$plist" ]] && ! _launchd_should_skip_registry; then
+        # FIX-097: never touch host launchctl from a sandboxed plist path.
         launchctl load -w "$plist" 2>/dev/null || true
       fi
     else

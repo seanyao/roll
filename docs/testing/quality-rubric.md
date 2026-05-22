@@ -1,0 +1,251 @@
+# Test Quality Rubric
+
+> Scope: bats tests in `tests/`, used by `roll-.dream` Scan 7 to surface
+> anti-patterns as structured REFACTOR entries.
+> Chinese version: [quality-rubric.zh.md](./quality-rubric.zh.md)
+
+This rubric publishes six anti-patterns that make tests give wrong signal —
+either false-positive (red on unrelated change) or false-negative (green
+while production is broken). Each category has the same four parts:
+
+- **Definition** — what the anti-pattern is
+- **Signals** — how to spot it from the test file alone
+- **Fix template** — minimal repair pattern (not a full rewrite)
+- **Real example** — an actual occurrence inside this repo
+
+Categories are numbered ❶ through ❻; `roll-.dream` tags each finding with
+the matching number so downstream filtering is mechanical.
+
+---
+
+## ❶ Hardcoded business data in assertions
+
+### Definition
+
+The test asserts a literal business value (price, version string, product
+copy, model name) instead of importing the value from the module under
+test or from a versioned fixture. When the business value changes, every
+unrelated test that hardcoded the old value turns red even though the
+logic under test still works.
+
+### Signals
+
+- Bare numeric or string literals inside `[[ "$output" == *"..."*` /
+  `[ "$output" = "..." ]` that match values living in the source module.
+- The same literal appears in ≥2 test files (price tables, version
+  numbers, model identifiers).
+- The test file is not the canonical owner of the value (e.g. a runner
+  test asserts a price, but pricing lives in `lib/model_prices.py`).
+
+### Fix template
+
+```bash
+# BEFORE
+@test "opus rate is 5/25" {
+  run my_cmd
+  [[ "$output" == *"5.0 25.0"* ]]
+}
+
+# AFTER — import the value from the source of truth
+@test "opus rate matches PRICES[claude-opus-4-7]" {
+  expected=$(python3 -c "import lib.model_prices as m; \
+    p=m.PRICES['claude-opus-4-7']; print(p['in'], p['out'])")
+  run my_cmd
+  [[ "$output" == *"$expected"* ]]
+}
+```
+
+Or replace the literal with an injection fixture (`tests/fixtures/prices.json`)
+so the value lives in one place and only assertions on the **formula**
+remain in the test.
+
+### Real example
+
+`tests/unit/model_prices.bats` lines 15–31 hardcode the opus/sonnet/haiku
+rates (`5.0 25.0`, `3.0 15.0`, `1.0 5.0`) directly in the assertion bodies.
+Any pricing adjustment on the source module turns these tests red without
+revealing any actual regression in the rate-resolution logic.
+
+---
+
+## ❷ Over-mocking
+
+### Definition
+
+The test mocks a boundary it should be hitting for real — database,
+filesystem, child-process spawn, git command — so the test passes against
+a mock that doesn't behave like the real thing. The test ships green; the
+first integration run breaks.
+
+### Signals
+
+- `function git() { … }` / `function gh() { … }` overrides at the top of
+  a unit test that exercises real git or gh behavior.
+- A SQL or filesystem call replaced with an inline stub returning a
+  hand-rolled string.
+- Mocks live in the test file itself rather than in `tests/helpers/`,
+  signaling they were added ad-hoc rather than shared.
+
+### Fix template
+
+```bash
+# Use a real ephemeral substrate (tmp git repo, sqlite file, tmpdir).
+# Tear it down in teardown(). The mock disappears entirely.
+setup() {
+  TMP=$(mktemp -d); cd "$TMP"; git init -q
+}
+teardown() { rm -rf "$TMP"; }
+```
+
+If a true boundary cannot be exercised in unit scope (network calls,
+launchctl, etc.), move the test to `tests/integration/` and accept it
+runs in the slow tier — not mocked.
+
+### Real example
+
+Watch for ad-hoc `function gh() { echo '{...}' }` overrides at the top of
+unit tests that test loop-PR routing. The fix is to use bats helpers in
+`tests/helpers/` so the same fake is shared, deliberate, and discoverable.
+
+---
+
+## ❸ Asserting on implementation details
+
+### Definition
+
+The test asserts on the *shape* of internal state (private function
+names, intermediate variable contents, file path of an internal cache)
+rather than the observable behavior. A refactor that preserves behavior
+breaks the test, blocking the refactor for no good reason.
+
+### Signals
+
+- `grep -q '_internal_helper' "$output"` — asserting a private symbol
+  name is leaked to output.
+- `[[ "$(cat .roll/internal/_cache.tmp)" == ... ]]` — asserting on an
+  internal cache file path that the public API never promised.
+- The assertion would still pass after a meaningful behavioral
+  regression because it checks the wrong layer.
+
+### Fix template
+
+Re-anchor the assertion to the **public effect**: exit code, observable
+output, state visible to a caller. If the internal detail is the only
+thing visible, the production code probably needs a thin public API to
+expose the behavior intentionally.
+
+### Real example
+
+Tests asserting `grep -q '_loop_check_depends_on' <output>` would break
+the moment the helper is renamed, even though the gating logic is
+unchanged. The right assertion is "story X is skipped because dep Y
+is unsatisfied," verified through the public side effect (story stays
+📋 Todo, log line emitted).
+
+---
+
+## ❹ Fixture order coupling
+
+### Definition
+
+Tests share mutable state (a file, an env var, a temp dir) and rely on
+running in a specific order. Parallel runs, `--filter`, or reshuffling
+cause sporadic failures that look like flakes.
+
+### Signals
+
+- A test reads state another test in the same file wrote.
+- `setup_file()` creates state that `teardown_file()` never tears down,
+  and a later test depends on it.
+- The test passes alone but fails inside the suite (or vice versa).
+
+### Fix template
+
+Move all setup into `setup()` (per-test) instead of `setup_file()`. Each
+test creates its own tmpdir / env / fixture, asserts, and tears down.
+Cross-test dependencies become explicit only when truly necessary, and
+even then they go through a named helper, not implicit ordering.
+
+### Real example
+
+Any bats file where `setup_file()` mutates `$HOME` or writes to a shared
+state-`<slug>.yaml` and a later test in the same file reads it without
+re-initializing is a candidate. The fix is per-test isolation through
+`mktemp -d` + an explicit `HOME=$tmp` override.
+
+---
+
+## ❺ Testing private functions / bypassing the public API
+
+### Definition
+
+The test reaches inside a module to call a private helper directly,
+asserting its return value. The helper can be renamed, inlined, or
+removed without changing behavior — but the test claims regression.
+
+### Signals
+
+- A test sources `lib/internal/foo.sh` and calls `_private_helper` by
+  name.
+- The function name starts with `_` (project convention for private),
+  yet a test depends on its signature.
+- The public API isn't exercised at all in the file; the test is
+  effectively testing the internal decomposition.
+
+### Fix template
+
+Route the call through the public entry point (`roll <cmd>` /
+`my-tool foo`). If the public API doesn't cover the case being tested,
+that's a feature gap — either the case is unreachable (delete the
+test) or the public API needs a new flag (add it intentionally).
+
+### Real example
+
+A test that does `source bin/roll; _loop_check_depends_on US-X` instead
+of running `roll loop now` and observing the skip decision in the run
+log. The first form locks the helper name; the second tests the
+behavior the user cares about.
+
+---
+
+## ❻ Asserting on framework behavior
+
+### Definition
+
+The test exercises bats itself (or pytest, jest, etc.) rather than the
+project code: asserting that `setup()` runs before tests, that `run`
+captures stderr, that a `@test` block exists. These assertions pass
+because the framework works; they tell us nothing about the project.
+
+### Signals
+
+- Assertions on bats internals: `$BATS_TEST_NUMBER`, `$BATS_SUITE_NAME`.
+- A test whose body is only setup/teardown verification with no call to
+  project code.
+- Tests added after a framework upgrade to "make sure bats still works."
+
+### Fix template
+
+Delete the test. Framework verification belongs upstream. If the project
+relies on a specific framework guarantee, document that contract in
+`tests/helpers/` and run one smoke test, not a category of them.
+
+### Real example
+
+A test that asserts `$BATS_TEST_NUMBER > 0` adds noise to every CI run
+without ever surfacing a project regression. The right place for that
+assurance is a one-time check in CI configuration, not in the suite.
+
+---
+
+## How `roll-.dream` consumes this rubric
+
+`roll-.dream` Scan 7 scans the test suite for each category's signals,
+emits at most 5 REFACTOR entries per cycle (rate cap to avoid drowning
+the backlog), and tags each entry with the matching marker:
+
+```markdown
+| REFACTOR-XXX | docs: <one-line description> [test-quality:❶] — flagged by dream YYYY-MM-DD | 📋 Todo |
+```
+
+The maintainer triages the REFACTOR queue in the morning brief.

@@ -341,6 +341,7 @@ EOF
   # The dead-code path: before FIX-098, _launchd_is_loaded returned true for a
   # stale agent, so all_loaded=true and 'roll loop on' returned early with
   # 'already enabled'. Now it must call enable+bootstrap for any unloaded label.
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only — _loop_on's launchd branch is gated by uname=Darwin"
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"

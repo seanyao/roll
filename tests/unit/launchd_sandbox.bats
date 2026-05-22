@@ -258,17 +258,23 @@ teardown() { unit_teardown_cd; }
 
 # ─── FIX-101: _launchctl_safe refuses to mutate launchd when sandboxed ──────
 
-@test "FIX-101: _launchctl_safe refuses mutating ops when _LAUNCHD_DIR is sandboxed" {
-  # When _LAUNCHD_DIR is anywhere other than ~/Library/LaunchAgents/, every
-  # mutating launchctl subcommand (bootstrap/bootout/enable/disable/load/unload)
-  # must be silently skipped — even when the caller forgot to gate on
-  # _LAUNCHD_SKIP_REGISTRY. Real launchctl must NOT be invoked.
+@test "FIX-101: _launchctl_safe refuses mutating ops when _LAUNCHD_DIR is sandboxed (real binary path)" {
+  # FIX-101 follow-up semantic: the tripwire only blocks the REAL launchctl
+  # binary. Function stubs (typical in bats) always pass through so existing
+  # tests that assert against captured calls keep working. To exercise the
+  # real-binary path here, unset any inherited function and use a PATH shim.
+  unset -f launchctl 2>/dev/null || true
   local tmp_dir; tmp_dir=$(mktemp -d)
   _LAUNCHD_DIR="${tmp_dir}/sandbox-launchagents"
   mkdir -p "$_LAUNCHD_DIR"
+  local shim_dir="${tmp_dir}/shim"; mkdir -p "$shim_dir"
   local log="${tmp_dir}/launchctl.log"
-  launchctl() { echo "$*" >> "$log"; }
-  export -f launchctl 2>/dev/null || true
+  cat > "${shim_dir}/launchctl" <<SHIM
+#!/bin/bash
+echo "\$*" >> "${log}"
+SHIM
+  chmod +x "${shim_dir}/launchctl"
+  PATH="${shim_dir}:$PATH"
 
   _launchctl_safe bootstrap "gui/$(id -u)" "${_LAUNCHD_DIR}/com.roll.loop.fake.plist"
   _launchctl_safe bootout   "gui/$(id -u)/com.roll.loop.fake"
@@ -277,10 +283,32 @@ teardown() { unit_teardown_cd; }
   _launchctl_safe load -w   "${_LAUNCHD_DIR}/com.roll.loop.fake.plist"
   _launchctl_safe unload -w "${_LAUNCHD_DIR}/com.roll.loop.fake.plist"
 
-  # The stub should never have been called — all six calls short-circuit
-  # inside _launchctl_safe before reaching the real launchctl.
+  # The PATH shim must never have been called — tripwire blocks real-binary
+  # mutating ops when _LAUNCHD_DIR is sandboxed.
   [ ! -f "$log" ]
 
+  rm -rf "$tmp_dir"
+}
+
+@test "FIX-101: _launchctl_safe passes through to function stub even when sandboxed" {
+  # Bats tests routinely stub launchctl as a function while _LAUNCHD_DIR is
+  # sandboxed, and assert against captured calls. The wrapper must let those
+  # reach the stub — stubs don't touch host launchd, so it's safe.
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  _LAUNCHD_DIR="${tmp_dir}/sandbox-launchagents"
+  mkdir -p "$_LAUNCHD_DIR"
+  local log="${tmp_dir}/launchctl.log"
+  launchctl() { echo "$*" >> "$log"; }
+  export -f launchctl 2>/dev/null || true
+
+  _launchctl_safe bootstrap "gui/$(id -u)" "${_LAUNCHD_DIR}/com.roll.loop.fake.plist"
+  _launchctl_safe bootout "gui/$(id -u)/com.roll.loop.fake"
+
+  [ -f "$log" ]
+  grep -q "bootstrap" "$log"
+  grep -q "bootout" "$log"
+
+  unset -f launchctl 2>/dev/null || true
   rm -rf "$tmp_dir"
 }
 

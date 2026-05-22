@@ -315,6 +315,7 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "FIX-097: _doctor_launchd_stale_section reports plists pointing to vanished paths" {
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only — _doctor_launchd_stale_section is gated by uname=Darwin (bin/roll:905)"
   cd "$_UNIT_ORIG_DIR"
   local tmp_dir; tmp_dir=$(mktemp -d)
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"; mkdir -p "$_LAUNCHD_DIR"

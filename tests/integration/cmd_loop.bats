@@ -210,16 +210,15 @@ teardown() {
 }
 
 @test "loop status (macOS): shows off-state when not loaded" {
-  skip "FIX-095: v2 loop status view does not differentiate off/on/not-installed — re-enable when v2 view exposes state again"
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   run_roll loop status
   [ "$status" -eq 0 ]
-  # Three-state display (US-AUTO-015): not installed | installed/off | enabled
+  # Three-state display (US-AUTO-015 / FIX-095):
+  # not installed | installed/off | enabled
   [[ "$output" == *"not installed"* ]] || [[ "$output" == *"installed/off"* ]] || [[ "$output" == *"未启用"* ]]
 }
 
 @test "loop status (macOS): shows enabled after loop on" {
-  skip "FIX-095: v2 loop status view does not differentiate off/on/not-installed — re-enable when v2 view exposes state again"
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   run_roll loop on
   run_roll loop status

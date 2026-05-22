@@ -48,3 +48,6 @@ npm-debug.log*
 # carry `.roll.yaml` don't accidentally push it before the next
 # `roll agent use` migrates the value.
 .roll.yaml
+
+# Antigravity CLI config (agy, successor to Gemini CLI)
+.antigravitycli/

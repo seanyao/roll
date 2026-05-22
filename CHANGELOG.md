@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Changed**: `roll loop status` — token 列现在显示 cache 费用，账单终于可解释
+
 ## v2026.522.2
 
 ### Changed

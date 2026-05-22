@@ -12,10 +12,10 @@ $1
 "
 }
 
-@test "PRICES: claude-opus-4-7 uses opus rates (in=15, out=75)" {
+@test "PRICES: claude-opus-4-7 uses opus rates (in=5, out=25)" {
   run run_py 'p = mp.PRICES["claude-opus-4-7"]; print(p["in"], p["out"])'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"15.0 75.0"* ]] || [[ "$output" == *"15 75"* ]]
+  [[ "$output" == *"5.0 25.0"* ]] || [[ "$output" == *"5 25"* ]]
 }
 
 @test "PRICES: claude-sonnet-4-6 uses sonnet rates (in=3, out=15)" {
@@ -30,10 +30,10 @@ $1
   [[ "$output" == *"1.0 5.0"* ]] || [[ "$output" == *"1 5"* ]]
 }
 
-@test "compute_list_cost: opus 1M input + 1M output = \$90" {
+@test "compute_list_cost: opus 1M input + 1M output = \$30" {
   run run_py 'print(round(mp.compute_list_cost("claude-opus-4-7", input_tokens=1_000_000, output_tokens=1_000_000), 2))'
   [ "$status" -eq 0 ]
-  [ "$output" = "90.0" ]
+  [ "$output" = "30.0" ]
 }
 
 @test "compute_list_cost: sonnet mixed token kinds" {
@@ -46,7 +46,7 @@ $1
 @test "compute_list_cost: claude-opus-4-7-20251001 (date suffix) resolves to opus rate" {
   run run_py 'print(round(mp.compute_list_cost("claude-opus-4-7-20251001", input_tokens=1_000_000), 2))'
   [ "$status" -eq 0 ]
-  [ "$output" = "15.0" ]
+  [ "$output" = "5.0" ]
 }
 
 @test "compute_list_cost: unknown model falls back to sonnet with stderr warn" {

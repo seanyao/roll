@@ -12,15 +12,26 @@ to sonnet rates with a stderr warning so dashboards don't blank out.
 import sys
 from typing import Dict, Optional
 
-# Rates per million tokens (USD).
+# Rates per million tokens (USD). cache_create = 5-minute cache write (1.25x
+# input). 1-hour cache writes (2x input) are not modeled — Roll loop uses the
+# default 5m caching only.
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
 PRICES: Dict[str, Dict[str, float]] = {
-    # Claude 4.x family (current as of 2026-05).
-    "claude-opus-4-7":    {"in": 15.00, "out": 75.00, "cache_create": 18.75, "cache_read": 1.50},
-    "claude-opus-4-6":    {"in": 15.00, "out": 75.00, "cache_create": 18.75, "cache_read": 1.50},
+    # Claude 4.x Opus family — 2026-05 repricing: Opus 4.5+ moved to
+    # $5/$25 base, 3x cheaper than Opus 4 / 4.1.
+    "claude-opus-4-7":    {"in":  5.00, "out": 25.00, "cache_create":  6.25, "cache_read": 0.50},
+    "claude-opus-4-6":    {"in":  5.00, "out": 25.00, "cache_create":  6.25, "cache_read": 0.50},
+    "claude-opus-4-5":    {"in":  5.00, "out": 25.00, "cache_create":  6.25, "cache_read": 0.50},
+    "claude-opus-4-1":    {"in": 15.00, "out": 75.00, "cache_create": 18.75, "cache_read": 1.50},
+    "claude-opus-4":      {"in": 15.00, "out": 75.00, "cache_create": 18.75, "cache_read": 1.50},
+    # Claude 4.x Sonnet family.
     "claude-sonnet-4-6":  {"in":  3.00, "out": 15.00, "cache_create":  3.75, "cache_read": 0.30},
+    "claude-sonnet-4-5":  {"in":  3.00, "out": 15.00, "cache_create":  3.75, "cache_read": 0.30},
     "claude-sonnet-4":    {"in":  3.00, "out": 15.00, "cache_create":  3.75, "cache_read": 0.30},
+    # Claude 4.x Haiku family.
     "claude-haiku-4-5":   {"in":  1.00, "out":  5.00, "cache_create":  1.25, "cache_read": 0.10},
-    # Older fallbacks
+    # Older / retired models (Bedrock & Vertex only for 3.5 Haiku).
+    "claude-haiku-3-5":   {"in":  0.80, "out":  4.00, "cache_create":  1.00, "cache_read": 0.08},
     "claude-3-5-sonnet":  {"in":  3.00, "out": 15.00, "cache_create":  3.75, "cache_read": 0.30},
 }
 

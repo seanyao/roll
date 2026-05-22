@@ -81,8 +81,9 @@ teardown() { unit_teardown_cd; }
 @test "_loop_resume: re-enables launchd when state is paused (macOS)" {
   local body
   body=$(awk '/^_loop_resume\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  # Must reference launchctl load for scheduler resume
-  echo "$body" | grep -qF 'launchctl load'
+  # Must reference launchctl load for scheduler resume. Post-FIX-101 the call
+  # goes through the _launchctl_safe wrapper, so accept either literal form.
+  echo "$body" | grep -qE '_?launchctl(_safe)? load'
 }
 
 @test "_loop_resume: clears paused state after scheduler resume (mocked launchd)" {

@@ -91,3 +91,74 @@ BACKLOG
   [ "$status" -eq 0 ]
   [[ "$output" == *"violation"* ]]
 }
+
+# ─── FIX-102: length + code-fence rules + --gate flag ──────────────────────
+
+@test "FIX-102: _backlog_lint detects rows longer than 120 chars" {
+  mkdir -p .roll
+  cat > .roll/backlog.md <<'MD'
+# Backlog
+
+## Epic: Test
+### Feature: t
+| Story | Description | Status |
+|-------|-------------|--------|
+| FIX-LONG | this is a deliberately verbose human sentence that drones on far beyond a reasonable backlog index row length and crosses the 120 char threshold without using jargon | 📋 Todo |
+MD
+  run _backlog_lint .roll/backlog.md
+  [[ "$output" == *"FIX-LONG"* ]]
+  [[ "$output" == *"length"* ]]
+}
+
+@test "FIX-102: _backlog_lint detects backtick code fence in descriptions" {
+  mkdir -p .roll
+  cat > .roll/backlog.md <<'MD'
+# Backlog
+
+## Epic: Test
+### Feature: t
+| Story | Description | Status |
+|-------|-------------|--------|
+| FIX-TICK | description mentions a command in backticks | 📋 Todo |
+MD
+  # Add a backtick row separately (heredoc with literal backticks needs care).
+  printf '| FIX-TICK2 | %s | %s |\n' '`some command` is mentioned here' '📋 Todo' >> .roll/backlog.md
+  run _backlog_lint .roll/backlog.md
+  [[ "$output" == *"FIX-TICK2"* ]]
+  [[ "$output" == *"code-fence"* ]]
+}
+
+@test "FIX-102: --gate flag flips warn-only to hard-fail" {
+  _seed_backlog_dirty
+  err() { echo "ERR: $*" >&2; }
+  # Without --gate: returns 0 (phase 1 default)
+  run _backlog_lint .roll/backlog.md
+  [ "$status" -eq 0 ]
+  # With --gate: returns 1
+  run _backlog_lint --gate .roll/backlog.md
+  [ "$status" -eq 1 ]
+}
+
+@test "FIX-102: --gate returns 0 when no violations" {
+  mkdir -p .roll
+  cat > .roll/backlog.md <<'MD'
+# Backlog
+
+## Epic: Test
+### Feature: t
+| Story | Description | Status |
+|-------|-------------|--------|
+| FIX-OK | 用户能看懂的一句人话 | 📋 Todo |
+MD
+  err() { echo "ERR: $*" >&2; }
+  run _backlog_lint --gate .roll/backlog.md
+  [ "$status" -eq 0 ]
+}
+
+@test "FIX-102: cmd_backlog lint forwards --gate flag" {
+  _seed_backlog_dirty
+  err() { echo "ERR: $*" >&2; }
+  run cmd_backlog lint --gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--gate enabled"* ]]
+}

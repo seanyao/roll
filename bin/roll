@@ -1947,7 +1947,7 @@ PY
   fi
   if [ "${#plists[@]}" -gt 0 ]; then
     for item in "${plists[@]}"; do
-      launchctl unload -w "$HOME/Library/LaunchAgents/$item" 2>/dev/null && echo "    unloaded     $item"
+      _launchctl_safe unload -w "$HOME/Library/LaunchAgents/$item" 2>/dev/null && echo "    unloaded     $item"
       rm -f "$HOME/Library/LaunchAgents/$item" 2>/dev/null
     done
   fi
@@ -3935,7 +3935,7 @@ PYEOF
 
   local old_plist=~/Library/LaunchAgents/com.roll.loop.${old_slug}.plist
   if [[ -f "$old_plist" ]]; then
-    launchctl unload "$old_plist" 2>/dev/null || true
+    _launchctl_safe unload "$old_plist" 2>/dev/null || true
     rm -f "$old_plist"
   fi
 
@@ -4832,6 +4832,44 @@ _launchd_is_loaded() {
   launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep -qF "\"$1\" => enabled"
 }
 
+# FIX-101 tripwire: refuse to mutate the host's launchd session when
+# _LAUNCHD_DIR has been sandboxed (i.e. is not the canonical
+# ${HOME}/Library/LaunchAgents). Tests that auto-sandbox _LAUNCHD_DIR for
+# isolation (FIX-087) may still forget to set _LAUNCHD_SKIP_REGISTRY=1 or
+# stub the launchctl binary; without this defensive layer the production
+# label's plist path can get overwritten with a transient sandbox path,
+# leading to launchd EX_CONFIG (exit 78) when the tmp dir is later cleaned
+# and the next scheduled fire can't find the plist. Read-only ops (print*,
+# list, version) are always allowed since they have no side effects.
+_launchctl_safe() {
+  # Read-only ops are always safe (no host launchd state mutation).
+  case "${1:-}" in
+    print|print-disabled|list|version|dumpstate|examine)
+      launchctl "$@"
+      return $?
+      ;;
+  esac
+  # If `launchctl` has been replaced by a function stub (typical in bats tests
+  # that want to assert against captured calls), pass through to the stub.
+  # Stubs by definition don't touch host launchd, so this is safe; and tests
+  # like `_install_launchd_plists: bootout targets gui/<uid>/<label>` rely on
+  # the literal call landing in their captured log.
+  if [[ "$(type -t launchctl 2>/dev/null)" == "function" ]]; then
+    launchctl "$@"
+    return $?
+  fi
+  # Real launchctl binary path: refuse to mutate when _LAUNCHD_DIR has been
+  # sandboxed (i.e. is not the canonical ${HOME}/Library/LaunchAgents). This
+  # is the FIX-101 defensive layer — when a test forgets to stub launchctl
+  # AND has _LAUNCHD_DIR sandboxed, prevent the call from reaching the host's
+  # production launchd and overwriting a live label's plist path.
+  local canonical="${HOME}/Library/LaunchAgents"
+  if [[ "${_LAUNCHD_DIR:-$canonical}" != "$canonical" ]]; then
+    return 0
+  fi
+  launchctl "$@"
+}
+
 _launchd_svc_state() {
   local svc="$1" project_path="$2"
   local label; label=$(_launchd_label "$svc" "$project_path")
@@ -4912,15 +4950,15 @@ _install_launchd_plists() {
           # unload/load no-`-w` wipes on macOS Sonoma+, causing
           # `roll loop status` to falsely report off after `roll update`).
           local uid; uid=$(id -u)
-          launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
-          launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
+          _launchctl_safe bootout "gui/${uid}/${label}" 2>/dev/null || true
+          _launchctl_safe bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
         elif [[ -z "$before" ]]; then
           # FIX-059: brand-new plist — macOS FSEvents auto-bootstraps any new
           # file dropped in ~/Library/LaunchAgents/, so projects never enabled
           # via 'roll loop on' would fire every hour. Immediately mark disabled
           # in the overrides db to block that auto-load.
           local uid; uid=$(id -u)
-          launchctl disable "gui/${uid}/${label}" 2>/dev/null || true
+          _launchctl_safe disable "gui/${uid}/${label}" 2>/dev/null || true
         fi
       fi
     fi
@@ -5006,7 +5044,7 @@ _loop_on() {
         # path — otherwise auto-sandbox (HOME under /tmp/ or /var/folders/)
         # would register ghost agents into the real gui/<uid> domain.
         _launchd_should_skip_registry && continue
-        launchctl load -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+        _launchctl_safe load -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
       fi
     done
 
@@ -5066,7 +5104,7 @@ _loop_off() {
         # FIX-097: skip real launchctl in sandbox to avoid touching the user's
         # real launchd registry.
         [[ "$_skip_off" == "1" ]] && continue
-        launchctl unload -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+        _launchctl_safe unload -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
       fi
     done
     if ! $any_loaded; then
@@ -5087,7 +5125,7 @@ _loop_off() {
       local label; label=$(_launchd_label "$svc" "$project_path")
       # FIX-097: same gate — never touch host launchctl from a sandbox.
       [[ "$_skip_off" == "1" ]] && continue
-      launchctl enable "gui/${uid}/${label}" 2>/dev/null || true
+      _launchctl_safe enable "gui/${uid}/${label}" 2>/dev/null || true
     done
     ok "Loop disabled  已停用"
     return 0
@@ -5269,7 +5307,7 @@ _loop_pause() {
     fi
     # FIX-097: never touch host launchctl from a sandboxed plist path.
     if ! _launchd_should_skip_registry; then
-      launchctl unload -w "$(_launchd_plist_path "loop" "$project_path")" 2>/dev/null || true
+      _launchctl_safe unload -w "$(_launchd_plist_path "loop" "$project_path")" 2>/dev/null || true
     fi
   else
     local slug; slug=$(_project_slug "$project_path")
@@ -5292,7 +5330,7 @@ _loop_resume() {
       local plist; plist=$(_launchd_plist_path "loop" "$project_path")
       if [[ -f "$plist" ]] && ! _launchd_should_skip_registry; then
         # FIX-097: never touch host launchctl from a sandboxed plist path.
-        launchctl load -w "$plist" 2>/dev/null || true
+        _launchctl_safe load -w "$plist" 2>/dev/null || true
       fi
     else
       local slug; slug=$(_project_slug "$project_path")
@@ -7180,7 +7218,19 @@ cmd_ci() {
 # will switch to hard-fail. Output format mirrors a linter ("file:line:
 # message") so editors can navigate from it.
 _backlog_lint() {
-  local backlog="${1:-.roll/backlog.md}"
+  # FIX-102: --gate flag flips Phase 1 warn-only behavior to hard-fail.
+  # When passed, any violation makes the command exit 1 — used by the
+  # PreToolUse / Stop hook in ~/.claude/settings.json to actually block
+  # the assistant from leaving the backlog dirty.
+  local gate=0
+  local backlog=".roll/backlog.md"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --gate) gate=1 ;;
+      *) backlog="$1" ;;
+    esac
+    shift
+  done
   [ -f "$backlog" ] || { err "backlog not found: $backlog"; return 1; }
 
   local violations=0
@@ -7205,6 +7255,18 @@ _backlog_lint() {
       | sed -E 's|^\[[A-Z]+-[0-9]+\]\([^)]*\)[[:space:]]*||' \
       | sed -E 's|^[A-Z]+-[0-9]+[[:space:]]*||')
     local issues=""
+    # FIX-102: length check — backlog rows are an index page; descriptions
+    # must be one human sentence (≤120 chars). Longer = technical detail
+    # that belongs in the linked .roll/features/<epic>/<slug>.md.
+    if [ "${#body}" -gt 120 ]; then
+      issues="${issues:+${issues}, }length>${#body}"
+    fi
+    # FIX-102: code-fence check — backticks (`code`) signal technical jargon
+    # (commands, identifiers, paths). Keep description prose plain text;
+    # any code goes in the feature file.
+    if echo "$body" | grep -qF '`'; then
+      issues="${issues:+${issues}, }code-fence"
+    fi
     # Filenames: bare `something.ext` for common code/config extensions
     if echo "$body" | grep -qE '\b[A-Za-z_][A-Za-z0-9_.-]*\.(sh|bash|yaml|yml|json|js|ts|tsx|py|rb|go|rs|c|cpp|h)\b'; then
       issues="${issues:+${issues}, }filename"
@@ -7231,11 +7293,14 @@ _backlog_lint() {
   echo ""
   if [ "$violations" -gt 0 ]; then
     echo "  ${violations} violation(s) — see conventions/global/AGENTS.md §4"
+    if [ "$gate" = 1 ]; then
+      echo "  ${violations} 条违规 — --gate enabled, exiting 1"
+      return 1
+    fi
     echo "  ${violations} 条违规 — Phase 1: warn-only, not blocking"
   else
     echo "  No violations  无违规"
   fi
-  # Phase 1: warn-only. Exit 0 regardless.
   return 0
 }
 
@@ -7251,7 +7316,8 @@ cmd_backlog() {
   # ── Status management subcommands ─────────────────────────────────────────
   case "$subcmd" in
     lint)
-      _backlog_lint "$backlog"
+      shift
+      _backlog_lint "$@" "$backlog"
       return
       ;;
     block|defer|unblock|promote)

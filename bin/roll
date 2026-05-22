@@ -322,16 +322,25 @@ safe_copy() {
     if diff -q "$src" "$dst" &>/dev/null; then
       return  # identical, skip silently
     fi
+    # Non-interactive (stdin is not a terminal): silently overwrite.
+    # _run_setup_step / cmd_update redirect stdin to /dev/null and all
+    # stdout/stderr is suppressed — prompting here would either hang on a
+    # hidden read or silently default to overwrite. Be explicit.
+    if [[ ! -t 0 ]]; then
+      cp "$src" "$dst"
+      ok "Wrote: ${dst/#$HOME/~}  已写入: ${dst/#$HOME/~}"
+      return
+    fi
     echo ""
     warn "File exists and differs: ${dst/#$HOME/~}  文件已存在且内容不同: ${dst/#$HOME/~}"
     echo -e "  ${BOLD}Overwrite?${NC} [Y/n/d(iff)] "
-    read -r answer
+    read -r answer || answer="Y"
     case "$answer" in
       d|D|diff)
         diff --color=auto "$dst" "$src" || true
         echo ""
         echo -e "  ${BOLD}Overwrite?${NC} [Y/n] "
-        read -r answer2
+        read -r answer2 || answer2="Y"
         [[ "$answer2" =~ ^[Nn]$ ]] && { info "Skipped: ${dst/#$HOME/\~}  已跳过: ${dst/#$HOME/\~}"; return; }
         ;;
       n|N) info "Skipped: ${dst/#$HOME/~}  已跳过: ${dst/#$HOME/~}"; return ;;
@@ -726,7 +735,7 @@ _run_setup_step() {
   local watch="$1"; shift
   local before after
   before=$(_setup_snapshot "$watch")
-  if "$@" >/dev/null 2>&1; then
+  if "$@" </dev/null >/dev/null 2>&1; then
     after=$(_setup_snapshot "$watch")
     if [[ "$before" == "$after" ]]; then
       _ROLL_SETUP_STATE="unchanged"

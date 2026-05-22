@@ -4481,6 +4481,10 @@ WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0
 cd "${project_path}" 2>/dev/null || true
+# FIX-104: GC stale merged temp branches at cycle entry — before worktree setup
+# and before any early-exit gate (pre-run abort, CI red precheck). The post-claude
+# call site doesn't cover those paths, so merged branches accumulated on origin.
+_loop_cleanup_stale_cycle_branches "${project_path}" || true
 # FIX-040: orphan worktree recovery — scan for worktrees left by previous failed
 # cycles (publish failed or inner script was SIGKILL'd). Attempt to publish each
 # before starting the new cycle. Glob is chronological via timestamp in name.
@@ -4707,9 +4711,6 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
     echo "[loop] cycle \${CYCLE_ID}: claude failed (exit \$_exit); worktree preserved at \$WT"
   fi
 fi
-
-# US-AUTO-040: fallback GC — delete remote loop/cycle-* branches already merged to main.
-_loop_cleanup_stale_cycle_branches "${project_path}" || true
 
 # FIX-044 / Step 5: Write loop cycle run summary to runs.jsonl
 # Deterministic — runs in shell regardless of whether agent executes SKILL.md Step 5.

@@ -124,25 +124,17 @@ evidence:
 Project identity fields (`pkg_name`, `repo_url`, `site_url`, `author`) are copied verbatim from `package.json` — never infer or guess these values. `roll slides build` injects them into the HTML template (cover, back cover, footer).
 项目身份字段从 `package.json` 原样复制——禁止推测。`roll slides build` 会把它们注入 HTML 模板（封面、封底、页脚）。
 
-### 5. Prompt the user  提示用户
+### 5. Stop after writing  写完即停
 
-After writing, print a single bilingual block:
-
-```
-deck.md written → .roll/slides/<slug>/deck.md
-deck.md 已写入 → .roll/slides/<slug>/deck.md
-
-Next:  roll slides build <slug>
-下一步：roll slides build <slug>
-```
-
-Do not run `roll slides build` yourself — that is a deliberate human gate.
+Once `deck.md` is written, stop. Do not run `roll slides build` yourself — that
+is a deliberate human gate. The CLI prints the bilingual "Next" hint after the
+agent exits, so the agent should not duplicate it.
 
 ## Output format expectations
 
 - One file written: `.roll/slides/<slug>/deck.md`.
-- Final agent message ends with the bilingual "Next" hint above.
 - No HTML, no edits to any other file.
+- No "Next" hint in the agent's final message (the CLI prints it).
 
 ## Rules
 

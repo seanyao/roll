@@ -5704,15 +5704,28 @@ _loop_precheck_ci() {
 
   local commit; commit=$(git rev-parse HEAD 2>/dev/null) || return 0
 
+  # FIX-103: fetch both `status` and `conclusion`. Pre-run gate must distinguish
+  # a still-running CI (status=in_progress/queued/waiting, conclusion=null) from
+  # a genuinely red CI (conclusion=failure/cancelled/timed_out/...). Treating
+  # in_progress as red kills every cycle started within the first ~30s of a
+  # merge-triggered CI run.
   local runs
-  runs=$(gh -R "$slug" run list --commit "$commit" --json conclusion 2>/dev/null) || return 0
+  runs=$(gh -R "$slug" run list --commit "$commit" --json conclusion,status 2>/dev/null) || return 0
   [[ -z "$runs" || "$runs" == "[]" ]] && return 0
 
-  local failed
-  failed=$(echo "$runs" | jq -r '[.[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "skipped")] | length' 2>/dev/null || echo "0")
+  # Conclusions that block the loop. Anything else (success, skipped, neutral,
+  # or null while still running) is treated as pass/pending.
+  local failed_conclusions
+  failed_conclusions=$(echo "$runs" \
+    | jq -r '[.[] | select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out" or .conclusion=="action_required" or .conclusion=="startup_failure") | .conclusion] | unique | join(",")' \
+    2>/dev/null || echo "")
 
-  if [[ "$failed" -gt 0 ]]; then
+  if [[ -n "$failed_conclusions" ]]; then
     local short; short=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+    local run_states
+    run_states=$(echo "$runs" \
+      | jq -r '[.[] | "\(.status // "?")/\(.conclusion // "null")"] | unique | join(", ")' \
+      2>/dev/null || echo "?")
     err "Pre-run CI check: HEAD CI is red — refuse to build on broken base (${short})  HEAD CI 红，拒绝在破损的基础上构建"
     mkdir -p "$(dirname "$_LOOP_ALERT")"
     cat > "$_LOOP_ALERT" << EOF
@@ -5721,6 +5734,8 @@ _loop_precheck_ci() {
 **Time**: $(date '+%Y-%m-%d %H:%M')
 **Commit**: ${short}
 **Reason**: HEAD CI is red — loop refused to build on a broken base  HEAD CI 红，loop 拒绝在破损的基础上构建
+**Failing conclusions**: ${failed_conclusions}
+**Run states**: ${run_states}
 
 **Action required**:
 - Investigate and fix CI: \`gh -R ${slug} run list --commit ${commit}\`

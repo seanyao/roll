@@ -156,3 +156,54 @@ teardown() {
   run "$ROLL_BIN" loop precheck-ci
   [ "$status" -eq 1 ]
 }
+
+# ─── FIX-103: precheck must distinguish in_progress from failure ─────────────
+
+@test "_loop_precheck_ci: returns 0 when HEAD CI is in_progress (FIX-103)" {
+  git remote add origin "git@github.com:seanyao/roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":null,"status":"in_progress"}]'; return 0; }
+  export -f gh
+  run _loop_precheck_ci
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_precheck_ci: returns 0 when HEAD CI is queued (FIX-103)" {
+  git remote add origin "git@github.com:seanyao/roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":null,"status":"queued"}]'; return 0; }
+  export -f gh
+  run _loop_precheck_ci
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_precheck_ci: returns 0 when mixing in_progress with success (FIX-103)" {
+  git remote add origin "git@github.com:seanyao/roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"success","status":"completed"},{"conclusion":null,"status":"in_progress"}]'; return 0; }
+  export -f gh
+  run _loop_precheck_ci
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_precheck_ci: returns 1 when HEAD CI is cancelled (FIX-103)" {
+  git remote add origin "git@github.com:seanyao/roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"cancelled","status":"completed"}]'; return 0; }
+  export -f gh
+  run _loop_precheck_ci
+  [ "$status" -eq 1 ]
+}
+
+@test "_loop_precheck_ci: ALERT records conclusion + status when red (FIX-103)" {
+  git remote add origin "git@github.com:seanyao/roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"failure","status":"completed"},{"conclusion":null,"status":"in_progress"}]'; return 0; }
+  export -f gh
+  _loop_precheck_ci || true
+  [ -f "$_LOOP_ALERT" ]
+  # ALERT must carry dedicated, structured fields so a human can tell
+  # "real red" from "misclassified pending" without re-querying gh.
+  grep -qE '\*\*Failing conclusions\*\*' "$_LOOP_ALERT"
+  grep -qE '\*\*Run states\*\*' "$_LOOP_ALERT"
+}

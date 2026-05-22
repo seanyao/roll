@@ -66,6 +66,118 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "run.sh --affected --dry-run prints the affected file list and does not invoke bats" {
+  # In this worktree we have just committed two new files (tests/helpers/affected.bash
+  # and tests/unit/affected_mode.bats). The helper triggers __ALL__, so the dry-run
+  # branch is not exercised by HEAD~1 — instead, set up an isolated temp repo.
+  local tmp
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+
+  # Mirror just the runner + helper so the script paths resolve. We don't need
+  # bats-core: --dry-run must short-circuit before bats is invoked.
+  mkdir -p "$tmp/tests/helpers/bats-core/bin"
+  mkdir -p "$tmp/tests/unit"
+  cp "${REPO_ROOT}/tests/run.sh" "$tmp/tests/run.sh"
+  cp "${REPO_ROOT}/tests/helpers/affected.bash" "$tmp/tests/helpers/affected.bash"
+  # Stub bats so a fall-through would fail loudly (we expect dry-run to exit before this).
+  printf '#!/bin/sh\necho "bats stub should not run in dry-run" >&2; exit 99\n' \
+    > "$tmp/tests/helpers/bats-core/bin/bats"
+  chmod +x "$tmp/tests/helpers/bats-core/bin/bats"
+  # Provide one .bats file the helper can map to.
+  touch "$tmp/tests/unit/sample.bats"
+
+  cd "$tmp"
+  git init -q
+  git config user.email t@example.com
+  git config user.name t
+  git add . && git commit -q -m init
+  # Modify the sample test → it becomes affected via direct-hit rule.
+  echo "# touched" >> "$tmp/tests/unit/sample.bats"
+  git add tests/unit/sample.bats && git commit -q -m "touch sample"
+
+  run bash tests/run.sh --affected --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "tests/unit/sample.bats"
+}
+
+@test "run.sh --affected with empty set prints skip message and exits 0" {
+  local tmp
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+
+  mkdir -p "$tmp/tests/helpers/bats-core/bin"
+  mkdir -p "$tmp/tests/unit"
+  cp "${REPO_ROOT}/tests/run.sh" "$tmp/tests/run.sh"
+  cp "${REPO_ROOT}/tests/helpers/affected.bash" "$tmp/tests/helpers/affected.bash"
+  printf '#!/bin/sh\nexit 99\n' > "$tmp/tests/helpers/bats-core/bin/bats"
+  chmod +x "$tmp/tests/helpers/bats-core/bin/bats"
+
+  cd "$tmp"
+  git init -q
+  git config user.email t@example.com
+  git config user.name t
+  echo "x" > README.md && git add . && git commit -q -m init
+  echo "y" >> README.md && git add README.md && git commit -q -m "doc-only change"
+
+  run bash tests/run.sh --affected
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "no affected tests, skipping suite"
+}
+
+@test "run.sh --affected falls through to full suite when helpers change" {
+  local tmp
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+
+  mkdir -p "$tmp/tests/helpers/bats-core/bin"
+  mkdir -p "$tmp/tests/unit"
+  mkdir -p "$tmp/tests/integration"
+  cp "${REPO_ROOT}/tests/run.sh" "$tmp/tests/run.sh"
+  cp "${REPO_ROOT}/tests/helpers/affected.bash" "$tmp/tests/helpers/affected.bash"
+  # Stub bats to succeed and print marker so we can detect fall-through.
+  printf '#!/bin/sh\necho "FULL_SUITE_RAN"\nexit 0\n' \
+    > "$tmp/tests/helpers/bats-core/bin/bats"
+  chmod +x "$tmp/tests/helpers/bats-core/bin/bats"
+  touch "$tmp/tests/unit/sample.bats"
+  touch "$tmp/tests/helpers/sidecar.bash"
+
+  cd "$tmp"
+  git init -q
+  git config user.email t@example.com
+  git config user.name t
+  git add . && git commit -q -m init
+  # Change an arbitrary helper file (not affected.bash itself) → __ALL__ → fall
+  # through to the default full-suite scan.
+  echo "# change" >> "$tmp/tests/helpers/sidecar.bash"
+  git add tests/helpers/sidecar.bash && git commit -q -m "touch helper"
+
+  run bash tests/run.sh --affected
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "FULL_SUITE_RAN"
+}
+
+@test "run.sh --affected outside git repo errors with exit 2" {
+  local tmp
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+
+  mkdir -p "$tmp/tests/helpers/bats-core/bin"
+  cp "${REPO_ROOT}/tests/run.sh" "$tmp/tests/run.sh"
+  cp "${REPO_ROOT}/tests/helpers/affected.bash" "$tmp/tests/helpers/affected.bash"
+  printf '#!/bin/sh\nexit 0\n' > "$tmp/tests/helpers/bats-core/bin/bats"
+  chmod +x "$tmp/tests/helpers/bats-core/bin/bats"
+
+  cd "$tmp"
+  run bash tests/run.sh --affected
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "requires a git repository"
+}
+
 @test "affected: lib/<stem> change selects tests/unit/<stem>*.bats" {
   # Use a real lib file with a corresponding tests/unit/<stem>*.bats — pick a
   # file we know exists in this repo to keep the test stable.

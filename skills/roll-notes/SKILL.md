@@ -29,7 +29,7 @@ $roll-notes 今天的 code review 给了很好的反馈
 
 ## Behavior
 
-1. **Determine file path**: `notes/YYYY-MM-DD.md` relative to project root
+1. **Determine file path**: `.roll/notes/YYYY-MM-DD.md` relative to project root (parallel to `.roll/dream/` and `.roll/briefs/` — notes is project metadata, not source)
 2. **Get current time**: Use `Asia/Shanghai` timezone (`TZ=Asia/Shanghai date`)
 3. **Read existing entries for style**: Before writing, read the last 2–3 entries
    in the same file. Analyze their style: heading format, voice/tone,
@@ -95,6 +95,9 @@ $roll-notes 今天的 code review 给了很好的反馈
 ## File location
 
 ```
-notes/
-  └── YYYY-MM-DD.md
+.roll/
+  └── notes/
+        └── YYYY-MM-DD.md
 ```
+
+注：notes 是项目元数据（与 `.roll/dream/` / `.roll/briefs/` 同级），不入 git；由 dream/brief 等下游 skill 跨日聚合。

@@ -66,10 +66,10 @@ EOF
   [[ "$output" != *"● IDLE   next run"* ]]
 }
 
-@test "FIX-095: status with plist present (no disable override) renders 'enabled'" {
-  # Drop a minimal plist for com.roll.loop.<slug> under HOME/Library/LaunchAgents.
-  # Real launchctl print-disabled will be hit but it cannot have an entry for
-  # this fresh TEST_TMP-derived slug, so install_state resolves to 'enabled'.
+@test "FIX-095/FIX-098: status with plist present and launchd print success renders 'enabled'" {
+  # FIX-098: _detect_install_state now uses `launchctl print gui/<uid>/<label>`
+  # (exit 0 = loaded) instead of print-disabled. We stub launchctl print to
+  # return exit 0 so the test runs without requiring a real launchd agent.
   local slug; slug=$(slug_for_cwd)
   mkdir -p "$TEST_TMP/Library/LaunchAgents"
   cat > "$TEST_TMP/Library/LaunchAgents/com.roll.loop.${slug}.plist" <<EOF
@@ -79,26 +79,14 @@ EOF
   <key>StartCalendarInterval</key><dict><key>Minute</key><integer>17</integer></dict>
 </dict></plist>
 EOF
-  run env NO_COLOR=1 HOME="$TEST_TMP" ROLL_SHARED_ROOT="$ROLL_SHARED_ROOT" \
-    python3 "$STATUS" --no-color --en
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"enabled"* ]]
-  [[ "$output" != *"not installed"* ]]
-}
-
-@test "FIX-095: status with plist + 'disabled' override renders 'installed/off'" {
-  # Drop a plist AND a PATH shim that fakes launchctl print-disabled returning
-  # the '=> disabled' line for our label. _detect_install_state should pick
-  # this up and render '◌ installed/off'.
-  local slug; slug=$(slug_for_cwd)
-  mkdir -p "$TEST_TMP/Library/LaunchAgents"
-  : > "$TEST_TMP/Library/LaunchAgents/com.roll.loop.${slug}.plist"
-
   local shim="$TEST_TMP/bin"
   mkdir -p "$shim"
-  cat > "$shim/launchctl" <<SH
+  # Stub: `launchctl print gui/<uid>/<label>` returns exit 0 (agent loaded).
+  cat > "$shim/launchctl" <<'SH'
 #!/usr/bin/env bash
-[[ "\$1" == "print-disabled" ]] && printf '\t"com.roll.loop.${slug}" => disabled\n'
+if [[ "$1" == "print" ]]; then
+  exit 0
+fi
 exit 0
 SH
   chmod +x "$shim/launchctl"
@@ -106,7 +94,38 @@ SH
   run env NO_COLOR=1 HOME="$TEST_TMP" ROLL_SHARED_ROOT="$ROLL_SHARED_ROOT" \
     PATH="$shim:$PATH" python3 "$STATUS" --no-color --en
   [ "$status" -eq 0 ]
-  [[ "$output" == *"installed/off"* ]]
+  [[ "$output" == *"enabled"* ]]
+  [[ "$output" != *"not installed"* ]]
+  [[ "$output" != *"STALE"* ]]
+}
+
+@test "FIX-098/FIX-095: status with plist present but agent not loaded renders 'STALE'" {
+  # FIX-098 updated _detect_install_state() to use `launchctl print` (actual registry)
+  # rather than `launchctl print-disabled` (disabled-overrides DB). This test validates
+  # that when launchctl print returns non-zero (agent not loaded), the dashboard
+  # renders the STALE eyebrow instead of IDLE or 'installed/off'.
+  local slug; slug=$(slug_for_cwd)
+  mkdir -p "$TEST_TMP/Library/LaunchAgents"
+  : > "$TEST_TMP/Library/LaunchAgents/com.roll.loop.${slug}.plist"
+
+  local shim="$TEST_TMP/bin"
+  mkdir -p "$shim"
+  # Stub: `launchctl print gui/<uid>/<label>` returns exit 1 (not loaded in launchd).
+  # All other launchctl calls succeed silently.
+  cat > "$shim/launchctl" <<'SH'
+#!/usr/bin/env bash
+if [[ "$1" == "print" ]]; then
+  # Simulate agent NOT registered in launchd
+  exit 1
+fi
+exit 0
+SH
+  chmod +x "$shim/launchctl"
+
+  run env NO_COLOR=1 HOME="$TEST_TMP" ROLL_SHARED_ROOT="$ROLL_SHARED_ROOT" \
+    PATH="$shim:$PATH" python3 "$STATUS" --no-color --en
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"STALE"* ]]
 }
 
 @test "E2E US-VIEW-012: cycle without usage event renders as —/—" {

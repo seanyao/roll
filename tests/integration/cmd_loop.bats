@@ -213,9 +213,11 @@ teardown() {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   run_roll loop status
   [ "$status" -eq 0 ]
-  # Three-state display (US-AUTO-015 / FIX-095):
-  # not installed | installed/off | enabled
-  [[ "$output" == *"not installed"* ]] || [[ "$output" == *"installed/off"* ]] || [[ "$output" == *"未启用"* ]]
+  # Three-state display (US-AUTO-015 / FIX-095 / FIX-098):
+  # not installed | STALE (plist present, not loaded) | enabled
+  # FIX-098 renamed 'installed/off' to 'STALE' to reflect that plist exists
+  # but launchd has no record of the agent (e.g. after off+update without on).
+  [[ "$output" == *"not installed"* ]] || [[ "$output" == *"STALE"* ]] || [[ "$output" == *"installed/off"* ]] || [[ "$output" == *"未启用"* ]]
 }
 
 @test "loop status (macOS): shows enabled after loop on" {

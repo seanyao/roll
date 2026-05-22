@@ -643,10 +643,13 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
                     c("dim", "run ") + c("fg", "roll loop on", bold=True) +
                     c("dim", " to enable"))
             eb_zh = c("dim", "  未安装 · 运行 ") + c("fg", "roll loop on") + c("dim", " 启用")
-        elif install_state == "disabled":
-            eb_l = (c("amber", "◌ installed/off", bold=True) + c("muted", "   ") +
-                    c("dim", "loop disabled — run ") + c("fg", "roll loop on", bold=True))
-            eb_zh = c("dim", "  未启用 · 运行 ") + c("fg", "roll loop on") + c("dim", " 启用")
+        elif install_state in ("stale", "disabled"):
+            # FIX-098: 'stale' = plist on disk but agent not registered in launchd.
+            # 'disabled' kept for back-compat (old install_state values). Both mean
+            # the user needs to run 'roll loop on' to bootstrap the agent.
+            eb_l = (c("amber", "◌ STALE — plist present, not loaded", bold=True) + c("muted", "   ") +
+                    c("dim", "run ") + c("fg", "roll loop on", bold=True) + c("dim", " to repair"))
+            eb_zh = c("dim", "  Plist 存在但未加载 · 运行 ") + c("fg", "roll loop on") + c("dim", " 修复")
         else:
             eb_l = (c("blue", "● IDLE", bold=True) + c("muted", " · ") +
                     c("dim", "enabled · next run ") + c("fg", _next_cron_hint(state), bold=True))
@@ -794,15 +797,18 @@ def _read_plist_loop_minute() -> int:
 
 
 def _detect_install_state() -> str:
-    """FIX-095: classify the launchd install state of the loop service.
+    """FIX-095 / FIX-098: classify the launchd install state of the loop service.
 
     Returns one of:
       'not-installed' — no plist for com.roll.loop.<slug> in ~/Library/LaunchAgents/
-      'disabled'      — plist exists but launchctl print-disabled shows '=> disabled'
-      'enabled'       — plist exists and no disable override is set
+      'stale'         — plist on disk but agent NOT registered in launchd
+                        (happens after roll loop off + roll update without roll loop on)
+      'enabled'       — plist on disk AND registered in launchd
 
-    Pre-FIX-095, the v2 view rendered '● IDLE' for all three states, leaving
-    users unable to tell whether the loop was actually installed/enabled.
+    FIX-098: switched from `launchctl print-disabled` (disabled-overrides DB) to
+    `launchctl print gui/<uid>/<label>` which probes the actual launchd registry.
+    The old approach returned false-positive 'enabled' when the disabled-overrides
+    DB had no entry for the label (empty = not explicitly disabled, not loaded).
     """
     slug = project_slug()
     label = f"com.roll.loop.{slug}"
@@ -811,17 +817,17 @@ def _detect_install_state() -> str:
         return "not-installed"
     try:
         uid = os.getuid()
-        out = subprocess.run(
-            ["launchctl", "print-disabled", f"gui/{uid}"],
-            capture_output=True, text=True, timeout=2,
-        ).stdout or ""
-        for line in out.splitlines():
-            if f'"{label}"' in line and "=> disabled" in line:
-                return "disabled"
+        result = subprocess.run(
+            ["launchctl", "print", f"gui/{uid}/{label}"],
+            capture_output=True, timeout=2,
+        )
+        if result.returncode == 0:
+            return "enabled"
+        return "stale"
     except Exception:
-        # launchctl missing or timed out — best-effort fall through to enabled.
-        pass
-    return "enabled"
+        # launchctl missing or timed out — assume stale (safe: user sees STALE
+        # banner and is told to run 'roll loop on' to repair).
+        return "stale"
 
 
 def _next_cron_hint(state: Dict[str, str], zh: bool = False) -> str:

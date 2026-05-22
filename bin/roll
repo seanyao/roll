@@ -4769,17 +4769,29 @@ SCRIPT
 }
 
 _launchd_is_loaded() {
-  launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep -qF "\"$1\" => enabled"
+  # FIX-098: probe actual launchd registry via `launchctl print`, NOT
+  # `launchctl print-disabled`. The disabled-overrides DB only tracks
+  # labels explicitly enabled/disabled by the user — after `roll loop off`
+  # (bootout) + `roll update` the label stays absent from the overrides DB,
+  # so the old grep returned false-positive "loaded". `launchctl print`
+  # returns exit 0 only when the agent is actually registered in the current
+  # launchd session; non-zero means the label is unknown to launchd.
+  launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1
 }
 
 _launchd_svc_state() {
+  # FIX-098: three-state classification:
+  #   enabled       — plist on disk AND registered in launchd
+  #   stale         — plist on disk BUT NOT registered in launchd
+  #   installed-off — kept for back-compat (maps to stale semantics)
+  #   not-installed — no plist
   local svc="$1" project_path="$2"
   local label; label=$(_launchd_label "$svc" "$project_path")
   local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
   if _launchd_is_loaded "$label"; then
     echo "enabled"
   elif [[ -f "$plist" ]]; then
-    echo "installed-off"
+    echo "stale"
   else
     echo "not-installed"
   fi
@@ -4954,12 +4966,21 @@ _loop_on() {
   if [[ "$(uname)" == "Darwin" ]]; then
     _install_launchd_plists "$project_path" >/dev/null
 
+    # FIX-098: use launchctl bootstrap/enable instead of load -w.
+    # `load -w` writes to the disabled-overrides DB which causes FIX-027's
+    # re-source to break after `roll update`. bootstrap is idem-potent and
+    # does not disturb the overrides DB.
+    local uid; uid=$(id -u)
     local all_loaded=true
     for svc in loop dream brief; do
       local label; label=$(_launchd_label "$svc" "$project_path")
+      local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
         all_loaded=false
-        launchctl load -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+        # enable clears the disabled-override so launchd will honor the plist;
+        # bootstrap actually loads it into the current session.
+        launchctl enable "gui/${uid}/${label}" 2>/dev/null || true
+        launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
       fi
     done
 
@@ -5178,7 +5199,7 @@ _legacy_loop_status() {
       else
         case "$state" in
           enabled)       echo -e "    ${GREEN}${svc}     ● enabled${NC}" ;;
-          installed-off) echo -e "    ${YELLOW}${svc}     ⚠ installed/off${NC}   run: roll loop on" ;;
+          stale|installed-off) echo -e "    ${YELLOW}${svc}     ⚠ STALE — plist present but not loaded${NC}   run: roll loop on" ;;
           not-installed) echo -e "    ${RED}${svc}     ○ not installed${NC}   run: roll setup" ;;
         esac
       fi

@@ -210,10 +210,10 @@ EOSHIM
   done
 }
 
-@test "loop runner script contains auto-attach osascript with mute check" {
+@test "loop runner script contains auto-attach popup with mute check" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS-only auto-attach path"
 
-  # Setup writes both an outer runner (run-<slug>.sh, contains tmux + osascript)
+  # Setup writes both an outer runner (run-<slug>.sh, contains tmux + popup)
   # and an inner runner (run-<slug>-inner.sh, contains the agent command).
   # Pick the outer one only.
   local runner=""
@@ -223,7 +223,10 @@ EOSHIM
   [ -n "$runner" ]
   [ -f "$runner" ]
 
-  grep -qF 'osascript' "$runner"
+  # FIX-092: popup uses `open -g -a Terminal <.command>` (background, no focus
+  # steal); replaces a prior osascript dance that triggered "where is <app>"
+  # dialogs on bundle-name vs process-name mismatch (e.g. MSTeams).
+  grep -qF 'open -g -a Terminal' "$runner"
   # FIX-052: mute is per-project (.shared/roll/loop/mute-<slug>).
   grep -qE '\.shared/roll/loop/mute-' "$runner"
   grep -qF 'tmux attach' "$runner"

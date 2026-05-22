@@ -20,16 +20,26 @@ teardown() { unit_teardown_cd; }
   echo "$body" | grep -qF '_LOOP_MUTE_FILE'
 }
 
-@test "_peer_auto_attach: calls osascript for Terminal popup" {
+@test "_peer_auto_attach: uses open -g -a Terminal for background popup (FIX-092)" {
   local body
   body=$(awk '/^_peer_auto_attach\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$body" | grep -qF 'osascript'
+  echo "$body" | grep -qF 'open -g -a Terminal'
+}
+
+@test "_peer_auto_attach: does not call osascript (FIX-092)" {
+  # Regression guard: the prior osascript capture-frontmost / restore-focus
+  # dance triggered LaunchServices "where is <app>" dialogs when the active
+  # process name differed from its bundle name (e.g. MSTeams).
+  local body
+  body=$(awk '/^_peer_auto_attach\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  run grep -F 'osascript' <<<"$body"
+  [ "$status" -ne 0 ]
 }
 
 @test "_peer_auto_attach: no terminal-preference detection (FIX-054)" {
   # FIX-054: dropped per-user terminal detection. Body must not branch on
   # loop_attach_terminal config or TERM_PROGRAM env, and must not invoke
-  # Ghostty / iTerm2 dispatch — always macOS Terminal.app via osascript.
+  # Ghostty / iTerm2 dispatch — always macOS Terminal.app.
   local body
   body=$(awk '/^_peer_auto_attach\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   run grep -F 'loop_attach_terminal' <<<"$body"
@@ -45,7 +55,7 @@ teardown() { unit_teardown_cd; }
 @test "_peer_auto_attach: no-ops when mute file exists" {
   _LOOP_MUTE_FILE="${_tmp}/mute"
   touch "$_LOOP_MUTE_FILE"
-  # Should return 0 without calling osascript (no side effects in test env)
+  # Should return 0 without opening Terminal (no side effects in test env)
   run _peer_auto_attach "roll-peer-claude-kimi"
   [ "$status" -eq 0 ]
 }
@@ -140,7 +150,7 @@ teardown() { unit_teardown_cd; }
 
 # ─── E2E golden path: mute suppresses popup, session name is deterministic ────
 
-@test "e2e: _peer_auto_attach is silent when mute file exists (no osascript side-effect)" {
+@test "e2e: _peer_auto_attach is silent when mute file exists (no popup side-effect)" {
   _LOOP_MUTE_FILE="${_tmp}/mute"
   touch "$_LOOP_MUTE_FILE"
   # Must exit 0 without error

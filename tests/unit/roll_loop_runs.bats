@@ -184,3 +184,57 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"US-CONTRACT-001"* ]]
 }
+
+# ─── FIX-099: tcr_count + built[] truthfulness ────────────────────────────────
+
+@test "FIX-099: runs.jsonl with tcr_count=1 and built=[FIX-097] renders correctly" {
+  # Regression: before FIX-099 the orphan recovery path hard-coded tcr_count=0
+  # and built=[]. Verify the runs display correctly reflects non-zero values.
+  local proj; proj=$(_project_slug "$(pwd -P)")
+  cat > "$_LOOP_RUNS" <<EOF
+{"ts":"2026-05-23T01:28:00Z","project":"${proj}","run_id":"loop-fix097","status":"built","built":["FIX-097"],"skipped":[],"alerts":[],"tcr_count":1,"duration_sec":540}
+EOF
+  run _loop_runs
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FIX-097"* ]]
+  [[ "$output" == *"1 tcr"* ]]
+}
+
+@test "FIX-099: runs.jsonl tcr_count=0 and built=[] does not show story ids" {
+  # When a cycle is genuinely idle (no tcr commits), the runs display should
+  # reflect that accurately — not spuriously invent story ids.
+  local proj; proj=$(_project_slug "$(pwd -P)")
+  cat > "$_LOOP_RUNS" <<EOF
+{"ts":"2026-05-23T01:18:00Z","project":"${proj}","run_id":"loop-idle","status":"idle","built":[],"skipped":[],"alerts":[],"tcr_count":0,"duration_sec":10}
+EOF
+  run _loop_runs
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"FIX-"* ]]
+  [[ "$output" != *"US-"* ]]
+}
+
+@test "FIX-099: ALERT three-field format contains recovered_from_orphan and tcr_commits fields" {
+  # Verify the new ALERT format used by _worktree_alert in the orphan recovery
+  # path carries the three structured fields the spec requires.
+  # The old pattern: _worktree_alert "... FIX-091 published as PR"
+  # The new pattern: recovered_from_orphan=yes; tcr_commits=...; stories=...
+  # Assert new fields present:
+  grep -q 'recovered_from_orphan=yes' "$ROLL_BIN"
+  grep -q 'tcr_commits=' "$ROLL_BIN"
+  # Assert old misleading text is NOT in any active _worktree_alert call
+  # (it may appear in a comment, that's fine).
+  # Use python to parse lines and check — avoids grep pipeline exit-code issues.
+  python3 - "$ROLL_BIN" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path) as f:
+    for i, line in enumerate(f, 1):
+        stripped = line.lstrip()
+        # Skip comment lines
+        if stripped.startswith('#'):
+            continue
+        if '_worktree_alert' in line and 'FIX-091 published as PR' in line:
+            print(f"Line {i}: {line.rstrip()}", file=sys.stderr)
+            sys.exit(1)
+PYEOF
+}

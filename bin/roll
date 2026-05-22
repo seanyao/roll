@@ -4338,13 +4338,29 @@ _inner_cleanup() {
       # FIX-091: prefer a real PR so auto-merge lands the work; tag-only is the
       # last-resort because it requires manual cherry-pick. Emit cycle_end "done"
       # (canonical success status the dashboard recognizes) when PR publishes.
+      # FIX-099: compute tcr_count + built[] from the worktree (it's still alive
+      # at EXIT trap time) so runs.jsonl and ALERT carry truthful data.
+      _orphan_tcr=0
+      _orphan_built="[]"
+      if command -v jq >/dev/null 2>&1; then
+        _orphan_tcr=\$(cd "\$WT" && git log --oneline "origin/main..HEAD" 2>/dev/null | grep -c ' tcr:' || echo 0)
+        _orphan_built=\$(cd "\$WT" && git log --oneline "origin/main..HEAD" 2>/dev/null \
+          | grep ' tcr:' \
+          | grep -oE '\b(FIX|US|REFACTOR|CHORE)-[0-9]+\b' \
+          | sort -u \
+          | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")
+      fi
       _slug=""
       if _gh_resolve _slug \\
          && ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" ) >/dev/null 2>&1; then
         _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "done" 2>/dev/null || true
         _CYCLE_END_WRITTEN=1
-        _runs_append "done" 0 "[]" 2>/dev/null || true
-        _worktree_alert "cycle \${CYCLE_ID}: aborted with \${_unpushed} commits; FIX-091 published as PR" 2>/dev/null || true
+        # FIX-099: pass real tcr_count + built[] instead of 0/"[]"
+        _runs_append "done" "\${_orphan_tcr}" "\${_orphan_built}" 2>/dev/null || true
+        # FIX-099: three-field ALERT so callers can distinguish recovered orphan
+        # from a cycle's normally-picked story (was: "FIX-091 published as PR"
+        # which leaked a hardcoded string regardless of what was actually built).
+        _worktree_alert "cycle \${CYCLE_ID}: recovered_from_orphan=yes; tcr_commits=\${_orphan_tcr}; stories=\${_orphan_built}; pr_branch=\${BRANCH:-unknown}" 2>/dev/null || true
       else
         _orphan_tag="loop-orphan-\${CYCLE_ID}"
         if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \\
@@ -4352,8 +4368,9 @@ _inner_cleanup() {
              && git push origin "\$_orphan_tag" 2>/dev/null ); then
           _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "orphan" 2>/dev/null || true
           _CYCLE_END_WRITTEN=1
-          _runs_append "orphan" 0 "[]" 2>/dev/null || true
-          _worktree_alert "cycle \${CYCLE_ID}: aborted with \${_unpushed} commits; FIX-086 pushed orphan tag \${_orphan_tag}" 2>/dev/null || true
+          # FIX-099: pass real tcr_count + built[] for the orphan-tag path too
+          _runs_append "orphan" "\${_orphan_tcr}" "\${_orphan_built}" 2>/dev/null || true
+          _worktree_alert "cycle \${CYCLE_ID}: recovered_from_orphan=yes; tcr_commits=\${_orphan_tcr}; stories=\${_orphan_built}; FIX-086 pushed orphan tag \${_orphan_tag}" 2>/dev/null || true
         fi
       fi
     fi

@@ -167,10 +167,11 @@ EOF
     return 1
   }
 
-  # Assert: ALERT mentions FIX-091 (PR published, not tag-only fallback).
+  # FIX-099: ALERT now uses three-field format instead of "FIX-091 published as PR".
+  # Assert: ALERT mentions recovered_from_orphan (orphan recovery path).
   [ -f "$_LOOP_ALERT" ]
-  grep -qE 'FIX-091' "$_LOOP_ALERT" || {
-    echo "expected ALERT to mention FIX-091, got:" >&2
+  grep -qE 'recovered_from_orphan=yes' "$_LOOP_ALERT" || {
+    echo "expected ALERT to contain recovered_from_orphan=yes, got:" >&2
     cat "$_LOOP_ALERT" >&2
     return 1
   }

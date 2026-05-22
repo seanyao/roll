@@ -47,6 +47,8 @@ $roll-deck "How TCR keeps us honest"
 
 Read in this order, skipping files that don't exist:
 
+0. `package.json` — **project identity**: extract `name`, `homepage`, `repository.url`, `author`. These are hard facts that MUST NOT be guessed or inferred from memory.
+   `package.json` — **项目身份**: 提取 `name`、`homepage`、`repository.url`、`author`。这些是硬事实，禁止猜测。
 1. `README.md` — top-level pitch and entry points.
 2. `AGENTS.md` — communication style, conventions, where to look.
 3. `.roll/backlog.md` — recently Done Stories and the top of the Todo queue.
@@ -72,8 +74,15 @@ Default count is `18` (or the count the template prescribes). Each slide MUST co
 - `body_zh` — Chinese body, concise, ≤ 200 chars.
 - `evidence` — list of `<path>:<line>` references that ground the claim.
 
-**Grounding threshold**: every 3 consecutive slides MUST contain at least 1 evidence citation. If you cannot ground a slide, label it `⚠️ unverified` in the body and explain why in one line.
-**Grounding 阈值**：每 3 张 slide 至少 1 条 evidence。无法取证时打 `⚠️ unverified` 并一行说明。
+**Grounding rules** (two tiers):
+
+- **Hard facts** (URLs, package names, version numbers, person names, quotes with attribution): MUST cite the source file and line (e.g. `package.json:2`, `README.md:15`). If no source can be found, mark the claim as `⚠️ unverified` — never guess.
+- **Narrative / opinions**: every 3 consecutive slides MUST contain at least 1 evidence citation. If you cannot ground a slide, label it `⚠️ unverified` and explain why in one line.
+
+**Grounding 规则**（两级）：
+
+- **硬事实**（URL、包名、版本号、人名、带归属的引言）：MUST 引用源文件及行号（如 `package.json:2`）。找不到来源则标 `⚠️ unverified`——禁止猜测。
+- **叙述/观点**：每 3 张 slide 至少 1 条 evidence。无法取证时打 `⚠️ unverified` 并一行说明。
 
 Bilingual rule: English and Chinese MUST be on separate lines in the rendered body — never inline on the same line.
 
@@ -89,6 +98,10 @@ title_en: "<topic in English>"
 title_zh: "<topic in Chinese>"
 total_slides: 18
 created: <YYYY-MM-DD>
+pkg_name: "<from package.json name>"
+repo_url: "<from package.json repository.url>"
+site_url: "<from package.json homepage>"
+author: "<from package.json author>"
 ---
 
 ## Slide 1
@@ -107,6 +120,9 @@ evidence:
 ```
 
 `total_slides` MUST match the number of `## Slide N` blocks. The validator (run by `roll slides build`) will reject mismatches.
+
+Project identity fields (`pkg_name`, `repo_url`, `site_url`, `author`) are copied verbatim from `package.json` — never infer or guess these values. `roll slides build` injects them into the HTML template (cover, back cover, footer).
+项目身份字段从 `package.json` 原样复制——禁止推测。`roll slides build` 会把它们注入 HTML 模板（封面、封底、页脚）。
 
 ### 5. Prompt the user  提示用户
 

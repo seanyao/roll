@@ -3823,8 +3823,12 @@ _slug_migrate_from_legacy() {
     [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return 0
     # Compute the pre-FIX-056 slug: same algorithm but without realpath.
     local raw_path; raw_path=$(pwd 2>/dev/null)
+    # FIX-094: `_common=$(...)` as a standalone assignment statement inherits the
+    # command's exit code; `set -e` aborts the whole script when cwd is non-git
+    # (git rev-parse exits 128). `|| true` keeps probing semantics — we WANT to
+    # detect "no git" by empty output, not by killing the script.
     local _common
-    _common=$(git -C "$raw_path" rev-parse --git-common-dir 2>/dev/null)
+    _common=$(git -C "$raw_path" rev-parse --git-common-dir 2>/dev/null) || true
     if [[ -n "$_common" && "$_common" == *"/.git" ]]; then
       raw_path="${_common%/.git}"
     fi

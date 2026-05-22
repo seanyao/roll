@@ -54,6 +54,60 @@ EOF
   [[ "$output" != *"8.8M"* ]]
 }
 
+@test "FIX-095: status with no launchd plist renders 'not installed'" {
+  # No plist in HOME/Library/LaunchAgents → _detect_install_state returns
+  # 'not-installed' → eyebrow shows '○ not installed'.
+  run env NO_COLOR=1 HOME="$TEST_TMP" ROLL_SHARED_ROOT="$ROLL_SHARED_ROOT" \
+    python3 "$STATUS" --no-color --en
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not installed"* ]]
+  # And explicitly NOT the legacy '● IDLE  next run' wording when uninstalled.
+  [[ "$output" != *"● IDLE   next run"* ]]
+}
+
+@test "FIX-095: status with plist present (no disable override) renders 'enabled'" {
+  # Drop a minimal plist for com.roll.loop.<slug> under HOME/Library/LaunchAgents.
+  # Real launchctl print-disabled will be hit but it cannot have an entry for
+  # this fresh TEST_TMP-derived slug, so install_state resolves to 'enabled'.
+  local slug; slug=$(slug_for_cwd)
+  mkdir -p "$TEST_TMP/Library/LaunchAgents"
+  cat > "$TEST_TMP/Library/LaunchAgents/com.roll.loop.${slug}.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.roll.loop.${slug}</string>
+  <key>StartCalendarInterval</key><dict><key>Minute</key><integer>17</integer></dict>
+</dict></plist>
+EOF
+  run env NO_COLOR=1 HOME="$TEST_TMP" ROLL_SHARED_ROOT="$ROLL_SHARED_ROOT" \
+    python3 "$STATUS" --no-color --en
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"enabled"* ]]
+  [[ "$output" != *"not installed"* ]]
+}
+
+@test "FIX-095: status with plist + 'disabled' override renders 'installed/off'" {
+  # Drop a plist AND a PATH shim that fakes launchctl print-disabled returning
+  # the '=> disabled' line for our label. _detect_install_state should pick
+  # this up and render '◌ installed/off'.
+  local slug; slug=$(slug_for_cwd)
+  mkdir -p "$TEST_TMP/Library/LaunchAgents"
+  : > "$TEST_TMP/Library/LaunchAgents/com.roll.loop.${slug}.plist"
+
+  local shim="$TEST_TMP/bin"
+  mkdir -p "$shim"
+  cat > "$shim/launchctl" <<SH
+#!/usr/bin/env bash
+[[ "\$1" == "print-disabled" ]] && printf '\t"com.roll.loop.${slug}" => disabled\n'
+exit 0
+SH
+  chmod +x "$shim/launchctl"
+
+  run env NO_COLOR=1 HOME="$TEST_TMP" ROLL_SHARED_ROOT="$ROLL_SHARED_ROOT" \
+    PATH="$shim:$PATH" python3 "$STATUS" --no-color --en
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"installed/off"* ]]
+}
+
 @test "E2E US-VIEW-012: cycle without usage event renders as —/—" {
   local slug; slug=$(slug_for_cwd)
   local evfile="${ROLL_SHARED_ROOT}/loop/events-${slug}.ndjson"

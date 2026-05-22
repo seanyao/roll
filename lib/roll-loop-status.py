@@ -625,9 +625,23 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
                 c("muted", " · ") + c("dim", state.get("paused_reason", "")))
         eb_zh = c("dim", "  已暂停 · run: roll loop resume")
     else:
-        eb_l = (c("blue", "● IDLE", bold=True) + c("muted", "   ") +
-                c("dim", "next run ") + c("fg", _next_cron_hint(state), bold=True))
-        eb_zh = c("dim", f"  闲置 · 距下一轮 {_next_cron_hint(state, zh=True)}")
+        # FIX-095: surface three-state install/enable status. Pre-FIX, every
+        # case fell through to '● IDLE' which hid 'not installed' and
+        # 'installed/off' from the user.
+        install_state = _detect_install_state()
+        if install_state == "not-installed":
+            eb_l = (c("muted", "○ not installed", bold=True) + c("muted", "   ") +
+                    c("dim", "run ") + c("fg", "roll loop on", bold=True) +
+                    c("dim", " to enable"))
+            eb_zh = c("dim", "  未安装 · 运行 ") + c("fg", "roll loop on") + c("dim", " 启用")
+        elif install_state == "disabled":
+            eb_l = (c("amber", "◌ installed/off", bold=True) + c("muted", "   ") +
+                    c("dim", "loop disabled — run ") + c("fg", "roll loop on", bold=True))
+            eb_zh = c("dim", "  未启用 · 运行 ") + c("fg", "roll loop on") + c("dim", " 启用")
+        else:
+            eb_l = (c("blue", "● IDLE", bold=True) + c("muted", " · ") +
+                    c("dim", "enabled · next run ") + c("fg", _next_cron_hint(state), bold=True))
+            eb_zh = c("dim", f"  已启用 · 闲置 · 距下一轮 {_next_cron_hint(state, zh=True)}")
 
     # 'last' = the most recent cycle the user can act on — skip cycles that
     # are still running (the running banner already announces those) and skip
@@ -767,6 +781,37 @@ def _read_plist_loop_minute() -> int:
         return 48
     m = _re.search(r"<key>Minute</key>\s*<integer>(\d+)</integer>", text)
     return int(m.group(1)) if m else 48
+
+
+def _detect_install_state() -> str:
+    """FIX-095: classify the launchd install state of the loop service.
+
+    Returns one of:
+      'not-installed' — no plist for com.roll.loop.<slug> in ~/Library/LaunchAgents/
+      'disabled'      — plist exists but launchctl print-disabled shows '=> disabled'
+      'enabled'       — plist exists and no disable override is set
+
+    Pre-FIX-095, the v2 view rendered '● IDLE' for all three states, leaving
+    users unable to tell whether the loop was actually installed/enabled.
+    """
+    slug = project_slug()
+    label = f"com.roll.loop.{slug}"
+    plist = Path(os.path.expanduser("~/Library/LaunchAgents")) / f"{label}.plist"
+    if not plist.exists():
+        return "not-installed"
+    try:
+        uid = os.getuid()
+        out = subprocess.run(
+            ["launchctl", "print-disabled", f"gui/{uid}"],
+            capture_output=True, text=True, timeout=2,
+        ).stdout or ""
+        for line in out.splitlines():
+            if f'"{label}"' in line and "=> disabled" in line:
+                return "disabled"
+    except Exception:
+        # launchctl missing or timed out — best-effort fall through to enabled.
+        pass
+    return "enabled"
 
 
 def _next_cron_hint(state: Dict[str, str], zh: bool = False) -> str:

@@ -58,10 +58,11 @@ teardown() { unit_teardown; }
   [ "${#_AGENT_ARGV[@]}" -eq 2 ]
 }
 
-@test "interactive argv: gemini → gemini <prompt>" {
-  _agent_argv gemini interactive "hi"
-  [ "${_AGENT_ARGV[0]}" = "gemini" ]
-  [ "${_AGENT_ARGV[1]}" = "hi" ]
+@test "interactive argv: agy → agy -i <prompt> (Antigravity, replacing Gemini CLI)" {
+  _agent_argv agy interactive "hi"
+  [ "${_AGENT_ARGV[0]}" = "agy" ]
+  [ "${_AGENT_ARGV[1]}" = "-i" ]
+  [ "${_AGENT_ARGV[2]}" = "hi" ]
 }
 
 @test "interactive argv: unknown agent returns 1" {

@@ -8,7 +8,7 @@
 
 ## Abstract
 
-As AI coding assistants evolve from point tools into team infrastructure, engineering organizations face an underappreciated challenge: **inconsistent behavior across AI clients (Claude Code, Gemini CLI, Cursor, Codex), fragmented environment configuration, and the absence of auditable quality gates on deliverables**. One developer writes code with Claude that passes local tests; another uses Cursor and bypasses those same tests — not because of a capability gap between the models, but because the two received entirely different engineering constraints.
+As AI coding assistants evolve from point tools into team infrastructure, engineering organizations face an underappreciated challenge: **inconsistent behavior across AI clients (Claude Code, Antigravity (agy), Cursor, Codex), fragmented environment configuration, and the absence of auditable quality gates on deliverables**. One developer writes code with Claude that passes local tests; another uses Cursor and bypasses those same tests — not because of a capability gap between the models, but because the two received entirely different engineering constraints.
 
 Roll is an **instruction and workflow management framework for AI Agents**. It does not invent new methodology. Instead, it encodes proven software engineering practices (Scrum, TDD, TCR, SRE) as standardized, AI-executable Skill definitions, and enforces cross-client configuration consistency through a CLI tool.
 
@@ -75,7 +75,7 @@ How the three loops interact:
 
 ### 2.1 The Problem
 
-In environments where multiple AI clients coexist, each client has its own configuration entry point (Claude reads `CLAUDE.md`, Gemini reads `GEMINI.md`, Cursor reads `.cursor-rules`). Maintaining these files manually leads to:
+In environments where multiple AI clients coexist, each client has its own configuration entry point (Claude reads `CLAUDE.md`, agy reads `GEMINI.md`, Cursor reads `.cursor-rules`). Maintaining these files manually leads to:
 
 - **Behavioral drift**: Different AI clients on the same project enforce different coding standards.
 - **Fragmented configuration**: Engineering constraints scattered across multiple locations, with updates prone to gaps.

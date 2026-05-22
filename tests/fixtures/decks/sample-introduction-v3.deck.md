@@ -128,7 +128,7 @@ body_en: |
     <div class="card" style="border-left:3px solid var(--accent-light);">
       <div style="font-size:26px;margin-bottom:6px;">🔧</div>
       <h3 style="font-size:15px;">Skill-Driven Execution</h3>
-      <p>23 skills encode TDD, TCR, DDD, INVEST as <strong>repeatable workflows any agent can follow</strong>. Works with Claude, Cursor, Codex, Gemini — swap the tool, keep the discipline.</p>
+      <p>23 skills encode TDD, TCR, DDD, INVEST as <strong>repeatable workflows any agent can follow</strong>. Works with Claude, Cursor, Codex, Antigravity — swap the tool, keep the discipline.</p>
     </div>
   </div>
   <div class="analogy fade-in">
@@ -148,7 +148,7 @@ body_zh: |
     <div class="card" style="border-left:3px solid var(--accent-light);">
       <div style="font-size:26px;margin-bottom:6px;">🔧</div>
       <h3 style="font-size:15px;">技能驱动执行</h3>
-      <p>23 个 Skill 把 TDD、TCR、DDD、INVEST 编码为<strong>任何 Agent 都能执行的可重复工作流</strong>。Claude、Cursor、Codex、Gemini 通用——换工具，留纪律。</p>
+      <p>23 个 Skill 把 TDD、TCR、DDD、INVEST 编码为<strong>任何 Agent 都能执行的可重复工作流</strong>。Claude、Cursor、Codex、Antigravity 通用——换工具，留纪律。</p>
     </div>
   </div>
   <div class="analogy fade-in">

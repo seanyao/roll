@@ -11,7 +11,7 @@ and skills — switching agents does not require changing your workflow.
 | Kimi CLI | `kimi` | Good fallback; supports peer review |
 | DeepSeek TUI | `ai_deepseek` | Local or API |
 | Codex CLI | `codex` | OpenAI |
-| Gemini CLI | `gemini` | |
+| Antigravity (agy) | `agy` | |
 | Pi (pi-coding-agent) | `pi` | |
 | Trae IDE | (IDE-based) | project_rules.md sync |
 | opencode | `opencode` | AGENTS.md sync |

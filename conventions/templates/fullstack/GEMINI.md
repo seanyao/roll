@@ -1,6 +1,6 @@
-# Project Preferences — Fullstack Web (Gemini CLI)
+# Project Preferences — Fullstack Web (Antigravity)
 
-> Extends global GEMINI.md + project AGENTS.md.
+> Extends global GEMINI.md (Antigravity) + project AGENTS.md.
 
 ## Stack
 
@@ -8,7 +8,7 @@
 - Backend: Node.js API (Express/Hono/Fastify)
 - Testing: Vitest (unit) + Playwright (E2E)
 
-## Gemini Notes
+## Antigravity (agy) Notes
 
 - When modifying API contracts, update both `api/types.ts` and `src/shared/types/` in the same commit.
 - Run `npm run build` to verify both frontend and backend compile before pushing.

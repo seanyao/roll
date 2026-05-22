@@ -1,6 +1,6 @@
-# Project Preferences — CLI Tool (Gemini CLI)
+# Project Preferences — CLI Tool (Antigravity)
 
-> Extends global GEMINI.md + project AGENTS.md.
+> Extends global GEMINI.md (Antigravity) + project AGENTS.md.
 
 ## Stack
 
@@ -8,7 +8,7 @@
 - CLI framework: commander or citty
 - Testing: Vitest
 
-## Gemini Notes
+## Antigravity (agy) Notes
 
 - No server, no frontend. CLI tool only.
 - Test commands by running them, not just unit tests.

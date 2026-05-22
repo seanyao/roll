@@ -85,7 +85,7 @@ Present these in chat. **Aim for total time ≤ 3 minutes.** Group 1 confirms yo
 **Group 3 — Privacy & next steps**
 
 7. Add `.roll/` to `.gitignore`? (yes = keep project management private; no = commit it like Roll itself does)
-8. Sync Roll conventions to which AI tools? Multi-select from detected agents (claude / cursor / codex / kimi / deepseek / pi / opencode / gemini / trae)
+8. Sync Roll conventions to which AI tools? Multi-select from detected agents (claude / cursor / codex / kimi / deepseek / pi / opencode / agy / trae)
 9. Enable `roll loop` autonomous execution after init?
 
 ### Step 4 — Write plan file

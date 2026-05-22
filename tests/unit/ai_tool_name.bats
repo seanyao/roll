@@ -10,10 +10,12 @@ teardown() { unit_teardown; }
   [ "$output" = "claude" ]
 }
 
-@test "ai_tool_name: ~/.gemini → gemini (strips leading dot)" {
+@test "ai_tool_name: ~/.gemini → agy (legacy dir name, now the Antigravity CLI)" {
+  # agy (Antigravity) reuses ~/.gemini/ for its config; the basename is
+  # mapped to the new agent identifier.
   run ai_tool_name "$HOME/.gemini"
   [ "$status" -eq 0 ]
-  [ "$output" = "gemini" ]
+  [ "$output" = "agy" ]
 }
 
 @test "ai_tool_name: ~/.openclaw/workspace → openclaw (workspace uses parent dir)" {

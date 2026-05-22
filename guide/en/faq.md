@@ -292,7 +292,7 @@ Code; it doesn't replace it.
 
 **What superpowers does well:** A mature 7-stage methodology (brainstorm →
 worktree → plan → execute → test → review → finish), broad agent support
-(Claude Code, Cursor, Codex, Gemini, Copilot, Factory, OpenCode), strong
+(Claude Code, Cursor, Codex, Antigravity, Copilot, Factory, OpenCode), strong
 RED-GREEN-REFACTOR enforcement, subagent-driven development. Roll's README
 already acknowledges it — several Roll workflow patterns were inspired by it.
 

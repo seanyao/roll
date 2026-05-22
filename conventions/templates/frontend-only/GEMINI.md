@@ -1,13 +1,13 @@
-# Project Preferences — Frontend Only (Gemini CLI)
+# Project Preferences — Frontend Only (Antigravity)
 
-> Extends global GEMINI.md + project AGENTS.md.
+> Extends global GEMINI.md (Antigravity) + project AGENTS.md.
 
 ## Stack
 
 - React + shadcn/ui + Tailwind CSS + Vite
 - Testing: Vitest + Playwright
 
-## Gemini Notes
+## Antigravity (agy) Notes
 
 - No backend in this project. All data via external API consumption.
 - Run `npm run build` to verify production bundle compiles before pushing.

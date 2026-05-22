@@ -160,7 +160,7 @@ def _fixture_data() -> Dict[str, Any]:
         ai_clients=[
             {"name": "claude",  "cfg_file": "CLAUDE.md",  "path": "~/.claude/CLAUDE.md",   "sync": "sync",        "skills": 12},
             {"name": "cursor",  "cfg_file": "AGENTS.md",  "path": "~/.cursor/AGENTS.md",    "sync": "out-of-sync", "skills": 12},
-            {"name": "gemini",  "cfg_file": "GEMINI.md",  "path": "~/.gemini/GEMINI.md",    "sync": "missing",     "skills": 0},
+            {"name": "agy",     "cfg_file": "GEMINI.md",  "path": "~/.gemini/GEMINI.md",    "sync": "missing",     "skills": 0},
         ],
         templates=[
             ("fullstack", 14), ("frontend-only", 9), ("backend-service", 11), ("cli", 7),

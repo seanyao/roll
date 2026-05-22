@@ -7,7 +7,7 @@
 sync_claude: ~/.claude/CLAUDE.md
 sync_kimi: ~/.kimi/AGENTS.md
 sync_codex: ~/.codex/AGENTS.md
-sync_gemini: ~/.gemini/GEMINI.md
+sync_agy: ~/.gemini/GEMINI.md   # Antigravity (agy) reuses the legacy ~/.gemini/ path
 
 # User preferences
 default_language: zh

@@ -133,7 +133,7 @@ conventions, deploy targets.
 |---|---|---|
 | `conventions/global/AGENTS.md` | `conventions/templates/<type>/AGENTS.md` | All agents |
 | `conventions/global/CLAUDE.md` | `conventions/templates/<type>/CLAUDE.md` | Claude Code |
-| `conventions/global/GEMINI.md` | `conventions/templates/<type>/GEMINI.md` | Gemini CLI |
+| `conventions/global/GEMINI.md` | `conventions/templates/<type>/GEMINI.md` | Antigravity (agy) — reads `~/.gemini/GEMINI.md` natively |
 | `conventions/global/project_rules.md` | `conventions/templates/<type>/project_rules.md` | Trae IDE |
 
 The CLAUDE / GEMINI / project_rules global files themselves declare they

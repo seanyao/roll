@@ -56,7 +56,7 @@ Check:
 # Claude Code
 ls -la ~/.claude/skills/roll-*
 
-# Gemini (if exists)
+# Antigravity (agy — reuses ~/.gemini/, if exists)
 ls -la ~/.gemini/skills/roll-* 2>/dev/null
 
 # Trae (if exists)

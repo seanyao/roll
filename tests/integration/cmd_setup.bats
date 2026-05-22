@@ -104,7 +104,7 @@ teardown() {
   [ "$broken" -eq 0 ]
 }
 
-@test "setup: creates ~/.gemini/skills/ symlinks when ~/.gemini/ exists" {
+@test "setup: creates ~/.gemini/skills/ symlinks when ~/.gemini/ exists (agy reuses gemini dir)" {
   run_roll setup
   [ "$status" -eq 0 ]
   [ -d "${TEST_TMP}/.gemini/skills" ]

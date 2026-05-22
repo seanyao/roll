@@ -30,7 +30,7 @@ _AGENT_COLOR = {
     "codex":    "pink",
     "kimi":     "amber",
     "deepseek": "green",
-    "gemini":   "purple",
+    "agy":      "purple",   # Antigravity (formerly Gemini CLI)
     "pi":       "yellow",
     "opencode": "muted",
     "trae":     "fg",

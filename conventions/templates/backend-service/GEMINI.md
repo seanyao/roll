@@ -1,6 +1,6 @@
-# Project Preferences — Backend Service (Gemini CLI)
+# Project Preferences — Backend Service (Antigravity)
 
-> Extends global GEMINI.md + project AGENTS.md.
+> Extends global GEMINI.md (Antigravity) + project AGENTS.md.
 
 ## Stack
 
@@ -8,7 +8,7 @@
 - Database: Prisma or Drizzle ORM
 - Testing: Vitest + Supertest
 
-## Gemini Notes
+## Antigravity (agy) Notes
 
 - No frontend in this project. API-only service.
 - Write integration tests that hit real endpoints, not mocked handlers.

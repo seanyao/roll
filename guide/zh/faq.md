@@ -260,7 +260,7 @@ Claude Code，它在上面叠一层。
 
 **superpowers 强在哪：** 成熟的 7 阶段方法论（brainstorm → worktree →
 plan → execute → test → review → finish），支持的 agent 很广（Claude
-Code / Cursor / Codex / Gemini / Copilot / Factory / OpenCode），强制
+Code / Cursor / Codex / Antigravity / Copilot / Factory / OpenCode），强制
 RED-GREEN-REFACTOR，subagent 驱动开发。Roll README 已致谢 ——
 Roll 几个工作流模式从它借鉴而来。
 

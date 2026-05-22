@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+### Improved
+
+- **dashboard token 列现在只算 input/output，cache 不再混进来虚抬总量** `[loop]`
+
 ### Fixed
 
 - **loop 异常中断时未推送的 commit 不再丢** — 自动开成 PR `[loop]`
+- **loop 每小时弹窗不再抢前台焦点** — 后台开 Terminal，不打断你在干的事
 
 ## v2026.522.1
 

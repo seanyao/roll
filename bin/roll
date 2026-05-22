@@ -6669,14 +6669,29 @@ _claude_cleanup_stale_worktrees() {
   return 0
 }
 
+# FIX-104: scan multiple ephemeral prefixes (loop/cycle-, worktree-agent-,
+# claude/) and delete any already merged to origin/main. Unmerged branches
+# are preserved — they may be active WIP. Caller can pass a custom prefix
+# list via $2 (newline-separated `refs/heads/<prefix>*` patterns) but the
+# default whitelist covers every temp prefix the loop / Claude session /
+# worktree-agent paths create.
 _loop_cleanup_stale_cycle_branches() {
   local project_path="${1:-.}"
   local url; url=$(git -C "$project_path" remote get-url origin 2>/dev/null) || return 0
   [[ "$url" == *github.com* ]] || return 0
 
-  local branches
-  branches=$(git -C "$project_path" ls-remote --heads origin 'refs/heads/loop/cycle-*' 2>/dev/null \
-    | awk '{print $2}' | sed 's|^refs/heads/||')
+  local prefixes="${2:-refs/heads/loop/cycle-*
+refs/heads/worktree-agent-*
+refs/heads/claude/*}"
+
+  local branches=""
+  while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    local found
+    found=$(git -C "$project_path" ls-remote --heads origin "$pat" 2>/dev/null \
+      | awk '{print $2}' | sed 's|^refs/heads/||')
+    [ -n "$found" ] && branches+="${found}"$'\n'
+  done <<< "$prefixes"
   [ -z "$branches" ] && return 0
 
   while IFS= read -r branch; do

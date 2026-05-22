@@ -26,7 +26,21 @@ _install_fake_git() {
 while [ "$1" = "-C" ]; do shift 2; done
 case "$1" in
   ls-remote)
-    cat "$LSREMOTE_OUT" 2>/dev/null
+    # FIX-104: honor the refspec arg so production code's prefix list is
+    # actually exercised. Filter LSREMOTE_OUT by the 'refs/heads/<prefix>*'
+    # arg if present; otherwise return everything (legacy callers).
+    pattern=""
+    for arg in "$@"; do
+      case "$arg" in
+        refs/heads/*) pattern="$arg" ;;
+      esac
+    done
+    if [ -n "$pattern" ]; then
+      prefix=${pattern%\*}
+      grep -F "	$prefix" "$LSREMOTE_OUT" 2>/dev/null || true
+    else
+      cat "$LSREMOTE_OUT" 2>/dev/null
+    fi
     ;;
   remote)
     if [ "$2" = "get-url" ]; then echo "$REMOTE_URL"; fi
@@ -205,4 +219,62 @@ teardown() {
   _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p go" "/tmp/log" 0 24
   local inner_path="${script_path%.sh}-inner.sh"
   grep -qF '_loop_cleanup_stale_cycle_branches' "$inner_path"
+}
+
+# --- FIX-104: prefix expansion + early call site ---
+
+@test "FIX-104: deletes merged worktree-agent-* branch" {
+  printf 'sha1\trefs/heads/worktree-agent-abc123\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES="worktree-agent-abc123"
+  : > "$PUSH_CALLS"
+  run _loop_cleanup_stale_cycle_branches .
+  [ "$status" -eq 0 ]
+  run cat "$PUSH_CALLS"
+  [ "$output" = "worktree-agent-abc123" ]
+}
+
+@test "FIX-104: deletes merged claude/* branch" {
+  printf 'sha1\trefs/heads/claude/session-xyz\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES="claude/session-xyz"
+  : > "$PUSH_CALLS"
+  run _loop_cleanup_stale_cycle_branches .
+  [ "$status" -eq 0 ]
+  run cat "$PUSH_CALLS"
+  [ "$output" = "claude/session-xyz" ]
+}
+
+@test "FIX-104: deletes mixed-prefix merged branches in one call" {
+  printf 'sha1\trefs/heads/loop/cycle-old\nsha2\trefs/heads/worktree-agent-xyz\nsha3\trefs/heads/claude/sess1\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES="loop/cycle-old
+worktree-agent-xyz
+claude/sess1"
+  : > "$PUSH_CALLS"
+  run _loop_cleanup_stale_cycle_branches .
+  [ "$status" -eq 0 ]
+  grep -qF 'loop/cycle-old' "$PUSH_CALLS"
+  grep -qF 'worktree-agent-xyz' "$PUSH_CALLS"
+  grep -qF 'claude/sess1' "$PUSH_CALLS"
+}
+
+@test "FIX-104: keeps unmerged worktree-agent-* branch (WIP protection)" {
+  printf 'sha1\trefs/heads/worktree-agent-wip\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES=""
+  : > "$PUSH_CALLS"
+  run _loop_cleanup_stale_cycle_branches .
+  [ "$status" -eq 0 ]
+  [ ! -s "$PUSH_CALLS" ]
+}
+
+@test "FIX-104: cleanup is wired at cycle entry (before worktree setup)" {
+  local script_path="${TEST_TMP}/run-test.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "claude -p go" "/tmp/log" 0 24
+  local inner_path="${script_path%.sh}-inner.sh"
+  local gc_line wt_line
+  gc_line=$(grep -n '_loop_cleanup_stale_cycle_branches' "$inner_path" | head -1 | cut -d: -f1)
+  wt_line=$(grep -n '_worktree_create' "$inner_path" | head -1 | cut -d: -f1)
+  [ -n "$gc_line" ]
+  [ -n "$wt_line" ]
+  # Early call: GC must run before worktree creation so pre-run abort paths
+  # (worktree setup failure, claude timeout) still GC stale merged branches.
+  [ "$gc_line" -lt "$wt_line" ]
 }

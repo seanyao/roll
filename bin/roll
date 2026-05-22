@@ -4192,15 +4192,33 @@ _write_launchd_plist() {
       ;;
   esac
 
-  local hour_xml=""
-  [[ -n "$hour" ]] && hour_xml="    <key>Hour</key>
-    <integer>${hour}</integer>
-"
-
   # FIX-050: bake PATH into the plist so launchd-spawned bash can find tmux,
   # claude, node, etc. The runner script also re-asserts PATH at runtime as
   # a second layer (covers stale plists where brew was installed after setup).
   local path_value; path_value=$(_detect_path_prepend)
+
+  # FIX-105: macOS 26.4 launchd silently refuses to fire StartCalendarInterval
+  # entries that contain BOTH Hour and Minute keys (verified: runs stays 0,
+  # last exit "never exited", no log output, the calendarinterval trigger is
+  # registered but never invoked by UserEventAgent-Aqua). Single-Minute (hourly)
+  # entries still fire fine. Workaround: when an Hour is provided (daily
+  # schedule), emit StartInterval=86400 (24h period) instead. First fire is
+  # bootstrap+24h rather than the exact requested wall-clock time — acceptable
+  # trade since the alternative was "never fires at all" (dream/brief broken
+  # for 4+ days). The Minute/Hour args are still kept in the function signature
+  # for callers that may want to filter at runtime, but they no longer steer
+  # the plist trigger format for daily schedules.
+  local schedule_xml
+  if [[ -n "$hour" ]]; then
+    schedule_xml="  <key>StartInterval</key>
+  <integer>86400</integer>"
+  else
+    schedule_xml="  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Minute</key>
+    <integer>${minute}</integer>
+  </dict>"
+  fi
 
   local content
   content="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
@@ -4220,11 +4238,7 @@ _write_launchd_plist() {
     <key>PATH</key>
     <string>${path_value}</string>
   </dict>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Minute</key>
-    <integer>${minute}</integer>
-${hour_xml}  </dict>
+${schedule_xml}
   <key>WorkingDirectory</key>
   <string>${project_path}</string>
 </dict>

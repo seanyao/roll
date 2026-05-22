@@ -479,7 +479,7 @@ from datetime import datetime, timezone
 cy = {
     "outcome": "done",
     "start": datetime(2026,5,20,10,0,0,tzinfo=timezone.utc),
-    "duration_s": 600, "tokens": 1_000_000, "cost_list": 1.50,
+    "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000, "cost_list": 1.50,
     "model": "claude-opus-4-7-20251001", "story": "US-VIEW-011",
 }
 buf = io.StringIO()
@@ -491,4 +491,130 @@ print("#" not in out, "↩" not in out, "⊘" not in out, "…" not in out)
 '
   [ "$status" -eq 0 ]
   [[ "$output" == *"True True True True"* ]]
+}
+
+# ─── US-VIEW-012: token column split into input / output ──────────────────────
+
+@test "US-VIEW-012 empty_rollup: exposes input_tokens + output_tokens, no tokens key" {
+  run run_py 'r = roll_render.empty_rollup(); print("input_tokens" in r, "output_tokens" in r, "tokens" not in r)'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True True"* ]]
+}
+
+@test "US-VIEW-012 cycle_row: token column renders as in/out (no single value, no cache)" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,22,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600,
+    "input_tokens": 2_100_000,
+    "output_tokens": 180_000,
+    "cost_list": 1.50,
+    "model": "claude-opus-4-7-20251001",
+    "story": "US-VIEW-012",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+# in/out form present, single combined value absent
+print("2.1M/180K" in out, "2.3M" not in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True"* ]]
+}
+
+@test "US-VIEW-012 cycle_row: cycle without usage shows —/— for token column" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,22,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "cost_list": 0.0,
+    "model": "claude-opus-4-7-20251001", "story": "US-X",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("—/—" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
+@test "US-VIEW-012 backfill_usage writes input_tokens + output_tokens (not legacy tokens)" {
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+cycles = [{
+    "label": "L7",
+    "start": ts,
+    "usage_event": {
+        "model": "claude-sonnet-4-6",
+        "input_tokens": 1000,
+        "output_tokens": 500,
+        "cache_creation_tokens": 200,
+        "cache_read_tokens": 122089,
+    },
+}]
+mod.backfill_usage_from_claude_sessions(cycles, "no-such-slug")
+cy = cycles[0]
+# AC: new fields populated, legacy aggregate dropped, cache fields not surfaced
+print(cy.get("input_tokens"), cy.get("output_tokens"), "tokens" not in cy)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1000 500 True"* ]]
+}
+
+@test "US-VIEW-012 rollup_for_day sums input_tokens + output_tokens (cache excluded)" {
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+cycles = [
+  {"start": ts, "duration_s": 60, "input_tokens": 100, "output_tokens":  50,
+   "cache_read_tokens": 100_000, "outcome": "done"},
+  {"start": ts, "duration_s": 60, "input_tokens": 200, "output_tokens": 150,
+   "cache_read_tokens":  50_000, "outcome": "done"},
+]
+r = mod.rollup_for_day(cycles)
+# AC: input_tokens / output_tokens summed, cache not in rollup, legacy tokens gone
+print(r["input_tokens"], r["output_tokens"], "tokens" not in r)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"300 200 True"* ]]
+}
+
+@test "US-VIEW-012 render: daily summary shows input + output rows, no combined tokens row" {
+  run run_status '
+import io, contextlib
+from datetime import datetime, timezone, timedelta
+now = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc).astimezone()
+ts = now - timedelta(hours=1)
+te = ts + timedelta(seconds=300)
+events = [
+  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "L8", "_ts": ts},
+  {"ts": ts.isoformat(), "stage": "usage", "label": "L8",
+   "detail": {"model": "claude-sonnet-4-6",
+              "input_tokens": 5000, "output_tokens": 1000,
+              "cache_creation_tokens": 0, "cache_read_tokens": 9_999_999}, "_ts": ts},
+  {"ts": te.isoformat(), "stage": "cycle_end", "label": "L8",
+   "outcome": "done", "_ts": te},
+]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    mod.render(events, [], {}, {}, days=3, lang="en", now=now)
+out = buf.getvalue()
+# Two metric rows under their own labels; legacy combined "tokens" row gone.
+import re
+has_in  = bool(re.search(r"^\s*input tokens\s+\S",  out, re.M))
+has_out = bool(re.search(r"^\s*output tokens\s+\S", out, re.M))
+has_old = bool(re.search(r"^\s*tokens\s+\S",        out, re.M))
+print(has_in, has_out, has_old)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True False"* ]]
 }

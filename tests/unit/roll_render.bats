@@ -121,7 +121,7 @@ cy = {
     "outcome": "done",
     "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
     "duration_s": 1080,
-    "tokens": 3_600_000,
+    "input_tokens": 3_200_000, "output_tokens": 400_000,
     "cost_list": 2.65,
     "model": "claude-opus-4-7-20251001",
     "story": "US-VIEW-010",
@@ -147,7 +147,7 @@ cy = {
     "outcome": "done",
     "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
     "duration_s": 60,
-    "tokens": 1000,
+    "input_tokens": 800, "output_tokens": 200,
     "cost_list": 0.0,
     "model": None,
     "story": "US-X",
@@ -172,7 +172,7 @@ cy = {
     "outcome": "done",
     "start": datetime(2026,5,19,22,37,0,tzinfo=timezone.utc),
     "duration_s": 600,
-    "tokens": 2_000_000,
+    "input_tokens": 1_800_000, "output_tokens": 200_000,
     "cost_list": 1.20,
     "model": "claude-sonnet-4-6",
     "story": "US-X",
@@ -414,7 +414,7 @@ from datetime import datetime, timezone
 cy = {
     "outcome": "done",
     "start": datetime(2026,5,20,10,0,0,tzinfo=timezone.utc),
-    "duration_s": 600, "tokens": 1_000_000, "cost_list": 1.50,
+    "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000, "cost_list": 1.50,
     "model": "claude-opus-4-7-20251001", "story": "US-VIEW-011",
     "pr_num": 77, "pr_outcome": "merged",
 }
@@ -436,7 +436,7 @@ from datetime import datetime, timezone
 cy = {
     "outcome": "done",
     "start": datetime(2026,5,20,10,0,0,tzinfo=timezone.utc),
-    "duration_s": 600, "tokens": 1_000_000, "cost_list": 1.50,
+    "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000, "cost_list": 1.50,
     "model": "claude-opus-4-7-20251001", "story": "US-VIEW-011",
     "pr_num": 99, "pr_outcome": "closed",
 }
@@ -458,7 +458,7 @@ from datetime import datetime, timezone
 cy = {
     "outcome": "done",
     "start": datetime(2026,5,20,10,0,0,tzinfo=timezone.utc),
-    "duration_s": 600, "tokens": 1_000_000, "cost_list": 1.50,
+    "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000, "cost_list": 1.50,
     "model": "claude-opus-4-7-20251001", "story": "US-VIEW-011",
     "pr_num": 55, "pr_outcome": "open",
 }

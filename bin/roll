@@ -4804,21 +4804,43 @@ _install_launchd_plists() {
     local after; after=$(cat "$plist")
     if [[ "$before" != "$after" ]]; then
       updated=$((updated + 1))
-      if _launchd_is_loaded "$label"; then
-        # FIX-027: use bootout/bootstrap so we don't disturb the label's
-        # enabled flag in the launchd overrides db (which legacy
-        # unload/load no-`-w` wipes on macOS Sonoma+, causing
-        # `roll loop status` to falsely report off after `roll update`).
-        local uid; uid=$(id -u)
-        launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
-        launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
-      elif [[ -z "$before" ]]; then
-        # FIX-059: brand-new plist — macOS FSEvents auto-bootstraps any new
-        # file dropped in ~/Library/LaunchAgents/, so projects never enabled
-        # via 'roll loop on' would fire every hour. Immediately mark disabled
-        # in the overrides db to block that auto-load.
-        local uid; uid=$(id -u)
-        launchctl disable "gui/${uid}/${label}" 2>/dev/null || true
+      # FIX-090: gate launchctl writes so a sandboxed plist never gets
+      # registered into the user's REAL gui/<uid> domain. Without this,
+      # `launchctl bootstrap gui/<uid> <sandbox-plist>` outlives TEST_TMP
+      # cleanup as a zombie that either fails silently (EX_CONFIG) or, when
+      # the label collides with the dev's project slug, displaces the real
+      # registration and kills the autonomous loop. Two gate paths:
+      #   - explicit: integration_setup exports _LAUNCHD_SKIP_REGISTRY=1
+      #   - implicit: if _LAUNCHD_DIR was auto-sandboxed under _SHARED_ROOT
+      #     (FIX-087 inner-runner.sh re-source path) we infer skip — callers
+      #     that genuinely want the launchctl flow override _LAUNCHD_DIR to
+      #     a path outside _SHARED_ROOT (unit tests; production has no
+      #     _SHARED_ROOT match against ~/Library/LaunchAgents).
+      # See helpers.bash and tests/unit/launchd_sandbox.bats.
+      local _skip_reg="${_LAUNCHD_SKIP_REGISTRY:-}"
+      if [[ -z "$_skip_reg" ]]; then
+        case "${_LAUNCHD_DIR:-}/" in
+          "${_SHARED_ROOT:-/nonexistent}"/*) _skip_reg=1 ;;
+          *) _skip_reg=0 ;;
+        esac
+      fi
+      if [[ "$_skip_reg" != "1" ]]; then
+        if _launchd_is_loaded "$label"; then
+          # FIX-027: use bootout/bootstrap so we don't disturb the label's
+          # enabled flag in the launchd overrides db (which legacy
+          # unload/load no-`-w` wipes on macOS Sonoma+, causing
+          # `roll loop status` to falsely report off after `roll update`).
+          local uid; uid=$(id -u)
+          launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+          launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
+        elif [[ -z "$before" ]]; then
+          # FIX-059: brand-new plist — macOS FSEvents auto-bootstraps any new
+          # file dropped in ~/Library/LaunchAgents/, so projects never enabled
+          # via 'roll loop on' would fire every hour. Immediately mark disabled
+          # in the overrides db to block that auto-load.
+          local uid; uid=$(id -u)
+          launchctl disable "gui/${uid}/${label}" 2>/dev/null || true
+        fi
       fi
     fi
   done

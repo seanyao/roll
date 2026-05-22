@@ -20,6 +20,12 @@ integration_setup() {
   export ROLL_CONFIG="${ROLL_HOME}/config.yaml"
   export ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
   export ROLL_TEMPLATES="${ROLL_HOME}/conventions/templates"
+  # FIX-090: by default integration tests must NOT mutate the host launchctl
+  # registry. _install_launchd_plists still writes plist files (so tests that
+  # inspect plist content keep working) but launchctl bootstrap/bootout/disable
+  # are short-circuited. The one test file that genuinely exercises launchctl
+  # (cmd_loop.bats) opts back in by `unset _LAUNCHD_SKIP_REGISTRY` in its setup.
+  export _LAUNCHD_SKIP_REGISTRY=1
 
   # US-ONBOARD-004: existing tests use legacy structure fixtures (.roll/backlog.md etc.)
   # Bypass structure check until Story 5 migrates fixtures. New tests explicitly

@@ -10,6 +10,12 @@ setup() {
   # itself). Skip the whole file when CYCLE_ID is set.
   require_not_in_real_loop
   integration_setup
+  # FIX-090: cmd_loop.bats is the one integration file that *intentionally*
+  # exercises the launchctl bootstrap/load path (assertions below call
+  # `launchctl list "$label"`). Opt out of the default skip set by
+  # integration_setup; the file's existing teardown bootouts these labels
+  # so the test still cleans up after itself.
+  unset _LAUNCHD_SKIP_REGISTRY
   # Pre-install plists via setup so loop on/off have files to work with
   run_roll setup
 }

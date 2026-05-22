@@ -101,6 +101,78 @@ teardown() { unit_teardown_cd; }
   [ ! -f "$plist_path" ]
 }
 
+@test "FIX-090: _LAUNCHD_SKIP_REGISTRY=1 makes _install_launchd_plists write files but skip launchctl" {
+  # FIX-087 sandboxed the plist FILE path. FIX-090 closes the second half:
+  # `launchctl bootstrap gui/<uid> <plist>` registers the (sandbox) path into
+  # the user's REAL gui domain — surviving TEST_TMP cleanup as a zombie that
+  # either fails silently (EX_CONFIG) or points launchd at a non-existent
+  # runner. Setting _LAUNCHD_SKIP_REGISTRY=1 must short-circuit every
+  # launchctl call inside _install_launchd_plists while leaving file-writes
+  # intact (so other unit tests that inspect the written plist still work).
+  cd "$_UNIT_ORIG_DIR"  # _slug_migrate_from_legacy needs a git-tracked cwd
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  local call_log="${tmp_dir}/launchctl_calls.log"
+  export _LAUNCHD_SKIP_REGISTRY=1
+
+  # Pretend the labels are already loaded so the reload branch would have
+  # fired (FIX-027 path) — without the skip, this would call bootout+bootstrap.
+  _launchd_is_loaded() { return 0; }
+  launchctl() { echo "$*" >> "$call_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  # First install — brand-new plist (would normally hit the FIX-059 disable branch).
+  _install_launchd_plists "$proj"
+  # Verify the plist file was actually written (file ops not gated by the skip).
+  local plist; plist=$(_launchd_plist_path "loop" "$proj")
+  [ -f "$plist" ]
+
+  # Change config so plist content differs — would normally hit FIX-027 reload.
+  local cfg; cfg=$(mktemp); echo "loop_minute: 47" > "$cfg"; ROLL_CONFIG="$cfg"
+  _install_launchd_plists "$proj"
+
+  # Hard assertion: NO launchctl call of any kind was made.
+  # Note: must use `[ ! -s ]` (or similar) — file may exist as empty, or not at all.
+  # Diagnostic to stderr if the assertion fails:
+  if [[ -s "$call_log" ]]; then
+    printf 'launchctl calls captured (should be empty under SKIP_REGISTRY=1):\n%s\n' "$(cat "$call_log")" >&2
+    return 1
+  fi
+
+  rm -rf "$tmp_dir"; rm -f "$cfg"
+  unset _LAUNCHD_SKIP_REGISTRY
+}
+
+@test "FIX-090 auto-detect: _LAUNCHD_DIR under _SHARED_ROOT short-circuits launchctl even with SKIP_REGISTRY unset" {
+  # Covers the FIX-087 inner-runner.sh re-source path: inner.sh sources
+  # bin/roll, the auto-sandbox sets _LAUNCHD_DIR under _SHARED_ROOT, but
+  # nothing exports _LAUNCHD_SKIP_REGISTRY. Implicit detection must still
+  # gate launchctl based on the sandbox path.
+  cd "$_UNIT_ORIG_DIR"
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  _LAUNCHD_DIR="${_SHARED_ROOT}/LaunchAgents"  # simulate auto-sandbox redirect
+  local call_log="${tmp_dir}/launchctl_calls.log"
+  unset _LAUNCHD_SKIP_REGISTRY                  # the inner.sh scenario
+
+  _launchd_is_loaded() { return 0; }
+  launchctl() { echo "$*" >> "$call_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  _install_launchd_plists "$proj"
+
+  if [[ -s "$call_log" ]]; then
+    printf 'auto-detect failed — launchctl was invoked despite sandbox path:\n%s\n' \
+      "$(cat "$call_log")" >&2
+    return 1
+  fi
+
+  rm -rf "$tmp_dir"
+}
+
 @test "tripwire: real ~/Library/LaunchAgents/com.roll.* count unchanged after running roll setup in a sandbox" {
   # End-to-end smoke: invoke a real `roll setup` flow through a subprocess
   # whose env is fully sandboxed, then confirm the developer's real launchd

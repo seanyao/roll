@@ -147,14 +147,14 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_write_loop_runner_script: always uses Terminal.app osascript" {
-  # FIX-054: terminal preference detection removed. Generated runner always
-  # dispatches the popup to macOS Terminal.app via osascript; no Ghostty /
-  # iTerm2 / config-driven cases remain.
+@test "_write_loop_runner_script: always dispatches popup to Terminal.app via open -g" {
+  # FIX-054: terminal preference detection removed — fixed to macOS Terminal.app.
+  # FIX-092: dispatch switched from osascript do-script to `open -g -a Terminal`
+  # so the window appears in the background and does not steal focus.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local script="${tmp_dir}/run.sh"
   _write_loop_runner_script "$script" "/tmp/proj" "claude -p prompt" "/tmp/run.log" "10" "18"
-  grep -qF 'tell application \"Terminal\"' "$script"
+  grep -qF 'open -g -a Terminal' "$script"
   rm -rf "$tmp_dir"
 }
 
@@ -477,7 +477,7 @@ setup() {
 
   local slug; slug=$(_project_slug "$proj")
   local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
-  grep -qF 'tell application \"Terminal\"' "$runner"
+  grep -qF 'open -g -a Terminal' "$runner"
   run grep -F 'Ghostty.app' "$runner"
   [ "$status" -ne 0 ]
   run grep -F 'iTerm2' "$runner"
@@ -544,6 +544,6 @@ setup() {
   local runner="${tmp_dir}/shared/loop/run-${slug}.sh"
   run grep -F 'Ghostty.app' "$runner"
   [ "$status" -ne 0 ]
-  grep -qF 'tell application \"Terminal\"' "$runner"
+  grep -qF 'open -g -a Terminal' "$runner"
   rm -rf "$tmp_dir"; rm -f "$cfg"
 }

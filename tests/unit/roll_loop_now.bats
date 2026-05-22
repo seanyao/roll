@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # Tests for _loop_now behavior parity with launchd-triggered service (FIX-021)
 # loop now must walk the SAME path as the scheduled service: runner script →
-# tmux session → claude --verbose -p → osascript popup. ROLL_LOOP_FORCE bypasses
+# tmux session → claude --verbose -p → Terminal.app popup. ROLL_LOOP_FORCE bypasses
 # only the active-window guard so the manual invocation isn't time-gated.
 
 load helpers

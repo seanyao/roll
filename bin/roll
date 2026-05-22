@@ -2612,19 +2612,23 @@ _peer_route() {
 }
 
 # Open a Terminal.app window attached to the given tmux session (peer
-# auto-attach). No-ops when muted, non-macOS, or osascript unavailable.
+# auto-attach). No-ops when muted or non-macOS.
 # FIX-054: terminal selection removed — always dispatches to macOS
 # Terminal.app for predictability (per-user detection silently failed on
 # Ghostty upgrades).
+# Uses `open -g` so the window appears in the background and does not steal
+# focus from the user's active app (replaces a prior osascript-based
+# capture-frontmost / restore-focus dance that triggered LaunchServices
+# "where is <app>" prompts when the active process name differed from its
+# .app bundle name, e.g. MSTeams vs Microsoft Teams.app).
 _peer_auto_attach() {
   local session="$1"
   [ "$(uname)" = "Darwin" ] || return 0
   [ -f "$_LOOP_MUTE_FILE" ] && return 0
-  command -v osascript >/dev/null 2>&1 || return 0
-  osascript \
-    -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \
-    -e "tell application \"Terminal\" to do script \"tmux attach -t $session\"" \
-    -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
+  local attach_cmd="${_SHARED_ROOT}/loop/attach-${session}.command"
+  printf '#!/bin/bash\nexec tmux attach -t %s\n' "$session" > "$attach_cmd" 2>/dev/null || return 0
+  chmod +x "$attach_cmd" 2>/dev/null || return 0
+  open -g -a Terminal "$attach_cmd" >/dev/null 2>&1 || true
 }
 
 # Dispatch a peer CLI command inside an existing tmux session (window 0).
@@ -4717,13 +4721,16 @@ if command -v tmux >/dev/null 2>&1; then
   # to the tmux session so the user can watch the loop work in real time.
   # FIX-054: terminal selection removed — fixed to macOS Terminal.app for
   # predictability (per-user detection silently failed on Ghostty upgrades).
-  # Best-effort focus retention: capture the current frontmost app and
-  # re-activate after.
-  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
-    osascript \\
-      -e 'tell application "System Events" to set _prev to name of first application process whose frontmost is true' \\
-      -e "tell application \"Terminal\" to do script \"tmux attach -t \$SESSION\"" \\
-      -e 'delay 0.3' -e 'try' -e 'tell application _prev to activate' -e 'end try' >/dev/null 2>&1 || true
+  # Uses \`open -g\` so the window appears in the background and does not steal
+  # focus. Replaces a prior osascript capture-frontmost / restore-focus dance
+  # that triggered LaunchServices "where is <app>" prompts when the active
+  # process name differed from its .app bundle name (e.g. MSTeams vs
+  # Microsoft Teams.app).
+  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
+    _attach_cmd="\$HOME/.shared/roll/loop/attach-\$SESSION.command"
+    printf '#!/bin/bash\\nexec tmux attach -t %s\\n' "\$SESSION" > "\$_attach_cmd" 2>/dev/null || true
+    chmod +x "\$_attach_cmd" 2>/dev/null || true
+    open -g -a Terminal "\$_attach_cmd" >/dev/null 2>&1 || true
   fi
   _OUTER_TIMEOUT=\$(( \${ROLL_LOOP_CYCLE_TIMEOUT_SEC:-2700} + 300 ))
   _outer_wait_start=\$(date +%s)

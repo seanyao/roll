@@ -94,35 +94,41 @@ teardown() { unit_teardown_cd; }
 
 # ─── Auto-attach injected into runner script ──────────────────────────────────
 
-@test "_write_loop_runner_script: runner contains osascript Terminal popup" {
+@test "_write_loop_runner_script: runner contains Terminal popup via open -g" {
   local script="${_tmp}/run-test.sh"
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
-  grep -qF 'osascript' "$script"
-  grep -qF 'Terminal' "$script"
+  # FIX-092: popup uses `open -g -a Terminal <.command>` so the window appears
+  # without stealing focus. Replaces an earlier osascript dance that triggered
+  # LaunchServices "where is <app>" prompts (process-name vs bundle-name mismatch).
+  grep -qF 'open -g -a Terminal' "$script"
   grep -qF 'tmux attach' "$script"
 }
 
-@test "_write_loop_runner_script: runner skips osascript when mute file exists" {
+@test "_write_loop_runner_script: runner skips popup when mute file exists" {
   local script="${_tmp}/run-test.sh"
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
-  # The runner checks for the mute marker before firing osascript.
+  # The runner checks for the mute marker before opening the Terminal window.
   # FIX-052: mute is per-project (.shared/roll/loop/mute-<slug>).
   grep -qE '\.shared/roll/loop/mute-' "$script"
 }
 
-@test "_write_loop_runner_script: osascript is fired in background (no blocking)" {
+@test "_write_loop_runner_script: popup writes a .command wrapper for the attach" {
   local script="${_tmp}/run-test.sh"
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
-  # The osascript pipeline must end with & so it doesn't block the runner
-  grep -qE 'osascript.*&[[:space:]]*$|osascript[^&]*\\\\$' "$script" || \
-    grep -qE 'end try.*>.*2>.*&' "$script" || \
-    grep -qE '\)[[:space:]]*&[[:space:]]*$' "$script"
+  # FIX-092: `open` needs a file; we write a one-line .command wrapper that
+  # execs `tmux attach`. Idempotent: same path each cycle, overwritten.
+  grep -qF '.command' "$script"
+  grep -qF 'tmux attach -t' "$script"
 }
 
-@test "_write_loop_runner_script: osascript uses tmux session variable for attach target" {
+@test "_write_loop_runner_script: popup does not invoke osascript (FIX-092)" {
   local script="${_tmp}/run-test.sh"
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
-  grep -qF 'tmux attach -t' "$script"
+  # Regression guard: the prior osascript capture-frontmost / restore-focus
+  # dance is gone — it triggered "where is <app>" dialogs. Allow the word
+  # to appear in commentary; flag actual command invocation only.
+  run grep -E '^[[:space:]]*osascript([[:space:]]|$|\\)' "$script"
+  [ "$status" -ne 0 ]
 }
 
 # ─── _ensure_tmux: required dependency auto-install ───────────────────────────

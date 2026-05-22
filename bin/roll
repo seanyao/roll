@@ -1913,7 +1913,7 @@ PY
   fi
   if [ "${#plists[@]}" -gt 0 ]; then
     for item in "${plists[@]}"; do
-      launchctl unload -w "$HOME/Library/LaunchAgents/$item" 2>/dev/null && echo "    unloaded     $item"
+      _launchctl_safe unload -w "$HOME/Library/LaunchAgents/$item" 2>/dev/null && echo "    unloaded     $item"
       rm -f "$HOME/Library/LaunchAgents/$item" 2>/dev/null
     done
   fi
@@ -3901,7 +3901,7 @@ PYEOF
 
   local old_plist=~/Library/LaunchAgents/com.roll.loop.${old_slug}.plist
   if [[ -f "$old_plist" ]]; then
-    launchctl unload "$old_plist" 2>/dev/null || true
+    _launchctl_safe unload "$old_plist" 2>/dev/null || true
     rm -f "$old_plist"
   fi
 
@@ -4772,6 +4772,32 @@ _launchd_is_loaded() {
   launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep -qF "\"$1\" => enabled"
 }
 
+# FIX-101 tripwire: refuse to mutate the host's launchd session when
+# _LAUNCHD_DIR has been sandboxed (i.e. is not the canonical
+# ${HOME}/Library/LaunchAgents). Tests that auto-sandbox _LAUNCHD_DIR for
+# isolation (FIX-087) may still forget to set _LAUNCHD_SKIP_REGISTRY=1 or
+# stub the launchctl binary; without this defensive layer the production
+# label's plist path can get overwritten with a transient sandbox path,
+# leading to launchd EX_CONFIG (exit 78) when the tmp dir is later cleaned
+# and the next scheduled fire can't find the plist. Read-only ops (print*,
+# list, version) are always allowed since they have no side effects.
+_launchctl_safe() {
+  case "${1:-}" in
+    print|print-disabled|list|version|dumpstate|examine)
+      launchctl "$@"
+      return $?
+      ;;
+  esac
+  local canonical="${HOME}/Library/LaunchAgents"
+  if [[ "${_LAUNCHD_DIR:-$canonical}" != "$canonical" ]]; then
+    # Silent skip — caller intended sandbox isolation, just didn't gate this
+    # particular call site. Exit 0 keeps caller code (typically `|| true`)
+    # behaving the same way it did when launchctl succeeded.
+    return 0
+  fi
+  launchctl "$@"
+}
+
 _launchd_svc_state() {
   local svc="$1" project_path="$2"
   local label; label=$(_launchd_label "$svc" "$project_path")
@@ -4869,15 +4895,15 @@ _install_launchd_plists() {
           # unload/load no-`-w` wipes on macOS Sonoma+, causing
           # `roll loop status` to falsely report off after `roll update`).
           local uid; uid=$(id -u)
-          launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
-          launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
+          _launchctl_safe bootout "gui/${uid}/${label}" 2>/dev/null || true
+          _launchctl_safe bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
         elif [[ -z "$before" ]]; then
           # FIX-059: brand-new plist — macOS FSEvents auto-bootstraps any new
           # file dropped in ~/Library/LaunchAgents/, so projects never enabled
           # via 'roll loop on' would fire every hour. Immediately mark disabled
           # in the overrides db to block that auto-load.
           local uid; uid=$(id -u)
-          launchctl disable "gui/${uid}/${label}" 2>/dev/null || true
+          _launchctl_safe disable "gui/${uid}/${label}" 2>/dev/null || true
         fi
       fi
     fi
@@ -4959,7 +4985,7 @@ _loop_on() {
       local label; label=$(_launchd_label "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
         all_loaded=false
-        launchctl load -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+        _launchctl_safe load -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
       fi
     done
 
@@ -5015,7 +5041,7 @@ _loop_off() {
       local label; label=$(_launchd_label "$svc" "$project_path")
       if _launchd_is_loaded "$label"; then
         any_loaded=true
-        launchctl unload -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+        _launchctl_safe unload -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
       fi
     done
     if ! $any_loaded; then
@@ -5034,7 +5060,7 @@ _loop_off() {
       # disable list, polluting `launchctl print-disabled` forever even after
       # the project dir, plists, and ~/.roll are gone.
       local label; label=$(_launchd_label "$svc" "$project_path")
-      launchctl enable "gui/${uid}/${label}" 2>/dev/null || true
+      _launchctl_safe enable "gui/${uid}/${label}" 2>/dev/null || true
     done
     ok "Loop disabled  已停用"
     return 0
@@ -5214,7 +5240,7 @@ _loop_pause() {
     if ! _launchd_is_loaded "$label"; then
       warn "Loop not enabled — nothing to pause  loop 未启用，无需暂停"; return 0
     fi
-    launchctl unload -w "$(_launchd_plist_path "loop" "$project_path")" 2>/dev/null || true
+    _launchctl_safe unload -w "$(_launchd_plist_path "loop" "$project_path")" 2>/dev/null || true
   else
     local slug; slug=$(_project_slug "$project_path")
     mkdir -p "${_SHARED_ROOT}/loop"
@@ -5235,7 +5261,7 @@ _loop_resume() {
       local label; label=$(_launchd_label "loop" "$project_path")
       local plist; plist=$(_launchd_plist_path "loop" "$project_path")
       if [[ -f "$plist" ]]; then
-        launchctl load -w "$plist" 2>/dev/null || true
+        _launchctl_safe load -w "$plist" 2>/dev/null || true
       fi
     else
       local slug; slug=$(_project_slug "$project_path")

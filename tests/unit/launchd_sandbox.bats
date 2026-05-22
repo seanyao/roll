@@ -255,3 +255,71 @@ teardown() { unit_teardown_cd; }
   after=$(find "$real_dir" -maxdepth 1 -name 'com.roll.*' 2>/dev/null | wc -l | tr -d ' ')
   [ "$before" = "$after" ]
 }
+
+# ─── FIX-101: _launchctl_safe refuses to mutate launchd when sandboxed ──────
+
+@test "FIX-101: _launchctl_safe refuses mutating ops when _LAUNCHD_DIR is sandboxed" {
+  # When _LAUNCHD_DIR is anywhere other than ~/Library/LaunchAgents/, every
+  # mutating launchctl subcommand (bootstrap/bootout/enable/disable/load/unload)
+  # must be silently skipped — even when the caller forgot to gate on
+  # _LAUNCHD_SKIP_REGISTRY. Real launchctl must NOT be invoked.
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  _LAUNCHD_DIR="${tmp_dir}/sandbox-launchagents"
+  mkdir -p "$_LAUNCHD_DIR"
+  local log="${tmp_dir}/launchctl.log"
+  launchctl() { echo "$*" >> "$log"; }
+  export -f launchctl 2>/dev/null || true
+
+  _launchctl_safe bootstrap "gui/$(id -u)" "${_LAUNCHD_DIR}/com.roll.loop.fake.plist"
+  _launchctl_safe bootout   "gui/$(id -u)/com.roll.loop.fake"
+  _launchctl_safe enable    "gui/$(id -u)/com.roll.loop.fake"
+  _launchctl_safe disable   "gui/$(id -u)/com.roll.loop.fake"
+  _launchctl_safe load -w   "${_LAUNCHD_DIR}/com.roll.loop.fake.plist"
+  _launchctl_safe unload -w "${_LAUNCHD_DIR}/com.roll.loop.fake.plist"
+
+  # The stub should never have been called — all six calls short-circuit
+  # inside _launchctl_safe before reaching the real launchctl.
+  [ ! -f "$log" ]
+
+  rm -rf "$tmp_dir"
+}
+
+@test "FIX-101: _launchctl_safe proxies launchctl when _LAUNCHD_DIR is canonical" {
+  # Conversely, when _LAUNCHD_DIR points at the real ~/Library/LaunchAgents,
+  # production callers must still get the real launchctl call. Stub launchctl
+  # so we don't actually touch host launchd, but verify it was invoked.
+  _LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local log="${tmp_dir}/launchctl.log"
+  launchctl() { echo "$*" >> "$log"; }
+  export -f launchctl 2>/dev/null || true
+
+  _launchctl_safe bootstrap "gui/$(id -u)" "${HOME}/Library/LaunchAgents/com.roll.loop.fake.plist"
+
+  [ -f "$log" ]
+  grep -q "bootstrap" "$log"
+
+  rm -rf "$tmp_dir"
+}
+
+@test "FIX-101: _launchctl_safe allows read-only ops regardless of sandbox state" {
+  # Read-only subcommands (print, print-disabled, list, version) have no side
+  # effects on host launchd state, so the tripwire must NOT block them even
+  # when _LAUNCHD_DIR is sandboxed. _launchd_is_loaded and friends rely on
+  # `launchctl print-disabled` and would break otherwise.
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  _LAUNCHD_DIR="${tmp_dir}/sandbox-launchagents"
+  mkdir -p "$_LAUNCHD_DIR"
+  local log="${tmp_dir}/launchctl.log"
+  launchctl() { echo "$*" >> "$log"; }
+  export -f launchctl 2>/dev/null || true
+
+  _launchctl_safe print "gui/$(id -u)/com.roll.loop.fake"
+  _launchctl_safe print-disabled "gui/$(id -u)"
+  _launchctl_safe list
+
+  [ -f "$log" ]
+  [ "$(wc -l < "$log" | tr -d ' ')" = "3" ]
+
+  rm -rf "$tmp_dir"
+}

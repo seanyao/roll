@@ -61,6 +61,43 @@ roll loop resume      # Resume scheduling after pause
 roll loop reset       # Clear loop state (start fresh on next fire)
 ```
 
+## Status Dashboard
+
+`roll loop status` prints a compact dashboard with per-cycle rows and daily rollup totals.
+
+### Token column
+
+Each cycle row shows token usage in a 4-component format:
+
+```
+·  19:18    13m    164/498.2K↑ 12.7M↓/63.3K   opus-4-7   $11.07   US-VIEW-012
+             ↑      in   cw↑     cr↓    out
+```
+
+| Segment | Meaning |
+|---------|---------|
+| `164` (before first `/`) | Base input tokens |
+| `498.2K↑` | Cache write tokens (billed at write rate) |
+| `12.7M↓` | Cache read tokens (billed at read rate, much cheaper) |
+| `63.3K` (after last `/`) | Output tokens |
+
+When a cycle has no cache data (older cycles or non-Opus models), the column
+falls back to the two-part `in/out` format.
+
+### Rollup rows
+
+Below the cycle list, daily totals break out all four components:
+
+```
+input tokens       164
+cache writes    498.2K
+cache reads      12.7M
+output tokens    63.3K
+```
+
+This lets you verify that the displayed per-cycle cost (e.g. `$11.07`) matches
+your Anthropic invoice — 86 % of the cost in that example comes from cache.
+
 ## Visibility (tmux + popup)
 
 Every loop run lives in a detached tmux session.

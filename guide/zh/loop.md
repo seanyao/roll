@@ -61,6 +61,42 @@ roll loop resume      # 暂停后恢复调度
 roll loop reset       # 清除 loop 状态（下次触发时重新开始）
 ```
 
+## Status Dashboard（状态仪表盘）
+
+`roll loop status` 输出一个紧凑的仪表盘，包含每个 cycle 的行记录和每日汇总。
+
+### Token 列
+
+每条 cycle 行的 token 用量以 4 分量格式显示：
+
+```
+·  19:18    13m    164/498.2K↑ 12.7M↓/63.3K   opus-4-7   $11.07   US-VIEW-012
+             ↑      in   cw↑     cr↓    out
+```
+
+| 分量 | 含义 |
+|------|------|
+| `164`（第一个 `/` 之前） | Base input tokens（基础输入） |
+| `498.2K↑` | Cache write tokens（缓存写入，按写入费率计费） |
+| `12.7M↓` | Cache read tokens（缓存读取，费率远低于写入） |
+| `63.3K`（最后一个 `/` 之后） | Output tokens（输出） |
+
+没有 cache 数据的旧 cycle 或非 Opus 模型，列退化为两段式 `in/out` 格式。
+
+### 汇总行
+
+cycle 列表下方是每日四分量总计：
+
+```
+input tokens       164
+cache writes    498.2K
+cache reads      12.7M
+output tokens    63.3K
+```
+
+通过这四行，你可以验证 cycle 行显示的费用（如 `$11.07`）与 Anthropic 账单是否吻合——
+上面这个例子里，86% 的费用来自 cache。
+
 ## 可见性（tmux + 弹窗）
 
 每次 loop 运行都在一个独立的 tmux session 里。

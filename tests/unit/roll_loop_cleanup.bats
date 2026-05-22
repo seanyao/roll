@@ -47,8 +47,11 @@ case "$1" in
     ;;
   merge-base)
     # merge-base --is-ancestor <branch> origin/main
-    local branch="$3"
-    if [ -n "$MERGED_BRANCHES" ] && echo "$MERGED_BRANCHES" | grep -qF "$branch"; then
+    # NOTE: no `local` — this is a standalone script, not a function. Earlier
+    # tests passed by coincidence (empty $branch + grep -F "" matches anything).
+    branch="$3"
+    if [ -n "$MERGED_BRANCHES" ] && [ -n "$branch" ] \
+       && printf '%s\n' "$MERGED_BRANCHES" | grep -qxF "$branch"; then
       exit 0
     fi
     exit 1
@@ -263,6 +266,25 @@ claude/sess1"
   run _loop_cleanup_stale_cycle_branches .
   [ "$status" -eq 0 ]
   [ ! -s "$PUSH_CALLS" ]
+}
+
+@test "FIX-104: roll loop branches lists temp branches with merged/open status" {
+  printf 'sha1\trefs/heads/loop/cycle-merged\nsha2\trefs/heads/worktree-agent-live\nsha3\trefs/heads/claude/sess-done\n' > "$LSREMOTE_OUT"
+  export MERGED_BRANCHES="loop/cycle-merged
+claude/sess-done"
+  run _loop_branches .
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE 'loop/cycle-merged[[:space:]]+merged'
+  echo "$output" | grep -qE 'worktree-agent-live[[:space:]]+open'
+  echo "$output" | grep -qE 'claude/sess-done[[:space:]]+merged'
+}
+
+@test "FIX-104: roll loop branches silent on non-GitHub remote" {
+  export REMOTE_URL="https://gitlab.example.com/owner/repo.git"
+  printf 'sha1\trefs/heads/loop/cycle-x\n' > "$LSREMOTE_OUT"
+  run _loop_branches .
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "FIX-104: cleanup is wired at cycle entry (before worktree setup)" {

@@ -354,7 +354,7 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
         c("muted", pad(dur, 4, "r")) + "  " +
-        c("muted", pad(tok, 11, "r")) + "  " +
+        c("muted", pad(tok, 26)) + "  " +
         model_seg +
         c("muted", pad(cost, 7, "r")) + "   " +
         c(sid_c, ids_str, bold=True) + pr_marker

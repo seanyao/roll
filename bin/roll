@@ -4481,6 +4481,10 @@ WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0
 cd "${project_path}" 2>/dev/null || true
+# FIX-104: GC stale merged temp branches at cycle entry — before worktree setup
+# and before any early-exit gate (pre-run abort, CI red precheck). The post-claude
+# call site doesn't cover those paths, so merged branches accumulated on origin.
+_loop_cleanup_stale_cycle_branches "${project_path}" || true
 # FIX-040: orphan worktree recovery — scan for worktrees left by previous failed
 # cycles (publish failed or inner script was SIGKILL'd). Attempt to publish each
 # before starting the new cycle. Glob is chronological via timestamp in name.
@@ -4707,9 +4711,6 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
     echo "[loop] cycle \${CYCLE_ID}: claude failed (exit \$_exit); worktree preserved at \$WT"
   fi
 fi
-
-# US-AUTO-040: fallback GC — delete remote loop/cycle-* branches already merged to main.
-_loop_cleanup_stale_cycle_branches "${project_path}" || true
 
 # FIX-044 / Step 5: Write loop cycle run summary to runs.jsonl
 # Deterministic — runs in shell regardless of whether agent executes SKILL.md Step 5.
@@ -5044,7 +5045,8 @@ cmd_loop() {
     notify)       _notify "${1:-roll}" "${2:-}" ;;
     enforce-tcr)  _loop_enforce_tcr "${1:-}" "${2:-}" ;;
     precheck-ci)  _loop_precheck_ci ;;
-    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci>"; exit 1 ;;
+    branches)     _loop_branches "$(pwd -P)" ;;
+    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci|branches>"; exit 1 ;;
   esac
 }
 
@@ -5704,15 +5706,28 @@ _loop_precheck_ci() {
 
   local commit; commit=$(git rev-parse HEAD 2>/dev/null) || return 0
 
+  # FIX-103: fetch both `status` and `conclusion`. Pre-run gate must distinguish
+  # a still-running CI (status=in_progress/queued/waiting, conclusion=null) from
+  # a genuinely red CI (conclusion=failure/cancelled/timed_out/...). Treating
+  # in_progress as red kills every cycle started within the first ~30s of a
+  # merge-triggered CI run.
   local runs
-  runs=$(gh -R "$slug" run list --commit "$commit" --json conclusion 2>/dev/null) || return 0
+  runs=$(gh -R "$slug" run list --commit "$commit" --json conclusion,status 2>/dev/null) || return 0
   [[ -z "$runs" || "$runs" == "[]" ]] && return 0
 
-  local failed
-  failed=$(echo "$runs" | jq -r '[.[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "skipped")] | length' 2>/dev/null || echo "0")
+  # Conclusions that block the loop. Anything else (success, skipped, neutral,
+  # or null while still running) is treated as pass/pending.
+  local failed_conclusions
+  failed_conclusions=$(echo "$runs" \
+    | jq -r '[.[] | select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out" or .conclusion=="action_required" or .conclusion=="startup_failure") | .conclusion] | unique | join(",")' \
+    2>/dev/null || echo "")
 
-  if [[ "$failed" -gt 0 ]]; then
+  if [[ -n "$failed_conclusions" ]]; then
     local short; short=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+    local run_states
+    run_states=$(echo "$runs" \
+      | jq -r '[.[] | "\(.status // "?")/\(.conclusion // "null")"] | unique | join(", ")' \
+      2>/dev/null || echo "?")
     err "Pre-run CI check: HEAD CI is red — refuse to build on broken base (${short})  HEAD CI 红，拒绝在破损的基础上构建"
     mkdir -p "$(dirname "$_LOOP_ALERT")"
     cat > "$_LOOP_ALERT" << EOF
@@ -5721,6 +5736,8 @@ _loop_precheck_ci() {
 **Time**: $(date '+%Y-%m-%d %H:%M')
 **Commit**: ${short}
 **Reason**: HEAD CI is red — loop refused to build on a broken base  HEAD CI 红，loop 拒绝在破损的基础上构建
+**Failing conclusions**: ${failed_conclusions}
+**Run states**: ${run_states}
 
 **Action required**:
 - Investigate and fix CI: \`gh -R ${slug} run list --commit ${commit}\`
@@ -6654,14 +6671,29 @@ _claude_cleanup_stale_worktrees() {
   return 0
 }
 
+# FIX-104: scan multiple ephemeral prefixes (loop/cycle-, worktree-agent-,
+# claude/) and delete any already merged to origin/main. Unmerged branches
+# are preserved — they may be active WIP. Caller can pass a custom prefix
+# list via $2 (newline-separated `refs/heads/<prefix>*` patterns) but the
+# default whitelist covers every temp prefix the loop / Claude session /
+# worktree-agent paths create.
 _loop_cleanup_stale_cycle_branches() {
   local project_path="${1:-.}"
   local url; url=$(git -C "$project_path" remote get-url origin 2>/dev/null) || return 0
   [[ "$url" == *github.com* ]] || return 0
 
-  local branches
-  branches=$(git -C "$project_path" ls-remote --heads origin 'refs/heads/loop/cycle-*' 2>/dev/null \
-    | awk '{print $2}' | sed 's|^refs/heads/||')
+  local prefixes="${2:-refs/heads/loop/cycle-*
+refs/heads/worktree-agent-*
+refs/heads/claude/*}"
+
+  local branches=""
+  while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    local found
+    found=$(git -C "$project_path" ls-remote --heads origin "$pat" 2>/dev/null \
+      | awk '{print $2}' | sed 's|^refs/heads/||')
+    [ -n "$found" ] && branches+="${found}"$'\n'
+  done <<< "$prefixes"
   [ -z "$branches" ] && return 0
 
   while IFS= read -r branch; do
@@ -6672,6 +6704,41 @@ _loop_cleanup_stale_cycle_branches() {
     if git -C "$project_path" push origin --delete "$branch" 2>/dev/null; then
       echo "[loop] deleted stale cycle branch: $branch"
     fi
+  done <<< "$branches"
+  return 0
+}
+
+# FIX-104: residual-visibility command. List origin's ephemeral temp branches
+# (loop/cycle-*, worktree-agent-*, claude/*) with their merge status so the
+# user can see what GC will clean up next cycle and what's still active WIP.
+# Output: TAB-separated `<branch>\t<merged|open>` lines, one per branch.
+# Silent on non-GitHub remote / empty / unreachable.
+_loop_branches() {
+  local project_path="${1:-.}"
+  local url; url=$(git -C "$project_path" remote get-url origin 2>/dev/null) || return 0
+  [[ "$url" == *github.com* ]] || return 0
+
+  local prefixes="refs/heads/loop/cycle-*
+refs/heads/worktree-agent-*
+refs/heads/claude/*"
+
+  local branches=""
+  while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    local found
+    found=$(git -C "$project_path" ls-remote --heads origin "$pat" 2>/dev/null \
+      | awk '{print $2}' | sed 's|^refs/heads/||')
+    [ -n "$found" ] && branches+="${found}"$'\n'
+  done <<< "$prefixes"
+  [ -z "$branches" ] && return 0
+
+  while IFS= read -r branch; do
+    [ -z "$branch" ] && continue
+    local status="open"
+    if git -C "$project_path" merge-base --is-ancestor "$branch" origin/main 2>/dev/null; then
+      status="merged"
+    fi
+    printf "%s\t%s\n" "$branch" "$status"
   done <<< "$branches"
   return 0
 }

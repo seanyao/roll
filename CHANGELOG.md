@@ -1,15 +1,21 @@
 # Changelog
 
-## Unreleased
+## v2026.522.2
+
+### Changed
+
+- **Roll 改用 Antigravity (`agy`)** — Google 已退役独立 Gemini CLI，agy 是接班产品；老用户重跑 `roll setup` 即可
 
 ### Improved
 
 - **dashboard token 列现在只算 input/output，cache 不再混进来虚抬总量** `[loop]`
+- **`roll loop status` 现在分清「没装 / 装了关了 / 正常」三种状态** — 之前看不出 loop 到底有没有起来 `[loop]`
 
 ### Fixed
 
 - **loop 异常中断时未推送的 commit 不再丢** — 自动开成 PR `[loop]`
 - **loop 每小时弹窗不再抢前台焦点** — 后台开 Terminal，不打断你在干的事
+- **`roll loop` 在非 git 目录下不再静默崩溃** `[loop]`
 
 ## v2026.522.1
 

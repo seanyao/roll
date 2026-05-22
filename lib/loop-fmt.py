@@ -353,14 +353,28 @@ class LoopFmt:
         # Use the cumulative totals accumulated across all assistant turns;
         # result.usage is per-turn (last only) so it would under-count badly.
         model = result_ev.get("model") or self._last_model or ""
+
+        # FIX-099: skip writing the usage event when claude returned no real
+        # usage data (model empty AND cost/duration both zero). This prevents
+        # stale/placeholder values from leaking into the events stream and
+        # showing up as "cost=$1.24 dur=372s" in three consecutive cycles when
+        # the real cycle had no token data (the default-value fallback).
+        # The dashboard can render "n/a" for missing usage rather than false data.
+        has_model   = bool(model)
+        has_tokens  = any(self._usage_totals[k] > 0 for k in self._usage_totals)
+        has_cost    = bool(cost_usd)
+        has_dur     = bool(dur_ms)
+        if not has_model and not has_tokens and not has_cost and not has_dur:
+            return  # nothing real to report — skip rather than persist zeros
+
         payload = {
-            "model":                 model,
+            "model":                 model if has_model else None,
             "input_tokens":          self._usage_totals["input_tokens"],
             "output_tokens":         self._usage_totals["output_tokens"],
             "cache_creation_tokens": self._usage_totals["cache_creation_tokens"],
             "cache_read_tokens":     self._usage_totals["cache_read_tokens"],
-            "cost_reported_usd":     float(cost_usd or 0),
-            "duration_ms":           int(dur_ms or 0),
+            "cost_reported_usd":     float(cost_usd) if has_cost else None,
+            "duration_ms":           int(dur_ms) if has_dur else None,
         }
         evfile = os.path.join(shared, "loop", f"events-{slug}.ndjson")
         line = json.dumps({

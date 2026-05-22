@@ -114,7 +114,11 @@ EOF
   rm -rf "$tmp_dir"
 }
 
-@test "_launchd_svc_state: plist exists but not loaded returns installed-off" {
+@test "_launchd_svc_state: plist exists but not loaded returns stale (FIX-098)" {
+  # FIX-098: renamed from 'installed-off' to 'stale' to distinguish from
+  # 'not-installed'. Both plist-present/not-loaded states mean the agent is
+  # not running, but 'stale' explicitly indicates launchd lost track of it
+  # (e.g. after roll loop off + roll update without roll loop on).
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
@@ -123,7 +127,7 @@ EOF
   local label; label=$(_launchd_label "loop" "$proj")
   touch "${tmp_dir}/LaunchAgents/${label}.plist"
   local state; state=$(_launchd_svc_state "loop" "$proj")
-  [ "$state" = "installed-off" ]
+  [ "$state" = "stale" ]
   rm -rf "$tmp_dir"
 }
 

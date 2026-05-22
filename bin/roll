@@ -4398,13 +4398,29 @@ _inner_cleanup() {
       # FIX-091: prefer a real PR so auto-merge lands the work; tag-only is the
       # last-resort because it requires manual cherry-pick. Emit cycle_end "done"
       # (canonical success status the dashboard recognizes) when PR publishes.
+      # FIX-099: compute tcr_count + built[] from the worktree (it's still alive
+      # at EXIT trap time) so runs.jsonl and ALERT carry truthful data.
+      _orphan_tcr=0
+      _orphan_built="[]"
+      if command -v jq >/dev/null 2>&1; then
+        _orphan_tcr=\$(cd "\$WT" && git log --oneline "origin/main..HEAD" 2>/dev/null | grep -c ' tcr:' || echo 0)
+        _orphan_built=\$(cd "\$WT" && git log --oneline "origin/main..HEAD" 2>/dev/null \
+          | grep ' tcr:' \
+          | grep -oE '\b(FIX|US|REFACTOR|CHORE)-[0-9]+\b' \
+          | sort -u \
+          | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")
+      fi
       _slug=""
       if _gh_resolve _slug \\
          && ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" ) >/dev/null 2>&1; then
         _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "done" 2>/dev/null || true
         _CYCLE_END_WRITTEN=1
-        _runs_append "done" 0 "[]" 2>/dev/null || true
-        _worktree_alert "cycle \${CYCLE_ID}: aborted with \${_unpushed} commits; FIX-091 published as PR" 2>/dev/null || true
+        # FIX-099: pass real tcr_count + built[] instead of 0/"[]"
+        _runs_append "done" "\${_orphan_tcr}" "\${_orphan_built}" 2>/dev/null || true
+        # FIX-099: three-field ALERT so callers can distinguish recovered orphan
+        # from a cycle's normally-picked story (was: "FIX-091 published as PR"
+        # which leaked a hardcoded string regardless of what was actually built).
+        _worktree_alert "cycle \${CYCLE_ID}: recovered_from_orphan=yes; tcr_commits=\${_orphan_tcr}; stories=\${_orphan_built}; pr_branch=\${BRANCH:-unknown}" 2>/dev/null || true
       else
         _orphan_tag="loop-orphan-\${CYCLE_ID}"
         if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \\
@@ -4412,8 +4428,9 @@ _inner_cleanup() {
              && git push origin "\$_orphan_tag" 2>/dev/null ); then
           _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "orphan" 2>/dev/null || true
           _CYCLE_END_WRITTEN=1
-          _runs_append "orphan" 0 "[]" 2>/dev/null || true
-          _worktree_alert "cycle \${CYCLE_ID}: aborted with \${_unpushed} commits; FIX-086 pushed orphan tag \${_orphan_tag}" 2>/dev/null || true
+          # FIX-099: pass real tcr_count + built[] for the orphan-tag path too
+          _runs_append "orphan" "\${_orphan_tcr}" "\${_orphan_built}" 2>/dev/null || true
+          _worktree_alert "cycle \${CYCLE_ID}: recovered_from_orphan=yes; tcr_commits=\${_orphan_tcr}; stories=\${_orphan_built}; FIX-086 pushed orphan tag \${_orphan_tag}" 2>/dev/null || true
         fi
       fi
     fi
@@ -4829,7 +4846,14 @@ SCRIPT
 }
 
 _launchd_is_loaded() {
-  launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep -qF "\"$1\" => enabled"
+  # FIX-098: probe actual launchd registry via `launchctl print`, NOT
+  # `launchctl print-disabled`. The disabled-overrides DB only tracks
+  # labels explicitly enabled/disabled by the user — after `roll loop off`
+  # (bootout) + `roll update` the label stays absent from the overrides DB,
+  # so the old grep returned false-positive "loaded". `launchctl print`
+  # returns exit 0 only when the agent is actually registered in the current
+  # launchd session; non-zero means the label is unknown to launchd.
+  launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1
 }
 
 # FIX-101 tripwire: refuse to mutate the host's launchd session when
@@ -4871,13 +4895,18 @@ _launchctl_safe() {
 }
 
 _launchd_svc_state() {
+  # FIX-098: three-state classification:
+  #   enabled       — plist on disk AND registered in launchd
+  #   stale         — plist on disk BUT NOT registered in launchd
+  #   installed-off — kept for back-compat (maps to stale semantics)
+  #   not-installed — no plist
   local svc="$1" project_path="$2"
   local label; label=$(_launchd_label "$svc" "$project_path")
   local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
   if _launchd_is_loaded "$label"; then
     echo "enabled"
   elif [[ -f "$plist" ]]; then
-    echo "installed-off"
+    echo "stale"
   else
     echo "not-installed"
   fi
@@ -5035,16 +5064,25 @@ _loop_on() {
   if [[ "$(uname)" == "Darwin" ]]; then
     _install_launchd_plists "$project_path" >/dev/null
 
+    # FIX-098: use launchctl bootstrap/enable instead of load -w.
+    # `load -w` writes to the disabled-overrides DB which causes FIX-027's
+    # re-source to break after `roll update`. bootstrap is idem-potent and
+    # does not disturb the overrides DB.
+    local uid; uid=$(id -u)
     local all_loaded=true
     for svc in loop dream brief; do
       local label; label=$(_launchd_label "$svc" "$project_path")
+      local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
         all_loaded=false
-        # FIX-097: skip real launchctl when running against a sandboxed plist
-        # path — otherwise auto-sandbox (HOME under /tmp/ or /var/folders/)
-        # would register ghost agents into the real gui/<uid> domain.
+        # FIX-097 guard: skip real launchctl when _LAUNCHD_DIR was auto-sandboxed.
         _launchd_should_skip_registry && continue
-        _launchctl_safe load -w "$(_launchd_plist_path "$svc" "$project_path")" 2>/dev/null || true
+        # FIX-098 semantic: enable+bootstrap pair (better than load -w).
+        # enable clears any disable-override; bootstrap registers with launchd.
+        # FIX-101 wrapper additionally tripwire-gates each call so a sandboxed
+        # _LAUNCHD_DIR can't accidentally touch host launchd state.
+        _launchctl_safe enable "gui/${uid}/${label}" 2>/dev/null || true
+        _launchctl_safe bootstrap "gui/${uid}" "$plist" 2>/dev/null || true
       fi
     done
 
@@ -5269,7 +5307,7 @@ _legacy_loop_status() {
       else
         case "$state" in
           enabled)       echo -e "    ${GREEN}${svc}     ● enabled${NC}" ;;
-          installed-off) echo -e "    ${YELLOW}${svc}     ⚠ installed/off${NC}   run: roll loop on" ;;
+          stale|installed-off) echo -e "    ${YELLOW}${svc}     ⚠ STALE — plist present but not loaded${NC}   run: roll loop on" ;;
           not-installed) echo -e "    ${RED}${svc}     ○ not installed${NC}   run: roll setup" ;;
         esac
       fi

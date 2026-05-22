@@ -382,6 +382,87 @@ EOF
   [ "$before" = "$after" ]
 }
 
+# ─── FIX-098: _launchd_is_loaded probes actual registry, not disabled DB ──────
+
+@test "FIX-098: _launchd_is_loaded returns false when plist present but launchctl print fails" {
+  # Regression for the silent-cycle bug at 2026-05-23 01:18 CST.
+  # Scenario: plist exists on disk, agent was bootout'd (not loaded), but the
+  # disabled-overrides DB has no entry (label was never explicitly disabled).
+  # Old implementation: grep print-disabled for '=> enabled' → true (false positive).
+  # New implementation: launchctl print gui/<uid>/<label> → non-zero → false.
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local label="com.roll.loop.fix098-test-abcdef"
+  local plist="${tmp_dir}/${label}.plist"
+  # Write a real-looking plist (contents don't matter for this test).
+  cat > "$plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.roll.loop.fix098-test-abcdef</string>
+</dict></plist>
+EOF
+
+  # Stub launchctl so 'print gui/<uid>/<label>' always exits non-zero (agent not loaded)
+  # while 'print-disabled' would have returned output containing '=> enabled'.
+  launchctl() {
+    local cmd="${1:-}"
+    if [[ "$cmd" == "print" ]]; then
+      # Simulate: agent is not registered in launchd
+      return 1
+    elif [[ "$cmd" == "print-disabled" ]]; then
+      # Simulate: old behavior would have shown '=> enabled' (no explicit disable entry)
+      echo "  \"${label}\" => enabled"
+      return 0
+    fi
+    command launchctl "$@"
+  }
+  export -f launchctl 2>/dev/null || true
+
+  # _launchd_is_loaded must return false — label is NOT loaded in launchd.
+  run _launchd_is_loaded "$label"
+  [ "$status" -ne 0 ]
+
+  rm -rf "$tmp_dir"
+}
+
+@test "FIX-098: _launchd_is_loaded returns true when launchctl print succeeds" {
+  # When launchctl print exits 0 the agent IS registered — should return true.
+  local label="com.roll.loop.fix098-loaded-abcdef"
+
+  launchctl() {
+    local cmd="${1:-}"
+    if [[ "$cmd" == "print" ]]; then
+      # Simulate: agent is registered in launchd
+      return 0
+    fi
+    command launchctl "$@"
+  }
+  export -f launchctl 2>/dev/null || true
+
+  run _launchd_is_loaded "$label"
+  [ "$status" -eq 0 ]
+}
+
+@test "FIX-098: _launchd_svc_state returns 'stale' when plist present but agent not loaded" {
+  # Ensures the three-state classifier surfaces the STALE state rather than
+  # falsely reporting 'enabled' when a plist exists but launchd has no record.
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+
+  # Install the plist file so it exists on disk.
+  _install_launchd_plists "$proj"
+
+  # Now stub _launchd_is_loaded to return false (agent not in launchd).
+  _launchd_is_loaded() { return 1; }
+
+  local state; state=$(_launchd_svc_state "loop" "$proj")
+  [ "$state" = "stale" ]
+
+  rm -rf "$tmp_dir"
+}
+
 # ─── FIX-101: _launchctl_safe refuses to mutate launchd when sandboxed ──────
 
 @test "FIX-101: _launchctl_safe refuses mutating ops when _LAUNCHD_DIR is sandboxed (real binary path)" {
@@ -453,6 +534,44 @@ SHIM
   [ -f "$log" ]
   grep -q "bootstrap" "$log"
 
+  rm -rf "$tmp_dir"
+}
+
+@test "FIX-098: roll loop on bootstraps stale agents instead of short-circuiting with 'already enabled'" {
+  # The dead-code path: before FIX-098, _launchd_is_loaded returned true for a
+  # stale agent, so all_loaded=true and 'roll loop on' returned early with
+  # 'already enabled'. Now it must call enable+bootstrap for any unloaded label.
+  [[ "$(uname)" != "Darwin" ]] && skip "macOS only — _loop_on's launchd branch is gated by uname=Darwin"
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  export _LAUNCHD_SKIP_REGISTRY=1
+
+  # Stub _launchd_is_loaded to simulate stale (plist on disk, not in launchd).
+  _launchd_is_loaded() { return 1; }
+
+  local launchctl_log="${tmp_dir}/launchctl.log"
+  launchctl() { echo "$*" >> "$launchctl_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  # _install_launchd_plists will call launchctl; we want to capture _loop_on's calls only.
+  # Pre-install the plists so _install_launchd_plists is a no-op in _loop_on.
+  cd "$proj"
+  _install_launchd_plists "$proj" >/dev/null 2>&1 || true
+  # Reset the log — only capture _loop_on's launchctl calls.
+  rm -f "$launchctl_log"
+
+  run _loop_on
+  # Must NOT print 'already enabled' (that was the false-positive path).
+  [[ "$output" != *"already enabled"* ]]
+
+  # Must have called enable and bootstrap (the real load path).
+  [ -f "$launchctl_log" ]
+  grep -q "enable" "$launchctl_log"
+  grep -q "bootstrap" "$launchctl_log"
+
+  cd "$_UNIT_ORIG_DIR" 2>/dev/null || true
   rm -rf "$tmp_dir"
 }
 

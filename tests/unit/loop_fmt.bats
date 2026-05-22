@@ -321,3 +321,63 @@ assert d['cache_creation_tokens']==  20, f\"cache_create expected 20, got {d['ca
 assert d['cache_read_tokens']    ==3000, f\"cache_read expected 3000, got {d['cache_read_tokens']}\"
 "
 }
+
+# ─── FIX-099: usage event skip on stale/placeholder data ──────────────────────
+
+@test "FIX-099: usage event NOT written when model empty + cost=0 + dur=0 (stale placeholder)" {
+  # Regression for the 3-cycle pattern: events.ndjson showed cost=\$1.24 dur=372s
+  # in three consecutive cycles where claude returned no real usage. The old code
+  # always wrote the event even when all fields were zeros/empty.
+  local res='{"type":"result","subtype":"success","duration_ms":0,"total_cost_usd":0}'
+  EVDIR="$TEST_TMP"
+  LOOP_PROJECT_SLUG=test-slug LOOP_CYCLE_ID=test-cycle-stale LOOP_SHARED_ROOT="$EVDIR" \
+    bash -c "echo '$res' | python3 '$LOOP_FMT'" >/dev/null
+  # Usage event must NOT be written when no real data was returned.
+  local evfile="$EVDIR/loop/events-test-slug.ndjson"
+  if [ -f "$evfile" ]; then
+    # If file exists, the stale cycle's event must not be present.
+    run grep '"label": "test-cycle-stale"' "$evfile"
+    [ "$status" -ne 0 ]
+  fi
+}
+
+@test "FIX-099: usage event IS written when model present even if cost=0" {
+  # A real (but free) cycle must still emit usage data when the model field is set.
+  local a1='{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":50,"output_tokens":10}}}'
+  local res='{"type":"result","subtype":"success","duration_ms":5000,"total_cost_usd":0}'
+  EVDIR="$TEST_TMP"
+  LOOP_PROJECT_SLUG=test-slug LOOP_CYCLE_ID=test-cycle-real LOOP_SHARED_ROOT="$EVDIR" \
+    bash -c "printf '%s\n%s\n' '$a1' '$res' | python3 '$LOOP_FMT'" >/dev/null
+  local evfile="$EVDIR/loop/events-test-slug.ndjson"
+  [ -f "$evfile" ]
+  grep -q '"label": "test-cycle-real"' "$evfile"
+}
+
+@test "FIX-099: usage event IS written when cost > 0 (no model in result)" {
+  # When claude returns real cost data, must write even if model not in result event.
+  local res='{"type":"result","subtype":"success","duration_ms":100000,"total_cost_usd":1.23}'
+  EVDIR="$TEST_TMP"
+  LOOP_PROJECT_SLUG=test-slug LOOP_CYCLE_ID=test-cycle-cost LOOP_SHARED_ROOT="$EVDIR" \
+    bash -c "echo '$res' | python3 '$LOOP_FMT'" >/dev/null
+  local evfile="$EVDIR/loop/events-test-slug.ndjson"
+  [ -f "$evfile" ]
+  grep -q '"label": "test-cycle-cost"' "$evfile"
+}
+
+@test "FIX-099: usage event model field is null (not empty string) when not set" {
+  # When model is unavailable, write null explicitly so dashboards show n/a.
+  local res='{"type":"result","subtype":"success","duration_ms":60000,"total_cost_usd":0.5}'
+  EVDIR="$TEST_TMP"
+  LOOP_PROJECT_SLUG=test-slug LOOP_CYCLE_ID=test-cycle-null-model LOOP_SHARED_ROOT="$EVDIR" \
+    bash -c "echo '$res' | python3 '$LOOP_FMT'" >/dev/null
+  local evfile="$EVDIR/loop/events-test-slug.ndjson"
+  [ -f "$evfile" ]
+  local usage_line; usage_line=$(grep '"label": "test-cycle-null-model"' "$evfile" | head -1)
+  [ -n "$usage_line" ]
+  # model must be null (JSON null), not empty string ""
+  echo "$usage_line" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())['detail']
+assert d.get('model') is None, f'expected model=null, got {repr(d.get(\"model\"))}'
+"
+}

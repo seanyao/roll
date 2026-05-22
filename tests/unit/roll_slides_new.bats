@@ -88,6 +88,17 @@ _seed_min_project() {
   [[ "$(cat "$skill")" == *"主题"* || "$(cat "$skill")" == *"幻灯片"* ]]
 }
 
+@test "skill file: does not embed the bash 'Next:' hint (FIX-089)" {
+  local skill="${REPO}/skills/roll-deck/SKILL.md"
+  # bin/roll already prints `Next:  roll slides build <slug>` after `new`
+  # completes. The skill must NOT instruct the agent to print this hint too
+  # — duplicated output makes users wonder if the command ran twice.
+  # Anchor on the bilingual hint pair (EN "Next:" + ZH "下一步") that bin/roll
+  # owns; bare prose references to `roll slides build` elsewhere are fine.
+  ! grep -qE 'Next:[[:space:]]+roll slides build' "$skill"
+  ! grep -qE '下一步.*roll slides build' "$skill"
+}
+
 # ─── Dispatch / usage ────────────────────────────────────────────────────────
 
 @test "cmd_slides new: no topic → bilingual usage error + non-zero exit" {

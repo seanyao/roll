@@ -4782,17 +4782,29 @@ _launchd_is_loaded() {
 # and the next scheduled fire can't find the plist. Read-only ops (print*,
 # list, version) are always allowed since they have no side effects.
 _launchctl_safe() {
+  # Read-only ops are always safe (no host launchd state mutation).
   case "${1:-}" in
     print|print-disabled|list|version|dumpstate|examine)
       launchctl "$@"
       return $?
       ;;
   esac
+  # If `launchctl` has been replaced by a function stub (typical in bats tests
+  # that want to assert against captured calls), pass through to the stub.
+  # Stubs by definition don't touch host launchd, so this is safe; and tests
+  # like `_install_launchd_plists: bootout targets gui/<uid>/<label>` rely on
+  # the literal call landing in their captured log.
+  if [[ "$(type -t launchctl 2>/dev/null)" == "function" ]]; then
+    launchctl "$@"
+    return $?
+  fi
+  # Real launchctl binary path: refuse to mutate when _LAUNCHD_DIR has been
+  # sandboxed (i.e. is not the canonical ${HOME}/Library/LaunchAgents). This
+  # is the FIX-101 defensive layer — when a test forgets to stub launchctl
+  # AND has _LAUNCHD_DIR sandboxed, prevent the call from reaching the host's
+  # production launchd and overwriting a live label's plist path.
   local canonical="${HOME}/Library/LaunchAgents"
   if [[ "${_LAUNCHD_DIR:-$canonical}" != "$canonical" ]]; then
-    # Silent skip — caller intended sandbox isolation, just didn't gate this
-    # particular call site. Exit 0 keeps caller code (typically `|| true`)
-    # behaving the same way it did when launchctl succeeded.
     return 0
   fi
   launchctl "$@"

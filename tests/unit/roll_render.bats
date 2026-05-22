@@ -618,3 +618,136 @@ print(has_in, has_out, has_old)
   [ "$status" -eq 0 ]
   [[ "$output" == *"True True False"* ]]
 }
+
+# ─── US-VIEW-017: 4-component token breakdown ────────────────────────────────
+
+@test "US-VIEW-017 cycle_row: cache tokens present → in/cw↑ cr↓/out format" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,22,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 780,
+    "input_tokens": 164,
+    "output_tokens": 63_300,
+    "cache_creation_tokens": 499_000,
+    "cache_read_tokens": 12_737_000,
+    "cost_list": 11.07,
+    "model": "claude-opus-4-7-20251001",
+    "story": "US-VIEW-012",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+# All 4 parts visible; arrows ↑ (cache write) and ↓ (cache read) present
+has_in  = "164" in out
+has_cw  = "499K↑" in out or "0.5M↑" in out
+has_cr  = "12.7M↓" in out
+has_out = "63.3K" in out
+has_up  = "↑" in out
+has_dn  = "↓" in out
+print(has_in, has_cw, has_cr, has_out, has_up, has_dn)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True True True True True"* ]]
+}
+
+@test "US-VIEW-017 cycle_row: no cache tokens → fallback to in/out (backward compat)" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,22,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600,
+    "input_tokens": 2_100_000,
+    "output_tokens": 180_000,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "cost_list": 1.50,
+    "model": "claude-opus-4-7-20251001",
+    "story": "US-VIEW-012",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("2.1M/180K" in out, "↑" not in out, "↓" not in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True True"* ]]
+}
+
+@test "US-VIEW-017 backfill_usage promotes cache tokens to cy top-level" {
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+cycles = [{
+    "label": "L9",
+    "start": ts,
+    "usage_event": {
+        "model": "claude-opus-4-7",
+        "input_tokens": 164,
+        "output_tokens": 63300,
+        "cache_creation_tokens": 499000,
+        "cache_read_tokens": 12737000,
+    },
+}]
+mod.backfill_usage_from_claude_sessions(cycles, "no-such-slug")
+cy = cycles[0]
+print(cy.get("cache_creation_tokens"), cy.get("cache_read_tokens"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"499000 12737000"* ]]
+}
+
+@test "US-VIEW-017 rollup_for_day sums all 4 token components" {
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+cycles = [
+  {"start": ts, "input_tokens": 100, "output_tokens":  50,
+   "cache_creation_tokens": 400_000, "cache_read_tokens": 10_000_000,
+   "outcome": "done"},
+  {"start": ts, "input_tokens": 64,  "output_tokens": 13_300,
+   "cache_creation_tokens": 99_000,  "cache_read_tokens":  2_737_000,
+   "outcome": "done"},
+]
+r = mod.rollup_for_day(cycles)
+print(r["input_tokens"], r["output_tokens"],
+      r["cache_creation_tokens"], r["cache_read_tokens"])
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"164 13350 499000 12737000"* ]]
+}
+
+@test "US-VIEW-017 render: daily summary includes cache writes + cache reads rows" {
+  run run_status '
+import io, contextlib, re
+from datetime import datetime, timezone, timedelta
+now = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc).astimezone()
+ts = now - timedelta(hours=1)
+te = ts + timedelta(seconds=300)
+events = [
+  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "L10", "_ts": ts},
+  {"ts": ts.isoformat(), "stage": "usage", "label": "L10",
+   "detail": {"model": "claude-opus-4-7",
+              "input_tokens": 164, "output_tokens": 63300,
+              "cache_creation_tokens": 499000, "cache_read_tokens": 12737000},
+   "_ts": ts},
+  {"ts": te.isoformat(), "stage": "cycle_end", "label": "L10",
+   "outcome": "done", "_ts": te},
+]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    mod.render(events, [], {}, {}, days=3, lang="en", now=now)
+out = buf.getvalue()
+has_cw = bool(re.search(r"^\s*cache writes\s+\S", out, re.M))
+has_cr = bool(re.search(r"^\s*cache reads\s+\S",  out, re.M))
+print(has_cw, has_cr)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True"* ]]
+}

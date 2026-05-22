@@ -356,8 +356,10 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
         # Path 1: usage event written by loop-fmt at result time.
         ue = cy.get("usage_event")
         if isinstance(ue, dict) and (ue.get("input_tokens") or ue.get("output_tokens")):
-            cy["input_tokens"]  = int(ue.get("input_tokens")  or 0)
-            cy["output_tokens"] = int(ue.get("output_tokens") or 0)
+            cy["input_tokens"]          = int(ue.get("input_tokens")          or 0)
+            cy["output_tokens"]         = int(ue.get("output_tokens")         or 0)
+            cy["cache_creation_tokens"] = int(ue.get("cache_creation_tokens") or 0)
+            cy["cache_read_tokens"]     = int(ue.get("cache_read_tokens")     or 0)
             cy["model"] = ue.get("model")
             # US-VIEW-010: aggregate now sums per-turn usage tokens, so the
             # totals in `ue` reflect the whole cycle. Always compute cost at
@@ -380,8 +382,10 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
         u = load_claude_session_usage(cy.get("label", ""), slug)
         if not u:
             continue
-        cy["input_tokens"]  = int(u.get("input_tokens")  or 0)
-        cy["output_tokens"] = int(u.get("output_tokens") or 0)
+        cy["input_tokens"]          = int(u.get("input_tokens")          or 0)
+        cy["output_tokens"]         = int(u.get("output_tokens")         or 0)
+        cy["cache_creation_tokens"] = int(u.get("cache_creation_tokens") or 0)
+        cy["cache_read_tokens"]     = int(u.get("cache_read_tokens")     or 0)
         cy["model"] = u["model"]
         cy["cost_list"] = mp.compute_list_cost(
             u["model"],
@@ -557,7 +561,8 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
     # reads all 4 fields), but they don't represent the model's actual work.
     r = {"cycles": len(day_cycles), "prs": 0, "failed": 0,
          "duration_s": 0, "cost": 0.0,
-         "input_tokens": 0, "output_tokens": 0}
+         "input_tokens": 0, "output_tokens": 0,
+         "cache_creation_tokens": 0, "cache_read_tokens": 0}
     for cy in day_cycles:
         if cy.get("outcome") == "fail":
             r["failed"] += 1
@@ -567,6 +572,10 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
             r["input_tokens"] += cy["input_tokens"]
         if cy.get("output_tokens"):
             r["output_tokens"] += cy["output_tokens"]
+        if cy.get("cache_creation_tokens"):
+            r["cache_creation_tokens"] += cy["cache_creation_tokens"]
+        if cy.get("cache_read_tokens"):
+            r["cache_read_tokens"] += cy["cache_read_tokens"]
         # US-VIEW-011: rollup only counts cycles whose PR actually merged.
         # Backward compat: rows where pr_outcome is missing but pr URL exists
         # (no `pr` event after the writer upgrade ran for that cycle) are
@@ -723,11 +732,12 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
            yest_color="amber" if yest["failed"] > 0 else "dim",
            yest_suffix="⚠" if yest["failed"] > 0 else "")
     metric_dur("duration", today["duration_s"], yest["duration_s"], d2["duration_s"], partial=is_partial)
-    # US-VIEW-012: input + output as two separate rows. cache_read no longer
-    # surfaces here — true cost is on the "cost" line below (computed from all
-    # 4 token kinds via list price). This row labels what the model actually
-    # processed and generated for this cycle.
+    # US-VIEW-017: show all 4 token components so the cost is explainable.
+    # cache_creation (↑) and cache_read (↓) typically account for 80-90% of
+    # cost — hiding them makes the cost line incomprehensible.
     metric_tokens("input tokens",  today["input_tokens"],  yest["input_tokens"],  d2["input_tokens"],  partial=is_partial)
+    metric_tokens("cache writes",  today["cache_creation_tokens"], yest["cache_creation_tokens"], d2["cache_creation_tokens"], partial=is_partial)
+    metric_tokens("cache reads",   today["cache_read_tokens"],     yest["cache_read_tokens"],     d2["cache_read_tokens"],     partial=is_partial)
     metric_tokens("output tokens", today["output_tokens"], yest["output_tokens"], d2["output_tokens"], partial=is_partial)
     metric_dollar("cost",   today["cost"],      yest["cost"],      d2["cost"],       partial=is_partial)
 

@@ -298,12 +298,19 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         from datetime import datetime as _dt, timezone as _tz
         dur_s = int((_dt.now(_tz.utc) - cy["start"]).total_seconds())
     dur = fmt_dur(dur_s) if dur_s else "—"
-    # US-VIEW-012: token column shows model's real work as input/output. Cache
-    # creation / cache read are kept in events.ndjson for cost math but never
-    # surface in the UI — they would inflate the visible number to 10–100× the
-    # "real" work done by the model on this cycle. fmt_tokens(0) already
-    # returns "—", so a cycle missing usage_event prints as "—/—".
-    tok = f"{fmt_tokens(cy.get('input_tokens') or 0)}/{fmt_tokens(cy.get('output_tokens') or 0)}"
+    # US-VIEW-017: show all 4 token components when cache data is available.
+    # Format: "in/cw↑ cr↓/out" (cache writes ↑, cache reads ↓).
+    # Falls back to "in/out" for cycles that predate cache tracking.
+    inp = cy.get('input_tokens') or 0
+    out_tok = cy.get('output_tokens') or 0
+    cw  = cy.get('cache_creation_tokens') or 0
+    cr  = cy.get('cache_read_tokens') or 0
+    if cw or cr:
+        tok = (f"{fmt_tokens(inp)}"
+               f"/{fmt_tokens(cw)}↑ {fmt_tokens(cr)}↓"
+               f"/{fmt_tokens(out_tok)}")
+    else:
+        tok = f"{fmt_tokens(inp)}/{fmt_tokens(out_tok)}"
     # cost prefers the backfilled list-price; falls back to cron.log when
     # the claude session log isn't available (only the latest cycle).
     if cy.get("cost_list") is not None:

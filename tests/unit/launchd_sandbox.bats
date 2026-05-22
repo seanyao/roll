@@ -145,6 +145,34 @@ teardown() { unit_teardown_cd; }
   unset _LAUNCHD_SKIP_REGISTRY
 }
 
+@test "FIX-090 auto-detect: _LAUNCHD_DIR under _SHARED_ROOT short-circuits launchctl even with SKIP_REGISTRY unset" {
+  # Covers the FIX-087 inner-runner.sh re-source path: inner.sh sources
+  # bin/roll, the auto-sandbox sets _LAUNCHD_DIR under _SHARED_ROOT, but
+  # nothing exports _LAUNCHD_SKIP_REGISTRY. Implicit detection must still
+  # gate launchctl based on the sandbox path.
+  cd "$_UNIT_ORIG_DIR"
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  _SHARED_ROOT="${tmp_dir}/shared"
+  _LAUNCHD_DIR="${_SHARED_ROOT}/LaunchAgents"  # simulate auto-sandbox redirect
+  local call_log="${tmp_dir}/launchctl_calls.log"
+  unset _LAUNCHD_SKIP_REGISTRY                  # the inner.sh scenario
+
+  _launchd_is_loaded() { return 0; }
+  launchctl() { echo "$*" >> "$call_log"; }
+  export -f _launchd_is_loaded launchctl 2>/dev/null || true
+
+  _install_launchd_plists "$proj"
+
+  if [[ -s "$call_log" ]]; then
+    printf 'auto-detect failed — launchctl was invoked despite sandbox path:\n%s\n' \
+      "$(cat "$call_log")" >&2
+    return 1
+  fi
+
+  rm -rf "$tmp_dir"
+}
+
 @test "tripwire: real ~/Library/LaunchAgents/com.roll.* count unchanged after running roll setup in a sandbox" {
   # End-to-end smoke: invoke a real `roll setup` flow through a subprocess
   # whose env is fully sandboxed, then confirm the developer's real launchd

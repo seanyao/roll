@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **loop 异常中断时未推送的 commit 不再丢** — 自动开成 PR `[loop]`
+
 ## v2026.522.1
 
 ### Fixed

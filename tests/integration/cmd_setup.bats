@@ -441,3 +441,22 @@ another_key: 42"
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE 'forced|re-installed'
 }
+
+# FIX-????: non-interactive setup must not hang when convention files differ.
+# _run_setup_step suppresses stdout/stderr; without stdin also redirected,
+# safe_copy's invisible prompt would wait for tty input forever.
+@test "setup v2 e2e: non-interactive setup overwrites differing files without hanging" {
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  # Tamper with an installed convention file
+  echo "corrupted by test" > "${ROLL_HOME}/conventions/global/AGENTS.md"
+
+  # Run setup without -f in bats (non-interactive, stdin is not a tty)
+  run_roll setup
+  [ "$status" -eq 0 ]
+
+  # File must have been restored to package content
+  local pkg_conventions="${ROLL_BIN%/bin/roll}/conventions"
+  diff "${pkg_conventions}/global/AGENTS.md" "${ROLL_HOME}/conventions/global/AGENTS.md"
+}

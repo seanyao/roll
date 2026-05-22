@@ -18,7 +18,7 @@ load helpers
 
 setup() {
   unit_setup
-  TEMPLATE="${BATS_TEST_DIRNAME}/../../site/slides/templates/introduction-v3.html"
+  TEMPLATE="${BATS_TEST_DIRNAME}/../../lib/slides/templates/introduction-v3.html"
   FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/decks/sample-introduction-v3.deck.md"
   ORIGINAL="${BATS_TEST_DIRNAME}/../../site/slides/roll-introduction-v3.html"
   RENDERER="${TEST_TMP}/render.py"

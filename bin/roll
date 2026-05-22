@@ -3072,7 +3072,7 @@ _slides_lib() {
 # Returns 0 + prints the path if the template exists, else returns 1.
 _slides_template_path() {
   local name="$1"
-  local tpl="${ROLL_PKG_DIR}/site/slides/templates/${name}.html"
+  local tpl="${ROLL_PKG_DIR}/lib/slides/templates/${name}.html"
   if [[ -f "$tpl" ]]; then
     printf '%s' "$tpl"
     return 0

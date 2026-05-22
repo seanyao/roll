@@ -124,3 +124,54 @@ _make_inner() {
     return 1
   }
 }
+
+@test "FIX-091: aborted with commits + gh available → PR published, ALERT mentions FIX-091" {
+  # FIX-091: when commits exist on abort AND gh is reachable, _inner_cleanup
+  # should call _loop_publish_pr first so the cycle's work lands as a normal
+  # PR (ready to auto-merge) instead of requiring manual rescue from a tag.
+  # Set up: rewire origin URL to look like github so _gh_repo_slug accepts it,
+  # but keep the actual push target via insteadOf so git push still reaches
+  # the local bare upstream.
+  cd "$_project"
+  git config --add url."${TEST_TMP}/upstream.git/".insteadOf "git@github.com:test/test.git"
+  git remote set-url origin "git@github.com:test/test.git"
+
+  # Stub gh in PATH: pr view returns 1 (no existing PR), pr create echoes URL
+  # and exits 0, pr merge exits 0. Every call is logged for assertion.
+  local mock_bin="${TEST_TMP}/mock-bin"
+  mkdir -p "$mock_bin"
+  local gh_log="${TEST_TMP}/gh.log"
+  : > "$gh_log"
+  cat > "$mock_bin/gh" <<EOF
+#!/bin/bash
+echo "gh \$*" >> "$gh_log"
+case "\$*" in
+  *"pr view"*)   exit 1 ;;
+  *"pr create"*) echo "https://github.com/test/test/pull/1"; exit 0 ;;
+  *"pr merge"*)  exit 0 ;;
+  *)             exit 0 ;;
+esac
+EOF
+  chmod +x "$mock_bin/gh"
+  export PATH="$mock_bin:$PATH"
+
+  local cmd='git commit --allow-empty -m "tcr: aborted cycle work" && kill -USR1 $$ && sleep 30'
+  local inner; inner=$(_make_inner "$cmd")
+
+  HOME="$TEST_TMP" PATH="$mock_bin:$PATH" bash "$inner" || true
+
+  # Assert: gh pr create was invoked (FIX-091 took the publish path).
+  grep -qE 'gh.*pr create' "$gh_log" || {
+    echo "expected 'gh pr create' to be called, got gh log:" >&2
+    cat "$gh_log" >&2
+    return 1
+  }
+
+  # Assert: ALERT mentions FIX-091 (PR published, not tag-only fallback).
+  [ -f "$_LOOP_ALERT" ]
+  grep -qE 'FIX-091' "$_LOOP_ALERT" || {
+    echo "expected ALERT to mention FIX-091, got:" >&2
+    cat "$_LOOP_ALERT" >&2
+    return 1
+  }
+}

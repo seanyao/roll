@@ -4312,14 +4312,30 @@ _inner_cleanup() {
      && [ -n "\${CYCLE_ID:-}" ]; then
     _unpushed=\$(cd "\$WT" && git rev-list --count "origin/main..HEAD" 2>/dev/null || echo 0)
     if [ "\${_unpushed:-0}" -gt 0 ]; then
-      _orphan_tag="loop-orphan-\${CYCLE_ID}"
-      if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \\
-           && git tag "\$_orphan_tag" 2>/dev/null \\
-           && git push origin "\$_orphan_tag" 2>/dev/null ); then
-        _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "orphan" 2>/dev/null || true
+      # FIX-091: try PR-publish first so the cycle's commits land as a normal
+      # PR (ready to auto-merge) instead of a dangling tag that needs manual
+      # rescue. Falls back to FIX-086 tag-only orphan push when gh is missing,
+      # origin is not GitHub, or the PR-publish path fails.
+      _pr_rc=99
+      if _gh_available && _gh_repo_slug >/dev/null 2>&1; then
+        ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" ) >/dev/null 2>&1
+        _pr_rc=\$?
+      fi
+      if [ "\$_pr_rc" -eq 0 ]; then
+        _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "rescued" 2>/dev/null || true
         _CYCLE_END_WRITTEN=1
-        _runs_append "orphan" 0 "[]" 2>/dev/null || true
-        _worktree_alert "cycle \${CYCLE_ID}: aborted with \${_unpushed} commits; FIX-086 pushed orphan tag \${_orphan_tag}" 2>/dev/null || true
+        _runs_append "rescued" 0 "[]" 2>/dev/null || true
+        _worktree_alert "cycle \${CYCLE_ID}: aborted with \${_unpushed} commits; FIX-091 published as PR" 2>/dev/null || true
+      else
+        _orphan_tag="loop-orphan-\${CYCLE_ID}"
+        if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \\
+             && git tag "\$_orphan_tag" 2>/dev/null \\
+             && git push origin "\$_orphan_tag" 2>/dev/null ); then
+          _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "orphan" 2>/dev/null || true
+          _CYCLE_END_WRITTEN=1
+          _runs_append "orphan" 0 "[]" 2>/dev/null || true
+          _worktree_alert "cycle \${CYCLE_ID}: aborted with \${_unpushed} commits; FIX-086 pushed orphan tag \${_orphan_tag}" 2>/dev/null || true
+        fi
       fi
     fi
   fi

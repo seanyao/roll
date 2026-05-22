@@ -85,3 +85,25 @@ teardown() { unit_teardown; }
 
   [ ! -f "${fake_loop}/state-new-ffffff.yaml" ]
 }
+
+@test "FIX-094: _slug_migrate_from_legacy under set -e in non-git cwd doesn't abort caller" {
+  # Repro: bin/roll runs under `set -euo pipefail`. When _slug_migrate_from_legacy
+  # is called from a non-git cwd without an explicit old_slug, the auto-compute
+  # path runs `_common=$(git rev-parse --git-common-dir 2>/dev/null)` as a
+  # standalone assignment — that statement's exit code is git's exit (128 when
+  # cwd isn't a git work tree), and set -e then aborts the whole script before
+  # the function ever returns. Without `|| true` the subshell below dies before
+  # printing "after".
+  local fake_loop="${TEST_TMP}/loop"
+  mkdir -p "$fake_loop"
+  local non_git="${TEST_TMP}/non-git-cwd"
+  mkdir -p "$non_git"
+
+  local out; out=$(
+    set -euo pipefail
+    cd "$non_git"
+    _slug_migrate_from_legacy "new-aaaaaa" "$fake_loop"
+    echo "after"
+  )
+  [ "$out" = "after" ]
+}

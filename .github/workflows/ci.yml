@@ -33,4 +33,6 @@ jobs:
         run: bash bin/roll setup
 
       - name: Run bats tests (${{ matrix.suite }})
-        run: bash tests/run.sh tests/${{ matrix.suite }}
+        # US-QA-007: --tier=all runs every test regardless of fast/slow
+        # classification. TCR / pre-push hooks default to --tier=fast.
+        run: bash tests/run.sh --tier=all tests/${{ matrix.suite }}

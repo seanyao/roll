@@ -399,20 +399,31 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
 
 def load_pr_merges_from_git(days: int) -> Dict[str, Dict[str, Any]]:
     """Repair fallback: when events.ndjson dropped the pr / cycle_end events
-    for a cycle (events writer regressions), git log still has the merge
-    commit `Merge pull request #N from seanyao/loop/cycle-LABEL`. Extract
-    PR number + story IDs from the merge subject + body so orphan cycles
-    can be reclassified done instead of permanently '⏵ running'."""
+    for a cycle (events writer regressions, or cycle_end fired before PR
+    merged), git log still has the merge commit. Two known subject formats:
+
+      - Branch-named (Merge commit / older squash): "Merge pull request #N
+        from seanyao/loop/cycle-LABEL" — the branch name carries the label.
+      - Squash with default-title (newer GitHub UI / `gh pr merge --squash`):
+        "loop cycle LABEL (#N)" — space-separated, no slash.
+
+    FIX-107: the old --grep="loop/cycle-" + label_re missed the squash
+    subject entirely, so PRs merged AFTER cycle_end never got their
+    pr_outcome promoted to 'merged' on the dashboard.
+    """
     try:
         out = subprocess.check_output(
             ["git", "log", f"--since={days + 1} days ago",
-             "--grep=loop/cycle-", "--format=%H|||%s|||%b<<<END>>>"],
+             "--grep=loop[ /]cycle", "--extended-regexp",
+             "--format=%H|||%s|||%b<<<END>>>"],
             text=True, errors="ignore"
         )
     except Exception:
         return {}
     result: Dict[str, Dict[str, Any]] = {}
-    label_re  = re.compile(r"loop/cycle-([A-Za-z0-9-]+)")
+    # Accept both `loop/cycle-LABEL` and `loop cycle LABEL` (with or without
+    # the leading `-` separator after `cycle`). LABEL = YYYYMMDD-HHMMSS-PID.
+    label_re  = re.compile(r"loop[ /]cycle[-\s](\d{8}-\d+-\d+)")
     pr_re     = re.compile(r"#(\d+)")
     story_re  = re.compile(r"\b([A-Z]+(?:-[A-Z]+)*-\d+)\b")
     for chunk in out.split("<<<END>>>"):

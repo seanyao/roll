@@ -226,8 +226,8 @@ Add after `## 文档覆盖度` section:
 
 ### Scan 7 — Test Quality (rubric-driven)
 
-Apply the test-quality rubric at [docs/testing/quality-rubric.md](../../docs/testing/quality-rubric.md)
-(Chinese: [quality-rubric.zh.md](../../docs/testing/quality-rubric.zh.md)) against every file under
+Apply the test-quality rubric at [guide/en/testing/quality-rubric.md](../../guide/en/testing/quality-rubric.md)
+(Chinese: [quality-rubric.zh.md](../../guide/zh/testing/quality-rubric.md)) against every file under
 `tests/`. The rubric publishes six anti-pattern categories (❶..❻); each has a
 **Signals** subsection that lists the matching heuristics. Scan 7 is purely a
 mechanical apply-the-rubric step — no new logic.

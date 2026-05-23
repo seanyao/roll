@@ -4,18 +4,18 @@
 # how to emit structured `[test-quality:❶..❻]` REFACTOR entries.
 
 REPO="${BATS_TEST_DIRNAME}/../.."
-RUBRIC_EN="${REPO}/docs/testing/quality-rubric.md"
-RUBRIC_ZH="${REPO}/docs/testing/quality-rubric.zh.md"
+RUBRIC_EN="${REPO}/guide/en/testing/quality-rubric.md"
+RUBRIC_ZH="${REPO}/guide/zh/testing/quality-rubric.md"
 SKILL="${REPO}/skills/roll-.dream/SKILL.md"
 DRY_RUN="${REPO}/bin/dream-test-quality-scan"
 
 # --- Rubric file existence -------------------------------------------------
 
-@test "quality-rubric.md exists at docs/testing/" {
+@test "quality-rubric.md exists at guide/en/testing/ + guide/zh/testing/ " {
   [ -f "$RUBRIC_EN" ]
 }
 
-@test "quality-rubric.zh.md exists at docs/testing/" {
+@test "quality-rubric.zh.md exists at guide/en/testing/ + guide/zh/testing/ " {
   [ -f "$RUBRIC_ZH" ]
 }
 
@@ -65,8 +65,8 @@ DRY_RUN="${REPO}/bin/dream-test-quality-scan"
   grep -qF '每轮' "$SKILL"
 }
 
-@test "roll-.dream SKILL.md: references docs/testing/quality-rubric.md" {
-  grep -qF 'docs/testing/quality-rubric.md' "$SKILL"
+@test "roll-.dream SKILL.md: references guide/en/testing/quality-rubric.md" {
+  grep -qF 'guide/en/testing/quality-rubric.md' "$SKILL"
 }
 
 # --- Dry-run helper finds a real ❶ instance in current suite ---------------

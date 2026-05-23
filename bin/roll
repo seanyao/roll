@@ -4513,8 +4513,65 @@ trap '_on_sigterm' TERM
 # US-LOOP-005: idempotent runs.jsonl writer shared by normal exit, timeout
 # trap, and worktree-setup-failure early exit. Guards on jq + run_id dedupe so
 # multiple callers in the same cycle are safe.
+# US-LOOP-008: build a JSON object {"<phase>": <duration_sec>, ...} from
+# the ordered list of completed phases. Returns "{}" if no phases ran.
+_phases_to_json() {
+  command -v jq >/dev/null 2>&1 || { printf '{}'; return 0; }
+  local _name _var _dur _args="" _filter="{}"
+  local _first=1
+  for _name in \$_PHASE_NAMES_DONE; do
+    [ -z "\$_name" ] && continue
+    _var="_PHASE_DUR_\${_name}"
+    _dur="\${!_var:-0}"
+    if [ "\$_first" -eq 1 ]; then
+      _filter="{\\"\${_name}\\": \\\$d_\${_name}}"
+      _first=0
+    else
+      _filter="\${_filter} + {\\"\${_name}\\": \\\$d_\${_name}}"
+    fi
+    _args="\${_args} --argjson d_\${_name} \${_dur}"
+  done
+  if [ "\$_first" -eq 1 ]; then
+    printf '{}'
+  else
+    eval "jq -nc \${_args} '\${_filter}'" 2>/dev/null || printf '{}'
+  fi
+}
+
+# US-LOOP-008: print phase breakdown panel sorted by duration desc.
+# Idle/failed/aborted cycles only list phases that actually entered — no
+# placeholder rows. Panel is best-effort (skips silently if no phases).
+_print_phase_breakdown() {
+  [ -n "\$_PHASE_NAMES_DONE" ] || return 0
+  local _name _var _dur _total=0 _rows=""
+  for _name in \$_PHASE_NAMES_DONE; do
+    [ -z "\$_name" ] && continue
+    _var="_PHASE_DUR_\${_name}"
+    _dur="\${!_var:-0}"
+    _total=\$(( _total + _dur ))
+    _rows="\${_rows}\${_dur} \${_name}\n"
+  done
+  [ "\$_total" -le 0 ] && _total=1
+  printf '\\n─── Cycle %s Phase Breakdown ───\\n' "\${CYCLE_ID:-unknown}"
+  printf '%b' "\$_rows" | sort -rn | while read -r _d _n; do
+    [ -z "\$_n" ] && continue
+    local _pct=\$(( (_d * 1000) / _total ))
+    local _pct_str
+    _pct_str=\$(printf '%d.%d%%' \$(( _pct / 10 )) \$(( _pct % 10 )))
+    local _bar="" _bar_len=\$(( (_d * 20) / _total ))
+    [ "\$_bar_len" -gt 0 ] && _bar=\$(printf '█%.0s' \$(seq 1 \$_bar_len))
+    printf '  %-22s %6ds  (%6s)  %s\\n' "\$_n" "\$_d" "\$_pct_str" "\$_bar"
+  done
+  printf '  %s\\n' "──────────────────────────────────────"
+  printf '  %-22s %6ds\\n\\n' "Total" "\$_total"
+}
+
 _runs_append() {
   local _status="\$1"; local _tcr="\${2:-0}"; local _built="\${3:-[]}"
+  # bash parameter expansion \${4:-{}} stops at the first \} so the default
+  # leaks a trailing \} into a real 4th arg ("{...}}"). Test explicit empty.
+  local _phases_json="\${4:-}"
+  [ -z "\$_phases_json" ] && _phases_json="{}"
   local _runs_dst="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/runs.jsonl"
   command -v jq >/dev/null 2>&1 || return 0
   local _cid="\${CYCLE_ID:-pre-cycle-\$\$}"
@@ -4536,10 +4593,11 @@ _runs_append() {
     --argjson alerts '[]' \\
     --argjson tcr_count "\$_tcr" \\
     --argjson duration_sec "\$_dur" \\
+    --argjson phases "\$_phases_json" \\
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
       cycle_id:\$cycle_id,
       built:\$built, skipped:\$skipped, alerts:\$alerts,
-      tcr_count:\$tcr_count, duration_sec:\$duration_sec}' \\
+      tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}' \\
     >> "\$_runs_dst" 2>/dev/null || true
 }
 _inner_cleanup() {
@@ -4561,7 +4619,8 @@ _inner_cleanup() {
     # US-LOOP-005 T9: timeout path must also write runs.jsonl row so dashboard
     # has a terminal record (cycle_end alone is insufficient — runs.jsonl is
     # the canonical history feed for 'roll loop runs').
-    _runs_append "failed" 0 "[]" 2>/dev/null || true
+    _phases_t=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_t" ] && _phases_t='{}'
+_runs_append "failed" 0 "[]" "\$_phases_t" 2>/dev/null || true
     _worktree_alert "cycle \${CYCLE_ID:-unknown}: \${LOOP_CYCLE_TIMEOUT_SEC}s timeout — claude/python killed; in-progress story marked Blocked" 2>/dev/null || true
   fi
   # FIX-086: aborted-path orphan safety net. When the inner script is killed
@@ -4606,7 +4665,8 @@ _inner_cleanup() {
         _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "done" 2>/dev/null || true
         _CYCLE_END_WRITTEN=1
         # FIX-099: pass real tcr_count + built[] instead of 0/"[]"
-        _runs_append "done" "\${_orphan_tcr}" "\${_orphan_built}" 2>/dev/null || true
+        _phases_t=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_t" ] && _phases_t='{}'
+        _runs_append "done" "\${_orphan_tcr}" "\${_orphan_built}" "\$_phases_t" 2>/dev/null || true
         # FIX-099: three-field ALERT so callers can distinguish recovered orphan
         # from a cycle's normally-picked story (was: "FIX-091 published as PR"
         # which leaked a hardcoded string regardless of what was actually built).
@@ -4619,7 +4679,8 @@ _inner_cleanup() {
           _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "orphan" 2>/dev/null || true
           _CYCLE_END_WRITTEN=1
           # FIX-099: pass real tcr_count + built[] for the orphan-tag path too
-          _runs_append "orphan" "\${_orphan_tcr}" "\${_orphan_built}" 2>/dev/null || true
+          _phases_t=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_t" ] && _phases_t='{}'
+          _runs_append "orphan" "\${_orphan_tcr}" "\${_orphan_built}" "\$_phases_t" 2>/dev/null || true
           _worktree_alert "cycle \${CYCLE_ID}: recovered_from_orphan=yes; tcr_commits=\${_orphan_tcr}; stories=\${_orphan_built}; FIX-086 pushed orphan tag \${_orphan_tag}" 2>/dev/null || true
         fi
       fi
@@ -4631,7 +4692,8 @@ _inner_cleanup() {
   # "still running" until the next successful cycle rolls past it.
   if [ "\${_CYCLE_END_WRITTEN:-0}" -eq 0 ] && [ -n "\${CYCLE_ID:-}" ]; then
     _loop_event cycle_end "\${CYCLE_ID}" "\${BRANCH:-}" "aborted" 2>/dev/null || true
-    _runs_append "aborted" 0 "[]" 2>/dev/null || true
+    _phases_t=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_t" ] && _phases_t='{}'
+    _runs_append "aborted" 0 "[]" "\$_phases_t" 2>/dev/null || true
   fi
   rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"
   exit "\$_rc"
@@ -4741,7 +4803,8 @@ else
   # US-LOOP-005 T10: worktree-setup-failed path leaves no commits and never
   # emits cycle_start, but dashboard still needs a runs.jsonl row marking the
   # cycle as failed (otherwise the scheduled tick appears to have vanished).
-  _runs_append "failed" 0 "[]" 2>/dev/null || true
+  _phases_t=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_t" ] && _phases_t='{}'
+_runs_append "failed" 0 "[]" "\$_phases_t" 2>/dev/null || true
   exit 0
 fi
 
@@ -4926,11 +4989,15 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
   fi
 fi
 
+# US-LOOP-008: cycle Phase Breakdown panel — printed to stdout (tmux readers)
+# before runs.jsonl is appended, so the user sees timings even if jq is missing.
+_print_phase_breakdown 2>/dev/null || true
+_phases_for_runs=\$(_phases_to_json 2>/dev/null || echo '{}')
 # FIX-044 / Step 5: Write loop cycle run summary to runs.jsonl
 # Deterministic — runs in shell regardless of whether agent executes SKILL.md Step 5.
 # US-LOOP-005: now routed through _runs_append so timeout/worktree-setup-fail
 # share the same write logic. _runs_append is idempotent on run_id.
-_runs_append "\$_cycle_status" "\$_cycle_tcr" "\$_cycle_built" 2>/dev/null || true
+_runs_append "\$_cycle_status" "\$_cycle_tcr" "\$_cycle_built" "\$_phases_for_runs" 2>/dev/null || true
 INNER
   chmod +x "$inner_path"
 

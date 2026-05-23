@@ -119,11 +119,20 @@ _i18n_load_catalogs() {
   i18n_dir="$(dirname "${BASH_SOURCE[0]:-$0}")/i18n"
   if [[ -d "$i18n_dir" ]]; then
     local f
+    # Load per-command catalogs
     for f in "$i18n_dir"/*.sh; do
       [[ -f "$f" ]] || continue
       # shellcheck source=/dev/null
       source "$f"
     done
+    # Load skill catalogs (US-I18N-003)
+    if [[ -d "$i18n_dir/skills" ]]; then
+      for f in "$i18n_dir/skills"/*.sh; do
+        [[ -f "$f" ]] || continue
+        # shellcheck source=/dev/null
+        source "$f"
+      done
+    fi
   fi
 }
 _i18n_load_catalogs

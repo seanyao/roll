@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Roll i18n catalog — roll-onboard skill user-facing strings (US-I18N-003).
+_i18n_set en onboard.welcome "Welcome to Roll Onboard"
+_i18n_set zh onboard.welcome "欢迎使用 Roll Onboard"
+_i18n_set en onboard.scanning "Scanning project..."
+_i18n_set zh onboard.scanning "正在扫描项目..."
+_i18n_set en onboard.questions_group1 "Group 1/3: Understanding your project"
+_i18n_set zh onboard.questions_group1 "第 1/3 组: 理解你的项目"
+_i18n_set en onboard.questions_group2 "Group 2/3: Defining scope"
+_i18n_set zh onboard.questions_group2 "第 2/3 组: 定义范围"
+_i18n_set en onboard.questions_group3 "Group 3/3: Privacy & preferences"
+_i18n_set zh onboard.questions_group3 "第 3/3 组: 隐私与偏好"
+_i18n_set en onboard.plan_written "Onboard plan written to .roll/onboard-plan.yaml"
+_i18n_set zh onboard.plan_written "Onboard 计划已写入 .roll/onboard-plan.yaml"
+_i18n_set en onboard.next_step "Next: run 'roll init --apply' to execute this plan"
+_i18n_set zh onboard.next_step "下一步: 运行 'roll init --apply' 执行此计划"

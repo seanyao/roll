@@ -350,6 +350,11 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
             "open":   ("dim",   "…"),
         }.get(pr_outcome, ("dim", "…"))
         pr_marker = " " + c(mark_c, f"#{pr_num} {mark_sym}")
+    # US-VIEW-014: pre-US-VIEW-014 events (no frozen cost_list_usd at
+    # cycle_end) get a muted [legacy] suffix — the number is recomputed on
+    # the fly and can shift with future price changes, unlike the frozen
+    # values written by current loop-fmt.
+    legacy_marker = " " + c("muted", "[legacy]") if cy.get("cost_list_legacy") else ""
     inner = (
         "  " + c(glyph_c, glyph, bold=True) + "  " +
         c(time_c, pad(time_str, 5), bold=(outcome == "fail")) + "   " +
@@ -357,7 +362,7 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         c("muted", pad(tok, 26)) + "  " +
         model_seg +
         c("muted", pad(cost, 7, "r")) + "   " +
-        c(sid_c, ids_str, bold=True) + pr_marker
+        c(sid_c, ids_str, bold=True) + pr_marker + legacy_marker
     )
     # Subtle red bg on failure rows so a fail can't be missed at a glance.
     if outcome == "fail" and USE_COLOR:

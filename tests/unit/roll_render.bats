@@ -723,6 +723,138 @@ print(r["input_tokens"], r["output_tokens"],
   [[ "$output" == *"164 13350 499000 12737000"* ]]
 }
 
+# ─── US-VIEW-014: persisted cost_list_usd preferred, fallback tagged [legacy] ─
+
+@test "US-VIEW-014 backfill: usage_event.cost_list_usd is used verbatim, not recomputed" {
+  # Persisted cost wins over recomputation. If we ever change list prices,
+  # historical cycles must keep showing the cost as fixed at their cycle_end.
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+cycles = [{
+    "label": "L14a",
+    "start": ts,
+    "usage_event": {
+        "model": "claude-sonnet-4-6",
+        "input_tokens": 1000, "output_tokens": 500,
+        "cache_creation_tokens": 200, "cache_read_tokens": 122089,
+        "cost_list_usd": 0.99,  # frozen value — must NOT be recomputed
+        "prices_version": "2026-04-01",
+    },
+}]
+mod.backfill_usage_from_claude_sessions(cycles, "no-such-slug")
+cy = cycles[0]
+import math
+assert math.isclose(cy["cost_list"], 0.99, abs_tol=1e-6), cy["cost_list"]
+assert cy.get("cost_list_legacy") is False, cy.get("cost_list_legacy")
+print("frozen")
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"frozen"* ]]
+}
+
+@test "US-VIEW-014 backfill: missing cost_list_usd → recomputed and tagged legacy" {
+  # Older events.ndjson rows that pre-date US-VIEW-014 still render; the
+  # dashboard recomputes on the fly and surfaces a muted [legacy] marker so
+  # the user knows the number is best-effort, not the frozen cycle_end value.
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+cycles = [{
+    "label": "L14b",
+    "start": ts,
+    "usage_event": {
+        "model": "claude-sonnet-4-6",
+        "input_tokens": 1000, "output_tokens": 500,
+        "cache_creation_tokens": 200, "cache_read_tokens": 122089,
+        # No cost_list_usd / prices_version → pre-US-VIEW-014 event shape.
+    },
+}]
+mod.backfill_usage_from_claude_sessions(cycles, "no-such-slug")
+cy = cycles[0]
+import math
+# Sonnet-4-6 list price for the tokens above (matches US-VIEW-010 test below).
+assert math.isclose(cy["cost_list"], 0.0479, abs_tol=0.001), cy["cost_list"]
+assert cy.get("cost_list_legacy") is True, cy.get("cost_list_legacy")
+print("legacy")
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"legacy"* ]]
+}
+
+@test "US-VIEW-014 backfill: claude session salvage path is always legacy" {
+  # When tokens come from the claude session JSONL salvage (path 2), there is
+  # no frozen cost_list_usd to read, so the row must be tagged legacy.
+  # We exercise this by skipping path 1 (no usage_event) and providing input
+  # tokens directly so path 2 short-circuits via the early return; instead we
+  # write a tiny fake session file. Easier: assert via path 2 stub.
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+# No usage_event at all and zero tokens forces path 2; we monkeypatch
+# load_claude_session_usage to return synthetic usage so we can test the
+# legacy tagging without needing a real claude session file on disk.
+cycles = [{"label": "L14c", "start": ts}]
+mod.load_claude_session_usage = lambda label, slug: {
+    "model": "claude-sonnet-4-6",
+    "input_tokens": 1000, "output_tokens": 500,
+    "cache_creation_tokens": 200, "cache_read_tokens": 122089,
+    "cost_reported_usd": None, "duration_ms": 60000,
+}
+mod.backfill_usage_from_claude_sessions(cycles, "no-such-slug")
+cy = cycles[0]
+assert cy.get("cost_list_legacy") is True, cy.get("cost_list_legacy")
+assert cy.get("cost_list") is not None
+print("legacy-path2")
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"legacy-path2"* ]]
+}
+
+@test "US-VIEW-014 cycle_row: cost_list_legacy=True appends muted [legacy] suffix" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,22,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "input_tokens": 1_000_000, "output_tokens": 200_000,
+    "cost_list": 1.50, "cost_list_legacy": True,
+    "model": "claude-opus-4-7-20251001", "story": "US-VIEW-014",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("[legacy]" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
+@test "US-VIEW-014 cycle_row: cost_list_legacy=False or absent does NOT append [legacy]" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy_fresh = {
+    "outcome": "done",
+    "start": datetime(2026,5,22,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "input_tokens": 1_000_000, "output_tokens": 200_000,
+    "cost_list": 1.50, "cost_list_legacy": False,
+    "model": "claude-opus-4-7-20251001", "story": "US-VIEW-014",
+}
+cy_absent = dict(cy_fresh); cy_absent.pop("cost_list_legacy")
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy_fresh, {})
+    roll_render.cycle_row(cy_absent, {})
+out = buf.getvalue()
+print("[legacy]" not in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
 @test "US-VIEW-017 render: daily summary includes cache writes + cache reads rows" {
   run run_status '
 import io, contextlib, re

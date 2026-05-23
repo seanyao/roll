@@ -57,6 +57,80 @@ layer of the test pyramid:
 | E2E | `<project E2E command>` | User path, environment |
 | Smoke | `roll doctor` | Toolchain health |
 
+## TCR Test Strategy (Phase 3.0)
+
+Each TCR micro-step needs second-level feedback. The test runner has two
+levers that keep that fast without giving up coverage in CI.
+
+### `--affected` — run only the tests touched by the diff
+
+```bash
+bash tests/run.sh --affected              # default base = HEAD~1
+bash tests/run.sh --affected main         # explicit base ref
+bash tests/run.sh --affected --dry-run    # print the file list, don't run
+```
+
+Mapping rules (precise → fuzzy → conservative):
+
+1. The changed file *is* the .bats — run it (self-test).
+2. Source-naming convention: `lib/foo.py` → `tests/unit/foo*.bats`,
+   `tests/integration/*foo*.bats`.
+3. Changes to `tests/helpers/*`, `tests/preconditions.bash`, or `tests/run.sh`
+   → run everything (no safe subset).
+
+When the affected set is empty (e.g. doc-only change) the runner prints
+`no affected tests, skipping suite` and exits 0.
+
+### `--tier` — fast (TCR / local) vs slow (CI / pre-push)
+
+```bash
+bash tests/run.sh                   # implicit --tier=fast (default)
+bash tests/run.sh --tier=slow
+bash tests/run.sh --tier=all        # run everything; CI uses this
+```
+
+Classification order (first hit wins):
+
+1. Explicit `# bats tier: fast|slow` header in the .bats file.
+2. Path under `tests/integration/` → slow.
+3. References `launchctl`, `crontab`, or `sleep N` with N ≥ 5 → slow.
+4. Default → fast.
+
+With `ROLL_TEST_TIME_CAP=1` (set in CI), `--tier=fast` enforces a
+60-second wall-clock cap (`ROLL_TEST_FAST_CAP_SEC` override). A creeping
+perf regression turns the suite red immediately rather than rotting silently.
+
+User-named .bats files bypass the tier filter:
+`bash tests/run.sh tests/integration/foo.bats` runs even with `--tier=fast`.
+
+The default combination is `--affected --tier=fast`; pre-push / release run
+`--tier=all`.
+
+## Test Quality Rubric
+
+`docs/testing/quality-rubric.md` (referenced from `$roll-.dream` Scan 7)
+catalogs six recurring antipatterns the dream nightly scan flags as
+`REFACTOR-XXX [test-quality:❶|❷|...]`:
+
+| # | Antipattern | Fix |
+|---|-------------|-----|
+| ❶ | Hard-coded business data (prices, version strings, product copy) | Inject fixture data via monkey-patch or constructor; assert behaviour, not the data table itself |
+| ❷ | Over-mocking (database, filesystem, real boundary) | Use real subsystems behind small adapter mocks; prefer in-memory test doubles |
+| ❸ | Asserting implementation details (private symbol names, internal data shape) | Assert observable behaviour through the public API |
+| ❹ | Fixture order coupling (shared mutable state between tests) | Setup/teardown each test independently; use immutable fixtures |
+| ❺ | Testing private functions / bypassing the public API | Re-route through the public entry point; if it's hard to reach, the API is wrong |
+| ❻ | Asserting framework behaviour (testing bats itself) | Delete the test; trust the framework |
+
+The dream skill emits at most 5 REFACTOR entries per scan, so the backlog
+doesn't drown in noise. Refactor them in priority order.
+
+`tests/unit/model_prices.bats` is the canonical ❶ exemplar — assertions
+that read live production rates were broken every time the rate card moved,
+even when the arithmetic logic was unchanged. The current file uses a
+monkey-patched fixture price table for arithmetic tests and asserts
+structural invariants (cache_read < input, etc.) on the production PRICES
+dict.
+
 ## See Also
 
 - [loop.md](loop.md) — how loop enforces TCR discipline per story

@@ -1,8 +1,23 @@
 # Changelog
 
-## Unreleased
+## v2026.523.1
 
-- **Changed**: `roll loop status` — token 列现在显示 cache 费用，账单终于可解释
+### Added
+
+- **`roll loop branches`** — 一眼看见本机残留的 loop 分支；每轮入口先 GC 一次，半途中止的 cycle 也会被收掉 `[loop]`
+
+### Changed
+
+- **dashboard token 列拆成 input / output / cache 写 / cache 读** — cache 是真花钱的，账单终于解释得清 `[loop]`
+
+### Fixed
+
+- **每日 dream / brief 在 macOS 26.4 上从来没真跑过** — 换成 interval 触发，从今天起稳定每天产出 `[loop]`
+- **dashboard 上 tcr 次数、built 列表、ALERT 文案不再显示假零或别故事的旧标签** `[loop]`
+- **选一个故事不再把别的依赖它的故事也标成"在做"** — dashboard 不再骗你说有人在干活 `[loop]`
+- **`roll setup` / `roll update` 不再在隐藏的覆盖提示上无声卡死**
+- **`$roll-notes` 现在写到 `.roll/notes/`** — 和 dream / brief 一致，不再扔到项目根目录 `[loop]`
+- **loop CI 网关不再把"排队中 / 进行中"误判成失败** `[loop]`
 
 ## v2026.522.2
 

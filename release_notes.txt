@@ -1,9 +1,11 @@
+### Added
+- **`roll loop branches`** — 一眼看见本机残留的 loop 分支；每轮入口先 GC 一次，半途中止的 cycle 也会被收掉 `[loop]`
 ### Changed
-- **Roll 改用 Antigravity (`agy`)** — Google 已退役独立 Gemini CLI，agy 是接班产品；老用户重跑 `roll setup` 即可
-### Improved
-- **dashboard token 列现在只算 input/output，cache 不再混进来虚抬总量** `[loop]`
-- **`roll loop status` 现在分清「没装 / 装了关了 / 正常」三种状态** — 之前看不出 loop 到底有没有起来 `[loop]`
+- **dashboard token 列拆成 input / output / cache 写 / cache 读** — cache 是真花钱的，账单终于解释得清 `[loop]`
 ### Fixed
-- **loop 异常中断时未推送的 commit 不再丢** — 自动开成 PR `[loop]`
-- **loop 每小时弹窗不再抢前台焦点** — 后台开 Terminal，不打断你在干的事
-- **`roll loop` 在非 git 目录下不再静默崩溃** `[loop]`
+- **每日 dream / brief 在 macOS 26.4 上从来没真跑过** — 换成 interval 触发，从今天起稳定每天产出 `[loop]`
+- **dashboard 上 tcr 次数、built 列表、ALERT 文案不再显示假零或别故事的旧标签** `[loop]`
+- **选一个故事不再把别的依赖它的故事也标成"在做"** — dashboard 不再骗你说有人在干活 `[loop]`
+- **`roll setup` / `roll update` 不再在隐藏的覆盖提示上无声卡死**
+- **`$roll-notes` 现在写到 `.roll/notes/`** — 和 dream / brief 一致，不再扔到项目根目录 `[loop]`
+- **loop CI 网关不再把"排队中 / 进行中"误判成失败** `[loop]`

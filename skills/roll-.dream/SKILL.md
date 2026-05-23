@@ -224,6 +224,65 @@ Add after `## 文档覆盖度` section:
 {发现内容列表 或 "文档新鲜度良好，无滞后或缺失项。"}
 ```
 
+### Scan 7 — Test Quality (rubric-driven)
+
+Apply the test-quality rubric at [guide/en/testing/quality-rubric.md](../../guide/en/testing/quality-rubric.md)
+(Chinese: [quality-rubric.zh.md](../../guide/zh/testing/quality-rubric.md)) against every file under
+`tests/`. The rubric publishes six anti-pattern categories (❶..❻); each has a
+**Signals** subsection that lists the matching heuristics. Scan 7 is purely a
+mechanical apply-the-rubric step — no new logic.
+
+**Per-category signals** — read from the rubric, summarized here:
+
+| Marker | Anti-pattern | Cheapest signal |
+|--------|--------------|-----------------|
+| ❶ | Hardcoded business data | Bare numeric / version / pricing literal inside `[[ "$output" == *"..."*` that matches a value also defined in `lib/` |
+| ❷ | Over-mocking real boundaries | `function git() {` / `function gh() {` overrides at the top of a unit test |
+| ❸ | Asserting implementation details | `grep '_internal_helper'` against output; assertions on `.roll/internal/*` paths |
+| ❹ | Fixture order coupling | `setup_file` writes shared mutable state without per-test reset |
+| ❺ | Testing private functions | Test sources a `lib/` file and calls a `_underscore_prefixed` helper directly |
+| ❻ | Asserting framework behavior | References to `$BATS_TEST_NUMBER`, `$BATS_SUITE_NAME` in assertions |
+
+**Rate cap — 每轮 ≤ 5 条 test-quality REFACTOR entries**. Same dream cycle may
+emit more than 5 findings; the dream scan must rank by severity (❶ > ❷ > ❸ > ❹ > ❺ > ❻
+and within a class, by occurrence count) and only persist the top 5 to BACKLOG.
+Remaining findings go into the dream log under `## 测试质量` but are not made
+into REFACTOR rows — this prevents the backlog from being drowned in test-debt
+on the first scan after rubric publication.
+
+**REFACTOR entry format** — same as other scans, but tagged with category:
+
+```markdown
+| REFACTOR-XXX | docs: <one-line description> [test-quality:❶] — flagged by dream YYYY-MM-DD | 📋 Todo |
+```
+
+The `[test-quality:❶]` (through `❻`) tag is **required** so downstream filtering
+(e.g. "show me all ❶ items still open") is mechanical. The marker character must
+match the rubric exactly.
+
+**Optional helper** — `bin/dream-test-quality-scan` is a thin shell script
+maintainers can invoke ad-hoc to dry-run the ❶ detector against a single file
+or directory (see `bin/dream-test-quality-scan --help`). The dream skill itself
+does **not** depend on the helper — Scan 7 is the AI agent applying the rubric.
+The helper just exists so a maintainer (or this skill's smoke test) can confirm
+the ❶ heuristic still finds known instances.
+
+#### Dream Log Section (Scan 7)
+
+Add after `## 文档新鲜度` section:
+
+```markdown
+## 测试质量
+- 本轮发现 {N} 项（写入 BACKLOG 的前 5 项见下；剩余 {M} 项仅记录于本日志）
+- ❶ 硬编码业务数据：{count}
+- ❷ 过度 mock：{count}
+- ❸ 断言实现细节：{count}
+- ❹ Fixture 顺序耦合：{count}
+- ❺ 测私有函数：{count}
+- ❻ 断言框架行为：{count}
+{命中文件列表 或 "未发现可治理的测试反模式。"}
+```
+
 ## Output
 
 ### REFACTOR Entry (.roll/backlog.md)

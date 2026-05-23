@@ -79,8 +79,12 @@ teardown() { unit_teardown_cd; }
 @test "T9: timeout path also writes runs.jsonl row" {
   # _inner_cleanup must write a runs.jsonl row when _CYCLE_TIMED_OUT==1
   # (otherwise dashboard sees no terminal row even though cycle_end fired).
-  awk '/_CYCLE_TIMED_OUT.*-eq 1/{f=1} f{print} /^[[:space:]]*}[[:space:]]*$/&&f{c++; if(c==1)exit}' "$_inner" \
-    | grep -qE 'runs\.jsonl'
+  # US-LOOP-007: avoid `awk | grep -q` pipeline — under mawk on Linux CI
+  # (and pipefail-enabled bats) the SIGPIPE from a fast grep -q closure
+  # propagates the test exit code to 141. Buffer the awk output first.
+  local block
+  block=$(awk '/_CYCLE_TIMED_OUT.*-eq 1/{f=1} f{print} /^[[:space:]]*}[[:space:]]*$/&&f{c++; if(c==1)exit}' "$_inner")
+  echo "$block" | grep -qE 'runs\.jsonl'
 }
 
 # --- IDEA-028 / FIX-066: EXIT-trap fallback for unexpected abort paths ---

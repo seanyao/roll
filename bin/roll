@@ -25,6 +25,10 @@ ROLL_PKG_CONVENTIONS="${ROLL_PKG_DIR}/conventions"
 # shellcheck source=../lib/i18n.sh
 [[ -f "${ROLL_PKG_DIR}/lib/i18n.sh" ]] && source "${ROLL_PKG_DIR}/lib/i18n.sh"
 
+# US-WATCH-001: upstream compatibility watch helpers.
+# shellcheck source=../lib/watch.sh
+[[ -f "${ROLL_PKG_DIR}/lib/watch.sh" ]] && source "${ROLL_PKG_DIR}/lib/watch.sh"
+
 # Colors
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'

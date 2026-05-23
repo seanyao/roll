@@ -25,6 +25,10 @@ ROLL_PKG_CONVENTIONS="${ROLL_PKG_DIR}/conventions"
 # shellcheck source=../lib/i18n.sh
 [[ -f "${ROLL_PKG_DIR}/lib/i18n.sh" ]] && source "${ROLL_PKG_DIR}/lib/i18n.sh"
 
+# US-WATCH-001: upstream compatibility watch helpers.
+# shellcheck source=../lib/watch.sh
+[[ -f "${ROLL_PKG_DIR}/lib/watch.sh" ]] && source "${ROLL_PKG_DIR}/lib/watch.sh"
+
 # Colors
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -3232,9 +3236,9 @@ USAGE  用法
   roll slides build <slug> [--no-open]
                           Render .roll/slides/<slug>/deck.md → .roll/slides/<slug>.html
                           渲染 deck.md 为 HTML 并自动打开浏览器
-  roll slides new "<topic>" [--template <name>]
-                          Generate a new deck.md from a topic via the selected AI agent
-                          通过所选 AI agent 根据主题生成新的 deck.md
+  roll slides new "<topic>" [--template <name>] [--no-build]
+                          Generate deck.md via AI, then auto-build + open HTML
+                          通过 AI 生成 deck.md，自动渲染并打开 HTML
   roll slides list        List all decks under .roll/slides/ as a table
                           列出 .roll/slides/ 下所有幻灯片
   roll slides preview <slug> [--no-open]
@@ -3244,6 +3248,8 @@ USAGE  用法
 OPTIONS  选项
   --no-open               Skip auto-opening the rendered HTML in a browser
                           渲染后不自动打开浏览器
+  --no-build              Skip auto-build after agent completes (deck.md only)
+                          仅生成 deck.md，不自动渲染
   --help, -h              Show this help
                           显示本帮助
 EOF
@@ -3558,13 +3564,14 @@ _slides_topic_slug() {
 # `.roll/slides/<slug>/deck.md` (and nothing else). After the agent exits,
 # we print a bilingual hint pointing at `roll slides build <slug>`.
 cmd_slides_new() {
-  local topic="" template="introduction-v3"
+  local topic="" template="introduction-v3" no_build=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --template)
         [[ -n "${2:-}" ]] || { err "--template requires a value  --template 需要一个值"; return 1; }
         template="$2"; shift 2 ;;
       --template=*) template="${1#--template=}"; shift ;;
+      --no-build) no_build=1; shift ;;
       --help|-h) _slides_help; return 0 ;;
       --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
       *)
@@ -3627,12 +3634,31 @@ EOF
   "${_AGENT_ARGV[@]}"
   local rc=$?
 
-  # Whether the agent succeeded or not, point the user at the next bash step.
-  # (Build will surface its own validation errors if deck.md is malformed.)
-  echo
-  echo "Next:  roll slides build ${slug}"
-  echo "下一步：roll slides build ${slug}"
+  if [[ "$no_build" -eq 1 ]]; then
+    echo
+    echo "Next:  roll slides build ${slug}"
+    echo "下一步：roll slides build ${slug}"
+    return "$rc"
+  fi
 
+  # US-DECK-009: auto-build after agent completes.
+  echo
+  info "Agent done — auto-building deck: ${slug}"
+  info "Agent 结束 — 自动渲染 deck：${slug}"
+
+  local build_rc=0
+  cmd_slides_build "$slug" || build_rc=$?
+
+  if [[ "$build_rc" -ne 0 ]]; then
+    echo >&2
+    err "Auto-build failed for ${slug} — deck.md preserved."
+    echo "  auto-build 失败 — deck.md 已保留。" >&2
+    echo "  See: roll slides logs ${slug}" >&2
+    echo "  查看：roll slides logs ${slug}" >&2
+    return "$build_rc"
+  fi
+
+  # Build succeeded — cmd_slides_build already printed "Opened in browser".
   return "$rc"
 }
 

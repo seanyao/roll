@@ -81,6 +81,7 @@ setup() {
   mkdir -p "$tmp/tests/unit"
   cp "${REPO_ROOT}/tests/run.sh" "$tmp/tests/run.sh"
   cp "${REPO_ROOT}/tests/helpers/affected.bash" "$tmp/tests/helpers/affected.bash"
+  cp "${REPO_ROOT}/tests/helpers/tier.bash" "$tmp/tests/helpers/tier.bash"
   # Stub bats so a fall-through would fail loudly (we expect dry-run to exit before this).
   printf '#!/bin/sh\necho "bats stub should not run in dry-run" >&2; exit 99\n' \
     > "$tmp/tests/helpers/bats-core/bin/bats"
@@ -112,6 +113,7 @@ setup() {
   mkdir -p "$tmp/tests/unit"
   cp "${REPO_ROOT}/tests/run.sh" "$tmp/tests/run.sh"
   cp "${REPO_ROOT}/tests/helpers/affected.bash" "$tmp/tests/helpers/affected.bash"
+  cp "${REPO_ROOT}/tests/helpers/tier.bash" "$tmp/tests/helpers/tier.bash"
   printf '#!/bin/sh\nexit 99\n' > "$tmp/tests/helpers/bats-core/bin/bats"
   chmod +x "$tmp/tests/helpers/bats-core/bin/bats"
 
@@ -138,6 +140,7 @@ setup() {
   mkdir -p "$tmp/tests/integration"
   cp "${REPO_ROOT}/tests/run.sh" "$tmp/tests/run.sh"
   cp "${REPO_ROOT}/tests/helpers/affected.bash" "$tmp/tests/helpers/affected.bash"
+  cp "${REPO_ROOT}/tests/helpers/tier.bash" "$tmp/tests/helpers/tier.bash"
   # Stub bats to succeed and print marker so we can detect fall-through.
   printf '#!/bin/sh\necho "FULL_SUITE_RAN"\nexit 0\n' \
     > "$tmp/tests/helpers/bats-core/bin/bats"
@@ -169,6 +172,7 @@ setup() {
   mkdir -p "$tmp/tests/helpers/bats-core/bin"
   cp "${REPO_ROOT}/tests/run.sh" "$tmp/tests/run.sh"
   cp "${REPO_ROOT}/tests/helpers/affected.bash" "$tmp/tests/helpers/affected.bash"
+  cp "${REPO_ROOT}/tests/helpers/tier.bash" "$tmp/tests/helpers/tier.bash"
   printf '#!/bin/sh\nexit 0\n' > "$tmp/tests/helpers/bats-core/bin/bats"
   chmod +x "$tmp/tests/helpers/bats-core/bin/bats"
 

@@ -11,11 +11,14 @@ if [ ! -x "$BATS" ]; then
 fi
 
 # US-QA-005: parse --affected [base-ref] / --affected=<ref> / --dry-run flags.
+# US-QA-007: parse --tier=fast|slow|all (default fast — TCR micro-step stays
+#            in seconds; CI / pre-push run --tier=all for full coverage).
 # Positional args (existing REFACTOR-009 behavior) still override the default
 # scan paths when --affected is not set.
 AFFECTED_MODE=0
 DRY_RUN=0
 BASE_REF=""
+TIER="${ROLL_TEST_TIER:-fast}"
 POSITIONAL=()
 
 while [ "$#" -gt 0 ]; do
@@ -36,6 +39,14 @@ while [ "$#" -gt 0 ]; do
       BASE_REF="${1#--affected=}"
       shift
       ;;
+    --tier)
+      TIER="${2:-fast}"
+      shift 2
+      ;;
+    --tier=*)
+      TIER="${1#--tier=}"
+      shift
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -50,6 +61,14 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+case "$TIER" in
+  fast|slow|all) ;;
+  *) echo "error: --tier must be one of fast|slow|all (got: $TIER)" >&2; exit 2 ;;
+esac
+
+# shellcheck source=helpers/tier.bash
+source "$(dirname "$0")/helpers/tier.bash"
 
 if [ "$AFFECTED_MODE" = 1 ]; then
   # shellcheck source=helpers/affected.bash
@@ -69,6 +88,16 @@ if [ "$AFFECTED_MODE" = 1 ]; then
   _all_changed=$(printf '%s\n%s\n' "$_committed" "$_wip" | grep -v '^$' | sort -u)
 
   AFFECTED=$(printf '%s\n' "$_all_changed" | (cd "$REPO_ROOT" && roll_affected_files))
+
+  # US-QA-007: tier filter inside affected mode too. When all affected files
+  # are slow but tier=fast (TCR default), skip with a clear message.
+  if [ -n "$AFFECTED" ] && [ "$AFFECTED" != "__ALL__" ] && [ "$TIER" != "all" ]; then
+    AFFECTED=$(printf '%s\n' "$AFFECTED" | while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      got=$(roll_tier_classify "$REPO_ROOT/$f")
+      [ "$got" = "$TIER" ] && printf '%s\n' "$f"
+    done)
+  fi
 
   if [ "$AFFECTED" = "__ALL__" ]; then
     # Conservative trigger (run.sh / helpers / preconditions changed) — fall
@@ -120,18 +149,48 @@ fi
 
 FILES=$(find "${SCAN_PATHS[@]}" -name '*.bats' | sort)
 
+# US-QA-007: apply tier filter unless --tier=all OR the user named individual
+# .bats files explicitly (their intent overrides classification).
+_USER_NAMED_FILES=0
+for _p in "${SCAN_PATHS[@]}"; do
+  case "$_p" in
+    *.bats) _USER_NAMED_FILES=1; break ;;
+  esac
+done
+if [ "$TIER" != "all" ] && [ "$_USER_NAMED_FILES" = "0" ]; then
+  FILES=$(printf '%s\n' "$FILES" | roll_tier_filter "$TIER")
+  if [ -z "$FILES" ]; then
+    echo "no $TIER-tier tests found in: ${SCAN_PATHS[*]}"
+    exit 0
+  fi
+fi
+
 # REFACTOR-008 Phase 1: detect CPU count dynamically instead of hardcoded 4.
 JOBS="${ROLL_TEST_JOBS:-}"
 if [ -z "$JOBS" ]; then
   JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 fi
 
+# US-QA-007: enforce 60s wall-clock cap when ROLL_TEST_TIME_CAP=1 (CI sets this
+# for fast tier so a creeping perf regression turns the suite red immediately).
+_t_start=$(date +%s)
 if command -v parallel >/dev/null 2>&1; then
   # shellcheck disable=SC2086
   echo "$FILES" | xargs "$BATS" --jobs "$JOBS" --no-parallelize-within-files
 else
   # shellcheck disable=SC2086
   echo "$FILES" | xargs "$BATS"
+fi
+_t_end=$(date +%s)
+_t_dur=$(( _t_end - _t_start ))
+
+if [ "${ROLL_TEST_TIME_CAP:-0}" = "1" ] && [ "$TIER" = "fast" ]; then
+  _cap="${ROLL_TEST_FAST_CAP_SEC:-60}"
+  if [ "$_t_dur" -gt "$_cap" ]; then
+    echo "error: --tier=fast suite took ${_t_dur}s, exceeds ${_cap}s cap (US-QA-007)" >&2
+    echo "       move heavyweight tests to tier=slow or split them" >&2
+    exit 3
+  fi
 fi
 
 # Write proof-of-pass for pre-commit hook (US-INFRA-006).

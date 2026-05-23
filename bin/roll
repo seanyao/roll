@@ -6255,10 +6255,24 @@ _loop_mark_in_progress() {
   [ -n "$story_id" ] || return 1
   [ -f "$backlog" ] || return 0
   local tmp; tmp=$(mktemp "${backlog}.XXXXXX") || return 1
+  # FIX-106: match the story-id column (col 2) for equality instead of doing
+  # substring match on the whole row. Pre-fix, picking US-X-001 also flipped
+  # any row whose description contained "depends-on:US-X-001" — leaving the
+  # dashboard claiming work on stories no one had picked.
   awk -v sid="$story_id" '
     {
-      if (index($0, sid) > 0 && index($0, "📋 Todo") > 0) {
-        sub(/📋 Todo/, "🔨 In Progress")
+      if (index($0, "📋 Todo") > 0) {
+        n = split($0, cols, "|")
+        if (n >= 2) {
+          id_cell = cols[2]
+          gsub(/[[:space:]]/, "", id_cell)
+          # Markdown link form "[ID](path)" → keep just "ID"
+          sub(/^\[/, "", id_cell)
+          sub(/\].*$/, "", id_cell)
+          if (id_cell == sid) {
+            sub(/📋 Todo/, "🔨 In Progress")
+          }
+        }
       }
       print
     }
@@ -6274,10 +6288,20 @@ _loop_mark_todo() {
   [ -n "$story_id" ] || return 1
   [ -f "$backlog" ] || return 0
   local tmp; tmp=$(mktemp "${backlog}.XXXXXX") || return 1
+  # FIX-106: same column-2 equality match as _loop_mark_in_progress.
   awk -v sid="$story_id" '
     {
-      if (index($0, sid) > 0 && index($0, "🔨 In Progress") > 0) {
-        sub(/🔨 In Progress/, "📋 Todo")
+      if (index($0, "🔨 In Progress") > 0) {
+        n = split($0, cols, "|")
+        if (n >= 2) {
+          id_cell = cols[2]
+          gsub(/[[:space:]]/, "", id_cell)
+          sub(/^\[/, "", id_cell)
+          sub(/\].*$/, "", id_cell)
+          if (id_cell == sid) {
+            sub(/🔨 In Progress/, "📋 Todo")
+          }
+        }
       }
       print
     }

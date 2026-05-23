@@ -80,6 +80,73 @@ BACKLOG
   grep -qF '| US-X-001 | something one | 📋 Todo |' "$backlog"
 }
 
+@test "FIX-106: _loop_mark_in_progress only flips the target row, not rows that mention id in depends-on" {
+  # Reproduces the substring-matching bug: pre-FIX-106, awk index($0, sid)
+  # would match every line whose description text contains the sid as a
+  # substring, including dependent rows like "depends-on:US-X-001". Result:
+  # picking US-X-001 also flipped US-X-002 (and any other dependent) to 🔨,
+  # leaving dashboard showing assistants working on stories no one had picked.
+  local backlog="${TEST_TMP}/main/.roll/backlog.md"
+  mkdir -p "$(dirname "$backlog")"
+  cat > "$backlog" <<'BACKLOG'
+# Backlog
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| US-X-001 | leaf story does X | 📋 Todo |
+| US-X-002 | depends-on:US-X-001 build on top | 📋 Todo |
+| US-X-003 | sibling depends-on:US-X-001,US-X-002 doc | 📋 Todo |
+BACKLOG
+
+  run _loop_mark_in_progress "US-X-001" "$backlog"
+  [ "$status" -eq 0 ]
+
+  # Only US-X-001 flips:
+  grep -qF '| US-X-001 | leaf story does X | 🔨 In Progress |' "$backlog"
+  # US-X-002 / US-X-003 mention US-X-001 in their depends-on — must stay Todo:
+  grep -qF '| US-X-002 | depends-on:US-X-001 build on top | 📋 Todo |' "$backlog"
+  grep -qF '| US-X-003 | sibling depends-on:US-X-001,US-X-002 doc | 📋 Todo |' "$backlog"
+}
+
+@test "FIX-106: _loop_mark_todo only reverts the target row" {
+  local backlog="${TEST_TMP}/main/.roll/backlog.md"
+  mkdir -p "$(dirname "$backlog")"
+  cat > "$backlog" <<'BACKLOG'
+# Backlog
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| US-X-001 | leaf | 🔨 In Progress |
+| US-X-002 | depends-on:US-X-001 | 🔨 In Progress |
+BACKLOG
+
+  run _loop_mark_todo "US-X-001" "$backlog"
+  [ "$status" -eq 0 ]
+  grep -qF '| US-X-001 | leaf | 📋 Todo |' "$backlog"
+  # US-X-002 had its own 🔨 (e.g. another cycle picked it); must NOT be touched
+  grep -qF '| US-X-002 | depends-on:US-X-001 | 🔨 In Progress |' "$backlog"
+}
+
+@test "FIX-106: markdown-linked rows ([ID](path)) also match exactly" {
+  # Real backlog rows use [US-X-001](.roll/features/...) markdown links.
+  # The fix must extract the bare id from the link, not parse the literal string.
+  local backlog="${TEST_TMP}/main/.roll/backlog.md"
+  mkdir -p "$(dirname "$backlog")"
+  cat > "$backlog" <<'BACKLOG'
+# Backlog
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-X-001](.roll/features/foo.md#us-x-001) | leaf | 📋 Todo |
+| [US-X-002](.roll/features/foo.md#us-x-002) | depends-on:US-X-001 | 📋 Todo |
+BACKLOG
+
+  run _loop_mark_in_progress "US-X-001" "$backlog"
+  [ "$status" -eq 0 ]
+  grep -qF '| [US-X-001](.roll/features/foo.md#us-x-001) | leaf | 🔨 In Progress |' "$backlog"
+  grep -qF '| [US-X-002](.roll/features/foo.md#us-x-002) | depends-on:US-X-001 | 📋 Todo |' "$backlog"
+}
+
 @test "ROLL_MAIN_PROJECT default: helper finds backlog via env when path omitted" {
   local main_dir="${TEST_TMP}/repo-main"
   local backlog="${main_dir}/.roll/backlog.md"

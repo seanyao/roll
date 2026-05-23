@@ -924,14 +924,14 @@ _doctor_launchd_stale_section() {
     [[ -d "$wd" ]] && continue
     if [[ "$found" -eq 0 ]]; then
       echo ""
-      echo "Stale launchd plists  无效的 launchd 服务"
+      echo "$(msg doctor.stale_plists)"
       echo ""
       found=1
     fi
     label=$(basename "$plist" .plist)
     echo "  ⚠ ${label}"
     echo "    WorkingDirectory missing: ${wd}"
-    echo "    路径已失效，可清理: launchctl bootout gui/$(id -u)/${label}; rm '${plist}'"
+    echo "    $(msg doctor.stale_plists_cleanup): launchctl bootout gui/$(id -u)/${label}; rm '${plist}'"
   done
   return 0
 }
@@ -940,7 +940,8 @@ _doctor_pr_section() {
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
 
   echo ""
-  echo "PR review extras  PR 评审两档开关"
+  echo "$(ROLL_LANG_RESOLVED=en msg doctor.pr_review_extras)"
+  echo "$(ROLL_LANG_RESOLVED=zh msg doctor.pr_review_extras)"
   echo ""
 
   local protection_state event_state
@@ -949,24 +950,24 @@ _doctor_pr_section() {
 
   case "$protection_state" in
     enabled)
-      echo "  ✅ AI review double gate enabled  AI 评审双门已启用"
+      echo "  $(msg doctor.pr_double_gate_enabled)"
       ;;
     disabled)
-      echo "  ⚪ AI review double gate not enabled  双门未启用"
+      echo "  $(msg doctor.pr_double_gate_disabled)"
       _print_pr_pipeline_hint
       ;;
     *)
-      echo "  ⚪ AI review double gate state unknown — requires gh auth  状态未知（需要 gh auth）"
+      echo "  $(msg doctor.pr_double_gate_unknown)"
       _print_pr_pipeline_hint
       ;;
   esac
 
   case "$event_state" in
     present)
-      echo "  ✅ Event-driven PR review installed  事件驱动 PR 评审已安装"
+      echo "  $(msg doctor.pr_event_enabled)"
       ;;
     *)
-      echo "  ⚪ Event-driven PR review not installed  事件驱动 PR 评审未安装"
+      echo "  $(msg doctor.pr_event_disabled)"
       _print_pr_event_hint
       ;;
   esac
@@ -1004,21 +1005,18 @@ _doctor_event_workflow_state() {
 }
 
 _print_pr_event_hint() {
-  cat <<'HINT'
-
-  Optional — enable event-driven PR review (seconds-fast, GitHub only).
-  可选 —— 启用事件驱动 PR 评审（秒级响应，仅限 GitHub）。
-
-  Without this, Roll reviews PRs each loop cycle (~1h). With it,
-  contributors get AI feedback on PR open/update immediately.
-  不安装也行 — loop 每轮会兜底评审。安装后 PR 一开即触发 AI 评审。
-
-      cp templates/workflows/pr-review-event.yml .github/workflows/
-
-  Then set the API key secret for your configured agent in GitHub repo settings.
-  然后在 GitHub 仓库设置中添加你配置的 agent 对应的 API key secret。
-
-HINT
+  echo ""
+  echo "  $(msg doctor.pr_event_optional)"
+  echo "  $(msg doctor.pr_event_optional_zh)"
+  echo ""
+  echo "  $(msg doctor.pr_event_without)"
+  echo "  $(msg doctor.pr_event_without_zh)"
+  echo ""
+  echo "      cp templates/workflows/pr-review-event.yml .github/workflows/"
+  echo ""
+  echo "  $(msg doctor.pr_event_secret)"
+  echo "  $(msg doctor.pr_event_secret_zh)"
+  echo ""
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1035,19 +1033,19 @@ _check_installed_version_or_retry() {
   [[ -z "$expected" || -z "$installed" ]] && return 0
 
   if [[ "$installed" != "$expected" ]]; then
-    warn "Version mismatch: installed ${installed}, expected ${expected} — CDN propagation lag, clearing cache and retrying...  版本不一致（已安装 ${installed}，期望 ${expected}），疑似 CDN 未同步，清理缓存后重试..."
+    warn "$(msg update.version_mismatch "$installed" "$expected")"
     npm cache clean --force &>/dev/null || true
     npm install -g @seanyao/roll@latest &>/dev/null || true
     local after
     after="$(grep "^VERSION=" "${pkg_dir}/@seanyao/roll/bin/roll" 2>/dev/null | sed 's/VERSION="\([^"]*\)"/\1/' || true)"
     if [[ -n "$after" && "$after" != "$expected" ]]; then
-      warn "Still on ${after} after retry — registry may not have propagated yet, try again in a minute.  重试后仍为 ${after}，注册表可能尚未同步，请稍后再试。"
+      warn "$(msg update.still_mismatch "$after")"
     fi
   fi
 }
 
 cmd_update() {
-  info "Current version: roll v${VERSION}  当前版本: roll v${VERSION}"
+  info "$(msg update.current_version "$VERSION")"
   info "Upgrading via npm...  正在通过 npm 升级..."
   echo ""
 
@@ -1524,16 +1522,16 @@ _onboard_failure_hint() {
   local agent="$1" code="$2"
   echo "" >&2
   if [[ "$code" == "130" ]]; then
-    err "Onboard cancelled (Ctrl-C).  Onboard 已取消（Ctrl-C）。" >&2
+    err "$(msg init.onboard_cancelled)" >&2
   else
-    err "Agent '${agent}' exited with code ${code}.  agent '${agent}' 异常退出 (code ${code})。" >&2
+    err "$(msg init.onboard_agent_exited "$agent" "$code")" >&2
   fi
   echo "" >&2
-  echo "  下一步  Next step:" >&2
-  echo "    - 再试一次同一个 agent:  roll init" >&2
-  echo "    - retry the same agent:   roll init" >&2
-  echo "    - 换一个 agent:           ROLL_ONBOARD_AGENT=<name> roll init" >&2
-  echo "    - switch to another:      ROLL_ONBOARD_AGENT=<name> roll init" >&2
+  echo "  $(msg init.onboard_next_step)" >&2
+  echo "    - $(msg init.onboard_retry)" >&2
+  echo "    - $(msg init.onboard_retry_en)" >&2
+  echo "    - $(msg init.onboard_switch)" >&2
+  echo "    - $(msg init.onboard_switch_en)" >&2
   echo "" >&2
 }
 
@@ -1825,13 +1823,13 @@ cmd_offboard() {
   local changeset; changeset=$(_onboard_changeset_path "$project_dir")
 
   if [[ ! -f "$changeset" ]]; then
-    err "No onboard changeset found at .roll/onboard-changeset.yaml"
-    err "未找到 onboard 变更清单 .roll/onboard-changeset.yaml"
+    err "$(msg offboard.no_changeset_en)"
+    err "$(msg offboard.no_changeset_zh)"
     echo "" >&2
-    echo "  Manual offboard — remove these by hand if they came from Roll:" >&2
-    echo "    rm -rf .roll/                  # all process artefacts" >&2
-    echo "    rm -f AGENTS.md CLAUDE.md      # only if they were generated by roll init" >&2
-    echo "    Edit .gitignore to remove any '.roll/' entry" >&2
+    echo "  $(msg offboard.manual_offboard)" >&2
+    echo "    $(msg offboard.manual_rm_roll)" >&2
+    echo "    $(msg offboard.manual_rm_agents)" >&2
+    echo "    $(msg offboard.manual_edit_gitignore)" >&2
     return 1
   fi
 
@@ -8654,17 +8652,17 @@ _check_structure() {
   fi
 
   if [[ "$_has_old_path" == "true" ]] && _has_roll_signature "$root"; then
-    err "Legacy structure detected at: $root  发现老结构目录"
+    err "$(msg check_structure.detected "$root")"
     echo "" >&2
-    echo "  This project uses the pre-2.0 layout (BACKLOG.md / docs/*). Roll 2.0 requires" >&2
-    echo "  process artifacts to live in .roll/. Run the migration to upgrade:" >&2
+    echo "  $(msg check_structure.pre_2_0_layout)" >&2
+    echo "  $(msg check_structure.run_migration)" >&2
     echo "" >&2
-    echo "    roll migrate --dry-run       # Preview changes" >&2
-    echo "    roll migrate                 # Execute (single atomic commit)" >&2
+    echo "    roll migrate --dry-run       $(msg check_structure.preview_changes)" >&2
+    echo "    roll migrate                 $(msg check_structure.execute)" >&2
     echo "" >&2
-    echo "  Migration guide: ${ROLL_PKG_DIR}/guide/en/migration-2.0.md" >&2
+    echo "  $(msg check_structure.migration_guide): ${ROLL_PKG_DIR}/guide/en/migration-2.0.md" >&2
     echo "" >&2
-    echo "  To roll back to Roll 1.x temporarily:" >&2
+    echo "  $(msg check_structure.roll_back):" >&2
     echo "    npm install -g @seanyao/roll@1" >&2
     exit 1
   fi
@@ -8704,7 +8702,7 @@ main() {
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;
     *)
-      err "Unknown command: $cmd  未知命令: $cmd"
+      err "$(msg main.unknown_command "$cmd")"
       echo ""
       usage
       exit 1
@@ -8717,7 +8715,7 @@ _show_changelog() {
   local changelog="${ROLL_PKG_DIR}/CHANGELOG.md"
   [[ -f "$changelog" ]] || return 0
 
-  echo -e "${BOLD}Recent Changes  最近更新:${NC}"
+  echo -e "${BOLD}$(msg changelog.heading):${NC}"
 
   local count=0 in_section=false
   while IFS= read -r line; do
@@ -8763,7 +8761,7 @@ _notify_update() {
     return
   fi
   echo ""
-  warn "v${latest} available — run 'roll update' to upgrade  有新版本 v${latest} — 运行 'roll update' 升级"
+  warn "$(msg update.available "$latest")"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

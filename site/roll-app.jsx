@@ -2,6 +2,24 @@
           useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakSelect */
 const { useEffect } = React;
 
+// US-I18N-005: detect browser language on first visit.
+// Priority: localStorage > navigator.language > 'EN'.
+function detectLang() {
+  try {
+    const stored = localStorage.getItem('roll-lang');
+    if (stored === 'ZH' || stored === 'EN') return stored;
+  } catch (e) { /* localStorage unavailable */ }
+  if (typeof navigator !== 'undefined' && navigator.language) {
+    return navigator.language.startsWith('zh') ? 'ZH' : 'EN';
+  }
+  return 'EN';
+}
+
+// US-I18N-005: persist lang choice to localStorage.
+function persistLang(lang) {
+  try { localStorage.setItem('roll-lang', lang); } catch (e) { /* noop */ }
+}
+
 // Tweak defaults — host re-writes the JSON in-place between the markers.
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "dark",
@@ -10,6 +28,11 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "density": "regular",
   "terminalAnim": "animated"
 }/*EDITMODE-END*/;
+
+// Override lang default with detected language (only on first load).
+if (TWEAK_DEFAULTS.lang === 'EN') {
+  TWEAK_DEFAULTS.lang = detectLang();
+}
 
 const ACCENT_HUES = {
   "Electric Blue": 226,
@@ -30,6 +53,7 @@ function App() {
     document.documentElement.setAttribute("data-lang", lang);
     document.documentElement.style.setProperty("--accent-h", ACCENT_HUES[tweaks.accent] ?? 226);
     document.documentElement.lang = lang === "ZH" ? "zh-CN" : "en";
+    persistLang(lang);
   }, [tweaks.theme, tweaks.density, tweaks.accent, lang]);
 
   // Re-mount the terminal when animation mode, language or accent toggles so it replays cleanly.

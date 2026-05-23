@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Roll i18n catalog — roll-design skill user-facing strings (US-I18N-003).
+_i18n_set en design.epic "Epic: %s"
+_i18n_set zh design.epic "Epic: %s"
+_i18n_set en design.feature "Feature: %s"
+_i18n_set zh design.feature "功能: %s"
+_i18n_set en design.user_story "User Story: %s"
+_i18n_set zh design.user_story "用户故事: %s"
+_i18n_set en design.acceptance_criteria "Acceptance Criteria"
+_i18n_set zh design.acceptance_criteria "验收标准"
+_i18n_set en design.domain_model "Domain Model"
+_i18n_set zh design.domain_model "领域模型"
+_i18n_set en design.aggregates "Aggregates"
+_i18n_set zh design.aggregates "聚合"
+_i18n_set en design.context_map "Context Map"
+_i18n_set zh design.context_map "上下文映射"
+_i18n_set en design.stories_created "Created %s stories in backlog"
+_i18n_set zh design.stories_created "已在 backlog 创建 %s 个故事"

@@ -81,3 +81,34 @@ teardown() { unit_teardown_cd; }
   grep -qF 'other: keepme' .roll.yaml
   ! grep -q '^agent:' .roll.yaml
 }
+
+@test "_fallback_agent: empty when nothing configured" {
+  rm -rf .roll .roll.yaml 2>/dev/null || true
+  ROLL_CONFIG="$TEST_TMP/nonexistent.yaml"
+  local out; out=$(_fallback_agent)
+  [ -z "$out" ]
+}
+
+@test "_fallback_agent: reads from global config" {
+  rm -rf .roll .roll.yaml 2>/dev/null || true
+  mkdir -p "$(dirname "$ROLL_CONFIG")"
+  echo "fallback_agent: deepseek" > "$ROLL_CONFIG"
+  local out; out=$(_fallback_agent)
+  [ "$out" = "deepseek" ]
+}
+
+@test "_fallback_agent: prefers .roll/local.yaml over global config" {
+  mkdir -p .roll
+  echo "fallback_agent: kimi" > .roll/local.yaml
+  ROLL_CONFIG="$TEST_TMP/dummy.yaml"
+  echo "fallback_agent: deepseek" > "$ROLL_CONFIG"
+  local out; out=$(_fallback_agent)
+  [ "$out" = "kimi" ]
+}
+
+@test "_fallback_agent: falls back to .roll.yaml when local.yaml absent" {
+  rm -rf .roll 2>/dev/null || true
+  echo "fallback_agent: codex" > .roll.yaml
+  local out; out=$(_fallback_agent)
+  [ "$out" = "codex" ]
+}

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.523.2
 
 ### Added
 
@@ -20,6 +20,7 @@
 - **`model_prices.bats` 改用 fixture 价格表注入** — 之前对生产 PRICES 算术断言把调价误伤成测试红，重写后只断结构不变量（cache_read < input、out ≥ in 等）`[testing]`
 - **已合入临时分支堆在 origin 不被清理** — `_loop_cleanup_stale_cycle_branches` 漏过 agent / abort 两条路径，现在 cycle 入口先扫一遍再走主流程 `[loop]`
 - **临时目录复现 bug 时留下幽灵 launchd 服务** — 自动检测临时路径并把所有 `launchctl` 调用走 sandbox 注册表，主用户 launchd domain 不再被污染 `[launchd]`
+- **dashboard 把 story 列错显示成上一轮的 ID** — `_STORY_ID_PAT` 老正则每段只认纯字母，`US-I18N-001` 这种字母+数字混合 segment 匹配不上 → 新 `pick_todo` 被静默丢掉，仍展示前一轮的旧 story 名；正则更新为 `[A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\d+` 后 I18N / K8S / D2 / S3 等命名都能识别 `[dashboard]`
 
 ### Docs
 

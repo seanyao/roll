@@ -3223,6 +3223,105 @@ _agent_run_skill() {
 # `list` / `preview` (DECK-005). The AI authoring step happens in `new`;
 # everything else is pure bash.
 # ═══════════════════════════════════════════════════════════════════════════════
+# ─── Progress helpers (US-DECK-010) ──────────────────────────────────────────
+# Shared state for slides progress reporting.
+
+_SLIDES_PROGRESS_PHASES=()
+_SLIDES_PROGRESS_START_TIME=0
+_SLIDES_PROGRESS_CURRENT=""
+_SLIDES_PROGRESS_PHASE_START_TIME=0
+_SLIDES_PROGRESS_SPINNER_PID=""
+_SLIDES_PROGRESS_QUIET=0
+
+_slides_progress_init() {
+  _SLIDES_PROGRESS_PHASES=("$@")
+  _SLIDES_PROGRESS_START_TIME=$(date +%s)
+  _SLIDES_PROGRESS_CURRENT=""
+  _SLIDES_PROGRESS_PHASE_START_TIME=0
+  _SLIDES_PROGRESS_SPINNER_PID=""
+  _SLIDES_PROGRESS_QUIET=0
+}
+
+_slides_progress_quiet() {
+  _SLIDES_PROGRESS_QUIET=1
+}
+
+_slides_progress_elapsed_str() {
+  local elapsed="${1:-0}"
+  local min=$(( elapsed / 60 ))
+  local sec=$(( elapsed % 60 ))
+  if [[ $min -gt 0 ]]; then
+    printf '%dm %ds' "$min" "$sec"
+  else
+    printf '%ds' "$sec"
+  fi
+}
+
+_slides_progress_detect_tty() {
+  if [[ ! -t 1 ]]; then
+    _slides_progress_quiet
+  fi
+}
+
+_slides_progress_phase_enter() {
+  local phase="$1"
+  local now
+  now=$(date +%s)
+
+  # Stop any running spinner
+  if [[ -n "${_SLIDES_PROGRESS_SPINNER_PID:-}" ]]; then
+    kill "${_SLIDES_PROGRESS_SPINNER_PID}" 2>/dev/null || true
+    wait "${_SLIDES_PROGRESS_SPINNER_PID}" 2>/dev/null || true
+    _SLIDES_PROGRESS_SPINNER_PID=""
+    if [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]]; then
+      printf '\r\033[K' >&2
+    fi
+  fi
+
+  # Print previous phase completion
+  if [[ -n "$_SLIDES_PROGRESS_CURRENT" && $_SLIDES_PROGRESS_PHASE_START_TIME -gt 0 ]]; then
+    local prev_elapsed=$(( now - _SLIDES_PROGRESS_PHASE_START_TIME ))
+    local elapsed_str
+    elapsed_str=$(_slides_progress_elapsed_str "$prev_elapsed")
+    if [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]]; then
+      printf '  ✅ %s (%s)\n' "$_SLIDES_PROGRESS_CURRENT" "$elapsed_str" >&2
+    fi
+  fi
+
+  _SLIDES_PROGRESS_CURRENT="$phase"
+  _SLIDES_PROGRESS_PHASE_START_TIME="$now"
+
+  if [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]]; then
+    printf '→ %s ...\n' "$phase" >&2
+  fi
+  return 0
+}
+
+_slides_progress_spinner_start() {
+  [[ $_SLIDES_PROGRESS_QUIET -eq 1 ]] && return 0
+
+  local chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local delay=0.1
+  (
+    local i=0
+    while true; do
+      printf '\r\033[K%s %s' "${chars:$i:1}" "$_SLIDES_PROGRESS_CURRENT" >&2
+      i=$(( (i+1) % ${#chars} ))
+      sleep "$delay"
+    done
+  ) &
+  _SLIDES_PROGRESS_SPINNER_PID=$!
+}
+
+_slides_progress_ok() {
+  local phase="$1"
+  local elapsed="${2:-0}"
+  local elapsed_str
+  elapsed_str=$(_slides_progress_elapsed_str "$elapsed")
+  [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]] && printf '  ✅ %s (%s)\n' "$phase" "$elapsed_str" >&2
+}
+
+# ─── slides help ─────────────────────────────────────────────────────────────
 _slides_help() {
   cat <<'EOF'
 roll slides — deck.md → HTML rendering

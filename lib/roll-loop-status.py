@@ -373,6 +373,7 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
             persisted = ue.get("cost_list_usd")
             if persisted is not None:
                 cy["cost_list"]        = float(persisted)
+                cy["cost_currency"]    = ue.get("cost_currency") or "USD"
                 cy["cost_list_legacy"] = False
             else:
                 cy["cost_list"] = mp.compute_list_cost(
@@ -382,6 +383,7 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
                     cache_creation_tokens=ue.get("cache_creation_tokens", 0),
                     cache_read_tokens=ue.get("cache_read_tokens", 0),
                 )
+                cy["cost_currency"]    = mp.currency_for(ue.get("model")) or "USD"
                 cy["cost_list_legacy"] = True
             if ue.get("duration_ms") and not cy.get("duration_s"):
                 cy["duration_s"] = int(ue["duration_ms"] / 1000)
@@ -404,6 +406,7 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
             cache_creation_tokens=u["cache_creation_tokens"],
             cache_read_tokens=u["cache_read_tokens"],
         )
+        cy["cost_currency"]    = mp.currency_for(u["model"]) or "USD"
         # US-VIEW-014: session salvage never has a frozen cycle_end cost, so
         # this path is always legacy.
         cy["cost_list_legacy"] = True

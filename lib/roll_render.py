@@ -313,10 +313,13 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
         tok = f"{fmt_tokens(inp)}/{fmt_tokens(out_tok)}"
     # cost prefers the backfilled list-price; falls back to cron.log when
     # the claude session log isn't available (only the latest cycle).
+    # FIX-116: use the model's native currency symbol.
+    cur = cy.get("cost_currency", "USD")
+    symbol = "¥" if cur == "CNY" else "$"
     if cy.get("cost_list") is not None:
-        cost = f"${cy['cost_list']:.2f}"
+        cost = f"{symbol}{cy['cost_list']:.2f}"
     elif cr:
-        cost = f"${cr.get('cost', 0):.2f}"
+        cost = f"{symbol}{cr.get('cost', 0):.2f}"
     else:
         cost = "—"
     sid = cy.get("story") or "—"

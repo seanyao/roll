@@ -153,7 +153,11 @@ def load_backlog(project_root: Optional[Path] = None) -> Dict[str, str]:
 # ════════════════════════════════════════════════════════════════════════════
 # Cycle aggregation — group events by cycle label; attach cron + story id
 # ════════════════════════════════════════════════════════════════════════════
-_STORY_ID_PAT = re.compile(r"\b([A-Z]+(?:-[A-Z]+)*-\d+)\b")
+# FIX-108: each segment was [A-Z]+ (letters only), so alphanumeric segments
+# like I18N / K8S / D2 / S3 / 2FA failed to match — dashboard silently dropped
+# any story id with a mixed-letter-digit segment (US-I18N-001 etc.). First
+# char must still be a letter so "001-002" doesn't false-positive as an id.
+_STORY_ID_PAT = re.compile(r"\b([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\d+)\b")
 _PR_NUM_PAT = re.compile(r"/pull/(\d+)")
 
 def _extract_story_id(ev_detail: str) -> Optional[str]:

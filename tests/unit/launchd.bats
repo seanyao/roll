@@ -105,11 +105,14 @@ setup() {
 }
 
 @test "_write_launchd_plist: creates valid plist XML" {
+  # FIX-105: pre-fix this called with hour="1" and asserted StartCalendarInterval.
+  # Post-fix daily schedules use StartInterval=86400 instead. Use the hourly
+  # path (empty hour) here so this test still exercises the calendar path.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
   local runner="${tmp_dir}/run.sh"
 
-  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "0" "1" "$runner"
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "0" "" "$runner"
 
   [ -f "$plist" ]
   grep -q "com.roll.loop.test" "$plist"
@@ -308,7 +311,13 @@ setup() {
   rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
-@test "_install_launchd_plists: same project loop/dream/brief minutes all differ" {
+@test "_install_launchd_plists: loop uses Minute schedule, dream/brief use StartInterval (FIX-105)" {
+  # Pre-FIX-105 this test asserted three different Minute values across loop/
+  # dream/brief plists (so they wouldn't collide at the same wall-clock minute).
+  # Post-FIX-105 daily schedules switched to StartInterval=86400; dream and
+  # brief don't have <Minute> at all. Loop still has Minute (hourly). The new
+  # invariant is "loop has Minute, dream/brief have StartInterval, no overlap
+  # in schedule key type."
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
@@ -317,13 +326,25 @@ setup() {
 
   _install_launchd_plists "$proj"
 
-  local lm dm bm
-  lm=$(grep -A1 "<key>Minute</key>" "$(_launchd_plist_path "loop" "$proj")" | grep -o "[0-9]*" | head -1)
-  dm=$(grep -A1 "<key>Minute</key>" "$(_launchd_plist_path "dream" "$proj")" | grep -o "[0-9]*" | head -1)
-  bm=$(grep -A1 "<key>Minute</key>" "$(_launchd_plist_path "brief" "$proj")" | grep -o "[0-9]*" | head -1)
-  [ "$lm" != "$dm" ]
-  [ "$lm" != "$bm" ]
-  [ "$dm" != "$bm" ]
+  local loop_p dream_p brief_p
+  loop_p=$(_launchd_plist_path "loop" "$proj")
+  dream_p=$(_launchd_plist_path "dream" "$proj")
+  brief_p=$(_launchd_plist_path "brief" "$proj")
+
+  # Loop: StartCalendarInterval with Minute (hourly), no Hour key.
+  grep -q "<key>StartCalendarInterval</key>" "$loop_p"
+  grep -q "<key>Minute</key>" "$loop_p"
+  ! grep -q "<key>Hour</key>" "$loop_p"
+
+  # Dream + brief: StartInterval=86400, no calendar interval.
+  grep -q "<key>StartInterval</key>" "$dream_p"
+  grep -A1 "<key>StartInterval</key>" "$dream_p" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$dream_p"
+
+  grep -q "<key>StartInterval</key>" "$brief_p"
+  grep -A1 "<key>StartInterval</key>" "$brief_p" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$brief_p"
+
   rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
@@ -358,7 +379,9 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: dream plist fires at hour 3" {
+@test "_install_launchd_plists: dream plist uses StartInterval=86400 (FIX-105)" {
+  # FIX-105: macOS 26.4 launchd silently refuses StartCalendarInterval with
+  # both Hour and Minute. Daily schedules switched to StartInterval=86400.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -368,12 +391,14 @@ setup() {
   _install_launchd_plists "$proj"
 
   local dream_plist; dream_plist=$(_launchd_plist_path "dream" "$proj")
-  grep -q "<key>Hour</key>" "$dream_plist"
-  grep -A1 "<key>Hour</key>" "$dream_plist" | grep -q "<integer>3</integer>"
+  grep -q "<key>StartInterval</key>" "$dream_plist"
+  grep -A1 "<key>StartInterval</key>" "$dream_plist" | grep -q "<integer>86400</integer>"
+  # The broken combo (Hour + Minute) must not be present.
+  ! grep -q "<key>Hour</key>" "$dream_plist"
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: brief plist fires at hour 9" {
+@test "_install_launchd_plists: brief plist uses StartInterval=86400 (FIX-105)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -383,8 +408,31 @@ setup() {
   _install_launchd_plists "$proj"
 
   local brief_plist; brief_plist=$(_launchd_plist_path "brief" "$proj")
-  grep -q "<key>Hour</key>" "$brief_plist"
-  grep -A1 "<key>Hour</key>" "$brief_plist" | grep -q "<integer>9</integer>"
+  grep -q "<key>StartInterval</key>" "$brief_plist"
+  grep -A1 "<key>StartInterval</key>" "$brief_plist" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>Hour</key>" "$brief_plist"
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_launchd_plist: daily schedule (hour set) emits StartInterval, not StartCalendarInterval (FIX-105)" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local plist="${tmp_dir}/test.plist"
+  _write_launchd_plist "$plist" "com.roll.dream.test" "/tmp/proj" "22" "9" "${tmp_dir}/run.sh"
+  grep -q "<key>StartInterval</key>" "$plist"
+  grep -A1 "<key>StartInterval</key>" "$plist" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$plist"
+  ! grep -q "<key>Hour</key>" "$plist"
+  rm -rf "$tmp_dir"
+}
+
+@test "_write_launchd_plist: hourly schedule (hour empty) still uses StartCalendarInterval (FIX-105)" {
+  # Hourly schedule (loop) keeps StartCalendarInterval since single-Minute form
+  # fires correctly on macOS 26.4 — the bug only affects Hour+Minute combos.
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local plist="${tmp_dir}/test.plist"
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "18" "" "${tmp_dir}/run.sh"
+  grep -q "<key>StartCalendarInterval</key>" "$plist"
+  ! grep -q "<key>StartInterval</key>" "$plist"
   rm -rf "$tmp_dir"
 }
 

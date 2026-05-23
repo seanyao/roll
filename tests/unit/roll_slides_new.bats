@@ -220,6 +220,19 @@ _seed_min_project() {
   [[ "$output" == *"下一步"* ]]
 }
 
+@test "cmd_slides new --quiet: suppresses progress output but keeps Next hint" {
+  _pin_claude_agent
+  _stub_claude
+  _seed_min_project
+  run cmd_slides new --quiet "Introducing Roll Loop"
+  [ "$status" -eq 0 ]
+  # Progress arrows should NOT appear
+  [[ "$output" != *'→ launching'* ]]
+  [[ "$output" != *'→ generating'* ]]
+  # Next hint should still appear
+  [[ "$output" == *"roll slides build introducing-roll-loop"* ]]
+}
+
 # ─── Agent resolution failure ────────────────────────────────────────────────
 
 @test "cmd_slides new: unknown agent in .roll/local.yaml → friendly error + non-zero exit" {

@@ -3225,6 +3225,115 @@ _agent_run_skill() {
 # `list` / `preview` (DECK-005). The AI authoring step happens in `new`;
 # everything else is pure bash.
 # ═══════════════════════════════════════════════════════════════════════════════
+# ─── Progress helpers (US-DECK-010) ──────────────────────────────────────────
+# Shared state for slides progress reporting.
+
+_SLIDES_PROGRESS_PHASES=()
+_SLIDES_PROGRESS_START_TIME=0
+_SLIDES_PROGRESS_CURRENT=""
+_SLIDES_PROGRESS_PHASE_START_TIME=0
+_SLIDES_PROGRESS_SPINNER_PID=""
+_SLIDES_PROGRESS_QUIET=0
+
+_slides_progress_init() {
+  _SLIDES_PROGRESS_PHASES=("$@")
+  _SLIDES_PROGRESS_START_TIME=$(date +%s)
+  _SLIDES_PROGRESS_CURRENT=""
+  _SLIDES_PROGRESS_PHASE_START_TIME=0
+  _SLIDES_PROGRESS_SPINNER_PID=""
+  _SLIDES_PROGRESS_QUIET=0
+}
+
+_slides_progress_quiet() {
+  _SLIDES_PROGRESS_QUIET=1
+}
+
+_slides_progress_elapsed_str() {
+  local elapsed="${1:-0}"
+  local min=$(( elapsed / 60 ))
+  local sec=$(( elapsed % 60 ))
+  if [[ $min -gt 0 ]]; then
+    printf '%dm %ds' "$min" "$sec"
+  else
+    printf '%ds' "$sec"
+  fi
+}
+
+_slides_progress_detect_tty() {
+  if [[ ! -t 1 ]]; then
+    _slides_progress_quiet
+  fi
+}
+
+_slides_progress_phase_enter() {
+  local phase="$1"
+  local now
+  now=$(date +%s)
+
+  # Stop any running spinner
+  if [[ -n "${_SLIDES_PROGRESS_SPINNER_PID:-}" ]]; then
+    kill "${_SLIDES_PROGRESS_SPINNER_PID}" 2>/dev/null || true
+    wait "${_SLIDES_PROGRESS_SPINNER_PID}" 2>/dev/null || true
+    _SLIDES_PROGRESS_SPINNER_PID=""
+    if [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]]; then
+      printf '\r\033[K' >&2
+    fi
+  fi
+
+  # Print previous phase completion
+  if [[ -n "$_SLIDES_PROGRESS_CURRENT" && $_SLIDES_PROGRESS_PHASE_START_TIME -gt 0 ]]; then
+    local prev_elapsed=$(( now - _SLIDES_PROGRESS_PHASE_START_TIME ))
+    local elapsed_str
+    elapsed_str=$(_slides_progress_elapsed_str "$prev_elapsed")
+    if [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]]; then
+      printf '  ✅ %s (%s)\n' "$_SLIDES_PROGRESS_CURRENT" "$elapsed_str" >&2
+    fi
+  fi
+
+  _SLIDES_PROGRESS_CURRENT="$phase"
+  _SLIDES_PROGRESS_PHASE_START_TIME="$now"
+
+  if [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]]; then
+    printf '→ %s ...\n' "$phase" >&2
+  fi
+  return 0
+}
+
+_slides_progress_spinner_start() {
+  [[ $_SLIDES_PROGRESS_QUIET -eq 1 ]] && return 0
+
+  local chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local delay=0.1
+  local label_file="${TEST_TMP:-/tmp}/roll-slides-spinner-label-$$"
+  printf '%s' "$_SLIDES_PROGRESS_CURRENT" > "$label_file"
+  (
+    local i=0
+    while true; do
+      local label
+      label=$(cat "$label_file" 2>/dev/null || echo "$_SLIDES_PROGRESS_CURRENT")
+      printf '\r\033[K%s %s' "${chars:$i:1}" "$label" >&2
+      i=$(( (i+1) % ${#chars} ))
+      sleep "$delay"
+    done
+  ) &
+  _SLIDES_PROGRESS_SPINNER_PID=$!
+}
+
+_slides_progress_spinner_label() {
+  local label="$1"
+  local label_file="${TEST_TMP:-/tmp}/roll-slides-spinner-label-$$"
+  printf '%s' "$label" > "$label_file"
+}
+
+_slides_progress_ok() {
+  local phase="$1"
+  local elapsed="${2:-0}"
+  local elapsed_str
+  elapsed_str=$(_slides_progress_elapsed_str "$elapsed")
+  [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]] && printf '  ✅ %s (%s)\n' "$phase" "$elapsed_str" >&2
+}
+
+# ─── slides help ─────────────────────────────────────────────────────────────
 _slides_help() {
   cat <<'EOF'
 roll slides — deck.md → HTML rendering
@@ -3562,13 +3671,14 @@ _slides_topic_slug() {
 # `.roll/slides/<slug>/deck.md` (and nothing else). After the agent exits,
 # we print a bilingual hint pointing at `roll slides build <slug>`.
 cmd_slides_new() {
-  local topic="" template="introduction-v3" no_build=0
+  local topic="" template="introduction-v3" quiet=0 no_build=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --template)
         [[ -n "${2:-}" ]] || { err "--template requires a value  --template 需要一个值"; return 1; }
         template="$2"; shift 2 ;;
       --template=*) template="${1#--template=}"; shift ;;
+      --quiet) quiet=1; shift ;;
       --no-build) no_build=1; shift ;;
       --help|-h) _slides_help; return 0 ;;
       --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
@@ -3583,8 +3693,8 @@ cmd_slides_new() {
   done
 
   if [[ -z "$topic" ]]; then
-    err "Usage: roll slides new \"<topic>\" [--template <name>]"
-    echo "  用法：roll slides new \"<主题>\" [--template <模板名>]" >&2
+    err "Usage: roll slides new \"<topic>\" [--template <name>] [--quiet] [--no-build]"
+    echo "  用法：roll slides new \"<主题>\" [--template <模板名>] [--quiet] [--no-build]" >&2
     return 1
   fi
 
@@ -3595,14 +3705,26 @@ cmd_slides_new() {
     return 1
   fi
 
+  # Progress: init with 5 phases, detect quiet mode
+  _slides_progress_init launching generating validating rendering opening
+  _slides_progress_detect_tty
+  if [[ "$quiet" -eq 1 ]]; then
+    _slides_progress_quiet
+  fi
+
+  # Ctrl-C trap: stop spinner and clean cursor
+  trap '_slides_progress_phase_enter "cancelled" 2>/dev/null; exit 130' INT TERM
+
+  # Phase: launching
+  _slides_progress_phase_enter "launching"
+
   local skill_file="${ROLL_PKG_DIR}/skills/roll-deck/SKILL.md"
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill_file}"; return 1; }
   local skill_body; skill_body=$(_skill_content "$skill_file")
 
   local agent; agent=$(_project_agent)
 
-  # Compose the full prompt: skill body + concrete task context. The agent
-  # reads the skill, then sees the topic / slug / template it must use.
+  # Compose the full prompt
   local prompt
   prompt="$(cat <<EOF
 ${skill_body}
@@ -3624,39 +3746,85 @@ EOF
 
   _agent_argv "$agent" text "$prompt" || {
     err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
+    trap - INT TERM
     return 1
   }
 
-  info "Launching ${agent} with roll-deck skill for topic: ${topic}"
-  info "启动 ${agent} 处理主题：${topic}"
-  "${_AGENT_ARGV[@]}"
+  # Phase: generating — launch agent in background + spinner + file-watch
+  _slides_progress_phase_enter "generating"
+
+  local deck_file=".roll/slides/${slug}/deck.md"
+  local deck_dir; deck_dir="$(dirname "$deck_file")"
+  mkdir -p "$deck_dir"
+
+  # Start spinner
+  _slides_progress_spinner_start
+
+  # Launch agent in background
+  "${_AGENT_ARGV[@]}" &
+  local agent_pid=$!
+
+  # File-watch: poll deck.md for ## Slide N count and update spinner label
+  local slide_count=0 last_slide_count=-1
+  while kill -0 "$agent_pid" 2>/dev/null; do
+    if [[ -f "$deck_file" ]]; then
+      slide_count=$(grep -c '^## Slide ' "$deck_file" 2>/dev/null || echo 0)
+      if [[ "$slide_count" != "$last_slide_count" ]]; then
+        last_slide_count="$slide_count"
+        if [[ "$slide_count" -gt 0 ]]; then
+          _slides_progress_spinner_label "generating slide ${slide_count}/18"
+        fi
+      fi
+    fi
+    sleep 1
+  done
+
+  # Agent finished — stop spinner
+  if [[ -n "${_SLIDES_PROGRESS_SPINNER_PID:-}" ]]; then
+    kill "${_SLIDES_PROGRESS_SPINNER_PID}" 2>/dev/null || true
+    wait "${_SLIDES_PROGRESS_SPINNER_PID}" 2>/dev/null || true
+    _SLIDES_PROGRESS_SPINNER_PID=""
+    [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]] && printf '\r\033[K' >&2
+  fi
+
+  wait "$agent_pid"
   local rc=$?
 
-  if [[ "$no_build" -eq 1 ]]; then
-    echo
-    echo "Next:  roll slides build ${slug}"
-    echo "下一步：roll slides build ${slug}"
-    return "$rc"
+  # Phase: validating
+  _slides_progress_phase_enter "validating"
+
+  # If deck.md exists, validate it
+  if [[ -f "$deck_file" ]]; then
+    local lib_dir; lib_dir=$(_slides_lib)
+    if python3 "${lib_dir}/slides-validate.py" "$deck_file" >/dev/null 2>&1; then
+      : # validation passed
+    else
+      [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]] && printf '  ⚠️ validation warnings (build may surface details)\n' >&2
+    fi
   fi
 
-  # US-DECK-009: auto-build after agent completes.
+  # Phase: rendering + opening (unless --no-build)
+  if [[ "$no_build" -eq 0 ]] && [[ -f "$deck_file" ]]; then
+    _slides_progress_phase_enter "rendering"
+    cmd_slides_build "$slug" --no-open
+    local build_rc=$?
+
+    if [[ $build_rc -eq 0 ]]; then
+      _slides_progress_phase_enter "opening"
+      local opener
+      if opener=$(_slides_open_cmd); then
+        "$opener" ".roll/slides/${slug}.html" >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+
+  trap - INT TERM
+
+  # Print Next hint (unless --quiet flag was explicitly passed)
   echo
-  info "Agent done — auto-building deck: ${slug}"
-  info "Agent 结束 — 自动渲染 deck：${slug}"
+  echo "Next:  roll slides build ${slug}"
+  echo "下一步：roll slides build ${slug}"
 
-  local build_rc=0
-  cmd_slides_build "$slug" || build_rc=$?
-
-  if [[ "$build_rc" -ne 0 ]]; then
-    echo >&2
-    err "Auto-build failed for ${slug} — deck.md preserved."
-    echo "  auto-build 失败 — deck.md 已保留。" >&2
-    echo "  See: roll slides logs ${slug}" >&2
-    echo "  查看：roll slides logs ${slug}" >&2
-    return "$build_rc"
-  fi
-
-  # Build succeeded — cmd_slides_build already printed "Opened in browser".
   return "$rc"
 }
 

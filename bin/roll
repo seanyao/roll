@@ -4755,6 +4755,18 @@ for _orphan_wt in "\${_SHARED_ROOT}/worktrees/${slug}-cycle-"*; do
   [ -d "\${_orphan_wt}/.git" ] || [ -f "\${_orphan_wt}/.git" ] || continue
   _orphan_branch=\$(cd "\$_orphan_wt" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   [ -z "\$_orphan_branch" ] && continue
+  # FIX-114: PR for this branch may already be squash-merged externally. In
+  # that case origin/main..HEAD still shows commits (squash created new SHA)
+  # so the old "needs republish" path tries to recreate the PR and fails.
+  # Ask gh first; if MERGED → drop the worktree clean.
+  if command -v gh >/dev/null 2>&1; then
+    _orphan_pr_state=\$(gh pr view "\$_orphan_branch" --json state -q .state 2>/dev/null || echo "")
+    if [ "\$_orphan_pr_state" = "MERGED" ]; then
+      echo "[loop] FIX-114: orphan worktree \$_orphan_wt branch \$_orphan_branch already merged remotely; cleaning up"
+      _worktree_cleanup "\$_orphan_wt" "\$_orphan_branch"
+      continue
+    fi
+  fi
   _orphan_commits=\$(cd "\$_orphan_wt" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
   if [ "\$_orphan_commits" -gt 0 ]; then
     echo "[loop] FIX-040: recovering orphan worktree \$_orphan_wt (branch \$_orphan_branch, \${_orphan_commits} commits)"

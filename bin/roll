@@ -6308,8 +6308,13 @@ _loop_check_depends_on() {
 }
 
 # _loop_is_manual_only <story-id> [backlog-path]
-#   Exit 0: story's own row carries `manual-only:true`.
+#   Exit 0: story's own row carries any manual-only:<value> tag.
 #   Exit 1: tag absent, story-id not found, or backlog missing.
+#
+# FIX-109: loop used to accept only the literal `manual-only:true` value;
+# anything else (e.g. `manual-only:roll-meta`, `manual-only:sean-yao`) was
+# ignored and the story got picked. Now any non-empty `manual-only:<value>`
+# qualifies — lets users tag rows reserved for a specific human or scope.
 _loop_is_manual_only() {
   local id="$1"
   local backlog="${2:-.roll/backlog.md}"
@@ -6320,7 +6325,7 @@ _loop_is_manual_only() {
   row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
   [ -n "$row" ] || return 1
 
-  echo "$row" | grep -qE 'manual-only:true'
+  echo "$row" | grep -qE 'manual-only:[A-Za-z0-9_.-]+'
 }
 
 # US-AUTO-034: PR-first inbox — loop processes open PRs before scanning BACKLOG.

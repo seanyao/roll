@@ -4186,8 +4186,39 @@ _loop_event() {
   esac
   mkdir -p "$(dirname "$evfile")"
 
-  # stdout: tab-separated for tmux display
-  printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$stage" "$label" "$detail" "$outcome"
+  # US-LOOP-007: human-friendly stdout for phase_* stages so tmux readers
+  # spot phase boundaries amid claude output. Other stages keep the legacy
+  # tab-separated format (consumers like tests grep on it).
+  case "$stage" in
+    phase_start)
+      local _emoji
+      case "$label" in
+        startup) _emoji="🚀" ;;
+        preflight) _emoji="🔍" ;;
+        worktree_setup) _emoji="🌳" ;;
+        claude_invoke) _emoji="🤖" ;;
+        publish_push) _emoji="📤" ;;
+        publish_wait_merge) _emoji="⏳" ;;
+        cleanup) _emoji="🧹" ;;
+        *) _emoji="▶" ;;
+      esac
+      printf '%s %-22s ─────────\n' "$_emoji" "$label"
+      ;;
+    phase_tick)
+      printf '   ⏱  %-20s ───── %s\n' "$label" "$detail"
+      ;;
+    phase_end)
+      local _mark
+      case "$outcome" in
+        fail) _mark="✗" ;;
+        *) _mark="✓" ;;
+      esac
+      printf '   %s %-20s ───── %s\n' "$_mark" "$label" "$detail"
+      ;;
+    *)
+      printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$stage" "$label" "$detail" "$outcome"
+      ;;
+  esac
 
   # JSON line appended to NDJSON file. FIX-067: drop the flock/lockf guard.
   # POSIX requires write() ≤ PIPE_BUF (≥512 bytes, 4 KiB on Linux/macOS) to
@@ -4422,9 +4453,47 @@ fi
 printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$INNER_LOCK"
 # FIX-038: background heartbeat writer — outer script uses this as primary liveness signal
 # to detect stale execution without relying on PID reuse heuristics.
+# US-LOOP-007: heartbeat also emits phase_tick for the current phase so tmux
+# readers see "still alive in <phase>" during long-running silences (e.g.
+# claude_invoke 5-45 min). CURRENT_PHASE is maintained by _phase_begin/_phase_end.
 HEARTBEAT_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
+CURRENT_PHASE=""
+# bash 3.2 (macOS /bin/bash) lacks associative arrays — use namespaced
+# variables via 'printf -v' + indirect '\${!VAR}' expansion instead.
+# _PHASE_START_<name>  stores the unix-second start ts per phase
+# _PHASE_DUR_<name>    stores the computed duration in seconds per phase
+# _PHASE_NAMES_DONE    space-separated list of completed phase names, in order
+_PHASE_NAMES_DONE=""
+_phase_begin() {
+  local _name="\$1"
+  printf -v "_PHASE_START_\${_name}" '%s' "\$(date +%s)"
+  CURRENT_PHASE="\$_name"
+  _loop_event phase_start "\$_name" "" "" || true
+}
+_phase_end() {
+  local _name="\$1" _outcome="\${2:-ok}"
+  local _start_var="_PHASE_START_\${_name}"
+  local _start="\${!_start_var:-\$(date +%s)}"
+  local _dur=\$(( \$(date +%s) - _start ))
+  [ "\$_dur" -lt 0 ] && _dur=0
+  printf -v "_PHASE_DUR_\${_name}" '%s' "\$_dur"
+  case " \$_PHASE_NAMES_DONE " in *" \$_name "*) ;; *) _PHASE_NAMES_DONE="\${_PHASE_NAMES_DONE} \$_name" ;; esac
+  CURRENT_PHASE=""
+  _loop_event phase_end "\$_name" "\${_dur}s" "\$_outcome" || true
+}
 _heartbeat_writer() {
-  while true; do echo "\$(date -u +%s)" > "\$HEARTBEAT_FILE"; sleep 60; done
+  while true; do
+    echo "\$(date -u +%s)" > "\$HEARTBEAT_FILE"
+    if [ -n "\$CURRENT_PHASE" ]; then
+      local _start_var="_PHASE_START_\${CURRENT_PHASE}"
+      local _phase_start="\${!_start_var:-}"
+      if [ -n "\$_phase_start" ]; then
+        local _el=\$(( \$(date +%s) - _phase_start ))
+        _loop_event phase_tick "\$CURRENT_PHASE" "\${_el}s elapsed" "" 2>/dev/null || true
+      fi
+    fi
+    sleep 60
+  done
 }
 _heartbeat_writer &
 _HEARTBEAT_PID=\$!
@@ -4475,6 +4544,12 @@ _runs_append() {
 }
 _inner_cleanup() {
   local _rc=\$?
+  # US-LOOP-007: close any CURRENT_PHASE that wasn't ended explicitly
+  # (sigterm / set -e fire / aborted exit paths). Marks as fail so the
+  # breakdown panel shows where we died.
+  if [ -n "\${CURRENT_PHASE:-}" ]; then
+    _phase_end "\$CURRENT_PHASE" fail 2>/dev/null || true
+  fi
   # Kill heartbeat + every remaining background job (watchdog, orphan
   # loop-fmt.py, publish subshells) — bash's foreground 'wait' for the
   # pipe has already returned by the time the EXIT trap runs.
@@ -4595,6 +4670,11 @@ CYCLE_START=\$(date +%s)
 WT="\$(_worktree_path "${slug}" "cycle-\${CYCLE_ID}")"
 BRANCH="loop/cycle-\${CYCLE_ID}"
 _USE_WORKTREE=0
+# US-LOOP-007: startup phase covers env / lock / heartbeat setup. End it now
+# that cycle vars are bound and we're about to do real work.
+_phase_begin startup
+_phase_end startup ok
+_phase_begin preflight
 cd "${project_path}" 2>/dev/null || true
 # FIX-104: GC stale merged temp branches at cycle entry — before worktree setup
 # and before any early-exit gate (pre-run abort, CI red precheck). The post-claude
@@ -4637,6 +4717,8 @@ done
 # US-AUTO-038: snapshot orphan claude/* branches before claude runs so the
 # post-claude cleanup can diff and delete only this session's additions.
 CLAUDE_BRANCH_SNAPSHOT="\$(_claude_remote_snapshot "${project_path}")"
+_phase_end preflight ok
+_phase_begin worktree_setup
 if _worktree_fetch_origin main \\
    && _worktree_create "\$WT" "\$BRANCH" "origin/main"; then
   _USE_WORKTREE=1
@@ -4648,12 +4730,14 @@ if _worktree_fetch_origin main \\
   _worktree_sync_meta "\$WT" 2>/dev/null || true
   echo "[loop] cycle \${CYCLE_ID}: worktree \$WT on \$BRANCH"
   _loop_event cycle_start "\${CYCLE_ID}" "" "" || true
+  _phase_end worktree_setup ok
 else
   # P3 fix: skip the cycle entirely when worktree isolation fails.
   # --dangerously-skip-permissions is only safe paired with worktree isolation;
   # falling back to the main tree without isolation is unacceptable.
   _worktree_alert "cycle \${CYCLE_ID}: worktree setup failed — skipping cycle to avoid running without isolation"
   echo "[loop] cycle \${CYCLE_ID}: worktree setup failed; skipping cycle (no isolation)"
+  _phase_end worktree_setup fail
   # US-LOOP-005 T10: worktree-setup-failed path leaves no commits and never
   # emits cycle_start, but dashboard still needs a runs.jsonl row marking the
   # cycle as failed (otherwise the scheduled tick appears to have vanished).
@@ -4669,6 +4753,7 @@ FMT="${fmt_script}"
 export LOOP_PROJECT_SLUG="${slug}"
 export LOOP_CYCLE_ID="\${CYCLE_ID}"
 export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
+_phase_begin claude_invoke
 for _attempt in 1 2 3; do
   # FIX-068: defensive reset before each attempt — _CYCLE_TIMED_OUT carries
   # the SIGTERM result of the previous attempt and would otherwise force an
@@ -4705,6 +4790,12 @@ for _attempt in 1 2 3; do
     sleep 30
   fi
 done
+
+if [ "\$_CYCLE_TIMED_OUT" -eq 1 ] || [ "\$_exit" -ne 0 ]; then
+  _phase_end claude_invoke fail
+else
+  _phase_end claude_invoke ok
+fi
 
 # FIX-057: timed out — skip publish; EXIT trap writes cycle_end blocked + ALERT.
 if [ "\$_CYCLE_TIMED_OUT" -eq 1 ]; then
@@ -4754,6 +4845,7 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
     else
       _is_doc_only=0
       ( cd "\$WT" && _loop_is_doc_only_change ) && _is_doc_only=1
+      _phase_begin publish_push
       if [ "\$_is_doc_only" -eq 1 ]; then
         ( cd "\$WT" && _loop_publish_doc_pr "\$BRANCH" "doc: loop cycle \${CYCLE_ID}" )
       else
@@ -4761,18 +4853,25 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       fi
       _publish_status=\$?
       if [ "\$_publish_status" -eq 0 ]; then
+        _phase_end publish_push ok
         # FIX-047: CI green ≠ delivered — wait for actual PR merge before cycle complete
         if [ "\$_is_doc_only" -eq 0 ]; then
+          _phase_begin publish_wait_merge
           if ! ( cd "\$WT" && _loop_wait_pr_merge "\$BRANCH" ); then
             _worktree_alert "cycle \${CYCLE_ID}: FIX-047: PR not merged within timeout — code may not be in main (BRANCH=\${BRANCH})"
+            _phase_end publish_wait_merge fail
+          else
+            _phase_end publish_wait_merge ok
           fi
         fi
+        _phase_begin cleanup
         # US-VIEW-011: emit terminal PR state (merged/closed/open) before cycle_end
         # so dashboard renders #NN ✓/↩/… correctly. Must run while branch ref
         # is still resolvable on remote — gh pr view <branch> needs the head ref.
         _loop_emit_pr_final "\$BRANCH" 2>/dev/null || true
         _worktree_cleanup "\$WT" "\$BRANCH"
         _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true; _CYCLE_END_WRITTEN=1
+        _phase_end cleanup ok
         echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
       elif [ "\$_publish_status" -eq 2 ]; then
         if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
@@ -6973,6 +7072,9 @@ _loop_wait_pr_merge() {
   local elapsed=0
   local slug; _gh_resolve slug || return 0
   while (( elapsed < timeout )); do
+    # US-LOOP-007: emit phase_tick at the top of each poll iteration so the
+    # tmux reader sees "still waiting" every 30s during merge wait.
+    (( elapsed > 0 )) && _loop_event phase_tick publish_wait_merge "${elapsed}s elapsed" "" 2>/dev/null || true
     local state; state=$(gh -R "$slug" pr view "$branch" --json state -q .state 2>/dev/null || echo "UNKNOWN")
     case "$state" in
       MERGED) return 0 ;;

@@ -361,18 +361,24 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
             cy["cache_creation_tokens"] = int(ue.get("cache_creation_tokens") or 0)
             cy["cache_read_tokens"]     = int(ue.get("cache_read_tokens")     or 0)
             cy["model"] = ue.get("model")
-            # US-VIEW-010: aggregate now sums per-turn usage tokens, so the
-            # totals in `ue` reflect the whole cycle. Always compute cost at
-            # list price for cross-account comparability — supersedes FIX-060
-            # which preferred cost_reported_usd as a workaround for
-            # last-event-only token counts (that root cause is now gone).
-            cy["cost_list"] = mp.compute_list_cost(
-                ue.get("model"),
-                input_tokens=ue.get("input_tokens", 0),
-                output_tokens=ue.get("output_tokens", 0),
-                cache_creation_tokens=ue.get("cache_creation_tokens", 0),
-                cache_read_tokens=ue.get("cache_read_tokens", 0),
-            )
+            # US-VIEW-014: prefer the cost frozen at cycle_end so a later
+            # prices refresh never rewrites a historical cycle's cost. Only
+            # legacy events (pre-US-VIEW-014) fall back to recomputing — and
+            # the row gets a muted [legacy] tag so it can't be mistaken for
+            # the authoritative value.
+            persisted = ue.get("cost_list_usd")
+            if persisted is not None:
+                cy["cost_list"]        = float(persisted)
+                cy["cost_list_legacy"] = False
+            else:
+                cy["cost_list"] = mp.compute_list_cost(
+                    ue.get("model"),
+                    input_tokens=ue.get("input_tokens", 0),
+                    output_tokens=ue.get("output_tokens", 0),
+                    cache_creation_tokens=ue.get("cache_creation_tokens", 0),
+                    cache_read_tokens=ue.get("cache_read_tokens", 0),
+                )
+                cy["cost_list_legacy"] = True
             if ue.get("duration_ms") and not cy.get("duration_s"):
                 cy["duration_s"] = int(ue["duration_ms"] / 1000)
             continue
@@ -394,6 +400,9 @@ def backfill_usage_from_claude_sessions(cycles: List[Dict[str, Any]], slug: str)
             cache_creation_tokens=u["cache_creation_tokens"],
             cache_read_tokens=u["cache_read_tokens"],
         )
+        # US-VIEW-014: session salvage never has a frozen cycle_end cost, so
+        # this path is always legacy.
+        cy["cost_list_legacy"] = True
         if u.get("duration_ms") and not cy.get("duration_s"):
             cy["duration_s"] = int(u["duration_ms"] / 1000)
 

@@ -111,3 +111,19 @@ msg() {
   printf "$tmpl" "$@"
   echo
 }
+
+# ── Load per-command message catalogs (US-I18N-002) ──
+# Source all lib/i18n/*.sh files (skip self). Called once at bin/roll startup.
+_i18n_load_catalogs() {
+  local i18n_dir
+  i18n_dir="$(dirname "${BASH_SOURCE[0]:-$0}")/i18n"
+  if [[ -d "$i18n_dir" ]]; then
+    local f
+    for f in "$i18n_dir"/*.sh; do
+      [[ -f "$f" ]] || continue
+      # shellcheck source=/dev/null
+      source "$f"
+    done
+  fi
+}
+_i18n_load_catalogs

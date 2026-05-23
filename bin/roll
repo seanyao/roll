@@ -8538,17 +8538,17 @@ _check_structure() {
   fi
 
   if [[ "$_has_old_path" == "true" ]] && _has_roll_signature "$root"; then
-    err "Legacy structure detected at: $root  发现老结构目录"
+    err "$(msg check_structure.detected "$root")"
     echo "" >&2
-    echo "  This project uses the pre-2.0 layout (BACKLOG.md / docs/*). Roll 2.0 requires" >&2
-    echo "  process artifacts to live in .roll/. Run the migration to upgrade:" >&2
+    echo "  $(msg check_structure.pre_2_0_layout)" >&2
+    echo "  $(msg check_structure.run_migration)" >&2
     echo "" >&2
-    echo "    roll migrate --dry-run       # Preview changes" >&2
-    echo "    roll migrate                 # Execute (single atomic commit)" >&2
+    echo "    roll migrate --dry-run       $(msg check_structure.preview_changes)" >&2
+    echo "    roll migrate                 $(msg check_structure.execute)" >&2
     echo "" >&2
-    echo "  Migration guide: ${ROLL_PKG_DIR}/guide/en/migration-2.0.md" >&2
+    echo "  $(msg check_structure.migration_guide): ${ROLL_PKG_DIR}/guide/en/migration-2.0.md" >&2
     echo "" >&2
-    echo "  To roll back to Roll 1.x temporarily:" >&2
+    echo "  $(msg check_structure.roll_back):" >&2
     echo "    npm install -g @seanyao/roll@1" >&2
     exit 1
   fi
@@ -8588,7 +8588,7 @@ main() {
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;
     *)
-      err "Unknown command: $cmd  未知命令: $cmd"
+      err "$(msg main.unknown_command "$cmd")"
       echo ""
       usage
       exit 1
@@ -8601,7 +8601,7 @@ _show_changelog() {
   local changelog="${ROLL_PKG_DIR}/CHANGELOG.md"
   [[ -f "$changelog" ]] || return 0
 
-  echo -e "${BOLD}Recent Changes  最近更新:${NC}"
+  echo -e "${BOLD}$(msg changelog.heading):${NC}"
 
   local count=0 in_section=false
   while IFS= read -r line; do
@@ -8647,7 +8647,7 @@ _notify_update() {
     return
   fi
   echo ""
-  warn "v${latest} available — run 'roll update' to upgrade  有新版本 v${latest} — 运行 'roll update' 升级"
+  warn "$(msg update.available "$latest")"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

@@ -346,11 +346,11 @@ class LoopFmt:
 
     @staticmethod
     def _price_at_snapshot(model, totals):
-        """Resolve (cost_list_usd, prices_version) from the active price snapshot.
+        """Resolve (cost_list, currency, prices_version) from the active price snapshot.
 
-        Returns (None, None) when model_prices isn't loadable or the snapshot
+        Returns (None, None, None) when model_prices isn't loadable or the snapshot
         has no usable prices — callers still emit the event so token data and
-        duration aren't lost. When tokens are all zero, cost_list_usd is None.
+        duration aren't lost. When tokens are all zero, cost_list is None.
         """
         try:
             import importlib.util
@@ -361,11 +361,11 @@ class LoopFmt:
             mp = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mp)
         except Exception:
-            return None, None
+            return None, None, None
         prices_version = getattr(mp, "VERSION", None)
         has_tokens = any(int(totals.get(k) or 0) > 0 for k in totals)
         if not has_tokens:
-            return None, prices_version
+            return None, None, prices_version
         try:
             cost = mp.compute_list_cost(
                 model,
@@ -374,9 +374,10 @@ class LoopFmt:
                 cache_creation_tokens=int(totals.get("cache_creation_tokens") or 0),
                 cache_read_tokens=int(totals.get("cache_read_tokens") or 0),
             )
+            currency = mp.currency_for(model) if model else "USD"
         except Exception:
-            return None, prices_version
-        return float(cost), prices_version
+            return None, None, prices_version
+        return float(cost), currency, prices_version
 
     def _emit_usage_event(self, result_ev, dur_ms, cost_usd):
         slug    = os.environ.get("LOOP_PROJECT_SLUG")
@@ -405,7 +406,9 @@ class LoopFmt:
         # later prices refresh (or roll upgrade) never rewrites history. The
         # dashboard reads cost_list_usd first; only legacy events without it
         # fall back to recomputing and get tagged [legacy].
-        cost_list_usd, prices_version = self._price_at_snapshot(
+        # FIX-116: also capture cost_currency so the dashboard shows the
+        # correct currency symbol (e.g. $ for USD, ¥ for CNY).
+        cost_list_usd, cost_currency, prices_version = self._price_at_snapshot(
             model if has_model else None,
             self._usage_totals,
         )
@@ -419,6 +422,7 @@ class LoopFmt:
             "cost_reported_usd":     float(cost_usd) if has_cost else None,
             "duration_ms":           int(dur_ms) if has_dur else None,
             "cost_list_usd":         cost_list_usd,
+            "cost_currency":         cost_currency,
             "prices_version":        prices_version,
         }
         evfile = os.path.join(shared, "loop", f"events-{slug}.ndjson")

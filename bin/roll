@@ -3636,14 +3636,15 @@ EOF
   return "$rc"
 }
 
-# ─── cmd_prices (US-VIEW-013) ─────────────────────────────────────────────────
+# ─── cmd_prices (US-VIEW-013 / FIX-116) ───────────────────────────────────────
 # `roll prices show`     — print the current price snapshot table.
 # `roll prices refresh`  — fetch live pricing docs, diff vs latest snapshot,
 #                          write a new snapshot when rates have changed.
+# FIX-116: --vendor flag for multi-vendor support.
 _prices_help() {
   cat <<'EOF'
-Usage: roll prices <subcommand> [--url URL]
-      roll prices <子命令> [--url 网址]
+Usage: roll prices <subcommand> [--url URL] [--vendor VENDOR]
+      roll prices <子命令> [--url 网址] [--vendor 厂商]
 
 Subcommands:
   show     Print the current price snapshot table.
@@ -3651,6 +3652,10 @@ Subcommands:
   refresh  Fetch the official pricing docs, diff against the latest snapshot,
            and write a new snapshot only when rates have changed.
            拉取官方价格文档与最新快照对比，有变化才落新快照。
+
+Options:
+  --vendor anthropic|deepseek|kimi  Target vendor for refresh (default: anthropic).
+                                    指定拉取价格的厂商（默认：anthropic）。
 EOF
 }
 
@@ -3666,36 +3671,60 @@ version, effective_at, source_url = mp.snapshot_meta()
 print(f"price snapshot  价格快照")
 print(f"  version        {version}")
 print(f"  effective_at   {effective_at}")
-print(f"  source         {source_url}")
-print(f"  default_model  {mp.DEFAULT}")
+print(f"  snapshots      {len(mp._SNAPSHOTS)} loaded  已加载")
+for snap in mp._SNAPSHOTS:
+    v = snap.get("vendor", "—")
+    c = snap.get("currency", "—")
+    print(f"    {v:<12} {c:>4}  {snap['source_url']}")
 print()
-print(f"  {'model':<22}{'in':>8}{'out':>8}{'cw':>8}{'cr':>8}")
+print(f"  {'model':<24}{'cur':>4}{'in':>10}{'out':>10}{'cw':>10}{'cr':>10}")
 for model in sorted(mp.PRICES):
     p = mp.PRICES[model]
-    print(f"  {model:<22}{p['in']:>8.2f}{p['out']:>8.2f}{p['cache_create']:>8.2f}{p['cache_read']:>8.2f}")
+    cur = mp.currency_for(model)
+    print(f"  {model:<24}{cur:>4}{p['in']:>10.4f}{p['out']:>10.4f}{p['cache_create']:>10.4f}{p['cache_read']:>10.4f}")
 print()
-print("rates per million tokens, USD  单位为每百万 token 美元")
+print("rates per million tokens  每百万 token 单价")
 PY
 }
 
 cmd_prices_refresh() {
   local url=""
+  local vendor=""
   while (( $# > 0 )); do
     case "$1" in
       --url) url="$2"; shift 2 ;;
+      --vendor) vendor="$2"; shift 2 ;;
       *)     err "Unknown flag: $1  未知参数: $1"; return 1 ;;
     esac
   done
   local lib_dir="${ROLL_PKG_DIR}/lib"
-  python3 - "$lib_dir" "$url" <<'PY'
+  python3 - "$lib_dir" "$url" "$vendor" <<'PY'
 import os, sys
 lib_dir = sys.argv[1]
 override_url = sys.argv[2] if len(sys.argv) > 2 else ""
+vendor = sys.argv[3] if len(sys.argv) > 3 else ""
 sys.path.insert(0, lib_dir)
 import prices_fetcher as pf
 
 snapshot_dir = os.path.join(lib_dir, "prices")
-url = override_url or pf.DEFAULT_SOURCE_URL
+
+# FIX-116: vendor-specific default URLs.
+VENDOR_URLS = {
+    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "deepseek":  "https://api-docs.deepseek.com/quick_start/pricing",
+    "kimi":      "https://platform.kimi.com/docs/pricing/chat",
+}
+
+if vendor:
+    default_url = VENDOR_URLS.get(vendor)
+    if not default_url:
+        print(f"[roll] unknown vendor: {vendor}  未知厂商", file=sys.stderr)
+        print(f"[roll] known vendors: {', '.join(sorted(VENDOR_URLS))}  已知厂商", file=sys.stderr)
+        sys.exit(1)
+    url = override_url or default_url
+    pf.DEFAULT_SOURCE_URL = url
+else:
+    url = override_url or pf.DEFAULT_SOURCE_URL
 
 try:
     action, changes = pf.refresh(snapshot_dir=snapshot_dir, url=url)

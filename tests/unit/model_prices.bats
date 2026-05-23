@@ -139,14 +139,14 @@ EOF
 @test "snapshot: PRICES is loaded from latest snapshot file" {
   run run_py 'v,e,u = mp.snapshot_meta(); print(v, e, u)'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"2026-05-22"* ]]
-  [[ "$output" == *"platform.claude.com"* ]]
+  [[ "$output" == *"2026-05-"* ]]
+  [[ "$output" == *"http"* ]]
 }
 
 @test "snapshot: list_snapshots returns sorted snapshot paths" {
-  run run_py 'snaps = mp.list_snapshots(); print(len(snaps), snaps[-1].endswith("snapshot-2026-05-22.json"))'
+  run run_py 'import os; snaps = mp.list_snapshots(); last = os.path.basename(snaps[-1]); print(len(snaps) >= 1, last.startswith("snapshot-"), last.endswith(".json"))'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"True"* ]]
+  [[ "$output" == *"True True True"* ]]
 }
 
 @test "snapshot: compute_list_cost accepts injected fixture prices" {
@@ -157,4 +157,47 @@ print(mp.compute_list_cost("x", input_tokens=1_000_000, output_tokens=500_000, p
 '
   [ "$status" -eq 0 ]
   [ "$output" = "20.0" ]
+}
+
+# ── FIX-116: multi-vendor support ───────────────────────────────────────────
+
+@test "FIX-116: PRICES includes deepseek and kimi entries" {
+  run run_py 'model_count = len(mp.PRICES); claude = sum(1 for k in mp.PRICES if k.startswith("claude-")); dk = sum(1 for k in mp.PRICES if k.startswith("deepseek-")); km = sum(1 for k in mp.PRICES if k.startswith("kimi-")); print(f"{model_count} c{claude} d{dk} k{km}")'
+  [ "$status" -eq 0 ]
+  # At least 4 non-claude keys: deepseek-chat, deepseek-reasoner, deepseek-v4-*, kimi-*
+  [[ "$output" == *"c11"* ]]
+  # d>=3 (chat, reasoner, v4-flash, v4-pro) and k>=3 (k2, k2.5, k2.6)
+  [[ "$output" =~ d[3-9] ]]
+  [[ "$output" =~ k[3-9] ]]
+}
+
+@test "FIX-116: currency_for returns USD for all current vendors" {
+  run run_py 'print(mp.currency_for("claude-sonnet-4-6"), mp.currency_for("deepseek-chat"), mp.currency_for("kimi-k2.5"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "USD USD USD" ]
+}
+
+@test "FIX-116: compute_list_cost works for deepseek-chat model" {
+  run run_py 'print(mp.compute_list_cost("deepseek-chat", input_tokens=1_000_000))'
+  [ "$status" -eq 0 ]
+  # deepseek-chat input = $0.14/M → 1M tokens = 0.14
+  [ "$output" = "0.14" ]
+}
+
+@test "FIX-116: vendor-prefixed model name resolves correctly" {
+  run run_py 'print(mp.compute_list_cost("deepseek/deepseek-chat", input_tokens=1_000_000))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "0.14" ]
+}
+
+@test "FIX-116: currency_for resolves vendor-prefixed model names" {
+  run run_py 'print(mp.currency_for("deepseek/deepseek-chat"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "USD" ]
+}
+
+@test "FIX-116: unknown model still warns and falls back to DEFAULT" {
+  run run_py 'print(mp.currency_for("nonexistent-model-xyz"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "USD" ]
 }

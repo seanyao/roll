@@ -3725,6 +3725,37 @@ cmd_prices() {
   esac
 }
 
+# FIX-113: changelog audit — list PRs merged to main since latest release
+# tag that don't appear in CHANGELOG.md's ## Unreleased section.
+cmd_changelog() {
+  local subcmd="${1:-audit}"
+  shift || true
+  case "$subcmd" in
+    audit)
+      python3 "${ROLL_PKG_DIR}/lib/changelog_audit.py" "$@"
+      ;;
+    --help|-h|help)
+      cat <<EOF
+Usage: roll changelog audit [--since <tag>] [--json]
+                                                                  发版前体检
+Scan PRs merged to main since latest v* tag; flag ones that look user-visible
+(carry US-/FIX-/REFACTOR- id) but are missing from CHANGELOG.md '## Unreleased'.
+
+Read-only — never edits CHANGELOG. Use to catch drift before release.
+
+  roll changelog audit                # check against latest v* tag
+  roll changelog audit --since v2026.520.1
+  roll changelog audit --json         # machine-readable
+EOF
+      ;;
+    *)
+      err "Unknown subcommand: ${subcmd}  未知子命令：${subcmd}"
+      err "Try: roll changelog audit"
+      return 1
+      ;;
+  esac
+}
+
 cmd_slides() {
   local subcmd="${1:-}"
   shift || true
@@ -8552,6 +8583,7 @@ main() {
     review-pr)     cmd_review_pr "$@" ;;
     slides)        cmd_slides "$@" ;;
     prices)        cmd_prices "$@" ;;
+    changelog)     cmd_changelog "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

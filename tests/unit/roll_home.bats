@@ -62,3 +62,62 @@ _run_fixture() {
   body=$(awk '/^_home\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
   [[ "$body" == *"_legacy_home"* ]]
 }
+
+@test "FIX-117: _resolve_project_agent prefers .roll/local.yaml agent over config primary_agent" {
+  local tmp; tmp=$(mktemp -d)
+  cd "$tmp"
+  mkdir -p .roll
+  echo "agent: pi" > .roll/local.yaml
+  run python3 -c "
+import sys, importlib.util
+spec = importlib.util.spec_from_file_location('rh', '${LIB}/roll-home.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._resolve_project_agent({'primary_agent': 'claude'}))
+"
+  cd - >/dev/null
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pi" ]
+}
+
+@test "FIX-117: _resolve_project_agent falls back to config primary_agent when no project file" {
+  local tmp; tmp=$(mktemp -d)
+  cd "$tmp"
+  run python3 -c "
+import sys, importlib.util
+spec = importlib.util.spec_from_file_location('rh', '${LIB}/roll-home.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._resolve_project_agent({'primary_agent': 'kimi'}))
+"
+  cd - >/dev/null
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" = "kimi" ]
+}
+
+@test "FIX-117: _resolve_project_agent defaults to claude when nothing set" {
+  local tmp; tmp=$(mktemp -d)
+  cd "$tmp"
+  run python3 -c "
+import sys, importlib.util
+spec = importlib.util.spec_from_file_location('rh', '${LIB}/roll-home.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._resolve_project_agent({}))
+"
+  cd - >/dev/null
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" = "claude" ]
+}
+
+@test "FIX-117: home banner reads project agent override" {
+  local tmp; tmp=$(mktemp -d)
+  cd "$tmp"
+  mkdir -p .roll
+  echo "agent: pi" > .roll/local.yaml
+  run python3 "${LIB}/roll-home.py" --no-color
+  cd - >/dev/null
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"agent pi"* ]]
+}

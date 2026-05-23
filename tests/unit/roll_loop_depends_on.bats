@@ -104,6 +104,30 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "FIX-109: _loop_is_manual_only accepts non-'true' values (manual-only:roll-meta)" {
+  local tmp; tmp=$(mktemp)
+  cat > "$tmp" <<'BL'
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-WATCH-001](features/upstream-watch.md#us-watch-001) | private maintainer task `manual-only:roll-meta` | 📋 Todo |
+BL
+  run _loop_is_manual_only "US-WATCH-001" "$tmp"
+  rm -f "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "FIX-109: _loop_is_manual_only accepts arbitrary tag value (manual-only:sean-yao)" {
+  local tmp; tmp=$(mktemp)
+  cat > "$tmp" <<'BL'
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-FOO-001](features/foo.md#us-foo-001) | claimed by human `manual-only:sean-yao` | 📋 Todo |
+BL
+  run _loop_is_manual_only "US-FOO-001" "$tmp"
+  rm -f "$tmp"
+  [ "$status" -eq 0 ]
+}
+
 @test "_loop_is_manual_only: row without manual-only tag returns 1" {
   run _loop_is_manual_only "US-AUTO-033" "$_backlog"
   [ "$status" -eq 1 ]

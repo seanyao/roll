@@ -47,9 +47,10 @@ roll loop test        # Quick smoke test: verify tmux/popup/stream chain works
 roll loop status      # Show scheduler state and current loop state
 roll loop monitor     # Live dashboard: launchd status, queue, recent runs
 
-roll loop runs        # Show last 10 run summaries (story IDs, TCR count, duration)
+roll loop runs        # Show last 10 run summaries (story IDs, TCR count, duration, slowest phase)
 roll loop runs 20     # Show last 20 runs
 roll loop runs --all  # Show all projects' run history
+roll loop runs --detail <cycle_id>  # Phase Breakdown panel for a single cycle
 
 roll loop attach      # Attach to running loop tmux session (Ctrl-B D to detach)
 roll loop mute        # Suppress auto-attach popup (loop still runs in tmux)
@@ -201,6 +202,49 @@ At the end of every cycle, loop automatically prunes stale local worktrees:
 This keeps `git worktree list` clean and prevents `.claude/worktrees/` from
 accumulating old entries over time. Active worktrees (branches ahead of `main`)
 are left untouched.
+
+## Cycle phases
+
+Every cycle is sliced into seven named phases. Each phase emits a `phase_start`
+event when entered and a `phase_end` event with duration + outcome when it
+exits. Long-silent phases (claude, PR-merge wait) emit a `phase_tick` heartbeat
+so the tmux viewer never looks frozen.
+
+| # | Phase | When it runs | Typical duration |
+|---|-------|--------------|------------------|
+| 1 | `startup` | env / lock / heartbeat setup | < 1 s |
+| 2 | `preflight` | stale-branch GC + orphan-worktree recovery | 0 s — 30 s |
+| 3 | `worktree_setup` | fetch origin + worktree create + meta sync | 2 – 10 s |
+| 4 | `claude_invoke` | Claude executes with up to 3 retries | 5 – 45 min |
+| 5 | `publish_push` | push branch + open PR (or doc-only merge) | 5 – 30 s |
+| 6 | `publish_wait_merge` | poll until PR is MERGED (skipped for doc-only) | 0 – 10 min |
+| 7 | `cleanup` | emit PR final state + worktree teardown | < 1 s |
+
+Idle / failed / aborted cycles only emit the phases they actually entered.
+At cycle exit, the inner runner prints a phase breakdown panel sorted by
+duration descending, e.g.:
+
+```
+─── Cycle 20260523-114502-12345 Phase Breakdown ───
+  claude_invoke           723s  ( 96.2%)  ████████████████████
+  publish_wait_merge       19s  (  2.5%)  █
+  worktree_setup            4s  (  0.5%)
+  publish_push              2s  (  0.3%)
+  preflight                 2s  (  0.3%)
+  cleanup                   1s  (  0.1%)
+  startup                   1s  (  0.1%)
+  ──────────────────────────────────────
+  Total                   752s
+```
+
+Each phase duration is also persisted to `runs.jsonl` in a new top-level
+`phases` object (see [State Files](#state-files) below). `roll loop runs`
+appends `slowest=<phase> <pct>%` to each built row so you can see which step
+dominated without opening the cycle. For the full breakdown, use:
+
+```bash
+roll loop runs --detail 20260523-114502-12345
+```
 
 ## State Files
 

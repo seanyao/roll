@@ -424,11 +424,43 @@ conversation until the next cycle overwrites it.
 |---|---|
 | Last N cycle summaries + cost | `roll loop status --days 7` |
 | Per-cycle JSONL records | `roll loop runs` |
+| Phase breakdown for one cycle | `roll loop runs --detail <cycle_id>` |
 | Live dashboard with cost column | `roll loop monitor` |
 | Watch the agent in real time | `roll loop attach` |
 | Human-readable daily summary | `roll brief` |
 | Alerts that need attention | `roll alert` |
 | Full agent transcript | `roll loop attach`, scroll up |
+
+---
+
+### C6. A cycle says phase X took forever — how do I find what slowed it down?
+
+**Symptoms:** `roll loop runs` shows `slowest=claude 96%` on a 45-minute cycle,
+or `slowest=pr-wait 80%` on one that seemed to finish quickly. You want to
+know which step ate the time before deciding whether to tune anything.
+
+**Why this matters:** Every cycle is sliced into seven named phases
+(`startup` / `preflight` / `worktree_setup` / `claude_invoke` / `publish_push` /
+`publish_wait_merge` / `cleanup`). The top-line duration alone hides which
+one dominated.
+
+**What to do:**
+
+1. Grab the cycle id from the `roll loop runs` row (or from `runs.jsonl`).
+2. Print the full breakdown with `roll loop runs --detail <cycle_id>` — phases
+   are sorted descending with seconds, percentage, and a bar chart.
+3. Common patterns:
+   - `claude_invoke` dominating → expected for a multi-file story; nothing
+     to tune unless you can split the story.
+   - `publish_wait_merge` > 5 min → CI is slow or auto-merge is gated on a
+     missing review; check the PR directly.
+   - `worktree_setup` > 30 s → likely a slow `git fetch origin`; transient
+     network issue.
+   - `preflight` > 30 s → previous cycles left orphan worktrees; loop is
+     recovering them. Self-heals on next cycle.
+
+The phase tracing data also lives in `runs.jsonl` under the `phases` key
+(per-phase seconds), so you can post-process across many cycles.
 
 ---
 

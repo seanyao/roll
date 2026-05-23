@@ -76,6 +76,22 @@ def _load_config() -> Dict[str, str]:
             return d
     return {}
 
+
+def _resolve_project_agent(config: Dict[str, str]) -> str:
+    """FIX-117: home banner agent label must honor project-level override
+    in `.roll/local.yaml` (set by `roll agent use`), not just the global
+    `~/.roll/config.yaml#primary_agent`. Mirror bin/roll _project_agent
+    precedence: local.yaml > .roll.yaml > config.primary_agent > 'claude'."""
+    for path in (
+        Path(".roll/local.yaml"),
+        Path(".roll.yaml"),
+    ):
+        if path.exists():
+            local = _load_yaml_flat(path)
+            if local.get("agent"):
+                return local["agent"]
+    return config.get("primary_agent") or "claude"
+
 def _git_info() -> Tuple[str, str]:
     try:
         branch = subprocess.check_output(
@@ -482,7 +498,7 @@ def main() -> None:
         d = dict(
             project_name   = os.path.basename(os.getcwd()),
             version        = _roll_version(),
-            agent          = config.get("primary_agent") or "claude",
+            agent          = _resolve_project_agent(config),
             git_branch     = bra,
             git_status     = gs,
             timestamp      = datetime.now().strftime("%H:%M"),

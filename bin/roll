@@ -21,6 +21,10 @@ SCRIPT_DIR="$(cd "$(dirname "$_source")" && pwd)"
 ROLL_PKG_DIR="$(dirname "$SCRIPT_DIR")"
 ROLL_PKG_CONVENTIONS="${ROLL_PKG_DIR}/conventions"
 
+# US-I18N-001: i18n engine (locale resolution + message catalog).
+# shellcheck source=../lib/i18n.sh
+[[ -f "${ROLL_PKG_DIR}/lib/i18n.sh" ]] && source "${ROLL_PKG_DIR}/lib/i18n.sh"
+
 # Colors
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -7671,6 +7675,57 @@ cmd_alert() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# LANG — switch / inspect Roll's UI language (US-I18N-001)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_lang() {
+  local arg="${1:-}"
+
+  case "$arg" in
+    "")
+      unset ROLL_LANG_RESOLVED
+      local current src
+      current=$(_i18n_resolve_lang)
+      if [[ -n "${ROLL_LANG:-}" ]]; then
+        src="ROLL_LANG env"
+      elif [[ -f "$ROLL_CONFIG" ]] && grep -qE '^lang:' "$ROLL_CONFIG"; then
+        src="config (${ROLL_CONFIG})"
+      elif [[ -n "${LC_ALL:-}" || -n "${LANG:-}" ]]; then
+        src="LC_ALL/LANG"
+      else
+        src="default"
+      fi
+      echo "current: ${current}, source: ${src}"
+      ;;
+    zh|en)
+      mkdir -p "$(dirname "$ROLL_CONFIG")"
+      [[ -f "$ROLL_CONFIG" ]] || : > "$ROLL_CONFIG"
+      local tmp; tmp=$(mktemp)
+      grep -vE '^lang:' "$ROLL_CONFIG" > "$tmp" || true
+      printf 'lang: %s\n' "$arg" >> "$tmp"
+      mv "$tmp" "$ROLL_CONFIG"
+      unset ROLL_LANG_RESOLVED
+      ok "Language set to ${arg}  语言已设置为 ${arg}"
+      ;;
+    --reset)
+      if [[ -f "$ROLL_CONFIG" ]]; then
+        local tmp; tmp=$(mktemp)
+        grep -vE '^lang:' "$ROLL_CONFIG" > "$tmp" || true
+        mv "$tmp" "$ROLL_CONFIG"
+      fi
+      unset ROLL_LANG_RESOLVED
+      ok "Language preference cleared (will follow locale)  语言偏好已清除（跟随系统 locale）"
+      ;;
+    *)
+      err "Unknown language: ${arg}  未知语言: ${arg}"
+      echo "  Valid values: zh, en, --reset"
+      echo "  可选值: zh, en, --reset"
+      return 1
+      ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_ci() {
   local wait_mode=false
@@ -8464,6 +8519,7 @@ main() {
     brief)         cmd_brief "$@" ;;
     backlog)       cmd_backlog "$@" ;;
     alert)         cmd_alert "$@" ;;
+    lang)          cmd_lang "$@" ;;
     agent)         cmd_agent "$@" ;;
     ci)            cmd_ci "$@" ;;
     doctor)        cmd_doctor "$@" ;;

@@ -37,3 +37,33 @@ print(m._extract_story_id(sys.argv[1]) or '')
   [ "$status" -eq 0 ]
   [ "$output" = "VIEW-011" ]
 }
+
+@test "FIX-108: _extract_story_id accepts alphanumeric segment US-I18N-001" {
+  run extract "US-I18N-001"
+  [ "$status" -eq 0 ]
+  [ "$output" = "US-I18N-001" ]
+}
+
+@test "FIX-108: _extract_story_id accepts alphanumeric segment US-K8S-007" {
+  run extract "US-K8S-007"
+  [ "$status" -eq 0 ]
+  [ "$output" = "US-K8S-007" ]
+}
+
+@test "FIX-108: _extract_story_id accepts short alphanumeric segment US-D2-042" {
+  run extract "US-D2-042"
+  [ "$status" -eq 0 ]
+  [ "$output" = "US-D2-042" ]
+}
+
+@test "FIX-108: _extract_story_id finds US-I18N-001 inside surrounding text" {
+  run extract "loop picked US-I18N-001 from backlog"
+  [ "$status" -eq 0 ]
+  [ "$output" = "US-I18N-001" ]
+}
+
+@test "FIX-108: _extract_story_id does NOT match pure-digit pattern 001-002" {
+  run extract "001-002"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

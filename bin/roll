@@ -3620,6 +3620,107 @@ EOF
   return "$rc"
 }
 
+# ─── cmd_prices (US-VIEW-013) ─────────────────────────────────────────────────
+# `roll prices show`     — print the current price snapshot table.
+# `roll prices refresh`  — fetch live pricing docs, diff vs latest snapshot,
+#                          write a new snapshot when rates have changed.
+_prices_help() {
+  cat <<'EOF'
+Usage: roll prices <subcommand> [--url URL]
+      roll prices <子命令> [--url 网址]
+
+Subcommands:
+  show     Print the current price snapshot table.
+           显示当前价格快照表。
+  refresh  Fetch the official pricing docs, diff against the latest snapshot,
+           and write a new snapshot only when rates have changed.
+           拉取官方价格文档与最新快照对比，有变化才落新快照。
+EOF
+}
+
+cmd_prices_show() {
+  local lib_dir="${ROLL_PKG_DIR}/lib"
+  python3 - "$lib_dir" <<'PY'
+import json, os, sys
+lib_dir = sys.argv[1]
+sys.path.insert(0, lib_dir)
+import model_prices as mp
+
+version, effective_at, source_url = mp.snapshot_meta()
+print(f"price snapshot  价格快照")
+print(f"  version        {version}")
+print(f"  effective_at   {effective_at}")
+print(f"  source         {source_url}")
+print(f"  default_model  {mp.DEFAULT}")
+print()
+print(f"  {'model':<22}{'in':>8}{'out':>8}{'cw':>8}{'cr':>8}")
+for model in sorted(mp.PRICES):
+    p = mp.PRICES[model]
+    print(f"  {model:<22}{p['in']:>8.2f}{p['out']:>8.2f}{p['cache_create']:>8.2f}{p['cache_read']:>8.2f}")
+print()
+print("rates per million tokens, USD  单位为每百万 token 美元")
+PY
+}
+
+cmd_prices_refresh() {
+  local url=""
+  while (( $# > 0 )); do
+    case "$1" in
+      --url) url="$2"; shift 2 ;;
+      *)     err "Unknown flag: $1  未知参数: $1"; return 1 ;;
+    esac
+  done
+  local lib_dir="${ROLL_PKG_DIR}/lib"
+  python3 - "$lib_dir" "$url" <<'PY'
+import os, sys
+lib_dir = sys.argv[1]
+override_url = sys.argv[2] if len(sys.argv) > 2 else ""
+sys.path.insert(0, lib_dir)
+import prices_fetcher as pf
+
+snapshot_dir = os.path.join(lib_dir, "prices")
+url = override_url or pf.DEFAULT_SOURCE_URL
+
+try:
+    action, changes = pf.refresh(snapshot_dir=snapshot_dir, url=url)
+except pf.FetchError as exc:
+    print(f"[roll] fetch failed: {exc}", file=sys.stderr)
+    print("[roll] keeping existing snapshot, no changes written  保留旧快照，未写入新文件",
+          file=sys.stderr)
+    sys.exit(2)
+except pf.ParseError as exc:
+    print(f"[roll] parse failed: {exc}", file=sys.stderr)
+    print("[roll] keeping existing snapshot, no changes written  保留旧快照，未写入新文件",
+          file=sys.stderr)
+    sys.exit(3)
+
+kind, _, _ = (action + "::").split(":", 2)
+if action == "unchanged":
+    print("[roll] up to date  价格快照已是最新")
+    sys.exit(0)
+if kind == "first":
+    print(f"[roll] baseline snapshot written  写入首份基线快照")
+elif kind == "written":
+    print(f"[roll] new snapshot written  写入新版价格快照")
+print(pf.format_diff(changes, colored=sys.stdout.isatty()))
+PY
+}
+
+cmd_prices() {
+  local subcmd="${1:-}"
+  shift || true
+  case "$subcmd" in
+    show)              cmd_prices_show "$@" ;;
+    refresh)           cmd_prices_refresh "$@" ;;
+    --help|-h|help|"") _prices_help ;;
+    *)
+      err "Unknown subcommand: ${subcmd}  未知子命令：${subcmd}"
+      _prices_help >&2
+      return 1
+      ;;
+  esac
+}
+
 cmd_slides() {
   local subcmd="${1:-}"
   shift || true
@@ -8122,6 +8223,7 @@ main() {
     doctor)        cmd_doctor "$@" ;;
     review-pr)     cmd_review_pr "$@" ;;
     slides)        cmd_slides "$@" ;;
+    prices)        cmd_prices "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

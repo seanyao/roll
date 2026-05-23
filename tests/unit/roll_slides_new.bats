@@ -7,7 +7,10 @@
 #   - Resolves the selected agent via _project_agent().
 #   - Invokes the agent (claude / kimi / codex / ...) with the roll-deck
 #     SKILL.md content + topic + slug + template as a single text prompt.
-#   - After the agent exits, prints a bilingual "next: roll slides build <slug>"
+#   - After the agent exits, auto-builds the deck (US-DECK-009). Pass
+#     --no-build to skip the build step (used in agent-wiring tests below
+#     so the stub agent doesn't need to create deck.md).
+#   - With --no-build, prints a bilingual "next: roll slides build <slug>"
 #     hint so the user can render the deck.
 #
 # Tests stub the chosen agent on PATH and inspect the captured argv +
@@ -131,7 +134,7 @@ _seed_min_project() {
   _pin_claude_agent
   _stub_claude
   _seed_min_project
-  run cmd_slides new "Introducing Roll Loop"
+  run cmd_slides new --no-build "Introducing Roll Loop"
   [ "$status" -eq 0 ]
   [ -s "${TEST_TMP}/claude.log" ]
   # claude was called with `-p` and `--output-format text` (text mode argv).
@@ -143,7 +146,7 @@ _seed_min_project() {
   _pin_claude_agent
   _stub_claude
   _seed_min_project
-  run cmd_slides new "Introducing Roll Loop"
+  run cmd_slides new --no-build "Introducing Roll Loop"
   [ "$status" -eq 0 ]
   grep -q "Introducing Roll Loop" "${TEST_TMP}/claude.log"
 }
@@ -152,7 +155,7 @@ _seed_min_project() {
   _pin_claude_agent
   _stub_claude
   _seed_min_project
-  run cmd_slides new "Introducing Roll Loop"
+  run cmd_slides new --no-build "Introducing Roll Loop"
   [ "$status" -eq 0 ]
   # Skill body marker — pick a stable, distinctive phrase from SKILL.md.
   grep -q "roll-deck" "${TEST_TMP}/claude.log"
@@ -163,7 +166,7 @@ _seed_min_project() {
   _pin_claude_agent
   _stub_claude
   _seed_min_project
-  run cmd_slides new "Introducing Roll Loop"
+  run cmd_slides new --no-build "Introducing Roll Loop"
   [ "$status" -eq 0 ]
   # "Introducing Roll Loop" → "introducing-roll-loop"
   grep -q "introducing-roll-loop" "${TEST_TMP}/claude.log"
@@ -173,7 +176,7 @@ _seed_min_project() {
   _pin_claude_agent
   _stub_claude
   _seed_min_project
-  run cmd_slides new "Introducing Roll Loop"
+  run cmd_slides new --no-build "Introducing Roll Loop"
   [ "$status" -eq 0 ]
   grep -q "introduction-v3" "${TEST_TMP}/claude.log"
 }
@@ -182,7 +185,7 @@ _seed_min_project() {
   _pin_claude_agent
   _stub_claude
   _seed_min_project
-  run cmd_slides new "Some Topic" --template custom-v1
+  run cmd_slides new --no-build "Some Topic" --template custom-v1
   [ "$status" -eq 0 ]
   # The override value reaches the agent prompt.
   grep -q "custom-v1" "${TEST_TMP}/claude.log"
@@ -197,7 +200,7 @@ _seed_min_project() {
   _pin_claude_agent
   _stub_claude
   _seed_min_project
-  run cmd_slides new "Hello, World! It's a Test."
+  run cmd_slides new --no-build "Hello, World! It's a Test."
   [ "$status" -eq 0 ]
   # No leading/trailing dashes, no upper-case, no punctuation.
   grep -q "hello-world-it-s-a-test" "${TEST_TMP}/claude.log"
@@ -209,7 +212,8 @@ _seed_min_project() {
   _pin_claude_agent
   _stub_claude
   _seed_min_project
-  run cmd_slides new "Introducing Roll Loop"
+  # --no-build: skip auto-build so the hint is printed (not swallowed by build output).
+  run cmd_slides new --no-build "Introducing Roll Loop"
   [ "$status" -eq 0 ]
   [[ "$output" == *"roll slides build introducing-roll-loop"* ]]
   # ZH hint substring.

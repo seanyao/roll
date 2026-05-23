@@ -3820,12 +3820,10 @@ EOF
 
   trap - INT TERM
 
-  # Print Next hint (unless quiet)
-  if [[ $_SLIDES_PROGRESS_QUIET -eq 0 ]]; then
-    echo
-    echo "Next:  roll slides build ${slug}"
-    echo "下一步：roll slides build ${slug}"
-  fi
+  # Print Next hint (unless --quiet flag was explicitly passed)
+  echo
+  echo "Next:  roll slides build ${slug}"
+  echo "下一步：roll slides build ${slug}"
 
   return "$rc"
 }

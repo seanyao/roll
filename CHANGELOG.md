@@ -4,8 +4,27 @@
 
 ### Added
 
+- **每轮 cycle 实时打出 7 阶段进入退出与耗时** — `startup` / `preflight` / `worktree_setup` / `claude_invoke` / `publish_push` / `publish_wait_merge` / `cleanup`，长静默阶段 30–60s 一次心跳，再也不用盯着空屏猜 loop 卡在哪 `[loop]`
+- **cycle 结束打一份按耗时降序的阶段面板** — 同时把每阶段秒数固化到 `runs.jsonl` 的 `phases` 字段，跨轮对比"今天哪一步最慢"有完整数据 `[loop]`
+- **`roll loop runs` 每行末尾追加 `slowest=<阶段> <占比>%`，新子命令 `roll loop runs --detail <cycle_id>` 打开完整阶段面板** — 不必翻 ndjson 就能定位单轮瓶颈 `[dashboard]`
+- **`tests/run.sh --affected [base-ref]`** — TCR micro-step 只跑被本次改动覆盖的测试文件，反馈秒级；改动 `tests/helpers/*` 等保守降级到全套 `[testing]`
+- **`tests/run.sh --tier=fast|slow|all`** — 本地 TCR 默认 `fast`，CI 跑 `--tier=all`；`ROLL_TEST_TIME_CAP=1` 时 `fast` 全跑 60s 硬上限，性能漂移立刻打红 `[testing]`
+- **测试质量评分卷（6 类反模式 rubric）** — `roll-.dream` Scan 7 按 rubric 输出 `REFACTOR-XXX [test-quality:❶|❷|...]`，单轮上限 5 条，存量 ❶ 类反模式可结构化治理 `[dream]`
+- **`roll lang [zh|en|--list]`** — i18n 地基命令：查看 / 切换 / 列出可用语言，按本机 locale 自动选默认；`ROLL_LANG` 环境变量临时覆盖 `[i18n]`
 - **`roll prices show / refresh`** — 价格表挪进带版本号的 snapshot，能一键拉官方文档对比；调价不再要改源码、提 PR，每个 version 的价格都查得到 `[pricing]`
 - **cycle 结束时按当时价格固化成本** — 以后调价或升级都不会回头改写历史轮次的数字；老事件继续可读，渲染时打 `[legacy]` 标记 `[loop]`
+
+### Fixed
+
+- **dashboard 把已合并 PR 错显示成"开放"** — `roll loop status` 兜底走 git log 找 squash merge subject，原正则只认 `loop/cycle-LABEL` 旧分支名，对新的 `loop cycle LABEL (#N)` 默认 subject 匹配不上；现在两种都认 `[dashboard]`
+- **`model_prices.bats` 改用 fixture 价格表注入** — 之前对生产 PRICES 算术断言把调价误伤成测试红，重写后只断结构不变量（cache_read < input、out ≥ in 等）`[testing]`
+- **已合入临时分支堆在 origin 不被清理** — `_loop_cleanup_stale_cycle_branches` 漏过 agent / abort 两条路径，现在 cycle 入口先扫一遍再走主流程 `[loop]`
+- **临时目录复现 bug 时留下幽灵 launchd 服务** — 自动检测临时路径并把所有 `launchctl` 调用走 sandbox 注册表，主用户 launchd domain 不再被污染 `[launchd]`
+
+### Docs
+
+- **新增 `guide/{en,zh}/loop.md` "Cycle phases" 小节** — 七阶段表 + 触发时机 + 典型耗时 + 收尾面板样例；FAQ 增 C6 "某阶段慢怎么定位"
+- **新增 `guide/{en,zh}/testing.md` "TCR Test Strategy" 小节** — `--affected` 与 `--tier` 两个杠杆的语义、匹配规则、CI/本地默认组合；新增 "测试质量评分卷" 小节列六类反模式与修复方向
 
 ## v2026.523.1
 

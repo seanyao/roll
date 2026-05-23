@@ -1,0 +1,15 @@
+{
+  "version": "2026-05-23",
+  "effective_at": "2026-05-23",
+  "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
+  "vendor": "deepseek",
+  "currency": "USD",
+  "default_model": "deepseek-chat",
+  "notes": "Rates per million tokens (USD). deepseek-chat and deepseek-reasoner are both deepseek-v4-flash with different thinking modes — same pricing. deepseek-v4-pro has 75% promotional discount until 2026-05-31. cache_create estimated at 1.25x input (same convention as Claude snapshot). cache_hit discount per official docs: 1/50 for flash ($0.14→$0.0028), 1/120 for pro ($0.435→$0.003625). Actual cache_create not published by DeepSeek — using 1.25x input convention.",
+  "prices": {
+    "deepseek-chat":        {"in": 0.14, "out": 0.28, "cache_create": 0.175,  "cache_read": 0.0028},
+    "deepseek-reasoner":    {"in": 0.14, "out": 0.28, "cache_create": 0.175,  "cache_read": 0.0028},
+    "deepseek-v4-flash":    {"in": 0.14, "out": 0.28, "cache_create": 0.175,  "cache_read": 0.0028},
+    "deepseek-v4-pro":      {"in": 0.435, "out": 0.87, "cache_create": 0.54375, "cache_read": 0.003625}
+  }
+}

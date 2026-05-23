@@ -1,14 +1,21 @@
 """
-model_prices — list-price table for Anthropic Claude API models.
+model_prices — list-price table for AI model API pricing.
 
-Pricing is per million tokens (MTok), USD. These are the public list rates;
-discounts (Pro subscription, prepay credits, etc.) are intentionally not
-modeled — IDEA-025 is about cross-account / cross-project comparable cost.
+Pricing is per million tokens (MTok), in the vendor's native currency.
+These are the public list rates; discounts (Pro subscription, prepay
+credits, etc.) are intentionally not modeled — IDEA-025 is about
+cross-account / cross-project comparable cost.
 
 US-VIEW-013: prices are no longer hardcoded here. They live in versioned
 snapshot files under ``lib/prices/snapshot-YYYY-MM-DD.json`` and are loaded
 at module import time. ``roll prices refresh`` produces new snapshots; this
-module never writes — it only loads the latest one.
+module never writes — it only loads all snapshots and merges them.
+
+FIX-116: multi-vendor support — snapshots carry ``vendor`` and ``currency``
+fields. All snapshots are loaded and merged into a single PRICES map, with
+each model entry carrying its native ``currency``. Vendor-prefixed model
+names (``deepseek/deepseek-chat``) are resolved by stripping the vendor
+segment when no exact match exists.
 
 Unknown models fall back to the snapshot's ``default_model`` with a stderr
 warning so dashboards don't blank out.
@@ -45,6 +52,8 @@ def load_snapshot(path: str) -> Dict[str, Any]:
     if not isinstance(data["prices"], dict) or not data["prices"]:
         raise ValueError(f"snapshot {path!r} has empty or invalid prices map")
     data.setdefault("default_model", next(iter(data["prices"])))
+    data.setdefault("vendor", "anthropic")
+    data.setdefault("currency", "USD")
     return data
 
 
@@ -58,12 +67,34 @@ def load_latest_snapshot(snapshot_dir: str = SNAPSHOT_DIR) -> Dict[str, Any]:
     return load_snapshot(snaps[-1])
 
 
-_SNAPSHOT: Dict[str, Any] = load_latest_snapshot()
-PRICES: Dict[str, Dict[str, float]] = _SNAPSHOT["prices"]
-DEFAULT: str = _SNAPSHOT["default_model"]
-VERSION: str = _SNAPSHOT["version"]
-EFFECTIVE_AT: str = _SNAPSHOT["effective_at"]
-SOURCE_URL: str = _SNAPSHOT["source_url"]
+def load_all_snapshots(snapshot_dir: str = SNAPSHOT_DIR) -> List[Dict[str, Any]]:
+    """Load all snapshots, sorted oldest → newest. Raises FileNotFoundError if none."""
+    snaps = list_snapshots(snapshot_dir)
+    if not snaps:
+        raise FileNotFoundError(
+            f"no price snapshots found in {snapshot_dir}; run `roll prices refresh`"
+        )
+    return [load_snapshot(p) for p in snaps]
+
+
+_SNAPSHOTS: List[Dict[str, Any]] = load_all_snapshots()
+_DEFAULT_SNAP: Dict[str, Any] = _SNAPSHOTS[-1]
+
+# Merge PRICES from all snapshots, injecting currency per model.
+# Later snapshots override earlier ones for the same model name.
+PRICES: Dict[str, Dict[str, float]] = {}
+_CURRENCY: Dict[str, str] = {}
+for _snap in _SNAPSHOTS:
+    _snap_currency = _snap.get("currency", "USD")
+    for _model, _rates in _snap["prices"].items():
+        PRICES[_model] = dict(_rates)
+        PRICES[_model]["currency"] = _snap_currency
+        _CURRENCY[_model] = _snap_currency
+
+DEFAULT: str = _DEFAULT_SNAP["default_model"]
+VERSION: str = _DEFAULT_SNAP["version"]
+EFFECTIVE_AT: str = _DEFAULT_SNAP["effective_at"]
+SOURCE_URL: str = _DEFAULT_SNAP["source_url"]
 
 _warned: set = set()
 
@@ -80,14 +111,64 @@ def _resolve(model: Optional[str], prices: Optional[Dict[str, Dict[str, float]]]
     if not model:
         return table[fallback]
     base = model.split("[")[0].rstrip("0123456789-")
+
+    # Direct match: model starts with a known key
     candidates = [k for k in table if model.startswith(k) or base.startswith(k)]
     if candidates:
         return table[max(candidates, key=len)]
+
+    # Vendor prefix: try stripping "vendor/" segment for proxy tools (pi, etc.)
+    if "/" in model:
+        inner = model.split("/", 1)[1]
+        inner_base = inner.split("[")[0].rstrip("0123456789-")
+        for k in table:
+            if inner == k or inner_base == k or inner.startswith(k) or inner_base.startswith(k):
+                return table[k]
+
     if model not in _warned:
         _warned.add(model)
         print(f"[model_prices] warn: unknown model {model!r}, falling back to {fallback}",
               file=sys.stderr)
     return table[fallback]
+
+
+def _resolve_name(model: Optional[str],
+                  prices: Optional[Dict[str, Dict[str, float]]] = None,
+                  default: Optional[str] = None) -> str:
+    """Return the canonical model name (key in PRICES) for a given model string.
+
+    Same resolution logic as _resolve, but returns the matched key name
+    instead of the rate dict. Used by currency_for() to find the currency.
+    """
+    table = prices if prices is not None else PRICES
+    fallback = default if default is not None else DEFAULT
+    if not model:
+        return fallback
+    base = model.split("[")[0].rstrip("0123456789-")
+
+    # Direct match: model starts with a known key
+    candidates = [k for k in table if model.startswith(k) or base.startswith(k)]
+    if candidates:
+        return max(candidates, key=len)
+
+    # Vendor prefix: try stripping "vendor/" segment
+    if "/" in model:
+        inner = model.split("/", 1)[1]
+        inner_base = inner.split("[")[0].rstrip("0123456789-")
+        for k in table:
+            if inner == k or inner_base == k or inner.startswith(k) or inner_base.startswith(k):
+                return k
+
+    return fallback
+
+
+def currency_for(model: Optional[str]) -> str:
+    """Return the native currency code (USD/CNY) for a model.
+
+    Falls back to 'USD' when the model isn't in any snapshot.
+    """
+    name = _resolve_name(model)
+    return _CURRENCY.get(name, "USD")
 
 
 def compute_list_cost(model: Optional[str],
@@ -98,7 +179,7 @@ def compute_list_cost(model: Optional[str],
                       cache_read_tokens: int = 0,
                       prices: Optional[Dict[str, Dict[str, float]]] = None,
                       default: Optional[str] = None) -> float:
-    """Return USD cost at list price for one cycle's token usage."""
+    """Return cost (in native currency) at list price for one cycle's token usage."""
     p = _resolve(model, prices=prices, default=default)
     total = (input_tokens         * p["in"]
            + output_tokens        * p["out"]

@@ -1,0 +1,14 @@
+{
+  "version": "2026-05-23",
+  "effective_at": "2026-05-23",
+  "source_url": "https://platform.kimi.com/docs/pricing/chat",
+  "vendor": "kimi",
+  "currency": "USD",
+  "default_model": "kimi-k2.5",
+  "notes": "Rates per million tokens (USD). cache_create estimated at 1.25x input. Prices from public Kimi API platform docs — verify with `roll prices refresh` if page layout changes. Model names: kimi-k2 (prior gen), kimi-k2.5 (current), kimi-k2.6 (latest).",
+  "prices": {
+    "kimi-k2":   {"in": 1.00, "out": 4.00, "cache_create": 1.25, "cache_read": 0.25},
+    "kimi-k2.5": {"in": 1.00, "out": 4.00, "cache_create": 1.25, "cache_read": 0.25},
+    "kimi-k2.6": {"in": 1.00, "out": 4.00, "cache_create": 1.25, "cache_read": 0.25}
+  }
+}

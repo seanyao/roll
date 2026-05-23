@@ -2,6 +2,8 @@
   "version": "2026-05-22",
   "effective_at": "2026-05-22",
   "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "vendor": "anthropic",
+  "currency": "USD",
   "default_model": "claude-sonnet-4-6",
   "notes": "Rates per million tokens (USD). cache_create = 5-minute cache write (1.25x input). 1-hour cache writes (2x input) are not modeled — Roll loop uses the default 5m caching only. 2026-05 repricing: Opus 4.5+ moved to $5/$25 base (3x cheaper than Opus 4/4.1).",
   "prices": {

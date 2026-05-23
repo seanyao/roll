@@ -381,3 +381,49 @@ d = json.loads(sys.stdin.read())['detail']
 assert d.get('model') is None, f'expected model=null, got {repr(d.get(\"model\"))}'
 "
 }
+
+# ─── US-VIEW-014: cost_list_usd + prices_version persisted in usage event ──────
+
+@test "US-VIEW-014: usage event carries cost_list_usd + prices_version when model is known" {
+  local a1='{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":1000,"output_tokens":500,"cache_creation_input_tokens":200,"cache_read_input_tokens":122089}}}'
+  local res='{"type":"result","subtype":"success","duration_ms":300000,"total_cost_usd":9.25}'
+  EVDIR="$TEST_TMP"
+  LOOP_PROJECT_SLUG=test-slug LOOP_CYCLE_ID=test-cycle-priced LOOP_SHARED_ROOT="$EVDIR" \
+    bash -c "printf '%s\n%s\n' '$a1' '$res' | python3 '$LOOP_FMT'" >/dev/null
+  local evfile="$EVDIR/loop/events-test-slug.ndjson"
+  [ -f "$evfile" ]
+  local usage_line; usage_line=$(grep '"label": "test-cycle-priced"' "$evfile" | head -1)
+  [ -n "$usage_line" ]
+  echo "$usage_line" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())['detail']
+# cost_list_usd present and a positive float (sonnet-4-6 priced math)
+assert isinstance(d.get('cost_list_usd'), float), f'cost_list_usd missing: {d}'
+assert d['cost_list_usd'] > 0, f'expected positive cost_list_usd, got {d[\"cost_list_usd\"]!r}'
+# prices_version present and shaped like YYYY-MM-DD
+pv = d.get('prices_version')
+assert isinstance(pv, str) and len(pv) >= 8, f'prices_version missing or wrong shape: {pv!r}'
+"
+}
+
+@test "US-VIEW-014: usage event with no model still carries prices_version (cost_list_usd may be null)" {
+  # When model is unknown, list-cost falls back via _resolve; we still tag the
+  # event with the active snapshot version so dashboards can label the cycle.
+  local res='{"type":"result","subtype":"success","duration_ms":60000,"total_cost_usd":0.5}'
+  EVDIR="$TEST_TMP"
+  LOOP_PROJECT_SLUG=test-slug LOOP_CYCLE_ID=test-cycle-no-model LOOP_SHARED_ROOT="$EVDIR" \
+    bash -c "echo '$res' | python3 '$LOOP_FMT'" >/dev/null
+  local evfile="$EVDIR/loop/events-test-slug.ndjson"
+  [ -f "$evfile" ]
+  local usage_line; usage_line=$(grep '"label": "test-cycle-no-model"' "$evfile" | head -1)
+  [ -n "$usage_line" ]
+  echo "$usage_line" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())['detail']
+# prices_version always present once any data is emitted; cost_list_usd is null
+# when there are no token counts to multiply against the price table.
+assert d.get('cost_list_usd') is None, f'expected null cost_list_usd, got {d.get(\"cost_list_usd\")!r}'
+pv = d.get('prices_version')
+assert isinstance(pv, str) and len(pv) >= 8, f'prices_version missing: {pv!r}'
+"
+}

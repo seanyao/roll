@@ -7882,6 +7882,14 @@ cmd_backlog() {
       _backlog_lint "$@" "$backlog"
       return
       ;;
+    unstick)
+      # FIX-112: revert 🔨 In Progress stories whose latest cycle ended
+      # failed / aborted / blocked > N hours ago (default 4). Conservative
+      # gate so it never undoes legitimately-in-progress work.
+      shift
+      python3 "${ROLL_PKG_DIR}/lib/loop_unstick.py" "$@"
+      return
+      ;;
     block|defer|unblock|promote)
       local pattern="${2:-}"
       local reason="${3:-}"
@@ -8418,6 +8426,7 @@ _legacy_help() {
   echo "  backlog block <pat> [reason]  Mark matching items as 🔒 Blocked  标记为已阻塞"
   echo "  backlog defer <pat> [reason]  Mark matching items as ⏸ Deferred  标记为已推迟"
   echo "  backlog unblock <pat>         Restore matching items to 📋 Todo   恢复为待处理"
+  echo "  backlog unstick [--dry-run]   Revert In Progress whose cycle failed >4h ago  自愈卡住的进行中任务"
   echo "  backlog lint                  Check descriptions for path/function/filename violations  检查描述合规"
   echo "  agent [use <name>|list]   [Config] Per-project agent selection            切换项目 agent"
   echo "  ci [--wait]            [CI] Show or wait for current commit's CI status       查看/等待 CI 状态"

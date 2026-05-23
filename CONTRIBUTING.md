@@ -17,8 +17,10 @@ cd roll
 All changes must keep CI green.
 
 ```bash
-npm test              # full bats suite
+npm test              # full bats suite (pre-push / CI / release)
 bash tests/run.sh tests/unit/<file>.bats   # one file
+bash tests/run.sh --affected              # TCR micro-step: only run tests touched by current diff
+bash tests/run.sh --affected --dry-run    # preview what --affected would pick
 ```
 
 - Unit tests live in `tests/unit/`, integration in `tests/integration/`.

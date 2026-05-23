@@ -381,11 +381,43 @@ git push --force-with-lease
 |---|---|
 | 最近 N 个周期摘要 + 成本 | `roll loop status --days 7` |
 | 每周期 JSONL 记录 | `roll loop runs` |
+| 单个 cycle 各阶段耗时 | `roll loop runs --detail <cycle_id>` |
 | 带成本列的实时 dashboard | `roll loop monitor` |
 | 实时看 agent 在做什么 | `roll loop attach` |
 | 人类可读的每日摘要 | `roll brief` |
 | 需要关注的告警 | `roll alert` |
 | 完整 agent 对话记录 | `roll loop attach` 后上翻 |
+
+---
+
+### C6. cycle 显示某个阶段特别慢——怎么定位？
+
+**现象：** `roll loop runs` 某条 built 行尾出现 `slowest=claude 96%`，
+或某轮看着没干啥却显示 `slowest=pr-wait 80%`。想知道时间花在哪一步
+再决定要不要动。
+
+**原因：** 每轮 cycle 在内部被切成 7 个命名阶段
+（`startup` / `preflight` / `worktree_setup` / `claude_invoke` /
+`publish_push` / `publish_wait_merge` / `cleanup`），总耗时单独看
+掩盖了哪一步在拖后腿。
+
+**怎么办：**
+
+1. 从 `roll loop runs` 那行（或 `runs.jsonl`）抄出 cycle_id。
+2. `roll loop runs --detail <cycle_id>` 打完整面板：按耗时降序，秒数 +
+   占比 + 条形图都有。
+3. 常见模式：
+   - `claude_invoke` 占绝大头 → 多文件故事的正常表现；除非能拆故事
+     否则没什么可调的。
+   - `publish_wait_merge` > 5 分钟 → CI 慢或 auto-merge 卡在缺评审；
+     直接看 PR。
+   - `worktree_setup` > 30 秒 → `git fetch origin` 慢；通常是临时网络
+     抖动。
+   - `preflight` > 30 秒 → 上轮留下了孤儿 worktree，loop 正在回收；
+     下一轮就好。
+
+阶段耗时也写进 `runs.jsonl` 的 `phases` 字段（每个阶段一个秒数键），
+可以跨多轮做后处理分析。
 
 ---
 

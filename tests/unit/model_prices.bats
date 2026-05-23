@@ -72,3 +72,27 @@ print(round(mp.compute_list_cost('gpt-4-turbo', input_tokens=1_000_000), 2))
   [ "$status" -eq 0 ]
   [ "$output" = "1060" ]
 }
+
+# US-VIEW-013: snapshot-backed loading.
+@test "snapshot: PRICES is loaded from latest snapshot file" {
+  run run_py 'v,e,u = mp.snapshot_meta(); print(v, e, u)'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2026-05-22"* ]]
+  [[ "$output" == *"platform.claude.com"* ]]
+}
+
+@test "snapshot: list_snapshots returns sorted snapshot paths" {
+  run run_py 'snaps = mp.list_snapshots(); print(len(snaps), snaps[-1].endswith("snapshot-2026-05-22.json"))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
+@test "snapshot: compute_list_cost accepts injected fixture prices" {
+  # Inject a fake price table; logic shouldn't depend on real model names.
+  run run_py '
+fake = {"x": {"in": 10, "out": 20, "cache_create": 1, "cache_read": 0.5}}
+print(mp.compute_list_cost("x", input_tokens=1_000_000, output_tokens=500_000, prices=fake, default="x"))
+'
+  [ "$status" -eq 0 ]
+  [ "$output" = "20.0" ]
+}

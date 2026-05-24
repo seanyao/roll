@@ -88,6 +88,17 @@ def fmt_dur(s: int) -> str:
         return f"{s // 60}m"
     return f"{s // 3600}h {(s % 3600) // 60}m"
 
+# FIX-121: agent → primary model used by `roll loop` dashboard's fallback
+# when an event stream lacks an explicit model name (non-claude agents'
+# stdout isn't stream-json so loop-fmt can't extract model). Keeps the
+# model column consistent with claude's "opus-4-7" style.
+_AGENT_PRIMARY_MODEL = {
+    "pi":       "deepseek-v4-pro",
+    "deepseek": "deepseek-v4-pro",
+    "kimi":     "kimi-k2-0905",
+}
+
+
 def fmt_model(model) -> str:
     """Short label for the cycle row's model column.
 
@@ -339,8 +350,11 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     # FIX-119: fall back to cy["agent"] (from agent_used event) when model
     # is unknown — non-claude agents (pi, deepseek, kimi) don't expose model
     # info in stream-json, leaving a "—" or "?" on the dashboard.
+    # FIX-121: map agent → its configured primary model so the column shows
+    # the actual model name (e.g. "deepseek-v4-pro") consistently with
+    # claude's "opus-4-7", not the bare agent name ("pi").
     if model_label in ("—", "?") and cy.get("agent"):
-        model_label = cy["agent"]
+        model_label = _AGENT_PRIMARY_MODEL.get(cy["agent"], cy["agent"])
     # Auto-hide model column on narrow screens — keeps the dashboard readable
     # when terminal is < 100 cols (cost / story IDs are higher-priority).
     show_model = COLS >= 100

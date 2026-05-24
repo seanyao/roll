@@ -886,7 +886,7 @@ print(has_cw, has_cr)
 
 # ─── FIX-119: agent_used fallback for model column ─────────────────────────
 
-@test "FIX-119 cycle_row: agent fallback when model=None shows agent name" {
+@test "FIX-121 cycle_row: model=None + agent=pi → maps to deepseek-v4-pro" {
   run run_py '
 import io, contextlib
 from datetime import datetime, timezone
@@ -894,20 +894,20 @@ cy = {
     "outcome": "done",
     "start": datetime(2026,5,24,10,0,0,tzinfo=timezone.utc),
     "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000,
-    "cost_list": 1.50, "model": None, "story": "FIX-119",
+    "cost_list": 1.50, "model": None, "story": "FIX-121",
     "agent": "pi",
 }
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     roll_render.cycle_row(cy, {})
 out = buf.getvalue()
-print("pi" in out)
+print("deepseek-v4-pro" in out)
 '
   [ "$status" -eq 0 ]
   [[ "$output" == *"True"* ]]
 }
 
-@test "FIX-119 cycle_row: agent fallback when model is non-claude shows agent" {
+@test "FIX-121 cycle_row: non-claude model + agent=kimi → maps to kimi-k2-0905" {
   run run_py '
 import io, contextlib
 from datetime import datetime, timezone
@@ -915,14 +915,35 @@ cy = {
     "outcome": "done",
     "start": datetime(2026,5,24,10,0,0,tzinfo=timezone.utc),
     "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000,
-    "cost_list": 1.50, "model": "gpt-4-turbo", "story": "FIX-119",
+    "cost_list": 1.50, "model": "gpt-4-turbo", "story": "FIX-121",
     "agent": "kimi",
 }
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     roll_render.cycle_row(cy, {})
 out = buf.getvalue()
-print("kimi" in out)
+print("kimi-k2-0905" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
+@test "FIX-121 cycle_row: unmapped agent falls back to bare agent name" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,24,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000,
+    "cost_list": 1.50, "model": None, "story": "FIX-121",
+    "agent": "novel-agent",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("novel-agent" in out)
 '
   [ "$status" -eq 0 ]
   [[ "$output" == *"True"* ]]

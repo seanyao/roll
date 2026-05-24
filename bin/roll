@@ -3349,12 +3349,19 @@ USAGE  用法
                           在浏览器中打开已渲染的幻灯片
   roll slides logs <slug> Show the last build failure log for a deck
                           显示幻灯片上次构建失败日志
+  roll slides templates   List available slide templates (built-in + project)
+                          列出可用模板（内置 + 项目自定义）
+  roll slides delete <slug> [--force]
+                          Delete a deck (dir + HTML) with confirmation prompt
+                          删除幻灯片（含目录与 HTML），需确认
 
 OPTIONS  选项
   --no-open               Skip auto-opening the rendered HTML in a browser
                           渲染后不自动打开浏览器
   --no-build              Skip auto-build after agent completes (deck.md only)
                           仅生成 deck.md，不自动渲染
+  --force                 Skip confirmation prompt (delete subcommand)
+                          跳过确认提示（delete 子命令）
   --help, -h              Show this help
                           显示本帮助
 EOF
@@ -3724,6 +3731,114 @@ cmd_slides_logs() {
   return 0
 }
 
+# ─── US-DECK-014 ─────────────────────────────────────────────────────────────
+cmd_slides_delete() {
+  local slug="" force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=1; shift ;;
+      --help|-h) _slides_help; return 0 ;;
+      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      *)
+        if [[ -z "$slug" ]]; then
+          slug="$1"; shift
+        else
+          err "Unexpected argument: $1  多余参数: $1"; return 1
+        fi
+        ;;
+    esac
+  done
+
+  if [[ -z "$slug" ]]; then
+    err "Usage: roll slides delete <slug> [--force]"
+    echo "用法: roll slides delete <slug> [--force]" >&2
+    return 1
+  fi
+
+  local deck_dir=".roll/slides/${slug}"
+  local html=".roll/slides/${slug}.html"
+
+  if [[ ! -d "$deck_dir" ]] || [[ ! -f "${deck_dir}/deck.md" ]]; then
+    err "Deck not found: ${slug}  未找到幻灯片：${slug}"
+    return 1
+  fi
+
+  # Non-TTY must use --force (skip interactive confirmation)
+  if [[ $force -eq 0 ]]; then
+    if [[ ! -t 0 ]]; then
+      err "Non-interactive terminal: must use --force to delete  非交互终端：需使用 --force 参数"
+      return 1
+    fi
+    printf 'Delete deck "%s"? (y/N)  删除幻灯片 "%s"？(y/N) ' "$slug" "$slug" >&2
+    read -r answer
+    case "$answer" in
+      [yY]|[yY][eE][sS]) : ;;
+      *) info "Cancelled  已取消"; return 0 ;;
+    esac
+  fi
+
+  # Remove deck directory and HTML file
+  rm -rf "$deck_dir" 2>/dev/null || true
+  rm -f "$html" 2>/dev/null || true
+  ok "Deleted ${slug}  已删除 ${slug}"
+  return 0
+}
+
+# ─── US-DECK-014 ─────────────────────────────────────────────────────────────
+cmd_slides_templates() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h) _slides_help; return 0 ;;
+      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      *) err "Unexpected argument: $1  多余参数: $1"; return 1 ;;
+    esac
+  done
+
+  local seen=""
+  local found=0
+  local name base path source
+
+  printf '%-24s  %-12s  %s\n' "name" "source" "path"
+  printf '%-24s  %-12s  %s\n' "----" "------" "----"
+
+  # Built-in templates (shipped with roll package)
+  local builtin_dir="${ROLL_PKG_DIR}/lib/slides/templates"
+  if [[ -d "$builtin_dir" ]]; then
+    shopt -s nullglob
+    for tpl in "$builtin_dir"/*.html; do
+      name="${tpl##*/}"
+      name="${name%.html}"
+      printf '%-24s  %-12s  %s\n' "$name" "builtin" "$tpl"
+      found=1
+    done
+    shopt -u nullglob
+  fi
+
+  # Project-level overrides (.roll/slides/templates/)
+  local proj_dir=".roll/slides/templates"
+  if [[ -d "$proj_dir" ]]; then
+    shopt -s nullglob
+    for tpl in "$proj_dir"/*.html; do
+      name="${tpl##*/}"
+      name="${name%.html}"
+      # Mark as project override if same name exists in builtin
+      if [[ -f "${builtin_dir}/${name}.html" ]]; then
+        source="project (override)"
+      else
+        source="project"
+      fi
+      printf '%-24s  %-12s  %s\n' "$name" "$source" "$tpl"
+      found=1
+    done
+    shopt -u nullglob
+  fi
+
+  if [[ $found -eq 0 ]]; then
+    info "No templates found  无可用模板"
+  fi
+  return 0
+}
+
 # ─── US-DECK-004 ─────────────────────────────────────────────────────────────
 # Turn a topic string into a kebab-case slug.
 # Lower-cases, replaces any run of non-alphanumerics with a single dash,
@@ -4082,6 +4197,12 @@ cmd_slides() {
       ;;
     logs)
       cmd_slides_logs "$@"
+      ;;
+    templates)
+      cmd_slides_templates "$@"
+      ;;
+    delete)
+      cmd_slides_delete "$@"
       ;;
     --help|-h|help)
       _slides_help

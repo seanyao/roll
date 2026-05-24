@@ -3342,11 +3342,13 @@ USAGE  用法
   roll slides new "<topic>" [--template <name>] [--no-build]
                           Generate deck.md via AI, then auto-build + open HTML
                           通过 AI 生成 deck.md，自动渲染并打开 HTML
-  roll slides list        List all decks under .roll/slides/ as a table
-                          列出 .roll/slides/ 下所有幻灯片
+  roll slides list        List all decks (built / stale / failed / unbuilt)
+                          列出 .roll/slides/ 下所有幻灯片（四态）
   roll slides preview <slug> [--no-open]
                           Open .roll/slides/<slug>.html in the default browser
                           在浏览器中打开已渲染的幻灯片
+  roll slides logs <slug> Show the last build failure log for a deck
+                          显示幻灯片上次构建失败日志
 
 OPTIONS  选项
   --no-open               Skip auto-opening the rendered HTML in a browser
@@ -3459,8 +3461,19 @@ cmd_slides_build() {
     return 1
   fi
 
+  # US-DECK-011: capture failure to .last-build.err for slides logs
+  local err_file=".roll/slides/${slug}/.last-build.err"
+
   # 1. Validate first (fail-fast on AI-generated decks).
-  if ! python3 "$validator" "$deck"; then
+  # Exit 2 = grounding warning (schema OK, evidence below threshold) — warn but don't fail.
+  local val_out val_exit
+  val_out=$(python3 "$validator" "$deck" 2>&1) || val_exit=$?
+  if [[ "${val_exit:-0}" -eq 2 ]]; then
+    echo "[roll] ${val_out}" >&2
+  elif [[ "${val_exit:-0}" -ne 0 ]]; then
+    local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    mkdir -p ".roll/slides/${slug}"
+    printf '[%s] stage=validate\n%s\n' "$ts" "$val_out" > "$err_file"
     err "deck.md validation failed — fix the issues above before building."
     echo "  deck.md 校验失败，请先修复上方提示再重试。" >&2
     return 1
@@ -3470,16 +3483,25 @@ cmd_slides_build() {
   local tpl_name; tpl_name=$(_slides_template_for_deck "$deck")
   local tpl_path
   if ! tpl_path=$(_slides_template_path "$tpl_name"); then
+    local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    mkdir -p ".roll/slides/${slug}"
+    printf '[%s] stage=template\ntemplate not found: %s\n' "$ts" "$tpl_name" > "$err_file"
     err "Template not found: ${tpl_name}  未找到模板：${tpl_name}"
     return 1
   fi
 
   local out=".roll/slides/${slug}.html"
   mkdir -p ".roll/slides"
-  if ! python3 "$renderer" "$deck" "$tpl_path" "$out"; then
+  local render_out; render_out=$(python3 "$renderer" "$deck" "$tpl_path" "$out" 2>&1) || {
+    local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    mkdir -p ".roll/slides/${slug}"
+    printf '[%s] stage=render\n%s\n' "$ts" "$render_out" > "$err_file"
     err "Render failed for ${deck}  渲染失败：${deck}"
     return 1
-  fi
+  }
+
+  # US-DECK-011: build succeeded — remove any stale .last-build.err
+  rm -f "$err_file" 2>/dev/null || true
 
   # 3. Default-ignore the HTML artefact so it doesn't accidentally get committed.
   _slides_ensure_gitignore
@@ -3571,31 +3593,42 @@ cmd_slides_list() {
   IFS=$'\n' sorted_slugs=($(printf '%s\n' "${slugs[@]}" | sort))
   unset IFS
 
-  printf '%-20s  %-20s  %-12s  %-12s  %-5s  %s\n' \
+  printf '%-20s  %-20s  %-12s  %-12s  %-8s  %s\n' \
     "slug" "template" "total_slides" "created" "built" "size"
-  printf '%-20s  %-20s  %-12s  %-12s  %-5s  %s\n' \
-    "----" "--------" "------------" "-------" "-----" "----"
+  printf '%-20s  %-20s  %-12s  %-12s  %-8s  %s\n' \
+    "----" "--------" "------------" "-------" "------" "----"
 
-  local s deck html template total created built size bytes
+  local s deck html err_file template total created built size bytes
   for s in "${sorted_slugs[@]}"; do
     deck="${slides_dir}/${s}/deck.md"
     html="${slides_dir}/${s}.html"
+    err_file="${slides_dir}/${s}/.last-build.err"
     template=$(_slides_frontmatter_field "$deck" "template")
     [[ -z "$template" ]] && template="-"
     total=$(_slides_frontmatter_field "$deck" "total_slides")
     [[ -z "$total" ]] && total="-"
     created=$(_slides_frontmatter_field "$deck" "created")
     [[ -z "$created" ]] && created="-"
-    if [[ -f "$html" ]]; then
-      built="✓"
-      bytes=$(wc -c <"$html" 2>/dev/null | tr -d ' ')
-      [[ -z "$bytes" ]] && bytes=0
-      size=$(_slides_human_size "$bytes")
+    # US-DECK-011: 4-state built column
+    if [[ -f "$err_file" ]]; then
+      built="⚠ failed"
+      size="-"
+    elif [[ -f "$html" ]]; then
+      # Check if deck.md is newer than the HTML (stale)
+      if [[ "$deck" -nt "$html" ]]; then
+        built="≈ stale"
+        size="-"
+      else
+        built="✓ built"
+        bytes=$(wc -c <"$html" 2>/dev/null | tr -d ' ')
+        [[ -z "$bytes" ]] && bytes=0
+        size=$(_slides_human_size "$bytes")
+      fi
     else
-      built="✗"
+      built="✗ unbuilt"
       size="-"
     fi
-    printf '%-20s  %-20s  %-12s  %-12s  %-5s  %s\n' \
+    printf '%-20s  %-20s  %-12s  %-12s  %-8s  %s\n' \
       "$s" "$template" "$total" "$created" "$built" "$size"
   done
   return 0
@@ -3642,6 +3675,46 @@ cmd_slides_preview() {
   if opener=$(_slides_open_cmd); then
     "$opener" "$html" >/dev/null 2>&1 || true
   fi
+  return 0
+}
+
+# ─── US-DECK-011 ─────────────────────────────────────────────────────────────
+cmd_slides_logs() {
+  local slug=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h) _slides_help; return 0 ;;
+      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      *)
+        if [[ -z "$slug" ]]; then
+          slug="$1"; shift
+        else
+          err "Unexpected argument: $1  多余参数: $1"; return 1
+        fi
+        ;;
+    esac
+  done
+
+  if [[ -z "$slug" ]]; then
+    err "Usage: roll slides logs <slug>"
+    echo "用法: roll slides logs <slug>" >&2
+    return 1
+  fi
+
+  local deck_dir=".roll/slides/${slug}"
+  local err_file="${deck_dir}/.last-build.err"
+
+  if [[ ! -d "$deck_dir" ]] || [[ ! -f "${deck_dir}/deck.md" ]]; then
+    err "Deck not found: ${slug}  未找到幻灯片：${slug}"
+    return 1
+  fi
+
+  if [[ ! -f "$err_file" ]]; then
+    info "No failure records for ${slug}  该幻灯片没有失败记录"
+    return 0
+  fi
+
+  cat "$err_file"
   return 0
 }
 
@@ -4000,6 +4073,9 @@ cmd_slides() {
       ;;
     preview)
       cmd_slides_preview "$@"
+      ;;
+    logs)
+      cmd_slides_logs "$@"
       ;;
     --help|-h|help)
       _slides_help

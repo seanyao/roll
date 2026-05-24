@@ -258,6 +258,30 @@ PRs upstream like any human contributor.
 
 ---
 
+### A11. After a price update, do historical cycle costs change?
+
+**Short answer:** No. Each cycle's cost is frozen at completion time.
+
+**Details:** When a loop cycle finishes, Roll writes `cost_list_usd` (the
+cost at that moment's prices) and `prices_version` (which snapshot was used)
+into the usage event. The dashboard reads the frozen value first. Vendor
+price changes, `roll prices refresh`, and Roll upgrades never rewrite
+historical costs.
+
+Cycles from before this feature shipped (no `cost_list_usd` field) fall back
+to computing with the *current* snapshot and show a dim `[legacy]` marker —
+so you know those numbers might drift when prices change.
+
+**Try it:**
+
+```bash
+roll prices show            # see current snapshot
+roll prices refresh         # fetch latest pricing, diff, snapshot if changed
+roll loop status --days 7   # historical cycles use frozen costs
+```
+
+---
+
 ## B. How Roll Compares
 
 ### B1. vs. Claude Code's built-in `/loop`, skills, and tasks

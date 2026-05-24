@@ -20,6 +20,11 @@
 - **dashboard 不再对非 Claude 模型显示空白** — 能看出每轮谁跑的 `[loop]`
 - **主页 agent 标签不再骗人** — 显示真名 `[dashboard]`
 
+### Docs
+
+- **新增 `guide/{en,zh}/pricing.md`** — `roll prices` 命令用法、价格快照机制、历史成本固化语义；README 索引同步 `[pricing]`
+- **FAQ 新增 A11** — 价格更新后历史 cycle 成本数字不会变 `[pricing]`
+
 ## v2026.523.2
 
 ### Added

@@ -228,6 +228,27 @@ CI，Roll 优雅降级：TCR 仍是内层闸门（测试不过提交不留），
 
 ---
 
+### A11. 价格更新后，历史 cycle 的成本数字会变吗？
+
+**短答：** 不会。每轮 cycle 的成本在完成时就固化了。
+
+**细节：** loop cycle 结束时，Roll 会把 `cost_list_usd`（按当时价格算出的成本）和
+`prices_version`（用了哪个快照版本）写入 usage 事件。dashboard 优先读固化值。厂商
+调价、`roll prices refresh`、Roll 升级都不会回头改写历史数字。
+
+此功能上线之前的旧 cycle（没有 `cost_list_usd` 字段）会回退到用*当前*快照现算，
+行末显示浅灰色 `[legacy]` 标记 — 提醒你这个数字在调价时可能会漂移。
+
+**试试看：**
+
+```bash
+roll prices show            # 查看当前价格快照
+roll prices refresh         # 拉取最新定价、对比、有变化落新快照
+roll loop status --days 7   # 历史 cycle 用的是固化成本
+```
+
+---
+
 ## B. 定位与对比
 
 ### B1. 和 Claude Code 自带的 `/loop`、skills、tasks 是什么关系？

@@ -1,5 +1,18 @@
 # Changelog
 
+## v2026.524.2
+
+### Added
+
+- **用 pi / deepseek / kimi 跑的 loop 也能在终端里实时看到进度** — 不再黑屏 `[loop]`
+- **`roll slides new` 可以用项目自己的模板** — 不只用内置的了 `[deck]`
+- **`roll slides list` 一眼看出 slide 状态** — 哪些能看、哪些生成失败、失败原因也能查 `[deck]`
+
+### Fixed
+
+- **loop 不再一次吞太多故事** — 每次只做一个，时间可预期 `[loop]`
+- **dashboard 不再对非 Claude 模型显示空白** — 能看出每轮谁跑的 `[loop]`
+
 ## v2026.524.1
 
 ### Added

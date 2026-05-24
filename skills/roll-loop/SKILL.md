@@ -75,12 +75,24 @@ denied operations and the cycle will idle-exit.
 loop:
   primary_agent: claude          # claude | deepseek | kimi
   fallback_agent: deepseek       # used when primary fails
-  max_items_per_run: 3           # limit parallel risk; adjust as needed
+  max_items_per_run: 1           # one story per cycle — atomic delivery, predictable cycle time
   brief_on_feature_complete: true
   retry_backoff: [2, 4, 8, 16]  # seconds, exponential
 ```
 
 ## Workflow
+
+> **One story per cycle (强约束)**: 每个 cycle 只 pick 一个 Todo、跑完 Step 4
+> 立刻退出，不再回 Step 2 找下一个。理由：
+> - cycle 时间可预测（不会因贪心一连串 PR 撞 45 分钟 hard timeout）
+> - PR / events / dashboard 每行一个故事，归因清晰
+> - 一个故事一个 PR 一次 review，blast radius 最小
+>
+> 唯一例外是依赖修复（CI self-heal 等）已经内嵌在当前故事的 Step 4 里——
+> 那部分不算"新挑故事"。
+>
+> 实现层：max_items_per_run 默认 1，executor skill 跑完 Step 5 必须 exit。
+> 不要在同一个 cycle 内多次 emit `pick_todo` 事件。
 
 ### Step 1 — Orphan 🔨 Recovery
 
@@ -311,6 +323,8 @@ After each item completes:
 3. Update state file: `status: idle`
 4. Check if a Feature is now fully complete (all its Stories ✅)
 5. If yes and `brief_on_feature_complete: true` → invoke `Skill("roll-brief")`
+6. **EXIT the cycle.** 不要回 Step 2 找下一个故事，不要再 emit `pick_todo`。
+   一个 cycle 只交付一个故事；剩下的 Todo 等下一个 launchd tick 起新 cycle 处理。
 
 ### Step 5 — Write Run Summary
 

@@ -5190,6 +5190,9 @@ FMT="${fmt_script}"
 export LOOP_PROJECT_SLUG="${slug}"
 export LOOP_CYCLE_ID="\${CYCLE_ID}"
 export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
+# US-LOOP-010: tell loop-fmt.py which agent is running so it can branch
+# rendering: claude → stream-json parser, others → transparent passthrough.
+export ROLL_LOOP_AGENT="\$(_project_agent)"
 _phase_begin claude_invoke
 # FIX-115: fallback agent support — when primary fails 3 attempts, try fallback 3 more
 FALLBACK_AGENT_NAME="${fallback_agent}"

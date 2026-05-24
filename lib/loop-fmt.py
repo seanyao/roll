@@ -441,11 +441,73 @@ class LoopFmt:
             pass  # best-effort; never break tmux output
 
 
-def main():
-    fmt = LoopFmt()
+def _passthrough_main(agent):
+    """Transparent forwarding for non-claude agents (pi, deepseek, kimi, …).
+
+    Writes every stdin line to stdout with a HH:MM:SS timestamp prefix so
+    tmux shows real-time progress.  Also appends each line as a lightweight
+    'usage'-type event to the per-slug events ndjson — token / cost fields
+    are set to null (agent-specific parsing is out of scope for this US).
+    """
+    slug   = os.environ.get("LOOP_PROJECT_SLUG")
+    cycle  = os.environ.get("LOOP_CYCLE_ID")
+    shared = os.environ.get("LOOP_SHARED_ROOT") or os.path.expanduser("~/.shared/roll")
+    evfile = None
+    if slug and cycle:
+        evfile = os.path.join(shared, "loop", f"events-{slug}.ndjson")
+        try:
+            os.makedirs(os.path.dirname(evfile), exist_ok=True)
+        except Exception:
+            evfile = None
+
     for line in sys.stdin:
-        fmt.process(line)
+        if not line.rstrip():
+            continue
+        # Timestamp prefix so tmux shows activity (even if agent output has
+        # no timestamps of its own).
+        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        out = f"{DARK_GRAY}{ts}{RESET}  {line.rstrip()}"
+        sys.stdout.write(out + "\n")
         sys.stdout.flush()
+        # Emit a lightweight usage event so the cycle has *some* event trace
+        # (token/cost are null — parsing those is agent-specific and out of
+        # scope for the minimal transparent-passthrough US).
+        if evfile:
+            _emit_passthrough_event(evfile, cycle, agent, line.rstrip())
+
+
+def _emit_passthrough_event(evfile, cycle, agent, text):
+    """Best-effort append a usage-type event to evfile."""
+    payload = {
+        "model":        agent,
+        "input_tokens":  None,
+        "output_tokens": None,
+        "cost_list_usd": None,
+        "duration_ms":   None,
+    }
+    record = json.dumps({
+        "ts":      datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "stage":   "usage",
+        "label":   cycle,
+        "detail":  payload,
+        "outcome": "ok",
+    }) + "\n"
+    try:
+        with open(evfile, "a") as f:
+            f.write(record)
+    except Exception:
+        pass
+
+
+def main():
+    agent = os.environ.get("ROLL_LOOP_AGENT", "claude")
+    if agent == "claude":
+        fmt = LoopFmt()
+        for line in sys.stdin:
+            fmt.process(line)
+            sys.stdout.flush()
+    else:
+        _passthrough_main(agent)
 
 if __name__ == "__main__":
     main()

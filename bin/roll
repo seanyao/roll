@@ -5190,6 +5190,9 @@ FMT="${fmt_script}"
 export LOOP_PROJECT_SLUG="${slug}"
 export LOOP_CYCLE_ID="\${CYCLE_ID}"
 export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
+# US-LOOP-010: tell loop-fmt.py which agent is running so it can branch
+# rendering: claude → stream-json parser, others → transparent passthrough.
+export ROLL_LOOP_AGENT="\$(_project_agent)"
 _phase_begin claude_invoke
 # FIX-115: fallback agent support — when primary fails 3 attempts, try fallback 3 more
 FALLBACK_AGENT_NAME="${fallback_agent}"
@@ -5239,6 +5242,9 @@ if [ "\$_CYCLE_TIMED_OUT" -eq 0 ] && [ "\$_exit" -ne 0 ] && [ -n "\$FALLBACK_AGE
   _loop_event agent_used "\${CYCLE_ID}" "\$FALLBACK_AGENT_NAME" "fallback" || true
   echo "[loop] primary agent failed after 3 attempts — switching to fallback: \$FALLBACK_AGENT_NAME"
   _USE_FALLBACK=1
+  # US-LOOP-010: tell loop-fmt which fallback agent is running so it renders
+  # correctly (passthrough for non-claude, stream-json for claude).
+  export ROLL_LOOP_AGENT="\$FALLBACK_AGENT_NAME"
   for _attempt in 1 2 3; do
     _CYCLE_TIMED_OUT=0
     ( sleep "\$LOOP_CYCLE_TIMEOUT_SEC" && {
@@ -5250,7 +5256,11 @@ if [ "\$_CYCLE_TIMED_OUT" -eq 0 ] && [ "\$_exit" -ne 0 ] && [ -n "\$FALLBACK_AGE
         pkill -KILL -f "\$WT" 2>/dev/null
       } ) &
     _WATCHDOG_PID=\$!
-    ( cd "\$WT" && \$FALLBACK_CMD )
+    if [ -f "\$FMT" ]; then
+      ( cd "\$WT" && \$FALLBACK_CMD ) | python3 "\$FMT"
+    else
+      ( cd "\$WT" && \$FALLBACK_CMD )
+    fi
     _exit=\$?
     kill "\$_WATCHDOG_PID" 2>/dev/null
     wait "\$_WATCHDOG_PID" 2>/dev/null

@@ -7,7 +7,7 @@ description: |
   Nightly code and architecture health scan. Passively triggered by scheduler
   (cron or GitHub Actions), not invoked by users directly. Detects dead code,
   architectural drift from domain model, pruning candidates, emerging patterns,
-  doc coverage gaps, doc staleness (文档新鲜度), and upstream CLI compatibility.
+  doc coverage gaps, and doc staleness (文档新鲜度).
   Outputs REFACTOR entries to .roll/backlog.md and a daily log to .roll/dream/.
   Distinct from roll-sentinel: sentinel monitors runtime behavior; dream reviews
   code structure and architectural health.
@@ -309,7 +309,7 @@ without context switching:
 # Dream Log {YYYY-MM-DD}
 
 ## 概要
-- 扫描项：死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 文档覆盖度 / 文档新鲜度 / 上游兼容性
+- 扫描项：死代码 / 架构漂移 / 裁剪候选 / 新兴模式 / 文档覆盖度 / 文档新鲜度
 - 发现：{N} 项标记，{M} 个 REFACTOR 条目已创建
 
 ## 死代码
@@ -333,9 +333,6 @@ without context switching:
 - 架构文档缺失模块：{N} 个
 {发现内容 或 "文档新鲜度良好，无滞后或缺失项。"}
 
-## 上游兼容性
-{发现内容 或 "已是最新版本，无变更。"}
-
 ## 创建的 REFACTOR 条目
 {列表 或 "无。"}
 ```
@@ -356,97 +353,6 @@ git push origin main
 - .roll/backlog.md 和 dream 日志必须在**同一个 commit** 里入库，避免出现"REFACTOR 已加但日志找不到"或反过来的撕裂状态
 - 写文件失败时不要执行 commit；保持工作区干净，由调度器负责重试
 - 仅 `.roll/backlog.md` 和 `.roll/dream/YYYY-MM-DD.md` 入 commit，不要顺带带入其他无关变更
-
-### Scan 8 — Upstream CLI Compatibility (US-WATCH-001)
-
-**Dependency gate**: Skip Scan 8 when `lib/watch.sh` is not deployed.
-Check: `[ -f "${ROLL_PKG_DIR}/lib/watch.sh" ]`. If absent, log "Scan 8 skipped — watch.sh not deployed" and stop.
-
-Scan 8 monitors upstream AI CLI releases for breaking changes that could affect
-Roll's harness layer. Each night:
-
-1. Fetch Claude Code release notes from GitHub
-2. Diff against the last seen version in `~/.shared/roll/dream/watch-state.yaml`
-3. Evaluate each new release entry against the watch dimensions checklist at `lib/watch-dimensions.md`
-4. Output tiered findings: high → open FIX, medium → write ALERT, low/noise → log only
-
-**Bash helpers** (call via `source "${ROLL_PKG_DIR}/lib/watch.sh"`):
-
-```bash
-# Source the watch library (needed before calling any _watch_* functions)
-source "${ROLL_PKG_DIR}/lib/watch.sh"
-
-# Get current claude version
-claude_version=$(_watch_get_claude_version)
-
-# Fetch releases from GitHub (returns JSON)
-releases=$(_watch_fetch_claude_releases)
-
-# Read last seen version from state
-last_seen=$(_watch_state_get "targets.claude.last_seen_version")
-
-# Check idempotency for a specific entry
-_watch_is_evaluated "claude" "$version" "$entry_hash" && echo "already done"
-
-# Mark as evaluated after processing
-_watch_mark_evaluated "claude" "$version" "$entry_hash" "high"
-
-# Update last seen version
-_watch_state_set "targets.claude.last_seen_version" "$claude_version"
-_watch_state_set "last_scan" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-```
-
-**Evaluation workflow:**
-
-1. Source `lib/watch.sh` and call `_watch_fetch_claude_releases`
-2. Parse the JSON array to extract version numbers and release body text
-3. For each release newer than `last_seen_version`:
-   a. Split the body into individual change entries (bullet points, paragraphs)
-   b. For each entry, compute a short hash (`echo "$entry" | md5 | cut -c1-8`)
-   c. Check `_watch_is_evaluated` — skip if already processed
-   d. Read the dimensions checklist at `_watch_dimensions_file`
-   e. Evaluate the entry against all 7 dimensions — output a tier
-   f. tier=high: append a FIX row to `.roll/backlog.md` under `## 🐛 Bug Fixes`
-   g. tier=medium: append to `~/.shared/roll/loop/ALERT-<slug>.md`
-   h. tier=low/noise: record in dream log only
-   i. Call `_watch_mark_evaluated` for every entry processed
-4. Update `last_seen_version` in watch-state.yaml
-5. Update `last_scan` timestamp
-
-**First-run behaviour**: When `last_seen_version` is empty, record the current
-version and do NOT open any FIX/ALERT — this avoids a flood of historical
-entries.
-
-**Failure handling**: If fetching fails (curl timeout, API error, rate limit),
-log the failure and skip — do not block other scans.
-
-**FIX entry format** (appended to `## 🐛 Bug Fixes` in `.roll/backlog.md`):
-
-```markdown
-| FIX-XXX | claude {version}: {one-line impact description} — flagged by dream {YYYY-MM-DD} (upstream watch) | 📋 Todo |
-```
-
-**ALERT entry format** (appended to `~/.shared/roll/loop/ALERT-<slug>.md`):
-
-```markdown
-## Upstream Change — claude {version}
-- **Time**: {timestamp}
-- **Dimension**: {dimension name}
-- **Change**: {summary}
-- **Rationale**: {why this might affect Roll}
-- **Suggested**: monitor roll behaviour after next claude upgrade
-```
-
-**Dream log section** — add after `## 测试质量` section:
-
-```markdown
-## 上游兼容性
-- claude {old_version} → {new_version}: {N} high, {M} medium, {L} low, {X} noise
-- 新开 FIX：{list or "无"}
-- 新开 ALERT：{list or "无"}
-{or "已是最新版本，无变更。"}
-{or "拉取失败：{reason}"}
-```
 
 ## Scheduler Configuration
 

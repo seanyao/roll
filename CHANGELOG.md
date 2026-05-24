@@ -7,6 +7,8 @@
 - **`roll slides new` 不再像卡住** — 分阶段显示进度、当前步骤和耗时 `[deck]`
 - **`roll slides new` 可以用项目自己的模板** — 不只用内置的了 `[deck]`
 - **`roll slides list` 一眼看出 slide 状态** — 哪些能看、哪些生成失败、失败原因也能查 `[deck]`
+- **`roll slides templates` 列出可用模板** — 内置和项目自定义的一眼可见 `[deck]`
+- **`roll slides delete` 删除幻灯片** — 不再需要手动 rm `[deck]`
 - **用 pi / deepseek / kimi 跑的 loop 也能在终端里实时看到进度** — 不再黑屏 `[loop]`
 - **网站语言随浏览器自动切换** — 中文用户看到中文 `[i18n]`
 

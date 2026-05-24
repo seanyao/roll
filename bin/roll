@@ -3732,6 +3732,59 @@ cmd_slides_logs() {
 }
 
 # ─── US-DECK-014 ─────────────────────────────────────────────────────────────
+cmd_slides_delete() {
+  local slug="" force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=1; shift ;;
+      --help|-h) _slides_help; return 0 ;;
+      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      *)
+        if [[ -z "$slug" ]]; then
+          slug="$1"; shift
+        else
+          err "Unexpected argument: $1  多余参数: $1"; return 1
+        fi
+        ;;
+    esac
+  done
+
+  if [[ -z "$slug" ]]; then
+    err "Usage: roll slides delete <slug> [--force]"
+    echo "用法: roll slides delete <slug> [--force]" >&2
+    return 1
+  fi
+
+  local deck_dir=".roll/slides/${slug}"
+  local html=".roll/slides/${slug}.html"
+
+  if [[ ! -d "$deck_dir" ]] || [[ ! -f "${deck_dir}/deck.md" ]]; then
+    err "Deck not found: ${slug}  未找到幻灯片：${slug}"
+    return 1
+  fi
+
+  # Non-TTY must use --force (skip interactive confirmation)
+  if [[ $force -eq 0 ]]; then
+    if [[ ! -t 0 ]]; then
+      err "Non-interactive terminal: must use --force to delete  非交互终端：需使用 --force 参数"
+      return 1
+    fi
+    printf 'Delete deck "%s"? (y/N)  删除幻灯片 "%s"？(y/N) ' "$slug" "$slug" >&2
+    read -r answer
+    case "$answer" in
+      [yY]|[yY][eE][sS]) : ;;
+      *) info "Cancelled  已取消"; return 0 ;;
+    esac
+  fi
+
+  # Remove deck directory and HTML file
+  rm -rf "$deck_dir" 2>/dev/null || true
+  rm -f "$html" 2>/dev/null || true
+  ok "Deleted ${slug}  已删除 ${slug}"
+  return 0
+}
+
+# ─── US-DECK-014 ─────────────────────────────────────────────────────────────
 cmd_slides_templates() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -4147,6 +4200,9 @@ cmd_slides() {
       ;;
     templates)
       cmd_slides_templates "$@"
+      ;;
+    delete)
+      cmd_slides_delete "$@"
       ;;
     --help|-h|help)
       _slides_help

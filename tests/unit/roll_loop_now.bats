@@ -65,3 +65,39 @@ teardown() { unit_teardown_cd; }
   body=$(awk '/^_loop_test\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   echo "$body" | grep -qF 'ROLL_LOOP_FORCE'
 }
+
+# ─── US-LOOP-010: roll loop test --agent <name> ────────────────────────────────
+
+@test "_loop_test: accepts --agent flag" {
+  local body
+  body=$(awk '/^_loop_test\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qE -- '--agent\)'
+}
+
+@test "_loop_test: accepts --cmd flag for custom agent invocation" {
+  local body
+  body=$(awk '/^_loop_test\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qE -- '--cmd\)'
+}
+
+@test "_loop_test: defaults to claude when --agent not given" {
+  local body
+  body=$(awk '/^_loop_test\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # Default literal `agent="claude"` must appear
+  echo "$body" | grep -qF 'agent="claude"'
+}
+
+@test "_loop_test: non-claude agent gets mock echo cmd (no real binary needed)" {
+  local body
+  body=$(awk '/^_loop_test\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # Mock fallback line for non-claude agents
+  echo "$body" | grep -qiE "mock .* output"
+}
+
+@test "cmd_loop: 'test' subcommand forwards args via shift" {
+  local body
+  body=$(awk '/^cmd_loop\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  # Must shift before passing remaining args to _loop_test so flags like
+  # --agent pi reach the function
+  echo "$body" | grep -qE 'test\).*shift.*_loop_test'
+}

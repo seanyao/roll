@@ -5731,7 +5731,7 @@ cmd_loop() {
     on)      _loop_on ;;
     off)     _loop_off ;;
     now)     _loop_now ;;
-    test)    _loop_test ;;
+    test)    shift; _loop_test "$@" ;;
     status)  _loop_status "$@" ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
@@ -5946,17 +5946,36 @@ _loop_test() {
   local log="${_SHARED_ROOT}/loop/cron-${slug}.log"
   local test_runner="${_SHARED_ROOT}/loop/run-${slug}-test.sh"
 
+  # US-LOOP-010: --agent <name> lets integration tests exercise the
+  # multi-agent passthrough path without needing a real pi binary.
+  local agent="claude"
+  local agent_cmd=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --agent) agent="${2:-claude}"; shift 2 ;;
+      --cmd)   agent_cmd="${2}"; shift 2 ;;
+      *)       shift ;;
+    esac
+  done
+  if [[ -z "$agent_cmd" ]]; then
+    if [[ "$agent" == "claude" ]]; then
+      agent_cmd='claude -p "Reply with a single word: hello"; sleep 10'
+    else
+      agent_cmd="echo 'mock ${agent} output line 1'; echo 'mock ${agent} output line 2'"
+    fi
+  fi
+
   # FIX-054: terminal preference removed — runner always uses Terminal.app.
   local active_start active_end
   active_start=$(_config_read_int "loop_active_start" "10")
   active_end=$(_config_read_int "loop_active_end" "18")
 
-  info "Generating test runner...  正在生成测试启动脚本..."
+  info "Generating test runner (agent: ${agent})...  正在生成测试启动脚本 (agent: ${agent})..."
   _write_loop_runner_script "$test_runner" "$project_path" \
-    'claude -p "Reply with a single word: hello"; sleep 10' \
+    "${agent_cmd}" \
     "$log" "$active_start" "$active_end"
 
-  info "Starting smoke test (real claude, trivial prompt)...  正在运行 smoke 测试（真实 claude）..."
+  info "Starting smoke test (agent: ${agent})...  正在运行 smoke 测试 (agent: ${agent})..."
   info "Watch for: tmux session + terminal popup + stream-json events flowing"
   info "观察：tmux 会话 + 终端弹窗 + stream-json 事件流"
 
@@ -5966,9 +5985,9 @@ _loop_test() {
   local elapsed=$(( $(date +%s) - start_time ))
 
   if [[ $exit_code -eq 0 ]]; then
-    ok "Smoke test passed (${elapsed}s)  smoke 测试通过 (${elapsed}秒)"
+    ok "Smoke test passed (${elapsed}s, agent: ${agent})  smoke 测试通过 (${elapsed}秒, agent: ${agent})"
   else
-    err "Smoke test failed (exit ${exit_code}, ${elapsed}s)  smoke 测试失败 (退出码 ${exit_code}, ${elapsed}秒)"
+    err "Smoke test failed (exit ${exit_code}, ${elapsed}s, agent: ${agent})  smoke 测试失败 (退出码 ${exit_code}, ${elapsed}s, agent: ${agent})"
     return 1
   fi
 }

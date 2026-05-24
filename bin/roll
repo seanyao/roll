@@ -3369,6 +3369,12 @@ _slides_lib() {
 # Returns 0 + prints the path if the template exists, else returns 1.
 _slides_template_path() {
   local name="$1"
+  # US-DECK-013: project-level template override takes priority over built-in.
+  local proj_tpl=".roll/slides/templates/${name}.html"
+  if [[ -f "$proj_tpl" ]]; then
+    printf '%s' "$proj_tpl"
+    return 0
+  fi
   local tpl="${ROLL_PKG_DIR}/lib/slides/templates/${name}.html"
   if [[ -f "$tpl" ]]; then
     printf '%s' "$tpl"

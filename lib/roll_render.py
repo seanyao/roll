@@ -336,6 +336,11 @@ def cycle_row(cy: Dict[str, Any], backlog: Dict[str, str]) -> None:
     sid_c   = "red" if outcome == "fail" else "blue"
 
     model_label = fmt_model(cy.get("model"))
+    # FIX-119: fall back to cy["agent"] (from agent_used event) when model
+    # is unknown — non-claude agents (pi, deepseek, kimi) don't expose model
+    # info in stream-json, leaving a "—" or "?" on the dashboard.
+    if model_label in ("—", "?") and cy.get("agent"):
+        model_label = cy["agent"]
     # Auto-hide model column on narrow screens — keeps the dashboard readable
     # when terminal is < 100 cols (cost / story IDs are higher-priority).
     show_model = COLS >= 100

@@ -231,6 +231,12 @@ def aggregate(events: List[Dict[str, Any]], cron: List[Dict[str, Any]]) -> List[
             sid = _extract_story_id(detail)
             if sid:
                 cy["story"] = sid
+        elif stage == "agent_used":
+            # FIX-119: non-claude agents don't expose model in stream-json.
+            # The inner runner emits an agent_used event with the agent name
+            # so the dashboard can show it when cy["model"] is None.
+            if detail:
+                cy["agent"] = detail
         elif stage == "usage":
             # US-LOOP-004: loop-fmt emits this with full token / cost data.
             # Detail is a dict (not the legacy string form).

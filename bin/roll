@@ -5083,6 +5083,7 @@ if _worktree_fetch_origin main \\
   _worktree_sync_meta "\$WT" 2>/dev/null || true
   echo "[loop] cycle \${CYCLE_ID}: worktree \$WT on \$BRANCH"
   _loop_event cycle_start "\${CYCLE_ID}" "" "" || true
+  _loop_event agent_used "\${CYCLE_ID}" "\$(_project_agent)" "primary" || true
   _phase_end worktree_setup ok
 else
   # P3 fix: skip the cycle entirely when worktree isolation fails.
@@ -5153,6 +5154,7 @@ done
 # fallback_agent is configured, try the fallback for 3 more attempts.
 if [ "\$_CYCLE_TIMED_OUT" -eq 0 ] && [ "\$_exit" -ne 0 ] && [ -n "\$FALLBACK_AGENT_NAME" ] && [ -n "\$FALLBACK_CMD" ]; then
   _loop_event agent_switch "\$FALLBACK_AGENT_NAME" "" "primary failed after 3 attempts" || true
+  _loop_event agent_used "\${CYCLE_ID}" "\$FALLBACK_AGENT_NAME" "fallback" || true
   echo "[loop] primary agent failed after 3 attempts — switching to fallback: \$FALLBACK_AGENT_NAME"
   _USE_FALLBACK=1
   for _attempt in 1 2 3; do

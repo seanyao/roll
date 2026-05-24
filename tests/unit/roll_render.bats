@@ -883,3 +883,106 @@ print(has_cw, has_cr)
   [ "$status" -eq 0 ]
   [[ "$output" == *"True True"* ]]
 }
+
+# ─── FIX-119: agent_used fallback for model column ─────────────────────────
+
+@test "FIX-119 cycle_row: agent fallback when model=None shows agent name" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,24,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000,
+    "cost_list": 1.50, "model": None, "story": "FIX-119",
+    "agent": "pi",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("pi" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
+@test "FIX-119 cycle_row: agent fallback when model is non-claude shows agent" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,24,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000,
+    "cost_list": 1.50, "model": "gpt-4-turbo", "story": "FIX-119",
+    "agent": "kimi",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("kimi" in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True"* ]]
+}
+
+@test "FIX-119 cycle_row: claude model still wins over agent fallback" {
+  run run_py '
+import io, contextlib
+from datetime import datetime, timezone
+cy = {
+    "outcome": "done",
+    "start": datetime(2026,5,24,10,0,0,tzinfo=timezone.utc),
+    "duration_s": 600, "input_tokens": 800_000, "output_tokens": 200_000,
+    "cost_list": 1.50, "model": "claude-opus-4-7-20251001",
+    "story": "FIX-119", "agent": "claude",
+}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    roll_render.cycle_row(cy, {})
+out = buf.getvalue()
+print("opus-4-7" in out, "claude" not in out)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"True True"* ]]
+}
+
+@test "FIX-119 aggregate: agent_used event sets cy[agent]" {
+  run run_status '
+from datetime import datetime, timezone, timedelta
+ts = datetime(2026,5,24,10,0,0,tzinfo=timezone.utc)
+events = [
+  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "L1", "_ts": ts},
+  {"ts": (ts+timedelta(seconds=10)).isoformat(), "stage": "agent_used",
+   "label": "L1", "detail": "pi", "_ts": ts+timedelta(seconds=10)},
+  {"ts": (ts+timedelta(seconds=120)).isoformat(), "stage": "cycle_end",
+   "label": "L1", "outcome": "done", "_ts": ts+timedelta(seconds=120)},
+]
+cs = mod.aggregate(events, [])
+print(cs[0].get("agent"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pi"* ]]
+}
+
+@test "FIX-119 aggregate: later agent_used overrides earlier (fallback wins)" {
+  run run_status '
+from datetime import datetime, timezone, timedelta
+ts = datetime(2026,5,24,10,0,0,tzinfo=timezone.utc)
+events = [
+  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "L1", "_ts": ts},
+  {"ts": (ts+timedelta(seconds=10)).isoformat(), "stage": "agent_used",
+   "label": "L1", "detail": "claude", "_ts": ts+timedelta(seconds=10)},
+  {"ts": (ts+timedelta(seconds=60)).isoformat(), "stage": "agent_used",
+   "label": "L1", "detail": "deepseek", "_ts": ts+timedelta(seconds=60)},
+  {"ts": (ts+timedelta(seconds=120)).isoformat(), "stage": "cycle_end",
+   "label": "L1", "outcome": "done", "_ts": ts+timedelta(seconds=120)},
+]
+cs = mod.aggregate(events, [])
+print(cs[0].get("agent"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deepseek"* ]]
+}

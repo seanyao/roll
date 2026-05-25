@@ -6087,12 +6087,14 @@ _loop_on() {
       warn "Loop already enabled for this project  当前项目 loop 已启用"; return 0
     fi
 
-    ok "Loop enabled  已启用"
-    printf "  • roll-loop   every hour :%02d  active %02d:00–%02d:00  每小时 :%02d（窗口 %02d:00–%02d:00）\n" \
-      "$loop_minute" "$active_start" "$active_end" "$loop_minute" "$active_start" "$active_end"
-    printf "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d\n" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
-    printf "  • roll-brief  daily at %02d:%02d  每天 %02d:%02d\n" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
-    echo "  • Agent: ${agent}  (change: roll agent use <name>)"
+    ok "$(msg loop.enabled)"
+    printf '  • roll-loop   %s  %s\n' "$(msg loop.every_hour $loop_minute)" "$(msg loop.active_window $active_start $active_end)"
+    printf '  • roll-.dream %s\n' "$(msg loop.daily_at $dream_hour $dream_minute)"
+    printf '  • roll-brief  %s\n' "$(msg loop.daily_at $brief_hour $brief_minute)"
+    echo "  • $(msg loop.agent_line "$agent")"
+    printf '  • roll-.dream %s\n' "$(msg loop.daily_at $dream_hour $dream_minute)"
+    printf '  • roll-brief  %s\n' "$(msg loop.daily_at $brief_hour $brief_minute)"
+    echo "  • $(msg loop.agent_line "$agent")"
     return 0
   fi
 
@@ -6118,12 +6120,11 @@ _loop_on() {
     printf "%d %d * * * %s %s:%s\n" "$brief_minute" "$brief_hour" "$brief_cmd" "$_LOOP_TAG" "$project_path"
   ) | crontab -
 
-  ok "Loop enabled  已启用"
-  printf "  • roll-loop   every hour :%02d  active %02d:00–%02d:00  每小时 :%02d（窗口 %02d:00–%02d:00）\n" \
-    "$loop_minute" "$active_start" "$active_end" "$loop_minute" "$active_start" "$active_end"
-  printf "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d\n" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
-  printf "  • roll-brief  daily at %02d:%02d  每天 %02d:%02d\n" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
-  echo "  • Agent: ${agent}  (change: roll agent use <name>)"
+  ok "$(msg loop.enabled)"
+  printf '  • roll-loop   %s  %s\n' "$(msg loop.every_hour $loop_minute)" "$(msg loop.active_window $active_start $active_end)"
+  printf '  • roll-.dream %s\n' "$(msg loop.daily_at $dream_hour $dream_minute)"
+  printf '  • roll-brief  %s\n' "$(msg loop.daily_at $brief_hour $brief_minute)"
+  echo "  • $(msg loop.agent_line "$agent")"
 }
 
 _loop_off() {
@@ -6162,7 +6163,7 @@ _loop_off() {
       [[ "$_skip_off" == "1" ]] && continue
       _launchctl_safe enable "gui/${uid}/${label}" 2>/dev/null || true
     done
-    ok "Loop disabled  已停用"
+    ok "$(msg loop.disabled)"
     return 0
   fi
 
@@ -6171,7 +6172,7 @@ _loop_off() {
     warn "Loop not enabled for this project  当前项目 loop 未启用"; return 0
   fi
   crontab -l 2>/dev/null | grep -v "${_LOOP_TAG}:${project_path}" | crontab -
-  ok "Loop disabled  已停用"
+  ok "$(msg loop.disabled)"
 }
 
 _loop_is_active() {

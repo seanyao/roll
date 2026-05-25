@@ -29,6 +29,17 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   grep -qE 'orphan.*🔨|🔨.*orphan' "$SKILL_FILE"
 }
 
+@test "roll-loop SKILL.md: Step 1 orphan recovery skips manual-only rows (FIX-G)" {
+  # manual-only:* rows are human-claimed and must not be reclaimed by the
+  # orphan sweep, otherwise the loop silently undoes the human's claim.
+  # The Step 1 section must (a) explicitly call out the rule and (b) invoke
+  # _loop_is_manual_only as the gate, mirroring the Step 2 BACKLOG scan.
+  awk '/^### Step 1 — Orphan/{flag=1} /^### Step 1\.5/{flag=0} flag' "$SKILL_FILE" \
+    | grep -qF 'manual-only'
+  awk '/^### Step 1 — Orphan/{flag=1} /^### Step 1\.5/{flag=0} flag' "$SKILL_FILE" \
+    | grep -qF '_loop_is_manual_only'
+}
+
 @test "roll-loop SKILL.md: Execution Boundary documents human bypass path (US-AUTO-020)" {
   # The Execution Boundary section must explain that humans can run $roll-build / $roll-fix directly
   grep -qE 'Execution Boundary' "$SKILL_FILE"

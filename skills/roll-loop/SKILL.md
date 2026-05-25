@@ -103,12 +103,24 @@ this point, any `🔨 In Progress` row in `.roll/backlog.md` belongs to a
 previous cycle that crashed before flipping it back; reclaim it before
 scanning.
 
+**Important — skip `manual-only:*` rows.** A row tagged `manual-only:*`
+means a human (or another non-loop process) has explicitly claimed it;
+it is not loop's to reclaim. Reverting it would silently undo the
+human's claim and cause confusing churn for `roll-brief` / dashboard
+readers. The rule mirrors the gate in Step 2.
+
 1. Scan .roll/backlog.md for all rows whose Status column contains `🔨 In Progress`.
-2. For each row found: revert the status back to `📋 Todo`, commit
-   `chore: revert orphan 🔨 US-XXX to 📋`, and append a line to
-   `~/.shared/roll/loop/ALERT-<slug>.md` recording the orphan id and time
-   so the next brief surfaces it.
-3. After orphan sweep, proceed to Step 1.5 (Pre-run CI health check) before scanning.
+2. For each candidate row, run the manual-only gate before touching it:
+   ```bash
+   bash -c 'source "$(command -v roll)"; _loop_is_manual_only "<story-id>" .roll/backlog.md'
+   #   exit 0 → row has `manual-only:*` → SKIP (human-claimed; not orphan)
+   #   exit 1 → reclaimable orphan; continue to step 3
+   ```
+3. For each row that passes the gate: revert the status back to
+   `📋 Todo`, commit `chore: revert orphan 🔨 US-XXX to 📋`, and append
+   a line to `~/.shared/roll/loop/ALERT-<slug>.md` recording the orphan
+   id and time so the next brief surfaces it.
+4. After orphan sweep, proceed to Step 1.5 (Pre-run CI health check) before scanning.
 
 ### Step 1.5 — Pre-run CI Health Check
 

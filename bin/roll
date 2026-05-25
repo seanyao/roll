@@ -4411,6 +4411,47 @@ _project_slug() {
   if [[ -n "$_common" && "$_common" == *"/.git" ]]; then
     path="${_common%/.git}"
   fi
+
+  # US-OBS-010: derive slug from git remote URL for stable cross-machine
+  # identity.  Normalize: strip .git, git@HOST:PATH → https://HOST/PATH,
+  # lowercase.  Fallback chain: origin → first available remote → path-based.
+  local remote_url
+  remote_url=$(git -C "$path" remote get-url origin 2>/dev/null)
+  if [[ -z "$remote_url" ]]; then
+    local first_remote
+    first_remote=$(git -C "$path" remote 2>/dev/null | head -1)
+    if [[ -n "$first_remote" ]]; then
+      remote_url=$(git -C "$path" remote get-url "$first_remote" 2>/dev/null)
+    fi
+  fi
+
+  if [[ -n "$remote_url" ]]; then
+    remote_url="${remote_url%.git}"
+    if [[ "$remote_url" =~ ^git@([^:]+):(.+)$ ]]; then
+      remote_url="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+    fi
+    remote_url=$(printf '%s' "$remote_url" | tr '[:upper:]' '[:lower:]')
+    local base; base=$(basename "$remote_url")
+    local hash
+    if command -v md5 &>/dev/null; then
+      hash=$(printf '%s' "$remote_url" | md5 | cut -c1-6)
+    else
+      hash=$(printf '%s' "$remote_url" | md5sum | cut -c1-6)
+    fi
+    base=$(printf '%s' "$base" | tr -cs '[:alnum:]' '-' | sed 's/-*$//')
+    printf '%s' "${base}-${hash}"
+    return 0
+  fi
+
+  # No remote available — fall back to path-based slug.
+  # If roll_records_remote is configured, warn the user: the slug won't be
+  # stable across machines, so cross-machine sync cannot work.
+  local records_remote
+  records_remote=$(config_get "roll_records_remote" "")
+  if [[ -n "$records_remote" ]]; then
+    printf 'roll: WARNING — roll_records_remote is configured but no git remote URL found; slug will fall back to path-based (cross-machine merge will not work)\n' >&2
+  fi
+
   local base; base=$(basename "$path")
   local hash
   if command -v md5 &>/dev/null; then

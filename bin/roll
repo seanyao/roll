@@ -3442,16 +3442,15 @@ cmd_slides_build() {
 
   if [[ -z "$slug" ]]; then
     err "Usage: roll slides build <slug> [--no-open]"
-    echo "用法: roll slides build <slug> [--no-open]" >&2
+    echo "$(msg slides.usage_build)" >&2
     return 1
   fi
 
   local deck=".roll/slides/${slug}/deck.md"
   if [[ ! -f "$deck" ]]; then
     err "Deck not found: ${deck}"
-    echo "  未找到 deck 文件：${deck}" >&2
-    echo "  Hint: run 'roll slides new \"<topic>\"' to generate a new deck." >&2
-    echo "  提示：先运行 'roll slides new \"<主题>\"' 生成新的幻灯片。" >&2
+    echo "  $(msg slides.deck_not_found "$deck")" >&2
+    echo "  $(msg slides.hint_new)" >&2
     return 1
   fi
 
@@ -3459,7 +3458,7 @@ cmd_slides_build() {
   local validator="${lib_dir}/slides-validate.py"
   local renderer="${lib_dir}/slides-render.py"
   if [[ ! -f "$validator" || ! -f "$renderer" ]]; then
-    err "Slides toolchain missing — re-run 'roll setup'  渲染工具缺失，请运行 roll setup"
+    err "Slides toolchain missing — re-run 'roll setup'"
     return 1
   fi
 
@@ -3477,7 +3476,7 @@ cmd_slides_build() {
     mkdir -p ".roll/slides/${slug}"
     printf '[%s] stage=validate\n%s\n' "$ts" "$val_out" > "$err_file"
     err "deck.md validation failed — fix the issues above before building."
-    echo "  deck.md 校验失败，请先修复上方提示再重试。" >&2
+    echo "  $(msg slides.validate_failed)" >&2
     return 1
   fi
 
@@ -3488,7 +3487,7 @@ cmd_slides_build() {
     local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     mkdir -p ".roll/slides/${slug}"
     printf '[%s] stage=template\ntemplate not found: %s\n' "$ts" "$tpl_name" > "$err_file"
-    err "Template not found: ${tpl_name}  未找到模板：${tpl_name}"
+    err "Template not found: ${tpl_name}"
     return 1
   fi
 
@@ -3566,9 +3565,8 @@ cmd_slides_list() {
 
   local slides_dir=".roll/slides"
   if [[ ! -d "$slides_dir" ]]; then
-    info "No decks found under .roll/slides/  无幻灯片"
-    echo "  Hint: run 'roll slides new \"<topic>\"' to create one."
-    echo "  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。"
+    info "No decks found under .roll/slides/"
+    echo "  $(msg slides.hint_create)"
     return 0
   fi
 
@@ -3585,9 +3583,8 @@ cmd_slides_list() {
   shopt -u nullglob
 
   if [[ "${#slugs[@]}" -eq 0 ]]; then
-    info "No decks found under .roll/slides/  无幻灯片"
-    echo "  Hint: run 'roll slides new \"<topic>\"' to create one."
-    echo "  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。"
+    info "No decks found under .roll/slides/"
+    echo "  $(msg slides.hint_create)"
     return 0
   fi
 
@@ -3655,7 +3652,7 @@ cmd_slides_preview() {
 
   if [[ -z "$slug" ]]; then
     err "Usage: roll slides preview <slug> [--no-open]"
-    echo "用法: roll slides preview <slug> [--no-open]" >&2
+    echo "$(msg slides.usage_preview)" >&2
     return 1
   fi
 
@@ -3663,8 +3660,7 @@ cmd_slides_preview() {
   if [[ ! -f "$html" ]]; then
     err "Rendered HTML not found: ${html}"
     echo "  未找到已渲染的 HTML：${html}" >&2
-    echo "  Hint: run 'roll slides build ${slug}' first to render it." >&2
-    echo "  提示：先运行 'roll slides build ${slug}' 渲染幻灯片。" >&2
+    echo "  $(msg slides.hint_build "$slug")" >&2
     return 1
   fi
 
@@ -3699,7 +3695,7 @@ cmd_slides_logs() {
 
   if [[ -z "$slug" ]]; then
     err "Usage: roll slides logs <slug>"
-    echo "用法: roll slides logs <slug>" >&2
+    echo "$(msg slides.usage_logs)" >&2
     return 1
   fi
 
@@ -3740,7 +3736,7 @@ cmd_slides_delete() {
 
   if [[ -z "$slug" ]]; then
     err "Usage: roll slides delete <slug> [--force]"
-    echo "用法: roll slides delete <slug> [--force]" >&2
+    echo "$(msg slides.usage_delete)" >&2
     return 1
   fi
 
@@ -3758,7 +3754,7 @@ cmd_slides_delete() {
       err "Non-interactive terminal: must use --force to delete  非交互终端：需使用 --force 参数"
       return 1
     fi
-    printf 'Delete deck "%s"? (y/N)  删除幻灯片 "%s"？(y/N) ' "$slug" "$slug" >&2
+    printf '%s ' "$(msg slides.delete_confirm "$slug")" >&2
     read -r answer
     case "$answer" in
       [yY]|[yY][eE][sS]) : ;;
@@ -3873,7 +3869,7 @@ cmd_slides_new() {
 
   if [[ -z "$topic" ]]; then
     err "Usage: roll slides new \"<topic>\" [--template <name>] [--quiet] [--no-build]"
-    echo "  用法：roll slides new \"<主题>\" [--template <模板名>] [--quiet] [--no-build]" >&2
+    echo "  $(msg slides.usage_new)" >&2
     return 1
   fi
 
@@ -4001,8 +3997,7 @@ EOF
 
   # Print Next hint (unless --quiet flag was explicitly passed)
   echo
-  echo "Next:  roll slides build ${slug}"
-  echo "下一步：roll slides build ${slug}"
+  echo "$(msg slides.next_build "$slug")"
 
   return "$rc"
 }

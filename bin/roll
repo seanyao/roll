@@ -2359,7 +2359,7 @@ EOF
 # Show current state of conventions
 # ═══════════════════════════════════════════════════════════════════════════════
 _legacy_status() {
-  echo -e "${BOLD}Roll Convention Status  Roll 约定状态${NC}"
+  echo -e "${BOLD}$(msg status.title)${NC}"
   echo ""
 
   if [[ -d "$ROLL_HOME" ]]; then
@@ -2370,28 +2370,28 @@ _legacy_status() {
   fi
 
   echo ""
-  echo -e "${BOLD}Global conventions:  全局约定${NC}"
+  echo -e "${BOLD}$(msg status.global_conventions):${NC}"
   for f in AGENTS.md CLAUDE.md GEMINI.md .cursor-rules project_rules.md; do
     if [[ -f "$ROLL_GLOBAL/$f" ]]; then
       echo -e "  ${GREEN}+${NC} $f"
     else
-      echo -e "  ${RED}-${NC} $f (missing / 缺失)"
+      echo -e "  ${RED}-${NC} $f ($(msg status.missing))"
     fi
   done
 
   echo ""
-  echo -e "${BOLD}Global skills:  全局技能${NC}"
+  echo -e "${BOLD}$(msg status.global_skills):${NC}"
   if [[ -d "$ROLL_HOME/skills" ]]; then
     local count
     count=$(find "$ROLL_HOME/skills" -maxdepth 1 -type d | wc -l | tr -d ' ')
     count=$((count - 1))
-    echo -e "  ${GREEN}+${NC} ~/.roll/skills ($count skills installed / 已安装 $count 个技能)"
+    echo -e "  ${GREEN}+${NC} ~/.roll/skills ($count $(msg status.installed_count) $count)"
   else
-    echo -e "  ${RED}-${NC} ~/.roll/skills (missing / 缺失)"
+    echo -e "  ${RED}-${NC} ~/.roll/skills ($(msg status.missing))"
   fi
 
   echo ""
-  echo -e "${BOLD}Sync targets:  同步目标${NC}"
+  echo -e "${BOLD}$(msg status.sync_targets):${NC}"
 
   local _sync_found=0
   while IFS= read -r _entry; do
@@ -2409,7 +2409,7 @@ _legacy_status() {
   fi
 
   echo ""
-  echo -e "${BOLD}Skill symlinks:  技能软链接${NC}"
+  echo -e "${BOLD}$(msg status.skill_symlinks):${NC}"
   local total_skills=0
   local wk_skills_real
   if [[ -d "$ROLL_HOME/skills" ]]; then
@@ -2435,9 +2435,9 @@ _legacy_status() {
         skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
         local skills_display="${skills_dir/#$HOME/~}"
         if [[ -n "$skills_real" && "$skills_real" == "$wk_skills_real" ]]; then
-          echo -e "  ${GREEN}=${NC} $name: $skills_display -> ~/.roll/skills (mounted / 已挂载)"
+          echo -e "  ${GREEN}=${NC} $name: $skills_display -> ~/.roll/skills ($(msg status.mounted))"
         else
-          echo -e "  ${YELLOW}~${NC} $name: $skills_display -> ${skills_target/#$HOME/~} (symlinked dir)"
+          echo -e "  ${YELLOW}~${NC} $name: $skills_display -> ${skills_target/#$HOME/~} ($(msg status.symlinked_dir))"
         fi
         continue
       fi
@@ -2446,14 +2446,14 @@ _legacy_status() {
       skills_display="${skills_dir/#$HOME/~}"
       linked_count=$(find "$skills_dir" -maxdepth 1 -mindepth 1 -type l -name "roll-*" 2>/dev/null | wc -l | tr -d ' ')
       if [[ "$linked_count" -eq "$total_skills" ]] && [[ "$total_skills" -gt 0 ]]; then
-        echo -e "  ${GREEN}=${NC} $name: $skills_display ($linked_count/$total_skills skills linked)"
+        echo -e "  ${GREEN}=${NC} $name: $skills_display ($linked_count/$total_skills $(msg status.skills_linked))"
       elif [[ "$linked_count" -gt 0 ]]; then
-        echo -e "  ${YELLOW}~${NC} $name: $skills_display ($linked_count/$total_skills skills linked)"
+        echo -e "  ${YELLOW}~${NC} $name: $skills_display ($linked_count/$total_skills $(msg status.skills_linked))"
       else
-        echo -e "  ${RED}-${NC} $name: $skills_display (no roll-* skills linked / 未链接 roll-* 技能)"
+        echo -e "  ${RED}-${NC} $name: $skills_display ($(msg status.no_roll_skills))"
       fi
     else
-      echo -e "  ${RED}-${NC} $name: ${skills_dir/#$HOME/~} (not found / 未找到)"
+      echo -e "  ${RED}-${NC} $name: ${skills_dir/#$HOME/~} ($(msg status.not_found))"
     fi
   done < <(_get_ai_tools)
   if [[ "$_skills_found" -eq 0 ]]; then
@@ -2461,14 +2461,14 @@ _legacy_status() {
   fi
 
   echo ""
-  echo -e "${BOLD}Templates:  模板${NC}"
+  echo -e "${BOLD}$(msg status.templates):${NC}"
   for tpl in fullstack frontend-only backend-service cli; do
     if [[ -d "$ROLL_TEMPLATES/$tpl" ]]; then
       local count
       count=$(find "$ROLL_TEMPLATES/$tpl" -type f | wc -l | tr -d ' ')
       echo -e "  ${GREEN}+${NC} $tpl ($count files)"
     else
-      echo -e "  ${RED}-${NC} $tpl (missing / 缺失)"
+      echo -e "  ${RED}-${NC} $tpl ($(msg status.missing))"
     fi
   done
 
@@ -2494,7 +2494,7 @@ _status_loop_overview() {
   [[ "${#plists[@]}" -eq 0 ]] && return 0
 
   echo ""
-  echo -e "${BOLD}Loop Overview:  所有项目 loop 状态${NC}"
+  echo -e "${BOLD}$(msg status.loop_overview):${NC}"
 
   for plist in "${plists[@]}"; do
     local label; label=$(basename "$plist" .plist)
@@ -2552,15 +2552,15 @@ check_sync_status() {
   # Sync writes content to {dir}/roll.md and appends @roll.md to the main config.
   # So "in sync" means: roll.md exists + matches source + main config contains @roll.md.
   if [[ ! -f "$dst" ]]; then
-    echo -e "  ${RED}-${NC} $name: $display (not synced / 未同步)"
+    echo -e "  ${RED}-${NC} $name: $display ($(msg status.not_synced))"
   elif [[ ! -f "$wk_file" ]]; then
-    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — roll.md missing / roll.md 缺失)"
+    echo -e "  ${YELLOW}~${NC} $name: $display ($(msg status.out_of_sync_missing))"
   elif ! diff -q "$src" "$wk_file" &>/dev/null 2>&1; then
-    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — roll.md outdated / roll.md 已过期)"
+    echo -e "  ${YELLOW}~${NC} $name: $display ($(msg status.out_of_sync_old))"
   elif ! grep -qF "@roll.md" "$dst" 2>/dev/null; then
-    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — @roll.md not in config / 未包含 @roll.md)"
+    echo -e "  ${YELLOW}~${NC} $name: $display ($(msg status.out_of_sync_config))"
   else
-    echo -e "  ${GREEN}=${NC} $name: $display (in sync / 已同步)"
+    echo -e "  ${GREEN}=${NC} $name: $display ($(msg status.in_sync))"
   fi
 }
 

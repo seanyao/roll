@@ -22,14 +22,14 @@ teardown() { unit_teardown; }
   [[ "$output" == *"worktree_setup"* ]]
 }
 
-@test "_loop_event phase_start uses claude emoji for claude_invoke" {
-  run _loop_event phase_start claude_invoke "" ""
+@test "_loop_event phase_start uses agent emoji for agent_invoke" {
+  run _loop_event phase_start agent_invoke "" ""
   [ "$status" -eq 0 ]
   [[ "$output" == *"🤖"* ]]
 }
 
 @test "_loop_event phase_tick prints elapsed marker" {
-  run _loop_event phase_tick claude_invoke "300s elapsed" ""
+  run _loop_event phase_tick agent_invoke "300s elapsed" ""
   [ "$status" -eq 0 ]
   [[ "$output" == *"⏱"* ]]
   [[ "$output" == *"300s elapsed"* ]]
@@ -74,7 +74,7 @@ teardown() { unit_teardown; }
   grep -q '_phase_begin startup' "$inner"
   grep -q '_phase_begin preflight' "$inner"
   grep -q '_phase_begin worktree_setup' "$inner"
-  grep -q '_phase_begin claude_invoke' "$inner"
+  grep -q '_phase_begin agent_invoke' "$inner"
   grep -q '_phase_begin publish_push' "$inner"
   grep -q '_phase_begin publish_wait_merge' "$inner"
   grep -q '_phase_begin cleanup' "$inner"

@@ -418,7 +418,7 @@ git push --force-with-lease
 再决定要不要动。
 
 **原因：** 每轮 cycle 在内部被切成 7 个命名阶段
-（`startup` / `preflight` / `worktree_setup` / `claude_invoke` /
+（`startup` / `preflight` / `worktree_setup` / `agent_invoke` /
 `publish_push` / `publish_wait_merge` / `cleanup`），总耗时单独看
 掩盖了哪一步在拖后腿。
 
@@ -428,7 +428,7 @@ git push --force-with-lease
 2. `roll loop runs --detail <cycle_id>` 打完整面板：按耗时降序，秒数 +
    占比 + 条形图都有。
 3. 常见模式：
-   - `claude_invoke` 占绝大头 → 多文件故事的正常表现；除非能拆故事
+   - `agent_invoke` 占绝大头 → 多文件故事的正常表现；除非能拆故事
      否则没什么可调的。
    - `publish_wait_merge` > 5 分钟 → CI 慢或 auto-merge 卡在缺评审；
      直接看 PR。

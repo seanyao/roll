@@ -8,10 +8,10 @@ load helpers
 setup() { unit_setup; }
 teardown() { unit_teardown; }
 
-@test "_loop_runs_slowest_phase abbreviates claude_invoke to 'claude'" {
-  run _loop_runs_slowest_phase '{"phases":{"startup":1,"claude_invoke":120}}'
+@test "_loop_runs_slowest_phase abbreviates agent_invoke to 'agent'" {
+  run _loop_runs_slowest_phase '{"phases":{"startup":1,"agent_invoke":120}}'
   [ "$status" -eq 0 ]
-  [[ "$output" == "claude "* ]]
+  [[ "$output" == "agent "* ]]
 }
 
 @test "_loop_runs_slowest_phase abbreviates publish_wait_merge to 'pr-wait'" {
@@ -33,7 +33,7 @@ teardown() { unit_teardown; }
 }
 
 @test "_loop_runs_slowest_phase shows percentage" {
-  run _loop_runs_slowest_phase '{"phases":{"startup":1,"claude_invoke":99}}'
+  run _loop_runs_slowest_phase '{"phases":{"startup":1,"agent_invoke":99}}'
   [[ "$output" == *"99%"* ]]
 }
 
@@ -50,27 +50,27 @@ teardown() { unit_teardown; }
 @test "_loop_runs_detail prints breakdown for cycle found in runs.jsonl" {
   local runs="${TEST_TMP}/runs.jsonl"
   cat > "$runs" <<'JSON'
-{"ts":"2026-05-23T11:00:00Z","project":"p","run_id":"loop-1","status":"built","cycle_id":"cy-1","built":["US"],"tcr_count":2,"duration_sec":125,"phases":{"startup":1,"claude_invoke":115,"cleanup":3}}
+{"ts":"2026-05-23T11:00:00Z","project":"p","run_id":"loop-1","status":"built","cycle_id":"cy-1","built":["US"],"tcr_count":2,"duration_sec":125,"phases":{"startup":1,"agent_invoke":115,"cleanup":3}}
 JSON
   _LOOP_RUNS="$runs"
   run _loop_runs_detail "cy-1"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"claude_invoke"* ]]
+  [[ "$output" == *"agent_invoke"* ]]
   [[ "$output" == *"Total"* ]]
 }
 
 @test "_loop_runs_detail prints phases in duration-desc order" {
   local runs="${TEST_TMP}/runs.jsonl"
   cat > "$runs" <<'JSON'
-{"cycle_id":"cy-2","phases":{"startup":2,"claude_invoke":100,"preflight":50}}
+{"cycle_id":"cy-2","phases":{"startup":2,"agent_invoke":100,"preflight":50}}
 JSON
   _LOOP_RUNS="$runs"
   run _loop_runs_detail "cy-2"
   [ "$status" -eq 0 ]
-  # First data row should be claude_invoke (largest)
+  # First data row should be agent_invoke (largest)
   local first
   first=$(echo "$output" | grep -E '^  [a-z_]+' | head -1 | awk '{print $1}')
-  [ "$first" = "claude_invoke" ]
+  [ "$first" = "agent_invoke" ]
 }
 
 @test "_loop_runs_detail returns non-zero when cycle id missing" {
@@ -94,7 +94,7 @@ JSON
 @test "_loop_runs accepts --detail flag and routes to detail handler" {
   local runs="${TEST_TMP}/runs.jsonl"
   cat > "$runs" <<'JSON'
-{"cycle_id":"abc","phases":{"startup":1,"claude_invoke":10}}
+{"cycle_id":"abc","phases":{"startup":1,"agent_invoke":10}}
 JSON
   _LOOP_RUNS="$runs"
   run _loop_runs --detail abc
@@ -105,7 +105,7 @@ JSON
 @test "_loop_runs accepts --detail=<id> form" {
   local runs="${TEST_TMP}/runs.jsonl"
   cat > "$runs" <<'JSON'
-{"cycle_id":"abc","phases":{"startup":1,"claude_invoke":10}}
+{"cycle_id":"abc","phases":{"startup":1,"agent_invoke":10}}
 JSON
   _LOOP_RUNS="$runs"
   run _loop_runs --detail=abc

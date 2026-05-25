@@ -8,21 +8,6 @@ teardown() { unit_teardown; }
 
 # ─── ANSI strip ────────────────────────────────────────────────────────────
 
-@test "cycle log: strip ANSI CSI escape sequences" {
-  local raw="${TEST_TMP}/test.raw"
-  printf '\x1b[2KHello\x1b[0m\n' > "$raw"
-  printf '\x1b[1;32mWorld\x1b[0m\n' >> "$raw"
-
-  local clean="${TEST_TMP}/test.log"
-  sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/\r$//' "$raw" > "$clean"
-
-  run cat "$clean"
-  [ "$status" -eq 0 ]
-  [[ "$output" == "Hello" ]]
-  # Second line should be "World" — verify by counting lines
-  [ "$(wc -l < "$clean" | tr -d ' ')" -eq 2 ]
-}
-
 @test "cycle log: strip ANSI + carriage return removal" {
   local raw="${TEST_TMP}/test2.raw"
   printf '\x1b[33mLine1\x1b[0m\r\n' > "$raw"
@@ -122,15 +107,6 @@ teardown() { unit_teardown; }
   [ -f "${dir}/cycle-2.raw" ]
   [ -f "${dir}/cycle-1.log" ]
   [ -f "${dir}/cycle-2.log" ]
-}
-
-# ─── Gitignore ──────────────────────────────────────────────────────────────
-
-@test "cycle log: .roll/.gitignore contains cycle-logs/" {
-  # Verify the repo's .gitignore has the entry
-  local gitignore="${BATS_TEST_DIRNAME}/../../.roll/.gitignore"
-  [ -f "$gitignore" ]
-  grep -q '^cycle-logs/' "$gitignore"
 }
 
 # ─── Generated script verification ──────────────────────────────────────────

@@ -52,6 +52,11 @@ from roll_render import (
 # Paths — must match bin/roll's _project_slug + _SHARED_ROOT defaults
 # ════════════════════════════════════════════════════════════════════════════
 def project_slug(path: Optional[str] = None) -> str:
+    # US-LOOP-006: cycle wrapper exports ROLL_MAIN_SLUG — honour it.
+    env_slug = os.environ.get("ROLL_MAIN_SLUG", "").strip()
+    if env_slug:
+        return env_slug
+
     path = os.path.realpath(path or os.getcwd())
     try:  # resolve git worktree → main tree (FIX-034 in bin/roll)
         common = subprocess.check_output(
@@ -62,9 +67,56 @@ def project_slug(path: Optional[str] = None) -> str:
             path = common[:-5]
     except Exception:
         pass
+
+    # US-OBS-010: derive slug from git remote URL for stable cross-machine
+    # identity.  Normalize: strip .git, git@HOST:PATH → https://HOST/PATH,
+    # lowercase.  Fallback chain: origin → first remote → path-based.
+    remote_url = _git_remote_url(path)
+    if remote_url:
+        # Normalize
+        remote_url = remote_url.rstrip("/")
+        if remote_url.endswith(".git"):
+            remote_url = remote_url[:-4]
+        m = re.match(r"^git@([^:]+):(.+)$", remote_url)
+        if m:
+            remote_url = f"https://{m.group(1)}/{m.group(2)}"
+        remote_url = remote_url.lower()
+        base = re.sub(r"[^A-Za-z0-9]+", "-", os.path.basename(remote_url)).strip("-")
+        h = hashlib.md5(remote_url.encode()).hexdigest()[:6]
+        return f"{base}-{h}"
+
     base = re.sub(r"[^A-Za-z0-9]+", "-", os.path.basename(path)).strip("-")
     h = hashlib.md5(path.encode()).hexdigest()[:6]
     return f"{base}-{h}"
+
+
+def _git_remote_url(repo_path: str) -> Optional[str]:
+    """Return the normalized remote URL for a git repo, or None."""
+    try:
+        url = subprocess.check_output(
+            ["git", "-C", repo_path, "remote", "get-url", "origin"],
+            stderr=subprocess.DEVNULL, text=True
+        ).strip()
+        if url:
+            return url
+    except Exception:
+        pass
+    # Fallback: first available remote
+    try:
+        remotes = subprocess.check_output(
+            ["git", "-C", repo_path, "remote"],
+            stderr=subprocess.DEVNULL, text=True
+        ).strip().splitlines()
+        if remotes:
+            url = subprocess.check_output(
+                ["git", "-C", repo_path, "remote", "get-url", remotes[0]],
+                stderr=subprocess.DEVNULL, text=True
+            ).strip()
+            if url:
+                return url
+    except Exception:
+        pass
+    return None
 
 def shared_root() -> Path:
     return Path(os.environ.get("ROLL_SHARED_ROOT") or os.path.expanduser("~/.shared/roll"))

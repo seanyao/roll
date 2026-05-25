@@ -6,7 +6,8 @@ description: |
   Autonomous BACKLOG executor. Runs on a schedule (hourly via cron or GitHub
   Actions), scans .roll/backlog.md for 📋 Todo items, and routes each to the
   appropriate skill: US-XXX → $roll-build, FIX-XXX → $roll-fix,
-  REFACTOR-XXX → $roll-build. Handles agent fallback on token/network failure.
+  REFACTOR-XXX → $roll-build. Retries the primary agent up to 3 times on
+  transient failure; pauses with ALERT on persistent failure.
   Never cuts a release autonomously — release is always a human decision.
   Triggers roll-brief when a Feature completes.
 ---
@@ -73,8 +74,7 @@ denied operations and the cycle will idle-exit.
 ```yaml
 # ~/.roll/config.yaml
 loop:
-  primary_agent: claude          # claude | deepseek | kimi
-  fallback_agent: deepseek       # used when primary fails
+  primary_agent: claude          # claude | deepseek | kimi | pi | ...
   max_items_per_run: 1           # one story per cycle — atomic delivery, predictable cycle time
   brief_on_feature_complete: true
   retry_backoff: [2, 4, 8, 16]  # seconds, exponential
@@ -439,21 +439,20 @@ Attempt 1 fails
 
 ```
 Primary agent fails (non-network error)
-  → switch to fallback_agent from config
-  → retry current item with fallback
-  → if fallback also fails → PAUSE
+  → 3 attempts at the agent_invoke phase (with 30s back-off between)
+  → still failing → PAUSE
 ```
 
 ### Pause + Alert
 
-When both agents fail:
+When the primary agent exhausts its retry budget:
 
 1. Write state:
 ```yaml
 status: paused
 paused_at: "2026-05-10T02:07:00+08:00"
 paused_on: US-AUTH-003
-reason: "both primary (claude) and fallback (deepseek) unavailable"
+reason: "primary agent (claude) unavailable after 3 attempts"
 ```
 
 2. Write alert:
@@ -462,11 +461,11 @@ reason: "both primary (claude) and fallback (deepseek) unavailable"
 
 **Time**: 2026-05-10 02:07
 **Paused on**: US-AUTH-003
-**Reason**: claude: token exhausted; deepseek: network error after 5 retries
+**Reason**: claude exited non-zero on 3 consecutive attempts
 
 **Action required** (choose one):
 - Top up credits and run: `roll loop resume`
-- Switch agent: edit `~/.roll/config.yaml` → `loop.primary_agent`
+- Switch agent: edit `~/.roll/config.yaml` → `primary_agent`
 - Take over manually: `$roll-build US-AUTH-003`
 ```
 

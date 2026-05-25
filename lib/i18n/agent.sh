@@ -1,0 +1,21 @@
+
+_i18n_set en agent.agent_set_to_for_this_project "Agent set to %s for this project"
+_i18n_set zh agent.agent_set_to_for_this_project "当前项目 agent 已设为 %s"
+_i18n_set en agent.loop_runner_scripts_regenerated_for_new "Loop runner scripts regenerated for new agent"
+_i18n_set zh agent.loop_runner_scripts_regenerated_for_new "已为新 agent 重新生成 loop 脚本"
+_i18n_set en agent.launchd_plists_installed_updated_launchagents "Launchd plists installed (%s updated)  LaunchAgents"
+_i18n_set zh agent.launchd_plists_installed_updated_launchagents "已安装"
+_i18n_set en agent.run_roll_loop_on_to_activate "  Run: roll loop on  to activate"
+_i18n_set zh agent.run_roll_loop_on_to_activate "运行 roll loop on 激活"
+_i18n_set en agent.launchd_plists_up_to_date_launchagents "Launchd plists up to date  LaunchAgents"
+_i18n_set zh agent.launchd_plists_up_to_date_launchagents "无需更新"
+
+_i18n_set en agent.hourly_at_02d "Hourly at :%02d"
+_i18n_set zh agent.hourly_at_02d "每小時 :%02d"
+_i18n_set en agent.every_d_min_s "Every %d min (%s)"
+_i18n_set zh agent.every_d_min_s "每%d分鐘 (%s)"
+
+_i18n_set en agent.not_found_in_path_setting_anyway "%s not found in PATH — setting anyway"
+_i18n_set zh agent.not_found_in_path_setting_anyway "未找到 %s，仍写入配置"
+_i18n_set en agent.available_agents "Available agents"
+_i18n_set zh agent.available_agents "可用 agent"

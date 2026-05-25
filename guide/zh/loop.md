@@ -209,7 +209,7 @@ PR 等合并）每 30–60s 还会 emit 一次 `phase_tick` 心跳，tmux 不再
 | 1 | `startup` | env / lock / 心跳启动 | < 1 秒 |
 | 2 | `preflight` | 清理已合并的临时分支 + 找回上轮孤儿 worktree | 0 – 30 秒 |
 | 3 | `worktree_setup` | fetch origin + 建 worktree + 同步 meta | 2 – 10 秒 |
-| 4 | `claude_invoke` | 调起 Claude（最多三次重试） | 5 – 45 分钟 |
+| 4 | `agent_invoke` | 调起 agent（最多三次重试） | 5 – 45 分钟 |
 | 5 | `publish_push` | push 分支 + 建 PR（doc-only 直接合） | 5 – 30 秒 |
 | 6 | `publish_wait_merge` | 轮询直到 PR 合并（doc-only 跳过） | 0 – 10 分钟 |
 | 7 | `cleanup` | 落 PR 终态 + 拆 worktree | < 1 秒 |
@@ -219,7 +219,7 @@ cycle 收尾时 inner runner 在 stdout 打一份按耗时降序的面板：
 
 ```
 ─── Cycle 20260523-114502-12345 Phase Breakdown ───
-  claude_invoke           723s  ( 96.2%)  ████████████████████
+  agent_invoke           723s  ( 96.2%)  ████████████████████
   publish_wait_merge       19s  (  2.5%)  █
   worktree_setup            4s  (  0.5%)
   publish_push              2s  (  0.3%)

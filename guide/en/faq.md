@@ -464,7 +464,7 @@ or `slowest=pr-wait 80%` on one that seemed to finish quickly. You want to
 know which step ate the time before deciding whether to tune anything.
 
 **Why this matters:** Every cycle is sliced into seven named phases
-(`startup` / `preflight` / `worktree_setup` / `claude_invoke` / `publish_push` /
+(`startup` / `preflight` / `worktree_setup` / `agent_invoke` / `publish_push` /
 `publish_wait_merge` / `cleanup`). The top-line duration alone hides which
 one dominated.
 
@@ -474,7 +474,7 @@ one dominated.
 2. Print the full breakdown with `roll loop runs --detail <cycle_id>` — phases
    are sorted descending with seconds, percentage, and a bar chart.
 3. Common patterns:
-   - `claude_invoke` dominating → expected for a multi-file story; nothing
+   - `agent_invoke` dominating → expected for a multi-file story; nothing
      to tune unless you can split the story.
    - `publish_wait_merge` > 5 min → CI is slow or auto-merge is gated on a
      missing review; check the PR directly.

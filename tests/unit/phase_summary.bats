@@ -46,18 +46,18 @@ teardown() { unit_teardown; }
 }
 
 @test "_print_phase_breakdown sorts phases by duration desc" {
-  _PHASE_NAMES_DONE=" startup preflight claude_invoke cleanup"
+  _PHASE_NAMES_DONE=" startup preflight agent_invoke cleanup"
   _PHASE_DUR_startup=1
   _PHASE_DUR_preflight=3
-  _PHASE_DUR_claude_invoke=120
+  _PHASE_DUR_agent_invoke=120
   _PHASE_DUR_cleanup=1
   CYCLE_ID="test-cycle-1"
   run _print_phase_breakdown
   [ "$status" -eq 0 ]
-  # First non-header phase row should be claude_invoke (largest)
+  # First non-header phase row should be agent_invoke (largest)
   local first_phase
   first_phase=$(echo "$output" | grep -E '^\s{2}[a-z_]+' | head -1 | awk '{print $1}')
-  [ "$first_phase" = "claude_invoke" ]
+  [ "$first_phase" = "agent_invoke" ]
   [[ "$output" == *"Total"* ]]
 }
 
@@ -72,9 +72,9 @@ teardown() { unit_teardown; }
   CYCLE_ID="20260523-100000-1"
   CYCLE_START=$(date +%s)
   local dst="${_SHARED_ROOT}/loop/runs.jsonl"
-  _runs_append "done" 2 '["US-LOOP-008"]' '{"startup":1,"claude_invoke":120}'
+  _runs_append "done" 2 '["US-LOOP-008"]' '{"startup":1,"agent_invoke":120}'
   [ -f "$dst" ]
-  jq -e '.phases.startup == 1 and .phases.claude_invoke == 120' "$dst"
+  jq -e '.phases.startup == 1 and .phases.agent_invoke == 120' "$dst"
   jq -e '.status == "done" and .built[0] == "US-LOOP-008"' "$dst"
 }
 

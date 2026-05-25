@@ -215,7 +215,7 @@ so the tmux viewer never looks frozen.
 | 1 | `startup` | env / lock / heartbeat setup | < 1 s |
 | 2 | `preflight` | stale-branch GC + orphan-worktree recovery | 0 s — 30 s |
 | 3 | `worktree_setup` | fetch origin + worktree create + meta sync | 2 – 10 s |
-| 4 | `claude_invoke` | Claude executes with up to 3 retries | 5 – 45 min |
+| 4 | `agent_invoke` | Agent executes with up to 3 retries | 5 – 45 min |
 | 5 | `publish_push` | push branch + open PR (or doc-only merge) | 5 – 30 s |
 | 6 | `publish_wait_merge` | poll until PR is MERGED (skipped for doc-only) | 0 – 10 min |
 | 7 | `cleanup` | emit PR final state + worktree teardown | < 1 s |
@@ -226,7 +226,7 @@ duration descending, e.g.:
 
 ```
 ─── Cycle 20260523-114502-12345 Phase Breakdown ───
-  claude_invoke           723s  ( 96.2%)  ████████████████████
+  agent_invoke           723s  ( 96.2%)  ████████████████████
   publish_wait_merge       19s  (  2.5%)  █
   worktree_setup            4s  (  0.5%)
   publish_push              2s  (  0.3%)

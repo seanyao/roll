@@ -10,6 +10,31 @@ _run_fixture() {
   ROLL_RENDER_FIXTURE=1 run python3 "${LIB}/roll-home.py" --no-color "$@"
 }
 
+@test "roll-home _project_slug matches roll-loop-status project_slug (no slug drift)" {
+  # Regression for FIX-H 2026-05-25: lib/roll-home.py kept the path-based
+  # slug after US-OBS-010 migrated bin/roll + lib/roll-loop-status.py to
+  # remote-URL-based. Result: `roll` home dash looked for plists at the
+  # old slug while `roll loop status` looked at the new slug — the home
+  # banner reported "missing" while the loop was actually healthy.
+  # Both modules must agree.
+  cd "${BATS_TEST_DIRNAME}/../.."
+  local home_slug status_slug
+  home_slug=$(python3 -c "
+import importlib.util
+spec = importlib.util.spec_from_file_location('rh', '${LIB}/roll-home.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._project_slug())
+")
+  status_slug=$(python3 -c "
+import importlib.util
+spec = importlib.util.spec_from_file_location('rls', '${LIB}/roll-loop-status.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.project_slug())
+")
+  [ -n "$home_slug" ]
+  [ "$home_slug" = "$status_slug" ]
+}
+
 @test "roll-home fixture --no-color: exits 0 and has identity line" {
   _run_fixture
   [ "$status" -eq 0 ]

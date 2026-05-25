@@ -6096,6 +6096,7 @@ cmd_loop() {
     status)  _loop_status "$@" ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
+    log)     _loop_log "$@" ;;
     events)  _loop_event_log "${1:-20}" ;;
     attach)  _loop_attach ;;
     mute)    _loop_mute ;;
@@ -6108,7 +6109,7 @@ cmd_loop() {
     precheck-ci)  _loop_precheck_ci ;;
     branches)     _loop_branches "$(pwd -P)" ;;
     *)  cat <<'HELP'
-Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci|branches>
+Usage: roll loop <on|off|now|test|status|monitor|runs|log|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci|branches>
 
   on            Install launchd scheduler (loop + dream + brief)
   off           Remove launchd scheduler
@@ -6117,6 +6118,7 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|
   status        Show scheduler state and current loop state
   monitor       Live dashboard: launchd status, queue, recent runs
   runs [N]      Show last N run summaries (default 10)
+  log [id]      Show per-cycle log (default: latest; optional cycle-id or prefix)
   events [N]    Show last N cycle events (default 20)
   attach        Attach to running loop tmux session (Ctrl-B D to detach)
   mute          Suppress auto-attach popup
@@ -6789,6 +6791,68 @@ _loop_tcr_count() {
   local started_at="$1"
   git log --all --oneline --since="${started_at}" 2>/dev/null \
     | awk '/^[a-f0-9]+ tcr:/{n++} END{print n+0}'
+}
+
+# US-LOOP-016: display a single cycle log with header.
+_loop_log_show() {
+  local file="$1"
+  local id; id=$(basename "$file" .log)
+  local ts; ts=$(echo "$id" | sed 's/^\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)-\([0-9]\{2\}\)\([0-9]\{2\}\).*/\1-\2-\3 \4:\5/')
+  printf '# cycle %s · %s\n' "$id" "$ts"
+  cat "$file"
+}
+
+# US-LOOP-016: roll loop log [cycle-id] — view per-cycle logs.
+_loop_log() {
+  local project_path; project_path=$(pwd -P)
+  local logs_dir="${project_path}/.roll/cycle-logs"
+  local query="${1:-}"
+
+  # Directory missing or empty — friendly message.
+  if [[ ! -d "$logs_dir" ]] || [[ -z "$(ls -A "$logs_dir" 2>/dev/null)" ]]; then
+    echo "No cycle logs found — run 'roll loop now' first  尚无 cycle 日志 — 请先运行 'roll loop now'"
+    return 0
+  fi
+
+  if [[ -z "$query" ]]; then
+    # No argument: find latest .log by mtime.
+    local latest; latest=$(ls -t "$logs_dir"/*.log 2>/dev/null | head -1)
+    if [[ -z "$latest" ]]; then
+      echo "No cycle logs found — run 'roll loop now' first  尚无 cycle 日志 — 请先运行 'roll loop now'"
+      return 0
+    fi
+    _loop_log_show "$latest"
+    return 0
+  fi
+
+  # Exact match first.
+  local exact="${logs_dir}/${query}.log"
+  if [[ -f "$exact" ]]; then
+    _loop_log_show "$exact"
+    return 0
+  fi
+
+  # Prefix match: glob for query*.log files.
+  local matches; matches=$(ls "$logs_dir/${query}"*.log 2>/dev/null || true)
+  local count=0
+  if [[ -n "$matches" ]]; then
+    count=$(echo "$matches" | wc -l | tr -d ' ')
+    count=$((count))
+  fi
+
+  if [[ "$count" -eq 0 ]]; then
+    echo "No cycle log matching '${query}'  未找到匹配 '${query}' 的 cycle 日志"
+    return 1
+  elif [[ "$count" -eq 1 ]]; then
+    _loop_log_show "$matches"
+    return 0
+  else
+    echo "Ambiguous prefix '${query}' — matches ${count} logs:  前缀 '${query}' 匹配多个日志:"
+    echo "$matches" | while IFS= read -r f; do
+      echo "  $(basename "$f" .log)"
+    done
+    return 1
+  fi
 }
 
 # Parse origin remote URL → "owner/repo" for GitHub repos.

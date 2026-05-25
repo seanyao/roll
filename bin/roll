@@ -5436,6 +5436,17 @@ _runs_append "failed" 0 "[]" "\$_phases_t" 2>/dev/null || true
     _phases_t=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_t" ] && _phases_t='{}'
     _runs_append "aborted" 0 "[]" "\$_phases_t" 2>/dev/null || true
   fi
+  # US-LOOP-015: process cycle raw log — strip ANSI, remove CR, rotate
+  if [ -n "\${ROLL_CYCLE_LOG_RAW:-}" ] && [ -f "\$ROLL_CYCLE_LOG_RAW" ]; then
+    _log_dir="${project_path}/.roll/cycle-logs"
+    mkdir -p "\$_log_dir"
+    sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/\r$//' "\$ROLL_CYCLE_LOG_RAW" \
+      > "\${_log_dir}/\${CYCLE_ID}.log" 2>/dev/null || true
+    rm -f "\$ROLL_CYCLE_LOG_RAW"
+    # Rotate: keep newest ROLL_CYCLE_LOG_KEEP (default 50) .log files
+    _keep="\${ROLL_CYCLE_LOG_KEEP:-50}"
+    ( cd "\$_log_dir" && ls -t *.log 2>/dev/null | tail -n +\$((_keep + 1)) | xargs -r rm -f ) 2>/dev/null || true
+  fi
   rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"
   exit "\$_rc"
 }
@@ -5859,7 +5870,10 @@ if command -v tmux >/dev/null 2>&1; then
     tmux kill-session -t "\$_s" 2>/dev/null || true
   done
   tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
-  tmux pipe-pane -t "\$SESSION" "cat >> \"\$LOG\""
+  CYCLE_LOG_RAW="${project_path}/.roll/cycle-logs/.pipe-\$\$.raw"
+  mkdir -p "${project_path}/.roll/cycle-logs"
+  export ROLL_CYCLE_LOG_RAW="\$CYCLE_LOG_RAW"
+  tmux pipe-pane -t "\$SESSION" "tee -a \"\$LOG\" >> \"\$ROLL_CYCLE_LOG_RAW\""
   # Auto-attach popup: when not muted, spawn a Terminal.app window attached
   # to the tmux session so the user can watch the loop work in real time.
   # FIX-054: terminal selection removed — fixed to macOS Terminal.app for

@@ -7724,6 +7724,33 @@ _worktree_merge_back() {
     _worktree_alert "pull --ff-only origin main failed (remote diverged?)"
     return 1
   fi
+  # FIX-E (2026-05-25): only doc-only branches may take the ff-merge fast path.
+  # Code changes must go through PR + CI; bypassing that gate has caused
+  # cycle commits to land on main with red CI, undetected. The check is the
+  # same one publish_push uses for the doc-vs-code split; here we apply it
+  # to the loop branch's diff against the (already-pulled) main HEAD so the
+  # bypass is also closed in the gh-unavailable fallback path. The ALERT
+  # body is targeted at the next cycle's agent (human-on-the-loop), telling
+  # it how to retry through the normal flow rather than waiting for a human.
+  local _changed
+  _changed=$(git diff --name-only HEAD.."$branch" 2>/dev/null)
+  if [ -n "$_changed" ] \
+     && echo "$_changed" | grep -qvE '^(\.roll/|CHANGELOG\.md|guide/|site/|\.claude/|BACKLOG\.md|PROPOSALS\.md|docs/)'; then
+    _worktree_alert "$(printf '%s\n' \
+      "## PRIOR CYCLE FAILED PUBLISH — REQUIRES NORMAL PR FLOW (FIX-E)" \
+      "branch: ${branch}" \
+      "reason: _loop_publish_pr failed (gh unavailable / API error); ff-merge" \
+      "        fallback was refused because the branch contains code changes." \
+      "        Code must not bypass PR+CI." \
+      "" \
+      "next-cycle action (agent reads this and retries automatically):" \
+      "  1. SKIP normal Todo scan this cycle." \
+      "  2. git push origin ${branch}" \
+      "  3. gh pr create --base main --head ${branch}" \
+      "  4. gh pr merge ${branch} --auto --squash --delete-branch" \
+      "  5. exit cleanly so CI runs and auto-merge takes over.")"
+    return 1
+  fi
   if ! git merge --ff-only "$branch" --quiet 2>/dev/null; then
     _worktree_alert "merge --ff-only ${branch} failed (not fast-forwardable from main)"
     return 1

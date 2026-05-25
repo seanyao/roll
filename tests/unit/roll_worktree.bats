@@ -239,15 +239,16 @@ teardown() {
 
 # --- _worktree_merge_back ---
 
-@test "_worktree_merge_back: ff-only success — worktree commit reaches main and origin" {
+@test "_worktree_merge_back: ff-only success for doc-only branch — commit reaches main and origin" {
   local wt; wt=$(_worktree_path "test" "US-FF")
   _worktree_create "$wt" "loop/US-FF" "main"
 
-  # Make a commit on the worktree's branch
+  # Doc-only commit (FIX-E: ff-merge fast path is now restricted to doc paths).
   ( cd "$wt" \
-      && echo "hello" > new.txt \
-      && git add new.txt \
-      && git commit -q -m "work commit" )
+      && mkdir -p docs \
+      && echo "hello" > docs/new.md \
+      && git add docs/new.md \
+      && git commit -q -m "doc: add note" )
 
   local main_head_before; main_head_before=$(git rev-parse HEAD)
 
@@ -258,12 +259,45 @@ teardown() {
   # Main has advanced (got the worktree's commit)
   local main_head_after; main_head_after=$(git rev-parse HEAD)
   [ "$main_head_before" != "$main_head_after" ]
-  [ -f new.txt ]
+  [ -f docs/new.md ]
 
   # Origin has the new commit too
   git fetch origin --quiet
   local origin_main; origin_main=$(git rev-parse origin/main)
   [ "$main_head_after" = "$origin_main" ]
+}
+
+# Regression for FIX-E 2026-05-25: code changes must not bypass PR+CI gate
+# via _worktree_merge_back's ff-push fallback. The 12:15 pi cycle landed
+# 3 commits on origin/main this way and turned CI red unnoticed.
+@test "_worktree_merge_back: code change branch is refused — main untouched, ALERT for next-cycle retry" {
+  local wt; wt=$(_worktree_path "test" "US-CODE")
+  _worktree_create "$wt" "loop/US-CODE" "main"
+
+  # Code commit: anything outside the doc allowlist counts (bin/, lib/, tests/, ...).
+  ( cd "$wt" \
+      && mkdir -p bin \
+      && echo "echo hi" > bin/new-tool.sh \
+      && git add bin/new-tool.sh \
+      && git commit -q -m "feat: new tool" )
+
+  local main_head_before; main_head_before=$(git rev-parse HEAD)
+  local origin_before; origin_before=$(git ls-remote origin main | awk '{print $1}')
+
+  run _worktree_merge_back "loop/US-CODE"
+  [ "$status" -eq 1 ]
+
+  # Main untouched locally and on origin.
+  local main_head_after; main_head_after=$(git rev-parse HEAD)
+  [ "$main_head_before" = "$main_head_after" ]
+  local origin_after; origin_after=$(git ls-remote origin main | awk '{print $1}')
+  [ "$origin_before" = "$origin_after" ]
+
+  # ALERT contains the human-on-the-loop retry script for the next cycle.
+  [ -f "$_LOOP_ALERT" ]
+  grep -qF 'FIX-E' "$_LOOP_ALERT"
+  grep -qF 'gh pr create --base main --head loop/US-CODE' "$_LOOP_ALERT"
+  grep -qF 'gh pr merge loop/US-CODE --auto --squash --delete-branch' "$_LOOP_ALERT"
 }
 
 @test "_worktree_merge_back: ff-only failure when main diverged — alert written, returns 1" {

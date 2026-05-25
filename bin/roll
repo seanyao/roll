@@ -6096,7 +6096,7 @@ cmd_loop() {
     status)  _loop_status "$@" ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
-    log)     shift; _loop_log "$@" ;;
+    log)     _loop_log "$@" ;;
     events)  _loop_event_log "${1:-20}" ;;
     attach)  _loop_attach ;;
     mute)    _loop_mute ;;

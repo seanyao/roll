@@ -19,7 +19,7 @@ _mklog() {
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 
 @test "cmd_loop routes 'log' to _loop_log" {
-  grep -qE 'log\)[[:space:]]+shift; _loop_log' "$ROLL_BIN"
+  grep -qE 'log\)[[:space:]]+_loop_log' "$ROLL_BIN"
 }
 
 @test "cmd_loop usage line lists 'log'" {

@@ -4551,6 +4551,144 @@ PYEOF
   rm -f "${loop_dir}/run-${old_slug}.sh" "${loop_dir}/run-${old_slug}-inner.sh"
 }
 
+# US-OBS-010: path-based slug (without remote URL) — used to detect the
+# pre-remote slug so migration can merge old records into the new identity.
+_project_slug_path_based() {
+  local path="${1:-$(pwd -P 2>/dev/null || pwd)}"
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    local _canon
+    _canon=$(realpath "$path" 2>/dev/null) && path="$_canon"
+  fi
+  local _common
+  _common=$(git -C "$path" rev-parse --git-common-dir 2>/dev/null)
+  if [[ -n "$_common" && "$_common" == *"/.git" ]]; then
+    path="${_common%/.git}"
+  fi
+  local base; base=$(basename "$path")
+  local hash
+  if command -v md5 &>/dev/null; then
+    hash=$(printf '%s' "$path" | md5 | cut -c1-6)
+  else
+    hash=$(printf '%s' "$path" | md5sum | cut -c1-6)
+  fi
+  base=$(printf '%s' "$base" | tr -cs '[:alnum:]' '-' | sed 's/-*$//')
+  printf '%s' "${base}-${hash}"
+}
+
+# US-OBS-010: migrate loop records from old path-based slug to new
+# remote-based slug.  Dedup by run_id; atomic cp→tmp→mv; keep old as .bak.
+#
+# Usage: _slug_migrate_to_remote <project_path> [<loop_dir>]
+_slug_migrate_to_remote() {
+  local project_path="$1"
+  local loop_dir="${2:-${_SHARED_ROOT}/loop}"
+
+  local new_slug; new_slug=$(_project_slug "$project_path")
+  local old_slug; old_slug=$(_project_slug_path_based "$project_path")
+
+  # Dedup guard: no migration needed
+  [[ "$old_slug" == "$new_slug" ]] && return 0
+  [[ -f "${loop_dir}/events-${old_slug}.ndjson" ]] || return 0
+
+  printf 'roll: migrating loop records %s → %s (cross-machine slug)\n' "$old_slug" "$new_slug" >&2
+
+  # Migrate events with run_id dedup + atomic write
+  local events_file="${loop_dir}/events-${new_slug}.ndjson"
+  local tmp_events; tmp_events=$(mktemp)
+
+  # Collect existing run_ids from new slug file
+  local existing_ids=""
+  if [[ -f "$events_file" ]]; then
+    existing_ids=$(python3 -c "
+import json, sys
+try:
+    with open('$events_file') as f:
+        for line in f:
+            d = json.loads(line.strip())
+            if 'label' in d:
+                print(d['label'])
+except: pass
+" 2>/dev/null)
+  fi
+
+  # Append old events to new, dedup by label (run_id / cycle_id)
+  python3 - "$old_slug" "$events_file" "$tmp_events" << 'PYEOF'
+import json, sys
+old_slug, new_file, tmp_file = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# Read existing new-file ids
+seen = set()
+try:
+    with open(new_file) as f:
+        for line in f:
+            d = json.loads(line.strip())
+            if 'label' in d:
+                seen.add(d['label'])
+except FileNotFoundError:
+    pass
+
+# Append old events, deduped
+old_file = new_file.replace(new_file.split('-')[-1].split('.')[0], old_slug)
+with open(tmp_file, 'w') as out:
+    # Copy existing new file
+    try:
+        with open(new_file) as f:
+            out.write(f.read())
+    except FileNotFoundError:
+        pass
+    # Append old events not yet seen
+    old_path = '/'.join(new_file.rsplit('/', 1)[:-1] + [f'events-{old_slug}.ndjson'])
+    try:
+        with open(old_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
+                lid = d.get('label', '')
+                if lid not in seen:
+                    seen.add(lid)
+                    out.write(json.dumps(d) + '\n')
+    except FileNotFoundError:
+        pass
+PYEOF
+
+  # Atomic replace
+  mv "$tmp_events" "$events_file"
+
+  # Keep old events as .bak (do not delete)
+  cp "${loop_dir}/events-${old_slug}.ndjson" "${loop_dir}/events-${old_slug}.ndjson.bak"
+  rm "${loop_dir}/events-${old_slug}.ndjson"
+
+  # Migrate runs.jsonl: rewrite project field + dedup by run_id
+  local runs_file="${loop_dir}/runs.jsonl"
+  if [[ -f "$runs_file" ]]; then
+    local tmp; tmp=$(mktemp)
+    python3 - "$old_slug" "$new_slug" "$runs_file" > "$tmp" << 'PYEOF'
+import json, sys
+old, new, path = sys.argv[1], sys.argv[2], sys.argv[3]
+seen = set()
+with open(path) as f:
+    for line in f:
+        line = line.rstrip('\n')
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+            if 'project' in d and old in str(d['project']):
+                d['project'] = str(d['project']).replace(old, new)
+            rid = d.get('run_id', '')
+            if rid in seen:
+                continue
+            seen.add(rid)
+            print(json.dumps(d))
+        except Exception:
+            print(line)
+PYEOF
+    mv "$tmp" "$runs_file"
+  fi
+}
+
 _LOOP_TAG="# roll-loop"
 # FIX-065: when sourced in a test context with no explicit override, route
 # shared state into a per-process /tmp path instead of falling back to
@@ -5808,6 +5946,9 @@ _install_launchd_plists() {
   # FIX-058: after FIX-056 introduced realpath normalization, the slug for an
   # existing project may have changed.  Migrate state before creating new files.
   _slug_migrate_from_legacy "$slug" "${shared}/loop"
+  # US-OBS-010: when slug changed from path-based to remote-based, merge
+  # old records into the new identity (dedup, atomic, .bak backup)
+  _slug_migrate_to_remote "$project_path" "${shared}/loop"
   for i in "${!services[@]}"; do
     local svc="${services[$i]}"
     local skill="${skill_names[$i]}"

@@ -197,3 +197,111 @@ teardown() {
   git -C "$main" worktree remove "$wt" --force 2>/dev/null || true
   git -C "$main" branch -D obs010-wt-branch 2>/dev/null || true
 }
+
+# ─── Migration: _slug_migrate_to_remote ────────────────────────────────────
+
+@test "_slug_migrate_to_remote: function exists" {
+  declare -f _slug_migrate_to_remote >/dev/null
+}
+
+@test "_slug_migrate_to_remote: no-ops when old and new slugs are identical" {
+  local proj="${TEST_TMP}/obs010-mig-same"
+  mkdir -p "$proj"
+  git -C "$proj" init
+  # No remote → path-based slug. Both old (path) and new (path) are same.
+  local loop_dir="${TEST_TMP}/loop"
+  mkdir -p "$loop_dir"
+
+  # Create a dummy old events file (same slug)
+  local slug; slug=$(_project_slug "$proj")
+  echo '{"ts":"2026-01-01T00:00:00Z","label":"test-1"}' > "${loop_dir}/events-${slug}.ndjson"
+
+  run _slug_migrate_to_remote "$proj" "$loop_dir"
+  [ "$status" -eq 0 ]
+  # File untouched (no .bak created)
+  [ -f "${loop_dir}/events-${slug}.ndjson" ]
+  [ ! -f "${loop_dir}/events-${slug}.ndjson.bak" ]
+}
+
+@test "_slug_migrate_to_remote: migrates events from old path slug to new remote slug" {
+  local proj="${TEST_TMP}/obs010-mig-events"
+  mkdir -p "$proj"
+  git -C "$proj" init
+  git -C "$proj" remote add origin "https://github.com/org/mig-repo.git"
+
+  local loop_dir="${TEST_TMP}/loop"
+  mkdir -p "$loop_dir"
+
+  local new_slug; new_slug=$(_project_slug "$proj")
+  local old_slug; old_slug=$(_project_slug_path_based "$proj")
+  echo "old=$old_slug new=$new_slug"
+
+  # Old slug and new slug should differ (path-based vs remote-based)
+  [ "$old_slug" != "$new_slug" ]
+
+  # Create old events file
+  echo '{"ts":"2026-01-01T00:00:00Z","label":"cycle-1"}' > "${loop_dir}/events-${old_slug}.ndjson"
+  echo '{"ts":"2026-01-02T00:00:00Z","label":"cycle-2"}' >> "${loop_dir}/events-${old_slug}.ndjson"
+
+  run _slug_migrate_to_remote "$proj" "$loop_dir"
+  [ "$status" -eq 0 ]
+
+  # New file should exist with migrated events
+  [ -f "${loop_dir}/events-${new_slug}.ndjson" ]
+
+  # Old file backed up as .bak, original removed
+  [ -f "${loop_dir}/events-${old_slug}.ndjson.bak" ]
+  [ ! -f "${loop_dir}/events-${old_slug}.ndjson" ]
+}
+
+@test "_slug_migrate_to_remote: deduplicates events by label (run_id)" {
+  local proj="${TEST_TMP}/obs010-mig-dedup"
+  mkdir -p "$proj"
+  git -C "$proj" init
+  git -C "$proj" remote add origin "https://github.com/org/dedup-repo.git"
+
+  local loop_dir="${TEST_TMP}/loop"
+  mkdir -p "$loop_dir"
+
+  local new_slug; new_slug=$(_project_slug "$proj")
+  local old_slug; old_slug=$(_project_slug_path_based "$proj")
+
+  # Create new events file with cycle-1
+  echo '{"ts":"2026-01-01T00:00:00Z","label":"cycle-1","msg":"new"}' > "${loop_dir}/events-${new_slug}.ndjson"
+
+  # Create old events file with cycle-1 (dup) and cycle-2 (new)
+  echo '{"ts":"2026-01-01T00:00:00Z","label":"cycle-1","msg":"old"}' > "${loop_dir}/events-${old_slug}.ndjson"
+  echo '{"ts":"2026-01-02T00:00:00Z","label":"cycle-2","msg":"old"}' >> "${loop_dir}/events-${old_slug}.ndjson"
+
+  run _slug_migrate_to_remote "$proj" "$loop_dir"
+  [ "$status" -eq 0 ]
+
+  # Should have 2 events (cycle-1 from new file, cycle-2 from old)
+  local count
+  count=$(grep -c . "${loop_dir}/events-${new_slug}.ndjson" 2>/dev/null || echo 0)
+  [ "$count" -eq 2 ]
+
+  # cycle-1 should be the "new" version (existing record wins)
+  grep -q '"msg":"new"' "${loop_dir}/events-${new_slug}.ndjson"
+}
+
+@test "_slug_migrate_to_remote: idempotent — second run no-ops" {
+  local proj="${TEST_TMP}/obs010-mig-idem"
+  mkdir -p "$proj"
+  git -C "$proj" init
+  git -C "$proj" remote add origin "https://github.com/org/idem-repo.git"
+
+  local loop_dir="${TEST_TMP}/loop"
+  mkdir -p "$loop_dir"
+
+  local old_slug; old_slug=$(_project_slug_path_based "$proj")
+
+  echo '{"ts":"2026-01-01T00:00:00Z","label":"cycle-1"}' > "${loop_dir}/events-${old_slug}.ndjson"
+
+  # First migration
+  _slug_migrate_to_remote "$proj" "$loop_dir"
+
+  # Second run: old events file is gone (moved to .bak), so nothing to do
+  run _slug_migrate_to_remote "$proj" "$loop_dir"
+  [ "$status" -eq 0 ]
+}

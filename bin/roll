@@ -3073,18 +3073,6 @@ _project_agent() {
   fi
 }
 
-_fallback_agent() {
-  local pref new_pref
-  new_pref=$(_project_agent_pref_file)
-  if [[ -f "$new_pref" ]] && grep -q "^fallback_agent:" "$new_pref" 2>/dev/null; then
-    grep "^fallback_agent:" "$new_pref" | awk '{print $2}' | tr -d '"' | head -1
-  elif [[ -f ".roll.yaml" ]] && grep -q "^fallback_agent:" .roll.yaml 2>/dev/null; then
-    grep "^fallback_agent:" .roll.yaml | awk '{print $2}' | tr -d '"' | head -1
-  elif [[ -f "$ROLL_CONFIG" ]] && grep -q "fallback_agent:" "$ROLL_CONFIG" 2>/dev/null; then
-    grep "fallback_agent:" "$ROLL_CONFIG" | awk '{print $2}' | tr -d '"' | head -1
-  fi
-}
-
 _skill_content() {
   # Strip YAML frontmatter (---...---) — it's roll-internal metadata, not agent instructions
   awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' "$1"
@@ -5054,21 +5042,6 @@ _write_loop_runner_script() {
     agent_cmd="${agent_cmd/--output-format stream-json/--output-format stream-json --add-dir \"\$WT\"}"
   fi
   local slug; slug=$(_project_slug "$project_path")
-  # FIX-115: build fallback agent command. When primary agent fails all 3
-  # attempts, the inner runner switches to this command for 3 more attempts.
-  local fallback_agent; fallback_agent=$(_fallback_agent)
-  local fallback_cmd=""
-  if [[ -n "$fallback_agent" ]]; then
-    local fallback_skill_file="${ROLL_HOME}/skills/roll-loop/SKILL.md"
-    if [[ -f "$fallback_skill_file" ]]; then
-      local fallback_prompt; fallback_prompt=$(_skill_content "$fallback_skill_file")
-      if _agent_argv "$fallback_agent" plain "$fallback_prompt" 2>/dev/null; then
-        _AGENT_ARGV[0]=$(command -v "${_AGENT_ARGV[0]}" 2>/dev/null || echo "${_AGENT_ARGV[0]}")
-        printf -v fallback_cmd '%q ' "${_AGENT_ARGV[@]}"
-        fallback_cmd="${fallback_cmd% }"
-      fi
-    fi
-  fi
   cat > "$inner_path" << INNER
 #!/bin/bash -l
 set -o pipefail
@@ -5478,10 +5451,6 @@ export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
 # rendering: claude → stream-json parser, others → transparent passthrough.
 export ROLL_LOOP_AGENT="\$(_project_agent)"
 _phase_begin agent_invoke
-# FIX-115: fallback agent support — when primary fails 3 attempts, try fallback 3 more
-FALLBACK_AGENT_NAME="${fallback_agent}"
-FALLBACK_CMD="${fallback_cmd}"
-_USE_FALLBACK=0
 for _attempt in 1 2 3; do
   # FIX-068: defensive reset before each attempt — _CYCLE_TIMED_OUT carries
   # the SIGTERM result of the previous attempt and would otherwise force an
@@ -5518,44 +5487,6 @@ for _attempt in 1 2 3; do
     sleep 30
   fi
 done
-
-# FIX-115: fallback agent retry — when primary fails all 3 attempts and a
-# fallback_agent is configured, try the fallback for 3 more attempts.
-if [ "\$_CYCLE_TIMED_OUT" -eq 0 ] && [ "\$_exit" -ne 0 ] && [ -n "\$FALLBACK_AGENT_NAME" ] && [ -n "\$FALLBACK_CMD" ]; then
-  _loop_event agent_switch "\$FALLBACK_AGENT_NAME" "" "primary failed after 3 attempts" || true
-  _loop_event agent_used "\${CYCLE_ID}" "\$FALLBACK_AGENT_NAME" "fallback" || true
-  echo "[loop] primary agent failed after 3 attempts — switching to fallback: \$FALLBACK_AGENT_NAME"
-  _USE_FALLBACK=1
-  # US-LOOP-010: tell loop-fmt which fallback agent is running so it renders
-  # correctly (passthrough for non-claude, stream-json for claude).
-  export ROLL_LOOP_AGENT="\$FALLBACK_AGENT_NAME"
-  for _attempt in 1 2 3; do
-    _CYCLE_TIMED_OUT=0
-    ( sleep "\$LOOP_CYCLE_TIMEOUT_SEC" && {
-        kill -TERM \$\$ 2>/dev/null
-        pkill -TERM -P \$\$ 2>/dev/null
-        pkill -TERM -f "\$WT" 2>/dev/null
-        sleep 5
-        pkill -KILL -P \$\$ 2>/dev/null
-        pkill -KILL -f "\$WT" 2>/dev/null
-      } ) &
-    _WATCHDOG_PID=\$!
-    if [ -f "\$FMT" ]; then
-      ( cd "\$WT" && \$FALLBACK_CMD ) | python3 "\$FMT"
-    else
-      ( cd "\$WT" && \$FALLBACK_CMD )
-    fi
-    _exit=\$?
-    kill "\$_WATCHDOG_PID" 2>/dev/null
-    wait "\$_WATCHDOG_PID" 2>/dev/null
-    [ "\$_CYCLE_TIMED_OUT" -eq 1 ] && break
-    [ "\$_exit" -eq 0 ] && break
-    if [ "\$_attempt" -lt 3 ]; then
-      echo "[loop] \$FALLBACK_AGENT_NAME exited \$_exit (attempt \$_attempt/3) — retrying in 30s..."
-      sleep 30
-    fi
-  done
-fi
 
 if [ "\$_CYCLE_TIMED_OUT" -eq 1 ] || [ "\$_exit" -ne 0 ]; then
   _phase_end agent_invoke fail

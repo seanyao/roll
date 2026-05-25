@@ -305,6 +305,61 @@ roll loop log <prefix>       # Prefix match (e.g. 20260525 matches all May 25 cy
 Cycle logs are stored inside `.roll/` (the project's meta directory) and are
 gitignored — they won't pollute your repo.
 
+## Cross-Machine Sync
+
+When you run loop on multiple machines for the same project, Roll can sync cycle
+records to a shared git repo. Every machine writes its own events file, and the
+dashboard reads all of them — you get a unified view of every cycle across every
+machine.
+
+### Setup
+
+Add a `roll_records_remote` field to `~/.roll/config.yaml`:
+
+```yaml
+roll_records_remote: "git@github.com:you/roll-loop-records.git"
+```
+
+**Private repo strongly recommended.** Cycle records contain prompt text, file
+paths, and other potentially sensitive information. Treat the records repo the
+same way you treat application logs — private, access-controlled, never public.
+
+If `roll_records_remote` is not configured, cross-machine sync is entirely
+skipped — no records leave your machine.
+
+### How it works
+
+- Each machine generates a unique machine-id (UUID v4) on first run, cached at
+  `~/.shared/roll/machine-id`.
+- Every cycle completion pushes an append-only `.ndjson` file to
+  `<slug>/events/<machine-id>.ndjson` in the records repo. Each machine only
+  writes to its own file — no merge conflicts.
+- Before rendering the dashboard, Roll runs `git pull --ff-only` on a local
+  clone at `~/.shared/roll/sync/`, reads every `*.ndjson` file, and merges
+  them sorted by timestamp with `run_id` deduplication.
+- Push and pull are best-effort background operations — if the remote is
+  unreachable, the cycle continues normally and the dashboard shows only
+  local data.
+
+### Dashboard sync indicator
+
+The dashboard footer shows one of three states:
+
+| Indicator | Meaning |
+|-----------|---------|
+| `sync: ok (2m ago)` | Remote reachable, records merged successfully |
+| `sync: offline` | Remote unreachable (network issue, auth expired) — showing local data only |
+| `sync: not configured` | `roll_records_remote` not set — sync is off, this is expected |
+
+### Fork caveat
+
+Roll derives the project slug from `git remote get-url origin`. If you change
+`origin` to point to a fork, the slug changes — records from the original repo
+and the fork will land in different directories in the records repo. This is
+intentional (different repos, different identities), but if you're temporarily
+working from a fork, be aware that the dashboard won't show the upstream's
+cycle history.
+
 ## State Files
 
 | File | Content |

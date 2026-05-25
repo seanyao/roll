@@ -292,6 +292,56 @@ roll loop log <前缀>         # 前缀匹配（如 20260525 匹配 5 月 25 日
 Cycle 日志存放在 `.roll/`（项目元数据目录）内，且已被 gitignore，
 不会污染你的代码仓库。
 
+## 跨机器同步
+
+如果你在多台机器上为同一个项目开启了 loop，Roll 可以把每台机器的 cycle
+记录同步到一个共享的 git 仓库。每台机器只写自己的事件文件、互不冲突，dashboard
+读取所有机器的记录合并显示——任一台机器都能看到完整的运行历史。
+
+### 配置
+
+在 `~/.roll/config.yaml` 中添加 `roll_records_remote` 字段：
+
+```yaml
+roll_records_remote: "git@github.com:you/roll-loop-records.git"
+```
+
+**强烈建议使用私有仓库。** Cycle 记录包含 prompt 文本、文件路径等可能敏感的
+信息。请将 records 仓库按日志级别对待——私有、访问受控、不公开。
+
+如果未配置 `roll_records_remote`，跨机器同步完全跳过——不会有任何记录离开
+你的本机。
+
+### 工作原理
+
+- 每台机器首次运行时生成唯一的 machine-id（UUID v4），缓存在
+  `~/.shared/roll/machine-id`。
+- 每轮 cycle 完成后，向 records 仓库推送一个只追加的 `.ndjson` 文件：
+  `<slug>/events/<machine-id>.ndjson`。每台机器只写自己的文件——不会产生
+  merge 冲突。
+- Dashboard 渲染前，Roll 在本地 clone（`~/.shared/roll/sync/`）执行
+  `git pull --ff-only`，读取所有 `*.ndjson` 文件，按时间戳排序并
+  以 `run_id` 去重后合并显示。
+- Push 和 pull 都是后台 best-effort 操作——如果远端不可达，cycle 照常执行，
+  dashboard 只显示本地数据。
+
+### Dashboard 同步状态指示器
+
+Dashboard 底部显示三种状态之一：
+
+| 指示器 | 含义 |
+|--------|------|
+| `sync: ok (2m ago)` | 远端可达，记录已成功合并 |
+| `sync: offline` | 远端不可达（网络问题、认证过期）——仅显示本地数据 |
+| `sync: not configured` | 未设置 `roll_records_remote`——同步已关闭，此状态为预期 |
+
+### Fork 注意事项
+
+Roll 根据 `git remote get-url origin` 推导项目 slug。如果你将 `origin` 改为指向
+fork，slug 会随之变化——原仓库和 fork 的记录会落到 records 仓库的不同目录中。
+这是有意为之（不同仓库 = 不同身份），但如果你临时从 fork 工作，请注意 dashboard
+不会显示上游仓库的 cycle 历史。
+
 ## 状态文件
 
 | 文件 | 内容 |

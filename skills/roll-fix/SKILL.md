@@ -100,13 +100,13 @@ Before creating any file or directory:
 ### 3. Test Design Review (TCR Core)
 
 ```
-🧪 Test Design for Fix:
+🧪 $(msg fix.test_design):
    
-   Verification Approach: {unit test | integration test | manual check}
+   $(msg fix.verification_approach): {unit test | integration test | manual check}
    
-   Test Scenarios:
-   ├── Fix verification: {how to confirm the fix works}
-   └── Regression check: {how to ensure we didn't break anything}
+   $(msg fix.test_scenarios):
+   ├── $(msg fix.fix_verification): {how to confirm the fix works}
+   └── $(msg fix.regression_check): {how to ensure we didn't break anything}
 ```
 
 **Reference `$roll-.qa` for test strategy:**
@@ -122,10 +122,10 @@ Before creating any file or directory:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ TCR CYCLE FOR FIX                                                    │
+│ $(msg fix.tcr_cycle)                                                 │
 └─────────────────────────────────────────────────────────────────────┘
 
-MICRO-STEP 1: {description of the fix}
+$(msg fix.micro_step 1 "{description of the fix}")
 
    Step 1: Write/Update Test
       └── Run test → Confirm RED (bug reproduced or test fails)
@@ -198,12 +198,12 @@ $roll-.review staged
 
 **Review Output:**
 ```
-🔍 Self Review Report
-├── Scope: X files (+Y/-Z lines)
-├── 🔴 Critical: N issues (must fix)
-├── 🟡 Warnings: N issues (should fix)
-├── 🟢 Suggestions: N items (optional)
-└── ✅ Passed dimensions: [...]
+🔍 $(msg fix.self_review)
+├── $(msg fix.scope): X files (+Y/-Z lines)
+├── 🔴 $(msg fix.critical): N issues (must fix)
+├── 🟡 $(msg fix.warnings): N issues (should fix)
+├── 🟢 $(msg fix.suggestions): N items (optional)
+└── ✅ $(msg fix.passed_dimensions): [...]
 ```
 
 **Review Dimensions** (correctness guaranteed by TCR):
@@ -269,17 +269,17 @@ Verify the shipped fix on the deployed target:
 **Fresh evidence** must be provided — claiming completion based on assumptions is not acceptable.
 
 ```
-🚦 Verification Gate
+🚦 $(msg build.verification_gate)
    
-   Evidence checklist (each item must have actual output):
-   ├── [ ] Tests pass: paste actual test run output
-   ├── [ ] Build succeeds: paste build output
-   ├── [ ] Issue resolved: screenshot / curl output / log excerpt as proof
-   └── [ ] No regression: verify at least one existing feature still works
+   $(msg build.evidence_checklist):
+   ├── [ ] $(msg build.tests_passed)
+   ├── [ ] $(msg build.build_succeeded)
+   ├── [ ] $(msg fix.issue_resolved): screenshot / curl output / log excerpt as proof
+   └── [ ] $(msg build.no_regression)
    
-   Gate Decision:
-   ├── ✅ All items have evidence → Can mark as DONE
-   └── ❌ Any item lacks evidence → Provide evidence before passing the gate
+   $(msg build.gate_decision):
+   ├── ✅ $(msg build.gate_pass)
+   └── ❌ $(msg build.gate_fail)
 ```
 
 **Hard Rule**: "I confirm tests passed" does not count as evidence. It must be **freshly run** command output from this session.

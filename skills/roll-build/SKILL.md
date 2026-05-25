@@ -90,16 +90,16 @@ git worktree add .worktrees/{action-id} -b dispatch/{action-id}
 **Status notifications (required):**
 
 ```
-🔀 Parallel Dispatch: N Actions running in parallel
+🔀 $(msg build.parallel_dispatch N)
 
-  Agent 1 [Action: ...]  ⏳ Running...
-  Agent 2 [Action: ...]  ⏳ Running...
+  $(msg build.agent_running 1 "...")
+  $(msg build.agent_running 2 "...")
 
-  Agent 1 [Action: ...]  ✅ Done (N TCR commits)
-  Agent 2 [Action: ...]  ✅ Done (N TCR commits)
+  $(msg build.agent_done 1 "..." N)
+  $(msg build.agent_done 2 "..." N)
 
-🔀 Merge: N/N succeeded, merging...
-🧪 Integration tests: running...
+🔀 $(msg build.merge_summary N N)
+🧪 $(msg build.integration_tests)
 ```
 
 When parallel conditions are not met, execute Actions sequentially.
@@ -123,9 +123,9 @@ Activate when input does not match any `US-XXX` / `FIX-XXX` pattern, or when no 
 Before any code, assess clarity:
 
 ```
-🎯 Clarified Goal: {1-2 sentences capturing user intent}
-📏 Complexity Assessment: {small|medium|large}
-🔍 Uncertainty Areas: {list what needs investigation/decision}
+🎯 $(msg build.clarified_goal): {1-2 sentences capturing user intent}
+📏 $(msg build.complexity_assessment): {small|medium|large}
+🔍 $(msg build.uncertainty_areas): {list what needs investigation/decision}
 ```
 
 **If uncertainty areas are non-empty or the request is vague, auto-trigger `$roll-.clarify`:**
@@ -138,11 +138,11 @@ Before any code, assess clarity:
 If the request involves any of: output format, layout, automation level (manual vs automatic), or architecture structure — output a confirmation block **before writing any code**:
 
 ```
-📐 Approach Confirmation
+📐 $(msg build.approach_confirmation)
 
-   1. What changes: {what will be built or modified}
-   2. The approach: {specific format / automation level / structure chosen}
-   3. Files touched: {list of files}
+   1. $(msg build.what_changes): {what will be built or modified}
+   2. $(msg build.the_approach): {specific format / automation level / structure chosen}
+   3. $(msg build.files_touched): {list of files}
 
    Proceeding unless you say otherwise.
 ```
@@ -205,14 +205,14 @@ Press Enter to launch peer review, or type 'n' to skip. Auto-executing in 10s...
 Before writing implementation code:
 
 ```
-🧪 Test Design for Action: {Action name}
+🧪 $(msg build.test_design): {Action name}
 
-   Scenarios:
+   $(msg build.scenarios):
    ├── {Happy path scenario}
    ├── {Edge case scenario}
    └── {Failure/regression scenario}
 
-   Test Types:
+   $(msg build.test_types):
    ├── Unit tests for: {logic components}
    ├── Integration tests for: {API/data flows}
    └── Manual verification for: {UI/visual elements}
@@ -231,10 +231,10 @@ Reference `$roll-.qa` for coverage requirements and test pyramid strategy.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  TCR CYCLE (Test && Commit || Revert)                       │
+│  $(msg build.tcr_cycle)                                      │
 └────────────────────────────────────────────────────────────┘
 
-MICRO-STEP {N}: {description of smallest testable change}
+$(msg build.micro_step {N} "{description of smallest testable change}")
 
    Step 1: Write/Update Test
       └── Run test → Confirm RED (expected failure)
@@ -485,17 +485,17 @@ Follow the repo's deployment path (Vercel / Railway / etc.) and record the deplo
 **Before marking as DONE, fresh evidence must be provided.**
 
 ```
-🚦 Verification Gate
+🚦 $(msg build.verification_gate)
 
-   Evidence checklist (each item must have actual output):
-   ├── [ ] Tests passed: paste actual test run output
-   ├── [ ] Build succeeded: paste build output
-   ├── [ ] Online verification: screenshot / curl output / log snippet
-   └── [ ] No regression: verify at least one existing feature still works
+   $(msg build.evidence_checklist):
+   ├── [ ] $(msg build.tests_passed)
+   ├── [ ] $(msg build.build_succeeded)
+   ├── [ ] $(msg build.online_verification)
+   └── [ ] $(msg build.no_regression)
 
-   Gate Decision:
-   ├── ✅ All items have evidence → Can mark as DONE
-   └── ❌ Any item missing evidence → Gather evidence before passing the gate
+   $(msg build.gate_decision):
+   ├── ✅ $(msg build.gate_pass)
+   └── ❌ $(msg build.gate_fail)
 ```
 
 **Hard Rule**: "I confirmed the tests passed" does not count as evidence. Must be **freshly run** command output from this session.
@@ -552,20 +552,20 @@ git push
 ### Phase 12: Report & Celebrate
 
 ```
-✅ Pushed to GitHub: origin/main
-🚀 Deployed: <url>
-✅ Verified: <what was checked>
-📦 Changes: <summary>
-🔢 Commits: <count> micro-commits via TCR
-🧪 Tests: <what tests were added/modified>
-📊 TCR Stats: <success rate, revert count if any>
-📋 Review Gate: <self-review findings summary>
-📝 BACKLOG: <US-ID> marked ✅ Done
-📄 CHANGELOG: bundled into completion commit (Phase 11)
+✅ $(msg build.pushed_to)
+🚀 $(msg build.deployed): <url>
+✅ $(msg build.verified): <what was checked>
+📦 $(msg build.changes_summary): <summary>
+🔢 $(msg build.commits_count): <count> micro-commits via TCR
+🧪 $(msg build.tests_added): <what tests were added/modified>
+📊 $(msg build.tcr_stats): <success rate, revert count if any>
+📋 $(msg build.review_gate): <self-review findings summary>
+📝 $(msg build.backlog_updated "<US-ID>")
+📄 $(msg build.changelog_bundled)
 
-🎉 Shipped.
+🎉 $(msg build.shipped)
 
-🔄 Next Options:
+🔄 $(msg build.next_options):
 1. Continue to next Action (if Story has more)
 2. Start next US (if Fly mode created multiple)
 3. Done (if all completed)

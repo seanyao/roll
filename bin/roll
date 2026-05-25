@@ -8341,9 +8341,9 @@ _loop_monitor() {
         local svc="${svcs[$i]}" schedule="${scheds[$i]}"
         local state; state=$(_launchd_svc_state "$svc" "$project_path")
         case "$state" in
-          enabled)       printf "    ${GREEN}%-8s ● enabled${NC}       (%s)\n" "$svc" "$schedule" ;;
-          installed-off) printf "    ${YELLOW}%-8s ⚠ installed/off${NC}  (%s)  run: roll loop on\n" "$svc" "$schedule" ;;
-          not-installed) printf "    ${RED}%-8s ○ not installed${NC}  (%s)  run: roll setup\n" "$svc" "$schedule" ;;
+          enabled)       printf "    ${GREEN}%-8s %s${NC}       (%s)\n" "$svc" "$(msg loop.svc_enabled)" "$schedule" ;;
+          installed-off) printf "    ${YELLOW}%-8s %s${NC}  (%s)  %s\n" "$svc" "$(msg loop.svc_installed_off)" "$schedule" "$(msg loop.svc_enabled_run)" ;;
+          not-installed) printf "    ${RED}%-8s %s${NC}  (%s)  %s\n" "$svc" "$(msg loop.svc_not_installed)" "$schedule" "$(msg loop.svc_not_installed_run)" ;;
         esac
       done
     else

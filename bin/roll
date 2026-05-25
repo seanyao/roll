@@ -1801,7 +1801,7 @@ cmd_offboard() {
         return 0
         ;;
       *)
-        err "Unknown flag: $arg  未知参数"
+        err "$(msg offboard.unknown_flag "$arg")"
         return 1
         ;;
     esac
@@ -1840,7 +1840,7 @@ pr("launchd_plists_installed")
 PY
   )
   if [[ $? -ne 0 ]]; then
-    err "Failed to parse changeset  解析变更清单失败"
+    err "$(msg offboard.parse_error)"
     return 1
   fi
 
@@ -1870,10 +1870,9 @@ PY
     case "$resolved" in
       "$project_dir"|"$project_dir"/*) ;;
       *)
-        err "Refusing to act on '$item' — it does not resolve under $project_dir"
-        err "拒绝处理 '$item' — 路径不在当前项目下，可能是误用"
-        echo "  This usually means the changeset was copied from another project." >&2
-        echo "  Remove .roll/onboard-changeset.yaml manually, or rerun in the right dir." >&2
+        err "$(msg offboard.path_mismatch "$item" "$project_dir")"
+        echo "  $(msg offboard.wrong_project_hint)" >&2
+        echo "  $(msg offboard.wrong_project_action)" >&2
         return 1
         ;;
     esac
@@ -1904,20 +1903,18 @@ PY
     echo ""
   fi
   if [[ ${#files[@]} -eq 0 && ${#dirs[@]} -eq 0 && ${#gi_entries[@]} -eq 0 && ${#plists[@]} -eq 0 ]]; then
-    info "Changeset is empty — nothing to offboard."
-    info "变更清单为空，无需 offboard。"
+    info "$(msg offboard.empty_changeset)"
     return 0
   fi
 
   if [[ "$confirm" -ne 1 ]]; then
-    echo "  This is a dry-run. Re-run with --confirm to apply."
-    echo "  以上为预演结果。加 --confirm 后才会真正执行。"
+    echo "  $(msg offboard.dry_run_hint)"
     return 0
   fi
 
   # Apply. Guard every loop with a count check — `set -u` upstream makes
   # naked `"${arr[@]}"` over an empty array a hard error on bash 5.0.
-  echo "  Applying offboard...  执行 offboard..."
+  echo "  $(msg offboard.applying)"
   if [ "${#files[@]}" -gt 0 ]; then
     for item in "${files[@]}"; do
       rm -f "$project_dir/$item" 2>/dev/null && echo "    removed file $item"

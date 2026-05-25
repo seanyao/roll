@@ -25,6 +25,10 @@ ROLL_PKG_CONVENTIONS="${ROLL_PKG_DIR}/conventions"
 # shellcheck source=../lib/i18n.sh
 [[ -f "${ROLL_PKG_DIR}/lib/i18n.sh" ]] && source "${ROLL_PKG_DIR}/lib/i18n.sh"
 
+# US-WATCH-001: upstream compatibility watch helpers.
+# shellcheck source=../lib/watch.sh
+[[ -f "${ROLL_PKG_DIR}/lib/watch.sh" ]] && source "${ROLL_PKG_DIR}/lib/watch.sh"
+
 # Colors
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -292,13 +296,13 @@ _ensure_config_entries() {
         echo "${key}: ${val}" >> "$tmp"
       fi
       added=$((added + 1))
-      warn "Added missing config entry: ${key}  已添加缺失配置项: ${key}"
+      warn "$(msg shared.added_missing_config_entry ${key})"
     fi
   done
 
   if [[ $added -gt 0 ]]; then
     cp "$tmp" "$ROLL_CONFIG"
-    ok "Config updated with $added new entries  配置已更新，新增 $added 条目"
+    ok "$(msg shared.config_updated_with_new_entries $added)"
   fi
   rm -f "$tmp"
 }
@@ -332,11 +336,11 @@ safe_copy() {
     # hidden read or silently default to overwrite. Be explicit.
     if [[ ! -t 0 ]]; then
       cp "$src" "$dst"
-      ok "Wrote: ${dst/#$HOME/~}  已写入: ${dst/#$HOME/~}"
+      ok "$(msg shared.wrote ${dst/#$HOME/~})"
       return
     fi
     echo ""
-    warn "File exists and differs: ${dst/#$HOME/~}  文件已存在且内容不同: ${dst/#$HOME/~}"
+    warn "$(msg shared.file_exists_and_differs ${dst/#$HOME/~})"
     echo -e "  ${BOLD}Overwrite?${NC} [Y/n/d(iff)] "
     read -r answer || answer="Y"
     case "$answer" in
@@ -345,15 +349,15 @@ safe_copy() {
         echo ""
         echo -e "  ${BOLD}Overwrite?${NC} [Y/n] "
         read -r answer2 || answer2="Y"
-        [[ "$answer2" =~ ^[Nn]$ ]] && { info "Skipped: ${dst/#$HOME/\~}  已跳过: ${dst/#$HOME/\~}"; return; }
+        [[ "$answer2" =~ ^[Nn]$ ]] && { info "$(msg shared.skipped ${dst/#$HOME/~})"; return; }
         ;;
-      n|N) info "Skipped: ${dst/#$HOME/~}  已跳过: ${dst/#$HOME/~}"; return ;;
+      n|N) info "$(msg shared.skipped ${dst/#$HOME/~})"; return ;;
       *) ;;  # empty answer or 'y' / 'Y' → overwrite (default Yes)
     esac
   fi
 
   cp "$src" "$dst"
-  ok "Wrote: ${dst/#$HOME/~}  已写入: ${dst/#$HOME/~}"
+  ok "$(msg shared.wrote_2 ${dst/#$HOME/~})"
 }
 
 # ─── Internal: prune files in $1 that no longer exist in $2 ──────────────────
@@ -372,7 +376,7 @@ _prune_dir() {
     [[ "$installed_fname" == "." || "$installed_fname" == ".." ]] && continue
     if [[ ! -f "$source_dir/$installed_fname" ]]; then
       rm -f "$installed_f"
-      info "Removed stale $label: ${installed_dir##*/}/$installed_fname  已删除过时$label: ${installed_dir##*/}/$installed_fname"
+      info "$(msg shared.removed_stale $label ${installed_dir##*/} $installed_fname)"
     fi
   done
 }
@@ -380,7 +384,7 @@ _prune_dir() {
 # ─── Internal: pull skills from repo → ~/.roll/skills ──────────────────────
 _pull_skills() {
   if [[ ! -d "$ROLL_PKG_DIR/skills" ]]; then
-    err "Skills source not found at: $ROLL_PKG_DIR/skills  技能源目录未找到: $ROLL_PKG_DIR/skills"
+    err "$(msg shared.skills_source_not_found_at_skills $ROLL_PKG_DIR)"
     return 1
   fi
 
@@ -408,7 +412,7 @@ _pull_skills() {
     installed_name="$(basename "$installed_dir")"
     if [[ ! -d "$ROLL_PKG_DIR/skills/$installed_name" ]]; then
       rm -rf "$installed_dir"
-      info "Removed stale skill: $installed_name  已删除过时技能: $installed_name"
+      info "$(msg shared.removed_stale_skill $installed_name)"
     fi
   done
 }
@@ -418,14 +422,14 @@ _pull_conventions() {
   local force="${1:-false}"
 
   if [[ ! -d "$ROLL_PKG_CONVENTIONS" ]]; then
-    err "Convention source not found at: $ROLL_PKG_CONVENTIONS  约定源文件未找到: $ROLL_PKG_CONVENTIONS"
+    err "$(msg shared.convention_source_not_found_at $ROLL_PKG_CONVENTIONS)"
     return 1
   fi
 
   mkdir -p "$ROLL_GLOBAL"
   mkdir -p "$ROLL_TEMPLATES"/{fullstack,frontend-only,backend-service,cli}
 
-  info "Copying global conventions...  正在复制全局约定..."
+  info "$(msg shared.copying_global_conventions)"
   for f in "$ROLL_PKG_CONVENTIONS"/global/*; do
     [[ -f "$f" ]] && safe_copy "$f" "$ROLL_GLOBAL/$(basename "$f")" "$force"
   done
@@ -436,7 +440,7 @@ _pull_conventions() {
   # Prune stale files in ~/.roll/conventions/global/
   _prune_dir "$ROLL_GLOBAL" "$ROLL_PKG_CONVENTIONS/global" "convention"
 
-  info "Copying project templates...  正在复制项目模板..."
+  info "$(msg shared.copying_project_templates)"
   for tpl_dir in "$ROLL_PKG_CONVENTIONS"/templates/*/; do
     local tpl_name
     tpl_name="$(basename "$tpl_dir")"
@@ -457,8 +461,8 @@ _install_local() {
   local force="${1:-false}"
 
   if [[ ! -d "$ROLL_PKG_CONVENTIONS" ]]; then
-    err "Convention source not found at: $ROLL_PKG_CONVENTIONS  约定源文件未找到: $ROLL_PKG_CONVENTIONS"
-    err "Run this from the roll repo, or symlink bin/roll to PATH.  请在 roll 仓库目录下运行，或将 bin/roll 软链接到 PATH。"
+    err "$(msg shared.convention_source_not_found_at_2 $ROLL_PKG_CONVENTIONS)"
+    err "$(msg shared.run_this_from_the_roll_repo)"
     exit 1
   fi
 
@@ -467,15 +471,15 @@ _install_local() {
 
   # Recreate config if it has no ai_* entries (covers legacy sync_* format and blank/broken configs)
   if [[ -f "$ROLL_CONFIG" ]] && ! grep -qE "^ai_[a-z]+:" "$ROLL_CONFIG" 2>/dev/null; then
-    warn "Config has no ai_* entries — recreating with defaults (backup saved)  配置无 ai_* 条目，将重建（已备份）"
+    warn "$(msg shared.config_has_no_ai_entries_recreating)"
     cp "$ROLL_CONFIG" "${ROLL_CONFIG}.bak"
-    info "Backup saved: ~/.roll/config.yaml.bak  备份已保存: ~/.roll/config.yaml.bak"
+    info "$(msg shared.backup_saved_roll_config_yaml_bak)"
     rm "$ROLL_CONFIG"
   fi
 
   # Create config if it doesn't exist
   if [[ ! -f "$ROLL_CONFIG" ]]; then
-    info "Creating default config...  正在创建默认配置..."
+    info "$(msg shared.creating_default_config)"
     cat > "$ROLL_CONFIG" << 'YAML'
 # Roll Configuration
 # Edit this file, then run `roll setup` to apply.
@@ -509,7 +513,7 @@ loop_brief_hour: 9
 # loop_brief_minute: 15 # omit to auto-derive
 primary_agent: claude
 YAML
-    ok "Created: ~/.roll/config.yaml  已创建: ~/.roll/config.yaml"
+    ok "$(msg shared.created_roll_config_yaml)"
   fi
 
   # Ensure all expected ai_* keys exist (handles upgrades where new tools were added)
@@ -537,7 +541,7 @@ _link_skills() {
 
     if [[ -n "$ai_dir_real" && \
           ( "$ai_dir_real" == "$ROLL_PKG_DIR" || "$ai_dir_real" == "$ROLL_PKG_DIR"/* ) ]]; then
-      warn "Skipped ~/${ai_name} (resolves to repo — refusing to manage skills inside roll worktree)  已跳过 ~/${ai_name}（解析到仓库目录 — 拒绝在 roll worktree 内管理技能）"
+      warn "$(msg shared.skipped_resolves_to_repo_refusing_to ${ai_name})"
       continue
     fi
 
@@ -546,7 +550,7 @@ _link_skills() {
     skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
     if [[ -n "$skills_real" && -n "$pkg_skills_real" && \
           ( "$skills_real" == "$pkg_skills_real" || "$skills_real" == "$pkg_skills_real"/* ) ]]; then
-      warn "Skipped ~/${ai_name}/skills (resolves to repo — check if ~/$(lower_name "$ai_name") symlinks to roll repo)  已跳过 ~/${ai_name}/skills（解析到仓库 — 检查 ~/$(lower_name "$ai_name") 是否软链接到 roll 仓库）"
+      warn "$(msg shared.skipped_resolves_to_repo "${ai_name}" "$(lower_name "$ai_name")")"
       continue
     fi
 
@@ -559,10 +563,10 @@ _link_skills() {
       fi
       # Dangling whole-dir symlink — remove and recreate as per-skill links
       if [[ -z "$skills_real" ]]; then
-        info "Removing legacy symlink ~/${ai_name}/skills -> ${skills_target/#$HOME/~}  正在移除遗留软链接 ~/${ai_name}/skills -> ${skills_target/#$HOME/~}"
+        info "$(msg shared.removing_legacy_symlink_skills ${ai_name} ${skills_target/#$HOME/~})"
         rm "$skills_dir"
       else
-        warn "Skipped ~/${ai_name}/skills -> ${skills_target/#$HOME/~} (unknown symlink target)  已跳过 ~/${ai_name}/skills -> ${skills_target/#$HOME/~}（未知软链接目标）"
+        warn "$(msg shared.skipped_skills_unknown_symlink_target ${ai_name} ${skills_target/#$HOME/~})"
         continue
       fi
     fi
@@ -571,7 +575,7 @@ _link_skills() {
     skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
     if [[ -n "$skills_real" && -n "$pkg_skills_real" && \
           ( "$skills_real" == "$pkg_skills_real" || "$skills_real" == "$pkg_skills_real"/* ) ]]; then
-      warn "Skipped ~/${ai_name}/skills (created path resolves to repo — refusing to write)  已跳过 ~/${ai_name}/skills（创建路径解析到仓库 — 拒绝写入）"
+      warn "$(msg shared.skipped_skills_created_path_resolves_to ${ai_name})"
       continue
     fi
     local linked=0 repaired=0 pruned=0
@@ -611,7 +615,7 @@ _link_skills() {
       # real file/dir at that path: skip — never touch user content
     done
     if [[ $((linked + repaired + pruned)) -gt 0 ]]; then
-      ok "Skills linked in ~/${ai_name}/skills (+${linked} new, ~${repaired} repaired, -${pruned} pruned)  已在 ~/${ai_name}/skills 中创建软链接（新增 +${linked}，修复 ~${repaired}，清理 -${pruned}）"
+      ok "$(msg shared.skills_linked_in_skills_new_repaired ${ai_name} ${linked} ${repaired} ${pruned})"
     fi
   done < <(_get_ai_tools)
 }
@@ -637,18 +641,18 @@ _sync_convention_for_tool() {
   local wk_file="$dst_dir/roll.md"
   if [[ "$force" == "true" ]] || ! diff -q "$src" "$wk_file" &>/dev/null 2>&1; then
     cp "$src" "$wk_file"
-    ok "Wrote: ${wk_file/#$HOME/~}  已写入: ${wk_file/#$HOME/~}"
+    ok "$(msg shared.wrote_3 ${wk_file/#$HOME/~})"
   fi
 
   # Append @roll.md include to main config — never overwrite existing content
   if [[ ! -f "$main_dst" ]]; then
     printf '@roll.md\n' > "$main_dst"
-    ok "Created: ${main_dst/#$HOME/~}  已创建: ${main_dst/#$HOME/~}"
+    ok "$(msg shared.created ${main_dst/#$HOME/~})"
   elif ! grep -qF "@roll.md" "$main_dst" 2>/dev/null; then
     printf '\n@roll.md\n' >> "$main_dst"
-    ok "Appended @roll.md to: ${main_dst/#$HOME/~}  已将 @roll.md 追加至: ${main_dst/#$HOME/~}"
+    ok "$(msg shared.appended_roll_md_to ${main_dst/#$HOME/~})"
   else
-    ok "Already included: ${main_dst/#$HOME/~}  已包含: ${main_dst/#$HOME/~}"
+    ok "$(msg shared.already_included ${main_dst/#$HOME/~})"
   fi
 }
 
@@ -665,10 +669,10 @@ _sync_conventions() {
 # ─── Internal: sync skills (pull + link) ──────────────────────────────────────
 _sync_skills() {
   local force="${1:-false}"
-  info "Updating skills...  正在更新技能..."
+  info "$(msg shared.updating_skills)"
   _pull_skills
-  ok "Skills updated in ~/.roll/skills  技能已更新至 ~/.roll/skills"
-  info "Creating skill symlinks for AI tools...  正在为 AI 工具创建技能软链接..."
+  ok "$(msg shared.skills_updated_in_roll_skills)"
+  info "$(msg shared.creating_skill_symlinks_for_ai_tools)"
   _link_skills "$force"
 }
 
@@ -689,19 +693,19 @@ _ensure_tmux() {
   local os; os="$(uname)"
   if [[ "$os" == "Darwin" ]]; then
     if command -v brew >/dev/null 2>&1; then
-      info "tmux not found — installing via brew...  未安装 tmux，正在通过 brew 安装..."
+      info "$(msg shared.tmux_not_found_installing_via_brew)"
       if brew install tmux >/dev/null 2>&1; then
-        ok "tmux installed.  tmux 已安装。"
+        ok "$(msg shared.tmux_installed_tmux)"
         return 0
       fi
-      warn "brew install tmux failed — install manually: brew install tmux  brew 安装失败，请手动 'brew install tmux'"
+      warn "$(msg shared.brew_install_tmux_failed_install_manually)"
       return 0
     fi
-    warn "tmux required but brew not available — install manually: brew install tmux  缺少 brew，请手动 'brew install tmux'"
+    warn "$(msg shared.tmux_required_but_brew_not_available)"
     return 0
   fi
 
-  warn "tmux required — install via your package manager (e.g. apt install tmux / pacman -S tmux)  请用系统包管理器安装 tmux"
+  warn "$(msg shared.tmux_required_install_via_your_package)"
   return 0
 }
 
@@ -756,7 +760,7 @@ cmd_setup() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force|-f) force=true; shift ;;
-      *) err "Unknown argument: $1  未知参数: $1"; exit 1 ;;
+      *) err "$(msg setup.unknown_argument_1)"; exit 1 ;;
     esac
   done
 
@@ -1042,18 +1046,18 @@ _check_installed_version_or_retry() {
 
 cmd_update() {
   info "$(msg update.current_version "$VERSION")"
-  info "Upgrading via npm...  正在通过 npm 升级..."
+  info "$(msg update.upgrading_via_npm)"
   echo ""
 
   if ! npm install -g @seanyao/roll@latest; then
-    err "npm install failed. Check network/proxy and try again.  npm 安装失败，请检查网络/代理后重试。"
+    err "$(msg update.npm_install_failed_check_network_proxy)"
     exit 1
   fi
 
   _check_installed_version_or_retry
 
   echo ""
-  info "Re-syncing to AI tools...  正在重新同步到 AI 工具..."
+  info "$(msg update.re_syncing_to_ai_tools)"
   echo ""
   cmd_setup
 
@@ -1193,7 +1197,7 @@ cmd_init() {
   # US-ONBOARD-009: --apply consumes onboard-plan.yaml produced by $roll-onboard
   if [[ "${1:-}" == "--apply" ]]; then
     if [[ ! -d "$ROLL_TEMPLATES" ]]; then
-      err "No templates found. Run 'roll setup' first.  未找到模板，请先运行 'roll setup'。"
+      err "$(msg init.no_templates_found_run_roll_setup)"
       exit 1
     fi
     shift
@@ -1202,12 +1206,12 @@ cmd_init() {
   fi
 
   if [[ "${1:-}" == -* ]]; then
-    err "Unknown flag: $1  未知参数: $1"
+    err "$(msg init.unknown_flag_1)"
     exit 1
   fi
 
   if [[ ! -d "$ROLL_TEMPLATES" ]]; then
-    err "No templates found. Run 'roll setup' first.  未找到模板，请先运行 'roll setup'。"
+    err "$(msg init.no_templates_found_run_roll_setup_2)"
     exit 1
   fi
 
@@ -1372,13 +1376,13 @@ _init_legacy_onboard_guide() {
   local count_summary
   count_summary=$(_init_legacy_file_summary "$project_dir")
 
-  info "Detected: legacy project (${count_summary})  检测到遗留项目"
+  info "$(msg init.detected_legacy_project ${count_summary})"
   echo ""
 
   # Discover installed agents (writes to globals: _ONBOARD_INSTALLED, _ONBOARD_MISSING).
   _onboard_discover_agents
 
-  echo "  Onboarding 需要一个 AI agent 来读懂这个项目。检测到："
+  echo "$(msg init.onboarding)"
   echo "  Onboarding requires an AI agent to read your code. Detected:"
   echo ""
   local n
@@ -1396,15 +1400,15 @@ _init_legacy_onboard_guide() {
   if [[ ${#_ONBOARD_INSTALLED[@]} -eq 0 ]]; then
     echo ""
     err "No AI agent detected. Install one (e.g., 'claude', 'codex', 'kimi') and try again."
-    err "未检测到 AI agent。请先安装 (如 claude / codex / kimi) 后重试。"
+    err "$(msg init.no_ai_agent_detected_install_one)"
     return 1
   fi
 
   echo ""
-  echo "  后续过程会使用你的 agent 调用模型，token 消耗在你自己的账户上。"
+  echo "$(msg init.the_process_will_use_your_agent)"
   echo "  Onboarding uses your agent to call models — tokens are billed to your account."
   echo ""
-  echo "  代码与对话都留在你的 agent 工具里 —— Roll 本身不上传任何内容。"
+  echo "$(msg init.code_and_conversations_stay_in_your)"
   echo "  Your code and conversation stay in your agent — Roll never uploads anything."
   echo ""
 
@@ -1416,9 +1420,9 @@ _init_legacy_onboard_guide() {
   [[ -n "$chosen" ]] || return 1
 
   echo ""
-  info "Launching ${chosen}…  正在启动 ${chosen}…"
+  info "$(msg init.launching ${chosen})"
   echo "  Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you."
-  echo "  在 agent 内用 /exit 结束（或 Ctrl-C）。退出后 Roll 会自动衔接 apply。"
+  echo "$(msg init.use_exit_to_end_or_ctrl)"
   echo ""
 
   # US-ONBOARD-018: actually run the agent with the onboard prompt pre-loaded.
@@ -1475,7 +1479,7 @@ _onboard_select_agent() {
 
   # Multi-agent: prompt the user. To stderr so stdout stays clean for the caller.
   {
-    echo "  选一个 agent  Pick an agent:"
+    echo "$(msg init.pick_an_agent)"
     local i=1
     for c in "${candidates[@]}"; do
       printf "    %d) %s\n" "$i" "$c"
@@ -1486,11 +1490,11 @@ _onboard_select_agent() {
 
   local choice
   if ! IFS= read -r choice; then
-    err "No input received. Aborting onboard.  未收到输入，已取消 onboard。" >&2
+    err "$(msg init.no_input_received_aborting_onboard)" >&2
     return 1
   fi
   if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#candidates[@]} )); then
-    err "Invalid choice: '${choice}'.  无效选择。" >&2
+    err "$(msg init.invalid_choice ${choice})" >&2
     return 1
   fi
   printf '%s\n' "${candidates[$((choice - 1))]}"
@@ -1542,7 +1546,7 @@ _run_onboard_agent() {
   local prompt
   prompt=$(_onboard_initial_prompt) || return 1
   _agent_argv "$agent" interactive "$prompt" || {
-    err "Agent '${agent}' has no interactive mode wired up.  agent '${agent}' 暂未接入 interactive 模式。" >&2
+    err "$(msg init.agent_has_no_interactive_mode_wired ${agent})" >&2
     return 1
   }
 
@@ -1560,15 +1564,15 @@ _run_onboard_agent() {
   if [[ ! -f "${project_dir}/.roll/onboard-plan.yaml" ]]; then
     echo "" >&2
     err "Agent exited cleanly but did not write .roll/onboard-plan.yaml." >&2
-    err "agent 正常退出但未生成 .roll/onboard-plan.yaml。" >&2
+    err "$(msg init.agent)" >&2
     echo "  Re-run \`roll init\` once you've completed the conversation." >&2
-    echo "  对话完成后再次运行 \`roll init\` 即可。" >&2
+    echo "$(msg init.en_roll_init)" >&2
     return 1
   fi
 
   # Plan present → chain into apply automatically.
   echo "" >&2
-  info "Plan written. Running apply…  已写入 plan，正在执行 apply…"
+  info "$(msg init.plan_written_running_apply)"
   ( cd "$project_dir" && _init_apply )
 }
 
@@ -1687,27 +1691,27 @@ _init_apply() {
   local validator="${ROLL_PKG_DIR}/lib/roll-plan-validate.py"
 
   if [[ ! -f "$plan" ]]; then
-    err "No onboard plan found at .roll/onboard-plan.yaml  未找到 onboard 计划。"
+    err "$(msg init.no_onboard_plan_found_at_roll)"
     echo "" >&2
     echo "  Run \$roll-onboard in your AI agent first to generate the plan." >&2
-    echo "  请先在 AI agent 里运行 \$roll-onboard 生成 plan，再回来执行 apply。" >&2
+    echo "$(msg init.en_ai_agent_onboard_plan_ap $roll)" >&2
     return 1
   fi
 
   if [[ ! -f "$validator" ]]; then
-    err "Plan validator missing: $validator  校验器缺失。"
+    err "$(msg init.plan_validator_missing $validator)"
     return 1
   fi
 
   # Validate plan (schema + generated_at freshness + version)
   if ! python3 "$validator" "$plan"; then
-    err "Plan validation failed. See errors above.  Plan 校验失败。"
+    err "$(msg init.plan_validation_failed_see_errors_above)"
     echo "" >&2
     echo "  If the plan is stale (>24h), regenerate by running \$roll-onboard again." >&2
     return 1
   fi
 
-  info "Applying onboard plan...  正在应用 onboard 计划..."
+  info "$(msg init.applying_onboard_plan)"
   _ROLL_MERGE_SUMMARY=()
 
   # US-ONBOARD-013: start a fresh changeset record so offboard can reverse.
@@ -1774,16 +1778,16 @@ print('true' if p.get('privacy', {}).get('gitignore_dot_roll', False) else 'fals
     if ! grep -qFx ".roll/" "$gi" 2>/dev/null; then
       echo ".roll/" >> "$gi"
       _onboard_changeset_record "$project_dir" "gitignore_entries_added" ".roll/"
-      ok "Added .roll/ to .gitignore  已将 .roll/ 加入 .gitignore"
+      ok "$(msg init.added_roll_to_gitignore)"
     fi
   fi
 
   echo ""
-  info "Syncing conventions to AI tools...  正在同步约定到 AI 工具..."
+  info "$(msg init.syncing_conventions_to_ai_tools)"
   _sync_conventions
   echo ""
 
-  ok "Onboard apply complete.  Onboard 应用完成。"
+  ok "$(msg init.onboard_apply_complete_onboard)"
 }
 
 # US-ONBOARD-014: roll offboard
@@ -1809,7 +1813,7 @@ cmd_offboard() {
         return 0
         ;;
       *)
-        err "Unknown flag: $arg  未知参数"
+        err "$(msg offboard.unknown_flag $arg)"
         return 1
         ;;
     esac
@@ -1848,7 +1852,7 @@ pr("launchd_plists_installed")
 PY
   )
   if [[ $? -ne 0 ]]; then
-    err "Failed to parse changeset  解析变更清单失败"
+    err "$(msg offboard.failed_to_parse_changeset)"
     return 1
   fi
 
@@ -1879,7 +1883,7 @@ PY
       "$project_dir"|"$project_dir"/*) ;;
       *)
         err "Refusing to act on '$item' — it does not resolve under $project_dir"
-        err "拒绝处理 '$item' — 路径不在当前项目下，可能是误用"
+        err "$(msg offboard.en $item)"
         echo "  This usually means the changeset was copied from another project." >&2
         echo "  Remove .roll/onboard-changeset.yaml manually, or rerun in the right dir." >&2
         return 1
@@ -1913,19 +1917,19 @@ PY
   fi
   if [[ ${#files[@]} -eq 0 && ${#dirs[@]} -eq 0 && ${#gi_entries[@]} -eq 0 && ${#plists[@]} -eq 0 ]]; then
     info "Changeset is empty — nothing to offboard."
-    info "变更清单为空，无需 offboard。"
+    info "$(msg offboard.change_list_is_empty_nothing_to)"
     return 0
   fi
 
   if [[ "$confirm" -ne 1 ]]; then
     echo "  This is a dry-run. Re-run with --confirm to apply."
-    echo "  以上为预演结果。加 --confirm 后才会真正执行。"
+    echo "$(msg offboard.above_is_a_dry_run_preview)"
     return 0
   fi
 
   # Apply. Guard every loop with a count check — `set -u` upstream makes
   # naked `"${arr[@]}"` over an empty array a hard error on bash 5.0.
-  echo "  Applying offboard...  执行 offboard..."
+  echo "$(msg offboard.applying_offboard)"
   if [ "${#files[@]}" -gt 0 ]; then
     for item in "${files[@]}"; do
       rm -f "$project_dir/$item" 2>/dev/null && echo "    removed file $item"
@@ -1955,7 +1959,7 @@ PY
   fi
   # Finally, remove the changeset file itself.
   rm -f "$changeset"
-  ok "Offboard complete.  Offboard 完成。"
+  ok "$(msg offboard.offboard_complete_offboard)"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1978,13 +1982,13 @@ cmd_migrate() {
     case "$1" in
       --dry-run|-n) dry_run=true; shift ;;
       -h|--help) _migrate_help; return 0 ;;
-      *) err "Unknown arg: $1  未知参数: $1"; return 1 ;;
+      *) err "$(msg migrate.unknown_arg_1 "$1")"; return 1 ;;
     esac
   done
 
   # Must be in a git repo (git mv preserves history)
   if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    err "Not a git repository. roll migrate requires git.  当前目录不是 git 仓库。"
+    err "$(msg migrate.not_a_git_repository_roll_migrate)"
     return 1
   fi
 
@@ -2006,9 +2010,9 @@ cmd_migrate() {
 
   # Three-state dispatch
   if [[ "$has_new" == "true" && "$has_old" == "true" ]]; then
-    err "Both old and new structures exist (partial migration detected).  老结构与新结构同时存在（部分迁移）。"
+    err "$(msg migrate.both_old_and_new_structures_exist)"
     echo "" >&2
-    echo "Conflicting paths:  冲突路径：" >&2
+    echo "$(msg migrate.conflicting_paths)" >&2
     for m in "${moves[@]}"; do
       src="${m%%|*}"
       local tgt="${m##*|}"
@@ -2017,17 +2021,17 @@ cmd_migrate() {
       fi
     done
     echo "" >&2
-    err "Resolve manually then re-run.  请手动解决冲突后重新运行。"
+    err "$(msg migrate.resolve_manually_then_re_run)"
     return 1
   fi
 
   if [[ "$has_new" == "true" && "$has_old" == "false" ]]; then
-    ok "Already migrated. .roll/ exists, no old paths found.  已迁移，无需重复操作。"
+    ok "$(msg migrate.already_migrated_roll_exists_no_old)"
     return 0
   fi
 
   if [[ "$has_old" == "false" ]]; then
-    info "No old structure detected. Nothing to migrate.  未发现老结构，无需迁移。"
+    info "$(msg migrate.no_old_structure_detected_nothing_to)"
     return 0
   fi
 
@@ -2039,7 +2043,7 @@ cmd_migrate() {
   done
 
   if [[ ${#active_moves[@]} -eq 0 ]]; then
-    warn "Old structure markers found but no migratable files.  未找到可迁移文件。"
+    warn "$(msg migrate.old_structure_markers_found_but_no)"
     return 0
   fi
 
@@ -2050,7 +2054,7 @@ cmd_migrate() {
 
   # Real execution requires clean working tree (we'll create a single commit)
   if ! git diff --quiet --ignore-submodules HEAD 2>/dev/null; then
-    err "Working tree not clean. Commit or stash changes before running migrate.  工作区有未提交改动，请先 commit 或 stash。"
+    err "$(msg migrate.working_tree_not_clean_commit_or)"
     return 1
   fi
 
@@ -2089,9 +2093,9 @@ EOF
 }
 
 _migrate_preview() {
-  info "Migration preview (dry-run):  迁移预览（dry-run）"
+  info "$(msg migrate.migration_preview_dry_run)"
   echo ""
-  printf "  %-60s → %s\n" "Old path  老路径" "New path  新路径"
+  printf "  %-60s → %s\n" "$(msg migrate.old_path)" "$(msg migrate.new_path)"
   local sep; sep=$(printf '─%.0s' {1..100})
   printf "  %s\n" "$sep"
   local m
@@ -2100,11 +2104,11 @@ _migrate_preview() {
     printf "  %-60s → %s\n" "$src" "$tgt"
   done
   echo ""
-  info "Run without --dry-run to execute.  去掉 --dry-run 即可真实执行。"
+  info "$(msg migrate.run_without_dry_run_to_execute)"
 }
 
 _migrate_execute() {
-  info "Migrating ${#@} paths via git mv...  正在通过 git mv 迁移 ${#@} 个路径..."
+  info "$(msg migrate.migrating_paths_via_git_mv ${#@})"
   local moved=0 m
   for m in "$@"; do
     local src="${m%%|*}" tgt="${m##*|}"
@@ -2112,7 +2116,7 @@ _migrate_execute() {
     [[ -d "$target_dir" ]] || mkdir -p "$target_dir"
     git mv "$src" "$tgt" || {
       err "git mv failed: $src → $tgt"
-      err "Aborting; previous moves are staged but not committed. Run 'git reset --hard' to undo.  已 stage 但未 commit，运行 'git reset --hard' 回滚。"
+      err "$(msg migrate.aborting_previous_moves_are_staged_but)"
       return 1
     }
     moved=$((moved + 1))
@@ -2128,9 +2132,9 @@ Atomic migration via 'roll migrate' command. Process artifacts moved
 from root and docs/ into .roll/; user docs relocated to guide/ and site/.
 
 Paths migrated: ${moved}"
-  ok "Migrated ${moved} paths in a single commit.  已在单 commit 中迁移 ${moved} 个路径。"
+  ok "$(msg migrate.migrated_paths_in_a_single_commit ${moved})"
   echo ""
-  echo "  Next steps  下一步："
+  echo "$(msg migrate.next_steps)"
   echo "    git log -1                    # Inspect the migration commit"
   echo "    roll status                   # Verify new structure"
 }
@@ -2168,7 +2172,7 @@ print_merge_summary() {
     return
   fi
   echo ""
-  echo "  ┌─ 操作摘要 Summary ──────────────────────────────────┐"
+  echo "$(msg migrate.summary)"
   for entry in "${_ROLL_MERGE_SUMMARY[@]}"; do
     local action="${entry%%|*}"
     local file="${entry##*|}"
@@ -2370,39 +2374,39 @@ EOF
 # Show current state of conventions
 # ═══════════════════════════════════════════════════════════════════════════════
 _legacy_status() {
-  echo -e "${BOLD}Roll Convention Status  Roll 约定状态${NC}"
+  echo -e "$(msg migrate.roll_convention_status_roll ${BOLD} ${NC})"
   echo ""
 
   if [[ -d "$ROLL_HOME" ]]; then
-    ok "~/.roll/ exists  ~/.roll/ 已存在"
+    ok "$(msg migrate.roll_exists_roll)"
   else
-    err "~/.roll/ not found — run 'roll setup'  ~/.roll/ 不存在 — 请运行 'roll setup'"
+    err "$(msg migrate.roll_not_found_run_roll_setup)"
     return
   fi
 
   echo ""
-  echo -e "${BOLD}Global conventions:  全局约定${NC}"
+  echo -e "$(msg migrate.global_conventions ${BOLD} ${NC})"
   for f in AGENTS.md CLAUDE.md GEMINI.md .cursor-rules project_rules.md; do
     if [[ -f "$ROLL_GLOBAL/$f" ]]; then
       echo -e "  ${GREEN}+${NC} $f"
     else
-      echo -e "  ${RED}-${NC} $f (missing / 缺失)"
+      echo -e "$(msg migrate.missing ${RED} ${NC} $f)"
     fi
   done
 
   echo ""
-  echo -e "${BOLD}Global skills:  全局技能${NC}"
+  echo -e "$(msg migrate.global_skills ${BOLD} ${NC})"
   if [[ -d "$ROLL_HOME/skills" ]]; then
     local count
     count=$(find "$ROLL_HOME/skills" -maxdepth 1 -type d | wc -l | tr -d ' ')
     count=$((count - 1))
-    echo -e "  ${GREEN}+${NC} ~/.roll/skills ($count skills installed / 已安装 $count 个技能)"
+    echo -e "$(msg migrate.roll_skills_skills_installed ${GREEN} ${NC} $count)"
   else
-    echo -e "  ${RED}-${NC} ~/.roll/skills (missing / 缺失)"
+    echo -e "$(msg migrate.roll_skills_missing ${RED} ${NC})"
   fi
 
   echo ""
-  echo -e "${BOLD}Sync targets:  同步目标${NC}"
+  echo -e "$(msg migrate.sync_targets ${BOLD} ${NC})"
 
   local _sync_found=0
   while IFS= read -r _entry; do
@@ -2415,12 +2419,12 @@ _legacy_status() {
     check_sync_status "$_tool_name" "$ROLL_GLOBAL/$_src" "$_ai_d/$_cfg"
   done < <(_get_ai_tools)
   if [[ "$_sync_found" -eq 0 ]]; then
-    warn "No AI tools configured — check ~/.roll/config.yaml  未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
-    info "Add ai_* entries or run 'roll setup' to restore defaults.  添加 ai_* 条目或运行 'roll setup' 恢复默认配置。"
+    warn "$(msg migrate.no_ai_tools_configured_check_roll)"
+    info "$(msg migrate.add_ai_entries_or_run_roll)"
   fi
 
   echo ""
-  echo -e "${BOLD}Skill symlinks:  技能软链接${NC}"
+  echo -e "$(msg migrate.skill_symlinks ${BOLD} ${NC})"
   local total_skills=0
   local wk_skills_real
   if [[ -d "$ROLL_HOME/skills" ]]; then
@@ -2446,7 +2450,7 @@ _legacy_status() {
         skills_real="$(canonical_dir "$skills_dir" 2>/dev/null || true)"
         local skills_display="${skills_dir/#$HOME/~}"
         if [[ -n "$skills_real" && "$skills_real" == "$wk_skills_real" ]]; then
-          echo -e "  ${GREEN}=${NC} $name: $skills_display -> ~/.roll/skills (mounted / 已挂载)"
+          echo -e "$(msg migrate.roll_skills_mounted ${GREEN} ${NC} $name $skills_display)"
         else
           echo -e "  ${YELLOW}~${NC} $name: $skills_display -> ${skills_target/#$HOME/~} (symlinked dir)"
         fi
@@ -2461,25 +2465,25 @@ _legacy_status() {
       elif [[ "$linked_count" -gt 0 ]]; then
         echo -e "  ${YELLOW}~${NC} $name: $skills_display ($linked_count/$total_skills skills linked)"
       else
-        echo -e "  ${RED}-${NC} $name: $skills_display (no roll-* skills linked / 未链接 roll-* 技能)"
+        echo -e "$(msg migrate.no_roll_skills_linked ${RED} ${NC} $name $skills_display)"
       fi
     else
-      echo -e "  ${RED}-${NC} $name: ${skills_dir/#$HOME/~} (not found / 未找到)"
+      echo -e "$(msg migrate.not_found ${RED} ${NC} $name ${skills_dir/#$HOME/~})"
     fi
   done < <(_get_ai_tools)
   if [[ "$_skills_found" -eq 0 ]]; then
-    warn "No AI tools configured — check ~/.roll/config.yaml  未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
+    warn "$(msg migrate.no_ai_tools_configured_check_roll_2)"
   fi
 
   echo ""
-  echo -e "${BOLD}Templates:  模板${NC}"
+  echo -e "$(msg migrate.templates ${BOLD} ${NC})"
   for tpl in fullstack frontend-only backend-service cli; do
     if [[ -d "$ROLL_TEMPLATES/$tpl" ]]; then
       local count
       count=$(find "$ROLL_TEMPLATES/$tpl" -type f | wc -l | tr -d ' ')
       echo -e "  ${GREEN}+${NC} $tpl ($count files)"
     else
-      echo -e "  ${RED}-${NC} $tpl (missing / 缺失)"
+      echo -e "$(msg migrate.missing_2 ${RED} ${NC} $tpl)"
     fi
   done
 
@@ -2505,7 +2509,7 @@ _status_loop_overview() {
   [[ "${#plists[@]}" -eq 0 ]] && return 0
 
   echo ""
-  echo -e "${BOLD}Loop Overview:  所有项目 loop 状态${NC}"
+  echo -e "$(msg status.loop_overview ${BOLD} ${NC})"
 
   for plist in "${plists[@]}"; do
     local label; label=$(basename "$plist" .plist)
@@ -2563,15 +2567,15 @@ check_sync_status() {
   # Sync writes content to {dir}/roll.md and appends @roll.md to the main config.
   # So "in sync" means: roll.md exists + matches source + main config contains @roll.md.
   if [[ ! -f "$dst" ]]; then
-    echo -e "  ${RED}-${NC} $name: $display (not synced / 未同步)"
+    echo -e "$(msg status.not_synced ${RED} ${NC} $name $display)"
   elif [[ ! -f "$wk_file" ]]; then
-    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — roll.md missing / roll.md 缺失)"
+    echo -e "$(msg status.out_of_sync_roll_md_missing ${YELLOW} ${NC} $name $display)"
   elif ! diff -q "$src" "$wk_file" &>/dev/null 2>&1; then
-    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — roll.md outdated / roll.md 已过期)"
+    echo -e "$(msg status.out_of_sync_roll_md_outdated ${YELLOW} ${NC} $name $display)"
   elif ! grep -qF "@roll.md" "$dst" 2>/dev/null; then
-    echo -e "  ${YELLOW}~${NC} $name: $display (out of sync — @roll.md not in config / 未包含 @roll.md)"
+    echo -e "$(msg status.out_of_sync_roll_md_not ${YELLOW} ${NC} $name $display)"
   else
-    echo -e "  ${GREEN}=${NC} $name: $display (in sync / 已同步)"
+    echo -e "$(msg status.in_sync ${GREEN} ${NC} $name $display)"
   fi
 }
 
@@ -2721,14 +2725,14 @@ _peer_call() {
   local call_timeout
   call_timeout="$(config_get "peer_call_timeout" "180")"
 
-  info "Peer call timeout: ${call_timeout}s  Peer 调用超时: ${call_timeout}s"
+  info "$(msg status.peer_call_timeout_s_peer ${call_timeout})"
 
   if [[ -n "$session" ]] && command -v tmux >/dev/null 2>&1 && tmux has-session -t "$session" 2>/dev/null; then
     local out_file
     out_file=$(mktemp)
     local cmd_str
     cmd_str=$(_agent_cmd_str "$to" peer "$prompt") || {
-      err "Unsupported peer: $to  不支持的 peer: $to"
+      err "$(msg status.unsupported_peer $to)"
       return 1
     }
     _peer_dispatch_in_tmux "$session" "$cmd_str" "$out_file" "$stderr_log" "$call_timeout"
@@ -2736,7 +2740,7 @@ _peer_call() {
     rm -f "$out_file"
   else
     _agent_argv "$to" peer "$prompt" || {
-      err "Unsupported peer: $to  不支持的 peer: $to"
+      err "$(msg status.unsupported_peer_2 $to)"
       return 1
     }
     output="$("${_AGENT_ARGV[@]}" 2>"$stderr_log" || true)"
@@ -2802,7 +2806,7 @@ cmd_peer() {
       status) subcmd="status"; shift ;;
       reset) subcmd="reset"; shift; break ;;
       help|--help|-h) subcmd="help"; shift ;;
-      *) err "Unknown option: $1  未知选项: $1"; exit 1 ;;
+      *) err "$(msg peer.unknown_option_1)"; exit 1 ;;
     esac
   done
 
@@ -2813,7 +2817,7 @@ cmd_peer() {
   esac
 
   if [[ -z "$from_tool" ]]; then
-    err "--from is required.  必须指定 --from。"
+    err "$(msg peer.from_is_required)"
     echo ""
     cmd_peer_help
     exit 1
@@ -2822,13 +2826,13 @@ cmd_peer() {
   if [[ -z "$to_tool" ]]; then
     to_tool="$(_peer_route "$from_tool" "$tag")"
     if [[ -z "$to_tool" ]]; then
-      err "No available peer found for tag '$tag'.  未找到 tag '$tag' 的可用 peer。"
+      err "$(msg peer.no_available_peer_found_for_tag $tag)"
       echo ""
       info "Installed peers: $(_peer_detect_peers)"
       info "Capability map: $(config_get "peer_capability_map_${tag}" "$(config_get "peer_capability_map_default" "kimi claude pi")")"
       exit 1
     fi
-    info "Auto-selected peer: $to_tool  自动选择 peer: $to_tool"
+    info "$(msg peer.auto_selected_peer $to_tool)"
   fi
 
   local pair
@@ -2837,7 +2841,7 @@ cmd_peer() {
   local status
   status="$(_peer_get_state "$pair" "status")"
   if [[ "$status" == "abandoned" ]]; then
-    err "Peer pair $pair is abandoned. Run 'roll peer reset $from_tool $to_tool' to restore.  Peer 对 $pair 已废弃。运行 'roll peer reset $from_tool $to_tool' 恢复。"
+    err "$(msg peer.peer_pair_is_abandoned_run_roll $pair $from_tool $to_tool)"
     exit 1
   fi
 
@@ -2846,13 +2850,13 @@ cmd_peer() {
     opt_out="$(config_get "peer_opt_out_seconds" "10")"
     info "Launching peer review: $from_tool → $to_tool (round $round, tag: $tag)"
     info "Press Enter to proceed or type 'n' to abort. Auto-executing in ${opt_out}s..."
-    info "启动 peer review: $from_tool → $to_tool (第 $round 轮, tag: $tag)"
-    info "按 Enter 执行或输入 n 取消。${opt_out} 秒后自动执行..."
+    info "$(msg peer.en_peer_review $from_tool $to_tool $round $tag)"
+    info "$(msg peer.en_enter_n ${opt_out})"
 
     local answer=""
     if IFS= read -r -t "$opt_out" answer 2>/dev/null; then
       if [[ "$answer" == "n" || "$answer" == "N" ]]; then
-        info "Peer review aborted by user.  用户取消 peer review。"
+        info "$(msg peer.peer_review_aborted_by_user)"
         exit 0
       fi
     fi
@@ -2899,7 +2903,7 @@ cmd_peer() {
     echo ""
   } > "$log_file"
 
-  info "Calling $to_tool...  调用 $to_tool..."
+  info "$(msg peer.calling $to_tool)"
   local response
   response="$(_peer_call "$to_tool" "$prompt" "$peer_session")"
 
@@ -2907,7 +2911,7 @@ cmd_peer() {
   stderr_log="${_PEER_STATE_DIR}/logs/.last_stderr.log"
   if [[ -f "$stderr_log" && -s "$stderr_log" ]]; then
     echo ""
-    echo -e "${BOLD}Peer stderr  Peer 标准错误:${NC}"
+    echo -e "$(msg peer.peer_stderr_peer ${BOLD} ${NC})"
     cat "$stderr_log"
     echo ""
   fi
@@ -2918,14 +2922,14 @@ cmd_peer() {
   resolution="$(_peer_parse_resolution "$response")"
 
   if [[ -z "$resolution" ]]; then
-    warn "Could not parse resolution from peer response.  无法解析 peer 响应中的决议状态。"
+    warn "$(msg peer.could_not_parse_resolution_from_peer)"
     resolution="UNKNOWN"
   fi
 
   _peer_update_state "$pair" "$resolution"
 
   echo ""
-  echo -e "${BOLD}Peer Review Result  Peer Review 结果${NC}"
+  echo -e "$(msg peer.peer_review_result_peer_review ${BOLD} ${NC})"
   echo "  Pair: $pair"
   echo "  Round: $round"
   echo "  Resolution: $resolution"
@@ -2933,17 +2937,17 @@ cmd_peer() {
 
   case "$resolution" in
     AGREE)
-      ok "Consensus reached. Proceed with execution.  达成共识，继续执行。"
+      ok "$(msg peer.consensus_reached_proceed_with_execution)"
       ;;
     REFINE|OBJECT)
       if [[ "$round" -ge 3 ]]; then
-        warn "Max rounds reached. Escalating to user.  达到最大轮数，升级给用户。"
+        warn "$(msg peer.max_rounds_reached_escalating_to_user)"
       else
-        info "Peer requests ${resolution}. Continue to round $((round + 1)).  Peer 请求 ${resolution}，继续第 $((round + 1)) 轮。"
+        info "$(msg peer.peer_requests_continue_to_round_round "${resolution}" "$((round + 1))")"
       fi
       ;;
     ESCALATE|UNKNOWN)
-      warn "Peer review escalated or failed. Human decision required.  Peer review 升级或失败，需要人类决策。"
+      warn "$(msg peer.peer_review_escalated_or_failed_human)"
       ;;
   esac
 
@@ -2969,7 +2973,7 @@ cmd_peer() {
 
 cmd_peer_status() {
   _peer_ensure_state_dir
-  echo -e "${BOLD}Peer Review Status  Peer Review 状态${NC}"
+  echo -e "$(msg peer_status.peer_review_status_peer_review ${BOLD} ${NC})"
   echo ""
 
   local found=0
@@ -2996,7 +3000,7 @@ cmd_peer_status() {
   done
 
   if [[ "$found" -eq 0 ]]; then
-    info "No peer review history yet.  暂无 peer review 记录。"
+    info "$(msg peer_status.no_peer_review_history_yet)"
   fi
 
   echo ""
@@ -3027,12 +3031,12 @@ cmd_peer_reset() {
     rm -f "$_PEER_STATE_DIR"/*_streak
     rm -f "$_PEER_STATE_DIR"/*_last_outcome
     rm -f "$_PEER_STATE_DIR"/*_last_time
-    ok "All peer states reset.  所有 peer 状态已重置。"
+    ok "$(msg peer_reset.all_peer_states_reset)"
     return
   fi
 
   if [[ -z "$target_pair" ]]; then
-    err "Usage: roll peer reset <from>→<to> | --all  用法: roll peer reset <from>→<to> | --all"
+    err "$(msg peer_reset.usage_roll_peer_reset_from_to)"
     exit 1
   fi
 
@@ -3040,26 +3044,26 @@ cmd_peer_reset() {
   rm -f "$(_peer_state_file "$target_pair" "streak")"
   rm -f "$(_peer_state_file "$target_pair" "last_outcome")"
   rm -f "$(_peer_state_file "$target_pair" "last_time")"
-  ok "Peer state reset: $target_pair  Peer 状态已重置: $target_pair"
+  ok "$(msg peer_reset.peer_state_reset_peer $target_pair)"
 }
 
 cmd_peer_help() {
   echo -e "${BOLD}roll peer — Cross-Agent Peer Review${NC}"
   echo ""
-  echo "Usage: roll peer [options]  用法: roll peer [选项]"
+  echo "$(msg peer_help.usage_roll_peer_options)"
   echo ""
   echo "Options:"
-  echo "  --from <tool>       Originating agent (kimi, claude, pi)  发起方"
-  echo "  --to <tool>         Target peer (auto-detected if omitted)  对端 peer（省略则自动选择）"
-  echo "  --round <N>         Current round (default: 1)  当前轮数"
-  echo "  --tag <type>        Task type for routing (architecture, security, test...)  任务类型"
-  echo "  --context <file>    Context file to send to peer  上下文文件"
-  echo "  --yes, --yolo       Skip opt-out prompt  跳过确认提示"
+  echo "$(msg peer_help.from_tool_originating_agent_kimi_claude)"
+  echo "$(msg peer_help.to_tool_target_peer_auto_detected)"
+  echo "$(msg peer_help.round_n_current_round_default_1)"
+  echo "$(msg peer_help.tag_type_task_type_for_routing)"
+  echo "$(msg peer_help.context_file_context_file_to_send)"
+  echo "$(msg peer_help.yes_yolo_skip_opt_out_prompt)"
   echo ""
   echo "Subcommands:"
-  echo "  status              Show peer review state  显示状态"
-  echo "  reset <pair|--all>  Reset peer state  重置状态"
-  echo "  help                Show this help  显示帮助"
+  echo "$(msg peer_help.status_show_peer_review_state)"
+  echo "$(msg peer_help.reset_pair_all_reset_peer_state)"
+  echo "$(msg peer_help.help_show_this_help)"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3434,12 +3438,12 @@ cmd_slides_build() {
     case "$1" in
       --no-open) no_open=1; shift ;;
       --help|-h) _slides_help; return 0 ;;
-      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      --*) err "$(msg slides_build.unknown_option_1)"; return 1 ;;
       *)
         if [[ -z "$slug" ]]; then
           slug="$1"; shift
         else
-          err "Unexpected argument: $1  多余参数: $1"; return 1
+          err "$(msg slides_build.unexpected_argument_1)"; return 1
         fi
         ;;
     esac
@@ -3447,16 +3451,16 @@ cmd_slides_build() {
 
   if [[ -z "$slug" ]]; then
     err "Usage: roll slides build <slug> [--no-open]"
-    echo "用法: roll slides build <slug> [--no-open]" >&2
+    echo "$(msg slides_build.usage_roll_slides_build_slug_no)" >&2
     return 1
   fi
 
   local deck=".roll/slides/${slug}/deck.md"
   if [[ ! -f "$deck" ]]; then
     err "Deck not found: ${deck}"
-    echo "  未找到 deck 文件：${deck}" >&2
+    echo "$(msg slides_build.en_deck ${deck})" >&2
     echo "  Hint: run 'roll slides new \"<topic>\"' to generate a new deck." >&2
-    echo "  提示：先运行 'roll slides new \"<主题>\"' 生成新的幻灯片。" >&2
+    echo "$(msg slides_build.en_roll_slides_new)" >&2
     return 1
   fi
 
@@ -3464,7 +3468,7 @@ cmd_slides_build() {
   local validator="${lib_dir}/slides-validate.py"
   local renderer="${lib_dir}/slides-render.py"
   if [[ ! -f "$validator" || ! -f "$renderer" ]]; then
-    err "Slides toolchain missing — re-run 'roll setup'  渲染工具缺失，请运行 roll setup"
+    err "$(msg slides_build.slides_toolchain_missing_re_run_roll)"
     return 1
   fi
 
@@ -3482,7 +3486,7 @@ cmd_slides_build() {
     mkdir -p ".roll/slides/${slug}"
     printf '[%s] stage=validate\n%s\n' "$ts" "$val_out" > "$err_file"
     err "deck.md validation failed — fix the issues above before building."
-    echo "  deck.md 校验失败，请先修复上方提示再重试。" >&2
+    echo "$(msg slides_build.deck_md)" >&2
     return 1
   fi
 
@@ -3493,7 +3497,7 @@ cmd_slides_build() {
     local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     mkdir -p ".roll/slides/${slug}"
     printf '[%s] stage=template\ntemplate not found: %s\n' "$ts" "$tpl_name" > "$err_file"
-    err "Template not found: ${tpl_name}  未找到模板：${tpl_name}"
+    err "$(msg slides_build.template_not_found ${tpl_name})"
     return 1
   fi
 
@@ -3503,7 +3507,7 @@ cmd_slides_build() {
     local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     mkdir -p ".roll/slides/${slug}"
     printf '[%s] stage=render\n%s\n' "$ts" "$render_out" > "$err_file"
-    err "Render failed for ${deck}  渲染失败：${deck}"
+    err "$(msg slides_build.render_failed_for ${deck})"
     return 1
   }
 
@@ -3513,7 +3517,7 @@ cmd_slides_build() {
   # 3. Default-ignore the HTML artefact so it doesn't accidentally get committed.
   _slides_ensure_gitignore
 
-  ok "Rendered → ${out}  渲染完成 → ${out}"
+  ok "$(msg slides_build.rendered ${out})"
 
   # 4. Auto-open browser unless suppressed (or running inside bats tests).
   if [[ "$no_open" -eq 1 ]] || [[ -n "${BATS_TEST_NUMBER:-}" ]] || [[ -n "${ROLL_SLIDES_NO_OPEN:-}" ]]; then
@@ -3564,16 +3568,16 @@ cmd_slides_list() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help|-h) _slides_help; return 0 ;;
-      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
-      *) err "Unexpected argument: $1  多余参数: $1"; return 1 ;;
+      --*) err "$(msg slides_list.unknown_option_1)"; return 1 ;;
+      *) err "$(msg slides_list.unexpected_argument_1)"; return 1 ;;
     esac
   done
 
   local slides_dir=".roll/slides"
   if [[ ! -d "$slides_dir" ]]; then
-    info "No decks found under .roll/slides/  无幻灯片"
+    info "$(msg slides_list.no_decks_found_under_roll_slides)"
     echo "  Hint: run 'roll slides new \"<topic>\"' to create one."
-    echo "  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。"
+    echo "$(msg slides_list.en_roll_slides_new)"
     return 0
   fi
 
@@ -3590,9 +3594,9 @@ cmd_slides_list() {
   shopt -u nullglob
 
   if [[ "${#slugs[@]}" -eq 0 ]]; then
-    info "No decks found under .roll/slides/  无幻灯片"
+    info "$(msg slides_list.no_decks_found_under_roll_slides_2)"
     echo "  Hint: run 'roll slides new \"<topic>\"' to create one."
-    echo "  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。"
+    echo "$(msg slides_list.en_roll_slides_new_2)"
     return 0
   fi
 
@@ -3647,12 +3651,12 @@ cmd_slides_preview() {
     case "$1" in
       --no-open) no_open=1; shift ;;
       --help|-h) _slides_help; return 0 ;;
-      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      --*) err "$(msg slides_preview.unknown_option_1)"; return 1 ;;
       *)
         if [[ -z "$slug" ]]; then
           slug="$1"; shift
         else
-          err "Unexpected argument: $1  多余参数: $1"; return 1
+          err "$(msg slides_preview.unexpected_argument_1)"; return 1
         fi
         ;;
     esac
@@ -3660,20 +3664,20 @@ cmd_slides_preview() {
 
   if [[ -z "$slug" ]]; then
     err "Usage: roll slides preview <slug> [--no-open]"
-    echo "用法: roll slides preview <slug> [--no-open]" >&2
+    echo "$(msg slides_preview.usage_roll_slides_preview_slug_no)" >&2
     return 1
   fi
 
   local html=".roll/slides/${slug}.html"
   if [[ ! -f "$html" ]]; then
     err "Rendered HTML not found: ${html}"
-    echo "  未找到已渲染的 HTML：${html}" >&2
+    echo "$(msg slides_preview.en_html ${html})" >&2
     echo "  Hint: run 'roll slides build ${slug}' first to render it." >&2
-    echo "  提示：先运行 'roll slides build ${slug}' 渲染幻灯片。" >&2
+    echo "$(msg slides_preview.en_roll_slides_build ${slug})" >&2
     return 1
   fi
 
-  ok "Preview → ${html}  打开预览 → ${html}"
+  ok "$(msg slides_preview.preview ${html})"
 
   if [[ "$no_open" -eq 1 ]] || [[ -n "${BATS_TEST_NUMBER:-}" ]] || [[ -n "${ROLL_SLIDES_NO_OPEN:-}" ]]; then
     return 0
@@ -3691,12 +3695,12 @@ cmd_slides_logs() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help|-h) _slides_help; return 0 ;;
-      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      --*) err "$(msg slides_logs.unknown_option_1)"; return 1 ;;
       *)
         if [[ -z "$slug" ]]; then
           slug="$1"; shift
         else
-          err "Unexpected argument: $1  多余参数: $1"; return 1
+          err "$(msg slides_logs.unexpected_argument_1)"; return 1
         fi
         ;;
     esac
@@ -3704,7 +3708,7 @@ cmd_slides_logs() {
 
   if [[ -z "$slug" ]]; then
     err "Usage: roll slides logs <slug>"
-    echo "用法: roll slides logs <slug>" >&2
+    echo "$(msg slides_logs.usage_roll_slides_logs_slug)" >&2
     return 1
   fi
 
@@ -3712,12 +3716,12 @@ cmd_slides_logs() {
   local err_file="${deck_dir}/.last-build.err"
 
   if [[ ! -d "$deck_dir" ]] || [[ ! -f "${deck_dir}/deck.md" ]]; then
-    err "Deck not found: ${slug}  未找到幻灯片：${slug}"
+    err "$(msg slides_logs.deck_not_found ${slug})"
     return 1
   fi
 
   if [[ ! -f "$err_file" ]]; then
-    info "No failure records for ${slug}  该幻灯片没有失败记录"
+    info "$(msg slides_logs.no_failure_records_for ${slug})"
     return 0
   fi
 
@@ -3732,12 +3736,12 @@ cmd_slides_delete() {
     case "$1" in
       --force) force=1; shift ;;
       --help|-h) _slides_help; return 0 ;;
-      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      --*) err "$(msg slides_delete.unknown_option_1)"; return 1 ;;
       *)
         if [[ -z "$slug" ]]; then
           slug="$1"; shift
         else
-          err "Unexpected argument: $1  多余参数: $1"; return 1
+          err "$(msg slides_delete.unexpected_argument_1)"; return 1
         fi
         ;;
     esac
@@ -3745,7 +3749,7 @@ cmd_slides_delete() {
 
   if [[ -z "$slug" ]]; then
     err "Usage: roll slides delete <slug> [--force]"
-    echo "用法: roll slides delete <slug> [--force]" >&2
+    echo "$(msg slides_delete.usage_roll_slides_delete_slug_force)" >&2
     return 1
   fi
 
@@ -3753,28 +3757,28 @@ cmd_slides_delete() {
   local html=".roll/slides/${slug}.html"
 
   if [[ ! -d "$deck_dir" ]] || [[ ! -f "${deck_dir}/deck.md" ]]; then
-    err "Deck not found: ${slug}  未找到幻灯片：${slug}"
+    err "$(msg slides_delete.deck_not_found ${slug})"
     return 1
   fi
 
   # Non-TTY must use --force (skip interactive confirmation)
   if [[ $force -eq 0 ]]; then
     if [[ ! -t 0 ]]; then
-      err "Non-interactive terminal: must use --force to delete  非交互终端：需使用 --force 参数"
+      err "$(msg slides_delete.non_interactive_terminal_must_use_force)"
       return 1
     fi
-    printf 'Delete deck "%s"? (y/N)  删除幻灯片 "%s"？(y/N) ' "$slug" "$slug" >&2
+    printf '%s ' "$(msg slides_delete.prompt "$slug")" >&2
     read -r answer
     case "$answer" in
       [yY]|[yY][eE][sS]) : ;;
-      *) info "Cancelled  已取消"; return 0 ;;
+      *) info "$(msg slides_delete.cancelled)"; return 0 ;;
     esac
   fi
 
   # Remove deck directory and HTML file
   rm -rf "$deck_dir" 2>/dev/null || true
   rm -f "$html" 2>/dev/null || true
-  ok "Deleted ${slug}  已删除 ${slug}"
+  ok "$(msg slides_delete.deleted ${slug})"
   return 0
 }
 
@@ -3783,8 +3787,8 @@ cmd_slides_templates() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help|-h) _slides_help; return 0 ;;
-      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
-      *) err "Unexpected argument: $1  多余参数: $1"; return 1 ;;
+      --*) err "$(msg slides_templates.unknown_option_1)"; return 1 ;;
+      *) err "$(msg slides_templates.unexpected_argument_1)"; return 1 ;;
     esac
   done
 
@@ -3828,7 +3832,7 @@ cmd_slides_templates() {
   fi
 
   if [[ $found -eq 0 ]]; then
-    info "No templates found  无可用模板"
+    info "$(msg slides_templates.no_templates_found)"
   fi
   return 0
 }
@@ -3859,18 +3863,18 @@ cmd_slides_new() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --template)
-        [[ -n "${2:-}" ]] || { err "--template requires a value  --template 需要一个值"; return 1; }
+        [[ -n "${2:-}" ]] || { err "$(msg slides_new.template_requires_value)"; return 1; }
         template="$2"; shift 2 ;;
       --template=*) template="${1#--template=}"; shift ;;
       --quiet) quiet=1; shift ;;
       --no-build) no_build=1; shift ;;
       --help|-h) _slides_help; return 0 ;;
-      --*) err "Unknown option: $1  未知选项: $1"; return 1 ;;
+      --*) err "$(msg slides_new.unknown_option_1)"; return 1 ;;
       *)
         if [[ -z "$topic" ]]; then
           topic="$1"; shift
         else
-          err "Unexpected argument: $1  多余参数: $1"; return 1
+          err "$(msg slides_new.unexpected_argument_1)"; return 1
         fi
         ;;
     esac
@@ -3878,14 +3882,14 @@ cmd_slides_new() {
 
   if [[ -z "$topic" ]]; then
     err "Usage: roll slides new \"<topic>\" [--template <name>] [--quiet] [--no-build]"
-    echo "  用法：roll slides new \"<主题>\" [--template <模板名>] [--quiet] [--no-build]" >&2
+    echo "$(msg slides_new.en_roll_slides_new_template)" >&2
     return 1
   fi
 
   local slug; slug=$(_slides_topic_slug "$topic")
   if [[ -z "$slug" ]]; then
     err "Could not derive a slug from topic: $topic"
-    echo "  无法从主题派生 slug：$topic" >&2
+    echo "$(msg slides_new.en_slug $topic)" >&2
     return 1
   fi
 
@@ -4007,7 +4011,7 @@ EOF
   # Print Next hint (unless --quiet flag was explicitly passed)
   echo
   echo "Next:  roll slides build ${slug}"
-  echo "下一步：roll slides build ${slug}"
+  echo "$(msg slides_new.en_roll_slides_build ${slug})"
 
   return "$rc"
 }
@@ -4070,7 +4074,7 @@ cmd_prices_refresh() {
     case "$1" in
       --url) url="$2"; shift 2 ;;
       --vendor) vendor="$2"; shift 2 ;;
-      *)     err "Unknown flag: $1  未知参数: $1"; return 1 ;;
+      *)     err "$(msg prices_refresh.unknown_flag_1)"; return 1 ;;
     esac
   done
   local lib_dir="${ROLL_PKG_DIR}/lib"
@@ -4094,8 +4098,8 @@ VENDOR_URLS = {
 if vendor:
     default_url = VENDOR_URLS.get(vendor)
     if not default_url:
-        print(f"[roll] unknown vendor: {vendor}  未知厂商", file=sys.stderr)
-        print(f"[roll] known vendors: {', '.join(sorted(VENDOR_URLS))}  已知厂商", file=sys.stderr)
+        print(f"$(msg prices_refresh.roll_unknown_vendor_vendor)", file=sys.stderr)
+        print(f"$(msg prices_refresh.roll_known_vendors_join_sorted_vendor)", file=sys.stderr)
         sys.exit(1)
     url = override_url or default_url
     pf.DEFAULT_SOURCE_URL = url
@@ -4135,7 +4139,7 @@ cmd_prices() {
     refresh)           cmd_prices_refresh "$@" ;;
     --help|-h|help|"") _prices_help ;;
     *)
-      err "Unknown subcommand: ${subcmd}  未知子命令：${subcmd}"
+      err "$(msg prices.unknown_subcommand ${subcmd})"
       _prices_help >&2
       return 1
       ;;
@@ -4166,7 +4170,7 @@ Read-only — never edits CHANGELOG. Use to catch drift before release.
 EOF
       ;;
     *)
-      err "Unknown subcommand: ${subcmd}  未知子命令：${subcmd}"
+      err "$(msg changelog.unknown_subcommand ${subcmd})"
       err "Try: roll changelog audit"
       return 1
       ;;
@@ -4207,7 +4211,7 @@ cmd_slides() {
       return 1
       ;;
     *)
-      err "Unknown subcommand: ${subcmd}  未知子命令：${subcmd}"
+      err "$(msg slides.unknown_subcommand ${subcmd})"
       _slides_help >&2
       return 1
       ;;
@@ -4316,7 +4320,7 @@ cmd_agent() {
     use)
       local name="${1:-}"
       [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; exit 1; }
-      command -v "$name" &>/dev/null || warn "${name} not found in PATH — setting anyway  未找到，仍写入配置"
+      command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
       # REFACTOR-040: write to .roll/local.yaml (per-machine state). Migrate
       # from legacy .roll.yaml in the project root on the spot — copy the
       # value over once, then delete the old file so the root stays clean.
@@ -4337,17 +4341,17 @@ cmd_agent() {
         mv "$tmp" .roll.yaml
         [[ -s ".roll.yaml" ]] || rm -f .roll.yaml
       fi
-      ok "Agent set to ${name} for this project  当前项目 agent 已设为 ${name}"
+      ok "$(msg agent.agent_set_to_for_this_project ${name})"
       local project_path; project_path=$(pwd -P)
       local slug; slug=$(_project_slug "$project_path")
       local runner="${_SHARED_ROOT}/loop/run-${slug}.sh"
       if [[ -f "$runner" ]]; then
         _install_launchd_plists "$project_path" >/dev/null
-        ok "Loop runner scripts regenerated for new agent  已为新 agent 重新生成 loop 脚本"
+        ok "$(msg agent.loop_runner_scripts_regenerated_for_new)"
       fi
       ;;
     list)
-      echo ""; echo "  Available agents  可用 agent:"; echo ""
+      echo ""; echo "  $(msg agent.available_agents)"; echo ""
       local current; current=$(_project_agent)
       for a in claude kimi deepseek opencode codex pi; do
         if command -v "$a" &>/dev/null; then
@@ -4868,7 +4872,7 @@ _loop_schedule_desc() {
   local period="$1" offset="$2" lang="${3:-en}"
   if [[ "$period" -eq 60 ]]; then
     if [[ "$lang" == "zh" ]]; then
-      printf "每小時 :%02d" "$offset"
+      printf "$(msg agent.hourly_at_02d)" "$offset"
     else
       printf "every hour :%02d" "$offset"
     fi
@@ -4880,7 +4884,7 @@ _loop_schedule_desc() {
     times="${times} :$(printf '%02d' "$m")"
   done
   if [[ "$lang" == "zh" ]]; then
-    printf "每%d分鐘 (%s)" "$period" "${times# }"
+    printf "$(msg agent.every_d_min_s)" "$period" "${times# }"
   else
     printf "every %dmin (%s)" "$period" "${times# }"
   fi
@@ -6070,10 +6074,10 @@ _install_launchd_plists() {
   done
 
   if [[ $updated -gt 0 ]]; then
-    ok "Launchd plists installed (${updated} updated)  LaunchAgents 已安装"
-    echo "  Run: roll loop on  to activate  运行 roll loop on 激活"
+    ok "$(msg agent.launchd_plists_installed_updated_launchagents ${updated})"
+    echo "$(msg agent.run_roll_loop_on_to_activate)"
   else
-    ok "Launchd plists up to date  LaunchAgents 无需更新"
+    ok "$(msg agent.launchd_plists_up_to_date_launchagents)"
   fi
 }
 
@@ -6205,14 +6209,14 @@ _loop_on() {
     done
 
     if $all_loaded; then
-      warn "Loop already enabled for this project  当前项目 loop 已启用"; return 0
+      warn "$(msg loop.loop_already_enabled_for_this_project)"; return 0
     fi
 
-    ok "Loop enabled  已启用"
-    printf "  • roll-loop   %s  active %02d:00–%02d:00  %s（窗口 %02d:00–%02d:00）\n" \
+    ok "$(msg loop.loop_enabled)"
+    printf "$(msg loop.roll_loop_s_active_02d_00)" \
       "$loop_sched_en" "$active_start" "$active_end" "$loop_sched_zh" "$active_start" "$active_end"
-    printf "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d\n" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
-    printf "  • roll-brief  daily at %02d:%02d  每天 %02d:%02d\n" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
+    printf "$(msg loop.roll_dream_daily_at_02d_02d)" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
+    printf "$(msg loop.roll_brief_daily_at_02d_02d)" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
     echo "  • Agent: ${agent}  (change: roll agent use <name>)"
     return 0
   fi
@@ -6220,7 +6224,7 @@ _loop_on() {
   # Linux: crontab
   local sd="${ROLL_HOME}/skills"
   if crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
-    warn "Loop already enabled for this project  当前项目 loop 已启用"; return 0
+    warn "$(msg loop.loop_already_enabled_for_this_project_2)"; return 0
   fi
 
   mkdir -p "${_SHARED_ROOT}/loop" "${_SHARED_ROOT}/dream" "${_SHARED_ROOT}/brief"
@@ -6239,11 +6243,11 @@ _loop_on() {
     printf "%d %d * * * %s %s:%s\n" "$brief_minute" "$brief_hour" "$brief_cmd" "$_LOOP_TAG" "$project_path"
   ) | crontab -
 
-  ok "Loop enabled  已启用"
-  printf "  • roll-loop   %s  active %02d:00–%02d:00  %s（窗口 %02d:00–%02d:00）\n" \
+  ok "$(msg loop.loop_enabled_2)"
+  printf "$(msg loop.roll_loop_s_active_02d_00_2)" \
     "$loop_sched_en" "$active_start" "$active_end" "$loop_sched_zh" "$active_start" "$active_end"
-  printf "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d\n" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
-  printf "  • roll-brief  daily at %02d:%02d  每天 %02d:%02d\n" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
+  printf "$(msg loop.roll_dream_daily_at_02d_02d_2)" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
+  printf "$(msg loop.roll_brief_daily_at_02d_02d_2)" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
   echo "  • Agent: ${agent}  (change: roll agent use <name>)"
 }
 
@@ -6264,7 +6268,7 @@ _loop_off() {
       fi
     done
     if ! $any_loaded; then
-      warn "Loop not enabled for this project  当前项目 loop 未启用"; return 0
+      warn "$(msg loop.loop_not_enabled_for_this_project)"; return 0
     fi
     local slug; slug=$(_project_slug "$project_path")
     local uid; uid=$(id -u)
@@ -6283,16 +6287,16 @@ _loop_off() {
       [[ "$_skip_off" == "1" ]] && continue
       _launchctl_safe enable "gui/${uid}/${label}" 2>/dev/null || true
     done
-    ok "Loop disabled  已停用"
+    ok "$(msg loop.loop_disabled)"
     return 0
   fi
 
   # Linux: crontab
   if ! crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}"; then
-    warn "Loop not enabled for this project  当前项目 loop 未启用"; return 0
+    warn "$(msg loop.loop_not_enabled_for_this_project_2)"; return 0
   fi
   crontab -l 2>/dev/null | grep -v "${_LOOP_TAG}:${project_path}" | crontab -
-  ok "Loop disabled  已停用"
+  ok "$(msg loop.loop_disabled_2)"
 }
 
 _loop_is_active() {
@@ -6326,9 +6330,9 @@ _loop_now() {
   # but no live signal exists, this trigger is the canonical recovery point.
   if [[ -f "$_LOOP_STATE" ]] && grep -q "status: running" "$_LOOP_STATE" 2>/dev/null; then
     if _loop_is_active "$slug"; then
-      warn "Loop already running  loop 正在运行中"; return 0
+      warn "$(msg loop.loop_already_running_loop)"; return 0
     fi
-    info "Stale running state detected — healing before new cycle  检测到孤儿状态，正在修复..."
+    info "$(msg loop.stale_running_state_detected_healing_before)"
     printf "status: idle\n" > "$_LOOP_STATE"
     rm -f "${_SHARED_ROOT}/loop/.LOCK-${slug}" 2>/dev/null || true
   fi
@@ -6341,7 +6345,7 @@ _loop_now() {
     err "Run 'roll setup' or 'roll loop on' first to generate it."
     return 1
   fi
-  info "Starting new loop cycle...  正在启动新的循环..."
+  info "$(msg loop.starting_new_loop_cycle)"
   ROLL_LOOP_FORCE=1 bash "$runner"
   # Reset stale running state if the cycle exited without cleanup (e.g. API error, SIGKILL)
   if [[ -f "$_LOOP_STATE" ]] && grep -q "^status: running" "$_LOOP_STATE" 2>/dev/null; then
@@ -6386,14 +6390,14 @@ _loop_test() {
   active_start=$(_config_read_int "loop_active_start" "10")
   active_end=$(_config_read_int "loop_active_end" "18")
 
-  info "Generating test runner (agent: ${agent})...  正在生成测试启动脚本 (agent: ${agent})..."
+  info "$(msg loop.generating_test_runner_agent ${agent})"
   _write_loop_runner_script "$test_runner" "$project_path" \
     "${agent_cmd}" \
     "$log" "$active_start" "$active_end"
 
-  info "Starting smoke test (agent: ${agent})...  正在运行 smoke 测试 (agent: ${agent})..."
+  info "$(msg loop.starting_smoke_test_agent ${agent})"
   info "Watch for: tmux session + terminal popup + stream-json events flowing"
-  info "观察：tmux 会话 + 终端弹窗 + stream-json 事件流"
+  info "$(msg loop.observing_tmux_session_terminal_popup_stream)"
 
   local start_time; start_time=$(date +%s)
   ROLL_LOOP_FORCE=1 bash "$test_runner"
@@ -6401,9 +6405,9 @@ _loop_test() {
   local elapsed=$(( $(date +%s) - start_time ))
 
   if [[ $exit_code -eq 0 ]]; then
-    ok "Smoke test passed (${elapsed}s, agent: ${agent})  smoke 测试通过 (${elapsed}秒, agent: ${agent})"
+    ok "$(msg loop.smoke_test_passed_s_agent_smoke ${elapsed} ${agent})"
   else
-    err "Smoke test failed (exit ${exit_code}, ${elapsed}s, agent: ${agent})  smoke 测试失败 (退出码 ${exit_code}, ${elapsed}s, agent: ${agent})"
+    err "$(msg loop.smoke_test_failed_exit_s_agent ${exit_code} ${elapsed} ${agent})"
     return 1
   fi
 }
@@ -6478,7 +6482,7 @@ _loop_pause() {
   if [[ "$(uname)" == "Darwin" ]]; then
     local label; label=$(_launchd_label "loop" "$project_path")
     if ! _launchd_is_loaded "$label"; then
-      warn "Loop not enabled — nothing to pause  loop 未启用，无需暂停"; return 0
+      warn "$(msg loop.loop_not_enabled_nothing_to_pause)"; return 0
     fi
     # FIX-097: never touch host launchctl from a sandboxed plist path.
     if ! _launchd_should_skip_registry; then
@@ -6492,7 +6496,7 @@ _loop_pause() {
 
   mkdir -p "$(dirname "$_LOOP_STATE")"
   printf 'status: paused\npaused_at: "%s"\npaused_reason: manual\n' "$paused_at" > "$_LOOP_STATE"
-  ok "Loop paused  已暂停   run: roll loop resume"
+  ok "$(msg loop.loop_paused)"
 }
 
 _loop_resume() {
@@ -6512,27 +6516,27 @@ _loop_resume() {
       rm -f "${_SHARED_ROOT}/loop/PAUSE-${slug}"
     fi
     printf "status: idle\n" > "$_LOOP_STATE"
-    ok "Loop resumed  已恢复"
+    ok "$(msg loop.loop_resumed)"
     return 0
   fi
 
   # Interrupt resume: loop was running a Story and crashed
   if [[ ! -f "$_LOOP_STATE" ]]; then
-    warn "No loop state found — nothing to resume  未找到 loop 状态，无需恢复"; return 0
+    warn "$(msg loop.no_loop_state_found_nothing_to)"; return 0
   fi
   if grep -q "status: running" "$_LOOP_STATE" 2>/dev/null; then
-    warn "Loop already running  loop 正在运行中"; return 0
+    warn "$(msg loop.loop_already_running_loop_2)"; return 0
   fi
-  info "Resuming loop from last state...  正在从上次状态恢复..."
+  info "$(msg loop.resuming_loop_from_last_state)"
   _agent_run_skill "roll-loop"
 }
 
 _loop_reset() {
   if [[ -f "$_LOOP_STATE" ]]; then
     rm -f "$_LOOP_STATE"
-    ok "Loop state cleared — will start fresh on next run  loop 状态已清除，下次运行将重新开始"
+    ok "$(msg loop.loop_state_cleared_will_start_fresh)"
   else
-    info "No loop state to clear  无 loop 状态可清除"
+    info "$(msg loop.no_loop_state_to_clear)"
   fi
   rm -rf "$(_loop_heal_dir)"
 }
@@ -6543,13 +6547,13 @@ _loop_reset() {
 _loop_mute() {
   mkdir -p "$(dirname "$_LOOP_MUTE_FILE")"
   : > "$_LOOP_MUTE_FILE"
-  ok "🔇 muted — auto-attach disabled  已静音，自动弹窗已关闭"
+  ok "$(msg loop.muted_auto_attach_disabled)"
 }
 
 # Re-enable the auto-attach popup.
 _loop_unmute() {
   rm -f "$_LOOP_MUTE_FILE"
-  ok "🔔 unmuted — auto-attach live  已恢复，自动弹窗已开启"
+  ok "$(msg loop.unmuted_auto_attach_live)"
 }
 
 # Attach to the tmux session a running loop iteration writes to. Returns 1 when
@@ -6560,12 +6564,12 @@ _loop_attach() {
   local session="roll-loop-${slug}"
 
   if ! command -v tmux >/dev/null 2>&1; then
-    warn "tmux not installed — install with 'brew install tmux'  请先安装 tmux"
+    warn "$(msg loop.tmux_not_installed_install_with_brew)"
     return 1
   fi
 
   if ! tmux has-session -t "$session" 2>/dev/null; then
-    info "No running loop session for this project  当前项目无运行中的 loop"
+    info "$(msg loop.no_running_loop_session_for_this)"
     info "Wait for next scheduled fire, or run: roll loop now"
     return 1
   fi
@@ -6605,19 +6609,19 @@ _loop_runs_detail() {
   local cycle_id="$1"
   command -v jq >/dev/null 2>&1 || { err "jq required for --detail"; return 1; }
   if [[ ! -f "$_LOOP_RUNS" ]]; then
-    echo "No runs.jsonl yet  尚无运行记录"
+    echo "$(msg loop.no_runs_jsonl_yet)"
     return 0
   fi
   local row
   row=$(jq -c --arg cid "$cycle_id" 'select(.cycle_id == $cid)' "$_LOOP_RUNS" | head -1)
   if [[ -z "$row" ]]; then
-    echo "Cycle not found: $cycle_id  未找到对应 cycle"
+    echo "$(msg loop.cycle_not_found $cycle_id)"
     return 1
   fi
   local has_phases
   has_phases=$(jq -r '(.phases // {}) | length' <<<"$row")
   if [[ "$has_phases" == "0" ]]; then
-    echo "Cycle $cycle_id has no phases data (pre-US-LOOP-008)  无 phase 数据"
+    echo "$(msg loop.cycle_has_no_phases_data_pre $cycle_id)"
     return 0
   fi
   echo ""
@@ -6746,12 +6750,12 @@ _loop_runs() {
   _loop_backfill_merged >/dev/null 2>&1 || true
 
   if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
-    echo "No loop runs yet  尚无 loop 运行记录"
+    echo "$(msg loop.no_loop_runs_yet)"
     return 0
   fi
 
   if ! command -v jq >/dev/null 2>&1; then
-    err "jq required for 'roll loop runs'  需要 jq"
+    err "$(msg loop.jq_required_for_roll_loop_runs)"
     return 1
   fi
 
@@ -6765,7 +6769,7 @@ _loop_runs() {
   fi
 
   if [[ -z "$filtered" ]]; then
-    echo "No loop runs for current project  当前项目尚无 loop 运行记录"
+    echo "$(msg loop.no_loop_runs_for_current_project)"
     return 0
   fi
 
@@ -6824,7 +6828,7 @@ _loop_log() {
 
   # Directory missing or empty — friendly message.
   if [[ ! -d "$logs_dir" ]] || [[ -z "$(ls -A "$logs_dir" 2>/dev/null)" ]]; then
-    echo "No cycle logs found — run 'roll loop now' first  尚无 cycle 日志 — 请先运行 'roll loop now'"
+    echo "$(msg loop.no_cycle_logs_found_run_roll)"
     return 0
   fi
 
@@ -6832,7 +6836,7 @@ _loop_log() {
     # No argument: find latest .log by mtime.
     local latest; latest=$(ls -t "$logs_dir"/*.log 2>/dev/null | head -1)
     if [[ -z "$latest" ]]; then
-      echo "No cycle logs found — run 'roll loop now' first  尚无 cycle 日志 — 请先运行 'roll loop now'"
+      echo "$(msg loop.no_cycle_logs_found_run_roll_2)"
       return 0
     fi
     _loop_log_show "$latest"
@@ -6855,13 +6859,13 @@ _loop_log() {
   fi
 
   if [[ "$count" -eq 0 ]]; then
-    echo "No cycle log matching '${query}'  未找到匹配 '${query}' 的 cycle 日志"
+    echo "$(msg loop.no_cycle_log_matching ${query})"
     return 1
   elif [[ "$count" -eq 1 ]]; then
     _loop_log_show "$matches"
     return 0
   else
-    echo "Ambiguous prefix '${query}' — matches ${count} logs:  前缀 '${query}' 匹配多个日志:"
+    echo "$(msg loop.ambiguous_prefix_matches_logs ${query} ${count})"
     echo "$matches" | while IFS= read -r f; do
       echo "  $(basename "$f" .log)"
     done
@@ -6909,24 +6913,24 @@ _ci_wait() {
   local interval=15
   local elapsed=0
 
-  _gh_available || { warn "gh not installed — skipping CI gate  gh 未安装，跳过 CI 检查"; return 0; }
+  _gh_available || { warn "$(msg loop.gh_not_installed_skipping_ci_gate)"; return 0; }
 
-  local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "Not a git repo  非 git 仓库"; return 1; }
+  local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "$(msg loop.not_a_git_repo)"; return 1; }
   local short; short=$(git rev-parse --short HEAD 2>/dev/null)
 
   # Resolve owner/repo from git remote so we don't depend on gh's auto-detection,
   # which breaks when ~/.ssh/config rewrites `Host github.com` → IP address.
   local repo_slug; repo_slug=$(_gh_repo_slug) || {
-    err "Cannot determine GitHub repo from origin remote  无法从 origin 推导 GitHub 仓库"
+    err "$(msg loop.cannot_determine_github_repo_from_origin)"
     return 1
   }
 
-  ok "Waiting for CI on ${short} (${repo_slug})  等待 CI: ${short}"
+  ok "$(msg loop.waiting_for_ci_on ${short} ${repo_slug})"
 
   while (( elapsed < timeout )); do
     local runs
     runs=$(gh -R "$repo_slug" run list --commit "$commit" --json status,conclusion 2>&1) || {
-      err "gh run list failed for ${repo_slug}@${short}: ${runs}  gh 调用失败"
+      err "$(msg loop.gh_run_list_failed_for_gh ${repo_slug} ${short} ${runs})"
       return 1
     }
 
@@ -6938,11 +6942,11 @@ _ci_wait() {
         local _pr_json; _pr_json=$(gh -R "$repo_slug" pr list --head "$_branch" --state open --json number 2>/dev/null || echo "1")
         local _pr_count; _pr_count=$(echo "$_pr_json" | jq 'length' 2>/dev/null || echo "1")
         if [[ "$_pr_count" == "0" ]]; then
-          warn "No open PR for ${_branch} — CI not triggered; skipping CI gate  当前分支无 PR，CI 未触发，跳过"
+          warn "$(msg loop.no_open_pr_for_ci_not ${_branch})"
           return 0
         fi
       fi
-      (( elapsed == 0 )) && echo "  No CI runs found yet, waiting...  尚无 CI 记录，等待触发..."
+      (( elapsed == 0 )) && echo "$(msg loop.no_ci_runs_found_yet_waiting)"
       sleep "$interval"
       elapsed=$(( elapsed + interval ))
       continue
@@ -6952,7 +6956,7 @@ _ci_wait() {
     pending=$(echo "$runs" | jq -r '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo "0")
 
     if [[ "$pending" -gt 0 ]]; then
-      printf "  ⏳ CI running (%ds)...  CI 运行中（%ds）...\n" "$elapsed" "$elapsed"
+      printf "$(msg loop.ci_running_ds_ci)" "$elapsed" "$elapsed"
       sleep "$interval"
       elapsed=$(( elapsed + interval ))
       continue
@@ -6962,15 +6966,15 @@ _ci_wait() {
     failed=$(echo "$runs" | jq -r '[.[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != null)] | length' 2>/dev/null || echo "0")
 
     if [[ "$failed" -gt 0 ]]; then
-      err "CI failed for ${short}  CI 失败: ${short}"
+      err "$(msg loop.ci_failed_for_ci ${short})"
       return 1
     fi
 
-    ok "CI passed  CI 通过"
+    ok "$(msg loop.ci_passed_ci)"
     return 0
   done
 
-  warn "CI timed out after ${timeout}s  CI 等待超时（${timeout}s）"
+  warn "$(msg loop.ci_timed_out_after_s_ci ${timeout})"
   return 1
 }
 
@@ -7007,14 +7011,14 @@ _loop_precheck_ci() {
     run_states=$(echo "$runs" \
       | jq -r '[.[] | "\(.status // "?")/\(.conclusion // "null")"] | unique | join(", ")' \
       2>/dev/null || echo "?")
-    err "Pre-run CI check: HEAD CI is red — refuse to build on broken base (${short})  HEAD CI 红，拒绝在破损的基础上构建"
+    err "$(msg loop.pre_run_ci_check_head_ci ${short})"
     mkdir -p "$(dirname "$_LOOP_ALERT")"
     cat > "$_LOOP_ALERT" << EOF
 # ALERT — Pre-run CI check failed (red base)
 
 **Time**: $(date '+%Y-%m-%d %H:%M')
 **Commit**: ${short}
-**Reason**: HEAD CI is red — loop refused to build on a broken base  HEAD CI 红，loop 拒绝在破损的基础上构建
+**Reason**: $(msg loop.pre_run_ci_red_base)
 **Failing conclusions**: ${failed_conclusions}
 **Run states**: ${run_states}
 
@@ -7105,7 +7109,7 @@ _loop_enforce_ci() {
 **Time**: $(date '+%Y-%m-%d %H:%M')
 **Story**: ${story_id}
 **Commit**: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-**Reason**: CI did not pass — story kept as 🔨 In Progress  CI 未通过，故事保持进行中
+**Reason**: $(msg loop.ci_did_not_pass_story_kept_in_progress)
 
 **Action required** (choose one):
 - Fix CI and re-run: \`roll loop now\`
@@ -7328,7 +7332,7 @@ _loop_pr_rebase_circuit() {
 
 **Time**: $(date '+%Y-%m-%d %H:%M')
 **PR**: #${pr}
-**Reason**: PR #${pr} rebased ${count}× within 24h without CI resolution — possible workflow file error  PR rebase 多次未解决，可能是 workflow 文件错误
+**Reason**: $(msg loop.pr_rebased_within_24h_no_ci "$pr" "$count")
 
 **Action required**:
 - Check PR CI logs and workflow files for breakage
@@ -8303,7 +8307,7 @@ _loop_monitor() {
     echo -e "\n  ${BOLD}${CYAN}roll loop monitor${NC}  ${YELLOW}${project_name}${NC}  ${now}  (Ctrl-C to exit)\n"
 
     # Services status (three services on macOS, single on Linux)
-    echo -e "  ${BOLD}Services  服务状态${NC}   Agent: ${CYAN}${agent}${NC}"
+    echo -e "$(msg loop.services ${BOLD} ${NC} ${CYAN} ${agent})"
     if [[ "$(uname)" == "Darwin" ]]; then
       local active_start active_end dream_hour dream_minute brief_hour brief_minute
       active_start=$(_config_read_int "loop_active_start" "10")
@@ -8371,7 +8375,7 @@ _loop_monitor() {
 
     # Queue: pending items
     echo ""
-    echo -e "  ${BOLD}Queue  待处理队列${NC}"
+    echo -e "$(msg loop.queue ${BOLD} ${NC})"
     local backlog=".roll/backlog.md"
     if [[ -f "$backlog" ]]; then
       local queue_count=0
@@ -8419,7 +8423,7 @@ _loop_monitor() {
     local log_file="${_SHARED_ROOT}/loop/launchd.log"
     echo ""
     echo -e "  ─────────────────────────────────────────────────────"
-    echo -e "  ${BOLD}Log Tail  实时日志${NC}  (~/.shared/roll/loop/launchd.log, last 10 lines)"
+    echo -e "$(msg loop.log_tail ${BOLD} ${NC})"
     if [[ -f "$log_file" && -s "$log_file" ]]; then
       tail -10 "$log_file" | sed 's/^/    /'
     else
@@ -8431,7 +8435,7 @@ _loop_monitor() {
     local evfile="${_SHARED_ROOT}/loop/events-${slug}.ndjson"
     echo ""
     echo -e "  ─────────────────────────────────────────────────────"
-    echo -e "  ${BOLD}Cycle Events  事件流${NC}  (last 10)"
+    echo -e "$(msg loop.cycle_events ${BOLD} ${NC})"
     if [[ -f "$evfile" && -s "$evfile" ]]; then
       tail -n 10 "$evfile" | python3 -c "
 import sys, json
@@ -8486,7 +8490,7 @@ cmd_brief() {
   local latest; latest=$(ls "${briefs_dir}"/*.md 2>/dev/null | sort | tail -1 || true)
 
   if [[ -z "$latest" ]]; then
-    info "No brief yet — generating...  暂无简报，正在生成..."
+    info "$(msg brief.no_brief_yet_generating)"
     _agent_run_skill "roll-brief"
     latest=$(ls "${briefs_dir}"/*.md 2>/dev/null | sort | tail -1 || true)
   else
@@ -8494,7 +8498,7 @@ cmd_brief() {
     mod_time=$(_file_mtime "$latest")
     now=$(date +%s); age=$(( now - mod_time ))
     if (( age > 86400 )); then
-      info "Brief is $(( age / 3600 ))h old — regenerating...  简报已 $(( age / 3600 )) 小时未更新，重新生成..."
+      info "$(msg brief.brief_is_age_3600_h_old "$(( age / 3600 ))")"
       _agent_run_skill "roll-brief"
       latest=$(ls "${briefs_dir}"/*.md 2>/dev/null | sort | tail -1 || true)
     fi
@@ -8589,19 +8593,19 @@ cmd_alert() {
   case "$subcmd" in
     list|"")
       if [[ ! -f "$_LOOP_ALERT" ]]; then
-        ok "No active alerts  暂无告警"
+        ok "$(msg alert.no_active_alerts)"
         return 0
       fi
-      echo -e "${BOLD}Active Alert  当前告警${NC}"
+      echo -e "$(msg alert.active_alert ${BOLD} ${NC})"
       echo ""
       cat "$_LOOP_ALERT"
       echo ""
       echo -e "  Run '${CYAN}roll alert ack${NC}' to acknowledge, '${CYAN}roll alert resolve${NC}' to clear."
-      echo -e "  运行 'roll alert ack' 确认告警，'roll alert resolve' 清除告警。"
+      echo -e "$(msg alert.run_roll_alert_ack_to_acknowledge)"
       ;;
     ack)
       if [[ ! -f "$_LOOP_ALERT" ]]; then
-        warn "No active alerts to acknowledge  暂无待确认告警"
+        warn "$(msg alert.no_active_alerts_to_acknowledge)"
         return 0
       fi
       local ts; ts=$(date '+%Y-%m-%d %H:%M:%S')
@@ -8609,20 +8613,20 @@ cmd_alert() {
         echo ""
         echo "**Acknowledged**: ${ts}"
       } >> "$_LOOP_ALERT"
-      ok "Alert acknowledged at ${ts}  告警已确认"
+      ok "$(msg alert.alert_acknowledged_at ${ts})"
       ;;
     resolve|clear)
       if [[ ! -f "$_LOOP_ALERT" ]]; then
-        ok "No active alerts  暂无告警"
+        ok "$(msg alert.no_active_alerts_2)"
         return 0
       fi
       rm -f "$_LOOP_ALERT"
-      ok "Alert resolved and cleared  告警已解决并清除"
+      ok "$(msg alert.alert_resolved_and_cleared)"
       ;;
     *)
-      err "Unknown subcommand: $subcmd  未知子命令: $subcmd"
+      err "$(msg alert.unknown_subcommand $subcmd)"
       echo "  Usage: roll alert [list|ack|resolve]"
-      echo "  用法: roll alert [list|ack|resolve]"
+      echo "$(msg alert.usage_roll_alert_list_ack_resolve)"
       return 1
       ;;
   esac
@@ -8659,7 +8663,7 @@ cmd_lang() {
       printf 'lang: %s\n' "$arg" >> "$tmp"
       mv "$tmp" "$ROLL_CONFIG"
       unset ROLL_LANG_RESOLVED
-      ok "Language set to ${arg}  语言已设置为 ${arg}"
+      ok "$(msg lang.language_set_to ${arg})"
       ;;
     --reset)
       if [[ -f "$ROLL_CONFIG" ]]; then
@@ -8668,12 +8672,12 @@ cmd_lang() {
         mv "$tmp" "$ROLL_CONFIG"
       fi
       unset ROLL_LANG_RESOLVED
-      ok "Language preference cleared (will follow locale)  语言偏好已清除（跟随系统 locale）"
+      ok "$(msg lang.language_preference_cleared_will_follow_locale)"
       ;;
     *)
-      err "Unknown language: ${arg}  未知语言: ${arg}"
+      err "$(msg lang.unknown_language ${arg})"
       echo "  Valid values: zh, en, --reset"
-      echo "  可选值: zh, en, --reset"
+      echo "$(msg lang.options_zh_en_reset)"
       return 1
       ;;
   esac
@@ -8689,7 +8693,7 @@ cmd_ci() {
     case "$1" in
       --wait) wait_mode=true; shift ;;
       --timeout=*) timeout="${1#*=}"; shift ;;
-      *) err "Usage: roll ci [--wait] [--timeout=N]  用法: roll ci [--wait] [--timeout=N]"; exit 1 ;;
+      *) err "$(msg ci.usage_roll_ci_wait_timeout_n)"; exit 1 ;;
     esac
   done
 
@@ -8698,12 +8702,12 @@ cmd_ci() {
     return
   fi
 
-  _gh_available || { warn "gh not installed  gh 未安装"; return 0; }
-  local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "Not a git repo  非 git 仓库"; return 1; }
+  _gh_available || { warn "$(msg ci.gh_not_installed_gh)"; return 0; }
+  local commit; commit=$(git rev-parse HEAD 2>/dev/null) || { err "$(msg ci.not_a_git_repo)"; return 1; }
   local runs
   runs=$(gh run list --commit "$commit" --json status,conclusion,name 2>/dev/null) || { warn "gh run list failed"; return 0; }
   if [[ -z "$runs" || "$runs" == "[]" ]]; then
-    echo "No CI runs for $(git rev-parse --short HEAD)  当前提交无 CI 记录"
+    echo "$(msg ci.no_ci_runs_for_git_rev "${commit:0:7}")"
     return 0
   fi
   echo "$runs" | jq -r '.[] | "\(.name): \(.status)/\(.conclusion)"'
@@ -8793,12 +8797,12 @@ _backlog_lint() {
   if [ "$violations" -gt 0 ]; then
     echo "  ${violations} violation(s) — see conventions/global/AGENTS.md §4"
     if [ "$gate" = 1 ]; then
-      echo "  ${violations} 条违规 — --gate enabled, exiting 1"
+      echo "$(msg ci.gate_enabled_exiting_1 ${violations})"
       return 1
     fi
-    echo "  ${violations} 条违规 — Phase 1: warn-only, not blocking"
+    echo "$(msg ci.phase_1_warn_only_not_blocking ${violations})"
   else
-    echo "  No violations  无违规"
+    echo "$(msg ci.no_violations)"
   fi
   return 0
 }
@@ -8806,7 +8810,7 @@ _backlog_lint() {
 cmd_backlog() {
   local backlog=".roll/backlog.md"
   if [[ ! -f "$backlog" ]]; then
-    err ".roll/backlog.md not found — run 'roll init' first  未找到 .roll/backlog.md，请先运行 roll init"
+    err "$(msg backlog.roll_backlog_md_not_found_run)"
     return 1
   fi
 
@@ -8831,7 +8835,7 @@ cmd_backlog() {
       local pattern="${2:-}"
       local reason="${3:-}"
       if [[ -z "$pattern" ]]; then
-        err "Usage: roll backlog $subcmd <pattern> [reason]  用法: roll backlog $subcmd <匹配模式> [原因]"
+        err "$(msg backlog.usage_roll_backlog_pattern_reason $subcmd)"
         return 1
       fi
       local new_status
@@ -8843,9 +8847,9 @@ cmd_backlog() {
       local count
       count=$(_backlog_set_status "$pattern" "$new_status")
       if [[ "$count" -eq 0 ]]; then
-        echo "  No items matched: $pattern  未找到匹配项: $pattern"
+        echo "$(msg backlog.no_items_matched $pattern)"
       else
-        echo "  Updated ${count} item(s) → ${new_status}  已更新 ${count} 条目"
+        echo "$(msg backlog.updated_item_s ${count} ${new_status})"
       fi
       return
       ;;
@@ -8890,22 +8894,22 @@ cmd_backlog() {
   [[ -z "$unknown_items" ]] && unknown_count=0
 
   echo ""
-  echo -e "  ${BOLD}Pending Backlog  待处理任务${NC}  (${total} items)"
+  echo -e "$(msg backlog.pending_backlog ${BOLD} ${NC} ${total})"
   echo ""
 
-  [[ $fix_count -gt 0 ]]      && _backlog_render_group "Bug Fixes  缺陷修复"   "$RED"    "$fix_count"      12 "$fix_items"
-  [[ $us_count -gt 0 ]]       && _backlog_render_group "User Stories  用户故事" "$CYAN"   "$us_count"       14 "$us_items"
-  [[ $refactor_count -gt 0 ]] && _backlog_render_group "Refactors  重构"        "$YELLOW" "$refactor_count" 16 "$refactor_items"
-  [[ $idea_count -gt 0 ]]     && _backlog_render_group "Ideas  创意"            "$NC"     "$idea_count"     14 "$idea_items"
+  [[ $fix_count -gt 0 ]]      && _backlog_render_group "$(msg backlog.bug_fixes)"   "$RED"    "$fix_count"      12 "$fix_items"
+  [[ $us_count -gt 0 ]]       && _backlog_render_group "$(msg backlog.user_stories)" "$CYAN"   "$us_count"       14 "$us_items"
+  [[ $refactor_count -gt 0 ]] && _backlog_render_group "$(msg backlog.refactors)"        "$YELLOW" "$refactor_count" 16 "$refactor_items"
+  [[ $idea_count -gt 0 ]]     && _backlog_render_group "$(msg backlog.ideas)"            "$NC"     "$idea_count"     14 "$idea_items"
 
   if [[ $total -eq 0 ]]; then
-    echo -e "  ${GREEN}✓ Nothing pending — backlog is clear  暂无待处理任务${NC}"
+    echo -e "$(msg backlog.nothing_pending_backlog_is_clear ${GREEN} ${NC})"
     echo ""
   fi
 
   # ── Blocked ───────────────────────────────────────────────────────────────
   if [[ $blocked_count -gt 0 ]]; then
-    echo -e "  ${DIM}Blocked  已阻塞  (${blocked_count})${NC}"
+    echo -e "$(msg backlog.blocked ${DIM} ${blocked_count} ${NC})"
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
       local id desc reason
@@ -8921,7 +8925,7 @@ cmd_backlog() {
 
   # ── Deferred ──────────────────────────────────────────────────────────────
   if [[ $deferred_count -gt 0 ]]; then
-    echo -e "  ${DIM}Deferred  已推迟  (${deferred_count})${NC}"
+    echo -e "$(msg backlog.deferred ${DIM} ${deferred_count} ${NC})"
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
       local id desc reason
@@ -8937,8 +8941,8 @@ cmd_backlog() {
 
   # ── Unknown status (show for human/AI triage) ─────────────────────────────
   if [[ $unknown_count -gt 0 ]]; then
-    echo -e "  ${YELLOW}? Unknown Status  未知状态  (${unknown_count})${NC}"
-    echo -e "  ${YELLOW}  Fix: roll backlog block/defer/unblock <pattern>  运行命令修正状态${NC}"
+    echo -e "$(msg backlog.unknown_status ${YELLOW} ${unknown_count} ${NC})"
+    echo -e "$(msg backlog.fix_roll_backlog_block_defer_unblock ${YELLOW} ${NC})"
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
       local id desc status_raw
@@ -9165,7 +9169,7 @@ _legacy_home() {
   echo ""
 
   # ── ② AI 自治 — 三层 × 四道防线 (主视觉) ────────────────────────────────
-  echo -e "  ${BOLD}╔══ 🤖 AI 自治 — 三层 × 四道防线 ══════════════════════════╗${NC}"
+  echo -e "$(msg backlog.ai ${BOLD} ${NC})"
 
   # Loop layer
   local loop_state="not-installed"
@@ -9253,7 +9257,7 @@ _legacy_home() {
   fi
 
   # 四道防线
-  echo -e "  ${BOLD}─ 四道防线 ─${NC}"
+  echo -e "$(msg backlog. ${BOLD} ${NC})"
   local def_tcr="${RED}○${NC}" def_review="${GREEN}●${NC}" def_spar="${YELLOW}○${NC}" def_sentinel="${YELLOW}○ off${NC}"
   if [[ -n "$last_tcr_min" ]]; then
     def_tcr="${GREEN}● ${last_tcr_min}min${NC}"
@@ -9295,7 +9299,7 @@ _legacy_home() {
     printf "  ${BOLD}📊 Current Focus · DoD${NC}\n"
     printf "    🔨 ${BOLD}%s${NC}  %s\n" "$p_id" "$p_desc"
     printf "    [%b]  [%b]\n" "$ac_badge" "$ci_badge"
-    printf "    ${YELLOW}其余 4 项 DoD 信号源待接入：see US-AUTO-030/031, IDEA-013/014${NC}\n"
+    printf "$(msg backlog.4_dod_see_us_auto_030 ${YELLOW} ${NC})"
     echo ""
   fi
 
@@ -9304,9 +9308,9 @@ _legacy_home() {
   alerts=$(_dash_alert_count); alerts=${alerts//[^0-9]/}; alerts=${alerts:-0}
   proposals=$(_dash_proposal_count); proposals=${proposals//[^0-9]/}; proposals=${proposals:-0}
   release_ready=false; _dash_release_ready && release_ready=true
-  printf "  ${BOLD}👤 需要你介入${NC}\n"
+  printf "$(msg backlog.n ${BOLD} ${NC})"
   if (( alerts == 0 )) && (( proposals == 0 )) && ! $release_ready; then
-    printf "    ${GREEN}✓ AI 自驱中 — 无需介入${NC}\n"
+    printf "$(msg backlog.ai_2 ${GREEN} ${NC})"
   else
     (( alerts > 0 )) && printf "    ${RED}⚠ %s ALERT${NC}          run: roll alert\n" "$alerts"
     (( proposals > 0 )) && printf "    ${YELLOW}📋 %s PROPOSAL${NC}      see: .roll/proposals.md\n" "$proposals"
@@ -9354,37 +9358,37 @@ _legacy_help() {
   echo -e "  ${BOLD}v${VERSION}${NC} — Roll out features with AI agents"
   echo ""
   echo "Usage: roll <command> [options]"
-  echo "用法:  roll <command> [options]"
+  echo "$(msg backlog.usage_roll_command_options)"
   echo ""
   echo "Commands:"
-  echo "  setup [-f]             [Machine] First-time install or re-sync             首次安装或重新同步"
-  echo "  update                 [Upgrade] npm install latest + re-sync             一键升级到最新版"
-  echo "  init                   [Project] Create AGENTS.md + .roll/backlog.md + .roll/features/  初始化项目工作流文件"
-  echo "  offboard [--confirm]   [Project] Reverse a previous \`roll init --apply\` (dry-run by default)  卸载本项目的 Roll 痕迹"
-  echo "  status                 [Diagnostic] Show current state                    显示当前状态"
-  echo "  peer                   [Peer Review] Cross-agent negotiation               跨 Agent 协商对审"
-  echo "  loop <on|off|now|status|monitor|resume|reset>  [Autonomous] Manage scheduled BACKLOG executor  管理自主执行循环"
-  echo "  brief                  [Digest] Show latest owner brief (regenerate if stale)  展示最新简报"
-  echo "  backlog                [View] Show pending tasks (Todo/Blocked/Deferred/Unknown)  显示任务清单"
-  echo "  backlog block <pat> [reason]  Mark matching items as 🔒 Blocked  标记为已阻塞"
-  echo "  backlog defer <pat> [reason]  Mark matching items as ⏸ Deferred  标记为已推迟"
-  echo "  backlog unblock <pat>         Restore matching items to 📋 Todo   恢复为待处理"
-  echo "  backlog unstick [--dry-run]   Revert In Progress whose cycle failed >4h ago  自愈卡住的进行中任务"
-  echo "  backlog lint                  Check descriptions for path/function/filename violations  检查描述合规"
-  echo "  agent [use <name>|list]   [Config] Per-project agent selection            切换项目 agent"
-  echo "  ci [--wait]            [CI] Show or wait for current commit's CI status       查看/等待 CI 状态"
-  echo "  review-pr <number>     [PR Review] AI-powered code review for a PR           AI 代码评审"
+  echo "$(msg backlog.setup_f_machine_first_time_install)"
+  echo "$(msg backlog.update_upgrade_npm_install_latest_re)"
+  echo "$(msg backlog.init_project_create_agents_md_roll)"
+  echo "$(msg backlog.offboard_confirm_project_reverse_a_previous)"
+  echo "$(msg backlog.status_diagnostic_show_current_state)"
+  echo "$(msg backlog.peer_peer_review_cross_agent_negotiation)"
+  echo "$(msg backlog.loop_on_off_now_status_monitor)"
+  echo "$(msg backlog.brief_digest_show_latest_owner_brief)"
+  echo "$(msg backlog.backlog_view_show_pending_tasks_todo)"
+  echo "$(msg backlog.backlog_block_pat_reason_mark_matching)"
+  echo "$(msg backlog.backlog_defer_pat_reason_mark_matching)"
+  echo "$(msg backlog.backlog_unblock_pat_restore_matching_items)"
+  echo "$(msg backlog.backlog_unstick_dry_run_revert_in)"
+  echo "$(msg backlog.backlog_lint_check_descriptions_for_path)"
+  echo "$(msg backlog.agent_use_name_list_config_per)"
+  echo "$(msg backlog.ci_wait_ci_show_or_wait)"
+  echo "$(msg backlog.review_pr_number_pr_review_ai)"
   echo ""
-  echo "Examples / 示例:"
-  echo "  roll setup                    # New machine: first-time install            新机器首次安装"
-  echo "  roll update                   # Upgrade to latest version + re-sync         升级到最新版并重新同步"
-  echo "  roll init                     # New or re-merge project (run in project)   新建或重新合并（项目目录）"
-  echo "  roll loop on                  # Enable autonomous loop (cron)              启用自主执行循环"
-  echo "  roll brief                    # Show latest brief                          查看最新简报"
-  echo "  roll backlog                  # Show pending/blocked/deferred items        查看待处理任务"
-  echo "  roll backlog defer US-DOC '过早引入'  # Defer all US-DOC-* items          推迟一类任务"
-  echo "  roll backlog block US-HW-001 '硬件未到货'  # Block a specific item        标记阻塞"
-  echo "  roll agent use kimi           # Switch this project to kimi               切换当前项目到 kimi"
+  echo "$(msg backlog.examples)"
+  echo "$(msg backlog.roll_setup_new_machine_first_time)"
+  echo "$(msg backlog.roll_update_upgrade_to_latest_version)"
+  echo "$(msg backlog.roll_init_new_or_re_merge)"
+  echo "$(msg backlog.roll_loop_on_enable_autonomous_loop)"
+  echo "$(msg backlog.roll_brief_show_latest_brief)"
+  echo "$(msg backlog.roll_backlog_show_pending_blocked_deferred)"
+  echo "$(msg backlog.roll_backlog_defer_us_doc)"
+  echo "$(msg backlog.roll_backlog_block_us_hw_001)"
+  echo "$(msg backlog.roll_agent_use_kimi_switch_this)"
 
 }
 

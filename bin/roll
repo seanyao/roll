@@ -1372,14 +1372,13 @@ _init_legacy_onboard_guide() {
   local count_summary
   count_summary=$(_init_legacy_file_summary "$project_dir")
 
-  info "Detected: legacy project (${count_summary})  检测到遗留项目"
+  info "$(msg init.detected_legacy "$count_summary")"
   echo ""
 
   # Discover installed agents (writes to globals: _ONBOARD_INSTALLED, _ONBOARD_MISSING).
   _onboard_discover_agents
 
-  echo "  Onboarding 需要一个 AI agent 来读懂这个项目。检测到："
-  echo "  Onboarding requires an AI agent to read your code. Detected:"
+  echo "  $(msg init.onboard_need_agent)"
   echo ""
   local n
   if [[ ${#_ONBOARD_INSTALLED[@]} -gt 0 ]]; then
@@ -1395,17 +1394,14 @@ _init_legacy_onboard_guide() {
 
   if [[ ${#_ONBOARD_INSTALLED[@]} -eq 0 ]]; then
     echo ""
-    err "No AI agent detected. Install one (e.g., 'claude', 'codex', 'kimi') and try again."
-    err "未检测到 AI agent。请先安装 (如 claude / codex / kimi) 后重试。"
+    err "$(msg init.onboard_no_agent)"
     return 1
   fi
 
   echo ""
-  echo "  后续过程会使用你的 agent 调用模型，token 消耗在你自己的账户上。"
-  echo "  Onboarding uses your agent to call models — tokens are billed to your account."
+  echo "  $(msg init.onboard_billing)"
   echo ""
-  echo "  代码与对话都留在你的 agent 工具里 —— Roll 本身不上传任何内容。"
-  echo "  Your code and conversation stay in your agent — Roll never uploads anything."
+  echo "  $(msg init.onboard_privacy)"
   echo ""
 
   # US-ONBOARD-018: select an agent. Single installed → auto-pick. Multiple
@@ -1416,9 +1412,8 @@ _init_legacy_onboard_guide() {
   [[ -n "$chosen" ]] || return 1
 
   echo ""
-  info "Launching ${chosen}…  正在启动 ${chosen}…"
-  echo "  Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you."
-  echo "  在 agent 内用 /exit 结束（或 Ctrl-C）。退出后 Roll 会自动衔接 apply。"
+  info "$(msg init.onboard_launching "$chosen")"
+  echo "  $(msg init.onboard_exit_hint)"
   echo ""
 
   # US-ONBOARD-018: actually run the agent with the onboard prompt pre-loaded.
@@ -1475,7 +1470,7 @@ _onboard_select_agent() {
 
   # Multi-agent: prompt the user. To stderr so stdout stays clean for the caller.
   {
-    echo "  选一个 agent  Pick an agent:"
+    echo "  $(msg init.onboard_select_agent)"
     local i=1
     for c in "${candidates[@]}"; do
       printf "    %d) %s\n" "$i" "$c"
@@ -1486,11 +1481,11 @@ _onboard_select_agent() {
 
   local choice
   if ! IFS= read -r choice; then
-    err "No input received. Aborting onboard.  未收到输入，已取消 onboard。" >&2
+    err "$(msg init.onboard_no_input)" >&2
     return 1
   fi
   if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#candidates[@]} )); then
-    err "Invalid choice: '${choice}'.  无效选择。" >&2
+    err "$(msg init.onboard_invalid_choice "$choice")" >&2
     return 1
   fi
   printf '%s\n' "${candidates[$((choice - 1))]}"
@@ -1542,7 +1537,7 @@ _run_onboard_agent() {
   local prompt
   prompt=$(_onboard_initial_prompt) || return 1
   _agent_argv "$agent" interactive "$prompt" || {
-    err "Agent '${agent}' has no interactive mode wired up.  agent '${agent}' 暂未接入 interactive 模式。" >&2
+    err "$(msg init.onboard_no_wire "$agent")" >&2
     return 1
   }
 
@@ -1559,16 +1554,14 @@ _run_onboard_agent() {
 
   if [[ ! -f "${project_dir}/.roll/onboard-plan.yaml" ]]; then
     echo "" >&2
-    err "Agent exited cleanly but did not write .roll/onboard-plan.yaml." >&2
-    err "agent 正常退出但未生成 .roll/onboard-plan.yaml。" >&2
-    echo "  Re-run \`roll init\` once you've completed the conversation." >&2
-    echo "  对话完成后再次运行 \`roll init\` 即可。" >&2
+    err "$(msg init.onboard_no_plan)" >&2
+    echo "  $(msg init.onboard_rerun_hint)" >&2
     return 1
   fi
 
   # Plan present → chain into apply automatically.
   echo "" >&2
-  info "Plan written. Running apply…  已写入 plan，正在执行 apply…"
+  info "$(msg init.onboard_plan_written)"
   ( cd "$project_dir" && _init_apply )
 }
 
@@ -1687,27 +1680,26 @@ _init_apply() {
   local validator="${ROLL_PKG_DIR}/lib/roll-plan-validate.py"
 
   if [[ ! -f "$plan" ]]; then
-    err "No onboard plan found at .roll/onboard-plan.yaml  未找到 onboard 计划。"
+    err "$(msg init.apply_no_plan)" >&2
     echo "" >&2
-    echo "  Run \$roll-onboard in your AI agent first to generate the plan." >&2
-    echo "  请先在 AI agent 里运行 \$roll-onboard 生成 plan，再回来执行 apply。" >&2
+    echo "  $(msg init.apply_run_onboard)" >&2
     return 1
   fi
 
   if [[ ! -f "$validator" ]]; then
-    err "Plan validator missing: $validator  校验器缺失。"
+    err "$(msg init.apply_validator_missing "$validator")"
     return 1
   fi
 
   # Validate plan (schema + generated_at freshness + version)
   if ! python3 "$validator" "$plan"; then
-    err "Plan validation failed. See errors above.  Plan 校验失败。"
+    err "$(msg init.apply_validation_failed)" >&2
     echo "" >&2
-    echo "  If the plan is stale (>24h), regenerate by running \$roll-onboard again." >&2
+    echo "  $(msg init.apply_stale_plan)" >&2
     return 1
   fi
 
-  info "Applying onboard plan...  正在应用 onboard 计划..."
+  info "Applying onboard plan…"
   _ROLL_MERGE_SUMMARY=()
 
   # US-ONBOARD-013: start a fresh changeset record so offboard can reverse.

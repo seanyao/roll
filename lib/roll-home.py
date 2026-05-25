@@ -31,7 +31,41 @@ from roll_render import COLS, c, row, section_head, strw, pad
 # ════════════════════════════════════════════════════════════════════════════
 # Paths
 # ════════════════════════════════════════════════════════════════════════════
+def _git_remote_url(repo_path: str) -> Optional[str]:
+    """Mirror lib/roll-loop-status.py::_git_remote_url — origin first, then any."""
+    try:
+        url = subprocess.check_output(
+            ["git", "-C", repo_path, "remote", "get-url", "origin"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        if url:
+            return url
+    except Exception:
+        pass
+    try:
+        remotes = subprocess.check_output(
+            ["git", "-C", repo_path, "remote"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip().splitlines()
+        if remotes:
+            url = subprocess.check_output(
+                ["git", "-C", repo_path, "remote", "get-url", remotes[0]],
+                stderr=subprocess.DEVNULL, text=True,
+            ).strip()
+            if url:
+                return url
+    except Exception:
+        pass
+    return None
+
+
 def _project_slug(path: Optional[str] = None) -> str:
+    # US-LOOP-006: cycle wrapper exports ROLL_MAIN_SLUG — honour it (parity with
+    # bin/roll _project_slug and lib/roll-loop-status.py project_slug).
+    env_slug = os.environ.get("ROLL_MAIN_SLUG", "").strip()
+    if env_slug:
+        return env_slug
+
     path = os.path.realpath(path or os.getcwd())
     try:
         common = subprocess.check_output(
@@ -42,6 +76,27 @@ def _project_slug(path: Optional[str] = None) -> str:
             path = common[:-5]
     except Exception:
         pass
+
+    # US-OBS-010: derive slug from git remote URL for stable cross-machine
+    # identity. Mirror normalization in bin/roll + lib/roll-loop-status.py
+    # so all three callers agree on the slug. Without this, `roll` home dash
+    # looks up plists at the old path-based slug while `roll loop status`
+    # looks them up at the new remote-based slug — dashboards diverge and
+    # the home page falsely reports the loop as "missing".
+    remote_url = _git_remote_url(path)
+    if remote_url:
+        remote_url = remote_url.rstrip("/")
+        if remote_url.endswith(".git"):
+            remote_url = remote_url[:-4]
+        m = re.match(r"^git@([^:]+):(.+)$", remote_url)
+        if m:
+            remote_url = f"https://{m.group(1)}/{m.group(2)}"
+        remote_url = remote_url.lower()
+        base = re.sub(r"[^A-Za-z0-9]+", "-", os.path.basename(remote_url)).strip("-")
+        h = hashlib.md5(remote_url.encode()).hexdigest()[:6]
+        return f"{base}-{h}"
+
+    # Fallback: path-based (pre-US-OBS-010 behaviour) when no remote configured.
     base = re.sub(r"[^A-Za-z0-9]+", "-", os.path.basename(path)).strip("-")
     h = hashlib.md5(path.encode()).hexdigest()[:6]
     return f"{base}-{h}"

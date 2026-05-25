@@ -2674,7 +2674,13 @@ _peer_auto_attach() {
   [ "$(uname)" = "Darwin" ] || return 0
   [ -f "$_LOOP_MUTE_FILE" ] && return 0
   local attach_cmd="${_SHARED_ROOT}/loop/attach-${session}.command"
-  printf '#!/bin/bash\nexec tmux attach -t %s\n' "$session" > "$attach_cmd" 2>/dev/null || return 0
+  # Drop `exec` so the wrapping shell survives `tmux attach` exiting; pause
+  # on `read` afterwards so the user can scroll back through the session's
+  # output before closing the Terminal window. Without this the window
+  # closes the instant the tmux session ends and the entire scrollback
+  # disappears with it.
+  printf '#!/bin/bash\ntmux attach -t %s\necho\necho "================================================================"\necho "  session ended. press enter to close this window."\necho "================================================================"\nread _\n' \
+    "$session" > "$attach_cmd" 2>/dev/null || return 0
   chmod +x "$attach_cmd" 2>/dev/null || return 0
   open -g -a Terminal "$attach_cmd" >/dev/null 2>&1 || true
 }
@@ -5829,7 +5835,14 @@ if command -v tmux >/dev/null 2>&1; then
   # Microsoft Teams.app).
   if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
     _attach_cmd="\$HOME/.shared/roll/loop/attach-\$SESSION.command"
-    printf '#!/bin/bash\\nexec tmux attach -t %s\\n' "\$SESSION" > "\$_attach_cmd" 2>/dev/null || true
+    # Drop \`exec\` so the wrapping shell survives \`tmux attach\` exiting,
+    # then \`read\` to hold the Terminal open until the user has had a
+    # chance to scroll back through the cycle's output. Without this the
+    # window closes the instant the tmux session ends (cycle_end kills
+    # the session) and the entire scrollback disappears with it; the
+    # cron-<slug>.log file still has the full transcript as a fallback.
+    printf '#!/bin/bash\\ntmux attach -t %s\\necho\\necho "================================================================"\\necho "  cycle ended. log: ~/.shared/roll/loop/cron-%s.log"\\necho "  press enter to close this window."\\necho "================================================================"\\nread _\\n' \\
+      "\$SESSION" "${slug}" > "\$_attach_cmd" 2>/dev/null || true
     chmod +x "\$_attach_cmd" 2>/dev/null || true
     open -g -a Terminal "\$_attach_cmd" >/dev/null 2>&1 || true
   fi

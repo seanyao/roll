@@ -89,7 +89,7 @@ teardown() { unit_teardown_cd; }
   local before
   before=$(ls "$fake_real_dir" 2>/dev/null | wc -l | tr -d ' ')
 
-  run _write_launchd_plist "$plist_path" "com.roll.loop.FIX-087-tripwire" "$TEST_TMP" 7 "" "${TEST_TMP}/runner.sh"
+  run _write_launchd_plist "$plist_path" "com.roll.loop.FIX-087-tripwire" "$TEST_TMP" 60 7 "" "${TEST_TMP}/runner.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"FIX-087"* ]] || [[ "$output" == *"refusing"* ]] || [[ "$output" == *"sandbox"* ]]
 

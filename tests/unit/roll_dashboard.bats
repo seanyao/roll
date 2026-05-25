@@ -215,7 +215,8 @@ EOF
 
 @test "dashboard: shows compact schedules line for three services" {
   local out; out=$(_legacy_home)
-  echo "$out" | grep -qE "loop[^A-Za-z0-9]+:[0-9]{2}"
+  # US-LOOP-013: schedule uses _loop_schedule_desc (e.g. "every hour :18" or "every 30min (:00 :30)")
+  echo "$out" | grep -qE "every (hour|([0-9]+min))"
   echo "$out" | grep -qE "dream[^A-Za-z0-9]+[0-9]{2}:[0-9]{2}"
   echo "$out" | grep -qE "brief[^A-Za-z0-9]+[0-9]{2}:[0-9]{2}"
 }

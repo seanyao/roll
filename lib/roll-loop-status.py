@@ -864,6 +864,56 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
           c("muted", "       ") +
           c("dim", "more   ") + c("blue", "roll loop status --days 7"))
 
+# US-LOOP-013: valid schedule periods (must divide 60)
+_VALID_SCHEDULE_PERIODS = {60, 30, 20, 15, 12, 10, 6, 5}
+
+
+def _schedule_valid(period: int, offset: int) -> bool:
+    """Validate schedule spec: period must divide 60, offset in [0, period)."""
+    return period in _VALID_SCHEDULE_PERIODS and 0 <= offset < period
+
+
+def _read_schedule_spec(project_root: Optional[Path] = None) -> Tuple[int, int]:
+    """US-LOOP-013: read loop schedule spec, mirroring bin/roll's _loop_schedule_spec.
+
+    Returns (period_minutes, offset_minute).
+    Priority: .roll/local.yaml → ~/.roll/config.yaml → default (60, hash-derived)
+    """
+    project_root = (project_root or Path()).resolve()
+
+    # 1. Try project-level .roll/local.yaml
+    local_file = project_root / ".roll" / "local.yaml"
+    if local_file.exists():
+        try:
+            text = local_file.read_text(errors="ignore")
+            # Parse loop_schedule block: loop_schedule:\n  period_minutes: N\n  offset_minute: N
+            period_m = re.search(r'period_minutes:\s*(\d+)', text)
+            offset_m = re.search(r'offset_minute:\s*(\d+)', text)
+            if period_m and offset_m:
+                period = int(period_m.group(1))
+                offset = int(offset_m.group(1))
+                if _schedule_valid(period, offset):
+                    return (period, offset)
+        except Exception:
+            pass
+
+    # 2. Try global ~/.roll/config.yaml loop_minute (backward compat)
+    config_file = Path(os.path.expanduser("~/.roll/config.yaml"))
+    if config_file.exists():
+        try:
+            text = config_file.read_text(errors="ignore")
+            m = re.search(r'^loop_minute:\s*(\d+)', text, re.MULTILINE)
+            if m:
+                offset = int(m.group(1))
+                return (60, offset)
+        except Exception:
+            pass
+
+    # 3. Default: derive offset from project path hash (matches bin/roll)
+    h = int(hashlib.md5(str(project_root).encode()).hexdigest()[:2], 16) % 60
+    return (60, h)
+
+
 def _read_plist_loop_minute() -> int:
     """FIX-063: read actual loop Minute from launchd plist (truth source).
     Falls back to 48 only when plist missing/unparseable.
@@ -916,12 +966,20 @@ def _detect_install_state() -> str:
 
 
 def _next_cron_hint(state: Dict[str, str], zh: bool = False) -> str:
-    """Compute next cron fire time from the actual launchd plist Minute (FIX-063)."""
+    """US-LOOP-013: compute next cron fire time from schedule spec.
+
+    Handles multi-trigger schedules (period < 60) by scanning forward
+    from the current hour's offset minute.
+    """
     now = datetime.now().astimezone()
-    minute_target = _read_plist_loop_minute()
-    nxt = now.replace(minute=minute_target, second=0, microsecond=0)
-    if nxt <= now:
-        nxt += timedelta(hours=1)
+    period, offset = _read_schedule_spec()
+
+    # Start at offset minute within the current hour, then advance
+    # by 'period' minutes until we find a slot after 'now'.
+    nxt = now.replace(minute=offset, second=0, microsecond=0)
+    while nxt <= now:
+        nxt += timedelta(minutes=period)
+
     delta = nxt - now
     mins = int(delta.total_seconds() // 60)
     secs = int(delta.total_seconds() % 60)

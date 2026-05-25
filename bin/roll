@@ -4861,6 +4861,31 @@ _loop_schedule_spec() {
   echo "60 $offset"
 }
 
+# US-LOOP-013: human-readable schedule description for display.
+# Args: period offset [lang]
+#   lang: en (default) or zh
+_loop_schedule_desc() {
+  local period="$1" offset="$2" lang="${3:-en}"
+  if [[ "$period" -eq 60 ]]; then
+    if [[ "$lang" == "zh" ]]; then
+      printf "每小時 :%02d" "$offset"
+    else
+      printf "every hour :%02d" "$offset"
+    fi
+    return 0
+  fi
+  local times="" slots=$((60 / period)) i m
+  for i in $(seq 0 $((slots - 1))); do
+    m=$((offset + i * period))
+    times="${times} :$(printf '%02d' "$m")"
+  done
+  if [[ "$lang" == "zh" ]]; then
+    printf "每%d分鐘 (%s)" "$period" "${times# }"
+  else
+    printf "every %dmin (%s)" "$period" "${times# }"
+  fi
+}
+
 # US-LOOP-001: structured event emission for cycle observability.
 # Writes a tab-separated line to stdout (for tmux/attach display) and appends
 # a JSON line to the per-project NDJSON event file under _SHARED_ROOT/loop/.
@@ -6093,7 +6118,16 @@ _loop_on() {
   local active_start active_end loop_minute dream_hour dream_minute brief_hour brief_minute
   active_start=$(_config_read_int "loop_active_start" "10")
   active_end=$(_config_read_int "loop_active_end" "18")
-  loop_minute=$(_config_read_int "loop_minute" "$(_loop_derive_minute "$project_path" 0)")
+  # US-LOOP-011: read schedule spec from project or global config
+  local loop_spec loop_period loop_offset
+  loop_spec=$(_loop_schedule_spec "$project_path")
+  loop_period="${loop_spec%% *}"
+  loop_offset="${loop_spec##* }"
+  # Keep loop_minute for Linux crontab backward compat (only supports hourly)
+  loop_minute="$loop_offset"
+  local loop_sched_en loop_sched_zh
+  loop_sched_en=$(_loop_schedule_desc "$loop_period" "$loop_offset" en)
+  loop_sched_zh=$(_loop_schedule_desc "$loop_period" "$loop_offset" zh)
   dream_hour=$(_config_read_int "loop_dream_hour" "3")
   dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
   brief_hour=$(_config_read_int "loop_brief_hour" "9")
@@ -6129,8 +6163,8 @@ _loop_on() {
     fi
 
     ok "Loop enabled  已启用"
-    printf "  • roll-loop   every hour :%02d  active %02d:00–%02d:00  每小时 :%02d（窗口 %02d:00–%02d:00）\n" \
-      "$loop_minute" "$active_start" "$active_end" "$loop_minute" "$active_start" "$active_end"
+    printf "  • roll-loop   %s  active %02d:00–%02d:00  %s（窗口 %02d:00–%02d:00）\n" \
+      "$loop_sched_en" "$active_start" "$active_end" "$loop_sched_zh" "$active_start" "$active_end"
     printf "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d\n" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
     printf "  • roll-brief  daily at %02d:%02d  每天 %02d:%02d\n" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
     echo "  • Agent: ${agent}  (change: roll agent use <name>)"
@@ -6160,8 +6194,8 @@ _loop_on() {
   ) | crontab -
 
   ok "Loop enabled  已启用"
-  printf "  • roll-loop   every hour :%02d  active %02d:00–%02d:00  每小时 :%02d（窗口 %02d:00–%02d:00）\n" \
-    "$loop_minute" "$active_start" "$active_end" "$loop_minute" "$active_start" "$active_end"
+  printf "  • roll-loop   %s  active %02d:00–%02d:00  %s（窗口 %02d:00–%02d:00）\n" \
+    "$loop_sched_en" "$active_start" "$active_end" "$loop_sched_zh" "$active_start" "$active_end"
   printf "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d\n" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
   printf "  • roll-brief  daily at %02d:%02d  每天 %02d:%02d\n" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
   echo "  • Agent: ${agent}  (change: roll agent use <name>)"
@@ -8163,17 +8197,22 @@ _loop_monitor() {
     # Services status (three services on macOS, single on Linux)
     echo -e "  ${BOLD}Services  服务状态${NC}   Agent: ${CYAN}${agent}${NC}"
     if [[ "$(uname)" == "Darwin" ]]; then
-      local active_start active_end loop_minute dream_hour dream_minute brief_hour brief_minute
+      local active_start active_end dream_hour dream_minute brief_hour brief_minute
       active_start=$(_config_read_int "loop_active_start" "10")
       active_end=$(_config_read_int "loop_active_end" "18")
-      loop_minute=$(_config_read_int "loop_minute" "$(_loop_derive_minute "$project_path" 0)")
+      # US-LOOP-013: use schedule spec for display
+      local loop_spec loop_period loop_offset
+      loop_spec=$(_loop_schedule_spec "$project_path")
+      loop_period="${loop_spec%% *}"
+      loop_offset="${loop_spec##* }"
       dream_hour=$(_config_read_int "loop_dream_hour" "3")
       dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
       brief_hour=$(_config_read_int "loop_brief_hour" "9")
       brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
 
       local loop_sched dream_sched brief_sched
-      loop_sched=$(printf "every hour :%02d  active %02d:00–%02d:00" "$loop_minute" "$active_start" "$active_end")
+      loop_sched=$(_loop_schedule_desc "$loop_period" "$loop_offset" en)
+      loop_sched="${loop_sched}  active ${active_start}:00–${active_end}:00"
       dream_sched=$(printf "%02d:%02d" "$dream_hour" "$dream_minute")
       brief_sched=$(printf "%02d:%02d" "$brief_hour" "$brief_minute")
 
@@ -9029,17 +9068,22 @@ _legacy_home() {
   else
     crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_state="enabled"
   fi
-  local active_start active_end loop_minute dream_hour dream_minute brief_hour brief_minute
+  local active_start active_end dream_hour dream_minute brief_hour brief_minute
   active_start=$(_config_read_int "loop_active_start" "10")
   active_end=$(_config_read_int "loop_active_end" "18")
-  loop_minute=$(_config_read_int "loop_minute" "$(_loop_derive_minute "$project_path" 0)")
+  # US-LOOP-013: use schedule spec for display
+  local loop_spec loop_period loop_offset
+  loop_spec=$(_loop_schedule_spec "$project_path")
+  loop_period="${loop_spec%% *}"
+  loop_offset="${loop_spec##* }"
   dream_hour=$(_config_read_int "loop_dream_hour" "3")
   dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
   brief_hour=$(_config_read_int "loop_brief_hour" "9")
   brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
 
   local loop_badge loop_sched
-  loop_sched=$(printf "every :%02d  active %02d:00–%02d:00" "$loop_minute" "$active_start" "$active_end")
+  loop_sched=$(_loop_schedule_desc "$loop_period" "$loop_offset" en)
+  loop_sched="${loop_sched}  active ${active_start}:00–${active_end}:00"
   case "$loop_state" in
     enabled)       loop_badge="${GREEN}● enabled${NC}" ;;
     installed-off) loop_badge="${YELLOW}⚠ off${NC}" ;;
@@ -9164,8 +9208,9 @@ _legacy_home() {
 
   # ── ⑥ Schedules & Last Brief ──────────────────────────────────────────────
   printf "  ${BOLD}⏰ Schedules & Last Brief${NC}\n"
-  printf "    loop :%02d · dream %02d:%02d · brief %02d:%02d\n" \
-    "$loop_minute" "$dream_hour" "$dream_minute" "$brief_hour" "$brief_minute"
+  local loop_sched_short; loop_sched_short=$(_loop_schedule_desc "$loop_period" "$loop_offset" en)
+  printf "    %s · dream %02d:%02d · brief %02d:%02d\n" \
+    "$loop_sched_short" "$dream_hour" "$dream_minute" "$brief_hour" "$brief_minute"
   local latest_brief; latest_brief=$(ls .roll/briefs/*.md 2>/dev/null | sort | tail -1 || true)
   if [[ -n "$latest_brief" ]]; then
     local mod_time now age summary

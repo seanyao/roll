@@ -92,12 +92,12 @@ setup() {
   local proj="/tmp/proj"
   local runner="${tmp_dir}/run.sh"
 
-  _write_launchd_plist "$plist" "$label" "$proj" "0" "1" "$runner"
+  _write_launchd_plist "$plist" "$label" "$proj" "60" "0" "1" "$runner"
   local mtime1; mtime1=$(stat -c "%Y" "$plist" 2>/dev/null || stat -f "%m" "$plist")
 
   # Small sleep to ensure mtime would change if file is rewritten
   sleep 1
-  _write_launchd_plist "$plist" "$label" "$proj" "0" "1" "$runner"
+  _write_launchd_plist "$plist" "$label" "$proj" "60" "0" "1" "$runner"
   local mtime2; mtime2=$(stat -c "%Y" "$plist" 2>/dev/null || stat -f "%m" "$plist")
 
   [ "$mtime1" = "$mtime2" ]
@@ -112,7 +112,7 @@ setup() {
   local plist="${tmp_dir}/test.plist"
   local runner="${tmp_dir}/run.sh"
 
-  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "0" "" "$runner"
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "60" "0" "" "$runner"
 
   [ -f "$plist" ]
   grep -q "com.roll.loop.test" "$plist"
@@ -125,7 +125,7 @@ setup() {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
 
-  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "0" "" "${tmp_dir}/run.sh"
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "60" "0" "" "${tmp_dir}/run.sh"
 
   ! grep -q "<key>Hour</key>" "$plist"
   rm -rf "$tmp_dir"
@@ -295,20 +295,16 @@ setup() {
 @test "_install_launchd_plists: two different projects get different default loop_minute" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   mkdir -p "${tmp_dir}/projA" "${tmp_dir}/projB"
-  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
-  _SHARED_ROOT="${tmp_dir}/shared"
-  ROLL_CONFIG=$(mktemp)
 
-  _install_launchd_plists "${tmp_dir}/projA"
-  _install_launchd_plists "${tmp_dir}/projB"
-
-  local pA pB mA mB
-  pA=$(_launchd_plist_path "loop" "${tmp_dir}/projA")
-  pB=$(_launchd_plist_path "loop" "${tmp_dir}/projB")
-  mA=$(grep -A1 "<key>Minute</key>" "$pA" | grep -o "[0-9]*" | head -1)
-  mB=$(grep -A1 "<key>Minute</key>" "$pB" | grep -o "[0-9]*" | head -1)
-  [ "$mA" != "$mB" ]
-  rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
+  # US-LOOP-012: _loop_schedule_spec derives offsets from project paths;
+  # two different paths must produce different offsets (period=60 for both).
+  local specA specB offA offB
+  specA=$(_loop_schedule_spec "${tmp_dir}/projA")
+  specB=$(_loop_schedule_spec "${tmp_dir}/projB")
+  offA="${specA##* }"
+  offB="${specB##* }"
+  [ "$offA" != "$offB" ]
+  rm -rf "$tmp_dir"
 }
 
 @test "_install_launchd_plists: loop uses Minute schedule, dream/brief use StartInterval (FIX-105)" {
@@ -417,7 +413,7 @@ setup() {
 @test "_write_launchd_plist: daily schedule (hour set) emits StartInterval, not StartCalendarInterval (FIX-105)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
-  _write_launchd_plist "$plist" "com.roll.dream.test" "/tmp/proj" "22" "9" "${tmp_dir}/run.sh"
+  _write_launchd_plist "$plist" "com.roll.dream.test" "/tmp/proj" "60" "22" "9" "${tmp_dir}/run.sh"
   grep -q "<key>StartInterval</key>" "$plist"
   grep -A1 "<key>StartInterval</key>" "$plist" | grep -q "<integer>86400</integer>"
   ! grep -q "<key>StartCalendarInterval</key>" "$plist"
@@ -430,7 +426,7 @@ setup() {
   # fires correctly on macOS 26.4 — the bug only affects Hour+Minute combos.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
-  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "18" "" "${tmp_dir}/run.sh"
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "60" "18" "" "${tmp_dir}/run.sh"
   grep -q "<key>StartCalendarInterval</key>" "$plist"
   ! grep -q "<key>StartInterval</key>" "$plist"
   rm -rf "$tmp_dir"

@@ -169,3 +169,77 @@ teardown() { unit_teardown_cd; }
   [[ "$output" == *"zh"* ]]
   [[ "$output" == *"en"* ]]
 }
+
+# ── _strw CJK display width (US-I18N-006) ───────────────────────────────
+
+@test "_strw: ASCII string returns char count" {
+  run _strw "hello"
+  [ "$output" -eq 5 ]
+}
+
+@test "_strw: CJK character counts as 2" {
+  run _strw "中"
+  [ "$output" -eq 2 ]
+}
+
+@test "_strw: mixed EN/ZH string calculates visual width" {
+  # "你好AB" = 2+2+1+1 = 6
+  run _strw "你好AB"
+  [ "$output" -eq 6 ]
+}
+
+@test "_strw: emoji counts correctly (fullwidth)" {
+  # Most emoji are wide
+  run _strw "✅"
+  [ "$output" -eq 2 ]
+}
+
+@test "_strw: empty string returns 0" {
+  run _strw ""
+  [ "$output" -eq 0 ]
+}
+
+# ── _pad_l / _pad_r (US-I18N-006) ──────────────────────────────────────
+
+@test "_pad_l: pads ASCII string to target visual width" {
+  run _pad_l "hi" 6
+  (( ${#output} == 6 ))   # 2 chars + 4 spaces
+  [[ "$output" == "hi    " ]]
+}
+
+@test "_pad_l: CJK string pads correctly (2 cells per char)" {
+  # "中" = 2 cells → pad to 6 → 4 spaces after
+  # bash 3.2 byte-count: 3 (UTF-8) + 4 spaces = 7
+  run _pad_l "中" 6
+  (( ${#output} == 7 ))
+  [[ "$output" == "中    " ]]
+}
+
+@test "_pad_l: no padding when string wider than target" {
+  run _pad_l "hello world" 5
+  [ "$output" = "hello world" ]
+}
+
+@test "_pad_l: exact width needs no padding" {
+  run _pad_l "abc" 3
+  [ "$output" = "abc" ]
+}
+
+@test "_pad_r: right-pads ASCII string" {
+  run _pad_r "hi" 6
+  (( ${#output} == 6 ))
+  [[ "$output" == "    hi" ]]
+}
+
+@test "_pad_r: right-pads CJK string" {
+  # "中" = 2 cells → right-pad to 6 → 4 spaces before
+  # bash 3.2 byte-count: 4 spaces + 3 (UTF-8) = 7
+  run _pad_r "中" 6
+  (( ${#output} == 7 ))
+  [[ "$output" == "    中" ]]
+}
+
+@test "_pad_r: no padding when string wider than target" {
+  run _pad_r "hello world" 5
+  [ "$output" = "hello world" ]
+}

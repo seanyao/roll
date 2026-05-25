@@ -1995,9 +1995,9 @@ cmd_migrate() {
 
   # Three-state dispatch
   if [[ "$has_new" == "true" && "$has_old" == "true" ]]; then
-    err "Both old and new structures exist (partial migration detected).  老结构与新结构同时存在（部分迁移）。"
+    err "$(msg migrate.partial_conflict)" >&2
     echo "" >&2
-    echo "Conflicting paths:  冲突路径：" >&2
+    echo "$(msg migrate.conflicting_paths)" >&2
     for m in "${moves[@]}"; do
       src="${m%%|*}"
       local tgt="${m##*|}"
@@ -2006,17 +2006,17 @@ cmd_migrate() {
       fi
     done
     echo "" >&2
-    err "Resolve manually then re-run.  请手动解决冲突后重新运行。"
+    err "$(msg migrate.resolve_manually)"
     return 1
   fi
 
   if [[ "$has_new" == "true" && "$has_old" == "false" ]]; then
-    ok "Already migrated. .roll/ exists, no old paths found.  已迁移，无需重复操作。"
+    ok "$(msg migrate.already_migrated)"
     return 0
   fi
 
   if [[ "$has_old" == "false" ]]; then
-    info "No old structure detected. Nothing to migrate.  未发现老结构，无需迁移。"
+    info "$(msg migrate.no_old_structure)"
     return 0
   fi
 
@@ -2028,7 +2028,7 @@ cmd_migrate() {
   done
 
   if [[ ${#active_moves[@]} -eq 0 ]]; then
-    warn "Old structure markers found but no migratable files.  未找到可迁移文件。"
+    warn "$(msg migrate.no_files_found)"
     return 0
   fi
 
@@ -2039,7 +2039,7 @@ cmd_migrate() {
 
   # Real execution requires clean working tree (we'll create a single commit)
   if ! git diff --quiet --ignore-submodules HEAD 2>/dev/null; then
-    err "Working tree not clean. Commit or stash changes before running migrate.  工作区有未提交改动，请先 commit 或 stash。"
+    err "$(msg migrate.dirty_tree)"
     return 1
   fi
 
@@ -2078,7 +2078,7 @@ EOF
 }
 
 _migrate_preview() {
-  info "Migration preview (dry-run):  迁移预览（dry-run）"
+  info "$(msg migrate.preview_header)"
   echo ""
   printf "  %-60s → %s\n" "Old path  老路径" "New path  新路径"
   local sep; sep=$(printf '─%.0s' {1..100})
@@ -2089,19 +2089,19 @@ _migrate_preview() {
     printf "  %-60s → %s\n" "$src" "$tgt"
   done
   echo ""
-  info "Run without --dry-run to execute.  去掉 --dry-run 即可真实执行。"
+  info "$(msg migrate.preview_footer)"
 }
 
 _migrate_execute() {
-  info "Migrating ${#@} paths via git mv...  正在通过 git mv 迁移 ${#@} 个路径..."
+  info "$(msg migrate.migrating ${#@})"
   local moved=0 m
   for m in "$@"; do
     local src="${m%%|*}" tgt="${m##*|}"
     local target_dir; target_dir=$(dirname "$tgt")
     [[ -d "$target_dir" ]] || mkdir -p "$target_dir"
     git mv "$src" "$tgt" || {
-      err "git mv failed: $src → $tgt"
-      err "Aborting; previous moves are staged but not committed. Run 'git reset --hard' to undo.  已 stage 但未 commit，运行 'git reset --hard' 回滚。"
+      err "$(msg migrate.git_mv_failed "$src" "$tgt")"
+      err "$(msg migrate.aborting)"
       return 1
     }
     moved=$((moved + 1))
@@ -2117,9 +2117,9 @@ Atomic migration via 'roll migrate' command. Process artifacts moved
 from root and docs/ into .roll/; user docs relocated to guide/ and site/.
 
 Paths migrated: ${moved}"
-  ok "Migrated ${moved} paths in a single commit.  已在单 commit 中迁移 ${moved} 个路径。"
+  ok "$(msg migrate.done $moved)"
   echo ""
-  echo "  Next steps  下一步："
+  echo "  $(msg migrate.next_steps):"
   echo "    git log -1                    # Inspect the migration commit"
   echo "    roll status                   # Verify new structure"
 }

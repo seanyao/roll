@@ -9208,8 +9208,9 @@ _legacy_home() {
 
   # ── ⑥ Schedules & Last Brief ──────────────────────────────────────────────
   printf "  ${BOLD}⏰ Schedules & Last Brief${NC}\n"
-  printf "    loop :%02d · dream %02d:%02d · brief %02d:%02d\n" \
-    "$loop_minute" "$dream_hour" "$dream_minute" "$brief_hour" "$brief_minute"
+  local loop_sched_short; loop_sched_short=$(_loop_schedule_desc "$loop_period" "$loop_offset" en)
+  printf "    %s · dream %02d:%02d · brief %02d:%02d\n" \
+    "$loop_sched_short" "$dream_hour" "$dream_minute" "$brief_hour" "$brief_minute"
   local latest_brief; latest_brief=$(ls .roll/briefs/*.md 2>/dev/null | sort | tail -1 || true)
   if [[ -n "$latest_brief" ]]; then
     local mod_time now age summary

@@ -4790,6 +4790,71 @@ _loop_derive_minute() {
   echo $(( (hash_dec + offset) % 55 + 1 ))
 }
 
+# US-LOOP-011: validate a (period, offset) pair against the allowed schedule spec.
+# Allowed periods are the divisors of 60: 60/30/20/15/12/10/6/5.
+# Offset must be within [0, period).
+_loop_schedule_valid() {
+  local period="$1" offset="$2"
+  case "$period" in
+    60|30|20|15|12|10|6|5) ;;
+    *) return 1 ;;
+  esac
+  [[ "$offset" =~ ^[0-9]+$ ]] || return 1
+  if (( offset >= period )); then return 1; fi
+  return 0
+}
+
+# US-LOOP-011: compute the loop schedule spec for a project.
+# Resolution order:
+#   1. .roll/local.yaml  loop_schedule.{period_minutes,offset_minute}
+#   2. ~/.roll/config.yaml  loop_minute  → period=60, offset=loop_minute
+#   3. default              period=60, offset=hash(project_path)%60
+# Output: "<period> <offset>" on stdout. Exit 0 on success.
+# Invalid project config → fallback to global/default + write ALERT.
+_loop_schedule_spec() {
+  local project_path="$1"
+
+  # 1. Try project-level .roll/local.yaml
+  local local_file="${project_path}/.roll/local.yaml"
+  if [[ -f "$local_file" ]]; then
+    local local_period local_offset
+    # Extract values from under loop_schedule: key (using awk for reliable block parsing)
+    local_period=$(awk '/^loop_schedule:/{found=1;next} found && /^[[:space:]]+period_minutes:/{print $2; exit}' "$local_file")
+    local_offset=$(awk '/^loop_schedule:/{found=1;next} found && /^[[:space:]]+offset_minute:/{print $2; exit}' "$local_file")
+    if [[ -n "$local_period" && -n "$local_offset" ]]; then
+      if _loop_schedule_valid "$local_period" "$local_offset"; then
+        echo "$local_period $local_offset"
+        return 0
+      fi
+      # Invalid: alert, then fall through to global/default
+      local slug; slug=$(_project_slug "$project_path")
+      local alert_file="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/ALERT-${slug}.md"
+      mkdir -p "$(dirname "$alert_file")" 2>/dev/null || true
+      {
+        printf '## ⚠️ US-LOOP-011: Invalid loop_schedule\n\n'
+        printf '**Time**: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+        printf '**Source**: %s\n\n' "${project_path}/.roll/local.yaml"
+        printf '**Values**: period_minutes=%s, offset_minute=%s\n\n' "$local_period" "$local_offset"
+        printf '**Action**: period must be one of 60/30/20/15/12/10/6/5; offset must be 0–(period-1). Falling back to default (period=60).\n\n'
+        printf '%s\n' '---'
+      } >> "$alert_file"
+    fi
+  fi
+
+  # 2. Try global ~/.roll/config.yaml loop_minute (backward compat)
+  local global_minute
+  global_minute=$(_config_read_int "loop_minute" "")
+  if [[ -n "$global_minute" && "$global_minute" =~ ^[0-9]+$ ]]; then
+    echo "60 $global_minute"
+    return 0
+  fi
+
+  # 3. Default: derive from project path hash (never collides across projects)
+  local offset
+  offset=$(_loop_derive_minute "$project_path" 0)
+  echo "60 $offset"
+}
+
 # US-LOOP-001: structured event emission for cycle observability.
 # Writes a tab-separated line to stdout (for tmux/attach display) and appends
 # a JSON line to the per-project NDJSON event file under _SHARED_ROOT/loop/.

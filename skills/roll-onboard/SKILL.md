@@ -65,15 +65,15 @@ Run `roll-doc --dry-run` (READ-ONLY mode). This reports:
 
 Present these in chat. **Aim for total time ≤ 3 minutes.** Group 1 confirms your understanding; group 2 scopes the work; group 3 handles privacy and next steps.
 
-**Group 1 — Project cognition check**
+**$(msg onboard.questions_group1)**
 
-1. I see this is a **[type]** project doing **[description]** — correct?
-2. The main business domains look like **[domain A, domain B, …]** — anything to add or correct?
-3. The key modules are **[X, Y, Z]** — any missed or mis-identified?
+1. $(msg onboard.q1 "[type]" "[description]")
+2. $(msg onboard.q2 "[domain A, domain B, …]")
+3. $(msg onboard.q3 "[X, Y, Z]")
 
-**Group 2 — Generation scope**
+**$(msg onboard.questions_group2)**
 
-4. Which artifacts should I generate? Multi-select:
+4. $(msg onboard.q4) Multi-select:
    - `backlog` — initial BACKLOG with seeded stories
    - `features` — features index + per-feature spec stubs
    - `domain` — DDD context map

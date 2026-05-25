@@ -179,8 +179,8 @@ git push origin main
 写完文件后在终端或 CI 日志中打印简报路径：
 
 ```
-📋 简报已生成：.roll/briefs/2026-05-10-01.md
-   发布就绪：✅ 可发版
+📋 $(msg brief.generated ".roll/briefs/YYYY-MM-DD-NN.md")
+   $(msg brief.release_readiness): ✅ $(msg brief.release_ready_status)
 ```
 
 有升级事项时须显著打印，不得遗漏。

@@ -6683,9 +6683,14 @@ _notify() {
 }
 
 # Count `tcr:` prefixed commits in the current git repo since started_at timestamp.
+# FIX-D 2026-05-25: use --all so commits made on a cycle worktree branch (not
+# yet merged into the current HEAD) are still counted. Without --all the
+# enforce-tcr check inside a cycle-worktree cwd would miss the worktree's own
+# fresh commits when the runner happens to chdir to the main repo before
+# calling enforce-tcr.
 _loop_tcr_count() {
   local started_at="$1"
-  git log --oneline --since="${started_at}" 2>/dev/null \
+  git log --all --oneline --since="${started_at}" 2>/dev/null \
     | awk '/^[a-f0-9]+ tcr:/{n++} END{print n+0}'
 }
 

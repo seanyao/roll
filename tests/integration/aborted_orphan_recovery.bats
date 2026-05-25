@@ -136,6 +136,12 @@ _make_inner() {
   git config --add url."${TEST_TMP}/upstream.git/".insteadOf "git@github.com:test/test.git"
   git remote set-url origin "git@github.com:test/test.git"
 
+  # US-OBS-010 made _project_slug remote-URL-based instead of path-based, so
+  # the setup()-computed _LOOP_ALERT (which used the original upstream.git path
+  # remote) is now stale. Recompute against the rewritten origin URL so the
+  # ALERT path written by inner.sh matches what this test asserts against.
+  _LOOP_ALERT="${_SHARED_ROOT}/loop/ALERT-$(_project_slug "$_project").md"
+
   # Stub gh in PATH: pr view returns 1 (no existing PR), pr create echoes URL
   # and exits 0, pr merge exits 0. Every call is logged for assertion.
   local mock_bin="${TEST_TMP}/mock-bin"

@@ -57,6 +57,30 @@ teardown() { unit_teardown_cd; }
   [ "$count" -eq 2 ]
 }
 
+# Regression for FIX-D 2026-05-25 — `git log` without `--all` only walks
+# the current HEAD's ancestry, so commits living on a cycle-worktree branch
+# that hasn't been merged into HEAD are missed. The enforce-tcr call must
+# see them, otherwise it falsely reports zero and trips the ALERT path.
+@test "_loop_tcr_count: counts commits on non-HEAD branches (worktree case)" {
+  # Bootstrap default branch with one non-tcr commit so it is named/visible.
+  GIT_COMMITTER_DATE="2026-01-02T00:00:00+0000" git commit \
+    --date="2026-01-02T00:00:00+0000" --allow-empty -m "initial" -q
+  local default_branch; default_branch=$(git symbolic-ref --short HEAD)
+  # Side branch carries the tcr commits, then we leave HEAD back on default.
+  git checkout -q -b side-branch
+  GIT_COMMITTER_DATE="2026-01-02T01:00:00+0000" git commit \
+    --date="2026-01-02T01:00:00+0000" --allow-empty -m "tcr: step 1 on side" -q
+  GIT_COMMITTER_DATE="2026-01-02T02:00:00+0000" git commit \
+    --date="2026-01-02T02:00:00+0000" --allow-empty -m "tcr: step 2 on side" -q
+  GIT_COMMITTER_DATE="2026-01-02T03:00:00+0000" git commit \
+    --date="2026-01-02T03:00:00+0000" --allow-empty -m "tcr: step 3 on side" -q
+  git checkout -q "$default_branch"
+
+  local started_at="2026-01-01T00:00:00+0000"
+  local count; count=$(_loop_tcr_count "$started_at")
+  [ "$count" -eq 3 ]
+}
+
 # ─── _loop_enforce_tcr ────────────────────────────────────────────────────────
 
 @test "_loop_enforce_tcr: returns 0 when tcr commits exist" {

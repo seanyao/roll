@@ -5623,6 +5623,14 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
     if [ "\$_cycle_commits" -eq 0 ]; then
       _worktree_cleanup "\$WT" "\$BRANCH"
       _loop_event idle "\${CYCLE_ID}" "" "" || true
+      # FIX-F (2026-05-25): explicitly write the terminal "idle" cycle_end +
+      # runs row here, otherwise the EXIT trap's catch-all fallback (which
+      # writes "aborted" when _CYCLE_END_WRITTEN is still 0) will reclassify
+      # this successful no-op as a failure on the dashboard.
+      _loop_event cycle_end "\${CYCLE_ID}" "" "idle" || true
+      _CYCLE_END_WRITTEN=1
+      _phases_idle=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_idle" ] && _phases_idle='{}'
+      _runs_append "idle" 0 "[]" "\$_phases_idle" 2>/dev/null || true
       echo "[loop] cycle \${CYCLE_ID}: idle (no new commits); worktree cleaned"
     else
       _is_doc_only=0

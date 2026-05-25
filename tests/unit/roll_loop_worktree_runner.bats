@@ -123,6 +123,23 @@ teardown() {
   grep -qF 'cycle_id:' "$inner"
 }
 
+@test "_write_loop_runner_script: FIX-F idle cycle writes terminal cycle_end and runs row" {
+  # Observed live during the 2026-05-25 13:18 and 14:18 pi cycles: agent
+  # exited cleanly (idle), but the runs.jsonl row was status:"aborted" and
+  # the events file ended with cycle_end:"aborted". The idle path only
+  # emitted an "idle" status event, not the terminal cycle_end, so the
+  # EXIT trap fallback (which classifies anything with _CYCLE_END_WRITTEN=0
+  # as aborted) ran. Regression: the idle branch must mark itself terminal.
+  local script="${_tmp}/run-tFIXF.sh"
+  _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-tFIXF-inner.sh"
+  grep -qF '_loop_event cycle_end "${CYCLE_ID}" "" "idle"' "$inner"
+  grep -qF '_runs_append "idle"' "$inner"
+  # The idle branch must set _CYCLE_END_WRITTEN so the cleanup trap's
+  # fallback does NOT overwrite this row with "aborted".
+  awk '/Idle cycle — no commits ahead/{flag=1} flag && /_CYCLE_END_WRITTEN=1/{found=1; exit} END{exit !found}' "$inner"
+}
+
 @test "_write_loop_runner_script: existing FIX-031 inner LOCK still present" {
   local script="${_tmp}/run-tA.sh"
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24

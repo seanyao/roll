@@ -132,3 +132,38 @@ teardown() { unit_teardown; }
   [ -f "$gitignore" ]
   grep -q '^cycle-logs/' "$gitignore"
 }
+
+# ─── Generated script verification ──────────────────────────────────────────
+
+@test "cycle log: inner script contains ANSI strip + rotate in _inner_cleanup" {
+  local runner="${TEST_TMP}/run-test.sh"
+  local log="${TEST_TMP}/test.log"
+  _write_loop_runner_script "$runner" "${TEST_TMP}/fake-project" "echo ok" "$log"
+
+  local inner="${runner%.sh}-inner.sh"
+  [ -f "$inner" ]
+
+  # Verify ANSI strip: sed processes ROLL_CYCLE_LOG_RAW
+  grep -q 'ROLL_CYCLE_LOG_RAW' "$inner"
+  # Verify rotate: ls -t *.log
+  grep -q 'ls -t \*\.log.*xargs.*rm' "$inner"
+  # Verify ROLL_CYCLE_LOG_KEEP default
+  grep -q 'ROLL_CYCLE_LOG_KEEP:-50' "$inner"
+}
+
+@test "cycle log: outer script exports ROLL_CYCLE_LOG_RAW and uses tee pipe-pane" {
+  local runner="${TEST_TMP}/run-test2.sh"
+  local log="${TEST_TMP}/test2.log"
+  _write_loop_runner_script "$runner" "${TEST_TMP}/fake-project" "echo ok" "$log"
+
+  [ -f "$runner" ]
+
+  # Verify pipe-pane uses tee (dual-write) not cat
+  grep -q 'tee -a' "$runner"
+  # Verify ROLL_CYCLE_LOG_RAW is exported
+  grep -q 'export ROLL_CYCLE_LOG_RAW' "$runner"
+  # Verify cycle-logs directory is created
+  grep -q 'cycle-logs' "$runner"
+  # No old cat >> pipe-pane
+  ! grep -q 'pipe-pane.*cat >>' "$runner"
+}

@@ -2864,7 +2864,7 @@ cmd_peer() {
   local log_file
   log_file="${_PEER_STATE_DIR}/logs/$(date +%Y%m%d_%H%M%S)_${from_tool}_${to_tool}.md"
   {
-    echo "# Peer Review Log"
+    echo "# $(msg peer.log_title)"
     echo ""
     echo "- **From**: $from_tool"
     echo "- **To**: $to_tool"
@@ -2890,7 +2890,7 @@ cmd_peer() {
   stderr_log="${_PEER_STATE_DIR}/logs/.last_stderr.log"
   if [[ -f "$stderr_log" && -s "$stderr_log" ]]; then
     echo ""
-    echo -e "${BOLD}Peer stderr  Peer 标准错误:${NC}"
+    echo -e "${BOLD}$(msg peer.stderr_title):${NC}"
     cat "$stderr_log"
     echo ""
   fi
@@ -2908,7 +2908,7 @@ cmd_peer() {
   _peer_update_state "$pair" "$resolution"
 
   echo ""
-  echo -e "${BOLD}Peer Review Result  Peer Review 结果${NC}"
+  echo -e "${BOLD}$(msg peer.result_title)${NC}"
   echo "  Pair: $pair"
   echo "  Round: $round"
   echo "  Resolution: $resolution"
@@ -2952,7 +2952,7 @@ cmd_peer() {
 
 cmd_peer_status() {
   _peer_ensure_state_dir
-  echo -e "${BOLD}Peer Review Status  Peer Review 状态${NC}"
+  echo -e "${BOLD}$(msg peer.status_title)${NC}"
   echo ""
 
   local found=0
@@ -3027,9 +3027,9 @@ cmd_peer_reset() {
 }
 
 cmd_peer_help() {
-  echo -e "${BOLD}roll peer — Cross-Agent Peer Review${NC}"
+  echo -e "${BOLD}$(msg peer.title)${NC}"
   echo ""
-  echo "Usage: roll peer [options]  用法: roll peer [选项]"
+  echo "$(msg peer.usage)"
   echo ""
   echo "Options:"
   echo "  --from <tool>       Originating agent (kimi, claude, pi)  发起方"
@@ -4337,7 +4337,7 @@ cmd_agent() {
       fi
       ;;
     list)
-      echo ""; echo "  Available agents  可用 agent:"; echo ""
+      echo ""; echo "  $(msg agent.available):"; echo ""
       local current; current=$(_project_agent)
       for a in claude kimi deepseek opencode codex pi; do
         if command -v "$a" &>/dev/null; then
@@ -4361,7 +4361,7 @@ cmd_agent() {
       echo "  roll agent use <name>   — switch agent for this project"
       echo "  roll agent list         — show installed agents"; echo ""
       ;;
-    *) err "Unknown subcommand: $subcmd"; echo "Usage: roll agent [use <name>|list]"; exit 1 ;;
+    *) err "$(msg agent.unknown_subcmd "$subcmd")"; echo "Usage: roll agent [use <name>|list]"; exit 1 ;;
   esac
 }
 
@@ -8482,8 +8482,7 @@ cmd_lang() {
       ;;
     *)
       err "Unknown language: ${arg}  未知语言: ${arg}"
-      echo "  Valid values: zh, en, --reset"
-      echo "  可选值: zh, en, --reset"
+      echo "  $(msg lang.valid_values)"
       return 1
       ;;
   esac

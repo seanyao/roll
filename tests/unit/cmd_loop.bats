@@ -182,6 +182,9 @@ teardown() {
   mkdir -p "$main"
   git -C "$main" init
   git -C "$main" remote add origin "https://github.com/team/worktree-repo.git"
+  # CI runners do not have a global git identity — required for commit.
+  git -C "$main" config user.email "test@example.com"
+  git -C "$main" config user.name "Test"
   # Create an initial commit so worktree add works
   git -C "$main" commit --allow-empty -m "init"
 

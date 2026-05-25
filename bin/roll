@@ -7109,6 +7109,7 @@ _worktree_sync_meta() {
   local path="$1"
   [ -d ".roll" ] || return 0
   rsync -a \
+    --exclude='.git/' \
     --exclude='state/' \
     --exclude='scratch/' \
     --exclude='*.lock' \

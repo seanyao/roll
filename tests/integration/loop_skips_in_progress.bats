@@ -61,6 +61,8 @@ refute_grep() {
   _worktree_create "$wt" "loop/FIX-085-A" "main"
 
   # Seed main .roll/backlog.md with one 📋 Todo row and one 🔨 In Progress row.
+  # _worktree_sync_meta reads .roll/ from CWD (the main repo), so be explicit.
+  cd "${TEST_TMP}/repo"
   mkdir -p .roll
   cat > .roll/backlog.md <<'EOF'
 # Project Backlog
@@ -95,6 +97,7 @@ EOF
   local wt; wt=$(_worktree_path "test" "FIX-085-B")
   _worktree_create "$wt" "loop/FIX-085-B" "main"
 
+  cd "${TEST_TMP}/repo"
   mkdir -p .roll
   cat > .roll/backlog.md <<'EOF'
 | [US-FOO-001](.roll/features/demo.md#us-foo-001) | x | 📋 Todo |
@@ -116,6 +119,7 @@ EOF
   local wt; wt=$(_worktree_path "test" "FIX-085-C")
   _worktree_create "$wt" "loop/FIX-085-C" "main"
 
+  cd "${TEST_TMP}/repo"
   mkdir -p .roll
   cat > .roll/backlog.md <<'EOF'
 | [US-FOO-001](.roll/features/demo.md#us-foo-001) | x | 🔨 In Progress |
@@ -132,6 +136,7 @@ EOF
   local wt; wt=$(_worktree_path "test" "FIX-085-D")
   _worktree_create "$wt" "loop/FIX-085-D" "main"
 
+  cd "${TEST_TMP}/repo"
   mkdir -p .roll
   cat > .roll/backlog.md <<'EOF'
 | [US-FOO-001](.roll/features/demo.md#us-foo-001) | x | 📋 Todo |

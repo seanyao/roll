@@ -85,7 +85,7 @@ teardown() { unit_teardown_cd; }
 @test "_write_launchd_plist: writes EnvironmentVariables PATH key" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
-  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "0" "" "${tmp_dir}/run.sh"
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "60" "0" "" "${tmp_dir}/run.sh"
   grep -q '<key>EnvironmentVariables</key>' "$plist"
   grep -q '<key>PATH</key>' "$plist"
   rm -rf "$tmp_dir"

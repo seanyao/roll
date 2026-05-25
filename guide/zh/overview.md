@@ -10,7 +10,7 @@ npm install -g @seanyao/roll
 cd my-project
 roll setup && roll init
 
-roll loop on        # AI 开始每小时执行 BACKLOG
+roll loop on        # AI 按可配置频次执行 BACKLOG
 roll loop monitor   # 实时查看进度
 ```
 
@@ -18,7 +18,7 @@ roll loop monitor   # 实时查看进度
 
 Roll 运行在三个自主层上：
 
-- **Loop** — 每小时从 BACKLOG 摘取最高优先级故事，在隔离的 worktree 里通过 `$roll-build` 执行。CI 通过后才会落到 `main`。
+- **Loop** — 按可配置频次从 BACKLOG 摘取最高优先级故事，在隔离的 worktree 里通过 `$roll-build` 执行。CI 通过后才会落到 `main`。
 - **Dream** — 凌晨 3 点扫描代码库，发现死代码、文档缺口和架构漂移，将 `REFACTOR-NNN` 条目排队交给 loop 领取。
 - **Peer** — 高风险构建前，第二个 AI agent 评审方案或 diff，同意后才继续执行。
 
@@ -28,7 +28,7 @@ Roll 运行在三个自主层上：
 
 ### 自主执行
 
-- `roll loop on` — AI 从 BACKLOG 领取故事，每小时在隔离 worktree 里执行 `[core]`
+- `roll loop on` — AI 从 BACKLOG 领取故事，按可配置频次在隔离 worktree 里执行 `[core]`
 - `roll loop monitor` — 实时看板：loop / dream / brief 服务状态 `[core]`
 - `roll loop attach` — 附加到实时 tmux 会话，观看 AI 工作过程 `[highlight]`
 - `roll loop pause / resume` — 手动编码时暂停，完成后让 AI 继续

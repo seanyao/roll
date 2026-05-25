@@ -65,7 +65,7 @@ graph TB
 - **Loop B → Loop C**：每次部署完成后，巡检闭环自动纳入新交付物进行监控。
 - **Loop C → Loop A**：巡检发现的问题若超出修复范围，升级回设计闭环重新评估。
 
-**可选自主层**（通过 `roll loop on` 启用）：`roll-loop` 每小时执行 BACKLOG 待办；`roll-.dream` 每晚扫描代码健康并产出 `REFACTOR` 条目；`roll-brief` 每天早晨向人类简报。人类保留 `roll-release` 的唯一权力。详见 §9。
+**可选自主层**（通过 `roll loop on` 启用）：`roll-loop` 按可配置频次执行 BACKLOG 待办；`roll-.dream` 每晚扫描代码健康并产出 `REFACTOR` 条目；`roll-brief` 每天早晨向人类简报。人类保留 `roll-release` 的唯一权力。详见 §9。
 
 ---
 
@@ -588,7 +588,7 @@ graph LR
 │  人类驱动每一个动作                                      │
 ├─────────────────────────────────────────────────────────┤
 │  自主层（可选：roll loop on）                            │
-│  roll-loop   — 每小时 BACKLOG 执行器                    │
+│  roll-loop   — 可配置频次的 BACKLOG 执行器              │
 │  roll-.dream — 每晚代码健康巡检                          │
 │  roll-brief  — 每日晨报 + 发布就绪建议                   │
 │  人类审阅简报；保留发布权                                 │
@@ -597,7 +597,7 @@ graph LR
 
 ### 9.2 各组件
 
-**`roll-loop`** — 通过 macOS launchd（Linux: crontab）每小时运行。扫描 BACKLOG 中 `📋 Todo` 条目并按类型路由：`US-XXX → $roll-build`、`FIX-XXX → $roll-fix`、`REFACTOR-XXX → $roll-build`。每次执行有条目上限，控制影响范围。Feature 全部完成时自动触发 `roll-brief`。内置 TCR 硬校验：Story 完成后检查 `tcr:` 微提交数量，为 0 时将 Story 回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏。
+**`roll-loop`** — 通过 macOS launchd（Linux: crontab）按可配置频次运行。扫描 BACKLOG 中 `📋 Todo` 条目并按类型路由：`US-XXX → $roll-build`、`FIX-XXX → $roll-fix`、`REFACTOR-XXX → $roll-build`。每次执行有条目上限，控制影响范围。Feature 全部完成时自动触发 `roll-brief`。内置 TCR 硬校验：Story 完成后检查 `tcr:` 微提交数量，为 0 时将 Story 回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏。
 
 **`roll-.dream`** — 通过 macOS launchd（Linux: crontab）每晚 03:00 运行。扫描代码库中的死代码、对照 `.roll/domain/` 检测架构漂移、识别可修剪的抽象和可提炼的模式。产出 `REFACTOR-XXX` 条目写入 BACKLOG，巡检日志写入 `.roll/dream/YYYY-MM-DD.md`。
 

@@ -6107,7 +6107,37 @@ cmd_loop() {
     enforce-tcr)  _loop_enforce_tcr "${1:-}" "${2:-}" ;;
     precheck-ci)  _loop_precheck_ci ;;
     branches)     _loop_branches "$(pwd -P)" ;;
-    *) err "Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci|branches>"; exit 1 ;;
+    *)  cat <<'HELP'
+Usage: roll loop <on|off|now|test|status|monitor|runs|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci|branches>
+
+  on            Install launchd scheduler (loop + dream + brief)
+  off           Remove launchd scheduler
+  now           Run one cycle immediately
+  test          Quick smoke test (tmux/popup/stream chain)
+  status        Show scheduler state and current loop state
+  monitor       Live dashboard: launchd status, queue, recent runs
+  runs [N]      Show last N run summaries (default 10)
+  events [N]    Show last N cycle events (default 20)
+  attach        Attach to running loop tmux session (Ctrl-B D to detach)
+  mute          Suppress auto-attach popup
+  unmute        Re-enable auto-attach popup
+  pause         Pause scheduling (keep plist, skip execution)
+  resume        Resume scheduling after pause
+  reset         Clear loop state (start fresh on next fire)
+  notify        Send macOS notification
+  enforce-tcr   Verify TCR commit count for a completed story
+  precheck-ci   Check HEAD CI status before scanning BACKLOG
+  branches      List loop-related branches
+
+Schedule is configured per-project in .roll/local.yaml:
+
+  loop_schedule:
+    period_minutes: 30   # 60, 30, 20, 15, 12, 10, 6, or 5
+    offset_minute: 7     # 0 – (period_minutes - 1)
+
+See guide/en/loop.md for full documentation.
+HELP
+      exit 1 ;;
   esac
 }
 

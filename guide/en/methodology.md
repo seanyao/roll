@@ -67,7 +67,7 @@ How the three loops interact:
 - **Loop B → Loop C**: Each deployment automatically brings new deliverables under the patrol loop's monitoring scope.
 - **Loop C → Loop A**: Issues found during patrol that exceed the scope of a quick fix escalate back to the design loop for reassessment.
 
-**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items hourly; `roll-.dream` scans code health nightly and produces `REFACTOR` entries; `roll-brief` briefs the human each morning. The human retains sole authority over `roll-release`. See §9 for details.
+**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items on a configurable schedule; `roll-.dream` scans code health nightly and produces `REFACTOR` entries; `roll-brief` briefs the human each morning. The human retains sole authority over `roll-release`. See §9 for details.
 
 ---
 
@@ -596,7 +596,7 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 │  Human drives every action                              │
 ├─────────────────────────────────────────────────────────┤
 │  Autonomous layer (opt-in: roll loop on)                │
-│  roll-loop   — hourly BACKLOG executor                  │
+│  roll-loop   — BACKLOG executor (configurable schedule)  │
 │  roll-.dream — nightly code health scan                 │
 │  roll-brief  — morning digest + release readiness       │
 │  Human reviews briefs; retains release authority        │
@@ -605,7 +605,7 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 
 ### 9.2 Components
 
-**`roll-loop`** — Runs hourly via macOS launchd (Linux: crontab). Scans BACKLOG for `📋 Todo` items and routes them: `US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`. Caps items per run to limit blast radius. Triggers `roll-brief` when a Feature completes. Built-in TCR enforcement: after a story completes, checks for `tcr:` micro-commits — if zero are found, reverts the story to Todo with an ALERT, preventing agents from skipping the TCR rhythm.
+**`roll-loop`** — Runs on a configurable schedule via macOS launchd (Linux: crontab). Scans BACKLOG for `📋 Todo` items and routes them: `US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`. Caps items per run to limit blast radius. Triggers `roll-brief` when a Feature completes. Built-in TCR enforcement: after a story completes, checks for `tcr:` micro-commits — if zero are found, reverts the story to Todo with an ALERT, preventing agents from skipping the TCR rhythm.
 
 **`roll-.dream`** — Runs nightly (03:00 local) via macOS launchd (Linux: crontab). Scans the codebase for dead code, architectural drift against `.roll/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `.roll/dream/YYYY-MM-DD.md`.
 

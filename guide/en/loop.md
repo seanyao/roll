@@ -1,8 +1,9 @@
 # roll loop — Autonomous BACKLOG Executor
 
 `roll loop` schedules and manages the autonomous execution of BACKLOG stories.
-When enabled, it wakes up every hour (within your active window), picks the top
-pending story, and executes it — committing changes in TCR micro-steps.
+When enabled, it wakes up on a configurable schedule (within your active
+window), picks the top pending story, and executes it — committing changes in
+TCR micro-steps.
 
 ## How It Works
 
@@ -17,23 +18,62 @@ When not muted, a terminal window pops up automatically so you can watch in real
 
 ## Scheduling
 
-Loop is scheduled via **launchd** (macOS). Default: every hour at `:05` past.
+Loop is scheduled via **launchd** (macOS). By default, every hour at a
+project-derived minute (different projects get different offsets to avoid
+collisions).
 
 ```
-Active window: 10am – 6pm (configurable)
+Active window: 10am – 6pm (configurable in ~/.roll/config.yaml)
 ```
 
 Outside the active window, loop silently exits without doing anything.
-Configure in `~/.roll/config.yaml`:
+
+### Per-project frequency
+
+Configure in `.roll/local.yaml`:
+
+```yaml
+loop_schedule:
+  period_minutes: 30   # 60, 30, 20, 15, 12, 10, 6, or 5
+  offset_minute: 7     # 0 – (period_minutes - 1)
+```
+
+- `period_minutes` — how often loop fires. Must evenly divide 60.
+- `offset_minute` — shifts the first trigger within the period. Different
+  projects with the same period should use different offsets.
+
+If no `.roll/local.yaml` or no `loop_schedule` block is present, Roll falls
+back to the global `loop_minute` in `~/.roll/config.yaml`, or derives a
+per-project default from the project path hash.
+
+**Example:**
+
+```yaml
+# .roll/local.yaml — high-frequency project
+loop_schedule:
+  period_minutes: 15   # every 15 minutes
+  offset_minute: 3     # triggers at :03, :18, :33, :48
+```
+
+`roll loop status` and `roll loop on` display the actual schedule frequency
+so you can verify it at a glance. An invalid value (e.g. `period_minutes: 45`)
+triggers an ALERT and falls back to the hourly default.
+
+### Global config (backward-compatible)
+
+For a single global offset across all projects, `~/.roll/config.yaml` still
+works:
 
 ```yaml
 loop:
   active_start: 10    # hour (24h)
   active_end: 18
-  loop_minute: 5      # minute past the hour
+  loop_minute: 5      # minute past the hour (overridden by .roll/local.yaml)
   primary_agent: claude
-  fallback_agent: deepseek
 ```
+
+Project-level `.roll/local.yaml` `loop_schedule` takes priority over
+`loop_minute`.
 
 ## Subcommands
 

@@ -539,3 +539,40 @@ when the work is ambiguous or the environment is broken — never guesses.**
 
 For deeper operational topics (pause/resume, agent switching, gh scopes), see
 [loop.md](loop.md) and [configuration.md](configuration.md).
+
+### C7. I changed loop_schedule but loop still runs at the old frequency
+
+**Symptoms:** You updated `.roll/local.yaml` `loop_schedule`, but
+`roll loop status` still shows the old trigger times.
+
+**Why this happens:** The launchd plist is written once when you run
+`roll loop on`. Changing the config file does not automatically update
+the plist.
+
+**Fix:**
+
+```bash
+roll loop off && roll loop on     # re-install the plist with new schedule
+roll loop status                  # verify the new trigger times
+```
+
+### C8. My period_minutes setting is not taking effect
+
+**Symptoms:** You set `period_minutes: 45` in `.roll/local.yaml`, the loop
+still runs every hour, and `roll alert` shows a scheduling ALERT.
+
+**Why this happens:** `period_minutes` must evenly divide 60.
+Valid values: 60, 30, 20, 15, 12, 10, 6, 5.
+
+**Under the hood:** `_loop_schedule_valid` validates the pair on every read.
+An invalid pair triggers an ALERT to `~/.shared/roll/loop/ALERT-<slug>.md`
+and falls back to the default (period=60, project-derived offset).
+
+**Fix:**
+
+```bash
+roll alert                        # check the exact error
+# Edit .roll/local.yaml — use a valid divisor of 60
+roll loop off && roll loop on     # re-install
+roll loop status                  # confirm the new schedule
+```

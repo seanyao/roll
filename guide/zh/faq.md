@@ -489,3 +489,37 @@ roll loop reset
 
 更细的操作话题（pause/resume、切换 agent、gh scope 等）见
 [loop.md](loop.md) 和 [configuration.md](configuration.md)。
+
+### C7. 改了 loop_schedule 但 loop 还是按旧频次跑
+
+**症状：** 更新了 `.roll/local.yaml` 的 `loop_schedule`，但 `roll loop status`
+显示的触发时间仍然是旧的。
+
+**原因：** launchd plist 只在 `roll loop on` 时写入一次。修改配置文件不会自动
+更新 plist。
+
+**解决：**
+
+```bash
+roll loop off && roll loop on     # 用新 schedule 重装 plist
+roll loop status                  # 确认新触发时间
+```
+
+### C8. period_minutes 设置不生效
+
+**症状：** `.roll/local.yaml` 里写了 `period_minutes: 45`，loop 还是每小时
+触发，`roll alert` 显示一条 schedule ALERT。
+
+**原因：** `period_minutes` 必须能整除 60。合法值：60、30、20、15、12、10、6、5。
+
+**底层：** `_loop_schedule_valid` 在每次读取时校验这对值。不合法时写 ALERT 到
+`~/.shared/roll/loop/ALERT-<slug>.md` 并回退到默认值（period=60，项目路径推导的偏移）。
+
+**解决：**
+
+```bash
+roll alert                        # 看具体错误信息
+# 编辑 .roll/local.yaml — 改用 60 的合法约数
+roll loop off && roll loop on     # 重装
+roll loop status                  # 确认新频次
+```

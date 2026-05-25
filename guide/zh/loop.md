@@ -1,7 +1,7 @@
 # roll loop — 自主 BACKLOG 执行器
 
 `roll loop` 负责调度和管理 BACKLOG 故事的自主执行。
-开启后，loop 每小时（在活跃窗口内）醒来，摘取最高优先级的待办故事，
+开启后，loop 按可配置的频次（在活跃窗口内）醒来，摘取最高优先级的待办故事，
 通过 TCR 微提交完成代码交付。
 
 ## 工作原理
@@ -17,23 +17,57 @@ Loop 在名为 **`roll-loop-<project-slug>`** 的 **tmux session** 里运行。
 
 ## 调度配置
 
-Loop 通过 **launchd**（macOS）调度，默认每小时 `:05` 触发。
+Loop 通过 **launchd**（macOS）调度。默认每小时在一个根据项目路径推导出的分钟触发
+（不同项目自动错开，避免碰撞）。
 
 ```
-活跃窗口：上午 10 点 — 下午 6 点（可配置）
+活跃窗口：上午 10 点 — 下午 6 点（在 ~/.roll/config.yaml 中配置）
 ```
 
 活跃窗口之外，loop 静默退出，不执行任何操作。
-在 `~/.roll/config.yaml` 中配置：
+
+### 项目级触发频次
+
+在 `.roll/local.yaml` 中配置：
+
+```yaml
+loop_schedule:
+  period_minutes: 30   # 60 / 30 / 20 / 15 / 12 / 10 / 6 / 5
+  offset_minute: 7     # 0 ~ (period_minutes - 1)
+```
+
+- `period_minutes` — loop 触发间隔。必须能整除 60。
+- `offset_minute` — 将首个触发时刻在周期内偏移。同周期的不同项目应使用不同偏移。
+
+如果没有 `.roll/local.yaml` 或没有 `loop_schedule` 配置，Roll 回退到
+`~/.roll/config.yaml` 中的全局 `loop_minute`，或者根据项目路径哈希推导
+默认值。
+
+**示例：**
+
+```yaml
+# .roll/local.yaml — 高频项目
+loop_schedule:
+  period_minutes: 15   # 每 15 分钟触发
+  offset_minute: 3     # 在 :03、:18、:33、:48 触发
+```
+
+`roll loop status` 和 `roll loop on` 直接显示实际频次，一眼可确认生效。
+非法值（如 `period_minutes: 45`）会触发 ALERT 并回退到每小时默认值。
+
+### 全局配置（向后兼容）
+
+若所有项目使用同一个全局偏移，`~/.roll/config.yaml` 仍然有效：
 
 ```yaml
 loop:
   active_start: 10    # 24 小时制，小时
   active_end: 18
-  loop_minute: 5      # 每小时第几分钟触发
+  loop_minute: 5      # 每小时第几分钟触发（被 .roll/local.yaml 覆盖）
   primary_agent: claude
-  fallback_agent: deepseek
 ```
+
+项目级 `.roll/local.yaml` `loop_schedule` 优先级高于 `loop_minute`。
 
 ## 子命令参考
 

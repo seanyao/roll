@@ -10,7 +10,7 @@ npm install -g @seanyao/roll
 cd my-project
 roll setup && roll init
 
-roll loop on        # AI starts executing BACKLOG hourly
+roll loop on        # AI starts executing BACKLOG on a configurable schedule
 roll loop monitor   # watch it work
 ```
 
@@ -18,7 +18,7 @@ roll loop monitor   # watch it work
 
 Roll runs on three autonomous layers:
 
-- **Loop** — every hour, picks the top story from BACKLOG and executes it via `$roll-build` in an isolated worktree. CI must pass before anything lands on `main`.
+- **Loop** — on a configurable schedule, picks the top story from BACKLOG and executes it via `$roll-build` in an isolated worktree. CI must pass before anything lands on `main`.
 - **Dream** — at 3am, scans the codebase for dead code, doc gaps, and architectural drift. Queues `REFACTOR-NNN` entries for loop to pick up.
 - **Peer** — before any risky build, a second AI agent reviews the plan or diff and must agree before execution continues.
 
@@ -28,7 +28,7 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 
 ### Autonomous Execution
 
-- `roll loop on` — AI picks stories from BACKLOG and executes hourly in an isolated worktree `[core]`
+- `roll loop on` — AI picks stories from BACKLOG and executes on a configurable schedule in an isolated worktree `[core]`
 - `roll loop monitor` — live dashboard: loop / dream / brief service status `[core]`
 - `roll loop attach` — attach to the live tmux session and watch AI work in real time `[highlight]`
 - `roll loop pause / resume` — hand-code yourself; let AI resume when you're done

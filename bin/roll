@@ -25,6 +25,10 @@ ROLL_PKG_CONVENTIONS="${ROLL_PKG_DIR}/conventions"
 # shellcheck source=../lib/i18n.sh
 [[ -f "${ROLL_PKG_DIR}/lib/i18n.sh" ]] && source "${ROLL_PKG_DIR}/lib/i18n.sh"
 
+# US-WATCH-001: upstream compatibility watch helpers.
+# shellcheck source=../lib/watch.sh
+[[ -f "${ROLL_PKG_DIR}/lib/watch.sh" ]] && source "${ROLL_PKG_DIR}/lib/watch.sh"
+
 # Colors
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -4044,10 +4048,10 @@ sys.path.insert(0, lib_dir)
 import model_prices as mp
 
 version, effective_at, source_url = mp.snapshot_meta()
-print(f"$(msg prices_show.price_snapshot)")
+print(f"price snapshot  价格快照")
 print(f"  version        {version}")
 print(f"  effective_at   {effective_at}")
-print(f"$(msg prices_show.snapshots_len_mp_snapshots_loaded)")
+print(f"  snapshots      {len(mp._SNAPSHOTS)} loaded  已加载")
 for snap in mp._SNAPSHOTS:
     v = snap.get("vendor", "—")
     c = snap.get("currency", "—")
@@ -4059,7 +4063,7 @@ for model in sorted(mp.PRICES):
     cur = mp.currency_for(model)
     print(f"  {model:<24}{cur:>4}{p['in']:>10.4f}{p['out']:>10.4f}{p['cache_create']:>10.4f}{p['cache_read']:>10.4f}")
 print()
-print("$(msg prices_show.rates_per_million_tokens)")
+print("rates per million tokens  每百万 token 单价")
 PY
 }
 
@@ -4106,23 +4110,23 @@ try:
     action, changes = pf.refresh(snapshot_dir=snapshot_dir, url=url)
 except pf.FetchError as exc:
     print(f"[roll] fetch failed: {exc}", file=sys.stderr)
-    print("$(msg prices_refresh.roll_keeping_existing_snapshot_no_changes)",
+    print("[roll] keeping existing snapshot, no changes written  保留旧快照，未写入新文件",
           file=sys.stderr)
     sys.exit(2)
 except pf.ParseError as exc:
     print(f"[roll] parse failed: {exc}", file=sys.stderr)
-    print("$(msg prices_refresh.roll_keeping_existing_snapshot_no_changes_2)",
+    print("[roll] keeping existing snapshot, no changes written  保留旧快照，未写入新文件",
           file=sys.stderr)
     sys.exit(3)
 
 kind, _, _ = (action + "::").split(":", 2)
 if action == "unchanged":
-    print("$(msg prices_refresh.roll_up_to_date)")
+    print("[roll] up to date  价格快照已是最新")
     sys.exit(0)
 if kind == "first":
-    print(f"$(msg prices_refresh.roll_baseline_snapshot_written)")
+    print(f"[roll] baseline snapshot written  写入首份基线快照")
 elif kind == "written":
-    print(f"$(msg prices_refresh.roll_new_snapshot_written)")
+    print(f"[roll] new snapshot written  写入新版价格快照")
 print(pf.format_diff(changes, colored=sys.stdout.isatty()))
 PY
 }

@@ -6307,7 +6307,7 @@ _legacy_loop_status() {
   [[ -f "$_LOOP_STATE" ]] && grep -q "^status: paused" "$_LOOP_STATE" 2>/dev/null && _is_paused=true
   echo ""
   if [[ "$(uname)" == "Darwin" ]]; then
-    echo -e "  Services   Agent: ${CYAN}${agent}${NC}"
+    echo -e "  $(msg loop.services)   Agent: ${CYAN}${agent}${NC}"
     for svc in loop dream brief; do
       local state; state=$(_launchd_svc_state "$svc" "$project_path")
       if [[ "$svc" == "loop" ]] && $_is_paused; then
@@ -6319,12 +6319,12 @@ _legacy_loop_status() {
           _ne=$(date +%s); _sec=$(( _ne - _pe ))
           _dur="  ($(( _sec / 3600 ))h $(( (_sec % 3600) / 60 ))m ago)"
         fi
-        echo -e "    ${YELLOW}loop     ⏸ paused${NC}${_dur}   run: roll loop resume"
+        echo -e "    ${YELLOW}$(msg loop.loop)     ⏸ $(msg loop.state_paused)${NC}${_dur}   $(msg loop.run_resume)"
       else
         case "$state" in
-          enabled)       echo -e "    ${GREEN}${svc}     ● enabled${NC}" ;;
-          stale|installed-off) echo -e "    ${YELLOW}${svc}     ⚠ STALE — plist present but not loaded${NC}   run: roll loop on" ;;
-          not-installed) echo -e "    ${RED}${svc}     ○ not installed${NC}   run: roll setup" ;;
+          enabled)       echo -e "    ${GREEN}${svc}     $(msg loop.status_loaded)${NC}" ;;
+          stale|installed-off) echo -e "    ${YELLOW}${svc}     $(msg loop.status_stale)${NC}   $(msg loop.run_on)" ;;
+          not-installed) echo -e "    ${RED}${svc}     $(msg loop.status_not_installed)${NC}   $(msg loop.run_setup)" ;;
         esac
       fi
     done
@@ -6332,21 +6332,21 @@ _legacy_loop_status() {
     local loop_enabled=false
     crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_enabled=true
     if $_is_paused; then
-      echo -e "  Scheduler  ${YELLOW}⏸ paused${NC}   run: roll loop resume"
+      echo -e "  $(msg loop.scheduler)  ${YELLOW}⏸ $(msg loop.state_paused)${NC}   $(msg loop.run_resume)"
     elif $loop_enabled; then
-      echo -e "  Scheduler  ${GREEN}● enabled${NC}   Agent: ${CYAN}${agent}${NC}"
+      echo -e "  $(msg loop.scheduler)  ${GREEN}$(msg loop.status_loaded)${NC}   Agent: ${CYAN}${agent}${NC}"
     else
-      echo -e "  Scheduler  ${YELLOW}○ disabled${NC}   run: roll loop on"
+      echo -e "  $(msg loop.scheduler)  ${YELLOW}$(msg loop.status_disabled)${NC}   $(msg loop.run_on)"
     fi
   fi
   echo ""
   if [[ -f "$_LOOP_MUTE_FILE" ]]; then
-    echo -e "  Auto-attach  ${YELLOW}muted${NC}   run: roll loop unmute"
+    echo -e "  $(msg loop.auto_attach)  ${YELLOW}$(msg loop.muted)${NC}   $(msg loop.run_unmute)"
   else
-    echo -e "  Auto-attach  ${GREEN}live${NC}    run: roll loop mute"
+    echo -e "  $(msg loop.auto_attach)  ${GREEN}$(msg loop.live)${NC}    $(msg loop.run_mute)"
   fi
-  [[ -f "$_LOOP_ALERT" ]] && { echo ""; echo -e "  ${RED}⚠ ALERT${NC}  (${CYAN}roll alert${NC} to manage)"; sed 's/^/    /' "$_LOOP_ALERT"; }
-  [[ -f "$_LOOP_STATE" ]] && { echo ""; echo "  State:"; sed 's/^/    /' "$_LOOP_STATE"; }
+  [[ -f "$_LOOP_ALERT" ]] && { echo ""; echo -e "  ${RED}$(msg loop.alert_header)${NC}  (${CYAN}roll alert${NC} to manage)"; sed 's/^/    /' "$_LOOP_ALERT"; }
+  [[ -f "$_LOOP_STATE" ]] && { echo ""; echo "  $(msg loop.state):"; sed 's/^/    /' "$_LOOP_STATE"; }
   echo ""
 }
 
@@ -6490,13 +6490,13 @@ _loop_runs_detail() {
   local row
   row=$(jq -c --arg cid "$cycle_id" 'select(.cycle_id == $cid)' "$_LOOP_RUNS" | head -1)
   if [[ -z "$row" ]]; then
-    echo "Cycle not found: $cycle_id  未找到对应 cycle"
+    echo "$(msg loop.cycle_not_found "$cycle_id")"
     return 1
   fi
   local has_phases
   has_phases=$(jq -r '(.phases // {}) | length' <<<"$row")
   if [[ "$has_phases" == "0" ]]; then
-    echo "Cycle $cycle_id has no phases data (pre-US-LOOP-008)  无 phase 数据"
+    echo "$(msg loop.no_phases "$cycle_id")"
     return 0
   fi
   echo ""
@@ -6625,7 +6625,7 @@ _loop_runs() {
   _loop_backfill_merged >/dev/null 2>&1 || true
 
   if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
-    echo "No loop runs yet  尚无 loop 运行记录"
+    echo "$(msg loop.no_runs)"
     return 0
   fi
 
@@ -6644,7 +6644,7 @@ _loop_runs() {
   fi
 
   if [[ -z "$filtered" ]]; then
-    echo "No loop runs for current project  当前项目尚无 loop 运行记录"
+    echo "$(msg loop.no_runs_project)"
     return 0
   fi
 

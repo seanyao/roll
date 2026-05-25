@@ -407,6 +407,7 @@ git push --force-with-lease
 | 实时看 agent 在做什么 | `roll loop attach` |
 | 人类可读的每日摘要 | `roll brief` |
 | 需要关注的告警 | `roll alert` |
+| 完整 cycle agent 输出（纯文本） | `roll loop log` |
 | 完整 agent 对话记录 | `roll loop attach` 后上翻 |
 
 ---

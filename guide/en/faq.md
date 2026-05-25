@@ -453,6 +453,7 @@ conversation until the next cycle overwrites it.
 | Watch the agent in real time | `roll loop attach` |
 | Human-readable daily summary | `roll brief` |
 | Alerts that need attention | `roll alert` |
+| Full cycle agent output (plain text) | `roll loop log` |
 | Full agent transcript | `roll loop attach`, scroll up |
 
 ---

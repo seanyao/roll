@@ -273,6 +273,25 @@ cycle 收尾时 inner runner 在 stdout 打一份按耗时降序的面板：
 roll loop runs --detail 20260523-114502-12345
 ```
 
+## Cycle 日志存档
+
+每轮 cycle 的完整 agent 输出都会归档到 `.roll/cycle-logs/<cycle-id>.log`，
+ANSI 颜色码已剥离，可用 `less`、`cat` 或任何编辑器直接阅读。
+
+- **按 cycle 归档**：每轮一个 `.log` 文件，保存在 `.roll/cycle-logs/`
+- **ANSI 已剥离**：颜色码和控制字符已清除，干净纯文本
+- **保留策略**：保留最近 50 轮，超出的自动轮转删除
+- **静音模式也照存**：即使 `roll loop mute` 开启，日志仍然保存
+
+```bash
+roll loop log                # 查看最近一轮 cycle 的完整日志
+roll loop log <cycle-id>     # 查看指定 cycle（如 20260525-231803-39799）
+roll loop log <前缀>         # 前缀匹配（如 20260525 匹配 5 月 25 日所有 cycle）
+```
+
+Cycle 日志存放在 `.roll/`（项目元数据目录）内，且已被 gitignore，
+不会污染你的代码仓库。
+
 ## 状态文件
 
 | 文件 | 内容 |

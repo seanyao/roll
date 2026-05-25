@@ -286,6 +286,25 @@ dominated without opening the cycle. For the full breakdown, use:
 roll loop runs --detail 20260523-114502-12345
 ```
 
+## Cycle Log Archive
+
+Every cycle's full agent output is archived to `.roll/cycle-logs/<cycle-id>.log`
+as an ANSI-stripped plain-text file — readable with `less`, `cat`, or any editor.
+
+- **Per-cycle archive**: one `.log` file per cycle, saved to `.roll/cycle-logs/`
+- **ANSI-stripped**: color codes and control characters removed, clean plain text
+- **Retention**: keeps the 50 most recent cycles, older ones are auto-rotated
+- **Works muted or not**: logs are saved even when `roll loop mute` is on
+
+```bash
+roll loop log                # View the most recent cycle's full log
+roll loop log <cycle-id>     # View a specific cycle (e.g. 20260525-231803-39799)
+roll loop log <prefix>       # Prefix match (e.g. 20260525 matches all May 25 cycles)
+```
+
+Cycle logs are stored inside `.roll/` (the project's meta directory) and are
+gitignored — they won't pollute your repo.
+
 ## State Files
 
 | File | Content |

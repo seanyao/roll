@@ -6172,7 +6172,7 @@ cmd_loop() {
     precheck-ci)  _loop_precheck_ci ;;
     branches)     _loop_branches "$(pwd -P)" ;;
     *)  cat <<'HELP'
-Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci|branches>
+Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|branches>
 
   on            Install launchd scheduler (loop + dream + brief)
   off           Remove launchd scheduler
@@ -6190,10 +6190,12 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mu
   pause         Pause scheduling (keep plist, skip execution)
   resume        Resume scheduling after pause
   reset         Clear loop state (start fresh on next fire)
+  branches      List loop-related branches
+
+Internal (called by roll-loop SKILL):
   notify        Send macOS notification
   enforce-tcr   Verify TCR commit count for a completed story
   precheck-ci   Check HEAD CI status before scanning BACKLOG
-  branches      List loop-related branches
 
 Schedule is configured per-project in .roll/local.yaml:
 

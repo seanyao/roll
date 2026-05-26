@@ -23,7 +23,7 @@ npm install -g @seanyao/roll
 roll setup
 ```
 
-Requirements: bash 4+, Node.js 16+.
+Requirements: bash 3.2+, Node.js 16+.
 
 ## Use
 
@@ -40,7 +40,7 @@ roll loop on        # let AI work through the backlog (optional)
 | Command | Description |
 |---------|-------------|
 | **Autonomy · daily use** | |
-| `roll loop <on\|off\|now\|status\|monitor>` | Manage the autonomous BACKLOG executor |
+| `roll loop <on\|off\|now\|status\|runs\|story\|monitor>` | Manage the autonomous BACKLOG executor |
 | `roll brief` | Show latest owner brief |
 | `roll backlog [block\|defer\|lint\|…]` | View and manage pending tasks |
 | `roll peer` | Cross-agent negotiation & review |

@@ -136,6 +136,7 @@ window.RollData = (function () {
       { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
         { name: "roll status",     mono: true, desc: "Project health: backlog queue, loop state, CI, release-ready verdict.", badges: ["core"] },
         { name: "roll loop runs",  mono: true, desc: "Per-cycle history with outcome, TCR count, and duration.", badges: [] },
+        { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll alert",      mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
         { name: "roll brief",      mono: true, desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
       ]},
@@ -314,6 +315,7 @@ window.RollData = (function () {
       { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
         { name: "roll status",     mono: true, desc: "项目健康:backlog 队列、loop 状态、CI、发布就绪判断。", badges: ["core"] },
         { name: "roll loop runs",  mono: true, desc: "每轮执行记录,含结果、TCR 次数、耗时。", badges: [] },
+        { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll alert",      mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
         { name: "roll brief",      mono: true, desc: "每日摘要:已发布、进行中、下一优先级。", badges: ["highlight"] },
       ]},

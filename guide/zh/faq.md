@@ -513,19 +513,20 @@ roll loop status                  # 确认新触发时间
 
 ### C8. period_minutes 设置不生效
 
-**症状：** `.roll/local.yaml` 里写了 `period_minutes: 45`，loop 还是每小时
+**症状：** `.roll/local.yaml` 里写了 `period_minutes: 0` 或 `1441`，loop 还是每小时
 触发，`roll alert` 显示一条 schedule ALERT。
 
-**原因：** `period_minutes` 必须能整除 60。合法值：60、30、20、15、12、10、6、5。
+**原因：** `period_minutes` 必须在 1–1440 范围。
+超出范围的值会被拒绝。
 
-**底层：** `_loop_schedule_valid` 在每次读取时校验这对值。不合法时写 ALERT 到
+**底层：** `_loop_schedule_valid` 在每次读取时校验这组值。不合法时写 ALERT 到
 `~/.shared/roll/loop/ALERT-<slug>.md` 并回退到默认值（period=60，项目路径推导的偏移）。
 
 **解决：**
 
 ```bash
 roll alert                        # 看具体错误信息
-# 编辑 .roll/local.yaml — 改用 60 的合法约数
+# 编辑 .roll/local.yaml — 改用 1–1440 范围内的值
 roll loop off && roll loop on     # 重装
 roll loop status                  # 确认新频次
 ```

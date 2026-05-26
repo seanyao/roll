@@ -34,13 +34,13 @@ Configure in `.roll/local.yaml`:
 
 ```yaml
 loop_schedule:
-  period_minutes: 30   # 60, 30, 20, 15, 12, 10, 6, or 5
-  offset_minute: 7     # 0 – (period_minutes - 1)
+  period_minutes: 30   # 1-1440 (any minute interval)
+  offset_minute: 7     # 0–59 (deprecated; for backward compat only)
 ```
 
-- `period_minutes` — how often loop fires. Must evenly divide 60.
-- `offset_minute` — shifts the first trigger within the period. Different
-  projects with the same period should use different offsets.
+- `period_minutes` — how often loop fires. Any value 1–1440.
+- `offset_minute` — (deprecated since US-LOOP-032) no longer affects timing.
+  Kept for backward compat; loop now uses `StartInterval = period × 60` seconds.
 
 If no `.roll/local.yaml` or no `loop_schedule` block is present, Roll falls
 back to the global `loop_minute` in `~/.roll/config.yaml`, or derives a
@@ -51,13 +51,12 @@ per-project default from the project path hash.
 ```yaml
 # .roll/local.yaml — high-frequency project
 loop_schedule:
-  period_minutes: 15   # every 15 minutes
-  offset_minute: 3     # triggers at :03, :18, :33, :48
+  period_minutes: 45   # every 45 minutes (no longer restricted to divisors of 60)
 ```
 
 `roll loop status` and `roll loop on` display the actual schedule frequency
-so you can verify it at a glance. An invalid value (e.g. `period_minutes: 45`)
-triggers an ALERT and falls back to the hourly default.
+so you can verify it at a glance. An invalid value (e.g. `period_minutes: 0` or
+`1441`) triggers an ALERT and falls back to the hourly default.
 
 ### Global config (backward-compatible)
 

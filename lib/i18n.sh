@@ -117,6 +117,26 @@ msg() {
   echo
 }
 
+# Look up message catalog entry with an explicit language, bypassing ROLL_LANG env.
+# Usage: msg_lang <lang> <key> [printf-args...]
+# Useful when the caller tracks language independently of the process env (e.g.
+# _loop_schedule_desc passes an explicit lang= parameter).
+msg_lang() {
+  local lang="$1" key="$2"; shift 2 || true
+  local upper safe varname tmpl
+  upper="${lang^^}"
+  safe="${key//[^A-Za-z0-9_]/_}"
+  varname="MSG_${upper}_${safe}"
+  tmpl="${!varname:-}"
+  if [[ -z "$tmpl" ]]; then
+    varname="MSG_EN_${safe}"
+    tmpl="${!varname:-$key}"
+  fi
+  # shellcheck disable=SC2059 — template comes from our own catalog
+  printf "$tmpl" "$@"
+  echo
+}
+
 # ── Load per-command message catalogs (US-I18N-002) ──
 # Source all lib/i18n/*.sh files (skip self). Called once at bin/roll startup.
 _i18n_load_catalogs() {

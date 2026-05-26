@@ -4872,7 +4872,9 @@ _loop_schedule_desc() {
   local period="$1" offset="$2" lang="${3:-en}"
   if [[ "$period" -eq 60 ]]; then
     if [[ "$lang" == "zh" ]]; then
-      printf "$(msg agent.hourly_at_02d)" "$offset"
+      # msg_lang uses the explicit lang param, not ROLL_LANG env; strips trailing
+      # newline via command substitution so callers get a clean string.
+      printf '%s' "$(msg_lang "$lang" agent.hourly_at_02d "$offset")"
     else
       printf "every hour :%02d" "$offset"
     fi
@@ -4884,7 +4886,7 @@ _loop_schedule_desc() {
     times="${times} :$(printf '%02d' "$m")"
   done
   if [[ "$lang" == "zh" ]]; then
-    printf "$(msg agent.every_d_min_s)" "$period" "${times# }"
+    printf '%s' "$(msg_lang "$lang" agent.every_d_min_s "$period" "${times# }")"
   else
     printf "every %dmin (%s)" "$period" "${times# }"
   fi

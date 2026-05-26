@@ -18,6 +18,7 @@
 ### Docs
 
 - 跨机同步用户文档 — `guide/{en,zh}/loop.md` 新增 Cross-Machine Sync 章节，FAQ C9 解释同步指示器状态 `[loop]`
+- README 安装要求更新为 bash 3.2+，命令表补齐 `roll loop story` 子命令 `[docs]`
 
 ## v2026.525.1
 

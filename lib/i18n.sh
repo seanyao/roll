@@ -28,7 +28,7 @@ _i18n_safe_key() {
 _i18n_set() {
   local lang="$1" key="$2" val="$3"
   local upper safe varname
-  upper=$(echo "$lang" | tr '[:lower:]' '[:upper:]')
+  upper="${lang^^}"   # FIX: bash built-in — no subshell fork per entry
   safe=$(_i18n_safe_key "$key")
   varname="MSG_${upper}_${safe}"
   printf -v "$varname" '%s' "$val"

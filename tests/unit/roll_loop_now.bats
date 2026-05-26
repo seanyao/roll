@@ -26,10 +26,11 @@ teardown() { unit_teardown_cd; }
   echo "$body" | grep -qF 'ROLL_LOOP_FORCE'
 }
 
-@test "_loop_now: emits Chinese-correct startup message" {
+@test "_loop_now: emits startup message via i18n (loop.starting_new_loop_cycle)" {
+  # US-I18N-002: message is now in the catalog; function must call msg with the key.
   local body
   body=$(awk '/^_loop_now\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$body" | grep -qF '正在启动新的循环'
+  echo "$body" | grep -qF 'loop.starting_new_loop_cycle'
 }
 
 @test "_write_loop_runner_script: active-window check honors ROLL_LOOP_FORCE" {

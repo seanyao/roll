@@ -56,9 +56,10 @@ teardown() {
 # ─── Block ② AI 自治 ─────────────────────────────────────────────────────────
 
 @test "dashboard: AI 自治 block frames Loop / Dream / Peer" {
+  # US-I18N-002: block header rendered via i18n — check for '🤖 AI' which is
+  # stable across en/zh (emoji + 'AI' suffix appear in both catalog entries).
   local out; out=$(_legacy_home)
-  echo "$out"
-  echo "$out" | grep -q "AI 自治"
+  echo "$out" | grep -q "🤖 AI"
   echo "$out" | grep -q "Loop"
   echo "$out" | grep -q "Dream"
   echo "$out" | grep -q "Peer"
@@ -125,9 +126,10 @@ EOF
 
 # ─── Block ⑤ Human × AI ─────────────────────────────────────────────────────
 
-@test "dashboard: Human×AI shows 自驱中 when no alerts/proposals/release" {
+@test "dashboard: Human×AI shows AI-running status when no alerts/proposals/release" {
+  # US-I18N-002: status text via i18n — '✓ AI' appears in both en/zh renderings.
   local out; out=$(_legacy_home)
-  echo "$out" | grep -q "AI 自驱中"
+  echo "$out" | grep -q "✓ AI"
 }
 
 @test "dashboard: Human×AI surfaces ALERT count" {

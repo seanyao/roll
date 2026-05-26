@@ -447,6 +447,7 @@ conversation until the next cycle overwrites it.
 | What you want | Command |
 |---|---|
 | Last N cycle summaries + cost | `roll loop status --days 7` |
+| Total spent on one story across all cycles | `roll loop story <ID>` |
 | Per-cycle JSONL records | `roll loop runs` |
 | Phase breakdown for one cycle | `roll loop runs --detail <cycle_id>` |
 | Live dashboard with cost column | `roll loop monitor` |
@@ -455,6 +456,11 @@ conversation until the next cycle overwrites it.
 | Alerts that need attention | `roll alert` |
 | Full cycle agent output (plain text) | `roll loop log` |
 | Full agent transcript | `roll loop attach`, scroll up |
+
+`status` rolls the dashboard forward (default 3-day window). When a story took
+several cycles spread over a week and you want the total — duration, tokens,
+cost, every PR that came out of it — `roll loop story <ID>` reads the full
+event stream (including rotated archives `.1` … `.4`) and prints a single panel.
 
 ---
 

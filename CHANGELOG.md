@@ -1,5 +1,12 @@
 # Changelog
 
+## v2026.526.1
+
+### Added
+
+- `roll loop story <ID>` — 按故事汇总所有 cycle 的耗时、token、成本和 PR `[loop]`
+- loop 仪表盘现在也会读轮转归档 — 旧 cycle 不再随 events 文件滚动消失 `[loop]`
+
 ## v2026.525.1
 
 ### Added

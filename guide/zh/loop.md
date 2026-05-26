@@ -86,6 +86,9 @@ roll loop runs 20     # 显示最近 20 次
 roll loop runs --all  # 显示本机所有项目的运行历史
 roll loop runs --detail <cycle_id>  # 打印单个 cycle 的阶段耗时面板
 
+roll loop story <ID>  # 按故事汇总：所有 cycle 数、耗时、token、费用、PR
+roll loop story <ID> --json  # JSON 输出，方便脚本和仪表盘消费
+
 roll loop attach      # 接入正在运行的 loop tmux session（Ctrl-B D 离开）
 roll loop mute        # 关闭自动弹窗（loop 继续在 tmux 里跑）
 roll loop unmute      # 重新开启自动弹窗
@@ -131,6 +134,39 @@ output tokens    63.3K
 
 通过这四行，你可以验证 cycle 行显示的费用（如 `$11.07`）与 Anthropic 账单是否吻合——
 上面这个例子里，86% 的费用来自 cache。
+
+## 按故事汇总（Per-Story Rollup）
+
+`roll loop status` 只显示滚动窗口（默认 3 天）。如果你想看**一个故事的全部生命周期**——
+它跑过的所有 cycle，包括已经滚出 status 窗口的——用 `roll loop story`。
+
+```bash
+roll loop story US-LOOP-004           # 单故事紧凑面板
+roll loop story us-loop-004           # 大小写不敏感
+roll loop story US-LOOP-004 --days 90 # 扩大事件流回溯窗口
+roll loop story US-LOOP-004 --json    # JSON 输出，给脚本/仪表盘消费
+```
+
+面板把你本来要跨多次 `status` 手动累加的总数一次给出：
+
+```
+── US-LOOP-004 · 把每轮 cycle 成本/token/耗时写进事件流 ──
+  cycles    3  (✓ 2  ✗ 1  ⏵ 0)
+  span      2026-05-18 14:22  →  2026-05-19 09:11
+  duration  1h 47m   tokens  in 412k  out 18.3k  cache w 1.2M  r 7.8M
+  cost      $4.92    model  claude-opus-4-7
+  PRs       #128 ✓   #131 ✓   #134 ✗
+  recent    20260518-142233-91  ✓  $2.10
+            20260518-203045-12  ✗  $1.71
+            20260519-091112-44  ✓  $1.11
+```
+
+**历史是怎么留下来的：** `bin/roll` 在 `events-<slug>.ndjson` 超过 10 MB 时轮转，
+保留 `.1` … `.4` 四份归档。`roll loop status` 和 `roll loop story` 都会读 head
+加全部轮转文件，cycle 一旦落盘就不会从汇总里消失。
+
+**退出码：** 找到至少一个 cycle 返回 `0`；窗口内没有匹配的故事 ID 返回 `2`。
+`--json` 形式遵守同样的退出码契约，脚本可以靠它判断"数据是否缺失"。
 
 ## 可见性（tmux + 弹窗）
 

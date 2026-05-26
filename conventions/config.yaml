@@ -13,3 +13,12 @@ sync_agy: ~/.gemini/GEMINI.md   # Antigravity (agy) reuses the legacy ~/.gemini/
 default_language: zh
 default_project_type: fullstack
 editor: ${EDITOR:-vim}
+
+# --- Advanced ---
+# Cross-machine loop record sync (optional).
+# Set to a private git remote URL to share cycle history across machines.
+# Each machine writes its own events file — no merge conflicts.
+# Private repo strongly recommended: cycle records contain prompt text,
+# file paths, and other potentially sensitive information.
+#
+# roll_records_remote: "git@github.com:you/roll-loop-records.git"

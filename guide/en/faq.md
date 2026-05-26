@@ -577,3 +577,40 @@ roll alert                        # check the exact error
 roll loop off && roll loop on     # re-install
 roll loop status                  # confirm the new schedule
 ```
+
+### C9. What does "sync: offline" mean on the dashboard?
+
+**Symptoms:** The dashboard footer shows `sync: offline` or you're wondering
+why `sync: not configured` appears when you haven't set up cross-machine sync.
+
+**Why this matters:** The dashboard sync indicator tells you whether cycle
+records from other machines are being merged into your local view.
+
+**Under the hood:** When `roll_records_remote` is configured in
+`~/.roll/config.yaml`, every cycle pushes its record to a shared git repo, and
+the dashboard pulls from it before rendering. The indicator has three states:
+
+- `sync: ok (2m ago)` — remote reachable, all machines' records merged
+- `sync: offline` — remote unreachable (network issue, auth expired); showing
+  local data only, other machines' cycles are invisible until connectivity
+  returns
+- `sync: not configured` — `roll_records_remote` is not set; sync is off by
+  design, this is the normal state for single-machine use
+
+**Fix for `sync: offline`:**
+
+```bash
+# Check connectivity to the records repo
+ssh -T git@github.com           # or your git host
+
+# Verify the remote is still accessible
+git ls-remote $(roll config get roll_records_remote)
+
+# If auth expired, re-authenticate
+github.com → gh auth login
+gitlab.com / self-hosted → check your SSH key
+
+# The dashboard falls back to local-only data while offline —
+# no data is lost, it just can't see other machines' cycles
+# until connectivity is restored.
+```

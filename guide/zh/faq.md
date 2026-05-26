@@ -524,3 +524,38 @@ roll alert                        # 看具体错误信息
 roll loop off && roll loop on     # 重装
 roll loop status                  # 确认新频次
 ```
+
+### C9. dashboard 显示 "sync: offline" 是什么意思？
+
+**症状：** dashboard 底部显示 `sync: offline`，或者你好奇为什么没配置跨机器同步
+却显示 `sync: not configured`。
+
+**为什么重要：** dashboard 同步状态指示器告诉你其他机器的 cycle 记录是否已合并到
+当前视图。
+
+**底层：** 在 `~/.roll/config.yaml` 中配置了 `roll_records_remote` 后，每轮 cycle
+会把自己的记录 push 到共享 git 仓库，dashboard 渲染前会 pull 合并。指示器有三种
+状态：
+
+- `sync: ok (2m ago)` — 远端可达，所有机器的记录已合并
+- `sync: offline` — 远端不可达（网络问题、认证过期）；仅显示本地数据，其他机器的
+  cycle 在恢复连接前不可见
+- `sync: not configured` — 未设置 `roll_records_remote`；同步已关闭，这是单机使用
+  时的正常状态
+
+**`sync: offline` 的解决：**
+
+```bash
+# 检查到 records 仓库的连通性
+ssh -T git@github.com           # 或你的 git host
+
+# 验证远端是否仍可访问
+git ls-remote $(roll config get roll_records_remote)
+
+# 认证过期则重新登录
+github.com → gh auth login
+gitlab.com / 自建 → 检查 SSH key
+
+# dashboard 在离线期间自动降级为仅本地数据——不会丢数据，
+# 只是暂时看不到其他机器的 cycle，等连接恢复即自动同步。
+```

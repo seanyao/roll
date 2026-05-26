@@ -69,6 +69,7 @@ roll loop on        # let AI work through the backlog (optional)
 | Configuration (env vars) | [guide/en/configuration.md](guide/en/configuration.md) | [guide/zh/configuration.md](guide/zh/configuration.md) |
 | Skill selection guide | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
 | Slides (deck generator) | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |
+| Cross-machine sync | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
 | Pricing (cost visibility) | [guide/en/pricing.md](guide/en/pricing.md) | [guide/zh/pricing.md](guide/zh/pricing.md) |
 | FAQ (troubleshooting) | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
 | Adoption patterns | [guide/en/patterns/](guide/en/patterns/) | [guide/zh/patterns/](guide/zh/patterns/) |

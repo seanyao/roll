@@ -4,32 +4,32 @@
 
 ### Added
 
-- `roll loop story <ID>` — 按故事汇总所有 cycle 的耗时、token、成本和 PR `[loop]`
-- loop 仪表盘现在也会读轮转归档 — 旧 cycle 不再随 events 文件滚动消失 `[loop]`
-- `roll slides` 提供 9 个 Mustache 组件 partial — 写 slide 不用再手抄 v5 模板里的卡片 / 对比 / 时间线 HTML `[deck]`
-- 服务状态在窄终端下也能整齐对齐 — 中英文混排不再因为汉字占两格而错位 `[i18n]`
+- **一个故事跑过的所有轮次能合并看了** — `roll loop story <ID>` 一眼看清总耗时、花了多少钱、走过哪几个 PR `[loop]`
+- **仪表盘不再丢历史轮次** — 老数据自动归档，往前翻多远都看得到 `[loop]`
+- **写 slides 不用再抄模板 HTML** — 9 个常用组件块（卡片、对比、时间线…）直接拿来用 `[deck]`
+- **服务状态在窄终端也对齐了** — 中英文混排不再因为汉字占两格错位 `[i18n]`
 
 ### Fixed
 
-- `roll slides new` 失败时按错误类型给恢复路径 — 模板缺失列出可选模板、validator 失败显示出错位置、renderer 崩溃指向日志 `[deck]`
-- loop i18n 初始化不再每条条目 fork 一次子 shell — 完整单元测试套不再因为 ~950K fork 卡 60+ 分钟 `[loop]`
-- 修复 9 个 stale / flaky 测试（i18n 迁移残留 + 跨平台时序假设）`[testing]`
+- **`roll slides new` 失败时给得出手的提示** — 模板找不到列可选项、内容有错指出位置、生成崩了告诉你看哪份日志 `[deck]`
+- **跑完整测试不再卡 60 分钟** — loop 启动时的多语言初始化优化后回到正常时长 `[loop]`
+- **收拾了 9 个不稳定的测试** `[testing]`
 
 ### Docs
 
-- 跨机同步用户文档 — `guide/{en,zh}/loop.md` 新增 Cross-Machine Sync 章节，FAQ C9 解释同步指示器状态 `[loop]`
-- README 安装要求更新为 bash 3.2+，命令表补齐 `roll loop story` 子命令 `[docs]`
+- **新增"多台机器同时跑 loop"章节** — 怎么协调、状态符号是啥意思都说清楚 `[loop]`
+- **README 更新** — 不再要求 bash 4，macOS 自带的 3.2 就能跑；命令表补上 `roll loop story` `[docs]`
 
 ## v2026.525.1
 
 ### Added
 
-- loop 触发频率可以按项目单独设 — 每个项目能自定义间隔，不再全局一刀切 `[loop]`
+- **loop 触发频率可以按项目单独设** — 不再全局一刀切，有的项目可以慢点跑 `[loop]`
 
 ### Fixed
 
-- `roll` 主页不再把已启用的 loop 误报成"缺失" `[loop]`
-- loop 弹窗关了也能翻回之前的输出 — 不再一关就全丢 `[loop]`
+- **主页不再误报** — 已经开了 loop 的项目不会再被标成"缺失" `[loop]`
+- **loop 弹窗关了也能翻回之前的输出** — 不再一关就全没 `[loop]`
 
 ## v2026.524.2
 

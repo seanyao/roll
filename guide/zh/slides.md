@@ -24,9 +24,9 @@
 
 ## 快速上手
 
-从主题到可分享 HTML，四步搞定。
+从主题到浏览器可见 HTML，三步搞定。
 
-### 1. New —— 生成 `deck.md`
+### 1. New —— 一条命令直达 HTML
 
 ```bash
 roll slides new "Introducing Roll Loop"
@@ -40,6 +40,24 @@ roll slides new "Introducing Roll Loop"
 
 `<slug>` 由主题派生（kebab-case，ASCII）。
 
+**默认 `new` 会自动渲染并打开 HTML**——一条命令从主题直达浏览器。Agent 生成完 `deck.md` 后，流水线自动衔接：
+
+```text
+✓ generating     (elapsed: 2m 14s)
+✓ validating     (elapsed: 0m  1s)
+✓ rendering      (elapsed: 0m  2s)
+✓ opening        (elapsed: 0m  0s)
+
+Opened in browser: .roll/slides/roll-loop-intro.html
+```
+
+用 `--no-build` 停在 `deck.md` 生成后：
+
+```bash
+roll slides new "我的草稿" --no-build  # 只生成 deck.md，不渲染
+roll slides build my-deck               # 稍后再手动渲染
+```
+
 如果主题含糊，skill 允许**一轮**澄清问答再开始写。无法取证的 slide 会被打上 `⚠️ unverified` 标签。
 
 ### 2. Review —— 审 `deck.md`
@@ -50,29 +68,15 @@ roll slides new "Introducing Roll Loop"
 - 证据引用是不是真实存在的文件路径和行号？
 - 被打 `⚠️ unverified` 的 slide，你能不能手动补上？
 
-不满意的地方直接改。这是纯文本文件——标题、正文、证据都可见可编辑。
+不满意的地方直接改。这是纯文本文件——标题、正文、证据都可见可编辑。改完跑 `roll slides build <slug>` 重新渲染。
 
-### 3. Build —— 渲染成 HTML
-
-```bash
-roll slides build <slug>
-```
-
-纯 bash + Python，无 AI 介入。它会：
-
-1. 用 schema 校验 `deck.md`（`lib/slides-validate.py`）。
-2. 解析 frontmatter 指定的模板（默认 `introduction-v3`）。
-3. 渲染到 `.roll/slides/<slug>.html`（`lib/slides-render.py`）。
-4. 如果 `.roll/.gitignore` 没有 `slides/*.html`，自动加上。
-5. 用浏览器打开（除非传 `--no-open`）。
-
-校验失败会逐行列出问题——改 `deck.md` 再重跑即可。
-
-### 4. Share —— 列表、预览或发布
+### 3. Share —— 列表、预览、模板管理、删除
 
 ```bash
-roll slides list             # 列出 .roll/slides/ 下所有 deck 的表格
+roll slides list             # 列出所有 deck（built / stale / failed / unbuilt 四态）
 roll slides preview <slug>   # 用浏览器打开 .roll/slides/<slug>.html
+roll slides templates        # 列出可用模板（内置 + 项目自定义）
+roll slides delete <slug>    # 删除 deck（目录 + HTML），有确认提示
 ```
 
 要把 deck 发布到公开站点，参考下面的 [输出位置](#输出位置) 章节——默认 HTML 是 gitignored，只留在本地。
@@ -187,6 +191,131 @@ evidence:
 4. 可选：在站点首页 / README 里加链接。
 
 把源 `deck.md` 留在 `.roll/slides/<slug>/` 下，方便后续 `roll slides build <slug>` 原地重渲染。**不要**只 commit HTML 然后手改它——改 `deck.md` 再重渲染。
+
+## `list` —— 四态总览
+
+`roll slides list` 把 `.roll/slides/` 下每个 deck 按四种状态展示：
+
+| 图标 | 状态 | 含义 |
+|------|------|------|
+| `✓` | **built** | `<slug>.html` 存在且最近无失败记录。可以分享。 |
+| `≈` | **stale** | `<slug>.html` 存在，但 `deck.md` 在上次构建后被改动过。重新 `build`。 |
+| `⚠` | **failed** | 上次 `build` 失败。`.last-build.err` 文件记录了详情。`roll slides logs <slug>` 查看。 |
+| `✗` | **unbuilt** | 无 HTML、无错误文件。`deck.md` 存在但尚未构建。 |
+
+## 失败恢复
+
+`build` 出错时，错误信息按失败类型给出对应的恢复路径，不需要翻源码或搜 issue。
+
+### 模板未找到
+
+```text
+[FAIL] Template "custom-dark" not found
+
+Available templates (built-in):
+  introduction-v3    lib/slides/templates/introduction-v3.html
+
+See also: roll slides templates
+```
+
+修复：检查 `deck.md` frontmatter 中的模板名是否与可用模板匹配。跑 `roll slides templates` 看所有选项，包括你已安装的项目级覆盖。
+
+### 校验失败
+
+```text
+[FAIL] Validation failed
+  deck.md:42 — required field "title_zh" missing
+  deck.md:67 — frontmatter: total_slides=18 but found 19 ## Slide blocks
+```
+
+修复：错误直接指向行号。打开 `deck.md` 到指定行，改好后重跑 `roll slides build <slug>`。
+
+### 渲染器崩溃
+
+```text
+[FAIL] Renderer crashed
+
+See: roll slides logs <slug>
+Last 5 lines of traceback:
+  File ".../slides-render.py", line 312, in _render_slide
+    raise ValueError(f"Unknown layout: {layout}")
+```
+
+修复：跑 `roll slides logs <slug>` 看完整错误日志，然后修 `deck.md` 或把日志附在 issue 里。
+
+## 自定义模板
+
+不用 fork 或修改 Roll 安装本身，就能按项目覆盖内置的幻灯片模板。
+
+### 原理
+
+在 `.roll/slides/templates/` 下放一个**和内置模板同名**的 `.html` 文件。`build` 解析模板时的查找顺序：
+
+1. `.roll/slides/templates/<name>.html` —— 你的项目覆盖
+2. `${ROLL_PKG_DIR}/lib/slides/templates/<name>.html` —— Roll 内置
+3. 都没找到 → 模板未找到错误（见 [失败恢复](#失败恢复)）
+
+### 示例
+
+```bash
+# 拷贝内置模板作为起点
+mkdir -p .roll/slides/templates
+cp "$(roll slides templates | grep introduction-v3 | awk '{print $NF}')" \
+   .roll/slides/templates/introduction-v3.html
+
+# 编辑颜色、字体、布局——Mustache 占位符不变
+# 下一次 build 会自动用你的版本
+roll slides build my-deck
+```
+
+### 占位符契约
+
+你的自定义模板必须支持与内置模板相同的 Mustache 占位符。最小集合：
+
+| 占位符 | 含义 |
+|--------|------|
+| `{{title_en}}` / `{{title_zh}}` | Deck 级标题 |
+| `{{#slides}} ... {{/slides}}` | slide 迭代块 |
+| `{{number}}` | 迭代中的 slide 编号 |
+| `{{title_en}}` / `{{title_zh}}` | 迭代中的 slide 级标题 |
+| `{{{body_en_html}}}` / `{{{body_zh_html}}}` | 已渲染的 slide 正文 |
+
+完整参考见 [支持的 Mustache 占位符](#支持的-mustache-占位符) 章节。
+
+跑 `roll slides templates` 查看当前可用模板及来源（内置 vs 项目覆盖）。
+
+## 新命令（Phase 1.5）
+
+### `roll slides logs <slug>`
+
+打印 deck 的上次构建失败日志：
+
+```bash
+roll slides logs my-deck
+# → 显示 .roll/slides/my-deck/.last-build.err 的内容
+# → 若从未失败，提示 "No failure log for this deck"
+```
+
+### `roll slides templates`
+
+列出每份可用模板、来源和路径：
+
+```bash
+roll slides templates
+# TEMPLATE             SOURCE    PATH
+# introduction-v3      builtin   /opt/roll/lib/slides/templates/introduction-v3.html
+# pitch                builtin   /opt/roll/lib/slides/templates/pitch.html
+# introduction-v3      project   .roll/slides/templates/introduction-v3.html
+```
+
+### `roll slides delete <slug>`
+
+删除 deck 的目录和 HTML 文件：
+
+```bash
+roll slides delete my-deck          # 确认提示（y/N）
+roll slides delete my-deck --force  # 跳过确认（CI/脚本用）
+```
 
 ## 常见陷阱
 

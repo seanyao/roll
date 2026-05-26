@@ -30,9 +30,9 @@ where you accept some non-determinism in exchange for speed.
 
 ## Quick Start
 
-Four steps from topic to shareable HTML.
+Three steps from topic to browser-ready HTML.
 
-### 1. New — generate `deck.md`
+### 1. New — one command to HTML
 
 ```bash
 roll slides new "Introducing Roll Loop"
@@ -46,6 +46,26 @@ haven't picked one) with the `roll-deck` skill loaded. The agent:
 3. Writes exactly one file: `.roll/slides/<slug>/deck.md`.
 
 `<slug>` is derived from your topic (kebab-cased, ASCII).
+
+**By default, `new` auto-builds and opens the HTML** — you go from
+topic to browser in one command. After the agent finishes generating
+`deck.md`, the pipeline continues automatically:
+
+```text
+✓ generating     (elapsed: 2m 14s)
+✓ validating     (elapsed: 0m  1s)
+✓ rendering      (elapsed: 0m  2s)
+✓ opening        (elapsed: 0m  0s)
+
+Opened in browser: .roll/slides/roll-loop-intro.html
+```
+
+Use `--no-build` to stop after `deck.md` generation:
+
+```bash
+roll slides new "My Draft" --no-build   # deck.md only, no HTML
+roll slides build my-draft               # build later by hand
+```
 
 If the topic is vague, the skill is allowed **one** clarifying round
 before it writes. If it can't ground a slide, it tags the body with
@@ -61,31 +81,16 @@ Things to check:
 - Are the `⚠️ unverified` slides ones you can fix manually?
 
 Edit anything you don't like. The file is plain text — title, body,
-evidence are all visible and editable.
+evidence are all visible and editable. Re-run `roll slides build <slug>`
+to re-render after edits.
 
-### 3. Build — render to HTML
-
-```bash
-roll slides build <slug>
-```
-
-This is pure bash + Python, no AI. It:
-
-1. Validates `deck.md` against the schema (`lib/slides-validate.py`).
-2. Resolves the template named in the frontmatter (default
-   `introduction-v3`).
-3. Renders to `.roll/slides/<slug>.html` (`lib/slides-render.py`).
-4. Adds `slides/*.html` to `.roll/.gitignore` if not already there.
-5. Opens the HTML in your browser (unless `--no-open` is passed).
-
-If validation fails, you'll see a line-by-line list of what's wrong —
-fix `deck.md` and re-run.
-
-### 4. Share — list, preview, or promote
+### 3. Share — list, preview, templates, delete
 
 ```bash
-roll slides list             # table of every deck under .roll/slides/
+roll slides list             # table of every deck (built / stale / failed / unbuilt)
 roll slides preview <slug>   # open .roll/slides/<slug>.html in browser
+roll slides templates        # list available templates (built-in + project overrides)
+roll slides delete <slug>    # remove a deck (dir + HTML), with confirmation
 ```
 
 To publish a deck publicly, see [Output location](#output-location)
@@ -224,6 +229,144 @@ GitHub Pages):
 Keep the source `deck.md` under `.roll/slides/<slug>/` so a future
 `roll slides build <slug>` can re-render in place. Don't commit the
 HTML and then edit it by hand — re-render from `deck.md` instead.
+
+## `list` — Four-State Overview
+
+`roll slides list` shows every deck under `.roll/slides/` with a
+four-state status:
+
+| Icon | State | Meaning |
+|------|-------|---------|
+| `✓` | **built** | `<slug>.html` exists and no recent failure recorded. Ready to share. |
+| `≈` | **stale** | `<slug>.html` exists but `deck.md` was modified after the last build. Re-run `build`. |
+| `⚠` | **failed** | The last `build` failed. A `.last-build.err` file was written with details. See `roll slides logs <slug>`. |
+| `✗` | **unbuilt** | No HTML, no error file. `deck.md` exists but hasn't been built yet. |
+
+## Failure Recovery
+
+When `build` fails, the error message includes a recovery path
+specific to the failure type. You don't need to read source code or
+search issues.
+
+### Template missing
+
+```text
+[FAIL] Template "custom-dark" not found
+
+Available templates (built-in):
+  introduction-v3    lib/slides/templates/introduction-v3.html
+
+See also: roll slides templates
+```
+
+Fix: check the template name in your `deck.md` frontmatter matches
+one of the available templates. Run `roll slides templates` to see all
+options, including any project-level overrides you've installed.
+
+### Validation failed
+
+```text
+[FAIL] Validation failed
+  deck.md:42 — required field "title_zh" missing
+  deck.md:67 — frontmatter: total_slides=18 but found 19 ## Slide blocks
+```
+
+Fix: the error points to exact lines. Open `deck.md` at the indicated
+line number, fix the issue, re-run `roll slides build <slug>`.
+
+### Renderer crashed
+
+```text
+[FAIL] Renderer crashed
+
+See: roll slides logs <slug>
+Last 5 lines of traceback:
+  File ".../slides-render.py", line 312, in _render_slide
+    raise ValueError(f"Unknown layout: {layout}")
+```
+
+Fix: run `roll slides logs <slug>` to see the full error log, then
+either fix `deck.md` or report the issue with the log output attached.
+
+## Custom Templates
+
+You can override Roll's built-in slide templates per project without
+forking or modifying the Roll installation.
+
+### How it works
+
+Place a `.html` file with the **same name** as a built-in template
+under `.roll/slides/templates/`. When `build` resolves a template, it
+checks in order:
+
+1. `.roll/slides/templates/<name>.html` — your project override
+2. `${ROLL_PKG_DIR}/lib/slides/templates/<name>.html` — Roll's built-in
+3. Neither → template-not-found error (see [Failure Recovery](#failure-recovery))
+
+### Example
+
+```bash
+# Copy the built-in template as a starting point
+mkdir -p .roll/slides/templates
+cp "$(roll slides templates | grep introduction-v3 | awk '{print $NF}')" \
+   .roll/slides/templates/introduction-v3.html
+
+# Edit colors, fonts, layout — same Mustache placeholders
+# Roll will pick up your version on the next build
+roll slides build my-deck
+```
+
+### Placeholder contract
+
+Your custom template must support the same Mustache placeholders the
+built-in template expects. The minimum set:
+
+| Placeholder | Meaning |
+|-------------|---------|
+| `{{title_en}}` / `{{title_zh}}` | Deck-level title |
+| `{{#slides}} ... {{/slides}}` | Slide iteration block |
+| `{{number}}` | Slide number inside iteration |
+| `{{title_en}}` / `{{title_zh}}` | Slide-level title (inside iteration) |
+| `{{{body_en_html}}}` / `{{{body_zh_html}}}` | Rendered slide body |
+
+See the [Supported Mustache placeholders](#supported-mustache-placeholders)
+section for the full reference.
+
+Run `roll slides templates` to see what's available and where each
+template comes from (built-in vs. project override).
+
+## New Commands (Phase 1.5)
+
+### `roll slides logs <slug>`
+
+Print the last build failure log for a deck:
+
+```bash
+roll slides logs my-deck
+# → Shows .roll/slides/my-deck/.last-build.err contents
+# → "No failure log for this deck" if never failed
+```
+
+### `roll slides templates`
+
+List every available template, its source, and path:
+
+```bash
+roll slides templates
+# TEMPLATE             SOURCE    PATH
+# introduction-v3      builtin   /opt/roll/lib/slides/templates/introduction-v3.html
+# pitch                builtin   /opt/roll/lib/slides/templates/pitch.html
+# introduction-v3      project   .roll/slides/templates/introduction-v3.html
+```
+
+### `roll slides delete <slug>`
+
+Remove a deck — its directory and HTML file:
+
+```bash
+roll slides delete my-deck          # asks for confirmation (y/N)
+roll slides delete my-deck --force  # skip confirmation (CI/scripts)
+```
 
 ## Common Pitfalls
 

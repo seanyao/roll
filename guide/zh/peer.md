@@ -75,7 +75,7 @@ peer_capability_map_security: "kimi deepseek claude"
 peer_capability_map_architecture: "claude kimi"
 ```
 
-支持的 peer Agent：`claude`、`kimi`、`pi`、`deepseek`、`codex`、`opencode`。
+支持的 peer Agent：`claude`、`kimi`、`pi`、`deepseek`、`codex`、`openai`、`opencode`。
 未安装的 Agent 会被自动跳过。
 
 ## 可见性（tmux + 弹窗）

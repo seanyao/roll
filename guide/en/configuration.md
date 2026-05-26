@@ -50,7 +50,14 @@ ROLL_CONFIG=/tmp/test-config.yaml roll agent use kimi
 effect. Invoke the `roll-doctor` skill (`$roll-doctor`) to diagnose
 directory structure issues under the resolved `ROLL_HOME`.
 
+## Agent Installation
+
+- `roll agent use openai` dispatches to the Codex CLI. Install with:
+  `npm install -g @openai/codex`
+- See [ai-agents.md](ai-agents.md) for the full supported agent list.
+
 ## See Also
 
 - [overview.md](overview.md) — three-layer model, BACKLOG priority
 - [loop.md](loop.md) — `roll loop` subcommands
+- [ai-agents.md](ai-agents.md) — supported AI agents

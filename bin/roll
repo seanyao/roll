@@ -7511,6 +7511,18 @@ _loop_pr_rebase_stale() {
   return 0
 }
 
+# _loop_pr_merge_self <num> <ci_state> <mergeable> <slug>
+#   Merge a loop_self PR directly when CI is green and PR is conflict-free.
+#   Does not rely on repo-level auto-merge (unreliable if not configured).
+#   Same pattern as the bot_review=APPROVED gate.
+_loop_pr_merge_self() {
+  local num="$1" ci_state="$2" mergeable="$3" slug="$4"
+  [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ] || return 0
+  gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1 \
+    && info "PR #${num}: loop_self CI green — merged" \
+    || warn "PR #${num}: loop_self merge failed — left open"
+}
+
 # _loop_pr_inbox
 #   Walks open PRs and routes each by classification.
 #   Lenient on gh unavailability — returns 0 so the loop continues to BACKLOG.
@@ -7575,7 +7587,10 @@ _loop_pr_inbox() {
     verdict=$(_loop_pr_classify "$head_ref" "$human_review" "$ci_state" "$mergeable")
 
     case "$verdict" in
-      loop_self|blocked_human_request_changes|blocked_human_approved)
+      loop_self)
+        _loop_pr_merge_self "$num" "$ci_state" "$mergeable" "$slug"
+        ;;
+      blocked_human_request_changes|blocked_human_approved)
         : # skip — explained by verdict; nothing to do this cycle
         ;;
       stale)

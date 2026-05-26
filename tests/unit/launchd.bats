@@ -2,6 +2,8 @@
 # Tests for launchd plist helpers (macOS loop scheduling)
 
 setup() {
+  # Skip on Linux — launchd is macOS only. Run locally on macOS before committing.
+  [[ "$(uname)" == "Darwin" ]] || skip "launchd tests require macOS (skip on Linux CI)"
   # FIX-093: gate every `launchctl` call inside `_install_launchd_plists`.
   # Without this, each of the 41 `_install_launchd_plists` calls in this file
   # hits the host gui domain and leaks ghost entries into

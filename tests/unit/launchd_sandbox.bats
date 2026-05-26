@@ -14,7 +14,11 @@
 
 load helpers
 
-setup() { unit_setup_cd; }
+setup() {
+  # Skip on Linux — launchd is macOS only. Run locally on macOS before committing.
+  [[ "$(uname)" == "Darwin" ]] || skip "launchd tests require macOS (skip on Linux CI)"
+  unit_setup_cd
+}
 teardown() { unit_teardown_cd; }
 
 @test "auto-sandbox: _LAUNCHD_DIR resolves under sandbox when bin/roll is sourced in a bats context" {

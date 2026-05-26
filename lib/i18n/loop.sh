@@ -118,6 +118,17 @@ _i18n_set zh loop.log_tail "实时日志%s  (~/.shared/roll/loop/launchd.log, la
 _i18n_set en loop.cycle_events "  %sCycle Events"
 _i18n_set zh loop.cycle_events "事件流%s  (last 10)"
 
+_i18n_set en loop.svc_enabled "● enabled"
+_i18n_set zh loop.svc_enabled "● 已启用"
+_i18n_set en loop.svc_installed_off "⚠ installed/off"
+_i18n_set zh loop.svc_installed_off "⚠ 已安装未启用"
+_i18n_set en loop.svc_not_installed "○ not installed"
+_i18n_set zh loop.svc_not_installed "○ 未安装"
+_i18n_set en loop.svc_enabled_run "run: roll loop on"
+_i18n_set zh loop.svc_enabled_run "运行: roll loop on"
+_i18n_set en loop.svc_not_installed_run "run: roll setup"
+_i18n_set zh loop.svc_not_installed_run "运行: roll setup"
+
 _i18n_set en loop.observing_tmux_session_terminal_popup_stream "Observing: tmux session + terminal popup + stream-json event stream"
 _i18n_set zh loop.observing_tmux_session_terminal_popup_stream "观察：tmux 会话 + 终端弹窗 + stream-json 事件流"
 

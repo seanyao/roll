@@ -137,6 +137,45 @@ msg_lang() {
   echo
 }
 
+# ── CJK display-width helpers (US-I18N-006) ──────────────────────────────
+# Compute visual display width of a string (CJK fullwidth = 2 cells,
+# ASCII = 1 cell). Delegates to python3 which is already a dependency.
+_strw() {
+  python3 -c "
+import sys
+from unicodedata import east_asian_width
+s = sys.argv[1]
+w = sum(2 if east_asian_width(c) in ('F','W') else 1 for c in s)
+print(w)
+" "$1"
+}
+
+# Left-pad a string to a target visual display width (CJK-aware).
+_pad_l() {
+  local s="$1" target="$2"
+  local sw
+  sw=$(_strw "$s")
+  local pad=$((target - sw))
+  if ((pad <= 0)); then
+    printf '%s' "$s"
+  else
+    printf '%s%*s' "$s" "$pad" ''
+  fi
+}
+
+# Right-pad a string to a target visual display width (CJK-aware).
+_pad_r() {
+  local s="$1" target="$2"
+  local sw
+  sw=$(_strw "$s")
+  local pad=$((target - sw))
+  if ((pad <= 0)); then
+    printf '%s' "$s"
+  else
+    printf '%*s%s' "$pad" '' "$s"
+  fi
+}
+
 # ── Load per-command message catalogs (US-I18N-002) ──
 # Source all lib/i18n/*.sh files (skip self). Called once at bin/roll startup.
 _i18n_load_catalogs() {

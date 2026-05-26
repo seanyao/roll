@@ -92,8 +92,13 @@ _i18n_resolve_lang() {
 msg() {
   local key="$1"; shift || true
   local lang safe
-  lang=$(_i18n_resolve_lang)
-  safe=$(_i18n_safe_key "$key")
+  # FIX: avoid subshell forks — check cached value first, inline key sanitize
+  if [[ -n "${ROLL_LANG_RESOLVED:-}" ]]; then
+    lang="$ROLL_LANG_RESOLVED"
+  else
+    lang=$(_i18n_resolve_lang)
+  fi
+  safe="${key//[^A-Za-z0-9_]/_}"       # FIX: inline — no subshell fork
 
   local zh_var="MSG_ZH_${safe}"
   local en_var="MSG_EN_${safe}"

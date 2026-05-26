@@ -75,7 +75,7 @@ peer_capability_map_security: "kimi deepseek claude"
 peer_capability_map_architecture: "claude kimi"
 ```
 
-Supported peer agents: `claude`, `kimi`, `pi`, `deepseek`, `codex`, `opencode`.
+Supported peer agents: `claude`, `kimi`, `pi`, `deepseek`, `codex`, `openai`, `opencode`.
 Loop skips agents that are not installed on the current machine.
 
 ## Visibility (tmux + popup)

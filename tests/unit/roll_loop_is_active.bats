@@ -7,7 +7,10 @@ setup() {
   unit_setup
   _SHARED_ROOT="$TEST_TMP"
   mkdir -p "$_SHARED_ROOT/loop"
+  local _saved_trap; _saved_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   source "${BATS_TEST_DIRNAME}/../../bin/roll"
+  [[ -n "$_saved_trap" ]] && eval "$_saved_trap"
 }
 teardown() { unit_teardown; }
 

@@ -3,6 +3,9 @@
 Roll supports multiple AI coding agents. Every agent gets the same conventions
 and skills — switching agents does not require changing your workflow.
 
+The `openai` agent name is an alias that dispatches to the Codex CLI (`codex`).
+Use `roll agent use openai` to select it — the same binary is invoked.
+
 ## Supported Agents
 
 | Agent | CLI command | Notes |
@@ -11,6 +14,7 @@ and skills — switching agents does not require changing your workflow.
 | Kimi CLI | `kimi` | Good fallback; supports peer review |
 | DeepSeek TUI | `ai_deepseek` | Local or API |
 | Codex CLI | `codex` | OpenAI |
+| OpenAI (alias) | `openai` | Alias for `codex`. Install: `npm install -g @openai/codex` |
 | Antigravity (agy) | `agy` | |
 | Pi (pi-coding-agent) | `pi` | |
 | Trae IDE | (IDE-based) | project_rules.md sync |

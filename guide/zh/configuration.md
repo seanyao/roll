@@ -47,7 +47,14 @@ ROLL_CONFIG=/tmp/test-config.yaml roll agent use kimi
 `roll status` 会打印解析后的路径，便于确认覆盖是否生效；
 通过 `$roll-doctor` 技能可以诊断解析后的 `ROLL_HOME` 下的目录结构问题。
 
+## Agent 安装
+
+- `roll agent use openai` 实际调用 Codex CLI。安装方式：
+  `npm install -g @openai/codex`
+- 完整支持列表见 [ai-agents.md](ai-agents.md)。
+
 ## 相关文档
 
 - [overview.md](overview.md) — 三层模型、BACKLOG 优先级
 - [loop.md](loop.md) — `roll loop` 子命令
+- [ai-agents.md](ai-agents.md) — 支持的 AI Agent

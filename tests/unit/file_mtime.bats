@@ -4,7 +4,10 @@
 # Replaces four copies of `stat -c %Y ... || stat -f %m ... || echo 0`.
 
 setup() {
+  local _saved_trap; _saved_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   source "${BATS_TEST_DIRNAME}/../../bin/roll"
+  [[ -n "$_saved_trap" ]] && eval "$_saved_trap"
   TMPDIR_TEST=$(mktemp -d)
 }
 

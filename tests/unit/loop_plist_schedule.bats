@@ -3,7 +3,10 @@
 
 setup() {
   export _LAUNCHD_SKIP_REGISTRY=1
+  local _saved_trap; _saved_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   source "${BATS_TEST_DIRNAME}/../../bin/roll"
+  [[ -n "$_saved_trap" ]] && eval "$_saved_trap"
   _LAUNCHD_DIR="$(mktemp -d)"
   export _LAUNCHD_DIR
 }

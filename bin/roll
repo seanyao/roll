@@ -273,7 +273,6 @@ _ensure_config_entries() {
     "ai_openclaw:~/.openclaw/workspace|AGENTS.md|AGENTS.md"
     "ai_pi:~/.pi/agent|AGENTS.md|AGENTS.md"
     "ai_deepseek:~/.deepseek|AGENTS.md|AGENTS.md"
-    "ai_qwen:~/.qwen|AGENTS.md|AGENTS.md"
   )
 
   local added=0
@@ -782,7 +781,7 @@ cmd_setup() {
     esac
   }
 
-  local _ai_dirs="$HOME/.claude:$HOME/.gemini:$HOME/.kimi:$HOME/.codex:$HOME/.cursor:$HOME/.trae:$HOME/.config/opencode:$HOME/.openclaw:$HOME/.pi:$HOME/.deepseek:$HOME/.qwen"
+  local _ai_dirs="$HOME/.claude:$HOME/.gemini:$HOME/.kimi:$HOME/.codex:$HOME/.cursor:$HOME/.trae:$HOME/.config/opencode:$HOME/.openclaw:$HOME/.pi:$HOME/.deepseek"
 
   _run_setup_step "$ROLL_HOME" _install_local "$force"
   _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Install templates & conventions to ~/.roll"
@@ -3145,7 +3144,7 @@ _agent_argv() {
         interactive) _AGENT_ARGV=(pi "$prompt") ;;
         *)           _AGENT_ARGV=(pi -p "$prompt") ;;
       esac ;;
-    codex)
+    codex|openai)
       case "$mode" in
         interactive) _AGENT_ARGV=(codex "$prompt") ;;
         peer)        _AGENT_ARGV=(codex exec --json --output-last-message "$prompt") ;;
@@ -3165,9 +3164,6 @@ _agent_argv() {
         interactive) _AGENT_ARGV=(agy -i "$prompt") ;;
         *) return 1 ;;
       esac ;;
-    qwen)
-      # qwen has the same argv shape in both modes (positional prompt).
-      _AGENT_ARGV=(qwen "$prompt") ;;
     *) return 1 ;;
   esac
 }
@@ -3205,7 +3201,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
   _agent_argv "$agent" text "$content" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode>"
     return 1
   }
   "${_AGENT_ARGV[@]}"
@@ -3964,7 +3960,7 @@ EOF
 )"
 
   _agent_argv "$agent" text "$prompt" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode>"
     trap - INT TERM
     return 1
   }
@@ -4350,8 +4346,12 @@ cmd_agent() {
   case "$subcmd" in
     use)
       local name="${1:-}"
-      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|codex|opencode|qwen>"; exit 1; }
-      command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
+      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode>"; exit 1; }
+      if [[ "$name" == openai ]]; then
+        command -v codex &>/dev/null || warn "openai agent requires the Codex CLI. Install: npm install -g @openai/codex"
+      else
+        command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
+      fi
       # REFACTOR-040: write to .roll/local.yaml (per-machine state). Migrate
       # from legacy .roll.yaml in the project root on the spot — copy the
       # value over once, then delete the old file so the root stays clean.
@@ -4384,7 +4384,7 @@ cmd_agent() {
     list)
       echo ""; echo "  $(msg agent.available_agents)"; echo ""
       local current; current=$(_project_agent)
-      for a in claude kimi deepseek opencode codex pi qwen; do
+      for a in claude kimi deepseek opencode codex openai pi; do
         if command -v "$a" &>/dev/null; then
           [[ "$a" == "$current" ]] && echo -e "    ${GREEN}✓ ${a}${NC}  (current)" \
                                    || echo -e "    ${GREEN}✓ ${a}${NC}"
@@ -5351,7 +5351,6 @@ _runs_append() {
   local _phases_json="\${4:-}"
   [ -z "\$_phases_json" ] && _phases_json="{}"
   local _runs_dst="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/runs.jsonl"
-  _loop_cleanup_stale_runs_tmp 2>/dev/null || true
   command -v jq >/dev/null 2>&1 || return 0
   local _cid="\${CYCLE_ID:-pre-cycle-\$\$}"
   local _rid="loop-\${_cid%-*}"
@@ -6134,7 +6133,7 @@ _agent_skill_cmd() {
   local agent; agent=$(_project_agent)
   local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
   _agent_argv "$agent" plain "__PROMPT__" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode>"
     return 1
   }
   # Cron-installed skills (dream / brief / loop) run autonomously and need to
@@ -8328,8 +8327,9 @@ _loop_publish_doc_pr() {
 
 # FIX-123: clean stale runs.jsonl .tmp orphan files from dead pids.
 # Called at every runs.jsonl write entry point so orphans never accumulate.
+# Optional $1: directory to scan. Defaults to dirname of $_LOOP_RUNS.
 _loop_cleanup_stale_runs_tmp() {
-  local _dir; _dir=$(dirname "${_LOOP_RUNS:-${HOME}/.shared/roll/loop/runs.jsonl}")
+  local _dir="${1:-$(dirname "${_LOOP_RUNS:-${HOME}/.shared/roll/loop/runs.jsonl}")}"
   [ -d "$_dir" ] || return 0
   local _f _pid
   for _f in "$_dir"/runs.jsonl.tmp.*; do
@@ -8349,9 +8349,9 @@ _loop_backfill_merged() {
   command -v jq >/dev/null 2>&1 || return 0
   local slug; _gh_resolve slug || return 0
 
-  _loop_cleanup_stale_runs_tmp
+  _loop_cleanup_stale_runs_tmp "$(dirname "$runs_path")"
   local tmp="${runs_path}.tmp.$$"
-  trap "rm -f ${tmp}" EXIT
+  trap "rm -f '$tmp'" EXIT
   : > "$tmp"
   local line status cycle_id branch view_json state merged_at merge_commit
   while IFS= read -r line; do
@@ -8382,6 +8382,7 @@ _loop_backfill_merged() {
       >> "$tmp" 2>/dev/null || printf '%s\n' "$line" >> "$tmp"
   done < "$runs_path"
   mv "$tmp" "$runs_path" 2>/dev/null || rm -f "$tmp"
+  trap - EXIT
   return 0
 }
 

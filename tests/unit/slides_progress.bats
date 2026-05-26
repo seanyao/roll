@@ -24,7 +24,10 @@ teardown() {
 
 source_roll() {
   # shellcheck disable=SC1090
+  local _saved_trap; _saved_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   source "$ROLL_BIN"
+  [[ -n "$_saved_trap" ]] && eval "$_saved_trap"
 }
 
 @test "progress init: populates phase list" {

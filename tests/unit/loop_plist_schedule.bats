@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# US-LOOP-012: launchd plist generation for multi-trigger schedules
+# US-LOOP-032: launchd plist generation uses StartInterval for all loop services
 
 setup() {
   export _LAUNCHD_SKIP_REGISTRY=1
@@ -17,104 +17,76 @@ teardown() {
 
 # ─── Helper: call _write_launchd_plist with schedule params ──────────────────
 
-# Writes a loop plist with given period/offset. hour="" triggers the
-# StartCalendarInterval path (not StartInterval=86400 for daily services).
+# Writes a loop plist with given period. hour="" triggers the
+# StartInterval path (not StartInterval=86400 for daily services).
 _write_loop_plist() {
   local plist="$1" label="$2" project="$3" period="$4" offset="$5" runner="$6"
   _write_launchd_plist "$plist" "$label" "$project" "$period" "$offset" "" "$runner"
 }
 
-# ─── period=60: backward compat (single dict) ────────────────────────────────
+# ─── US-LOOP-032: StartInterval = period * 60 for all loop periods ───────────
 
-@test "_write_launchd_plist: period=60 generates single StartCalendarInterval dict" {
+@test "_write_launchd_plist: period=60 generates StartInterval=3600" {
   local plist="${_LAUNCHD_DIR}/loop-60.plist"
   _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "60" "18" "/tmp/runner.sh"
   [ -f "$plist" ]
 
-  # Must contain StartCalendarInterval with a single <dict>
-  grep -q 'StartCalendarInterval' "$plist"
-  grep -q '<integer>18</integer>' "$plist"
-
-  # Must NOT contain StartCalendarInterval <array> (period=60 uses single dict)
-  # Check that StartCalendarInterval is followed by <dict>, not <array>
-  grep -A1 'StartCalendarInterval' "$plist" | grep -q '<dict>'
+  # Must use StartInterval, not StartCalendarInterval
+  grep -q 'StartInterval' "$plist"
+  grep -q '<integer>3600</integer>' "$plist"
+  ! grep -q 'StartCalendarInterval' "$plist"
 }
 
-# ─── period=30: array with 2 entries ─────────────────────────────────────────
-
-@test "_write_launchd_plist: period=30 offset=0 generates 2-entry array" {
-  local plist="${_LAUNCHD_DIR}/loop-30-0.plist"
+@test "_write_launchd_plist: period=30 generates StartInterval=1800" {
+  local plist="${_LAUNCHD_DIR}/loop-30.plist"
   _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "30" "0" "/tmp/runner.sh"
   [ -f "$plist" ]
 
-  grep -q 'StartCalendarInterval' "$plist"
-  grep -q '<array>' "$plist"
-  # Minute entries: 0, 30
-  grep -q '<integer>0</integer>' "$plist"
-  grep -q '<integer>30</integer>' "$plist"
+  grep -q 'StartInterval' "$plist"
+  grep -q '<integer>1800</integer>' "$plist"
+  ! grep -q 'StartCalendarInterval' "$plist"
 }
 
-@test "_write_launchd_plist: period=30 offset=7 generates 2-entry array" {
-  local plist="${_LAUNCHD_DIR}/loop-30-7.plist"
-  _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "30" "7" "/tmp/runner.sh"
-  [ -f "$plist" ]
-
-  grep -q '<array>' "$plist"
-  grep -q '<integer>7</integer>' "$plist"
-  grep -q '<integer>37</integer>' "$plist"
-}
-
-# ─── period=15: array with 4 entries ─────────────────────────────────────────
-
-@test "_write_launchd_plist: period=15 offset=7 generates 4-entry array" {
-  local plist="${_LAUNCHD_DIR}/loop-15-7.plist"
-  _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "15" "7" "/tmp/runner.sh"
-  [ -f "$plist" ]
-
-  grep -q '<array>' "$plist"
-  grep -q '<integer>7</integer>' "$plist"
-  grep -q '<integer>22</integer>' "$plist"
-  grep -q '<integer>37</integer>' "$plist"
-  grep -q '<integer>52</integer>' "$plist"
-}
-
-@test "_write_launchd_plist: period=15 offset=0 generates 4-entry array" {
-  local plist="${_LAUNCHD_DIR}/loop-15-0.plist"
+@test "_write_launchd_plist: period=15 generates StartInterval=900" {
+  local plist="${_LAUNCHD_DIR}/loop-15.plist"
   _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "15" "0" "/tmp/runner.sh"
   [ -f "$plist" ]
 
-  grep -q '<array>' "$plist"
-  grep -q '<integer>0</integer>' "$plist"
-  grep -q '<integer>15</integer>' "$plist"
-  grep -q '<integer>30</integer>' "$plist"
-  grep -q '<integer>45</integer>' "$plist"
+  grep -q 'StartInterval' "$plist"
+  grep -q '<integer>900</integer>' "$plist"
+  ! grep -q 'StartCalendarInterval' "$plist"
 }
 
-# ─── period=20: array with 3 entries ─────────────────────────────────────────
+# ─── US-LOOP-032: non-divisor periods ────────────────────────────────────────
 
-@test "_write_launchd_plist: period=20 offset=5 generates 3-entry array" {
-  local plist="${_LAUNCHD_DIR}/loop-20-5.plist"
-  _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "20" "5" "/tmp/runner.sh"
+@test "_write_launchd_plist: period=45 generates StartInterval=2700" {
+  local plist="${_LAUNCHD_DIR}/loop-45.plist"
+  _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "45" "0" "/tmp/runner.sh"
   [ -f "$plist" ]
 
-  grep -q '<array>' "$plist"
-  grep -q '<integer>5</integer>' "$plist"
-  grep -q '<integer>25</integer>' "$plist"
-  grep -q '<integer>45</integer>' "$plist"
+  grep -q 'StartInterval' "$plist"
+  grep -q '<integer>2700</integer>' "$plist"
+  ! grep -q 'StartCalendarInterval' "$plist"
 }
 
-# ─── period=5: array with 12 entries ─────────────────────────────────────────
-
-@test "_write_launchd_plist: period=5 offset=3 generates 12-entry array" {
-  local plist="${_LAUNCHD_DIR}/loop-5-3.plist"
-  _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "5" "3" "/tmp/runner.sh"
+@test "_write_launchd_plist: period=40 generates StartInterval=2400" {
+  local plist="${_LAUNCHD_DIR}/loop-40.plist"
+  _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "40" "0" "/tmp/runner.sh"
   [ -f "$plist" ]
 
-  grep -q '<array>' "$plist"
-  # All 12 entries: 3, 8, 13, 18, 23, 28, 33, 38, 43, 48, 53, 58
-  for m in 3 8 13 18 23 28 33 38 43 48 53 58; do
-    grep -q "<integer>${m}</integer>" "$plist"
-  done
+  grep -q 'StartInterval' "$plist"
+  grep -q '<integer>2400</integer>' "$plist"
+  ! grep -q 'StartCalendarInterval' "$plist"
+}
+
+@test "_write_launchd_plist: period=90 generates StartInterval=5400" {
+  local plist="${_LAUNCHD_DIR}/loop-90.plist"
+  _write_loop_plist "$plist" "com.roll.loop.test" "$PWD" "90" "0" "/tmp/runner.sh"
+  [ -f "$plist" ]
+
+  grep -q 'StartInterval' "$plist"
+  grep -q '<integer>5400</integer>' "$plist"
+  ! grep -q 'StartCalendarInterval' "$plist"
 }
 
 # ─── Daily services still generate StartInterval=86400 ──────────────────────
@@ -146,18 +118,14 @@ _write_loop_plist() {
   [[ "$output" == *"OK"* ]]
 }
 
-# ─── count check: ensures exactly 60/period dict entries ────────────────────
+# ─── US-LOOP-032: StartInterval value = period * 60 for various periods ─────
 
-@test "_write_launchd_plist: array has exactly 60/period entries" {
-  for period in 30 20 15 12 10 6 5; do
-    local plist="${_LAUNCHD_DIR}/loop-count-${period}.plist"
-    _write_loop_plist "$plist" "com.roll.loop.cnt" "$PWD" "$period" "0" "/tmp/runner.sh"
-    # Count the number of <dict> entries inside StartCalendarInterval <array>
-    # Extract lines between StartCalendarInterval and the next top-level <key>
-    local count
-    count=$(sed -n '/StartCalendarInterval/,/<key>WorkingDirectory</p' "$plist" | grep -c '<dict>' || true)
-    local expected=$((60 / period))
-    [ "$count" -eq "$expected" ]
+@test "_write_launchd_plist: StartInterval value matches period*60" {
+  for period in 60 45 30 20 15 12 10 6 5 1; do
+    local plist="${_LAUNCHD_DIR}/loop-si-${period}.plist"
+    _write_loop_plist "$plist" "com.roll.loop.si" "$PWD" "$period" "0" "/tmp/runner.sh"
+    local expected=$(( period * 60 ))
+    grep -q "<integer>${expected}</integer>" "$plist"
     rm -f "$plist"
   done
 }

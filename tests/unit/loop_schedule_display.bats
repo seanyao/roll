@@ -98,6 +98,26 @@ YAML
   [ "$desc_en" = "every 5min (:02 :07 :12 :17 :22 :27 :32 :37 :42 :47 :52 :57)" ]
 }
 
+# ─── US-LOOP-032: non-divisor period display pipeline ────────────────────────
+
+@test "US-LOOP-032: display pipeline period=45 offset=0" {
+  cat > "${TEST_PROJECT}/.roll/local.yaml" << 'YAML'
+loop_schedule:
+  period_minutes: 45
+  offset_minute: 0
+YAML
+  local spec; spec=$(_loop_schedule_spec "$TEST_PROJECT")
+  local period="${spec%% *}" offset="${spec##* }"
+  [ "$period" = "45" ]
+  [ "$offset" = "0" ]
+
+  local desc_en; desc_en=$(_loop_schedule_desc "$period" "$offset" en)
+  [ "$desc_en" = "every 45min" ]
+
+  local desc_zh; desc_zh=$(_loop_schedule_desc "$period" "$offset" zh)
+  [ "$desc_zh" = "每45分鐘" ]
+}
+
 # ─── _next_cron_hint Python v2 smoke test ─────────────────────────────────────
 
 @test "US-LOOP-013: Python _read_schedule_spec returns valid defaults" {

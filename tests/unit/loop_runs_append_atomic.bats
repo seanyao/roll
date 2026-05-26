@@ -63,8 +63,12 @@ _extract_runs_append() {
   mkdir -p "${TEST_TMP}/shared/loop"
   export _SHARED_ROOT="${TEST_TMP}/shared"
 
-  # Create a fake stale .tmp file with a PID that definitely does not exist
-  local stale_tmp="${_SHARED_ROOT}/loop/runs.jsonl.tmp.99999"
+  # Create a fake stale .tmp file with a PID that is guaranteed to be dead:
+  # launch a subshell, capture its PID, wait for it to exit.
+  bash -c 'exit 0' &
+  local dead_pid=$!
+  wait "$dead_pid" 2>/dev/null || true
+  local stale_tmp="${_SHARED_ROOT}/loop/runs.jsonl.tmp.${dead_pid}"
   echo '{"stale":"data"}' > "$stale_tmp"
 
   local fn_file="${TEST_TMP}/fn.sh"
@@ -73,7 +77,7 @@ _extract_runs_append() {
 
   _runs_append "built" 1 '["US-TEST-002"]'
 
-  # The stale .tmp should be gone
+  # The stale .tmp should be gone (dead PID cleaned on entry)
   [ ! -f "$stale_tmp" ]
 }
 

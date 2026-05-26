@@ -6,6 +6,11 @@
 # tipped 125+ tests into setup failure. CI runs on Ubuntu (bash 5) and missed
 # it. These tests source lib/i18n.sh in isolation and exercise every code
 # path that uppercases — any future bash-4-only operator drops one of these.
+#
+# PR #213 replaced ${lang^^} with $(_i18n_upper) to restore bash 3.2 compat,
+# but re-introduced a subshell fork per catalog entry (~2s per source of
+# bin/roll). PR #215+ inlined the case statement directly in _i18n_set and
+# msg_lang — zero subshell forks, bash 3.2-compatible. _i18n_upper is gone.
 
 LIB="${BATS_TEST_DIRNAME}/../../lib"
 
@@ -15,26 +20,26 @@ setup() {
   source "${LIB}/i18n.sh"
 }
 
-@test "_i18n_upper EN/ZH common path returns the literal" {
-  [ "$(_i18n_upper en)" = "EN" ]
-  [ "$(_i18n_upper zh)" = "ZH" ]
-  [ "$(_i18n_upper EN)" = "EN" ]
-  [ "$(_i18n_upper ZH)" = "ZH" ]
-}
-
-@test "_i18n_upper unknown locale falls back to tr (still uppercase)" {
-  [ "$(_i18n_upper fr)" = "FR" ]
-  [ "$(_i18n_upper ja)" = "JA" ]
-}
-
-@test "_i18n_set populates MSG_EN_<key> without bash 4+ syntax" {
+@test "_i18n_set EN common path populates MSG_EN_<key> without bash 4+ syntax" {
   _i18n_set en greeting "Hello, %s!"
   [ "$MSG_EN_greeting" = "Hello, %s!" ]
+  _i18n_set EN greeting2 "Hi"
+  [ "$MSG_EN_greeting2" = "Hi" ]
 }
 
-@test "_i18n_set populates MSG_ZH_<key> with CJK payload" {
+@test "_i18n_set ZH common path populates MSG_ZH_<key> with CJK payload" {
   _i18n_set zh greeting "你好，%s！"
   [ "$MSG_ZH_greeting" = "你好，%s！" ]
+  _i18n_set ZH greeting2 "嗨"
+  [ "$MSG_ZH_greeting2" = "嗨" ]
+}
+
+@test "_i18n_set unknown locale falls back to tr (still uppercase, no bash 4+)" {
+  # Exercises the * arm of the inline case — must not use ${var^^}
+  _i18n_set fr greeting "Bonjour, %s!"
+  [ "$MSG_FR_greeting" = "Bonjour, %s!" ]
+  _i18n_set ja greeting "こんにちは"
+  [ "$MSG_JA_greeting" = "こんにちは" ]
 }
 
 @test "msg_lang resolves the registered template" {
@@ -48,6 +53,11 @@ setup() {
   _i18n_set en only_en "fallback"
   # Deliberately no zh registration.
   [ "$(msg_lang zh only_en)" = "fallback" ]
+}
+
+@test "msg_lang with unknown locale uses tr fallback and resolves correctly" {
+  _i18n_set fr bonjour "Bonjour!"
+  [ "$(msg_lang fr bonjour)" = "Bonjour!" ]
 }
 
 @test "lib/i18n.sh sources cleanly under the running bash (no parse error)" {

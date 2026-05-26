@@ -269,21 +269,21 @@ run_fmt_nospin() {
 
 @test "Spinner: Skill roll-build shows executing-story waiting indicator" {
   local ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"roll-build","args":"US-AUTH-003 login flow"}}]}}'
-  run bash -c "LOOP_FMT_NO_SPIN=1 echo '$ev' | python3 '$LOOP_FMT'"
+  run bash -c "echo '$ev' | LOOP_FMT_NO_SPIN=1 python3 '$LOOP_FMT'"
   local clean; clean=$(echo "$output" | strip_ansi)
   [[ "$clean" == *"executing story"* ]]
 }
 
 @test "Spinner: roll ci command shows waiting-for-CI indicator" {
   local bash_ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"roll ci --wait"}}]}}'
-  run bash -c "LOOP_FMT_NO_SPIN=1 echo '$bash_ev' | python3 '$LOOP_FMT'"
+  run bash -c "echo '$bash_ev' | LOOP_FMT_NO_SPIN=1 python3 '$LOOP_FMT'"
   local clean; clean=$(echo "$output" | strip_ansi)
   [[ "$clean" == *"waiting for CI"* ]]
 }
 
 @test "Spinner: gh pr create/merge shows merging-PR indicator" {
   local bash_ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh pr merge 42 --auto --squash"}}]}}'
-  run bash -c "LOOP_FMT_NO_SPIN=1 echo '$bash_ev' | python3 '$LOOP_FMT'"
+  run bash -c "echo '$bash_ev' | LOOP_FMT_NO_SPIN=1 python3 '$LOOP_FMT'"
   local clean; clean=$(echo "$output" | strip_ansi)
   [[ "$clean" == *"merging PR"* ]]
 }
@@ -291,7 +291,7 @@ run_fmt_nospin() {
 @test "Spinner: CI result still produces ci step after waiting indicator" {
   local bash_ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"roll ci --wait"}}]}}'
   local result_ev='{"type":"user","message":{"content":[{"type":"tool_result","is_error":false,"content":"CI passed\n45 tests"}]}}'
-  run bash -c "LOOP_FMT_NO_SPIN=1 printf '%s\n%s\n' '$bash_ev' '$result_ev' | python3 '$LOOP_FMT'"
+  run bash -c "printf '%s\n%s\n' '$bash_ev' '$result_ev' | LOOP_FMT_NO_SPIN=1 python3 '$LOOP_FMT'"
   local clean; clean=$(echo "$output" | strip_ansi)
   [[ "$clean" == *"waiting for CI"* ]]
   [[ "$clean" == *"ci"* ]]

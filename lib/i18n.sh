@@ -28,8 +28,8 @@ _i18n_safe_key() {
 _i18n_set() {
   local lang="$1" key="$2" val="$3"
   local upper safe varname
-  upper=$(echo "$lang" | tr '[:lower:]' '[:upper:]')
-  safe=$(_i18n_safe_key "$key")
+  upper="${lang^^}"                      # FIX: bash built-in — no subshell fork
+  safe="${key//[^A-Za-z0-9_]/_}"        # FIX: inline param-expansion — no subshell fork
   varname="MSG_${upper}_${safe}"
   printf -v "$varname" '%s' "$val"
   export "$varname"
@@ -92,8 +92,13 @@ _i18n_resolve_lang() {
 msg() {
   local key="$1"; shift || true
   local lang safe
-  lang=$(_i18n_resolve_lang)
-  safe=$(_i18n_safe_key "$key")
+  # FIX: avoid subshell forks — check cached value first, inline key sanitize
+  if [[ -n "${ROLL_LANG_RESOLVED:-}" ]]; then
+    lang="$ROLL_LANG_RESOLVED"
+  else
+    lang=$(_i18n_resolve_lang)
+  fi
+  safe="${key//[^A-Za-z0-9_]/_}"       # FIX: inline — no subshell fork
 
   local zh_var="MSG_ZH_${safe}"
   local en_var="MSG_EN_${safe}"
@@ -112,9 +117,34 @@ msg() {
   echo
 }
 
+# Look up message catalog entry with an explicit language, bypassing ROLL_LANG env.
+# Usage: msg_lang <lang> <key> [printf-args...]
+# Useful when the caller tracks language independently of the process env (e.g.
+# _loop_schedule_desc passes an explicit lang= parameter).
+msg_lang() {
+  local lang="$1" key="$2"; shift 2 || true
+  local upper safe varname tmpl
+  upper="${lang^^}"
+  safe="${key//[^A-Za-z0-9_]/_}"
+  varname="MSG_${upper}_${safe}"
+  tmpl="${!varname:-}"
+  if [[ -z "$tmpl" ]]; then
+    varname="MSG_EN_${safe}"
+    tmpl="${!varname:-$key}"
+  fi
+  # shellcheck disable=SC2059 — template comes from our own catalog
+  printf "$tmpl" "$@"
+  echo
+}
+
 # ── Load per-command message catalogs (US-I18N-002) ──
 # Source all lib/i18n/*.sh files (skip self). Called once at bin/roll startup.
 _i18n_load_catalogs() {
+  # FIX: guard — skip re-load when catalogs already loaded in this shell.
+  # Each bats test sources bin/roll in its own subshell so the guard resets
+  # automatically; but within a single shell (e.g. integration tests) this
+  # prevents 2.6s of catalog I/O on every subsequent source.
+  [[ -n "${_I18N_CATALOGS_LOADED:-}" ]] && return 0
   local i18n_dir
   i18n_dir="$(dirname "${BASH_SOURCE[0]:-$0}")/i18n"
   if [[ -d "$i18n_dir" ]]; then
@@ -134,5 +164,6 @@ _i18n_load_catalogs() {
       done
     fi
   fi
+  _I18N_CATALOGS_LOADED=1
 }
 _i18n_load_catalogs

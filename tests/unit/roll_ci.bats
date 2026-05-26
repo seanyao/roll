@@ -42,9 +42,10 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_ci_wait: polls gh run list with commit SHA" {
+  # US-I18N-002: gh call now uses -R <repo_slug> flag before 'run list'
   local body
   body=$(awk '/^_ci_wait\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$body" | grep -qE 'gh run list'
+  echo "$body" | grep -qE 'gh.*run list'
 }
 
 @test "_ci_wait: uses --commit flag with current HEAD" {
@@ -266,7 +267,8 @@ teardown() { unit_teardown_cd; }
 # ─── usage documentation ─────────────────────────────────────────────────────
 
 @test "usage: mentions 'roll ci' command" {
+  # US-I18N-002: ci help text is now in i18n catalog key ci_wait_ci_show_or_wait
   local body
   body=$(awk '/^usage\(\)|^_legacy_help\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$body" | grep -qE 'roll ci|ci '
+  echo "$body" | grep -qE 'ci_wait_ci_show_or_wait|roll ci|ci '
 }

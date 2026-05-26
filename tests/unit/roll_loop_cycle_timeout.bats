@@ -132,10 +132,14 @@ STUB
   local inner="${script_path%.sh}-inner.sh"
 
   # 3s timeout for the test. Run inner in background; expect it to exit
-  # on its own within ~15s. timeout(1) is not portable on macOS, so we poll.
+  # on its own within ~15s (3s timeout + 5s SIGKILL grace + buffer).
+  # FIX: close fd 3 (bats communication pipe) so orphaned grandchildren
+  # (e.g. the stub's `sleep 600`) do not keep the pipe open and block bats
+  # for 600 s after the test function returns.
+  # timeout(1) is not portable on macOS, so we poll.
   ROLL_LOOP_CYCLE_TIMEOUT_SEC=3 \
   PATH="${_test_dir}/stubbin:$PATH" \
-    bash "$inner" >/dev/null 2>&1 &
+    bash "$inner" >/dev/null 2>&1 3>&- &
   local inner_pid=$!
   local waited=0
   while kill -0 "$inner_pid" 2>/dev/null && [ "$waited" -lt 15 ]; do

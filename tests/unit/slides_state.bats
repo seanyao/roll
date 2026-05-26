@@ -127,7 +127,7 @@ _list_built_for() {
   _make_deck "mydeck"
   run bash "$ROLL_BIN" slides logs mydeck 2>/dev/null
   [ "$status" -eq 0 ]
-  [[ "$output" == *"没有失败记录"* ]] || [[ "$output" == *"no failure"* ]]
+  [[ "$output" == *"没有失败记录"* ]] || [[ "$output" == *"No failure"* ]]
 }
 
 @test "slides logs on missing deck shows error" {
@@ -140,7 +140,7 @@ _list_built_for() {
   _make_deck "mydeck"
   run bash "$ROLL_BIN" slides logs mydeck 2>/dev/null
   [ "$status" -eq 0 ]
-  [[ "$output" == *"没有失败记录"* ]] || [[ "$output" == *"no failure"* ]]
+  [[ "$output" == *"没有失败记录"* ]] || [[ "$output" == *"No failure"* ]]
 }
 
 # ─── list empty dir ──────────────────────────────────────────────────────────

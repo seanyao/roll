@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
+# bats tier: fast
 # Tests for roll loop attach + tmux-wrapped runner (US-AUTO-025)
+# (No actual sleep calls — auto-classifier sees 'sleep 30' in grep patterns, overriding to fast)
 
 load helpers
 setup() {

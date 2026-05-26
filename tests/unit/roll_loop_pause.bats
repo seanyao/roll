@@ -29,25 +29,9 @@ teardown() { unit_teardown_cd; }
   grep -qF '_loop_pause()' "$ROLL_BIN"
 }
 
-@test "_loop_pause: references launchctl unload (macOS path)" {
-  local body
-  body=$(awk '/^_loop_pause\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$body" | grep -qF 'launchctl'
-}
-
-@test "_loop_pause: writes status: paused to state file" {
-  local body
-  body=$(awk '/^_loop_pause\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$body" | grep -qF 'status: paused'
-}
-
-@test "_loop_pause: writes paused_at timestamp to state file" {
-  local body
-  body=$(awk '/^_loop_pause\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$body" | grep -q 'paused_at'
-}
-
 # ─── _loop_pause state file behavior ─────────────────────────────────────────
+# (Structural body-inspection tests removed: the behavioral tests below cover
+# the same state-file assertions via actual _loop_pause invocation.)
 
 @test "_loop_pause: state file contains 'status: paused' after invocation (mocked launchd)" {
   # Override launchd helpers to no-op

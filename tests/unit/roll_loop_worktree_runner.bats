@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
+# bats tier: fast
 # US-AUTO-037: Tests that _write_loop_runner_script's inner script template
 # wires in the US-AUTO-036 worktree helpers and runs claude in an isolated
 # per-cycle worktree.
+# (No actual sleep calls — auto-classifier sees 'sleep N' in grep patterns, overriding to fast)
 #
 # Architectural choice (B in design notes): claude keeps selection authority
 # (SKILL.md unchanged) — the runner creates a generic `loop/cycle-<id>`

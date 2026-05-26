@@ -72,11 +72,15 @@ ROLL_BIN="${BATS_TEST_DIRNAME}/../../bin/roll"
 }
 
 @test "_legacy_help: init description references .roll/features/" {
-  body=$(awk '/^_legacy_help\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
-  [[ "$body" == *".roll/features/"* ]]
+  # _legacy_help uses msg() calls (US-I18N-002) — check the i18n catalog
+  # entry rather than the function body, which no longer contains literals.
+  grep -q ".roll/features/" "${BATS_TEST_DIRNAME}/../../lib/i18n/backlog.sh"
 }
 
 @test "_legacy_help: init description does not mention legacy docs/" {
-  body=$(awk '/^_legacy_help\(\)/{p=1} p{print} p && /^\}$/{p=0}' "$ROLL_BIN")
+  # _legacy_help uses msg() calls (US-I18N-002) — check the i18n catalog.
+  # The EN catalog entry must not reference the old docs/ layout.
+  body=$(grep "backlog.init_project_create_agents_md_roll" \
+    "${BATS_TEST_DIRNAME}/../../lib/i18n/backlog.sh" | head -1)
   [[ "$body" != *"+ docs/"* ]]
 }

@@ -1,0 +1,12 @@
+<!-- pipeline: requires stages[].{title_en,title_zh,desc_en,desc_zh,css_class} -->
+<div class="pipeline-bar">
+{{#stages}}
+<div class="pipe-stage {{css_class}}">
+<h4><span class="lang-en">{{title_en}}</span><span class="lang-zh">{{title_zh}}</span></h4>
+<p><span class="lang-en">{{desc_en}}</span><span class="lang-zh">{{desc_zh}}</span></p>
+</div>
+{{^last}}
+<div class="pipe-arrow">→</div>
+{{/last}}
+{{/stages}}
+</div>

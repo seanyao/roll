@@ -28,8 +28,8 @@ _i18n_safe_key() {
 _i18n_set() {
   local lang="$1" key="$2" val="$3"
   local upper safe varname
-  upper="${lang^^}"   # FIX: bash built-in — no subshell fork per entry
-  safe=$(_i18n_safe_key "$key")
+  upper="${lang^^}"                      # FIX: bash built-in — no subshell fork
+  safe="${key//[^A-Za-z0-9_]/_}"        # FIX: inline param-expansion — no subshell fork
   varname="MSG_${upper}_${safe}"
   printf -v "$varname" '%s' "$val"
   export "$varname"
@@ -115,6 +115,11 @@ msg() {
 # ── Load per-command message catalogs (US-I18N-002) ──
 # Source all lib/i18n/*.sh files (skip self). Called once at bin/roll startup.
 _i18n_load_catalogs() {
+  # FIX: guard — skip re-load when catalogs already loaded in this shell.
+  # Each bats test sources bin/roll in its own subshell so the guard resets
+  # automatically; but within a single shell (e.g. integration tests) this
+  # prevents 2.6s of catalog I/O on every subsequent source.
+  [[ -n "${_I18N_CATALOGS_LOADED:-}" ]] && return 0
   local i18n_dir
   i18n_dir="$(dirname "${BASH_SOURCE[0]:-$0}")/i18n"
   if [[ -d "$i18n_dir" ]]; then
@@ -134,5 +139,6 @@ _i18n_load_catalogs() {
       done
     fi
   fi
+  _I18N_CATALOGS_LOADED=1
 }
 _i18n_load_catalogs

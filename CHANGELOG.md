@@ -2,6 +2,10 @@
 
 ## v2026.526.1
 
+### Changed
+
+- **`roll loop --help` 不再显示内部 hook 命令** — notify / enforce-tcr / precheck-ci 移到单独的内部命令区，不给用户看了 `[cli]`
+
 ### Added
 
 - **一个故事跑过的所有轮次能合并看了** — `roll loop story <ID>` 一眼看清总耗时、花了多少钱、走过哪几个 PR `[loop]`

@@ -1,5 +1,12 @@
 ### Added
-- loop 触发频率可以按项目单独设 — 每个项目能自定义间隔，不再全局一刀切 `[loop]`
+- `roll loop story <ID>` — 按故事汇总所有 cycle 的耗时、token、成本和 PR `[loop]`
+- loop 仪表盘现在也会读轮转归档 — 旧 cycle 不再随 events 文件滚动消失 `[loop]`
+- `roll slides` 提供 9 个 Mustache 组件 partial — 写 slide 不用再手抄 v5 模板里的卡片 / 对比 / 时间线 HTML `[deck]`
+- 服务状态在窄终端下也能整齐对齐 — 中英文混排不再因为汉字占两格而错位 `[i18n]`
 ### Fixed
-- `roll` 主页不再把已启用的 loop 误报成"缺失" `[loop]`
-- loop 弹窗关了也能翻回之前的输出 — 不再一关就全丢 `[loop]`
+- `roll slides new` 失败时按错误类型给恢复路径 — 模板缺失列出可选模板、validator 失败显示出错位置、renderer 崩溃指向日志 `[deck]`
+- loop i18n 初始化不再每条条目 fork 一次子 shell — 完整单元测试套不再因为 ~950K fork 卡 60+ 分钟 `[loop]`
+- 修复 9 个 stale / flaky 测试（i18n 迁移残留 + 跨平台时序假设）`[testing]`
+### Docs
+- 跨机同步用户文档 — `guide/{en,zh}/loop.md` 新增 Cross-Machine Sync 章节，FAQ C9 解释同步指示器状态 `[loop]`
+- README 安装要求更新为 bash 3.2+，命令表补齐 `roll loop story` 子命令 `[docs]`

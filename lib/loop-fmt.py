@@ -445,9 +445,10 @@ def _passthrough_main(agent):
     """Transparent forwarding for non-claude agents (pi, deepseek, kimi, …).
 
     Writes every stdin line to stdout with a HH:MM:SS timestamp prefix so
-    tmux shows real-time progress.  Also appends each line as a lightweight
-    'usage'-type event to the per-slug events ndjson — token / cost fields
-    are set to null (agent-specific parsing is out of scope for this US).
+    tmux shows real-time progress.  Accumulates all lines; at cycle end,
+    dispatches to the agent_usage plugin registry (US-LOOP-026).  If a plugin
+    returns real token/cost data, emits a single usage event with it;
+    otherwise falls back to a single null-payload event (US-LOOP-010 compat).
     """
     slug   = os.environ.get("LOOP_PROJECT_SLUG")
     cycle  = os.environ.get("LOOP_CYCLE_ID")
@@ -460,24 +461,30 @@ def _passthrough_main(agent):
         except Exception:
             evfile = None
 
+    # Accumulate all lines for end-of-cycle usage extraction.
+    accumulated: list[str] = []
+
     for line in sys.stdin:
         if not line.rstrip():
             continue
+        accumulated.append(line.rstrip())
         # Timestamp prefix so tmux shows activity (even if agent output has
         # no timestamps of its own).
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         out = f"{DARK_GRAY}{ts}{RESET}  {line.rstrip()}"
         sys.stdout.write(out + "\n")
         sys.stdout.flush()
-        # Emit a lightweight usage event so the cycle has *some* event trace
-        # (token/cost are null — parsing those is agent-specific and out of
-        # scope for the minimal transparent-passthrough US).
-        if evfile:
-            _emit_passthrough_event(evfile, cycle, agent, line.rstrip())
+
+    # Cycle ended — try to extract real usage via plugin registry.
+    if accumulated and evfile:
+        _emit_final_usage_event(evfile, cycle, agent, accumulated)
 
 
 def _emit_passthrough_event(evfile, cycle, agent, text):
-    """Best-effort append a usage-type event to evfile."""
+    """Best-effort append a usage-type event to evfile (null payload).
+
+    Kept for backward-compat with US-LOOP-010 tests.
+    """
     payload = {
         "model":        agent,
         "input_tokens":  None,
@@ -485,6 +492,52 @@ def _emit_passthrough_event(evfile, cycle, agent, text):
         "cost_list_usd": None,
         "duration_ms":   None,
     }
+    record = json.dumps({
+        "ts":      datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "stage":   "usage",
+        "label":   cycle,
+        "detail":  payload,
+        "outcome": "ok",
+    }) + "\n"
+    try:
+        with open(evfile, "a") as f:
+            f.write(record)
+    except Exception:
+        pass
+
+
+def _emit_final_usage_event(evfile, cycle, agent, accumulated_lines):
+    """Try plugin extraction; emit one usage event (real or null).
+
+    US-LOOP-026: at cycle end, dispatches accumulated stdout to the
+    agent_usage plugin registry.  If a plugin returns real data, emits
+    a usage event with it.  Otherwise emits a single null-payload event
+    (US-LOOP-010 backward-compat).
+    """
+    payload = None
+    try:
+        from agent_usage import extract_usage
+        usage = extract_usage(agent, accumulated_lines)
+        if usage is not None:
+            payload = {
+                "model":        usage.get("model", agent),
+                "input_tokens":  usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "cost_list_usd": usage.get("cost_list_usd"),
+                "duration_ms":   usage.get("duration_ms"),
+            }
+    except Exception:
+        pass
+
+    if payload is None:
+        payload = {
+            "model":        agent,
+            "input_tokens":  None,
+            "output_tokens": None,
+            "cost_list_usd": None,
+            "duration_ms":   None,
+        }
+
     record = json.dumps({
         "ts":      datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "stage":   "usage",

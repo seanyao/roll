@@ -125,23 +125,39 @@ def shared_root() -> Path:
 # Loaders
 # ════════════════════════════════════════════════════════════════════════════
 def load_events(slug: str, days: int) -> List[Dict[str, Any]]:
-    path = shared_root() / "loop" / f"events-{slug}.ndjson"
-    if not path.exists():
+    # US-LOOP-023: read the head NDJSON plus its rotated siblings .1..4.
+    # bin/roll rotates events-<slug>.ndjson at 10MB keeping 4 archives; without
+    # this loop the dashboard silently dropped any cycle whose events landed in
+    # a rotated file (the "永久留存" promise of US-LOOP-004 only held on disk).
+    head = shared_root() / "loop" / f"events-{slug}.ndjson"
+    candidates = [head] + [head.with_suffix(f".ndjson.{i}") for i in range(1, 5)]
+    existing = [p for p in candidates if p.exists()]
+    if not existing:
         return []
     cutoff = datetime.now(timezone.utc) - timedelta(days=days + 1)  # +1 for grace
     out: List[Dict[str, Any]] = []
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                e = json.loads(line)
-                e["_ts"] = datetime.fromisoformat(e["ts"].replace("Z", "+00:00"))
-                if e["_ts"] >= cutoff:
-                    out.append(e)
-            except Exception:
-                continue
+    seen: set[str] = set()  # dedup on the raw JSON line (rotation is mv, so
+                            # duplicates only appear from manual ops — defensive)
+    for p in existing:
+        with p.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line in seen:
+                    continue
+                seen.add(line)
+                try:
+                    e = json.loads(line)
+                    e["_ts"] = datetime.fromisoformat(e["ts"].replace("Z", "+00:00"))
+                    if e["_ts"] >= cutoff:
+                        out.append(e)
+                except Exception:
+                    continue
+    out.sort(key=lambda e: e["_ts"])
+    if os.environ.get("ROLL_DEBUG_LOAD"):
+        print(f"roll-loop-status: loaded {len(out)} events from {len(existing)} files",
+              file=sys.stderr)
     return out
 
 # cron.log entry format (from bin/roll):

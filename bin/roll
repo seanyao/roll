@@ -5353,10 +5353,22 @@ _runs_append() {
   local _rid="loop-\${_cid%-*}"
   grep -qF "\"run_id\":\"\$_rid\"" "\$_runs_dst" 2>/dev/null && return 0
   mkdir -p "\$(dirname "\$_runs_dst")"
+  # FIX-123: clean stale .tmp files from dead PIDs on entry.
+  # A .tmp residue means a previous atomic write was interrupted.
+  # Only clean files whose PID (extracted from suffix) is dead.
+  local _tmp_dir; _tmp_dir="\$(dirname "\$_runs_dst")"
+  for _stale in "\$_tmp_dir"/runs.jsonl.tmp.*; do
+    [ -f "\$_stale" ] || continue
+    local _stale_pid="\${_stale##*.tmp.}"
+    kill -0 "\$_stale_pid" 2>/dev/null || rm -f "\$_stale"
+  done
   local _ts_now; _ts_now=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local _start="\${CYCLE_START:-\$(date -u +%s)}"
   local _dur=\$(( \$(date -u +%s) - _start ))
   [ "\$_dur" -lt 0 ] && _dur=0
+  # FIX-123: atomic write — write to .tmp.$$ first, then cat >> to append,
+  # then remove. If interrupted between jq and rm, the next call cleans it.
+  local _tmp="\$_runs_dst.tmp.\$\$"
   jq -nc \\
     --arg ts "\$_ts_now" \\
     --arg project "${slug}" \\
@@ -5373,7 +5385,9 @@ _runs_append() {
       cycle_id:\$cycle_id,
       built:\$built, skipped:\$skipped, alerts:\$alerts,
       tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}' \\
-    >> "\$_runs_dst" 2>/dev/null || true
+    > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }
+  cat "\$_tmp" >> "\$_runs_dst" 2>/dev/null || true
+  rm -f "\$_tmp"
 }
 _inner_cleanup() {
   local _rc=\$?

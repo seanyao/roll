@@ -3485,8 +3485,10 @@ cmd_slides_build() {
     local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     mkdir -p ".roll/slides/${slug}"
     printf '[%s] stage=validate\n%s\n' "$ts" "$val_out" > "$err_file"
-    err "deck.md validation failed — fix the issues above before building."
-    echo "$(msg slides_build.deck_md)" >&2
+    # Print validator output so user can see what failed.
+    printf '%s\n' "$val_out" >&2
+    echo -e "${RED}[FAIL]${NC} $(msg slides_build.validation_failed_for "${deck}")" >&2
+    echo "  $(msg slides_build.hint_fix_and_rerun "${deck}" "${slug}")" >&2
     return 1
   fi
 
@@ -3497,7 +3499,26 @@ cmd_slides_build() {
     local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     mkdir -p ".roll/slides/${slug}"
     printf '[%s] stage=template\ntemplate not found: %s\n' "$ts" "$tpl_name" > "$err_file"
-    err "$(msg slides_build.template_not_found ${tpl_name})"
+    echo -e "${RED}[FAIL]${NC} $(msg slides_build.template_not_found "${tpl_name}")" >&2
+    # List available templates (built-in + project overrides).
+    echo "  $(msg slides_build.available_templates)" >&2
+    local builtin_dir="${ROLL_PKG_DIR}/lib/slides/templates"
+    if [[ -d "$builtin_dir" ]]; then
+      local t
+      for t in "$builtin_dir"/*.html; do
+        local n="${t##*/}"; n="${n%.html}"
+        printf '    %-20s (builtin)\n' "$n" >&2
+      done
+    fi
+    local proj_dir=".roll/slides/templates"
+    if [[ -d "$proj_dir" ]]; then
+      local t
+      for t in "$proj_dir"/*.html; do
+        local n="${t##*/}"; n="${n%.html}"
+        printf '    %-20s (project)\n' "$n" >&2
+      done
+    fi
+    echo "  $(msg slides_build.templates_list_hint)" >&2
     return 1
   fi
 
@@ -3507,7 +3528,13 @@ cmd_slides_build() {
     local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     mkdir -p ".roll/slides/${slug}"
     printf '[%s] stage=render\n%s\n' "$ts" "$render_out" > "$err_file"
-    err "$(msg slides_build.render_failed_for ${deck})"
+    echo -e "${RED}[FAIL]${NC} $(msg slides_build.renderer_crashed_for "${deck}")" >&2
+    echo "  $(msg slides_build.see_full_error_logs "${slug}")" >&2
+    local last_lines; last_lines=$(printf '%s' "$render_out" | tail -n 5)
+    if [[ -n "$last_lines" ]]; then
+      echo "  $(msg slides_build.last_5_lines_of_renderer_output)" >&2
+      printf '%s\n' "$last_lines" >&2
+    fi
     return 1
   }
 

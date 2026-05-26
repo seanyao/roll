@@ -22,14 +22,25 @@ _i18n_safe_key() {
   echo "${1//[^A-Za-z0-9_]/_}"
 }
 
+# Uppercase a lang code without forking for the EN/ZH common case.
+# macOS still ships bash 3.2 which doesn't have ${var^^}; this helper keeps
+# the no-subshell goal for the languages we actually ship.
+_i18n_upper() {
+  case "$1" in
+    en|EN) printf 'EN' ;;
+    zh|ZH) printf 'ZH' ;;
+    *)     printf '%s' "$1" | tr '[:lower:]' '[:upper:]' ;;
+  esac
+}
+
 # Fill the catalog. Modules call this at source-time:
 #   _i18n_set en hello "Hello, %s!"
 #   _i18n_set zh hello "你好，%s！"
 _i18n_set() {
   local lang="$1" key="$2" val="$3"
   local upper safe varname
-  upper="${lang^^}"                      # FIX: bash built-in — no subshell fork
-  safe="${key//[^A-Za-z0-9_]/_}"        # FIX: inline param-expansion — no subshell fork
+  upper="$(_i18n_upper "$lang")"
+  safe="${key//[^A-Za-z0-9_]/_}"        # inline param-expansion — no subshell fork
   varname="MSG_${upper}_${safe}"
   printf -v "$varname" '%s' "$val"
   export "$varname"
@@ -124,7 +135,7 @@ msg() {
 msg_lang() {
   local lang="$1" key="$2"; shift 2 || true
   local upper safe varname tmpl
-  upper="${lang^^}"
+  upper="$(_i18n_upper "$lang")"
   safe="${key//[^A-Za-z0-9_]/_}"
   varname="MSG_${upper}_${safe}"
   tmpl="${!varname:-}"

@@ -73,7 +73,33 @@ setup() {
   [ "$output" = "every 5min (:02 :07 :12 :17 :22 :27 :32 :37 :42 :47 :52 :57)" ]
 }
 
-# ─── Chinese locale ───────────────────────────────────────────────────────────
+# ─── US-LOOP-032: non-divisor periods (no clock-aligned slots) ──────────────
+
+@test "_loop_schedule_desc: period=45 offset=0 (non-divisor)" {
+  run _loop_schedule_desc 45 0 en
+  [ "$status" -eq 0 ]
+  [ "$output" = "every 45min" ]
+}
+
+@test "_loop_schedule_desc: period=40 offset=0 (non-divisor)" {
+  run _loop_schedule_desc 40 0 en
+  [ "$status" -eq 0 ]
+  [ "$output" = "every 40min" ]
+}
+
+@test "_loop_schedule_desc: period=90 offset=0 (non-divisor)" {
+  run _loop_schedule_desc 90 0 en
+  [ "$status" -eq 0 ]
+  [ "$output" = "every 90min" ]
+}
+
+@test "_loop_schedule_desc: period=45 offset=0 zh" {
+  run _loop_schedule_desc 45 0 zh
+  [ "$status" -eq 0 ]
+  [ "$output" = "每45分鐘" ]
+}
+
+# ─── Chinese locale (divisor periods) ───────────────────────────────────────
 
 @test "_loop_schedule_desc: period=60 offset=18 zh" {
   run _loop_schedule_desc 60 18 zh

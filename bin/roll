@@ -4835,17 +4835,15 @@ _loop_derive_minute() {
   echo $(( (hash_dec + offset) % 55 + 1 ))
 }
 
-# US-LOOP-011: validate a (period, offset) pair against the allowed schedule spec.
-# Allowed periods are the divisors of 60: 60/30/20/15/12/10/6/5.
-# Offset must be within [0, period).
+# US-LOOP-032: validate a (period, offset) pair.  Period 1–1440.
+# offset_minute is deprecated (US-LOOP-032); still accepted for backward
+# compat but plist generation ignores it (uses StartInterval = period*60).
 _loop_schedule_valid() {
   local period="$1" offset="$2"
-  case "$period" in
-    60|30|20|15|12|10|6|5) ;;
-    *) return 1 ;;
-  esac
+  [[ "$period" =~ ^[0-9]+$ ]] || return 1
+  if (( period < 1 || period > 1440 )); then return 1; fi
   [[ "$offset" =~ ^[0-9]+$ ]] || return 1
-  if (( offset >= period )); then return 1; fi
+  if (( offset >= 60 )); then return 1; fi
   return 0
 }
 
@@ -4868,6 +4866,11 @@ _loop_schedule_spec() {
     local_offset=$(awk '/^loop_schedule:/{found=1;next} found && /^[[:space:]]+offset_minute:/{print $2; exit}' "$local_file")
     if [[ -n "$local_period" && -n "$local_offset" ]]; then
       if _loop_schedule_valid "$local_period" "$local_offset"; then
+        # US-LOOP-032: offset_minute is deprecated when period doesn't divide 60.
+        # Warn but don't fail.
+        if (( 60 % local_period != 0 )) && [[ "$local_offset" != "0" ]]; then
+          echo "roll: warning: offset_minute is deprecated (period=${local_period}, offset=${local_offset}). Use period_minutes only." >&2
+        fi
         echo "$local_period $local_offset"
         return 0
       fi
@@ -4876,11 +4879,11 @@ _loop_schedule_spec() {
       local alert_file="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/ALERT-${slug}.md"
       mkdir -p "$(dirname "$alert_file")" 2>/dev/null || true
       {
-        printf '## ⚠️ US-LOOP-011: Invalid loop_schedule\n\n'
+        printf '## ⚠️ US-LOOP-032: Invalid loop_schedule\n\n'
         printf '**Time**: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
         printf '**Source**: %s\n\n' "${project_path}/.roll/local.yaml"
         printf '**Values**: period_minutes=%s, offset_minute=%s\n\n' "$local_period" "$local_offset"
-        printf '**Action**: period must be one of 60/30/20/15/12/10/6/5; offset must be 0–(period-1). Falling back to default (period=60).\n\n'
+        printf '**Action**: period must be 1–1440; offset must be 0–59. Falling back to default (period=60).\n\n'
         printf '%s\n' '---'
       } >> "$alert_file"
     fi
@@ -4900,30 +4903,39 @@ _loop_schedule_spec() {
   echo "60 $offset"
 }
 
-# US-LOOP-013: human-readable schedule description for display.
+# US-LOOP-032: human-readable schedule description.
 # Args: period offset [lang]
 #   lang: en (default) or zh
+# For periods that divide 60, shows clock-aligned slots (e.g. "every 30min (:00 :30)").
+# For non-divisor periods (US-LOOP-032), shows just the interval (e.g. "every 45min").
 _loop_schedule_desc() {
   local period="$1" offset="$2" lang="${3:-en}"
   if [[ "$period" -eq 60 ]]; then
     if [[ "$lang" == "zh" ]]; then
-      # msg_lang uses the explicit lang param, not ROLL_LANG env; strips trailing
-      # newline via command substitution so callers get a clean string.
       printf '%s' "$(msg_lang "$lang" agent.hourly_at_02d "$offset")"
     else
       printf "every hour :%02d" "$offset"
     fi
     return 0
   fi
-  local times="" slots=$((60 / period)) i m
-  for i in $(seq 0 $((slots - 1))); do
-    m=$((offset + i * period))
-    times="${times} :$(printf '%02d' "$m")"
-  done
-  if [[ "$lang" == "zh" ]]; then
-    printf '%s' "$(msg_lang "$lang" agent.every_d_min_s "$period" "${times# }")"
+  # US-LOOP-032: only show clock-aligned slots when period divides 60
+  if (( 60 % period == 0 )); then
+    local times="" slots=$((60 / period)) i m
+    for i in $(seq 0 $((slots - 1))); do
+      m=$((offset + i * period))
+      times="${times} :$(printf '%02d' "$m")"
+    done
+    if [[ "$lang" == "zh" ]]; then
+      printf '%s' "$(msg_lang "$lang" agent.every_d_min_s "$period" "${times# }")"
+    else
+      printf "every %dmin (%s)" "$period" "${times# }"
+    fi
   else
-    printf "every %dmin (%s)" "$period" "${times# }"
+    if [[ "$lang" == "zh" ]]; then
+      printf '每%d分鐘' "$period"
+    else
+      printf "every %dmin" "$period"
+    fi
   fi
 }
 
@@ -5103,35 +5115,18 @@ _write_launchd_plist() {
   # FIX-105: macOS 26.4 launchd silently refuses to fire StartCalendarInterval
   # entries that contain BOTH Hour and Minute keys. Daily services use
   # StartInterval=86400 instead.
-  # US-LOOP-012: when period < 60 and no hour, generate StartCalendarInterval
-  # <array> with one <dict> per trigger minute.
+  # US-LOOP-032: all loop services use StartInterval = period * 60 (was
+  # StartCalendarInterval with slot enumeration). Non-divisor periods are now
+  # supported.
   local schedule_xml
   if [[ -n "$hour" ]]; then
     schedule_xml="  <key>StartInterval</key>
   <integer>86400</integer>"
-  elif [[ "$period" == "60" ]]; then
-    schedule_xml="  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Minute</key>
-    <integer>${offset}</integer>
-  </dict>"
   else
-    # US-LOOP-012: period < 60 → generate array of dicts
-    local entries=$(( 60 / period ))
-    local xml_lines="  <key>StartCalendarInterval</key>
-  <array>"
-    local i m
-    for ((i = 0; i < entries; i++)); do
-      m=$(( offset + i * period ))
-      xml_lines+="
-    <dict>
-      <key>Minute</key>
-      <integer>${m}</integer>
-    </dict>"
-    done
-    xml_lines+="
-  </array>"
-    schedule_xml="$xml_lines"
+    # US-LOOP-032: StartInterval in seconds = period_minutes * 60
+    local interval=$(( period * 60 ))
+    schedule_xml="  <key>StartInterval</key>
+  <integer>${interval}</integer>"
   fi
 
   local content
@@ -6207,7 +6202,7 @@ Internal (called by roll-loop SKILL):
 Schedule is configured per-project in .roll/local.yaml:
 
   loop_schedule:
-    period_minutes: 30   # 60, 30, 20, 15, 12, 10, 6, or 5
+    period_minutes: 30   # 1-1440 (any minute interval)
     offset_minute: 7     # 0 – (period_minutes - 1)
 
 See guide/en/loop.md for full documentation.

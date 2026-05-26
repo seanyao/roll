@@ -80,10 +80,10 @@ YAML
 
 # ─── Validation: invalid period ───────────────────────────────────────────────
 
-@test "_loop_schedule_spec: invalid period falls back to default + ALERT" {
+@test "_loop_schedule_spec: invalid period (1441) falls back to default + ALERT" {
   cat > "${TEST_PROJECT}/.roll/local.yaml" << 'YAML'
 loop_schedule:
-  period_minutes: 45
+  period_minutes: 1441
   offset_minute: 7
 YAML
   run _loop_schedule_spec "$TEST_PROJECT"
@@ -120,11 +120,11 @@ YAML
 
 # ─── Validation: invalid offset ───────────────────────────────────────────────
 
-@test "_loop_schedule_spec: offset >= period falls back to default" {
+@test "_loop_schedule_spec: offset >= 60 falls back to default" {
   cat > "${TEST_PROJECT}/.roll/local.yaml" << 'YAML'
 loop_schedule:
   period_minutes: 30
-  offset_minute: 30
+  offset_minute: 60
 YAML
   run _loop_schedule_spec "$TEST_PROJECT"
   [ "$status" -eq 0 ]
@@ -153,9 +153,68 @@ YAML
   [[ "$output" =~ ^60\ [0-9]+$ ]]
 }
 
+# ─── US-LOOP-032: non-divisor periods (1-1440) ───────────────────────────────
+
+@test "_loop_schedule_spec: period=45 offset=7 emits deprecation to stderr" {
+  cat > "${TEST_PROJECT}/.roll/local.yaml" << 'YAML'
+loop_schedule:
+  period_minutes: 45
+  offset_minute: 7
+YAML
+  run _loop_schedule_spec "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  # Output contains the spec (stdout) and deprecation warning (stderr)
+  [[ "$output" =~ 45\ 7 ]]
+  [[ "$output" == *"deprecated"* ]]
+}
+
+@test "_loop_schedule_spec: period=40 (non-divisor) passes" {
+  cat > "${TEST_PROJECT}/.roll/local.yaml" << 'YAML'
+loop_schedule:
+  period_minutes: 40
+  offset_minute: 0
+YAML
+  run _loop_schedule_spec "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "40 0" ]
+}
+
+@test "_loop_schedule_spec: period=90 (non-divisor) passes" {
+  cat > "${TEST_PROJECT}/.roll/local.yaml" << 'YAML'
+loop_schedule:
+  period_minutes: 90
+  offset_minute: 0
+YAML
+  run _loop_schedule_spec "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "90 0" ]
+}
+
+@test "_loop_schedule_spec: period=1 (minimum) passes" {
+  cat > "${TEST_PROJECT}/.roll/local.yaml" << 'YAML'
+loop_schedule:
+  period_minutes: 1
+  offset_minute: 0
+YAML
+  run _loop_schedule_spec "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1 0" ]
+}
+
+@test "_loop_schedule_spec: period=1440 (maximum) passes" {
+  cat > "${TEST_PROJECT}/.roll/local.yaml" << 'YAML'
+loop_schedule:
+  period_minutes: 1440
+  offset_minute: 0
+YAML
+  run _loop_schedule_spec "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1440 0" ]
+}
+
 # ─── Edge cases ───────────────────────────────────────────────────────────────
 
-@test "_loop_schedule_spec: all valid periods pass validation" {
+@test "_loop_schedule_spec: all divisor periods still pass validation" {
   for period in 60 30 20 15 12 10 6 5; do
     cat > "${TEST_PROJECT}/.roll/local.yaml" << YAML
 loop_schedule:
@@ -224,17 +283,30 @@ YAML
   [ "$status" -eq 0 ]
 }
 
-@test "_loop_schedule_valid: invalid period rejected" {
+@test "_loop_schedule_valid: non-divisor periods now pass (US-LOOP-032)" {
   run _loop_schedule_valid 45 0
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
+  run _loop_schedule_valid 40 0
+  [ "$status" -eq 0 ]
+  run _loop_schedule_valid 90 0
+  [ "$status" -eq 0 ]
+  run _loop_schedule_valid 1 0
+  [ "$status" -eq 0 ]
+  run _loop_schedule_valid 1440 0
+  [ "$status" -eq 0 ]
+}
+
+@test "_loop_schedule_valid: invalid period rejected" {
   run _loop_schedule_valid 0 0
   [ "$status" -ne 0 ]
-  run _loop_schedule_valid 100 0
+  run _loop_schedule_valid 1441 0
+  [ "$status" -ne 0 ]
+  run _loop_schedule_valid 2000 0
   [ "$status" -ne 0 ]
 }
 
 @test "_loop_schedule_valid: invalid offset rejected" {
-  run _loop_schedule_valid 30 30
+  run _loop_schedule_valid 30 60
   [ "$status" -ne 0 ]
   run _loop_schedule_valid 30 99
   [ "$status" -ne 0 ]

@@ -565,11 +565,12 @@ roll loop status                  # verify the new trigger times
 
 ### C8. My period_minutes setting is not taking effect
 
-**Symptoms:** You set `period_minutes: 45` in `.roll/local.yaml`, the loop
-still runs every hour, and `roll alert` shows a scheduling ALERT.
+**Symptoms:** You set `period_minutes: 0` or `period_minutes: 1441` in
+`.roll/local.yaml`, the loop still runs every hour, and `roll alert` shows
+a scheduling ALERT.
 
-**Why this happens:** `period_minutes` must evenly divide 60.
-Valid values: 60, 30, 20, 15, 12, 10, 6, 5.
+**Why this happens:** `period_minutes` must be 1–1440.
+Values outside this range are rejected.
 
 **Under the hood:** `_loop_schedule_valid` validates the pair on every read.
 An invalid pair triggers an ALERT to `~/.shared/roll/loop/ALERT-<slug>.md`
@@ -579,7 +580,7 @@ and falls back to the default (period=60, project-derived offset).
 
 ```bash
 roll alert                        # check the exact error
-# Edit .roll/local.yaml — use a valid divisor of 60
+# Edit .roll/local.yaml — use a value 1–1440
 roll loop off && roll loop on     # re-install
 roll loop status                  # confirm the new schedule
 ```

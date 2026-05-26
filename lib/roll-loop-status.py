@@ -931,13 +931,10 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
           c("muted", "       ") +
           c("dim", "more   ") + c("blue", "roll loop status --days 7"))
 
-# US-LOOP-013: valid schedule periods (must divide 60)
-_VALID_SCHEDULE_PERIODS = {60, 30, 20, 15, 12, 10, 6, 5}
-
-
+# US-LOOP-032: period 1–1440; offset 0–59 (deprecated, kept for backward compat)
 def _schedule_valid(period: int, offset: int) -> bool:
-    """Validate schedule spec: period must divide 60, offset in [0, period)."""
-    return period in _VALID_SCHEDULE_PERIODS and 0 <= offset < period
+    """Validate schedule spec: period 1–1440, offset in [0, 60)."""
+    return 1 <= period <= 1440 and 0 <= offset < 60
 
 
 def _read_schedule_spec(project_root: Optional[Path] = None) -> Tuple[int, int]:

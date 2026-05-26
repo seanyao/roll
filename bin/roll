@@ -6144,6 +6144,7 @@ cmd_loop() {
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
     log)     _loop_log "$@" ;;
+    story)   _loop_story "$@" ;;
     events)  _loop_event_log "${1:-20}" ;;
     attach)  _loop_attach ;;
     mute)    _loop_mute ;;
@@ -6156,7 +6157,7 @@ cmd_loop() {
     precheck-ci)  _loop_precheck_ci ;;
     branches)     _loop_branches "$(pwd -P)" ;;
     *)  cat <<'HELP'
-Usage: roll loop <on|off|now|test|status|monitor|runs|log|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci|branches>
+Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|notify|enforce-tcr|precheck-ci|branches>
 
   on            Install launchd scheduler (loop + dream + brief)
   off           Remove launchd scheduler
@@ -6166,6 +6167,7 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|log|events|attach|mute|unm
   monitor       Live dashboard: launchd status, queue, recent runs
   runs [N]      Show last N run summaries (default 10)
   log [id]      Show per-cycle log (default: latest; optional cycle-id or prefix)
+  story <ID>    Show per-story rollup (cycles, duration, tokens, cost, PRs)
   events [N]    Show last N cycle events (default 20)
   attach        Attach to running loop tmux session (Ctrl-B D to detach)
   mute          Suppress auto-attach popup
@@ -6452,6 +6454,25 @@ _loop_status() {
     return
   fi
   _legacy_loop_status "$@"
+}
+
+_loop_story() {
+  if [[ -z "${1:-}" || "$1" == "-h" || "$1" == "--help" ]]; then
+    cat <<'HELP'
+Usage: roll loop story <STORY-ID> [--days N] [--json]
+
+  Show a per-story rollup across cycles: count, span, duration, tokens,
+  cost, model, PR landings, and the last 3 cycles. Story ID is case-
+  insensitive (us-loop-004 == US-LOOP-004).
+
+Examples:
+  roll loop story US-LOOP-004
+  roll loop story us-loop-004 --days 90
+  roll loop story US-LOOP-004 --json | jq .cost
+HELP
+    return 1
+  fi
+  python3 "${ROLL_PKG_DIR}/lib/roll-loop-story.py" "$@"
 }
 
 _legacy_loop_status() {

@@ -273,6 +273,7 @@ _ensure_config_entries() {
     "ai_openclaw:~/.openclaw/workspace|AGENTS.md|AGENTS.md"
     "ai_pi:~/.pi/agent|AGENTS.md|AGENTS.md"
     "ai_deepseek:~/.deepseek|AGENTS.md|AGENTS.md"
+    "ai_qwen:~/.qwen|AGENTS.md|AGENTS.md"
   )
 
   local added=0
@@ -781,7 +782,7 @@ cmd_setup() {
     esac
   }
 
-  local _ai_dirs="$HOME/.claude:$HOME/.gemini:$HOME/.kimi:$HOME/.codex:$HOME/.cursor:$HOME/.trae:$HOME/.config/opencode:$HOME/.openclaw:$HOME/.pi:$HOME/.deepseek"
+  local _ai_dirs="$HOME/.claude:$HOME/.gemini:$HOME/.kimi:$HOME/.codex:$HOME/.cursor:$HOME/.trae:$HOME/.config/opencode:$HOME/.openclaw:$HOME/.pi:$HOME/.deepseek:$HOME/.qwen"
 
   _run_setup_step "$ROLL_HOME" _install_local "$force"
   _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Install templates & conventions to ~/.roll"
@@ -3164,6 +3165,9 @@ _agent_argv() {
         interactive) _AGENT_ARGV=(agy -i "$prompt") ;;
         *) return 1 ;;
       esac ;;
+    qwen)
+      # qwen has the same argv shape in both modes (positional prompt).
+      _AGENT_ARGV=(qwen "$prompt") ;;
     *) return 1 ;;
   esac
 }
@@ -3201,7 +3205,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
   _agent_argv "$agent" text "$content" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode|qwen>"
     return 1
   }
   "${_AGENT_ARGV[@]}"
@@ -3960,7 +3964,7 @@ EOF
 )"
 
   _agent_argv "$agent" text "$prompt" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode|qwen>"
     trap - INT TERM
     return 1
   }
@@ -4346,7 +4350,7 @@ cmd_agent() {
   case "$subcmd" in
     use)
       local name="${1:-}"
-      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"; exit 1; }
+      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|codex|opencode|qwen>"; exit 1; }
       command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
       # REFACTOR-040: write to .roll/local.yaml (per-machine state). Migrate
       # from legacy .roll.yaml in the project root on the spot — copy the
@@ -4380,7 +4384,7 @@ cmd_agent() {
     list)
       echo ""; echo "  $(msg agent.available_agents)"; echo ""
       local current; current=$(_project_agent)
-      for a in claude kimi deepseek opencode codex pi; do
+      for a in claude kimi deepseek opencode codex pi qwen; do
         if command -v "$a" &>/dev/null; then
           [[ "$a" == "$current" ]] && echo -e "    ${GREEN}✓ ${a}${NC}  (current)" \
                                    || echo -e "    ${GREEN}✓ ${a}${NC}"
@@ -6130,7 +6134,7 @@ _agent_skill_cmd() {
   local agent; agent=$(_project_agent)
   local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
   _agent_argv "$agent" plain "__PROMPT__" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|codex|opencode|qwen>"
     return 1
   }
   # Cron-installed skills (dream / brief / loop) run autonomously and need to

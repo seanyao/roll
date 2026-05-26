@@ -15,6 +15,7 @@ and skills — switching agents does not require changing your workflow.
 | Pi (pi-coding-agent) | `pi` | |
 | Trae IDE | (IDE-based) | project_rules.md sync |
 | opencode | `opencode` | AGENTS.md sync |
+| Qwen | `qwen` | Alibaba Cloud / DashScope |
 
 ## Switching Agents
 

@@ -71,6 +71,12 @@ teardown() { unit_teardown; }
   [ "${_AGENT_ARGV[2]}" = "p" ]
 }
 
+@test "_agent_argv qwen → qwen prompt" {
+  _agent_argv qwen text "p"
+  [ "${_AGENT_ARGV[0]}" = "qwen" ]
+  [ "${_AGENT_ARGV[1]}" = "p" ]
+}
+
 @test "_agent_argv unknown agent returns 1" {
   run _agent_argv bogus text "p"
   [ "$status" -eq 1 ]
@@ -121,6 +127,13 @@ teardown() { unit_teardown; }
   [ "$status" -eq 0 ]
   # Output begins with either /…/claude or literal claude, then -p, then bypass flag
   [[ "$output" == *claude\ -p\ --dangerously-skip-permissions\ \"\$\(awk* ]]
+}
+
+@test "_agent_skill_cmd qwen → qwen \"\$(awk ...)\"" {
+  _project_agent() { echo qwen; }
+  run _agent_skill_cmd "/tmp/skill.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == qwen\ \"\$\(awk* ]]
 }
 
 @test "_agent_skill_cmd unknown agent returns 1" {

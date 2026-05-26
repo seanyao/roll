@@ -1,0 +1,22 @@
+<!-- compare: requires left_title_en,left_title_zh,right_title_en,right_title_zh, left_items[].{text_en,text_zh}, right_items[].{text_en,text_zh} -->
+<div class="compare">
+<div class="compare-col compare-before">
+<h3><span class="lang-en">{{left_title_en}}</span><span class="lang-zh">{{left_title_zh}}</span></h3>
+{{#left_items}}
+<div class="compare-item">
+<span class="icon">✗</span>
+<span class="lang-en">{{text_en}}</span><span class="lang-zh">{{text_zh}}</span>
+</div>
+{{/left_items}}
+</div>
+<div class="compare-arrow">→</div>
+<div class="compare-col compare-after">
+<h3><span class="lang-en">{{right_title_en}}</span><span class="lang-zh">{{right_title_zh}}</span></h3>
+{{#right_items}}
+<div class="compare-item">
+<span class="icon">✓</span>
+<span class="lang-en">{{text_en}}</span><span class="lang-zh">{{text_zh}}</span>
+</div>
+{{/right_items}}
+</div>
+</div>

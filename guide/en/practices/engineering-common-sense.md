@@ -220,6 +220,141 @@ At the **Test Design Review** phase of each Story, the following must be answere
 
 ---
 
+## 9. Shell Script Performance 🐚
+
+**Definition:** `$()` command substitution forks a subshell. In hot paths (functions called per-test, per-catalog-entry, or per-message-lookup) this is the dominant cost.
+
+**Rule of thumb:**
+- 1 subshell fork ≈ 2–3 ms on Linux
+- 1000 forks in a test suite setup = +2–3 s per test run
+- 1739 tests × 2.3 s = **~67 minutes of wasted CI time** (observed in this repo)
+
+**Must avoid in hot paths:**
+```bash
+# ❌ Subshell fork — slow when called thousands of times
+upper="$(echo "$lang" | tr '[:lower:]' '[:upper:]')"
+upper="$(_some_helper_function "$lang")"
+safe="$(_sanitize_key "$key")"
+
+# ✅ Inline equivalents — zero fork
+case "$lang" in
+  en|EN) upper=EN ;;
+  zh|ZH) upper=ZH ;;
+  *)     upper="$(printf '%s' "$lang" | tr '[:lower:]' '[:upper:]')" ;;  # rare path OK
+esac
+safe="${key//[^A-Za-z0-9_]/_}"   # parameter expansion, no fork
+printf -v "$varname" '%s' "$val"  # printf -v instead of subshell assignment
+```
+
+**Compatibility trap — the "fixed twice" anti-pattern:**
+```
+PR #211: fixed $(echo | tr) → ${lang^^}      ✅ fast, but bash 4+ only
+PR #213: fixed bash 3.2 compat → $(_helper)  ❌ reintroduced the subshell
+PR #218: fixed both → inline case             ✅ fast + bash 3.2 safe
+```
+When fixing for compatibility, verify the fix does not reintroduce the original problem.
+Add a timing assertion or benchmark test to guard the regression.
+
+**Dead code from inlining:**
+When inlining a helper function's logic, remove the original function and grep for all callers.
+A leftover function with zero callers misleads future contributors into calling it via `$()`
+and reintroducing the fork.
+
+**Must check:**
+- [ ] Is this function called inside a loop, setup(), or per-entry catalog loading?
+- [ ] Does it use `$()` anywhere? Can it be replaced with `case`, `${var//...}`, or `printf -v`?
+- [ ] After inlining, is the original helper now dead code? Remove it.
+- [ ] Is there a timing test or CI cap to catch regressions? (see `ROLL_TEST_TIME_CAP`)
+
+---
+
+## 10. Shell Resource Cleanup 🧹
+
+**Definition:** Every `trap` set must be explicitly reset. Temporary files and lock files must never outlive their owning process.
+
+**trap - EXIT pattern:**
+```bash
+# ❌ Dangling trap — EXIT handler persists in the calling shell after return
+local tmp; tmp=$(mktemp)
+trap "rm -f '$tmp'" EXIT
+# ... do work ...
+mv "$tmp" "$dst"
+return 0   # EXIT trap still armed — any later exit fires rm on a stale path
+
+# ✅ Always reset after use
+local tmp; tmp=$(mktemp)
+trap "rm -f '$tmp'" EXIT
+# ... do work ...
+mv "$tmp" "$dst" 2>/dev/null || rm -f "$tmp"
+trap - EXIT   # disarm before return
+return 0
+```
+
+**Directory scope in cleanup helpers:**
+```bash
+# ❌ Wrong — scans the env-var default, not the actual path in use
+_cleanup_tmp() {
+  local dir; dir=$(dirname "${MY_PATH:-$HOME/.default/path}")
+  ...
+}
+_do_work() {
+  local custom_path="$1"   # may differ from MY_PATH
+  _cleanup_tmp             # scans wrong directory!
+}
+
+# ✅ Pass the actual directory explicitly
+_cleanup_tmp() {
+  local dir="${1:-$(dirname "${MY_PATH:-$HOME/.default/path}")}"
+  ...
+}
+_do_work() {
+  local custom_path="$1"
+  _cleanup_tmp "$(dirname "$custom_path")"
+}
+```
+
+**Must check:**
+- [ ] Every `trap "…" EXIT` has a matching `trap - EXIT` before the function returns.
+- [ ] Cleanup helpers accept the target directory as an argument — no implicit env-var path.
+- [ ] Temporary file names are quoted in trap strings: `"rm -f '$tmp'"` not `"rm -f $tmp"`.
+
+---
+
+## 11. Test Reliability 🧪
+
+**Definition:** Tests must not rely on environmental assumptions that can silently fail on different hosts.
+
+**PID assumptions:**
+```bash
+# ❌ Assumes pid_max ≤ 99999 — fails silently in containers with large pid_max
+local stale_tmp="runs.jsonl.tmp.99999"
+
+# ✅ Use a process that is provably dead
+bash -c 'exit 0' &
+local dead_pid=$!
+wait "$dead_pid" 2>/dev/null || true
+local stale_tmp="runs.jsonl.tmp.${dead_pid}"
+```
+
+**Heredoc scope:**
+Functions defined outside a heredoc are not available inside it when the generated
+script executes. Calling them silently no-ops (if guarded with `|| true`) or crashes.
+```bash
+# ❌ _some_helper is not defined in the generated script's scope
+cat > script.sh <<'EOF'
+_some_helper 2>/dev/null || true   # silent no-op — always "succeeds"
+EOF
+
+# ✅ Either inline the logic, or define the function inside the heredoc
+```
+
+**Must check:**
+- [ ] Does the test use a hardcoded PID, port, or path that may conflict on the host?
+- [ ] Does the test call a function that is only defined in the outer shell, not inside a heredoc?
+- [ ] Is the "dead process" check using an actual exited process, not a guessed PID?
+
+---
+
 ## Automated Safeguards
 
 ### Sentinel Patrol Rules

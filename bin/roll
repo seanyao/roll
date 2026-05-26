@@ -6835,8 +6835,12 @@ _loop_log() {
   fi
 
   if [[ -z "$query" ]]; then
-    # No argument: find latest .log by mtime.
-    local latest; latest=$(ls -t "$logs_dir"/*.log 2>/dev/null | head -1)
+    # No argument: find latest .log by cycle-id (filename reverse-sort).
+    # Cycle filenames encode the start timestamp (YYYYMMDD-HHMMSS-PID.log) so
+    # the lexicographically greatest name is always the most recent cycle.
+    # mtime-based sorting (ls -t) is unreliable when files are created in the
+    # same sub-second window (all share the same inode timestamp).
+    local latest; latest=$(ls "$logs_dir"/*.log 2>/dev/null | sort -r | head -1)
     if [[ -z "$latest" ]]; then
       echo "$(msg loop.no_cycle_logs_found_run_roll_2)"
       return 0

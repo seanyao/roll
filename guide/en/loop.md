@@ -92,6 +92,9 @@ roll loop runs 20     # Show last 20 runs
 roll loop runs --all  # Show all projects' run history
 roll loop runs --detail <cycle_id>  # Phase Breakdown panel for a single cycle
 
+roll loop story <ID>  # Per-story rollup: cycles, span, duration, tokens, cost, PRs
+roll loop story <ID> --json  # Machine-readable form for scripting
+
 roll loop attach      # Attach to running loop tmux session (Ctrl-B D to detach)
 roll loop mute        # Suppress auto-attach popup (loop still runs in tmux)
 roll loop unmute      # Re-enable auto-attach popup
@@ -138,6 +141,42 @@ output tokens    63.3K
 
 This lets you verify that the displayed per-cycle cost (e.g. `$11.07`) matches
 your Anthropic invoice — 86 % of the cost in that example comes from cache.
+
+## Per-Story Rollup
+
+`roll loop status` shows the rolling window (default 3 days). When you want the
+**full lifetime** of a single story — every cycle that ever ran on it, including
+cycles that have aged out of the dashboard window — use `roll loop story`.
+
+```bash
+roll loop story US-LOOP-004           # Compact panel for one story
+roll loop story us-loop-004           # Case-insensitive
+roll loop story US-LOOP-004 --days 90 # Widen the event-stream lookback
+roll loop story US-LOOP-004 --json    # Emit JSON for scripting / dashboards
+```
+
+The panel reports the totals you'd otherwise have to hand-add across multiple
+`status` runs:
+
+```
+── US-LOOP-004 · 把每轮 cycle 成本/token/耗时写进事件流 ──
+  cycles    3  (✓ 2  ✗ 1  ⏵ 0)
+  span      2026-05-18 14:22  →  2026-05-19 09:11
+  duration  1h 47m   tokens  in 412k  out 18.3k  cache w 1.2M  r 7.8M
+  cost      $4.92    model  claude-opus-4-7
+  PRs       #128 ✓   #131 ✓   #134 ✗
+  recent    20260518-142233-91  ✓  $2.10
+            20260518-203045-12  ✗  $1.71
+            20260519-091112-44  ✓  $1.11
+```
+
+**How history is preserved:** `bin/roll` rotates `events-<slug>.ndjson` at 10 MB,
+keeping `.1` … `.4` archives. `roll loop status` and `roll loop story` both read
+the head plus all rotated files, so cycles never disappear once they're on disk.
+
+**Exit codes:** `0` when at least one cycle is found, `2` when no cycles match
+the story id in the lookback window. The `--json` form follows the same exit
+code contract so scripts can detect missing data.
 
 ## Visibility (tmux + popup)
 

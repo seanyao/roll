@@ -401,6 +401,7 @@ git push --force-with-lease
 | 你想看什么 | 命令 |
 |---|---|
 | 最近 N 个周期摘要 + 成本 | `roll loop status --days 7` |
+| 一个故事跨所有 cycle 的总花费 | `roll loop story <ID>` |
 | 每周期 JSONL 记录 | `roll loop runs` |
 | 单个 cycle 各阶段耗时 | `roll loop runs --detail <cycle_id>` |
 | 带成本列的实时 dashboard | `roll loop monitor` |
@@ -409,6 +410,10 @@ git push --force-with-lease
 | 需要关注的告警 | `roll alert` |
 | 完整 cycle agent 输出（纯文本） | `roll loop log` |
 | 完整 agent 对话记录 | `roll loop attach` 后上翻 |
+
+`status` 是滚动窗口（默认 3 天）。当一个 story 拖了一周、跑过好几轮，你想看它**总共**花了多少
+——总耗时、总 token、总成本、所有 PR——用 `roll loop story <ID>`：它会读完整事件流（含轮转归档
+`.1` … `.4`），一次性给你一张面板。
 
 ---
 

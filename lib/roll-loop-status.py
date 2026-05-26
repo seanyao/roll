@@ -125,23 +125,39 @@ def shared_root() -> Path:
 # Loaders
 # ════════════════════════════════════════════════════════════════════════════
 def load_events(slug: str, days: int) -> List[Dict[str, Any]]:
-    path = shared_root() / "loop" / f"events-{slug}.ndjson"
-    if not path.exists():
+    # US-LOOP-023: read the head NDJSON plus its rotated siblings .1..4.
+    # bin/roll rotates events-<slug>.ndjson at 10MB keeping 4 archives; without
+    # this loop the dashboard silently dropped any cycle whose events landed in
+    # a rotated file (the "永久留存" promise of US-LOOP-004 only held on disk).
+    head = shared_root() / "loop" / f"events-{slug}.ndjson"
+    candidates = [head] + [head.with_suffix(f".ndjson.{i}") for i in range(1, 5)]
+    existing = [p for p in candidates if p.exists()]
+    if not existing:
         return []
     cutoff = datetime.now(timezone.utc) - timedelta(days=days + 1)  # +1 for grace
     out: List[Dict[str, Any]] = []
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                e = json.loads(line)
-                e["_ts"] = datetime.fromisoformat(e["ts"].replace("Z", "+00:00"))
-                if e["_ts"] >= cutoff:
-                    out.append(e)
-            except Exception:
-                continue
+    seen: set[str] = set()  # dedup on the raw JSON line (rotation is mv, so
+                            # duplicates only appear from manual ops — defensive)
+    for p in existing:
+        with p.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line in seen:
+                    continue
+                seen.add(line)
+                try:
+                    e = json.loads(line)
+                    e["_ts"] = datetime.fromisoformat(e["ts"].replace("Z", "+00:00"))
+                    if e["_ts"] >= cutoff:
+                        out.append(e)
+                except Exception:
+                    continue
+    out.sort(key=lambda e: e["_ts"])
+    if os.environ.get("ROLL_DEBUG_LOAD"):
+        print(f"roll-loop-status: loaded {len(out)} events from {len(existing)} files",
+              file=sys.stderr)
     return out
 
 # cron.log entry format (from bin/roll):
@@ -638,6 +654,57 @@ def bucket_by_day(cycles: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]
         day = cy["start"].astimezone().strftime("%Y-%m-%d")
         out[day].append(cy)
     return out
+
+def rollup_for_story(cycles: List[Dict[str, Any]], story_id: str) -> Dict[str, Any]:
+    """US-LOOP-024: aggregate cycles belonging to a single story.
+
+    Case-insensitive match on cy["story"]. Sums duration / tokens / cost,
+    splits outcomes into ✓ (done|idle) / ✗ (fail) / ⏵ (running), collects
+    PR landings, captures the model from the first matching cycle.
+    """
+    sid_lower = (story_id or "").lower()
+    matched = [cy for cy in cycles if (cy.get("story") or "").lower() == sid_lower]
+    r: Dict[str, Any] = {
+        "story_id": story_id,
+        "cycles": matched,
+        "count": len(matched),
+        "ok_count": 0, "fail_count": 0, "running_count": 0,
+        "span_start": None, "span_end": None,
+        "duration_s": 0, "cost": 0.0,
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_tokens": 0, "cache_read_tokens": 0,
+        "prs": [], "model": None,
+    }
+    for cy in matched:
+        outcome = cy.get("outcome") or ""
+        if outcome == "fail":
+            r["fail_count"] += 1
+        elif outcome == "running":
+            r["running_count"] += 1
+        else:
+            r["ok_count"] += 1
+        if cy.get("start"):
+            if r["span_start"] is None or cy["start"] < r["span_start"]:
+                r["span_start"] = cy["start"]
+        if cy.get("end"):
+            if r["span_end"] is None or cy["end"] > r["span_end"]:
+                r["span_end"] = cy["end"]
+        if cy.get("duration_s"):
+            r["duration_s"] += cy["duration_s"]
+        for tk in ("input_tokens", "output_tokens",
+                   "cache_creation_tokens", "cache_read_tokens"):
+            if cy.get(tk):
+                r[tk] += cy[tk]
+        if cy.get("cost_list") is not None:
+            r["cost"] += cy["cost_list"]
+        elif cy.get("cron"):
+            r["cost"] += cy["cron"]["cost"]
+        if cy.get("pr_num"):
+            r["prs"].append({"num": cy["pr_num"],
+                             "outcome": cy.get("pr_outcome") or "open"})
+        if cy.get("model") and not r["model"]:
+            r["model"] = cy["model"]
+    return r
 
 def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
     # US-VIEW-012: track input + output separately so the daily summary can

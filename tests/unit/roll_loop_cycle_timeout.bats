@@ -132,19 +132,19 @@ STUB
   local inner="${script_path%.sh}-inner.sh"
 
   # 3s timeout for the test. Run inner in background; expect it to exit
-  # on its own within ~8s (3s timeout + 5s buffer). timeout(1) is not
-  # portable on macOS, so we poll.
+  # on its own within ~15s (startup overhead + 3s timeout + 5s SIGKILL grace
+  # + buffer). timeout(1) is not portable on macOS, so we poll.
   ROLL_LOOP_CYCLE_TIMEOUT_SEC=3 \
   PATH="${_test_dir}/stubbin:$PATH" \
     bash "$inner" >/dev/null 2>&1 &
   local inner_pid=$!
   local waited=0
-  while kill -0 "$inner_pid" 2>/dev/null && [ "$waited" -lt 8 ]; do
+  while kill -0 "$inner_pid" 2>/dev/null && [ "$waited" -lt 15 ]; do
     sleep 1; waited=$((waited+1))
   done
   if kill -0 "$inner_pid" 2>/dev/null; then
     kill -KILL "$inner_pid" 2>/dev/null
-    return 1   # inner did not exit within 8s — timeout did not fire
+    return 1   # inner did not exit within 15s — timeout did not fire
   fi
   # Lock file must be released.
   local inner_lock="$(dirname "$inner")/.INNER-LOCK-$(basename "$inner" -inner.sh | sed 's/^run-//')"

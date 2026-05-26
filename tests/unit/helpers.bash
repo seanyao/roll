@@ -31,7 +31,16 @@ unit_setup() {
   # auto-detect only fires when _LAUNCHD_DIR is under _SHARED_ROOT — many unit
   # tests set them as siblings, so the env gate is the reliable lever.
   export _LAUNCHD_SKIP_REGISTRY=1
+  # US-QA-009: suspend bats DEBUG trap during source to avoid 10,764-call
+  # overhead. bats installs 'trap bats_debug_trap DEBUG' via set -eET before
+  # setup() runs; with functrace active, every command in bin/roll's 9,665
+  # lines triggers the trap (~228μs each = ~2.5s per test). Suspending for
+  # the source call and restoring afterwards cuts unit CI from ~27min to ~2min.
+  local _saved_debug_trap
+  _saved_debug_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   source "$ROLL_BIN"
+  [[ -n "$_saved_debug_trap" ]] && eval "$_saved_debug_trap"
   export NO_COLOR=1
   export TERM=dumb
 }
@@ -49,7 +58,12 @@ unit_setup_cd() {
   # FIX-093: see unit_setup above — gate launchctl calls so tests cannot leak
   # ghost entries into the host's disabled overrides db.
   export _LAUNCHD_SKIP_REGISTRY=1
+  # US-QA-009: same DEBUG trap suspension as unit_setup (see above).
+  local _saved_debug_trap
+  _saved_debug_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   source "$ROLL_BIN"
+  [[ -n "$_saved_debug_trap" ]] && eval "$_saved_debug_trap"
   cd "$TEST_TMP"
   export NO_COLOR=1
   export TERM=dumb

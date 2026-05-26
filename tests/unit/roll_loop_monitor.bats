@@ -11,7 +11,10 @@ setup() {
   export TERM=dumb
   # Source bin/roll to access internal functions
   # shellcheck disable=SC1090
+  local _saved_trap; _saved_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   ROLL_HOME="${BATS_TEST_DIRNAME}/../../" source "$ROLL_BIN" 2>/dev/null || true
+  [[ -n "$_saved_trap" ]] && eval "$_saved_trap"
 }
 
 teardown() {

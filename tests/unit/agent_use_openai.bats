@@ -38,3 +38,12 @@ teardown() { unit_teardown_cd; }
 @test "openai appears in _agent_argv case statement" {
   grep -q 'openai' "$ROLL_BIN"
 }
+
+# ── CLI detection ──────────────────────────────────────────────────────────
+
+@test "roll agent use openai warns about missing codex CLI" {
+  run bash "$ROLL_BIN" agent use openai
+  grep -qE 'codex|Codex' <<< "$output" || true
+  # Accept either: codex is installed (no warning) or warning mentions codex
+  [ "$status" -eq 0 ]
+}

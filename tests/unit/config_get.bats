@@ -2,7 +2,10 @@
 
 # Load the script (sourcing defines all functions without executing main)
 setup() {
+  local _saved_trap; _saved_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   source "${BATS_TEST_DIRNAME}/../../bin/roll"
+  [[ -n "$_saved_trap" ]] && eval "$_saved_trap"
   # Override ROLL_CONFIG after sourcing — the script assigns ROLL_CONFIG on load,
   # so we must set it afterwards to point at our fixture.
   export ROLL_CONFIG="${BATS_TEST_DIRNAME}/../fixtures/configs/basic.yaml"

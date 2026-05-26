@@ -43,7 +43,10 @@ LOOP_SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
 # ─── _loop_enforce_ci integration with BACKLOG ────────────────────────────────
 
 setup() {
+  local _saved_trap; _saved_trap="$(trap -p DEBUG 2>/dev/null || true)"
+  trap - DEBUG
   source "$ROLL_BIN"
+  [[ -n "$_saved_trap" ]] && eval "$_saved_trap"
   _orig_dir="$PWD"
   _test_dir=$(mktemp -d)
   cd "$_test_dir"

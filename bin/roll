@@ -7575,7 +7575,17 @@ _loop_pr_inbox() {
     verdict=$(_loop_pr_classify "$head_ref" "$human_review" "$ci_state" "$mergeable")
 
     case "$verdict" in
-      loop_self|blocked_human_request_changes|blocked_human_approved)
+      loop_self)
+        # Don't rely on repo-level auto-merge (unreliable if not configured).
+        # Loop owns the merge decision: if CI is green and PR is conflict-free,
+        # merge directly — same pattern as the bot_review=APPROVED gate above.
+        if [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ]; then
+          gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1 \
+            && info "PR #${num}: loop_self CI green — merged" \
+            || warn "PR #${num}: loop_self merge failed — left open"
+        fi
+        ;;
+      blocked_human_request_changes|blocked_human_approved)
         : # skip — explained by verdict; nothing to do this cycle
         ;;
       stale)

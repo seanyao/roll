@@ -15,31 +15,19 @@
 #             > (macOS) AppleLanguages > 'en'.
 # Decision:   value starting with `zh` → "zh", everything else → "en".
 
-# Sanitize a free-form key into a variable-safe suffix. Anything that isn't a
-# letter, digit, or underscore becomes an underscore so callers can use natural
-# dotted keys like "loop.cycle_start" without exploding bash syntax.
-_i18n_safe_key() {
-  echo "${1//[^A-Za-z0-9_]/_}"
-}
-
-# Uppercase a lang code without forking for the EN/ZH common case.
-# macOS still ships bash 3.2 which doesn't have ${var^^}; this helper keeps
-# the no-subshell goal for the languages we actually ship.
-_i18n_upper() {
-  case "$1" in
-    en|EN) printf 'EN' ;;
-    zh|ZH) printf 'ZH' ;;
-    *)     printf '%s' "$1" | tr '[:lower:]' '[:upper:]' ;;
-  esac
-}
-
 # Fill the catalog. Modules call this at source-time:
 #   _i18n_set en hello "Hello, %s!"
 #   _i18n_set zh hello "你好，%s！"
+# No subshell forks: lang uppercasing uses a case statement (bash 3.2-safe;
+# ${var^^} requires bash 4+), key sanitization uses inline param-expansion.
 _i18n_set() {
   local lang="$1" key="$2" val="$3"
   local upper safe varname
-  upper="$(_i18n_upper "$lang")"
+  case "$lang" in
+    en|EN) upper=EN ;;
+    zh|ZH) upper=ZH ;;
+    *)     upper="$(printf '%s' "$lang" | tr '[:lower:]' '[:upper:]')" ;;
+  esac
   safe="${key//[^A-Za-z0-9_]/_}"        # inline param-expansion — no subshell fork
   varname="MSG_${upper}_${safe}"
   printf -v "$varname" '%s' "$val"
@@ -135,7 +123,11 @@ msg() {
 msg_lang() {
   local lang="$1" key="$2"; shift 2 || true
   local upper safe varname tmpl
-  upper="$(_i18n_upper "$lang")"
+  case "$lang" in
+    en|EN) upper=EN ;;
+    zh|ZH) upper=ZH ;;
+    *)     upper="$(printf '%s' "$lang" | tr '[:lower:]' '[:upper:]')" ;;
+  esac
   safe="${key//[^A-Za-z0-9_]/_}"
   varname="MSG_${upper}_${safe}"
   tmpl="${!varname:-}"

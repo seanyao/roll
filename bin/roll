@@ -5347,7 +5347,6 @@ _runs_append() {
   local _phases_json="\${4:-}"
   [ -z "\$_phases_json" ] && _phases_json="{}"
   local _runs_dst="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/runs.jsonl"
-  _loop_cleanup_stale_runs_tmp 2>/dev/null || true
   command -v jq >/dev/null 2>&1 || return 0
   local _cid="\${CYCLE_ID:-pre-cycle-\$\$}"
   local _rid="loop-\${_cid%-*}"
@@ -8324,8 +8323,9 @@ _loop_publish_doc_pr() {
 
 # FIX-123: clean stale runs.jsonl .tmp orphan files from dead pids.
 # Called at every runs.jsonl write entry point so orphans never accumulate.
+# Optional $1: directory to scan. Defaults to dirname of $_LOOP_RUNS.
 _loop_cleanup_stale_runs_tmp() {
-  local _dir; _dir=$(dirname "${_LOOP_RUNS:-${HOME}/.shared/roll/loop/runs.jsonl}")
+  local _dir="${1:-$(dirname "${_LOOP_RUNS:-${HOME}/.shared/roll/loop/runs.jsonl}")}"
   [ -d "$_dir" ] || return 0
   local _f _pid
   for _f in "$_dir"/runs.jsonl.tmp.*; do
@@ -8345,9 +8345,9 @@ _loop_backfill_merged() {
   command -v jq >/dev/null 2>&1 || return 0
   local slug; _gh_resolve slug || return 0
 
-  _loop_cleanup_stale_runs_tmp
+  _loop_cleanup_stale_runs_tmp "$(dirname "$runs_path")"
   local tmp="${runs_path}.tmp.$$"
-  trap "rm -f ${tmp}" EXIT
+  trap "rm -f '$tmp'" EXIT
   : > "$tmp"
   local line status cycle_id branch view_json state merged_at merge_commit
   while IFS= read -r line; do
@@ -8378,6 +8378,7 @@ _loop_backfill_merged() {
       >> "$tmp" 2>/dev/null || printf '%s\n' "$line" >> "$tmp"
   done < "$runs_path"
   mv "$tmp" "$runs_path" 2>/dev/null || rm -f "$tmp"
+  trap - EXIT
   return 0
 }
 

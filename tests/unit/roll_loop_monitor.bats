@@ -104,7 +104,12 @@ EOF
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   local monitor_body
   monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
-  echo "$monitor_body" | grep -q 'roll setup'
+  # The literal hint moved to the i18n catalog under loop.svc_not_installed_run;
+  # assert both the function references the key and the en catalog still emits
+  # 'roll setup' so a refactor that drops either side fails loudly.
+  echo "$monitor_body" | grep -q 'svc_not_installed_run'
+  grep -q '^_i18n_set en loop.svc_not_installed_run .*roll setup' \
+    "${BATS_TEST_DIRNAME}/../../lib/i18n/loop.sh"
 }
 
 @test "_launchd_svc_state: loaded service returns enabled" {

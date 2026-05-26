@@ -135,9 +135,12 @@ SHIM_EOF
   PATH="${_LAUNCHCTL_SHIM_DIR}:$PATH"
   export PATH
 
-  # FIX-096: keep _LAUNCHD_SKIP_REGISTRY=1 inherited from integration_setup.
-  # It gates the launchctl calls inside `_install_launchd_plists`; the shim
-  # only needs to model the naked launchctl calls in _loop_on/off/pause/resume.
+  # FIX-097 hoisted the launchctl skip into _loop_on/off/pause/resume, which
+  # would short-circuit BEFORE reaching the PATH shim and silently no-op the
+  # very calls these tests assert against. Drop the inherited skip — every
+  # `launchctl` invocation now lands in our shim, which is itself sandboxed
+  # under TEST_TMP, so host launchd state remains untouched.
+  unset _LAUNCHD_SKIP_REGISTRY
 
   # Pre-install plists via setup so loop on/off have files to work with
   run_roll setup

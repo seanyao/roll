@@ -20,10 +20,22 @@ _sandbox_loop_state() {
   mkdir -p "${_SHARED_ROOT}/loop"
 }
 
+# Default to en for deterministic catalog lookups across dev machines. Tests
+# that exercise zh behaviour (e.g. i18n_engine.bats) override per-test. Without
+# this, a macOS dev whose AppleLanguages resolves to zh renders different
+# strings than the Ubuntu CI runner and tests that grep for English markers
+# (🤖 AI, Loop Overview, …) fail locally only.
+_unit_default_lang() {
+  : "${ROLL_LANG:=en}"
+  export ROLL_LANG
+  unset ROLL_LANG_RESOLVED
+}
+
 # Source bin/roll, create isolated temp dir, suppress colour output.
 unit_setup() {
   TEST_TMP="$(mktemp -d)"
   _sandbox_loop_state
+  _unit_default_lang
   # FIX-093: gate every launchctl call inside _install_launchd_plists. Without
   # this, tests that call _install_launchd_plists directly (e.g. launchd.bats)
   # hit the host gui domain and leak ghost entries into
@@ -55,6 +67,7 @@ unit_setup_cd() {
   _UNIT_ORIG_DIR="$PWD"
   TEST_TMP="$(mktemp -d)"
   _sandbox_loop_state
+  _unit_default_lang
   # FIX-093: see unit_setup above — gate launchctl calls so tests cannot leak
   # ghost entries into the host's disabled overrides db.
   export _LAUNCHD_SKIP_REGISTRY=1

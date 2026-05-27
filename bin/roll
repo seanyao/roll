@@ -3156,14 +3156,15 @@ _agent_argv() {
         interactive) _AGENT_ARGV=(opencode "$prompt") ;;
         *)           _AGENT_ARGV=(opencode run "$prompt") ;;
       esac ;;
-    agy)
+    gemini|agy)
       # Antigravity (agy) replaces the deprecated Google Gemini CLI as of
       # late 2025. agy reuses ~/.gemini/ for config and reads GEMINI.md
       # natively, so the convention sync target is unchanged — only the
-      # invoked binary changes. Interactive-only (used by onboard flow).
+      # invoked binary changes.
       case "$mode" in
         interactive) _AGENT_ARGV=(agy -i "$prompt") ;;
-        *) return 1 ;;
+        text|peer)   _AGENT_ARGV=(agy "$prompt") ;;
+        *)           _AGENT_ARGV=(agy "$prompt") ;;
       esac ;;
     qwen)
       # qwen has the same argv shape in both modes (positional prompt).
@@ -3205,7 +3206,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
   _agent_argv "$agent" text "$content" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
     return 1
   }
   "${_AGENT_ARGV[@]}"
@@ -3964,7 +3965,7 @@ EOF
 )"
 
   _agent_argv "$agent" text "$prompt" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
     trap - INT TERM
     return 1
   }
@@ -4350,9 +4351,11 @@ cmd_agent() {
   case "$subcmd" in
     use)
       local name="${1:-}"
-      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen>"; exit 1; }
+      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"; exit 1; }
       if [[ "$name" == openai ]]; then
         command -v codex &>/dev/null || warn "openai agent requires the Codex CLI. Install: npm install -g @openai/codex"
+      elif [[ "$name" == gemini ]]; then
+        command -v agy &>/dev/null || command -v gemini &>/dev/null || warn "gemini agent requires the Google Gemini CLI. Install: npm install -g @antigravity/agy"
       else
         command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
       fi
@@ -4388,7 +4391,7 @@ cmd_agent() {
     list)
       echo ""; echo "  $(msg agent.available_agents)"; echo ""
       local current; current=$(_project_agent)
-      for a in claude kimi deepseek opencode codex openai pi qwen; do
+      for a in claude kimi deepseek opencode codex openai pi qwen gemini; do
         if command -v "$a" &>/dev/null; then
           [[ "$a" == "$current" ]] && echo -e "    ${GREEN}✓ ${a}${NC}  (current)" \
                                    || echo -e "    ${GREEN}✓ ${a}${NC}"
@@ -6225,7 +6228,7 @@ _agent_skill_cmd() {
   local agent; agent=$(_project_agent)
   local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
   _agent_argv "$agent" plain "__PROMPT__" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
     return 1
   }
   # Cron-installed skills (dream / brief / loop) run autonomously and need to

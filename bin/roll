@@ -3156,14 +3156,15 @@ _agent_argv() {
         interactive) _AGENT_ARGV=(opencode "$prompt") ;;
         *)           _AGENT_ARGV=(opencode run "$prompt") ;;
       esac ;;
-    agy)
+    gemini|agy)
       # Antigravity (agy) replaces the deprecated Google Gemini CLI as of
       # late 2025. agy reuses ~/.gemini/ for config and reads GEMINI.md
       # natively, so the convention sync target is unchanged — only the
-      # invoked binary changes. Interactive-only (used by onboard flow).
+      # invoked binary changes.
       case "$mode" in
         interactive) _AGENT_ARGV=(agy -i "$prompt") ;;
-        *) return 1 ;;
+        text|peer)   _AGENT_ARGV=(agy "$prompt") ;;
+        *)           _AGENT_ARGV=(agy "$prompt") ;;
       esac ;;
     qwen)
       # qwen has the same argv shape in both modes (positional prompt).
@@ -3205,7 +3206,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
   _agent_argv "$agent" text "$content" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
     return 1
   }
   "${_AGENT_ARGV[@]}"
@@ -3964,7 +3965,7 @@ EOF
 )"
 
   _agent_argv "$agent" text "$prompt" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
     trap - INT TERM
     return 1
   }
@@ -4350,9 +4351,11 @@ cmd_agent() {
   case "$subcmd" in
     use)
       local name="${1:-}"
-      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen>"; exit 1; }
+      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"; exit 1; }
       if [[ "$name" == openai ]]; then
         command -v codex &>/dev/null || warn "openai agent requires the Codex CLI. Install: npm install -g @openai/codex"
+      elif [[ "$name" == gemini ]]; then
+        command -v agy &>/dev/null || command -v gemini &>/dev/null || warn "gemini agent requires the Google Gemini CLI. Install: npm install -g @antigravity/agy"
       else
         command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
       fi
@@ -4388,7 +4391,7 @@ cmd_agent() {
     list)
       echo ""; echo "  $(msg agent.available_agents)"; echo ""
       local current; current=$(_project_agent)
-      for a in claude kimi deepseek opencode codex openai pi qwen; do
+      for a in claude kimi deepseek opencode codex openai pi qwen gemini; do
         if command -v "$a" &>/dev/null; then
           [[ "$a" == "$current" ]] && echo -e "    ${GREEN}✓ ${a}${NC}  (current)" \
                                    || echo -e "    ${GREEN}✓ ${a}${NC}"
@@ -4764,6 +4767,90 @@ fi
 # _SHARED_ROOT overrides and silently leaked test runs.jsonl writes into prod.
 _LOOP_RUNS="${_SHARED_ROOT}/loop/runs.jsonl"
 : "${_LOOP_MUTE_FILE:=${_SHARED_ROOT}/loop/mute-${_LOOP_PROJ_SLUG}}"
+
+# ──────────────────────────────────────────────────────────────
+# US-LOOP-018: _loop_resolve_project_path + _loop_runtime_dir
+#
+# Two helpers that form the single source-of-truth for resolving
+# "where does this project's loop runtime data live?". All callers
+# (inner/outer runner templates, dashboard, GC, pause/resume, etc.)
+# must go through _loop_runtime_dir — never inline paths.
+#
+# Resolution order for _loop_resolve_project_path:
+#   1. macOS: launchd plist WorkingDirectory key (already used by
+#      _status_loop_overview — implicit registry, no new state file)
+#   2. Linux: crontab entry (grep for "cd \"<path>\"")  — best-effort
+#   3. Universal fallback: inner runner script grep for
+#      export ROLL_MAIN_PROJECT="..."  (inner scripts carry this;
+#      outer runner scripts do not — pi peer review correction)
+# ──────────────────────────────────────────────────────────────
+
+# _loop_resolve_project_path <slug>
+# Resolve a slug to its project directory path.
+# Returns 0 and prints path on success; returns 1 on failure.
+_loop_resolve_project_path() {
+  local slug="$1"
+
+  # 1. macOS: launchd plist WorkingDirectory (primary source)
+  if [[ "$(uname)" = "Darwin" ]]; then
+    local plist_dir="${HOME}/Library/LaunchAgents"
+    local plist="${plist_dir}/com.roll.loop.${slug}.plist"
+    if [[ -f "$plist" ]]; then
+      local proj; proj=$(awk '/<key>WorkingDirectory<\/key>/{f=1;next} f{gsub(/^[[:space:]]*<string>|<\/string>[[:space:]]*$/,"");print;exit}' "$plist" 2>/dev/null)
+      if [[ -n "$proj" ]]; then
+        echo "$proj"
+        return 0
+      fi
+    fi
+  fi
+
+  # 2. Linux: crontab entry (best-effort)
+  if command -v crontab >/dev/null 2>&1; then
+    local cron_line; cron_line=$(crontab -l 2>/dev/null | grep "run-${slug}.sh" | head -1)
+    if [[ -n "$cron_line" ]]; then
+      # Extract cd path: "cd \"<path>\" && ..."
+      local proj; proj=$(echo "$cron_line" | sed -n 's/.*cd[[:space:]]*"\([^"]*\)".*/\1/p')
+      if [[ -n "$proj" && -d "$proj" ]]; then
+        echo "$proj"
+        return 0
+      fi
+    fi
+  fi
+
+  # 3. Universal fallback: inner runner script ROLL_MAIN_PROJECT export
+  local inner_script="${_SHARED_ROOT:-${HOME}/.shared/roll}/loop/run-${slug}-inner.sh"
+  if [[ -f "$inner_script" ]]; then
+    local proj; proj=$(grep '^export ROLL_MAIN_PROJECT=' "$inner_script" 2>/dev/null | head -1 | sed 's/.*="\(.*\)"/\1/')
+    if [[ -n "$proj" ]]; then
+      echo "$proj"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+# _loop_runtime_dir <slug>
+# Return the project's .roll/loop/ directory path.
+# Priority: ROLL_PROJECT_RUNTIME_DIR env → resolved project + .roll/loop
+# Returns 0 and prints path on success; returns 1 on failure.
+_loop_runtime_dir() {
+  local slug="$1"
+
+  # 1. Environment override (test sandbox)
+  if [[ -n "${ROLL_PROJECT_RUNTIME_DIR:-}" ]]; then
+    echo "${ROLL_PROJECT_RUNTIME_DIR}"
+    return 0
+  fi
+
+  # 2. Resolve project path and append .roll/loop
+  local proj; proj=$(_loop_resolve_project_path "$slug")
+  if [[ -z "$proj" ]]; then
+    return 1
+  fi
+  echo "${proj}/.roll/loop"
+}
+
 # FIX-087: parallel to FIX-065's _SHARED_ROOT auto-sandbox above. Without this,
 # tests that source bin/roll (directly via BATS or indirectly via a runner-inner
 # fork under /tmp / /var/folders/) wrote plists into the developer's real
@@ -4948,7 +5035,16 @@ _loop_event() {
   local ts slug evfile json
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   slug=$(_project_slug 2>/dev/null || basename "$PWD")
-  evfile="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/events-${slug}.ndjson"
+  # US-LOOP-020: prefer project-local .roll/loop/; fallback to shared root
+  # for transient slugs (worktree cleanup, orphan recovery) where
+  # _loop_runtime_dir cannot resolve a project path.
+  local _rt_dir
+  _rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  if [ -n "$_rt_dir" ]; then
+    evfile="${_rt_dir}/events.ndjson"
+  else
+    evfile="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/events-${slug}.ndjson"
+  fi
   # FIX-065 tripwire: in a test context (BATS or temp cwd), refuse to write
   # into production ~/.shared/roll/. Catching this in code is the last line
   # of defense if some unusual path bypassed the auto-sandbox at source-time.
@@ -5844,7 +5940,7 @@ if [ -z "\$ROLL_LOOP_FORCE" ]; then
   if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
 fi
 # Pause check — 'roll loop pause' creates this marker to suspend scheduling
-PAUSE="\$HOME/.shared/roll/loop/PAUSE-${slug}"
+PAUSE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/PAUSE-${slug}"
 if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
 # FIX-037: orphan state detection & self-heal — if state.yaml says running
 # but no LOCK process or tmux session exists, the previous cycle was killed
@@ -5933,8 +6029,8 @@ if command -v tmux >/dev/null 2>&1; then
   # that triggered LaunchServices "where is <app>" prompts when the active
   # process name differed from its .app bundle name (e.g. MSTeams vs
   # Microsoft Teams.app).
-  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
-    _attach_cmd="\$HOME/.shared/roll/loop/attach-\$SESSION.command"
+  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
+    _attach_cmd="\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/attach-\$SESSION.command"
     # Drop \`exec\` so the wrapping shell survives \`tmux attach\` exiting,
     # then \`read\` to hold the Terminal open until the user has had a
     # chance to scroll back through the cycle's output. Without this the
@@ -6132,7 +6228,7 @@ _agent_skill_cmd() {
   local agent; agent=$(_project_agent)
   local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
   _agent_argv "$agent" plain "__PROMPT__" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
     return 1
   }
   # Cron-installed skills (dream / brief / loop) run autonomously and need to

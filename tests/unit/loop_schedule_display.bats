@@ -121,17 +121,25 @@ YAML
 # ─── _next_cron_hint Python v2 smoke test ─────────────────────────────────────
 
 @test "US-LOOP-013: Python _read_schedule_spec returns valid defaults" {
+  # Isolate from the developer's real .roll/local.yaml — pass an empty
+  # project_root so the assertion sees the hermetic default (period 60),
+  # not whatever loop_schedule the current repo happens to configure.
+  local empty="${BATS_TMPDIR}/sched-empty-${RANDOM}"
+  mkdir -p "$empty"
   local result
   result=$(python3 -c "
 import importlib.util
+from pathlib import Path
 spec = importlib.util.spec_from_file_location('mod', '${BATS_TEST_DIRNAME}/../../lib/roll-loop-status.py')
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-period, offset = mod._read_schedule_spec()
+period, offset = mod._read_schedule_spec(Path('${empty}'))
 assert period == 60
 assert 0 <= offset < 60
 print(f'{period} {offset}')
 ")
-  [ "$?" -eq 0 ]
+  local rc=$?
+  rm -rf "$empty"
+  [ "$rc" -eq 0 ]
   [[ "$result" =~ ^60\ [0-9]+$ ]]
 }

@@ -109,7 +109,9 @@ teardown() { unit_teardown_cd; }
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
   # The runner checks for the mute marker before opening the Terminal window.
   # FIX-052: mute is per-project (.shared/roll/loop/mute-<slug>).
-  grep -qE '\.shared/roll/loop/mute-' "$script"
+  # US-LOOP-020: the path now honors a ${_SHARED_ROOT:-…} override, so the
+  # default branch renders ".shared/roll}/loop/mute-" — tolerate the brace.
+  grep -qE '\.shared/roll[^/]*/loop/mute-' "$script"
 }
 
 @test "_write_loop_runner_script: popup writes a .command wrapper for the attach" {

@@ -275,3 +275,18 @@ teardown() {
   [ "$(grep -c "trap .* EXIT" "$inner")" -eq 1 ]
   grep -qE 'rm -f.*INNER_LOCK.*HEARTBEAT_FILE' "$inner"
 }
+
+@test "US-LOOP-026: inner script calls pi_emit once post-cycle for non-claude agents" {
+  local script="${_tmp}/run-pi.sh"
+  _write_loop_runner_script "$script" "/some/project" "pi -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-pi-inner.sh"
+  # The post-cycle usage capture is gated on a non-claude agent and invokes
+  # pi_emit.py exactly once with the cycle's worktree + id.
+  grep -qF 'agent_usage/pi_emit.py' "$inner"
+  grep -qE '_project_agent.*!=.*claude' "$inner"
+  [ "$(grep -c 'pi_emit.py' "$inner")" -eq 2 ]  # local var def + invocation
+  # Must run after the agent phase ends, before worktree cleanup removes $WT.
+  local emit_line;  emit_line=$(grep -n 'pi_emit.py" --cwd' "$inner" | head -1 | cut -d: -f1)
+  local phase_line; phase_line=$(grep -n '_phase_end agent_invoke ok' "$inner" | head -1 | cut -d: -f1)
+  [ "$phase_line" -lt "$emit_line" ]
+}

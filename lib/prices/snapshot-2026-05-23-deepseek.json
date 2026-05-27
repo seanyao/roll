@@ -1,15 +1,15 @@
 {
   "version": "2026-05-23",
   "effective_at": "2026-05-23",
-  "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
+  "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
   "vendor": "deepseek",
-  "currency": "USD",
+  "currency": "CNY",
   "default_model": "deepseek-chat",
-  "notes": "Rates per million tokens (USD). deepseek-chat and deepseek-reasoner are both deepseek-v4-flash with different thinking modes — same pricing. deepseek-v4-pro has 75% promotional discount until 2026-05-31. cache_create estimated at 1.25x input (same convention as Claude snapshot). cache_hit discount per official docs: 1/50 for flash ($0.14→$0.0028), 1/120 for pro ($0.435→$0.003625). Actual cache_create not published by DeepSeek — using 1.25x input convention.",
+  "notes": "Rates per million tokens in CNY (¥) — DeepSeek's native billing currency; we never convert to USD (the dashboard already shows the currency symbol). deepseek-chat and deepseek-reasoner are both deepseek-v4-flash with different thinking modes — same pricing. deepseek-v4-pro is under a 2.5折 (75% off) promo until Beijing time 2026-05-31 23:59 (normal: in 12 / out 24); after expiry, refresh this snapshot. cache_read is the official cache-hit input price (reduced to 1/10 of launch price since 2026-04-26). cache_create = cache-miss input rate: DeepSeek levies no separate cache-write surcharge, and pi reports cacheWrite cost as 0, so this rate only ever applies to (near-zero) cacheWrite tokens. pi's own per-message cost.total is computed in USD and is kept as cost_reported_usd for audit, NOT used for the authoritative cost.",
   "prices": {
-    "deepseek-chat":        {"in": 0.14, "out": 0.28, "cache_create": 0.175,  "cache_read": 0.0028},
-    "deepseek-reasoner":    {"in": 0.14, "out": 0.28, "cache_create": 0.175,  "cache_read": 0.0028},
-    "deepseek-v4-flash":    {"in": 0.14, "out": 0.28, "cache_create": 0.175,  "cache_read": 0.0028},
-    "deepseek-v4-pro":      {"in": 0.435, "out": 0.87, "cache_create": 0.54375, "cache_read": 0.003625}
+    "deepseek-chat":        {"in": 1, "out": 2, "cache_create": 1, "cache_read": 0.02},
+    "deepseek-reasoner":    {"in": 1, "out": 2, "cache_create": 1, "cache_read": 0.02},
+    "deepseek-v4-flash":    {"in": 1, "out": 2, "cache_create": 1, "cache_read": 0.02},
+    "deepseek-v4-pro":      {"in": 3, "out": 6, "cache_create": 3, "cache_read": 0.025}
   }
 }

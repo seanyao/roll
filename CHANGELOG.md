@@ -1,5 +1,18 @@
 # Changelog
 
+## v2026.527.1
+
+### Added
+
+- **pi / deepseek 跑的 loop 现在能看到真实 token 和花费** — 仪表盘不再显示 —/—，按人民币原币种计价，连之前没数据的历史轮次也补齐了 `[loop]`
+- **`roll loop gc` 清理 loop 残留** — 一条命令清掉废弃项目的残骸文件和过期备份，不再越堆越多 `[loop]`
+- **loop 可以用 gemini / openai / qwen 来跑了** — 在 pi / deepseek / kimi 之外多了几个选择 `[loop]`
+- **loop 触发频率能设成任意分钟数** — 不再只有几个固定档，1 到 1440 分钟随便填 `[loop]`
+
+### Fixed
+
+- **每日汇总的花费按币种分开显示** — 人民币和美金不再被混加成一个数 `[dashboard]`
+
 ## v2026.526.1
 
 ### Changed

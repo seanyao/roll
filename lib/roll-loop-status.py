@@ -711,8 +711,13 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
     # show two metric rows. cache_read tokens deliberately excluded — they're
     # already captured in cy["cost_list"] via list-price math (compute_list_cost
     # reads all 4 fields), but they don't represent the model's actual work.
+    # FIX-126: cost is tracked per-currency. deepseek bills in native CNY (¥),
+    # claude in USD ($) — summing them into one number (and stamping it "$")
+    # is meaningless. `cost` stays as a legacy scalar sum for back-compat with
+    # callers that don't care about currency; `cost_by_cur` is the currency-
+    # aware breakdown the dashboard ROLLUP renders (one row per currency).
     r = {"cycles": len(day_cycles), "prs": 0, "failed": 0,
-         "duration_s": 0, "cost": 0.0,
+         "duration_s": 0, "cost": 0.0, "cost_by_cur": {},
          "input_tokens": 0, "output_tokens": 0,
          "cache_creation_tokens": 0, "cache_read_tokens": 0}
     for cy in day_cycles:
@@ -736,10 +741,14 @@ def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
             r["prs"] += 1
         if cy.get("cost_list") is not None:
             r["cost"] += cy["cost_list"]
+            cur = cy.get("cost_currency") or "USD"
+            r["cost_by_cur"][cur] = r["cost_by_cur"].get(cur, 0.0) + cy["cost_list"]
         elif cy.get("cron"):
             # No claude session backfill available — fall back to whatever
-            # cron.log carries (best-effort, only the latest cycle).
+            # cron.log carries (best-effort, only the latest cycle). cron.log
+            # cost is claude's USD figure.
             r["cost"] += cy["cron"]["cost"]
+            r["cost_by_cur"]["USD"] = r["cost_by_cur"].get("USD", 0.0) + cy["cron"]["cost"]
     return r
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -753,8 +762,12 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
         merge_runs_into_cycles(cycles, runs)
     if git_merges:
         repair_orphan_cycles_from_git(cycles, git_merges)
-    if claude_slug:
-        backfill_usage_from_claude_sessions(cycles, claude_slug)
+    # Path 1 (usage_event from the events stream) is authoritative and needs no
+    # slug; path 2 (claude session-log salvage) self-guards on the worktree dir
+    # existing, so it's a no-op when claude_slug is empty. Always run both — the
+    # old `if claude_slug:` gate dropped real per-currency cost for any caller
+    # that didn't pass a slug (FIX-126).
+    backfill_usage_from_claude_sessions(cycles, claude_slug or "")
     by_day = bucket_by_day(cycles)
     days_keys = sorted(by_day.keys(), reverse=True)[:days]
 
@@ -894,7 +907,28 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
     metric_tokens("cache writes",  today["cache_creation_tokens"], yest["cache_creation_tokens"], d2["cache_creation_tokens"], partial=is_partial)
     metric_tokens("cache reads",   today["cache_read_tokens"],     yest["cache_read_tokens"],     d2["cache_read_tokens"],     partial=is_partial)
     metric_tokens("output tokens", today["output_tokens"], yest["output_tokens"], d2["output_tokens"], partial=is_partial)
-    metric_dollar("cost",   today["cost"],      yest["cost"],      d2["cost"],       partial=is_partial)
+    # FIX-126: one cost row per currency (deepseek ¥, claude $) — never summed
+    # across currencies. Show a currency only if it has spend in any of the 3
+    # days; default to a single USD row when there's no cost at all.
+    _cost_days = (today, yest, d2)
+    _currencies = []
+    for _cur in ["USD", "CNY"]:
+        if any(r["cost_by_cur"].get(_cur) for r in _cost_days):
+            _currencies.append(_cur)
+    for r in _cost_days:
+        for _cur in r["cost_by_cur"]:
+            if _cur not in _currencies and r["cost_by_cur"][_cur]:
+                _currencies.append(_cur)
+    if not _currencies:
+        _currencies = ["USD"]
+    for _cur in _currencies:
+        _sym = "¥" if _cur == "CNY" else "$"
+        _label = "cost" if len(_currencies) == 1 else "cost " + _sym
+        metric_dollar(_label,
+                      today["cost_by_cur"].get(_cur, 0.0),
+                      yest["cost_by_cur"].get(_cur, 0.0),
+                      d2["cost_by_cur"].get(_cur, 0.0),
+                      partial=is_partial, symbol=_sym)
 
     print()
     print(c("faint", "─" * COLS))

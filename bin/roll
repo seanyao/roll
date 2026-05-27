@@ -4,7 +4,7 @@ set -euo pipefail
 # Roll — AI Agent Convention Manager
 # Single source of truth for how all AI coding agents behave.
 
-VERSION="2026.526.1"
+VERSION="2026.527.1"
 ROLL_HOME="${ROLL_HOME:-${HOME}/.roll}"
 ROLL_CONFIG="${ROLL_HOME}/config.yaml"
 ROLL_GLOBAL="${ROLL_HOME}/conventions/global"
@@ -5279,6 +5279,10 @@ _write_loop_runner_script() {
   # Use stream-json + formatter: --verbose alone does nothing in -p mode;
   # stream-json enables realtime streaming; loop-fmt.py humanizes the events.
   local fmt_script="${ROLL_PKG_DIR}/lib/loop-fmt.py"
+  # US-LOOP-026: post-cycle single-shot usage writer for non-claude agents.
+  # pi -p text mode prints no usage, so we recover it from pi's session jsonl
+  # exactly once per cycle (loop-fmt passthrough is display-only).
+  local pi_emit_script="${ROLL_PKG_DIR}/lib/agent_usage/pi_emit.py"
   local roll_bin="${ROLL_PKG_DIR}/bin/roll"
   # FIX-041: loop cycle is autonomous — permission prompts and sandbox path
   # restrictions only cause the cycle to burn turns asking for approvals
@@ -5772,6 +5776,25 @@ if [ "\$_CYCLE_TIMED_OUT" -eq 1 ] || [ "\$_exit" -ne 0 ]; then
   _phase_end agent_invoke fail
 else
   _phase_end agent_invoke ok
+fi
+
+# US-LOOP-026: non-claude agents (pi/deepseek/kimi) print no usage in -p text
+# mode. Recover token+cost once per cycle from the agent's session jsonl and
+# append a single authoritative usage event. Done here (not in loop-fmt's
+# per-attempt passthrough) so retries can't write N duplicate events that the
+# dashboard's same-label SUM would inflate. Runs before the timeout-abort exit
+# so partial cycles still get whatever usage the session recorded. The events
+# path is resolved exactly like _loop_event (rt_dir first, shared fallback) so
+# pi_emit appends to the same file the reader consumes.
+if [ "\$(_project_agent)" != "claude" ] && [ -f "${pi_emit_script}" ]; then
+  _pi_rt=\$(_loop_runtime_dir "${slug}" 2>/dev/null || echo "")
+  if [ -n "\$_pi_rt" ]; then
+    _pi_evfile="\${_pi_rt}/events.ndjson"
+  else
+    _pi_evfile="\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/events-${slug}.ndjson"
+  fi
+  python3 "${pi_emit_script}" --cwd "\$WT" --cycle "\${CYCLE_ID}" \\
+    --slug "${slug}" --events "\$_pi_evfile" 2>/dev/null || true
 fi
 
 # FIX-057: timed out — skip publish; EXIT trap writes cycle_end blocked + ALERT.

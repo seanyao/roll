@@ -75,21 +75,38 @@ teardown() {
   local script_path="${_test_dir}/run-test-concurrent.sh"
   local log="${_test_dir}/run.log"
   local marker="${_test_dir}/marker"
-  # Use a command that writes a marker then sleeps; we'll count markers
-  local cmd="echo marker >> '${marker}' && sleep 2"
+  local stopfile="${_test_dir}/stop"
+  # The first instance writes a marker (proof it acquired the LOCK and entered
+  # the cmd) then parks on $stopfile until the test releases it. Holding the
+  # LOCK on an explicit signal — instead of a fixed `sleep N` — removes the
+  # timing race: under heavy parallel load a 0.3s sleep was not enough for the
+  # backgrounded instance to acquire the LOCK, so the second instance
+  # sometimes ran too (count=2) or neither had written the marker yet.
+  local cmd="echo marker >> '${marker}'; while [ ! -f '${stopfile}' ]; do sleep 0.05; done"
   # Pass active window covering current hour so the script runs
   _write_loop_runner_script "$script_path" "${_test_dir}" "$cmd" "$log" 0 24
 
   # Start first instance in background
   HOME="${_test_dir}" bash "$script_path" &
   local pid1=$!
-  sleep 0.3  # let it acquire LOCK
 
-  # Second instance should detect LOCK and exit immediately
+  # Condition-based wait: block until the first instance has written its marker.
+  # The marker write happens only AFTER the LOCK is acquired, so its presence
+  # guarantees the LOCK is held (the instance is now parked on $stopfile).
+  local _waited=0
+  until [ -f "$marker" ]; do
+    sleep 0.05
+    _waited=$((_waited + 1))
+    [ "$_waited" -ge 200 ] && break  # 10s ceiling so a real hang fails fast
+  done
+  [ -f "$marker" ]  # first instance acquired the LOCK within the ceiling
+
+  # Second instance must detect the held LOCK and exit immediately.
   HOME="${_test_dir}" bash "$script_path"
   local second_exit=$?
 
-  # Wait for first to finish
+  # Release the first instance so it exits and its EXIT trap removes the LOCK.
+  touch "$stopfile"
   wait "$pid1"
 
   # Only one marker (first instance ran the cmd, second skipped)

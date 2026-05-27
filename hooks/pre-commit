@@ -10,6 +10,33 @@ _fail() {
   exit 1
 }
 
+# Docs-only exemption: narrative documentation can't break code, so it needn't
+# carry a fresh test proof. If EVERY staged path is narrative docs, skip the
+# TCR gate entirely. A single non-doc file in the same commit re-arms the full
+# check — you can't smuggle code in under a docs commit.
+#
+# Narrative docs = root-level *.md (README, CHANGELOG, AGENTS…), docs/, guide/.
+# Deliberately NOT exempt: skills/**/*.md (prompt contracts with contract
+# tests), lib/, bin/, tests/, and any other nested path — those are behavior.
+_docs_only() {
+  local f had=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    had=1
+    case "$f" in
+      docs/*|guide/*) ;;   # nested narrative docs — exempt
+      */*) return 1 ;;     # any other nested path = code/contract
+      *.md) ;;             # root-level markdown — exempt
+      *) return 1 ;;       # root-level non-markdown (package.json…) = code
+    esac
+  done < <(git diff --cached --name-only)
+  [ "$had" -eq 1 ]         # no staged files at all → not a docs-only commit
+}
+
+if _docs_only; then
+  exit 0
+fi
+
 if [ ! -f "$PROOF" ]; then
   _fail "tests not verified on current code." "当前代码未经测试验证。"
 fi

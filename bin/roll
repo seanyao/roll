@@ -4767,6 +4767,90 @@ fi
 # _SHARED_ROOT overrides and silently leaked test runs.jsonl writes into prod.
 _LOOP_RUNS="${_SHARED_ROOT}/loop/runs.jsonl"
 : "${_LOOP_MUTE_FILE:=${_SHARED_ROOT}/loop/mute-${_LOOP_PROJ_SLUG}}"
+
+# ──────────────────────────────────────────────────────────────
+# US-LOOP-018: _loop_resolve_project_path + _loop_runtime_dir
+#
+# Two helpers that form the single source-of-truth for resolving
+# "where does this project's loop runtime data live?". All callers
+# (inner/outer runner templates, dashboard, GC, pause/resume, etc.)
+# must go through _loop_runtime_dir — never inline paths.
+#
+# Resolution order for _loop_resolve_project_path:
+#   1. macOS: launchd plist WorkingDirectory key (already used by
+#      _status_loop_overview — implicit registry, no new state file)
+#   2. Linux: crontab entry (grep for "cd \"<path>\"")  — best-effort
+#   3. Universal fallback: inner runner script grep for
+#      export ROLL_MAIN_PROJECT="..."  (inner scripts carry this;
+#      outer runner scripts do not — pi peer review correction)
+# ──────────────────────────────────────────────────────────────
+
+# _loop_resolve_project_path <slug>
+# Resolve a slug to its project directory path.
+# Returns 0 and prints path on success; returns 1 on failure.
+_loop_resolve_project_path() {
+  local slug="$1"
+
+  # 1. macOS: launchd plist WorkingDirectory (primary source)
+  if [[ "$(uname)" = "Darwin" ]]; then
+    local plist_dir="${HOME}/Library/LaunchAgents"
+    local plist="${plist_dir}/com.roll.loop.${slug}.plist"
+    if [[ -f "$plist" ]]; then
+      local proj; proj=$(awk '/<key>WorkingDirectory<\/key>/{f=1;next} f{gsub(/^[[:space:]]*<string>|<\/string>[[:space:]]*$/,"");print;exit}' "$plist" 2>/dev/null)
+      if [[ -n "$proj" ]]; then
+        echo "$proj"
+        return 0
+      fi
+    fi
+  fi
+
+  # 2. Linux: crontab entry (best-effort)
+  if command -v crontab >/dev/null 2>&1; then
+    local cron_line; cron_line=$(crontab -l 2>/dev/null | grep "run-${slug}.sh" | head -1)
+    if [[ -n "$cron_line" ]]; then
+      # Extract cd path: "cd \"<path>\" && ..."
+      local proj; proj=$(echo "$cron_line" | sed -n 's/.*cd[[:space:]]*"\([^"]*\)".*/\1/p')
+      if [[ -n "$proj" && -d "$proj" ]]; then
+        echo "$proj"
+        return 0
+      fi
+    fi
+  fi
+
+  # 3. Universal fallback: inner runner script ROLL_MAIN_PROJECT export
+  local inner_script="${_SHARED_ROOT:-${HOME}/.shared/roll}/loop/run-${slug}-inner.sh"
+  if [[ -f "$inner_script" ]]; then
+    local proj; proj=$(grep '^export ROLL_MAIN_PROJECT=' "$inner_script" 2>/dev/null | head -1 | sed 's/.*="\(.*\)"/\1/')
+    if [[ -n "$proj" ]]; then
+      echo "$proj"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+# _loop_runtime_dir <slug>
+# Return the project's .roll/loop/ directory path.
+# Priority: ROLL_PROJECT_RUNTIME_DIR env → resolved project + .roll/loop
+# Returns 0 and prints path on success; returns 1 on failure.
+_loop_runtime_dir() {
+  local slug="$1"
+
+  # 1. Environment override (test sandbox)
+  if [[ -n "${ROLL_PROJECT_RUNTIME_DIR:-}" ]]; then
+    echo "${ROLL_PROJECT_RUNTIME_DIR}"
+    return 0
+  fi
+
+  # 2. Resolve project path and append .roll/loop
+  local proj; proj=$(_loop_resolve_project_path "$slug")
+  if [[ -z "$proj" ]]; then
+    return 1
+  fi
+  echo "${proj}/.roll/loop"
+}
+
 # FIX-087: parallel to FIX-065's _SHARED_ROOT auto-sandbox above. Without this,
 # tests that source bin/roll (directly via BATS or indirectly via a runner-inner
 # fork under /tmp / /var/folders/) wrote plists into the developer's real
@@ -4951,7 +5035,16 @@ _loop_event() {
   local ts slug evfile json
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   slug=$(_project_slug 2>/dev/null || basename "$PWD")
-  evfile="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/events-${slug}.ndjson"
+  # US-LOOP-020: prefer project-local .roll/loop/; fallback to shared root
+  # for transient slugs (worktree cleanup, orphan recovery) where
+  # _loop_runtime_dir cannot resolve a project path.
+  local _rt_dir
+  _rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  if [ -n "$_rt_dir" ]; then
+    evfile="${_rt_dir}/events.ndjson"
+  else
+    evfile="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/events-${slug}.ndjson"
+  fi
   # FIX-065 tripwire: in a test context (BATS or temp cwd), refuse to write
   # into production ~/.shared/roll/. Catching this in code is the last line
   # of defense if some unusual path bypassed the auto-sandbox at source-time.
@@ -5847,7 +5940,7 @@ if [ -z "\$ROLL_LOOP_FORCE" ]; then
   if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
 fi
 # Pause check — 'roll loop pause' creates this marker to suspend scheduling
-PAUSE="\$HOME/.shared/roll/loop/PAUSE-${slug}"
+PAUSE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/PAUSE-${slug}"
 if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
 # FIX-037: orphan state detection & self-heal — if state.yaml says running
 # but no LOCK process or tmux session exists, the previous cycle was killed
@@ -5936,8 +6029,8 @@ if command -v tmux >/dev/null 2>&1; then
   # that triggered LaunchServices "where is <app>" prompts when the active
   # process name differed from its .app bundle name (e.g. MSTeams vs
   # Microsoft Teams.app).
-  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\$HOME/.shared/roll/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
-    _attach_cmd="\$HOME/.shared/roll/loop/attach-\$SESSION.command"
+  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
+    _attach_cmd="\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/attach-\$SESSION.command"
     # Drop \`exec\` so the wrapping shell survives \`tmux attach\` exiting,
     # then \`read\` to hold the Terminal open until the user has had a
     # chance to scroll back through the cycle's output. Without this the

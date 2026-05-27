@@ -52,7 +52,13 @@ _KV_INPUT_RE = re.compile(r"^\s*(?:Input|输入)\s*(?:tokens)?\s*[:：]\s*([\d,]
 _KV_OUTPUT_RE = re.compile(r"^\s*(?:Output|输出)\s*(?:tokens)?\s*[:：]\s*([\d,]+)", re.MULTILINE | re.IGNORECASE)
 _KV_CACHE_READ_RE = re.compile(r"^\s*(?:Cache\s*Read|cache_read)\s*[:：]\s*([\d,]+)", re.MULTILINE | re.IGNORECASE)
 _KV_CACHE_WRITE_RE = re.compile(r"^\s*(?:Cache\s*Write|cache_write)\s*[:：]\s*([\d,]+)", re.MULTILINE | re.IGNORECASE)
-_KV_COST_RE = re.compile(r"^\s*(?:Cost|费用|Total)\s*[:：]\s*\$?([\d.]+)", re.MULTILINE | re.IGNORECASE)
+# Matches inline "Cost: 0.12" or "费用: 0.12" on the same line.
+_KV_COST_RE = re.compile(r"^\s*(?:Cost|费用)\s*[:：]\s*\$?([\d.]+)", re.MULTILINE | re.IGNORECASE)
+# Matches the two-line pattern:  "Cost\nTotal: 0.12"  (pi session summary style).
+_KV_COST_SECTION_RE = re.compile(
+    r"^\s*(?:Cost|费用)\s*$\s+(?:Total|合计)\s*[:：]\s*\$?([\d.]+)",
+    re.MULTILINE | re.IGNORECASE,
+)
 _KV_MODEL_RE = re.compile(r"^\s*(?:Model|模型)\s*[:：]\s*(\S+)", re.MULTILINE | re.IGNORECASE)
 
 
@@ -60,7 +66,8 @@ def _try_kv_block(text: str) -> Optional[dict]:
     """Match the key-value summary block style."""
     input_match = _KV_INPUT_RE.search(text)
     output_match = _KV_OUTPUT_RE.search(text)
-    cost_match = _KV_COST_RE.search(text)
+    # Prefer the two-line "Cost section + Total" pattern; fall back to inline "Cost: N".
+    cost_match = _KV_COST_SECTION_RE.search(text) or _KV_COST_RE.search(text)
 
     if not input_match or not output_match:
         return None

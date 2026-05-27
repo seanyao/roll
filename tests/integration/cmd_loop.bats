@@ -365,7 +365,11 @@ EOSHIM
   # steal); replaces a prior osascript dance that triggered "where is <app>"
   # dialogs on bundle-name vs process-name mismatch (e.g. MSTeams).
   grep -qF 'open -g -a Terminal' "$runner"
-  # FIX-052: mute is per-project (.shared/roll/loop/mute-<slug>).
-  grep -qE '\.shared/roll/loop/mute-' "$runner"
+  # FIX-052: mute is per-project (…/loop/mute-<slug>). US-LOOP-018 (#229)
+  # prefixed the path with ${_SHARED_ROOT:-$HOME/.shared/roll}, so the literal
+  # is `${_SHARED_ROOT:-$HOME/.shared/roll}/loop/mute-<slug>` — the `}` breaks a
+  # contiguous `.shared/roll/loop/mute-` match. Assert the stable /loop/mute-
+  # suffix instead, which survives future _SHARED_ROOT resolution changes.
+  grep -qE '/loop/mute-' "$runner"
   grep -qF 'tmux attach' "$runner"
 }

@@ -147,7 +147,9 @@ def backfill(evfile, slug=None, shared=None, base_dir=None, dry_run=False):
         replacement[lab] = ev["detail"]
         matched.append(lab)
 
-    if dry_run:
+    if dry_run or not matched:
+        # Nothing recoverable to rewrite → no backup, no write (keeps re-runs
+        # a true no-op instead of spawning empty .bak files).
         return {
             "candidates": len(candidates),
             "matched": len(matched),

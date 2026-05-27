@@ -37,3 +37,59 @@ REPO_ROOT="${BATS_TEST_DIRNAME}/../../"
   local skill="${BATS_TEST_DIRNAME}/../../skills/roll-.changelog/SKILL.md"
   grep -q "规划中" "$skill"
 }
+
+# ─── REFACTOR-044: features.md format ──────────────────────────────────────
+
+# .roll/ is gitignored — migrated to the private roll-meta repo — so a clean
+# CI checkout has no repo .roll/. Skip when absent, the same dependency-gate
+# pattern as roll-.dream Scan 5 Check D.
+
+@test "features.md exists and is not empty" {
+  [ -f "${REPO_ROOT}/.roll/features.md" ] || skip "no .roll/features.md (roll-meta not checked out)"
+  [ -s "${REPO_ROOT}/.roll/features.md" ]
+}
+
+@test "features.md does not contain raw code fences" {
+  [ -f "${REPO_ROOT}/.roll/features.md" ] || skip "no .roll/features.md (roll-meta not checked out)"
+  # Content should be rendered markdown, not wrapped in code blocks.
+  ! grep -q '^\x60\x60\x60' "${REPO_ROOT}/.roll/features.md"
+}
+
+@test "features.md has proper heading structure" {
+  [ -f "${REPO_ROOT}/.roll/features.md" ] || skip "no .roll/features.md (roll-meta not checked out)"
+  grep -q '^# Roll' "${REPO_ROOT}/.roll/features.md"
+  grep -q '^## .*Core Highlights' "${REPO_ROOT}/.roll/features.md"
+  grep -q '^## Features by Epic' "${REPO_ROOT}/.roll/features.md"
+}
+
+@test "features.md covers all BACKLOG Feature groups with Done stories" {
+  local backlog="${REPO_ROOT}/.roll/backlog.md"
+  local features="${REPO_ROOT}/.roll/features.md"
+  [ -f "$backlog" ] && [ -f "$features" ] || skip "no .roll/ (roll-meta not checked out)"
+
+  # Extract Feature names from BACKLOG that have Done stories
+  local feature_names
+  feature_names=$(awk '
+    /^### Feature:/ {
+      gsub(/^### Feature: */, "")
+      feat = $0
+      in_feat = 1
+      has_done = 0
+      next
+    }
+    in_feat && /^$/ { in_feat = 0; if (has_done) print feat }
+    in_feat && /✅ Done/ { has_done = 1 }
+
+    END { if (in_feat && has_done) print feat }
+  ' "$backlog")
+
+  [ -n "$feature_names" ]
+
+  while IFS= read -r feat; do
+    [ -n "$feat" ] || continue
+    grep -qF "$feat" "$features" || {
+      echo "MISSING Feature in features.md: $feat"
+      false
+    }
+  done <<< "$feature_names"
+}

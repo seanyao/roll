@@ -6169,12 +6169,13 @@ cmd_loop() {
     pause)   _loop_pause ;;
     resume)  _loop_resume ;;
     reset)   _loop_reset ;;
+    gc)      shift; _loop_gc "$@" ;;
     notify)       _notify "${1:-roll}" "${2:-}" ;;
     enforce-tcr)  _loop_enforce_tcr "${1:-}" "${2:-}" ;;
     precheck-ci)  _loop_precheck_ci ;;
     branches)     _loop_branches "$(pwd -P)" ;;
     *)  cat <<'HELP'
-Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|branches>
+Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
   on            Install launchd scheduler (loop + dream + brief)
   off           Remove launchd scheduler
@@ -6192,6 +6193,8 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mu
   pause         Pause scheduling (keep plist, skip execution)
   resume        Resume scheduling after pause
   reset         Clear loop state (start fresh on next fire)
+  gc [--dry-run] [--keep-days N]
+                Garbage-collect orphan slugs, tmp debris, expired backups
   branches      List loop-related branches
 
 Internal (called by roll-loop SKILL):
@@ -6644,6 +6647,130 @@ _loop_attach() {
   fi
 
   exec tmux attach -t "$session"
+}
+
+# US-LOOP-021: garbage-collect orphan slugs, tmp debris, and expired backups.
+# Usage: _loop_gc [--dry-run] [--keep-days N]
+# Keeps backups/migrated files within N days (default 30).
+# Retention order: ROLL_LOOP_GC_RETENTION_DAYS env > .roll/local.yaml loop_gc.retention_days > 30.
+_loop_gc() {
+  local dry_run=false
+  local keep_days=30
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) dry_run=true; shift ;;
+      --keep-days) keep_days="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  # Retention config: env > local.yaml > default
+  if [[ -n "${ROLL_LOOP_GC_RETENTION_DAYS:-}" ]]; then
+    keep_days="$ROLL_LOOP_GC_RETENTION_DAYS"
+  elif [[ -f .roll/local.yaml ]]; then
+    local yaml_val; yaml_val=$(_config_read_int "loop_gc.retention_days" "" 2>/dev/null || true)
+    [[ -n "$yaml_val" ]] && keep_days="$yaml_val"
+  fi
+
+  local loop_dir="${_SHARED_ROOT:-${HOME}/.shared/roll}/loop"
+  # Always use canonical LaunchAgents — auto-sandbox only redirects writes.
+  local plist_dir="${HOME}/Library/LaunchAgents"
+  local now_epoch; now_epoch=$(date +%s)
+  local gc_count=0
+
+  # ── Phase 1: orphan slug detection ──
+  local slug plist proj
+  for plist in "$plist_dir"/com.roll.loop.*.plist; do
+    [[ -f "$plist" ]] || continue
+    local fname; fname=$(basename "$plist" .plist)
+    # Extract slug: com.roll.loop.<slug> → <slug>
+    slug="${fname#com.roll.loop.}"
+    [[ -z "$slug" ]] && continue
+
+    # Resolve project path from plist WorkingDirectory key
+    # (inlined from _loop_resolve_project_path — US-LOOP-018)
+    proj=$(awk '/<key>WorkingDirectory<\/key>/{f=1;next} f{gsub(/^[[:space:]]*<string>|<\/string>[[:space:]]*$/,"");print;exit}' "$plist" 2>/dev/null)
+
+    if [[ -z "$proj" || ! -d "$proj" ]]; then
+      # Expired slug — project directory doesn't exist
+      local ts; ts=$(date +%Y%m%dT%H%M%S)
+      local archive_dir="${loop_dir}/archived/${slug}-${ts}"
+
+      if $dry_run; then
+        echo "[DRY-RUN] orphan slug: $slug (project not found)"
+        gc_count=$((gc_count + 1))
+        continue
+      fi
+
+      echo "gc: archiving orphan slug $slug"
+      mkdir -p "$archive_dir"
+
+      # Move runner scripts
+      for f in "${loop_dir}/run-${slug}.sh" \
+               "${loop_dir}/run-${slug}-inner.sh" \
+               "${loop_dir}/attach-roll-loop-${slug}.command"; do
+        [[ -f "$f" ]] && mv "$f" "$archive_dir/"
+      done
+
+      # Move plist (it's already unloaded since project dir is gone)
+      [[ -f "$plist" ]] && mv "$plist" "$archive_dir/"
+
+      gc_count=$((gc_count + 1))
+    fi
+  done
+
+  # ── Phase 2: tmp debris cleanup ──
+
+  # runs.jsonl.tmp.* — always safe to remove (FIX-123 cleans stale on entry,
+  # but files from cycles that hard-crashed without the FIX-123 trap may remain)
+  local f
+  for f in "$loop_dir"/runs.jsonl.tmp.*; do
+    [[ -f "$f" ]] || continue
+    if $dry_run; then
+      echo "[DRY-RUN] tmp debris: $(basename "$f")"
+    else
+      rm -f "$f"
+    fi
+    gc_count=$((gc_count + 1))
+  done
+
+  # backup-before-merge-*.tgz older than 5 days
+  local cutoff_5d; cutoff_5d=$((now_epoch - 5 * 86400))
+  for f in "$loop_dir"/backup-before-merge-*.tgz; do
+    [[ -f "$f" ]] || continue
+    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    if [[ "$mtime" -lt "$cutoff_5d" ]]; then
+      if $dry_run; then
+        echo "[DRY-RUN] old backup: $(basename "$f")"
+      else
+        rm -f "$f"
+      fi
+      gc_count=$((gc_count + 1))
+    fi
+  done
+
+  # *.migrated-* older than 7 days
+  local cutoff_7d; cutoff_7d=$((now_epoch - 7 * 86400))
+  for f in "$loop_dir"/*.migrated-*; do
+    [[ -f "$f" ]] || continue
+    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    if [[ "$mtime" -lt "$cutoff_7d" ]]; then
+      if $dry_run; then
+        echo "[DRY-RUN] old migrated: $(basename "$f")"
+      else
+        rm -f "$f"
+      fi
+      gc_count=$((gc_count + 1))
+    fi
+  done
+
+  if $dry_run; then
+    echo "gc: dry-run complete ($gc_count items would be cleaned)"
+  else
+    echo "gc: $gc_count items cleaned, keep-days=$keep_days"
+  fi
 }
 
 # Pretty-print a duration in seconds as "Xs" / "Ym" / "Yh Zm".

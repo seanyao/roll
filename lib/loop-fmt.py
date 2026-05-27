@@ -475,9 +475,14 @@ def _passthrough_main(agent):
         sys.stdout.write(out + "\n")
         sys.stdout.flush()
 
-    # Cycle ended — try to extract real usage via plugin registry.
-    if accumulated and evfile:
-        _emit_final_usage_event(evfile, cycle, agent, accumulated)
+    # Passthrough is display-only. Usage is NOT emitted from here:
+    #  - pi -p text mode carries no usage in stdout (nothing to extract), and
+    #  - this runs once per retry attempt, so emitting here wrote N usage
+    #    events per cycle and the dashboard SUMS same-label usage → ×N.
+    # Instead bin/roll calls agent_usage/pi_emit.py exactly once after the
+    # agent phase, recovering real usage from pi's session files. The
+    # _emit_* helpers below are retained for US-LOOP-010 unit tests.
+    _ = (accumulated, evfile)  # intentionally unused now
 
 
 def _emit_passthrough_event(evfile, cycle, agent, text):

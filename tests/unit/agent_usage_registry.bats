@@ -31,7 +31,10 @@ print(callable(fn))
   [ "$output" = "True" ]
 }
 
-@test "US-LOOP-026: extract_usage with pi returns real data" {
+@test "US-LOOP-026: extract_usage with pi returns None (text mode has no usage)" {
+  # pi runs as `pi -p` text mode — stdout is only the answer, no token/cost
+  # summary. So the stdout-scraping registry path always yields None; real
+  # usage is recovered out-of-band from session files (usage_from_session).
   run python3 -c "
 import sys; sys.path.insert(0, '${BATS_TEST_DIRNAME}/../../lib')
 from agent_usage import extract_usage
@@ -45,9 +48,7 @@ result = extract_usage('pi', lines)
 print(result)
 "
   [ "$status" -eq 0 ]
-  [[ "$output" == *"'input_tokens': 15000"* ]]
-  [[ "$output" == *"'output_tokens': 3000"* ]]
-  [[ "$output" == *"'cost_list_usd': 0.15"* ]]
+  [ "$output" = "None" ]
 }
 
 # ─── Unregistered agent → None ───────────────────────────────────────────

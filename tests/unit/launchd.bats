@@ -107,9 +107,9 @@ setup() {
 }
 
 @test "_write_launchd_plist: creates valid plist XML" {
-  # FIX-105: pre-fix this called with hour="1" and asserted StartCalendarInterval.
-  # Post-fix daily schedules use StartInterval=86400 instead. Use the hourly
-  # path (empty hour) here so this test still exercises the calendar path.
+  # US-LOOP-032/FIX-105: every schedule now emits StartInterval (seconds), never
+  # StartCalendarInterval. The hourly loop path (empty hour) uses
+  # StartInterval = period * 60 = 60 * 60 = 3600.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
   local runner="${tmp_dir}/run.sh"
@@ -118,8 +118,9 @@ setup() {
 
   [ -f "$plist" ]
   grep -q "com.roll.loop.test" "$plist"
-  grep -q "StartCalendarInterval" "$plist"
-  grep -q "<integer>0</integer>" "$plist"
+  grep -q "<key>StartInterval</key>" "$plist"
+  grep -A1 "<key>StartInterval</key>" "$plist" | grep -q "<integer>3600</integer>"
+  ! grep -q "StartCalendarInterval" "$plist"
   rm -rf "$tmp_dir"
 }
 
@@ -280,18 +281,28 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: custom loop_minute from config overrides hash" {
+@test "_install_launchd_plists: custom loop period from .roll/local.yaml drives StartInterval (US-LOOP-032)" {
+  # Pre-US-LOOP-032 this asserted a custom loop_minute landed in the loop plist
+  # as <Minute>7</Minute>. The offset (loop_minute) is no longer emitted — the
+  # loop plist now carries StartInterval = period * 60. A custom period_minutes
+  # in .roll/local.yaml therefore drives the StartInterval, overriding the
+  # default period=60 (→3600): period=30 → 1800. (Global loop_minute → spec
+  # offset is covered in loop_schedule_display.bats.)
   local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj/.roll"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
-  local cfg; cfg=$(mktemp); echo "loop_minute: 7" > "$cfg"; ROLL_CONFIG="$cfg"
+  ROLL_CONFIG=$(mktemp)
+  printf 'loop_schedule:\n  period_minutes: 30\n  offset_minute: 0\n' > "$proj/.roll/local.yaml"
 
   _install_launchd_plists "$proj"
 
   local loop_plist; loop_plist=$(_launchd_plist_path "loop" "$proj")
-  grep -A1 "<key>Minute</key>" "$loop_plist" | grep -q "<integer>7</integer>"
-  rm -rf "$tmp_dir"; rm -f "$cfg"
+  grep -q "<key>StartInterval</key>" "$loop_plist"
+  grep -A1 "<key>StartInterval</key>" "$loop_plist" | grep -q "<integer>1800</integer>"
+  ! grep -q "<key>Minute</key>" "$loop_plist"
+  ! grep -q "<key>StartCalendarInterval</key>" "$loop_plist"
+  rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
 @test "_install_launchd_plists: two different projects get different default loop_minute" {
@@ -309,13 +320,14 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: loop uses Minute schedule, dream/brief use StartInterval (FIX-105)" {
-  # Pre-FIX-105 this test asserted three different Minute values across loop/
-  # dream/brief plists (so they wouldn't collide at the same wall-clock minute).
-  # Post-FIX-105 daily schedules switched to StartInterval=86400; dream and
-  # brief don't have <Minute> at all. Loop still has Minute (hourly). The new
-  # invariant is "loop has Minute, dream/brief have StartInterval, no overlap
-  # in schedule key type."
+@test "_install_launchd_plists: loop uses StartInterval=3600, dream/brief use StartInterval=86400 (US-LOOP-032/FIX-105)" {
+  # Pre-US-LOOP-032 this test asserted loop carried StartCalendarInterval+Minute
+  # while dream/brief used StartInterval. US-LOOP-032 moved loop onto
+  # StartInterval = period * 60 too, so no service emits StartCalendarInterval
+  # or <Minute> any more. New invariant:
+  #   - loop (sub-daily, empty hour): StartInterval = period * 60; default
+  #     period 60 → 3600.
+  #   - dream/brief (daily): StartInterval = 86400.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
@@ -329,9 +341,10 @@ setup() {
   dream_p=$(_launchd_plist_path "dream" "$proj")
   brief_p=$(_launchd_plist_path "brief" "$proj")
 
-  # Loop: StartCalendarInterval with Minute (hourly), no Hour key.
-  grep -q "<key>StartCalendarInterval</key>" "$loop_p"
-  grep -q "<key>Minute</key>" "$loop_p"
+  # Loop: StartInterval=3600 (period 60 * 60), no calendar interval, no Hour.
+  grep -q "<key>StartInterval</key>" "$loop_p"
+  grep -A1 "<key>StartInterval</key>" "$loop_p" | grep -q "<integer>3600</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$loop_p"
   ! grep -q "<key>Hour</key>" "$loop_p"
 
   # Dream + brief: StartInterval=86400, no calendar interval.
@@ -423,14 +436,19 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_write_launchd_plist: hourly schedule (hour empty) still uses StartCalendarInterval (FIX-105)" {
-  # Hourly schedule (loop) keeps StartCalendarInterval since single-Minute form
-  # fires correctly on macOS 26.4 — the bug only affects Hour+Minute combos.
+@test "_write_launchd_plist: sub-daily schedule (hour empty) uses StartInterval=period*60 (US-LOOP-032)" {
+  # US-LOOP-032: the sub-daily/hourly loop path (empty hour) switched from
+  # StartCalendarInterval+<Minute> to StartInterval = period * 60. Verified here
+  # with a non-60 period (30 → 1800) to pin the formula, not just the hourly
+  # default. The calendar form is gone entirely. offset (arg 5) is accepted for
+  # backward compat but no longer emitted.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
-  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "60" "18" "" "${tmp_dir}/run.sh"
-  grep -q "<key>StartCalendarInterval</key>" "$plist"
-  ! grep -q "<key>StartInterval</key>" "$plist"
+  _write_launchd_plist "$plist" "com.roll.loop.test" "/tmp/proj" "30" "0" "" "${tmp_dir}/run.sh"
+  grep -q "<key>StartInterval</key>" "$plist"
+  grep -A1 "<key>StartInterval</key>" "$plist" | grep -q "<integer>1800</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$plist"
+  ! grep -q "<key>Minute</key>" "$plist"
   rm -rf "$tmp_dir"
 }
 
@@ -438,14 +456,19 @@ setup() {
   # FIX-093: this test asserts launchctl was called with specific args; opt out
   # of the unit_setup-wide skip so the function() override below catches them.
   unset _LAUNCHD_SKIP_REGISTRY
+  # US-LOOP-032: the loop plist is driven by StartInterval = period * 60, so
+  # changing loop_minute (the offset) no longer alters plist content. Vary
+  # period_minutes in .roll/local.yaml instead to force a real content change
+  # and trigger the reload path.
   local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj/.roll"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
+  ROLL_CONFIG=$(mktemp)
   local reload_log="${tmp_dir}/launchctl_calls.log"
 
-  # Install with first config
-  local cfg; cfg=$(mktemp); echo "loop_minute: 11" > "$cfg"; ROLL_CONFIG="$cfg"
+  # Install with first schedule (period=30 → loop StartInterval=1800)
+  printf 'loop_schedule:\n  period_minutes: 30\n  offset_minute: 0\n' > "$proj/.roll/local.yaml"
   _install_launchd_plists "$proj"
 
   # Simulate service is loaded and capture launchctl calls
@@ -453,8 +476,8 @@ setup() {
   launchctl() { echo "$*" >> "$reload_log"; }
   export -f _launchd_is_loaded launchctl 2>/dev/null || true
 
-  # Change config so plist content changes
-  echo "loop_minute: 22" > "$cfg"
+  # Change schedule so loop plist content changes (period=45 → StartInterval=2700)
+  printf 'loop_schedule:\n  period_minutes: 45\n  offset_minute: 0\n' > "$proj/.roll/local.yaml"
   _install_launchd_plists "$proj"
 
   # FIX-027: reload must use bootout/bootstrap (doesn't touch overrides db),
@@ -463,26 +486,30 @@ setup() {
   grep -q "bootstrap" "$reload_log"
   ! grep -qE '^unload ' "$reload_log"
   ! grep -qE '^load ' "$reload_log"
-  rm -rf "$tmp_dir"; rm -f "$cfg"
+  rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
 @test "_install_launchd_plists: bootout targets gui/<uid>/<label> and bootstrap targets gui/<uid> <plist> (FIX-027)" {
   # FIX-093: see sibling FIX-027 test above — opt out so launchctl override fires.
   unset _LAUNCHD_SKIP_REGISTRY
+  # US-LOOP-032: drive the loop plist content change via period_minutes
+  # (loop_minute is only the offset and no longer appears in the plist — see
+  # sibling test).
   local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"; mkdir -p "$proj"
+  local proj="${tmp_dir}/proj"; mkdir -p "$proj/.roll"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
+  ROLL_CONFIG=$(mktemp)
   local reload_log="${tmp_dir}/launchctl_calls.log"
 
-  local cfg; cfg=$(mktemp); echo "loop_minute: 11" > "$cfg"; ROLL_CONFIG="$cfg"
+  printf 'loop_schedule:\n  period_minutes: 30\n  offset_minute: 0\n' > "$proj/.roll/local.yaml"
   _install_launchd_plists "$proj"
 
   _launchd_is_loaded() { return 0; }
   launchctl() { echo "$*" >> "$reload_log"; }
   export -f _launchd_is_loaded launchctl 2>/dev/null || true
 
-  echo "loop_minute: 22" > "$cfg"
+  printf 'loop_schedule:\n  period_minutes: 45\n  offset_minute: 0\n' > "$proj/.roll/local.yaml"
   _install_launchd_plists "$proj"
 
   local uid; uid=$(id -u)
@@ -490,7 +517,7 @@ setup() {
   local plist; plist=$(_launchd_plist_path "loop" "$proj")
   grep -qF "bootout gui/${uid}/${label}" "$reload_log"
   grep -qF "bootstrap gui/${uid} ${plist}" "$reload_log"
-  rm -rf "$tmp_dir"; rm -f "$cfg"
+  rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
 @test "_install_launchd_plists: content unchanged → reload not triggered" {

@@ -56,10 +56,19 @@ teardown() { unit_teardown; }
 }
 
 @test "phase_* events are appended to events ndjson alongside stdout rendering" {
+  # Pin the runtime dir so _loop_event resolves its events file deterministically.
+  # Without this the path goes through _loop_resolve_project_path, which reads the
+  # real ~/Library/LaunchAgents and honours an inherited ROLL_MAIN_SLUG — both
+  # non-hermetic. Under parallel load (or when the suite runs inside a loop cycle)
+  # a live plist or inherited slug redirected the write to the real project's
+  # .roll/loop/events.ndjson, so the assertion on the sandbox path flaked.
+  # ROLL_PROJECT_RUNTIME_DIR is the purpose-built test-sandbox override in
+  # _loop_runtime_dir; with it set, _loop_event writes to <dir>/events.ndjson.
+  export ROLL_PROJECT_RUNTIME_DIR="${_SHARED_ROOT}/loop"
+  mkdir -p "$ROLL_PROJECT_RUNTIME_DIR"
   _loop_event phase_start startup "" "" >/dev/null
   _loop_event phase_end startup "0.4s" ok >/dev/null
-  local slug; slug=$(_project_slug)
-  local evfile="${_SHARED_ROOT}/loop/events-${slug}.ndjson"
+  local evfile="${ROLL_PROJECT_RUNTIME_DIR}/events.ndjson"
   [ -f "$evfile" ]
   grep -q '"stage":"phase_start"' "$evfile"
   grep -q '"stage":"phase_end"' "$evfile"

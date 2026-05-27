@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Default the test suite to en so dev machines with AppleLanguages=zh (or any
+# zh-prefixed LANG) render the same catalog strings as the Ubuntu CI runner.
+# Tests that exercise zh behaviour set ROLL_LANG=zh explicitly per-test.
+: "${ROLL_LANG:=en}"
+export ROLL_LANG
+
 BATS="$(dirname "$0")/helpers/bats-core/bin/bats"
 
 # REFACTOR-008 Phase 1: clear error when bats-core submodule not initialized.

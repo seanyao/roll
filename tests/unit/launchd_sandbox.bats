@@ -550,7 +550,11 @@ SHIM
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
-  export _LAUNCHD_SKIP_REGISTRY=1
+  # This test asserts _loop_on REACHES the launchctl call path (the FIX-098
+  # contract). Unset the unit_setup skip flag so _launchd_should_skip_registry
+  # doesn't continue past the call — the launchctl function stub below
+  # captures every invocation, so host launchd is still safe.
+  unset _LAUNCHD_SKIP_REGISTRY
 
   # Stub _launchd_is_loaded to simulate stale (plist on disk, not in launchd).
   _launchd_is_loaded() { return 1; }

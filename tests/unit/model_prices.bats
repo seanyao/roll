@@ -171,29 +171,30 @@ print(mp.compute_list_cost("x", input_tokens=1_000_000, output_tokens=500_000, p
   [[ "$output" =~ k[3-9] ]]
 }
 
-@test "FIX-116: currency_for returns USD for all current vendors" {
+@test "FIX-116: currency_for is USD for claude/kimi, CNY for deepseek (native)" {
+  # deepseek bills in CNY — we store native currency, never converting.
   run run_py 'print(mp.currency_for("claude-sonnet-4-6"), mp.currency_for("deepseek-chat"), mp.currency_for("kimi-k2.5"))'
   [ "$status" -eq 0 ]
-  [ "$output" = "USD USD USD" ]
+  [ "$output" = "USD CNY USD" ]
 }
 
 @test "FIX-116: compute_list_cost works for deepseek-chat model" {
   run run_py 'print(mp.compute_list_cost("deepseek-chat", input_tokens=1_000_000))'
   [ "$status" -eq 0 ]
-  # deepseek-chat input = $0.14/M → 1M tokens = 0.14
-  [ "$output" = "0.14" ]
+  # deepseek-chat input = ¥1/M → 1M tokens = 1.0 (CNY, native)
+  [ "$output" = "1.0" ]
 }
 
 @test "FIX-116: vendor-prefixed model name resolves correctly" {
   run run_py 'print(mp.compute_list_cost("deepseek/deepseek-chat", input_tokens=1_000_000))'
   [ "$status" -eq 0 ]
-  [ "$output" = "0.14" ]
+  [ "$output" = "1.0" ]
 }
 
 @test "FIX-116: currency_for resolves vendor-prefixed model names" {
   run run_py 'print(mp.currency_for("deepseek/deepseek-chat"))'
   [ "$status" -eq 0 ]
-  [ "$output" = "USD" ]
+  [ "$output" = "CNY" ]
 }
 
 @test "FIX-116: unknown model still warns and falls back to DEFAULT" {

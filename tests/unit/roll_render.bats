@@ -723,6 +723,101 @@ print(r["input_tokens"], r["output_tokens"],
   [[ "$output" == *"164 13350 499000 12737000"* ]]
 }
 
+# ─── FIX-126: rollup cost is per-currency, never summed across currencies ─────
+
+@test "FIX-126 rollup_for_day splits cost by currency, never sums ¥ into \$" {
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+cycles = [
+  {"start": ts, "cost_list": 1.50, "cost_currency": "USD", "outcome": "done"},
+  {"start": ts, "cost_list": 0.40, "cost_currency": "CNY", "outcome": "done"},
+  {"start": ts, "cost_list": 0.60, "cost_currency": "CNY", "outcome": "done"},
+]
+r = mod.rollup_for_day(cycles)
+# legacy scalar still sums (back-compat), but cost_by_cur keeps them apart
+print("USD=%.2f" % r["cost_by_cur"]["USD"], "CNY=%.2f" % r["cost_by_cur"]["CNY"])
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"USD=1.50 CNY=1.00"* ]]
+}
+
+@test "FIX-126 rollup_for_day defaults missing cost_currency to USD" {
+  run run_status '
+from datetime import datetime, timezone
+ts = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc)
+cycles = [{"start": ts, "cost_list": 2.00, "outcome": "done"}]
+r = mod.rollup_for_day(cycles)
+print("USD=%.2f" % r["cost_by_cur"].get("USD", -1), "keys=%d" % len(r["cost_by_cur"]))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"USD=2.00 keys=1"* ]]
+}
+
+@test "FIX-126 render: CNY-only rollup shows ¥ symbol, not \$" {
+  run run_status '
+import io, contextlib
+from datetime import datetime, timezone, timedelta
+now = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc).astimezone()
+ts = now - timedelta(hours=1)
+te = ts + timedelta(seconds=300)
+events = [
+  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "L", "_ts": ts},
+  {"ts": ts.isoformat(), "stage": "usage", "label": "L",
+   "detail": {"model": "deepseek-v4-pro", "input_tokens": 3000, "output_tokens": 500,
+              "cache_creation_tokens": 0, "cache_read_tokens": 1000,
+              "cost_list_usd": 0.57, "cost_currency": "CNY"}, "_ts": ts},
+  {"ts": te.isoformat(), "stage": "cycle_end", "label": "L", "outcome": "done", "_ts": te},
+]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    mod.render(events, [], {}, {}, days=3, lang="en", now=now)
+out = buf.getvalue()
+assert "¥0.57" in out, repr([l for l in out.splitlines() if "cost" in l])
+# no stray dollar-stamped cost row when all spend is CNY
+cost_lines = [l for l in out.splitlines() if l.strip().startswith("cost")]
+assert all("$" not in l for l in cost_lines), cost_lines
+print("OK")
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK"* ]]
+}
+
+@test "FIX-126 render: mixed USD+CNY shows two cost rows with their own symbols" {
+  run run_status '
+import io, contextlib
+from datetime import datetime, timezone, timedelta
+now = datetime(2026,5,22,10,0,0,tzinfo=timezone.utc).astimezone()
+ts = now - timedelta(hours=1)
+te = ts + timedelta(seconds=300)
+ts2 = now - timedelta(hours=2)
+te2 = ts2 + timedelta(seconds=300)
+events = [
+  {"ts": ts.isoformat(), "stage": "cycle_start", "label": "LA", "_ts": ts},
+  {"ts": ts.isoformat(), "stage": "usage", "label": "LA",
+   "detail": {"model": "claude-opus-4-7", "input_tokens": 5000, "output_tokens": 900,
+              "cost_list_usd": 1.20, "cost_currency": "USD"}, "_ts": ts},
+  {"ts": te.isoformat(), "stage": "cycle_end", "label": "LA", "outcome": "done", "_ts": te},
+  {"ts": ts2.isoformat(), "stage": "cycle_start", "label": "LB", "_ts": ts2},
+  {"ts": ts2.isoformat(), "stage": "usage", "label": "LB",
+   "detail": {"model": "deepseek-v4-pro", "input_tokens": 3000, "output_tokens": 500,
+              "cost_list_usd": 0.57, "cost_currency": "CNY"}, "_ts": ts2},
+  {"ts": te2.isoformat(), "stage": "cycle_end", "label": "LB", "outcome": "done", "_ts": te2},
+]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    mod.render(events, [], {}, {}, days=3, lang="en", now=now)
+out = buf.getvalue()
+assert "$1.20" in out, "missing USD row"
+assert "¥0.57" in out, "missing CNY row"
+cost_rows = [l for l in out.splitlines() if l.strip().startswith("cost ")]
+assert len(cost_rows) == 2, cost_rows
+print("OK")
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK"* ]]
+}
+
 # ─── US-VIEW-014: persisted cost_list_usd preferred, fallback tagged [legacy] ─
 
 @test "US-VIEW-014 backfill: usage_event.cost_list_usd is used verbatim, not recomputed" {

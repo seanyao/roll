@@ -85,22 +85,21 @@ strip_ansi() {
   [ "${#output}" -eq 0 ]
 }
 
-# ─── Usage event emission ───────────────────────────────────────────────────
+# ─── Passthrough is display-only (US-LOOP-026 supersedes US-LOOP-010) ────────
+# The realtime passthrough no longer emits usage events: pi -p text mode has
+# no usage to scrape, and it ran once per retry → the dashboard's same-label
+# SUM inflated tokens ×N. Usage is now written exactly once post-cycle by
+# agent_usage/pi_emit.py (see tests/integration/loop_pi_usage_event.bats).
 
-@test "US-LOOP-010: pi agent writes usage events to ndjson" {
+@test "US-LOOP-026: pi passthrough writes NO usage event (display-only)" {
   export ROLL_LOOP_AGENT="pi"
   echo "Working on story..." | python3 "$LOOP_FMT"
   local evfile="$TEST_TMP/loop/events-test-slug.ndjson"
-  [ -f "$evfile" ]
-  grep -q 'test-cycle-001' "$evfile"
-  grep -q 'null' "$evfile"
-}
-
-@test "US-LOOP-010: pi agent usage event has agent as model" {
-  export ROLL_LOOP_AGENT="pi"
-  echo "Hello" | python3 "$LOOP_FMT"
-  local evfile="$TEST_TMP/loop/events-test-slug.ndjson"
-  grep -q '"pi"' "$evfile"
+  # No usage event from the realtime path — file is absent or has none.
+  if [ -f "$evfile" ]; then
+    run grep -c '"stage": "usage"' "$evfile"
+    [ "$output" = "0" ]
+  fi
 }
 
 # ─── Integration: mock agent pipeline ───────────────────────────────────────

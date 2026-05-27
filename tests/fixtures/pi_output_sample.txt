@@ -1,0 +1,28 @@
+I will implement the story.
+Reading file lib/loop-fmt.py...
+Writing tests...
+Tests passed!
+All 5 tests passed.
+Committing changes...
+
+Session Info
+
+File: /Users/seanyao/.pi/agent/sessions/session-abc123.json
+ID: abc123-def456
+
+Messages
+User: 1
+Assistant: 4
+Tool Calls: 12
+Tool Results: 12
+Total: 29
+
+Tokens
+Input: 15,234
+Output: 3,456
+Cache Read: 1,200
+Cache Write: 800
+Total: 20,690
+
+Cost
+Total: 0.1234

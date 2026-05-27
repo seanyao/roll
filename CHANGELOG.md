@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2026.527.1
 
 ### Added
 

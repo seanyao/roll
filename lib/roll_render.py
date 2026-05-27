@@ -146,8 +146,8 @@ def fmt_delta(today: float, yest: float, *, kind: str, unit: str = "") -> Tuple[
     arrow = "▲" if diff > 0 else "▼"
     sign = "+" if diff > 0 else "−"
     mag = abs(diff)
-    if unit == "$":
-        body = f"{sign}${mag:.2f}"
+    if unit in ("$", "¥"):
+        body = f"{sign}{unit}{mag:.2f}"
     elif unit == "m":
         body = f"{sign}{int(round(mag))}m"
     else:
@@ -215,16 +215,20 @@ def metric_dur(name: str, t: int, y: int, d2: int, *, partial: bool = False) -> 
           c("dim", pad(fmt_dur(y), 10)) +
           c("muted", pad(fmt_dur(d2), 8)))
 
-def metric_dollar(name: str, t: float, y: float, d2: float, *, partial: bool = False) -> None:
-    delta_text, delta_c = fmt_delta(t, y, kind="up_bad", unit="$")
+def metric_dollar(name: str, t: float, y: float, d2: float, *,
+                  partial: bool = False, symbol: str = "$") -> None:
+    # FIX-126: currency-aware — deepseek cost is native CNY (¥), claude USD ($).
+    # We never convert; the rollup shows one row per currency with its own
+    # symbol, so a ¥-row and a $-row are never summed into a meaningless total.
+    delta_text, delta_c = fmt_delta(t, y, kind="up_bad", unit=symbol)
     if partial and delta_c not in ("muted",):
         delta_c = "muted"
     print("  " +
           c("dim", pad(name, 14)) +
-          c("fg", pad(f"${t:.2f}", 8, "r"), bold=True) + "  " +
+          c("fg", pad(f"{symbol}{t:.2f}", 8, "r"), bold=True) + "  " +
           c(delta_c, pad(delta_text, 12), bold=(delta_c != "muted")) +
-          c("dim", pad(f"${y:.2f}", 10)) +
-          c("muted", pad(f"${d2:.2f}", 8)))
+          c("dim", pad(f"{symbol}{y:.2f}", 10)) +
+          c("muted", pad(f"{symbol}{d2:.2f}", 8)))
 
 def metric_tokens(name: str, t: int, y: int, d2: int, *, partial: bool = False) -> None:
     # Compose the delta string with token-unit scaling so a 200M increase

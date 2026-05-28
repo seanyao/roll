@@ -7776,6 +7776,9 @@ _loop_sync_meta() {
   local roll_meta="${project_path}/.roll"
   local timeout_sec="${ROLL_LOOP_META_SYNC_TIMEOUT:-15}"
   local cid="${CYCLE_ID:-unknown}"
+  local slug="${_LOOP_PROJ_SLUG:-$(_project_slug 2>/dev/null || echo unknown)}"
+  local shared_dir="${_SHARED_ROOT:-$HOME/.shared/roll}/loop"
+  local fail_counter="${shared_dir}/meta-sync-fail-${slug}"
 
   # Detect remote via the canonical probe point. If .roll/ has no .git or no
   # remote configured, treat as "not managed" and skip silently.
@@ -7796,12 +7799,25 @@ _loop_sync_meta() {
   if [ "$_fetch_ok" -eq 1 ]; then
     if git -C "$roll_meta" reset --hard origin/main --quiet 2>/dev/null; then
       _loop_event meta_sync "$cid" "ok" "" 2>/dev/null || true
+      # US-LOOP-057: reset consecutive failure counter on success
+      rm -f "$fail_counter" 2>/dev/null || true
       return 0
     fi
   fi
 
   # Fetch or reset failed — stale .roll/ used; cycle continues
   _loop_event meta_sync "$cid" "stale" "fetch/reset failed" 2>/dev/null || true
+
+  # US-LOOP-057: increment failure counter; write ALERT after 3 consecutive failures
+  mkdir -p "$shared_dir" 2>/dev/null || true
+  local count=0
+  [ -f "$fail_counter" ] && count=$(cat "$fail_counter" 2>/dev/null || echo 0)
+  count=$(( count + 1 ))
+  printf '%s\n' "$count" > "$fail_counter"
+  if [ "$count" -ge 3 ]; then
+    printf '[%s] roll-meta sync consecutive failures: %d times. Check SSH key / network.\n  Last error: fetch/reset failed for %s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$count" "$remote_url" >> "${shared_dir}/ALERT-${slug}.md" 2>/dev/null || true
+  fi
   return 0
 }
 

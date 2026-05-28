@@ -101,3 +101,66 @@ _make_roll_meta_repo() {
   [ -f "$inner" ]
   grep -q '_loop_sync_meta' "$inner"
 }
+
+# ─── US-LOOP-057: consecutive failure counter + ALERT ───────────────────────
+
+@test "US-LOOP-057: first failure increments counter in state file" {
+  local proj="${TEST_TMP}/proj-fail1"
+  mkdir -p "${proj}/.roll"
+  git init "${proj}/.roll" -q
+  git -C "${proj}/.roll" remote add origin "git@nonexistent.invalid:t/r.git" 2>/dev/null || true
+  export CYCLE_ID="c1"
+  export ROLL_LOOP_META_SYNC_TIMEOUT=1
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/rt-fail1"
+  export _SHARED_ROOT="${TEST_TMP}/shared-fail1"
+  export _LOOP_PROJ_SLUG="test-fail1"
+  mkdir -p "$ROLL_PROJECT_RUNTIME_DIR" "$_SHARED_ROOT/loop"
+  run _loop_sync_meta "$proj"
+  [ "$status" -eq 0 ]
+  # Counter file should exist with value 1
+  local counter_file="${_SHARED_ROOT}/loop/meta-sync-fail-test-fail1"
+  [ -f "$counter_file" ]
+  local count; count=$(cat "$counter_file")
+  [ "$count" -eq 1 ]
+  unset ROLL_PROJECT_RUNTIME_DIR _SHARED_ROOT _LOOP_PROJ_SLUG ROLL_LOOP_META_SYNC_TIMEOUT
+}
+
+@test "US-LOOP-057: three consecutive failures trigger ALERT" {
+  local proj="${TEST_TMP}/proj-fail3"
+  mkdir -p "${proj}/.roll"
+  git init "${proj}/.roll" -q
+  git -C "${proj}/.roll" remote add origin "git@nonexistent.invalid:t/r.git" 2>/dev/null || true
+  export ROLL_LOOP_META_SYNC_TIMEOUT=1
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/rt-fail3"
+  export _SHARED_ROOT="${TEST_TMP}/shared-fail3"
+  export _LOOP_PROJ_SLUG="test-fail3"
+  mkdir -p "$ROLL_PROJECT_RUNTIME_DIR" "$_SHARED_ROOT/loop"
+  # Run 3 times to reach threshold
+  CYCLE_ID="c1" _loop_sync_meta "$proj" || true
+  CYCLE_ID="c2" _loop_sync_meta "$proj" || true
+  CYCLE_ID="c3" _loop_sync_meta "$proj" || true
+  # ALERT file should exist
+  local alert_file="${_SHARED_ROOT}/loop/ALERT-test-fail3.md"
+  [ -f "$alert_file" ]
+  grep -qi "meta.sync\|roll-meta\|sync" "$alert_file"
+  unset ROLL_PROJECT_RUNTIME_DIR _SHARED_ROOT _LOOP_PROJ_SLUG ROLL_LOOP_META_SYNC_TIMEOUT
+}
+
+@test "US-LOOP-057: success resets failure counter" {
+  local proj="${TEST_TMP}/proj-reset"
+  _make_roll_meta_repo "$proj"
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/rt-reset"
+  export _SHARED_ROOT="${TEST_TMP}/shared-reset"
+  export _LOOP_PROJ_SLUG="test-reset"
+  mkdir -p "$ROLL_PROJECT_RUNTIME_DIR" "$_SHARED_ROOT/loop"
+  # Pre-populate counter with value 2
+  echo "2" > "${_SHARED_ROOT}/loop/meta-sync-fail-test-reset"
+  CYCLE_ID="c-ok" _loop_sync_meta "$proj" || true
+  # Counter should be reset (file removed or 0)
+  local counter_file="${_SHARED_ROOT}/loop/meta-sync-fail-test-reset"
+  if [ -f "$counter_file" ]; then
+    local count; count=$(cat "$counter_file")
+    [ "$count" -eq 0 ]
+  fi
+  unset ROLL_PROJECT_RUNTIME_DIR _SHARED_ROOT _LOOP_PROJ_SLUG
+}

@@ -262,29 +262,36 @@ teardown() { unit_teardown; }
 
 # ─── _onboard_discover_agents — config parsing ───────────────────────────────
 
-@test "_onboard_discover_agents: installed dirs go to _ONBOARD_INSTALLED" {
+@test "_onboard_discover_agents: installed binaries go to _ONBOARD_INSTALLED (FIX-128)" {
+  # FIX-128: "installed" now means the CLI binary is on PATH, not just
+  # that Roll's convention-sync dir exists.
   local cfg="$TEST_TMP/roll-cfg"
-  mkdir -p "$TEST_TMP/has-claude" "$TEST_TMP/has-codex"
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\n' > "$TEST_TMP/bin/claude"
+  printf '#!/bin/sh\n' > "$TEST_TMP/bin/codex"
+  chmod +x "$TEST_TMP/bin/claude" "$TEST_TMP/bin/codex"
   cat > "$cfg" <<EOF
 ai_claude: $TEST_TMP/has-claude|x|y
 ai_codex: $TEST_TMP/has-codex|x|y
 ai_kimi: $TEST_TMP/no-kimi|x|y
 EOF
-  ROLL_CONFIG="$cfg" _onboard_discover_agents
+  PATH="$TEST_TMP/bin:/usr/bin:/bin" ROLL_CONFIG="$cfg" _onboard_discover_agents
   printf '%s\n' "${_ONBOARD_INSTALLED[@]}" | grep -qx claude
   printf '%s\n' "${_ONBOARD_INSTALLED[@]}" | grep -qx codex
   printf '%s\n' "${_ONBOARD_MISSING[@]}"   | grep -qx kimi
 }
 
-@test "_onboard_discover_agents: ignores non-ai_ keys" {
+@test "_onboard_discover_agents: ignores non-ai_ keys (FIX-128)" {
   local cfg="$TEST_TMP/roll-cfg"
-  mkdir -p "$TEST_TMP/has-claude"
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\n' > "$TEST_TMP/bin/claude"
+  chmod +x "$TEST_TMP/bin/claude"
   cat > "$cfg" <<EOF
 primary_agent: claude
 ai_claude: $TEST_TMP/has-claude|x|y
 some_other: $TEST_TMP|x|y
 EOF
-  ROLL_CONFIG="$cfg" _onboard_discover_agents
+  PATH="$TEST_TMP/bin:/usr/bin:/bin" ROLL_CONFIG="$cfg" _onboard_discover_agents
   [ "${#_ONBOARD_INSTALLED[@]}" -eq 1 ]
   [ "${_ONBOARD_INSTALLED[0]}" = "claude" ]
 }

@@ -3372,7 +3372,7 @@ USAGE  用法
   roll slides build <slug> [--no-open]
                           Render .roll/slides/<slug>/deck.md → .roll/slides/<slug>.html
                           渲染 deck.md 为 HTML 并自动打开浏览器
-  roll slides new "<topic>" [--template <name>] [--no-build]
+  roll slides new "<topic>" [--template <name>] [--slug <slug>] [--no-build]
                           Generate deck.md via AI, then auto-build + open HTML
                           通过 AI 生成 deck.md，自动渲染并打开 HTML
   roll slides list        List all decks (built / stale / failed / unbuilt)
@@ -3914,20 +3914,34 @@ _slides_topic_slug() {
   printf '%s' "$slug"
 }
 
-# `roll slides new "<topic>" [--template <name>]`
+# Fallback slug generator for non-ASCII topics (FIX-127).
+# Produces a deterministic deck-YYYYMMDD-<hash> slug from any topic.
+_slides_topic_slug_fallback() {
+  local topic="$1"
+  local date_str; date_str=$(date +%Y%m%d)
+  local hash
+  hash=$(printf '%s' "$topic" | md5 | cut -c1-4 2>/dev/null || printf '%s' "$topic" | md5sum | cut -c1-4)
+  printf 'deck-%s-%s' "$date_str" "$hash"
+}
+
+# `roll slides new "<topic>" [--template <name>] [--slug <slug>]`
 # AI authoring entry point. Loads the `roll-deck` skill, builds a single text
 # prompt containing the skill body + topic + slug + template, and hands it
 # to the selected project agent. The agent is responsible for writing
 # `.roll/slides/<slug>/deck.md` (and nothing else). After the agent exits,
 # we print a bilingual hint pointing at `roll slides build <slug>`.
 cmd_slides_new() {
-  local topic="" template="introduction-v3" quiet=0 no_build=0
+  local topic="" template="introduction-v3" quiet=0 no_build=0 user_slug=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --template)
         [[ -n "${2:-}" ]] || { err "$(msg slides_new.template_requires_value)"; return 1; }
         template="$2"; shift 2 ;;
       --template=*) template="${1#--template=}"; shift ;;
+      --slug)
+        [[ -n "${2:-}" ]] || { err "$(msg slides_new.slug_requires_value)"; return 1; }
+        user_slug="$2"; shift 2 ;;
+      --slug=*) user_slug="${1#--slug=}"; shift ;;
       --quiet) quiet=1; shift ;;
       --no-build) no_build=1; shift ;;
       --help|-h) _slides_help; return 0 ;;
@@ -3943,16 +3957,25 @@ cmd_slides_new() {
   done
 
   if [[ -z "$topic" ]]; then
-    err "Usage: roll slides new \"<topic>\" [--template <name>] [--quiet] [--no-build]"
+    err "Usage: roll slides new \"<topic>\" [--template <name>] [--slug <slug>] [--quiet] [--no-build]"
     echo "$(msg slides_new.en_roll_slides_new_template)" >&2
     return 1
   fi
 
-  local slug; slug=$(_slides_topic_slug "$topic")
-  if [[ -z "$slug" ]]; then
-    err "Could not derive a slug from topic: $topic"
-    echo "$(msg slides_new.en_slug $topic)" >&2
-    return 1
+  local slug
+  if [[ -n "$user_slug" ]]; then
+    # Validate user-provided slug: lowercase letters, digits, hyphens only
+    if [[ ! "$user_slug" =~ ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ]]; then
+      err "$(msg slides_new.slug_invalid "$user_slug")"
+      return 1
+    fi
+    slug="$user_slug"
+  else
+    slug=$(_slides_topic_slug "$topic")
+    if [[ -z "$slug" ]]; then
+      slug=$(_slides_topic_slug_fallback "$topic")
+      echo "$(msg slides_new.fallback_slug "$slug")" >&2
+    fi
   fi
 
   # Progress: init with 5 phases, detect quiet mode

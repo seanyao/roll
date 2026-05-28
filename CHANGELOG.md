@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **loop 运行时间可以按项目设** — 不用再全局迁就
+
+### Fixed
+
+- **`roll loop on` 不再显示全 00:00** — 时间显示正常了
+- **agent 检测不再误报** — 没装的工具不会被当成可用
+
 ## v2026.528.2
 
 ### Added

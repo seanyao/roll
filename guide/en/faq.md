@@ -621,3 +621,42 @@ gitlab.com / self-hosted → check your SSH key
 # no data is lost, it just can't see other machines' cycles
 # until connectivity is restored.
 ```
+
+
+---
+
+## Loop runs a cycle but the backlog appears empty
+
+The loop picks stories from `.roll/backlog.md`. If the backlog looks empty
+or shows no `📋 Todo` items, the most common causes:
+
+**1. `.roll/` is out of date (new machine or OS reinstall)**
+
+`.roll/` is a separate private git repo (`roll-meta`). After a fresh setup,
+clone it manually and point the remote:
+
+```bash
+# Replace with your actual roll-meta repo URL
+git clone git@github.com:your-org/roll-meta.git .roll
+```
+
+**2. SSH key not authorized**
+
+```bash
+ssh -T git@github.com   # should say "Hi <username>!"
+```
+
+If it fails, re-add your SSH key to GitHub.
+
+**3. Check sync status**
+
+```bash
+git -C .roll remote get-url origin  # empty = sync disabled
+git -C .roll log --oneline -3        # shows last synced commits
+```
+
+**4. Force a manual sync**
+
+```bash
+git -C .roll fetch && git -C .roll reset --hard origin/main
+```

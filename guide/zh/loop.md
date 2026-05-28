@@ -277,7 +277,7 @@ PR 等合并）每 30–60s 还会 emit 一次 `phase_tick` 心跳，tmux 不再
 | # | 阶段 | 触发时机 | 典型耗时 |
 |---|------|---------|---------|
 | 1 | `startup` | env / lock / 心跳启动 | < 1 秒 |
-| 2 | `preflight` | 清理已合并的临时分支 + 找回上轮孤儿 worktree | 0 – 30 秒 |
+| 2 | `preflight` | 同步 `.roll/` 元数据 + 清理已合并的临时分支 + 找回上轮孤儿 worktree | 0 – 30 秒 |
 | 3 | `worktree_setup` | fetch origin + 建 worktree + 同步 meta | 2 – 10 秒 |
 | 4 | `agent_invoke` | 调起 agent（最多三次重试） | 5 – 45 分钟 |
 | 5 | `publish_push` | push 分支 + 建 PR（doc-only 直接合） | 5 – 30 秒 |
@@ -377,6 +377,34 @@ Roll 根据 `git remote get-url origin` 推导项目 slug。如果你将 `origin
 fork，slug 会随之变化——原仓库和 fork 的记录会落到 records 仓库的不同目录中。
 这是有意为之（不同仓库 = 不同身份），但如果你临时从 fork 工作，请注意 dashboard
 不会显示上游仓库的 cycle 历史。
+
+## Loop 元数据同步
+
+每轮 cycle 启动时，roll 会自动从 `.roll/` 的 git 远端拉取最新的项目元数据
+（backlog、约定、skill），再去扫描待办故事。
+
+**工作机制**
+
+1. 检测 `.roll/` 是否配置了 `origin` 远端。
+   没有则静默跳过（对标准 roll 安装没有任何影响）。
+2. 执行 `git fetch && git reset --hard origin/main`，超时 15 秒。
+3. 成功：emit `meta_sync ok` 事件；cycle 用最新 backlog 继续。
+4. 失败：emit `meta_sync stale` 事件；cycle 用本地现有 `.roll/` 兜底继续运行。
+
+**连续 3 次失败**后 loop 会写 ALERT，提示检查 SSH key 或网络。
+
+**手动同步**
+
+```bash
+git -C .roll fetch && git -C .roll reset --hard origin/main
+```
+
+**FAQ：loop 跑了一轮但 dashboard 显示 backlog 为空**
+
+通常是 `.roll/` 没同步上：
+- 换机器或重装系统后：需要手动把 roll-meta 克隆到 `.roll/` 并配置 origin 远端。
+- 确认方法：`git -C .roll remote get-url origin` — 如果为空则不会触发同步。
+- SSH Key 可能需要重新授权（`ssh -T git@github.com` 测试连通性）。
 
 ## 状态文件
 

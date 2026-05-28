@@ -565,3 +565,41 @@ gitlab.com / 自建 → 检查 SSH key
 # dashboard 在离线期间自动降级为仅本地数据——不会丢数据，
 # 只是暂时看不到其他机器的 cycle，等连接恢复即自动同步。
 ```
+
+
+---
+
+## loop 跑完一轮但 dashboard 显示 backlog 为空
+
+loop 从 `.roll/backlog.md` 选故事。如果 backlog 看起来空了或没有 `📋 Todo` 条目，常见原因：
+
+**1. `.roll/` 没同步（换机器或重装系统）**
+
+`.roll/` 是独立的私有 git 仓库（roll-meta）。
+新机器上需要手动克隆并配置远端：
+
+```bash
+# 替换成你实际的 roll-meta 仓库地址
+git clone git@github.com:your-org/roll-meta.git .roll
+```
+
+**2. SSH Key 未授权**
+
+```bash
+ssh -T git@github.com   # 应该返回 "Hi <username>!"
+```
+
+失败则需要把 SSH Key 重新添加到 GitHub。
+
+**3. 检查同步状态**
+
+```bash
+git -C .roll remote get-url origin  # 空值 = 同步未启用
+git -C .roll log --oneline -3        # 查看最近同步的提交
+```
+
+**4. 手动强制同步**
+
+```bash
+git -C .roll fetch && git -C .roll reset --hard origin/main
+```

@@ -291,7 +291,7 @@ so the tmux viewer never looks frozen.
 | # | Phase | When it runs | Typical duration |
 |---|-------|--------------|------------------|
 | 1 | `startup` | env / lock / heartbeat setup | < 1 s |
-| 2 | `preflight` | stale-branch GC + orphan-worktree recovery | 0 s — 30 s |
+| 2 | `preflight` | meta sync + stale-branch GC + orphan-worktree recovery | 0 s — 30 s |
 | 3 | `worktree_setup` | fetch origin + worktree create + meta sync | 2 – 10 s |
 | 4 | `agent_invoke` | Agent executes with up to 3 retries | 5 – 45 min |
 | 5 | `publish_push` | push branch + open PR (or doc-only merge) | 5 – 30 s |
@@ -397,6 +397,37 @@ and the fork will land in different directories in the records repo. This is
 intentional (different repos, different identities), but if you're temporarily
 working from a fork, be aware that the dashboard won't show the upstream's
 cycle history.
+
+## Loop Meta Sync
+
+At the start of every cycle, roll automatically pulls the latest project metadata
+(`.roll/` directory — backlog, conventions, skills) from its git remote before
+scanning for stories.
+
+**How it works**
+
+1. Detects whether `.roll/` has a configured `origin` remote.
+   If not, the step is silently skipped (no side-effects for standard roll installs).
+2. Runs `git fetch && git reset --hard origin/main` with a 15-second timeout.
+3. On success: emits a `meta_sync ok` event; cycle proceeds with fresh backlog.
+4. On failure: emits a `meta_sync stale` event; cycle continues with the existing
+   `.roll/` contents (stale is better than no-op).
+
+**After 3 consecutive failures** the loop writes an ALERT prompting you to check
+your SSH key or network connectivity.
+
+**Manual sync**
+
+```bash
+git -C .roll fetch && git -C .roll reset --hard origin/main
+```
+
+**FAQ: the loop runs but the dashboard shows an empty backlog**
+
+This usually means `.roll/` is out of date:
+- On a new machine: clone roll-meta manually into `.roll/` and configure the origin remote.
+- After reinstalling the OS: same as above — SSH key may also need re-authorization.
+- To confirm: `git -C .roll remote get-url origin` — if empty, no sync is attempted.
 
 ## State Files
 

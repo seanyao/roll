@@ -1928,6 +1928,18 @@ PY
     return 0
   fi
 
+  # FIX-125: cycle-context tripwire. Apply phase below runs launchctl unload
+  # and rm against ${HOME}/Library/LaunchAgents/<plist> (bin/roll:1957-1958).
+  # From inside a loop cycle this would mutate the host's launchd domain
+  # using another project's identity. Doc-only offboards (no plists) stay
+  # allowed so cycles can still call offboard for non-launchd cleanup.
+  if [ "${#plists[@]}" -gt 0 ] && _loop_in_cycle; then
+    err "Refusing to unload launchd plists from inside a loop cycle (FIX-125)."
+    echo "  Run 'roll offboard --confirm' from a terminal outside the cycle," >&2
+    echo "  or pause the loop first: 'roll loop pause'." >&2
+    return 1
+  fi
+
   # Apply. Guard every loop with a count check — `set -u` upstream makes
   # naked `"${arr[@]}"` over an empty array a hard error on bash 5.0.
   echo "$(msg offboard.applying_offboard)"
@@ -6768,11 +6780,33 @@ _loop_attach() {
   exec tmux attach -t "$session"
 }
 
+# FIX-125: detect whether we are running inside a loop cycle. Cycle context
+# is signalled by env vars exported by the cycle runner (ROLL_LOOP_AGENT,
+# bin/roll:5736) or by the outer cycle script (ROLL_CYCLE_LOG_RAW,
+# bin/roll:6044). Used by callers that touch canonical ${HOME}/Library/LaunchAgents
+# directly (_loop_gc, cmd_offboard) to refuse host-loop mutations from inside
+# a cycle. Read-only ops are unaffected.
+_loop_in_cycle() {
+  [[ -n "${ROLL_LOOP_AGENT:-}" || -n "${ROLL_CYCLE_LOG_RAW:-}" ]]
+}
+
 # US-LOOP-021: garbage-collect orphan slugs, tmp debris, and expired backups.
 # Usage: _loop_gc [--dry-run] [--keep-days N]
 # Keeps backups/migrated files within N days (default 30).
 # Retention order: ROLL_LOOP_GC_RETENTION_DAYS env > .roll/local.yaml loop_gc.retention_days > 30.
 _loop_gc() {
+  # FIX-125: refuse from inside a loop cycle. Phase 1 below scans/mutates
+  # ${HOME}/Library/LaunchAgents directly (bin/roll:6814,6847) — running it
+  # from a cycle would let one project's tick remove another project's plist
+  # under the host's launchd domain. Read-only ops (status, runs) are
+  # unaffected; only the GC mutator is gated.
+  if _loop_in_cycle; then
+    echo "roll loop gc: refusing — cycle-context tripwire (FIX-125)" >&2
+    echo "  This command scans ~/Library/LaunchAgents directly. Running it" >&2
+    echo "  from inside a loop cycle is a known host-state corruption path." >&2
+    return 1
+  fi
+
   local dry_run=false
   local keep_days=30
 

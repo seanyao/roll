@@ -165,8 +165,8 @@ def _validate_history(node: yaml.MappingNode, errs: list[LintError]) -> None:
         if isinstance(wv, yaml.ScalarNode):
             try:
                 n = int(wv.value)
-                if n < 1:
-                    errs.append(LintError(wl, "history.window_cycles must be >= 1"))
+                if n < 0:
+                    errs.append(LintError(wl, "history.window_cycles must be >= 0 (0 disables history)"))
             except ValueError:
                 errs.append(LintError(wl, "history.window_cycles must be an integer"))
 

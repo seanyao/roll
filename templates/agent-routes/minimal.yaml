@@ -1,0 +1,17 @@
+# Agent routing config — minimal preset (US-AGENT-002 / US-AGENT-003)
+#
+# 适合只用一个 agent 的小项目,或者只想 loop 跑测试 + brief 不分配的场景。
+# 历史命中率不计算 (window_cycles: 0)。
+
+schema: v1
+
+agents:
+  pi:
+    types: [FIX, US, REFACTOR]
+    est_min: { min: 0, max: 30 }
+    risk: [low, medium, high]
+
+history:
+  window_cycles: 0
+  prefer_threshold: 0.0
+  cold_start_default: pi

@@ -1406,6 +1406,10 @@ cmd_init() {
     _write_backlog "$project_dir/.roll/backlog.md"
     _ensure_features_dir "$project_dir/.roll/features"
     _write_features_md "$project_dir/.roll/features.md"
+    # US-AGENT-003: seed agent-routes.yaml from template. Env override:
+    #   ROLL_AGENT_ROUTES_TEMPLATE=minimal roll init
+    # Onboard plan can also set agent_routes_template; _init_apply reads it.
+    _init_seed_agent_routes "${ROLL_AGENT_ROUTES_TEMPLATE:-default}" "$project_dir" || true
     # US-ONBOARD-019: stamp the project so legacy detection can recognise it
     # as Roll-onboarded without depending on directory-name heuristics.
     _write_version_stamp "$project_dir"
@@ -1931,6 +1935,26 @@ print(' '.join(p.get('scope', {}).get('approved', [])))
     _write_backlog "$project_dir/.roll/backlog.md"
     _onboard_changeset_record "$project_dir" "files_created" ".roll/backlog.md"
   fi
+
+  # US-AGENT-003: seed agent-routes.yaml. Template precedence:
+  #   1. plan.agent_routes_template (set by $roll-onboard interactive flow)
+  #   2. ROLL_AGENT_ROUTES_TEMPLATE env var
+  #   3. "default"
+  # Set to "skip" to omit seeding entirely.
+  local _routes_template
+  _routes_template=$(python3 -c "
+import yaml
+p = yaml.safe_load(open('$plan')) or {}
+print(p.get('agent_routes_template', '') or '')
+" 2>/dev/null || echo "")
+  if [[ -z "$_routes_template" ]]; then
+    _routes_template="${ROLL_AGENT_ROUTES_TEMPLATE:-default}"
+  fi
+  if [[ "$_routes_template" != "skip" ]]; then
+    if _init_seed_agent_routes "$_routes_template" "$project_dir"; then
+      _onboard_changeset_record "$project_dir" "files_created" ".roll/agent-routes.yaml"
+    fi
+  fi
   if [[ " $approved " == *" features "* ]]; then
     _ensure_features_dir "$project_dir/.roll/features"
     _write_features_md "$project_dir/.roll/features.md"
@@ -2447,6 +2471,31 @@ _write_backlog() {
 EOF
   ok "Created: .roll/backlog.md"
   _ROLL_MERGE_SUMMARY+=("created|.roll/backlog.md")
+}
+
+# US-AGENT-003: seed .roll/agent-routes.yaml from a named template (default /
+# minimal / heavy). Idempotent — leaves an existing file untouched. Templates
+# live under ${ROLL_TEMPLATES}/agent-routes/<name>.yaml.
+_init_seed_agent_routes() {
+  local template_name="${1:-default}"
+  local project_dir="${2:-$(pwd)}"
+  local dest="${project_dir}/.roll/agent-routes.yaml"
+
+  if [[ -f "$dest" ]]; then
+    _ROLL_MERGE_SUMMARY+=("unchanged|.roll/agent-routes.yaml")
+    return 0
+  fi
+
+  local src="${ROLL_TEMPLATES}/agent-routes/${template_name}.yaml"
+  if [[ ! -f "$src" ]]; then
+    err "agent-routes template not found: ${template_name} (looked for ${src})"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$dest")"
+  cp "$src" "$dest"
+  ok "Created: .roll/agent-routes.yaml (template: ${template_name})"
+  _ROLL_MERGE_SUMMARY+=("created|.roll/agent-routes.yaml")
 }
 
 _ensure_features_dir() {

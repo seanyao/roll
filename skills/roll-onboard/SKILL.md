@@ -115,6 +115,12 @@ privacy:
 
 sync_targets: [claude, cursor]               # user's Q8
 enable_loop: false                            # user's Q9
+agent_routes_template: default                # user's Q10 — agent routing preset
+                                              # one of: default / minimal / heavy / skip
+                                              # default = pi/deepseek/claude + history (US-AGENT-002)
+                                              # minimal = single agent (pi), no history
+                                              # heavy   = pi/deepseek/claude/kimi + larger window
+                                              # skip    = don't seed .roll/agent-routes.yaml
 ```
 
 Then tell the user:

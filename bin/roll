@@ -4521,6 +4521,149 @@ _isolation_none_status()    { echo "ready"; return 0; }
 _isolation_none_reset()     { return 0; }
 _isolation_none_destroy()   { return 0; }
 
+# ── `tart` adapter (US-ISO-002 — macOS Apple Silicon VM via Tart) ─────────
+# Test override hooks (used by unit tests; default values keep prod stable):
+#   _TART_VM_NAME      — VM identifier (default: roll-dev-test)
+#   _TART_BASE_IMAGE   — OCI base image (default: cirruslabs macos-tahoe-base)
+#   _TART_SSH_USER     — SSH user inside the VM (default: admin)
+
+_isolation_tart_vm_name()    { printf '%s\n' "${_TART_VM_NAME:-roll-dev-test}"; }
+_isolation_tart_base_image() { printf '%s\n' "${_TART_BASE_IMAGE:-ghcr.io/cirruslabs/macos-tahoe-base:latest}"; }
+_isolation_tart_ssh_user()   { printf '%s\n' "${_TART_SSH_USER:-admin}"; }
+
+_isolation_tart_check_platform() {
+  if [[ "$(uname)" != "Darwin" ]] || [[ "$(uname -m)" != "arm64" ]]; then
+    err "Tart 仅支持 Apple Silicon macOS"
+    err "Tart only supports Apple Silicon macOS"
+    return 1
+  fi
+  return 0
+}
+
+_isolation_tart_check_binary() {
+  if ! command -v tart >/dev/null 2>&1; then
+    err "tart binary not found"
+    err "  install via: brew install cirruslabs/cli/tart"
+    return 1
+  fi
+  return 0
+}
+
+# Returns 0 with the VM name on stdout when the VM is in `tart list`,
+# returns 1 silently otherwise. Caller decides what to do.
+_isolation_tart_vm_present() {
+  local name; name=$(_isolation_tart_vm_name)
+  tart list 2>/dev/null | awk -v n="$name" '$1 == n { found=1 } END { exit !found }'
+}
+
+# Returns the VM's IP on stdout when reachable; exit non-zero when the VM
+# is stopped or `tart ip` fails for any other reason.
+_isolation_tart_ip() {
+  local name; name=$(_isolation_tart_vm_name)
+  local ip; ip=$(tart ip "$name" 2>/dev/null) || return 1
+  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s\n' "$ip"
+}
+
+# Status state machine — see dev-vm-isolation-plan.md §4.
+# Returns one of: not-installed | stopped | running | ready
+_isolation_tart_status() {
+  _isolation_tart_check_platform >/dev/null 2>&1 || { echo "not-installed"; return 0; }
+  command -v tart >/dev/null 2>&1 || { echo "not-installed"; return 0; }
+  _isolation_tart_vm_present || { echo "not-installed"; return 0; }
+  local ip
+  if ! ip=$(_isolation_tart_ip); then
+    echo "stopped"
+    return 0
+  fi
+  # VM up. Is it provisioned? A trivial SSH probe is the cheapest check.
+  local user; user=$(_isolation_tart_ssh_user)
+  if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no \
+         "${user}@${ip}" "true" >/dev/null 2>&1; then
+    echo "ready"
+  else
+    echo "running"
+  fi
+  return 0
+}
+
+# init: ensure the base image is cloned into our VM slot. Idempotent —
+# `tart clone` is skipped when the VM already exists.
+_isolation_tart_init() {
+  _isolation_tart_check_platform || return 1
+  _isolation_tart_check_binary || return 1
+  local name; name=$(_isolation_tart_vm_name)
+  if _isolation_tart_vm_present; then
+    return 0
+  fi
+  local img; img=$(_isolation_tart_base_image)
+  tart clone "$img" "$name"
+}
+
+# provision: ensure runtime deps are installed inside the VM. Idempotent —
+# brew install no-ops for already-installed packages. Requires the VM to
+# be running with SSH responsive (caller's responsibility, usually exec).
+_isolation_tart_provision() {
+  _isolation_tart_check_platform || return 1
+  _isolation_tart_check_binary || return 1
+  local ip; ip=$(_isolation_tart_ip) || { err "tart provision: VM not running"; return 1; }
+  local user; user=$(_isolation_tart_ssh_user)
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
+      "${user}@${ip}" "brew list bats >/dev/null 2>&1 || brew install bats-core; \
+                       brew list node >/dev/null 2>&1 || brew install node; \
+                       brew list bash >/dev/null 2>&1 || brew install bash"
+}
+
+# exec: run the command inside the VM. Auto-starts the VM if it's stopped.
+# Mounts the host worktree at /Volumes/My Shared Files/roll (Tart virtiofs).
+_isolation_tart_exec() {
+  _isolation_tart_check_platform || return 1
+  _isolation_tart_check_binary || return 1
+  local name; name=$(_isolation_tart_vm_name)
+  local ip
+  if ! ip=$(_isolation_tart_ip); then
+    # VM stopped — start it in the background with the repo mounted.
+    local repo_root; repo_root="$(pwd -P)"
+    tart run --dir="roll:${repo_root}" "$name" >/dev/null 2>&1 &
+    # Wait up to ~30s for IP to come up.
+    local i=0
+    while (( i < 30 )); do
+      if ip=$(_isolation_tart_ip); then break; fi
+      sleep 1
+      i=$((i + 1))
+    done
+    [[ -n "${ip:-}" ]] || { err "tart exec: VM failed to start in 30s"; return 1; }
+  fi
+  local user; user=$(_isolation_tart_ssh_user)
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${user}@${ip}" "$@"
+}
+
+# reset: stop, delete, re-clone from base image, then re-provision.
+# Target: ≤90s (caller's perception); actual depends on tart clone speed.
+# Clone is called directly (not via init) so the sequence is unconditional —
+# tart's own "VM exists" check still no-ops re-clone if delete didn't take.
+_isolation_tart_reset() {
+  _isolation_tart_check_platform || return 1
+  _isolation_tart_check_binary || return 1
+  local name; name=$(_isolation_tart_vm_name)
+  local img; img=$(_isolation_tart_base_image)
+  tart stop "$name" 2>/dev/null || true
+  tart delete "$name" 2>/dev/null || true
+  tart clone "$img" "$name" || return 1
+  _isolation_tart_provision || true   # provision may fail mid-reset; surface
+                                       # via subsequent status check.
+}
+
+# destroy: stop + delete. Doesn't rebuild.
+_isolation_tart_destroy() {
+  _isolation_tart_check_platform || return 1
+  _isolation_tart_check_binary || return 1
+  local name; name=$(_isolation_tart_vm_name)
+  tart stop "$name" 2>/dev/null || true
+  tart delete "$name" 2>/dev/null || true
+  return 0
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # LOOP — autonomous BACKLOG executor management
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -627,7 +627,18 @@ _link_skills() {
   while IFS= read -r entry; do
     local ai_dir
     ai_dir="$(_ai_dir "$entry")"
-    _is_ai_installed "$ai_dir" || continue
+    # FIX-128: detection is now binary-on-PATH, but skill linking keeps
+    # the same Claude-always-syncs semantics as _apply_conventions and
+    # tolerates pre-existing config dirs (an agent the user is mid-
+    # upgrade or installed via nvm/asdf still has its convention dir;
+    # we don't want to silently stop linking skills there). Strict
+    # binary detection drives chooser logic (primary_agent /
+    # _onboard_discover_agents) — see FIX-128.
+    if [[ "$ai_dir" != "$HOME/.claude" ]] \
+       && ! _is_ai_installed "$ai_dir" \
+       && [[ ! -d "$ai_dir" ]]; then
+      continue
+    fi
     mkdir -p "$ai_dir"
 
     local ai_name ai_dir_real skills_dir
@@ -727,8 +738,13 @@ _sync_convention_for_tool() {
   local dst_dir
   dst_dir="$(dirname "$main_dst")"
 
-  # Only proceed if Claude (always) or the tool is installed
-  if [[ "$dst_dir" != "$HOME/.claude" ]] && ! _is_ai_installed "$dst_dir"; then
+  # Only proceed if Claude (always), the tool is installed (binary-on-PATH
+  # per FIX-128), or the convention dir already exists (mid-upgrade /
+  # nvm-installed binaries that aren't on this shell's PATH still get
+  # their convention refresh).
+  if [[ "$dst_dir" != "$HOME/.claude" ]] \
+     && ! _is_ai_installed "$dst_dir" \
+     && [[ ! -d "$dst_dir" ]]; then
     return
   fi
   mkdir -p "$dst_dir"

@@ -42,6 +42,7 @@ AUTONOMY = [
     ("backlog",  "[block|defer|…]",        "view and manage pending tasks",               "查看和管理待处理任务",        True),
     ("peer",     "",                       "cross-agent negotiation & review",            "跨 Agent 协商对审",         False),
     ("alert",    "",                       "view and clear loop alerts",                  "查看 / 清除 loop 告警",     False),
+    ("feedback", "--type bug|idea|ux …",   "open a GitHub issue for this project",        "为本项目提交反馈",            False),
 ]
 
 PROJECT = [

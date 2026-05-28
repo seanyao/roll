@@ -208,10 +208,12 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_pad_l: CJK string pads correctly (2 cells per char)" {
-  # "中" = 2 cells → pad to 6 → 4 spaces after
-  # bash 3.2 byte-count: 3 (UTF-8) + 4 spaces = 7
+  # "中" = 2 cells → pad to 6 → 4 spaces after.
+  # FIX-126: dropped `(( ${#output} == 7 ))` — byte-count assertion is
+  # locale-dependent (works on LANG=C but fails on en_US.UTF-8 with bash 5).
+  # Exact-match below already validates the output; visual width verified by
+  # _strw tests above.
   run _pad_l "中" 6
-  (( ${#output} == 7 ))
   [[ "$output" == "中    " ]]
 }
 
@@ -232,10 +234,9 @@ teardown() { unit_teardown_cd; }
 }
 
 @test "_pad_r: right-pads CJK string" {
-  # "中" = 2 cells → right-pad to 6 → 4 spaces before
-  # bash 3.2 byte-count: 4 spaces + 3 (UTF-8) = 7
+  # "中" = 2 cells → right-pad to 6 → 4 spaces before. See FIX-126 note on
+  # _pad_l above for why the byte-count assertion was removed.
   run _pad_r "中" 6
-  (( ${#output} == 7 ))
   [[ "$output" == "    中" ]]
 }
 

@@ -1,0 +1,39 @@
+# Agent routing config — schema v1 (US-AGENT-002)
+#
+# loop 选完一个 Todo 故事后,_loop_pick_agent_for_story 用这份配置决定
+# 这一轮 cycle 跑哪个 agent×模型。匹配顺序：
+#
+#   1. 硬规则：故事的 type / est_min / risk_zone 全部落在 agent 的能力区间
+#   2. 软偏好：硬规则候选 ≥2 时,用近 N cycle 命中率 tie-break (US-AGENT-005)
+#   3. 兜底：找不到匹配 → cold_start_default + 写 WARN
+#
+# 想改路由?改这个文件 + roll loop agent-routes lint 校验 + 下轮 cycle 生效。
+
+schema: v1
+
+agents:
+  pi:
+    # pi 适合短平快的故事 (FIX / 小 REFACTOR),改基础设施不适合
+    types: [FIX, REFACTOR]
+    est_min: { min: 0, max: 8 }
+    risk: [low, medium]
+
+  deepseek:
+    # deepseek 平衡型 — US 中等故事的主力
+    types: [FIX, US, REFACTOR]
+    est_min: { min: 0, max: 15 }
+    risk: [low, medium]
+
+  claude:
+    # claude 处理大故事 / loop infra / 高风险架构动刀
+    types: [US, REFACTOR]
+    est_min: { min: 5, max: 30 }
+    risk: [low, medium, high]
+
+history:
+  # 滚动窗口：近多少个 cycle 算命中率
+  window_cycles: 50
+  # 命中率达到这个阈值才作为软偏好的依据 (US-AGENT-005)
+  prefer_threshold: 0.6
+  # 历史数据不足 / 全部 agent 不匹配 / agent 名拼错时的兜底
+  cold_start_default: pi

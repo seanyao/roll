@@ -6949,6 +6949,7 @@ cmd_loop() {
     precheck-ci)          _loop_precheck_ci ;;
     hotfix-head-context)  _loop_hotfix_head_context "${1:-}" ;;
     branches)             _loop_branches "$(pwd -P)" ;;
+    agent-routes)         _loop_agent_routes "${1:-show}" "${@:2}" ;;
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
@@ -6971,6 +6972,7 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mu
   gc [--dry-run] [--keep-days N]
                 Garbage-collect orphan slugs, tmp debris, expired backups
   branches      List loop-related branches
+  agent-routes  Show / lint agent routing config (.roll/agent-routes.yaml)
 
 Internal (called by roll-loop SKILL):
   notify        Send macOS notification
@@ -9248,6 +9250,76 @@ refs/heads/claude/*"
     printf "%s\t%s\n" "$branch" "$status"
   done <<< "$branches"
   return 0
+}
+
+# US-AGENT-002: agent-routes.yaml management.
+# `roll loop agent-routes [show|lint] [path]` — dispatch + helpers.
+# Default path order: $ROLL_AGENT_ROUTES (if set) → ./.roll/agent-routes.yaml
+# → built-in default in templates/agent-routes/default.yaml.
+_loop_agent_routes_path() {
+  if [ -n "${ROLL_AGENT_ROUTES:-}" ] && [ -f "$ROLL_AGENT_ROUTES" ]; then
+    printf '%s\n' "$ROLL_AGENT_ROUTES"
+    return 0
+  fi
+  if [ -f ".roll/agent-routes.yaml" ]; then
+    printf '%s\n' ".roll/agent-routes.yaml"
+    return 0
+  fi
+  # Fallback: built-in default shipped with the package.
+  # ROLL_INSTALL_DIR is set when installed via npm; fall back to script dir.
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  local default_tpl="$install_dir/templates/agent-routes/default.yaml"
+  if [ -f "$default_tpl" ]; then
+    printf '%s\n' "$default_tpl"
+    return 0
+  fi
+  return 1
+}
+
+_loop_agent_routes_show() {
+  local path
+  path=$(_loop_agent_routes_path) || {
+    echo "agent-routes: no config found (set ROLL_AGENT_ROUTES, drop .roll/agent-routes.yaml, or run roll init)" >&2
+    return 1
+  }
+  echo "# source: $path"
+  cat "$path"
+}
+
+_loop_agent_routes_lint() {
+  local path="${1:-}"
+  if [ -z "$path" ]; then
+    path=$(_loop_agent_routes_path) || {
+      echo "agent-routes lint: no config found" >&2
+      return 1
+    }
+  fi
+  if [ ! -f "$path" ]; then
+    echo "agent-routes lint: file not found: $path" >&2
+    return 1
+  fi
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  python3 "$install_dir/lib/agent_routes_lint.py" "$path"
+}
+
+_loop_agent_routes() {
+  local sub="${1:-show}"; shift || true
+  case "$sub" in
+    show) _loop_agent_routes_show ;;
+    lint) _loop_agent_routes_lint "${1:-}" ;;
+    path) _loop_agent_routes_path ;;
+    *)
+      cat >&2 <<'HELP'
+Usage: roll loop agent-routes <show|lint|path> [path]
+
+  show         Print active agent-routes config (source + content)
+  lint [path]  Validate schema (default: active config). Exit 1 on errors.
+  path         Print which file is currently active.
+HELP
+      return 1 ;;
+  esac
 }
 
 # US-AUTO-033: publish a loop cycle branch as a GitHub PR with auto-merge.

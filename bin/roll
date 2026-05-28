@@ -9353,6 +9353,37 @@ _loop_agent_routes_lint() {
   python3 "$install_dir/lib/agent_routes_lint.py" "$path"
 }
 
+# US-AGENT-004: pick the agent for a given backlog story by reading its
+# Agent profile from the linked feature md and matching against the active
+# agent-routes.yaml. Falls back to history.cold_start_default when no agent
+# matches or the story has no profile.
+#
+# stdout: "<agent> <rule_kind> <rationale...>"
+# exit 0 on success, 1 if the story id isn't found.
+_loop_pick_agent_for_story() {
+  local story_id="${1:-}"
+  if [ -z "$story_id" ]; then
+    echo "_loop_pick_agent_for_story: story id required" >&2
+    return 1
+  fi
+  local routes
+  routes=$(_loop_agent_routes_path 2>/dev/null) || {
+    echo "_loop_pick_agent_for_story: no agent-routes.yaml available" >&2
+    return 1
+  }
+  local backlog=".roll/backlog.md"
+  [ -f "$backlog" ] || {
+    echo "_loop_pick_agent_for_story: $backlog not found" >&2
+    return 1
+  }
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  python3 "$install_dir/lib/loop_pick_agent.py" \
+    --story-id "$story_id" \
+    --backlog "$backlog" \
+    --routes "$routes"
+}
+
 _loop_agent_routes() {
   local sub="${1:-show}"; shift || true
   case "$sub" in

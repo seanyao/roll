@@ -119,6 +119,23 @@ CI 里设置 `ROLL_TEST_TIME_CAP=1` 时，`--tier=fast` 跑全套上限 60 秒
 dream 每轮最多 emit 5 条 REFACTOR，避免 backlog 被噪音淹没。
 按优先级逐个收拾。
 
+### 测试质量合并门（US-QA-012 / 013）
+
+❼ 和 ❽ 两类是**硬阻断**：CI 绿后 loop 自动合并前会跑
+`roll loop test-quality-check <改动的-bats-文件>`。命中违规时 loop 写
+`ALERT-<slug>.md` 并卡住 PR，要么改测试要么 PR 描述加
+`[skip-test-quality]` 标记放行（大小写不敏感）。
+
+❼ and ❽ are **blocking**: PR auto-merge is held until violations are fixed
+or the PR description carries `[skip-test-quality]`.
+
+绕过请谨慎使用——dream 仍会把违规登记为 REFACTOR,不会因为 skip 就被遗忘。
+
+❶..❻ 是建议性,dream 标 REFACTOR 但门不卡。常规迭代里慢慢清。
+
+带 `# test-quality:allow` 注释的行会被扫描器跳过（文档校验类测试里
+合法使用 `awk` 解析 markdown 时用，不触碰生产代码）。
+
 `tests/unit/model_prices.bats` 是 ❶ 类范例 —— 之前的断言读生产费率
 表，每次价格调整就把套件打红，即便算术逻辑没动。重写后算术测试走
 monkey-patch 的 fixture 价格表，对生产 PRICES 只断结构不变量

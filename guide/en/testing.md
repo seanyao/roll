@@ -126,6 +126,22 @@ catalogs eight recurring antipatterns the dream nightly scan flags as
 The dream skill emits at most 5 REFACTOR entries per scan, so the backlog
 doesn't drown in noise. Refactor them in priority order.
 
+### Test-quality merge gate (US-QA-012 / 013)
+
+Categories ❼ and ❽ are **blocking**: loop runs
+`roll loop test-quality-check <changed-bats-files>` between CI green and
+auto-merge. Violations write `ALERT-<slug>.md` and hold the PR until either
+the test is reshaped or the PR description carries `[skip-test-quality]`
+(case-insensitive). Use the bypass sparingly — the violation still gets
+reported through dream as a REFACTOR row, so it doesn't quietly accumulate.
+
+Categories ❶..❻ remain advisory: dream flags them as REFACTOR entries but
+the gate doesn't block on them. Triage them in your usual queue.
+
+Lines with `# test-quality:allow` are skipped by the scanner — reserved for
+doc-validation tests that legitimately inline `awk` to parse markdown
+without ever touching production code.
+
 `tests/unit/model_prices.bats` is the canonical ❶ exemplar — assertions
 that read live production rates were broken every time the rate card moved,
 even when the arithmetic logic was unchanged. The current file uses a

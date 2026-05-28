@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# FIX-124: macOS default /bin/bash is 3.2, whose `${str:i:1}` and `\'X`
+# encodings return Unicode codepoints under UTF-8 locale, mangling
+# bats's test-name encoder for `@test` titles containing multi-byte
+# chars (the 3 affected tests get silently skipped with
+# "bats warning: Executed N instead of expected M tests"). Force
+# byte-wise locale only on bash <4 so the encoder iterates raw bytes.
+# Bash 4+ (Ubuntu CI, brew bash) handles UTF-8 correctly and keeps
+# its locale.
+if [ "${BASH_VERSINFO:-5}" -lt 4 ]; then
+  export LC_ALL=C
+fi
+
 # Default the test suite to en so dev machines with AppleLanguages=zh (or any
 # zh-prefixed LANG) render the same catalog strings as the Ubuntu CI runner.
 # Tests that exercise zh behaviour set ROLL_LANG=zh explicitly per-test.

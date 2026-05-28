@@ -7031,6 +7031,7 @@ cmd_loop() {
     hotfix-head-context)  _loop_hotfix_head_context "${1:-}" ;;
     branches)             _loop_branches "$(pwd -P)" ;;
     agent-routes)         _loop_agent_routes "${1:-show}" "${@:2}" ;;
+    test-quality-check)   _loop_test_quality_check "$@" ;;
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
@@ -9612,6 +9613,18 @@ _loop_pick_agent_for_story() {
     --backlog "$backlog" \
     --routes "$routes" \
     $runs_arg
+}
+
+# US-QA-012: merge-time test-quality gate. Scan bats files for ❼ + ❽
+# violations; loop auto-merge waits on a clean exit. PR description
+# `[skip-test-quality]` marker → US-QA-013 passes --skip here.
+#
+# Usage:
+#   roll loop test-quality-check [--skip] file.bats [file.bats ...]
+_loop_test_quality_check() {
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  python3 "$install_dir/lib/test_quality_gate.py" "$@"
 }
 
 _loop_agent_routes() {

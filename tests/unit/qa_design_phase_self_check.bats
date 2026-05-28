@@ -32,7 +32,7 @@ FIX_SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-fix/SKILL.md"
 }
 
 @test "roll-build SKILL self-check names rubric ❼ and ❽" {
-  awk '/^### Step 2:/{flag=1;next}/^### Step 3:/{flag=0}flag' "$BUILD_SKILL" > /tmp/build-step2.txt
+  awk '/^### Step 2:/{flag=1;next}/^### Step 3:/{flag=0}flag' "$BUILD_SKILL" > /tmp/build-step2.txt  # test-quality:allow (doc-section extraction, not production parsing)
   grep -qF '❼' /tmp/build-step2.txt
   grep -qF '❽' /tmp/build-step2.txt
   rm -f /tmp/build-step2.txt
@@ -43,7 +43,7 @@ FIX_SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-fix/SKILL.md"
 }
 
 @test "roll-fix SKILL self-check names rubric ❼ and ❽" {
-  awk '/^### 2\. Define verification/{flag=1;next}/^### 3\. Test/{flag=0}flag' "$FIX_SKILL" > /tmp/fix-step2.txt
+  awk '/^### 2\. Define verification/{flag=1;next}/^### 3\. Test/{flag=0}flag' "$FIX_SKILL" > /tmp/fix-step2.txt  # test-quality:allow (doc-section extraction, not production parsing)
   grep -qF '❼' /tmp/fix-step2.txt
   grep -qF '❽' /tmp/fix-step2.txt
   rm -f /tmp/fix-step2.txt

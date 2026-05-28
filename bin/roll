@@ -747,6 +747,22 @@ _setup_snapshot() {
 # _ROLL_SETUP_STATE. Caller passes the watch dir(s) plus the command + args.
 # stdout/stderr of the inner command are suppressed (same as the previous
 # pattern in cmd_setup) to keep the v2 UI render the only user-visible output.
+# US-INFRA-008: ensure core.hooksPath is set to 'hooks' so TCR pre-commit gate
+# is never silently bypassed in new clones, worktrees, or automated environments.
+# Idempotent: already set to a non-default value → leave it (user knows better).
+# Not a git repo → silently skip.
+_ensure_hooks_path() {
+  local repo_path="${1:-$PWD}"
+  # Must be a git repo
+  git -C "$repo_path" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  local current; current=$(git -C "$repo_path" config core.hooksPath 2>/dev/null || echo "")
+  # Only set when unset or pointing at the git default (.git/hooks)
+  if [[ -z "$current" || "$current" == ".git/hooks" ]]; then
+    git -C "$repo_path" config core.hooksPath hooks 2>/dev/null || true
+  fi
+  return 0
+}
+
 _run_setup_step() {
   local watch="$1"; shift
   local before after
@@ -802,6 +818,10 @@ cmd_setup() {
 
   _run_setup_step "$ROLL_HOME/.peer-state" _peer_ensure_state_dir
   _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Initialize peer-review state directory"
+
+  # US-INFRA-008: configure git hooks path so TCR pre-commit gate works in this repo
+  _run_setup_step "$PWD" _ensure_hooks_path
+  _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Configure git hooks path"
 
   if command -v tmux >/dev/null 2>&1; then
     _record skip "Ensure tmux is installed (already present)"
@@ -6063,6 +6083,8 @@ _phase_begin startup
 _phase_end startup ok
 _phase_begin preflight
 cd "${project_path}" 2>/dev/null || true
+# US-INFRA-008: ensure git hooks are wired so TCR pre-commit gate can't be bypassed
+_ensure_hooks_path "${project_path}" 2>/dev/null || true
 # US-LOOP-056: sync .roll/ meta from roll-meta remote before backlog scan
 _loop_sync_meta "${project_path}" || true
 # FIX-104: GC stale merged temp branches at cycle entry — before worktree setup

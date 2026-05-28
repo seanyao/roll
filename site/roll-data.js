@@ -34,7 +34,7 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v2026.519.2",
+      version: "v2026.529.1",
       tagline: "It just works.",
       sub2: "Write a goal. Ship it autonomously.",
       sub: "Write a goal in Backlog. Roll picks it up hourly, executes it in an isolated worktree, opens a PR, waits for green CI — and ships. You stay on the loop, not in it.",
@@ -43,7 +43,7 @@ window.RollData = (function () {
         { label: "Read the guide", href: "#guides", primary: false },
         { label: "View on GitHub", href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
-      meta: ["MIT licensed", "Node 16+", "Works with Claude · Cursor · Codex · Kimi"],
+      meta: ["MIT licensed", "Node 16+", "Works with Claude · Cursor · Codex · Kimi · Gemini · OpenAI · Qwen"],
     },
     TERMINAL: [
       { kind: "prompt", text: "roll loop on" },
@@ -212,7 +212,7 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v2026.519.2",
+      version: "v2026.529.1",
       tagline: "It just works.",
       sub2: "把目标写下来。让它自主交付。",
       sub: "把目标写进 Backlog。Roll 每小时领取一个，在隔离的 worktree 里执行、开 PR、等 CI 绿、自动合入。你掌舵，不掌桨。",
@@ -221,7 +221,7 @@ window.RollData = (function () {
         { label: "查看文档", href: "#guides", primary: false },
         { label: "GitHub",  href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
-      meta: ["MIT 协议", "Node 16+", "支持 Claude · Cursor · Codex · Kimi"],
+      meta: ["MIT 协议", "Node 16+", "支持 Claude · Cursor · Codex · Kimi · Gemini · OpenAI · Qwen"],
     },
     // Terminal stays mostly English — these are real CLI outputs.
     TERMINAL: [

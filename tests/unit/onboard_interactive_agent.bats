@@ -31,7 +31,8 @@ teardown() { unit_teardown; }
 }
 
 @test "interactive argv: kimi → kimi <prompt> (no --quiet, no -p)" {
-  _agent_argv kimi interactive "hi"
+  # FIX-126: with no kimi-* on PATH the binary falls back to legacy 'kimi'.
+  PATH="/usr/bin:/bin" _agent_argv kimi interactive "hi"
   [ "${_AGENT_ARGV[0]}" = "kimi" ]
   [ "${_AGENT_ARGV[1]}" = "hi" ]
   [ "${#_AGENT_ARGV[@]}" -eq 2 ]

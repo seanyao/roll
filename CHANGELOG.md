@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`roll test` — 测试隔离运行，不再误伤本机 loop 服务** `[loop]`
+
+### Fixed
+
+- **Kimi CLI 升级改名为 kimi-code 后，roll 现在能正常识别** `[loop]`
+
 ## v2026.527.1
 
 ### Added

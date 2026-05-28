@@ -5602,6 +5602,28 @@ _loop_schedule_spec() {
   echo "60 $offset"
 }
 
+# Read loop active window from .roll/local.yaml loop_schedule block.
+# Resolution order:
+#   1. .roll/local.yaml  loop_schedule.{active_start,active_end}
+#   2. default           0 / 24  (full day)
+# Validation: both values must be integers 0–24, active_start < active_end.
+# Output: "<start> <end>" on stdout.
+_loop_read_active_window() {
+  local project_path="${1:-$(pwd -P)}"
+  local local_file="${project_path}/.roll/local.yaml"
+  if [[ -f "$local_file" ]]; then
+    local val_start val_end
+    val_start=$(awk '/^loop_schedule:/{found=1;next} found && /^[[:space:]]+active_start:/{print $2; exit}' "$local_file")
+    val_end=$(awk '/^loop_schedule:/{found=1;next} found && /^[[:space:]]+active_end:/{print $2; exit}' "$local_file")
+    if [[ "$val_start" =~ ^[0-9]+$ && "$val_end" =~ ^[0-9]+$ ]] \
+        && (( val_start < val_end && val_end <= 24 )); then
+      echo "$val_start $val_end"
+      return 0
+    fi
+  fi
+  echo "0 24"
+}
+
 # US-LOOP-032: human-readable schedule description.
 # Args: period offset [lang]
 #   lang: en (default) or zh

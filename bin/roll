@@ -4780,13 +4780,16 @@ _isolation_tart_check_binary() {
 # returns 1 silently otherwise. Caller decides what to do.
 _isolation_tart_vm_present() {
   local name; name=$(_isolation_tart_vm_name)
-  tart list 2>/dev/null | awk -v n="$name" '$1 == n { found=1 } END { exit !found }'
+  tart list 2>/dev/null | awk -v n="$name" '$2 == n { found=1 } END { exit !found }'
 }
 
 # Returns the VM's IP on stdout when reachable; exit non-zero when the VM
 # is stopped or `tart ip` fails for any other reason.
 _isolation_tart_ip() {
   local name; name=$(_isolation_tart_vm_name)
+  # FIX: tart ip returns a stale DHCP-cached IP even for stopped VMs.
+  # Gate on tart list State field before trusting the IP.
+  tart list 2>/dev/null | awk -v n="$name" '$2 == n && $NF == "running" { found=1 } END { exit !found }' || return 1
   local ip; ip=$(tart ip "$name" 2>/dev/null) || return 1
   [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
   printf '%s\n' "$ip"
@@ -4836,7 +4839,7 @@ _isolation_tart_provision() {
   local ip; ip=$(_isolation_tart_ip) || { err "tart provision: VM not running"; return 1; }
   local user; user=$(_isolation_tart_ssh_user)
   ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-      "${user}@${ip}" "brew list bats >/dev/null 2>&1 || brew install bats-core; \
+      "${user}@${ip}" "export PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH; brew list bats >/dev/null 2>&1 || brew install bats-core; \
                        brew list node >/dev/null 2>&1 || brew install node; \
                        brew list bash >/dev/null 2>&1 || brew install bash"
 }
@@ -4851,7 +4854,7 @@ _isolation_tart_exec() {
   if ! ip=$(_isolation_tart_ip); then
     # VM stopped — start it in the background with the repo mounted.
     local repo_root; repo_root="$(pwd -P)"
-    tart run --dir="roll:${repo_root}" "$name" >/dev/null 2>&1 &
+    tart run --no-graphics --dir="roll:${repo_root}" "$name" >/dev/null 2>&1 &
     # Wait up to ~30s for IP to come up.
     local i=0
     while (( i < 30 )); do
@@ -4862,7 +4865,9 @@ _isolation_tart_exec() {
     [[ -n "${ip:-}" ]] || { err "tart exec: VM failed to start in 30s"; return 1; }
   fi
   local user; user=$(_isolation_tart_ssh_user)
-  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${user}@${ip}" "$@"
+  local remote_cmd
+  remote_cmd=$(printf '%q ' "$@")
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${user}@${ip}" "export PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH; cd '/Volumes/My Shared Files/roll' && $remote_cmd"
 }
 
 # reset: stop, delete, re-clone from base image, then re-provision.
@@ -4966,7 +4971,8 @@ Flags:
   --help, -h     Show this help.
 
 Examples:
-  roll test                    Run the suite in whatever the config says.
+  roll test                    Run affected tests (default: --affected HEAD~1).
+  roll test -- tests/          Run the full suite explicitly.
   roll test -- --tier=fast     Forward arguments to npm test.
   roll test --where            Don't run; just report routing.
   roll test --reset            Rebuild the VM (or host no-op).
@@ -5011,7 +5017,16 @@ EOF
   fi
 
   # Pass remaining args through to npm test inside the configured adapter.
-  _isolation_dispatch exec npm test "$@"
+  # Default to --affected (HEAD~1 base) when the caller passes no extra args —
+  # mirrors the pre-commit hook's intent and keeps VM runs fast.
+  # To run the full suite explicitly: roll test -- tests/
+  local _npm_args=("$@")
+  if [[ "${#_npm_args[@]}" -eq 0 ]]; then
+    _npm_args=(--affected)
+  fi
+  # Always pass args via `--` so npm doesn't intercept flags like --affected
+  # as npm config options (npm warns and silently drops them otherwise).
+  _isolation_dispatch exec npm test -- "${_npm_args[@]}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

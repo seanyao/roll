@@ -54,10 +54,28 @@ falls back to `none` and prints a one-line note to stderr. An explicit
 
 ### `roll test`
 
-Runs `npm test` inside whatever adapter is configured. Args after `--` (or
-just trailing args) forward verbatim. Exit code is the test suite's exit
-code — when `type: tart` and the suite fails inside the VM, your shell
-sees the same non-zero exit.
+Runs `npm test` inside whatever adapter is configured. Exit code is the
+test suite's exit code — when `type: tart` and the suite fails inside the
+VM, your shell sees the same non-zero exit.
+
+**Default: affected tests only.** When called with no extra args, `roll test`
+automatically passes `--affected` to `npm test`, running only the tests
+affected by changes since `HEAD~1` plus any uncommitted working-tree edits.
+This matches the pre-commit hook's intent and keeps VM runs fast (seconds
+instead of minutes for a typical feature branch).
+
+To run the full suite explicitly:
+
+```bash
+roll test -- tests/
+```
+
+Args after `--` forward verbatim to `npm test`:
+
+```bash
+roll test -- --tier=all        # full suite, all tiers
+roll test -- tests/unit/loop.bats   # specific file
+```
 
 When `type: tart` and the VM can't be reached, the command exits non-zero
 rather than silently falling back to host execution. The whole point of

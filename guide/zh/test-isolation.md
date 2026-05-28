@@ -50,9 +50,26 @@ roll test --reset              # 销毁 VM 重建
 
 ### `roll test`
 
-在配置的 adapter 里跑 `npm test`。`--` 后面的参数（或直接尾随
-参数）原样透传。退码就是测试套件的退码——`type: tart` 下 VM 里
-测试失败时，host 看到同样的非零退码。
+在配置的 adapter 里跑 `npm test`。退码就是测试套件的退码——
+`type: tart` 下 VM 里测试失败时，host 看到同样的非零退码。
+
+**默认只跑 affected 测试。** 无额外参数调用时，`roll test` 自动
+给 `npm test` 加 `--affected`，只跑自 `HEAD~1` 起的改动和未提交
+工作区编辑所影响的测试。这和 pre-commit hook 的逻辑一致，让 VM
+的测试也能秒级完成（而不是跑满整套）。
+
+需要全量跑时：
+
+```bash
+roll test -- tests/
+```
+
+`--` 后面的参数原样透传给 `npm test`：
+
+```bash
+roll test -- --tier=all              # 全量，所有 tier
+roll test -- tests/unit/loop.bats    # 指定文件
+```
 
 `type: tart` 且 VM 起不来时，命令非零退出，**不**静默 fallback
 到 host 跑。整个隔离的意义就在于你知道测试到底跑在哪。

@@ -10208,7 +10208,7 @@ cmd_alert() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Derive owner/repo from git origin. Returns "" when not a github remote.
-_feedback_default_repo() {
+_feedback_origin_repo() {
   local url
   url=$(git remote get-url origin 2>/dev/null) || return 0
   case "$url" in
@@ -10224,6 +10224,42 @@ _feedback_default_repo() {
       ;;
     *) printf '\n' ;;
   esac
+}
+
+# US-FB-003: feedback target repo precedence:
+#   1. --repo flag (caller already resolved this; not part of this helper)
+#   2. ROLL_FEEDBACK_REPO env var
+#   3. .roll/local.yaml `feedback_repo:`
+#   4. ~/.roll/config.yaml `feedback_repo:`
+#   5. origin-derived github owner/repo
+_feedback_yaml_field() {
+  local file="$1" field="$2"
+  [ -f "$file" ] || return 0
+  awk -v key="$field" '
+    $0 ~ "^"key":" {
+      v=$0; sub("^"key":[[:space:]]*", "", v); gsub("^[\"\x27]|[\"\x27]$", "", v); print v; exit
+    }' "$file"
+}
+
+_feedback_default_repo() {
+  if [ -n "${ROLL_FEEDBACK_REPO:-}" ]; then
+    printf '%s\n' "$ROLL_FEEDBACK_REPO"
+    return 0
+  fi
+  local project_local=".roll/local.yaml"
+  local v
+  v=$(_feedback_yaml_field "$project_local" "feedback_repo")
+  if [ -n "$v" ]; then
+    printf '%s\n' "$v"
+    return 0
+  fi
+  local global="${HOME}/.roll/config.yaml"
+  v=$(_feedback_yaml_field "$global" "feedback_repo")
+  if [ -n "$v" ]; then
+    printf '%s\n' "$v"
+    return 0
+  fi
+  _feedback_origin_repo
 }
 
 # Map --type to GitHub label list (single, no spaces).

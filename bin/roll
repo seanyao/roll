@@ -6155,12 +6155,22 @@ _runs_append() {
   # FIX-123: atomic write — write to .tmp.$$ first, then cat >> to append,
   # then remove. If interrupted between jq and rm, the next call cleans it.
   local _tmp="\$_runs_dst.tmp.\$\$"
+  # US-AGENT-005/010: emit agent + story_type so historical hit rates and
+  # status-page summaries have data to aggregate. Empty when not routed.
+  local _agent_field="\${ROLL_LOOP_ROUTED_AGENT:-\${CYCLE_AGENT:-}}"
+  local _story_field="\${ROLL_LOOP_ROUTED_STORY:-}"
+  local _stype_field=""
+  if [ -n "\$_story_field" ]; then
+    _stype_field="\${_story_field%%-*}"
+  fi
   jq -nc \\
     --arg ts "\$_ts_now" \\
     --arg project "${slug}" \\
     --arg run_id "\$_rid" \\
     --arg status "\$_status" \\
     --arg cycle_id "\$_cid" \\
+    --arg agent "\$_agent_field" \\
+    --arg story_type "\$_stype_field" \\
     --argjson built "\$_built" \\
     --argjson skipped '[]' \\
     --argjson alerts '[]' \\
@@ -6168,7 +6178,7 @@ _runs_append() {
     --argjson duration_sec "\$_dur" \\
     --argjson phases "\$_phases_json" \\
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
-      cycle_id:\$cycle_id,
+      cycle_id:\$cycle_id, agent:\$agent, story_type:\$story_type,
       built:\$built, skipped:\$skipped, alerts:\$alerts,
       tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}' \\
     > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }

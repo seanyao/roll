@@ -4,7 +4,7 @@
 > anti-patterns as structured REFACTOR entries.
 > Chinese version: [quality-rubric.zh.md](./quality-rubric.zh.md)
 
-This rubric publishes six anti-patterns that make tests give wrong signal —
+This rubric publishes eight anti-patterns that make tests give wrong signal —
 either false-positive (red on unrelated change) or false-negative (green
 while production is broken). Each category has the same four parts:
 

@@ -203,8 +203,30 @@ loop 看到 `🔨 In Progress` 标记就会自动跳过。
 | 主 Agent 失败 | 切换到备用 Agent |
 | 两个 Agent 都失败 | 暂停 loop，写 ALERT.md |
 | TCR 提交数为 0 | 故事回退为 📋 Todo，写 ALERT.md |
+| HEAD CI 红 | 尝试自动热修（见下），用完次数后才写 ALERT |
 
 ALERT 条目会在下次 `roll loop monitor` 和 `roll-brief` 输出中显示。
+
+## CI 自愈（US-LOOP-046..050）
+
+当 loop 检测到 HEAD CI 红时，不再立即写 ALERT 停工。
+它会先尝试自己把 CI 修好再继续推进 backlog。
+
+**工作流程：**
+
+1. 每轮 cycle 扫 backlog 之前先执行 `roll loop precheck-ci`。
+2. CI 绿 → 正常推进。
+3. CI 红且允许热修：通过 `roll loop hotfix-head-context` 抓 CI 失败日志和最近 commit diff，调 `roll-fix` 修复，等 CI 变绿。超过 `ROLL_LOOP_HEAL_MAX`（默认 2）次还没修好则写 ALERT 停工。
+4. CI 红且已用完热修次数或 `ROLL_LOOP_NO_HEAL=1`：写 ALERT（保留原有行为）。
+
+自家 PR（`loop/*` 分支）在 cycle 结束后才转红（US-LOOP-049）也会被识别：分类为 `loop_self_ci_red`，路由到热修路径，不再静默跳过。
+
+**环境变量：**
+
+| 变量 | 默认值 | 作用 |
+|------|--------|------|
+| `ROLL_LOOP_NO_HEAL=1` | 未设置 | 关闭所有 CI 热修，恢复快速失败 |
+| `ROLL_LOOP_HEAL_MAX` | `2` | 连续热修最大尝试次数，超过后写 ALERT |
 
 ## PR 收件箱与评审
 

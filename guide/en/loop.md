@@ -212,8 +212,36 @@ Loop sees the `🔨 In Progress` marker and skips it.
 | Primary agent fails | Switch to fallback agent |
 | Both agents fail | Pause loop, write ALERT.md |
 | TCR: 0 commits | Revert story to 📋 Todo, write ALERT.md |
+| HEAD CI red | Hot-fix attempt (see below), or ALERT if exhausted |
 
 ALERT entries surface in the next `roll loop monitor` and `roll-brief` output.
+
+## CI Self-Healing (US-LOOP-046..050)
+
+When loop detects that HEAD CI is red before picking a story, it no longer
+immediately writes an ALERT and stops. Instead it tries to fix CI autonomously.
+
+**How it works:**
+
+1. `roll loop precheck-ci` runs before each BACKLOG scan.
+2. If CI is green → cycle proceeds normally.
+3. If CI is red AND heal is allowed:
+   - Loop captures the failing CI log + commit diff via `roll loop hotfix-head-context`.
+   - Invokes `roll-fix` with that context as a brief.
+   - Waits for CI to go green.
+   - If still red after `ROLL_LOOP_HEAL_MAX` attempts (default 2): writes ALERT and stops.
+4. If CI is red AND heal is exhausted or `ROLL_LOOP_NO_HEAL=1`: writes ALERT (existing behavior).
+
+**Loop's own PRs (`loop/*`) that turn red after merging** are also detected
+(US-LOOP-049): classified as `loop_self_ci_red` and routed to `_loop_hot_fix_pr`
+for a branch-level hot-fix, instead of being silently skipped.
+
+**Environment variables:**
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `ROLL_LOOP_NO_HEAL=1` | unset | Disables all CI hot-fix attempts; reverts to fail-fast |
+| `ROLL_LOOP_HEAL_MAX` | `2` | Maximum consecutive hot-fix attempts before ALERT |
 
 ## PR Inbox & Review
 

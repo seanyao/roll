@@ -6063,6 +6063,8 @@ _phase_begin startup
 _phase_end startup ok
 _phase_begin preflight
 cd "${project_path}" 2>/dev/null || true
+# US-LOOP-056: sync .roll/ meta from roll-meta remote before backlog scan
+_loop_sync_meta "${project_path}" || true
 # FIX-104: GC stale merged temp branches at cycle entry — before worktree setup
 # and before any early-exit gate (pre-run abort, CI red precheck). The post-claude
 # call site doesn't cover those paths, so merged branches accumulated on origin.
@@ -7759,6 +7761,50 @@ _ci_wait() {
 }
 
 # Pre-run CI health check — call before picking up new stories.
+# US-LOOP-056: sync .roll/ (roll-meta private submodule) before each cycle so
+# the cycle always runs against the latest backlog. Fail-soft: any error emits
+# a meta_sync event and returns 0 so the cycle continues with stale/existing meta.
+#
+# Statuses emitted via _loop_event meta_sync:
+#   ok      – fetch + reset --hard succeeded
+#   stale   – fetch failed; existing .roll/ used as fallback
+#   skipped – no git remote configured (not a roll-meta managed project)
+#
+# Env override: ROLL_LOOP_META_SYNC_TIMEOUT (default 15) controls fetch timeout.
+_loop_sync_meta() {
+  local project_path="$1"
+  local roll_meta="${project_path}/.roll"
+  local timeout_sec="${ROLL_LOOP_META_SYNC_TIMEOUT:-15}"
+  local cid="${CYCLE_ID:-unknown}"
+
+  # Detect remote via the canonical probe point. If .roll/ has no .git or no
+  # remote configured, treat as "not managed" and skip silently.
+  local remote_url
+  remote_url=$(git -C "$roll_meta" remote get-url origin 2>/dev/null || echo "")
+  if [ -z "$remote_url" ]; then
+    return 0
+  fi
+
+  # Attempt fetch with timeout
+  local _fetch_ok=0
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$timeout_sec" git -C "$roll_meta" fetch --quiet 2>/dev/null && _fetch_ok=1
+  else
+    git -C "$roll_meta" fetch --quiet 2>/dev/null && _fetch_ok=1
+  fi
+
+  if [ "$_fetch_ok" -eq 1 ]; then
+    if git -C "$roll_meta" reset --hard origin/main --quiet 2>/dev/null; then
+      _loop_event meta_sync "$cid" "ok" "" 2>/dev/null || true
+      return 0
+    fi
+  fi
+
+  # Fetch or reset failed — stale .roll/ used; cycle continues
+  _loop_event meta_sync "$cid" "stale" "fetch/reset failed" 2>/dev/null || true
+  return 0
+}
+
 # Refuses to build on a red base (HEAD CI failed). Lenient on unknown states
 # (gh missing, repo unparseable, no runs yet) — the post-build _loop_enforce_ci
 # is the strict gate.

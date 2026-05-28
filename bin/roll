@@ -4518,8 +4518,41 @@ _isolation_none_init()      { return 0; }
 _isolation_none_provision() { return 0; }
 _isolation_none_exec()      { "$@"; }
 _isolation_none_status()    { echo "ready"; return 0; }
-_isolation_none_reset()     { return 0; }
+_isolation_none_reset() {
+  # US-ISO-004 AC: type=none has nothing to reset; print explanation but
+  # exit 0 (not a failure — host execution is already as clean as it gets).
+  info "isolation type 'none' has nothing to reset (host execution is stateless)" >&2
+  return 0
+}
 _isolation_none_destroy()   { return 0; }
+
+# ─── reset lock (US-ISO-004) ──────────────────────────────────────────────
+# A single lockfile under .roll/ prevents two `roll test --reset` runs from
+# racing, and forces concurrent `roll test` test-execution paths to bail
+# fast rather than blocking on a half-rebuilt VM. --where is read-only and
+# deliberately bypasses the lock.
+_isolation_reset_lock_path() {
+  echo ".roll/.iso-reset.lock"
+}
+
+_isolation_reset_lock_held() {
+  [[ -f "$(_isolation_reset_lock_path)" ]]
+}
+
+# Returns 0 if the caller now holds the lock; 1 if someone else does.
+_isolation_reset_acquire_lock() {
+  local lock; lock=$(_isolation_reset_lock_path)
+  if [[ -f "$lock" ]]; then
+    return 1
+  fi
+  mkdir -p "$(dirname "$lock")"
+  echo "$$" > "$lock"
+  return 0
+}
+
+_isolation_reset_release_lock() {
+  rm -f "$(_isolation_reset_lock_path)"
+}
 
 # ── `tart` adapter (US-ISO-002 — macOS Apple Silicon VM via Tart) ─────────
 # Test override hooks (used by unit tests; default values keep prod stable):
@@ -4706,7 +4739,7 @@ cmd_test() {
   case "${1:-}" in
     --help|-h)
       cat <<'EOF'
-Usage: roll test [--where] [--] [<extra-args>...]
+Usage: roll test [--where | --reset] [--] [<extra-args>...]
 
 Runs the project's test suite through the isolation adapter chosen in
 .roll/local.yaml:
@@ -4721,12 +4754,18 @@ Runs the project's test suite through the isolation adapter chosen in
 Flags:
   --where        Print where tests will run, then exit (e.g. `host`,
                  `tart:192.168.64.5`, `tart:stopped`).
+  --reset        Rebuild the isolation environment to a clean baseline.
+                 type=tart: stop → delete → clone → provision (~90s).
+                 type=none: prints a note and exits 0 (host is stateless).
+                 Holds a lockfile under .roll/.iso-reset.lock; concurrent
+                 `roll test` invocations fast-fail with a clear error.
   --help, -h     Show this help.
 
 Examples:
   roll test                    Run the suite in whatever the config says.
   roll test -- --tier=fast     Forward arguments to npm test.
   roll test --where            Don't run; just report routing.
+  roll test --reset            Rebuild the VM (or host no-op).
 
 When type=tart and the VM can't be reached, the command exits non-zero
 rather than silently falling back to host execution.
@@ -4737,10 +4776,35 @@ EOF
       _cmd_test_where
       return 0
       ;;
+    --reset)
+      # Refuse if another reset is in progress — fast-fail beats blocking
+      # on a half-rebuilt VM (US-ISO-004 AC).
+      if _isolation_reset_lock_held; then
+        err "roll test --reset: another reset is already in progress"
+        echo "  lock: $(_isolation_reset_lock_path) (delete manually if stale)" >&2
+        return 1
+      fi
+      _isolation_reset_acquire_lock || {
+        err "roll test --reset: failed to acquire reset lock"
+        return 1
+      }
+      # Make sure the lock comes off no matter how dispatch exits.
+      trap '_isolation_reset_release_lock' RETURN
+      _isolation_dispatch reset
+      return $?
+      ;;
     --)
       shift
       ;;
   esac
+
+  # Test-execution path. If a reset is in progress, bail rather than racing
+  # into a half-rebuilt VM — user can `roll test --where` to inspect state.
+  if _isolation_reset_lock_held; then
+    err "roll test: a reset is in progress (lock: $(_isolation_reset_lock_path))"
+    echo "  re-run once the reset completes, or delete the lockfile if stale" >&2
+    return 1
+  fi
 
   # Pass remaining args through to npm test inside the configured adapter.
   _isolation_dispatch exec npm test "$@"

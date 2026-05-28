@@ -1406,6 +1406,10 @@ cmd_init() {
     _write_backlog "$project_dir/.roll/backlog.md"
     _ensure_features_dir "$project_dir/.roll/features"
     _write_features_md "$project_dir/.roll/features.md"
+    # US-AGENT-003: seed agent-routes.yaml from template. Env override:
+    #   ROLL_AGENT_ROUTES_TEMPLATE=minimal roll init
+    # Onboard plan can also set agent_routes_template; _init_apply reads it.
+    _init_seed_agent_routes "${ROLL_AGENT_ROUTES_TEMPLATE:-default}" "$project_dir" || true
     # US-ONBOARD-019: stamp the project so legacy detection can recognise it
     # as Roll-onboarded without depending on directory-name heuristics.
     _write_version_stamp "$project_dir"
@@ -1931,6 +1935,26 @@ print(' '.join(p.get('scope', {}).get('approved', [])))
     _write_backlog "$project_dir/.roll/backlog.md"
     _onboard_changeset_record "$project_dir" "files_created" ".roll/backlog.md"
   fi
+
+  # US-AGENT-003: seed agent-routes.yaml. Template precedence:
+  #   1. plan.agent_routes_template (set by $roll-onboard interactive flow)
+  #   2. ROLL_AGENT_ROUTES_TEMPLATE env var
+  #   3. "default"
+  # Set to "skip" to omit seeding entirely.
+  local _routes_template
+  _routes_template=$(python3 -c "
+import yaml
+p = yaml.safe_load(open('$plan')) or {}
+print(p.get('agent_routes_template', '') or '')
+" 2>/dev/null || echo "")
+  if [[ -z "$_routes_template" ]]; then
+    _routes_template="${ROLL_AGENT_ROUTES_TEMPLATE:-default}"
+  fi
+  if [[ "$_routes_template" != "skip" ]]; then
+    if _init_seed_agent_routes "$_routes_template" "$project_dir"; then
+      _onboard_changeset_record "$project_dir" "files_created" ".roll/agent-routes.yaml"
+    fi
+  fi
   if [[ " $approved " == *" features "* ]]; then
     _ensure_features_dir "$project_dir/.roll/features"
     _write_features_md "$project_dir/.roll/features.md"
@@ -2447,6 +2471,31 @@ _write_backlog() {
 EOF
   ok "Created: .roll/backlog.md"
   _ROLL_MERGE_SUMMARY+=("created|.roll/backlog.md")
+}
+
+# US-AGENT-003: seed .roll/agent-routes.yaml from a named template (default /
+# minimal / heavy). Idempotent — leaves an existing file untouched. Templates
+# live under ${ROLL_TEMPLATES}/agent-routes/<name>.yaml.
+_init_seed_agent_routes() {
+  local template_name="${1:-default}"
+  local project_dir="${2:-$(pwd)}"
+  local dest="${project_dir}/.roll/agent-routes.yaml"
+
+  if [[ -f "$dest" ]]; then
+    _ROLL_MERGE_SUMMARY+=("unchanged|.roll/agent-routes.yaml")
+    return 0
+  fi
+
+  local src="${ROLL_TEMPLATES}/agent-routes/${template_name}.yaml"
+  if [[ ! -f "$src" ]]; then
+    err "agent-routes template not found: ${template_name} (looked for ${src})"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$dest")"
+  cp "$src" "$dest"
+  ok "Created: .roll/agent-routes.yaml (template: ${template_name})"
+  _ROLL_MERGE_SUMMARY+=("created|.roll/agent-routes.yaml")
 }
 
 _ensure_features_dir() {
@@ -6106,12 +6155,22 @@ _runs_append() {
   # FIX-123: atomic write — write to .tmp.$$ first, then cat >> to append,
   # then remove. If interrupted between jq and rm, the next call cleans it.
   local _tmp="\$_runs_dst.tmp.\$\$"
+  # US-AGENT-005/010: emit agent + story_type so historical hit rates and
+  # status-page summaries have data to aggregate. Empty when not routed.
+  local _agent_field="\${ROLL_LOOP_ROUTED_AGENT:-\${CYCLE_AGENT:-}}"
+  local _story_field="\${ROLL_LOOP_ROUTED_STORY:-}"
+  local _stype_field=""
+  if [ -n "\$_story_field" ]; then
+    _stype_field="\${_story_field%%-*}"
+  fi
   jq -nc \\
     --arg ts "\$_ts_now" \\
     --arg project "${slug}" \\
     --arg run_id "\$_rid" \\
     --arg status "\$_status" \\
     --arg cycle_id "\$_cid" \\
+    --arg agent "\$_agent_field" \\
+    --arg story_type "\$_stype_field" \\
     --argjson built "\$_built" \\
     --argjson skipped '[]' \\
     --argjson alerts '[]' \\
@@ -6119,7 +6178,7 @@ _runs_append() {
     --argjson duration_sec "\$_dur" \\
     --argjson phases "\$_phases_json" \\
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
-      cycle_id:\$cycle_id,
+      cycle_id:\$cycle_id, agent:\$agent, story_type:\$story_type,
       built:\$built, skipped:\$skipped, alerts:\$alerts,
       tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}' \\
     > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }
@@ -6345,7 +6404,27 @@ if _worktree_fetch_origin main \\
   _worktree_sync_meta "\$WT" 2>/dev/null || true
   echo "[loop] cycle \${CYCLE_ID}: worktree \$WT on \$BRANCH"
   _loop_event cycle_start "\${CYCLE_ID}" "" "" || true
-  _loop_event agent_used "\${CYCLE_ID}" "\$(_project_agent)" "primary" || true
+  # US-AGENT-006: per-story routing — pick the next Todo, route to an agent
+  # based on its Agent profile + agent-routes.yaml, fall back to
+  # _project_agent when no story is pickable or routing returns nothing.
+  ROLL_LOOP_ROUTED_STORY=""
+  ROLL_LOOP_ROUTED_AGENT=""
+  ROLL_LOOP_ROUTED_RULE=""
+  ROLL_LOOP_ROUTE_RATIONALE=""
+  ( cd "\$WT" >/dev/null 2>&1 && ROLL_LOOP_ROUTED_STORY=\$(_loop_pick_next_story 2>/dev/null) || true )
+  ROLL_LOOP_ROUTED_STORY=\$( (cd "\$WT" 2>/dev/null && _loop_pick_next_story 2>/dev/null) || echo "" )
+  if [ -n "\$ROLL_LOOP_ROUTED_STORY" ]; then
+    _route_line=\$( (cd "\$WT" 2>/dev/null && _loop_pick_agent_for_story "\$ROLL_LOOP_ROUTED_STORY" 2>/dev/null) || echo "" )
+    if [ -n "\$_route_line" ]; then
+      ROLL_LOOP_ROUTED_AGENT=\$(echo "\$_route_line" | awk '{print \$1}')
+      ROLL_LOOP_ROUTED_RULE=\$(echo "\$_route_line" | awk '{print \$2}')
+      ROLL_LOOP_ROUTE_RATIONALE=\$(echo "\$_route_line" | cut -d' ' -f3-)
+      echo "[loop] story \${ROLL_LOOP_ROUTED_STORY} routed to \${ROLL_LOOP_ROUTED_AGENT} via \${ROLL_LOOP_ROUTED_RULE}"
+      _loop_event story_routed "\${CYCLE_ID}" "\${ROLL_LOOP_ROUTED_STORY}" "\${ROLL_LOOP_ROUTED_AGENT}|\${ROLL_LOOP_ROUTED_RULE}" || true
+    fi
+  fi
+  CYCLE_AGENT="\${ROLL_LOOP_ROUTED_AGENT:-\$(_project_agent)}"
+  _loop_event agent_used "\${CYCLE_ID}" "\${CYCLE_AGENT}" "primary" || true
   _phase_end worktree_setup ok
 else
   # P3 fix: skip the cycle entirely when worktree isolation fails.
@@ -6372,7 +6451,9 @@ export LOOP_CYCLE_ID="\${CYCLE_ID}"
 export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
 # US-LOOP-010: tell loop-fmt.py which agent is running so it can branch
 # rendering: claude → stream-json parser, others → transparent passthrough.
-export ROLL_LOOP_AGENT="\$(_project_agent)"
+# US-AGENT-006: prefer the per-story routed agent (set above) when present.
+export ROLL_LOOP_AGENT="\${CYCLE_AGENT:-\$(_project_agent)}"
+export ROLL_LOOP_ROUTED_STORY ROLL_LOOP_ROUTED_AGENT ROLL_LOOP_ROUTED_RULE
 _phase_begin agent_invoke
 for _attempt in 1 2 3; do
   # FIX-068: defensive reset before each attempt — _CYCLE_TIMED_OUT carries
@@ -6949,6 +7030,7 @@ cmd_loop() {
     precheck-ci)          _loop_precheck_ci ;;
     hotfix-head-context)  _loop_hotfix_head_context "${1:-}" ;;
     branches)             _loop_branches "$(pwd -P)" ;;
+    agent-routes)         _loop_agent_routes "${1:-show}" "${@:2}" ;;
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
@@ -6971,6 +7053,7 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mu
   gc [--dry-run] [--keep-days N]
                 Garbage-collect orphan slugs, tmp debris, expired backups
   branches      List loop-related branches
+  agent-routes  Show / lint agent routing config (.roll/agent-routes.yaml)
 
 Internal (called by roll-loop SKILL):
   notify        Send macOS notification
@@ -8720,6 +8803,154 @@ _loop_mark_in_progress() {
   ' "$backlog" > "$tmp" && mv "$tmp" "$backlog"
 }
 
+# US-AGENT-008: _loop_mark_hold <story-id> <reason> [backlog-path]
+#   Flip "🔨 In Progress" or "📋 Todo" row to "🚫 Hold" with a parenthetical
+#   reason suffix appended to the description column. Idempotent — if the
+#   row is already 🚫 Hold the call is a no-op (status compare is exact).
+_loop_mark_hold() {
+  local story_id="$1"
+  local reason="${2:-self-downgrade}"
+  local backlog="${3:-${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md}"
+  [ -n "$story_id" ] || return 1
+  [ -f "$backlog" ] || return 0
+  local tmp; tmp=$(mktemp "${backlog}.XXXXXX") || return 1
+  awk -v sid="$story_id" -v reason="$reason" '
+    {
+      line = $0
+      changed = 0
+      if (index(line, "🔨 In Progress") > 0 || index(line, "📋 Todo") > 0) {
+        n = split(line, cols, "|")
+        if (n >= 2) {
+          id_cell = cols[2]
+          gsub(/[[:space:]]/, "", id_cell)
+          sub(/^\[/, "", id_cell)
+          sub(/\].*$/, "", id_cell)
+          if (id_cell == sid) {
+            sub(/🔨 In Progress/, "🚫 Hold", line)
+            sub(/📋 Todo/, "🚫 Hold", line)
+            # Append reason to the description column (cols[3]) only if not
+            # already present.
+            if (index(line, "→ " reason) == 0 && index(line, "(" reason ")") == 0) {
+              # Insert before the trailing " | 🚫 Hold |"
+              sub(/ \| 🚫 Hold \|/, " → " reason " | 🚫 Hold |", line)
+            }
+            changed = 1
+          }
+        }
+      }
+      print line
+    }
+  ' "$backlog" > "$tmp" && mv "$tmp" "$backlog"
+}
+
+# US-AGENT-008: self-downgrade primitive.
+#   _loop_self_downgrade <story-id> <reason> <sub-ids-csv>
+# Flips story to 🚫 Hold (with sub list embedded), writes ALERT, emits a
+# story_self_downgrade event. The actual sub-story rows + feature md are
+# produced by the SKILL invocation of roll-design --from-story (this helper
+# just records the contract).
+_loop_self_downgrade() {
+  local story_id="$1"
+  local reason="${2:-too_big}"
+  local subs="${3:-}"
+  [ -n "$story_id" ] || return 1
+  local backlog="${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md"
+  local annotation
+  if [ -n "$subs" ]; then
+    annotation="split to ${subs}"
+  else
+    annotation="$reason"
+  fi
+  _loop_mark_hold "$story_id" "$annotation" "$backlog" || true
+
+  # ALERT line for human visibility. Slug derives from main project dir.
+  local main_dir="${ROLL_MAIN_PROJECT:-$PWD}"
+  local slug; slug=$(_project_slug "$main_dir" 2>/dev/null || basename "$main_dir")
+  local shared_root="${_SHARED_ROOT:-$HOME/.shared/roll}"
+  local alert_file="${shared_root}/loop/ALERT-${slug}.md"
+  mkdir -p "$(dirname "$alert_file")"
+  printf '[%s] self-downgrade: %s — reason: %s; subs: %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$story_id" "$reason" "${subs:-<none>}" \
+    >> "$alert_file"
+
+  # Best-effort event emission (tolerates missing helpers).
+  if declare -F _loop_event >/dev/null 2>&1; then
+    _loop_event "agent_self_downgrade" "${LOOP_CYCLE_ID:-$story_id}" "$story_id" "${reason}|${subs}" || true
+  fi
+  echo "[loop] self-downgrade ${story_id}: ${reason}; subs=${subs:-<none>}"
+}
+
+# US-AGENT-009: _loop_chain_depth_cap_check <story-id> [backlog]
+#   Returns 0 when auto re-split is still allowed (story's chain_depth < 2),
+#   1 when the cap is hit (≥ 2 already — the third re-split would be #3 in
+#   the chain). Reads chain_depth from the story's feature md profile;
+#   missing profile is treated as depth 0 (split allowed).
+_loop_chain_depth_cap_check() {
+  local story_id="$1"
+  local backlog="${2:-${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md}"
+  [ -n "$story_id" ] || return 0
+  [ -f "$backlog" ] || return 0
+
+  # Resolve feature md from backlog link.
+  local md_path
+  md_path=$(grep -E "\[${story_id}\]\(" "$backlog" 2>/dev/null \
+    | head -1 \
+    | sed -E "s/.*\[${story_id}\]\(([^)#]+)#?[^)]*\).*/\1/")
+  [ -n "$md_path" ] || return 0
+  [ -f "$md_path" ] || return 0
+
+  # Find the section for this story id and extract chain_depth.
+  local anchor; anchor=$(echo "$story_id" | tr '[:upper:]' '[:lower:]')
+  local depth
+  depth=$(awk -v anchor="$anchor" '
+    /<a id="/ {
+      if (match($0, /<a id="[^"]+"/)) {
+        cur = substr($0, RSTART + 7, RLENGTH - 8)
+        in_section = (cur == anchor)
+      }
+      next
+    }
+    in_section && /^- chain_depth:/ {
+      gsub(/^- chain_depth:[ \t]*/, "")
+      gsub(/[ \t].*$/, "")
+      print
+      exit
+    }
+  ' "$md_path")
+
+  # Empty / non-numeric → treat as 0.
+  case "$depth" in
+    ''|*[!0-9]*) depth=0 ;;
+  esac
+
+  [ "$depth" -lt 2 ]
+}
+
+# US-AGENT-009: cap-hit path. Story has reached chain_depth ≥ 2 — refuse
+# further auto re-split, flip 🚫 Hold + write a high-priority ALERT with
+# chain context for human triage.
+_loop_split_cap_hit() {
+  local story_id="$1"
+  local reason="${2:-cap-hit}"
+  [ -n "$story_id" ] || return 1
+  local backlog="${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md"
+  _loop_mark_hold "$story_id" "StorySplitCapHit: $reason" "$backlog" || true
+
+  local main_dir="${ROLL_MAIN_PROJECT:-$PWD}"
+  local slug; slug=$(_project_slug "$main_dir" 2>/dev/null || basename "$main_dir")
+  local shared_root="${_SHARED_ROOT:-$HOME/.shared/roll}"
+  local alert_file="${shared_root}/loop/ALERT-${slug}.md"
+  mkdir -p "$(dirname "$alert_file")"
+  printf '[%s] StorySplitCapHit: %s — chain_depth >= 2 (third auto-split refused). %s. Human triage required.\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$story_id" "$reason" \
+    >> "$alert_file"
+
+  if declare -F _loop_event >/dev/null 2>&1; then
+    _loop_event "story_split_cap_hit" "${LOOP_CYCLE_ID:-$story_id}" "$story_id" "$reason" || true
+  fi
+  echo "[loop] StorySplitCapHit ${story_id}: chain_depth >= 2 — held for human triage"
+}
+
 # _loop_mark_todo <story-id> [backlog-path]
 #   Revert a row from "🔨 In Progress" back to "📋 Todo". Called when a
 #   cycle's executor fails so the next cycle can pick the story up again.
@@ -9248,6 +9479,157 @@ refs/heads/claude/*"
     printf "%s\t%s\n" "$branch" "$status"
   done <<< "$branches"
   return 0
+}
+
+# US-AGENT-002: agent-routes.yaml management.
+# `roll loop agent-routes [show|lint] [path]` — dispatch + helpers.
+# Default path order: $ROLL_AGENT_ROUTES (if set) → ./.roll/agent-routes.yaml
+# → built-in default in templates/agent-routes/default.yaml.
+_loop_agent_routes_path() {
+  if [ -n "${ROLL_AGENT_ROUTES:-}" ] && [ -f "$ROLL_AGENT_ROUTES" ]; then
+    printf '%s\n' "$ROLL_AGENT_ROUTES"
+    return 0
+  fi
+  if [ -f ".roll/agent-routes.yaml" ]; then
+    printf '%s\n' ".roll/agent-routes.yaml"
+    return 0
+  fi
+  # Fallback: built-in default shipped with the package.
+  # ROLL_INSTALL_DIR is set when installed via npm; fall back to script dir.
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  local default_tpl="$install_dir/templates/agent-routes/default.yaml"
+  if [ -f "$default_tpl" ]; then
+    printf '%s\n' "$default_tpl"
+    return 0
+  fi
+  return 1
+}
+
+_loop_agent_routes_show() {
+  local path
+  path=$(_loop_agent_routes_path) || {
+    echo "agent-routes: no config found (set ROLL_AGENT_ROUTES, drop .roll/agent-routes.yaml, or run roll init)" >&2
+    return 1
+  }
+  echo "# source: $path"
+  cat "$path"
+}
+
+_loop_agent_routes_lint() {
+  local path="${1:-}"
+  if [ -z "$path" ]; then
+    path=$(_loop_agent_routes_path) || {
+      echo "agent-routes lint: no config found" >&2
+      return 1
+    }
+  fi
+  if [ ! -f "$path" ]; then
+    echo "agent-routes lint: file not found: $path" >&2
+    return 1
+  fi
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  python3 "$install_dir/lib/agent_routes_lint.py" "$path"
+}
+
+# US-AGENT-006: pick the next eligible 📋 Todo story from .roll/backlog.md
+# applying the same gates as the roll-loop SKILL Step 2:
+#   1. Status = 📋 Todo
+#   2. NOT manual-only:* tagged
+#   3. depends-on:* (if any) all ✅ Done
+#   4. Priority order: FIX > US > REFACTOR
+#
+# stdout: chosen story id (single line)
+# exit 0 when picked, 1 when nothing eligible.
+_loop_pick_next_story() {
+  local backlog="${1:-.roll/backlog.md}"
+  [ -f "$backlog" ] || return 1
+
+  # Two passes over the file, once per type prefix, return first hit.
+  local prefix
+  for prefix in FIX US REFACTOR; do
+    local id
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      # Skip non-Todo rows fast
+      case "$line" in
+        *'📋 Todo'*) ;;
+        *) continue ;;
+      esac
+      # Extract id like FIX-XXX-NNN / US-XXX-NNN / REFACTOR-XXX-NNN.
+      id=$(printf '%s\n' "$line" | grep -oE "${prefix}-[A-Za-z0-9_-]+" | head -1)
+      [ -n "$id" ] || continue
+      # Gate 1: manual-only
+      _loop_is_manual_only "$id" "$backlog" 2>/dev/null && continue
+      # Gate 2: depends-on
+      if ! _loop_check_depends_on "$id" "$backlog" >/dev/null 2>&1; then
+        continue
+      fi
+      printf '%s\n' "$id"
+      return 0
+    done < "$backlog"
+  done
+  return 1
+}
+
+# US-AGENT-004: pick the agent for a given backlog story by reading its
+# Agent profile from the linked feature md and matching against the active
+# agent-routes.yaml. Falls back to history.cold_start_default when no agent
+# matches or the story has no profile.
+#
+# stdout: "<agent> <rule_kind> <rationale...>"
+# exit 0 on success, 1 if the story id isn't found.
+_loop_pick_agent_for_story() {
+  local story_id="${1:-}"
+  if [ -z "$story_id" ]; then
+    echo "_loop_pick_agent_for_story: story id required" >&2
+    return 1
+  fi
+  local routes
+  routes=$(_loop_agent_routes_path 2>/dev/null) || {
+    echo "_loop_pick_agent_for_story: no agent-routes.yaml available" >&2
+    return 1
+  }
+  local backlog=".roll/backlog.md"
+  [ -f "$backlog" ] || {
+    echo "_loop_pick_agent_for_story: $backlog not found" >&2
+    return 1
+  }
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  # US-AGENT-005: pass runs.jsonl when available so history soft preference
+  # can layer on top of hard rules. Project-local first, then shared.
+  local runs_arg=""
+  if [ -f ".roll/runs.jsonl" ]; then
+    runs_arg="--runs .roll/runs.jsonl"
+  elif [ -f "${HOME}/.shared/roll/loop/runs.jsonl" ]; then
+    runs_arg="--runs ${HOME}/.shared/roll/loop/runs.jsonl"
+  fi
+  # shellcheck disable=SC2086
+  python3 "$install_dir/lib/loop_pick_agent.py" \
+    --story-id "$story_id" \
+    --backlog "$backlog" \
+    --routes "$routes" \
+    $runs_arg
+}
+
+_loop_agent_routes() {
+  local sub="${1:-show}"; shift || true
+  case "$sub" in
+    show) _loop_agent_routes_show ;;
+    lint) _loop_agent_routes_lint "${1:-}" ;;
+    path) _loop_agent_routes_path ;;
+    *)
+      cat >&2 <<'HELP'
+Usage: roll loop agent-routes <show|lint|path> [path]
+
+  show         Print active agent-routes config (source + content)
+  lint [path]  Validate schema (default: active config). Exit 1 on errors.
+  path         Print which file is currently active.
+HELP
+      return 1 ;;
+  esac
 }
 
 # US-AUTO-033: publish a loop cycle branch as a GitHub PR with auto-merge.

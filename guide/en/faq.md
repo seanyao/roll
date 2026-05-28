@@ -660,3 +660,53 @@ git -C .roll log --oneline -3        # shows last synced commits
 ```bash
 git -C .roll fetch && git -C .roll reset --hard origin/main
 ```
+
+### C5. Why is this cycle running on `<agent>` instead of my configured default?
+
+**Symptoms:** `~/.roll/config.yaml` says `primary_agent: pi`, but cron.log shows
+`[loop] story US-AGENT-007 routed to claude via hard`.
+
+为什么这个 cycle 用了 claude 而不是配置里的 pi？
+
+**Why this happens:** Since US-AGENT-001..011 shipped, `primary_agent` is no
+longer the only voice. Each cycle picks the agent based on the story's
+**Agent profile** (`est_min` / `risk_zone` / `chain_depth`) and the per-project
+`.roll/agent-routes.yaml`. Hard rules + soft preference from `runs.jsonl`
+history decide the winner; only when no agent passes does
+`history.cold_start_default` fall back.
+
+**Inspect:**
+
+```bash
+roll loop agent-routes show          # current routing config
+roll loop agent-routes lint          # schema check
+roll loop runs 20                     # see which agent each cycle picked
+```
+
+If you want a story to always run on a specific agent, narrow that agent's
+range in `.roll/agent-routes.yaml` (or temporarily downgrade the others' caps).
+If you want to disable routing entirely, set every agent's `types` to the same
+list and ensure `cold_start_default` points at your preferred one.
+
+### C6. Why was my story flipped to 🚫 Hold instead of Done?
+
+**Symptoms:** Backlog row shows `🚫 Hold → split to US-FOO-XXXa,US-FOO-XXXb`,
+and there's an ALERT line about `self-downgrade` or `StorySplitCapHit`.
+
+故事为什么翻成 🚫 搁置了，明明 cycle 还跑了？
+
+**Why this happens:** The agent's pre-flight self-check (in
+`roll-build` / `roll-fix` SKILL) returned `verdict: too_big` — the story's
+`est_min` exceeded the agent's capability range, OR `risk_zone` didn't match,
+OR the agent's historical hit rate on that story type is below
+`prefer_threshold` and there's downgrade budget left. The cycle then runs
+`roll-design --from-story <id>` to write smaller sub-stories with
+`chain_depth + 1`, flips the parent to 🚫 Hold, and exits cleanly.
+
+The cap kicks in at `chain_depth ≥ 2` — the third consecutive auto-split is
+refused (`StorySplitCapHit`) and ALERT is raised for you to triage manually.
+
+**Fix:** Look at the sub-stories the agent created; they should be smaller and
+should pass pre-flight on the next cycle. If you disagree with the split,
+edit the sub-stories or flip the original back to 📋 Todo with a tighter
+`est_min` / `risk_zone` profile.

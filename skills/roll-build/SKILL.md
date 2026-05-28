@@ -52,6 +52,66 @@ Do not use for:
 
 Activate when input is a `US-[A-Z]+-[0-9]+` identifier.
 
+### Step 0: Pre-flight self-check (US-AGENT-007)
+
+Before reading the Story in depth or splitting actions, **read the Agent profile** from the story's feature md and decide whether this cycle can realistically deliver it. The check is mechanical:
+
+```
+inputs:
+  story.est_min       (from **Agent profile:** block, US-AGENT-001)
+  story.risk_zone     (low / medium / high)
+  story.chain_depth   (0 unless already a downgrade product)
+  agent.max_est_min   (from .roll/agent-routes.yaml for the current agent)
+  history.prefer_threshold (from .roll/agent-routes.yaml)
+  history.hit_rate    (this agent × this story_type, last window_cycles)
+
+verdict:
+  too_big when ANY of these is true:
+    1. story.est_min > agent.max_est_min   (hard capacity miss)
+    2. story.risk_zone not in agent.risk    (hard risk miss)
+    3. history.hit_rate < prefer_threshold AND story.chain_depth == 0
+       (soft signal: history says this agent's not on top of this type yet,
+        and we still have downgrade budget — don't burn a cycle)
+  ok otherwise
+```
+
+Output the verdict as the first line of the cycle response:
+
+```yaml
+verdict: ok    # or: too_big
+reason: <one short line — which condition triggered, with numbers>
+```
+
+When `verdict: ok` → continue to Step 1 normally.
+When `verdict: too_big` → go to **US-AGENT-008 self-downgrade path**, **but** first run the **US-AGENT-009 chain_depth cap check**:
+
+```bash
+# 0a. Cap check: refuse the third consecutive auto-split.
+#     exit 0 → split allowed; exit 1 → cap hit, take cap-hit path instead.
+if ! bash -c 'source "$(command -v roll)"; _loop_chain_depth_cap_check US-XXX-NNN'; then
+  # Cap hit (chain_depth ≥ 2): hold + ALERT, exit cleanly.
+  bash -c 'source "$(command -v roll)"; _loop_split_cap_hit US-XXX-NNN "depth >= 2, human triage required"'
+  exit 0
+fi
+
+# 1. Invoke roll-design to re-split the story into smaller sub-stories.
+#    Each sub-story carries chain_depth = (parent.chain_depth + 1).
+#    Sub-stories land as 📋 Todo with depends-on:<parent> chained.
+Skill("roll-design", "--from-story US-XXX-NNN")
+
+# 2. After the sub-stories are written to BACKLOG, flip the parent
+#    to 🚫 Hold and emit the downgrade event. The helper handles ALERT.
+bash -c 'source "$(command -v roll)"; _loop_self_downgrade US-XXX-NNN "too_big: <reason from verdict>" "US-XXX-NNNa,US-XXX-NNNb"'
+
+# 3. Exit cleanly — no TCR commits this cycle. The next loop cycle picks
+#    up the first sub-story (which is smaller and should pass pre-flight).
+exit 0
+```
+
+If `roll-design` cannot produce ≥2 sub-stories (story is already irreducible), fall through to **US-AGENT-009 cap-hit path** by invoking `_loop_split_cap_hit` directly. The cap is purely about stopping infinite split chains; even on the first re-split, if the design step gives up, the cap-hit handler raises ALERT for human triage.
+
+> Pre-flight is honest, not paranoid: a small story (est_min ≤ 5, chain_depth=0, low risk) should almost always go `ok`. The check pays off on the long tail — stories that look small but compose tons of files, or that the current agent has historically failed.
+
 ### Step 1: Read the Story
 
 1. Open `.roll/backlog.md`, find the US row, follow the link to `.roll/features/<feature>.md`

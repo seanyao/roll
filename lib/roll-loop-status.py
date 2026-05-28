@@ -706,6 +706,51 @@ def rollup_for_story(cycles: List[Dict[str, Any]], story_id: str) -> Dict[str, A
             r["model"] = cy["model"]
     return r
 
+# US-AGENT-010: per-agent hit-rate summary for the ROLLUP block.
+# Aggregates the last `window_cycles` runs.jsonl records grouped by `agent`.
+# Returns a single-line string like
+#     "agents: pi 8/22 (36%) · deepseek 5/8 (63%) · claude 2/2 (n/a)"
+# Empty agents / missing agent field are skipped. Sample < min_sample renders
+# as "(n/a)" instead of a percentage to avoid noise from tiny windows.
+def _agent_summary_line(records: List[Dict[str, Any]], window_cycles: int = 50,
+                       min_sample: int = 5) -> str:
+    if not records or window_cycles <= 0:
+        return ""
+    # Take the most recent `window_cycles` records that have an agent field.
+    tail: List[Dict[str, Any]] = []
+    for rec in records[-window_cycles:]:
+        agent = (rec or {}).get("agent") or ""
+        if not agent:
+            continue
+        tail.append(rec)
+    if not tail:
+        return ""
+    counts: Dict[str, List[int]] = {}
+    # preserve first-seen order for stable output
+    order: List[str] = []
+    for rec in tail:
+        agent = rec.get("agent") or ""
+        if not agent:
+            continue
+        if agent not in counts:
+            counts[agent] = [0, 0]
+            order.append(agent)
+        counts[agent][1] += 1
+        if rec.get("status") == "built":
+            counts[agent][0] += 1
+    if not order:
+        return ""
+    parts: List[str] = []
+    for agent in order:
+        built, total = counts[agent]
+        if total < min_sample:
+            parts.append(f"{agent} {built}/{total} (n/a)")
+        else:
+            pct = round(100 * built / total) if total else 0
+            parts.append(f"{agent} {built}/{total} ({pct}%)")
+    return "agents: " + " · ".join(parts)
+
+
 def rollup_for_day(day_cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
     # US-VIEW-012: track input + output separately so the daily summary can
     # show two metric rows. cache_read tokens deliberately excluded — they're
@@ -929,6 +974,16 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
                       yest["cost_by_cur"].get(_cur, 0.0),
                       d2["cost_by_cur"].get(_cur, 0.0),
                       partial=is_partial, symbol=_sym)
+
+    # US-AGENT-010: per-agent hit-rate summary (single line).
+    try:
+        runs_records = list(runs.values()) if isinstance(runs, dict) else list(runs or [])
+        runs_records.sort(key=lambda r: (r or {}).get("ts", ""))
+        _agent_line = _agent_summary_line(runs_records, window_cycles=50)
+    except Exception:
+        _agent_line = ""
+    if _agent_line:
+        print("  " + c("dim", _agent_line))
 
     print()
     print(c("faint", "─" * COLS))

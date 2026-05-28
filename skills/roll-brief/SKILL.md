@@ -127,6 +127,13 @@ A simple heuristic — not a gate, just a signal for the human:
 |----|-------------|----------|
 | US-XXX | {标题} | 高 |
 
+<!-- US-AGENT-010: per-agent hit-rate summary (one line). Read the last
+     window_cycles records of runs.jsonl, group by `agent`, format as
+     `agents: pi 8/22 (36%) · deepseek 5/8 (63%)`. Sample < 5 → `(n/a)`.
+     Omit when no records have an agent field (legacy data). -->
+## Agent 路由命中率
+{agents: <name> built/total (pct%) · …}  ← from `runs.jsonl` last 50 cycles
+
 <!-- 仅当 roll-.dream 有新发现时输出 -->
 ## 悟见
 {来自 .roll/dream/ 的摘要}

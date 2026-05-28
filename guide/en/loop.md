@@ -111,7 +111,66 @@ roll loop branches    # List loop-related branches (merged temp branches, open P
 
 roll loop events      # Show last 20 cycle events
 roll loop events 50   # Show last 50 events
+
+roll loop agent-routes show          # Print active .roll/agent-routes.yaml (US-AGENT-002)
+roll loop agent-routes lint          # Validate schema, report line-numbered errors
+roll loop agent-routes path          # Print which routes file is active
 ```
+
+## Agent-aware routing (US-AGENT-001..011)
+
+Loop no longer uses a single fixed `primary_agent` for every cycle. Each Todo's
+**Agent profile** (`est_min` / `risk_zone` / `chain_depth`, set by `roll-design`
+when splitting) plus the per-project `.roll/agent-routes.yaml` decide which
+agent×model runs the cycle.
+
+每个故事在拆分时由 roll-design 写入估时、风险区、链深度三项画像；项目根目录的
+`.roll/agent-routes.yaml` 写清每个 agent 的能力区间和软偏好阈值；每轮 cycle 起
+跑前 loop 按这两份数据选 agent，不再读全局 primary_agent 字段。
+
+Two layers decide the agent:
+
+1. **Hard rules** — story must satisfy the agent's `types` / `est_min` /
+   `risk` constraints. First declared agent matching wins.
+2. **Soft preference** — when ≥ 2 agents pass hard rules, the last
+   `history.window_cycles` records of `runs.jsonl` are aggregated by
+   (agent, story_type). If any candidate's hit rate ≥
+   `history.prefer_threshold` and sample ≥ 5, that one is picked.
+
+每轮 cycle 启动时 cron log 会打印一行：
+
+```
+[loop] story US-AGENT-007 routed to claude via hard
+[loop] story FIX-127 routed to pi via soft
+```
+
+You can also confirm the routing is wired correctly with:
+
+```
+roll loop agent-routes show          # current config
+roll loop agent-routes lint          # schema check
+```
+
+If no agent passes the hard rules, loop falls back to `history.cold_start_default`
+and writes a WARN line to cron.log.
+
+### Agent self-downgrade (too_big verdict)
+
+The picked agent runs a **pre-flight self-check** (in `roll-build` / `roll-fix`
+SKILL.md). When it decides the story is over capacity it emits:
+
+```yaml
+verdict: too_big
+reason: est_min=20 > pi.max=8
+```
+
+并触发 self-downgrade 流程：调 `roll-design --from-story <id>` 把故事拆成
+chain_depth + 1 的子故事写回 BACKLOG，原故事翻 🚫 Hold，cycle 干净退出。
+下一轮 loop 接力第一个更小的子故事。
+
+The chain is capped at **2 auto re-splits**. The third would be refused and a
+`StorySplitCapHit` ALERT is written, forcing human triage instead of letting
+the chain grow indefinitely.
 
 ## Status Dashboard
 

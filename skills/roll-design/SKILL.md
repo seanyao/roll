@@ -681,6 +681,11 @@ Note: `{DOMAIN}` maps to the Bounded Context name identified in DDD analysis.
 - Events raised: [{EventName}] → {consumer context}
 - Cross-context: {if touches another context, otherwise omit}
 
+**Agent profile:**
+- est_min: {1-30 整数,目标 5-10 min 一个 cycle 闭环}
+- risk_zone: {low / medium / high — 改文档 low,改用户可见行为 medium,改 loop infra 或安全/隔离基建 high}
+- chain_depth: 0  {若是自降级产出的子 story 则 +1,累计 ≥2 时第 3 次拒拆}
+
 **AC:**
 - [ ] {measurable criteria 1}
 - [ ] {measurable criteria 2}
@@ -699,6 +704,10 @@ Note: `{DOMAIN}` maps to the Bounded Context name identified in DDD analysis.
 - Consumer: {which module reads data}
 - Integration test: `tests/integration/{flow}.test.ts`
 ```
+
+> **强制规则 — Agent profile 必须填**：Split into Stories 步骤产出的每个 US 都必须带 `**Agent profile:**` 子段，est_min / risk_zone 不可省（chain_depth 默认 0）。loop 路由（US-AGENT-004）和 agent 自评（US-AGENT-007）都靠这两个字段决策，缺了就回退到 cold_start_default 并 WARN。历史 US 不强制回填。
+>
+> **MUST fill** the `**Agent profile:**` block on every newly split US — `est_min` and `risk_zone` are non-optional. They drive loop routing and agent self-eval downstream.
 
 ### Closing Doc-Refresh Story Template — Phase N.M 收尾文档
 

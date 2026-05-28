@@ -60,3 +60,16 @@ _make_git_repo() {
   grep -A5 'cmd_setup' "${ROLL_BIN}" | grep -q '_ensure_hooks_path' || \
   grep '_ensure_hooks_path' "${ROLL_BIN}" | grep -q 'setup\|_run_setup_step'
 }
+
+# ─── US-INFRA-009: Claude Code SessionStart hook ────────────────────────────
+
+@test "US-INFRA-009: .claude/settings.json has SessionStart hook" {
+  local settings="${BATS_TEST_DIRNAME}/../../.claude/settings.json"
+  [ -f "$settings" ]
+  grep -q '"SessionStart"' "$settings"
+}
+
+@test "US-INFRA-009: SessionStart hook runs git config core.hooksPath" {
+  local settings="${BATS_TEST_DIRNAME}/../../.claude/settings.json"
+  grep -q 'core.hooksPath' "$settings"
+}

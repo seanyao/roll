@@ -1,5 +1,16 @@
 {
   "includeCoAuthoredBy": true,
-  "commandsDirectories": []
+  "commandsDirectories": [],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath hooks 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
 }
-

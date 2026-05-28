@@ -112,7 +112,7 @@ msg() {
   fi
 
   # shellcheck disable=SC2059 — template comes from our own catalog
-  printf "$tmpl" "$@"
+  printf -- "$tmpl" "$@"
   echo
 }
 
@@ -136,7 +136,7 @@ msg_lang() {
     tmpl="${!varname:-$key}"
   fi
   # shellcheck disable=SC2059 — template comes from our own catalog
-  printf "$tmpl" "$@"
+  printf -- "$tmpl" "$@"
   echo
 }
 

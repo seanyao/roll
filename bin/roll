@@ -8952,6 +8952,49 @@ _loop_split_cap_hit() {
   echo "[loop] StorySplitCapHit ${story_id}: chain_depth >= 2 — held for human triage"
 }
 
+# US-SKILL-014: summarise recent self-score notes for the dashboard.
+# Reads .roll/notes/*.md sorted by name (epoch suffix gives a stable
+# chronological order), takes the last `window` records, and emits a
+# single dim line like:
+#   self-score: mean 7.8 / min 4 / redo 2 (last 14)
+# Empty notes → empty string. Sample < 3 → "(n/a)".
+_self_score_summary_line() {
+  local window="${1:-14}"
+  local notes_dir=".roll/notes"
+  [ -d "$notes_dir" ] || { printf ''; return 0; }
+  local files; files=$(ls "$notes_dir"/*.md 2>/dev/null | sort | tail -n "$window")
+  [ -n "$files" ] || { printf ''; return 0; }
+
+  local total=0 count=0 minv=11 redo=0
+  local f score verdict
+  while IFS= read -r f; do
+    score=$(grep -E '^score: ' "$f" | head -1 | awk '{print $2}')
+    verdict=$(grep -E '^verdict: ' "$f" | head -1 | awk '{print $2}')
+    case "$score" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    count=$((count + 1))
+    total=$((total + score))
+    if [ "$score" -lt "$minv" ]; then minv=$score; fi
+    case "$verdict" in
+      regression) redo=$((redo + 1)) ;;
+      ok)
+        if [ "$score" -lt 6 ]; then
+          redo=$((redo + 1))
+        fi
+        ;;
+    esac
+  done <<< "$files"
+
+  if [ "$count" -lt 3 ]; then
+    printf 'self-score: (n/a) — %d sample(s), need 3 (last %d)\n' "$count" "$window"
+    return 0
+  fi
+  local mean
+  mean=$(python3 -c "print(f'{$total/$count:.1f}')")
+  printf 'self-score: mean %s / min %d / redo %d (last %d)\n' "$mean" "$minv" "$redo" "$window"
+}
+
 # US-SKILL-010: unified self-score note writer for roll-build /
 # roll-fix / roll-design. Lands under .roll/notes/ with YAML frontmatter
 # so subsequent stories (US-SKILL-014 trend, US-SKILL-015 docs) can

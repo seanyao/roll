@@ -83,9 +83,17 @@ reason: <one short line — which condition triggered, with numbers>
 ```
 
 When `verdict: ok` → continue to Step 1 normally.
-When `verdict: too_big` → go to **US-AGENT-008 self-downgrade path**:
+When `verdict: too_big` → go to **US-AGENT-008 self-downgrade path**, **but** first run the **US-AGENT-009 chain_depth cap check**:
 
 ```bash
+# 0a. Cap check: refuse the third consecutive auto-split.
+#     exit 0 → split allowed; exit 1 → cap hit, take cap-hit path instead.
+if ! bash -c 'source "$(command -v roll)"; _loop_chain_depth_cap_check US-XXX-NNN'; then
+  # Cap hit (chain_depth ≥ 2): hold + ALERT, exit cleanly.
+  bash -c 'source "$(command -v roll)"; _loop_split_cap_hit US-XXX-NNN "depth >= 2, human triage required"'
+  exit 0
+fi
+
 # 1. Invoke roll-design to re-split the story into smaller sub-stories.
 #    Each sub-story carries chain_depth = (parent.chain_depth + 1).
 #    Sub-stories land as 📋 Todo with depends-on:<parent> chained.
@@ -100,7 +108,7 @@ bash -c 'source "$(command -v roll)"; _loop_self_downgrade US-XXX-NNN "too_big: 
 exit 0
 ```
 
-If `roll-design` cannot produce ≥2 sub-stories (story is already irreducible), fall through to **US-AGENT-009 cap-hit path**: leave 🚫 Hold and write a higher-priority ALERT asking for human triage.
+If `roll-design` cannot produce ≥2 sub-stories (story is already irreducible), fall through to **US-AGENT-009 cap-hit path** by invoking `_loop_split_cap_hit` directly. The cap is purely about stopping infinite split chains; even on the first re-split, if the design step gives up, the cap-hit handler raises ALERT for human triage.
 
 > Pre-flight is honest, not paranoid: a small story (est_min ≤ 5, chain_depth=0, low risk) should almost always go `ok`. The check pays off on the long tail — stories that look small but compose tons of files, or that the current agent has historically failed.
 

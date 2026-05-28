@@ -8870,6 +8870,77 @@ _loop_self_downgrade() {
   echo "[loop] self-downgrade ${story_id}: ${reason}; subs=${subs:-<none>}"
 }
 
+# US-AGENT-009: _loop_chain_depth_cap_check <story-id> [backlog]
+#   Returns 0 when auto re-split is still allowed (story's chain_depth < 2),
+#   1 when the cap is hit (≥ 2 already — the third re-split would be #3 in
+#   the chain). Reads chain_depth from the story's feature md profile;
+#   missing profile is treated as depth 0 (split allowed).
+_loop_chain_depth_cap_check() {
+  local story_id="$1"
+  local backlog="${2:-${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md}"
+  [ -n "$story_id" ] || return 0
+  [ -f "$backlog" ] || return 0
+
+  # Resolve feature md from backlog link.
+  local md_path
+  md_path=$(grep -E "\[${story_id}\]\(" "$backlog" 2>/dev/null \
+    | head -1 \
+    | sed -E "s/.*\[${story_id}\]\(([^)#]+)#?[^)]*\).*/\1/")
+  [ -n "$md_path" ] || return 0
+  [ -f "$md_path" ] || return 0
+
+  # Find the section for this story id and extract chain_depth.
+  local anchor; anchor=$(echo "$story_id" | tr '[:upper:]' '[:lower:]')
+  local depth
+  depth=$(awk -v anchor="$anchor" '
+    /<a id="/ {
+      if (match($0, /<a id="[^"]+"/)) {
+        cur = substr($0, RSTART + 7, RLENGTH - 8)
+        in_section = (cur == anchor)
+      }
+      next
+    }
+    in_section && /^- chain_depth:/ {
+      gsub(/^- chain_depth:[ \t]*/, "")
+      gsub(/[ \t].*$/, "")
+      print
+      exit
+    }
+  ' "$md_path")
+
+  # Empty / non-numeric → treat as 0.
+  case "$depth" in
+    ''|*[!0-9]*) depth=0 ;;
+  esac
+
+  [ "$depth" -lt 2 ]
+}
+
+# US-AGENT-009: cap-hit path. Story has reached chain_depth ≥ 2 — refuse
+# further auto re-split, flip 🚫 Hold + write a high-priority ALERT with
+# chain context for human triage.
+_loop_split_cap_hit() {
+  local story_id="$1"
+  local reason="${2:-cap-hit}"
+  [ -n "$story_id" ] || return 1
+  local backlog="${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md"
+  _loop_mark_hold "$story_id" "StorySplitCapHit: $reason" "$backlog" || true
+
+  local main_dir="${ROLL_MAIN_PROJECT:-$PWD}"
+  local slug; slug=$(_project_slug "$main_dir" 2>/dev/null || basename "$main_dir")
+  local shared_root="${_SHARED_ROOT:-$HOME/.shared/roll}"
+  local alert_file="${shared_root}/loop/ALERT-${slug}.md"
+  mkdir -p "$(dirname "$alert_file")"
+  printf '[%s] StorySplitCapHit: %s — chain_depth >= 2 (third auto-split refused). %s. Human triage required.\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$story_id" "$reason" \
+    >> "$alert_file"
+
+  if declare -F _loop_event >/dev/null 2>&1; then
+    _loop_event "story_split_cap_hit" "${LOOP_CYCLE_ID:-$story_id}" "$story_id" "$reason" || true
+  fi
+  echo "[loop] StorySplitCapHit ${story_id}: chain_depth >= 2 — held for human triage"
+}
+
 # _loop_mark_todo <story-id> [backlog-path]
 #   Revert a row from "🔨 In Progress" back to "📋 Todo". Called when a
 #   cycle's executor fails so the next cycle can pick the story up again.

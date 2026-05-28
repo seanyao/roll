@@ -4664,6 +4664,88 @@ _isolation_tart_destroy() {
   return 0
 }
 
+# ─── cmd_test ────────────────────────────────────────────────────────────
+# US-ISO-003: `roll test` — runs the project's test suite through the
+# isolation dispatcher. The configured `test_isolation.type` determines
+# where the tests execute (host shell vs Tart VM). When type=tart and
+# the VM fails to start, the failure surfaces non-zero — no silent
+# fallback to host, since that would lie about where the tests ran.
+
+# Print where the test suite will execute. Format is machine-readable
+# (one token, optionally with a colon-separated detail) so scripts can
+# parse it: `host`, `tart:<ip>`, `tart:stopped`, `tart:not-installed`, …
+_cmd_test_where() {
+  local type; type=$(_isolation_get_type)
+  case "$type" in
+    none)
+      echo "host"
+      ;;
+    tart)
+      local st; st=$(_isolation_tart_status)
+      case "$st" in
+        ready|running)
+          local ip
+          if ip=$(_isolation_tart_ip 2>/dev/null); then
+            echo "tart:${ip}"
+          else
+            echo "tart:${st}"
+          fi
+          ;;
+        *)
+          echo "tart:${st}"
+          ;;
+      esac
+      ;;
+    *)
+      echo "unknown:${type}"
+      ;;
+  esac
+}
+
+cmd_test() {
+  case "${1:-}" in
+    --help|-h)
+      cat <<'EOF'
+Usage: roll test [--where] [--] [<extra-args>...]
+
+Runs the project's test suite through the isolation adapter chosen in
+.roll/local.yaml:
+
+  test_isolation:
+    type: none   (default)   Direct host execution — same shell as `npm test`.
+    type: tart               Inside the Apple-Silicon `roll-dev-test` Tart VM,
+                             so tests can't reach the host's launchd / shared
+                             roll state. Tart isn't auto-installed; run
+                             `brew install cirruslabs/cli/tart` first.
+
+Flags:
+  --where        Print where tests will run, then exit (e.g. `host`,
+                 `tart:192.168.64.5`, `tart:stopped`).
+  --help, -h     Show this help.
+
+Examples:
+  roll test                    Run the suite in whatever the config says.
+  roll test -- --tier=fast     Forward arguments to npm test.
+  roll test --where            Don't run; just report routing.
+
+When type=tart and the VM can't be reached, the command exits non-zero
+rather than silently falling back to host execution.
+EOF
+      return 0
+      ;;
+    --where)
+      _cmd_test_where
+      return 0
+      ;;
+    --)
+      shift
+      ;;
+  esac
+
+  # Pass remaining args through to npm test inside the configured adapter.
+  _isolation_dispatch exec npm test "$@"
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # LOOP — autonomous BACKLOG executor management
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -10123,6 +10205,7 @@ main() {
     doctor)        cmd_doctor "$@" ;;
     review-pr)     cmd_review_pr "$@" ;;
     slides)        cmd_slides "$@" ;;
+    test)          cmd_test "$@" ;;
     prices)        cmd_prices "$@" ;;
     changelog)     cmd_changelog "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;

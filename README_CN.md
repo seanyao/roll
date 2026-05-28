@@ -50,6 +50,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll status` | 显示当前状态和漂移项 |
 | `roll agent [use <name>]` | 切换当前项目使用的 agent |
 | `roll ci [--wait]` | 查看 / 等待当前 commit 的 CI 状态 |
+| `roll test [--where] [--reset]` | 运行测试套件（通过隔离适配器分发；Apple Silicon 上使用 Tart VM） |
 | `roll release` | 执行发版脚本（仅人工） |
 | `roll review-pr <number>` | 对指定 PR 做 AI 代码评审 |
 | **Machine · 全局** | |

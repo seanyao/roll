@@ -97,6 +97,15 @@ roll loop pause       # 暂停调度（保留 plist，跳过执行）
 roll loop resume      # 暂停后恢复调度
 
 roll loop reset       # 清除 loop 状态（下次触发时重新开始）
+
+roll loop gc                  # 清理孤儿 slug、临时文件、过期备份（默认保留 30 天）
+roll loop gc --dry-run        # 预览将被清理的内容，不实际删除
+roll loop gc --keep-days 14   # 覆盖保留天数（也可用 .roll/local.yaml 中的 loop_gc.retention_days）
+
+roll loop branches    # 列出 loop 相关分支（已合并临时分支、开放 PR 等）
+
+roll loop events      # 显示最近 20 条 cycle 事件
+roll loop events 50   # 显示最近 50 条
 ```
 
 ## Status Dashboard（状态仪表盘）

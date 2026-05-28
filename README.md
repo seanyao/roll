@@ -50,6 +50,7 @@ roll loop on        # let AI work through the backlog (optional)
 | `roll status` | Show current state and drift |
 | `roll agent [use <name>]` | Per-project agent selection |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |
+| `roll test [--where] [--reset]` | Run the test suite (routes through isolation adapter; Tart VM on Apple Silicon) |
 | `roll release` | Run the release script (human-only) |
 | `roll review-pr <number>` | AI-powered code review for a PR |
 | **Machine · global** | |

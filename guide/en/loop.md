@@ -102,6 +102,15 @@ roll loop pause       # Pause scheduling (keep plist, skip execution)
 roll loop resume      # Resume scheduling after pause
 
 roll loop reset       # Clear loop state (start fresh on next fire)
+
+roll loop gc                  # GC orphan slugs, tmp debris, expired backups (default: keep 30 days)
+roll loop gc --dry-run        # Preview what would be removed without deleting
+roll loop gc --keep-days 14   # Override retention (also: loop_gc.retention_days in .roll/local.yaml)
+
+roll loop branches    # List loop-related branches (merged temp branches, open PRs, etc.)
+
+roll loop events      # Show last 20 cycle events
+roll loop events 50   # Show last 50 events
 ```
 
 ## Status Dashboard

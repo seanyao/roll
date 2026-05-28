@@ -7020,10 +7020,10 @@ _loop_on() {
     fi
 
     ok "$(msg loop.loop_enabled)"
-    printf "$(msg loop.roll_loop_s_active_02d_00)" \
+    msg loop.roll_loop_s_active_02d_00 \
       "$loop_sched_en" "$active_start" "$active_end" "$loop_sched_zh" "$active_start" "$active_end"
-    printf "$(msg loop.roll_dream_daily_at_02d_02d)" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
-    printf "$(msg loop.roll_brief_daily_at_02d_02d)" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
+    msg loop.roll_dream_daily_at_02d_02d "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
+    msg loop.roll_brief_daily_at_02d_02d "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
     echo "  • Agent: ${agent}  (change: roll agent use <name>)"
     return 0
   fi
@@ -7051,10 +7051,10 @@ _loop_on() {
   ) | crontab -
 
   ok "$(msg loop.loop_enabled_2)"
-  printf "$(msg loop.roll_loop_s_active_02d_00_2)" \
+  msg loop.roll_loop_s_active_02d_00_2 \
     "$loop_sched_en" "$active_start" "$active_end" "$loop_sched_zh" "$active_start" "$active_end"
-  printf "$(msg loop.roll_dream_daily_at_02d_02d_2)" "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
-  printf "$(msg loop.roll_brief_daily_at_02d_02d_2)" "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
+  msg loop.roll_dream_daily_at_02d_02d_2 "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
+  msg loop.roll_brief_daily_at_02d_02d_2 "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
   echo "  • Agent: ${agent}  (change: roll agent use <name>)"
 }
 

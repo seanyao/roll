@@ -136,6 +136,15 @@ Bug fixes are usually small (est_min ≤ 5), so pre-flight is mostly a sanity ba
    - define the online verification target
    - for hotfixes: include regression test to prevent recurrence
    - reference `$roll-.qa` for appropriate test type (unit/integration/E2E)
+   - **Test-quality self-check (US-QA-011)** — for any new test the fix adds:
+     1. The test must call project functions / public command entry points,
+        not inline `sed`/`awk`/`grep -o`/`find`/`cut` pipelines that
+        re-implement what `lib/` or `bin/` already does — rubric ❼.
+     2. The test must sandbox filesystem state via `BATS_TMPDIR` or an
+        equivalent helper; never assert on or write to paths outside this
+        repo (`~/.codex`, `~/.kimi`, `~/.roll/`, system paths) — rubric ❽.
+     3. If you can't satisfy (1) or (2), extract a project helper or
+        redirect the env var to a tmp dir before writing the test.
 
 ### 3. Test Design Review (TCR Core)
 

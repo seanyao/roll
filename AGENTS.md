@@ -42,6 +42,17 @@
 - **Atomicity**: Complete fully or rollback. No partial state.
 - **Validation**: All external input validated. Fail fast on startup.
 - **Testing**: Unit >80%. E2E for flows. No DB mocks.
+- **Test-quality design self-check (US-QA-011)**: when adding tests, before
+  writing code, confirm:
+  1. Each new test calls **project functions / public command entry points** —
+     not inline `sed` / `awk` / `grep -o` / `find` / `cut` pipelines that
+     duplicate behaviour the project already encapsulates (rubric ❼).
+  2. The test sandboxes any filesystem touch through `BATS_TMPDIR` or an
+     equivalent project helper — never asserts on or writes to paths outside
+     this repo (`~/.codex`, `~/.kimi`, `~/.roll/`, `/etc/`, etc.) (rubric ❽).
+  3. The dream nightly scan flags ❼ / ❽ as REFACTOR entries; the loop merge
+     gate (US-QA-012) blocks PRs that introduce new violations of those two
+     categories. See [guide/en/testing/quality-rubric.md](guide/en/testing/quality-rubric.md).
 
 
 ## 4. Workflow

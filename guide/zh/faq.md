@@ -647,3 +647,20 @@ Why was my story flipped to 🚫 Hold instead of Done?
 
 **处理**：看 agent 拆出来的子故事是否合理;不满意可手动编辑,或把
 原故事翻回 📋 Todo + 重写更紧的 `est_min` / `risk_zone` profile。
+
+### C7. 怎么不离开终端发反馈（bug / idea / UX）？
+
+**用 `roll feedback`**（US-FB-001 / 005）。一条命令打开 GitHub
+issue,自动附环境信息 + label 对应 Roll backlog 约定。
+
+How do I send feedback without leaving the terminal? Use `roll feedback`.
+
+```bash
+roll feedback --type bug --title "Safari 上登录失败" --body "复现步骤: ..."
+```
+
+装了 `gh` 直接调 `gh issue create` 提交;没装就打印一条预填 URL,
+浏览器打开就行。Environment 段（roll 版本 / OS / agent / 语言 /
+项目）默认自动附,`--no-env` 关。目标仓库通过 `--repo`、
+`ROLL_FEEDBACK_REPO`、`.roll/local.yaml`、`~/.roll/config.yaml` 任
+一层固定,详细规则见 [feedback.md](feedback.md)。

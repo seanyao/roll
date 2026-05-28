@@ -10266,6 +10266,185 @@ cmd_alert() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# FEEDBACK — one-shot GitHub issue from the CLI (US-FB-001)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Derive owner/repo from git origin. Returns "" when not a github remote.
+_feedback_origin_repo() {
+  local url
+  url=$(git remote get-url origin 2>/dev/null) || return 0
+  case "$url" in
+    git@github.com:*)
+      url="${url#git@github.com:}"
+      url="${url%.git}"
+      printf '%s\n' "$url"
+      ;;
+    https://github.com/*)
+      url="${url#https://github.com/}"
+      url="${url%.git}"
+      printf '%s\n' "$url"
+      ;;
+    *) printf '\n' ;;
+  esac
+}
+
+# US-FB-003: feedback target repo precedence:
+#   1. --repo flag (caller already resolved this; not part of this helper)
+#   2. ROLL_FEEDBACK_REPO env var
+#   3. .roll/local.yaml `feedback_repo:`
+#   4. ~/.roll/config.yaml `feedback_repo:`
+#   5. origin-derived github owner/repo
+_feedback_yaml_field() {
+  local file="$1" field="$2"
+  [ -f "$file" ] || return 0
+  awk -v key="$field" '
+    $0 ~ "^"key":" {
+      v=$0; sub("^"key":[[:space:]]*", "", v); gsub("^[\"\x27]|[\"\x27]$", "", v); print v; exit
+    }' "$file"
+}
+
+_feedback_default_repo() {
+  if [ -n "${ROLL_FEEDBACK_REPO:-}" ]; then
+    printf '%s\n' "$ROLL_FEEDBACK_REPO"
+    return 0
+  fi
+  local project_local=".roll/local.yaml"
+  local v
+  v=$(_feedback_yaml_field "$project_local" "feedback_repo")
+  if [ -n "$v" ]; then
+    printf '%s\n' "$v"
+    return 0
+  fi
+  local global="${HOME}/.roll/config.yaml"
+  v=$(_feedback_yaml_field "$global" "feedback_repo")
+  if [ -n "$v" ]; then
+    printf '%s\n' "$v"
+    return 0
+  fi
+  _feedback_origin_repo
+}
+
+# Map --type to GitHub label list (single, no spaces).
+_feedback_label_for_type() {
+  case "${1:-}" in
+    bug)  printf 'bug,FIX\n' ;;
+    idea) printf 'idea,enhancement,US\n' ;;
+    ux)   printf 'ux,enhancement\n' ;;
+    *)    printf 'feedback\n' ;;
+  esac
+}
+
+# Percent-encode for use in a GitHub issue URL query string.
+_feedback_urlencode() {
+  python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+# US-FB-002: compose env info appendix attached to feedback body unless
+# --no-env is set. Single source of truth so future feedback paths
+# (web embedded, slack, etc.) can reuse.
+_feedback_env_block() {
+  local roll_v os_name shell_name agent lang project
+  roll_v="${VERSION:-unknown}"
+  os_name="$(uname -srm 2>/dev/null || echo unknown)"
+  shell_name="$(basename "${SHELL:-/bin/sh}")"
+  agent=$(_project_agent 2>/dev/null || echo "unknown")
+  lang="${LANG:-${LC_ALL:-unknown}}"
+  project="$(basename "$(pwd -P)")"
+  cat <<EOF
+
+---
+
+### Environment
+- roll version: $roll_v
+- OS: $os_name
+- shell: $shell_name
+- current agent: $agent
+- language: $lang
+- project: $project
+EOF
+}
+
+cmd_feedback() {
+  local type="" title="" body="" repo="" print_url=0 attach_env=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --type)      type="$2"; shift 2 ;;
+      --title)     title="$2"; shift 2 ;;
+      --body)      body="$2"; shift 2 ;;
+      --repo)      repo="$2"; shift 2 ;;
+      --no-env)    attach_env=0; shift ;;
+      --print-url) print_url=1; shift ;;
+      --help|-h)
+        cat <<'HELP'
+Usage: roll feedback [options]
+        roll feedback (一句话提反馈)
+
+Open a GitHub issue from the CLI. Type auto-labels (bug → FIX label;
+idea → US label; ux → ux label).
+
+Options:
+  --type <bug|idea|ux>      Classify the feedback (default: bug)
+  --title <text>            Issue title (required)
+  --body <text>             Issue body
+  --repo <owner/repo>       Target repo (default: derived from origin)
+  --no-env                  Skip the auto-attached Environment section
+                            (roll version, OS, agent, language, project)
+  --print-url               Print the prefilled github.com URL instead of
+                            invoking `gh`. Falls back to this automatically
+                            when `gh` is not installed.
+HELP
+        return 0 ;;
+      *)
+        err "feedback: unknown flag $1"
+        return 1 ;;
+    esac
+  done
+
+  if [ -z "$title" ]; then
+    err "feedback: --title is required"
+    return 1
+  fi
+  if [ -z "$type" ]; then
+    type="bug"
+  fi
+  case "$type" in
+    bug|idea|ux) ;;
+    *)
+      err "feedback: unknown --type '$type' (expected one of: bug, idea, ux)"
+      return 1 ;;
+  esac
+
+  if [ -z "$repo" ]; then
+    repo=$(_feedback_default_repo)
+  fi
+  if [ -z "$repo" ]; then
+    err "feedback: cannot derive owner/repo from origin; pass --repo owner/repo"
+    return 1
+  fi
+
+  # US-FB-002: compose final body with optional env appendix.
+  if [ "$attach_env" -eq 1 ]; then
+    body="${body}$(_feedback_env_block)"
+  fi
+
+  local labels; labels=$(_feedback_label_for_type "$type")
+
+  # Decide path: --print-url or gh missing → print URL; else use gh.
+  if [ "$print_url" -eq 1 ] || ! command -v gh >/dev/null 2>&1; then
+    local t_enc b_enc l_enc
+    t_enc=$(_feedback_urlencode "$title")
+    b_enc=$(_feedback_urlencode "$body")
+    l_enc=$(_feedback_urlencode "$labels")
+    printf 'https://github.com/%s/issues/new?title=%s&body=%s&labels=%s\n' \
+      "$repo" "$t_enc" "$b_enc" "$l_enc"
+    return 0
+  fi
+
+  # Real path: gh issue create
+  gh issue create --repo "$repo" --title "$title" --body "$body" --label "$labels"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # LANG — switch / inspect Roll's UI language (US-I18N-001)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -11125,6 +11304,7 @@ main() {
     brief)         cmd_brief "$@" ;;
     backlog)       cmd_backlog "$@" ;;
     alert)         cmd_alert "$@" ;;
+    feedback)      cmd_feedback "$@" ;;
     lang)          cmd_lang "$@" ;;
     agent)         cmd_agent "$@" ;;
     ci)            cmd_ci "$@" ;;

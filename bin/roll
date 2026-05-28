@@ -6469,10 +6469,16 @@ if command -v tmux >/dev/null 2>&1; then
     echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] ABORT: inner script failed syntax check — cycle skipped (see log: \$LOG)" >> "\$LOG"
     exit 1
   fi
-  tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
-  CYCLE_LOG_RAW="${project_path}/.roll/cycle-logs/.pipe-\$\$.raw"
+  # FIX-130: export ROLL_CYCLE_LOG_RAW BEFORE spawning the tmux session so
+  # the inner script inherits it (env vars are inherited at spawn time, not
+  # retroactively — exporting after new-session means inner never sees it and
+  # _inner_cleanup skips log archiving, leaving only orphan .pipe-*.raw files).
   mkdir -p "${project_path}/.roll/cycle-logs"
+  # Clean orphan .pipe-*.raw files from previous crashed cycles
+  find "${project_path}/.roll/cycle-logs" -name '.pipe-*.raw' -delete 2>/dev/null || true
+  CYCLE_LOG_RAW="${project_path}/.roll/cycle-logs/.pipe-\$\$.raw"
   export ROLL_CYCLE_LOG_RAW="\$CYCLE_LOG_RAW"
+  tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
   tmux pipe-pane -t "\$SESSION" "tee -a \"\$LOG\" >> \"\$ROLL_CYCLE_LOG_RAW\""
   # Auto-attach popup: when not muted, spawn a Terminal.app window attached
   # to the tmux session so the user can watch the loop work in real time.

@@ -143,3 +143,28 @@ teardown() { unit_teardown; }
   # No old cat >> pipe-pane
   ! grep -q 'pipe-pane.*cat >>' "$runner"
 }
+
+@test "FIX-130: outer script exports ROLL_CYCLE_LOG_RAW BEFORE tmux new-session" {
+  # Root cause of FIX-130: ROLL_CYCLE_LOG_RAW was exported after tmux new-session,
+  # so the inner script never inherited it and _inner_cleanup skipped log archiving.
+  # Fix: export must appear before new-session so the spawned process inherits it.
+  local runner="${TEST_TMP}/run-test-order.sh"
+  _write_loop_runner_script "$runner" "${TEST_TMP}/fake-project" "echo ok" "${TEST_TMP}/log"
+  [ -f "$runner" ]
+  local export_line new_session_line
+  export_line=$(grep -n 'export ROLL_CYCLE_LOG_RAW' "$runner" | head -1 | cut -d: -f1)
+  new_session_line=$(grep -n 'tmux new-session' "$runner" | head -1 | cut -d: -f1)
+  # export line number must be less than new-session line number
+  [ -n "$export_line" ]
+  [ -n "$new_session_line" ]
+  [ "$export_line" -lt "$new_session_line" ]
+}
+
+@test "FIX-130: outer script cleans orphan .pipe-*.raw files at startup" {
+  # Orphan .pipe-*.raw files from previous crashed cycles must be purged so
+  # cycle-logs dir doesn't accumulate indefinitely.
+  local runner="${TEST_TMP}/run-test-orphan.sh"
+  _write_loop_runner_script "$runner" "${TEST_TMP}/fake-project" "echo ok" "${TEST_TMP}/log"
+  # Must have a find -delete for .pipe-*.raw cleanup
+  grep -q "find.*\.raw.*-delete\|find.*-delete.*\.raw\|find.*pipe.*\.raw" "$runner"
+}

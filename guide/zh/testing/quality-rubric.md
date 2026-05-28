@@ -11,7 +11,9 @@
 - **最小修复模板** — 最少改动的修复路径，不要求整体重写
 - **真实代码反例** — 当前仓库里真实存在的一处
 
-类目编号 ❶ ~ ❻；`roll-.dream` 给每条发现都打上对应的编号 tag，下游过滤就是机械动作。
+类目编号 ❶ ~ ❽。❶–❻ 为提醒级（dream 标出、维护者分诊）。❼ 和 ❽ 为**阻断级**：
+loop cycle 的测试质量合并门（US-QA-012）会拒绝引入新的 ❼ 或 ❽ 违规的 PR，
+哪怕 CI 是绿的也不放行。
 
 ---
 
@@ -194,6 +196,85 @@ teardown() { rm -rf "$TMP"; }
 
 断言 `$BATS_TEST_NUMBER > 0` 的测试，每次 CI 都跑、从来没拦下过一次项目回归。如果
 真要保留这种保障，放进 CI 配置里跑一次就够，不必落到测试套里。
+
+---
+
+## ❼ 测试内联外部工具行为
+
+### 定义
+
+测试体用内联的 shell 管道（`sed`、`grep`、`find`、`awk`、`tr`）把外部工具
+的行为重新实现了一遍，而不是调用项目里已有的封装函数。当项目替换工具或改变内部
+解析逻辑时，所有抄了这段管道的测试一起红，但公共 API 的输出根本没变。
+
+### 判定信号
+
+- 测试体里出现 `foo=$(echo "$output" | grep ... | sed ... | awk ...)` 这种链式调用。
+- 同样的管道在 ≥2 个测试文件出现（解析逻辑被复制粘贴）。
+- 项目里已经（或者本该）有一个函数封装了这个解析，但测试绕过了它自己搞了一遍。
+
+### 最小修复模板
+
+```bash
+# 改之前 —— 内联管道复刻了项目函数已经做的事
+label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+
+# 改之后 —— 调项目里处理这件事的函数
+source bin/roll
+label=$(_plist_get_string "$plist" Label)
+```
+
+如果项目里还没有对应函数，把管道抽成一个有名字的 helper 放进 `tests/helpers/`，
+让逻辑共享、可被发现。
+
+### 真实代码反例
+
+`tests/integration/cmd_loop.bats` 第 181 行 —— 用内联的 `grep -A1 | grep | sed`
+链去解析 plist XML 提取 `<string>` 值。macOS 自带 `plutil`，项目完全可以包一层
+`_plist_get_string`。将来 plist schema 一改，所有抄了这段管道的测试都得跟着修。
+
+---
+
+## ❽ 测试断言触及仓库外的文件
+
+### 定义
+
+测试断言里读或检查的文件路径在仓库根目录之外（如 `~/.roll/`、`~/.codex/`、
+`/etc/`、`/tmp/other-project/`）。换了机器或用户 home 目录状态不同时，测试要么
+误报失败，要么更糟——恰好通过了却在测错的东西。
+
+### 判定信号
+
+- 断言里出现 `[[ -f ~/.xxx/... ]]`、`[[ -d ~/.xxx/... ]]`、`cat ~/.xxx/...`。
+- `[[ -f /tmp/... ]]` 里的 `/tmp/...` 不是同一个测试文件的 `setup()` 创建的。
+- 路径以 `${HOME}` 或 `/Users/` 或 `/home/` 开头，并且不是测试文件自己建的。
+
+### 最小修复模板
+
+```bash
+# 改之前 —— 断言了一个仓库外、依赖本机环境的文件
+@test "skill file is synced" {
+  grep -qE 'Scan 6' "${HOME}/.roll/skills/roll-.dream/SKILL.md"
+}
+
+# 改之后 —— 在测试自己控制的 tmpdir 里重建最小 fixture
+@test "skill file includes Scan 6" {
+  mkdir -p "$TMP/.roll/skills/roll-.dream"
+  echo '### Scan 6 — Doc Freshness' > "$TMP/.roll/skills/roll-.dream/SKILL.md"
+  ROLL_HOME="$TMP/.roll" run check_skill_has_scan6
+  [ "$status" -eq 0 ]
+}
+```
+
+如果测试的目的确实是与外部文件打交道，用 `ROLL_HOME` 注入（setup 里设成 tmpdir），
+让测试在不同机器上结果一致。
+
+### 真实代码反例
+
+`tests/unit/roll_dream_scan6.bats` 第 49 行 —— 断言了
+`${HOME}/.roll/skills/roll-.dream/SKILL.md`，一个仓库外的文件，它的内容取决于
+用户有没有跑过 `roll setup`。没装 Roll 的机器、或装了旧版本的机器上，这条测试
+会挂，但项目本身代码其实没问题。
 
 ---
 

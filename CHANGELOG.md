@@ -1,5 +1,17 @@
 # Changelog
 
+## v2026.528.2
+
+### Added
+
+- **loop 换机器跑不会再拿过期 backlog** — 每轮自动拉最新项目元数据 `[loop]`
+- **CI 红了 loop 不再干等** — 先试着自己修，修不好再找人 `[loop]`
+
+### Fixed
+
+- **`roll loop log` 现在真的能看了** — 每轮 cycle 的留档修好了 `[loop]`
+- **loop 跑完的终端窗口不再瞬间清空** — 关闭前能看到本轮摘要 `[loop]`
+
 ## v2026.528.1
 
 ### Added

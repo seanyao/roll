@@ -240,6 +240,19 @@ Together these mean: only one loop runs at a time per project (LOCK), and within
 
 ### Step 3 — Route and Execute
 
+> **US-AGENT-006 — Per-story agent routing (pre-cycle)**
+>
+> Before this skill even starts, the runner inner script has already:
+> 1. Picked the next eligible Todo via `_loop_pick_next_story` (priority FIX > US > REFACTOR, manual-only / depends-on gates respected)
+> 2. Read its Agent profile (est_min / risk_zone) and routed an agent via `_loop_pick_agent_for_story` (hard rules from `.roll/agent-routes.yaml` + soft preference from `runs.jsonl`)
+> 3. Exported `ROLL_LOOP_ROUTED_STORY` / `ROLL_LOOP_ROUTED_AGENT` / `ROLL_LOOP_ROUTED_RULE` and printed `[loop] story <id> routed to <agent> via <rule_kind>` to cron.log
+>
+> When `ROLL_LOOP_ROUTED_STORY` is set, prefer it as `US_ID` for this cycle. The story has already been chosen by hard+soft routing rules — do not re-pick a different one unless that story can no longer be found in BACKLOG (e.g. status changed concurrently).
+>
+> Old single-agent fallback (`primary_agent` from `~/.roll/config.yaml`) still applies when:
+> - no story is pickable (empty Todo / all manual-only)
+> - the matching agent-routes.yaml has no agent that fits the story profile (then `cold_start_default` is used)
+
 For each item, **before invoking the executor skill**, mark the story 🔨 In Progress in the **main repo's** .roll/backlog.md so brief and peer agents can see it being worked on. The cycle worktree is gitignored at .roll/, so editing the worktree's own copy + committing carries no change back to main — write directly via the helper instead:
 
 ```bash

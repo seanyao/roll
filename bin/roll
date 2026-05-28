@@ -6818,8 +6818,8 @@ _install_launchd_plists() {
   mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief"
 
   local active_start active_end dream_hour dream_minute brief_hour brief_minute loop_period loop_offset
-  active_start=$(_config_read_int "loop_active_start" "10")
-  active_end=$(_config_read_int "loop_active_end" "18")
+  local _aw; _aw=$(_loop_read_active_window "$project_path")
+  active_start="${_aw%% *}"; active_end="${_aw##* }"
   # US-LOOP-012: use _loop_schedule_spec instead of raw loop_minute
   local loop_spec; loop_spec=$(_loop_schedule_spec "$project_path")
   loop_period="${loop_spec%% *}"
@@ -6995,8 +6995,8 @@ _loop_on() {
   local agent; agent=$(_project_agent)
 
   local active_start active_end loop_minute dream_hour dream_minute brief_hour brief_minute
-  active_start=$(_config_read_int "loop_active_start" "10")
-  active_end=$(_config_read_int "loop_active_end" "18")
+  local _aw; _aw=$(_loop_read_active_window "$project_path")
+  active_start="${_aw%% *}"; active_end="${_aw##* }"
   # US-LOOP-011: read schedule spec from project or global config
   local loop_spec loop_period loop_offset
   loop_spec=$(_loop_schedule_spec "$project_path")
@@ -7216,8 +7216,8 @@ _loop_test() {
 
   # FIX-054: terminal preference removed — runner always uses Terminal.app.
   local active_start active_end
-  active_start=$(_config_read_int "loop_active_start" "10")
-  active_end=$(_config_read_int "loop_active_end" "18")
+  local _aw; _aw=$(_loop_read_active_window "$project_path")
+  active_start="${_aw%% *}"; active_end="${_aw##* }"
 
   info "$(msg loop.generating_test_runner_agent ${agent})"
   _write_loop_runner_script "$test_runner" "$project_path" \
@@ -9500,8 +9500,8 @@ _loop_monitor() {
     echo -e "$(msg loop.services ${BOLD} ${NC} ${CYAN} ${agent})"
     if [[ "$(uname)" == "Darwin" ]]; then
       local active_start active_end dream_hour dream_minute brief_hour brief_minute
-      active_start=$(_config_read_int "loop_active_start" "10")
-      active_end=$(_config_read_int "loop_active_end" "18")
+      local _aw; _aw=$(_loop_read_active_window "$project_path")
+      active_start="${_aw%% *}"; active_end="${_aw##* }"
       # US-LOOP-013: use schedule spec for display
       local loop_spec loop_period loop_offset
       loop_spec=$(_loop_schedule_spec "$project_path")
@@ -10371,8 +10371,8 @@ _legacy_home() {
     crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_state="enabled"
   fi
   local active_start active_end dream_hour dream_minute brief_hour brief_minute
-  active_start=$(_config_read_int "loop_active_start" "10")
-  active_end=$(_config_read_int "loop_active_end" "18")
+  local _aw; _aw=$(_loop_read_active_window "$project_path")
+  active_start="${_aw%% *}"; active_end="${_aw##* }"
   # US-LOOP-013: use schedule spec for display
   local loop_spec loop_period loop_offset
   loop_spec=$(_loop_schedule_spec "$project_path")

@@ -9627,6 +9627,55 @@ _loop_test_quality_check() {
   python3 "$install_dir/lib/test_quality_gate.py" "$@"
 }
 
+# US-QA-013: PR description marker check. Returns 0 if the body contains
+# `[skip-test-quality]` (case-insensitive); 1 otherwise.
+_loop_pr_body_has_skip_test_quality() {
+  local body="${1:-}"
+  [ -n "$body" ] || return 1
+  printf '%s' "$body" | grep -qiE '\[skip-test-quality\]'
+}
+
+# US-QA-013: gate + ALERT wrapper. Runs the test-quality gate; on
+# violations writes a structured ALERT-<slug>.md entry so the human (or
+# next brief) sees what blocked auto-merge. The wrapper is the entry
+# point loop calls; it accepts --skip to honor the PR bypass marker.
+_loop_test_quality_check_with_alert() {
+  local skip=0
+  if [ "${1:-}" = "--skip" ]; then
+    skip=1; shift
+  fi
+  if [ "$skip" -eq 1 ]; then
+    return 0
+  fi
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  local report
+  report=$(python3 "$install_dir/lib/test_quality_gate.py" "$@" 2>&1)
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+
+  local main_dir="${ROLL_MAIN_PROJECT:-$PWD}"
+  local slug; slug=$(_project_slug "$main_dir" 2>/dev/null || basename "$main_dir")
+  local shared_root="${_SHARED_ROOT:-$HOME/.shared/roll}"
+  local alert_file="${shared_root}/loop/ALERT-${slug}.md"
+  mkdir -p "$(dirname "$alert_file")"
+  {
+    printf '[%s] test-quality gate blocked auto-merge (rubric ❼ / ❽).\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '%s\n' "$report"
+    printf 'Bypass: add `[skip-test-quality]` to the PR description and re-run.\n'
+    printf '\n'
+  } >> "$alert_file"
+
+  if declare -F _loop_event >/dev/null 2>&1; then
+    _loop_event "test_quality_gate_block" "${LOOP_CYCLE_ID:-test-quality}" "${1:-}" "$report" || true
+  fi
+  echo "[loop] test-quality gate blocked: see $alert_file" >&2
+  return 1
+}
+
 _loop_agent_routes() {
   local sub="${1:-show}"; shift || true
   case "$sub" in

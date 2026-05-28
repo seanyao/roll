@@ -102,8 +102,8 @@ CI 里设置 `ROLL_TEST_TIME_CAP=1` 时，`--tier=fast` 跑全套上限 60 秒
 
 ## 测试质量评分卷（rubric）
 
-`docs/testing/quality-rubric.md`（由 `$roll-.dream` Scan 7 消费）列出
-夜检扫描会按 `REFACTOR-XXX [test-quality:❶|❷|...]` 输出的六类反模式：
+`guide/zh/testing/quality-rubric.md`（由 `$roll-.dream` Scan 7 消费）列出
+夜检扫描会按 `REFACTOR-XXX [test-quality:❶|❷|...|❽]` 输出的八类反模式：
 
 | # | 反模式 | 修复方向 |
 |---|--------|---------|
@@ -113,6 +113,8 @@ CI 里设置 `ROLL_TEST_TIME_CAP=1` 时，`--tier=fast` 跑全套上限 60 秒
 | ❹ | Fixture 顺序耦合（测试间共享可变状态） | 每个测试独立 setup/teardown；用不可变 fixture |
 | ❺ | 测私有函数 / 绕过 public API | 改走 public 入口；如果难以到达，说明 API 设计有问题 |
 | ❻ | 断言框架行为（在测 bats 本身） | 删测试；信任框架 |
+| ❼ | 内联外部工具行为（测试体里复制 `sed`/`grep`/`awk` 流水线） | 调项目自己的 helper；或抽到 `tests/helpers/` 共享 |
+| ❽ | 断言 repo 之外的文件（`~/.codex`/`~/.kimi`/`~/.roll` 或系统路径） | 用 `BATS_TMPDIR` 沙箱化，环境变量重定向到临时目录，不碰用户真实配置 |
 
 dream 每轮最多 emit 5 条 REFACTOR，避免 backlog 被噪音淹没。
 按优先级逐个收拾。

@@ -108,9 +108,9 @@ The default combination is `--affected --tier=fast`; pre-push / release run
 
 ## Test Quality Rubric
 
-`docs/testing/quality-rubric.md` (referenced from `$roll-.dream` Scan 7)
-catalogs six recurring antipatterns the dream nightly scan flags as
-`REFACTOR-XXX [test-quality:❶|❷|...]`:
+`guide/en/testing/quality-rubric.md` (referenced from `$roll-.dream` Scan 7)
+catalogs eight recurring antipatterns the dream nightly scan flags as
+`REFACTOR-XXX [test-quality:❶|❷|...|❽]`:
 
 | # | Antipattern | Fix |
 |---|-------------|-----|
@@ -120,6 +120,8 @@ catalogs six recurring antipatterns the dream nightly scan flags as
 | ❹ | Fixture order coupling (shared mutable state between tests) | Setup/teardown each test independently; use immutable fixtures |
 | ❺ | Testing private functions / bypassing the public API | Re-route through the public entry point; if it's hard to reach, the API is wrong |
 | ❻ | Asserting framework behaviour (testing bats itself) | Delete the test; trust the framework |
+| ❼ | Inlining external-tool behaviour (`sed`/`grep`/`awk` pipelines duplicated in test bodies) | Call the project helper that owns the parsing, or extract into `tests/helpers/` |
+| ❽ | Asserting on a file outside this repo (`~/.codex`, `~/.kimi`, `~/.roll`, system paths) | Sandbox via `BATS_TMPDIR`, redirect env vars to a tmp dir, never touch live config |
 
 The dream skill emits at most 5 REFACTOR entries per scan, so the backlog
 doesn't drown in noise. Refactor them in priority order.

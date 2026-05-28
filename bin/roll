@@ -1011,8 +1011,44 @@ HINT
 # prints install commands for the ones that aren't, so users who already opted
 # in (or opted out) don't get spammed each upgrade.
 cmd_doctor() {
+  _doctor_agent_section
   _doctor_pr_section
   _doctor_launchd_stale_section
+}
+
+# FIX-128: list every ai_* entry from config, tag each with binary-on-PATH
+# status and config-dir existence so the user can see at a glance which
+# agents are actually usable vs only have Roll-maintained dirs.
+_doctor_agent_section() {
+  [[ -f "$ROLL_CONFIG" ]] || return 0
+  echo ""
+  echo "$(ROLL_LANG_RESOLVED=en msg doctor.agent_detection)"
+  echo "$(ROLL_LANG_RESOLVED=zh msg doctor.agent_detection)"
+  echo ""
+  local _key _value _name _dir _installed _dir_exists _is_primary
+  _is_primary=$(grep -E '^primary_agent:' "$ROLL_CONFIG" 2>/dev/null | sed 's/^primary_agent: *//')
+  while IFS=: read -r _key _value; do
+    [[ "$_key" =~ ^ai_ ]] || continue
+    _name="${_key#ai_}"
+    [[ "$_name" == "kimi_code" ]] && continue  # dedupe
+    _dir="${_value%%|*}"
+    _dir="${_dir# }"
+    _dir="${_dir/#\~/$HOME}"
+    if _agent_installed_by_name "$_name" "$_dir"; then
+      _installed="$(msg doctor.agent_installed)"
+    else
+      _installed="$(msg doctor.agent_missing)"
+    fi
+    if [[ -d "$_dir" ]]; then
+      _dir_exists="$(msg doctor.agent_dir_exists)"
+    else
+      _dir_exists="$(msg doctor.agent_dir_missing)"
+    fi
+    local _tag=""
+    [[ "$_name" == "$_is_primary" ]] && _tag="  ($(msg doctor.agent_primary_label))"
+    printf "  %-10s  %-14s  %s%s\n" "$_name" "$_installed" "$_dir_exists" "$_tag"
+  done < "$ROLL_CONFIG"
+  return 0
 }
 
 # FIX-097: scan ${_LAUNCHD_DIR}/com.roll.*.plist for entries whose

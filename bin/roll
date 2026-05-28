@@ -83,31 +83,80 @@ lower_name() {
 }
 
 
-# Check if an AI tool is actually installed.
-# Most tools create their own config dir; Trae on macOS uses Library/Application Support
-# and expects roll to manage ~/.trae/ — so we detect via the app directory instead.
-_is_ai_installed() {
-  local ai_dir="$1"
-  [[ -d "$ai_dir" ]] && return 0
-  local bn
-  bn="$(basename "$ai_dir" | sed 's/^\.//')"
-  case "$bn" in
+# FIX-128: agent → binary-name(s) lookup. First binary found wins. Used by
+# _agent_installed_by_name to enforce "CLI must exist on PATH" detection
+# instead of the old "config dir exists" check (which Roll's own convention
+# sync would fake — see FIX-128).
+_agent_bin_names() {
+  case "$1" in
+    claude)            echo "claude" ;;
+    codex|openai)      echo "codex" ;;        # openai is a Roll alias for codex
+    agy|gemini)        echo "agy gemini" ;;   # gemini reuses ~/.gemini for agy
+    kimi)              echo "kimi-code kimi-cli kimi" ;;  # FIX-126
+    deepseek)          echo "deepseek" ;;
+    qwen)              echo "qwen" ;;
+    pi)                echo "pi" ;;
+    *)                 return 1 ;;
+  esac
+}
+
+# FIX-128: detect whether an AI agent (by canonical name) is actually
+# usable on this machine. For CLI-only agents this means "binary on PATH";
+# GUI / bundled-binary agents keep their special-case paths. Falls back
+# to dir-existence only for unknown agents the operator has registered
+# manually (forward-compatible with future additions).
+_agent_installed_by_name() {
+  local agent="$1"
+  local dir="${2:-}"
+  case "$agent" in
     trae)
-      [[ -d "$HOME/Library/Application Support/Trae" ]] ||
-      [[ -d "$HOME/.config/Trae" ]]
+      [[ -d "$HOME/Library/Application Support/Trae" ]] || [[ -d "$HOME/.config/Trae" ]]
       return
       ;;
     opencode)
       [[ -x "$HOME/.opencode/bin/opencode" ]]
       return
       ;;
-    agent)
-      if [[ "$(basename "$(dirname "$ai_dir")")" == ".pi" ]]; then
-        command -v pi &>/dev/null && return
-      fi
+    cursor)
+      # cursor ships a GUI + an optional CLI; either path counts as "installed".
+      command -v cursor >/dev/null 2>&1 || [[ -d "$HOME/.cursor" ]]
+      return
+      ;;
+    openclaw)
+      [[ -d "$HOME/.openclaw/workspace" ]]
+      return
       ;;
   esac
-  return 1
+  local bins
+  if bins=$(_agent_bin_names "$agent" 2>/dev/null); then
+    local b
+    for b in $bins; do
+      command -v "$b" >/dev/null 2>&1 && return 0
+    done
+    return 1
+  fi
+  # Unknown agent — fall back to dir presence so user-added entries still work.
+  [[ -n "$dir" && -d "$dir" ]]
+}
+
+# Check if an AI tool is actually installed (back-compat shim around
+# _agent_installed_by_name; preserves the dir-path-based signature used
+# throughout bin/roll).
+_is_ai_installed() {
+  local ai_dir="$1"
+  local bn
+  bn="$(basename "$ai_dir" | sed 's/^\.//')"
+  # Nested-dir layouts collapse to their parent agent name.
+  case "$bn" in
+    agent|workspace)
+      bn="$(basename "$(dirname "$ai_dir")" | sed 's/^\.//')"
+      ;;
+  esac
+  # Mirror ai_tool_name's alias normalization so detection routes to the
+  # canonical agent record (e.g. ~/.gemini → agy, ~/.kimi-code → kimi).
+  [[ "$bn" == "gemini" ]] && bn="agy"
+  [[ "$bn" == "kimi-code" ]] && bn="kimi"
+  _agent_installed_by_name "$bn" "$ai_dir"
 }
 
 # ─── Spinner: TTY-aware status display for long-running steps (US-REL-003) ───
@@ -522,11 +571,50 @@ loop_brief_hour: 9
 primary_agent: claude
 YAML
     ok "$(msg shared.created_roll_config_yaml)"
+
+    # FIX-128: the heredoc template hardcodes `primary_agent: claude` for
+    # the first-time case. Replace it with the first agent that actually
+    # has its CLI on PATH so users without Claude installed don't get a
+    # silently-broken default. If nothing detected, leave `claude` so the
+    # user still has a clear handle to fix manually.
+    local _detected_primary
+    _detected_primary="$(_first_installed_agent || true)"
+    if [[ -n "$_detected_primary" && "$_detected_primary" != "claude" ]]; then
+      _replace_primary_agent "$_detected_primary"
+      info "$(msg shared.primary_agent_auto_detected "$_detected_primary" 2>/dev/null \
+             || echo "primary_agent → $_detected_primary (auto-detected from installed CLIs)")"
+    fi
   fi
 
   # Ensure all expected ai_* keys exist (handles upgrades where new tools were added)
   _ensure_config_entries
 
+}
+
+# FIX-128: pick the first agent whose CLI is on PATH, scanning the same
+# order the default config template lists them. Empty stdout when none
+# detected; never errors.
+_first_installed_agent() {
+  local agent
+  for agent in claude codex kimi deepseek qwen agy pi cursor opencode trae openclaw; do
+    if _agent_installed_by_name "$agent"; then
+      echo "$agent"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# FIX-128: rewrite the `primary_agent:` line in $ROLL_CONFIG to the given
+# value. Single-line in-place edit, preserves the rest of the file.
+_replace_primary_agent() {
+  local new="$1"
+  [[ -f "$ROLL_CONFIG" && -n "$new" ]] || return 0
+  local tmp; tmp="$(mktemp)"
+  awk -v new="$new" '
+    /^primary_agent:/ { print "primary_agent: " new; next }
+    { print }
+  ' "$ROLL_CONFIG" > "$tmp" && mv "$tmp" "$ROLL_CONFIG"
 }
 
 # ─── Internal: create or repair per-skill symlinks (non-destructive) ─────────
@@ -539,7 +627,18 @@ _link_skills() {
   while IFS= read -r entry; do
     local ai_dir
     ai_dir="$(_ai_dir "$entry")"
-    _is_ai_installed "$ai_dir" || continue
+    # FIX-128: detection is now binary-on-PATH, but skill linking keeps
+    # the same Claude-always-syncs semantics as _apply_conventions and
+    # tolerates pre-existing config dirs (an agent the user is mid-
+    # upgrade or installed via nvm/asdf still has its convention dir;
+    # we don't want to silently stop linking skills there). Strict
+    # binary detection drives chooser logic (primary_agent /
+    # _onboard_discover_agents) — see FIX-128.
+    if [[ "$ai_dir" != "$HOME/.claude" ]] \
+       && ! _is_ai_installed "$ai_dir" \
+       && [[ ! -d "$ai_dir" ]]; then
+      continue
+    fi
     mkdir -p "$ai_dir"
 
     local ai_name ai_dir_real skills_dir
@@ -639,8 +738,13 @@ _sync_convention_for_tool() {
   local dst_dir
   dst_dir="$(dirname "$main_dst")"
 
-  # Only proceed if Claude (always) or the tool is installed
-  if [[ "$dst_dir" != "$HOME/.claude" ]] && ! _is_ai_installed "$dst_dir"; then
+  # Only proceed if Claude (always), the tool is installed (binary-on-PATH
+  # per FIX-128), or the convention dir already exists (mid-upgrade /
+  # nvm-installed binaries that aren't on this shell's PATH still get
+  # their convention refresh).
+  if [[ "$dst_dir" != "$HOME/.claude" ]] \
+     && ! _is_ai_installed "$dst_dir" \
+     && [[ ! -d "$dst_dir" ]]; then
     return
   fi
   mkdir -p "$dst_dir"
@@ -927,8 +1031,44 @@ HINT
 # prints install commands for the ones that aren't, so users who already opted
 # in (or opted out) don't get spammed each upgrade.
 cmd_doctor() {
+  _doctor_agent_section
   _doctor_pr_section
   _doctor_launchd_stale_section
+}
+
+# FIX-128: list every ai_* entry from config, tag each with binary-on-PATH
+# status and config-dir existence so the user can see at a glance which
+# agents are actually usable vs only have Roll-maintained dirs.
+_doctor_agent_section() {
+  [[ -f "$ROLL_CONFIG" ]] || return 0
+  echo ""
+  echo "$(ROLL_LANG_RESOLVED=en msg doctor.agent_detection)"
+  echo "$(ROLL_LANG_RESOLVED=zh msg doctor.agent_detection)"
+  echo ""
+  local _key _value _name _dir _installed _dir_exists _is_primary
+  _is_primary=$(grep -E '^primary_agent:' "$ROLL_CONFIG" 2>/dev/null | sed 's/^primary_agent: *//')
+  while IFS=: read -r _key _value; do
+    [[ "$_key" =~ ^ai_ ]] || continue
+    _name="${_key#ai_}"
+    [[ "$_name" == "kimi_code" ]] && continue  # dedupe
+    _dir="${_value%%|*}"
+    _dir="${_dir# }"
+    _dir="${_dir/#\~/$HOME}"
+    if _agent_installed_by_name "$_name" "$_dir"; then
+      _installed="$(msg doctor.agent_installed)"
+    else
+      _installed="$(msg doctor.agent_missing)"
+    fi
+    if [[ -d "$_dir" ]]; then
+      _dir_exists="$(msg doctor.agent_dir_exists)"
+    else
+      _dir_exists="$(msg doctor.agent_dir_missing)"
+    fi
+    local _tag=""
+    [[ "$_name" == "$_is_primary" ]] && _tag="  ($(msg doctor.agent_primary_label))"
+    printf "  %-10s  %-14s  %s%s\n" "$_name" "$_installed" "$_dir_exists" "$_tag"
+  done < "$ROLL_CONFIG"
+  return 0
 }
 
 # FIX-097: scan ${_LAUNCHD_DIR}/com.roll.*.plist for entries whose
@@ -1467,15 +1607,31 @@ _onboard_discover_agents() {
   while IFS=: read -r _key _value; do
     [[ "$_key" =~ ^ai_ ]] || continue
     _name="${_key#ai_}"
+    # ai_kimi_code → kimi (avoid listing the same agent twice).
+    [[ "$_name" == "kimi_code" ]] && _name="kimi"
     _dir="${_value%%|*}"
     _dir="${_dir# }"
     _dir="${_dir/#\~/$HOME}"
-    if [[ -d "$_dir" ]]; then
-      _ONBOARD_INSTALLED+=("$_name")
+    # FIX-128: route via _agent_installed_by_name so "installed" means the
+    # CLI is actually on PATH for known agents, not just the config dir
+    # that Roll's own convention sync would have created.
+    if _agent_installed_by_name "$_name" "$_dir"; then
+      # Dedupe — kimi may appear under both ai_kimi and ai_kimi_code.
+      # `${arr[@]+...}` keeps `set -u` happy when the array is still empty.
+      local _already=0 _existing
+      for _existing in ${_ONBOARD_INSTALLED[@]+"${_ONBOARD_INSTALLED[@]}"}; do
+        if [[ "$_existing" == "$_name" ]]; then _already=1; break; fi
+      done
+      if [[ $_already -eq 0 ]]; then _ONBOARD_INSTALLED+=("$_name"); fi
     else
-      _ONBOARD_MISSING+=("$_name")
+      local _already=0 _existing
+      for _existing in ${_ONBOARD_MISSING[@]+"${_ONBOARD_MISSING[@]}"}; do
+        if [[ "$_existing" == "$_name" ]]; then _already=1; break; fi
+      done
+      if [[ $_already -eq 0 ]]; then _ONBOARD_MISSING+=("$_name"); fi
     fi
   done < "$ROLL_CONFIG"
+  return 0
 }
 
 # US-ONBOARD-018: pick an agent for the onboard flow.

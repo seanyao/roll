@@ -4736,6 +4736,16 @@ _cmd_test_where() {
 }
 
 cmd_test() {
+  # US-ISO-005: `--help` / `-h` anywhere in pre-`--` args shows help and
+  # exits 0, so `roll test --reset --help` is a help lookup, not a reset.
+  # Args appearing after `--` are forwarded verbatim and not intercepted.
+  local _a
+  for _a in "$@"; do
+    case "$_a" in
+      --) break ;;
+      --help|-h) set -- --help; break ;;
+    esac
+  done
   case "${1:-}" in
     --help|-h)
       cat <<'EOF'

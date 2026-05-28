@@ -33,6 +33,22 @@ EOF
   [[ "$output" == *"--reset"* ]]
 }
 
+@test "cmd_test --reset --help: prints help, does NOT trigger a reset" {
+  _DISPATCH_LOG="${TEST_TMP}/dispatch.log"
+  _isolation_dispatch() {
+    echo "DISPATCH: $*" >> "$_DISPATCH_LOG"
+    return 0
+  }
+  export -f _isolation_dispatch
+
+  run cmd_test --reset --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage"* ]]
+  [[ "$output" == *"--reset"* ]]
+  # Dispatcher must never have been called.
+  [ ! -f "$_DISPATCH_LOG" ] || ! grep -q "^DISPATCH:" "$_DISPATCH_LOG"
+}
+
 # ── --reset on type=none degrades gracefully ─────────────────────────────
 
 @test "cmd_test --reset on type=none: prints explanation + exits 0 (not a failure)" {

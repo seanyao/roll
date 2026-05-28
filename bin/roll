@@ -8793,6 +8793,83 @@ _loop_mark_in_progress() {
   ' "$backlog" > "$tmp" && mv "$tmp" "$backlog"
 }
 
+# US-AGENT-008: _loop_mark_hold <story-id> <reason> [backlog-path]
+#   Flip "🔨 In Progress" or "📋 Todo" row to "🚫 Hold" with a parenthetical
+#   reason suffix appended to the description column. Idempotent — if the
+#   row is already 🚫 Hold the call is a no-op (status compare is exact).
+_loop_mark_hold() {
+  local story_id="$1"
+  local reason="${2:-self-downgrade}"
+  local backlog="${3:-${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md}"
+  [ -n "$story_id" ] || return 1
+  [ -f "$backlog" ] || return 0
+  local tmp; tmp=$(mktemp "${backlog}.XXXXXX") || return 1
+  awk -v sid="$story_id" -v reason="$reason" '
+    {
+      line = $0
+      changed = 0
+      if (index(line, "🔨 In Progress") > 0 || index(line, "📋 Todo") > 0) {
+        n = split(line, cols, "|")
+        if (n >= 2) {
+          id_cell = cols[2]
+          gsub(/[[:space:]]/, "", id_cell)
+          sub(/^\[/, "", id_cell)
+          sub(/\].*$/, "", id_cell)
+          if (id_cell == sid) {
+            sub(/🔨 In Progress/, "🚫 Hold", line)
+            sub(/📋 Todo/, "🚫 Hold", line)
+            # Append reason to the description column (cols[3]) only if not
+            # already present.
+            if (index(line, "→ " reason) == 0 && index(line, "(" reason ")") == 0) {
+              # Insert before the trailing " | 🚫 Hold |"
+              sub(/ \| 🚫 Hold \|/, " → " reason " | 🚫 Hold |", line)
+            }
+            changed = 1
+          }
+        }
+      }
+      print line
+    }
+  ' "$backlog" > "$tmp" && mv "$tmp" "$backlog"
+}
+
+# US-AGENT-008: self-downgrade primitive.
+#   _loop_self_downgrade <story-id> <reason> <sub-ids-csv>
+# Flips story to 🚫 Hold (with sub list embedded), writes ALERT, emits a
+# story_self_downgrade event. The actual sub-story rows + feature md are
+# produced by the SKILL invocation of roll-design --from-story (this helper
+# just records the contract).
+_loop_self_downgrade() {
+  local story_id="$1"
+  local reason="${2:-too_big}"
+  local subs="${3:-}"
+  [ -n "$story_id" ] || return 1
+  local backlog="${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md"
+  local annotation
+  if [ -n "$subs" ]; then
+    annotation="split to ${subs}"
+  else
+    annotation="$reason"
+  fi
+  _loop_mark_hold "$story_id" "$annotation" "$backlog" || true
+
+  # ALERT line for human visibility. Slug derives from main project dir.
+  local main_dir="${ROLL_MAIN_PROJECT:-$PWD}"
+  local slug; slug=$(_project_slug "$main_dir" 2>/dev/null || basename "$main_dir")
+  local shared_root="${_SHARED_ROOT:-$HOME/.shared/roll}"
+  local alert_file="${shared_root}/loop/ALERT-${slug}.md"
+  mkdir -p "$(dirname "$alert_file")"
+  printf '[%s] self-downgrade: %s — reason: %s; subs: %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$story_id" "$reason" "${subs:-<none>}" \
+    >> "$alert_file"
+
+  # Best-effort event emission (tolerates missing helpers).
+  if declare -F _loop_event >/dev/null 2>&1; then
+    _loop_event "agent_self_downgrade" "${LOOP_CYCLE_ID:-$story_id}" "$story_id" "${reason}|${subs}" || true
+  fi
+  echo "[loop] self-downgrade ${story_id}: ${reason}; subs=${subs:-<none>}"
+}
+
 # _loop_mark_todo <story-id> [backlog-path]
 #   Revert a row from "🔨 In Progress" back to "📋 Todo". Called when a
 #   cycle's executor fails so the next cycle can pick the story up again.

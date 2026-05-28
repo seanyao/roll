@@ -110,7 +110,15 @@ verdict:
 Emit `verdict: ok` or `verdict: too_big` (with `reason:`) as the first cycle output line.
 
 - `ok` → continue with step 1 below normally
-- `too_big` → self-downgrade per US-AGENT-008: invoke `roll-design --from-story <FIX-id>` to re-split, write sub-stories with `chain_depth + 1`, flip original FIX to 🚫 Hold, exit cleanly. Do NOT TCR a half fix.
+- `too_big` → self-downgrade per US-AGENT-008:
+
+```bash
+Skill("roll-design", "--from-story FIX-XXX-NNN")
+bash -c 'source "$(command -v roll)"; _loop_self_downgrade FIX-XXX-NNN "too_big: <reason>" "FIX-XXX-NNNa,FIX-XXX-NNNb"'
+exit 0
+```
+
+Original FIX goes to 🚫 Hold with `→ split to ...` annotation; sub-stories carry `chain_depth + 1`. If `roll-design` produces fewer than 2 sub-stories, fall through to **US-AGENT-009 cap-hit path**: leave 🚫 Hold + raise ALERT for human triage. Do NOT TCR a half fix.
 
 Bug fixes are usually small (est_min ≤ 5), so pre-flight is mostly a sanity barrier for FIXes whose underlying issue turns out structural — e.g. a "simple null check" that requires touching 12 files. Catching that upfront is cheaper than burning a cycle.
 

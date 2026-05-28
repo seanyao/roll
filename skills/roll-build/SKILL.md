@@ -83,7 +83,24 @@ reason: <one short line — which condition triggered, with numbers>
 ```
 
 When `verdict: ok` → continue to Step 1 normally.
-When `verdict: too_big` → go to **US-AGENT-008 self-downgrade path** (re-split via `roll-design --from-story <id>`, write sub-stories with `chain_depth + 1`, flip original story to 🚫 Hold, exit cleanly without TCR work this cycle).
+When `verdict: too_big` → go to **US-AGENT-008 self-downgrade path**:
+
+```bash
+# 1. Invoke roll-design to re-split the story into smaller sub-stories.
+#    Each sub-story carries chain_depth = (parent.chain_depth + 1).
+#    Sub-stories land as 📋 Todo with depends-on:<parent> chained.
+Skill("roll-design", "--from-story US-XXX-NNN")
+
+# 2. After the sub-stories are written to BACKLOG, flip the parent
+#    to 🚫 Hold and emit the downgrade event. The helper handles ALERT.
+bash -c 'source "$(command -v roll)"; _loop_self_downgrade US-XXX-NNN "too_big: <reason from verdict>" "US-XXX-NNNa,US-XXX-NNNb"'
+
+# 3. Exit cleanly — no TCR commits this cycle. The next loop cycle picks
+#    up the first sub-story (which is smaller and should pass pre-flight).
+exit 0
+```
+
+If `roll-design` cannot produce ≥2 sub-stories (story is already irreducible), fall through to **US-AGENT-009 cap-hit path**: leave 🚫 Hold and write a higher-priority ALERT asking for human triage.
 
 > Pre-flight is honest, not paranoid: a small story (est_min ≤ 5, chain_depth=0, low risk) should almost always go `ok`. The check pays off on the long tail — stories that look small but compose tons of files, or that the current agent has historically failed.
 

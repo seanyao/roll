@@ -6459,6 +6459,14 @@ if command -v tmux >/dev/null 2>&1; then
   tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^roll-loop-${slug}\$" | while read _s; do
     tmux kill-session -t "\$_s" 2>/dev/null || true
   done
+  # FIX-132: syntax-check the inner script before spawning the tmux session.
+  # A heredoc quoting regression or mid-cycle regeneration can silently produce
+  # a syntactically broken script; catching it here prevents the session from
+  # starting in a corrupted state and logging a misleading "exited 0, retrying".
+  if ! bash -n "\$INNER_SCRIPT" 2>>"\$LOG"; then
+    echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] ABORT: inner script failed syntax check — cycle skipped (see log: \$LOG)" >> "\$LOG"
+    exit 1
+  fi
   tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
   CYCLE_LOG_RAW="${project_path}/.roll/cycle-logs/.pipe-\$\$.raw"
   mkdir -p "${project_path}/.roll/cycle-logs"
@@ -6481,7 +6489,9 @@ if command -v tmux >/dev/null 2>&1; then
     # window closes the instant the tmux session ends (cycle_end kills
     # the session) and the entire scrollback disappears with it; the
     # cron-<slug>.log file still has the full transcript as a fallback.
-    printf '#!/bin/bash\\ntmux attach -t %s\\necho\\necho "================================================================"\\necho "  cycle ended. log: ~/.shared/roll/loop/cron-%s.log"\\necho "  press enter to close this window."\\necho "================================================================"\\nread _\\n' \\
+    # FIX-131: after tmux session ends, open the cron log with less so the
+    # user can scroll through the full cycle output instead of seeing nothing.
+    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=~/.shared/roll/loop/cron-%s.log\\necho\\nif [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. Log not found: \$LOGFILE"\\n  echo "  press enter to close."\\n  echo "================================================================"\\n  read _\\nfi\\n' \\
       "\$SESSION" "${slug}" > "\$_attach_cmd" 2>/dev/null || true
     chmod +x "\$_attach_cmd" 2>/dev/null || true
     open -g -a Terminal "\$_attach_cmd" >/dev/null 2>&1 || true

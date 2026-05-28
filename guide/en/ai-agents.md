@@ -11,7 +11,7 @@ Use `roll agent use openai` to select it — the same binary is invoked.
 | Agent | CLI command | Notes |
 |-------|-------------|-------|
 | Claude Code | `claude` | Default primary agent |
-| Kimi CLI | `kimi` | Good fallback; supports peer review |
+| Kimi CLI | `kimi-code` (legacy: `kimi-cli` / `kimi`) | Good fallback; supports peer review. Config dir: `~/.kimi-code/` (legacy `~/.kimi/` still recognized) |
 | DeepSeek TUI | `ai_deepseek` | Local or API |
 | Codex CLI | `codex` | OpenAI |
 | OpenAI (alias) | `openai` | Alias for `codex`. Install: `npm install -g @openai/codex` |

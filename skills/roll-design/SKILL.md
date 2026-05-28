@@ -121,7 +121,7 @@ Document structure (two-layer separation):
 3. **FIX / IDEA detail files use ID-prefixed filenames**: `.roll/features/<epic>/FIX-097.md`, not `.roll/features/<epic>/some-descriptive-slug.md`. Reason: a single FIX is one card, not a long-lived feature; the ID is the most stable handle, descriptive slugs date quickly and break links. US can keep feature-slug naming (US lives inside a multi-Story feature file). Quick lookup: `ls .roll/features/<epic>/FIX-*.md` finds all bugs in that area without grepping content.
 4. .roll/backlog.md only contains index rows (one row per US), **do not write** AC / Files / Notes
 5. Domain model files go in `.roll/domain/` — create on first greenfield design, update incrementally
-6. **Do not** write to `~/.kimi/` or any global config directory
+6. **Do not** write to `~/.kimi/`, `~/.kimi-code/`, or any global config directory
 
 **File path resolution order:**
 1. Determine Feature ownership (based on the requirement domain: compiler / ingest / qa / ...)

@@ -70,6 +70,11 @@ ai_tool_name() {
   # Antigravity (agy) reuses ~/.gemini/ from the deprecated Gemini CLI for
   # its config dir, so a literal `gemini` basename now identifies agy.
   [[ "$bn" == "gemini" ]] && bn="agy"
+  # FIX-126: Kimi upstream renamed its CLI to kimi-code and its config dir
+  # to ~/.kimi-code/; map both old and new basenames to the canonical
+  # "kimi" agent identifier so downstream argv / config / sync paths stay
+  # uniform across the upgrade.
+  [[ "$bn" == "kimi-code" ]] && bn="kimi"
   echo "$bn"
 }
 
@@ -266,6 +271,7 @@ _ensure_config_entries() {
     "ai_claude:~/.claude|CLAUDE.md|CLAUDE.md"
     "ai_agy:~/.gemini|GEMINI.md|GEMINI.md"
     "ai_kimi:~/.kimi|AGENTS.md|AGENTS.md"
+    "ai_kimi_code:~/.kimi-code|AGENTS.md|AGENTS.md"
     "ai_codex:~/.codex|AGENTS.md|AGENTS.md"
     "ai_cursor:~/.cursor|.cursor-rules|.cursor-rules"
     "ai_trae:~/.trae|user_rules.md|project_rules.md"
@@ -490,6 +496,7 @@ _install_local() {
 ai_claude: ~/.claude|CLAUDE.md|CLAUDE.md
 ai_gemini: ~/.gemini|GEMINI.md|GEMINI.md
 ai_kimi: ~/.kimi|AGENTS.md|AGENTS.md
+ai_kimi_code: ~/.kimi-code|AGENTS.md|AGENTS.md
 ai_codex: ~/.codex|AGENTS.md|AGENTS.md
 ai_cursor: ~/.cursor|.cursor-rules|.cursor-rules
 ai_trae: ~/.trae|user_rules.md|project_rules.md
@@ -782,7 +789,7 @@ cmd_setup() {
     esac
   }
 
-  local _ai_dirs="$HOME/.claude:$HOME/.gemini:$HOME/.kimi:$HOME/.codex:$HOME/.cursor:$HOME/.trae:$HOME/.config/opencode:$HOME/.openclaw:$HOME/.pi:$HOME/.deepseek:$HOME/.qwen"
+  local _ai_dirs="$HOME/.claude:$HOME/.gemini:$HOME/.kimi:$HOME/.kimi-code:$HOME/.codex:$HOME/.cursor:$HOME/.trae:$HOME/.config/opencode:$HOME/.openclaw:$HOME/.pi:$HOME/.deepseek:$HOME/.qwen"
 
   _run_setup_step "$ROLL_HOME" _install_local "$force"
   _record "$(_state_to_marker "$_ROLL_SETUP_STATE")" "Install templates & conventions to ~/.roll"
@@ -3145,9 +3152,20 @@ _agent_argv() {
         *)           _AGENT_ARGV=(claude -p "$prompt") ;;
       esac ;;
     kimi)
+      # FIX-126: Kimi upstream renamed binary from kimi-cli → kimi-code.
+      # Prefer the new name when present; fall back through legacy names
+      # so users mid-upgrade keep working until they reinstall.
+      local _kimi_bin
+      if command -v kimi-code >/dev/null 2>&1; then
+        _kimi_bin=kimi-code
+      elif command -v kimi-cli >/dev/null 2>&1; then
+        _kimi_bin=kimi-cli
+      else
+        _kimi_bin=kimi
+      fi
       case "$mode" in
-        interactive) _AGENT_ARGV=(kimi "$prompt") ;;
-        *)           _AGENT_ARGV=(kimi --quiet -p "$prompt") ;;
+        interactive) _AGENT_ARGV=("$_kimi_bin" "$prompt") ;;
+        *)           _AGENT_ARGV=("$_kimi_bin" --quiet -p "$prompt") ;;
       esac ;;
     deepseek)
       # deepseek has the same argv shape in both modes (positional prompt).

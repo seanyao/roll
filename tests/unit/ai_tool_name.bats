@@ -36,6 +36,15 @@ teardown() { unit_teardown; }
   [ "$output" = "kimi" ]
 }
 
+@test "ai_tool_name: ~/.kimi-code → kimi (FIX-126 Kimi CLI rename)" {
+  # Kimi upstream renamed its config dir from ~/.kimi to ~/.kimi-code; the
+  # basename maps back to the canonical "kimi" agent identifier so all the
+  # downstream argv / config / sync paths stay uniform.
+  run ai_tool_name "$HOME/.kimi-code"
+  [ "$status" -eq 0 ]
+  [ "$output" = "kimi" ]
+}
+
 @test "ai_tool_name: ~/.pi/agent → pi (agent uses parent dir)" {
   run ai_tool_name "$HOME/.pi/agent"
   [ "$status" -eq 0 ]

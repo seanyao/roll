@@ -27,12 +27,33 @@ teardown() { unit_teardown; }
   [ "${_AGENT_ARGV[3]}" = "text" ]
 }
 
-@test "_agent_argv kimi → kimi --quiet -p prompt" {
-  _agent_argv kimi text "p"
+@test "_agent_argv kimi (no kimi-* on PATH) → falls back to legacy 'kimi'" {
+  # FIX-126: ensure the legacy binary name is the final fallback when
+  # neither kimi-code nor kimi-cli is installed.
+  PATH="/usr/bin:/bin" _agent_argv kimi text "p"
   [ "${_AGENT_ARGV[0]}" = "kimi" ]
   [ "${_AGENT_ARGV[1]}" = "--quiet" ]
   [ "${_AGENT_ARGV[2]}" = "-p" ]
   [ "${_AGENT_ARGV[3]}" = "p" ]
+}
+
+@test "_agent_argv kimi (kimi-code on PATH) → uses kimi-code" {
+  # FIX-126: new upstream binary name preferred when installed.
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\n' > "$TEST_TMP/bin/kimi-code"
+  chmod +x "$TEST_TMP/bin/kimi-code"
+  PATH="$TEST_TMP/bin:/usr/bin:/bin" _agent_argv kimi text "p"
+  [ "${_AGENT_ARGV[0]}" = "kimi-code" ]
+  [ "${_AGENT_ARGV[1]}" = "--quiet" ]
+}
+
+@test "_agent_argv kimi (only kimi-cli on PATH) → uses kimi-cli" {
+  # FIX-126: transitional fallback for users mid-upgrade.
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\n' > "$TEST_TMP/bin/kimi-cli"
+  chmod +x "$TEST_TMP/bin/kimi-cli"
+  PATH="$TEST_TMP/bin:/usr/bin:/bin" _agent_argv kimi text "p"
+  [ "${_AGENT_ARGV[0]}" = "kimi-cli" ]
 }
 
 @test "_agent_argv deepseek → deepseek prompt" {
@@ -99,9 +120,9 @@ teardown() { unit_teardown; }
 
 # _agent_skill_cmd: emits a cron-ready shell string with $(strip-frontmatter) inline.
 # We stub _project_agent and exercise each agent shape.
-@test "_agent_skill_cmd kimi → kimi --quiet -p \"\$(awk ...)\"" {
+@test "_agent_skill_cmd kimi (no kimi-* on PATH) → kimi --quiet -p \"\$(awk ...)\"" {
   _project_agent() { echo kimi; }
-  run _agent_skill_cmd "/tmp/skill.md"
+  PATH="/usr/bin:/bin" run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 0 ]
   [[ "$output" == kimi\ --quiet\ -p\ \"\$\(awk* ]]
   case "$output" in *"'/tmp/skill.md')\""*) :;; *) false;; esac

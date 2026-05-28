@@ -13,8 +13,10 @@ while production is broken). Each category has the same four parts:
 - **Fix template** — minimal repair pattern (not a full rewrite)
 - **Real example** — an actual occurrence inside this repo
 
-Categories are numbered ❶ through ❻; `roll-.dream` tags each finding with
-the matching number so downstream filtering is mechanical.
+Categories are numbered ❶ through ❽. Categories ❶–❻ are advisory (dream
+flags them; the maintainer triages). Categories ❼ and ❽ are **blocking**:
+the loop cycle's test-quality merge gate (US-QA-012) rejects a PR that
+introduces a new ❼ or ❽ violation, even if CI is green.
 
 ---
 
@@ -235,6 +237,98 @@ relies on a specific framework guarantee, document that contract in
 A test that asserts `$BATS_TEST_NUMBER > 0` adds noise to every CI run
 without ever surfacing a project regression. The right place for that
 assurance is a one-time check in CI configuration, not in the suite.
+
+---
+
+## ❼ Test inlines external tool behaviour
+
+### Definition
+
+The test body re-implements the behaviour of external tools (`sed`, `grep`,
+`find`, `awk`, `tr`) via inline shell pipelines, instead of calling a
+project function that encapsulates that logic. When the project replaces
+the external tool or changes the internal parsing, every test that copied
+the pipeline breaks — even though the public-API output didn't change.
+
+### Signals
+
+- `foo=$(echo "$output" | grep ... | sed ... | awk ...)` chains inside
+the test body.
+- The same pipeline appears in ≥2 test files (duplicated parsing logic).
+- A project function exists (or should exist) that encapsulates this
+parsing, but the test bypasses it and rolls its own inline version.
+
+### Fix template
+
+```bash
+# BEFORE — inline pipeline replicates what a project function already does
+label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+
+# AFTER — call the project function that owns the parsing
+source bin/roll
+label=$(_plist_get_string "$plist" Label)
+```
+
+If no project function exists, extract the pipeline into a named test helper
+in `tests/helpers/` so the logic is shared and deliberate.
+
+### Real example
+
+`tests/integration/cmd_loop.bats` line 181 — inline `grep -A1 | grep | sed`
+chain parses a plist XML file to extract a `<string>` value. The project
+already has `plutil` available on macOS and could wrap the pattern in a
+`_plist_get_string` helper. Any plist schema change forces the test author
+to fix the inline pipeline in multiple test files.
+
+---
+
+## ❽ Test asserts on a file outside this repo
+
+### Definition
+
+The test assertion reads or asserts on a file path outside the repository
+root (e.g. `~/.roll/`, `~/.codex/`, `/etc/`, `/tmp/other-project/`). When
+the repo is cloned on a different machine, or the user's home directory
+has different state, the test either fails spuriously or — worse — passes
+by coincidence while testing the wrong thing.
+
+### Signals
+
+- `[[ -f ~/.xxx/... ]]`, `[[ -d ~/.xxx/... ]]`, `cat ~/.xxx/...` inside
+an assertion.
+- `[[ -f /tmp/... ]]` where `/tmp/...` was not created by `setup()` in the
+same test file.
+- Paths starting with `${HOME}` or `/Users/` or `/home/` that the test
+file did not create itself.
+
+### Fix template
+
+```bash
+# BEFORE — asserts on a file that lives outside the repo
+@test "skill file is synced" {
+  grep -qE 'Scan 6' "${HOME}/.roll/skills/roll-.dream/SKILL.md"
+}
+
+# AFTER — recreate the fixture inside a tmpdir owned by the test
+@test "skill file includes Scan 6" {
+  mkdir -p "$TMP/.roll/skills/roll-.dream"
+  echo '### Scan 6 — Doc Freshness' > "$TMP/.roll/skills/roll-.dream/SKILL.md"
+  ROLL_HOME="$TMP/.roll" run check_skill_has_scan6
+  [ "$status" -eq 0 ]
+}
+```
+
+If the test's purpose is truly to verify interaction with an external file,
+use `ROLL_HOME` injection (set to a tmpdir in `setup()`) so the test stays
+deterministic across machines.
+
+### Real example
+
+`tests/unit/roll_dream_scan6.bats` line 49 — asserts on
+`${HOME}/.roll/skills/roll-.dream/SKILL.md`, a file outside the repo whose
+content depends on whether the user ran `roll setup`. On a machine without
+Roll installed, or with an older version, the test fails even though the
+project code under test is correct.
 
 ---
 

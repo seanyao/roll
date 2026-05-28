@@ -9378,10 +9378,20 @@ _loop_pick_agent_for_story() {
   }
   local install_dir
   install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+  # US-AGENT-005: pass runs.jsonl when available so history soft preference
+  # can layer on top of hard rules. Project-local first, then shared.
+  local runs_arg=""
+  if [ -f ".roll/runs.jsonl" ]; then
+    runs_arg="--runs .roll/runs.jsonl"
+  elif [ -f "${HOME}/.shared/roll/loop/runs.jsonl" ]; then
+    runs_arg="--runs ${HOME}/.shared/roll/loop/runs.jsonl"
+  fi
+  # shellcheck disable=SC2086
   python3 "$install_dir/lib/loop_pick_agent.py" \
     --story-id "$story_id" \
     --backlog "$backlog" \
-    --routes "$routes"
+    --routes "$routes" \
+    $runs_arg
 }
 
 _loop_agent_routes() {

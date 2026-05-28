@@ -710,3 +710,23 @@ refused (`StorySplitCapHit`) and ALERT is raised for you to triage manually.
 should pass pre-flight on the next cycle. If you disagree with the split,
 edit the sub-stories or flip the original back to 📋 Todo with a tighter
 `est_min` / `risk_zone` profile.
+
+### C7. How do I send feedback (bug / idea / UX) without leaving the terminal?
+
+**Use `roll feedback`** (US-FB-001 / 005). It opens a GitHub issue with
+auto-attached environment info and a label that maps back to the Roll
+backlog convention.
+
+如何不离开终端发送反馈？用 `roll feedback`。
+
+```bash
+roll feedback --type bug --title "Login fails on Safari" --body "Repro: ..."
+```
+
+When `gh` is installed it calls `gh issue create` directly; otherwise it
+prints a pre-filled `github.com/.../issues/new?...` URL you open in a
+browser. The Environment section (roll version / OS / agent / language /
+project) auto-attaches; `--no-env` suppresses it. Pin the target repo
+via `--repo`, `ROLL_FEEDBACK_REPO`, `.roll/local.yaml`, or
+`~/.roll/config.yaml` — see [feedback.md](feedback.md) for the full
+precedence chain.

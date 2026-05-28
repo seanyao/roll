@@ -603,3 +603,47 @@ git -C .roll log --oneline -3        # 查看最近同步的提交
 ```bash
 git -C .roll fetch && git -C .roll reset --hard origin/main
 ```
+
+### C5. 为什么这个 cycle 用了别的 agent 而不是配置里的默认？
+
+**症状**：`~/.roll/config.yaml` 写 `primary_agent: pi`，但 cron.log 显示
+`[loop] story US-AGENT-007 routed to claude via hard`。
+
+Why is this cycle running on a different agent than my configured default?
+
+**原因**：US-AGENT-001..011 上线后,`primary_agent` 不再是唯一决策者。
+每轮 cycle 按故事的 **Agent profile**(`est_min` / `risk_zone` /
+`chain_depth`) + 项目根的 `.roll/agent-routes.yaml` 决定路由：硬规则
+筛候选 + `runs.jsonl` 历史命中率做软偏好。都不匹配才回退到
+`history.cold_start_default`。
+
+**自检**：
+
+```bash
+roll loop agent-routes show          # 当前路由配置
+roll loop agent-routes lint          # 校验
+roll loop runs 20                     # 看最近 20 个 cycle 各自挑了谁
+```
+
+想让某故事固定路由到指定 agent,可以收紧其他 agent 的能力区间,或临时把
+那个 agent 的 `est_min.max` 调小。完全禁用智能路由：所有 agent 写一样
+的 `types` 列表 + `cold_start_default` 指向你想用的。
+
+### C6. 故事为什么翻成 🚫 搁置了，cycle 不是跑了吗？
+
+**症状**：BACKLOG 行显示 `🚫 Hold → split to US-FOO-XXXa,US-FOO-XXXb`,
+日志里有 `self-downgrade` 或 `StorySplitCapHit` 类的 ALERT。
+
+Why was my story flipped to 🚫 Hold instead of Done?
+
+**原因**：agent 在 `roll-build` / `roll-fix` SKILL 的 Pre-flight 阶段
+自评判定 `verdict: too_big` —— 故事的 `est_min` 超出当前 agent 上限,
+或 `risk_zone` 不匹配,或近期历史命中率低于 `prefer_threshold` 且
+链深度还有降级预算。cycle 调 `roll-design --from-story <id>` 拆出
+`chain_depth + 1` 的子故事,原故事翻 🚫 Hold,干净退出。
+
+链深 ≥ 2 时 cap 拦截 `StorySplitCapHit`,第 3 次拆解被拒绝,写 ALERT
+等人工介入,防止无限套娃。
+
+**处理**：看 agent 拆出来的子故事是否合理;不满意可手动编辑,或把
+原故事翻回 📋 Todo + 重写更紧的 `est_min` / `risk_zone` profile。

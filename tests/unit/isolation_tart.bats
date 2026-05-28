@@ -98,7 +98,8 @@ esac
 # ── status state machine ──────────────────────────────────────────────────
 
 @test "tart: status = 'not-installed' when tart binary missing" {
-  # No tart stub written → command -v tart fails.
+  # Shadow PATH to exclude any real tart binary on the host.
+  export PATH="${_STUB_BIN_DIR}:/usr/bin:/bin:/usr/sbin:/sbin"
   uname() { [[ "${1:-}" = "-m" ]] && echo "arm64" || echo "Darwin"; }
   export -f uname
   run _isolation_tart_status
@@ -119,7 +120,7 @@ esac
 @test "tart: status = 'stopped' when VM exists but tart ip fails" {
   uname() { [[ "${1:-}" = "-m" ]] && echo "arm64" || echo "Darwin"; }
   export -f uname
-  export _MOCK_TART_LIST="roll-dev-test"
+  export _MOCK_TART_LIST="local roll-dev-test 50 31 1h stopped"
   export _MOCK_TART_IP_EXIT=1
   export _MOCK_TART_IP_OUTPUT=""
   _stub_tart
@@ -131,7 +132,7 @@ esac
 @test "tart: status = 'running' when tart ip returns a valid IP" {
   uname() { [[ "${1:-}" = "-m" ]] && echo "arm64" || echo "Darwin"; }
   export -f uname
-  export _MOCK_TART_LIST="roll-dev-test"
+  export _MOCK_TART_LIST="local roll-dev-test 50 31 1h running"
   export _MOCK_TART_IP_OUTPUT="192.168.64.5"
   export _MOCK_TART_IP_EXIT=0
   _stub_tart
@@ -145,7 +146,7 @@ esac
 @test "tart: status = 'ready' when running AND SSH responsive (provisioned)" {
   uname() { [[ "${1:-}" = "-m" ]] && echo "arm64" || echo "Darwin"; }
   export -f uname
-  export _MOCK_TART_LIST="roll-dev-test"
+  export _MOCK_TART_LIST="local roll-dev-test 50 31 1h running"
   export _MOCK_TART_IP_OUTPUT="192.168.64.5"
   _stub_tart
   # ssh succeeds → ready.
@@ -171,7 +172,7 @@ esac
 @test "tart: init is idempotent when VM already present" {
   uname() { [[ "${1:-}" = "-m" ]] && echo "arm64" || echo "Darwin"; }
   export -f uname
-  export _MOCK_TART_LIST="roll-dev-test"   # VM present
+  export _MOCK_TART_LIST="local roll-dev-test 50 31 1h stopped"   # VM present
   _stub_tart
   run _isolation_tart_init
   [ "$status" -eq 0 ]
@@ -179,6 +180,7 @@ esac
 }
 
 @test "tart: init fails with install hint when tart binary missing" {
+  export PATH="${_STUB_BIN_DIR}:/usr/bin:/bin:/usr/sbin:/sbin"
   uname() { [[ "${1:-}" = "-m" ]] && echo "arm64" || echo "Darwin"; }
   export -f uname
   run --separate-stderr _isolation_tart_init
@@ -239,7 +241,7 @@ esac
 @test "tart: exec runs the command via ssh and forwards exit code" {
   uname() { [[ "${1:-}" = "-m" ]] && echo "arm64" || echo "Darwin"; }
   export -f uname
-  export _MOCK_TART_LIST="roll-dev-test"
+  export _MOCK_TART_LIST="local roll-dev-test 50 31 1h running"
   export _MOCK_TART_IP_OUTPUT="192.168.64.5"
   _stub_tart
   _stub_bin ssh 'echo "via-ssh"; exit 7'

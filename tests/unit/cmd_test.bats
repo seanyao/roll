@@ -102,7 +102,7 @@ EOF
 
 # ── routing to dispatcher ────────────────────────────────────────────────
 
-@test "cmd_test: with no args invokes dispatcher exec with 'npm test'" {
+@test "cmd_test: with no args defaults to --affected (keeps VM runs fast)" {
   _DISPATCH_LOG="${TEST_TMP}/dispatch.log"
   _isolation_dispatch() {
     echo "DISPATCH: $*" >> "$_DISPATCH_LOG"
@@ -112,10 +112,10 @@ EOF
 
   run cmd_test
   [ "$status" -eq 0 ]
-  grep -q "^DISPATCH: exec npm test$" "$_DISPATCH_LOG"
+  grep -q "^DISPATCH: exec npm test -- --affected$" "$_DISPATCH_LOG"
 }
 
-@test "cmd_test: forwards extra args after -- to npm test" {
+@test "cmd_test: forwards extra args after -- to npm test (via -- separator)" {
   _DISPATCH_LOG="${TEST_TMP}/dispatch.log"
   _isolation_dispatch() {
     echo "DISPATCH: $*" >> "$_DISPATCH_LOG"
@@ -125,10 +125,10 @@ EOF
 
   run cmd_test -- --tier=fast tests/unit
   [ "$status" -eq 0 ]
-  grep -q "^DISPATCH: exec npm test --tier=fast tests/unit$" "$_DISPATCH_LOG"
+  grep -q "^DISPATCH: exec npm test -- --tier=fast tests/unit$" "$_DISPATCH_LOG"
 }
 
-@test "cmd_test: also accepts extra args without explicit --" {
+@test "cmd_test: also accepts extra args without explicit -- (via -- separator)" {
   _DISPATCH_LOG="${TEST_TMP}/dispatch.log"
   _isolation_dispatch() {
     echo "DISPATCH: $*" >> "$_DISPATCH_LOG"
@@ -139,7 +139,7 @@ EOF
   # When the first arg isn't a known flag, treat the whole list as forwarded.
   run cmd_test tests/unit/some_file.bats
   [ "$status" -eq 0 ]
-  grep -q "^DISPATCH: exec npm test tests/unit/some_file.bats$" "$_DISPATCH_LOG"
+  grep -q "^DISPATCH: exec npm test -- tests/unit/some_file.bats$" "$_DISPATCH_LOG"
 }
 
 # ── exit code passthrough (AC: VM test fail → host roll test non-zero) ──

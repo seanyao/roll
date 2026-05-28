@@ -16,7 +16,7 @@
 - **Bash**: `set -euo pipefail`. All variables quoted. shellcheck-clean.
 - **Rules**: [engineering-common-sense.md](guide/en/practices/engineering-common-sense.md).
 - **Test**: bats coverage for `cmd_*` and helpers. Run `npm test` before push.
-- **Git hooks**: After cloning, run `git config core.hooksPath hooks` once to activate TCR pre-commit enforcement. The hook blocks any commit where tests did not pass on the exact code being committed.
+- **Git hooks**: TCR pre-commit gate is in `hooks/pre-commit`. `core.hooksPath` is auto-configured by `roll setup`, by the autonomous loop at cycle preflight, and by the Claude Code SessionStart hook — no manual step needed. If you clone without setup, run `roll setup` once to wire it up. (US-INFRA-008/009)
 
 ## 3. Workflow
 - **TCR**: Test -> Green = Commit / Red = Revert. No WIP.

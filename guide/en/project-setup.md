@@ -73,3 +73,28 @@ skips files that already exist and only creates what is missing.
 - [legacy-onboarding.md](legacy-onboarding.md) — graft Roll into an existing codebase
 - [migration-2.0.md](migration-2.0.md) — upgrade a pre-2.0 project to `.roll/` layout
 - [loop.md](loop.md) — enable autonomous execution
+
+## Git Hooks Auto-Setup (US-INFRA-008/009)
+
+Roll's TCR pre-commit gate lives in `hooks/pre-commit`. Git ignores this directory
+by default — `core.hooksPath` must point to it. Roll configures this automatically
+in three places so you never hit a "TCR gate bypassed" window:
+
+1. **`roll setup`** — configures `core.hooksPath=hooks` in the current repo.
+2. **Autonomous loop cycle preflight** — each cycle ensures the worktree it runs in
+   has the correct hooks path.
+3. **Claude Code SessionStart hook** (`.claude/settings.json`) — runs
+   `git config core.hooksPath hooks` every time a new Claude Code session opens in
+   this project.
+
+**Manual override:** If you've intentionally set `core.hooksPath` to something else,
+Roll will not overwrite it. The auto-setup only fires when the value is unset or
+equals the git default `.git/hooks`.
+
+**Troubleshooting:** If commits are going through without running tests:
+
+```bash
+git config core.hooksPath   # should print: hooks
+ls hooks/pre-commit          # should exist and be executable
+roll setup                   # re-runs the configuration step
+```

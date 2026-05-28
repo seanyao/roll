@@ -69,3 +69,24 @@ roll loop on               # 开启自主执行
 - [legacy-onboarding.md](legacy-onboarding.md) — 将 Roll 嫁接到已有代码库
 - [migration-2.0.md](migration-2.0.md) — 从 2.0 之前的布局升级到 `.roll/`
 - [loop.md](loop.md) — 开启自主执行
+
+## Git Hooks 自动配置（US-INFRA-008/009）
+
+Roll 的 TCR 提交前检查在 `hooks/pre-commit` 里。
+Git 默认忽略这个目录——需要把 `core.hooksPath` 指向它才能生效。
+Roll 在三个地方自动完成配置，不会出现"检查门被绕过"的时间窗口：
+
+1. **`roll setup`** — 在当前仓库设置 `core.hooksPath=hooks`。
+2. **自主 loop 每轮 cycle preflight** — 每轮启动时确保 worktree 的 hooks 路径正确。
+3. **Claude Code SessionStart hook**（`.claude/settings.json`）— 每次新开 Claude Code 会话时自动执行 `git config core.hooksPath hooks`。
+
+**手动覆盖：** 如果你已经把 `core.hooksPath` 设成了别的值，Roll 不会覆盖它。
+自动配置只在该值未设或等于 git 默认值 `.git/hooks` 时才触发。
+
+**排查：** 提交时没有运行测试：
+
+```bash
+git config core.hooksPath   # 应该显示: hooks
+ls hooks/pre-commit          # 应该存在且可执行
+roll setup                   # 重新执行配置步骤
+```

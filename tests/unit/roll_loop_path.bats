@@ -82,6 +82,28 @@ teardown() { unit_teardown_cd; }
   [[ "$out" == *":"* ]]
 }
 
+@test "FIX-129: _write_loop_runner_script includes ~/.kimi-code/bin in PATH candidate list" {
+  # kimi-code installs its binary in ~/.kimi-code/bin, which is not under
+  # brew prefix or ~/.local/bin. launchd loops must find kimi without user
+  # having to create a symlink manually.
+  local script_path="${_test_dir}/run-test-kimi-path.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "echo hi" "/tmp/log" 10 24
+  local inner_script="${script_path%.sh}-inner.sh"
+  grep -qF '.kimi-code/bin' "$inner_script"
+  grep -qF '.kimi-code/bin' "$script_path"
+}
+
+@test "FIX-129: _detect_path_prepend includes ~/.kimi-code/bin when dir exists" {
+  # Simulate kimi-code installed: create the dir then check detection.
+  local fake_kimi="${TEST_TMP}/.kimi-code/bin"
+  mkdir -p "$fake_kimi"
+  local orig_home="$HOME"
+  export HOME="$TEST_TMP"
+  local out; out=$(_detect_path_prepend)
+  export HOME="$orig_home"
+  [[ "$out" == *".kimi-code/bin"* ]]
+}
+
 @test "_write_launchd_plist: writes EnvironmentVariables PATH key" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"

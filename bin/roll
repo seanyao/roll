@@ -2719,7 +2719,7 @@ _peer_dispatch_in_tmux() {
   {
     printf '#!/bin/bash -l\n'
     # FIX-050: portable PATH assembly (was hardcoded /opt/homebrew/bin)
-    printf 'for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "$HOME/.local/bin"; do\n'
+    printf 'for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "$HOME/.local/bin" "$HOME/.kimi-code/bin"; do\n'
     printf '  case ":$PATH:" in *":$_d:"*) ;; *) [ -d "$_d" ] && PATH="$_d:$PATH" ;; esac\n'
     printf 'done; export PATH\n'
     printf '%s > %q 2> %q || true\n' "$cmd_str" "$out_file" "$err_file"
@@ -5563,6 +5563,8 @@ _detect_path_prepend() {
   [[ -d /usr/local/bin ]] && dirs+=("/usr/local/bin")
   [[ -d /opt/local/bin ]] && dirs+=("/opt/local/bin")
   [[ -d "$HOME/.local/bin" ]] && dirs+=("$HOME/.local/bin")
+  # FIX-129: kimi-code installs to ~/.kimi-code/bin (not brew/local), launchd misses it
+  [[ -d "$HOME/.kimi-code/bin" ]] && dirs+=("$HOME/.kimi-code/bin")
   dirs+=("/usr/bin" "/bin" "/usr/sbin" "/sbin")
   for d in "${dirs[@]}"; do
     case ":$seen:" in *":$d:"*) continue ;; esac
@@ -5728,7 +5730,7 @@ set -o pipefail
 # FIX-050: portable PATH assembly — launchd/cron deliver a bare PATH that
 # misses brew-installed tools (tmux, claude, node, …). Iterate candidate
 # dirs; only prepend when present and not already in PATH. Idempotent.
-for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin"; do
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
   case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
 done
 export PATH
@@ -6372,7 +6374,7 @@ INNER
 # FIX-050: portable PATH assembly before any brew-tool lookup (tmux, caffeinate
 # on some systems, claude). Mirrors the inner script's bootstrap so even when
 # launchd's plist EnvironmentVariables is stale, the runner self-repairs.
-for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin"; do
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
   case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
 done
 export PATH

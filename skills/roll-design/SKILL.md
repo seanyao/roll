@@ -771,6 +771,42 @@ Each story must be:
 
 ---
 
+## Self-score (US-SKILL-010 / 013)
+
+After Step 5 (Write to BACKLOG) completes — i.e. once the new US rows are
+landed and the user has either confirmed or chosen `No` (story still
+queued) — write a single self-score note covering the design session:
+
+```bash
+bash -c 'source "$(command -v roll)"; \
+  _skill_write_self_score roll-design US-XXX-NNN <score 1..10> <good|ok|regression> "<rationale>"'
+```
+
+Use the **first** US-id of the batch as the story handle (or the
+representative story when splitting). The note lands under
+`.roll/notes/<date>-roll-design-<id>-<epoch>.md` so US-SKILL-014 can
+read trend data.
+
+Score guidance for design quality (integer 1..10):
+- **9..10** — clean split: every US is INVEST-compliant, profile
+  (est_min / risk_zone / chain_depth) filled, doc-refresh closer wired
+  when user-visible behaviour changed, peer-review unnecessary or
+  reached AGREE quickly.
+- **6..8** — split shipped but with caveats: one US borderline on
+  INVEST (e.g. shared file conflict), or Discuss had ESCALATE before
+  settling, or profile was partial.
+- **1..5** — split shipped but rough: missing doc-refresh closer,
+  profile fields skipped, USer story too coarse for AI cycle; flag a
+  follow-up `roll-design` pass.
+
+Verdict values:
+- `good` — design + split are clean.
+- `ok` — design is acceptable with one or two trade-offs noted.
+- `regression` — the split visibly broke something earlier (rare; e.g.
+  invalidated a previously-stable depends-on chain).
+
+---
+
 ## Integration
 
 ### With roll-build

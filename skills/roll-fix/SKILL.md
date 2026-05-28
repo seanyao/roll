@@ -87,6 +87,33 @@ Before creating any file or directory:
 
 ## TCR Workflow
 
+### 0. Pre-flight self-check (US-AGENT-007)
+
+Before locking the issue, read the FIX's Agent profile (est_min / risk_zone / chain_depth) from the linked feature md and decide whether this cycle should attempt the fix:
+
+```
+inputs:
+  fix.est_min       (from **Agent profile:** block on the FIX row's feature md)
+  fix.risk_zone     (low / medium / high)
+  fix.chain_depth   (0 unless already a downgrade product)
+  agent.max_est_min (from .roll/agent-routes.yaml for the current agent)
+  history.prefer_threshold + history.hit_rate (FIX history for this agent)
+
+verdict:
+  too_big when ANY:
+    1. fix.est_min > agent.max_est_min
+    2. fix.risk_zone not in agent.risk
+    3. history.hit_rate < prefer_threshold AND fix.chain_depth == 0
+  ok otherwise
+```
+
+Emit `verdict: ok` or `verdict: too_big` (with `reason:`) as the first cycle output line.
+
+- `ok` → continue with step 1 below normally
+- `too_big` → self-downgrade per US-AGENT-008: invoke `roll-design --from-story <FIX-id>` to re-split, write sub-stories with `chain_depth + 1`, flip original FIX to 🚫 Hold, exit cleanly. Do NOT TCR a half fix.
+
+Bug fixes are usually small (est_min ≤ 5), so pre-flight is mostly a sanity barrier for FIXes whose underlying issue turns out structural — e.g. a "simple null check" that requires touching 12 files. Catching that upfront is cheaper than burning a cycle.
+
 ### 1. Lock the issue
    - state the user-visible issue or requested enhancement
    - define the scope boundary and non-goals

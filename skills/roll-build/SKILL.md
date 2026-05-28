@@ -52,6 +52,41 @@ Do not use for:
 
 Activate when input is a `US-[A-Z]+-[0-9]+` identifier.
 
+### Step 0: Pre-flight self-check (US-AGENT-007)
+
+Before reading the Story in depth or splitting actions, **read the Agent profile** from the story's feature md and decide whether this cycle can realistically deliver it. The check is mechanical:
+
+```
+inputs:
+  story.est_min       (from **Agent profile:** block, US-AGENT-001)
+  story.risk_zone     (low / medium / high)
+  story.chain_depth   (0 unless already a downgrade product)
+  agent.max_est_min   (from .roll/agent-routes.yaml for the current agent)
+  history.prefer_threshold (from .roll/agent-routes.yaml)
+  history.hit_rate    (this agent × this story_type, last window_cycles)
+
+verdict:
+  too_big when ANY of these is true:
+    1. story.est_min > agent.max_est_min   (hard capacity miss)
+    2. story.risk_zone not in agent.risk    (hard risk miss)
+    3. history.hit_rate < prefer_threshold AND story.chain_depth == 0
+       (soft signal: history says this agent's not on top of this type yet,
+        and we still have downgrade budget — don't burn a cycle)
+  ok otherwise
+```
+
+Output the verdict as the first line of the cycle response:
+
+```yaml
+verdict: ok    # or: too_big
+reason: <one short line — which condition triggered, with numbers>
+```
+
+When `verdict: ok` → continue to Step 1 normally.
+When `verdict: too_big` → go to **US-AGENT-008 self-downgrade path** (re-split via `roll-design --from-story <id>`, write sub-stories with `chain_depth + 1`, flip original story to 🚫 Hold, exit cleanly without TCR work this cycle).
+
+> Pre-flight is honest, not paranoid: a small story (est_min ≤ 5, chain_depth=0, low risk) should almost always go `ok`. The check pays off on the long tail — stories that look small but compose tons of files, or that the current agent has historically failed.
+
 ### Step 1: Read the Story
 
 1. Open `.roll/backlog.md`, find the US row, follow the link to `.roll/features/<feature>.md`

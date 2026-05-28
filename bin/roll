@@ -8952,6 +8952,57 @@ _loop_split_cap_hit() {
   echo "[loop] StorySplitCapHit ${story_id}: chain_depth >= 2 — held for human triage"
 }
 
+# US-SKILL-010: unified self-score note writer for roll-build /
+# roll-fix / roll-design. Lands under .roll/notes/ with YAML frontmatter
+# so subsequent stories (US-SKILL-014 trend, US-SKILL-015 docs) can
+# read/aggregate without parsing free text.
+#
+# Args: skill story_id score:int verdict [rationale...]
+_skill_write_self_score() {
+  local skill="${1:-}"
+  local story="${2:-}"
+  local score="${3:-}"
+  local verdict="${4:-}"
+  shift 4 2>/dev/null || true
+  local rationale="${*:-}"
+
+  case "$skill" in
+    roll-build|roll-fix|roll-design) ;;
+    *) err "_skill_write_self_score: skill must be roll-build / roll-fix / roll-design (got '$skill')"; return 1 ;;
+  esac
+  [ -n "$story" ] || { err "_skill_write_self_score: story id required"; return 1; }
+  case "$score" in
+    ''|*[!0-9]*) err "_skill_write_self_score: score must be integer 1..10"; return 1 ;;
+  esac
+  if [ "$score" -lt 1 ] || [ "$score" -gt 10 ]; then
+    err "_skill_write_self_score: score out of range (1..10): $score"
+    return 1
+  fi
+  case "$verdict" in
+    good|ok|regression) ;;
+    *) err "_skill_write_self_score: verdict must be good / ok / regression (got '$verdict')"; return 1 ;;
+  esac
+
+  local notes_dir=".roll/notes"
+  mkdir -p "$notes_dir"
+  local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local date_part; date_part=$(date -u +%Y-%m-%d)
+  local epoch; epoch=$(date -u +%s)
+  local file="${notes_dir}/${date_part}-${skill}-${story}-${epoch}.md"
+
+  {
+    printf -- '---\n'
+    printf 'skill: %s\n' "$skill"
+    printf 'story: %s\n' "$story"
+    printf 'score: %s\n' "$score"
+    printf 'verdict: %s\n' "$verdict"
+    printf 'ts: %s\n' "$ts"
+    printf -- '---\n'
+    printf '\n'
+    printf '%s\n' "$rationale"
+  } > "$file"
+}
+
 # _loop_mark_todo <story-id> [backlog-path]
 #   Revert a row from "🔨 In Progress" back to "📋 Todo". Called when a
 #   cycle's executor fails so the next cycle can pick the story up again.

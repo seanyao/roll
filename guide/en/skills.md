@@ -63,6 +63,51 @@ User Input
   Manual judgment
 ```
 
+## Self-scoring (US-SKILL-010..014)
+
+`roll-build`, `roll-fix`, and `roll-design` each write one structured
+self-score note to `.roll/notes/` whenever they complete:
+
+```
+.roll/notes/2026-05-29-roll-build-US-AUTH-001-1717000000.md
+.roll/notes/2026-05-29-roll-fix-FIX-072-1717000123.md
+.roll/notes/2026-05-29-roll-design-US-FOO-001-1717000456.md
+```
+
+Each note is YAML frontmatter + rationale:
+
+```markdown
+---
+skill: roll-build
+story: US-AUTH-001
+score: 8
+verdict: good
+ts: 2026-05-29T03:14:15Z
+---
+
+Story shipped cleanly; AC fully met. One TCR retry on the auth-cookie test
+(missing setup). Peer review surfaced one nit, addressed inline.
+```
+
+`roll loop status` rolls up the trend at the bottom of the ROLLUP block:
+
+```
+self-score: mean 7.8 / min 4 / redo 2 (last 14)
+```
+
+`redo` counts entries whose `verdict` is `regression`, or whose `verdict`
+is `ok` with `score < 6` — both signal that a follow-up look is
+warranted. Mean and min cover the whole window so a single bad cycle
+doesn't get hidden by the average.
+
+The notes are part of `.roll/` and therefore commit-tracked, so the
+quality trail is reproducible across machines and visible to anyone
+reading the project history.
+
+`roll loop status` 状态盘底部会汇总自评趋势:`self-score: mean 7.8 /
+min 4 / redo 2 (last 14)`,`redo` 包含 `regression` 判定和 `ok` 但分
+数 < 6 的低置信交付,共同标记需要回看的 cycle 数量。
+
 ## Auto-Trigger Keywords
 
 | Skill | Trigger Keywords |

@@ -415,6 +415,33 @@ A minor change is only "done" when all are true:
 - [ ] Deployment completed
 - [ ] Online verification performed
 - [ ] **Verification Gate passed** (fresh evidence for tests, build, fix confirmation, no regression)
+- [ ] **Self-score note written (US-SKILL-010 / 011)** — before exit, the agent
+      writes a structured score note via `_skill_write_self_score` so trend
+      analysis (US-SKILL-014) and skill-self-scoring docs (US-SKILL-015) have
+      data to read.
+
+### Self-score (US-SKILL-011)
+
+Before exiting the cycle, write one self-score note. The helper validates
+inputs and lands the note under `.roll/notes/<date>-roll-fix-<FIX-id>-<epoch>.md`:
+
+```bash
+bash -c 'source "$(command -v roll)"; \
+  _skill_write_self_score roll-fix FIX-XXX-NNN <score 1..10> <good|ok|regression> "<rationale>"'
+```
+
+Score guidance (integer 1..10):
+- **9..10** — clean root-cause fix; regression test added; TCR cycle smooth.
+- **6..8** — fix shipped but with caveats (e.g. workaround, partial coverage,
+  or repeated TCR red iterations); rationale explains the trade-off.
+- **1..5** — fix landed but quality is below the bar (test coverage missing,
+  fix only narrows blast radius, repeated agent re-tries). Verdict should be
+  `ok` or `regression` if a related test broke.
+
+Verdict values:
+- `good` — fix is the proper root-cause fix; no caveats.
+- `ok` — shipped but with documented trade-offs (use rationale to explain).
+- `regression` — the fix re-broke something else (rare; consider re-opening).
 
 ## Rubric
 

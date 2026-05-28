@@ -706,7 +706,32 @@ Before creating any file or directory:
 - [ ] **.roll/backlog.md index status updated** (📋 → ✅, REQUIRED)
 - [ ] **`.roll/features/<feature>.md` US section updated** (Completed date + [x] ACs, REQUIRED)
 - [ ] **CHANGELOG.md staged and bundled** into completion commit via `$roll-.changelog` in Phase 11 (REQUIRED)
+- [ ] **Self-score note written (US-SKILL-010 / 012)** — see "Self-score" subsection below
 - [ ] Summary reported to user
+
+### Self-score (US-SKILL-012)
+
+Before reporting completion to the user, write one self-score note. The
+helper lands the note under `.roll/notes/<date>-roll-build-<US-id>-<epoch>.md`
+with YAML frontmatter so trend analysis (US-SKILL-014) can aggregate later:
+
+```bash
+bash -c 'source "$(command -v roll)"; \
+  _skill_write_self_score roll-build US-XXX-NNN <score 1..10> <good|ok|regression> "<rationale>"'
+```
+
+Score guidance (integer 1..10):
+- **9..10** — story shipped cleanly: AC fully met, TCR rhythm tight, no
+  re-tries from `verdict: too_big`, peer review concerns addressed inline.
+- **6..8** — shipped with caveats: re-tries on red, edge case left to a
+  follow-up FIX, documentation lagged behind code by one cycle, etc.
+- **1..5** — shipped but at low confidence: AC partially met (note which),
+  TCR rhythm broken (multiple revert iterations), or `regression` verdict.
+
+Verdict values:
+- `good` — story fully delivered; AC met; no concerning signal.
+- `ok` — shipped but with at least one documented trade-off (use rationale).
+- `regression` — story landed but another behaviour broke (rare; open a FIX).
 
 ---
 

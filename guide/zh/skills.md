@@ -61,6 +61,51 @@
   人工判断
 ```
 
+## 技能自评（US-SKILL-010..014）
+
+`roll-build`、`roll-fix`、`roll-design` 完成时各自写一条结构化自评笔
+记到 `.roll/notes/`：
+
+Each of `roll-build` / `roll-fix` / `roll-design` writes a structured
+self-score note on completion.
+
+```
+.roll/notes/2026-05-29-roll-build-US-AUTH-001-1717000000.md
+.roll/notes/2026-05-29-roll-fix-FIX-072-1717000123.md
+.roll/notes/2026-05-29-roll-design-US-FOO-001-1717000456.md
+```
+
+每条笔记是 YAML frontmatter + 自评原因：
+
+```markdown
+---
+skill: roll-build
+story: US-AUTH-001
+score: 8
+verdict: good
+ts: 2026-05-29T03:14:15Z
+---
+
+故事干净交付,AC 全部命中。auth-cookie 测试 TCR 重试一次(setup 漏初始化)。
+Peer review 有一条 nit,inline 解决。
+```
+
+`roll loop status` 在 ROLLUP 区块底部汇总趋势：
+
+```
+self-score: mean 7.8 / min 4 / redo 2 (last 14)
+```
+
+`redo` 计入 `verdict: regression` 和 `verdict: ok` 且 `score < 6` 的
+低置信交付——两者都提示该轮 cycle 值得回看。mean 和 min 覆盖整个
+窗口，避免一次糟糕 cycle 被平均掩盖。
+
+The trend line shows mean, minimum, and `redo` count (regression
+verdicts plus low-confidence "ok"s) for the last 14 self-score notes.
+
+这些笔记是 `.roll/` 的一部分，跟代码一起提交，质量轨迹在不同机器、
+不同协作者之间都可复现，从项目历史里直接可见。
+
 ## 自动触发关键词
 
 | 技能 | 触发关键词 |

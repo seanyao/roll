@@ -706,6 +706,52 @@ def rollup_for_story(cycles: List[Dict[str, Any]], story_id: str) -> Dict[str, A
             r["model"] = cy["model"]
     return r
 
+
+# US-SKILL-014: aggregate the last N self-score notes for the dashboard.
+# Reads .roll/notes/*.md (frontmatter format from US-SKILL-010), returns
+#   "self-score: mean 7.8 / min 4 / redo 2 (last 14)"
+# or "" when no notes / "self-score: (n/a) — N sample(s), need 3 (last N)"
+# when sample is too small.
+def _self_score_summary_line(notes_dir = None, window: int = 14) -> str:
+    notes_dir = notes_dir if notes_dir is not None else Path(".roll/notes")
+    if not notes_dir.exists():
+        return ""
+    files = sorted(notes_dir.glob("*.md"))[-window:]
+    if not files:
+        return ""
+    total = 0
+    count = 0
+    minv = 11
+    redo = 0
+    for f in files:
+        score = None
+        verdict = None
+        for line in f.read_text(errors="ignore").splitlines():
+            if line.startswith("score: "):
+                try:
+                    score = int(line.split(": ", 1)[1].strip())
+                except ValueError:
+                    score = None
+            elif line.startswith("verdict: "):
+                verdict = line.split(": ", 1)[1].strip()
+            if score is not None and verdict is not None:
+                break
+        if score is None:
+            continue
+        count += 1
+        total += score
+        if score < minv:
+            minv = score
+        if verdict == "regression":
+            redo += 1
+        elif verdict == "ok" and score < 6:
+            redo += 1
+    if count < 3:
+        return f"self-score: (n/a) — {count} sample(s), need 3 (last {window})"
+    mean = total / count
+    return f"self-score: mean {mean:.1f} / min {minv} / redo {redo} (last {window})"
+
+
 # US-AGENT-010: per-agent hit-rate summary for the ROLLUP block.
 # Aggregates the last `window_cycles` runs.jsonl records grouped by `agent`.
 # Returns a single-line string like
@@ -984,6 +1030,14 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
         _agent_line = ""
     if _agent_line:
         print("  " + c("dim", _agent_line))
+
+    # US-SKILL-014: per-skill self-score trend (single line) under the agent line.
+    try:
+        _skill_line = _self_score_summary_line()
+    except Exception:
+        _skill_line = ""
+    if _skill_line:
+        print("  " + c("dim", _skill_line))
 
     print()
     print(c("faint", "─" * COLS))

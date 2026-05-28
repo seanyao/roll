@@ -125,16 +125,26 @@ readers. The rule mirrors the gate in Step 2.
 ### Step 1.5 — Pre-run CI Health Check
 
 Call `roll loop precheck-ci` before scanning BACKLOG. This is a **defensive gate**
-against building on a broken base — if the most recent commit on the branch
-has red CI, the loop must not stack new commits on top (which would create the
-exact stuck-red state FIX-026 traces to).
+against building on a broken base. Check the **exit code** and route accordingly:
 
-- HEAD CI green / pending / no-run-yet → proceed to Step 2.
-- HEAD CI red → write ALERT, **do not pick up any stories this cycle**,
-  exit cleanly. The next cycle will retry; the human must fix CI manually
-  (typically by reverting or pushing a green commit) before the loop resumes.
-- `gh` missing or repo unparseable → graceful skip (`roll loop precheck-ci`
-  returns 0); the post-build `_loop_enforce_ci` remains the strict gate.
+| Exit code | Meaning | Action |
+|-----------|---------|--------|
+| `0` | CI green / pending / unknown | Proceed to Step 1.6 (PR Inbox) and Step 2 (BACKLOG scan) |
+| `1` | CI red AND heal exhausted or `ROLL_LOOP_NO_HEAL=1` | ALERT already written; exit cleanly this cycle |
+| `2` | CI red AND heal attempt allowed (US-LOOP-046) | **Hot-fix path** — skip BACKLOG, fix CI instead (see below) |
+
+`gh` missing or repo unparseable → `precheck-ci` returns `0`; graceful skip.
+
+**Hot-fix path (exit code 2) — US-LOOP-046:**
+
+Do NOT pick any BACKLOG stories this cycle. Instead:
+
+1. Capture context: `roll loop hotfix-head-context` → prints path to context log
+2. Invoke `Skill("roll-fix")` with brief:
+   `"CI red on HEAD. Failing run logs at <context-log-path>. Diagnose root cause, fix via TCR, commit, push. Do NOT change BACKLOG status."`
+3. After `roll-fix` completes, re-run `roll ci --wait` to verify the fix
+4. If CI is still red: run `roll loop precheck-ci` again; if it returns `1` (heal exhausted),
+   exit cleanly — ALERT was already written by the precheck
 
 ### Step 1.6 — PR Inbox (US-AUTO-034)
 

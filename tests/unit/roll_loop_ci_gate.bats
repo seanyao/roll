@@ -122,21 +122,33 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "_loop_precheck_ci: returns 1 when HEAD CI is failure" {
+@test "_loop_precheck_ci: returns non-zero when HEAD CI is failure (US-LOOP-046: 2=hot-fix, 1=abort)" {
+  # US-LOOP-046: CI red now returns exit 2 (hot-fix signal) by default when
+  # heal is allowed (ROLL_LOOP_HEAL_MAX > 0 and ROLL_LOOP_NO_HEAL unset).
   git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"failure"}]'; return 0; }
   export -f gh
   run _loop_precheck_ci
-  [ "$status" -eq 1 ]
+  # Either 1 (abort/exhausted) or 2 (hot-fix allowed) — both indicate CI is red
+  [ "$status" -ne 0 ]
 }
 
-@test "_loop_precheck_ci: writes ALERT when HEAD CI is red" {
+@test "_loop_precheck_ci: returns 1 with ROLL_LOOP_NO_HEAL=1 when HEAD CI is failure" {
   git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"failure"}]'; return 0; }
   export -f gh
-  _loop_precheck_ci || true
+  ROLL_LOOP_NO_HEAL=1 run _loop_precheck_ci
+  [ "$status" -eq 1 ]
+}
+
+@test "_loop_precheck_ci: writes ALERT when HEAD CI is red and NO_HEAL=1" {
+  git remote add origin "git@github.com:seanyao/roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"failure"}]'; return 0; }
+  export -f gh
+  ROLL_LOOP_NO_HEAL=1 _loop_precheck_ci || true
   [ -f "$_LOOP_ALERT" ]
   grep -qE 'red|失败|broken base' "$_LOOP_ALERT"
 }
@@ -151,12 +163,22 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "roll loop precheck-ci: CLI subcommand returns 1 when HEAD CI is red" {
+@test "roll loop precheck-ci: CLI subcommand returns non-zero when HEAD CI is red" {
+  # US-LOOP-046: may return 2 (hot-fix) or 1 (abort) — both non-zero
   git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"failure"}]'; return 0; }
   export -f gh
   run "$ROLL_BIN" loop precheck-ci
+  [ "$status" -ne 0 ]
+}
+
+@test "roll loop precheck-ci: returns 1 with ROLL_LOOP_NO_HEAL=1 when HEAD CI is red" {
+  git remote add origin "git@github.com:seanyao/roll.git"
+  git commit --allow-empty -m "test" -q
+  gh() { echo '[{"conclusion":"failure"}]'; return 0; }
+  export -f gh
+  ROLL_LOOP_NO_HEAL=1 run "$ROLL_BIN" loop precheck-ci
   [ "$status" -eq 1 ]
 }
 
@@ -189,21 +211,22 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "_loop_precheck_ci: returns 1 when HEAD CI is cancelled (FIX-103)" {
+@test "_loop_precheck_ci: returns non-zero when HEAD CI is cancelled (FIX-103)" {
+  # US-LOOP-046: cancelled returns 2 (hot-fix) or 1 (abort) — both non-zero
   git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"cancelled","status":"completed"}]'; return 0; }
   export -f gh
   run _loop_precheck_ci
-  [ "$status" -eq 1 ]
+  [ "$status" -ne 0 ]
 }
 
-@test "_loop_precheck_ci: ALERT records conclusion + status when red (FIX-103)" {
+@test "_loop_precheck_ci: ALERT records conclusion + status when red with NO_HEAL=1 (FIX-103)" {
   git remote add origin "git@github.com:seanyao/roll.git"
   git commit --allow-empty -m "test" -q
   gh() { echo '[{"conclusion":"failure","status":"completed"},{"conclusion":null,"status":"in_progress"}]'; return 0; }
   export -f gh
-  _loop_precheck_ci || true
+  ROLL_LOOP_NO_HEAL=1 _loop_precheck_ci || true
   [ -f "$_LOOP_ALERT" ]
   # ALERT must carry dedicated, structured fields so a human can tell
   # "real red" from "misclassified pending" without re-querying gh.

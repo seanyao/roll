@@ -6730,10 +6730,11 @@ cmd_loop() {
     resume)  _loop_resume ;;
     reset)   _loop_reset ;;
     gc)      shift; _loop_gc "$@" ;;
-    notify)       _notify "${1:-roll}" "${2:-}" ;;
-    enforce-tcr)  _loop_enforce_tcr "${1:-}" "${2:-}" ;;
-    precheck-ci)  _loop_precheck_ci ;;
-    branches)     _loop_branches "$(pwd -P)" ;;
+    notify)               _notify "${1:-roll}" "${2:-}" ;;
+    enforce-tcr)          _loop_enforce_tcr "${1:-}" "${2:-}" ;;
+    precheck-ci)          _loop_precheck_ci ;;
+    hotfix-head-context)  _loop_hotfix_head_context "${1:-}" ;;
+    branches)             _loop_branches "$(pwd -P)" ;;
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
@@ -7853,6 +7854,38 @@ _loop_precheck_ci() {
     run_states=$(echo "$runs" \
       | jq -r '[.[] | "\(.status // "?")/\(.conclusion // "null")"] | unique | join(", ")' \
       2>/dev/null || echo "?")
+
+    # US-LOOP-046/048: check whether hot-fix path is allowed before aborting.
+    # ROLL_LOOP_NO_HEAL=1 or ROLL_LOOP_HEAL_MAX=0 → fall through to original abort.
+    local _heal_max="${ROLL_LOOP_HEAL_MAX:-2}"
+    if [[ "${ROLL_LOOP_NO_HEAL:-}" != "1" ]] && [[ "$_heal_max" -gt 0 ]]; then
+      local _state_file="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/state-${_LOOP_PROJ_SLUG:-$(basename "$PWD")}.yaml"
+      local _heal_key="heal_count_head_${commit:0:8}"
+      local _count=0
+      [[ -f "$_state_file" ]] && _count=$(grep "^${_heal_key}:" "$_state_file" 2>/dev/null | awk '{print $2}' || echo 0)
+      _count=$(( ${_count:-0} + 0 ))  # coerce to int
+      if [[ "$_count" -lt "$_heal_max" ]]; then
+        # Increment counter and signal hot-fix path to the agent
+        _count=$(( _count + 1 ))
+        mkdir -p "$(dirname "$_state_file")" 2>/dev/null || true
+        if [[ -f "$_state_file" ]]; then
+          # Update existing key or append
+          if grep -q "^${_heal_key}:" "$_state_file" 2>/dev/null; then
+            local _tmp; _tmp=$(mktemp)
+            grep -v "^${_heal_key}:" "$_state_file" > "$_tmp" 2>/dev/null || true
+            printf '%s: %d\n' "$_heal_key" "$_count" >> "$_tmp"
+            mv "$_tmp" "$_state_file"
+          else
+            printf '%s: %d\n' "$_heal_key" "$_count" >> "$_state_file"
+          fi
+        else
+          printf '%s: %d\n' "$_heal_key" "$_count" > "$_state_file"
+        fi
+        # Exit 2 signals the agent: CI is red, hot-fix path is available
+        return 2
+      fi
+    fi
+
     err "$(msg loop.pre_run_ci_check_head_ci ${short})"
     mkdir -p "$(dirname "$_LOOP_ALERT")"
     cat > "$_LOOP_ALERT" << EOF
@@ -7872,6 +7905,62 @@ EOF
     _notify "roll ⚠ CI red" "loop refused to build on broken base (${short})"
     return 1
   fi
+  return 0
+}
+
+# US-LOOP-047: hot-fix context factory for HEAD CI failures.
+# Captures failing run logs + recent commit diff, writes to /tmp/roll-heal-head-<sha>.log
+# Returns 0 and prints the log path on success; 1 if context could not be gathered.
+_loop_hotfix_head_context() {
+  local commit="${1:-$(git rev-parse HEAD 2>/dev/null)}"
+  [[ -z "$commit" ]] && return 1
+  local short="${commit:0:8}"
+  local outfile="/tmp/roll-heal-head-${short}.log"
+  local slug; _gh_resolve slug || slug="unknown"
+
+  {
+    printf '=== CI Hot-fix Context: HEAD %s ===\n\n' "$short"
+    printf '--- Recent commits ---\n'
+    git log --oneline -5 2>/dev/null || true
+    printf '\n--- Diff of last commit ---\n'
+    git show --stat HEAD 2>/dev/null | head -40 || true
+    printf '\n--- CI failure logs (head 200 lines) ---\n'
+    local run_id
+    run_id=$(gh -R "$slug" run list --commit "$commit" \
+      --json databaseId,conclusion -L 5 2>/dev/null \
+      | jq -r '.[] | select(.conclusion=="failure") | .databaseId' 2>/dev/null | head -1)
+    if [[ -n "$run_id" ]]; then
+      gh -R "$slug" run view --log-failed "$run_id" 2>/dev/null | head -200 || true
+    else
+      printf '(no failed run found for commit %s)\n' "$short"
+    fi
+  } > "$outfile" 2>/dev/null
+  printf '%s\n' "$outfile"
+  return 0
+}
+
+# US-LOOP-050: PR hot-fix entry point.
+# Checks out the PR branch, captures CI failure logs, and prepares context
+# for a roll-fix invocation on the PR branch.
+# Usage: _loop_hot_fix_pr <pr_number>
+_loop_hot_fix_pr() {
+  local pr_num="$1"
+  [[ -z "$pr_num" ]] && return 1
+  local slug; _gh_resolve slug || return 1
+  local outfile="/tmp/roll-heal-pr-${pr_num}.log"
+  local run_id
+  run_id=$(gh -R "$slug" run list --json databaseId,conclusion,headBranch -L 20 2>/dev/null \
+    | jq -r --argjson pr "\"$pr_num\"" \
+      '.[] | select(.conclusion=="failure") | .databaseId' 2>/dev/null | head -1)
+  {
+    printf '=== PR #%s CI Hot-fix Context ===\n\n' "$pr_num"
+    if [[ -n "$run_id" ]]; then
+      gh -R "$slug" run view --log-failed "$run_id" 2>/dev/null | head -200 || true
+    else
+      printf '(no failed run found for PR #%s)\n' "$pr_num"
+    fi
+  } > "$outfile" 2>/dev/null
+  printf '%s\n' "$outfile"
   return 0
 }
 
@@ -8109,7 +8198,14 @@ _loop_pr_classify() {
   local mergeable="${4:-}"
 
   case "$head_ref" in
-    loop/*) echo "loop_self"; return 0 ;;
+    loop/*)
+      # US-LOOP-049: loop/* PRs with CI failure get their own classification
+      # so _loop_pr_inbox can route them to the PR hot-fix path.
+      if [[ "$ci_state" == "failure" ]]; then
+        echo "loop_self_ci_red"; return 0
+      fi
+      echo "loop_self"; return 0
+      ;;
   esac
 
   case "$human_review" in

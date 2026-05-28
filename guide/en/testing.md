@@ -108,9 +108,9 @@ The default combination is `--affected --tier=fast`; pre-push / release run
 
 ## Test Quality Rubric
 
-`docs/testing/quality-rubric.md` (referenced from `$roll-.dream` Scan 7)
-catalogs six recurring antipatterns the dream nightly scan flags as
-`REFACTOR-XXX [test-quality:❶|❷|...]`:
+`guide/en/testing/quality-rubric.md` (referenced from `$roll-.dream` Scan 7)
+catalogs eight recurring antipatterns the dream nightly scan flags as
+`REFACTOR-XXX [test-quality:❶|❷|...|❽]`:
 
 | # | Antipattern | Fix |
 |---|-------------|-----|
@@ -120,9 +120,27 @@ catalogs six recurring antipatterns the dream nightly scan flags as
 | ❹ | Fixture order coupling (shared mutable state between tests) | Setup/teardown each test independently; use immutable fixtures |
 | ❺ | Testing private functions / bypassing the public API | Re-route through the public entry point; if it's hard to reach, the API is wrong |
 | ❻ | Asserting framework behaviour (testing bats itself) | Delete the test; trust the framework |
+| ❼ | Inlining external-tool behaviour (`sed`/`grep`/`awk` pipelines duplicated in test bodies) | Call the project helper that owns the parsing, or extract into `tests/helpers/` |
+| ❽ | Asserting on a file outside this repo (`~/.codex`, `~/.kimi`, `~/.roll`, system paths) | Sandbox via `BATS_TMPDIR`, redirect env vars to a tmp dir, never touch live config |
 
 The dream skill emits at most 5 REFACTOR entries per scan, so the backlog
 doesn't drown in noise. Refactor them in priority order.
+
+### Test-quality merge gate (US-QA-012 / 013)
+
+Categories ❼ and ❽ are **blocking**: loop runs
+`roll loop test-quality-check <changed-bats-files>` between CI green and
+auto-merge. Violations write `ALERT-<slug>.md` and hold the PR until either
+the test is reshaped or the PR description carries `[skip-test-quality]`
+(case-insensitive). Use the bypass sparingly — the violation still gets
+reported through dream as a REFACTOR row, so it doesn't quietly accumulate.
+
+Categories ❶..❻ remain advisory: dream flags them as REFACTOR entries but
+the gate doesn't block on them. Triage them in your usual queue.
+
+Lines with `# test-quality:allow` are skipped by the scanner — reserved for
+doc-validation tests that legitimately inline `awk` to parse markdown
+without ever touching production code.
 
 `tests/unit/model_prices.bats` is the canonical ❶ exemplar — assertions
 that read live production rates were broken every time the rate card moved,

@@ -124,6 +124,16 @@ If `roll-design` cannot produce ≥2 sub-stories (story is already irreducible),
 - Pick the smallest shippable Action first
 - **Granularity constraint**: Each Action completable in 2–5 minutes; split if larger
 - **No placeholders**: Action descriptions must be specific and directly executable
+- **Test-quality self-check (US-QA-011)** — for every Action that adds tests:
+  1. Tests call project functions / public command entry points; do NOT inline
+     external-tool behaviour (`sed`/`awk`/`grep`/`find`/`cut` pipelines that
+     duplicate logic already in `lib/` or `bin/`) — rubric ❼.
+  2. Tests sandbox filesystem state via `BATS_TMPDIR` (or equivalent); do NOT
+     touch or assert on paths outside this repo (`~/.codex`, `~/.kimi`,
+     `~/.roll/`, `/etc/...`) — rubric ❽.
+  3. If you can't satisfy (1) or (2), reshape the Action: extract a project
+     helper, redirect the env var to a tmp dir, or move the test to an
+     integration tier where the boundary is intentional and documented.
 
 #### 2.5 Parallel Dispatch (auto-determined)
 

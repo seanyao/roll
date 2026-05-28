@@ -102,8 +102,8 @@ CI 里设置 `ROLL_TEST_TIME_CAP=1` 时，`--tier=fast` 跑全套上限 60 秒
 
 ## 测试质量评分卷（rubric）
 
-`docs/testing/quality-rubric.md`（由 `$roll-.dream` Scan 7 消费）列出
-夜检扫描会按 `REFACTOR-XXX [test-quality:❶|❷|...]` 输出的六类反模式：
+`guide/zh/testing/quality-rubric.md`（由 `$roll-.dream` Scan 7 消费）列出
+夜检扫描会按 `REFACTOR-XXX [test-quality:❶|❷|...|❽]` 输出的八类反模式：
 
 | # | 反模式 | 修复方向 |
 |---|--------|---------|
@@ -113,9 +113,28 @@ CI 里设置 `ROLL_TEST_TIME_CAP=1` 时，`--tier=fast` 跑全套上限 60 秒
 | ❹ | Fixture 顺序耦合（测试间共享可变状态） | 每个测试独立 setup/teardown；用不可变 fixture |
 | ❺ | 测私有函数 / 绕过 public API | 改走 public 入口；如果难以到达，说明 API 设计有问题 |
 | ❻ | 断言框架行为（在测 bats 本身） | 删测试；信任框架 |
+| ❼ | 内联外部工具行为（测试体里复制 `sed`/`grep`/`awk` 流水线） | 调项目自己的 helper；或抽到 `tests/helpers/` 共享 |
+| ❽ | 断言 repo 之外的文件（`~/.codex`/`~/.kimi`/`~/.roll` 或系统路径） | 用 `BATS_TMPDIR` 沙箱化，环境变量重定向到临时目录，不碰用户真实配置 |
 
 dream 每轮最多 emit 5 条 REFACTOR，避免 backlog 被噪音淹没。
 按优先级逐个收拾。
+
+### 测试质量合并门（US-QA-012 / 013）
+
+❼ 和 ❽ 两类是**硬阻断**：CI 绿后 loop 自动合并前会跑
+`roll loop test-quality-check <改动的-bats-文件>`。命中违规时 loop 写
+`ALERT-<slug>.md` 并卡住 PR，要么改测试要么 PR 描述加
+`[skip-test-quality]` 标记放行（大小写不敏感）。
+
+❼ and ❽ are **blocking**: PR auto-merge is held until violations are fixed
+or the PR description carries `[skip-test-quality]`.
+
+绕过请谨慎使用——dream 仍会把违规登记为 REFACTOR,不会因为 skip 就被遗忘。
+
+❶..❻ 是建议性,dream 标 REFACTOR 但门不卡。常规迭代里慢慢清。
+
+带 `# test-quality:allow` 注释的行会被扫描器跳过（文档校验类测试里
+合法使用 `awk` 解析 markdown 时用，不触碰生产代码）。
 
 `tests/unit/model_prices.bats` 是 ❶ 类范例 —— 之前的断言读生产费率
 表，每次价格调整就把套件打红，即便算术逻辑没动。重写后算术测试走

@@ -6,7 +6,7 @@ PROOF="$(git rev-parse --show-toplevel)/.roll/last-test-pass"
 _fail() {
   echo "✗ Commit blocked: $1" >&2
   echo "✗ 提交被拒绝：$2" >&2
-  echo "Run: npm test" >&2
+  echo "Run: roll test   (affected by default; writes the test-pass proof. Full 'npm test' is pre-push only — it won't finish inside the 60s gate.)" >&2
   exit 1
 }
 

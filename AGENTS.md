@@ -15,7 +15,10 @@
 ## 2. Standards
 - **Bash**: `set -euo pipefail`. All variables quoted. shellcheck-clean.
 - **Rules**: [engineering-common-sense.md](guide/en/practices/engineering-common-sense.md).
-- **Test**: bats coverage for `cmd_*` and helpers. Run `npm test` before push.
+- **Test**: bats coverage for `cmd_*` and helpers.
+  - **TCR commits**: run `roll test` — affected by default (fast) and it writes the `.roll/last-test-pass` proof the pre-commit hook checks. `roll test` honors `.roll/local.yaml` `test_isolation` (host by default; `tart` VM on this dev machine if configured).
+  - **Pre-push**: run the full `npm test`.
+  - **Never** run the full suite for a single TCR micro-step — it can't finish inside the hook's 60s window and hangs/kills the agent (the historical "kill-pi" abort: blocked commit → agent runs `npm test` → death).
 - **Git hooks**: TCR pre-commit gate is in `hooks/pre-commit`. `core.hooksPath` is auto-configured by `roll setup`, by the autonomous loop at cycle preflight, and by the Claude Code SessionStart hook — no manual step needed. If you clone without setup, run `roll setup` once to wire it up. (US-INFRA-008/009)
 
 ## 3. Workflow

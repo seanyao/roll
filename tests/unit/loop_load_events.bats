@@ -11,6 +11,10 @@ setup() {
   TEST_TMP="$(mktemp -d)"
   mkdir -p "${TEST_TMP}/loop"
   export ROLL_SHARED_ROOT="${TEST_TMP}"
+  # FIX-137: unset ROLL_MAIN_PROJECT so _resolve_project_path doesn't
+  # short-circuit to the real project (test uses fake slug 'myslug').
+  unset ROLL_MAIN_PROJECT
+  unset ROLL_MAIN_SLUG
 }
 
 teardown() {

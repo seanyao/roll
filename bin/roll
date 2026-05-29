@@ -291,6 +291,140 @@ _agents_config_slot() {
   printf '%s\n' "$agent"
 }
 
+# ──────────────────────────────────────────────────────────────
+# US-AGENT-021: local agent detection + cheap online probe (cached).
+#
+# `_agents_installed`  → newline list of agents actually installed on this
+#                        machine (binary on PATH / special-case dir). deepseek
+#                        is intentionally excluded — it is a model pi loads,
+#                        not a routable agent.
+# `_agent_available N` → is agent N usable right now? ① on PATH ② a one-shot
+#                        sub-second probe (--version) that catches auth/network
+#                        failure. Prints "online"/"offline" and exits 0/1.
+#                        Result is cached per-machine (project-local), default
+#                        30 min, configurable via ROLL_AGENT_PROBE_TTL (seconds).
+#
+# bash 3.2 safe: no declare -A, no mapfile/readarray, no ${var^^}/${var,,}.
+# ──────────────────────────────────────────────────────────────
+
+# Candidate routable agents, in the same order _first_installed_agent scans.
+# deepseek is deliberately absent (it is a pi-loaded model, not an agent).
+_AGENT_REGISTRY_NAMES="claude codex kimi qwen agy pi cursor opencode trae openclaw"
+
+# List agents installed on this machine (one per line). Empty when none.
+# Used by the cascade menu (US-AGENT-026) and `use` validation (US-AGENT-027).
+_agents_installed() {
+  local agent
+  for agent in $_AGENT_REGISTRY_NAMES; do
+    if _agent_installed_by_name "$agent"; then
+      printf '%s\n' "$agent"
+    fi
+  done
+  return 0
+}
+
+# Directory holding per-machine availability cache. Project-local so two
+# checkouts on one machine do not share (and it never leaks into roll-meta).
+# Honors ROLL_AGENT_CACHE_DIR (tests / sandboxes) first, then .roll/cache/.
+_agent_cache_dir() {
+  if [ -n "${ROLL_AGENT_CACHE_DIR:-}" ]; then
+    printf '%s\n' "$ROLL_AGENT_CACHE_DIR"
+    return 0
+  fi
+  printf '%s\n' ".roll/cache/agent-availability"
+}
+
+# Cache TTL in seconds (default 30 min). ROLL_AGENT_PROBE_TTL overrides.
+_agent_probe_ttl() {
+  local ttl="${ROLL_AGENT_PROBE_TTL:-1800}"
+  case "$ttl" in
+    ''|*[!0-9]*) ttl=1800 ;;
+  esac
+  printf '%s\n' "$ttl"
+}
+
+# One-shot, sub-second probe: does agent NAME's CLI respond to --version
+# without an auth/network error? Returns 0 (online) / 1 (offline). Overridable
+# for tests via ROLL_AGENT_PROBE_HOOK (a command receiving the agent name;
+# its exit code is the verdict). Real probe: run the first known binary with
+# --version under a short timeout; non-zero exit ⇒ offline (auth/network/crash).
+_agent_probe() {
+  local name; name="$(_canonical_agent_name "$1")"
+  if [ -n "${ROLL_AGENT_PROBE_HOOK:-}" ]; then
+    "$ROLL_AGENT_PROBE_HOOK" "$name"
+    return $?
+  fi
+  local bins bin=""
+  if bins=$(_agent_bin_names "$name" 2>/dev/null); then
+    local b
+    for b in $bins; do
+      if command -v "$b" >/dev/null 2>&1; then bin="$b"; break; fi
+    done
+  fi
+  # No PATH binary to probe (special-case/dir agents) → treat presence as
+  # online; PATH detection in _agent_available already gated this path.
+  [ -n "$bin" ] || return 0
+  # Sub-second budget. `timeout` is GNU-only; fall back to a bare call when
+  # absent (macOS) — the --version path returns near-instantly anyway.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 5 "$bin" --version >/dev/null 2>&1
+  else
+    "$bin" --version >/dev/null 2>&1
+  fi
+}
+
+# Is agent NAME usable right now? Prints "online"/"offline", exits 0/1.
+# Reads a fresh cache entry when present; otherwise probes and caches the
+# result. ROLL_AGENT_NO_CACHE=1 forces a re-probe (still writes the cache).
+_agent_available() {
+  local name; name="$(_canonical_agent_name "$1")"
+  [ -n "$name" ] || { printf 'offline\n'; return 1; }
+
+  local cache_dir; cache_dir="$(_agent_cache_dir)"
+  local cache_file="${cache_dir}/${name}"
+  local ttl; ttl="$(_agent_probe_ttl)"
+  local now; now="$(date +%s)"
+
+  # Cache hit within TTL → trust it (unless caller forced a re-probe).
+  if [ -z "${ROLL_AGENT_NO_CACHE:-}" ] && [ -f "$cache_file" ]; then
+    local cached_at cached_status line
+    cached_at=""; cached_status=""
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        checked_at=*) cached_at="${line#checked_at=}" ;;
+        status=*)     cached_status="${line#status=}" ;;
+      esac
+    done < "$cache_file"
+    case "$cached_at" in ''|*[!0-9]*) cached_at="" ;; esac
+    if [ -n "$cached_at" ] && [ -n "$cached_status" ]; then
+      local age=$(( now - cached_at ))
+      if [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ]; then
+        printf '%s\n' "$cached_status"
+        [ "$cached_status" = "online" ] && return 0 || return 1
+      fi
+    fi
+  fi
+
+  # Cache miss / expired / forced → ① PATH ② probe.
+  local status="offline"
+  if _agent_installed_by_name "$name" && _agent_probe "$name"; then
+    status="online"
+  fi
+
+  # Persist the verdict (project-local, per-machine).
+  mkdir -p "$cache_dir" 2>/dev/null || true
+  if [ -d "$cache_dir" ]; then
+    local tmp="${cache_file}.tmp.$$"
+    {
+      printf 'checked_at=%s\n' "$now"
+      printf 'status=%s\n' "$status"
+    } > "$tmp" 2>/dev/null && mv "$tmp" "$cache_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  fi
+
+  printf '%s\n' "$status"
+  [ "$status" = "online" ] && return 0 || return 1
+}
+
 # Check if an AI tool is actually installed (back-compat shim around
 # _agent_installed_by_name; preserves the dir-path-based signature used
 # throughout bin/roll).

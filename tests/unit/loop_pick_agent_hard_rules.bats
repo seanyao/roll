@@ -1,84 +1,62 @@
 #!/usr/bin/env bats
-# US-AGENT-004: _loop_pick_agent_for_story hard-rule path.
+# US-AGENT-022: complexity classifier (est_min → easy/default/hard).
 #
-# Reads story profile (est_min / risk_zone / chain_depth) from the linked
-# feature md, matches against .roll/agent-routes.yaml hard rules, and prints
-# the chosen agent on stdout. Falls back to history.cold_start_default when
-# no agent matches.
+# Supersedes the three-dimensional (type/est/risk) hard-rule matcher. Routing
+# now turns on a single axis: a story's est_min maps to a complexity tier.
+#   est_min <= 8      → easy
+#   8 < est_min <= 20 → default
+#   est_min > 20      → hard
+#   missing / illegal → default
 
-ROLL="${BATS_TEST_DIRNAME}/../../bin/roll"
-ROLL_HOME="${BATS_TEST_DIRNAME}/../.."
+LIB="${BATS_TEST_DIRNAME}/../../lib/loop_pick_agent.py"
 
 setup() {
   TEST_TMP=$(mktemp -d)
   cd "$TEST_TMP"
   mkdir -p .roll/features/test-epic
-  cat > .roll/agent-routes.yaml <<'YAML'
-schema: v1
-agents:
-  pi:
-    types: [FIX]
-    est_min: { min: 0, max: 5 }
-    risk: [low]
-  deepseek:
-    types: [FIX, US, REFACTOR]
-    est_min: { min: 0, max: 15 }
-    risk: [low, medium]
-  claude:
-    types: [US, REFACTOR]
-    est_min: { min: 5, max: 30 }
-    risk: [low, medium, high]
-history:
-  window_cycles: 50
-  prefer_threshold: 0.6
-  cold_start_default: pi
-YAML
   cat > .roll/backlog.md <<'MD'
 # Project Backlog
 
-## Epic: Test
-### Feature: test-feature
-| Story | Description | Status |
-|-------|-------------|--------|
-| [US-TEST-001](.roll/features/test-epic/test-feature.md#us-test-001) | small fix | 📋 Todo |
-| [US-TEST-002](.roll/features/test-epic/test-feature.md#us-test-002) | medium story | 📋 Todo |
-| [US-TEST-003](.roll/features/test-epic/test-feature.md#us-test-003) | high-risk story | 📋 Todo |
-| [FIX-TEST-001](.roll/features/test-epic/test-feature.md#fix-test-001) | tiny bug | 📋 Todo |
+| [US-EASY-008](.roll/features/test-epic/t.md#us-easy-008) | boundary 8 | 📋 Todo |
+| [US-DEF-009](.roll/features/test-epic/t.md#us-def-009)   | boundary 9 | 📋 Todo |
+| [US-DEF-020](.roll/features/test-epic/t.md#us-def-020)   | boundary 20 | 📋 Todo |
+| [US-HARD-021](.roll/features/test-epic/t.md#us-hard-021) | boundary 21 | 📋 Todo |
+| [US-NOEST-001](.roll/features/test-epic/t.md#us-noest-001) | no estimate | 📋 Todo |
 MD
-  cat > .roll/features/test-epic/test-feature.md <<'MD'
-# Feature: test-feature
+  cat > .roll/features/test-epic/t.md <<'MD'
+# Feature: test
 
-<a id="us-test-001"></a>
-## US-TEST-001 small fix story
-
+<a id="us-easy-008"></a>
+## US-EASY-008 boundary 8
 **Agent profile:**
-- est_min: 3
-- risk_zone: low
-- chain_depth: 0
-
-<a id="us-test-002"></a>
-## US-TEST-002 medium story
-
-**Agent profile:**
-- est_min: 12
-- risk_zone: medium
-- chain_depth: 0
-
-<a id="us-test-003"></a>
-## US-TEST-003 high risk story
-
-**Agent profile:**
-- est_min: 20
+- est_min: 8
 - risk_zone: high
 - chain_depth: 0
 
-<a id="fix-test-001"></a>
-## FIX-TEST-001 tiny bug
-
+<a id="us-def-009"></a>
+## US-DEF-009 boundary 9
 **Agent profile:**
-- est_min: 3
+- est_min: 9
 - risk_zone: low
 - chain_depth: 0
+
+<a id="us-def-020"></a>
+## US-DEF-020 boundary 20
+**Agent profile:**
+- est_min: 20
+- risk_zone: low
+- chain_depth: 0
+
+<a id="us-hard-021"></a>
+## US-HARD-021 boundary 21
+**Agent profile:**
+- est_min: 21
+- risk_zone: low
+- chain_depth: 0
+
+<a id="us-noest-001"></a>
+## US-NOEST-001 no estimate
+This story has no Agent profile block.
 MD
 }
 
@@ -87,72 +65,69 @@ teardown() {
   rm -rf "$TEST_TMP"
 }
 
-@test "pick_agent: FIX small low-risk → pi (first matching hard rule)" {
-  # All three agents match types/est/risk for this story (FIX:3min:low),
-  # so first declared wins → pi
-  source "$ROLL"
-  run _loop_pick_agent_for_story FIX-TEST-001
+classify() { python3 "$LIB" --story-id "$1" --backlog .roll/backlog.md; }
+
+@test "classify: est_min=8 → easy (upper edge of easy)" {
+  run classify US-EASY-008
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pi"* ]]
+  [[ "$output" == easy\ * ]]
 }
 
-@test "pick_agent: US medium-risk story → deepseek (pi rejects US, claude est too low for 12 inside range; both match → first declared)" {
-  source "$ROLL"
-  run _loop_pick_agent_for_story US-TEST-002
+@test "classify: est_min=9 → default (just above easy)" {
+  run classify US-DEF-009
   [ "$status" -eq 0 ]
-  # US 12min medium: pi rejects (no US), deepseek matches, claude matches; first = deepseek
-  [[ "$output" == *"deepseek"* ]]
+  [[ "$output" == default\ * ]]
 }
 
-@test "pick_agent: US 20min high-risk → claude (only one matching)" {
-  source "$ROLL"
-  run _loop_pick_agent_for_story US-TEST-003
+@test "classify: est_min=20 → default (upper edge of default)" {
+  run classify US-DEF-020
   [ "$status" -eq 0 ]
-  [[ "$output" == *"claude"* ]]
+  [[ "$output" == default\ * ]]
 }
 
-@test "pick_agent: emits rule_kind=hard in output" {
-  source "$ROLL"
-  run _loop_pick_agent_for_story US-TEST-003
+@test "classify: est_min=21 → hard (just above default)" {
+  run classify US-HARD-021
   [ "$status" -eq 0 ]
-  [[ "$output" == *"hard"* ]]
+  [[ "$output" == hard\ * ]]
 }
 
-@test "pick_agent: story without profile → cold_start_default + warn" {
-  cat > .roll/features/test-epic/test-feature.md <<'MD'
-<a id="us-test-orphan"></a>
-## US-TEST-ORPHAN no agent profile here
-MD
-  cat > .roll/backlog.md <<'MD'
-| [US-TEST-ORPHAN](.roll/features/test-epic/test-feature.md#us-test-orphan) | x | 📋 Todo |
-MD
-  source "$ROLL"
-  run _loop_pick_agent_for_story US-TEST-ORPHAN
-  # Falls back to cold_start_default (pi) even on missing profile
+@test "classify: missing est_min → default" {
+  run classify US-NOEST-001
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pi"* ]]
+  [[ "$output" == default\ * ]]
 }
 
-@test "pick_agent: no matching agent → cold_start_default" {
-  # Override routes to leave no agent matching FIX 3min low
-  cat > .roll/agent-routes.yaml <<'YAML'
-schema: v1
-agents:
-  claude:
-    types: [US, REFACTOR]
-    est_min: { min: 10, max: 30 }
-    risk: [medium, high]
-history:
-  cold_start_default: claude
-YAML
-  source "$ROLL"
-  run _loop_pick_agent_for_story FIX-TEST-001
+@test "classify: --est-min direct, illegal value → default" {
+  run python3 "$LIB" --est-min notanumber
   [ "$status" -eq 0 ]
-  [[ "$output" == *"claude"* ]]
+  [[ "$output" == default\ * ]]
 }
 
-@test "pick_agent: missing story id → non-zero exit" {
-  source "$ROLL"
-  run _loop_pick_agent_for_story "US-DOES-NOT-EXIST"
+@test "classify: --est-min direct, empty value → default" {
+  run python3 "$LIB" --est-min ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == default\ * ]]
+}
+
+@test "classify: --est-min=1 → easy (well inside easy)" {
+  run python3 "$LIB" --est-min 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == easy\ * ]]
+}
+
+@test "classify: --est-min=100 → hard (well inside hard)" {
+  run python3 "$LIB" --est-min 100
+  [ "$status" -eq 0 ]
+  [[ "$output" == hard\ * ]]
+}
+
+@test "classify: --est-min negative → default (invalid data, not easy)" {
+  run python3 "$LIB" --est-min -1
+  [ "$status" -eq 0 ]
+  [[ "$output" == default\ * ]]
+}
+
+@test "classify: unknown story id → non-zero exit" {
+  run classify US-DOES-NOT-EXIST
   [ "$status" -ne 0 ]
 }

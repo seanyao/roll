@@ -364,6 +364,133 @@ _agents_config_set_slot() {
   return 0
 }
 
+# US-AGENT-028: one-shot migrate a legacy v1 agent-routes.yaml into a v3
+# agents.yaml (four complexity slots). Mirrors _loop_migrate_legacy_paths: it
+# is idempotent (skips when the v3 file already exists), writes the product to
+# a temp file and atomically mv's it over the target so a running loop only
+# sees the new config on its next cycle.
+#
+# `_agents_migrate_v1_to_v3 [V1_PATH] [V3_PATH] [LOCAL_YAML]`
+#   V1_PATH    legacy source (default .roll/agent-routes.yaml)
+#   V3_PATH    destination   (default .roll/agents.yaml)
+#   LOCAL_YAML .roll/local.yaml whose top-level `agent:` is the last-resort
+#              default-slot fallback (default .roll/local.yaml)
+#
+# Mapping (AC US-AGENT-028):
+#   - v1 `history.cold_start_default` → `default` slot (and `fallback` slot)
+#   - v1 `agents.*` capability ranges → easy / hard by est_min.max: the agent
+#     with the smallest max lands in `easy`, the largest in `hard`
+#   - ghost agent `deepseek` is dropped (it is a pi-loaded model, not an agent)
+#   - when cold_start_default is absent, `.roll/local.yaml`'s `agent:` seeds the
+#     `default` slot; any still-empty slot falls back to the default slot agent
+#
+# Returns 0 on success or no-op; 1 only when the temp render itself fails.
+_agents_migrate_v1_to_v3() {
+  local v1="${1:-.roll/agent-routes.yaml}"
+  local v3="${2:-.roll/agents.yaml}"
+  local local_yaml="${3:-.roll/local.yaml}"
+
+  # Idempotent: never clobber an existing v3 config.
+  [ -f "$v3" ] && return 0
+  # Nothing to migrate from.
+  [ -f "$v1" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local dir; dir="$(dirname "$v3")"
+  [ -d "$dir" ] || mkdir -p "$dir" || return 1
+
+  local tmp; tmp="$(mktemp "${v3}.XXXXXX")" || return 1
+
+  if ! ROLL_MIG_V1="$v1" ROLL_MIG_LOCAL="$local_yaml" python3 - > "$tmp" <<'PY'
+import os, sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(3)
+
+v1_path = os.environ["ROLL_MIG_V1"]
+local_path = os.environ.get("ROLL_MIG_LOCAL", "")
+
+try:
+    v1 = yaml.safe_load(open(v1_path)) or {}
+except Exception:
+    sys.exit(3)
+if not isinstance(v1, dict):
+    sys.exit(3)
+
+GHOST = {"deepseek"}
+
+agents = v1.get("agents") or {}
+if not isinstance(agents, dict):
+    agents = {}
+
+history = v1.get("history") or {}
+cold = history.get("cold_start_default") if isinstance(history, dict) else None
+
+# Last-resort default from .roll/local.yaml `agent:`.
+local_agent = None
+if local_path and os.path.exists(local_path):
+    try:
+        loc = yaml.safe_load(open(local_path)) or {}
+        if isinstance(loc, dict) and isinstance(loc.get("agent"), str):
+            local_agent = loc.get("agent")
+    except Exception:
+        local_agent = None
+
+def real(name):
+    return isinstance(name, str) and name and name not in GHOST
+
+# Rank routable (non-ghost) agents by their est_min.max capability ceiling so
+# the smallest-window agent maps to easy and the largest to hard.
+ranked = []
+for name, cfg in agents.items():
+    if not real(name):
+        continue
+    mx = None
+    if isinstance(cfg, dict):
+        em = cfg.get("est_min")
+        if isinstance(em, dict) and isinstance(em.get("max"), (int, float)):
+            mx = em.get("max")
+    ranked.append((name, mx if mx is not None else 0))
+ranked.sort(key=lambda t: (t[1], t[0]))
+
+default_agent = cold if real(cold) else local_agent
+if not real(default_agent) and ranked:
+    # Median-ish: pick the agent whose window straddles the default band.
+    default_agent = ranked[len(ranked) // 2][0]
+
+easy_agent = ranked[0][0] if ranked else default_agent
+hard_agent = ranked[-1][0] if ranked else default_agent
+
+# Any unresolved slot falls back to the default-slot agent.
+def pick(a):
+    return a if real(a) else default_agent
+
+slots = {
+    "easy": pick(easy_agent),
+    "default": pick(default_agent),
+    "hard": pick(hard_agent),
+    "fallback": pick(default_agent),
+}
+
+out = ["schema: v3"]
+for slot in ("easy", "default", "hard", "fallback"):
+    agent = slots[slot]
+    if real(agent):
+        out.append("%s: { agent: %s }" % (slot, agent))
+    else:
+        out.append("%s: { agent: }" % slot)
+sys.stdout.write("\n".join(out) + "\n")
+PY
+  then
+    rm -f "$tmp"
+    return 0
+  fi
+
+  mv "$tmp" "$v3"
+  return 0
+}
+
 # ──────────────────────────────────────────────────────────────
 # US-AGENT-021: local agent detection + cheap online probe (cached).
 #
@@ -7380,6 +7507,9 @@ fi
 # US-LOOP-019: migrate legacy control-plane files to project-local .roll/loop/.
 # Then resolve the runtime dir for all subsequent path lookups.
 _loop_migrate_legacy_paths "${slug}"
+# US-AGENT-028: one-shot migrate legacy v1 agent-routes.yaml → v3 agents.yaml.
+# Idempotent + atomic — the running loop only sees the new config next cycle.
+_agents_migrate_v1_to_v3 2>/dev/null || true
 _LOOP_RT_DIR=\$(_loop_runtime_dir "${slug}" 2>/dev/null || echo "")
 
 # Pause check — 'roll loop pause' creates this marker to suspend scheduling
@@ -10317,57 +10447,10 @@ refs/heads/claude/*"
   return 0
 }
 
-# US-AGENT-002: agent-routes.yaml management.
-# `roll loop agent-routes [show|lint] [path]` — dispatch + helpers.
-# Default path order: $ROLL_AGENT_ROUTES (if set) → ./.roll/agent-routes.yaml
-# → built-in default in templates/agent-routes/default.yaml.
-_loop_agent_routes_path() {
-  if [ -n "${ROLL_AGENT_ROUTES:-}" ] && [ -f "$ROLL_AGENT_ROUTES" ]; then
-    printf '%s\n' "$ROLL_AGENT_ROUTES"
-    return 0
-  fi
-  if [ -f ".roll/agent-routes.yaml" ]; then
-    printf '%s\n' ".roll/agent-routes.yaml"
-    return 0
-  fi
-  # Fallback: built-in default shipped with the package.
-  # ROLL_INSTALL_DIR is set when installed via npm; fall back to script dir.
-  local install_dir
-  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
-  local default_tpl="$install_dir/templates/agent-routes/default.yaml"
-  if [ -f "$default_tpl" ]; then
-    printf '%s\n' "$default_tpl"
-    return 0
-  fi
-  return 1
-}
-
-_loop_agent_routes_show() {
-  local path
-  path=$(_loop_agent_routes_path) || {
-    echo "agent-routes: no config found (set ROLL_AGENT_ROUTES, drop .roll/agent-routes.yaml, or run roll init)" >&2
-    return 1
-  }
-  echo "# source: $path"
-  cat "$path"
-}
-
-_loop_agent_routes_lint() {
-  local path="${1:-}"
-  if [ -z "$path" ]; then
-    path=$(_loop_agent_routes_path) || {
-      echo "agent-routes lint: no config found" >&2
-      return 1
-    }
-  fi
-  if [ ! -f "$path" ]; then
-    echo "agent-routes lint: file not found: $path" >&2
-    return 1
-  fi
-  local install_dir
-  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
-  python3 "$install_dir/lib/agent_routes_lint.py" "$path"
-}
+# US-AGENT-028: the v1 agent-routes helpers (_loop_agent_routes_path/show/lint)
+# are retired. `roll loop agent-routes` now forwards to `roll agent` via the
+# deprecated alias in _loop_agent_routes (schema v3 / agents.yaml replaces the
+# v1 type/est/risk routing). lib/agent_routes_lint.py is no longer invoked.
 
 # US-AGENT-006: pick the next eligible 📋 Todo story from .roll/backlog.md
 # applying the same gates as the roll-loop SKILL Step 2:
@@ -10622,18 +10705,32 @@ _loop_test_quality_check_with_alert() {
 }
 
 _loop_agent_routes() {
+  # US-AGENT-028: `roll loop agent-routes …` is retained only as a deprecated
+  # alias of `roll agent`. The v1 agent-routes.yaml schema (three-dimensional
+  # type/est/risk routing) is gone — agents.yaml (schema v3, four complexity
+  # slots) replaces it. Each sub-command forwards to the equivalent `roll agent`
+  # behaviour after printing a one-line deprecation notice on stderr.
   local sub="${1:-show}"; shift || true
   case "$sub" in
-    show) _loop_agent_routes_show ;;
-    lint) _loop_agent_routes_lint "${1:-}" ;;
-    path) _loop_agent_routes_path ;;
+    show)
+      echo "roll loop agent-routes: deprecated — use 'roll agent' (showing agents.yaml)" >&2
+      cmd_agent
+      ;;
+    path)
+      echo "roll loop agent-routes path: deprecated — use 'roll agent' (agents.yaml path)" >&2
+      _agents_config_path
+      ;;
+    lint)
+      echo "roll loop agent-routes lint: deprecated — schema v3 needs no lint" >&2
+      return 0
+      ;;
     *)
       cat >&2 <<'HELP'
-Usage: roll loop agent-routes <show|lint|path> [path]
+Usage: roll loop agent-routes <show|lint|path>   (DEPRECATED — use 'roll agent')
 
-  show         Print active agent-routes config (source + content)
-  lint [path]  Validate schema (default: active config). Exit 1 on errors.
-  path         Print which file is currently active.
+  show   Alias for 'roll agent' (the schema-v3 complexity-routing view).
+  path   Print the active agents.yaml path.
+  lint   Deprecated no-op — schema v3 needs no lint.
 HELP
       return 1 ;;
   esac

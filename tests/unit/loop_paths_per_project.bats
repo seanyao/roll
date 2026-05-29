@@ -93,9 +93,10 @@ teardown() { unit_teardown; }
   ! grep -nE '/\.shared/roll/mute"' "$ROLL_BIN"
 }
 
-@test "bin/roll: no shared cron.log path (each project gets its own cron-<slug>.log)" {
-  # Multiple projects writing to the same cron.log interleaves their cycle
-  # output. Per-project log keeps each project's record clean and aligns with
-  # the "no cross-project loop state" rule.
-  ! grep -nE '/cron\.log' "$ROLL_BIN"
+@test "bin/roll: no shared cross-project cron.log (per-project only)" {
+  # Multiple projects writing to one shared cron.log interleaves their output.
+  # FIX-139 writes the machine/ops log to project-local .roll/loop/cron.log
+  # (per-project — fine). Forbid only a SHARED ~/.shared/roll/loop/cron.log
+  # (no slug), which would cross projects.
+  ! grep -nE '\.shared/roll/loop/cron\.log' "$ROLL_BIN"
 }

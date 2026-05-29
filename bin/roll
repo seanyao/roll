@@ -6782,11 +6782,11 @@ fi
 LOCK="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
 SESSION="roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')"
 INNER_SCRIPT="${inner_path}"
-# FIX-139: machine/ops log is project-local (.roll/loop/cron.log) — no global
-# cumulative cron-<slug>.log dup. Reader (FIX-137) reads project-local cron.log
-# first; per-cycle durations fall back to event timestamps when absent.
-LOG="${project_path}/.roll/loop/cron.log"
-mkdir -p "${project_path}/.roll/loop" 2>/dev/null || true
+# FIX-139: machine/ops log path is supplied by the caller (now project-local
+# .roll/loop/cron.log — see the _write_loop_runner_script call site). Ensure its
+# directory exists before the early LOCK-skip echoes append to it.
+LOG="${log_path}"
+mkdir -p "\$(dirname "\$LOG")" 2>/dev/null || true
 if [ -f "\$LOCK" ]; then
   prev_pid=\$(head -1 "\$LOCK" 2>/dev/null || echo "")
   if [ -n "\$prev_pid" ] && kill -0 "\$prev_pid" 2>/dev/null; then
@@ -6826,9 +6826,9 @@ if command -v tmux >/dev/null 2>&1; then
   CYCLE_LOG_RAW="${project_path}/.roll/cycle-logs/.pipe-\$\$.raw"
   export ROLL_CYCLE_LOG_RAW="\$CYCLE_LOG_RAW"
   tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
-  # FIX-139: pane output goes ONLY to the per-cycle raw (-> <CYCLE_ID>.log).
-  # No `tee -a "\$LOG"` cumulative dup — per-cycle logs are the single source,
-  # all kept (no cap). Machine/ops events still append to \$LOG directly.
+  # FIX-139: pane output goes ONLY to the per-cycle raw (-> <CYCLE_ID>.log),
+  # no cumulative tee into LOG — per-cycle logs are the single source, all kept
+  # (no cap). Machine/ops events still append to LOG directly.
   tmux pipe-pane -t "\$SESSION" "cat >> \"\$ROLL_CYCLE_LOG_RAW\""
   # Auto-attach popup: when not muted, spawn a Terminal.app window attached
   # to the tmux session so the user can watch the loop work in real time.
@@ -6994,7 +6994,11 @@ _install_launchd_plists() {
     local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
 
     if [[ "$svc" == "loop" ]]; then
-      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log" "$active_start" "$active_end" "${sd}/${skill}/SKILL.md"
+      # FIX-139: loop machine/ops log is project-local (.roll/loop/cron.log),
+      # not the global cron-<slug>.log. Reader (FIX-137) reads it project-local;
+      # per-cycle transcripts live in .roll/cycle-logs/ (single source, no dup).
+      local loop_log="${project_path}/.roll/loop/cron.log"
+      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$loop_log" "$active_start" "$active_end" "${sd}/${skill}/SKILL.md"
     else
       _write_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log"
     fi

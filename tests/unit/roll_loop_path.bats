@@ -82,16 +82,19 @@ teardown() { unit_teardown_cd; }
   local script_path="${_test_dir}/run-test-log139.sh"
   _write_loop_runner_script "$script_path" "/tmp/proj139" "pi -p \"x\"" "/tmp/log" 0 24 "/tmp/skill/SKILL.md"
   local outer="$script_path" inner="${script_path%.sh}-inner.sh"
-  # machine/ops log is project-local, not global cron-<slug>.log
-  grep -qF 'LOG="/tmp/proj139/.roll/loop/cron.log"' "$outer"
-  # pane -> per-cycle raw only, no `tee -a "$LOG"` cumulative dup
-  grep -qF 'pipe-pane' "$outer"
-  ! grep -q 'tee -a "\$LOG"' "$outer"
+  # pane -> per-cycle raw only (cat), no `tee -a "$LOG"` cumulative dup
+  grep -qE 'pipe-pane.*cat >>' "$outer"
+  ! grep -qE 'pipe-pane.*tee -a' "$outer"
+  # outer creates the machine-log dir from its dirname (honours caller's path)
+  grep -qF 'mkdir -p "$(dirname "$LOG")"' "$outer"
   # attach shows newest per-cycle log, not the global cumulative transcript
   grep -qF '.roll/cycle-logs/*.log' "$outer"
   ! grep -qF 'cron-%s.log' "$outer"
   # no per-cycle retention cap
   ! grep -q 'ROLL_CYCLE_LOG_KEEP' "$inner"
+  # the loop caller wires the machine log to project-local .roll/loop/cron.log
+  local rollbin="${BATS_TEST_DIRNAME}/../../bin/roll"
+  grep -qF 'loop_log="${project_path}/.roll/loop/cron.log"' "$rollbin"
 }
 
 @test "FIX-140: inner reverts story Done->Todo when PR is not merged" {

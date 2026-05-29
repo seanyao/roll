@@ -682,7 +682,7 @@ Note: `{DOMAIN}` maps to the Bounded Context name identified in DDD analysis.
 - Cross-context: {if touches another context, otherwise omit}
 
 **Agent profile:**
-- est_min: {1-30 整数,目标 5-10 min 一个 cycle 闭环}
+- est_min: {1-30 整数;一个 Story ≈ 一个 AI cycle 闭环,目标 5-10 min。est > ~15 是"再拆"信号——除非原子不可分(见 INVEST 的 S/I 校准)}
 - risk_zone: {low / medium / high — 改文档 low,改用户可见行为 medium,改 loop infra 或安全/隔离基建 high}
 - chain_depth: 0  {若是自降级产出的子 story 则 +1,累计 ≥2 时第 3 次拒拆}
 
@@ -746,12 +746,19 @@ When any preceding US in the batch changes user-visible behavior, append this te
 
 ## INVEST Principles
 
+> **颗粒度校准（按 AI cycle 量纲）**：Roll 的 Story 不是"几天的活"，而是
+> **一个 AI cycle 闭环（目标 5–10 min）**。下面的 S 和 I 按这个量纲重定义，
+> 别套用传统敏捷"一个 sprint 装几个 story"的尺度。
+
 Each story must be:
-- **Independent**: Can be implemented independently
+- **Independent**: 不强求完全独立。有先后依赖就用 `depends-on:` 串成链（配合
+  `chain_depth ≤ 2` 防无限套娃）。真正要避免的是"改同一文件的并行冲突"，
+  而不是"禁止依赖"——为追求独立硬把一个 cycle 的活摊成几个反而更糟。
 - **Negotiable**: Scope is negotiable
 - **Valuable**: Provides value to the user
 - **Estimable**: Effort can be estimated
-- **Small**: Small enough for fast delivery
+- **Small**: **一个 Story ≈ 一个 AI cycle 闭环（目标 5–10 min）**。S 是 cycle 量纲，
+  装不进一个 cycle 就拆；`est_min > ~15` 是"再拆"信号——除非原子不可分。
 - **Testable**: Can be tested and verified
 
 ## Backlog Structure

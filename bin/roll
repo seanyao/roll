@@ -5198,11 +5198,28 @@ _slug_migrate_from_legacy() {
   fi
 
   [[ "$old_slug" == "$new_slug" ]] && return 0
-  [[ -f "${loop_dir}/state-${old_slug}.yaml" ]] || return 0
 
-  printf 'roll: migrating loop state %s → %s\n' "$old_slug" "$new_slug" >&2
+  # US-LOOP-019: control-plane files (state/ALERT/PAUSE/mute) moved to
+  # project-local .roll/loop/; slug change does not affect them. Only
+  # migrate data-plane files and runner/plist artifacts.
+  # Idempotency guard: if project-local state already exists, skip legacy
+  # loop_dir migration entirely (data was already moved by _loop_migrate_legacy_paths).
+  local _proj_state="$(_loop_runtime_dir "$new_slug" 2>/dev/null || echo "")/state-${new_slug}.yaml"
+  if [[ -f "$_proj_state" ]]; then
+    # Control-plane is project-local; only clean up old runner/plist.
+    local old_plist=~/Library/LaunchAgents/com.roll.loop.${old_slug}.plist
+    if [[ -f "$old_plist" ]]; then
+      _launchctl_safe unload "$old_plist" 2>/dev/null || true
+      rm -f "$old_plist"
+    fi
+    rm -f "${loop_dir}/run-${old_slug}.sh" "${loop_dir}/run-${old_slug}-inner.sh"
+    return 0
+  fi
 
-  mv "${loop_dir}/state-${old_slug}.yaml" "${loop_dir}/state-${new_slug}.yaml"
+  # Still check if there's anything in loop_dir to migrate
+  [[ -f "${loop_dir}/events-${old_slug}.ndjson" ]] || [[ -f "${loop_dir}/cron-${old_slug}.log" ]] || [[ -f "${loop_dir}/runs.jsonl" ]] || return 0
+
+  printf 'roll: migrating loop records %s → %s\n' "$old_slug" "$new_slug" >&2
 
   [[ -f "${loop_dir}/cron-${old_slug}.log" ]] && \
     mv "${loop_dir}/cron-${old_slug}.log" "${loop_dir}/cron-${new_slug}.log"
@@ -5284,6 +5301,13 @@ _slug_migrate_to_remote() {
 
   # Dedup guard: no migration needed
   [[ "$old_slug" == "$new_slug" ]] && return 0
+
+  # US-LOOP-019: if project-local state already exists, data was migrated.
+  local _proj_state="$(_loop_runtime_dir "$new_slug" 2>/dev/null || echo "")/state-${new_slug}.yaml"
+  if [[ -f "$_proj_state" ]]; then
+    return 0
+  fi
+
   [[ -f "${loop_dir}/events-${old_slug}.ndjson" ]] || return 0
 
   printf 'roll: migrating loop records %s → %s (cross-machine slug)\n' "$old_slug" "$new_slug" >&2
@@ -5421,12 +5445,21 @@ fi
 # letting concurrent cycles overwrite each other's state. Align with the
 # existing events-/run-/LOCK-/heartbeat-<slug> namespacing.
 : "${_LOOP_PROJ_SLUG:=$(_project_slug 2>/dev/null || echo default)}"
-: "${_LOOP_STATE:=${_SHARED_ROOT}/loop/state-${_LOOP_PROJ_SLUG}.yaml}"
-: "${_LOOP_ALERT:=${_SHARED_ROOT}/loop/ALERT-${_LOOP_PROJ_SLUG}.md}"
+# US-LOOP-019: prefer project-local .roll/loop/ for control-plane files;
+# fall back to shared root when project path cannot be resolved.
+_LOOP_RT_DIR=$(_loop_runtime_dir "${_LOOP_PROJ_SLUG}" 2>/dev/null || echo "")
+if [[ -n "$_LOOP_RT_DIR" ]]; then
+  : "${_LOOP_STATE:=${_LOOP_RT_DIR}/state-${_LOOP_PROJ_SLUG}.yaml}"
+  : "${_LOOP_ALERT:=${_LOOP_RT_DIR}/ALERT-${_LOOP_PROJ_SLUG}.md}"
+  : "${_LOOP_MUTE_FILE:=${_LOOP_RT_DIR}/mute-${_LOOP_PROJ_SLUG}}"
+else
+  : "${_LOOP_STATE:=${_SHARED_ROOT}/loop/state-${_LOOP_PROJ_SLUG}.yaml}"
+  : "${_LOOP_ALERT:=${_SHARED_ROOT}/loop/ALERT-${_LOOP_PROJ_SLUG}.md}"
+  : "${_LOOP_MUTE_FILE:=${_SHARED_ROOT}/loop/mute-${_LOOP_PROJ_SLUG}}"
+fi
 # FIX-065: was hardcoded to ${HOME}/.shared/roll/loop/runs.jsonl which ignored
 # _SHARED_ROOT overrides and silently leaked test runs.jsonl writes into prod.
 _LOOP_RUNS="${_SHARED_ROOT}/loop/runs.jsonl"
-: "${_LOOP_MUTE_FILE:=${_SHARED_ROOT}/loop/mute-${_LOOP_PROJ_SLUG}}"
 
 # ──────────────────────────────────────────────────────────────
 # US-LOOP-018: _loop_resolve_project_path + _loop_runtime_dir
@@ -5509,6 +5542,74 @@ _loop_runtime_dir() {
     return 1
   fi
   echo "${proj}/.roll/loop"
+}
+
+# ──────────────────────────────────────────────────────────────
+# US-LOOP-019: _loop_migrate_legacy_paths — one-shot migration of
+# control-plane files (state / ALERT / PAUSE / mute) from legacy
+# ~/.shared/roll/loop/ to project-local .roll/loop/. Idempotent.
+# Called by outer runner before reading control state.
+# ──────────────────────────────────────────────────────────────
+
+# _loop_migrate_legacy_paths <slug> [<legacy_dir>]
+# Migrate control-plane files. Skips if new path already has the file.
+# Marks old files as .migrated-<timestamp> after successful copy.
+_loop_migrate_legacy_paths() {
+  local slug="$1"
+  local legacy_dir="${2:-${_SHARED_ROOT:-$HOME/.shared/roll}/loop}"
+
+  local rt_dir
+  rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  if [[ -z "$rt_dir" ]]; then
+    return 0
+  fi
+  mkdir -p "$rt_dir"
+
+  local ts
+  ts=$(date +%s)
+
+  for _f in "state-${slug}.yaml" "ALERT-${slug}.md" "PAUSE-${slug}" "mute-${slug}"; do
+    local legacy="${legacy_dir}/${_f}"
+    [[ -f "$legacy" ]] || continue
+    # Skip if already migrated (has .migrated-* marker)
+    if compgen -G "${legacy}.migrated-"* >/dev/null 2>&1; then
+      continue
+    fi
+    local target="${rt_dir}/${_f}"
+    # If target already exists (newer), just mark legacy as migrated
+    if [[ -f "$target" ]]; then
+      mv "$legacy" "${legacy}.migrated-${ts}"
+      continue
+    fi
+    cp "$legacy" "$target"
+    mv "$legacy" "${legacy}.migrated-${ts}"
+  done
+  return 0
+}
+
+# _loop_control_state_path <slug> <basename> [<legacy_dir>]
+# Dual-path read for control-plane files during 7-day migration window.
+# Prefers project-local .roll/loop/; falls back to legacy path.
+# Returns 0 and prints path on success; returns 1 if neither exists.
+_loop_control_state_path() {
+  local slug="$1" basename="$2"
+  local rt_dir legacy_dir
+
+  rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  legacy_dir="${3:-${_SHARED_ROOT:-$HOME/.shared/roll}/loop}"
+
+  local new_path="${rt_dir}/${basename}"
+  local legacy_path="${legacy_dir}/${basename}"
+
+  if [[ -n "$rt_dir" ]] && [[ -f "$new_path" ]]; then
+    echo "$new_path"
+    return 0
+  fi
+  if [[ -f "$legacy_path" ]]; then
+    echo "$legacy_path"
+    return 0
+  fi
+  return 1
 }
 
 # FIX-087: parallel to FIX-065's _SHARED_ROOT auto-sandbox above. Without this,
@@ -6025,16 +6126,6 @@ if [ -f "\$INNER_LOCK" ]; then
   rm -f "\$INNER_LOCK"
 fi
 printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$INNER_LOCK"
-# FIX-038: background heartbeat writer — outer script uses this as primary liveness signal
-# to detect stale execution without relying on PID reuse heuristics.
-# US-LOOP-007: heartbeat also emits phase_tick for the current phase so tmux
-# readers see "still alive in <phase>" during long-running silences (e.g.
-# agent_invoke 5-45 min). CURRENT_PHASE is maintained by _phase_begin/_phase_end.
-HEARTBEAT_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
-# FIX-136: file-based phase tracking so forked heartbeat child can see phase changes.
-# CURRENT_PHASE is inherited at fork time — changes after fork are invisible to child.
-# Writing phase state to a file decouples the heartbeat from fork-time snapshot.
-HEARTBEAT_PHASE_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.phase-${slug}"
 CURRENT_PHASE=""
 # bash 3.2 (macOS /bin/bash) lacks associative arrays — use namespaced
 # variables via 'printf -v' + indirect '\${!VAR}' expansion instead.
@@ -6329,19 +6420,36 @@ trap '_inner_cleanup' EXIT
 source "${roll_bin}"
 set +e
 
+# US-LOOP-019: heartbeat files moved here (after source) so _loop_runtime_dir is available.
+_LOOP_RT_DIR=\$(_loop_runtime_dir "${slug}" 2>/dev/null || echo "")
+if [ -n "\$_LOOP_RT_DIR" ]; then
+  HEARTBEAT_FILE="\${_LOOP_RT_DIR}/.heartbeat-${slug}"
+  HEARTBEAT_PHASE_FILE="\${_LOOP_RT_DIR}/.phase-${slug}"
+else
+  HEARTBEAT_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
+  HEARTBEAT_PHASE_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.phase-${slug}"
+fi
+
 # FIX-138: start heartbeat now that _loop_event is defined (see note at its
 # definition above). Forking earlier loses _loop_event in the subshell snapshot.
 _heartbeat_writer &
 _HEARTBEAT_PID=\$!
 
+# US-LOOP-019: control-plane files moved to project-local .roll/loop/.
 # FIX-052: bin/roll initializes loop state paths from cwd at source time, but
 # the inner script may be launched from anywhere. Override to this project's
 # slug (baked at template generation) so helpers like _worktree_alert write
 # to the correct project's ALERT-<slug>.md / state-<slug>.yaml / mute-<slug>.
 _LOOP_PROJ_SLUG="${slug}"
-_LOOP_ALERT="\${_SHARED_ROOT}/loop/ALERT-${slug}.md"
-_LOOP_STATE="\${_SHARED_ROOT}/loop/state-${slug}.yaml"
-_LOOP_MUTE_FILE="\${_SHARED_ROOT}/loop/mute-${slug}"
+if [ -n "\$_LOOP_RT_DIR" ]; then
+  _LOOP_ALERT="\${_LOOP_RT_DIR}/ALERT-${slug}.md"
+  _LOOP_STATE="\${_LOOP_RT_DIR}/state-${slug}.yaml"
+  _LOOP_MUTE_FILE="\${_LOOP_RT_DIR}/mute-${slug}"
+else
+  _LOOP_ALERT="\${_SHARED_ROOT}/loop/ALERT-${slug}.md"
+  _LOOP_STATE="\${_SHARED_ROOT}/loop/state-${slug}.yaml"
+  _LOOP_MUTE_FILE="\${_SHARED_ROOT}/loop/mute-${slug}"
+fi
 # US-LOOP-006: ROLL_MAIN_SLUG is the canonical identity for any subprocess —
 # claude, loop-fmt.py, _loop_event in arbitrary cwd. _project_slug honors this
 # env var first, so writes never fragment into tmp-* / cycle-* phantom slugs.
@@ -6728,8 +6836,17 @@ if [ -z "\$ROLL_LOOP_FORCE" ]; then
   h=\$(printf '%d' "\$(date +%H)")
   if [ "\$h" -lt ${active_start} ] || [ "\$h" -ge ${active_end} ]; then exit 0; fi
 fi
+# US-LOOP-019: migrate legacy control-plane files to project-local .roll/loop/.
+# Then resolve the runtime dir for all subsequent path lookups.
+_loop_migrate_legacy_paths "${slug}"
+_LOOP_RT_DIR=\$(_loop_runtime_dir "${slug}" 2>/dev/null || echo "")
+
 # Pause check — 'roll loop pause' creates this marker to suspend scheduling
-PAUSE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/PAUSE-${slug}"
+if [ -n "\$_LOOP_RT_DIR" ]; then
+  PAUSE="\${_LOOP_RT_DIR}/PAUSE-${slug}"
+else
+  PAUSE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/PAUSE-${slug}"
+fi
 if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
 # FIX-037: orphan state detection & self-heal — if state.yaml says running
 # but no LOCK process or tmux session exists, the previous cycle was killed
@@ -6738,15 +6855,22 @@ if [ -z "\$ROLL_LOOP_FORCE" ] && [ -f "\$PAUSE" ]; then exit 0; fi
 # FIX-038: heartbeat is the primary liveness signal (avoids PID reuse race);
 # LOCK pid check is secondary fallback for backward compatibility.
 HEARTBEAT_TIMEOUT="\${ROLL_HEARTBEAT_TIMEOUT:-1800}"
-# FIX-052: per-project STATE_FILE (was global state.yaml — caused two projects
-# to clobber each other's cycle state).
-STATE_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/state-${slug}.yaml"
+# US-LOOP-019 / FIX-052: per-project STATE_FILE now in project-local .roll/loop/.
+if [ -n "\$_LOOP_RT_DIR" ]; then
+  STATE_FILE="\${_LOOP_RT_DIR}/state-${slug}.yaml"
+else
+  STATE_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/state-${slug}.yaml"
+fi
 if [ -f "\$STATE_FILE" ]; then
   _state=\$(grep '^status:' "\$STATE_FILE" | awk '{print \$2}' 2>/dev/null || echo "")
   if [ "\$_state" = "running" ]; then
     _still_active=false
     # FIX-038: heartbeat is primary signal
-    _heartbeat_file="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
+    if [ -n "\$_LOOP_RT_DIR" ]; then
+      _heartbeat_file="\${_LOOP_RT_DIR}/.heartbeat-${slug}"
+    else
+      _heartbeat_file="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
+    fi
     if [ -f "\$_heartbeat_file" ]; then
       _hb_ts=\$(cat "\$_heartbeat_file" 2>/dev/null || echo "0")
       _now=\$(date -u +%s)
@@ -6771,9 +6895,12 @@ if [ -f "\$STATE_FILE" ]; then
       echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-037: orphan state detected (status=running, heartbeat stale or missing) — healing to idle" >> "\$LOG"
       echo "status: idle" > "\${STATE_FILE}.tmp" && mv "\${STATE_FILE}.tmp" "\$STATE_FILE"
       rm -f "\$_lock_file" 2>/dev/null || true
-      # FIX-052: per-project ALERT file (was shared ALERT.md — caused R0
-      # auto-heal entries to surface in Roll's alert view).
-      _alert_file="\$(dirname "\$0")/ALERT-${slug}.md"
+      # US-LOOP-019 / FIX-052: per-project ALERT file in project-local .roll/loop/.
+      if [ -n "\$_LOOP_RT_DIR" ]; then
+        _alert_file="\${_LOOP_RT_DIR}/ALERT-${slug}.md"
+      else
+        _alert_file="\$(dirname "\$0")/ALERT-${slug}.md"
+      fi
       echo "\$(date '+%Y-%m-%dT%H:%M:%S%z') | FIX-037 auto-heal | Orphan state detected and cleared (status=running → idle)" >> "\$_alert_file" 2>/dev/null || true
       echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] FIX-037: healed to idle, ALERT written" >> "\$LOG"
     fi
@@ -6787,6 +6914,11 @@ INNER_SCRIPT="${inner_path}"
 # directory exists before the early LOCK-skip echoes append to it.
 LOG="${log_path}"
 mkdir -p "\$(dirname "\$LOG")" 2>/dev/null || true
+# US-LOOP-019: ensure .roll/loop/ is gitignored (idempotent).
+if [ -n "\$_LOOP_RT_DIR" ] && [ -f "${project_path}/.gitignore" ]; then
+  grep -qFx '.roll/loop/' "${project_path}/.gitignore" 2>/dev/null || \
+    echo '.roll/loop/' >> "${project_path}/.gitignore"
+fi
 if [ -f "\$LOCK" ]; then
   prev_pid=\$(head -1 "\$LOCK" 2>/dev/null || echo "")
   if [ -n "\$prev_pid" ] && kill -0 "\$prev_pid" 2>/dev/null; then
@@ -6839,8 +6971,8 @@ if command -v tmux >/dev/null 2>&1; then
   # that triggered LaunchServices "where is <app>" prompts when the active
   # process name differed from its .app bundle name (e.g. MSTeams vs
   # Microsoft Teams.app).
-  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
-    _attach_cmd="\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/attach-\$SESSION.command"
+  if [ -z "\${ROLL_LOOP_NO_POPUP:-}" ] && [ -z "\${BATS_TEST_NUMBER:-}" ] && [ ! -f "\${_LOOP_RT_DIR:-\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop}/mute-${slug}" ] && [ "\$(uname)" = "Darwin" ]; then
+    _attach_cmd="\${_LOOP_RT_DIR:-\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop}/attach-\$SESSION.command"
     # Drop \`exec\` so the wrapping shell survives \`tmux attach\` exiting,
     # then \`read\` to hold the Terminal open until the user has had a
     # chance to scroll back through the cycle's output. Without this the
@@ -6851,7 +6983,7 @@ if command -v tmux >/dev/null 2>&1; then
     # user can scroll through the full cycle output instead of seeing nothing.
     # FIX-139: after the session ends, show ONLY this cycle's per-cycle log
     # (newest in .roll/cycle-logs/), not the global cumulative transcript.
-    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=\$(ls -t "%s"/.roll/cycle-logs/*.log 2>/dev/null | head -1)\\necho\\nif [ -n "\$LOGFILE" ] && [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing this cycle log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. No per-cycle log yet."\\n  echo "  press enter to close."\\n  echo "================================================================"\\n  read _\\nfi\\n' \\
+    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=\$(ls -t "%s"/.roll/cycle-logs/*.log 2>/dev/null | head -1)\\necho\\nif [ -n "\$LOGFILE" ] && [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing this cycle log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. Try: roll loop log"\\n  echo "  press enter to close."\\n  echo "================================================================"\\n  read _\\nfi\\n' \\
       "\$SESSION" "${project_path}" > "\$_attach_cmd" 2>/dev/null || true
     chmod +x "\$_attach_cmd" 2>/dev/null || true
     open -g -a Terminal "\$_attach_cmd" >/dev/null 2>&1 || true
@@ -7499,8 +7631,14 @@ _loop_pause() {
     fi
   else
     local slug; slug=$(_project_slug "$project_path")
-    mkdir -p "${_SHARED_ROOT}/loop"
-    touch "${_SHARED_ROOT}/loop/PAUSE-${slug}"
+    local rt_dir; rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+    if [ -n "$rt_dir" ]; then
+      mkdir -p "$rt_dir"
+      touch "${rt_dir}/PAUSE-${slug}"
+    else
+      mkdir -p "${_SHARED_ROOT}/loop"
+      touch "${_SHARED_ROOT}/loop/PAUSE-${slug}"
+    fi
   fi
 
   mkdir -p "$(dirname "$_LOOP_STATE")"
@@ -7522,6 +7660,10 @@ _loop_resume() {
       fi
     else
       local slug; slug=$(_project_slug "$project_path")
+      local rt_dir; rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+      if [ -n "$rt_dir" ]; then
+        rm -f "${rt_dir}/PAUSE-${slug}"
+      fi
       rm -f "${_SHARED_ROOT}/loop/PAUSE-${slug}"
     fi
     printf "status: idle\n" > "$_LOOP_STATE"

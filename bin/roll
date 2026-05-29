@@ -6581,6 +6581,9 @@ _runs_append() {
   # writes the tier into ROLL_LOOP_ROUTED_RULE (field 2 of the route line), so
   # surface it as a first-class runs.jsonl column alongside the routed agent.
   local _tier_field="\${ROLL_LOOP_ROUTED_RULE:-}"
+  # US-AGENT-024: when a fallback fired, ROLL_LOOP_FALLBACK_FROM holds the
+  # original (offline) agent so the run row records the degradation.
+  local _fallback_from_field="\${ROLL_LOOP_FALLBACK_FROM:-}"
   local _stype_field=""
   if [ -n "\$_story_field" ]; then
     _stype_field="\${_story_field%%-*}"
@@ -6593,6 +6596,7 @@ _runs_append() {
     --arg cycle_id "\$_cid" \\
     --arg agent "\$_agent_field" \\
     --arg tier "\$_tier_field" \\
+    --arg fallback_from "\$_fallback_from_field" \\
     --arg story_type "\$_stype_field" \\
     --argjson built "\$_built" \\
     --argjson skipped '[]' \\
@@ -6601,8 +6605,8 @@ _runs_append() {
     --argjson duration_sec "\$_dur" \\
     --argjson phases "\$_phases_json" \\
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
-      cycle_id:\$cycle_id, agent:\$agent, tier:\$tier, story_type:\$story_type,
-      built:\$built, skipped:\$skipped, alerts:\$alerts,
+      cycle_id:\$cycle_id, agent:\$agent, tier:\$tier, fallback_from:\$fallback_from,
+      story_type:\$story_type, built:\$built, skipped:\$skipped, alerts:\$alerts,
       tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}' \\
     > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }
   cat "\$_tmp" >> "\$_runs_dst" 2>/dev/null || true
@@ -6855,6 +6859,7 @@ if _worktree_fetch_origin main \\
   ROLL_LOOP_ROUTED_AGENT=""
   ROLL_LOOP_ROUTED_RULE=""
   ROLL_LOOP_ROUTE_RATIONALE=""
+  ROLL_LOOP_FALLBACK_FROM=""
   ( cd "\$WT" >/dev/null 2>&1 && ROLL_LOOP_ROUTED_STORY=\$(_loop_pick_next_story 2>/dev/null) || true )
   ROLL_LOOP_ROUTED_STORY=\$( (cd "\$WT" 2>/dev/null && _loop_pick_next_story 2>/dev/null) || echo "" )
   if [ -n "\$ROLL_LOOP_ROUTED_STORY" ]; then
@@ -6865,6 +6870,21 @@ if _worktree_fetch_origin main \\
       ROLL_LOOP_ROUTE_RATIONALE=\$(echo "\$_route_line" | cut -d' ' -f3-)
       echo "[loop] story \${ROLL_LOOP_ROUTED_STORY} routed to \${ROLL_LOOP_ROUTED_AGENT} via \${ROLL_LOOP_ROUTED_RULE}"
       _loop_event story_routed "\${CYCLE_ID}" "\${ROLL_LOOP_ROUTED_STORY}" "\${ROLL_LOOP_ROUTED_AGENT}|\${ROLL_LOOP_ROUTED_RULE}" || true
+      # US-AGENT-024: mechanical fallback — if the routed agent is offline
+      # (no PATH / auth / network), swap to the fallback slot agent. When the
+      # fallback is also down, _loop_resolve_fallback_agent returns 2 after
+      # writing an ALERT; we leave the routed agent as-is so the cycle still
+      # records a terminal run (the ALERT is the operator-facing signal).
+      _fb_line=\$( (cd "\$WT" 2>/dev/null && _loop_resolve_fallback_agent "\$ROLL_LOOP_ROUTED_AGENT" 2>/dev/null) || echo "" )
+      if [ -n "\$_fb_line" ]; then
+        _fb_agent=\$(echo "\$_fb_line" | awk '{print \$1}')
+        ROLL_LOOP_FALLBACK_FROM=\$(echo "\$_fb_line" | awk '{print \$2}')
+        if [ -n "\$ROLL_LOOP_FALLBACK_FROM" ] && [ -n "\$_fb_agent" ]; then
+          echo "[loop] agent \${ROLL_LOOP_FALLBACK_FROM} unavailable; cycle falls back to \${_fb_agent}"
+          _loop_event agent_fallback "\${CYCLE_ID}" "\${ROLL_LOOP_FALLBACK_FROM}" "\${_fb_agent}" || true
+          ROLL_LOOP_ROUTED_AGENT="\$_fb_agent"
+        fi
+      fi
     fi
   fi
   CYCLE_AGENT="\${ROLL_LOOP_ROUTED_AGENT:-\$(_project_agent)}"
@@ -6898,7 +6918,7 @@ export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
 # rendering: claude → stream-json parser, others → transparent passthrough.
 # US-AGENT-006: prefer the per-story routed agent (set above) when present.
 export ROLL_LOOP_AGENT="\${CYCLE_AGENT:-\$(_project_agent)}"
-export ROLL_LOOP_ROUTED_STORY ROLL_LOOP_ROUTED_AGENT ROLL_LOOP_ROUTED_RULE
+export ROLL_LOOP_ROUTED_STORY ROLL_LOOP_ROUTED_AGENT ROLL_LOOP_ROUTED_RULE ROLL_LOOP_FALLBACK_FROM
 _phase_begin agent_invoke
 # FIX-136: non-claude agents (pi/deepseek/kimi) buffer stdout when piped.
 # Force a pseudo-TTY via script(1) so loop-fmt.py's passthrough receives
@@ -10254,6 +10274,77 @@ _loop_pick_agent_for_story() {
   }
 
   printf '%s %s %s\n' "$agent" "$tier" "$rationale"
+}
+
+# US-AGENT-024: mechanical fallback resolution.
+#
+# Given the PRIMARY agent the tier router picked, decide which agent the cycle
+# should actually run, using US-AGENT-021's availability probe (+ cache):
+#   - primary online            → run primary, no fallback.
+#   - primary offline + fallback slot agent online
+#                               → run the fallback agent; record fallback_from.
+#   - primary offline + fallback also unavailable (missing/offline)
+#                               → write an ALERT (reuse the per-project ALERT
+#                                 file) and STOP rather than spin through more
+#                                 agents. We never chain past one fallback.
+#
+# A failed primary is also stamped offline in the availability cache (the probe
+# inside _agent_available already persists the verdict), so later cycles skip it
+# until the TTL expires.
+#
+# stdout: "<chosen_agent> <fallback_from>"  — field 1 is the agent to run;
+#         field 2 is the original agent when a fallback fired, empty otherwise.
+#         The loop reads field 2 into runs.jsonl's `fallback_from`.
+# exit:   0 chosen agent printed (with or without fallback)
+#         1 bad input (empty primary)
+#         2 both primary and fallback unavailable → ALERT written, do not run.
+#
+# bash 3.2 safe: no declare -A, no mapfile/readarray, no ${var^^}/${var,,}.
+_loop_resolve_fallback_agent() {
+  local primary="${1:-}"
+  if [ -z "$primary" ]; then
+    echo "_loop_resolve_fallback_agent: primary agent required" >&2
+    return 1
+  fi
+
+  # Agent names are contractually single tokens (no whitespace), so the
+  # "<agent> <fallback_from>" line is awk-field-splittable by the caller.
+  #
+  # Primary still usable → run it, no fallback. Print only field 1; the
+  # caller's `awk '{print $2}'` reads an empty fallback_from. _agent_available
+  # reads the availability cache (online/offline) and re-probes when stale.
+  if _agent_available "$primary" >/dev/null 2>&1; then
+    printf '%s\n' "$primary"
+    return 0
+  fi
+
+  # Primary down — try the dedicated fallback slot. The caller narrates the
+  # degradation on stdout (and emits an agent_fallback event), so we stay
+  # quiet here rather than warning into the swallowed stderr stream.
+  local fb
+  fb="$(_agents_config_slot fallback 2>/dev/null || true)"
+  if [ -n "$fb" ] && _agent_available "$fb" >/dev/null 2>&1; then
+    printf '%s %s\n' "$fb" "$primary"
+    return 0
+  fi
+
+  # Neither primary nor fallback usable. Do NOT keep trying other agents;
+  # write an ALERT and stop so the operator (or next brief) sees it.
+  local alert_file="${_LOOP_ALERT:-}"
+  [ -n "$alert_file" ] || alert_file=".roll/loop/ALERT-$(_project_slug 2>/dev/null || basename "$PWD").md"
+  mkdir -p "$(dirname "$alert_file")" 2>/dev/null || true
+  {
+    printf '[%s] agent fallback exhausted: primary "%s" offline' \
+      "$(date -u +%FT%TZ)" "$primary"
+    if [ -n "$fb" ]; then
+      printf ', fallback "%s" also offline' "$fb"
+    else
+      printf ', no fallback slot configured'
+    fi
+    printf ' — cycle stopped.\n'
+  } >> "$alert_file" 2>/dev/null || true
+  echo "_loop_resolve_fallback_agent: primary '${primary}' and fallback unavailable — ALERT written" >&2
+  return 2
 }
 
 # US-QA-012: merge-time test-quality gate. Scan bats files for ❼ + ❽

@@ -680,10 +680,6 @@ def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
     if not path.exists():
         return {}
     base = slug.split("-")[0]  # 'Roll-a43d1b' → 'Roll'
-    # FIX-144: old-slug runs (e.g. path-based slug before git-remote-based
-    # migration) share the same project path but have a different slug.
-    # Resolve once and compare paths to salvage those runs.
-    proj_path = _resolve_project_path(slug)
     out: Dict[str, Dict[str, Any]] = {}
     with path.open(errors="ignore") as f:
         for line in f:
@@ -693,12 +689,7 @@ def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
                 continue
             p = r.get("project", "")
             if p != slug and p != base and not p.startswith(f"{slug}-cycle-"):
-                # String match failed — try path match for old-slug salvage.
-                if proj_path is None:
-                    continue
-                other_proj = _resolve_project_path(p)
-                if other_proj is None or other_proj != proj_path:
-                    continue
+                continue
             rid = r.get("run_id", "")
             if rid:
                 out[rid] = r

@@ -1,17 +1,11 @@
-# Agent routing config — minimal preset (US-AGENT-002 / US-AGENT-003)
+# Agent routing config — minimal preset, schema v3 (US-AGENT-028)
 #
-# 适合只用一个 agent 的小项目,或者只想 loop 跑测试 + brief 不分配的场景。
-# 历史命中率不计算 (window_cycles: 0)。
+# 适合本机只有一个可用 agent 的项目：三档(easy/default/hard)全锁同一个 agent,
+# 等价于 `roll agent use pi`。fallback 也指向同一个,因为没有别的可顶。
 
-schema: v1
+schema: v3
 
-agents:
-  pi:
-    types: [FIX, US, REFACTOR]
-    est_min: { min: 0, max: 30 }
-    risk: [low, medium, high]
-
-history:
-  window_cycles: 0
-  prefer_threshold: 0.0
-  cold_start_default: pi
+easy:     { agent: pi }
+default:  { agent: pi }
+hard:     { agent: pi }
+fallback: { agent: pi }

@@ -1,33 +1,11 @@
-# Agent routing config — heavy preset (US-AGENT-002 / US-AGENT-003)
+# Agent routing config — heavy preset, schema v3 (US-AGENT-028)
 #
-# 适合需要多 agent 协作 + 学习历史命中率的复杂项目:
-# pi 跑短小 FIX,deepseek 接 US 中等故事,claude 啃跨文件 REFACTOR / 高风险架构,
-# kimi 作为 peer review 候选 (路由不直接派,但 routes.yaml 留位置便于 US-AGENT-005 扩展)。
+# 适合多 agent 协作的复杂项目：pi 跑短小 easy 故事,claude 啃 hard 大故事 /
+# 高风险架构,default 走 claude 兜底。fallback 用 pi 作为机械顶替。
 
-schema: v1
+schema: v3
 
-agents:
-  pi:
-    types: [FIX]
-    est_min: { min: 0, max: 5 }
-    risk: [low]
-
-  deepseek:
-    types: [FIX, US, REFACTOR]
-    est_min: { min: 0, max: 12 }
-    risk: [low, medium]
-
-  claude:
-    types: [US, REFACTOR]
-    est_min: { min: 5, max: 30 }
-    risk: [low, medium, high]
-
-  kimi:
-    types: [US, REFACTOR]
-    est_min: { min: 5, max: 20 }
-    risk: [low, medium]
-
-history:
-  window_cycles: 100
-  prefer_threshold: 0.65
-  cold_start_default: deepseek
+easy:     { agent: pi }
+default:  { agent: claude }
+hard:     { agent: claude }
+fallback: { agent: pi }

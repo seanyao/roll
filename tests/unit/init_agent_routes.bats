@@ -27,28 +27,41 @@ teardown() {
   [ -f "$TPL_DIR/heavy.yaml" ]
 }
 
-@test "templates: minimal.yaml is valid schema v1" {
-  run python3 "${BATS_TEST_DIRNAME}/../../lib/agent_routes_lint.py" "$TPL_DIR/minimal.yaml"
-  [ "$status" -eq 0 ]
+# US-AGENT-028: templates are now schema v3 (four complexity slots), not v1.
+@test "templates: all three are schema v3 with the four complexity slots" {
+  local tpl
+  for tpl in default minimal heavy; do
+    run grep -q "^schema: v3" "$TPL_DIR/${tpl}.yaml"
+    [ "$status" -eq 0 ]
+    local slot
+    for slot in easy default hard fallback; do
+      run grep -qE "^${slot}:" "$TPL_DIR/${tpl}.yaml"
+      [ "$status" -eq 0 ]
+    done
+  done
 }
 
-@test "templates: heavy.yaml is valid schema v1" {
-  run python3 "${BATS_TEST_DIRNAME}/../../lib/agent_routes_lint.py" "$TPL_DIR/heavy.yaml"
-  [ "$status" -eq 0 ]
+# US-AGENT-028 AC: minimal = all three complexity tiers on the same agent.
+@test "templates: minimal locks easy/default/hard to one agent" {
+  source "$ROLL"
+  local easy def hard
+  easy=$(_agents_config_slot easy "$TPL_DIR/minimal.yaml")
+  def=$(_agents_config_slot default "$TPL_DIR/minimal.yaml")
+  hard=$(_agents_config_slot hard "$TPL_DIR/minimal.yaml")
+  [ -n "$easy" ]
+  [ "$easy" = "$def" ]
+  [ "$def" = "$hard" ]
 }
 
-@test "templates: minimal lists fewer agents than default" {
-  local min_count def_count
-  min_count=$(grep -cE "^  [a-z]+:$" "$TPL_DIR/minimal.yaml")
-  def_count=$(grep -cE "^  [a-z]+:$" "$TPL_DIR/default.yaml")
-  [ "$min_count" -lt "$def_count" ] || [ "$min_count" -le 1 ]
-}
-
-@test "templates: heavy lists at least as many agents as default" {
-  local heavy_count def_count
-  heavy_count=$(grep -cE "^  [a-z]+:$" "$TPL_DIR/heavy.yaml")
-  def_count=$(grep -cE "^  [a-z]+:$" "$TPL_DIR/default.yaml")
-  [ "$heavy_count" -ge "$def_count" ]
+# default/heavy split the tiers: easy and hard need not be the same agent.
+@test "templates: default splits easy vs hard tiers" {
+  source "$ROLL"
+  local easy hard
+  easy=$(_agents_config_slot easy "$TPL_DIR/default.yaml")
+  hard=$(_agents_config_slot hard "$TPL_DIR/default.yaml")
+  [ -n "$easy" ]
+  [ -n "$hard" ]
+  [ "$easy" != "$hard" ]
 }
 
 @test "init helper: _init_seed_agent_routes default copies default.yaml" {

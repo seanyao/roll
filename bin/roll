@@ -291,6 +291,79 @@ _agents_config_slot() {
   printf '%s\n' "$agent"
 }
 
+# US-AGENT-026: write the agent for one complexity slot into agents.yaml.
+# `_agents_config_set_slot SLOT AGENT [PATH]` rewrites the slot's `agent:`
+# value in place (inline flow form `slot: { agent: <name> }`), preserving every
+# other line — including comments and unrelated slots. When the file or the
+# slot is missing, the slot line is created (the file is seeded with a
+# `schema: v3` header). The write is atomic: render to a temp file, then mv
+# over the target. Returns 1 on a missing slot name / agent / unwritable path.
+_agents_config_set_slot() {
+  local slot="${1:-}" agent="${2:-}" path="${3:-}"
+  if [ -z "$slot" ] || [ -z "$agent" ]; then
+    echo "_agents_config_set_slot: slot and agent required" >&2
+    return 1
+  fi
+  if [ -z "$path" ]; then
+    path="$(_agents_config_path 2>/dev/null || true)"
+    [ -n "$path" ] || path=".roll/agents.yaml"
+  fi
+
+  local dir; dir="$(dirname "$path")"
+  [ -d "$dir" ] || mkdir -p "$dir" || return 1
+
+  local tmp; tmp="$(mktemp "${path}.XXXXXX")" || return 1
+  local new_line="${slot}: { agent: ${agent} }"
+
+  if [ ! -f "$path" ]; then
+    # Fresh file: seed a v3 header, then the slot line.
+    printf 'schema: v3\n%s\n' "$new_line" > "$tmp" || { rm -f "$tmp"; return 1; }
+    mv "$tmp" "$path"
+    return 0
+  fi
+
+  # Rewrite in place. Track whether we are inside the target slot's block so a
+  # nested `agent:` line gets replaced too. Replace the first agent-bearing
+  # line of the block (inline or nested) and drop any further block lines that
+  # only carried the old value, collapsing the slot to the inline form.
+  local line in_block="" replaced="" found=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    local raw="$line"
+    raw="${raw%$'\r'}"
+    case "$raw" in
+      "$slot":|"$slot":" "*|"$slot":\{*)
+        # Slot header — emit the canonical inline form and enter the block.
+        printf '%s\n' "$new_line" >> "$tmp"
+        in_block=1; replaced=1; found=1
+        # If the header itself carried the inline agent, the whole slot is done.
+        case "$raw" in
+          *\{*) in_block="" ;;
+        esac
+        continue
+        ;;
+      [!\ ]*)
+        in_block=""
+        ;;
+    esac
+    if [ -n "$in_block" ]; then
+      # Inside a freshly-rewritten nested block: drop the old `agent:` line(s);
+      # keep any sibling keys untouched.
+      if _agents_line_agent_value "$raw"; then
+        continue
+      fi
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$path"
+
+  if [ -z "$found" ]; then
+    # Slot was absent — append it.
+    printf '%s\n' "$new_line" >> "$tmp"
+  fi
+
+  mv "$tmp" "$path"
+  return 0
+}
+
 # ──────────────────────────────────────────────────────────────
 # US-AGENT-021: local agent detection + cheap online probe (cached).
 #
@@ -4957,6 +5030,71 @@ cmd_agent() {
         ok "$(msg agent.loop_runner_scripts_regenerated_for_new)"
       fi
       ;;
+    set)
+      # US-AGENT-026: cascade interactive picker (slot → agent) with a
+      # non-interactive `set <slot> <agent>` shortcut for pipes/CI. No model
+      # layer — picking the agent settles the slot (the agent's own default
+      # model is used). Writes back to .roll/agents.yaml (atomic, comments
+      # preserved).
+      local slot="${1:-}" agent="${2:-}"
+      local valid_slots="easy default hard fallback"
+
+      # ── Slot selection ────────────────────────────────────────────────
+      if [[ -z "$slot" ]]; then
+        {
+          echo "$(msg agent.set_pick_slot)"
+          local i=1 s
+          for s in $valid_slots; do
+            printf "    %d) %s\n" "$i" "$s"; i=$((i + 1))
+          done
+          printf "  $(msg agent.set_enter_number) [1-4]: "
+        } >&2
+        local choice
+        if ! IFS= read -r choice; then
+          err "$(msg agent.set_no_input)"; exit 1
+        fi
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > 4 )); then
+          err "$(msg agent.set_invalid_choice "$choice")"; exit 1
+        fi
+        slot=$(echo "$valid_slots" | cut -d' ' -f"$choice")
+      else
+        # Validate a slot passed on the command line.
+        local ok_slot=""
+        local s
+        for s in $valid_slots; do [[ "$s" == "$slot" ]] && ok_slot=1; done
+        if [[ -z "$ok_slot" ]]; then
+          err "$(msg agent.set_unknown_slot "$slot")"; exit 1
+        fi
+      fi
+
+      # ── Agent selection ───────────────────────────────────────────────
+      if [[ -z "$agent" ]]; then
+        # Build the candidate list: installed AND online agents only.
+        local -a online=()
+        local cand
+        while IFS= read -r cand; do
+          [[ -z "$cand" ]] && continue
+          if _agent_available "$cand" >/dev/null 2>&1; then
+            online+=("$cand")
+          fi
+        done < <(_agents_installed)
+        if [[ ${#online[@]} -eq 0 ]]; then
+          err "$(msg agent.set_no_online_agents)"; exit 1
+        fi
+        agent=$(_onboard_select_agent "${online[@]}") || { err "$(msg agent.set_no_input)"; exit 1; }
+      else
+        # Non-interactive value: validate it is a known agent name.
+        agent="$(_canonical_agent_name "$agent")"
+        if ! _agent_is_known "$agent"; then
+          err "$(msg agent.set_unknown_agent "$agent")"; exit 1
+        fi
+      fi
+
+      if ! _agents_config_set_slot "$slot" "$agent"; then
+        err "$(msg agent.set_write_failed "$slot")"; exit 1
+      fi
+      ok "$(msg agent.set_saved "$slot" "$(_agent_display_name "$agent")")"
+      ;;
     list)
       echo ""; echo "  $(msg agent.available_agents)"; echo ""
       local current; current=$(_canonical_agent_name "$(_project_agent)")
@@ -5027,7 +5165,7 @@ cmd_agent() {
       echo "  roll agent use <name>           — switch agent for this project"
       echo "  roll agent list                 — show installed agents"; echo ""
       ;;
-    *) err "Unknown subcommand: $subcmd"; echo "Usage: roll agent [use <name>|list]"; exit 1 ;;
+    *) err "Unknown subcommand: $subcmd"; echo "Usage: roll agent [set <slot> <agent>|use <name>|list]"; exit 1 ;;
   esac
 }
 

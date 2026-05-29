@@ -6577,6 +6577,10 @@ _runs_append() {
   # status-page summaries have data to aggregate. Empty when not routed.
   local _agent_field="\${ROLL_LOOP_ROUTED_AGENT:-\${CYCLE_AGENT:-}}"
   local _story_field="\${ROLL_LOOP_ROUTED_STORY:-}"
+  # US-AGENT-023: the routed complexity tier (easy/default/hard). The router
+  # writes the tier into ROLL_LOOP_ROUTED_RULE (field 2 of the route line), so
+  # surface it as a first-class runs.jsonl column alongside the routed agent.
+  local _tier_field="\${ROLL_LOOP_ROUTED_RULE:-}"
   local _stype_field=""
   if [ -n "\$_story_field" ]; then
     _stype_field="\${_story_field%%-*}"
@@ -6588,6 +6592,7 @@ _runs_append() {
     --arg status "\$_status" \\
     --arg cycle_id "\$_cid" \\
     --arg agent "\$_agent_field" \\
+    --arg tier "\$_tier_field" \\
     --arg story_type "\$_stype_field" \\
     --argjson built "\$_built" \\
     --argjson skipped '[]' \\
@@ -6596,7 +6601,7 @@ _runs_append() {
     --argjson duration_sec "\$_dur" \\
     --argjson phases "\$_phases_json" \\
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
-      cycle_id:\$cycle_id, agent:\$agent, story_type:\$story_type,
+      cycle_id:\$cycle_id, agent:\$agent, tier:\$tier, story_type:\$story_type,
       built:\$built, skipped:\$skipped, alerts:\$alerts,
       tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}' \\
     > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }
@@ -10185,24 +10190,26 @@ _loop_pick_next_story() {
   return 1
 }
 
-# US-AGENT-004: pick the agent for a given backlog story by reading its
-# Agent profile from the linked feature md and matching against the active
-# agent-routes.yaml. Falls back to history.cold_start_default when no agent
-# matches or the story has no profile.
+# US-AGENT-023: pick the agent for a backlog story by complexity tier.
 #
-# stdout: "<agent> <rule_kind> <rationale...>"
-# exit 0 on success, 1 if the story id isn't found.
+# Chain: story est_min → _classify_complexity (lib/loop_pick_agent.py emits the
+# tier) → read the matching slot from agents.yaml → agent. When the tier slot is
+# empty, fall back to the `default` slot; when `default` is also empty, WARN and
+# use _first_installed_agent so the cycle still has a runnable agent.
+#
+# Supersedes the US-AGENT-004/005 three-dimensional matcher + history soft
+# preference (retired in US-AGENT-022). agents.yaml replaces agent-routes.yaml.
+#
+# stdout: "<agent> <tier> <rationale...>"   (field 1 = agent, field 2 = tier —
+#         the loop inner script reads field 1 as the routed agent, field 2 as
+#         the routing "rule", field 3+ as the rationale).
+# exit 0 on success, 1 if the story id can't be classified.
 _loop_pick_agent_for_story() {
   local story_id="${1:-}"
   if [ -z "$story_id" ]; then
     echo "_loop_pick_agent_for_story: story id required" >&2
     return 1
   fi
-  local routes
-  routes=$(_loop_agent_routes_path 2>/dev/null) || {
-    echo "_loop_pick_agent_for_story: no agent-routes.yaml available" >&2
-    return 1
-  }
   local backlog=".roll/backlog.md"
   [ -f "$backlog" ] || {
     echo "_loop_pick_agent_for_story: $backlog not found" >&2
@@ -10210,20 +10217,43 @@ _loop_pick_agent_for_story() {
   }
   local install_dir
   install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
-  # US-AGENT-005: pass runs.jsonl when available so history soft preference
-  # can layer on top of hard rules. Project-local first, then shared.
-  local runs_arg=""
-  if [ -f ".roll/runs.jsonl" ]; then
-    runs_arg="--runs .roll/runs.jsonl"
-  elif [ -f "${HOME}/.shared/roll/loop/runs.jsonl" ]; then
-    runs_arg="--runs ${HOME}/.shared/roll/loop/runs.jsonl"
-  fi
-  # shellcheck disable=SC2086
-  python3 "$install_dir/lib/loop_pick_agent.py" \
+
+  # Classify into a complexity tier. The python prints "<tier> <rationale...>".
+  local classify_line tier rationale
+  classify_line=$(python3 "$install_dir/lib/loop_pick_agent.py" \
     --story-id "$story_id" \
-    --backlog "$backlog" \
-    --routes "$routes" \
-    $runs_arg
+    --backlog "$backlog" 2>/dev/null) || {
+    echo "_loop_pick_agent_for_story: cannot classify $story_id" >&2
+    return 1
+  }
+  tier=$(printf '%s\n' "$classify_line" | awk '{print $1}')
+  rationale=$(printf '%s\n' "$classify_line" | cut -d' ' -f2-)
+  [ -n "$tier" ] || {
+    echo "_loop_pick_agent_for_story: empty tier for $story_id" >&2
+    return 1
+  }
+
+  # Resolve tier → agent via agents.yaml slots, with mechanical fallback.
+  local agent=""
+  agent=$(_agents_config_slot "$tier" 2>/dev/null || true)
+  if [ -z "$agent" ] && [ "$tier" != "default" ]; then
+    # Tier slot empty/missing → fall back to the `default` slot.
+    agent=$(_agents_config_slot "default" 2>/dev/null || true)
+  fi
+  if [ -z "$agent" ]; then
+    # default slot also empty → WARN and use the first installed agent so the
+    # cycle is still runnable rather than silently dropping to nothing.
+    agent=$(_first_installed_agent 2>/dev/null || true)
+    if [ -n "$agent" ]; then
+      warn "agents.yaml: tier '${tier}' and 'default' slot both empty; using first installed agent '${agent}'" >&2
+    fi
+  fi
+  [ -n "$agent" ] || {
+    echo "_loop_pick_agent_for_story: no agent resolvable for tier '$tier' (agents.yaml empty and no installed agent)" >&2
+    return 1
+  }
+
+  printf '%s %s %s\n' "$agent" "$tier" "$rationale"
 }
 
 # US-QA-012: merge-time test-quality gate. Scan bats files for ❼ + ❽

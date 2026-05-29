@@ -4530,33 +4530,36 @@ cmd_review_pr() {
 
   local content; content=$(_skill_content "$template")
 
-  local tmp; tmp=$(mktemp)
-  # shellcheck disable=SC2064
-  trap "rm -f '$tmp'" EXIT
+  local prompt
+  prompt=$(
+    local tmp; tmp=$(mktemp)
+    # shellcheck disable=SC2064
+    trap "rm -f '$tmp'" EXIT
 
-  echo "$content" > "$tmp"
-  sed -i '' "s|{{PR_TITLE}}|${title}|g" "$tmp" 2>/dev/null \
-    || sed -i "s|{{PR_TITLE}}|${title}|g" "$tmp"
+    echo "$content" > "$tmp"
+    sed -i '' "s|{{PR_TITLE}}|${title}|g" "$tmp" 2>/dev/null \
+      || sed -i "s|{{PR_TITLE}}|${title}|g" "$tmp"
 
-  local body_escaped; body_escaped=$(printf '%s' "$body" | sed 's/[&/\]/\\&/g; s/$/\\/' | sed '$ s/\\$//')
-  sed -i '' "s|{{PR_BODY}}|${body_escaped}|g" "$tmp" 2>/dev/null \
-    || sed -i "s|{{PR_BODY}}|${body_escaped}|g" "$tmp"
+    local body_escaped; body_escaped=$(printf '%s' "$body" | sed 's/[&/\]/\\&/g; s/$/\\/' | sed '$ s/\\$//')
+    sed -i '' "s|{{PR_BODY}}|${body_escaped}|g" "$tmp" 2>/dev/null \
+      || sed -i "s|{{PR_BODY}}|${body_escaped}|g" "$tmp"
 
-  local diff_truncated
-  diff_truncated=$(echo "$diff" | head -500)
-  local diff_file; diff_file=$(mktemp)
-  echo "$diff_truncated" > "$diff_file"
-  awk -v f="$diff_file" '{
-    if (index($0, "{{PR_DIFF}}")) {
-      while ((getline line < f) > 0) print line
-      close(f)
-    } else print
-  }' "$tmp" > "${tmp}.out" && mv "${tmp}.out" "$tmp"
-  rm -f "$diff_file"
+    local diff_truncated
+    diff_truncated=$(echo "$diff" | head -500)
+    local diff_file; diff_file=$(mktemp)
+    echo "$diff_truncated" > "$diff_file"
+    awk -v f="$diff_file" '{
+      if (index($0, "{{PR_DIFF}}")) {
+        while ((getline line < f) > 0) print line
+        close(f)
+      } else print
+    }' "$tmp" > "${tmp}.out" && mv "${tmp}.out" "$tmp"
+    rm -f "$diff_file"
 
-  local prompt; prompt=$(cat "$tmp")
-  rm -f "$tmp"
-  trap - EXIT
+    cat "$tmp"
+    rm -f "$tmp"
+    trap - EXIT
+  )
 
   local agent; agent=$(_project_agent)
   local output
@@ -6121,6 +6124,7 @@ if [ -f "\$INNER_LOCK" ]; then
      && kill -0 "\$_prev_pid" 2>/dev/null \\
      && [ "\$((_now - _prev_ts))" -lt 14400 ]; then
     echo "[\$(date '+%Y-%m-%dT%H:%M:%S%z')] inner loop already running (PID \$_prev_pid), skipping"
+    trap '_inner_cleanup' EXIT
     exit 0
   fi
   rm -f "\$INNER_LOCK"
@@ -6577,6 +6581,7 @@ else
   # cycle as failed (otherwise the scheduled tick appears to have vanished).
   _phases_t=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_t" ] && _phases_t='{}'
 _runs_append "failed" 0 "[]" "\$_phases_t" 2>/dev/null || true
+  trap '_inner_cleanup' EXIT
   exit 0
 fi
 
@@ -6669,6 +6674,7 @@ fi
 # FIX-057: timed out — skip publish; EXIT trap writes cycle_end blocked + ALERT.
 if [ "\$_CYCLE_TIMED_OUT" -eq 1 ]; then
   echo "[loop] cycle \${CYCLE_ID}: \${LOOP_CYCLE_TIMEOUT_SEC}s timeout — aborting cycle (worktree preserved at \$WT)"
+  trap '_inner_cleanup' EXIT
   exit 0
 fi
 
@@ -6817,6 +6823,7 @@ _phases_for_runs=\$(_phases_to_json 2>/dev/null || echo '{}')
 # US-LOOP-005: now routed through _runs_append so timeout/worktree-setup-fail
 # share the same write logic. _runs_append is idempotent on run_id.
 _runs_append "\$_cycle_status" "\$_cycle_tcr" "\$_cycle_built" "\$_phases_for_runs" 2>/dev/null || true
+trap '_inner_cleanup' EXIT
 INNER
   chmod +x "$inner_path"
 
@@ -7849,7 +7856,7 @@ _loop_gc() {
   local cutoff_5d; cutoff_5d=$((now_epoch - 5 * 86400))
   for f in "$loop_dir"/backup-before-merge-*.tgz; do
     [[ -f "$f" ]] || continue
-    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    local mtime; mtime=$(_file_mtime "$f")
     if [[ "$mtime" -lt "$cutoff_5d" ]]; then
       if $dry_run; then
         echo "[DRY-RUN] old backup: $(basename "$f")"
@@ -7864,7 +7871,7 @@ _loop_gc() {
   local cutoff_7d; cutoff_7d=$((now_epoch - 7 * 86400))
   for f in "$loop_dir"/*.migrated-*; do
     [[ -f "$f" ]] || continue
-    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    local mtime; mtime=$(_file_mtime "$f")
     if [[ "$mtime" -lt "$cutoff_7d" ]]; then
       if $dry_run; then
         echo "[DRY-RUN] old migrated: $(basename "$f")"
@@ -7879,7 +7886,7 @@ _loop_gc() {
   local cutoff_keep; cutoff_keep=$((now_epoch - keep_days * 86400))
   for f in "$loop_dir"/*.bak; do
     [[ -f "$f" ]] || continue
-    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    local mtime; mtime=$(_file_mtime "$f")
     if [[ "$mtime" -lt "$cutoff_keep" ]]; then
       if $dry_run; then
         echo "[DRY-RUN] old .bak: $(basename "$f")"
@@ -10188,47 +10195,49 @@ _loop_cleanup_stale_runs_tmp() {
 }
 
 _loop_backfill_merged() {
-  local runs_path="${1:-${HOME}/.shared/roll/loop/runs.jsonl}"
-  [ -f "$runs_path" ] || return 0
-  command -v gh >/dev/null 2>&1 || return 0
-  command -v jq >/dev/null 2>&1 || return 0
-  local slug; _gh_resolve slug || return 0
+  (
+    local runs_path="${1:-${HOME}/.shared/roll/loop/runs.jsonl}"
+    [ -f "$runs_path" ] || return 0
+    command -v gh >/dev/null 2>&1 || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    local slug; _gh_resolve slug || return 0
 
-  _loop_cleanup_stale_runs_tmp "$(dirname "$runs_path")"
-  local tmp="${runs_path}.tmp.$$"
-  trap "rm -f '$tmp'" EXIT
-  : > "$tmp"
-  local line status cycle_id branch view_json state merged_at merge_commit
-  while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    status=$(printf '%s' "$line" | jq -r '.status // ""' 2>/dev/null)
-    cycle_id=$(printf '%s' "$line" | jq -r '.cycle_id // ""' 2>/dev/null)
-    if [ "$status" != "built" ] || [ -z "$cycle_id" ]; then
-      printf '%s\n' "$line" >> "$tmp"
-      continue
-    fi
-    branch="loop/cycle-${cycle_id}"
-    view_json=$(gh -R "$slug" pr view "$branch" --json state,mergedAt,mergeCommit 2>/dev/null) || view_json=""
-    if [ -z "$view_json" ]; then
-      printf '%s\n' "$line" >> "$tmp"
-      continue
-    fi
-    state=$(printf '%s' "$view_json" | jq -r '.state // ""' 2>/dev/null)
-    if [ "$state" != "MERGED" ]; then
-      printf '%s\n' "$line" >> "$tmp"
-      continue
-    fi
-    merged_at=$(printf '%s' "$view_json" | jq -r '.mergedAt // ""' 2>/dev/null)
-    merge_commit=$(printf '%s' "$view_json" | jq -r '.mergeCommit.oid // ""' 2>/dev/null)
-    printf '%s' "$line" | jq -c \
-      --arg merged_at "$merged_at" \
-      --arg merge_commit "$merge_commit" \
-      '.status = "merged" | .merged_at = $merged_at | .merge_commit = $merge_commit' \
-      >> "$tmp" 2>/dev/null || printf '%s\n' "$line" >> "$tmp"
-  done < "$runs_path"
-  mv "$tmp" "$runs_path" 2>/dev/null || rm -f "$tmp"
-  trap - EXIT
-  return 0
+    _loop_cleanup_stale_runs_tmp "$(dirname "$runs_path")"
+    local tmp="${runs_path}.tmp.$$"
+    trap "rm -f '$tmp'" EXIT
+    : > "$tmp"
+    local line status cycle_id branch view_json state merged_at merge_commit
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      status=$(printf '%s' "$line" | jq -r '.status // ""' 2>/dev/null)
+      cycle_id=$(printf '%s' "$line" | jq -r '.cycle_id // ""' 2>/dev/null)
+      if [ "$status" != "built" ] || [ -z "$cycle_id" ]; then
+        printf '%s\n' "$line" >> "$tmp"
+        continue
+      fi
+      branch="loop/cycle-${cycle_id}"
+      view_json=$(gh -R "$slug" pr view "$branch" --json state,mergedAt,mergeCommit 2>/dev/null) || view_json=""
+      if [ -z "$view_json" ]; then
+        printf '%s\n' "$line" >> "$tmp"
+        continue
+      fi
+      state=$(printf '%s' "$view_json" | jq -r '.state // ""' 2>/dev/null)
+      if [ "$state" != "MERGED" ]; then
+        printf '%s\n' "$line" >> "$tmp"
+        continue
+      fi
+      merged_at=$(printf '%s' "$view_json" | jq -r '.mergedAt // ""' 2>/dev/null)
+      merge_commit=$(printf '%s' "$view_json" | jq -r '.mergeCommit.oid // ""' 2>/dev/null)
+      printf '%s' "$line" | jq -c \
+        --arg merged_at "$merged_at" \
+        --arg merge_commit "$merge_commit" \
+        '.status = "merged" | .merged_at = $merged_at | .merge_commit = $merge_commit' \
+        >> "$tmp" 2>/dev/null || printf '%s\n' "$line" >> "$tmp"
+    done < "$runs_path"
+    mv "$tmp" "$runs_path" 2>/dev/null || rm -f "$tmp"
+    trap - EXIT
+    return 0
+  )
 }
 
 _loop_monitor() {

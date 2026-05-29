@@ -7707,7 +7707,7 @@ _loop_gc() {
   local cutoff_5d; cutoff_5d=$((now_epoch - 5 * 86400))
   for f in "$loop_dir"/backup-before-merge-*.tgz; do
     [[ -f "$f" ]] || continue
-    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    local mtime; mtime=$(_file_mtime "$f")
     if [[ "$mtime" -lt "$cutoff_5d" ]]; then
       if $dry_run; then
         echo "[DRY-RUN] old backup: $(basename "$f")"
@@ -7722,7 +7722,7 @@ _loop_gc() {
   local cutoff_7d; cutoff_7d=$((now_epoch - 7 * 86400))
   for f in "$loop_dir"/*.migrated-*; do
     [[ -f "$f" ]] || continue
-    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    local mtime; mtime=$(_file_mtime "$f")
     if [[ "$mtime" -lt "$cutoff_7d" ]]; then
       if $dry_run; then
         echo "[DRY-RUN] old migrated: $(basename "$f")"
@@ -7737,7 +7737,7 @@ _loop_gc() {
   local cutoff_keep; cutoff_keep=$((now_epoch - keep_days * 86400))
   for f in "$loop_dir"/*.bak; do
     [[ -f "$f" ]] || continue
-    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    local mtime; mtime=$(_file_mtime "$f")
     if [[ "$mtime" -lt "$cutoff_keep" ]]; then
       if $dry_run; then
         echo "[DRY-RUN] old .bak: $(basename "$f")"

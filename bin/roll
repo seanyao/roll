@@ -4990,21 +4990,33 @@ cmd_agent() {
   local subcmd="${1:-}"; shift || true
   case "$subcmd" in
     use)
+      # US-AGENT-027: one-shot lock of the three complexity tiers to a single
+      # agent. Backward-compatible semantics: `roll agent use claude` still
+      # "works", but its meaning is upgraded from a single per-project agent
+      # pref to "lock easy/default/hard". The `fallback` slot is intentionally
+      # left untouched so a degraded run still has somewhere to go.
       local name="${1:-}"
-      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|antigravity>"; exit 1; }
+      [[ -z "$name" ]] && { err "$(msg agent.use_usage)"; exit 1; }
       # Collapse Antigravity aliases (antigravity / legacy gemini) to canonical agy.
       name="$(_canonical_agent_name "$name")"
-      if [[ "$name" == openai ]]; then
-        command -v codex &>/dev/null || warn "openai agent requires the Codex CLI. Install: npm install -g @openai/codex"
-      elif [[ "$name" == agy ]]; then
-        command -v agy &>/dev/null || command -v gemini &>/dev/null || warn "antigravity agent requires the Antigravity CLI (agy). Install: npm install -g @antigravity/agy"
-      else
-        command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
+      # Reject unknown OR uninstalled agents up front — `use` locks the routing
+      # config, so naming an agent this machine cannot run is a hard error
+      # (unlike `set`, `use` is the "I only have one agent" shortcut).
+      if ! _agent_is_known "$name" || ! _agent_installed_by_name "$name"; then
+        err "$(msg agent.use_unknown_agent "$name")"; exit 1
       fi
-      # REFACTOR-040: write to .roll/local.yaml (per-machine state). Migrate
-      # from legacy .roll.yaml in the project root on the spot — copy the
-      # value over once, then delete the old file so the root stays clean.
       mkdir -p .roll
+      # Lock the three complexity tiers; leave fallback alone. Each write is
+      # atomic (temp file → mv) inside _agents_config_set_slot.
+      local slot
+      for slot in easy default hard; do
+        if ! _agents_config_set_slot "$slot" "$name"; then
+          err "$(msg agent.set_write_failed "$slot")"; exit 1
+        fi
+      done
+      # Back-compat: keep the legacy single-agent pref (.roll/local.yaml) in
+      # sync so code paths still reading _project_agent see the same agent.
+      # Migrate / clean the old project-root .roll.yaml on the spot.
       local pref; pref=$(_project_agent_pref_file)
       if [[ -f "$pref" ]] && grep -q "^agent:" "$pref"; then
         local tmp; tmp=$(mktemp) && sed "s/^agent:.*/agent: ${name}/" "$pref" > "$tmp" && mv "$tmp" "$pref"
@@ -5012,16 +5024,12 @@ cmd_agent() {
         echo "agent: ${name}" >> "$pref"
       fi
       if [[ -f ".roll.yaml" ]]; then
-        # Drop legacy agent line; remove the file if it's left empty (covers
-        # the common case where .roll.yaml only ever held the agent pref).
-        # grep -v returns 1 when nothing remains after filtering — that's a
-        # success here, so suppress the exit code so the mv still runs.
         local tmp; tmp=$(mktemp)
         grep -v "^agent:" .roll.yaml > "$tmp" 2>/dev/null || true
         mv "$tmp" .roll.yaml
         [[ -s ".roll.yaml" ]] || rm -f .roll.yaml
       fi
-      ok "$(msg agent.agent_set_to_for_this_project "$(_agent_display_name "$name")")"
+      ok "$(msg agent.use_locked "$(_agent_display_name "$name")")"
       local project_path; project_path=$(pwd -P)
       local slug; slug=$(_project_slug "$project_path")
       local runner="${_SHARED_ROOT}/loop/run-${slug}.sh"

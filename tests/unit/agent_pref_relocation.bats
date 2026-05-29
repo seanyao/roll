@@ -29,12 +29,18 @@ teardown() { unit_teardown_cd; }
   [ "$out" = "claude" ]
 }
 
-@test "roll agent use: writes to .roll/local.yaml, not the project root" {
-  # Stub the noisy side effects so the function-under-test runs cleanly.
+# US-AGENT-027 changed `roll agent use` to lock the easy/default/hard tiers in
+# .roll/agents.yaml AND keep the legacy .roll/local.yaml pref in sync for code
+# paths that still read _project_agent. It now also requires the named agent to
+# be installed, so these back-compat tests stub the install/known gate to
+# isolate the local.yaml write behavior under test.
+@test "roll agent use: keeps the legacy .roll/local.yaml pref in sync" {
   err()  { echo "ERR: $*" >&2; }
   warn() { echo "WARN: $*" >&2; }
   ok()   { echo "OK: $*"; }
   _install_launchd_plists() { :; }
+  _agent_installed_by_name() { return 0; }
+  _agent_is_known() { return 0; }
   _SHARED_ROOT="$TEST_TMP/shared"
   mkdir -p "$_SHARED_ROOT/loop"
 
@@ -50,15 +56,17 @@ teardown() { unit_teardown_cd; }
   warn() { echo "WARN: $*" >&2; }
   ok()   { echo "OK: $*"; }
   _install_launchd_plists() { :; }
+  _agent_installed_by_name() { return 0; }
+  _agent_is_known() { return 0; }
   _SHARED_ROOT="$TEST_TMP/shared"
   mkdir -p "$_SHARED_ROOT/loop"
 
   echo "agent: claude" > .roll.yaml
-  run cmd_agent use deepseek
+  run cmd_agent use kimi
   [ "$status" -eq 0 ]
 
   # New file holds the new value
-  grep -qF 'agent: deepseek' .roll/local.yaml
+  grep -qF 'agent: kimi' .roll/local.yaml
   # Legacy file is gone (was empty after stripping the agent line)
   [ ! -f .roll.yaml ]
 }
@@ -68,6 +76,8 @@ teardown() { unit_teardown_cd; }
   warn() { echo "WARN: $*" >&2; }
   ok()   { echo "OK: $*"; }
   _install_launchd_plists() { :; }
+  _agent_installed_by_name() { return 0; }
+  _agent_is_known() { return 0; }
   _SHARED_ROOT="$TEST_TMP/shared"
   mkdir -p "$_SHARED_ROOT/loop"
 

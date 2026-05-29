@@ -65,3 +65,11 @@ _i18n_set en agent.set_write_failed "Could not write slot '%s' to agents.yaml"
 _i18n_set zh agent.set_write_failed "无法将槽位 '%s' 写入 agents.yaml"
 _i18n_set en agent.set_saved "%s → %s  saved"
 _i18n_set zh agent.set_saved "%s → %s  已保存"
+
+# US-AGENT-027: `roll agent use <name>` — lock easy/default/hard to one agent.
+_i18n_set en agent.use_usage "Usage: roll agent use <name>   (locks easy/default/hard to one agent)"
+_i18n_set zh agent.use_usage "用法：roll agent use <name>（把 easy/default/hard 三档一次锁成同一 agent）"
+_i18n_set en agent.use_unknown_agent "Unknown or uninstalled agent '%s' — run: roll agent list"
+_i18n_set zh agent.use_unknown_agent "未知或未安装的 agent '%s' — 运行：roll agent list"
+_i18n_set en agent.use_locked "easy/default/hard all locked to %s  (fallback unchanged)"
+_i18n_set zh agent.use_locked "已将 easy/default/hard 三档锁为 %s（fallback 不变）"

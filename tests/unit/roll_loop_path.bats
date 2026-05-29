@@ -57,8 +57,25 @@ teardown() { unit_teardown_cd; }
   _write_loop_runner_script "$script_path" "/tmp/proj" "cd \"/tmp/proj\" && kimi -p \"x\"" "/tmp/log" 0 24 "/tmp/skill/SKILL.md"
   local inner_script="${script_path%.sh}-inner.sh"
   grep -qF '_loop_cycle_agent_cmd "/tmp/skill/SKILL.md"' "$inner_script"
-  grep -qF 'eval "$_CYCLE_CMD"' "$inner_script"
+  # FIX-136 inserted $_AGENT_PTY_PREFIX between eval and the command for
+  # non-claude PTY wrapping, so match eval ... "$_CYCLE_CMD" loosely.
+  grep -qE 'eval .*"\$_CYCLE_CMD"' "$inner_script"
   grep -qF '"$CYCLE_AGENT"' "$inner_script"
+}
+
+@test "FIX-138: _heartbeat_writer starts AFTER sourcing bin/roll (so _loop_event is defined)" {
+  # The heartbeat writer calls _loop_event, which is defined in bin/roll.
+  # If '_heartbeat_writer &' forks before the source line, the subshell
+  # snapshot lacks _loop_event and every phase_tick silently fails -> no
+  # heartbeat all cycle. Guard the ordering.
+  local script_path="${_test_dir}/run-test-hb-order.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "pi -p \"x\"" "/tmp/log" 0 24 "/tmp/skill/SKILL.md"
+  local inner_script="${script_path%.sh}-inner.sh"
+  local src_line hb_line
+  src_line=$(grep -n '^source ' "$inner_script" | head -1 | cut -d: -f1)
+  hb_line=$(grep -n '^_heartbeat_writer &' "$inner_script" | head -1 | cut -d: -f1)
+  [[ -n "$src_line" && -n "$hb_line" ]]
+  [[ "$hb_line" -gt "$src_line" ]]
 }
 
 # FIX-050: launchd/cron deliver a bare PATH. Hardcoded /opt/homebrew/bin breaks

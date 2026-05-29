@@ -6079,8 +6079,12 @@ _heartbeat_writer() {
     sleep 60
   done
 }
-_heartbeat_writer &
-_HEARTBEAT_PID=\$!
+# FIX-138: _heartbeat_writer is started AFTER sourcing bin/roll below, NOT here.
+# Backgrounding a function forks a subshell snapshot of the current shell;
+# _loop_event (defined in bin/roll, sourced ~240 lines later) is undefined in
+# that snapshot, so every phase_tick call silently failed (2>/dev/null || true)
+# -> zero heartbeat across the whole cycle. The publish_wait_merge ticks seen
+# were its own 30s poll loop, not this writer. Starting post-source fixes it.
 # FIX-057: cycle hard timeout — 45 minute SLA per loop cycle. If a cycle runs
 # longer, kill claude / loop-fmt.py / all backgrounded children, mark the
 # in-progress backlog item Blocked (caller decides), and exit cleanly so the
@@ -6325,6 +6329,11 @@ trap '_inner_cleanup' EXIT
 # retry loop relies on tolerating non-zero exits) while keeping pipefail.
 source "${roll_bin}"
 set +e
+
+# FIX-138: start heartbeat now that _loop_event is defined (see note at its
+# definition above). Forking earlier loses _loop_event in the subshell snapshot.
+_heartbeat_writer &
+_HEARTBEAT_PID=\$!
 
 # FIX-052: bin/roll initializes loop state paths from cwd at source time, but
 # the inner script may be launched from anywhere. Override to this project's

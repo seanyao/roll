@@ -122,15 +122,100 @@ def shared_root() -> Path:
     return Path(os.environ.get("ROLL_SHARED_ROOT") or os.path.expanduser("~/.shared/roll"))
 
 # ════════════════════════════════════════════════════════════════════════════
+# Project path resolution — mirrors bin/roll's _loop_resolve_project_path
+# ════════════════════════════════════════════════════════════════════════════
+def _resolve_project_path(slug: str) -> Optional[Path]:
+    """Mirror bin/roll's _loop_resolve_project_path: resolve a project slug
+    back to the absolute project root directory.
+
+    Priority chain (same as bash):
+      1. ROLL_MAIN_PROJECT env var (set by cycle runner)
+      2. macOS launchd plist WorkingDirectory for com.roll.loop.<slug>
+      3. crontab entry referencing run-<slug>.sh
+      4. inner runner script at ~/.shared/roll/loop/run-<slug>-inner.sh
+    """
+    # 1. Env var
+    env_proj = os.environ.get("ROLL_MAIN_PROJECT", "").strip()
+    if env_proj and Path(env_proj).is_dir():
+        return Path(env_proj)
+
+    # 2. macOS launchd plist
+    if sys.platform == "darwin":
+        plist = Path.home() / "Library" / "LaunchAgents" / f"com.roll.loop.{slug}.plist"
+        if plist.exists():
+            try:
+                text = plist.read_text(errors="ignore")
+                m = re.search(
+                    r"<key>WorkingDirectory</key>\s*<string>([^<]+)</string>",
+                    text
+                )
+                if m:
+                    proj = Path(m.group(1))
+                    if proj.is_dir():
+                        return proj
+            except Exception:
+                pass
+
+    # 3. crontab
+    try:
+        cron_out = subprocess.check_output(
+            ["crontab", "-l"], stderr=subprocess.DEVNULL, text=True
+        )
+        for line in cron_out.splitlines():
+            if f"run-{slug}.sh" in line:
+                # Match: cd "<path>"
+                m = re.search(r'cd\s+"([^"]+)"', line)
+                if m:
+                    proj = Path(m.group(1))
+                    if proj.is_dir():
+                        return proj
+    except Exception:
+        pass
+
+    # 4. Inner runner script (grep for ROLL_MAIN_PROJECT=)
+    inner_script = shared_root() / "loop" / f"run-{slug}-inner.sh"
+    if inner_script.exists():
+        try:
+            text = inner_script.read_text(errors="ignore")
+            m = re.search(r'export ROLL_MAIN_PROJECT="([^"]+)"', text)
+            if m:
+                proj = Path(m.group(1))
+                if proj.is_dir():
+                    return proj
+        except Exception:
+            pass
+
+    return None
+
+
+def _loop_runtime_dir_py(slug: str) -> Optional[Path]:
+    """Mirror bin/roll's _loop_runtime_dir: return <project>/.roll/loop."""
+    proj = _resolve_project_path(slug)
+    if proj is None:
+        return None
+    return proj / ".roll" / "loop"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Loaders
 # ════════════════════════════════════════════════════════════════════════════
 def load_events(slug: str, days: int) -> List[Dict[str, Any]]:
-    # US-LOOP-023: read the head NDJSON plus its rotated siblings .1..4.
-    # bin/roll rotates events-<slug>.ndjson at 10MB keeping 4 archives; without
-    # this loop the dashboard silently dropped any cycle whose events landed in
-    # a rotated file (the "永久留存" promise of US-LOOP-004 only held on disk).
-    head = shared_root() / "loop" / f"events-{slug}.ndjson"
-    candidates = [head] + [head.with_suffix(f".ndjson.{i}") for i in range(1, 5)]
+    # FIX-137: read from project-local .roll/loop/events.ndjson first
+    # (mirrors _loop_event writer), fall back to shared events-<slug>.ndjson
+    # for historical data that hasn't been migrated yet.
+    candidates: List[Path] = []
+
+    # Primary: project-local (same path as _loop_event writer, US-LOOP-020)
+    rt_dir = _loop_runtime_dir_py(slug)
+    if rt_dir is not None:
+        head = rt_dir / "events.ndjson"
+        candidates.append(head)
+        candidates.extend(head.with_suffix(f".ndjson.{i}") for i in range(1, 5))
+
+    # Fallback: shared (old data pre-US-LOOP-020, migration not yet done)
+    shared_head = shared_root() / "loop" / f"events-{slug}.ndjson"
+    candidates.append(shared_head)
+    candidates.extend(shared_head.with_suffix(f".ndjson.{i}") for i in range(1, 5))
+
     existing = [p for p in candidates if p.exists()]
     if not existing:
         return []
@@ -171,8 +256,16 @@ _CRON_PAT = re.compile(
 )
 
 def load_cron_log(slug: str) -> List[Dict[str, Any]]:
-    """Return ordered list of cron entries with local HH:MM:SS + extracted fields."""
-    path = shared_root() / "loop" / f"cron-{slug}.log"
+    """Return ordered list of cron entries with local HH:MM:SS + extracted fields.
+
+    FIX-137: checks project-local .roll/loop/cron.log first, falls back to
+    shared cron-<slug>.log."""
+    # Primary: project-local
+    rt_dir = _loop_runtime_dir_py(slug)
+    path = (rt_dir / "cron.log") if rt_dir is not None else None
+    if path is None or not path.exists():
+        # Fallback: shared
+        path = shared_root() / "loop" / f"cron-{slug}.log"
     if not path.exists():
         return []
     out: List[Dict[str, Any]] = []
@@ -193,8 +286,16 @@ def load_cron_log(slug: str) -> List[Dict[str, Any]]:
     return out
 
 def load_state(slug: str) -> Dict[str, str]:
-    """Tiny YAML reader — only the flat keys bin/roll writes."""
-    path = shared_root() / "loop" / f"state-{slug}.yaml"
+    """Tiny YAML reader — only the flat keys bin/roll writes.
+
+    FIX-137: checks project-local .roll/loop/state.yaml first, falls back to
+    shared state-<slug>.yaml."""
+    # Primary: project-local
+    rt_dir = _loop_runtime_dir_py(slug)
+    path = (rt_dir / "state.yaml") if rt_dir is not None else None
+    if path is None or not path.exists():
+        # Fallback: shared
+        path = shared_root() / "loop" / f"state-{slug}.yaml"
     if not path.exists():
         return {}
     out: Dict[str, str] = {}
@@ -564,10 +665,18 @@ def repair_orphan_cycles_from_git(cycles: List[Dict[str, Any]], git_merges: Dict
 
 def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
     """Map run_id → run row for the current project (filters out other slugs
-    sharing ~/.shared/roll/loop/runs.jsonl). Lenient slug matching salvages
-    entries written under buggy slugs (FIX-053): the bare project basename
-    (e.g. 'Roll') or worktree paths (e.g. '{slug}-cycle-XXX')."""
-    path = shared_root() / "loop" / "runs.jsonl"
+    sharing runs.jsonl). Lenient slug matching salvages entries written under
+    buggy slugs (FIX-053): the bare project basename (e.g. 'Roll') or worktree
+    paths (e.g. '{slug}-cycle-XXX').
+
+    FIX-137: reads from project-local .roll/loop/runs.jsonl first, falls back
+    to shared runs.jsonl."""
+    # Primary: project-local
+    rt_dir = _loop_runtime_dir_py(slug)
+    path = (rt_dir / "runs.jsonl") if rt_dir is not None else None
+    if path is None or not path.exists():
+        # Fallback: shared (cross-project)
+        path = shared_root() / "loop" / "runs.jsonl"
     if not path.exists():
         return {}
     base = slug.split("-")[0]  # 'Roll-a43d1b' → 'Roll'

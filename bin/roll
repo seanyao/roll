@@ -4889,6 +4889,30 @@ cmd_review_pr() {
   esac
 }
 
+# US-AGENT-025: recent degradation traces for the `roll agent` view.
+#
+# Scans the tail of runs.jsonl for rows that carry a non-empty `fallback_from`
+# and prints one "<tier> <intended-agent> <ran-agent>" line per degradation,
+# newest first, capped at LIMIT (default 5). The intended agent is the
+# `fallback_from` field (the agent the tier router originally picked); the ran
+# agent is the row's `agent` field (the fallback that actually executed).
+#
+# Honors ROLL_AGENT_RUNS_FILE (tests) over the live _LOOP_RUNS path. Prints
+# nothing (exit 0) when there is no runs.jsonl, no jq, or no fallback rows.
+_agent_view_recent_fallbacks() {
+  local limit="${1:-5}"
+  local runs_file="${ROLL_AGENT_RUNS_FILE:-$_LOOP_RUNS}"
+  [ -n "$runs_file" ] && [ -f "$runs_file" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  # tail then reverse so newest degradations come first; jq filters rows that
+  # actually fell back. tier may be absent on older rows → default to "?".
+  tail -n 200 "$runs_file" 2>/dev/null \
+    | jq -r 'select((.fallback_from // "") != "")
+             | "\(.tier // "?") \(.fallback_from) \(.agent // "?")"' 2>/dev/null \
+    | tail -n "$limit" \
+    | sed '1!G;h;$!d'
+}
+
 cmd_agent() {
   local subcmd="${1:-}"; shift || true
   case "$subcmd" in
@@ -4948,17 +4972,60 @@ cmd_agent() {
       done; echo ""
       ;;
     "")
-      local agent; agent=$(_project_agent)
-      local src="global"
-      local pref; pref=$(_project_agent_pref_file)
-      if [[ -f "$pref" ]] && grep -q "^agent:" "$pref" 2>/dev/null; then
-        src="project (.roll/local.yaml)"
-      elif [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml 2>/dev/null; then
-        src="project (.roll.yaml, legacy — run \`roll agent use\` to migrate)"
+      # US-AGENT-025: four-slot complexity-routing view — slot / agent /
+      # online status (✓/✗) / note, plus the fallback slot (idle vs active)
+      # and any recent runs.jsonl degradation traces.
+      echo ""; echo "  $(msg agent.view_header)"; echo ""
+      if ! _agents_config_path >/dev/null 2>&1; then
+        echo -e "    ${YELLOW}$(msg agent.view_no_config)${NC}"
+        echo "    $(msg agent.view_no_config_hint)"; echo ""
+        return 0
       fi
-      echo -e "\n  Agent  ${CYAN}$(_agent_display_name "$agent")${NC}  (${src})\n"
-      echo "  roll agent use <name>   — switch agent for this project"
-      echo "  roll agent list         — show installed agents"; echo ""
+      printf '    %-9s %-22s %-8s %s\n' \
+        "$(msg agent.view_col_slot)" "$(msg agent.view_col_agent)" \
+        "$(msg agent.view_col_status)" "$(msg agent.view_col_note)"
+      # Is any slot's agent currently serving as the active fallback?
+      local fb_active=""
+      if [[ -n "$(_agent_view_recent_fallbacks 1)" ]]; then fb_active=1; fi
+      local slot agent disp status_cell note
+      for slot in easy default hard fallback; do
+        agent=$(_agents_config_slot "$slot" 2>/dev/null || true)
+        note=""
+        if [[ -z "$agent" ]]; then
+          disp="$(msg agent.view_slot_unset)"
+          status_cell="-"
+        else
+          disp="$(_agent_display_name "$agent")"
+          if _agent_available "$agent" >/dev/null 2>&1; then
+            status_cell="$(echo -e "${GREEN}✓${NC}")"
+          else
+            status_cell="$(echo -e "${RED}✗${NC}")"
+          fi
+        fi
+        if [[ "$slot" == "fallback" ]]; then
+          if [[ -n "$fb_active" ]]; then
+            note="$(msg agent.view_fallback_active)"
+          else
+            note="$(msg agent.view_fallback_idle)"
+          fi
+        fi
+        printf '    %-9s %-22s %-8b %s\n' "$slot" "$disp" "$status_cell" "$note"
+      done
+      echo ""
+      # Recent degradation traces (newest first).
+      local degr; degr=$(_agent_view_recent_fallbacks 5)
+      if [[ -n "$degr" ]]; then
+        echo "  $(msg agent.view_recent_downgrades)"
+        local tier from ran
+        while read -r tier from ran; do
+          [[ -z "$tier" ]] && continue
+          echo "    $(msg agent.view_downgrade_line "$tier" "$from" "$ran")"
+        done <<< "$degr"
+        echo ""
+      fi
+      echo "  roll agent set <slot> <agent>   — set the agent for a slot"
+      echo "  roll agent use <name>           — switch agent for this project"
+      echo "  roll agent list                 — show installed agents"; echo ""
       ;;
     *) err "Unknown subcommand: $subcmd"; echo "Usage: roll agent [use <name>|list]"; exit 1 ;;
   esac

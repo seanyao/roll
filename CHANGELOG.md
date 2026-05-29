@@ -2,49 +2,32 @@
 
 ## v2026.529.5
 
-### Fixed
-
-- loop dashboard 恢复显示当天跑完的 cycle（读取端对齐项目本地事件）`[loop]`
-- 非 Claude agent 执行阶段恢复存活心跳（修复心跳子进程 fork 早于 source）`[loop]`
-
-## v2026.529.4
-
-### Fixed
-
-- 非 Claude agent 跑 loop 不再黑屏 `[loop]`
-
 ### Added
 
-- `roll-doc` 现在追踪数据流和调用链 `[loop]`
-
-## v2026.529.3
-
-### Fixed
-
-- loop 用 kimi 跑不再必崩 `[loop]`
-- 切 agent 后 loop 不再用旧的 `[loop]`
-- loop 不再因提交卡住整轮白做 `[loop]`
-
-## v2026.529.2
-
-### Added
-
-- **loop 按故事自动匹配最合适的 AI 工具 — 不再一刀切** `[loop]`
-- **agent 做不动时自动拆小任务 — 不再硬干半成品** `[loop]`
-- **技能交付后自动评分 — 回看质量趋势** `[loop]`
-- **loop 重复改同一文件时自动折叠 — 输出不再刷屏** `[loop]`
-- **loop 合并前自动检查测试质量 — 烂测试不再混入** `[loop]`
-
-## v2026.529.1
-
-### Added
-
-- **loop 运行时间可以按项目设** — 不用再全局迁就
+- **`roll feedback` — 一条命令直接给 Roll 提反馈** — `roll feedback "..."` 直接开一个 GitHub issue,自动附上环境信息(系统 / 版本 / 当前 agent),`--type` 自动映射到对应 label;反馈仓库按 env > 项目 > 全局 > origin 优先级解析,不用手填 `[cli]`
+- **loop 按故事自动挑最合适的 AI agent** — 不再所有活都丢给同一个工具:每个故事按硬规则 + 历史命中率软偏好路由到更合适的 agent,`roll loop status` / brief 能看到每个 agent 的命中率 `[agent]`
+- **agent 扛不动的活自动拆小,而不是硬憋半成品** — cycle 起步先跑 pre-flight 自检;扛不住就自降级(重新拆小 + 标 🚫 Hold + 干净退出),自动重拆设 chain_depth≥2 上限并告警 `[agent]`
+- **每次交付自动打分,能回看质量趋势** — roll-build / roll-fix / roll-design 完成后各写一条统一格式自评分,dashboard 显示趋势(均值 / 最低 / 重做率)`[skill]`
+- **合并前自动查测试质量,烂测试进不了主干** — 新增两条测试质量红线(内联外部工具、文件落在仓库外),设计阶段自检 + 合并门扫描;命中写 ALERT,确需绕过用 `[skip-test-quality]` `[test]`
+- **loop 活跃时段能按项目单独设** — 不用再让所有项目迁就一个全局时间,活跃窗口从项目本地 `.roll/local.yaml` 读 `[loop]`
+- **`roll-doc` 能追踪数据流和调用链** — 不只列模块,还顺着 import 链路把数据怎么流、谁调谁理出来 `[doc]`
 
 ### Fixed
 
-- **`roll loop on` 不再显示全 00:00** — 时间显示正常了
-- **agent 检测不再误报** — 没装的工具不会被当成可用
+- **loop 的 agent 路由以前是摆设,说一套做一套** — 嘴上说"交给 X",实跑的却是安装时写死的另一条命令,手动换工具也不生效;改成每轮运行时按当下挑中的 agent 重建命令,换 agent 立刻生效 `[loop]`
+- **干完活却卡在提交、整轮白做** — 提交前被测试门拦下,接着去跑全量 `npm test` 把自己拖死、成果作废;改成只测改动的 `roll test` 快速过关,能正常提交、开 PR `[loop]`
+- **非 Claude agent 跑 loop 不再黑屏假死** — deepseek / pi 等执行阶段几十分钟没输出像卡死、心跳也没发;放弃强求实时输出,改成稳定打存活心跳(运行时待下一轮 cycle 实证)`[loop]`
+- **dashboard 看不到当天跑完的 cycle** — 事件写入端搬进了项目本地,读取端还在读旧的 shared 文件,卡跑完合了 PR 却显示 Today=0;改成统一从项目本地读并把历史并过去 `[loop]`
+- **loop 用 kimi 跑必崩** — kimi 升级新版后调用参数对不上,一跑就挂;已修好 `[agent]`
+- **`roll loop on` 调度时间显示全是 00:00** — 渲染时 printf 展开顺序错了,现在正常 `[loop]`
+- **没装的工具被误判成"可用"** — 只看到 `~/.claude` 目录就当 Claude 装了、还设成默认 agent;现在必须命令真在 PATH 上才算装 `[agent]`
+- **`roll test` 在隔离 VM 里更稳** — 修了 tart 拿到过期 IP 的问题,默认只跑受影响用例让 VM 更快 `[test]`
+
+### Improved
+
+- **loop 日志全改项目本地、按 cycle 全留** — 以前全局 + 项目本地重复存两份、全局那份还无限 append,per-cycle 又 cap 50 偶尔丢轮;改成全落项目本地、不限量、零全局重复,机器层事件单列项目 ops 日志,cycle 结束终端只显示当前这轮 `[loop]`
+- **loop 的"完成"现在等于"真合进主干"** — 以前开 PR 那刻就标 ✅ Done,但 PR-protected main 要 review + 绿 CI、自治 cycle 常合不进 → 假 Done;改成真正 merge 才算完成,没合自动退回 📋 待办 `[loop]`
+- **同一故事不再每轮重复开 PR** — 选卡前先查它是不是已有开着的 PR,有就跳过,合不进的 PR 不再越堆越多 `[loop]`
 
 ## v2026.528.2
 

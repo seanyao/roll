@@ -872,6 +872,154 @@ def _self_score_summary_line(notes_dir = None, window: int = 14) -> str:
     return f"self-score: mean {mean:.1f} / min {minv} / redo {redo} (last {window})"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# US-EVAL-003: result-eval trend view (window aggregation).
+#
+# Distinct from self-score (above): self-score is the agent's *subjective*
+# review of a skill run; result_eval is the *objective* per-cycle result score
+# computed in US-EVAL-002 and stored in each runs.jsonl record under the
+# `result_eval` block ({version, score 1..10, dims{dim: 0..1|"unknown"}}).
+#
+# We aggregate the most recent N records that carry a result_eval: the mean and
+# minimum cycle score, a per-dimension hit-rate (share of records scoring 1.0 on
+# that dimension, ignoring "unknown"), and a trend arrow comparing the newer
+# half's mean against the older half's. Records without result_eval (older
+# schema) are simply skipped — never an error (backward compat).
+
+# Dimension order for the eval view. Imported from the rubric so the two stay
+# in sync; falls back to a literal list if the scorer module isn't importable
+# (e.g. a stripped-down test env).
+def _eval_dim_names() -> List[str]:
+    try:
+        import importlib.util
+        path = Path(__file__).resolve().parent / "loop_result_eval.py"
+        spec = importlib.util.spec_from_file_location("loop_result_eval", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return [name for name, _ in mod.DIMENSIONS]
+    except Exception:
+        return ["outcome", "correctness", "scope_fidelity",
+                "quality", "efficiency", "cleanliness"]
+
+UNKNOWN = "unknown"
+
+
+def _eval_records(records: List[Dict[str, Any]], window: int) -> List[Dict[str, Any]]:
+    """The most recent `window` records (oldest→newest) that carry a usable
+    result_eval block. Records sorted by `ts`; absence of result_eval skips."""
+    rows: List[Dict[str, Any]] = []
+    ordered = sorted((r or {} for r in records), key=lambda r: r.get("ts", ""))
+    for r in ordered:
+        ev = r.get("result_eval")
+        if isinstance(ev, dict) and isinstance(ev.get("score"), (int, float)):
+            rows.append(ev)
+    return rows[-window:] if window > 0 else rows
+
+
+def aggregate_eval(records: List[Dict[str, Any]], window: int = 14) -> Dict[str, Any]:
+    """Aggregate result_eval over the last `window` scored records.
+
+    Returns a dict: {n, mean, min, trend ('up'|'down'|'flat'|None), dims:
+    {dim: hit_rate float 0..1 | None}}. n is the count of scored records used.
+    """
+    rows = _eval_records(records, window)
+    n = len(rows)
+    scores = [float(ev["score"]) for ev in rows]
+    out: Dict[str, Any] = {"n": n, "mean": None, "min": None,
+                           "trend": None, "dims": {}}
+    if n == 0:
+        return out
+    out["mean"] = sum(scores) / n
+    out["min"] = min(scores)
+    # Per-dimension hit-rate: share of records that scored a perfect 1.0 on the
+    # dimension, counting only records where the dim is known (not "unknown").
+    for dim in _eval_dim_names():
+        known = 0
+        hits = 0
+        for ev in rows:
+            v = (ev.get("dims") or {}).get(dim, UNKNOWN)
+            if v == UNKNOWN or v is None:
+                continue
+            known += 1
+            if float(v) >= 1.0:
+                hits += 1
+        out["dims"][dim] = (hits / known) if known else None
+    # Trend: compare the newer half's mean against the older half's. Needs at
+    # least 2 records to split; <0.3 score delta is "flat".
+    if n >= 2:
+        half = n // 2
+        older = scores[:half] or scores[:1]
+        newer = scores[half:]
+        delta = (sum(newer) / len(newer)) - (sum(older) / len(older))
+        if delta > 0.3:
+            out["trend"] = "up"
+        elif delta < -0.3:
+            out["trend"] = "down"
+        else:
+            out["trend"] = "flat"
+    return out
+
+
+_TREND_ARROW = {"up": "↑", "down": "↓", "flat": "→"}
+
+
+# Single-line dashboard summary, mirroring `_self_score_summary_line`'s form.
+# Returns "" when there are no scored records, "result-eval: (n/a) need 3 ..."
+# when the sample is below 3 (same threshold/idiom as self-score), else
+# "result-eval: mean 7.4↑ / min 5 / outcome 80% scope 60% ... (last N)".
+def _result_eval_summary_line(records: List[Dict[str, Any]], window: int = 14) -> str:
+    agg = aggregate_eval(records or [], window)
+    n = agg["n"]
+    if n == 0:
+        return ""
+    if n < 3:
+        return f"result-eval: (n/a) — {n} sample(s), need 3 (last {window})"
+    arrow = _TREND_ARROW.get(agg["trend"] or "flat", "")
+    # Short per-dimension labels for a compact line.
+    short = {"outcome": "out", "correctness": "ci", "scope_fidelity": "scope",
+             "quality": "qual", "efficiency": "eff", "cleanliness": "clean"}
+    dim_bits = []
+    for dim, rate in agg["dims"].items():
+        if rate is None:
+            continue
+        dim_bits.append(f"{short.get(dim, dim)} {round(rate * 100)}%")
+    dims_str = (" / " + " ".join(dim_bits)) if dim_bits else ""
+    return (f"result-eval: mean {agg['mean']:.1f}{arrow} / min {int(agg['min'])}"
+            f"{dims_str} (last {window})")
+
+
+# Multi-line view for `roll loop eval [N]`. Pretty-prints the aggregation as a
+# small dashboard block (no color dependency beyond the shared renderer).
+def format_eval_view(records: List[Dict[str, Any]], window: int = 14) -> str:
+    agg = aggregate_eval(records or [], window)
+    n = agg["n"]
+    lines: List[str] = []
+    lines.append(f"Loop result-eval — last {window} cycles")
+    lines.append(f"循环结果评分 — 最近 {window} 轮")
+    lines.append("")
+    if n == 0:
+        lines.append("no scored cycles yet (need result_eval in runs.jsonl)")
+        lines.append("尚无评分 cycle（runs.jsonl 需含 result_eval）")
+        return "\n".join(lines)
+    if n < 3:
+        lines.append(f"(n/a) — {n} sample(s), need 3")
+        lines.append(f"(n/a) — 样本 {n} 个，至少需要 3 个")
+        return "\n".join(lines)
+    arrow = _TREND_ARROW.get(agg["trend"] or "flat", "")
+    lines.append(f"  mean   {agg['mean']:.1f} / 10   {arrow}")
+    lines.append(f"  min    {int(agg['min'])} / 10")
+    lines.append(f"  n      {n}")
+    lines.append("")
+    lines.append("  dimension hit-rate / 各维度命中率")
+    for dim in _eval_dim_names():
+        rate = agg["dims"].get(dim)
+        if rate is None:
+            lines.append(f"    {dim:<16} n/a")
+        else:
+            lines.append(f"    {dim:<16} {round(rate * 100)}%")
+    return "\n".join(lines)
+
+
 # US-AGENT-010: per-agent hit-rate summary for the ROLLUP block.
 # Aggregates the last `window_cycles` runs.jsonl records grouped by `agent`.
 # Returns a single-line string like
@@ -1159,6 +1307,16 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
     if _skill_line:
         print("  " + c("dim", _skill_line))
 
+    # US-EVAL-003: per-cycle result-eval trend (single line), distinct from the
+    # self-score line above (subjective skill review vs objective cycle result).
+    try:
+        _eval_records_in = list(runs.values()) if isinstance(runs, dict) else list(runs or [])
+        _eval_line = _result_eval_summary_line(_eval_records_in)
+    except Exception:
+        _eval_line = ""
+    if _eval_line:
+        print("  " + c("dim", _eval_line))
+
     print()
     print(c("faint", "─" * COLS))
     print()
@@ -1370,7 +1528,23 @@ def main(argv=None):
     p.add_argument("--no-color", action="store_true", help="strip ANSI (also honors NO_COLOR=1)")
     p.add_argument("--en", action="store_true", help="EN rows only")
     p.add_argument("--zh", action="store_true", help="ZH rows only")
+    p.add_argument("--eval", nargs="?", type=int, const=14, default=None,
+                   metavar="N",
+                   help="result-eval trend view over the last N scored cycles "
+                        "(default 14); prints mean/min/per-dim hit-rate and exits")
     args = p.parse_args(argv)
+
+    # US-EVAL-003: `roll loop eval [N]` — result-eval trend view, then exit.
+    if args.eval is not None:
+        window = args.eval if args.eval and args.eval > 0 else 14
+        if os.environ.get("ROLL_RENDER_FIXTURE"):
+            records: List[Dict[str, Any]] = []
+        else:
+            _slug = project_slug()
+            _runs = load_runs(_slug)
+            records = list(_runs.values())
+        print(format_eval_view(records, window=window))
+        return
 
     roll_render.USE_COLOR = (not args.no_color
                              and not os.environ.get("NO_COLOR")

@@ -1,5 +1,12 @@
 # Changelog
 
+## v2026.529.5
+
+### Fixed
+
+- loop dashboard 恢复显示当天跑完的 cycle（读取端对齐项目本地事件）`[loop]`
+- 非 Claude agent 执行阶段恢复存活心跳（修复心跳子进程 fork 早于 source）`[loop]`
+
 ## v2026.529.4
 
 ### Fixed

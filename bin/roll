@@ -7940,6 +7940,7 @@ cmd_loop() {
     now)     _loop_now ;;
     test)    shift; _loop_test "$@" ;;
     status)  _loop_status "$@" ;;
+    eval)    _loop_eval "$@" ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
     log)     _loop_log "$@" ;;
@@ -7967,6 +7968,7 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mu
   now           Run one cycle immediately
   test          Quick smoke test (tmux/popup/stream chain)
   status        Show scheduler state and current loop state
+  eval [N]      Result-eval trend over the last N scored cycles (default 14)
   monitor       Live dashboard: launchd status, queue, recent runs
   runs [N]      Show last N run summaries (default 10)
   log [id]      Show per-cycle log (default: latest; optional cycle-id or prefix)
@@ -8249,6 +8251,40 @@ _loop_test() {
     err "$(msg loop.smoke_test_failed_exit_s_agent ${exit_code} ${elapsed} ${agent})"
     return 1
   fi
+}
+
+# US-EVAL-003: `roll loop eval [N]` — objective result-eval trend over the last
+# N scored cycles. Reads each runs.jsonl record's `result_eval` block (written
+# by US-EVAL-002) and prints mean/min cycle score, per-dimension hit-rate, and a
+# trend arrow. Distinct from skill self-score. Delegates aggregation to the
+# Python view (--eval), which shares load_runs/result_eval logic with the dash.
+_loop_eval() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    cat <<'HELP'
+Usage: roll loop eval [N]
+
+  Result-eval trend over the last N scored cycles (default 14).
+  Reads each runs.jsonl record's result_eval block and reports the mean and
+  minimum cycle score (1..10), each rubric dimension's hit-rate, and a trend
+  arrow. Cycles without a result_eval (older schema) are skipped. With fewer
+  than 3 scored cycles, prints an "(n/a) need 3" notice.
+
+  近 N 轮 cycle 的结果评分趋势（默认 14）。
+  读取每条 runs.jsonl 的 result_eval，输出均分 / 最低分 / 各维度命中率 / 趋势箭头。
+  无 result_eval 的旧记录跳过；样本不足 3 个时提示 (n/a) need 3。
+
+Examples:
+  roll loop eval
+  roll loop eval 30
+HELP
+    return 0
+  fi
+  local n="${1:-}"
+  if [[ -n "$n" && ! "$n" =~ ^[0-9]+$ ]]; then
+    err "roll loop eval: N must be a positive integer (got '$n')"
+    return 1
+  fi
+  python3 "${ROLL_PKG_DIR}/lib/roll-loop-status.py" --eval ${n:+$n}
 }
 
 _loop_status() {

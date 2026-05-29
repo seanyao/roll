@@ -1,4 +1,4 @@
 ### Fixed
-- loop 用 kimi 跑不再必崩 `[loop]`
-- 切 agent 后 loop 不再用旧的 `[loop]`
-- loop 不再因提交卡住整轮白做 `[loop]`
+- 非 Claude agent 跑 loop 不再黑屏 `[loop]`
+### Added
+- `roll-doc` 现在追踪数据流和调用链 `[loop]`

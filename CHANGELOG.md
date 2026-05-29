@@ -1,5 +1,15 @@
 # Changelog
 
+## v2026.529.4
+
+### Fixed
+
+- 非 Claude agent 跑 loop 不再黑屏 `[loop]`
+
+### Added
+
+- `roll-doc` 现在追踪数据流和调用链 `[loop]`
+
 ## v2026.529.3
 
 ### Fixed

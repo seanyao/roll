@@ -6031,6 +6031,10 @@ printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$INNER_LOCK"
 # readers see "still alive in <phase>" during long-running silences (e.g.
 # agent_invoke 5-45 min). CURRENT_PHASE is maintained by _phase_begin/_phase_end.
 HEARTBEAT_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
+# FIX-136: file-based phase tracking so forked heartbeat child can see phase changes.
+# CURRENT_PHASE is inherited at fork time — changes after fork are invisible to child.
+# Writing phase state to a file decouples the heartbeat from fork-time snapshot.
+HEARTBEAT_PHASE_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.phase-${slug}"
 CURRENT_PHASE=""
 # bash 3.2 (macOS /bin/bash) lacks associative arrays — use namespaced
 # variables via 'printf -v' + indirect '\${!VAR}' expansion instead.
@@ -6042,6 +6046,8 @@ _phase_begin() {
   local _name="\$1"
   printf -v "_PHASE_START_\${_name}" '%s' "\$(date +%s)"
   CURRENT_PHASE="\$_name"
+  # FIX-136: write phase+start_ts to file so forked heartbeat child can read it
+  printf '%s %s' "\$_name" "\$(date +%s)" > "\$HEARTBEAT_PHASE_FILE"
   _loop_event phase_start "\$_name" "" "" || true
 }
 _phase_end() {
@@ -6053,17 +6059,21 @@ _phase_end() {
   printf -v "_PHASE_DUR_\${_name}" '%s' "\$_dur"
   case " \$_PHASE_NAMES_DONE " in *" \$_name "*) ;; *) _PHASE_NAMES_DONE="\${_PHASE_NAMES_DONE} \$_name" ;; esac
   CURRENT_PHASE=""
+  # FIX-136: clear phase file so heartbeat knows no active phase
+  echo -n > "\$HEARTBEAT_PHASE_FILE" 2>/dev/null || true
   _loop_event phase_end "\$_name" "\${_dur}s" "\$_outcome" || true
 }
 _heartbeat_writer() {
   while true; do
     echo "\$(date -u +%s)" > "\$HEARTBEAT_FILE"
-    if [ -n "\$CURRENT_PHASE" ]; then
-      local _start_var="_PHASE_START_\${CURRENT_PHASE}"
-      local _phase_start="\${!_start_var:-}"
-      if [ -n "\$_phase_start" ]; then
-        local _el=\$(( \$(date +%s) - _phase_start ))
-        _loop_event phase_tick "\$CURRENT_PHASE" "\${_el}s elapsed" "" 2>/dev/null || true
+    # FIX-136: read phase from file — CURRENT_PHASE is inherited at fork and
+    # never updated. The parent writes phase+start_ts on _phase_begin, clears
+    # on _phase_end. No phase file = no active phase = skip tick.
+    if [ -f "\$HEARTBEAT_PHASE_FILE" ]; then
+      read -r _hb_phase _hb_start_ts < "\$HEARTBEAT_PHASE_FILE" 2>/dev/null || true
+      if [ -n "\$_hb_phase" ] && [ -n "\$_hb_start_ts" ]; then
+        local _el=\$(( \$(date +%s) - _hb_start_ts ))
+        _loop_event phase_tick "\$_hb_phase" "\${_el}s elapsed" "" 2>/dev/null || true
       fi
     fi
     sleep 60
@@ -6304,7 +6314,7 @@ _runs_append "failed" 0 "[]" "\$_phases_t" 2>/dev/null || true
     _keep="\${ROLL_CYCLE_LOG_KEEP:-50}"
     ( cd "\$_log_dir" && ls -t *.log 2>/dev/null | tail -n +\$((_keep + 1)) | xargs -r rm -f ) 2>/dev/null || true
   fi
-  rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE"
+  rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE" "\$HEARTBEAT_PHASE_FILE"
   exit "\$_rc"
 }
 trap '_inner_cleanup' EXIT
@@ -6468,6 +6478,11 @@ export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
 export ROLL_LOOP_AGENT="\${CYCLE_AGENT:-\$(_project_agent)}"
 export ROLL_LOOP_ROUTED_STORY ROLL_LOOP_ROUTED_AGENT ROLL_LOOP_ROUTED_RULE
 _phase_begin agent_invoke
+# FIX-136: non-claude agents (pi/deepseek/kimi) buffer stdout when piped.
+# Force a pseudo-TTY via script(1) so loop-fmt.py's passthrough receives
+# output in real time — without this, tmux is black for the entire phase.
+_AGENT_PTY_PREFIX=""
+[ "\$ROLL_LOOP_AGENT" != "claude" ] && _AGENT_PTY_PREFIX="script -q /dev/null"
 for _attempt in 1 2 3; do
   # FIX-068: defensive reset before each attempt — _CYCLE_TIMED_OUT carries
   # the SIGTERM result of the previous attempt and would otherwise force an
@@ -6493,11 +6508,11 @@ for _attempt in 1 2 3; do
   # FIX-134: prefer the runtime-rebuilt command (routing-aware); fall back to
   # the baked command (project agent at \`roll loop on\` time) when empty.
   if [ -f "\$FMT" ]; then
-    if [ -n "\$_CYCLE_CMD" ]; then ( cd "\$WT" && eval "\$_CYCLE_CMD" ) | python3 "\$FMT"
-    else ( cd "\$WT" && ${agent_cmd} ) | python3 "\$FMT"; fi
+    if [ -n "\$_CYCLE_CMD" ]; then ( cd "\$WT" && eval \$_AGENT_PTY_PREFIX "\$_CYCLE_CMD" ) | python3 "\$FMT"
+    else ( cd "\$WT" && \$_AGENT_PTY_PREFIX ${agent_cmd} ) | python3 "\$FMT"; fi
   else
-    if [ -n "\$_CYCLE_CMD" ]; then ( cd "\$WT" && eval "\$_CYCLE_CMD" )
-    else ( cd "\$WT" && ${agent_cmd} ); fi
+    if [ -n "\$_CYCLE_CMD" ]; then ( cd "\$WT" && eval \$_AGENT_PTY_PREFIX "\$_CYCLE_CMD" )
+    else ( cd "\$WT" && \$_AGENT_PTY_PREFIX ${agent_cmd} ); fi
   fi
   _exit=\$?
   kill "\$_WATCHDOG_PID" 2>/dev/null

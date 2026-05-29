@@ -89,11 +89,20 @@ teardown() { unit_teardown; }
   grep -q '_phase_begin cleanup' "$inner"
 }
 
-@test "inner runner template heartbeat emits phase_tick when CURRENT_PHASE set" {
+@test "inner runner template heartbeat reads phase from file (FIX-136)" {
   local runner_dir="${TEST_TMP}/runner2"
   mkdir -p "$runner_dir"
   _write_loop_runner_script "${runner_dir}/run.sh" "${TEST_TMP}" "echo claude" "${runner_dir}/log.txt" 10 18
-  grep -q 'phase_tick "\$CURRENT_PHASE"' "${runner_dir}/run-inner.sh"
+  local inner="${runner_dir}/run-inner.sh"
+  # FIX-136: heartbeat reads phase from HEARTBEAT_PHASE_FILE instead of
+  # CURRENT_PHASE (which is inherited at fork and never updated).
+  grep -qF 'HEARTBEAT_PHASE_FILE' "$inner"
+  grep -qF '_hb_phase' "$inner"
+  grep -qF '_hb_start_ts' "$inner"
+  # _phase_begin writes to HEARTBEAT_PHASE_FILE
+  grep -qF 'HEARTBEAT_PHASE_FILE' "$inner"
+  # _phase_end clears it
+  grep -qF 'HEARTBEAT_PHASE_FILE' "$inner"
 }
 
 @test "inner runner template _inner_cleanup auto-closes CURRENT_PHASE" {

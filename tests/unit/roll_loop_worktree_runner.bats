@@ -210,6 +210,8 @@ teardown() {
   grep -qF 'HEARTBEAT_FILE' "$inner"
   grep -qF 'sleep 60' "$inner"
   grep -qF '_heartbeat_writer' "$inner"
+  # FIX-136: phase file for cross-process phase tracking
+  grep -qF 'HEARTBEAT_PHASE_FILE' "$inner"
   # Cleans up heartbeat PID on EXIT
   grep -qF '_HEARTBEAT_PID' "$inner"
   grep -qF 'HEARTBEAT_FILE' "$inner"
@@ -285,4 +287,17 @@ teardown() {
   local emit_line;  emit_line=$(grep -n 'pi_emit.py" --cwd' "$inner" | head -1 | cut -d: -f1)
   local phase_line; phase_line=$(grep -n '_phase_end agent_invoke ok' "$inner" | head -1 | cut -d: -f1)
   [ "$phase_line" -lt "$emit_line" ]
+}
+
+@test "_write_loop_runner_script: FIX-136 non-claude agents get PTY wrapper for streaming" {
+  local script="${_tmp}/run-fix136a.sh"
+  # Use a non-claude command (pi -p) to simulate a pi/deepseek cycle
+  _write_loop_runner_script "$script" "/some/project" "pi -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-fix136a-inner.sh"
+  # PTY wrapper variable defined for non-claude agents
+  grep -qF '_AGENT_PTY_PREFIX' "$inner"
+  grep -qF 'script -q /dev/null' "$inner"
+  # Agent invoke lines must use the wrapper (not bare eval)
+  grep -qF 'eval $_AGENT_PTY_PREFIX' "$inner"
+  grep -qF '$_AGENT_PTY_PREFIX pi' "$inner"
 }

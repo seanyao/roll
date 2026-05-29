@@ -160,6 +160,137 @@ _agent_installed_by_name() {
   [[ -n "$dir" && -d "$dir" ]]
 }
 
+# US-AGENT-020: is NAME a known agent in this machine's registry? "Known"
+# means it has a binary-name entry (_agent_bin_names) OR is one of the
+# special-cased non-PATH agents (_agent_installed_by_name's case arms). This
+# is a name-validity check, NOT an installed check — agents.yaml may name an
+# agent the operator has not installed yet. deepseek is intentionally NOT
+# listed here as a routable agent (it is a model pi loads), so it is treated
+# as unknown for routing purposes. Returns 0 when known, 1 otherwise.
+_agent_is_known() {
+  local name; name="$(_canonical_agent_name "$1")"
+  case "$name" in
+    deepseek)                         return 1 ;;
+    trae|opencode|cursor|openclaw)    return 0 ;;
+  esac
+  _agent_bin_names "$name" >/dev/null 2>&1
+}
+
+# US-AGENT-020: schema-v3 agents.yaml loader.
+#
+# Layout (per-machine, never committed — see .roll/.gitignore):
+#   schema: v3
+#   easy:     { agent: kimi }
+#   default:  { agent: claude }
+#   hard:     { agent: claude }
+#   fallback: { agent: pi }
+#
+# `_agents_config_slot SLOT [PATH]` reads the `agent:` value for SLOT
+# (easy|default|hard|fallback) and prints the agent name on stdout.
+#   - File missing / slot missing / empty value → prints nothing, exit 1
+#     (caller is responsible for its own fallback — typically the `default`
+#     slot, then a registered/installed agent).
+#   - Value names an unknown agent → WARN on stderr, still print the value
+#     and exit 0 so the operator sees a typo rather than a silent drop.
+#
+# bash 3.2 safe: no declare -A, no mapfile/readarray, no ${var^^}/${var,,}.
+_agents_config_path() {
+  if [ -n "${ROLL_AGENTS_CONFIG:-}" ] && [ -f "$ROLL_AGENTS_CONFIG" ]; then
+    printf '%s\n' "$ROLL_AGENTS_CONFIG"
+    return 0
+  fi
+  if [ -f ".roll/agents.yaml" ]; then
+    printf '%s\n' ".roll/agents.yaml"
+    return 0
+  fi
+  return 1
+}
+
+# US-AGENT-020 helper: extract the value of an `agent:` key from a single
+# line, only when `agent:` appears at a token boundary (line start, or right
+# after `{`, `,`, or whitespace) — so `no_agent:` / `sub_agent:` / `agent_x:`
+# do not false-match. On success sets _AGENTS_AGENT_VALUE to the raw value
+# (still un-trimmed) and returns 0; returns 1 when the line has no agent key.
+_agents_line_agent_value() {
+  local s="$1" rest=""
+  # Collapse any tab to a space first so a tab-separated `agent:` key still
+  # hits the space-boundary arm (avoids embedding a literal tab in a case
+  # pattern, which bash's case parser rejects).
+  s="${s//	/ }"
+  case "$s" in
+    "agent:"*)            rest="${s#agent:}" ;;
+    *[\ ,\{]"agent:"*)    rest="${s#*[ ,{]agent:}" ;;
+    *)                    return 1 ;;
+  esac
+  _AGENTS_AGENT_VALUE="$rest"
+  return 0
+}
+
+_agents_config_slot() {
+  local slot="${1:-}"
+  local path="${2:-}"
+  if [ -z "$slot" ]; then
+    echo "_agents_config_slot: slot name required" >&2
+    return 1
+  fi
+  if [ -z "$path" ]; then
+    path="$(_agents_config_path)" || return 1
+  fi
+  [ -f "$path" ] || return 1
+
+  # Find the slot's top-level block and read its `agent:` value. The block
+  # spans from `^<slot>:` to the next top-level key (a line starting with a
+  # non-space char). agent: may be inline (`easy: { agent: kimi }`) or nested
+  # on a following indented line (`easy:\n  agent: kimi`). The slot key and the
+  # `agent:` key are matched at token boundaries so `easy_mode:` / `no_agent:`
+  # / `sub_agent:` do not false-match (peer review).
+  local line in_block="" agent="" found=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Strip a trailing CR so DOS/CRLF-saved configs still parse.
+    line="${line%$'\r'}"
+    case "$line" in
+      "$slot":|"$slot":" "*|"$slot":\{*)
+        in_block=1
+        # Inline flow form: easy: { agent: kimi }
+        if _agents_line_agent_value "$line"; then
+          agent="$_AGENTS_AGENT_VALUE"; found=1
+        fi
+        ;;
+      [!\ ]*)
+        # A new top-level key (no leading space) ends the slot block.
+        [ -n "$in_block" ] && break
+        ;;
+      *)
+        if [ -n "$in_block" ] && [ -z "$found" ]; then
+          if _agents_line_agent_value "$line"; then
+            agent="$_AGENTS_AGENT_VALUE"; found=1
+          fi
+        fi
+        ;;
+    esac
+    [ -n "$found" ] && break
+  done < "$path"
+
+  [ -n "$in_block" ] || return 1
+
+  # Strip flow-map punctuation, quotes, inline comments, and surrounding space.
+  agent="${agent%%\#*}"
+  agent="${agent//\{/}"
+  agent="${agent//\}/}"
+  agent="${agent//,/}"
+  agent="${agent//\"/}"
+  agent="${agent//\'/}"
+  # Trim leading/trailing whitespace (bash 3.2 safe).
+  agent="$(printf '%s' "$agent" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+  [ -n "$agent" ] || return 1
+
+  if ! _agent_is_known "$agent"; then
+    warn "agents.yaml: slot '${slot}' names unknown agent '${agent}' (not in this machine's registry)" >&2
+  fi
+  printf '%s\n' "$agent"
+}
+
 # Check if an AI tool is actually installed (back-compat shim around
 # _agent_installed_by_name; preserves the dir-path-based signature used
 # throughout bin/roll).

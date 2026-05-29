@@ -32,9 +32,9 @@ teardown() { unit_teardown; }
   # neither kimi-code nor kimi-cli is installed.
   PATH="/usr/bin:/bin" _agent_argv kimi text "p"
   [ "${_AGENT_ARGV[0]}" = "kimi" ]
-  [ "${_AGENT_ARGV[1]}" = "--quiet" ]
-  [ "${_AGENT_ARGV[2]}" = "-p" ]
-  [ "${_AGENT_ARGV[3]}" = "p" ]
+  # FIX-133: kimi-code 无 --quiet，-p 自带 auto 审批
+  [ "${_AGENT_ARGV[1]}" = "-p" ]
+  [ "${_AGENT_ARGV[2]}" = "p" ]
 }
 
 @test "_agent_argv kimi (kimi-code on PATH) → uses kimi-code" {
@@ -44,7 +44,7 @@ teardown() { unit_teardown; }
   chmod +x "$TEST_TMP/bin/kimi-code"
   PATH="$TEST_TMP/bin:/usr/bin:/bin" _agent_argv kimi text "p"
   [ "${_AGENT_ARGV[0]}" = "kimi-code" ]
-  [ "${_AGENT_ARGV[1]}" = "--quiet" ]
+  [ "${_AGENT_ARGV[1]}" = "-p" ]
 }
 
 @test "_agent_argv kimi (only kimi-cli on PATH) → uses kimi-cli" {
@@ -120,12 +120,38 @@ teardown() { unit_teardown; }
 
 # _agent_skill_cmd: emits a cron-ready shell string with $(strip-frontmatter) inline.
 # We stub _project_agent and exercise each agent shape.
-@test "_agent_skill_cmd kimi (no kimi-* on PATH) → kimi --quiet -p \"\$(awk ...)\"" {
+@test "_agent_skill_cmd kimi (no kimi-* on PATH) → kimi -p \"\$(awk ...)\"" {
   _project_agent() { echo kimi; }
   PATH="/usr/bin:/bin" run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 0 ]
-  [[ "$output" == kimi\ --quiet\ -p\ \"\$\(awk* ]]
+  # FIX-133: kimi-code 非交互是 -p（无 --quiet）
+  [[ "$output" == kimi\ -p\ \"\$\(awk* ]]
+  [[ "$output" != *"--quiet"* ]]
   case "$output" in *"'/tmp/skill.md')\""*) :;; *) false;; esac
+}
+
+@test "_agent_skill_cmd honors explicit agent arg over project agent (FIX-134)" {
+  _project_agent() { echo claude; }
+  PATH="/usr/bin:/bin" run _agent_skill_cmd "/tmp/skill.md" "kimi"
+  [ "$status" -eq 0 ]
+  [[ "$output" == kimi\ -p\ * ]]
+}
+
+@test "_loop_cycle_agent_cmd kimi → kimi -p, no claude-only flags (FIX-134)" {
+  _project_agent() { echo claude; }
+  PATH="/usr/bin:/bin" run _loop_cycle_agent_cmd "/tmp/skill.md" "kimi" "/tmp/wt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == kimi\ -p\ * ]]
+  [[ "$output" != *"--verbose"* ]]
+  [[ "$output" != *"stream-json"* ]]
+}
+
+@test "_loop_cycle_agent_cmd claude → adds verbose/stream-json/add-dir (FIX-134)" {
+  run _loop_cycle_agent_cmd "/tmp/skill.md" "claude" "/tmp/wt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--verbose"* ]]
+  [[ "$output" == *"--output-format stream-json"* ]]
+  [[ "$output" == *"--add-dir \"/tmp/wt\""* ]]
 }
 
 @test "_agent_skill_cmd codex → codex exec \"\$(awk ...)\"" {

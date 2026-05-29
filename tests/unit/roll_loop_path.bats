@@ -44,10 +44,21 @@ teardown() { unit_teardown_cd; }
 @test "_write_loop_runner_script: non-claude cmds (kimi/deepseek) are NOT modified" {
   # --verbose injection must be claude-specific; other agents shouldn't get it
   local script_path="${_test_dir}/run-test-kimi.sh"
-  _write_loop_runner_script "$script_path" "/tmp/proj" "kimi --quiet -p \"prompt\"" "/tmp/log" 10 24
+  _write_loop_runner_script "$script_path" "/tmp/proj" "kimi -p \"prompt\"" "/tmp/log" 10 24
   local inner_script="${script_path%.sh}-inner.sh"
   ! grep -qF 'kimi --verbose' "$inner_script"
-  grep -qF 'kimi --quiet -p' "$inner_script"
+  grep -qF 'kimi -p' "$inner_script"
+}
+
+@test "_write_loop_runner_script: with skill_path, inner rebuilds agent cmd at runtime (FIX-134)" {
+  # When skill_path (7th arg) is provided, the inner script must resolve the
+  # cycle agent live via _loop_cycle_agent_cmd + eval, not run a baked constant.
+  local script_path="${_test_dir}/run-test-rebuild.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj" "cd \"/tmp/proj\" && kimi -p \"x\"" "/tmp/log" 0 24 "/tmp/skill/SKILL.md"
+  local inner_script="${script_path%.sh}-inner.sh"
+  grep -qF '_loop_cycle_agent_cmd "/tmp/skill/SKILL.md"' "$inner_script"
+  grep -qF 'eval "$_CYCLE_CMD"' "$inner_script"
+  grep -qF '"$CYCLE_AGENT"' "$inner_script"
 }
 
 # FIX-050: launchd/cron deliver a bare PATH. Hardcoded /opt/homebrew/bin breaks

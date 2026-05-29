@@ -7,7 +7,7 @@ description: "Legacy project documentation automation. Scans all docs, builds/up
 
 # roll-doc
 
-Four-phase legacy documentation automation: scan → index → gap analysis → fill.
+Four-phase legacy documentation automation (plus deep-read Phase 3b): scan → index → gap analysis → fill (directory-level) → deep read (cross-directory topics).
 
 Works on any project root. No manual mode switching — reads the project state and decides what to do.
 
@@ -162,6 +162,70 @@ Only include lines for directories that already exist in the project.
 
 Do not fabricate details — infer only from source files actually read.
 
+## Phase 3b — Deep Read
+
+Deep-read phase that builds a full project symbol table (without truncation) and auto-detects
+cross-directory topics that directory-level Phase 3 alone cannot discover.
+
+**Trigger conditions** — Phase 3b runs when either is true:
+- Phase 2 found any gap (module or special gap)
+- The project exhibits code characteristics that Phase 3a cannot capture:
+  cross-directory import chains spanning ≥ 3 directories, state enums referenced by
+  multiple files, external URL/endpoint calls, or CI pipeline configuration files
+
+Pure documentation-only projects (no source code gaps, no code characteristics) skip Phase 3b.
+
+### Step 1 — Build Symbol Table
+
+Read every source file **in full** (no truncation). The existing Phase 3 "up to 20 source files"
+limit does not apply — Phase 3b builds a complete project symbol table for downstream topic
+detection to reason across files without missing logic.
+
+**Exclusion directories** (same as Phase 1):
+
+```
+node_modules/   .git/   dist/   build/   .shared/   .roll/dream/   .roll/briefs/
+```
+
+**Symbol table fields:**
+
+| Field | Content |
+|-------|---------|
+| `exports` | class / interface / type / function / const declarations, per file |
+| `imports` | source file → target file mapping (dependency graph edges) |
+| `enums` | enum declarations with enumerated values, per file |
+| `external_urls` | `fetch(...)` / `axios` / `http.*` calls, `API_ENDPOINT` / `*_URL` / `*_HOST` constants, hardcoded `https?://` strings (exclude comments and test fixtures) |
+| `configs` | CI workflow YAML files, build config paths, test framework config file paths |
+
+**`--dry-run` behavior:** print symbol table summary counts per category (e.g. "exports: 42, imports: 156, enums: 7, external_urls: 4, configs: 3") plus top-N examples per category. Write nothing to disk.
+
+**`--force` behavior:** unchanged — `--force` only affects draft generation (Phase 3/3b output files).
+The symbol table itself is rebuilt from scratch on every run regardless of flags.
+
+### Step 2 — Topic Detection
+
+Using the symbol table from Step 1, detect cross-directory topics. Each topic type has a
+detection rule and a target output file. Skip any topic whose target file already exists
+(unless `--force`). Skip any topic whose detection rule finds no matches.
+
+| Topic | Detection Rule | Output |
+|-------|---------------|--------|
+| 数据流 / 调用链 | Entry files (`bin/`, `cmd/`, `main.*`, `index.*`) → trace import chain to leaf nodes; require ≥ 1 chain spanning ≥ 3 directories | `docs/data-flows.md` |
+| 状态机 | Enums matching `*State` / `*Status` referenced by ≥ 2 source files | `docs/state-machines.md` |
+| 外部集成 | `external_urls` entries from symbol table (exclude comment/test-fixture matches) | `docs/integrations.md` |
+| 部署管线 | `.github/workflows/*.yml` / `.gitlab-ci.yml` / `circle.yml` / `Jenkinsfile` present, with deploy URL patterns detected | `docs/deployment.md` |
+| Agent 入口 (AGENTS.md) | Project root has no `AGENTS.md` AND `src/` (or equivalent source root) has ≥ 3 subdirectories | `AGENTS.md` |
+| 高引用目录 | Directory imported by ≥ 5 other source files, even if directory itself has < 3 source files | `<dir>/README.md` |
+
+### Step 3 — Source Annotations
+
+Every topic document generated in Step 2 must cite `file:line` for each claim (function call,
+endpoint URL, state transition, CI job, import path). Annotations must come from actual
+symbol table records — do not fabricate line numbers. Follows the same "Do not fabricate"
+rule as Phase 3.
+
+---
+
 ## Phase 4 — Report
 
 After all phases complete, output a summary:
@@ -180,6 +244,12 @@ Phase 2 — Gaps
 Phase 3 — Fill
   N drafts generated: [list of paths]
   N skipped (already exist; use --force to regenerate)
+
+Phase 3b — Deep Read
+  Symbol table: exports(N) imports(N) enums(N) external_urls(N) configs(N)
+  N topic documents generated: [list of paths and types]
+  N topics skipped (no matches or already exist; use --force to regenerate)
+  (if no topics generated: "no subject-level drafts generated")
 
 📋 Review priority (largest / most active modules first):
   1. src/commands/README.md — 8 source files

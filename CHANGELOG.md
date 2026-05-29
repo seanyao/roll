@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.529.3
+
+### Fixed
+
+- loop 用 kimi 跑不再必崩 `[loop]`
+- 切 agent 后 loop 不再用旧的 `[loop]`
+- loop 不再因提交卡住整轮白做 `[loop]`
+
 ## v2026.529.2
 
 ### Added

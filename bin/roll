@@ -7676,6 +7676,14 @@ _loop_gc() {
       # Move plist (it's already unloaded since project dir is gone)
       [[ -f "$plist" ]] && mv "$plist" "$archive_dir/"
 
+      # Clean up data files for this orphan slug (FIX-143)
+      for f in "${loop_dir}/state-${slug}.yaml" \
+               "${loop_dir}/runs-${slug}.jsonl" \
+               "${loop_dir}/events-${slug}.ndjson" \
+               "${loop_dir}/cron-${slug}.log"; do
+        [[ -f "$f" ]] && rm -f "$f"
+      done
+
       gc_count=$((gc_count + 1))
     fi
   done
@@ -7718,6 +7726,21 @@ _loop_gc() {
     if [[ "$mtime" -lt "$cutoff_7d" ]]; then
       if $dry_run; then
         echo "[DRY-RUN] old migrated: $(basename "$f")"
+      else
+        rm -f "$f"
+      fi
+      gc_count=$((gc_count + 1))
+    fi
+  done
+
+  # *.bak files (events/runs backups) older than keep_days (FIX-143)
+  local cutoff_keep; cutoff_keep=$((now_epoch - keep_days * 86400))
+  for f in "$loop_dir"/*.bak; do
+    [[ -f "$f" ]] || continue
+    local mtime; mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    if [[ "$mtime" -lt "$cutoff_keep" ]]; then
+      if $dry_run; then
+        echo "[DRY-RUN] old .bak: $(basename "$f")"
       else
         rm -f "$f"
       fi

@@ -79,3 +79,45 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
 @test "roll-doc SKILL.md: Phase 3b Step 2 lists high-fanin README topic" {
   grep -qiE '(high.fan.?in|高引用|high.*ref|被.*引用)' "$SKILL"
 }
+
+# ── US-DOC-013: Data Flow / Import Chain Tracing ──
+
+@test "roll-doc SKILL.md: data-flow subsection documents entry point selection" {
+  grep -qiE '(Entry point.*selection|entry.*file.*pattern|bin/|main\.\*)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: data-flow subsection documents chain construction algorithm" {
+  grep -qiE '(Chain construction|recursively.*follow|call graph|directed graph)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: data-flow subsection documents cross-directory threshold (≥3)" {
+  grep -qiE '(cross.directory|≥.*3.*(director|dir)|at least.*3.*(director|dir))' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: data-flow subsection documents output structure with call chain and files table" {
+  grep -qiE '(Complete Call Chain|完整调用链)' "$SKILL"
+  grep -qiE '(Files Involved|涉及文件)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: data-flow subsection documents Draft header requirement" {
+  grep -qiE '(Draft.*auto.generated|draft header)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: data-flow subsection documents idempotency (skip if already exists)" {
+  grep -qiE '(skip.*already.*exist|do not overwrite.*data.flow|idempoten.*skip)' "$SKILL"
+}
+
+@test "roll-doc dataflow fixture: directory has ≥3 distinct source dirs with imports" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_dataflow"
+  [ -d "$FIXTURE" ]
+  # Count distinct parent directories of .ts files (excluding node_modules)
+  dirs=$(find "$FIXTURE" -name '*.ts' -not -path '*/node_modules/*' \
+    -exec dirname {} \; | sort -u | wc -l | tr -d ' ')
+  [ "$dirs" -ge 3 ]
+}
+
+@test "roll-doc dataflow fixture: entry file imports from another directory" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_dataflow"
+  # main.ts should import from outside its own directory
+  grep -qE 'from "\.\./' "$FIXTURE/src/cli/main.ts"
+}

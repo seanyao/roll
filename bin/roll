@@ -100,6 +100,27 @@ _agent_bin_names() {
   esac
 }
 
+# Antigravity is the product; `agy` is its CLI binary; `~/.gemini/` is the
+# legacy Google-Gemini-CLI config dir it reuses. Accept all three spellings on
+# input and collapse them to the canonical `agy` token, so every downstream
+# consumer (dispatch, routes, peer/status, usage) keys on one name.
+_canonical_agent_name() {
+  case "$1" in
+    antigravity|gemini) echo "agy" ;;
+    *)                  echo "$1" ;;
+  esac
+}
+
+# Human-facing label for `roll agent list` / `roll agent`. Most agents show
+# their bare token; agy shows the product name with the binary in parens so
+# both the recognizable name and the typed command stay visible.
+_agent_display_name() {
+  case "$(_canonical_agent_name "$1")" in
+    agy) echo "antigravity (agy)" ;;
+    *)   echo "$1" ;;
+  esac
+}
+
 # FIX-128: detect whether an AI agent (by canonical name) is actually
 # usable on this machine. For CLI-only agents this means "binary on PATH";
 # GUI / bundled-binary agents keep their special-case paths. Falls back
@@ -543,7 +564,7 @@ _install_local() {
 # AI tools — each entry controls both convention sync and skill linking
 # Format: <name>: <dir>|<config_file>|<convention_src>
 ai_claude: ~/.claude|CLAUDE.md|CLAUDE.md
-ai_gemini: ~/.gemini|GEMINI.md|GEMINI.md
+ai_agy: ~/.gemini|GEMINI.md|GEMINI.md
 ai_kimi: ~/.kimi|AGENTS.md|AGENTS.md
 ai_kimi_code: ~/.kimi-code|AGENTS.md|AGENTS.md
 ai_codex: ~/.codex|AGENTS.md|AGENTS.md
@@ -3410,7 +3431,7 @@ _agent_argv() {
         interactive) _AGENT_ARGV=(opencode "$prompt") ;;
         *)           _AGENT_ARGV=(opencode run "$prompt") ;;
       esac ;;
-    gemini|agy)
+    gemini|agy|antigravity)
       # Antigravity (agy) replaces the deprecated Google Gemini CLI as of
       # late 2025. agy reuses ~/.gemini/ for config and reads GEMINI.md
       # natively, so the convention sync target is unchanged — only the
@@ -3460,7 +3481,7 @@ _agent_run_skill() {
   [[ -f "$skill_file" ]] || { err "Skill not found: ${skill}"; return 1; }
   local content; content=$(_skill_content "$skill_file")
   _agent_argv "$agent" text "$content" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|antigravity>"
     return 1
   }
   "${_AGENT_ARGV[@]}"
@@ -4219,7 +4240,7 @@ EOF
 )"
 
   _agent_argv "$agent" text "$prompt" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|antigravity>"
     trap - INT TERM
     return 1
   }
@@ -4608,11 +4629,13 @@ cmd_agent() {
   case "$subcmd" in
     use)
       local name="${1:-}"
-      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"; exit 1; }
+      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|antigravity>"; exit 1; }
+      # Collapse Antigravity aliases (antigravity / legacy gemini) to canonical agy.
+      name="$(_canonical_agent_name "$name")"
       if [[ "$name" == openai ]]; then
         command -v codex &>/dev/null || warn "openai agent requires the Codex CLI. Install: npm install -g @openai/codex"
-      elif [[ "$name" == gemini ]]; then
-        command -v agy &>/dev/null || command -v gemini &>/dev/null || warn "gemini agent requires the Google Gemini CLI. Install: npm install -g @antigravity/agy"
+      elif [[ "$name" == agy ]]; then
+        command -v agy &>/dev/null || command -v gemini &>/dev/null || warn "antigravity agent requires the Antigravity CLI (agy). Install: npm install -g @antigravity/agy"
       else
         command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
       fi
@@ -4636,7 +4659,7 @@ cmd_agent() {
         mv "$tmp" .roll.yaml
         [[ -s ".roll.yaml" ]] || rm -f .roll.yaml
       fi
-      ok "$(msg agent.agent_set_to_for_this_project ${name})"
+      ok "$(msg agent.agent_set_to_for_this_project "$(_agent_display_name "$name")")"
       local project_path; project_path=$(pwd -P)
       local slug; slug=$(_project_slug "$project_path")
       local runner="${_SHARED_ROOT}/loop/run-${slug}.sh"
@@ -4647,13 +4670,15 @@ cmd_agent() {
       ;;
     list)
       echo ""; echo "  $(msg agent.available_agents)"; echo ""
-      local current; current=$(_project_agent)
-      for a in claude kimi deepseek opencode codex openai pi qwen gemini; do
-        if command -v "$a" &>/dev/null; then
-          [[ "$a" == "$current" ]] && echo -e "    ${GREEN}✓ ${a}${NC}  (current)" \
-                                   || echo -e "    ${GREEN}✓ ${a}${NC}"
+      local current; current=$(_canonical_agent_name "$(_project_agent)")
+      local a disp
+      for a in claude kimi deepseek opencode codex openai pi qwen agy; do
+        disp=$(_agent_display_name "$a")
+        if _agent_installed_by_name "$a"; then
+          [[ "$a" == "$current" ]] && echo -e "    ${GREEN}✓ ${disp}${NC}  (current)" \
+                                   || echo -e "    ${GREEN}✓ ${disp}${NC}"
         else
-          echo -e "    ${YELLOW}✗ ${a}${NC}  (not installed)"
+          echo -e "    ${YELLOW}✗ ${disp}${NC}  (not installed)"
         fi
       done; echo ""
       ;;
@@ -4666,7 +4691,7 @@ cmd_agent() {
       elif [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml 2>/dev/null; then
         src="project (.roll.yaml, legacy — run \`roll agent use\` to migrate)"
       fi
-      echo -e "\n  Agent  ${CYAN}${agent}${NC}  (${src})\n"
+      echo -e "\n  Agent  ${CYAN}$(_agent_display_name "$agent")${NC}  (${src})\n"
       echo "  roll agent use <name>   — switch agent for this project"
       echo "  roll agent list         — show installed agents"; echo ""
       ;;
@@ -7055,7 +7080,7 @@ _agent_skill_cmd() {
   local agent="${2:-$(_project_agent)}"
   local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
   _agent_argv "$agent" plain "__PROMPT__" || {
-    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
+    err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|antigravity>"
     return 1
   }
   # Cron-installed skills (dream / brief / loop) run autonomously and need to

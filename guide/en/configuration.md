@@ -55,8 +55,8 @@ directory structure issues under the resolved `ROLL_HOME`.
 
 - `roll agent use openai` dispatches to the Codex CLI. Install with:
   `npm install -g @openai/codex`
-- `roll agent use gemini` dispatches to the Google Gemini CLI. Install with:
-  `npm install -g @antigravity/agy`
+- `roll agent use antigravity` (aliases: `agy`, legacy `gemini`) dispatches to the
+  Antigravity CLI. Install with: `npm install -g @antigravity/agy`
 - See [ai-agents.md](ai-agents.md) for the full supported agent list.
 
 ## See Also

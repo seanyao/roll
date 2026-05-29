@@ -52,7 +52,7 @@ ROLL_CONFIG=/tmp/test-config.yaml roll agent use kimi
 
 - `roll agent use openai` 实际调用 Codex CLI。安装方式：
   `npm install -g @openai/codex`
-- `roll agent use gemini` 实际调用 Google Gemini CLI。安装方式：
+- `roll agent use antigravity`（别名：`agy`、旧别名 `gemini`）实际调用 Antigravity CLI。安装方式：
   `npm install -g @antigravity/agy`
 - 完整支持列表见 [ai-agents.md](ai-agents.md)。
 

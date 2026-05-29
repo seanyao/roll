@@ -199,7 +199,7 @@ teardown() {
   grep -qF '.tmp' "$script"
   grep -qF '&& mv' "$script"
   # ALERT written on heal
-  grep -qF 'ALERT.md' "$script"
+  grep -qE 'ALERT.*\.md' "$script"
 }
 
 @test "_write_loop_runner_script: FIX-038 inner script writes heartbeat every 60s" {

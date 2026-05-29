@@ -5453,7 +5453,10 @@ fi
 : "${_LOOP_PROJ_SLUG:=$(_project_slug 2>/dev/null || echo default)}"
 # US-LOOP-019: prefer project-local .roll/loop/ for control-plane files;
 # fall back to shared root when project path cannot be resolved.
-_LOOP_RT_DIR=$(_loop_runtime_dir "${_LOOP_PROJ_SLUG}" 2>/dev/null || echo "")
+_LOOP_RT_DIR=""
+if _rt_dir_out=$(_loop_runtime_dir "${_LOOP_PROJ_SLUG}" 2>/dev/null); then
+  _LOOP_RT_DIR="$_rt_dir_out"
+fi
 if [[ -n "$_LOOP_RT_DIR" ]]; then
   : "${_LOOP_STATE:=${_LOOP_RT_DIR}/state-${_LOOP_PROJ_SLUG}.yaml}"
   : "${_LOOP_ALERT:=${_LOOP_RT_DIR}/ALERT-${_LOOP_PROJ_SLUG}.md}"

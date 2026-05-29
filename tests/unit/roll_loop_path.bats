@@ -78,6 +78,34 @@ teardown() { unit_teardown_cd; }
   [[ "$hb_line" -gt "$src_line" ]]
 }
 
+@test "FIX-139: logging is project-local — no global cron dup, no cap, attach shows this cycle" {
+  local script_path="${_test_dir}/run-test-log139.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj139" "pi -p \"x\"" "/tmp/log" 0 24 "/tmp/skill/SKILL.md"
+  local outer="$script_path" inner="${script_path%.sh}-inner.sh"
+  # pane -> per-cycle raw only (cat), no `tee -a "$LOG"` cumulative dup
+  grep -qE 'pipe-pane.*cat >>' "$outer"
+  ! grep -qE 'pipe-pane.*tee -a' "$outer"
+  # outer creates the machine-log dir from its dirname (honours caller's path)
+  grep -qF 'mkdir -p "$(dirname "$LOG")"' "$outer"
+  # attach shows newest per-cycle log, not the global cumulative transcript
+  grep -qF '.roll/cycle-logs/*.log' "$outer"
+  ! grep -qF 'cron-%s.log' "$outer"
+  # no per-cycle retention cap
+  ! grep -q 'ROLL_CYCLE_LOG_KEEP' "$inner"
+  # the loop caller wires the machine log to project-local .roll/loop/cron.log
+  local rollbin="${BATS_TEST_DIRNAME}/../../bin/roll"
+  grep -qF 'loop_log="${project_path}/.roll/loop/cron.log"' "$rollbin"
+}
+
+@test "FIX-140: inner reverts story Done->Todo when PR is not merged" {
+  local script_path="${_test_dir}/run-test-fix140.sh"
+  _write_loop_runner_script "$script_path" "/tmp/proj140" "pi -p \"x\"" "/tmp/log" 0 24 "/tmp/skill/SKILL.md"
+  local inner="${script_path%.sh}-inner.sh"
+  # The not-merged branch must revert the routed story so backlog never shows
+  # a false Done for code that isn't on main.
+  grep -qF '_loop_mark_todo "$ROLL_LOOP_ROUTED_STORY"' "$inner"
+}
+
 # FIX-050: launchd/cron deliver a bare PATH. Hardcoded /opt/homebrew/bin breaks
 # on Intel macOS, Linux cron, and any future tool-prefix change. Two layers:
 # (1) setup-time PATH in plist EnvironmentVariables; (2) cross-platform PATH

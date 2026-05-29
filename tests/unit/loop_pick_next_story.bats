@@ -91,6 +91,36 @@ MD
   [ "$status" -ne 0 ]
 }
 
+@test "pick_next (FIX-141): skips a story that already has an open PR" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | first | 📋 Todo |
+| [FIX-A-002](.roll/features/test/t.md#fix-a-002) | second | 📋 Todo |
+MD
+  # Stub gh so `gh pr list ... --jq '.[].title'` reports an open PR for A-001.
+  mkdir -p "$TEST_TMP/binstub"
+  printf '#!/bin/bash\necho "FIX-A-001: some open PR"\n' > "$TEST_TMP/binstub/gh"
+  chmod +x "$TEST_TMP/binstub/gh"
+  source "$ROLL"
+  PATH="$TEST_TMP/binstub:$PATH"
+  run _loop_pick_next_story
+  [ "$status" -eq 0 ]
+  [ "$output" = "FIX-A-002" ]   # A-001 skipped (open PR), A-002 picked
+}
+
+@test "pick_next (FIX-141): no gh / no open PRs → normal pick (no skipping)" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | first | 📋 Todo |
+MD
+  mkdir -p "$TEST_TMP/binstub"
+  printf '#!/bin/bash\nexit 0\n' > "$TEST_TMP/binstub/gh"   # empty PR list
+  chmod +x "$TEST_TMP/binstub/gh"
+  source "$ROLL"
+  PATH="$TEST_TMP/binstub:$PATH"
+  run _loop_pick_next_story
+  [ "$status" -eq 0 ]
+  [ "$output" = "FIX-A-001" ]
+}
+
 # US-AGENT-006: the generated runner inner script must call the routing
 # helpers before agent invocation, replacing the old `_project_agent` reference.
 @test "runner script: inner writes a routing block referencing _loop_pick_next_story" {

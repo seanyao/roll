@@ -344,8 +344,12 @@ After each item completes:
 
    **Path B — heal exhausted (≥`ROLL_LOOP_HEAL_MAX`, default 2) or disabled (`ROLL_LOOP_NO_HEAL=1`) (exit 1):**
 
-   1. Keep story as ✅ Done — commits are already on main; CI red is a follow-up
-      problem, not a story failure.
+   1. Do NOT force ✅ Done here. CI red means the PR will not merge, and
+      FIX-140's merge gate (in `bin/roll`, after `publish_wait_merge`) is the
+      single authority on final status: if the PR actually merges, the story
+      stays ✅ Done; if it does not merge, the gate reverts it ✅ Done → 📋 Todo
+      so BACKLOG never shows a false Done for code that isn't on main. (FIX-141
+      then stops the next cycle re-opening a duplicate PR while this one is open.)
    2. Write ALERT to `~/.shared/roll/loop/ALERT-<slug>.md` with:
       - story ID, time, commit SHA
       - heal attempts made (read `heal_count:` from `state-<slug>.yaml`)

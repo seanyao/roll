@@ -111,7 +111,7 @@ teardown() { unit_teardown; }
 
 # ─── Generated script verification ──────────────────────────────────────────
 
-@test "cycle log: inner script contains ANSI strip + rotate in _inner_cleanup" {
+@test "cycle log: inner script strips ANSI and keeps ALL per-cycle logs (FIX-139, no cap)" {
   local runner="${TEST_TMP}/run-test.sh"
   local log="${TEST_TMP}/test.log"
   _write_loop_runner_script "$runner" "${TEST_TMP}/fake-project" "echo ok" "$log"
@@ -121,27 +121,24 @@ teardown() { unit_teardown; }
 
   # Verify ANSI strip: sed processes ROLL_CYCLE_LOG_RAW
   grep -q 'ROLL_CYCLE_LOG_RAW' "$inner"
-  # Verify rotate: ls -t *.log
-  grep -q 'ls -t \*\.log.*xargs.*rm' "$inner"
-  # Verify ROLL_CYCLE_LOG_KEEP default
-  grep -q 'ROLL_CYCLE_LOG_KEEP:-50' "$inner"
+  # FIX-139: no rotation cap — every per-cycle log is kept
+  ! grep -q 'ROLL_CYCLE_LOG_KEEP' "$inner"
+  ! grep -qE 'ls -t \*\.log.*xargs.*rm' "$inner"
 }
 
-@test "cycle log: outer script exports ROLL_CYCLE_LOG_RAW and uses tee pipe-pane" {
+@test "cycle log: outer pipe-pane writes per-cycle raw only, no global tee dup (FIX-139)" {
   local runner="${TEST_TMP}/run-test2.sh"
   local log="${TEST_TMP}/test2.log"
   _write_loop_runner_script "$runner" "${TEST_TMP}/fake-project" "echo ok" "$log"
 
   [ -f "$runner" ]
 
-  # Verify pipe-pane uses tee (dual-write) not cat
-  grep -q 'tee -a' "$runner"
-  # Verify ROLL_CYCLE_LOG_RAW is exported
+  # Verify ROLL_CYCLE_LOG_RAW is exported and cycle-logs dir is created
   grep -q 'export ROLL_CYCLE_LOG_RAW' "$runner"
-  # Verify cycle-logs directory is created
   grep -q 'cycle-logs' "$runner"
-  # No old cat >> pipe-pane
-  ! grep -q 'pipe-pane.*cat >>' "$runner"
+  # FIX-139: pane -> per-cycle raw ONLY (cat), no `tee -a "$LOG"` cumulative dup
+  grep -qE 'pipe-pane.*cat >>' "$runner"
+  ! grep -qE 'pipe-pane.*tee -a' "$runner"
 }
 
 @test "FIX-130: outer script exports ROLL_CYCLE_LOG_RAW BEFORE tmux new-session" {

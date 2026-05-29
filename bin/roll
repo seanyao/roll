@@ -6314,9 +6314,8 @@ _runs_append "failed" 0 "[]" "\$_phases_t" 2>/dev/null || true
     sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/\r$//' "\$ROLL_CYCLE_LOG_RAW" \
       > "\${_log_dir}/\${CYCLE_ID}.log" 2>/dev/null || true
     rm -f "\$ROLL_CYCLE_LOG_RAW"
-    # Rotate: keep newest ROLL_CYCLE_LOG_KEEP (default 50) .log files
-    _keep="\${ROLL_CYCLE_LOG_KEEP:-50}"
-    ( cd "\$_log_dir" && ls -t *.log 2>/dev/null | tail -n +\$((_keep + 1)) | xargs -r rm -f ) 2>/dev/null || true
+    # FIX-139: keep ALL per-cycle logs — no rotation cap. Each log is ~2KB,
+    # full-year retention is a few MB. Owner: "不做 50 的限制,所有的都要留下来".
   fi
   rm -f "\$INNER_LOCK" "\$HEARTBEAT_FILE" "\$HEARTBEAT_PHASE_FILE"
   exit "\$_rc"
@@ -6629,6 +6628,11 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
           _phase_begin publish_wait_merge
           if ! ( cd "\$WT" && _loop_wait_pr_merge "\$BRANCH" ); then
             _worktree_alert "cycle \${CYCLE_ID}: FIX-047: PR not merged within timeout — code may not be in main (BRANCH=\${BRANCH})"
+            # FIX-140: PR not merged => commits are NOT on main => story is NOT
+            # done. Revert the routed story ✅ Done -> 📋 Todo so backlog reflects
+            # reality instead of a false Done. (FIX-141's open-PR gate keeps the
+            # next cycle from opening a duplicate PR while this one is still open.)
+            [ -n "\${ROLL_LOOP_ROUTED_STORY:-}" ] && _loop_mark_todo "\$ROLL_LOOP_ROUTED_STORY" 2>/dev/null || true
             _phase_end publish_wait_merge fail
           else
             _phase_end publish_wait_merge ok
@@ -6778,7 +6782,11 @@ fi
 LOCK="\$(dirname "\$0")/.LOCK-\$(basename "\$0" .sh | sed 's/^run-//')"
 SESSION="roll-loop-\$(basename "\$0" .sh | sed 's/^run-//')"
 INNER_SCRIPT="${inner_path}"
+# FIX-139: machine/ops log path is supplied by the caller (now project-local
+# .roll/loop/cron.log — see the _write_loop_runner_script call site). Ensure its
+# directory exists before the early LOCK-skip echoes append to it.
 LOG="${log_path}"
+mkdir -p "\$(dirname "\$LOG")" 2>/dev/null || true
 if [ -f "\$LOCK" ]; then
   prev_pid=\$(head -1 "\$LOCK" 2>/dev/null || echo "")
   if [ -n "\$prev_pid" ] && kill -0 "\$prev_pid" 2>/dev/null; then
@@ -6818,7 +6826,10 @@ if command -v tmux >/dev/null 2>&1; then
   CYCLE_LOG_RAW="${project_path}/.roll/cycle-logs/.pipe-\$\$.raw"
   export ROLL_CYCLE_LOG_RAW="\$CYCLE_LOG_RAW"
   tmux new-session -d -s "\$SESSION" -x 200 -y 50 "bash \"\$INNER_SCRIPT\""
-  tmux pipe-pane -t "\$SESSION" "tee -a \"\$LOG\" >> \"\$ROLL_CYCLE_LOG_RAW\""
+  # FIX-139: pane output goes ONLY to the per-cycle raw (-> <CYCLE_ID>.log),
+  # no cumulative tee into LOG — per-cycle logs are the single source, all kept
+  # (no cap). Machine/ops events still append to LOG directly.
+  tmux pipe-pane -t "\$SESSION" "cat >> \"\$ROLL_CYCLE_LOG_RAW\""
   # Auto-attach popup: when not muted, spawn a Terminal.app window attached
   # to the tmux session so the user can watch the loop work in real time.
   # FIX-054: terminal selection removed — fixed to macOS Terminal.app for
@@ -6838,8 +6849,10 @@ if command -v tmux >/dev/null 2>&1; then
     # cron-<slug>.log file still has the full transcript as a fallback.
     # FIX-131: after tmux session ends, open the cron log with less so the
     # user can scroll through the full cycle output instead of seeing nothing.
-    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=~/.shared/roll/loop/cron-%s.log\\necho\\nif [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. Log not found: \$LOGFILE"\\n  echo "  press enter to close."\\n  echo "================================================================"\\n  read _\\nfi\\n' \\
-      "\$SESSION" "${slug}" > "\$_attach_cmd" 2>/dev/null || true
+    # FIX-139: after the session ends, show ONLY this cycle's per-cycle log
+    # (newest in .roll/cycle-logs/), not the global cumulative transcript.
+    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=\$(ls -t "%s"/.roll/cycle-logs/*.log 2>/dev/null | head -1)\\necho\\nif [ -n "\$LOGFILE" ] && [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing this cycle log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. No per-cycle log yet."\\n  echo "  press enter to close."\\n  echo "================================================================"\\n  read _\\nfi\\n' \\
+      "\$SESSION" "${project_path}" > "\$_attach_cmd" 2>/dev/null || true
     chmod +x "\$_attach_cmd" 2>/dev/null || true
     open -g -a Terminal "\$_attach_cmd" >/dev/null 2>&1 || true
   fi
@@ -6981,7 +6994,11 @@ _install_launchd_plists() {
     local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
 
     if [[ "$svc" == "loop" ]]; then
-      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log" "$active_start" "$active_end" "${sd}/${skill}/SKILL.md"
+      # FIX-139: loop machine/ops log is project-local (.roll/loop/cron.log),
+      # not the global cron-<slug>.log. Reader (FIX-137) reads it project-local;
+      # per-cycle transcripts live in .roll/cycle-logs/ (single source, no dup).
+      local loop_log="${project_path}/.roll/loop/cron.log"
+      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$loop_log" "$active_start" "$active_end" "${sd}/${skill}/SKILL.md"
     else
       _write_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log"
     fi
@@ -9659,6 +9676,15 @@ _loop_pick_next_story() {
   local backlog="${1:-.roll/backlog.md}"
   [ -f "$backlog" ] || return 1
 
+  # FIX-141: fetch open PR titles ONCE so we can skip any story that already
+  # has an open PR (it's in review / awaiting merge — re-picking it produces a
+  # duplicate PR, as happened with FIX-137 #257 -> #258). gh runs in the cycle
+  # worktree (has the remote); empty/unavailable gh => no skipping (safe).
+  local _open_pr_titles=""
+  if command -v gh >/dev/null 2>&1; then
+    _open_pr_titles=$(gh pr list --state open --json title --jq '.[].title' 2>/dev/null || echo "")
+  fi
+
   # Two passes over the file, once per type prefix, return first hit.
   local prefix
   for prefix in FIX US REFACTOR; do
@@ -9677,6 +9703,11 @@ _loop_pick_next_story() {
       _loop_is_manual_only "$id" "$backlog" 2>/dev/null && continue
       # Gate 2: depends-on
       if ! _loop_check_depends_on "$id" "$backlog" >/dev/null 2>&1; then
+        continue
+      fi
+      # Gate 3 (FIX-141): skip if an open PR already references this story id
+      # (in its title) — avoids duplicate PRs for a story already in review.
+      if [ -n "$_open_pr_titles" ] && printf '%s\n' "$_open_pr_titles" | grep -qE "${id}([^0-9A-Za-z]|$)"; then
         continue
       fi
       printf '%s\n' "$id"

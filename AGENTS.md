@@ -201,3 +201,39 @@ git fetch && git reset --hard origin/main
 ```
 
 This dual-repo model is v2.0 onward. Pre-v2.0 (before commit `f03ddd6`), `.roll/` was tracked in the public repo.
+
+## 10. Issue lifecycle for `roll-meta` (maintainer-only)
+
+> **Scope**: applies to issues filed in [`seanyao/roll-meta`](https://github.com/seanyao/roll-meta) — the private meta repo for this project. **Not** a Roll-product convention; downstream users may not use GitHub for issue tracking, and `roll backlog sync` (US-SYNC-*) is the eventual shipped surface for those who do. Don't propagate this protocol into `guide/` or `roll-build` defaults.
+
+**Why a protocol exists**: roll-meta's `backlog.md` is the engineering source of truth. GitHub issues are an *entry point* (external ideas, user-filed bugs). Without a mapping rule, the two drift — closed issues hide work-in-progress, open issues stay open after merge.
+
+**The rule**: issues mirror **backlog state**, not card-creation state.
+
+1. **On card creation** — comment on the issue with the backlog card ID(s) and design-doc path, then apply the `tracked` label. Issue stays **open**.
+    - Multi-card issues (one feature) list the range: `US-LOOP-040..US-LOOP-042`.
+    - Single-card issues name the one card: `FIX-127`.
+    - Example: [seanyao/roll-meta#9](https://github.com/seanyao/roll-meta/issues/9).
+2. **During delivery** — do NOT echo progress back to the issue. The backlog row's status field is the live state; issue comments would drift.
+3. **On closure** — three cases:
+    - **Card flips ✅ Done**: close the issue with a comment naming the merged PR(s), e.g. `Closed by #240, #245`.
+    - **Won't do / superseded**: close with `wontfix` or `duplicate` label + one-line reason. If superseded by a different card, link the new card ID.
+    - **Split / merged**: close pointing at the new issue(s) or card range.
+4. **Never use `Resolves #N`** in PR bodies for cards that span multiple PRs (the auto-close fires on the first merge and leaves later work orphaned). Manual close after the last PR merges is the rule for multi-PR cards. Single-PR FIXes may use `Resolves #N`.
+
+**Labels in roll-meta** (already present): `tracked` (green) marks issues that have a backlog card. Filter open-untracked issues with `gh issue list --state open --search 'no:label'`.
+
+**Quick reference for an agent processing a fresh issue**:
+
+```bash
+# 1. Add backlog row(s) via $roll-build / $roll-fix / manual edit of .roll/backlog.md
+# 2. Comment + label
+gh issue comment <N> --repo seanyao/roll-meta --body \
+  "Tracked in backlog as **<CARD-IDs>** under epic *<feature-slug>*. ..."
+gh issue edit <N> --repo seanyao/roll-meta --add-label tracked
+# 3. Close (after merge)
+gh issue close <N> --repo seanyao/roll-meta \
+  --comment "Closed by #<PR1>, #<PR2>. Backlog card(s) ✅ Done."
+```
+
+Worked example: the 2026-05-28 batch (#9–#15 → US-LOOP-033..037, FIX-128, FIX-127, US-DOC-012..020, US-SYNC-001..008, US-LOOP-040..042, US-FB-001..005).

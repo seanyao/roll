@@ -188,3 +188,66 @@ teardown() { unit_teardown; }
   run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 1 ]
 }
+
+# ── US-AGENT-023: tier → agent → exec, the full runtime chain ────────────────
+# A backlog story's est_min must route through _classify_complexity →
+# agents.yaml slot → the agent that actually drives _loop_cycle_agent_cmd.
+# This is the integration assertion the story's AC asks for (tier → exec).
+
+_seed_tier_project() {
+  # Layout under TEST_TMP so relative .roll paths resolve.
+  cd "$TEST_TMP"
+  mkdir -p .roll/features/test-epic
+  cat > .roll/backlog.md <<'MD'
+| [US-EZ-005](.roll/features/test-epic/t.md#us-ez-005) | easy | 📋 Todo |
+| [US-HD-030](.roll/features/test-epic/t.md#us-hd-030) | hard | 📋 Todo |
+MD
+  cat > .roll/features/test-epic/t.md <<'MD'
+<a id="us-ez-005"></a>
+## US-EZ-005 easy
+**Agent profile:**
+- est_min: 5
+
+<a id="us-hd-030"></a>
+## US-HD-030 hard
+**Agent profile:**
+- est_min: 30
+MD
+  cat > .roll/agents.yaml <<'YAML'
+schema: v3
+easy:     { agent: kimi }
+default:  { agent: claude }
+hard:     { agent: codex }
+fallback: { agent: pi }
+YAML
+}
+
+@test "US-AGENT-023 chain: easy story → kimi slot → _loop_cycle_agent_cmd execs kimi" {
+  _seed_tier_project
+  local route agent
+  # Resolver only reads agent names from agents.yaml; it needs python3 on PATH,
+  # so keep the inherited PATH here (do NOT strip it).
+  route=$(_loop_pick_agent_for_story US-EZ-005 2>/dev/null)
+  agent=$(printf '%s\n' "$route" | awk '{print $1}')
+  [ "$agent" = "kimi" ]
+  # Pin PATH for the exec-shape check so a real kimi-code/codex on the dev box
+  # can't change the binary name out from under the assertion.
+  PATH="/usr/bin:/bin" run _loop_cycle_agent_cmd "/tmp/skill.md" "$agent" "/tmp/wt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == kimi\ -p\ * ]]
+  # easy was not routed to claude → no claude-only stream-json flags.
+  [[ "$output" != *"stream-json"* ]]
+}
+
+@test "US-AGENT-023 chain: hard story → codex slot → _loop_cycle_agent_cmd execs codex exec" {
+  _seed_tier_project
+  local route agent
+  route=$(_loop_pick_agent_for_story US-HD-030 2>/dev/null)
+  agent=$(printf '%s\n' "$route" | awk '{print $1}')
+  [ "$agent" = "codex" ]
+  # field 2 is the tier — must survive to drive runs.jsonl's tier column.
+  [ "$(printf '%s\n' "$route" | awk '{print $2}')" = "hard" ]
+  PATH="/usr/bin:/bin" run _loop_cycle_agent_cmd "/tmp/skill.md" "$agent" "/tmp/wt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == codex\ exec\ * ]]
+}

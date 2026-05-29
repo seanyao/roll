@@ -68,8 +68,10 @@ loop:
   active_start: 10    # hour (24h)
   active_end: 18
   loop_minute: 5      # minute past the hour (overridden by .roll/local.yaml)
-  primary_agent: claude
 ```
+
+(Agent selection is no longer a global config key — it is per-project complexity
+routing in `.roll/agents.yaml`. See [Complexity-based agent routing](#complexity-based-agent-routing).)
 
 Project-level `.roll/local.yaml` `loop_schedule` takes priority over
 `loop_minute`.
@@ -112,47 +114,75 @@ roll loop branches    # List loop-related branches (merged temp branches, open P
 roll loop events      # Show last 20 cycle events
 roll loop events 50   # Show last 50 events
 
-roll loop agent-routes show          # Print active .roll/agent-routes.yaml (US-AGENT-002)
-roll loop agent-routes lint          # Validate schema, report line-numbered errors
-roll loop agent-routes path          # Print which routes file is active
+roll agent                           # Show the four complexity slots + online status
+roll agent list                      # Show agents installed on this machine
 ```
 
-## Agent-aware routing (US-AGENT-001..011)
+## Complexity-based agent routing
 
-Loop no longer uses a single fixed `primary_agent` for every cycle. Each Todo's
-**Agent profile** (`est_min` / `risk_zone` / `chain_depth`, set by `roll-design`
-when splitting) plus the per-project `.roll/agent-routes.yaml` decide which
-agent×model runs the cycle.
+Loop routes each cycle along a single axis — **task complexity**. A story's
+`est_min` is classified into one of three tiers, and the tier maps to an agent
+through four slots in the per-project `.roll/agents.yaml`. There is no global
+`primary_agent`, no `agent×model` selection (each agent uses its own default
+model), and no soft-preference history.
 
-每个故事在拆分时由 roll-design 写入估时、风险区、链深度三项画像；项目根目录的
-`.roll/agent-routes.yaml` 写清每个 agent 的能力区间和软偏好阈值；每轮 cycle 起
-跑前 loop 按这两份数据选 agent，不再读全局 primary_agent 字段。
+每轮 cycle 只按一根轴选 agent —— **任务复杂度**。故事的 `est_min` 归到三档之一，
+再由项目本地 `.roll/agents.yaml` 的四个槽映射到具体 agent。没有全局
+primary_agent，不再选 agent×model（每个 agent 用自己的默认模型），也没有软偏好历史。
 
-Two layers decide the agent:
-
-1. **Hard rules** — story must satisfy the agent's `types` / `est_min` /
-   `risk` constraints. First declared agent matching wins.
-2. **Soft preference** — when ≥ 2 agents pass hard rules, the last
-   `history.window_cycles` records of `runs.jsonl` are aggregated by
-   (agent, story_type). If any candidate's hit rate ≥
-   `history.prefer_threshold` and sample ≥ 5, that one is picked.
-
-每轮 cycle 启动时 cron log 会打印一行：
+The complexity classifier (single source of truth, fixed thresholds):
 
 ```
-[loop] story US-AGENT-007 routed to claude via hard
-[loop] story FIX-127 routed to pi via soft
+est_min <= 8        → easy
+8 < est_min <= 20   → default
+est_min > 20        → hard
+missing / invalid   → default
 ```
 
-You can also confirm the routing is wired correctly with:
+The four slots in `.roll/agents.yaml` (schema v3):
+
+```yaml
+schema: v3
+easy:     { agent: kimi }
+default:  { agent: kimi }
+hard:     { agent: claude }
+fallback: { agent: pi }
+```
+
+`agents.yaml` is per-machine — it lives in `.roll/.gitignore` and is never
+committed, so each machine manages its own slots. When a tier's slot is empty,
+routing falls back to the `default` slot; if that is also empty it WARNs and
+uses the first installed agent.
+
+每轮 cycle 启动时 cron log 会打印一行（`via <tier>` 是复杂度档，不是硬规则命中）：
 
 ```
-roll loop agent-routes show          # current config
-roll loop agent-routes lint          # schema check
+[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard
+[loop] story FIX-127 routed to kimi via easy est_min=6 → tier=easy
 ```
 
-If no agent passes the hard rules, loop falls back to `history.cold_start_default`
-and writes a WARN line to cron.log.
+Inspect and change routing:
+
+```
+roll agent                           # four slots + online status + recent downgrades
+roll agent set hard claude           # set one slot
+roll agent use kimi                  # lock easy/default/hard to one agent (fallback unchanged)
+```
+
+### Mechanical fallback
+
+After a tier resolves to an agent, loop probes whether that agent is usable
+right now (on PATH + a one-shot auth/network check). If it is offline — no
+binary, expired token, or no network — loop swaps to the `fallback` slot agent
+and records `fallback_from: <original agent>` in `runs.jsonl`. The downed agent
+is cached as unavailable (~30 min) so later cycles skip it. If the `fallback`
+slot agent is also unavailable, loop does not keep trying other agents — it
+writes an ALERT and stops, so a human can fix the environment.
+
+主 agent 解析出来后，loop 先探测它当前能不能跑（在 PATH + 一次 auth/网络探测）。
+离线（没装 / 断 token / 断网）就切到 `fallback` 槽 agent，并在 `runs.jsonl` 记
+`fallback_from`；挂掉的 agent 写入不可用缓存（约 30 min）后续跳过。`fallback`
+也不可用时不无限顺试，写 ALERT 停下等人介入。
 
 ### Agent self-downgrade (too_big verdict)
 

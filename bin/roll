@@ -6712,6 +6712,9 @@ _write_loop_runner_script() {
   # exactly once per cycle (loop-fmt passthrough is display-only).
   local pi_emit_script="${ROLL_PKG_DIR}/lib/agent_usage/pi_emit.py"
   local roll_bin="${ROLL_PKG_DIR}/bin/roll"
+  # US-EVAL-002: pure-function rubric scorer (US-EVAL-001). Baked in at
+  # generation time so the inner runner can compute result_eval at cycle finish.
+  local eval_script="${ROLL_PKG_DIR}/lib/loop_result_eval.py"
   # FIX-041: loop cycle is autonomous — permission prompts and sandbox path
   # restrictions only cause the cycle to burn turns asking for approvals
   # it cannot receive. Bypass all permission checks for the inner claude
@@ -6928,7 +6931,46 @@ _runs_append() {
   if [ -n "\$_story_field" ]; then
     _stype_field="\${_story_field%%-*}"
   fi
+  # US-EVAL-002: compute the objective result_eval block from this cycle's
+  # facts via the US-EVAL-001 pure-function rubric. Best-effort — when python3
+  # or the scorer script is unavailable the row is written WITHOUT result_eval
+  # (older rows have no such key; consumers treat its absence as "not scored").
+  #
+  # Facts adapter: translate the runner's terminal status vocabulary
+  # (idle/built/done/orphan/failed/aborted/blocked) into the rubric's facts
+  # shape. "done" is the only terminal that means the PR merged into main, so
+  # it maps to merged=true; every other terminal is merged=false. status=idle
+  # is passed through verbatim so scope_fidelity scores it as 0. An "orphan"
+  # terminal flags an orphan so cleanliness scores 0. CI verdict and est_min
+  # are not tracked at this layer, so they are intentionally left absent and
+  # the rubric records those dimensions as "unknown" (never a silent 0).
+  local _result_eval_json=""
+  local _eval_bin="\${_EVAL_SCRIPT:-}"
+  if [ -n "\$_eval_bin" ] && [ -f "\$_eval_bin" ] && command -v python3 >/dev/null 2>&1; then
+    local _merged_flag=false _orphans_json='[]'
+    case "\$_status" in
+      done) _merged_flag=true ;;
+      orphan) _orphans_json='["orphan"]' ;;
+    esac
+    local _facts_json
+    _facts_json=\$(jq -nc \\
+      --arg status "\$_status" \\
+      --arg routed_story "\$_story_field" \\
+      --argjson built "\$_built" \\
+      --argjson tcr_count "\$_tcr" \\
+      --argjson duration_sec "\$_dur" \\
+      --argjson merged "\$_merged_flag" \\
+      --argjson orphans "\$_orphans_json" \\
+      '{status:\$status, routed_story:\$routed_story, built:\$built,
+        tcr_count:\$tcr_count, duration_sec:\$duration_sec,
+        merged:\$merged, orphans:\$orphans}' 2>/dev/null) || _facts_json=""
+    if [ -n "\$_facts_json" ]; then
+      _result_eval_json=\$(printf '%s' "\$_facts_json" | python3 "\$_eval_bin" 2>/dev/null) || _result_eval_json=""
+    fi
+  fi
+  [ -n "\$_result_eval_json" ] || _result_eval_json="null"
   jq -nc \\
+    --argjson result_eval "\$_result_eval_json" \\
     --arg ts "\$_ts_now" \\
     --arg project "${slug}" \\
     --arg run_id "\$_rid" \\
@@ -6947,7 +6989,8 @@ _runs_append() {
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
       cycle_id:\$cycle_id, agent:\$agent, tier:\$tier, fallback_from:\$fallback_from,
       story_type:\$story_type, built:\$built, skipped:\$skipped, alerts:\$alerts,
-      tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}' \\
+      tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}
+     + (if \$result_eval == null then {} else {result_eval:\$result_eval} end)' \\
     > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }
   cat "\$_tmp" >> "\$_runs_dst" 2>/dev/null || true
   rm -f "\$_tmp"
@@ -7247,6 +7290,9 @@ _runs_append "failed" 0 "[]" "\$_phases_t" 2>/dev/null || true
 fi
 
 FMT="${fmt_script}"
+# US-EVAL-002: path to the rubric scorer (US-EVAL-001), baked at generation
+# time. _runs_append reads it via \${_EVAL_SCRIPT:-} to compute result_eval.
+_EVAL_SCRIPT="${eval_script}"
 # US-LOOP-004: hand loop-fmt the slug + cycle id + shared root so it can
 # append a per-cycle 'usage' event into events-<slug>.ndjson with
 # tokens / cost / model / duration. Reader (roll loop status) consumes

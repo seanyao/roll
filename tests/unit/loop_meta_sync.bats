@@ -64,6 +64,26 @@ _make_roll_meta_repo() {
   unset ROLL_PROJECT_RUNTIME_DIR
 }
 
+@test "FIX-145: _loop_sync_meta skips reset + emits dirty when .roll has uncommitted edits" {
+  local proj="${TEST_TMP}/proj-dirty"
+  _make_roll_meta_repo "$proj"
+  # Simulate a human editing a tracked .roll file mid-session (uncommitted)
+  echo "LOCAL EDIT must survive the loop" >> "${proj}/.roll/backlog.md"
+  export CYCLE_ID="test-cycle-dirty"
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/rt-dirty"
+  mkdir -p "$ROLL_PROJECT_RUNTIME_DIR"
+  run _loop_sync_meta "$proj"
+  [ "$status" -eq 0 ]
+  # The uncommitted edit must NOT be wiped by reset --hard
+  grep -q "LOCAL EDIT must survive the loop" "${proj}/.roll/backlog.md"
+  # A dirty event must be emitted so the skip is visible
+  local evfile="${ROLL_PROJECT_RUNTIME_DIR}/events.ndjson"
+  [ -f "$evfile" ]
+  grep -q '"meta_sync"' "$evfile"
+  grep -q '"dirty"' "$evfile"
+  unset ROLL_PROJECT_RUNTIME_DIR
+}
+
 @test "_loop_sync_meta: emits stale event when fetch fails" {
   local proj="${TEST_TMP}/proj-stale"
   mkdir -p "${proj}/.roll"

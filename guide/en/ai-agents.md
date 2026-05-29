@@ -15,8 +15,7 @@ Use `roll agent use openai` to select it — the same binary is invoked.
 | DeepSeek TUI | `ai_deepseek` | Local or API |
 | Codex CLI | `codex` | OpenAI |
 | OpenAI (alias) | `openai` | Alias for `codex`. Install: `npm install -g @openai/codex` |
-| Gemini (alias) | `gemini` | Alias for `agy`. Install: `npm install -g @antigravity/agy` |
-| Antigravity (agy) | `agy` | Google Gemini CLI |
+| Antigravity | `agy` | Successor to the Google Gemini CLI; reuses `~/.gemini/` + `GEMINI.md`. Select with `roll agent use antigravity` (legacy alias `gemini` still accepted). Install: `npm install -g @antigravity/agy` |
 | Pi (pi-coding-agent) | `pi` | |
 | Trae IDE | (IDE-based) | project_rules.md sync |
 | opencode | `opencode` | AGENTS.md sync |

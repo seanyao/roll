@@ -3389,7 +3389,7 @@ _agent_argv() {
       fi
       case "$mode" in
         interactive) _AGENT_ARGV=("$_kimi_bin" "$prompt") ;;
-        *)           _AGENT_ARGV=("$_kimi_bin" --quiet -p "$prompt") ;;
+        *)           _AGENT_ARGV=("$_kimi_bin" -p "$prompt") ;;  # FIX-133: kimi-code 无 --quiet,-p 自带 auto 审批
       esac ;;
     deepseek)
       # deepseek has the same argv shape in both modes (positional prompt).
@@ -5954,6 +5954,10 @@ _write_runner_script() {
 _write_loop_runner_script() {
   local script_path="$1" project_path="$2" cmd="$3" log_path="$4"
   local active_start="${5:-10}" active_end="${6:-18}"
+  # FIX-134: skill md path. When set, the inner script rebuilds the agent
+  # command at runtime from the routed cycle agent; when empty it falls back to
+  # the baked command (backwards compatible with callers that omit it).
+  local skill_path="${7:-}"
   # FIX-054: terminal preference detection removed. Popup is hard-coded to
   # macOS Terminal.app; the 7th positional arg, if any, is ignored for
   # backwards compatibility with existing callers.
@@ -5985,6 +5989,15 @@ _write_loop_runner_script() {
     agent_cmd="${agent_cmd/--output-format stream-json/--output-format stream-json --add-dir \"\$WT\"}"
   fi
   local slug; slug=$(_project_slug "$project_path")
+  # FIX-134: emit a runtime command-builder line when skill_path is known, so
+  # the cycle agent is resolved live (routing-aware). Otherwise leave _CYCLE_CMD
+  # empty and the inner script uses the baked fallback command below.
+  local cycle_cmd_line
+  if [[ -n "$skill_path" ]]; then
+    cycle_cmd_line="_CYCLE_CMD=\$(_loop_cycle_agent_cmd \"${skill_path}\" \"\$CYCLE_AGENT\" \"\$WT\" 2>/dev/null || true)"
+  else
+    cycle_cmd_line="_CYCLE_CMD="
+  fi
   cat > "$inner_path" << INNER
 #!/bin/bash -l
 set -o pipefail
@@ -6476,10 +6489,15 @@ for _attempt in 1 2 3; do
       pkill -KILL -f "\$WT" 2>/dev/null
     } ) &
   _WATCHDOG_PID=\$!
+  ${cycle_cmd_line}
+  # FIX-134: prefer the runtime-rebuilt command (routing-aware); fall back to
+  # the baked command (project agent at \`roll loop on\` time) when empty.
   if [ -f "\$FMT" ]; then
-    ( cd "\$WT" && ${agent_cmd} ) | python3 "\$FMT"
+    if [ -n "\$_CYCLE_CMD" ]; then ( cd "\$WT" && eval "\$_CYCLE_CMD" ) | python3 "\$FMT"
+    else ( cd "\$WT" && ${agent_cmd} ) | python3 "\$FMT"; fi
   else
-    ( cd "\$WT" && ${agent_cmd} )
+    if [ -n "\$_CYCLE_CMD" ]; then ( cd "\$WT" && eval "\$_CYCLE_CMD" )
+    else ( cd "\$WT" && ${agent_cmd} ); fi
   fi
   _exit=\$?
   kill "\$_WATCHDOG_PID" 2>/dev/null
@@ -6939,7 +6957,7 @@ _install_launchd_plists() {
     local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
 
     if [[ "$svc" == "loop" ]]; then
-      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log" "$active_start" "$active_end"
+      _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log" "$active_start" "$active_end" "${sd}/${skill}/SKILL.md"
     else
       _write_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log"
     fi
@@ -6984,7 +7002,9 @@ _install_launchd_plists() {
 
 _agent_skill_cmd() {
   local skill_path="$1"
-  local agent; agent=$(_project_agent)
+  # FIX-134: accept an explicit agent (loop routing passes the resolved cycle
+  # agent); default to the project agent for non-routed callers.
+  local agent="${2:-$(_project_agent)}"
   local strip="awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' '${skill_path}'"
   _agent_argv "$agent" plain "__PROMPT__" || {
     err "Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|gemini>"
@@ -7003,6 +7023,23 @@ _agent_skill_cmd() {
     out+=" ${_AGENT_ARGV[i]}"
   done
   echo "${out} \"\$(${strip})\""
+}
+
+# FIX-134: build the full per-cycle agent command at RUNTIME, routing-aware.
+# The loop inner script calls this with the resolved cycle agent (CYCLE_AGENT =
+# ROLL_LOOP_ROUTED_AGENT or project agent) so routing actually switches the
+# executed binary — instead of running a constant baked at `roll loop on` time.
+# Reproduces the claude-only verbose / stream-json / add-dir enhancements that
+# _write_loop_runner_script previously baked into the runner.
+_loop_cycle_agent_cmd() {
+  local skill_path="$1" agent="${2:-$(_project_agent)}" wt="${3:-$WT}"
+  [ -n "$skill_path" ] || return 1
+  local cmd; cmd=$(_agent_skill_cmd "$skill_path" "$agent") || return 1
+  cmd="${cmd/claude -p/claude -p --verbose --dangerously-skip-permissions --output-format stream-json}"
+  if [[ "$cmd" == *"--output-format stream-json"* ]]; then
+    cmd="${cmd/--output-format stream-json/--output-format stream-json --add-dir \"$wt\"}"
+  fi
+  printf '%s' "$cmd"
 }
 
 cmd_loop() {

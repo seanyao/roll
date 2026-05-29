@@ -107,8 +107,9 @@ $roll-fix   FIX-002        # 端到端跑一条 bugfix
 
 **细节：**
 
-- **全局**：`~/.roll/`（你的 config、primary_agent）、`~/.shared/roll/`
-  （loop 状态、`runs.jsonl`）。npm 二进制放在 npm 全局目录里。
+- **全局**：`~/.roll/`（你的 config）、`~/.shared/roll/`（loop 状态、
+  `runs.jsonl`）。每个项目的 agent 路由放在 `.roll/agents.yaml`。
+  npm 二进制放在 npm 全局目录里。
 - **每个项目**：`.roll/`，以及 `.claude/skills/`（或其他 agent 等价路径）
   下指向 Roll skill 的软链。
 - **只在 `roll loop on` 之后**：macOS 上一个 `launchd` plist 用来触发周期。
@@ -480,13 +481,16 @@ roll loop reset
 **自动恢复（不需要你）：**
 
 - 网络超时 → 指数退避重试（2s、4s、8s、16s）
-- 主 agent token 耗尽 → 切到后备 agent
+- 选中的 agent 离线（不在 PATH / 断 auth / 断网）或 token 耗尽 → 切到
+  `fallback` 槽的 agent，并在 `runs.jsonl` 记 `fallback_from`；挂掉的 agent
+  写入不可用缓存（约 30 min），后续 cycle 先跳过
 - 崩溃进程留下的僵死 LOCK → 下个周期自动清理
 - 崩溃周期留下的孤儿 `🔨 In Progress` → 下个周期回退为 `📋 Todo`
 
 **需要你：**
 
-- 主 agent 和后备 agent 都失败 → 修环境后 `roll loop resume`
+- 选中的 agent 和 `fallback` 槽 agent 都挂了 → 写 ALERT 停下（绝不无限顺试）；
+  修环境后 `roll loop resume`
 - CI 持续红 → 修测试 / build，然后 `roll loop now`
 - PR 合并冲突 → 手动解决，push
 - `gh` 认证过期 → `gh auth login`
@@ -604,30 +608,31 @@ git -C .roll log --oneline -3        # 查看最近同步的提交
 git -C .roll fetch && git -C .roll reset --hard origin/main
 ```
 
-### C5. 为什么这个 cycle 用了别的 agent 而不是配置里的默认？
+### C5. 为什么这个 cycle 用了别的 agent 而不是我以为的那个？
 
-**症状**：`~/.roll/config.yaml` 写 `primary_agent: pi`，但 cron.log 显示
-`[loop] story US-AGENT-007 routed to claude via hard`。
+**症状**：你以为会用某个 agent，但 cron.log 显示
+`[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard`。
 
-Why is this cycle running on a different agent than my configured default?
+Why is this cycle running on a different agent than I expected?
 
-**原因**：US-AGENT-001..011 上线后,`primary_agent` 不再是唯一决策者。
-每轮 cycle 按故事的 **Agent profile**(`est_min` / `risk_zone` /
-`chain_depth`) + 项目根的 `.roll/agent-routes.yaml` 决定路由：硬规则
-筛候选 + `runs.jsonl` 历史命中率做软偏好。都不匹配才回退到
-`history.cold_start_default`。
+**原因**：路由现在只看一根轴 —— **任务复杂度**。每个故事的 `est_min`
+归到三档之一（`est_min ≤ 8 → easy`、`8 < est_min ≤ 20 → default`、
+`est_min > 20 → hard`；评不出或非法 → `default`），再由 `.roll/agents.yaml`
+的四个槽（`easy` / `default` / `hard` / `fallback`）映射到具体 agent。
+旧的三维匹配（`type` / `est_min` / `risk_zone`）和软偏好历史
+（`runs.jsonl` 命中率、`cold_start_default`）都已退役。日志里的
+`via hard` / `via easy` 是复杂度档，不是硬规则命中。
 
 **自检**：
 
 ```bash
-roll loop agent-routes show          # 当前路由配置
-roll loop agent-routes lint          # 校验
-roll loop runs 20                     # 看最近 20 个 cycle 各自挑了谁
+roll agent                            # 四个槽 + 在线状态 + 最近降级痕迹
+roll agent list                       # 本机装了哪些 agent
+roll loop runs 20                     # 看最近 20 个 cycle 各自的 agent + tier
 ```
 
-想让某故事固定路由到指定 agent,可以收紧其他 agent 的能力区间,或临时把
-那个 agent 的 `est_min.max` 调小。完全禁用智能路由：所有 agent 写一样
-的 `types` 列表 + `cold_start_default` 指向你想用的。
+想让某故事固定走某个 agent：用 `roll agent use <name>` 把 easy/default/hard
+三档全锁成同一个（fallback 槽不动）。只改一档用 `roll agent set <slot> <agent>`。
 
 ### C6. 故事为什么翻成 🚫 搁置了，cycle 不是跑了吗？
 

@@ -119,8 +119,9 @@ to `main` directly — see A1).
 
 **Details:**
 
-- **Global:** `~/.roll/` (your config, primary_agent), `~/.shared/roll/` (loop
-  state, `runs.jsonl`). The npm binary lives where your global npm packages do.
+- **Global:** `~/.roll/` (your config), `~/.shared/roll/` (loop
+  state, `runs.jsonl`). Per-project agent routing lives in `.roll/agents.yaml`.
+  The npm binary lives where your global npm packages do.
 - **Per project:** `.roll/`, plus symlinks under `.claude/skills/` (or
   equivalent for other agents).
 - **Per project, only with `roll loop on`:** a `launchd` plist on macOS that
@@ -529,14 +530,18 @@ when the work is ambiguous or the environment is broken — never guesses.**
 **Auto-recovers (no human needed):**
 
 - Network timeout → retries with backoff (2s, 4s, 8s, 16s)
-- Primary agent token exhausted → switches to fallback agent
+- Routed agent offline (no PATH / auth / network) or token exhausted → swaps to
+  the `fallback` slot agent and records `fallback_from` in `runs.jsonl`. The
+  downed agent is cached as unavailable (~30 min) so later cycles skip it.
 - Stale LOCK from a crashed process → next cycle cleans it up
 - Orphan `🔨 In Progress` from a crashed cycle → next cycle reverts to
   `📋 Todo`
 
 **Needs you:**
 
-- Both primary and fallback agents fail → fix env, then `roll loop resume`
+- Both the routed agent and the `fallback` slot agent are down → an ALERT is
+  written and the loop stops (it never loops forever). Fix env, then
+  `roll loop resume`
 - CI persistently red → fix the failing test/build, then `roll loop now`
 - Merge conflict on PR → resolve manually, push
 - `gh` auth expired → `gh auth login`
@@ -663,30 +668,33 @@ git -C .roll fetch && git -C .roll reset --hard origin/main
 
 ### C5. Why is this cycle running on `<agent>` instead of my configured default?
 
-**Symptoms:** `~/.roll/config.yaml` says `primary_agent: pi`, but cron.log shows
-`[loop] story US-AGENT-007 routed to claude via hard`.
+**Symptoms:** you expected one agent, but cron.log shows
+`[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard`.
 
-为什么这个 cycle 用了 claude 而不是配置里的 pi？
+为什么这个 cycle 用了 claude 而不是我以为的那个 agent？
 
-**Why this happens:** Since US-AGENT-001..011 shipped, `primary_agent` is no
-longer the only voice. Each cycle picks the agent based on the story's
-**Agent profile** (`est_min` / `risk_zone` / `chain_depth`) and the per-project
-`.roll/agent-routes.yaml`. Hard rules + soft preference from `runs.jsonl`
-history decide the winner; only when no agent passes does
-`history.cold_start_default` fall back.
+**Why this happens:** routing is now driven by a single axis — **task
+complexity**. Each story's `est_min` is classified into one of three tiers
+(`est_min ≤ 8 → easy`, `8 < est_min ≤ 20 → default`, `est_min > 20 → hard`;
+missing or invalid estimate → `default`), and the tier maps to an agent through
+the four slots in `.roll/agents.yaml` (`easy` / `default` / `hard` / `fallback`).
+The old three-dimensional matcher (`type` / `est_min` / `risk_zone`) and the
+soft-preference history (`runs.jsonl` hit-rate, `cold_start_default`) are
+retired. The `via hard`/`via easy` token in the log line is the complexity tier,
+not a hard-rule match.
 
 **Inspect:**
 
 ```bash
-roll loop agent-routes show          # current routing config
-roll loop agent-routes lint          # schema check
-roll loop runs 20                     # see which agent each cycle picked
+roll agent                            # four slots + online status + recent downgrades
+roll agent list                       # which agents this machine has installed
+roll loop runs 20                     # see which agent + tier each cycle picked
 ```
 
-If you want a story to always run on a specific agent, narrow that agent's
-range in `.roll/agent-routes.yaml` (or temporarily downgrade the others' caps).
-If you want to disable routing entirely, set every agent's `types` to the same
-list and ensure `cold_start_default` points at your preferred one.
+If you want a story to always run on a specific agent, set every tier to the
+same agent with `roll agent use <name>` (locks `easy`/`default`/`hard`; the
+`fallback` slot is left untouched). To change a single tier, use
+`roll agent set <slot> <agent>`.
 
 ### C6. Why was my story flipped to 🚫 Hold instead of Done?
 

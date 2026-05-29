@@ -67,6 +67,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | Loop（自主执行器） | [guide/en/loop.md](guide/en/loop.md) | [guide/zh/loop.md](guide/zh/loop.md) |
 | Dream（夜间健康巡检） | [guide/en/dream.md](guide/en/dream.md) | [guide/zh/dream.md](guide/zh/dream.md) |
 | Peer（跨 Agent 评审） | [guide/en/peer.md](guide/en/peer.md) | [guide/zh/peer.md](guide/zh/peer.md) |
+| AI Agent 与复杂度路由 | [guide/en/ai-agents.md](guide/en/ai-agents.md) | [guide/zh/ai-agents.md](guide/zh/ai-agents.md) |
 | 配置（环境变量） | [guide/en/configuration.md](guide/en/configuration.md) | [guide/zh/configuration.md](guide/zh/configuration.md) |
 | 技能选择指南 | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
 | 幻灯片（deck 生成器） | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |

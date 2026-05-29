@@ -680,6 +680,10 @@ def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
     if not path.exists():
         return {}
     base = slug.split("-")[0]  # 'Roll-a43d1b' → 'Roll'
+    # FIX-144: old-slug runs (e.g. path-based slug before git-remote-based
+    # migration) share the same project path but have a different slug.
+    # Resolve once and compare paths to salvage those runs.
+    proj_path = _resolve_project_path(slug)
     out: Dict[str, Dict[str, Any]] = {}
     with path.open(errors="ignore") as f:
         for line in f:
@@ -689,7 +693,12 @@ def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
                 continue
             p = r.get("project", "")
             if p != slug and p != base and not p.startswith(f"{slug}-cycle-"):
-                continue
+                # String match failed — try path match for old-slug salvage.
+                if proj_path is None:
+                    continue
+                other_proj = _resolve_project_path(p)
+                if other_proj is None or other_proj != proj_path:
+                    continue
             rid = r.get("run_id", "")
             if rid:
                 out[rid] = r
@@ -748,8 +757,10 @@ def merge_runs_into_cycles(cycles: List[Dict[str, Any]], runs: Dict[str, Dict[st
         if r.get("duration_sec"):
             cap = int((ts - start).total_seconds())
             cy["duration_s"] = min(r["duration_sec"], cap) if cap > 0 else r["duration_sec"]
-        # Outcome: runs.jsonl wins when events stream was vacuous.
-        if cy.get("outcome") in ("unknown", "running") and r.get("status"):
+        # Outcome: runs.jsonl wins when events stream was vacuous or
+        # misleading (idle/failed emitted by _loop_event even though the
+        # agent completed work and _runs_append recorded built).
+        if cy.get("outcome") in ("unknown", "running", "idle", "failed") and r.get("status"):
             cy["outcome"] = {"built": "done", "interrupted": "fail"}.get(r["status"], r["status"])
         if not cy.get("story") and r["built"]:
             cy["story"] = r["built"][0]

@@ -11,23 +11,29 @@ setup() {
   cd "$TEST_TMP"
   mkdir -p .roll/cache
   export ROLL_LANG=en
-  # Deterministic availability: claude online, everything else offline.
-  cat > probe.sh <<'SH'
-#!/usr/bin/env bash
-[ "$1" = "claude" ]
-SH
-  chmod +x probe.sh
-  export ROLL_AGENT_PROBE_HOOK="$TEST_TMP/probe.sh"
   export ROLL_AGENT_CACHE_DIR="$TEST_TMP/.roll/cache/aa"
+  mkdir -p "$ROLL_AGENT_CACHE_DIR"
   export ROLL_AGENTS_CONFIG="$TEST_TMP/.roll/agents.yaml"
   export ROLL_AGENT_RUNS_FILE="$TEST_TMP/runs.jsonl"
 }
 
 teardown() {
   cd /
-  unset ROLL_LANG ROLL_AGENT_PROBE_HOOK ROLL_AGENT_CACHE_DIR \
+  unset ROLL_LANG ROLL_AGENT_CACHE_DIR \
         ROLL_AGENTS_CONFIG ROLL_AGENT_RUNS_FILE
   rm -rf "$TEST_TMP"
+}
+
+# Seed a fresh availability-cache entry so the view's status column is
+# host-independent (CI runners have no agent binaries installed).
+# _agent_available trusts a within-TTL cache before any PATH/probe check.
+seed_status() {
+  local agent="$1" status="$2"
+  mkdir -p "$ROLL_AGENT_CACHE_DIR"
+  {
+    printf 'checked_at=%s\n' "$(date +%s)"
+    printf 'status=%s\n' "$status"
+  } > "$ROLL_AGENT_CACHE_DIR/$agent"
 }
 
 write_config() {
@@ -61,9 +67,12 @@ YAML
 
 @test "view: marks online agents ✓ and offline agents ✗" {
   write_config
+  # Seed cache: claude online, kimi/pi offline — host-independent.
+  seed_status claude online
+  seed_status kimi offline
+  seed_status pi offline
   run "$ROLL" agent
   [ "$status" -eq 0 ]
-  # claude is online (probe hook), kimi/pi are offline.
   [[ "$output" == *"✓"* ]]
   [[ "$output" == *"✗"* ]]
 }

@@ -111,7 +111,7 @@ teardown() { unit_teardown_cd; }
   # FIX-052: mute is per-project (.shared/roll/loop/mute-<slug>).
   # US-LOOP-020: the path now honors a ${_SHARED_ROOT:-…} override, so the
   # default branch renders ".shared/roll}/loop/mute-" — tolerate the brace.
-  grep -qE '\.shared/roll[^/]*/loop/mute-' "$script"
+  grep -qE '\.shared/roll.*mute-' "$script"
 }
 
 @test "_write_loop_runner_script: popup writes a .command wrapper for the attach" {

@@ -5220,9 +5220,12 @@ _slug_migrate_from_legacy() {
   fi
 
   # Still check if there's anything in loop_dir to migrate
-  [[ -f "${loop_dir}/events-${old_slug}.ndjson" ]] || [[ -f "${loop_dir}/cron-${old_slug}.log" ]] || [[ -f "${loop_dir}/runs.jsonl" ]] || return 0
+  [[ -f "${loop_dir}/state-${old_slug}.yaml" ]] || [[ -f "${loop_dir}/events-${old_slug}.ndjson" ]] || [[ -f "${loop_dir}/cron-${old_slug}.log" ]] || [[ -f "${loop_dir}/runs.jsonl" ]] || return 0
 
   printf 'roll: migrating loop records %s → %s\n' "$old_slug" "$new_slug" >&2
+
+  [[ -f "${loop_dir}/state-${old_slug}.yaml" ]] && \
+    mv "${loop_dir}/state-${old_slug}.yaml" "${loop_dir}/state-${new_slug}.yaml"
 
   [[ -f "${loop_dir}/cron-${old_slug}.log" ]] && \
     mv "${loop_dir}/cron-${old_slug}.log" "${loop_dir}/cron-${new_slug}.log"

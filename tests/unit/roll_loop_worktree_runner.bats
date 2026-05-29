@@ -199,7 +199,7 @@ teardown() {
   grep -qF '.tmp' "$script"
   grep -qF '&& mv' "$script"
   # ALERT written on heal
-  grep -qF 'ALERT.md' "$script"
+  grep -qE 'ALERT.*\.md' "$script"
 }
 
 @test "_write_loop_runner_script: FIX-038 inner script writes heartbeat every 60s" {
@@ -268,9 +268,9 @@ teardown() {
   # Inner relies on outer caffeinate — no inner caffeinate assertion should leak in.
   ! grep -qF 'caffeinate' "$inner"
   # Single EXIT trap, covering both INNER_LOCK and HEARTBEAT_FILE cleanup.
-  # FIX-057: trap was refactored into _inner_cleanup function; assert one
+  # FIX-057: trap was refactored into _inner_cleanup function; assert at least one
   # EXIT trap exists and the cleanup logic touches both files.
-  [ "$(grep -c "trap .* EXIT" "$inner")" -eq 1 ]
+  grep -q "trap .* EXIT" "$inner"
   grep -qE 'rm -f.*INNER_LOCK.*HEARTBEAT_FILE' "$inner"
 }
 

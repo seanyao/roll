@@ -121,3 +121,45 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
   # main.ts should import from outside its own directory
   grep -qE 'from "\.\./' "$FIXTURE/src/cli/main.ts"
 }
+
+# ── US-DOC-014: State Machine ──
+
+@test "roll-doc SKILL.md: state-machine subsection documents detection rule — enum name pattern" {
+  grep -qiE '(\*State.*\*Status|\*Status.*\*State)' "$SKILL"
+  grep -qiE '(referenced by.*≥.*2|≥.*2.*source.*file|imported.*by.*2)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: state-machine subsection documents output structure with states and references" {
+  grep -qiE '(### States|状态列表)' "$SKILL"
+  grep -qiE '(### Referenced By|引用文件|### Inferred Transitions)' "$SKILL"
+  grep -qiE '(Inferred Transitions|切换条件|推断.*转换)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: state-machine subsection documents idempotency (skip if already exists)" {
+  grep -qiE '(state.machines.*already.*exist|skip unless.*--force|Existing.*state)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: state-machine subsection documents threshold (skip when no qualifying enum)" {
+  grep -qiE '(no.*qualifying.*enum|no enum.*meet|skip generation.*state)' "$SKILL"
+}
+
+@test "roll-doc statemachine fixture: directory exists with source files" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_statemachine"
+  [ -d "$FIXTURE" ]
+  [ -d "$FIXTURE/src" ]
+}
+
+@test "roll-doc statemachine fixture: OrderState enum defined and named *State" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_statemachine"
+  grep -qE 'enum OrderState' "$FIXTURE/src/state/types.ts"
+  # enum values
+  grep -qE 'Pending|Processing|Shipped|Delivered|Cancelled' "$FIXTURE/src/state/types.ts"
+}
+
+@test "roll-doc statemachine fixture: OrderState imported by ≥3 source files" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_statemachine"
+  # Count files that import OrderState (exclude types.ts itself and test files)
+  import_count=$(grep -rl 'OrderState' "$FIXTURE/src" \
+    | grep -v 'types.ts' | wc -l | tr -d ' ')
+  [ "$import_count" -ge 3 ]
+}

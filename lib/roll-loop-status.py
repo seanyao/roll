@@ -121,16 +121,48 @@ def _git_remote_url(repo_path: str) -> Optional[str]:
 def shared_root() -> Path:
     return Path(os.environ.get("ROLL_SHARED_ROOT") or os.path.expanduser("~/.shared/roll"))
 
+def runtime_dir() -> Optional[Path]:
+    """Return the project's .roll/loop/ directory (mirrors bin/roll _loop_runtime_dir).
+
+    Priority:
+    1. ROLL_PROJECT_RUNTIME_DIR env var (test sandbox override)
+    2. CWD/.roll/loop if events.ndjson exists (the project's runtime data dir)
+    """
+    env = os.environ.get("ROLL_PROJECT_RUNTIME_DIR")
+    if env:
+        return Path(env)
+    cwd_loop = Path.cwd() / ".roll" / "loop"
+    if (cwd_loop / "events.ndjson").exists():
+        return cwd_loop
+    return None
+
 # ════════════════════════════════════════════════════════════════════════════
 # Loaders
 # ════════════════════════════════════════════════════════════════════════════
+def _events_paths(slug: str) -> Tuple[Path, List[Path]]:
+    """Resolve the events file path, project-local first, shared fallback.
+
+    FIX-137: US-LOOP-020 moved the events writer (_loop_event) to
+    project-local .roll/loop/events.ndjson via _loop_runtime_dir, but the
+    reader (load_events) still read from shared events-<slug>.ndjson.
+    Mirror the writer path with shared fallback for backward compat.
+    """
+    rt = runtime_dir()
+    if rt:
+        head = rt / "events.ndjson"
+    else:
+        head = shared_root() / "loop" / f"events-{slug}.ndjson"
+    return head, [head] + [head.with_suffix(f".ndjson.{i}") for i in range(1, 5)]
+
 def load_events(slug: str, days: int) -> List[Dict[str, Any]]:
     # US-LOOP-023: read the head NDJSON plus its rotated siblings .1..4.
-    # bin/roll rotates events-<slug>.ndjson at 10MB keeping 4 archives; without
+    # bin/roll rotates events.ndjson at 10MB keeping 4 archives; without
     # this loop the dashboard silently dropped any cycle whose events landed in
     # a rotated file (the "永久留存" promise of US-LOOP-004 only held on disk).
-    head = shared_root() / "loop" / f"events-{slug}.ndjson"
-    candidates = [head] + [head.with_suffix(f".ndjson.{i}") for i in range(1, 5)]
+    #
+    # FIX-137: reads from project-local .roll/loop/events.ndjson (matching
+    # _loop_event writer) with shared fallback.
+    head, candidates = _events_paths(slug)
     existing = [p for p in candidates if p.exists()]
     if not existing:
         return []
@@ -171,8 +203,17 @@ _CRON_PAT = re.compile(
 )
 
 def load_cron_log(slug: str) -> List[Dict[str, Any]]:
-    """Return ordered list of cron entries with local HH:MM:SS + extracted fields."""
-    path = shared_root() / "loop" / f"cron-{slug}.log"
+    """Return ordered list of cron entries with local HH:MM:SS + extracted fields.
+
+    FIX-137: try project-local .roll/loop/cron.log first, fall back to
+    shared cron-<slug>.log."""
+    rt = runtime_dir()
+    if rt:
+        path = rt / "cron.log"
+        if not path.exists():
+            path = shared_root() / "loop" / f"cron-{slug}.log"
+    else:
+        path = shared_root() / "loop" / f"cron-{slug}.log"
     if not path.exists():
         return []
     out: List[Dict[str, Any]] = []
@@ -193,8 +234,17 @@ def load_cron_log(slug: str) -> List[Dict[str, Any]]:
     return out
 
 def load_state(slug: str) -> Dict[str, str]:
-    """Tiny YAML reader — only the flat keys bin/roll writes."""
-    path = shared_root() / "loop" / f"state-{slug}.yaml"
+    """Tiny YAML reader — only the flat keys bin/roll writes.
+
+    FIX-137: try project-local .roll/loop/state.yaml first, fall back to
+    shared state-<slug>.yaml."""
+    rt = runtime_dir()
+    if rt:
+        path = rt / "state.yaml"
+        if not path.exists():
+            path = shared_root() / "loop" / f"state-{slug}.yaml"
+    else:
+        path = shared_root() / "loop" / f"state-{slug}.yaml"
     if not path.exists():
         return {}
     out: Dict[str, str] = {}
@@ -566,8 +616,17 @@ def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
     """Map run_id → run row for the current project (filters out other slugs
     sharing ~/.shared/roll/loop/runs.jsonl). Lenient slug matching salvages
     entries written under buggy slugs (FIX-053): the bare project basename
-    (e.g. 'Roll') or worktree paths (e.g. '{slug}-cycle-XXX')."""
-    path = shared_root() / "loop" / "runs.jsonl"
+    (e.g. 'Roll') or worktree paths (e.g. '{slug}-cycle-XXX').
+
+    FIX-137: try project-local .roll/loop/runs.jsonl first, fall back to
+    shared runs.jsonl."""
+    rt = runtime_dir()
+    if rt:
+        path = rt / "runs.jsonl"
+        if not path.exists():
+            path = shared_root() / "loop" / "runs.jsonl"
+    else:
+        path = shared_root() / "loop" / "runs.jsonl"
     if not path.exists():
         return {}
     base = slug.split("-")[0]  # 'Roll-a43d1b' → 'Roll'

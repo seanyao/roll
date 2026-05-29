@@ -139,3 +139,47 @@ m.load_events('myslug', 30)
   [ "${lines[0]}" = "1" ]
   [[ "$output" == *"HEAD"* ]]
 }
+
+# ── FIX-137: project-local events.ndjson path ────────────────────────────
+
+@test "FIX-137: load_events reads from ROLL_PROJECT_RUNTIME_DIR (project-local path)" {
+  local rt="${TEST_TMP}/proj_rt"
+  mkdir -p "$rt"
+  export ROLL_PROJECT_RUNTIME_DIR="$rt"
+  local head="${rt}/events.ndjson"
+  local now_iso="$(python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+  write_event "$head" "$now_iso" "cycle_start" "PROJ-LOCAL"
+  write_event "$head" "$now_iso" "cycle_end"   "PROJ-LOCAL"
+  run load_count "myslug" 30
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "2" ]
+  [[ "$output" == *"PROJ-LOCAL"* ]]
+}
+
+@test "FIX-137: project-local events.ndjson with rotation siblings (.1..4)" {
+  local rt="${TEST_TMP}/proj_rt"
+  mkdir -p "$rt"
+  export ROLL_PROJECT_RUNTIME_DIR="$rt"
+  local head="${rt}/events.ndjson"
+  local rot1="${rt}/events.ndjson.1"
+  local now_iso="$(python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+  write_event "$rot1" "$now_iso" "cycle_start" "OLDIE"
+  write_event "$head" "$now_iso" "cycle_start" "NEWBIE"
+  run load_count "myslug" 30
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "2" ]
+  [[ "$output" == *"OLDIE"* ]]
+  [[ "$output" == *"NEWBIE"* ]]
+}
+
+@test "FIX-137: falls back to shared when project-local dir is absent" {
+  # No ROLL_PROJECT_RUNTIME_DIR set, and CWD has no .roll/loop
+  # so it should fall back to ROLL_SHARED_ROOT/loop/events-<slug>.ndjson
+  local f="${TEST_TMP}/loop/events-myslug.ndjson"
+  local now_iso="$(python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+  write_event "$f" "$now_iso" "cycle_start" "FALLBACK"
+  run load_count "myslug" 30
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "1" ]
+  [[ "$output" == *"FALLBACK"* ]]
+}

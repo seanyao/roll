@@ -5160,11 +5160,18 @@ Supported keys (range):
   loop_brief_hour                0-23    brief daily fire hour
   loop_brief_minute              0-59    brief daily fire minute
 
+Compact facades (write multiple keys at once):
+  roll config loop-window 9-18              loop_active_start + loop_active_end
+  roll config loop-schedule 30/7            period_minutes + offset_minute
+  roll config dream-time 03:20              loop_dream_hour + loop_dream_minute
+  roll config brief-time 09:15              loop_brief_hour + loop_brief_minute
+
 Examples:
   roll config loop_dream_hour
   roll config --list
   roll config loop_schedule.period_minutes 30
   roll config loop_dream_hour 3 --global
+  roll config dream-time 03:20
 EOF
 }
 
@@ -5257,6 +5264,51 @@ _config_loop_schedule() {
   return 0
 }
 
+# US-LOOP-035: `roll config dream-time <HH:MM>` / `brief-time <HH:MM>` — compact
+# facade writing loop_<svc>_hour + loop_<svc>_minute in one shot. With no value,
+# prints the current effective time + source. HH ∈ [0,23], MM ∈ [0,59].
+# These keys are global-scoped, so writes land in ~/.roll/config.yaml.
+#   _config_daily_time <svc> <value>   svc ∈ {dream, brief}
+_config_daily_time() {
+  local svc="$1" value="$2"
+  local hour_key="loop_${svc}_hour" min_key="loop_${svc}_minute"
+  if [[ -z "$value" ]]; then
+    local rh rm vh vm sh
+    rh=$(_config_resolve "$hour_key"); rm=$(_config_resolve "$min_key")
+    vh="${rh%%$'\t'*}"; sh="${rh#*$'\t'}"; vm="${rm%%$'\t'*}"
+    # minute auto-derives to "-" when unset; render as 00 for display
+    [[ "$vm" == "-" || -z "$vm" ]] && vm="0"
+    [[ "$sh" != "default" ]] && sh="from $sh" || sh="from default"
+    printf '%s-time: %02d:%02d (%s)\n' "$svc" "$vh" "$vm" "$sh"
+    return 0
+  fi
+  if ! [[ "$value" =~ ^[0-9]{1,2}:[0-9]{1,2}$ ]]; then
+    err "config: ${svc}-time expects <HH:MM>, got '$value'"
+    err "config：${svc}-time 需要 <HH:MM> 格式，收到 '$value'"
+    return 2
+  fi
+  local hh="${value%%:*}" mm="${value#*:}"
+  # strip leading zeros to avoid octal interpretation in arithmetic
+  hh=$((10#$hh)); mm=$((10#$mm))
+  if (( hh < 0 )) || (( hh > 23 )); then
+    err "config: ${svc}-time hour must be in [0,23]"
+    err "config：${svc}-time 小时必须在 [0,23]"
+    return 2
+  fi
+  if (( mm < 0 )) || (( mm > 59 )); then
+    err "config: ${svc}-time minute must be in [0,59]"
+    err "config：${svc}-time 分钟必须在 [0,59]"
+    return 2
+  fi
+  local file
+  file=$(_config_key_file "$ROLL_CFG_SCOPE")
+  _config_set "$hour_key" "$hh" "$file"
+  _config_set "$min_key" "$mm" "$file"
+  ok "$(printf '✓ set %s-time = %02d:%02d in %s' "$svc" "$hh" "$mm" "$file")"
+  printf 'run `roll loop on` to apply\n'
+  return 0
+}
+
 cmd_config() {
   local key="" value="" scope="" want_list=""
   while [[ $# -gt 0 ]]; do
@@ -5286,6 +5338,12 @@ cmd_config() {
       else
         _config_loop_schedule "$value"; return $?
       fi
+      ;;
+    dream-time|brief-time)
+      # dream/brief schedule keys are global-scoped (~/.roll/config.yaml).
+      local fscope="$scope"; [[ -z "$fscope" ]] && fscope="global"
+      ROLL_CFG_SCOPE="$fscope"
+      _config_daily_time "${key%-time}" "$value"; return $?
       ;;
   esac
 
@@ -7288,16 +7346,33 @@ _write_launchd_plist() {
   # a second layer (covers stale plists where brew was installed after setup).
   local path_value; path_value=$(_detect_path_prepend)
 
-  # FIX-105: macOS 26.4 launchd silently refuses to fire StartCalendarInterval
-  # entries that contain BOTH Hour and Minute keys. Daily services use
-  # StartInterval=86400 instead.
-  # US-LOOP-032: all loop services use StartInterval = period * 60 (was
-  # StartCalendarInterval with slot enumeration). Non-divisor periods are now
-  # supported.
+  # FIX-105 / US-LOOP-035: macOS 26.4 launchd silently refuses to fire a
+  # single-dict StartCalendarInterval that contains BOTH Hour and Minute keys.
+  # The original FIX-105 workaround forced daily services to StartInterval=86400,
+  # which drifts the fire time off the configured HH:MM. US-LOOP-035 resolves it
+  # with the *array-style* StartCalendarInterval (one-element array of a dict) —
+  # launchd honors Hour+Minute when wrapped in an array. Set
+  # ROLL_DREAM_LEGACY_INTERVAL=1 to fall back to the legacy StartInterval=86400
+  # workaround (rollback channel if the array form ever regresses).
+  # US-LOOP-032: non-daily loop services use StartInterval = period * 60.
   local schedule_xml
   if [[ -n "$hour" ]]; then
-    schedule_xml="  <key>StartInterval</key>
+    if [[ "${ROLL_DREAM_LEGACY_INTERVAL:-}" == "1" ]]; then
+      schedule_xml="  <key>StartInterval</key>
   <integer>86400</integer>"
+    else
+      # Daily services carry the fire minute in $offset ($5); $hour is $6.
+      local cal_minute="${offset:-0}"
+      schedule_xml="  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Hour</key>
+      <integer>${hour}</integer>
+      <key>Minute</key>
+      <integer>${cal_minute}</integer>
+    </dict>
+  </array>"
+    fi
   else
     # US-LOOP-032: StartInterval in seconds = period_minutes * 60
     local interval=$(( period * 60 ))

@@ -57,6 +57,47 @@ machine's agent choices leaking to another (or into the shared meta repo). There
 is no global `primary_agent` / `fallback_agent` config key any more — routing is
 entirely per-project complexity slots.
 
+## Adaptive Soft Priority (in-tier nudge)
+
+On top of the complexity tier — which is a **hard** constraint that decides
+which slot is consulted — Roll applies a **soft priority** that can reorder the
+candidate agents *within the same tier* by their historical hit-rate. This is
+the transparent, auditable successor to the old (retired) history preference.
+
+How the nudge is computed:
+
+- **In-tier only.** The tier (`easy` / `default` / `hard`) is never changed. A
+  task is never moved to a different tier; only the agent inside the resolved
+  tier may be reordered.
+- **Per (agent × story type).** The hit-rate is looked up per agent and story
+  type (the story id prefix, e.g. `US` / `FIX`), from the cycle history in
+  `runs.jsonl` via `result_eval`.
+- **Sample floor.** A (agent × story type) combo with fewer than 8 samples is
+  ignored — below that it is statistically meaningless, so the est_min slot
+  agent is kept and the audit line says so.
+- **Deterministic.** Same history in → same agent out. No random numbers, no
+  time seed, no decay clock. The reorder is a pure function of its inputs and is
+  reproducible from fixed test inputs.
+
+Where to read the nudge reason:
+
+- The router emits a human-readable rationale, e.g.
+  `kimi in-tier hit_rate 0.82 (n=14) > slot claude 0.61 (n=11) for US -> prefer kimi`.
+- The loop prints it on the `[loop] story … routed to …` line, records it in the
+  event log (`story_routed`), and the routed agent + complexity `tier` are
+  first-class columns in `runs.jsonl`.
+
+How to turn it off:
+
+- Set `ROLL_AGENT_NUDGE=0` (also accepts `off` / `false` / `no`). With the nudge
+  disabled, routing behaves **exactly** like the pure est_min slot routing — the
+  resolved slot agent is used unchanged, with no reordering.
+
+How this differs from the **retired** soft preference: the old history
+preference was implicit, unpredictable, and not explainable. This one is
+**deterministic, auditable, and one-switch off** — it can only reorder agents
+inside a tier, never silently move work across tiers.
+
 ## Convention Sync
 
 `roll setup` copies global conventions (`AGENTS.md`, `CLAUDE.md`) into each

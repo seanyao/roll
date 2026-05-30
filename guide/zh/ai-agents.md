@@ -52,6 +52,38 @@ commit，所以每台机器各管各的 agent 槽。这样一台机器的 agent 
 （或进共享的 meta repo）。不再有全局 `primary_agent` / `fallback_agent` 配置项 ——
 路由完全由项目本地的复杂度槽决定。
 
+## 透明软优先（档内 nudge）
+
+在复杂度档之上 —— 档（`easy` / `default` / `hard`）是**硬约束**，决定查哪个槽 ——
+Roll 再叠一层**软优先**：在**同一档内**按各 agent 的历史命中率给候选 agent 重新排序。
+这是被弃用的旧历史偏好的透明、可审计的继任者。
+
+软优先怎么算：
+
+- **只在档内重排。** 档（`easy` / `default` / `hard`）绝不改变；任务永远不被挪到别的
+  档，只有解析出的这一档内部的 agent 才可能被重排。
+- **按 (agent × 故事类型)。** 命中率按 agent 与故事类型（故事 id 前缀，如 `US` /
+  `FIX`）查表，数据来自 `runs.jsonl` 的 cycle 历史，经 `result_eval` 聚合。
+- **样本下限。** 样本数少于 8 的 (agent × 故事类型) 组合不参与 —— 低于此值统计上没有
+  意义，于是保留 est_min 槽位 agent，审计行会写明这一点。
+- **确定性。** 同一历史输入 → 同一 agent 输出。无随机数、无时间种子、无衰减时钟。重排
+  是其输入的纯函数，可由固定测试输入复现。
+
+nudge 理由在哪看：
+
+- 路由器产出人类可读的理由，例如
+  `kimi in-tier hit_rate 0.82 (n=14) > slot claude 0.61 (n=11) for US -> prefer kimi`。
+- loop 把它打印在 `[loop] story … routed to …` 行，记进事件日志（`story_routed`），
+  路由出的 agent 与复杂度 `tier` 是 `runs.jsonl` 的一等列。
+
+怎么关：
+
+- 设 `ROLL_AGENT_NUDGE=0`（也接受 `off` / `false` / `no`）。关掉后，路由行为**完全
+  等同**纯 est_min 槽位路由 —— 直接用解析出的槽位 agent，不做任何重排。
+
+与**被弃用的**旧软偏好的区别：旧的历史偏好是隐式的、不可预测的、不可解释的。这一个是
+**确定、可审计、可一键关**的 —— 它只能在档内重排 agent，绝不会悄悄把活儿跨档挪走。
+
 ## 约定同步
 
 `roll setup` 将全局约定（`AGENTS.md`、`CLAUDE.md`）复制到每个检测到的 AI 工具的预期目录。新增 Agent 后重新运行：

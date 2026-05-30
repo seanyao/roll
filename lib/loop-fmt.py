@@ -571,35 +571,8 @@ def _passthrough_main(agent):
     #  - this runs once per retry attempt, so emitting here wrote N usage
     #    events per cycle and the dashboard SUMS same-label usage → ×N.
     # Instead bin/roll calls agent_usage/pi_emit.py exactly once after the
-    # agent phase, recovering real usage from pi's session files. The
-    # _emit_* helpers below are retained for US-LOOP-010 unit tests.
+    # agent phase, recovering real usage from pi's session files.
     _ = (accumulated, evfile)  # intentionally unused now
-
-
-def _emit_passthrough_event(evfile, cycle, agent, text):
-    """Best-effort append a usage-type event to evfile (null payload).
-
-    Kept for backward-compat with US-LOOP-010 tests.
-    """
-    payload = {
-        "model":        agent,
-        "input_tokens":  None,
-        "output_tokens": None,
-        "cost_list_usd": None,
-        "duration_ms":   None,
-    }
-    record = json.dumps({
-        "ts":      datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "stage":   "usage",
-        "label":   cycle,
-        "detail":  payload,
-        "outcome": "ok",
-    }) + "\n"
-    try:
-        with open(evfile, "a") as f:
-            f.write(record)
-    except Exception:
-        pass
 
 
 def _emit_final_usage_event(evfile, cycle, agent, accumulated_lines):

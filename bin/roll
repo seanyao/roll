@@ -5168,6 +5168,95 @@ Examples:
 EOF
 }
 
+# US-LOOP-034: `roll config loop-window <start>-<end>` — compact facade that
+# writes loop_active_start + loop_active_end in one shot. With no value, prints
+# the current effective window + source. start must be < end and both ∈ [0,24].
+_config_loop_window() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    local rs re vs ss
+    rs=$(_config_resolve "loop_active_start"); re=$(_config_resolve "loop_active_end")
+    vs="${rs%%$'\t'*}"; ss="${rs#*$'\t'}"
+    local ve; ve="${re%%$'\t'*}"
+    [[ "$ss" != "default" ]] && ss="from $ss" || ss="from default"
+    printf 'loop-window: %s-%s (%s)\n' "$vs" "$ve" "$ss"
+    return 0
+  fi
+  if ! [[ "$value" =~ ^[0-9]+-[0-9]+$ ]]; then
+    err "config: loop-window expects <start>-<end>, got '$value'"
+    err "config：loop-window 需要 <start>-<end> 格式，收到 '$value'"
+    return 2
+  fi
+  local start="${value%-*}" end="${value#*-}"
+  if (( start < 0 )) || (( start > 24 )); then
+    err "config: loop-window start must be in [0,24]"
+    err "config：loop-window 开始时间必须在 [0,24]"
+    return 2
+  fi
+  if (( end > 24 )); then
+    err "config: loop-window end must be <= 24"
+    err "config：loop-window 结束时间必须 ≤ 24"
+    return 2
+  fi
+  if (( start >= end )); then
+    err "config: loop-window start must be < end (got ${start}-${end})"
+    err "config：loop-window 开始时间必须 < 结束时间（收到 ${start}-${end}）"
+    return 2
+  fi
+  local file
+  file=$(_config_key_file "$ROLL_CFG_SCOPE")
+  _config_set "loop_active_start" "$start" "$file"
+  _config_set "loop_active_end" "$end" "$file"
+  ok "✓ set loop-window = ${start}-${end} in $file"
+  printf 'run `roll loop on` to apply\n'
+  return 0
+}
+
+# US-LOOP-034: `roll config loop-schedule <period>[/<offset>]` — writes
+# loop_schedule.period_minutes (+ offset_minute when given). With no value,
+# prints the current effective schedule + source. period ∈ [1,1440],
+# offset ∈ [0, period-1]; offset omitted leaves the offset line untouched.
+_config_loop_schedule() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    local rp ro vp vo sp
+    rp=$(_config_resolve "loop_schedule.period_minutes")
+    ro=$(_config_resolve "loop_schedule.offset_minute")
+    vp="${rp%%$'\t'*}"; sp="${rp#*$'\t'}"; vo="${ro%%$'\t'*}"
+    [[ "$sp" != "default" ]] && sp="from $sp" || sp="from default"
+    printf 'loop-schedule: every %smin (offset :%s) (%s)\n' "$vp" "$vo" "$sp"
+    return 0
+  fi
+  if ! [[ "$value" =~ ^[0-9]+(/[0-9]+)?$ ]]; then
+    err "config: loop-schedule expects <period>[/<offset>], got '$value'"
+    err "config：loop-schedule 需要 <period>[/<offset>] 格式，收到 '$value'"
+    return 2
+  fi
+  local period="${value%%/*}" offset=""
+  [[ "$value" == */* ]] && offset="${value#*/}"
+  if (( period < 1 )) || (( period > 1440 )); then
+    err "config: loop-schedule period must be in [1,1440]"
+    err "config：loop-schedule 周期必须在 [1,1440]"
+    return 2
+  fi
+  if [[ -n "$offset" ]] && (( offset > period - 1 )); then
+    err "config: loop-schedule offset must be in [0, period-1] (period ${period})"
+    err "config：loop-schedule 偏移必须在 [0, period-1]（周期 ${period}）"
+    return 2
+  fi
+  local file
+  file=$(_config_key_file "$ROLL_CFG_SCOPE")
+  _config_set "loop_schedule.period_minutes" "$period" "$file"
+  if [[ -n "$offset" ]]; then
+    _config_set "loop_schedule.offset_minute" "$offset" "$file"
+    ok "✓ set loop-schedule = ${period}/${offset} in $file"
+  else
+    ok "✓ set loop-schedule = ${period} in $file"
+  fi
+  printf 'run `roll loop on` to apply\n'
+  return 0
+}
+
 cmd_config() {
   local key="" value="" scope="" want_list=""
   while [[ $# -gt 0 ]]; do
@@ -5185,6 +5274,20 @@ cmd_config() {
     esac
     shift
   done
+
+  # US-LOOP-034 facade subcommands: translate a compact string into low-level
+  # key/value writes. Scope defaults to project (loop schedule lives there).
+  case "$key" in
+    loop-window|loop-schedule)
+      local fscope="$scope"; [[ -z "$fscope" ]] && fscope="project"
+      ROLL_CFG_SCOPE="$fscope"
+      if [[ "$key" == "loop-window" ]]; then
+        _config_loop_window "$value"; return $?
+      else
+        _config_loop_schedule "$value"; return $?
+      fi
+      ;;
+  esac
 
   # --list: tabulate every key with value + source
   if [[ -n "$want_list" ]]; then

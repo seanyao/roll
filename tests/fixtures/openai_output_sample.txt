@@ -1,0 +1,12 @@
+Reading prompt from stdin...
+Working on: US-LOOP-028 openai usage plugin
+
+I'll implement the extract() function for the openai plugin.
+
+codex
+Done. The plugin is registered and tests pass.
+
+--------
+Model: gpt-4o
+Token usage: total=18420 input=15300 output=3120
+--------

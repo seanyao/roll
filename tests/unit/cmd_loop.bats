@@ -308,3 +308,82 @@ teardown() {
   run _slug_migrate_to_remote "$proj" "$loop_dir"
   [ "$status" -eq 0 ]
 }
+
+# ─── US-OBS-014: _loop_push_status_snapshot ────────────────────────────────
+# Each loop cycle end fires a best-effort background push to roll-meta. The
+# helper is sourced from bin/roll (the inner runner calls it after cycle_end),
+# so we can exercise it directly. A mock push script writes a flag file so we
+# can assert it was actually invoked with the roll_meta_dir argument.
+
+# Build a fake roll-meta checkout whose ops/push-loop-status.sh records its
+# first arg into "$1/invoked.flag". Echoes the meta dir path on stdout.
+_obs014_make_meta() {
+  local meta="$1"
+  mkdir -p "${meta}/ops"
+  cat > "${meta}/ops/push-loop-status.sh" <<'MOCK'
+#!/bin/bash
+printf '%s' "$1" > "$(dirname "$0")/../invoked.flag"
+MOCK
+  chmod +x "${meta}/ops/push-loop-status.sh"
+}
+
+# Poll for the flag file (push runs in the background); bounded to ~5s.
+_obs014_wait_flag() {
+  local flag="$1" n=0
+  while [ "$n" -lt 50 ]; do
+    [ -f "$flag" ] && return 0
+    sleep 0.1
+    n=$((n + 1))
+  done
+  return 1
+}
+
+@test "_loop_push_status_snapshot: configured + script exists → invokes push in background" {
+  local meta="${TEST_TMP}/obs014-meta"
+  _obs014_make_meta "$meta"
+
+  ROLL_CONFIG="${TEST_TMP}/obs014-config.yaml"
+  echo "roll_meta_dir: ${meta}" > "$ROLL_CONFIG"
+
+  _loop_push_status_snapshot
+
+  _obs014_wait_flag "${meta}/invoked.flag"
+  [ -f "${meta}/invoked.flag" ]
+  # invoked with the meta dir as its first argument
+  [ "$(cat "${meta}/invoked.flag")" = "$meta" ]
+}
+
+@test "_loop_push_status_snapshot: roll_meta_dir unset → no call, no output, no side effect" {
+  ROLL_CONFIG="${TEST_TMP}/obs014-empty-config.yaml"
+  echo "default_language: zh" > "$ROLL_CONFIG"
+
+  run _loop_push_status_snapshot
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "_loop_push_status_snapshot: configured but path missing → WARNING logged, no call" {
+  local meta="${TEST_TMP}/obs014-nonexistent"
+
+  ROLL_CONFIG="${TEST_TMP}/obs014-missing-config.yaml"
+  echo "roll_meta_dir: ${meta}" > "$ROLL_CONFIG"
+
+  run _loop_push_status_snapshot
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "WARNING" ]]
+  [[ "$output" =~ "does not exist" ]]
+  # nothing was created
+  [ ! -e "${meta}/invoked.flag" ]
+}
+
+@test "_loop_push_status_snapshot: idle cycle path wires the push call" {
+  # The idle branch must fire the same push as the done branch (heartbeat:
+  # lets remote-watch tell "online but no work" from "offline"). The inner
+  # runner is a generated script, so assert the wiring lives in the idle
+  # branch of bin/roll — directly after the terminal idle cycle_end emit.
+  run grep -n "_loop_push_status_snapshot" "$ROLL_BIN"
+  [ "$status" -eq 0 ]
+  # idle branch: cycle_end "idle" is immediately followed by the push call
+  run awk '/cycle_end .*"idle"/{f=1} f && /_loop_push_status_snapshot/{print "FOUND"; exit}' "$ROLL_BIN"
+  [[ "$output" =~ "FOUND" ]]
+}

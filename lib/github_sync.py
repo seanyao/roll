@@ -363,6 +363,55 @@ def _gh_id_present(content: str, ident: str) -> bool:
                      content) is not None
 
 
+def dry_run_line(issue: Dict[str, Any], *, skipped: bool) -> str:
+    """Render the ``--dry-run`` preview line for a single issue (US-SYNC-004).
+
+    Format:
+      ``+ GH-13 [US] 需求：roll backlog 支持从 GitHub Issues 同步``  (would add)
+      ``= GH-12 [FIX] (skipped, already exists)``                  (would skip)
+
+    The ``GH-<number>`` token is the stable id; the bracketed token is the
+    label→type prefix; the leading ``+``/``=`` marks add vs skip.
+    """
+    ident = gh_id(issue)
+    type_prefix = map_label_to_type(issue.get("labels", []))
+    if skipped:
+        return f"= {ident} [{type_prefix}] (skipped, already exists)"
+    title = (issue.get("title") or "").strip()
+    return f"+ {ident} [{type_prefix}] {title}"
+
+
+def dry_run_preview(issues: List[Dict[str, Any]],
+                    backlog_path: str) -> Dict[str, Any]:
+    """Compute the sync diff for ``issues`` WITHOUT writing ``backlog_path``.
+
+    Mirrors :func:`sync_to_backlog`'s idempotency logic (an issue whose
+    ``GH-<number>`` id already appears in the backlog is a skip) but performs
+    no file write — the backlog file is read-only here (US-SYNC-004 dry-run).
+    Returns ``{"added": N, "skipped": M, "total": K, "lines": [...]}`` where
+    ``lines`` are the formatted preview lines in issue order.
+    """
+    with open(backlog_path, "r", encoding="utf-8") as fh:
+        content = fh.read()
+    lines: List[str] = []
+    added = 0
+    skipped = 0
+    for issue in issues:
+        ident = gh_id(issue)
+        is_skip = _gh_id_present(content, ident)
+        if is_skip:
+            skipped += 1
+        else:
+            added += 1
+        lines.append(dry_run_line(issue, skipped=is_skip))
+    return {
+        "added": added,
+        "skipped": skipped,
+        "total": len(issues),
+        "lines": lines,
+    }
+
+
 def sync_to_backlog(issues: List[Dict[str, Any]],
                     backlog_path: str) -> Dict[str, Any]:
     """Append backlog rows for new ``issues`` to the table in ``backlog_path``.
@@ -416,7 +465,7 @@ def _load_issues_for_sync(owner: str, repo: str) -> List[Dict[str, Any]]:
 def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     if "--repo" not in argv:
         print("usage: github_sync.py sync --repo <owner/repo> "
-              "[--backlog <path>]", file=sys.stderr)
+              "[--backlog <path>] [--dry-run]", file=sys.stderr)
         return 1
     repo_arg = argv[argv.index("--repo") + 1]
     if "/" not in repo_arg:
@@ -427,6 +476,7 @@ def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     backlog = ".roll/backlog.md"
     if "--backlog" in argv:
         backlog = argv[argv.index("--backlog") + 1]
+    dry_run = "--dry-run" in argv
     try:
         issues = _load_issues_for_sync(owner, repo)
     except AuthError as exc:
@@ -438,6 +488,15 @@ def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     except GitHubAPIError as exc:
         print(f"api error: {exc}", file=sys.stderr)
         return 4
+    if dry_run:
+        # US-SYNC-004: preview only — compute the diff, leave backlog.md
+        # untouched, exit 0 on a successful dry run.
+        preview = dry_run_preview(issues, backlog)
+        for line in preview["lines"]:
+            print(line)
+        print(f"added: {preview['added']}, skipped: {preview['skipped']}, "
+              f"total issues: {preview['total']} (dry-run, no changes written)")
+        return 0
     summary = sync_to_backlog(issues, backlog)
     for row in summary["rows"]:
         print(f"+ {row}")
@@ -451,7 +510,7 @@ def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
 def _main(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     if not argv or argv[0] in ("-h", "--help", "help"):
         print("usage: github_sync.py issues <owner/repo> [--state all|open|closed]")
-        print("       github_sync.py sync --repo <owner/repo> [--backlog <path>]")
+        print("       github_sync.py sync --repo <owner/repo> [--backlog <path>] [--dry-run]")
         return 0
     cmd = argv[0]
     if cmd == "sync":

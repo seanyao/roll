@@ -17,9 +17,15 @@ teardown() {
   integration_teardown
 }
 
-# Portable mtime in seconds: BSD/macOS `stat -f %m` vs GNU/Linux `stat -c %Y`.
+# Portable mtime in seconds. NOTE: on GNU/Linux `stat -f` stats the FILESYSTEM
+# (and exits 0), so a `stat -f ... || stat -c ...` fallback silently reads the
+# wrong thing — branch on `uname` instead.
 _file_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"
+  if [[ "$(uname)" == "Darwin" ]]; then
+    stat -f %m "$1"
+  else
+    stat -c %Y "$1"
+  fi
 }
 
 _make_sync_backlog() {

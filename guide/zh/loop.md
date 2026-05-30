@@ -428,6 +428,43 @@ roll loop unmute      # 🔔 重新开启弹窗
 `mute` 文件对所有项目、所有自主活动（loop + peer review）共享生效。
 一个开关控制全部。
 
+### Edit 折叠
+
+当 agent 连续 Edit 同一个文件时，`roll loop attach` 不再把那条一模一样的
+长路径在 N 行里复读（以前看起来像卡死）。现在它把相邻的同文件改动折叠成一行，
+并原地刷新：
+
+```text
+✏ <basename> | <hint> ×N
+```
+
+- **触发条件** —— 相邻 ≥2 次针对同一 `file_path` 的 `Edit` / `Write`。路径只显示
+  `os.path.basename(file_path)`，绝不显示全路径；单次 Edit 不带 `×N` 计数。
+- **`<hint>`** —— 从改动输入里抽出的 ≤20 字特征，让你看到“在改什么”而不只是计数：
+  - `replace_all=true` → 字面输出 `replace-all`。
+  - 否则取 `new_string` 首行的首个非空 token，去掉前导空白与注释符
+    （`#`、`//`、`/*`、`*`、`--`、`;`）。
+  - 超过 20 字符的 token 截断为 `token[:20] + "…"`（按 unicode 字符计，中文 /
+    emoji 不会被按字节截断）。
+  - `new_string` 为空 / 全空白时不产生 hint，整段 ` | <hint>` 一并省略。
+- **跨文件 flush** —— 切到另一个文件（或任意其它事件：`Bash`、`Skill`、错误、cycle
+  结束）会先 flush 前一个文件的最终 streak 行（保留在 scrollback 里），再为新文件
+  起一行。折叠绝不会跨越非 Edit 行。
+
+三个示例（已去除 ANSI 转义）：
+
+```text
+# 单次 Edit
+✏ auth.ts | export
+
+# 折叠 ×N（同文件改了 7 次）
+✏ auth.ts | export ×7
+
+# 跨文件切换 —— 两行，第一行在第二行开始前被 flush
+✏ auth.ts | export ×3
+✏ router.ts | replace-all
+```
+
 ## Cycle 退出摘要（Cycle exit summary）
 
 When a cycle ends and the tmux session detaches, the macOS `.command` window no longer leaves you on a bare `press enter to close` line.

@@ -442,8 +442,9 @@ assert isinstance(pv, str) and len(pv) >= 8, f'prices_version missing: {pv!r}'
   local ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/src/token.ts","old_string":"a","new_string":"b"}}]}}'
   run bash -c "printf '%s\n%s\n%s\n' '$ev' '$ev' '$ev' | LOOP_FMT_NO_SPIN=1 python3 '$LOOP_FMT'"
   local clean; clean=$(echo "$output" | strip_ansi)
-  # final fold line shows ×3
-  [[ "$clean" == *"token.ts ×3"* ]]
+  # final fold line shows ×3 (US-VIEW-021 inserts a ` | <hint>` before ×N)
+  [[ "$clean" == *"token.ts"* ]]
+  [[ "$clean" == *"×3"* ]]
   # no full path leaked
   [[ "$clean" != *"/src/token.ts"* ]]
 }
@@ -453,8 +454,10 @@ assert isinstance(pv, str) and len(pv) >= 8, f'prices_version missing: {pv!r}'
   local b='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/src/b.ts","old_string":"x","new_string":"y"}}]}}'
   run bash -c "printf '%s\n%s\n%s\n' '$a' '$a' '$b' | LOOP_FMT_NO_SPIN=1 python3 '$LOOP_FMT'"
   local clean; clean=$(echo "$output" | strip_ansi)
-  # a.ts folded to ×2, then b.ts begins as its own line
-  [[ "$clean" == *"a.ts ×2"* ]]
+  # a.ts folded to ×2 (US-VIEW-021 may insert ` | <hint>` before ×N),
+  # then b.ts begins as its own line
+  [[ "$clean" == *"a.ts"* ]]
+  [[ "$clean" == *"×2"* ]]
   [[ "$clean" == *"b.ts"* ]]
   # b.ts should be a fresh single edit (no ×N)
   echo "$clean" | grep -q "b.ts" 
@@ -478,7 +481,49 @@ assert isinstance(pv, str) and len(pv) >= 8, f'prices_version missing: {pv!r}'
   local res='{"type":"result","subtype":"success","duration_ms":1000,"total_cost_usd":0}'
   run bash -c "printf '%s\n%s\n%s\n' '$e' '$e' '$res' | LOOP_FMT_NO_SPIN=1 python3 '$LOOP_FMT'"
   local clean; clean=$(echo "$output" | strip_ansi)
-  [[ "$clean" == *"d.ts ×2"* ]]
+  [[ "$clean" == *"d.ts"* ]]
+  [[ "$clean" == *"×2"* ]]
   # cycle summary still printed after the streak
   [[ "$clean" == *"done"* ]]
+}
+
+# ─── US-VIEW-021: per-Edit change-feature hint ───────────────────────────────
+
+@test "US-VIEW-021: replace_all=true renders 'replace-all' hint" {
+  local ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/src/r.ts","old_string":"x","new_string":"y","replace_all":true}}]}}'
+  run run_fmt_nospin "$ev"
+  local clean; clean=$(echo "$output" | strip_ansi)
+  [[ "$clean" == *"r.ts | replace-all"* ]]
+}
+
+@test "US-VIEW-021: multi-line new_string takes first non-blank line's token" {
+  local ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/src/m.ts","old_string":"x","new_string":"\n  export function foo() {\n  return 1\n}"}}]}}'
+  run run_fmt_nospin "$ev"
+  local clean; clean=$(echo "$output" | strip_ansi)
+  [[ "$clean" == *"m.ts | export"* ]]
+}
+
+@test "US-VIEW-021: long token is truncated to 20 chars with ellipsis" {
+  local ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/src/l.ts","old_string":"x","new_string":"superDuperLongIdentifierNameHere=1"}}]}}'
+  run run_fmt_nospin "$ev"
+  local clean; clean=$(echo "$output" | strip_ansi)
+  # 20-char prefix then …
+  [[ "$clean" == *"l.ts | superDuperLongIdenti…"* ]]
+}
+
+@test "US-VIEW-021: empty new_string yields no ' | ' separator" {
+  local ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/src/e.ts","old_string":"x","new_string":"   "}}]}}'
+  run run_fmt_nospin "$ev"
+  local clean; clean=$(echo "$output" | strip_ansi)
+  [[ "$clean" == *"e.ts"* ]]
+  [[ "$clean" != *"e.ts |"* ]]
+}
+
+@test "US-VIEW-021: unicode token counted by char, not byte" {
+  # 22 Chinese chars → truncated to 20 + … (byte length would over-cut)
+  local ev='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/src/u.ts","old_string":"x","new_string":"一二三四五六七八九十一二三四五六七八九十廿一"}}]}}'
+  run run_fmt_nospin "$ev"
+  local clean; clean=$(echo "$output" | strip_ansi)
+  # first 20 chars then ellipsis
+  [[ "$clean" == *"u.ts | 一二三四五六七八九十一二三四五六七八九十…"* ]]
 }

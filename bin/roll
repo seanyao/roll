@@ -10864,11 +10864,15 @@ _loop_pr_rebase_stale() {
   return 0
 }
 
-# _loop_pr_merge_self <num> <ci_state> <mergeable> <slug>
+# _loop_pr_merge_self_eager <num> <ci_state> <mergeable> <slug>
 #   Merge a loop_self PR directly when CI is green and PR is conflict-free.
 #   Does not rely on repo-level auto-merge (unreliable if not configured).
 #   Same pattern as the bot_review=APPROVED gate.
-_loop_pr_merge_self() {
+#   NOTE: US-AUTO-044 introduces a spec-named _loop_pr_merge_self <PR#> that
+#   (re)sets `gh pr merge --auto` instead of merging immediately. This eager
+#   variant is the original US-AUTO-034 inbox behaviour; renamed to free the
+#   spec name. Both coexist until Phase 2 collapses the inbox path.
+_loop_pr_merge_self_eager() {
   local num="$1" ci_state="$2" mergeable="$3" slug="$4"
   [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ] || return 0
   gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1 \
@@ -10941,7 +10945,7 @@ _loop_pr_inbox() {
 
     case "$verdict" in
       loop_self)
-        _loop_pr_merge_self "$num" "$ci_state" "$mergeable" "$slug"
+        _loop_pr_merge_self_eager "$num" "$ci_state" "$mergeable" "$slug"
         ;;
       blocked_human_request_changes|blocked_human_approved)
         : # skip — explained by verdict; nothing to do this cycle
@@ -10957,6 +10961,176 @@ _loop_pr_inbox() {
 
     i=$((i + 1))
   done
+  return 0
+}
+
+# ── US-AUTO-044 Phase 1: dedicated PR Loop helpers ───────────────────────────
+#
+# Loop-safe building blocks for the future PR Loop (com.roll.pr.<slug>.plist,
+# 5-min cadence). Phase 1 ships the helpers + tests only; Phase 2 (runner /
+# plist / main-loop wiring) is manual-only and out of scope here.
+#
+# All helpers are lenient on a missing `gh` binary or any gh failure: they
+# return 0 so a loop iteration never aborts on a single bad PR. State writes
+# reuse the US-AUTO-034 24h sliding-window breaker (_loop_pr_rebase_circuit)
+# and pr_state writer.
+
+# _loop_pr_close_with_comment <PR#> <reason>
+#   Close a PR with an explanatory comment and append a warn-level _LOOP_ALERT.
+#   Lenient: gh failure does not propagate.
+_loop_pr_close_with_comment() {
+  local pr="$1" reason="$2"
+  [ -n "$pr" ] || return 0
+  local slug; _gh_resolve slug || return 0
+  gh -R "$slug" pr close "$pr" --comment "$reason" >/dev/null 2>&1 || true
+  local alert="$_LOOP_ALERT"
+  mkdir -p "$(dirname "$alert")" 2>/dev/null || true
+  printf '[%s] [warn] PR #%s closed: %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr" "$reason" >> "$alert"
+  return 0
+}
+
+# _loop_pr_empty_diff <PR#>
+#   Exit 0 when the PR's diff against base is empty (changes already on main);
+#   exit 1 otherwise. Lenient: gh failure is treated as "not empty" (exit 1)
+#   so we never close a PR we couldn't inspect.
+_loop_pr_empty_diff() {
+  local pr="$1"
+  [ -n "$pr" ] || return 1
+  local slug; _gh_resolve slug || return 1
+  local diff
+  diff=$(gh -R "$slug" pr diff "$pr" 2>/dev/null) || return 1
+  [ -z "$diff" ]
+}
+
+# _loop_pr_rebase <PR#> [head_ref]
+#   fetch origin + rebase head onto origin/main + push. On conflict / failure,
+#   record the attempt via _loop_pr_rebase_circuit (24h window). When the
+#   breaker trips (>=3 attempts in 24h), close the PR with a comment.
+#   Lenient: returns 0 on a clean rebase, 1 on failure (after recording).
+_loop_pr_rebase() {
+  local pr="$1" head_ref="${2:-}"
+  [ -n "$pr" ] || return 0
+  local slug; _gh_resolve slug || return 0
+
+  if [ -z "$head_ref" ]; then
+    head_ref=$(gh -R "$slug" pr view "$pr" --json headRefName -q .headRefName 2>/dev/null) || return 0
+  fi
+  [ -n "$head_ref" ] || return 0
+
+  git fetch origin "$head_ref" 2>/dev/null || true
+  git fetch origin main 2>/dev/null || true
+  if git checkout "$head_ref" 2>/dev/null \
+     && git rebase origin/main 2>/dev/null \
+     && git push --force-with-lease origin "$head_ref" 2>/dev/null; then
+    info "PR #${pr}: rebased ${head_ref} onto origin/main"
+    return 0
+  fi
+
+  git rebase --abort 2>/dev/null || true
+  git checkout - 2>/dev/null || true
+
+  # Record the failed attempt; breaker tripping (exit 1) → close the PR.
+  if ! _loop_pr_rebase_circuit "$pr"; then
+    _loop_pr_close_with_comment "$pr" \
+      "rebase failed 3+ times in 24h — please resolve conflicts manually"
+  fi
+  return 1
+}
+
+# _loop_pr_merge_self <PR#> [auto_merge_present]
+#   For a loop/* self-authored PR: ensure auto-merge is armed. When
+#   autoMergeRequest is already present (arg2 = "true") this is a no-op (the PR
+#   is already waiting on CI). Otherwise (re)set `gh pr merge --auto`.
+#   When arg2 is omitted, queries the PR for its autoMergeRequest state.
+#   Lenient: gh failure does not propagate.
+_loop_pr_merge_self() {
+  local pr="$1" auto_present="${2:-}"
+  [ -n "$pr" ] || return 0
+  local slug; _gh_resolve slug || return 0
+
+  if [ -z "$auto_present" ]; then
+    local am
+    am=$(gh -R "$slug" pr view "$pr" --json autoMergeRequest -q '.autoMergeRequest' 2>/dev/null)
+    if [ -n "$am" ] && [ "$am" != "null" ]; then
+      auto_present="true"
+    else
+      auto_present="false"
+    fi
+  fi
+
+  if [ "$auto_present" = "true" ]; then
+    return 0   # auto-merge already armed — wait for CI
+  fi
+
+  gh -R "$slug" pr merge "$pr" --auto --squash --delete-branch >/dev/null 2>&1 \
+    && info "PR #${pr}: auto-merge (re)armed for loop self-PR" \
+    || warn "PR #${pr}: failed to arm auto-merge — left open"
+  return 0
+}
+
+# _loop_pr_route <PR_json>
+#   Single-PR dispatcher for the PR Loop. <PR_json> is one object from
+#   `gh pr list --json number,headRefName,isDraft,mergeable,mergeStateStatus,
+#    autoMergeRequest`. Routes to the matching handler:
+#     claude/*                          → skip (GHA bot review owns it)
+#     loop/* with autoMergeRequest      → skip (already armed)
+#     loop/* without autoMergeRequest   → _loop_pr_merge_self (arm auto-merge)
+#     isDraft                           → skip
+#     BEHIND                            → _loop_pr_rebase
+#     CLEAN + MERGEABLE + no auto-merge → _loop_pr_merge_self (arm auto-merge)
+#     empty diff                        → _loop_pr_close_with_comment
+#     otherwise (CI pending / blocked)  → skip
+#   Prints the chosen route token (for tests / logs). Always exits 0.
+_loop_pr_route() {
+  local json="$1"
+  [ -n "$json" ] || { echo "skip"; return 0; }
+
+  local num head_ref is_draft mergeable merge_state auto_merge
+  num=$(echo "$json" | jq -r '.number // ""' 2>/dev/null)
+  head_ref=$(echo "$json" | jq -r '.headRefName // ""' 2>/dev/null)
+  is_draft=$(echo "$json" | jq -r '.isDraft // false' 2>/dev/null)
+  mergeable=$(echo "$json" | jq -r '.mergeable // ""' 2>/dev/null)
+  merge_state=$(echo "$json" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
+  auto_merge=$(echo "$json" | jq -r 'if (.autoMergeRequest // null) == null then "false" else "true" end' 2>/dev/null)
+
+  [ -n "$num" ] || { echo "skip"; return 0; }
+
+  case "$head_ref" in
+    claude/*)
+      echo "skip_claude"; return 0 ;;
+    loop/*)
+      if [ "$auto_merge" = "true" ]; then
+        echo "skip_loop_auto_armed"
+      else
+        _loop_pr_merge_self "$num" "$auto_merge" >/dev/null 2>&1 || true
+        echo "merge_self"
+      fi
+      return 0 ;;
+  esac
+
+  if [ "$is_draft" = "true" ]; then
+    echo "skip_draft"; return 0
+  fi
+
+  if [ "$merge_state" = "BEHIND" ]; then
+    _loop_pr_rebase "$num" "$head_ref" >/dev/null 2>&1 || true
+    echo "rebase"; return 0
+  fi
+
+  if [ "$merge_state" = "CLEAN" ] && [ "$mergeable" = "MERGEABLE" ] && [ "$auto_merge" != "true" ]; then
+    _loop_pr_merge_self "$num" "$auto_merge" >/dev/null 2>&1 || true
+    echo "set_auto_merge"; return 0
+  fi
+
+  if _loop_pr_empty_diff "$num"; then
+    _loop_pr_close_with_comment "$num" \
+      "changes already merged to main — empty diff, closing automatically" \
+      >/dev/null 2>&1 || true
+    echo "close_empty"; return 0
+  fi
+
+  echo "skip"
   return 0
 }
 

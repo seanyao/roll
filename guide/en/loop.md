@@ -458,6 +458,49 @@ roll loop unmute      # 🔔 re-enable popup
 The `mute` file is shared across all projects and all autonomous activity
 (loop + peer review). One switch controls everything.
 
+### Edit fold
+
+When the agent edits the same file several times in a row, `roll loop attach`
+no longer repeats the identical long path on N separate lines (which used to
+look like a hang). Instead it folds consecutive same-file edits into a single
+line and refreshes it in place:
+
+```text
+✏ <basename> | <hint> ×N
+```
+
+- **Trigger** — two or more *adjacent* `Edit` / `Write` calls targeting the
+  same `file_path`. The path is shown as `os.path.basename(file_path)`, never
+  the full path. A single edit shows no `×N` counter.
+- **`<hint>`** — a ≤20-char feature derived from the edit input so you can tell
+  *what* is changing, not just count:
+  - `replace_all=true` → the literal `replace-all`.
+  - otherwise the first non-blank token of `new_string`'s first line, with
+    leading whitespace and comment markers (`#`, `//`, `/*`, `*`, `--`, `;`)
+    stripped.
+  - tokens longer than 20 characters are truncated to `token[:20] + "…"`
+    (counted by unicode char, so 中文 / emoji are not byte-split).
+  - an empty / all-whitespace `new_string` yields no hint, and the ` | <hint>`
+    segment is omitted entirely.
+- **Cross-file flush** — switching to a different file (or any other event:
+  `Bash`, `Skill`, an error, or cycle end) first flushes the previous file's
+  final streak line so it stays in the scrollback, then starts a fresh line for
+  the new file. Edits never fold across a non-edit line.
+
+Three examples (ANSI-stripped):
+
+```text
+# single edit
+✏ auth.ts | export
+
+# folded ×N (7 edits of the same file)
+✏ auth.ts | export ×7
+
+# cross-file switch — two lines, the first flushed before the second starts
+✏ auth.ts | export ×3
+✏ router.ts | replace-all
+```
+
 ## Cycle exit summary
 
 When a cycle ends and the tmux session detaches, the macOS `.command` window

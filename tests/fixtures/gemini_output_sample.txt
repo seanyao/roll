@@ -1,0 +1,15 @@
+Reading prompt from stdin...
+Working on: US-LOOP-029 gemini usage plugin
+
+I'll implement the extract() function for the gemini plugin.
+
+gemini
+
+Done. The plugin is registered and tests pass.
+
+--- Session Stats ---
+Model: gemini-2.5-pro
+Input tokens:  15,300
+Output tokens:  3,120
+Total tokens:  18,420
+---------------------

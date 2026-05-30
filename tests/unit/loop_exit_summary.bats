@@ -116,3 +116,124 @@ _render() {
 @test "main() dispatches _loop_render_exit_summary subcommand" {
   grep -qE '_loop_render_exit_summary\)[[:space:]]+_loop_render_exit_summary' "$ROLL_BIN"
 }
+
+# ── US-LOOP-041: failure / alert highlighting ────────────────────────────────
+# ESC byte for asserting (or refuting) ANSI escapes in captured output.
+ESC=$'\033'
+
+# --- FAIL state ---------------------------------------------------------------
+
+@test "highlight: failed status gets ✗ prefix (plain in pipe / --color never)" {
+  printf '%s\n' '{"status":"failed","cycle_id":"f1","built":[],"tcr_count":0,"phases":{}}' > "${RT}/runs.jsonl"
+  run _render --runs "${RT}/runs.jsonl" --color never
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"✗ failed"* ]]
+  [[ "$output" != *"$ESC"* ]]
+}
+
+@test "highlight: failed status emits red ANSI with --color always (TTY mode)" {
+  printf '%s\n' '{"status":"failed","cycle_id":"f1","built":[],"tcr_count":0,"phases":{}}' > "${RT}/runs.jsonl"
+  run _render --runs "${RT}/runs.jsonl" --color always
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"${ESC}[31m"* ]]
+  [[ "$output" == *"✗ failed"* ]]
+}
+
+@test "highlight: ci red flags the ci line as ✗ fail" {
+  printf '%s\n' '{"status":"done","cycle_id":"f2","built":["US-X"],"tcr_count":2,"phases":{}}' > "${RT}/runs.jsonl"
+  printf '%s\n' '{"stage":"ci","outcome":"red"}' > "${RT}/events.ndjson"
+  run _render --runs "${RT}/runs.jsonl" --events "${RT}/events.ndjson" --color never
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"✗ ci: red"* ]]
+}
+
+@test "highlight: cycle_end outcome != ok/idle flags result as fail" {
+  printf '%s\n' '{"status":"done","cycle_id":"f3","built":["US-X"],"tcr_count":2,"phases":{}}' > "${RT}/runs.jsonl"
+  printf '%s\n' '{"stage":"cycle_end","outcome":"error"}' > "${RT}/events.ndjson"
+  run _render --runs "${RT}/runs.jsonl" --events "${RT}/events.ndjson" --color always
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"${ESC}[31m"* ]]
+  [[ "$output" == *"✗ built: US-X"* ]]
+}
+
+# --- WARN state ---------------------------------------------------------------
+
+@test "highlight: ci heal-attempting gets ⚠ prefix (plain --color never)" {
+  printf '%s\n' '{"status":"done","cycle_id":"w1","built":["US-X"],"tcr_count":2,"phases":{}}' > "${RT}/runs.jsonl"
+  printf '%s\n' '{"stage":"ci","outcome":"heal-attempting"}' > "${RT}/events.ndjson"
+  run _render --runs "${RT}/runs.jsonl" --events "${RT}/events.ndjson" --color never
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"⚠ ci: heal-attempting"* ]]
+  [[ "$output" != *"$ESC"* ]]
+}
+
+@test "highlight: ci heal-attempting emits yellow ANSI with --color always" {
+  printf '%s\n' '{"status":"done","cycle_id":"w1","built":["US-X"],"tcr_count":2,"phases":{}}' > "${RT}/runs.jsonl"
+  printf '%s\n' '{"stage":"ci","outcome":"heal-attempting"}' > "${RT}/events.ndjson"
+  run _render --runs "${RT}/runs.jsonl" --events "${RT}/events.ndjson" --color always
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"${ESC}[33m"* ]]
+  [[ "$output" == *"⚠ ci: heal-attempting"* ]]
+}
+
+@test "highlight: tcr_count==0 with non-empty built[] is zero-diff ⚠ warn" {
+  printf '%s\n' '{"status":"done","cycle_id":"w2","built":["US-X"],"tcr_count":0,"phases":{}}' > "${RT}/runs.jsonl"
+  run _render --runs "${RT}/runs.jsonl" --color never
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"⚠ built: US-X · tcr commits: 0"* ]]
+}
+
+@test "highlight: non-empty ALERT file raises a ⚠ alert line" {
+  printf '%s\n' '{"status":"done","cycle_id":"w3","built":["US-X"],"tcr_count":2,"phases":{}}' > "${RT}/runs.jsonl"
+  printf '%s\n' 'persistent failure: 3 retries' > "${RT}/ALERT-some-slug.md"
+  run _render --runs "${RT}/runs.jsonl" --alert "${RT}/ALERT-some-slug.md" --color never
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"⚠ alert: ALERT file active"* ]]
+}
+
+@test "highlight: empty ALERT file does NOT raise an alert line" {
+  printf '%s\n' '{"status":"done","cycle_id":"w3","built":["US-X"],"tcr_count":2,"phases":{}}' > "${RT}/runs.jsonl"
+  : > "${RT}/ALERT-some-slug.md"
+  run _render --runs "${RT}/runs.jsonl" --alert "${RT}/ALERT-some-slug.md" --color never
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"alert: ALERT file active"* ]]
+}
+
+# --- GREEN state --------------------------------------------------------------
+
+@test "highlight: fully green cycle has no prefix and no ANSI even with --color always" {
+  printf '%s\n' '{"status":"done","cycle_id":"g1","built":["US-X"],"tcr_count":3,"phases":{}}' > "${RT}/runs.jsonl"
+  printf '%s\n' '{"stage":"ci","outcome":"ok"}' > "${RT}/events.ndjson"
+  run _render --runs "${RT}/runs.jsonl" --events "${RT}/events.ndjson" --color always
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"built: US-X · tcr commits: 3"* ]]
+  [[ "$output" == *"ci: green"* ]]
+  [[ "$output" != *"✗"* ]]
+  [[ "$output" != *"⚠"* ]]
+  [[ "$output" != *"$ESC"* ]]
+}
+
+@test "highlight: green cycle in pipe mode (--color never) stays plain text" {
+  printf '%s\n' '{"status":"done","cycle_id":"g1","built":["US-X"],"tcr_count":3,"phases":{}}' > "${RT}/runs.jsonl"
+  printf '%s\n' '{"stage":"ci","outcome":"ok"}' > "${RT}/events.ndjson"
+  run _render --runs "${RT}/runs.jsonl" --events "${RT}/events.ndjson" --color never
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"$ESC"* ]]
+}
+
+# --- NO_COLOR + auto-detect ---------------------------------------------------
+
+@test "highlight: NO_COLOR=1 forces plain text even with status=failed" {
+  printf '%s\n' '{"status":"failed","cycle_id":"n1","built":[],"tcr_count":0,"phases":{}}' > "${RT}/runs.jsonl"
+  NO_COLOR=1 run _render --runs "${RT}/runs.jsonl"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"✗ failed"* ]]
+  [[ "$output" != *"$ESC"* ]]
+}
+
+@test "highlight: auto mode under capture (non-TTY) emits no ANSI" {
+  printf '%s\n' '{"status":"failed","cycle_id":"n2","built":[],"tcr_count":0,"phases":{}}' > "${RT}/runs.jsonl"
+  run _render --runs "${RT}/runs.jsonl"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"$ESC"* ]]
+}

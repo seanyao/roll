@@ -127,3 +127,108 @@ ZH="${ROOT}/guide/zh/slides.md"
 @test "README_CN.md Documentation Index links to guide/zh/slides.md" {
   grep -qF "guide/zh/slides.md" "${ROOT}/README_CN.md"
 }
+
+# ─── US-DECK-021: Layouts reference (Phase 2 doc refresh) ────────────────────
+
+# The canonical layout whitelist, kept in sync across guide / skill / components.
+LAYOUTS="plain cards-2 cards-3 cards-4 compare pipeline timeline quote highlight"
+
+@test "slides.md (en) has a Layouts section" {
+  grep -qF "## Layouts" "${EN}"
+}
+
+@test "slides.md (zh) has a Layouts section" {
+  grep -qF "## Layouts（布局）" "${ZH}"
+}
+
+@test "slides.md (en) documents every whitelisted layout name" {
+  for l in ${LAYOUTS}; do
+    grep -qF "\`${l}\`" "${EN}" || { echo "missing layout in en: ${l}"; return 1; }
+  done
+}
+
+@test "slides.md (zh) documents every whitelisted layout name" {
+  for l in ${LAYOUTS}; do
+    grep -qF "\`${l}\`" "${ZH}" || { echo "missing layout in zh: ${l}"; return 1; }
+  done
+}
+
+@test "slides.md (en) documents the rich-layout structured fields" {
+  grep -qF "left_items" "${EN}"
+  grep -qF "right_items" "${EN}"
+  grep -qF "stages" "${EN}"
+  grep -qF "css_class" "${EN}"
+  grep -qF "cards" "${EN}"
+  grep -qF "text_en" "${EN}"
+}
+
+@test "slides.md (zh) documents the rich-layout structured fields" {
+  grep -qF "left_items" "${ZH}"
+  grep -qF "right_items" "${ZH}"
+  grep -qF "stages" "${ZH}"
+  grep -qF "css_class" "${ZH}"
+  grep -qF "cards" "${ZH}"
+  grep -qF "text_en" "${ZH}"
+}
+
+@test "slides.md (en) explains how \$roll-deck picks a layout" {
+  grep -qF "How \`\$roll-deck\` picks a layout" "${EN}"
+  grep -qF "Layout Selection Playbook" "${EN}"
+}
+
+@test "slides.md (zh) explains how \$roll-deck picks a layout" {
+  grep -qF "\`\$roll-deck\` 怎么挑 layout" "${ZH}"
+  grep -qF "Layout 选择手册" "${ZH}"
+}
+
+@test "every layout has a screenshot PNG under guide/assets/layouts" {
+  for l in ${LAYOUTS}; do
+    f="${ROOT}/guide/assets/layouts/${l}.png"
+    [ -s "$f" ] || { echo "missing or empty screenshot: ${f}"; return 1; }
+  done
+}
+
+@test "slides.md (en) embeds every layout screenshot" {
+  for l in ${LAYOUTS}; do
+    grep -qF "assets/layouts/${l}.png" "${EN}" || { echo "en missing img: ${l}"; return 1; }
+  done
+}
+
+@test "slides.md (zh) embeds every layout screenshot" {
+  for l in ${LAYOUTS}; do
+    grep -qF "assets/layouts/${l}.png" "${ZH}" || { echo "zh missing img: ${l}"; return 1; }
+  done
+}
+
+@test "README index adds a Layouts reference sub-link" {
+  grep -qF "guide/en/slides.md#layouts" "${ROOT}/README.md"
+  grep -qF "guide/en/slides.md#layouts" "${ROOT}/README_CN.md"
+}
+
+@test "components README cross-links the guide Layouts section" {
+  README="${ROOT}/lib/slides/components/README.md"
+  grep -qF "guide/en/slides.md#layouts" "${README}"
+}
+
+# ─── No drift: skill playbook ⇄ guide ⇄ components README ────────────────────
+
+@test "roll-deck SKILL whitelists exactly the documented layouts" {
+  SKILL="${ROOT}/skills/roll-deck/SKILL.md"
+  for l in ${LAYOUTS}; do
+    grep -qF "\`${l}\`" "${SKILL}" || { echo "SKILL.md missing layout: ${l}"; return 1; }
+  done
+}
+
+@test "components README whitelists exactly the documented layouts" {
+  README="${ROOT}/lib/slides/components/README.md"
+  for l in ${LAYOUTS}; do
+    grep -qF "\`${l}\`" "${README}" || { echo "components README missing layout: ${l}"; return 1; }
+  done
+}
+
+@test "no doc still describes the Phase 1 two-field-only schema" {
+  # Phase 1 docs said slides have exactly "four required keys"
+  # (title_en/title_zh/body_en/body_zh) with no layout. That phrasing must be gone.
+  ! grep -qF "four required keys" "${EN}"
+  ! grep -qF "四个必需键" "${ZH}"
+}

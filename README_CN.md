@@ -73,6 +73,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | 技能选择指南 | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
 | roll-doc（遗留文档自动化:四 phase + Phase 3b 深度读取） | [guide/en/roll-doc.md](guide/en/roll-doc.md) | [guide/zh/roll-doc.md](guide/zh/roll-doc.md) |
 | 幻灯片（deck 生成器） | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |
+| 幻灯片 —— 布局参考（Layouts） | [guide/en/slides.md#layouts](guide/en/slides.md#layouts) | [guide/zh/slides.md#layouts布局](guide/zh/slides.md#layouts%E5%B8%83%E5%B1%80) |
 | 反馈（`roll feedback`） | [guide/en/feedback.md](guide/en/feedback.md) | [guide/zh/feedback.md](guide/zh/feedback.md) |
 | Backlog GitHub 同步（`roll backlog sync`） | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
 | 跨机器同步 | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |

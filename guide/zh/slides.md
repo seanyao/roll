@@ -113,10 +113,11 @@ created: 2026-05-21
 
 ### Slide 段
 
-每张 slide 由 `## Slide N` 头部加四个必需键和一个 evidence 列表组成：
+每张 slide 由 `## Slide N` 头部加一个 `layout` 声明、该 layout 的内容键和一个 evidence 列表组成：
 
 ```markdown
 ## Slide 1
+layout: plain
 title_en: "Why autonomy"
 title_zh: "为什么要自主"
 body_en: |
@@ -129,7 +130,9 @@ evidence:
   - guide/en/loop.md:12
 ```
 
-每张 slide 必需键：`title_en`、`title_zh`、`body_en`、`body_zh`。`evidence` 是 `<path>:<line>` 引用列表——每 3 张 slide 至少 1 条（详见 [Grounding](#grounding-与-evidence-约定)）。
+每张 slide 都声明 `layout:`（默认 `plain`），加上 `title_en` / `title_zh`。其余键取决于 layout——`plain` 和 `highlight` 用 `body_en` / `body_zh`；更丰富的 layout 用 `cards`、`left_items`、`stages`、`items` 等结构化字段。完整的逐 layout 字段参考见 [Layouts（布局）](#layouts布局)。
+
+`evidence` 是 `<path>:<line>` 引用列表——每 3 张 slide 至少 1 条（详见 [Grounding](#grounding-与-evidence-约定)）。
 
 ### 支持的 Mustache 占位符
 
@@ -144,7 +147,194 @@ evidence:
 
 **故意不支持**的：partials（`{{>name}}`）、lambda、自定义定界符（`{{=<% %>=}}`）、点路径查找（`{{a.b}}`）。
 
-渲染上下文暴露 frontmatter 标量（`title_en`、`title_zh`、`total_slides` 等）和 `slides` 列表。每张 slide 项暴露 `number`、`title_en`、`title_zh`、`body_en`、`body_zh`、`body_en_html`、`body_zh_html`、`evidence`。
+渲染上下文暴露 frontmatter 标量（`title_en`、`title_zh`、`total_slides` 等）和 `slides` 列表。每张 slide 项暴露 `number`、`layout`、`title_en`、`title_zh`、`evidence`，以及该 layout 声明的结构化字段（如 `plain` / `highlight` 的 `body_en_html` / `body_zh_html`，或更丰富 layout 的 `cards` / `stages` / `items`——见 [Layouts（布局）](#layouts布局)）。
+
+## Layouts（布局）
+
+每张 slide 都声明一个 `layout`。layout 决定这张 slide **长什么样**——一段普通段落、红绿双栏对比、横向流水线、纵向时间线、并列卡片、引用金句，或单条结论高亮。按**内容形态**选 layout，而不是为了好看硬凑：内容真就是一段话时，`plain` 是正确答案。
+
+`layout` 会按固定白名单校验。自创名字（或缺了该 layout 必需字段）会让 build 失败，并明确告诉你该补什么。不写 `layout` 等同 `plain`——Phase 1 的旧 deck 照常工作。
+
+| Layout | 适用 | 不要用于 |
+|--------|------|----------|
+| `plain` | 普通段落、解释、纯列表 | 内容其实是对比 / 流程 / 时间线 |
+| `cards-2` | 2 个并列概念，左右并排 | 3 个以上（用 `cards-3` / `cards-4`） |
+| `cards-3` | 3 大支柱、三选项、三步总结 | 2 项（用 `cards-2`） |
+| `cards-4` | 4 象限、价格档位、团队角色 | 不足 4 项（太稀疏） |
+| `compare` | 前后对比、旧 vs 新、问题/方案 | 不相关的项（用 `cards`） |
+| `pipeline` | 顺序流程、CI/CD、有序步骤 | 无序项（用 `cards`） |
+| `timeline` | 时间序列、历史、路线图 | 单个事件（用 `highlight`） |
+| `quote` | 引言、金句、用户原话 | 多段落散文（用 `plain`） |
+| `highlight` | 关键结论 / 一句话总结 | 普通正文（用 `plain`） |
+
+下面的字段名与 `lib/slides/components/README.md` 以及 `roll-deck` skill 的选择手册逐字一致——原样照抄。
+
+### `plain`
+
+自由段落。键：`body_en`、`body_zh`。
+
+```markdown
+## Slide 9
+layout: plain
+title_en: "Plain Prose"
+title_zh: "普通段落"
+body_en: |
+  When the content is genuinely one block of prose, plain is the
+  correct choice — not a failure.
+body_zh: |
+  内容真就是一段话时，plain 是正确答案，不是偷懒。
+evidence:
+  - README.md:1
+```
+
+![plain 布局](../assets/layouts/plain.png)
+
+### `highlight`
+
+单条结论 / 一句话高亮。键：`body_en`、`body_zh`。
+
+```markdown
+## Slide 6
+layout: highlight
+title_en: "Key Takeaway"
+title_zh: "关键结论"
+body_en: |
+  One command takes a topic to a shareable HTML deck.
+body_zh: |
+  一条命令把主题变成可分享的 HTML 演示。
+evidence:
+  - README.md:1
+```
+
+![highlight 布局](../assets/layouts/highlight.png)
+
+### `quote`
+
+带归属的引用金句。键：`text_en`、`text_zh`。
+
+```markdown
+## Slide 5
+layout: quote
+title_en: "What Users Say"
+title_zh: "用户原话"
+text_en: "Roll turned a 3-minute black screen into a deck I can share."
+text_zh: "Roll 把 3 分钟的黑屏变成了我能分享的演示。"
+evidence:
+  - README.md:1
+```
+
+![quote 布局](../assets/layouts/quote.png)
+
+### `cards-2` / `cards-3` / `cards-4`
+
+2 / 3 / 4 个无先后的并列概念。键：`cards`，数组，每项含 `title_en`、`title_zh`、`body_en`、`body_zh`。
+
+```markdown
+## Slide 7
+layout: cards-3
+title_en: "Three Pillars"
+title_zh: "三大支柱"
+cards:
+  - title_en: "Skills"
+    title_zh: "技能"
+    body_en: "Composable AI workflows."
+    body_zh: "可组合的 AI 工作流。"
+  - title_en: "Loop"
+    title_zh: "循环"
+    body_en: "Autonomous backlog executor."
+    body_zh: "自主 backlog 执行器。"
+  - title_en: "TCR"
+    title_zh: "TCR"
+    body_en: "Test, commit, or revert."
+    body_zh: "测试、提交或回滚。"
+evidence:
+  - README.md:1
+```
+
+`cards-2` 和 `cards-4` 用同样的 `cards` 数组，分别放 2 项或 4 项。
+
+![cards-2 布局](../assets/layouts/cards-2.png)
+
+![cards-3 布局](../assets/layouts/cards-3.png)
+
+![cards-4 布局](../assets/layouts/cards-4.png)
+
+### `compare`
+
+两栏：左（如"之前"）vs 右（如"之后"）。键：`left_title_en` / `left_title_zh` / `right_title_en` / `right_title_zh`，加上 `left_items` 和 `right_items`——数组，每项含 `text_en` / `text_zh`。
+
+```markdown
+## Slide 2
+layout: compare
+title_en: "Before vs After"
+title_zh: "前后对比"
+left_title_en: "Before"
+left_title_zh: "之前"
+right_title_en: "After"
+right_title_zh: "之后"
+left_items:
+  - text_en: "Manual steps"
+    text_zh: "手动步骤"
+right_items:
+  - text_en: "Automated"
+    text_zh: "自动化"
+evidence:
+  - README.md:1
+```
+
+![compare 布局](../assets/layouts/compare.png)
+
+### `pipeline`
+
+横向、有序的阶段序列。键：`stages`，数组，每项含 `title_en`、`title_zh`、`desc_en`、`desc_zh`，以及可选的 `css_class`（`pipe-idea`、`pipe-backlog`、`pipe-build`、`pipe-verify` 或 `pipe-release`）。
+
+```markdown
+## Slide 3
+layout: pipeline
+title_en: "Build Pipeline"
+title_zh: "构建流水线"
+stages:
+  - title_en: "Stage"
+    title_zh: "暂存"
+    desc_en: "git add -A"
+    desc_zh: "git add -A"
+  - title_en: "Test"
+    title_zh: "测试"
+    desc_en: "roll test"
+    desc_zh: "roll test"
+evidence:
+  - README.md:1
+```
+
+![pipeline 布局](../assets/layouts/pipeline.png)
+
+### `timeline`
+
+纵向、按时间排序的事件列表。键：`items`，数组，每项含 `title_en`、`title_zh`、`body_en`、`body_zh`。
+
+```markdown
+## Slide 4
+layout: timeline
+title_en: "Project Evolution"
+title_zh: "项目演进"
+items:
+  - title_en: "Phase 1"
+    title_zh: "阶段一"
+    body_en: "Generate and render."
+    body_zh: "生成与渲染。"
+  - title_en: "Phase 2"
+    title_zh: "阶段二"
+    body_en: "Visual richness."
+    body_zh: "视觉富度。"
+evidence:
+  - README.md:1
+```
+
+![timeline 布局](../assets/layouts/timeline.png)
+
+### `$roll-deck` 怎么挑 layout
+
+跑 `roll slides new "<主题>"` 时，`roll-deck` skill 会按**内容形态**逐张挑 layout——前后对比挑 `compare`、多步骤流程挑 `pipeline`、时间序列挑 `timeline`、并列概念挑 `cards-N`、带归属的金句挑 `quote`、一句话结论挑 `highlight`，其余挑 `plain`。同一套决策矩阵写在 `skills/roll-deck/SKILL.md`（"Layout 选择手册"），本文档与该手册保持同步。你随时可以改 `deck.md` 里的 `layout:` 覆盖 AI 的选择，再跑 `roll slides build <slug>` 重渲染。
 
 ## Grounding 与 evidence 约定
 

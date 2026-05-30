@@ -3,7 +3,7 @@ template: introduction-v3
 slug: all-layouts-sample
 title_en: "All Layouts Sample"
 title_zh: "全布局样例"
-total_slides: 6
+total_slides: 9
 created: 2026-05-23
 ---
 
@@ -101,5 +101,61 @@ body_en: |
   One command takes a topic to a shareable HTML deck.
 body_zh: |
   一条命令把主题变成可分享的 HTML 演示。
+evidence:
+  - README.md:1
+
+## Slide 7
+layout: cards-3
+title_en: "Three Pillars"
+title_zh: "三大支柱"
+cards:
+  - title_en: "Skills"
+    title_zh: "技能"
+    body_en: "Composable AI workflows."
+    body_zh: "可组合的 AI 工作流。"
+  - title_en: "Loop"
+    title_zh: "循环"
+    body_en: "Autonomous backlog executor."
+    body_zh: "自主 backlog 执行器。"
+  - title_en: "TCR"
+    title_zh: "TCR"
+    body_en: "Test, commit, or revert."
+    body_zh: "测试、提交或回滚。"
+evidence:
+  - README.md:1
+
+## Slide 8
+layout: cards-4
+title_en: "Four Quadrants"
+title_zh: "四个象限"
+cards:
+  - title_en: "Design"
+    title_zh: "设计"
+    body_en: "Plan the story."
+    body_zh: "规划故事。"
+  - title_en: "Build"
+    title_zh: "构建"
+    body_en: "Ship via TCR."
+    body_zh: "通过 TCR 交付。"
+  - title_en: "Verify"
+    title_zh: "验证"
+    body_en: "CI keeps it green."
+    body_zh: "CI 保持绿灯。"
+  - title_en: "Release"
+    title_zh: "发布"
+    body_en: "Human decision."
+    body_zh: "人类决策。"
+evidence:
+  - README.md:1
+
+## Slide 9
+layout: plain
+title_en: "Plain Prose"
+title_zh: "普通段落"
+body_en: |
+  When the content is genuinely one block of prose, plain is the
+  correct choice — not a failure.
+body_zh: |
+  内容真就是一段话时，plain 是正确答案，不是偷懒。
 evidence:
   - README.md:1

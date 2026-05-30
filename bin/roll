@@ -5309,6 +5309,30 @@ _config_daily_time() {
   return 0
 }
 
+# US-LOOP-036: after a schedule key is written, regenerate the launchd plists so
+# `roll loop status` and the actual fire schedule reflect the new yaml without a
+# manual `roll loop on`. yaml is the source of truth — a reload failure must NOT
+# fail the write, so we warn (not err) and point the user at the manual fallback.
+# When the loop is paused/muted we still rewrite the plist (content vs running
+# state are orthogonal) but add a hint that the schedule is updated yet not
+# firing. Sandbox guards inside _install_launchd_plists keep this off the host's
+# real launchd domain during tests.
+_config_reload_schedule() {
+  local project_path; project_path="$(pwd -P)"
+  if _install_launchd_plists "$project_path" >/dev/null 2>&1; then
+    if [[ -f "$_LOOP_STATE" ]] && grep -q "^status: paused" "$_LOOP_STATE" 2>/dev/null; then
+      warn "loop is paused — schedule updated but not firing"
+      warn "loop 已暂停 —— 调度已更新但不会触发"
+    elif [[ -f "$_LOOP_MUTE_FILE" ]]; then
+      warn "loop is muted — schedule updated but not firing"
+      warn "loop 已静音 —— 调度已更新但不会触发"
+    fi
+  else
+    warn "config: schedule reload failed — yaml is saved; run \`roll loop on\` to apply"
+    warn "config：调度重载失败 —— yaml 已保存；运行 \`roll loop on\` 手工生效"
+  fi
+}
+
 cmd_config() {
   local key="" value="" scope="" want_list=""
   while [[ $# -gt 0 ]]; do
@@ -5333,17 +5357,24 @@ cmd_config() {
     loop-window|loop-schedule)
       local fscope="$scope"; [[ -z "$fscope" ]] && fscope="project"
       ROLL_CFG_SCOPE="$fscope"
+      local _rc
       if [[ "$key" == "loop-window" ]]; then
-        _config_loop_window "$value"; return $?
+        _config_loop_window "$value"; _rc=$?
       else
-        _config_loop_schedule "$value"; return $?
+        _config_loop_schedule "$value"; _rc=$?
       fi
+      # US-LOOP-036: auto-reload only on a successful write (value supplied).
+      [[ $_rc -eq 0 && -n "$value" ]] && _config_reload_schedule
+      return $_rc
       ;;
     dream-time|brief-time)
       # dream/brief schedule keys are global-scoped (~/.roll/config.yaml).
       local fscope="$scope"; [[ -z "$fscope" ]] && fscope="global"
       ROLL_CFG_SCOPE="$fscope"
-      _config_daily_time "${key%-time}" "$value"; return $?
+      local _rc
+      _config_daily_time "${key%-time}" "$value"; _rc=$?
+      [[ $_rc -eq 0 && -n "$value" ]] && _config_reload_schedule
+      return $_rc
       ;;
   esac
 
@@ -5392,6 +5423,10 @@ cmd_config() {
   fi
   _config_set "$key" "$value" "$file"
   ok "✓ set $key = $value in $file"
+  # US-LOOP-036: every recognized config key is a loop/dream/brief schedule key
+  # (display-only keys are out of scope for this command), so a successful write
+  # always reloads the launchd plists.
+  _config_reload_schedule
   return 0
 }
 

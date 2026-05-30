@@ -575,52 +575,6 @@ def _passthrough_main(agent):
     _ = (accumulated, evfile)  # intentionally unused now
 
 
-def _emit_final_usage_event(evfile, cycle, agent, accumulated_lines):
-    """Try plugin extraction; emit one usage event (real or null).
-
-    US-LOOP-026: at cycle end, dispatches accumulated stdout to the
-    agent_usage plugin registry.  If a plugin returns real data, emits
-    a usage event with it.  Otherwise emits a single null-payload event
-    (US-LOOP-010 backward-compat).
-    """
-    payload = None
-    try:
-        from agent_usage import extract_usage
-        usage = extract_usage(agent, accumulated_lines)
-        if usage is not None:
-            payload = {
-                "model":        usage.get("model", agent),
-                "input_tokens":  usage.get("input_tokens"),
-                "output_tokens": usage.get("output_tokens"),
-                "cost_list_usd": usage.get("cost_list_usd"),
-                "duration_ms":   usage.get("duration_ms"),
-            }
-    except Exception:
-        pass
-
-    if payload is None:
-        payload = {
-            "model":        agent,
-            "input_tokens":  None,
-            "output_tokens": None,
-            "cost_list_usd": None,
-            "duration_ms":   None,
-        }
-
-    record = json.dumps({
-        "ts":      datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "stage":   "usage",
-        "label":   cycle,
-        "detail":  payload,
-        "outcome": "ok",
-    }) + "\n"
-    try:
-        with open(evfile, "a") as f:
-            f.write(record)
-    except Exception:
-        pass
-
-
 def main():
     agent = os.environ.get("ROLL_LOOP_AGENT", "claude")
     if agent == "claude":

@@ -11810,12 +11810,100 @@ _loop_pick_next_story() {
   return 1
 }
 
+# US-AGENT-030: transparent, auditable in-tier soft nudge.
+#
+# `_loop_tier_nudge SLOT_AGENT TIER STORY_TYPE` — on top of the est_min tier
+# slot result (a HARD constraint), prefer the in-tier candidate agent with the
+# best per-(agent × story_type) historical hit-rate. The tier is NOT changed;
+# only the agent within it may be re-ordered.
+#
+# Candidate pool = the slot agent ∪ agents observed running this TIER in
+# runs.jsonl, intersected with agents installed on this machine. Hit-rates come
+# from lib/loop_result_eval.py --hit-rates (deterministic flat counts), and the
+# re-order is the pure nudge_within_tier in lib/loop_pick_agent.py.
+#
+# Switch: ROLL_AGENT_NUDGE defaults ON. Set ROLL_AGENT_NUDGE=0 to disable — the
+# router then behaves EXACTLY like US-AGENT-023 (the nudge runs its identity
+# path). When there is no runs.jsonl, no python3, or no jq, the slot agent is
+# returned unchanged (graceful degradation, never a hard failure).
+#
+# stdout: "<chosen_agent>\t<rationale>"  (tab-separated; rationale carries
+#         spaces). Always exits 0 — the slot agent is the safe default.
+_loop_tier_nudge() {
+  local slot_agent="${1:-}" tier="${2:-}" story_type="${3:-}"
+  # Empty slot agent → nothing to nudge; echo it back verbatim.
+  [ -n "$slot_agent" ] || { printf '%s\t%s\n' "$slot_agent" "no slot agent"; return 0; }
+
+  # Disabled → exact US-AGENT-023 behaviour (identity path in the python).
+  local nudge_off=""
+  case "${ROLL_AGENT_NUDGE:-1}" in
+    0|off|false|no|OFF|FALSE|NO) nudge_off=1 ;;
+  esac
+
+  local install_dir
+  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
+
+  # Need python3 to run the pure nudge at all; degrade to slot agent otherwise.
+  command -v python3 >/dev/null 2>&1 || {
+    printf '%s\t%s\n' "$slot_agent" "python3 unavailable; keeping slot $slot_agent"
+    return 0
+  }
+
+  local runs="" hit_rates="{}" candidates=""
+  if [ -z "$nudge_off" ]; then
+    # Source runs.jsonl from the current project (read-side resolver).
+    runs="$(_loop_runs_file 2>/dev/null || true)"
+    if [ -n "$runs" ] && [ -f "$runs" ] && command -v jq >/dev/null 2>&1; then
+      # Candidate pool: agents seen on rows whose tier == this tier, intersected
+      # with installed agents. The slot agent is folded in by the python.
+      local seen_agents installed_list
+      seen_agents="$(jq -r --arg t "$tier" 'select(.tier == $t) | .agent // empty' "$runs" 2>/dev/null | sort -u)"
+      installed_list="$(_agents_installed 2>/dev/null || true)"
+      local a
+      for a in $seen_agents; do
+        case "
+$installed_list
+" in
+          *"
+$a
+"*) candidates="${candidates}${candidates:+,}$a" ;;
+        esac
+      done
+      # Hit-rate read model over all rows (flat, deterministic counts).
+      hit_rates="$(jq -s '.' "$runs" 2>/dev/null | python3 "$install_dir/lib/loop_result_eval.py" --hit-rates 2>/dev/null || echo '{}')"
+      [ -n "$hit_rates" ] || hit_rates="{}"
+    fi
+  fi
+
+  # Run the pure nudge. --disabled forces the identity path; otherwise the
+  # candidates + hit-rates drive the re-order, with the sample floor inside.
+  local out
+  if [ -n "$nudge_off" ]; then
+    out="$(printf '%s' "$hit_rates" | python3 "$install_dir/lib/loop_pick_agent.py" \
+      --nudge --slot-agent "$slot_agent" --story-type "$story_type" \
+      --candidates "$candidates" --disabled 2>/dev/null)" || out=""
+  else
+    out="$(printf '%s' "$hit_rates" | python3 "$install_dir/lib/loop_pick_agent.py" \
+      --nudge --slot-agent "$slot_agent" --story-type "$story_type" \
+      --candidates "$candidates" 2>/dev/null)" || out=""
+  fi
+  if [ -z "$out" ]; then
+    printf '%s\t%s\n' "$slot_agent" "nudge unavailable; keeping slot $slot_agent"
+    return 0
+  fi
+  printf '%s\n' "$out"
+}
+
 # US-AGENT-023: pick the agent for a backlog story by complexity tier.
 #
 # Chain: story est_min → _classify_complexity (lib/loop_pick_agent.py emits the
 # tier) → read the matching slot from agents.yaml → agent. When the tier slot is
 # empty, fall back to the `default` slot; when `default` is also empty, WARN and
 # use _first_installed_agent so the cycle still has a runnable agent.
+#
+# US-AGENT-030: after the slot agent is resolved, an in-tier soft nudge may
+# re-order to a better-performing same-tier agent (see _loop_tier_nudge). The
+# nudge never changes the tier; ROLL_AGENT_NUDGE=0 disables it entirely.
 #
 # Supersedes the US-AGENT-004/005 three-dimensional matcher + history soft
 # preference (retired in US-AGENT-022). agents.yaml replaces agent-routes.yaml.
@@ -11872,6 +11960,23 @@ _loop_pick_agent_for_story() {
     echo "_loop_pick_agent_for_story: no agent resolvable for tier '$tier' (agents.yaml empty and no installed agent)" >&2
     return 1
   }
+
+  # US-AGENT-030: in-tier soft nudge. Tier stays a hard constraint — only the
+  # agent within the tier may be re-ordered by historical hit-rate. story_type
+  # is the id prefix (US-AGENT-030 → US). The nudge always yields a runnable
+  # agent (the slot agent is the safe default) and a human-readable rationale,
+  # which we fold into the route line so runs.jsonl + the event log record it.
+  local story_type="${story_id%%-*}"
+  local nudge_line nudged_agent nudge_reason
+  nudge_line="$(_loop_tier_nudge "$agent" "$tier" "$story_type" 2>/dev/null || true)"
+  if [ -n "$nudge_line" ]; then
+    nudged_agent="${nudge_line%%	*}"
+    nudge_reason="${nudge_line#*	}"
+    if [ -n "$nudged_agent" ]; then
+      agent="$nudged_agent"
+      [ -n "$nudge_reason" ] && rationale="$rationale | nudge: $nudge_reason"
+    fi
+  fi
 
   printf '%s %s %s\n' "$agent" "$tier" "$rationale"
 }

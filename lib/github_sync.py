@@ -363,6 +363,137 @@ def _gh_id_present(content: str, ident: str) -> bool:
                      content) is not None
 
 
+def parse_labels_filter(value: Optional[str]) -> List[str]:
+    """Parse a ``--label`` flag value into a normalized list of label names.
+
+    The flag is comma-separated and may be passed multiple times (the caller
+    joins repeats with commas before calling this); ``"P1, bug"`` → ``["p1",
+    "bug"]``. Names are lower-cased and stripped so matching is
+    case-insensitive (US-SYNC-005). Empty / whitespace-only tokens are dropped.
+    """
+    if not value:
+        return []
+    out: List[str] = []
+    for tok in value.split(","):
+        key = tok.strip().lower()
+        if key and key not in out:
+            out.append(key)
+    return out
+
+
+def issue_has_label(issue: Dict[str, Any], wanted: List[str]) -> bool:
+    """Return True if ``issue`` carries any of the ``wanted`` labels (OR).
+
+    ``wanted`` is the normalized list from :func:`parse_labels_filter`. An
+    empty ``wanted`` matches every issue (no filter). Matching is
+    case-insensitive and uses OR semantics — a single overlapping label is
+    enough (US-SYNC-005).
+    """
+    if not wanted:
+        return True
+    have = set()
+    for label in issue.get("labels", []) or []:
+        name = label.get("name", "") if isinstance(label, dict) else str(label)
+        key = name.strip().lower()
+        if key:
+            have.add(key)
+    return any(w in have for w in wanted)
+
+
+def filter_issues_by_label(issues: List[Dict[str, Any]],
+                           wanted: List[str]) -> List[Dict[str, Any]]:
+    """Filter ``issues`` to those matching any ``wanted`` label (US-SYNC-005)."""
+    if not wanted:
+        return list(issues)
+    return [i for i in issues if issue_has_label(i, wanted)]
+
+
+# A top-level GitHub task-list item: ``- [ ] text`` or ``- [x] text`` with NO
+# leading indentation. Nested items (indented) are intentionally ignored so we
+# only capture the issue's primary acceptance criteria, not sub-points.
+import re as _re  # noqa: E402
+
+_TOP_LEVEL_CHECKBOX = _re.compile(r'^[-*] \[([ xX])\] (.+?)\s*$')
+
+
+def extract_ac_items(body: Optional[str]) -> List[str]:
+    """Extract top-level ``- [ ]`` / ``- [x]`` checkbox items from an issue body.
+
+    Only checkbox items with no leading indentation are returned — nested
+    (indented) list items are ignored so we capture the issue's primary
+    acceptance criteria, not sub-bullets (US-SYNC-005). Returns the raw item
+    text (the label after the checkbox), in document order. ``\\r\\n`` line
+    endings are tolerated.
+    """
+    if not body:
+        return []
+    items: List[str] = []
+    for raw in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        # A leading space means the item is nested under another bullet — skip.
+        if raw[:1] == " " or raw[:1] == "\t":
+            continue
+        m = _TOP_LEVEL_CHECKBOX.match(raw)
+        if m:
+            items.append(m.group(2).strip())
+    return items
+
+
+def render_ac_section(issue: Dict[str, Any]) -> str:
+    """Render the AC section body for a feature stub from an issue (US-SYNC-005).
+
+    Each top-level checkbox in the issue body becomes a Markdown ``- [ ]`` AC
+    line (state normalized to unchecked — the backlog tracks completion, not
+    the upstream issue). When the issue has no checkboxes the section is empty.
+    """
+    items = extract_ac_items(issue.get("body"))
+    return "\n".join(f"- [ ] {it}" for it in items)
+
+
+def write_feature_stub(issue: Dict[str, Any],
+                       features_dir: str,
+                       *,
+                       epic: str = "backlog-lifecycle") -> str:
+    """Create or append a feature file stub for ``issue`` (US-SYNC-005).
+
+    Writes ``<features_dir>/<epic>/GH-<number>.md``. If the file does not exist
+    a stub is created with a heading + AC section; if it exists the AC items are
+    appended (idempotency at the row level is handled upstream, but appending
+    here is non-destructive to any human-authored prose). Returns the path
+    written.
+    """
+    ident = gh_id(issue)
+    epic_dir = os.path.join(features_dir, epic)
+    os.makedirs(epic_dir, exist_ok=True)
+    path = os.path.join(epic_dir, f"{ident}.md")
+    ac_body = render_ac_section(issue)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            existing = fh.read()
+        block = ac_body + "\n" if ac_body else ""
+        sep = "" if existing.endswith("\n") or not existing else "\n"
+        with open(path, "a", encoding="utf-8") as fh:
+            if block:
+                fh.write(sep + block)
+        return path
+    title = (issue.get("title") or "").strip()
+    type_prefix = map_label_to_type(issue.get("labels", []))
+    parts = [
+        f"# {ident} {title}".rstrip(),
+        "",
+        f"> Synced from GitHub issue #{issue.get('number')} "
+        f"({type_prefix}).",
+        "",
+        "## AC",
+        "",
+    ]
+    stub = "\n".join(parts)
+    if ac_body:
+        stub += ac_body + "\n"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(stub)
+    return path
+
+
 def dry_run_line(issue: Dict[str, Any], *, skipped: bool) -> str:
     """Render the ``--dry-run`` preview line for a single issue (US-SYNC-004).
 
@@ -465,7 +596,8 @@ def _load_issues_for_sync(owner: str, repo: str) -> List[Dict[str, Any]]:
 def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     if "--repo" not in argv:
         print("usage: github_sync.py sync --repo <owner/repo> "
-              "[--backlog <path>] [--dry-run]", file=sys.stderr)
+              "[--backlog <path>] [--features <dir>] [--label <a,b>] [--dry-run]",
+              file=sys.stderr)
         return 1
     repo_arg = argv[argv.index("--repo") + 1]
     if "/" not in repo_arg:
@@ -476,6 +608,16 @@ def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     backlog = ".roll/backlog.md"
     if "--backlog" in argv:
         backlog = argv[argv.index("--backlog") + 1]
+    features_dir = ".roll/features"
+    if "--features" in argv:
+        features_dir = argv[argv.index("--features") + 1]
+    # --label may be repeated; each value is comma-separated. Join repeats with
+    # commas so parse_labels_filter sees one flat list (OR semantics).
+    label_parts: List[str] = []
+    for i, tok in enumerate(argv):
+        if tok == "--label" and i + 1 < len(argv):
+            label_parts.append(argv[i + 1])
+    wanted = parse_labels_filter(",".join(label_parts))
     dry_run = "--dry-run" in argv
     try:
         issues = _load_issues_for_sync(owner, repo)
@@ -488,6 +630,7 @@ def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     except GitHubAPIError as exc:
         print(f"api error: {exc}", file=sys.stderr)
         return 4
+    issues = filter_issues_by_label(issues, wanted)
     if dry_run:
         # US-SYNC-004: preview only — compute the diff, leave backlog.md
         # untouched, exit 0 on a successful dry run.
@@ -498,6 +641,13 @@ def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
               f"total issues: {preview['total']} (dry-run, no changes written)")
         return 0
     summary = sync_to_backlog(issues, backlog)
+    # US-SYNC-005: for each newly-added issue, materialize a feature stub whose
+    # AC section is its top-level issue-body checkboxes.
+    skipped_set = set(summary["skipped_ids"])
+    for issue in issues:
+        if gh_id(issue) in skipped_set:
+            continue
+        write_feature_stub(issue, features_dir)
     for row in summary["rows"]:
         print(f"+ {row}")
     for ident in summary["skipped_ids"]:

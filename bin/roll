@@ -8225,6 +8225,15 @@ if _worktree_fetch_origin main \\
   ROLL_LOOP_FALLBACK_FROM=""
   ( cd "\$WT" >/dev/null 2>&1 && ROLL_LOOP_ROUTED_STORY=\$(_loop_pick_next_story 2>/dev/null) || true )
   ROLL_LOOP_ROUTED_STORY=\$( (cd "\$WT" 2>/dev/null && _loop_pick_next_story 2>/dev/null) || echo "" )
+  # FIX-146: close TOCTOU window — if the picked story became ineligible between
+  # pick and agent handoff, re-pick once rather than idling on a stale route.
+  if [ -n "\$ROLL_LOOP_ROUTED_STORY" ]; then
+    if ! (cd "\$WT" 2>/dev/null && _loop_story_is_eligible "\$ROLL_LOOP_ROUTED_STORY" 2>/dev/null); then
+      echo "[loop] story \${ROLL_LOOP_ROUTED_STORY} stale — became ineligible after pick; re-picking"
+      _loop_event story_stale "\${CYCLE_ID}" "\${ROLL_LOOP_ROUTED_STORY}" "" || true
+      ROLL_LOOP_ROUTED_STORY=\$( (cd "\$WT" 2>/dev/null && _loop_pick_next_story 2>/dev/null) || echo "" )
+    fi
+  fi
   if [ -n "\$ROLL_LOOP_ROUTED_STORY" ]; then
     _route_line=\$( (cd "\$WT" 2>/dev/null && _loop_pick_agent_for_story "\$ROLL_LOOP_ROUTED_STORY" 2>/dev/null) || echo "" )
     if [ -n "\$_route_line" ]; then
@@ -11721,6 +11730,41 @@ refs/heads/claude/*"
 # deprecated alias in _loop_agent_routes (schema v3 / agents.yaml replaces the
 # v1 type/est/risk routing). lib/agent_routes_lint.py is no longer invoked.
 
+# FIX-146: per-story eligibility gate, reusable for pick and re-validation.
+# Exit 0 when the story id is eligible to be worked (📋 Todo, not manual-only,
+# deps satisfied, no open PR). Exit 1 otherwise.
+# Args: <story-id> [backlog-path] [open-pr-titles]
+_loop_story_is_eligible() {
+  local id="$1"
+  local backlog="${2:-.roll/backlog.md}"
+  local open_pr_titles="${3:-}"
+  [ -n "$id" ] || return 1
+  [ -f "$backlog" ] || return 1
+
+  local row
+  row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
+  [ -n "$row" ] || return 1
+
+  # Gate 0: status == 📋 Todo
+  case "$row" in
+    *'📋 Todo'*) ;;
+    *) return 1 ;;
+  esac
+
+  # Gate 1: manual-only
+  _loop_is_manual_only "$id" "$backlog" 2>/dev/null && return 1
+
+  # Gate 2: depends-on
+  _loop_check_depends_on "$id" "$backlog" >/dev/null 2>&1 || return 1
+
+  # Gate 3 (FIX-141): skip if an open PR already references this story id.
+  if [ -n "$open_pr_titles" ] && printf '%s\n' "$open_pr_titles" | grep -qE "${id}([^0-9A-Za-z]|$)"; then
+    return 1
+  fi
+
+  return 0
+}
+
 # US-AGENT-006: pick the next eligible 📋 Todo story from .roll/backlog.md
 # applying the same gates as the roll-loop SKILL Step 2:
 #   1. Status = 📋 Todo
@@ -11757,19 +11801,10 @@ _loop_pick_next_story() {
       # Extract id like FIX-XXX-NNN / US-XXX-NNN / REFACTOR-XXX-NNN.
       id=$(printf '%s\n' "$line" | grep -oE "${prefix}-[A-Za-z0-9_-]+" | head -1)
       [ -n "$id" ] || continue
-      # Gate 1: manual-only
-      _loop_is_manual_only "$id" "$backlog" 2>/dev/null && continue
-      # Gate 2: depends-on
-      if ! _loop_check_depends_on "$id" "$backlog" >/dev/null 2>&1; then
-        continue
+      if _loop_story_is_eligible "$id" "$backlog" "$_open_pr_titles" 2>/dev/null; then
+        printf '%s\n' "$id"
+        return 0
       fi
-      # Gate 3 (FIX-141): skip if an open PR already references this story id
-      # (in its title) — avoids duplicate PRs for a story already in review.
-      if [ -n "$_open_pr_titles" ] && printf '%s\n' "$_open_pr_titles" | grep -qE "${id}([^0-9A-Za-z]|$)"; then
-        continue
-      fi
-      printf '%s\n' "$id"
-      return 0
     done < "$backlog"
   done
   return 1

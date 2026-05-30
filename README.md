@@ -73,6 +73,7 @@ roll loop on        # let AI work through the backlog (optional)
 | Skill selection guide | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
 | roll-doc (legacy doc automation: four phases + Phase 3b deep read) | [guide/en/roll-doc.md](guide/en/roll-doc.md) | [guide/zh/roll-doc.md](guide/zh/roll-doc.md) |
 | Slides (deck generator) | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |
+| Slides — Layouts reference | [guide/en/slides.md#layouts](guide/en/slides.md#layouts) | [guide/zh/slides.md#layouts布局](guide/zh/slides.md#layouts%E5%B8%83%E5%B1%80) |
 | Feedback (`roll feedback`) | [guide/en/feedback.md](guide/en/feedback.md) | [guide/zh/feedback.md](guide/zh/feedback.md) |
 | Backlog GitHub sync (`roll backlog sync`) | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
 | Test isolation (`roll test` + Tart VM) | [guide/en/test-isolation.md](guide/en/test-isolation.md) | [guide/zh/test-isolation.md](guide/zh/test-isolation.md) |

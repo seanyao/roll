@@ -97,8 +97,14 @@ new class names — the template's CSS is the single source of truth.
 ## Usage
 
 Partials are consumed by `lib/slides-render.py` when a `deck.md` slide declares
-a `layout` field (US-DECK-017). Until then, all partials render the same
-`plain` layout by default.
+a `layout` field. A slide that omits `layout` renders as `plain`.
+
+For the user-facing walkthrough — per-layout `deck.md` examples, rendered
+screenshots, and how `$roll-deck` picks a layout — see the Layouts section of
+the slides guide: [`guide/en/slides.md`](../../../guide/en/slides.md#layouts)
+([中文](../../../guide/zh/slides.md#layouts布局)). Field names in this file,
+that guide, and `skills/roll-deck/SKILL.md` are kept in sync — change one,
+change all three.
 
 ```markdown
 ### Slide 3: Architecture Overview

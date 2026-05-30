@@ -9,7 +9,7 @@ shared conventions.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `ROLL_HOME` | `~/.roll` | Per-user state root. Holds `config.yaml`, installed `skills/`, synced `conventions/`. |
-| `ROLL_CONFIG` | `$ROLL_HOME/config.yaml` | Agent routing, active window, schedule, per-tool config. |
+| `ROLL_CONFIG` | `$ROLL_HOME/config.yaml` | Editor, loop/dream/brief schedule hours, and per-tool (`ai_*`) config. Agent routing is **not** here — it lives in per-project `.roll/agents.yaml` (see [ai-agents.md](ai-agents.md)). |
 | `ROLL_GLOBAL` | `$ROLL_HOME/conventions/global` | Global convention files (`AGENTS.md`, `CLAUDE.md`, etc.) synced into AI tool directories. |
 | `ROLL_HEARTBEAT_TIMEOUT` | `1800` (seconds) | How long without a heartbeat write before the loop runner treats an inner cycle as orphan and heals state. Raise it if your cycles can legitimately stay quiet longer than 30 minutes. |
 | `ROLL_LOOP_FORCE` | unset | When set to any non-empty value, `roll loop` bypasses the active-window check and the pause file. `roll loop now` and `roll loop test` set this internally; export it manually only when you want a cron-scheduled run to ignore quiet hours. |
@@ -18,6 +18,8 @@ shared conventions.
 | `ROLL_PR_MERGE_TIMEOUT` | `600` (seconds) | How long `_loop_wait_pr_merge` waits for an opened PR to merge (or fail) before giving up and writing an ALERT. Raise it on slow CI; lower it for fast pipelines. |
 | `ROLL_LOOP_NO_POPUP` | unset | When set to any non-empty value, the runner does **not** auto-spawn a macOS Terminal.app window running `tmux attach`. For tests and headless batch runs — the popup outlives the killed tmux session and clutters the desktop. |
 | `ROLL_LOOP_GC_RETENTION_DAYS` | `30` | Override the GC retention period for `roll loop gc`. Takes precedence over `loop_gc.retention_days` in `.roll/local.yaml`. |
+| `ROLL_FEED_BUDGET_BYTES` | `16384` | Byte budget for the context feed handed to the inner agent each cycle. Set it to a positive integer to dial the feed to the inner agent's capacity; non-numeric or non-positive values fall back to the default. |
+| `ROLL_AGENT_NUDGE` | `1` (on) | The in-tier nudge that picks the best agent within the routed complexity tier from recent run history. Set to `0` (or `off`/`false`/`no`) to disable it; the tier itself is never changed either way. |
 
 `ROLL_CONFIG` and `ROLL_GLOBAL` derive from `ROLL_HOME`, so usually you only
 need to override `ROLL_HOME` to relocate everything together.
@@ -42,7 +44,7 @@ ROLL_GLOBAL=/path/to/team-conventions roll init
 Point `ROLL_CONFIG` at a one-off config file to test changes:
 
 ```bash
-ROLL_CONFIG=/tmp/test-config.yaml roll agent use kimi
+ROLL_CONFIG=/tmp/test-config.yaml roll status
 ```
 
 ## Verifying

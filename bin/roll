@@ -11134,6 +11134,315 @@ _loop_pr_route() {
   return 0
 }
 
+# US-AUTO-045 Phase 1: dedicated CI Loop helpers (loop-safe pure additions).
+#
+# These six helpers collect CI timing data, classify failures, auto-rerun
+# transient flakes, and surface flaky / degradation signals as backlog
+# entries. They are NOT yet wired into any runner or launchd plist — that is
+# Phase 2 (manual-only:true). Each is unit-tested in
+# tests/unit/roll_loop_ci_loop.bats with gh stubbed. Do not delete or inline.
+#
+# State lives under project-local .roll/state/:
+#   ci-timing.jsonl       append-only NDJSON, one line per recorded CI run
+#   ci-rerun-state.yaml   minimal YAML: rerun attempt count per run_id
+# _LOOP_ALERT is the existing shared alert file (real failures, rerun limits).
+
+# _ci_state_dir
+#   Echo the project-local CI state directory, creating it if needed.
+#   Resolves relative to the current working dir's .roll/ (tests cd into a
+#   sandbox; the live loop runner cds into the project root).
+_ci_state_dir() {
+  local dir=".roll/state"
+  mkdir -p "$dir" 2>/dev/null || true
+  echo "$dir"
+}
+
+# _ci_record_timing <run_json>
+#   Parse one `gh run list --json ...` object and append a flat NDJSON line to
+#   ci-timing.jsonl. Idempotent: a run_id already present in the file is
+#   skipped. Duration is computed from createdAt → updatedAt (gh exposes no
+#   native duration field). Returns 0 always (loop-safe).
+_ci_record_timing() {
+  local json="$1"
+  [ -n "$json" ] || return 0
+
+  local run_id workflow conclusion status created updated
+  run_id=$(echo "$json" | jq -r '.databaseId // ""' 2>/dev/null)
+  [ -n "$run_id" ] || return 0
+
+  local dir; dir=$(_ci_state_dir)
+  local file="${dir}/ci-timing.jsonl"
+
+  # Idempotency: skip if this run_id is already recorded.
+  if [ -f "$file" ] && grep -q "\"run_id\":${run_id}," "$file" 2>/dev/null; then
+    return 0
+  fi
+
+  workflow=$(echo "$json" | jq -r '.workflowName // .name // ""' 2>/dev/null)
+  conclusion=$(echo "$json" | jq -r '.conclusion // ""' 2>/dev/null)
+  status=$(echo "$json" | jq -r '.status // ""' 2>/dev/null)
+  created=$(echo "$json" | jq -r '.createdAt // ""' 2>/dev/null)
+  updated=$(echo "$json" | jq -r '.updatedAt // ""' 2>/dev/null)
+
+  # Duration in seconds from ISO-8601 timestamps; 0 if either is missing or
+  # unparseable. `date -j` (BSD) and `date -d` (GNU) differ — try both.
+  local dur=0 c_epoch u_epoch
+  if [ -n "$created" ] && [ -n "$updated" ]; then
+    c_epoch=$(_ci_iso_to_epoch "$created")
+    u_epoch=$(_ci_iso_to_epoch "$updated")
+    if [ -n "$c_epoch" ] && [ -n "$u_epoch" ] && [ "$u_epoch" -ge "$c_epoch" ] 2>/dev/null; then
+      dur=$((u_epoch - c_epoch))
+    fi
+  fi
+
+  printf '{"run_id":%s,"workflow":"%s","conclusion":"%s","status":"%s","duration_sec":%s,"recorded_at":"%s"}\n' \
+    "$run_id" "$workflow" "$conclusion" "$status" "$dur" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$file"
+  return 0
+}
+
+# _ci_iso_to_epoch <iso8601>
+#   Convert an ISO-8601 UTC timestamp (2026-05-30T10:00:00Z) to epoch seconds.
+#   Echoes nothing on failure. Handles both BSD (macOS) and GNU date.
+_ci_iso_to_epoch() {
+  local iso="$1"
+  [ -n "$iso" ] || return 0
+  local e
+  # GNU date
+  e=$(date -u -d "$iso" +%s 2>/dev/null) && { echo "$e"; return 0; }
+  # BSD date (strip trailing Z, parse explicit format)
+  local trimmed="${iso%Z}"
+  e=$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "$trimmed" +%s 2>/dev/null) && { echo "$e"; return 0; }
+  return 0
+}
+
+# _ci_classify_failure <run_id>
+#   Inspect `gh run view <id> --log-failed` and classify the failure as
+#   "transient" (infra flake: network, timeout, runner death) or "real"
+#   (genuine test/build failure). Echoes "transient" or "real".
+#   Empty / unavailable logs default to "real" (fail safe — don't auto-rerun
+#   something we can't read).
+_ci_classify_failure() {
+  local run_id="$1"
+  [ -n "$run_id" ] || { echo "real"; return 0; }
+  local slug; _gh_resolve slug 2>/dev/null || slug=""
+
+  local log
+  if [ -n "$slug" ]; then
+    log=$(gh -R "$slug" run view "$run_id" --log-failed 2>/dev/null)
+  else
+    log=$(gh run view "$run_id" --log-failed 2>/dev/null)
+  fi
+
+  # Transient signatures: network/infra failures that a rerun typically clears.
+  if echo "$log" | grep -qiE 'ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|shutdown signal|runner.*(error|lost|terminated)|The runner has received a shutdown|503 Service|connection reset|TLS handshake|i/o timeout|could not resolve host'; then
+    echo "transient"
+    return 0
+  fi
+  echo "real"
+  return 0
+}
+
+# _ci_rerun_state_file
+#   Echo path to ci-rerun-state.yaml (creating the dir).
+_ci_rerun_state_file() {
+  local dir; dir=$(_ci_state_dir)
+  echo "${dir}/ci-rerun-state.yaml"
+}
+
+# _ci_rerun_attempts <run_id>
+#   Echo the recorded rerun attempt count for <run_id> (0 if none).
+_ci_rerun_attempts() {
+  local run_id="$1"
+  local file; file=$(_ci_rerun_state_file)
+  [ -f "$file" ] || { echo 0; return 0; }
+  local n
+  n=$(awk -v key="\"${run_id}\":" '$1 == key { print $2 }' "$file" 2>/dev/null | head -1)
+  case "$n" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$n" ;;
+  esac
+}
+
+# _ci_rerun_state_write <run_id> <attempts>
+#   Set the attempt count for <run_id> in ci-rerun-state.yaml. Minimal YAML
+#   writer (we own the schema): one `"<run_id>": <n>` line per run.
+_ci_rerun_state_write() {
+  local run_id="$1" attempts="$2"
+  local file; file=$(_ci_rerun_state_file)
+  [ -f "$file" ] || : > "$file"
+  local tmp; tmp=$(mktemp)
+  awk -v key="\"${run_id}\":" -v val="$attempts" '
+    $1 == key { print key " " val; found=1; next }
+    { print }
+    END { if (!found) print key " " val }
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# _ci_rerun_transient <run_id>
+#   Auto-rerun a transient CI failure, capped at 2 attempts. attempt<2 →
+#   `gh run rerun`; attempt>=2 → write an error ALERT. Echoes the action taken
+#   ("rerun" / "limit"). Loop-safe (returns 0).
+_ci_rerun_transient() {
+  local run_id="$1"
+  [ -n "$run_id" ] || return 0
+  local slug; _gh_resolve slug 2>/dev/null || slug=""
+
+  local attempts; attempts=$(_ci_rerun_attempts "$run_id")
+  if [ "$attempts" -ge 2 ]; then
+    local alert="$_LOOP_ALERT"
+    mkdir -p "$(dirname "$alert")" 2>/dev/null || true
+    printf '[%s] [error] [TYPE:ci-rerun-limit] CI rerun reached limit: run #%s (%s attempts)\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$run_id" "$attempts" >> "$alert"
+    echo "limit"
+    return 0
+  fi
+
+  if [ -n "$slug" ]; then
+    gh -R "$slug" run rerun "$run_id" >/dev/null 2>&1 || true
+  else
+    gh run rerun "$run_id" >/dev/null 2>&1 || true
+  fi
+  _ci_rerun_state_write "$run_id" "$((attempts + 1))"
+  echo "rerun"
+  return 0
+}
+
+# _ci_open_story <type> <title>
+#   Append a FIX or US row to .roll/backlog.md's `| ID | Description | Status |`
+#   table. Idempotent: if a 📋 Todo row with the same title already exists, skip
+#   (echo "skip"). New IDs auto-increment from the max existing <TYPE>-NNN.
+#   Echoes the new ID on success, "skip" if already queued.
+_ci_open_story() {
+  local type="$1" title="$2"
+  [ -n "$type" ] && [ -n "$title" ] || return 0
+
+  # Resolve the backlog file (project-local).
+  local backlog=".roll/backlog.md"
+  [ -f "$backlog" ] || { echo "skip"; return 0; }
+
+  # Idempotency: same title already queued as Todo → skip.
+  if grep -F "$title" "$backlog" 2>/dev/null | grep -q '📋 Todo'; then
+    echo "skip"
+    return 0
+  fi
+
+  # Auto-increment: find the max existing <TYPE>-NNN id.
+  local prefix max next
+  prefix=$(echo "$type" | tr '[:lower:]' '[:upper:]')
+  max=$(grep -oE "${prefix}-[0-9]+" "$backlog" 2>/dev/null \
+        | sed "s/${prefix}-//" \
+        | sort -n | tail -1)
+  case "$max" in ''|*[!0-9]*) max=0 ;; esac
+  # 10# prefix forces base-10: a zero-padded id like 008/009 would otherwise be
+  # parsed as octal and either misnumber (010→8) or error ("value too great").
+  next=$((10#$max + 1))
+  local id
+  id=$(printf '%s-%03d' "$prefix" "$next")
+
+  printf '| %s | %s | 📋 Todo |\n' "$id" "$title" >> "$backlog"
+  echo "$id"
+  return 0
+}
+
+# _ci_detect_flaky
+#   Scan the last 20 ci-timing.jsonl lines, group by workflow, and flag any
+#   workflow whose recent runs have a 20%–80% failure rate (2..8 failures of
+#   the last 10) as flaky — opening a FIX story. Returns 0 (loop-safe).
+_ci_detect_flaky() {
+  local dir; dir=$(_ci_state_dir)
+  local file="${dir}/ci-timing.jsonl"
+  [ -f "$file" ] || return 0
+
+  # Per workflow: count total + failures over the most recent 10 records.
+  # awk reads last 20 lines (tail), keeps last 10 per workflow. Output is
+  # collected into a variable (not piped to `while`) so an empty result or
+  # an intermediate nonzero exit cannot trip a caller's ERR trap.
+  local flaky_wfs
+  flaky_wfs=$(tail -n 20 "$file" 2>/dev/null | awk '
+    {
+      # crude field extraction from flat JSON line
+      wf=""; concl="";
+      if (match($0, /"workflow":"[^"]*"/)) { wf=substr($0,RSTART+12,RLENGTH-13) }
+      if (match($0, /"conclusion":"[^"]*"/)) { concl=substr($0,RSTART+14,RLENGTH-15) }
+      if (wf=="") next
+      order[wf]=order[wf]" "NR
+      val[wf"|"NR]=concl
+    }
+    END {
+      for (wf in order) {
+        n=split(order[wf], idx, " ")
+        # keep most recent 10
+        start=1; if (n-10 > 0) start=n-9
+        total=0; fail=0
+        for (i=start;i<=n;i++) {
+          if (idx[i]=="") continue
+          total++
+          c=val[wf"|"idx[i]]
+          if (c=="failure" || c=="timed_out" || c=="cancelled") fail++
+        }
+        if (total>=4 && fail>=2 && fail<=8 && fail*100 <= total*80 && fail*100 >= total*20) {
+          print wf
+        }
+      }
+    }
+  ' || true)
+
+  local wf
+  for wf in $flaky_wfs; do
+    [ -n "$wf" ] && _ci_open_story FIX "flaky: ${wf}" >/dev/null || true
+  done
+  return 0
+}
+
+# _ci_detect_degradation
+#   Scan the last 20 ci-timing.jsonl lines, compute mean duration per workflow,
+#   and open a US story when a workflow crosses its threshold:
+#     unit*        > 300s  (5 min)
+#     integration* > 900s  (15 min)
+#   Returns 0 (loop-safe).
+_ci_detect_degradation() {
+  local dir; dir=$(_ci_state_dir)
+  local file="${dir}/ci-timing.jsonl"
+  [ -f "$file" ] || return 0
+
+  local degraded
+  degraded=$(tail -n 20 "$file" 2>/dev/null | awk '
+    {
+      wf=""; dur=0;
+      if (match($0, /"workflow":"[^"]*"/)) { wf=substr($0,RSTART+12,RLENGTH-13) }
+      if (match($0, /"duration_sec":[0-9]+/)) { dur=substr($0,RSTART+15,RLENGTH-15)+0 }
+      if (wf=="") next
+      sum[wf]+=dur; cnt[wf]++
+    }
+    END {
+      for (wf in sum) {
+        if (cnt[wf]==0) continue
+        avg=sum[wf]/cnt[wf]
+        lc=tolower(wf)
+        if (index(lc,"unit")>0 && avg>300)        { print wf "\t" int(avg) }
+        else if (index(lc,"integration")>0 && avg>900) { print wf "\t" int(avg) }
+      }
+    }
+  ' || true)
+
+  local line wf avg
+  # IFS=newline so each "wf<TAB>avg" record is one iteration; field-split on TAB.
+  local _oifs="$IFS"
+  IFS='
+'
+  for line in $degraded; do
+    IFS="$_oifs"
+    wf=$(printf '%s' "$line" | cut -f1)
+    avg=$(printf '%s' "$line" | cut -f2)
+    [ -n "$wf" ] && _ci_open_story US "CI degradation: ${wf} avg ${avg}s exceeds threshold" >/dev/null || true
+    IFS='
+'
+  done
+  IFS="$_oifs"
+  return 0
+}
+
 # FIX-070: flip a story row in the main repo's .roll/backlog.md between
 # 📋 Todo and 🔨 In Progress. The cycle worktree is gitignored at .roll/,
 # so editing the worktree copy + committing leaves no trace in git — and

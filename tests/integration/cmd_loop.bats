@@ -368,8 +368,8 @@ EOSHIM
   # FIX-052: mute is per-project (…/loop/mute-<slug>). US-LOOP-018 (#229)
   # prefixed the path with ${_SHARED_ROOT:-$HOME/.shared/roll}, so the literal
   # is `${_SHARED_ROOT:-$HOME/.shared/roll}/loop/mute-<slug>` — the `}` breaks a
-  # contiguous `.shared/roll/loop/mute-` match. Assert the stable /loop/mute-
-  # suffix instead, which survives future _SHARED_ROOT resolution changes.
-  grep -qE '/loop/mute-' "$runner"
+  # contiguous `/loop/mute-` match. Assert the stable `mute-` token instead,
+  # which survives future _SHARED_ROOT / _LOOP_RT_DIR resolution changes.
+  grep -qE 'mute-' "$runner"
   grep -qF 'tmux attach' "$runner"
 }

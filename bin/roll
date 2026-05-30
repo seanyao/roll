@@ -29,6 +29,12 @@ ROLL_PKG_CONVENTIONS="${ROLL_PKG_DIR}/conventions"
 # shellcheck source=../lib/watch.sh
 [[ -f "${ROLL_PKG_DIR}/lib/watch.sh" ]] && source "${ROLL_PKG_DIR}/lib/watch.sh"
 
+# US-CTX-001: context-feed budget — bounds the material (chiefly story feature
+# files) injected into the inner agent's prompt; summarizes/chunks over-budget
+# material with an explicit notice instead of silently truncating or hard-stuffing.
+# shellcheck source=../lib/context_feed_budget.sh
+[[ -f "${ROLL_PKG_DIR}/lib/context_feed_budget.sh" ]] && source "${ROLL_PKG_DIR}/lib/context_feed_budget.sh"
+
 # Colors
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -4021,6 +4027,32 @@ _project_agent() {
 _skill_content() {
   # Strip YAML frontmatter (---...---) — it's roll-internal metadata, not agent instructions
   awk 'NR==1 && /^---$/{skip=1;next} skip && /^---$/{skip=0;next} !skip{print}' "$1"
+}
+
+# US-CTX-001: inject a material file (chiefly a story feature .md) into a prompt
+# through the context-feed budget. Assembles budget-bounded material on stdout
+# and logs the actual injected size + chosen strategy (full / summarized /
+# chunked) to the event log. The material assembly itself never silently
+# truncates — over-budget files are summarized/chunked with an explicit notice
+# (see lib/context_feed_budget.sh). This is the bin/roll-side assembly point that
+# replaces "整文件硬塞" (whole-file hard-stuffing) for injected feature files.
+_feed_inject_material() {
+  local f="$1"
+  # Defensive: if the budget lib didn't load, fall back to raw file content so
+  # callers never break — but this path is exercised only on a broken install.
+  if ! command -v _feed_assemble >/dev/null 2>&1; then
+    [ -f "$f" ] && cat "$f"
+    return 0
+  fi
+  local plan
+  plan=$(_feed_plan "$f")
+  # AC: every injection records actual size + strategy in the event log.
+  if command -v _loop_event >/dev/null 2>&1; then
+    local _line
+    _line=$(_feed_log_line "$f" "$plan")
+    _loop_event context_feed "${LOOP_CYCLE_ID:-}" "$f" "$_line" 2>/dev/null || true
+  fi
+  _feed_assemble "$f"
 }
 
 _parse_review_verdict() {

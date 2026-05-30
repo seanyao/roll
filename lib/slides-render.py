@@ -625,6 +625,84 @@ def _inline(text: str) -> str:
     return text
 
 
+# ──────────────────────────── layout routing ────────────────────────────────
+
+
+# The default layout when a slide omits `layout:` — preserves the pre-layout
+# behaviour (a plain lang-en / lang-zh body block).
+DEFAULT_LAYOUT = "plain"
+
+
+class LayoutResolver:
+    """
+    Map a slide's `layout` name to its component partial path.
+
+    Partials live in `lib/slides/components/<layout>.html` next to this module.
+    The resolver does not read the file — it only computes and validates the
+    path so callers get a clear `Unknown layout: ...` error before any I/O.
+    """
+
+    def __init__(self, components_dir: Path | None = None) -> None:
+        if components_dir is None:
+            components_dir = Path(__file__).resolve().parent / "slides" / "components"
+        self.components_dir = components_dir
+
+    def available(self) -> list[str]:
+        """Return the sorted layout names backed by a `<name>.html` partial."""
+        if not self.components_dir.is_dir():
+            return []
+        names = [
+            p.stem
+            for p in self.components_dir.glob("*.html")
+        ]
+        # Locale-independent ordering: plain (the default/fallback) first, then
+        # the rest in plain ASCII sort so the error message is deterministic
+        # across CI locales.
+        rest = sorted(n for n in names if n != DEFAULT_LAYOUT)
+        head = [DEFAULT_LAYOUT] if DEFAULT_LAYOUT in names else []
+        return head + rest
+
+    def resolve(self, layout: str) -> Path:
+        """
+        Return the partial path for `layout`, or raise ValueError with the list
+        of available layouts when no matching partial file exists.
+
+        Layout names are restricted to `[a-z0-9-]+` so a malicious or malformed
+        `layout:` field (e.g. `../../etc/passwd`) can never escape
+        `components_dir` — anything else is reported as an unknown layout.
+        """
+        if not re.fullmatch(r"[a-z0-9-]+", layout):
+            avail = ", ".join(self.available())
+            raise ValueError(f"Unknown layout: {layout}; available: {avail}")
+        path = self.components_dir / f"{layout}.html"
+        if not path.is_file():
+            avail = ", ".join(self.available())
+            raise ValueError(f"Unknown layout: {layout}; available: {avail}")
+        return path
+
+
+def render_slide_inner(slide: dict, resolver: LayoutResolver) -> str:
+    """
+    Resolve the slide's layout to a partial, render that partial against the
+    slide dict, and return the inner HTML to inject into the main template's
+    slide slot.
+
+    The result is stripped of the partial's leading `<!-- ... -->` doc comment
+    and of surrounding blank lines so that, for the default `plain` layout, the
+    output is byte-identical to the pre-layout template body block.
+    """
+    layout = slide.get("layout") or DEFAULT_LAYOUT
+    partial_path = resolver.resolve(layout)
+    partial = partial_path.read_text(encoding="utf-8")
+    # Drop a leading HTML doc comment (the `<!-- layout: requires ... -->`
+    # header every partial carries) so it never leaks into the rendered deck.
+    partial = re.sub(
+        r"\A\s*<!--.*?-->(?:\s*\n)?", "", partial, count=1, flags=re.DOTALL
+    )
+    rendered = mustache(partial, slide)
+    return rendered.strip("\n")
+
+
 # ───────────────────────────── render_deck ──────────────────────────────────
 
 
@@ -636,6 +714,8 @@ def render_deck(deck_path: Path, template_path: Path) -> str:
     fm, body = parse_frontmatter(src)
     slides = parse_slides(body)
 
+    resolver = LayoutResolver()
+
     # Pre-render body_en / body_zh markdown into HTML strings so the template
     # can drop them in via {{{body_en_html}}}.
     for slide in slides:
@@ -644,6 +724,9 @@ def render_deck(deck_path: Path, template_path: Path) -> str:
         # Provide an `evidence` flag for inverted-section use in templates.
         if "evidence" not in slide:
             slide["evidence"] = []
+        # US-DECK-018: route each slide through its layout partial and inject
+        # the result via the main template's {{{slide_inner_html}}} slot.
+        slide["slide_inner_html"] = render_slide_inner(slide, resolver)
 
     context: dict = dict(fm)
     context["slides"] = slides

@@ -174,6 +174,14 @@ def main():
     with open(sys.argv[2], encoding='utf-8') as f:
         tmpl = f.read()
     meta, slides = parse_deck(deck)
+    # US-DECK-018: the slide loop now consumes {{{slide_inner_html}}} instead of
+    # {{{body_en}}} / {{{body_zh}}} directly. For these plain/cover sample slides
+    # the inner HTML is the plain layout body block — reproduce it here so the
+    # golden-master content match still exercises the real template loop.
+    plain = (
+        '<div class="lang-en">\n{body_en}\n</div>\n'
+        '<div class="lang-zh">\n{body_zh}\n</div>'
+    )
     # Decorate each slide with number_padded; ensure cover flag honored.
     for s in slides:
         try:
@@ -181,6 +189,9 @@ def main():
         except ValueError:
             n = 0
         s['number_padded'] = f"{n:02d}"
+        s['slide_inner_html'] = plain.format(
+            body_en=s.get('body_en', ''), body_zh=s.get('body_zh', '')
+        )
     ctx = dict(meta)
     ctx['slides'] = slides
     sys.stdout.write(render(tmpl, ctx))
@@ -306,8 +317,9 @@ teardown() { unit_teardown; }
   grep -q '{{#slides}}' "$TEMPLATE"
   grep -q '{{/slides}}' "$TEMPLATE"
   grep -q '{{number}}' "$TEMPLATE"
-  grep -q 'body_en' "$TEMPLATE"
-  grep -q 'body_zh' "$TEMPLATE"
+  # US-DECK-018: the slide loop now injects the layout-routed partial output via
+  # {{{slide_inner_html}}}; per-slide body_en/body_zh live in the plain partial.
+  grep -q '{{{slide_inner_html}}}' "$TEMPLATE"
 }
 
 @test "US-DECK-001: fixture deck.md exists with frontmatter and 19 slide sections (cover + 18)" {

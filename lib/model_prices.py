@@ -57,16 +57,6 @@ def load_snapshot(path: str) -> Dict[str, Any]:
     return data
 
 
-def load_latest_snapshot(snapshot_dir: str = SNAPSHOT_DIR) -> Dict[str, Any]:
-    """Load the newest snapshot by filename. Raises FileNotFoundError if none exist."""
-    snaps = list_snapshots(snapshot_dir)
-    if not snaps:
-        raise FileNotFoundError(
-            f"no price snapshots found in {snapshot_dir}; run `roll prices refresh`"
-        )
-    return load_snapshot(snaps[-1])
-
-
 def load_all_snapshots(snapshot_dir: str = SNAPSHOT_DIR) -> List[Dict[str, Any]]:
     """Load all snapshots, sorted oldest → newest. Raises FileNotFoundError if none."""
     snaps = list_snapshots(snapshot_dir)

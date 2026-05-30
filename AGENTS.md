@@ -14,7 +14,7 @@
 
 ## 2. Standards
 - **Bash**: `set -euo pipefail`. All variables quoted. shellcheck-clean.
-- **Rules**: [engineering-common-sense.md](guide/en/practices/engineering-common-sense.md).
+- **Rules**: engineering-common-sense — [EN](guide/en/practices/engineering-common-sense.md) · [中文](guide/zh/practices/engineering-common-sense.md).
 - **Test**: bats coverage for `cmd_*` and helpers.
   - **TCR commits**: run `roll test` — affected by default (fast) and it writes the `.roll/last-test-pass` proof the pre-commit hook checks. `roll test` honors `.roll/local.yaml` `test_isolation` (host by default; `tart` VM on this dev machine if configured).
   - **Pre-push**: run the full `npm test`.

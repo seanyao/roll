@@ -80,14 +80,14 @@ rec() { printf '{"result_eval":{"score":1,"dims":{"scope_fidelity":%s,"outcome":
   _LOOP_RT_DIR="$proj/.roll/loop"
 
   local slug; slug=$(_project_slug "$proj")
-  local runs="${_SHARED_ROOT}/loop/runs.jsonl"
+  # US-LOOP-020: runs.jsonl is now project-local (resolved via ROLL_PROJECT_RUNTIME_DIR).
+  local runs="${ROLL_PROJECT_RUNTIME_DIR}/runs.jsonl"
   : > "$runs"
   # three consecutive low-scope cycles for THIS project
   local i
   for i in 1 2 3; do
     printf '{"project":"%s","ts":"2026-05-30T0%d:00:00Z","result_eval":{"score":1,"dims":{"scope_fidelity":0.0,"outcome":0.0}}}\n' "$slug" "$i" >> "$runs"
   done
-  _LOOP_RUNS="$runs"
 
   run _loop_signals
   [ "$status" -eq 0 ]
@@ -119,13 +119,13 @@ rec() { printf '{"result_eval":{"score":1,"dims":{"scope_fidelity":%s,"outcome":
   _LOOP_RT_DIR="$proj/.roll/loop"
 
   local slug; slug=$(_project_slug "$proj")
-  local runs="${_SHARED_ROOT}/loop/runs.jsonl"
+  # US-LOOP-020: runs.jsonl is now project-local (resolved via ROLL_PROJECT_RUNTIME_DIR).
+  local runs="${ROLL_PROJECT_RUNTIME_DIR}/runs.jsonl"
   : > "$runs"
   local i
   for i in 1 2 3; do
     printf '{"project":"%s","ts":"2026-05-30T0%d:00:00Z","result_eval":{"score":1,"dims":{"scope_fidelity":0.0,"outcome":0.0}}}\n' "$slug" "$i" >> "$runs"
   done
-  _LOOP_RUNS="$runs"
 
   run _loop_signals
   [ "$status" -eq 0 ]

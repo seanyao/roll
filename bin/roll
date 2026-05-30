@@ -6098,7 +6098,102 @@ else
 fi
 # FIX-065: was hardcoded to ${HOME}/.shared/roll/loop/runs.jsonl which ignored
 # _SHARED_ROOT overrides and silently leaked test runs.jsonl writes into prod.
+# US-LOOP-020: this remains the legacy shared-root path for backward-compatible
+# reads / migration only. New cycle rows land in the project-local runs.jsonl
+# (see _runs_append + _loop_runs_file). Tests still override _LOOP_RUNS directly.
 _LOOP_RUNS="${_SHARED_ROOT}/loop/runs.jsonl"
+
+# US-LOOP-020: resolve the *current project's* runs.jsonl for read-side commands
+# (`roll loop runs`, --detail, signals, backfill). Resolution order:
+#   1. ROLL_PROJECT_RUNTIME_DIR env (test sandbox) → <dir>/runs.jsonl
+#   2. <current project>/.roll/loop/runs.jsonl  (the project we are invoked in)
+# Tests that set _LOOP_RUNS directly are honored by callers that read it; this
+# helper is for the live, project-local path. Prints the path; never fails.
+_loop_runs_file() {
+  if [[ -n "${ROLL_PROJECT_RUNTIME_DIR:-}" ]]; then
+    echo "${ROLL_PROJECT_RUNTIME_DIR}/runs.jsonl"
+    return 0
+  fi
+  # An explicit _LOOP_RUNS override (set by tests, or pointed at a custom path)
+  # wins over the live project-local default — but only when it diverges from
+  # the shared-root default. Otherwise resolve the current project's file.
+  if [[ -n "${_LOOP_RUNS:-}" && "${_LOOP_RUNS}" != "${_SHARED_ROOT}/loop/runs.jsonl" ]]; then
+    echo "${_LOOP_RUNS}"
+    return 0
+  fi
+  local proj; proj="${ROLL_MAIN_PROJECT:-$(pwd -P)}"
+  echo "${proj}/.roll/loop/runs.jsonl"
+}
+
+# US-LOOP-020: enumerate every loop-registered project and emit the union of
+# their .roll/loop/runs.jsonl rows as one newline-separated jsonl stream,
+# sorted oldest→newest by .ts (caller reverses for newest-first display).
+# Project enumeration uses the launchd plist registry on macOS (same source as
+# _status_loop_overview); on Linux (no plists) it falls back to the current
+# project's local file. A test sandbox can point the whole machine at one dir
+# via ROLL_PROJECT_RUNTIME_DIR, or list extra files via ROLL_LOOP_RUNS_ALL_DIRS
+# (':'-separated runtime dirs) for cross-project fixtures without launchd.
+_loop_runs_aggregate_all() {
+  command -v jq >/dev/null 2>&1 || return 0
+  # US-LOOP-020 hook point: ROLL_LOOP_RUNS_CACHE_TTL (default 0 = no cache).
+  # Reserved for a future caching layer over the cross-project merge; the
+  # default 0 means every call re-reads live files. No implementation built yet.
+  : "${ROLL_LOOP_RUNS_CACHE_TTL:=0}"
+  # Candidate runs.jsonl files, one per line. Built from the project registry,
+  # then deduped exactly (newline-bounded membership — no substring aliasing).
+  local _candidates=""
+  if [[ -n "${ROLL_LOOP_RUNS_ALL_DIRS:-}" ]]; then
+    # Explicit fixture dirs (tests) take precedence and avoid touching launchd.
+    local _oldifs="$IFS"; IFS=':'
+    local _d
+    for _d in ${ROLL_LOOP_RUNS_ALL_DIRS}; do
+      _candidates="${_candidates}${_d}/runs.jsonl
+"
+    done
+    IFS="$_oldifs"
+  elif [[ -n "${ROLL_PROJECT_RUNTIME_DIR:-}" ]]; then
+    _candidates="${ROLL_PROJECT_RUNTIME_DIR}/runs.jsonl
+"
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    local _plist _proj
+    while IFS= read -r _plist; do
+      [[ -f "$_plist" ]] || continue
+      _proj=$(awk '/<key>WorkingDirectory<\/key>/{f=1;next} f{gsub(/^[[:space:]]*<string>|<\/string>[[:space:]]*$/,"");print;exit}' "$_plist" 2>/dev/null)
+      [[ -n "$_proj" ]] || continue
+      _candidates="${_candidates}${_proj}/.roll/loop/runs.jsonl
+"
+    done < <(ls "${_LAUNCHD_DIR}"/com.roll.loop.*.plist 2>/dev/null)
+  fi
+  # Always include the current project's file as a fallback / supplement.
+  _candidates="${_candidates}$(_loop_runs_file)
+"
+
+  # Dedup (exact, newline-bounded) + keep only non-empty existing files.
+  local files="" seen="
+"
+  local _f
+  while IFS= read -r _f; do
+    [[ -n "$_f" && -f "$_f" && -s "$_f" ]] || continue
+    case "$seen" in *"
+${_f}
+"*) continue ;; esac
+    seen="${seen}${_f}
+"
+    files="${files}${_f}
+"
+  done <<EOF
+$_candidates
+EOF
+
+  [[ -n "$files" ]] || return 0
+
+  # Merge + stable sort by ts (rows lacking ts sort first). jq's sort_by is a
+  # stable sort, so same-ts rows keep file/encounter order.
+  printf '%s' "$files" | while IFS= read -r _f; do
+    [[ -n "$_f" ]] || continue
+    cat "$_f"
+  done | jq -c '.' 2>/dev/null | jq -s -c 'sort_by(.ts // "") | .[]' 2>/dev/null
+}
 
 # ──────────────────────────────────────────────────────────────
 # US-LOOP-018: _loop_resolve_project_path + _loop_runtime_dir
@@ -6223,6 +6318,63 @@ _loop_migrate_legacy_paths() {
     cp "$legacy" "$target"
     mv "$legacy" "${legacy}.migrated-${ts}"
   done
+  return 0
+}
+
+# ──────────────────────────────────────────────────────────────
+# US-LOOP-020: _loop_migrate_legacy_runs — one-shot migration of the
+# legacy machine-wide ~/.shared/roll/loop/runs.jsonl into per-project
+# .roll/loop/runs.jsonl, split by each row's `project` slug. Rows whose
+# project slug cannot be resolved to a runtime dir are left behind so no
+# history is lost. After splitting, the legacy file is renamed to
+# runs.jsonl.migrated-<ts> (GC reaps it after 7 days). Idempotent: the
+# rename makes a second run a no-op. Called by the outer runner at startup.
+# ──────────────────────────────────────────────────────────────
+# _loop_migrate_legacy_runs [<legacy_runs_file>]
+_loop_migrate_legacy_runs() {
+  local legacy="${1:-${_SHARED_ROOT:-$HOME/.shared/roll}/loop/runs.jsonl}"
+  [[ -f "$legacy" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  local ts; ts=$(date +%s)
+  # Distinct project slugs present in the legacy file (skip empty/null).
+  local projects; projects=$(jq -r '.project // empty' "$legacy" 2>/dev/null | sort -u)
+  [[ -n "$projects" ]] || { mv "$legacy" "${legacy}.migrated-${ts}" 2>/dev/null || true; return 0; }
+
+  local _unresolved=0
+  local _p
+  while IFS= read -r _p; do
+    [[ -n "$_p" ]] || continue
+    local _rt; _rt=$(_loop_runtime_dir "$_p" 2>/dev/null || echo "")
+    if [[ -z "$_rt" ]]; then
+      _unresolved=1
+      continue
+    fi
+    mkdir -p "$_rt"
+    local _dst="${_rt}/runs.jsonl"
+    # Append only rows not already present (dedup by run_id) — idempotent even
+    # if a partial migration ran before.
+    local _rows; _rows=$(jq -c --arg p "$_p" 'select(.project == $p)' "$legacy" 2>/dev/null)
+    local _line
+    while IFS= read -r _line; do
+      [[ -n "$_line" ]] || continue
+      local _rid; _rid=$(printf '%s' "$_line" | jq -r '.run_id // ""' 2>/dev/null)
+      if [[ -n "$_rid" ]] && grep -qF "\"run_id\":\"$_rid\"" "$_dst" 2>/dev/null; then
+        continue
+      fi
+      printf '%s\n' "$_line" >> "$_dst"
+    done <<EOF
+$_rows
+EOF
+  done <<EOF
+$projects
+EOF
+
+  # Only retire the legacy file once every project resolved; otherwise keep it
+  # so the next cycle can retry the unresolved slugs.
+  if [[ "$_unresolved" -eq 0 ]]; then
+    mv "$legacy" "${legacy}.migrated-${ts}" 2>/dev/null || true
+  fi
   return 0
 }
 
@@ -6894,7 +7046,15 @@ _runs_append() {
   # leaks a trailing \} into a real 4th arg ("{...}}"). Test explicit empty.
   local _phases_json="\${4:-}"
   [ -z "\$_phases_json" ] && _phases_json="{}"
-  local _runs_dst="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/runs.jsonl"
+  # US-LOOP-020: write the cycle row to the project-local runs.jsonl so each
+  # project owns its own cycle history. Falls back to the shared root only for
+  # transient slugs where _LOOP_RT_DIR could not be resolved at startup.
+  local _runs_dst
+  if [ -n "\${_LOOP_RT_DIR:-}" ]; then
+    _runs_dst="\${_LOOP_RT_DIR}/runs.jsonl"
+  else
+    _runs_dst="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/runs.jsonl"
+  fi
   command -v jq >/dev/null 2>&1 || return 0
   local _cid="\${CYCLE_ID:-pre-cycle-\$\$}"
   local _rid="loop-\${_cid%-*}"
@@ -7557,6 +7717,9 @@ fi
 # US-LOOP-019: migrate legacy control-plane files to project-local .roll/loop/.
 # Then resolve the runtime dir for all subsequent path lookups.
 _loop_migrate_legacy_paths "${slug}"
+# US-LOOP-020: one-shot split of the legacy machine-wide runs.jsonl into each
+# project's .roll/loop/runs.jsonl, then retire the legacy file. Idempotent.
+_loop_migrate_legacy_runs 2>/dev/null || true
 # US-AGENT-028: one-shot migrate legacy v1 agent-routes.yaml → v3 agents.yaml.
 # Idempotent + atomic — the running loop only sees the new config next cycle.
 _agents_migrate_v1_to_v3 2>/dev/null || true
@@ -8336,7 +8499,9 @@ HELP
     esac
   done
 
-  if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
+  # US-LOOP-020: read the project-local runs.jsonl.
+  local runs_src; runs_src=$(_loop_runs_file)
+  if [[ ! -f "$runs_src" ]] || [[ ! -s "$runs_src" ]]; then
     $quiet || echo "$(msg loop.no_loop_runs_yet 2>/dev/null || echo 'no loop runs yet')"
     return 0
   fi
@@ -8350,7 +8515,7 @@ HELP
   # Records for this project, oldest→newest, as a JSON array for the detector.
   local records
   records=$(jq -s -c --arg p "$project_slug" \
-    '[ .[] | select(.project == $p) ]' "$_LOOP_RUNS" 2>/dev/null) || records="[]"
+    '[ .[] | select(.project == $p) ]' "$runs_src" 2>/dev/null) || records="[]"
 
   local signals
   signals=$(printf '%s' "$records" \
@@ -8807,12 +8972,13 @@ _loop_runs_slowest_phase() {
 _loop_runs_detail() {
   local cycle_id="$1"
   command -v jq >/dev/null 2>&1 || { err "jq required for --detail"; return 1; }
-  if [[ ! -f "$_LOOP_RUNS" ]]; then
+  local runs_src; runs_src=$(_loop_runs_file)
+  if [[ ! -f "$runs_src" ]]; then
     echo "$(msg loop.no_runs_jsonl_yet)"
     return 0
   fi
   local row
-  row=$(jq -c --arg cid "$cycle_id" 'select(.cycle_id == $cid)' "$_LOOP_RUNS" | head -1)
+  row=$(jq -c --arg cid "$cycle_id" 'select(.cycle_id == $cid)' "$runs_src" | head -1)
   if [[ -z "$row" ]]; then
     echo "$(msg loop.cycle_not_found $cycle_id)"
     return 1
@@ -8945,13 +9111,9 @@ _loop_runs() {
     return $?
   fi
 
-  # FIX-060: refresh merged status before reading, so paused-window merges show up.
-  _loop_backfill_merged >/dev/null 2>&1 || true
-
-  if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
-    echo "$(msg loop.no_loop_runs_yet)"
-    return 0
-  fi
+  # US-LOOP-020: read the current project's local runs.jsonl. --all aggregates
+  # every project's file (enumerated via launchd plists), merged + time-sorted.
+  local runs_src; runs_src=$(_loop_runs_file)
 
   if ! command -v jq >/dev/null 2>&1; then
     err "$(msg loop.jq_required_for_roll_loop_runs)"
@@ -8962,9 +9124,20 @@ _loop_runs() {
   local project_slug; project_slug=$(_project_slug "$project_path")
   local filtered
   if $all_flag; then
-    filtered=$(cat "$_LOOP_RUNS")
+    # US-LOOP-020: cross-project view — enumerate plists, traverse each
+    # project's .roll/loop/runs.jsonl, merge and sort by ts (oldest→newest).
+    # Backfill is intentionally skipped here: it would require resolving and
+    # querying gh for every project's repo (slow + N network calls). The
+    # single-project path below backfills, so per-project views stay fresh.
+    filtered=$(_loop_runs_aggregate_all)
   else
-    filtered=$(jq -c --arg p "$project_slug" 'select(.project == $p)' "$_LOOP_RUNS")
+    # FIX-060: refresh merged status before reading, so paused-window merges show up.
+    _loop_backfill_merged "$runs_src" >/dev/null 2>&1 || true
+    if [[ ! -f "$runs_src" ]] || [[ ! -s "$runs_src" ]]; then
+      echo "$(msg loop.no_loop_runs_yet)"
+      return 0
+    fi
+    filtered=$(jq -c --arg p "$project_slug" 'select(.project == $p)' "$runs_src")
   fi
 
   if [[ -z "$filtered" ]]; then
@@ -9032,6 +9205,10 @@ _loop_log() {
   fi
 
   if [[ -z "$query" ]]; then
+    # US-LOOP-020: cron.log is the legacy machine-wide aggregate; steer users to
+    # per-cycle search. Notice on stderr so it never pollutes piped log output.
+    echo "note: cron.log is a legacy aggregate; use 'roll loop log <cycle-id>' for per-cycle search" >&2
+    echo "提示：cron.log 是旧的聚合日志；按周期查看请用 'roll loop log <cycle-id>'" >&2
     # No argument: find latest .log by cycle-id (filename reverse-sort).
     # Cycle filenames encode the start timestamp (YYYYMMDD-HHMMSS-PID.log) so
     # the lexicographically greatest name is always the most recent cycle.
@@ -11131,7 +11308,9 @@ _loop_cleanup_stale_runs_tmp() {
 
 _loop_backfill_merged() {
   (
-    local runs_path="${1:-${HOME}/.shared/roll/loop/runs.jsonl}"
+    # US-LOOP-020: default to the project-local runs.jsonl (callers may pass an
+    # explicit path). Was hardcoded to ${HOME}/.shared/roll/loop/runs.jsonl.
+    local runs_path="${1:-$(_loop_runs_file)}"
     [ -f "$runs_path" ] || return 0
     command -v gh >/dev/null 2>&1 || return 0
     command -v jq >/dev/null 2>&1 || return 0

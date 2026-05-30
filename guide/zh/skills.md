@@ -24,6 +24,27 @@
 | 生成变更日志 | `roll-.changelog` | 成功 Deploy 后自动触发 |
 | QA 测试参考 | `roll-.qa` | 写测试时参考 |
 | 意图澄清 | `roll-.echo` | 用户输入模糊或不清晰时自动激活 |
+| 遗留文档自动化 | `roll-doc` | 扫描项目、建文档索引、补缺口、深度读取跨目录主题 |
+
+## roll-doc —— 遗留项目文档自动化
+
+`roll-doc` 运行四个 phase——扫描/索引 → 缺口分析 → 填充 → 报告——外加深度读取的
+**Phase 3b**。Phase 3 填充目录级缺口(每个缺口目录孤立读取,至多 20 个文件);
+Phase 3b 构建完整项目符号表(每个源文件全量读取,不截断),侦测目录级填充单独
+无法发现的 **6 类跨目录主题**:
+
+| 主题 | 触发条件 | 输出 |
+|------|----------|------|
+| 数据流 / 调用链 | import 链跨越 ≥ 3 个源目录 | `docs/data-flows.md` |
+| 状态机 | `*State` / `*Status` 枚举被 ≥ 2 个文件引用 | `docs/state-machines.md` |
+| 外部集成 | 存在 `fetch` / `axios` / `*_URL` 常量 | `docs/integrations.md` |
+| 部署管线 | 存在 CI 配置文件加部署 URL 模式 | `docs/deployment.md` |
+| Agent 入口 | 无 `AGENTS.md` 且源码根有 ≥ 3 个子目录 | `AGENTS.md` |
+| 高引用目录 | 某目录被 ≥ 5 个源文件引用 | `<dir>/README.md` |
+
+`$roll-doc --dry-run` 运行 Phase 1–2 并打印 Phase 3 / 3b 计划而不写文件;
+`$roll-doc --force` 即便目标已存在也重新生成草稿。完整指南见
+[roll-doc.md](roll-doc.md)。
 
 ## 快速决策树
 

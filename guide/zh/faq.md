@@ -570,6 +570,35 @@ gitlab.com / 自建 → 检查 SSH key
 # 只是暂时看不到其他机器的 cycle，等连接恢复即自动同步。
 ```
 
+### C10. 我跑了 roll-doc——怎么知道它做了 Phase 3a 还是 Phase 3b？
+
+**症状:** 你跑了 `$roll-doc`,想知道它是停在目录级填充(Phase 3a),还是继续做了
+深度的跨目录读取(Phase 3b)。
+
+**为什么会这样:** Phase 3a(即"Fill"填充阶段)孤立地读取每个缺口目录——每个目录
+至多 20 个源文件——产出模块 README。Phase 3b("Deep Read")仅在项目具备值得记录的
+跨目录结构时触发:跨 ≥ 3 个目录的 import 链、被共享的 `*State` / `*Status` 枚举、
+外部端点调用,或 CI 配置文件。纯文档项目若无源码缺口且无此类特征,则完全跳过
+Phase 3b。
+
+**看 Phase 4 报告。** 运行结束的摘要始终打印两段:
+
+```
+Phase 3 — Fill
+  2 drafts generated: [src/commands/README.md, docs/CONVENTIONS.md]
+Phase 3b — Deep Read
+  Symbol table: exports(42) imports(156) enums(7) external_urls(4) configs(3)
+  2 topic documents generated:
+    - docs/data-flows.md     (data-flow)   source entries: 6
+    - docs/integrations.md   (external-integration) source entries: 4
+```
+
+若 Phase 3b 无命中,则只打印一行——`Phase 3b: no subject-level drafts generated`
+——所以没有任何 `docs/data-flows.md` / `docs/state-machines.md` /
+`docs/integrations.md` / `docs/deployment.md` 输出,就是只跑了 Phase 3a 的标志。
+在 `--dry-run` 下,同样的 Phase 3b 行会标 `(plan)` 且不写文件。完整拆解见
+[roll-doc.md](roll-doc.md)。
+
 
 ---
 

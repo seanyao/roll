@@ -627,6 +627,40 @@ gitlab.com / self-hosted → check your SSH key
 # until connectivity is restored.
 ```
 
+### C10. I ran roll-doc — how do I know whether it did Phase 3a or Phase 3b?
+
+**Symptoms:** You run `$roll-doc` and want to know whether it stopped at the
+directory-level fill (Phase 3a) or went on to the deep cross-directory read
+(Phase 3b).
+
+**Why this happens:** Phase 3a (the "Fill" phase) reads each gap directory in
+isolation — up to 20 files per gap directory — and emits module READMEs.
+Phase 3b ("Deep Read") only fires when the project has cross-directory
+structure worth documenting: an import chain spanning ≥ 3 directories, a shared
+`*State` / `*Status` enum, external endpoint calls, or a CI config file. A pure
+docs-only project with no source gaps and no such characteristics skips
+Phase 3b entirely.
+
+**Read the Phase 4 report.** The end-of-run summary always prints both
+sections:
+
+```
+Phase 3 — Fill
+  2 drafts generated: [src/commands/README.md, docs/CONVENTIONS.md]
+Phase 3b — Deep Read
+  Symbol table: exports(42) imports(156) enums(7) external_urls(4) configs(3)
+  2 topic documents generated:
+    - docs/data-flows.md     (data-flow)   source entries: 6
+    - docs/integrations.md   (external-integration) source entries: 4
+```
+
+If Phase 3b found nothing it prints exactly one line —
+`Phase 3b: no subject-level drafts generated` — so the absence of any
+`docs/data-flows.md` / `docs/state-machines.md` / `docs/integrations.md` /
+`docs/deployment.md` output is the tell that only Phase 3a ran. Under
+`--dry-run`, the same Phase 3b lines appear tagged `(plan)` and nothing is
+written. Full breakdown: [roll-doc.md](roll-doc.md).
+
 
 ---
 

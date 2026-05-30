@@ -302,6 +302,20 @@ reads that snapshot plus the GitHub API and reports loop health, backlog
 progress, Dream results, and CI state — read-only, no local `roll` needed. See
 [Remote Monitoring](loop.md#remote-monitoring) for setup and troubleshooting.
 
+### A13. What's that coloured summary block in the `.command` window?
+
+**Short answer:** It's the cycle exit summary — a recap of what the cycle just
+did, printed right before `press enter to close`.
+
+**Details:** When a cycle ends, the `.command` window renders a
+`─── Cycle <id> Summary ───` block covering five signals: the result
+(`built: <story>` or `idle`), CI status (`green` / `red` / `heal-attempting`),
+todo remaining, the top phases by time, and any failure / alert highlights
+(`✗` red for failures, `⚠` yellow for warnings). A fully green cycle prints in
+the default colour. Set `NO_COLOR=1` to disable colour. The `press enter to
+close` prompt is unchanged. See
+[Cycle exit summary](loop.md#cycle-exit-summary) for the full breakdown.
+
 ---
 
 ## B. How Roll Compares

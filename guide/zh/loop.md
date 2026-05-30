@@ -386,6 +386,76 @@ roll loop unmute      # 🔔 重新开启弹窗
 `mute` 文件对所有项目、所有自主活动（loop + peer review）共享生效。
 一个开关控制全部。
 
+## Cycle 退出摘要（Cycle exit summary）
+
+When a cycle ends and the tmux session detaches, the macOS `.command` window no longer leaves you on a bare `press enter to close` line.
+
+cycle 结束、tmux 会话退出后，macOS `.command` 窗口不再只剩一行 `press enter to close`。
+
+Just before that prompt, the window renders a compact recap so you can review the cycle without scrolling back or opening the cron log:
+
+就在那行提示之前，窗口会渲染一段紧凑的复盘块，让你不必回滚 tmux scrollback 或翻 cron 日志就能复盘本轮：
+
+```text
+─── Cycle 20260530-2301-94839 Summary ───
+  built: US-LOOP-040 · tcr commits: 4
+  ci: green
+  todo remaining: 7
+  phases (top 5 by time):
+    build                   612s
+    ci                       94s
+    pr                       31s
+  press enter to close.
+```
+
+The summary covers five signals:
+
+摘要覆盖五类信号：
+
+1. Result — the cycle outcome from `runs.jsonl`: `built: <story> · tcr commits: N`, or `idle: no story picked`.
+
+   本轮处理结果——来自 `runs.jsonl`：成功时 `built: <story> · tcr commits: N`，idle 时显示 `idle: no story picked`。
+2. CI / build status — the latest `ci` event outcome: `green` / `red` / `heal-attempting` / `ci: n/a`.
+
+   测试 / 构建状态——最新 `ci` 事件结果：`green` / `red` / `heal-attempting`，无 ci 事件时 `ci: n/a`。
+3. Todo remaining — count of `📋 Todo` lines in `.roll/backlog.md`.
+
+   Todo 剩余——扫 `.roll/backlog.md` 里 `📋 Todo` 行的总数。
+4. Phase breakdown — the top 5 cycle phases by elapsed time.
+
+   阶段耗时——按耗时降序的前 5 个阶段。
+5. Failure / alert highlights — failed/aborted runs, red CI, active alerts and suspected zero-diff cycles get a `✗` / `⚠` prefix and (on a colour terminal) red / yellow highlighting; a fully green cycle prints in the default colour with no prefix.
+
+   失败 / 告警高亮——failed/aborted、CI red、有 alert、疑似 zero-diff 会带 `✗`（失败）/ `⚠`（告警）前缀，并在彩色终端里红 / 黄高亮；全绿状态以默认色输出、不加前缀。
+
+The `press enter to close` prompt is preserved — the summary prints above it, the close interaction is unchanged.
+
+`press enter to close` 提示保留——摘要打印在它上方，关闭交互完全不变。
+
+### 关闭颜色（Turning off colour）
+
+ANSI colour is only emitted on a real terminal; pipes, redirects and captured output stay plain text. Force colour off with `NO_COLOR=1` (per [no-color.org](https://no-color.org)):
+
+ANSI 颜色仅在真实终端启用；管道 / 重定向 / capture 时输出纯文本。在 TTY 上强制关闭颜色用 `NO_COLOR=1`（遵循 [no-color.org](https://no-color.org)）：
+
+```bash
+NO_COLOR=1 roll loop now
+```
+
+### 排障：没有摘要出现（no summary appears）
+
+If the cycle exited early (aborted/idle) or `runs.jsonl` had not yet flushed, the window prints a single placeholder line instead, and `press enter` still works:
+
+如果 cycle 早退（aborted/idle）或 `runs.jsonl` 还没写盘，窗口改为打印一行占位文案，`press enter` 仍可用：
+
+```text
+(summary unavailable — see log: ~/.shared/roll/loop/cron-<slug>.log)
+```
+
+Summary rendering is always silent best-effort: if `python3` is missing or the data is corrupt, the cycle skips the recap and falls through to `press enter to close` — it never changes the `.command` exit code or blocks the window.
+
+摘要渲染始终是 silent best-effort：python3 缺失或数据损坏时，跳过摘要直接走 `press enter to close`——绝不改变 `.command` 退出码，也不阻塞窗口关闭。
+
 ## 并发安全
 
 Loop 有两层保护：

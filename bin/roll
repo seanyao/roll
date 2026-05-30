@@ -6563,6 +6563,67 @@ _loop_runtime_dir() {
   echo "${proj}/.roll/loop"
 }
 
+# US-LOOP-040: render this cycle's exit summary to stdout for the .command
+# Terminal window (after tmux attach exits, before `press enter to close`).
+# Pure read-side view: resolves the project-local runs.jsonl / events.ndjson /
+# backlog / cron log, then delegates rendering to lib/loop-exit-summary.py.
+#
+# Usage: _loop_render_exit_summary <slug> [<cycle_id>]
+#
+# AC: silent fallback — when python3 is missing, the renderer script is absent,
+# or any source is broken, this MUST return 0 (never blocks `press enter`).
+_loop_render_exit_summary() {
+  local slug="${1:-}"
+  local cycle_id="${2:-}"
+  [ -n "$slug" ] || return 0
+
+  local renderer="${ROLL_PKG_DIR}/lib/loop-exit-summary.py"
+  [ -f "$renderer" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  # Resolve the project-local runtime dir (honors ROLL_PROJECT_RUNTIME_DIR for
+  # tests); fall back to the shared root for transient slugs.
+  local rt_dir
+  rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  local shared="${_SHARED_ROOT:-$HOME/.shared/roll}/loop"
+
+  local runs="" events="" cron_log=""
+  if [ -n "$rt_dir" ] && [ -f "${rt_dir}/runs.jsonl" ]; then
+    runs="${rt_dir}/runs.jsonl"
+  elif [ -f "${shared}/runs.jsonl" ]; then
+    runs="${shared}/runs.jsonl"
+  fi
+  if [ -n "$rt_dir" ] && [ -f "${rt_dir}/events.ndjson" ]; then
+    events="${rt_dir}/events.ndjson"
+  elif [ -f "${shared}/events-${slug}.ndjson" ]; then
+    events="${shared}/events-${slug}.ndjson"
+  fi
+  # cron log lives under the shared root (per-project file).
+  if [ -f "${shared}/cron-${slug}.log" ]; then
+    cron_log="${shared}/cron-${slug}.log"
+  fi
+
+  # Backlog: project-local .roll/backlog.md relative to the resolved runtime dir.
+  local backlog=""
+  if [ -n "$rt_dir" ]; then
+    local _proj_root="${rt_dir%/.roll/loop}"
+    [ -f "${_proj_root}/.roll/backlog.md" ] && backlog="${_proj_root}/.roll/backlog.md"
+  fi
+  [ -z "$backlog" ] && [ -f ".roll/backlog.md" ] && backlog=".roll/backlog.md"
+
+  local _args
+  _args=""
+  [ -n "$runs" ] && _args="$_args --runs $runs"
+  [ -n "$events" ] && _args="$_args --events $events"
+  [ -n "$backlog" ] && _args="$_args --backlog $backlog"
+  [ -n "$cron_log" ] && _args="$_args --cron-log $cron_log"
+  [ -n "$cycle_id" ] && _args="$_args --cycle-id $cycle_id"
+
+  # shellcheck disable=SC2086 — args are space-free paths assembled above.
+  python3 "$renderer" $_args 2>/dev/null || return 0
+  return 0
+}
+
 # ──────────────────────────────────────────────────────────────
 # US-LOOP-019: _loop_migrate_legacy_paths — one-shot migration of
 # control-plane files (state / ALERT / PAUSE / mute) from legacy
@@ -8152,8 +8213,13 @@ if command -v tmux >/dev/null 2>&1; then
     # user can scroll through the full cycle output instead of seeing nothing.
     # FIX-139: after the session ends, show ONLY this cycle's per-cycle log
     # (newest in .roll/cycle-logs/), not the global cumulative transcript.
-    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=\$(ls -t "%s"/.roll/cycle-logs/*.log 2>/dev/null | head -1)\\necho\\nif [ -n "\$LOGFILE" ] && [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing this cycle log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. Try: roll loop log"\\n  echo "  press enter to close."\\n  echo "================================================================"\\n  read _\\nfi\\n' \\
-      "\$SESSION" "${project_path}" > "\$_attach_cmd" 2>/dev/null || true
+    # US-LOOP-040: before the `press enter to close` prompt, render this
+    # cycle's exit summary (built/ci/todo/phases/alerts) so the user sees what
+    # happened without scrolling tmux scrollback or opening the cron log. The
+    # renderer is silent-fallback (python3 missing / broken JSON → no output,
+    # exit 0) so it can never block the prompt below.
+    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=\$(ls -t "%s"/.roll/cycle-logs/*.log 2>/dev/null | head -1)\\necho\\nif [ -n "\$LOGFILE" ] && [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing this cycle log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. Try: roll loop log"\\n  echo "================================================================"\\n  bash %s _loop_render_exit_summary %s 2>/dev/null || true\\n  echo\\n  echo "  press enter to close."\\n  read _\\nfi\\n' \\
+      "\$SESSION" "${project_path}" "${roll_bin}" "${slug}" > "\$_attach_cmd" 2>/dev/null || true
     chmod +x "\$_attach_cmd" 2>/dev/null || true
     open -g -a Terminal "\$_attach_cmd" >/dev/null 2>&1 || true
   fi
@@ -13031,6 +13097,7 @@ main() {
     prices)        cmd_prices "$@" ;;
     changelog)     cmd_changelog "$@" ;;
     config)        cmd_config "$@" ;;
+    _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

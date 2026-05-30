@@ -331,7 +331,8 @@ teardown() { unit_teardown_cd; }
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.roll.loop.stale-fix097</string>
-  <key>WorkingDirectory</key><string>${vanished}</string>
+  <key>WorkingDirectory</key>
+  <string>${vanished}</string>
 </dict>
 </plist>
 EOF
@@ -342,7 +343,8 @@ EOF
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.roll.loop.live-fix097</string>
-  <key>WorkingDirectory</key><string>${live_proj}</string>
+  <key>WorkingDirectory</key>
+  <string>${live_proj}</string>
 </dict>
 </plist>
 EOF

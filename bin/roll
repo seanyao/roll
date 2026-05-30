@@ -8499,7 +8499,7 @@ if command -v tmux >/dev/null 2>&1; then
     # user can scroll through the full cycle output instead of seeing nothing.
     # FIX-139: after the session ends, show ONLY this cycle's per-cycle log
     # (newest in .roll/cycle-logs/), not the global cumulative transcript.
-    # US-LOOP-040: before the `press enter to close` prompt, render this
+    # US-LOOP-040: before the 'press enter to close' prompt, render this
     # cycle's exit summary (built/ci/todo/phases/alerts) so the user sees what
     # happened without scrolling tmux scrollback or opening the cron log. The
     # renderer is silent-fallback (python3 missing / broken JSON → no output,

@@ -116,6 +116,10 @@ class LoopFmt:
         self.pending_ci      = False
         self.pending_story   = False
         self.spinner         = Spinner()
+        # US-VIEW-020: consecutive same-file Edit/Write streak. Tracks the last
+        # file path and how many times in a row it's been edited so the renderer
+        # can collapse N identical lines into one `✏ <basename> ×N` line.
+        self._edit_streak    = (None, 0)  # (last_file_path, count)
         # Accumulate token usage across all assistant turns in the cycle so
         # the trailing result event can emit a 'usage' event carrying the
         # cumulative totals (result.usage only carries the last turn's).
@@ -199,9 +203,54 @@ class LoopFmt:
                 m2 = re.search(r'(\w+)\s*→\s*(\w+)', text)
                 if m2:
                     agents = f"{m2.group(1)} → {m2.group(2)}"
+                self._flush_edit_streak()
                 print(step("peer", agents, f"{round_str} · {verdict}"))
                 return
         # All other text: Tier 3, suppress
+
+    def _edit_streak_line(self, path, count):
+        """Render the streak line for `path` at `count`. basename only."""
+        base = os.path.basename(path) or path
+        suffix = f" ×{count}" if count >= 2 else ""
+        return f"  {DARK_GRAY}✏ {base}{suffix}{RESET}"
+
+    def _flush_edit_streak(self):
+        """Finalize the current Edit/Write streak (if any), leaving its last
+        line in place, and reset the streak state. In production the streak
+        used `\\r` in-place refresh, so we end with a newline to keep the final
+        line; in test mode each line was already printed standalone."""
+        path, count = self._edit_streak
+        if path is None:
+            return
+        if _SPIN_ENABLED:
+            # finish the in-place line so subsequent output starts fresh
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        self._edit_streak = (None, 0)
+
+    def _handle_edit(self, path):
+        last_path, count = self._edit_streak
+        if path == last_path:
+            count += 1
+            self._edit_streak = (path, count)
+            line = self._edit_streak_line(path, count)
+            if _SPIN_ENABLED:
+                # in-place refresh: overwrite the current line with the new ×N
+                sys.stdout.write("\r" + line)
+                sys.stdout.flush()
+            else:
+                # deterministic test mode: static line per Spinner-style convention
+                print(line)
+        else:
+            # different file: flush previous streak, then start a new one
+            self._flush_edit_streak()
+            self._edit_streak = (path, 1)
+            line = self._edit_streak_line(path, 1)
+            if _SPIN_ENABLED:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            else:
+                print(line)
 
     def _handle_tool_use(self, blk):
         name = blk.get("name", "")
@@ -212,8 +261,11 @@ class LoopFmt:
 
         if name in ("Edit", "Write"):
             path = inp.get("file_path") or inp.get("path", "")
-            print(f"  {DARK_GRAY}✏ {path}{RESET}")
+            self._handle_edit(path)
             return  # Tier 2
+
+        # Any non-Edit tool_use breaks the streak (don't collapse across them).
+        self._flush_edit_streak()
 
         if name == "Bash":
             cmd = inp.get("command", "")
@@ -258,6 +310,7 @@ class LoopFmt:
                 self.last_test_count = int(m.group(1))
 
             if is_err:
+                self._flush_edit_streak()  # don't stack an error onto a streak
                 tool_name = "tool"
                 lines = [l for l in text.splitlines() if l.strip()][:3]
                 detail = " | ".join(lines)
@@ -324,6 +377,9 @@ class LoopFmt:
         return str(content) if content else ""
 
     def _handle_result(self, ev):
+        # US-VIEW-020: flush any residual Edit streak before the cycle summary
+        # so the final ✏ line isn't lost / left mid-`\r`.
+        self._flush_edit_streak()
         dur_ms   = ev.get("duration_ms", 0)
         cost_usd = ev.get("total_cost_usd", 0)
         dur_s    = dur_ms / 1000

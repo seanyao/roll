@@ -231,6 +231,22 @@ Each cycle row shows token usage in a 4-component format:
 When a cycle has no cache data (older cycles or non-Opus models), the column
 falls back to the two-part `in/out` format.
 
+**Per-agent coverage.** Token/cost capture depends on a per-agent usage plugin.
+
+| Agent | Token/cost in dashboard |
+|-------|-------------------------|
+| Claude | ✅ supported |
+| pi (DeepSeek) | ✅ supported |
+| OpenAI (codex) | ✅ supported |
+| Gemini | ✅ supported |
+| Kimi | ✅ supported |
+| Qwen | ✅ supported |
+| OpenCode | ❌ shows `—/—` |
+
+Agents without a plugin fall back to a `—/—` placeholder. Adding a new agent is
+a small per-agent plugin (`lib/agent_usage/<agent>.py`) — it does not happen
+automatically. See `lib/agent_usage/README.md` for the five-step howto.
+
 ### Rollup rows
 
 Below the cycle list, daily totals break out all four components:

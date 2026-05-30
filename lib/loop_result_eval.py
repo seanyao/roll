@@ -235,13 +235,131 @@ def score_cycle(facts: dict) -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# US-EVAL-004: self-evolution signals — repeated low-score patterns.
+#
+# This is the pure *detection* half. Given an ordered (oldest→newest) list of
+# runs.jsonl records, it finds dimensions that have been low (0.0) for N cycles
+# in a row and turns each into a structured improvement *signal*. It does NOT
+# write the brief, touch the backlog, or dedup against history — that side-
+# effecting wiring lives in bin/roll, which dedups on each signal's stable
+# ``key`` so the same standing pattern is surfaced once, not every cycle.
+#
+# A signal is advisory only: it is meant to be surfaced in the brief's
+# improvement-signal section and to seed a *candidate* backlog draft marked
+# "📋 待人确认" — never to auto-activate a story or auto-edit code.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# How many consecutive low cycles a dimension must show before it is a signal.
+SIGNAL_STREAK = 3
+
+# Per-dimension signal metadata: the candidate backlog item kind (FIX vs IDEA)
+# and a human-facing description of what the streak means. A dimension that
+# keeps measuring 0.0 means the loop is reliably failing that axis, so most map
+# to FIX; scope_fidelity (repeatedly idle / off-scope) is a process IDEA.
+_SIGNAL_META = {
+    "outcome":        ("FIX",  "cycles keep failing to merge into main"),
+    "correctness":    ("FIX",  "produced PRs keep failing CI"),
+    "scope_fidelity": ("IDEA", "cycles keep going idle or off-scope"),
+    "quality":        ("FIX",  "cycles keep landing without test activity"),
+    "efficiency":     ("IDEA", "cycles keep blowing past their est_min budget"),
+    "cleanliness":    ("FIX",  "cycles keep leaving orphans / raising ALERTs"),
+}
+
+
+def _result_eval_of(record):
+    """Pull a usable result_eval block out of a record, or None.
+
+    Accepts either a full runs.jsonl record ({..., "result_eval": {...}}) or a
+    bare result_eval block ({"score":.., "dims":{...}})."""
+    if not isinstance(record, dict):
+        return None
+    ev = record.get("result_eval", record)
+    if isinstance(ev, dict) and isinstance(ev.get("dims"), dict):
+        return ev
+    return None
+
+
+def detect_signals(records, streak: int = SIGNAL_STREAK):
+    """Detect repeated-low-score patterns over an ordered record list.
+
+    ``records`` is oldest→newest. A dimension fires a signal when its most
+    recent ``streak`` *scored* cycles all measure exactly 0.0 (low) on it —
+    "unknown" cycles are skipped (they neither confirm nor break the streak,
+    so a missing CI signal does not mask a real failing streak). Each signal
+    is a dict::
+
+        {
+          "key": "lowdim:<dim>",      # stable id for dedup
+          "dim": "<dim>",
+          "kind": "FIX" | "IDEA",
+          "streak": <int>,            # how many low cycles in a row
+          "summary": "<one-line human description>",
+        }
+
+    Returns signals in DIMENSIONS order (deterministic, locale-independent).
+    """
+    try:
+        streak = int(streak)
+    except (TypeError, ValueError):
+        streak = SIGNAL_STREAK
+    if streak < 1:
+        streak = 1
+
+    evals = [ev for ev in (_result_eval_of(r) for r in (records or [])) if ev]
+    signals = []
+    for name, _weight in DIMENSIONS:
+        # Walk newest→oldest, counting a leading run of known-low scores.
+        run = 0
+        for ev in reversed(evals):
+            v = (ev.get("dims") or {}).get(name, UNKNOWN)
+            if v == UNKNOWN or v is None:
+                continue  # unknown neither extends nor breaks the streak
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if fv <= 0.0:
+                run += 1
+            else:
+                break  # a known-good cycle breaks the streak
+        if run >= streak:
+            kind, why = _SIGNAL_META.get(name, ("IDEA", "repeated low score"))
+            signals.append({
+                "key": "lowdim:" + name,
+                "dim": name,
+                "kind": kind,
+                "streak": run,
+                "summary": "%s for %d cycles in a row" % (why, run),
+            })
+    return signals
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Score a loop cycle result.")
     parser.add_argument("--facts", default=None,
                         help="cycle facts as a JSON object; reads stdin if omitted")
+    parser.add_argument("--signals", action="store_true",
+                        help="read a JSON array of runs records from --facts/stdin "
+                             "and emit detected self-evolution signals")
+    parser.add_argument("--streak", type=int, default=SIGNAL_STREAK,
+                        help="consecutive low cycles required to fire a signal")
     args = parser.parse_args()
 
     raw = args.facts if args.facts is not None else sys.stdin.read()
+
+    if args.signals:
+        try:
+            records = json.loads(raw) if raw.strip() else []
+        except (ValueError, AttributeError) as exc:
+            print(f"loop_result_eval: bad records JSON: {exc}", file=sys.stderr)
+            return 1
+        if not isinstance(records, list):
+            print("loop_result_eval: --signals expects a JSON array", file=sys.stderr)
+            return 1
+        print(json.dumps(detect_signals(records, args.streak), sort_keys=True))
+        return 0
+
     try:
         facts = json.loads(raw) if raw.strip() else {}
     except (ValueError, AttributeError) as exc:

@@ -7530,6 +7530,10 @@ _phases_for_runs=\$(_phases_to_json 2>/dev/null || echo '{}')
 # US-LOOP-005: now routed through _runs_append so timeout/worktree-setup-fail
 # share the same write logic. _runs_append is idempotent on run_id.
 _runs_append "\$_cycle_status" "\$_cycle_tcr" "\$_cycle_built" "\$_phases_for_runs" 2>/dev/null || true
+# US-EVAL-004: after the scored row lands, surface any repeated low-score
+# pattern as a candidate draft (deduped, never auto-activated). Quiet so the
+# cycle log stays clean; failures here never affect the cycle outcome.
+_loop_signals --quiet 2>/dev/null || true
 trap '_inner_cleanup' EXIT
 INNER
   chmod +x "$inner_path"
@@ -7941,6 +7945,7 @@ cmd_loop() {
     test)    shift; _loop_test "$@" ;;
     status)  _loop_status "$@" ;;
     eval)    _loop_eval "$@" ;;
+    signals) _loop_signals "$@" ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
     log)     _loop_log "$@" ;;
@@ -7969,6 +7974,7 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mu
   test          Quick smoke test (tmux/popup/stream chain)
   status        Show scheduler state and current loop state
   eval [N]      Result-eval trend over the last N scored cycles (default 14)
+  signals       Surface repeated low-score patterns as candidate drafts (📋 待人确认)
   monitor       Live dashboard: launchd status, queue, recent runs
   runs [N]      Show last N run summaries (default 10)
   log [id]      Show per-cycle log (default: latest; optional cycle-id or prefix)
@@ -8285,6 +8291,126 @@ HELP
     return 1
   fi
   python3 "${ROLL_PKG_DIR}/lib/roll-loop-status.py" --eval ${n:+$n}
+}
+
+# US-EVAL-004: self-evolution signals — surface repeated low-score patterns.
+#
+# Reads the project's scored runs.jsonl, asks the rubric's pure detector
+# (lib/loop_result_eval.py --signals) for any dimension that has been low for
+# N cycles in a row, then for each *fresh* signal (deduped on its stable key
+# against .roll/loop/signals-seen) appends a CANDIDATE backlog draft to
+# .roll/signals/candidates.md marked "📋 待人确认". It never edits the real
+# backlog, never activates a story, never touches code — it only exposes.
+#
+# Surfaced candidates feed the brief's improvement-signal section; the brief
+# skill reads candidates.md. `roll loop signals` runs this on demand and the
+# cycle-finish hook calls it once per cycle so standing patterns get raised
+# exactly once.
+_loop_signals() {
+  local quiet=false streak=3
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<'HELP'
+Usage: roll loop signals [--streak N] [--quiet]
+
+  Detect repeated low-score patterns in the cycle result-eval history and
+  expose them as improvement signals: each fresh pattern appends a CANDIDATE
+  backlog draft (IDEA/FIX, marked 📋 待人确认) to .roll/signals/candidates.md.
+  Deduped per pattern, so a standing issue is raised once, not every cycle.
+  Never edits the real backlog, activates a story, or changes code.
+
+  检测 cycle 结果评分中反复出现的低分模式，暴露成改善信号：每个新模式向
+  .roll/signals/candidates.md 追加一条候选 backlog 草稿（IDEA/FIX，标 📋 待人确认）。
+  按模式去重，同一问题只提一次；绝不改真实 backlog / 激活故事 / 改代码。
+
+Options:
+  --streak N   consecutive low cycles required to fire (default 3)
+  --quiet      suppress the "no new signals" line (used by the cycle hook)
+HELP
+        return 0 ;;
+      --streak) streak="${2:-3}"; shift 2 ;;
+      --streak=*) streak="${1#--streak=}"; shift ;;
+      --quiet) quiet=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
+    $quiet || echo "$(msg loop.no_loop_runs_yet 2>/dev/null || echo 'no loop runs yet')"
+    return 0
+  fi
+  command -v jq >/dev/null 2>&1 || { $quiet || err "jq required for roll loop signals"; return 0; }
+
+  # Prefer the main project dir (inner runner runs from a worktree, so pwd is
+  # the wrong tree — candidates/dedup must land in the canonical .roll/).
+  local project_path; project_path="${ROLL_MAIN_PROJECT:-$(pwd -P)}"
+  local project_slug; project_slug=$(_project_slug "$project_path")
+
+  # Records for this project, oldest→newest, as a JSON array for the detector.
+  local records
+  records=$(jq -s -c --arg p "$project_slug" \
+    '[ .[] | select(.project == $p) ]' "$_LOOP_RUNS" 2>/dev/null) || records="[]"
+
+  local signals
+  signals=$(printf '%s' "$records" \
+    | python3 "${ROLL_PKG_DIR}/lib/loop_result_eval.py" --signals --streak "$streak" 2>/dev/null) \
+    || signals="[]"
+  [[ -n "$signals" ]] || signals="[]"
+
+  # Dedup store + candidate drafts both live with the project (roll-meta side).
+  local rt_dir="${_LOOP_RT_DIR:-${project_path}/.roll/loop}"
+  local seen_file="${rt_dir}/signals-seen-${project_slug}"
+  local cand_file="${project_path}/.roll/signals/candidates.md"
+  mkdir -p "$rt_dir" "$(dirname "$cand_file")" 2>/dev/null || true
+  touch "$seen_file" 2>/dev/null || true
+
+  # next candidate id (CAND-NNN) — scan existing candidates so re-runs keep counting up.
+  local last_id=0
+  if [[ -f "$cand_file" ]]; then
+    last_id=$(grep -oE 'CAND-[0-9]+' "$cand_file" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)
+    [[ -n "$last_id" ]] || last_id=0
+  fi
+
+  local new_count=0
+  local keys; keys=$(printf '%s' "$signals" | jq -r '.[].key' 2>/dev/null)
+  local key
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    # Dedup: same standing pattern is surfaced once.
+    if grep -qxF "$key" "$seen_file" 2>/dev/null; then
+      continue
+    fi
+    local kind summary dim streak_n
+    kind=$(printf '%s' "$signals" | jq -r --arg k "$key" '.[] | select(.key==$k) | .kind' 2>/dev/null)
+    summary=$(printf '%s' "$signals" | jq -r --arg k "$key" '.[] | select(.key==$k) | .summary' 2>/dev/null)
+    dim=$(printf '%s' "$signals" | jq -r --arg k "$key" '.[] | select(.key==$k) | .dim' 2>/dev/null)
+    streak_n=$(printf '%s' "$signals" | jq -r --arg k "$key" '.[] | select(.key==$k) | .streak' 2>/dev/null)
+    [[ -n "$kind" && "$kind" != "null" ]] || kind="IDEA"
+
+    last_id=$(( last_id + 1 ))
+    local cand_id; cand_id=$(printf 'CAND-%03d' "$last_id")
+    local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    {
+      printf '\n## %s — %s (%s) 📋 待人确认\n' "$cand_id" "$dim" "$kind"
+      printf -- '- Detected: %s\n' "$ts"
+      printf -- '- Pattern: %s\n' "$key"
+      printf -- '- Signal: %s\n' "$summary"
+      printf -- '- 信号：result-eval 维度 %s 连续 %s 轮低分；候选 %s，待人确认后再激活。\n' \
+        "$dim" "$streak_n" "$kind"
+    } >> "$cand_file"
+
+    printf '%s\n' "$key" >> "$seen_file"
+    new_count=$(( new_count + 1 ))
+    $quiet || echo "signal: $cand_id $dim → candidate $kind ($summary)"
+  done <<< "$keys"
+
+  if [[ "$new_count" -eq 0 ]]; then
+    $quiet || echo "no new improvement signals (result-eval patterns)"
+    return 0
+  fi
+  $quiet || echo "${new_count} candidate draft(s) → ${cand_file} (📋 待人确认, not activated)"
+  return 0
 }
 
 _loop_status() {

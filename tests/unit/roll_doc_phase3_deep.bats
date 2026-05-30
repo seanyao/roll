@@ -214,3 +214,54 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
   grep -qE 'fetch\(' "$FIXTURE/src/clients/profile.ts"
   ! grep -qE 'timeout' "$FIXTURE/src/clients/profile.ts"
 }
+
+# ── US-DOC-016: Deployment Pipeline ──
+
+@test "roll-doc SKILL.md: deployment subsection documents detection rule — CI config files + deploy URL" {
+  grep -qiE '(Deployment Pipeline|部署管线)' "$SKILL"
+  grep -qF '.github/workflows' "$SKILL"
+  grep -qF '.gitlab-ci.yml' "$SKILL"
+  grep -qiE '(circle\.yml|circleci)' "$SKILL"
+  grep -qF 'Jenkinsfile' "$SKILL"
+  grep -qiE '(vercel|netlify|cloudflare|firebase|\*\.app|\*\.dev)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: deployment subsection documents output fields — platform, triggers, jobs, deploy URL, env names" {
+  grep -qiE '(CI [Pp]latform)' "$SKILL"
+  grep -qiE '(trigger event|push.*PR.*tag|push.*pull_request)' "$SKILL"
+  grep -qiE '(Key Jobs|key job)' "$SKILL"
+  grep -qiE '(Deploy Target|deploy.*URL|部署目标)' "$SKILL"
+  grep -qiE '(Environment Variable|环境变量|env var.*name)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: deployment subsection lists env var names without values" {
+  grep -qiE '(without value|不含值|only names|never emit secret)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: deployment subsection documents empty-skip and idempotency" {
+  grep -qiE '(no CI config.*skip|skip generation.*no empty.*deployment|deployment.md.*skip)' "$SKILL"
+  grep -qiE '(Existing.*deployment.md|deployment.md.*skip unless.*--force)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Step 2 table maps 部署管线 to docs/deployment.md" {
+  grep -qE '部署管线.*docs/deployment.md' "$SKILL"
+}
+
+@test "roll-doc deployment fixture: contains a GitHub Actions workflow file" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_deployment"
+  [ -d "$FIXTURE" ]
+  [ -f "$FIXTURE/.github/workflows/deploy.yml" ]
+}
+
+@test "roll-doc deployment fixture: workflow declares jobs and a deploy URL" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_deployment"
+  WF="$FIXTURE/.github/workflows/deploy.yml"
+  # jobs present
+  grep -qE '^  test:' "$WF"
+  grep -qE '^  build:' "$WF"
+  grep -qE '^  deploy:' "$WF"
+  # deploy URL (vercel) present
+  grep -qE 'https://my-app\.vercel\.app' "$WF"
+  # env var name present
+  grep -qE 'VERCEL_TOKEN' "$WF"
+}

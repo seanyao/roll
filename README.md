@@ -40,7 +40,7 @@ roll loop on        # let AI work through the backlog (optional)
 | Command | Description |
 |---------|-------------|
 | **Autonomy · daily use** | |
-| `roll loop <on\|off\|now\|status\|runs\|story\|monitor>` | Manage the autonomous BACKLOG executor |
+| `roll loop <on\|off\|now\|status\|eval\|signals\|runs\|story\|monitor\|…>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
 | `roll brief` | Show latest owner brief |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll peer` | Cross-agent negotiation & review |

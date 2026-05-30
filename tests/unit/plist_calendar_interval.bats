@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
-# US-LOOP-035 (resolves FIX-105): _write_launchd_plist must render daily
-# (dream/brief) services with an array-style StartCalendarInterval carrying
-# Hour + Minute, so launchd fires at the exact configured HH:MM instead of the
-# legacy StartInterval=86400 drift. ROLL_DREAM_LEGACY_INTERVAL=1 keeps the old
-# workaround as a rollback channel.
+# FIX-148 (owner decision B): daily (dream/brief) services DEFAULT to the FIX-105
+# known-good StartInterval=86400 workaround, because macOS 26.x launchd SILENTLY
+# refuses to FIRE a StartCalendarInterval carrying Hour+Minute (so dream/brief
+# never run). The array-style StartCalendarInterval (US-LOOP-035) is UNVERIFIED
+# on macOS 26.x and is an explicit OPT-IN only: set ROLL_DREAM_CALENDAR=1 to emit
+# it. These tests cover BOTH paths (default=86400, opt-in=array).
 #
 # _write_launchd_plist signature:
 #   <plist_path> <label> <project_path> <period> <offset> <hour> <runner>
@@ -27,8 +28,19 @@ teardown() {
   rm -rf "$TESTDIR"
 }
 
-@test "daily plist: hour=3 minute=20 renders array-style StartCalendarInterval" {
+@test "daily plist: defaults to StartInterval=86400 (FIX-148 known-good)" {
   run _write_launchd_plist "$PLIST" "com.roll.dream.test" "$PROJ" "60" "20" "3" "$RUNNER"
+  [ "$status" -eq 0 ]
+  run cat "$PLIST"
+  [[ "$output" == *"<key>StartInterval</key>"* ]]
+  [[ "$output" == *"<integer>86400</integer>"* ]]
+  # the unverified array-style calendar form must NOT be emitted by default
+  [[ "$output" != *"StartCalendarInterval"* ]]
+  [[ "$output" != *"<key>Hour</key>"* ]]
+}
+
+@test "daily plist: ROLL_DREAM_CALENDAR=1 opts into array-style StartCalendarInterval" {
+  ROLL_DREAM_CALENDAR=1 run _write_launchd_plist "$PLIST" "com.roll.dream.test" "$PROJ" "60" "20" "3" "$RUNNER"
   [ "$status" -eq 0 ]
   run cat "$PLIST"
   [[ "$output" == *"<key>StartCalendarInterval</key>"* ]]
@@ -37,17 +49,8 @@ teardown() {
   [[ "$output" == *"<integer>3</integer>"* ]]
   [[ "$output" == *"<key>Minute</key>"* ]]
   [[ "$output" == *"<integer>20</integer>"* ]]
-  # must NOT fall back to the legacy 86400 workaround
+  # opt-in path must NOT carry the default 86400 interval
   [[ "$output" != *"<integer>86400</integer>"* ]]
-}
-
-@test "daily plist: ROLL_DREAM_LEGACY_INTERVAL=1 restores StartInterval=86400" {
-  ROLL_DREAM_LEGACY_INTERVAL=1 run _write_launchd_plist "$PLIST" "com.roll.dream.test" "$PROJ" "60" "20" "3" "$RUNNER"
-  [ "$status" -eq 0 ]
-  run cat "$PLIST"
-  [[ "$output" == *"<key>StartInterval</key>"* ]]
-  [[ "$output" == *"<integer>86400</integer>"* ]]
-  [[ "$output" != *"StartCalendarInterval"* ]]
 }
 
 @test "non-daily plist: empty hour keeps StartInterval = period*60" {
@@ -59,8 +62,8 @@ teardown() {
   [[ "$output" != *"StartCalendarInterval"* ]]
 }
 
-@test "daily plist: minute defaults to 0 when offset is empty" {
-  run _write_launchd_plist "$PLIST" "com.roll.dream.test" "$PROJ" "60" "" "5" "$RUNNER"
+@test "daily plist (opt-in): minute defaults to 0 when offset is empty" {
+  ROLL_DREAM_CALENDAR=1 run _write_launchd_plist "$PLIST" "com.roll.dream.test" "$PROJ" "60" "" "5" "$RUNNER"
   [ "$status" -eq 0 ]
   run cat "$PLIST"
   [[ "$output" == *"<key>StartCalendarInterval</key>"* ]]

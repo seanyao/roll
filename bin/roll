@@ -8803,6 +8803,7 @@ Schedule is configured per-project in .roll/local.yaml:
     offset_minute: 7     # 0 – (period_minutes - 1)
 
 See guide/en/loop.md for full documentation.
+See 'roll config --help' for schedule configuration.
 HELP
       exit 1 ;;
   esac

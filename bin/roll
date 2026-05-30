@@ -763,9 +763,42 @@ _spin() {
 }
 
 # ─── Helper: read config value ───────────────────────────────────────────────
+# Read a nested `parent.child` value (one indent level) from a yaml file.
+# Mirrors the awk block readers used for loop_schedule. Prints the raw value
+# (inline comment + surrounding whitespace stripped) on stdout; empty when the
+# parent block or the child key is absent. US-LOOP-033.
+_yaml_read_nested() {
+  local file="$1" parent="$2" child="$3"
+  [[ -f "$file" ]] || return 0
+  awk -v p="^${parent}:" -v c="^[[:space:]]+${child}:" '
+    $0 ~ p { found=1; next }
+    found && /^[^[:space:]]/ { exit }
+    found && $0 ~ c {
+      sub(/^[[:space:]]*[^:]*:[[:space:]]*/, "")
+      sub(/[[:space:]]*#.*$/, "")
+      sub(/[[:space:]]*$/, "")
+      print
+      exit
+    }
+  ' "$file" 2>/dev/null
+}
+
 config_get() {
   local key="$1"
   local default="${2:-}"
+  # US-LOOP-033: nested `parent.child` keys (e.g. loop_schedule.period_minutes)
+  # are read from the same global config file as flat keys.
+  if [[ "$key" == *.* ]]; then
+    local parent="${key%%.*}" child="${key#*.}"
+    local nval
+    nval=$(_yaml_read_nested "$ROLL_CONFIG" "$parent" "$child")
+    if [[ -n "$nval" ]]; then
+      echo "${nval/#\~/$HOME}"
+      return
+    fi
+    echo "${default/#\~/$HOME}"
+    return
+  fi
   if [[ -f "$ROLL_CONFIG" ]]; then
     local val
     val=$(grep -E "^${key}:" "$ROLL_CONFIG" 2>/dev/null | head -1 | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*#.*$//' | sed 's/[[:space:]]*$//')
@@ -4947,6 +4980,258 @@ EOF
       return 1
       ;;
   esac
+}
+
+# ─── roll config — unified read/list/set for loop schedule keys (US-LOOP-033) ──
+#
+# One interactive entry point so users don't have to remember whether a key
+# lives in ~/.roll/config.yaml (global) or .roll/local.yaml (project), nor hand-
+# edit yaml and remember to reload.
+#
+# Key registry — one record per supported key, pipe-delimited:
+#   <key>|<scope>|<store>|<min>|<max>|<default>
+#     scope   default write target: global → ~/.roll/config.yaml
+#                                    project → .roll/local.yaml
+#     store   flat            → top-level `key: value`
+#             nested:<parent> → indented under a `<parent>:` block
+#     min/max integer range (inclusive); empty min disables the lower bound
+#     default value reported as "(default)" when unset; "-" means auto-derived
+_config_keys() {
+  cat <<'EOF'
+loop_active_start|project|nested:loop_schedule|0|23|0
+loop_active_end|project|nested:loop_schedule|1|24|24
+loop_schedule.period_minutes|project|nested:loop_schedule|1|1440|60
+loop_schedule.offset_minute|project|nested:loop_schedule|0|59|0
+loop_dream_hour|global|flat|0|23|3
+loop_dream_minute|global|flat|0|59|-
+loop_brief_hour|global|flat|0|23|9
+loop_brief_minute|global|flat|0|59|-
+EOF
+}
+
+# Echo the registry record for a key, or return 1 if unknown.
+_config_key_record() {
+  local key="$1" line
+  while IFS= read -r line; do
+    [[ "${line%%|*}" == "$key" ]] && { printf '%s\n' "$line"; return 0; }
+  done < <(_config_keys)
+  return 1
+}
+
+# List the bare key names (for help / list iteration).
+_config_list_keys() {
+  local line
+  while IFS= read -r line; do
+    printf '%s\n' "${line%%|*}"
+  done < <(_config_keys)
+}
+
+# The yaml file backing a key, given its scope. project → CWD .roll/local.yaml.
+_config_key_file() {
+  local scope="$1"
+  if [[ "$scope" == "global" ]]; then
+    printf '%s\n' "$ROLL_CONFIG"
+  else
+    printf '%s\n' ".roll/local.yaml"
+  fi
+}
+
+# Resolve a key to "<value>\t<source>". source is a file path or "default".
+# Reads the project file first, then global, then the registry default.
+_config_resolve() {
+  local key="$1" record scope store def file parent val
+  record=$(_config_key_record "$key") || return 1
+  IFS='|' read -r _ scope store _ _ def <<<"$record"
+  file=$(_config_key_file "$scope")
+
+  if [[ "$store" == nested:* ]]; then
+    parent="${store#nested:}"
+    local child="${key#*.}"
+    [[ "$key" != *.* ]] && child="$key"
+    val=$(_yaml_read_nested "$file" "$parent" "$child")
+  else
+    if [[ -f "$file" ]]; then
+      val=$(grep -E "^${key}:" "$file" 2>/dev/null | head -1 \
+        | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*#.*$//' | sed 's/[[:space:]]*$//')
+    fi
+  fi
+
+  if [[ -n "$val" ]]; then
+    printf '%s\t%s\n' "$val" "$file"
+    return 0
+  fi
+  printf '%s\t%s\n' "$def" "default"
+  return 0
+}
+
+# Validate that $value is an integer within [min,max] for the registry key.
+# Prints a bilingual error and returns 2 on failure (caller exits 2).
+_config_validate() {
+  local key="$1" value="$2" record min max
+  record=$(_config_key_record "$key") || return 1
+  IFS='|' read -r _ _ _ min max _ <<<"$record"
+  if ! [[ "$value" =~ ^-?[0-9]+$ ]]; then
+    err "config: '$key' expects an integer, got '$value'"
+    err "config：'$key' 需要整数，收到 '$value'"
+    return 2
+  fi
+  if [[ -n "$min" ]] && (( value < min )); then
+    err "config: '$key' must be >= ${min} (got ${value})"
+    err "config：'$key' 必须 >= ${min}（收到 ${value}）"
+    return 2
+  fi
+  if [[ -n "$max" ]] && (( value > max )); then
+    err "config: '$key' must be <= ${max} (got ${value})"
+    err "config：'$key' 必须 <= ${max}（收到 ${value}）"
+    return 2
+  fi
+  return 0
+}
+
+# Idempotent yaml writer. Replaces an existing line in place (preserving every
+# other line / comment / order) or appends under the right block. Handles both
+# flat top-level keys and nested `parent.child` keys. US-LOOP-033.
+#   _config_set <key> <value> <file>
+_config_set() {
+  local key="$1" value="$2" file="$3"
+  local record store parent child
+  record=$(_config_key_record "$key") || return 1
+  IFS='|' read -r _ _ store _ _ _ <<<"$record"
+
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true
+  [[ -f "$file" ]] || : > "$file"
+
+  local tmp; tmp="$(mktemp)"
+  if [[ "$store" == nested:* ]]; then
+    parent="${store#nested:}"
+    child="${key#*.}"
+    [[ "$key" != *.* ]] && child="$key"
+    ROLL_CFG_PARENT="$parent" ROLL_CFG_CHILD="$child" ROLL_CFG_VAL="$value" \
+      awk '
+      BEGIN { parent=ENVIRON["ROLL_CFG_PARENT"]; child=ENVIRON["ROLL_CFG_CHILD"]; val=ENVIRON["ROLL_CFG_VAL"]; done=0 }
+      # Entering target parent block
+      $0 ~ ("^" parent ":") { in_block=1; print; next }
+      # Inside the block: replace the child line if present
+      in_block && $0 ~ ("^[[:space:]]+" child ":") {
+        print "  " child ": " val; done=1; in_block=0; next
+      }
+      # Leaving the block at the next top-level key — append child if not done
+      in_block && /^[^[:space:]]/ {
+        if (!done) { print "  " child ": " val; done=1 }
+        in_block=0; print; next
+      }
+      { print }
+      END {
+        if (in_block && !done) { print "  " child ": " val; done=1 }
+        if (!done) { print parent ":"; print "  " child ": " val }
+      }
+    ' "$file" > "$tmp"
+  else
+    ROLL_CFG_KEY="$key" ROLL_CFG_VAL="$value" \
+      awk '
+      BEGIN { key=ENVIRON["ROLL_CFG_KEY"]; val=ENVIRON["ROLL_CFG_VAL"]; done=0 }
+      $0 ~ ("^" key ":") && !done { print key ": " val; done=1; next }
+      { print }
+      END { if (!done) print key ": " val }
+    ' "$file" > "$tmp"
+  fi
+  mv "$tmp" "$file"
+}
+
+_config_help() {
+  cat <<'EOF'
+Usage: roll config <key>                 print current value + source
+       roll config --list                list all loop schedule keys
+       roll config <key> <value> [--global|--project]   set a value
+                                                                  统一调度配置
+Read / list / set the loop, dream and brief schedule keys without hand-editing
+yaml. Default write scope is --project (.roll/local.yaml); --global writes
+~/.roll/config.yaml.
+读 / 列 / 写 loop、dream、brief 调度 key，免去手工编辑 yaml。默认写 --project
+（.roll/local.yaml）；--global 写 ~/.roll/config.yaml。
+
+Supported keys (range):
+  loop_active_start              0-23    loop active window start hour
+  loop_active_end                1-24    loop active window end hour
+  loop_schedule.period_minutes   1-1440  fire interval in minutes
+  loop_schedule.offset_minute    0-59    minute offset within the period
+  loop_dream_hour                0-23    dream daily fire hour
+  loop_dream_minute              0-59    dream daily fire minute
+  loop_brief_hour                0-23    brief daily fire hour
+  loop_brief_minute              0-59    brief daily fire minute
+
+Examples:
+  roll config loop_dream_hour
+  roll config --list
+  roll config loop_schedule.period_minutes 30
+  roll config loop_dream_hour 3 --global
+EOF
+}
+
+cmd_config() {
+  local key="" value="" scope="" want_list=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h|help) _config_help; return 0 ;;
+      --list)         want_list=1 ;;
+      --global)       scope="global" ;;
+      --project)      scope="project" ;;
+      *)
+        if [[ -z "$key" ]]; then key="$1"
+        elif [[ -z "$value" ]]; then value="$1"
+        else err "config: unexpected argument '$1'"; err "config：多余参数 '$1'"; return 2
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  # --list: tabulate every key with value + source
+  if [[ -n "$want_list" ]]; then
+    local k v src resolved
+    while IFS= read -r k; do
+      resolved=$(_config_resolve "$k")
+      v="${resolved%%$'\t'*}"; src="${resolved#*$'\t'}"
+      printf '  %-30s = %-8s (%s)\n' "$k" "$v" "$src"
+    done < <(_config_list_keys)
+    return 0
+  fi
+
+  if [[ -z "$key" ]]; then
+    _config_help
+    return 0
+  fi
+
+  if ! _config_key_record "$key" >/dev/null; then
+    err "config: unknown key '$key'"
+    err "config：未知 key '$key'"
+    err "Try: roll config --list"
+    return 2
+  fi
+
+  # Read mode: no value supplied
+  if [[ -z "$value" ]]; then
+    local resolved v src
+    resolved=$(_config_resolve "$key")
+    v="${resolved%%$'\t'*}"; src="${resolved#*$'\t'}"
+    printf '%s = %s  (from %s)\n' "$key" "$v" "$src"
+    return 0
+  fi
+
+  # Write mode
+  _config_validate "$key" "$value" || return $?
+  [[ -z "$scope" ]] && scope="project"
+  local record key_scope file
+  record=$(_config_key_record "$key")
+  IFS='|' read -r _ key_scope _ _ _ _ <<<"$record"
+  if [[ "$scope" == "global" ]]; then
+    file="$ROLL_CONFIG"
+  else
+    file=".roll/local.yaml"
+  fi
+  _config_set "$key" "$value" "$file"
+  ok "✓ set $key = $value in $file"
+  return 0
 }
 
 cmd_slides() {
@@ -12745,6 +13030,7 @@ main() {
     test)          cmd_test "$@" ;;
     prices)        cmd_prices "$@" ;;
     changelog)     cmd_changelog "$@" ;;
+    config)        cmd_config "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

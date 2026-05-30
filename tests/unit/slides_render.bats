@@ -109,6 +109,167 @@ print(len(slides[0]["evidence"]), slides[0]["evidence"][0], slides[0]["evidence"
   [[ "$output" == "2 README.md:42 .roll/x.md:7" ]]
 }
 
+@test "parse_slides: parses layout scalar + cards list-of-mappings (US-DECK-017)" {
+  run run_render_module '
+src = """---
+template: t
+slug: s
+title_en: \"T\"
+title_zh: \"T\"
+total_slides: 1
+created: 2026-05-21
+---
+
+## Slide 1
+layout: cards-2
+title_en: \"A\"
+title_zh: \"甲\"
+cards:
+  - title_en: \"Card A\"
+    title_zh: \"卡A\"
+    body_en: \"alpha\"
+    body_zh: \"甲文\"
+  - title_en: \"Card B\"
+    title_zh: \"卡B\"
+    body_en: \"beta\"
+    body_zh: \"乙文\"
+evidence:
+  - README.md:42
+"""
+_, body = mod.parse_frontmatter(src)
+s = mod.parse_slides(body)[0]
+print(s["layout"])
+print(len(s["cards"]), s["cards"][0]["title_en"], s["cards"][1]["body_zh"])
+print(len(s["evidence"]), s["evidence"][0])
+'
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "cards-2" ]]
+  [[ "${lines[1]}" == "2 Card A 乙文" ]]
+  [[ "${lines[2]}" == "1 README.md:42" ]]
+}
+
+@test "parse_slides: parses compare nested mappings (US-DECK-017)" {
+  run run_render_module '
+src = """---
+template: t
+slug: s
+title_en: \"T\"
+title_zh: \"T\"
+total_slides: 1
+created: 2026-05-21
+---
+
+## Slide 1
+layout: compare
+title_en: \"A\"
+title_zh: \"甲\"
+left_title_en: \"Before\"
+left_title_zh: \"之前\"
+left_items:
+  - text_en: \"manual\"
+    text_zh: \"手动\"
+  - text_en: \"slow\"
+    text_zh: \"慢\"
+right_title_en: \"After\"
+right_title_zh: \"之后\"
+right_items:
+  - text_en: \"auto\"
+    text_zh: \"自动\"
+"""
+_, body = mod.parse_frontmatter(src)
+s = mod.parse_slides(body)[0]
+print(s["left_title_en"], s["right_title_zh"])
+print(len(s["left_items"]), s["left_items"][1]["text_en"])
+print(len(s["right_items"]), s["right_items"][0]["text_zh"])
+'
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "Before 之后" ]]
+  [[ "${lines[1]}" == "2 slow" ]]
+  [[ "${lines[2]}" == "1 自动" ]]
+}
+
+@test "parse_slides: block literal inside a list item is dedented (US-DECK-017 peer-fix)" {
+  run run_render_module '
+src = """## Slide 1
+layout: cards-2
+cards:
+  - title_en: \"A\"
+    title_zh: \"甲\"
+    body_en: |
+      Line one
+      Line two
+    body_zh: |
+      第一行
+"""
+s = mod.parse_slides(src)[0]
+print(repr(s["cards"][0]["body_en"]))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "'Line one"*"Line two"* ]]
+}
+
+@test "parse_slides: evidence item containing a colon stays a scalar (US-DECK-017 peer-fix)" {
+  run run_render_module '
+src = """## Slide 1
+title_en: \"A\"
+title_zh: \"甲\"
+evidence:
+  - TODO: see README.md:1
+  - README.md:42
+"""
+s = mod.parse_slides(src)[0]
+print(type(s["evidence"][0]).__name__, "|", s["evidence"][0])
+print(s["evidence"][1])
+'
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "str | TODO: see README.md:1" ]]
+  [[ "${lines[1]}" == "README.md:42" ]]
+}
+
+@test "parse_slides: extra-spaced dash keeps continuation lines (US-DECK-017 peer-fix)" {
+  run run_render_module '
+src = """## Slide 1
+cards:
+  -   title_en: \"X\"
+      title_zh: \"叉\"
+      body_en: \"b\"
+      body_zh: \"乙\"
+"""
+s = mod.parse_slides(src)[0]
+c = s["cards"][0]
+print(len(c), c.get("title_en"), c.get("body_zh"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "4 X 乙" ]]
+}
+
+@test "parse_slides: slide without layout omits the layout key (backward compat)" {
+  run run_render_module '
+src = """---
+template: t
+slug: s
+title_en: \"T\"
+title_zh: \"T\"
+total_slides: 1
+created: 2026-05-21
+---
+
+## Slide 1
+title_en: \"A\"
+title_zh: \"甲\"
+body_en: |
+  hello
+body_zh: |
+  你好
+"""
+_, body = mod.parse_frontmatter(src)
+s = mod.parse_slides(body)[0]
+print("has-layout" if "layout" in s else "no-layout")
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "no-layout" ]]
+}
+
 @test "mustache: {{var}} substitutes and HTML-escapes" {
   run run_render_module '
 print(mod.mustache("hi {{name}}", {"name": "<b>Bob</b>"}))

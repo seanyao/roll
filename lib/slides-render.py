@@ -99,6 +99,12 @@ def _coerce_scalar(v: str):
     return v
 
 
+# Keys whose `- item` children are always flat scalar strings, never coerced
+# into mappings even when an item contains a colon (e.g. `evidence:` citations
+# like `- TODO: see README.md:1`).
+_SCALAR_LIST_KEYS = ("evidence",)
+
+
 # A slide section starts at a line matching `^## Slide \d+` and continues
 # until the next such line or EOF.
 _SLIDE_HEADER_RE = re.compile(r"^##\s+Slide\s+(\d+)\s*$")
@@ -188,21 +194,21 @@ def _populate_slide(slide: dict, content_lines: list[str]) -> None:
                 block.pop()
             slide[key] = "\n".join(block) + "\n" if block else ""
         elif val == "":
-            # Could be `evidence:` list or an empty scalar.
-            list_items: list[str] = []
-            j = i + 1
-            while j < n:
-                bl = content_lines[j]
-                if bl.strip() == "":
-                    j += 1
-                    continue
-                if bl.lstrip().startswith("- "):
-                    list_items.append(bl.lstrip()[2:].strip())
-                    j += 1
-                    continue
-                break
-            if list_items:
-                slide[key] = list_items
+            # A bare `key:` introduces an indented child block, which may be:
+            #   - a list of scalars      (`- one.md:1`)        -> list[str]
+            #   - a list of mappings     (`- title_en: "..."`) -> list[dict]
+            #   - a nested mapping       (`  left_title_en: …`) -> dict
+            # or, if no indented child follows, an empty scalar.
+            key_indent = len(raw) - len(raw.lstrip(" "))
+            block, j = _collect_indented_block(content_lines, i + 1, key_indent)
+            if block:
+                # `evidence` is always a flat list of free-form citation
+                # strings (e.g. `- TODO: see README.md:1`), so it must never be
+                # coerced into a mapping by the generic block parser.
+                if key in _SCALAR_LIST_KEYS:
+                    slide[key] = _parse_scalar_list(block)
+                else:
+                    slide[key] = _parse_block(block)
                 i = j
             else:
                 slide[key] = ""
@@ -210,6 +216,207 @@ def _populate_slide(slide: dict, content_lines: list[str]) -> None:
         else:
             slide[key] = _coerce_scalar(val)
             i += 1
+
+
+def _collect_indented_block(
+    lines: list[str], start: int, parent_indent: int
+) -> tuple[list[str], int]:
+    """
+    Gather lines that belong to the indented child block of a `key:` at
+    `parent_indent`. A line belongs to the block if it is blank or indented
+    strictly deeper than the parent key. Returns (block_lines, next_index).
+
+    Trailing blank lines are dropped so an all-blank block reads as empty.
+    """
+    block: list[str] = []
+    j = start
+    n = len(lines)
+    while j < n:
+        bl = lines[j]
+        if bl.strip() == "":
+            block.append("")
+            j += 1
+            continue
+        indent = len(bl) - len(bl.lstrip(" "))
+        if indent <= parent_indent:
+            break
+        block.append(bl)
+        j += 1
+    while block and block[-1] == "":
+        block.pop()
+    return block, j
+
+
+def _parse_block(block: list[str]):
+    """
+    Parse an indented YAML-subset block into a list or a dict.
+
+    - If the first non-blank line starts with `- `, the block is a sequence.
+      Each `- ` opens a new item; a scalar follows `- ` directly (list of
+      scalars) or a `key: value` does (list of mappings, with subsequent
+      deeper-indented `key: value` lines folded into the same item).
+    - Otherwise the block is a mapping of `key: value` / `key:` (nested)
+      entries.
+
+    Scalars are coerced via `_coerce_scalar`. Nested `key:` with no inline
+    value recurse into another block (supports `compare`'s `left_items:`).
+    """
+    # Find the indentation of the block's own top level (first non-blank line).
+    first = next((b for b in block if b.strip() != ""), "")
+    base_indent = len(first) - len(first.lstrip(" "))
+
+    if first.lstrip().startswith("- "):
+        return _parse_sequence(block, base_indent)
+    return _parse_mapping(block, base_indent)
+
+
+def _parse_sequence(block: list[str], base_indent: int) -> list:
+    """Parse a `- ...` sequence at `base_indent` into list[str] | list[dict]."""
+    items: list = []
+    i = 0
+    n = len(block)
+    while i < n:
+        line = block[i]
+        if line.strip() == "":
+            i += 1
+            continue
+        stripped = line.lstrip()
+        # Only treat a `- ` at the sequence's own indent as an item start.
+        indent = len(line) - len(stripped)
+        if indent == base_indent and stripped.startswith("- "):
+            # Strip the dash and ALL following spaces; `content_col` is the
+            # column where the item's first key actually begins, which equals
+            # the indent of the item's continuation lines in well-formed YAML.
+            after_dash = stripped[1:]
+            rest = after_dash.lstrip(" ")
+            content_col = indent + 1 + (len(after_dash) - len(rest))
+            if ":" in rest and not _looks_like_scalar(rest):
+                # List of mappings. Re-indent the inline key to `content_col`
+                # so the sub-block has one consistent base indent regardless of
+                # how the author spaced the `- ` (fixes hardcoded-indent
+                # mis-parse).
+                sub = [(" " * content_col) + rest]
+                i += 1
+                while i < n:
+                    bl = block[i]
+                    if bl.strip() == "":
+                        sub.append("")
+                        i += 1
+                        continue
+                    bi = len(bl) - len(bl.lstrip(" "))
+                    if bi <= base_indent:
+                        break
+                    sub.append(bl)
+                    i += 1
+                items.append(_parse_mapping(sub, content_col))
+            else:
+                items.append(_coerce_scalar(rest.strip()))
+                i += 1
+        else:
+            # Defensive: ignore stray lines that don't open an item.
+            i += 1
+    return items
+
+
+def _parse_mapping(block: list[str], base_indent: int | None = None) -> dict:
+    """Parse `key: value` / `key:` (nested / block-literal) lines into a dict.
+
+    `base_indent` defaults to the indent of the block's first non-blank line so
+    callers need not compute it; only top-level keys at that indent are read,
+    deeper lines are folded into the value of the key they belong to.
+    """
+    out: dict = {}
+    i = 0
+    n = len(block)
+    if base_indent is None:
+        first = next((b for b in block if b.strip() != ""), "")
+        base_indent = len(first) - len(first.lstrip(" "))
+    while i < n:
+        line = block[i]
+        if line.strip() == "" or ":" not in line:
+            i += 1
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent != base_indent:
+            # Belongs to a deeper structure handled by recursion; skip.
+            i += 1
+            continue
+        key, _, val = line.partition(":")
+        key = key.strip()
+        val = val.strip()
+        if val == "|":
+            block_lines, j = _collect_indented_block(block, i + 1, base_indent)
+            out[key] = _dedent_block_literal(block_lines)
+            i = j
+        elif val == "":
+            child, j = _collect_indented_block(block, i + 1, base_indent)
+            if child:
+                if key in _SCALAR_LIST_KEYS:
+                    out[key] = _parse_scalar_list(child)
+                else:
+                    out[key] = _parse_block(child)
+                i = j
+            else:
+                out[key] = ""
+                i += 1
+        else:
+            out[key] = _coerce_scalar(val)
+            i += 1
+    return out
+
+
+def _dedent_block_literal(block_lines: list[str]) -> str:
+    """Strip the common leading indent of a `key: |` block literal and join the
+    lines, matching the top-level block-literal handling in `_populate_slide`."""
+    out: list[str] = []
+    common_indent: int | None = None
+    for bl in block_lines:
+        if bl.strip() == "":
+            out.append("")
+            continue
+        indent = len(bl) - len(bl.lstrip(" "))
+        if common_indent is None:
+            common_indent = indent
+        elif indent < common_indent:
+            common_indent = indent
+    if common_indent is None:
+        return ""
+    for bl in block_lines:
+        out.append(bl[common_indent:] if bl.strip() != "" else "")
+    while out and out[-1] == "":
+        out.pop()
+    return "\n".join(out) + "\n" if out else ""
+
+
+def _parse_scalar_list(block: list[str]) -> list:
+    """Parse a `- item` sequence as a flat list of scalar strings, regardless of
+    whether an item contains a colon (used for `evidence:` citations)."""
+    items: list = []
+    for line in block:
+        s = line.strip()
+        if s.startswith("- "):
+            items.append(_coerce_scalar(s[2:].strip()))
+    return items
+
+
+def _looks_like_scalar(rest: str) -> bool:
+    """A `- ` item is a scalar (not a mapping) when the text before the first
+    colon looks like a value rather than a bare key — e.g. a path `README.md:42`
+    where the colon is part of the value. Heuristic: it's a mapping only when
+    the segment before the colon is a bare identifier (word chars / underscore)
+    and is immediately followed by a space or end-of-string."""
+    head, sep, tail = rest.partition(":")
+    if not sep:
+        return True
+    head = head.strip()
+    if not head or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", head):
+        return True
+    # `key:value` with no space is treated as a scalar (e.g. `README.md:42`
+    # never reaches here since `.` breaks the identifier rule, but a bare
+    # `word:7` would — require a space after the colon for a mapping).
+    if tail and not tail.startswith(" ") and not tail == "":
+        return True
+    return False
 
 
 # ─────────────────────────── Mustache subset ─────────────────────────────────

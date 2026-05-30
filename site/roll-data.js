@@ -34,7 +34,7 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v2026.529.1",
+      version: "v2026.529.5",
       tagline: "It just works.",
       sub2: "Write a goal. Ship it autonomously.",
       sub: "Write a goal in Backlog. Roll picks it up hourly, executes it in an isolated worktree, opens a PR, waits for green CI — and ships. You stay on the loop, not in it.",
@@ -43,7 +43,7 @@ window.RollData = (function () {
         { label: "Read the guide", href: "#guides", primary: false },
         { label: "View on GitHub", href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
-      meta: ["MIT licensed", "Node 16+", "Works with Claude · Cursor · Codex · Kimi · Gemini · OpenAI · Qwen"],
+      meta: ["MIT licensed", "Node 16+", "Works with Claude · Antigravity · Codex · Kimi · Qwen · Pi · Cursor"],
     },
     TERMINAL: [
       { kind: "prompt", text: "roll loop on" },
@@ -147,7 +147,7 @@ window.RollData = (function () {
         { name: "$roll-doctor",   mono: true, desc: "Diagnose the dev toolchain — node, npm, git, AI CLI installs.", badges: [] },
       ]},
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
-        { name: "Fallback Routing", desc: "Primary agent down or rate-limited → automatic failover to the configured peer.", badges: ["highlight"] },
+        { name: "Fallback Routing", desc: "Four complexity slots (easy/default/hard/fallback) each map to a locally-installed agent; when the slot agent is down or rate-limited, work fails over to the fallback-slot agent.", badges: ["highlight"] },
         { name: "roll peer", mono: true, desc: "Structured negotiation: propose → challenge → refine, up to 3 rounds.", badges: ["core"] },
         { name: "PR Inbox",  desc: "External PRs get AI review before merge; stale PRs auto-rebase onto main.", badges: ["new"] },
         { name: "roll review-pr", mono: true, desc: "On-demand AI review for any PR, any agent, any git host.", badges: ["new"] },
@@ -212,7 +212,7 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v2026.529.1",
+      version: "v2026.529.5",
       tagline: "It just works.",
       sub2: "把目标写下来。让它自主交付。",
       sub: "把目标写进 Backlog。Roll 每小时领取一个，在隔离的 worktree 里执行、开 PR、等 CI 绿、自动合入。你掌舵，不掌桨。",
@@ -221,7 +221,7 @@ window.RollData = (function () {
         { label: "查看文档", href: "#guides", primary: false },
         { label: "GitHub",  href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
-      meta: ["MIT 协议", "Node 16+", "支持 Claude · Cursor · Codex · Kimi · Gemini · OpenAI · Qwen"],
+      meta: ["MIT 协议", "Node 16+", "支持 Claude · Antigravity · Codex · Kimi · Qwen · Pi · Cursor"],
     },
     // Terminal stays mostly English — these are real CLI outputs.
     TERMINAL: [
@@ -326,7 +326,7 @@ window.RollData = (function () {
         { name: "$roll-doctor",   mono: true, desc: "诊断开发工具链——node、npm、git、AI CLI。", badges: [] },
       ]},
       { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
-        { name: "故障转移", desc: "主 agent 宕机或限流 → 自动切换到配置的备用。", badges: ["highlight"] },
+        { name: "故障转移", desc: "四个复杂度槽位（easy/default/hard/fallback）各自映射到本机已装 agent；槽位 agent 宕机或限流时，工作转移到 fallback 槽位 agent。", badges: ["highlight"] },
         { name: "roll peer", mono: true, desc: "结构化协商:提案 → 挑战 → 精炼,最多三轮。", badges: ["core"] },
         { name: "PR 收件箱",  desc: "外部 PR 先经 AI 评审再合入;过时 PR 自动 rebase。", badges: ["new"] },
         { name: "roll review-pr", mono: true, desc: "对任意 PR 按需发起 AI 评审,任意 agent、任意 git 平台。", badges: ["new"] },

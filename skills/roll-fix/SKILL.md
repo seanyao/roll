@@ -1,6 +1,7 @@
 ---
 name: roll-fix
 license: MIT
+allowed-tools: "Read, Edit, Write, Glob, Grep, Bash, Skill"
 description: Execute bugfix/hotfix from backlog. Reads FIX/BUG from .roll/backlog.md, delivers via TCR workflow. Lighter than roll-build, focused on single-issue fixes.
 ---
 

@@ -21,7 +21,24 @@ Five signals (per the US-LOOP-040 issue):
                 no event → ``ci: n/a``)
   3. todo     — count of ``📋 Todo`` lines in .roll/backlog.md
   4. phases   — runs.jsonl ``phases`` map, top 5 by duration desc
-  5. alerts   — raw failure / alert text placeholder (US-LOOP-041 adds colour)
+  5. alerts   — raw failure / alert text placeholder
+
+US-LOOP-041 layers failure / alert *highlighting* on top of the US-LOOP-040
+renderer. The relevant signal lines are flagged with a severity prefix and
+ANSI colour:
+
+  * RED + ``✗`` — runs.jsonl ``status`` is ``failed`` / ``aborted``; the latest
+    ``ci`` outcome is ``red``; or the events tail has a ``cycle_end`` whose
+    outcome is not ``ok`` / ``idle``.
+  * YELLOW + ``⚠`` — latest ``ci`` outcome is ``heal-attempting``; an
+    ``ALERT-<slug>.md`` exists and is non-empty; or ``tcr_count == 0`` while
+    ``built[]`` is non-empty (suspected zero-diff).
+  * default colour, no prefix — a fully green cycle (built/idle + ci green +
+    no alert).
+
+ANSI escapes are only emitted when stdout is a TTY (``sys.stdout.isatty()``)
+and ``NO_COLOR`` is unset (see https://no-color.org). Pipes, redirects and
+test captures get plain text — no escape codes are written.
 
 Data-source priority: runs.jsonl latest matching row > events.ndjson tail >
 fall back to the cron log's last 30 lines. Any missing source degrades
@@ -38,7 +55,8 @@ Invocation::
         --events <events.ndjson> \
         --backlog <.roll/backlog.md> \
         --cron-log <cron-<slug>.log> \
-        [--cycle-id <id>]
+        --alert  <ALERT-<slug>.md> \
+        [--cycle-id <id>] [--color {auto,always,never}]
 
 All paths are optional; a missing / unreadable file is treated as absent.
 """
@@ -115,6 +133,72 @@ def _latest_ci_outcome(events: List[Dict[str, Any]]) -> Optional[str]:
     return None
 
 
+def _latest_cycle_end_outcome(events: List[Dict[str, Any]]) -> Optional[str]:
+    """Newest ``cycle_end`` event outcome from an events stream, or None."""
+    for ev in reversed(events):
+        if ev.get("stage") == "cycle_end":
+            outcome = ev.get("outcome")
+            if outcome:
+                return str(outcome)
+    return None
+
+
+def _alert_active(path: Optional[str]) -> bool:
+    """True when an ALERT-<slug>.md file exists and has non-whitespace content."""
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            return bool(fh.read().strip())
+    except OSError:
+        return False
+
+
+# ── ANSI colouring (US-LOOP-041) ─────────────────────────────────────────────
+# Severity ranks: 0 = none/green, 1 = warn (yellow), 2 = fail (red).
+_SEV_NONE = 0
+_SEV_WARN = 1
+_SEV_FAIL = 2
+
+_ANSI = {_SEV_WARN: "\033[33m", _SEV_FAIL: "\033[31m"}
+_ANSI_RESET = "\033[0m"
+_PREFIX = {_SEV_NONE: "", _SEV_WARN: "⚠ ", _SEV_FAIL: "✗ "}
+
+
+def _color_enabled(mode: str) -> bool:
+    """Decide whether ANSI escapes should be emitted.
+
+    ``always`` forces colour, ``never`` forces plain text, ``auto`` (default)
+    honours NO_COLOR (https://no-color.org) and only colours a real TTY.
+    """
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    if os.environ.get("NO_COLOR") is not None:
+        return False
+    try:
+        return bool(sys.stdout.isatty())
+    except (ValueError, AttributeError):
+        return False
+
+
+def _decorate(text: str, sev: int, color: bool) -> str:
+    """Apply severity prefix + (optional) ANSI colour to a single line.
+
+    The leading indentation is preserved; the prefix and colour wrap only the
+    non-indented payload so columns still line up.
+    """
+    if sev == _SEV_NONE:
+        return text
+    stripped = text.lstrip(" ")
+    indent = text[: len(text) - len(stripped)]
+    payload = _PREFIX[sev] + stripped
+    if color:
+        payload = _ANSI[sev] + payload + _ANSI_RESET
+    return indent + payload
+
+
 def _count_todo(path: Optional[str]) -> Optional[int]:
     """Count lines bearing the 📋 Todo marker in backlog.md. None if absent."""
     if not path or not os.path.isfile(path):
@@ -177,12 +261,40 @@ def _fmt_phases(phases: Dict[str, Any], limit: int = 5) -> List[str]:
     return out
 
 
+def _result_severity(row: Dict[str, Any]) -> int:
+    """Severity for the result line (US-LOOP-041)."""
+    status = str(row.get("status", ""))
+    if status in ("failed", "aborted"):
+        return _SEV_FAIL
+    built = row.get("built") or []
+    tcr = row.get("tcr_count", 0)
+    if built and tcr == 0:  # suspected zero-diff: built something but no commit
+        return _SEV_WARN
+    return _SEV_NONE
+
+
+def _ci_severity(outcome: Optional[str]) -> int:
+    """Severity for the ci line (US-LOOP-041)."""
+    if outcome == "red":
+        return _SEV_FAIL
+    if outcome == "heal-attempting":
+        return _SEV_WARN
+    return _SEV_NONE
+
+
 def render(runs: Optional[str], events: Optional[str], backlog: Optional[str],
-           cron_log: Optional[str], cycle_id: str = "") -> str:
-    """Build the summary block as a plain-text string (no ANSI in US-LOOP-040)."""
+           cron_log: Optional[str], cycle_id: str = "",
+           alert: Optional[str] = None, color: bool = False) -> str:
+    """Build the summary block as a string.
+
+    ``color`` toggles ANSI escapes; severity prefixes (``✗`` / ``⚠``) are
+    always applied to flagged lines regardless of ``color`` (US-LOOP-041).
+    """
     row = _read_last_json_line(runs, cycle_id)
     ev_list = _read_json_lines(events)
     ci_outcome = _latest_ci_outcome(ev_list)
+    cycle_end_outcome = _latest_cycle_end_outcome(ev_list)
+    alert_on = _alert_active(alert)
     todo = _count_todo(backlog)
 
     # Source priority: a usable runs.jsonl row is the primary feed. With no
@@ -209,14 +321,22 @@ def render(runs: Optional[str], events: Optional[str], backlog: Optional[str],
 
     lines.append(title)
 
+    # cycle_end fail severity applies to the result line when it's worse than
+    # what the runs.jsonl status alone implies.
+    cycle_end_sev = _SEV_NONE
+    if cycle_end_outcome is not None and cycle_end_outcome not in ("ok", "idle"):
+        cycle_end_sev = _SEV_FAIL
+
     # 1. result
     if row is not None:
-        lines.append("  " + _fmt_result(row))
+        result_sev = max(_result_severity(row), cycle_end_sev)
+        lines.append(_decorate("  " + _fmt_result(row), result_sev, color))
     else:
-        lines.append("  result: n/a")
+        lines.append(_decorate("  result: n/a", cycle_end_sev, color))
 
     # 2. ci
-    lines.append("  " + _fmt_ci(ci_outcome))
+    lines.append(_decorate("  " + _fmt_ci(ci_outcome),
+                           _ci_severity(ci_outcome), color))
 
     # 3. todo
     if todo is not None:
@@ -232,12 +352,15 @@ def render(runs: Optional[str], events: Optional[str], backlog: Optional[str],
             lines.append("  phases (top 5 by time):")
             lines.extend(phase_rows)
 
-    # 5. alerts / failure placeholder (raw text; US-LOOP-041 highlights it)
+    # 5. alerts / failure highlight (US-LOOP-041)
     alerts = (row.get("alerts") if row else None) or []
     if isinstance(alerts, list) and alerts:
-        lines.append("  alerts:")
+        lines.append(_decorate("  alerts:", _SEV_FAIL, color))
         for a in alerts:
-            lines.append("    " + str(a))
+            lines.append(_decorate("    " + str(a), _SEV_FAIL, color))
+    if alert_on:
+        lines.append(_decorate("  alert: ALERT file active — see log",
+                               _SEV_WARN, color))
 
     return "\n".join(lines)
 
@@ -250,11 +373,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--backlog", default=None, help="path to .roll/backlog.md")
     parser.add_argument("--cron-log", default=None, help="path to cron-<slug>.log")
     parser.add_argument("--cycle-id", default="", help="cycle id to prefer")
+    parser.add_argument("--alert", default=None, help="path to ALERT-<slug>.md")
+    parser.add_argument("--color", choices=("auto", "always", "never"),
+                        default="auto", help="ANSI colour mode (default: auto)")
     args = parser.parse_args(argv)
 
     try:
+        color = _color_enabled(args.color)
         out = render(args.runs, args.events, args.backlog,
-                     args.cron_log, args.cycle_id)
+                     args.cron_log, args.cycle_id,
+                     alert=args.alert, color=color)
     except Exception:  # noqa: BLE001 — silent fallback per AC: never error
         return 0
     sys.stdout.write(out + "\n")

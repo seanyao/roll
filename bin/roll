@@ -6764,6 +6764,15 @@ _loop_render_exit_summary() {
     cron_log="${shared}/cron-${slug}.log"
   fi
 
+  # ALERT-<slug>.md drives the yellow ⚠ highlight (US-LOOP-041). Project-local
+  # control-plane file first, shared root as fallback.
+  local alert=""
+  if [ -n "$rt_dir" ] && [ -f "${rt_dir}/ALERT-${slug}.md" ]; then
+    alert="${rt_dir}/ALERT-${slug}.md"
+  elif [ -f "${shared}/ALERT-${slug}.md" ]; then
+    alert="${shared}/ALERT-${slug}.md"
+  fi
+
   # Backlog: project-local .roll/backlog.md relative to the resolved runtime dir.
   local backlog=""
   if [ -n "$rt_dir" ]; then
@@ -6778,6 +6787,7 @@ _loop_render_exit_summary() {
   [ -n "$events" ] && _args="$_args --events $events"
   [ -n "$backlog" ] && _args="$_args --backlog $backlog"
   [ -n "$cron_log" ] && _args="$_args --cron-log $cron_log"
+  [ -n "$alert" ] && _args="$_args --alert $alert"
   [ -n "$cycle_id" ] && _args="$_args --cycle-id $cycle_id"
 
   # shellcheck disable=SC2086 — args are space-free paths assembled above.

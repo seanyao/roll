@@ -7584,22 +7584,21 @@ _write_launchd_plist() {
   # a second layer (covers stale plists where brew was installed after setup).
   local path_value; path_value=$(_detect_path_prepend)
 
-  # FIX-105 / US-LOOP-035: macOS 26.4 launchd silently refuses to fire a
-  # single-dict StartCalendarInterval that contains BOTH Hour and Minute keys.
-  # The original FIX-105 workaround forced daily services to StartInterval=86400,
-  # which drifts the fire time off the configured HH:MM. US-LOOP-035 resolves it
-  # with the *array-style* StartCalendarInterval (one-element array of a dict) —
-  # launchd honors Hour+Minute when wrapped in an array. Set
-  # ROLL_DREAM_LEGACY_INTERVAL=1 to fall back to the legacy StartInterval=86400
-  # workaround (rollback channel if the array form ever regresses).
+  # FIX-105 / FIX-148: macOS 26.x launchd silently refuses to FIRE a
+  # StartCalendarInterval carrying Hour+Minute (verified firsthand in FIX-105 —
+  # dream/brief never ran). The known-good workaround is StartInterval=86400:
+  # it fires every 24h; the exact HH:MM drifts but it reliably fires.
+  # US-LOOP-035 tried array-style StartCalendarInterval (claiming launchd honors
+  # Hour+Minute when wrapped in an array), but that was never verified on
+  # macOS 26.x and contradicts FIX-105 — so FIX-148 keeps StartInterval=86400 as
+  # the DEFAULT. Opt into the (unverified) array form with ROLL_DREAM_CALENDAR=1
+  # only after confirming it actually fires on your macOS.
   # US-LOOP-032: non-daily loop services use StartInterval = period * 60.
   local schedule_xml
   if [[ -n "$hour" ]]; then
-    if [[ "${ROLL_DREAM_LEGACY_INTERVAL:-}" == "1" ]]; then
-      schedule_xml="  <key>StartInterval</key>
-  <integer>86400</integer>"
-    else
-      # Daily services carry the fire minute in $offset ($5); $hour is $6.
+    if [[ "${ROLL_DREAM_CALENDAR:-}" == "1" ]]; then
+      # Opt-in / experimental: array-style StartCalendarInterval (fire at HH:MM).
+      # UNVERIFIED on macOS 26.x — see FIX-148. $offset ($5) is the fire minute, $hour ($6).
       local cal_minute="${offset:-0}"
       schedule_xml="  <key>StartCalendarInterval</key>
   <array>
@@ -7610,6 +7609,10 @@ _write_launchd_plist() {
       <integer>${cal_minute}</integer>
     </dict>
   </array>"
+    else
+      # FIX-148 default: FIX-105 known-good workaround — fires reliably.
+      schedule_xml="  <key>StartInterval</key>
+  <integer>86400</integer>"
     fi
   else
     # US-LOOP-032: StartInterval in seconds = period_minutes * 60

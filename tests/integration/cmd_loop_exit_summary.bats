@@ -36,9 +36,14 @@ teardown() { integration_teardown; }
   grep -qF '_loop_render_exit_summary' "$runner"
   # … and it must come before the `press enter to close` prompt so the user
   # sees the summary first.
+  # Match the executable printf line, not comment lines: a US-LOOP-040 comment
+  # above the printf also contains 'press enter to close', and head -1 would
+  # otherwise pick that comment (line N) ahead of the real prompt, making the
+  # ordering check spuriously fail though behavior is correct. Drop comment
+  # lines (leading whitespace + '#') so we compare executable positions only.
   local sum_line enter_line
-  sum_line=$(grep -n '_loop_render_exit_summary' "$runner" | head -1 | cut -d: -f1)
-  enter_line=$(grep -n 'press enter to close' "$runner" | head -1 | cut -d: -f1)
+  sum_line=$(grep -n '_loop_render_exit_summary' "$runner" | grep -v ':[[:space:]]*#' | head -1 | cut -d: -f1)
+  enter_line=$(grep -n 'press enter to close' "$runner" | grep -v ':[[:space:]]*#' | head -1 | cut -d: -f1)
   [ -n "$sum_line" ]
   [ -n "$enter_line" ]
   [ "$sum_line" -le "$enter_line" ]

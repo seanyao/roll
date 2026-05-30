@@ -358,3 +358,45 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
   # below both thresholds → no gap, no README
   [ ! -f "$FIXTURE/src/rare/README.md" ]
 }
+
+# ── US-DOC-019: file:line Source Annotations + Phase 4 report upgrade ──
+
+@test "roll-doc SKILL.md: Step 3 mandates a file:line column on subject-doc source tables" {
+  # the three table types named in the AC must each be tied to a file:line requirement
+  grep -qiE '(涉及文件|Files Involved)' "$SKILL"
+  grep -qiE '(引用文件|Referenced By)' "$SKILL"
+  grep -qiE '(调用链|Complete Call Chain)' "$SKILL"
+  # an explicit "file:line column" mandate exists in Step 3
+  grep -qiE 'file:line.{0,3}column' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Step 3 forbids fabricating file:line — must come from symbol table" {
+  grep -qiE 'do.?n.?o?t fabricate' "$SKILL"
+  grep -qiE '(come from|from an actual).*symbol table' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Phase 4 report has a Phase 3b — Deep Read section listing path + type + source entries" {
+  grep -qF 'Phase 3b — Deep Read' "$SKILL"
+  grep -qiE 'topic documents generated' "$SKILL"
+  # each listed doc carries its source-entry count
+  grep -qiE '(source entries|来源条目数)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Phase 4 prints exact empty message when no subject docs generated" {
+  grep -qF 'Phase 3b: no subject-level drafts generated' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Phase 4 Phase 3b section is shown under --dry-run tagged (plan)" {
+  grep -qiE 'dry.?run' "$SKILL"
+  grep -qF 'Phase 3b — Deep Read  (plan)' "$SKILL"
+}
+
+@test "roll-doc fixtures: at least one Phase 3b fixture is readable for cross-fixture file:line annotation" {
+  # cross-fixture readiness: the symbol-table source of file:line annotations exists and has
+  # line-locatable claims (a grep -n hit) in at least one Phase 3b fixture
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_integrations"
+  [ -d "$FIXTURE" ]
+  # a concrete claim (endpoint URL) is locatable by line → backs a real file:line annotation
+  hit=$(grep -rnE 'https://' "$FIXTURE/src" | head -1)
+  [ -n "$hit" ]
+}

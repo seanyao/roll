@@ -510,6 +510,16 @@ endpoint URL, state transition, CI job, import path). Annotations must come from
 symbol table records — do not fabricate line numbers. Follows the same "Do not fabricate"
 rule as Phase 3.
 
+**Mandatory `file:line` column** — each topic document's source-reference tables MUST carry a
+dedicated `file:line` column so the reader can jump straight to the code:
+- 「涉及文件」/ Files Involved table → one `file:line` per row.
+- 「引用文件」/ Referenced By table → one `file:line` per referencing site.
+- 「调用链」/ Complete Call Chain table → one `file:line` per hop.
+
+Do **not** fabricate a `file:line` value: every annotation MUST come from an actual symbol
+table record (the same "Do not fabricate" rule as above). If the symbol table has no line for
+a claim, omit the row rather than invent a location.
+
 ---
 
 ## Phase 4 — Report
@@ -533,13 +543,32 @@ Phase 3 — Fill
 
 Phase 3b — Deep Read
   Symbol table: exports(N) imports(N) enums(N) external_urls(N) configs(N)
-  N topic documents generated: [list of paths and types]
+  N topic documents generated:
+    - docs/dataflow.md       (data-flow)          source entries: N
+    - docs/state-machines.md (state-machine)       source entries: N
+    - docs/integrations.md   (external-integration) source entries: N
   N topics skipped (no matches or already exist; use --force to regenerate)
-  (if no topics generated: "no subject-level drafts generated")
 
 📋 Review priority (largest / most active modules first):
   1. src/commands/README.md — 8 source files
   2. docs/CONVENTIONS.md — 6 patterns detected
+```
+
+Each generated topic document is listed with its **path**, **type**, and **来源条目数 /
+source entries** (how many symbol-table records back the document). When Phase 3b produced no
+subject-level documents, print exactly one line and do **not** error:
+
+```
+Phase 3b: no subject-level drafts generated
+```
+
+If `--dry-run`, the `Phase 3b — Deep Read` section is shown the same way but every generated
+line is tagged `(plan)` — matching Phase 3's dry-run convention (nothing is written):
+
+```
+Phase 3b — Deep Read  (plan)
+  N topic documents would be generated:
+    - docs/dataflow.md (data-flow) source entries: N  (plan)
 ```
 
 If no gaps were found:

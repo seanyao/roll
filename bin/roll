@@ -11443,6 +11443,197 @@ _ci_detect_degradation() {
   return 0
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# US-AUTO-046 Phase 1: dedicated Alert Loop helpers (loop-safe, pure bash)
+# ═══════════════════════════════════════════════════════════════════════════════
+# These consume the existing $_LOOP_ALERT file — until now a write-only dumb file
+# that every loop appends to but nobody reads. The Alert Loop turns it into a
+# real consumer: parse → dedup (1h per category) → notify (error always) →
+# log → rotate. They are NOT yet wired into any runner or launchd plist — that
+# is Phase 2 (manual-only:true). Each is unit-tested in
+# tests/unit/roll_loop_alert_loop.bats with _notify stubbed. Do not delete or
+# inline.
+#
+# State lives under project-local .roll/state/ (shared with the CI Loop):
+#   alert-log.jsonl   append-only NDJSON, one line per consumed alert
+# $_LOOP_ALERT.prev is the rotated copy (kept for debugging).
+#
+# Line format ($_LOOP_ALERT) — new tagged format, old format read-compatible:
+#   [2026-05-26T10:00:00] [error] [TYPE:ci-real-failure] CI failed: run #123
+#   [2026-05-26T10:00:00] some legacy message        → level=warn category=legacy
+
+# _alert_parse_file [file]
+#   Parse each non-empty line of $_LOOP_ALERT (or <file>) into a TAB-separated
+#   record `ts<TAB>level<TAB>category<TAB>message`, one per output line. The
+#   leading `[ts]` is extracted when present; optional `[level]` and
+#   `[TYPE:category]` tags follow. Untagged (legacy) lines default to
+#   level=warn, category=legacy, with the whole remainder as the message.
+#   Markdown headers / ack footers (lines starting with `#` or `**`) are skipped.
+#   Echoes nothing for a missing/empty file. Loop-safe (returns 0).
+_alert_parse_file() {
+  local file="${1:-$_LOOP_ALERT}"
+  [ -n "$file" ] && [ -f "$file" ] || return 0
+
+  awk '
+    {
+      line=$0
+      # skip blank lines and markdown chrome (headers, ack footers)
+      if (line ~ /^[ \t]*$/) next
+      if (line ~ /^[ \t]*#/) next
+      if (line ~ /^[ \t]*\*\*/) next
+
+      ts=""; level=""; category=""
+
+      # leading [timestamp]
+      if (match(line, /^\[[^]]*\]/)) {
+        ts=substr(line, RSTART+1, RLENGTH-2)
+        line=substr(line, RSTART+RLENGTH)
+        sub(/^[ \t]+/, "", line)
+      }
+      # optional [level]  (error|warn|info)
+      if (match(line, /^\[(error|warn|info)\]/)) {
+        level=substr(line, RSTART+1, RLENGTH-2)
+        line=substr(line, RSTART+RLENGTH)
+        sub(/^[ \t]+/, "", line)
+      }
+      # optional [TYPE:category]
+      if (match(line, /^\[TYPE:[^]]*\]/)) {
+        category=substr(line, RSTART+6, RLENGTH-7)
+        line=substr(line, RSTART+RLENGTH)
+        sub(/^[ \t]+/, "", line)
+      }
+
+      # legacy "ALERT:" prefix on the remaining message — strip the keyword
+      sub(/^ALERT:[ \t]*/, "", line)
+
+      if (level=="") level="warn"
+      if (category=="") category="legacy"
+
+      printf "%s\t%s\t%s\t%s\n", ts, level, category, line
+    }
+  ' "$file"
+  return 0
+}
+
+# _alert_log_file
+#   Echo path to .roll/state/alert-log.jsonl (creating the dir). Reuses the
+#   CI Loop's _ci_state_dir so both loops share one project-local state dir.
+_alert_log_file() {
+  local dir; dir=$(_ci_state_dir)
+  echo "${dir}/alert-log.jsonl"
+}
+
+# _alert_should_notify <category> <level>
+#   Decide whether an alert should fire a notification.
+#     error          → always true (immediate, never throttled)
+#     warn | info    → true unless a same-category alert was already notified
+#                      within the last hour (rate-limit / dedup)
+#   The 1h window is read from alert-log.jsonl (notified=1 entries only).
+#   Echoes "true" / "false".
+_alert_should_notify() {
+  local category="$1" level="$2"
+  [ "$level" = "error" ] && { echo "true"; return 0; }
+
+  local file; file=$(_alert_log_file)
+  [ -f "$file" ] || { echo "true"; return 0; }
+
+  local now; now=$(date -u +%s)
+  # Most recent notified=1 entry for this category → its recorded_at epoch.
+  local last
+  last=$(grep -F "\"category\":\"${category}\"" "$file" 2>/dev/null \
+         | grep -F '"notified":1' \
+         | tail -1 \
+         | sed -n 's/.*"recorded_at":"\([^"]*\)".*/\1/p')
+  [ -n "$last" ] || { echo "true"; return 0; }
+
+  local last_epoch; last_epoch=$(_ci_iso_to_epoch "$last")
+  [ -n "$last_epoch" ] || { echo "true"; return 0; }
+
+  # Within 1h (3600s) → throttle (false); otherwise allow.
+  if [ "$((now - last_epoch))" -lt 3600 ] 2>/dev/null; then
+    echo "false"
+  else
+    echo "true"
+  fi
+  return 0
+}
+
+# _alert_write_log <ts> <level> <category> <message> <notified>
+#   Append one NDJSON record to alert-log.jsonl. <notified> is the literal
+#   string "true"/"false" (or 1/0) and is normalized to 1/0. recorded_at is the
+#   consumption time (UTC), distinct from the alert's own <ts>. Quotes in the
+#   message are escaped so the line stays valid JSON. Loop-safe (returns 0).
+_alert_write_log() {
+  local ts="$1" level="$2" category="$3" message="$4" notified="$5"
+  local file; file=$(_alert_log_file)
+
+  local n=0
+  case "$notified" in true|1) n=1 ;; esac
+
+  # Escape backslashes then double-quotes for JSON string safety.
+  local esc
+  esc=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+  printf '{"ts":"%s","level":"%s","category":"%s","message":"%s","notified":%s,"recorded_at":"%s"}\n' \
+    "$ts" "$level" "$category" "$esc" "$n" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$file"
+  return 0
+}
+
+# _alert_rotate [file]
+#   Move $_LOOP_ALERT (or <file>) to <file>.prev and recreate an empty file.
+#   Idempotent: a missing source is a no-op (the .prev from a prior run is
+#   left untouched). Loop-safe (returns 0).
+_alert_rotate() {
+  local file="${1:-$_LOOP_ALERT}"
+  [ -n "$file" ] || return 0
+  if [ -f "$file" ]; then
+    mv -f "$file" "${file}.prev" 2>/dev/null || true
+    : > "$file"
+  fi
+  return 0
+}
+
+# _alert_dispatch [file]
+#   Main consumer entry point. Parse $_LOOP_ALERT → for each alert decide
+#   notify → fire _notify + record to alert-log.jsonl → rotate the file.
+#   A missing/empty alert file is a no-op (no rotate, no log). Loop-safe.
+_alert_dispatch() {
+  local file="${1:-$_LOOP_ALERT}"
+  [ -n "$file" ] && [ -f "$file" ] || return 0
+  # Empty file → nothing to consume, leave it in place.
+  [ -s "$file" ] || return 0
+
+  local parsed; parsed=$(_alert_parse_file "$file")
+  [ -n "$parsed" ] || { _alert_rotate "$file"; return 0; }
+
+  local line ts level category message notify
+  local _oifs="$IFS"
+  IFS='
+'
+  for line in $parsed; do
+    IFS="$_oifs"
+    ts=$(printf '%s' "$line" | cut -f1)
+    level=$(printf '%s' "$line" | cut -f2)
+    category=$(printf '%s' "$line" | cut -f3)
+    message=$(printf '%s' "$line" | cut -f4-)
+
+    notify=$(_alert_should_notify "$category" "$level")
+    if [ "$notify" = "true" ]; then
+      _notify "roll alert: ${level}" "${message}" || true
+      _alert_write_log "$ts" "$level" "$category" "$message" "true"
+    else
+      _alert_write_log "$ts" "$level" "$category" "$message" "false"
+    fi
+    IFS='
+'
+  done
+  IFS="$_oifs"
+
+  _alert_rotate "$file"
+  return 0
+}
+
 # FIX-070: flip a story row in the main repo's .roll/backlog.md between
 # 📋 Todo and 🔨 In Progress. The cycle worktree is gitignored at .roll/,
 # so editing the worktree copy + committing leaves no trace in git — and

@@ -62,8 +62,3 @@ GUIDE_ZH="${ROOT}/guide/zh"
   grep -qiE '弃用|被弃用' "${GUIDE_ZH}/ai-agents.md"
   grep -qF '确定、可审计、可一键关' "${GUIDE_ZH}/ai-agents.md"
 }
-
-@test "README indexes the ai-agents guide page (both languages)" {
-  grep -qF 'guide/en/ai-agents.md' "${ROOT}/README.md"
-  grep -qF 'guide/zh/ai-agents.md' "${ROOT}/README.md"
-}

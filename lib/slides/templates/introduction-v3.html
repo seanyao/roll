@@ -465,12 +465,7 @@
 {{#slides}}
 <!-- {{number}}: {{title_en}} -->
 <div class="slide{{#is_cover}} active{{/is_cover}}" data-slide="{{number}}">
-<div class="lang-en">
-{{{body_en}}}
-</div>
-<div class="lang-zh">
-{{{body_zh}}}
-</div>
+{{{slide_inner_html}}}
 {{^is_cover}}<span class="slide-number">{{number_padded}} / {{total_slides}}</span>{{/is_cover}}
 </div>
 {{/slides}}

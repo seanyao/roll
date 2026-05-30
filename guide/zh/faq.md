@@ -250,6 +250,19 @@ roll loop status --days 7   # 历史 cycle 用的是固化成本
 
 ---
 
+### A12. 人不在本机时，怎么在手机上看 loop 状态？
+
+**短答：** 配置 `roll_meta_dir`，然后把 `.roll/prompts/remote-watch.md` 粘贴进手机或
+浏览器里的 Claude Code。
+
+**细节：** 在 `~/.roll/config.yaml` 配好 `roll_meta_dir` 后，本机会在每轮 cycle 结束
+后把 `status/loop.md` 快照 push 到 roll-meta 仓库（≤35min 新鲜，idle cycle 也推，充当
+心跳）。remote-watch prompt 读这份快照 + GitHub API，汇报 loop 健康、backlog 进度、
+Dream 结果和 CI 状态——只读，不需要本地 `roll`。配置与排障见
+[远程监控](loop.md#远程监控remote-monitoring)。
+
+---
+
 ## B. 定位与对比
 
 ### B1. 和 Claude Code 自带的 `/loop`、skills、tasks 是什么关系？

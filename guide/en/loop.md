@@ -661,6 +661,129 @@ This usually means `.roll/` is out of date:
 - After reinstalling the OS: same as above — SSH key may also need re-authorization.
 - To confirm: `git -C .roll remote get-url origin` — if empty, no sync is attempted.
 
+## Remote Monitoring
+
+When you're away from your machine you can still watch the loop — backlog
+progress, Dream health, CI state — from a phone or any browser, without a local
+`roll` command. It works in two layers: a **data layer** (your machine pushes a
+status snapshot to the roll-meta repo) and a **prompt layer** (you paste a watch
+prompt into Claude Code, which reads roll-meta + the GitHub API).
+
+### Configure `roll_meta_dir`
+
+Tell roll where your roll-meta checkout lives, in `~/.roll/config.yaml`:
+
+```yaml
+# ~/.roll/config.yaml
+roll_meta_dir: ~/projects/roll-meta
+```
+
+`~` is expanded. The key is optional — if it's unset, nothing changes and no
+snapshot is pushed. If the path doesn't exist, roll prints one WARNING to the
+cron log and skips the push (the cycle is never affected).
+
+### How the automatic push works
+
+Once `roll_meta_dir` is configured, the loop pushes a fresh snapshot after
+**every** cycle — including idle cycles where no story ran, so the snapshot
+doubles as a heartbeat. The cycle runner calls
+`${roll_meta_dir}/ops/push-loop-status.sh` in the background right after the
+`cycle_end` event. The script writes `status/loop.md` and commits + pushes it to
+roll-meta. Output goes to `~/.shared/roll/push-status.log` (rotated at 1MB, 2
+copies kept).
+
+Because the loop runs on its normal schedule, `status/loop.md` stays **≤35min
+fresh** — the watch prompt always sees recent data. The push is best-effort: a
+network error, git conflict, or a >60s timeout is logged to push-status.log, the
+process is killed if it hangs, and the cycle continues. No ALERT, no retry.
+
+### Manual push
+
+You can push a snapshot by hand at any time:
+
+```bash
+bash .roll/ops/push-loop-status.sh .roll
+```
+
+(`.roll` is your project's roll-meta checkout.) This is also how you confirm the
+push pipeline works before relying on the automatic hook.
+
+### Watching from a phone or browser
+
+Open `.roll/prompts/remote-watch.md`, copy its contents, and paste them into
+Claude Code (web, mobile, or a remote IDE). The prompt does a full health check
+on first run, then polls every 15 minutes and raises an ALERT immediately on
+conditions like CI failing twice in a row or `status/loop.md` going >60min
+stale. It only reads — it never modifies `seanyao/roll`.
+
+### Troubleshooting: `status/loop.md` is stale
+
+If the snapshot's timestamp is far older than 35 minutes:
+
+1. Check `~/.shared/roll/push-status.log` — it records every push attempt and
+   any timeout or git error.
+2. Confirm `roll_meta_dir` is set and the path exists
+   (`roll config get roll_meta_dir`).
+3. Confirm `${roll_meta_dir}/ops/push-loop-status.sh` exists and is executable.
+4. Run the manual push above and watch for errors.
+
+---
+
+远程不在本机时，依然可以从手机或任意浏览器查看 loop —— backlog 进度、Dream 健康、
+CI 状态 —— 无需本地 `roll` 命令。它分两层：**数据层**（本机把状态快照 push 到
+roll-meta 仓库）和 **prompt 层**（把巡检 prompt 粘贴进 Claude Code，读 roll-meta +
+GitHub API）。
+
+### 配置 `roll_meta_dir`
+
+在 `~/.roll/config.yaml` 里告诉 roll 你的 roll-meta 检出在哪：
+
+```yaml
+# ~/.roll/config.yaml
+roll_meta_dir: ~/projects/roll-meta
+```
+
+`~` 会被展开。这个键是可选的——不配就什么都不变，也不会推快照。路径不存在时，roll 向
+cron 日志打一条 WARNING 并跳过推送（绝不影响 cycle）。
+
+### 自动 push 的工作原理
+
+配好 `roll_meta_dir` 后，loop 在**每一次** cycle 结束后推一份新快照——包括没跑故事
+的 idle cycle，所以快照同时充当心跳。cycle runner 在 `cycle_end` 事件之后，于后台调
+用 `${roll_meta_dir}/ops/push-loop-status.sh`。脚本写出 `status/loop.md` 并提交 +
+push 到 roll-meta。输出写到 `~/.shared/roll/push-status.log`（1MB 轮转，保留 2 份）。
+
+因为 loop 按固定节奏运行，`status/loop.md` 始终保持 **≤35min 新鲜**——巡检 prompt 总
+能看到近期数据。推送是 best-effort：网络错误、git 冲突或 >60s 超时都记进
+push-status.log，进程卡住会被 kill，cycle 继续。不设 ALERT，不重试。
+
+### 手动 push
+
+随时可以手动推一份快照：
+
+```bash
+bash .roll/ops/push-loop-status.sh .roll
+```
+
+（`.roll` 是你项目的 roll-meta 检出。）这也是在依赖自动 hook 前确认推送链路是否正常
+的方法。
+
+### 在手机或浏览器上巡检
+
+打开 `.roll/prompts/remote-watch.md`，复制全文，粘贴进 Claude Code（网页、手机或远端
+IDE）。该 prompt 首次执行做一次全量体检，之后每 15min 轮询一次，遇到「CI 连续两次失
+败」或「`status/loop.md` 超过 60min 未更新」等条件立即告警。它只读——绝不修改
+`seanyao/roll`。
+
+### 排障：`status/loop.md` 不更新
+
+若快照时间戳远早于 35 分钟：
+
+1. 看 `~/.shared/roll/push-status.log`——它记录每次推送尝试以及任何超时或 git 错误。
+2. 确认 `roll_meta_dir` 已配置且路径存在（`roll config get roll_meta_dir`）。
+3. 确认 `${roll_meta_dir}/ops/push-loop-status.sh` 存在且可执行。
+4. 跑一次上面的手动 push，观察是否报错。
+
 ## State Files
 
 Since Phase 2.0, a project's loop state lives **inside the project** at

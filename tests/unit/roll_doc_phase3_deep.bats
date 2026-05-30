@@ -265,3 +265,46 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
   # env var name present
   grep -qE 'VERCEL_TOKEN' "$WF"
 }
+
+# ── US-DOC-017: Agent Entrypoint (AGENTS.md auto-generation) ──
+
+@test "roll-doc SKILL.md: agent-entrypoint subsection documents detection rule — no AGENTS.md + ≥3 src subdirs" {
+  grep -qiE '(Agent Entrypoint|Agent 入口)' "$SKILL"
+  grep -qiE '(no.*AGENTS\.md|无.*AGENTS\.md)' "$SKILL"
+  grep -qiE '≥.*3.*(subdirector|subdir|子目录)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: agent-entrypoint subsection requires three sections — positioning, Where to Look, source layout" {
+  grep -qiE '(positioning|一句话|one.sentence)' "$SKILL"
+  grep -qF '## Where to Look' "$SKILL"
+  grep -qiE '(Source Layout|源码目录|关键源码)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: agent-entrypoint subsection documents idempotency — skip existing unless --force" {
+  grep -qiE '(Existing.*AGENTS\.md.*skip|AGENTS\.md.*skip unless.*--force|never overwrite a human)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: agent-entrypoint complements Phase 2 bootstrap (create vs append are distinct)" {
+  grep -qiE '(文件不存在.*创建|文件存在.*补章节|complementary.*bootstrap|complement)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Step 2 table maps Agent 入口 to AGENTS.md" {
+  grep -qE 'Agent 入口.*AGENTS\.md' "$SKILL"
+}
+
+@test "roll-doc agents-md fixture: has no AGENTS.md and ≥3 src subdirectories" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_agents_md"
+  [ -d "$FIXTURE" ]
+  [ ! -f "$FIXTURE/AGENTS.md" ]
+  count=$(find "$FIXTURE/src" -mindepth 1 -maxdepth 1 -type d | wc -l)
+  [ "$count" -ge 3 ]
+}
+
+@test "roll-doc agents-md fixture: src subdirectories contain source files for symbol-table inference" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_agents_md"
+  [ -f "$FIXTURE/src/parser/index.js" ]
+  [ -f "$FIXTURE/src/codegen/index.js" ]
+  [ -f "$FIXTURE/src/cli/index.js" ]
+  # cross-directory import chain present (codegen -> parser)
+  grep -qF "../parser/index.js" "$FIXTURE/src/codegen/index.js"
+}

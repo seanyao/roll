@@ -90,23 +90,28 @@ Before creating any file or directory:
 
 ### 0. Pre-flight self-check (US-AGENT-007)
 
-Before locking the issue, read the FIX's Agent profile (est_min / risk_zone / chain_depth) from the linked feature md and decide whether this cycle should attempt the fix:
+Before locking the issue, read the FIX's Agent profile (est_min / chain_depth) from the linked feature md and decide whether this cycle should attempt the fix:
 
 ```
 inputs:
   fix.est_min       (from **Agent profile:** block on the FIX row's feature md)
-  fix.risk_zone     (low / medium / high)
   fix.chain_depth   (0 unless already a downgrade product)
-  agent.max_est_min (from .roll/agent-routes.yaml for the current agent)
-  history.prefer_threshold + history.hit_rate (FIX history for this agent)
 
 verdict:
-  too_big when ANY:
-    1. fix.est_min > agent.max_est_min
-    2. fix.risk_zone not in agent.risk
-    3. history.hit_rate < prefer_threshold AND fix.chain_depth == 0
+  too_big when:
+    fix.est_min > 20   (lands in the `hard` complexity tier)
   ok otherwise
 ```
+
+Routing is a single axis now (US-AGENT-022): `est_min` maps to one of three
+complexity tiers — `easy` (≤8), `default` (8<x≤20), `hard` (>20) — and each
+tier binds to a locally-installed agent slot in `.roll/agents.yaml` (model =
+the agent's own default; a `fallback` slot mechanically covers an unavailable
+agent). The retired v1 model (three-dimension type/est/risk_zone matching
+against `agent-routes.yaml`, soft history hit-rate preference, per-agent
+`max_est_min`/`risk`) no longer applies. The pre-flight verdict here is just
+the `hard`-tier boundary: a FIX estimated past it is a sanity signal that the
+"single small fix" assumption may be wrong.
 
 Emit `verdict: ok` or `verdict: too_big` (with `reason:`) as the first cycle output line.
 

@@ -238,11 +238,18 @@ another_key: 42"
   [ "$count" -eq 1 ]
 }
 
-@test "setup: absent ~/.gemini/ is not recreated by setup" {
+@test "setup: absent ~/.gemini/ is not recreated by setup when agy is not installed" {
   run_roll setup
   [ "$status" -eq 0 ]
   rm -rf "${TEST_TMP}/.gemini"
-  run_roll setup
+  # FIX-128 keys "installed" off the binary on PATH, not the config dir. Pin
+  # PATH to system dirs (cmd_doctor.bats pattern) so agy/gemini are not found
+  # on a dev machine that has them installed — otherwise _is_ai_installed
+  # would (correctly) refresh ~/.gemini and this "stays absent" check would be
+  # machine-dependent (green in CI, red on the maintainer's box). With no agy
+  # binary discoverable, an absent ~/.gemini means "tool not installed", which
+  # setup must not resurrect.
+  PATH="/usr/bin:/bin" run_roll setup
   [ "$status" -eq 0 ]
   [ ! -d "${TEST_TMP}/.gemini" ]
 }

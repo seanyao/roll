@@ -211,7 +211,7 @@ row = gs.issue_to_row({"number": 14, "title": "Crash on empty repo",
 print(row)
 '
   [ "$status" -eq 0 ]
-  [[ "$output" == *"| FIX-14 | Crash on empty repo | 📋 Todo |"* ]]
+  [[ "$output" == *"| FIX-GH-14 | Crash on empty repo | 📋 Todo |"* ]]
 }
 
 @test "US-SYNC-002: sync_to_backlog appends rows into the table" {
@@ -233,7 +233,7 @@ print('ADDED:', summary['added'])
 "
   [ "$status" -eq 0 ]
   [[ "$output" == *"ADDED: 1"* ]]
-  grep -qE '^\| US-13 \| New sync story \| 📋 Todo \|$' "${TMP}/backlog.md"
+  grep -qE '^\| US-GH-13 \| New sync story \| 📋 Todo \|$' "${TMP}/backlog.md"
   # Existing row and trailing prose are preserved.
   grep -q "US-EXISTING-001" "${TMP}/backlog.md"
   grep -q "trailing prose must survive" "${TMP}/backlog.md"

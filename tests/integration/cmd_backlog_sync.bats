@@ -62,7 +62,7 @@ EOF
   _make_fixture
   run_roll backlog sync --repo seanyao/roll-meta
   [ "$status" -eq 0 ]
-  grep -qE '^\| FIX-14 \| Crash on empty repo \| 📋 Todo \|$' "${TEST_TMP}/.roll/backlog.md"
+  grep -qE '^\| FIX-GH-14 \| Crash on empty repo \| 📋 Todo \|$' "${TEST_TMP}/.roll/backlog.md"
 }
 
 @test "backlog sync e2e: maps enhancement label to US prefix" {
@@ -70,7 +70,7 @@ EOF
   _make_fixture
   run_roll backlog sync --repo seanyao/roll-meta
   [ "$status" -eq 0 ]
-  grep -qE '^\| US-13 \| Add GitHub Issues sync \| 📋 Todo \|$' "${TEST_TMP}/.roll/backlog.md"
+  grep -qE '^\| US-GH-13 \| Add GitHub Issues sync \| 📋 Todo \|$' "${TEST_TMP}/.roll/backlog.md"
 }
 
 @test "backlog sync e2e: maps refactor label and closed state" {
@@ -78,7 +78,7 @@ EOF
   _make_fixture
   run_roll backlog sync --repo seanyao/roll-meta
   [ "$status" -eq 0 ]
-  grep -qE '^\| REFACTOR-15 \| Untidy module structure \| ✅ Done \|$' "${TEST_TMP}/.roll/backlog.md"
+  grep -qE '^\| REFACTOR-GH-15 \| Untidy module structure \| ✅ Done \|$' "${TEST_TMP}/.roll/backlog.md"
 }
 
 @test "backlog sync e2e: unlabeled issue defaults to US" {
@@ -86,7 +86,7 @@ EOF
   _make_fixture
   run_roll backlog sync --repo seanyao/roll-meta
   [ "$status" -eq 0 ]
-  grep -qE '^\| US-16 \| No label issue \| 📋 Todo \|$' "${TEST_TMP}/.roll/backlog.md"
+  grep -qE '^\| US-GH-16 \| No label issue \| 📋 Todo \|$' "${TEST_TMP}/.roll/backlog.md"
 }
 
 @test "backlog sync e2e: preexisting rows are preserved" {

@@ -293,17 +293,27 @@ def map_state_to_status(state: Optional[str]) -> str:
     return _STATE_STATUS_MAP.get((state or "").strip().lower(), DEFAULT_STATUS)
 
 
+def gh_id(issue: Dict[str, Any]) -> str:
+    """Return the canonical GitHub id token for an issue, e.g. ``GH-13``.
+
+    This is stable across syncs and independent of the label→type prefix, so
+    it is what idempotency detection keys on (US-SYNC-003).
+    """
+    return f"GH-{issue.get('number')}"
+
+
 def issue_to_row(issue: Dict[str, Any]) -> str:
     """Render a single GitHub issue as a backlog Markdown table row.
 
-    The id is ``<TYPE>-<number>`` (e.g. ``US-13`` / ``FIX-13``); the issue
-    title becomes the Description and the state becomes the status column.
+    The id is ``<TYPE>-GH-<number>`` (e.g. ``US-GH-13`` / ``FIX-GH-13``): the
+    label→type mapping supplies the prefix and ``GH-<number>`` is the stable
+    GitHub id (US-SYNC-003). The issue title becomes the Description and the
+    state becomes the status column.
     """
-    number = issue.get("number")
     title = (issue.get("title") or "").strip()
     type_prefix = map_label_to_type(issue.get("labels", []))
     status = map_state_to_status(issue.get("state"))
-    row_id = f"{type_prefix}-{number}"
+    row_id = f"{type_prefix}-{gh_id(issue)}"
     return f"| {row_id} | {title} | {status} |"
 
 
@@ -338,21 +348,50 @@ def _append_rows_to_table(content: str, rows: List[str]) -> str:
     return "\n".join(new_lines)
 
 
+def _gh_id_present(content: str, ident: str) -> bool:
+    """Return True if backlog ``content`` already contains the GitHub id token.
+
+    Matches the ``GH-<number>`` token so ``GH-1`` does not spuriously match
+    ``GH-13``. The token always appears inside a row id of the form
+    ``<TYPE>-GH-<number>`` (the char before ``GH`` is the prefix hyphen), so the
+    leading boundary must reject only an alphanumeric — never the hyphen. A
+    label/type change between syncs still counts as "already exists" (we skip
+    rather than duplicate).
+    """
+    import re
+    return re.search(r'(?<![0-9A-Za-z])' + re.escape(ident) + r'(?![0-9A-Za-z-])',
+                     content) is not None
+
+
 def sync_to_backlog(issues: List[Dict[str, Any]],
                     backlog_path: str) -> Dict[str, Any]:
-    """Append backlog rows for ``issues`` to the table in ``backlog_path``.
+    """Append backlog rows for new ``issues`` to the table in ``backlog_path``.
 
-    Returns a summary dict ``{"added": N, "rows": [...]}``. This is the v1
-    single-direction write: every issue is rendered and appended (idempotency
-    /skip-existing arrives in US-SYNC-003).
+    Idempotent (US-SYNC-003): an issue whose ``GH-<number>`` id already appears
+    in the backlog is skipped (status/description left untouched) and reported
+    in ``skipped``. Returns a summary dict
+    ``{"added": N, "skipped": M, "total": K, "rows": [...], "skipped_ids": [...]}``.
     """
     with open(backlog_path, "r", encoding="utf-8") as fh:
         content = fh.read()
-    rows = [issue_to_row(issue) for issue in issues]
+    rows: List[str] = []
+    skipped_ids: List[str] = []
+    for issue in issues:
+        ident = gh_id(issue)
+        if _gh_id_present(content, ident):
+            skipped_ids.append(ident)
+            continue
+        rows.append(issue_to_row(issue))
     updated = _append_rows_to_table(content, rows)
     with open(backlog_path, "w", encoding="utf-8") as fh:
         fh.write(updated)
-    return {"added": len(rows), "rows": rows}
+    return {
+        "added": len(rows),
+        "skipped": len(skipped_ids),
+        "total": len(issues),
+        "rows": rows,
+        "skipped_ids": skipped_ids,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +441,10 @@ def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     summary = sync_to_backlog(issues, backlog)
     for row in summary["rows"]:
         print(f"+ {row}")
-    print(f"added: {summary['added']}, total issues: {len(issues)}")
+    for ident in summary["skipped_ids"]:
+        print(f"skipped (already exists): {ident}")
+    print(f"added: {summary['added']}, skipped: {summary['skipped']}, "
+          f"total issues: {summary['total']}")
     return 0
 
 

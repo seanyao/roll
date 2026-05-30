@@ -335,6 +335,82 @@ def detect_signals(records, streak: int = SIGNAL_STREAK):
     return signals
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# US-AGENT-030: per-(agent × story_type) historical hit-rate aggregation.
+#
+# This is the pure read-model the adaptive in-tier nudge (lib/loop_pick_agent.py
+# nudge_within_tier) consumes. Given runs.jsonl records, it computes — for every
+# observed (agent, story_type) pair — the share of *scored* cycles that landed a
+# "hit" (a high result_eval.score), plus the sample size that share rests on.
+#
+# Crucially distinct from the US-AGENT-022-retired soft preference: that ranked
+# agents by an opaque, unbounded, implicitly-decaying history with no audit
+# trail. This is a flat, deterministic, locale-independent count over the
+# records handed in — same records in → same numbers out, every time. The nudge
+# layer adds the sample floor and the on/off switch; this function only counts.
+#
+# A "hit" is a cycle whose result_eval.score is at or above HIT_SCORE_MIN. Using
+# the rolled-up 1..10 cycle score (not a single dimension) keeps the signal the
+# same one the dashboard already trends, so the audit story is one number.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# A cycle counts as a "hit" for its (agent, story_type) when its rolled-up
+# result_eval.score is at least this. 8/10 = "clearly good cycle". Centralised
+# constant; intentionally not a user knob (keeps the nudge's input deterministic
+# and explainable).
+HIT_SCORE_MIN = 8
+
+
+def agent_story_hit_rates(records):
+    """Aggregate per-(agent, story_type) hit-rate + sample size from records.
+
+    ``records`` is an iterable of runs.jsonl record dicts (order irrelevant —
+    the result is a flat count, so it is deterministic regardless of input
+    order). A record contributes to a pair only when it carries a non-empty
+    ``agent`` and ``story_type`` and a usable ``result_eval.score`` (records
+    without a score are simply not counted — never treated as a 0 hit).
+
+    Returns a dict keyed by ``"<agent>\\x1f<story_type>"`` (unit-separator so
+    the key round-trips through JSON and shell without ambiguity) →
+    ``{"agent":.., "story_type":.., "hit_rate": float 0..1, "sample_n": int}``.
+    A hit is ``result_eval.score >= HIT_SCORE_MIN``.
+    """
+    # pair-key → [hits, sample_n]
+    tally = {}
+    for r in (records or []):
+        if not isinstance(r, dict):
+            continue
+        agent = r.get("agent")
+        stype = r.get("story_type")
+        if not agent or not stype:
+            continue
+        ev = r.get("result_eval")
+        if not isinstance(ev, dict):
+            continue
+        score = ev.get("score")
+        if not isinstance(score, (int, float)):
+            continue
+        key = "%s\x1f%s" % (agent, stype)
+        slot = tally.get(key)
+        if slot is None:
+            slot = [0, 0]
+            tally[key] = slot
+        slot[1] += 1
+        if float(score) >= HIT_SCORE_MIN:
+            slot[0] += 1
+    out = {}
+    for key in sorted(tally):
+        hits, n = tally[key]
+        agent, stype = key.split("\x1f", 1)
+        out[key] = {
+            "agent": agent,
+            "story_type": stype,
+            "hit_rate": (hits / n) if n else 0.0,
+            "sample_n": n,
+        }
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Score a loop cycle result.")
     parser.add_argument("--facts", default=None,
@@ -344,9 +420,25 @@ def main() -> int:
                              "and emit detected self-evolution signals")
     parser.add_argument("--streak", type=int, default=SIGNAL_STREAK,
                         help="consecutive low cycles required to fire a signal")
+    parser.add_argument("--hit-rates", action="store_true",
+                        help="read a JSON array of runs records from --facts/stdin "
+                             "and emit per-(agent × story_type) hit-rate + sample_n "
+                             "(US-AGENT-030 adaptive-nudge read model)")
     args = parser.parse_args()
 
     raw = args.facts if args.facts is not None else sys.stdin.read()
+
+    if args.hit_rates:
+        try:
+            records = json.loads(raw) if raw.strip() else []
+        except (ValueError, AttributeError) as exc:
+            print(f"loop_result_eval: bad records JSON: {exc}", file=sys.stderr)
+            return 1
+        if not isinstance(records, list):
+            print("loop_result_eval: --hit-rates expects a JSON array", file=sys.stderr)
+            return 1
+        print(json.dumps(agent_story_hit_rates(records), sort_keys=True))
+        return 0
 
     if args.signals:
         try:

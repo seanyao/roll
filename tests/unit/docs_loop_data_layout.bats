@@ -73,3 +73,13 @@ GUIDE_ZH="${ROOT}/guide/zh"
   grep -q 'ALERT-<slug>.md' "${GUIDE_ZH}/faq.md"
   grep -q 'migrated-' "${GUIDE_ZH}/faq.md"
 }
+
+@test "guide en: data-layout documents dream/brief project-local cron logs (IDEA-051)" {
+  grep -q '<project>/.roll/dream/cron.log' "${GUIDE_EN}/loop-data-layout.md"
+  grep -q '<project>/.roll/brief/cron.log' "${GUIDE_EN}/loop-data-layout.md"
+}
+
+@test "guide zh: data-layout documents dream/brief project-local cron logs (IDEA-051)" {
+  grep -q '<project>/.roll/dream/cron.log' "${GUIDE_ZH}/loop-data-layout.md"
+  grep -q '<project>/.roll/brief/cron.log' "${GUIDE_ZH}/loop-data-layout.md"
+}

@@ -247,7 +247,7 @@ Together these mean: only one loop runs at a time per project (LOCK), and within
 > 2. Read its Agent profile (est_min / risk_zone) and routed an agent via `_loop_pick_agent_for_story` (hard rules from `.roll/agent-routes.yaml` + soft preference from `runs.jsonl`)
 > 3. Exported `ROLL_LOOP_ROUTED_STORY` / `ROLL_LOOP_ROUTED_AGENT` / `ROLL_LOOP_ROUTED_RULE` and printed `[loop] story <id> routed to <agent> via <rule_kind>` to cron.log
 >
-> When `ROLL_LOOP_ROUTED_STORY` is set, prefer it as `US_ID` for this cycle. The story has already been chosen by hard+soft routing rules — do not re-pick a different one unless that story can no longer be found in BACKLOG (e.g. status changed concurrently).
+> When `ROLL_LOOP_ROUTED_STORY` is set, prefer it as `US_ID` for this cycle. The story has already been chosen by hard+soft routing rules — and, per FIX-146, the runner re-validates it against the authoritative backlog right before handing it to you (re-picking the next eligible Todo if it went ✅ Done / In Progress / ineligible between pick and handoff, emitting a `story_stale` event). So treat `ROLL_LOOP_ROUTED_STORY` as already-eligible and just work it. Only if you still find at cycle start that it is no longer 📋 Todo in BACKLOG (a residual concurrent flip), re-pick the next eligible Todo via `_loop_pick_next_story` rather than idling the whole cycle.
 >
 > Old single-agent fallback (`primary_agent` from `~/.roll/config.yaml`) still applies when:
 > - no story is pickable (empty Todo / all manual-only)

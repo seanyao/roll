@@ -138,3 +138,108 @@ MD
   [ -f "$inner" ]
   grep -qE "routed to|via.*hard|via.*soft|story.*routed" "$inner"
 }
+
+# FIX-146: _loop_story_is_eligible tests ─────────────────────────────────────
+
+@test "story_is_eligible: 📋 Todo story with no blockers → eligible" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | plain | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-001"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "story_is_eligible: ✅ Done story → ineligible" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | done | ✅ Done |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-001"
+  [ "$status" -ne 0 ]
+}
+
+@test "story_is_eligible: manual-only → ineligible" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | reserved manual-only:true | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-001"
+  [ "$status" -ne 0 ]
+}
+
+@test "story_is_eligible: unsatisfied depends-on → ineligible" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | parent | 🔨 In Progress |
+| [FIX-A-002](.roll/features/test/t.md#fix-a-002) | child depends-on:FIX-A-001 | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-002"
+  [ "$status" -ne 0 ]
+}
+
+@test "story_is_eligible: satisfied depends-on → eligible" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | parent | ✅ Done |
+| [FIX-A-002](.roll/features/test/t.md#fix-a-002) | child depends-on:FIX-A-001 | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-002"
+  [ "$status" -eq 0 ]
+}
+
+@test "story_is_eligible: open PR titles provided → ineligible when matched" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | first | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-001" ".roll/backlog.md" "FIX-A-001: some open PR"
+  [ "$status" -ne 0 ]
+}
+
+@test "story_is_eligible: open PR titles provided → eligible when not matched" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | first | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-001" ".roll/backlog.md" "FIX-A-999: unrelated PR"
+  [ "$status" -eq 0 ]
+}
+
+@test "story_is_eligible: missing story id → ineligible" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | plain | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-999"
+  [ "$status" -ne 0 ]
+}
+
+@test "story_is_eligible: missing backlog file → ineligible" {
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-001" ".roll/missing.md"
+  [ "$status" -ne 0 ]
+}
+
+@test "story_is_eligible: _loop_pick_next_story delegates to it (behavior unchanged)" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | manual manual-only:true | 📋 Todo |
+| [FIX-A-002](.roll/features/test/t.md#fix-a-002) | plain | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_pick_next_story
+  [ "$status" -eq 0 ]
+  [ "$output" = "FIX-A-002" ]
+}
+
+# FIX-146: inner script template includes the re-validation guard
+@test "runner script: FIX-146 inner includes TOCTOU re-validation guard" {
+  source "$ROLL"
+  _write_loop_runner_script "${TEST_TMP}/run-fix146.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24 >/dev/null 2>&1 || true
+  local inner="${TEST_TMP}/run-fix146-inner.sh"
+  [ -f "$inner" ]
+  grep -qF '_loop_story_is_eligible' "$inner"
+  grep -qF 'story_stale' "$inner"
+  grep -qF 're-picking' "$inner"
+}

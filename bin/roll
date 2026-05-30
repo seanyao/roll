@@ -10058,6 +10058,25 @@ _loop_sync_meta() {
     return 0
   fi
 
+  # FIX-145: never `reset --hard` over uncommitted local .roll edits. The local
+  # .roll is not only a cache of the roll-meta remote — a human (or a design
+  # session) often edits backlog / domain files directly. A hard reset would
+  # silently destroy that work. If tracked files differ from HEAD, skip the sync
+  # entirely and keep the local edits; emit a `dirty` event so it's visible.
+  # (Untracked files are safe — `reset --hard` does not touch them, so we only
+  # guard on tracked modifications. A repo with no commits yet has no HEAD and
+  # nothing to protect, so the guard is skipped.)
+  # NOTE: use `git status --porcelain` rather than `git diff --quiet HEAD` —
+  # status refreshes the index stat cache and content-checks racy entries, so it
+  # reliably detects a just-written edit even on fast machines (a same-second
+  # working-tree change can slip past `git diff --quiet` on CI). --untracked-files=no
+  # keeps untracked files (safe from reset) from blocking the sync forever.
+  if git -C "$roll_meta" rev-parse --verify -q HEAD >/dev/null 2>&1 \
+     && [ -n "$(git -C "$roll_meta" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    _loop_event meta_sync "$cid" "dirty" "uncommitted .roll edits — sync skipped to protect local work" 2>/dev/null || true
+    return 0
+  fi
+
   # Attempt fetch with timeout
   local _fetch_ok=0
   if command -v timeout >/dev/null 2>&1; then

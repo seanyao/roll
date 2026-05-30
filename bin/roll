@@ -7918,6 +7918,9 @@ cd "${project_path}" 2>/dev/null || true
 _ensure_hooks_path "${project_path}" 2>/dev/null || true
 # US-LOOP-056: sync .roll/ meta from roll-meta remote before backlog scan
 _loop_sync_meta "${project_path}" || true
+# US-SYNC-008: when backlog_sync.on_loop_cycle is true, pull new GitHub issues
+# into the backlog before the story scan. Default off; fail-soft (ALERT only).
+_loop_backlog_sync_hook "${project_path}" || true
 # FIX-104: GC stale merged temp branches at cycle entry — before worktree setup
 # and before any early-exit gate (pre-run abort, CI red precheck). The post-claude
 # call site doesn't cover those paths, so merged branches accumulated on origin.
@@ -9967,6 +9970,40 @@ _ci_wait() {
 #   stale   – fetch failed; existing .roll/ used as fallback
 #   skipped – no git remote configured (not a roll-meta managed project)
 #
+# US-SYNC-008: when `.roll/local.yaml backlog_sync.on_loop_cycle: true`, pull
+# fresh GitHub issues into the backlog at cycle preflight so the upcoming story
+# scan sees new issues. Default is OFF — absent file/key/flag is a silent no-op,
+# so cycle behaviour is unchanged for projects that haven't opted in. Fail-soft:
+# a sync error never blocks the cycle; it writes an ALERT and returns 0. The
+# project's main .roll/ is synced (real sync, not dry-run) so the worktree's
+# backlog copy (_worktree_sync_meta runs after this) carries the new rows.
+_loop_backlog_sync_hook() {
+  local project_path="$1"
+  local local_yaml="${project_path}/.roll/local.yaml"
+  local backlog="${project_path}/.roll/backlog.md"
+  local cid="${CYCLE_ID:-unknown}"
+  command -v python3 >/dev/null 2>&1 || return 0
+  [ -f "$local_yaml" ] || return 0
+  # Read the switch (true/false). Absent file or key prints "false".
+  local on
+  on=$(python3 "${ROLL_PKG_DIR}/lib/github_sync.py" on-loop-cycle \
+         --local-yaml "$local_yaml" 2>/dev/null || echo "false")
+  if [ "$on" != "true" ]; then
+    return 0
+  fi
+  _loop_event backlog_sync "$cid" "start" "" 2>/dev/null || true
+  # Real sync into the project's backlog. github_sync.py resolves --repo from
+  # the persisted backlog_sync.repo, so no --repo flag is needed here.
+  if python3 "${ROLL_PKG_DIR}/lib/github_sync.py" sync \
+       --backlog "$backlog" --local-yaml "$local_yaml" >/dev/null 2>&1; then
+    _loop_event backlog_sync "$cid" "ok" "" 2>/dev/null || true
+  else
+    _loop_event backlog_sync "$cid" "failed" "" 2>/dev/null || true
+    _worktree_alert "cycle ${cid}: backlog sync failed (on_loop_cycle=true); cycle continues with existing backlog" 2>/dev/null || true
+  fi
+  return 0
+}
+
 # Env override: ROLL_LOOP_META_SYNC_TIMEOUT (default 15) controls fetch timeout.
 _loop_sync_meta() {
   local project_path="$1"

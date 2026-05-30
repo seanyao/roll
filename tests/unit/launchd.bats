@@ -381,8 +381,12 @@ setup() {
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
-  local cfg; cfg=$(mktemp)
-  printf 'loop_active_start: 10\nloop_active_end: 18\n' > "$cfg"; ROLL_CONFIG="$cfg"
+  local cfg; cfg=$(mktemp); ROLL_CONFIG="$cfg"
+  # Active window now lives in per-project .roll/local.yaml loop_schedule block
+  # (_loop_read_active_window), not global ROLL_CONFIG. Default is 0/24, so the
+  # fixture must set the bounds here to drive 10/18 into the runner.
+  mkdir -p "${proj}/.roll"
+  printf 'loop_schedule:\n  active_start: 10\n  active_end: 18\n' > "${proj}/.roll/local.yaml"
 
   _install_launchd_plists "$proj"
 

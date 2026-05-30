@@ -47,6 +47,7 @@ from roll_render import (
     section_head, metric, metric_dur, metric_dollar, metric_tokens,
     day_band, cycle_row,
 )
+from roll_git import git_remote_url as _git_remote_url
 
 # ════════════════════════════════════════════════════════════════════════════
 # Paths — must match bin/roll's _project_slug + _SHARED_ROOT defaults
@@ -89,34 +90,6 @@ def project_slug(path: Optional[str] = None) -> str:
     h = hashlib.md5(path.encode()).hexdigest()[:6]
     return f"{base}-{h}"
 
-
-def _git_remote_url(repo_path: str) -> Optional[str]:
-    """Return the normalized remote URL for a git repo, or None."""
-    try:
-        url = subprocess.check_output(
-            ["git", "-C", repo_path, "remote", "get-url", "origin"],
-            stderr=subprocess.DEVNULL, text=True
-        ).strip()
-        if url:
-            return url
-    except Exception:
-        pass
-    # Fallback: first available remote
-    try:
-        remotes = subprocess.check_output(
-            ["git", "-C", repo_path, "remote"],
-            stderr=subprocess.DEVNULL, text=True
-        ).strip().splitlines()
-        if remotes:
-            url = subprocess.check_output(
-                ["git", "-C", repo_path, "remote", "get-url", remotes[0]],
-                stderr=subprocess.DEVNULL, text=True
-            ).strip()
-            if url:
-                return url
-    except Exception:
-        pass
-    return None
 
 def shared_root() -> Path:
     return Path(os.environ.get("ROLL_SHARED_ROOT") or os.path.expanduser("~/.shared/roll"))

@@ -108,6 +108,7 @@ roll loop reset       # 清除 loop 状态（下次触发时重新开始）
 roll loop gc                  # 清理孤儿 slug、临时文件、过期备份（默认保留 30 天）
 roll loop gc --dry-run        # 预览将被清理的内容，不实际删除
 roll loop gc --keep-days 14   # 覆盖保留天数（也可用 .roll/local.yaml 中的 loop_gc.retention_days）
+                              # 完整 gc 手册见 guide/zh/loop-data-layout.md
 
 roll loop branches    # 列出 loop 相关分支（已合并临时分支、开放 PR 等）
 
@@ -373,7 +374,7 @@ roll loop unmute      # 🔔 重新开启弹窗
 
 Loop 有两层保护：
 
-- **LOCK 文件**（`~/.shared/roll/loop/.LOCK-<slug>`）：同一个项目同一时间只有一个 loop 实例运行。
+- **LOCK 文件**（`<project>/.roll/loop/.LOCK-<slug>`）：同一个项目同一时间只有一个 loop 实例运行。
   如果 loop 已在运行，新的触发直接退出，不重复执行。
 - **🔨 In Progress 状态**：正在被人工或其他 Agent 执行的故事，loop 会跳过，不抢占。
 
@@ -615,11 +616,18 @@ git -C .roll fetch && git -C .roll reset --hard origin/main
 
 ## 状态文件
 
+Since Phase 2.0, loop state lives inside the project at `<project>/.roll/loop/`.
+
+自 Phase 2.0 起，项目的 loop 状态搬进了**项目目录** `<project>/.roll/loop/`。只有机
+器级绑定文件（launchd runner、attach 脚本）和全局静音开关留在 `~/.shared/roll/`。完
+整布局、迁移与 `roll loop gc` 见 [Loop 数据布局](loop-data-layout.md)。
+
 | 文件 | 内容 |
 |------|------|
-| `~/.shared/roll/loop/state.yaml` | 当前/最近一次运行：状态、故事 ID、Agent、run_id |
-| `~/.shared/roll/loop/runs.jsonl` | 只追加的运行历史（每次循环一行 JSON）；每条记录带 `result_eval` 块（见 [Cycle 结果评分](#cycle-结果评分result-eval)） |
+| `<project>/.roll/loop/state-<slug>.yaml` | 当前/最近一次运行：状态、故事 ID、Agent、run_id |
+| `<project>/.roll/loop/runs.jsonl` | 只追加的运行历史（每次循环一行 JSON）；每条记录带 `result_eval` 块（见 [Cycle 结果评分](#cycle-结果评分result-eval)） |
+| `<project>/.roll/loop/events.ndjson` | 逐 cycle 事件流（phase_start/phase_end…） |
 | `.roll/signals/candidates.md` | 自进化信号产出的候选 backlog 草稿（`📋 待人确认`，绝不自动激活） |
-| `~/.shared/roll/loop/ALERT.md` | 累积的告警（失败、TCR 违规）|
-| `~/.shared/roll/loop/PAUSE-<slug>` | 暂停标记（由 `roll loop pause` 创建）|
-| `~/.shared/roll/mute` | 静音标记（跨项目共享）|
+| `<project>/.roll/loop/ALERT-<slug>.md` | 累积的告警（失败、TCR 违规）|
+| `<project>/.roll/loop/PAUSE-<slug>` | 暂停标记（由 `roll loop pause` 创建）|
+| `~/.shared/roll/mute` | 全局静音标记（跨项目共享）|

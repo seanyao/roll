@@ -67,6 +67,7 @@ _PLUGINS = {
     # agent name → python module name (relative to this package)
     "pi": ".pi",
     "openai": ".openai",
+    "gemini": ".gemini",
 }
 
 for _agent, _mod_suffix in _PLUGINS.items():

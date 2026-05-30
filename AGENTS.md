@@ -157,6 +157,8 @@ Confirm each phase clean before proceeding to the next.
 2. Reflect changes in `guide/zh/<topic>.md`
 3. Update Documentation Index tables in README.md and README_CN.md if new files were added
 
+**Legacy-doc automation (`$roll-doc`):** runs four phases — scan/index → gap analysis → fill → report — plus a deep-read **Phase 3b** that builds a full project symbol table and detects six cross-directory topics (data flow, state machine, integrations, deployment, AGENTS.md, high fan-in README). It only writes drafts; humans review and commit. See [guide/en/roll-doc.md](guide/en/roll-doc.md) / [guide/zh/roll-doc.md](guide/zh/roll-doc.md).
+
 ## 9. Working with `.roll/` (nested private repo)
 
 > Maintainer-only. Roll itself dogfoods Roll, but the project meta (backlog,

@@ -22,3 +22,10 @@ editor: ${EDITOR:-vim}
 # file paths, and other potentially sensitive information.
 #
 # roll_records_remote: "git@github.com:you/roll-loop-records.git"
+
+# Remote monitoring (optional) — US-OBS-014.
+# Local checkout of your roll-meta repo. When set, each loop cycle end
+# auto-pushes a status snapshot via ops/push-loop-status.sh so the
+# remote-watch prompt always sees fresh data (no manual cron needed).
+# Path supports ~ expansion; a missing path logs one WARNING and is skipped.
+# roll_meta_dir: ~/projects/roll-meta

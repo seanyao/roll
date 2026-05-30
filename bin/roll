@@ -7049,6 +7049,61 @@ _loop_event_rotate() {
   fi
 }
 
+# US-OBS-014: after a loop cycle reaches a terminal cycle_end (done or idle),
+# fire a best-effort, background status-snapshot push to roll-meta so the
+# remote-watch prompt always sees ≤35min-fresh data — no user-side cron needed.
+#
+# Reads the optional `roll_meta_dir` config key (config_get already ~-expands).
+# Fully skips with zero output when it is unset. When set but the directory is
+# missing, prints one WARNING (the inner runner redirects stdout/stderr to
+# cron.log) and skips. The push script itself is invoked in the background and
+# is hard-killed after 60s; any failure/timeout is logged to push-status.log
+# (rotated at 1MB, keeping 2 copies) and never aborts the cycle or sets an ALERT.
+_loop_push_status_snapshot() {
+  local meta_dir
+  meta_dir=$(config_get roll_meta_dir "")
+  # Unconfigured → complete no-op, zero output (preserves prior behaviour).
+  [ -z "$meta_dir" ] && return 0
+  if [ ! -d "$meta_dir" ]; then
+    echo "WARNING: roll_meta_dir '${meta_dir}' does not exist; skipping status push" >&2
+    return 0
+  fi
+  local script="${meta_dir}/ops/push-loop-status.sh"
+  # Configured dir exists but the push script isn't there (e.g. older roll-meta
+  # checkout) → silent skip; nothing to push.
+  [ -f "$script" ] || return 0
+
+  local logf="${_SHARED_ROOT:-${HOME}/.shared/roll}/push-status.log"
+  mkdir -p "$(dirname "$logf")" 2>/dev/null || true
+  # Rotate at 1MB, keep 2 copies (.1) — same policy as watch.sh's push log.
+  local _sz
+  _sz=$(stat -f%z "$logf" 2>/dev/null || stat -c%s "$logf" 2>/dev/null || echo 0)
+  if [ "$_sz" -gt 1048576 ]; then
+    rm -f "${logf}.2"
+    [ -f "${logf}.1" ] && mv "${logf}.1" "${logf}.2"
+    mv "$logf" "${logf}.1"
+    touch "$logf"
+  fi
+
+  # Background, best-effort. A portable watchdog hard-kills the push after 60s
+  # (`timeout` is GNU-only and absent on stock macOS) so a hung git push can
+  # never stall the next cycle.
+  (
+    bash "$script" "$meta_dir" >> "$logf" 2>&1 &
+    local _push_pid=$!
+    local _waited=0
+    while kill -0 "$_push_pid" 2>/dev/null; do
+      if [ "$_waited" -ge 60 ]; then
+        kill -TERM "$_push_pid" 2>/dev/null
+        echo "$(date '+%Y-%m-%dT%H:%M:%S%z') push-loop-status timeout (>60s); killed pid ${_push_pid}" >> "$logf"
+        break
+      fi
+      sleep 1
+      _waited=$((_waited + 1))
+    done
+  ) &
+}
+
 # FIX-050: probe brew prefix + common tool dirs to build a PATH that survives
 # launchd/cron's bare-env launch. Setup-time companion to the runtime
 # assembly snippet embedded in runner scripts.
@@ -7935,6 +7990,9 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       # this successful no-op as a failure on the dashboard.
       _loop_event cycle_end "\${CYCLE_ID}" "" "idle" || true
       _CYCLE_END_WRITTEN=1
+      # US-OBS-014: idle cycles push too — keeps the remote heartbeat fresh so
+      # remote-watch can tell "loop online but no work" apart from "loop offline".
+      _loop_push_status_snapshot || true
       _phases_idle=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_idle" ] && _phases_idle='{}'
       _runs_append "idle" 0 "[]" "\$_phases_idle" 2>/dev/null || true
       echo "[loop] cycle \${CYCLE_ID}: idle (no new commits); worktree cleaned"
@@ -7972,6 +8030,8 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
         _loop_emit_pr_final "\$BRANCH" 2>/dev/null || true
         _worktree_cleanup "\$WT" "\$BRANCH"
         _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true; _CYCLE_END_WRITTEN=1
+        # US-OBS-014: normal-completion path — push a fresh status snapshot.
+        _loop_push_status_snapshot || true
         _phase_end cleanup ok
         echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
       elif [ "\$_publish_status" -eq 2 ]; then

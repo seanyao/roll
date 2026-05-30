@@ -102,6 +102,56 @@ _seed_min_project() {
   ! grep -qE '下一步.*roll slides build' "$skill"
 }
 
+# ─── US-DECK-019: layout selection playbook ──────────────────────────────────
+
+@test "skill file: has a Layout selection playbook section (US-DECK-019)" {
+  local skill="${REPO}/skills/roll-deck/SKILL.md"
+  grep -qE '^## Layout 选择手册' "$skill"
+  # The decision matrix must steer the three most-forgotten rich layouts.
+  grep -q "compare" "$skill"
+  grep -q "pipeline" "$skill"
+  grep -q "timeline" "$skill"
+}
+
+@test "skill file: layout matrix gives anti-patterns, not just recommendations" {
+  local skill="${REPO}/skills/roll-deck/SKILL.md"
+  # Anti-pattern column must exist (the matrix teaches what NOT to use).
+  grep -qiE "anti-pattern|反例" "$skill"
+  # And the explicit guidance that plain is a legitimate choice, not a failure.
+  grep -qE "plain.* is the correct choice|plain.* 是正确答案" "$skill"
+}
+
+@test "skill file: workflow forces explicit layout per slide (US-DECK-019)" {
+  local skill="${REPO}/skills/roll-deck/SKILL.md"
+  # Step 3 must require declaring layout: explicitly on every slide.
+  grep -qE "MUST declare .?layout:.? explicitly on every slide" "$skill"
+}
+
+@test "skill file: hard constraint pins layout to the whitelist (US-DECK-019)" {
+  local skill="${REPO}/skills/roll-deck/SKILL.md"
+  # Inventing a layout name must be called out as a render failure.
+  grep -qE "Unknown layout|自创 layout 名渲染会失败" "$skill"
+  # All nine whitelist names must appear in the constraint.
+  for layout in plain cards-2 cards-3 cards-4 compare pipeline timeline quote highlight; do
+    grep -q "$layout" "$skill"
+  done
+}
+
+@test "skill file: worked examples use whitelist field names (no schema drift)" {
+  local skill="${REPO}/skills/roll-deck/SKILL.md"
+  # Field names must match lib/slides/components/README.md verbatim so the
+  # AI-authored deck.md actually renders. Assert the distinctive ones.
+  grep -qE "left_items:" "$skill"
+  grep -qE "right_items:" "$skill"
+  grep -qE "css_class:" "$skill"
+  grep -qE "text_en:" "$skill"
+}
+
+@test "skill file: has a Known agent limitations section (US-DECK-019)" {
+  local skill="${REPO}/skills/roll-deck/SKILL.md"
+  grep -qE "Known agent limitations|已知 agent 局限" "$skill"
+}
+
 # ─── Dispatch / usage ────────────────────────────────────────────────────────
 
 @test "cmd_slides new: no topic → bilingual usage error + non-zero exit" {

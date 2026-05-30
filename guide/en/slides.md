@@ -129,11 +129,12 @@ created: 2026-05-21
 
 ### Slide section
 
-Each slide is a `## Slide N` header followed by four required keys plus
-an evidence list:
+Each slide is a `## Slide N` header followed by a `layout` declaration,
+the layout's content keys, and an evidence list:
 
 ```markdown
 ## Slide 1
+layout: plain
 title_en: "Why autonomy"
 title_zh: "为什么要自主"
 body_en: |
@@ -146,7 +147,12 @@ evidence:
   - guide/en/loop.md:12
 ```
 
-Required per-slide keys: `title_en`, `title_zh`, `body_en`, `body_zh`.
+Every slide declares `layout:` (default `plain`) plus `title_en` /
+`title_zh`. The remaining keys depend on the layout — `plain` and
+`highlight` use `body_en` / `body_zh`; richer layouts use structured
+fields like `cards`, `left_items`, `stages`, or `items`. See
+[Layouts](#layouts) for the full per-layout field reference.
+
 `evidence` is a list of `<path>:<line>` references — at least one
 citation is expected per three slides (see [Grounding](#grounding--evidence-convention)).
 
@@ -167,8 +173,222 @@ delimiters (`{{=<% %>=}}`), and dotted lookup (`{{a.b}}`).
 
 The render context exposes the frontmatter scalars (`title_en`,
 `title_zh`, `total_slides`, …) and a `slides` list. Each slide item
-exposes `number`, `title_en`, `title_zh`, `body_en`, `body_zh`,
-`body_en_html`, `body_zh_html`, `evidence`.
+exposes `number`, `layout`, `title_en`, `title_zh`, `evidence`, plus
+the structured fields its layout declares (e.g. `body_en_html` /
+`body_zh_html` for `plain` / `highlight`, or `cards` / `stages` /
+`items` for the richer layouts — see [Layouts](#layouts)).
+
+## Layouts
+
+Every slide declares a `layout`. The layout decides what the slide
+*looks like* — a plain paragraph, two red/green columns, a horizontal
+pipeline, a vertical timeline, side-by-side cards, a pulled quote, or a
+single callout. Pick the layout from the **shape of your content**, not
+to look fancy: if the content is genuinely one block of prose, `plain`
+is the correct choice.
+
+`layout` is validated against a fixed whitelist. An unknown name (or a
+layout missing its required fields) fails the build with a clear
+message telling you what to fix. Omitting `layout` is the same as
+`plain` — Phase 1 decks keep working unchanged.
+
+| Layout | Use it for | Don't use it for |
+|--------|-----------|------------------|
+| `plain` | Ordinary prose, explanation, a plain list | Data that is really a comparison / flow / timeline |
+| `cards-2` | 2 parallel concepts, side-by-side | 3+ items (use `cards-3` / `cards-4`) |
+| `cards-3` | 3 pillars, triple option, 3-step summary | 2 items (use `cards-2`) |
+| `cards-4` | 4 quadrants, pricing tiers, team roles | Fewer than 4 items (too sparse) |
+| `compare` | Before/after, old vs new, problem/solution | Unrelated items (use `cards`) |
+| `pipeline` | Sequential flow, CI/CD, ordered process steps | Unordered items (use `cards`) |
+| `timeline` | Chronological events, history, roadmap | A single event (use `highlight`) |
+| `quote` | A testimonial, a memorable line, user's own words | Multi-paragraph prose (use `plain`) |
+| `highlight` | The one key takeaway / one-line conclusion | Normal body text (use `plain`) |
+
+Field names below match `lib/slides/components/README.md` and the
+`roll-deck` skill's selection playbook verbatim — copy them exactly.
+
+### `plain`
+
+Free-form prose. Keys: `body_en`, `body_zh`.
+
+```markdown
+## Slide 9
+layout: plain
+title_en: "Plain Prose"
+title_zh: "普通段落"
+body_en: |
+  When the content is genuinely one block of prose, plain is the
+  correct choice — not a failure.
+body_zh: |
+  内容真就是一段话时，plain 是正确答案，不是偷懒。
+evidence:
+  - README.md:1
+```
+
+![plain layout](assets/layouts/plain.png)
+
+### `highlight`
+
+A single callout / one-line conclusion. Keys: `body_en`, `body_zh`.
+
+```markdown
+## Slide 6
+layout: highlight
+title_en: "Key Takeaway"
+title_zh: "关键结论"
+body_en: |
+  One command takes a topic to a shareable HTML deck.
+body_zh: |
+  一条命令把主题变成可分享的 HTML 演示。
+evidence:
+  - README.md:1
+```
+
+![highlight layout](assets/layouts/highlight.png)
+
+### `quote`
+
+A pulled quote with attribution. Keys: `text_en`, `text_zh`.
+
+```markdown
+## Slide 5
+layout: quote
+title_en: "What Users Say"
+title_zh: "用户原话"
+text_en: "Roll turned a 3-minute black screen into a deck I can share."
+text_zh: "Roll 把 3 分钟的黑屏变成了我能分享的演示。"
+evidence:
+  - README.md:1
+```
+
+![quote layout](assets/layouts/quote.png)
+
+### `cards-2` / `cards-3` / `cards-4`
+
+2, 3, or 4 parallel concepts with no internal order. Key: `cards`, an
+array where each item has `title_en`, `title_zh`, `body_en`, `body_zh`.
+
+```markdown
+## Slide 7
+layout: cards-3
+title_en: "Three Pillars"
+title_zh: "三大支柱"
+cards:
+  - title_en: "Skills"
+    title_zh: "技能"
+    body_en: "Composable AI workflows."
+    body_zh: "可组合的 AI 工作流。"
+  - title_en: "Loop"
+    title_zh: "循环"
+    body_en: "Autonomous backlog executor."
+    body_zh: "自主 backlog 执行器。"
+  - title_en: "TCR"
+    title_zh: "TCR"
+    body_en: "Test, commit, or revert."
+    body_zh: "测试、提交或回滚。"
+evidence:
+  - README.md:1
+```
+
+`cards-2` and `cards-4` take the same `cards` array with 2 or 4 items.
+
+![cards-2 layout](assets/layouts/cards-2.png)
+
+![cards-3 layout](assets/layouts/cards-3.png)
+
+![cards-4 layout](assets/layouts/cards-4.png)
+
+### `compare`
+
+Two columns: left (e.g. "before") vs right (e.g. "after"). Keys:
+`left_title_en` / `left_title_zh` / `right_title_en` / `right_title_zh`,
+plus `left_items` and `right_items` — arrays where each item has
+`text_en` / `text_zh`.
+
+```markdown
+## Slide 2
+layout: compare
+title_en: "Before vs After"
+title_zh: "前后对比"
+left_title_en: "Before"
+left_title_zh: "之前"
+right_title_en: "After"
+right_title_zh: "之后"
+left_items:
+  - text_en: "Manual steps"
+    text_zh: "手动步骤"
+right_items:
+  - text_en: "Automated"
+    text_zh: "自动化"
+evidence:
+  - README.md:1
+```
+
+![compare layout](assets/layouts/compare.png)
+
+### `pipeline`
+
+A horizontal, ordered sequence of stages. Key: `stages`, an array where
+each item has `title_en`, `title_zh`, `desc_en`, `desc_zh`, and an
+optional `css_class` (`pipe-idea`, `pipe-backlog`, `pipe-build`,
+`pipe-verify`, or `pipe-release`).
+
+```markdown
+## Slide 3
+layout: pipeline
+title_en: "Build Pipeline"
+title_zh: "构建流水线"
+stages:
+  - title_en: "Stage"
+    title_zh: "暂存"
+    desc_en: "git add -A"
+    desc_zh: "git add -A"
+  - title_en: "Test"
+    title_zh: "测试"
+    desc_en: "roll test"
+    desc_zh: "roll test"
+evidence:
+  - README.md:1
+```
+
+![pipeline layout](assets/layouts/pipeline.png)
+
+### `timeline`
+
+A vertical, chronological list of events. Key: `items`, an array where
+each item has `title_en`, `title_zh`, `body_en`, `body_zh`.
+
+```markdown
+## Slide 4
+layout: timeline
+title_en: "Project Evolution"
+title_zh: "项目演进"
+items:
+  - title_en: "Phase 1"
+    title_zh: "阶段一"
+    body_en: "Generate and render."
+    body_zh: "生成与渲染。"
+  - title_en: "Phase 2"
+    title_zh: "阶段二"
+    body_en: "Visual richness."
+    body_zh: "视觉富度。"
+evidence:
+  - README.md:1
+```
+
+![timeline layout](assets/layouts/timeline.png)
+
+### How `$roll-deck` picks a layout
+
+When you run `roll slides new "<topic>"`, the `roll-deck` skill chooses
+a layout per slide from the **shape of the content** — before/after
+goes to `compare`, multi-step flows to `pipeline`, time series to
+`timeline`, parallel concepts to `cards-N`, attributed lines to
+`quote`, a one-line conclusion to `highlight`, and everything else to
+`plain`. The same decision matrix lives in `skills/roll-deck/SKILL.md`
+("Layout Selection Playbook"); this doc and that playbook are kept in
+sync. You can always override the AI's choice by editing `layout:` in
+`deck.md` and re-running `roll slides build <slug>`.
 
 ## Grounding & Evidence Convention
 

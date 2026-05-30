@@ -178,9 +178,12 @@ Pure documentation-only projects (no source code gaps, no code characteristics) 
 
 ### Step 1 — Build Symbol Table
 
-Read every source file **in full** (no truncation). The existing Phase 3 "up to 20 source files"
-limit does not apply — Phase 3b builds a complete project symbol table for downstream topic
-detection to reason across files without missing logic.
+Read each source file through the context-feed budget (US-CTX-001), not by hard-stuffing whole
+files unconditionally. The existing Phase 3 "up to 20 source files" count limit does not apply —
+Phase 3b aims for a complete project symbol table — but per-file material still goes through the
+feed budget: files within budget are read in full, and over-budget files are summarized/chunked
+with an explicit notice (never silently truncated) so the inner agent's context window is not
+blown. This replaces the previous "read every source file in full, no truncation" unbounded path.
 
 **Exclusion directories** (same as Phase 1):
 

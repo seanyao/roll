@@ -8844,8 +8844,6 @@ _install_launchd_plists() {
     local label; label=$(_launchd_label "$svc" "$project_path")
     local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
     local runner="${shared}/${svc}/run-${slug}.sh"
-    # FIX-052: per-project cron log so concurrent projects don't interleave.
-    local log="${shared}/${svc}/cron-${slug}.log"
     local cmd; cmd=$(_agent_skill_cmd "${sd}/${skill}/SKILL.md" 2>/dev/null || echo "roll loop now")
 
     if [[ "$svc" == "loop" ]]; then
@@ -8855,6 +8853,9 @@ _install_launchd_plists() {
       local loop_log="${project_path}/.roll/loop/cron.log"
       _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$loop_log" "$active_start" "$active_end" "${sd}/${skill}/SKILL.md"
     else
+      # IDEA-051: dream/brief cron logs are project-local, mirroring loop (FIX-139).
+      local log="${project_path}/.roll/${svc}/cron.log"
+      mkdir -p "${project_path}/.roll/${svc}"
       _write_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log"
     fi
 
@@ -9083,8 +9084,10 @@ _loop_on() {
   local slug; slug=$(_project_slug "$project_path")
   local loop_cmd dream_cmd brief_cmd
   loop_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-loop/SKILL.md") >> ${_SHARED_ROOT}/loop/cron-${slug}.log 2>&1"
-  dream_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-.dream/SKILL.md") >> ${_SHARED_ROOT}/dream/cron-${slug}.log 2>&1"
-  brief_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-brief/SKILL.md") >> ${_SHARED_ROOT}/brief/cron-${slug}.log 2>&1"
+  # IDEA-051: dream/brief cron logs are project-local, mirroring loop (FIX-139).
+  mkdir -p "${project_path}/.roll/dream" "${project_path}/.roll/brief"
+  dream_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-.dream/SKILL.md") >> ${project_path}/.roll/dream/cron.log 2>&1"
+  brief_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-brief/SKILL.md") >> ${project_path}/.roll/brief/cron.log 2>&1"
 
   (
     crontab -l 2>/dev/null

@@ -55,24 +55,25 @@ Activate when input is a `US-[A-Z]+-[0-9]+` identifier.
 
 ### Step 0: Pre-flight self-check (US-AGENT-007)
 
-Before reading the Story in depth or splitting actions, **read the Agent profile** from the story's feature md and decide whether this cycle can realistically deliver it. The check is mechanical:
+Before reading the Story in depth or splitting actions, **read the Agent profile** from the story's feature md and decide whether this cycle can realistically deliver it. The check is mechanical and turns on a single axis — the story's `est_min` estimate (US-AGENT-022 retired the old three-dimension type/est/risk routing; there is no per-agent capacity range, risk zone, or history threshold anymore):
 
 ```
 inputs:
   story.est_min       (from **Agent profile:** block, US-AGENT-001)
-  story.risk_zone     (low / medium / high)
   story.chain_depth   (0 unless already a downgrade product)
-  agent.max_est_min   (from .roll/agent-routes.yaml for the current agent)
-  history.prefer_threshold (from .roll/agent-routes.yaml)
-  history.hit_rate    (this agent × this story_type, last window_cycles)
+
+complexity tier (lib/loop_pick_agent.py, single source of truth):
+  est_min <= 8        → easy
+  8 < est_min <= 20   → default
+  est_min > 20        → hard
+  missing / illegal   → default
 
 verdict:
-  too_big when ANY of these is true:
-    1. story.est_min > agent.max_est_min   (hard capacity miss)
-    2. story.risk_zone not in agent.risk    (hard risk miss)
-    3. history.hit_rate < prefer_threshold AND story.chain_depth == 0
-       (soft signal: history says this agent's not on top of this type yet,
-        and we still have downgrade budget — don't burn a cycle)
+  too_big when:
+    story.est_min is large enough that even the `hard` tier won't fit one
+    cycle — i.e. the work plainly composes too many files / behaviours to
+    land green in a single cycle — AND story.chain_depth == 0
+    (still have downgrade budget; don't burn a cycle on a guaranteed miss).
   ok otherwise
 ```
 
@@ -111,7 +112,7 @@ exit 0
 
 If `roll-design` cannot produce ≥2 sub-stories (story is already irreducible), fall through to **US-AGENT-009 cap-hit path** by invoking `_loop_split_cap_hit` directly. The cap is purely about stopping infinite split chains; even on the first re-split, if the design step gives up, the cap-hit handler raises ALERT for human triage.
 
-> Pre-flight is honest, not paranoid: a small story (est_min ≤ 5, chain_depth=0, low risk) should almost always go `ok`. The check pays off on the long tail — stories that look small but compose tons of files, or that the current agent has historically failed.
+> Pre-flight is honest, not paranoid: a small story (est_min ≤ 8 — the `easy` tier — with chain_depth=0) should almost always go `ok`. The check pays off on the long tail — stories with a large `est_min` that, on inspection, plainly compose far more files and behaviours than one cycle can land green.
 
 ### Step 1: Read the Story
 

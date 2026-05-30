@@ -91,6 +91,11 @@ roll loop runs --detail <cycle_id>  # 打印单个 cycle 的阶段耗时面板
 roll loop story <ID>  # 按故事汇总：所有 cycle 数、耗时、token、费用、PR
 roll loop story <ID> --json  # JSON 输出，方便脚本和仪表盘消费
 
+roll loop eval        # 近 14 轮已评分 cycle 的结果评分趋势（客观）
+roll loop eval 30     # 窗口放大到近 30 轮已评分 cycle
+roll loop signals     # 把反复出现的低分模式暴露成改善信号
+roll loop signals --streak 4  # 连续 4 轮低分才触发信号
+
 roll loop attach      # 接入正在运行的 loop tmux session（Ctrl-B D 离开）
 roll loop mute        # 关闭自动弹窗（loop 继续在 tmux 里跑）
 roll loop unmute      # 重新开启自动弹窗
@@ -259,6 +264,94 @@ roll loop story US-LOOP-004 --json    # JSON 输出，给脚本/仪表盘消费
 
 **退出码：** 找到至少一个 cycle 返回 `0`；窗口内没有匹配的故事 ID 返回 `2`。
 `--json` 形式遵守同样的退出码契约，脚本可以靠它判断"数据是否缺失"。
+
+## Cycle 结果评分（Result Eval）
+
+每轮 cycle 收尾时都会按一套固定的多维 rubric 给结果**客观打分**，且**不花额外
+token**——分数完全从 loop 已有的 facts 算出（是否 merge、CI 结果、TCR 提交数、
+耗时、ALERT、孤儿）。结果写进该轮 `runs.jsonl` 记录的 `result_eval` 块：
+
+```json
+{ "version": 1, "score": 8, "dims": { "outcome": 1.0, "correctness": 1.0,
+  "scope_fidelity": 1.0, "quality": 1.0, "efficiency": 0.6, "cleanliness": 1.0 } }
+```
+
+> **结果评分不是 skill 自评。** skill 自评是 agent 对单次 skill 运行的**主观**复盘，
+> 写在 `.roll/notes/*.md`；结果评分是这套从 facts 算出的**客观**每轮结果分。两者是
+> 不同信号，在 dashboard 上分两行各自显示，绝不混为一谈。
+
+### Rubric（六个维度）
+
+每个维度打 `0.0`–`1.0`，facts 缺失时记 `unknown`。unknown 维度不计入汇总，剩余维度的
+权重重新归一——所以缺一个 fact 绝不会被悄悄算成 `0`。
+
+| 维度 | 权重 | 含义 | 何时为 1.0 |
+|------|------|------|-----------|
+| `outcome` | 3 | 这轮有没有 merge 进 `main`？ | 已 merge · `0.0` 未 merge |
+| `correctness` | 2 | 产出 PR 的 CI 是不是绿？ | 绿 · `0.0` 红 |
+| `scope_fidelity` | 2 | 有没有完成被路由到的那个故事？ | 完成 · `0.0` idle / 跑偏 |
+| `quality` | 1 | 加了测试、没立刻返工？ | TCR ≥ 1 且无返工 FIX · `0.5` 有返工 · `0.0` 没测试 |
+| `efficiency` | 1 | 耗时 vs 故事的 `est_min` 预算 | 在预算内 · 超出后逐档降分 |
+| `cleanliness` | 1 | 无孤儿 worktree/分支、无 ALERT | 干净 · `0.0` 有孤儿 / 有 ALERT |
+
+各维度汇总成一个 **1–10 的 cycle 分**：
+
+```
+weighted    = Σ(score_i × weight_i 取已知维度) / Σ(weight_i 取已知维度)
+cycle_score = round(1 + weighted × 9)        # 0.0 → 1, 1.0 → 10
+```
+
+权重集中成 `lib/loop_result_eval.py` 里的常量——可调，但刻意不做成用户高频改的旋钮。
+
+### 看趋势——`roll loop eval [N]`
+
+`roll loop eval` 聚合近 `N` 轮已评分 cycle（默认 14）的 `result_eval`，输出均分 /
+最低分 / 各维度命中率 / 趋势箭头。无 `result_eval` 的旧记录跳过；样本不足 3 个时提示
+`(n/a) need 3`。
+
+```
+$ roll loop eval
+Loop result-eval — last 14 cycles
+循环结果评分 — 最近 14 轮
+
+  mean   6.8 / 10   ↓
+  min    4 / 10
+  n      4
+
+  dimension hit-rate / 各维度命中率
+    outcome          75%
+    correctness      67%
+    scope_fidelity   75%
+    quality          75%
+    efficiency       50%
+    cleanliness      100%
+```
+
+`roll loop status` dashboard 上也有一行结果评分小结，**与 skill 自评那行分开**显示，
+两者绝不混淆：
+
+```
+result-eval: mean 6.8↓ / min 4 / out 75% ci 67% scope 75% qual 75% eff 50% clean 100% (last 14)
+```
+
+### 自进化信号——`roll loop signals`
+
+当某个维度连续 `N` 轮（默认 3，`--streak` 可调）都是低分（`0.0`），loop 把它暴露成
+一条**改善信号**：向 `.roll/signals/candidates.md` 追加一条**候选** backlog 草稿
+（`IDEA` 或 `FIX`，标 `📋 待人确认`），并由 `roll-brief` 的改善信号段报出来。信号按
+模式去重，同一个长期问题只提一次，不每轮重复刷。
+
+信号只是提示。它绝不改真实 backlog、绝不激活故事、绝不改代码——只把"哪里在反复出问题"
+推到面前，让人来决定。cycle 收尾钩子每轮跑一次检测，`roll loop signals` 则按需手动跑。
+
+| 维度持续低分 | 暴露为 | 读法 |
+|-------------|--------|------|
+| `outcome` | FIX | cycle 反复 merge 不进 main |
+| `correctness` | FIX | 产出 PR 反复挂 CI |
+| `scope_fidelity` | IDEA | cycle 反复 idle 或跑偏 |
+| `quality` | FIX | cycle 反复没有测试活动就落地 |
+| `efficiency` | IDEA | cycle 反复超出 `est_min` 预算 |
+| `cleanliness` | FIX | cycle 反复留孤儿 / 触发 ALERT |
 
 ## 可见性（tmux + 弹窗）
 
@@ -525,7 +618,8 @@ git -C .roll fetch && git -C .roll reset --hard origin/main
 | 文件 | 内容 |
 |------|------|
 | `~/.shared/roll/loop/state.yaml` | 当前/最近一次运行：状态、故事 ID、Agent、run_id |
-| `~/.shared/roll/loop/runs.jsonl` | 只追加的运行历史（每次循环一行 JSON） |
+| `~/.shared/roll/loop/runs.jsonl` | 只追加的运行历史（每次循环一行 JSON）；每条记录带 `result_eval` 块（见 [Cycle 结果评分](#cycle-结果评分result-eval)） |
+| `.roll/signals/candidates.md` | 自进化信号产出的候选 backlog 草稿（`📋 待人确认`，绝不自动激活） |
 | `~/.shared/roll/loop/ALERT.md` | 累积的告警（失败、TCR 违规）|
 | `~/.shared/roll/loop/PAUSE-<slug>` | 暂停标记（由 `roll loop pause` 创建）|
 | `~/.shared/roll/mute` | 静音标记（跨项目共享）|

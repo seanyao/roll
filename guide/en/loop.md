@@ -96,6 +96,11 @@ roll loop runs --detail <cycle_id>  # Phase Breakdown panel for a single cycle
 roll loop story <ID>  # Per-story rollup: cycles, span, duration, tokens, cost, PRs
 roll loop story <ID> --json  # Machine-readable form for scripting
 
+roll loop eval       # Objective result-eval trend over the last 14 scored cycles
+roll loop eval 30    # Widen the window to the last 30 scored cycles
+roll loop signals    # Surface repeated low-score patterns as improvement signals
+roll loop signals --streak 4  # Require 4 consecutive low cycles before firing
+
 roll loop attach      # Attach to running loop tmux session (Ctrl-B D to detach)
 roll loop mute        # Suppress auto-attach popup (loop still runs in tmux)
 roll loop unmute      # Re-enable auto-attach popup
@@ -274,6 +279,106 @@ the head plus all rotated files, so cycles never disappear once they're on disk.
 **Exit codes:** `0` when at least one cycle is found, `2` when no cycles match
 the story id in the lookback window. The `--json` form follows the same exit
 code contract so scripts can detect missing data.
+
+## Cycle Result Eval
+
+Every cycle is scored *objectively* at finish against a fixed multi-dimensional
+rubric, with **zero extra tokens** — the score is computed from facts the loop
+already has (merge state, CI verdict, TCR count, duration, alerts, orphans). The
+result is written into that cycle's `runs.jsonl` record under a `result_eval`
+block:
+
+```json
+{ "version": 1, "score": 8, "dims": { "outcome": 1.0, "correctness": 1.0,
+  "scope_fidelity": 1.0, "quality": 1.0, "efficiency": 0.6, "cleanliness": 1.0 } }
+```
+
+> **Result-eval is NOT skill self-scoring.** Skill self-scoring (the agent's
+> *subjective* review of one skill run, written into `.roll/notes/*.md`) and
+> result-eval (this *objective* per-cycle result score, computed from facts) are
+> two different signals. They are reported on separate dashboard lines and never
+> merged.
+
+### The rubric (six dimensions)
+
+Each dimension is scored on `0.0`–`1.0`, or `unknown` when its facts are absent.
+Unknown dimensions are excluded from the roll-up and the remaining weights are
+renormalised, so a missing fact never silently scores `0`.
+
+| Dimension | Weight | Meaning | 1.0 when… |
+|-----------|--------|---------|-----------|
+| `outcome` | 3 | Did the cycle merge into `main`? | merged · `0.0` not merged |
+| `correctness` | 2 | Is the produced PR's CI green? | green · `0.0` red |
+| `scope_fidelity` | 2 | Did it complete the story it was routed to? | completed · `0.0` idle / off-scope |
+| `quality` | 1 | Tests added, no immediate rework? | TCR ≥ 1, no rework FIX · `0.5` rework landed · `0.0` no tests |
+| `efficiency` | 1 | Duration vs the story's `est_min` budget | within budget · grades down past it |
+| `cleanliness` | 1 | No orphan worktrees/branches and no ALERTs | clean · `0.0` orphans / alerts |
+
+The dimensions roll up into a single **1–10 cycle score**:
+
+```
+weighted    = Σ(score_i × weight_i for known dims) / Σ(weight_i for known dims)
+cycle_score = round(1 + weighted × 9)        # 0.0 → 1, 1.0 → 10
+```
+
+Weights are a centralised constant in `lib/loop_result_eval.py` — tunable there,
+but deliberately not a high-frequency user knob.
+
+### Reading the trend — `roll loop eval [N]`
+
+`roll loop eval` aggregates the `result_eval` of the last `N` scored cycles
+(default 14) and prints mean / minimum cycle score, each dimension's hit-rate,
+and a trend arrow. Older records without a `result_eval` block are skipped; with
+fewer than 3 scored cycles it prints an `(n/a) need 3` notice.
+
+```
+$ roll loop eval
+Loop result-eval — last 14 cycles
+循环结果评分 — 最近 14 轮
+
+  mean   6.8 / 10   ↓
+  min    4 / 10
+  n      4
+
+  dimension hit-rate / 各维度命中率
+    outcome          75%
+    correctness      67%
+    scope_fidelity   75%
+    quality          75%
+    efficiency       50%
+    cleanliness      100%
+```
+
+The `roll loop status` dashboard also carries a one-line result-eval summary,
+shown **separately** from the skill self-score line so the two are never
+confused:
+
+```
+result-eval: mean 6.8↓ / min 4 / out 75% ci 67% scope 75% qual 75% eff 50% clean 100% (last 14)
+```
+
+### Self-evolution signals — `roll loop signals`
+
+When a dimension stays low (`0.0`) for `N` cycles in a row (default 3,
+`--streak` to change), the loop surfaces it as an **improvement signal**: it
+appends a *candidate* backlog draft — an `IDEA` or `FIX`, marked `📋 待人确认`
+— to `.roll/signals/candidates.md`, and the `roll-brief` improvement-signal
+section reports it. Signals are deduped per pattern, so a standing issue is
+raised once, not every cycle.
+
+A signal is advisory only. It never edits the real backlog, never activates a
+story, and never changes code — it only exposes what keeps going wrong so a
+human can decide. The cycle-finish hook runs the detector once per cycle;
+`roll loop signals` runs it on demand.
+
+| Dimension stuck low | Surfaced as | Reading |
+|---------------------|-------------|---------|
+| `outcome` | FIX | cycles keep failing to merge into main |
+| `correctness` | FIX | produced PRs keep failing CI |
+| `scope_fidelity` | IDEA | cycles keep going idle or off-scope |
+| `quality` | FIX | cycles keep landing without test activity |
+| `efficiency` | IDEA | cycles keep blowing past their `est_min` budget |
+| `cleanliness` | FIX | cycles keep leaving orphans / raising ALERTs |
 
 ## Visibility (tmux + popup)
 
@@ -560,7 +665,8 @@ This usually means `.roll/` is out of date:
 | File | Content |
 |------|---------|
 | `~/.shared/roll/loop/state.yaml` | Current/last run: status, story, agent, run_id |
-| `~/.shared/roll/loop/runs.jsonl` | Append-only run history (one JSON line per cycle) |
+| `~/.shared/roll/loop/runs.jsonl` | Append-only run history (one JSON line per cycle); each record carries a `result_eval` block (see [Cycle Result Eval](#cycle-result-eval)) |
+| `.roll/signals/candidates.md` | Candidate backlog drafts from self-evolution signals (`📋 待人确认`, never auto-activated) |
 | `~/.shared/roll/loop/ALERT.md` | Accumulated alerts (failures, TCR violations) |
 | `~/.shared/roll/loop/PAUSE-<slug>` | Pause marker (created by `roll loop pause`) |
 | `~/.shared/roll/mute` | Auto-attach mute marker (shared across projects) |

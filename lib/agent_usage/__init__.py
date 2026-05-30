@@ -69,6 +69,7 @@ _PLUGINS = {
     "openai": ".openai",
     "gemini": ".gemini",
     "kimi": ".kimi",
+    "qwen": ".qwen",
 }
 
 for _agent, _mod_suffix in _PLUGINS.items():

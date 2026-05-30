@@ -7558,21 +7558,18 @@ _write_launchd_plist() {
   # a second layer (covers stale plists where brew was installed after setup).
   local path_value; path_value=$(_detect_path_prepend)
 
-  # FIX-105 / US-LOOP-035: macOS 26.4 launchd silently refuses to fire a
-  # single-dict StartCalendarInterval that contains BOTH Hour and Minute keys.
-  # The original FIX-105 workaround forced daily services to StartInterval=86400,
-  # which drifts the fire time off the configured HH:MM. US-LOOP-035 resolves it
-  # with the *array-style* StartCalendarInterval (one-element array of a dict) —
-  # launchd honors Hour+Minute when wrapped in an array. Set
-  # ROLL_DREAM_LEGACY_INTERVAL=1 to fall back to the legacy StartInterval=86400
-  # workaround (rollback channel if the array form ever regresses).
+  # FIX-148 (owner decision B) / FIX-105 / US-LOOP-035: on macOS 26.x launchd
+  # SILENTLY refuses to FIRE a StartCalendarInterval that carries Hour+Minute, so
+  # daily services (dream + brief) never run. The FIX-105 known-good workaround is
+  # to force daily services to StartInterval=86400; that is the verified default.
+  # US-LOOP-035's *array-style* StartCalendarInterval (one-element array of a dict)
+  # is UNVERIFIED on macOS 26.x, so it is an explicit OPT-IN only: set
+  # ROLL_DREAM_CALENDAR=1 to emit the array-style Hour+Minute schedule.
   # US-LOOP-032: non-daily loop services use StartInterval = period * 60.
   local schedule_xml
   if [[ -n "$hour" ]]; then
-    if [[ "${ROLL_DREAM_LEGACY_INTERVAL:-}" == "1" ]]; then
-      schedule_xml="  <key>StartInterval</key>
-  <integer>86400</integer>"
-    else
+    if [[ "${ROLL_DREAM_CALENDAR:-}" == "1" ]]; then
+      # OPT-IN (unverified on macOS 26.x): array-style StartCalendarInterval.
       # Daily services carry the fire minute in $offset ($5); $hour is $6.
       local cal_minute="${offset:-0}"
       schedule_xml="  <key>StartCalendarInterval</key>
@@ -7584,6 +7581,10 @@ _write_launchd_plist() {
       <integer>${cal_minute}</integer>
     </dict>
   </array>"
+    else
+      # DEFAULT (FIX-105 known-good): StartInterval=86400 so the service fires.
+      schedule_xml="  <key>StartInterval</key>
+  <integer>86400</integer>"
     fi
   else
     # US-LOOP-032: StartInterval in seconds = period_minutes * 60

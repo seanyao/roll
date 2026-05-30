@@ -320,20 +320,19 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: loop uses StartInterval=3600, dream/brief use array-style StartCalendarInterval (US-LOOP-032/US-LOOP-035)" {
-  # Pre-US-LOOP-032 this test asserted loop carried StartCalendarInterval+Minute
-  # while dream/brief used StartInterval. US-LOOP-032 moved loop onto
-  # StartInterval = period * 60. US-LOOP-035 (resolving FIX-105) then moved daily
-  # dream/brief OFF the legacy StartInterval=86400 workaround and onto an
-  # array-style StartCalendarInterval (Hour+Minute), so launchd fires at the
-  # exact configured HH:MM. Current invariant:
+@test "_install_launchd_plists: loop uses StartInterval=3600, dream/brief default to StartInterval=86400 (US-LOOP-032/FIX-148)" {
+  # FIX-148 (owner decision B): daily dream/brief DEFAULT to the FIX-105
+  # known-good StartInterval=86400 workaround, because macOS 26.x launchd
+  # SILENTLY refuses to FIRE a StartCalendarInterval carrying Hour+Minute. The
+  # array-style StartCalendarInterval (US-LOOP-035) is UNVERIFIED on macOS 26.x
+  # and is an explicit OPT-IN only (ROLL_DREAM_CALENDAR=1). Current invariant:
   #   - loop (sub-daily, empty hour): StartInterval = period * 60; default
   #     period 60 → 3600; no calendar interval, no Hour.
-  #   - dream/brief (daily): array-style StartCalendarInterval with Hour+Minute;
-  #     no StartInterval, no legacy 86400. Default dream hour=3, brief hour=9.
-  # The unit-level form + legacy ROLL_DREAM_LEGACY_INTERVAL fallback live in
+  #   - dream/brief (daily): default StartInterval=86400; no StartCalendarInterval,
+  #     no Hour.
+  # The opt-in array path + both unit forms live in
   # plist_calendar_interval.bats; this asserts _install_launchd_plists wires the
-  # services through the right code path.
+  # services through the right default code path.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"; mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
@@ -353,25 +352,17 @@ setup() {
   ! grep -q "<key>StartCalendarInterval</key>" "$loop_p"
   ! grep -q "<key>Hour</key>" "$loop_p"
 
-  # Dream: array-style StartCalendarInterval (Hour=3, Minute), no legacy 86400,
-  # no StartInterval.
-  grep -q "<key>StartCalendarInterval</key>" "$dream_p"
-  grep -q "<array>" "$dream_p"
-  grep -q "<key>Hour</key>" "$dream_p"
-  grep -A1 "<key>Hour</key>" "$dream_p" | grep -q "<integer>3</integer>"
-  grep -q "<key>Minute</key>" "$dream_p"
-  ! grep -q "<key>StartInterval</key>" "$dream_p"
-  ! grep -q "<integer>86400</integer>" "$dream_p"
+  # Dream: default StartInterval=86400, no calendar interval, no Hour.
+  grep -q "<key>StartInterval</key>" "$dream_p"
+  grep -A1 "<key>StartInterval</key>" "$dream_p" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$dream_p"
+  ! grep -q "<key>Hour</key>" "$dream_p"
 
-  # Brief: array-style StartCalendarInterval (Hour=9, Minute), no legacy 86400,
-  # no StartInterval.
-  grep -q "<key>StartCalendarInterval</key>" "$brief_p"
-  grep -q "<array>" "$brief_p"
-  grep -q "<key>Hour</key>" "$brief_p"
-  grep -A1 "<key>Hour</key>" "$brief_p" | grep -q "<integer>9</integer>"
-  grep -q "<key>Minute</key>" "$brief_p"
-  ! grep -q "<key>StartInterval</key>" "$brief_p"
-  ! grep -q "<integer>86400</integer>" "$brief_p"
+  # Brief: default StartInterval=86400, no calendar interval, no Hour.
+  grep -q "<key>StartInterval</key>" "$brief_p"
+  grep -A1 "<key>StartInterval</key>" "$brief_p" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$brief_p"
+  ! grep -q "<key>Hour</key>" "$brief_p"
 
   rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
@@ -411,77 +402,68 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: dream plist uses array-style StartCalendarInterval (US-LOOP-035)" {
-  # FIX-105: macOS 26.4 launchd silently refuses a single-dict
-  # StartCalendarInterval with both Hour and Minute. US-LOOP-035 resolves it by
-  # wrapping Hour+Minute in a one-element array (launchd honors that), so daily
-  # dream fires at the exact HH:MM instead of the legacy StartInterval=86400
-  # drift. Default dream hour=3.
+@test "_install_launchd_plists: dream plist defaults to StartInterval=86400 (FIX-148)" {
+  # FIX-148 (owner decision B): macOS 26.x launchd SILENTLY refuses to FIRE a
+  # StartCalendarInterval carrying Hour+Minute, so daily dream never runs. The
+  # verified default is the FIX-105 known-good StartInterval=86400 workaround.
+  # The array-style StartCalendarInterval (US-LOOP-035) is UNVERIFIED and gated
+  # behind ROLL_DREAM_CALENDAR=1 (see plist_calendar_interval.bats opt-in test).
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
   # Isolate config so the host developer's ~/.roll/config.yaml can't override
-  # the dream hour default (3) and make this assertion host-dependent.
+  # defaults and make this assertion host-dependent.
   ROLL_CONFIG=$(mktemp)
 
   _install_launchd_plists "$proj"
 
   local dream_plist; dream_plist=$(_launchd_plist_path "dream" "$proj")
-  grep -q "<key>StartCalendarInterval</key>" "$dream_plist"
-  grep -q "<array>" "$dream_plist"
-  grep -q "<key>Hour</key>" "$dream_plist"
-  grep -A1 "<key>Hour</key>" "$dream_plist" | grep -q "<integer>3</integer>"
-  grep -q "<key>Minute</key>" "$dream_plist"
-  # The legacy drift workaround must not be present.
-  ! grep -q "<key>StartInterval</key>" "$dream_plist"
-  ! grep -q "<integer>86400</integer>" "$dream_plist"
+  grep -q "<key>StartInterval</key>" "$dream_plist"
+  grep -A1 "<key>StartInterval</key>" "$dream_plist" | grep -q "<integer>86400</integer>"
+  # The unverified array-style calendar form must not be present by default.
+  ! grep -q "<key>StartCalendarInterval</key>" "$dream_plist"
+  ! grep -q "<key>Hour</key>" "$dream_plist"
   rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
-@test "_install_launchd_plists: brief plist uses array-style StartCalendarInterval (US-LOOP-035)" {
-  # US-LOOP-035 (resolves FIX-105): daily brief fires via array-style
-  # StartCalendarInterval (Hour+Minute), not the legacy StartInterval=86400.
-  # Default brief hour=9.
+@test "_install_launchd_plists: brief plist defaults to StartInterval=86400 (FIX-148)" {
+  # FIX-148 (owner decision B): daily brief defaults to the FIX-105 known-good
+  # StartInterval=86400 workaround; the array-style StartCalendarInterval is an
+  # explicit opt-in (ROLL_DREAM_CALENDAR=1), not the default.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
   # Isolate config so the host developer's ~/.roll/config.yaml can't override
-  # the brief hour default (9) and make this assertion host-dependent.
+  # defaults and make this assertion host-dependent.
   ROLL_CONFIG=$(mktemp)
 
   _install_launchd_plists "$proj"
 
   local brief_plist; brief_plist=$(_launchd_plist_path "brief" "$proj")
-  grep -q "<key>StartCalendarInterval</key>" "$brief_plist"
-  grep -q "<array>" "$brief_plist"
-  grep -q "<key>Hour</key>" "$brief_plist"
-  grep -A1 "<key>Hour</key>" "$brief_plist" | grep -q "<integer>9</integer>"
-  grep -q "<key>Minute</key>" "$brief_plist"
-  ! grep -q "<key>StartInterval</key>" "$brief_plist"
-  ! grep -q "<integer>86400</integer>" "$brief_plist"
+  grep -q "<key>StartInterval</key>" "$brief_plist"
+  grep -A1 "<key>StartInterval</key>" "$brief_plist" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$brief_plist"
+  ! grep -q "<key>Hour</key>" "$brief_plist"
   rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
-@test "_write_launchd_plist: daily schedule (hour set) emits array-style StartCalendarInterval (US-LOOP-035)" {
-  # US-LOOP-035 (resolves FIX-105): daily services (hour set, here Hour=9
-  # Minute=22) render an array-style StartCalendarInterval carrying Hour+Minute
-  # so launchd fires at the exact HH:MM, replacing the legacy StartInterval=86400
-  # drift. Arg order: plist label project period offset(minute) hour runner.
+@test "_write_launchd_plist: daily schedule (hour set) defaults to StartInterval=86400 (FIX-148)" {
+  # FIX-148 (owner decision B): daily services (hour set) default to the FIX-105
+  # known-good StartInterval=86400 workaround because macOS 26.x launchd silently
+  # refuses to fire a StartCalendarInterval carrying Hour+Minute. The array-style
+  # form is unverified and gated behind ROLL_DREAM_CALENDAR=1 (tested separately).
+  # Arg order: plist label project period offset(minute) hour runner.
   local tmp_dir; tmp_dir=$(mktemp -d)
   local plist="${tmp_dir}/test.plist"
   _write_launchd_plist "$plist" "com.roll.dream.test" "/tmp/proj" "60" "22" "9" "${tmp_dir}/run.sh"
-  grep -q "<key>StartCalendarInterval</key>" "$plist"
-  grep -q "<array>" "$plist"
-  grep -q "<key>Hour</key>" "$plist"
-  grep -A1 "<key>Hour</key>" "$plist" | grep -q "<integer>9</integer>"
-  grep -q "<key>Minute</key>" "$plist"
-  grep -A1 "<key>Minute</key>" "$plist" | grep -q "<integer>22</integer>"
-  ! grep -q "<key>StartInterval</key>" "$plist"
-  ! grep -q "<integer>86400</integer>" "$plist"
+  grep -q "<key>StartInterval</key>" "$plist"
+  grep -A1 "<key>StartInterval</key>" "$plist" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$plist"
+  ! grep -q "<key>Hour</key>" "$plist"
   rm -rf "$tmp_dir"
 }
 

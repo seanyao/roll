@@ -89,28 +89,30 @@ _write_loop_plist() {
   ! grep -q 'StartCalendarInterval' "$plist"
 }
 
-# ─── Daily services use array-style StartCalendarInterval (US-LOOP-035) ─────
+# ─── Daily services default to StartInterval=86400; array is opt-in (FIX-148) ─
 
-@test "_write_launchd_plist: daily service (hour present) generates array StartCalendarInterval" {
+@test "_write_launchd_plist: daily service (hour present) defaults to StartInterval=86400" {
   local plist="${_LAUNCHD_DIR}/dream-daily.plist"
   _write_launchd_plist "$plist" "com.roll.dream.test" "$PWD" "60" "18" "3" "/tmp/runner.sh"
   [ -f "$plist" ]
 
-  # US-LOOP-035 (resolves FIX-105): daily services fire at the exact HH:MM via
-  # an array-style StartCalendarInterval, not the legacy StartInterval=86400.
+  # FIX-148 (owner decision B): daily services default to the FIX-105 known-good
+  # StartInterval=86400 workaround, because macOS 26.x launchd silently refuses
+  # to fire a StartCalendarInterval carrying Hour+Minute. The array-style form is
+  # unverified and opt-in only (ROLL_DREAM_CALENDAR=1).
+  grep -q 'StartInterval' "$plist"
+  grep -q '<integer>86400</integer>' "$plist"
+  ! grep -q 'StartCalendarInterval' "$plist"
+}
+
+@test "_write_launchd_plist: ROLL_DREAM_CALENDAR=1 opts into array StartCalendarInterval" {
+  local plist="${_LAUNCHD_DIR}/dream-calendar.plist"
+  ROLL_DREAM_CALENDAR=1 _write_launchd_plist "$plist" "com.roll.dream.test" "$PWD" "60" "18" "3" "/tmp/runner.sh"
+  [ -f "$plist" ]
   grep -q 'StartCalendarInterval' "$plist"
   grep -q '<integer>3</integer>' "$plist"   # Hour
   grep -q '<integer>18</integer>' "$plist"  # Minute
   ! grep -q '<integer>86400</integer>' "$plist"
-}
-
-@test "_write_launchd_plist: ROLL_DREAM_LEGACY_INTERVAL=1 restores StartInterval=86400" {
-  local plist="${_LAUNCHD_DIR}/dream-legacy.plist"
-  ROLL_DREAM_LEGACY_INTERVAL=1 _write_launchd_plist "$plist" "com.roll.dream.test" "$PWD" "60" "18" "3" "/tmp/runner.sh"
-  [ -f "$plist" ]
-  grep -q 'StartInterval' "$plist"
-  grep -q '<integer>86400</integer>' "$plist"
-  ! grep -q 'StartCalendarInterval' "$plist"
 }
 
 # ─── plutil -lint integration test ───────────────────────────────────────────

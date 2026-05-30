@@ -36,6 +36,18 @@ roll_in_proj() {
       bash "$ROLL_BIN" "$@" )
 }
 
+# FIX-148 (owner decision B): the array-style StartCalendarInterval (HH:MM in the
+# plist) is OPT-IN only via ROLL_DREAM_CALENDAR=1; the default emits
+# StartInterval=86400 with no HH:MM. Tests that assert the configured HH:MM
+# reaches the plist / status must run on the opt-in path.
+roll_in_proj_cal() {
+  ( cd "$PROJ" && HOME="$TEST_TMP" \
+      _SHARED_ROOT="$_SHARED_ROOT" _LAUNCHD_DIR="$_LAUNCHD_DIR" \
+      _LAUNCHD_SKIP_REGISTRY=1 ROLL_HOME="$ROLL_HOME" ROLL_CONFIG="$ROLL_CONFIG" \
+      ROLL_SKIP_STRUCTURE_CHECK=1 NO_COLOR=1 ROLL_DREAM_CALENDAR=1 \
+      bash "$ROLL_BIN" "$@" )
+}
+
 dream_plist() {
   # Exactly one dream plist is written for the sandboxed project; resolve it by
   # glob rather than recomputing the slug (sourcing bin/roll here breaks PATH).
@@ -46,12 +58,16 @@ dream_plist() {
   return 1
 }
 
-@test "US-LOOP-036: roll config dream-time rewrites the dream plist with the new HH:MM" {
-  run roll_in_proj config dream-time 03:30
+@test "US-LOOP-036: roll config dream-time (ROLL_DREAM_CALENDAR=1) rewrites the dream plist with the new HH:MM" {
+  # FIX-148 (owner decision B): the array-style StartCalendarInterval is opt-in
+  # (ROLL_DREAM_CALENDAR=1) since macOS 26.x silently refuses to fire it; the
+  # default path emits StartInterval=86400. This test exercises the opt-in path
+  # to keep coverage that dream-time wires the configured HH:MM into the array.
+  run roll_in_proj_cal config dream-time 03:30
   [ "$status" -eq 0 ]
   local plist; plist="$(dream_plist)"
   [ -f "$plist" ]
-  # plist must carry the configured calendar fire time (array-style, US-LOOP-035)
+  # opt-in plist must carry the configured calendar fire time (array-style)
   run cat "$plist"
   [[ "$output" == *"<key>StartCalendarInterval</key>"* ]]
   [[ "$output" == *"<key>Hour</key>"* ]]
@@ -60,13 +76,16 @@ dream_plist() {
   [[ "$output" == *"<integer>30</integer>"* ]]
 }
 
-@test "US-LOOP-036: a follow-up dream-time change updates the plist mtime" {
-  roll_in_proj config dream-time 03:30
+@test "US-LOOP-036: a follow-up dream-time change updates the plist (opt-in calendar path)" {
+  # FIX-148: the configured HH:MM only reaches the plist on the opt-in array
+  # path; the default path emits a constant StartInterval=86400 that does not
+  # vary with the time, so this rewrite assertion runs with ROLL_DREAM_CALENDAR=1.
+  roll_in_proj_cal config dream-time 03:30
   local plist; plist="$(dream_plist)"
   [ -f "$plist" ]
   local before; before="$(cat "$plist")"
   # Change to a different time — content must differ (proves a real rewrite).
-  run roll_in_proj config dream-time 04:45
+  run roll_in_proj_cal config dream-time 04:45
   [ "$status" -eq 0 ]
   local after; after="$(cat "$plist")"
   [ "$before" != "$after" ]
@@ -74,9 +93,12 @@ dream_plist() {
   [[ "$after" == *"<integer>45</integer>"* ]]
 }
 
-@test "US-LOOP-036: roll loop status reflects the freshly-configured dream time" {
-  roll_in_proj config dream-time 03:30
-  run roll_in_proj loop status --no-color
+@test "US-LOOP-036: roll loop status reflects the freshly-configured dream time (opt-in calendar path)" {
+  # FIX-148: status shows the wall-clock HH:MM only when the plist carries the
+  # array-style StartCalendarInterval (opt-in). The default path renders the
+  # service as a daily interval with no HH:MM anchor.
+  roll_in_proj_cal config dream-time 03:30
+  run roll_in_proj_cal loop status --no-color
   [ "$status" -eq 0 ]
   [[ "$output" == *"dream: 03:30"* ]]
 }

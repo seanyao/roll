@@ -76,6 +76,7 @@ roll loop on        # let AI work through the backlog (optional)
 | Feedback (`roll feedback`) | [guide/en/feedback.md](guide/en/feedback.md) | [guide/zh/feedback.md](guide/zh/feedback.md) |
 | Test isolation (`roll test` + Tart VM) | [guide/en/test-isolation.md](guide/en/test-isolation.md) | [guide/zh/test-isolation.md](guide/zh/test-isolation.md) |
 | Cross-machine sync | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
+| Remote monitoring (watch loop from a phone via `remote-watch`) | [guide/en/loop.md#remote-monitoring](guide/en/loop.md#remote-monitoring) | [guide/zh/loop.md#远程监控remote-monitoring](guide/zh/loop.md#%E8%BF%9C%E7%A8%8B%E7%9B%91%E6%8E%A7remote-monitoring) |
 | Cycle result eval (`roll loop eval`) | [guide/en/loop.md#cycle-result-eval](guide/en/loop.md#cycle-result-eval) | [guide/zh/loop.md#cycle-结果评分result-eval](guide/zh/loop.md#cycle-%E7%BB%93%E6%9E%9C%E8%AF%84%E5%88%86result-eval) |
 | Pricing (cost visibility) | [guide/en/pricing.md](guide/en/pricing.md) | [guide/zh/pricing.md](guide/zh/pricing.md) |
 | FAQ (troubleshooting) | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |

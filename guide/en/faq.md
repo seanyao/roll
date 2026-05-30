@@ -283,6 +283,20 @@ roll loop status --days 7   # historical cycles use frozen costs
 
 ---
 
+### A12. How do I watch the loop from my phone while I'm away?
+
+**Short answer:** Configure `roll_meta_dir`, then paste
+`.roll/prompts/remote-watch.md` into Claude Code on your phone or browser.
+
+**Details:** Once `roll_meta_dir` is set in `~/.roll/config.yaml`, your machine
+pushes a `status/loop.md` snapshot to the roll-meta repo after every cycle
+(≤35min fresh, idle cycles included as a heartbeat). The remote-watch prompt
+reads that snapshot plus the GitHub API and reports loop health, backlog
+progress, Dream results, and CI state — read-only, no local `roll` needed. See
+[Remote Monitoring](loop.md#remote-monitoring) for setup and troubleshooting.
+
+---
+
 ## B. How Roll Compares
 
 ### B1. vs. Claude Code's built-in `/loop`, skills, and tasks

@@ -682,8 +682,8 @@ Note: `{DOMAIN}` maps to the Bounded Context name identified in DDD analysis.
 - Cross-context: {if touches another context, otherwise omit}
 
 **Agent profile:**
-- est_min: {1-30 整数;一个 Story ≈ 一个 AI cycle 闭环,目标 5-10 min。est > ~15 是"再拆"信号——除非原子不可分(见 INVEST 的 S/I 校准)}
-- risk_zone: {low / medium / high — 改文档 low,改用户可见行为 medium,改 loop infra 或安全/隔离基建 high}
+- est_min: {1-30 整数;一个 Story ≈ 一个 AI cycle 闭环,目标 5-10 min。这是**唯一的 loop 路由输入**——`lib/loop_pick_agent.py` 把 est_min 映射到复杂度档：≤8 → easy,8<x≤20 → default,>20 → hard;缺失/非法值 → default。est > ~15 是"再拆"信号——除非原子不可分(见 INVEST 的 S/I 校准)}
+- risk_zone: {low / medium / high — 改文档 low,改用户可见行为 medium,改 loop infra 或安全/隔离基建 high。**不参与 loop 路由**(路由只看 est_min);仅供 roll-build / roll-fix 的 pre-flight 自评(US-AGENT-007)做能力匹配参考}
 - chain_depth: 0  {若是自降级产出的子 story 则 +1,累计 ≥2 时第 3 次拒拆}
 
 **AC:**
@@ -705,9 +705,9 @@ Note: `{DOMAIN}` maps to the Bounded Context name identified in DDD analysis.
 - Integration test: `tests/integration/{flow}.test.ts`
 ```
 
-> **强制规则 — Agent profile 必须填**：Split into Stories 步骤产出的每个 US 都必须带 `**Agent profile:**` 子段，est_min / risk_zone 不可省（chain_depth 默认 0）。loop 路由（US-AGENT-004）和 agent 自评（US-AGENT-007）都靠这两个字段决策，缺了就回退到 cold_start_default 并 WARN。历史 US 不强制回填。
+> **强制规则 — Agent profile 必须填**：Split into Stories 步骤产出的每个 US 都必须带 `**Agent profile:**` 子段。`est_min` 是 **loop 路由唯一输入**（`lib/loop_pick_agent.py` 的四槽复杂度路由 easy/default/hard/fallback，按 est_min 单轴决档；缺失/非法 → default 档）——务必填准。`risk_zone` 仍要填，但**不参与路由**，只供 roll-build / roll-fix 的 pre-flight 自评（US-AGENT-007）参考；`chain_depth` 默认 0。历史 US 不强制回填。
 >
-> **MUST fill** the `**Agent profile:**` block on every newly split US — `est_min` and `risk_zone` are non-optional. They drive loop routing and agent self-eval downstream.
+> **MUST fill** the `**Agent profile:**` block on every newly split US. `est_min` is the **sole loop-routing input** — `lib/loop_pick_agent.py` maps it onto a four-slot complexity tier (easy/default/hard/fallback) on the est_min axis alone (missing/illegal → default). Fill `risk_zone` too, but note it does NOT feed routing; it only informs the roll-build / roll-fix pre-flight self-eval (US-AGENT-007).
 
 ### Closing Doc-Refresh Story Template — Phase N.M 收尾文档
 

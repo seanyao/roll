@@ -1208,6 +1208,14 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
         # ZH eyebrow row is left-aligned only — mirroring the EN right side
         # would duplicate signal without adding info.
         print(eb_zh)
+
+    # US-LOOP-036: daily service (dream/brief) next-fire lines, read straight
+    # from the launchd plist so they reflect the latest `roll config <svc>-time`
+    # reload rather than a stale yaml-derived guess.
+    for _svc in ("dream", "brief"):
+        _sl = _daily_schedule_line(_svc, now=now)
+        if _sl:
+            print("  " + c("dim", _sl))
     print()
 
     print(c("faint", "─" * COLS))
@@ -1416,6 +1424,62 @@ def _read_plist_loop_minute() -> int:
     return int(m.group(1)) if m else 48
 
 
+def _read_daily_plist_schedule(svc: str) -> Optional[Dict[str, Any]]:
+    """US-LOOP-036: read the actual fire schedule of a daily service (dream/brief)
+    from its launchd plist — the truth source after a `roll config <svc>-time`
+    reload. Returns one of:
+
+      {"mode": "calendar", "hour": H, "minute": M}   array-style StartCalendarInterval
+      {"mode": "interval"}                            legacy StartInterval=86400
+
+    or None when the plist is missing/unparseable. Distinguishing the two modes
+    lets the caller pick the right _compute_next_fire branch.
+    """
+    import re as _re
+    slug = project_slug()
+    # Honor _LAUNCHD_DIR (the same sandbox override bin/roll exports) so tests —
+    # and any non-default install dir — read the plist the writer just wrote.
+    ladir = os.environ.get("_LAUNCHD_DIR") or os.path.expanduser("~/Library/LaunchAgents")
+    plist = Path(ladir) / f"com.roll.{svc}.{slug}.plist"
+    if not plist.exists():
+        return None
+    try:
+        text = plist.read_text(errors="ignore")
+    except Exception:
+        return None
+    if "StartCalendarInterval" in text:
+        h = _re.search(r"<key>Hour</key>\s*<integer>(\d+)</integer>", text)
+        m = _re.search(r"<key>Minute</key>\s*<integer>(\d+)</integer>", text)
+        if h:
+            return {"mode": "calendar", "hour": int(h.group(1)),
+                    "minute": int(m.group(1)) if m else 0}
+    if "StartInterval" in text:
+        return {"mode": "interval"}
+    return None
+
+
+def _daily_schedule_line(svc: str, now: Optional[datetime] = None) -> Optional[str]:
+    """US-LOOP-036: one-line `<svc>: HH:MM (next fire in Xh Ym)` for the status
+    dashboard. Calendar mode shows the configured wall-clock time and projects
+    the next fire; interval (legacy) mode has no HH:MM anchor so it just labels
+    the daily-interval mode. Returns None when the service has no plist.
+    """
+    sched = _read_daily_plist_schedule(svc)
+    if sched is None:
+        return None
+    base = now or datetime.now().astimezone()
+    if sched["mode"] == "calendar":
+        hh, mm = sched["hour"], sched["minute"]
+        nxt = _compute_next_fire(hour=hh, minute=mm, now=base)
+        line = f"{svc}: {hh:02d}:{mm:02d}"
+        if nxt is not None:
+            delta = int(nxt - base.timestamp())
+            h, m = divmod(max(delta, 0) // 60, 60)
+            line += f" (next fire in {h}h {m}m)"
+        return line
+    return f"{svc}: daily (legacy interval)"
+
+
 def _detect_install_state() -> str:
     """FIX-095 / FIX-098: classify the launchd install state of the loop service.
 
@@ -1448,6 +1512,46 @@ def _detect_install_state() -> str:
         # launchctl missing or timed out — assume stale (safe: user sees STALE
         # banner and is told to run 'roll loop on' to repair).
         return "stale"
+
+
+def _compute_next_fire(
+    *,
+    hour: Optional[int] = None,
+    minute: int = 0,
+    last_fire: Optional[float] = None,
+    now: Optional[datetime] = None,
+) -> Optional[float]:
+    """US-LOOP-036: compute the next fire epoch for a daily (dream/brief) service.
+
+    Two modes mirror the plist schedule_xml that _write_launchd_plist renders:
+
+      StartCalendarInterval mode (hour is not None):
+        Fire at the next HH:MM wall-clock instant. If today's HH:MM has not yet
+        passed (relative to `now`), it is today; otherwise tomorrow. Day/month/
+        year roll-over (including leap-year Feb 29 → Mar 1) is handled by adding
+        a timedelta to a normalized datetime, so we never construct an invalid
+        date by hand.
+
+      StartInterval=86400 legacy mode (hour is None):
+        Fire at `last_fire` + 24h. Returns None when last_fire is unknown — the
+        caller then has no anchor to project from.
+
+    Returns a POSIX epoch (float seconds) or None. `now` defaults to the current
+    local time; tests pass a fixed `now` for determinism.
+    """
+    if hour is None:
+        # Legacy StartInterval=86400 — project from the last fire.
+        if last_fire is None:
+            return None
+        return float(last_fire) + 86400.0
+
+    base = (now or datetime.now().astimezone())
+    # Anchor to today's HH:MM. timedelta arithmetic handles all calendar
+    # roll-over (month/year boundaries, leap days) without manual date math.
+    candidate = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= base:
+        candidate = candidate + timedelta(days=1)
+    return candidate.timestamp()
 
 
 def _next_cron_hint(state: Dict[str, str], zh: bool = False) -> str:

@@ -27,38 +27,11 @@ if _LIB_DIR not in sys.path:
     sys.path.insert(0, _LIB_DIR)
 import roll_render
 from roll_render import COLS, c, row, section_head, strw, pad
+from roll_git import git_remote_url as _git_remote_url
 
 # ════════════════════════════════════════════════════════════════════════════
 # Paths
 # ════════════════════════════════════════════════════════════════════════════
-def _git_remote_url(repo_path: str) -> Optional[str]:
-    """Mirror lib/roll-loop-status.py::_git_remote_url — origin first, then any."""
-    try:
-        url = subprocess.check_output(
-            ["git", "-C", repo_path, "remote", "get-url", "origin"],
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-        if url:
-            return url
-    except Exception:
-        pass
-    try:
-        remotes = subprocess.check_output(
-            ["git", "-C", repo_path, "remote"],
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip().splitlines()
-        if remotes:
-            url = subprocess.check_output(
-                ["git", "-C", repo_path, "remote", "get-url", remotes[0]],
-                stderr=subprocess.DEVNULL, text=True,
-            ).strip()
-            if url:
-                return url
-    except Exception:
-        pass
-    return None
-
-
 def _project_slug(path: Optional[str] = None) -> str:
     # US-LOOP-006: cycle wrapper exports ROLL_MAIN_SLUG — honour it (parity with
     # bin/roll _project_slug and lib/roll-loop-status.py project_slug).

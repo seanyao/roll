@@ -308,3 +308,53 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
   # cross-directory import chain present (codegen -> parser)
   grep -qF "../parser/index.js" "$FIXTURE/src/codegen/index.js"
 }
+
+# ── US-DOC-018: High Fan-in Directory README ──
+
+@test "roll-doc SKILL.md: Phase 2 gap analysis includes high fan-in rule (≥5 referencing files, <3 files)" {
+  grep -qiE '(high.fan.?in|高.?引用)' "$SKILL"
+  grep -qiE '≥.*5.*(other source|文件|referenc|import)' "$SKILL"
+  # threshold expressed as OR with file-count rule
+  grep -qiE '(文件数 ≥ 3 OR|count ≥ 3 OR|≥ 3 OR.*≥ 5|OR imported by ≥ 5)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: high fan-in rule does not override the existing count ≥ 3 rule" {
+  grep -qiE '(continues to apply|never override|in addition to|never replac|widens)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: high fan-in target is <dir>/README.md, skip existing unless --force" {
+  grep -qE '高引用目录.*<dir>/README\.md' "$SKILL"
+  grep -qiE '(<dir>/README\.md.*skip unless.*--force|Existing.*README\.md.*skip unless.*--force|never overwrite)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: high fan-in subsection excludes test files when counting referencing files" {
+  grep -qiE '(exclude test files|\*\.test\.\*|\*\.spec\.\*)' "$SKILL"
+}
+
+@test "roll-doc high-fanin fixture: directory exists with source files" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_high_fanin"
+  [ -d "$FIXTURE" ]
+  [ -d "$FIXTURE/src" ]
+}
+
+@test "roll-doc high-fanin fixture: shared/ has <3 files but is imported by ≥5 source files → README expected" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_high_fanin"
+  # shared/ holds fewer than 3 source files
+  file_count=$(find "$FIXTURE/src/shared" -maxdepth 1 -type f -name '*.ts' | wc -l | tr -d ' ')
+  [ "$file_count" -lt 3 ]
+  # but imported by ≥5 distinct source files (exclude test files / the dir itself)
+  fanin=$(grep -rl 'shared/' "$FIXTURE/src/consumers" | wc -l | tr -d ' ')
+  [ "$fanin" -ge 5 ]
+  # no pre-existing README (so the gap rule must fire)
+  [ ! -f "$FIXTURE/src/shared/README.md" ]
+}
+
+@test "roll-doc high-fanin fixture: rare/ has 1 file imported by only 2 files → README NOT expected" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_high_fanin"
+  file_count=$(find "$FIXTURE/src/rare" -maxdepth 1 -type f -name '*.ts' | wc -l | tr -d ' ')
+  [ "$file_count" -lt 3 ]
+  fanin=$(grep -rl 'rare/once' "$FIXTURE/src/consumers" | wc -l | tr -d ' ')
+  [ "$fanin" -lt 5 ]
+  # below both thresholds → no gap, no README
+  [ ! -f "$FIXTURE/src/rare/README.md" ]
+}

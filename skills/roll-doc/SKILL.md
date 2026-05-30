@@ -95,12 +95,13 @@ Walk every directory (applying Phase 1 exclusions):
 
 1. Count non-hidden, non-`.md` source files directly in the directory
 2. If count ≥ 3 AND no `README.md` in that directory AND no `docs/INDEX.md` entry links to it → **module gap**
+3. **High fan-in gap**: a directory imported by **≥ 5 other source files** is a gap targeting `<dir>/README.md`, **even if it has < 3 source files** — critical low-volume modules (shared utils, single-file core) must not be skipped by the file-count threshold. The existing count ≥ 3 rule (rule 2) continues to apply independently; high fan-in only widens what qualifies, it never overrides rule 2.
 
 **Special gaps (checked once per project):**
 - No `.roll/domain/` directory or empty → gap: `.roll/domain/context-map.md`
 - No `CONVENTIONS.md` or `docs/CONVENTIONS.md` exists → gap: `docs/CONVENTIONS.md`
 
-**Threshold**: directories with ≥ 3 source files (default). Tune by editing the skill.
+**Threshold**: a directory qualifies for a module README gap when **file count ≥ 3 OR imported by ≥ 5 other source files** (default). The fan-in count comes from the Phase 3b symbol table `imports` edges; exclude test files (`*.test.*`, `*.spec.*`, `tests/`) when counting referencing files. An existing `<dir>/README.md` is never overwritten unless `--force`. Tune by editing the skill.
 
 Record all gaps — they become Phase 3 input.
 
@@ -480,6 +481,27 @@ fewer than 3 subdirectories, skip — the project is too small to warrant a base
 - Existing `AGENTS.md` → skip unless `--force` (never overwrite a human-authored file).
 - Source root with < 3 subdirectories → skip generation entirely (no empty `AGENTS.md`).
 - All three sections must be present in the generated file.
+
+#### High Fan-in Directory (README)
+
+This topic complements the Phase 2 file-count threshold. A directory may hold only one or two
+source files yet be imported across the whole codebase (shared utils, a single-file core
+module). The file-count rule (≥ 3 files) alone skips such hot paths, so high fan-in widens the
+threshold to **「文件数 ≥ 3 OR 被 ≥ 5 个文件引用」**.
+
+**Detection rule:** using the symbol table's `imports` edges, count the **distinct source files
+that import any file in the directory**. If that count is **≥ 5**, the directory qualifies for a
+`<dir>/README.md` gap, **even when it contains < 3 source files**. Only count referencing files
+that are source files — exclude test files (`*.test.*`, `*.spec.*`, `tests/`) and files inside
+the directory itself. This rule operates **in addition to** the Phase 2 count ≥ 3 rule, never
+replacing it: directories meeting either condition get a README.
+
+**Output rules:**
+- Target file is `<dir>/README.md`, generated with the same Module README content as Phase 3
+  (purpose, key files, dependencies).
+- Existing `<dir>/README.md` → skip unless `--force` (never overwrite).
+- Directory imported by < 5 source files **and** holding < 3 source files → skip (no gap).
+- A directory already qualifying under the count ≥ 3 rule is not double-counted — one README.
 
 ### Step 3 — Source Annotations
 

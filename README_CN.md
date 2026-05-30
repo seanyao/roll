@@ -77,6 +77,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | Backlog GitHub 同步（`roll backlog sync`） | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
 | 跨机器同步 | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
 | Cycle 结果评分（`roll loop eval`） | [guide/en/loop.md#cycle-result-eval](guide/en/loop.md#cycle-result-eval) | [guide/zh/loop.md#cycle-结果评分result-eval](guide/zh/loop.md#cycle-%E7%BB%93%E6%9E%9C%E8%AF%84%E5%88%86result-eval) |
+| Cycle 退出摘要（`.command` 窗口复盘） | [guide/en/loop.md#cycle-exit-summary](guide/en/loop.md#cycle-exit-summary) | [guide/zh/loop.md#cycle-退出摘要cycle-exit-summary](guide/zh/loop.md#cycle-%E9%80%80%E5%87%BA%E6%91%98%E8%A6%81cycle-exit-summary) |
 | Pricing（成本可见性） | [guide/en/pricing.md](guide/en/pricing.md) | [guide/zh/pricing.md](guide/zh/pricing.md) |
 | 常见问题（排障） | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
 | 接入模式 | [guide/en/patterns/](guide/en/patterns/) | [guide/zh/patterns/](guide/zh/patterns/) |

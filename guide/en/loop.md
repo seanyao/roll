@@ -413,6 +413,67 @@ roll loop unmute      # 🔔 re-enable popup
 The `mute` file is shared across all projects and all autonomous activity
 (loop + peer review). One switch controls everything.
 
+## Cycle exit summary
+
+When a cycle ends and the tmux session detaches, the macOS `.command` window
+no longer leaves you staring at a bare `press enter to close` line. Just before
+that prompt, the window renders a compact recap block so you can see what the
+cycle did without scrolling back through tmux scrollback or opening the cron
+log:
+
+```text
+─── Cycle 20260530-2301-94839 Summary ───
+  built: US-LOOP-040 · tcr commits: 4
+  ci: green
+  todo remaining: 7
+  phases (top 5 by time):
+    build                   612s
+    ci                       94s
+    pr                       31s
+  press enter to close.
+```
+
+The summary covers five signals:
+
+1. **Result** — the cycle's outcome from `runs.jsonl`: `built: <story> · tcr
+   commits: N` on success, or `idle: no story picked` when nothing was worked.
+2. **CI / build status** — the latest `ci` event outcome: `green`, `red`,
+   `heal-attempting`, or `ci: n/a` when the cycle never ran CI.
+3. **Todo remaining** — count of `📋 Todo` lines still in `.roll/backlog.md`.
+4. **Phase breakdown** — the top 5 cycle phases by elapsed time.
+5. **Failure / alert highlights** — failed/aborted runs, red CI, active alerts,
+   and suspected zero-diff cycles are flagged with a `✗` (failure) or `⚠`
+   (warning) prefix and, on a colour terminal, red / yellow highlighting. A
+   fully green cycle prints in the default colour with no prefix.
+
+The `press enter to close` prompt is preserved — the summary is printed *above*
+it, nothing about the close interaction changes.
+
+### Turning off colour
+
+ANSI colour is only emitted when the output is a real terminal. Pipes,
+redirects and captured output stay plain text. To force colour off on a TTY,
+set `NO_COLOR=1` (per [no-color.org](https://no-color.org)):
+
+```bash
+NO_COLOR=1 roll loop now
+```
+
+### Troubleshooting: no summary appears
+
+If the cycle exited early (aborted/idle) or `runs.jsonl` had not yet flushed,
+the window prints a single placeholder line instead, and the `press enter`
+prompt still works:
+
+```text
+(summary unavailable — see log: ~/.shared/roll/loop/cron-<slug>.log)
+```
+
+Summary rendering is always a silent best-effort step: if `python3` is missing
+or the data is corrupt, the cycle skips the recap and falls straight through to
+`press enter to close` — it never changes the `.command` exit code or blocks
+the window from closing.
+
 ## Concurrency Safety
 
 Loop has two layers:

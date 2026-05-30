@@ -40,7 +40,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | 命令 | 说明 |
 |------|------|
 | **Autonomy · 日常使用** | |
-| `roll loop <on\|off\|now\|status\|runs\|story\|monitor>` | 管理自主 BACKLOG 执行循环 |
+| `roll loop <on\|off\|now\|status\|eval\|runs\|story\|monitor>` | 管理自主 BACKLOG 执行循环 |
 | `roll brief` | 查看最新 owner 简报 |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
 | `roll peer` | 跨 Agent 协商对审 |

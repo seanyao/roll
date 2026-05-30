@@ -23,58 +23,103 @@ project-derived minute (different projects get different offsets to avoid
 collisions).
 
 ```
-Active window: 10am – 6pm (configurable in ~/.roll/config.yaml)
+Active window: 10am – 6pm (set with `roll config loop-window 10-18`)
 ```
 
 Outside the active window, loop silently exits without doing anything.
 
+## Configuring the schedule
+
+Instead of hand-editing `~/.roll/config.yaml` and `.roll/local.yaml` and then
+hoping the launchd plist picks up your change, use the `roll config` command
+family. Each write lands in the right yaml file **and** automatically
+regenerates the runner, re-bootstraps the launchd plist, and is reflected
+immediately by `roll loop status` — no manual reload step.
+
+| Command | What it sets |
+|---------|--------------|
+| `roll config loop-window <start>-<end>` | loop active window hours (`loop_active_start` + `loop_active_end`) |
+| `roll config loop-schedule <period>[/<offset>]` | fire interval (`loop_schedule.period_minutes` + `offset_minute`) |
+| `roll config dream-time <HH:MM>` | dream daily fire time (`loop_dream_hour` + `loop_dream_minute`) |
+| `roll config brief-time <HH:MM>` | brief daily fire time (`loop_brief_hour` + `loop_brief_minute`) |
+
+```bash
+roll config loop-window 9-18        # active 9am – 6pm; start < end, both in [0,24]
+roll config loop-schedule 30        # fire every 30 minutes (period in [1,1440])
+roll config loop-schedule 30/7      # every 30 minutes, offset :07 (offset in [0, period-1])
+roll config dream-time 03:20        # dream fires at exactly 03:20; HH in [0,23], MM in [0,59]
+roll config brief-time 09:15        # brief fires at exactly 09:15
+```
+
+**Reading the current value.** Run any facade with no value to print the
+effective combination and where it comes from:
+
+```bash
+roll config loop-window             # loop-window: 10-18 (from default)
+roll config dream-time              # dream-time: 03:20 (from ~/.roll/config.yaml)
+```
+
+**Range validation.** Out-of-range or non-numeric input is rejected with a
+bilingual error and exit code 2 — e.g. `roll config loop-window 9-25` prints
+`loop-window end must be <= 24` / `loop-window 结束时间必须 ≤ 24`.
+
+**`--global` vs `--project`.** Writes default to `--project` (`.roll/local.yaml`,
+this project only). Pass `--global` to write `~/.roll/config.yaml` as the
+default for every project that has no project-level override.
+
+```bash
+roll config dream-time 03:20             # this project (.roll/local.yaml)
+roll config dream-time 03:20 --global    # all projects (~/.roll/config.yaml)
+```
+
+**Auto-reload.** After writing a schedule key, `roll config` re-installs the
+launchd plists for loop / dream / brief so the change fires on the next
+window. If reload fails (e.g. in a sandbox), the yaml is still the source of
+truth — run `roll loop on` to apply it by hand. See `roll config --help` for
+the full key list and ranges.
+
 ### Per-project frequency
 
-Configure in `.roll/local.yaml`:
+Set the fire interval with one command:
+
+```bash
+roll config loop-schedule 30        # every 30 minutes (period 1–1440, any interval)
+roll config loop-schedule 45        # every 45 minutes (no longer restricted to divisors of 60)
+```
+
+This writes a `loop_schedule` block to `.roll/local.yaml`:
 
 ```yaml
 loop_schedule:
   period_minutes: 30   # 1-1440 (any minute interval)
-  offset_minute: 7     # 0–59 (deprecated; for backward compat only)
+  offset_minute: 7     # 0–(period-1) (deprecated; for backward compat only)
 ```
 
 - `period_minutes` — how often loop fires. Any value 1–1440.
 - `offset_minute` — (deprecated since US-LOOP-032) no longer affects timing.
-  Kept for backward compat; loop now uses `StartInterval = period × 60` seconds.
+  Kept for backward compat.
 
 If no `.roll/local.yaml` or no `loop_schedule` block is present, Roll falls
-back to the global `loop_minute` in `~/.roll/config.yaml`, or derives a
-per-project default from the project path hash.
-
-**Example:**
-
-```yaml
-# .roll/local.yaml — high-frequency project
-loop_schedule:
-  period_minutes: 45   # every 45 minutes (no longer restricted to divisors of 60)
-```
+back to the global value (set with `roll config loop-schedule … --global`), or
+derives a per-project default from the project path hash.
 
 `roll loop status` and `roll loop on` display the actual schedule frequency
 so you can verify it at a glance. An invalid value (e.g. `period_minutes: 0` or
-`1441`) triggers an ALERT and falls back to the hourly default.
+`1441`) is rejected at write time with exit code 2.
 
-### Global config (backward-compatible)
+### Global defaults (backward-compatible)
 
-For a single global offset across all projects, `~/.roll/config.yaml` still
-works:
+For a single global default across all projects, write with `--global`:
 
-```yaml
-loop:
-  active_start: 10    # hour (24h)
-  active_end: 18
-  loop_minute: 5      # minute past the hour (overridden by .roll/local.yaml)
+```bash
+roll config loop-window 10-18 --global   # active window for every project
+roll config loop-schedule 60 --global    # default interval for every project
 ```
 
 (Agent selection is no longer a global config key — it is per-project complexity
 routing in `.roll/agents.yaml`. See [Complexity-based agent routing](#complexity-based-agent-routing).)
 
-Project-level `.roll/local.yaml` `loop_schedule` takes priority over
-`loop_minute`.
+Project-level `.roll/local.yaml` always takes priority over the global default.
 
 ## Subcommands
 

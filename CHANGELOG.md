@@ -4,6 +4,7 @@
 
 ### Added
 
+- **自主循环调度配置统一交互式管理 (US-LOOP-033..036, fixes FIX-105)** — `roll config loop-window 9-18` / `loop-schedule 30/7` / `dream-time 03:20` / `brief-time 09:15` 一行命令改 loop、dream、brief 调度,写完自动 reload plist 并立即在 `roll loop status` 反映;不用再手工 vim 三个 yaml;dream / brief 用 `StartCalendarInterval` 数组式绕过 macOS launchd 单字典 bug,重新支持精确到分钟的 fire 时刻 `[loop]`
 - **非 Claude agent 也能看到 token/成本** — dashboard 的 token/cost 列不再对所有非 Claude agent 黑屏:pi(DeepSeek)、OpenAI(codex)、Gemini、Kimi、Qwen 的 cycle 现在显示真实 token 和成本;OpenCode 等暂无 usage 插件的 agent 仍显示 `—/—`,新 agent 支持需落一个按 agent 插件而非自动出现;文档(FAQ + loop guide,中英双轨)补上覆盖矩阵 `[loop]` `[doc]`
 
 ## v2026.529.5

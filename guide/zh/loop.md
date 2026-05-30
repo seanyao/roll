@@ -219,6 +219,22 @@ cycle cleanly. Next cycle picks up the first smaller sub-story.
 
 没有 cache 数据的旧 cycle 或非 Opus 模型，列退化为两段式 `in/out` 格式。
 
+**按 agent 覆盖情况。** token/cost 抓取取决于按 agent 的 usage 插件。
+
+| Agent | dashboard token/cost |
+|-------|----------------------|
+| Claude | ✅ 支持 |
+| pi（DeepSeek） | ✅ 支持 |
+| OpenAI（codex） | ✅ 支持 |
+| Gemini | ✅ 支持 |
+| Kimi | ✅ 支持 |
+| Qwen | ✅ 支持 |
+| OpenCode | ❌ 显示 `—/—` |
+
+没有插件的 agent 退回 `—/—` 占位符。新增 agent 是一个小的按 agent 插件
+（`lib/agent_usage/<agent>.py`），不会自动出现。五步走 howto 见
+`lib/agent_usage/README.md`。
+
 ### 汇总行
 
 cycle 列表下方是每日四分量总计：

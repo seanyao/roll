@@ -834,6 +834,18 @@ def _main(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     cmd = argv[0]
     if cmd == "sync":
         return _cmd_sync(argv[1:])
+    if cmd == "on-loop-cycle":
+        # US-SYNC-008: print "true"/"false" for backlog_sync.on_loop_cycle so the
+        # roll-loop preflight hook can read the switch without a YAML parser.
+        # Default false when the file or the key is absent.
+        rest = argv[1:]
+        local_yaml = ".roll/local.yaml"
+        if "--local-yaml" in rest:
+            local_yaml = rest[rest.index("--local-yaml") + 1]
+        cfg = read_sync_config(local_yaml)
+        raw = str(cfg.get("on_loop_cycle", "")).strip().lower()
+        print("true" if raw in ("true", "1", "yes", "on") else "false")
+        return 0
     if cmd != "issues" or len(argv) < 2 or "/" not in argv[1]:
         print("usage: github_sync.py issues <owner/repo>", file=sys.stderr)
         return 1

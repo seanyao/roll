@@ -113,6 +113,7 @@ roll loop reset       # Clear loop state (start fresh on next fire)
 roll loop gc                  # GC orphan slugs, tmp debris, expired backups (default: keep 30 days)
 roll loop gc --dry-run        # Preview what would be removed without deleting
 roll loop gc --keep-days 14   # Override retention (also: loop_gc.retention_days in .roll/local.yaml)
+                              # See guide/en/loop-data-layout.md for the full gc manual
 
 roll loop branches    # List loop-related branches (merged temp branches, open PRs, etc.)
 
@@ -400,7 +401,7 @@ The `mute` file is shared across all projects and all autonomous activity
 
 Loop has two layers:
 
-- **LOCK file** (`~/.shared/roll/loop/.LOCK-<slug>`): only one loop per project runs at a time.
+- **LOCK file** (`<project>/.roll/loop/.LOCK-<slug>`): only one loop per project runs at a time.
   If loop is already running, a new fire exits immediately.
 - **🔨 In Progress status**: stories being worked by humans or other agents are skipped.
 
@@ -662,11 +663,22 @@ This usually means `.roll/` is out of date:
 
 ## State Files
 
+Since Phase 2.0, a project's loop state lives **inside the project** at
+`<project>/.roll/loop/`. Only machine-level binding files (launchd runners,
+attach scripts) and the global mute switch stay in `~/.shared/roll/`. See
+[Loop Data Layout](loop-data-layout.md) for the full layout, migration, and
+`roll loop gc`.
+
+自 Phase 2.0 起，项目的 loop 状态搬进了**项目目录** `<project>/.roll/loop/`。只有机
+器级绑定文件（launchd runner、attach 脚本）和全局静音开关留在 `~/.shared/roll/`。完
+整布局、迁移与 `roll loop gc` 见 [Loop 数据布局](loop-data-layout.md)。
+
 | File | Content |
 |------|---------|
-| `~/.shared/roll/loop/state.yaml` | Current/last run: status, story, agent, run_id |
-| `~/.shared/roll/loop/runs.jsonl` | Append-only run history (one JSON line per cycle); each record carries a `result_eval` block (see [Cycle Result Eval](#cycle-result-eval)) |
+| `<project>/.roll/loop/state-<slug>.yaml` | Current/last run: status, story, agent, run_id |
+| `<project>/.roll/loop/runs.jsonl` | Append-only run history (one JSON line per cycle); each record carries a `result_eval` block (see [Cycle Result Eval](#cycle-result-eval)) |
+| `<project>/.roll/loop/events.ndjson` | Per-cycle event stream (phase_start/phase_end, …) |
 | `.roll/signals/candidates.md` | Candidate backlog drafts from self-evolution signals (`📋 待人确认`, never auto-activated) |
-| `~/.shared/roll/loop/ALERT.md` | Accumulated alerts (failures, TCR violations) |
-| `~/.shared/roll/loop/PAUSE-<slug>` | Pause marker (created by `roll loop pause`) |
-| `~/.shared/roll/mute` | Auto-attach mute marker (shared across projects) |
+| `<project>/.roll/loop/ALERT-<slug>.md` | Accumulated alerts (failures, TCR violations) |
+| `<project>/.roll/loop/PAUSE-<slug>` | Pause marker (created by `roll loop pause`) |
+| `~/.shared/roll/mute` | Global auto-attach mute marker (shared across projects) |

@@ -392,7 +392,7 @@ git push --force-with-lease
 
 **为什么重要：** Roll 每个周期都写结构化记录，但根据需求有多个查看入口。
 
-**原理：** 每个周期向 `~/.shared/roll/loop/runs.jsonl` 追加一条 JSONL，
+**原理：** 每个周期向 `<project>/.roll/loop/runs.jsonl` 追加一条 JSONL，
 包含 story ID、模型、TCR commit 数、耗时、结果、成本（按公开单价）。
 `roll-brief` 把这些聚合成人类可读摘要。tmux 会话保留完整 agent 对话，
 直到下一个周期覆盖。
@@ -669,3 +669,33 @@ roll feedback --type bug --title "Safari 上登录失败" --body "复现步骤: 
 项目）默认自动附,`--no-env` 关。目标仓库通过 `--repo`、
 `ROLL_FEEDBACK_REPO`、`.roll/local.yaml`、`~/.roll/config.yaml` 任
 一层固定,详细规则见 [feedback.md](feedback.md)。
+
+### C8. 升级后我的 loop 状态 / ALERT 跑哪去了？（Phase 2.0）
+
+**短答：进了你的项目。** Phase 2.0 起，项目的 loop 运行时数据放在
+`<project>/.roll/loop/`，不再在 `~/.shared/roll/loop/`。ALERT 现在是
+`<project>/.roll/loop/ALERT-<slug>.md`，状态是 `state-<slug>.yaml`，运行
+历史是 `runs.jsonl`。
+
+Where did my loop state / ALERT go after upgrading? Into your project, under
+`<project>/.roll/loop/`.
+
+**需要手动迁移吗？不需要。** 下一个 cycle 自动迁移：`_loop_migrate_legacy_paths`
+把 state / ALERT / PAUSE / mute 复制进项目并把旧文件标记 `.migrated-<时间戳>`；
+`runs.jsonl` 按项目拆分。7 天窗口内，新路径缺失时读取会回退旧家目录路径，升级中
+途不会出问题。
+
+No manual migration needed — the next cycle does it, with a 7-day dual-path
+fallback.
+
+**怎么回滚？** 老文件以 `<name>.migrated-<时间戳>` 保留 7 天，改名回去（去后缀）
+并删掉项目本地副本即可。
+
+To roll back, rename `<name>.migrated-<timestamp>` back within 7 days.
+
+**清残骸：** `roll loop gc` 退役孤儿 slug（项目已删）、清扫过期 `.migrated-*`、
+`runs.jsonl.tmp.*` 与旧备份；`roll loop gc --dry-run` 预览。完整说明见
+[Loop 数据布局](loop-data-layout.md)。
+
+`roll loop gc` sweeps debris; full details in
+[Loop Data Layout](loop-data-layout.md).

@@ -245,14 +245,175 @@ def fetch_issues(owner: str,
 
 
 # ---------------------------------------------------------------------------
+# Backlog write (US-SYNC-002)
+#
+# Single-direction mapping: GitHub issues → .roll/backlog.md rows. label→type
+# mapping decides the backlog prefix (FIX / US / REFACTOR), title becomes the
+# Description, and state (open/closed) becomes the status emoji. New rows are
+# appended to the bottom of the target Markdown table.
+# ---------------------------------------------------------------------------
+
+# label → backlog type. First matching label (case-insensitive) wins; an issue
+# with no recognised label defaults to US.
+_LABEL_TYPE_MAP = {
+    "bug": "FIX",
+    "enhancement": "US",
+    "feature": "US",
+    "us": "US",
+    "refactor": "REFACTOR",
+}
+DEFAULT_TYPE = "US"
+
+# state → backlog status column.
+_STATE_STATUS_MAP = {
+    "open": "📋 Todo",
+    "closed": "✅ Done",
+}
+DEFAULT_STATUS = "📋 Todo"
+
+
+def map_label_to_type(labels: List[Any]) -> str:
+    """Map a GitHub issue's labels to a backlog type prefix.
+
+    ``labels`` is the raw ``issue["labels"]`` list (each entry a dict with a
+    ``name`` key, as GitHub returns them, or a plain string). The first label
+    that matches a known mapping wins; with no match we fall back to
+    ``DEFAULT_TYPE`` (US).
+    """
+    for label in labels or []:
+        name = label.get("name", "") if isinstance(label, dict) else str(label)
+        key = name.strip().lower()
+        if key in _LABEL_TYPE_MAP:
+            return _LABEL_TYPE_MAP[key]
+    return DEFAULT_TYPE
+
+
+def map_state_to_status(state: Optional[str]) -> str:
+    """Map a GitHub issue state (``open``/``closed``) to a backlog status."""
+    return _STATE_STATUS_MAP.get((state or "").strip().lower(), DEFAULT_STATUS)
+
+
+def issue_to_row(issue: Dict[str, Any]) -> str:
+    """Render a single GitHub issue as a backlog Markdown table row.
+
+    The id is ``<TYPE>-<number>`` (e.g. ``US-13`` / ``FIX-13``); the issue
+    title becomes the Description and the state becomes the status column.
+    """
+    number = issue.get("number")
+    title = (issue.get("title") or "").strip()
+    type_prefix = map_label_to_type(issue.get("labels", []))
+    status = map_state_to_status(issue.get("state"))
+    row_id = f"{type_prefix}-{number}"
+    return f"| {row_id} | {title} | {status} |"
+
+
+def _append_rows_to_table(content: str, rows: List[str]) -> str:
+    """Append ``rows`` to the bottom of the first Markdown table in ``content``.
+
+    A "table" here is the contiguous run of lines starting with ``|`` that
+    follows the ``|---|`` separator. New rows are inserted directly after the
+    last existing body row of that table, so subsequent (non-table) content is
+    preserved.
+    """
+    if not rows:
+        return content
+    lines = content.split("\n")
+    sep_idx = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("|") and set(stripped) <= set("|-: "):
+            sep_idx = idx
+            break
+    if sep_idx is None:
+        # No table found — append the rows at the end as a fallback.
+        tail = "\n".join(rows)
+        if content and not content.endswith("\n"):
+            return content + "\n" + tail + "\n"
+        return content + tail + "\n"
+    # Find the last contiguous body row after the separator.
+    insert_at = sep_idx + 1
+    while insert_at < len(lines) and lines[insert_at].strip().startswith("|"):
+        insert_at += 1
+    new_lines = lines[:insert_at] + rows + lines[insert_at:]
+    return "\n".join(new_lines)
+
+
+def sync_to_backlog(issues: List[Dict[str, Any]],
+                    backlog_path: str) -> Dict[str, Any]:
+    """Append backlog rows for ``issues`` to the table in ``backlog_path``.
+
+    Returns a summary dict ``{"added": N, "rows": [...]}``. This is the v1
+    single-direction write: every issue is rendered and appended (idempotency
+    /skip-existing arrives in US-SYNC-003).
+    """
+    with open(backlog_path, "r", encoding="utf-8") as fh:
+        content = fh.read()
+    rows = [issue_to_row(issue) for issue in issues]
+    updated = _append_rows_to_table(content, rows)
+    with open(backlog_path, "w", encoding="utf-8") as fh:
+        fh.write(updated)
+    return {"added": len(rows), "rows": rows}
+
+
+# ---------------------------------------------------------------------------
 # CLI entry — `python3 lib/github_sync.py issues owner/repo` for ad-hoc use /
 # direct testing when bin/roll is unavailable.
 # ---------------------------------------------------------------------------
+def _load_issues_for_sync(owner: str, repo: str) -> List[Dict[str, Any]]:
+    """Fetch open issues for sync, honouring a test fixture override.
+
+    When ``ROLL_SYNC_FIXTURE`` points at a JSON file, its contents are used
+    instead of a live API call. This lets the ``roll backlog sync`` integration
+    test exercise the full bin/roll → python write path with mocked GitHub
+    responses and zero network access.
+    """
+    fixture = os.environ.get("ROLL_SYNC_FIXTURE")
+    if fixture:
+        with open(fixture, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    return fetch_issues(owner, repo, state="open")
+
+
+def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
+    if "--repo" not in argv:
+        print("usage: github_sync.py sync --repo <owner/repo> "
+              "[--backlog <path>]", file=sys.stderr)
+        return 1
+    repo_arg = argv[argv.index("--repo") + 1]
+    if "/" not in repo_arg:
+        print(f"invalid --repo {repo_arg!r}: expected owner/repo",
+              file=sys.stderr)
+        return 1
+    owner, repo = repo_arg.split("/", 1)
+    backlog = ".roll/backlog.md"
+    if "--backlog" in argv:
+        backlog = argv[argv.index("--backlog") + 1]
+    try:
+        issues = _load_issues_for_sync(owner, repo)
+    except AuthError as exc:
+        print(f"auth error: {exc}", file=sys.stderr)
+        return 2
+    except RateLimitError as exc:
+        print(f"rate limit: {exc}", file=sys.stderr)
+        return 3
+    except GitHubAPIError as exc:
+        print(f"api error: {exc}", file=sys.stderr)
+        return 4
+    summary = sync_to_backlog(issues, backlog)
+    for row in summary["rows"]:
+        print(f"+ {row}")
+    print(f"added: {summary['added']}, total issues: {len(issues)}")
+    return 0
+
+
 def _main(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
     if not argv or argv[0] in ("-h", "--help", "help"):
         print("usage: github_sync.py issues <owner/repo> [--state all|open|closed]")
+        print("       github_sync.py sync --repo <owner/repo> [--backlog <path>]")
         return 0
     cmd = argv[0]
+    if cmd == "sync":
+        return _cmd_sync(argv[1:])
     if cmd != "issues" or len(argv) < 2 or "/" not in argv[1]:
         print("usage: github_sync.py issues <owner/repo>", file=sys.stderr)
         return 1

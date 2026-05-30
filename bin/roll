@@ -12425,6 +12425,15 @@ cmd_backlog() {
       python3 "${ROLL_PKG_DIR}/lib/loop_unstick.py" "$@"
       return
       ;;
+    sync)
+      # US-SYNC-002: pull GitHub issues into the local backlog. label→type
+      # mapping (bug→FIX, enhancement/feature/US→US, refactor→REFACTOR,
+      # else US), title→Description, open→📋 Todo / closed→✅ Done. Single
+      # direction (issues → backlog.md).
+      shift
+      python3 "${ROLL_PKG_DIR}/lib/github_sync.py" sync "$@" --backlog "$backlog"
+      return
+      ;;
     block|defer|unblock|promote)
       local pattern="${2:-}"
       local reason="${3:-}"

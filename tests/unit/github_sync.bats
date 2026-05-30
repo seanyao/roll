@@ -171,3 +171,70 @@ except gs.AuthError:
   [ "$status" -eq 0 ]
   [[ "$output" == *"AuthError"* ]]
 }
+
+# --- label→type / state→status mapping + backlog write (US-SYNC-002) --------
+
+@test "US-SYNC-002: bug label maps to FIX, refactor to REFACTOR, else US" {
+  run run_py '
+print("BUG:", gs.map_label_to_type([{"name": "bug"}]))
+print("ENH:", gs.map_label_to_type([{"name": "enhancement"}]))
+print("FEAT:", gs.map_label_to_type([{"name": "feature"}]))
+print("US:", gs.map_label_to_type([{"name": "US"}]))
+print("REF:", gs.map_label_to_type([{"name": "refactor"}]))
+print("NONE:", gs.map_label_to_type([]))
+print("UNKNOWN:", gs.map_label_to_type([{"name": "wontfix"}]))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BUG: FIX"* ]]
+  [[ "$output" == *"ENH: US"* ]]
+  [[ "$output" == *"FEAT: US"* ]]
+  [[ "$output" == *"US: US"* ]]
+  [[ "$output" == *"REF: REFACTOR"* ]]
+  [[ "$output" == *"NONE: US"* ]]
+  [[ "$output" == *"UNKNOWN: US"* ]]
+}
+
+@test "US-SYNC-002: open maps to Todo, closed to Done" {
+  run run_py '
+print("OPEN:", gs.map_state_to_status("open"))
+print("CLOSED:", gs.map_state_to_status("closed"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OPEN: 📋 Todo"* ]]
+  [[ "$output" == *"CLOSED: ✅ Done"* ]]
+}
+
+@test "US-SYNC-002: issue_to_row renders id, title, status" {
+  run run_py '
+row = gs.issue_to_row({"number": 14, "title": "Crash on empty repo",
+                       "state": "open", "labels": [{"name": "bug"}]})
+print(row)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"| FIX-14 | Crash on empty repo | 📋 Todo |"* ]]
+}
+
+@test "US-SYNC-002: sync_to_backlog appends rows into the table" {
+  cat > "${TMP}/backlog.md" << 'EOF'
+# Backlog
+| Story | Description | Status |
+|-------|-------------|--------|
+| US-EXISTING-001 | Keep me | 📋 Todo |
+
+## Notes
+trailing prose must survive
+EOF
+  run run_py "
+summary = gs.sync_to_backlog(
+    [{'number': 13, 'title': 'New sync story', 'state': 'open',
+      'labels': [{'name': 'enhancement'}]}],
+    '${TMP}/backlog.md')
+print('ADDED:', summary['added'])
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ADDED: 1"* ]]
+  grep -qE '^\| US-13 \| New sync story \| 📋 Todo \|$' "${TMP}/backlog.md"
+  # Existing row and trailing prose are preserved.
+  grep -q "US-EXISTING-001" "${TMP}/backlog.md"
+  grep -q "trailing prose must survive" "${TMP}/backlog.md"
+}

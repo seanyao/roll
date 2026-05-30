@@ -1407,23 +1407,6 @@ def _read_schedule_spec(project_root: Optional[Path] = None) -> Tuple[int, int]:
     return (60, h)
 
 
-def _read_plist_loop_minute() -> int:
-    """FIX-063: read actual loop Minute from launchd plist (truth source).
-    Falls back to 48 only when plist missing/unparseable.
-    """
-    import re as _re
-    slug = project_slug()
-    plist = Path(os.path.expanduser("~/Library/LaunchAgents")) / f"com.roll.loop.{slug}.plist"
-    if not plist.exists():
-        return 48
-    try:
-        text = plist.read_text(errors="ignore")
-    except Exception:
-        return 48
-    m = _re.search(r"<key>Minute</key>\s*<integer>(\d+)</integer>", text)
-    return int(m.group(1)) if m else 48
-
-
 def _read_daily_plist_schedule(svc: str) -> Optional[Dict[str, Any]]:
     """US-LOOP-036: read the actual fire schedule of a daily service (dream/brief)
     from its launchd plist — the truth source after a `roll config <svc>-time`

@@ -188,6 +188,61 @@ print(len(s["right_items"]), s["right_items"][0]["text_zh"])
   [[ "${lines[2]}" == "1 自动" ]]
 }
 
+@test "parse_slides: block literal inside a list item is dedented (US-DECK-017 peer-fix)" {
+  run run_render_module '
+src = """## Slide 1
+layout: cards-2
+cards:
+  - title_en: \"A\"
+    title_zh: \"甲\"
+    body_en: |
+      Line one
+      Line two
+    body_zh: |
+      第一行
+"""
+s = mod.parse_slides(src)[0]
+print(repr(s["cards"][0]["body_en"]))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "'Line one"*"Line two"* ]]
+}
+
+@test "parse_slides: evidence item containing a colon stays a scalar (US-DECK-017 peer-fix)" {
+  run run_render_module '
+src = """## Slide 1
+title_en: \"A\"
+title_zh: \"甲\"
+evidence:
+  - TODO: see README.md:1
+  - README.md:42
+"""
+s = mod.parse_slides(src)[0]
+print(type(s["evidence"][0]).__name__, "|", s["evidence"][0])
+print(s["evidence"][1])
+'
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "str | TODO: see README.md:1" ]]
+  [[ "${lines[1]}" == "README.md:42" ]]
+}
+
+@test "parse_slides: extra-spaced dash keeps continuation lines (US-DECK-017 peer-fix)" {
+  run run_render_module '
+src = """## Slide 1
+cards:
+  -   title_en: \"X\"
+      title_zh: \"叉\"
+      body_en: \"b\"
+      body_zh: \"乙\"
+"""
+s = mod.parse_slides(src)[0]
+c = s["cards"][0]
+print(len(c), c.get("title_en"), c.get("body_zh"))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "4 X 乙" ]]
+}
+
 @test "parse_slides: slide without layout omits the layout key (backward compat)" {
   run run_render_module '
 src = """---

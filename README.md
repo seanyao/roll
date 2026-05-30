@@ -42,7 +42,7 @@ roll loop on        # let AI work through the backlog (optional)
 | **Autonomy · daily use** | |
 | `roll loop <on\|off\|now\|status\|runs\|story\|monitor>` | Manage the autonomous BACKLOG executor |
 | `roll brief` | Show latest owner brief |
-| `roll backlog [block\|defer\|lint\|…]` | View and manage pending tasks |
+| `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll peer` | Cross-agent negotiation & review |
 | `roll alert` | View / clear loop alerts |
 | **Project · per repo** | |
@@ -74,6 +74,7 @@ roll loop on        # let AI work through the backlog (optional)
 | roll-doc (legacy doc automation: four phases + Phase 3b deep read) | [guide/en/roll-doc.md](guide/en/roll-doc.md) | [guide/zh/roll-doc.md](guide/zh/roll-doc.md) |
 | Slides (deck generator) | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |
 | Feedback (`roll feedback`) | [guide/en/feedback.md](guide/en/feedback.md) | [guide/zh/feedback.md](guide/zh/feedback.md) |
+| Backlog GitHub sync (`roll backlog sync`) | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
 | Test isolation (`roll test` + Tart VM) | [guide/en/test-isolation.md](guide/en/test-isolation.md) | [guide/zh/test-isolation.md](guide/zh/test-isolation.md) |
 | Cross-machine sync | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
 | Remote monitoring (watch loop from a phone via `remote-watch`) | [guide/en/loop.md#remote-monitoring](guide/en/loop.md#remote-monitoring) | [guide/zh/loop.md#远程监控remote-monitoring](guide/zh/loop.md#%E8%BF%9C%E7%A8%8B%E7%9B%91%E6%8E%A7remote-monitoring) |

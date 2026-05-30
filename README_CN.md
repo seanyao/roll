@@ -42,7 +42,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | **Autonomy · 日常使用** | |
 | `roll loop <on\|off\|now\|status\|runs\|story\|monitor>` | 管理自主 BACKLOG 执行循环 |
 | `roll brief` | 查看最新 owner 简报 |
-| `roll backlog [block\|defer\|lint\|…]` | 查看和管理待处理任务 |
+| `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
 | `roll peer` | 跨 Agent 协商对审 |
 | `roll alert` | 查看 / 清除 loop 告警 |
 | **Project · 项目内** | |
@@ -74,6 +74,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | roll-doc（遗留文档自动化:四 phase + Phase 3b 深度读取） | [guide/en/roll-doc.md](guide/en/roll-doc.md) | [guide/zh/roll-doc.md](guide/zh/roll-doc.md) |
 | 幻灯片（deck 生成器） | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |
 | 反馈（`roll feedback`） | [guide/en/feedback.md](guide/en/feedback.md) | [guide/zh/feedback.md](guide/zh/feedback.md) |
+| Backlog GitHub 同步（`roll backlog sync`） | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
 | 跨机器同步 | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
 | Cycle 结果评分（`roll loop eval`） | [guide/en/loop.md#cycle-result-eval](guide/en/loop.md#cycle-result-eval) | [guide/zh/loop.md#cycle-结果评分result-eval](guide/zh/loop.md#cycle-%E7%BB%93%E6%9E%9C%E8%AF%84%E5%88%86result-eval) |
 | Pricing（成本可见性） | [guide/en/pricing.md](guide/en/pricing.md) | [guide/zh/pricing.md](guide/zh/pricing.md) |

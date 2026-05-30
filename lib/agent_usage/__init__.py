@@ -68,6 +68,7 @@ _PLUGINS = {
     "pi": ".pi",
     "openai": ".openai",
     "gemini": ".gemini",
+    "kimi": ".kimi",
 }
 
 for _agent, _mod_suffix in _PLUGINS.items():

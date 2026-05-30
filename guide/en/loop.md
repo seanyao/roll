@@ -23,10 +23,14 @@ project-derived minute (different projects get different offsets to avoid
 collisions).
 
 ```
-Active window: 10am – 6pm (set with `roll config loop-window 10-18`)
+Active window: 0–24 (always on — the shipped default)
 ```
 
-Outside the active window, loop silently exits without doing anything.
+By default the active window is the full day (`loop_active_start=0`,
+`loop_active_end=24`), so loop fires on every scheduled tick. Narrow it to a
+working window with `roll config loop-window` — e.g. `roll config loop-window
+10-18` for 10am – 6pm. Outside the configured window, loop silently exits
+without doing anything.
 
 ## Configuring the schedule
 
@@ -55,7 +59,7 @@ roll config brief-time 09:15        # brief fires at exactly 09:15
 effective combination and where it comes from:
 
 ```bash
-roll config loop-window             # loop-window: 10-18 (from default)
+roll config loop-window             # loop-window: 0-24 (from default)
 roll config dream-time              # dream-time: 03:20 (from ~/.roll/config.yaml)
 ```
 
@@ -174,12 +178,14 @@ roll agent list                      # Show agents installed on this machine
 Loop routes each cycle along a single axis — **task complexity**. A story's
 `est_min` is classified into one of three tiers, and the tier maps to an agent
 through four slots in the per-project `.roll/agents.yaml`. There is no global
-`primary_agent`, no `agent×model` selection (each agent uses its own default
-model), and no soft-preference history.
+`primary_agent` and no `agent×model` selection (each agent uses its own default
+model). The tier itself is a hard constraint — history only ever re-orders the
+agent *within* a tier (the in-tier soft nudge), never crosses tiers.
 
 每轮 cycle 只按一根轴选 agent —— **任务复杂度**。故事的 `est_min` 归到三档之一，
 再由项目本地 `.roll/agents.yaml` 的四个槽映射到具体 agent。没有全局
-primary_agent，不再选 agent×model（每个 agent 用自己的默认模型），也没有软偏好历史。
+primary_agent，不再选 agent×model（每个 agent 用自己的默认模型）。档位本身是硬约束——
+历史只会在同一档位内重排 agent（in-tier 软微调），绝不跨档。
 
 The complexity classifier (single source of truth, fixed thresholds):
 

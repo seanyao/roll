@@ -55,3 +55,36 @@ GUIDE_DIR="${BATS_TEST_DIRNAME}/../../guide/zh"
 @test "e2e: zh peer.md covers mute mechanism" {
   grep -qiE 'mute|静音' "${GUIDE_DIR}/peer.md"
 }
+
+# ─── REFACTOR-045: zh practices/engineering-common-sense.md ──────────────────────
+
+@test "zh practices/engineering-common-sense.md exists" {
+  [ -f "${GUIDE_DIR}/practices/engineering-common-sense.md" ]
+}
+
+@test "zh engineering-common-sense.md has Chinese title and baseline framing" {
+  DOC="${GUIDE_DIR}/practices/engineering-common-sense.md"
+  grep -qF '# Roll 工程常识清单' "${DOC}"
+  grep -qF '它们是基线要求' "${DOC}"
+}
+
+@test "zh engineering-common-sense.md covers all 11 numbered principles in Chinese" {
+  DOC="${GUIDE_DIR}/practices/engineering-common-sense.md"
+  grep -qF '## 1. 幂等性' "${DOC}"
+  grep -qF '## 2. 跨模块契约一致性' "${DOC}"
+  grep -qF '## 3. 数据流完整性' "${DOC}"
+  grep -qF '## 4. 原子性' "${DOC}"
+  grep -qF '## 5. 输入校验' "${DOC}"
+  grep -qF '## 6. 优雅降级' "${DOC}"
+  grep -qF '## 7. 可观测性' "${DOC}"
+  grep -qF '## 8. 并发安全' "${DOC}"
+  grep -qF '## 9. Shell 脚本性能' "${DOC}"
+  grep -qF '## 10. Shell 资源清理' "${DOC}"
+  grep -qF '## 11. 测试可靠性' "${DOC}"
+}
+
+@test "zh engineering-common-sense.md keeps the mandatory checklist process" {
+  DOC="${GUIDE_DIR}/practices/engineering-common-sense.md"
+  grep -qF '强制检查流程' "${DOC}"
+  grep -qF '工程常识检查清单' "${DOC}"
+}

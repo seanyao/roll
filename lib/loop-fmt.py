@@ -116,6 +116,10 @@ class LoopFmt:
         self.pending_ci      = False
         self.pending_story   = False
         self.spinner         = Spinner()
+        # US-VIEW-020: consecutive same-file Edit/Write streak. Tracks the last
+        # file path and how many times in a row it's been edited so the renderer
+        # can collapse N identical lines into one `✏ <basename> ×N` line.
+        self._edit_streak    = (None, 0)  # (last_file_path, count)
         # Accumulate token usage across all assistant turns in the cycle so
         # the trailing result event can emit a 'usage' event carrying the
         # cumulative totals (result.usage only carries the last turn's).
@@ -199,9 +203,88 @@ class LoopFmt:
                 m2 = re.search(r'(\w+)\s*→\s*(\w+)', text)
                 if m2:
                     agents = f"{m2.group(1)} → {m2.group(2)}"
+                self._flush_edit_streak()
                 print(step("peer", agents, f"{round_str} · {verdict}"))
                 return
         # All other text: Tier 3, suppress
+
+    @staticmethod
+    def _edit_hint(inp):
+        """US-VIEW-021: derive a ≤20-char change feature from an Edit/Write input.
+
+        Priority:
+          1. replace_all=true → "replace-all"
+          2. else first non-blank token of new_string's first line, with leading
+             whitespace / comment markers stripped.
+        Truncates to 20 chars (unicode chars, not bytes) with a trailing "…".
+        Empty / all-whitespace new_string → "" (caller omits the ` | ` segment).
+        """
+        if inp.get("replace_all") is True:
+            return "replace-all"
+        new_string = inp.get("new_string") or ""
+        if not isinstance(new_string, str):
+            return ""
+        # first non-blank line
+        first_line = next((l for l in new_string.splitlines() if l.strip()), "")
+        s = first_line.strip()
+        # strip leading comment markers (#, //, /*, *, --, ;) then re-strip
+        s = re.sub(r'^(#+|//+|/\*+|\*+|--+|;+)\s*', '', s).strip()
+        # first token (non-whitespace run)
+        token = s.split()[0] if s.split() else ""
+        if not token:
+            return ""
+        if len(token) > 20:
+            return token[:20] + "…"
+        return token
+
+    def _edit_streak_line(self, path, count, hint=""):
+        """Render the streak line for `path` at `count`. basename only.
+
+        US-VIEW-021: when `hint` is non-empty, insert a ` | <hint>` segment
+        before the ×N suffix: `✏ <basename> | <hint> ×N`.
+        """
+        base = os.path.basename(path) or path
+        hint_part = f" | {hint}" if hint else ""
+        suffix = f" ×{count}" if count >= 2 else ""
+        return f"  {DARK_GRAY}✏ {base}{hint_part}{suffix}{RESET}"
+
+    def _flush_edit_streak(self):
+        """Finalize the current Edit/Write streak (if any), leaving its last
+        line in place, and reset the streak state. In production the streak
+        used `\\r` in-place refresh, so we end with a newline to keep the final
+        line; in test mode each line was already printed standalone."""
+        path, count = self._edit_streak
+        if path is None:
+            return
+        if _SPIN_ENABLED:
+            # finish the in-place line so subsequent output starts fresh
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        self._edit_streak = (None, 0)
+
+    def _handle_edit(self, path, hint=""):
+        last_path, count = self._edit_streak
+        if path == last_path:
+            count += 1
+            self._edit_streak = (path, count)
+            line = self._edit_streak_line(path, count, hint)
+            if _SPIN_ENABLED:
+                # in-place refresh: overwrite the current line with the new ×N
+                sys.stdout.write("\r" + line)
+                sys.stdout.flush()
+            else:
+                # deterministic test mode: static line per Spinner-style convention
+                print(line)
+        else:
+            # different file: flush previous streak, then start a new one
+            self._flush_edit_streak()
+            self._edit_streak = (path, 1)
+            line = self._edit_streak_line(path, 1, hint)
+            if _SPIN_ENABLED:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            else:
+                print(line)
 
     def _handle_tool_use(self, blk):
         name = blk.get("name", "")
@@ -212,8 +295,12 @@ class LoopFmt:
 
         if name in ("Edit", "Write"):
             path = inp.get("file_path") or inp.get("path", "")
-            print(f"  {DARK_GRAY}✏ {path}{RESET}")
+            hint = self._edit_hint(inp)
+            self._handle_edit(path, hint)
             return  # Tier 2
+
+        # Any non-Edit tool_use breaks the streak (don't collapse across them).
+        self._flush_edit_streak()
 
         if name == "Bash":
             cmd = inp.get("command", "")
@@ -258,6 +345,7 @@ class LoopFmt:
                 self.last_test_count = int(m.group(1))
 
             if is_err:
+                self._flush_edit_streak()  # don't stack an error onto a streak
                 tool_name = "tool"
                 lines = [l for l in text.splitlines() if l.strip()][:3]
                 detail = " | ".join(lines)
@@ -324,6 +412,9 @@ class LoopFmt:
         return str(content) if content else ""
 
     def _handle_result(self, ev):
+        # US-VIEW-020: flush any residual Edit streak before the cycle summary
+        # so the final ✏ line isn't lost / left mid-`\r`.
+        self._flush_edit_streak()
         dur_ms   = ev.get("duration_ms", 0)
         cost_usd = ev.get("total_cost_usd", 0)
         dur_s    = dur_ms / 1000

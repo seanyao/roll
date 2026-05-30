@@ -23,56 +23,103 @@ project-derived minute (different projects get different offsets to avoid
 collisions).
 
 ```
-Active window: 10am – 6pm (configurable in ~/.roll/config.yaml)
+Active window: 10am – 6pm (set with `roll config loop-window 10-18`)
 ```
 
 Outside the active window, loop silently exits without doing anything.
 
+## Configuring the schedule
+
+Instead of hand-editing `~/.roll/config.yaml` and `.roll/local.yaml` and then
+hoping the launchd plist picks up your change, use the `roll config` command
+family. Each write lands in the right yaml file **and** automatically
+regenerates the runner, re-bootstraps the launchd plist, and is reflected
+immediately by `roll loop status` — no manual reload step.
+
+| Command | What it sets |
+|---------|--------------|
+| `roll config loop-window <start>-<end>` | loop active window hours (`loop_active_start` + `loop_active_end`) |
+| `roll config loop-schedule <period>[/<offset>]` | fire interval (`loop_schedule.period_minutes` + `offset_minute`) |
+| `roll config dream-time <HH:MM>` | dream daily fire time (`loop_dream_hour` + `loop_dream_minute`) |
+| `roll config brief-time <HH:MM>` | brief daily fire time (`loop_brief_hour` + `loop_brief_minute`) |
+
+```bash
+roll config loop-window 9-18        # active 9am – 6pm; start < end, both in [0,24]
+roll config loop-schedule 30        # fire every 30 minutes (period in [1,1440])
+roll config loop-schedule 30/7      # every 30 minutes, offset :07 (offset in [0, period-1])
+roll config dream-time 03:20        # dream fires at exactly 03:20; HH in [0,23], MM in [0,59]
+roll config brief-time 09:15        # brief fires at exactly 09:15
+```
+
+**Reading the current value.** Run any facade with no value to print the
+effective combination and where it comes from:
+
+```bash
+roll config loop-window             # loop-window: 10-18 (from default)
+roll config dream-time              # dream-time: 03:20 (from ~/.roll/config.yaml)
+```
+
+**Range validation.** Out-of-range or non-numeric input is rejected with a
+bilingual error and exit code 2 — e.g. `roll config loop-window 9-25` prints
+`loop-window end must be <= 24` / `loop-window 结束时间必须 ≤ 24`.
+
+**`--global` vs `--project`.** Writes default to `--project` (`.roll/local.yaml`,
+this project only). Pass `--global` to write `~/.roll/config.yaml` as the
+default for every project that has no project-level override.
+
+```bash
+roll config dream-time 03:20             # this project (.roll/local.yaml)
+roll config dream-time 03:20 --global    # all projects (~/.roll/config.yaml)
+```
+
+**Auto-reload.** After writing a schedule key, `roll config` re-installs the
+launchd plists for loop / dream / brief so the change fires on the next
+window. If reload fails (e.g. in a sandbox), the yaml is still the source of
+truth — run `roll loop on` to apply it by hand. See `roll config --help` for
+the full key list and ranges.
+
 ### Per-project frequency
 
-Configure in `.roll/local.yaml`:
+Set the fire interval with one command:
+
+```bash
+roll config loop-schedule 30        # every 30 minutes (period 1–1440, any interval)
+roll config loop-schedule 45        # every 45 minutes (no longer restricted to divisors of 60)
+```
+
+This writes a `loop_schedule` block to `.roll/local.yaml`:
 
 ```yaml
 loop_schedule:
   period_minutes: 30   # 1-1440 (any minute interval)
-  offset_minute: 7     # 0–59 (deprecated; for backward compat only)
+  offset_minute: 7     # 0–(period-1) (deprecated; for backward compat only)
 ```
 
 - `period_minutes` — how often loop fires. Any value 1–1440.
 - `offset_minute` — (deprecated since US-LOOP-032) no longer affects timing.
-  Kept for backward compat; loop now uses `StartInterval = period × 60` seconds.
+  Kept for backward compat.
 
 If no `.roll/local.yaml` or no `loop_schedule` block is present, Roll falls
-back to the global `loop_minute` in `~/.roll/config.yaml`, or derives a
-per-project default from the project path hash.
-
-**Example:**
-
-```yaml
-# .roll/local.yaml — high-frequency project
-loop_schedule:
-  period_minutes: 45   # every 45 minutes (no longer restricted to divisors of 60)
-```
+back to the global value (set with `roll config loop-schedule … --global`), or
+derives a per-project default from the project path hash.
 
 `roll loop status` and `roll loop on` display the actual schedule frequency
 so you can verify it at a glance. An invalid value (e.g. `period_minutes: 0` or
-`1441`) triggers an ALERT and falls back to the hourly default.
+`1441`) is rejected at write time with exit code 2.
 
-### Global config (backward-compatible)
+### Global defaults (backward-compatible)
 
-For a single global offset across all projects, `~/.roll/config.yaml` still
-works:
+For a single global default across all projects, write with `--global`:
 
-```yaml
-loop:
-  active_start: 10    # hour (24h)
-  active_end: 18
-  loop_minute: 5      # minute past the hour (overridden by .roll/local.yaml)
-  primary_agent: claude
+```bash
+roll config loop-window 10-18 --global   # active window for every project
+roll config loop-schedule 60 --global    # default interval for every project
 ```
 
-Project-level `.roll/local.yaml` `loop_schedule` takes priority over
-`loop_minute`.
+(Agent selection is no longer a global config key — it is per-project complexity
+routing in `.roll/agents.yaml`. See [Complexity-based agent routing](#complexity-based-agent-routing).)
+
+Project-level `.roll/local.yaml` always takes priority over the global default.
 
 ## Subcommands
 
@@ -94,6 +141,11 @@ roll loop runs --detail <cycle_id>  # Phase Breakdown panel for a single cycle
 roll loop story <ID>  # Per-story rollup: cycles, span, duration, tokens, cost, PRs
 roll loop story <ID> --json  # Machine-readable form for scripting
 
+roll loop eval       # Objective result-eval trend over the last 14 scored cycles
+roll loop eval 30    # Widen the window to the last 30 scored cycles
+roll loop signals    # Surface repeated low-score patterns as improvement signals
+roll loop signals --streak 4  # Require 4 consecutive low cycles before firing
+
 roll loop attach      # Attach to running loop tmux session (Ctrl-B D to detach)
 roll loop mute        # Suppress auto-attach popup (loop still runs in tmux)
 roll loop unmute      # Re-enable auto-attach popup
@@ -106,53 +158,82 @@ roll loop reset       # Clear loop state (start fresh on next fire)
 roll loop gc                  # GC orphan slugs, tmp debris, expired backups (default: keep 30 days)
 roll loop gc --dry-run        # Preview what would be removed without deleting
 roll loop gc --keep-days 14   # Override retention (also: loop_gc.retention_days in .roll/local.yaml)
+                              # See guide/en/loop-data-layout.md for the full gc manual
 
 roll loop branches    # List loop-related branches (merged temp branches, open PRs, etc.)
 
 roll loop events      # Show last 20 cycle events
 roll loop events 50   # Show last 50 events
 
-roll loop agent-routes show          # Print active .roll/agent-routes.yaml (US-AGENT-002)
-roll loop agent-routes lint          # Validate schema, report line-numbered errors
-roll loop agent-routes path          # Print which routes file is active
+roll agent                           # Show the four complexity slots + online status
+roll agent list                      # Show agents installed on this machine
 ```
 
-## Agent-aware routing (US-AGENT-001..011)
+## Complexity-based agent routing
 
-Loop no longer uses a single fixed `primary_agent` for every cycle. Each Todo's
-**Agent profile** (`est_min` / `risk_zone` / `chain_depth`, set by `roll-design`
-when splitting) plus the per-project `.roll/agent-routes.yaml` decide which
-agent×model runs the cycle.
+Loop routes each cycle along a single axis — **task complexity**. A story's
+`est_min` is classified into one of three tiers, and the tier maps to an agent
+through four slots in the per-project `.roll/agents.yaml`. There is no global
+`primary_agent`, no `agent×model` selection (each agent uses its own default
+model), and no soft-preference history.
 
-每个故事在拆分时由 roll-design 写入估时、风险区、链深度三项画像；项目根目录的
-`.roll/agent-routes.yaml` 写清每个 agent 的能力区间和软偏好阈值；每轮 cycle 起
-跑前 loop 按这两份数据选 agent，不再读全局 primary_agent 字段。
+每轮 cycle 只按一根轴选 agent —— **任务复杂度**。故事的 `est_min` 归到三档之一，
+再由项目本地 `.roll/agents.yaml` 的四个槽映射到具体 agent。没有全局
+primary_agent，不再选 agent×model（每个 agent 用自己的默认模型），也没有软偏好历史。
 
-Two layers decide the agent:
-
-1. **Hard rules** — story must satisfy the agent's `types` / `est_min` /
-   `risk` constraints. First declared agent matching wins.
-2. **Soft preference** — when ≥ 2 agents pass hard rules, the last
-   `history.window_cycles` records of `runs.jsonl` are aggregated by
-   (agent, story_type). If any candidate's hit rate ≥
-   `history.prefer_threshold` and sample ≥ 5, that one is picked.
-
-每轮 cycle 启动时 cron log 会打印一行：
+The complexity classifier (single source of truth, fixed thresholds):
 
 ```
-[loop] story US-AGENT-007 routed to claude via hard
-[loop] story FIX-127 routed to pi via soft
+est_min <= 8        → easy
+8 < est_min <= 20   → default
+est_min > 20        → hard
+missing / invalid   → default
 ```
 
-You can also confirm the routing is wired correctly with:
+The four slots in `.roll/agents.yaml` (schema v3):
+
+```yaml
+schema: v3
+easy:     { agent: kimi }
+default:  { agent: kimi }
+hard:     { agent: claude }
+fallback: { agent: pi }
+```
+
+`agents.yaml` is per-machine — it lives in `.roll/.gitignore` and is never
+committed, so each machine manages its own slots. When a tier's slot is empty,
+routing falls back to the `default` slot; if that is also empty it WARNs and
+uses the first installed agent.
+
+每轮 cycle 启动时 cron log 会打印一行（`via <tier>` 是复杂度档，不是硬规则命中）：
 
 ```
-roll loop agent-routes show          # current config
-roll loop agent-routes lint          # schema check
+[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard
+[loop] story FIX-127 routed to kimi via easy est_min=6 → tier=easy
 ```
 
-If no agent passes the hard rules, loop falls back to `history.cold_start_default`
-and writes a WARN line to cron.log.
+Inspect and change routing:
+
+```
+roll agent                           # four slots + online status + recent downgrades
+roll agent set hard claude           # set one slot
+roll agent use kimi                  # lock easy/default/hard to one agent (fallback unchanged)
+```
+
+### Mechanical fallback
+
+After a tier resolves to an agent, loop probes whether that agent is usable
+right now (on PATH + a one-shot auth/network check). If it is offline — no
+binary, expired token, or no network — loop swaps to the `fallback` slot agent
+and records `fallback_from: <original agent>` in `runs.jsonl`. The downed agent
+is cached as unavailable (~30 min) so later cycles skip it. If the `fallback`
+slot agent is also unavailable, loop does not keep trying other agents — it
+writes an ALERT and stops, so a human can fix the environment.
+
+主 agent 解析出来后，loop 先探测它当前能不能跑（在 PATH + 一次 auth/网络探测）。
+离线（没装 / 断 token / 断网）就切到 `fallback` 槽 agent，并在 `runs.jsonl` 记
+`fallback_from`；挂掉的 agent 写入不可用缓存（约 30 min）后续跳过。`fallback`
+也不可用时不无限顺试，写 ALERT 停下等人介入。
 
 ### Agent self-downgrade (too_big verdict)
 
@@ -194,6 +275,22 @@ Each cycle row shows token usage in a 4-component format:
 
 When a cycle has no cache data (older cycles or non-Opus models), the column
 falls back to the two-part `in/out` format.
+
+**Per-agent coverage.** Token/cost capture depends on a per-agent usage plugin.
+
+| Agent | Token/cost in dashboard |
+|-------|-------------------------|
+| Claude | ✅ supported |
+| pi (DeepSeek) | ✅ supported |
+| OpenAI (codex) | ✅ supported |
+| Gemini | ✅ supported |
+| Kimi | ✅ supported |
+| Qwen | ✅ supported |
+| OpenCode | ❌ shows `—/—` |
+
+Agents without a plugin fall back to a `—/—` placeholder. Adding a new agent is
+a small per-agent plugin (`lib/agent_usage/<agent>.py`) — it does not happen
+automatically. See `lib/agent_usage/README.md` for the five-step howto.
 
 ### Rollup rows
 
@@ -245,6 +342,106 @@ the head plus all rotated files, so cycles never disappear once they're on disk.
 the story id in the lookback window. The `--json` form follows the same exit
 code contract so scripts can detect missing data.
 
+## Cycle Result Eval
+
+Every cycle is scored *objectively* at finish against a fixed multi-dimensional
+rubric, with **zero extra tokens** — the score is computed from facts the loop
+already has (merge state, CI verdict, TCR count, duration, alerts, orphans). The
+result is written into that cycle's `runs.jsonl` record under a `result_eval`
+block:
+
+```json
+{ "version": 1, "score": 8, "dims": { "outcome": 1.0, "correctness": 1.0,
+  "scope_fidelity": 1.0, "quality": 1.0, "efficiency": 0.6, "cleanliness": 1.0 } }
+```
+
+> **Result-eval is NOT skill self-scoring.** Skill self-scoring (the agent's
+> *subjective* review of one skill run, written into `.roll/notes/*.md`) and
+> result-eval (this *objective* per-cycle result score, computed from facts) are
+> two different signals. They are reported on separate dashboard lines and never
+> merged.
+
+### The rubric (six dimensions)
+
+Each dimension is scored on `0.0`–`1.0`, or `unknown` when its facts are absent.
+Unknown dimensions are excluded from the roll-up and the remaining weights are
+renormalised, so a missing fact never silently scores `0`.
+
+| Dimension | Weight | Meaning | 1.0 when… |
+|-----------|--------|---------|-----------|
+| `outcome` | 3 | Did the cycle merge into `main`? | merged · `0.0` not merged |
+| `correctness` | 2 | Is the produced PR's CI green? | green · `0.0` red |
+| `scope_fidelity` | 2 | Did it complete the story it was routed to? | completed · `0.0` idle / off-scope |
+| `quality` | 1 | Tests added, no immediate rework? | TCR ≥ 1, no rework FIX · `0.5` rework landed · `0.0` no tests |
+| `efficiency` | 1 | Duration vs the story's `est_min` budget | within budget · grades down past it |
+| `cleanliness` | 1 | No orphan worktrees/branches and no ALERTs | clean · `0.0` orphans / alerts |
+
+The dimensions roll up into a single **1–10 cycle score**:
+
+```
+weighted    = Σ(score_i × weight_i for known dims) / Σ(weight_i for known dims)
+cycle_score = round(1 + weighted × 9)        # 0.0 → 1, 1.0 → 10
+```
+
+Weights are a centralised constant in `lib/loop_result_eval.py` — tunable there,
+but deliberately not a high-frequency user knob.
+
+### Reading the trend — `roll loop eval [N]`
+
+`roll loop eval` aggregates the `result_eval` of the last `N` scored cycles
+(default 14) and prints mean / minimum cycle score, each dimension's hit-rate,
+and a trend arrow. Older records without a `result_eval` block are skipped; with
+fewer than 3 scored cycles it prints an `(n/a) need 3` notice.
+
+```
+$ roll loop eval
+Loop result-eval — last 14 cycles
+循环结果评分 — 最近 14 轮
+
+  mean   6.8 / 10   ↓
+  min    4 / 10
+  n      4
+
+  dimension hit-rate / 各维度命中率
+    outcome          75%
+    correctness      67%
+    scope_fidelity   75%
+    quality          75%
+    efficiency       50%
+    cleanliness      100%
+```
+
+The `roll loop status` dashboard also carries a one-line result-eval summary,
+shown **separately** from the skill self-score line so the two are never
+confused:
+
+```
+result-eval: mean 6.8↓ / min 4 / out 75% ci 67% scope 75% qual 75% eff 50% clean 100% (last 14)
+```
+
+### Self-evolution signals — `roll loop signals`
+
+When a dimension stays low (`0.0`) for `N` cycles in a row (default 3,
+`--streak` to change), the loop surfaces it as an **improvement signal**: it
+appends a *candidate* backlog draft — an `IDEA` or `FIX`, marked `📋 待人确认`
+— to `.roll/signals/candidates.md`, and the `roll-brief` improvement-signal
+section reports it. Signals are deduped per pattern, so a standing issue is
+raised once, not every cycle.
+
+A signal is advisory only. It never edits the real backlog, never activates a
+story, and never changes code — it only exposes what keeps going wrong so a
+human can decide. The cycle-finish hook runs the detector once per cycle;
+`roll loop signals` runs it on demand.
+
+| Dimension stuck low | Surfaced as | Reading |
+|---------------------|-------------|---------|
+| `outcome` | FIX | cycles keep failing to merge into main |
+| `correctness` | FIX | produced PRs keep failing CI |
+| `scope_fidelity` | IDEA | cycles keep going idle or off-scope |
+| `quality` | FIX | cycles keep landing without test activity |
+| `efficiency` | IDEA | cycles keep blowing past their `est_min` budget |
+| `cleanliness` | FIX | cycles keep leaving orphans / raising ALERTs |
+
 ## Visibility (tmux + popup)
 
 Every loop run lives in a detached tmux session.
@@ -261,11 +458,72 @@ roll loop unmute      # 🔔 re-enable popup
 The `mute` file is shared across all projects and all autonomous activity
 (loop + peer review). One switch controls everything.
 
+## Cycle exit summary
+
+When a cycle ends and the tmux session detaches, the macOS `.command` window
+no longer leaves you staring at a bare `press enter to close` line. Just before
+that prompt, the window renders a compact recap block so you can see what the
+cycle did without scrolling back through tmux scrollback or opening the cron
+log:
+
+```text
+─── Cycle 20260530-2301-94839 Summary ───
+  built: US-LOOP-040 · tcr commits: 4
+  ci: green
+  todo remaining: 7
+  phases (top 5 by time):
+    build                   612s
+    ci                       94s
+    pr                       31s
+  press enter to close.
+```
+
+The summary covers five signals:
+
+1. **Result** — the cycle's outcome from `runs.jsonl`: `built: <story> · tcr
+   commits: N` on success, or `idle: no story picked` when nothing was worked.
+2. **CI / build status** — the latest `ci` event outcome: `green`, `red`,
+   `heal-attempting`, or `ci: n/a` when the cycle never ran CI.
+3. **Todo remaining** — count of `📋 Todo` lines still in `.roll/backlog.md`.
+4. **Phase breakdown** — the top 5 cycle phases by elapsed time.
+5. **Failure / alert highlights** — failed/aborted runs, red CI, active alerts,
+   and suspected zero-diff cycles are flagged with a `✗` (failure) or `⚠`
+   (warning) prefix and, on a colour terminal, red / yellow highlighting. A
+   fully green cycle prints in the default colour with no prefix.
+
+The `press enter to close` prompt is preserved — the summary is printed *above*
+it, nothing about the close interaction changes.
+
+### Turning off colour
+
+ANSI colour is only emitted when the output is a real terminal. Pipes,
+redirects and captured output stay plain text. To force colour off on a TTY,
+set `NO_COLOR=1` (per [no-color.org](https://no-color.org)):
+
+```bash
+NO_COLOR=1 roll loop now
+```
+
+### Troubleshooting: no summary appears
+
+If the cycle exited early (aborted/idle) or `runs.jsonl` had not yet flushed,
+the window prints a single placeholder line instead, and the `press enter`
+prompt still works:
+
+```text
+(summary unavailable — see log: ~/.shared/roll/loop/cron-<slug>.log)
+```
+
+Summary rendering is always a silent best-effort step: if `python3` is missing
+or the data is corrupt, the cycle skips the recap and falls straight through to
+`press enter to close` — it never changes the `.command` exit code or blocks
+the window from closing.
+
 ## Concurrency Safety
 
 Loop has two layers:
 
-- **LOCK file** (`~/.shared/roll/loop/.LOCK-<slug>`): only one loop per project runs at a time.
+- **LOCK file** (`<project>/.roll/loop/.LOCK-<slug>`): only one loop per project runs at a time.
   If loop is already running, a new fire exits immediately.
 - **🔨 In Progress status**: stories being worked by humans or other agents are skipped.
 
@@ -525,12 +783,147 @@ This usually means `.roll/` is out of date:
 - After reinstalling the OS: same as above — SSH key may also need re-authorization.
 - To confirm: `git -C .roll remote get-url origin` — if empty, no sync is attempted.
 
+## Remote Monitoring
+
+When you're away from your machine you can still watch the loop — backlog
+progress, Dream health, CI state — from a phone or any browser, without a local
+`roll` command. It works in two layers: a **data layer** (your machine pushes a
+status snapshot to the roll-meta repo) and a **prompt layer** (you paste a watch
+prompt into Claude Code, which reads roll-meta + the GitHub API).
+
+### Configure `roll_meta_dir`
+
+Tell roll where your roll-meta checkout lives, in `~/.roll/config.yaml`:
+
+```yaml
+# ~/.roll/config.yaml
+roll_meta_dir: ~/projects/roll-meta
+```
+
+`~` is expanded. The key is optional — if it's unset, nothing changes and no
+snapshot is pushed. If the path doesn't exist, roll prints one WARNING to the
+cron log and skips the push (the cycle is never affected).
+
+### How the automatic push works
+
+Once `roll_meta_dir` is configured, the loop pushes a fresh snapshot after
+**every** cycle — including idle cycles where no story ran, so the snapshot
+doubles as a heartbeat. The cycle runner calls
+`${roll_meta_dir}/ops/push-loop-status.sh` in the background right after the
+`cycle_end` event. The script writes `status/loop.md` and commits + pushes it to
+roll-meta. Output goes to `~/.shared/roll/push-status.log` (rotated at 1MB, 2
+copies kept).
+
+Because the loop runs on its normal schedule, `status/loop.md` stays **≤35min
+fresh** — the watch prompt always sees recent data. The push is best-effort: a
+network error, git conflict, or a >60s timeout is logged to push-status.log, the
+process is killed if it hangs, and the cycle continues. No ALERT, no retry.
+
+### Manual push
+
+You can push a snapshot by hand at any time:
+
+```bash
+bash .roll/ops/push-loop-status.sh .roll
+```
+
+(`.roll` is your project's roll-meta checkout.) This is also how you confirm the
+push pipeline works before relying on the automatic hook.
+
+### Watching from a phone or browser
+
+Open `.roll/prompts/remote-watch.md`, copy its contents, and paste them into
+Claude Code (web, mobile, or a remote IDE). The prompt does a full health check
+on first run, then polls every 15 minutes and raises an ALERT immediately on
+conditions like CI failing twice in a row or `status/loop.md` going >60min
+stale. It only reads — it never modifies `seanyao/roll`.
+
+### Troubleshooting: `status/loop.md` is stale
+
+If the snapshot's timestamp is far older than 35 minutes:
+
+1. Check `~/.shared/roll/push-status.log` — it records every push attempt and
+   any timeout or git error.
+2. Confirm `roll_meta_dir` is set and the path exists
+   (`roll config get roll_meta_dir`).
+3. Confirm `${roll_meta_dir}/ops/push-loop-status.sh` exists and is executable.
+4. Run the manual push above and watch for errors.
+
+---
+
+远程不在本机时，依然可以从手机或任意浏览器查看 loop —— backlog 进度、Dream 健康、
+CI 状态 —— 无需本地 `roll` 命令。它分两层：**数据层**（本机把状态快照 push 到
+roll-meta 仓库）和 **prompt 层**（把巡检 prompt 粘贴进 Claude Code，读 roll-meta +
+GitHub API）。
+
+### 配置 `roll_meta_dir`
+
+在 `~/.roll/config.yaml` 里告诉 roll 你的 roll-meta 检出在哪：
+
+```yaml
+# ~/.roll/config.yaml
+roll_meta_dir: ~/projects/roll-meta
+```
+
+`~` 会被展开。这个键是可选的——不配就什么都不变，也不会推快照。路径不存在时，roll 向
+cron 日志打一条 WARNING 并跳过推送（绝不影响 cycle）。
+
+### 自动 push 的工作原理
+
+配好 `roll_meta_dir` 后，loop 在**每一次** cycle 结束后推一份新快照——包括没跑故事
+的 idle cycle，所以快照同时充当心跳。cycle runner 在 `cycle_end` 事件之后，于后台调
+用 `${roll_meta_dir}/ops/push-loop-status.sh`。脚本写出 `status/loop.md` 并提交 +
+push 到 roll-meta。输出写到 `~/.shared/roll/push-status.log`（1MB 轮转，保留 2 份）。
+
+因为 loop 按固定节奏运行，`status/loop.md` 始终保持 **≤35min 新鲜**——巡检 prompt 总
+能看到近期数据。推送是 best-effort：网络错误、git 冲突或 >60s 超时都记进
+push-status.log，进程卡住会被 kill，cycle 继续。不设 ALERT，不重试。
+
+### 手动 push
+
+随时可以手动推一份快照：
+
+```bash
+bash .roll/ops/push-loop-status.sh .roll
+```
+
+（`.roll` 是你项目的 roll-meta 检出。）这也是在依赖自动 hook 前确认推送链路是否正常
+的方法。
+
+### 在手机或浏览器上巡检
+
+打开 `.roll/prompts/remote-watch.md`，复制全文，粘贴进 Claude Code（网页、手机或远端
+IDE）。该 prompt 首次执行做一次全量体检，之后每 15min 轮询一次，遇到「CI 连续两次失
+败」或「`status/loop.md` 超过 60min 未更新」等条件立即告警。它只读——绝不修改
+`seanyao/roll`。
+
+### 排障：`status/loop.md` 不更新
+
+若快照时间戳远早于 35 分钟：
+
+1. 看 `~/.shared/roll/push-status.log`——它记录每次推送尝试以及任何超时或 git 错误。
+2. 确认 `roll_meta_dir` 已配置且路径存在（`roll config get roll_meta_dir`）。
+3. 确认 `${roll_meta_dir}/ops/push-loop-status.sh` 存在且可执行。
+4. 跑一次上面的手动 push，观察是否报错。
+
 ## State Files
+
+Since Phase 2.0, a project's loop state lives **inside the project** at
+`<project>/.roll/loop/`. Only machine-level binding files (launchd runners,
+attach scripts) and the global mute switch stay in `~/.shared/roll/`. See
+[Loop Data Layout](loop-data-layout.md) for the full layout, migration, and
+`roll loop gc`.
+
+自 Phase 2.0 起，项目的 loop 状态搬进了**项目目录** `<project>/.roll/loop/`。只有机
+器级绑定文件（launchd runner、attach 脚本）和全局静音开关留在 `~/.shared/roll/`。完
+整布局、迁移与 `roll loop gc` 见 [Loop 数据布局](loop-data-layout.md)。
 
 | File | Content |
 |------|---------|
-| `~/.shared/roll/loop/state.yaml` | Current/last run: status, story, agent, run_id |
-| `~/.shared/roll/loop/runs.jsonl` | Append-only run history (one JSON line per cycle) |
-| `~/.shared/roll/loop/ALERT.md` | Accumulated alerts (failures, TCR violations) |
-| `~/.shared/roll/loop/PAUSE-<slug>` | Pause marker (created by `roll loop pause`) |
-| `~/.shared/roll/mute` | Auto-attach mute marker (shared across projects) |
+| `<project>/.roll/loop/state-<slug>.yaml` | Current/last run: status, story, agent, run_id |
+| `<project>/.roll/loop/runs.jsonl` | Append-only run history (one JSON line per cycle); each record carries a `result_eval` block (see [Cycle Result Eval](#cycle-result-eval)) |
+| `<project>/.roll/loop/events.ndjson` | Per-cycle event stream (phase_start/phase_end, …) |
+| `.roll/signals/candidates.md` | Candidate backlog drafts from self-evolution signals (`📋 待人确认`, never auto-activated) |
+| `<project>/.roll/loop/ALERT-<slug>.md` | Accumulated alerts (failures, TCR violations) |
+| `<project>/.roll/loop/PAUSE-<slug>` | Pause marker (created by `roll loop pause`) |
+| `~/.shared/roll/mute` | Global auto-attach mute marker (shared across projects) |

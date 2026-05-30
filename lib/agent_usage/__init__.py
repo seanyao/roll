@@ -66,6 +66,10 @@ _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _PLUGINS = {
     # agent name → python module name (relative to this package)
     "pi": ".pi",
+    "openai": ".openai",
+    "gemini": ".gemini",
+    "kimi": ".kimi",
+    "qwen": ".qwen",
 }
 
 for _agent, _mod_suffix in _PLUGINS.items():

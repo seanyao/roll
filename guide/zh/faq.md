@@ -107,8 +107,9 @@ $roll-fix   FIX-002        # 端到端跑一条 bugfix
 
 **细节：**
 
-- **全局**：`~/.roll/`（你的 config、primary_agent）、`~/.shared/roll/`
-  （loop 状态、`runs.jsonl`）。npm 二进制放在 npm 全局目录里。
+- **全局**：`~/.roll/`（你的 config）、`~/.shared/roll/`（loop 状态、
+  `runs.jsonl`）。每个项目的 agent 路由放在 `.roll/agents.yaml`。
+  npm 二进制放在 npm 全局目录里。
 - **每个项目**：`.roll/`，以及 `.claude/skills/`（或其他 agent 等价路径）
   下指向 Roll skill 的软链。
 - **只在 `roll loop on` 之后**：macOS 上一个 `launchd` plist 用来触发周期。
@@ -133,6 +134,12 @@ npm uninstall -g @seanyao/roll
 
 Claude Opus 4.x 上典型单条 story 成本：**$0.5 – $3**，看故事复杂度和
 TCR 来回次数。切到 Kimi / DeepSeek 能便宜 5–10 倍，代价是收敛慢一点。
+
+**非 Claude agent：** token/cost 抓取是按 agent 分别支持的。截至当前版本，跑在
+**Claude、pi（DeepSeek）、OpenAI（codex）、Gemini、Kimi、Qwen** 上的 cycle
+都能看到真实 token 数和成本。还没有 usage 插件的 agent —— 主要是 **OpenCode** ——
+token/cost 列仍显示 `—/—`。新 agent 的支持不会自动出现，需要落一个小的按 agent
+插件（见 `lib/agent_usage/README.md`）。
 
 **试一下：**
 
@@ -246,6 +253,30 @@ roll prices show            # 查看当前价格快照
 roll prices refresh         # 拉取最新定价、对比、有变化落新快照
 roll loop status --days 7   # 历史 cycle 用的是固化成本
 ```
+
+---
+
+### A12. 人不在本机时，怎么在手机上看 loop 状态？
+
+**短答：** 配置 `roll_meta_dir`，然后把 `.roll/prompts/remote-watch.md` 粘贴进手机或
+浏览器里的 Claude Code。
+
+**细节：** 在 `~/.roll/config.yaml` 配好 `roll_meta_dir` 后，本机会在每轮 cycle 结束
+后把 `status/loop.md` 快照 push 到 roll-meta 仓库（≤35min 新鲜，idle cycle 也推，充当
+心跳）。remote-watch prompt 读这份快照 + GitHub API，汇报 loop 健康、backlog 进度、
+Dream 结果和 CI 状态——只读，不需要本地 `roll`。配置与排障见
+[远程监控](loop.md#远程监控remote-monitoring)。
+
+### A13. `.command` 窗口里那段彩色摘要是什么？
+
+**短答：** 那是 cycle 退出摘要——本轮做了什么的复盘，打印在 `press enter to close`
+之前。
+
+**细节：** cycle 结束时，`.command` 窗口会渲染一段 `─── Cycle <id> Summary ───` 块，
+覆盖五类信号：处理结果（`built: <story>` 或 `idle`）、CI 状态（`green` / `red` /
+`heal-attempting`）、Todo 剩余、按耗时排序的前几个阶段，以及失败 / 告警高亮（失败 `✗`
+红色，告警 `⚠` 黄色）。全绿状态以默认色输出。设 `NO_COLOR=1` 关闭颜色。`press enter
+to close` 提示不变。完整说明见 [Cycle 退出摘要](loop.md#cycle-退出摘要cycle-exit-summary)。
 
 ---
 
@@ -391,7 +422,7 @@ git push --force-with-lease
 
 **为什么重要：** Roll 每个周期都写结构化记录，但根据需求有多个查看入口。
 
-**原理：** 每个周期向 `~/.shared/roll/loop/runs.jsonl` 追加一条 JSONL，
+**原理：** 每个周期向 `<project>/.roll/loop/runs.jsonl` 追加一条 JSONL，
 包含 story ID、模型、TCR commit 数、耗时、结果、成本（按公开单价）。
 `roll-brief` 把这些聚合成人类可读摘要。tmux 会话保留完整 agent 对话，
 直到下一个周期覆盖。
@@ -480,13 +511,16 @@ roll loop reset
 **自动恢复（不需要你）：**
 
 - 网络超时 → 指数退避重试（2s、4s、8s、16s）
-- 主 agent token 耗尽 → 切到后备 agent
+- 选中的 agent 离线（不在 PATH / 断 auth / 断网）或 token 耗尽 → 切到
+  `fallback` 槽的 agent，并在 `runs.jsonl` 记 `fallback_from`；挂掉的 agent
+  写入不可用缓存（约 30 min），后续 cycle 先跳过
 - 崩溃进程留下的僵死 LOCK → 下个周期自动清理
 - 崩溃周期留下的孤儿 `🔨 In Progress` → 下个周期回退为 `📋 Todo`
 
 **需要你：**
 
-- 主 agent 和后备 agent 都失败 → 修环境后 `roll loop resume`
+- 选中的 agent 和 `fallback` 槽 agent 都挂了 → 写 ALERT 停下（绝不无限顺试）；
+  修环境后 `roll loop resume`
 - CI 持续红 → 修测试 / build，然后 `roll loop now`
 - PR 合并冲突 → 手动解决，push
 - `gh` 认证过期 → `gh auth login`
@@ -566,6 +600,35 @@ gitlab.com / 自建 → 检查 SSH key
 # 只是暂时看不到其他机器的 cycle，等连接恢复即自动同步。
 ```
 
+### C10. 我跑了 roll-doc——怎么知道它做了 Phase 3a 还是 Phase 3b？
+
+**症状:** 你跑了 `$roll-doc`,想知道它是停在目录级填充(Phase 3a),还是继续做了
+深度的跨目录读取(Phase 3b)。
+
+**为什么会这样:** Phase 3a(即"Fill"填充阶段)孤立地读取每个缺口目录——每个目录
+至多 20 个源文件——产出模块 README。Phase 3b("Deep Read")仅在项目具备值得记录的
+跨目录结构时触发:跨 ≥ 3 个目录的 import 链、被共享的 `*State` / `*Status` 枚举、
+外部端点调用,或 CI 配置文件。纯文档项目若无源码缺口且无此类特征,则完全跳过
+Phase 3b。
+
+**看 Phase 4 报告。** 运行结束的摘要始终打印两段:
+
+```
+Phase 3 — Fill
+  2 drafts generated: [src/commands/README.md, docs/CONVENTIONS.md]
+Phase 3b — Deep Read
+  Symbol table: exports(42) imports(156) enums(7) external_urls(4) configs(3)
+  2 topic documents generated:
+    - docs/data-flows.md     (data-flow)   source entries: 6
+    - docs/integrations.md   (external-integration) source entries: 4
+```
+
+若 Phase 3b 无命中,则只打印一行——`Phase 3b: no subject-level drafts generated`
+——所以没有任何 `docs/data-flows.md` / `docs/state-machines.md` /
+`docs/integrations.md` / `docs/deployment.md` 输出,就是只跑了 Phase 3a 的标志。
+在 `--dry-run` 下,同样的 Phase 3b 行会标 `(plan)` 且不写文件。完整拆解见
+[roll-doc.md](roll-doc.md)。
+
 
 ---
 
@@ -604,30 +667,31 @@ git -C .roll log --oneline -3        # 查看最近同步的提交
 git -C .roll fetch && git -C .roll reset --hard origin/main
 ```
 
-### C5. 为什么这个 cycle 用了别的 agent 而不是配置里的默认？
+### C5. 为什么这个 cycle 用了别的 agent 而不是我以为的那个？
 
-**症状**：`~/.roll/config.yaml` 写 `primary_agent: pi`，但 cron.log 显示
-`[loop] story US-AGENT-007 routed to claude via hard`。
+**症状**：你以为会用某个 agent，但 cron.log 显示
+`[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard`。
 
-Why is this cycle running on a different agent than my configured default?
+Why is this cycle running on a different agent than I expected?
 
-**原因**：US-AGENT-001..011 上线后,`primary_agent` 不再是唯一决策者。
-每轮 cycle 按故事的 **Agent profile**(`est_min` / `risk_zone` /
-`chain_depth`) + 项目根的 `.roll/agent-routes.yaml` 决定路由：硬规则
-筛候选 + `runs.jsonl` 历史命中率做软偏好。都不匹配才回退到
-`history.cold_start_default`。
+**原因**：路由现在只看一根轴 —— **任务复杂度**。每个故事的 `est_min`
+归到三档之一（`est_min ≤ 8 → easy`、`8 < est_min ≤ 20 → default`、
+`est_min > 20 → hard`；评不出或非法 → `default`），再由 `.roll/agents.yaml`
+的四个槽（`easy` / `default` / `hard` / `fallback`）映射到具体 agent。
+旧的三维匹配（`type` / `est_min` / `risk_zone`）和软偏好历史
+（`runs.jsonl` 命中率、`cold_start_default`）都已退役。日志里的
+`via hard` / `via easy` 是复杂度档，不是硬规则命中。
 
 **自检**：
 
 ```bash
-roll loop agent-routes show          # 当前路由配置
-roll loop agent-routes lint          # 校验
-roll loop runs 20                     # 看最近 20 个 cycle 各自挑了谁
+roll agent                            # 四个槽 + 在线状态 + 最近降级痕迹
+roll agent list                       # 本机装了哪些 agent
+roll loop runs 20                     # 看最近 20 个 cycle 各自的 agent + tier
 ```
 
-想让某故事固定路由到指定 agent,可以收紧其他 agent 的能力区间,或临时把
-那个 agent 的 `est_min.max` 调小。完全禁用智能路由：所有 agent 写一样
-的 `types` 列表 + `cold_start_default` 指向你想用的。
+想让某故事固定走某个 agent：用 `roll agent use <name>` 把 easy/default/hard
+三档全锁成同一个（fallback 槽不动）。只改一档用 `roll agent set <slot> <agent>`。
 
 ### C6. 故事为什么翻成 🚫 搁置了，cycle 不是跑了吗？
 
@@ -664,3 +728,33 @@ roll feedback --type bug --title "Safari 上登录失败" --body "复现步骤: 
 项目）默认自动附,`--no-env` 关。目标仓库通过 `--repo`、
 `ROLL_FEEDBACK_REPO`、`.roll/local.yaml`、`~/.roll/config.yaml` 任
 一层固定,详细规则见 [feedback.md](feedback.md)。
+
+### C8. 升级后我的 loop 状态 / ALERT 跑哪去了？（Phase 2.0）
+
+**短答：进了你的项目。** Phase 2.0 起，项目的 loop 运行时数据放在
+`<project>/.roll/loop/`，不再在 `~/.shared/roll/loop/`。ALERT 现在是
+`<project>/.roll/loop/ALERT-<slug>.md`，状态是 `state-<slug>.yaml`，运行
+历史是 `runs.jsonl`。
+
+Where did my loop state / ALERT go after upgrading? Into your project, under
+`<project>/.roll/loop/`.
+
+**需要手动迁移吗？不需要。** 下一个 cycle 自动迁移：`_loop_migrate_legacy_paths`
+把 state / ALERT / PAUSE / mute 复制进项目并把旧文件标记 `.migrated-<时间戳>`；
+`runs.jsonl` 按项目拆分。7 天窗口内，新路径缺失时读取会回退旧家目录路径，升级中
+途不会出问题。
+
+No manual migration needed — the next cycle does it, with a 7-day dual-path
+fallback.
+
+**怎么回滚？** 老文件以 `<name>.migrated-<时间戳>` 保留 7 天，改名回去（去后缀）
+并删掉项目本地副本即可。
+
+To roll back, rename `<name>.migrated-<timestamp>` back within 7 days.
+
+**清残骸：** `roll loop gc` 退役孤儿 slug（项目已删）、清扫过期 `.migrated-*`、
+`runs.jsonl.tmp.*` 与旧备份；`roll loop gc --dry-run` 预览。完整说明见
+[Loop 数据布局](loop-data-layout.md)。
+
+`roll loop gc` sweeps debris; full details in
+[Loop Data Layout](loop-data-layout.md).

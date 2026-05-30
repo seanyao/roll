@@ -119,8 +119,9 @@ to `main` directly — see A1).
 
 **Details:**
 
-- **Global:** `~/.roll/` (your config, primary_agent), `~/.shared/roll/` (loop
-  state, `runs.jsonl`). The npm binary lives where your global npm packages do.
+- **Global:** `~/.roll/` (your config), `~/.shared/roll/` (loop
+  state, `runs.jsonl`). Per-project agent routing lives in `.roll/agents.yaml`.
+  The npm binary lives where your global npm packages do.
 - **Per project:** `.roll/`, plus symlinks under `.claude/skills/` (or
   equivalent for other agents).
 - **Per project, only with `roll loop on`:** a `launchd` plist on macOS that
@@ -149,6 +150,13 @@ subscription tier (Claude Pro, etc.).
 Typical ranges per story on Claude Opus 4.x: **$0.5 – $3**, depending on story
 complexity and how many TCR iterations the agent burned. Switching to Kimi /
 DeepSeek drops this 5–10× at the cost of slower convergence.
+
+**Non-Claude agents:** token/cost capture is per-agent. As of the current
+release, cycles run on **Claude, pi (DeepSeek), OpenAI (codex), Gemini, Kimi,
+and Qwen** show real token counts and cost. Agents without a usage plugin yet —
+notably **OpenCode** — still show `—/—` in the token/cost columns. Support for a
+new agent does not appear automatically; it ships as a small per-agent plugin
+(see `lib/agent_usage/README.md`).
 
 **Try it:**
 
@@ -279,6 +287,34 @@ roll prices show            # see current snapshot
 roll prices refresh         # fetch latest pricing, diff, snapshot if changed
 roll loop status --days 7   # historical cycles use frozen costs
 ```
+
+---
+
+### A12. How do I watch the loop from my phone while I'm away?
+
+**Short answer:** Configure `roll_meta_dir`, then paste
+`.roll/prompts/remote-watch.md` into Claude Code on your phone or browser.
+
+**Details:** Once `roll_meta_dir` is set in `~/.roll/config.yaml`, your machine
+pushes a `status/loop.md` snapshot to the roll-meta repo after every cycle
+(≤35min fresh, idle cycles included as a heartbeat). The remote-watch prompt
+reads that snapshot plus the GitHub API and reports loop health, backlog
+progress, Dream results, and CI state — read-only, no local `roll` needed. See
+[Remote Monitoring](loop.md#remote-monitoring) for setup and troubleshooting.
+
+### A13. What's that coloured summary block in the `.command` window?
+
+**Short answer:** It's the cycle exit summary — a recap of what the cycle just
+did, printed right before `press enter to close`.
+
+**Details:** When a cycle ends, the `.command` window renders a
+`─── Cycle <id> Summary ───` block covering five signals: the result
+(`built: <story>` or `idle`), CI status (`green` / `red` / `heal-attempting`),
+todo remaining, the top phases by time, and any failure / alert highlights
+(`✗` red for failures, `⚠` yellow for warnings). A fully green cycle prints in
+the default colour. Set `NO_COLOR=1` to disable colour. The `press enter to
+close` prompt is unchanged. See
+[Cycle exit summary](loop.md#cycle-exit-summary) for the full breakdown.
 
 ---
 
@@ -437,7 +473,7 @@ happened and what it cost.
 are multiple surfaces depending on what you need.
 
 **Under the hood:** Each cycle appends a JSONL record to
-`~/.shared/roll/loop/runs.jsonl` with story ID, model, TCR commit count,
+`<project>/.roll/loop/runs.jsonl` with story ID, model, TCR commit count,
 duration, outcome, and cost (public pricing). `roll-brief` aggregates this
 into a human-readable digest. The tmux session retains the full agent
 conversation until the next cycle overwrites it.
@@ -529,14 +565,18 @@ when the work is ambiguous or the environment is broken — never guesses.**
 **Auto-recovers (no human needed):**
 
 - Network timeout → retries with backoff (2s, 4s, 8s, 16s)
-- Primary agent token exhausted → switches to fallback agent
+- Routed agent offline (no PATH / auth / network) or token exhausted → swaps to
+  the `fallback` slot agent and records `fallback_from` in `runs.jsonl`. The
+  downed agent is cached as unavailable (~30 min) so later cycles skip it.
 - Stale LOCK from a crashed process → next cycle cleans it up
 - Orphan `🔨 In Progress` from a crashed cycle → next cycle reverts to
   `📋 Todo`
 
 **Needs you:**
 
-- Both primary and fallback agents fail → fix env, then `roll loop resume`
+- Both the routed agent and the `fallback` slot agent are down → an ALERT is
+  written and the loop stops (it never loops forever). Fix env, then
+  `roll loop resume`
 - CI persistently red → fix the failing test/build, then `roll loop now`
 - Merge conflict on PR → resolve manually, push
 - `gh` auth expired → `gh auth login`
@@ -622,6 +662,40 @@ gitlab.com / self-hosted → check your SSH key
 # until connectivity is restored.
 ```
 
+### C10. I ran roll-doc — how do I know whether it did Phase 3a or Phase 3b?
+
+**Symptoms:** You run `$roll-doc` and want to know whether it stopped at the
+directory-level fill (Phase 3a) or went on to the deep cross-directory read
+(Phase 3b).
+
+**Why this happens:** Phase 3a (the "Fill" phase) reads each gap directory in
+isolation — up to 20 files per gap directory — and emits module READMEs.
+Phase 3b ("Deep Read") only fires when the project has cross-directory
+structure worth documenting: an import chain spanning ≥ 3 directories, a shared
+`*State` / `*Status` enum, external endpoint calls, or a CI config file. A pure
+docs-only project with no source gaps and no such characteristics skips
+Phase 3b entirely.
+
+**Read the Phase 4 report.** The end-of-run summary always prints both
+sections:
+
+```
+Phase 3 — Fill
+  2 drafts generated: [src/commands/README.md, docs/CONVENTIONS.md]
+Phase 3b — Deep Read
+  Symbol table: exports(42) imports(156) enums(7) external_urls(4) configs(3)
+  2 topic documents generated:
+    - docs/data-flows.md     (data-flow)   source entries: 6
+    - docs/integrations.md   (external-integration) source entries: 4
+```
+
+If Phase 3b found nothing it prints exactly one line —
+`Phase 3b: no subject-level drafts generated` — so the absence of any
+`docs/data-flows.md` / `docs/state-machines.md` / `docs/integrations.md` /
+`docs/deployment.md` output is the tell that only Phase 3a ran. Under
+`--dry-run`, the same Phase 3b lines appear tagged `(plan)` and nothing is
+written. Full breakdown: [roll-doc.md](roll-doc.md).
+
 
 ---
 
@@ -663,30 +737,33 @@ git -C .roll fetch && git -C .roll reset --hard origin/main
 
 ### C5. Why is this cycle running on `<agent>` instead of my configured default?
 
-**Symptoms:** `~/.roll/config.yaml` says `primary_agent: pi`, but cron.log shows
-`[loop] story US-AGENT-007 routed to claude via hard`.
+**Symptoms:** you expected one agent, but cron.log shows
+`[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard`.
 
-为什么这个 cycle 用了 claude 而不是配置里的 pi？
+为什么这个 cycle 用了 claude 而不是我以为的那个 agent？
 
-**Why this happens:** Since US-AGENT-001..011 shipped, `primary_agent` is no
-longer the only voice. Each cycle picks the agent based on the story's
-**Agent profile** (`est_min` / `risk_zone` / `chain_depth`) and the per-project
-`.roll/agent-routes.yaml`. Hard rules + soft preference from `runs.jsonl`
-history decide the winner; only when no agent passes does
-`history.cold_start_default` fall back.
+**Why this happens:** routing is now driven by a single axis — **task
+complexity**. Each story's `est_min` is classified into one of three tiers
+(`est_min ≤ 8 → easy`, `8 < est_min ≤ 20 → default`, `est_min > 20 → hard`;
+missing or invalid estimate → `default`), and the tier maps to an agent through
+the four slots in `.roll/agents.yaml` (`easy` / `default` / `hard` / `fallback`).
+The old three-dimensional matcher (`type` / `est_min` / `risk_zone`) and the
+soft-preference history (`runs.jsonl` hit-rate, `cold_start_default`) are
+retired. The `via hard`/`via easy` token in the log line is the complexity tier,
+not a hard-rule match.
 
 **Inspect:**
 
 ```bash
-roll loop agent-routes show          # current routing config
-roll loop agent-routes lint          # schema check
-roll loop runs 20                     # see which agent each cycle picked
+roll agent                            # four slots + online status + recent downgrades
+roll agent list                       # which agents this machine has installed
+roll loop runs 20                     # see which agent + tier each cycle picked
 ```
 
-If you want a story to always run on a specific agent, narrow that agent's
-range in `.roll/agent-routes.yaml` (or temporarily downgrade the others' caps).
-If you want to disable routing entirely, set every agent's `types` to the same
-list and ensure `cold_start_default` points at your preferred one.
+If you want a story to always run on a specific agent, set every tier to the
+same agent with `roll agent use <name>` (locks `easy`/`default`/`hard`; the
+`fallback` slot is left untouched). To change a single tier, use
+`roll agent set <slot> <agent>`.
 
 ### C6. Why was my story flipped to 🚫 Hold instead of Done?
 
@@ -730,3 +807,36 @@ project) auto-attaches; `--no-env` suppresses it. Pin the target repo
 via `--repo`, `ROLL_FEEDBACK_REPO`, `.roll/local.yaml`, or
 `~/.roll/config.yaml` — see [feedback.md](feedback.md) for the full
 precedence chain.
+
+### C10. Where did my loop state / ALERT go after upgrading? (Phase 2.0)
+
+**Short answer:** Into your project. Since Phase 2.0, a project's loop runtime
+data lives at `<project>/.roll/loop/` instead of `~/.shared/roll/loop/`. Your
+ALERT is now `<project>/.roll/loop/ALERT-<slug>.md`, state is
+`state-<slug>.yaml`, run history is `runs.jsonl`.
+
+升级后我的 loop 状态 / ALERT 跑哪去了？进了你的项目。Phase 2.0 起，项目的 loop
+运行时数据放在 `<project>/.roll/loop/`，不再在 `~/.shared/roll/loop/`。
+
+**Do I need to migrate manually?** No. The next cycle migrates legacy files
+automatically: `_loop_migrate_legacy_paths` copies state / ALERT / PAUSE / mute
+into the project and marks each old file `.migrated-<timestamp>`; `runs.jsonl`
+is split per project. During a 7-day window, reads fall back to the old home
+path if the new one is missing — so nothing breaks mid-upgrade.
+
+需要手动迁移吗？不需要。下一个 cycle 自动迁移，旧文件标记为 `.migrated-<时间戳>`；
+7 天窗口内读取会回退到旧家目录路径作兜底。
+
+**How do I roll back?** The legacy files survive as `<name>.migrated-<timestamp>`
+for 7 days. Rename one back (drop the suffix) and delete the project-local copy.
+
+怎么回滚？老文件以 `<name>.migrated-<时间戳>` 保留 7 天，改名回去并删掉项目本地副本
+即可。
+
+**Cleaning up debris:** `roll loop gc` retires orphan slugs (project deleted) and
+sweeps expired `.migrated-*` markers, `runs.jsonl.tmp.*`, and old backups. Use
+`roll loop gc --dry-run` to preview. Full details:
+[Loop Data Layout](loop-data-layout.md).
+
+清残骸：`roll loop gc` 退役孤儿 slug、清扫过期 `.migrated-*` 与备份；`--dry-run`
+预览。完整说明见 [Loop 数据布局](loop-data-layout.md)。

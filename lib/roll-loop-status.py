@@ -872,6 +872,154 @@ def _self_score_summary_line(notes_dir = None, window: int = 14) -> str:
     return f"self-score: mean {mean:.1f} / min {minv} / redo {redo} (last {window})"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# US-EVAL-003: result-eval trend view (window aggregation).
+#
+# Distinct from self-score (above): self-score is the agent's *subjective*
+# review of a skill run; result_eval is the *objective* per-cycle result score
+# computed in US-EVAL-002 and stored in each runs.jsonl record under the
+# `result_eval` block ({version, score 1..10, dims{dim: 0..1|"unknown"}}).
+#
+# We aggregate the most recent N records that carry a result_eval: the mean and
+# minimum cycle score, a per-dimension hit-rate (share of records scoring 1.0 on
+# that dimension, ignoring "unknown"), and a trend arrow comparing the newer
+# half's mean against the older half's. Records without result_eval (older
+# schema) are simply skipped — never an error (backward compat).
+
+# Dimension order for the eval view. Imported from the rubric so the two stay
+# in sync; falls back to a literal list if the scorer module isn't importable
+# (e.g. a stripped-down test env).
+def _eval_dim_names() -> List[str]:
+    try:
+        import importlib.util
+        path = Path(__file__).resolve().parent / "loop_result_eval.py"
+        spec = importlib.util.spec_from_file_location("loop_result_eval", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return [name for name, _ in mod.DIMENSIONS]
+    except Exception:
+        return ["outcome", "correctness", "scope_fidelity",
+                "quality", "efficiency", "cleanliness"]
+
+UNKNOWN = "unknown"
+
+
+def _eval_records(records: List[Dict[str, Any]], window: int) -> List[Dict[str, Any]]:
+    """The most recent `window` records (oldest→newest) that carry a usable
+    result_eval block. Records sorted by `ts`; absence of result_eval skips."""
+    rows: List[Dict[str, Any]] = []
+    ordered = sorted((r or {} for r in records), key=lambda r: r.get("ts", ""))
+    for r in ordered:
+        ev = r.get("result_eval")
+        if isinstance(ev, dict) and isinstance(ev.get("score"), (int, float)):
+            rows.append(ev)
+    return rows[-window:] if window > 0 else rows
+
+
+def aggregate_eval(records: List[Dict[str, Any]], window: int = 14) -> Dict[str, Any]:
+    """Aggregate result_eval over the last `window` scored records.
+
+    Returns a dict: {n, mean, min, trend ('up'|'down'|'flat'|None), dims:
+    {dim: hit_rate float 0..1 | None}}. n is the count of scored records used.
+    """
+    rows = _eval_records(records, window)
+    n = len(rows)
+    scores = [float(ev["score"]) for ev in rows]
+    out: Dict[str, Any] = {"n": n, "mean": None, "min": None,
+                           "trend": None, "dims": {}}
+    if n == 0:
+        return out
+    out["mean"] = sum(scores) / n
+    out["min"] = min(scores)
+    # Per-dimension hit-rate: share of records that scored a perfect 1.0 on the
+    # dimension, counting only records where the dim is known (not "unknown").
+    for dim in _eval_dim_names():
+        known = 0
+        hits = 0
+        for ev in rows:
+            v = (ev.get("dims") or {}).get(dim, UNKNOWN)
+            if v == UNKNOWN or v is None:
+                continue
+            known += 1
+            if float(v) >= 1.0:
+                hits += 1
+        out["dims"][dim] = (hits / known) if known else None
+    # Trend: compare the newer half's mean against the older half's. Needs at
+    # least 2 records to split; <0.3 score delta is "flat".
+    if n >= 2:
+        half = n // 2
+        older = scores[:half] or scores[:1]
+        newer = scores[half:]
+        delta = (sum(newer) / len(newer)) - (sum(older) / len(older))
+        if delta > 0.3:
+            out["trend"] = "up"
+        elif delta < -0.3:
+            out["trend"] = "down"
+        else:
+            out["trend"] = "flat"
+    return out
+
+
+_TREND_ARROW = {"up": "↑", "down": "↓", "flat": "→"}
+
+
+# Single-line dashboard summary, mirroring `_self_score_summary_line`'s form.
+# Returns "" when there are no scored records, "result-eval: (n/a) need 3 ..."
+# when the sample is below 3 (same threshold/idiom as self-score), else
+# "result-eval: mean 7.4↑ / min 5 / outcome 80% scope 60% ... (last N)".
+def _result_eval_summary_line(records: List[Dict[str, Any]], window: int = 14) -> str:
+    agg = aggregate_eval(records or [], window)
+    n = agg["n"]
+    if n == 0:
+        return ""
+    if n < 3:
+        return f"result-eval: (n/a) — {n} sample(s), need 3 (last {window})"
+    arrow = _TREND_ARROW.get(agg["trend"] or "flat", "")
+    # Short per-dimension labels for a compact line.
+    short = {"outcome": "out", "correctness": "ci", "scope_fidelity": "scope",
+             "quality": "qual", "efficiency": "eff", "cleanliness": "clean"}
+    dim_bits = []
+    for dim, rate in agg["dims"].items():
+        if rate is None:
+            continue
+        dim_bits.append(f"{short.get(dim, dim)} {round(rate * 100)}%")
+    dims_str = (" / " + " ".join(dim_bits)) if dim_bits else ""
+    return (f"result-eval: mean {agg['mean']:.1f}{arrow} / min {int(agg['min'])}"
+            f"{dims_str} (last {window})")
+
+
+# Multi-line view for `roll loop eval [N]`. Pretty-prints the aggregation as a
+# small dashboard block (no color dependency beyond the shared renderer).
+def format_eval_view(records: List[Dict[str, Any]], window: int = 14) -> str:
+    agg = aggregate_eval(records or [], window)
+    n = agg["n"]
+    lines: List[str] = []
+    lines.append(f"Loop result-eval — last {window} cycles")
+    lines.append(f"循环结果评分 — 最近 {window} 轮")
+    lines.append("")
+    if n == 0:
+        lines.append("no scored cycles yet (need result_eval in runs.jsonl)")
+        lines.append("尚无评分 cycle（runs.jsonl 需含 result_eval）")
+        return "\n".join(lines)
+    if n < 3:
+        lines.append(f"(n/a) — {n} sample(s), need 3")
+        lines.append(f"(n/a) — 样本 {n} 个，至少需要 3 个")
+        return "\n".join(lines)
+    arrow = _TREND_ARROW.get(agg["trend"] or "flat", "")
+    lines.append(f"  mean   {agg['mean']:.1f} / 10   {arrow}")
+    lines.append(f"  min    {int(agg['min'])} / 10")
+    lines.append(f"  n      {n}")
+    lines.append("")
+    lines.append("  dimension hit-rate / 各维度命中率")
+    for dim in _eval_dim_names():
+        rate = agg["dims"].get(dim)
+        if rate is None:
+            lines.append(f"    {dim:<16} n/a")
+        else:
+            lines.append(f"    {dim:<16} {round(rate * 100)}%")
+    return "\n".join(lines)
+
+
 # US-AGENT-010: per-agent hit-rate summary for the ROLLUP block.
 # Aggregates the last `window_cycles` runs.jsonl records grouped by `agent`.
 # Returns a single-line string like
@@ -1060,6 +1208,14 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
         # ZH eyebrow row is left-aligned only — mirroring the EN right side
         # would duplicate signal without adding info.
         print(eb_zh)
+
+    # US-LOOP-036: daily service (dream/brief) next-fire lines, read straight
+    # from the launchd plist so they reflect the latest `roll config <svc>-time`
+    # reload rather than a stale yaml-derived guess.
+    for _svc in ("dream", "brief"):
+        _sl = _daily_schedule_line(_svc, now=now)
+        if _sl:
+            print("  " + c("dim", _sl))
     print()
 
     print(c("faint", "─" * COLS))
@@ -1158,6 +1314,16 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
         _skill_line = ""
     if _skill_line:
         print("  " + c("dim", _skill_line))
+
+    # US-EVAL-003: per-cycle result-eval trend (single line), distinct from the
+    # self-score line above (subjective skill review vs objective cycle result).
+    try:
+        _eval_records_in = list(runs.values()) if isinstance(runs, dict) else list(runs or [])
+        _eval_line = _result_eval_summary_line(_eval_records_in)
+    except Exception:
+        _eval_line = ""
+    if _eval_line:
+        print("  " + c("dim", _eval_line))
 
     print()
     print(c("faint", "─" * COLS))
@@ -1258,6 +1424,62 @@ def _read_plist_loop_minute() -> int:
     return int(m.group(1)) if m else 48
 
 
+def _read_daily_plist_schedule(svc: str) -> Optional[Dict[str, Any]]:
+    """US-LOOP-036: read the actual fire schedule of a daily service (dream/brief)
+    from its launchd plist — the truth source after a `roll config <svc>-time`
+    reload. Returns one of:
+
+      {"mode": "calendar", "hour": H, "minute": M}   array-style StartCalendarInterval
+      {"mode": "interval"}                            legacy StartInterval=86400
+
+    or None when the plist is missing/unparseable. Distinguishing the two modes
+    lets the caller pick the right _compute_next_fire branch.
+    """
+    import re as _re
+    slug = project_slug()
+    # Honor _LAUNCHD_DIR (the same sandbox override bin/roll exports) so tests —
+    # and any non-default install dir — read the plist the writer just wrote.
+    ladir = os.environ.get("_LAUNCHD_DIR") or os.path.expanduser("~/Library/LaunchAgents")
+    plist = Path(ladir) / f"com.roll.{svc}.{slug}.plist"
+    if not plist.exists():
+        return None
+    try:
+        text = plist.read_text(errors="ignore")
+    except Exception:
+        return None
+    if "StartCalendarInterval" in text:
+        h = _re.search(r"<key>Hour</key>\s*<integer>(\d+)</integer>", text)
+        m = _re.search(r"<key>Minute</key>\s*<integer>(\d+)</integer>", text)
+        if h:
+            return {"mode": "calendar", "hour": int(h.group(1)),
+                    "minute": int(m.group(1)) if m else 0}
+    if "StartInterval" in text:
+        return {"mode": "interval"}
+    return None
+
+
+def _daily_schedule_line(svc: str, now: Optional[datetime] = None) -> Optional[str]:
+    """US-LOOP-036: one-line `<svc>: HH:MM (next fire in Xh Ym)` for the status
+    dashboard. Calendar mode shows the configured wall-clock time and projects
+    the next fire; interval (legacy) mode has no HH:MM anchor so it just labels
+    the daily-interval mode. Returns None when the service has no plist.
+    """
+    sched = _read_daily_plist_schedule(svc)
+    if sched is None:
+        return None
+    base = now or datetime.now().astimezone()
+    if sched["mode"] == "calendar":
+        hh, mm = sched["hour"], sched["minute"]
+        nxt = _compute_next_fire(hour=hh, minute=mm, now=base)
+        line = f"{svc}: {hh:02d}:{mm:02d}"
+        if nxt is not None:
+            delta = int(nxt - base.timestamp())
+            h, m = divmod(max(delta, 0) // 60, 60)
+            line += f" (next fire in {h}h {m}m)"
+        return line
+    return f"{svc}: daily (legacy interval)"
+
+
 def _detect_install_state() -> str:
     """FIX-095 / FIX-098: classify the launchd install state of the loop service.
 
@@ -1290,6 +1512,46 @@ def _detect_install_state() -> str:
         # launchctl missing or timed out — assume stale (safe: user sees STALE
         # banner and is told to run 'roll loop on' to repair).
         return "stale"
+
+
+def _compute_next_fire(
+    *,
+    hour: Optional[int] = None,
+    minute: int = 0,
+    last_fire: Optional[float] = None,
+    now: Optional[datetime] = None,
+) -> Optional[float]:
+    """US-LOOP-036: compute the next fire epoch for a daily (dream/brief) service.
+
+    Two modes mirror the plist schedule_xml that _write_launchd_plist renders:
+
+      StartCalendarInterval mode (hour is not None):
+        Fire at the next HH:MM wall-clock instant. If today's HH:MM has not yet
+        passed (relative to `now`), it is today; otherwise tomorrow. Day/month/
+        year roll-over (including leap-year Feb 29 → Mar 1) is handled by adding
+        a timedelta to a normalized datetime, so we never construct an invalid
+        date by hand.
+
+      StartInterval=86400 legacy mode (hour is None):
+        Fire at `last_fire` + 24h. Returns None when last_fire is unknown — the
+        caller then has no anchor to project from.
+
+    Returns a POSIX epoch (float seconds) or None. `now` defaults to the current
+    local time; tests pass a fixed `now` for determinism.
+    """
+    if hour is None:
+        # Legacy StartInterval=86400 — project from the last fire.
+        if last_fire is None:
+            return None
+        return float(last_fire) + 86400.0
+
+    base = (now or datetime.now().astimezone())
+    # Anchor to today's HH:MM. timedelta arithmetic handles all calendar
+    # roll-over (month/year boundaries, leap days) without manual date math.
+    candidate = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= base:
+        candidate = candidate + timedelta(days=1)
+    return candidate.timestamp()
 
 
 def _next_cron_hint(state: Dict[str, str], zh: bool = False) -> str:
@@ -1370,7 +1632,23 @@ def main(argv=None):
     p.add_argument("--no-color", action="store_true", help="strip ANSI (also honors NO_COLOR=1)")
     p.add_argument("--en", action="store_true", help="EN rows only")
     p.add_argument("--zh", action="store_true", help="ZH rows only")
+    p.add_argument("--eval", nargs="?", type=int, const=14, default=None,
+                   metavar="N",
+                   help="result-eval trend view over the last N scored cycles "
+                        "(default 14); prints mean/min/per-dim hit-rate and exits")
     args = p.parse_args(argv)
+
+    # US-EVAL-003: `roll loop eval [N]` — result-eval trend view, then exit.
+    if args.eval is not None:
+        window = args.eval if args.eval and args.eval > 0 else 14
+        if os.environ.get("ROLL_RENDER_FIXTURE"):
+            records: List[Dict[str, Any]] = []
+        else:
+            _slug = project_slug()
+            _runs = load_runs(_slug)
+            records = list(_runs.values())
+        print(format_eval_view(records, window=window))
+        return
 
     roll_render.USE_COLOR = (not args.no_color
                              and not os.environ.get("NO_COLOR")

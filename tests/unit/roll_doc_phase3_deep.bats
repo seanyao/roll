@@ -163,3 +163,240 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
     | grep -v 'types.ts' | wc -l | tr -d ' ')
   [ "$import_count" -ge 3 ]
 }
+
+# ── US-DOC-015: External Integrations ──
+
+@test "roll-doc SKILL.md: external-integration subsection documents detection rule" {
+  grep -qiE '(External Integration|外部集成)' "$SKILL"
+  grep -qiE 'fetch' "$SKILL"
+  grep -qiE '(axios|http\.get|http\.\*)' "$SKILL"
+  grep -qiE '(API_ENDPOINT|\*_URL|\*_HOST)' "$SKILL"
+  grep -qiE '(https\?://|hardcoded.*http)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: external-integration subsection documents per-entry fields (timeout, error handling)" {
+  grep -qiE '(endpoint URL)' "$SKILL"
+  grep -qiE 'timeout' "$SKILL"
+  grep -qiE '(error handling|fallback|\.catch|try.*catch)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: external-integration subsection merges multi-site endpoint into one record" {
+  grep -qiE '(merged into.*one|merge.*one integration|same endpoint.*one|all.*call sites)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: external-integration subsection documents empty-skip and idempotency" {
+  grep -qiE '(no external integration.*skip|skip generation.*no empty.*integration|integrations.md.*skip)' "$SKILL"
+  grep -qiE '(Existing.*integrations.md|integrations.md.*skip unless.*--force)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Step 2 table maps 外部集成 to docs/integrations.md" {
+  grep -qE '外部集成.*docs/integrations.md' "$SKILL"
+}
+
+@test "roll-doc integrations fixture: directory exists with source files" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_integrations"
+  [ -d "$FIXTURE" ]
+  [ -d "$FIXTURE/src" ]
+}
+
+@test "roll-doc integrations fixture: contains a URL with timeout config" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_integrations"
+  # payment endpoint: hardcoded https URL, fetch call, and timeout field
+  grep -qE 'https://api\.payments\.example\.com' "$FIXTURE/src/clients/payment.ts"
+  grep -qE 'fetch\(' "$FIXTURE/src/clients/payment.ts"
+  grep -qE 'timeout: *5000' "$FIXTURE/src/clients/payment.ts"
+}
+
+@test "roll-doc integrations fixture: contains a URL without timeout config" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_integrations"
+  # profile endpoint: hardcoded https URL, fetch call, no timeout field
+  grep -qE 'https://profile\.example\.com' "$FIXTURE/src/clients/profile.ts"
+  grep -qE 'fetch\(' "$FIXTURE/src/clients/profile.ts"
+  ! grep -qE 'timeout' "$FIXTURE/src/clients/profile.ts"
+}
+
+# ── US-DOC-016: Deployment Pipeline ──
+
+@test "roll-doc SKILL.md: deployment subsection documents detection rule — CI config files + deploy URL" {
+  grep -qiE '(Deployment Pipeline|部署管线)' "$SKILL"
+  grep -qF '.github/workflows' "$SKILL"
+  grep -qF '.gitlab-ci.yml' "$SKILL"
+  grep -qiE '(circle\.yml|circleci)' "$SKILL"
+  grep -qF 'Jenkinsfile' "$SKILL"
+  grep -qiE '(vercel|netlify|cloudflare|firebase|\*\.app|\*\.dev)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: deployment subsection documents output fields — platform, triggers, jobs, deploy URL, env names" {
+  grep -qiE '(CI [Pp]latform)' "$SKILL"
+  grep -qiE '(trigger event|push.*PR.*tag|push.*pull_request)' "$SKILL"
+  grep -qiE '(Key Jobs|key job)' "$SKILL"
+  grep -qiE '(Deploy Target|deploy.*URL|部署目标)' "$SKILL"
+  grep -qiE '(Environment Variable|环境变量|env var.*name)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: deployment subsection lists env var names without values" {
+  grep -qiE '(without value|不含值|only names|never emit secret)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: deployment subsection documents empty-skip and idempotency" {
+  grep -qiE '(no CI config.*skip|skip generation.*no empty.*deployment|deployment.md.*skip)' "$SKILL"
+  grep -qiE '(Existing.*deployment.md|deployment.md.*skip unless.*--force)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Step 2 table maps 部署管线 to docs/deployment.md" {
+  grep -qE '部署管线.*docs/deployment.md' "$SKILL"
+}
+
+@test "roll-doc deployment fixture: contains a GitHub Actions workflow file" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_deployment"
+  [ -d "$FIXTURE" ]
+  [ -f "$FIXTURE/.github/workflows/deploy.yml" ]
+}
+
+@test "roll-doc deployment fixture: workflow declares jobs and a deploy URL" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_deployment"
+  WF="$FIXTURE/.github/workflows/deploy.yml"
+  # jobs present
+  grep -qE '^  test:' "$WF"
+  grep -qE '^  build:' "$WF"
+  grep -qE '^  deploy:' "$WF"
+  # deploy URL (vercel) present
+  grep -qE 'https://my-app\.vercel\.app' "$WF"
+  # env var name present
+  grep -qE 'VERCEL_TOKEN' "$WF"
+}
+
+# ── US-DOC-017: Agent Entrypoint (AGENTS.md auto-generation) ──
+
+@test "roll-doc SKILL.md: agent-entrypoint subsection documents detection rule — no AGENTS.md + ≥3 src subdirs" {
+  grep -qiE '(Agent Entrypoint|Agent 入口)' "$SKILL"
+  grep -qiE '(no.*AGENTS\.md|无.*AGENTS\.md)' "$SKILL"
+  grep -qiE '≥.*3.*(subdirector|subdir|子目录)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: agent-entrypoint subsection requires three sections — positioning, Where to Look, source layout" {
+  grep -qiE '(positioning|一句话|one.sentence)' "$SKILL"
+  grep -qF '## Where to Look' "$SKILL"
+  grep -qiE '(Source Layout|源码目录|关键源码)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: agent-entrypoint subsection documents idempotency — skip existing unless --force" {
+  grep -qiE '(Existing.*AGENTS\.md.*skip|AGENTS\.md.*skip unless.*--force|never overwrite a human)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: agent-entrypoint complements Phase 2 bootstrap (create vs append are distinct)" {
+  grep -qiE '(文件不存在.*创建|文件存在.*补章节|complementary.*bootstrap|complement)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Step 2 table maps Agent 入口 to AGENTS.md" {
+  grep -qE 'Agent 入口.*AGENTS\.md' "$SKILL"
+}
+
+@test "roll-doc agents-md fixture: has no AGENTS.md and ≥3 src subdirectories" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_agents_md"
+  [ -d "$FIXTURE" ]
+  [ ! -f "$FIXTURE/AGENTS.md" ]
+  count=$(find "$FIXTURE/src" -mindepth 1 -maxdepth 1 -type d | wc -l)
+  [ "$count" -ge 3 ]
+}
+
+@test "roll-doc agents-md fixture: src subdirectories contain source files for symbol-table inference" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_agents_md"
+  [ -f "$FIXTURE/src/parser/index.js" ]
+  [ -f "$FIXTURE/src/codegen/index.js" ]
+  [ -f "$FIXTURE/src/cli/index.js" ]
+  # cross-directory import chain present (codegen -> parser)
+  grep -qF "../parser/index.js" "$FIXTURE/src/codegen/index.js"
+}
+
+# ── US-DOC-018: High Fan-in Directory README ──
+
+@test "roll-doc SKILL.md: Phase 2 gap analysis includes high fan-in rule (≥5 referencing files, <3 files)" {
+  grep -qiE '(high.fan.?in|高.?引用)' "$SKILL"
+  grep -qiE '≥.*5.*(other source|文件|referenc|import)' "$SKILL"
+  # threshold expressed as OR with file-count rule
+  grep -qiE '(文件数 ≥ 3 OR|count ≥ 3 OR|≥ 3 OR.*≥ 5|OR imported by ≥ 5)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: high fan-in rule does not override the existing count ≥ 3 rule" {
+  grep -qiE '(continues to apply|never override|in addition to|never replac|widens)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: high fan-in target is <dir>/README.md, skip existing unless --force" {
+  grep -qE '高引用目录.*<dir>/README\.md' "$SKILL"
+  grep -qiE '(<dir>/README\.md.*skip unless.*--force|Existing.*README\.md.*skip unless.*--force|never overwrite)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: high fan-in subsection excludes test files when counting referencing files" {
+  grep -qiE '(exclude test files|\*\.test\.\*|\*\.spec\.\*)' "$SKILL"
+}
+
+@test "roll-doc high-fanin fixture: directory exists with source files" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_high_fanin"
+  [ -d "$FIXTURE" ]
+  [ -d "$FIXTURE/src" ]
+}
+
+@test "roll-doc high-fanin fixture: shared/ has <3 files but is imported by ≥5 source files → README expected" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_high_fanin"
+  # shared/ holds fewer than 3 source files
+  file_count=$(find "$FIXTURE/src/shared" -maxdepth 1 -type f -name '*.ts' | wc -l | tr -d ' ')
+  [ "$file_count" -lt 3 ]
+  # but imported by ≥5 distinct source files (exclude test files / the dir itself)
+  fanin=$(grep -rl 'shared/' "$FIXTURE/src/consumers" | wc -l | tr -d ' ')
+  [ "$fanin" -ge 5 ]
+  # no pre-existing README (so the gap rule must fire)
+  [ ! -f "$FIXTURE/src/shared/README.md" ]
+}
+
+@test "roll-doc high-fanin fixture: rare/ has 1 file imported by only 2 files → README NOT expected" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_high_fanin"
+  file_count=$(find "$FIXTURE/src/rare" -maxdepth 1 -type f -name '*.ts' | wc -l | tr -d ' ')
+  [ "$file_count" -lt 3 ]
+  fanin=$(grep -rl 'rare/once' "$FIXTURE/src/consumers" | wc -l | tr -d ' ')
+  [ "$fanin" -lt 5 ]
+  # below both thresholds → no gap, no README
+  [ ! -f "$FIXTURE/src/rare/README.md" ]
+}
+
+# ── US-DOC-019: file:line Source Annotations + Phase 4 report upgrade ──
+
+@test "roll-doc SKILL.md: Step 3 mandates a file:line column on subject-doc source tables" {
+  # the three table types named in the AC must each be tied to a file:line requirement
+  grep -qiE '(涉及文件|Files Involved)' "$SKILL"
+  grep -qiE '(引用文件|Referenced By)' "$SKILL"
+  grep -qiE '(调用链|Complete Call Chain)' "$SKILL"
+  # an explicit "file:line column" mandate exists in Step 3
+  grep -qiE 'file:line.{0,3}column' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Step 3 forbids fabricating file:line — must come from symbol table" {
+  grep -qiE 'do.?n.?o?t fabricate' "$SKILL"
+  grep -qiE '(come from|from an actual).*symbol table' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Phase 4 report has a Phase 3b — Deep Read section listing path + type + source entries" {
+  grep -qF 'Phase 3b — Deep Read' "$SKILL"
+  grep -qiE 'topic documents generated' "$SKILL"
+  # each listed doc carries its source-entry count
+  grep -qiE '(source entries|来源条目数)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Phase 4 prints exact empty message when no subject docs generated" {
+  grep -qF 'Phase 3b: no subject-level drafts generated' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Phase 4 Phase 3b section is shown under --dry-run tagged (plan)" {
+  grep -qiE 'dry.?run' "$SKILL"
+  grep -qF 'Phase 3b — Deep Read  (plan)' "$SKILL"
+}
+
+@test "roll-doc fixtures: at least one Phase 3b fixture is readable for cross-fixture file:line annotation" {
+  # cross-fixture readiness: the symbol-table source of file:line annotations exists and has
+  # line-locatable claims (a grep -n hit) in at least one Phase 3b fixture
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_integrations"
+  [ -d "$FIXTURE" ]
+  # a concrete claim (endpoint URL) is locatable by line → backs a real file:line annotation
+  hit=$(grep -rnE 'https://' "$FIXTURE/src" | head -1)
+  [ -n "$hit" ]
+}

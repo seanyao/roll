@@ -160,6 +160,471 @@ _agent_installed_by_name() {
   [[ -n "$dir" && -d "$dir" ]]
 }
 
+# US-AGENT-020: is NAME a known agent in this machine's registry? "Known"
+# means it has a binary-name entry (_agent_bin_names) OR is one of the
+# special-cased non-PATH agents (_agent_installed_by_name's case arms). This
+# is a name-validity check, NOT an installed check — agents.yaml may name an
+# agent the operator has not installed yet. deepseek is intentionally NOT
+# listed here as a routable agent (it is a model pi loads), so it is treated
+# as unknown for routing purposes. Returns 0 when known, 1 otherwise.
+_agent_is_known() {
+  local name; name="$(_canonical_agent_name "$1")"
+  case "$name" in
+    deepseek)                         return 1 ;;
+    trae|opencode|cursor|openclaw)    return 0 ;;
+  esac
+  _agent_bin_names "$name" >/dev/null 2>&1
+}
+
+# US-AGENT-020: schema-v3 agents.yaml loader.
+#
+# Layout (per-machine, never committed — see .roll/.gitignore):
+#   schema: v3
+#   easy:     { agent: kimi }
+#   default:  { agent: claude }
+#   hard:     { agent: claude }
+#   fallback: { agent: pi }
+#
+# `_agents_config_slot SLOT [PATH]` reads the `agent:` value for SLOT
+# (easy|default|hard|fallback) and prints the agent name on stdout.
+#   - File missing / slot missing / empty value → prints nothing, exit 1
+#     (caller is responsible for its own fallback — typically the `default`
+#     slot, then a registered/installed agent).
+#   - Value names an unknown agent → WARN on stderr, still print the value
+#     and exit 0 so the operator sees a typo rather than a silent drop.
+#
+# bash 3.2 safe: no declare -A, no mapfile/readarray, no ${var^^}/${var,,}.
+_agents_config_path() {
+  if [ -n "${ROLL_AGENTS_CONFIG:-}" ] && [ -f "$ROLL_AGENTS_CONFIG" ]; then
+    printf '%s\n' "$ROLL_AGENTS_CONFIG"
+    return 0
+  fi
+  if [ -f ".roll/agents.yaml" ]; then
+    printf '%s\n' ".roll/agents.yaml"
+    return 0
+  fi
+  return 1
+}
+
+# US-AGENT-020 helper: extract the value of an `agent:` key from a single
+# line, only when `agent:` appears at a token boundary (line start, or right
+# after `{`, `,`, or whitespace) — so `no_agent:` / `sub_agent:` / `agent_x:`
+# do not false-match. On success sets _AGENTS_AGENT_VALUE to the raw value
+# (still un-trimmed) and returns 0; returns 1 when the line has no agent key.
+_agents_line_agent_value() {
+  local s="$1" rest=""
+  # Collapse any tab to a space first so a tab-separated `agent:` key still
+  # hits the space-boundary arm (avoids embedding a literal tab in a case
+  # pattern, which bash's case parser rejects).
+  s="${s//	/ }"
+  case "$s" in
+    "agent:"*)            rest="${s#agent:}" ;;
+    *[\ ,\{]"agent:"*)    rest="${s#*[ ,{]agent:}" ;;
+    *)                    return 1 ;;
+  esac
+  _AGENTS_AGENT_VALUE="$rest"
+  return 0
+}
+
+_agents_config_slot() {
+  local slot="${1:-}"
+  local path="${2:-}"
+  if [ -z "$slot" ]; then
+    echo "_agents_config_slot: slot name required" >&2
+    return 1
+  fi
+  if [ -z "$path" ]; then
+    path="$(_agents_config_path)" || return 1
+  fi
+  [ -f "$path" ] || return 1
+
+  # Find the slot's top-level block and read its `agent:` value. The block
+  # spans from `^<slot>:` to the next top-level key (a line starting with a
+  # non-space char). agent: may be inline (`easy: { agent: kimi }`) or nested
+  # on a following indented line (`easy:\n  agent: kimi`). The slot key and the
+  # `agent:` key are matched at token boundaries so `easy_mode:` / `no_agent:`
+  # / `sub_agent:` do not false-match (peer review).
+  local line in_block="" agent="" found=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Strip a trailing CR so DOS/CRLF-saved configs still parse.
+    line="${line%$'\r'}"
+    case "$line" in
+      "$slot":|"$slot":" "*|"$slot":\{*)
+        in_block=1
+        # Inline flow form: easy: { agent: kimi }
+        if _agents_line_agent_value "$line"; then
+          agent="$_AGENTS_AGENT_VALUE"; found=1
+        fi
+        ;;
+      [!\ ]*)
+        # A new top-level key (no leading space) ends the slot block.
+        [ -n "$in_block" ] && break
+        ;;
+      *)
+        if [ -n "$in_block" ] && [ -z "$found" ]; then
+          if _agents_line_agent_value "$line"; then
+            agent="$_AGENTS_AGENT_VALUE"; found=1
+          fi
+        fi
+        ;;
+    esac
+    [ -n "$found" ] && break
+  done < "$path"
+
+  [ -n "$in_block" ] || return 1
+
+  # Strip flow-map punctuation, quotes, inline comments, and surrounding space.
+  agent="${agent%%\#*}"
+  agent="${agent//\{/}"
+  agent="${agent//\}/}"
+  agent="${agent//,/}"
+  agent="${agent//\"/}"
+  agent="${agent//\'/}"
+  # Trim leading/trailing whitespace (bash 3.2 safe).
+  agent="$(printf '%s' "$agent" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+  [ -n "$agent" ] || return 1
+
+  if ! _agent_is_known "$agent"; then
+    warn "agents.yaml: slot '${slot}' names unknown agent '${agent}' (not in this machine's registry)" >&2
+  fi
+  printf '%s\n' "$agent"
+}
+
+# US-AGENT-026: write the agent for one complexity slot into agents.yaml.
+# `_agents_config_set_slot SLOT AGENT [PATH]` rewrites the slot's `agent:`
+# value in place (inline flow form `slot: { agent: <name> }`), preserving every
+# other line — including comments and unrelated slots. When the file or the
+# slot is missing, the slot line is created (the file is seeded with a
+# `schema: v3` header). The write is atomic: render to a temp file, then mv
+# over the target. Returns 1 on a missing slot name / agent / unwritable path.
+_agents_config_set_slot() {
+  local slot="${1:-}" agent="${2:-}" path="${3:-}"
+  if [ -z "$slot" ] || [ -z "$agent" ]; then
+    echo "_agents_config_set_slot: slot and agent required" >&2
+    return 1
+  fi
+  if [ -z "$path" ]; then
+    path="$(_agents_config_path 2>/dev/null || true)"
+    [ -n "$path" ] || path=".roll/agents.yaml"
+  fi
+
+  local dir; dir="$(dirname "$path")"
+  [ -d "$dir" ] || mkdir -p "$dir" || return 1
+
+  local tmp; tmp="$(mktemp "${path}.XXXXXX")" || return 1
+  local new_line="${slot}: { agent: ${agent} }"
+
+  if [ ! -f "$path" ]; then
+    # Fresh file: seed a v3 header, then the slot line.
+    printf 'schema: v3\n%s\n' "$new_line" > "$tmp" || { rm -f "$tmp"; return 1; }
+    mv "$tmp" "$path"
+    return 0
+  fi
+
+  # Rewrite in place. Track whether we are inside the target slot's block so a
+  # nested `agent:` line gets replaced too. Replace the first agent-bearing
+  # line of the block (inline or nested) and drop any further block lines that
+  # only carried the old value, collapsing the slot to the inline form.
+  local line in_block="" replaced="" found=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    local raw="$line"
+    raw="${raw%$'\r'}"
+    case "$raw" in
+      "$slot":|"$slot":" "*|"$slot":\{*)
+        # Slot header — emit the canonical inline form and enter the block.
+        printf '%s\n' "$new_line" >> "$tmp"
+        in_block=1; replaced=1; found=1
+        # If the header itself carried the inline agent, the whole slot is done.
+        case "$raw" in
+          *\{*) in_block="" ;;
+        esac
+        continue
+        ;;
+      [!\ ]*)
+        in_block=""
+        ;;
+    esac
+    if [ -n "$in_block" ]; then
+      # Inside a freshly-rewritten nested block: drop the old `agent:` line(s);
+      # keep any sibling keys untouched.
+      if _agents_line_agent_value "$raw"; then
+        continue
+      fi
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$path"
+
+  if [ -z "$found" ]; then
+    # Slot was absent — append it.
+    printf '%s\n' "$new_line" >> "$tmp"
+  fi
+
+  mv "$tmp" "$path"
+  return 0
+}
+
+# US-AGENT-028: one-shot migrate a legacy v1 agent-routes.yaml into a v3
+# agents.yaml (four complexity slots). Mirrors _loop_migrate_legacy_paths: it
+# is idempotent (skips when the v3 file already exists), writes the product to
+# a temp file and atomically mv's it over the target so a running loop only
+# sees the new config on its next cycle.
+#
+# `_agents_migrate_v1_to_v3 [V1_PATH] [V3_PATH] [LOCAL_YAML]`
+#   V1_PATH    legacy source (default .roll/agent-routes.yaml)
+#   V3_PATH    destination   (default .roll/agents.yaml)
+#   LOCAL_YAML .roll/local.yaml whose top-level `agent:` is the last-resort
+#              default-slot fallback (default .roll/local.yaml)
+#
+# Mapping (AC US-AGENT-028):
+#   - v1 `history.cold_start_default` → `default` slot (and `fallback` slot)
+#   - v1 `agents.*` capability ranges → easy / hard by est_min.max: the agent
+#     with the smallest max lands in `easy`, the largest in `hard`
+#   - ghost agent `deepseek` is dropped (it is a pi-loaded model, not an agent)
+#   - when cold_start_default is absent, `.roll/local.yaml`'s `agent:` seeds the
+#     `default` slot; any still-empty slot falls back to the default slot agent
+#
+# Returns 0 on success or no-op; 1 only when the temp render itself fails.
+_agents_migrate_v1_to_v3() {
+  local v1="${1:-.roll/agent-routes.yaml}"
+  local v3="${2:-.roll/agents.yaml}"
+  local local_yaml="${3:-.roll/local.yaml}"
+
+  # Idempotent: never clobber an existing v3 config.
+  [ -f "$v3" ] && return 0
+  # Nothing to migrate from.
+  [ -f "$v1" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local dir; dir="$(dirname "$v3")"
+  [ -d "$dir" ] || mkdir -p "$dir" || return 1
+
+  local tmp; tmp="$(mktemp "${v3}.XXXXXX")" || return 1
+
+  if ! ROLL_MIG_V1="$v1" ROLL_MIG_LOCAL="$local_yaml" python3 - > "$tmp" <<'PY'
+import os, sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(3)
+
+v1_path = os.environ["ROLL_MIG_V1"]
+local_path = os.environ.get("ROLL_MIG_LOCAL", "")
+
+try:
+    v1 = yaml.safe_load(open(v1_path)) or {}
+except Exception:
+    sys.exit(3)
+if not isinstance(v1, dict):
+    sys.exit(3)
+
+GHOST = {"deepseek"}
+
+agents = v1.get("agents") or {}
+if not isinstance(agents, dict):
+    agents = {}
+
+history = v1.get("history") or {}
+cold = history.get("cold_start_default") if isinstance(history, dict) else None
+
+# Last-resort default from .roll/local.yaml `agent:`.
+local_agent = None
+if local_path and os.path.exists(local_path):
+    try:
+        loc = yaml.safe_load(open(local_path)) or {}
+        if isinstance(loc, dict) and isinstance(loc.get("agent"), str):
+            local_agent = loc.get("agent")
+    except Exception:
+        local_agent = None
+
+def real(name):
+    return isinstance(name, str) and name and name not in GHOST
+
+# Rank routable (non-ghost) agents by their est_min.max capability ceiling so
+# the smallest-window agent maps to easy and the largest to hard.
+ranked = []
+for name, cfg in agents.items():
+    if not real(name):
+        continue
+    mx = None
+    if isinstance(cfg, dict):
+        em = cfg.get("est_min")
+        if isinstance(em, dict) and isinstance(em.get("max"), (int, float)):
+            mx = em.get("max")
+    ranked.append((name, mx if mx is not None else 0))
+ranked.sort(key=lambda t: (t[1], t[0]))
+
+default_agent = cold if real(cold) else local_agent
+if not real(default_agent) and ranked:
+    # Median-ish: pick the agent whose window straddles the default band.
+    default_agent = ranked[len(ranked) // 2][0]
+
+easy_agent = ranked[0][0] if ranked else default_agent
+hard_agent = ranked[-1][0] if ranked else default_agent
+
+# Any unresolved slot falls back to the default-slot agent.
+def pick(a):
+    return a if real(a) else default_agent
+
+slots = {
+    "easy": pick(easy_agent),
+    "default": pick(default_agent),
+    "hard": pick(hard_agent),
+    "fallback": pick(default_agent),
+}
+
+out = ["schema: v3"]
+for slot in ("easy", "default", "hard", "fallback"):
+    agent = slots[slot]
+    if real(agent):
+        out.append("%s: { agent: %s }" % (slot, agent))
+    else:
+        out.append("%s: { agent: }" % slot)
+sys.stdout.write("\n".join(out) + "\n")
+PY
+  then
+    rm -f "$tmp"
+    return 0
+  fi
+
+  mv "$tmp" "$v3"
+  return 0
+}
+
+# ──────────────────────────────────────────────────────────────
+# US-AGENT-021: local agent detection + cheap online probe (cached).
+#
+# `_agents_installed`  → newline list of agents actually installed on this
+#                        machine (binary on PATH / special-case dir). deepseek
+#                        is intentionally excluded — it is a model pi loads,
+#                        not a routable agent.
+# `_agent_available N` → is agent N usable right now? ① on PATH ② a one-shot
+#                        sub-second probe (--version) that catches auth/network
+#                        failure. Prints "online"/"offline" and exits 0/1.
+#                        Result is cached per-machine (project-local), default
+#                        30 min, configurable via ROLL_AGENT_PROBE_TTL (seconds).
+#
+# bash 3.2 safe: no declare -A, no mapfile/readarray, no ${var^^}/${var,,}.
+# ──────────────────────────────────────────────────────────────
+
+# Candidate routable agents, in the same order _first_installed_agent scans.
+# deepseek is deliberately absent (it is a pi-loaded model, not an agent).
+_AGENT_REGISTRY_NAMES="claude codex kimi qwen agy pi cursor opencode trae openclaw"
+
+# List agents installed on this machine (one per line). Empty when none.
+# Used by the cascade menu (US-AGENT-026) and `use` validation (US-AGENT-027).
+_agents_installed() {
+  local agent
+  for agent in $_AGENT_REGISTRY_NAMES; do
+    if _agent_installed_by_name "$agent"; then
+      printf '%s\n' "$agent"
+    fi
+  done
+  return 0
+}
+
+# Directory holding per-machine availability cache. Project-local so two
+# checkouts on one machine do not share (and it never leaks into roll-meta).
+# Honors ROLL_AGENT_CACHE_DIR (tests / sandboxes) first, then .roll/cache/.
+_agent_cache_dir() {
+  if [ -n "${ROLL_AGENT_CACHE_DIR:-}" ]; then
+    printf '%s\n' "$ROLL_AGENT_CACHE_DIR"
+    return 0
+  fi
+  printf '%s\n' ".roll/cache/agent-availability"
+}
+
+# Cache TTL in seconds (default 30 min). ROLL_AGENT_PROBE_TTL overrides.
+_agent_probe_ttl() {
+  local ttl="${ROLL_AGENT_PROBE_TTL:-1800}"
+  case "$ttl" in
+    ''|*[!0-9]*) ttl=1800 ;;
+  esac
+  printf '%s\n' "$ttl"
+}
+
+# One-shot, sub-second probe: does agent NAME's CLI respond to --version
+# without an auth/network error? Returns 0 (online) / 1 (offline). Overridable
+# for tests via ROLL_AGENT_PROBE_HOOK (a command receiving the agent name;
+# its exit code is the verdict). Real probe: run the first known binary with
+# --version under a short timeout; non-zero exit ⇒ offline (auth/network/crash).
+_agent_probe() {
+  local name; name="$(_canonical_agent_name "$1")"
+  if [ -n "${ROLL_AGENT_PROBE_HOOK:-}" ]; then
+    "$ROLL_AGENT_PROBE_HOOK" "$name"
+    return $?
+  fi
+  local bins bin=""
+  if bins=$(_agent_bin_names "$name" 2>/dev/null); then
+    local b
+    for b in $bins; do
+      if command -v "$b" >/dev/null 2>&1; then bin="$b"; break; fi
+    done
+  fi
+  # No PATH binary to probe (special-case/dir agents) → treat presence as
+  # online; PATH detection in _agent_available already gated this path.
+  [ -n "$bin" ] || return 0
+  # Sub-second budget. `timeout` is GNU-only; fall back to a bare call when
+  # absent (macOS) — the --version path returns near-instantly anyway.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 5 "$bin" --version >/dev/null 2>&1
+  else
+    "$bin" --version >/dev/null 2>&1
+  fi
+}
+
+# Is agent NAME usable right now? Prints "online"/"offline", exits 0/1.
+# Reads a fresh cache entry when present; otherwise probes and caches the
+# result. ROLL_AGENT_NO_CACHE=1 forces a re-probe (still writes the cache).
+_agent_available() {
+  local name; name="$(_canonical_agent_name "$1")"
+  [ -n "$name" ] || { printf 'offline\n'; return 1; }
+
+  local cache_dir; cache_dir="$(_agent_cache_dir)"
+  local cache_file="${cache_dir}/${name}"
+  local ttl; ttl="$(_agent_probe_ttl)"
+  local now; now="$(date +%s)"
+
+  # Cache hit within TTL → trust it (unless caller forced a re-probe).
+  if [ -z "${ROLL_AGENT_NO_CACHE:-}" ] && [ -f "$cache_file" ]; then
+    local cached_at cached_status line
+    cached_at=""; cached_status=""
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        checked_at=*) cached_at="${line#checked_at=}" ;;
+        status=*)     cached_status="${line#status=}" ;;
+      esac
+    done < "$cache_file"
+    case "$cached_at" in ''|*[!0-9]*) cached_at="" ;; esac
+    if [ -n "$cached_at" ] && [ -n "$cached_status" ]; then
+      local age=$(( now - cached_at ))
+      if [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ]; then
+        printf '%s\n' "$cached_status"
+        [ "$cached_status" = "online" ] && return 0 || return 1
+      fi
+    fi
+  fi
+
+  # Cache miss / expired / forced → ① PATH ② probe.
+  local status="offline"
+  if _agent_installed_by_name "$name" && _agent_probe "$name"; then
+    status="online"
+  fi
+
+  # Persist the verdict (project-local, per-machine).
+  mkdir -p "$cache_dir" 2>/dev/null || true
+  if [ -d "$cache_dir" ]; then
+    local tmp="${cache_file}.tmp.$$"
+    {
+      printf 'checked_at=%s\n' "$now"
+      printf 'status=%s\n' "$status"
+    } > "$tmp" 2>/dev/null && mv "$tmp" "$cache_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  fi
+
+  printf '%s\n' "$status"
+  [ "$status" = "online" ] && return 0 || return 1
+}
+
 # Check if an AI tool is actually installed (back-compat shim around
 # _agent_installed_by_name; preserves the dir-path-based signature used
 # throughout bin/roll).
@@ -298,9 +763,42 @@ _spin() {
 }
 
 # ─── Helper: read config value ───────────────────────────────────────────────
+# Read a nested `parent.child` value (one indent level) from a yaml file.
+# Mirrors the awk block readers used for loop_schedule. Prints the raw value
+# (inline comment + surrounding whitespace stripped) on stdout; empty when the
+# parent block or the child key is absent. US-LOOP-033.
+_yaml_read_nested() {
+  local file="$1" parent="$2" child="$3"
+  [[ -f "$file" ]] || return 0
+  awk -v p="^${parent}:" -v c="^[[:space:]]+${child}:" '
+    $0 ~ p { found=1; next }
+    found && /^[^[:space:]]/ { exit }
+    found && $0 ~ c {
+      sub(/^[[:space:]]*[^:]*:[[:space:]]*/, "")
+      sub(/[[:space:]]*#.*$/, "")
+      sub(/[[:space:]]*$/, "")
+      print
+      exit
+    }
+  ' "$file" 2>/dev/null
+}
+
 config_get() {
   local key="$1"
   local default="${2:-}"
+  # US-LOOP-033: nested `parent.child` keys (e.g. loop_schedule.period_minutes)
+  # are read from the same global config file as flat keys.
+  if [[ "$key" == *.* ]]; then
+    local parent="${key%%.*}" child="${key#*.}"
+    local nval
+    nval=$(_yaml_read_nested "$ROLL_CONFIG" "$parent" "$child")
+    if [[ -n "$nval" ]]; then
+      echo "${nval/#\~/$HOME}"
+      return
+    fi
+    echo "${default/#\~/$HOME}"
+    return
+  fi
   if [[ -f "$ROLL_CONFIG" ]]; then
     local val
     val=$(grep -E "^${key}:" "$ROLL_CONFIG" 2>/dev/null | head -1 | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*#.*$//' | sed 's/[[:space:]]*$//')
@@ -4484,6 +4982,454 @@ EOF
   esac
 }
 
+# ─── roll config — unified read/list/set for loop schedule keys (US-LOOP-033) ──
+#
+# One interactive entry point so users don't have to remember whether a key
+# lives in ~/.roll/config.yaml (global) or .roll/local.yaml (project), nor hand-
+# edit yaml and remember to reload.
+#
+# Key registry — one record per supported key, pipe-delimited:
+#   <key>|<scope>|<store>|<min>|<max>|<default>
+#     scope   default write target: global → ~/.roll/config.yaml
+#                                    project → .roll/local.yaml
+#     store   flat            → top-level `key: value`
+#             nested:<parent> → indented under a `<parent>:` block
+#     min/max integer range (inclusive); empty min disables the lower bound
+#     default value reported as "(default)" when unset; "-" means auto-derived
+_config_keys() {
+  cat <<'EOF'
+loop_active_start|project|nested:loop_schedule|0|23|0
+loop_active_end|project|nested:loop_schedule|1|24|24
+loop_schedule.period_minutes|project|nested:loop_schedule|1|1440|60
+loop_schedule.offset_minute|project|nested:loop_schedule|0|59|0
+loop_dream_hour|global|flat|0|23|3
+loop_dream_minute|global|flat|0|59|-
+loop_brief_hour|global|flat|0|23|9
+loop_brief_minute|global|flat|0|59|-
+EOF
+}
+
+# Echo the registry record for a key, or return 1 if unknown.
+_config_key_record() {
+  local key="$1" line
+  while IFS= read -r line; do
+    [[ "${line%%|*}" == "$key" ]] && { printf '%s\n' "$line"; return 0; }
+  done < <(_config_keys)
+  return 1
+}
+
+# List the bare key names (for help / list iteration).
+_config_list_keys() {
+  local line
+  while IFS= read -r line; do
+    printf '%s\n' "${line%%|*}"
+  done < <(_config_keys)
+}
+
+# The yaml file backing a key, given its scope. project → CWD .roll/local.yaml.
+_config_key_file() {
+  local scope="$1"
+  if [[ "$scope" == "global" ]]; then
+    printf '%s\n' "$ROLL_CONFIG"
+  else
+    printf '%s\n' ".roll/local.yaml"
+  fi
+}
+
+# Resolve a key to "<value>\t<source>". source is a file path or "default".
+# Reads the project file first, then global, then the registry default.
+_config_resolve() {
+  local key="$1" record scope store def file parent val
+  record=$(_config_key_record "$key") || return 1
+  IFS='|' read -r _ scope store _ _ def <<<"$record"
+  file=$(_config_key_file "$scope")
+
+  if [[ "$store" == nested:* ]]; then
+    parent="${store#nested:}"
+    local child="${key#*.}"
+    [[ "$key" != *.* ]] && child="$key"
+    val=$(_yaml_read_nested "$file" "$parent" "$child")
+  else
+    if [[ -f "$file" ]]; then
+      val=$(grep -E "^${key}:" "$file" 2>/dev/null | head -1 \
+        | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*#.*$//' | sed 's/[[:space:]]*$//')
+    fi
+  fi
+
+  if [[ -n "$val" ]]; then
+    printf '%s\t%s\n' "$val" "$file"
+    return 0
+  fi
+  printf '%s\t%s\n' "$def" "default"
+  return 0
+}
+
+# Validate that $value is an integer within [min,max] for the registry key.
+# Prints a bilingual error and returns 2 on failure (caller exits 2).
+_config_validate() {
+  local key="$1" value="$2" record min max
+  record=$(_config_key_record "$key") || return 1
+  IFS='|' read -r _ _ _ min max _ <<<"$record"
+  if ! [[ "$value" =~ ^-?[0-9]+$ ]]; then
+    err "config: '$key' expects an integer, got '$value'"
+    err "config：'$key' 需要整数，收到 '$value'"
+    return 2
+  fi
+  if [[ -n "$min" ]] && (( value < min )); then
+    err "config: '$key' must be >= ${min} (got ${value})"
+    err "config：'$key' 必须 >= ${min}（收到 ${value}）"
+    return 2
+  fi
+  if [[ -n "$max" ]] && (( value > max )); then
+    err "config: '$key' must be <= ${max} (got ${value})"
+    err "config：'$key' 必须 <= ${max}（收到 ${value}）"
+    return 2
+  fi
+  return 0
+}
+
+# Idempotent yaml writer. Replaces an existing line in place (preserving every
+# other line / comment / order) or appends under the right block. Handles both
+# flat top-level keys and nested `parent.child` keys. US-LOOP-033.
+#   _config_set <key> <value> <file>
+_config_set() {
+  local key="$1" value="$2" file="$3"
+  local record store parent child
+  record=$(_config_key_record "$key") || return 1
+  IFS='|' read -r _ _ store _ _ _ <<<"$record"
+
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true
+  [[ -f "$file" ]] || : > "$file"
+
+  local tmp; tmp="$(mktemp)"
+  if [[ "$store" == nested:* ]]; then
+    parent="${store#nested:}"
+    child="${key#*.}"
+    [[ "$key" != *.* ]] && child="$key"
+    ROLL_CFG_PARENT="$parent" ROLL_CFG_CHILD="$child" ROLL_CFG_VAL="$value" \
+      awk '
+      BEGIN { parent=ENVIRON["ROLL_CFG_PARENT"]; child=ENVIRON["ROLL_CFG_CHILD"]; val=ENVIRON["ROLL_CFG_VAL"]; done=0 }
+      # Entering target parent block
+      $0 ~ ("^" parent ":") { in_block=1; print; next }
+      # Inside the block: replace the child line if present
+      in_block && $0 ~ ("^[[:space:]]+" child ":") {
+        print "  " child ": " val; done=1; in_block=0; next
+      }
+      # Leaving the block at the next top-level key — append child if not done
+      in_block && /^[^[:space:]]/ {
+        if (!done) { print "  " child ": " val; done=1 }
+        in_block=0; print; next
+      }
+      { print }
+      END {
+        if (in_block && !done) { print "  " child ": " val; done=1 }
+        if (!done) { print parent ":"; print "  " child ": " val }
+      }
+    ' "$file" > "$tmp"
+  else
+    ROLL_CFG_KEY="$key" ROLL_CFG_VAL="$value" \
+      awk '
+      BEGIN { key=ENVIRON["ROLL_CFG_KEY"]; val=ENVIRON["ROLL_CFG_VAL"]; done=0 }
+      $0 ~ ("^" key ":") && !done { print key ": " val; done=1; next }
+      { print }
+      END { if (!done) print key ": " val }
+    ' "$file" > "$tmp"
+  fi
+  mv "$tmp" "$file"
+}
+
+_config_help() {
+  cat <<'EOF'
+Usage: roll config <key>                 print current value + source
+       roll config --list                list all loop schedule keys
+       roll config <key> <value> [--global|--project]   set a value
+                                                                  统一调度配置
+Read / list / set the loop, dream and brief schedule keys without hand-editing
+yaml. Default write scope is --project (.roll/local.yaml); --global writes
+~/.roll/config.yaml.
+读 / 列 / 写 loop、dream、brief 调度 key，免去手工编辑 yaml。默认写 --project
+（.roll/local.yaml）；--global 写 ~/.roll/config.yaml。
+
+Supported keys (range):
+  loop_active_start              0-23    loop active window start hour
+  loop_active_end                1-24    loop active window end hour
+  loop_schedule.period_minutes   1-1440  fire interval in minutes
+  loop_schedule.offset_minute    0-59    minute offset within the period
+  loop_dream_hour                0-23    dream daily fire hour
+  loop_dream_minute              0-59    dream daily fire minute
+  loop_brief_hour                0-23    brief daily fire hour
+  loop_brief_minute              0-59    brief daily fire minute
+
+Compact facades (write multiple keys at once):
+  roll config loop-window 9-18              loop_active_start + loop_active_end
+  roll config loop-schedule 30/7            period_minutes + offset_minute
+  roll config dream-time 03:20              loop_dream_hour + loop_dream_minute
+  roll config brief-time 09:15              loop_brief_hour + loop_brief_minute
+
+Examples:
+  roll config loop_dream_hour
+  roll config --list
+  roll config loop_schedule.period_minutes 30
+  roll config loop_dream_hour 3 --global
+  roll config dream-time 03:20
+EOF
+}
+
+# US-LOOP-034: `roll config loop-window <start>-<end>` — compact facade that
+# writes loop_active_start + loop_active_end in one shot. With no value, prints
+# the current effective window + source. start must be < end and both ∈ [0,24].
+_config_loop_window() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    local rs re vs ss
+    rs=$(_config_resolve "loop_active_start"); re=$(_config_resolve "loop_active_end")
+    vs="${rs%%$'\t'*}"; ss="${rs#*$'\t'}"
+    local ve; ve="${re%%$'\t'*}"
+    [[ "$ss" != "default" ]] && ss="from $ss" || ss="from default"
+    printf 'loop-window: %s-%s (%s)\n' "$vs" "$ve" "$ss"
+    return 0
+  fi
+  if ! [[ "$value" =~ ^[0-9]+-[0-9]+$ ]]; then
+    err "config: loop-window expects <start>-<end>, got '$value'"
+    err "config：loop-window 需要 <start>-<end> 格式，收到 '$value'"
+    return 2
+  fi
+  local start="${value%-*}" end="${value#*-}"
+  if (( start < 0 )) || (( start > 24 )); then
+    err "config: loop-window start must be in [0,24]"
+    err "config：loop-window 开始时间必须在 [0,24]"
+    return 2
+  fi
+  if (( end > 24 )); then
+    err "config: loop-window end must be <= 24"
+    err "config：loop-window 结束时间必须 ≤ 24"
+    return 2
+  fi
+  if (( start >= end )); then
+    err "config: loop-window start must be < end (got ${start}-${end})"
+    err "config：loop-window 开始时间必须 < 结束时间（收到 ${start}-${end}）"
+    return 2
+  fi
+  local file
+  file=$(_config_key_file "$ROLL_CFG_SCOPE")
+  _config_set "loop_active_start" "$start" "$file"
+  _config_set "loop_active_end" "$end" "$file"
+  ok "✓ set loop-window = ${start}-${end} in $file"
+  printf 'run `roll loop on` to apply\n'
+  return 0
+}
+
+# US-LOOP-034: `roll config loop-schedule <period>[/<offset>]` — writes
+# loop_schedule.period_minutes (+ offset_minute when given). With no value,
+# prints the current effective schedule + source. period ∈ [1,1440],
+# offset ∈ [0, period-1]; offset omitted leaves the offset line untouched.
+_config_loop_schedule() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    local rp ro vp vo sp
+    rp=$(_config_resolve "loop_schedule.period_minutes")
+    ro=$(_config_resolve "loop_schedule.offset_minute")
+    vp="${rp%%$'\t'*}"; sp="${rp#*$'\t'}"; vo="${ro%%$'\t'*}"
+    [[ "$sp" != "default" ]] && sp="from $sp" || sp="from default"
+    printf 'loop-schedule: every %smin (offset :%s) (%s)\n' "$vp" "$vo" "$sp"
+    return 0
+  fi
+  if ! [[ "$value" =~ ^[0-9]+(/[0-9]+)?$ ]]; then
+    err "config: loop-schedule expects <period>[/<offset>], got '$value'"
+    err "config：loop-schedule 需要 <period>[/<offset>] 格式，收到 '$value'"
+    return 2
+  fi
+  local period="${value%%/*}" offset=""
+  [[ "$value" == */* ]] && offset="${value#*/}"
+  if (( period < 1 )) || (( period > 1440 )); then
+    err "config: loop-schedule period must be in [1,1440]"
+    err "config：loop-schedule 周期必须在 [1,1440]"
+    return 2
+  fi
+  if [[ -n "$offset" ]] && (( offset > period - 1 )); then
+    err "config: loop-schedule offset must be in [0, period-1] (period ${period})"
+    err "config：loop-schedule 偏移必须在 [0, period-1]（周期 ${period}）"
+    return 2
+  fi
+  local file
+  file=$(_config_key_file "$ROLL_CFG_SCOPE")
+  _config_set "loop_schedule.period_minutes" "$period" "$file"
+  if [[ -n "$offset" ]]; then
+    _config_set "loop_schedule.offset_minute" "$offset" "$file"
+    ok "✓ set loop-schedule = ${period}/${offset} in $file"
+  else
+    ok "✓ set loop-schedule = ${period} in $file"
+  fi
+  printf 'run `roll loop on` to apply\n'
+  return 0
+}
+
+# US-LOOP-035: `roll config dream-time <HH:MM>` / `brief-time <HH:MM>` — compact
+# facade writing loop_<svc>_hour + loop_<svc>_minute in one shot. With no value,
+# prints the current effective time + source. HH ∈ [0,23], MM ∈ [0,59].
+# These keys are global-scoped, so writes land in ~/.roll/config.yaml.
+#   _config_daily_time <svc> <value>   svc ∈ {dream, brief}
+_config_daily_time() {
+  local svc="$1" value="$2"
+  local hour_key="loop_${svc}_hour" min_key="loop_${svc}_minute"
+  if [[ -z "$value" ]]; then
+    local rh rm vh vm sh
+    rh=$(_config_resolve "$hour_key"); rm=$(_config_resolve "$min_key")
+    vh="${rh%%$'\t'*}"; sh="${rh#*$'\t'}"; vm="${rm%%$'\t'*}"
+    # minute auto-derives to "-" when unset; render as 00 for display
+    [[ "$vm" == "-" || -z "$vm" ]] && vm="0"
+    [[ "$sh" != "default" ]] && sh="from $sh" || sh="from default"
+    printf '%s-time: %02d:%02d (%s)\n' "$svc" "$vh" "$vm" "$sh"
+    return 0
+  fi
+  if ! [[ "$value" =~ ^[0-9]{1,2}:[0-9]{1,2}$ ]]; then
+    err "config: ${svc}-time expects <HH:MM>, got '$value'"
+    err "config：${svc}-time 需要 <HH:MM> 格式，收到 '$value'"
+    return 2
+  fi
+  local hh="${value%%:*}" mm="${value#*:}"
+  # strip leading zeros to avoid octal interpretation in arithmetic
+  hh=$((10#$hh)); mm=$((10#$mm))
+  if (( hh < 0 )) || (( hh > 23 )); then
+    err "config: ${svc}-time hour must be in [0,23]"
+    err "config：${svc}-time 小时必须在 [0,23]"
+    return 2
+  fi
+  if (( mm < 0 )) || (( mm > 59 )); then
+    err "config: ${svc}-time minute must be in [0,59]"
+    err "config：${svc}-time 分钟必须在 [0,59]"
+    return 2
+  fi
+  local file
+  file=$(_config_key_file "$ROLL_CFG_SCOPE")
+  _config_set "$hour_key" "$hh" "$file"
+  _config_set "$min_key" "$mm" "$file"
+  ok "$(printf '✓ set %s-time = %02d:%02d in %s' "$svc" "$hh" "$mm" "$file")"
+  printf 'run `roll loop on` to apply\n'
+  return 0
+}
+
+# US-LOOP-036: after a schedule key is written, regenerate the launchd plists so
+# `roll loop status` and the actual fire schedule reflect the new yaml without a
+# manual `roll loop on`. yaml is the source of truth — a reload failure must NOT
+# fail the write, so we warn (not err) and point the user at the manual fallback.
+# When the loop is paused/muted we still rewrite the plist (content vs running
+# state are orthogonal) but add a hint that the schedule is updated yet not
+# firing. Sandbox guards inside _install_launchd_plists keep this off the host's
+# real launchd domain during tests.
+_config_reload_schedule() {
+  local project_path; project_path="$(pwd -P)"
+  if _install_launchd_plists "$project_path" >/dev/null 2>&1; then
+    if [[ -f "$_LOOP_STATE" ]] && grep -q "^status: paused" "$_LOOP_STATE" 2>/dev/null; then
+      warn "loop is paused — schedule updated but not firing"
+      warn "loop 已暂停 —— 调度已更新但不会触发"
+    elif [[ -f "$_LOOP_MUTE_FILE" ]]; then
+      warn "loop is muted — schedule updated but not firing"
+      warn "loop 已静音 —— 调度已更新但不会触发"
+    fi
+  else
+    warn "config: schedule reload failed — yaml is saved; run \`roll loop on\` to apply"
+    warn "config：调度重载失败 —— yaml 已保存；运行 \`roll loop on\` 手工生效"
+  fi
+}
+
+cmd_config() {
+  local key="" value="" scope="" want_list=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h|help) _config_help; return 0 ;;
+      --list)         want_list=1 ;;
+      --global)       scope="global" ;;
+      --project)      scope="project" ;;
+      *)
+        if [[ -z "$key" ]]; then key="$1"
+        elif [[ -z "$value" ]]; then value="$1"
+        else err "config: unexpected argument '$1'"; err "config：多余参数 '$1'"; return 2
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  # US-LOOP-034 facade subcommands: translate a compact string into low-level
+  # key/value writes. Scope defaults to project (loop schedule lives there).
+  case "$key" in
+    loop-window|loop-schedule)
+      local fscope="$scope"; [[ -z "$fscope" ]] && fscope="project"
+      ROLL_CFG_SCOPE="$fscope"
+      local _rc
+      if [[ "$key" == "loop-window" ]]; then
+        _config_loop_window "$value"; _rc=$?
+      else
+        _config_loop_schedule "$value"; _rc=$?
+      fi
+      # US-LOOP-036: auto-reload only on a successful write (value supplied).
+      [[ $_rc -eq 0 && -n "$value" ]] && _config_reload_schedule
+      return $_rc
+      ;;
+    dream-time|brief-time)
+      # dream/brief schedule keys are global-scoped (~/.roll/config.yaml).
+      local fscope="$scope"; [[ -z "$fscope" ]] && fscope="global"
+      ROLL_CFG_SCOPE="$fscope"
+      local _rc
+      _config_daily_time "${key%-time}" "$value"; _rc=$?
+      [[ $_rc -eq 0 && -n "$value" ]] && _config_reload_schedule
+      return $_rc
+      ;;
+  esac
+
+  # --list: tabulate every key with value + source
+  if [[ -n "$want_list" ]]; then
+    local k v src resolved
+    while IFS= read -r k; do
+      resolved=$(_config_resolve "$k")
+      v="${resolved%%$'\t'*}"; src="${resolved#*$'\t'}"
+      printf '  %-30s = %-8s (%s)\n' "$k" "$v" "$src"
+    done < <(_config_list_keys)
+    return 0
+  fi
+
+  if [[ -z "$key" ]]; then
+    _config_help
+    return 0
+  fi
+
+  if ! _config_key_record "$key" >/dev/null; then
+    err "config: unknown key '$key'"
+    err "config：未知 key '$key'"
+    err "Try: roll config --list"
+    return 2
+  fi
+
+  # Read mode: no value supplied
+  if [[ -z "$value" ]]; then
+    local resolved v src
+    resolved=$(_config_resolve "$key")
+    v="${resolved%%$'\t'*}"; src="${resolved#*$'\t'}"
+    printf '%s = %s  (from %s)\n' "$key" "$v" "$src"
+    return 0
+  fi
+
+  # Write mode
+  _config_validate "$key" "$value" || return $?
+  [[ -z "$scope" ]] && scope="project"
+  local record key_scope file
+  record=$(_config_key_record "$key")
+  IFS='|' read -r _ key_scope _ _ _ _ <<<"$record"
+  if [[ "$scope" == "global" ]]; then
+    file="$ROLL_CONFIG"
+  else
+    file=".roll/local.yaml"
+  fi
+  _config_set "$key" "$value" "$file"
+  ok "✓ set $key = $value in $file"
+  # US-LOOP-036: every recognized config key is a loop/dream/brief schedule key
+  # (display-only keys are out of scope for this command), so a successful write
+  # always reloads the launchd plists.
+  _config_reload_schedule
+  return 0
+}
+
 cmd_slides() {
   local subcmd="${1:-}"
   shift || true
@@ -4624,25 +5570,61 @@ cmd_review_pr() {
   esac
 }
 
+# US-AGENT-025: recent degradation traces for the `roll agent` view.
+#
+# Scans the tail of runs.jsonl for rows that carry a non-empty `fallback_from`
+# and prints one "<tier> <intended-agent> <ran-agent>" line per degradation,
+# newest first, capped at LIMIT (default 5). The intended agent is the
+# `fallback_from` field (the agent the tier router originally picked); the ran
+# agent is the row's `agent` field (the fallback that actually executed).
+#
+# Honors ROLL_AGENT_RUNS_FILE (tests) over the live _LOOP_RUNS path. Prints
+# nothing (exit 0) when there is no runs.jsonl, no jq, or no fallback rows.
+_agent_view_recent_fallbacks() {
+  local limit="${1:-5}"
+  local runs_file="${ROLL_AGENT_RUNS_FILE:-$_LOOP_RUNS}"
+  [ -n "$runs_file" ] && [ -f "$runs_file" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  # tail then reverse so newest degradations come first; jq filters rows that
+  # actually fell back. tier may be absent on older rows → default to "?".
+  tail -n 200 "$runs_file" 2>/dev/null \
+    | jq -r 'select((.fallback_from // "") != "")
+             | "\(.tier // "?") \(.fallback_from) \(.agent // "?")"' 2>/dev/null \
+    | tail -n "$limit" \
+    | sed '1!G;h;$!d'
+}
+
 cmd_agent() {
   local subcmd="${1:-}"; shift || true
   case "$subcmd" in
     use)
+      # US-AGENT-027: one-shot lock of the three complexity tiers to a single
+      # agent. Backward-compatible semantics: `roll agent use claude` still
+      # "works", but its meaning is upgraded from a single per-project agent
+      # pref to "lock easy/default/hard". The `fallback` slot is intentionally
+      # left untouched so a degraded run still has somewhere to go.
       local name="${1:-}"
-      [[ -z "$name" ]] && { err "Usage: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|antigravity>"; exit 1; }
+      [[ -z "$name" ]] && { err "$(msg agent.use_usage)"; exit 1; }
       # Collapse Antigravity aliases (antigravity / legacy gemini) to canonical agy.
       name="$(_canonical_agent_name "$name")"
-      if [[ "$name" == openai ]]; then
-        command -v codex &>/dev/null || warn "openai agent requires the Codex CLI. Install: npm install -g @openai/codex"
-      elif [[ "$name" == agy ]]; then
-        command -v agy &>/dev/null || command -v gemini &>/dev/null || warn "antigravity agent requires the Antigravity CLI (agy). Install: npm install -g @antigravity/agy"
-      else
-        command -v "$name" &>/dev/null || warn "$(msg agent.not_found_in_path_setting_anyway "$name")"
+      # Reject unknown OR uninstalled agents up front — `use` locks the routing
+      # config, so naming an agent this machine cannot run is a hard error
+      # (unlike `set`, `use` is the "I only have one agent" shortcut).
+      if ! _agent_is_known "$name" || ! _agent_installed_by_name "$name"; then
+        err "$(msg agent.use_unknown_agent "$name")"; exit 1
       fi
-      # REFACTOR-040: write to .roll/local.yaml (per-machine state). Migrate
-      # from legacy .roll.yaml in the project root on the spot — copy the
-      # value over once, then delete the old file so the root stays clean.
       mkdir -p .roll
+      # Lock the three complexity tiers; leave fallback alone. Each write is
+      # atomic (temp file → mv) inside _agents_config_set_slot.
+      local slot
+      for slot in easy default hard; do
+        if ! _agents_config_set_slot "$slot" "$name"; then
+          err "$(msg agent.set_write_failed "$slot")"; exit 1
+        fi
+      done
+      # Back-compat: keep the legacy single-agent pref (.roll/local.yaml) in
+      # sync so code paths still reading _project_agent see the same agent.
+      # Migrate / clean the old project-root .roll.yaml on the spot.
       local pref; pref=$(_project_agent_pref_file)
       if [[ -f "$pref" ]] && grep -q "^agent:" "$pref"; then
         local tmp; tmp=$(mktemp) && sed "s/^agent:.*/agent: ${name}/" "$pref" > "$tmp" && mv "$tmp" "$pref"
@@ -4650,16 +5632,12 @@ cmd_agent() {
         echo "agent: ${name}" >> "$pref"
       fi
       if [[ -f ".roll.yaml" ]]; then
-        # Drop legacy agent line; remove the file if it's left empty (covers
-        # the common case where .roll.yaml only ever held the agent pref).
-        # grep -v returns 1 when nothing remains after filtering — that's a
-        # success here, so suppress the exit code so the mv still runs.
         local tmp; tmp=$(mktemp)
         grep -v "^agent:" .roll.yaml > "$tmp" 2>/dev/null || true
         mv "$tmp" .roll.yaml
         [[ -s ".roll.yaml" ]] || rm -f .roll.yaml
       fi
-      ok "$(msg agent.agent_set_to_for_this_project "$(_agent_display_name "$name")")"
+      ok "$(msg agent.use_locked "$(_agent_display_name "$name")")"
       local project_path; project_path=$(pwd -P)
       local slug; slug=$(_project_slug "$project_path")
       local runner="${_SHARED_ROOT}/loop/run-${slug}.sh"
@@ -4667,6 +5645,71 @@ cmd_agent() {
         _install_launchd_plists "$project_path" >/dev/null
         ok "$(msg agent.loop_runner_scripts_regenerated_for_new)"
       fi
+      ;;
+    set)
+      # US-AGENT-026: cascade interactive picker (slot → agent) with a
+      # non-interactive `set <slot> <agent>` shortcut for pipes/CI. No model
+      # layer — picking the agent settles the slot (the agent's own default
+      # model is used). Writes back to .roll/agents.yaml (atomic, comments
+      # preserved).
+      local slot="${1:-}" agent="${2:-}"
+      local valid_slots="easy default hard fallback"
+
+      # ── Slot selection ────────────────────────────────────────────────
+      if [[ -z "$slot" ]]; then
+        {
+          echo "$(msg agent.set_pick_slot)"
+          local i=1 s
+          for s in $valid_slots; do
+            printf "    %d) %s\n" "$i" "$s"; i=$((i + 1))
+          done
+          printf "  $(msg agent.set_enter_number) [1-4]: "
+        } >&2
+        local choice
+        if ! IFS= read -r choice; then
+          err "$(msg agent.set_no_input)"; exit 1
+        fi
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > 4 )); then
+          err "$(msg agent.set_invalid_choice "$choice")"; exit 1
+        fi
+        slot=$(echo "$valid_slots" | cut -d' ' -f"$choice")
+      else
+        # Validate a slot passed on the command line.
+        local ok_slot=""
+        local s
+        for s in $valid_slots; do [[ "$s" == "$slot" ]] && ok_slot=1; done
+        if [[ -z "$ok_slot" ]]; then
+          err "$(msg agent.set_unknown_slot "$slot")"; exit 1
+        fi
+      fi
+
+      # ── Agent selection ───────────────────────────────────────────────
+      if [[ -z "$agent" ]]; then
+        # Build the candidate list: installed AND online agents only.
+        local -a online=()
+        local cand
+        while IFS= read -r cand; do
+          [[ -z "$cand" ]] && continue
+          if _agent_available "$cand" >/dev/null 2>&1; then
+            online+=("$cand")
+          fi
+        done < <(_agents_installed)
+        if [[ ${#online[@]} -eq 0 ]]; then
+          err "$(msg agent.set_no_online_agents)"; exit 1
+        fi
+        agent=$(_onboard_select_agent "${online[@]}") || { err "$(msg agent.set_no_input)"; exit 1; }
+      else
+        # Non-interactive value: validate it is a known agent name.
+        agent="$(_canonical_agent_name "$agent")"
+        if ! _agent_is_known "$agent"; then
+          err "$(msg agent.set_unknown_agent "$agent")"; exit 1
+        fi
+      fi
+
+      if ! _agents_config_set_slot "$slot" "$agent"; then
+        err "$(msg agent.set_write_failed "$slot")"; exit 1
+      fi
+      ok "$(msg agent.set_saved "$slot" "$(_agent_display_name "$agent")")"
       ;;
     list)
       echo ""; echo "  $(msg agent.available_agents)"; echo ""
@@ -4683,19 +5726,62 @@ cmd_agent() {
       done; echo ""
       ;;
     "")
-      local agent; agent=$(_project_agent)
-      local src="global"
-      local pref; pref=$(_project_agent_pref_file)
-      if [[ -f "$pref" ]] && grep -q "^agent:" "$pref" 2>/dev/null; then
-        src="project (.roll/local.yaml)"
-      elif [[ -f ".roll.yaml" ]] && grep -q "^agent:" .roll.yaml 2>/dev/null; then
-        src="project (.roll.yaml, legacy — run \`roll agent use\` to migrate)"
+      # US-AGENT-025: four-slot complexity-routing view — slot / agent /
+      # online status (✓/✗) / note, plus the fallback slot (idle vs active)
+      # and any recent runs.jsonl degradation traces.
+      echo ""; echo "  $(msg agent.view_header)"; echo ""
+      if ! _agents_config_path >/dev/null 2>&1; then
+        echo -e "    ${YELLOW}$(msg agent.view_no_config)${NC}"
+        echo "    $(msg agent.view_no_config_hint)"; echo ""
+        return 0
       fi
-      echo -e "\n  Agent  ${CYAN}$(_agent_display_name "$agent")${NC}  (${src})\n"
-      echo "  roll agent use <name>   — switch agent for this project"
-      echo "  roll agent list         — show installed agents"; echo ""
+      printf '    %-9s %-22s %-8s %s\n' \
+        "$(msg agent.view_col_slot)" "$(msg agent.view_col_agent)" \
+        "$(msg agent.view_col_status)" "$(msg agent.view_col_note)"
+      # Is any slot's agent currently serving as the active fallback?
+      local fb_active=""
+      if [[ -n "$(_agent_view_recent_fallbacks 1)" ]]; then fb_active=1; fi
+      local slot agent disp status_cell note
+      for slot in easy default hard fallback; do
+        agent=$(_agents_config_slot "$slot" 2>/dev/null || true)
+        note=""
+        if [[ -z "$agent" ]]; then
+          disp="$(msg agent.view_slot_unset)"
+          status_cell="-"
+        else
+          disp="$(_agent_display_name "$agent")"
+          if _agent_available "$agent" >/dev/null 2>&1; then
+            status_cell="$(echo -e "${GREEN}✓${NC}")"
+          else
+            status_cell="$(echo -e "${RED}✗${NC}")"
+          fi
+        fi
+        if [[ "$slot" == "fallback" ]]; then
+          if [[ -n "$fb_active" ]]; then
+            note="$(msg agent.view_fallback_active)"
+          else
+            note="$(msg agent.view_fallback_idle)"
+          fi
+        fi
+        printf '    %-9s %-22s %-8b %s\n' "$slot" "$disp" "$status_cell" "$note"
+      done
+      echo ""
+      # Recent degradation traces (newest first).
+      local degr; degr=$(_agent_view_recent_fallbacks 5)
+      if [[ -n "$degr" ]]; then
+        echo "  $(msg agent.view_recent_downgrades)"
+        local tier from ran
+        while read -r tier from ran; do
+          [[ -z "$tier" ]] && continue
+          echo "    $(msg agent.view_downgrade_line "$tier" "$from" "$ran")"
+        done <<< "$degr"
+        echo ""
+      fi
+      echo "  roll agent set <slot> <agent>   — set the agent for a slot"
+      echo "  roll agent use <name>           — switch agent for this project"
+      echo "  roll agent list                 — show installed agents"; echo ""
       ;;
-    *) err "Unknown subcommand: $subcmd"; echo "Usage: roll agent [use <name>|list]"; exit 1 ;;
+    *) err "Unknown subcommand: $subcmd"; echo "Usage: roll agent [set <slot> <agent>|use <name>|list]"; exit 1 ;;
   esac
 }
 
@@ -5493,7 +6579,102 @@ else
 fi
 # FIX-065: was hardcoded to ${HOME}/.shared/roll/loop/runs.jsonl which ignored
 # _SHARED_ROOT overrides and silently leaked test runs.jsonl writes into prod.
+# US-LOOP-020: this remains the legacy shared-root path for backward-compatible
+# reads / migration only. New cycle rows land in the project-local runs.jsonl
+# (see _runs_append + _loop_runs_file). Tests still override _LOOP_RUNS directly.
 _LOOP_RUNS="${_SHARED_ROOT}/loop/runs.jsonl"
+
+# US-LOOP-020: resolve the *current project's* runs.jsonl for read-side commands
+# (`roll loop runs`, --detail, signals, backfill). Resolution order:
+#   1. ROLL_PROJECT_RUNTIME_DIR env (test sandbox) → <dir>/runs.jsonl
+#   2. <current project>/.roll/loop/runs.jsonl  (the project we are invoked in)
+# Tests that set _LOOP_RUNS directly are honored by callers that read it; this
+# helper is for the live, project-local path. Prints the path; never fails.
+_loop_runs_file() {
+  if [[ -n "${ROLL_PROJECT_RUNTIME_DIR:-}" ]]; then
+    echo "${ROLL_PROJECT_RUNTIME_DIR}/runs.jsonl"
+    return 0
+  fi
+  # An explicit _LOOP_RUNS override (set by tests, or pointed at a custom path)
+  # wins over the live project-local default — but only when it diverges from
+  # the shared-root default. Otherwise resolve the current project's file.
+  if [[ -n "${_LOOP_RUNS:-}" && "${_LOOP_RUNS}" != "${_SHARED_ROOT}/loop/runs.jsonl" ]]; then
+    echo "${_LOOP_RUNS}"
+    return 0
+  fi
+  local proj; proj="${ROLL_MAIN_PROJECT:-$(pwd -P)}"
+  echo "${proj}/.roll/loop/runs.jsonl"
+}
+
+# US-LOOP-020: enumerate every loop-registered project and emit the union of
+# their .roll/loop/runs.jsonl rows as one newline-separated jsonl stream,
+# sorted oldest→newest by .ts (caller reverses for newest-first display).
+# Project enumeration uses the launchd plist registry on macOS (same source as
+# _status_loop_overview); on Linux (no plists) it falls back to the current
+# project's local file. A test sandbox can point the whole machine at one dir
+# via ROLL_PROJECT_RUNTIME_DIR, or list extra files via ROLL_LOOP_RUNS_ALL_DIRS
+# (':'-separated runtime dirs) for cross-project fixtures without launchd.
+_loop_runs_aggregate_all() {
+  command -v jq >/dev/null 2>&1 || return 0
+  # US-LOOP-020 hook point: ROLL_LOOP_RUNS_CACHE_TTL (default 0 = no cache).
+  # Reserved for a future caching layer over the cross-project merge; the
+  # default 0 means every call re-reads live files. No implementation built yet.
+  : "${ROLL_LOOP_RUNS_CACHE_TTL:=0}"
+  # Candidate runs.jsonl files, one per line. Built from the project registry,
+  # then deduped exactly (newline-bounded membership — no substring aliasing).
+  local _candidates=""
+  if [[ -n "${ROLL_LOOP_RUNS_ALL_DIRS:-}" ]]; then
+    # Explicit fixture dirs (tests) take precedence and avoid touching launchd.
+    local _oldifs="$IFS"; IFS=':'
+    local _d
+    for _d in ${ROLL_LOOP_RUNS_ALL_DIRS}; do
+      _candidates="${_candidates}${_d}/runs.jsonl
+"
+    done
+    IFS="$_oldifs"
+  elif [[ -n "${ROLL_PROJECT_RUNTIME_DIR:-}" ]]; then
+    _candidates="${ROLL_PROJECT_RUNTIME_DIR}/runs.jsonl
+"
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    local _plist _proj
+    while IFS= read -r _plist; do
+      [[ -f "$_plist" ]] || continue
+      _proj=$(awk '/<key>WorkingDirectory<\/key>/{f=1;next} f{gsub(/^[[:space:]]*<string>|<\/string>[[:space:]]*$/,"");print;exit}' "$_plist" 2>/dev/null)
+      [[ -n "$_proj" ]] || continue
+      _candidates="${_candidates}${_proj}/.roll/loop/runs.jsonl
+"
+    done < <(ls "${_LAUNCHD_DIR}"/com.roll.loop.*.plist 2>/dev/null)
+  fi
+  # Always include the current project's file as a fallback / supplement.
+  _candidates="${_candidates}$(_loop_runs_file)
+"
+
+  # Dedup (exact, newline-bounded) + keep only non-empty existing files.
+  local files="" seen="
+"
+  local _f
+  while IFS= read -r _f; do
+    [[ -n "$_f" && -f "$_f" && -s "$_f" ]] || continue
+    case "$seen" in *"
+${_f}
+"*) continue ;; esac
+    seen="${seen}${_f}
+"
+    files="${files}${_f}
+"
+  done <<EOF
+$_candidates
+EOF
+
+  [[ -n "$files" ]] || return 0
+
+  # Merge + stable sort by ts (rows lacking ts sort first). jq's sort_by is a
+  # stable sort, so same-ts rows keep file/encounter order.
+  printf '%s' "$files" | while IFS= read -r _f; do
+    [[ -n "$_f" ]] || continue
+    cat "$_f"
+  done | jq -c '.' 2>/dev/null | jq -s -c 'sort_by(.ts // "") | .[]' 2>/dev/null
+}
 
 # ──────────────────────────────────────────────────────────────
 # US-LOOP-018: _loop_resolve_project_path + _loop_runtime_dir
@@ -5578,6 +6759,77 @@ _loop_runtime_dir() {
   echo "${proj}/.roll/loop"
 }
 
+# US-LOOP-040: render this cycle's exit summary to stdout for the .command
+# Terminal window (after tmux attach exits, before `press enter to close`).
+# Pure read-side view: resolves the project-local runs.jsonl / events.ndjson /
+# backlog / cron log, then delegates rendering to lib/loop-exit-summary.py.
+#
+# Usage: _loop_render_exit_summary <slug> [<cycle_id>]
+#
+# AC: silent fallback — when python3 is missing, the renderer script is absent,
+# or any source is broken, this MUST return 0 (never blocks `press enter`).
+_loop_render_exit_summary() {
+  local slug="${1:-}"
+  local cycle_id="${2:-}"
+  [ -n "$slug" ] || return 0
+
+  local renderer="${ROLL_PKG_DIR}/lib/loop-exit-summary.py"
+  [ -f "$renderer" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  # Resolve the project-local runtime dir (honors ROLL_PROJECT_RUNTIME_DIR for
+  # tests); fall back to the shared root for transient slugs.
+  local rt_dir
+  rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  local shared="${_SHARED_ROOT:-$HOME/.shared/roll}/loop"
+
+  local runs="" events="" cron_log=""
+  if [ -n "$rt_dir" ] && [ -f "${rt_dir}/runs.jsonl" ]; then
+    runs="${rt_dir}/runs.jsonl"
+  elif [ -f "${shared}/runs.jsonl" ]; then
+    runs="${shared}/runs.jsonl"
+  fi
+  if [ -n "$rt_dir" ] && [ -f "${rt_dir}/events.ndjson" ]; then
+    events="${rt_dir}/events.ndjson"
+  elif [ -f "${shared}/events-${slug}.ndjson" ]; then
+    events="${shared}/events-${slug}.ndjson"
+  fi
+  # cron log lives under the shared root (per-project file).
+  if [ -f "${shared}/cron-${slug}.log" ]; then
+    cron_log="${shared}/cron-${slug}.log"
+  fi
+
+  # ALERT-<slug>.md drives the yellow ⚠ highlight (US-LOOP-041). Project-local
+  # control-plane file first, shared root as fallback.
+  local alert=""
+  if [ -n "$rt_dir" ] && [ -f "${rt_dir}/ALERT-${slug}.md" ]; then
+    alert="${rt_dir}/ALERT-${slug}.md"
+  elif [ -f "${shared}/ALERT-${slug}.md" ]; then
+    alert="${shared}/ALERT-${slug}.md"
+  fi
+
+  # Backlog: project-local .roll/backlog.md relative to the resolved runtime dir.
+  local backlog=""
+  if [ -n "$rt_dir" ]; then
+    local _proj_root="${rt_dir%/.roll/loop}"
+    [ -f "${_proj_root}/.roll/backlog.md" ] && backlog="${_proj_root}/.roll/backlog.md"
+  fi
+  [ -z "$backlog" ] && [ -f ".roll/backlog.md" ] && backlog=".roll/backlog.md"
+
+  local _args
+  _args=""
+  [ -n "$runs" ] && _args="$_args --runs $runs"
+  [ -n "$events" ] && _args="$_args --events $events"
+  [ -n "$backlog" ] && _args="$_args --backlog $backlog"
+  [ -n "$cron_log" ] && _args="$_args --cron-log $cron_log"
+  [ -n "$alert" ] && _args="$_args --alert $alert"
+  [ -n "$cycle_id" ] && _args="$_args --cycle-id $cycle_id"
+
+  # shellcheck disable=SC2086 — args are space-free paths assembled above.
+  python3 "$renderer" $_args 2>/dev/null || return 0
+  return 0
+}
+
 # ──────────────────────────────────────────────────────────────
 # US-LOOP-019: _loop_migrate_legacy_paths — one-shot migration of
 # control-plane files (state / ALERT / PAUSE / mute) from legacy
@@ -5618,6 +6870,63 @@ _loop_migrate_legacy_paths() {
     cp "$legacy" "$target"
     mv "$legacy" "${legacy}.migrated-${ts}"
   done
+  return 0
+}
+
+# ──────────────────────────────────────────────────────────────
+# US-LOOP-020: _loop_migrate_legacy_runs — one-shot migration of the
+# legacy machine-wide ~/.shared/roll/loop/runs.jsonl into per-project
+# .roll/loop/runs.jsonl, split by each row's `project` slug. Rows whose
+# project slug cannot be resolved to a runtime dir are left behind so no
+# history is lost. After splitting, the legacy file is renamed to
+# runs.jsonl.migrated-<ts> (GC reaps it after 7 days). Idempotent: the
+# rename makes a second run a no-op. Called by the outer runner at startup.
+# ──────────────────────────────────────────────────────────────
+# _loop_migrate_legacy_runs [<legacy_runs_file>]
+_loop_migrate_legacy_runs() {
+  local legacy="${1:-${_SHARED_ROOT:-$HOME/.shared/roll}/loop/runs.jsonl}"
+  [[ -f "$legacy" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  local ts; ts=$(date +%s)
+  # Distinct project slugs present in the legacy file (skip empty/null).
+  local projects; projects=$(jq -r '.project // empty' "$legacy" 2>/dev/null | sort -u)
+  [[ -n "$projects" ]] || { mv "$legacy" "${legacy}.migrated-${ts}" 2>/dev/null || true; return 0; }
+
+  local _unresolved=0
+  local _p
+  while IFS= read -r _p; do
+    [[ -n "$_p" ]] || continue
+    local _rt; _rt=$(_loop_runtime_dir "$_p" 2>/dev/null || echo "")
+    if [[ -z "$_rt" ]]; then
+      _unresolved=1
+      continue
+    fi
+    mkdir -p "$_rt"
+    local _dst="${_rt}/runs.jsonl"
+    # Append only rows not already present (dedup by run_id) — idempotent even
+    # if a partial migration ran before.
+    local _rows; _rows=$(jq -c --arg p "$_p" 'select(.project == $p)' "$legacy" 2>/dev/null)
+    local _line
+    while IFS= read -r _line; do
+      [[ -n "$_line" ]] || continue
+      local _rid; _rid=$(printf '%s' "$_line" | jq -r '.run_id // ""' 2>/dev/null)
+      if [[ -n "$_rid" ]] && grep -qF "\"run_id\":\"$_rid\"" "$_dst" 2>/dev/null; then
+        continue
+      fi
+      printf '%s\n' "$_line" >> "$_dst"
+    done <<EOF
+$_rows
+EOF
+  done <<EOF
+$projects
+EOF
+
+  # Only retire the legacy file once every project resolved; otherwise keep it
+  # so the next cycle can retry the unresolved slugs.
+  if [[ "$_unresolved" -eq 0 ]]; then
+    mv "$legacy" "${legacy}.migrated-${ts}" 2>/dev/null || true
+  fi
   return 0
 }
 
@@ -5946,6 +7255,61 @@ _loop_event_rotate() {
   fi
 }
 
+# US-OBS-014: after a loop cycle reaches a terminal cycle_end (done or idle),
+# fire a best-effort, background status-snapshot push to roll-meta so the
+# remote-watch prompt always sees ≤35min-fresh data — no user-side cron needed.
+#
+# Reads the optional `roll_meta_dir` config key (config_get already ~-expands).
+# Fully skips with zero output when it is unset. When set but the directory is
+# missing, prints one WARNING (the inner runner redirects stdout/stderr to
+# cron.log) and skips. The push script itself is invoked in the background and
+# is hard-killed after 60s; any failure/timeout is logged to push-status.log
+# (rotated at 1MB, keeping 2 copies) and never aborts the cycle or sets an ALERT.
+_loop_push_status_snapshot() {
+  local meta_dir
+  meta_dir=$(config_get roll_meta_dir "")
+  # Unconfigured → complete no-op, zero output (preserves prior behaviour).
+  [ -z "$meta_dir" ] && return 0
+  if [ ! -d "$meta_dir" ]; then
+    echo "WARNING: roll_meta_dir '${meta_dir}' does not exist; skipping status push" >&2
+    return 0
+  fi
+  local script="${meta_dir}/ops/push-loop-status.sh"
+  # Configured dir exists but the push script isn't there (e.g. older roll-meta
+  # checkout) → silent skip; nothing to push.
+  [ -f "$script" ] || return 0
+
+  local logf="${_SHARED_ROOT:-${HOME}/.shared/roll}/push-status.log"
+  mkdir -p "$(dirname "$logf")" 2>/dev/null || true
+  # Rotate at 1MB, keep 2 copies (.1) — same policy as watch.sh's push log.
+  local _sz
+  _sz=$(stat -f%z "$logf" 2>/dev/null || stat -c%s "$logf" 2>/dev/null || echo 0)
+  if [ "$_sz" -gt 1048576 ]; then
+    rm -f "${logf}.2"
+    [ -f "${logf}.1" ] && mv "${logf}.1" "${logf}.2"
+    mv "$logf" "${logf}.1"
+    touch "$logf"
+  fi
+
+  # Background, best-effort. A portable watchdog hard-kills the push after 60s
+  # (`timeout` is GNU-only and absent on stock macOS) so a hung git push can
+  # never stall the next cycle.
+  (
+    bash "$script" "$meta_dir" >> "$logf" 2>&1 &
+    local _push_pid=$!
+    local _waited=0
+    while kill -0 "$_push_pid" 2>/dev/null; do
+      if [ "$_waited" -ge 60 ]; then
+        kill -TERM "$_push_pid" 2>/dev/null
+        echo "$(date '+%Y-%m-%dT%H:%M:%S%z') push-loop-status timeout (>60s); killed pid ${_push_pid}" >> "$logf"
+        break
+      fi
+      sleep 1
+      _waited=$((_waited + 1))
+    done
+  ) &
+}
+
 # FIX-050: probe brew prefix + common tool dirs to build a PATH that survives
 # launchd/cron's bare-env launch. Setup-time companion to the runtime
 # assembly snippet embedded in runner scripts.
@@ -6027,16 +7391,33 @@ _write_launchd_plist() {
   # a second layer (covers stale plists where brew was installed after setup).
   local path_value; path_value=$(_detect_path_prepend)
 
-  # FIX-105: macOS 26.4 launchd silently refuses to fire StartCalendarInterval
-  # entries that contain BOTH Hour and Minute keys. Daily services use
-  # StartInterval=86400 instead.
-  # US-LOOP-032: all loop services use StartInterval = period * 60 (was
-  # StartCalendarInterval with slot enumeration). Non-divisor periods are now
-  # supported.
+  # FIX-105 / US-LOOP-035: macOS 26.4 launchd silently refuses to fire a
+  # single-dict StartCalendarInterval that contains BOTH Hour and Minute keys.
+  # The original FIX-105 workaround forced daily services to StartInterval=86400,
+  # which drifts the fire time off the configured HH:MM. US-LOOP-035 resolves it
+  # with the *array-style* StartCalendarInterval (one-element array of a dict) —
+  # launchd honors Hour+Minute when wrapped in an array. Set
+  # ROLL_DREAM_LEGACY_INTERVAL=1 to fall back to the legacy StartInterval=86400
+  # workaround (rollback channel if the array form ever regresses).
+  # US-LOOP-032: non-daily loop services use StartInterval = period * 60.
   local schedule_xml
   if [[ -n "$hour" ]]; then
-    schedule_xml="  <key>StartInterval</key>
+    if [[ "${ROLL_DREAM_LEGACY_INTERVAL:-}" == "1" ]]; then
+      schedule_xml="  <key>StartInterval</key>
   <integer>86400</integer>"
+    else
+      # Daily services carry the fire minute in $offset ($5); $hour is $6.
+      local cal_minute="${offset:-0}"
+      schedule_xml="  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Hour</key>
+      <integer>${hour}</integer>
+      <key>Minute</key>
+      <integer>${cal_minute}</integer>
+    </dict>
+  </array>"
+    fi
   else
     # US-LOOP-032: StartInterval in seconds = period_minutes * 60
     local interval=$(( period * 60 ))
@@ -6107,6 +7488,9 @@ _write_loop_runner_script() {
   # exactly once per cycle (loop-fmt passthrough is display-only).
   local pi_emit_script="${ROLL_PKG_DIR}/lib/agent_usage/pi_emit.py"
   local roll_bin="${ROLL_PKG_DIR}/bin/roll"
+  # US-EVAL-002: pure-function rubric scorer (US-EVAL-001). Baked in at
+  # generation time so the inner runner can compute result_eval at cycle finish.
+  local eval_script="${ROLL_PKG_DIR}/lib/loop_result_eval.py"
   # FIX-041: loop cycle is autonomous — permission prompts and sandbox path
   # restrictions only cause the cycle to burn turns asking for approvals
   # it cannot receive. Bypass all permission checks for the inner claude
@@ -6286,7 +7670,15 @@ _runs_append() {
   # leaks a trailing \} into a real 4th arg ("{...}}"). Test explicit empty.
   local _phases_json="\${4:-}"
   [ -z "\$_phases_json" ] && _phases_json="{}"
-  local _runs_dst="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/runs.jsonl"
+  # US-LOOP-020: write the cycle row to the project-local runs.jsonl so each
+  # project owns its own cycle history. Falls back to the shared root only for
+  # transient slugs where _LOOP_RT_DIR could not be resolved at startup.
+  local _runs_dst
+  if [ -n "\${_LOOP_RT_DIR:-}" ]; then
+    _runs_dst="\${_LOOP_RT_DIR}/runs.jsonl"
+  else
+    _runs_dst="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/runs.jsonl"
+  fi
   command -v jq >/dev/null 2>&1 || return 0
   local _cid="\${CYCLE_ID:-pre-cycle-\$\$}"
   local _rid="loop-\${_cid%-*}"
@@ -6312,17 +7704,65 @@ _runs_append() {
   # status-page summaries have data to aggregate. Empty when not routed.
   local _agent_field="\${ROLL_LOOP_ROUTED_AGENT:-\${CYCLE_AGENT:-}}"
   local _story_field="\${ROLL_LOOP_ROUTED_STORY:-}"
+  # US-AGENT-023: the routed complexity tier (easy/default/hard). The router
+  # writes the tier into ROLL_LOOP_ROUTED_RULE (field 2 of the route line), so
+  # surface it as a first-class runs.jsonl column alongside the routed agent.
+  local _tier_field="\${ROLL_LOOP_ROUTED_RULE:-}"
+  # US-AGENT-024: when a fallback fired, ROLL_LOOP_FALLBACK_FROM holds the
+  # original (offline) agent so the run row records the degradation.
+  local _fallback_from_field="\${ROLL_LOOP_FALLBACK_FROM:-}"
   local _stype_field=""
   if [ -n "\$_story_field" ]; then
     _stype_field="\${_story_field%%-*}"
   fi
+  # US-EVAL-002: compute the objective result_eval block from this cycle's
+  # facts via the US-EVAL-001 pure-function rubric. Best-effort — when python3
+  # or the scorer script is unavailable the row is written WITHOUT result_eval
+  # (older rows have no such key; consumers treat its absence as "not scored").
+  #
+  # Facts adapter: translate the runner's terminal status vocabulary
+  # (idle/built/done/orphan/failed/aborted/blocked) into the rubric's facts
+  # shape. "done" is the only terminal that means the PR merged into main, so
+  # it maps to merged=true; every other terminal is merged=false. status=idle
+  # is passed through verbatim so scope_fidelity scores it as 0. An "orphan"
+  # terminal flags an orphan so cleanliness scores 0. CI verdict and est_min
+  # are not tracked at this layer, so they are intentionally left absent and
+  # the rubric records those dimensions as "unknown" (never a silent 0).
+  local _result_eval_json=""
+  local _eval_bin="\${_EVAL_SCRIPT:-}"
+  if [ -n "\$_eval_bin" ] && [ -f "\$_eval_bin" ] && command -v python3 >/dev/null 2>&1; then
+    local _merged_flag=false _orphans_json='[]'
+    case "\$_status" in
+      done) _merged_flag=true ;;
+      orphan) _orphans_json='["orphan"]' ;;
+    esac
+    local _facts_json
+    _facts_json=\$(jq -nc \\
+      --arg status "\$_status" \\
+      --arg routed_story "\$_story_field" \\
+      --argjson built "\$_built" \\
+      --argjson tcr_count "\$_tcr" \\
+      --argjson duration_sec "\$_dur" \\
+      --argjson merged "\$_merged_flag" \\
+      --argjson orphans "\$_orphans_json" \\
+      '{status:\$status, routed_story:\$routed_story, built:\$built,
+        tcr_count:\$tcr_count, duration_sec:\$duration_sec,
+        merged:\$merged, orphans:\$orphans}' 2>/dev/null) || _facts_json=""
+    if [ -n "\$_facts_json" ]; then
+      _result_eval_json=\$(printf '%s' "\$_facts_json" | python3 "\$_eval_bin" 2>/dev/null) || _result_eval_json=""
+    fi
+  fi
+  [ -n "\$_result_eval_json" ] || _result_eval_json="null"
   jq -nc \\
+    --argjson result_eval "\$_result_eval_json" \\
     --arg ts "\$_ts_now" \\
     --arg project "${slug}" \\
     --arg run_id "\$_rid" \\
     --arg status "\$_status" \\
     --arg cycle_id "\$_cid" \\
     --arg agent "\$_agent_field" \\
+    --arg tier "\$_tier_field" \\
+    --arg fallback_from "\$_fallback_from_field" \\
     --arg story_type "\$_stype_field" \\
     --argjson built "\$_built" \\
     --argjson skipped '[]' \\
@@ -6331,9 +7771,10 @@ _runs_append() {
     --argjson duration_sec "\$_dur" \\
     --argjson phases "\$_phases_json" \\
     '{ts:\$ts, project:\$project, run_id:\$run_id, status:\$status,
-      cycle_id:\$cycle_id, agent:\$agent, story_type:\$story_type,
-      built:\$built, skipped:\$skipped, alerts:\$alerts,
-      tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}' \\
+      cycle_id:\$cycle_id, agent:\$agent, tier:\$tier, fallback_from:\$fallback_from,
+      story_type:\$story_type, built:\$built, skipped:\$skipped, alerts:\$alerts,
+      tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}
+     + (if \$result_eval == null then {} else {result_eval:\$result_eval} end)' \\
     > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }
   cat "\$_tmp" >> "\$_runs_dst" 2>/dev/null || true
   rm -f "\$_tmp"
@@ -6512,6 +7953,9 @@ cd "${project_path}" 2>/dev/null || true
 _ensure_hooks_path "${project_path}" 2>/dev/null || true
 # US-LOOP-056: sync .roll/ meta from roll-meta remote before backlog scan
 _loop_sync_meta "${project_path}" || true
+# US-SYNC-008: when backlog_sync.on_loop_cycle is true, pull new GitHub issues
+# into the backlog before the story scan. Default off; fail-soft (ALERT only).
+_loop_backlog_sync_hook "${project_path}" || true
 # FIX-104: GC stale merged temp branches at cycle entry — before worktree setup
 # and before any early-exit gate (pre-run abort, CI red precheck). The post-claude
 # call site doesn't cover those paths, so merged branches accumulated on origin.
@@ -6585,6 +8029,7 @@ if _worktree_fetch_origin main \\
   ROLL_LOOP_ROUTED_AGENT=""
   ROLL_LOOP_ROUTED_RULE=""
   ROLL_LOOP_ROUTE_RATIONALE=""
+  ROLL_LOOP_FALLBACK_FROM=""
   ( cd "\$WT" >/dev/null 2>&1 && ROLL_LOOP_ROUTED_STORY=\$(_loop_pick_next_story 2>/dev/null) || true )
   ROLL_LOOP_ROUTED_STORY=\$( (cd "\$WT" 2>/dev/null && _loop_pick_next_story 2>/dev/null) || echo "" )
   if [ -n "\$ROLL_LOOP_ROUTED_STORY" ]; then
@@ -6595,6 +8040,21 @@ if _worktree_fetch_origin main \\
       ROLL_LOOP_ROUTE_RATIONALE=\$(echo "\$_route_line" | cut -d' ' -f3-)
       echo "[loop] story \${ROLL_LOOP_ROUTED_STORY} routed to \${ROLL_LOOP_ROUTED_AGENT} via \${ROLL_LOOP_ROUTED_RULE}"
       _loop_event story_routed "\${CYCLE_ID}" "\${ROLL_LOOP_ROUTED_STORY}" "\${ROLL_LOOP_ROUTED_AGENT}|\${ROLL_LOOP_ROUTED_RULE}" || true
+      # US-AGENT-024: mechanical fallback — if the routed agent is offline
+      # (no PATH / auth / network), swap to the fallback slot agent. When the
+      # fallback is also down, _loop_resolve_fallback_agent returns 2 after
+      # writing an ALERT; we leave the routed agent as-is so the cycle still
+      # records a terminal run (the ALERT is the operator-facing signal).
+      _fb_line=\$( (cd "\$WT" 2>/dev/null && _loop_resolve_fallback_agent "\$ROLL_LOOP_ROUTED_AGENT" 2>/dev/null) || echo "" )
+      if [ -n "\$_fb_line" ]; then
+        _fb_agent=\$(echo "\$_fb_line" | awk '{print \$1}')
+        ROLL_LOOP_FALLBACK_FROM=\$(echo "\$_fb_line" | awk '{print \$2}')
+        if [ -n "\$ROLL_LOOP_FALLBACK_FROM" ] && [ -n "\$_fb_agent" ]; then
+          echo "[loop] agent \${ROLL_LOOP_FALLBACK_FROM} unavailable; cycle falls back to \${_fb_agent}"
+          _loop_event agent_fallback "\${CYCLE_ID}" "\${ROLL_LOOP_FALLBACK_FROM}" "\${_fb_agent}" || true
+          ROLL_LOOP_ROUTED_AGENT="\$_fb_agent"
+        fi
+      fi
     fi
   fi
   CYCLE_AGENT="\${ROLL_LOOP_ROUTED_AGENT:-\$(_project_agent)}"
@@ -6617,6 +8077,9 @@ _runs_append "failed" 0 "[]" "\$_phases_t" 2>/dev/null || true
 fi
 
 FMT="${fmt_script}"
+# US-EVAL-002: path to the rubric scorer (US-EVAL-001), baked at generation
+# time. _runs_append reads it via \${_EVAL_SCRIPT:-} to compute result_eval.
+_EVAL_SCRIPT="${eval_script}"
 # US-LOOP-004: hand loop-fmt the slug + cycle id + shared root so it can
 # append a per-cycle 'usage' event into events-<slug>.ndjson with
 # tokens / cost / model / duration. Reader (roll loop status) consumes
@@ -6628,7 +8091,7 @@ export LOOP_SHARED_ROOT="\${_SHARED_ROOT:-\$HOME/.shared/roll}"
 # rendering: claude → stream-json parser, others → transparent passthrough.
 # US-AGENT-006: prefer the per-story routed agent (set above) when present.
 export ROLL_LOOP_AGENT="\${CYCLE_AGENT:-\$(_project_agent)}"
-export ROLL_LOOP_ROUTED_STORY ROLL_LOOP_ROUTED_AGENT ROLL_LOOP_ROUTED_RULE
+export ROLL_LOOP_ROUTED_STORY ROLL_LOOP_ROUTED_AGENT ROLL_LOOP_ROUTED_RULE ROLL_LOOP_FALLBACK_FROM
 _phase_begin agent_invoke
 # FIX-136: non-claude agents (pi/deepseek/kimi) buffer stdout when piped.
 # Force a pseudo-TTY via script(1) so loop-fmt.py's passthrough receives
@@ -6753,6 +8216,9 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       # this successful no-op as a failure on the dashboard.
       _loop_event cycle_end "\${CYCLE_ID}" "" "idle" || true
       _CYCLE_END_WRITTEN=1
+      # US-OBS-014: idle cycles push too — keeps the remote heartbeat fresh so
+      # remote-watch can tell "loop online but no work" apart from "loop offline".
+      _loop_push_status_snapshot || true
       _phases_idle=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_idle" ] && _phases_idle='{}'
       _runs_append "idle" 0 "[]" "\$_phases_idle" 2>/dev/null || true
       echo "[loop] cycle \${CYCLE_ID}: idle (no new commits); worktree cleaned"
@@ -6790,6 +8256,8 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
         _loop_emit_pr_final "\$BRANCH" 2>/dev/null || true
         _worktree_cleanup "\$WT" "\$BRANCH"
         _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true; _CYCLE_END_WRITTEN=1
+        # US-OBS-014: normal-completion path — push a fresh status snapshot.
+        _loop_push_status_snapshot || true
         _phase_end cleanup ok
         echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
       elif [ "\$_publish_status" -eq 2 ]; then
@@ -6854,6 +8322,10 @@ _phases_for_runs=\$(_phases_to_json 2>/dev/null || echo '{}')
 # US-LOOP-005: now routed through _runs_append so timeout/worktree-setup-fail
 # share the same write logic. _runs_append is idempotent on run_id.
 _runs_append "\$_cycle_status" "\$_cycle_tcr" "\$_cycle_built" "\$_phases_for_runs" 2>/dev/null || true
+# US-EVAL-004: after the scored row lands, surface any repeated low-score
+# pattern as a candidate draft (deduped, never auto-activated). Quiet so the
+# cycle log stays clean; failures here never affect the cycle outcome.
+_loop_signals --quiet 2>/dev/null || true
 trap '_inner_cleanup' EXIT
 INNER
   chmod +x "$inner_path"
@@ -6877,6 +8349,12 @@ fi
 # US-LOOP-019: migrate legacy control-plane files to project-local .roll/loop/.
 # Then resolve the runtime dir for all subsequent path lookups.
 _loop_migrate_legacy_paths "${slug}"
+# US-LOOP-020: one-shot split of the legacy machine-wide runs.jsonl into each
+# project's .roll/loop/runs.jsonl, then retire the legacy file. Idempotent.
+_loop_migrate_legacy_runs 2>/dev/null || true
+# US-AGENT-028: one-shot migrate legacy v1 agent-routes.yaml → v3 agents.yaml.
+# Idempotent + atomic — the running loop only sees the new config next cycle.
+_agents_migrate_v1_to_v3 2>/dev/null || true
 _LOOP_RT_DIR=\$(_loop_runtime_dir "${slug}" 2>/dev/null || echo "")
 
 # Pause check — 'roll loop pause' creates this marker to suspend scheduling
@@ -7021,8 +8499,13 @@ if command -v tmux >/dev/null 2>&1; then
     # user can scroll through the full cycle output instead of seeing nothing.
     # FIX-139: after the session ends, show ONLY this cycle's per-cycle log
     # (newest in .roll/cycle-logs/), not the global cumulative transcript.
-    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=\$(ls -t "%s"/.roll/cycle-logs/*.log 2>/dev/null | head -1)\\necho\\nif [ -n "\$LOGFILE" ] && [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing this cycle log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. Try: roll loop log"\\n  echo "  press enter to close."\\n  echo "================================================================"\\n  read _\\nfi\\n' \\
-      "\$SESSION" "${project_path}" > "\$_attach_cmd" 2>/dev/null || true
+    # US-LOOP-040: before the `press enter to close` prompt, render this
+    # cycle's exit summary (built/ci/todo/phases/alerts) so the user sees what
+    # happened without scrolling tmux scrollback or opening the cron log. The
+    # renderer is silent-fallback (python3 missing / broken JSON → no output,
+    # exit 0) so it can never block the prompt below.
+    printf '#!/bin/bash\\ntmux attach -t %s 2>/dev/null\\nLOGFILE=\$(ls -t "%s"/.roll/cycle-logs/*.log 2>/dev/null | head -1)\\necho\\nif [ -n "\$LOGFILE" ] && [ -f "\$LOGFILE" ]; then\\n  echo "================================================================"\\n  echo "  Cycle ended  —  showing this cycle log (arrows to scroll, q to close)"\\n  echo "================================================================"\\n  less -R +G "\$LOGFILE"\\nelse\\n  echo "================================================================"\\n  echo "  Cycle ended. Try: roll loop log"\\n  echo "================================================================"\\n  bash %s _loop_render_exit_summary %s 2>/dev/null || true\\n  echo\\n  echo "  press enter to close."\\n  read _\\nfi\\n' \\
+      "\$SESSION" "${project_path}" "${roll_bin}" "${slug}" > "\$_attach_cmd" 2>/dev/null || true
     chmod +x "\$_attach_cmd" 2>/dev/null || true
     open -g -a Terminal "\$_attach_cmd" >/dev/null 2>&1 || true
   fi
@@ -7261,6 +8744,8 @@ cmd_loop() {
     now)     _loop_now ;;
     test)    shift; _loop_test "$@" ;;
     status)  _loop_status "$@" ;;
+    eval)    _loop_eval "$@" ;;
+    signals) _loop_signals "$@" ;;
     monitor) _loop_monitor "${1:-3}" ;;
     runs)    _loop_runs "$@" ;;
     log)     _loop_log "$@" ;;
@@ -7288,6 +8773,8 @@ Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mu
   now           Run one cycle immediately
   test          Quick smoke test (tmux/popup/stream chain)
   status        Show scheduler state and current loop state
+  eval [N]      Result-eval trend over the last N scored cycles (default 14)
+  signals       Surface repeated low-score patterns as candidate drafts (📋 待人确认)
   monitor       Live dashboard: launchd status, queue, recent runs
   runs [N]      Show last N run summaries (default 10)
   log [id]      Show per-cycle log (default: latest; optional cycle-id or prefix)
@@ -7316,6 +8803,7 @@ Schedule is configured per-project in .roll/local.yaml:
     offset_minute: 7     # 0 – (period_minutes - 1)
 
 See guide/en/loop.md for full documentation.
+See 'roll config --help' for schedule configuration.
 HELP
       exit 1 ;;
   esac
@@ -7570,6 +9058,162 @@ _loop_test() {
     err "$(msg loop.smoke_test_failed_exit_s_agent ${exit_code} ${elapsed} ${agent})"
     return 1
   fi
+}
+
+# US-EVAL-003: `roll loop eval [N]` — objective result-eval trend over the last
+# N scored cycles. Reads each runs.jsonl record's `result_eval` block (written
+# by US-EVAL-002) and prints mean/min cycle score, per-dimension hit-rate, and a
+# trend arrow. Distinct from skill self-score. Delegates aggregation to the
+# Python view (--eval), which shares load_runs/result_eval logic with the dash.
+_loop_eval() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    cat <<'HELP'
+Usage: roll loop eval [N]
+
+  Result-eval trend over the last N scored cycles (default 14).
+  Reads each runs.jsonl record's result_eval block and reports the mean and
+  minimum cycle score (1..10), each rubric dimension's hit-rate, and a trend
+  arrow. Cycles without a result_eval (older schema) are skipped. With fewer
+  than 3 scored cycles, prints an "(n/a) need 3" notice.
+
+  近 N 轮 cycle 的结果评分趋势（默认 14）。
+  读取每条 runs.jsonl 的 result_eval，输出均分 / 最低分 / 各维度命中率 / 趋势箭头。
+  无 result_eval 的旧记录跳过；样本不足 3 个时提示 (n/a) need 3。
+
+Examples:
+  roll loop eval
+  roll loop eval 30
+HELP
+    return 0
+  fi
+  local n="${1:-}"
+  if [[ -n "$n" && ! "$n" =~ ^[0-9]+$ ]]; then
+    err "roll loop eval: N must be a positive integer (got '$n')"
+    return 1
+  fi
+  python3 "${ROLL_PKG_DIR}/lib/roll-loop-status.py" --eval ${n:+$n}
+}
+
+# US-EVAL-004: self-evolution signals — surface repeated low-score patterns.
+#
+# Reads the project's scored runs.jsonl, asks the rubric's pure detector
+# (lib/loop_result_eval.py --signals) for any dimension that has been low for
+# N cycles in a row, then for each *fresh* signal (deduped on its stable key
+# against .roll/loop/signals-seen) appends a CANDIDATE backlog draft to
+# .roll/signals/candidates.md marked "📋 待人确认". It never edits the real
+# backlog, never activates a story, never touches code — it only exposes.
+#
+# Surfaced candidates feed the brief's improvement-signal section; the brief
+# skill reads candidates.md. `roll loop signals` runs this on demand and the
+# cycle-finish hook calls it once per cycle so standing patterns get raised
+# exactly once.
+_loop_signals() {
+  local quiet=false streak=3
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<'HELP'
+Usage: roll loop signals [--streak N] [--quiet]
+
+  Detect repeated low-score patterns in the cycle result-eval history and
+  expose them as improvement signals: each fresh pattern appends a CANDIDATE
+  backlog draft (IDEA/FIX, marked 📋 待人确认) to .roll/signals/candidates.md.
+  Deduped per pattern, so a standing issue is raised once, not every cycle.
+  Never edits the real backlog, activates a story, or changes code.
+
+  检测 cycle 结果评分中反复出现的低分模式，暴露成改善信号：每个新模式向
+  .roll/signals/candidates.md 追加一条候选 backlog 草稿（IDEA/FIX，标 📋 待人确认）。
+  按模式去重，同一问题只提一次；绝不改真实 backlog / 激活故事 / 改代码。
+
+Options:
+  --streak N   consecutive low cycles required to fire (default 3)
+  --quiet      suppress the "no new signals" line (used by the cycle hook)
+HELP
+        return 0 ;;
+      --streak) streak="${2:-3}"; shift 2 ;;
+      --streak=*) streak="${1#--streak=}"; shift ;;
+      --quiet) quiet=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  # US-LOOP-020: read the project-local runs.jsonl.
+  local runs_src; runs_src=$(_loop_runs_file)
+  if [[ ! -f "$runs_src" ]] || [[ ! -s "$runs_src" ]]; then
+    $quiet || echo "$(msg loop.no_loop_runs_yet 2>/dev/null || echo 'no loop runs yet')"
+    return 0
+  fi
+  command -v jq >/dev/null 2>&1 || { $quiet || err "jq required for roll loop signals"; return 0; }
+
+  # Prefer the main project dir (inner runner runs from a worktree, so pwd is
+  # the wrong tree — candidates/dedup must land in the canonical .roll/).
+  local project_path; project_path="${ROLL_MAIN_PROJECT:-$(pwd -P)}"
+  local project_slug; project_slug=$(_project_slug "$project_path")
+
+  # Records for this project, oldest→newest, as a JSON array for the detector.
+  local records
+  records=$(jq -s -c --arg p "$project_slug" \
+    '[ .[] | select(.project == $p) ]' "$runs_src" 2>/dev/null) || records="[]"
+
+  local signals
+  signals=$(printf '%s' "$records" \
+    | python3 "${ROLL_PKG_DIR}/lib/loop_result_eval.py" --signals --streak "$streak" 2>/dev/null) \
+    || signals="[]"
+  [[ -n "$signals" ]] || signals="[]"
+
+  # Dedup store + candidate drafts both live with the project (roll-meta side).
+  local rt_dir="${_LOOP_RT_DIR:-${project_path}/.roll/loop}"
+  local seen_file="${rt_dir}/signals-seen-${project_slug}"
+  local cand_file="${project_path}/.roll/signals/candidates.md"
+  mkdir -p "$rt_dir" "$(dirname "$cand_file")" 2>/dev/null || true
+  touch "$seen_file" 2>/dev/null || true
+
+  # next candidate id (CAND-NNN) — scan existing candidates so re-runs keep counting up.
+  local last_id=0
+  if [[ -f "$cand_file" ]]; then
+    last_id=$(grep -oE 'CAND-[0-9]+' "$cand_file" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)
+    [[ -n "$last_id" ]] || last_id=0
+  fi
+
+  local new_count=0
+  local keys; keys=$(printf '%s' "$signals" | jq -r '.[].key' 2>/dev/null)
+  local key
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    # Dedup: same standing pattern is surfaced once.
+    if grep -qxF "$key" "$seen_file" 2>/dev/null; then
+      continue
+    fi
+    local kind summary dim streak_n
+    kind=$(printf '%s' "$signals" | jq -r --arg k "$key" '.[] | select(.key==$k) | .kind' 2>/dev/null)
+    summary=$(printf '%s' "$signals" | jq -r --arg k "$key" '.[] | select(.key==$k) | .summary' 2>/dev/null)
+    dim=$(printf '%s' "$signals" | jq -r --arg k "$key" '.[] | select(.key==$k) | .dim' 2>/dev/null)
+    streak_n=$(printf '%s' "$signals" | jq -r --arg k "$key" '.[] | select(.key==$k) | .streak' 2>/dev/null)
+    [[ -n "$kind" && "$kind" != "null" ]] || kind="IDEA"
+
+    last_id=$(( last_id + 1 ))
+    local cand_id; cand_id=$(printf 'CAND-%03d' "$last_id")
+    local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    {
+      printf '\n## %s — %s (%s) 📋 待人确认\n' "$cand_id" "$dim" "$kind"
+      printf -- '- Detected: %s\n' "$ts"
+      printf -- '- Pattern: %s\n' "$key"
+      printf -- '- Signal: %s\n' "$summary"
+      printf -- '- 信号：result-eval 维度 %s 连续 %s 轮低分；候选 %s，待人确认后再激活。\n' \
+        "$dim" "$streak_n" "$kind"
+    } >> "$cand_file"
+
+    printf '%s\n' "$key" >> "$seen_file"
+    new_count=$(( new_count + 1 ))
+    $quiet || echo "signal: $cand_id $dim → candidate $kind ($summary)"
+  done <<< "$keys"
+
+  if [[ "$new_count" -eq 0 ]]; then
+    $quiet || echo "no new improvement signals (result-eval patterns)"
+    return 0
+  fi
+  $quiet || echo "${new_count} candidate draft(s) → ${cand_file} (📋 待人确认, not activated)"
+  return 0
 }
 
 _loop_status() {
@@ -7966,12 +9610,13 @@ _loop_runs_slowest_phase() {
 _loop_runs_detail() {
   local cycle_id="$1"
   command -v jq >/dev/null 2>&1 || { err "jq required for --detail"; return 1; }
-  if [[ ! -f "$_LOOP_RUNS" ]]; then
+  local runs_src; runs_src=$(_loop_runs_file)
+  if [[ ! -f "$runs_src" ]]; then
     echo "$(msg loop.no_runs_jsonl_yet)"
     return 0
   fi
   local row
-  row=$(jq -c --arg cid "$cycle_id" 'select(.cycle_id == $cid)' "$_LOOP_RUNS" | head -1)
+  row=$(jq -c --arg cid "$cycle_id" 'select(.cycle_id == $cid)' "$runs_src" | head -1)
   if [[ -z "$row" ]]; then
     echo "$(msg loop.cycle_not_found $cycle_id)"
     return 1
@@ -8104,13 +9749,9 @@ _loop_runs() {
     return $?
   fi
 
-  # FIX-060: refresh merged status before reading, so paused-window merges show up.
-  _loop_backfill_merged >/dev/null 2>&1 || true
-
-  if [[ ! -f "$_LOOP_RUNS" ]] || [[ ! -s "$_LOOP_RUNS" ]]; then
-    echo "$(msg loop.no_loop_runs_yet)"
-    return 0
-  fi
+  # US-LOOP-020: read the current project's local runs.jsonl. --all aggregates
+  # every project's file (enumerated via launchd plists), merged + time-sorted.
+  local runs_src; runs_src=$(_loop_runs_file)
 
   if ! command -v jq >/dev/null 2>&1; then
     err "$(msg loop.jq_required_for_roll_loop_runs)"
@@ -8121,9 +9762,20 @@ _loop_runs() {
   local project_slug; project_slug=$(_project_slug "$project_path")
   local filtered
   if $all_flag; then
-    filtered=$(cat "$_LOOP_RUNS")
+    # US-LOOP-020: cross-project view — enumerate plists, traverse each
+    # project's .roll/loop/runs.jsonl, merge and sort by ts (oldest→newest).
+    # Backfill is intentionally skipped here: it would require resolving and
+    # querying gh for every project's repo (slow + N network calls). The
+    # single-project path below backfills, so per-project views stay fresh.
+    filtered=$(_loop_runs_aggregate_all)
   else
-    filtered=$(jq -c --arg p "$project_slug" 'select(.project == $p)' "$_LOOP_RUNS")
+    # FIX-060: refresh merged status before reading, so paused-window merges show up.
+    _loop_backfill_merged "$runs_src" >/dev/null 2>&1 || true
+    if [[ ! -f "$runs_src" ]] || [[ ! -s "$runs_src" ]]; then
+      echo "$(msg loop.no_loop_runs_yet)"
+      return 0
+    fi
+    filtered=$(jq -c --arg p "$project_slug" 'select(.project == $p)' "$runs_src")
   fi
 
   if [[ -z "$filtered" ]]; then
@@ -8191,6 +9843,10 @@ _loop_log() {
   fi
 
   if [[ -z "$query" ]]; then
+    # US-LOOP-020: cron.log is the legacy machine-wide aggregate; steer users to
+    # per-cycle search. Notice on stderr so it never pollutes piped log output.
+    echo "note: cron.log is a legacy aggregate; use 'roll loop log <cycle-id>' for per-cycle search" >&2
+    echo "提示：cron.log 是旧的聚合日志；按周期查看请用 'roll loop log <cycle-id>'" >&2
     # No argument: find latest .log by cycle-id (filename reverse-sort).
     # Cycle filenames encode the start timestamp (YYYYMMDD-HHMMSS-PID.log) so
     # the lexicographically greatest name is always the most recent cycle.
@@ -8350,6 +10006,40 @@ _ci_wait() {
 #   stale   – fetch failed; existing .roll/ used as fallback
 #   skipped – no git remote configured (not a roll-meta managed project)
 #
+# US-SYNC-008: when `.roll/local.yaml backlog_sync.on_loop_cycle: true`, pull
+# fresh GitHub issues into the backlog at cycle preflight so the upcoming story
+# scan sees new issues. Default is OFF — absent file/key/flag is a silent no-op,
+# so cycle behaviour is unchanged for projects that haven't opted in. Fail-soft:
+# a sync error never blocks the cycle; it writes an ALERT and returns 0. The
+# project's main .roll/ is synced (real sync, not dry-run) so the worktree's
+# backlog copy (_worktree_sync_meta runs after this) carries the new rows.
+_loop_backlog_sync_hook() {
+  local project_path="$1"
+  local local_yaml="${project_path}/.roll/local.yaml"
+  local backlog="${project_path}/.roll/backlog.md"
+  local cid="${CYCLE_ID:-unknown}"
+  command -v python3 >/dev/null 2>&1 || return 0
+  [ -f "$local_yaml" ] || return 0
+  # Read the switch (true/false). Absent file or key prints "false".
+  local on
+  on=$(python3 "${ROLL_PKG_DIR}/lib/github_sync.py" on-loop-cycle \
+         --local-yaml "$local_yaml" 2>/dev/null || echo "false")
+  if [ "$on" != "true" ]; then
+    return 0
+  fi
+  _loop_event backlog_sync "$cid" "start" "" 2>/dev/null || true
+  # Real sync into the project's backlog. github_sync.py resolves --repo from
+  # the persisted backlog_sync.repo, so no --repo flag is needed here.
+  if python3 "${ROLL_PKG_DIR}/lib/github_sync.py" sync \
+       --backlog "$backlog" --local-yaml "$local_yaml" >/dev/null 2>&1; then
+    _loop_event backlog_sync "$cid" "ok" "" 2>/dev/null || true
+  else
+    _loop_event backlog_sync "$cid" "failed" "" 2>/dev/null || true
+    _worktree_alert "cycle ${cid}: backlog sync failed (on_loop_cycle=true); cycle continues with existing backlog" 2>/dev/null || true
+  fi
+  return 0
+}
+
 # Env override: ROLL_LOOP_META_SYNC_TIMEOUT (default 15) controls fetch timeout.
 _loop_sync_meta() {
   local project_path="$1"
@@ -9833,57 +11523,10 @@ refs/heads/claude/*"
   return 0
 }
 
-# US-AGENT-002: agent-routes.yaml management.
-# `roll loop agent-routes [show|lint] [path]` — dispatch + helpers.
-# Default path order: $ROLL_AGENT_ROUTES (if set) → ./.roll/agent-routes.yaml
-# → built-in default in templates/agent-routes/default.yaml.
-_loop_agent_routes_path() {
-  if [ -n "${ROLL_AGENT_ROUTES:-}" ] && [ -f "$ROLL_AGENT_ROUTES" ]; then
-    printf '%s\n' "$ROLL_AGENT_ROUTES"
-    return 0
-  fi
-  if [ -f ".roll/agent-routes.yaml" ]; then
-    printf '%s\n' ".roll/agent-routes.yaml"
-    return 0
-  fi
-  # Fallback: built-in default shipped with the package.
-  # ROLL_INSTALL_DIR is set when installed via npm; fall back to script dir.
-  local install_dir
-  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
-  local default_tpl="$install_dir/templates/agent-routes/default.yaml"
-  if [ -f "$default_tpl" ]; then
-    printf '%s\n' "$default_tpl"
-    return 0
-  fi
-  return 1
-}
-
-_loop_agent_routes_show() {
-  local path
-  path=$(_loop_agent_routes_path) || {
-    echo "agent-routes: no config found (set ROLL_AGENT_ROUTES, drop .roll/agent-routes.yaml, or run roll init)" >&2
-    return 1
-  }
-  echo "# source: $path"
-  cat "$path"
-}
-
-_loop_agent_routes_lint() {
-  local path="${1:-}"
-  if [ -z "$path" ]; then
-    path=$(_loop_agent_routes_path) || {
-      echo "agent-routes lint: no config found" >&2
-      return 1
-    }
-  fi
-  if [ ! -f "$path" ]; then
-    echo "agent-routes lint: file not found: $path" >&2
-    return 1
-  fi
-  local install_dir
-  install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
-  python3 "$install_dir/lib/agent_routes_lint.py" "$path"
-}
+# US-AGENT-028: the v1 agent-routes helpers (_loop_agent_routes_path/show/lint)
+# are retired. `roll loop agent-routes` now forwards to `roll agent` via the
+# deprecated alias in _loop_agent_routes (schema v3 / agents.yaml replaces the
+# v1 type/est/risk routing). lib/agent_routes_lint.py is no longer invoked.
 
 # US-AGENT-006: pick the next eligible 📋 Todo story from .roll/backlog.md
 # applying the same gates as the roll-loop SKILL Step 2:
@@ -9939,24 +11582,26 @@ _loop_pick_next_story() {
   return 1
 }
 
-# US-AGENT-004: pick the agent for a given backlog story by reading its
-# Agent profile from the linked feature md and matching against the active
-# agent-routes.yaml. Falls back to history.cold_start_default when no agent
-# matches or the story has no profile.
+# US-AGENT-023: pick the agent for a backlog story by complexity tier.
 #
-# stdout: "<agent> <rule_kind> <rationale...>"
-# exit 0 on success, 1 if the story id isn't found.
+# Chain: story est_min → _classify_complexity (lib/loop_pick_agent.py emits the
+# tier) → read the matching slot from agents.yaml → agent. When the tier slot is
+# empty, fall back to the `default` slot; when `default` is also empty, WARN and
+# use _first_installed_agent so the cycle still has a runnable agent.
+#
+# Supersedes the US-AGENT-004/005 three-dimensional matcher + history soft
+# preference (retired in US-AGENT-022). agents.yaml replaces agent-routes.yaml.
+#
+# stdout: "<agent> <tier> <rationale...>"   (field 1 = agent, field 2 = tier —
+#         the loop inner script reads field 1 as the routed agent, field 2 as
+#         the routing "rule", field 3+ as the rationale).
+# exit 0 on success, 1 if the story id can't be classified.
 _loop_pick_agent_for_story() {
   local story_id="${1:-}"
   if [ -z "$story_id" ]; then
     echo "_loop_pick_agent_for_story: story id required" >&2
     return 1
   fi
-  local routes
-  routes=$(_loop_agent_routes_path 2>/dev/null) || {
-    echo "_loop_pick_agent_for_story: no agent-routes.yaml available" >&2
-    return 1
-  }
   local backlog=".roll/backlog.md"
   [ -f "$backlog" ] || {
     echo "_loop_pick_agent_for_story: $backlog not found" >&2
@@ -9964,20 +11609,114 @@ _loop_pick_agent_for_story() {
   }
   local install_dir
   install_dir="${ROLL_INSTALL_DIR:-$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")")}"
-  # US-AGENT-005: pass runs.jsonl when available so history soft preference
-  # can layer on top of hard rules. Project-local first, then shared.
-  local runs_arg=""
-  if [ -f ".roll/runs.jsonl" ]; then
-    runs_arg="--runs .roll/runs.jsonl"
-  elif [ -f "${HOME}/.shared/roll/loop/runs.jsonl" ]; then
-    runs_arg="--runs ${HOME}/.shared/roll/loop/runs.jsonl"
-  fi
-  # shellcheck disable=SC2086
-  python3 "$install_dir/lib/loop_pick_agent.py" \
+
+  # Classify into a complexity tier. The python prints "<tier> <rationale...>".
+  local classify_line tier rationale
+  classify_line=$(python3 "$install_dir/lib/loop_pick_agent.py" \
     --story-id "$story_id" \
-    --backlog "$backlog" \
-    --routes "$routes" \
-    $runs_arg
+    --backlog "$backlog" 2>/dev/null) || {
+    echo "_loop_pick_agent_for_story: cannot classify $story_id" >&2
+    return 1
+  }
+  tier=$(printf '%s\n' "$classify_line" | awk '{print $1}')
+  rationale=$(printf '%s\n' "$classify_line" | cut -d' ' -f2-)
+  [ -n "$tier" ] || {
+    echo "_loop_pick_agent_for_story: empty tier for $story_id" >&2
+    return 1
+  }
+
+  # Resolve tier → agent via agents.yaml slots, with mechanical fallback.
+  local agent=""
+  agent=$(_agents_config_slot "$tier" 2>/dev/null || true)
+  if [ -z "$agent" ] && [ "$tier" != "default" ]; then
+    # Tier slot empty/missing → fall back to the `default` slot.
+    agent=$(_agents_config_slot "default" 2>/dev/null || true)
+  fi
+  if [ -z "$agent" ]; then
+    # default slot also empty → WARN and use the first installed agent so the
+    # cycle is still runnable rather than silently dropping to nothing.
+    agent=$(_first_installed_agent 2>/dev/null || true)
+    if [ -n "$agent" ]; then
+      warn "agents.yaml: tier '${tier}' and 'default' slot both empty; using first installed agent '${agent}'" >&2
+    fi
+  fi
+  [ -n "$agent" ] || {
+    echo "_loop_pick_agent_for_story: no agent resolvable for tier '$tier' (agents.yaml empty and no installed agent)" >&2
+    return 1
+  }
+
+  printf '%s %s %s\n' "$agent" "$tier" "$rationale"
+}
+
+# US-AGENT-024: mechanical fallback resolution.
+#
+# Given the PRIMARY agent the tier router picked, decide which agent the cycle
+# should actually run, using US-AGENT-021's availability probe (+ cache):
+#   - primary online            → run primary, no fallback.
+#   - primary offline + fallback slot agent online
+#                               → run the fallback agent; record fallback_from.
+#   - primary offline + fallback also unavailable (missing/offline)
+#                               → write an ALERT (reuse the per-project ALERT
+#                                 file) and STOP rather than spin through more
+#                                 agents. We never chain past one fallback.
+#
+# A failed primary is also stamped offline in the availability cache (the probe
+# inside _agent_available already persists the verdict), so later cycles skip it
+# until the TTL expires.
+#
+# stdout: "<chosen_agent> <fallback_from>"  — field 1 is the agent to run;
+#         field 2 is the original agent when a fallback fired, empty otherwise.
+#         The loop reads field 2 into runs.jsonl's `fallback_from`.
+# exit:   0 chosen agent printed (with or without fallback)
+#         1 bad input (empty primary)
+#         2 both primary and fallback unavailable → ALERT written, do not run.
+#
+# bash 3.2 safe: no declare -A, no mapfile/readarray, no ${var^^}/${var,,}.
+_loop_resolve_fallback_agent() {
+  local primary="${1:-}"
+  if [ -z "$primary" ]; then
+    echo "_loop_resolve_fallback_agent: primary agent required" >&2
+    return 1
+  fi
+
+  # Agent names are contractually single tokens (no whitespace), so the
+  # "<agent> <fallback_from>" line is awk-field-splittable by the caller.
+  #
+  # Primary still usable → run it, no fallback. Print only field 1; the
+  # caller's `awk '{print $2}'` reads an empty fallback_from. _agent_available
+  # reads the availability cache (online/offline) and re-probes when stale.
+  if _agent_available "$primary" >/dev/null 2>&1; then
+    printf '%s\n' "$primary"
+    return 0
+  fi
+
+  # Primary down — try the dedicated fallback slot. The caller narrates the
+  # degradation on stdout (and emits an agent_fallback event), so we stay
+  # quiet here rather than warning into the swallowed stderr stream.
+  local fb
+  fb="$(_agents_config_slot fallback 2>/dev/null || true)"
+  if [ -n "$fb" ] && _agent_available "$fb" >/dev/null 2>&1; then
+    printf '%s %s\n' "$fb" "$primary"
+    return 0
+  fi
+
+  # Neither primary nor fallback usable. Do NOT keep trying other agents;
+  # write an ALERT and stop so the operator (or next brief) sees it.
+  local alert_file="${_LOOP_ALERT:-}"
+  [ -n "$alert_file" ] || alert_file=".roll/loop/ALERT-$(_project_slug 2>/dev/null || basename "$PWD").md"
+  mkdir -p "$(dirname "$alert_file")" 2>/dev/null || true
+  {
+    printf '[%s] agent fallback exhausted: primary "%s" offline' \
+      "$(date -u +%FT%TZ)" "$primary"
+    if [ -n "$fb" ]; then
+      printf ', fallback "%s" also offline' "$fb"
+    else
+      printf ', no fallback slot configured'
+    fi
+    printf ' — cycle stopped.\n'
+  } >> "$alert_file" 2>/dev/null || true
+  echo "_loop_resolve_fallback_agent: primary '${primary}' and fallback unavailable — ALERT written" >&2
+  return 2
 }
 
 # US-QA-012: merge-time test-quality gate. Scan bats files for ❼ + ❽
@@ -10042,18 +11781,32 @@ _loop_test_quality_check_with_alert() {
 }
 
 _loop_agent_routes() {
+  # US-AGENT-028: `roll loop agent-routes …` is retained only as a deprecated
+  # alias of `roll agent`. The v1 agent-routes.yaml schema (three-dimensional
+  # type/est/risk routing) is gone — agents.yaml (schema v3, four complexity
+  # slots) replaces it. Each sub-command forwards to the equivalent `roll agent`
+  # behaviour after printing a one-line deprecation notice on stderr.
   local sub="${1:-show}"; shift || true
   case "$sub" in
-    show) _loop_agent_routes_show ;;
-    lint) _loop_agent_routes_lint "${1:-}" ;;
-    path) _loop_agent_routes_path ;;
+    show)
+      echo "roll loop agent-routes: deprecated — use 'roll agent' (showing agents.yaml)" >&2
+      cmd_agent
+      ;;
+    path)
+      echo "roll loop agent-routes path: deprecated — use 'roll agent' (agents.yaml path)" >&2
+      _agents_config_path
+      ;;
+    lint)
+      echo "roll loop agent-routes lint: deprecated — schema v3 needs no lint" >&2
+      return 0
+      ;;
     *)
       cat >&2 <<'HELP'
-Usage: roll loop agent-routes <show|lint|path> [path]
+Usage: roll loop agent-routes <show|lint|path>   (DEPRECATED — use 'roll agent')
 
-  show         Print active agent-routes config (source + content)
-  lint [path]  Validate schema (default: active config). Exit 1 on errors.
-  path         Print which file is currently active.
+  show   Alias for 'roll agent' (the schema-v3 complexity-routing view).
+  path   Print the active agents.yaml path.
+  lint   Deprecated no-op — schema v3 needs no lint.
 HELP
       return 1 ;;
   esac
@@ -10246,7 +11999,9 @@ _loop_cleanup_stale_runs_tmp() {
 
 _loop_backfill_merged() {
   (
-    local runs_path="${1:-${HOME}/.shared/roll/loop/runs.jsonl}"
+    # US-LOOP-020: default to the project-local runs.jsonl (callers may pass an
+    # explicit path). Was hardcoded to ${HOME}/.shared/roll/loop/runs.jsonl.
+    local runs_path="${1:-$(_loop_runs_file)}"
     [ -f "$runs_path" ] || return 0
     command -v gh >/dev/null 2>&1 || return 0
     command -v jq >/dev/null 2>&1 || return 0
@@ -11010,6 +12765,15 @@ cmd_backlog() {
       python3 "${ROLL_PKG_DIR}/lib/loop_unstick.py" "$@"
       return
       ;;
+    sync)
+      # US-SYNC-002: pull GitHub issues into the local backlog. label→type
+      # mapping (bug→FIX, enhancement/feature/US→US, refactor→REFACTOR,
+      # else US), title→Description, open→📋 Todo / closed→✅ Done. Single
+      # direction (issues → backlog.md).
+      shift
+      python3 "${ROLL_PKG_DIR}/lib/github_sync.py" sync "$@" --backlog "$backlog"
+      return
+      ;;
     block|defer|unblock|promote)
       local pattern="${2:-}"
       local reason="${3:-}"
@@ -11681,6 +13445,8 @@ main() {
     test)          cmd_test "$@" ;;
     prices)        cmd_prices "$@" ;;
     changelog)     cmd_changelog "$@" ;;
+    config)        cmd_config "$@" ;;
+    _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

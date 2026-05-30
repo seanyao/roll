@@ -89,18 +89,27 @@ _write_loop_plist() {
   ! grep -q 'StartCalendarInterval' "$plist"
 }
 
-# ─── Daily services still generate StartInterval=86400 ──────────────────────
+# ─── Daily services use array-style StartCalendarInterval (US-LOOP-035) ─────
 
-@test "_write_launchd_plist: daily service (hour present) generates StartInterval, not calendar" {
+@test "_write_launchd_plist: daily service (hour present) generates array StartCalendarInterval" {
   local plist="${_LAUNCHD_DIR}/dream-daily.plist"
   _write_launchd_plist "$plist" "com.roll.dream.test" "$PWD" "60" "18" "3" "/tmp/runner.sh"
   [ -f "$plist" ]
 
-  # Daily services with hour present use StartInterval=86400 (FIX-105)
+  # US-LOOP-035 (resolves FIX-105): daily services fire at the exact HH:MM via
+  # an array-style StartCalendarInterval, not the legacy StartInterval=86400.
+  grep -q 'StartCalendarInterval' "$plist"
+  grep -q '<integer>3</integer>' "$plist"   # Hour
+  grep -q '<integer>18</integer>' "$plist"  # Minute
+  ! grep -q '<integer>86400</integer>' "$plist"
+}
+
+@test "_write_launchd_plist: ROLL_DREAM_LEGACY_INTERVAL=1 restores StartInterval=86400" {
+  local plist="${_LAUNCHD_DIR}/dream-legacy.plist"
+  ROLL_DREAM_LEGACY_INTERVAL=1 _write_launchd_plist "$plist" "com.roll.dream.test" "$PWD" "60" "18" "3" "/tmp/runner.sh"
+  [ -f "$plist" ]
   grep -q 'StartInterval' "$plist"
   grep -q '<integer>86400</integer>' "$plist"
-
-  # Should NOT have StartCalendarInterval
   ! grep -q 'StartCalendarInterval' "$plist"
 }
 

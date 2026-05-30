@@ -49,6 +49,7 @@
 | guide/zh/migration-2.0.md | 迁移到 Roll 2.0 | guide | 2026-05-19 |
 | guide/zh/overview.md | Roll — 概述 | guide | 2026-05-25 |
 | guide/zh/patterns/README.md | Roll 接入模式（Patterns）| guide | 2026-05-19 |
+| guide/zh/practices/engineering-common-sense.md | Roll 工程常识清单 | guide | 2026-05-30 |
 | guide/zh/patterns/graft-pattern.md | Graft Pattern（续写路径）| guide | 2026-05-19 |
 | guide/zh/patterns/replant-pattern.md | Replant Pattern（翻种路径）| guide | 2026-05-19 |
 | guide/zh/patterns/seed-pattern.md | Seed Pattern（播种路径）| guide | 2026-05-19 |

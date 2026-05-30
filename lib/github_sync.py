@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -575,6 +576,153 @@ def sync_to_backlog(issues: List[Dict[str, Any]],
 
 
 # ---------------------------------------------------------------------------
+# Config persistence (US-SYNC-006)
+#
+# After a successful `roll backlog sync --repo owner/repo`, the resolved repo /
+# labels / timestamp are persisted to `.roll/local.yaml` under a `backlog_sync:`
+# block so subsequent `roll backlog sync` (no flags) can reuse them. We parse /
+# rewrite YAML with the same regex-on-text approach the rest of the codebase
+# uses (lib/roll-home.py, lib/roll-loop-status.py) — no PyYAML dependency, and
+# the block is replaced surgically so unrelated keys (`agent:`, `loop_schedule:`)
+# survive untouched.
+# ---------------------------------------------------------------------------
+SYNC_CONFIG_KEY = "backlog_sync"
+DEFAULT_SYNC_DIRECTION = "issues-to-backlog"
+
+
+def read_sync_config(local_yaml_path: str) -> Dict[str, Any]:
+    """Read the ``backlog_sync:`` block from ``local_yaml_path``.
+
+    Returns a dict with whatever keys are present (``repo``, ``direction``,
+    ``labels``, ``last_sync_at``); an empty dict when the file is missing or
+    has no ``backlog_sync:`` block (US-SYNC-006). ``labels`` is normalized to a
+    list. Parsing is line-based so it tolerates the rest of the YAML without a
+    full parser.
+    """
+    if not os.path.exists(local_yaml_path):
+        return {}
+    with open(local_yaml_path, "r", encoding="utf-8") as fh:
+        lines = fh.read().replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    # Locate the top-level `backlog_sync:` key.
+    start = None
+    for idx, line in enumerate(lines):
+        if line.rstrip() == f"{SYNC_CONFIG_KEY}:" or \
+                line.startswith(f"{SYNC_CONFIG_KEY}:"):
+            # Must be a top-level key (no leading indentation).
+            if line[:1] not in (" ", "\t"):
+                start = idx
+                break
+    if start is None:
+        return {}
+    cfg: Dict[str, Any] = {}
+    for line in lines[start + 1:]:
+        if line.strip() == "":
+            continue
+        # A new top-level key (no indentation) ends the block.
+        if line[:1] not in (" ", "\t"):
+            break
+        m = re.match(r'^\s+([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$', line)
+        if not m:
+            continue
+        key, raw = m.group(1), m.group(2).strip()
+        if key == "labels":
+            cfg["labels"] = _parse_yaml_inline_list(raw)
+        else:
+            # Strip surrounding quotes if present.
+            if len(raw) >= 2 and raw[0] in "'\"" and raw[-1] == raw[0]:
+                raw = raw[1:-1]
+            cfg[key] = raw
+    return cfg
+
+
+def _parse_yaml_inline_list(raw: str) -> List[str]:
+    """Parse a YAML inline list literal (``[]`` / ``[a, b]``) into a list."""
+    raw = raw.strip()
+    if not raw or raw == "[]":
+        return []
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1]
+        return [tok.strip().strip("'\"") for tok in inner.split(",")
+                if tok.strip()]
+    # A bare scalar (single label without brackets).
+    return [raw.strip("'\"")]
+
+
+def _render_sync_block(repo: str,
+                       labels: List[str],
+                       last_sync_at: str,
+                       direction: str = DEFAULT_SYNC_DIRECTION) -> str:
+    """Render the ``backlog_sync:`` YAML block (no trailing newline)."""
+    labels_lit = "[" + ", ".join(labels) + "]" if labels else "[]"
+    return (
+        f"{SYNC_CONFIG_KEY}:\n"
+        f"  repo: {repo}\n"
+        f"  direction: {direction}\n"
+        f"  labels: {labels_lit}\n"
+        f"  last_sync_at: {last_sync_at}"
+    )
+
+
+def write_sync_config(local_yaml_path: str,
+                      repo: str,
+                      *,
+                      labels: Optional[List[str]] = None,
+                      last_sync_at: Optional[str] = None,
+                      direction: str = DEFAULT_SYNC_DIRECTION) -> None:
+    """Persist the ``backlog_sync:`` block to ``local_yaml_path`` (US-SYNC-006).
+
+    Replaces an existing top-level ``backlog_sync:`` block in place (preserving
+    every other key) or appends a new one when absent. Creates the file if it
+    does not exist. ``last_sync_at`` defaults to the current UTC time in RFC3339
+    form (``2026-05-28T10:00:00Z``).
+    """
+    labels = list(labels or [])
+    if last_sync_at is None:
+        last_sync_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    block = _render_sync_block(repo, labels, last_sync_at, direction)
+
+    if not os.path.exists(local_yaml_path):
+        os.makedirs(os.path.dirname(local_yaml_path) or ".", exist_ok=True)
+        with open(local_yaml_path, "w", encoding="utf-8") as fh:
+            fh.write(block + "\n")
+        return
+
+    with open(local_yaml_path, "r", encoding="utf-8") as fh:
+        original = fh.read()
+    text = original.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+
+    start = None
+    for idx, line in enumerate(lines):
+        if (line.rstrip() == f"{SYNC_CONFIG_KEY}:" or
+                line.startswith(f"{SYNC_CONFIG_KEY}:")) and \
+                line[:1] not in (" ", "\t"):
+            start = idx
+            break
+
+    if start is None:
+        # Append the block, keeping a single blank-line separator.
+        sep = "" if text.endswith("\n\n") or text == "" else (
+            "\n" if text.endswith("\n") else "\n\n")
+        new_text = text + sep + block + "\n"
+    else:
+        # Find the end of the existing block (next top-level key or EOF).
+        end = start + 1
+        while end < len(lines):
+            line = lines[end]
+            if line.strip() != "" and line[:1] not in (" ", "\t"):
+                break
+            end += 1
+        new_lines = lines[:start] + block.split("\n") + lines[end:]
+        new_text = "\n".join(new_lines)
+        if not new_text.endswith("\n"):
+            new_text += "\n"
+
+    with open(local_yaml_path, "w", encoding="utf-8") as fh:
+        fh.write(new_text)
+
+
+# ---------------------------------------------------------------------------
 # CLI entry — `python3 lib/github_sync.py issues owner/repo` for ad-hoc use /
 # direct testing when bin/roll is unavailable.
 # ---------------------------------------------------------------------------
@@ -594,30 +742,48 @@ def _load_issues_for_sync(owner: str, repo: str) -> List[Dict[str, Any]]:
 
 
 def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
-    if "--repo" not in argv:
-        print("usage: github_sync.py sync --repo <owner/repo> "
-              "[--backlog <path>] [--features <dir>] [--label <a,b>] [--dry-run]",
-              file=sys.stderr)
-        return 1
-    repo_arg = argv[argv.index("--repo") + 1]
-    if "/" not in repo_arg:
-        print(f"invalid --repo {repo_arg!r}: expected owner/repo",
-              file=sys.stderr)
-        return 1
-    owner, repo = repo_arg.split("/", 1)
     backlog = ".roll/backlog.md"
     if "--backlog" in argv:
         backlog = argv[argv.index("--backlog") + 1]
     features_dir = ".roll/features"
     if "--features" in argv:
         features_dir = argv[argv.index("--features") + 1]
+    local_yaml = ".roll/local.yaml"
+    if "--local-yaml" in argv:
+        local_yaml = argv[argv.index("--local-yaml") + 1]
+
+    # US-SYNC-006: resolve --repo from the flag first; otherwise fall back to
+    # the persisted backlog_sync.repo in .roll/local.yaml. With neither, the
+    # first sync must be explicit.
+    cfg = read_sync_config(local_yaml)
+    if "--repo" in argv:
+        repo_arg = argv[argv.index("--repo") + 1]
+    else:
+        repo_arg = cfg.get("repo") or ""
+    if not repo_arg:
+        print("usage: github_sync.py sync --repo <owner/repo> "
+              "[--backlog <path>] [--features <dir>] [--label <a,b>] [--dry-run]\n"
+              "  no --repo and no backlog_sync.repo in .roll/local.yaml: "
+              "first sync must pass --repo.\n"
+              "  首次 sync 必须显式 --repo（local.yaml 中尚无 backlog_sync.repo）。",
+              file=sys.stderr)
+        return 1
+    if "/" not in repo_arg:
+        print(f"invalid --repo {repo_arg!r}: expected owner/repo",
+              file=sys.stderr)
+        return 1
+    owner, repo = repo_arg.split("/", 1)
     # --label may be repeated; each value is comma-separated. Join repeats with
-    # commas so parse_labels_filter sees one flat list (OR semantics).
+    # commas so parse_labels_filter sees one flat list (OR semantics). With no
+    # --label flag, fall back to persisted config labels (US-SYNC-006).
     label_parts: List[str] = []
     for i, tok in enumerate(argv):
         if tok == "--label" and i + 1 < len(argv):
             label_parts.append(argv[i + 1])
-    wanted = parse_labels_filter(",".join(label_parts))
+    if label_parts:
+        wanted = parse_labels_filter(",".join(label_parts))
+    else:
+        wanted = parse_labels_filter(",".join(cfg.get("labels") or []))
     dry_run = "--dry-run" in argv
     try:
         issues = _load_issues_for_sync(owner, repo)
@@ -654,6 +820,9 @@ def _cmd_sync(argv: List[str]) -> int:  # pragma: no cover - thin CLI wrapper
         print(f"skipped (already exists): {ident}")
     print(f"added: {summary['added']}, skipped: {summary['skipped']}, "
           f"total issues: {summary['total']}")
+    # US-SYNC-006: persist the resolved repo/labels/timestamp so subsequent
+    # `roll backlog sync` (no flags) can reuse them.
+    write_sync_config(local_yaml, repo_arg, labels=wanted)
     return 0
 
 

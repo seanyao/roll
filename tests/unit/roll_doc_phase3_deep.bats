@@ -163,3 +163,54 @@ SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-doc/SKILL.md"
     | grep -v 'types.ts' | wc -l | tr -d ' ')
   [ "$import_count" -ge 3 ]
 }
+
+# ── US-DOC-015: External Integrations ──
+
+@test "roll-doc SKILL.md: external-integration subsection documents detection rule" {
+  grep -qiE '(External Integration|外部集成)' "$SKILL"
+  grep -qiE 'fetch' "$SKILL"
+  grep -qiE '(axios|http\.get|http\.\*)' "$SKILL"
+  grep -qiE '(API_ENDPOINT|\*_URL|\*_HOST)' "$SKILL"
+  grep -qiE '(https\?://|hardcoded.*http)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: external-integration subsection documents per-entry fields (timeout, error handling)" {
+  grep -qiE '(endpoint URL)' "$SKILL"
+  grep -qiE 'timeout' "$SKILL"
+  grep -qiE '(error handling|fallback|\.catch|try.*catch)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: external-integration subsection merges multi-site endpoint into one record" {
+  grep -qiE '(merged into.*one|merge.*one integration|same endpoint.*one|all.*call sites)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: external-integration subsection documents empty-skip and idempotency" {
+  grep -qiE '(no external integration.*skip|skip generation.*no empty.*integration|integrations.md.*skip)' "$SKILL"
+  grep -qiE '(Existing.*integrations.md|integrations.md.*skip unless.*--force)' "$SKILL"
+}
+
+@test "roll-doc SKILL.md: Step 2 table maps 外部集成 to docs/integrations.md" {
+  grep -qE '外部集成.*docs/integrations.md' "$SKILL"
+}
+
+@test "roll-doc integrations fixture: directory exists with source files" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_integrations"
+  [ -d "$FIXTURE" ]
+  [ -d "$FIXTURE/src" ]
+}
+
+@test "roll-doc integrations fixture: contains a URL with timeout config" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_integrations"
+  # payment endpoint: hardcoded https URL, fetch call, and timeout field
+  grep -qE 'https://api\.payments\.example\.com' "$FIXTURE/src/clients/payment.ts"
+  grep -qE 'fetch\(' "$FIXTURE/src/clients/payment.ts"
+  grep -qE 'timeout: *5000' "$FIXTURE/src/clients/payment.ts"
+}
+
+@test "roll-doc integrations fixture: contains a URL without timeout config" {
+  FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/roll_doc_integrations"
+  # profile endpoint: hardcoded https URL, fetch call, no timeout field
+  grep -qE 'https://profile\.example\.com' "$FIXTURE/src/clients/profile.ts"
+  grep -qE 'fetch\(' "$FIXTURE/src/clients/profile.ts"
+  ! grep -qE 'timeout' "$FIXTURE/src/clients/profile.ts"
+}

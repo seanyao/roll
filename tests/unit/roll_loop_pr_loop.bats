@@ -217,3 +217,38 @@ EOF
   [ "$status" -eq 1 ]
   grep -q "pr close 88" "$GH_LOG"
 }
+
+# ── _loop_pr_prune_local (US-AUTO-044 Phase 2: local branch cleanup) ──────────
+# After a self-PR merges (remote branch already removed via --delete-branch),
+# prune the now-stale LOCAL branch. Uses -D because squash-merge leaves the
+# local branch looking unmerged to git; skips branches still checked out in a
+# worktree (kimi peer-review Q3 — `git branch -d/-D` errors on those).
+
+@test "_loop_pr_prune_local: deletes local branch with -D when not checked out" {
+  GIT_WORKTREES=""
+  git() {
+    echo "git $*" >> "$GIT_LOG"
+    [ "$1 $2" = "worktree list" ] && printf '%s' "$GIT_WORKTREES"
+    return 0
+  }
+  _loop_pr_prune_local "feat/merged"
+  grep -q "git branch -D feat/merged" "$GIT_LOG"
+}
+
+@test "_loop_pr_prune_local: skips when branch checked out in a worktree" {
+  GIT_WORKTREES=$'worktree /tmp/wt\nbranch refs/heads/feat/inuse'
+  git() {
+    echo "git $*" >> "$GIT_LOG"
+    [ "$1 $2" = "worktree list" ] && printf '%s' "$GIT_WORKTREES"
+    return 0
+  }
+  _loop_pr_prune_local "feat/inuse"
+  ! grep -q "branch -D feat/inuse" "$GIT_LOG"
+}
+
+@test "_loop_pr_prune_local: empty branch arg is a no-op" {
+  git() { echo "git $*" >> "$GIT_LOG"; return 0; }
+  run _loop_pr_prune_local ""
+  [ "$status" -eq 0 ]
+  ! grep -q "branch -D" "$GIT_LOG"
+}

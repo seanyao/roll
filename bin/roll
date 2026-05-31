@@ -11044,6 +11044,24 @@ _loop_pr_merge_self() {
   return 0
 }
 
+# _loop_pr_prune_local <branch>
+#   US-AUTO-044 Phase 2: once a self-PR merges (remote head already removed by
+#   `--delete-branch` in _loop_pr_merge_self), prune the now-stale LOCAL branch
+#   so the loop checkout doesn't accumulate merged refs (we hand-cleaned 134
+#   such branches + 38 worktrees once — see FIX/owner cleanup 2026-05-31).
+#   Uses -D, not -d: a squash-merge leaves the local branch looking unmerged to
+#   git, so -d would refuse. Skips a branch still checked out in any worktree —
+#   `git branch -D` errors on those (kimi peer-review Q3). Always exits 0.
+_loop_pr_prune_local() {
+  local branch="$1"
+  [ -n "$branch" ] || return 0
+  if git worktree list --porcelain 2>/dev/null | grep -q "^branch refs/heads/${branch}$"; then
+    return 0   # checked out in a worktree — leave it for that worktree's teardown
+  fi
+  git branch -D "$branch" >/dev/null 2>&1 || true
+  return 0
+}
+
 # _loop_pr_route <PR_json>
 #   Single-PR dispatcher for the PR Loop. <PR_json> is one object from
 #   `gh pr list --json number,headRefName,isDraft,mergeable,mergeStateStatus,

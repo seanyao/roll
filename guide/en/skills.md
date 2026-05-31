@@ -198,3 +198,4 @@ description: ...
 | `roll-spar` | "adversarial", "attack-defense", "high-risk", "critical logic", "payment", "permissions", "security" |
 | `roll-sentinel` | "patrol", "check production", "regression test" |
 | `roll-debug` | "debug", "diagnose", "page has issues", "black-box analysis" |
+| `roll-release-notes` | "release notes", "write release notes", "生成发布说明", "roll release-notes" |

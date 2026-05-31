@@ -145,6 +145,22 @@ teardown() { unit_teardown_cd; }
   [ ! -f "$_LOOP_ALERT" ]
 }
 
+@test "_alert_rotate: a concurrent appender's pre-opened fd is preserved (US-AUTO-046 kimi Q2)" {
+  # A producer loop (main/pr/ci) opens its `>>` fd, then the Alert Loop rotates
+  # underneath it. With copy+truncate (not mv) the inode at the path is stable,
+  # so the producer's subsequent write lands in the LIVE alert file — not lost
+  # into .prev. (With the old `mv`, this write would vanish into .prev.)
+  printf 'first\n' > "$_LOOP_ALERT"
+  exec 9>>"$_LOOP_ALERT"               # producer opens append fd before rotation
+  _alert_rotate                        # Alert Loop snapshots + truncates in place
+  printf 'second\n' >&9                # producer writes through its pre-opened fd
+  exec 9>&-                            # close producer fd
+  # The post-rotation write must be readable from the live file next tick.
+  [[ "$(cat "$_LOOP_ALERT")" == *"second"* ]]
+  # And the snapshot kept the pre-rotation content.
+  [[ "$(cat "${_LOOP_ALERT}.prev")" == *"first"* ]]
+}
+
 # ── _alert_dispatch ───────────────────────────────────────────────────────────
 
 @test "_alert_dispatch: empty file → no side effects (no rotate, no log)" {

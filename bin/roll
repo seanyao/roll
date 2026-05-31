@@ -11982,14 +11982,21 @@ _alert_write_log() {
 }
 
 # _alert_rotate [file]
-#   Move $_LOOP_ALERT (or <file>) to <file>.prev and recreate an empty file.
+#   Snapshot $_LOOP_ALERT (or <file>) to <file>.prev and truncate it in place.
 #   Idempotent: a missing source is a no-op (the .prev from a prior run is
 #   left untouched). Loop-safe (returns 0).
+#
+#   US-AUTO-046 (kimi peer-review Q2): copy+truncate instead of mv. `mv` swaps
+#   the inode at the path, so a producer loop (main/pr/ci) that opened its `>>`
+#   fd *before* the rotation but writes *after* it would land in `.prev` and be
+#   silently lost. Copying keeps the original inode at the path; the subsequent
+#   `:>` truncates that same inode, so any concurrent appender's fd still points
+#   at the live alert file and its write is read on the next 1-min tick.
 _alert_rotate() {
   local file="${1:-$_LOOP_ALERT}"
   [ -n "$file" ] || return 0
   if [ -f "$file" ]; then
-    mv -f "$file" "${file}.prev" 2>/dev/null || true
+    cat "$file" > "${file}.prev" 2>/dev/null || true
     : > "$file"
   fi
   return 0

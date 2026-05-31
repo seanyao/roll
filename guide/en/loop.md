@@ -698,8 +698,9 @@ so the tmux viewer never looks frozen.
 | 3 | `worktree_setup` | fetch origin + worktree create + meta sync | 2 – 10 s |
 | 4 | `agent_invoke` | Agent executes with up to 3 retries | 5 – 45 min |
 | 5 | `publish_push` | push branch + open PR (or doc-only merge) | 5 – 30 s |
-| 6 | `publish_wait_merge` | poll until PR is MERGED (skipped for doc-only) | 0 – 10 min |
-| 7 | `cleanup` | emit PR final state + worktree teardown | < 1 s |
+| 6 | `cleanup` | emit PR final state + worktree teardown | < 1 s |
+
+> **US-AUTO-044**: the main loop exits after opening the PR and **no longer waits for merge**. Merge / rebase / close is handled asynchronously by the dedicated PR Loop (`com.roll.pr.<slug>`, every 5 min); a story with an open PR is skipped by the eligibility gate, so it is neither re-opened nor falsely marked Done.
 
 Idle / failed / aborted cycles only emit the phases they actually entered.
 At cycle exit, the inner runner prints a phase breakdown panel sorted by

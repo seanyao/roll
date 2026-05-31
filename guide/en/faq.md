@@ -503,13 +503,14 @@ event stream (including rotated archives `.1` … `.4`) and prints a single pane
 ### C6. A cycle says phase X took forever — how do I find what slowed it down?
 
 **Symptoms:** `roll loop runs` shows `slowest=claude 96%` on a 45-minute cycle,
-or `slowest=pr-wait 80%` on one that seemed to finish quickly. You want to
-know which step ate the time before deciding whether to tune anything.
+or `slowest=worktree_setup 40%` on one that seemed to finish quickly. You want
+to know which step ate the time before deciding whether to tune anything.
 
-**Why this matters:** Every cycle is sliced into seven named phases
+**Why this matters:** Every cycle is sliced into six named phases
 (`startup` / `preflight` / `worktree_setup` / `agent_invoke` / `publish_push` /
-`publish_wait_merge` / `cleanup`). The top-line duration alone hides which
-one dominated.
+`cleanup`). The main loop no longer waits for merge (US-AUTO-044) — the
+dedicated PR Loop handles that asynchronously — so the top-line duration is
+now dominated by `agent_invoke` in almost every cycle.
 
 **What to do:**
 
@@ -519,8 +520,9 @@ one dominated.
 3. Common patterns:
    - `agent_invoke` dominating → expected for a multi-file story; nothing
      to tune unless you can split the story.
-   - `publish_wait_merge` > 5 min → CI is slow or auto-merge is gated on a
-     missing review; check the PR directly.
+   - PR sitting open / not merging → the dedicated PR Loop (every 5 min)
+     handles merge/rebase asynchronously; check the PR's CI or whether it's
+     gated on a missing review. This is no longer a main-loop phase.
    - `worktree_setup` > 30 s → likely a slow `git fetch origin`; transient
      network issue.
    - `preflight` > 30 s → previous cycles left orphan worktrees; loop is

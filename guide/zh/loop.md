@@ -641,8 +641,9 @@ PR 等合并）每 30–60s 还会 emit 一次 `phase_tick` 心跳，tmux 不再
 | 3 | `worktree_setup` | fetch origin + 建 worktree + 同步 meta | 2 – 10 秒 |
 | 4 | `agent_invoke` | 调起 agent（最多三次重试） | 5 – 45 分钟 |
 | 5 | `publish_push` | push 分支 + 建 PR（doc-only 直接合） | 5 – 30 秒 |
-| 6 | `publish_wait_merge` | 轮询直到 PR 合并（doc-only 跳过） | 0 – 10 分钟 |
-| 7 | `cleanup` | 落 PR 终态 + 拆 worktree | < 1 秒 |
+| 6 | `cleanup` | 落 PR 终态 + 拆 worktree | < 1 秒 |
+
+> **US-AUTO-044**:主 loop 开完 PR 即退,**不再等合并**。合并 / rebase / 关 PR 交给专职 PR Loop（`com.roll.pr.<slug>`,每 5 分钟）异步处理;有 open PR 的 story 由资格闸跳过,不会重复开,也不会假 Done。
 
 Idle / failed / aborted cycle 只 emit 实际进入过的阶段。
 cycle 收尾时 inner runner 在 stdout 打一份按耗时降序的面板：
@@ -650,7 +651,6 @@ cycle 收尾时 inner runner 在 stdout 打一份按耗时降序的面板：
 ```
 ─── Cycle 20260523-114502-12345 Phase Breakdown ───
   agent_invoke           723s  ( 96.2%)  ████████████████████
-  publish_wait_merge       19s  (  2.5%)  █
   worktree_setup            4s  (  0.5%)
   publish_push              2s  (  0.3%)
   preflight                 2s  (  0.3%)

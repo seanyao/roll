@@ -8,7 +8,7 @@ description: |
   status, escalations requiring human attention, and a release-readiness verdict.
   Three trigger modes: auto on Feature completion, daily morning schedule,
   or manual $roll-brief invocation. Distinct from roll-.changelog (user-facing
-  release notes) — this is an internal digest for the product owner.
+  changelog) — this is an internal digest for the product owner.
 ---
 
 # Roll Brief

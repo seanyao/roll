@@ -191,4 +191,3 @@ description: ...
 | `roll-spar` | 对抗式、攻防、高风险、核心逻辑、支付、权限、安全 |
 | `roll-sentinel` | 巡检、检查生产环境、回归测试 |
 | `roll-debug` | 调试、诊断、页面有问题、排查 |
-| `roll-release-notes` | 生成发布说明、release notes、写发布说明、roll release-notes |

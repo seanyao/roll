@@ -579,7 +579,7 @@ graph LR
 
 **`roll-.dream`** — 通过 macOS launchd（Linux: crontab）每晚 03:00 运行。扫描代码库中的死代码、对照 `.roll/domain/` 检测架构漂移、识别可修剪的抽象和可提炼的模式。产出 `REFACTOR-XXX` 条目写入 BACKLOG，巡检日志写入 `.roll/dream/YYYY-MM-DD.md`。
 
-**`roll-brief`** — 三种触发模式：Feature 完成时（由 roll-loop 触发）、每日早晨（09:00，通过 launchd 调度）、按需（`roll brief`）。产出 owner 面简报：已完成内容、待处理队列、需升级的事项、发布就绪建议。有别于 `roll-.changelog`（用户面发布说明）。
+**`roll-brief`** — 三种触发模式：Feature 完成时（由 roll-loop 触发）、每日早晨（09:00，通过 launchd 调度）、按需（`roll brief`）。产出 owner 面简报：已完成内容、待处理队列、需升级的事项、发布就绪建议。有别于 `roll-.changelog`（用户面 changelog）。
 
 ### 9.3 为什么用本地调度，而非 GitHub Actions
 

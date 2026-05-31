@@ -5313,37 +5313,6 @@ cmd_prices() {
 
 # FIX-113: changelog audit — list PRs merged to main since latest release
 # tag that don't appear in CHANGELOG.md's ## Unreleased section.
-# US-REL-004: release-notes generation, decoupled from the release script.
-# _release_notes_gather [changelog-path]
-#   Print the body of the CHANGELOG `## Unreleased` section (everything between
-#   the `## Unreleased` header and the next `## ` header). Returns 1 when the
-#   changelog file is absent; prints nothing (exit 0) when the section is empty.
-_release_notes_gather() {
-  local changelog="${1:-CHANGELOG.md}"
-  [ -f "$changelog" ] || return 1
-  awk '
-    /^## Unreleased/ { inblock=1; next }
-    inblock && /^## / { exit }
-    inblock { print }
-  ' "$changelog"
-}
-
-# cmd_release_notes [version]
-#   Generate a reviewable RELEASE_NOTES.md from the CHANGELOG Unreleased section
-#   ahead of release, so `roll release` only bumps + publishes (no inline AI
-#   wait). For richer/translated notes beyond the curated CHANGELOG bullets, run
-#   the roll-release-notes skill, which edits RELEASE_NOTES.md in place.
-cmd_release_notes() {
-  local version="${1:-Unreleased}"
-  local body; body=$(_release_notes_gather "CHANGELOG.md") || { err "CHANGELOG.md not found"; return 1; }
-  if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
-    warn "CHANGELOG '## Unreleased' is empty — nothing to release"; return 1
-  fi
-  { printf '# %s\n\n' "$version"; printf '%s\n' "$body"; } > "RELEASE_NOTES.md"
-  ok "release notes written to RELEASE_NOTES.md (${version})"
-  echo "  review/edit it (or run the roll-release-notes skill for polish), then release publishes it as-is"
-}
-
 cmd_changelog() {
   local subcmd="${1:-audit}"
   shift || true
@@ -14913,7 +14882,6 @@ main() {
     test)          cmd_test "$@" ;;
     prices)        cmd_prices "$@" ;;
     changelog)     cmd_changelog "$@" ;;
-    release-notes) cmd_release_notes "$@" ;;
     config)        cmd_config "$@" ;;
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;
@@ -14925,7 +14893,7 @@ main() {
     *)
       err "$(msg main.unknown_command "$cmd")"
       echo ""
-      usage
+      _help
       exit 1
       ;;
   esac

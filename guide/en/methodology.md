@@ -587,7 +587,7 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 
 **`roll-.dream`** — Runs nightly (03:00 local) via macOS launchd (Linux: crontab). Scans the codebase for dead code, architectural drift against `.roll/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `.roll/dream/YYYY-MM-DD.md`.
 
-**`roll-brief`** — Three trigger modes: Feature completion (via roll-loop), daily morning (09:00, via launchd), or on-demand (`roll brief`). Produces an owner-facing digest: what's done, what's pending, escalations, and a release-readiness verdict. Distinct from `roll-.changelog` (user-facing release notes).
+**`roll-brief`** — Three trigger modes: Feature completion (via roll-loop), daily morning (09:00, via launchd), or on-demand (`roll brief`). Produces an owner-facing digest: what's done, what's pending, escalations, and a release-readiness verdict. Distinct from `roll-.changelog` (user-facing changelog).
 
 ### 9.3 Why Local Scheduling, Not GitHub Actions
 

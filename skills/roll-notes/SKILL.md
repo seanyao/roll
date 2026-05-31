@@ -24,7 +24,7 @@ $roll-notes 今天的 code review 给了很好的反馈
 ## When Not to Use
 
 - Capturing a bug or feature idea into BACKLOG (use `$roll-idea`)
-- Generating user-facing release notes (use `$roll-.changelog`)
+- Generating the user-facing changelog (use `$roll-.changelog`)
 - Writing design documents or AC (use `$roll-design`)
 
 ## Behavior

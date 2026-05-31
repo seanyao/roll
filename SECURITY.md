@@ -21,7 +21,7 @@ You can expect:
 
 - An acknowledgement within 3 business days.
 - A coordinated timeline for a fix and disclosure once we agree on severity.
-- Credit in the release notes if you'd like to be named.
+- Credit in the changelog if you'd like to be named.
 
 ## Scope
 

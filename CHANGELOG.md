@@ -2,13 +2,19 @@
 
 ## Unreleased
 
-### Added
+### 自动化流水线
 
-- **release notes 可以提前生成、发版不再干等 (US-REL-004)** — 新增 `roll release-notes` 命令和 `roll-release-notes` skill,从 CHANGELOG 提前生成一份可审阅的 `RELEASE_NOTES.md`;发版时若已存在就直接用、跳过现场 AI 生成,发布脚本只负责 bump + 推送,不用再卡着等 `[release]`
-- **专职 PR Loop:PR 生命周期从主循环拆出来,每 5 分钟独立跑 (US-AUTO-044 Phase 2)** — 主 loop 开完 PR 就退、不再同步干等合并;新增 5 分钟的 launchd 服务 `com.roll.pr.<slug>`(`StartInterval=300`,单写者锁)专门 rebase / 合并 / 关 PR,PR 响应不再卡在 30 分钟一轮;合并即删分支(远端 `--delete-branch` + 仓库 `delete_branch_on_merge` + 本地 `_loop_pr_prune_local` 带 worktree 守卫,根治分支/worktree 堆积);`roll loop on/off/status` 一并管理新服务;有 open PR 的 story 由资格闸防重复开,worktree 隔离杜绝假 Done `[loop]`
-- **loop tmux 连续同文件 Edit 折叠** — `roll loop attach` 里 agent 连续改同一个文件不再复读 N 行长路径(像卡死),折叠成一行 `✏ <basename> | <hint> ×N`(hint 来自 `replace_all` 或 `new_string` 首行 token,≤20 字);跨文件 / 非 Edit 事件 / cycle 结束自动 flush;guide 中英双轨补上 "Edit 折叠" 小节 `[loop]` `[doc]`
-- **自主循环调度配置统一交互式管理 (US-LOOP-033..036, fixes FIX-105)** — `roll config loop-window 9-18` / `loop-schedule 30/7` / `dream-time 03:20` / `brief-time 09:15` 一行命令改 loop、dream、brief 调度,写完自动 reload plist 并立即在 `roll loop status` 反映;不用再手工 vim 三个 yaml;dream / brief 用 `StartCalendarInterval` 数组式绕过 macOS launchd 单字典 bug,重新支持精确到分钟的 fire 时刻 `[loop]`
-- **非 Claude agent 也能看到 token/成本** — dashboard 的 token/cost 列不再对所有非 Claude agent 黑屏:pi(DeepSeek)、OpenAI(codex)、Gemini、Kimi、Qwen 的 cycle 现在显示真实 token 和成本;OpenCode 等暂无 usage 插件的 agent 仍显示 `—/—`,新 agent 支持需落一个按 agent 插件而非自动出现;文档(FAQ + loop guide,中英双轨)补上覆盖矩阵 `[loop]` `[doc]`
+- **专职 PR Loop:开完 PR 不用再守着合并 (US-AUTO-044 Phase 2)** — 主 loop 开完 PR 就退,新增一个每 5 分钟独立跑的服务专门 rebase / 合并 / 关 PR,响应不再卡在 30 分钟一轮;合并即自动删分支,不再越堆越乱;同一故事不会重复开 PR `[loop]`
+- **loop / dream / brief 的调度一行命令就能改 (US-LOOP-033..036, fixes FIX-105)** — `roll config loop-window 9-18` / `loop-schedule 30/7` / `dream-time 03:20` / `brief-time 09:15`,改完立刻生效,不用再手工 vim 配置文件;dream / brief 重新支持精确到分钟的触发时刻 `[loop]`
+
+### 可见性
+
+- **loop 连续改同一个文件不再刷屏像卡死** — `roll loop attach` 里 agent 反复改同一文件,折叠成一行 `✏ <文件> ×N` 而不是复读一堆长路径 `[loop]` `[doc]`
+- **非 Claude agent 也能看到 token/成本** — dashboard 不再对 pi、codex、Gemini、Kimi、Qwen 的 cycle 黑屏,显示真实 token 和成本;暂无用量插件的 agent 仍显示 `—/—` `[loop]` `[doc]`
+
+### 工程和测试
+
+- **发布说明就是 changelog,不再是两个东西 (US-REL-004)** — Roll 里只有 changelog、没有单独的 "release notes"(也没有 `RELEASE_NOTES.md` / `roll release-notes`):发版时直接把该版 changelog 段落作为 GitHub Release 正文,changelog 本身改用按感知分组 + 第二人称的写法,读起来就是给你看的发布说明 `[release]`
 
 ## v2026.529.5
 

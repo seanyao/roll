@@ -71,8 +71,8 @@ teardown() { unit_teardown_cd; }
   _write_loop_runner_script "$script" "/some/project" "echo hi" "${_tmp}/log" 10 24
   # Cleanup section both removes LOCK and (best-effort) kills session
   local body; body=$(cat "$script")
-  echo "$body" | grep -qF 'rm -f'
-  echo "$body" | grep -qF 'kill-session'
+  grep -qF 'rm -f' <<< "$body"
+  grep -qF 'kill-session' <<< "$body"
 }
 
 @test "_write_loop_runner_script: writes inner script with the cmd payload" {

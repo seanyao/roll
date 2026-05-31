@@ -91,11 +91,6 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 
 详见 [SECURITY.md](SECURITY.md)。漏洞请私下汇报，不要在公开 Issue 里贴。
 
-## 致谢
-
-- **[khazix-skills](https://github.com/KKKKhazix/khazix-skills)** by 数字生命卡兹克 — `$roll-research` 使用的 HV 分析框架，MIT 许可。
-- **[superpowers](https://github.com/obra/superpowers)** by Jesse Vincent — 启发了 Roll 多个工作流模式的可组合技能库。
-
 ## License
 
 [MIT](LICENSE)

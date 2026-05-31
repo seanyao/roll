@@ -282,7 +282,6 @@
     font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 600;
     display: inline-block;
   }
-  .phase-research { background: rgba(99,102,241,0.15); color: var(--accent-light); }
   .phase-design { background: rgba(99,102,241,0.15); color: var(--accent-light); }
   .phase-build { background: rgba(34,197,94,0.15); color: var(--green); }
   .phase-check { background: rgba(245,158,11,0.15); color: var(--orange); }
@@ -574,20 +573,15 @@
       <p>Establish Bounded Contexts, Ubiquitous Language, and Context Maps. Ensure engineering speaks the same language as business.</p>
     </div>
     <div class="timeline-item">
-      <h4>2. Research — $roll-research</h4>
-      <p>HV Analysis: vertical traces the full lifecycle, horizontal compares competitors. Cross-axis produces insights. Output: PDF report.</p>
-    </div>
-    <div class="timeline-item">
-      <h4>3. Design — $roll-design</h4>
+      <h4>2. Design — $roll-design</h4>
       <p>Solution exploration with DDD modeling, architecture decisions, interface definitions, data models. When uncertain, explores multiple options before committing.</p>
     </div>
     <div class="timeline-item">
-      <h4>4. Decompose + AC</h4>
+      <h4>3. Decompose + AC</h4>
       <p>Break into INVEST-compliant User Stories with acceptance criteria. Write to BACKLOG.md + docs/features/. Each Story is independently deliverable.</p>
     </div>
   </div>
   <div class="fade-in" style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
-    <span class="skill-tag" style="background:rgba(99,102,241,0.15);color:var(--accent-light);">$roll-research</span>
     <span class="skill-tag" style="background:rgba(99,102,241,0.15);color:var(--accent-light);">$roll-design</span>
     <span class="skill-tag" style="background:rgba(99,102,241,0.15);color:var(--accent-light);">$roll-idea</span>
     <span class="skill-tag" style="background:rgba(99,102,241,0.15);color:var(--accent-light);">$roll-propose</span>
@@ -605,7 +599,7 @@
   <div class="cards cards-4 fade-in">
     <div class="card" style="border-left: 3px solid var(--accent-light);">
       <h3 style="font-size:15px;color:var(--accent-light);">User Story</h3>
-      <p>Business requirements, product features. Full Loop A: DDD → Research → Design → AC. The heaviest investment upfront.</p>
+      <p>Business requirements, product features. Full Loop A: DDD → Design → AC. The heaviest investment upfront.</p>
       <p style="margin-top:6px;font-size:11px;color:var(--accent-light);">ID: US-XXX</p>
     </div>
     <div class="card" style="border-left: 3px solid var(--cyan);">
@@ -821,7 +815,6 @@
       <tr><th>Skill</th><th>Tier</th><th>What It Does</th></tr>
     </thead>
     <tbody>
-      <tr><td class="skill-name">$roll-research</td><td><span class="phase-tag phase-research">Research</span></td><td>HV analysis — timeline + competitive landscape → PDF report</td></tr>
       <tr><td class="skill-name">$roll-design</td><td><span class="phase-tag phase-design">Design</span></td><td>DDD modeling, solution design, INVEST story breakdown</td></tr>
       <tr><td class="skill-name">$roll-idea</td><td><span class="phase-tag phase-design">Capture</span></td><td>Fast backlog capture — one-liner in, classified BACKLOG entry out</td></tr>
       <tr><td class="skill-name">$roll-propose</td><td><span class="phase-tag phase-design">Propose</span></td><td>Generate 1-3 structured US drafts → PROPOSALS.md for human review</td></tr>
@@ -1016,7 +1009,7 @@
           <div style="font-size:13px;font-weight:700;color:var(--accent-light);">Idea</div>
           <div style="font-size:8px;color:var(--text-dim);margin-top:2px;">任何人可提 · 业务 · 产品 · 工程师</div>
         </div>
-        <div style="text-align:center;font-size:9px;color:var(--text-dim);">↓ DDD → Research → Design → AC</div>
+        <div style="text-align:center;font-size:9px;color:var(--text-dim);">↓ DDD → Design → AC</div>
         <div style="border-radius:7px;padding:6px 8px;background:rgba(99,102,241,0.06);">
           <div style="font-size:13px;font-weight:700;color:var(--accent-light);">Backlog</div>
           <div style="font-size:8px;color:var(--text-dim);margin-top:2px;">AC 就绪 · Feature Doc 完成</div>
@@ -1026,7 +1019,7 @@
             <span style="font-size:7px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(239,68,68,0.12);color:var(--red);">Fix</span>
             <span style="font-size:7px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(245,158,11,0.12);color:var(--orange);">Spike</span>
           </div>
-          <div style="font-size:7px;color:var(--text-dim);margin-top:3px;font-family:monospace;">research · design · idea · propose</div>
+          <div style="font-size:7px;color:var(--text-dim);margin-top:3px;font-family:monospace;">design · idea · propose</div>
         </div>
       </div>
     </div>

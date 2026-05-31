@@ -252,3 +252,24 @@ EOF
   [ "$status" -eq 0 ]
   ! grep -q "branch -D" "$GIT_LOG"
 }
+
+# ── _write_pr_loop_runner_script (US-AUTO-044 Phase 2: PR Loop runner) ────────
+# Generates the script the com.roll.pr.<slug> launchd plist runs every 5 min:
+# portable PATH, a single-flight re-entry lock (pid+ts staleness), then drives
+# the existing _loop_pr_inbox orchestrator via the `roll _loop_pr_inbox` dispatch.
+
+@test "_write_pr_loop_runner_script: drives _loop_pr_inbox under a re-entry lock" {
+  local sp="${TEST_TMP}/pr-runner.sh"
+  _write_pr_loop_runner_script "$sp" "/proj" "/usr/bin/roll" "/proj/.roll/loop/pr.log"
+  [ -x "$sp" ]
+  grep -q 'bash "/usr/bin/roll" _loop_pr_inbox' "$sp"
+  grep -q '.pr-loop.lock' "$sp"
+  grep -q 'kill -0' "$sp"
+  grep -q 'cd "/proj"' "$sp"
+}
+
+@test "_write_pr_loop_runner_script: generated script is valid bash" {
+  local sp="${TEST_TMP}/pr-runner.sh"
+  _write_pr_loop_runner_script "$sp" "/proj" "/usr/bin/roll" "/proj/log"
+  bash -n "$sp"
+}

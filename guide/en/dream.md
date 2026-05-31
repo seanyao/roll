@@ -52,15 +52,38 @@ Dream does **not** generate REFACTOR entries for:
 
 ## Schedule Configuration
 
-Dream runs at 3am by default. Configure in `~/.roll/config.yaml`:
+Dream runs at 3am by default. The recommended way to change the time is the
+`roll config dream-time` facade — it writes both keys at once, no hand-editing yaml:
+推荐用 `roll config dream-time` 改时间 —— 一条命令同时写两个 key，免手工编辑 yaml：
 
-```yaml
-loop:
-  loop_dream_hour: 3     # 0-23
-  loop_dream_minute: 10  # 0-59
+```bash
+roll config dream-time 03:20   # sets loop_dream_hour + loop_dream_minute
 ```
 
-`roll loop on` installs the dream plist alongside the loop and brief plists.
+`roll config` writes to the project's `.roll/local.yaml` by default (`--project`);
+pass `--global` to write `~/.roll/config.yaml` instead:
+`roll config` 默认写项目的 `.roll/local.yaml`（`--project`）；加 `--global` 改写 `~/.roll/config.yaml`：
+
+```bash
+roll config loop_dream_hour 3            # set a single key, project scope
+roll config loop_dream_hour 3 --global   # set a single key, global scope
+roll config loop_dream_hour              # print current value + source
+roll config --list                       # list all loop/dream/brief schedule keys
+```
+
+The underlying keys (resolved here as `.roll/local.yaml`):
+底层 key（这里以 `.roll/local.yaml` 为例）：
+
+```yaml
+loop_dream_hour: 3     # 0-23, default 3
+loop_dream_minute: 12  # 0-59, omit to auto-derive
+```
+
+`roll config` reloads the schedule automatically, so a separate `roll loop on` is
+not required after changing the time. `roll loop on` installs the dream plist
+alongside the loop and brief plists.
+改完时间 `roll config` 会自动重载调度，无需再跑 `roll loop on`。`roll loop on`
+会把 dream plist 和 loop、brief plist 一起安装。
 All three services are managed together:
 
 ```bash

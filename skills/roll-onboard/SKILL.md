@@ -55,6 +55,58 @@ Walk the repo. Identify:
 - **domains**: top business/technical domains (e.g., "auth", "billing", "search")
 - **key_modules**: top 3-5 modules that hold most of the logic
 
+### Step 1b — Phase 2 analysis: business model, tech, tests (US-ONBOARD-016)
+
+A single onboard now produces three structured analysis sections in the plan
+(`domain_model`, `tech_analysis`, `test_assessment`). Build them here so Step 4
+can serialise them.
+
+**`domain_model`** — from the code you read, identify the bounded contexts. For
+each: a `name`, its `aggregates` (the entities that own consistency), and its
+`ubiquitous_language` (the domain terms the code/docs actually use). If you
+genuinely cannot infer contexts from the code, emit an empty
+`bounded_contexts: []` — do NOT invent contexts that aren't in the code.
+
+**`tech_analysis`** — `stack` (languages/frameworks evidenced by manifests),
+`dependencies` (from `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml`
+etc.), `architecture_notes` (observed structure, not aspirational), and `risks`
+(each a mapping with a `description`; optionally `severity: LOW|MEDIUM|HIGH` and
+an `evidence: detected|inferred` tag).
+
+**`test_assessment`** — this section is under a **hard anti-hallucination
+constraint** (next sub-step). Do NOT write it from intuition.
+
+#### The verifiable test scan (ANTI-HALLUCINATION HARD CONSTRAINT)
+
+Every `test_assessment` claim must be backed by a real filesystem scan you run
+here — never by "what a project like this usually needs". Run these probes and
+record the raw counts/paths:
+
+1. **Count test files** by the conventional patterns:
+   - `*.test.*` / `*.spec.*` (JS/TS), `*_test.go` (Go), `test_*.py` / `*_test.py` (Python), `*_spec.rb` (Ruby), `*Test.java` (Java)
+   - e.g. `git ls-files | grep -cE '\.(test|spec)\.[jt]sx?$'` and similar per pattern
+2. **Probe for runner configs**: `jest.config.*`, `pytest.ini` (or `[tool.pytest]` in `pyproject.toml`), `.mocharc.*`, `vitest.config.*`, `karma.conf.*`, `phpunit.xml`, `go test` (implied by `*_test.go`)
+3. **Probe for a `coverage/` directory** (and `.coverage` / `coverage.xml` artifacts)
+
+Then turn the raw findings into claims, each a **mapping** carrying a `claim`
+string plus an `evidence` tag:
+
+- `evidence: detected` — the scan directly found it (e.g. "42 `*.test.ts` files detected", "vitest.config.ts present", "coverage/ directory present").
+- `evidence: inferred` — a judgement you derived FROM the detected facts (e.g. "unit layer present but no E2E config — integration coverage likely thin"). The inference must trace back to something the scan detected.
+
+**"none detected" rule**: when a probe finds nothing, you MUST say so explicitly
+with a tagged claim — `{claim: "none detected", evidence: detected}` (a scan that
+ran and returned zero is a genuine `detected` finding). You must NOT silently
+omit the dimension, and you must NOT invent generic filler like "needs more E2E
+tests" / "consider adding integration tests" with no detected basis. The plan
+validator (`lib/roll-plan-validate.py`) rejects any untagged free-text claim, so
+filler will fail `roll init --apply`.
+
+Map the findings into the three buckets:
+- `current_layers`: what test layers actually exist (each tagged `detected`)
+- `gaps`: dimensions where the scan found nothing (`none detected`, tagged `detected`) or thin coverage you can justify (`inferred`)
+- `recommended_actions`: actions that trace to a detected gap (tag `inferred`); if nothing is missing, this bucket may be `[]`
+
 ### Step 2 — Get gap report
 
 Run `roll-doc --dry-run` (READ-ONLY mode). This reports:
@@ -121,6 +173,39 @@ agent_routes_template: default                # user's Q10 — agent routing pre
                                               # minimal = single agent (pi), no history
                                               # heavy   = pi/deepseek/claude/kimi + larger window
                                               # skip    = don't seed .roll/agent-routes.yaml
+
+# ── US-ONBOARD-016: Phase 2 analysis sections (optional, but emit all three) ──
+# All three are validated only when present, so they are backward-compatible,
+# but a normal onboard should produce them from Step 1b.
+
+domain_model:
+  bounded_contexts:                          # [] if none can be inferred — never invent
+    - name: auth
+      aggregates: [User, Session]
+      ubiquitous_language: [login, token, refresh]
+
+tech_analysis:
+  stack: [bash, python3]                     # evidenced by manifests
+  dependencies: [pyyaml]                     # from package.json / pyproject / go.mod / ...
+  architecture_notes: ["single-binary CLI + python helpers in lib/"]
+  risks:
+    - description: "no automated test run on macOS bash 3.2"
+      severity: HIGH                         # optional: LOW | MEDIUM | HIGH
+      evidence: detected                     # optional: detected | inferred
+
+# test_assessment — ANTI-HALLUCINATION: every claim is a mapping with an
+# `evidence` tag (detected | inferred). A zero-result scan is `none detected`
+# tagged `detected`. Untagged free-text is REJECTED by the validator.
+test_assessment:
+  current_layers:
+    - claim: "112 bats files detected under tests/"   # evidence: a real scan count
+      evidence: detected
+  gaps:
+    - claim: "none detected"                 # e.g. no coverage/ dir found
+      evidence: detected
+  recommended_actions:                       # [] if nothing is missing
+    - claim: "add a macOS CI runner (inferred from launchd-only test skips)"
+      evidence: inferred                     # an inference traceable to a detected fact
 ```
 
 Then tell the user:

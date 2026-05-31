@@ -85,7 +85,8 @@ teardown() { unit_teardown; }
   grep -q '_phase_begin worktree_setup' "$inner"
   grep -q '_phase_begin agent_invoke' "$inner"
   grep -q '_phase_begin publish_push' "$inner"
-  grep -q '_phase_begin publish_wait_merge' "$inner"
+  # US-AUTO-044: publish_wait_merge phase removed — main loop no longer waits
+  # for merge (handed to the PR Loop).
   grep -q '_phase_begin cleanup' "$inner"
 }
 

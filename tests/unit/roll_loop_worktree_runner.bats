@@ -243,15 +243,18 @@ teardown() {
   grep -qF 'FIX-045' "$inner"
 }
 
-@test "_write_loop_runner_script: FIX-047 inner script waits for PR merge after non-doc publish" {
+@test "_write_loop_runner_script: US-AUTO-044 main loop hands merge to the PR Loop (no synchronous wait)" {
   local script="${_tmp}/run-fix047.sh"
   _write_loop_runner_script "$script" "/some/project" "claude -p hi" "${_tmp}/log" 10 24
   local inner="${_tmp}/run-fix047-inner.sh"
-  # Must call _loop_wait_pr_merge for non-doc code changes
-  grep -qF '_loop_wait_pr_merge' "$inner"
-  # Must have FIX-047 annotation
-  grep -qF 'FIX-047' "$inner"
-  # Must track doc-only flag to skip wait for doc-only PRs (admin merge = immediate)
+  # US-AUTO-044 Phase 2: the main loop no longer blocks on merge — the
+  # synchronous _loop_wait_pr_merge call was removed (replaces FIX-047); the
+  # dedicated PR Loop merges async, and the open-PR eligibility gate keeps the
+  # story from being re-picked meanwhile.
+  ! grep -qF '_loop_wait_pr_merge' "$inner"
+  grep -qF 'merge handed to PR Loop' "$inner"
+  # Still publishes the PR and still branches on doc-only (doc PRs admin-merge).
+  grep -qF '_loop_publish_pr' "$inner"
   grep -qF '_is_doc_only' "$inner"
 }
 

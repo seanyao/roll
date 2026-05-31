@@ -24,9 +24,8 @@ Roll decomposes the software delivery lifecycle into three loops, each independe
 
 ```mermaid
 graph TB
-    subgraph "Loop A: Research & Design"
-        A1["$roll-research<br/>HV Research & Analysis"] --> A2["$roll-design<br/>Requirements → INVEST Stories"]
-        A2 --> A3[".roll/backlog.md<br/>Status Index"]
+    subgraph "Loop A: Design"
+        A2["$roll-design<br/>Requirements → INVEST Stories"] --> A3[".roll/backlog.md<br/>Status Index"]
         A3 --> A4[".roll/features/<br/>Acceptance Criteria & Design"]
     end
 
@@ -52,7 +51,6 @@ graph TB
     B6 -->|"Delivery complete"| C1
     C5 -->|"Issue escalation"| A2
 
-    style A1 fill:#e8f4fd,stroke:#2196F3
     style A2 fill:#e8f4fd,stroke:#2196F3
     style B2 fill:#e8f5e9,stroke:#4CAF50
     style B7 fill:#fff3e0,stroke:#FF9800
@@ -141,28 +139,11 @@ Project Type (Template)  ← Reference only — consulted by $roll-build / $roll
 
 | Classical Methodology | Roll Implementation |
 |----------------------|--------------------|
-| HCD (Human-Centered Design) | `$roll-research`: Research before design; data-driven decision-making |
 | BDD (Behavior-Driven Development) | `$roll-design`: Requirements expressed as Acceptance Criteria |
 | Scrum Backlog | `.roll/backlog.md` + `.roll/features/`: Two-tier index structure |
 | INVEST Principles | Mandatory constraints on Story decomposition |
 
-### 3.2 Research-Driven Design: `$roll-research`
-
-Structured research precedes requirements definition, preventing design decisions made on gut instinct alone. `$roll-research` implements **HV Analysis (Horizontal-Vertical Analysis)**:
-
-- **Vertical Axis**: Traces the full evolutionary arc of the subject — from its origins to the present — along a timeline. Produces a narrative analysis of 6,000–15,000 words, covering key inflection points, technology iterations, and market shifts.
-- **Horizontal Axis**: Performs systematic benchmarking against comparable products and solutions at the current point in time. Produces a comparative analysis of 3,000–10,000 words, covering feature matrices, technology approaches, and positioning differences.
-- **Cross-Axis Insights**: Cross-validates findings from both axes to surface trend predictions and strategic recommendations.
-
-Research follows a strict source priority hierarchy: **primary sources > industry reports > secondary analysis**. Fabricating data is prohibited — information that cannot be verified is marked as unavailable, never invented.
-
-The final output is a structured Markdown report that can be converted to a PDF with cover page and table of contents using the built-in `md_to_pdf.py` script (powered by WeasyPrint).
-
-> **Scenario**: TaskFlow plans to add an "organization-level permission management" module. Before writing a single line, `$roll-research` conducts an HV analysis on "B2B SaaS permission models" — the vertical axis traces the ACL → RBAC → ABAC → ReBAC evolution, while the horizontal axis compares how Linear, Notion, and GitHub each implement permissions.
->
-> The cross-axis insight: after 2023, mainstream products universally layered resource-level fine-grained controls on top of RBAC — pure RBAC has become the minimum viable bar. This finding directly shaped how `$roll-design` decomposed Stories downstream, averting a rework cycle that would have surfaced only after delivery.
-
-### 3.3 From Idea to BACKLOG: `$roll-design`
+### 3.2 From Idea to BACKLOG: `$roll-design`
 
 Translates raw ideas and business requirements into executable instruction contracts. The journey from an undeveloped thought to a BACKLOG Story follows a staged, gate-controlled flow:
 
@@ -199,7 +180,7 @@ The core output is User Stories that conform to the **INVEST principles**:
 >
 > Each Story carries its own acceptance criteria — US-007's AC includes "create/delete/modify operations all generate audit events" and "events include actor ID, timestamp, and change diff." The export capability, which was buried implicitly in the original requirement, is surfaced as an explicit standalone Story rather than hidden in implementation details.
 
-### 3.4 Management Artifacts: Two-Tier Index Structure
+### 3.3 Management Artifacts: Two-Tier Index Structure
 
 **`.roll/backlog.md` (status index)** — the project's central state machine. Contains only Story ID, title, and status summary; implementation details are excluded:
 
@@ -548,7 +529,6 @@ Roll is not a new methodology. It encodes proven engineering practices as standa
 ```mermaid
 graph LR
     subgraph "Classical Methodologies"
-        HCD["HCD<br/>Human-Centered Design"]
         BDD["BDD<br/>Behavior-Driven Dev"]
         S["Scrum<br/>Sprint / Backlog"]
         T["TDD<br/>RED-GREEN-Refactor"]
@@ -558,7 +538,6 @@ graph LR
     end
 
     subgraph "Roll Implementation"
-        R["$roll-research<br/>HV Analysis"]
         D["$roll-design<br/>INVEST Stories"]
         SB["$roll-build<br/>TCR Micro-steps"]
         SP["$roll-spar<br/>Adversarial TDD"]
@@ -566,7 +545,6 @@ graph LR
         BB["$roll-debug<br/>Auto Forensics"]
     end
 
-    HCD -->|"Research first"| R
     BDD -->|"Acceptance criteria"| D
     S -->|"Backlog management"| D
     T -->|"Test first"| SB
@@ -670,7 +648,7 @@ roll                      # project dashboard (in project dir): loop status + br
 **Validated:**
 
 - Feedback-driven continuous delivery loop (Design → Build → Check → Fix)
-- A standardized skill set of 20 Skills (12 active + 8 passive support)
+- A standardized skill set of 19 Skills (11 active + 8 passive support)
 - Cross-AI-client configuration consistency management (`roll` CLI)
 - TCR micro-commits + Verification Gate quality assurance mechanism
 - Multi-Agent audit tracing via `Co-Authored-By` trailers (written natively by each AI tool)
@@ -678,7 +656,7 @@ roll                      # project dashboard (in project dir): loop status + br
 **Current Limitations:**
 
 - **Multi-Agent coordination overhead**: `$roll-build` evaluates Action dependencies to determine whether to launch parallel sub-Agents, but cross-Agent state synchronization and conflict resolution currently depend on conventions rather than enforced protocols, incurring coordination overhead in high-concurrency scenarios.
-- **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models. Each Skill now pins a model in its frontmatter (`model:` — e.g. Opus for `roll-research`, Haiku for `roll-idea`) and declares a tool allowlist (`allowed-tools:`), mitigating precision drift and accidental tool misuse, though both fields still depend on the client honoring them.
+- **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models. Each Skill now pins a model in its frontmatter (`model:` — e.g. Opus for `roll-design`, Haiku for `roll-idea`) and declares a tool allowlist (`allowed-tools:`), mitigating precision drift and accidental tool misuse, though both fields still depend on the client honoring them.
 - **Patrol coverage**: `$roll-sentinel`'s sampling strategy effectively controls cost, but it does not provide the same coverage guarantee as exhaustive regression testing.
 
 ---
@@ -687,7 +665,6 @@ roll                      # project dashboard (in project dir): loop status + br
 
 | Skill | Phase | Input | Output |
 |-------|-------|-------|--------|
-| `$roll-research` | Research | Research topic | Markdown / PDF research report |
 | `$roll-design` | Design | Requirements description | `.roll/backlog.md` + `.roll/features/` |
 | `$roll-build` | Implementation | Story ID / one-sentence requirement | Deployed code + verification evidence |
 | `$roll-spar` | Defensive implementation | Feature description | Adversarial test suite + implementation code |

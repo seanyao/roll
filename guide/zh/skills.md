@@ -14,7 +14,6 @@
 | **"并行跑多个 Action"** | `roll-build` | 拆分 Action 后自动判断是否并行 |
 | **"检查生产状态"** | `roll-sentinel` | 生产巡检、回归测试 |
 | **"调试这个页面"** | `roll-debug` | 深度诊断，采集日志/网络/DOM |
-| **"研究这个主题"** | `roll-research` | HV 分析深度调研，输出 PDF 报告 |
 
 ## 支撑技能
 
@@ -192,4 +191,3 @@ description: ...
 | `roll-spar` | 对抗式、攻防、高风险、核心逻辑、支付、权限、安全 |
 | `roll-sentinel` | 巡检、检查生产环境、回归测试 |
 | `roll-debug` | 调试、诊断、页面有问题、排查 |
-| `roll-research` | 深度调研、研究一下、竞品分析、HV 分析、深入了解 |

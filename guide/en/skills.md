@@ -14,7 +14,6 @@ Quickly select the right skill or tool.
 | **"Run several Actions in parallel"** | `roll-build` | Auto-determines parallelism after splitting Actions |
 | **"Check production status"** | `roll-sentinel` | Production patrol, regression testing |
 | **"Debug this page"** | `roll-debug` | Deep diagnosis, collect logs/network/DOM |
-| **"Research this topic"** | `roll-research` | HV analysis deep research, outputs PDF report |
 
 ## Support Skills
 
@@ -199,4 +198,3 @@ description: ...
 | `roll-spar` | "adversarial", "attack-defense", "high-risk", "critical logic", "payment", "permissions", "security" |
 | `roll-sentinel` | "patrol", "check production", "regression test" |
 | `roll-debug` | "debug", "diagnose", "page has issues", "black-box analysis" |
-| `roll-research` | "deep research", "research this", "competitive analysis", "HV analysis", "deep dive" |

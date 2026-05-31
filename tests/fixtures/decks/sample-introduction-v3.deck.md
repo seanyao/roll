@@ -128,7 +128,7 @@ body_en: |
     <div class="card" style="border-left:3px solid var(--accent-light);">
       <div style="font-size:26px;margin-bottom:6px;">🔧</div>
       <h3 style="font-size:15px;">Skill-Driven Execution</h3>
-      <p>23 skills encode TDD, TCR, DDD, INVEST as <strong>repeatable workflows any agent can follow</strong>. Works with Claude, Cursor, Codex, Antigravity — swap the tool, keep the discipline.</p>
+      <p>22 skills encode TDD, TCR, DDD, INVEST as <strong>repeatable workflows any agent can follow</strong>. Works with Claude, Cursor, Codex, Antigravity — swap the tool, keep the discipline.</p>
     </div>
   </div>
   <div class="analogy fade-in">
@@ -148,7 +148,7 @@ body_zh: |
     <div class="card" style="border-left:3px solid var(--accent-light);">
       <div style="font-size:26px;margin-bottom:6px;">🔧</div>
       <h3 style="font-size:15px;">技能驱动执行</h3>
-      <p>23 个 Skill 把 TDD、TCR、DDD、INVEST 编码为<strong>任何 Agent 都能执行的可重复工作流</strong>。Claude、Cursor、Codex、Antigravity 通用——换工具，留纪律。</p>
+      <p>22 个 Skill 把 TDD、TCR、DDD、INVEST 编码为<strong>任何 Agent 都能执行的可重复工作流</strong>。Claude、Cursor、Codex、Antigravity 通用——换工具，留纪律。</p>
     </div>
   </div>
   <div class="analogy fade-in">
@@ -325,20 +325,15 @@ body_en: |
       <p>Establish Bounded Contexts, Ubiquitous Language, Context Maps. Ensure engineering speaks the same language as business.</p>
     </div>
     <div class="timeline-item">
-      <h4>2. Research — $roll-research</h4>
-      <p>HV Analysis: vertical traces full lifecycle, horizontal compares competitors. Cross-axis produces insights. Output: PDF report.</p>
-    </div>
-    <div class="timeline-item">
-      <h4>3. Design — $roll-design</h4>
+      <h4>2. Design — $roll-design</h4>
       <p>Solution exploration with DDD modeling, architecture decisions, interface definitions, data models. Explores multiple options before committing.</p>
     </div>
     <div class="timeline-item">
-      <h4>4. Decompose + AC</h4>
+      <h4>3. Decompose + AC</h4>
       <p>Break into INVEST-compliant User Stories with acceptance criteria. Write to BACKLOG + features/. Each Story independently deliverable.</p>
     </div>
   </div>
   <div class="fade-in" style="margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
-    <span class="skill-tag">$roll-research</span>
     <span class="skill-tag">$roll-design</span>
     <span class="skill-tag">$roll-idea</span>
     <span class="skill-tag">$roll-propose</span>
@@ -355,20 +350,15 @@ body_zh: |
       <p>建立限界上下文、统一语言、上下文映射。让工程和业务说同一种话。</p>
     </div>
     <div class="timeline-item">
-      <h4>2. 调研 — $roll-research</h4>
-      <p>HV 分析：纵轴梳理全生命周期，横轴对比竞品，交叉产出洞察。输出 PDF 报告。</p>
-    </div>
-    <div class="timeline-item">
-      <h4>3. 设计 — $roll-design</h4>
+      <h4>2. 设计 — $roll-design</h4>
       <p>用 DDD 建模、架构决策、接口定义、数据模型来做方案探索。落定前先比较多个方案。</p>
     </div>
     <div class="timeline-item">
-      <h4>4. 拆分 + 验收标准</h4>
+      <h4>3. 拆分 + 验收标准</h4>
       <p>拆成符合 INVEST 的 User Story，每个带验收标准。写入 BACKLOG + features/。每个 Story 都能独立交付。</p>
     </div>
   </div>
   <div class="fade-in" style="margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
-    <span class="skill-tag">$roll-research</span>
     <span class="skill-tag">$roll-design</span>
     <span class="skill-tag">$roll-idea</span>
     <span class="skill-tag">$roll-propose</span>
@@ -386,7 +376,7 @@ body_en: |
   <div class="cards cards-4 fade-in">
     <div class="card" style="border-left: 3px solid var(--accent-light);">
       <h3 style="font-size:14px;color:var(--accent-light);">User Story</h3>
-      <p>Business features. Full Loop A: DDD → Research → Design → AC. The heaviest investment.</p>
+      <p>Business features. Full Loop A: DDD → Design → AC. The heaviest investment.</p>
       <p style="margin-top:6px;font-size:11px;color:var(--accent-light);">ID: US-XXX</p>
     </div>
     <div class="card" style="border-left: 3px solid var(--cyan);">
@@ -416,7 +406,7 @@ body_zh: |
   <div class="cards cards-4 fade-in">
     <div class="card" style="border-left: 3px solid var(--accent-light);">
       <h3 style="font-size:14px;color:var(--accent-light);">User Story</h3>
-      <p>业务功能。完整 Loop A：DDD → 调研 → 设计 → AC。前期投入最重。</p>
+      <p>业务功能。完整 Loop A：DDD → 设计 → AC。前期投入最重。</p>
       <p style="margin-top:6px;font-size:11px;color:var(--accent-light);">ID: US-XXX</p>
     </div>
     <div class="card" style="border-left: 3px solid var(--cyan);">
@@ -750,7 +740,7 @@ title_zh: "ROLL 技能全景"
 body_en: |
   <span class="tag fade-in">Skill System</span>
   <h2 class="fade-in">ROLL's Skills, At a Glance</h2>
-  <p class="section-desc fade-in" style="margin-bottom: 10px;">23 skills spanning design, build, check, autonomous, and support — each maps to a specific phase.</p>
+  <p class="section-desc fade-in" style="margin-bottom: 10px;">22 skills spanning design, build, check, autonomous, and support — each maps to a specific phase.</p>
   <table class="skill-table fade-in">
     <thead>
       <tr>
@@ -760,7 +750,6 @@ body_en: |
       </tr>
     </thead>
     <tbody>
-      <tr><td class="skill-name">$roll-research</td><td><span class="phase-tag phase-design">Research</span></td><td>HV analysis — timeline + competitive landscape → PDF report</td></tr>
       <tr><td class="skill-name">$roll-design</td><td><span class="phase-tag phase-design">Design</span></td><td>DDD modeling, solution design, INVEST story breakdown</td></tr>
       <tr><td class="skill-name">$roll-idea</td><td><span class="phase-tag phase-design">Capture</span></td><td>Fast backlog capture — one-liner in, classified entry out</td></tr>
       <tr><td class="skill-name">$roll-propose</td><td><span class="phase-tag phase-design">Propose</span></td><td>Generate 1-3 structured US drafts → proposals.md for human review</td></tr>
@@ -788,7 +777,7 @@ body_en: |
 body_zh: |
   <span class="tag fade-in">技能体系</span>
   <h2 class="fade-in">ROLL 技能全景</h2>
-  <p class="section-desc fade-in" style="margin-bottom: 10px;">23 个 Skill，覆盖设计、构建、校验、自治、支持——每个对应一个具体阶段。</p>
+  <p class="section-desc fade-in" style="margin-bottom: 10px;">22 个 Skill，覆盖设计、构建、校验、自治、支持——每个对应一个具体阶段。</p>
   <table class="skill-table fade-in">
     <thead>
       <tr>
@@ -798,7 +787,6 @@ body_zh: |
       </tr>
     </thead>
     <tbody>
-      <tr><td class="skill-name">$roll-research</td><td><span class="phase-tag phase-design">调研</span></td><td>HV 分析——时间线 + 竞品 → PDF 报告</td></tr>
       <tr><td class="skill-name">$roll-design</td><td><span class="phase-tag phase-design">设计</span></td><td>DDD 建模、方案设计、INVEST Story 拆分</td></tr>
       <tr><td class="skill-name">$roll-idea</td><td><span class="phase-tag phase-design">捕获</span></td><td>快速收录——一句话进，分类条目出</td></tr>
       <tr><td class="skill-name">$roll-propose</td><td><span class="phase-tag phase-design">提案</span></td><td>生成 1-3 个结构化 US 草稿 → proposals.md 待人审</td></tr>
@@ -1085,11 +1073,11 @@ body_en: |
     <div class="card" style="text-align:center;border-top:3px solid var(--orange);">
       <div style="font-size:24px;margin-bottom:6px;">🤝</div>
       <h3 style="color:var(--orange-text);font-size:15px;">Aligned · 齐</h3>
-      <p>23 skills, one unified system<br>Three-layer autonomy<br>Human decides, AI delivers</p>
+      <p>22 skills, one unified system<br>Three-layer autonomy<br>Human decides, AI delivers</p>
     </div>
   </div>
   <div class="fade-in" style="margin-top: 24px; text-align: center;">
-    <p style="font-size: 13px; color: var(--text-dim);">@seanyao/roll · MIT · 23 skills · <code>npm install -g @seanyao/roll</code></p>
+    <p style="font-size: 13px; color: var(--text-dim);">@seanyao/roll · MIT · 22 skills · <code>npm install -g @seanyao/roll</code></p>
   </div>
 body_zh: |
   <span class="tag fade-in">总结</span>
@@ -1111,9 +1099,9 @@ body_zh: |
     <div class="card" style="text-align:center;border-top:3px solid var(--orange);">
       <div style="font-size:24px;margin-bottom:6px;">🤝</div>
       <h3 style="color:var(--orange-text);font-size:15px;">齐</h3>
-      <p>23 个 Skill，统一一套体系<br>三层自治模型<br>人来决策，AI 来交付</p>
+      <p>22 个 Skill，统一一套体系<br>三层自治模型<br>人来决策，AI 来交付</p>
     </div>
   </div>
   <div class="fade-in" style="margin-top: 24px; text-align: center;">
-    <p style="font-size: 13px; color: var(--text-dim);">@seanyao/roll · MIT · 23 个 Skill · <code>npm install -g @seanyao/roll</code></p>
+    <p style="font-size: 13px; color: var(--text-dim);">@seanyao/roll · MIT · 22 个 Skill · <code>npm install -g @seanyao/roll</code></p>
   </div>

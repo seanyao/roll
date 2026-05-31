@@ -93,11 +93,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, test setup,
 
 See [SECURITY.md](SECURITY.md). Please report vulnerabilities privately, not through public issues.
 
-## Acknowledgments
-
-- **[khazix-skills](https://github.com/KKKKhazix/khazix-skills)** by Digital Life Khazix — HV Analysis framework used by `$roll-research`, MIT License.
-- **[superpowers](https://github.com/obra/superpowers)** by Jesse Vincent — composable skills library that inspired several Roll workflow patterns.
-
 ## License
 
 [MIT](LICENSE)

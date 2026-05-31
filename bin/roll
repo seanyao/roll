@@ -7933,6 +7933,47 @@ CIRUNNER
   chmod +x "$script_path"
 }
 
+# _write_alert_loop_runner_script <script_path> <project_path> <roll_bin> <log_path>
+#   US-AUTO-046 Phase 2: the script the com.roll.alert.<slug> launchd plist runs
+#   every 1 min. Mirrors _write_ci_loop_runner_script — lightweight (no agent,
+#   no tmux): portable PATH, a single-flight re-entry lock (pid+ts), then drives
+#   the Phase-1 _alert_dispatch consumer via the `roll _alert_dispatch` dispatch.
+#   _alert_dispatch reads $_LOOP_ALERT, parses + notifies + records to
+#   alert-log.jsonl, then rotates the file. Staleness is 180s (3 ticks at the
+#   1-min cadence) so a crashed/hung pass self-heals quickly.
+_write_alert_loop_runner_script() {
+  local script_path="$1" project_path="$2" roll_bin="$3" log_path="$4"
+  mkdir -p "$(dirname "$script_path")"
+  local lock="${project_path}/.roll/loop/.alert-loop.lock"
+  cat > "$script_path" << ALERTRUNNER
+#!/bin/bash -l
+set -o pipefail
+# Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
+  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
+done
+export PATH
+# Single-flight re-entry guard: one alert-loop pass at a time. 1-min cadence;
+# 180s staleness so a crashed/hung pass self-heals within a few ticks.
+LOCK="${lock}"
+mkdir -p "\$(dirname "\$LOCK")"
+if [ -f "\$LOCK" ]; then
+  _pp=""; _pt=""
+  IFS=: read -r _pp _pt < "\$LOCK" 2>/dev/null || true
+  _now=\$(date -u +%s)
+  if [ -n "\$_pp" ] && [ -n "\$_pt" ] && kill -0 "\$_pp" 2>/dev/null && [ "\$((_now - _pt))" -lt 180 ]; then
+    exit 0
+  fi
+  rm -f "\$LOCK"
+fi
+printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$LOCK"
+trap 'rm -f "\$LOCK"' EXIT
+cd "${project_path}" || exit 0
+bash "${roll_bin}" _alert_dispatch >> "${log_path}" 2>&1 || true
+ALERTRUNNER
+  chmod +x "$script_path"
+}
+
 # Like _write_runner_script but prepends an active window guard.
 # Silently exits when current hour is outside [active_start, active_end).
 # When tmux is available, wraps the inner command in a detached tmux session
@@ -9078,7 +9119,7 @@ _install_launchd_plists() {
   local shared="${_SHARED_ROOT}"
 
   mkdir -p "$_LAUNCHD_DIR"
-  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief" "${shared}/pr" "${shared}/ci"
+  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief" "${shared}/pr" "${shared}/ci" "${shared}/alert"
 
   local active_start active_end dream_hour dream_minute brief_hour brief_minute loop_period loop_offset
   local _aw; _aw=$(_loop_read_active_window "$project_path")
@@ -9098,11 +9139,13 @@ _install_launchd_plists() {
   # → StartInterval=300). No skill (it drives _loop_pr_inbox, not an agent).
   # US-AUTO-045: "ci" is the 5th service — a 5-min CI Loop (period=5, empty hour
   # → StartInterval=300). No skill (it drives _ci_scan, not an agent).
-  local services=("loop" "dream" "brief" "pr" "ci")
-  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "" "")
-  local periods=("$loop_period" "60" "60" "5" "5")
-  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0" "0")
-  local hours=("" "$dream_hour" "$brief_hour" "" "")
+  # US-AUTO-046: "alert" is the 6th service — a 1-min Alert Loop (period=1, empty
+  # hour → StartInterval=60). No skill (it drives _alert_dispatch, not an agent).
+  local services=("loop" "dream" "brief" "pr" "ci" "alert")
+  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "" "" "")
+  local periods=("$loop_period" "60" "60" "5" "5" "1")
+  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0" "0" "0")
+  local hours=("" "$dream_hour" "$brief_hour" "" "" "")
 
   local updated=0
   local slug; slug=$(_project_slug "$project_path")
@@ -9142,6 +9185,13 @@ _install_launchd_plists() {
       local ci_log="${project_path}/.roll/loop/ci.log"
       mkdir -p "${project_path}/.roll/loop"
       _write_ci_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$ci_log"
+    elif [[ "$svc" == "alert" ]]; then
+      # US-AUTO-046 Phase 2: lightweight Alert Loop runner — drives _alert_dispatch
+      # every 1 min (no agent, no tmux). Consumes _LOOP_ALERT: parse → notify →
+      # record to alert-log.jsonl → rotate the file.
+      local alert_log="${project_path}/.roll/loop/alert.log"
+      mkdir -p "${project_path}/.roll/loop"
+      _write_alert_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$alert_log"
     else
       # IDEA-051: dream/brief cron logs are project-local, mirroring loop (FIX-139).
       local log="${project_path}/.roll/${svc}/cron.log"
@@ -9261,7 +9311,7 @@ cmd_loop() {
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
-  on            Install launchd scheduler (loop + dream + brief + pr + ci)
+  on            Install launchd scheduler (loop + dream + brief + pr + ci + alert)
   off           Remove launchd scheduler
   now           Run one cycle immediately
   test          Quick smoke test (tmux/popup/stream chain)
@@ -9333,7 +9383,7 @@ _loop_on() {
     # does not disturb the overrides DB.
     local uid; uid=$(id -u)
     local all_loaded=true
-    for svc in loop dream brief pr ci; do
+    for svc in loop dream brief pr ci alert; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
@@ -9400,7 +9450,7 @@ _loop_off() {
   if [[ "$(uname)" == "Darwin" ]]; then
     local any_loaded=false
     local _skip_off; _launchd_should_skip_registry && _skip_off=1 || _skip_off=0
-    for svc in loop dream brief pr ci; do
+    for svc in loop dream brief pr ci alert; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       if _launchd_is_loaded "$label"; then
         any_loaded=true
@@ -9415,7 +9465,7 @@ _loop_off() {
     fi
     local slug; slug=$(_project_slug "$project_path")
     local uid; uid=$(id -u)
-    for svc in loop dream brief pr ci; do
+    for svc in loop dream brief pr ci alert; do
       rm -f "${_SHARED_ROOT}/${svc}/run-${slug}.sh"
       # FIX-081: reverse the FIX-059 auto-bootstrap guard. `_install_launchd_plists`
       # writes `launchctl disable gui/<UID>/<label>` for every brand-new plist
@@ -9751,7 +9801,7 @@ _legacy_loop_status() {
   echo ""
   if [[ "$(uname)" == "Darwin" ]]; then
     echo -e "  Services   Agent: ${CYAN}${agent}${NC}"
-    for svc in loop dream brief pr ci; do
+    for svc in loop dream brief pr ci alert; do
       local state; state=$(_launchd_svc_state "$svc" "$project_path")
       if [[ "$svc" == "loop" ]] && $_is_paused; then
         local _paused_at; _paused_at=$(grep '^paused_at:' "$_LOOP_STATE" 2>/dev/null | awk '{print $2}' | tr -d '"')
@@ -11932,14 +11982,21 @@ _alert_write_log() {
 }
 
 # _alert_rotate [file]
-#   Move $_LOOP_ALERT (or <file>) to <file>.prev and recreate an empty file.
+#   Snapshot $_LOOP_ALERT (or <file>) to <file>.prev and truncate it in place.
 #   Idempotent: a missing source is a no-op (the .prev from a prior run is
 #   left untouched). Loop-safe (returns 0).
+#
+#   US-AUTO-046 (kimi peer-review Q2): copy+truncate instead of mv. `mv` swaps
+#   the inode at the path, so a producer loop (main/pr/ci) that opened its `>>`
+#   fd *before* the rotation but writes *after* it would land in `.prev` and be
+#   silently lost. Copying keeps the original inode at the path; the subsequent
+#   `:>` truncates that same inode, so any concurrent appender's fd still points
+#   at the live alert file and its write is read on the next 1-min tick.
 _alert_rotate() {
   local file="${1:-$_LOOP_ALERT}"
   [ -n "$file" ] || return 0
   if [ -f "$file" ]; then
-    mv -f "$file" "${file}.prev" 2>/dev/null || true
+    cat "$file" > "${file}.prev" 2>/dev/null || true
     : > "$file"
   fi
   return 0
@@ -13739,13 +13796,62 @@ cmd_alert() {
       rm -f "$_LOOP_ALERT"
       ok "$(msg alert.alert_resolved_and_cleared)"
       ;;
+    log)
+      # US-AUTO-046: show the Alert Loop's consumption history — the most recent
+      # N records the dispatcher wrote to alert-log.jsonl (newest first).
+      _alert_log "$@"
+      ;;
     *)
       err "$(msg alert.unknown_subcommand $subcmd)"
-      echo "  Usage: roll alert [list|ack|resolve]"
-      echo "$(msg alert.usage_roll_alert_list_ack_resolve)"
+      echo "  Usage: roll alert [list|ack|resolve|log]"
+      echo "  用法：roll alert [list|ack|resolve|log]"
       return 1
       ;;
   esac
+}
+
+# _alert_log [N]
+#   US-AUTO-046: print the last N (default 10) records from alert-log.jsonl,
+#   newest first — a pull-based view of what the Alert Loop has consumed
+#   (analogous to `roll loop runs`). Each line: HH:MM  <glyph> [level] category — message
+#   The glyph is ● when the alert was notified, ○ when it was throttled/deduped.
+_alert_log() {
+  local n="${1:-10}"
+  case "$n" in ''|*[!0-9]*) n=10 ;; esac
+  local file; file=$(_alert_log_file)
+  if [[ ! -s "$file" ]]; then
+    ok "No alert history yet."
+    echo "  暂无告警历史。"
+    return 0
+  fi
+  echo -e "  ${BOLD}Alert log${NC}  (${CYAN}${file}${NC})"
+  echo -e "  告警日志  最近 ${n} 条"
+  echo ""
+  ROLL_GREEN="$GREEN" ROLL_YELLOW="$YELLOW" ROLL_RED="$RED" ROLL_NC="$NC" \
+  python3 - "$file" "$n" <<'PY'
+import json, sys
+path, n = sys.argv[1], int(sys.argv[2])
+import os
+G=os.environ.get("ROLL_GREEN",""); Y=os.environ.get("ROLL_YELLOW","")
+R=os.environ.get("ROLL_RED",""); NC=os.environ.get("ROLL_NC","")
+rows=[]
+with open(path) as fh:
+    for ln in fh:
+        ln=ln.strip()
+        if not ln: continue
+        try: rows.append(json.loads(ln))
+        except Exception: continue
+for r in reversed(rows[-n:]):
+    ts=r.get("recorded_at") or r.get("ts") or ""
+    hhmm=ts[11:16] if len(ts)>=16 else ts
+    notified=str(r.get("notified")) in ("1","True","true")
+    glyph=(G+"●"+NC) if notified else (Y+"○"+NC)
+    level=r.get("level","")
+    lc={"error":R,"warn":Y,"info":""}.get(level,"")
+    cat=r.get("category","")
+    msg=r.get("message","")
+    print(f"  {hhmm}  {glyph} {lc}[{level}]{NC} {cat} — {msg}")
+PY
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -14812,6 +14918,7 @@ main() {
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;
     _ci_scan) _ci_scan "$@" ;;
+    _alert_dispatch) _alert_dispatch "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

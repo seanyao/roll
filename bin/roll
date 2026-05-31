@@ -3713,6 +3713,48 @@ _peer_ensure_state_dir() {
   mkdir -p "${_PEER_STATE_DIR}/logs"
 }
 
+# FIX-150a: project-local peer data directory (analogous to loop runtime dir).
+_peer_project_dir() {
+  local proj
+  proj=$(pwd -P 2>/dev/null || pwd)
+  # FIX-056: normalize path to canonical case on macOS case-insensitive filesystem.
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    local _canon
+    _canon=$(realpath "$proj" 2>/dev/null) && proj="$_canon"
+  fi
+  # When inside a git worktree, resolve to main tree (same pattern as _project_slug).
+  local _common
+  _common=$(git -C "$proj" rev-parse --git-common-dir 2>/dev/null)
+  if [[ -n "$_common" && "$_common" == *"/.git" ]]; then
+    proj="${_common%/.git}"
+  fi
+  echo "${proj}/.roll/peer"
+}
+
+_peer_ensure_project_dir() {
+  local dir
+  dir=$(_peer_project_dir)
+  mkdir -p "$dir/logs"
+}
+
+# FIX-150a: write a structured JSONL record to the project-local peer runs file.
+_peer_write_record() {
+  local from_tool="$1"
+  local to_tool="$2"
+  local round="$3"
+  local verdict="$4"
+  local tag="$5"
+  local duration_sec="$6"
+  local dir
+  dir=$(_peer_project_dir)
+  mkdir -p "$dir"
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"ts":"%s","from":"%s","to":"%s","round":%s,"verdict":"%s","tag":"%s","duration_sec":%s}\n' \
+    "$ts" "$from_tool" "$to_tool" "$round" "$verdict" "$tag" "$duration_sec" \
+    >> "$dir/runs.jsonl"
+}
+
 _peer_state_file() {
   local pair="$1"
   local key="$2"
@@ -3928,6 +3970,8 @@ cmd_peer() {
       --yes|--yolo) yolo=true; shift ;;
       status) subcmd="status"; shift ;;
       reset) subcmd="reset"; shift; break ;;
+      log) subcmd="log"; shift ;;
+      runs) subcmd="runs"; shift ;;
       help|--help|-h) subcmd="help"; shift ;;
       *) err "$(msg peer.unknown_option_1)"; exit 1 ;;
     esac
@@ -3936,6 +3980,8 @@ cmd_peer() {
   case "$subcmd" in
     status) cmd_peer_status; return ;;
     reset) cmd_peer_reset "$@"; return ;;
+    log) cmd_peer_log; return ;;
+    runs) cmd_peer_runs "$@"; return ;;
     help) cmd_peer_help; return ;;
   esac
 
@@ -3985,6 +4031,9 @@ cmd_peer() {
     fi
   fi
 
+  local start_epoch
+  start_epoch=$(date +%s)
+
   local context=""
   if [[ -n "$context_file" && -f "$context_file" ]]; then
     context="$(cat "$context_file")"
@@ -4004,9 +4053,10 @@ cmd_peer() {
     fi
   fi
 
-  _peer_ensure_state_dir
+  # FIX-150a: write logs to project-local path; keep global state dir for adaptive routing.
+  _peer_ensure_project_dir
   local log_file
-  log_file="${_PEER_STATE_DIR}/logs/$(date +%Y%m%d_%H%M%S)_${from_tool}_${to_tool}.md"
+  log_file="$(_peer_project_dir)/logs/$(date +%Y%m%d_%H%M%S)_${from_tool}_${to_tool}.md"
   {
     echo "# Peer Review Log"
     echo ""
@@ -4050,6 +4100,11 @@ cmd_peer() {
   fi
 
   _peer_update_state "$pair" "$resolution"
+
+  # FIX-150a: write structured record for observability.
+  local duration_sec=0
+  duration_sec=$(( $(date +%s) - start_epoch ))
+  _peer_write_record "$from_tool" "$to_tool" "$round" "$resolution" "$tag" "$duration_sec"
 
   echo ""
   echo -e "$(msg peer.peer_review_result_peer_review ${BOLD} ${NC})"
@@ -4185,8 +4240,70 @@ cmd_peer_help() {
   echo ""
   echo "Subcommands:"
   echo "$(msg peer_help.status_show_peer_review_state)"
+  echo "$(msg peer_help.log_show_latest_peer_transcript)"
+  echo "$(msg peer_help.runs_show_recent_peer_review_runs)"
   echo "$(msg peer_help.reset_pair_all_reset_peer_state)"
   echo "$(msg peer_help.help_show_this_help)"
+}
+
+# FIX-150a: `roll peer runs [N]` — show recent peer review runs (project-local).
+cmd_peer_runs() {
+  local n=10
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      [0-9]*) n="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local dir
+  dir=$(_peer_project_dir)
+  local runs_file="$dir/runs.jsonl"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    err "$(msg peer.jq_required_for_roll_peer_runs)"
+    return 1
+  fi
+
+  if [[ ! -f "$runs_file" ]] || [[ ! -s "$runs_file" ]]; then
+    echo "$(msg peer.no_peer_runs_yet)"
+    return 0
+  fi
+
+  local reversed
+  reversed=$(awk '{a[NR]=$0} END{for(i=NR; i>=1; i--) print a[i]}' "$runs_file")
+  local recent
+  recent=$(printf '%s\n' "$reversed" | head -n "$n")
+
+  echo -e "${BOLD}Peer Review Runs${NC}"
+  echo ""
+  printf "%-19s  %-8s  %-10s  %-5s  %-10s  %s\n" "Time" "From" "To" "Rnd" "Verdict" "Tag"
+  printf "%s\n" "───────────────────  ────────  ──────────  ─────  ──────────  ──────────"
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local ts from to round verdict tag
+    ts=$(printf '%s' "$line" | jq -r '.ts // "—"')
+    from=$(printf '%s' "$line" | jq -r '.from // "—"')
+    to=$(printf '%s' "$line" | jq -r '.to // "—"')
+    round=$(printf '%s' "$line" | jq -r '.round // "—"')
+    verdict=$(printf '%s' "$line" | jq -r '.verdict // "—"')
+    tag=$(printf '%s' "$line" | jq -r '.tag // "—"')
+    printf "%-19s  %-8s  %-10s  %-5s  %-10s  %s\n" "$ts" "$from" "$to" "$round" "$verdict" "$tag"
+  done <<<"$recent"
+}
+
+# FIX-150a: `roll peer log` — show the latest peer review transcript.
+cmd_peer_log() {
+  local dir
+  dir=$(_peer_project_dir)
+  local latest
+  latest=$(ls "$dir/logs"/*.md 2>/dev/null | sort | tail -1 || true)
+  if [[ -z "$latest" || ! -f "$latest" ]]; then
+    echo "$(msg peer.no_peer_logs_found)"
+    return 0
+  fi
+  cat "$latest"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -14399,9 +14516,11 @@ _dash_refactor_pending() {
 
 # ② Peer layer: last result + days ago from peer log, empty if no log.
 _dash_last_peer() {
-  local peer_log_dir="${HOME}/.shared/roll/peer"
+  # FIX-150a: read from project-local peer logs (was ~/.shared/roll/peer/*.log).
+  local peer_log_dir
+  peer_log_dir=$(_peer_project_dir)/logs
   local latest
-  latest=$(ls "$peer_log_dir"/*.log 2>/dev/null | sort | tail -1 || true)
+  latest=$(ls "$peer_log_dir"/*.md 2>/dev/null | sort | tail -1 || true)
   [[ -z "$latest" || ! -f "$latest" ]] && return 0
   local result
   result=$(grep -oE '(AGREE|REFINE|OBJECT|ESCALATE)' "$latest" 2>/dev/null | tail -1 || true)

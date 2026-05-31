@@ -84,7 +84,7 @@ _run_fixture() {
   _run_fixture
   [ "$status" -eq 0 ]
   [[ "$output" == *"artifact"* ]]
-  [[ "$output" == *".peer-state/logs/"* ]]
+  [[ "$output" == *".roll/peer/logs/"* ]]
   [[ "$output" == *"NEXT"* ]]
 }
 

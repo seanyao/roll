@@ -34,6 +34,38 @@ Schema (v1):
       gitignore_dot_roll: bool
     sync_targets: [str]
     enable_loop: bool
+
+US-ONBOARD-016 — Phase 2 analysis sections (all OPTIONAL, pure-incremental,
+backward compatible; an old plan that omits them still validates). When
+present, each is validated for structure:
+
+    domain_model:
+      bounded_contexts:
+        - name: str
+          aggregates: [str]
+          ubiquitous_language: [str]   # or [{term, definition}]
+    tech_analysis:
+      stack: [str]
+      dependencies: [str]
+      architecture_notes: [str]
+      risks:
+        - description: str
+          severity: LOW | MEDIUM | HIGH   # optional
+          evidence: detected | inferred   # optional
+    test_assessment:
+      current_layers:     [<claim>]
+      gaps:               [<claim>]
+      recommended_actions:[<claim>]
+
+ANTI-HALLUCINATION HARD CONSTRAINT (the heart of US-ONBOARD-016):
+Every test_assessment claim MUST be a mapping carrying an `evidence` key whose
+value is exactly `detected` or `inferred`. A schema validator cannot re-run the
+filesystem scan, so the data contract is the lever: free-floating untagged
+strings (e.g. a hallucinated "needs more E2E tests") are REJECTED. When a scan
+finds nothing the skill must still emit a tagged claim such as
+`{claim: "none detected", evidence: detected}` — never invent filler. A scan
+that ran and returned zero matches is a genuine detection, so "none detected"
+carries `evidence: detected` (not a third enum value).
 """
 
 from __future__ import annotations
@@ -57,6 +89,14 @@ SUPPORTED_VERSIONS = {1}
 MAX_AGE_HOURS = 24
 VALID_PROJECT_TYPES = {"backend-service", "frontend-only", "fullstack", "cli"}
 VALID_SCOPE_ITEMS = {"backlog", "features", "domain", "briefs"}
+
+# US-ONBOARD-016: anti-hallucination evidence tags. Every test_assessment claim
+# must carry one of these; risks[].evidence (when present) uses the same enum.
+VALID_EVIDENCE = {"detected", "inferred"}
+# test_assessment buckets whose entries are evidence-tagged claims.
+TEST_ASSESSMENT_CLAIM_KEYS = ("current_layers", "gaps", "recommended_actions")
+# Optional severity enum for tech_analysis.risks[].severity.
+VALID_RISK_SEVERITY = {"LOW", "MEDIUM", "HIGH"}
 
 
 def err(msg_en: str, msg_zh: str = "") -> None:
@@ -162,6 +202,126 @@ def validate_privacy(plan: dict) -> list[str]:
     return errors
 
 
+def validate_domain_model(plan: dict) -> list[str]:
+    """US-ONBOARD-016: validate the optional domain_model section.
+
+    Absent → no errors (pure-incremental). When present it must be a mapping
+    with a bounded_contexts list; each context is a mapping with a name and
+    list-typed aggregates / ubiquitous_language.
+    """
+    errors: list[str] = []
+    if "domain_model" not in plan:
+        return errors
+    dm = plan.get("domain_model")
+    if not isinstance(dm, dict):
+        return ["domain_model must be a mapping"]
+    contexts = dm.get("bounded_contexts")
+    if contexts is None:
+        return ["domain_model.bounded_contexts missing"]
+    if not isinstance(contexts, list):
+        return ["domain_model.bounded_contexts must be a list"]
+    for i, ctx in enumerate(contexts):
+        where = f"domain_model.bounded_contexts[{i}]"
+        if not isinstance(ctx, dict):
+            errors.append(f"{where} must be a mapping")
+            continue
+        if not ctx.get("name"):
+            errors.append(f"{where}.name missing or empty")
+        for list_key in ("aggregates", "ubiquitous_language"):
+            if list_key in ctx and not isinstance(ctx[list_key], list):
+                errors.append(f"{where}.{list_key} must be a list")
+    return errors
+
+
+def _validate_evidence_value(value, where: str) -> list[str]:
+    """Shared check: a value must be exactly one of VALID_EVIDENCE."""
+    if value is None:
+        return [f"{where}.evidence missing (must be one of {sorted(VALID_EVIDENCE)})"]
+    if value not in VALID_EVIDENCE:
+        return [
+            f"{where}.evidence='{value}' invalid "
+            f"(must be one of {sorted(VALID_EVIDENCE)})"
+        ]
+    return []
+
+
+def validate_tech_analysis(plan: dict) -> list[str]:
+    """US-ONBOARD-016: validate the optional tech_analysis section.
+
+    Absent → no errors. When present: stack / dependencies / architecture_notes
+    (if given) must be lists; risks (if given) must be a list of mappings each
+    with a description, an optional severity in VALID_RISK_SEVERITY, and an
+    optional evidence tag in VALID_EVIDENCE.
+    """
+    errors: list[str] = []
+    if "tech_analysis" not in plan:
+        return errors
+    ta = plan.get("tech_analysis")
+    if not isinstance(ta, dict):
+        return ["tech_analysis must be a mapping"]
+    for list_key in ("stack", "dependencies", "architecture_notes"):
+        if list_key in ta and not isinstance(ta[list_key], list):
+            errors.append(f"tech_analysis.{list_key} must be a list")
+    if "risks" in ta:
+        risks = ta["risks"]
+        if not isinstance(risks, list):
+            errors.append("tech_analysis.risks must be a list")
+        else:
+            for i, risk in enumerate(risks):
+                where = f"tech_analysis.risks[{i}]"
+                if not isinstance(risk, dict):
+                    errors.append(f"{where} must be a mapping")
+                    continue
+                if not risk.get("description"):
+                    errors.append(f"{where}.description missing or empty")
+                sev = risk.get("severity")
+                if sev is not None and sev not in VALID_RISK_SEVERITY:
+                    errors.append(
+                        f"{where}.severity='{sev}' invalid "
+                        f"(must be one of {sorted(VALID_RISK_SEVERITY)})"
+                    )
+                if "evidence" in risk:
+                    errors += _validate_evidence_value(risk["evidence"], where)
+    return errors
+
+
+def validate_test_assessment(plan: dict) -> list[str]:
+    """US-ONBOARD-016 anti-hallucination HARD constraint.
+
+    Absent → no errors. When present, every entry in current_layers / gaps /
+    recommended_actions MUST be a mapping carrying an `evidence` tag of exactly
+    `detected` or `inferred`. This is the mechanical lever: untagged free-text
+    claims (hallucinated filler) are rejected. An empty bucket is allowed — that
+    is how "the section ran but had nothing in this dimension" is expressed; the
+    skill represents a zero-result scan as a tagged `{claim: "none detected",
+    evidence: detected}` entry rather than inventing a recommendation.
+    """
+    errors: list[str] = []
+    if "test_assessment" not in plan:
+        return errors
+    ta = plan.get("test_assessment")
+    if not isinstance(ta, dict):
+        return ["test_assessment must be a mapping"]
+    for key in TEST_ASSESSMENT_CLAIM_KEYS:
+        if key not in ta:
+            continue
+        claims = ta[key]
+        if not isinstance(claims, list):
+            errors.append(f"test_assessment.{key} must be a list")
+            continue
+        for i, claim in enumerate(claims):
+            where = f"test_assessment.{key}[{i}]"
+            if not isinstance(claim, dict):
+                errors.append(
+                    f"{where} must be a mapping carrying an 'evidence' tag "
+                    f"(got {type(claim).__name__}); untagged claims are rejected "
+                    f"to block unverifiable filler"
+                )
+                continue
+            errors += _validate_evidence_value(claim.get("evidence"), where)
+    return errors
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         err("usage: roll-plan-validate.py <plan.yaml>", "用法: roll-plan-validate.py <plan.yaml>")
@@ -189,6 +349,11 @@ def main(argv: list[str]) -> int:
     schema_errors += validate_project_understanding(plan)
     schema_errors += validate_scope(plan)
     schema_errors += validate_privacy(plan)
+    # US-ONBOARD-016: optional Phase 2 analysis sections (validated only when
+    # present so old plans stay compatible).
+    schema_errors += validate_domain_model(plan)
+    schema_errors += validate_tech_analysis(plan)
+    schema_errors += validate_test_assessment(plan)
 
     freshness_errors, is_stale = validate_freshness(plan)
 

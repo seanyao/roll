@@ -451,13 +451,13 @@ git push --force-with-lease
 ### C6. cycle 显示某个阶段特别慢——怎么定位？
 
 **现象：** `roll loop runs` 某条 built 行尾出现 `slowest=claude 96%`，
-或某轮看着没干啥却显示 `slowest=pr-wait 80%`。想知道时间花在哪一步
-再决定要不要动。
+或某轮看着没干啥却显示 `slowest=worktree_setup 40%`。想知道时间花在哪
+一步再决定要不要动。
 
-**原因：** 每轮 cycle 在内部被切成 7 个命名阶段
+**原因：** 每轮 cycle 在内部被切成 6 个命名阶段
 （`startup` / `preflight` / `worktree_setup` / `agent_invoke` /
-`publish_push` / `publish_wait_merge` / `cleanup`），总耗时单独看
-掩盖了哪一步在拖后腿。
+`publish_push` / `cleanup`）。主 loop 不再等合并（US-AUTO-044,交给专职
+PR Loop 异步处理），所以现在几乎每轮都是 `agent_invoke` 占大头。
 
 **怎么办：**
 
@@ -467,8 +467,8 @@ git push --force-with-lease
 3. 常见模式：
    - `agent_invoke` 占绝大头 → 多文件故事的正常表现；除非能拆故事
      否则没什么可调的。
-   - `publish_wait_merge` > 5 分钟 → CI 慢或 auto-merge 卡在缺评审；
-     直接看 PR。
+   - PR 一直开着没合 → 合并/rebase 由专职 PR Loop（每 5 分钟）异步处理;
+     查那个 PR 的 CI 或是否卡在缺评审。这已不再是主 loop 的阶段。
    - `worktree_setup` > 30 秒 → `git fetch origin` 慢；通常是临时网络
      抖动。
    - `preflight` > 30 秒 → 上轮留下了孤儿 worktree，loop 正在回收；

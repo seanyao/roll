@@ -32,3 +32,10 @@ _i18n_set en peer.en_peer_review "[EN:启动 peer review: %s → %s (第 %s 轮,
 _i18n_set zh peer.en_peer_review "启动 peer review: %s → %s (第 %s 轮, tag: %s)"
 _i18n_set en peer.en_enter_n "[EN:按 Enter 执行或输入 n 取消。%s 秒后自动执行......]"
 _i18n_set zh peer.en_enter_n "按 Enter 执行或输入 n 取消。%s 秒后自动执行..."
+
+_i18n_set en peer.no_peer_runs_yet "No peer review runs yet."
+_i18n_set zh peer.no_peer_runs_yet "还没有 peer review 记录。"
+_i18n_set en peer.no_peer_logs_found "No peer logs found."
+_i18n_set zh peer.no_peer_logs_found "还没有 peer 日志。"
+_i18n_set en peer.jq_required_for_roll_peer_runs "jq is required for 'roll peer runs'."
+_i18n_set zh peer.jq_required_for_roll_peer_runs "'roll peer runs' 需要安装 jq。"

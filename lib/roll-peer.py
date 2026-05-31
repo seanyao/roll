@@ -99,7 +99,7 @@ _FIXTURE_VERDICT = {
     "reason":  "2 rounds · 5 turns · all blocks resolved",
 }
 
-_FIXTURE_ARTIFACT = "~/.roll/.peer-state/logs/20260519_213700_claude_codex.md"
+_FIXTURE_ARTIFACT = ".roll/peer/logs/20260519_213700_claude_codex.md"
 _FIXTURE_NEXT = [
     ("Continue execution",   "claude resumes work on US-AUTH-014"),
     ("Inspect log",          "open the artifact above to replay the transcript"),

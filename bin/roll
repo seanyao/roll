@@ -7670,6 +7670,45 @@ PRRUNNER
   chmod +x "$script_path"
 }
 
+# _write_ci_loop_runner_script <script_path> <project_path> <roll_bin> <log_path>
+#   US-AUTO-045 Phase 2: the script the com.roll.ci.<slug> launchd plist runs
+#   every 5 min. Mirrors _write_pr_loop_runner_script — lightweight (no agent,
+#   no tmux): portable PATH, a single-flight re-entry lock (pid+ts, 15-min
+#   staleness so a crashed pass self-heals next tick), then drives the _ci_scan
+#   orchestrator via the `roll _ci_scan` dispatch.
+_write_ci_loop_runner_script() {
+  local script_path="$1" project_path="$2" roll_bin="$3" log_path="$4"
+  mkdir -p "$(dirname "$script_path")"
+  local lock="${project_path}/.roll/loop/.ci-loop.lock"
+  cat > "$script_path" << CIRUNNER
+#!/bin/bash -l
+set -o pipefail
+# Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
+  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
+done
+export PATH
+# Single-flight re-entry guard: one CI-loop pass at a time. 5-min cadence;
+# 15-min (900s) staleness so a crashed/hung pass self-heals on the next tick.
+LOCK="${lock}"
+mkdir -p "\$(dirname "\$LOCK")"
+if [ -f "\$LOCK" ]; then
+  _pp=""; _pt=""
+  IFS=: read -r _pp _pt < "\$LOCK" 2>/dev/null || true
+  _now=\$(date -u +%s)
+  if [ -n "\$_pp" ] && [ -n "\$_pt" ] && kill -0 "\$_pp" 2>/dev/null && [ "\$((_now - _pt))" -lt 900 ]; then
+    exit 0
+  fi
+  rm -f "\$LOCK"
+fi
+printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$LOCK"
+trap 'rm -f "\$LOCK"' EXIT
+cd "${project_path}" || exit 0
+bash "${roll_bin}" _ci_scan >> "${log_path}" 2>&1 || true
+CIRUNNER
+  chmod +x "$script_path"
+}
+
 # Like _write_runner_script but prepends an active window guard.
 # Silently exits when current hour is outside [active_start, active_end).
 # When tmux is available, wraps the inner command in a detached tmux session

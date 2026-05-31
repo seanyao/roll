@@ -375,7 +375,7 @@ Change the Status of the corresponding row from `📋 Todo` or `🔨 In Progress
 
 ### 12. Update Changelog
 
-**Mandatory** — release notes depend on this step. Do not skip.
+**Mandatory** — the release (GitHub Release body = this version's changelog section) depends on this step. Do not skip.
 
 ```bash
 $roll-.changelog

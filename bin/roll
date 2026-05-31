@@ -11479,6 +11479,49 @@ _ci_detect_degradation() {
   return 0
 }
 
+# _ci_scan
+#   US-AUTO-045 Phase 2 orchestrator: the entry the CI Loop runner drives every
+#   5 min. Lists recent `main`-branch CI runs, records each run's timing, and on
+#   a `failure` conclusion classifies it — auto-rerunning transient infra
+#   flakes. After the loop it runs the flaky + degradation detectors over the
+#   accumulated history. Lenient on gh unavailability (missing / failed list →
+#   return 0) so the service never errors out a tick.
+_ci_scan() {
+  local slug; _gh_resolve slug 2>/dev/null || return 0
+
+  local runs_json
+  runs_json=$(gh -R "$slug" run list --branch main \
+    --json databaseId,workflowName,name,conclusion,status,createdAt,updatedAt \
+    2>/dev/null) || return 0
+  [ -n "$runs_json" ] || return 0
+
+  # An empty list ("[]") still falls through to the detectors below: they run
+  # over accumulated history, not just this tick's runs.
+  local count; count=$(echo "$runs_json" | jq 'length' 2>/dev/null || echo 0)
+  case "$count" in ''|*[!0-9]*) count=0 ;; esac
+
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    local run_json conclusion run_id
+    run_json=$(echo "$runs_json" | jq -c ".[$i]" 2>/dev/null)
+    _ci_record_timing "$run_json"
+
+    conclusion=$(echo "$run_json" | jq -r '.conclusion // ""' 2>/dev/null)
+    if [ "$conclusion" = "failure" ]; then
+      run_id=$(echo "$run_json" | jq -r '.databaseId // ""' 2>/dev/null)
+      if [ -n "$run_id" ]; then
+        local kind; kind=$(_ci_classify_failure "$run_id")
+        [ "$kind" = "transient" ] && _ci_rerun_transient "$run_id" >/dev/null
+      fi
+    fi
+    i=$((i + 1))
+  done
+
+  _ci_detect_flaky
+  _ci_detect_degradation
+  return 0
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # US-AUTO-046 Phase 1: dedicated Alert Loop helpers (loop-safe, pure bash)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -14495,6 +14538,7 @@ main() {
     config)        cmd_config "$@" ;;
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;
+    _ci_scan) _ci_scan "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

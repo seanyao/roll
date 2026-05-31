@@ -283,6 +283,21 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
+@test "loop lifecycle loops include ci as the 5th service (US-AUTO-045)" {
+  # Every `for svc in loop dream brief pr ...` lifecycle loop must include ci,
+  # so on/off/status manage the CI Loop plist alongside the others.
+  local roll_bin="${BATS_TEST_DIRNAME}/../../bin/roll"
+  run grep -c 'for svc in loop dream brief pr;' "$roll_bin"
+  [ "$output" -eq 0 ]
+  run grep -c 'for svc in loop dream brief pr ci;' "$roll_bin"
+  [ "$output" -eq 4 ]
+}
+
+@test "roll loop on help text lists the ci service (US-AUTO-045)" {
+  local roll_bin="${BATS_TEST_DIRNAME}/../../bin/roll"
+  grep -q 'loop + dream + brief + pr + ci' "$roll_bin"
+}
+
 @test "_install_launchd_plists: CI Loop plist has StartInterval=300 and drives _ci_scan (US-AUTO-045)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"

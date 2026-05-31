@@ -9037,7 +9037,7 @@ cmd_loop() {
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
-  on            Install launchd scheduler (loop + dream + brief + pr)
+  on            Install launchd scheduler (loop + dream + brief + pr + ci)
   off           Remove launchd scheduler
   now           Run one cycle immediately
   test          Quick smoke test (tmux/popup/stream chain)
@@ -9109,7 +9109,7 @@ _loop_on() {
     # does not disturb the overrides DB.
     local uid; uid=$(id -u)
     local all_loaded=true
-    for svc in loop dream brief pr; do
+    for svc in loop dream brief pr ci; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
@@ -9176,7 +9176,7 @@ _loop_off() {
   if [[ "$(uname)" == "Darwin" ]]; then
     local any_loaded=false
     local _skip_off; _launchd_should_skip_registry && _skip_off=1 || _skip_off=0
-    for svc in loop dream brief pr; do
+    for svc in loop dream brief pr ci; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       if _launchd_is_loaded "$label"; then
         any_loaded=true
@@ -9191,7 +9191,7 @@ _loop_off() {
     fi
     local slug; slug=$(_project_slug "$project_path")
     local uid; uid=$(id -u)
-    for svc in loop dream brief pr; do
+    for svc in loop dream brief pr ci; do
       rm -f "${_SHARED_ROOT}/${svc}/run-${slug}.sh"
       # FIX-081: reverse the FIX-059 auto-bootstrap guard. `_install_launchd_plists`
       # writes `launchctl disable gui/<UID>/<label>` for every brand-new plist
@@ -9527,7 +9527,7 @@ _legacy_loop_status() {
   echo ""
   if [[ "$(uname)" == "Darwin" ]]; then
     echo -e "  Services   Agent: ${CYAN}${agent}${NC}"
-    for svc in loop dream brief pr; do
+    for svc in loop dream brief pr ci; do
       local state; state=$(_launchd_svc_state "$svc" "$project_path")
       if [[ "$svc" == "loop" ]] && $_is_paused; then
         local _paused_at; _paused_at=$(grep '^paused_at:' "$_LOOP_STATE" 2>/dev/null | awk '{print $2}' | tr -d '"')

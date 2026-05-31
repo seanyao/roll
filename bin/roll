@@ -8820,7 +8820,7 @@ _install_launchd_plists() {
   local shared="${_SHARED_ROOT}"
 
   mkdir -p "$_LAUNCHD_DIR"
-  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief"
+  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief" "${shared}/pr"
 
   local active_start active_end dream_hour dream_minute brief_hour brief_minute loop_period loop_offset
   local _aw; _aw=$(_loop_read_active_window "$project_path")
@@ -8836,11 +8836,13 @@ _install_launchd_plists() {
 
   # FIX-054: terminal preference removed — runner always uses Terminal.app.
 
-  local services=("loop" "dream" "brief")
-  local skill_names=("roll-loop" "roll-.dream" "roll-brief")
-  local periods=("$loop_period" "60" "60")
-  local offsets=("$loop_offset" "$dream_minute" "$brief_minute")
-  local hours=("" "$dream_hour" "$brief_hour")
+  # US-AUTO-044: "pr" is the 4th service — a 5-min PR Loop (period=5, empty hour
+  # → StartInterval=300). No skill (it drives _loop_pr_inbox, not an agent).
+  local services=("loop" "dream" "brief" "pr")
+  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "")
+  local periods=("$loop_period" "60" "60" "5")
+  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0")
+  local hours=("" "$dream_hour" "$brief_hour" "")
 
   local updated=0
   local slug; slug=$(_project_slug "$project_path")
@@ -8867,6 +8869,12 @@ _install_launchd_plists() {
       # per-cycle transcripts live in .roll/cycle-logs/ (single source, no dup).
       local loop_log="${project_path}/.roll/loop/cron.log"
       _write_loop_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$loop_log" "$active_start" "$active_end" "${sd}/${skill}/SKILL.md"
+    elif [[ "$svc" == "pr" ]]; then
+      # US-AUTO-044 Phase 2: lightweight PR Loop runner — drives _loop_pr_inbox
+      # every 5 min (no agent, no tmux). It stays sole owner of pr_state (Q1).
+      local pr_log="${project_path}/.roll/loop/pr.log"
+      mkdir -p "${project_path}/.roll/loop"
+      _write_pr_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$pr_log"
     else
       # IDEA-051: dream/brief cron logs are project-local, mirroring loop (FIX-139).
       local log="${project_path}/.roll/${svc}/cron.log"

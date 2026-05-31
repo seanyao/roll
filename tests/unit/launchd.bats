@@ -231,7 +231,7 @@ setup() {
 
 # ─── _install_launchd_plists ──────────────────────────────────────────────────
 
-@test "_install_launchd_plists: creates three plist files" {
+@test "_install_launchd_plists: creates four plist files (loop/dream/brief/pr)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -243,10 +243,11 @@ setup() {
   [ -f "$(_launchd_plist_path "loop" "$proj")" ]
   [ -f "$(_launchd_plist_path "dream" "$proj")" ]
   [ -f "$(_launchd_plist_path "brief" "$proj")" ]
+  [ -f "$(_launchd_plist_path "pr" "$proj")" ]   # US-AUTO-044 PR Loop
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: creates three runner scripts" {
+@test "_install_launchd_plists: creates four runner scripts (loop/dream/brief/pr)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -259,6 +260,24 @@ setup() {
   [ -x "${_SHARED_ROOT}/loop/run-${slug}.sh" ]
   [ -x "${_SHARED_ROOT}/dream/run-${slug}.sh" ]
   [ -x "${_SHARED_ROOT}/brief/run-${slug}.sh" ]
+  [ -x "${_SHARED_ROOT}/pr/run-${slug}.sh" ]   # US-AUTO-044 PR Loop
+  rm -rf "$tmp_dir"
+}
+
+@test "_install_launchd_plists: PR Loop plist has StartInterval=300 and drives _loop_pr_inbox (US-AUTO-044)" {
+  local tmp_dir; tmp_dir=$(mktemp -d)
+  local proj="${tmp_dir}/proj"
+  mkdir -p "$proj"
+  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
+  _SHARED_ROOT="${tmp_dir}/shared"
+
+  _install_launchd_plists "$proj"
+
+  local slug; slug=$(_project_slug "$proj")
+  local pr_plist; pr_plist=$(_launchd_plist_path "pr" "$proj")
+  grep -q "com.roll.pr.${slug}" "$pr_plist"
+  grep -A1 "<key>StartInterval</key>" "$pr_plist" | grep -q "<integer>300</integer>"
+  grep -q "_loop_pr_inbox" "${_SHARED_ROOT}/pr/run-${slug}.sh"
   rm -rf "$tmp_dir"
 }
 

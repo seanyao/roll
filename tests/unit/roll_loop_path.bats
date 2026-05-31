@@ -97,13 +97,17 @@ teardown() { unit_teardown_cd; }
   grep -qF 'loop_log="${project_path}/.roll/loop/cron.log"' "$rollbin"
 }
 
-@test "FIX-140: inner reverts story Done->Todo when PR is not merged" {
+@test "US-AUTO-044: inner hands PR merge to the PR Loop (supersedes FIX-140 wait/revert)" {
   local script_path="${_test_dir}/run-test-fix140.sh"
   _write_loop_runner_script "$script_path" "/tmp/proj140" "pi -p \"x\"" "/tmp/log" 0 24 "/tmp/skill/SKILL.md"
   local inner="${script_path%.sh}-inner.sh"
-  # The not-merged branch must revert the routed story so backlog never shows
-  # a false Done for code that isn't on main.
-  grep -qF '_loop_mark_todo "$ROLL_LOOP_ROUTED_STORY"' "$inner"
+  # US-AUTO-044 Phase 2: the main loop no longer waits for merge, so the FIX-140
+  # timeout-revert (Done->Todo) is gone. The dedicated PR Loop merges async, and
+  # the open-PR eligibility gate (not a revert) keeps the story from re-pick.
+  # With worktree isolation the ✅ Done lives only in the unmerged PR, so main
+  # never shows a false Done in the first place.
+  ! grep -qF '_loop_mark_todo "$ROLL_LOOP_ROUTED_STORY"' "$inner"
+  grep -qF 'merge handed to PR Loop' "$inner"
 }
 
 # FIX-050: launchd/cron deliver a bare PATH. Hardcoded /opt/homebrew/bin breaks

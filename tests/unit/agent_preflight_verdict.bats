@@ -21,9 +21,10 @@ FIX_SKILL="${BATS_TEST_DIRNAME}/../../skills/roll-fix/SKILL.md"
   grep -qE 'verdict.*ok.*too_big|verdict.*too_big.*ok|ok\|too_big|"ok"|"too_big"' "$FIX_SKILL"
 }
 
-@test "roll-build SKILL: pre-flight reads Agent profile (est_min / risk_zone)" {
+@test "roll-build SKILL: pre-flight reads Agent profile est_min (single-axis, US-AGENT-022)" {
+  # US-AGENT-022 retired the three-dimension (type/est_min/risk_zone) matcher;
+  # roll-build pre-flight now turns on the single est_min axis only.
   grep -qF 'est_min' "$BUILD_SKILL"
-  grep -qF 'risk_zone' "$BUILD_SKILL"
 }
 
 @test "roll-fix SKILL: pre-flight reads Agent profile (est_min / risk_zone)" {

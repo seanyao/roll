@@ -4,6 +4,7 @@
 
 ### Added
 
+- **专职 PR Loop:PR 生命周期从主循环拆出来,每 5 分钟独立跑 (US-AUTO-044 Phase 2)** — 主 loop 开完 PR 就退、不再同步干等合并;新增 5 分钟的 launchd 服务 `com.roll.pr.<slug>`(`StartInterval=300`,单写者锁)专门 rebase / 合并 / 关 PR,PR 响应不再卡在 30 分钟一轮;合并即删分支(远端 `--delete-branch` + 仓库 `delete_branch_on_merge` + 本地 `_loop_pr_prune_local` 带 worktree 守卫,根治分支/worktree 堆积);`roll loop on/off/status` 一并管理新服务;有 open PR 的 story 由资格闸防重复开,worktree 隔离杜绝假 Done `[loop]`
 - **loop tmux 连续同文件 Edit 折叠** — `roll loop attach` 里 agent 连续改同一个文件不再复读 N 行长路径(像卡死),折叠成一行 `✏ <basename> | <hint> ×N`(hint 来自 `replace_all` 或 `new_string` 首行 token,≤20 字);跨文件 / 非 Edit 事件 / cycle 结束自动 flush;guide 中英双轨补上 "Edit 折叠" 小节 `[loop]` `[doc]`
 - **自主循环调度配置统一交互式管理 (US-LOOP-033..036, fixes FIX-105)** — `roll config loop-window 9-18` / `loop-schedule 30/7` / `dream-time 03:20` / `brief-time 09:15` 一行命令改 loop、dream、brief 调度,写完自动 reload plist 并立即在 `roll loop status` 反映;不用再手工 vim 三个 yaml;dream / brief 用 `StartCalendarInterval` 数组式绕过 macOS launchd 单字典 bug,重新支持精确到分钟的 fire 时刻 `[loop]`
 - **非 Claude agent 也能看到 token/成本** — dashboard 的 token/cost 列不再对所有非 Claude agent 黑屏:pi(DeepSeek)、OpenAI(codex)、Gemini、Kimi、Qwen 的 cycle 现在显示真实 token 和成本;OpenCode 等暂无 usage 插件的 agent 仍显示 `—/—`,新 agent 支持需落一个按 agent 插件而非自动出现;文档(FAQ + loop guide,中英双轨)补上覆盖矩阵 `[loop]` `[doc]`

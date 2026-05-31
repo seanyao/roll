@@ -8451,21 +8451,16 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       _publish_status=\$?
       if [ "\$_publish_status" -eq 0 ]; then
         _phase_end publish_push ok
-        # FIX-047: CI green ≠ delivered — wait for actual PR merge before cycle complete
-        if [ "\$_is_doc_only" -eq 0 ]; then
-          _phase_begin publish_wait_merge
-          if ! ( cd "\$WT" && _loop_wait_pr_merge "\$BRANCH" ); then
-            _worktree_alert "cycle \${CYCLE_ID}: FIX-047: PR not merged within timeout — code may not be in main (BRANCH=\${BRANCH})"
-            # FIX-140: PR not merged => commits are NOT on main => story is NOT
-            # done. Revert the routed story ✅ Done -> 📋 Todo so backlog reflects
-            # reality instead of a false Done. (FIX-141's open-PR gate keeps the
-            # next cycle from opening a duplicate PR while this one is still open.)
-            [ -n "\${ROLL_LOOP_ROUTED_STORY:-}" ] && _loop_mark_todo "\$ROLL_LOOP_ROUTED_STORY" 2>/dev/null || true
-            _phase_end publish_wait_merge fail
-          else
-            _phase_end publish_wait_merge ok
-          fi
-        fi
+        # US-AUTO-044 Phase 2: the main loop no longer blocks on merge (this
+        # replaces FIX-047's synchronous _loop_wait_pr_merge, now redundant).
+        # The PR is handed to the dedicated PR Loop (com.roll.pr.<slug>, every
+        # 5 min) which merges / rebases / closes it asynchronously. The story is
+        # not re-picked meanwhile via the open-PR eligibility gate
+        # (_loop_story_is_eligible, FIX-146); its ✅ Done rides the PR diff and
+        # lands on main when the PR Loop merges. No false-Done risk: with
+        # worktree isolation the Done lives only in the unmerged PR, never on the
+        # loop's main checkout, so FIX-140's revert is no longer needed.
+        echo "[loop] cycle \${CYCLE_ID}: PR published (\${BRANCH}); merge handed to PR Loop"
         _phase_begin cleanup
         # US-VIEW-011: emit terminal PR state (merged/closed/open) before cycle_end
         # so dashboard renders #NN ✓/↩/… correctly. Must run while branch ref

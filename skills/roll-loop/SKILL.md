@@ -344,12 +344,14 @@ After each item completes:
 
    **Path B — heal exhausted (≥`ROLL_LOOP_HEAL_MAX`, default 2) or disabled (`ROLL_LOOP_NO_HEAL=1`) (exit 1):**
 
-   1. Do NOT force ✅ Done here. CI red means the PR will not merge, and
-      FIX-140's merge gate (in `bin/roll`, after `publish_wait_merge`) is the
-      single authority on final status: if the PR actually merges, the story
-      stays ✅ Done; if it does not merge, the gate reverts it ✅ Done → 📋 Todo
-      so BACKLOG never shows a false Done for code that isn't on main. (FIX-141
-      then stops the next cycle re-opening a duplicate PR while this one is open.)
+   1. Do NOT force ✅ Done here. CI red means the PR will not merge. Under
+      **US-AUTO-044** the main loop no longer waits for merge — it publishes the
+      PR and exits; the dedicated PR Loop (`com.roll.pr.<slug>`, every 5 min)
+      merges / rebases / closes it asynchronously. There is no false-Done risk:
+      with worktree isolation the ✅ Done lives only in the unmerged PR, never on
+      the loop's main checkout, and the story is not re-picked meanwhile via the
+      open-PR eligibility gate (`_loop_story_is_eligible`, FIX-146). The story's
+      ✅ Done lands on main only when the PR Loop actually merges the PR.
    2. Write ALERT to `~/.shared/roll/loop/ALERT-<slug>.md` with:
       - story ID, time, commit SHA
       - heal attempts made (read `heal_count:` from `state-<slug>.yaml`)

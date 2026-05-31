@@ -145,6 +145,22 @@ teardown() { unit_teardown_cd; }
   [ ! -f "$_LOOP_ALERT" ]
 }
 
+@test "_alert_rotate: a concurrent appender's pre-opened fd is preserved (US-AUTO-046 kimi Q2)" {
+  # A producer loop (main/pr/ci) opens its `>>` fd, then the Alert Loop rotates
+  # underneath it. With copy+truncate (not mv) the inode at the path is stable,
+  # so the producer's subsequent write lands in the LIVE alert file — not lost
+  # into .prev. (With the old `mv`, this write would vanish into .prev.)
+  printf 'first\n' > "$_LOOP_ALERT"
+  exec 9>>"$_LOOP_ALERT"               # producer opens append fd before rotation
+  _alert_rotate                        # Alert Loop snapshots + truncates in place
+  printf 'second\n' >&9                # producer writes through its pre-opened fd
+  exec 9>&-                            # close producer fd
+  # The post-rotation write must be readable from the live file next tick.
+  [[ "$(cat "$_LOOP_ALERT")" == *"second"* ]]
+  # And the snapshot kept the pre-rotation content.
+  [[ "$(cat "${_LOOP_ALERT}.prev")" == *"first"* ]]
+}
+
 # ── _alert_dispatch ───────────────────────────────────────────────────────────
 
 @test "_alert_dispatch: empty file → no side effects (no rotate, no log)" {
@@ -191,4 +207,41 @@ teardown() { unit_teardown_cd; }
   run cat .roll/state/alert-log.jsonl
   [[ "$output" == *'"category":"legacy"'* ]]
   [[ "$output" == *'"notified":1'* ]]
+}
+
+# ── _alert_log (roll alert log) — US-AUTO-046 Phase 2 read view ────────────────
+
+@test "_alert_log: empty / missing history → friendly notice, no error" {
+  rm -f .roll/state/alert-log.jsonl
+  run _alert_log
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No alert history"* ]]
+}
+
+@test "_alert_log: prints records newest-first with notified glyphs" {
+  {
+    printf '{"ts":"2026-06-01T10:00:00","level":"error","category":"ci-real-failure","message":"CI failed","notified":1,"recorded_at":"2026-06-01T10:00:05Z"}\n'
+    printf '{"ts":"2026-06-01T10:01:00","level":"warn","category":"pr-rebase","message":"rebase failed","notified":0,"recorded_at":"2026-06-01T10:01:03Z"}\n'
+  } > .roll/state/alert-log.jsonl
+  run _alert_log
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ci-real-failure"* ]]
+  [[ "$output" == *"pr-rebase"* ]]
+  # newest (10:01 pr-rebase) appears before oldest (10:00 ci) in the output.
+  local first second
+  first=$(printf '%s\n' "$output" | grep -n 'pr-rebase' | head -1 | cut -d: -f1)
+  second=$(printf '%s\n' "$output" | grep -n 'ci-real-failure' | head -1 | cut -d: -f1)
+  [ "$first" -lt "$second" ]
+}
+
+@test "_alert_log: honors an explicit count argument" {
+  for i in 1 2 3 4 5; do
+    printf '{"ts":"2026-06-01T10:0%s:00","level":"info","category":"loop-idle","message":"idle %s","notified":1,"recorded_at":"2026-06-01T10:0%s:01Z"}\n' "$i" "$i" "$i"
+  done > .roll/state/alert-log.jsonl
+  run _alert_log 2
+  [ "$status" -eq 0 ]
+  # Only the two most recent messages (idle 5, idle 4) should appear.
+  [[ "$output" == *"idle 5"* ]]
+  [[ "$output" == *"idle 4"* ]]
+  [[ "$output" != *"idle 3"* ]]
 }

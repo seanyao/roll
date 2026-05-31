@@ -191,11 +191,93 @@ _state="$BATS_TEST_DIRNAME"  # placeholder; real paths resolved at runtime
   [ "$output" -eq 0 ]
 }
 
+# ── _ci_scan (orchestrator) ──────────────────────────────────────────────────
+
+@test "_ci_scan: gh missing → returns 0 (lenient, no state written)" {
+  # Simulate gh absent: _gh_resolve fails.
+  _gh_resolve() { return 1; }
+  run _ci_scan
+  [ "$status" -eq 0 ]
+  [ ! -f .roll/state/ci-timing.jsonl ]
+}
+
+@test "_ci_scan: gh run list failure → returns 0 (lenient)" {
+  gh() { return 1; }
+  run _ci_scan
+  [ "$status" -eq 0 ]
+}
+
+@test "_ci_scan: empty run list → returns 0, no records" {
+  gh() { echo "[]"; }
+  run _ci_scan
+  [ "$status" -eq 0 ]
+  [ ! -f .roll/state/ci-timing.jsonl ]
+}
+
+@test "_ci_scan: records timing for each run via _ci_record_timing" {
+  gh() {
+    case "$*" in
+      *"run list"*) echo '[{"databaseId":501,"workflowName":"unit","conclusion":"success","status":"completed","createdAt":"2026-05-30T10:00:00Z","updatedAt":"2026-05-30T10:01:00Z"},{"databaseId":502,"workflowName":"integration","conclusion":"success","status":"completed","createdAt":"2026-05-30T10:00:00Z","updatedAt":"2026-05-30T10:05:00Z"}]' ;;
+      *) : ;;
+    esac
+  }
+  run _ci_scan
+  [ "$status" -eq 0 ]
+  grep -q '"run_id":501' .roll/state/ci-timing.jsonl
+  grep -q '"run_id":502' .roll/state/ci-timing.jsonl
+}
+
+@test "_ci_scan: a transient failure is auto-rerun" {
+  gh() {
+    case "$*" in
+      *"run list"*) echo '[{"databaseId":600,"workflowName":"unit","conclusion":"failure","status":"completed","createdAt":"2026-05-30T10:00:00Z","updatedAt":"2026-05-30T10:01:00Z"}]' ;;
+      *"--log-failed"*) echo "Error: connect ETIMEDOUT 10.0.0.1:443" ;;
+      *) echo "gh $*" >> "$GH_LOG" ;;
+    esac
+  }
+  run _ci_scan
+  [ "$status" -eq 0 ]
+  # transient → rerun recorded
+  run _ci_rerun_attempts 600
+  [ "$output" -eq 1 ]
+}
+
+@test "_ci_scan: a real failure is NOT rerun" {
+  gh() {
+    case "$*" in
+      *"run list"*) echo '[{"databaseId":601,"workflowName":"unit","conclusion":"failure","status":"completed","createdAt":"2026-05-30T10:00:00Z","updatedAt":"2026-05-30T10:01:00Z"}]' ;;
+      *"--log-failed"*) echo "not ok 5 assertion failed" ;;
+      *) : ;;
+    esac
+  }
+  run _ci_scan
+  [ "$status" -eq 0 ]
+  run _ci_rerun_attempts 601
+  [ "$output" -eq 0 ]
+}
+
+@test "_ci_scan: runs flaky + degradation detection after the loop" {
+  # Pre-seed timing history so detectors fire on data the scan appends to.
+  printf '| ID | Description | Status |\n' > .roll/backlog.md
+  local f=.roll/state/ci-timing.jsonl
+  : > "$f"
+  for i in 1 2 3 4 5 6; do
+    printf '{"run_id":%s,"workflow":"unit","conclusion":"success","duration_sec":10}\n' "$i" >> "$f"
+  done
+  for i in 7 8 9 10; do
+    printf '{"run_id":%s,"workflow":"unit","conclusion":"failure","duration_sec":10}\n' "$i" >> "$f"
+  done
+  gh() { case "$*" in *"run list"*) echo "[]" ;; *) : ;; esac; }
+  run _ci_scan
+  [ "$status" -eq 0 ]
+  grep -q 'flaky: unit' .roll/backlog.md
+}
+
 # ── function existence contracts ─────────────────────────────────────────────
 
 @test "all CI loop helpers are defined in bin/roll" {
   for fn in _ci_record_timing _ci_classify_failure _ci_rerun_transient \
-            _ci_detect_flaky _ci_detect_degradation _ci_open_story; do
+            _ci_detect_flaky _ci_detect_degradation _ci_open_story _ci_scan; do
     grep -qF "${fn}()" "$ROLL_BIN"
   done
 }

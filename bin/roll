@@ -2551,6 +2551,193 @@ _onboard_changeset_record() {
   fi
 }
 
+# US-ONBOARD-017: insert a candidate story row into .roll/backlog.md under the
+# "Epic: Initial Setup" table, idempotently. Returns 0 if a row was written, 1
+# if it already existed (so the caller can keep an accurate seeded count).
+# The id is a deterministic placeholder (US-SEED-NNN); the human renumbers it
+# into their real scheme later.
+_onboard_seed_backlog_story() {
+  local backlog="$1" id="$2" title="$3"
+  [ -f "$backlog" ] || return 1
+  # Idempotency: never append a row whose id already appears in the file.
+  if grep -qF "| ${id} |" "$backlog"; then
+    return 1
+  fi
+  local row="| ${id} | ${title} | 📋 Todo |"
+  local tmp; tmp=$(mktemp)
+  # Insert directly after the Epic table header separator line. If that anchor
+  # is absent (custom backlog), append the row at end of file as a fallback.
+  awk -v row="$row" '
+    !done && $0 ~ /^\|-+\|-+\|-+\|$/ && seen_epic {
+      print
+      print row
+      done=1
+      next
+    }
+    /^## Epic: Initial Setup$/ { seen_epic=1 }
+    { print }
+    END { if (!done) print row }
+  ' "$backlog" > "$tmp" && mv "$tmp" "$backlog"
+  return 0
+}
+
+# US-ONBOARD-017: insert a candidate FIX row into the "Bug Fixes" table,
+# idempotently. Same contract as _onboard_seed_backlog_story.
+_onboard_seed_backlog_fix() {
+  local backlog="$1" id="$2" problem="$3"
+  [ -f "$backlog" ] || return 1
+  if grep -qF "| ${id} |" "$backlog"; then
+    return 1
+  fi
+  local row="| ${id} | ${problem} | 📋 Todo |"
+  local tmp; tmp=$(mktemp)
+  awk -v row="$row" '
+    !done && $0 ~ /^\|-+\|-+\|-+\|$/ && seen_fix {
+      print
+      print row
+      done=1
+      next
+    }
+    /^## Bug Fixes$/ { seen_fix=1 }
+    { print }
+    END { if (!done) print row }
+  ' "$backlog" > "$tmp" && mv "$tmp" "$backlog"
+  return 0
+}
+
+# US-ONBOARD-017: render the three analysis sections to markdown and seed
+# BACKLOG/FIX candidates behind a HARD [Y/n] gate.
+#
+# Rendering (deterministic; delegated to lib/roll-onboard-render.py) ALWAYS
+# happens when the plan carries any Phase 2 section — the three md files are
+# generated even if the user declines seeding. Each rendered file is registered
+# in the offboard changeset's files_created so `roll offboard` removes it.
+#
+# Seeding is gated: the user sees a preview ("about to seed N stories") and must
+# type an explicit y/Y. n, a bare Enter, EOF, and a non-interactive stdin all
+# CANCEL (the safe default — peer review confirmed cancel-with-note for non-tty;
+# under `set -e` an unguarded read on EOF could abort, so we trap INT locally
+# and check the read exit code). Cancelling skips ONLY seeding; the md files
+# stay. HIGH-severity risks are offered as FIX-SEED-NNN under a second, separate
+# confirm.
+_init_render_and_seed() {
+  local project_dir="$1" plan="$2"
+  local renderer="${ROLL_PKG_DIR}/lib/roll-onboard-render.py"
+  [ -f "$renderer" ] || return 0   # renderer absent → nothing to do (no-op)
+
+  # Run the renderer; capture its manifest. Exit 2 = no Phase 2 sections
+  # (clean no-op); exit 1 = real failure (warn but don't abort the whole apply).
+  local manifest rc
+  manifest=$(python3 "$renderer" "$plan" "$project_dir")
+  rc=$?
+  if [ "$rc" -eq 2 ]; then
+    return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    warn "$(msg init.onboard_render_failed)"
+    return 0
+  fi
+
+  # Parse the pipe-delimited manifest. FILE rows are registered immediately
+  # (the files already exist on disk — renderer is atomic). SEED/FIX rows are
+  # buffered for the gated preview.
+  local -a seed_ids=() seed_titles=() fix_ids=() fix_titles=()
+  local kind a b
+  while IFS='|' read -r kind a b; do
+    [ -z "$kind" ] && continue
+    case "$kind" in
+      FILE)
+        _onboard_changeset_record "$project_dir" "files_created" "$a"
+        ok "$(msg init.onboard_rendered "$a")"
+        ;;
+      SEED) seed_ids+=("$a"); seed_titles+=("$b") ;;
+      FIX)  fix_ids+=("$a");  fix_titles+=("$b") ;;
+    esac
+  done <<< "$manifest"
+
+  local backlog="$project_dir/.roll/backlog.md"
+
+  # ── Story seeding gate ──────────────────────────────────────────────────
+  if [ "${#seed_ids[@]}" -gt 0 ]; then
+    if [ ! -f "$backlog" ]; then
+      info "$(msg init.onboard_seed_no_backlog)"
+    elif _onboard_confirm_seed "${#seed_ids[@]}" "story" seed_ids seed_titles; then
+      local i seeded=0
+      for i in "${!seed_ids[@]}"; do
+        if _onboard_seed_backlog_story "$backlog" "${seed_ids[$i]}" "${seed_titles[$i]}"; then
+          seeded=$((seeded + 1))
+        fi
+      done
+      ok "$(msg init.onboard_seeded_stories "$seeded")"
+    else
+      info "$(msg init.onboard_seed_cancelled)"
+    fi
+  fi
+
+  # ── HIGH-risk FIX seeding gate (separate confirm) ───────────────────────
+  if [ "${#fix_ids[@]}" -gt 0 ]; then
+    if [ ! -f "$backlog" ]; then
+      info "$(msg init.onboard_seed_no_backlog)"
+    elif _onboard_confirm_seed "${#fix_ids[@]}" "fix" fix_ids fix_titles; then
+      local j seeded_fix=0
+      for j in "${!fix_ids[@]}"; do
+        if _onboard_seed_backlog_fix "$backlog" "${fix_ids[$j]}" "${fix_titles[$j]}"; then
+          seeded_fix=$((seeded_fix + 1))
+        fi
+      done
+      ok "$(msg init.onboard_seeded_fixes "$seeded_fix")"
+    else
+      info "$(msg init.onboard_seed_cancelled)"
+    fi
+  fi
+}
+
+# US-ONBOARD-017: the HARD [Y/n] gate. Prints a preview list then reads one
+# line. Returns 0 ONLY on an explicit y/Y. Everything else — n, bare Enter,
+# EOF, non-interactive stdin — returns 1 (cancel). Default is NO.
+#   $1 = count, $2 = noun ("story"/"fix"), $3/$4 = nameref arrays of ids/titles
+_onboard_confirm_seed() {
+  local count="$1" noun="$2"
+  local -n _ids="$3"
+  local -n _titles="$4"
+  echo "" >&2
+  if [ "$noun" = "fix" ]; then
+    warn "$(msg init.onboard_seed_preview_fix "$count")" >&2
+  else
+    warn "$(msg init.onboard_seed_preview_story "$count")" >&2
+  fi
+  local i
+  for i in "${!_ids[@]}"; do
+    echo "    ${_ids[$i]}  ${_titles[$i]}" >&2
+  done
+  echo "" >&2
+
+  # Non-interactive stdin (CI / piped): never block, never seed. Cancel + note.
+  # ROLL_ASSUME_TTY=1 forces the interactive read path so tests can pipe the
+  # answer in (mirrors the ROLL_SPIN_FORCE_TTY seam used elsewhere in bin/roll).
+  if [ "${ROLL_ASSUME_TTY:-}" != "1" ] && [ ! -t 0 ]; then
+    info "$(msg init.onboard_seed_noninteractive)" >&2
+    return 1
+  fi
+
+  echo -e "  ${BOLD}$(msg init.onboard_seed_prompt)${NC} [y/N] " >&2
+  # Trap INT locally so Ctrl-C cancels just this gate (returns 1) rather than
+  # aborting all of roll init under `set -e`. Restore the prior handler after.
+  local _saved_int reply
+  _saved_int="$(trap -p INT 2>/dev/null || true)"
+  trap 'return 1' INT
+  if ! read -r reply; then
+    # EOF (e.g. </dev/null) → cancel.
+    reply=""
+  fi
+  if [ -n "$_saved_int" ]; then eval "$_saved_int"; else trap - INT; fi
+
+  case "$reply" in
+    y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;   # n / empty / anything else → cancel
+  esac
+}
+
 # US-ONBOARD-009: roll init --apply
 # Consume .roll/onboard-plan.yaml (produced by $roll-onboard skill) and execute
 # all side effects: create .roll/ structure per scope, sync AI tools, write
@@ -2655,6 +2842,12 @@ print(p.get('agent_routes_template', '') or '')
     mkdir -p "$project_dir/.roll/briefs"
     _onboard_changeset_record "$project_dir" "dirs_created" ".roll/briefs"
   fi
+
+  # US-ONBOARD-017: render the Phase 2 analysis sections to markdown (always,
+  # when present) and offer BACKLOG/FIX seeding behind a HARD [Y/n] gate. The
+  # rendered files are registered in the changeset for offboard. Runs after the
+  # scope artifacts so .roll/backlog.md and .roll/domain/ already exist.
+  _init_render_and_seed "$project_dir" "$plan"
 
   print_merge_summary
 
@@ -7670,6 +7863,86 @@ PRRUNNER
   chmod +x "$script_path"
 }
 
+# _write_ci_loop_runner_script <script_path> <project_path> <roll_bin> <log_path>
+#   US-AUTO-045 Phase 2: the script the com.roll.ci.<slug> launchd plist runs
+#   every 5 min. Mirrors _write_pr_loop_runner_script — lightweight (no agent,
+#   no tmux): portable PATH, a single-flight re-entry lock (pid+ts, 15-min
+#   staleness so a crashed pass self-heals next tick), then drives the _ci_scan
+#   orchestrator via the `roll _ci_scan` dispatch.
+_write_ci_loop_runner_script() {
+  local script_path="$1" project_path="$2" roll_bin="$3" log_path="$4"
+  mkdir -p "$(dirname "$script_path")"
+  local lock="${project_path}/.roll/loop/.ci-loop.lock"
+  cat > "$script_path" << CIRUNNER
+#!/bin/bash -l
+set -o pipefail
+# Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
+  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
+done
+export PATH
+# Single-flight re-entry guard: one CI-loop pass at a time. 5-min cadence;
+# 15-min (900s) staleness so a crashed/hung pass self-heals on the next tick.
+LOCK="${lock}"
+mkdir -p "\$(dirname "\$LOCK")"
+if [ -f "\$LOCK" ]; then
+  _pp=""; _pt=""
+  IFS=: read -r _pp _pt < "\$LOCK" 2>/dev/null || true
+  _now=\$(date -u +%s)
+  if [ -n "\$_pp" ] && [ -n "\$_pt" ] && kill -0 "\$_pp" 2>/dev/null && [ "\$((_now - _pt))" -lt 900 ]; then
+    exit 0
+  fi
+  rm -f "\$LOCK"
+fi
+printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$LOCK"
+trap 'rm -f "\$LOCK"' EXIT
+cd "${project_path}" || exit 0
+bash "${roll_bin}" _ci_scan >> "${log_path}" 2>&1 || true
+CIRUNNER
+  chmod +x "$script_path"
+}
+
+# _write_alert_loop_runner_script <script_path> <project_path> <roll_bin> <log_path>
+#   US-AUTO-046 Phase 2: the script the com.roll.alert.<slug> launchd plist runs
+#   every 1 min. Mirrors _write_ci_loop_runner_script — lightweight (no agent,
+#   no tmux): portable PATH, a single-flight re-entry lock (pid+ts), then drives
+#   the Phase-1 _alert_dispatch consumer via the `roll _alert_dispatch` dispatch.
+#   _alert_dispatch reads $_LOOP_ALERT, parses + notifies + records to
+#   alert-log.jsonl, then rotates the file. Staleness is 180s (3 ticks at the
+#   1-min cadence) so a crashed/hung pass self-heals quickly.
+_write_alert_loop_runner_script() {
+  local script_path="$1" project_path="$2" roll_bin="$3" log_path="$4"
+  mkdir -p "$(dirname "$script_path")"
+  local lock="${project_path}/.roll/loop/.alert-loop.lock"
+  cat > "$script_path" << ALERTRUNNER
+#!/bin/bash -l
+set -o pipefail
+# Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
+  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
+done
+export PATH
+# Single-flight re-entry guard: one alert-loop pass at a time. 1-min cadence;
+# 180s staleness so a crashed/hung pass self-heals within a few ticks.
+LOCK="${lock}"
+mkdir -p "\$(dirname "\$LOCK")"
+if [ -f "\$LOCK" ]; then
+  _pp=""; _pt=""
+  IFS=: read -r _pp _pt < "\$LOCK" 2>/dev/null || true
+  _now=\$(date -u +%s)
+  if [ -n "\$_pp" ] && [ -n "\$_pt" ] && kill -0 "\$_pp" 2>/dev/null && [ "\$((_now - _pt))" -lt 180 ]; then
+    exit 0
+  fi
+  rm -f "\$LOCK"
+fi
+printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$LOCK"
+trap 'rm -f "\$LOCK"' EXIT
+cd "${project_path}" || exit 0
+bash "${roll_bin}" _alert_dispatch >> "${log_path}" 2>&1 || true
+ALERTRUNNER
+  chmod +x "$script_path"
+}
+
 # Like _write_runner_script but prepends an active window guard.
 # Silently exits when current hour is outside [active_start, active_end).
 # When tmux is available, wraps the inner command in a detached tmux session
@@ -8815,7 +9088,7 @@ _install_launchd_plists() {
   local shared="${_SHARED_ROOT}"
 
   mkdir -p "$_LAUNCHD_DIR"
-  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief" "${shared}/pr"
+  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief" "${shared}/pr" "${shared}/ci" "${shared}/alert"
 
   local active_start active_end dream_hour dream_minute brief_hour brief_minute loop_period loop_offset
   local _aw; _aw=$(_loop_read_active_window "$project_path")
@@ -8833,11 +9106,15 @@ _install_launchd_plists() {
 
   # US-AUTO-044: "pr" is the 4th service — a 5-min PR Loop (period=5, empty hour
   # → StartInterval=300). No skill (it drives _loop_pr_inbox, not an agent).
-  local services=("loop" "dream" "brief" "pr")
-  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "")
-  local periods=("$loop_period" "60" "60" "5")
-  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0")
-  local hours=("" "$dream_hour" "$brief_hour" "")
+  # US-AUTO-045: "ci" is the 5th service — a 5-min CI Loop (period=5, empty hour
+  # → StartInterval=300). No skill (it drives _ci_scan, not an agent).
+  # US-AUTO-046: "alert" is the 6th service — a 1-min Alert Loop (period=1, empty
+  # hour → StartInterval=60). No skill (it drives _alert_dispatch, not an agent).
+  local services=("loop" "dream" "brief" "pr" "ci" "alert")
+  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "" "" "")
+  local periods=("$loop_period" "60" "60" "5" "5" "1")
+  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0" "0" "0")
+  local hours=("" "$dream_hour" "$brief_hour" "" "" "")
 
   local updated=0
   local slug; slug=$(_project_slug "$project_path")
@@ -8870,6 +9147,20 @@ _install_launchd_plists() {
       local pr_log="${project_path}/.roll/loop/pr.log"
       mkdir -p "${project_path}/.roll/loop"
       _write_pr_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$pr_log"
+    elif [[ "$svc" == "ci" ]]; then
+      # US-AUTO-045 Phase 2: lightweight CI Loop runner — drives _ci_scan every
+      # 5 min (no agent, no tmux). Records run timing, auto-reruns transient
+      # failures, and surfaces flaky / degradation stories.
+      local ci_log="${project_path}/.roll/loop/ci.log"
+      mkdir -p "${project_path}/.roll/loop"
+      _write_ci_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$ci_log"
+    elif [[ "$svc" == "alert" ]]; then
+      # US-AUTO-046 Phase 2: lightweight Alert Loop runner — drives _alert_dispatch
+      # every 1 min (no agent, no tmux). Consumes _LOOP_ALERT: parse → notify →
+      # record to alert-log.jsonl → rotate the file.
+      local alert_log="${project_path}/.roll/loop/alert.log"
+      mkdir -p "${project_path}/.roll/loop"
+      _write_alert_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$alert_log"
     else
       # IDEA-051: dream/brief cron logs are project-local, mirroring loop (FIX-139).
       local log="${project_path}/.roll/${svc}/cron.log"
@@ -8989,7 +9280,7 @@ cmd_loop() {
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
-  on            Install launchd scheduler (loop + dream + brief + pr)
+  on            Install launchd scheduler (loop + dream + brief + pr + ci + alert)
   off           Remove launchd scheduler
   now           Run one cycle immediately
   test          Quick smoke test (tmux/popup/stream chain)
@@ -9061,7 +9352,7 @@ _loop_on() {
     # does not disturb the overrides DB.
     local uid; uid=$(id -u)
     local all_loaded=true
-    for svc in loop dream brief pr; do
+    for svc in loop dream brief pr ci alert; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
@@ -9128,7 +9419,7 @@ _loop_off() {
   if [[ "$(uname)" == "Darwin" ]]; then
     local any_loaded=false
     local _skip_off; _launchd_should_skip_registry && _skip_off=1 || _skip_off=0
-    for svc in loop dream brief pr; do
+    for svc in loop dream brief pr ci alert; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       if _launchd_is_loaded "$label"; then
         any_loaded=true
@@ -9143,7 +9434,7 @@ _loop_off() {
     fi
     local slug; slug=$(_project_slug "$project_path")
     local uid; uid=$(id -u)
-    for svc in loop dream brief pr; do
+    for svc in loop dream brief pr ci alert; do
       rm -f "${_SHARED_ROOT}/${svc}/run-${slug}.sh"
       # FIX-081: reverse the FIX-059 auto-bootstrap guard. `_install_launchd_plists`
       # writes `launchctl disable gui/<UID>/<label>` for every brand-new plist
@@ -9479,7 +9770,7 @@ _legacy_loop_status() {
   echo ""
   if [[ "$(uname)" == "Darwin" ]]; then
     echo -e "  Services   Agent: ${CYAN}${agent}${NC}"
-    for svc in loop dream brief pr; do
+    for svc in loop dream brief pr ci alert; do
       local state; state=$(_launchd_svc_state "$svc" "$project_path")
       if [[ "$svc" == "loop" ]] && $_is_paused; then
         local _paused_at; _paused_at=$(grep '^paused_at:' "$_LOOP_STATE" 2>/dev/null | awk '{print $2}' | tr -d '"')
@@ -11479,6 +11770,49 @@ _ci_detect_degradation() {
   return 0
 }
 
+# _ci_scan
+#   US-AUTO-045 Phase 2 orchestrator: the entry the CI Loop runner drives every
+#   5 min. Lists recent `main`-branch CI runs, records each run's timing, and on
+#   a `failure` conclusion classifies it — auto-rerunning transient infra
+#   flakes. After the loop it runs the flaky + degradation detectors over the
+#   accumulated history. Lenient on gh unavailability (missing / failed list →
+#   return 0) so the service never errors out a tick.
+_ci_scan() {
+  local slug; _gh_resolve slug 2>/dev/null || return 0
+
+  local runs_json
+  runs_json=$(gh -R "$slug" run list --branch main \
+    --json databaseId,workflowName,name,conclusion,status,createdAt,updatedAt \
+    2>/dev/null) || return 0
+  [ -n "$runs_json" ] || return 0
+
+  # An empty list ("[]") still falls through to the detectors below: they run
+  # over accumulated history, not just this tick's runs.
+  local count; count=$(echo "$runs_json" | jq 'length' 2>/dev/null || echo 0)
+  case "$count" in ''|*[!0-9]*) count=0 ;; esac
+
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    local run_json conclusion run_id
+    run_json=$(echo "$runs_json" | jq -c ".[$i]" 2>/dev/null)
+    _ci_record_timing "$run_json"
+
+    conclusion=$(echo "$run_json" | jq -r '.conclusion // ""' 2>/dev/null)
+    if [ "$conclusion" = "failure" ]; then
+      run_id=$(echo "$run_json" | jq -r '.databaseId // ""' 2>/dev/null)
+      if [ -n "$run_id" ]; then
+        local kind; kind=$(_ci_classify_failure "$run_id")
+        [ "$kind" = "transient" ] && _ci_rerun_transient "$run_id" >/dev/null
+      fi
+    fi
+    i=$((i + 1))
+  done
+
+  _ci_detect_flaky
+  _ci_detect_degradation
+  return 0
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # US-AUTO-046 Phase 1: dedicated Alert Loop helpers (loop-safe, pure bash)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -11617,14 +11951,21 @@ _alert_write_log() {
 }
 
 # _alert_rotate [file]
-#   Move $_LOOP_ALERT (or <file>) to <file>.prev and recreate an empty file.
+#   Snapshot $_LOOP_ALERT (or <file>) to <file>.prev and truncate it in place.
 #   Idempotent: a missing source is a no-op (the .prev from a prior run is
 #   left untouched). Loop-safe (returns 0).
+#
+#   US-AUTO-046 (kimi peer-review Q2): copy+truncate instead of mv. `mv` swaps
+#   the inode at the path, so a producer loop (main/pr/ci) that opened its `>>`
+#   fd *before* the rotation but writes *after* it would land in `.prev` and be
+#   silently lost. Copying keeps the original inode at the path; the subsequent
+#   `:>` truncates that same inode, so any concurrent appender's fd still points
+#   at the live alert file and its write is read on the next 1-min tick.
 _alert_rotate() {
   local file="${1:-$_LOOP_ALERT}"
   [ -n "$file" ] || return 0
   if [ -f "$file" ]; then
-    mv -f "$file" "${file}.prev" 2>/dev/null || true
+    cat "$file" > "${file}.prev" 2>/dev/null || true
     : > "$file"
   fi
   return 0
@@ -13424,13 +13765,62 @@ cmd_alert() {
       rm -f "$_LOOP_ALERT"
       ok "$(msg alert.alert_resolved_and_cleared)"
       ;;
+    log)
+      # US-AUTO-046: show the Alert Loop's consumption history — the most recent
+      # N records the dispatcher wrote to alert-log.jsonl (newest first).
+      _alert_log "$@"
+      ;;
     *)
       err "$(msg alert.unknown_subcommand $subcmd)"
-      echo "  Usage: roll alert [list|ack|resolve]"
-      echo "$(msg alert.usage_roll_alert_list_ack_resolve)"
+      echo "  Usage: roll alert [list|ack|resolve|log]"
+      echo "  用法：roll alert [list|ack|resolve|log]"
       return 1
       ;;
   esac
+}
+
+# _alert_log [N]
+#   US-AUTO-046: print the last N (default 10) records from alert-log.jsonl,
+#   newest first — a pull-based view of what the Alert Loop has consumed
+#   (analogous to `roll loop runs`). Each line: HH:MM  <glyph> [level] category — message
+#   The glyph is ● when the alert was notified, ○ when it was throttled/deduped.
+_alert_log() {
+  local n="${1:-10}"
+  case "$n" in ''|*[!0-9]*) n=10 ;; esac
+  local file; file=$(_alert_log_file)
+  if [[ ! -s "$file" ]]; then
+    ok "No alert history yet."
+    echo "  暂无告警历史。"
+    return 0
+  fi
+  echo -e "  ${BOLD}Alert log${NC}  (${CYAN}${file}${NC})"
+  echo -e "  告警日志  最近 ${n} 条"
+  echo ""
+  ROLL_GREEN="$GREEN" ROLL_YELLOW="$YELLOW" ROLL_RED="$RED" ROLL_NC="$NC" \
+  python3 - "$file" "$n" <<'PY'
+import json, sys
+path, n = sys.argv[1], int(sys.argv[2])
+import os
+G=os.environ.get("ROLL_GREEN",""); Y=os.environ.get("ROLL_YELLOW","")
+R=os.environ.get("ROLL_RED",""); NC=os.environ.get("ROLL_NC","")
+rows=[]
+with open(path) as fh:
+    for ln in fh:
+        ln=ln.strip()
+        if not ln: continue
+        try: rows.append(json.loads(ln))
+        except Exception: continue
+for r in reversed(rows[-n:]):
+    ts=r.get("recorded_at") or r.get("ts") or ""
+    hhmm=ts[11:16] if len(ts)>=16 else ts
+    notified=str(r.get("notified")) in ("1","True","true")
+    glyph=(G+"●"+NC) if notified else (Y+"○"+NC)
+    level=r.get("level","")
+    lc={"error":R,"warn":Y,"info":""}.get(level,"")
+    cat=r.get("category","")
+    msg=r.get("message","")
+    print(f"  {hhmm}  {glyph} {lc}[{level}]{NC} {cat} — {msg}")
+PY
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -14495,6 +14885,8 @@ main() {
     config)        cmd_config "$@" ;;
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;
+    _ci_scan) _ci_scan "$@" ;;
+    _alert_dispatch) _alert_dispatch "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

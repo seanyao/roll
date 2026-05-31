@@ -2,15 +2,37 @@
 
 ## Unreleased
 
+### 新功能
+
+- **从 GitHub Issues 直接拉进 backlog (US-SYNC-001..007)** — `roll backlog sync` 把 GitHub issue 按 label 映射成 US/FIX/IDEA 拉进 backlog,`--dry-run` 先预览、`--label` 过滤,重复同步自动跳过已存在的 `[loop]`
+- **loop 按任务难度自动挑 AI agent(四槽路由)(US-AGENT-020..031)** — 复杂度分类器把活分到 easy / default / hard 各自的 agent(取代旧的三维历史命中率路由),`roll agent use/set` 锁定或单槽切换,选中的扛不住会自动降级换备用并留痕 `[loop]`
+- **每个 cycle 跑完自动打分、能看质量趋势 (US-EVAL-001..005)** — loop 每轮按统一 rubric 自评打分写进记录,`roll loop eval` 看窗口趋势,连续低分自动浮出"该改进了"的信号 `[loop]`
+- **onboard 会分析业务 / 技术 / 测试现状 (US-ONBOARD-016/017)** — 接手老项目时多产出领域建模、技术现状、测试覆盖三类分析(区分扫描到的事实和 AI 推断、禁止泛泛而谈),并据此给 backlog 播种候选 story,落盘前 [Y/n] 让你确认 `[loop]`
+- **roll-doc 能跨目录深读项目 (US-DOC-015..019)** — 新增 Phase 3b:顺着调用链理出外部集成、部署管线,缺 `AGENTS.md` 自动补、高引用目录自动加 README,报告标注 `file:line` `[loop]`
+- **deck 支持按 slide 选版式 (US-DECK-017..019)** — 每页 slide 可声明 layout,渲染器按布局路由到不同版式组件,skill 带选版式 playbook(老 deck 仍兼容)`[loop]`
+- **新增 / 删 skill 后自动重建能力清单 (US-SKILL-016)** — `roll skills generate` 扫描 `skills/` 重写清单,CI 有漂移门防手改失忆,不用再手维护目录 `[loop]`
+
 ### 自动化流水线
 
-- **专职 PR Loop:开完 PR 不用再守着合并 (US-AUTO-044 Phase 2)** — 主 loop 开完 PR 就退,新增一个每 5 分钟独立跑的服务专门 rebase / 合并 / 关 PR,响应不再卡在 30 分钟一轮;合并即自动删分支,不再越堆越乱;同一故事不会重复开 PR `[loop]`
-- **loop / dream / brief 的调度一行命令就能改 (US-LOOP-033..036, fixes FIX-105)** — `roll config loop-window 9-18` / `loop-schedule 30/7` / `dream-time 03:20` / `brief-time 09:15`,改完立刻生效,不用再手工 vim 配置文件;dream / brief 重新支持精确到分钟的触发时刻 `[loop]`
+- **专职 PR Loop:开完 PR 不用再守着合并 (US-AUTO-044)** — 主 loop 开完 PR 就退,新增每 5 分钟独立跑的服务专门 rebase / 合并 / 关 PR,合并即自动删分支,同一故事不会重复开 PR `[loop]`
+- **专职 CI Loop:CI 抖动自动重跑、flaky 自动浮出 (US-AUTO-045)** — 新增每 5 分钟独立跑的服务,瞬时网络抖动导致的失败自动 rerun,检测 flaky 和耗时劣化,真失败写 ALERT `[loop]`
+- **专职 Alert Loop:告警不再刷屏、急事立刻弹通知 (US-AUTO-046)** — 新增每 1 分钟独立跑的服务消费告警,同类 1 小时内聚合防刷屏,error 立即弹 macOS 通知 `[loop]`
+- **loop / dream / brief 调度一行命令就能改 (US-LOOP-033..036, fixes FIX-105)** — `roll config loop-window 9-18` / `loop-schedule 30/7` / `dream-time 03:20` / `brief-time 09:15`,改完立刻生效,不用再手工改配置;dream / brief 重新支持精确到分钟 `[loop]`
 
 ### 可见性
 
-- **loop 连续改同一个文件不再刷屏像卡死** — `roll loop attach` 里 agent 反复改同一文件,折叠成一行 `✏ <文件> ×N` 而不是复读一堆长路径 `[loop]` `[doc]`
-- **非 Claude agent 也能看到 token/成本** — dashboard 不再对 pi、codex、Gemini、Kimi、Qwen 的 cycle 黑屏,显示真实 token 和成本;暂无用量插件的 agent 仍显示 `—/—` `[loop]` `[doc]`
+- **每轮 loop 结束直接看到这一轮干了啥 (US-LOOP-040/042)** — cycle 结束在 `.command` 窗口渲染本轮总结(开了什么 PR、跑没跑测试、有没有告警)`[loop]`
+- **远程也能看 loop 在干嘛 (US-OBS-014/015)** — 每轮结束自动推送状态快照,人不在机器前也能远程看 loop 状态 `[loop]`
+- **loop 连续改同一文件不再刷屏像卡死 (US-VIEW-020..022)** — `roll loop attach` 里 agent 反复改同一文件折叠成一行 `✏ <文件> ×N`,不再复读长路径 `[loop]` `[doc]`
+- **非 Claude agent 也能看到 token/成本 (US-LOOP-027..031)** — dashboard 不再对 pi、codex、Gemini、Kimi、Qwen 的 cycle 黑屏,显示真实 token 和成本;暂无插件的 agent 仍显示 `—/—` `[loop]` `[doc]`
+- **loop 跑了哪几轮可跨项目查 (US-LOOP-020)** — 运行记录改存项目本地,`roll loop runs --all` 跨项目聚合查看 `[loop]`
+
+### 稳定性
+
+- **loop 同步不再冲掉你未提交的 .roll 改动 (FIX-145)** — meta-sync 遇到未提交的 `.roll` 编辑时跳过 `reset --hard`,不再清掉本地改动 `[loop]`
+- **路由到的故事中途没法做时自动改挑别的 (FIX-146)** — agent 交接时若选中的 story 变不可用,自动重新挑一个,不再空转 `[loop]`
+- **修好几个会让 loop runner 崩的小问题 (FIX-147/148)** — runner 因反引号转义报 `press: command not found`、dream/brief 调度默认值错乱,均已修复 `[loop]`
+- **`roll agent list` 正确识别 antigravity** — 能正常显示 `antigravity (agy)` 并探测 agy 命令 `[loop]`
 
 ### 工程和测试
 

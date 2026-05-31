@@ -180,7 +180,7 @@ Running
 
 ### Per Peer Pair (e.g., kimi→claude)
 
-Stored in `~/.shared/roll/peer/state.yaml`:
+Stored in `~/.roll/.peer-state/state.yaml`:
 
 ```yaml
 kimi→claude:
@@ -269,7 +269,7 @@ When peer review is manually triggered by a human (via `/peer`, "叫上 peer", e
 - Relay the peer's response **verbatim** before adding your own analysis.
 - After the peer's reply, the reviewer's own analysis block must explicitly state whether the peer's root cause and fix direction match the reviewer's own (independent) conclusion — that comparison is what determines the next round's action.
 - If a peer call fails or times out, report it immediately inline and either retry or ESCALATE.
-- Negotiation log is still written to `~/.shared/roll/peer/logs/` as usual.
+- Negotiation log is written to `~/.roll/.peer-state/logs/` as usual.
 
 **Why inline, not tmux:** When a human manually triggers peer review inside an agent's interactive session, the conversation IS the visible interface. tmux auto-attach is only relevant for CLI-launched background sessions (`bin/roll peer`), not for skill invocations.
 
@@ -300,9 +300,29 @@ When Attacker and Defender reach a stalemate (both tests pass but interpretation
 
 ## Output Artifacts
 
-- **Negotiation log**: `~/.shared/roll/peer/logs/<timestamp>_<from>_<to>.md`
-- **State file**: `~/.shared/roll/peer/state.yaml`
+- **Negotiation log**: `~/.roll/.peer-state/logs/<timestamp>_<from>_<to>.md`
+- **State file**: `~/.roll/.peer-state/state.yaml`
+- **Structured ledger**: `~/.roll/.peer-state/peer-runs.jsonl` (append-only, one record per review)
+- **Query commands**: `roll peer log [N]` (last N markdown logs), `roll peer runs [N]` (last N structured records)
 - **Decision record**: If AGREE, append summary to `docs/decisions/` or `.roll/backlog.md` (optional)
+
+### Structured Ledger (FIX-150a)
+
+Every peer review — whether launched via `bin/roll peer` or inline during a skill — must append one structured record to `~/.roll/.peer-state/peer-runs.jsonl`. The record is consumed by adaptive routing and `roll peer runs`.
+
+Schema (one JSON line per review):
+```json
+{"ts":"2026-05-31T21:53:05Z","from":"claude","to":"kimi","round":1,"tag":"architecture","verdict":"AGREE","duration_sec":45,"pair":"claude→kimi"}
+```
+
+**For inline peer (skill execution):** After the negotiation concludes, write the record using the bash helper:
+```bash
+bash -c 'source "$(command -v roll)"; _peer_write_ledger "<from>" "<to>" <round> "<tag>" "<verdict>" <duration_sec>'
+```
+
+**Query commands:**
+- `roll peer log [N]` — Show last N markdown negotiation logs (default 1).
+- `roll peer runs [N]` — Show last N structured records as a table (default 10).
 
 ## Configuration
 
@@ -327,7 +347,7 @@ peer:
 
 ## Limitations
 
-1. **Reverse link reliability**: Direct CLI calls are preferred. Reliability varies by tool — see Peer Invocation Reference table. If a peer fails consistently, the adaptive streak tracker marks it `abandoned` and falls back to the next candidate. File mailbox (`~/.shared/roll/peer/mailbox/`) is the last-resort fallback.
+1. **Reverse link reliability**: Direct CLI calls are preferred. Reliability varies by tool — see Peer Invocation Reference table. If a peer fails consistently, the adaptive streak tracker marks it `abandoned` and falls back to the next candidate. File mailbox (`~/.roll/.peer-state/mailbox/`) is the last-resort fallback.
    - `deepseek serve --http` is the most reliable option when available — prefer it over direct `deepseek` CLI invocation.
    - `codex exec` has known TTY/Ink issues in non-interactive environments; treat as low-priority fallback.
 2. **Cost**: Every peer review consumes tokens on both sides. Only trigger for tasks where the cost of a wrong decision exceeds the cost of peer review. DeepSeek is the most cost-effective peer for general use.

@@ -3713,6 +3713,42 @@ _peer_ensure_state_dir() {
   mkdir -p "${_PEER_STATE_DIR}/logs"
 }
 
+_peer_ledger_file() {
+  echo "${_PEER_STATE_DIR}/peer-runs.jsonl"
+}
+
+_peer_write_ledger() {
+  local from_tool="$1"
+  local to_tool="$2"
+  local round="$3"
+  local tag="$4"
+  local verdict="$5"
+  local duration_sec="$6"
+  local pair
+  pair="$(_peer_normalize_pair "$from_tool" "$to_tool")"
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local ledger_file
+  ledger_file="$(_peer_ledger_file)"
+  if command -v jq >/dev/null 2>&1; then
+    jq -nc \
+      --arg ts "$ts" \
+      --arg from "$from_tool" \
+      --arg to "$to_tool" \
+      --argjson round "$round" \
+      --arg tag "$tag" \
+      --arg verdict "$verdict" \
+      --argjson duration_sec "$duration_sec" \
+      --arg pair "$pair" \
+      '{ts:$ts, from:$from, to:$to, round:$round, tag:$tag, verdict:$verdict, duration_sec:$duration_sec, pair:$pair}' \
+      >> "$ledger_file"
+  else
+    printf '{"ts":"%s","from":"%s","to":"%s","round":%s,"tag":"%s","verdict":"%s","duration_sec":%s,"pair":"%s"}\n' \
+      "$ts" "$from_tool" "$to_tool" "$round" "$tag" "$verdict" "$duration_sec" "$pair" \
+      >> "$ledger_file"
+  fi
+}
+
 _peer_state_file() {
   local pair="$1"
   local key="$2"
@@ -3936,6 +3972,8 @@ cmd_peer() {
   case "$subcmd" in
     status) cmd_peer_status; return ;;
     reset) cmd_peer_reset "$@"; return ;;
+    log) cmd_peer_log "$@"; return ;;
+    runs) cmd_peer_runs "$@"; return ;;
     help) cmd_peer_help; return ;;
   esac
 
@@ -4027,8 +4065,12 @@ cmd_peer() {
   } > "$log_file"
 
   info "$(msg peer.calling $to_tool)"
+  local _peer_start _peer_end _peer_duration
+  _peer_start=$(date +%s)
   local response
   response="$(_peer_call "$to_tool" "$prompt" "$peer_session")"
+  _peer_end=$(date +%s)
+  _peer_duration=$((_peer_end - _peer_start))
 
   local stderr_log
   stderr_log="${_PEER_STATE_DIR}/logs/.last_stderr.log"
@@ -4050,12 +4092,14 @@ cmd_peer() {
   fi
 
   _peer_update_state "$pair" "$resolution"
+  _peer_write_ledger "$from_tool" "$to_tool" "$round" "$tag" "$resolution" "$_peer_duration"
 
   echo ""
   echo -e "$(msg peer.peer_review_result_peer_review ${BOLD} ${NC})"
   echo "  Pair: $pair"
   echo "  Round: $round"
   echo "  Resolution: $resolution"
+  echo "  Duration: ${_peer_duration}s"
   echo ""
 
   case "$resolution" in
@@ -4170,6 +4214,79 @@ cmd_peer_reset() {
   ok "$(msg peer_reset.peer_state_reset_peer $target_pair)"
 }
 
+cmd_peer_log() {
+  local n=1
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      [0-9]*) n="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  _peer_ensure_state_dir
+  local logs_dir="${_PEER_STATE_DIR}/logs"
+  if [[ ! -d "$logs_dir" ]] || [[ -z "$(ls -A "$logs_dir" 2>/dev/null)" ]]; then
+    echo "$(msg peer.no_peer_logs_yet)"
+    return 0
+  fi
+
+  local files
+  files=$(ls -1t "$logs_dir"/*.md 2>/dev/null | grep -v '\.last_stderr\.log$' | head -n "$n")
+  if [[ -z "$files" ]]; then
+    echo "$(msg peer.no_peer_logs_yet)"
+    return 0
+  fi
+
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    echo ""
+    echo "═══ $(basename "$f") ═══"
+    cat "$f"
+  done <<<"$files"
+}
+
+cmd_peer_runs() {
+  local n=10
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      [0-9]*) n="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local ledger_file
+  ledger_file="$(_peer_ledger_file)"
+  if [[ ! -f "$ledger_file" ]] || [[ ! -s "$ledger_file" ]]; then
+    echo "$(msg peer.no_peer_runs_yet)"
+    return 0
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    err "$(msg peer.jq_required_for_roll_peer_runs)"
+    return 1
+  fi
+
+  local reversed
+  reversed=$(tac "$ledger_file" 2>/dev/null || tail -r "$ledger_file" 2>/dev/null)
+  local recent
+  recent=$(printf '%s\n' "$reversed" | head -n "$n")
+
+  printf '%-19s %-10s %-10s %-6s %-12s %-10s %s\n' \
+    "TS" "FROM" "TO" "ROUND" "TAG" "VERDICT" "DUR"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local ts from to round tag verdict dur
+    ts=$(echo "$line" | jq -r '.ts // "—"')
+    from=$(echo "$line" | jq -r '.from // "—"')
+    to=$(echo "$line" | jq -r '.to // "—"')
+    round=$(echo "$line" | jq -r '.round // "—"')
+    tag=$(echo "$line" | jq -r '.tag // "—"')
+    verdict=$(echo "$line" | jq -r '.verdict // "—"')
+    dur=$(echo "$line" | jq -r '.duration_sec // "—"')
+    printf '%-19s %-10s %-10s %-6s %-12s %-10s %ss\n' "$ts" "$from" "$to" "$round" "$tag" "$verdict" "$dur"
+  done <<<"$recent"
+}
+
 cmd_peer_help() {
   echo -e "${BOLD}roll peer — Cross-Agent Peer Review${NC}"
   echo ""
@@ -4186,6 +4303,8 @@ cmd_peer_help() {
   echo "Subcommands:"
   echo "$(msg peer_help.status_show_peer_review_state)"
   echo "$(msg peer_help.reset_pair_all_reset_peer_state)"
+  echo "  log [N]          Show last N peer review markdown logs (default: 1)"
+  echo "  runs [N]         Show last N peer review structured records (default: 10)"
   echo "$(msg peer_help.help_show_this_help)"
 }
 
@@ -14399,9 +14518,9 @@ _dash_refactor_pending() {
 
 # ② Peer layer: last result + days ago from peer log, empty if no log.
 _dash_last_peer() {
-  local peer_log_dir="${HOME}/.shared/roll/peer"
+  local peer_log_dir="${ROLL_HOME}/.peer-state/logs"
   local latest
-  latest=$(ls "$peer_log_dir"/*.log 2>/dev/null | sort | tail -1 || true)
+  latest=$(ls -1t "$peer_log_dir"/*.md 2>/dev/null | grep -v '\.last_stderr\.log$' | head -1 || true)
   [[ -z "$latest" || ! -f "$latest" ]] && return 0
   local result
   result=$(grep -oE '(AGREE|REFINE|OBJECT|ESCALATE)' "$latest" 2>/dev/null | tail -1 || true)

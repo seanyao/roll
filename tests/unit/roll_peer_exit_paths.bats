@@ -7,8 +7,8 @@ load helpers
 setup() {
   unit_setup
   export HOME="$TEST_TMP"
-  mkdir -p "$HOME/.shared/roll/peer/logs"
-  _PEER_STATE_DIR="$HOME/.shared/roll/peer"
+  mkdir -p "$HOME/.roll/.peer-state/logs"
+  _PEER_STATE_DIR="$HOME/.roll/.peer-state"
 
   # Stub tmux so cmd_peer's tmux session creation succeeds without side effects.
   TMUX_KILL_LOG="$TEST_TMP/tmux_kill.log"

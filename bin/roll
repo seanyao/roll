@@ -1899,6 +1899,25 @@ _check_installed_version_or_retry() {
 
 cmd_update() {
   info "$(msg update.current_version "$VERSION")"
+
+  # Detect install method
+  local install_method="npm"
+  if [[ -f "${ROLL_PKG_DIR}/.install-method" ]]; then
+    install_method="$(cat "${ROLL_PKG_DIR}/.install-method")"
+  fi
+
+  if [[ "$install_method" == "curl" ]]; then
+    info "$(msg update.upgrading_via_curl)"
+    echo ""
+
+    local install_url="https://seanyao.github.io/roll/install"
+    if ! bash -c "$(curl -fsSL "$install_url")"; then
+      err "$(msg update.curl_install_failed)"
+      exit 1
+    fi
+    return 0
+  fi
+
   info "$(msg update.upgrading_via_npm)"
   echo ""
 

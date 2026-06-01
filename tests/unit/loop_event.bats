@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 load helpers
-setup()    { unit_setup_cd; }
+setup()    { unit_setup_cd; unset ROLL_MAIN_SLUG; }
 teardown() { unit_teardown_cd; }
 
 @test "_loop_event: writes tab-separated line to stdout" {
@@ -66,6 +66,26 @@ assert 'ts' in e and 'stage' in e and 'label' in e
   _loop_event "ci" "green" "single write" "ok"
   [ -f "$f" ]
   [ ! -f "${f}.lock" ]
+}
+
+@test "_loop_event: FIX-157 creates file when missing in worktree with ROLL_MAIN_SLUG" {
+  # Simulate main project + worktree layout: _loop_event must write to main
+  # project's .roll/loop/events.ndjson, not a local worktree path.
+  local main_proj="${TEST_TMP}/main-project"
+  mkdir -p "${main_proj}/.roll/loop"
+  export ROLL_MAIN_SLUG="test-fix157"
+  # Override _loop_runtime_dir to return main project path
+  _loop_runtime_dir() { echo "${main_proj}/.roll/loop"; }
+
+  local f="${main_proj}/.roll/loop/events.ndjson"
+  [ ! -f "$f" ]
+
+  _loop_event "cycle_start" "20260601-220000-00000" "" ""
+
+  [ -f "$f" ]
+  run wc -l < "$f"
+  [ "$output" -eq 1 ]
+  python3 -c "import json; json.loads(open('$f').read().strip())"
 }
 
 @test "_loop_event_rotate: rotates file when over 10MB" {

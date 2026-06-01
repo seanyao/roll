@@ -191,6 +191,71 @@ EOF
   [[ "$output" == *"Legacy structure detected"* ]]
 }
 
+# FIX-156: nested-repo escape — cwd inside `.roll/` (a nested roll-meta git
+# repo) must not trip the legacy warning because the outer project's `.roll/`
+# IS the new structure. Without the escape, `git rev-parse --show-toplevel`
+# returns the inner `.roll/` git root, the existing `[[ -d "$root/.roll" ]]`
+# check looks for `.roll/.roll` (which doesn't exist), and the legacy
+# heuristic fires on the very file that defines `.roll/` itself.
+
+@test "FIX-156: cwd inside .roll/ nested git repo does NOT trip legacy warning" {
+  # Outer project with .roll/ as the new structure marker
+  mkdir -p .roll
+  echo "x" > .roll/backlog.md
+  git add -A && git commit --quiet -m "outer init"
+
+  # Inside .roll/, a nested git repo (mirrors roll-meta layout) with Roll-
+  # style content that would normally trip the legacy detector
+  cd .roll
+  git init --quiet
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  # Write a BACKLOG.md whose content matches the Roll-1.x signature
+  cat > BACKLOG.md <<'EOF'
+# Project Backlog
+
+## Epic: Initial Setup
+| Story | Description | Status |
+|-------|-------------|--------|
+| US-001 | example | Done |
+
+## Bug Fixes
+| ID | Problem | Status |
+|----|---------|--------|
+EOF
+  git add -A && git commit --quiet -m "inner init"
+
+  # From inside .roll/, run a project command — must escape upward and find
+  # the outer .roll/ marker, NOT report legacy structure.
+  run _run_roll status
+  [[ "$output" != *"Legacy structure detected"* ]]
+  [[ "$output" != *"roll migrate"* ]]
+}
+
+@test "FIX-156: outer .roll/ takes precedence even when inner has legacy markers" {
+  # Same setup as above; verify positive: command is allowed (exit may be
+  # non-zero for command-specific reasons but never blocked by structure).
+  mkdir -p .roll
+  echo "x" > .roll/backlog.md
+  git add -A && git commit --quiet -m "outer init"
+  cd .roll
+  git init --quiet
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  cat > BACKLOG.md <<'EOF'
+# Project Backlog
+## Bug Fixes
+| ID | Problem | Status |
+EOF
+  git add -A && git commit --quiet -m "inner init"
+
+  # `version` is exempt (always allowed) — used as a low-noise probe that
+  # the check doesn't error out.
+  run _run_roll version
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"roll v"* ]]
+}
+
 # ─── Empty/clean dir allows everything ──────────────────────────────────────
 
 @test "structure: empty dir with no markers allows commands" {

@@ -15053,6 +15053,21 @@ _check_structure() {
   # If new structure exists, allow
   [[ -d "$root/.roll" ]] && return 0
 
+  # FIX-156: nested-repo escape — when cwd is inside `.roll/` (a Roll project's
+  # nested private roll-meta worktree), git rev-parse returns `.roll/` itself
+  # instead of the outer Roll project, so the check above misses the outer
+  # `.roll/` and trips the legacy warning on the project's own roll-meta files
+  # (which contain BACKLOG.md / etc by definition). Walk up from $root and
+  # allow when any ancestor directory has a `.roll/` sibling — that is the
+  # outer Roll project, and the user is operating on it from a sub-checkout.
+  local _probe; _probe="$(dirname "$root")"
+  while [[ "$_probe" != "/" && "$_probe" != "." && -n "$_probe" ]]; do
+    if [[ -d "$_probe/.roll" ]]; then return 0; fi
+    local _parent; _parent="$(dirname "$_probe")"
+    [[ "$_parent" == "$_probe" ]] && break  # reached fs root
+    _probe="$_parent"
+  done
+
   # US-ONBOARD-019: only treat the directory as a legacy *Roll* project when an
   # old-path marker is present AND a Roll-specific content signature confirms
   # the project was actually onboarded with Roll. Otherwise we'd block any

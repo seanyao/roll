@@ -43,7 +43,7 @@ roll sync
 ## Typical First-Use Sequence
 
 ```bash
-npm install -g roll        # install roll
+curl -fsSL https://seanyao.github.io/roll/install | bash   # install roll
 roll setup                 # configure AI tools globally (one time per machine)
 cd my-project
 roll init                  # initialize this project (or run $roll-onboard for legacy code)

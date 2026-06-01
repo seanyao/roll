@@ -5,7 +5,7 @@ Roll is an autonomous delivery system. Write a goal in `.roll/backlog.md`, let R
 ## Quick Start
 
 ```bash
-npm install -g @seanyao/roll
+curl -fsSL https://seanyao.github.io/roll/install | bash
 
 cd my-project
 roll setup && roll init

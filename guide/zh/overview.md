@@ -5,7 +5,7 @@ Roll 是一个自主交付系统。把目标写进 `.roll/backlog.md`，让 Roll
 ## 快速开始
 
 ```bash
-npm install -g @seanyao/roll
+curl -fsSL https://seanyao.github.io/roll/install | bash
 
 cd my-project
 roll setup && roll init

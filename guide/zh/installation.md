@@ -2,11 +2,29 @@
 
 ## 安装
 
+### curl（推荐）
+
 ```bash
-npm install -g roll
+curl -fsSL https://seanyao.github.io/roll/install | bash
 ```
 
-安装后运行 setup，将约定和技能同步到你的 AI 工具：
+仅需 bash 3.2+、curl、tar —— macOS 和 Linux 预装即可，无需 Node.js。
+
+钉版本：
+
+```bash
+curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v2.601.1 bash
+```
+
+### npm
+
+```bash
+npm install -g @seanyao/roll
+```
+
+需要 Node.js 16+。
+
+无论哪种方式安装，完成后运行 setup 将约定和技能同步到你的 AI 工具：
 
 ```bash
 roll setup
@@ -29,7 +47,8 @@ Roll 自动检测安装方式并对应处理：
 
 | 安装方式 | `roll update` 的行为 |
 |---|---|
-| npm（默认） | `npm update -g roll`，然后 `roll sync` |
+| curl（默认） | 重新下载最新 tarball、原子替换，然后 `roll sync` |
+| npm | `npm update -g @seanyao/roll`，然后 `roll sync` |
 | git clone（贡献者） | 在包目录执行 `git pull`，然后 `roll sync` |
 
 ## 自动版本提示
@@ -38,8 +57,16 @@ Roll 自动检测安装方式并对应处理：
 
 ## 卸载
 
+### curl
+
 ```bash
-npm uninstall -g roll
+rm -rf ~/.local/share/roll ~/.local/bin/roll
+```
+
+### npm
+
+```bash
+npm uninstall -g @seanyao/roll
 ```
 
 不再需要时删除状态文件：
@@ -53,3 +80,4 @@ rm -rf ~/.roll ~/.shared/roll
 - [overview.md](overview.md) — roll 是什么
 - [project-setup.md](project-setup.md) — 新项目的 `roll init`
 - [configuration.md](configuration.md) — 环境变量
+- [SECURITY.md](../../SECURITY.md) — curl|bash 信任边界与版本钉住

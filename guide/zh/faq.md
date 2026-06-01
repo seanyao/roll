@@ -124,6 +124,29 @@ npm uninstall -g @seanyao/roll
 
 ---
 
+### A4b. 没装 npm / Node.js 能装 Roll 吗？
+
+**短答：** 能。curl 安装自带一切，只需要 bash、curl、tar —— macOS 和 Linux 都预装。
+
+**细节：**
+
+```bash
+curl -fsSL https://seanyao.github.io/roll/install | bash
+```
+
+不需要 Node.js、不需要 npm、不需要任何包管理器。脚本下载 tarball、解压到
+`~/.local/share/roll/`、把 `~/.local/bin/roll` 软链进你的 PATH。升级和卸载也一样
+——`roll update` 重新下载最新 tarball；`rm -rf ~/.local/share/roll ~/.local/bin/roll`
+全部清除。
+
+钉版本（生产环境推荐）：
+
+```bash
+curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v2.601.1 bash
+```
+
+---
+
 ### A5. 跑一次大概多少 token？成本能看到吗？
 
 **短答：** 能。Dashboard 按公开单价显示每个周期的模型 + 成本。

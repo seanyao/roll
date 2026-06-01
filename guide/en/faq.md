@@ -137,6 +137,31 @@ npm uninstall -g @seanyao/roll
 
 ---
 
+### A4b. I don't have npm or Node.js. Can I still install Roll?
+
+**Short answer:** Yes. The curl install is self-contained and requires only
+bash, curl, and tar — all preinstalled on macOS and Linux.
+
+**Details:**
+
+```bash
+curl -fsSL https://seanyao.github.io/roll/install | bash
+```
+
+No Node.js, no npm, no package manager needed. The script downloads a tarball,
+extracts it to `~/.local/share/roll/`, and symlinks `~/.local/bin/roll` into
+your PATH. Updates and uninstalls work the same way — `roll update` re-downloads
+the latest tarball; `rm -rf ~/.local/share/roll ~/.local/bin/roll` removes
+everything.
+
+To pin a specific version (recommended for production):
+
+```bash
+curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v2.601.1 bash
+```
+
+---
+
 ### A5. How much does a Roll run cost? Can I see token usage?
 
 **Short answer:** Yes — the dashboard shows model + cost per cycle at public

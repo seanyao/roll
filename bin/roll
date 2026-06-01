@@ -7789,7 +7789,9 @@ _loop_event() {
   # defeating FIX-066's whole purpose.
   json=$(printf '{"ts":"%s","stage":"%s","label":"%s","detail":"%s","outcome":"%s"}\n' \
     "$ts" "$stage" "$label" "$detail" "$outcome")
-  printf '%s\n' "$json" >> "$evfile"
+  if ! printf '%s\n' "$json" >> "$evfile"; then
+    echo "[loop] _loop_event: failed to append to $evfile" >&2
+  fi
 
   # File rotation: if >10MB, rotate keeping last 5
   _loop_event_rotate "$evfile"

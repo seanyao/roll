@@ -5,13 +5,30 @@ set -euo pipefail
 # REPO_ROOT walks up two levels: .roll/ops/release.sh → .roll/ → Roll repo root.
 # This keeps cwd inside the public Roll repo so all relative paths
 # (package.json, bin/roll, CHANGELOG.md, .roll/backlog.md) resolve unchanged.
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$REPO_ROOT"
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
-# Calculate version: MAJOR.MMDD.N (no leading zero on month+day combined)
-TODAY=$(date +%Y)
-MMDD=$(date +%-m%d)  # e.g. 419 for April 19, 1201 for Dec 1
-VERSION_PREFIX="${TODAY}.${MMDD}"
+# Calculate version prefix: MAJOR.MMDD (no leading zero on month+day combined)
+_release_compute_version_prefix() {
+  local _repo_root="${1:-$REPO_ROOT}"
+  local _major_file="${_repo_root}/.roll/ops/MAJOR_VERSION"
+  if ! [ -f "$_major_file" ]; then
+    echo "❌ Release aborted: ${_major_file} not found." >&2
+    echo "   Create it with a single integer (e.g. '2')." >&2
+    return 1
+  fi
+  local _major; _major=$(cat "$_major_file")
+  if ! echo "$_major" | grep -qE '^[0-9]+$'; then
+    echo "❌ Release aborted: ${_major_file} must contain a single integer." >&2
+    return 1
+  fi
+  local _mmdd; _mmdd=$(date +%-m%d)
+  VERSION_PREFIX="${_major}.${_mmdd}"
+}
+
+# Guard: when sourced, only load functions; do not run the release flow.
+if [ "${BASH_SOURCE[0]}" = "$0" ] || [ -z "${BASH_SOURCE[0]}" ]; then
+  cd "$REPO_ROOT"
+  _release_compute_version_prefix || exit 1
 
 # Find highest N used today.
 # Query the remote — a tag created on another machine and never fetched would
@@ -205,3 +222,4 @@ fi
 
 echo ""
 echo "✅ Released ${TAG}"
+fi

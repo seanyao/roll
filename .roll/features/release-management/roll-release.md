@@ -154,9 +154,10 @@
 ---
 
 <a id="us-rel-005"></a>
-## US-REL-005 版本号去掉「年」,改用可手动 bump 的 major 段 📋
+## US-REL-005 版本号去掉「年」,改用可手动 bump 的 major 段 ✅
 
 **Created**: 2026-06-01
+**Completed**: 2026-06-02
 
 - As a roll maintainer cutting releases
 - I want the version string to lead with a manually-controlled major number instead of the calendar year
@@ -178,18 +179,18 @@
 - chain_depth: 0
 
 **AC:**
-- [ ] 新增 `.roll/ops/MAJOR_VERSION`,内容为单行裸整数 `2`(无 `v` 前缀、无多余空行)
-- [ ] `release.sh` 第 11–14 行:删除 `TODAY=$(date +%Y)`,改为 `MAJOR_VERSION=$(cat "${REPO_ROOT}/.roll/ops/MAJOR_VERSION")`,`VERSION_PREFIX="${MAJOR_VERSION}.${MMDD}"`;计算说明注释从 `YYYY.MMDD.N` 改为 `MAJOR.MMDD.N`
-- [ ] N 自增逻辑不变:仍按 `v${VERSION_PREFIX}.*` 查本地 + 远端 tag 取最大值 +1;验证 glob `v2.601.*` 不会误匹配旧 tag `v2026.601.*`(`.` 在 git fnmatch 里是字面量,`v2` 后紧跟 `0` 而非 `.`,不匹配)
-- [ ] MAJOR_VERSION 文件缺失或非整数时给出清晰报错并 `exit 1`,不静默退化成 `v.601.1`
-- [ ] `bash tests/run.sh` 全绿(bash 3.2 兼容:不引入 `${var^^}` / `mapfile` / `declare -A`)
-- [ ] 新增/调整测试:断言给定 MAJOR_VERSION=2 + 某 MMDD 时 `VERSION_PREFIX` 形如 `^[0-9]+\.[0-9]+$`,且最终 tag 形如 `^v[0-9]+\.[0-9]+\.[0-9]+$`(release.sh 是交互脚本,把前缀计算抽成可 source 的小函数,或写独立 bats 断言文件内容 + 正则)
-- [ ] 手动验证:dry-run(confirm 前 abort)确认 `Proposed version:` 打印 `2.601.N` 形态
+- [x] 新增 `.roll/ops/MAJOR_VERSION`,内容为单行裸整数 `2`(无 `v` 前缀、无多余空行)
+- [x] `release.sh` 第 11–14 行:删除 `TODAY=$(date +%Y)`,改为 `MAJOR_VERSION=$(cat "${REPO_ROOT}/.roll/ops/MAJOR_VERSION")`,`VERSION_PREFIX="${MAJOR_VERSION}.${MMDD}"`;计算说明注释从 `YYYY.MMDD.N` 改为 `MAJOR.MMDD.N`
+- [x] N 自增逻辑不变:仍按 `v${VERSION_PREFIX}.*` 查本地 + 远端 tag 取最大值 +1;验证 glob `v2.601.*` 不会误匹配旧 tag `v2026.601.*`(`.` 在 git fnmatch 里是字面量,`v2` 后紧跟 `0` 而非 `.`,不匹配)
+- [x] MAJOR_VERSION 文件缺失或非整数时给出清晰报错并 `exit 1`,不静默退化成 `v.601.1`
+- [x] `bash tests/run.sh` 全绿(bash 3.2 兼容:不引入 `${var^^}` / `mapfile` / `declare -A`)
+- [x] 新增/调整测试:断言给定 MAJOR_VERSION=2 + 某 MMDD 时 `VERSION_PREFIX` 形如 `^[0-9]+\.[0-9]+$`,且最终 tag 形如 `^v[0-9]+\.[0-9]+\.[0-9]+$`(release.sh 是交互脚本,把前缀计算抽成可 source 的小函数,或写独立 bats 断言文件内容 + 正则)
+- [x] 手动验证:dry-run(confirm 前 abort)确认 `Proposed version:` 打印 `2.601.N` 形态
 
 **Files:**
 - `.roll/ops/MAJOR_VERSION` (新增)
 - `.roll/ops/release.sh` (第 11–14 行 + 注释)
-- `tests/unit/` (新增或扩展版本格式断言)
+- `tests/unit/release_version_prefix.bats` (新增)
 
 **Dependencies:**
 - Depended on by: US-REL-006(文档刷新收尾)

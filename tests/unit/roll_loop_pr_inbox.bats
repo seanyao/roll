@@ -184,3 +184,26 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 0 ]
   [ ! -f "${TEST_TMP}/review-fired" ]
 }
+
+@test "_loop_pr_inbox: writes tick on completion" {
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/.roll/loop"
+  git remote add origin git@github.com:test/repo.git
+  _gh_repo_slug() { echo "test/repo"; }
+  gh() {
+    if [ "$1" = "-R" ]; then shift 2; fi
+    if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+      echo '[{"number":1,"headRefName":"loop/cycle-x","author":{"login":"seanyao"}}]'
+      return 0
+    fi
+    if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+      echo '{"reviews":[],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
+      return 0
+    fi
+    return 0
+  }
+  run _loop_pr_inbox
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/.roll/loop/pr-tick.jsonl" ]
+  run cat "${TEST_TMP}/.roll/loop/pr-tick.jsonl"
+  [[ "$output" == *'"loop":"pr"'* ]]
+}

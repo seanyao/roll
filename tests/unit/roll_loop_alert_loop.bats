@@ -245,3 +245,13 @@ teardown() { unit_teardown_cd; }
   [[ "$output" == *"idle 4"* ]]
   [[ "$output" != *"idle 3"* ]]
 }
+
+@test "_alert_dispatch: writes tick on completion" {
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/.roll/loop"
+  printf '[2026-06-01T10:00:00] [error] [TYPE:ci-real-failure] CI failed: run #123\n' > "$_LOOP_ALERT"
+  run _alert_dispatch
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/.roll/loop/alert-tick.jsonl" ]
+  run cat "${TEST_TMP}/.roll/loop/alert-tick.jsonl"
+  [[ "$output" == *'"loop":"alert"'* ]]
+}

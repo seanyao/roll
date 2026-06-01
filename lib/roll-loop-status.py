@@ -162,7 +162,11 @@ def _resolve_project_path(slug: str) -> Optional[Path]:
 
 
 def _loop_runtime_dir_py(slug: str) -> Optional[Path]:
-    """Mirror bin/roll's _loop_runtime_dir: return <project>/.roll/loop."""
+    """Mirror bin/roll's _loop_runtime_dir: return <project>/.roll/loop.
+    Honors ROLL_PROJECT_RUNTIME_DIR env override (test sandbox)."""
+    env_rt = os.environ.get("ROLL_PROJECT_RUNTIME_DIR", "").strip()
+    if env_rt:
+        return Path(env_rt)
     proj = _resolve_project_path(slug)
     if proj is None:
         return None
@@ -1189,6 +1193,11 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
         _sl = _daily_schedule_line(_svc, now=now)
         if _sl:
             print("  " + c("dim", _sl))
+    # FIX-151: dedicated loop (pr/ci/alert) last-tick age
+    for _loop in ("pr", "ci", "alert"):
+        _tl = _tick_age_line(_loop, now=now)
+        if _tl:
+            print("  " + c("dim", _tl))
     print()
 
     print(c("faint", "─" * COLS))
@@ -1434,6 +1443,42 @@ def _daily_schedule_line(svc: str, now: Optional[datetime] = None) -> Optional[s
             line += f" (next fire in {h}h {m}m)"
         return line
     return f"{svc}: daily (legacy interval)"
+
+
+def _tick_age_line(loop_type: str, now: Optional[datetime] = None) -> Optional[str]:
+    """FIX-151: read the last tick for a dedicated loop (pr/ci/alert) and return
+    a human-readable age line, or None if no tick file exists."""
+    slug = project_slug()
+    rt_dir = _loop_runtime_dir_py(slug)
+    if rt_dir is not None:
+        tick_file = rt_dir / f"{loop_type}-tick.jsonl"
+    else:
+        tick_file = shared_root() / "loop" / f"{loop_type}-tick-{slug}.jsonl"
+    if not tick_file.exists():
+        return None
+    try:
+        last_line = tick_file.read_text().strip().splitlines()[-1]
+    except (IndexError, OSError):
+        return None
+    # Extract ts field from JSONL
+    m = re.search(r'"ts":"([^"]+)"', last_line)
+    if not m:
+        return None
+    ts_str = m.group(1)
+    try:
+        # Parse ISO 8601 UTC timestamp
+        tick_dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    base = now or datetime.now(timezone.utc)
+    age_sec = int((base - tick_dt).total_seconds())
+    if age_sec < 60:
+        age_str = f"{age_sec}s"
+    elif age_sec < 3600:
+        age_str = f"{age_sec // 60}m"
+    else:
+        age_str = f"{age_sec // 3600}h"
+    return f"{loop_type}: tick {age_str} ago"
 
 
 def _detect_install_state() -> str:

@@ -11543,16 +11543,38 @@ _loop_pr_rebase_stale() {
   fi
 
   git fetch origin "$head_ref" 2>/dev/null || return 0
+
+  # FIX-159: save original branch so we can restore it unconditionally
+  local _orig
+  _orig=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || _orig=""
+
+  local _rebase_ok=0 _push_ok=0
   if git checkout "$head_ref" 2>/dev/null \
-     && git rebase origin/main 2>/dev/null \
-     && git push origin "$head_ref" 2>/dev/null; then
-    info "PR #${pr}: rebased ${head_ref} onto origin/main"
-  else
+     && git rebase origin/main 2>/dev/null; then
+    _rebase_ok=1
+    if git push --force-with-lease origin "$head_ref" 2>/dev/null; then
+      _push_ok=1
+      info "PR #${pr}: rebased ${head_ref} onto origin/main"
+    fi
+  fi
+
+  # Restore original branch regardless of outcome
+  if [ -n "$_orig" ] && [ "$_orig" != "HEAD" ]; then
+    git checkout "$_orig" 2>/dev/null || true
+  fi
+
+  if [ "$_push_ok" -eq 1 ]; then
+    return 0
+  fi
+
+  local alert="$_LOOP_ALERT"
+  mkdir -p "$(dirname "$alert")" 2>/dev/null || true
+  if [ "$_rebase_ok" -eq 0 ]; then
     git rebase --abort 2>/dev/null || true
-    git checkout - 2>/dev/null || true
-    local alert="$_LOOP_ALERT"
-    mkdir -p "$(dirname "$alert")" 2>/dev/null || true
     printf '[%s] PR #%s: rebase conflict on %s — please rebase manually\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr" "$head_ref" >> "$alert"
+  else
+    printf '[%s] PR #%s: rebase succeeded but push failed on %s — please check manually\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr" "$head_ref" >> "$alert"
   fi
   return 0

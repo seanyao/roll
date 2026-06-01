@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 稳定性
+
+- fallback agent 能在无人场景正常接手 `[loop]`
+
 ## v2026.601.2
 
 ### 新功能

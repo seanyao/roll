@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 可见性
+
+- **kimi cycle 现在也能看到 token 和成本(FIX-154)** — 以前 dashboard 对 kimi 那一行全是 `—/—`,看不到主力 agent 花了多少钱;现在 cycle 跑完读 kimi-code 的 `wire.jsonl`,把 token 数和成本写进事件流,RECENT 视图和成本总闸都看得见 `[loop]`
+
 ### 稳定性
 
 - fallback agent 能在无人场景正常接手 `[loop]`

@@ -99,3 +99,82 @@ print(r is not None and r['model'] == 'kimi-k2' and r['input_tokens'] == 4000 an
   [ "$status" -eq 0 ]
   [ "$output" = "null" ]
 }
+
+# ─── FIX-154: usage_from_session reads kimi-code wire.jsonl ───────────────
+#
+# kimi-code's `-p` (script/automation) mode prints nothing usage-related to
+# stdout but persists every session to disk under
+#   ~/.kimi-code/sessions/wd_<cwd-basename>_<8-hex>/session_<uuid>/agents/main/wire.jsonl
+# usage_from_session sums the `usage.record` lines so the loop dashboard
+# can show real tokens/cost for kimi cycles (FIX-154).
+
+WIRE_FIXTURE="${BATS_TEST_DIRNAME}/../fixtures/kimi_wire_sample.jsonl"
+
+# Plant a wire.jsonl into a fake kimi-code sessions tree.
+# $1 = wd_dir name (e.g. wd_roll-cycle-TESTCYCLE_deadbeef)
+plant_wire() {
+  local wd="$1"
+  local dir="${TEST_TMP}/sessions/${wd}/session_abc/agents/main"
+  mkdir -p "${dir}"
+  cp "${WIRE_FIXTURE}" "${dir}/wire.jsonl"
+}
+
+setup_wire() {
+  TEST_TMP="$(mktemp -d)"
+}
+teardown_wire() {
+  rm -rf "${TEST_TMP:-}"
+}
+
+run_from_session() {
+  ROLL_KIMI_SESSIONS_DIR="${TEST_TMP}/sessions" python3 -c "
+import sys, json
+sys.path.insert(0, '${LIB_DIR}')
+from agent_usage.kimi import usage_from_session
+print(json.dumps(usage_from_session($1)))
+"
+}
+
+@test "FIX-154: kimi.usage_from_session sums usage.record tokens (match by cwd)" {
+  setup_wire
+  # Plant a session whose wd_ dir embeds the worktree basename.
+  plant_wire "wd_roll-cycle-TESTCYCLE_deadbeef"
+  run run_from_session "cwd='/sandbox/worktrees/roll-cycle-TESTCYCLE'"
+  [ "$status" -eq 0 ]
+  # 14850 + 2150 = 17000
+  [[ "$output" == *'"input_tokens": 17000'* ]]
+  # 217 + 83 = 300
+  [[ "$output" == *'"output_tokens": 300'* ]]
+  # 13056 + 4000 = 17056
+  [[ "$output" == *'"cache_read_tokens": 17056'* ]]
+  # 0 + 100 = 100
+  [[ "$output" == *'"cache_creation_tokens": 100'* ]]
+  [[ "$output" == *'"model": "kimi-code/kimi-for-coding"'* ]]
+  teardown_wire
+}
+
+@test "FIX-154: kimi.usage_from_session matches by cycle_id when cwd not given" {
+  setup_wire
+  plant_wire "wd_anything-cycle-ABC123_cafebabe"
+  run run_from_session "cycle_id='ABC123'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"input_tokens": 17000'* ]]
+  teardown_wire
+}
+
+@test "FIX-154: kimi.usage_from_session returns None when no session matches" {
+  setup_wire
+  plant_wire "wd_somethingelse_aaaaaaaa"
+  run run_from_session "cwd='/no/such/worktree'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+  teardown_wire
+}
+
+@test "FIX-154: kimi.usage_from_session returns None when sessions dir empty" {
+  setup_wire
+  run run_from_session "cwd='/sandbox/worktrees/anything'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+  teardown_wire
+}

@@ -8164,7 +8164,11 @@ _write_loop_runner_script() {
   # US-LOOP-026: post-cycle single-shot usage writer for non-claude agents.
   # pi -p text mode prints no usage, so we recover it from pi's session jsonl
   # exactly once per cycle (loop-fmt passthrough is display-only).
+  # FIX-154: kimi-code's `-p` mode also writes nothing to stdout but persists
+  # usage to wire.jsonl; kimi_emit covers that path. bin/roll dispatches by
+  # agent (pi/deepseek → pi_emit, kimi → kimi_emit).
   local pi_emit_script="${ROLL_PKG_DIR}/lib/agent_usage/pi_emit.py"
+  local kimi_emit_script="${ROLL_PKG_DIR}/lib/agent_usage/kimi_emit.py"
   local roll_bin="${ROLL_PKG_DIR}/bin/roll"
   # US-EVAL-002: pure-function rubric scorer (US-EVAL-001). Baked in at
   # generation time so the inner runner can compute result_eval at cycle finish.
@@ -8833,23 +8837,37 @@ else
   _phase_end agent_invoke ok
 fi
 
-# US-LOOP-026: non-claude agents (pi/deepseek/kimi) print no usage in -p text
-# mode. Recover token+cost once per cycle from the agent's session jsonl and
-# append a single authoritative usage event. Done here (not in loop-fmt's
-# per-attempt passthrough) so retries can't write N duplicate events that the
-# dashboard's same-label SUM would inflate. Runs before the timeout-abort exit
-# so partial cycles still get whatever usage the session recorded. The events
-# path is resolved exactly like _loop_event (rt_dir first, shared fallback) so
-# pi_emit appends to the same file the reader consumes.
-if [ "\$(_project_agent)" != "claude" ] && [ -f "${pi_emit_script}" ]; then
+# US-LOOP-026 + FIX-154: non-claude agents (pi/deepseek/kimi) print no usage
+# in -p text mode. Recover token+cost once per cycle from the agent's session
+# jsonl and append a single authoritative usage event. Done here (not in
+# loop-fmt's per-attempt passthrough) so retries can't write N duplicate
+# events that the dashboard's same-label SUM would inflate. Runs before the
+# timeout-abort exit so partial cycles still get whatever usage the session
+# recorded. The events path is resolved exactly like _loop_event (rt_dir
+# first, shared fallback) so the emitter appends to the same file the reader
+# consumes. Dispatch by agent so each emitter reads the right session format
+# (pi.usage_from_session vs kimi.usage_from_session).
+if [ "\$(_project_agent)" != "claude" ]; then
   _pi_rt=\$(_loop_runtime_dir "${slug}" 2>/dev/null || echo "")
   if [ -n "\$_pi_rt" ]; then
     _pi_evfile="\${_pi_rt}/events.ndjson"
   else
     _pi_evfile="\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/events-${slug}.ndjson"
   fi
-  python3 "${pi_emit_script}" --cwd "\$WT" --cycle "\${CYCLE_ID}" \\
-    --slug "${slug}" --events "\$_pi_evfile" 2>/dev/null || true
+  case "\$(_project_agent)" in
+    kimi)
+      if [ -f "${kimi_emit_script}" ]; then
+        python3 "${kimi_emit_script}" --cwd "\$WT" --cycle "\${CYCLE_ID}" \\
+          --slug "${slug}" --events "\$_pi_evfile" 2>/dev/null || true
+      fi
+      ;;
+    *)
+      if [ -f "${pi_emit_script}" ]; then
+        python3 "${pi_emit_script}" --cwd "\$WT" --cycle "\${CYCLE_ID}" \\
+          --slug "${slug}" --events "\$_pi_evfile" 2>/dev/null || true
+      fi
+      ;;
+  esac
 fi
 
 # FIX-057: timed out — skip publish; EXIT trap writes cycle_end blocked + ALERT.

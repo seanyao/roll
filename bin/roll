@@ -11490,6 +11490,120 @@ _loop_pr_merge_self_eager() {
     || warn "PR #${num}: loop_self merge failed — left open"
 }
 
+# _loop_pr_merge_approved <num> <ci_state> <mergeable> <slug>
+#   Active-merge an approved, green, mergeable PR (US-AUTO-044 expectation ②):
+#   the loop owns the merge decision rather than relying on repo-level GitHub
+#   auto-merge being armed. `--delete-branch` also covers the post-merge cleanup
+#   (expectation ③). No-op unless CI is green AND there are no merge conflicts.
+_loop_pr_merge_approved() {
+  local num="$1" ci_state="$2" mergeable="$3" slug="$4"
+  [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ] || return 0
+  gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1 \
+    && info "PR #${num}: approved + CI green — merged" \
+    || warn "PR #${num}: merge failed (approved + CI green) — left open"
+}
+
+# _loop_state_file
+#   Per-slug loop state file (shared with the main loop's heal bookkeeping).
+_loop_state_file() {
+  printf '%s/loop/state-%s.yaml\n' \
+    "${_SHARED_ROOT:-$HOME/.shared/roll}" \
+    "${_LOOP_PROJ_SLUG:-$(basename "$PWD")}"
+}
+
+# _loop_state_set_int <file> <key> <int>
+#   Update-or-append a `key: int` line (mirrors the main loop's heal counter).
+_loop_state_set_int() {
+  local file="$1" key="$2" val="$3"
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true
+  if [[ -f "$file" ]] && grep -q "^${key}:" "$file" 2>/dev/null; then
+    local tmp; tmp=$(mktemp)
+    grep -v "^${key}:" "$file" > "$tmp" 2>/dev/null || true
+    printf '%s: %d\n' "$key" "$val" >> "$tmp"
+    mv "$tmp" "$file"
+  else
+    printf '%s: %d\n' "$key" "$val" >> "$file"
+  fi
+}
+
+# _loop_pr_ci_red_alert <num>
+#   FIX-158 surfacing: write a deduped ALERT for a red loop/* PR so it reaches
+#   the dashboard / notifications instead of being silently dropped. Deduped so
+#   the same PR is not re-announced on every 5-min tick.
+_loop_pr_ci_red_alert() {
+  local num="$1"
+  local alert="$_LOOP_ALERT"
+  local marker="[TYPE:loop-pr-ci-red] PR #${num}"
+  mkdir -p "$(dirname "$alert")" 2>/dev/null || true
+  grep -qF "$marker" "$alert" 2>/dev/null && return 0
+  printf '[%s] %s — red loop PR, heal budget exhausted or disabled; needs attention\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$marker" >> "$alert"
+}
+
+# _loop_pr_heal_prompt <num> <branch> <logfile>
+#   The instruction handed to the headless heal agent.
+_loop_pr_heal_prompt() {
+  local num="$1" branch="$2" logfile="$3"
+  cat <<EOF
+A loop-authored pull request (#${num}, branch \`${branch}\`) has red CI and is
+blocking auto-merge. Heal it:
+
+1. \`git fetch origin && git checkout ${branch}\` (rebase onto origin/main if behind).
+2. Read the captured CI failure log at ${logfile} to see what failed.
+3. Use the roll-fix skill (\$roll-fix) to fix the failing tests via TCR.
+4. Push the fix back to the same branch (\`git push origin ${branch}\`) so CI re-runs.
+
+Stay scoped to making CI green for this PR. Do not open new PRs or touch other branches.
+EOF
+}
+
+# _loop_pr_spawn_heal_agent <num> <branch> <slug> <logfile>
+#   Launch a headless agent (background, per-PR lock) to fix a red loop PR.
+#   Background so a multi-minute agent run never blocks the 5-min PR tick; the
+#   lock guarantees at most one heal per PR in flight. Overridable in tests.
+_loop_pr_spawn_heal_agent() {
+  local num="$1" branch="$2" slug="$3" logfile="$4"
+  local lock="${TMPDIR:-/tmp}/roll-pr-heal-${num}.lock"
+  mkdir "$lock" 2>/dev/null || { info "PR #${num}: heal already in flight — skipping"; return 0; }
+  local prompt; prompt="$(_loop_pr_heal_prompt "$num" "$branch" "$logfile")"
+  (
+    trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+    claude -p --dangerously-skip-permissions "$prompt" \
+      >"${TMPDIR:-/tmp}/roll-pr-heal-${num}.out" 2>&1 || true
+  ) &
+  info "PR #${num}: spawned background heal agent for red CI"
+}
+
+# _loop_pr_heal_self <num> <branch> <slug>
+#   US-LOOP-050 (revived): heal a loop/* PR whose CI went red after its cycle
+#   exited. Bounded by ROLL_LOOP_HEAL_MAX (default 2) per PR; disabled by
+#   ROLL_LOOP_NO_HEAL=1. When the budget is spent or healing is disabled, fall
+#   back to the deduped FIX-158 ALERT instead of silently dropping the PR.
+_loop_pr_heal_self() {
+  local num="$1" branch="$2" slug="$3"
+  local heal_max="${ROLL_LOOP_HEAL_MAX:-2}"
+
+  if [[ "${ROLL_LOOP_NO_HEAL:-}" == "1" ]] || [[ "$heal_max" -le 0 ]]; then
+    _loop_pr_ci_red_alert "$num"; return 0
+  fi
+
+  local state_file; state_file="$(_loop_state_file)"
+  local key="heal_count_pr_${num}"
+  local count=0
+  [[ -f "$state_file" ]] && count=$(grep "^${key}:" "$state_file" 2>/dev/null | awk '{print $2}')
+  count=$(( ${count:-0} + 0 ))
+
+  if [[ "$count" -ge "$heal_max" ]]; then
+    _loop_pr_ci_red_alert "$num"; return 0
+  fi
+
+  # Reserve a heal slot before spawning so a crashed agent still counts.
+  _loop_state_set_int "$state_file" "$key" "$(( count + 1 ))"
+
+  local logfile; logfile="$(_loop_hot_fix_pr "$num" 2>/dev/null || echo "")"
+  _loop_pr_spawn_heal_agent "$num" "$branch" "$slug" "$logfile"
+}
+
 # _loop_pr_inbox
 #   Walks open PRs and routes each by classification.
 #   Lenient on gh unavailability — returns 0 so the loop continues to BACKLOG.
@@ -11557,8 +11671,18 @@ _loop_pr_inbox() {
       loop_self)
         _loop_pr_merge_self_eager "$num" "$ci_state" "$mergeable" "$slug"
         ;;
-      blocked_human_request_changes|blocked_human_approved)
-        : # skip — explained by verdict; nothing to do this cycle
+      loop_self_ci_red)
+        # US-LOOP-050 (revived) / FIX-158: red loop PR — heal it (bounded,
+        # background agent) instead of letting it rot as a zombie.
+        _loop_pr_heal_self "$num" "$head_ref" "$slug" || true
+        ;;
+      blocked_human_request_changes)
+        : # skip — last human review requested changes; wait for the author
+        ;;
+      blocked_human_approved)
+        # US-AUTO-044 expectation ②: own the merge for approved + green PRs
+        # rather than relying on repo-level auto-merge being armed.
+        _loop_pr_merge_approved "$num" "$ci_state" "$mergeable" "$slug" || true
         ;;
       stale)
         _loop_pr_rebase_circuit "$num" || true

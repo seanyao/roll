@@ -157,11 +157,12 @@ Call `_loop_pr_inbox` after the pre-run CI check passes. It walks
 
 | Classification | Action |
 |---|---|
-| `loop_self` (head ref starts with `loop/`) | Skip — let GitHub auto-merge handle it; never AI-review your own commit |
+| `loop_self` (head ref starts with `loop/`, CI not red) | `_loop_pr_merge_self_eager` — merge directly when CI green + mergeable (`--delete-branch`); never AI-review your own commit |
+| `loop_self_ci_red` (loop/* PR with red CI) | `_loop_pr_heal_self` — revived US-LOOP-050: spawn a bounded, locked, background heal agent (`$roll-fix` on the PR branch), capped by `ROLL_LOOP_HEAL_MAX` (default 2) per PR; when the budget is spent or `ROLL_LOOP_NO_HEAL=1`, fall back to a deduped `[TYPE:loop-pr-ci-red]` ALERT (FIX-158) instead of dropping the PR |
 | `blocked_human_request_changes` | Skip — last human review requested changes; wait for the author to push fixes |
-| `blocked_human_approved` | Skip — let GitHub auto-merge after CI is green |
+| `blocked_human_approved` | `_loop_pr_merge_approved` — own the merge directly when CI green + mergeable (`--delete-branch`), rather than relying on repo-level GitHub auto-merge being armed |
 | `stale` (CI failed or branch behind/conflicting) | Try `_loop_pr_rebase_stale` after the circuit breaker allows it |
-| `eligible` (clean external PR, no blocking review) | Invoke `_loop_pr_review_external` — the actual decision is provided by US-AUTO-035's GitHub Action |
+| `eligible` (clean external PR, no blocking review) | Invoke `_loop_pr_review_external`; once it approves, the PR is picked up as `blocked_human_approved` on the next tick and merged |
 
 **Rebase circuit breaker** — `_loop_pr_rebase_circuit <pr>` records each rebase
 attempt under `pr_state.<PR>.attempts_at` in the per-slug state file

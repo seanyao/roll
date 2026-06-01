@@ -273,6 +273,16 @@ _state="$BATS_TEST_DIRNAME"  # placeholder; real paths resolved at runtime
   grep -q 'flaky: unit' .roll/backlog.md
 }
 
+@test "_ci_scan: writes tick on completion" {
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/.roll/loop"
+  gh() { case "$*" in *"run list"*) echo "[]" ;; *) : ;; esac; }
+  run _ci_scan
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/.roll/loop/ci-tick.jsonl" ]
+  run cat "${TEST_TMP}/.roll/loop/ci-tick.jsonl"
+  [[ "$output" == *'"loop":"ci"'* ]]
+}
+
 # ── function existence contracts ─────────────────────────────────────────────
 
 @test "all CI loop helpers are defined in bin/roll" {

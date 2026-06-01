@@ -7732,6 +7732,84 @@ _loop_event_rotate() {
   fi
 }
 
+# FIX-151: write a lightweight tick heartbeat for dedicated loops (pr/ci/alert).
+# Appends one JSONL line per tick; rotates by line count to control bloat.
+_loop_write_tick() {
+  local loop_type="${1:-}" outcome="${2:-idle}" note="${3:-}"
+  [ -n "$loop_type" ] || return 0
+  local slug tick_file
+  slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  local _rt_dir
+  _rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  if [ -n "$_rt_dir" ]; then
+    tick_file="${_rt_dir}/${loop_type}-tick.jsonl"
+  else
+    tick_file="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/${loop_type}-tick-${slug}.jsonl"
+  fi
+  mkdir -p "$(dirname "$tick_file")" 2>/dev/null || true
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  printf '{"ts":"%s","loop":"%s","outcome":"%s","note":"%s"}\n' \
+    "$ts" "$loop_type" "$outcome" "$note" >> "$tick_file"
+
+  # Rotate: alert loop (1 min) → 1000 lines (~16h); ci/pr (5 min) → 500 lines (~42h)
+  local max_lines=500
+  [ "$loop_type" = "alert" ] && max_lines=1000
+  local line_count
+  line_count=$(wc -l < "$tick_file" 2>/dev/null | tr -d ' \t' || echo 0)
+  case "$line_count" in ''|*[!0-9]*) line_count=0 ;; esac
+  if [ "$line_count" -gt "$max_lines" ]; then
+    tail -n "$max_lines" "$tick_file" > "${tick_file}.tmp" && mv "${tick_file}.tmp" "$tick_file"
+  fi
+}
+
+# FIX-151: read the last tick line from a dedicated loop's tick file.
+# Optional second arg selects a JSON field (ts, loop, outcome, note).
+_loop_read_last_tick() {
+  local loop_type="${1:-}" field="${2:-}"
+  [ -n "$loop_type" ] || return 0
+  local slug tick_file
+  slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  local _rt_dir
+  _rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  if [ -n "$_rt_dir" ]; then
+    tick_file="${_rt_dir}/${loop_type}-tick.jsonl"
+  else
+    tick_file="${_SHARED_ROOT:-$HOME/.shared/roll}/loop/${loop_type}-tick-${slug}.jsonl"
+  fi
+  [ -f "$tick_file" ] || return 0
+  local last
+  last=$(tail -1 "$tick_file" 2>/dev/null || echo "")
+  [ -n "$last" ] || return 0
+  if [ -n "$field" ]; then
+    echo "$last" | awk -F'"' '{for(i=2;i<NF;i+=2) if($i=="'"$field"'") {print $(i+2); exit}}' 2>/dev/null || echo ""
+  else
+    printf '%s\n' "$last"
+  fi
+}
+
+# FIX-151: compute human-readable age of the last tick for a dedicated loop.
+# Prints something like "5s", "3m", "2h" or empty string if no tick.
+_loop_tick_age() {
+  local loop_type="${1:-}"
+  [ -n "$loop_type" ] || return 0
+  local ts
+  ts=$(_loop_read_last_tick "$loop_type" "ts")
+  [ -n "$ts" ] || return 0
+  local tick_epoch now_epoch age
+  tick_epoch=$(date -d "$ts" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null || echo 0)
+  [ "$tick_epoch" -gt 0 ] || return 0
+  now_epoch=$(date +%s)
+  age=$(( now_epoch - tick_epoch ))
+  if [ "$age" -lt 60 ]; then
+    echo "${age}s"
+  elif [ "$age" -lt 3600 ]; then
+    echo "$(( age / 60 ))m"
+  else
+    echo "$(( age / 3600 ))h"
+  fi
+}
+
 # US-OBS-014: after a loop cycle reaches a terminal cycle_end (done or idle),
 # fire a best-effort, background status-snapshot push to roll-meta so the
 # remote-watch prompt always sees ≤35min-fresh data — no user-side cron needed.
@@ -9900,8 +9978,13 @@ _legacy_loop_status() {
         fi
         echo -e "    ${YELLOW}loop     ⏸ paused${NC}${_dur}   run: roll loop resume"
       else
+        local _tick_age=""
+        case "$svc" in pr|ci|alert)
+          _tick_age=$(_loop_tick_age "$svc")
+          [ -n "$_tick_age" ] && _tick_age="  tick ${_tick_age}"
+        esac
         case "$state" in
-          enabled)       echo -e "    ${GREEN}${svc}     ● enabled${NC}" ;;
+          enabled)       echo -e "    ${GREEN}${svc}     ● enabled${NC}${_tick_age}" ;;
           stale|installed-off) echo -e "    ${YELLOW}${svc}     ⚠ STALE — plist present but not loaded${NC}   run: roll loop on" ;;
           not-installed) echo -e "    ${RED}${svc}     ○ not installed${NC}   run: roll setup" ;;
         esac
@@ -11310,16 +11393,16 @@ _loop_pr_merge_self_eager() {
 #   Walks open PRs and routes each by classification.
 #   Lenient on gh unavailability — returns 0 so the loop continues to BACKLOG.
 _loop_pr_inbox() {
-  local slug; _gh_resolve slug || return 0
+  local slug; _gh_resolve slug || { _loop_write_tick "pr" "idle" "gh_unavailable"; return 0; }
   local prs_json
   prs_json=$(gh -R "$slug" pr list --state open \
     --json number,headRefName,author,title \
-    2>/dev/null) || return 0
-  [ -n "$prs_json" ] || return 0
-  [ "$prs_json" = "[]" ] && return 0
+    2>/dev/null) || { _loop_write_tick "pr" "idle" "gh_error"; return 0; }
+  [ -n "$prs_json" ] || { _loop_write_tick "pr" "idle" "empty_response"; return 0; }
+  [ "$prs_json" = "[]" ] && { _loop_write_tick "pr" "idle" "no_open_prs"; return 0; }
 
   local count; count=$(echo "$prs_json" | jq 'length' 2>/dev/null || echo 0)
-  [ "${count:-0}" -gt 0 ] || return 0
+  [ "${count:-0}" -gt 0 ] || { _loop_write_tick "pr" "idle" "zero_prs"; return 0; }
 
   local i=0
   while [ "$i" -lt "$count" ]; do
@@ -11387,6 +11470,7 @@ _loop_pr_inbox() {
 
     i=$((i + 1))
   done
+  _loop_write_tick "pr" "acted" "inbox_done"
   return 0
 }
 
@@ -11895,13 +11979,13 @@ _ci_detect_degradation() {
 #   accumulated history. Lenient on gh unavailability (missing / failed list →
 #   return 0) so the service never errors out a tick.
 _ci_scan() {
-  local slug; _gh_resolve slug 2>/dev/null || return 0
+  local slug; _gh_resolve slug 2>/dev/null || { _loop_write_tick "ci" "idle" "gh_unavailable"; return 0; }
 
   local runs_json
   runs_json=$(gh -R "$slug" run list --branch main \
     --json databaseId,workflowName,name,conclusion,status,createdAt,updatedAt \
-    2>/dev/null) || return 0
-  [ -n "$runs_json" ] || return 0
+    2>/dev/null) || { _loop_write_tick "ci" "idle" "gh_error"; return 0; }
+  [ -n "$runs_json" ] || { _loop_write_tick "ci" "idle" "empty_response"; return 0; }
 
   # An empty list ("[]") still falls through to the detectors below: they run
   # over accumulated history, not just this tick's runs.
@@ -11927,6 +12011,7 @@ _ci_scan() {
 
   _ci_detect_flaky
   _ci_detect_degradation
+  _loop_write_tick "ci" "acted" "scan_done"
   return 0
 }
 
@@ -12094,12 +12179,12 @@ _alert_rotate() {
 #   A missing/empty alert file is a no-op (no rotate, no log). Loop-safe.
 _alert_dispatch() {
   local file="${1:-$_LOOP_ALERT}"
-  [ -n "$file" ] && [ -f "$file" ] || return 0
+  [ -n "$file" ] && [ -f "$file" ] || { _loop_write_tick "alert" "idle" "no_file"; return 0; }
   # Empty file → nothing to consume, leave it in place.
-  [ -s "$file" ] || return 0
+  [ -s "$file" ] || { _loop_write_tick "alert" "idle" "empty_file"; return 0; }
 
   local parsed; parsed=$(_alert_parse_file "$file")
-  [ -n "$parsed" ] || { _alert_rotate "$file"; return 0; }
+  [ -n "$parsed" ] || { _alert_rotate "$file"; _loop_write_tick "alert" "idle" "no_parsed"; return 0; }
 
   local line ts level category message notify
   local _oifs="$IFS"
@@ -12125,6 +12210,7 @@ _alert_dispatch() {
   IFS="$_oifs"
 
   _alert_rotate "$file"
+  _loop_write_tick "alert" "acted" "dispatch_done"
   return 0
 }
 

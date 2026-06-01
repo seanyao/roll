@@ -60,6 +60,30 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 0 ]
 }
 
+@test "_peer_auto_attach: guards against BATS_TEST_NUMBER (FIX-155)" {
+  local body
+  body=$(awk '/^_peer_auto_attach\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qF 'BATS_TEST_NUMBER'
+}
+
+@test "_peer_auto_attach: guards against ROLL_LOOP_NO_POPUP (FIX-155)" {
+  local body
+  body=$(awk '/^_peer_auto_attach\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
+  echo "$body" | grep -qF 'ROLL_LOOP_NO_POPUP'
+}
+
+@test "_peer_auto_attach: no-ops when BATS_TEST_NUMBER is set (FIX-155)" {
+  BATS_TEST_NUMBER=1
+  run _peer_auto_attach "roll-peer-claude-kimi"
+  [ "$status" -eq 0 ]
+}
+
+@test "_peer_auto_attach: no-ops when ROLL_LOOP_NO_POPUP is set (FIX-155)" {
+  ROLL_LOOP_NO_POPUP=1
+  run _peer_auto_attach "roll-peer-claude-kimi"
+  [ "$status" -eq 0 ]
+}
+
 # ─── _peer_dispatch_in_tmux ───────────────────────────────────────────────────
 
 @test "_peer_dispatch_in_tmux: function exists" {

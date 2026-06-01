@@ -11557,6 +11557,21 @@ _loop_pr_inbox() {
       loop_self)
         _loop_pr_merge_self_eager "$num" "$ci_state" "$mergeable" "$slug"
         ;;
+      loop_self_ci_red)
+        # FIX-158: _loop_pr_classify (US-LOOP-049) labels a red loop/* PR
+        # loop_self_ci_red, but US-LOOP-050's heal handler was lost in
+        # REFACTOR-030 — this verdict had no branch, so a red self-PR fell
+        # through silently: GitHub auto-merge can't merge it (CI red) and
+        # nothing healed it, leaving a permanent zombie PR. Until the full
+        # checkout→fix→push auto-heal is re-wired, surface a deduped ALERT so
+        # the red self-PR is visible instead of dropped (full fix: FIX-158).
+        local _ci_red_alert="$_LOOP_ALERT"
+        mkdir -p "$(dirname "$_ci_red_alert")" 2>/dev/null || true
+        if ! grep -qF "[TYPE:loop-pr-ci-red] PR #${num} " "$_ci_red_alert" 2>/dev/null; then
+          printf '[%s] [error] [TYPE:loop-pr-ci-red] PR #%s %s: own loop PR CI red — needs heal (FIX-158)\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$num" "$head_ref" >> "$_ci_red_alert"
+        fi
+        ;;
       blocked_human_request_changes|blocked_human_approved)
         : # skip — explained by verdict; nothing to do this cycle
         ;;

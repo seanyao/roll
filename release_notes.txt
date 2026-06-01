@@ -1,5 +1,6 @@
-### 新功能
-- **curl 安装器骨架:不靠 npm 也能装 roll(US-INSTALL-001)** — 自包含安装脚本探测 OS(仅放行 macOS / Linux)、preflight 检查 `bash≥3.2`/`python3`/`curl`/`tar` 缺啥报啥、把运行时装到 `~/.local/share/roll/` 并 symlink 进 PATH,重复运行即原地升级。本版先从本地源目录复制(真正的 `curl ... | bash` 远端取数留后续故事)`[loop]`
 ### 可见性
-- **peer 评审可靠落盘、能查了(FIX-150a)** — 此前 peer 痕迹碎成三处且大多丢失;统一落盘到项目本地规范路径,新增查询命令翻看历次 peer 记录(发起方 / 对象 / 轮次 / 各方结论 / 耗时),不再依赖 agent 自觉写盘 `[loop]`
-- **三个专用 loop(CI / PR / Alert)空闲时也留心跳(FIX-151)** — 健康空闲时不再零日志让人以为没在跑;每轮补一条轻量存活心跳,status 显示各 loop 上次运行距今多久 `[loop]`
+- **kimi cycle 现在也能看到 token 和成本(FIX-154)** — 以前 dashboard 对 kimi 那一行全是 `—/—`,看不到主力 agent 花了多少钱;现在 cycle 跑完读 kimi-code 的 `wire.jsonl`,把 token 数和成本写进事件流,RECENT 视图和成本总闸都看得见 `[loop]`
+### 稳定性
+- **loop 把活派给 AI 后现在真会动手,不再空转零产出(FIX-152)** — kimi 等对话式 agent 拿到 SKILL.md 会把它当成"贴过来的文档"反问"What would you like me to do?",8 秒空返没交付;技能正文前置一条 agent 无关的自主执行指令,kimi/claude/pi/codex/agy 现在都会直接动手 `[loop]`
+- **agy 在 loop / cron 自动化里不再卡 tty 等待(FIX-153)** — antigravity(agy)默认要 tty 批准操作,自动化场景拿不到 tty 就一直挂着等;现在 headless 模式自动加 `-p` 和跳过权限标记,跑得到结果 `[loop]`
+- **测试不再在桌面弹空报错终端(FIX-155)** — bats 测试跑完临时沙箱删了,但 peer auto-attach 弹的 Terminal 窗口指向那个已不存在的路径,桌面堆一堆空报错的死窗口;给 peer 弹窗补上和 loop 弹窗一样的测试守卫,测试上下文不再弹 `[loop]`

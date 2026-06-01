@@ -107,3 +107,62 @@ _extract_runs_append() {
   # The live .tmp should still exist (PID is alive)
   [ -f "$live_tmp" ]
 }
+
+@test "_runs_append: FIX-157 creates runs.jsonl when file is missing" {
+  local inner_script="${TEST_TMP}/run-inner.sh"
+  _write_loop_runner_script "${TEST_TMP}/run.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24
+  inner_script="${TEST_TMP}/run-inner.sh"
+
+  export CYCLE_ID="20260601-220000-00000"
+  CYCLE_START=$(date -u +%s)
+  export slug="test-proj-fix157"
+
+  mkdir -p "${TEST_TMP}/shared/loop"
+  export _SHARED_ROOT="${TEST_TMP}/shared"
+
+  local fn_file="${TEST_TMP}/fn.sh"
+  _extract_runs_append "$inner_script" > "$fn_file"
+  source "$fn_file"
+
+  # Deliberately do NOT create runs.jsonl — assert _runs_append creates it
+  [ ! -f "${_SHARED_ROOT}/loop/runs.jsonl" ]
+
+  _runs_append "built" 2 '["FIX-157"]'
+
+  [ -f "${_SHARED_ROOT}/loop/runs.jsonl" ]
+  run grep -c '"run_id":"loop-20260601-220000"' "${_SHARED_ROOT}/loop/runs.jsonl"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "_runs_append: FIX-157 writes to main project path when ROLL_MAIN_SLUG set in worktree" {
+  local inner_script="${TEST_TMP}/run-inner.sh"
+  _write_loop_runner_script "${TEST_TMP}/run.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24
+  inner_script="${TEST_TMP}/run-inner.sh"
+
+  export CYCLE_ID="20260601-221000-11111"
+  CYCLE_START=$(date -u +%s)
+  export slug="test-proj-fix157b"
+
+  # Simulate main project + worktree layout
+  local main_proj="${TEST_TMP}/main-project"
+  mkdir -p "${main_proj}/.roll/loop"
+  export _SHARED_ROOT="${TEST_TMP}/shared"
+  export ROLL_MAIN_SLUG="test-proj-fix157b"
+
+  local fn_file="${TEST_TMP}/fn.sh"
+  _extract_runs_append "$inner_script" > "$fn_file"
+  source "$fn_file"
+
+  # Force _LOOP_RT_DIR to point at main project (like inner runner does)
+  _LOOP_RT_DIR="${main_proj}/.roll/loop"
+
+  _runs_append "built" 1 '["FIX-157"]'
+
+  # Record must land in main project, not shared fallback
+  [ -f "${main_proj}/.roll/loop/runs.jsonl" ]
+  run grep -c '"run_id":"loop-20260601-221000"' "${main_proj}/.roll/loop/runs.jsonl"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+  [ ! -f "${_SHARED_ROOT}/loop/runs.jsonl" ]
+}

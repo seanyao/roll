@@ -7812,6 +7812,9 @@ _loop_event() {
       ;;
   esac
   mkdir -p "$(dirname "$evfile")"
+  # FIX-157: ensure file exists before append; some contexts (launchd+inner)
+  # silently drop >> when the target is missing.
+  touch "$evfile" 2>/dev/null || true
 
   # US-LOOP-007: human-friendly stdout for phase_* stages so tmux readers
   # spot phase boundaries amid claude output. Other stages keep the legacy
@@ -7856,7 +7859,9 @@ _loop_event() {
   # defeating FIX-066's whole purpose.
   json=$(printf '{"ts":"%s","stage":"%s","label":"%s","detail":"%s","outcome":"%s"}\n' \
     "$ts" "$stage" "$label" "$detail" "$outcome")
-  printf '%s\n' "$json" >> "$evfile"
+  if ! printf '%s\n' "$json" >> "$evfile"; then
+    echo "[loop] _loop_event: failed to append to $evfile" >&2
+  fi
 
   # File rotation: if >10MB, rotate keeping last 5
   _loop_event_rotate "$evfile"
@@ -8601,7 +8606,12 @@ _runs_append() {
       tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}
      + (if \$result_eval == null then {} else {result_eval:\$result_eval} end)' \\
     > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }
-  cat "\$_tmp" >> "\$_runs_dst" 2>/dev/null || true
+  # FIX-157: ensure target exists before append; missing file silently drops
+  # the write in launchd+inner contexts.
+  touch "\$_runs_dst" 2>/dev/null || true
+  if ! cat "\$_tmp" >> "\$_runs_dst" 2>/dev/null; then
+    echo "[loop] _runs_append: failed to append to \$_runs_dst" >&2
+  fi
   rm -f "\$_tmp"
 }
 _inner_cleanup() {
@@ -8726,6 +8736,10 @@ _LOOP_RT_DIR=\$(_loop_runtime_dir "${slug}" 2>/dev/null || echo "")
 if [ -n "\$_LOOP_RT_DIR" ]; then
   HEARTBEAT_FILE="\${_LOOP_RT_DIR}/.heartbeat-${slug}"
   HEARTBEAT_PHASE_FILE="\${_LOOP_RT_DIR}/.phase-${slug}"
+  # FIX-157: ensure data-plane files exist so append-mode writes survive
+  # archive/reset/new-machine scenarios where the file is absent.
+  mkdir -p "\$_LOOP_RT_DIR"
+  touch "\${_LOOP_RT_DIR}/events.ndjson" "\${_LOOP_RT_DIR}/runs.jsonl" 2>/dev/null || true
 else
   HEARTBEAT_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.heartbeat-${slug}"
   HEARTBEAT_PHASE_FILE="\${_SHARED_ROOT:-\${HOME}/.shared/roll}/loop/.phase-${slug}"

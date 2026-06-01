@@ -9425,7 +9425,15 @@ _agent_skill_cmd() {
   for ((i = 1; i < prompt_idx; i++)); do
     out+=" ${_AGENT_ARGV[i]}"
   done
-  echo "${out} \"\$(${strip})\""
+  # FIX-152: prepend an explicit autonomous-execution directive ahead of the bare
+  # SKILL.md body. Without it, conversational `-p` agents (notably kimi-code) read
+  # the skill doc as pasted context and reply "what would you like me to do?",
+  # returning in seconds with zero output → the cycle ends idle, no delivery.
+  # pi/deepseek/claude tolerate the bare doc, but the directive is agent-agnostic
+  # and hardens every autonomous cron skill (loop/dream/brief share this chokepoint).
+  # Must stay free of " $ ` \ so it survives the later `eval` of the cycle command.
+  local _autorun='[roll 自主模式] 你正在无人值守的自动化循环中运行,这不是对话。请立即、完整地执行下面这份技能文档描述的工作流,直到完成交付或写出 ALERT 为止;严禁反问、严禁等待确认、严禁只复述或总结而不动手。技能文档如下: '
+  echo "${out} \"${_autorun}\$(${strip})\""
 }
 
 # FIX-134: build the full per-cycle agent command at RUNTIME, routing-aware.

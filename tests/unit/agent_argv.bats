@@ -149,7 +149,10 @@ teardown() { unit_teardown; }
   PATH="/usr/bin:/bin" run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 0 ]
   # FIX-133: kimi-code 非交互是 -p（无 --quiet）
-  [[ "$output" == kimi\ -p\ \"\$\(awk* ]]
+  # FIX-152: prompt 现在前置自主执行指令,正文仍是 $(awk ...) strip
+  [[ "$output" == kimi\ -p\ \"* ]]
+  [[ "$output" == *'$(awk'* ]]
+  [[ "$output" == *"自主模式"* ]]
   [[ "$output" != *"--quiet"* ]]
   case "$output" in *"'/tmp/skill.md')\""*) :;; *) false;; esac
 }
@@ -182,14 +185,18 @@ teardown() { unit_teardown; }
   _project_agent() { echo codex; }
   run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 0 ]
-  [[ "$output" == codex\ exec\ \"\$\(awk* ]]
+  [[ "$output" == codex\ exec\ \"* ]]
+  [[ "$output" == *'$(awk'* ]]
+  [[ "$output" == *"自主模式"* ]]
 }
 
 @test "_agent_skill_cmd opencode → opencode run \"\$(awk ...)\"" {
   _project_agent() { echo opencode; }
   run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 0 ]
-  [[ "$output" == opencode\ run\ \"\$\(awk* ]]
+  [[ "$output" == opencode\ run\ \"* ]]
+  [[ "$output" == *'$(awk'* ]]
+  [[ "$output" == *"自主模式"* ]]
 }
 
 @test "_agent_skill_cmd claude → uses resolved absolute claude path" {
@@ -197,14 +204,18 @@ teardown() { unit_teardown; }
   run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 0 ]
   # Output begins with either /…/claude or literal claude, then -p, then bypass flag
-  [[ "$output" == *claude\ -p\ --dangerously-skip-permissions\ \"\$\(awk* ]]
+  [[ "$output" == *claude\ -p\ --dangerously-skip-permissions\ \"* ]]
+  [[ "$output" == *'$(awk'* ]]
+  [[ "$output" == *"自主模式"* ]]
 }
 
 @test "_agent_skill_cmd qwen → qwen \"\$(awk ...)\"" {
   _project_agent() { echo qwen; }
   run _agent_skill_cmd "/tmp/skill.md"
   [ "$status" -eq 0 ]
-  [[ "$output" == qwen\ \"\$\(awk* ]]
+  [[ "$output" == qwen\ \"* ]]
+  [[ "$output" == *'$(awk'* ]]
+  [[ "$output" == *"自主模式"* ]]
 }
 
 @test "_agent_skill_cmd unknown agent returns 1" {

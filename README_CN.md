@@ -19,11 +19,14 @@
 ## 安装
 
 ```bash
-npm install -g @seanyao/roll
-roll setup
+curl -fsSL https://seanyao.github.io/roll/install | bash
 ```
 
-环境要求：bash 3.2+、Node.js 16+。
+```bash
+npm install -g @seanyao/roll
+```
+
+环境要求：bash 3.2+。不需要 npm/Node.js —— curl 安装自带一切。
 
 ## 使用
 

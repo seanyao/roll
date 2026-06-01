@@ -29,7 +29,18 @@ The graft is **fully reversible**: run `roll offboard` and Roll undoes exactly w
 ### 1. Install Roll
 
 ```bash
+curl -fsSL https://seanyao.github.io/roll/install | bash
+```
+
+Or via npm:
+
+```bash
 npm install -g @seanyao/roll@latest
+```
+
+Then:
+
+```bash
 roll setup
 ```
 

@@ -676,7 +676,7 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 | 命令 | 作用 |
 |------|------|
 | `roll setup [-f]` | 首次安装或重新同步：初始化 `~/.roll/` 并把约定与技能分发到所有 AI 工具（加 `--force` 覆盖本地缓存） |
-| `roll update` | 一键升级：`npm install -g @seanyao/roll@latest` + 重新执行 setup |
+| `roll update` | 一键升级：自动检测安装方式（curl/npm/git）并对应处理，再重新同步 |
 | `roll init` | 在项目目录创建 `AGENTS.md` + `.roll/` 骨架（`backlog.md`、`features/`、`domain/`）；遗留项目引导到 `$roll-onboard`；已有 `AGENTS.md` 则重新合并 |
 | `roll status` | 显示同步状态、技能软链接、检测到的 AI 工具 |
 | `roll backlog` | 显示 `.roll/backlog.md` 中所有待处理任务 |

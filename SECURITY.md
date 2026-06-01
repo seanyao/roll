@@ -2,7 +2,30 @@
 
 ## Supported versions
 
-Roll ships from one active line. The version installed via `npm install -g @seanyao/roll` is the supported version; older tags do not receive security patches.
+Roll ships from one active line. The version installed via
+`curl -fsSL https://seanyao.github.io/roll/install | bash` or
+`npm install -g @seanyao/roll` is the supported version; older tags do
+not receive security patches.
+
+## curl|bash trust boundary
+
+Piping a remote script into `bash` carries inherent risk. Mitigations:
+
+- **Pin the version.** Set `ROLL_VERSION` to a known tag so a compromised
+  `latest` redirect can't inject code:
+  ```bash
+  curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v2.601.1 bash
+  ```
+- **Inspect before running.** Download and review the script first:
+  ```bash
+  curl -fsSL https://seanyao.github.io/roll/install -o /tmp/roll-install
+  less /tmp/roll-install     # review
+  bash /tmp/roll-install     # run
+  ```
+- **Verify the source.** The script is served from `seanyao.github.io/roll`,
+  which is deployed from `site/install` in this repository via GitHub Pages.
+  The deploy workflow runs on push to `main` and the Pages build is visible
+  at `https://github.com/seanyao/roll/actions/workflows/deploy-site.yml`.
 
 ## Reporting a vulnerability
 

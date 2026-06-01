@@ -19,11 +19,14 @@ Roll — a CLI that lets AI agents pick up backlog items and ship them through y
 ## Install
 
 ```bash
-npm install -g @seanyao/roll
-roll setup
+curl -fsSL https://seanyao.github.io/roll/install | bash
 ```
 
-Requirements: bash 3.2+, Node.js 16+.
+```bash
+npm install -g @seanyao/roll
+```
+
+Requirements: bash 3.2+. npm/Node.js not required — curl install is self-contained.
 
 ## Use
 

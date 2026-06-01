@@ -684,7 +684,7 @@ Commands fall into two categories: bash commands run pure shell logic; agent com
 | Command | Purpose |
 |---------|---------|
 | `roll setup [-f]` | First-time install on this machine, or re-sync (use `--force` to overwrite local cache) |
-| `roll update` | One-step upgrade: `npm install -g @seanyao/roll@latest` + re-sync via setup |
+| `roll update` | One-step upgrade: detects install method (curl/npm/git) and upgrades accordingly, then re-sync |
 | `roll init` | Create `AGENTS.md` + `.roll/` scaffold (`backlog.md`, `features/`, `domain/`) in cwd; surfaces `$roll-onboard` for legacy code; re-merges if `AGENTS.md` exists |
 | `roll status` | Display current sync status, skill links, and detected AI tools |
 | `roll backlog` | Show all pending tasks from `.roll/backlog.md` |

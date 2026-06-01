@@ -4411,10 +4411,12 @@ _agent_argv() {
       # late 2025. agy reuses ~/.gemini/ for config and reads GEMINI.md
       # natively, so the convention sync target is unchanged — only the
       # invoked binary changes.
+      # FIX-153: non-interactive modes must use -p (headless) +
+      # --dangerously-skip-permissions so the agent does not hang waiting
+      # for a tty approval that never comes in loop/cron contexts.
       case "$mode" in
         interactive) _AGENT_ARGV=(agy -i "$prompt") ;;
-        text|peer)   _AGENT_ARGV=(agy "$prompt") ;;
-        *)           _AGENT_ARGV=(agy "$prompt") ;;
+        *)           _AGENT_ARGV=(agy -p --dangerously-skip-permissions "$prompt") ;;
       esac ;;
     qwen)
       # qwen has the same argv shape in both modes (positional prompt).

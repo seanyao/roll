@@ -91,6 +91,14 @@ teardown() { unit_teardown; }
   [ "${_AGENT_ARGV[2]}" = "x" ]
 }
 
+@test "non-interactive argv: agy plain → agy -p --dangerously-skip-permissions (FIX-153)" {
+  _agent_argv agy plain "x"
+  [ "${_AGENT_ARGV[0]}" = "agy" ]
+  [ "${_AGENT_ARGV[1]}" = "-p" ]
+  [ "${_AGENT_ARGV[2]}" = "--dangerously-skip-permissions" ]
+  [ "${_AGENT_ARGV[3]}" = "x" ]
+}
+
 # ─── _onboard_initial_prompt — kickoff line + skill body ─────────────────────
 
 @test "_onboard_initial_prompt: includes the kickoff line" {

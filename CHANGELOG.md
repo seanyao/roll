@@ -5,6 +5,7 @@
 ### 稳定性
 
 - **从 `.roll/` 子目录跑 `roll` 不再误报"老结构"(FIX-156)** — `.roll/` 是嵌套 roll-meta git repo,从那里跑 `roll loop status` 等命令时 `git rev-parse` 会返回 `.roll/` 自己当 root,然后旧的"新结构存在?"检查找 `.roll/.roll` 找不到,又看到 `.roll/` 里满地 Roll 内容,就误报"老结构、要 migrate";现在检查会向上找直到 `.roll/` 的父目录,认出"这就是该 Roll 项目的私有过程仓",不再误报 `[loop]`
+- **peer review 死等终结(FIX-150c)** — 此前 peer 调用挂了就是无限挂,等不到 verdict cycle 就跟着挂;现在 wall-clock 超 `peer_call_timeout`(默认 3min)直接 SIGTERM/SIGKILL 干掉跑挂的 agent,tmux 内的也送 Ctrl-C 中断,设全局标志 `_PEER_LAST_TIMED_OUT` 让上层落 ledger 用,绝不无限等 `[loop]`
 
 ## v2026.601.3
 

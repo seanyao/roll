@@ -3879,7 +3879,18 @@ _peer_dispatch_in_tmux() {
     sleep 1
     elapsed=$((elapsed + 1))
   done
+  # FIX-150c: if we hit the wall clock without the done marker, the agent
+  # is still running inside the tmux session. Send Ctrl-C to interrupt it
+  # so the cycle doesn't hang on a peer that's no longer being awaited.
+  # Return 1 (timed out) vs 0 (completed within budget); _peer_call lifts
+  # this into the global _PEER_LAST_TIMED_OUT flag.
+  local _timed_out=0
+  if [[ ! -f "$done_file" ]]; then
+    tmux send-keys -t "${session}:0" C-c 2>/dev/null || true
+    _timed_out=1
+  fi
   rm -f "$done_file"
+  return "$_timed_out"
 }
 
 _peer_call() {
@@ -3892,6 +3903,11 @@ _peer_call() {
   local call_timeout
   call_timeout="$(config_get "peer_call_timeout" "180")"
 
+  # FIX-150c: signal back to caller whether this call hit the wall-clock
+  # limit. Caller (_peer_*_state, ledger writer) records "timeout" verdict.
+  # Reset per call so callers reading the previous result don't mis-attribute.
+  _PEER_LAST_TIMED_OUT=0
+
   info "$(msg status.peer_call_timeout_s_peer ${call_timeout})"
 
   if [[ -n "$session" ]] && command -v tmux >/dev/null 2>&1 && tmux has-session -t "$session" 2>/dev/null; then
@@ -3903,14 +3919,50 @@ _peer_call() {
       return 1
     }
     _peer_dispatch_in_tmux "$session" "$cmd_str" "$out_file" "$stderr_log" "$call_timeout"
+    local _dispatch_rc=$?
     output="$(cat "$out_file" 2>/dev/null || true)"
     rm -f "$out_file"
+    if [[ "$_dispatch_rc" -ne 0 ]]; then
+      _PEER_LAST_TIMED_OUT=1
+      warn "$(msg status.peer_call_timeout_killed "$to" "$call_timeout")"
+    fi
   else
     _agent_argv "$to" peer "$prompt" || {
       err "$(msg status.unsupported_peer_2 $to)"
       return 1
     }
-    output="$("${_AGENT_ARGV[@]}" 2>"$stderr_log" || true)"
+    # FIX-150c: hard timeout for non-tmux path. macOS has no `timeout`(1),
+    # so use a background watchdog that SIGTERMs (then SIGKILLs after 2 s
+    # grace) the agent process when it overruns. Output captured via tmp
+    # file because we can't keep it in $output while juggling pids.
+    # `wait` returns the agent's exit code; with `set -e` enabled by the
+    # caller (loops, hooks, bats), a non-zero from the killed agent would
+    # short-circuit out before we can read it — `|| _peer_exit=$?` keeps
+    # the value flowing into the timeout check.
+    local _out _peer_exit=0 _peer_pid _watchdog_pid
+    _out=$(mktemp)
+    "${_AGENT_ARGV[@]}" >"$_out" 2>"$stderr_log" &
+    _peer_pid=$!
+    (
+      sleep "$call_timeout"
+      kill -TERM "$_peer_pid" 2>/dev/null && {
+        sleep 2
+        kill -KILL "$_peer_pid" 2>/dev/null
+      }
+    ) &
+    _watchdog_pid=$!
+    wait "$_peer_pid" 2>/dev/null || _peer_exit=$?
+    # Cancel watchdog if agent finished on time.
+    kill "$_watchdog_pid" 2>/dev/null || true
+    wait "$_watchdog_pid" 2>/dev/null || true
+    output="$(cat "$_out" 2>/dev/null || true)"
+    rm -f "$_out"
+    # SIGTERM kill → 143, SIGKILL → 137. Either means we tripped the
+    # timeout watchdog (agent itself doesn't normally exit with those).
+    if [[ "$_peer_exit" -eq 143 || "$_peer_exit" -eq 137 ]]; then
+      _PEER_LAST_TIMED_OUT=1
+      warn "$(msg status.peer_call_timeout_killed "$to" "$call_timeout")"
+    fi
   fi
 
   printf '%s\n' "$output"

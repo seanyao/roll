@@ -202,3 +202,68 @@ EOF
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"Failed to download"* ]]
 }
+
+@test "install: roll update detects curl install method" {
+  # Rebuild fixture tarball with real bin/roll and lib/
+  cp "${BATS_TEST_DIRNAME}/../bin/roll" "${TEST_TMP}/fixture/roll-v2.601.1/bin/roll"
+  rm -rf "${TEST_TMP}/fixture/roll-v2.601.1/lib"
+  cp -r "${BATS_TEST_DIRNAME}/../lib" "${TEST_TMP}/fixture/roll-v2.601.1/lib"
+  (cd "${TEST_TMP}/fixture" && tar -czf "${TEST_TMP}/roll.tar.gz" roll-v2.601.1)
+
+  # Update mock curl to also serve the install script
+  cat > "${TEST_TMP}/mockbin/curl" <<EOF
+#!/usr/bin/env bash
+output_file=""
+args=("\$@")
+for ((i=0; i<\${#args[@]}; i++)); do
+  if [[ "\${args[\$i]}" == "-o" ]] && ((i+1 < \${#args[@]})); then
+    output_file="\${args[\$((i+1))]}"
+  fi
+done
+
+if [[ "\$*" == *"api.github.com"* ]]; then
+  if [[ -n "\$output_file" ]]; then
+    echo '{"tag_name":"v2.601.1"}' > "\$output_file"
+  else
+    echo '{"tag_name":"v2.601.1"}'
+  fi
+elif [[ "\$*" == *"seanyao.github.io/roll/install"* ]]; then
+  cat "${BATS_TEST_DIRNAME}/../install"
+elif [[ "\$*" == *"tar.gz"* ]]; then
+  if [[ -n "\$output_file" ]]; then
+    cat "${TEST_TMP}/roll.tar.gz" > "\$output_file"
+  else
+    cat "${TEST_TMP}/roll.tar.gz"
+  fi
+else
+  echo "Unexpected curl call: \$*" >&2
+  exit 1
+fi
+EOF
+  chmod +x "${TEST_TMP}/mockbin/curl"
+
+  # Install first
+  PATH="${TEST_TMP}/mockbin:$PATH" HOME="$TEST_TMP" run bash "$INSTALL_SCRIPT"
+  [[ "$status" -eq 0 ]]
+
+  # Run update — should detect curl method and not call npm
+  PATH="${TEST_TMP}/mockbin:$PATH" HOME="$TEST_TMP" run bash "${TEST_TMP}/.local/bin/roll" update
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"curl"* ]]
+  [[ "$output" != *"npm"* ]]
+}
+
+@test "install: uninstall removes curl install files" {
+  PATH="${TEST_TMP}/mockbin:$PATH" HOME="$TEST_TMP" run bash "$INSTALL_SCRIPT"
+  [[ "$status" -eq 0 ]]
+
+  # Run uninstall with automatic yes
+  HOME="$TEST_TMP" run bash -c 'yes | bash "'"${BATS_TEST_DIRNAME}/../uninstall.sh"'"'
+  [[ "$status" -eq 0 ]]
+
+  # Data dir removed
+  [[ ! -d "${TEST_TMP}/.local/share/roll" ]]
+
+  # Symlink removed
+  [[ ! -L "${TEST_TMP}/.local/bin/roll" ]]
+}

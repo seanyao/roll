@@ -138,6 +138,17 @@ else
   info "~/.roll/ not found — skipping"
 fi
 
+# ─── Step 2.5: Remove curl install data dir ───────────────────────────────────
+step "Step 2.5: Remove curl data dir"
+
+CURL_DATA_DIR="${HOME}/.local/share/roll"
+if [[ -d "$CURL_DATA_DIR" ]]; then
+  run "rm -rf '$CURL_DATA_DIR'"
+  ok "Removed: ~/.local/share/roll"
+else
+  info "~/.local/share/roll not found — skipping"
+fi
+
 # ─── Step 3: Remove binary ────────────────────────────────────────────────────
 step "Step 3: Remove binary"
 

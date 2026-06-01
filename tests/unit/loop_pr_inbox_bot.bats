@@ -86,6 +86,84 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 0 ]
 }
 
+@test "_loop_pr_rebase_stale: rebases BEHIND branch and force-pushes, restoring original branch" {
+  _gh_repo_slug() { echo "test/repo"; }
+  gh() {
+    if [ "$1" = "-R" ]; then shift 2; fi
+    if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+      echo '{"isCrossRepository":false}'
+      return 0
+    fi
+    return 0
+  }
+
+  local _bare="${TEST_TMP}/origin.git"
+  git init --bare -q "$_bare"
+  git remote add origin "$_bare"
+
+  # initial commit on main
+  echo "init" > main.txt
+  git add main.txt
+  git commit -q -m "init"
+  git push -u origin main
+
+  # create feature branch (touch different file to avoid content conflict)
+  git checkout -q -b feat/behind
+  echo "feat" > feat.txt
+  git add feat.txt
+  git commit -q -m "feat"
+
+  # advance main
+  git checkout -q main
+  echo "advance" >> main.txt
+  git add main.txt
+  git commit -q -m "main advance"
+  git push origin main
+
+  # push feature (now behind)
+  git checkout -q feat/behind
+  git push -u origin feat/behind
+
+  local _orig_branch; _orig_branch=$(git rev-parse --abbrev-ref HEAD)
+  local _before; _before=$(git rev-parse origin/feat/behind)
+
+  _loop_pr_rebase_stale 20 "feat/behind"
+
+  # remote should have been force-pushed to a new commit
+  local _after; _after=$(git rev-parse origin/feat/behind)
+  [ "$_before" != "$_after" ]
+
+  # current branch should be restored
+  local _final; _final=$(git rev-parse --abbrev-ref HEAD)
+  [ "$_final" = "$_orig_branch" ]
+}
+
+@test "_loop_pr_rebase_stale: push failure after rebase writes push-failed ALERT" {
+  _gh_repo_slug() { echo "test/repo"; }
+  gh() {
+    if [ "$1" = "-R" ]; then shift 2; fi
+    if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+      echo '{"isCrossRepository":false}'
+      return 0
+    fi
+    return 0
+  }
+  git() {
+    case "$1" in
+      fetch)     return 0 ;;
+      checkout)  return 0 ;;
+      rebase)    [ "${2:-}" = "--abort" ] && return 0 || return 0 ;;
+      push)      return 1 ;;
+      rev-parse) echo "main" ;;
+    esac
+    command git "$@"
+  }
+  _loop_pr_rebase_stale 16 "feat/push-fail"
+  [ -f "$_LOOP_ALERT" ]
+  grep -q "push failed" "$_LOOP_ALERT"
+  grep -q "PR #16" "$_LOOP_ALERT"
+}
+
 # ─── bot review detection in _loop_pr_inbox ──────────────────────────────────
 
 @test "_loop_pr_inbox: bot APPROVED skips PR (defers to auto-merge)" {

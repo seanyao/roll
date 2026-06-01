@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Roll curl|bash installer — US-INSTALL-001 skeleton (offline-testable)
-# When run from a cloned repo, copies the repo to the data dir.
-# Future US-INSTALL-002 adds network tarball download.
+# Roll curl|bash installer — US-INSTALL-002 (network tarball download)
+# Supports ROLL_VERSION env var to pin version.
 
 OS="$(uname -s)"
 if [[ "$OS" != "Darwin" && "$OS" != "Linux" ]]; then
@@ -50,40 +49,71 @@ if ! command -v tar >/dev/null 2>&1; then
   exit 1
 fi
 
-# Detect source directory (local repo path)
-SOURCE_DIR=""
-if [[ -f "${BASH_SOURCE[0]:-$0}" ]]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-  if [[ -f "$SCRIPT_DIR/bin/roll" ]]; then
-    SOURCE_DIR="$SCRIPT_DIR"
+# Resolve target version tag from GitHub releases or env override
+_resolve_version() {
+  if [[ -n "${ROLL_VERSION:-}" ]]; then
+    echo "$ROLL_VERSION"
+    return 0
   fi
-fi
 
-if [[ -z "$SOURCE_DIR" ]]; then
-  echo "No local source directory found. This installer currently requires running from a cloned repository." >&2
-  echo "Future versions will support curl|bash installation." >&2
-  exit 1
-fi
+  local latest
+  latest=$(curl -fsSL \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/seanyao/roll/releases/latest" \
+    | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || true)
+
+  if [[ -z "$latest" ]]; then
+    echo "Failed to resolve latest version from GitHub." >&2
+    echo "You can pin a version with ROLL_VERSION=vX.Y.Z" >&2
+    exit 1
+  fi
+
+  echo "$latest"
+}
+
+# Download release tarball and atomically install to data dir
+_download_and_install() {
+  local tag="$1"
+  local url="https://github.com/seanyao/roll/archive/refs/tags/${tag}.tar.gz"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+
+  echo "[roll] Downloading roll $tag ..."
+  if ! curl -fsSL "$url" -o "${tmp_dir}/roll.tar.gz"; then
+    rm -rf "$tmp_dir"
+    echo "Failed to download $url" >&2
+    echo "Check your network connection or pin a version with ROLL_VERSION=vX.Y.Z" >&2
+    exit 1
+  fi
+
+  echo "[roll] Extracting ..."
+  mkdir -p "${tmp_dir}/extract"
+  if ! tar -xzf "${tmp_dir}/roll.tar.gz" --strip-components=1 -C "${tmp_dir}/extract"; then
+    rm -rf "$tmp_dir"
+    echo "Failed to extract tarball." >&2
+    exit 1
+  fi
+
+  # Atomic install: swap in the newly extracted directory
+  rm -rf "$DATA_DIR"
+  mkdir -p "$(dirname "$DATA_DIR")"
+  mv "${tmp_dir}/extract" "$DATA_DIR"
+  rm -rf "$tmp_dir"
+
+  chmod +x "$DATA_DIR/bin/roll"
+}
 
 # Installation paths
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/roll"
 BIN_DIR="$HOME/.local/bin"
 BIN_LINK="$BIN_DIR/roll"
 
-echo "[roll] Installing from: $SOURCE_DIR"
+# Resolve version
+TAG=$(_resolve_version)
+echo "[roll] Installing roll $TAG"
 
-# Remove old installation and copy new (idempotent upgrade)
-rm -rf "$DATA_DIR"
-mkdir -p "$DATA_DIR"
-
-# Copy repo contents, excluding git metadata
-(
-  cd "$SOURCE_DIR"
-  tar -cf - --exclude='.git' --exclude='.gitmodules' --exclude='.gitignore' . 2>/dev/null | tar -xf - -C "$DATA_DIR" 2>/dev/null
-)
-
-# Ensure bin/roll is executable
-chmod +x "$DATA_DIR/bin/roll"
+# Download and extract
+_download_and_install "$TAG"
 
 # Symlink into PATH
 mkdir -p "$BIN_DIR"

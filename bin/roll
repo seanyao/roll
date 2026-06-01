@@ -3841,6 +3841,8 @@ _peer_route() {
 _peer_auto_attach() {
   local session="$1"
   [ "$(uname)" = "Darwin" ] || return 0
+  [ -n "${BATS_TEST_NUMBER:-}" ] && return 0
+  [ -n "${ROLL_LOOP_NO_POPUP:-}" ] && return 0
   [ -f "$_LOOP_MUTE_FILE" ] && return 0
   local attach_cmd="${_SHARED_ROOT}/loop/attach-${session}.command"
   # Drop `exec` so the wrapping shell survives `tmux attach` exiting; pause

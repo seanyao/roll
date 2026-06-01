@@ -18,7 +18,9 @@ while [[ -L "$_source" ]]; do
   [[ "$_source" != /* ]] && _source="$_dir/$_source"
 done
 SCRIPT_DIR="$(cd "$(dirname "$_source")" && pwd)"
-ROLL_PKG_DIR="$(dirname "$SCRIPT_DIR")"
+# Respect a pre-set ROLL_PKG_DIR (tests override it to an isolated dir so the
+# curl-update atomic swap can never touch the real install tree).
+ROLL_PKG_DIR="${ROLL_PKG_DIR:-$(dirname "$SCRIPT_DIR")}"
 ROLL_PKG_CONVENTIONS="${ROLL_PKG_DIR}/conventions"
 
 # US-I18N-001: i18n engine (locale resolution + message catalog).
@@ -1877,6 +1879,66 @@ _print_pr_event_hint() {
 # Thin wrapper: upgrade the npm-installed package, then re-sync via setup.
 # Equivalent to: npm install -g @seanyao/roll@latest && roll setup
 # ═══════════════════════════════════════════════════════════════════════════════
+# ─── Helper: resolve latest version tag from GitHub releases ───────────────────
+_resolve_remote_version() {
+  if [[ -n "${ROLL_VERSION:-}" ]]; then
+    echo "$ROLL_VERSION"
+    return 0
+  fi
+
+  local latest
+  latest=$(curl -fsSL \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/seanyao/roll/releases/latest" \
+    | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null) || true
+
+  if [[ -z "$latest" ]]; then
+    err "Failed to resolve latest version from GitHub."
+    echo "You can pin a version with ROLL_VERSION=vX.Y.Z" >&2
+    return 1
+  fi
+
+  echo "$latest"
+}
+
+# ─── Helper: download release tarball and atomically swap into place ───────────
+_download_and_install_curl() {
+  local tag="$1"
+  local url="https://github.com/seanyao/roll/archive/refs/tags/${tag}.tar.gz"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+
+  info "[roll] Downloading roll $tag ..."
+  if ! curl -fsSL "$url" -o "${tmp_dir}/roll.tar.gz"; then
+    rm -rf "$tmp_dir"
+    err "$(msg update.curl_download_failed)"
+    return 1
+  fi
+
+  info "[roll] Extracting ..."
+  mkdir -p "${tmp_dir}/extract"
+  if ! tar -xzf "${tmp_dir}/roll.tar.gz" --strip-components=1 -C "${tmp_dir}/extract"; then
+    rm -rf "$tmp_dir"
+    err "$(msg update.curl_extract_failed)"
+    return 1
+  fi
+
+  # Preserve install-method marker (not in tarball)
+  if [[ -f "$ROLL_PKG_DIR/.install-method" ]]; then
+    cp "$ROLL_PKG_DIR/.install-method" "${tmp_dir}/extract/.install-method" 2>/dev/null || true
+  fi
+
+  # Atomic swap: backup old → move new → remove backup
+  local backup
+  backup="${ROLL_PKG_DIR}.bak.$$"
+  mv "$ROLL_PKG_DIR" "$backup"
+  mv "${tmp_dir}/extract" "$ROLL_PKG_DIR"
+  rm -rf "$backup"
+  rm -rf "$tmp_dir"
+
+  chmod +x "$ROLL_PKG_DIR/bin/roll"
+}
+
 _check_installed_version_or_retry() {
   local expected installed pkg_dir
   expected="$(npm view @seanyao/roll version 2>/dev/null || true)"
@@ -1900,33 +1962,41 @@ _check_installed_version_or_retry() {
 cmd_update() {
   info "$(msg update.current_version "$VERSION")"
 
-  # Detect install method
   local install_method="npm"
-  if [[ -f "${ROLL_PKG_DIR}/.install-method" ]]; then
-    install_method="$(cat "${ROLL_PKG_DIR}/.install-method")"
+  if [[ -f "$ROLL_PKG_DIR/.install-method" ]]; then
+    install_method="$(cat "$ROLL_PKG_DIR/.install-method" 2>/dev/null || echo "npm")"
   fi
 
   if [[ "$install_method" == "curl" ]]; then
     info "$(msg update.upgrading_via_curl)"
     echo ""
 
-    local install_url="https://seanyao.github.io/roll/install"
-    if ! bash -c "$(curl -fsSL "$install_url")"; then
-      err "$(msg update.curl_install_failed)"
+    local tag
+    tag="$(_resolve_remote_version)"
+    if [[ -z "$tag" ]]; then
       exit 1
     fi
-    return 0
+
+    if ! _download_and_install_curl "$tag"; then
+      exit 1
+    fi
+
+    local new_version
+    new_version="$(grep "^VERSION=" "$ROLL_PKG_DIR/bin/roll" 2>/dev/null | sed 's/VERSION="\([^"]*\)"/\1/' || true)"
+    if [[ -n "$new_version" ]]; then
+      info "$(msg update.new_version "$new_version")"
+    fi
+  else
+    info "$(msg update.upgrading_via_npm)"
+    echo ""
+
+    if ! npm install -g @seanyao/roll@latest; then
+      err "$(msg update.npm_install_failed_check_network_proxy)"
+      exit 1
+    fi
+
+    _check_installed_version_or_retry
   fi
-
-  info "$(msg update.upgrading_via_npm)"
-  echo ""
-
-  if ! npm install -g @seanyao/roll@latest; then
-    err "$(msg update.npm_install_failed_check_network_proxy)"
-    exit 1
-  fi
-
-  _check_installed_version_or_retry
 
   echo ""
   info "$(msg update.re_syncing_to_ai_tools)"

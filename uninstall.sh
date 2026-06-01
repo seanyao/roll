@@ -34,6 +34,13 @@ _sedi() { sed -i '' "$@" 2>/dev/null || sed -i "$@"; }
 ROLL_HOME="${ROLL_HOME:-$HOME/.roll}"
 ROLL_CONFIG="$ROLL_HOME/config.yaml"
 BIN_DST="$HOME/.local/bin/roll"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/roll"
+
+# Detect install method
+INSTALL_METHOD="npm"
+if [[ -f "$DATA_DIR/.install-method" ]]; then
+  INSTALL_METHOD="$(cat "$DATA_DIR/.install-method" 2>/dev/null || echo "npm")"
+fi
 
 echo ""
 echo -e "${BOLD}Roll Uninstall${NC}"
@@ -62,6 +69,7 @@ _get_ai_dirs() {
 step "What will be removed"
 
 [[ -d "$ROLL_HOME" ]]  && echo -e "  ${RED}✕${NC} ~/.roll/"
+[[ -d "$DATA_DIR" ]] && [[ "$INSTALL_METHOD" == "curl" ]] && echo -e "  ${RED}✕${NC} ${DATA_DIR/#$HOME/~}/"
 [[ -L "$BIN_DST" || -f "$BIN_DST" ]] && echo -e "  ${RED}✕${NC} ~/.local/bin/roll"
 
 while IFS= read -r ai_dir; do
@@ -138,19 +146,15 @@ else
   info "~/.roll/ not found — skipping"
 fi
 
-# ─── Step 2.5: Remove curl install data dir ───────────────────────────────────
-step "Step 2.5: Remove curl data dir"
-
-CURL_DATA_DIR="${HOME}/.local/share/roll"
-if [[ -d "$CURL_DATA_DIR" ]]; then
-  run "rm -rf '$CURL_DATA_DIR'"
-  ok "Removed: ~/.local/share/roll"
-else
-  info "~/.local/share/roll not found — skipping"
+# ─── Step 3: Remove data dir (curl install) ───────────────────────────────────
+if [[ "$INSTALL_METHOD" == "curl" && -d "$DATA_DIR" ]]; then
+  step "Step 3: Remove data directory"
+  run "rm -rf '$DATA_DIR'"
+  ok "Removed: ${DATA_DIR/#$HOME/~}/"
 fi
 
-# ─── Step 3: Remove binary ────────────────────────────────────────────────────
-step "Step 3: Remove binary"
+# ─── Step 4: Remove binary ────────────────────────────────────────────────────
+step "Remove binary"
 
 if [[ -L "$BIN_DST" || -f "$BIN_DST" ]]; then
   run "rm '$BIN_DST'"

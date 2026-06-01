@@ -98,6 +98,30 @@ teardown() { unit_teardown; }
   [ "${_AGENT_ARGV[1]}" = "p" ]
 }
 
+@test "_agent_argv agy text → agy -p --dangerously-skip-permissions prompt (FIX-153)" {
+  _agent_argv agy text "p"
+  [ "${_AGENT_ARGV[0]}" = "agy" ]
+  [ "${_AGENT_ARGV[1]}" = "-p" ]
+  [ "${_AGENT_ARGV[2]}" = "--dangerously-skip-permissions" ]
+  [ "${_AGENT_ARGV[3]}" = "p" ]
+}
+
+@test "_agent_argv agy plain → agy -p --dangerously-skip-permissions prompt (FIX-153)" {
+  _agent_argv agy plain "p"
+  [ "${_AGENT_ARGV[0]}" = "agy" ]
+  [ "${_AGENT_ARGV[1]}" = "-p" ]
+  [ "${_AGENT_ARGV[2]}" = "--dangerously-skip-permissions" ]
+  [ "${_AGENT_ARGV[3]}" = "p" ]
+}
+
+@test "_agent_argv agy peer → agy -p --dangerously-skip-permissions prompt (FIX-153)" {
+  _agent_argv agy peer "p"
+  [ "${_AGENT_ARGV[0]}" = "agy" ]
+  [ "${_AGENT_ARGV[1]}" = "-p" ]
+  [ "${_AGENT_ARGV[2]}" = "--dangerously-skip-permissions" ]
+  [ "${_AGENT_ARGV[3]}" = "p" ]
+}
+
 @test "_agent_argv unknown agent returns 1" {
   run _agent_argv bogus text "p"
   [ "$status" -eq 1 ]

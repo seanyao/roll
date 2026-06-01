@@ -105,6 +105,10 @@ teardown() { unit_teardown_cd; }
   echo "init" > main.txt
   git add main.txt
   git commit -q -m "init"
+  # FIX-159: normalize the default branch to main — CI runners whose git
+  # defaults to `master` would otherwise fail `push -u origin main` with
+  # "src refspec main does not match any".
+  git branch -M main
   git push -u origin main
 
   # create feature branch (touch different file to avoid content conflict)

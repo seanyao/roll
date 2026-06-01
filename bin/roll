@@ -5575,6 +5575,7 @@ cmd_prices() {
 
 # FIX-113: changelog audit — list PRs merged to main since latest release
 # tag that don't appear in CHANGELOG.md's ## Unreleased section.
+# US-CL-006: changelog generate — deterministic draft from backlog Done stories.
 cmd_changelog() {
   local subcmd="${1:-audit}"
   shift || true
@@ -5582,23 +5583,32 @@ cmd_changelog() {
     audit)
       python3 "${ROLL_PKG_DIR}/lib/changelog_audit.py" "$@"
       ;;
+    generate)
+      python3 "${ROLL_PKG_DIR}/lib/changelog_generate.py" "$@"
+      ;;
     --help|-h|help)
       cat <<EOF
-Usage: roll changelog audit [--since <tag>] [--json]
-                                                                  发版前体检
-Scan PRs merged to main since latest v* tag; flag ones that look user-visible
-(carry US-/FIX-/REFACTOR- id) but are missing from CHANGELOG.md '## Unreleased'.
+Usage: roll changelog <subcommand>
 
-Read-only — never edits CHANGELOG. Use to catch drift before release.
+  audit [--since <tag>] [--json]        发版前体检
+    Scan PRs merged to main since latest v* tag; flag ones that look user-visible
+    (carry US-/FIX-/REFACTOR- id) but are missing from CHANGELOG.md '## Unreleased'.
 
-  roll changelog audit                # check against latest v* tag
+  generate [--write] [--json]           从 backlog 生成草稿
+    Extract ✅ Done stories from .roll/backlog.md, filter internal entries,
+    apply lint, and produce a draft ## Unreleased section.
+
+  roll changelog audit                  # check against latest v* tag
   roll changelog audit --since v2026.520.1
-  roll changelog audit --json         # machine-readable
+  roll changelog audit --json           # machine-readable
+  roll changelog generate               # preview draft to stdout
+  roll changelog generate --write       # append draft to CHANGELOG.md
+  roll changelog generate --json        # machine-readable
 EOF
       ;;
     *)
       err "$(msg changelog.unknown_subcommand ${subcmd})"
-      err "Try: roll changelog audit"
+      err "Try: roll changelog audit | roll changelog generate"
       return 1
       ;;
   esac

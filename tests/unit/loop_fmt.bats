@@ -527,3 +527,69 @@ assert isinstance(pv, str) and len(pv) >= 8, f'prices_version missing: {pv!r}'
   # first 20 chars then ellipsis
   [[ "$clean" == *"u.ts | 一二三四五六七八九十一二三四五六七八九十…"* ]]
 }
+
+# ─── FIX-169: display timestamps use local time, storage stays UTC ────────────
+
+@test "FIX-169: now_hms returns local time (mocked UTC→+8)" {
+  local out
+  out=$(TZ=Asia/Shanghai python3 -c "
+import sys, os, time, importlib.util
+os.environ['TZ'] = 'Asia/Shanghai'
+time.tzset()
+spec = importlib.util.spec_from_file_location('loop_fmt', '$LOOP_FMT')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+sys.modules['loop_fmt'] = mod
+now_hms = mod.now_hms
+from datetime import datetime, timezone
+from unittest.mock import patch
+
+with patch('loop_fmt.datetime') as mock_dt:
+    mock_dt.now.return_value = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+    mock_dt.timezone = timezone
+    result = now_hms()
+    expected = '18:30:00'  # UTC+8
+    if result != expected:
+        print(f'FAIL: got {result}, expected {expected}')
+        sys.exit(1)
+    print('OK')
+")
+  [[ "$out" == "OK" ]]
+}
+
+@test "FIX-169: passthrough timestamp is local time" {
+  local out
+  out=$(TZ=Asia/Shanghai bash -c "
+    export TZ=Asia/Shanghai
+    export ROLL_LOOP_AGENT=pi
+    export LOOP_PROJECT_SLUG=test-slug
+    export LOOP_CYCLE_ID=test-cycle
+    export LOOP_SHARED_ROOT='$TEST_TMP'
+    printf 'line one\n' | python3 '$LOOP_FMT' | sed 's/\x1b\[[0-9;]*m//g' | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1
+  ")
+  [ -n "$out" ]
+  # Verify the timestamp hour matches local hour (Asia/Shanghai is UTC+8)
+  # Allow up to 2-second drift by comparing HH:MM prefix
+  local local_hms
+  local_hms=$(TZ=Asia/Shanghai date +%H:%M:%S)
+  [[ "$out" == "${local_hms%:*}"* ]]
+}
+
+@test "FIX-169: usage event ts stays UTC (no regression)" {
+  local a1='{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":100,"output_tokens":50}}}'
+  local res='{"type":"result","subtype":"success","duration_ms":1000,"total_cost_usd":0.5}'
+  EVDIR="$TEST_TMP"
+  LOOP_PROJECT_SLUG=test-slug LOOP_CYCLE_ID=test-cycle-utc LOOP_SHARED_ROOT="$EVDIR" \
+    bash -c "printf '%s\n%s\n' '$a1' '$res' | python3 '$LOOP_FMT'" >/dev/null
+  local evfile="$EVDIR/loop/events-test-slug.ndjson"
+  [ -f "$evfile" ]
+  local usage_line; usage_line=$(grep '"label": "test-cycle-utc"' "$evfile" | head -1)
+  [ -n "$usage_line" ]
+  # ts must end with Z (UTC)
+  echo "$usage_line" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())
+ts = d['ts']
+assert ts.endswith('Z'), f'expected UTC Z suffix, got {ts!r}'
+"
+}

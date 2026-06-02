@@ -85,7 +85,7 @@ SUPPRESS_TOOLS = {"Read", "Glob", "Grep", "ReadMcpResourceTool", "ListMcpResourc
                   "TaskUpdate", "TaskOutput", "TaskStop"}
 
 def now_hms():
-    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+    return datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S")
 
 def trunc(s, n=60):
     s = str(s).replace("\n", " ").strip()
@@ -561,7 +561,7 @@ def _passthrough_main(agent):
         accumulated.append(line.rstrip())
         # Timestamp prefix so tmux shows activity (even if agent output has
         # no timestamps of its own).
-        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        ts = datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S")
         out = f"{DARK_GRAY}{ts}{RESET}  {line.rstrip()}"
         sys.stdout.write(out + "\n")
         sys.stdout.flush()

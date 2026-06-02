@@ -233,6 +233,31 @@ MD
   [ "$output" = "FIX-A-002" ]
 }
 
+# FIX-161: story description containing another story's id or 📋 Todo must not
+# cause false positives in either eligibility gate or id extraction.
+@test "story_is_eligible: ✅ Done story with 📋 Todo in description → ineligible" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | reverts to 📋 Todo on failure | ✅ Done |
+MD
+  source "$ROLL"
+  run _loop_story_is_eligible "FIX-A-001"
+  [ "$status" -ne 0 ]
+}
+
+@test "pick_next: does not extract story ID from description column" {
+  write_backlog <<'MD'
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | mentions US-A-002 in description manual-only:true | 📋 Todo |
+| [US-A-002](.roll/features/test/t.md#us-a-002) | reverts to 📋 Todo on failure | ✅ Done |
+MD
+  source "$ROLL"
+  run _loop_pick_next_story
+  # With the bug, US-A-002 would be extracted from FIX-A-001's description
+  # and returned as eligible (because US-A-002's own description contains
+  # 📋 Todo, fooling the gate). After the fix, no eligible story remains.
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
 # FIX-146: inner script template includes the re-validation guard
 @test "runner script: FIX-146 inner includes TOCTOU re-validation guard" {
   source "$ROLL"

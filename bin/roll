@@ -13293,6 +13293,33 @@ _worktree_sync_meta() {
   fi
 }
 
+# US-LOOP-068: set up .roll/ inside the product worktree as a roll-meta git worktree.
+# Must be called after the product worktree is created.
+# Returns 0 on success, 1 on failure.
+_loop_roll_meta_worktree_setup() {
+  local wt="$1" branch="$2" project_path="$3"
+  local meta_repo="${project_path}/.roll"
+  [ -d "$meta_repo/.git" ] || { echo "[loop] roll-meta setup: ${meta_repo} is not a git repo"; return 1; }
+  rm -rf "${wt}/.roll"
+  git -C "$meta_repo" worktree add "${wt}/.roll" -b "$branch" "origin/main"
+}
+
+# US-LOOP-068: clean up the roll-meta worktree inside the product worktree.
+_loop_roll_meta_worktree_cleanup() {
+  local wt="$1" branch="$2" project_path="$3"
+  local meta_repo="${project_path}/.roll"
+  [ -d "$meta_repo/.git" ] || return 0
+  git -C "$meta_repo" worktree remove --force "${wt}/.roll" 2>/dev/null || true
+  rm -rf "${wt}/.roll" 2>/dev/null || true
+  git -C "$meta_repo" branch -D "$branch" 2>/dev/null || true
+}
+
+# US-LOOP-068: publish a PR from the roll-meta worktree.
+_loop_roll_meta_publish() {
+  local wt="$1" branch="$2" title="$3"
+  (cd "${wt}/.roll" && _loop_publish_pr "$branch" "$title")
+}
+
 # _worktree_merge_back <branch>
 #   Caller must be in the main worktree (cwd = main). Steps:
 #     1. git pull --ff-only origin main   (sync local main with remote)

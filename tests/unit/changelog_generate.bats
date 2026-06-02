@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# US-CL-006: roll changelog generate — deterministic draft from backlog Done stories.
+# US-CL-006+007: roll changelog generate — deterministic draft from backlog Done stories + merged PR gap detection.
 # bats tier: fast
 
 load helpers
@@ -238,4 +238,141 @@ EOF
   run cmd_changelog
   [ "$status" -eq 0 ]
   [[ "$output" == *"Unreleased"* ]]
+}
+
+# ─── US-CL-007: merged PR gap detection ──────────────────────────────────────
+
+_setup_git_repo() {
+  git init
+  git config user.email "test@roll.local"
+  git config user.name "Test"
+  echo "init" > file.txt
+  git add file.txt
+  git commit -m "init"
+  git tag v1.0.0
+}
+
+_gh_mock_dir() {
+  local d="${TEST_TMP}/fake_gh"
+  mkdir -p "$d"
+  cat > "$d/gh" <<'SCRIPT'
+#!/usr/bin/env bash
+# Mock gh
+if [[ "$1" == "--version" ]]; then
+  echo "gh version 2.0.0"
+  exit 0
+fi
+if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" && "$5" == "title" ]]; then
+  num="$3"
+  echo "{\"title\": \"PR title $num\"}"
+  exit 0
+fi
+exit 1
+SCRIPT
+  chmod +x "$d/gh"
+  echo "$d"
+}
+
+@test "changelog_generate: shows uncarded merged PRs not in backlog Done" {
+  mkdir -p .roll
+  _setup_git_repo
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [US-FOO-001](x.md) | 新增一键安装 | ✅ Done |
+EOF
+  # Simulate a merged PR after the tag
+  echo "change" >> file.txt
+  git add file.txt
+  git commit -m "Fix something (#123)"
+
+  fake_gh="$(_gh_mock_dir)"
+  PATH="$fake_gh:$PATH" run python3 "$GEN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"⚠️ 待确认"* ]] || [[ "$output" == *"待确认(merged 但未入 backlog)"* ]]
+  [[ "$output" == *"#123"* ]]
+}
+
+@test "changelog_generate: skips merged PR when story is Done in backlog" {
+  mkdir -p .roll
+  _setup_git_repo
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [FIX-101](x.md) | 修复崩溃问题 | ✅ Done |
+EOF
+  echo "change" >> file.txt
+  git add file.txt
+  git commit -m "Fix: FIX-101 repair crash (#123)"
+
+  fake_gh="$(_gh_mock_dir)"
+  PATH="$fake_gh:$PATH" run python3 "$GEN"
+  [ "$status" -eq 0 ]
+  ! [[ "$output" == *"#123"* ]]
+}
+
+@test "changelog_generate: skips merged PR already in CHANGELOG" {
+  mkdir -p .roll
+  _setup_git_repo
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [US-FOO-001](x.md) | 新增一键安装 | ✅ Done |
+EOF
+  cat > CHANGELOG.md <<'EOF'
+# Changelog
+## Unreleased
+- PR title #123
+EOF
+  echo "change" >> file.txt
+  git add file.txt
+  git commit -m "Fix something (#123)"
+
+  fake_gh="$(_gh_mock_dir)"
+  PATH="$fake_gh:$PATH" run python3 "$GEN"
+  [ "$status" -eq 0 ]
+  ! [[ "$output" == *"#123"* ]]
+}
+
+@test "changelog_generate: offline mode skips uncarded block gracefully" {
+  mkdir -p .roll
+  _setup_git_repo
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [US-FOO-001](x.md) | 新增一键安装 | ✅ Done |
+EOF
+  echo "change" >> file.txt
+  git add file.txt
+  git commit -m "Fix something (#123)"
+
+  # Ensure gh is NOT available by creating a fake gh that always fails
+  fake_gh="${TEST_TMP}/fake_gh_offline"
+  mkdir -p "$fake_gh"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 127' > "$fake_gh/gh"
+  chmod +x "$fake_gh/gh"
+  PATH="$fake_gh:$PATH" run python3 "$GEN"
+  [ "$status" -eq 0 ]
+  # Should still produce the backlog-driven part
+  [[ "$output" == *"新增一键安装"* ]]
+  # Should NOT contain the warning block
+  ! [[ "$output" == *"待确认"* ]]
+}
+
+@test "changelog_generate --json: includes uncarded_merged array" {
+  mkdir -p .roll
+  _setup_git_repo
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [US-FOO-001](x.md) | 新增一键安装 | ✅ Done |
+EOF
+  echo "change" >> file.txt
+  git add file.txt
+  git commit -m "Fix something (#123)"
+
+  fake_gh="$(_gh_mock_dir)"
+  PATH="$fake_gh:$PATH" run python3 "$GEN" --json
+  [ "$status" -eq 0 ]
+  echo "$output" | python3 -c "import sys, json; d=json.load(sys.stdin); assert len(d.get('uncarded_merged', [])) == 1; assert d['uncarded_merged'][0]['pr'] == '123'"
 }

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""US-CL-006: changelog generate — deterministic draft generator.
+"""US-CL-006+007: changelog generate — deterministic draft generator.
 
 Extracts ✅ Done stories from .roll/backlog.md, filters internal entries,
 applies mechanical lint, and produces a draft ## Unreleased section.
+Also detects merged PRs since the last release tag that lack a corresponding
+Done story or CHANGELOG entry (gap detection).
 
 Usage:
   python3 lib/changelog_generate.py           # output draft to stdout
@@ -13,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,8 +47,8 @@ LINT_FILE_SUFFIX = re.compile(r"\.(md|sh|yml|ts|bats)([^A-Za-z0-9]|$)")
 LINT_INTERNAL_WORD = re.compile(r"(Phase|Step)\s+[0-9]+|Helper|Schema|Fixture|Refactor")
 LINT_PATH_FRAG = re.compile(r"(^|[^A-Za-z0-9_])(\.roll|docs|bin|tests|scripts)/")
 
-
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
 
 def _read_done_stories(backlog_path: Path) -> list[tuple[str, str, str]]:
     """Extract ✅ Done rows from backlog table.
@@ -190,7 +193,125 @@ def _write_to_changelog(draft: str, changelog_path: Path) -> None:
     changelog_path.write_text(text, encoding="utf-8")
 
 
+# ─── US-CL-007: merged PR gap detection ──────────────────────────────────────
+
+
+def _latest_release_tag() -> str | None:
+    """Find the latest v* tag using git."""
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0", "--match", "v*"],
+            capture_output=True, text=True, check=True
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def _gh_available() -> bool:
+    """Check whether the gh CLI is installed and on PATH."""
+    try:
+        result = subprocess.run(
+            ["gh", "--version"],
+            capture_output=True, text=True, timeout=5
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _merged_prs_since_tag(tag: str) -> list[tuple[str, str, str]]:
+    """Return list of (pr_number, title, commit_msg) for PRs merged since tag.
+
+    PR numbers are extracted from commit messages (e.g. ``(#123)``).
+    Titles are enriched via ``gh pr view`` when available.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", f"{tag}..HEAD", "--pretty=format:%H %s"],
+            capture_output=True, text=True, check=True
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+
+    prs: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for line in result.stdout.strip().splitlines():
+        if not line:
+            continue
+        parts = line.split(" ", 1)
+        if len(parts) < 2:
+            continue
+        _commit_hash, subject = parts
+        m = re.search(r"\(#(\d+)\)", subject)
+        if not m:
+            continue
+        pr_num = m.group(1)
+        if pr_num in seen:
+            continue
+        seen.add(pr_num)
+
+        title = subject
+        if _gh_available():
+            try:
+                gh_result = subprocess.run(
+                    ["gh", "pr", "view", pr_num, "--json", "title"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if gh_result.returncode == 0:
+                    gh_data = json.loads(gh_result.stdout)
+                    title = gh_data.get("title", subject)
+            except (json.JSONDecodeError, subprocess.TimeoutExpired):
+                pass
+
+        prs.append((pr_num, title, subject))
+    return prs
+
+
+def _pr_in_done_rows(pr_number: str, backlog_path: Path) -> bool:
+    """Check whether the PR number appears in any ✅ Done row of the backlog."""
+    text = backlog_path.read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if "✅ Done" in line and f"#{pr_number}" in line:
+            return True
+    return False
+
+
+def _pr_is_covered(
+    pr_number: str,
+    pr_title: str,
+    commit_msg: str,
+    done_story_ids: set[str],
+    changelog_text: str,
+) -> bool:
+    """Check if a merged PR is already represented in backlog or changelog."""
+    # By PR number in CHANGELOG
+    if f"#{pr_number}" in changelog_text:
+        return True
+    # By story ID appearing in PR title / commit message
+    for story_id in done_story_ids:
+        if story_id and (story_id in pr_title or story_id in commit_msg):
+            return True
+    return False
+
+
+def _build_uncarded_block(uncarded: list[tuple[str, str]]) -> str:
+    lines = [
+        "",
+        "### ⚠️ 待确认(merged 但未入 backlog)",
+        "",
+        "> 以下 PR 已合入主干，但在 backlog 中没有对应的 ✅ Done story，也未出现在 CHANGELOG 中。",
+        "> 请确认是否需要在 Unreleased 中补充条目。",
+        "",
+    ]
+    for pr_num, title in uncarded:
+        lines.append(f"- PR #{pr_num}: {title}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(
@@ -223,32 +344,51 @@ def main() -> int:
         cat = _detect_category(cleaned)
         filtered.append((story_id, cleaned, source, cat))
 
+    # ── US-CL-007: gap detection ───────────────────────────────────────────
+    uncarded: list[tuple[str, str]] = []
+    tag = _latest_release_tag()
+    if tag and _gh_available():
+        merged_prs = _merged_prs_since_tag(tag)
+        done_story_ids = {sid for sid, _desc, _src in rows}
+        changelog_text = changelog.read_text(encoding="utf-8") if changelog.exists() else ""
+        for pr_num, pr_title, commit_msg in merged_prs:
+            if _pr_in_done_rows(pr_num, backlog):
+                continue
+            if _pr_is_covered(pr_num, pr_title, commit_msg, done_story_ids, changelog_text):
+                continue
+            uncarded.append((pr_num, pr_title))
+
     if args.json:
-        json.dump(
-            {
-                "stories_found": len(rows),
-                "stories_drafted": len(filtered),
-                "draft": [
-                    {"id": sid, "desc": d, "category": c, "source": s}
-                    for sid, d, s, c in filtered
-                ],
-            },
-            sys.stdout,
-            indent=2,
-            ensure_ascii=False,
-        )
+        payload = {
+            "stories_found": len(rows),
+            "stories_drafted": len(filtered),
+            "draft": [
+                {"id": sid, "desc": d, "category": c, "source": s}
+                for sid, d, s, c in filtered
+            ],
+            "uncarded_merged": [
+                {"pr": num, "title": title}
+                for num, title in uncarded
+            ],
+        }
+        json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
         print()
         return 0
 
-    if not filtered:
+    if not filtered and not uncarded:
         print("# No new ✅ Done stories found for CHANGELOG.")
         return 0
 
-    groups: dict[str, list[tuple[str, str, str]]] = {}
-    for story_id, desc, source, cat in filtered:
-        groups.setdefault(cat, []).append((story_id, desc, source))
+    if filtered:
+        groups: dict[str, list[tuple[str, str, str]]] = {}
+        for story_id, desc, source, cat in filtered:
+            groups.setdefault(cat, []).append((story_id, desc, source))
+        draft = _build_draft(groups)
+    else:
+        draft = ""
 
-    draft = _build_draft(groups)
+    if uncarded:
+        draft += _build_uncarded_block(uncarded)
 
     if args.write:
         _write_to_changelog(draft, changelog)

@@ -69,3 +69,31 @@ NPMEOF
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "FIX-166: _invalidate_update_cache removes the stale update-check file" {
+  ROLL_HOME="$TEST_TMP/rh"; mkdir -p "$ROLL_HOME"
+  printf '111 2.602.1\n' > "$ROLL_HOME/.update-check"
+  [ -f "$ROLL_HOME/.update-check" ]
+  run _invalidate_update_cache
+  [ "$status" -eq 0 ]
+  [ ! -f "$ROLL_HOME/.update-check" ]
+}
+
+@test "FIX-166: after cache invalidation _notify_update is silent (no reverse-nag)" {
+  # Reproduces the bug: cache holds the OLD latest (2.602.1) but we now run 2.602.2.
+  # Before invalidation _notify_update nags; after it the file is gone → silent.
+  ROLL_HOME="$TEST_TMP/rh"; mkdir -p "$ROLL_HOME"
+  printf '111 2.602.1\n' > "$ROLL_HOME/.update-check"
+  VERSION="2.602.2" run _notify_update
+  [[ "$output" == *"2.602.1"* ]]          # confirms the stale-cache reverse-nag exists
+  _invalidate_update_cache
+  VERSION="2.602.2" run _notify_update
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]                         # silent after invalidation
+}
+
+@test "FIX-166: _invalidate_update_cache is a no-op when cache already absent" {
+  ROLL_HOME="$TEST_TMP/rh-empty"; mkdir -p "$ROLL_HOME"
+  run _invalidate_update_cache
+  [ "$status" -eq 0 ]
+}

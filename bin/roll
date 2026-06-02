@@ -12125,9 +12125,20 @@ _ci_record_timing() {
   local dir; dir=$(_ci_state_dir)
   local file="${dir}/ci-timing.jsonl"
 
-  # Idempotency: skip if this run_id is already recorded.
+  # Idempotency: skip if this run_id is already recorded with a non-empty
+  # conclusion. If the existing record has an empty conclusion and the new
+  # data has a conclusion, update in-place so in-progress runs are completed.
   if [ -f "$file" ] && grep -q "\"run_id\":${run_id}," "$file" 2>/dev/null; then
-    return 0
+    local existing_conclusion new_conclusion
+    existing_conclusion=$(grep "\"run_id\":${run_id}," "$file" 2>/dev/null | jq -r '.conclusion // ""' 2>/dev/null)
+    new_conclusion=$(echo "$json" | jq -r '.conclusion // ""' 2>/dev/null)
+    if [ -n "$existing_conclusion" ] || [ -z "$new_conclusion" ]; then
+      return 0
+    fi
+    # Remove the stale line so the new record can be appended below.
+    local tmpfile="${file}.tmp.$$"
+    grep -v "\"run_id\":${run_id}," "$file" > "$tmpfile" 2>/dev/null || true
+    mv "$tmpfile" "$file"
   fi
 
   workflow=$(echo "$json" | jq -r '.workflowName // .name // ""' 2>/dev/null)

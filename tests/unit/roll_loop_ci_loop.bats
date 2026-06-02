@@ -47,6 +47,17 @@ _state="$BATS_TEST_DIRNAME"  # placeholder; real paths resolved at runtime
   [ "$output" -eq 1 ]
 }
 
+@test "_ci_record_timing: empty conclusion is updated when run completes" {
+  _ci_record_timing '{"databaseId":104,"workflowName":"unit","conclusion":"","status":"in_progress","createdAt":"2026-05-30T10:00:00Z","updatedAt":"2026-05-30T10:01:00Z"}'
+  _ci_record_timing '{"databaseId":104,"workflowName":"unit","conclusion":"failure","status":"completed","createdAt":"2026-05-30T10:00:00Z","updatedAt":"2026-05-30T10:02:00Z"}'
+  run wc -l < .roll/state/ci-timing.jsonl
+  [ "$output" -eq 1 ]
+  run cat .roll/state/ci-timing.jsonl
+  [[ "$output" == *'"conclusion":"failure"'* ]]
+  [[ "$output" == *'"status":"completed"'* ]]
+  [[ "$output" == *'"duration_sec":120'* ]]
+}
+
 @test "_ci_record_timing: empty json is a no-op" {
   _ci_record_timing ""
   [ ! -f .roll/state/ci-timing.jsonl ]

@@ -171,11 +171,21 @@ print(mp.compute_list_cost("x", input_tokens=1_000_000, output_tokens=500_000, p
   [[ "$output" =~ k[3-9] ]]
 }
 
-@test "FIX-116: currency_for is USD for claude/kimi, CNY for deepseek (native)" {
-  # deepseek bills in CNY — we store native currency, never converting.
+@test "FIX-162: currency_for is USD for claude, CNY for deepseek AND kimi (native)" {
+  # deepseek and kimi (Moonshot) both bill in CNY — we store native currency,
+  # never converting. FIX-162: the kimi snapshot was mislabeled USD (FIX-116
+  # impl diverged from its own doc, which said Kimi → CNY); corrected here.
   run run_py 'print(mp.currency_for("claude-sonnet-4-6"), mp.currency_for("deepseek-chat"), mp.currency_for("kimi-k2.5"))'
   [ "$status" -eq 0 ]
-  [ "$output" = "USD CNY USD" ]
+  [ "$output" = "USD CNY CNY" ]
+}
+
+@test "FIX-162: kimi cost rows render in CNY across name variants (kimi-k2, -0905, kimi-code)" {
+  # The dashboard saw kimi cost as \$ because currency_for fell back to USD.
+  # All kimi name variants must resolve to CNY now.
+  run run_py 'print(mp.currency_for("kimi-k2"), mp.currency_for("kimi-k2-0905"), mp.currency_for("kimi-code/kimi-for-coding"))'
+  [ "$status" -eq 0 ]
+  [ "$output" = "CNY CNY CNY" ]
 }
 
 @test "FIX-116: compute_list_cost works for deepseek-chat model" {

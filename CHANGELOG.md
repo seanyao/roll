@@ -4,6 +4,7 @@
 
 ### 新功能
 
+- `roll prices refresh` 支持 deepseek — 自动抓取中文官方定价页、与快照 diff、变了才落盘 `[loop]`
 - **`roll changelog generate` 不再漏掉没建卡的 merged PR(US-CL-007)** — 自上次发版 tag 以来已合入主干、但 backlog 里没有对应 ✅ Done story 的 PR,会在生成结果末尾以「待确认」区块提示出来,发版前不用手工对账 `[loop]`
 
 ## v2.602.5

@@ -153,3 +153,42 @@ BL
   run _loop_is_manual_only "US-AUTO-036" "$_backlog"
   [ "$status" -eq 1 ]
 }
+
+@test "FIX-167: depends-on a lettered sub-story (062c) resolves to the sub-story, not its base parent" {
+  # The a/b/c split pattern: parent on Hold, sub-story Done, dependent on the sub-story.
+  # The old regex [A-Z0-9,-] dropped the lowercase suffix → checked US-SPLIT-062 (Hold)
+  # instead of US-SPLIT-062c (Done), wrongly blocking the dependent.
+  local bl="${TEST_TMP}/split-backlog.md"
+  cat > "$bl" << 'BL'
+| [US-SPLIT-062](.roll/features/x.md#us-split-062) | parent | 🚫 Hold (split into a..c) |
+| [US-SPLIT-062c](.roll/features/x.md#us-split-062c) | sub-story c | ✅ Done |
+| [US-SPLIT-070](.roll/features/x.md#us-split-070) | dependent `depends-on:US-SPLIT-062c` | 📋 Todo |
+BL
+  run _loop_check_depends_on "US-SPLIT-070" "$bl"
+  [ "$status" -eq 0 ]      # dep US-SPLIT-062c is ✅ Done → satisfied
+  [ -z "$output" ]
+}
+
+@test "FIX-167: lettered sub-story dep that is NOT done still blocks (and is reported with full id)" {
+  local bl="${TEST_TMP}/split-backlog2.md"
+  cat > "$bl" << 'BL'
+| [US-SPLIT-062](.roll/features/x.md#us-split-062) | parent | ✅ Done |
+| [US-SPLIT-062c](.roll/features/x.md#us-split-062c) | sub-story c | 📋 Todo |
+| [US-SPLIT-070](.roll/features/x.md#us-split-070) | dependent `depends-on:US-SPLIT-062c` | 📋 Todo |
+BL
+  run _loop_check_depends_on "US-SPLIT-070" "$bl"
+  [ "$status" -eq 1 ]                       # 062c is Todo → blocked even though base 062 is Done
+  [[ "$output" == *"US-SPLIT-062c"* ]]      # full id reported, not truncated to US-SPLIT-062
+}
+
+@test "FIX-167: deps after a lettered one are not dropped (multi-dep with suffix)" {
+  local bl="${TEST_TMP}/split-backlog3.md"
+  cat > "$bl" << 'BL'
+| [US-SPLIT-062c](.roll/features/x.md#us-split-062c) | done sub | ✅ Done |
+| [US-AGENT-040](.roll/features/x.md#us-agent-040) | other dep | 📋 Todo |
+| [US-SPLIT-070](.roll/features/x.md#us-split-070) | dependent `depends-on:US-SPLIT-062c,US-AGENT-040` | 📋 Todo |
+BL
+  run _loop_check_depends_on "US-SPLIT-070" "$bl"
+  [ "$status" -eq 1 ]                       # US-AGENT-040 (after the lettered dep) is Todo → must still block
+  [[ "$output" == *"US-AGENT-040"* ]]       # the 2nd dep was not dropped by the parser
+}

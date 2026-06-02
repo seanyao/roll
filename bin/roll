@@ -11511,7 +11511,12 @@ _loop_check_depends_on() {
   [ -n "$row" ] || return 1
 
   local deps
-  deps=$(echo "$row" | grep -oE 'depends-on:[A-Z][A-Z0-9,-]+' | head -1 | sed 's/depends-on://' || true)
+  # FIX-167: include lowercase letters so lettered sub-story ids (the a/b/c
+  # split pattern, e.g. US-LOOP-062c) aren't truncated to their numeric base
+  # (US-LOOP-062). The old class [A-Z0-9,-] stopped at the lowercase suffix,
+  # dropping the suffix AND every dep after it — so a story depending on a Done
+  # sub-story was matched against its (often Hold) parent and wrongly blocked.
+  deps=$(echo "$row" | grep -oE 'depends-on:[A-Za-z][A-Za-z0-9,-]+' | head -1 | sed 's/depends-on://' || true)
   [ -n "$deps" ] || return 0
 
   local unsatisfied=""

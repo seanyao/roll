@@ -76,3 +76,23 @@ RELEASE_SH="${BATS_TEST_DIRNAME}/../../.roll/ops/release.sh"
   run bash -c "source '${RELEASE_SH}'; _release_should_move_latest '2.602.1' ''"
   [ "$status" -ne 0 ]
 }
+
+@test "FIX-165: _release_max_published picks semver-max from npm versions JSON" {
+  # year-scheme version stays semver-highest even after newer 2.x publishes
+  run bash -c "source '${RELEASE_SH}'; _release_max_published '[\"2026.601.4\",\"2.602.1\",\"2.602.2\"]'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026.601.4" ]
+  # pure 2.x set → highest 2.x
+  run bash -c "source '${RELEASE_SH}'; _release_max_published '[\"2.101.1\",\"2.602.2\",\"2.603.1\"]'"
+  [ "$output" = "2.603.1" ]
+  # empty / no version tokens → empty
+  run bash -c "source '${RELEASE_SH}'; _release_max_published '[]'"
+  [ -z "$output" ]
+}
+
+@test "FIX-165: regression — 2.602.2 vs published [2026.601.4,2.602.1] moves latest explicitly" {
+  # the exact bug: baseline must be max-published (2026.601.4), not dist-tags.latest (2.602.1).
+  # 2.602.2 > 2.602.1 (latest) but < 2026.601.4 (max) → must move explicitly.
+  run bash -c "source '${RELEASE_SH}'; _max=\$(_release_max_published '[\"2026.601.4\",\"2.602.1\"]'); _release_should_move_latest '2.602.2' \"\$_max\""
+  [ "$status" -eq 0 ]
+}

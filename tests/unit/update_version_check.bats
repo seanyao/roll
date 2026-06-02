@@ -51,3 +51,21 @@ NPMEOF
   run _notify_update
   [ "$status" -eq 0 ]
 }
+
+@test "FIX-163: _notify_update nags when GitHub latest differs, even if semver-lower (Jan-1 MMDD wrap)" {
+  ROLL_HOME="$TEST_TMP/rh"; mkdir -p "$ROLL_HOME"
+  # GitHub releases/latest (chronological) = 2.101.1 (new year), running = 2.1231.5 (last year).
+  # sort -V would rank 2.1231.5 higher and (old behavior) suppress the update — must NOT.
+  printf '111 2.101.1\n' > "$ROLL_HOME/.update-check"
+  VERSION="2.1231.5" run _notify_update
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2.101.1"* ]]
+}
+
+@test "FIX-163: _notify_update silent when GitHub latest matches running version" {
+  ROLL_HOME="$TEST_TMP/rh"; mkdir -p "$ROLL_HOME"
+  printf '111 2.602.1\n' > "$ROLL_HOME/.update-check"
+  VERSION="2.602.1" run _notify_update
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

@@ -28,15 +28,25 @@ _release_compute_version_prefix() {
 # FIX-163: decide whether <new> sorts BELOW the current npm <latest>. When it
 # does, npm refuses to *implicitly* move the `latest` dist-tag "down", so the
 # publish must move it explicitly (publish under a temp tag, then `dist-tag
-# add ... latest`). This happens (a) one-time when migrating off the year-based
-# scheme (2026.601.4 → 2.602.1, major 2026 > 2) and (b) every Jan 1 when MMDD
-# wraps (…2.1231.N → 2.101.1). Returns 0 (move explicitly) when new < latest;
-# 1 otherwise (empty/equal latest, or new ≥ latest → plain implicit publish).
+# add ... latest`). FIX-165: npm compares against the SEMVER-MAX of ALL published
+# versions, not the current `latest` dist-tag — so the baseline `_cur` must be the
+# highest published version. While the year-scheme 2026.601.4 stays published it
+# is semver-highest, so EVERY 2.x release (not just the migration) takes this path;
+# likewise every Jan 1 when MMDD wraps (…2.1231.N → 2.101.1). Returns 0 (move
+# explicitly) when new sorts below the highest published version; 1 otherwise.
 _release_should_move_latest() {
   local _new="$1" _cur="$2"
   [ -n "$_new" ] && [ -n "$_cur" ] && [ "$_cur" != "$_new" ] || return 1
   local _top; _top=$(printf '%s\n%s\n' "$_new" "$_cur" | sort -V | tail -1)
   [ "$_top" = "$_cur" ]
+}
+
+# FIX-165: echo the semver-max of all published versions, given npm's
+# `versions --json` output (a JSON array). This is the baseline npm's
+# implicit-latest guard actually compares against — NOT dist-tags.latest.
+# Echoes "" when the input has no version-like tokens.
+_release_max_published() {
+  printf '%s' "$1" | tr -d '[]" ' | tr ',' '\n' | grep -E '^[0-9]' | sort -V | tail -1
 }
 
 # Guard: when sourced, only load functions; do not run the release flow.
@@ -217,13 +227,16 @@ if _npm view "@seanyao/roll@${VERSION}" version 2>/dev/null | grep -qx "${VERSIO
   echo "v${VERSION} already published to npm — skipping."
 else
   echo "Publishing to npm..."
-  _cur_latest=$(_npm view "@seanyao/roll" dist-tags.latest 2>/dev/null || echo "")
-  if _release_should_move_latest "${VERSION}" "${_cur_latest}"; then
-    # FIX-163: new version sorts below current latest (year-scheme transition or
-    # Jan-1 MMDD wrap). npm blocks implicit latest-downgrade — publish under a
-    # temp tag, then move `latest` explicitly. Without this the publish aborts
-    # with "Cannot implicitly apply the latest tag".
-    echo "  ${VERSION} sorts below current latest ${_cur_latest} — publishing then moving latest explicitly."
+  # FIX-165: compare against the highest PUBLISHED version (npm's implicit-latest
+  # guard does), not dist-tags.latest. dist-tags.latest was 2.602.1 while the
+  # semver-max stayed 2026.601.4, so the old comparison wrongly took the plain
+  # path and npm rejected with "Cannot implicitly apply the latest tag".
+  _max_pub=$(_release_max_published "$(_npm view "@seanyao/roll" versions --json 2>/dev/null)")
+  if _release_should_move_latest "${VERSION}" "${_max_pub}"; then
+    # New version sorts below the highest published version (year-scheme
+    # transition or Jan-1 MMDD wrap). npm blocks implicit latest-downgrade —
+    # publish under a temp tag, then move `latest` explicitly.
+    echo "  ${VERSION} sorts below highest published ${_max_pub} — publishing then moving latest explicitly."
     _npm publish --tag transition --access public
     _npm dist-tag add "@seanyao/roll@${VERSION}" latest
     _npm dist-tag rm "@seanyao/roll" transition 2>/dev/null || true

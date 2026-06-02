@@ -139,7 +139,11 @@ EOF
 @test "snapshot: PRICES is loaded from latest snapshot file" {
   run run_py 'v,e,u = mp.snapshot_meta(); print(v, e, u)'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"2026-05-"* ]]
+  # Assert the meta version *looks like* a dated snapshot (YYYY-MM-DD) rather than
+  # pinning a specific month — the latest snapshot rolls forward as vendors are
+  # re-priced (e.g. the kimi correction dated 2026-06-02). Pinning "2026-05-"
+  # was the "test data, not logic" anti-pattern US-QA-008 set out to kill.
+  [[ "$output" =~ [0-9]{4}-[0-9]{2}-[0-9]{2} ]]
   [[ "$output" == *"http"* ]]
 }
 

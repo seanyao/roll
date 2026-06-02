@@ -8956,6 +8956,7 @@ if _worktree_fetch_origin main \\
       echo "[loop] story \${ROLL_LOOP_ROUTED_STORY} is roll-meta target"
     fi
   fi
+  export ROLL_LOOP_ROLL_META_TARGET="\${_ROLL_META_TARGET}"
   _phase_end worktree_setup ok
 else
   # P3 fix: skip the cycle entirely when worktree isolation fails.

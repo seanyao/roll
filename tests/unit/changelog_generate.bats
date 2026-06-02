@@ -346,8 +346,12 @@ EOF
   git add file.txt
   git commit -m "Fix something (#123)"
 
-  # Ensure gh is NOT available by using a minimal PATH
-  PATH="/usr/bin:/bin" run python3 "$GEN"
+  # Ensure gh is NOT available by creating a fake gh that always fails
+  fake_gh="${TEST_TMP}/fake_gh_offline"
+  mkdir -p "$fake_gh"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 127' > "$fake_gh/gh"
+  chmod +x "$fake_gh/gh"
+  PATH="$fake_gh:$PATH" run python3 "$GEN"
   [ "$status" -eq 0 ]
   # Should still produce the backlog-driven part
   [[ "$output" == *"新增一键安装"* ]]

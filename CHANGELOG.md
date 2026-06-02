@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 新功能
+
+- **`roll changelog generate` 不再漏掉没建卡的 merged PR(US-CL-007)** — 自上次发版 tag 以来已合入主干、但 backlog 里没有对应 ✅ Done story 的 PR,会在生成结果末尾以「待确认」区块提示出来,发版前不用手工对账 `[loop]`
+
 ## v2.602.5
 
 ### 稳定性

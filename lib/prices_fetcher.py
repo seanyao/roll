@@ -171,9 +171,81 @@ def _parse_deepseek_html(html: str) -> Dict[str, Dict[str, float]]:
     return prices
 
 
-def _parse_kimi_html(_html: str) -> Dict[str, Dict[str, float]]:
-    """Placeholder — Kimi parser ships in US-VIEW-025."""
-    raise ParseError("kimi parser not yet implemented — follow US-VIEW-025")
+def _try_parse_kimi_pricing(html: str) -> Optional[Dict[str, Dict[str, float]]]:
+    """Try to parse Kimi pricing from HTML/MDX content.
+
+    Handles the JSX ``DocTable`` format used by Kimi's ``.md`` endpoints:
+    rows contain [model, unit, cache-hit, cache-miss, output, context].
+    """
+    prices: Dict[str, Dict[str, float]] = {}
+    price_re = re.compile(r"¥\s*([0-9]+(?:\.[0-9]+)?)")
+    row_re = re.compile(
+        r'\[\s*"([^"]+)"\s*,\s*"[^"]+"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"[^"]+"\s*\]'
+    )
+
+    for m in row_re.finditer(html):
+        model, cache_hit_str, cache_miss_str, output_str = m.groups()
+        cache_hit_m = price_re.search(cache_hit_str)
+        cache_miss_m = price_re.search(cache_miss_str)
+        output_m = price_re.search(output_str)
+        if not all((cache_hit_m, cache_miss_m, output_m)):
+            continue
+        prices[model] = {
+            "in": float(cache_miss_m.group(1)),
+            "out": float(output_m.group(1)),
+            "cache_create": float(cache_miss_m.group(1)),
+            "cache_read": float(cache_hit_m.group(1)),
+        }
+
+    return prices if prices else None
+
+
+def _parse_kimi_html(html: str) -> Dict[str, Dict[str, float]]:
+    """Parse Kimi pricing HTML into a {model: rates} map.
+
+    Kimi pricing is split across sub-pages (``pricing/chat-k25``,
+    ``pricing/chat-k26``).  The parser first tries to extract prices from the
+    provided HTML; if none found, it fetches the ``.md`` sub-pages and parses
+    those.
+    """
+    prices = _try_parse_kimi_pricing(html)
+    if prices:
+        if "kimi-k2.6" in prices:
+            prices["kimi-for-coding"] = dict(prices["kimi-k2.6"])
+        if "kimi-k2" not in prices:
+            prices["kimi-k2"] = {
+                "in": 1.00,
+                "out": 4.00,
+                "cache_create": 1.00,
+                "cache_read": 0.25,
+            }
+        return prices
+
+    sub_urls = [
+        "https://platform.kimi.com/docs/pricing/chat-k25.md",
+        "https://platform.kimi.com/docs/pricing/chat-k26.md",
+    ]
+    combined = html
+    for url in sub_urls:
+        try:
+            combined += "\n" + fetch_pricing_html(url)
+        except FetchError as exc:
+            raise ParseError(f"could not fetch kimi sub-page {url}: {exc}")
+
+    prices = _try_parse_kimi_pricing(combined)
+    if not prices:
+        raise ParseError("no price rows found in kimi pages")
+
+    if "kimi-k2.6" in prices:
+        prices["kimi-for-coding"] = dict(prices["kimi-k2.6"])
+    if "kimi-k2" not in prices:
+        prices["kimi-k2"] = {
+            "in": 1.00,
+            "out": 4.00,
+            "cache_create": 1.00,
+            "cache_read": 0.25,
+        }
+    return prices
 
 
 VENDOR_REGISTRY: Dict[str, VendorConfig] = {

@@ -607,9 +607,15 @@ immediately writes an ALERT and stops. Instead it tries to fix CI autonomously.
    - If still red after `ROLL_LOOP_HEAL_MAX` attempts (default 2): writes ALERT and stops.
 4. If CI is red AND heal is exhausted or `ROLL_LOOP_NO_HEAL=1`: writes ALERT (existing behavior).
 
-**Loop's own PRs (`loop/*`) that turn red after merging** are also detected
-(US-LOOP-049): classified as `loop_self_ci_red` and routed to `_loop_hot_fix_pr`
-for a branch-level hot-fix, instead of being silently skipped.
+**Loop's own PRs (`loop/*`) that turn red after a cycle exits** are detected
+(US-LOOP-049) and **background-healed** (US-LOOP-062a): classified as
+`loop_self_ci_red`, the PR Loop routes them to `_loop_pr_heal_self`, which checks
+out the PR branch and hands the failing-CI context to the project's agent
+(`_project_agent`) — bounded by a per-PR heal budget (`ROLL_LOOP_HEAL_MAX`,
+default 2) and a per-PR lock that prevents duplicate concurrent heals. The heal
+runs in the background so the PR tick continues. When heal is disabled
+(`ROLL_LOOP_NO_HEAL=1`) or the budget is exhausted, it writes a deduped
+`[TYPE:loop-pr-ci-red]` ALERT instead of silently skipping.
 
 **Environment variables:**
 
@@ -654,6 +660,12 @@ Fork PRs are skipped (no write access) with an ALERT.
 (e.g. via the optional GHA workflow), `_loop_pr_inbox` defers:
 - Bot `APPROVED` → skip, let auto-merge proceed
 - Bot `CHANGES_REQUESTED` → write ALERT (loop PR rejected by GHA reviewer)
+
+**Active merge of approved PRs (US-LOOP-062b):** when a PR is human-approved,
+CI-green, and mergeable, the PR Loop merges it directly (`gh pr merge --squash`)
+via `_loop_pr_merge_approved` rather than waiting for repo-level auto-merge
+(which may be disabled). Merge failure is non-fatal — the PR is left open and
+retried on the next tick.
 
 ### Optional: Event-driven PR review (GHA)
 

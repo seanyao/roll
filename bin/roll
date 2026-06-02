@@ -11416,6 +11416,21 @@ _loop_pr_do_heal() {
   rm -rf "$(dirname "$wt")" 2>/dev/null || true
 }
 
+# US-LOOP-062b: merge a human-approved PR directly when CI is green and the PR
+# is conflict-free, instead of waiting for repo-level auto-merge (which may be
+# disabled). Mirrors the bot-approved eager-merge. Merge failure is NON-fatal:
+# the PR is left open and the next PR-loop tick retries.
+_loop_pr_merge_approved() {
+  local num="$1" ci_state="$2" mergeable="$3" slug="$4"
+  [ -n "$num" ] && [ -n "$slug" ] || return 0
+  [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ] || return 0
+  if gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1; then
+    info "PR #${num}: human-approved + CI green — merged"
+  else
+    warn "PR #${num}: merge failed (human-approved + CI green) — left open, will retry"
+  fi
+}
+
 # REFACTOR-030: removed `_loop_self_heal_ci` and `_loop_clear_heal_state`.
 # REFACTOR-023 merged the CI self-heal counter into the main state.yaml flow,
 # but the two helpers themselves were left behind as dead code. Their job
@@ -11844,8 +11859,13 @@ _loop_pr_inbox() {
         # surfacing) when heal is disabled/exhausted. Re-wires US-LOOP-050.
         _loop_pr_heal_self "$num" "$head_ref" "$slug" || true
         ;;
-      blocked_human_request_changes|blocked_human_approved)
-        : # skip — explained by verdict; nothing to do this cycle
+      blocked_human_request_changes)
+        : # skip — last human review requested changes; wait for the author
+        ;;
+      blocked_human_approved)
+        # US-LOOP-062b: human approved — merge directly when green + mergeable
+        # (don't wait for repo auto-merge, which may be off).
+        _loop_pr_merge_approved "$num" "$ci_state" "$mergeable" "$slug" || true
         ;;
       stale)
         _loop_pr_rebase_circuit "$num" || true

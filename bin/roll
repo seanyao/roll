@@ -9022,14 +9022,21 @@ fi
 # first, shared fallback) so the emitter appends to the same file the reader
 # consumes. Dispatch by agent so each emitter reads the right session format
 # (pi.usage_from_session vs kimi.usage_from_session).
-if [ "\$(_project_agent)" != "claude" ]; then
+# FIX-164: dispatch on the per-cycle ROUTED agent (CYCLE_AGENT), not the project
+# default (_project_agent). With the project default, a kimi-default project ran
+# kimi_emit for EVERY cycle — so deepseek/pi cycles emitted no usage event at all
+# (kimi_emit finds no kimi session for a pi cycle), and the dashboard showed them
+# with empty token/cost. CYCLE_AGENT (set above by the router) is the agent that
+# actually ran this cycle, so the right emitter reads the right session format.
+_emit_agent="\${CYCLE_AGENT:-\$(_project_agent)}"
+if [ "\$_emit_agent" != "claude" ]; then
   _pi_rt=\$(_loop_runtime_dir "${slug}" 2>/dev/null || echo "")
   if [ -n "\$_pi_rt" ]; then
     _pi_evfile="\${_pi_rt}/events.ndjson"
   else
     _pi_evfile="\${_SHARED_ROOT:-\$HOME/.shared/roll}/loop/events-${slug}.ndjson"
   fi
-  case "\$(_project_agent)" in
+  case "\$_emit_agent" in
     kimi)
       if [ -f "${kimi_emit_script}" ]; then
         python3 "${kimi_emit_script}" --cwd "\$WT" --cycle "\${CYCLE_ID}" \\

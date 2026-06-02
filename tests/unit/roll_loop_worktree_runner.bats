@@ -283,8 +283,10 @@ teardown() {
   local inner="${_tmp}/run-pi-inner.sh"
   # The post-cycle usage capture is gated on a non-claude agent and invokes
   # pi_emit.py exactly once with the cycle's worktree + id.
+  # FIX-164: the guard now keys on the per-cycle routed agent (_emit_agent),
+  # not the static project default.
   grep -qF 'agent_usage/pi_emit.py' "$inner"
-  grep -qE '_project_agent.*!=.*claude' "$inner"
+  grep -qE '_emit_agent.*!=.*claude' "$inner"
   [ "$(grep -c 'pi_emit.py' "$inner")" -eq 2 ]  # local var def + invocation
   # Must run after the agent phase ends, before worktree cleanup removes $WT.
   local emit_line;  emit_line=$(grep -n 'pi_emit.py" --cwd' "$inner" | head -1 | cut -d: -f1)
@@ -303,4 +305,18 @@ teardown() {
   # Agent invoke lines must use the wrapper (not bare eval)
   grep -qF 'eval $_AGENT_PTY_PREFIX' "$inner"
   grep -qF '$_AGENT_PTY_PREFIX pi' "$inner"
+}
+
+@test "FIX-164: inner script dispatches usage-emit by per-cycle CYCLE_AGENT, not project default" {
+  local script="${_tmp}/run-fix164.sh"
+  _write_loop_runner_script "$script" "/some/project" "pi -p hi" "${_tmp}/log" 10 24
+  local inner="${_tmp}/run-fix164-inner.sh"
+  # The emit agent is resolved from the routed CYCLE_AGENT (falling back to project default).
+  grep -qF '_emit_agent="${CYCLE_AGENT:-$(_project_agent)}"' "$inner"
+  # Both the guard and the kimi/pi dispatch case key on $_emit_agent.
+  grep -qF 'if [ "$_emit_agent" != "claude" ]' "$inner"
+  grep -qF 'case "$_emit_agent" in' "$inner"
+  # Regression guard: the usage-emit case must NOT branch directly on $(_project_agent)
+  # (that routed every cycle to the project default and starved non-default agents).
+  ! grep -qF 'case "$(_project_agent)" in' "$inner"
 }

@@ -15576,19 +15576,30 @@ _invalidate_update_cache() {
   rm -f "${ROLL_HOME}/.update-check"
 }
 
+# FIX-170: the cache file is `<ts> <latest> <writer-version>` — the 3rd field
+# binds it to the binary version that wrote it. FIX-166's explicit invalidation
+# only covers `roll update` run by a NEW binary; an upgrade executed by an old
+# binary (the 2.602.2→2.602.4 transition) or out-of-band (npm -g / brew / git)
+# left a stale cache that reverse-nagged for up to 24h. A writer-version
+# mismatch now means "stale" regardless of TTL: refetch, and stay silent until
+# the refetch lands. Legacy 2-field caches have no writer → auto-invalidated.
 _check_update_async() {
   local cache="${ROLL_HOME}/.update-check"
   local now; now=$(date +%s)
-  local last=0
-  [[ -f "$cache" ]] && last=$(awk '{print $1}' "$cache" 2>/dev/null || echo 0)
-  (( now - last < 86400 )) && return
+  local last=0 writer=""
+  if [[ -f "$cache" ]]; then
+    last=$(awk '{print $1}' "$cache" 2>/dev/null || echo 0)
+    writer=$(awk '{print $3}' "$cache" 2>/dev/null || true)
+  fi
+  [[ "$writer" == "$VERSION" ]] && (( now - ${last:-0} < 86400 )) && return
 
   {
     local latest
     latest=$(curl -sf --max-time 5 \
       "https://api.github.com/repos/seanyao/roll/releases/latest" \
       | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/' 2>/dev/null || true)
-    echo "$now ${latest:-}" > "$cache"
+    # `-` placeholder keeps the field positions stable when the fetch fails.
+    echo "$now ${latest:--} $VERSION" > "$cache"
   } &
   disown
 }
@@ -15596,8 +15607,13 @@ _check_update_async() {
 _notify_update() {
   local cache="${ROLL_HOME}/.update-check"
   [[ -f "$cache" ]] || return 0
-  local latest; latest=$(awk '{print $2}' "$cache" 2>/dev/null || true)
-  [[ -z "$latest" || "$latest" == "$VERSION" ]] && return
+  local latest writer
+  latest=$(awk '{print $2}' "$cache" 2>/dev/null || true)
+  writer=$(awk '{print $3}' "$cache" 2>/dev/null || true)
+  # FIX-170: cache written by a different binary version is stale — stay
+  # silent; _check_update_async has already kicked off the refetch.
+  [[ "$writer" != "$VERSION" ]] && return
+  [[ -z "$latest" || "$latest" == "-" || "$latest" == "$VERSION" ]] && return
   # FIX-163: the cached `latest` is GitHub's releases/latest — the newest
   # release by created_at, NOT by semver. Under the MAJOR.MMDD scheme a plain
   # `sort -V` mis-ranks versions across the year-based→MAJOR.MMDD transition

@@ -220,3 +220,22 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"Unknown subcommand"* ]]
 }
+
+@test "cmd_changelog: audit is now unknown subcommand (US-CL-008)" {
+  run cmd_changelog audit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown subcommand"* ]]
+  [[ "$output" == *"generate"* ]]
+}
+
+@test "cmd_changelog: default (no args) runs generate (US-CL-008)" {
+  mkdir -p .roll
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [US-FOO-001](x.md) | 新增一键安装 | ✅ Done |
+EOF
+  run cmd_changelog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Unreleased"* ]]
+}

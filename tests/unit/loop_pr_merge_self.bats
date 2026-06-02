@@ -23,6 +23,21 @@ teardown() { unit_teardown_cd; }
   [ "$output" != "loop_self" ]
 }
 
+# ── PR-loop closure: claude/* PRs are loop-owned when green ───────────────────
+
+@test "_loop_pr_classify: claude/* branch (green) returns loop_self" {
+  run _loop_pr_classify "claude/ci-fix-abc" "" "success" "CLEAN"
+  [ "$status" -eq 0 ]
+  [ "$output" = "loop_self" ]
+}
+
+@test "_loop_pr_classify: claude/* with CI failure is NOT auto-owned (human decides)" {
+  run _loop_pr_classify "claude/ci-fix-abc" "" "failure" "CLEAN"
+  [ "$status" -eq 0 ]
+  [ "$output" != "loop_self" ]
+  [ "$output" != "loop_self_ci_red" ]
+}
+
 # ── _loop_pr_merge_self_eager: merge only when CI green + MERGEABLE ────────────────
 
 @test "_loop_pr_merge_self_eager: calls gh merge when ci=success and MERGEABLE" {
@@ -30,6 +45,15 @@ teardown() { unit_teardown_cd; }
   gh() { gh_called="$*"; }
   info() { :; }
   _loop_pr_merge_self_eager "42" "success" "MERGEABLE" "owner/repo"
+  [[ "$gh_called" == *"pr merge 42"* ]]
+  [[ "$gh_called" == *"--squash"* ]]
+}
+
+@test "_loop_pr_merge_self_eager: calls gh merge when ci=success and CLEAN (prod mergeStateStatus)" {
+  local gh_called=""
+  gh() { gh_called="$*"; }
+  info() { :; }
+  _loop_pr_merge_self_eager "42" "success" "CLEAN" "owner/repo"
   [[ "$gh_called" == *"pr merge 42"* ]]
   [[ "$gh_called" == *"--squash"* ]]
 }

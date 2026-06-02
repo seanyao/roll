@@ -11557,6 +11557,29 @@ _loop_is_manual_only() {
   echo "$row" | grep -qE 'manual-only:[A-Za-z0-9_.-]+'
 }
 
+# US-LOOP-067: detect whether we are on the Roll maintainer machine where
+# manual-only:roll-meta stories should be eligible for loop execution.
+# Returns 0 when:
+#   1. cwd is inside the Roll product repo (remote matches seanyao/roll)
+#   2. .roll/ is a nested git repo whose remote matches seanyao/roll-meta
+_loop_is_roll_meta_maintainer_context() {
+  local product_remote meta_remote
+  product_remote=$(git remote get-url origin 2>/dev/null || echo "")
+  case "$product_remote" in
+    *seanyao/roll*) ;;
+    *) return 1 ;;
+  esac
+  if [ -d ".roll/.git" ]; then
+    meta_remote=$(cd ".roll" && git remote get-url origin 2>/dev/null || echo "")
+  else
+    return 1
+  fi
+  case "$meta_remote" in
+    *seanyao/roll-meta*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # US-AUTO-034: PR-first inbox — loop processes open PRs before scanning BACKLOG.
 #
 # Three building blocks, kept as pure / mockable functions:
@@ -13473,7 +13496,16 @@ _loop_story_is_eligible() {
   [ "$_status" = "📋 Todo" ] || return 1
 
   # Gate 1: manual-only
-  _loop_is_manual_only "$id" "$backlog" 2>/dev/null && return 1
+  # US-LOOP-067: manual-only:roll-meta is eligible ONLY on maintainer context
+  local _mo_val
+  _mo_val=$(printf '%s\n' "$row" | grep -oE 'manual-only:[A-Za-z0-9_.-]+' | head -1 | cut -d: -f2)
+  if [ -n "$_mo_val" ]; then
+    if [ "$_mo_val" = "roll-meta" ] && _loop_is_roll_meta_maintainer_context 2>/dev/null; then
+      : # allow roll-meta stories on maintainer machine
+    else
+      return 1
+    fi
+  fi
 
   # Gate 2: depends-on
   _loop_check_depends_on "$id" "$backlog" >/dev/null 2>&1 || return 1

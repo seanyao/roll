@@ -268,3 +268,57 @@ MD
   grep -qF 'story_stale' "$inner"
   grep -qF 're-picking' "$inner"
 }
+
+# US-LOOP-067: manual-only:roll-meta eligibility on maintainer context ─────────
+
+@test "story_is_eligible: manual-only:roll-meta on maintainer context → eligible" {
+  write_backlog <<'MD'
+| [US-A-001](.roll/features/test/t.md#us-a-001) | roll-meta story manual-only:roll-meta | 📋 Todo |
+MD
+  # Set up maintainer context: product repo + nested roll-meta repo
+  git init --quiet
+  git remote add origin https://github.com/seanyao/roll.git
+  mkdir -p .roll
+  (cd .roll && git init --quiet && git remote add origin https://github.com/seanyao/roll-meta.git)
+  source "$ROLL"
+  run _loop_story_is_eligible "US-A-001"
+  [ "$status" -eq 0 ]
+}
+
+@test "story_is_eligible: manual-only:roll-meta on non-maintainer context → ineligible" {
+  write_backlog <<'MD'
+| [US-A-001](.roll/features/test/t.md#us-a-001) | roll-meta story manual-only:roll-meta | 📋 Todo |
+MD
+  git init --quiet
+  git remote add origin https://github.com/other/user.git
+  source "$ROLL"
+  run _loop_story_is_eligible "US-A-001"
+  [ "$status" -ne 0 ]
+}
+
+@test "story_is_eligible: manual-only:true on maintainer context → still ineligible" {
+  write_backlog <<'MD'
+| [US-A-001](.roll/features/test/t.md#us-a-001) | true story manual-only:true | 📋 Todo |
+MD
+  git init --quiet
+  git remote add origin https://github.com/seanyao/roll.git
+  mkdir -p .roll
+  (cd .roll && git init --quiet && git remote add origin https://github.com/seanyao/roll-meta.git)
+  source "$ROLL"
+  run _loop_story_is_eligible "US-A-001"
+  [ "$status" -ne 0 ]
+}
+
+@test "pick_next: picks manual-only:roll-meta on maintainer context" {
+  write_backlog <<'MD'
+| [US-A-001](.roll/features/test/t.md#us-a-001) | roll-meta story manual-only:roll-meta | 📋 Todo |
+MD
+  git init --quiet
+  git remote add origin https://github.com/seanyao/roll.git
+  mkdir -p .roll
+  (cd .roll && git init --quiet && git remote add origin https://github.com/seanyao/roll-meta.git)
+  source "$ROLL"
+  run _loop_pick_next_story
+  [ "$status" -eq 0 ]
+  [ "$output" = "US-A-001" ]
+}

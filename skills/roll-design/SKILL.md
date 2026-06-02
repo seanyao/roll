@@ -227,7 +227,7 @@ User Input
               │ Approach confirmed
               ▼
 ┌─────────────────────────────┐
-│ [peer] Direction Review     │  ← if complexity=large or cross-context; 10s opt-out
+│ [peer] Direction Review     │  ← if complexity=medium/large or cross-context; 10s opt-out
 │    Skill("roll-peer",       │
 │      tag="architecture")    │
 └─────────────┬───────────────┘
@@ -298,7 +298,7 @@ User Input
                                  │
                                  ▼
               ┌─────────────────────────────────────────┐
-              │ [peer] Plan Review                       │  ← if complexity=large; 10s opt-out
+              │ [peer] Plan Review                       │  ← if complexity=medium/large; 10s opt-out
               │    Skill("roll-peer", tag="architecture")│
               └──────────────────┬──────────────────────┘
                                  │ AGREE / skipped
@@ -840,12 +840,18 @@ Two checkpoints, both with 10s opt-out:
 ```
 1. After Discuss — Direction Review
    Approach confirmed → [peer, tag=architecture] → challenge the direction before DDD
-   Trigger: complexity=large OR requirement touches multiple Bounded Contexts
+   Trigger: complexity=medium OR complexity=large OR requirement touches multiple Bounded Contexts
 
 2. After Solution Design — Plan Review
    Plan written → [peer, tag=architecture] → full plan review before story split
-   Trigger: complexity=large (greenfield always qualifies)
+   Trigger: complexity=medium OR complexity=large (greenfield always qualifies)
 ```
+
+Rationale (US-SKILL-018): medium-complexity designs also routinely carry
+direction/plan risks worth one independent challenge before story split — the
+cost of one bounded peer pass is small next to reworking a misaimed design after
+it ships. So peer now triggers at medium as well as large; the 10s opt-out
+stays, so you can always skip when you're confident.
 
 On AGREE or user skip → continue to the next step normally.
 On REFINE/OBJECT → incorporate feedback, regenerate the relevant output, re-trigger peer.

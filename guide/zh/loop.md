@@ -557,7 +557,9 @@ ALERT 条目会在下次 `roll loop monitor` 和 `roll-brief` 输出中显示。
 3. CI 红且允许热修：通过 `roll loop hotfix-head-context` 抓 CI 失败日志和最近 commit diff，调 `roll-fix` 修复，等 CI 变绿。超过 `ROLL_LOOP_HEAL_MAX`（默认 2）次还没修好则写 ALERT 停工。
 4. CI 红且已用完热修次数或 `ROLL_LOOP_NO_HEAL=1`：写 ALERT（保留原有行为）。
 
-自家 PR（`loop/*` 分支）在 cycle 结束后才转红（US-LOOP-049）也会被识别：分类为 `loop_self_ci_red`，路由到热修路径，不再静默跳过。
+自家 PR（`loop/*` 分支）在 cycle 结束后才转红（US-LOOP-049）会被**后台自愈**（US-LOOP-062a）：分类为 `loop_self_ci_red`，PR Loop 路由到 `_loop_pr_heal_self`——checkout 该 PR 分支、把失败 CI 上下文交给项目 agent（`_project_agent`）修，受每 PR 自愈预算（`ROLL_LOOP_HEAL_MAX`，默认 2）和每 PR 锁（防重复并发）约束,自愈在后台跑、PR tick 不阻塞。自愈关闭（`ROLL_LOOP_NO_HEAL=1`）或预算用尽时，写去重 `[TYPE:loop-pr-ci-red]` ALERT，绝不静默跳过。
+
+human 已批准、CI 绿、可合并的 PR 会被**主动合并**（US-LOOP-062b）：`_loop_pr_merge_approved` 直接 `gh pr merge --squash`,不再依赖仓库级 auto-merge（可能关着）；合并失败非致命,PR 留开,下一轮重试。
 
 **环境变量：**
 

@@ -1,14 +1,19 @@
 """
-prices_fetcher — fetch + parse + diff + write Claude API pricing snapshots.
+prices_fetcher — fetch + parse + diff + write multi-vendor pricing snapshots.
 
 US-VIEW-013: replaces the hardcoded PRICES table in ``model_prices.py`` with
 versioned JSON snapshots under ``lib/prices/``. The fetcher pulls the live
 pricing docs page, extracts the model rate rows, and writes a new snapshot
 only when the rates differ from the most recent one on disk.
 
+US-VIEW-023: vendor-registry architecture — ``fetch``/``parse``/``refresh``
+dispatch by vendor. Adding a new vendor is a registry entry, not a change to
+the fetch/parse/refresh orchestration.
+
 Design:
   * ``fetch_pricing_html(url, timeout)`` — pure I/O, raises ``FetchError``
-  * ``parse_pricing_html(html)`` — pure parser, raises ``ParseError``
+  * ``parse_pricing_html(html, vendor)`` — dispatches to vendor parser,
+    raises ``ParseError``
   * ``diff_prices(old, new)`` — pure diff, returns list of changes
   * ``write_snapshot(prices, ...)`` — pure I/O, returns the path written
   * ``refresh(...)`` — orchestrator; the only function with side effects on
@@ -22,16 +27,13 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-DEFAULT_SOURCE_URL = "https://platform.claude.com/docs/en/about-claude/pricing"
 DEFAULT_TIMEOUT = 15
-
-_MODEL_RE = re.compile(r"claude-(?:opus|sonnet|haiku)-[0-9](?:-[0-9])?")
-_DOLLAR_RE = re.compile(r"\$\s*([0-9]+(?:\.[0-9]+)?)")
 
 
 class FetchError(RuntimeError):
@@ -42,7 +44,84 @@ class ParseError(ValueError):
     """Raised when the pricing HTML cannot be parsed into a prices map."""
 
 
-def fetch_pricing_html(url: str = DEFAULT_SOURCE_URL,
+# ─── Vendor registry ──────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class VendorConfig:
+    """Configuration for a single pricing vendor."""
+
+    name: str
+    source_url: str
+    currency: str
+    parse: Callable[[str], Dict[str, Dict[str, float]]]
+
+
+def _parse_claude_html(html: str) -> Dict[str, Dict[str, float]]:
+    """Parse Anthropic/Claude pricing HTML into a {model: rates} map."""
+    model_re = re.compile(r"claude-(?:opus|sonnet|haiku)-[0-9](?:-[0-9])?")
+    dollar_re = re.compile(r"\$\s*([0-9]+(?:\.[0-9]+)?)")
+
+    extractor = _TableTextExtractor()
+    extractor.feed(html)
+
+    prices: Dict[str, Dict[str, float]] = {}
+    for row in extractor.rows:
+        text = " ".join(row)
+        model_match = model_re.search(text)
+        if not model_match:
+            continue
+        model = model_match.group(0)
+        amounts = [float(m.group(1)) for m in dollar_re.finditer(text)]
+        if len(amounts) < 4:
+            continue
+        in_rate, cache_create, cache_read, out_rate = amounts[:4]
+        prices[model] = {
+            "in": in_rate,
+            "out": out_rate,
+            "cache_create": cache_create,
+            "cache_read": cache_read,
+        }
+
+    if not prices:
+        raise ParseError("no price rows found in HTML; page layout may have changed")
+    return prices
+
+
+def _parse_deepseek_html(_html: str) -> Dict[str, Dict[str, float]]:
+    """Placeholder — DeepSeek parser ships in US-VIEW-024."""
+    raise ParseError("deepseek parser not yet implemented — follow US-VIEW-024")
+
+
+def _parse_kimi_html(_html: str) -> Dict[str, Dict[str, float]]:
+    """Placeholder — Kimi parser ships in US-VIEW-025."""
+    raise ParseError("kimi parser not yet implemented — follow US-VIEW-025")
+
+
+VENDOR_REGISTRY: Dict[str, VendorConfig] = {
+    "anthropic": VendorConfig(
+        name="anthropic",
+        source_url="https://platform.claude.com/docs/en/about-claude/pricing",
+        currency="USD",
+        parse=_parse_claude_html,
+    ),
+    "deepseek": VendorConfig(
+        name="deepseek",
+        source_url="https://api-docs.deepseek.com/quick_start/pricing",
+        currency="CNY",
+        parse=_parse_deepseek_html,
+    ),
+    "kimi": VendorConfig(
+        name="kimi",
+        source_url="https://platform.kimi.com/docs/pricing/chat",
+        currency="CNY",
+        parse=_parse_kimi_html,
+    ),
+}
+
+
+# ─── Network I/O ──────────────────────────────────────────────────────────────
+
+def fetch_pricing_html(url: str,
                        timeout: float = DEFAULT_TIMEOUT) -> str:
     """Fetch the pricing docs page and return its raw HTML."""
     req = Request(url, headers={"User-Agent": "roll/prices_fetcher"})
@@ -54,6 +133,8 @@ def fetch_pricing_html(url: str = DEFAULT_SOURCE_URL,
     except (URLError, OSError, TimeoutError) as exc:
         raise FetchError(f"could not fetch {url}: {exc}") from exc
 
+
+# ─── HTML parsing helpers ─────────────────────────────────────────────────────
 
 class _TableTextExtractor(HTMLParser):
     """Walk an HTML document and yield <tr> cell-text lists per row."""
@@ -88,39 +169,22 @@ class _TableTextExtractor(HTMLParser):
             self._cur.append(data)
 
 
-def parse_pricing_html(html: str) -> Dict[str, Dict[str, float]]:
+# ─── Parser dispatch ──────────────────────────────────────────────────────────
+
+def parse_pricing_html(html: str, vendor: str = "anthropic") -> Dict[str, Dict[str, float]]:
     """Parse pricing docs HTML into a {model: rates} map.
 
-    The parser is intentionally tolerant: it scans every table row, looks for
-    one ``claude-*`` model identifier and four dollar amounts on that row, and
-    treats them as ``in / cache_create / cache_read / out`` in the order they
-    appear. (Anthropic's table renders columns in that order.)
+    Dispatches to the vendor-specific parser registered in ``VENDOR_REGISTRY``.
     """
-    parser = _TableTextExtractor()
-    parser.feed(html)
+    config = VENDOR_REGISTRY.get(vendor)
+    if not config:
+        raise ParseError(
+            f"unknown vendor {vendor!r}; known: {', '.join(sorted(VENDOR_REGISTRY))}"
+        )
+    return config.parse(html)
 
-    prices: Dict[str, Dict[str, float]] = {}
-    for row in parser.rows:
-        text = " ".join(row)
-        model_match = _MODEL_RE.search(text)
-        if not model_match:
-            continue
-        model = model_match.group(0)
-        amounts = [float(m.group(1)) for m in _DOLLAR_RE.finditer(text)]
-        if len(amounts) < 4:
-            continue
-        in_rate, cache_create, cache_read, out_rate = amounts[:4]
-        prices[model] = {
-            "in": in_rate,
-            "out": out_rate,
-            "cache_create": cache_create,
-            "cache_read": cache_read,
-        }
 
-    if not prices:
-        raise ParseError("no price rows found in HTML; page layout may have changed")
-    return prices
-
+# ─── Diff & formatting ────────────────────────────────────────────────────────
 
 def diff_prices(old: Dict[str, Dict[str, float]],
                 new: Dict[str, Dict[str, float]]
@@ -168,10 +232,41 @@ def format_diff(changes: List[Tuple[str, str, str, Optional[float], Optional[flo
     return "\n".join(lines)
 
 
+# ─── Snapshot I/O ─────────────────────────────────────────────────────────────
+
+_SNAPSHOT_NAME_RE = re.compile(r"snapshot-(\d{4}-\d{2}-\d{2})(?:-([a-z]+))?\.json")
+
+
+def _extract_vendor_from_filename(name: str) -> Optional[str]:
+    """Extract vendor from snapshot filename.
+
+    snapshot-2026-05-22.json          → anthropic
+    snapshot-2026-05-22-deepseek.json → deepseek
+    snapshot-2026-06-02-kimi.json     → kimi
+    """
+    m = _SNAPSHOT_NAME_RE.match(name)
+    if not m:
+        return None
+    return m.group(2) or "anthropic"
+
+
+def _latest_snapshot_path(snapshot_dir: str, vendor: str = "anthropic") -> Optional[str]:
+    if not os.path.isdir(snapshot_dir):
+        return None
+    snaps = sorted(
+        os.path.join(snapshot_dir, n)
+        for n in os.listdir(snapshot_dir)
+        if _SNAPSHOT_NAME_RE.match(n) and _extract_vendor_from_filename(n) == vendor
+    )
+    return snaps[-1] if snaps else None
+
+
 def write_snapshot(prices: Dict[str, Dict[str, float]],
                    *,
                    snapshot_dir: str,
-                   source_url: str = DEFAULT_SOURCE_URL,
+                   source_url: str,
+                   vendor: str = "anthropic",
+                   currency: str = "USD",
                    effective_at: Optional[str] = None,
                    default_model: Optional[str] = None,
                    notes: Optional[str] = None) -> str:
@@ -182,12 +277,15 @@ def write_snapshot(prices: Dict[str, Dict[str, float]],
         "version": today,
         "effective_at": today,
         "source_url": source_url,
+        "vendor": vendor,
+        "currency": currency,
         "default_model": default_model or _pick_default(prices),
         "prices": prices,
     }
     if notes:
         payload["notes"] = notes
-    dest = os.path.join(snapshot_dir, f"snapshot-{today}.json")
+    suffix = f"-{vendor}" if vendor != "anthropic" else ""
+    dest = os.path.join(snapshot_dir, f"snapshot-{today}{suffix}.json")
     with open(dest, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, sort_keys=False)
         f.write("\n")
@@ -202,9 +300,12 @@ def _pick_default(prices: Dict[str, Dict[str, float]]) -> str:
     return next(iter(prices))
 
 
+# ─── Orchestrator ─────────────────────────────────────────────────────────────
+
 def refresh(*,
             snapshot_dir: str,
-            url: str = DEFAULT_SOURCE_URL,
+            vendor: str = "anthropic",
+            url: Optional[str] = None,
             timeout: float = DEFAULT_TIMEOUT,
             html: Optional[str] = None,
             ) -> Tuple[str, List[Tuple[str, str, str, Optional[float], Optional[float]]]]:
@@ -215,14 +316,26 @@ def refresh(*,
       ``"written:<path>"`` — new snapshot written at <path>
       ``"first:<path>"`` — no prior snapshot existed; baseline written
     """
-    if html is None:
-        html = fetch_pricing_html(url, timeout=timeout)
-    new_prices = parse_pricing_html(html)
+    config = VENDOR_REGISTRY.get(vendor)
+    if not config:
+        raise ParseError(
+            f"unknown vendor {vendor!r}; known: {', '.join(sorted(VENDOR_REGISTRY))}"
+        )
 
-    # Load latest if any
-    latest = _latest_snapshot_path(snapshot_dir)
+    source_url = url or config.source_url
+    if html is None:
+        html = fetch_pricing_html(source_url, timeout=timeout)
+    new_prices = parse_pricing_html(html, vendor=vendor)
+
+    latest = _latest_snapshot_path(snapshot_dir, vendor=vendor)
     if latest is None:
-        dest = write_snapshot(new_prices, snapshot_dir=snapshot_dir, source_url=url)
+        dest = write_snapshot(
+            new_prices,
+            snapshot_dir=snapshot_dir,
+            source_url=source_url,
+            vendor=vendor,
+            currency=config.currency,
+        )
         return f"first:{dest}", diff_prices({}, new_prices)
 
     with open(latest, "r", encoding="utf-8") as f:
@@ -230,34 +343,38 @@ def refresh(*,
     changes = diff_prices(old, new_prices)
     if not changes:
         return "unchanged", []
-    dest = write_snapshot(new_prices, snapshot_dir=snapshot_dir, source_url=url)
+    dest = write_snapshot(
+        new_prices,
+        snapshot_dir=snapshot_dir,
+        source_url=source_url,
+        vendor=vendor,
+        currency=config.currency,
+    )
     return f"written:{dest}", changes
 
 
-def _latest_snapshot_path(snapshot_dir: str) -> Optional[str]:
-    if not os.path.isdir(snapshot_dir):
-        return None
-    snaps = sorted(
-        os.path.join(snapshot_dir, n)
-        for n in os.listdir(snapshot_dir)
-        if n.startswith("snapshot-") and n.endswith(".json")
-    )
-    return snaps[-1] if snaps else None
-
-
-# CLI entry — `python3 lib/prices_fetcher.py refresh|show` is the fallback when
+# ─── CLI entry — `python3 lib/prices_fetcher.py refresh|show` is the fallback when
 # bin/roll is unavailable (e.g. running tests directly).
 def _main(argv: List[str]) -> int:
     snapshot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prices")
     if not argv or argv[0] in ("-h", "--help", "help"):
-        print("usage: prices_fetcher.py refresh|show [--url URL]")
+        print("usage: prices_fetcher.py refresh|show [--url URL] [--vendor VENDOR]")
         return 0
     cmd = argv[0]
-    url = DEFAULT_SOURCE_URL
-    if "--url" in argv:
-        url = argv[argv.index("--url") + 1]
+    url: Optional[str] = None
+    vendor = "anthropic"
+    i = 1
+    while i < len(argv):
+        if argv[i] == "--url" and i + 1 < len(argv):
+            url = argv[i + 1]
+            i += 2
+        elif argv[i] == "--vendor" and i + 1 < len(argv):
+            vendor = argv[i + 1]
+            i += 2
+        else:
+            i += 1
     if cmd == "show":
-        latest = _latest_snapshot_path(snapshot_dir)
+        latest = _latest_snapshot_path(snapshot_dir, vendor=vendor)
         if not latest:
             print("no snapshot found", file=sys.stderr)
             return 1
@@ -266,7 +383,7 @@ def _main(argv: List[str]) -> int:
         return 0
     if cmd == "refresh":
         try:
-            action, changes = refresh(snapshot_dir=snapshot_dir, url=url)
+            action, changes = refresh(snapshot_dir=snapshot_dir, vendor=vendor, url=url)
         except FetchError as exc:
             print(f"fetch failed: {exc}", file=sys.stderr)
             return 2

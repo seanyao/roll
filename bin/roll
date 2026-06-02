@@ -5519,26 +5519,20 @@ import prices_fetcher as pf
 
 snapshot_dir = os.path.join(lib_dir, "prices")
 
-# FIX-116: vendor-specific default URLs.
-VENDOR_URLS = {
-    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
-    "deepseek":  "https://api-docs.deepseek.com/quick_start/pricing",
-    "kimi":      "https://platform.kimi.com/docs/pricing/chat",
-}
-
 if vendor:
-    default_url = VENDOR_URLS.get(vendor)
-    if not default_url:
+    if vendor not in pf.VENDOR_REGISTRY:
         print(f"$(msg prices_refresh.roll_unknown_vendor_vendor)", file=sys.stderr)
         print(f"$(msg prices_refresh.roll_known_vendors_join_sorted_vendor)", file=sys.stderr)
         sys.exit(1)
-    url = override_url or default_url
-    pf.DEFAULT_SOURCE_URL = url
 else:
-    url = override_url or pf.DEFAULT_SOURCE_URL
+    vendor = "anthropic"
 
 try:
-    action, changes = pf.refresh(snapshot_dir=snapshot_dir, url=url)
+    action, changes = pf.refresh(
+        snapshot_dir=snapshot_dir,
+        vendor=vendor,
+        url=override_url or None,
+    )
 except pf.FetchError as exc:
     print(f"[roll] fetch failed: {exc}", file=sys.stderr)
     print("[roll] keeping existing snapshot, no changes written  保留旧快照，未写入新文件",

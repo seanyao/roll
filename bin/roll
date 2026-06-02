@@ -11557,6 +11557,21 @@ _loop_is_manual_only() {
   echo "$row" | grep -qE 'manual-only:[A-Za-z0-9_.-]+'
 }
 
+# US-LOOP-068: detect whether a story is a roll-meta story (manual-only:roll-meta).
+# Returns 0 when the story's row carries `manual-only:roll-meta`.
+_loop_is_roll_meta_story() {
+  local id="$1"
+  local backlog="${2:-.roll/backlog.md}"
+  [ -n "$id" ] || return 1
+  [ -f "$backlog" ] || return 1
+
+  local row
+  row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
+  [ -n "$row" ] || return 1
+
+  echo "$row" | grep -qF 'manual-only:roll-meta'
+}
+
 # US-LOOP-067: detect whether we are on the Roll maintainer machine where
 # manual-only:roll-meta stories should be eligible for loop execution.
 # Returns 0 when:

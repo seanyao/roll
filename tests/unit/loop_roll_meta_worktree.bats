@@ -67,3 +67,46 @@ teardown() { cd /; rm -rf "$TEST_TMP"; }
   run _loop_roll_meta_worktree_cleanup "${TEST_TMP}/worktrees/wt" "loop/cycle-test" "${TEST_TMP}/product"
   [ "$status" -eq 0 ]
 }
+
+# Runner script generation tests ──────────────────────────────────────────────
+
+@test "runner script: inner contains roll-meta detection" {
+  source "$ROLL"
+  _write_loop_runner_script "${TEST_TMP}/run.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24 >/dev/null 2>&1 || true
+  local inner="${TEST_TMP}/run-inner.sh"
+  [ -f "$inner" ]
+  grep -qF '_loop_is_roll_meta_story' "$inner"
+}
+
+@test "runner script: inner contains roll-meta worktree setup" {
+  source "$ROLL"
+  _write_loop_runner_script "${TEST_TMP}/run.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24 >/dev/null 2>&1 || true
+  local inner="${TEST_TMP}/run-inner.sh"
+  [ -f "$inner" ]
+  grep -qF '_loop_roll_meta_worktree_setup' "$inner"
+}
+
+@test "runner script: inner contains roll-meta publish path" {
+  source "$ROLL"
+  _write_loop_runner_script "${TEST_TMP}/run.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24 >/dev/null 2>&1 || true
+  local inner="${TEST_TMP}/run-inner.sh"
+  [ -f "$inner" ]
+  grep -qF '_loop_roll_meta_publish' "$inner"
+}
+
+@test "runner script: inner contains roll-meta cleanup" {
+  source "$ROLL"
+  _write_loop_runner_script "${TEST_TMP}/run.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24 >/dev/null 2>&1 || true
+  local inner="${TEST_TMP}/run-inner.sh"
+  [ -f "$inner" ]
+  grep -qF '_loop_roll_meta_worktree_cleanup' "$inner"
+}
+
+@test "runner script: inner contains target field in runs.jsonl" {
+  source "$ROLL"
+  _write_loop_runner_script "${TEST_TMP}/run.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24 >/dev/null 2>&1 || true
+  local inner="${TEST_TMP}/run-inner.sh"
+  [ -f "$inner" ]
+  grep -qF 'target' "$inner"
+  grep -qF '_target_field' "$inner"
+}

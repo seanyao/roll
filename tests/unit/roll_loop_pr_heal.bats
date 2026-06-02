@@ -81,3 +81,32 @@ _wait_heal_log() {
   ROLL_LOOP_HEAL_MAX=2 _loop_pr_heal_self 42 loop/cycle-x test/repo
   grep -q "^heal_count.pr:42: 1$" "$_LOOP_STATE"
 }
+
+# ── US-LOOP-062b: _loop_pr_merge_approved ─────────────────────────────────────
+
+@test "US-LOOP-062b: human-approved + green + mergeable → gh pr merge --squash" {
+  gh() { echo "gh $*" >> "${TEST_TMP}/gh.log"; return 0; }
+  run _loop_pr_merge_approved 50 success MERGEABLE test/repo
+  [ "$status" -eq 0 ]
+  grep -q "pr merge 50 --squash --delete-branch" "${TEST_TMP}/gh.log"
+}
+
+@test "US-LOOP-062b: NOT merged when CI is not green" {
+  gh() { echo "gh $*" >> "${TEST_TMP}/gh.log"; return 0; }
+  run _loop_pr_merge_approved 50 pending MERGEABLE test/repo
+  [ "$status" -eq 0 ]
+  [ ! -f "${TEST_TMP}/gh.log" ] || ! grep -q "pr merge" "${TEST_TMP}/gh.log"
+}
+
+@test "US-LOOP-062b: NOT merged when not MERGEABLE (conflict/behind)" {
+  gh() { echo "gh $*" >> "${TEST_TMP}/gh.log"; return 0; }
+  run _loop_pr_merge_approved 50 success BEHIND test/repo
+  [ "$status" -eq 0 ]
+  [ ! -f "${TEST_TMP}/gh.log" ] || ! grep -q "pr merge" "${TEST_TMP}/gh.log"
+}
+
+@test "US-LOOP-062b: merge failure is non-fatal (returns 0, PR left open)" {
+  gh() { return 1; }   # merge command fails
+  run _loop_pr_merge_approved 50 success MERGEABLE test/repo
+  [ "$status" -eq 0 ]
+}

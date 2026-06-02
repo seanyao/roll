@@ -193,7 +193,10 @@ teardown() { unit_teardown_cd; }
   # Guard against silent regression: merge-self must NOT be the handler here.
   _loop_pr_merge_self_eager() { touch "${TEST_TMP}/merge-self-fired"; }
 
-  run _loop_pr_inbox
+  # US-LOOP-062a: a red loop/* PR routes to _loop_pr_heal_self. With heal
+  # disabled (ROLL_LOOP_NO_HEAL=1) it falls back to the deduped ALERT — which
+  # is exactly FIX-158's "never silently drop" guarantee.
+  ROLL_LOOP_NO_HEAL=1 run _loop_pr_inbox
   [ "$status" -eq 0 ]
   [ -f "$_LOOP_ALERT" ]
   grep -q "TYPE:loop-pr-ci-red" "$_LOOP_ALERT"
@@ -218,8 +221,8 @@ teardown() { unit_teardown_cd; }
     fi
     return 0
   }
-  run _loop_pr_inbox
-  run _loop_pr_inbox
+  ROLL_LOOP_NO_HEAL=1 run _loop_pr_inbox
+  ROLL_LOOP_NO_HEAL=1 run _loop_pr_inbox
   [ "$(grep -c "TYPE:loop-pr-ci-red" "$_LOOP_ALERT")" -eq 1 ]
 }
 

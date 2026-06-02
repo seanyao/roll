@@ -83,3 +83,23 @@ teardown() { rm -rf "${TEST_TMP:-}"; }
   grep -q '"category":"ci-real-failure"' "$jsonl"
   grep -q '"notified":1' "$jsonl"
 }
+
+@test "FIX-171: Alert runner resolves project-local _LOOP_ALERT without override" {
+  # The runner must source bin/roll and recompute _LOOP_RT_DIR so that
+  # _alert_dispatch reads the project-local ALERT file, not the legacy
+  # shared path.
+  mkdir -p "${PROJ}/.roll/state"
+  local slug; slug=$(_project_slug "$PROJ")
+  local af="${PROJ}/.roll/loop/ALERT-${slug}.md"
+  printf '%s\n' '[2026-06-01T10:00:00] [error] [TYPE:ci-real-failure] CI failed run #999' > "$af"
+  local runner="${TEST_TMP}/alert-runner.sh"
+  _write_alert_loop_runner_script "$runner" "$PROJ" "$ROLL_BIN" "${PROJ}/.roll/loop/alert.log"
+  # Do NOT override _LOOP_ALERT — the runner itself must resolve it.
+  bash "$runner"
+  # File consumed and rotated.
+  [ ! -s "$af" ]
+  [ -f "${af}.prev" ]
+  local jsonl="${PROJ}/.roll/state/alert-log.jsonl"
+  [ -f "$jsonl" ]
+  grep -q '"category":"ci-real-failure"' "$jsonl"
+}

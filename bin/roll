@@ -8263,6 +8263,7 @@ _write_alert_loop_runner_script() {
   local script_path="$1" project_path="$2" roll_bin="$3" log_path="$4"
   mkdir -p "$(dirname "$script_path")"
   local lock="${project_path}/.roll/loop/.alert-loop.lock"
+  local slug; slug=$(_project_slug "${project_path}")
   cat > "$script_path" << ALERTRUNNER
 #!/bin/bash -l
 set -o pipefail
@@ -8287,6 +8288,15 @@ fi
 printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$LOCK"
 trap 'rm -f "\$LOCK"' EXIT
 cd "${project_path}" || exit 0
+# FIX-171: bake the project-local runtime dir directly; do not rely on
+# _loop_runtime_dir which may fail to resolve in fresh shells. Set
+# _LOOP_ALERT so the dispatched roll reads the project-local ALERT file,
+# but do not override an externally-supplied value (test sandboxes).
+_LOOP_RT_DIR="${project_path}/.roll/loop"
+if [ -d "\$_LOOP_RT_DIR" ]; then
+  : "\${_LOOP_ALERT:=\${_LOOP_RT_DIR}/ALERT-${slug}.md}"
+  export _LOOP_ALERT
+fi
 bash "${roll_bin}" _alert_dispatch >> "${log_path}" 2>&1 || true
 ALERTRUNNER
   chmod +x "$script_path"

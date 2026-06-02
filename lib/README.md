@@ -24,7 +24,6 @@ Python scripts and shell libraries that `bin/roll` delegates to for rendering-he
 | `loop-fmt.py` | Loop log formatter (ANSI-strip, timestamp alignment) |
 | `loop_unstick.py` | Diagnostic: detects and unsticks hung loop state |
 | `backfill-pi-usage.py` | Backfills pi/deepseek token and cost data into existing cycle records |
-| `changelog_audit.py` | Audits CHANGELOG.md against backlog entries |
 | `i18n.sh` | Shell wrapper that delegates i18n string lookups to `lib/i18n/` |
 | `slides-render.py` | Renders `.deck.md` → HTML slides |
 | `slides-validate.py` | Validates deck file syntax and asset references |

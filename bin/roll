@@ -1998,6 +1998,10 @@ cmd_update() {
     _check_installed_version_or_retry
   fi
 
+  # FIX-166: the running version just changed — invalidate the stale update-check
+  # cache so we don't reverse-nag the new version to "upgrade" to the old latest.
+  _invalidate_update_cache
+
   echo ""
   info "$(msg update.re_syncing_to_ai_tools)"
   echo ""
@@ -15551,6 +15555,15 @@ _show_changelog() {
 }
 
 # ─── Version check (background, non-blocking, 24h cache) ─────────────────────
+# FIX-166: drop the cached `latest` so the next run refetches it. Called after a
+# successful `roll update`: without this, the 24h cache TTL keeps the pre-upgrade
+# `latest` around, and _notify_update reverse-nags the freshly-installed (newer)
+# version to "upgrade" to the older cached one for up to a day. With the file
+# gone, _notify_update stays silent until the async refetch repopulates it.
+_invalidate_update_cache() {
+  rm -f "${ROLL_HOME}/.update-check"
+}
+
 _check_update_async() {
   local cache="${ROLL_HOME}/.update-check"
   local now; now=$(date +%s)

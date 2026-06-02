@@ -9110,6 +9110,15 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
     else
       _is_doc_only=0
       ( cd "\$WT" && _loop_is_doc_only_change ) && _is_doc_only=1
+      # US-LOOP-069: roll-meta boundary guard — abort if a roll-meta story touched product files
+      if ! _loop_guard_roll_meta_boundary "\$WT" "\$ROLL_LOOP_ROUTED_STORY"; then
+        _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
+        _phases_guard=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_guard" ] && _phases_guard='{}'
+        _runs_append "failed" 0 "[]" "\$_phases_guard" 2>/dev/null || true
+        echo "[loop] cycle \${CYCLE_ID}: US-LOOP-069 blocked — roll-meta story touched product files; worktree preserved at \$WT"
+        trap '_inner_cleanup' EXIT
+        exit 0
+      fi
       _phase_begin publish_push
       if [ "\$_is_doc_only" -eq 1 ]; then
         ( cd "\$WT" && _loop_publish_doc_pr "\$BRANCH" "doc: loop cycle \${CYCLE_ID}" )
@@ -14017,6 +14026,43 @@ _loop_is_doc_only_change() {
   # Post-Phase-1: process artifacts moved into .roll/; user-facing docs at guide/ + site/.
   # Legacy paths (BACKLOG.md, PROPOSALS.md, docs/) kept as fallback for pre-2.0 projects.
   echo "$changed" | grep -qvE '^(\.roll/|CHANGELOG\.md|guide/|site/|\.claude/|BACKLOG\.md|PROPOSALS\.md|docs/)' && return 1
+  return 0
+}
+
+# _loop_guard_roll_meta_boundary <worktree> <story_id>
+# US-LOOP-069: for manual-only:roll-meta stories, verify that no product-repo
+# tracked files were modified in the worktree. Returns 0 if safe (or not a
+# roll-meta story), returns 1 if product files were touched and writes ALERT.
+_loop_guard_roll_meta_boundary() {
+  local wt="$1" story_id="$2"
+  [ -n "$story_id" ] || return 0
+  [ -d "$wt" ] || return 0
+
+  local _backlog="${ROLL_MAIN_PROJECT:-.}/.roll/backlog.md"
+  [ -f "$_backlog" ] || return 0
+
+  local _row
+  _row=$(grep -E "^\| \[?${story_id}[]| ]" "$_backlog" 2>/dev/null | head -1)
+  [ -n "$_row" ] || return 0
+
+  local _mo_val
+  _mo_val=$(printf '%s\n' "$_row" | grep -oE 'manual-only:[A-Za-z0-9_.-]+' | head -1 | cut -d: -f2)
+  [ "$_mo_val" = "roll-meta" ] || return 0
+
+  local _changed _violations
+  _changed=$(cd "$wt" && git diff --name-only origin/main..HEAD 2>/dev/null || true)
+  [ -n "$_changed" ] || return 0
+
+  _violations=$(printf '%s\n' "$_changed" | grep -v '^\.roll/' || true)
+  if [ -n "$_violations" ]; then
+    local _alert
+    _alert="US-LOOP-069 guard blocked roll-meta story ${story_id}"
+    _alert="${_alert}"$'\n'"Touched product files (only .roll/ is allowed):"
+    _alert="${_alert}"$'\n'"${_violations}"
+    _worktree_alert "$_alert"
+    return 1
+  fi
+
   return 0
 }
 

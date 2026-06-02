@@ -15440,12 +15440,13 @@ _notify_update() {
   [[ -f "$cache" ]] || return 0
   local latest; latest=$(awk '{print $2}' "$cache" 2>/dev/null || true)
   [[ -z "$latest" || "$latest" == "$VERSION" ]] && return
-  local newer; newer=$(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1)
-  if [[ "$newer" == "$VERSION" ]]; then
-    # Running version is newer than cached — stale cache, clear it
-    rm -f "$cache"
-    return
-  fi
+  # FIX-163: the cached `latest` is GitHub's releases/latest — the newest
+  # release by created_at, NOT by semver. Under the MAJOR.MMDD scheme a plain
+  # `sort -V` mis-ranks versions across the year-based→MAJOR.MMDD transition
+  # (2026.601.4 > 2.602.1) and the Jan-1 MMDD wrap (2.1231.N > 2.101.1), which
+  # previously (a) reverse-nagged users to "upgrade" to an older release and
+  # (b) silently suppressed real updates after the wrap. Trust GitHub's
+  # chronological latest: if it differs from what's running, surface it.
   echo ""
   warn "$(msg update.available "$latest")"
 }

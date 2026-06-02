@@ -25,6 +25,20 @@ _release_compute_version_prefix() {
   VERSION_PREFIX="${_major}.${_mmdd}"
 }
 
+# FIX-163: decide whether <new> sorts BELOW the current npm <latest>. When it
+# does, npm refuses to *implicitly* move the `latest` dist-tag "down", so the
+# publish must move it explicitly (publish under a temp tag, then `dist-tag
+# add ... latest`). This happens (a) one-time when migrating off the year-based
+# scheme (2026.601.4 → 2.602.1, major 2026 > 2) and (b) every Jan 1 when MMDD
+# wraps (…2.1231.N → 2.101.1). Returns 0 (move explicitly) when new < latest;
+# 1 otherwise (empty/equal latest, or new ≥ latest → plain implicit publish).
+_release_should_move_latest() {
+  local _new="$1" _cur="$2"
+  [ -n "$_new" ] && [ -n "$_cur" ] && [ "$_cur" != "$_new" ] || return 1
+  local _top; _top=$(printf '%s\n%s\n' "$_new" "$_cur" | sort -V | tail -1)
+  [ "$_top" = "$_cur" ]
+}
+
 # Guard: when sourced, only load functions; do not run the release flow.
 if [ "${BASH_SOURCE[0]}" = "$0" ] || [ -z "${BASH_SOURCE[0]}" ]; then
   cd "$REPO_ROOT"
@@ -195,12 +209,27 @@ fi
 # problem (auth, network) and re-run; nothing public has diverged.
 # Idempotent: skip when the version is already on the registry.
 echo ""
-if npm view "@seanyao/roll@${VERSION}" version 2>/dev/null | grep -qx "${VERSION}"; then
+_npm() {
+  env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy \
+    npm "$@"
+}
+if _npm view "@seanyao/roll@${VERSION}" version 2>/dev/null | grep -qx "${VERSION}"; then
   echo "v${VERSION} already published to npm — skipping."
 else
   echo "Publishing to npm..."
-  env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy \
-    npm publish --access public
+  _cur_latest=$(_npm view "@seanyao/roll" dist-tags.latest 2>/dev/null || echo "")
+  if _release_should_move_latest "${VERSION}" "${_cur_latest}"; then
+    # FIX-163: new version sorts below current latest (year-scheme transition or
+    # Jan-1 MMDD wrap). npm blocks implicit latest-downgrade — publish under a
+    # temp tag, then move `latest` explicitly. Without this the publish aborts
+    # with "Cannot implicitly apply the latest tag".
+    echo "  ${VERSION} sorts below current latest ${_cur_latest} — publishing then moving latest explicitly."
+    _npm publish --tag transition --access public
+    _npm dist-tag add "@seanyao/roll@${VERSION}" latest
+    _npm dist-tag rm "@seanyao/roll" transition 2>/dev/null || true
+  else
+    _npm publish --access public
+  fi
 fi
 
 # ── git push (only after npm succeeded) ──────────────────────────────────────

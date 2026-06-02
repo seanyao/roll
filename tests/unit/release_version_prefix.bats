@@ -58,3 +58,21 @@ RELEASE_SH="${BATS_TEST_DIRNAME}/../../.roll/ops/release.sh"
   [ "$status" -eq 0 ]
   [[ "$output" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
+
+@test "FIX-163: _release_should_move_latest true when new sorts below current latest" {
+  # year-scheme transition: 2.602.1 < 2026.601.4
+  run bash -c "source '${RELEASE_SH}'; _release_should_move_latest '2.602.1' '2026.601.4'"
+  [ "$status" -eq 0 ]
+  # Jan-1 MMDD wrap: 2.101.1 < 2.1231.5
+  run bash -c "source '${RELEASE_SH}'; _release_should_move_latest '2.101.1' '2.1231.5'"
+  [ "$status" -eq 0 ]
+}
+
+@test "FIX-163: _release_should_move_latest false for normal-higher / equal / empty latest" {
+  run bash -c "source '${RELEASE_SH}'; _release_should_move_latest '2.603.1' '2.602.1'"
+  [ "$status" -ne 0 ]
+  run bash -c "source '${RELEASE_SH}'; _release_should_move_latest '2.602.1' '2.602.1'"
+  [ "$status" -ne 0 ]
+  run bash -c "source '${RELEASE_SH}'; _release_should_move_latest '2.602.1' ''"
+  [ "$status" -ne 0 ]
+}

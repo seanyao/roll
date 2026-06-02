@@ -87,9 +87,88 @@ def _parse_claude_html(html: str) -> Dict[str, Dict[str, float]]:
     return prices
 
 
-def _parse_deepseek_html(_html: str) -> Dict[str, Dict[str, float]]:
-    """Placeholder — DeepSeek parser ships in US-VIEW-024."""
-    raise ParseError("deepseek parser not yet implemented — follow US-VIEW-024")
+def _parse_deepseek_html(html: str) -> Dict[str, Dict[str, float]]:
+    """Parse DeepSeek pricing HTML into a {model: rates} map.
+
+    Handles both the Chinese (元) and English ($) pricing pages.
+    Extracts deepseek-v4-flash and deepseek-v4-pro rates, then adds
+    deepseek-chat and deepseek-reasoner as aliases for flash.
+    """
+    extractor = _TableTextExtractor()
+    extractor.feed(html)
+
+    # Find the header row with model names.
+    model_names: List[str] = []
+    header_idx = -1
+    for i, row in enumerate(extractor.rows):
+        if any(k in ' '.join(row) for k in ('模型', 'MODEL')):
+            # Cells after the label are model names.
+            # Strip footnote markers like (1) and HTML tags.
+            names = [
+                re.sub(r'<[^>]+>', '', re.sub(r'\s*\(\d+\)', '', cell)).strip()
+                for cell in row[1:]
+                if cell.strip()
+            ]
+            if len(names) >= 2:
+                model_names = names
+                header_idx = i
+                break
+
+    if len(model_names) < 2:
+        raise ParseError('no model header row found; page layout may have changed')
+
+    # Walk rows after header to find pricing data.
+    cache_hit: List[float] = []
+    cache_miss: List[float] = []
+    output: List[float] = []
+
+    for row in extractor.rows[header_idx + 1:]:
+        text = ' '.join(row)
+        # Skip non-pricing rows.
+        if not any(k in text for k in ('缓存命中', 'CACHE HIT', '缓存未命中', 'CACHE MISS', '输出', 'OUTPUT')):
+            continue
+
+        # Extract numeric values followed by 元 or $.
+        values: List[float] = []
+        for cell in row:
+            # Match numbers like 0.02元, $0.14, 1元, etc.
+            m = re.search(r'(?:\$)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:元|¥)?', cell)
+            if m:
+                values.append(float(m.group(1)))
+
+        if len(values) < len(model_names):
+            continue
+
+        if any(k in text for k in ('缓存命中', 'CACHE HIT')):
+            cache_hit = values[:len(model_names)]
+        elif any(k in text for k in ('缓存未命中', 'CACHE MISS')):
+            cache_miss = values[:len(model_names)]
+        elif any(k in text for k in ('输出', 'OUTPUT')):
+            output = values[:len(model_names)]
+
+    if not cache_miss or not output:
+        raise ParseError('no price rows found in HTML; page layout may have changed')
+
+    prices: Dict[str, Dict[str, float]] = {}
+    for idx, model in enumerate(model_names):
+        if model in ('deepseek-v4-flash', 'deepseek-v4-pro'):
+            prices[model] = {
+                'in': cache_miss[idx],
+                'out': output[idx],
+                'cache_create': cache_miss[idx],
+                'cache_read': cache_hit[idx] if cache_hit else 0.0,
+            }
+
+    if not prices:
+        raise ParseError('no price rows found in HTML; page layout may have changed')
+
+    # Aliases: deepseek-chat and deepseek-reasoner both map to v4-flash.
+    if 'deepseek-v4-flash' in prices:
+        flash = prices['deepseek-v4-flash']
+        prices['deepseek-chat'] = dict(flash)
+        prices['deepseek-reasoner'] = dict(flash)
+
+    return prices
 
 
 def _parse_kimi_html(_html: str) -> Dict[str, Dict[str, float]]:
@@ -106,7 +185,7 @@ VENDOR_REGISTRY: Dict[str, VendorConfig] = {
     ),
     "deepseek": VendorConfig(
         name="deepseek",
-        source_url="https://api-docs.deepseek.com/quick_start/pricing",
+        source_url="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
         currency="CNY",
         parse=_parse_deepseek_html,
     ),

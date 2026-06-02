@@ -208,7 +208,7 @@ print('currency:', data.get('currency'))
   [[ "$output" == *"currency: USD"* ]]
 }
 
-@test "refresh: deepseek placeholder parser raises ParseError" {
+@test "refresh: deepseek parser raises ParseError on unparseable HTML" {
   run run_py "
 d = '${TMP}'
 try:
@@ -219,7 +219,7 @@ except pf.ParseError as e:
 "
   [ "$status" -eq 0 ]
   [[ "$output" == *"ParseError:"* ]]
-  [[ "$output" == *"deepseek parser not yet implemented"* ]]
+  [[ "$output" == *"no model header row found"* ]]
 }
 
 @test "refresh: kimi placeholder parser raises ParseError" {
@@ -271,4 +271,78 @@ print("keys:", sorted(pf.VENDOR_REGISTRY.keys()))
   [[ "$output" == *"deepseek: CNY"* ]]
   [[ "$output" == *"kimi: CNY"* ]]
   [[ "$output" == *"keys: ['anthropic', 'deepseek', 'kimi']"* ]]
+}
+
+# ─── US-VIEW-024: deepseek parser tests ───────────────────────────────────────
+
+@test "parse_pricing_html: deepseek fixture extracts correct prices" {
+  run run_py "
+html = open('${BATS_TEST_DIRNAME}/fixtures/deepseek_pricing_zh.html').read()
+p = pf.parse_pricing_html(html, vendor='deepseek')
+print('flash-in:', p['deepseek-v4-flash']['in'])
+print('flash-out:', p['deepseek-v4-flash']['out'])
+print('flash-cache_read:', p['deepseek-v4-flash']['cache_read'])
+print('pro-in:', p['deepseek-v4-pro']['in'])
+print('pro-out:', p['deepseek-v4-pro']['out'])
+print('pro-cache_read:', p['deepseek-v4-pro']['cache_read'])
+print('chat-in:', p['deepseek-chat']['in'])
+print('reasoner-in:', p['deepseek-reasoner']['in'])
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"flash-in: 1.0"* ]]
+  [[ "$output" == *"flash-out: 2.0"* ]]
+  [[ "$output" == *"flash-cache_read: 0.02"* ]]
+  [[ "$output" == *"pro-in: 3.0"* ]]
+  [[ "$output" == *"pro-out: 6.0"* ]]
+  [[ "$output" == *"pro-cache_read: 0.025"* ]]
+  [[ "$output" == *"chat-in: 1.0"* ]]
+  [[ "$output" == *"reasoner-in: 1.0"* ]]
+}
+
+@test "parse_pricing_html: deepseek raises ParseError on bad HTML" {
+  run run_py '
+try:
+    pf.parse_pricing_html("<html><body>no prices</body></html>", vendor="deepseek")
+    print("UNEXPECTED OK")
+except pf.ParseError as e:
+    print("ParseError:", str(e))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ParseError:"* ]]
+}
+
+@test "refresh: deepseek first run writes snapshot with CNY currency" {
+  run run_py "
+import json, os
+d = '${TMP}'
+html = open('${BATS_TEST_DIRNAME}/fixtures/deepseek_pricing_zh.html').read()
+action, changes = pf.refresh(snapshot_dir=d, vendor='deepseek', html=html)
+print('action:', action.split(':')[0])
+files = [f for f in os.listdir(d) if f.startswith('snapshot-')]
+print('files:', len(files))
+data = json.load(open(os.path.join(d, files[0])))
+print('vendor:', data.get('vendor'))
+print('currency:', data.get('currency'))
+print('prices-keys:', sorted(data['prices'].keys()))
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"action: first"* ]]
+  [[ "$output" == *"files: 1"* ]]
+  [[ "$output" == *"vendor: deepseek"* ]]
+  [[ "$output" == *"currency: CNY"* ]]
+}
+
+@test "refresh: deepseek identical HTML produces unchanged" {
+  run run_py "
+import os
+d = '${TMP}'
+html = open('${BATS_TEST_DIRNAME}/fixtures/deepseek_pricing_zh.html').read()
+pf.refresh(snapshot_dir=d, vendor='deepseek', html=html)
+action, changes = pf.refresh(snapshot_dir=d, vendor='deepseek', html=html)
+print('action:', action)
+print('changes:', len(changes))
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"action: unchanged"* ]]
+  [[ "$output" == *"changes: 0"* ]]
 }

@@ -152,12 +152,20 @@ def _resolve_name(model: Optional[str],
     return fallback
 
 
+_NO_CURRENCY_MATCH = "\x00__no_currency_match__\x00"
+
+
 def currency_for(model: Optional[str]) -> str:
     """Return the native currency code (USD/CNY) for a model.
 
-    Falls back to 'USD' when the model isn't in any snapshot.
+    Falls back to 'USD' when the model isn't in any snapshot. FIX-162: resolve
+    with a sentinel default so a *genuinely unknown* model returns USD instead
+    of inheriting the global DEFAULT model's currency (which is a CNY kimi
+    entry — that would mislabel unrelated unknown models as CNY).
     """
-    name = _resolve_name(model)
+    name = _resolve_name(model, default=_NO_CURRENCY_MATCH)
+    if name == _NO_CURRENCY_MATCH:
+        return "USD"
     return _CURRENCY.get(name, "USD")
 
 

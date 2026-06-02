@@ -64,6 +64,16 @@ teardown() { unit_teardown_cd; }
   [ "$output" = "stale" ]
 }
 
+@test "_loop_pr_classify: mergeStateStatus DIRTY (conflict) → stale" {
+  run _loop_pr_classify "feat/foo" "" "success" "DIRTY"
+  [ "$output" = "stale" ]
+}
+
+@test "_loop_pr_classify: claude/* branch (green) → loop_self" {
+  run _loop_pr_classify "claude/ci-fix" "" "success" "CLEAN"
+  [ "$output" = "loop_self" ]
+}
+
 @test "_loop_pr_classify: clean external PR → eligible" {
   run _loop_pr_classify "feat/foo" "" "success" "MERGEABLE"
   [ "$output" = "eligible" ]
@@ -169,6 +179,61 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 0 ]
   [ -f "${TEST_TMP}/review-fired" ]
   [ "$(cat "${TEST_TMP}/review-fired")" = "42" ]
+}
+
+# PR-loop closure: a green claude/* PR (CLEAN) must be merged like a loop_self
+# PR, not merely AI-reviewed — otherwise it sits open until a human acts.
+@test "_loop_pr_inbox: green claude/* PR is merged (not just reviewed)" {
+  git remote add origin git@github.com:test/repo.git
+  _gh_repo_slug() { echo "test/repo"; }
+  gh() {
+    if [ "$1" = "-R" ]; then shift 2; fi
+    if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+      echo '[{"number":99,"headRefName":"claude/ci-fix","author":{"login":"seanyao"}}]'
+      return 0
+    fi
+    if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+      echo '{"reviews":[],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
+      return 0
+    fi
+    return 0
+  }
+  _loop_pr_merge_self_eager() { echo "$1" > "${TEST_TMP}/merge-fired"; }
+  _loop_pr_review_external() { touch "${TEST_TMP}/review-fired"; }
+
+  run _loop_pr_inbox
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/merge-fired" ]
+  [ "$(cat "${TEST_TMP}/merge-fired")" = "99" ]
+  [ ! -f "${TEST_TMP}/review-fired" ]
+}
+
+# PR-loop closure (PR #410 regression): a green self-PR that conflicts with
+# main (DIRTY) must be rebased, not silently left — eager-merge can never
+# merge it, so without the rebase branch it stays open forever.
+@test "_loop_pr_inbox: green-but-DIRTY self-PR rebases instead of merging" {
+  git remote add origin git@github.com:test/repo.git
+  _gh_repo_slug() { echo "test/repo"; }
+  gh() {
+    if [ "$1" = "-R" ]; then shift 2; fi
+    if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+      echo '[{"number":410,"headRefName":"loop/cycle-x","author":{"login":"seanyao"}}]'
+      return 0
+    fi
+    if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+      echo '{"reviews":[],"mergeStateStatus":"DIRTY","statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
+      return 0
+    fi
+    return 0
+  }
+  _loop_pr_merge_self_eager() { touch "${TEST_TMP}/merge-fired"; }
+  _loop_pr_rebase_stale() { echo "$1" > "${TEST_TMP}/rebase-fired"; }
+
+  run _loop_pr_inbox
+  [ "$status" -eq 0 ]
+  [ -f "${TEST_TMP}/rebase-fired" ]
+  [ "$(cat "${TEST_TMP}/rebase-fired")" = "410" ]
+  [ ! -f "${TEST_TMP}/merge-fired" ]
 }
 
 # FIX-158: a loop/* PR with red CI must NOT be silently dropped. The inbox

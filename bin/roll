@@ -11424,7 +11424,10 @@ _loop_pr_do_heal() {
 _loop_pr_merge_approved() {
   local num="$1" ci_state="$2" mergeable="$3" slug="$4"
   [ -n "$num" ] && [ -n "$slug" ] || return 0
-  [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ] || return 0
+  [ "$ci_state" = "success" ] || return 0
+  # MERGEABLE (GraphQL mergeable) or CLEAN (mergeStateStatus) — see
+  # _loop_pr_merge_self_eager for why both spellings must be accepted.
+  case "$mergeable" in MERGEABLE|CLEAN) ;; *) return 0 ;; esac
   if gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1; then
     info "PR #${num}: human-approved + CI green — merged"
   else
@@ -11588,6 +11591,17 @@ _loop_pr_classify() {
       fi
       echo "loop_self"; return 0
       ;;
+    claude/*)
+      # Claude-agent-authored PRs are loop-owned for autonomous merge/rebase
+      # once green — same treatment as loop/* — so they close within a
+      # PR-loop tick instead of waiting on a human or a GHA bot review.
+      # CI-red claude/* PRs are deliberately NOT routed to background heal
+      # (no agent re-spawn); they fall through to the stale/eligible paths
+      # below so a human decides what to do with a failing run.
+      if [[ "$ci_state" != "failure" ]]; then
+        echo "loop_self"; return 0
+      fi
+      ;;
   esac
 
   case "$human_review" in
@@ -11595,7 +11609,10 @@ _loop_pr_classify() {
     APPROVED)          echo "blocked_human_approved";         return 0 ;;
   esac
 
-  if [ "$ci_state" = "failure" ] || [ "$mergeable" = "CONFLICTING" ] || [ "$mergeable" = "BEHIND" ]; then
+  # CONFLICTING is the GraphQL `mergeable` enum; DIRTY/BEHIND are
+  # `mergeStateStatus` values (_loop_pr_inbox feeds the latter). Accept both
+  # spellings so a conflicting/out-of-date PR is reliably routed to rebase.
+  if [ "$ci_state" = "failure" ] || [ "$mergeable" = "CONFLICTING" ] || [ "$mergeable" = "DIRTY" ] || [ "$mergeable" = "BEHIND" ]; then
     echo "stale"
     return 0
   fi
@@ -11785,7 +11802,12 @@ _loop_pr_rebase_stale() {
 #   spec name. Both coexist until Phase 2 collapses the inbox path.
 _loop_pr_merge_self_eager() {
   local num="$1" ci_state="$2" mergeable="$3" slug="$4"
-  [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ] || return 0
+  [ "$ci_state" = "success" ] || return 0
+  # Accept both the GraphQL `mergeable` enum (MERGEABLE) and the
+  # `mergeStateStatus` enum (CLEAN). _loop_pr_inbox feeds mergeStateStatus, so
+  # a ready-to-merge PR arrives as CLEAN in production — without it the eager
+  # merge never fired and self-PRs silently waited on repo-level auto-merge.
+  case "$mergeable" in MERGEABLE|CLEAN) ;; *) return 0 ;; esac
   gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1 \
     && info "PR #${num}: loop_self CI green — merged" \
     || warn "PR #${num}: loop_self merge failed — left open"
@@ -11837,7 +11859,7 @@ _loop_pr_inbox() {
       # All gates cleared (bot-approved + CI green + no conflicts) → merge directly.
       # Relying on repo-level auto-merge being configured is not reliable; loop
       # owns the decision here since it already ran the review.
-      if [ "$ci_state" = "success" ] && [ "$mergeable" = "MERGEABLE" ]; then
+      if [ "$ci_state" = "success" ] && { [ "$mergeable" = "MERGEABLE" ] || [ "$mergeable" = "CLEAN" ]; }; then
         gh -R "$slug" pr merge "$num" --squash --delete-branch >/dev/null 2>&1 \
           && info "PR #${num}: bot-approved + CI green — merged" \
           || warn "PR #${num}: merge failed (bot-approved + CI green) — left open"
@@ -11856,7 +11878,21 @@ _loop_pr_inbox() {
 
     case "$verdict" in
       loop_self)
-        _loop_pr_merge_self_eager "$num" "$ci_state" "$mergeable" "$slug"
+        # Green self-PR: merge when clean, else rebase onto main first. A
+        # loop/* or claude/* PR that fell BEHIND or now CONFLICTS with main can
+        # never auto-merge until rebased — eager-merge alone would leave it
+        # stuck open forever. Rebase is circuit-gated (≥3 attempts/24h → ALERT)
+        # and merges on a later tick once the rebased head is green + clean.
+        case "$mergeable" in
+          BEHIND|DIRTY|CONFLICTING)
+            if _loop_pr_rebase_circuit "$num"; then
+              _loop_pr_rebase_stale "$num" "$head_ref" || true
+            fi
+            ;;
+          *)
+            _loop_pr_merge_self_eager "$num" "$ci_state" "$mergeable" "$slug"
+            ;;
+        esac
         ;;
       loop_self_ci_red)
         # US-LOOP-062a: a red loop/* PR (classified by US-LOOP-049) is now

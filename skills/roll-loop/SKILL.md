@@ -157,7 +157,7 @@ Call `_loop_pr_inbox` after the pre-run CI check passes. It walks
 
 | Classification | Action |
 |---|---|
-| `loop_self` (head ref starts with `loop/`, CI not red) | Skip — let GitHub auto-merge handle it; never AI-review your own commit |
+| `loop_self` (head ref starts with `loop/` **or** `claude/`, CI not red) | `_loop_pr_merge_self_eager` — squash-merge directly when CI green + clean; if the PR is BEHIND/CONFLICTING with main, `_loop_pr_rebase_stale` rebases it first (circuit-gated) so it merges on a later tick. Never AI-review your own commit. (Agent-authored `claude/*` PRs are loop-owned the same way; a CI-red `claude/*` PR is **not** auto-healed — it falls through for a human to decide.) |
 | `loop_self_ci_red` (loop/* PR whose CI went red) | **US-LOOP-062a**: `_loop_pr_heal_self` — background-heal (per-PR lock + heal budget `ROLL_LOOP_HEAL_MAX`, default 2, via `_project_agent`); on `ROLL_LOOP_NO_HEAL=1` / budget exhausted → deduped `[TYPE:loop-pr-ci-red]` ALERT (never silently dropped) |
 | `blocked_human_request_changes` | Skip — last human review requested changes; wait for the author to push fixes |
 | `blocked_human_approved` | **US-LOOP-062b**: `_loop_pr_merge_approved` — merge directly (`gh pr merge --squash`) when CI green + mergeable, instead of relying on repo auto-merge (which may be off); merge failure is non-fatal (retried next tick) |

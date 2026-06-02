@@ -159,3 +159,116 @@ except pf.FetchError as e:
   [ "$status" -eq 0 ]
   [[ "$output" == *"FetchError"* ]]
 }
+
+# ─── US-VIEW-023: vendor registry tests ───────────────────────────────────────
+
+@test "parse_pricing_html: explicit anthropic vendor gives same result as default" {
+  run run_py '
+html = """
+<table>
+  <tr><td>Claude Opus 4.7 (claude-opus-4-7)</td><td>$5</td><td>$6.25</td><td>$0.50</td><td>$25</td></tr>
+</table>
+"""
+default_p = pf.parse_pricing_html(html)
+anthropic_p = pf.parse_pricing_html(html, vendor="anthropic")
+print("equal:", default_p == anthropic_p)
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"equal: True"* ]]
+}
+
+@test "parse_pricing_html: unknown vendor raises ParseError" {
+  run run_py '
+try:
+    pf.parse_pricing_html("<html></html>", vendor="nonexistent")
+    print("UNEXPECTED OK")
+except pf.ParseError as e:
+    print("ParseError:", str(e))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ParseError:"* ]]
+  [[ "$output" == *"unknown vendor"* ]]
+}
+
+@test "refresh: anthropic snapshot includes vendor and currency fields" {
+  run run_py "
+import json, os
+d = '${TMP}'
+html = '<table><tr><td>claude-opus-4-7</td><td>\$5</td><td>\$6.25</td><td>\$0.50</td><td>\$25</td></tr></table>'
+pf.refresh(snapshot_dir=d, html=html)
+files = [f for f in os.listdir(d) if f.startswith('snapshot-')]
+print('files:', len(files))
+data = json.load(open(os.path.join(d, files[0])))
+print('vendor:', data.get('vendor'))
+print('currency:', data.get('currency'))
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"files: 1"* ]]
+  [[ "$output" == *"vendor: anthropic"* ]]
+  [[ "$output" == *"currency: USD"* ]]
+}
+
+@test "refresh: deepseek placeholder parser raises ParseError" {
+  run run_py "
+d = '${TMP}'
+try:
+    pf.refresh(snapshot_dir=d, vendor='deepseek', html='<html>deepseek</html>')
+    print('UNEXPECTED OK')
+except pf.ParseError as e:
+    print('ParseError:', str(e))
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ParseError:"* ]]
+  [[ "$output" == *"deepseek parser not yet implemented"* ]]
+}
+
+@test "refresh: kimi placeholder parser raises ParseError" {
+  run run_py "
+d = '${TMP}'
+try:
+    pf.refresh(snapshot_dir=d, vendor='kimi', html='<html>kimi</html>')
+    print('UNEXPECTED OK')
+except pf.ParseError as e:
+    print('ParseError:', str(e))
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ParseError:"* ]]
+  [[ "$output" == *"kimi parser not yet implemented"* ]]
+}
+
+@test "_latest_snapshot_path: filters by vendor suffix" {
+  run run_py "
+import os, json
+d = '${TMP}'
+# Write three snapshots: anthropic (no suffix), deepseek, kimi
+for name, vendor, currency in [
+    ('snapshot-2099-01-01.json', 'anthropic', 'USD'),
+    ('snapshot-2099-01-02-deepseek.json', 'deepseek', 'CNY'),
+    ('snapshot-2099-01-03-kimi.json', 'kimi', 'CNY'),
+]:
+    path = os.path.join(d, name)
+    json.dump({'version':'2099-01-01','effective_at':'2099-01-01','source_url':'x','vendor':vendor,'currency':currency,'prices':{'m':{'in':1,'out':2,'cache_create':0.1,'cache_read':0.05}}}, open(path,'w'))
+
+print('anthropic:', os.path.basename(pf._latest_snapshot_path(d, vendor='anthropic') or ''))
+print('deepseek:', os.path.basename(pf._latest_snapshot_path(d, vendor='deepseek') or ''))
+print('kimi:', os.path.basename(pf._latest_snapshot_path(d, vendor='kimi') or ''))
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"anthropic: snapshot-2099-01-01.json"* ]]
+  [[ "$output" == *"deepseek: snapshot-2099-01-02-deepseek.json"* ]]
+  [[ "$output" == *"kimi: snapshot-2099-01-03-kimi.json"* ]]
+}
+
+@test "VENDOR_REGISTRY: contains expected vendors with correct currencies" {
+  run run_py '
+print("anthropic:", pf.VENDOR_REGISTRY["anthropic"].currency)
+print("deepseek:", pf.VENDOR_REGISTRY["deepseek"].currency)
+print("kimi:", pf.VENDOR_REGISTRY["kimi"].currency)
+print("keys:", sorted(pf.VENDOR_REGISTRY.keys()))
+'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"anthropic: USD"* ]]
+  [[ "$output" == *"deepseek: CNY"* ]]
+  [[ "$output" == *"kimi: CNY"* ]]
+  [[ "$output" == *"keys: ['anthropic', 'deepseek', 'kimi']"* ]]
+}

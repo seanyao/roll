@@ -10939,6 +10939,28 @@ _loop_backlog_sync_hook() {
   return 0
 }
 
+# FIX-160: check whether every dirty tracked file in .roll/ is a loop-generated
+# path. If so, meta_sync can proceed with a sparse checkout that leaves those
+# paths untouched. Human edits outside loop paths still trigger the FIX-145
+# skip-to-protect guard.
+_loop_meta_sync_is_loop_only_dirty() {
+  local roll_meta="$1"
+  local line path
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    path="${line#???}"
+    # Renames: "old -> new" — take the destination
+    case "$path" in
+      *" -> "*) path="${path#* -> }" ;;
+    esac
+    case "$path" in
+      signals/*|notes/*|cycle-logs/*|local.yaml) continue ;;
+      *) return 1 ;;
+    esac
+  done < <(git -C "$roll_meta" status --porcelain --untracked-files=no 2>/dev/null)
+  return 0
+}
+
 # Env override: ROLL_LOOP_META_SYNC_TIMEOUT (default 15) controls fetch timeout.
 _loop_sync_meta() {
   local project_path="$1"
@@ -10970,10 +10992,15 @@ _loop_sync_meta() {
   # reliably detects a just-written edit even on fast machines (a same-second
   # working-tree change can slip past `git diff --quiet` on CI). --untracked-files=no
   # keeps untracked files (safe from reset) from blocking the sync forever.
+  local _loop_only_dirty=0
   if git -C "$roll_meta" rev-parse --verify -q HEAD >/dev/null 2>&1 \
      && [ -n "$(git -C "$roll_meta" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-    _loop_event meta_sync "$cid" "dirty" "uncommitted .roll edits — sync skipped to protect local work" 2>/dev/null || true
-    return 0
+    if _loop_meta_sync_is_loop_only_dirty "$roll_meta"; then
+      _loop_only_dirty=1
+    else
+      _loop_event meta_sync "$cid" "dirty" "uncommitted .roll edits — sync skipped to protect local work" 2>/dev/null || true
+      return 0
+    fi
   fi
 
   # Attempt fetch with timeout
@@ -10985,12 +11012,20 @@ _loop_sync_meta() {
   fi
 
   if [ "$_fetch_ok" -eq 1 ]; then
-    if git -C "$roll_meta" reset --hard origin/main --quiet 2>/dev/null; then
-      _loop_event meta_sync "$cid" "ok" "" 2>/dev/null || true
-      # US-LOOP-057: reset consecutive failure counter on success
-      rm -f "$fail_counter" 2>/dev/null || true
-      return 0
+    if [ "$_loop_only_dirty" -eq 1 ]; then
+      # FIX-160: sparse sync — update source-of-truth paths from origin/main
+      # while preserving loop-generated产物 (signals, notes, cycle-logs, local.yaml)
+      # that would otherwise make .roll/ permanently dirty and block sync.
+      git -C "$roll_meta" checkout origin/main -- . ':!signals/' ':!notes/' ':!cycle-logs/' ':!local.yaml' 2>/dev/null || true
+      _loop_event meta_sync "$cid" "ok" "sparse-sync" 2>/dev/null || true
+    else
+      if git -C "$roll_meta" reset --hard origin/main --quiet 2>/dev/null; then
+        _loop_event meta_sync "$cid" "ok" "" 2>/dev/null || true
+      fi
     fi
+    # US-LOOP-057: reset consecutive failure counter on success
+    rm -f "$fail_counter" 2>/dev/null || true
+    return 0
   fi
 
   # Fetch or reset failed — stale .roll/ used; cycle continues

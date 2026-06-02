@@ -190,3 +190,108 @@ _make_roll_meta_repo() {
   fi
   unset ROLL_PROJECT_RUNTIME_DIR _SHARED_ROOT _LOOP_PROJ_SLUG
 }
+
+# ─── FIX-160: loop-generated dirty vs human dirty ─────────────────────────────
+
+@test "FIX-160: _loop_meta_sync_is_loop_only_dirty function exists in bin/roll" {
+  declare -f _loop_meta_sync_is_loop_only_dirty | grep -q "_loop_meta_sync_is_loop_only_dirty"
+}
+
+@test "FIX-160: loop-only dirty proceeds with sparse sync, backlog updates" {
+  local proj="${TEST_TMP}/proj-loop-dirty"
+  _make_roll_meta_repo "$proj"
+
+  # Seed remote with loop产物 files so they are tracked in the clone
+  local remote_dir="${TEST_TMP}/roll-meta-remote"
+  local tmp_clone="${TEST_TMP}/seed-clone-fix160"
+  git clone "$remote_dir" "$tmp_clone" -q 2>/dev/null
+  mkdir -p "${tmp_clone}/signals" "${tmp_clone}/notes"
+  echo "candidates" > "${tmp_clone}/signals/candidates.md"
+  echo "note1" > "${tmp_clone}/notes/note.md"
+  echo "agent: claude" > "${tmp_clone}/local.yaml"
+  git -C "$tmp_clone" add .
+  git -C "$tmp_clone" -c "user.email=t@t" -c "user.name=T" commit -m "add loop产物" -q
+  git -C "$tmp_clone" push origin main -q 2>/dev/null || true
+
+  # Re-clone .roll/ so it has the tracked loop产物 files
+  rm -rf "${proj}/.roll"
+  git clone "$remote_dir" "${proj}/.roll" -q 2>/dev/null
+
+  # Update remote backlog (simulate roll-meta advancing)
+  echo "UPDATED BACKLOG" > "${tmp_clone}/backlog.md"
+  git -C "$tmp_clone" add backlog.md
+  git -C "$tmp_clone" -c "user.email=t@t" -c "user.name=T" commit -m "update backlog" -q
+  git -C "$tmp_clone" push origin main -q 2>/dev/null || true
+
+  # Simulate loop writing to a loop产物 file (dirty but loop-only)
+  echo "loop wrote this" >> "${proj}/.roll/signals/candidates.md"
+
+  export CYCLE_ID="test-cycle-loop-dirty"
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/rt-loop-dirty"
+  mkdir -p "$ROLL_PROJECT_RUNTIME_DIR"
+  run _loop_sync_meta "$proj"
+  [ "$status" -eq 0 ]
+
+  # Backlog must have been updated (sparse sync worked)
+  grep -q "UPDATED BACKLOG" "${proj}/.roll/backlog.md"
+
+  # Loop产物 must survive (not overwritten by remote)
+  grep -q "loop wrote this" "${proj}/.roll/signals/candidates.md"
+
+  # Event must show ok with sparse-sync detail
+  local evfile="${ROLL_PROJECT_RUNTIME_DIR}/events.ndjson"
+  [ -f "$evfile" ]
+  grep -q '"meta_sync"' "$evfile"
+  grep -q '"ok"' "$evfile"
+  grep -q '"sparse-sync"' "$evfile"
+
+  unset ROLL_PROJECT_RUNTIME_DIR
+}
+
+@test "FIX-160: mixed dirty (human + loop) still skips sync" {
+  local proj="${TEST_TMP}/proj-mixed-dirty"
+  _make_roll_meta_repo "$proj"
+
+  # Seed remote with a loop产物 file
+  local remote_dir="${TEST_TMP}/roll-meta-remote"
+  local tmp_clone="${TEST_TMP}/seed-clone-fix160b"
+  git clone "$remote_dir" "$tmp_clone" -q 2>/dev/null
+  mkdir -p "${tmp_clone}/signals"
+  echo "candidates" > "${tmp_clone}/signals/candidates.md"
+  git -C "$tmp_clone" add .
+  git -C "$tmp_clone" -c "user.email=t@t" -c "user.name=T" commit -m "add signals" -q
+  git -C "$tmp_clone" push origin main -q 2>/dev/null || true
+
+  rm -rf "${proj}/.roll"
+  git clone "$remote_dir" "${proj}/.roll" -q 2>/dev/null
+
+  # Update remote backlog
+  echo "REMOTE BACKLOG" > "${tmp_clone}/backlog.md"
+  git -C "$tmp_clone" add backlog.md
+  git -C "$tmp_clone" -c "user.email=t@t" -c "user.name=T" commit -m "update backlog" -q
+  git -C "$tmp_clone" push origin main -q 2>/dev/null || true
+
+  # Simulate loop writing to loop产物 AND human editing backlog
+  echo "loop wrote this" >> "${proj}/.roll/signals/candidates.md"
+  echo "HUMAN EDIT" >> "${proj}/.roll/backlog.md"
+
+  export CYCLE_ID="test-cycle-mixed-dirty"
+  export ROLL_PROJECT_RUNTIME_DIR="${TEST_TMP}/rt-mixed-dirty"
+  mkdir -p "$ROLL_PROJECT_RUNTIME_DIR"
+  run _loop_sync_meta "$proj"
+  [ "$status" -eq 0 ]
+
+  # Human edit must survive (sync skipped)
+  grep -q "HUMAN EDIT" "${proj}/.roll/backlog.md"
+
+  # Remote update must NOT have been applied
+  ! grep -q "REMOTE BACKLOG" "${proj}/.roll/backlog.md"
+
+  # Event must show dirty
+  local evfile="${ROLL_PROJECT_RUNTIME_DIR}/events.ndjson"
+  [ -f "$evfile" ]
+  grep -q '"meta_sync"' "$evfile"
+  grep -q '"dirty"' "$evfile"
+
+  unset ROLL_PROJECT_RUNTIME_DIR
+}

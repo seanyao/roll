@@ -8879,7 +8879,6 @@ if _worktree_fetch_origin main \\
   ROLL_LOOP_ROUTED_RULE=""
   ROLL_LOOP_ROUTE_RATIONALE=""
   ROLL_LOOP_FALLBACK_FROM=""
-  ( cd "\$WT" >/dev/null 2>&1 && ROLL_LOOP_ROUTED_STORY=\$(_loop_pick_next_story 2>/dev/null) || true )
   ROLL_LOOP_ROUTED_STORY=\$( (cd "\$WT" 2>/dev/null && _loop_pick_next_story 2>/dev/null) || echo "" )
   # FIX-146: close TOCTOU window — if the picked story became ineligible between
   # pick and agent handoff, re-pick once rather than idling on a stale route.
@@ -8888,6 +8887,15 @@ if _worktree_fetch_origin main \\
       echo "[loop] story \${ROLL_LOOP_ROUTED_STORY} stale — became ineligible after pick; re-picking"
       _loop_event story_stale "\${CYCLE_ID}" "\${ROLL_LOOP_ROUTED_STORY}" "" || true
       ROLL_LOOP_ROUTED_STORY=\$( (cd "\$WT" 2>/dev/null && _loop_pick_next_story 2>/dev/null) || echo "" )
+    fi
+  fi
+  # FIX-161: hard assertion before handoff — if the story is still not 📋 Todo
+  # after all re-picks, clear it so the cycle idles rather than routing garbage.
+  if [ -n "\$ROLL_LOOP_ROUTED_STORY" ]; then
+    if ! (cd "\$WT" 2>/dev/null && _loop_story_is_eligible "\$ROLL_LOOP_ROUTED_STORY" 2>/dev/null); then
+      echo "[loop] FIX-161: story \${ROLL_LOOP_ROUTED_STORY} is not Todo after handoff guard — clearing"
+      _loop_event story_stale "\${CYCLE_ID}" "\${ROLL_LOOP_ROUTED_STORY}" "FIX-161 handoff guard" || true
+      ROLL_LOOP_ROUTED_STORY=""
     fi
   fi
   if [ -n "\$ROLL_LOOP_ROUTED_STORY" ]; then
@@ -11356,7 +11364,7 @@ _loop_check_depends_on() {
   [ -n "$row" ] || return 1
 
   local deps
-  deps=$(echo "$row" | grep -oE 'depends-on:[A-Z][A-Z0-9,-]+' | head -1 | sed 's/depends-on://')
+  deps=$(echo "$row" | grep -oE 'depends-on:[A-Z][A-Z0-9,-]+' | head -1 | sed 's/depends-on://' || true)
   [ -n "$deps" ] || return 0
 
   local unsatisfied=""
@@ -13269,11 +13277,10 @@ _loop_story_is_eligible() {
   row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
   [ -n "$row" ] || return 1
 
-  # Gate 0: status == 📋 Todo
-  case "$row" in
-    *'📋 Todo'*) ;;
-    *) return 1 ;;
-  esac
+  # Gate 0: status == 📋 Todo (check the last column, not anywhere in the row)
+  local _status
+  _status=$(printf '%s\n' "$row" | awk -F'|' '{for(i=NF;i>=1;i--) if($i ~ /[^ \t]/) {gsub(/^[ \t]+|[ \t]+$/, "", $i); print $i; exit}}')
+  [ "$_status" = "📋 Todo" ] || return 1
 
   # Gate 1: manual-only
   _loop_is_manual_only "$id" "$backlog" 2>/dev/null && return 1
@@ -13323,7 +13330,10 @@ _loop_pick_next_story() {
         *) continue ;;
       esac
       # Extract id like FIX-XXX-NNN / US-XXX-NNN / REFACTOR-XXX-NNN.
-      id=$(printf '%s\n' "$line" | grep -oE "${prefix}-[A-Za-z0-9_-]+" | head -1)
+      # FIX-161: only look in the first column (between the first two '|'),
+      # never in the description, to avoid routing a Done story whose id
+      # happens to appear in a Todo row's description.
+      id=$(printf '%s\n' "$line" | awk -F'|' '{print $2}' | grep -oE "${prefix}-[A-Za-z0-9_-]+" | head -1)
       [ -n "$id" ] || continue
       if _loop_story_is_eligible "$id" "$backlog" "$_open_pr_titles" 2>/dev/null; then
         printf '%s\n' "$id"

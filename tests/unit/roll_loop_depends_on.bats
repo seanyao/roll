@@ -97,6 +97,15 @@ teardown() {
   [ "$status" -eq 0 ]   # US-AUTO-036 has no depends-on
 }
 
+@test "_loop_check_depends_on: no depends-on under set -e pipefail → returns 0" {
+  # FIX-161: the grep pipeline inside the function used to return 1 when no
+  # depends-on tag exists; with set -e active that crashed the caller.
+  source "$ROLL_BIN"
+  set -e
+  set -o pipefail
+  _loop_check_depends_on "US-AUTO-100" "$_backlog"
+}
+
 # --- _loop_is_manual_only ---
 
 @test "_loop_is_manual_only: row with manual-only:true returns 0" {

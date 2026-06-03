@@ -10512,7 +10512,7 @@ _legacy_loop_status() {
         echo -e "    ${YELLOW}loop     ⏸ paused${NC}${_dur}   run: roll loop resume"
       else
         local _tick_age=""
-        case "$svc" in pr|ci|alert)
+        case "$svc" in pr|ci|alert|consistency)
           _tick_age=$(_loop_tick_age "$svc")
           [ -n "$_tick_age" ] && _tick_age="  tick ${_tick_age}"
         esac

@@ -229,6 +229,9 @@ EOF
 
 @test "cmd_changelog: default (no args) runs generate (US-CL-008)" {
   mkdir -p .roll
+  # FIX-178: force AI styling to no-op (unknown agent → deterministic fallback)
+  # so the dispatch test never makes a real agent call.
+  echo 'agent: __none__' > .roll.yaml
   cat > .roll/backlog.md <<'EOF'
 # Backlog
 | Story | Description | Status |
@@ -237,6 +240,36 @@ EOF
   run cmd_changelog
   [ "$status" -eq 0 ]
   [[ "$output" == *"Unreleased"* ]]
+}
+
+@test "FIX-178: generate AI-styles the draft via the configured agent" {
+  mkdir -p .roll
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [US-FOO-001](x.md) | 新增一键安装 | ✅ Done |
+EOF
+  # Stub the default configured agent (claude) with a fake that emits a styled draft.
+  local fake="${TEST_TMP}/fakebin"; mkdir -p "$fake"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'printf "## Unreleased\n\n### 新功能\n\n- **AI润色标题(US-FOO-001)** — 说明\n"' > "$fake/claude"
+  chmod +x "$fake/claude"
+  PATH="$fake:$PATH" run cmd_changelog generate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AI润色标题"* ]]
+}
+
+@test "FIX-178: generate falls back to deterministic draft when agent unavailable" {
+  mkdir -p .roll
+  echo 'agent: __none__' > .roll.yaml
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [US-FOO-001](x.md) | 新增一键安装 | ✅ Done |
+EOF
+  run cmd_changelog generate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"新增一键安装"* ]]
 }
 
 # ─── US-CL-007: merged PR gap detection ──────────────────────────────────────

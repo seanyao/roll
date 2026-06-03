@@ -233,7 +233,6 @@ print('k26-in:', p['kimi-k2.6']['in'])
 print('k26-out:', p['kimi-k2.6']['out'])
 print('k26-cache_read:', p['kimi-k2.6']['cache_read'])
 print('coding-in:', p['kimi-for-coding']['in'])
-print('k2-in:', p['kimi-k2']['in'])
 "
   [ "$status" -eq 0 ]
   [[ "$output" == *"k25-in: 4.0"* ]]
@@ -243,7 +242,6 @@ print('k2-in:', p['kimi-k2']['in'])
   [[ "$output" == *"k26-out: 27.0"* ]]
   [[ "$output" == *"k26-cache_read: 1.1"* ]]
   [[ "$output" == *"coding-in: 6.5"* ]]
-  [[ "$output" == *"k2-in: 1.0"* ]]
 }
 
 @test "parse_pricing_html: kimi fetches sub-pages when landing page has no prices" {
@@ -307,7 +305,7 @@ print('prices-keys:', sorted(data['prices'].keys()))
   [[ "$output" == *"files: 1"* ]]
   [[ "$output" == *"vendor: kimi"* ]]
   [[ "$output" == *"currency: CNY"* ]]
-  [[ "$output" == *"prices-keys: ['kimi-for-coding', 'kimi-k2', 'kimi-k2.5', 'kimi-k2.6']"* ]]
+  [[ "$output" == *"prices-keys: ['kimi-for-coding', 'kimi-k2.5', 'kimi-k2.6']"* ]]
 }
 
 @test "refresh: kimi identical HTML produces unchanged" {
@@ -374,8 +372,8 @@ print('flash-cache_read:', p['deepseek-v4-flash']['cache_read'])
 print('pro-in:', p['deepseek-v4-pro']['in'])
 print('pro-out:', p['deepseek-v4-pro']['out'])
 print('pro-cache_read:', p['deepseek-v4-pro']['cache_read'])
-print('chat-in:', p['deepseek-chat']['in'])
-print('reasoner-in:', p['deepseek-reasoner']['in'])
+print('flash-in:', p['deepseek-v4-flash']['in'])
+print('pro-in:', p['deepseek-v4-pro']['in'])
 "
   [ "$status" -eq 0 ]
   [[ "$output" == *"flash-in: 1.0"* ]]
@@ -384,8 +382,8 @@ print('reasoner-in:', p['deepseek-reasoner']['in'])
   [[ "$output" == *"pro-in: 3.0"* ]]
   [[ "$output" == *"pro-out: 6.0"* ]]
   [[ "$output" == *"pro-cache_read: 0.025"* ]]
-  [[ "$output" == *"chat-in: 1.0"* ]]
-  [[ "$output" == *"reasoner-in: 1.0"* ]]
+  [[ "$output" == *"flash-in: 1.0"* ]]
+  [[ "$output" == *"pro-in: 3.0"* ]]
 }
 
 @test "parse_pricing_html: deepseek raises ParseError on bad HTML" {

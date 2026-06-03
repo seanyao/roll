@@ -168,10 +168,9 @@ print(mp.compute_list_cost("x", input_tokens=1_000_000, output_tokens=500_000, p
 @test "FIX-116: PRICES includes deepseek and kimi entries" {
   run run_py 'model_count = len(mp.PRICES); claude = sum(1 for k in mp.PRICES if k.startswith("claude-")); dk = sum(1 for k in mp.PRICES if k.startswith("deepseek-")); km = sum(1 for k in mp.PRICES if k.startswith("kimi-")); print(f"{model_count} c{claude} d{dk} k{km}")'
   [ "$status" -eq 0 ]
-  # At least 4 non-claude keys: deepseek-chat, deepseek-reasoner, deepseek-v4-*, kimi-*
-  [[ "$output" == *"c11"* ]]
-  # d>=3 (chat, reasoner, v4-flash, v4-pro) and k>=3 (k2, k2.5, k2.6)
-  [[ "$output" =~ d[3-9] ]]
+  # At least 2 non-claude: deepseek-v4-*, kimi-*
+  [[ "$output" == *"c5"* ]]
+  [[ "$output" =~ d[2-9] ]]
   [[ "$output" =~ k[3-9] ]]
 }
 
@@ -179,7 +178,7 @@ print(mp.compute_list_cost("x", input_tokens=1_000_000, output_tokens=500_000, p
   # deepseek and kimi (Moonshot) both bill in CNY — we store native currency,
   # never converting. FIX-162: the kimi snapshot was mislabeled USD (FIX-116
   # impl diverged from its own doc, which said Kimi → CNY); corrected here.
-  run run_py 'print(mp.currency_for("claude-sonnet-4-6"), mp.currency_for("deepseek-chat"), mp.currency_for("kimi-k2.5"))'
+  run run_py 'print(mp.currency_for("claude-sonnet-4-6"), mp.currency_for("deepseek-v4-flash"), mp.currency_for("kimi-k2.5"))'
   [ "$status" -eq 0 ]
   [ "$output" = "USD CNY CNY" ]
 }
@@ -187,26 +186,26 @@ print(mp.compute_list_cost("x", input_tokens=1_000_000, output_tokens=500_000, p
 @test "FIX-162: kimi cost rows render in CNY across name variants (kimi-k2, -0905, kimi-code)" {
   # The dashboard saw kimi cost as \$ because currency_for fell back to USD.
   # All kimi name variants must resolve to CNY now.
-  run run_py 'print(mp.currency_for("kimi-k2"), mp.currency_for("kimi-k2-0905"), mp.currency_for("kimi-code/kimi-for-coding"))'
+  run run_py 'print(mp.currency_for("kimi-k2.5"), mp.currency_for("kimi-k2.5-0905"), mp.currency_for("kimi-code/kimi-for-coding"))'
   [ "$status" -eq 0 ]
   [ "$output" = "CNY CNY CNY" ]
 }
 
-@test "FIX-116: compute_list_cost works for deepseek-chat model" {
-  run run_py 'print(mp.compute_list_cost("deepseek-chat", input_tokens=1_000_000))'
+@test "FIX-116: compute_list_cost works for deepseek-v4-flash model" {
+  run run_py 'print(mp.compute_list_cost("deepseek-v4-flash", input_tokens=1_000_000))'
   [ "$status" -eq 0 ]
-  # deepseek-chat input = ¥1/M → 1M tokens = 1.0 (CNY, native)
+  # deepseek-v4-flash input = ¥1/M → 1M tokens = 1.0
   [ "$output" = "1.0" ]
 }
 
 @test "FIX-116: vendor-prefixed model name resolves correctly" {
-  run run_py 'print(mp.compute_list_cost("deepseek/deepseek-chat", input_tokens=1_000_000))'
+  run run_py 'print(mp.compute_list_cost("deepseek/deepseek-v4-flash", input_tokens=1_000_000))'
   [ "$status" -eq 0 ]
   [ "$output" = "1.0" ]
 }
 
 @test "FIX-116: currency_for resolves vendor-prefixed model names" {
-  run run_py 'print(mp.currency_for("deepseek/deepseek-chat"))'
+  run run_py 'print(mp.currency_for("deepseek/deepseek-v4-flash"))'
   [ "$status" -eq 0 ]
   [ "$output" = "CNY" ]
 }

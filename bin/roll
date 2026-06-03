@@ -8424,6 +8424,56 @@ ALERTRUNNER
   chmod +x "$script_path"
 }
 
+# _write_consistency_loop_runner_script <script_path> <project_path> <roll_bin> <log_path>
+#   US-CONSIST-006: the script the com.roll.consistency.<slug> launchd plist runs
+#   every 60 min. Mirrors _write_ci_loop_runner_script — lightweight (no agent,
+#   no tmux): portable PATH, a single-flight re-entry lock (pid+ts, 120-min
+#   staleness so a crashed pass self-heals next tick), then drives the
+#   _consistency_scan orchestrator via the `roll _consistency_scan` dispatch.
+_write_consistency_loop_runner_script() {
+  local script_path="$1" project_path="$2" roll_bin="$3" log_path="$4"
+  mkdir -p "$(dirname "$script_path")"
+  local lock="${project_path}/.roll/loop/.consistency-loop.lock"
+  local slug; slug=$(_project_slug "${project_path}")
+  cat > "$script_path" << CONSRUNNER
+#!/bin/bash -l
+set -o pipefail
+# Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
+for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
+  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
+done
+export PATH
+# Single-flight re-entry guard: one consistency-loop pass at a time.
+# 60-min cadence; 120-min (7200s) staleness so a crashed/hung pass
+# self-heals on the next tick.
+LOCK="${lock}"
+mkdir -p "\$(dirname "\$LOCK")"
+if [ -f "\$LOCK" ]; then
+  _pp=""; _pt=""
+  IFS=: read -r _pp _pt < "\$LOCK" 2>/dev/null || true
+  _now=\$(date -u +%s)
+  if [ -n "\$_pp" ] && [ -n "\$_pt" ] && kill -0 "\$_pp" 2>/dev/null && [ "\$((_now - _pt))" -lt 7200 ]; then
+    exit 0
+  fi
+  rm -f "\$LOCK"
+fi
+printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$LOCK"
+trap 'rm -f "\$LOCK"' EXIT
+cd "${project_path}" || exit 0
+# FIX-171: bake the project-local runtime dir directly; do not rely on
+# _loop_runtime_dir which may fail to resolve in fresh shells. Set
+# _LOOP_ALERT so the dispatched roll writes to the project-local ALERT file,
+# but do not override an externally-supplied value (test sandboxes).
+_LOOP_RT_DIR="${project_path}/.roll/loop"
+if [ -d "\$_LOOP_RT_DIR" ]; then
+  : "\${_LOOP_ALERT:=\${_LOOP_RT_DIR}/ALERT-${slug}.md}"
+  export _LOOP_ALERT
+fi
+bash "${roll_bin}" _consistency_scan >> "${log_path}" 2>&1 || true
+CONSRUNNER
+  chmod +x "$script_path"
+}
+
 # Like _write_runner_script but prepends an active window guard.
 # Silently exits when current hour is outside [active_start, active_end).
 # When tmux is available, wraps the inner command in a detached tmux session
@@ -9748,7 +9798,7 @@ _install_launchd_plists() {
   local shared="${_SHARED_ROOT}"
 
   mkdir -p "$_LAUNCHD_DIR"
-  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief" "${shared}/pr" "${shared}/ci" "${shared}/alert"
+  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief" "${shared}/pr" "${shared}/ci" "${shared}/alert" "${shared}/consistency"
 
   local active_start active_end dream_hour dream_minute brief_hour brief_minute loop_period loop_offset
   local _aw; _aw=$(_loop_read_active_window "$project_path")
@@ -9770,11 +9820,14 @@ _install_launchd_plists() {
   # → StartInterval=300). No skill (it drives _ci_scan, not an agent).
   # US-AUTO-046: "alert" is the 6th service — a 1-min Alert Loop (period=1, empty
   # hour → StartInterval=60). No skill (it drives _alert_dispatch, not an agent).
-  local services=("loop" "dream" "brief" "pr" "ci" "alert")
-  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "" "" "")
-  local periods=("$loop_period" "60" "60" "5" "5" "1")
-  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0" "0" "0")
-  local hours=("" "$dream_hour" "$brief_hour" "" "" "")
+  # US-CONSIST-006: "consistency" is the 7th service — a 60-min Consistency Loop
+  # (period=60, empty hour → StartInterval=3600). No skill (it drives
+  # _consistency_scan, not an agent).
+  local services=("loop" "dream" "brief" "pr" "ci" "alert" "consistency")
+  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "" "" "" "")
+  local periods=("$loop_period" "60" "60" "5" "5" "1" "60")
+  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0" "0" "0" "0")
+  local hours=("" "$dream_hour" "$brief_hour" "" "" "" "")
 
   local updated=0
   local slug; slug=$(_project_slug "$project_path")
@@ -9821,6 +9874,13 @@ _install_launchd_plists() {
       local alert_log="${project_path}/.roll/loop/alert.log"
       mkdir -p "${project_path}/.roll/loop"
       _write_alert_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$alert_log"
+    elif [[ "$svc" == "consistency" ]]; then
+      # US-CONSIST-006: lightweight Consistency Loop runner — drives
+      # _consistency_scan every 60 min (no agent, no tmux). Runs the
+      # consistency check, diffs gaps, creates IDEA entries + ALERT.
+      local cons_log="${project_path}/.roll/loop/consistency.log"
+      mkdir -p "${project_path}/.roll/loop"
+      _write_consistency_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$cons_log"
     else
       # IDEA-051: dream/brief cron logs are project-local, mirroring loop (FIX-139).
       local log="${project_path}/.roll/${svc}/cron.log"
@@ -12764,6 +12824,128 @@ _ci_scan() {
   _ci_detect_flaky
   _ci_detect_degradation
   _loop_write_tick "ci" "acted" "scan_done"
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# US-CONSIST-006: dedicated Consistency Loop helpers (loop-safe, pure bash)
+# ═══════════════════════════════════════════════════════════════════════════════
+# These consume the existing `roll consistency check --json` orchestrator.
+# _consistency_scan is the main entry point the Consistency Loop runner drives
+# every 60 min. It runs the check, diffs gaps against a state file, creates
+# IDEA backlog entries for new gaps, and writes ALERT if any new gap is found.
+# Each helper is unit-tested in tests/unit/roll_loop_consistency.bats.
+
+# _consistency_state_file
+#   Echo the path to the consistency loop's gap-state file (project-local).
+#   The file records previously-seen gaps so we only act on new ones.
+_consistency_state_file() {
+  local slug; slug=$(_project_slug 2>/dev/null || basename "$PWD")
+  local rt_dir
+  rt_dir=$(_loop_runtime_dir "$slug" 2>/dev/null || echo "")
+  if [ -n "$rt_dir" ]; then
+    echo "${rt_dir}/consistency-state.txt"
+  else
+    echo "${_SHARED_ROOT:-$HOME/.shared/roll}/loop/consistency-state-${slug}.txt"
+  fi
+}
+
+# _consistency_create_idea <dimension> <gap_description>
+#   Append an IDEA-NNN row to .roll/backlog.md's Ideas table.  Idempotent:
+#   if a 📋 Todo row with the same description already exists, skip.
+#   Echoes the new ID on success, "skip" if already queued.  Returns 0 always.
+_consistency_create_idea() {
+  local dim="$1" title="$2"
+  [ -n "$dim" ] && [ -n "$title" ] || return 0
+
+  local backlog=".roll/backlog.md"
+  [ -f "$backlog" ] || { echo "skip"; return 0; }
+
+  # Idempotency: same title already queued as Todo → skip.
+  if grep -F "$title" "$backlog" 2>/dev/null | grep -q '📋 Todo'; then
+    echo "skip"
+    return 0
+  fi
+
+  # Auto-increment IDEA-NNN from max existing.
+  local max next
+  max=$(grep -oE 'IDEA-[0-9]+' "$backlog" 2>/dev/null \
+        | sed 's/IDEA-//' \
+        | sort -n | tail -1)
+  case "$max" in ''|*[!0-9]*) max=0 ;; esac
+  next=$((10#$max + 1))
+  local id
+  id=$(printf 'IDEA-%03d' "$next")
+
+  # Ensure the Ideas table heading exists; if not, append a minimal section.
+  if ! grep -q '## 💡 Ideas' "$backlog" 2>/dev/null; then
+    printf '\n## 💡 Ideas\n| ID | Description | Status |\n|----|-------------|--------|\n' >> "$backlog"
+  fi
+
+  printf '| %s | [%s] consistency gap: %s | 📋 Todo |\n' "$id" "$dim" "$title" >> "$backlog"
+  echo "$id"
+  return 0
+}
+
+# _consistency_scan
+#   US-CONSIST-006 orchestrator: the entry the Consistency Loop runner drives
+#   every 60 min. Runs `consistency check --json`, diffs gaps against the
+#   state file, creates IDEA backlog entries and ALERT for new gaps.
+#   Lenient on check failure (missing python3 / jq → return 0) so the
+#   service never errors out a tick.
+_consistency_scan() {
+  # Run consistency check orchestrator
+  local result
+  result=$(python3 "${ROLL_PKG_DIR}/lib/consistency_check.py" --json 2>/dev/null) || {
+    _loop_write_tick "consistency" "idle" "check_failed"
+    return 0
+  }
+  [ -n "$result" ] || { _loop_write_tick "consistency" "idle" "empty_result"; return 0; }
+
+  # Is jq available? If not, lenient skip.
+  command -v jq >/dev/null 2>&1 || { _loop_write_tick "consistency" "idle" "no_jq"; return 0; }
+
+  # Extract gaps as TAB-separated lines: dimension<tab>gap_description
+  local gaps
+  gaps=$(echo "$result" | jq -r '
+    .dimensions | to_entries[] |
+    .key as $dim | .value.gaps[]? |
+    "\($dim)\t\(.)"
+  ' 2>/dev/null)
+
+  [ -n "$gaps" ] || { _loop_write_tick "consistency" "idle" "no_gaps"; return 0; }
+
+  # Load previous gaps from state file
+  local state_file; state_file=$(_consistency_state_file)
+  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
+  local prev_gaps=""
+  [ -f "$state_file" ] && prev_gaps=$(cat "$state_file")
+
+  # Diff: find new gaps (not in previous state)
+  local new_gaps=0
+  local line dim gap_text
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    if ! printf '%s\n' "$prev_gaps" | grep -qF "$line" 2>/dev/null; then
+      new_gaps=$((new_gaps + 1))
+      dim=$(printf '%s' "$line" | cut -f1)
+      gap_text=$(printf '%s' "$line" | cut -f2-)
+      _consistency_create_idea "$dim" "$gap_text" >/dev/null
+    fi
+  done <<< "$gaps"
+
+  # Save current gaps for next diff
+  printf '%s\n' "$gaps" > "$state_file"
+
+  if [ "$new_gaps" -gt 0 ]; then
+    # Write ALERT for new gaps
+    local ts; ts=$(date +"%Y-%m-%dT%H:%M:%S%z")
+    local alert_msg="[${ts}] [warn] [TYPE:consistency-gap] consistency loop found ${new_gaps} new gap(s). Run 'roll consistency check' to review."
+    printf '%s\n' "$alert_msg" >> "${_LOOP_ALERT:-/dev/null}" 2>/dev/null || true
+    _loop_write_tick "consistency" "acted" "found_${new_gaps}_new_gaps"
+  else
+    _loop_write_tick "consistency" "idle" "no_new_gaps"
+  fi
   return 0
 }
 
@@ -15947,6 +16129,7 @@ main() {
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;
     _ci_scan) _ci_scan "$@" ;;
+    _consistency_scan) _consistency_scan "$@" ;;
     _alert_dispatch) _alert_dispatch "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;

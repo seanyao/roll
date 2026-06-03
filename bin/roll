@@ -13269,6 +13269,174 @@ _loop_ideation_scan() {
   return 0
 }
 
+# US-AUTO-048: ideation convert — take candidates from _loop_ideation_scan and
+# auto-convert simple ones to US via roll-design, with peer-review gate for
+# borderline candidates.
+# Args: [backlog-path] [agent]
+# Side effects: spawns agent for each candidate, updates backlog, emits events.
+_loop_ideation_convert() {
+  local backlog="${1:-.roll/backlog.md}"
+  local agent="${2:-$(_project_agent)}"
+
+  local scan_json
+  scan_json=$(_loop_ideation_scan "$backlog")
+  [ "$scan_json" = "[]" ] && {
+    _loop_event ideation_convert "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "no_candidates" "" 2>/dev/null || true
+    return 0
+  }
+
+  if ! command -v jq >/dev/null 2>&1; then
+    _loop_event ideation_convert "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "jq_missing" "" 2>/dev/null || true
+    return 0
+  fi
+
+  local count
+  count=$(echo "$scan_json" | jq 'length')
+  [ "${count:-0}" -eq 0 ] && return 0
+
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    local idea_id verdict peer reason
+    idea_id=$(echo "$scan_json" | jq -r ".[$i].id")
+    verdict=$(echo "$scan_json" | jq -r ".[$i].verdict")
+    peer=$(echo "$scan_json" | jq -r ".[$i].peer")
+    reason=$(echo "$scan_json" | jq -r ".[$i].reason")
+
+    if [ "$verdict" = "manual" ]; then
+      _loop_event ideation_skip "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$idea_id" "$reason" 2>/dev/null || true
+      i=$((i + 1))
+      continue
+    fi
+
+    # Borderline candidate: peer gate
+    if [ "$peer" = "true" ]; then
+      local peer_verdict
+      peer_verdict=$(_loop_ideation_peer "$idea_id" "$agent" "$backlog")
+      case "$peer_verdict" in
+        AGREE) ;;
+        *)
+          _loop_ideation_add_note "$backlog" "$idea_id" "peer ${peer_verdict}: 保留 IDEA"
+          _loop_event ideation_skip "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$idea_id" "peer_${peer_verdict}" 2>/dev/null || true
+          i=$((i + 1))
+          continue
+          ;;
+      esac
+    fi
+
+    # Convert via roll-design
+    if _loop_ideation_design "$idea_id" "$agent"; then
+      # Verify backlog was annotated
+      if _loop_ideation_was_converted "$backlog" "$idea_id"; then
+        _loop_event ideation_convert "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$idea_id" "converted" 2>/dev/null || true
+      else
+        _loop_event ideation_fail "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$idea_id" "no_backlog_annotation" 2>/dev/null || true
+      fi
+    else
+      _loop_event ideation_fail "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$idea_id" "design_failed" 2>/dev/null || true
+    fi
+
+    i=$((i + 1))
+  done
+}
+
+# Spawn agent with roll-design skill to convert one IDEA to US.
+# Args: idea_id agent
+# Returns 0 if agent exits 0, 1 otherwise.
+_loop_ideation_design() {
+  local idea_id="${1:-}" agent="${2:-$(_project_agent)}"
+  [ -n "$idea_id" ] || return 1
+
+  local skill_path="${ROLL_HOME}/skills/roll-design/SKILL.md"
+  [ -f "$skill_path" ] || { warn "roll-design skill not found"; return 1; }
+
+  local skill_body
+  skill_body=$(_skill_content "$skill_path")
+
+  local prompt
+  prompt="--from-idea ${idea_id}
+
+[roll 自主模式] 你正在无人值守的自动化循环中运行,这不是对话。请立即、完整地执行下面这份技能文档描述的工作流,直到完成交付或写出 ALERT 为止;严禁反问、严禁等待确认、严禁只复述或总结而不动手。技能文档如下:
+
+${skill_body}"
+
+  _agent_argv "$agent" plain "$prompt" || return 1
+  _agent_bypass_claude_perms
+  "${_AGENT_ARGV[@]}" >/dev/null 2>&1
+}
+
+# Ask an agent to peer-review a borderline IDEA.
+# Args: idea_id agent backlog
+# stdout: AGREE or OBJECT
+_loop_ideation_peer() {
+  local idea_id="${1:-}" agent="${2:-$(_project_agent)}" backlog="${3:-.roll/backlog.md}"
+  [ -n "$idea_id" ] || { echo "OBJECT"; return 0; }
+
+  local desc
+  desc=$(grep -E "^\|.*\[${idea_id}\]" "$backlog" 2>/dev/null | awk -F'|' '{print $3}' | sed 's/^[ \t]*//;s/[ \t]*$//')
+  [ -n "$desc" ] || desc="(no description)"
+
+  local prompt
+  prompt="[IDEATION PEER REVIEW]
+IDEA: ${idea_id}
+描述: ${desc}
+
+请判断这个 IDEA 是否适合自动转成 US 待办(简单、范围明确、无高风险)。只回答一个词: AGREE 或 OBJECT。不要解释。"
+
+  _agent_argv "$agent" text "$prompt" || { echo "OBJECT"; return 0; }
+
+  local out
+  out=$(mktemp)
+  "${_AGENT_ARGV[@]}" > "$out" 2>/dev/null
+  local response
+  response=$(cat "$out" 2>/dev/null | tr '[:lower:]' '[:upper:]')
+  rm -f "$out"
+
+  case "$response" in
+    *AGREE*) echo "AGREE" ;;
+    *) echo "OBJECT" ;;
+  esac
+}
+
+# Add a parenthetical note to an IDEA row's description column.
+# Args: backlog idea_id note
+_loop_ideation_add_note() {
+  local backlog="${1:-}" idea_id="${2:-}" note="${3:-}"
+  [ -f "$backlog" ] || return 0
+  [ -n "$idea_id" ] || return 0
+  [ -n "$note" ] || return 0
+
+  # Use python3 for a robust multi-column edit (already a project dependency).
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "
+import sys
+idea_id = sys.argv[1]
+note = sys.argv[2]
+with open(sys.argv[3], 'r') as f:
+    lines = f.readlines()
+with open(sys.argv[3], 'w') as f:
+    for line in lines:
+        if idea_id in line and line.strip().startswith('|'):
+            parts = line.split('|')
+            if len(parts) >= 4:
+                desc = parts[2].strip()
+                if note not in desc:
+                    parts[2] = ' ' + desc + ' (' + note + ') '
+                    line = '|'.join(parts)
+        f.write(line)
+" "$idea_id" "$note" "$backlog"
+  fi
+}
+
+# Check whether an IDEA row has been annotated with → US-XXX.
+# Args: backlog idea_id
+# exit 0 if converted, 1 otherwise.
+_loop_ideation_was_converted() {
+  local backlog="${1:-}" idea_id="${2:-}"
+  [ -f "$backlog" ] || return 1
+  [ -n "$idea_id" ] || return 1
+  grep -q "\[${idea_id}\].*→ US-" "$backlog" 2>/dev/null
+}
+
 # US-AGENT-030: transparent, auditable in-tier soft nudge.
 #
 # `_loop_tier_nudge SLOT_AGENT TIER STORY_TYPE` — on top of the est_min tier
@@ -15341,6 +15509,7 @@ main() {
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;
     _loop_ideation_scan) _loop_ideation_scan "$@" ;;
+    _loop_ideation_convert) _loop_ideation_convert "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

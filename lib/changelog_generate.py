@@ -137,24 +137,33 @@ def _lint_bullet(bullet: str) -> list[str]:
     return viols
 
 
-def _format_bullet(desc: str, source: str) -> str:
-    tag = f" [{source}]" if source else ""
-    return f"- {desc}{tag}"
+def _format_bullet(desc: str, source: str, story_id: str = "") -> str:
+    """Render one clean changelog bullet (deterministic & idempotent, FIX-178):
+
+        - <description>（<ID>） `[source]`
+
+    The story id is appended at the END (never spliced into the sentence) so it
+    is always traceable / audit-matchable without ever mangling the prose. The
+    bold-headline polish in the project's voice is applied by a separate AI pass
+    (configured agent) on top of this raw bullet — deterministic prose splitting
+    on punctuation mangles parentheses/arrows, so it is intentionally avoided.
+    """
+    tag = f" `[{source}]`" if source else ""
+    idref = f"（{story_id}）" if story_id and story_id not in desc else ""
+    return f"- {desc}{idref}{tag}"
 
 
 def _build_draft(groups: dict[str, list[tuple[str, str, str]]]) -> str:
+    # FIX-178: emit clean styled bullets only — lint markers are a separate
+    # concern (stderr summary in main), never inlined into the deliverable.
     lines = ["## Unreleased", ""]
     for cat in CATEGORY_ORDER:
         if cat not in groups:
             continue
         lines.append(f"### {cat}")
         lines.append("")
-        for _story_id, desc, source in groups[cat]:
-            bullet = _format_bullet(desc, source)
-            viols = _lint_bullet(bullet)
-            if viols:
-                bullet += f"  # lint: {', '.join(viols)}"
-            lines.append(bullet)
+        for story_id, desc, source in groups[cat]:
+            lines.append(_format_bullet(desc, source, story_id))
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -411,6 +420,13 @@ def main() -> int:
     if not filtered and not uncarded:
         print("# No new ✅ Done stories found for CHANGELOG.")
         return 0
+
+    # FIX-178: style-lint warnings go to STDERR so the stdout draft stays clean
+    # (no inline `# lint:` markers in the deliverable). The human still sees them.
+    for story_id, desc, source, _cat in filtered:
+        viols = _lint_bullet(_format_bullet(desc, source, story_id))
+        if viols:
+            print(f"lint: {story_id or '?'}: {', '.join(viols)}", file=sys.stderr)
 
     if filtered:
         groups: dict[str, list[tuple[str, str, str]]] = {}

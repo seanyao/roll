@@ -5571,27 +5571,122 @@ cmd_prices() {
   esac
 }
 
+# FIX-178: AI-style a deterministic changelog draft into the project voice via
+# the configured agent (roll agent use). Content-preserving polish only — same
+# items + (ID)s, bold-lead style anchored on the last 3 released versions. Echoes
+# the styled draft on success; empty output on any failure so the caller falls
+# back to the deterministic raw draft. Bounded by a 150s watchdog (macOS lacks
+# timeout(1)). Uses the same agent path as peer review (_agent_argv).
+_changelog_ai_style() {
+  local raw="$1"
+  [ -n "$raw" ] || return 1
+  local agent; agent=$(_project_agent)
+  local anchors; anchors=$(_changelog_style_anchors CHANGELOG.md 2>/dev/null || true)
+  local prompt
+  prompt="你是 roll 的 changelog 编辑。把【原始草稿】改写成发布说明,严格遵守:
+1) 不增删条目、不改事实;每条保留它的(ID)。只润色措辞。
+2) 每条格式:\`- **简短标题(ID)** — 补充说明\`;若原条目结尾有 \`[loop]\` 则保留。
+3) 保留每个 ### 分类标题与分组。只输出 markdown,从 '## Unreleased' 开始,前后不要任何解释。
+
+【风格锚点·最近版本】
+${anchors}
+
+【原始草稿】
+${raw}"
+  _agent_argv "$agent" text "$prompt" 2>/dev/null || return 1
+  _agent_bypass_claude_perms
+  local out; out=$(mktemp)
+  "${_AGENT_ARGV[@]}" >"$out" 2>/dev/null &
+  local pid=$!
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 1; waited=$((waited + 1))
+    if [ "$waited" -ge 150 ]; then
+      kill "$pid" 2>/dev/null; sleep 1; kill -9 "$pid" 2>/dev/null; break
+    fi
+  done
+  wait "$pid" 2>/dev/null
+  # Normalize agent chrome before extracting: some agents (e.g. kimi) prefix the
+  # rendered answer with a "• " marker and indent the body. Changelog markdown is
+  # flat (##, ###, -, blank), so stripping a leading "• " and any leading
+  # whitespace is safe and is a no-op for plain agents (e.g. claude -p). Then
+  # keep from the first '## Unreleased' line onward (drops any preamble).
+  sed -E 's/^[[:space:]]*•[[:space:]]?//; s/^[[:space:]]+//' "$out" \
+    | awk '/^## Unreleased/{f=1} f{print}'
+  rm -f "$out"
+}
+
+# FIX-178: replace (or insert) the ## Unreleased section of CHANGELOG.md with
+# the given draft (which itself begins with '## Unreleased'). getline-from-file
+# keeps the multi-line draft intact.
+_changelog_write_unreleased() {
+  local draft="$1" cl="${2:-CHANGELOG.md}"
+  local dfile; dfile=$(mktemp); printf '%s\n' "$draft" > "$dfile"
+  local tmp; tmp=$(mktemp)
+  if [ -f "$cl" ] && grep -q '^## Unreleased' "$cl"; then
+    awk -v df="$dfile" '
+      /^## Unreleased/ && !done { while ((getline line < df) > 0) print line; print ""; skip=1; done=1; next }
+      skip && /^## / { skip=0 }
+      skip { next }
+      { print }
+    ' "$cl" > "$tmp"
+  else
+    { [ -f "$cl" ] && head -1 "$cl" || echo "# Changelog"; echo; cat "$dfile"; echo;
+      [ -f "$cl" ] && tail -n +2 "$cl"; } > "$tmp"
+  fi
+  mv "$tmp" "$cl"; rm -f "$dfile"
+}
+
 # FIX-113: changelog audit — list PRs merged to main since latest release
 # tag that don't appear in CHANGELOG.md's ## Unreleased section.
 # US-CL-006: changelog generate — deterministic draft from backlog Done stories.
+# FIX-178: generate now AI-styles the deterministic draft via the configured
+# agent by default (content-preserving); --no-ai / --json stay deterministic.
 cmd_changelog() {
   local subcmd="${1:-generate}"
   shift || true
   case "$subcmd" in
     generate)
-      python3 "${ROLL_PKG_DIR}/lib/changelog_generate.py" "$@"
+      local want_ai=1 to_write=0 is_json=0 pyargs=()
+      local a
+      for a in "$@"; do
+        case "$a" in
+          --no-ai) want_ai=0 ;;
+          --write) to_write=1 ;;
+          --json)  is_json=1; want_ai=0; pyargs+=("$a") ;;
+          *)       pyargs+=("$a") ;;
+        esac
+      done
+      local raw
+      raw=$(python3 "${ROLL_PKG_DIR}/lib/changelog_generate.py" "${pyargs[@]}") || return 1
+      if [ "$is_json" = 1 ]; then printf '%s\n' "$raw"; return 0; fi
+      local final="$raw"
+      if [ "$want_ai" = 1 ]; then
+        local styled; styled=$(_changelog_ai_style "$raw" 2>/dev/null || true)
+        if [ -n "$styled" ] && printf '%s' "$styled" | grep -q '^- '; then
+          final="$styled"
+        else
+          warn "changelog: AI 润色不可用/失败,输出确定性草稿(可加 --no-ai 跳过)"
+        fi
+      fi
+      if [ "$to_write" = 1 ]; then
+        _changelog_write_unreleased "$final"
+        info "Updated CHANGELOG.md"
+      else
+        printf '%s\n' "$final"
+      fi
       ;;
     --help|-h|help)
       cat <<EOF
-Usage: roll changelog <subcommand>
+Usage: roll changelog generate [options]
 
-  generate [--write] [--json]           从 backlog 生成草稿
-    Extract ✅ Done stories from .roll/backlog.md, filter internal entries,
-    apply lint, and produce a draft ## Unreleased section.
+  从 backlog ✅ Done 故事 + 上次发布以来的提交,生成 ## Unreleased 发布说明。
+  默认用配置的 agent(roll agent use)按项目风格润色;失败自动回退确定性草稿。
 
-  roll changelog generate               # preview draft to stdout
-  roll changelog generate --write       # append draft to CHANGELOG.md
-  roll changelog generate --json        # machine-readable
+  roll changelog generate               # 预览(AI 润色)
+  roll changelog generate --write       # 写入 CHANGELOG.md(AI 润色)
+  roll changelog generate --no-ai       # 仅确定性草稿,不调 AI
+  roll changelog generate --json        # 机器可读(确定性)
 EOF
       ;;
     *)

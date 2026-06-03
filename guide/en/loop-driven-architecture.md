@@ -42,17 +42,18 @@ Roll coordinates AI agents differently. Instead of a central planner and a share
 ```
          BACKLOG  ←──────── shared state ────────→  git / PRs / alerts
             │
-    ┌───────┼────────┬──────────────┬───────────┐
-    ▼       ▼        ▼              ▼           ▼
-main loop  PR loop  CI loop    alert loop   doc loop
-  30min     5min     5min        1min         1day
-  deliver   merge    monitor    notify       sync
-  stories   PRs      CI runs    humans       docs
+    ┌───────┼────────┬──────────┐
+    ▼       ▼        ▼          ▼
+main loop  PR loop  dream     brief
+  30min     5min     daily     daily
+  deliver   heal +  scan      digest
+  stories   rebase + code
+            merge
 ```
 
 Each loop:
-1. **Polls** a specific artifact (BACKLOG, open PRs, CI runs, alert file)
-2. **Acts** on what it finds (write code, merge, rerun, notify)
+1. **Polls** a specific artifact (BACKLOG, open PRs, alert file)
+2. **Acts** on what it finds (write code, heal CI, merge)
 3. **Writes back** to shared artifacts (commits, PR comments, BACKLOG updates)
 4. **Sleeps** until next interval
 

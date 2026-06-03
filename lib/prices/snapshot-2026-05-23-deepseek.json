@@ -7,8 +7,6 @@
   "default_model": "deepseek-chat",
   "notes": "Rates per million tokens in CNY (¥) — DeepSeek's native billing currency; we never convert to USD (the dashboard already shows the currency symbol). deepseek-chat and deepseek-reasoner are both deepseek-v4-flash with different thinking modes — same pricing. deepseek-v4-pro is priced at in 3 / out 6 — the earlier 2.5折 launch promo became permanent (confirmed 2026-06-02 against the official page), so these are the standing rates, not a temporary discount. cache_read is the official cache-hit input price (reduced to 1/10 of launch price since 2026-04-26). cache_create = cache-miss input rate: DeepSeek levies no separate cache-write surcharge, and pi reports cacheWrite cost as 0, so this rate only ever applies to (near-zero) cacheWrite tokens. pi's own per-message cost.total is computed in USD and is kept as cost_reported_usd for audit, NOT used for the authoritative cost.",
   "prices": {
-    "deepseek-chat":        {"in": 1, "out": 2, "cache_create": 1, "cache_read": 0.02},
-    "deepseek-reasoner":    {"in": 1, "out": 2, "cache_create": 1, "cache_read": 0.02},
     "deepseek-v4-flash":    {"in": 1, "out": 2, "cache_create": 1, "cache_read": 0.02},
     "deepseek-v4-pro":      {"in": 3, "out": 6, "cache_create": 3, "cache_read": 0.025}
   }

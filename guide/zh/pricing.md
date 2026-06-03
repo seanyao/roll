@@ -8,21 +8,29 @@ dashboard（`roll loop status` / `roll loop monitor`）在每轮 cycle 显示两
 
 | 列 | 含义 |
 |----|------|
-| **model** | 使用的 agent + 版本（如 `opus-4-7`、`sonnet-4-6`），决定了哪套价格生效 |
-| **cost** | `$` 金额，按公开单价 × 该轮实际 token 用量计算 |
+| **model** | 使用的 agent + 版本（如 `deepseek-v4-pro`、`claude-sonnet-4-6`），决定了哪套价格生效 |
+| **cost** | 按公开单价 × 该轮实际 token 用量计算。币种跟随厂商：Anthropic 显示 `$`（USD），DeepSeek / Kimi 显示 `¥`（CNY） |
 
 Roll 通过**价格快照文件**（而非硬编码常量）查询单价。快照存放在 Roll 安装目录下的 `lib/prices/` 中。
+
+## 支持的厂商
+
+| 厂商 | 币种 | 数据来源 |
+|------|------|----------|
+| Anthropic (Claude) | USD | `platform.claude.com/docs/en/about-claude/pricing` |
+| DeepSeek | CNY | `api-docs.deepseek.com/zh-cn/quick_start/pricing/` |
+| Kimi (Moonshot) | CNY | `platform.kimi.com/docs/pricing/chat` |
 
 ## `roll prices` 命令
 
 ```bash
-roll prices show        # 打印当前价格快照表
-roll prices refresh     # 拉取官方定价文档、对比、有变化才落新快照
+roll prices show        # 打印当前所有厂商的价格快照表
+roll prices refresh     # 拉取所有厂商官方定价文档、对比、有变化才落新快照
 ```
 
 ### `roll prices show`
 
-打印当前生效快照的元数据（版本号、生效日期、数据来源）和所有已知模型的每百万 token 单价表：
+打印当前生效快照的元数据和所有已知模型的每百万 token 单价表：
 
 ```
 in       基础输入 token
@@ -31,11 +39,12 @@ cw       缓存写入 token（单价比输入略高）
 cr       缓存读取 token（单价极低）
 ```
 
-所有费率单位：**每百万 token，USD**。
+费率单位：**每百万 token，厂商本地币种**。
 
 ### `roll prices refresh`
 
-从模型厂商拉取官方定价页面（默认：Anthropic），解析价格表，与本地最新快照对比。
+从各厂商拉取官方定价页面，解析价格表，与本地最新快照对比。支持按厂商刷新：
+`roll prices refresh anthropic|deepseek|kimi`。
 
 - **价格有变** → 写入新快照文件（`snapshot-YYYY-MM-DD.json`），终端打印 diff（红色减、绿色加），dashboard 下次渲染时自动使用新价格。
 - **无变化** → 打印 `up to date` 后退出。

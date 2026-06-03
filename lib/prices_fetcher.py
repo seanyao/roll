@@ -162,12 +162,6 @@ def _parse_deepseek_html(html: str) -> Dict[str, Dict[str, float]]:
     if not prices:
         raise ParseError('no price rows found in HTML; page layout may have changed')
 
-    # Aliases: deepseek-chat and deepseek-reasoner both map to v4-flash.
-    if 'deepseek-v4-flash' in prices:
-        flash = prices['deepseek-v4-flash']
-        prices['deepseek-chat'] = dict(flash)
-        prices['deepseek-reasoner'] = dict(flash)
-
     return prices
 
 
@@ -212,13 +206,6 @@ def _parse_kimi_html(html: str) -> Dict[str, Dict[str, float]]:
     if prices:
         if "kimi-k2.6" in prices:
             prices["kimi-for-coding"] = dict(prices["kimi-k2.6"])
-        if "kimi-k2" not in prices:
-            prices["kimi-k2"] = {
-                "in": 1.00,
-                "out": 4.00,
-                "cache_create": 1.00,
-                "cache_read": 0.25,
-            }
         return prices
 
     sub_urls = [
@@ -238,13 +225,7 @@ def _parse_kimi_html(html: str) -> Dict[str, Dict[str, float]]:
 
     if "kimi-k2.6" in prices:
         prices["kimi-for-coding"] = dict(prices["kimi-k2.6"])
-    if "kimi-k2" not in prices:
-        prices["kimi-k2"] = {
-            "in": 1.00,
-            "out": 4.00,
-            "cache_create": 1.00,
-            "cache_read": 0.25,
-        }
+
     return prices
 
 

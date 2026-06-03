@@ -7,7 +7,6 @@
   "default_model": "kimi-k2.6",
   "notes": "Rates per million tokens (CNY), verified 2026-06-02 against the official Kimi platform pricing pages (pricing/chat-k25 + pricing/chat-k26). Corrects the 2026-05-23 snapshot, which had copied the original-K2 rate (1/4) onto EVERY kimi model — real K2.5 is 4/21, K2.6 is 6.5/27, so the current models' cost was under-reported ~5-7x on output. Field convention: `in` = standard (cache-miss) input price; `cache_read` = cache-hit input price; `cache_create` = cache-miss input rate (Kimi documents no separate cache-write surcharge, mirroring DeepSeek). kimi-for-coding is the kimi-code CLI's model id; the CLI config pins it to K2.6 (display_name Kimi-k2.6, default_thinking=true, base_url api.kimi.com/coding/v1), so it is priced at K2.6 rates. NOTE: kimi-code is a coding *subscription*; these per-token rates are the published K2.6 API rates used as a usage-cost estimate, not the flat subscription fee. kimi-k2 is the prior-gen original K2, retained at its launch rate (1/4) for currency resolution of legacy name variants; it is no longer on the public pricing page and is not actually billed — only kimi-for-coding (K2.6) is.",
   "prices": {
-    "kimi-k2":         {"in": 1.00, "out": 4.00,  "cache_create": 1.00, "cache_read": 0.25},
     "kimi-k2.5":       {"in": 4.00, "out": 21.00, "cache_create": 4.00, "cache_read": 0.70},
     "kimi-k2.6":       {"in": 6.50, "out": 27.00, "cache_create": 6.50, "cache_read": 1.10},
     "kimi-for-coding": {"in": 6.50, "out": 27.00, "cache_create": 6.50, "cache_read": 1.10}

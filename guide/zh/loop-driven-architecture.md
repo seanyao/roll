@@ -42,17 +42,18 @@ Roll 采用不同的协调方式。没有中心规划器，没有共享执行图
 ```
          BACKLOG  ←──────── 共享状态 ────────→  git / PR / alert
             │
-    ┌───────┼────────┬──────────────┬───────────┐
-    ▼       ▼        ▼              ▼           ▼
-主 loop  PR loop  CI loop    alert loop   doc loop
-  30min    5min     5min        1min         1天
-  交付     合并     监控         通知         同步
-  story    PR       CI           人类         文档
+    ┌───────┼────────┬──────────┐
+    ▼       ▼        ▼          ▼
+主 loop  PR loop  dream     brief
+  30min    5min     daily     daily
+  交付     heal +   扫描     摘要
+  story    rebase + 代码
+           merge
 ```
 
 每个 Loop：
-1. **轮询**特定 artifact（BACKLOG、open PR、CI run、alert 文件）
-2. **行动**（写代码、合 PR、重跑 CI、发通知）
+1. **轮询**特定 artifact（BACKLOG、open PR、alert 文件）
+2. **行动**（写代码、heal CI、合 PR）
 3. **写回**共享 artifact（提交、PR 评论、BACKLOG 更新）
 4. **休眠**直到下一个周期
 

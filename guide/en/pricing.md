@@ -12,23 +12,31 @@ columns per cycle:
 
 | Column | What it means |
 |--------|---------------|
-| **model** | Agent + version used (e.g. `opus-4-7`, `sonnet-4-6`). Drives which price rates apply. |
-| **cost** | `$` amount computed at public per-token rates × token usage recorded for that cycle. |
+| **model** | Agent + version used (e.g. `deepseek-v4-pro`, `claude-sonnet-4-6`). Drives which price rates apply. |
+| **cost** | Cost computed at public per-token rates × token usage. Currency follows the vendor: `$` for Anthropic (USD), `¥` for DeepSeek and Kimi (CNY). |
 
-Roll uses a **price snapshot** file (not hardcoded constants) to look up rates.
-The snapshot lives in `lib/prices/` under your Roll install directory.
+Roll uses **price snapshots** (not hardcoded constants) to look up rates.
+Snapshots live in `lib/prices/` under your Roll install directory.
+
+## Supported Vendors
+
+| Vendor | Currency | Source |
+|--------|----------|--------|
+| Anthropic (Claude) | USD | `platform.claude.com/docs/en/about-claude/pricing` |
+| DeepSeek | CNY | `api-docs.deepseek.com/zh-cn/quick_start/pricing/` |
+| Kimi (Moonshot) | CNY | `platform.kimi.com/docs/pricing/chat` |
 
 ## `roll prices` Command
 
 ```bash
-roll prices show        # Print the current price snapshot table
-roll prices refresh     # Fetch the official pricing docs, diff, write new snapshot if changed
+roll prices show        # Print the current price table (all vendors)
+roll prices refresh     # Fetch official pricing docs for all vendors, diff, write if changed
 ```
 
 ### `roll prices show`
 
-Prints the active snapshot's metadata (version, effective date, source URL)
-and a table of all known models with their per-million-token rates:
+Prints the active snapshots' metadata and a table of all known models with
+their per-million-token rates:
 
 ```
 in       Base input tokens
@@ -37,12 +45,13 @@ cw       Cache write tokens (billed at a premium over input)
 cr       Cache read tokens (billed at a deep discount)
 ```
 
-All rates are **per million tokens, in USD**.
+Rates are **per million tokens**, in the vendor's native currency.
 
 ### `roll prices refresh`
 
-Fetches the official pricing page from the model vendor (default: Anthropic),
-parses the rate table, and diffs it against the latest local snapshot.
+Fetches the official pricing page from each vendor, parses the rate table,
+and diffs it against the latest local snapshot. Supports per-vendor refresh:
+`roll prices refresh anthropic|deepseek|kimi`.
 
 - **Rates changed** → writes a new snapshot file (`snapshot-YYYY-MM-DD.json`),
   prints a diff (red = removed, green = added), and the dashboard picks up the

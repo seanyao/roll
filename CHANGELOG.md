@@ -1,10 +1,36 @@
 # Changelog
 
-## Unreleased
+## v2.604.1
 
-### 工程和测试
+### PR Loop 重构
 
-- **一致性检查骨架(US-CONSIST-001)** — 新增 `lib/consistency_check.py` 统一编排入口，按五维（代码、文档、i18n、测试、网站）产出结构化 gap 报告，为后续发版闸和专职 loop 打基础
+- **统一 PR Loop 分类（CI 唯一门禁）** — 移除分支名特殊处理和 review 门禁，所有 PR 一视同仁：落后→rebase，CI 红→heal，CI 绿→合
+- **删除 CI / Alert / Brief Loop** — 6 条服务精简为 3 条（loop、dream、pr），PR Loop 接管 CI 监控和 heal
+- **rebase 后立刻合并** — rebase 完成后同轮重取 PR 状态，可合则合，不再等下一轮 tick
+- **rebase 先于 heal** — 落后且有 CI 故障的 PR 先 rebase 再判断是否需要 heal
+- **修复 rebase 丢失远程 commit** — fetch 后 `checkout -B origin/ref` 再 rebase，不再静默销毁他人推送的 commit
+- **修复 BASHPID bash 3.2 兼容** — `${BASHPID:-$$}` 回退，heal 不再崩溃
+
+### 价格系统
+
+- **移除硬编码 parser alias + 精简模型 19→10** — 删除 deepseek-chat/reasoner 别名、kimi-k2 保底，移除已退役的 claude 旧模型
+- **`roll prices refresh` 支持多厂商** — 可按 `anthropic|deepseek|kimi` 分别刷新
+
+### 修复
+
+- **修复 `cmd_review_pr` — `gh pr view --json diff` 在任何已发布版本中不存在，改用 `gh pr diff`
+- **修复 orphan 结果覆盖** — 允许 `runs.jsonl` 纠正 `cycle_end(orphan)`，成功交付不再显示 `·`
+- **修复 changelog generate pyargs bash 3.2 兼容** — 空参数不再 panic
+
+### 文档
+
+- **loop 架构图更新** — 6→3 loop + PR Loop 统一行为
+- **价格文档更新** — 多厂商、多币种（USD + CNY）
+
+### backlog 维护
+
+- **自制 `→ v3` 标记统一改为正式 `🚫 Deferred` 状态**
+- **推迟 ideation loop 系列（US-AUTO-047..050）至 v3**
 
 ## v2.603.1
 

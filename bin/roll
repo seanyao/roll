@@ -12039,7 +12039,21 @@ _loop_pr_inbox() {
         ;;
       stale)
         _loop_pr_rebase_circuit "$num" || true
-        _loop_pr_rebase_stale "$num" "$head_ref" || true
+        if _loop_pr_rebase_stale "$num" "$head_ref" || true; then
+          # Re-fetch PR state after rebase — if now clean, merge immediately.
+          local _re_view
+          _re_view=$(gh -R "$slug" pr view "$num" --json mergeStateStatus,statusCheckRollup 2>/dev/null) || true
+          if [ -n "$_re_view" ]; then
+            local _re_ci _re_mb
+            _re_ci=$(echo "$_re_view" | jq -r '
+              if (.statusCheckRollup | length) == 0 then ""
+              elif any(.statusCheckRollup[]?; .conclusion == "FAILURE") then "failure"
+              elif all(.statusCheckRollup[]?; .conclusion == "SUCCESS" or .conclusion == "SKIPPED") then "success"
+              else "pending" end' 2>/dev/null)
+            _re_mb=$(echo "$_re_view" | jq -r '.mergeStateStatus // ""' 2>/dev/null)
+            _loop_pr_merge_self_eager "$num" "$_re_ci" "$_re_mb" "$slug"
+          fi
+        fi
         ;;
       ready)
         _loop_pr_merge_self_eager "$num" "$ci_state" "$mergeable" "$slug"

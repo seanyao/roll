@@ -13252,9 +13252,13 @@ _loop_ideation_scan() {
 # and routes: manual (skip), direct (convert), peer-required (peer then convert).
 # Conversion hooks (_ideation_direct_convert / _ideation_peer_convert) are
 # overrideable for testing. Events emitted via _loop_event when available.
-# Args: <candidates-json>
+# Args: [candidates-json] — if omitted, reads from stdin (pipeline-friendly).
 _loop_ideation_convert() {
-  local candidates="$1"
+  local candidates="${1:-}"
+  # Read from stdin when no arg given
+  if [ -z "$candidates" ]; then
+    candidates=$(cat)
+  fi
 
   if [ -z "$candidates" ] || [ "$candidates" = "[]" ]; then
     _loop_write_tick "ideation" "idle" "no_candidates" 2>/dev/null || true

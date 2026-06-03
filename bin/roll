@@ -13248,6 +13248,132 @@ _loop_ideation_scan() {
   return 0
 }
 
+# US-AUTO-048: ideation conversion — takes candidates from _loop_ideation_scan
+# and routes: manual (skip), direct (convert), peer-required (peer then convert).
+# Conversion hooks (_ideation_direct_convert / _ideation_peer_convert) are
+# overrideable for testing. Events emitted via _loop_event when available.
+# Args: <candidates-json>
+_loop_ideation_convert() {
+  local candidates="$1"
+
+  if [ -z "$candidates" ] || [ "$candidates" = "[]" ]; then
+    _loop_write_tick "ideation" "idle" "no_candidates" 2>/dev/null || true
+    return 0
+  fi
+
+  local count
+  count=$(echo "$candidates" | jq 'length' 2>/dev/null || echo 0)
+  [ "${count:-0}" -gt 0 ] || { _loop_write_tick "ideation" "idle" "zero_candidates" 2>/dev/null || true; return 0; }
+
+  local i=0 converted=0 skipped_manual=0 peer_count=0
+  while [ "$i" -lt "$count" ]; do
+    local id verdict reason peer
+    id=$(echo "$candidates" | jq -r ".[$i].id")
+    verdict=$(echo "$candidates" | jq -r ".[$i].verdict")
+    reason=$(echo "$candidates" | jq -r ".[$i].reason")
+    peer=$(echo "$candidates" | jq -r ".[$i].peer")
+
+    case "$verdict" in
+      manual)
+        echo "[ideation] skip ${id}: ${reason}"
+        if declare -F _loop_event >/dev/null 2>&1; then
+          _loop_event "ideation_skip" "${LOOP_CYCLE_ID:-ideation}" "$id" "manual: ${reason}" || true
+        fi
+        skipped_manual=$((skipped_manual + 1))
+        ;;
+      candidate)
+        if [ "$peer" = "true" ]; then
+          echo "[ideation] peer required: ${id} (${reason})"
+          if declare -F _loop_event >/dev/null 2>&1; then
+            _loop_event "ideation_peer" "${LOOP_CYCLE_ID:-ideation}" "$id" "${reason}" || true
+          fi
+          _ideation_peer_convert "$id" "$reason" || true
+          peer_count=$((peer_count + 1))
+        else
+          echo "[ideation] converting: ${id} (${reason})"
+          _ideation_direct_convert "$id" "$reason" || true
+          converted=$((converted + 1))
+        fi
+        ;;
+    esac
+    i=$((i + 1))
+  done
+
+  _loop_write_tick "ideation" "acted" "converted=${converted},skipped_manual=${skipped_manual},peer=${peer_count}" 2>/dev/null || true
+  return 0
+}
+
+# Hook: direct conversion of a simple IDEA candidate.
+# Default: emit a plan line. Override in agent context to invoke roll-design --from-idea.
+_ideation_direct_convert() {
+  local idea_id="$1" reason="${2:-}"
+  _loop_ideation_mark_converting "$idea_id" || true
+  echo "[ideation] plan: Skill(roll-design, --from-idea ${idea_id}) — ${reason}"
+}
+
+# Hook: peer-then-convert for boundary IDEA candidates.
+# Default: emit a plan line + mark for peer. Override in agent context.
+_ideation_peer_convert() {
+  local idea_id="$1" reason="${2:-}"
+  _loop_ideation_mark_peer "$idea_id" || true
+  echo "[ideation] plan: Skill(roll-peer, ${idea_id}) then Skill(roll-design, --from-idea ${idea_id}) — ${reason}"
+}
+
+# Mark an IDEA row as 🔨 Converting in the main project's backlog.
+# Idempotent: no-op when backlog or row is missing.
+_loop_ideation_mark_converting() {
+  local idea_id="$1"
+  local backlog="${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md"
+  [ -f "$backlog" ] || return 0
+  # Replace only the status column (the last | cell) for the matching IDEA row.
+  # Match on IDEA id in column 2 and "📋 Todo" in the trailing column.
+  if command -v gsed >/dev/null 2>&1; then
+    gsed -i "s/|\\(.*${idea_id}.*|.*\\)| 📋 Todo |/|\\1| 🔨 Converting |/" "$backlog"
+  else
+    local tmp; tmp=$(mktemp)
+    sed "s/| \\(.*${idea_id}.*|.*\\)| 📋 Todo |/| \\1| 🔨 Converting |/" "$backlog" > "$tmp"
+    mv "$tmp" "$backlog"
+  fi
+}
+
+# Mark an IDEA row as 🔍 Peer Review in the main project's backlog.
+_loop_ideation_mark_peer() {
+  local idea_id="$1"
+  local backlog="${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md"
+  [ -f "$backlog" ] || return 0
+  if command -v gsed >/dev/null 2>&1; then
+    gsed -i "s/|\\(.*${idea_id}.*|.*\\)| 📋 Todo |/|\\1| 🔍 Peer Review |/" "$backlog"
+  else
+    local tmp; tmp=$(mktemp)
+    sed "s/| \\(.*${idea_id}.*|.*\\)| 📋 Todo |/| \\1| 🔍 Peer Review |/" "$backlog" > "$tmp"
+    mv "$tmp" "$backlog"
+  fi
+}
+
+# Mark an IDEA row as ✅ 已转 <us-id> after successful conversion.
+_loop_ideation_mark_done() {
+  local idea_id="$1" us_id="${2:-}"
+  local backlog="${ROLL_MAIN_PROJECT:-$PWD}/.roll/backlog.md"
+  [ -f "$backlog" ] || return 0
+  local marker
+  if [ -n "$us_id" ]; then
+    marker="✅ 已转 ${us_id}"
+  else
+    marker="✅ 已转"
+  fi
+  # Replace any intermediate status (🔨 Converting / 🔍 Peer Review) with done marker
+  if command -v gsed >/dev/null 2>&1; then
+    gsed -i "s/|\\(.*${idea_id}.*|.*\\)| 🔨 Converting |/|\\1| ${marker} |/" "$backlog"
+    gsed -i "s/|\\(.*${idea_id}.*|.*\\)| 🔍 Peer Review |/|\\1| ${marker} |/" "$backlog"
+  else
+    local tmp; tmp=$(mktemp)
+    sed "s/| \\(.*${idea_id}.*|.*\\)| 🔨 Converting |/| \\1| ${marker} |/" "$backlog" > "$tmp"
+    mv "$tmp" "$backlog"
+    sed "s/| \\(.*${idea_id}.*|.*\\)| 🔍 Peer Review |/| \\1| ${marker} |/" "$backlog" > "$tmp"
+    mv "$tmp" "$backlog"
+  fi
+}
+
 # FIX-070: flip a story row in the main repo's .roll/backlog.md between
 # 📋 Todo and 🔨 In Progress. The cycle worktree is gitignored at .roll/,
 # so editing the worktree copy + committing leaves no trace in git — and
@@ -16232,6 +16358,7 @@ main() {
     _consistency_scan) _consistency_scan "$@" ;;
     _alert_dispatch) _alert_dispatch "$@" ;;
     _loop_ideation_scan) _loop_ideation_scan "$@" ;;
+    _loop_ideation_convert) _loop_ideation_convert "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

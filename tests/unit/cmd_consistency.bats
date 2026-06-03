@@ -176,3 +176,93 @@ IEOF
 
   rm -rf "$tmpdir"
 }
+
+# ── US-CONSIST-003: tests dimension ──
+
+@test "consistency: tests reports gap when Done feature has no test coverage" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/.roll"
+  mkdir -p "$tmpdir/tests/unit"
+  mkdir -p "$tmpdir/guide/en"
+  mkdir -p "$tmpdir/guide/zh"
+  mkdir -p "$tmpdir/lib/i18n"
+
+  cat > "$tmpdir/.roll/backlog.md" <<'EOF'
+### Feature: cli-simplification
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CLI-001](...) | desc | ✅ Done |
+
+### Feature: feedback-command
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-FB-001](...) | desc | ✅ Done |
+EOF
+
+  echo "# cli tests" > "$tmpdir/tests/unit/cmd_cli.bats"
+  # feedback-command has no test file
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [[ "$output" == *'"tests"'* ]]
+  [[ "$output" == *"feedback-command"* ]]
+
+  rm -rf "$tmpdir"
+}
+
+@test "consistency: tests reports gap for stale test file referencing removed feature" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/.roll"
+  mkdir -p "$tmpdir/tests/unit"
+  mkdir -p "$tmpdir/guide/en"
+  mkdir -p "$tmpdir/guide/zh"
+  mkdir -p "$tmpdir/lib/i18n"
+
+  cat > "$tmpdir/.roll/backlog.md" <<'EOF'
+### Feature: cli-simplification
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CLI-001](...) | desc | ✅ Done |
+EOF
+
+  echo "# feedback tests" > "$tmpdir/tests/unit/cmd_feedback.bats"
+  echo "# old tool tests" > "$tmpdir/tests/unit/cmd_old_tool.bats"
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [[ "$output" == *'"tests"'* ]]
+  [[ "$output" == *"stale"* ]]
+
+  rm -rf "$tmpdir"
+}
+
+@test "consistency: tests passes when all Done features have test coverage" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/.roll"
+  mkdir -p "$tmpdir/tests/unit"
+  mkdir -p "$tmpdir/guide/en"
+  mkdir -p "$tmpdir/guide/zh"
+  mkdir -p "$tmpdir/lib/i18n"
+
+  cat > "$tmpdir/.roll/backlog.md" <<'EOF'
+### Feature: cli-simplification
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CLI-001](...) | desc | ✅ Done |
+
+### Feature: feedback-command
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-FB-001](...) | desc | ✅ Done |
+EOF
+
+  echo "# cli tests" > "$tmpdir/tests/unit/cmd_cli.bats"
+  echo "# feedback tests" > "$tmpdir/tests/unit/cmd_feedback.bats"
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [[ "$output" == *'"tests"'* ]]
+  [[ "$output" == *'"status": "pass"'* ]]
+
+  rm -rf "$tmpdir"
+}

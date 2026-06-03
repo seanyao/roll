@@ -121,12 +121,109 @@ def check_i18n(project_dir: Path) -> dict[str, Any]:
     }
 
 
-def check_tests_placeholder(_project_dir: Path, dim: str) -> dict[str, Any]:
-    """Placeholder for dimensions not yet implemented."""
+def _feature_to_keywords(feature_name: str) -> list[str]:
+    """Extract search keywords from a feature name for fuzzy matching."""
+    slug = feature_name.lower().replace("-", " ").replace("_", " ")
+    parts = [p for p in slug.split() if len(p) > 2]
+    return parts
+
+
+def _test_file_relates_to_feature(test_name: str, feature_name: str) -> bool:
+    """Check if a test file name relates to a feature (fuzzy match)."""
+    keywords = _feature_to_keywords(feature_name)
+    if not keywords:
+        return False
+    test_lower = test_name.lower()
+    # Test is related if ALL feature keywords appear somewhere in the test name
+    return all(kw in test_lower for kw in keywords)
+
+
+def check_tests(project_dir: Path) -> dict[str, Any]:
+    """Dimension: tests — heuristic test coverage check.
+
+    Checks: (1) Done features have some test file that references them.
+            (2) Test files that reference non-existent features are flagged as stale.
+    """
+    gaps: list[str] = []
+    backlog = project_dir / ".roll" / "backlog.md"
+    tests_dir = project_dir / "tests"
+
+    if not backlog.exists():
+        return {"status": "pass", "gaps": []}
+
+    # Read all features (Done or not) for stale-check and test-coverage baseline
+    backlog_text = backlog.read_text(encoding="utf-8")
+    all_features: set[str] = set()
+    done_features: list[str] = []
+
+    for line in backlog_text.splitlines():
+        m = re.search(r"^### Feature:\s*(.+)$", line)
+        if m:
+            current = m.group(1).strip()
+            all_features.add(current)
+            continue
+        if "✅ Done" in line:
+            # Get the feature from context or check if this feature has Done items
+            pass
+
+    # Re-scan to associate Done status to features
+    current_feature: str | None = None
+    for line in backlog_text.splitlines():
+        m = re.search(r"^### Feature:\s*(.+)$", line)
+        if m:
+            current_feature = m.group(1).strip()
+            continue
+        if current_feature and "✅ Done" in line:
+            m2 = re.search(r"\[(US-|FIX-|REFACTOR-)([^\]]+)\]", line)
+            if m2 and current_feature not in done_features:
+                done_features.append(current_feature)
+
+    # Collect test file names
+    test_files: list[str] = []
+    if tests_dir.exists():
+        for tf in tests_dir.rglob("*.bats"):
+            test_files.append(tf.name)
+
+    # If no test files exist at all, skip the check (not meaningful to flag gaps)
+    if not test_files:
+        return {"status": "pass", "gaps": []}
+
+    # 1. Check each Done feature for test coverage
+    for feat in done_features:
+        has_test = any(
+            _test_file_relates_to_feature(tf, feat) for tf in test_files
+        )
+        if not has_test:
+            gaps.append(
+                f"Feature '{feat}' has Done stories but no test file appears to cover it "
+                f"(heuristic: no test file name matches keywords "
+                f"{_feature_to_keywords(feat)})"
+            )
+
+    # 2. Check for stale test files (reference non-existent features)
+    for tf in test_files:
+        # Extract candidate feature name from test filename
+        # e.g., cmd_feedback.bats → feedback, agent_usage_pi.bats → (skip generic)
+        stem = tf.replace(".bats", "")
+        # Strip common test file prefixes
+        for prefix in ("cmd_", "agent_"):
+            if stem.startswith(prefix):
+                stem = stem[len(prefix):]
+                break
+        # Skip generic test files that don't map to a single feature
+        if "_" in stem or len(stem) < 4:
+            continue
+        # Convert to feature-name format: replace underscores with hyphens
+        candidate = stem.replace("_", "-")
+        if candidate not in all_features and stem not in all_features:
+            gaps.append(
+                f"Test file '{tf}' appears to reference feature '{candidate}' "
+                f"which does not exist in backlog — may be stale"
+            )
+
     return {
-        "status": "pass",
-        "gaps": [],
-        "note": "placeholder — will be implemented in US-CONSIST-003",
+        "status": "pass" if not gaps else "fail",
+        "gaps": gaps,
     }
 
 
@@ -142,7 +239,7 @@ def run_all(project_dir: Path) -> dict[str, Any]:
         elif dim == "i18n":
             result = check_i18n(project_dir)
         elif dim == "tests":
-            result = check_tests_placeholder(project_dir, dim)
+            result = check_tests(project_dir)
         elif dim in ("docs", "site"):
             result = {
                 "status": "pass",

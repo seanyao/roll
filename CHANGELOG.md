@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 工程和测试
+
+- **一致性检查骨架(US-CONSIST-001)** — 新增 `lib/consistency_check.py` 统一编排入口，按五维（代码、文档、i18n、测试、网站）产出结构化 gap 报告，为后续发版闸和专职 loop 打基础
+
 ## v2.603.1
 
 ### 可见性

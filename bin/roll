@@ -13056,7 +13056,13 @@ _skill_write_self_score() {
     *) err "_skill_write_self_score: verdict must be good / ok / regression (got '$verdict')"; return 1 ;;
   esac
 
+  # FIX-176: anchor notes to <project>/.roll/notes regardless of cwd. When
+  # invoked with cwd already inside the .roll dir (e.g. a self-score run from
+  # within .roll), the bare ".roll/notes" doubled to .roll/.roll/notes.
   local notes_dir=".roll/notes"
+  if [ "$(basename "$PWD")" = ".roll" ]; then
+    notes_dir="notes"
+  fi
   mkdir -p "$notes_dir"
   local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local date_part="${ts%%T*}"

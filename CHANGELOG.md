@@ -5,10 +5,18 @@
 ### 可见性
 
 - **loop tmux 时间戳显示改为本地时区(FIX-169)** — 之前输出 UTC，北京时间显示晚 8 小时，看 loop 现场时间全程对不上；显示改本地时区，事件日志仍存 UTC `[loop]`
+- **dashboard ci-timing 完成时回填空 conclusion(FIX-168)** — run 跑完时更新 `ci-timing.jsonl` 里空的 conclusion，时长统计不再缺口 `[loop]`
+
+### 稳定性
+
+- **技能自评笔记不再写错位置(FIX-176)** — 从 `.roll/` 目录内调用时会写成 `.roll/.roll/notes`、趋势统计读不到；现在始终落到正确的 `.roll/notes`
 
 ### 自动化流水线
 
+- **changelog generate 只列自上次发布以来的待发布项(FIX-177)** — 之前会把全部 500+ 历史 ✅ Done 都列出来；现在按「上次 release tag 以来的提交」判定，只显示这一版真正要发的内容
+- **changelog generate 出完整 + 按项目风格 AI 润色的待发布说明(FIX-178)** — 一条命令产出自上次发布以来的完整内容，用配置的 agent 按 CHANGELOG 风格润色，失败自动回退确定性草稿
 - **changelog generate 补录无卡 merged 改动(US-CL-007)** — 发版前已 merge 但没建卡的改动（如直接开 PR 的修正）不再在 Unreleased 里被漏掉
+- **PR loop 单轮内关闭已绿的 agent PR(PR #413)** — green 且可合的 agent PR 在同一个 tick 内处理掉，不再留到下一轮 `[loop]`
 - **Alert Loop runner 显式传入 `_LOOP_RT_DIR`(FIX-171)** — 之前未显式传入，导致 `_alert_dispatch` 消费端回退到旧共享路径，项目本地 ALERT 永久积压无人处理 `[loop]`
 - **loop 按文件路径判断产出落仓(FIX-172)** — 不再读标签，改为看 story 改的文件路径（`.roll/`→roll-meta）；摘标签前的安全前置 `[loop]`
 - **loop 仅在 Roll 维护者机器上领卡(US-LOOP-067)** — 别的项目仍跳过，让维护者侧卡以后也能 loop 自己跑 `[loop]`
@@ -20,17 +28,6 @@
 - **prices_fetcher 抽象为 vendor 驱动(US-VIEW-023)** — 从 Claude-only 抽象成按 vendor 驱动，加一家厂商只注册一个 vendor、不动抓取主干，Claude 行为不变
 - **roll prices refresh deepseek 自动抓价(US-VIEW-024)** — 从官方页抓实价、diff、变了才落盘，deepseek 价格不再只能手工维护
 - **roll prices refresh kimi 聚合多子页抓价(US-VIEW-025)** — 聚合 K2.5/K2.6 多子页抓实价，kimi 错价不再像 #406 那样靠人肉发现
-
-### ⚠️ 待确认(merged 但未入 backlog)
-
-> 以下 PR 已合入主干，但在 backlog 中没有对应的 ✅ Done story，也未出现在 CHANGELOG 中。
-> 请确认是否需要在 Unreleased 中补充条目。
-
-- **roll changelog generate 出完整 + AI 风格化的待发布说明(FIX-178)** — PR #429
-- **changelog generate 只列待发布，不再 dump 全部 Done(FIX-177)** — PR #427
-- **self-score note 双重嵌套 `.roll/.roll/notes`(FIX-176)** — PR #426
-- **PR loop 单轮内关闭 green agent PRs(PR #413)** — 在单个 tick 内关闭 green agent 发出的 PR
-- **ci-timing.jsonl 空 conclusion 更新(FIX-168)** — PR #409
 
 ## v2.602.5
 

@@ -323,19 +323,31 @@ def _pr_is_covered(
     return False
 
 
-def _build_uncarded_block(uncarded: list[tuple[str, str]]) -> str:
-    lines = [
-        "",
-        "### ⚠️ 待确认(merged 但未入 backlog)",
-        "",
-        "> 以下 PR 已合入主干，但在 backlog 中没有对应的 ✅ Done story，也未出现在 CHANGELOG 中。",
-        "> 请确认是否需要在 Unreleased 中补充条目。",
-        "",
-    ]
+def _uncarded_to_entries(uncarded: list[tuple[str, str]]) -> list[tuple[str, str, str, str]]:
+    """FIX-179: convert uncarded merged PRs (pr_num, title) into draft entries
+    (id, desc, source, category) so they fold into the categorized draft as
+    normal bullets. The old behaviour emitted a separate '⚠️ 待确认 … 请确认'
+    block — a maintainer prompt that must NEVER reach the published CHANGELOG
+    (it leaked into v2.603.1). The "lacked a card" notice now goes to stderr.
+
+    Uses the PR title as the description (stripped of conventional-commit
+    prefixes and the leading id); the story/fix id when present, else PR#<n>.
+    """
+    entries: list[tuple[str, str, str, str]] = []
     for pr_num, title in uncarded:
-        lines.append(f"- PR #{pr_num}: {title}")
-    lines.append("")
-    return "\n".join(lines)
+        t = re.sub(
+            r"^\s*(Fix|tcr|docs|chore|feat|refactor|perf|test|Story\s+\d+)\s*[:：]\s*",
+            "", title, flags=re.I,
+        )
+        idm = re.search(r"\b(US-[A-Z]+-\d+|FIX-\d+|REFACTOR-\d+)\b", title)
+        sid = idm.group(1) if idm else f"PR#{pr_num}"
+        if idm:
+            t = re.sub(r"\b" + re.escape(idm.group(1)) + r"\b\s*[:：]?\s*", "", t).strip()
+        cleaned = _clean_description(t) or t.strip()
+        cat = _detect_category(cleaned)
+        src = "loop" if re.search(r"US-AUTO|US-LOOP|FIX-|REFACTOR-", sid) else ""
+        entries.append((sid, cleaned, src, cat))
+    return entries
 
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -421,23 +433,29 @@ def main() -> int:
         print("# No new ✅ Done stories found for CHANGELOG.")
         return 0
 
+    # FIX-179: fold uncarded merged PRs INTO the categorized draft (complete
+    # coverage) rather than a separate '请确认' warning block — that maintainer
+    # prompt must never reach the published CHANGELOG. The "lacked a card"
+    # notice goes to STDERR so the human still sees what to back-fill.
+    all_entries: list[tuple[str, str, str, str]] = list(filtered) + _uncarded_to_entries(uncarded)
+    if uncarded:
+        pr_list = " ".join(f"#{p}" for p, _t in uncarded)
+        print(
+            f"note: {len(uncarded)} 个 merged PR 未建卡,已按 PR 标题并入草稿,建议补卡: {pr_list}",
+            file=sys.stderr,
+        )
+
     # FIX-178: style-lint warnings go to STDERR so the stdout draft stays clean
     # (no inline `# lint:` markers in the deliverable). The human still sees them.
-    for story_id, desc, source, _cat in filtered:
+    for story_id, desc, source, _cat in all_entries:
         viols = _lint_bullet(_format_bullet(desc, source, story_id))
         if viols:
             print(f"lint: {story_id or '?'}: {', '.join(viols)}", file=sys.stderr)
 
-    if filtered:
-        groups: dict[str, list[tuple[str, str, str]]] = {}
-        for story_id, desc, source, cat in filtered:
-            groups.setdefault(cat, []).append((story_id, desc, source))
-        draft = _build_draft(groups)
-    else:
-        draft = ""
-
-    if uncarded:
-        draft += _build_uncarded_block(uncarded)
+    groups: dict[str, list[tuple[str, str, str]]] = {}
+    for story_id, desc, source, cat in all_entries:
+        groups.setdefault(cat, []).append((story_id, desc, source))
+    draft = _build_draft(groups)
 
     if args.write:
         _write_to_changelog(draft, changelog)

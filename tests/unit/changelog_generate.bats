@@ -305,7 +305,7 @@ SCRIPT
   echo "$d"
 }
 
-@test "changelog_generate: shows uncarded merged PRs not in backlog Done" {
+@test "FIX-179: uncarded merged PRs fold into the draft, no 待确认 warning block" {
   mkdir -p .roll
   _setup_git_repo
   cat > .roll/backlog.md <<'EOF'
@@ -313,15 +313,19 @@ SCRIPT
 | Story | Description | Status |
 | [US-FOO-001](x.md) | 新增一键安装 | ✅ Done |
 EOF
-  # Simulate a merged PR after the tag
+  # Simulate a merged PR after the tag (no backlog card)
   echo "change" >> file.txt
   git add file.txt
   git commit -m "Fix something (#123)"
 
   fake_gh="$(_gh_mock_dir)"
+  # bats merges stderr into $output; the uncarded notice (with #123) appears there.
   PATH="$fake_gh:$PATH" run python3 "$GEN"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"⚠️ 待确认"* ]] || [[ "$output" == *"待确认(merged 但未入 backlog)"* ]]
+  # The maintainer-only warning block must NEVER be emitted (it leaked into v2.603.1).
+  ! [[ "$output" == *"待确认"* ]]
+  ! [[ "$output" == *"请确认"* ]]
+  # The uncarded PR is still surfaced (folded bullet idref / stderr notice).
   [[ "$output" == *"#123"* ]]
 }
 

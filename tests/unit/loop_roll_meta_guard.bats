@@ -11,6 +11,17 @@ setup() {
 
 teardown() { cd /; rm -rf "$TEST_TMP"; }
 
+# Helper: mark a story as a roll-meta target by writing a feature file whose
+# Files block lists a deliverable under .roll/ (path-based detection).
+_write_roll_meta_feature() {
+  mkdir -p .roll/features/test
+  cat > .roll/features/test/t.md <<'MD'
+## US-LOOP-069 meta story
+**Files:**
+- `.roll/ops/guard.sh`
+MD
+}
+
 # Helper: create a git repo with origin/main ref at first commit
 _setup_git_with_origin() {
   git init --quiet
@@ -41,8 +52,9 @@ MD
 @test "guard: roll-meta story with only .roll/ changes → allowed" {
   mkdir -p .roll
   cat > .roll/backlog.md <<'MD'
-| [US-LOOP-069](.roll/features/test/t.md#us-loop-069) | meta manual-only:roll-meta | 📋 Todo |
+| [US-LOOP-069](.roll/features/test/t.md#us-loop-069) | meta | 📋 Todo |
 MD
+  _write_roll_meta_feature
   _setup_git_with_origin
   touch .roll/somefile
   git add .roll/somefile
@@ -56,8 +68,9 @@ MD
 @test "guard: roll-meta story touching product file → blocked + ALERT" {
   mkdir -p .roll
   cat > .roll/backlog.md <<'MD'
-| [US-LOOP-069](.roll/features/test/t.md#us-loop-069) | meta manual-only:roll-meta | 📋 Todo |
+| [US-LOOP-069](.roll/features/test/t.md#us-loop-069) | meta | 📋 Todo |
 MD
+  _write_roll_meta_feature
   _setup_git_with_origin
   mkdir -p bin && touch bin/roll
   git add bin/roll
@@ -77,8 +90,9 @@ MD
 @test "guard: roll-meta story touching lib/ → blocked" {
   mkdir -p .roll lib
   cat > .roll/backlog.md <<'MD'
-| [US-LOOP-069](.roll/features/test/t.md#us-loop-069) | meta manual-only:roll-meta | 📋 Todo |
+| [US-LOOP-069](.roll/features/test/t.md#us-loop-069) | meta | 📋 Todo |
 MD
+  _write_roll_meta_feature
   _setup_git_with_origin
   touch lib/helper.sh
   git add lib/helper.sh

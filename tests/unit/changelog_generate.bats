@@ -61,19 +61,18 @@ EOF
   echo "$output" | python3 -c "import sys, json; d=json.load(sys.stdin); assert d['stories_drafted'] == 1"
 }
 
-@test "changelog_generate: cleans depends-on and manual-only tags" {
+@test "changelog_generate: cleans depends-on tags" {
   mkdir -p .roll
   cat > .roll/backlog.md <<'EOF'
 # Backlog
 | Story | Description | Status |
 | [US-FOO-001](x.md) | 新增功能 `depends-on:US-FOO-002` | ✅ Done |
-| [FIX-101](x.md) | 修复问题 manual-only:true | ✅ Done |
+| [FIX-101](x.md) | 修复问题 | ✅ Done |
 EOF
   run python3 "$GEN" --json
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "新增功能"
   ! echo "$output" | grep -q "depends-on"
-  ! echo "$output" | grep -q "manual-only"
 }
 
 @test "changelog_generate: groups by category" {

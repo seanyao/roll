@@ -48,7 +48,7 @@ Create mode:
 CHANGELOG 是给**使用者**看的，不是给维护者看的。一句话讲清"用户能做什么 / 不再被什么坑"，能不写就不写。
 
 **BACKLOG 描述写好了，CHANGELOG 就是复制 + 过滤，不是重写。**
-如果 BACKLOG 描述已经是人话、一句话、说用户价值，直接用它（去掉 `depends-on:` / `manual-only:` 等功能性标签）。
+如果 BACKLOG 描述已经是人话、一句话、说用户价值，直接用它（去掉 `depends-on:` 等功能性标签）。
 只有 BACKLOG 描述包含实现细节或技术黑话时，才需要改写。
 
 **FIX 条目的 filter 规则**：BACKLOG 的 FIX 描述通常是 `<用户症状> — <修复手段>` 结构。

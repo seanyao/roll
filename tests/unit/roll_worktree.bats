@@ -2,7 +2,7 @@
 # US-AUTO-036: Tests for worktree helper functions (loop-safe additions).
 #
 # These helpers will be wired into _write_loop_runner_script in US-AUTO-037
-# (manual-only). Phase 1 (this Story) delivers helpers + tests with **zero
+# (wired by hand). Phase 1 (this Story) delivers helpers + tests with **zero
 # runner.sh changes**.
 #
 # Helper namespace: _worktree_*

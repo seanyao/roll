@@ -11624,7 +11624,7 @@ EOF
 # can enforce them at Step 2 (story pickup). Pure functions, no side effects.
 #
 # BACKLOG row format (relevant fragments):
-#   | [US-AUTO-033](...) | desc `depends-on:US-AUTO-037` `manual-only:true` | 📋 Todo |
+#   | [US-AUTO-033](...) | desc `depends-on:US-AUTO-037` | 📋 Todo |
 #   | FIX-100 | desc `depends-on:US-A,US-B` | 📋 Todo |
 #
 # Row matching is anchored on `^| [?<id>\b` so a story-id appearing in some
@@ -11673,29 +11673,13 @@ _loop_check_depends_on() {
   return 0
 }
 
-# _loop_is_manual_only <story-id> [backlog-path]
-#   Exit 0: story's own row carries any manual-only:<value> tag.
-#   Exit 1: tag absent, story-id not found, or backlog missing.
-#
-# FIX-109: loop used to accept only the literal `manual-only:true` value;
-# anything else (e.g. `manual-only:roll-meta`, `manual-only:sean-yao`) was
-# ignored and the story got picked. Now any non-empty `manual-only:<value>`
-# qualifies — lets users tag rows reserved for a specific human or scope.
-_loop_is_manual_only() {
-  local id="$1"
-  local backlog="${2:-.roll/backlog.md}"
-  [ -n "$id" ] || return 1
-  [ -f "$backlog" ] || return 1
-
-  local row
-  row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
-  [ -n "$row" ] || return 1
-
-  echo "$row" | grep -qE 'manual-only:[A-Za-z0-9_.-]+'
-}
-
-# US-LOOP-068: detect whether a story is a roll-meta story (manual-only:roll-meta).
-# Returns 0 when the story's row carries `manual-only:roll-meta`.
+# FIX-172: detect whether a story routes its output to roll-meta — path-based,
+# never tag-based. A story is a roll-meta target iff its declared deliverable
+# **Files:** include a path under .roll/ that is NOT a status-management file
+# (.roll/backlog.md, .roll/features/). Every cycle flips its own backlog/feature
+# status under .roll/, so "touches .roll/" must NOT flag a product story; only a
+# genuine roll-meta deliverable (e.g. .roll/ops/watch.sh) counts.
+# Returns 0 when the story delivers to roll-meta.
 _loop_is_roll_meta_story() {
   local id="$1"
   local backlog="${2:-.roll/backlog.md}"
@@ -11706,30 +11690,30 @@ _loop_is_roll_meta_story() {
   row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
   [ -n "$row" ] || return 1
 
-  echo "$row" | grep -qF 'manual-only:roll-meta'
-}
+  # Resolve the feature file from the row's markdown link: [id](path.md#anchor).
+  # Links appear in two relative forms — ".roll/features/x.md" (rel. to product
+  # root) or "features/x.md" (rel. to .roll). Normalise from "features/" onward
+  # and resolve against the backlog's own directory (the roll-meta root).
+  local link featrel metadir feat
+  link=$(printf '%s\n' "$row" | grep -oE '\([^)]+\.md' | head -1 | sed -E 's/^\(//')
+  [ -n "$link" ] || return 1
+  featrel=$(printf '%s\n' "$link" | sed -E 's#^.*(features/.*)#\1#')
+  metadir=$(dirname "$backlog")
+  feat="${metadir}/${featrel}"
+  [ -f "$feat" ] || return 1
 
-# US-LOOP-067: detect whether we are on the Roll maintainer machine where
-# manual-only:roll-meta stories should be eligible for loop execution.
-# Returns 0 when:
-#   1. cwd is inside the Roll product repo (remote matches seanyao/roll)
-#   2. .roll/ is a nested git repo whose remote matches seanyao/roll-meta
-_loop_is_roll_meta_maintainer_context() {
-  local product_remote meta_remote
-  product_remote=$(git remote get-url origin 2>/dev/null || echo "")
-  case "$product_remote" in
-    *seanyao/roll*) ;;
-    *) return 1 ;;
-  esac
-  if [ -d ".roll/.git" ]; then
-    meta_remote=$(cd ".roll" && git remote get-url origin 2>/dev/null || echo "")
-  else
-    return 1
-  fi
-  case "$meta_remote" in
-    *seanyao/roll-meta*) return 0 ;;
-    *) return 1 ;;
-  esac
+  # Extract this story's **Files:** block, then test for a roll-meta deliverable
+  # path (under .roll/ but not the universal status-management files).
+  awk -v id="$id" '
+    $0 ~ ("^## " id "( |$)") {insec=1; next}
+    insec && /^## / {exit}
+    insec && /^\*\*Files:\*\*/ {infiles=1; next}
+    insec && infiles && /^\*\*/ {exit}
+    insec && infiles {print}
+  ' "$feat" \
+    | grep -oE '\.roll/[A-Za-z0-9_./-]+' \
+    | grep -vE '^\.roll/backlog\.md$|^\.roll/features/' \
+    | grep -q .
 }
 
 # US-AUTO-034: PR-first inbox — loop processes open PRs before scanning BACKLOG.
@@ -12107,7 +12091,7 @@ _loop_pr_inbox() {
 #
 # Loop-safe building blocks for the future PR Loop (com.roll.pr.<slug>.plist,
 # 5-min cadence). Phase 1 ships the helpers + tests only; Phase 2 (runner /
-# plist / main-loop wiring) is manual-only and out of scope here.
+# plist / main-loop wiring) is wired by hand and out of scope here.
 #
 # All helpers are lenient on a missing `gh` binary or any gh failure: they
 # return 0 so a loop iteration never aborts on a single bad PR. State writes
@@ -12296,7 +12280,7 @@ _loop_pr_route() {
 # These six helpers collect CI timing data, classify failures, auto-rerun
 # transient flakes, and surface flaky / degradation signals as backlog
 # entries. They are NOT yet wired into any runner or launchd plist — that is
-# Phase 2 (manual-only:true). Each is unit-tested in
+# Phase 2 (wired by hand). Each is unit-tested in
 # tests/unit/roll_loop_ci_loop.bats with gh stubbed. Do not delete or inline.
 #
 # State lives under project-local .roll/state/:
@@ -12662,7 +12646,7 @@ _ci_scan() {
 # that every loop appends to but nobody reads. The Alert Loop turns it into a
 # real consumer: parse → dedup (1h per category) → notify (error always) →
 # log → rotate. They are NOT yet wired into any runner or launchd plist — that
-# is Phase 2 (manual-only:true). Each is unit-tested in
+# is Phase 2 (wired by hand). Each is unit-tested in
 # tests/unit/roll_loop_alert_loop.bats with _notify stubbed. Do not delete or
 # inline.
 #
@@ -13329,7 +13313,7 @@ _changelog_audit_gate() {
 # US-AUTO-036: worktree helpers (loop-safe pure additions).
 #
 # Phase 1 of worktree isolation — these helpers are NOT yet called by
-# runner.sh. US-AUTO-037 (manual-only) wires them into
+# runner.sh. US-AUTO-037 (wired by hand) wires them into
 # _write_loop_runner_script. Do not delete or inline; they are unit-tested
 # in tests/unit/roll_worktree.bats.
 
@@ -13680,8 +13664,8 @@ refs/heads/claude/*"
 # v1 type/est/risk routing). lib/agent_routes_lint.py is no longer invoked.
 
 # FIX-146: per-story eligibility gate, reusable for pick and re-validation.
-# Exit 0 when the story id is eligible to be worked (📋 Todo, not manual-only,
-# deps satisfied, no open PR). Exit 1 otherwise.
+# Exit 0 when the story id is eligible to be worked (📋 Todo, deps satisfied,
+# no open PR). Exit 1 otherwise.
 # Args: <story-id> [backlog-path] [open-pr-titles]
 _loop_story_is_eligible() {
   local id="$1"
@@ -13699,22 +13683,10 @@ _loop_story_is_eligible() {
   _status=$(printf '%s\n' "$row" | awk -F'|' '{for(i=NF;i>=1;i--) if($i ~ /[^ \t]/) {gsub(/^[ \t]+|[ \t]+$/, "", $i); print $i; exit}}')
   [ "$_status" = "📋 Todo" ] || return 1
 
-  # Gate 1: manual-only
-  # US-LOOP-067: manual-only:roll-meta is eligible ONLY on maintainer context
-  local _mo_val
-  _mo_val=$(printf '%s\n' "$row" | grep -oE 'manual-only:[A-Za-z0-9_.-]+' | head -1 | cut -d: -f2)
-  if [ -n "$_mo_val" ]; then
-    if [ "$_mo_val" = "roll-meta" ] && _loop_is_roll_meta_maintainer_context 2>/dev/null; then
-      : # allow roll-meta stories on maintainer machine
-    else
-      return 1
-    fi
-  fi
-
-  # Gate 2: depends-on
+  # Gate 1: depends-on
   _loop_check_depends_on "$id" "$backlog" >/dev/null 2>&1 || return 1
 
-  # Gate 3 (FIX-141): skip if an open PR already references this story id.
+  # Gate 2 (FIX-141): skip if an open PR already references this story id.
   if [ -n "$open_pr_titles" ] && printf '%s\n' "$open_pr_titles" | grep -qE "${id}([^0-9A-Za-z]|$)"; then
     return 1
   fi
@@ -13725,9 +13697,8 @@ _loop_story_is_eligible() {
 # US-AGENT-006: pick the next eligible 📋 Todo story from .roll/backlog.md
 # applying the same gates as the roll-loop SKILL Step 2:
 #   1. Status = 📋 Todo
-#   2. NOT manual-only:* tagged
-#   3. depends-on:* (if any) all ✅ Done
-#   4. Priority order: FIX > US > REFACTOR
+#   2. depends-on:* (if any) all ✅ Done
+#   3. Priority order: FIX > US > REFACTOR
 #
 # stdout: chosen story id (single line)
 # exit 0 when picked, 1 when nothing eligible.
@@ -14225,9 +14196,10 @@ _loop_is_doc_only_change() {
 }
 
 # _loop_guard_roll_meta_boundary <worktree> <story_id>
-# US-LOOP-069: for manual-only:roll-meta stories, verify that no product-repo
-# tracked files were modified in the worktree. Returns 0 if safe (or not a
-# roll-meta story), returns 1 if product files were touched and writes ALERT.
+# US-LOOP-069: for roll-meta-target stories (deliverable under .roll/), verify
+# that no product-repo tracked files were modified in the worktree. Returns 0 if
+# safe (or not a roll-meta story), returns 1 if product files were touched and
+# writes ALERT. FIX-172: roll-meta-ness is path-based, not tag-based.
 _loop_guard_roll_meta_boundary() {
   local wt="$1" story_id="$2"
   [ -n "$story_id" ] || return 0
@@ -14236,13 +14208,7 @@ _loop_guard_roll_meta_boundary() {
   local _backlog="${ROLL_MAIN_PROJECT:-.}/.roll/backlog.md"
   [ -f "$_backlog" ] || return 0
 
-  local _row
-  _row=$(grep -E "^\| \[?${story_id}[]| ]" "$_backlog" 2>/dev/null | head -1)
-  [ -n "$_row" ] || return 0
-
-  local _mo_val
-  _mo_val=$(printf '%s\n' "$_row" | grep -oE 'manual-only:[A-Za-z0-9_.-]+' | head -1 | cut -d: -f2)
-  [ "$_mo_val" = "roll-meta" ] || return 0
+  _loop_is_roll_meta_story "$story_id" "$_backlog" || return 0
 
   local _changed _violations
   _changed=$(cd "$wt" && git diff --name-only origin/main..HEAD 2>/dev/null || true)

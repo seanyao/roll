@@ -85,9 +85,8 @@ def _is_internal(desc: str) -> bool:
 
 
 def _clean_description(desc: str) -> str:
-    # Remove depends-on / manual-only tags
+    # Remove depends-on tags
     desc = re.sub(r"`?depends-on:[^`|]+`?", "", desc)
-    desc = re.sub(r"`?manual-only:[^`|]+`?", "", desc)
     # Remove markdown links — keep link text only
     desc = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", desc)
     # Collapse whitespace

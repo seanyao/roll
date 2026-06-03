@@ -236,6 +236,111 @@ EOF
   rm -rf "$tmpdir"
 }
 
+# ── US-CONSIST-004: site dimension ──
+
+@test "consistency: site reports gap when Done feature not mentioned on site" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/.roll"
+  mkdir -p "$tmpdir/site"
+  mkdir -p "$tmpdir/guide/en"
+  mkdir -p "$tmpdir/guide/zh"
+  mkdir -p "$tmpdir/lib/i18n"
+
+  cat > "$tmpdir/.roll/backlog.md" <<'EOF'
+### Feature: cli-simplification
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CLI-001](...) | desc | ✅ Done |
+
+### Feature: feedback-command
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-FB-001](...) | desc | ✅ Done |
+EOF
+
+  # Site only mentions cli stuff, not feedback
+  cat > "$tmpdir/site/roll-data.js" <<'SEOF'
+const FEATURE_GROUPS = [
+  { id: "adoption", features: [
+    { name: "roll init", mono: true, desc: "..." },
+    { name: "roll migrate", mono: true, desc: "..." },
+  ]},
+];
+SEOF
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [[ "$output" == *'"site"'* ]]
+  [[ "$output" == *"feedback-command"* ]]
+
+  rm -rf "$tmpdir"
+}
+
+@test "consistency: site passes when Done features are all mentioned on site" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/.roll"
+  mkdir -p "$tmpdir/site"
+  mkdir -p "$tmpdir/guide/en"
+  mkdir -p "$tmpdir/guide/zh"
+  mkdir -p "$tmpdir/lib/i18n"
+
+  cat > "$tmpdir/.roll/backlog.md" <<'EOF'
+### Feature: cli-simplification
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CLI-001](...) | desc | ✅ Done |
+
+### Feature: autonomous-evolution
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-AUTO-001](...) | desc | ✅ Done |
+EOF
+
+  cat > "$tmpdir/site/roll-data.js" <<'SEOF'
+const FEATURE_GROUPS = [
+  { id: "adoption", features: [
+    { name: "roll init", mono: true, desc: "..." },
+    { name: "cli simplification", mono: true, desc: "..." },
+  ]},
+  { id: "autonomous", features: [
+    { name: "roll loop on", mono: true, desc: "..." },
+    { name: "autonomous execution", mono: true, desc: "..." },
+  ]},
+];
+SEOF
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [[ "$output" == *'"site"'* ]]
+  [[ "$output" == *'"status": "pass"'* ]]
+
+  rm -rf "$tmpdir"
+}
+
+@test "consistency: site handles missing roll-data.js gracefully" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/.roll"
+  mkdir -p "$tmpdir/site"
+  mkdir -p "$tmpdir/guide/en"
+  mkdir -p "$tmpdir/guide/zh"
+  mkdir -p "$tmpdir/lib/i18n"
+
+  cat > "$tmpdir/.roll/backlog.md" <<'EOF'
+### Feature: cli-simplification
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-CLI-001](...) | desc | ✅ Done |
+EOF
+  # No roll-data.js created
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [[ "$output" == *'"site"'* ]]
+  [[ "$output" == *'"status": "pass"'* ]]
+
+  rm -rf "$tmpdir"
+}
+
 @test "consistency: tests passes when all Done features have test coverage" {
   local tmpdir; tmpdir=$(mktemp -d)
 

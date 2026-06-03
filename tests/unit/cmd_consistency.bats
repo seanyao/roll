@@ -95,6 +95,41 @@ EOF
   rm -rf "$tmpdir"
 }
 
+@test "consistency: reports changelog gap when Done story not in CHANGELOG" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/.roll"
+  cat > "$tmpdir/.roll/backlog.md" <<'EOF'
+### Feature: test-feature
+| Story | Description | Status |
+|-------|-------------|--------|
+| [US-TEST-001](...) | desc | ✅ Done |
+EOF
+
+  cat > "$tmpdir/.roll/features.md" <<'EOF'
+# Features
+
+## test-feature
+Some description.
+EOF
+
+  cat > "$tmpdir/CHANGELOG.md" <<'EOF'
+# Changelog
+
+## Unreleased
+- some other feature
+EOF
+
+  run python3 lib/consistency_check.py --project-dir "$tmpdir"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Overall: fail"* ]]
+  [[ "$output" == *"docs: fail"* ]]
+  [[ "$output" == *"US-TEST-001"* ]]
+  [[ "$output" == *"not referenced in CHANGELOG"* ]]
+
+  rm -rf "$tmpdir"
+}
+
 @test "consistency: passes gracefully when backlog or features.md is missing" {
   local tmpdir; tmpdir=$(mktemp -d)
 

@@ -82,7 +82,60 @@ def check_placeholder(_project_dir: Path, dim: str) -> dict[str, Any]:
     return {
         "status": "pass",
         "gaps": [],
-        "note": "placeholder — will be implemented in US-CONSIST-002..004",
+        "note": f"placeholder — will be implemented in US-CONSIST-003..004 (dim: {dim})",
+    }
+
+
+def check_docs_dimension(project_dir: Path) -> dict[str, Any]:
+    """Dimension: docs — changelog coverage + features.md catalog + guide doc gaps.
+
+    Wires changelog_audit.py checks into the consistency report.
+    """
+    try:
+        from lib.changelog_audit import (
+            check_changelog_coverage,
+            check_features_md_coverage,
+            check_guide_doc_coverage,
+        )
+    except ImportError:
+        from changelog_audit import (  # type: ignore[no-redef]
+            check_changelog_coverage,
+            check_features_md_coverage,
+            check_guide_doc_coverage,
+        )
+
+    backlog = project_dir / ".roll" / "backlog.md"
+    changelog = project_dir / "CHANGELOG.md"
+    features_md = project_dir / ".roll" / "features.md"
+    guide_en_dir = project_dir / "guide" / "en"
+
+    if not backlog.exists():
+        return {"status": "pass", "gaps": []}
+
+    done_features = _read_done_features(backlog)
+    if not done_features:
+        return {"status": "pass", "gaps": []}
+
+    all_gaps: list[str] = []
+
+    # 1. Changelog coverage: each Done story should appear in CHANGELOG.md
+    cl_result = check_changelog_coverage(done_features, changelog)
+    if cl_result["gaps"]:
+        all_gaps.extend(cl_result["gaps"])
+
+    # 2. Features.md catalog completeness
+    fm_result = check_features_md_coverage(done_features, features_md)
+    if fm_result["gaps"]:
+        all_gaps.extend(fm_result["gaps"])
+
+    # 3. Guide documentation coverage
+    gd_result = check_guide_doc_coverage(done_features, guide_en_dir)
+    if gd_result["gaps"]:
+        all_gaps.extend(gd_result["gaps"])
+
+    return {
+        "status": "pass" if not all_gaps else "fail",
+        "gaps": all_gaps,
     }
 
 
@@ -95,6 +148,8 @@ def run_all(project_dir: Path) -> dict[str, Any]:
     for dim in DIMENSIONS:
         if dim == "code":
             result = check_features_catalog(project_dir)
+        elif dim == "docs":
+            result = check_docs_dimension(project_dir)
         else:
             result = check_placeholder(project_dir, dim)
 

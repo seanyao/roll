@@ -35,6 +35,9 @@ def check_changelog_coverage(
     Returns:
         {"status": "pass"|"fail", "gaps": [descriptions...]}
     """
+    if not changelog_path.exists():
+        return {"status": "pass", "gaps": []}
+
     changelog_text = _read_changelog_text(changelog_path)
     gaps: list[str] = []
 

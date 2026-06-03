@@ -222,18 +222,107 @@ except pf.ParseError as e:
   [[ "$output" == *"no model header row found"* ]]
 }
 
-@test "refresh: kimi placeholder parser raises ParseError" {
+@test "parse_pricing_html: kimi combined fixture extracts correct prices" {
   run run_py "
-d = '${TMP}'
+html = open('${BATS_TEST_DIRNAME}/fixtures/kimi_pricing_k25.md').read() + '\n' + open('${BATS_TEST_DIRNAME}/fixtures/kimi_pricing_k26.md').read()
+p = pf.parse_pricing_html(html, vendor='kimi')
+print('k25-in:', p['kimi-k2.5']['in'])
+print('k25-out:', p['kimi-k2.5']['out'])
+print('k25-cache_read:', p['kimi-k2.5']['cache_read'])
+print('k26-in:', p['kimi-k2.6']['in'])
+print('k26-out:', p['kimi-k2.6']['out'])
+print('k26-cache_read:', p['kimi-k2.6']['cache_read'])
+print('coding-in:', p['kimi-for-coding']['in'])
+print('k2-in:', p['kimi-k2']['in'])
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"k25-in: 4.0"* ]]
+  [[ "$output" == *"k25-out: 21.0"* ]]
+  [[ "$output" == *"k25-cache_read: 0.7"* ]]
+  [[ "$output" == *"k26-in: 6.5"* ]]
+  [[ "$output" == *"k26-out: 27.0"* ]]
+  [[ "$output" == *"k26-cache_read: 1.1"* ]]
+  [[ "$output" == *"coding-in: 6.5"* ]]
+  [[ "$output" == *"k2-in: 1.0"* ]]
+}
+
+@test "parse_pricing_html: kimi fetches sub-pages when landing page has no prices" {
+  run run_py "
+_original = pf.fetch_pricing_html
+def _mock(url, timeout=15):
+    if 'chat-k25.md' in url:
+        return open('${BATS_TEST_DIRNAME}/fixtures/kimi_pricing_k25.md').read()
+    if 'chat-k26.md' in url:
+        return open('${BATS_TEST_DIRNAME}/fixtures/kimi_pricing_k26.md').read()
+    return _mock(url, timeout)
+pf.fetch_pricing_html = _mock
+
+p = pf.parse_pricing_html('<html>landing</html>', vendor='kimi')
+print('k25-in:', p['kimi-k2.5']['in'])
+print('k26-in:', p['kimi-k2.6']['in'])
+pf.fetch_pricing_html = _original
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"k25-in: 4.0"* ]]
+  [[ "$output" == *"k26-in: 6.5"* ]]
+}
+
+@test "parse_pricing_html: kimi raises ParseError when sub-pages also fail" {
+  run run_py "
+_original = pf.fetch_pricing_html
+def _mock(url, timeout=15):
+    if 'chat-k25.md' in url or 'chat-k26.md' in url:
+        return '<html>no prices here</html>'
+    return _original(url, timeout)
+pf.fetch_pricing_html = _mock
+
 try:
-    pf.refresh(snapshot_dir=d, vendor='kimi', html='<html>kimi</html>')
+    pf.parse_pricing_html('<html>landing</html>', vendor='kimi')
     print('UNEXPECTED OK')
 except pf.ParseError as e:
     print('ParseError:', str(e))
+pf.fetch_pricing_html = _original
 "
   [ "$status" -eq 0 ]
   [[ "$output" == *"ParseError:"* ]]
-  [[ "$output" == *"kimi parser not yet implemented"* ]]
+  [[ "$output" == *"no price rows found"* ]]
+}
+
+@test "refresh: kimi first run writes snapshot with CNY currency" {
+  run run_py "
+import json, os
+d = '${TMP}'
+html = open('${BATS_TEST_DIRNAME}/fixtures/kimi_pricing_k25.md').read() + '\n' + open('${BATS_TEST_DIRNAME}/fixtures/kimi_pricing_k26.md').read()
+action, changes = pf.refresh(snapshot_dir=d, vendor='kimi', html=html)
+print('action:', action.split(':')[0])
+files = [f for f in os.listdir(d) if f.startswith('snapshot-')]
+print('files:', len(files))
+data = json.load(open(os.path.join(d, files[0])))
+print('vendor:', data.get('vendor'))
+print('currency:', data.get('currency'))
+print('prices-keys:', sorted(data['prices'].keys()))
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"action: first"* ]]
+  [[ "$output" == *"files: 1"* ]]
+  [[ "$output" == *"vendor: kimi"* ]]
+  [[ "$output" == *"currency: CNY"* ]]
+  [[ "$output" == *"prices-keys: ['kimi-for-coding', 'kimi-k2', 'kimi-k2.5', 'kimi-k2.6']"* ]]
+}
+
+@test "refresh: kimi identical HTML produces unchanged" {
+  run run_py "
+import os
+d = '${TMP}'
+html = open('${BATS_TEST_DIRNAME}/fixtures/kimi_pricing_k25.md').read() + '\n' + open('${BATS_TEST_DIRNAME}/fixtures/kimi_pricing_k26.md').read()
+pf.refresh(snapshot_dir=d, vendor='kimi', html=html)
+action, changes = pf.refresh(snapshot_dir=d, vendor='kimi', html=html)
+print('action:', action)
+print('changes:', len(changes))
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"action: unchanged"* ]]
+  [[ "$output" == *"changes: 0"* ]]
 }
 
 @test "_latest_snapshot_path: filters by vendor suffix" {

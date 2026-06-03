@@ -6225,14 +6225,14 @@ cmd_review_pr() {
 
   local slug; slug=$(_gh_repo_slug) || { err "Not a GitHub repo — review-pr requires GitHub remote"; return 1; }
 
-  local pr_json
-  pr_json=$(gh -R "$slug" pr view "$pr_number" --json title,body,diff 2>&1) \
+  local pr_json diff
+  pr_json=$(gh -R "$slug" pr view "$pr_number" --json title,body 2>&1) \
     || { err "gh pr view failed: ${pr_json}"; return 1; }
+  diff=$(gh -R "$slug" pr diff "$pr_number" 2>/dev/null) || true
 
   local title body diff
   title=$(echo "$pr_json" | jq -r '.title // ""')
   body=$(echo "$pr_json" | jq -r '.body // ""')
-  diff=$(echo "$pr_json" | jq -r '.diff // ""')
 
   if echo "$body" | grep -qF '[skip-ai-review]'; then
     gh -R "$slug" pr review "$pr_number" --approve -b "Auto-approved: [skip-ai-review] detected" 2>/dev/null || true

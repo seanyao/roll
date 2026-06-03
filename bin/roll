@@ -11763,13 +11763,13 @@ _loop_pr_classify() {
   local ci_state="${3:-}"
   local mergeable="${4:-}"
 
-  if [ "$ci_state" = "failure" ]; then
-    echo "ci_red"; return 0
-  fi
-
   case "$mergeable" in
     BEHIND|DIRTY|CONFLICTING) echo "stale"; return 0 ;;
   esac
+
+  if [ "$ci_state" = "failure" ]; then
+    echo "ci_red"; return 0
+  fi
 
   echo "ready"
 }

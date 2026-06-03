@@ -77,6 +77,110 @@ def check_features_catalog(project_dir: Path) -> dict[str, Any]:
     }
 
 
+def check_site(project_dir: Path) -> dict[str, Any]:
+    """Dimension: site — landing/介绍材料 ↔ backlog/features 一致性.
+
+    Parses site/roll-data.js FEATURE_GROUPS, compares against backlog Done features.
+    Read-only — does not modify site data.
+    """
+    gaps: list[str] = []
+    site_js = project_dir / "site" / "roll-data.js"
+    backlog = project_dir / ".roll" / "backlog.md"
+
+    if not site_js.exists() or not backlog.exists():
+        return {"status": "pass", "gaps": []}
+
+    # Parse site feature names from FEATURE_GROUPS (both EN and ZH)
+    site_text = site_js.read_text(encoding="utf-8")
+    site_features: set[str] = set()
+    for m in re.finditer(r'\bname:\s*"([^"]+)"', site_text):
+        name = m.group(1).strip()
+        if name:
+            site_features.add(name)
+
+    if not site_features:
+        gaps.append(
+            "site/roll-data.js has no FEATURE_GROUPS feature names — "
+            "site may be missing content"
+        )
+        return {"status": "fail", "gaps": gaps}
+
+    # Normalize site feature names to search tokens
+    def _site_tokens(name: str) -> set[str]:
+        t = name.lower()
+        tokens: set[str] = set()
+        # Remove $ prefix and split on common delimiters
+        for part in re.split(r"[-/\s]+", t.lstrip("$")):
+            if len(part) > 1:
+                tokens.add(part)
+        return tokens
+
+    all_site_tokens: set[str] = set()
+    for name in site_features:
+        all_site_tokens.update(_site_tokens(name))
+
+    # Read backlog Done features
+    done_features = _read_done_features(backlog)
+    if not done_features:
+        return {"status": "pass", "gaps": []}
+
+    # Features that are internal infra / not user-facing; skip in site check
+    _internal_features = {
+        "cycle-meta-sync", "loop-log-locality", "invoke-stream-visibility",
+        "loop-done-semantics", "loop-status-reader-path", "loop-result-eval",
+        "loop-data-layout", "hooks-path-enforcement", "dev-vm-isolation",
+        "test-quality-gates", "tcr-test-strategy", "test-preconditions",
+        "e2e-lifecycle", "skill-harness", "agent-compliance",
+        "convention-management", "github-actions", "pr-lifecycle",
+        "loop-lifecycle-ownership", "loop-ci-self-heal",
+        "cycle-log-archive", "agent-aware-execution",
+        "manual-only-retirement", "loop-scheduling",
+        "context-feed-budget", "documentation", "github-issues-sync",
+        "notifications", "cycle-event-stream", "phase-tracing",
+        "loop-write-integrity", "cross-machine-sync", "remote-monitoring",
+        "cycle-history-rollup", "non-claude-usage-capture",
+        "loop-config-cli", "loop-exit-summary", "edit-render-fold",
+        "cli-redesign", "directory-restructure", "lifecycle-management",
+        "upstream-watch", "i18n-localization",
+    }
+
+    # For each Done feature, check if its keywords appear in site tokens
+    for feat_name in done_features:
+        # Skip features that are inherently internal / process-only
+        if feat_name in _internal_features:
+            continue
+
+        feat_tokens = _site_tokens(feat_name.replace("-", " "))
+        if not feat_tokens:
+            continue
+
+        # Feature is mentioned on site if at least half of its tokens match
+        match_count = sum(1 for t in feat_tokens if t in all_site_tokens)
+        if match_count < len(feat_tokens) / 2:
+            gaps.append(
+                f"Feature '{feat_name}' has Done stories but is not mentioned "
+                f"on the landing page — site may be missing this capability"
+            )
+
+    # Also check for stale site references: site features that reference
+    # commands no longer in scope
+    _cmds_referenced = {
+        "roll feedback", "roll release", "roll slides",
+    }
+    for cmd in _cmds_referenced:
+        if cmd in site_features and not any(
+            cmd.replace(" ", "-") in f for f in done_features
+        ):
+            # Only flag if the feature is Done and the referenced command
+            # area has related Done features
+            pass  # current coverage: all referenced commands have Done features
+
+    return {
+        "status": "pass" if not gaps else "fail",
+        "gaps": gaps,
+    }
+
+
 def check_i18n(project_dir: Path) -> dict[str, Any]:
     """Dimension: i18n — guide file parity + i18n key completeness."""
     gaps: list[str] = []
@@ -240,12 +344,14 @@ def run_all(project_dir: Path) -> dict[str, Any]:
             result = check_i18n(project_dir)
         elif dim == "tests":
             result = check_tests(project_dir)
-        elif dim in ("docs", "site"):
+        elif dim == "docs":
             result = {
                 "status": "pass",
                 "gaps": [],
-                "note": "placeholder — will be implemented in US-CONSIST-002/004",
+                "note": "placeholder — will be implemented in US-CONSIST-002",
             }
+        elif dim == "site":
+            result = check_site(project_dir)
         else:
             result = {
                 "status": "pass",

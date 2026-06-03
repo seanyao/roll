@@ -104,3 +104,75 @@ EOF
 
   rm -rf "$tmpdir"
 }
+
+# ── US-CONSIST-003: i18n dimension ──
+
+@test "consistency: i18n reports gap when guide/zh file is missing" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/guide/en"
+  mkdir -p "$tmpdir/guide/zh"
+  echo "# Test" > "$tmpdir/guide/en/loop.md"
+  echo "# Test" > "$tmpdir/guide/zh/loop.md"
+  echo "# Test" > "$tmpdir/guide/en/consistency.md"
+  # consistency.md missing from guide/zh
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"overall": "fail"'* ]]
+  [[ "$output" == *'"i18n"'* ]]
+  [[ "$output" == *'"status": "fail"'* ]]
+  [[ "$output" == *'consistency.md'* ]]
+
+  rm -rf "$tmpdir"
+}
+
+@test "consistency: i18n reports gap when i18n key is missing ZH" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/lib/i18n"
+  cat > "$tmpdir/lib/i18n/loop.sh" <<'IEOF'
+_i18n_set en loop.hello "Hello"
+_i18n_set zh loop.hello "你好"
+_i18n_set en loop.goodbye "Goodbye"
+# missing ZH for loop.goodbye
+IEOF
+  cat > "$tmpdir/lib/i18n/setup.sh" <<'IEOF'
+_i18n_set en setup.start "Starting"
+_i18n_set zh setup.start "开始"
+IEOF
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"overall": "fail"'* ]]
+  [[ "$output" == *'"i18n"'* ]]
+  [[ "$output" == *'"status": "fail"'* ]]
+  [[ "$output" == *'loop.goodbye'* ]]
+
+  rm -rf "$tmpdir"
+}
+
+@test "consistency: i18n passes when guide files and i18n keys are all paired" {
+  local tmpdir; tmpdir=$(mktemp -d)
+
+  mkdir -p "$tmpdir/guide/en"
+  mkdir -p "$tmpdir/guide/zh"
+  echo "# Test" > "$tmpdir/guide/en/loop.md"
+  echo "# Test" > "$tmpdir/guide/zh/loop.md"
+  echo "# Test" > "$tmpdir/guide/en/skills.md"
+  echo "# Test" > "$tmpdir/guide/zh/skills.md"
+
+  mkdir -p "$tmpdir/lib/i18n"
+  cat > "$tmpdir/lib/i18n/loop.sh" <<'IEOF'
+_i18n_set en loop.hello "Hello"
+_i18n_set zh loop.hello "你好"
+IEOF
+
+  run python3 lib/consistency_check.py --json --project-dir "$tmpdir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"overall": "pass"'* ]]
+  [[ "$output" == *'"i18n"'* ]]
+  [[ "$output" == *'"status": "pass"'* ]]
+
+  rm -rf "$tmpdir"
+}

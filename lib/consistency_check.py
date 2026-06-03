@@ -77,12 +77,56 @@ def check_features_catalog(project_dir: Path) -> dict[str, Any]:
     }
 
 
-def check_placeholder(_project_dir: Path, dim: str) -> dict[str, Any]:
+def check_i18n(project_dir: Path) -> dict[str, Any]:
+    """Dimension: i18n — guide file parity + i18n key completeness."""
+    gaps: list[str] = []
+
+    # 1. Guide file parity (guide/en ↔ guide/zh)
+    guide_en = project_dir / "guide" / "en"
+    guide_zh = project_dir / "guide" / "zh"
+    if guide_en.exists() and guide_zh.exists():
+        en_files = {p.name for p in guide_en.iterdir() if p.is_file()}
+        zh_files = {p.name for p in guide_zh.iterdir() if p.is_file()}
+        en_only = en_files - zh_files
+        zh_only = zh_files - en_files
+        for f in sorted(en_only):
+            gaps.append(f"guide/en/{f} has no corresponding guide/zh/{f}")
+        for f in sorted(zh_only):
+            gaps.append(f"guide/zh/{f} has no corresponding guide/en/{f}")
+
+    # 2. i18n key completeness (EN ↔ ZH pairing)
+    i18n_dir = project_dir / "lib" / "i18n"
+    if i18n_dir.exists():
+        keys_en: set[str] = set()
+        keys_zh: set[str] = set()
+        for sh_file in sorted(i18n_dir.glob("*.sh")):
+            text = sh_file.read_text(encoding="utf-8")
+            for m in re.finditer(r'_i18n_set\s+(en|zh)\s+([^\s]+)', text):
+                lang = m.group(1)
+                key = m.group(2)
+                if lang == "en":
+                    keys_en.add(key)
+                else:
+                    keys_zh.add(key)
+        en_only_keys = keys_en - keys_zh
+        zh_only_keys = keys_zh - keys_en
+        for k in sorted(en_only_keys):
+            gaps.append(f"i18n key '{k}' has EN but is missing ZH translation")
+        for k in sorted(zh_only_keys):
+            gaps.append(f"i18n key '{k}' has ZH but is missing EN translation")
+
+    return {
+        "status": "pass" if not gaps else "fail",
+        "gaps": gaps,
+    }
+
+
+def check_tests_placeholder(_project_dir: Path, dim: str) -> dict[str, Any]:
     """Placeholder for dimensions not yet implemented."""
     return {
         "status": "pass",
         "gaps": [],
-        "note": "placeholder — will be implemented in US-CONSIST-002..004",
+        "note": "placeholder — will be implemented in US-CONSIST-003",
     }
 
 
@@ -95,8 +139,22 @@ def run_all(project_dir: Path) -> dict[str, Any]:
     for dim in DIMENSIONS:
         if dim == "code":
             result = check_features_catalog(project_dir)
+        elif dim == "i18n":
+            result = check_i18n(project_dir)
+        elif dim == "tests":
+            result = check_tests_placeholder(project_dir, dim)
+        elif dim in ("docs", "site"):
+            result = {
+                "status": "pass",
+                "gaps": [],
+                "note": "placeholder — will be implemented in US-CONSIST-002/004",
+            }
         else:
-            result = check_placeholder(project_dir, dim)
+            result = {
+                "status": "pass",
+                "gaps": [],
+                "note": f"unknown dimension: {dim}",
+            }
 
         report["dimensions"][dim] = result
         if result["status"] == "fail":

@@ -103,24 +103,12 @@ this point, any `🔨 In Progress` row in `.roll/backlog.md` belongs to a
 previous cycle that crashed before flipping it back; reclaim it before
 scanning.
 
-**Important — skip `manual-only:*` rows.** A row tagged `manual-only:*`
-means a human (or another non-loop process) has explicitly claimed it;
-it is not loop's to reclaim. Reverting it would silently undo the
-human's claim and cause confusing churn for `roll-brief` / dashboard
-readers. The rule mirrors the gate in Step 2.
-
 1. Scan .roll/backlog.md for all rows whose Status column contains `🔨 In Progress`.
-2. For each candidate row, run the manual-only gate before touching it:
-   ```bash
-   bash -c 'source "$(command -v roll)"; _loop_is_manual_only "<story-id>" .roll/backlog.md'
-   #   exit 0 → row has `manual-only:*` → SKIP (human-claimed; not orphan)
-   #   exit 1 → reclaimable orphan; continue to step 3
-   ```
-3. For each row that passes the gate: revert the status back to
+2. For each such row: revert the status back to
    `📋 Todo`, commit `chore: revert orphan 🔨 US-XXX to 📋`, and append
    a line to `~/.shared/roll/loop/ALERT-<slug>.md` recording the orphan
    id and time so the next brief surfaces it.
-4. After orphan sweep, proceed to Step 1.5 (Pre-run CI health check) before scanning.
+3. After orphan sweep, proceed to Step 1.5 (Pre-run CI health check) before scanning.
 
 ### Step 1.5 — Pre-run CI Health Check
 
@@ -202,12 +190,8 @@ bash -c 'source "$(command -v roll)"; _loop_pr_claimed_stories'
 **Dependency gate** (FIX-032). For each `📋 Todo` candidate, before picking:
 
 ```bash
-# Source bin/roll once per cycle, then call the helpers per candidate.
+# Source bin/roll once per cycle, then call the helper per candidate.
 source "$(command -v roll)"
-
-bash -c 'source "$(command -v roll)"; _loop_is_manual_only "<story-id>" .roll/backlog.md'
-#   exit 0 → row has `manual-only:true` → SKIP this story, log to runs.jsonl
-#            `skipped`, append INFO line ("manual-only — requires $roll-build")
 
 bash -c 'source "$(command -v roll)"; _loop_check_depends_on "<story-id>" .roll/backlog.md'
 #   exit 0 → all `depends-on:US-X,US-Y` are ✅ Done → eligible
@@ -215,7 +199,7 @@ bash -c 'source "$(command -v roll)"; _loop_check_depends_on "<story-id>" .roll/
 #            runs.jsonl `skipped` with reason "depends-on: <unsatisfied>"
 ```
 
-Move to the next candidate when skipping. The two gates are pure functions
+Move to the next candidate when skipping. The gate is a pure function
 over .roll/backlog.md text — no side effects, no LOCK interaction.
 
 Cap at `max_items_per_run` to limit blast radius per cycle.
@@ -244,14 +228,14 @@ Together these mean: only one loop runs at a time per project (LOCK), and within
 > **US-AGENT-006 — Per-story agent routing (pre-cycle)**
 >
 > Before this skill even starts, the runner inner script has already:
-> 1. Picked the next eligible Todo via `_loop_pick_next_story` (priority FIX > US > REFACTOR, manual-only / depends-on gates respected)
+> 1. Picked the next eligible Todo via `_loop_pick_next_story` (priority FIX > US > REFACTOR, depends-on gate respected)
 > 2. Read its Agent profile (est_min / risk_zone) and routed an agent via `_loop_pick_agent_for_story` (hard rules from `.roll/agent-routes.yaml` + soft preference from `runs.jsonl`)
 > 3. Exported `ROLL_LOOP_ROUTED_STORY` / `ROLL_LOOP_ROUTED_AGENT` / `ROLL_LOOP_ROUTED_RULE` and printed `[loop] story <id> routed to <agent> via <rule_kind>` to cron.log
 >
 > When `ROLL_LOOP_ROUTED_STORY` is set, prefer it as `US_ID` for this cycle. The story has already been chosen by hard+soft routing rules — and, per FIX-146, the runner re-validates it against the authoritative backlog right before handing it to you (re-picking the next eligible Todo if it went ✅ Done / In Progress / ineligible between pick and handoff, emitting a `story_stale` event). So treat `ROLL_LOOP_ROUTED_STORY` as already-eligible and just work it. Only if you still find at cycle start that it is no longer 📋 Todo in BACKLOG (a residual concurrent flip), re-pick the next eligible Todo via `_loop_pick_next_story` rather than idling the whole cycle.
 >
 > Old single-agent fallback (`primary_agent` from `~/.roll/config.yaml`) still applies when:
-> - no story is pickable (empty Todo / all manual-only)
+> - no story is pickable (empty Todo / all blocked by depends-on)
 > - the matching agent-routes.yaml has no agent that fits the story profile (then `cold_start_default` is used)
 
 For each item, **before invoking the executor skill**, mark the story 🔨 In Progress in the **main repo's** .roll/backlog.md so brief and peer agents can see it being worked on. The cycle worktree is gitignored at .roll/, so editing the worktree's own copy + committing carries no change back to main — write directly via the helper instead:

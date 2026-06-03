@@ -29,17 +29,6 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
   grep -qE 'orphan.*🔨|🔨.*orphan' "$SKILL_FILE"
 }
 
-@test "roll-loop SKILL.md: Step 1 orphan recovery skips manual-only rows (FIX-G)" {
-  # manual-only:* rows are human-claimed and must not be reclaimed by the
-  # orphan sweep, otherwise the loop silently undoes the human's claim.
-  # The Step 1 section must (a) explicitly call out the rule and (b) invoke
-  # _loop_is_manual_only as the gate, mirroring the Step 2 BACKLOG scan.
-  awk '/^### Step 1 — Orphan/{flag=1} /^### Step 1\.5/{flag=0} flag' "$SKILL_FILE" \
-    | grep -qF 'manual-only'
-  awk '/^### Step 1 — Orphan/{flag=1} /^### Step 1\.5/{flag=0} flag' "$SKILL_FILE" \
-    | grep -qF '_loop_is_manual_only'
-}
-
 @test "roll-loop SKILL.md: Execution Boundary documents human bypass path (US-AUTO-020)" {
   # The Execution Boundary section must explain that humans can run $roll-build / $roll-fix directly
   grep -qE 'Execution Boundary' "$SKILL_FILE"
@@ -49,11 +38,9 @@ SKILL_FILE="${BATS_TEST_DIRNAME}/../../skills/roll-loop/SKILL.md"
 }
 
 @test "roll-loop SKILL.md: Step 2 documents dependency gate (FIX-032)" {
-  # Must mention the two helpers added in FIX-032 + how the loop uses them
+  # Must mention the depends-on helper added in FIX-032 + how the loop uses it
   grep -qF '_loop_check_depends_on' "$SKILL_FILE"
-  grep -qF '_loop_is_manual_only' "$SKILL_FILE"
   grep -qE 'depends-on|Dependency gate' "$SKILL_FILE"
-  grep -qF 'manual-only' "$SKILL_FILE"
   # On skip, must be logged to runs.jsonl as `skipped`
   grep -qE 'skipped.*depends-on|runs\.jsonl.*skipped' "$SKILL_FILE"
 }

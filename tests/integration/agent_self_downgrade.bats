@@ -18,7 +18,7 @@ setup() {
   export _SHARED_ROOT="$TEST_TMP/shared"
   mkdir -p "$_SHARED_ROOT/loop"
   cat > .roll/backlog.md <<'MD'
-| [US-TEST-100](.roll/features/test/t.md#us-test-100) | parent story manual-only:true | 🔨 In Progress |
+| [US-TEST-100](.roll/features/test/t.md#us-test-100) | parent story | 🔨 In Progress |
 | [US-TEST-101](.roll/features/test/t.md#us-test-101) | downstream depends-on:US-TEST-100 | 📋 Todo |
 MD
 }

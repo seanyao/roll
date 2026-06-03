@@ -6,9 +6,6 @@
 #       exit 0 if all `depends-on:` deps are ✅ Done (or no deps);
 #       exit 1 if any unsatisfied / story missing / backlog missing.
 #       Prints unsatisfied dep IDs (space-separated) to stdout when blocking.
-#
-#   _loop_is_manual_only <story-id> [backlog]
-#       exit 0 if row carries `manual-only:true`; exit 1 otherwise.
 
 load helpers
 
@@ -23,7 +20,7 @@ setup() {
 | Story | Description | Status |
 |-------|-------------|--------|
 | [US-AUTO-036](.roll/features/foo.md#us-auto-036) | helpers + tests | ✅ Done |
-| [US-AUTO-037](.roll/features/foo.md#us-auto-037) | runner integration `depends-on:US-AUTO-036` `manual-only:true` | 📋 Todo |
+| [US-AUTO-037](.roll/features/foo.md#us-auto-037) | runner integration `depends-on:US-AUTO-036` | 📋 Todo |
 | [US-AUTO-033](.roll/features/foo.md#us-auto-033) | build PR + auto-merge `depends-on:US-AUTO-037` | 📋 Todo |
 | [US-AUTO-034](.roll/features/foo.md#us-auto-034) | PR inbox first `depends-on:US-AUTO-033,US-AUTO-035` | 📋 Todo |
 | [US-AUTO-035](.roll/features/foo.md#us-auto-035) | review approve `depends-on:US-AUTO-033` | ✅ Done |
@@ -104,54 +101,6 @@ teardown() {
   set -e
   set -o pipefail
   _loop_check_depends_on "US-AUTO-100" "$_backlog"
-}
-
-# --- _loop_is_manual_only ---
-
-@test "_loop_is_manual_only: row with manual-only:true returns 0" {
-  run _loop_is_manual_only "US-AUTO-037" "$_backlog"
-  [ "$status" -eq 0 ]
-}
-
-@test "FIX-109: _loop_is_manual_only accepts non-'true' values (manual-only:roll-meta)" {
-  local tmp; tmp=$(mktemp)
-  cat > "$tmp" <<'BL'
-| Story | Description | Status |
-|-------|-------------|--------|
-| [US-WATCH-001](features/upstream-watch.md#us-watch-001) | private maintainer task `manual-only:roll-meta` | 📋 Todo |
-BL
-  run _loop_is_manual_only "US-WATCH-001" "$tmp"
-  rm -f "$tmp"
-  [ "$status" -eq 0 ]
-}
-
-@test "FIX-109: _loop_is_manual_only accepts arbitrary tag value (manual-only:sean-yao)" {
-  local tmp; tmp=$(mktemp)
-  cat > "$tmp" <<'BL'
-| Story | Description | Status |
-|-------|-------------|--------|
-| [US-FOO-001](features/foo.md#us-foo-001) | claimed by human `manual-only:sean-yao` | 📋 Todo |
-BL
-  run _loop_is_manual_only "US-FOO-001" "$tmp"
-  rm -f "$tmp"
-  [ "$status" -eq 0 ]
-}
-
-@test "_loop_is_manual_only: row without manual-only tag returns 1" {
-  run _loop_is_manual_only "US-AUTO-033" "$_backlog"
-  [ "$status" -eq 1 ]
-}
-
-@test "_loop_is_manual_only: story not in backlog returns 1" {
-  run _loop_is_manual_only "US-NONE-999" "$_backlog"
-  [ "$status" -eq 1 ]
-}
-
-@test "_loop_is_manual_only: tag must be on the story's own row, not in someone else's deps" {
-  # US-AUTO-036 is referenced in US-AUTO-037 (which has manual-only:true)
-  # but US-AUTO-036 itself does NOT have manual-only:true.
-  run _loop_is_manual_only "US-AUTO-036" "$_backlog"
-  [ "$status" -eq 1 ]
 }
 
 @test "FIX-167: depends-on a lettered sub-story (062c) resolves to the sub-story, not its base parent" {

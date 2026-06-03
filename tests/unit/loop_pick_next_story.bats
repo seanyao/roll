@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # US-AGENT-006: _loop_pick_next_story chooses the first eligible Todo from
-# .roll/backlog.md, respecting status (📋 Todo only), manual-only:true skip,
+# .roll/backlog.md, respecting status (📋 Todo only)
 # and depends-on satisfaction. This is what the runner uses before invoking
 # the routed agent (replaces the old "one agent for all cycles" model).
 
@@ -28,6 +28,12 @@ write_backlog() {
   cat > .roll/backlog.md
 }
 
+write_feature() {
+  # $1 = path under .roll/features (e.g. test/t.md), rest = heredoc content via stdin
+  mkdir -p ".roll/features/$(dirname "$1")"
+  cat > ".roll/features/$1"
+}
+
 @test "pick_next: returns FIX before US (priority)" {
   write_backlog <<'MD'
 | [US-A-001](.roll/features/test/t.md#us-a-001) | x | 📋 Todo |
@@ -50,17 +56,6 @@ MD
   [ "$output" = "FIX-A-002" ]
 }
 
-@test "pick_next: skips manual-only rows" {
-  write_backlog <<'MD'
-| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | manual one manual-only:true | 📋 Todo |
-| [FIX-A-002](.roll/features/test/t.md#fix-a-002) | second | 📋 Todo |
-MD
-  source "$ROLL"
-  run _loop_pick_next_story
-  [ "$status" -eq 0 ]
-  [ "$output" = "FIX-A-002" ]
-}
-
 @test "pick_next: respects depends-on (skip if dep not Done)" {
   write_backlog <<'MD'
 | [FIX-A-001](.roll/features/test/t.md#fix-a-001) | parent | 📋 Todo |
@@ -75,7 +70,7 @@ MD
 @test "pick_next: no eligible Todo → non-zero exit, empty stdout" {
   write_backlog <<'MD'
 | [FIX-A-001](.roll/features/test/t.md#fix-a-001) | done | ✅ Done |
-| [FIX-A-002](.roll/features/test/t.md#fix-a-002) | manual manual-only:true | 📋 Todo |
+| [FIX-A-002](.roll/features/test/t.md#fix-a-002) | also done | ✅ Done |
 MD
   source "$ROLL"
   run _loop_pick_next_story
@@ -160,15 +155,6 @@ MD
   [ "$status" -ne 0 ]
 }
 
-@test "story_is_eligible: manual-only → ineligible" {
-  write_backlog <<'MD'
-| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | reserved manual-only:true | 📋 Todo |
-MD
-  source "$ROLL"
-  run _loop_story_is_eligible "FIX-A-001"
-  [ "$status" -ne 0 ]
-}
-
 @test "story_is_eligible: unsatisfied depends-on → ineligible" {
   write_backlog <<'MD'
 | [FIX-A-001](.roll/features/test/t.md#fix-a-001) | parent | 🔨 In Progress |
@@ -224,7 +210,7 @@ MD
 
 @test "story_is_eligible: _loop_pick_next_story delegates to it (behavior unchanged)" {
   write_backlog <<'MD'
-| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | manual manual-only:true | 📋 Todo |
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | already done | ✅ Done |
 | [FIX-A-002](.roll/features/test/t.md#fix-a-002) | plain | 📋 Todo |
 MD
   source "$ROLL"
@@ -246,7 +232,7 @@ MD
 
 @test "pick_next: does not extract story ID from description column" {
   write_backlog <<'MD'
-| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | mentions US-A-002 in description manual-only:true | 📋 Todo |
+| [FIX-A-001](.roll/features/test/t.md#fix-a-001) | mentions US-A-002 in description | ✅ Done |
 | [US-A-002](.roll/features/test/t.md#us-a-002) | reverts to 📋 Todo on failure | ✅ Done |
 MD
   source "$ROLL"
@@ -269,83 +255,45 @@ MD
   grep -qF 're-picking' "$inner"
 }
 
-# US-LOOP-067: manual-only:roll-meta eligibility on maintainer context ─────────
+# US-LOOP-068: _loop_is_roll_meta_story tests (path-based) ─────────────────────
 
-@test "story_is_eligible: manual-only:roll-meta on maintainer context → eligible" {
+@test "is_roll_meta_story: deliverable under .roll/ → true (path-based)" {
   write_backlog <<'MD'
-| [US-A-001](.roll/features/test/t.md#us-a-001) | roll-meta story manual-only:roll-meta | 📋 Todo |
+| [US-A-001](.roll/features/test/t.md#us-a-001) | meta story | 📋 Todo |
 MD
-  # Set up maintainer context: product repo + nested roll-meta repo
-  git init --quiet
-  git remote add origin https://github.com/seanyao/roll.git
-  mkdir -p .roll
-  (cd .roll && git init --quiet && git remote add origin https://github.com/seanyao/roll-meta.git)
-  source "$ROLL"
-  run _loop_story_is_eligible "US-A-001"
-  [ "$status" -eq 0 ]
-}
-
-@test "story_is_eligible: manual-only:roll-meta on non-maintainer context → ineligible" {
-  write_backlog <<'MD'
-| [US-A-001](.roll/features/test/t.md#us-a-001) | roll-meta story manual-only:roll-meta | 📋 Todo |
-MD
-  git init --quiet
-  git remote add origin https://github.com/other/user.git
-  source "$ROLL"
-  run _loop_story_is_eligible "US-A-001"
-  [ "$status" -ne 0 ]
-}
-
-@test "story_is_eligible: manual-only:true on maintainer context → still ineligible" {
-  write_backlog <<'MD'
-| [US-A-001](.roll/features/test/t.md#us-a-001) | true story manual-only:true | 📋 Todo |
-MD
-  git init --quiet
-  git remote add origin https://github.com/seanyao/roll.git
-  mkdir -p .roll
-  (cd .roll && git init --quiet && git remote add origin https://github.com/seanyao/roll-meta.git)
-  source "$ROLL"
-  run _loop_story_is_eligible "US-A-001"
-  [ "$status" -ne 0 ]
-}
-
-@test "pick_next: picks manual-only:roll-meta on maintainer context" {
-  write_backlog <<'MD'
-| [US-A-001](.roll/features/test/t.md#us-a-001) | roll-meta story manual-only:roll-meta | 📋 Todo |
-MD
-  git init --quiet
-  git remote add origin https://github.com/seanyao/roll.git
-  mkdir -p .roll
-  (cd .roll && git init --quiet && git remote add origin https://github.com/seanyao/roll-meta.git)
-  source "$ROLL"
-  run _loop_pick_next_story
-  [ "$status" -eq 0 ]
-  [ "$output" = "US-A-001" ]
-}
-
-# US-LOOP-068: _loop_is_roll_meta_story tests ─────────────────────────────────
-
-@test "is_roll_meta_story: roll-meta tag → true" {
-  write_backlog <<'MD'
-| [US-A-001](.roll/features/test/t.md#us-a-001) | roll-meta story manual-only:roll-meta | 📋 Todo |
+  write_feature test/t.md <<'MD'
+## US-A-001 meta story
+**Files:**
+- `.roll/ops/watch.sh`
 MD
   source "$ROLL"
   run _loop_is_roll_meta_story "US-A-001"
   [ "$status" -eq 0 ]
 }
 
-@test "is_roll_meta_story: manual-only:true → false" {
+@test "is_roll_meta_story: product deliverable → false (path-based)" {
   write_backlog <<'MD'
-| [US-A-001](.roll/features/test/t.md#us-a-001) | true story manual-only:true | 📋 Todo |
+| [US-A-001](.roll/features/test/t.md#us-a-001) | product story | 📋 Todo |
+MD
+  write_feature test/t.md <<'MD'
+## US-A-001 product story
+**Files:**
+- `bin/roll`
 MD
   source "$ROLL"
   run _loop_is_roll_meta_story "US-A-001"
   [ "$status" -ne 0 ]
 }
 
-@test "is_roll_meta_story: no manual-only → false" {
+@test "is_roll_meta_story: only .roll/backlog.md + features touched → false (status flips don't count)" {
   write_backlog <<'MD'
-| [US-A-001](.roll/features/test/t.md#us-a-001) | plain | 📋 Todo |
+| [US-A-001](.roll/features/test/t.md#us-a-001) | product story | 📋 Todo |
+MD
+  write_feature test/t.md <<'MD'
+## US-A-001 product story
+**Files:**
+- `bin/roll`
+- `.roll/backlog.md`
 MD
   source "$ROLL"
   run _loop_is_roll_meta_story "US-A-001"
@@ -354,7 +302,7 @@ MD
 
 @test "is_roll_meta_story: missing story → false" {
   write_backlog <<'MD'
-| [US-A-001](.roll/features/test/t.md#us-a-001) | plain | 📋 Todo |
+| [US-A-001](.roll/features/test/t.md#us-a-001) | x | 📋 Todo |
 MD
   source "$ROLL"
   run _loop_is_roll_meta_story "US-A-999"

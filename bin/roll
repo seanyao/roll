@@ -8334,96 +8334,6 @@ PRRUNNER
   chmod +x "$script_path"
 }
 
-# _write_ci_loop_runner_script <script_path> <project_path> <roll_bin> <log_path>
-#   US-AUTO-045 Phase 2: the script the com.roll.ci.<slug> launchd plist runs
-#   every 5 min. Mirrors _write_pr_loop_runner_script — lightweight (no agent,
-#   no tmux): portable PATH, a single-flight re-entry lock (pid+ts, 15-min
-#   staleness so a crashed pass self-heals next tick), then drives the _ci_scan
-#   orchestrator via the `roll _ci_scan` dispatch.
-_write_ci_loop_runner_script() {
-  local script_path="$1" project_path="$2" roll_bin="$3" log_path="$4"
-  mkdir -p "$(dirname "$script_path")"
-  local lock="${project_path}/.roll/loop/.ci-loop.lock"
-  cat > "$script_path" << CIRUNNER
-#!/bin/bash -l
-set -o pipefail
-# Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
-for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
-  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
-done
-export PATH
-# Single-flight re-entry guard: one CI-loop pass at a time. 5-min cadence;
-# 15-min (900s) staleness so a crashed/hung pass self-heals on the next tick.
-LOCK="${lock}"
-mkdir -p "\$(dirname "\$LOCK")"
-if [ -f "\$LOCK" ]; then
-  _pp=""; _pt=""
-  IFS=: read -r _pp _pt < "\$LOCK" 2>/dev/null || true
-  _now=\$(date -u +%s)
-  if [ -n "\$_pp" ] && [ -n "\$_pt" ] && kill -0 "\$_pp" 2>/dev/null && [ "\$((_now - _pt))" -lt 900 ]; then
-    exit 0
-  fi
-  rm -f "\$LOCK"
-fi
-printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$LOCK"
-trap 'rm -f "\$LOCK"' EXIT
-cd "${project_path}" || exit 0
-bash "${roll_bin}" _ci_scan >> "${log_path}" 2>&1 || true
-CIRUNNER
-  chmod +x "$script_path"
-}
-
-# _write_alert_loop_runner_script <script_path> <project_path> <roll_bin> <log_path>
-#   US-AUTO-046 Phase 2: the script the com.roll.alert.<slug> launchd plist runs
-#   every 1 min. Mirrors _write_ci_loop_runner_script — lightweight (no agent,
-#   no tmux): portable PATH, a single-flight re-entry lock (pid+ts), then drives
-#   the Phase-1 _alert_dispatch consumer via the `roll _alert_dispatch` dispatch.
-#   _alert_dispatch reads $_LOOP_ALERT, parses + notifies + records to
-#   alert-log.jsonl, then rotates the file. Staleness is 180s (3 ticks at the
-#   1-min cadence) so a crashed/hung pass self-heals quickly.
-_write_alert_loop_runner_script() {
-  local script_path="$1" project_path="$2" roll_bin="$3" log_path="$4"
-  mkdir -p "$(dirname "$script_path")"
-  local lock="${project_path}/.roll/loop/.alert-loop.lock"
-  local slug; slug=$(_project_slug "${project_path}")
-  cat > "$script_path" << ALERTRUNNER
-#!/bin/bash -l
-set -o pipefail
-# Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
-for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "\$HOME/.local/bin" "\$HOME/.kimi-code/bin"; do
-  case ":\$PATH:" in *":\$_d:"*) ;; *) [ -d "\$_d" ] && PATH="\$_d:\$PATH" ;; esac
-done
-export PATH
-# Single-flight re-entry guard: one alert-loop pass at a time. 1-min cadence;
-# 180s staleness so a crashed/hung pass self-heals within a few ticks.
-LOCK="${lock}"
-mkdir -p "\$(dirname "\$LOCK")"
-if [ -f "\$LOCK" ]; then
-  _pp=""; _pt=""
-  IFS=: read -r _pp _pt < "\$LOCK" 2>/dev/null || true
-  _now=\$(date -u +%s)
-  if [ -n "\$_pp" ] && [ -n "\$_pt" ] && kill -0 "\$_pp" 2>/dev/null && [ "\$((_now - _pt))" -lt 180 ]; then
-    exit 0
-  fi
-  rm -f "\$LOCK"
-fi
-printf '%s:%s\n' "\$\$" "\$(date -u +%s)" > "\$LOCK"
-trap 'rm -f "\$LOCK"' EXIT
-cd "${project_path}" || exit 0
-# FIX-171: bake the project-local runtime dir directly; do not rely on
-# _loop_runtime_dir which may fail to resolve in fresh shells. Set
-# _LOOP_ALERT so the dispatched roll reads the project-local ALERT file,
-# but do not override an externally-supplied value (test sandboxes).
-_LOOP_RT_DIR="${project_path}/.roll/loop"
-if [ -d "\$_LOOP_RT_DIR" ]; then
-  : "\${_LOOP_ALERT:=\${_LOOP_RT_DIR}/ALERT-${slug}.md}"
-  export _LOOP_ALERT
-fi
-bash "${roll_bin}" _alert_dispatch >> "${log_path}" 2>&1 || true
-ALERTRUNNER
-  chmod +x "$script_path"
-}
-
 # Like _write_runner_script but prepends an active window guard.
 # Silently exits when current hour is outside [active_start, active_end).
 # When tmux is available, wraps the inner command in a detached tmux session
@@ -9766,15 +9676,11 @@ _install_launchd_plists() {
 
   # US-AUTO-044: "pr" is the 4th service — a 5-min PR Loop (period=5, empty hour
   # → StartInterval=300). No skill (it drives _loop_pr_inbox, not an agent).
-  # US-AUTO-045: "ci" is the 5th service — a 5-min CI Loop (period=5, empty hour
-  # → StartInterval=300). No skill (it drives _ci_scan, not an agent).
-  # US-AUTO-046: "alert" is the 6th service — a 1-min Alert Loop (period=1, empty
-  # hour → StartInterval=60). No skill (it drives _alert_dispatch, not an agent).
-  local services=("loop" "dream" "brief" "pr" "ci" "alert")
-  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "" "" "")
-  local periods=("$loop_period" "60" "60" "5" "5" "1")
-  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0" "0" "0")
-  local hours=("" "$dream_hour" "$brief_hour" "" "" "")
+  local services=("loop" "dream" "pr")
+  local skill_names=("roll-loop" "roll-.dream" "")
+  local periods=("$loop_period" "60" "5")
+  local offsets=("$loop_offset" "$dream_minute" "0")
+  local hours=("" "$dream_hour" "")
 
   local updated=0
   local slug; slug=$(_project_slug "$project_path")
@@ -9807,22 +9713,8 @@ _install_launchd_plists() {
       local pr_log="${project_path}/.roll/loop/pr.log"
       mkdir -p "${project_path}/.roll/loop"
       _write_pr_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$pr_log"
-    elif [[ "$svc" == "ci" ]]; then
-      # US-AUTO-045 Phase 2: lightweight CI Loop runner — drives _ci_scan every
-      # 5 min (no agent, no tmux). Records run timing, auto-reruns transient
-      # failures, and surfaces flaky / degradation stories.
-      local ci_log="${project_path}/.roll/loop/ci.log"
-      mkdir -p "${project_path}/.roll/loop"
-      _write_ci_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$ci_log"
-    elif [[ "$svc" == "alert" ]]; then
-      # US-AUTO-046 Phase 2: lightweight Alert Loop runner — drives _alert_dispatch
-      # every 1 min (no agent, no tmux). Consumes _LOOP_ALERT: parse → notify →
-      # record to alert-log.jsonl → rotate the file.
-      local alert_log="${project_path}/.roll/loop/alert.log"
-      mkdir -p "${project_path}/.roll/loop"
-      _write_alert_loop_runner_script "$runner" "$project_path" "${ROLL_PKG_DIR}/bin/roll" "$alert_log"
     else
-      # IDEA-051: dream/brief cron logs are project-local, mirroring loop (FIX-139).
+      # dream cron log is project-local, mirroring loop (FIX-139).
       local log="${project_path}/.roll/${svc}/cron.log"
       mkdir -p "${project_path}/.roll/${svc}"
       _write_runner_script "$runner" "$project_path" "cd \"${project_path}\" && ${cmd}" "$log"
@@ -10020,7 +9912,7 @@ _loop_on() {
     # does not disturb the overrides DB.
     local uid; uid=$(id -u)
     local all_loaded=true
-    for svc in loop dream brief pr ci alert; do
+    for svc in loop dream pr; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
@@ -10087,7 +9979,7 @@ _loop_off() {
   if [[ "$(uname)" == "Darwin" ]]; then
     local any_loaded=false
     local _skip_off; _launchd_should_skip_registry && _skip_off=1 || _skip_off=0
-    for svc in loop dream brief pr ci alert; do
+    for svc in loop dream pr; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       if _launchd_is_loaded "$label"; then
         any_loaded=true
@@ -10102,7 +9994,7 @@ _loop_off() {
     fi
     local slug; slug=$(_project_slug "$project_path")
     local uid; uid=$(id -u)
-    for svc in loop dream brief pr ci alert; do
+    for svc in loop dream pr; do
       rm -f "${_SHARED_ROOT}/${svc}/run-${slug}.sh"
       # FIX-081: reverse the FIX-059 auto-bootstrap guard. `_install_launchd_plists`
       # writes `launchctl disable gui/<UID>/<label>` for every brand-new plist
@@ -10438,7 +10330,7 @@ _legacy_loop_status() {
   echo ""
   if [[ "$(uname)" == "Darwin" ]]; then
     echo -e "  Services   Agent: ${CYAN}${agent}${NC}"
-    for svc in loop dream brief pr ci alert; do
+    for svc in loop dream pr; do
       local state; state=$(_launchd_svc_state "$svc" "$project_path")
       if [[ "$svc" == "loop" ]] && $_is_paused; then
         local _paused_at; _paused_at=$(grep '^paused_at:' "$_LOOP_STATE" 2>/dev/null | awk '{print $2}' | tr -d '"')
@@ -10452,7 +10344,7 @@ _legacy_loop_status() {
         echo -e "    ${YELLOW}loop     ⏸ paused${NC}${_dur}   run: roll loop resume"
       else
         local _tick_age=""
-        case "$svc" in pr|ci|alert)
+        case "$svc" in pr)
           _tick_age=$(_loop_tick_age "$svc")
           [ -n "$_tick_age" ] && _tick_age="  tick ${_tick_age}"
         esac
@@ -11634,7 +11526,7 @@ _loop_pr_heal_self() {
 
   local agent; agent="$(_project_agent 2>/dev/null)"; agent="${agent:-claude}"
 
-  ( echo "$BASHPID" > "$lock"
+  ( echo "${BASHPID:-$$}" > "$lock"
     _loop_pr_do_heal "$num" "$head_ref" "$slug" "$agent" >/dev/null 2>&1
     rm -f "$lock"
   ) &
@@ -11861,54 +11753,25 @@ _loop_is_roll_meta_story() {
 
 # _loop_pr_classify <head_ref> <human_review_state> <ci_state> <mergeable_state>
 #   Prints one of:
-#     loop_self
-#     blocked_human_request_changes
-#     blocked_human_approved
-#     stale
-#     eligible
-#   Exit 0 always — callers parse the printed token.
+#     ci_red    — CI failed → heal
+#     stale     — needs rebase / conflicting / behind
+#     ready     — CI green + clean → merge
+#   Human review intentionally irrelevant — CI is the only gate.
 _loop_pr_classify() {
   local head_ref="${1:-}"
   local human_review="${2:-}"
   local ci_state="${3:-}"
   local mergeable="${4:-}"
 
-  case "$head_ref" in
-    loop/*)
-      # US-LOOP-049: loop/* PRs with CI failure get their own classification
-      # so _loop_pr_inbox can route them to the PR hot-fix path.
-      if [[ "$ci_state" == "failure" ]]; then
-        echo "loop_self_ci_red"; return 0
-      fi
-      echo "loop_self"; return 0
-      ;;
-    claude/*)
-      # Claude-agent-authored PRs are loop-owned for autonomous merge/rebase
-      # once green — same treatment as loop/* — so they close within a
-      # PR-loop tick instead of waiting on a human or a GHA bot review.
-      # CI-red claude/* PRs are deliberately NOT routed to background heal
-      # (no agent re-spawn); they fall through to the stale/eligible paths
-      # below so a human decides what to do with a failing run.
-      if [[ "$ci_state" != "failure" ]]; then
-        echo "loop_self"; return 0
-      fi
-      ;;
-  esac
-
-  case "$human_review" in
-    CHANGES_REQUESTED) echo "blocked_human_request_changes"; return 0 ;;
-    APPROVED)          echo "blocked_human_approved";         return 0 ;;
-  esac
-
-  # CONFLICTING is the GraphQL `mergeable` enum; DIRTY/BEHIND are
-  # `mergeStateStatus` values (_loop_pr_inbox feeds the latter). Accept both
-  # spellings so a conflicting/out-of-date PR is reliably routed to rebase.
-  if [ "$ci_state" = "failure" ] || [ "$mergeable" = "CONFLICTING" ] || [ "$mergeable" = "DIRTY" ] || [ "$mergeable" = "BEHIND" ]; then
-    echo "stale"
-    return 0
+  if [ "$ci_state" = "failure" ]; then
+    echo "ci_red"; return 0
   fi
 
-  echo "eligible"
+  case "$mergeable" in
+    BEHIND|DIRTY|CONFLICTING) echo "stale"; return 0 ;;
+  esac
+
+  echo "ready"
 }
 
 # _loop_pr_rebase_circuit <pr_number>
@@ -12046,6 +11909,9 @@ _loop_pr_rebase_stale() {
   fi
 
   git fetch origin "$head_ref" 2>/dev/null || return 0
+  # Reset local tracking branch to the freshly-fetched remote state
+  # before rebasing, otherwise force-push destroys commits pushed by others.
+  git checkout -B "$head_ref" "origin/$head_ref" 2>/dev/null || return 0
 
   # FIX-159: save original branch so we can restore it unconditionally
   local _orig
@@ -12168,44 +12034,15 @@ _loop_pr_inbox() {
     verdict=$(_loop_pr_classify "$head_ref" "$human_review" "$ci_state" "$mergeable")
 
     case "$verdict" in
-      loop_self)
-        # Green self-PR: merge when clean, else rebase onto main first. A
-        # loop/* or claude/* PR that fell BEHIND or now CONFLICTS with main can
-        # never auto-merge until rebased — eager-merge alone would leave it
-        # stuck open forever. Rebase is circuit-gated (≥3 attempts/24h → ALERT)
-        # and merges on a later tick once the rebased head is green + clean.
-        case "$mergeable" in
-          BEHIND|DIRTY|CONFLICTING)
-            if _loop_pr_rebase_circuit "$num"; then
-              _loop_pr_rebase_stale "$num" "$head_ref" || true
-            fi
-            ;;
-          *)
-            _loop_pr_merge_self_eager "$num" "$ci_state" "$mergeable" "$slug"
-            ;;
-        esac
-        ;;
-      loop_self_ci_red)
-        # US-LOOP-062a: a red loop/* PR (classified by US-LOOP-049) is now
-        # background-healed: bounded retries via heal budget + dynamic agent,
-        # falling back to the deduped [TYPE:loop-pr-ci-red] ALERT (FIX-158's
-        # surfacing) when heal is disabled/exhausted. Re-wires US-LOOP-050.
+      ci_red)
         _loop_pr_heal_self "$num" "$head_ref" "$slug" || true
-        ;;
-      blocked_human_request_changes)
-        : # skip — last human review requested changes; wait for the author
-        ;;
-      blocked_human_approved)
-        # US-LOOP-062b: human approved — merge directly when green + mergeable
-        # (don't wait for repo auto-merge, which may be off).
-        _loop_pr_merge_approved "$num" "$ci_state" "$mergeable" "$slug" || true
         ;;
       stale)
         _loop_pr_rebase_circuit "$num" || true
         _loop_pr_rebase_stale "$num" "$head_ref" || true
         ;;
-      eligible)
-        _loop_pr_review_external "$num" || true
+      ready)
+        _loop_pr_merge_self_eager "$num" "$ci_state" "$mergeable" "$slug"
         ;;
     esac
 
@@ -12403,567 +12240,11 @@ _loop_pr_route() {
   return 0
 }
 
-# US-AUTO-045 Phase 1: dedicated CI Loop helpers (loop-safe pure additions).
-#
-# These six helpers collect CI timing data, classify failures, auto-rerun
-# transient flakes, and surface flaky / degradation signals as backlog
-# entries. They are NOT yet wired into any runner or launchd plist — that is
-# Phase 2 (wired by hand). Each is unit-tested in
-# tests/unit/roll_loop_ci_loop.bats with gh stubbed. Do not delete or inline.
-#
-# State lives under project-local .roll/state/:
-#   ci-timing.jsonl       append-only NDJSON, one line per recorded CI run
-#   ci-rerun-state.yaml   minimal YAML: rerun attempt count per run_id
-# _LOOP_ALERT is the existing shared alert file (real failures, rerun limits).
-
-# _ci_state_dir
-#   Echo the project-local CI state directory, creating it if needed.
-#   Resolves relative to the current working dir's .roll/ (tests cd into a
-#   sandbox; the live loop runner cds into the project root).
-_ci_state_dir() {
+# _alert_log_file — echo path to alert-log.jsonl (used by `roll alert log` CLI).
+_alert_log_file() {
   local dir=".roll/state"
   mkdir -p "$dir" 2>/dev/null || true
-  echo "$dir"
-}
-
-# _ci_record_timing <run_json>
-#   Parse one `gh run list --json ...` object and append a flat NDJSON line to
-#   ci-timing.jsonl. Idempotent: a run_id already present in the file is
-#   skipped. Duration is computed from createdAt → updatedAt (gh exposes no
-#   native duration field). Returns 0 always (loop-safe).
-_ci_record_timing() {
-  local json="$1"
-  [ -n "$json" ] || return 0
-
-  local run_id workflow conclusion status created updated
-  run_id=$(echo "$json" | jq -r '.databaseId // ""' 2>/dev/null)
-  [ -n "$run_id" ] || return 0
-
-  local dir; dir=$(_ci_state_dir)
-  local file="${dir}/ci-timing.jsonl"
-
-  # Idempotency: skip if this run_id is already recorded with a non-empty
-  # conclusion. If the existing record has an empty conclusion and the new
-  # data has a conclusion, update in-place so in-progress runs are completed.
-  if [ -f "$file" ] && grep -q "\"run_id\":${run_id}," "$file" 2>/dev/null; then
-    local existing_conclusion new_conclusion
-    existing_conclusion=$(grep "\"run_id\":${run_id}," "$file" 2>/dev/null | jq -r '.conclusion // ""' 2>/dev/null)
-    new_conclusion=$(echo "$json" | jq -r '.conclusion // ""' 2>/dev/null)
-    if [ -n "$existing_conclusion" ] || [ -z "$new_conclusion" ]; then
-      return 0
-    fi
-    # Remove the stale line so the new record can be appended below.
-    local tmpfile="${file}.tmp.$$"
-    grep -v "\"run_id\":${run_id}," "$file" > "$tmpfile" 2>/dev/null || true
-    mv "$tmpfile" "$file"
-  fi
-
-  workflow=$(echo "$json" | jq -r '.workflowName // .name // ""' 2>/dev/null)
-  conclusion=$(echo "$json" | jq -r '.conclusion // ""' 2>/dev/null)
-  status=$(echo "$json" | jq -r '.status // ""' 2>/dev/null)
-  created=$(echo "$json" | jq -r '.createdAt // ""' 2>/dev/null)
-  updated=$(echo "$json" | jq -r '.updatedAt // ""' 2>/dev/null)
-
-  # Duration in seconds from ISO-8601 timestamps; 0 if either is missing or
-  # unparseable. `date -j` (BSD) and `date -d` (GNU) differ — try both.
-  local dur=0 c_epoch u_epoch
-  if [ -n "$created" ] && [ -n "$updated" ]; then
-    c_epoch=$(_ci_iso_to_epoch "$created")
-    u_epoch=$(_ci_iso_to_epoch "$updated")
-    if [ -n "$c_epoch" ] && [ -n "$u_epoch" ] && [ "$u_epoch" -ge "$c_epoch" ] 2>/dev/null; then
-      dur=$((u_epoch - c_epoch))
-    fi
-  fi
-
-  printf '{"run_id":%s,"workflow":"%s","conclusion":"%s","status":"%s","duration_sec":%s,"recorded_at":"%s"}\n' \
-    "$run_id" "$workflow" "$conclusion" "$status" "$dur" \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$file"
-  return 0
-}
-
-# _ci_iso_to_epoch <iso8601>
-#   Convert an ISO-8601 UTC timestamp (2026-05-30T10:00:00Z) to epoch seconds.
-#   Echoes nothing on failure. Handles both BSD (macOS) and GNU date.
-_ci_iso_to_epoch() {
-  local iso="$1"
-  [ -n "$iso" ] || return 0
-  local e
-  # GNU date
-  e=$(date -u -d "$iso" +%s 2>/dev/null) && { echo "$e"; return 0; }
-  # BSD date (strip trailing Z, parse explicit format)
-  local trimmed="${iso%Z}"
-  e=$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "$trimmed" +%s 2>/dev/null) && { echo "$e"; return 0; }
-  return 0
-}
-
-# _ci_classify_failure <run_id>
-#   Inspect `gh run view <id> --log-failed` and classify the failure as
-#   "transient" (infra flake: network, timeout, runner death) or "real"
-#   (genuine test/build failure). Echoes "transient" or "real".
-#   Empty / unavailable logs default to "real" (fail safe — don't auto-rerun
-#   something we can't read).
-_ci_classify_failure() {
-  local run_id="$1"
-  [ -n "$run_id" ] || { echo "real"; return 0; }
-  local slug; _gh_resolve slug 2>/dev/null || slug=""
-
-  local log
-  if [ -n "$slug" ]; then
-    log=$(gh -R "$slug" run view "$run_id" --log-failed 2>/dev/null)
-  else
-    log=$(gh run view "$run_id" --log-failed 2>/dev/null)
-  fi
-
-  # Transient signatures: network/infra failures that a rerun typically clears.
-  if echo "$log" | grep -qiE 'ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|shutdown signal|runner.*(error|lost|terminated)|The runner has received a shutdown|503 Service|connection reset|TLS handshake|i/o timeout|could not resolve host'; then
-    echo "transient"
-    return 0
-  fi
-  echo "real"
-  return 0
-}
-
-# _ci_rerun_state_file
-#   Echo path to ci-rerun-state.yaml (creating the dir).
-_ci_rerun_state_file() {
-  local dir; dir=$(_ci_state_dir)
-  echo "${dir}/ci-rerun-state.yaml"
-}
-
-# _ci_rerun_attempts <run_id>
-#   Echo the recorded rerun attempt count for <run_id> (0 if none).
-_ci_rerun_attempts() {
-  local run_id="$1"
-  local file; file=$(_ci_rerun_state_file)
-  [ -f "$file" ] || { echo 0; return 0; }
-  local n
-  n=$(awk -v key="\"${run_id}\":" '$1 == key { print $2 }' "$file" 2>/dev/null | head -1)
-  case "$n" in
-    ''|*[!0-9]*) echo 0 ;;
-    *) echo "$n" ;;
-  esac
-}
-
-# _ci_rerun_state_write <run_id> <attempts>
-#   Set the attempt count for <run_id> in ci-rerun-state.yaml. Minimal YAML
-#   writer (we own the schema): one `"<run_id>": <n>` line per run.
-_ci_rerun_state_write() {
-  local run_id="$1" attempts="$2"
-  local file; file=$(_ci_rerun_state_file)
-  [ -f "$file" ] || : > "$file"
-  local tmp; tmp=$(mktemp)
-  awk -v key="\"${run_id}\":" -v val="$attempts" '
-    $1 == key { print key " " val; found=1; next }
-    { print }
-    END { if (!found) print key " " val }
-  ' "$file" > "$tmp" && mv "$tmp" "$file"
-}
-
-# _ci_rerun_transient <run_id>
-#   Auto-rerun a transient CI failure, capped at 2 attempts. attempt<2 →
-#   `gh run rerun`; attempt>=2 → write an error ALERT. Echoes the action taken
-#   ("rerun" / "limit"). Loop-safe (returns 0).
-_ci_rerun_transient() {
-  local run_id="$1"
-  [ -n "$run_id" ] || return 0
-  local slug; _gh_resolve slug 2>/dev/null || slug=""
-
-  local attempts; attempts=$(_ci_rerun_attempts "$run_id")
-  if [ "$attempts" -ge 2 ]; then
-    local alert="$_LOOP_ALERT"
-    mkdir -p "$(dirname "$alert")" 2>/dev/null || true
-    printf '[%s] [error] [TYPE:ci-rerun-limit] CI rerun reached limit: run #%s (%s attempts)\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$run_id" "$attempts" >> "$alert"
-    echo "limit"
-    return 0
-  fi
-
-  if [ -n "$slug" ]; then
-    gh -R "$slug" run rerun "$run_id" >/dev/null 2>&1 || true
-  else
-    gh run rerun "$run_id" >/dev/null 2>&1 || true
-  fi
-  _ci_rerun_state_write "$run_id" "$((attempts + 1))"
-  echo "rerun"
-  return 0
-}
-
-# _ci_open_story <type> <title>
-#   Append a FIX or US row to .roll/backlog.md's `| ID | Description | Status |`
-#   table. Idempotent: if a 📋 Todo row with the same title already exists, skip
-#   (echo "skip"). New IDs auto-increment from the max existing <TYPE>-NNN.
-#   Echoes the new ID on success, "skip" if already queued.
-_ci_open_story() {
-  local type="$1" title="$2"
-  [ -n "$type" ] && [ -n "$title" ] || return 0
-
-  # Resolve the backlog file (project-local).
-  local backlog=".roll/backlog.md"
-  [ -f "$backlog" ] || { echo "skip"; return 0; }
-
-  # Idempotency: same title already queued as Todo → skip.
-  if grep -F "$title" "$backlog" 2>/dev/null | grep -q '📋 Todo'; then
-    echo "skip"
-    return 0
-  fi
-
-  # Auto-increment: find the max existing <TYPE>-NNN id.
-  local prefix max next
-  prefix=$(echo "$type" | tr '[:lower:]' '[:upper:]')
-  max=$(grep -oE "${prefix}-[0-9]+" "$backlog" 2>/dev/null \
-        | sed "s/${prefix}-//" \
-        | sort -n | tail -1)
-  case "$max" in ''|*[!0-9]*) max=0 ;; esac
-  # 10# prefix forces base-10: a zero-padded id like 008/009 would otherwise be
-  # parsed as octal and either misnumber (010→8) or error ("value too great").
-  next=$((10#$max + 1))
-  local id
-  id=$(printf '%s-%03d' "$prefix" "$next")
-
-  printf '| %s | %s | 📋 Todo |\n' "$id" "$title" >> "$backlog"
-  echo "$id"
-  return 0
-}
-
-# _ci_detect_flaky
-#   Scan the last 20 ci-timing.jsonl lines, group by workflow, and flag any
-#   workflow whose recent runs have a 20%–80% failure rate (2..8 failures of
-#   the last 10) as flaky — opening a FIX story. Returns 0 (loop-safe).
-_ci_detect_flaky() {
-  local dir; dir=$(_ci_state_dir)
-  local file="${dir}/ci-timing.jsonl"
-  [ -f "$file" ] || return 0
-
-  # Per workflow: count total + failures over the most recent 10 records.
-  # awk reads last 20 lines (tail), keeps last 10 per workflow. Output is
-  # collected into a variable (not piped to `while`) so an empty result or
-  # an intermediate nonzero exit cannot trip a caller's ERR trap.
-  local flaky_wfs
-  flaky_wfs=$(tail -n 20 "$file" 2>/dev/null | awk '
-    {
-      # crude field extraction from flat JSON line
-      wf=""; concl="";
-      if (match($0, /"workflow":"[^"]*"/)) { wf=substr($0,RSTART+12,RLENGTH-13) }
-      if (match($0, /"conclusion":"[^"]*"/)) { concl=substr($0,RSTART+14,RLENGTH-15) }
-      if (wf=="") next
-      order[wf]=order[wf]" "NR
-      val[wf"|"NR]=concl
-    }
-    END {
-      for (wf in order) {
-        n=split(order[wf], idx, " ")
-        # keep most recent 10
-        start=1; if (n-10 > 0) start=n-9
-        total=0; fail=0
-        for (i=start;i<=n;i++) {
-          if (idx[i]=="") continue
-          total++
-          c=val[wf"|"idx[i]]
-          if (c=="failure" || c=="timed_out" || c=="cancelled") fail++
-        }
-        if (total>=4 && fail>=2 && fail<=8 && fail*100 <= total*80 && fail*100 >= total*20) {
-          print wf
-        }
-      }
-    }
-  ' || true)
-
-  local wf
-  for wf in $flaky_wfs; do
-    [ -n "$wf" ] && _ci_open_story FIX "flaky: ${wf}" >/dev/null || true
-  done
-  return 0
-}
-
-# _ci_detect_degradation
-#   Scan the last 20 ci-timing.jsonl lines, compute mean duration per workflow,
-#   and open a US story when a workflow crosses its threshold:
-#     unit*        > 300s  (5 min)
-#     integration* > 900s  (15 min)
-#   Returns 0 (loop-safe).
-_ci_detect_degradation() {
-  local dir; dir=$(_ci_state_dir)
-  local file="${dir}/ci-timing.jsonl"
-  [ -f "$file" ] || return 0
-
-  local degraded
-  degraded=$(tail -n 20 "$file" 2>/dev/null | awk '
-    {
-      wf=""; dur=0;
-      if (match($0, /"workflow":"[^"]*"/)) { wf=substr($0,RSTART+12,RLENGTH-13) }
-      if (match($0, /"duration_sec":[0-9]+/)) { dur=substr($0,RSTART+15,RLENGTH-15)+0 }
-      if (wf=="") next
-      sum[wf]+=dur; cnt[wf]++
-    }
-    END {
-      for (wf in sum) {
-        if (cnt[wf]==0) continue
-        avg=sum[wf]/cnt[wf]
-        lc=tolower(wf)
-        if (index(lc,"unit")>0 && avg>300)        { print wf "\t" int(avg) }
-        else if (index(lc,"integration")>0 && avg>900) { print wf "\t" int(avg) }
-      }
-    }
-  ' || true)
-
-  local line wf avg
-  # IFS=newline so each "wf<TAB>avg" record is one iteration; field-split on TAB.
-  local _oifs="$IFS"
-  IFS='
-'
-  for line in $degraded; do
-    IFS="$_oifs"
-    wf=$(printf '%s' "$line" | cut -f1)
-    avg=$(printf '%s' "$line" | cut -f2)
-    [ -n "$wf" ] && _ci_open_story US "CI degradation: ${wf} avg ${avg}s exceeds threshold" >/dev/null || true
-    IFS='
-'
-  done
-  IFS="$_oifs"
-  return 0
-}
-
-# _ci_scan
-#   US-AUTO-045 Phase 2 orchestrator: the entry the CI Loop runner drives every
-#   5 min. Lists recent `main`-branch CI runs, records each run's timing, and on
-#   a `failure` conclusion classifies it — auto-rerunning transient infra
-#   flakes. After the loop it runs the flaky + degradation detectors over the
-#   accumulated history. Lenient on gh unavailability (missing / failed list →
-#   return 0) so the service never errors out a tick.
-_ci_scan() {
-  local slug; _gh_resolve slug 2>/dev/null || { _loop_write_tick "ci" "idle" "gh_unavailable"; return 0; }
-
-  local runs_json
-  runs_json=$(gh -R "$slug" run list --branch main \
-    --json databaseId,workflowName,name,conclusion,status,createdAt,updatedAt \
-    2>/dev/null) || { _loop_write_tick "ci" "idle" "gh_error"; return 0; }
-  [ -n "$runs_json" ] || { _loop_write_tick "ci" "idle" "empty_response"; return 0; }
-
-  # An empty list ("[]") still falls through to the detectors below: they run
-  # over accumulated history, not just this tick's runs.
-  local count; count=$(echo "$runs_json" | jq 'length' 2>/dev/null || echo 0)
-  case "$count" in ''|*[!0-9]*) count=0 ;; esac
-
-  local i=0
-  while [ "$i" -lt "$count" ]; do
-    local run_json conclusion run_id
-    run_json=$(echo "$runs_json" | jq -c ".[$i]" 2>/dev/null)
-    _ci_record_timing "$run_json"
-
-    conclusion=$(echo "$run_json" | jq -r '.conclusion // ""' 2>/dev/null)
-    if [ "$conclusion" = "failure" ]; then
-      run_id=$(echo "$run_json" | jq -r '.databaseId // ""' 2>/dev/null)
-      if [ -n "$run_id" ]; then
-        local kind; kind=$(_ci_classify_failure "$run_id")
-        [ "$kind" = "transient" ] && _ci_rerun_transient "$run_id" >/dev/null
-      fi
-    fi
-    i=$((i + 1))
-  done
-
-  _ci_detect_flaky
-  _ci_detect_degradation
-  _loop_write_tick "ci" "acted" "scan_done"
-  return 0
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# US-AUTO-046 Phase 1: dedicated Alert Loop helpers (loop-safe, pure bash)
-# ═══════════════════════════════════════════════════════════════════════════════
-# These consume the existing $_LOOP_ALERT file — until now a write-only dumb file
-# that every loop appends to but nobody reads. The Alert Loop turns it into a
-# real consumer: parse → dedup (1h per category) → notify (error always) →
-# log → rotate. They are NOT yet wired into any runner or launchd plist — that
-# is Phase 2 (wired by hand). Each is unit-tested in
-# tests/unit/roll_loop_alert_loop.bats with _notify stubbed. Do not delete or
-# inline.
-#
-# State lives under project-local .roll/state/ (shared with the CI Loop):
-#   alert-log.jsonl   append-only NDJSON, one line per consumed alert
-# $_LOOP_ALERT.prev is the rotated copy (kept for debugging).
-#
-# Line format ($_LOOP_ALERT) — new tagged format, old format read-compatible:
-#   [2026-05-26T10:00:00] [error] [TYPE:ci-real-failure] CI failed: run #123
-#   [2026-05-26T10:00:00] some legacy message        → level=warn category=legacy
-
-# _alert_parse_file [file]
-#   Parse each non-empty line of $_LOOP_ALERT (or <file>) into a TAB-separated
-#   record `ts<TAB>level<TAB>category<TAB>message`, one per output line. The
-#   leading `[ts]` is extracted when present; optional `[level]` and
-#   `[TYPE:category]` tags follow. Untagged (legacy) lines default to
-#   level=warn, category=legacy, with the whole remainder as the message.
-#   Markdown headers / ack footers (lines starting with `#` or `**`) are skipped.
-#   Echoes nothing for a missing/empty file. Loop-safe (returns 0).
-_alert_parse_file() {
-  local file="${1:-$_LOOP_ALERT}"
-  [ -n "$file" ] && [ -f "$file" ] || return 0
-
-  awk '
-    {
-      line=$0
-      # skip blank lines and markdown chrome (headers, ack footers)
-      if (line ~ /^[ \t]*$/) next
-      if (line ~ /^[ \t]*#/) next
-      if (line ~ /^[ \t]*\*\*/) next
-
-      ts=""; level=""; category=""
-
-      # leading [timestamp]
-      if (match(line, /^\[[^]]*\]/)) {
-        ts=substr(line, RSTART+1, RLENGTH-2)
-        line=substr(line, RSTART+RLENGTH)
-        sub(/^[ \t]+/, "", line)
-      }
-      # optional [level]  (error|warn|info)
-      if (match(line, /^\[(error|warn|info)\]/)) {
-        level=substr(line, RSTART+1, RLENGTH-2)
-        line=substr(line, RSTART+RLENGTH)
-        sub(/^[ \t]+/, "", line)
-      }
-      # optional [TYPE:category]
-      if (match(line, /^\[TYPE:[^]]*\]/)) {
-        category=substr(line, RSTART+6, RLENGTH-7)
-        line=substr(line, RSTART+RLENGTH)
-        sub(/^[ \t]+/, "", line)
-      }
-
-      # legacy "ALERT:" prefix on the remaining message — strip the keyword
-      sub(/^ALERT:[ \t]*/, "", line)
-
-      if (level=="") level="warn"
-      if (category=="") category="legacy"
-
-      printf "%s\t%s\t%s\t%s\n", ts, level, category, line
-    }
-  ' "$file"
-  return 0
-}
-
-# _alert_log_file
-#   Echo path to .roll/state/alert-log.jsonl (creating the dir). Reuses the
-#   CI Loop's _ci_state_dir so both loops share one project-local state dir.
-_alert_log_file() {
-  local dir; dir=$(_ci_state_dir)
   echo "${dir}/alert-log.jsonl"
-}
-
-# _alert_should_notify <category> <level>
-#   Decide whether an alert should fire a notification.
-#     error          → always true (immediate, never throttled)
-#     warn | info    → true unless a same-category alert was already notified
-#                      within the last hour (rate-limit / dedup)
-#   The 1h window is read from alert-log.jsonl (notified=1 entries only).
-#   Echoes "true" / "false".
-_alert_should_notify() {
-  local category="$1" level="$2"
-  [ "$level" = "error" ] && { echo "true"; return 0; }
-
-  local file; file=$(_alert_log_file)
-  [ -f "$file" ] || { echo "true"; return 0; }
-
-  local now; now=$(date -u +%s)
-  # Most recent notified=1 entry for this category → its recorded_at epoch.
-  local last
-  last=$(grep -F "\"category\":\"${category}\"" "$file" 2>/dev/null \
-         | grep -F '"notified":1' \
-         | tail -1 \
-         | sed -n 's/.*"recorded_at":"\([^"]*\)".*/\1/p')
-  [ -n "$last" ] || { echo "true"; return 0; }
-
-  local last_epoch; last_epoch=$(_ci_iso_to_epoch "$last")
-  [ -n "$last_epoch" ] || { echo "true"; return 0; }
-
-  # Within 1h (3600s) → throttle (false); otherwise allow.
-  if [ "$((now - last_epoch))" -lt 3600 ] 2>/dev/null; then
-    echo "false"
-  else
-    echo "true"
-  fi
-  return 0
-}
-
-# _alert_write_log <ts> <level> <category> <message> <notified>
-#   Append one NDJSON record to alert-log.jsonl. <notified> is the literal
-#   string "true"/"false" (or 1/0) and is normalized to 1/0. recorded_at is the
-#   consumption time (UTC), distinct from the alert's own <ts>. Quotes in the
-#   message are escaped so the line stays valid JSON. Loop-safe (returns 0).
-_alert_write_log() {
-  local ts="$1" level="$2" category="$3" message="$4" notified="$5"
-  local file; file=$(_alert_log_file)
-
-  local n=0
-  case "$notified" in true|1) n=1 ;; esac
-
-  # Escape backslashes then double-quotes for JSON string safety.
-  local esc
-  esc=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g')
-
-  printf '{"ts":"%s","level":"%s","category":"%s","message":"%s","notified":%s,"recorded_at":"%s"}\n' \
-    "$ts" "$level" "$category" "$esc" "$n" \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$file"
-  return 0
-}
-
-# _alert_rotate [file]
-#   Snapshot $_LOOP_ALERT (or <file>) to <file>.prev and truncate it in place.
-#   Idempotent: a missing source is a no-op (the .prev from a prior run is
-#   left untouched). Loop-safe (returns 0).
-#
-#   US-AUTO-046 (kimi peer-review Q2): copy+truncate instead of mv. `mv` swaps
-#   the inode at the path, so a producer loop (main/pr/ci) that opened its `>>`
-#   fd *before* the rotation but writes *after* it would land in `.prev` and be
-#   silently lost. Copying keeps the original inode at the path; the subsequent
-#   `:>` truncates that same inode, so any concurrent appender's fd still points
-#   at the live alert file and its write is read on the next 1-min tick.
-_alert_rotate() {
-  local file="${1:-$_LOOP_ALERT}"
-  [ -n "$file" ] || return 0
-  if [ -f "$file" ]; then
-    cat "$file" > "${file}.prev" 2>/dev/null || true
-    : > "$file"
-  fi
-  return 0
-}
-
-# _alert_dispatch [file]
-#   Main consumer entry point. Parse $_LOOP_ALERT → for each alert decide
-#   notify → fire _notify + record to alert-log.jsonl → rotate the file.
-#   A missing/empty alert file is a no-op (no rotate, no log). Loop-safe.
-_alert_dispatch() {
-  local file="${1:-$_LOOP_ALERT}"
-  [ -n "$file" ] && [ -f "$file" ] || { _loop_write_tick "alert" "idle" "no_file"; return 0; }
-  # Empty file → nothing to consume, leave it in place.
-  [ -s "$file" ] || { _loop_write_tick "alert" "idle" "empty_file"; return 0; }
-
-  local parsed; parsed=$(_alert_parse_file "$file")
-  [ -n "$parsed" ] || { _alert_rotate "$file"; _loop_write_tick "alert" "idle" "no_parsed"; return 0; }
-
-  local line ts level category message notify
-  local _oifs="$IFS"
-  IFS='
-'
-  for line in $parsed; do
-    IFS="$_oifs"
-    ts=$(printf '%s' "$line" | cut -f1)
-    level=$(printf '%s' "$line" | cut -f2)
-    category=$(printf '%s' "$line" | cut -f3)
-    message=$(printf '%s' "$line" | cut -f4-)
-
-    notify=$(_alert_should_notify "$category" "$level")
-    if [ "$notify" = "true" ]; then
-      _notify "roll alert: ${level}" "${message}" || true
-      _alert_write_log "$ts" "$level" "$category" "$message" "true"
-    else
-      _alert_write_log "$ts" "$level" "$category" "$message" "false"
-    fi
-    IFS='
-'
-  done
-  IFS="$_oifs"
-
-  _alert_rotate "$file"
-  _loop_write_tick "alert" "acted" "dispatch_done"
-  return 0
 }
 
 # FIX-070: flip a story row in the main repo's .roll/backlog.md between
@@ -14513,7 +13794,7 @@ _loop_monitor() {
       dream_sched=$(printf "%02d:%02d" "$dream_hour" "$dream_minute")
       brief_sched=$(printf "%02d:%02d" "$brief_hour" "$brief_minute")
 
-      local svcs=("loop" "dream" "brief")
+      local svcs=("loop" "dream" "pr")
       local scheds=("$loop_sched" "$dream_sched" "$brief_sched")
       for i in "${!svcs[@]}"; do
         local svc="${svcs[$i]}" schedule="${scheds[$i]}"
@@ -15946,8 +15227,6 @@ main() {
     config)        cmd_config "$@" ;;
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;
-    _ci_scan) _ci_scan "$@" ;;
-    _alert_dispatch) _alert_dispatch "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

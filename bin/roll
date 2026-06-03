@@ -5697,6 +5697,34 @@ EOF
   esac
 }
 
+# ─── roll consistency check — unified consistency orchestrator (US-CONSIST-001) ──
+cmd_consistency() {
+  local subcmd="${1:-check}"
+  shift || true
+  case "$subcmd" in
+    check)
+      python3 "${ROLL_PKG_DIR}/lib/consistency_check.py" "$@"
+      ;;
+    --help|-h|help)
+      cat <<EOF
+Usage: roll consistency <subcommand>
+
+  check [--json] [--project-dir DIR]    逐维度跑一致性检查
+    Run checks across five dimensions (code, docs, i18n, tests, site)
+    and produce a structured pass/gap report.
+
+  roll consistency check                # human-readable report
+  roll consistency check --json         # machine-readable JSON
+EOF
+      ;;
+    *)
+      err "$(msg consistency.unknown_sub "$subcmd")"
+      err "Try: roll consistency check"
+      return 1
+      ;;
+  esac
+}
+
 # ─── roll config — unified read/list/set for loop schedule keys (US-LOOP-033) ──
 #
 # One interactive entry point so users don't have to remember whether a key
@@ -15909,6 +15937,7 @@ main() {
     test)          cmd_test "$@" ;;
     prices)        cmd_prices "$@" ;;
     changelog)     cmd_changelog "$@" ;;
+    consistency)   cmd_consistency "$@" ;;
     config)        cmd_config "$@" ;;
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;

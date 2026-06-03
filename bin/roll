@@ -9220,7 +9220,9 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
         _phase_end cleanup ok
         echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
       elif [ "\$_publish_status" -eq 2 ]; then
-        # US-LOOP-068: for roll-meta, merge_back doesn't apply; fall through to orphan push
+        # US-LOOP-068: for roll-meta, merge_back doesn't apply — skip straight to
+        # the orphan-push safety net (roll-meta commits live on a different remote).
+        _merged_back=0
         if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
           :
         elif ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
@@ -9228,12 +9230,14 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
           # US-LOOP-005 T3: gh unavailable + ff merge_back OK → cycle_end done
           _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true; _CYCLE_END_WRITTEN=1
           echo "[loop] cycle \${CYCLE_ID}: gh unavailable; merged via ff and cleaned up"
-        else
-          :
+          _merged_back=1
         fi
         # FIX-039: gh unavailable + merge_back failed — push orphan branch+tag to origin
         # as final safety net so code is never local-only before worktree cleanup.
+        # Skip entirely when merge_back already finalized the cycle (the worktree is
+        # gone, so re-pushing from \$WT would spuriously fail and raise a false alert).
         # US-LOOP-068: for roll-meta, push from roll-meta worktree
+        if [ "\$_merged_back" -ne 1 ]; then
         _orphan_tag="loop-orphan-\${CYCLE_ID}"
         if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
           if ( cd "\$WT/.roll" && git push origin "\$BRANCH" 2>/dev/null \
@@ -9266,6 +9270,7 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
             _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back+push all failed; worktree preserved at \$WT"
             echo "[loop] cycle \${CYCLE_ID}: all publish paths failed; worktree preserved at \$WT"
           fi
+        fi
         fi
       else
         # FIX-039: PR publish failed — push orphan branch+tag to origin as safety net.

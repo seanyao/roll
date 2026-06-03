@@ -6,6 +6,10 @@ ROLL="${BATS_TEST_DIRNAME}/../../bin/roll"
 setup() {
   TEST_TMP=$(mktemp -d)
   cd "$TEST_TMP"
+  # CI runners have no global git identity; the temp repos below commit, so
+  # provide one via env vars (covers every repo this test creates).
+  export GIT_AUTHOR_NAME="Test" GIT_AUTHOR_EMAIL="test@test"
+  export GIT_COMMITTER_NAME="Test" GIT_COMMITTER_EMAIL="test@test"
 }
 
 teardown() { cd /; rm -rf "$TEST_TMP"; }

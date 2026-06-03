@@ -1,11 +1,36 @@
 # Changelog
 
-## Unreleased
+## v2.603.1
 
-### 新功能
+### 可见性
 
-- `roll prices refresh` 支持 deepseek — 自动抓取中文官方定价页、与快照 diff、变了才落盘 `[loop]`
-- **`roll changelog generate` 不再漏掉没建卡的 merged PR(US-CL-007)** — 自上次发版 tag 以来已合入主干、但 backlog 里没有对应 ✅ Done story 的 PR,会在生成结果末尾以「待确认」区块提示出来,发版前不用手工对账 `[loop]`
+- **loop tmux 时间戳显示改为本地时区(FIX-169)** — 之前输出 UTC，北京时间显示晚 8 小时，看 loop 现场时间全程对不上；显示改本地时区，事件日志仍存 UTC `[loop]`
+
+### 自动化流水线
+
+- **changelog generate 补录无卡 merged 改动(US-CL-007)** — 发版前已 merge 但没建卡的改动（如直接开 PR 的修正）不再在 Unreleased 里被漏掉
+- **Alert Loop runner 显式传入 `_LOOP_RT_DIR`(FIX-171)** — 之前未显式传入，导致 `_alert_dispatch` 消费端回退到旧共享路径，项目本地 ALERT 永久积压无人处理 `[loop]`
+- **loop 按文件路径判断产出落仓(FIX-172)** — 不再读标签，改为看 story 改的文件路径（`.roll/`→roll-meta）；摘标签前的安全前置 `[loop]`
+- **loop 仅在 Roll 维护者机器上领卡(US-LOOP-067)** — 别的项目仍跳过，让维护者侧卡以后也能 loop 自己跑 `[loop]`
+- **loop 领到 roll-meta 卡后在 `.roll/` 干活(US-LOOP-068)** — 在 `.roll/` 做活、提交到 roll-meta 仓、用 roll-meta 自己的测试做 gate `[loop]`
+
+### 其他
+
+- **roll-meta 卡改到产品仓文件立即 abort(US-LOOP-069)** — 绝不重演把维护者工具塞进产品仓的事故 `[loop]`
+- **prices_fetcher 抽象为 vendor 驱动(US-VIEW-023)** — 从 Claude-only 抽象成按 vendor 驱动，加一家厂商只注册一个 vendor、不动抓取主干，Claude 行为不变
+- **roll prices refresh deepseek 自动抓价(US-VIEW-024)** — 从官方页抓实价、diff、变了才落盘，deepseek 价格不再只能手工维护
+- **roll prices refresh kimi 聚合多子页抓价(US-VIEW-025)** — 聚合 K2.5/K2.6 多子页抓实价，kimi 错价不再像 #406 那样靠人肉发现
+
+### ⚠️ 待确认(merged 但未入 backlog)
+
+> 以下 PR 已合入主干，但在 backlog 中没有对应的 ✅ Done story，也未出现在 CHANGELOG 中。
+> 请确认是否需要在 Unreleased 中补充条目。
+
+- **roll changelog generate 出完整 + AI 风格化的待发布说明(FIX-178)** — PR #429
+- **changelog generate 只列待发布，不再 dump 全部 Done(FIX-177)** — PR #427
+- **self-score note 双重嵌套 `.roll/.roll/notes`(FIX-176)** — PR #426
+- **PR loop 单轮内关闭 green agent PRs(PR #413)** — 在单个 tick 内关闭 green agent 发出的 PR
+- **ci-timing.jsonl 空 conclusion 更新(FIX-168)** — PR #409
 
 ## v2.602.5
 

@@ -737,7 +737,7 @@ def merge_runs_into_cycles(cycles: List[Dict[str, Any]], runs: Dict[str, Dict[st
         # Outcome: runs.jsonl wins when events stream was vacuous or
         # misleading (idle/failed emitted by _loop_event even though the
         # agent completed work and _runs_append recorded built).
-        if cy.get("outcome") in ("unknown", "running", "idle", "failed") and r.get("status"):
+        if cy.get("outcome") in ("unknown", "running", "idle", "failed", "orphan") and r.get("status"):
             cy["outcome"] = {"built": "done", "interrupted": "fail"}.get(r["status"], r["status"])
         if not cy.get("story") and r["built"]:
             cy["story"] = r["built"][0]

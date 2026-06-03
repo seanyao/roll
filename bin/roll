@@ -8553,6 +8553,11 @@ _runs_append() {
   if [ -n "\$_story_field" ]; then
     _stype_field="\${_story_field%%-*}"
   fi
+  # US-LOOP-068: target field — roll-meta for roll-meta stories, empty otherwise
+  local _target_field=""
+  if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+    _target_field="roll-meta"
+  fi
   # US-EVAL-002: compute the objective result_eval block from this cycle's
   # facts via the US-EVAL-001 pure-function rubric. Best-effort — when python3
   # or the scorer script is unavailable the row is written WITHOUT result_eval
@@ -8602,6 +8607,7 @@ _runs_append() {
     --arg tier "\$_tier_field" \\
     --arg fallback_from "\$_fallback_from_field" \\
     --arg story_type "\$_stype_field" \\
+    --arg target "\$_target_field" \\
     --argjson built "\$_built" \\
     --argjson skipped '[]' \\
     --argjson alerts '[]' \\
@@ -8612,6 +8618,7 @@ _runs_append() {
       cycle_id:\$cycle_id, agent:\$agent, tier:\$tier, fallback_from:\$fallback_from,
       story_type:\$story_type, built:\$built, skipped:\$skipped, alerts:\$alerts,
       tcr_count:\$tcr_count, duration_sec:\$duration_sec, phases:\$phases}
+     + (if \$target == "" then {} else {target:\$target} end)
      + (if \$result_eval == null then {} else {result_eval:\$result_eval} end)' \\
     > "\$_tmp" 2>/dev/null || { rm -f "\$_tmp"; return 0; }
   # FIX-157: ensure target exists before append; missing file silently drops
@@ -8843,6 +8850,10 @@ for _orphan_wt in "\${_SHARED_ROOT}/worktrees/${slug}-cycle-"*; do
       ( cd "\$_orphan_wt" && _loop_publish_pr "\$_orphan_branch" "recover orphan \${_orphan_branch}" ) && _orphan_ok=1
     fi
     if [ "\$_orphan_ok" -eq 1 ]; then
+      # US-LOOP-068: if orphan contains a roll-meta worktree, clean it first
+      if [ -d "\${_orphan_wt}/.roll/.git" ]; then
+        _loop_roll_meta_worktree_cleanup "\$_orphan_wt" "\$_orphan_branch" "${project_path}" 2>/dev/null || true
+      fi
       _worktree_cleanup "\$_orphan_wt" "\$_orphan_branch"
       echo "[loop] FIX-040: orphan recovered and cleaned: \$_orphan_branch"
     else
@@ -8850,6 +8861,10 @@ for _orphan_wt in "\${_SHARED_ROOT}/worktrees/${slug}-cycle-"*; do
     fi
   else
     echo "[loop] FIX-040: orphan worktree \$_orphan_wt has no commits; cleaning up"
+    # US-LOOP-068: if orphan contains a roll-meta worktree, clean it first
+    if [ -d "\${_orphan_wt}/.roll/.git" ]; then
+      _loop_roll_meta_worktree_cleanup "\$_orphan_wt" "\$_orphan_branch" "${project_path}" 2>/dev/null || true
+    fi
     _worktree_cleanup "\$_orphan_wt" "\$_orphan_branch"
   fi
 done
@@ -8867,6 +8882,16 @@ if _worktree_fetch_origin main \\
   # because .roll/ is gitignored and the clean clone has no backlog
   # for Claude to read or skill entry points to dispatch to.
   _worktree_sync_meta "\$WT" 2>/dev/null || true
+  # US-LOOP-068: for roll-meta stories, replace the synced .roll/ with a
+  # real roll-meta git worktree so commits land in roll-meta remote.
+  if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+    if _loop_roll_meta_worktree_setup "\$WT" "\$BRANCH" "${project_path}" 2>/dev/null; then
+      echo "[loop] cycle \${CYCLE_ID}: roll-meta worktree \${WT}/.roll on \$BRANCH"
+    else
+      echo "[loop] cycle \${CYCLE_ID}: roll-meta worktree setup failed — falling back to normal"
+      _ROLL_META_TARGET=0
+    fi
+  fi
   echo "[loop] cycle \${CYCLE_ID}: worktree \$WT on \$BRANCH"
   _loop_event cycle_start "\${CYCLE_ID}" "" "" || true
   # US-AGENT-006: per-story routing — pick the next Todo, route to an agent
@@ -8923,6 +8948,15 @@ if _worktree_fetch_origin main \\
   fi
   CYCLE_AGENT="\${ROLL_LOOP_ROUTED_AGENT:-\$(_project_agent)}"
   _loop_event agent_used "\${CYCLE_ID}" "\${CYCLE_AGENT}" "primary" || true
+  # US-LOOP-068: detect roll-meta target after routing is complete
+  _ROLL_META_TARGET=0
+  if [ -n "\$ROLL_LOOP_ROUTED_STORY" ]; then
+    if _loop_is_roll_meta_story "\$ROLL_LOOP_ROUTED_STORY" "\${ROLL_MAIN_PROJECT}/.roll/backlog.md" 2>/dev/null; then
+      _ROLL_META_TARGET=1
+      echo "[loop] story \${ROLL_LOOP_ROUTED_STORY} is roll-meta target"
+    fi
+  fi
+  export ROLL_LOOP_ROLL_META_TARGET="\${_ROLL_META_TARGET}"
   _phase_end worktree_setup ok
 else
   # P3 fix: skip the cycle entirely when worktree isolation fails.
@@ -9065,12 +9099,25 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
   if [ "\$_exit" -ne 0 ]; then
     _cycle_status="failed"
   else
-    _cycle_commits_pre=\$(cd "\$WT" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+    # US-LOOP-068: for roll-meta stories, count commits in the roll-meta worktree
+    if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+      _cycle_commits_pre=\$(cd "\$WT/.roll" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+    else
+      _cycle_commits_pre=\$(cd "\$WT" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+    fi
     if [ "\$_cycle_commits_pre" -gt 0 ]; then
       _cycle_status="built"
-      _cycle_tcr=\$(cd "\$WT" && git log --oneline origin/main..HEAD -- 2>/dev/null | grep -c ' tcr:' || echo 0)
+      if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+        _cycle_tcr=\$(cd "\$WT/.roll" && git log --oneline origin/main..HEAD -- 2>/dev/null | grep -c ' tcr:' || echo 0)
+      else
+        _cycle_tcr=\$(cd "\$WT" && git log --oneline origin/main..HEAD -- 2>/dev/null | grep -c ' tcr:' || echo 0)
+      fi
       if command -v jq >/dev/null 2>&1; then
-        _cycle_built=\$(cd "\$WT" && git diff origin/main -- .roll/backlog.md 2>/dev/null | grep '✅ Done' | grep -oE '\[[A-Z]+-[0-9]+\]' | sed 's/^.//;s/.\$//' | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")
+        if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+          _cycle_built=\$(cd "\$WT/.roll" && git diff origin/main -- backlog.md 2>/dev/null | grep '✅ Done' | grep -oE '\[[A-Z]+-[0-9]+\]' | sed 's/^.//;s/.\$//' | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")
+        else
+          _cycle_built=\$(cd "\$WT" && git diff origin/main -- .roll/backlog.md 2>/dev/null | grep '✅ Done' | grep -oE '\[[A-Z]+-[0-9]+\]' | sed 's/^.//;s/.\$//' | jq -R -s 'split("\n") | map(select(length>0))' 2>/dev/null || echo "[]")
+        fi
       fi
     fi
   fi
@@ -9091,8 +9138,17 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
   if [ "\$_exit" -eq 0 ]; then
     # Idle cycle — no commits ahead of origin/main means nothing was built;
     # skip publish and reclaim the worktree immediately.
-    _cycle_commits=\$(cd "\$WT" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+    # US-LOOP-068: for roll-meta stories, count commits in roll-meta worktree
+    if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+      _cycle_commits=\$(cd "\$WT/.roll" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+    else
+      _cycle_commits=\$(cd "\$WT" && git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+    fi
     if [ "\$_cycle_commits" -eq 0 ]; then
+      # US-LOOP-068: clean up roll-meta worktree before product worktree
+      if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+        _loop_roll_meta_worktree_cleanup "\$WT" "\$BRANCH" "${project_path}" 2>/dev/null || true
+      fi
       _worktree_cleanup "\$WT" "\$BRANCH"
       _loop_event idle "\${CYCLE_ID}" "" "" || true
       # FIX-F (2026-05-25): explicitly write the terminal "idle" cycle_end +
@@ -9109,7 +9165,12 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
       echo "[loop] cycle \${CYCLE_ID}: idle (no new commits); worktree cleaned"
     else
       _is_doc_only=0
-      ( cd "\$WT" && _loop_is_doc_only_change ) && _is_doc_only=1
+      # US-LOOP-068: for roll-meta stories, doc-only check runs in roll-meta worktree
+      if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+        ( cd "\$WT/.roll" && _loop_is_doc_only_change ) && _is_doc_only=1
+      else
+        ( cd "\$WT" && _loop_is_doc_only_change ) && _is_doc_only=1
+      fi
       # US-LOOP-069: roll-meta boundary guard — abort if a roll-meta story touched product files
       if ! _loop_guard_roll_meta_boundary "\$WT" "\$ROLL_LOOP_ROUTED_STORY"; then
         _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
@@ -9120,10 +9181,15 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
         exit 0
       fi
       _phase_begin publish_push
-      if [ "\$_is_doc_only" -eq 1 ]; then
-        ( cd "\$WT" && _loop_publish_doc_pr "\$BRANCH" "doc: loop cycle \${CYCLE_ID}" )
+      # US-LOOP-068: roll-meta stories publish to roll-meta remote
+      if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+        _loop_roll_meta_publish "\$WT" "\$BRANCH" "loop cycle \${CYCLE_ID}"
       else
-        ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" )
+        if [ "\$_is_doc_only" -eq 1 ]; then
+          ( cd "\$WT" && _loop_publish_doc_pr "\$BRANCH" "doc: loop cycle \${CYCLE_ID}" )
+        else
+          ( cd "\$WT" && _loop_publish_pr "\$BRANCH" "loop cycle \${CYCLE_ID}" )
+        fi
       fi
       _publish_status=\$?
       if [ "\$_publish_status" -eq 0 ]; then
@@ -9143,6 +9209,10 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
         # so dashboard renders #NN ✓/↩/… correctly. Must run while branch ref
         # is still resolvable on remote — gh pr view <branch> needs the head ref.
         _loop_emit_pr_final "\$BRANCH" 2>/dev/null || true
+        # US-LOOP-068: clean up roll-meta worktree before product worktree
+        if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+          _loop_roll_meta_worktree_cleanup "\$WT" "\$BRANCH" "${project_path}" 2>/dev/null || true
+        fi
         _worktree_cleanup "\$WT" "\$BRANCH"
         _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true; _CYCLE_END_WRITTEN=1
         # US-OBS-014: normal-completion path — push a fresh status snapshot.
@@ -9150,15 +9220,42 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
         _phase_end cleanup ok
         echo "[loop] cycle \${CYCLE_ID}: published; worktree cleaned"
       elif [ "\$_publish_status" -eq 2 ]; then
-        if ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
+        # US-LOOP-068: for roll-meta, merge_back doesn't apply — skip straight to
+        # the orphan-push safety net (roll-meta commits live on a different remote).
+        _merged_back=0
+        if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+          :
+        elif ( cd "${project_path}" && _worktree_merge_back "\$BRANCH" ); then
           _worktree_cleanup "\$WT" "\$BRANCH"
           # US-LOOP-005 T3: gh unavailable + ff merge_back OK → cycle_end done
           _loop_event cycle_end "\${CYCLE_ID}" "" "done" || true; _CYCLE_END_WRITTEN=1
           echo "[loop] cycle \${CYCLE_ID}: gh unavailable; merged via ff and cleaned up"
+          _merged_back=1
+        fi
+        # FIX-039: gh unavailable + merge_back failed — push orphan branch+tag to origin
+        # as final safety net so code is never local-only before worktree cleanup.
+        # Skip entirely when merge_back already finalized the cycle (the worktree is
+        # gone, so re-pushing from \$WT would spuriously fail and raise a false alert).
+        # US-LOOP-068: for roll-meta, push from roll-meta worktree
+        if [ "\$_merged_back" -ne 1 ]; then
+        _orphan_tag="loop-orphan-\${CYCLE_ID}"
+        if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+          if ( cd "\$WT/.roll" && git push origin "\$BRANCH" 2>/dev/null \
+               && git tag "\$_orphan_tag" 2>/dev/null \
+               && git push origin "\$_orphan_tag" 2>/dev/null ); then
+            _loop_roll_meta_worktree_cleanup "\$WT" "\$BRANCH" "${project_path}" 2>/dev/null || true
+            _worktree_cleanup "\$WT" "\$BRANCH"
+            # US-LOOP-005 T4: gh unavailable + orphan push OK → cycle_end orphan
+            _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true; _CYCLE_END_WRITTEN=1
+            _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
+            echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
+          else
+            # US-LOOP-005 T5: gh unavailable + all failed → cycle_end failed
+            _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
+            _worktree_alert "cycle \${CYCLE_ID}: gh+merge_back+push all failed; worktree preserved at \$WT"
+            echo "[loop] cycle \${CYCLE_ID}: all publish paths failed; worktree preserved at \$WT"
+          fi
         else
-          # FIX-039: gh unavailable + merge_back failed — push orphan branch+tag to origin
-          # as final safety net so code is never local-only before worktree cleanup.
-          _orphan_tag="loop-orphan-\${CYCLE_ID}"
           if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \
                && git tag "\$_orphan_tag" 2>/dev/null \
                && git push origin "\$_orphan_tag" 2>/dev/null ); then
@@ -9174,23 +9271,43 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
             echo "[loop] cycle \${CYCLE_ID}: all publish paths failed; worktree preserved at \$WT"
           fi
         fi
+        fi
       else
         # FIX-039: PR publish failed — push orphan branch+tag to origin as safety net.
         # (_loop_publish_pr may have already pushed the branch; git push is idempotent.)
+        # US-LOOP-068: for roll-meta, push from roll-meta worktree
         _orphan_tag="loop-orphan-\${CYCLE_ID}"
-        if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \
-             && git tag "\$_orphan_tag" 2>/dev/null \
-             && git push origin "\$_orphan_tag" 2>/dev/null ); then
-          _worktree_cleanup "\$WT" "\$BRANCH"
-          # US-LOOP-005 T6: PR publish failed + orphan push OK → cycle_end orphan
-          _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true; _CYCLE_END_WRITTEN=1
-          _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
-          echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
+        if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+          if ( cd "\$WT/.roll" && git push origin "\$BRANCH" 2>/dev/null \
+               && git tag "\$_orphan_tag" 2>/dev/null \
+               && git push origin "\$_orphan_tag" 2>/dev/null ); then
+            _loop_roll_meta_worktree_cleanup "\$WT" "\$BRANCH" "${project_path}" 2>/dev/null || true
+            _worktree_cleanup "\$WT" "\$BRANCH"
+            # US-LOOP-005 T6: PR publish failed + orphan push OK → cycle_end orphan
+            _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true; _CYCLE_END_WRITTEN=1
+            _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
+            echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
+          else
+            # US-LOOP-005 T7: PR publish failed + orphan push failed → cycle_end failed
+            _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
+            _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
+            echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
+          fi
         else
-          # US-LOOP-005 T7: PR publish failed + orphan push failed → cycle_end failed
-          _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
-          _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
-          echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
+          if ( cd "\$WT" && git push origin "\$BRANCH" 2>/dev/null \
+               && git tag "\$_orphan_tag" 2>/dev/null \
+               && git push origin "\$_orphan_tag" 2>/dev/null ); then
+            _worktree_cleanup "\$WT" "\$BRANCH"
+            # US-LOOP-005 T6: PR publish failed + orphan push OK → cycle_end orphan
+            _loop_event cycle_end "\${CYCLE_ID}" "" "orphan" || true; _CYCLE_END_WRITTEN=1
+            _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; FIX-039 pushed orphan+tag \${_orphan_tag}; worktree cleaned"
+            echo "[loop] cycle \${CYCLE_ID}: FIX-039: orphan branch+tag \${_orphan_tag} pushed; worktree cleaned"
+          else
+            # US-LOOP-005 T7: PR publish failed + orphan push failed → cycle_end failed
+            _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
+            _worktree_alert "cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT (branch \$BRANCH)"
+            echo "[loop] cycle \${CYCLE_ID}: PR publish failed; worktree preserved at \$WT"
+          fi
         fi
       fi
     fi
@@ -11566,6 +11683,21 @@ _loop_is_manual_only() {
   echo "$row" | grep -qE 'manual-only:[A-Za-z0-9_.-]+'
 }
 
+# US-LOOP-068: detect whether a story is a roll-meta story (manual-only:roll-meta).
+# Returns 0 when the story's row carries `manual-only:roll-meta`.
+_loop_is_roll_meta_story() {
+  local id="$1"
+  local backlog="${2:-.roll/backlog.md}"
+  [ -n "$id" ] || return 1
+  [ -f "$backlog" ] || return 1
+
+  local row
+  row=$(grep -E "^\| \[?${id}[]| ]" "$backlog" | head -1)
+  [ -n "$row" ] || return 1
+
+  echo "$row" | grep -qF 'manual-only:roll-meta'
+}
+
 # US-LOOP-067: detect whether we are on the Roll maintainer machine where
 # manual-only:roll-meta stories should be eligible for loop execution.
 # Returns 0 when:
@@ -13285,6 +13417,33 @@ _worktree_sync_meta() {
     sed -i.bak '/| 🔨 In Progress |$/d' "$path/.roll/backlog.md" 2>/dev/null || true
     rm -f "$path/.roll/backlog.md.bak"
   fi
+}
+
+# US-LOOP-068: set up .roll/ inside the product worktree as a roll-meta git worktree.
+# Must be called after the product worktree is created.
+# Returns 0 on success, 1 on failure.
+_loop_roll_meta_worktree_setup() {
+  local wt="$1" branch="$2" project_path="$3"
+  local meta_repo="${project_path}/.roll"
+  [ -d "$meta_repo/.git" ] || { echo "[loop] roll-meta setup: ${meta_repo} is not a git repo"; return 1; }
+  rm -rf "${wt}/.roll"
+  git -C "$meta_repo" worktree add "${wt}/.roll" -b "$branch" "origin/main"
+}
+
+# US-LOOP-068: clean up the roll-meta worktree inside the product worktree.
+_loop_roll_meta_worktree_cleanup() {
+  local wt="$1" branch="$2" project_path="$3"
+  local meta_repo="${project_path}/.roll"
+  [ -d "$meta_repo/.git" ] || return 0
+  git -C "$meta_repo" worktree remove --force "${wt}/.roll" 2>/dev/null || true
+  rm -rf "${wt}/.roll" 2>/dev/null || true
+  git -C "$meta_repo" branch -D "$branch" 2>/dev/null || true
+}
+
+# US-LOOP-068: publish a PR from the roll-meta worktree.
+_loop_roll_meta_publish() {
+  local wt="$1" branch="$2" title="$3"
+  (cd "${wt}/.roll" && _loop_publish_pr "$branch" "$title")
 }
 
 # _worktree_merge_back <branch>

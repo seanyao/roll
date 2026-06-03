@@ -322,3 +322,47 @@ MD
   [ "$status" -eq 0 ]
   [ "$output" = "US-A-001" ]
 }
+
+# US-LOOP-068: _loop_is_roll_meta_story tests ─────────────────────────────────
+
+@test "is_roll_meta_story: roll-meta tag → true" {
+  write_backlog <<'MD'
+| [US-A-001](.roll/features/test/t.md#us-a-001) | roll-meta story manual-only:roll-meta | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_is_roll_meta_story "US-A-001"
+  [ "$status" -eq 0 ]
+}
+
+@test "is_roll_meta_story: manual-only:true → false" {
+  write_backlog <<'MD'
+| [US-A-001](.roll/features/test/t.md#us-a-001) | true story manual-only:true | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_is_roll_meta_story "US-A-001"
+  [ "$status" -ne 0 ]
+}
+
+@test "is_roll_meta_story: no manual-only → false" {
+  write_backlog <<'MD'
+| [US-A-001](.roll/features/test/t.md#us-a-001) | plain | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_is_roll_meta_story "US-A-001"
+  [ "$status" -ne 0 ]
+}
+
+@test "is_roll_meta_story: missing story → false" {
+  write_backlog <<'MD'
+| [US-A-001](.roll/features/test/t.md#us-a-001) | plain | 📋 Todo |
+MD
+  source "$ROLL"
+  run _loop_is_roll_meta_story "US-A-999"
+  [ "$status" -ne 0 ]
+}
+
+@test "is_roll_meta_story: missing backlog → false" {
+  source "$ROLL"
+  run _loop_is_roll_meta_story "US-A-001" ".roll/missing.md"
+  [ "$status" -ne 0 ]
+}

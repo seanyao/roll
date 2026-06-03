@@ -9180,6 +9180,17 @@ if [ "\$_USE_WORKTREE" = "1" ]; then
         trap '_inner_cleanup' EXIT
         exit 0
       fi
+      # US-LOOP-068: roll-meta test gate — run roll-meta tests when ops/ changed
+      if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
+        if ! _loop_roll_meta_test_gate "\$WT"; then
+          _loop_event cycle_end "\${CYCLE_ID}" "" "failed" || true; _CYCLE_END_WRITTEN=1
+          _phases_test=\$(_phases_to_json 2>/dev/null); [ -z "\$_phases_test" ] && _phases_test='{}'
+          _runs_append "failed" 0 "[]" "\$_phases_test" 2>/dev/null || true
+          echo "[loop] cycle \${CYCLE_ID}: roll-meta test gate failed; worktree preserved at \$WT"
+          trap '_inner_cleanup' EXIT
+          exit 0
+        fi
+      fi
       _phase_begin publish_push
       # US-LOOP-068: roll-meta stories publish to roll-meta remote
       if [ "\${_ROLL_META_TARGET:-0}" = "1" ]; then
@@ -13444,6 +13455,31 @@ _loop_roll_meta_worktree_cleanup() {
 _loop_roll_meta_publish() {
   local wt="$1" branch="$2" title="$3"
   (cd "${wt}/.roll" && _loop_publish_pr "$branch" "$title")
+}
+
+# US-LOOP-068: run roll-meta test gate when .roll/ops/ files are modified.
+# Returns 0 when no ops changes or tests pass; 1 when tests fail.
+_loop_roll_meta_test_gate() {
+  local wt="$1"
+  local _ops_changed
+  _ops_changed=$(cd "${wt}/.roll" && git diff --name-only origin/main..HEAD 2>/dev/null | grep '^ops/' || true)
+  [ -n "$_ops_changed" ] || return 0
+  if ! command -v bats >/dev/null 2>&1; then
+    echo "[loop] roll-meta ops/ changed but bats not installed — skipping test gate"
+    return 0
+  fi
+  local _test_dir="${wt}/.roll/ops/tests"
+  if [ ! -d "$_test_dir" ]; then
+    echo "[loop] roll-meta ops/ changed but no $_test_dir found — skipping test gate"
+    return 0
+  fi
+  echo "[loop] roll-meta test gate: bats ${_test_dir}"
+  if ! bats "${_test_dir}" 2>/dev/null; then
+    echo "[loop] roll-meta test gate failed"
+    return 1
+  fi
+  echo "[loop] roll-meta test gate passed"
+  return 0
 }
 
 # _worktree_merge_back <branch>

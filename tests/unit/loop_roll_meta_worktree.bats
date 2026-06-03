@@ -114,3 +114,73 @@ teardown() { cd /; rm -rf "$TEST_TMP"; }
   grep -qF 'target' "$inner"
   grep -qF '_target_field' "$inner"
 }
+
+@test "roll_meta_test_gate: no ops changes → pass" {
+  git init --quiet product
+  mkdir -p product/.roll
+  git -C product/.roll init --quiet
+  git -C product/.roll remote add origin https://github.com/seanyao/roll-meta.git
+  touch product/.roll/README.md
+  git -C product/.roll add README.md
+  git -C product/.roll commit -m "init" --quiet
+  git -C product/.roll update-ref refs/remotes/origin/main HEAD
+  touch product/.roll/backlog.md
+  git -C product/.roll add backlog.md
+  git -C product/.roll commit -m "tcr: backlog update" --quiet
+
+  source "$ROLL"
+  run _loop_roll_meta_test_gate "${TEST_TMP}/product"
+  [ "$status" -eq 0 ]
+}
+
+@test "roll_meta_test_gate: ops changed + tests pass → pass" {
+  command -v bats >/dev/null 2>&1 || skip "bats not installed"
+  git init --quiet product
+  mkdir -p product/.roll/ops/tests
+  git -C product/.roll init --quiet
+  git -C product/.roll remote add origin https://github.com/seanyao/roll-meta.git
+  touch product/.roll/README.md
+  git -C product/.roll add README.md
+  git -C product/.roll commit -m "init" --quiet
+  git -C product/.roll update-ref refs/remotes/origin/main HEAD
+  touch product/.roll/ops/config.sh
+  cat > product/.roll/ops/tests/config.bats <<'BAT'
+@test "dummy" { true; }
+BAT
+  git -C product/.roll add ops/
+  git -C product/.roll commit -m "tcr: ops change" --quiet
+
+  source "$ROLL"
+  run _loop_roll_meta_test_gate "${TEST_TMP}/product"
+  [ "$status" -eq 0 ]
+}
+
+@test "roll_meta_test_gate: ops changed + tests fail → fail" {
+  command -v bats >/dev/null 2>&1 || skip "bats not installed"
+  git init --quiet product
+  mkdir -p product/.roll/ops/tests
+  git -C product/.roll init --quiet
+  git -C product/.roll remote add origin https://github.com/seanyao/roll-meta.git
+  touch product/.roll/README.md
+  git -C product/.roll add README.md
+  git -C product/.roll commit -m "init" --quiet
+  git -C product/.roll update-ref refs/remotes/origin/main HEAD
+  touch product/.roll/ops/config.sh
+  cat > product/.roll/ops/tests/config.bats <<'BAT'
+@test "failing" { false; }
+BAT
+  git -C product/.roll add ops/
+  git -C product/.roll commit -m "tcr: ops change" --quiet
+
+  source "$ROLL"
+  run _loop_roll_meta_test_gate "${TEST_TMP}/product"
+  [ "$status" -eq 1 ]
+}
+
+@test "runner script: inner contains roll-meta test gate" {
+  source "$ROLL"
+  _write_loop_runner_script "${TEST_TMP}/run.sh" "${TEST_TMP}" "echo ok" "${TEST_TMP}/log" 0 24 >/dev/null 2>&1 || true
+  local inner="${TEST_TMP}/run-inner.sh"
+  [ -f "$inner" ]
+  grep -qF '_loop_roll_meta_test_gate' "$inner"
+}

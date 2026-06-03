@@ -32,7 +32,11 @@ teardown() {
 _load_peer_call() {
   # Stub the helpers `_peer_call` calls. Defined BEFORE sourcing so the real
   # implementations in bin/roll don't override us — bash uses last definition.
-  source <(awk '/^_peer_call\(\)/,/^}/' "$ROLL_BIN")
+  # FIX-181: use a temp file instead of source <(...) for bash 3.2 compat.
+  local _peer_call_tmp
+  _peer_call_tmp="${TEST_TMP}/_peer_call.sh"
+  awk '/^_peer_call\(\)/,/^}/' "$ROLL_BIN" > "$_peer_call_tmp"
+  source "$_peer_call_tmp"
 
   # Stub agent invocation — caller picks the argv per test.
   _agent_argv() { :; }  # default no-op; tests overwrite

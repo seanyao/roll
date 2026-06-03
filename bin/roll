@@ -4046,6 +4046,11 @@ _peer_call() {
     _watchdog_pid=$!
     wait "$_peer_pid" 2>/dev/null || _peer_exit=$?
     # Cancel watchdog if agent finished on time.
+    # FIX-181: kill children (sleep) first so they cannot outlive the
+    # watchdog and later hit a reused PID, then kill the watchdog itself.
+    if command -v pkill >/dev/null 2>&1; then
+      pkill -P "$_watchdog_pid" 2>/dev/null || true
+    fi
     kill "$_watchdog_pid" 2>/dev/null || true
     wait "$_watchdog_pid" 2>/dev/null || true
     output="$(cat "$_out" 2>/dev/null || true)"

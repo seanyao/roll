@@ -31,6 +31,15 @@ teardown() { cd /; rm -rf "$TEST_TMP"; }
   ls .roll/notes/*roll-build*US-FOO-001*.md > /dev/null
 }
 
+@test "FIX-176: invoked from inside .roll/ does not double-nest (.roll/.roll/notes)" {
+  source "$ROLL"
+  cd .roll
+  _skill_write_self_score roll-design US-BAR-002 7 good "self-score run from inside .roll"
+  # Note lands in .roll/notes (here: cwd/notes), never .roll/.roll/notes
+  [ ! -d ".roll/notes" ]
+  ls notes/*roll-design*US-BAR-002*.md > /dev/null
+}
+
 @test "helper: note contains valid YAML frontmatter" {
   source "$ROLL"
   _skill_write_self_score roll-build US-FOO-001 8 good "rationale"

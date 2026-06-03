@@ -343,7 +343,9 @@ EOF
 EOF
   echo "change" >> file.txt
   git add file.txt
-  git commit -m "Fix something (#123)"
+  # FIX-177: commit references the story so release-aware filtering (since last
+  # tag) drafts it; an unreferenced story would be treated as already-released.
+  git commit -m "US-FOO-001: 新增一键安装 (#123)"
 
   # Ensure gh is NOT available by creating a fake gh that always fails
   fake_gh="${TEST_TMP}/fake_gh_offline"
@@ -356,6 +358,26 @@ EOF
   [[ "$output" == *"新增一键安装"* ]]
   # Should NOT contain the warning block
   ! [[ "$output" == *"待确认"* ]]
+}
+
+@test "FIX-177: release-aware draft excludes stories not committed since last tag" {
+  mkdir -p .roll
+  _setup_git_repo
+  cat > .roll/backlog.md <<'EOF'
+# Backlog
+| Story | Description | Status |
+| [US-OLD-001](x.md) | 老功能早已发布 | ✅ Done |
+| [US-NEW-002](x.md) | 新功能本次发布 | ✅ Done |
+EOF
+  echo c >> file.txt
+  git add file.txt
+  git commit -m "US-NEW-002: 新功能本次发布 (#200)"
+  run python3 "$GEN"
+  [ "$status" -eq 0 ]
+  # since-tag commit names US-NEW-002 → drafted
+  [[ "$output" == *"新功能本次发布"* ]]
+  # US-OLD-001 not referenced post-tag → treated as already released, excluded
+  ! [[ "$output" == *"老功能早已发布"* ]]
 }
 
 @test "changelog_generate --json: includes uncarded_merged array" {

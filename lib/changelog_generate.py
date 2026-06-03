@@ -207,6 +207,26 @@ def _latest_release_tag() -> str | None:
         return None
 
 
+def _commit_log_since_last_release() -> str | None:
+    """Concatenated commit subjects since the last release tag (FIX-177).
+
+    Used for release-aware unreleased detection: a ✅ Done story is unreleased
+    iff its id appears here. Returns None when there is no release tag or git is
+    unavailable, so the caller falls back to the CHANGELOG-text dedup.
+    """
+    tag = _latest_release_tag()
+    if not tag:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "log", f"{tag}..HEAD", "--pretty=format:%s"],
+            capture_output=True, text=True, check=True
+        )
+        return result.stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
 def _gh_available() -> bool:
     """Check whether the gh CLI is installed and on PATH."""
     try:
@@ -331,9 +351,23 @@ def main() -> int:
 
     rows = _read_done_stories(backlog)
 
+    # FIX-177: only draft stories that are actually UNRELEASED. The backlog holds
+    # every ✅ Done story ever (500+), most already shipped in past versions; the
+    # CHANGELOG only carries recent versions, so filtering by "already in
+    # CHANGELOG text" let hundreds of long-released stories leak into the draft.
+    # Release-aware rule: a story is unreleased iff its id is referenced by a
+    # commit merged since the last release tag (git log <tag>..HEAD). Old stories
+    # never appear there and are correctly excluded. Falls back to the
+    # CHANGELOG-text filter when git/tag are unavailable (e.g. test sandboxes).
+    since_tag_log = _commit_log_since_last_release()
+
     filtered: list[tuple[str, str, str, str]] = []
     for story_id, desc, source in rows:
-        if _already_in_changelog(story_id, desc, changelog):
+        if since_tag_log is not None:
+            # Release-aware: skip stories not named in any post-release commit.
+            if not story_id or story_id not in since_tag_log:
+                continue
+        elif _already_in_changelog(story_id, desc, changelog):
             continue
         if _is_internal(desc):
             continue

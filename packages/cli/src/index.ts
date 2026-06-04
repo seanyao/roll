@@ -1,1 +1,3 @@
 export * from "./bridge.js";
+export * from "./render.js";
+export * from "./commands/index.js";

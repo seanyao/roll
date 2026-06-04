@@ -51,3 +51,8 @@ npm-debug.log*
 
 # Antigravity CLI config (agy, successor to Gemini CLI)
 .antigravitycli/
+
+# v3 TS build artifacts
+node_modules/
+packages/*/dist/
+*.tsbuildinfo

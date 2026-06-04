@@ -29,6 +29,10 @@ importers:
         version: 25.9.1
 
   packages/core:
+    dependencies:
+      '@roll/spec':
+        specifier: workspace:*
+        version: link:../spec
     devDependencies:
       '@types/node':
         specifier: ^25.9.1

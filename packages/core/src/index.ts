@@ -13,5 +13,7 @@ export * from "./evals/candidates.js";
 export * from "./evals/score.js";
 export * from "./events/bus.js";
 export * from "./events/infra-default.js";
+export * from "./loop/quality-gate.js";
+export * from "./loop/recovery.js";
 export * from "./policy/engine.js";
 export * from "./reconcile/engine.js";

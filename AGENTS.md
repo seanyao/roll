@@ -1,241 +1,64 @@
-# Roll Project — Internal Conventions
+# Roll v3（在建分支）— Agent 操作手册
 
-> ⚠️ **This file is for developers working ON Roll itself.**
-> The user-facing baseline — distributed via `roll setup` to `~/.codex/AGENTS.md`,
-> `~/.kimi/AGENTS.md`, etc. — lives at [conventions/global/AGENTS.md](conventions/global/AGENTS.md).
+> ⚠️ **This is the Roll v3 work-in-progress branch. Stable = `main` (bash).**
+> ⚠️ **这是 Roll v3 在建分支；稳定版在 `main`（bash，锚点 tag `v2-freeze-2026-06-04`）。**
+> 本分支把 roll 从 bash 重写为 TypeScript，按"反馈闭环 + 能力域分层"收敛。给在本分支干活的 agent / loop 读。
+> 规格依据：`.roll/v3/README.md`（包地图 + 冲突裁定表）；每 story 纪律：`.roll/v3/build/prompts/p2-build-cycle.md`。
 
-> Focus on outcomes.
+## 0. 这是什么（一句话）
 
-## 1. Communication
-- Respond in user's language. Code/Git/Comments: English. UI: Chinese.
-- Concise. No summaries/code-walking. Implementation invisible.
-- Strategy (Why) OK; Tactics (How) NO. Outcomes only.
-- **Voice**: Natural, colleague-like tone — neither robotic ("Executing…") nor over-enthusiastic ("Great!"). "Done — here's what changed." instead of "Task completed successfully." Consistent warmth for success and failure alike.
+roll 是一个**按反馈闭环设计的 agent harness**：把 LLM agent 当黑盒，用反馈闭环优化对它的控制力。本分支把这台控制器从散落的 bash/skill/py/配置，收敛成 TS 分层系统。
 
-## 2. Standards
-- **Bash**: `set -euo pipefail`. All variables quoted. shellcheck-clean.
-- **Rules**: engineering-common-sense — [EN](guide/en/practices/engineering-common-sense.md) · [中文](guide/zh/practices/engineering-common-sense.md).
-- **Test**: bats coverage for `cmd_*` and helpers.
-  - **TCR commits**: run `roll test` — affected by default (fast) and it writes the `.roll/last-test-pass` proof the pre-commit hook checks. `roll test` honors `.roll/local.yaml` `test_isolation` (host by default; `tart` VM on this dev machine if configured).
-  - **Pre-push**: run the full `npm test`.
-  - **Never** run the full suite for a single TCR micro-step — it can't finish inside the hook's 60s window and hangs/kills the agent (the historical "kill-pi" abort: blocked commit → agent runs `npm test` → death).
-- **Git hooks**: TCR pre-commit gate is in `hooks/pre-commit`. `core.hooksPath` is auto-configured by `roll setup`, by the autonomous loop at cycle preflight, and by the Claude Code SessionStart hook — no manual step needed. If you clone without setup, run `roll setup` once to wire it up. (US-INFRA-008/009)
+## 1. 当前桥接状态（随每条命令迁移增量更新）
 
-## 3. Workflow
-- **TCR**: Test -> Green = Commit / Red = Revert. No WIP.
-- **Backlog**: Work stems from `.roll/backlog.md`. **Row format is governed by [conventions/global/AGENTS.md §4 Backlog descriptions](conventions/global/AGENTS.md)** — one sentence in plain language, no file paths / function names / architecture jargon; implementation goes in `.roll/features/`. The rule applies equally when working ON Roll as when using Roll.
-- **Docs**: [guide/en/skills.md](guide/en/skills.md), [guide/en/methodology.md](guide/en/methodology.md).
+| 范围 | 状态 |
+|---|---|
+| 全部子命令 | **bash**（`bin/roll`，未开始 port） |
+| `packages/` | 空脚手架（pnpm workspace 已就位） |
+| `skills/` | git submodule → seanyao/roll-skills |
 
-## 4. CLI
-- **Entry**: `bin/roll` — single bash script. No Node runtime. No build step.
-- **Tests**: `bats` (`tests/unit/`, `tests/integration/`).
-- **Config**: Flags > Env (`ROLL_HOME`, `NO_COLOR`) > File (`~/.roll/config.yaml`) > Defaults.
-- **UI**: Human-readable bilingual output (EN + ZH on separate lines).
+> 每 port 完一条命令，把它从上表挪进「走 TS」行——只改相关行，不大改。
 
-## 2. Code
-- **TS**: Strict, no `any`. Functional hooks. Early returns.
-- **Git**: No force-push main. No `--no-verify`. No secrets in git.
-- **Identity**: When you need the user's name or email, read it dynamically — `git config user.name` / `git config user.email`. **Never hardcode personal data** (names, emails, machine paths, personal repo URLs) into files that get committed or shipped via npm. Author/repo metadata in `package.json` is the only allowed exception.
-- **Behavior**: No unrelated refactoring. No speculative abstractions.
-- **File ops**: Prefer targeted edits over full file rewrites. Verify file exists before modifying.
+## 2. 沟通
 
+- 用用户语言回答；代码/git/注释用英文；UI 中英双行。
+- 简洁，讲结果（outcome），不复述实现、不走查代码。
+- 自然、同事口吻；成功失败一致的温度。
 
-## 3. Engineering
-- **Idempotency**: Same op N times = same result.
-- **Atomicity**: Complete fully or rollback. No partial state.
-- **Validation**: All external input validated. Fail fast on startup.
-- **Testing**: Unit >80%. E2E for flows. No DB mocks.
-- **Test-quality design self-check (US-QA-011)**: when adding tests, before
-  writing code, confirm:
-  1. Each new test calls **project functions / public command entry points** —
-     not inline `sed` / `awk` / `grep -o` / `find` / `cut` pipelines that
-     duplicate behaviour the project already encapsulates (rubric ❼).
-  2. The test sandboxes any filesystem touch through `BATS_TMPDIR` or an
-     equivalent project helper — never asserts on or writes to paths outside
-     this repo (`~/.codex`, `~/.kimi`, `~/.roll/`, `/etc/`, etc.) (rubric ❽).
-  3. The dream nightly scan flags ❼ / ❽ as REFACTOR entries; the loop merge
-     gate (US-QA-012) blocks PRs that introduce new violations of those two
-     categories. See [guide/en/testing/quality-rubric.md](guide/en/testing/quality-rubric.md).
+## 3. 架构不变量（动手前必须守）
 
+1. **反馈闭环是脊柱**：核心作动（编排）→ 控制平面传感/评分/限幅（可观测/Evals/Guardrails）→ 反哺。别把功能做成互不相干的孤岛。
+2. **能力域分层 = 每个能力域一个家**：Orchestration / Sandboxing / Tool Use / Context Engineering / Observability / Evals / Guardrails。新代码先问"它属哪个域"，进那个域的包（6 包：spec/core/infra/daemon/cli/web），别又摊回多载体。
+3. **守黑盒边界（外层 harness）**：token 级压缩、工具 schema 强制、单次 ReAct 委派内层 agent。
+4. **event-driven，不中央编排**：多 loop 独立、经 artifact 协调，单 loop 故障不塌全局。
+5. **主干即真相**：Done ≡ 已合进 `v3` 分支；退出码不算数，事后对账。
+6. **失败要响（fail-loud）**：连续失败 → PAUSE + 记录 + 问 owner；不做静默自愈/自动 fallback 链。
+7. **持久优先**：状态从不可变事件流重建，不存独立缓存；写在前、原子 append。
+8. **有界且可逆**：一 cycle 一小故事、fresh 上下文、TCR green-or-revert、feature 可整体回退。
+9. **反馈带 Goodhart 护栏**：评分信号不自动激活，只生成"待人确认"候选；human-on-the-loop。
 
-## 4. Workflow
-- **Goal First**: Before any implementation, state verifiable success criteria.
-  Transform vague tasks: "add validation" → "write test for invalid input, then make it pass".
-  Multi-step work: list steps with verify checkpoints (step → verify: how to check).
-  Weak criteria ("make it work") require human clarification before starting.
-- **TCR**: Test -> Green = Commit / Red = Revert. No WIP commits.
-  - Before implementing: confirm exact files, test strategy, and commit message
-    draft with user. Do not write code until approved.
-  - Before claiming completion: verify in the target environment mentioned by
-    user (e.g., specific CLI tool, remote server, hardware platform).
-- **Workspace**: `.roll/backlog.md` index. `.roll/features/` for details.
-- **Done**: Push + CI passes + deployed. Local-only is not done.
-- **Commit message format**:
-  - Format: `<type>: <description>`
-  - Types: `Story N`, `Fix`, `Refactor`, `Docs`, `Chore`
-  - TCR micro-commits use `tcr:` prefix instead
+## 4. 标准
 
+- **TS**：strict、禁 `any`、函数式、早返回。**类型是层与层之间的契约**——不退回 stdout 文本解析 / heredoc 生成脚本。
+- **TCR**：Test → 绿则 commit / 红则 revert。无 WIP commit。提交直进 `v3` 分支（README 裁定 #10）。
+- **测试**：单测覆盖每个公共入口；凡有 v2 对应行为的，写 diff-test 断言"TS 输出 == bash 输出"。
+- **Git**：不碰 `main`（两仓都是）；不 `--no-verify`；不提交密钥；身份动态读 `git config`。
+- **不做**：无关重构、投机抽象、为换语言而改变 v2 可观察行为。
 
-## 5. Refactoring & Renames
+## 5. v2 = 标准答案（diff-test oracle）
 
-Project-wide renames require systematic checking. Never assume find/replace
-is sufficient. Execute in order:
+`main`（bash v2）是只读快照、行为标准答案。每条迁移 story：先读懂对应 v2 实现的可观察契约（入参/stdout/副作用/退出码/写的文件与事件），TS 版复刻其行为。**行为对齐优先于代码美观。** 写之前先查 `.roll/v3/build/invariants.md` 对应域，把当年的坑当 diff-test/chaos 带走。
 
-1. **Code references** — imports, function names, string literals
-2. **Documentation** — README, methodology, API docs
-3. **Config files** — YAML frontmatter, package names, manifests
-4. **Symlinks** — verify all resolve after rename
-5. **Installer scripts** — update paths and references
-6. **Shell environment** — remind user to reload or restart sessions
+新增任何持久化状态前先答 8 问（缺失/并发写/被测试踩/被外部清/版本不兼容/id 不匹配/PID 复用/超时）——答不到五项先别加。
 
-Confirm each phase clean before proceeding to the next.
+## 6. skills（不重写）
 
+skills 是 markdown + shell，在独立仓 `seanyao/roll-skills`（submodule 挂 `skills/` 原路径），经桥接 `spawn` 调用。**它们是灵魂/契约，不翻成 TS。** clone 后 `skills/` 为空时跑一次 `roll setup` 或 `git submodule update --init --recursive`。
 
-## 6. Configuration & External Services
-- **Config file editing** (YAML/TOML/JSON with schema):
-  1. Find official documentation or a verified working example first
-  2. Do not guess syntax
-  3. If no docs found after 2 searches, ask user for a reference config
-  4. Maximum 2 syntax attempts before escalating to research mode
-- **External services** (npm publishing, proxy, auth-dependent deploy):
-  - Stop after 2 failed attempts and ask user for preferred fallback
-  - Do not continue iterating on auth/proxy debugging without explicit direction
-  - If OIDC/token issues persist, immediately fallback to manual with explanation
+## 7. 与 `.roll/`（嵌套私有仓 roll-meta）
 
+`.roll/` 是独立 git 仓，**非 submodule**。本分支工作期间 roll-meta 同样用 `v3` 分支——backlog/features/notes 改动 `cd .roll` 后 commit+push 到 **v3**（roll-meta main 已冻结且无法上保护，纯纪律守住）。
 
-## 7. Frontend Default Stack
-- React + shadcn/ui + Tailwind CSS is the default.
-- Use shadcn/ui components first. Custom components only when shadcn doesn't cover it.
-- `components/ui/` is shadcn-generated — never edit manually.
-- Tailwind utility classes only. No inline styles, no CSS modules.
-- Icons: Lucide React.
+## 8. 完成 = 上线
 
-
-## 8. Documentation Conventions
-
-**Principle:** 过程默认对内（`.roll/`），产品默认对外（根级）。Process artifacts live inside `.roll/`. Product artifacts (user guides, marketing site) live at the repo root.
-
-**Side judgement:** if AGENTS.md or README references it → product (root). If only internally consumed or auto-generated → process (`.roll/`).
-
-**Directory purposes:**
-
-| Directory | Purpose | Language | Side |
-|-----------|---------|----------|------|
-| `guide/en/` | User-facing guides (EN source of truth) | English only | product |
-| `guide/zh/` | User-facing guides (ZH mirror of EN) | Chinese only | product |
-| `guide/{en,zh}/practices/` | Engineering norms referenced externally | matching lang | product |
-| `site/` | Marketing site source code | mixed | product |
-| `site/slides/` | Promotional materials (HTML intro pages) | mixed | product |
-| `.roll/features/` | Story details, AC, design specs | English only | process |
-| `.roll/domain/` | DDD domain models and architecture | English only | process |
-| `.roll/design/` | Design exploration docs (idea drafts, epic specs) | English | process |
-| `.roll/verification/` | Execution records (run logs, verification reports) | English | process |
-| `.roll/briefs/` | Owner digests generated by `$roll-brief` | Chinese | process |
-| `.roll/dream/` | Nightly scan logs generated by `$roll-.dream` | Chinese | process |
-
-**Language rules:**
-- `guide/en/` is the authoritative source — write EN first
-- `guide/zh/` is derived — translate from EN after the EN doc is complete
-- `.roll/features/`, `.roll/domain/`, `.roll/design/`, `.roll/verification/` are English-only (consumed by AI agents)
-- Never mix languages within a single document
-
-**Where to put new docs:**
-- New user guide → `guide/en/<topic>.md` (then `guide/zh/<topic>.md`)
-- New domain model → `.roll/domain/<model>.md`
-- New Story spec → `.roll/features/<feature>.md`
-- New design exploration → `.roll/design/<topic>.md`
-- New verification record → `.roll/verification/<topic>.md`
-- New engineering norm referenced externally → `guide/en/practices/<topic>.md`
-
-**README responsibility boundary:**
-- README.md and README_CN.md are navigation hubs — they link to docs, they do not contain content
-- Keep both READMEs ≤ 120 lines
-- Documentation Index table must include all `guide/en/` and `guide/zh/` files
-
-**Maintenance workflow:**
-1. Write or update `guide/en/<topic>.md`
-2. Reflect changes in `guide/zh/<topic>.md`
-3. Update Documentation Index tables in README.md and README_CN.md if new files were added
-
-**Legacy-doc automation (`$roll-doc`):** runs four phases — scan/index → gap analysis → fill → report — plus a deep-read **Phase 3b** that builds a full project symbol table and detects six cross-directory topics (data flow, state machine, integrations, deployment, AGENTS.md, high fan-in README). It only writes drafts; humans review and commit. See [guide/en/roll-doc.md](guide/en/roll-doc.md) / [guide/zh/roll-doc.md](guide/zh/roll-doc.md).
-
-## 9. Working with `.roll/` (nested private repo)
-
-> Maintainer-only. Roll itself dogfoods Roll, but the project meta (backlog,
-> proposals, features, briefs, dream, design, domain, verification) is private
-> and lives in [`seanyao/roll-meta`](https://github.com/seanyao/roll-meta).
-> This public repo gitignores all of `.roll/`.
-
-**Layout**
-- `~/Workspace/roll/` — outer working tree, tracks `seanyao/roll` (public)
-- `~/Workspace/roll/.roll/` — independent nested git repo, tracks `seanyao/roll-meta` (private)
-- Outer's `.gitignore` lists `.roll/`; only runtime files (`state/`, `scratch/`, `last-test-pass`, `*.lock`) are also gitignored *inside* the nested repo
-
-**Where to commit what**
-
-| 改动类型 | cwd 改动 | commit + push 去哪 |
-|---------|---------|-------------------|
-| 代码 / skills / tests / docs | 任意 | `cd ~/Workspace/roll` → roll (public) |
-| backlog / proposals / features | 任意 | `cd ~/Workspace/roll/.roll` → roll-meta (private) |
-| briefs / dream / design / domain | 任意 | `cd ~/Workspace/roll/.roll` → roll-meta (private) |
-
-**Daily-ops pitfalls (high frequency, easy to miss)**
-
-1. `git status` from outer `roll/` will NOT show `.roll/` changes — the outer git ignores them entirely. After editing backlog/features/etc., always also run `cd .roll && git status` (or you'll never push them).
-
-2. `git add -A` from outer roll/ does not reach into `.roll/`. Have to `cd` first.
-
-3. CI (GitHub Actions, the daemon loop, etc.) cannot see `.roll/`. Don't write tests that assume `.roll/<file>` exists at fresh-checkout time — use TMP/PROJECT_DIR fixtures, as the surviving `cmd_*.bats` tests do.
-
-4. `rg` / `find` / `grep` from outer roll/ root will *not* recurse into `.roll/` automatically (gitignored). To search backlog/etc., pass the path explicitly: `rg pattern .roll/`. Read tool / direct path access works as normal.
-
-5. `git worktree add` of outer roll/ creates a new working dir with an empty `.roll/`. To re-populate: `cd <worktree>/.roll && git init -b main && git remote add origin git@github.com:seanyao/roll-meta.git && git fetch && git reset --hard origin/main`.
-
-6. Do *not* `rm -rf .roll/` from outer roll/ to "clean up" — that destroys the nested `.git/` and its un-pushed history. To resync only working-tree content: `cd .roll && git reset --hard origin/main`.
-
-**New-machine setup**: see roll-meta's README §Setup. The short version:
-```
-git clone git@github.com:seanyao/roll.git
-cd roll/.roll
-git init -b main
-git remote add origin git@github.com:seanyao/roll-meta.git
-git fetch && git reset --hard origin/main
-```
-
-This dual-repo model is v2.0 onward. Pre-v2.0 (before commit `f03ddd6`), `.roll/` was tracked in the public repo.
-
-## 10. Issue lifecycle for `roll-meta` (maintainer-only)
-
-> **Scope**: applies to issues filed in [`seanyao/roll-meta`](https://github.com/seanyao/roll-meta) — the private meta repo for this project. **Not** a Roll-product convention; downstream users may not use GitHub for issue tracking, and `roll backlog sync` (US-SYNC-*) is the eventual shipped surface for those who do. Don't propagate this protocol into `guide/` or `roll-build` defaults.
-
-**Why a protocol exists**: roll-meta's `backlog.md` is the engineering source of truth. GitHub issues are an *entry point* (external ideas, user-filed bugs). Without a mapping rule, the two drift — closed issues hide work-in-progress, open issues stay open after merge.
-
-**The rule**: issues mirror **backlog state**, not card-creation state.
-
-1. **On card creation** — comment on the issue with the backlog card ID(s) and design-doc path, then apply the `tracked` label. Issue stays **open**.
-    - Multi-card issues (one feature) list the range: `US-LOOP-040..US-LOOP-042`.
-    - Single-card issues name the one card: `FIX-127`.
-    - Example: [seanyao/roll-meta#9](https://github.com/seanyao/roll-meta/issues/9).
-2. **During delivery** — do NOT echo progress back to the issue. The backlog row's status field is the live state; issue comments would drift.
-3. **On closure** — three cases:
-    - **Card flips ✅ Done**: close the issue with a comment naming the merged PR(s), e.g. `Closed by #240, #245`.
-    - **Won't do / superseded**: close with `wontfix` or `duplicate` label + one-line reason. If superseded by a different card, link the new card ID.
-    - **Split / merged**: close pointing at the new issue(s) or card range.
-4. **Never use `Resolves #N`** in PR bodies for cards that span multiple PRs (the auto-close fires on the first merge and leaves later work orphaned). Manual close after the last PR merges is the rule for multi-PR cards. Single-PR FIXes may use `Resolves #N`.
-
-**Labels in roll-meta** (already present): `tracked` (green) marks issues that have a backlog card. Filter open-untracked issues with `gh issue list --state open --search 'no:label'`.
-
-**Quick reference for an agent processing a fresh issue**:
-
-```bash
-# 1. Add backlog row(s) via $roll-build / $roll-fix / manual edit of .roll/backlog.md
-# 2. Comment + label
-gh issue comment <N> --repo seanyao/roll-meta --body \
-  "Tracked in backlog as **<CARD-IDs>** under epic *<feature-slug>*. ..."
-gh issue edit <N> --repo seanyao/roll-meta --add-label tracked
-# 3. Close (after merge)
-gh issue close <N> --repo seanyao/roll-meta \
-  --comment "Closed by #<PR1>, #<PR2>. Backlog card(s) ✅ Done."
-```
-
-Worked example: the 2026-05-28 batch (#9–#15 → US-LOOP-033..037, FIX-128, FIX-127, US-DOC-012..020, US-SYNC-001..008, US-LOOP-040..042, US-FB-001..005).
+backlog 全绿 + 过 `.roll/v3/02-verification.md` 验证门（L1 全绿 + v3 loop 连跑 20 cycle ≥90% + diff-test 对齐）→ 按 `.roll/v3/03-migration.md` P4 翻默认分支，老 bash 留 `v2-final` 一键回滚。

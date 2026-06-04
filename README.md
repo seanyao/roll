@@ -1,3 +1,9 @@
+> ⚠️ **This is the Roll v3 work-in-progress branch — the stable version lives on `main` (bash, anchor tag `v2-freeze-2026-06-04`).**
+> **这是 Roll v3 在建分支——稳定版在 `main` 分支（bash）。**
+> What's new on this branch: `packages/` — TypeScript monorepo growing layer by layer; `skills/` — git submodule → [seanyao/roll-skills](https://github.com/seanyao/roll-skills); commands not yet ported fall back to bash automatically (see [AGENTS.md](AGENTS.md)).
+> 本分支新增：`packages/`（TS monorepo，逐层生长）；`skills/`（git submodule 独立仓）；未迁完的命令自动回落 bash（见 [AGENTS.md](AGENTS.md)）。
+> Build & test: `pnpm install && pnpm -r test`. Bash entry `bin/roll` unchanged.
+
 ```
  ██████╗  ██████╗ ██╗     ██╗     
  ██╔══██╗██╔═══██╗██║     ██║     

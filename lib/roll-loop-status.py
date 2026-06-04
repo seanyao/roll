@@ -668,6 +668,12 @@ def load_runs(slug: str) -> Dict[str, Dict[str, Any]]:
                 r = json.loads(line)
             except Exception:
                 continue
+            # FIX-193: a stray line can parse as a bare JSON scalar (e.g. an
+            # agent pretty-printed a record across lines and `"FIX-181"` parses
+            # as a str) — r.get() then crashes the whole dashboard. Records
+            # must be objects; skip anything else.
+            if not isinstance(r, dict):
+                continue
             p = r.get("project", "")
             if p != slug and p != base and not p.startswith(f"{slug}-cycle-"):
                 # String match failed — try path match for old-slug salvage.

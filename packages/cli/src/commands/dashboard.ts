@@ -1,0 +1,1863 @@
+/**
+ * `roll loop status` — TS port of lib/roll-loop-status.py (US-CLI-006).
+ *
+ * Renders the loop health dashboard. Byte-aligned with the python oracle
+ * (fixture + live diff-tests). Display time is fixed to Asia/Shanghai (UTC+8,
+ * no DST): internal timestamps stay UTC, only display conversions add +8h.
+ *
+ * Most `loop` subcommands stay on the bash fallback; only `status` (and the
+ * `--eval` view it owns) is ported here.
+ */
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { homedir, platform } from "node:os";
+import { basename, join } from "node:path";
+import {
+  COLS,
+  c,
+  cycleRow,
+  dayBand,
+  metric,
+  metricDollar,
+  metricDur,
+  metricTokens,
+  pad,
+  renderState,
+  row,
+  trunc,
+  type CycleView,
+} from "../render.js";
+import { computeListCost, currencyFor } from "./prices-cost.js";
+
+// ════════════════════════════════════════════════════════════════════════════
+// Display-time helpers — fixed UTC+8, no DST.
+// ════════════════════════════════════════════════════════════════════════════
+const TZ_OFFSET_MS = 8 * 3600 * 1000;
+
+/** A UTC Date shifted into UTC+8 wall-clock, exposed via getUTC* accessors. */
+function toShanghai(d: Date): Date {
+  return new Date(d.getTime() + TZ_OFFSET_MS);
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+function shHHMM(d: Date): string {
+  const s = toShanghai(d);
+  return `${pad2(s.getUTCHours())}:${pad2(s.getUTCMinutes())}`;
+}
+
+function shDayKey(d: Date): string {
+  const s = toShanghai(d);
+  return `${s.getUTCFullYear()}-${pad2(s.getUTCMonth() + 1)}-${pad2(s.getUTCDate())}`;
+}
+
+function shYmdHm(d: Date): string {
+  const s = toShanghai(d);
+  return `${s.getUTCFullYear()}-${pad2(s.getUTCMonth() + 1)}-${pad2(s.getUTCDate())} ${pad2(s.getUTCHours())}:${pad2(s.getUTCMinutes())}`;
+}
+
+/** YYYY-MM-DD shifted by `deltaDays` from a given day key (display TZ). */
+function dayKeyOffset(d: Date, deltaDays: number): string {
+  const s = toShanghai(d);
+  const shifted = new Date(
+    Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate() + deltaDays),
+  );
+  return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+}
+
+function parseTs(ts: string): Date {
+  return new Date(ts.replace("Z", "+00:00"));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Paths — mirror project_slug / shared_root / runtime-dir resolution.
+// ════════════════════════════════════════════════════════════════════════════
+function gitRemoteUrl(repoPath: string): string | null {
+  try {
+    const url = execFileSync("git", ["-C", repoPath, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (url) return url;
+  } catch {
+    /* no origin */
+  }
+  try {
+    const remotes = execFileSync("git", ["-C", repoPath, "remote"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .trim()
+      .split("\n")
+      .filter((x) => x !== "");
+    if (remotes.length > 0) {
+      const url = execFileSync("git", ["-C", repoPath, "remote", "get-url", remotes[0] ?? ""], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (url) return url;
+    }
+  } catch {
+    /* no remotes */
+  }
+  return null;
+}
+
+function projectSlug(p?: string): string {
+  const envSlug = (process.env["ROLL_MAIN_SLUG"] ?? "").trim();
+  if (envSlug) return envSlug;
+
+  let path = realpathSync(p ?? process.cwd());
+  try {
+    const common = execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (common.endsWith("/.git")) path = common.slice(0, -5);
+  } catch {
+    /* not a git repo */
+  }
+
+  let remoteUrl = gitRemoteUrl(path);
+  if (remoteUrl) {
+    remoteUrl = remoteUrl.replace(/\/+$/, "");
+    if (remoteUrl.endsWith(".git")) remoteUrl = remoteUrl.slice(0, -4);
+    const m = /^git@([^:]+):(.+)$/.exec(remoteUrl);
+    if (m) remoteUrl = `https://${m[1]}/${m[2]}`;
+    remoteUrl = remoteUrl.toLowerCase();
+    const base = basename(remoteUrl)
+      .replace(/[^A-Za-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const h = createHash("md5").update(remoteUrl).digest("hex").slice(0, 6);
+    return `${base}-${h}`;
+  }
+
+  const base = basename(path)
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const h = createHash("md5").update(path).digest("hex").slice(0, 6);
+  return `${base}-${h}`;
+}
+
+function sharedRoot(): string {
+  return process.env["ROLL_SHARED_ROOT"] || join(homedir(), ".shared", "roll");
+}
+
+function isDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function resolveProjectPath(slug: string): string | null {
+  const envProj = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim();
+  if (envProj && isDir(envProj)) return envProj;
+
+  if (platform() === "darwin") {
+    const plist = join(homedir(), "Library", "LaunchAgents", `com.roll.loop.${slug}.plist`);
+    if (existsSync(plist)) {
+      try {
+        const text = readFileSync(plist, "utf8");
+        const m = /<key>WorkingDirectory<\/key>\s*<string>([^<]+)<\/string>/.exec(text);
+        if (m && m[1] !== undefined && isDir(m[1])) return m[1];
+      } catch {
+        /* unreadable */
+      }
+    }
+  }
+
+  try {
+    const cronOut = execFileSync("crontab", ["-l"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    for (const line of cronOut.split("\n")) {
+      if (line.includes(`run-${slug}.sh`)) {
+        const m = /cd\s+"([^"]+)"/.exec(line);
+        if (m && m[1] !== undefined && isDir(m[1])) return m[1];
+      }
+    }
+  } catch {
+    /* no crontab */
+  }
+
+  const innerScript = join(sharedRoot(), "loop", `run-${slug}-inner.sh`);
+  if (existsSync(innerScript)) {
+    try {
+      const text = readFileSync(innerScript, "utf8");
+      const m = /export ROLL_MAIN_PROJECT="([^"]+)"/.exec(text);
+      if (m && m[1] !== undefined && isDir(m[1])) return m[1];
+    } catch {
+      /* unreadable */
+    }
+  }
+  return null;
+}
+
+function loopRuntimeDir(slug: string): string | null {
+  const envRt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+  if (envRt) return envRt;
+  const proj = resolveProjectPath(slug);
+  if (proj === null) return null;
+  return join(proj, ".roll", "loop");
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Loaders
+// ════════════════════════════════════════════════════════════════════════════
+interface RawEvent {
+  ts?: string;
+  label?: string;
+  stage?: string;
+  detail?: unknown;
+  outcome?: string;
+  _ts: Date;
+}
+
+function loadEvents(slug: string, days: number): RawEvent[] {
+  const candidates: string[] = [];
+  const rtDir = loopRuntimeDir(slug);
+  if (rtDir !== null) {
+    const head = join(rtDir, "events.ndjson");
+    candidates.push(head);
+    for (let i = 1; i < 5; i++) candidates.push(join(rtDir, `events.ndjson.${i}`));
+  }
+  const sharedHead = join(sharedRoot(), "loop", `events-${slug}.ndjson`);
+  candidates.push(sharedHead);
+  for (let i = 1; i < 5; i++) {
+    candidates.push(join(sharedRoot(), "loop", `events-${slug}.ndjson.${i}`));
+  }
+  const existing = candidates.filter((p) => existsSync(p));
+  if (existing.length === 0) return [];
+  const cutoff = Date.now() - (days + 1) * 86400 * 1000;
+  const out: RawEvent[] = [];
+  const seen = new Set<string>();
+  for (const p of existing) {
+    let content: string;
+    try {
+      content = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    for (let line of content.split("\n")) {
+      line = line.trim();
+      if (line === "") continue;
+      if (seen.has(line)) continue;
+      seen.add(line);
+      try {
+        const e = JSON.parse(line) as RawEvent;
+        const ts = parseTs(String(e.ts));
+        e._ts = ts;
+        if (ts.getTime() >= cutoff) out.push(e);
+      } catch {
+        continue;
+      }
+    }
+  }
+  out.sort((a, b) => a._ts.getTime() - b._ts.getTime());
+  return out;
+}
+
+const CRON_PAT =
+  /^(\d{2}:\d{2}):(\d{2})\s+cycle done — (\w+)(?:\s*·\s*(\d+)\s+tcr)?\s*·\s*(\d+)s\s*·\s*\$([\d.]+)/;
+const ANSI_RE = /\x1b\[[\d;]*m/g;
+
+interface CronEntry {
+  hhmm: string;
+  ss: number;
+  outcome: string;
+  tcr: number;
+  duration_s: number;
+  cost: number;
+}
+
+function loadCronLog(slug: string): CronEntry[] {
+  const rtDir = loopRuntimeDir(slug);
+  let path = rtDir !== null ? join(rtDir, "cron.log") : null;
+  if (path === null || !existsSync(path)) {
+    path = join(sharedRoot(), "loop", `cron-${slug}.log`);
+  }
+  if (!existsSync(path)) return [];
+  const out: CronEntry[] = [];
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  for (const rawLine of content.split("\n")) {
+    const m = CRON_PAT.exec(rawLine.replace(ANSI_RE, "").trim());
+    if (m) {
+      out.push({
+        hhmm: m[1] ?? "",
+        ss: parseInt(m[2] ?? "0", 10),
+        outcome: m[3] ?? "",
+        tcr: parseInt(m[4] ?? "0", 10),
+        duration_s: parseInt(m[5] ?? "0", 10),
+        cost: parseFloat(m[6] ?? "0"),
+      });
+    }
+  }
+  return out;
+}
+
+function loadState(slug: string): Record<string, string> {
+  const rtDir = loopRuntimeDir(slug);
+  let path = rtDir !== null ? join(rtDir, "state.yaml") : null;
+  if (path === null || !existsSync(path)) {
+    path = join(sharedRoot(), "loop", `state-${slug}.yaml`);
+  }
+  if (!existsSync(path)) return {};
+  const out: Record<string, string> = {};
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return {};
+  }
+  for (const line of content.split("\n")) {
+    const m = /^([\w_]+):\s*(.*?)\s*$/.exec(line);
+    if (m) {
+      let v = (m[2] ?? "").trim();
+      v = v.replace(/^"|"$/g, "").replace(/^'|'$/g, "");
+      out[m[1] ?? ""] = v;
+    }
+  }
+  return out;
+}
+
+function loadBacklog(projectRoot?: string): Record<string, string> {
+  const path = join(projectRoot ?? "", ".roll/backlog.md");
+  if (!existsSync(path)) return {};
+  const out: Record<string, string> = {};
+  const pat = /^\|\s*(?:\[)?([A-Z]+-\d+)(?:\]\([^)]+\))?\s*\|\s*([^|]+?)\s*\|/;
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return {};
+  }
+  for (const line of content.split("\n")) {
+    const m = pat.exec(line);
+    if (m) out[m[1] ?? ""] = m[2] ?? "";
+  }
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cycle aggregation
+// ════════════════════════════════════════════════════════════════════════════
+const STORY_ID_PAT = /\b([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\d+)\b/;
+const PR_NUM_PAT = /\/pull\/(\d+)/;
+
+function extractStoryId(detail: string): string | null {
+  if (!detail) return null;
+  const m = STORY_ID_PAT.exec(detail);
+  return m ? (m[1] ?? null) : null;
+}
+
+function extractPrNum(url: string): number | null {
+  if (!url) return null;
+  const m = PR_NUM_PAT.exec(url);
+  return m ? parseInt(m[1] ?? "0", 10) : null;
+}
+
+function normalizePrOutcome(raw: string): string {
+  if (raw === "merged" || raw === "closed" || raw === "open") return raw;
+  return "open";
+}
+
+function normalizeCycleLabel(lbl: string): string {
+  if (lbl.startsWith("loop/cycle-")) return lbl.slice("loop/cycle-".length);
+  return lbl;
+}
+
+interface Cycle {
+  label: string;
+  start: Date | null;
+  end: Date | null;
+  outcome: string | null;
+  story: string | null;
+  pr: string | null;
+  pr_ts?: Date;
+  pr_num?: number;
+  pr_outcome?: string;
+  fail_detail: string | null;
+  agent?: string;
+  usage_event?: Record<string, unknown>;
+  cron?: CronEntry;
+  duration_s?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_tokens?: number;
+  cache_read_tokens?: number;
+  model?: string | null;
+  cost_list?: number | null;
+  cost_currency?: string;
+  cost_list_legacy?: boolean;
+  tcr_count?: number;
+  built?: string[];
+}
+
+function toInt(v: unknown): number {
+  const n = typeof v === "number" ? v : parseInt(String(v ?? 0), 10);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
+function aggregate(events: RawEvent[], cron: CronEntry[]): Cycle[] {
+  const byLabel = new Map<string, Cycle>();
+  const getCy = (lbl: string): Cycle => {
+    let cy = byLabel.get(lbl);
+    if (cy === undefined) {
+      cy = {
+        label: lbl,
+        start: null,
+        end: null,
+        outcome: null,
+        story: null,
+        pr: null,
+        fail_detail: null,
+      };
+      byLabel.set(lbl, cy);
+    }
+    return cy;
+  };
+
+  for (const e of events) {
+    const lbl = normalizeCycleLabel(e.label ?? "");
+    if (!lbl || lbl.startsWith("tmp-")) continue;
+    const cy = getCy(lbl);
+    cy.label = lbl;
+    const stage = e.stage ?? "";
+    const detail = typeof e.detail === "string" ? e.detail : "";
+    if (stage === "cycle_start") {
+      cy.start = e._ts;
+    } else if (stage === "cycle_end") {
+      cy.end = e._ts;
+      cy.outcome = e.outcome ?? "done";
+    } else if (stage === "idle") {
+      cy.end = e._ts;
+      cy.outcome = "idle";
+    } else if (stage === "pr") {
+      cy.pr = detail;
+      cy.pr_ts = e._ts;
+      const prNum = extractPrNum(detail);
+      if (prNum !== null) cy.pr_num = prNum;
+      cy.pr_outcome = normalizePrOutcome(e.outcome ?? "");
+      const sid = extractStoryId(detail) ?? extractStoryId(lbl);
+      if (sid && !cy.story) cy.story = sid;
+    } else if (stage === "pick_todo") {
+      const sid = extractStoryId(detail);
+      if (sid) cy.story = sid;
+    } else if (stage === "agent_used") {
+      if (detail) cy.agent = detail;
+    } else if (stage === "usage") {
+      const d = e.detail;
+      if (d !== null && typeof d === "object" && !Array.isArray(d)) {
+        const dd = d as Record<string, unknown>;
+        const prev = cy.usage_event ?? {};
+        const merged: Record<string, unknown> = { ...prev, ...dd };
+        for (const k of [
+          "input_tokens",
+          "output_tokens",
+          "cache_creation_tokens",
+          "cache_read_tokens",
+        ]) {
+          merged[k] = toInt(prev[k]) + toInt(dd[k]);
+        }
+        cy.usage_event = merged;
+      }
+    } else if ((stage === "test" || stage === "build") && e.outcome === "fail") {
+      cy.fail_detail = detail || stage;
+    }
+  }
+
+  const cycles = [...byLabel.values()].filter((v) => v.start !== null);
+  // stable sort newest-first by start time (Array.sort is stable in V8)
+  cycles.sort((a, b) => (b.start as Date).getTime() - (a.start as Date).getTime());
+
+  for (const cy of cycles) {
+    const anchor = cy.pr_ts ?? cy.end ?? cy.start;
+    if (anchor) {
+      // Quirk parity: python reads anchor.hour/minute/second off the UTC-aware
+      // datetime (UTC fields), while cron entries carry *local* HH:MM:SS — so
+      // the two are 8h apart and rarely match. Mirror the UTC read exactly.
+      const target =
+        anchor.getUTCHours() * 3600 + anchor.getUTCMinutes() * 60 + anchor.getUTCSeconds();
+      let best: CronEntry | null = null;
+      let bestDt = 999;
+      for (const cr of cron) {
+        const [ch, cm] = cr.hhmm.split(":");
+        const csec = parseInt(ch ?? "0", 10) * 3600 + parseInt(cm ?? "0", 10) * 60 + cr.ss;
+        const dt = Math.abs(csec - target);
+        if (dt < bestDt) {
+          bestDt = dt;
+          best = cr;
+        }
+      }
+      if (best && bestDt <= 120) cy.cron = best;
+    }
+
+    if (cy.end && cy.start) {
+      cy.duration_s = Math.trunc((cy.end.getTime() - cy.start.getTime()) / 1000);
+    } else if (cy.cron) {
+      cy.duration_s = cy.cron.duration_s;
+    }
+
+    if (!cy.outcome) {
+      cy.outcome = !cy.end ? "running" : "unknown";
+    }
+  }
+  return cycles;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// runs.jsonl
+// ════════════════════════════════════════════════════════════════════════════
+interface RunRecord {
+  project?: string;
+  run_id?: string;
+  ts?: string;
+  tcr_count?: number;
+  built?: string[];
+  duration_sec?: number;
+  status?: string;
+  agent?: string;
+  result_eval?: unknown;
+  [k: string]: unknown;
+}
+
+function loadRuns(slug: string): Record<string, RunRecord> {
+  const rtDir = loopRuntimeDir(slug);
+  let path = rtDir !== null ? join(rtDir, "runs.jsonl") : null;
+  if (path === null || !existsSync(path)) {
+    path = join(sharedRoot(), "loop", "runs.jsonl");
+  }
+  if (!existsSync(path)) return {};
+  const base = slug.split("-")[0] ?? "";
+  const projPath = resolveProjectPath(slug);
+  const out: Record<string, RunRecord> = {};
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return {};
+  }
+  for (const line of content.split("\n")) {
+    if (line.trim() === "") continue;
+    let r: unknown;
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (r === null || typeof r !== "object" || Array.isArray(r)) continue;
+    const rec = r as RunRecord;
+    const p = rec.project ?? "";
+    if (p !== slug && p !== base && !p.startsWith(`${slug}-cycle-`)) {
+      if (projPath === null) continue;
+      const otherProj = resolveProjectPath(p);
+      if (otherProj === null || otherProj !== projPath) continue;
+    }
+    const rid = rec.run_id ?? "";
+    if (rid) out[rid] = rec;
+  }
+  return out;
+}
+
+function mergeRunsIntoCycles(cycles: Cycle[], runs: Record<string, RunRecord>): void {
+  const runsList: Array<[Date, string, RunRecord]> = [];
+  for (const [rid, r] of Object.entries(runs)) {
+    try {
+      const ts = parseTs(String(r.ts));
+      if (Number.isNaN(ts.getTime())) continue;
+      runsList.push([ts, rid, r]);
+    } catch {
+      continue;
+    }
+  }
+  runsList.sort((a, b) => a[0].getTime() - b[0].getTime());
+  const consumed = new Set<string>();
+
+  for (let i = 0; i < cycles.length; i++) {
+    const cy = cycles[i];
+    if (cy === undefined || cy.start === null) continue;
+    const start = cy.start;
+    const prevCy = i > 0 ? cycles[i - 1] : undefined;
+    const nextStart =
+      prevCy && prevCy.start
+        ? prevCy.start
+        : new Date(start.getTime() + 2 * 3600 * 1000);
+    let windowEnd: Date;
+    if (cy.end) {
+      const clamp = new Date(cy.end.getTime() + 30 * 60 * 1000);
+      windowEnd = clamp.getTime() < nextStart.getTime() ? clamp : nextStart;
+    } else {
+      windowEnd = nextStart;
+    }
+    let best: [Date, string, RunRecord] | null = null;
+    for (const entry of runsList) {
+      const [ts, rid] = entry;
+      if (consumed.has(rid)) continue;
+      if (ts.getTime() < start.getTime()) continue;
+      if (ts.getTime() >= windowEnd.getTime()) break;
+      if (best === null || ts.getTime() < best[0].getTime()) best = entry;
+    }
+    if (best === null) continue;
+    const [ts, rid, r] = best;
+    consumed.add(rid);
+    cy.tcr_count = r.tcr_count ?? 0;
+    cy.built = r.built && Array.isArray(r.built) ? r.built : [];
+    if (r.duration_sec) {
+      const cap = Math.trunc((ts.getTime() - start.getTime()) / 1000);
+      cy.duration_s = cap > 0 ? Math.min(r.duration_sec, cap) : r.duration_sec;
+    }
+    if (
+      (cy.outcome === "unknown" ||
+        cy.outcome === "running" ||
+        cy.outcome === "idle" ||
+        cy.outcome === "failed" ||
+        cy.outcome === "orphan") &&
+      r.status
+    ) {
+      const map: Record<string, string> = { built: "done", interrupted: "fail" };
+      cy.outcome = map[r.status] ?? r.status;
+    }
+    if (!cy.story && cy.built.length > 0) cy.story = cy.built[0] ?? null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// git merge repair
+// ════════════════════════════════════════════════════════════════════════════
+interface GitMerge {
+  pr: string | null;
+  stories: string[];
+}
+
+function loadPrMergesFromGit(days: number): Record<string, GitMerge> {
+  let out: string;
+  try {
+    out = execFileSync(
+      "git",
+      [
+        "log",
+        `--since=${days + 1} days ago`,
+        "--grep=loop[ /]cycle",
+        "--extended-regexp",
+        "--format=%H|||%s|||%b<<<END>>>",
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+  } catch {
+    return {};
+  }
+  const result: Record<string, GitMerge> = {};
+  const labelRe = /loop[ /]cycle[-\s](\d{8}-\d+-\d+)/;
+  const prRe = /#(\d+)/;
+  const storyRe = /\b([A-Z]+(?:-[A-Z]+)*-\d+)\b/g;
+  for (let chunk of out.split("<<<END>>>")) {
+    chunk = chunk.trim();
+    if (!chunk) continue;
+    const parts = chunk.split("|||");
+    if (parts.length < 3) continue;
+    const subj = parts[1] ?? "";
+    const body = parts.slice(2).join("|||");
+    const text = `${subj}\n${body}`;
+    const m = labelRe.exec(text);
+    if (!m) continue;
+    const label = m[1] ?? "";
+    const prM = prRe.exec(subj);
+    const stories: string[] = [];
+    let sm: RegExpExecArray | null;
+    storyRe.lastIndex = 0;
+    while ((sm = storyRe.exec(text)) !== null) {
+      const s = sm[1] ?? "";
+      if (s && !stories.includes(s)) stories.push(s);
+    }
+    result[label] = { pr: prM ? (prM[1] ?? null) : null, stories };
+  }
+  return result;
+}
+
+function repairOrphanCyclesFromGit(
+  cycles: Cycle[],
+  gitMerges: Record<string, GitMerge>,
+): void {
+  for (const cy of cycles) {
+    const m = gitMerges[cy.label];
+    if (!m) continue;
+    if (cy.outcome === "running" || cy.outcome === "unknown") cy.outcome = "done";
+    if (m.pr && !cy.pr) cy.pr = `https://github.com/seanyao/roll/pull/${m.pr}`;
+    if (m.pr) {
+      cy.pr_num = parseInt(m.pr, 10);
+      cy.pr_outcome = "merged";
+    }
+    if (m.stories.length > 0 && (!cy.built || cy.built.length === 0)) {
+      cy.built = m.stories;
+      cy.story = m.stories[0] ?? null;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// claude session backfill
+// ════════════════════════════════════════════════════════════════════════════
+interface SessionUsage {
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  cost_reported_usd: number | null;
+  duration_ms: number | null;
+}
+
+function loadClaudeSessionUsage(label: string, slug: string): SessionUsage | null {
+  const user = process.env["USER"] ?? "seanyao";
+  const worktreePath = `/Users/${user}/.shared/roll/worktrees/${slug}-cycle-${label}`;
+  const projName =
+    "-" + worktreePath.replaceAll("/", "-").replaceAll(".", "-").replace(/^-+/, "");
+  const projDir = join(homedir(), ".claude", "projects", projName);
+  if (!existsSync(projDir)) return null;
+  let entries: string[];
+  try {
+    entries = readdirSync(projDir).filter((n) => n.endsWith(".jsonl"));
+  } catch {
+    return null;
+  }
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => {
+    const sa = statSync(join(projDir, a)).size;
+    const sb = statSync(join(projDir, b)).size;
+    return sb - sa;
+  });
+  const path = join(projDir, entries[0] ?? "");
+  const sums = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_tokens: 0,
+    cache_read_tokens: 0,
+  };
+  let model: string | null = null;
+  let cost: number | null = null;
+  let durationMs: number | null = null;
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+  for (const line of content.split("\n")) {
+    if (line.trim() === "") continue;
+    let e: Record<string, unknown>;
+    try {
+      e = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (e["type"] === "result") {
+      cost = (e["total_cost_usd"] as number) || cost;
+      durationMs = (e["duration_ms"] as number) || durationMs;
+      continue;
+    }
+    const msg = (e["message"] as Record<string, unknown>) ?? {};
+    const usage = (msg["usage"] as Record<string, unknown>) ?? {};
+    if (Object.keys(usage).length === 0) continue;
+    if (msg["model"] && model === null) model = msg["model"] as string;
+    sums.input_tokens += toInt(usage["input_tokens"]);
+    sums.output_tokens += toInt(usage["output_tokens"]);
+    sums.cache_creation_tokens += toInt(usage["cache_creation_input_tokens"]);
+    sums.cache_read_tokens += toInt(usage["cache_read_input_tokens"]);
+  }
+  if (sums.input_tokens === 0 && sums.output_tokens === 0) return null;
+  return { model, ...sums, cost_reported_usd: cost, duration_ms: durationMs };
+}
+
+function backfillUsageFromClaudeSessions(cycles: Cycle[], slug: string): void {
+  for (const cy of cycles) {
+    const ue = cy.usage_event;
+    if (
+      ue !== undefined &&
+      (toInt(ue["input_tokens"]) || toInt(ue["output_tokens"]))
+    ) {
+      cy.input_tokens = toInt(ue["input_tokens"]);
+      cy.output_tokens = toInt(ue["output_tokens"]);
+      cy.cache_creation_tokens = toInt(ue["cache_creation_tokens"]);
+      cy.cache_read_tokens = toInt(ue["cache_read_tokens"]);
+      cy.model = (ue["model"] as string | null) ?? null;
+      const persisted = ue["cost_list_usd"];
+      if (persisted !== undefined && persisted !== null) {
+        cy.cost_list = Number(persisted);
+        cy.cost_currency = (ue["cost_currency"] as string) || "USD";
+        cy.cost_list_legacy = false;
+      } else {
+        cy.cost_list = computeListCost(ue["model"] as string | null | undefined, {
+          input_tokens: toInt(ue["input_tokens"]),
+          output_tokens: toInt(ue["output_tokens"]),
+          cache_creation_tokens: toInt(ue["cache_creation_tokens"]),
+          cache_read_tokens: toInt(ue["cache_read_tokens"]),
+        });
+        cy.cost_currency = currencyFor(ue["model"] as string | null | undefined) || "USD";
+        cy.cost_list_legacy = true;
+      }
+      const durMs = ue["duration_ms"];
+      if (durMs && !cy.duration_s) cy.duration_s = Math.trunc(Number(durMs) / 1000);
+      continue;
+    }
+    if (cy.input_tokens || cy.output_tokens) continue;
+    const u = loadClaudeSessionUsage(cy.label, slug);
+    if (!u) continue;
+    cy.input_tokens = toInt(u.input_tokens);
+    cy.output_tokens = toInt(u.output_tokens);
+    cy.cache_creation_tokens = toInt(u.cache_creation_tokens);
+    cy.cache_read_tokens = toInt(u.cache_read_tokens);
+    cy.model = u.model;
+    cy.cost_list = computeListCost(u.model, {
+      input_tokens: u.input_tokens,
+      output_tokens: u.output_tokens,
+      cache_creation_tokens: u.cache_creation_tokens,
+      cache_read_tokens: u.cache_read_tokens,
+    });
+    cy.cost_currency = currencyFor(u.model) || "USD";
+    cy.cost_list_legacy = true;
+    if (u.duration_ms && !cy.duration_s) cy.duration_s = Math.trunc(u.duration_ms / 1000);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Rollup math (by display-TZ day)
+// ════════════════════════════════════════════════════════════════════════════
+function bucketByDay(cycles: Cycle[]): Map<string, Cycle[]> {
+  const out = new Map<string, Cycle[]>();
+  for (const cy of cycles) {
+    if (cy.start === null) continue;
+    const day = shDayKey(cy.start);
+    const arr = out.get(day);
+    if (arr) arr.push(cy);
+    else out.set(day, [cy]);
+  }
+  return out;
+}
+
+interface DayRollup {
+  cycles: number;
+  prs: number;
+  failed: number;
+  duration_s: number;
+  cost: number;
+  cost_by_cur: Record<string, number>;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+}
+
+function rollupForDay(dayCycles: Cycle[]): DayRollup {
+  const r: DayRollup = {
+    cycles: dayCycles.length,
+    prs: 0,
+    failed: 0,
+    duration_s: 0,
+    cost: 0.0,
+    cost_by_cur: {},
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_tokens: 0,
+    cache_read_tokens: 0,
+  };
+  for (const cy of dayCycles) {
+    if (cy.outcome === "fail") r.failed += 1;
+    if (cy.duration_s) r.duration_s += cy.duration_s;
+    if (cy.input_tokens) r.input_tokens += cy.input_tokens;
+    if (cy.output_tokens) r.output_tokens += cy.output_tokens;
+    if (cy.cache_creation_tokens) r.cache_creation_tokens += cy.cache_creation_tokens;
+    if (cy.cache_read_tokens) r.cache_read_tokens += cy.cache_read_tokens;
+    if (cy.pr_outcome === "merged") r.prs += 1;
+    if (cy.cost_list !== undefined && cy.cost_list !== null) {
+      r.cost += cy.cost_list;
+      const cur = cy.cost_currency ?? "USD";
+      r.cost_by_cur[cur] = (r.cost_by_cur[cur] ?? 0.0) + cy.cost_list;
+    } else if (cy.cron) {
+      r.cost += cy.cron.cost;
+      r.cost_by_cur["USD"] = (r.cost_by_cur["USD"] ?? 0.0) + cy.cron.cost;
+    }
+  }
+  return r;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// self-score / result-eval / agent summary lines
+// ════════════════════════════════════════════════════════════════════════════
+function selfScoreSummaryLine(notesDir = ".roll/notes", windowN = 14): string {
+  if (!existsSync(notesDir)) return "";
+  let files: string[];
+  try {
+    files = readdirSync(notesDir).filter((n) => n.endsWith(".md"));
+  } catch {
+    return "";
+  }
+  files.sort();
+  files = files.slice(-windowN);
+  if (files.length === 0) return "";
+  let total = 0;
+  let count = 0;
+  let minv = 11;
+  let redo = 0;
+  for (const f of files) {
+    let score: number | null = null;
+    let verdict: string | null = null;
+    let content: string;
+    try {
+      content = readFileSync(join(notesDir, f), "utf8");
+    } catch {
+      content = "";
+    }
+    for (const line of content.split("\n")) {
+      if (line.startsWith("score: ")) {
+        const v = parseInt(line.split(": ").slice(1).join(": ").trim(), 10);
+        score = Number.isNaN(v) ? null : v;
+      } else if (line.startsWith("verdict: ")) {
+        verdict = line.split(": ").slice(1).join(": ").trim();
+      }
+      if (score !== null && verdict !== null) break;
+    }
+    if (score === null) continue;
+    count += 1;
+    total += score;
+    if (score < minv) minv = score;
+    if (verdict === "regression") redo += 1;
+    else if (verdict === "ok" && score < 6) redo += 1;
+  }
+  if (count < 3) return `self-score: (n/a) — ${count} sample(s), need 3 (last ${windowN})`;
+  const mean = total / count;
+  return `self-score: mean ${mean.toFixed(1)} / min ${minv} / redo ${redo} (last ${windowN})`;
+}
+
+const EVAL_DIM_NAMES = [
+  "outcome",
+  "correctness",
+  "scope_fidelity",
+  "quality",
+  "efficiency",
+  "cleanliness",
+];
+const UNKNOWN = "unknown";
+const TREND_ARROW: Record<string, string> = { up: "↑", down: "↓", flat: "→" };
+
+interface EvalAgg {
+  n: number;
+  mean: number | null;
+  min: number | null;
+  trend: string | null;
+  dims: Record<string, number | null>;
+}
+
+function evalRecords(records: RunRecord[], windowN: number): Array<Record<string, unknown>> {
+  const ordered = [...records.map((r) => r ?? {})].sort((a, b) =>
+    String(a.ts ?? "").localeCompare(String(b.ts ?? "")),
+  );
+  const rows: Array<Record<string, unknown>> = [];
+  for (const r of ordered) {
+    const ev = r.result_eval;
+    if (
+      ev !== null &&
+      typeof ev === "object" &&
+      !Array.isArray(ev) &&
+      typeof (ev as Record<string, unknown>)["score"] === "number"
+    ) {
+      rows.push(ev as Record<string, unknown>);
+    }
+  }
+  return windowN > 0 ? rows.slice(-windowN) : rows;
+}
+
+function pyRoundInt(x: number): number {
+  const floor = Math.floor(x);
+  const frac = x - floor;
+  const eps = 1e-9;
+  if (Math.abs(frac - 0.5) < eps) return floor % 2 === 0 ? floor : floor + 1;
+  return Math.round(x);
+}
+
+function aggregateEval(records: RunRecord[], windowN = 14): EvalAgg {
+  const rows = evalRecords(records, windowN);
+  const n = rows.length;
+  const scores = rows.map((ev) => Number(ev["score"]));
+  const out: EvalAgg = { n, mean: null, min: null, trend: null, dims: {} };
+  if (n === 0) return out;
+  out.mean = scores.reduce((a, b) => a + b, 0) / n;
+  out.min = Math.min(...scores);
+  for (const dim of EVAL_DIM_NAMES) {
+    let known = 0;
+    let hits = 0;
+    for (const ev of rows) {
+      const dims = (ev["dims"] as Record<string, unknown>) ?? {};
+      const v = dim in dims ? dims[dim] : UNKNOWN;
+      if (v === UNKNOWN || v === null) continue;
+      known += 1;
+      if (Number(v) >= 1.0) hits += 1;
+    }
+    out.dims[dim] = known ? hits / known : null;
+  }
+  if (n >= 2) {
+    const half = Math.floor(n / 2);
+    const older = half > 0 ? scores.slice(0, half) : scores.slice(0, 1);
+    const newer = scores.slice(half);
+    const delta =
+      newer.reduce((a, b) => a + b, 0) / newer.length -
+      older.reduce((a, b) => a + b, 0) / older.length;
+    if (delta > 0.3) out.trend = "up";
+    else if (delta < -0.3) out.trend = "down";
+    else out.trend = "flat";
+  }
+  return out;
+}
+
+function resultEvalSummaryLine(records: RunRecord[], windowN = 14): string {
+  const agg = aggregateEval(records, windowN);
+  const n = agg.n;
+  if (n === 0) return "";
+  if (n < 3) return `result-eval: (n/a) — ${n} sample(s), need 3 (last ${windowN})`;
+  const arrow = TREND_ARROW[agg.trend ?? "flat"] ?? "";
+  const short: Record<string, string> = {
+    outcome: "out",
+    correctness: "ci",
+    scope_fidelity: "scope",
+    quality: "qual",
+    efficiency: "eff",
+    cleanliness: "clean",
+  };
+  const dimBits: string[] = [];
+  for (const [dim, rate] of Object.entries(agg.dims)) {
+    if (rate === null) continue;
+    dimBits.push(`${short[dim] ?? dim} ${pyRoundInt(rate * 100)}%`);
+  }
+  const dimsStr = dimBits.length > 0 ? " / " + dimBits.join(" ") : "";
+  return `result-eval: mean ${(agg.mean as number).toFixed(1)}${arrow} / min ${Math.trunc(
+    agg.min as number,
+  )}${dimsStr} (last ${windowN})`;
+}
+
+function formatEvalView(records: RunRecord[], windowN = 14): string {
+  const agg = aggregateEval(records, windowN);
+  const n = agg.n;
+  const lines: string[] = [];
+  lines.push(`Loop result-eval — last ${windowN} cycles`);
+  lines.push(`循环结果评分 — 最近 ${windowN} 轮`);
+  lines.push("");
+  if (n === 0) {
+    lines.push("no scored cycles yet (need result_eval in runs.jsonl)");
+    lines.push("尚无评分 cycle（runs.jsonl 需含 result_eval）");
+    return lines.join("\n");
+  }
+  if (n < 3) {
+    lines.push(`(n/a) — ${n} sample(s), need 3`);
+    lines.push(`(n/a) — 样本 ${n} 个，至少需要 3 个`);
+    return lines.join("\n");
+  }
+  const arrow = TREND_ARROW[agg.trend ?? "flat"] ?? "";
+  lines.push(`  mean   ${(agg.mean as number).toFixed(1)} / 10   ${arrow}`);
+  lines.push(`  min    ${Math.trunc(agg.min as number)} / 10`);
+  lines.push(`  n      ${n}`);
+  lines.push("");
+  lines.push("  dimension hit-rate / 各维度命中率");
+  for (const dim of EVAL_DIM_NAMES) {
+    const rate = agg.dims[dim];
+    if (rate === undefined || rate === null) {
+      lines.push(`    ${pyLjust(dim, 16)} n/a`);
+    } else {
+      lines.push(`    ${pyLjust(dim, 16)} ${pyRoundInt(rate * 100)}%`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function pyLjust(s: string, w: number): string {
+  return s.length >= w ? s : s + " ".repeat(w - s.length);
+}
+
+function agentSummaryLine(records: RunRecord[], windowCycles = 50, minSample = 5): string {
+  if (records.length === 0 || windowCycles <= 0) return "";
+  const tail: RunRecord[] = [];
+  for (const rec of records.slice(-windowCycles)) {
+    const agent = (rec ?? {}).agent ?? "";
+    if (!agent) continue;
+    tail.push(rec);
+  }
+  if (tail.length === 0) return "";
+  const counts = new Map<string, [number, number]>();
+  const order: string[] = [];
+  for (const rec of tail) {
+    const agent = rec.agent ?? "";
+    if (!agent) continue;
+    if (!counts.has(agent)) {
+      counts.set(agent, [0, 0]);
+      order.push(agent);
+    }
+    const cur = counts.get(agent);
+    if (cur) {
+      cur[1] += 1;
+      if (rec.status === "built") cur[0] += 1;
+    }
+  }
+  if (order.length === 0) return "";
+  const parts: string[] = [];
+  for (const agent of order) {
+    const [built, total] = counts.get(agent) ?? [0, 0];
+    if (total < minSample) parts.push(`${agent} ${built}/${total} (n/a)`);
+    else {
+      const pct = total ? pyRoundInt((100 * built) / total) : 0;
+      parts.push(`${agent} ${built}/${total} (${pct}%)`);
+    }
+  }
+  return "agents: " + parts.join(" · ");
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Install-state / schedule / tick lines (eyebrow)
+// ════════════════════════════════════════════════════════════════════════════
+function detectInstallState(): string {
+  const slug = projectSlug();
+  const label = `com.roll.loop.${slug}`;
+  const plist = join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
+  if (!existsSync(plist)) return "not-installed";
+  try {
+    const uid = typeof process.getuid === "function" ? process.getuid() : 0;
+    const res = execFileSync("launchctl", ["print", `gui/${uid}/${label}`], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 2000,
+    });
+    void res;
+    return "enabled";
+  } catch {
+    return "stale";
+  }
+}
+
+interface DailySchedule {
+  mode: "calendar" | "interval";
+  hour?: number;
+  minute?: number;
+}
+
+function readDailyPlistSchedule(svc: string): DailySchedule | null {
+  const slug = projectSlug();
+  const ladir = process.env["_LAUNCHD_DIR"] || join(homedir(), "Library", "LaunchAgents");
+  const plist = join(ladir, `com.roll.${svc}.${slug}.plist`);
+  if (!existsSync(plist)) return null;
+  let text: string;
+  try {
+    text = readFileSync(plist, "utf8");
+  } catch {
+    return null;
+  }
+  if (text.includes("StartCalendarInterval")) {
+    const h = /<key>Hour<\/key>\s*<integer>(\d+)<\/integer>/.exec(text);
+    const m = /<key>Minute<\/key>\s*<integer>(\d+)<\/integer>/.exec(text);
+    if (h) {
+      return {
+        mode: "calendar",
+        hour: parseInt(h[1] ?? "0", 10),
+        minute: m ? parseInt(m[1] ?? "0", 10) : 0,
+      };
+    }
+  }
+  if (text.includes("StartInterval")) return { mode: "interval" };
+  return null;
+}
+
+/** now is the display-local Date (UTC+8 wall clock represented as a Date). */
+function computeNextFire(hour: number, minute: number, base: Date): number {
+  // base is a real (UTC) Date; we anchor candidate to today's HH:MM in UTC+8.
+  const sh = toShanghai(base);
+  // candidate in UTC+8 wall clock
+  let candidateShanghai = Date.UTC(
+    sh.getUTCFullYear(),
+    sh.getUTCMonth(),
+    sh.getUTCDate(),
+    hour,
+    minute,
+    0,
+    0,
+  );
+  // convert candidate (UTC+8 wall) back to real epoch by subtracting offset
+  let candidateEpoch = candidateShanghai - TZ_OFFSET_MS;
+  if (candidateEpoch <= base.getTime()) candidateEpoch += 86400 * 1000;
+  return candidateEpoch / 1000;
+}
+
+function dailyScheduleLine(svc: string, now: Date): string | null {
+  const sched = readDailyPlistSchedule(svc);
+  if (sched === null) return null;
+  if (sched.mode === "calendar") {
+    const hh = sched.hour ?? 0;
+    const mm = sched.minute ?? 0;
+    const nxt = computeNextFire(hh, mm, now);
+    let line = `${svc}: ${pad2(hh)}:${pad2(mm)}`;
+    const delta = Math.trunc(nxt - now.getTime() / 1000);
+    const safe = Math.max(delta, 0);
+    const h = Math.floor(Math.floor(safe / 60) / 60);
+    const m = Math.floor(safe / 60) % 60;
+    line += ` (next fire in ${h}h ${m}m)`;
+    return line;
+  }
+  return `${svc}: daily (legacy interval)`;
+}
+
+function tickAgeLine(loopType: string, now: Date): string | null {
+  const slug = projectSlug();
+  const rtDir = loopRuntimeDir(slug);
+  const tickFile =
+    rtDir !== null
+      ? join(rtDir, `${loopType}-tick.jsonl`)
+      : join(sharedRoot(), "loop", `${loopType}-tick-${slug}.jsonl`);
+  if (!existsSync(tickFile)) return null;
+  let lastLine: string;
+  try {
+    const lines = readFileSync(tickFile, "utf8").trim().split("\n");
+    lastLine = lines[lines.length - 1] ?? "";
+    if (lastLine === "") return null;
+  } catch {
+    return null;
+  }
+  const m = /"ts":"([^"]+)"/.exec(lastLine);
+  if (!m) return null;
+  const tsStr = m[1] ?? "";
+  const tm = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/.exec(tsStr);
+  if (!tm) return null;
+  const tickEpoch = Date.UTC(
+    parseInt(tm[1] ?? "0", 10),
+    parseInt(tm[2] ?? "1", 10) - 1,
+    parseInt(tm[3] ?? "1", 10),
+    parseInt(tm[4] ?? "0", 10),
+    parseInt(tm[5] ?? "0", 10),
+    parseInt(tm[6] ?? "0", 10),
+  );
+  const ageSec = Math.trunc((now.getTime() - tickEpoch) / 1000);
+  let ageStr: string;
+  if (ageSec < 60) ageStr = `${ageSec}s`;
+  else if (ageSec < 3600) ageStr = `${Math.floor(ageSec / 60)}m`;
+  else ageStr = `${Math.floor(ageSec / 3600)}h`;
+  return `${loopType}: tick ${ageStr} ago`;
+}
+
+interface ScheduleSpec {
+  period: number;
+  offset: number;
+}
+
+function scheduleValid(period: number, offset: number): boolean {
+  return period >= 1 && period <= 1440 && offset >= 0 && offset < 60;
+}
+
+function readScheduleSpec(projectRoot?: string): ScheduleSpec {
+  const root = realpathSync(projectRoot ?? process.cwd());
+  const localFile = join(root, ".roll", "local.yaml");
+  if (existsSync(localFile)) {
+    try {
+      const text = readFileSync(localFile, "utf8");
+      const pm = /period_minutes:\s*(\d+)/.exec(text);
+      const om = /offset_minute:\s*(\d+)/.exec(text);
+      if (pm && om) {
+        const period = parseInt(pm[1] ?? "0", 10);
+        const offset = parseInt(om[1] ?? "0", 10);
+        if (scheduleValid(period, offset)) return { period, offset };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  const configFile = join(homedir(), ".roll", "config.yaml");
+  if (existsSync(configFile)) {
+    try {
+      const text = readFileSync(configFile, "utf8");
+      const m = /^loop_minute:\s*(\d+)/m.exec(text);
+      if (m) return { period: 60, offset: parseInt(m[1] ?? "0", 10) };
+    } catch {
+      /* ignore */
+    }
+  }
+  const h = parseInt(createHash("md5").update(root).digest("hex").slice(0, 2), 16) % 60;
+  return { period: 60, offset: h };
+}
+
+function nextCronHint(zh: boolean): string {
+  const now = new Date();
+  const { period, offset } = readScheduleSpec();
+  // next fire = today's HH:offset in UTC+8, advance by `period` minutes.
+  const sh = toShanghai(now);
+  let nxtEpoch =
+    Date.UTC(sh.getUTCFullYear(), sh.getUTCMonth(), sh.getUTCDate(), sh.getUTCHours(), offset, 0, 0) -
+    TZ_OFFSET_MS;
+  while (nxtEpoch <= now.getTime()) nxtEpoch += period * 60 * 1000;
+  const deltaMs = nxtEpoch - now.getTime();
+  const mins = Math.floor(deltaMs / 1000 / 60);
+  const secs = Math.floor((deltaMs / 1000) % 60);
+  if (zh) return `${mins} 分 ${pad2(secs)} 秒`;
+  const nxtSh = toShanghai(new Date(nxtEpoch));
+  return `${pad2(nxtSh.getUTCHours())}:${pad2(nxtSh.getUTCMinutes())}` + ` · in ${mins}m ${pad2(secs)}s`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Fixture data (test-only; ROLL_RENDER_FIXTURE=1)
+// ════════════════════════════════════════════════════════════════════════════
+interface FixtureBundle {
+  events: RawEvent[];
+  cron: CronEntry[];
+  state: Record<string, string>;
+  backlog: Record<string, string>;
+}
+
+function fixtureData(): FixtureBundle {
+  const now = new Date(); // UTC instant
+  const events: RawEvent[] = [];
+  const cron: CronEntry[] = [];
+  let cycleId = 0;
+  for (const d of [2, 1, 0]) {
+    const day = new Date(now.getTime() - d * 86400 * 1000);
+    const nCycles = [3, 4, 5][2 - d] ?? 0;
+    for (let i = 0; i < nCycles; i++) {
+      const hour = 0 + i * 5;
+      // start = day.replace(hour=hour, minute=48, second=0, microsecond=0) — UTC
+      const start = new Date(
+        Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, 48, 0, 0),
+      );
+      const end = new Date(start.getTime() + (540 + i * 120) * 1000);
+      const label = isoLabel(start);
+      const story = ["FIX-048", "US-112", "FIX-047", "REFACT-9", "FIX-040"][i % 5] ?? "";
+      const outcome = d === 1 && i === 2 ? "fail" : "done";
+      const startIso = start.toISOString().replace(".000Z", "+00:00").replace("Z", "+00:00");
+      const endIso = end.toISOString().replace(".000Z", "+00:00").replace("Z", "+00:00");
+      events.push(
+        { ts: startIso, stage: "cycle_start", label, detail: "", outcome: "", _ts: start },
+        {
+          ts: startIso,
+          stage: "pick_todo",
+          label,
+          detail: `${story} picked`,
+          outcome: "ok",
+          _ts: new Date(start.getTime() + 2000),
+        },
+        { ts: endIso, stage: "cycle_end", label, detail: "", outcome, _ts: end },
+      );
+      if (outcome === "done") {
+        events.push({
+          ts: endIso,
+          stage: "pr",
+          label,
+          detail: `https://github.com/x/y/pull/${50 + cycleId}`,
+          outcome: "ok",
+          _ts: new Date(end.getTime() - 1000),
+        });
+      }
+      const local = toShanghai(end);
+      cron.push({
+        hhmm: `${pad2(local.getUTCHours())}:${pad2(local.getUTCMinutes())}`,
+        ss: local.getUTCSeconds(),
+        outcome,
+        tcr: outcome === "done" ? 1 : 0,
+        duration_s: Math.trunc((end.getTime() - start.getTime()) / 1000),
+        cost: 3.2 + i * 0.32,
+      });
+      cycleId += 1;
+    }
+  }
+  const state = { status: "idle", last_run_outcome: "success" };
+  const backlog: Record<string, string> = {
+    "FIX-048": "Dedupe Todo across cycles",
+    "US-112": "Loop run summary report",
+    "FIX-047": "Cycle log rotation by day",
+    "REFACT-9": "Extract stage runner module",
+    "FIX-040": "8/12 tests failed → bail",
+  };
+  return { events, cron, state, backlog };
+}
+
+/** Mirror python start.strftime("%Y%m%d-%H%M%S-30585") in UTC. */
+function isoLabel(d: Date): string {
+  return (
+    `${d.getUTCFullYear()}${pad2(d.getUTCMonth() + 1)}${pad2(d.getUTCDate())}-` +
+    `${pad2(d.getUTCHours())}${pad2(d.getUTCMinutes())}${pad2(d.getUTCSeconds())}-30585`
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Render
+// ════════════════════════════════════════════════════════════════════════════
+interface RenderArgs {
+  days: number;
+  lang: "both" | "en" | "zh";
+  runs: Record<string, RunRecord>;
+  gitMerges: Record<string, GitMerge>;
+  claudeSlug: string | null;
+  now: Date;
+}
+
+function render(
+  out: string[],
+  events: RawEvent[],
+  cron: CronEntry[],
+  state: Record<string, string>,
+  backlog: Record<string, string>,
+  args: RenderArgs,
+): void {
+  const { days, lang, runs, gitMerges, claudeSlug, now } = args;
+  const cycles = aggregate(events, cron);
+  if (Object.keys(runs).length > 0) mergeRunsIntoCycles(cycles, runs);
+  if (Object.keys(gitMerges).length > 0) repairOrphanCyclesFromGit(cycles, gitMerges);
+  backfillUsageFromClaudeSessions(cycles, claudeSlug ?? "");
+  const byDay = bucketByDay(cycles);
+  const daysKeys = [...byDay.keys()].sort().reverse().slice(0, days);
+
+  const bilingual = (enLine: string, zhLine: string | null): void => {
+    if (lang === "both" || lang === "en") out.push(enLine);
+    if ((lang === "both" || lang === "zh") && zhLine !== null) out.push(zhLine);
+  };
+
+  // ── Title row ──
+  const nCycles = cycles.length;
+  const titleL = c("fg", "roll loop", { bold: true }) + c("muted", "  ·  ") + c("dim", "health");
+  const titleR =
+    c("dim", shYmdHm(now)) + c("muted", " · ") + c("muted", `${nCycles} cycles / ${days * 24}h`);
+  out.push(row(titleL, titleR));
+  out.push("");
+
+  // ── Status eyebrow ──
+  const statusWord = (state["status"] ?? "idle").toLowerCase();
+  let ebL: string;
+  let ebZh = "";
+  if (statusWord === "running") {
+    const item = state["current_item"] || "—";
+    ebL =
+      c("purple", "⏵", { bold: true }) +
+      " " +
+      c("purple", "RUNNING", { bold: true }) +
+      c("muted", "   ") +
+      c("dim", "story ") +
+      c("blue", item, { bold: true });
+    ebZh = c("dim", "  正在运行 · 当前 ") + c("blue", item);
+  } else if (statusWord === "paused") {
+    ebL =
+      c("amber", "⏸ PAUSED", { bold: true }) +
+      c("muted", "   ") +
+      c("dim", "since ") +
+      c("fg", state["paused_at"] ?? "—") +
+      c("muted", " · ") +
+      c("dim", state["paused_reason"] ?? "");
+    ebZh = c("dim", "  已暂停 · run: roll loop resume");
+  } else {
+    const installState = detectInstallState();
+    if (installState === "not-installed") {
+      ebL =
+        c("muted", "○ not installed", { bold: true }) +
+        c("muted", "   ") +
+        c("dim", "run ") +
+        c("fg", "roll loop on", { bold: true }) +
+        c("dim", " to enable");
+      ebZh = c("dim", "  未安装 · 运行 ") + c("fg", "roll loop on") + c("dim", " 启用");
+    } else if (installState === "stale" || installState === "disabled") {
+      ebL =
+        c("amber", "◌ STALE — plist present, not loaded", { bold: true }) +
+        c("muted", "   ") +
+        c("dim", "run ") +
+        c("fg", "roll loop on", { bold: true }) +
+        c("dim", " to repair");
+      ebZh = c("dim", "  Plist 存在但未加载 · 运行 ") + c("fg", "roll loop on") + c("dim", " 修复");
+    } else {
+      ebL =
+        c("blue", "● IDLE", { bold: true }) +
+        c("muted", " · ") +
+        c("dim", "enabled · next run ") +
+        c("fg", nextCronHint(false), { bold: true });
+      ebZh = c("dim", `  已启用 · 闲置 · 距下一轮 ${nextCronHint(true)}`);
+    }
+  }
+
+  // 'last' actionable cycle
+  let last: Cycle | null =
+    cycles.find((cy) => cy.outcome !== "running" && cy.outcome !== "idle") ??
+    (cycles.length > 0 ? (cycles[0] ?? null) : null);
+  let ebR: string;
+  if (last) {
+    const story = last.story || "—";
+    const title = story !== "—" ? (backlog[story] ?? "") : "";
+    const glyphMap: Record<string, [string, string]> = {
+      done: ["green", "✓"],
+      ok: ["green", "✓"],
+      idle: ["muted", "·"],
+      fail: ["red", "✗"],
+      running: ["purple", "⏵"],
+    };
+    const [glyphC, glyphCh] = glyphMap[last.outcome ?? ""] ?? ["muted", "·"];
+    const glyph = c(glyphC, glyphCh, { bold: true });
+    ebR =
+      c("dim", "last ") +
+      glyph +
+      " " +
+      c("fg", last.start ? shHHMM(last.start) : "") +
+      "  " +
+      c("blue", story, { bold: true }) +
+      "  " +
+      c("fg", trunc(title, 32));
+  } else {
+    ebR = c("muted", "no cycles yet");
+  }
+  out.push(row(ebL, ebR));
+  if (lang !== "en" && last) out.push(ebZh);
+
+  for (const svc of ["dream"]) {
+    const sl = dailyScheduleLine(svc, now);
+    if (sl) out.push("  " + c("dim", sl));
+  }
+  for (const loop of ["pr"]) {
+    const tl = tickAgeLine(loop, now);
+    if (tl) out.push("  " + c("dim", tl));
+  }
+  out.push("");
+
+  out.push(c("faint", "─".repeat(COLS)));
+  out.push("");
+
+  // ── ROLLUP ──
+  out.push(sectionHeadLine("ROLLUP", "近 " + String(days) + " 天", "↑ today vs yesterday · 今日 vs 昨日"));
+  out.push("");
+
+  const todayKey = shDayKey(now);
+  const yestKey = dayKeyOffset(now, -1);
+  const d2Key = dayKeyOffset(now, -2);
+
+  const today = rollupForDay(byDay.get(todayKey) ?? []);
+  const yest = rollupForDay(byDay.get(yestKey) ?? []);
+  const d2 = rollupForDay(byDay.get(d2Key) ?? []);
+
+  const isPartial = today.cycles < yest.cycles;
+
+  const hdrEn =
+    "  " +
+    c("muted", pad("", 14)) +
+    c("fg", pad("Today", 22), { bold: true }) +
+    c("dim", pad("Yesterday", 10)) +
+    c("muted", pad("−2d", 8));
+  const hdrZh =
+    "  " +
+    c("muted", pad("", 14)) +
+    c("dim", pad("今日", 22)) +
+    c("muted", pad("昨日", 10)) +
+    c("muted", pad("前天", 8));
+  bilingual(hdrEn, hdrZh);
+
+  out.push(metric("cycles", today.cycles, yest.cycles, d2.cycles, "up_good", { partial: isPartial }));
+  out.push(metric("merged PRs", today.prs, yest.prs, d2.prs, "up_good", { partial: isPartial }));
+  out.push(
+    metric("failed", today.failed, yest.failed, d2.failed, "up_bad", {
+      yestColor: yest.failed > 0 ? "amber" : "dim",
+      yestSuffix: yest.failed > 0 ? "⚠" : "",
+    }),
+  );
+  out.push(metricDur("duration", today.duration_s, yest.duration_s, d2.duration_s, { partial: isPartial }));
+  out.push(
+    metricTokens("input tokens", today.input_tokens, yest.input_tokens, d2.input_tokens, {
+      partial: isPartial,
+    }),
+  );
+  out.push(
+    metricTokens(
+      "cache writes",
+      today.cache_creation_tokens,
+      yest.cache_creation_tokens,
+      d2.cache_creation_tokens,
+      { partial: isPartial },
+    ),
+  );
+  out.push(
+    metricTokens(
+      "cache reads",
+      today.cache_read_tokens,
+      yest.cache_read_tokens,
+      d2.cache_read_tokens,
+      { partial: isPartial },
+    ),
+  );
+  out.push(
+    metricTokens("output tokens", today.output_tokens, yest.output_tokens, d2.output_tokens, {
+      partial: isPartial,
+    }),
+  );
+
+  const costDays = [today, yest, d2];
+  const currencies: string[] = [];
+  for (const cur of ["USD", "CNY"]) {
+    if (costDays.some((r) => r.cost_by_cur[cur])) currencies.push(cur);
+  }
+  for (const r of costDays) {
+    for (const cur of Object.keys(r.cost_by_cur)) {
+      if (!currencies.includes(cur) && r.cost_by_cur[cur]) currencies.push(cur);
+    }
+  }
+  if (currencies.length === 0) currencies.push("USD");
+  for (const cur of currencies) {
+    const sym = cur === "CNY" ? "¥" : "$";
+    const label = currencies.length === 1 ? "cost" : "cost " + sym;
+    out.push(
+      metricDollar(
+        label,
+        today.cost_by_cur[cur] ?? 0.0,
+        yest.cost_by_cur[cur] ?? 0.0,
+        d2.cost_by_cur[cur] ?? 0.0,
+        { partial: isPartial, symbol: sym },
+      ),
+    );
+  }
+
+  // agent / self-score / result-eval lines
+  let agentLine = "";
+  try {
+    const runsRecords = Object.values(runs);
+    runsRecords.sort((a, b) => String(a.ts ?? "").localeCompare(String(b.ts ?? "")));
+    agentLine = agentSummaryLine(runsRecords, 50);
+  } catch {
+    agentLine = "";
+  }
+  if (agentLine) out.push("  " + c("dim", agentLine));
+
+  let skillLine = "";
+  try {
+    skillLine = selfScoreSummaryLine();
+  } catch {
+    skillLine = "";
+  }
+  if (skillLine) out.push("  " + c("dim", skillLine));
+
+  let evalLine = "";
+  try {
+    evalLine = resultEvalSummaryLine(Object.values(runs));
+  } catch {
+    evalLine = "";
+  }
+  if (evalLine) out.push("  " + c("dim", evalLine));
+
+  out.push("");
+  out.push(c("faint", "─".repeat(COLS)));
+  out.push("");
+
+  // ── RECENT ──
+  out.push(
+    sectionHeadLine(
+      "RECENT",
+      `最近 ${cycles.length} 个 cycle`,
+      "t · time   Δ · duration   tok · tokens   $ · cost   id · backlog",
+    ),
+  );
+  out.push("");
+
+  if (cycles.length === 0) {
+    out.push("  " + c("dim", "no cycles yet — first run fires on next cron tick"));
+    out.push("  " + c("dim", "尚无 cycle · 等待下一次 cron 触发"));
+    return;
+  }
+
+  const yestForBand = dayKeyOffset(now, -1);
+  for (const dayKey of daysKeys) {
+    const dayCycles = byDay.get(dayKey) ?? [];
+    if (dayCycles.length === 0) continue;
+    out.push(
+      dayBand(
+        dayKey,
+        dayCycles.length,
+        dayCycles.filter((c0) => c0.outcome === "fail").length,
+        todayKey,
+        yestForBand,
+        { inProgress: dayKey === todayKey && isPartial },
+      ),
+    );
+    for (let j = dayCycles.length - 1; j >= 0; j--) {
+      const cy = dayCycles[j];
+      if (cy === undefined) continue;
+      out.push(...renderCycle(cy, now));
+    }
+    out.push("");
+  }
+
+  out.push(c("faint", "─".repeat(COLS)));
+  out.push("");
+  out.push(
+    "  " +
+      c("dim", "drill   ") +
+      c("blue", "roll loop show <cycle>") +
+      c("muted", "       ") +
+      c("dim", "watch   ") +
+      c("blue", "roll loop --watch") +
+      c("muted", "       ") +
+      c("dim", "more   ") +
+      c("blue", "roll loop status --days 7"),
+  );
+}
+
+/** Build a CycleView for cycleRow, computing running wall-clock duration. */
+function renderCycle(cy: Cycle, now: Date): string[] {
+  let durS = cy.duration_s || cy.cron?.duration_s || 0;
+  if (cy.outcome === "running" && !durS && cy.start) {
+    durS = Math.trunc((now.getTime() - cy.start.getTime()) / 1000);
+  }
+  const view: CycleView = {
+    outcome: cy.outcome ?? "done",
+    pr_outcome: cy.pr_outcome ?? null,
+    start_hhmm: cy.start ? shHHMM(cy.start) : "",
+    duration_s: durS,
+    input_tokens: cy.input_tokens ?? 0,
+    output_tokens: cy.output_tokens ?? 0,
+    cache_creation_tokens: cy.cache_creation_tokens ?? 0,
+    cache_read_tokens: cy.cache_read_tokens ?? 0,
+    cost_currency: cy.cost_currency ?? "USD",
+    cost_list: cy.cost_list ?? null,
+    cron_cost: cy.cron ? cy.cron.cost : null,
+    story: cy.story ?? null,
+    built: cy.built,
+    model: cy.model ?? null,
+    agent: cy.agent ?? null,
+    pr_num: cy.pr_num ?? null,
+    cost_list_legacy: cy.cost_list_legacy ?? false,
+    fail_detail: cy.fail_detail ?? null,
+    label: cy.label,
+  };
+  return cycleRow(view);
+}
+
+/** Mirror roll_render.section_head as a returned string (not printed). */
+function sectionHeadLine(en: string, zh: string, hint: string): string {
+  const left = "  " + c("pink", en, { bold: true }) + c("muted", "  ·  ") + c("dim", zh);
+  return row(left, c("muted", hint));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Entry
+// ════════════════════════════════════════════════════════════════════════════
+interface ParsedArgs {
+  days: number;
+  noColor: boolean;
+  en: boolean;
+  zh: boolean;
+  evalN: number | null;
+  unknown: string[];
+}
+
+/** Mirror argparse for the dashboard's flags. */
+function parseArgs(argv: string[]): ParsedArgs {
+  const r: ParsedArgs = {
+    days: 3,
+    noColor: false,
+    en: false,
+    zh: false,
+    evalN: null,
+    unknown: [],
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--no-color") r.noColor = true;
+    else if (a === "--en") r.en = true;
+    else if (a === "--zh") r.zh = true;
+    else if (a === "--days") {
+      const v = argv[++i];
+      r.days = parseInt(v ?? "", 10);
+      if (Number.isNaN(r.days)) r.unknown.push(a);
+    } else if (a !== undefined && a.startsWith("--days=")) {
+      r.days = parseInt(a.slice("--days=".length), 10);
+    } else if (a === "--eval") {
+      // nargs="?" const=14 — consume the next token only if it's an int.
+      const next = argv[i + 1];
+      if (next !== undefined && /^-?\d+$/.test(next)) {
+        r.evalN = parseInt(next, 10);
+        i++;
+      } else {
+        r.evalN = 14;
+      }
+    } else if (a !== undefined && a.startsWith("--eval=")) {
+      r.evalN = parseInt(a.slice("--eval=".length), 10);
+    } else if (a !== undefined) {
+      r.unknown.push(a);
+    }
+  }
+  return r;
+}
+
+export function dashboardCommand(argv: string[]): number {
+  const args = parseArgs(argv);
+
+  if (args.unknown.length > 0) {
+    // argparse errors on unrecognized args with exit code 2.
+    process.stderr.write(
+      `usage: roll-loop-status.py [-h] [--days DAYS] [--no-color] [--en] [--zh]\n` +
+        `                           [--eval [N]]\n` +
+        `roll-loop-status.py: error: unrecognized arguments: ${args.unknown.join(" ")}\n`,
+    );
+    return 2;
+  }
+
+  const useFixture = (process.env["ROLL_RENDER_FIXTURE"] ?? "") !== "";
+
+  // --eval view → print and exit (no color dependency).
+  if (args.evalN !== null) {
+    const windowN = args.evalN > 0 ? args.evalN : 14;
+    let records: RunRecord[];
+    if (useFixture) records = [];
+    else {
+      const slug = projectSlug();
+      records = Object.values(loadRuns(slug));
+    }
+    process.stdout.write(formatEvalView(records, windowN) + "\n");
+    return 0;
+  }
+
+  renderState.useColor =
+    !args.noColor &&
+    (process.env["NO_COLOR"] ?? "") === "" &&
+    (process.stdout.isTTY === true || (process.env["FORCE_COLOR"] ?? "") !== "");
+
+  const lang: "both" | "en" | "zh" = args.en ? "en" : args.zh ? "zh" : "both";
+  const now = new Date();
+
+  let events: RawEvent[];
+  let cron: CronEntry[];
+  let state: Record<string, string>;
+  let backlog: Record<string, string>;
+  let runs: Record<string, RunRecord>;
+  let gitMerges: Record<string, GitMerge>;
+  let slug: string | null;
+
+  if (useFixture) {
+    const fx = fixtureData();
+    events = fx.events;
+    cron = fx.cron;
+    state = fx.state;
+    backlog = fx.backlog;
+    runs = {};
+    gitMerges = {};
+    slug = null;
+  } else {
+    slug = projectSlug();
+    events = loadEvents(slug, args.days);
+    cron = loadCronLog(slug);
+    state = loadState(slug);
+    backlog = loadBacklog();
+    runs = loadRuns(slug);
+    gitMerges = loadPrMergesFromGit(args.days);
+  }
+
+  const out: string[] = [];
+  render(out, events, cron, state, backlog, {
+    days: args.days,
+    lang,
+    runs,
+    gitMerges,
+    claudeSlug: slug,
+    now,
+  });
+  process.stdout.write(out.join("\n") + "\n");
+  return 0;
+}

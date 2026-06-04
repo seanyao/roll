@@ -3,6 +3,7 @@ import { fallbackToBash, registerPorted } from "../bridge.js";
 import { agentListCommand } from "./agent-list.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
+import { dashboardCommand } from "./dashboard.js";
 import { pricesCommand } from "./prices.js";
 import { statusCommand } from "./status.js";
 
@@ -38,5 +39,10 @@ export function registerAll(): void {
       return fallbackToBash(["config", ...args]).status;
     }
     return configGetCommand(args);
+  });
+  // `loop status` is TS; every other loop subcommand stays on bash.
+  registerPorted("loop", (args) => {
+    if (args[0] === "status") return dashboardCommand(args.slice(1));
+    return fallbackToBash(["loop", ...args]).status;
   });
 }

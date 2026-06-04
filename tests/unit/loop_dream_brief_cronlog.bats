@@ -31,21 +31,14 @@ teardown() { unit_teardown; }
   ! grep -qF "dream/cron-${slug}.log" "$runner"
 }
 
-@test "_install_launchd_plists: brief runner writes to <project>/.roll/brief/cron.log" {
-  run _install_launchd_plists "$PROJ"
-  [ "$status" -eq 0 ]
-  local slug; slug=$(_project_slug "$PROJ")
-  local runner="${_SHARED_ROOT}/brief/run-${slug}.sh"
-  [ -f "$runner" ]
-  grep -qF ">> \"${PROJ}/.roll/brief/cron.log\"" "$runner"
-  ! grep -qF "brief/cron-${slug}.log" "$runner"
-}
+# FIX-194: the brief loop was retired from the launchd scheduler — only the
+# dream runner is installed via _install_launchd_plists now. (The Linux crontab
+# brief path is being torn down separately.)
 
-@test "_install_launchd_plists: creates project-local dream/brief log dirs" {
+@test "_install_launchd_plists: creates project-local dream log dir" {
   run _install_launchd_plists "$PROJ"
   [ "$status" -eq 0 ]
   [ -d "${PROJ}/.roll/dream" ]
-  [ -d "${PROJ}/.roll/brief" ]
 }
 
 # ── static guards: no shared cross-project dream/brief cron-<slug>.log remains ──

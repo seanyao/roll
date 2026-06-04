@@ -83,14 +83,15 @@ EOF
 
 # ─── Three-service status display (US-AUTO-011 / US-AUTO-015) ────────────────
 
-@test "loop monitor: shows three service lines (loop, dream, brief) on macOS" {
+# FIX-194: brief/ci/alert loops retired — the monitor renders loop/dream/pr.
+@test "loop monitor: shows three service lines (loop, dream, pr) on macOS" {
   [[ "$(uname)" != "Darwin" ]] && skip "macOS only"
   local monitor_body
   monitor_body=$(awk '/^_loop_monitor\(\)/{p=1} p{print} p && /^}$/{p=0}' "$ROLL_BIN")
   echo "$monitor_body" | grep -q '_launchd_svc_state'
   echo "$monitor_body" | grep -q '"loop"'
   echo "$monitor_body" | grep -q '"dream"'
-  echo "$monitor_body" | grep -q '"brief"'
+  echo "$monitor_body" | grep -q '"pr"'
 }
 
 @test "loop monitor: installed/off state shows repair command" {

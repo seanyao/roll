@@ -11,35 +11,29 @@ setup() {
 }
 teardown() { unit_teardown_cd; }
 
-@test "_legacy_loop_status: shows tick age for pr/ci/alert when tick exists" {
-  # _legacy_loop_status renders pr/ci/alert only on macOS (launchd services)
-  [[ "$(uname)" == "Darwin" ]] || skip "pr/ci/alert lines only rendered on macOS"
+# FIX-194: ci/alert loops were retired — pr is the sole dedicated loop with a
+# tick heartbeat. The legacy status renders the pr service line only.
+@test "_legacy_loop_status: shows tick age for pr when tick exists" {
+  # _legacy_loop_status renders service lines only on macOS (launchd services)
+  [[ "$(uname)" == "Darwin" ]] || skip "service lines only rendered on macOS"
   mkdir -p .roll/loop
-  # Seed tick files with recent timestamps
+  # Seed tick file with a recent timestamp
   printf '{"ts":"%s","loop":"pr","outcome":"idle","note":""}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .roll/loop/pr-tick.jsonl
-  printf '{"ts":"%s","loop":"ci","outcome":"acted","note":""}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .roll/loop/ci-tick.jsonl
-  printf '{"ts":"%s","loop":"alert","outcome":"idle","note":""}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .roll/loop/alert-tick.jsonl
 
   run _legacy_loop_status
   [ "$status" -eq 0 ]
-  # Each of pr/ci/alert should appear with a tick age indicator ("tick" or time)
+  # pr should appear with a tick age indicator ("tick" or time)
   [[ "$output" == *"pr"*"tick"* ]] || [[ "$output" == *"pr"*"s"* ]]
-  [[ "$output" == *"ci"*"tick"* ]] || [[ "$output" == *"ci"*"s"* ]]
-  [[ "$output" == *"alert"*"tick"* ]] || [[ "$output" == *"alert"*"s"* ]]
 }
 
 @test "_legacy_loop_status: handles missing tick files gracefully" {
-  # _legacy_loop_status renders pr/ci/alert only on macOS (launchd services)
-  [[ "$(uname)" == "Darwin" ]] || skip "pr/ci/alert lines only rendered on macOS"
+  # _legacy_loop_status renders service lines only on macOS (launchd services)
+  [[ "$(uname)" == "Darwin" ]] || skip "service lines only rendered on macOS"
   run _legacy_loop_status
   [ "$status" -eq 0 ]
-  # pr/ci/alert services still shown even without ticks
+  # pr service still shown even without ticks
   [[ "$output" == *"pr"* ]]
-  [[ "$output" == *"ci"* ]]
-  [[ "$output" == *"alert"* ]]
 }
 
 # ── Python v2 status tick display ───────────────────────────────────────────

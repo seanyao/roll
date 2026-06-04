@@ -231,7 +231,10 @@ setup() {
 
 # ─── _install_launchd_plists ──────────────────────────────────────────────────
 
-@test "_install_launchd_plists: creates six plist files (loop/dream/brief/pr/ci/alert)" {
+# FIX-194: the brief / CI / Alert loops were all retired (brief + ci + alert
+# removed; only loop/dream/pr remain as launchd services). Tests assert the
+# three surviving services only.
+@test "_install_launchd_plists: creates three plist files (loop/dream/pr)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -242,14 +245,11 @@ setup() {
 
   [ -f "$(_launchd_plist_path "loop" "$proj")" ]
   [ -f "$(_launchd_plist_path "dream" "$proj")" ]
-  [ -f "$(_launchd_plist_path "brief" "$proj")" ]
   [ -f "$(_launchd_plist_path "pr" "$proj")" ]      # US-AUTO-044 PR Loop
-  [ -f "$(_launchd_plist_path "ci" "$proj")" ]      # US-AUTO-045 CI Loop
-  [ -f "$(_launchd_plist_path "alert" "$proj")" ]   # US-AUTO-046 Alert Loop
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: creates six runner scripts (loop/dream/brief/pr/ci/alert)" {
+@test "_install_launchd_plists: creates three runner scripts (loop/dream/pr)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -261,10 +261,7 @@ setup() {
   local slug; slug=$(_project_slug "$proj")
   [ -x "${_SHARED_ROOT}/loop/run-${slug}.sh" ]
   [ -x "${_SHARED_ROOT}/dream/run-${slug}.sh" ]
-  [ -x "${_SHARED_ROOT}/brief/run-${slug}.sh" ]
   [ -x "${_SHARED_ROOT}/pr/run-${slug}.sh" ]      # US-AUTO-044 PR Loop
-  [ -x "${_SHARED_ROOT}/ci/run-${slug}.sh" ]      # US-AUTO-045 CI Loop
-  [ -x "${_SHARED_ROOT}/alert/run-${slug}.sh" ]   # US-AUTO-046 Alert Loop
   rm -rf "$tmp_dir"
 }
 
@@ -285,56 +282,21 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "loop lifecycle loops include alert as the 6th service (US-AUTO-046)" {
-  # Every `for svc in loop dream brief pr ci ...` lifecycle loop must include
-  # alert, so on/off/status manage the Alert Loop plist alongside the others.
+@test "loop lifecycle loops manage loop/dream/pr services (FIX-194)" {
+  # FIX-194: brief/ci/alert loops were all retired. Every on/off/status
+  # lifecycle loop iterates exactly `for svc in loop dream pr`.
   local roll_bin="${BATS_TEST_DIRNAME}/../../bin/roll"
-  run grep -c 'for svc in loop dream brief pr ci;' "$roll_bin"
-  [ "$output" -eq 0 ]
   run grep -c 'for svc in loop dream brief pr ci alert;' "$roll_bin"
+  [ "$output" -eq 0 ]
+  run grep -c 'for svc in loop dream pr; do' "$roll_bin"
   [ "$output" -eq 4 ]
 }
 
-@test "roll loop on help text lists the alert service (US-AUTO-046)" {
+@test "roll loop on help text lists the three services (FIX-194)" {
   local roll_bin="${BATS_TEST_DIRNAME}/../../bin/roll"
-  grep -q 'loop + dream + brief + pr + ci + alert' "$roll_bin"
-}
-
-@test "_install_launchd_plists: CI Loop plist has StartInterval=300 and drives _ci_scan (US-AUTO-045)" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"
-  mkdir -p "$proj"
-  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
-  _SHARED_ROOT="${tmp_dir}/shared"
-
-  _install_launchd_plists "$proj"
-
-  local slug; slug=$(_project_slug "$proj")
-  local ci_plist; ci_plist=$(_launchd_plist_path "ci" "$proj")
-  grep -q "com.roll.ci.${slug}" "$ci_plist"
-  grep -A1 "<key>StartInterval</key>" "$ci_plist" | grep -q "<integer>300</integer>"
-  grep -q "_ci_scan" "${_SHARED_ROOT}/ci/run-${slug}.sh"
-  rm -rf "$tmp_dir"
-}
-
-@test "_install_launchd_plists: Alert Loop plist has StartInterval=60 and drives _alert_dispatch (US-AUTO-046)" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"
-  mkdir -p "$proj"
-  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
-  _SHARED_ROOT="${tmp_dir}/shared"
-
-  _install_launchd_plists "$proj"
-
-  local slug; slug=$(_project_slug "$proj")
-  local alert_plist; alert_plist=$(_launchd_plist_path "alert" "$proj")
-  grep -q "com.roll.alert.${slug}" "$alert_plist"
-  # period=1 → StartInterval = 1 * 60 = 60 (every 1 minute)
-  grep -A1 "<key>StartInterval</key>" "$alert_plist" | grep -q "<integer>60</integer>"
-  # No calendar Hour key — sub-daily interval schedule, not a daily one.
-  ! grep -q "<key>Hour</key>" "$alert_plist"
-  grep -q "_alert_dispatch" "${_SHARED_ROOT}/alert/run-${slug}.sh"
-  rm -rf "$tmp_dir"
+  grep -q 'loop + dream + pr' "$roll_bin"
+  # ci/alert/brief must no longer appear in the help text.
+  ! grep -q 'loop + dream + brief + pr + ci + alert' "$roll_bin"
 }
 
 @test "_install_launchd_plists: idempotent — no plist mtime change on second call" {
@@ -395,16 +357,17 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: loop uses StartInterval=3600, dream/brief default to StartInterval=86400 (US-LOOP-032/FIX-148)" {
-  # FIX-148 (owner decision B): daily dream/brief DEFAULT to the FIX-105
+@test "_install_launchd_plists: loop uses StartInterval=3600, dream defaults to StartInterval=86400 (US-LOOP-032/FIX-148)" {
+  # FIX-148 (owner decision B): daily dream DEFAULTS to the FIX-105
   # known-good StartInterval=86400 workaround, because macOS 26.x launchd
   # SILENTLY refuses to FIRE a StartCalendarInterval carrying Hour+Minute. The
   # array-style StartCalendarInterval (US-LOOP-035) is UNVERIFIED on macOS 26.x
   # and is an explicit OPT-IN only (ROLL_DREAM_CALENDAR=1). Current invariant:
   #   - loop (sub-daily, empty hour): StartInterval = period * 60; default
   #     period 60 → 3600; no calendar interval, no Hour.
-  #   - dream/brief (daily): default StartInterval=86400; no StartCalendarInterval,
+  #   - dream (daily): default StartInterval=86400; no StartCalendarInterval,
   #     no Hour.
+  # FIX-194: brief was retired, so it is no longer asserted here.
   # The opt-in array path + both unit forms live in
   # plist_calendar_interval.bats; this asserts _install_launchd_plists wires the
   # services through the right default code path.
@@ -416,10 +379,9 @@ setup() {
 
   _install_launchd_plists "$proj"
 
-  local loop_p dream_p brief_p
+  local loop_p dream_p
   loop_p=$(_launchd_plist_path "loop" "$proj")
   dream_p=$(_launchd_plist_path "dream" "$proj")
-  brief_p=$(_launchd_plist_path "brief" "$proj")
 
   # Loop: StartInterval=3600 (period 60 * 60), no calendar interval, no Hour.
   grep -q "<key>StartInterval</key>" "$loop_p"
@@ -432,12 +394,6 @@ setup() {
   grep -A1 "<key>StartInterval</key>" "$dream_p" | grep -q "<integer>86400</integer>"
   ! grep -q "<key>StartCalendarInterval</key>" "$dream_p"
   ! grep -q "<key>Hour</key>" "$dream_p"
-
-  # Brief: default StartInterval=86400, no calendar interval, no Hour.
-  grep -q "<key>StartInterval</key>" "$brief_p"
-  grep -A1 "<key>StartInterval</key>" "$brief_p" | grep -q "<integer>86400</integer>"
-  ! grep -q "<key>StartCalendarInterval</key>" "$brief_p"
-  ! grep -q "<key>Hour</key>" "$brief_p"
 
   rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
@@ -503,28 +459,9 @@ setup() {
   rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
-@test "_install_launchd_plists: brief plist defaults to StartInterval=86400 (FIX-148)" {
-  # FIX-148 (owner decision B): daily brief defaults to the FIX-105 known-good
-  # StartInterval=86400 workaround; the array-style StartCalendarInterval is an
-  # explicit opt-in (ROLL_DREAM_CALENDAR=1), not the default.
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"
-  mkdir -p "$proj"
-  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
-  _SHARED_ROOT="${tmp_dir}/shared"
-  # Isolate config so the host developer's ~/.roll/config.yaml can't override
-  # defaults and make this assertion host-dependent.
-  ROLL_CONFIG=$(mktemp)
-
-  _install_launchd_plists "$proj"
-
-  local brief_plist; brief_plist=$(_launchd_plist_path "brief" "$proj")
-  grep -q "<key>StartInterval</key>" "$brief_plist"
-  grep -A1 "<key>StartInterval</key>" "$brief_plist" | grep -q "<integer>86400</integer>"
-  ! grep -q "<key>StartCalendarInterval</key>" "$brief_plist"
-  ! grep -q "<key>Hour</key>" "$brief_plist"
-  rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
-}
+# FIX-194: brief loop retired — its dedicated StartInterval assertion is gone.
+# The daily-schedule default (used by dream) is still covered by the
+# _write_launchd_plist test below.
 
 @test "_write_launchd_plist: daily schedule (hour set) defaults to StartInterval=86400 (FIX-148)" {
   # FIX-148 (owner decision B): daily services (hour set) default to the FIX-105
@@ -694,11 +631,12 @@ setup() {
   local uid; uid=$(id -u)
   local loop_label; loop_label=$(_launchd_label "loop" "$proj")
   local dream_label; dream_label=$(_launchd_label "dream" "$proj")
-  local brief_label; brief_label=$(_launchd_label "brief" "$proj")
+  # FIX-194: brief retired — assert the pr label instead of brief.
+  local pr_label; pr_label=$(_launchd_label "pr" "$proj")
 
   grep -qF "disable gui/${uid}/${loop_label}" "$disable_log"
   grep -qF "disable gui/${uid}/${dream_label}" "$disable_log"
-  grep -qF "disable gui/${uid}/${brief_label}" "$disable_log"
+  grep -qF "disable gui/${uid}/${pr_label}" "$disable_log"
   rm -rf "$tmp_dir"
 }
 

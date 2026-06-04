@@ -1,0 +1,199 @@
+/**
+ * Unit tests for PolicyEngine (US-CORE-010): policy.yaml parser, first-match
+ * routing, safety thresholds, repo-compliance verdict.
+ *
+ * The parser fixture is the architecture §5.1/§6.1 example policy.yaml verbatim,
+ * so the test pins the v3 spec shape.
+ *
+ * On the bash guard diff-test: v2's structural guard is the FIX-065 tripwire
+ * (bin/roll:7917-7934), inlined into `_loop_event` and gated on HOME / BATS /
+ * PWD sandbox env — it is NOT a cleanly extractable standalone function (it
+ * mutates / inspects loop runtime state). So {@link repoComplianceVerdict} MIRRORS
+ * its INTENT ("never operate on a stray, non-roll checkout") as a pure structural
+ * check and is unit-tested against fixtures here rather than byte-diffed.
+ */
+import { describe, expect, it } from "vitest";
+import {
+  type Policy,
+  consecutiveFailureVerdict,
+  parsePolicy,
+  repoComplianceVerdict,
+  resolvePolicyRoute,
+  storyFailureVerdict,
+} from "../src/index.js";
+
+// architecture.md §5.1 + §6.1 example, verbatim.
+const SPEC_POLICY = `
+model_routing:
+  - match: { level: "epic|feature" }
+    agent: claude
+    model: opus
+    fallback: { agent: claude, model: sonnet }
+    rationale: "拆分错误传播范围大，不可逆性高"
+  - match: { level: "story", type: "US-*" }
+    agent: claude
+    model: sonnet
+    fallback: { agent: kimi, model: default }
+  - match: { level: "story", type: "FIX-*|REFACTOR-*" }
+    agent: deepseek
+    model: default
+    fallback: { agent: kimi, model: default }
+  - match: { level: "action" }
+    agent: deepseek
+    model: default
+  - match: { level: "*" }
+    agent: claude
+    model: default
+
+loop_safety:
+  max_consecutive_failures: 3
+  action_on_breach: pause_and_notify
+  max_story_failures: 3
+  action_on_story_breach: hold
+  budget:
+    daily_usd: 20
+    weekly_usd: 100
+    metric: effective_cost
+    on_approach:
+      action: downgrade
+    on_breach:
+      action: pause_and_notify
+    upgrade_hint:
+      when: { revert_rate_gt: 0.4 }
+      action: suggest_upgrade
+`;
+
+describe("parsePolicy — v3 spec shape round-trip", () => {
+  const policy = parsePolicy(SPEC_POLICY);
+
+  it("parses all five routing rules in order", () => {
+    expect(policy.modelRouting).toHaveLength(5);
+    expect(policy.modelRouting[0]).toEqual({
+      match: { level: "epic|feature" },
+      agent: "claude",
+      model: "opus",
+      fallback: { agent: "claude", model: "sonnet" },
+      rationale: "拆分错误传播范围大，不可逆性高",
+    });
+    expect(policy.modelRouting[1]).toMatchObject({ match: { level: "story", type: "US-*" }, agent: "claude", model: "sonnet" });
+    expect(policy.modelRouting[2]?.match.type).toBe("FIX-*|REFACTOR-*");
+    expect(policy.modelRouting[4]?.match.level).toBe("*");
+  });
+
+  it("parses loop_safety + nested budget + upgrade_hint", () => {
+    expect(policy.loopSafety.maxConsecutiveFailures).toBe(3);
+    expect(policy.loopSafety.actionOnBreach).toBe("pause_and_notify");
+    expect(policy.loopSafety.maxStoryFailures).toBe(3);
+    expect(policy.loopSafety.actionOnStoryBreach).toBe("hold");
+    expect(policy.loopSafety.budget).toMatchObject({
+      dailyUsd: 20,
+      weeklyUsd: 100,
+      metric: "effective_cost",
+      onApproach: "downgrade",
+      onBreach: "pause_and_notify",
+      upgradeHint: { revertRateGt: 0.4, action: "suggest_upgrade" },
+    });
+  });
+
+  it("falls back to v2-aligned defaults for an empty/absent policy", () => {
+    const p = parsePolicy("");
+    expect(p.modelRouting).toHaveLength(0);
+    expect(p.loopSafety).toEqual({
+      maxConsecutiveFailures: 3,
+      actionOnBreach: "pause_and_notify",
+      maxStoryFailures: 3,
+      actionOnStoryBreach: "hold",
+    });
+  });
+
+  it("ignores comments and unknown keys (forward-compatible)", () => {
+    const p = parsePolicy(`
+# leading comment
+model_routing:
+  - match: { level: "action" }  # inline comment
+    agent: deepseek
+    model: default
+    unknown_key: ignored
+loop_safety:
+  max_consecutive_failures: 5
+  future_field: whatever
+`);
+    expect(p.modelRouting).toHaveLength(1);
+    expect(p.modelRouting[0]?.agent).toBe("deepseek");
+    expect(p.loopSafety.maxConsecutiveFailures).toBe(5);
+  });
+});
+
+describe("resolvePolicyRoute — first-match precedence (D1/I10)", () => {
+  const policy = parsePolicy(SPEC_POLICY);
+
+  it("epic/feature → opus (rule 0)", () => {
+    expect(resolvePolicyRoute(policy, { level: "epic", type: "US" })).toMatchObject({ model: "opus", ruleIndex: 0 });
+    expect(resolvePolicyRoute(policy, { level: "feature", type: "FIX" })).toMatchObject({ model: "opus", ruleIndex: 0 });
+  });
+
+  it("story + US-* → sonnet (rule 1), before the FIX rule", () => {
+    expect(resolvePolicyRoute(policy, { level: "story", type: "US-AUTH-001" })).toMatchObject({
+      agent: "claude",
+      model: "sonnet",
+      ruleIndex: 1,
+    });
+  });
+
+  it("story + FIX-* / REFACTOR-* → deepseek (rule 2)", () => {
+    expect(resolvePolicyRoute(policy, { level: "story", type: "FIX-9" })).toMatchObject({ agent: "deepseek", ruleIndex: 2 });
+    expect(resolvePolicyRoute(policy, { level: "story", type: "REFACTOR-3" })).toMatchObject({ agent: "deepseek", ruleIndex: 2 });
+  });
+
+  it("action → deepseek (rule 3)", () => {
+    expect(resolvePolicyRoute(policy, { level: "action", type: "US" })).toMatchObject({ ruleIndex: 3 });
+  });
+
+  it("anything else → wildcard default (rule 4)", () => {
+    expect(resolvePolicyRoute(policy, { level: "story", type: "IDEA-1" })).toMatchObject({ model: "default", ruleIndex: 4 });
+  });
+
+  it("returns null when nothing matches (no wildcard rule)", () => {
+    const p: Policy = { modelRouting: [{ match: { level: "epic" }, agent: "a", model: "m" }], loopSafety: parsePolicy("").loopSafety };
+    expect(resolvePolicyRoute(p, { level: "story", type: "US" })).toBeNull();
+  });
+
+  it("is deterministic — same input, same route", () => {
+    const a = resolvePolicyRoute(policy, { level: "story", type: "US-1" });
+    const b = resolvePolicyRoute(policy, { level: "story", type: "US-1" });
+    expect(a).toEqual(b);
+  });
+});
+
+describe("safety thresholds", () => {
+  const { loopSafety } = parsePolicy(SPEC_POLICY);
+
+  it("consecutive failures < threshold → continue", () => {
+    expect(consecutiveFailureVerdict(loopSafety, 2)).toEqual({ action: "continue" });
+  });
+  it("consecutive failures >= threshold → pause_and_notify", () => {
+    expect(consecutiveFailureVerdict(loopSafety, 3)).toMatchObject({ action: "pause_and_notify", threshold: 3 });
+  });
+  it("story failures >= threshold → hold (C5)", () => {
+    expect(storyFailureVerdict(loopSafety, 3)).toMatchObject({ action: "hold", threshold: 3 });
+    expect(storyFailureVerdict(loopSafety, 1)).toEqual({ action: "continue" });
+  });
+});
+
+describe("repoComplianceVerdict — 防误伤非本项目仓", () => {
+  it("compliant when git repo + .roll/ + backlog all present", () => {
+    expect(repoComplianceVerdict({ isGitRepo: true, hasRollDir: true, hasBacklog: true })).toEqual({ compliant: true });
+  });
+
+  it("declines a non-git repo", () => {
+    const v = repoComplianceVerdict({ isGitRepo: false, hasRollDir: true, hasBacklog: true });
+    expect(v.compliant).toBe(false);
+    if (!v.compliant) expect(v.missing).toContain("git-repo");
+  });
+
+  it("declines a repo with no .roll/ (a stray checkout)", () => {
+    const v = repoComplianceVerdict({ isGitRepo: true, hasRollDir: false, hasBacklog: false });
+    expect(v.compliant).toBe(false);
+    if (!v.compliant) expect(v.missing).toEqual([".roll/", ".roll/backlog.md"]);
+  });
+});

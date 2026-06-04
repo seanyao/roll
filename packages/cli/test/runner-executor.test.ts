@@ -1,0 +1,264 @@
+/**
+ * Unit tests for the runner adapter's pure-ish surface: the agent-spawn argv
+ * construction (mirrors v2 _agent_argv + loop enhancements), the command→executor
+ * dispatch (every CycleCommand kind, via fully faked Ports), the v2-shaped runs
+ * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
+ */
+import { describe, expect, it, vi } from "vitest";
+import type { CycleCommand, CycleContext, RollEvent } from "@roll/core";
+import {
+  AGENT_ARGV_TODO,
+  AUTORUN_DIRECTIVE,
+  type Ports,
+  buildClaudeArgv,
+  buildRunRow,
+  dryRunPlan,
+  executeCommand,
+  parseEstMin,
+  realAgentSpawn,
+} from "../src/runner/index.js";
+
+const CTX: CycleContext = {
+  cycleId: "20260605-000000-1",
+  branch: "loop/cycle-20260605-000000-1",
+  loop: "ci" as never,
+  storyId: "US-RUN-001",
+  agent: "claude",
+  model: "",
+};
+
+describe("buildClaudeArgv — mirrors v2 _loop_cycle_agent_cmd", () => {
+  it("produces the claude loop-enhanced argv with autorun directive + skill body", () => {
+    const { bin, args } = buildClaudeArgv({ worktree: "/wt", skillBody: "DO WORK", bin: "claude" });
+    expect(bin).toBe("claude");
+    expect(args.slice(0, 7)).toEqual([
+      "-p",
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--output-format",
+      "stream-json",
+      "--add-dir",
+      "/wt",
+    ]);
+    // The single positional prompt = autorun directive + skill body.
+    expect(args[7]).toBe(`${AUTORUN_DIRECTIVE}DO WORK`);
+  });
+});
+
+describe("realAgentSpawn — only claude argv is ported", () => {
+  it("throws a loud, documented error for an un-ported agent (fail-loud, not silent)", () => {
+    expect(() => realAgentSpawn("kimi", { cwd: "/wt", skillBody: "x" })).toThrow(
+      /agent 'kimi' argv not yet ported/,
+    );
+    // The TODO map documents the deferred agents' v2 shapes.
+    expect(Object.keys(AGENT_ARGV_TODO)).toContain("kimi");
+    expect(Object.keys(AGENT_ARGV_TODO)).toContain("codex");
+  });
+});
+
+describe("parseEstMin", () => {
+  it("reads est_min from a desc tag, undefined when absent", () => {
+    expect(parseEstMin("foo est_min:12 bar")).toBe(12);
+    expect(parseEstMin("foo est-min: 7")).toBe(7);
+    expect(parseEstMin("no estimate")).toBeUndefined();
+  });
+});
+
+describe("buildRunRow — v2 runs.jsonl shape", () => {
+  it("done/built credits built[]; failed leaves it empty", () => {
+    const done = buildRunRow(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      CTX,
+    );
+    expect(done["built"]).toEqual(["US-RUN-001"]);
+    expect(done["status"]).toBe("done");
+    expect(done["agent"]).toBe("claude");
+    expect(done["run_id"]).toBe(CTX.cycleId);
+
+    const failed = buildRunRow(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      CTX,
+    );
+    expect(failed["built"]).toEqual([]);
+  });
+});
+
+describe("dryRunPlan", () => {
+  it("renders the happy-path command plan without executing anything", () => {
+    const plan = dryRunPlan(CTX);
+    const joined = plan.join("\n");
+    expect(joined).toContain("create_worktree");
+    expect(joined).toContain("pick_story");
+    expect(joined).toContain("spawn_agent");
+    expect(joined).toContain("publish_pr");
+    expect(joined).toContain("append_run");
+  });
+});
+
+// ── executeCommand dispatch (every kind, via fakes) ──────────────────────────
+
+function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<string, unknown[]> } {
+  const calls: Record<string, unknown[]> = {};
+  const rec = (k: string) => (...a: unknown[]): void => {
+    (calls[k] ??= []).push(a);
+  };
+  const ports: Ports = {
+    repoCwd: "/repo",
+    paths: {
+      eventsPath: "/rt/events.ndjson",
+      runsPath: "/rt/runs.jsonl",
+      alertsPath: "/rt/alerts.log",
+      lockPath: "/rt/inner.lock",
+      heartbeatPath: "/rt/heartbeat",
+      worktreePath: "/rt/wt",
+    },
+    skillBody: "work",
+    clock: () => 42,
+    agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
+    git: {
+      worktreeAdd: vi.fn(async () => ({ code: 0 })),
+      worktreeRemove: vi.fn(async () => ({ code: 0 })),
+      push: vi.fn(async () => ({ code: 0 })),
+      commitsAhead: vi.fn(async () => 3),
+    },
+    github: {
+      repoSlug: vi.fn(async () => "o/r"),
+      runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true })),
+      prState: vi.fn(async () => "MERGED"),
+    },
+    process: {
+      acquireLock: vi.fn(() => ({ acquired: true, heldByPid: undefined })),
+      releaseLock: vi.fn(rec("releaseLock")),
+      writeHeartbeat: vi.fn(rec("heartbeat")),
+    },
+    events: {
+      ensureEventFiles: vi.fn(rec("ensure")),
+      appendEvent: vi.fn(rec("event")),
+      upsertRun: vi.fn(rec("run")),
+      appendAlert: vi.fn(rec("alert")),
+    },
+    backlog: {
+      read: vi.fn(() => [{ id: "US-RUN-001", desc: "est_min:5", status: "📋 Todo" }]),
+    },
+    route: { resolve: vi.fn(() => ({ agent: "claude", model: "" })) },
+    budget: { check: vi.fn(() => "ok" as const) },
+    ...over,
+  };
+  return { ports, calls };
+}
+
+describe("executeCommand — command → executor mapping", () => {
+  it("create_worktree code 0 → worktree_created; non-zero → worktree_failed", async () => {
+    const ok = fakePorts();
+    const r1 = await executeCommand({ kind: "create_worktree", branch: "b" }, ok.ports, CTX);
+    expect(r1.event).toEqual({ type: "worktree_created" });
+
+    const bad = fakePorts({
+      git: { ...fakePorts().ports.git, worktreeAdd: vi.fn(async () => ({ code: 1 })) },
+    });
+    const r2 = await executeCommand({ kind: "create_worktree", branch: "b" }, bad.ports, CTX);
+    expect(r2.event).toEqual({ type: "worktree_failed" });
+  });
+
+  it("pick_story returns story_picked when a Todo exists, no_story when empty", async () => {
+    const has = fakePorts();
+    const r1 = await executeCommand({ kind: "pick_story" }, has.ports, CTX);
+    expect(r1.event).toEqual({ type: "story_picked", storyId: "US-RUN-001" });
+
+    const none = fakePorts({ backlog: { read: () => [] } });
+    const r2 = await executeCommand({ kind: "pick_story" }, none.ports, CTX);
+    expect(r2.event).toEqual({ type: "no_story" });
+  });
+
+  it("budget_check pause → budget_halt; ok → budget_ok", async () => {
+    const halt = fakePorts({ budget: { check: () => "pause_and_notify" } });
+    const r1 = await executeCommand({ kind: "budget_check", storyId: "US-RUN-001" }, halt.ports, CTX);
+    expect(r1.event?.type).toBe("budget_halt");
+
+    const ok = fakePorts();
+    const r2 = await executeCommand({ kind: "budget_check", storyId: "US-RUN-001" }, ok.ports, CTX);
+    expect(r2.event).toEqual({ type: "budget_ok" });
+  });
+
+  it("spawn_agent → agent_exited with the agent exit code", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
+  });
+
+  it("capture_facts reads commits ahead via git port", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3, usedWorktree: true } });
+  });
+
+  it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(r.event).toEqual({ type: "published", result: { status: 0 } });
+  });
+
+  it("publish_pr with no slug → gh-missing tier (status 2)", async () => {
+    const { ports } = fakePorts({
+      github: { ...fakePorts().ports.github, repoSlug: async () => undefined },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(r.event).toEqual({ type: "published", result: { status: 2, mergedBack: false, orphanPushed: false } });
+  });
+
+  it("wait_merge polls prState → merge_polled", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "wait_merge", branch: "b", elapsedSec: 30 }, ports, CTX);
+    expect(r.event).toEqual({ type: "merge_polled", state: "MERGED", elapsedSec: 30 });
+  });
+
+  it("emit_event stamps the clock ts and appends", async () => {
+    const { ports, calls } = fakePorts();
+    const ev: RollEvent = { type: "cycle:end", cycleId: CTX.cycleId, outcome: "delivered", cost: zeroCost(), ts: 0 };
+    await executeCommand({ kind: "emit_event", event: ev }, ports, CTX);
+    expect(calls["event"]?.[0]).toBeDefined();
+    const appended = (calls["event"]?.[0] as unknown[])[1] as RollEvent;
+    expect(appended.ts).toBe(42);
+  });
+
+  it("append_run upserts a v2-shaped row keyed by story+cycle", async () => {
+    const { ports, calls } = fakePorts();
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    const args = calls["run"]?.[0] as unknown[];
+    expect(args[1]).toEqual({ storyId: "US-RUN-001", cycleId: CTX.cycleId });
+    expect((args[2] as Record<string, unknown>)["status"]).toBe("done");
+  });
+
+  it("release_lock reports lockReleased", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "release_lock" }, ports, CTX);
+    expect(r.lockReleased).toBe(true);
+  });
+
+  it("cleanup_worktree calls the git remove port", async () => {
+    const { ports } = fakePorts();
+    await executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, CTX);
+    expect(ports.git.worktreeRemove).toHaveBeenCalled();
+  });
+});
+
+function zeroCost(): RollEvent extends { type: "cycle:end"; cost: infer C } ? C : never {
+  return {
+    cycleId: CTX.cycleId,
+    agent: "claude",
+    model: "",
+    tokensIn: 0,
+    tokensOut: 0,
+    estimatedCost: 0,
+    revertCount: 0,
+    effectiveCost: 0,
+  } as never;
+}
+
+// Touch a CycleCommand type so the import is load-bearing in the test file.
+const _sample: CycleCommand = { kind: "release_lock" };
+void _sample;

@@ -1,0 +1,4 @@
+/** Runner adapter barrel — the executable glue driving the pure orchestrator. */
+export * from "./agent-spawn.js";
+export * from "./executor.js";
+export * from "./run-cycle.js";

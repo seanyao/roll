@@ -4,6 +4,7 @@ import { agentListCommand } from "./agent-list.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
 import { dashboardCommand } from "./dashboard.js";
+import { loopRunOnceCommand } from "./loop-run-once.js";
 import { pricesCommand } from "./prices.js";
 import { statusCommand } from "./status.js";
 
@@ -40,9 +41,12 @@ export function registerAll(): void {
     }
     return configGetCommand(args);
   });
-  // `loop status` is TS; every other loop subcommand stays on bash.
+  // `loop status` + `loop run-once` are TS; every other loop subcommand falls
+  // back to bash. `run-once` is the v3 single-cycle runner adapter (US-LOOP-006
+  // prerequisite); --dry-run prints the command plan without executing.
   registerPorted("loop", (args) => {
     if (args[0] === "status") return dashboardCommand(args.slice(1));
+    if (args[0] === "run-once") return loopRunOnceCommand(args.slice(1));
     return fallbackToBash(["loop", ...args]).status;
   });
 }

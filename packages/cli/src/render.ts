@@ -105,3 +105,17 @@ export function sectionHead(en: string, zh: string, hint: string): string {
 export function hr(): string {
   return c("faint", "─".repeat(COLS));
 }
+
+/** Truncate to display width n with a trailing ellipsis (mirrors trunc). */
+export function trunc(s: string, n: number): string {
+  if (strw(s) <= n) return s;
+  let out = "";
+  for (const ch of s) {
+    if (strw(out) + strw(ch) + 1 > n) return out + "\u2026";
+    out += ch;
+  }
+  return out;
+}
+
+/** Raw RESET escape (exported for background-row rendering parity). */
+export const RESET_RAW = "\x1b[0m";

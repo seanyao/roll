@@ -1,6 +1,7 @@
 /** Ported-command registry — one line per migrated subcommand. */
 import { fallbackToBash, registerPorted } from "../bridge.js";
 import { agentListCommand } from "./agent-list.js";
+import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
 import { pricesCommand } from "./prices.js";
 import { statusCommand } from "./status.js";
@@ -15,6 +16,13 @@ export function registerAll(): void {
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));
     return fallbackToBash(["agent", ...args]).status;
+  });
+  // `backlog` display is TS; management subcommands (writes) stay on bash.
+  registerPorted("backlog", (args) => {
+    if (args[0] !== undefined && BACKLOG_MGMT_SUBCOMMANDS.includes(args[0])) {
+      return fallbackToBash(["backlog", ...args]).status;
+    }
+    return backlogCommand(args);
   });
   // `prices`: show/help/unknown are TS; `refresh` (network write) is bash.
   registerPorted("prices", (args) => {

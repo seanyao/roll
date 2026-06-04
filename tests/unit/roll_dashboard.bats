@@ -215,12 +215,14 @@ EOF
 
 # ─── Block ⑥ Schedules & Last Brief ─────────────────────────────────────────
 
-@test "dashboard: shows compact schedules line for three services" {
+# FIX-195: brief loop retired — the compact schedule line shows loop + dream.
+@test "dashboard: shows compact schedules line for loop and dream" {
   local out; out=$(_legacy_home)
   # US-LOOP-013: schedule uses _loop_schedule_desc (e.g. "every hour :18" or "every 30min (:00 :30)")
   echo "$out" | grep -qE "every (hour|([0-9]+min))"
   echo "$out" | grep -qE "dream[^A-Za-z0-9]+[0-9]{2}:[0-9]{2}"
-  echo "$out" | grep -qE "brief[^A-Za-z0-9]+[0-9]{2}:[0-9]{2}"
+  # brief must no longer appear as a scheduled service in the line.
+  ! echo "$out" | grep -qE "· brief[^A-Za-z0-9]+[0-9]{2}:[0-9]{2}"
 }
 
 @test "dashboard: shows latest brief age + summary line" {

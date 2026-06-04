@@ -1,8 +1,12 @@
 #!/usr/bin/env bats
-# IDEA-051 (→ US-DREAM-001): dream/brief cron logs must be project-local
-# (<project>/.roll/{dream,brief}/cron.log), mirroring loop's FIX-139 cron.log.
+# IDEA-051 (→ US-DREAM-001): the dream cron log must be project-local
+# (<project>/.roll/dream/cron.log), mirroring loop's FIX-139 cron.log.
 # Project-intrinsic run history belongs inside the project — visible to git
-# status / IDE — not buried in ~/.shared/roll/{dream,brief}/cron-<slug>.log.
+# status / IDE — not buried in ~/.shared/roll/dream/cron-<slug>.log.
+#
+# FIX-195: the brief loop was fully retired (launchd + Linux crontab + config).
+# Only loop/dream/pr remain as scheduled services; the brief assertions here
+# became guards that brief is gone.
 
 load helpers
 
@@ -18,7 +22,7 @@ setup() {
 }
 teardown() { unit_teardown; }
 
-# ── _install_launchd_plists wires dream/brief runners at project-local cron.log ─
+# ── _install_launchd_plists wires the dream runner at a project-local cron.log ──
 
 @test "_install_launchd_plists: dream runner writes to <project>/.roll/dream/cron.log" {
   run _install_launchd_plists "$PROJ"
@@ -31,25 +35,17 @@ teardown() { unit_teardown; }
   ! grep -qF "dream/cron-${slug}.log" "$runner"
 }
 
-# FIX-194: the brief loop was retired from the launchd scheduler — only the
-# dream runner is installed via _install_launchd_plists now. (The Linux crontab
-# brief path is being torn down separately.)
-
 @test "_install_launchd_plists: creates project-local dream log dir" {
   run _install_launchd_plists "$PROJ"
   [ "$status" -eq 0 ]
   [ -d "${PROJ}/.roll/dream" ]
 }
 
-# ── static guards: no shared cross-project dream/brief cron-<slug>.log remains ──
+# ── static guards: no shared cross-project dream cron-<slug>.log remains ────────
 
 @test "bin/roll: no shared dream/cron-<slug>.log redirect remains" {
   # A shared ~/.shared/roll/dream/cron-<slug>.log would re-bury project history.
   ! grep -nE 'dream/cron-\$\{?slug' "$ROLL_BIN"
-}
-
-@test "bin/roll: no shared brief/cron-<slug>.log redirect remains" {
-  ! grep -nE 'brief/cron-\$\{?slug' "$ROLL_BIN"
 }
 
 # ── Linux crontab generation also uses project-local paths ─────────────────────
@@ -58,11 +54,16 @@ teardown() { unit_teardown; }
   grep -q '>> \${project_path}/.roll/dream/cron.log 2>&1' "$ROLL_BIN"
 }
 
-@test "bin/roll: Linux brief_cmd writes to project-local .roll/brief/cron.log" {
-  grep -q '>> \${project_path}/.roll/brief/cron.log 2>&1' "$ROLL_BIN"
+@test "bin/roll: no _SHARED_ROOT dream cron-<slug>.log references remain" {
+  run grep -nE '_SHARED_ROOT}/dream/cron-' "$ROLL_BIN"
+  [ "$status" -ne 0 ] || [ -z "$output" ]
 }
 
-@test "bin/roll: no _SHARED_ROOT dream/brief cron-<slug>.log references remain" {
-  run grep -nE '_SHARED_ROOT}/dream/cron-|_SHARED_ROOT}/brief/cron-' "$ROLL_BIN"
-  [ "$status" -ne 0 ] || [ -z "$output" ]
+# ── FIX-195: brief loop fully removed from the scheduler ────────────────────────
+
+@test "FIX-195: bin/roll installs no brief cron/launchd loop" {
+  # No brief command wired into the Linux crontab generator…
+  ! grep -q 'brief_cmd=' "$ROLL_BIN"
+  # …and no brief schedule keys read for the loop.
+  ! grep -qE 'loop_brief_(hour|minute)' "$ROLL_BIN"
 }

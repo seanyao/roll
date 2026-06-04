@@ -1192,15 +1192,17 @@ def render(events, cron, state, backlog, *, days=3, lang="both", now=None,
         # would duplicate signal without adding info.
         print(eb_zh)
 
-    # US-LOOP-036: daily service (dream/brief) next-fire lines, read straight
-    # from the launchd plist so they reflect the latest `roll config <svc>-time`
-    # reload rather than a stale yaml-derived guess.
-    for _svc in ("dream", "brief"):
+    # US-LOOP-036: daily service (dream) next-fire line, read straight from the
+    # launchd plist so it reflects the latest `roll config dream-time` reload
+    # rather than a stale yaml-derived guess.
+    # FIX-194/FIX-195: brief loop retired — dream is the only daily service.
+    for _svc in ("dream",):
         _sl = _daily_schedule_line(_svc, now=now)
         if _sl:
             print("  " + c("dim", _sl))
-    # FIX-151: dedicated loop (pr/ci/alert) last-tick age
-    for _loop in ("pr", "ci", "alert"):
+    # FIX-151: dedicated loop last-tick age.
+    # FIX-194: ci/alert loops retired — pr is the only dedicated loop tick.
+    for _loop in ("pr",):
         _tl = _tick_age_line(_loop, now=now)
         if _tl:
             print("  " + c("dim", _tl))

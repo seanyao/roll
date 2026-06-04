@@ -2,6 +2,7 @@
 import { fallbackToBash, registerPorted } from "../bridge.js";
 import { agentListCommand } from "./agent-list.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
+import { pricesCommand } from "./prices.js";
 import { statusCommand } from "./status.js";
 
 let registered = false;
@@ -14,6 +15,11 @@ export function registerAll(): void {
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));
     return fallbackToBash(["agent", ...args]).status;
+  });
+  // `prices`: show/help/unknown are TS; `refresh` (network write) is bash.
+  registerPorted("prices", (args) => {
+    const r = pricesCommand(args);
+    return r ?? fallbackToBash(["prices", ...args]).status;
   });
   // `config` read surface is TS; facades and writes stay on bash.
   registerPorted("config", (args) => {

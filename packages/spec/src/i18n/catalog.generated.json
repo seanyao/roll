@@ -1,0 +1,2330 @@
+{
+ "agent.agent_set_to_for_this_project": {
+  "en": "Agent set to %s for this project",
+  "zh": "当前项目 agent 已设为 %s"
+ },
+ "agent.loop_runner_scripts_regenerated_for_new": {
+  "en": "Loop runner scripts regenerated for new agent",
+  "zh": "已为新 agent 重新生成 loop 脚本"
+ },
+ "agent.launchd_plists_installed_updated_launchagents": {
+  "en": "Launchd plists installed (%s updated)  LaunchAgents",
+  "zh": "已安装"
+ },
+ "agent.run_roll_loop_on_to_activate": {
+  "en": "  Run: roll loop on  to activate",
+  "zh": "运行 roll loop on 激活"
+ },
+ "agent.launchd_plists_up_to_date_launchagents": {
+  "en": "Launchd plists up to date  LaunchAgents",
+  "zh": "无需更新"
+ },
+ "agent.hourly_at_02d": {
+  "en": "Hourly at :%02d",
+  "zh": "每小時 :%02d"
+ },
+ "agent.every_d_min_s": {
+  "en": "Every %d min (%s)",
+  "zh": "每%d分鐘 (%s)"
+ },
+ "agent.not_found_in_path_setting_anyway": {
+  "en": "%s not found in PATH — setting anyway",
+  "zh": "未找到 %s，仍写入配置"
+ },
+ "agent.available_agents": {
+  "en": "Available agents",
+  "zh": "可用 agent"
+ },
+ "agent.view_header": {
+  "en": "Complexity routing (.roll/agents.yaml)",
+  "zh": "复杂度路由（.roll/agents.yaml）"
+ },
+ "agent.view_col_slot": {
+  "en": "SLOT",
+  "zh": "槽位"
+ },
+ "agent.view_col_agent": {
+  "en": "AGENT",
+  "zh": "AGENT"
+ },
+ "agent.view_col_status": {
+  "en": "STATUS",
+  "zh": "状态"
+ },
+ "agent.view_col_note": {
+  "en": "NOTE",
+  "zh": "备注"
+ },
+ "agent.view_slot_unset": {
+  "en": "(unset)",
+  "zh": "(未设)"
+ },
+ "agent.view_fallback_idle": {
+  "en": "idle",
+  "zh": "待命"
+ },
+ "agent.view_fallback_active": {
+  "en": "active (in use)",
+  "zh": "已启用"
+ },
+ "agent.view_recent_downgrades": {
+  "en": "Recent downgrades",
+  "zh": "近期降级"
+ },
+ "agent.view_downgrade_line": {
+  "en": "%s slot %s → ran %s",
+  "zh": "%s 档本该 %s → 实际 %s"
+ },
+ "agent.view_no_config": {
+  "en": "No .roll/agents.yaml yet — routing falls back to the first installed agent.",
+  "zh": "尚无 .roll/agents.yaml — 路由回退到首个已装 agent。"
+ },
+ "agent.view_no_config_hint": {
+  "en": "Set up routing: roll agent set <slot> <agent>  (or migrate from a legacy config)",
+  "zh": "配置路由：roll agent set <slot> <agent>（或从旧配置迁移）"
+ },
+ "agent.set_pick_slot": {
+  "en": "Pick a complexity slot to configure:",
+  "zh": "选择要配置的复杂度档："
+ },
+ "agent.set_enter_number": {
+  "en": "Enter number",
+  "zh": "输入编号"
+ },
+ "agent.set_no_input": {
+  "en": "No input received — aborting.",
+  "zh": "未收到输入 — 已取消。"
+ },
+ "agent.set_invalid_choice": {
+  "en": "Invalid choice: %s",
+  "zh": "无效选择：%s"
+ },
+ "agent.set_unknown_slot": {
+  "en": "Unknown slot '%s' (expected easy|default|hard|fallback)",
+  "zh": "未知槽位 '%s'（应为 easy|default|hard|fallback）"
+ },
+ "agent.set_unknown_agent": {
+  "en": "Unknown agent '%s' — run: roll agent list",
+  "zh": "未知 agent '%s' — 运行：roll agent list"
+ },
+ "agent.set_no_online_agents": {
+  "en": "No installed agent is online right now — nothing to pick from.",
+  "zh": "当前没有在线的已装 agent — 无可选项。"
+ },
+ "agent.set_write_failed": {
+  "en": "Could not write slot '%s' to agents.yaml",
+  "zh": "无法将槽位 '%s' 写入 agents.yaml"
+ },
+ "agent.set_saved": {
+  "en": "%s → %s  saved",
+  "zh": "%s → %s  已保存"
+ },
+ "agent.use_usage": {
+  "en": "Usage: roll agent use <name>   (locks easy/default/hard to one agent)",
+  "zh": "用法：roll agent use <name>（把 easy/default/hard 三档一次锁成同一 agent）"
+ },
+ "agent.use_unknown_agent": {
+  "en": "Unknown or uninstalled agent '%s' — run: roll agent list",
+  "zh": "未知或未安装的 agent '%s' — 运行：roll agent list"
+ },
+ "agent.use_locked": {
+  "en": "easy/default/hard all locked to %s  (fallback unchanged)",
+  "zh": "已将 easy/default/hard 三档锁为 %s（fallback 不变）"
+ },
+ "alert.no_active_alerts": {
+  "en": "No active alerts",
+  "zh": "暂无告警"
+ },
+ "alert.active_alert": {
+  "en": "%sActive Alert",
+  "zh": "当前告警%s"
+ },
+ "alert.no_active_alerts_to_acknowledge": {
+  "en": "No active alerts to acknowledge",
+  "zh": "暂无待确认告警"
+ },
+ "alert.alert_acknowledged_at": {
+  "en": "Alert acknowledged at %s",
+  "zh": "告警已确认"
+ },
+ "alert.no_active_alerts_2": {
+  "en": "No active alerts",
+  "zh": "暂无告警"
+ },
+ "alert.alert_resolved_and_cleared": {
+  "en": "Alert resolved and cleared",
+  "zh": "告警已解决并清除"
+ },
+ "alert.unknown_subcommand": {
+  "en": "Unknown subcommand: %s",
+  "zh": "未知子命令: %s"
+ },
+ "alert.run_roll_alert_ack_to_acknowledge": {
+  "en": "Run 'roll alert ack' to acknowledge alerts, 'roll alert resolve' to clear.",
+  "zh": "  运行 'roll alert ack' 确认告警，'roll alert resolve' 清除告警。"
+ },
+ "alert.usage_roll_alert_list_ack_resolve": {
+  "en": "Usage: roll alert [list|ack|resolve]",
+  "zh": "  用法: roll alert [list|ack|resolve]"
+ },
+ "backlog.roll_backlog_md_not_found_run": {
+  "en": ".roll/backlog.md not found — run 'roll init' first",
+  "zh": "未找到 .roll/backlog.md，请先运行 roll init"
+ },
+ "backlog.usage_roll_backlog_pattern_reason": {
+  "en": "Usage: roll backlog %s <pattern> [reason]",
+  "zh": "用法: roll backlog %s <匹配模式> [原因]"
+ },
+ "backlog.no_items_matched": {
+  "en": "  No items matched: %s",
+  "zh": "未找到匹配项: %s"
+ },
+ "backlog.updated_item_s": {
+  "en": "  Updated %s item(s) → %s",
+  "zh": "已更新 %s 条目"
+ },
+ "backlog.pending_backlog": {
+  "en": "  %sPending Backlog",
+  "zh": "待处理任务%s  (%s items)"
+ },
+ "backlog.bug_fixes": {
+  "en": "Bug Fixes",
+  "zh": "缺陷修复"
+ },
+ "backlog.user_stories": {
+  "en": "User Stories",
+  "zh": "用户故事"
+ },
+ "backlog.refactors": {
+  "en": "Refactors",
+  "zh": "重构"
+ },
+ "backlog.ideas": {
+  "en": "Ideas",
+  "zh": "创意"
+ },
+ "backlog.nothing_pending_backlog_is_clear": {
+  "en": "  %s✓ Nothing pending — backlog is clear",
+  "zh": "暂无待处理任务%s"
+ },
+ "backlog.blocked": {
+  "en": "  %sBlocked",
+  "zh": "已阻塞  (%s)%s"
+ },
+ "backlog.deferred": {
+  "en": "  %sDeferred",
+  "zh": "已推迟  (%s)%s"
+ },
+ "backlog.unknown_status": {
+  "en": "  %s? Unknown Status",
+  "zh": "未知状态  (%s)%s"
+ },
+ "backlog.fix_roll_backlog_block_defer_unblock": {
+  "en": "  %s  Fix: roll backlog block/defer/unblock <pattern>",
+  "zh": "运行命令修正状态%s"
+ },
+ "backlog.ai": {
+  "en": "  %s╔══ 🤖 AI",
+  "zh": "自治 — 三层 × 四道防线 ══════════════════════════╗%s"
+ },
+ "backlog.": {
+  "en": "  %s─",
+  "zh": "四道防线 ─%s"
+ },
+ "backlog.4_dod_see_us_auto_030": {
+  "en": "    %s",
+  "zh": "其余 4 项 DoD 信号源待接入：see US-AUTO-030/031, IDEA-013/014%s\\n"
+ },
+ "backlog.n": {
+  "en": "  %s👤",
+  "zh": "需要你介入%s\\n"
+ },
+ "backlog.ai_2": {
+  "en": "    %s✓ AI",
+  "zh": "自驱中 — 无需介入%s\\n"
+ },
+ "backlog.setup_f_machine_first_time_install": {
+  "en": "  setup [-f]             [Machine] First-time install or re-sync",
+  "zh": "首次安装或重新同步"
+ },
+ "backlog.update_upgrade_npm_install_latest_re": {
+  "en": "  update                 [Upgrade] npm install latest + re-sync",
+  "zh": "一键升级到最新版"
+ },
+ "backlog.init_project_create_agents_md_roll": {
+  "en": "  init                   [Project] Create AGENTS.md + .roll/backlog.md + .roll/features/",
+  "zh": "初始化项目工作流文件"
+ },
+ "backlog.offboard_confirm_project_reverse_a_previous": {
+  "en": "  offboard [--confirm]   [Project] Reverse a previous `roll init --apply` (dry-run by default)",
+  "zh": "卸载本项目的 Roll 痕迹"
+ },
+ "backlog.status_diagnostic_show_current_state": {
+  "en": "  status                 [Diagnostic] Show current state",
+  "zh": "显示当前状态"
+ },
+ "backlog.peer_peer_review_cross_agent_negotiation": {
+  "en": "  peer                   [Peer Review] Cross-agent negotiation",
+  "zh": "跨 Agent 协商对审"
+ },
+ "backlog.loop_on_off_now_status_monitor": {
+  "en": "  loop <on|off|now|status|monitor|resume|reset>  [Autonomous] Manage scheduled BACKLOG executor",
+  "zh": "管理自主执行循环"
+ },
+ "backlog.brief_digest_show_latest_owner_brief": {
+  "en": "  brief                  [Digest] Show latest owner brief (regenerate if stale)",
+  "zh": "展示最新简报"
+ },
+ "backlog.backlog_view_show_pending_tasks_todo": {
+  "en": "  backlog                [View] Show pending tasks (Todo/Blocked/Deferred/Unknown)",
+  "zh": "显示任务清单"
+ },
+ "backlog.backlog_block_pat_reason_mark_matching": {
+  "en": "  backlog block <pat> [reason]  Mark matching items as 🔒 Blocked",
+  "zh": "标记为已阻塞"
+ },
+ "backlog.backlog_defer_pat_reason_mark_matching": {
+  "en": "  backlog defer <pat> [reason]  Mark matching items as ⏸ Deferred",
+  "zh": "标记为已推迟"
+ },
+ "backlog.backlog_unblock_pat_restore_matching_items": {
+  "en": "  backlog unblock <pat>         Restore matching items to 📋 Todo",
+  "zh": "恢复为待处理"
+ },
+ "backlog.backlog_unstick_dry_run_revert_in": {
+  "en": "  backlog unstick [--dry-run]   Revert In Progress whose cycle failed >4h ago",
+  "zh": "自愈卡住的进行中任务"
+ },
+ "backlog.backlog_lint_check_descriptions_for_path": {
+  "en": "  backlog lint                  Check descriptions for path/function/filename violations",
+  "zh": "检查描述合规"
+ },
+ "backlog.agent_use_name_list_config_per": {
+  "en": "  agent [use <name>|list]   [Config] Per-project agent selection",
+  "zh": "切换项目 agent"
+ },
+ "backlog.ci_wait_ci_show_or_wait": {
+  "en": "  ci [--wait]            [CI] Show or wait for current commit's CI status",
+  "zh": "查看/等待 CI 状态"
+ },
+ "backlog.review_pr_number_pr_review_ai": {
+  "en": "  review-pr <number>     [PR Review] AI-powered code review for a PR           AI",
+  "zh": "代码评审"
+ },
+ "backlog.examples": {
+  "en": "Examples /",
+  "zh": "示例:"
+ },
+ "backlog.roll_setup_new_machine_first_time": {
+  "en": "  roll setup                    # New machine: first-time install",
+  "zh": "新机器首次安装"
+ },
+ "backlog.roll_update_upgrade_to_latest_version": {
+  "en": "  roll update                   # Upgrade to latest version + re-sync",
+  "zh": "升级到最新版并重新同步"
+ },
+ "backlog.roll_init_new_or_re_merge": {
+  "en": "  roll init                     # New or re-merge project (run in project)",
+  "zh": "新建或重新合并（项目目录）"
+ },
+ "backlog.roll_loop_on_enable_autonomous_loop": {
+  "en": "  roll loop on                  # Enable autonomous loop (cron)",
+  "zh": "启用自主执行循环"
+ },
+ "backlog.roll_brief_show_latest_brief": {
+  "en": "  roll brief                    # Show latest brief",
+  "zh": "查看最新简报"
+ },
+ "backlog.roll_backlog_show_pending_blocked_deferred": {
+  "en": "  roll backlog                  # Show pending/blocked/deferred items",
+  "zh": "查看待处理任务"
+ },
+ "backlog.roll_backlog_defer_us_doc": {
+  "en": "  roll backlog defer US-DOC '",
+  "zh": "过早引入'  # Defer all US-DOC-* items          推迟一类任务"
+ },
+ "backlog.roll_backlog_block_us_hw_001": {
+  "en": "  roll backlog block US-HW-001 '",
+  "zh": "硬件未到货'  # Block a specific item        标记阻塞"
+ },
+ "backlog.roll_agent_use_kimi_switch_this": {
+  "en": "  roll agent use kimi           # Switch this project to kimi",
+  "zh": "切换当前项目到 kimi"
+ },
+ "backlog.usage_roll_command_options": {
+  "en": "Usage:  roll <command> [options]",
+  "zh": "用法:  roll <command> [options]"
+ },
+ "brief.no_brief_yet_generating": {
+  "en": "No brief yet — generating...",
+  "zh": "暂无简报，正在生成..."
+ },
+ "brief.brief_is_age_3600_h_old": {
+  "en": "Brief is %sh old — regenerating...",
+  "zh": "简报已 %s 小时未更新，重新生成..."
+ },
+ "changelog.unknown_subcommand": {
+  "en": "Unknown subcommand: %s",
+  "zh": "未知子命令：%s"
+ },
+ "changelog.generate_help": {
+  "en": "Generate draft ## Unreleased entries from backlog ✅ Done stories",
+  "zh": "从 backlog 已完成的 Story 生成 ## Unreleased 草稿"
+ },
+ "ci.usage_roll_ci_wait_timeout_n": {
+  "en": "Usage: roll ci [--wait] [--timeout=N]",
+  "zh": "用法: roll ci [--wait] [--timeout=N]"
+ },
+ "ci.gh_not_installed_gh": {
+  "en": "gh not installed  gh",
+  "zh": "未安装"
+ },
+ "ci.not_a_git_repo": {
+  "en": "Not a git repo",
+  "zh": "非 git 仓库"
+ },
+ "ci.no_ci_runs_for_git_rev": {
+  "en": "No CI runs for %s",
+  "zh": "%s 无 CI 记录"
+ },
+ "ci.gate_enabled_exiting_1": {
+  "en": "  %s violations — --gate enabled, exiting 1",
+  "zh": "  %s 条违规 — --gate enabled, exiting 1"
+ },
+ "ci.phase_1_warn_only_not_blocking": {
+  "en": "  %s violations — Phase 1: warn-only, not blocking",
+  "zh": "  %s 条违规 — Phase 1: warn-only, not blocking"
+ },
+ "ci.no_violations": {
+  "en": "  No violations",
+  "zh": "无违规"
+ },
+ "consistency.usage": {
+  "en": "roll consistency check [--json] [--project-dir DIR]",
+  "zh": "roll consistency check [--json] [--project-dir DIR]"
+ },
+ "consistency.unknown_sub": {
+  "en": "Unknown consistency subcommand: %s",
+  "zh": "未知的一致性子命令: %s"
+ },
+ "doctor.stale_plists": {
+  "en": "Stale launchd plists",
+  "zh": "无效的 launchd 服务"
+ },
+ "doctor.stale_plists_cleanup": {
+  "en": "Path is stale, clean up with",
+  "zh": "路径已失效，可清理"
+ },
+ "doctor.pr_review_extras": {
+  "en": "PR review extras",
+  "zh": "PR 评审两档开关"
+ },
+ "doctor.pr_double_gate_enabled": {
+  "en": "✅ AI review double gate enabled",
+  "zh": "✅ AI 评审双门已启用"
+ },
+ "doctor.pr_double_gate_disabled": {
+  "en": "⚪ AI review double gate not enabled",
+  "zh": "⚪ 双门未启用"
+ },
+ "doctor.pr_double_gate_unknown": {
+  "en": "⚪ AI review double gate state unknown — requires gh auth",
+  "zh": "⚪ 状态未知（需要 gh auth）"
+ },
+ "doctor.pr_event_enabled": {
+  "en": "✅ Event-driven PR review installed",
+  "zh": "✅ 事件驱动 PR 评审已安装"
+ },
+ "doctor.pr_event_disabled": {
+  "en": "⚪ Event-driven PR review not installed",
+  "zh": "⚪ 事件驱动 PR 评审未安装"
+ },
+ "doctor.pr_event_optional": {
+  "en": "Optional — enable event-driven PR review (seconds-fast, GitHub only).",
+  "zh": "可选 —— 启用事件驱动 PR 评审（秒级响应，仅限 GitHub）。"
+ },
+ "doctor.pr_event_without": {
+  "en": "Without this, Roll reviews PRs each loop cycle (~1h). With it,",
+  "zh": "不安装也行 — loop 每轮会兜底评审。安装后"
+ },
+ "doctor.pr_event_without_zh": {
+  "en": "contributors get AI feedback on PR open/update immediately.",
+  "zh": "PR 一开即触发 AI 评审。"
+ },
+ "doctor.pr_event_secret": {
+  "en": "Then set the API key secret for your configured agent in GitHub repo settings.",
+  "zh": "然后在 GitHub 仓库设置中添加你配置的 agent 对应的 API key secret。"
+ },
+ "doctor.agent_detection": {
+  "en": "Agent detection",
+  "zh": "Agent 检测"
+ },
+ "doctor.agent_installed": {
+  "en": "CLI on PATH",
+  "zh": "CLI 可用"
+ },
+ "doctor.agent_missing": {
+  "en": "CLI not found",
+  "zh": "CLI 未安装"
+ },
+ "doctor.agent_dir_exists": {
+  "en": "config dir exists",
+  "zh": "配置目录存在"
+ },
+ "doctor.agent_dir_missing": {
+  "en": "config dir missing",
+  "zh": "配置目录不存在"
+ },
+ "doctor.agent_primary_label": {
+  "en": "primary",
+  "zh": "默认"
+ },
+ "init.onboard_cancelled": {
+  "en": "Onboard cancelled (Ctrl-C).",
+  "zh": "Onboard 已取消（Ctrl-C）。"
+ },
+ "init.onboard_agent_exited": {
+  "en": "Agent '%s' exited with code %s.",
+  "zh": "agent '%s' 异常退出 (code %s)。"
+ },
+ "init.onboard_next_step": {
+  "en": "Next step  下一步:",
+  "zh": "下一步  Next step:"
+ },
+ "init.onboard_retry": {
+  "en": "retry the same agent:   roll init",
+  "zh": "再试一次同一个 agent:  roll init"
+ },
+ "init.onboard_retry_en": {
+  "en": "retry the same agent:   roll init",
+  "zh": "retry the same agent:   roll init"
+ },
+ "init.onboard_switch": {
+  "en": "switch to another:      ROLL_ONBOARD_AGENT=<name> roll init",
+  "zh": "换一个 agent:           ROLL_ONBOARD_AGENT=<name> roll init"
+ },
+ "init.onboard_switch_en": {
+  "en": "switch to another:      ROLL_ONBOARD_AGENT=<name> roll init",
+  "zh": "switch to another:      ROLL_ONBOARD_AGENT=<name> roll init"
+ },
+ "init.no_templates_found_run_roll_setup": {
+  "en": "No templates found. Run 'roll setup' first.",
+  "zh": "未找到模板，请先运行 'roll setup'。"
+ },
+ "init.unknown_flag_1": {
+  "en": "Unknown flag: %s",
+  "zh": "未知参数: %s"
+ },
+ "init.no_templates_found_run_roll_setup_2": {
+  "en": "No templates found. Run 'roll setup' first.",
+  "zh": "未找到模板，请先运行 'roll setup'。"
+ },
+ "init.detected_legacy_project": {
+  "en": "Detected: legacy project (%s)",
+  "zh": "检测到遗留项目"
+ },
+ "init.onboarding": {
+  "en": "  Onboarding",
+  "zh": "需要一个 AI agent 来读懂这个项目。检测到："
+ },
+ "init.launching": {
+  "en": "Launching %s…",
+  "zh": "正在启动 %s…"
+ },
+ "init.no_input_received_aborting_onboard": {
+  "en": "No input received. Aborting onboard.",
+  "zh": "未收到输入，已取消 onboard。"
+ },
+ "init.invalid_choice": {
+  "en": "Invalid choice: '%s'.",
+  "zh": "无效选择。"
+ },
+ "init.agent_has_no_interactive_mode_wired": {
+  "en": "Agent '%s' has no interactive mode wired up.  agent '%s'",
+  "zh": "暂未接入 interactive 模式。"
+ },
+ "init.agent": {
+  "en": "agent",
+  "zh": "正常退出但未生成 .roll/onboard-plan.yaml。"
+ },
+ "init.plan_written_running_apply": {
+  "en": "Plan written. Running apply…",
+  "zh": "已写入 plan，正在执行 apply…"
+ },
+ "init.no_onboard_plan_found_at_roll": {
+  "en": "No onboard plan found at .roll/onboard-plan.yaml",
+  "zh": "未找到 onboard 计划。"
+ },
+ "init.plan_validator_missing": {
+  "en": "Plan validator missing: %s",
+  "zh": "校验器缺失。"
+ },
+ "init.plan_validation_failed_see_errors_above": {
+  "en": "Plan validation failed. See errors above.  Plan",
+  "zh": "校验失败。"
+ },
+ "init.applying_onboard_plan": {
+  "en": "Applying onboard plan...",
+  "zh": "正在应用 onboard 计划..."
+ },
+ "init.added_roll_to_gitignore": {
+  "en": "Added .roll/ to .gitignore",
+  "zh": "已将 .roll/ 加入 .gitignore"
+ },
+ "init.syncing_conventions_to_ai_tools": {
+  "en": "Syncing conventions to AI tools...",
+  "zh": "正在同步约定到 AI 工具..."
+ },
+ "init.onboard_apply_complete_onboard": {
+  "en": "Onboard apply complete.  Onboard",
+  "zh": "应用完成。"
+ },
+ "init.onboard_rendered": {
+  "en": "Rendered: %s",
+  "zh": "已生成：%s"
+ },
+ "init.onboard_render_failed": {
+  "en": "Could not render analysis markdown (skipping); onboard continues.",
+  "zh": "分析 markdown 生成失败（已跳过），onboard 继续。"
+ },
+ "init.onboard_seed_preview_story": {
+  "en": "About to seed %s candidate stories to BACKLOG:",
+  "zh": "准备向 BACKLOG 播种 %s 条候选 story："
+ },
+ "init.onboard_seed_preview_fix": {
+  "en": "About to seed %s HIGH-severity risks as FIX entries:",
+  "zh": "准备将 %s 条高严重度风险播种为 FIX 条目："
+ },
+ "init.onboard_seed_prompt": {
+  "en": "Seed these to BACKLOG?",
+  "zh": "把这些播种到 BACKLOG 吗？"
+ },
+ "init.onboard_seed_cancelled": {
+  "en": "Seeding cancelled. The analysis markdown was still generated.",
+  "zh": "已取消播种。分析 markdown 仍已生成。"
+ },
+ "init.onboard_seed_noninteractive": {
+  "en": "Non-interactive stdin — skipping BACKLOG seeding (markdown still generated).",
+  "zh": "stdin 非交互 —— 跳过 BACKLOG 播种（markdown 仍已生成）。"
+ },
+ "init.onboard_seeded_stories": {
+  "en": "Seeded %s candidate stories to BACKLOG.",
+  "zh": "已向 BACKLOG 播种 %s 条候选 story。"
+ },
+ "init.onboard_seeded_fixes": {
+  "en": "Seeded %s candidate FIX entries to BACKLOG.",
+  "zh": "已向 BACKLOG 播种 %s 条候选 FIX。"
+ },
+ "init.onboard_seed_no_backlog": {
+  "en": "No .roll/backlog.md (backlog scope not approved) — skipping seeding.",
+  "zh": "无 .roll/backlog.md（未批准 backlog scope）—— 跳过播种。"
+ },
+ "init.no_ai_agent_detected_install_one": {
+  "en": "No AI agent detected. Install one (e.g., claude, codex, kimi) and try again.",
+  "zh": "未检测到 AI agent。请先安装 (如 claude / codex / kimi) 后重试。"
+ },
+ "init.the_process_will_use_your_agent": {
+  "en": "The process will use your agent to call models. Token cost is on your own account.",
+  "zh": "  后续过程会使用你的 agent 调用模型，token 消耗在你自己的账户上。"
+ },
+ "init.code_and_conversations_stay_in_your": {
+  "en": "Code and conversations stay in your agent tool — Roll does not upload anything.",
+  "zh": "  代码与对话都留在你的 agent 工具里 —— Roll 本身不上传任何内容。"
+ },
+ "init.use_exit_to_end_or_ctrl": {
+  "en": "Use /exit to end (or Ctrl-C). Roll will auto-apply after exit.",
+  "zh": "  在 agent 内用 /exit 结束（或 Ctrl-C）。退出后 Roll 会自动衔接 apply。"
+ },
+ "init.pick_an_agent": {
+  "en": "Pick an agent:",
+  "zh": "  选一个 agent  Pick an agent:"
+ },
+ "init.en_roll_init": {
+  "en": "[EN:  对话完成后再次运行 `roll init` 即可。...]",
+  "zh": "  对话完成后再次运行 `roll init` 即可。"
+ },
+ "init.en_ai_agent_onboard_plan_ap": {
+  "en": "[EN:  请先在 AI agent 里运行 \\%s-onboard 生成 plan，再回来执行 ap...]",
+  "zh": "  请先在 AI agent 里运行 \\%s-onboard 生成 plan，再回来执行 apply。"
+ },
+ "lang.language_set_to": {
+  "en": "Language set to %s",
+  "zh": "语言已设置为 %s"
+ },
+ "lang.language_preference_cleared_will_follow_locale": {
+  "en": "Language preference cleared (will follow locale)",
+  "zh": "语言偏好已清除（跟随系统 locale）"
+ },
+ "lang.unknown_language": {
+  "en": "Unknown language: %s",
+  "zh": "未知语言: %s"
+ },
+ "lang.options_zh_en_reset": {
+  "en": "Options: zh, en, --reset",
+  "zh": "  可选值: zh, en, --reset"
+ },
+ "loop.loop_already_enabled_for_this_project": {
+  "en": "Loop already enabled for this project",
+  "zh": "当前项目 loop 已启用"
+ },
+ "loop.loop_enabled": {
+  "en": "Loop enabled",
+  "zh": "已启用"
+ },
+ "loop.roll_loop_s_active_02d_00": {
+  "en": "  • roll-loop   %s  active %02d:00–%02d:00  %s（窗口 %02d:00–%02d:00）",
+  "zh": "  • roll-loop   %s  有效窗口 %02d:00–%02d:00  %s（active %02d:00–%02d:00）"
+ },
+ "loop.roll_dream_daily_at_02d_02d": {
+  "en": "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d",
+  "zh": "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d"
+ },
+ "loop.loop_already_enabled_for_this_project_2": {
+  "en": "Loop already enabled for this project",
+  "zh": "当前项目 loop 已启用"
+ },
+ "loop.loop_enabled_2": {
+  "en": "Loop enabled",
+  "zh": "已启用"
+ },
+ "loop.roll_loop_s_active_02d_00_2": {
+  "en": "  • roll-loop   %s  active %02d:00–%02d:00  %s（窗口 %02d:00–%02d:00）",
+  "zh": "  • roll-loop   %s  有效窗口 %02d:00–%02d:00  %s（active %02d:00–%02d:00）"
+ },
+ "loop.roll_dream_daily_at_02d_02d_2": {
+  "en": "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d",
+  "zh": "  • roll-.dream daily at %02d:%02d  每天 %02d:%02d"
+ },
+ "loop.loop_not_enabled_for_this_project": {
+  "en": "Loop not enabled for this project",
+  "zh": "当前项目 loop 未启用"
+ },
+ "loop.loop_disabled": {
+  "en": "Loop disabled",
+  "zh": "已停用"
+ },
+ "loop.loop_not_enabled_for_this_project_2": {
+  "en": "Loop not enabled for this project",
+  "zh": "当前项目 loop 未启用"
+ },
+ "loop.loop_disabled_2": {
+  "en": "Loop disabled",
+  "zh": "已停用"
+ },
+ "loop.loop_already_running_loop": {
+  "en": "Loop already running  loop",
+  "zh": "正在运行中"
+ },
+ "loop.stale_running_state_detected_healing_before": {
+  "en": "Stale running state detected — healing before new cycle",
+  "zh": "检测到孤儿状态，正在修复..."
+ },
+ "loop.starting_new_loop_cycle": {
+  "en": "Starting new loop cycle...",
+  "zh": "正在启动新的循环..."
+ },
+ "loop.generating_test_runner_agent": {
+  "en": "Generating test runner (agent: %s)...",
+  "zh": "正在生成测试启动脚本 (agent: %s)..."
+ },
+ "loop.starting_smoke_test_agent": {
+  "en": "Starting smoke test (agent: %s)...",
+  "zh": "正在运行 smoke 测试 (agent: %s)..."
+ },
+ "loop.smoke_test_passed_s_agent_smoke": {
+  "en": "Smoke test passed (%ss, agent: %s)  smoke",
+  "zh": "测试通过 (%s秒, agent: %s)"
+ },
+ "loop.smoke_test_failed_exit_s_agent": {
+  "en": "Smoke test failed (exit %s, %ss, agent: %s)  smoke",
+  "zh": "测试失败 (退出码 %s, %ss, agent: %s)"
+ },
+ "loop.loop_not_enabled_nothing_to_pause": {
+  "en": "Loop not enabled — nothing to pause  loop",
+  "zh": "未启用，无需暂停"
+ },
+ "loop.loop_paused": {
+  "en": "Loop paused",
+  "zh": "已暂停   run: roll loop resume"
+ },
+ "loop.loop_resumed": {
+  "en": "Loop resumed",
+  "zh": "已恢复"
+ },
+ "loop.no_loop_state_found_nothing_to": {
+  "en": "No loop state found — nothing to resume",
+  "zh": "未找到 loop 状态，无需恢复"
+ },
+ "loop.loop_already_running_loop_2": {
+  "en": "Loop already running  loop",
+  "zh": "正在运行中"
+ },
+ "loop.resuming_loop_from_last_state": {
+  "en": "Resuming loop from last state...",
+  "zh": "正在从上次状态恢复..."
+ },
+ "loop.loop_state_cleared_will_start_fresh": {
+  "en": "Loop state cleared — will start fresh on next run  loop",
+  "zh": "状态已清除，下次运行将重新开始"
+ },
+ "loop.no_loop_state_to_clear": {
+  "en": "No loop state to clear",
+  "zh": "无 loop 状态可清除"
+ },
+ "loop.muted_auto_attach_disabled": {
+  "en": "🔇 muted — auto-attach disabled",
+  "zh": "已静音，自动弹窗已关闭"
+ },
+ "loop.unmuted_auto_attach_live": {
+  "en": "🔔 unmuted — auto-attach live",
+  "zh": "已恢复，自动弹窗已开启"
+ },
+ "loop.tmux_not_installed_install_with_brew": {
+  "en": "tmux not installed — install with 'brew install tmux'",
+  "zh": "请先安装 tmux"
+ },
+ "loop.no_running_loop_session_for_this": {
+  "en": "No running loop session for this project",
+  "zh": "当前项目无运行中的 loop"
+ },
+ "loop.no_runs_jsonl_yet": {
+  "en": "No runs.jsonl yet",
+  "zh": "尚无运行记录"
+ },
+ "loop.cycle_not_found": {
+  "en": "Cycle not found: %s",
+  "zh": "未找到对应 cycle"
+ },
+ "loop.cycle_has_no_phases_data_pre": {
+  "en": "Cycle %s has no phases data (pre-US-LOOP-008)",
+  "zh": "无 phase 数据"
+ },
+ "loop.no_loop_runs_yet": {
+  "en": "No loop runs yet",
+  "zh": "尚无 loop 运行记录"
+ },
+ "loop.jq_required_for_roll_loop_runs": {
+  "en": "jq required for 'roll loop runs'",
+  "zh": "需要 jq"
+ },
+ "loop.no_loop_runs_for_current_project": {
+  "en": "No loop runs for current project",
+  "zh": "当前项目尚无 loop 运行记录"
+ },
+ "loop.no_cycle_logs_found_run_roll": {
+  "en": "No cycle logs found — run 'roll loop now' first",
+  "zh": "尚无 cycle 日志 — 请先运行 'roll loop now'"
+ },
+ "loop.no_cycle_logs_found_run_roll_2": {
+  "en": "No cycle logs found — run 'roll loop now' first",
+  "zh": "尚无 cycle 日志 — 请先运行 'roll loop now'"
+ },
+ "loop.no_cycle_log_matching": {
+  "en": "No cycle log matching '%s'",
+  "zh": "未找到匹配 '%s' 的 cycle 日志"
+ },
+ "loop.ambiguous_prefix_matches_logs": {
+  "en": "Ambiguous prefix '%s' — matches %s logs:",
+  "zh": "前缀 '%s' 匹配多个日志:"
+ },
+ "loop.gh_not_installed_skipping_ci_gate": {
+  "en": "gh not installed — skipping CI gate  gh",
+  "zh": "未安装，跳过 CI 检查"
+ },
+ "loop.not_a_git_repo": {
+  "en": "Not a git repo",
+  "zh": "非 git 仓库"
+ },
+ "loop.cannot_determine_github_repo_from_origin": {
+  "en": "Cannot determine GitHub repo from origin remote",
+  "zh": "无法从 origin 推导 GitHub 仓库"
+ },
+ "loop.waiting_for_ci_on": {
+  "en": "Waiting for CI on %s (%s)",
+  "zh": "等待 CI: %s"
+ },
+ "loop.gh_run_list_failed_for_gh": {
+  "en": "gh run list failed for %s@%s: %s  gh",
+  "zh": "调用失败"
+ },
+ "loop.no_open_pr_for_ci_not": {
+  "en": "No open PR for %s — CI not triggered; skipping CI gate",
+  "zh": "当前分支无 PR，CI 未触发，跳过"
+ },
+ "loop.no_ci_runs_found_yet_waiting": {
+  "en": "  No CI runs found yet, waiting...",
+  "zh": "尚无 CI 记录，等待触发..."
+ },
+ "loop.ci_running_ds_ci": {
+  "en": "  ⏳ CI running (%ds)...  CI",
+  "zh": "运行中（%ds）...\\n"
+ },
+ "loop.ci_failed_for_ci": {
+  "en": "CI failed for %s  CI",
+  "zh": "失败: %s"
+ },
+ "loop.ci_passed_ci": {
+  "en": "CI passed  CI",
+  "zh": "通过"
+ },
+ "loop.ci_timed_out_after_s_ci": {
+  "en": "CI timed out after %ss  CI",
+  "zh": "等待超时（%ss）"
+ },
+ "loop.pre_run_ci_check_head_ci": {
+  "en": "Pre-run CI check: HEAD CI is red — refuse to build on broken base (%s)  HEAD CI",
+  "zh": "红，拒绝在破损的基础上构建"
+ },
+ "loop.services": {
+  "en": "  %sServices",
+  "zh": "服务状态%s   Agent: %s%s%s"
+ },
+ "loop.queue": {
+  "en": "  %sQueue",
+  "zh": "待处理队列%s"
+ },
+ "loop.log_tail": {
+  "en": "  %sLog Tail",
+  "zh": "实时日志%s  (~/.shared/roll/loop/launchd.log, last 10 lines)"
+ },
+ "loop.cycle_events": {
+  "en": "  %sCycle Events",
+  "zh": "事件流%s  (last 10)"
+ },
+ "loop.svc_enabled": {
+  "en": "● enabled",
+  "zh": "● 已启用"
+ },
+ "loop.svc_installed_off": {
+  "en": "⚠ installed/off",
+  "zh": "⚠ 已安装未启用"
+ },
+ "loop.svc_not_installed": {
+  "en": "○ not installed",
+  "zh": "○ 未安装"
+ },
+ "loop.svc_enabled_run": {
+  "en": "run: roll loop on",
+  "zh": "运行: roll loop on"
+ },
+ "loop.svc_not_installed_run": {
+  "en": "run: roll setup",
+  "zh": "运行: roll setup"
+ },
+ "loop.observing_tmux_session_terminal_popup_stream": {
+  "en": "Observing: tmux session + terminal popup + stream-json event stream",
+  "zh": "观察：tmux 会话 + 终端弹窗 + stream-json 事件流"
+ },
+ "loop.pre_run_ci_red_base": {
+  "en": "HEAD CI is red — loop refused to build on a broken base",
+  "zh": "HEAD CI 红，loop 拒绝在破损的基础上构建"
+ },
+ "loop.ci_did_not_pass_story_kept_in_progress": {
+  "en": "CI did not pass — story kept as 🔨 In Progress",
+  "zh": "CI 未通过，故事保持进行中"
+ },
+ "loop.pr_rebased_within_24h_no_ci": {
+  "en": "PR #%s rebased %s× within 24h without CI resolution — possible workflow file error",
+  "zh": "PR #%s rebase %s 次未解决（24h 内），可能是 workflow 文件错误"
+ },
+ "migrate.unknown_arg_1": {
+  "en": "Unknown arg: %s",
+  "zh": "未知参数: %s"
+ },
+ "migrate.not_a_git_repository_roll_migrate": {
+  "en": "Not a git repository. roll migrate requires git.",
+  "zh": "当前目录不是 git 仓库。"
+ },
+ "migrate.both_old_and_new_structures_exist": {
+  "en": "Both old and new structures exist (partial migration detected).",
+  "zh": "老结构与新结构同时存在（部分迁移）。"
+ },
+ "migrate.conflicting_paths": {
+  "en": "Conflicting paths:",
+  "zh": "冲突路径："
+ },
+ "migrate.resolve_manually_then_re_run": {
+  "en": "Resolve manually then re-run.",
+  "zh": "请手动解决冲突后重新运行。"
+ },
+ "migrate.already_migrated_roll_exists_no_old": {
+  "en": "Already migrated. .roll/ exists, no old paths found.",
+  "zh": "已迁移，无需重复操作。"
+ },
+ "migrate.no_old_structure_detected_nothing_to": {
+  "en": "No old structure detected. Nothing to migrate.",
+  "zh": "未发现老结构，无需迁移。"
+ },
+ "migrate.old_structure_markers_found_but_no": {
+  "en": "Old structure markers found but no migratable files.",
+  "zh": "未找到可迁移文件。"
+ },
+ "migrate.working_tree_not_clean_commit_or": {
+  "en": "Working tree not clean. Commit or stash changes before running migrate.",
+  "zh": "工作区有未提交改动，请先 commit 或 stash。"
+ },
+ "migrate.migration_preview_dry_run": {
+  "en": "Migration preview (dry-run):",
+  "zh": "迁移预览（dry-run）"
+ },
+ "migrate.run_without_dry_run_to_execute": {
+  "en": "Run without --dry-run to execute.",
+  "zh": "去掉 --dry-run 即可真实执行。"
+ },
+ "migrate.migrating_paths_via_git_mv": {
+  "en": "Migrating %s paths via git mv...",
+  "zh": "正在通过 git mv 迁移 %s 个路径..."
+ },
+ "migrate.aborting_previous_moves_are_staged_but": {
+  "en": "Aborting; previous moves are staged but not committed. Run 'git reset --hard' to undo.",
+  "zh": "已 stage 但未 commit，运行 'git reset --hard' 回滚。"
+ },
+ "migrate.migrated_paths_in_a_single_commit": {
+  "en": "Migrated %s paths in a single commit.",
+  "zh": "已在单 commit 中迁移 %s 个路径。"
+ },
+ "migrate.next_steps": {
+  "en": "  Next steps",
+  "zh": "下一步："
+ },
+ "migrate.summary": {
+  "en": "  ┌─",
+  "zh": "操作摘要 Summary ──────────────────────────────────┐"
+ },
+ "migrate.roll_convention_status_roll": {
+  "en": "%sRoll Convention Status  Roll",
+  "zh": "约定状态%s"
+ },
+ "migrate.roll_exists_roll": {
+  "en": "~/.roll/ exists  ~/.roll/",
+  "zh": "已存在"
+ },
+ "migrate.roll_not_found_run_roll_setup": {
+  "en": "~/.roll/ not found — run 'roll setup'  ~/.roll/",
+  "zh": "不存在 — 请运行 'roll setup'"
+ },
+ "migrate.global_conventions": {
+  "en": "%sGlobal conventions:",
+  "zh": "全局约定%s"
+ },
+ "migrate.missing": {
+  "en": "  %s-%s %s (missing /",
+  "zh": "缺失)"
+ },
+ "migrate.global_skills": {
+  "en": "%sGlobal skills:",
+  "zh": "全局技能%s"
+ },
+ "migrate.roll_skills_skills_installed": {
+  "en": "  %s+%s ~/.roll/skills (%s skills installed /",
+  "zh": "已安装 %s 个技能)"
+ },
+ "migrate.roll_skills_missing": {
+  "en": "  %s-%s ~/.roll/skills (missing /",
+  "zh": "缺失)"
+ },
+ "migrate.sync_targets": {
+  "en": "%sSync targets:",
+  "zh": "同步目标%s"
+ },
+ "migrate.no_ai_tools_configured_check_roll": {
+  "en": "No AI tools configured — check ~/.roll/config.yaml",
+  "zh": "未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
+ },
+ "migrate.add_ai_entries_or_run_roll": {
+  "en": "Add ai_* entries or run 'roll setup' to restore defaults.",
+  "zh": "添加 ai_* 条目或运行 'roll setup' 恢复默认配置。"
+ },
+ "migrate.skill_symlinks": {
+  "en": "%sSkill symlinks:",
+  "zh": "技能软链接%s"
+ },
+ "migrate.roll_skills_mounted": {
+  "en": "  %s=%s %s: %s -> ~/.roll/skills (mounted /",
+  "zh": "已挂载)"
+ },
+ "migrate.no_roll_skills_linked": {
+  "en": "  %s-%s %s: %s (no roll-* skills linked /",
+  "zh": "未链接 roll-* 技能)"
+ },
+ "migrate.not_found": {
+  "en": "  %s-%s %s: %s (not found /",
+  "zh": "未找到)"
+ },
+ "migrate.no_ai_tools_configured_check_roll_2": {
+  "en": "No AI tools configured — check ~/.roll/config.yaml",
+  "zh": "未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
+ },
+ "migrate.templates": {
+  "en": "%sTemplates:",
+  "zh": "模板%s"
+ },
+ "migrate.missing_2": {
+  "en": "  %s-%s %s (missing /",
+  "zh": "缺失)"
+ },
+ "migrate.old_path": {
+  "en": "Old path",
+  "zh": "老路径"
+ },
+ "migrate.new_path": {
+  "en": "New path",
+  "zh": "新路径"
+ },
+ "offboard.no_changeset_en": {
+  "en": "No onboard changeset found at .roll/onboard-changeset.yaml",
+  "zh": "No onboard changeset found at .roll/onboard-changeset.yaml"
+ },
+ "offboard.no_changeset_zh": {
+  "en": "未找到 onboard 变更清单 .roll/onboard-changeset.yaml",
+  "zh": "未找到 onboard 变更清单 .roll/onboard-changeset.yaml"
+ },
+ "offboard.manual_offboard": {
+  "en": "Manual offboard — remove these by hand if they came from Roll:",
+  "zh": "手动清理——如果这些文件来自 Roll，请手动删除:"
+ },
+ "offboard.manual_rm_roll": {
+  "en": "rm -rf .roll/                  # all process artefacts",
+  "zh": "rm -rf .roll/                  # 所有过程文件"
+ },
+ "offboard.manual_rm_agents": {
+  "en": "rm -f AGENTS.md CLAUDE.md      # only if they were generated by roll init",
+  "zh": "rm -f AGENTS.md CLAUDE.md      # 仅当这些文件由 roll init 生成"
+ },
+ "offboard.manual_edit_gitignore": {
+  "en": "Edit .gitignore to remove any '.roll/' entry",
+  "zh": "编辑 .gitignore 移除 '.roll/' 条目"
+ },
+ "offboard.unknown_flag": {
+  "en": "Unknown flag: %s",
+  "zh": "未知参数"
+ },
+ "offboard.failed_to_parse_changeset": {
+  "en": "Failed to parse changeset",
+  "zh": "解析变更清单失败"
+ },
+ "offboard.applying_offboard": {
+  "en": "  Applying offboard...",
+  "zh": "执行 offboard..."
+ },
+ "offboard.offboard_complete_offboard": {
+  "en": "Offboard complete.  Offboard",
+  "zh": "完成。"
+ },
+ "offboard.en": {
+  "en": "[EN:拒绝处理 '%s' — 路径不在当前项目下，可能是误用...]",
+  "zh": "拒绝处理 '%s' — 路径不在当前项目下，可能是误用"
+ },
+ "offboard.change_list_is_empty_nothing_to": {
+  "en": "Change list is empty, nothing to offboard.",
+  "zh": "变更清单为空，无需 offboard。"
+ },
+ "offboard.above_is_a_dry_run_preview": {
+  "en": "Above is a dry-run preview. Add --confirm to execute.",
+  "zh": "  以上为预演结果。加 --confirm 后才会真正执行。"
+ },
+ "peer.unknown_option_1": {
+  "en": "Unknown option: %s",
+  "zh": "未知选项: %s"
+ },
+ "peer.from_is_required": {
+  "en": "--from is required.",
+  "zh": "必须指定 --from。"
+ },
+ "peer.no_available_peer_found_for_tag": {
+  "en": "No available peer found for tag '%s'.",
+  "zh": "未找到 tag '%s' 的可用 peer。"
+ },
+ "peer.auto_selected_peer": {
+  "en": "Auto-selected peer: %s",
+  "zh": "自动选择 peer: %s"
+ },
+ "peer.peer_pair_is_abandoned_run_roll": {
+  "en": "Peer pair %s is abandoned. Run 'roll peer reset %s %s' to restore.  Peer",
+  "zh": "对 %s 已废弃。运行 'roll peer reset %s %s' 恢复。"
+ },
+ "peer.peer_review_aborted_by_user": {
+  "en": "Peer review aborted by user.",
+  "zh": "用户取消 peer review。"
+ },
+ "peer.calling": {
+  "en": "Calling %s...",
+  "zh": "调用 %s..."
+ },
+ "peer.peer_stderr_peer": {
+  "en": "%sPeer stderr  Peer",
+  "zh": "标准错误:%s"
+ },
+ "peer.could_not_parse_resolution_from_peer": {
+  "en": "Could not parse resolution from peer response.",
+  "zh": "无法解析 peer 响应中的决议状态。"
+ },
+ "peer.peer_review_result_peer_review": {
+  "en": "%sPeer Review Result  Peer Review",
+  "zh": "结果%s"
+ },
+ "peer.consensus_reached_proceed_with_execution": {
+  "en": "Consensus reached. Proceed with execution.",
+  "zh": "达成共识，继续执行。"
+ },
+ "peer.max_rounds_reached_escalating_to_user": {
+  "en": "Max rounds reached. Escalating to user.",
+  "zh": "达到最大轮数，升级给用户。"
+ },
+ "peer.peer_requests_continue_to_round_round": {
+  "en": "Peer requests %s. Continue to round %s.",
+  "zh": "请求 %s，继续第 %s 轮。"
+ },
+ "peer.peer_review_escalated_or_failed_human": {
+  "en": "Peer review escalated or failed. Human decision required.  Peer review",
+  "zh": "升级或失败，需要人类决策。"
+ },
+ "peer.en_peer_review": {
+  "en": "[EN:启动 peer review: %s → %s (第 %s 轮,...]",
+  "zh": "启动 peer review: %s → %s (第 %s 轮, tag: %s)"
+ },
+ "peer.en_enter_n": {
+  "en": "[EN:按 Enter 执行或输入 n 取消。%s 秒后自动执行......]",
+  "zh": "按 Enter 执行或输入 n 取消。%s 秒后自动执行..."
+ },
+ "peer.no_peer_runs_yet": {
+  "en": "No peer review runs yet.",
+  "zh": "还没有 peer review 记录。"
+ },
+ "peer.no_peer_logs_found": {
+  "en": "No peer logs found.",
+  "zh": "还没有 peer 日志。"
+ },
+ "peer.jq_required_for_roll_peer_runs": {
+  "en": "jq is required for 'roll peer runs'.",
+  "zh": "'roll peer runs' 需要安装 jq。"
+ },
+ "peer_help.usage_roll_peer_options": {
+  "en": "Usage: roll peer [options]",
+  "zh": "用法: roll peer [选项]"
+ },
+ "peer_help.from_tool_originating_agent_kimi_claude": {
+  "en": "  --from <tool>       Originating agent (kimi, claude, pi)",
+  "zh": "发起方"
+ },
+ "peer_help.to_tool_target_peer_auto_detected": {
+  "en": "  --to <tool>         Target peer (auto-detected if omitted)",
+  "zh": "对端 peer（省略则自动选择）"
+ },
+ "peer_help.round_n_current_round_default_1": {
+  "en": "  --round <N>         Current round (default: 1)",
+  "zh": "当前轮数"
+ },
+ "peer_help.tag_type_task_type_for_routing": {
+  "en": "  --tag <type>        Task type for routing (architecture, security, test...)",
+  "zh": "任务类型"
+ },
+ "peer_help.context_file_context_file_to_send": {
+  "en": "  --context <file>    Context file to send to peer",
+  "zh": "上下文文件"
+ },
+ "peer_help.yes_yolo_skip_opt_out_prompt": {
+  "en": "  --yes, --yolo       Skip opt-out prompt",
+  "zh": "跳过确认提示"
+ },
+ "peer_help.status_show_peer_review_state": {
+  "en": "  status              Show peer review state",
+  "zh": "显示状态"
+ },
+ "peer_help.log_show_latest_peer_transcript": {
+  "en": "  log                 Show latest peer review transcript",
+  "zh": "查看最新 peer 日志"
+ },
+ "peer_help.runs_show_recent_peer_review_runs": {
+  "en": "  runs [N]            Show recent peer review runs",
+  "zh": "查看最近 peer review 记录"
+ },
+ "peer_help.reset_pair_all_reset_peer_state": {
+  "en": "  reset <pair|--all>  Reset peer state",
+  "zh": "重置状态"
+ },
+ "peer_help.help_show_this_help": {
+  "en": "  help                Show this help",
+  "zh": "显示帮助"
+ },
+ "peer_reset.all_peer_states_reset": {
+  "en": "All peer states reset.",
+  "zh": "所有 peer 状态已重置。"
+ },
+ "peer_reset.usage_roll_peer_reset_from_to": {
+  "en": "Usage: roll peer reset <from>→<to> | --all",
+  "zh": "用法: roll peer reset <from>→<to> | --all"
+ },
+ "peer_reset.peer_state_reset_peer": {
+  "en": "Peer state reset: %s  Peer",
+  "zh": "状态已重置: %s"
+ },
+ "peer_status.peer_review_status_peer_review": {
+  "en": "%sPeer Review Status  Peer Review",
+  "zh": "状态%s"
+ },
+ "peer_status.no_peer_review_history_yet": {
+  "en": "No peer review history yet.",
+  "zh": "暂无 peer review 记录。"
+ },
+ "prices.unknown_subcommand": {
+  "en": "Unknown subcommand: %s",
+  "zh": "未知子命令：%s"
+ },
+ "prices_refresh.unknown_flag_1": {
+  "en": "Unknown flag: %s",
+  "zh": "未知参数: %s"
+ },
+ "prices_refresh.roll_unknown_vendor_vendor": {
+  "en": "[roll] unknown vendor: {vendor}",
+  "zh": "未知厂商"
+ },
+ "prices_refresh.roll_known_vendors_join_sorted_vendor": {
+  "en": "[roll] known vendors: {', '.join(sorted(VENDOR_URLS))}",
+  "zh": "已知厂商"
+ },
+ "prices_refresh.roll_keeping_existing_snapshot_no_changes": {
+  "en": "[roll] keeping existing snapshot, no changes written",
+  "zh": "保留旧快照，未写入新文件"
+ },
+ "prices_refresh.roll_keeping_existing_snapshot_no_changes_2": {
+  "en": "[roll] keeping existing snapshot, no changes written",
+  "zh": "保留旧快照，未写入新文件"
+ },
+ "prices_refresh.roll_up_to_date": {
+  "en": "[roll] up to date",
+  "zh": "价格快照已是最新"
+ },
+ "prices_refresh.roll_baseline_snapshot_written": {
+  "en": "[roll] baseline snapshot written",
+  "zh": "写入首份基线快照"
+ },
+ "prices_refresh.roll_new_snapshot_written": {
+  "en": "[roll] new snapshot written",
+  "zh": "写入新版价格快照"
+ },
+ "prices_show.price_snapshot": {
+  "en": "price snapshot",
+  "zh": "价格快照"
+ },
+ "prices_show.snapshots_len_mp_snapshots_loaded": {
+  "en": "  snapshots      {len(mp._SNAPSHOTS)} loaded",
+  "zh": "已加载"
+ },
+ "prices_show.rates_per_million_tokens": {
+  "en": "rates per million tokens",
+  "zh": "每百万 token 单价"
+ },
+ "setup.unknown_argument_1": {
+  "en": "Unknown argument: %s",
+  "zh": "未知参数: %s"
+ },
+ "update.available": {
+  "en": "v%s available — run 'roll update' to upgrade",
+  "zh": "有新版本 v%s — 运行 'roll update' 升级"
+ },
+ "changelog.heading": {
+  "en": "Recent Changes",
+  "zh": "最近更新"
+ },
+ "migrate.tips.inspect": {
+  "en": "Inspect the migration commit",
+  "zh": "查看迁移提交"
+ },
+ "migrate.tips.verify": {
+  "en": "Verify new structure",
+  "zh": "验证新结构"
+ },
+ "peer.help.from": {
+  "en": "Originating agent",
+  "zh": "发起方"
+ },
+ "peer.help.to": {
+  "en": "Target peer (auto-detected if omitted)",
+  "zh": "对端 peer（省略则自动选择）"
+ },
+ "peer.help.round": {
+  "en": "Current round (default: 1)",
+  "zh": "当前轮数"
+ },
+ "peer.help.tag": {
+  "en": "Task type for routing (architecture, security, test...)",
+  "zh": "任务类型"
+ },
+ "peer.help.context": {
+  "en": "Context file to send to peer",
+  "zh": "上下文文件"
+ },
+ "peer.help.yes": {
+  "en": "Skip opt-out prompt",
+  "zh": "跳过确认提示"
+ },
+ "peer.help.status_cmd": {
+  "en": "Show peer review state",
+  "zh": "显示状态"
+ },
+ "agent.use_hint": {
+  "en": "roll agent use <name>   — switch agent for this project",
+  "zh": "roll agent use <name>   — 切换此项目的 agent"
+ },
+ "agent.list_hint": {
+  "en": "roll agent list         — show installed agents",
+  "zh": "roll agent list         — 查看已安装的 agent"
+ },
+ "doctor.stale_plists_path": {
+  "en": "Path no longer valid, clean up with:",
+  "zh": "路径已失效，可清理:"
+ },
+ "check_structure.detected": {
+  "en": "Legacy structure detected at: %s",
+  "zh": "发现老结构目录: %s"
+ },
+ "check_structure.pre_2_0_layout": {
+  "en": "This project uses the pre-2.0 layout (BACKLOG.md / docs/*). Roll 2.0 requires",
+  "zh": "此项目使用 2.0 之前的老结构 (BACKLOG.md / docs/*)。Roll 2.0 要求"
+ },
+ "check_structure.run_migration": {
+  "en": "process artifacts to live in .roll/. Run the migration to upgrade:",
+  "zh": "过程文件放在 .roll/ 下。运行迁移命令升级:"
+ },
+ "check_structure.preview_changes": {
+  "en": "# Preview changes",
+  "zh": "# 预览变更"
+ },
+ "check_structure.execute": {
+  "en": "# Execute (single atomic commit)",
+  "zh": "# 执行（单次原子提交）"
+ },
+ "check_structure.migration_guide": {
+  "en": "Migration guide",
+  "zh": "迁移指南"
+ },
+ "check_structure.roll_back": {
+  "en": "To roll back to Roll 1.x temporarily",
+  "zh": "如需临时回退到 Roll 1.x"
+ },
+ "main.unknown_command": {
+  "en": "Unknown command: %s",
+  "zh": "未知命令: %s"
+ },
+ "dashboard.pending": {
+  "en": "pending",
+  "zh": "待办"
+ },
+ "shared.added_missing_config_entry": {
+  "en": "Added missing config entry: %s",
+  "zh": "已添加缺失配置项: %s"
+ },
+ "shared.config_updated_with_new_entries": {
+  "en": "Config updated with %s new entries",
+  "zh": "配置已更新，新增 %s 条目"
+ },
+ "shared.wrote": {
+  "en": "Wrote: %s",
+  "zh": "已写入: %s"
+ },
+ "shared.file_exists_and_differs": {
+  "en": "File exists and differs: %s",
+  "zh": "文件已存在且内容不同: %s"
+ },
+ "shared.skipped": {
+  "en": "Skipped: %s",
+  "zh": "已跳过: %s"
+ },
+ "shared.wrote_2": {
+  "en": "Wrote: %s",
+  "zh": "已写入: %s"
+ },
+ "shared.removed_stale": {
+  "en": "Removed stale %s: %s/%s",
+  "zh": "已删除过时%s: %s/%s"
+ },
+ "shared.skills_source_not_found_at_skills": {
+  "en": "Skills source not found at: %s/skills",
+  "zh": "技能源目录未找到: %s/skills"
+ },
+ "shared.removed_stale_skill": {
+  "en": "Removed stale skill: %s",
+  "zh": "已删除过时技能: %s"
+ },
+ "shared.convention_source_not_found_at": {
+  "en": "Convention source not found at: %s",
+  "zh": "约定源文件未找到: %s"
+ },
+ "shared.copying_global_conventions": {
+  "en": "Copying global conventions...",
+  "zh": "正在复制全局约定..."
+ },
+ "shared.copying_project_templates": {
+  "en": "Copying project templates...",
+  "zh": "正在复制项目模板..."
+ },
+ "shared.convention_source_not_found_at_2": {
+  "en": "Convention source not found at: %s",
+  "zh": "约定源文件未找到: %s"
+ },
+ "shared.run_this_from_the_roll_repo": {
+  "en": "Run this from the roll repo, or symlink bin/roll to PATH.",
+  "zh": "请在 roll 仓库目录下运行，或将 bin/roll 软链接到 PATH。"
+ },
+ "shared.config_has_no_ai_entries_recreating": {
+  "en": "Config has no ai_* entries — recreating with defaults (backup saved)",
+  "zh": "配置无 ai_* 条目，将重建（已备份）"
+ },
+ "shared.backup_saved_roll_config_yaml_bak": {
+  "en": "Backup saved: ~/.roll/config.yaml.bak",
+  "zh": "备份已保存: ~/.roll/config.yaml.bak"
+ },
+ "shared.creating_default_config": {
+  "en": "Creating default config...",
+  "zh": "正在创建默认配置..."
+ },
+ "shared.created_roll_config_yaml": {
+  "en": "Created: ~/.roll/config.yaml",
+  "zh": "已创建: ~/.roll/config.yaml"
+ },
+ "shared.skipped_resolves_to_repo_refusing_to": {
+  "en": "Skipped ~/%s (resolves to repo — refusing to manage skills inside roll worktree)",
+  "zh": "已跳过 ~/%s（解析到仓库目录 — 拒绝在 roll worktree 内管理技能）"
+ },
+ "shared.removing_legacy_symlink_skills": {
+  "en": "Removing legacy symlink ~/%s/skills -> %s",
+  "zh": "正在移除遗留软链接 ~/%s/skills -> %s"
+ },
+ "shared.skipped_skills_unknown_symlink_target": {
+  "en": "Skipped ~/%s/skills -> %s (unknown symlink target)",
+  "zh": "已跳过 ~/%s/skills -> %s（未知软链接目标）"
+ },
+ "shared.skipped_skills_created_path_resolves_to": {
+  "en": "Skipped ~/%s/skills (created path resolves to repo — refusing to write)",
+  "zh": "已跳过 ~/%s/skills（创建路径解析到仓库 — 拒绝写入）"
+ },
+ "shared.skills_linked_in_skills_new_repaired": {
+  "en": "Skills linked in ~/%s/skills (+%s new, ~%s repaired, -%s pruned)",
+  "zh": "已在 ~/%s/skills 中创建软链接（新增 +%s，修复 ~%s，清理 -%s）"
+ },
+ "shared.wrote_3": {
+  "en": "Wrote: %s",
+  "zh": "已写入: %s"
+ },
+ "shared.created": {
+  "en": "Created: %s",
+  "zh": "已创建: %s"
+ },
+ "shared.appended_roll_md_to": {
+  "en": "Appended @roll.md to: %s",
+  "zh": "已将 @roll.md 追加至: %s"
+ },
+ "shared.already_included": {
+  "en": "Already included: %s",
+  "zh": "已包含: %s"
+ },
+ "shared.updating_skills": {
+  "en": "Updating skills...",
+  "zh": "正在更新技能..."
+ },
+ "shared.skills_updated_in_roll_skills": {
+  "en": "Skills updated in ~/.roll/skills",
+  "zh": "技能已更新至 ~/.roll/skills"
+ },
+ "shared.creating_skill_symlinks_for_ai_tools": {
+  "en": "Creating skill symlinks for AI tools...",
+  "zh": "正在为 AI 工具创建技能软链接..."
+ },
+ "shared.tmux_not_found_installing_via_brew": {
+  "en": "tmux not found — installing via brew...",
+  "zh": "未安装 tmux，正在通过 brew 安装..."
+ },
+ "shared.tmux_installed_tmux": {
+  "en": "tmux installed.  tmux",
+  "zh": "已安装。"
+ },
+ "shared.brew_install_tmux_failed_install_manually": {
+  "en": "brew install tmux failed — install manually: brew install tmux  brew",
+  "zh": "安装失败，请手动 'brew install tmux'"
+ },
+ "shared.tmux_required_but_brew_not_available": {
+  "en": "tmux required but brew not available — install manually: brew install tmux",
+  "zh": "缺少 brew，请手动 'brew install tmux'"
+ },
+ "shared.tmux_required_install_via_your_package": {
+  "en": "tmux required — install via your package manager (e.g. apt install tmux / pacman -S tmux)",
+  "zh": "请用系统包管理器安装 tmux"
+ },
+ "shared.skipped_resolves_to_repo": {
+  "en": "Skipped ~/%s/skills (resolves to repo — check if ~/%s symlinks to roll repo)",
+  "zh": "已跳过 ~/%s/skills（解析到仓库 — 检查 ~/%s 是否软链接到 roll 仓库）"
+ },
+ "skills.generated": {
+  "en": "Generated skill catalog: %s",
+  "zh": "已生成技能清单：%s"
+ },
+ "skills.check_ok": {
+  "en": "Skill catalog is up to date.",
+  "zh": "技能清单已是最新。"
+ },
+ "skills.check_drift": {
+  "en": "Skill catalog drift: %s differs from a fresh scan. Run 'roll skills generate'.",
+  "zh": "技能清单漂移：%s 与最新扫描不一致。请运行 'roll skills generate'。"
+ },
+ "skills.check_missing": {
+  "en": "Skill catalog not found at %s. Run 'roll skills generate'.",
+  "zh": "未找到技能清单 %s。请运行 'roll skills generate'。"
+ },
+ "skills.unknown_sub": {
+  "en": "Unknown 'roll skills' subcommand: %s",
+  "zh": "未知的 'roll skills' 子命令：%s"
+ },
+ "skills.usage": {
+  "en": "Usage: roll skills <generate|check>",
+  "zh": "用法：roll skills <generate|check>"
+ },
+ "skills.doctor_heading": {
+  "en": "Skill catalog",
+  "zh": "技能清单"
+ },
+ "skills.doctor_ok": {
+  "en": "✅ guide/skills.md matches skills/*/SKILL.md",
+  "zh": "✅ guide/skills.md 与 skills/*/SKILL.md 一致"
+ },
+ "skills.doctor_drift": {
+  "en": "⚠️  guide/skills.md is stale — run 'roll skills generate'",
+  "zh": "⚠️  guide/skills.md 已过期 — 请运行 'roll skills generate'"
+ },
+ "slides.unknown_subcommand": {
+  "en": "Unknown subcommand: %s",
+  "zh": "未知子命令：%s"
+ },
+ "slides_build.unknown_option_1": {
+  "en": "Unknown option: %s",
+  "zh": "未知选项: %s"
+ },
+ "slides_build.unexpected_argument_1": {
+  "en": "Unexpected argument: %s",
+  "zh": "多余参数: %s"
+ },
+ "slides_build.slides_toolchain_missing_re_run_roll": {
+  "en": "Slides toolchain missing — re-run 'roll setup'",
+  "zh": "渲染工具缺失，请运行 roll setup"
+ },
+ "slides_build.deck_md": {
+  "en": "  deck.md",
+  "zh": "校验失败，请先修复上方提示再重试。"
+ },
+ "slides_build.template_not_found": {
+  "en": "Template not found: %s",
+  "zh": "未找到模板：%s"
+ },
+ "slides_build.render_failed_for": {
+  "en": "Render failed for %s",
+  "zh": "渲染失败：%s"
+ },
+ "slides_build.rendered": {
+  "en": "Rendered → %s",
+  "zh": "渲染完成 → %s"
+ },
+ "slides_build.validation_failed_for": {
+  "en": "Validation failed for %s",
+  "zh": "校验失败：%s"
+ },
+ "slides_build.hint_fix_and_rerun": {
+  "en": "Hint: fix the issues above in %s and re-run 'roll slides build %s'",
+  "zh": "提示：请按上方提示修复 %s，然后重新运行 'roll slides build %s'"
+ },
+ "slides_build.available_templates": {
+  "en": "Available templates:",
+  "zh": "可用模板："
+ },
+ "slides_build.templates_list_hint": {
+  "en": "Hint: 'roll slides templates' lists all installed templates",
+  "zh": "提示：'roll slides templates' 列出所有已安装模板"
+ },
+ "slides_build.renderer_crashed_for": {
+  "en": "Renderer crashed for %s",
+  "zh": "渲染器崩溃：%s"
+ },
+ "slides_build.see_full_error_logs": {
+  "en": "See full error: roll slides logs %s",
+  "zh": "查看完整错误：roll slides logs %s"
+ },
+ "slides_build.last_5_lines_of_renderer_output": {
+  "en": "Last 5 lines of renderer output:",
+  "zh": "渲染器最后 5 行："
+ },
+ "slides_build.usage_roll_slides_build_slug_no": {
+  "en": "Usage: roll slides build <slug> [--no-open]",
+  "zh": "用法: roll slides build <slug> [--no-open]"
+ },
+ "slides_build.en_deck": {
+  "en": "[EN:  未找到 deck 文件：%s...]",
+  "zh": "  未找到 deck 文件：%s"
+ },
+ "slides_build.en_roll_slides_new": {
+  "en": "[EN:  提示：先运行 'roll slides new \"<主题>\"' 生成新的幻灯片。...]",
+  "zh": "  提示：先运行 'roll slides new \"<主题>\"' 生成新的幻灯片。"
+ },
+ "slides_delete.unknown_option_1": {
+  "en": "Unknown option: %s",
+  "zh": "未知选项: %s"
+ },
+ "slides_delete.unexpected_argument_1": {
+  "en": "Unexpected argument: %s",
+  "zh": "多余参数: %s"
+ },
+ "slides_delete.deck_not_found": {
+  "en": "Deck not found: %s",
+  "zh": "未找到幻灯片：%s"
+ },
+ "slides_delete.non_interactive_terminal_must_use_force": {
+  "en": "Non-interactive terminal: must use --force to delete",
+  "zh": "非交互终端：需使用 --force 参数"
+ },
+ "slides_delete.cancelled": {
+  "en": "Cancelled",
+  "zh": "已取消"
+ },
+ "slides_delete.deleted": {
+  "en": "Deleted %s",
+  "zh": "已删除 %s"
+ },
+ "slides_delete.usage_roll_slides_delete_slug_force": {
+  "en": "Usage: roll slides delete <slug> [--force]",
+  "zh": "用法: roll slides delete <slug> [--force]"
+ },
+ "slides_delete.prompt": {
+  "en": "Delete deck \"%s\"? (y/N)",
+  "zh": "删除幻灯片 \"%s\"？(y/N)"
+ },
+ "slides_list.unknown_option_1": {
+  "en": "Unknown option: %s",
+  "zh": "未知选项: %s"
+ },
+ "slides_list.unexpected_argument_1": {
+  "en": "Unexpected argument: %s",
+  "zh": "多余参数: %s"
+ },
+ "slides_list.no_decks_found_under_roll_slides": {
+  "en": "No decks found under .roll/slides/",
+  "zh": "无幻灯片"
+ },
+ "slides_list.no_decks_found_under_roll_slides_2": {
+  "en": "No decks found under .roll/slides/",
+  "zh": "无幻灯片"
+ },
+ "slides_list.en_roll_slides_new": {
+  "en": "[EN:  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。...]",
+  "zh": "  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。"
+ },
+ "slides_list.en_roll_slides_new_2": {
+  "en": "[EN:  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。...]",
+  "zh": "  提示：运行 'roll slides new \"<主题>\"' 创建第一个幻灯片。"
+ },
+ "slides_logs.unknown_option_1": {
+  "en": "Unknown option: %s",
+  "zh": "未知选项: %s"
+ },
+ "slides_logs.unexpected_argument_1": {
+  "en": "Unexpected argument: %s",
+  "zh": "多余参数: %s"
+ },
+ "slides_logs.deck_not_found": {
+  "en": "Deck not found: %s",
+  "zh": "未找到幻灯片：%s"
+ },
+ "slides_logs.no_failure_records_for": {
+  "en": "No failure records for %s",
+  "zh": "该幻灯片没有失败记录"
+ },
+ "slides_logs.usage_roll_slides_logs_slug": {
+  "en": "Usage: roll slides logs <slug>",
+  "zh": "用法: roll slides logs <slug>"
+ },
+ "slides_new.unknown_option_1": {
+  "en": "Unknown option: %s",
+  "zh": "未知选项: %s"
+ },
+ "slides_new.unexpected_argument_1": {
+  "en": "Unexpected argument: %s",
+  "zh": "多余参数: %s"
+ },
+ "slides_new.en_roll_slides_new_template": {
+  "en": "[EN:  用法：roll slides new \"<主题>\" [--template <模板名>] [...]",
+  "zh": "  用法：roll slides new \"<主题>\" [--template <模板名>] [--quiet] [--no-build]"
+ },
+ "slides_new.en_slug": {
+  "en": "[EN:  无法从主题派生 slug：%s...]",
+  "zh": "  无法从主题派生 slug：%s"
+ },
+ "slides_new.en_roll_slides_build": {
+  "en": "[EN:下一步：roll slides build %s...]",
+  "zh": "下一步：roll slides build %s"
+ },
+ "slides_new.template_requires_value": {
+  "en": "--template requires a value",
+  "zh": "--template 需要一个值"
+ },
+ "slides_preview.unknown_option_1": {
+  "en": "Unknown option: %s",
+  "zh": "未知选项: %s"
+ },
+ "slides_preview.unexpected_argument_1": {
+  "en": "Unexpected argument: %s",
+  "zh": "多余参数: %s"
+ },
+ "slides_preview.preview": {
+  "en": "Preview → %s",
+  "zh": "打开预览 → %s"
+ },
+ "slides_preview.usage_roll_slides_preview_slug_no": {
+  "en": "Usage: roll slides preview <slug> [--no-open]",
+  "zh": "用法: roll slides preview <slug> [--no-open]"
+ },
+ "slides_preview.en_html": {
+  "en": "[EN:  未找到已渲染的 HTML：%s...]",
+  "zh": "  未找到已渲染的 HTML：%s"
+ },
+ "slides_preview.en_roll_slides_build": {
+  "en": "[EN:  提示：先运行 'roll slides build %s' 渲染幻灯片。...]",
+  "zh": "  提示：先运行 'roll slides build %s' 渲染幻灯片。"
+ },
+ "slides_templates.unknown_option_1": {
+  "en": "Unknown option: %s",
+  "zh": "未知选项: %s"
+ },
+ "slides_templates.unexpected_argument_1": {
+  "en": "Unexpected argument: %s",
+  "zh": "多余参数: %s"
+ },
+ "slides_templates.no_templates_found": {
+  "en": "No templates found",
+  "zh": "无可用模板"
+ },
+ "status.loop_overview": {
+  "en": "%sLoop Overview:",
+  "zh": "所有项目 loop 状态%s"
+ },
+ "status.not_synced": {
+  "en": "  %s-%s %s: %s (not synced /",
+  "zh": "未同步)"
+ },
+ "status.out_of_sync_roll_md_missing": {
+  "en": "  %s~%s %s: %s (out of sync — roll.md missing / roll.md",
+  "zh": "缺失)"
+ },
+ "status.out_of_sync_roll_md_outdated": {
+  "en": "  %s~%s %s: %s (out of sync — roll.md outdated / roll.md",
+  "zh": "已过期)"
+ },
+ "status.out_of_sync_roll_md_not": {
+  "en": "  %s~%s %s: %s (out of sync — @roll.md not in config /",
+  "zh": "未包含 @roll.md)"
+ },
+ "status.in_sync": {
+  "en": "  %s=%s %s: %s (in sync /",
+  "zh": "已同步)"
+ },
+ "status.peer_call_timeout_s_peer": {
+  "en": "Peer call timeout: %ss  Peer",
+  "zh": "调用超时: %ss"
+ },
+ "status.peer_call_timeout_killed": {
+  "en": "Peer %s killed after %ss wall-clock budget (FIX-150c)",
+  "zh": "Peer %s 超过 %ss 上限,已强制终止 (FIX-150c)"
+ },
+ "status.unsupported_peer": {
+  "en": "Unsupported peer: %s",
+  "zh": "不支持的 peer: %s"
+ },
+ "status.unsupported_peer_2": {
+  "en": "Unsupported peer: %s",
+  "zh": "不支持的 peer: %s"
+ },
+ "update.version_mismatch": {
+  "en": "Version mismatch: installed %s, expected %s — CDN propagation lag, clearing cache and retrying...",
+  "zh": "版本不一致（已安装 %s，期望 %s），疑似 CDN 未同步，清理缓存后重试..."
+ },
+ "update.still_mismatch": {
+  "en": "Still on %s after retry — registry may not have propagated yet, try again in a minute.",
+  "zh": "重试后仍为 %s，注册表可能尚未同步，请稍后再试。"
+ },
+ "update.current_version": {
+  "en": "Current version: roll v%s",
+  "zh": "当前版本: roll v%s"
+ },
+ "update.upgrading_via_npm": {
+  "en": "Upgrading via npm...",
+  "zh": "正在通过 npm 升级..."
+ },
+ "update.upgrading_via_curl": {
+  "en": "Upgrading via curl...",
+  "zh": "正在通过 curl 升级..."
+ },
+ "update.npm_install_failed_check_network_proxy": {
+  "en": "npm install failed. Check network/proxy and try again.",
+  "zh": "安装失败，请检查网络/代理后重试。"
+ },
+ "update.curl_download_failed": {
+  "en": "Download failed. Check network/proxy and try again.",
+  "zh": "下载失败，请检查网络/代理后重试。"
+ },
+ "update.curl_extract_failed": {
+  "en": "Extraction failed. The downloaded archive may be corrupted.",
+  "zh": "解压失败，下载的归档可能已损坏。"
+ },
+ "update.new_version": {
+  "en": "Upgraded to roll v%s",
+  "zh": "已升级到 roll v%s"
+ },
+ "update.re_syncing_to_ai_tools": {
+  "en": "Re-syncing to AI tools...",
+  "zh": "正在重新同步到 AI 工具..."
+ },
+ "brief.title": {
+  "en": "Roll Brief — %s",
+  "zh": "Roll 简报 — %s"
+ },
+ "brief.summary": {
+  "en": "Summary",
+  "zh": "摘要"
+ },
+ "brief.completed": {
+  "en": "Completed: %s",
+  "zh": "已完成: %s"
+ },
+ "brief.in_progress": {
+  "en": "In Progress: %s",
+  "zh": "进行中: %s"
+ },
+ "brief.backlog_queue": {
+  "en": "Backlog Queue: %s pending",
+  "zh": "Backlog 队列: %s 个待办"
+ },
+ "brief.requires_attention": {
+  "en": "Requires Attention",
+  "zh": "需要关注"
+ },
+ "brief.release_readiness": {
+  "en": "Release Readiness",
+  "zh": "发版就绪"
+ },
+ "brief.ready": {
+  "en": "Ready to release",
+  "zh": "可以发版"
+ },
+ "brief.not_ready": {
+  "en": "Not ready — %s blockers",
+  "zh": "暂不可发版 — %s 个阻塞项"
+ },
+ "brief.section_completed": {
+  "en": "Completed (%s items)",
+  "zh": "已完成（%s 项）"
+ },
+ "brief.section_in_progress": {
+  "en": "In Progress",
+  "zh": "进行中"
+ },
+ "brief.section_queue": {
+  "en": "Pending Queue (%s items)",
+  "zh": "待处理队列（%s 项）"
+ },
+ "brief.section_insights": {
+  "en": "Insights from Dream",
+  "zh": "悟见"
+ },
+ "brief.section_escalations": {
+  "en": "Requires Human Attention",
+  "zh": "需人工介入"
+ },
+ "brief.section_doc_coverage": {
+  "en": "Documentation Coverage",
+  "zh": "文档覆盖度"
+ },
+ "brief.section_release": {
+  "en": "Release Readiness",
+  "zh": "发版就绪"
+ },
+ "brief.generated": {
+  "en": "Brief generated: %s",
+  "zh": "简报已生成：%s"
+ },
+ "brief.release_ready_status": {
+  "en": "Ready to release",
+  "zh": "可发版"
+ },
+ "brief.release_hold_status": {
+  "en": "Hold — %s",
+  "zh": "暂缓 — %s"
+ },
+ "build.clarified_goal": {
+  "en": "Clarified Goal",
+  "zh": "目标澄清"
+ },
+ "build.complexity_assessment": {
+  "en": "Complexity Assessment",
+  "zh": "复杂度评估"
+ },
+ "build.uncertainty_areas": {
+  "en": "Uncertainty Areas",
+  "zh": "不确定性"
+ },
+ "build.approach_confirmation": {
+  "en": "Approach Confirmation",
+  "zh": "方案确认"
+ },
+ "build.what_changes": {
+  "en": "What changes",
+  "zh": "变更内容"
+ },
+ "build.the_approach": {
+  "en": "The approach",
+  "zh": "方案"
+ },
+ "build.files_touched": {
+  "en": "Files touched",
+  "zh": "涉及文件"
+ },
+ "build.parallel_dispatch": {
+  "en": "Parallel Dispatch: %s Actions running in parallel",
+  "zh": "并行分发: %s 个 Action 并行执行"
+ },
+ "build.agent_running": {
+  "en": "Agent %s [Action: %s]  ⏳ Running...",
+  "zh": "Agent %s [Action: %s]  ⏳ 运行中..."
+ },
+ "build.agent_done": {
+  "en": "Agent %s [Action: %s]  ✅ Done (%s TCR commits)",
+  "zh": "Agent %s [Action: %s]  ✅ 完成 (%s 个 TCR 提交)"
+ },
+ "build.merge_summary": {
+  "en": "Merge: %s/%s succeeded, merging...",
+  "zh": "合并: %s/%s 成功，正在合并..."
+ },
+ "build.integration_tests": {
+  "en": "Integration tests: running...",
+  "zh": "集成测试: 运行中..."
+ },
+ "build.test_design": {
+  "en": "Test Design",
+  "zh": "测试设计"
+ },
+ "build.scenarios": {
+  "en": "Scenarios",
+  "zh": "场景"
+ },
+ "build.test_types": {
+  "en": "Test Types",
+  "zh": "测试类型"
+ },
+ "build.tcr_cycle": {
+  "en": "TCR CYCLE (Test && Commit || Revert)",
+  "zh": "TCR 循环 (Test && Commit || Revert)"
+ },
+ "build.micro_step": {
+  "en": "MICRO-STEP %s: %s",
+  "zh": "微步骤 %s: %s"
+ },
+ "build.ci_check_failed": {
+  "en": "Local CI check failed",
+  "zh": "本地 CI 检查失败"
+ },
+ "build.ci_check_passed": {
+  "en": "CI check passed",
+  "zh": "CI 检查通过"
+ },
+ "build.verification_gate": {
+  "en": "Verification Gate",
+  "zh": "验证门"
+ },
+ "build.evidence_checklist": {
+  "en": "Evidence checklist (each item must have actual output)",
+  "zh": "证据清单（每项必须有实际输出）"
+ },
+ "build.tests_passed": {
+  "en": "Tests passed: paste actual test run output",
+  "zh": "测试通过: 粘贴实际测试输出"
+ },
+ "build.build_succeeded": {
+  "en": "Build succeeded: paste build output",
+  "zh": "构建成功: 粘贴构建输出"
+ },
+ "build.online_verification": {
+  "en": "Online verification: screenshot / curl output / log snippet",
+  "zh": "在线验证: 截图 / curl 输出 / 日志片段"
+ },
+ "build.no_regression": {
+  "en": "No regression: verify at least one existing feature still works",
+  "zh": "无回归: 验证至少一个已有功能仍然正常"
+ },
+ "build.gate_decision": {
+  "en": "Gate Decision",
+  "zh": "门控决议"
+ },
+ "build.gate_pass": {
+  "en": "All items have evidence → Can mark as DONE",
+  "zh": "所有项有证据 → 可标记为完成"
+ },
+ "build.gate_fail": {
+  "en": "Any item missing evidence → Gather evidence before passing the gate",
+  "zh": "任一项缺证据 → 收集证据后再过门"
+ },
+ "build.pushed_to": {
+  "en": "Pushed to GitHub: origin/main",
+  "zh": "已推送至 GitHub: origin/main"
+ },
+ "build.deployed": {
+  "en": "Deployed",
+  "zh": "已部署"
+ },
+ "build.verified": {
+  "en": "Verified",
+  "zh": "已验证"
+ },
+ "build.changes_summary": {
+  "en": "Changes",
+  "zh": "变更"
+ },
+ "build.commits_count": {
+  "en": "Commits",
+  "zh": "提交"
+ },
+ "build.tests_added": {
+  "en": "Tests",
+  "zh": "测试"
+ },
+ "build.tcr_stats": {
+  "en": "TCR Stats",
+  "zh": "TCR 统计"
+ },
+ "build.review_gate": {
+  "en": "Review Gate",
+  "zh": "评审门"
+ },
+ "build.backlog_updated": {
+  "en": "BACKLOG: %s marked ✅ Done",
+  "zh": "BACKLOG: %s 已标记 ✅ Done"
+ },
+ "build.changelog_bundled": {
+  "en": "CHANGELOG: bundled into completion commit",
+  "zh": "CHANGELOG: 已并入完成提交"
+ },
+ "build.shipped": {
+  "en": "Shipped",
+  "zh": "已交付"
+ },
+ "build.next_options": {
+  "en": "Next Options",
+  "zh": "下一步"
+ },
+ "design.epic": {
+  "en": "Epic: %s",
+  "zh": "Epic: %s"
+ },
+ "design.feature": {
+  "en": "Feature: %s",
+  "zh": "功能: %s"
+ },
+ "design.user_story": {
+  "en": "User Story: %s",
+  "zh": "用户故事: %s"
+ },
+ "design.acceptance_criteria": {
+  "en": "Acceptance Criteria",
+  "zh": "验收标准"
+ },
+ "design.domain_model": {
+  "en": "Domain Model",
+  "zh": "领域模型"
+ },
+ "design.aggregates": {
+  "en": "Aggregates",
+  "zh": "聚合"
+ },
+ "design.context_map": {
+  "en": "Context Map",
+  "zh": "上下文映射"
+ },
+ "design.stories_created": {
+  "en": "Created %s stories in backlog",
+  "zh": "已在 backlog 创建 %s 个故事"
+ },
+ "fix.test_design": {
+  "en": "Test Design for Fix",
+  "zh": "修复测试设计"
+ },
+ "fix.verification_approach": {
+  "en": "Verification Approach",
+  "zh": "验证方式"
+ },
+ "fix.test_scenarios": {
+  "en": "Test Scenarios",
+  "zh": "测试场景"
+ },
+ "fix.fix_verification": {
+  "en": "Fix verification",
+  "zh": "修复验证"
+ },
+ "fix.regression_check": {
+  "en": "Regression check",
+  "zh": "回归检查"
+ },
+ "fix.tcr_cycle": {
+  "en": "TCR CYCLE FOR FIX",
+  "zh": "修复 TCR 循环"
+ },
+ "fix.micro_step": {
+  "en": "MICRO-STEP %s: %s",
+  "zh": "微步骤 %s: %s"
+ },
+ "fix.self_review": {
+  "en": "Self Review Report",
+  "zh": "自审报告"
+ },
+ "fix.scope": {
+  "en": "Scope",
+  "zh": "范围"
+ },
+ "fix.critical": {
+  "en": "Critical",
+  "zh": "严重"
+ },
+ "fix.warnings": {
+  "en": "Warnings",
+  "zh": "警告"
+ },
+ "fix.suggestions": {
+  "en": "Suggestions",
+  "zh": "建议"
+ },
+ "fix.passed_dimensions": {
+  "en": "Passed dimensions",
+  "zh": "通过维度"
+ },
+ "fix.issue_resolved": {
+  "en": "Issue resolved",
+  "zh": "问题已解决"
+ },
+ "fix.bug_identified": {
+  "en": "Bug identified: %s",
+  "zh": "Bug 已识别: %s"
+ },
+ "fix.root_cause": {
+  "en": "Root cause",
+  "zh": "根因"
+ },
+ "fix.fix_applied": {
+  "en": "Fix applied via TCR",
+  "zh": "已通过 TCR 应用修复"
+ },
+ "fix.tests_updated": {
+  "en": "Tests updated: %s",
+  "zh": "测试已更新: %s"
+ },
+ "fix.regression_verified": {
+  "en": "Regression verified",
+  "zh": "回归验证通过"
+ },
+ "fix.fix_complete": {
+  "en": "Fix complete: %s",
+  "zh": "修复完成: %s"
+ },
+ "loop.cycle_start": {
+  "en": "Cycle %s started",
+  "zh": "Cycle %s 开始"
+ },
+ "loop.orphan_recovery": {
+  "en": "Orphan recovery: %s items reverted",
+  "zh": "孤儿恢复: %s 项已回退"
+ },
+ "loop.ci_precheck": {
+  "en": "Pre-run CI check",
+  "zh": "启动前 CI 检查"
+ },
+ "loop.pr_inbox": {
+  "en": "PR inbox: %s open",
+  "zh": "PR 收件箱: %s 个开放"
+ },
+ "loop.scanning_backlog": {
+  "en": "Scanning backlog...",
+  "zh": "扫描 backlog..."
+ },
+ "loop.picked_story": {
+  "en": "Picked: %s",
+  "zh": "已选取: %s"
+ },
+ "loop.executing": {
+  "en": "Executing: %s",
+  "zh": "执行中: %s"
+ },
+ "loop.story_done": {
+  "en": "Story complete: %s",
+  "zh": "故事完成: %s"
+ },
+ "loop.ci_waiting": {
+  "en": "Waiting for CI...",
+  "zh": "等待 CI..."
+ },
+ "loop.ci_green": {
+  "en": "CI: green",
+  "zh": "CI: 通过"
+ },
+ "loop.ci_red": {
+  "en": "CI: red",
+  "zh": "CI: 失败"
+ },
+ "loop.cycle_complete": {
+  "en": "Cycle complete: %s built, %s skipped",
+  "zh": "Cycle 完成: %s 个已构建, %s 个已跳过"
+ },
+ "loop.idle_exit": {
+  "en": "No Todo items — idle exit",
+  "zh": "无待办项 — 空闲退出"
+ },
+ "onboard.welcome": {
+  "en": "Welcome to Roll Onboard",
+  "zh": "欢迎使用 Roll Onboard"
+ },
+ "onboard.scanning": {
+  "en": "Scanning project...",
+  "zh": "正在扫描项目..."
+ },
+ "onboard.stop_migrate_first": {
+  "en": "This project has legacy Roll structure (BACKLOG.md or docs/features/). Run 'roll migrate' first before onboarding.",
+  "zh": "此项目还保留着旧版 Roll 结构（BACKLOG.md 或 docs/features/）。请先运行 'roll migrate' 再 onboard。"
+ },
+ "onboard.questions_group1": {
+  "en": "Group 1/3: Understanding your project",
+  "zh": "第 1/3 组: 理解你的项目"
+ },
+ "onboard.questions_group2": {
+  "en": "Group 2/3: Defining scope",
+  "zh": "第 2/3 组: 定义范围"
+ },
+ "onboard.questions_group3": {
+  "en": "Group 3/3: Privacy & preferences",
+  "zh": "第 3/3 组: 隐私与偏好"
+ },
+ "onboard.q1": {
+  "en": "I see this is a %s project doing %s — correct?",
+  "zh": "我看到这是一个 %s 项目，做的是 %s — 对吗？"
+ },
+ "onboard.q2": {
+  "en": "The main business domains look like %s — anything to add or correct?",
+  "zh": "主要业务领域看起来有 %s — 有需要补充或纠正的吗？"
+ },
+ "onboard.q3": {
+  "en": "The key modules are %s — any missed or mis-identified?",
+  "zh": "关键模块是 %s — 有遗漏或识别错误的吗？"
+ },
+ "onboard.q4": {
+  "en": "Which artifacts should I generate?",
+  "zh": "需要生成哪些产出物？"
+ },
+ "onboard.plan_written": {
+  "en": "Onboard plan written to .roll/onboard-plan.yaml",
+  "zh": "Onboard 计划已写入 .roll/onboard-plan.yaml"
+ },
+ "onboard.next_step": {
+  "en": "Next: run 'roll init --apply' to execute this plan",
+  "zh": "下一步: 运行 'roll init --apply' 执行此计划"
+ }
+}

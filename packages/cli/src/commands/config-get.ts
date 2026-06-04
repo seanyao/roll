@@ -4,7 +4,7 @@
  * loop-schedule / dream-time) stay on the bash fallback via the registry
  * router until their cards come up.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { yamlReadFlat, yamlReadNested } from "@roll/infra";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -60,39 +60,9 @@ function keyFile(scope: "project" | "global"): string {
   return scope === "global" ? rollConfigPath() : ".roll/local.yaml";
 }
 
-/** Mirrors _yaml_read_nested: value of `child:` inside the `parent:` block. */
-function yamlReadNested(file: string, parent: string, child: string): string {
-  if (!existsSync(file)) return "";
-  let found = false;
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    if (!found) {
-      if (new RegExp(`^${parent}:`).test(line)) found = true;
-      continue;
-    }
-    if (/^[^\s]/.test(line) && line !== "") return "";
-    if (new RegExp(`^\\s+${child}:`).test(line)) {
-      return line
-        .replace(/^\s*[^:]*:\s*/, "")
-        .replace(/\s*#.*$/, "")
-        .replace(/\s*$/, "");
-    }
-  }
-  return "";
-}
-
-/** Mirrors the flat branch: first `^key:` line, strip label/comment/ws. */
-function yamlReadFlat(file: string, key: string): string {
-  if (!existsSync(file)) return "";
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    if (new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`).test(line)) {
-      return line
-        .replace(/^[^:]*:\s*/, "")
-        .replace(/\s*#.*$/, "")
-        .replace(/\s*$/, "");
-    }
-  }
-  return "";
-}
+// yamlReadNested / yamlReadFlat are the canonical _yaml_read_nested ports —
+// MOVED to @roll/infra (US-INFRA-001) and imported above so the cli read
+// surface and the infra config module share one byte-faithful implementation.
 
 /** Mirrors _config_resolve: returns [value, source]. */
 function configResolve(key: string): [string, string] | null {

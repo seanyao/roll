@@ -23,6 +23,9 @@ importers:
       '@roll/core':
         specifier: workspace:*
         version: link:../core
+      '@roll/infra':
+        specifier: workspace:*
+        version: link:../infra
       '@roll/spec':
         specifier: workspace:*
         version: link:../spec
@@ -42,6 +45,10 @@ importers:
         version: 25.9.1
 
   packages/infra:
+    dependencies:
+      '@roll/spec':
+        specifier: workspace:*
+        version: link:../spec
     devDependencies:
       '@types/node':
         specifier: ^25.9.1

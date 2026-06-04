@@ -1092,8 +1092,6 @@ editor: ${EDITOR:-vim}
 # loop_minute: 5        # omit to auto-derive from project hash
 loop_dream_hour: 3
 # loop_dream_minute: 10 # omit to auto-derive
-loop_brief_hour: 9
-# loop_brief_minute: 15 # omit to auto-derive
 primary_agent: claude
 YAML
     ok "$(msg shared.created_roll_config_yaml)"
@@ -5752,8 +5750,6 @@ loop_schedule.period_minutes|project|nested:loop_schedule|1|1440|60
 loop_schedule.offset_minute|project|nested:loop_schedule|0|59|0
 loop_dream_hour|global|flat|0|23|3
 loop_dream_minute|global|flat|0|59|-
-loop_brief_hour|global|flat|0|23|9
-loop_brief_minute|global|flat|0|59|-
 EOF
 }
 
@@ -5892,10 +5888,10 @@ Usage: roll config <key>                 print current value + source
        roll config --list                list all loop schedule keys
        roll config <key> <value> [--global|--project]   set a value
                                                                   统一调度配置
-Read / list / set the loop, dream and brief schedule keys without hand-editing
+Read / list / set the loop and dream schedule keys without hand-editing
 yaml. Default write scope is --project (.roll/local.yaml); --global writes
 ~/.roll/config.yaml.
-读 / 列 / 写 loop、dream、brief 调度 key，免去手工编辑 yaml。默认写 --project
+读 / 列 / 写 loop、dream 调度 key，免去手工编辑 yaml。默认写 --project
 （.roll/local.yaml）；--global 写 ~/.roll/config.yaml。
 
 Supported keys (range):
@@ -5905,14 +5901,11 @@ Supported keys (range):
   loop_schedule.offset_minute    0-59    minute offset within the period
   loop_dream_hour                0-23    dream daily fire hour
   loop_dream_minute              0-59    dream daily fire minute
-  loop_brief_hour                0-23    brief daily fire hour
-  loop_brief_minute              0-59    brief daily fire minute
 
 Compact facades (write multiple keys at once):
   roll config loop-window 9-18              loop_active_start + loop_active_end
   roll config loop-schedule 30/7            period_minutes + offset_minute
   roll config dream-time 03:20              loop_dream_hour + loop_dream_minute
-  roll config brief-time 09:15              loop_brief_hour + loop_brief_minute
 
 Examples:
   roll config loop_dream_hour
@@ -6012,11 +6005,12 @@ _config_loop_schedule() {
   return 0
 }
 
-# US-LOOP-035: `roll config dream-time <HH:MM>` / `brief-time <HH:MM>` — compact
-# facade writing loop_<svc>_hour + loop_<svc>_minute in one shot. With no value,
-# prints the current effective time + source. HH ∈ [0,23], MM ∈ [0,59].
+# US-LOOP-035: `roll config dream-time <HH:MM>` — compact facade writing
+# loop_<svc>_hour + loop_<svc>_minute in one shot. With no value, prints the
+# current effective time + source. HH ∈ [0,23], MM ∈ [0,59].
 # These keys are global-scoped, so writes land in ~/.roll/config.yaml.
-#   _config_daily_time <svc> <value>   svc ∈ {dream, brief}
+# FIX-195: brief retired — svc is {dream} (the helper stays generic).
+#   _config_daily_time <svc> <value>
 _config_daily_time() {
   local svc="$1" value="$2"
   local hour_key="loop_${svc}_hour" min_key="loop_${svc}_minute"
@@ -6115,8 +6109,9 @@ cmd_config() {
       [[ $_rc -eq 0 && -n "$value" ]] && _config_reload_schedule
       return $_rc
       ;;
-    dream-time|brief-time)
-      # dream/brief schedule keys are global-scoped (~/.roll/config.yaml).
+    dream-time)
+      # FIX-195: brief-time retired with the brief loop; dream-time is the only
+      # daily schedule facade. The key is global-scoped (~/.roll/config.yaml).
       local fscope="$scope"; [[ -z "$fscope" ]] && fscope="global"
       ROLL_CFG_SCOPE="$fscope"
       local _rc
@@ -6171,7 +6166,7 @@ cmd_config() {
   fi
   _config_set "$key" "$value" "$file"
   ok "✓ set $key = $value in $file"
-  # US-LOOP-036: every recognized config key is a loop/dream/brief schedule key
+  # US-LOOP-036: every recognized config key is a loop/dream schedule key
   # (display-only keys are out of scope for this command), so a successful write
   # always reloads the launchd plists.
   _config_reload_schedule
@@ -9658,9 +9653,10 @@ _install_launchd_plists() {
   local shared="${_SHARED_ROOT}"
 
   mkdir -p "$_LAUNCHD_DIR"
-  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/brief" "${shared}/pr" "${shared}/ci" "${shared}/alert"
+  # FIX-194/FIX-195: brief/ci/alert loops retired — only loop/dream/pr remain.
+  mkdir -p "${shared}/loop" "${shared}/dream" "${shared}/pr"
 
-  local active_start active_end dream_hour dream_minute brief_hour brief_minute loop_period loop_offset
+  local active_start active_end dream_hour dream_minute loop_period loop_offset
   local _aw; _aw=$(_loop_read_active_window "$project_path")
   active_start="${_aw%% *}"; active_end="${_aw##* }"
   # US-LOOP-012: use _loop_schedule_spec instead of raw loop_minute
@@ -9669,8 +9665,6 @@ _install_launchd_plists() {
   loop_offset="${loop_spec##* }"
   dream_hour=$(_config_read_int "loop_dream_hour" "3")
   dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
-  brief_hour=$(_config_read_int "loop_brief_hour" "9")
-  brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
 
   # FIX-054: terminal preference removed — runner always uses Terminal.app.
 
@@ -9885,7 +9879,7 @@ _loop_on() {
   local project_path; project_path=$(pwd -P)
   local agent; agent=$(_project_agent)
 
-  local active_start active_end loop_minute dream_hour dream_minute brief_hour brief_minute
+  local active_start active_end loop_minute dream_hour dream_minute
   local _aw; _aw=$(_loop_read_active_window "$project_path")
   active_start="${_aw%% *}"; active_end="${_aw##* }"
   # US-LOOP-011: read schedule spec from project or global config
@@ -9900,8 +9894,6 @@ _loop_on() {
   loop_sched_zh=$(_loop_schedule_desc "$loop_period" "$loop_offset" zh)
   dream_hour=$(_config_read_int "loop_dream_hour" "3")
   dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
-  brief_hour=$(_config_read_int "loop_brief_hour" "9")
-  brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
 
   if [[ "$(uname)" == "Darwin" ]]; then
     _install_launchd_plists "$project_path" >/dev/null
@@ -9936,7 +9928,6 @@ _loop_on() {
     msg loop.roll_loop_s_active_02d_00 \
       "$loop_sched_en" "$active_start" "$active_end" "$loop_sched_zh" "$active_start" "$active_end"
     msg loop.roll_dream_daily_at_02d_02d "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
-    msg loop.roll_brief_daily_at_02d_02d "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
     echo "  • Agent: ${agent}  (change: roll agent use <name>)"
     return 0
   fi
@@ -9947,29 +9938,26 @@ _loop_on() {
     warn "$(msg loop.loop_already_enabled_for_this_project_2)"; return 0
   fi
 
-  mkdir -p "${_SHARED_ROOT}/loop" "${_SHARED_ROOT}/dream" "${_SHARED_ROOT}/brief"
+  mkdir -p "${_SHARED_ROOT}/loop" "${_SHARED_ROOT}/dream"
 
   # FIX-052: per-project cron logs so concurrent projects don't interleave.
   local slug; slug=$(_project_slug "$project_path")
-  local loop_cmd dream_cmd brief_cmd
+  local loop_cmd dream_cmd
   loop_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-loop/SKILL.md") >> ${_SHARED_ROOT}/loop/cron-${slug}.log 2>&1"
-  # IDEA-051: dream/brief cron logs are project-local, mirroring loop (FIX-139).
-  mkdir -p "${project_path}/.roll/dream" "${project_path}/.roll/brief"
+  # IDEA-051: dream cron log is project-local, mirroring loop (FIX-139).
+  mkdir -p "${project_path}/.roll/dream"
   dream_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-.dream/SKILL.md") >> ${project_path}/.roll/dream/cron.log 2>&1"
-  brief_cmd="cd \"${project_path}\" && $(_agent_skill_cmd "${sd}/roll-brief/SKILL.md") >> ${project_path}/.roll/brief/cron.log 2>&1"
 
   (
     crontab -l 2>/dev/null
     printf "%d * * * * %s %s:%s\n" "$loop_minute" "$loop_cmd" "$_LOOP_TAG" "$project_path"
     printf "%d %d * * * %s %s:%s\n" "$dream_minute" "$dream_hour" "$dream_cmd" "$_LOOP_TAG" "$project_path"
-    printf "%d %d * * * %s %s:%s\n" "$brief_minute" "$brief_hour" "$brief_cmd" "$_LOOP_TAG" "$project_path"
   ) | crontab -
 
   ok "$(msg loop.loop_enabled_2)"
   msg loop.roll_loop_s_active_02d_00_2 \
     "$loop_sched_en" "$active_start" "$active_end" "$loop_sched_zh" "$active_start" "$active_end"
   msg loop.roll_dream_daily_at_02d_02d_2 "$dream_hour" "$dream_minute" "$dream_hour" "$dream_minute"
-  msg loop.roll_brief_daily_at_02d_02d_2 "$brief_hour" "$brief_minute" "$brief_hour" "$brief_minute"
   echo "  • Agent: ${agent}  (change: roll agent use <name>)"
 }
 
@@ -13789,7 +13777,7 @@ _loop_monitor() {
     # Services status (three services on macOS, single on Linux)
     echo -e "$(msg loop.services ${BOLD} ${NC} ${CYAN} ${agent})"
     if [[ "$(uname)" == "Darwin" ]]; then
-      local active_start active_end dream_hour dream_minute brief_hour brief_minute
+      local active_start active_end dream_hour dream_minute
       local _aw; _aw=$(_loop_read_active_window "$project_path")
       active_start="${_aw%% *}"; active_end="${_aw##* }"
       # US-LOOP-013: use schedule spec for display
@@ -13799,17 +13787,16 @@ _loop_monitor() {
       loop_offset="${loop_spec##* }"
       dream_hour=$(_config_read_int "loop_dream_hour" "3")
       dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
-      brief_hour=$(_config_read_int "loop_brief_hour" "9")
-      brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
 
-      local loop_sched dream_sched brief_sched
+      local loop_sched dream_sched pr_sched
       loop_sched=$(_loop_schedule_desc "$loop_period" "$loop_offset" en)
       loop_sched="${loop_sched}  active ${active_start}:00–${active_end}:00"
       dream_sched=$(printf "%02d:%02d" "$dream_hour" "$dream_minute")
-      brief_sched=$(printf "%02d:%02d" "$brief_hour" "$brief_minute")
+      # FIX-195: pr is a 5-min PR Loop (StartInterval=300); brief was retired.
+      pr_sched="every 5m"
 
       local svcs=("loop" "dream" "pr")
-      local scheds=("$loop_sched" "$dream_sched" "$brief_sched")
+      local scheds=("$loop_sched" "$dream_sched" "$pr_sched")
       for i in "${!svcs[@]}"; do
         local svc="${svcs[$i]}" schedule="${scheds[$i]}"
         local state; state=$(_launchd_svc_state "$svc" "$project_path")
@@ -14899,7 +14886,7 @@ _legacy_home() {
   else
     crontab -l 2>/dev/null | grep -q "${_LOOP_TAG}:${project_path}" && loop_state="enabled"
   fi
-  local active_start active_end dream_hour dream_minute brief_hour brief_minute
+  local active_start active_end dream_hour dream_minute
   local _aw; _aw=$(_loop_read_active_window "$project_path")
   active_start="${_aw%% *}"; active_end="${_aw##* }"
   # US-LOOP-013: use schedule spec for display
@@ -14909,8 +14896,6 @@ _legacy_home() {
   loop_offset="${loop_spec##* }"
   dream_hour=$(_config_read_int "loop_dream_hour" "3")
   dream_minute=$(_config_read_int "loop_dream_minute" "$(_loop_derive_minute "$project_path" 2)")
-  brief_hour=$(_config_read_int "loop_brief_hour" "9")
-  brief_minute=$(_config_read_int "loop_brief_minute" "$(_loop_derive_minute "$project_path" 4)")
 
   local loop_badge loop_sched
   loop_sched=$(_loop_schedule_desc "$loop_period" "$loop_offset" en)
@@ -15040,8 +15025,9 @@ _legacy_home() {
   # ── ⑥ Schedules & Last Brief ──────────────────────────────────────────────
   printf "  ${BOLD}⏰ Schedules & Last Brief${NC}\n"
   local loop_sched_short; loop_sched_short=$(_loop_schedule_desc "$loop_period" "$loop_offset" en)
-  printf "    %s · dream %02d:%02d · brief %02d:%02d\n" \
-    "$loop_sched_short" "$dream_hour" "$dream_minute" "$brief_hour" "$brief_minute"
+  # FIX-195: brief loop retired — schedule line shows loop + dream only.
+  printf "    %s · dream %02d:%02d\n" \
+    "$loop_sched_short" "$dream_hour" "$dream_minute"
   local latest_brief; latest_brief=$(ls .roll/briefs/*.md 2>/dev/null | sort | tail -1 || true)
   if [[ -n "$latest_brief" ]]; then
     local mod_time now age summary

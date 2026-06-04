@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# US-LOOP-035: roll config dream-time / brief-time — compact facades that
-# translate `03:20` into the low-level loop_dream_hour + loop_dream_minute keys
-# (and likewise for brief). dream/brief keys are global-scoped, so writes land
-# in the isolated temp global file, not .roll/local.yaml.
+# US-LOOP-035: roll config dream-time — compact facade that translates `03:20`
+# into the low-level loop_dream_hour + loop_dream_minute keys. The dream keys
+# are global-scoped, so writes land in the isolated temp global file, not
+# .roll/local.yaml. (FIX-195: the parallel brief-time facade was retired.)
 #
 # Each test sources bin/roll (defines functions without running main), points
 # ROLL_CONFIG at an isolated temp global file, and cds into a throwaway project
@@ -46,14 +46,12 @@ teardown() {
   [ ! -f .roll/local.yaml ] || ! grep -q 'loop_dream_hour' .roll/local.yaml
 }
 
-@test "brief-time: 09:15 writes both brief_hour and brief_minute" {
+# FIX-195: brief-time / loop_brief_* were retired with the brief loop.
+@test "FIX-195: brief-time is no longer a recognized config facade" {
   run cmd_config brief-time 09:15
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"set brief-time = 09:15"* ]]
-  run cmd_config loop_brief_hour
-  [[ "$output" == *"loop_brief_hour = 9"* ]]
-  run cmd_config loop_brief_minute
-  [[ "$output" == *"loop_brief_minute = 15"* ]]
+  [ "$status" -ne 0 ]
+  run cmd_config loop_brief_hour 9
+  [ "$status" -ne 0 ]
 }
 
 @test "dream-time: hour > 23 is rejected with exit code 2 (bilingual)" {

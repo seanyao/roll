@@ -42,7 +42,8 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"loop_active_start"* ]]
   [[ "$output" == *"loop_schedule.period_minutes"* ]]
-  [[ "$output" == *"loop_brief_minute"* ]]
+  # FIX-195: brief retired — loop_dream_minute is the daily-schedule key now.
+  [[ "$output" == *"loop_dream_minute"* ]]
   [[ "$output" == *"(default)"* ]]
 }
 
@@ -85,10 +86,12 @@ teardown() {
 }
 
 @test "config: --global writes the global file, not the project file" {
-  run cmd_config loop_brief_hour 8 --global
+  # FIX-195: loop_brief_hour retired — exercise the global write path with the
+  # surviving global-scoped daily key loop_dream_hour.
+  run cmd_config loop_dream_hour 8 --global
   [ "$status" -eq 0 ]
   [[ "$output" == *"global.yaml"* ]]
-  run grep -c '^loop_brief_hour:' "$ROLL_CONFIG"
+  run grep -c '^loop_dream_hour:' "$ROLL_CONFIG"
   [ "$output" = "1" ]
   [ ! -f .roll/local.yaml ]
 }

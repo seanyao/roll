@@ -231,10 +231,12 @@ teardown() { unit_teardown_cd; }
     fi
     return 0
   }
-  _loop_pr_review_external() { echo "$1" > "${TEST_TMP}/review-fired"; }
+  # With no bot review, the inbox falls through to classify → a green + clean PR
+  # is `ready`, so it is eager-merged (not routed to inline review).
+  _loop_pr_merge_self_eager() { echo "$1" > "${TEST_TMP}/merge-fired"; }
 
   run _loop_pr_inbox
   [ "$status" -eq 0 ]
-  [ -f "${TEST_TMP}/review-fired" ]
-  [ "$(cat "${TEST_TMP}/review-fired")" = "22" ]
+  [ -f "${TEST_TMP}/merge-fired" ]
+  [ "$(cat "${TEST_TMP}/merge-fired")" = "22" ]
 }

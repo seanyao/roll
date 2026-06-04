@@ -48,19 +48,9 @@ teardown() { unit_teardown; }
   awk '/^_loop_precheck_ci\(\)/,/^}/' "${ROLL_BIN}" | grep -q 'ROLL_LOOP_HEAL_MAX'
 }
 
-# ─── US-LOOP-049: PR classification ─────────────────────────────────────────
-
-@test "US-LOOP-049: _loop_pr_classify returns loop_self_ci_red for loop/* PR with CI failure" {
-  run bash -c "source '${ROLL_BIN}' && _loop_pr_classify 'loop/cycle-123' '' 'failure' 'MERGEABLE'"
-  [ "$status" -eq 0 ]
-  [ "$output" = "loop_self_ci_red" ]
-}
-
-@test "US-LOOP-049: _loop_pr_classify still returns loop_self for loop/* PR with green CI" {
-  run bash -c "source '${ROLL_BIN}' && _loop_pr_classify 'loop/cycle-123' '' 'success' 'MERGEABLE'"
-  [ "$status" -eq 0 ]
-  [ "$output" = "loop_self" ]
-}
+# US-LOOP-049 (PR classification verdicts) is covered canonically in
+# roll_loop_pr_inbox.bats — the classifier was simplified to stale/ci_red/ready,
+# so the old loop_self* verdict assertions no longer apply here.
 
 # ─── US-LOOP-050: PR hot-fix function ───────────────────────────────────────
 

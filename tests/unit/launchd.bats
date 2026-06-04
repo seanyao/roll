@@ -285,56 +285,44 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "loop lifecycle loops include alert as the 6th service (US-AUTO-046)" {
-  # Every `for svc in loop dream brief pr ci ...` lifecycle loop must include
-  # alert, so on/off/status manage the Alert Loop plist alongside the others.
+@test "loop lifecycle loops manage loop/dream/brief/pr services" {
+  # Every `for svc in ...` lifecycle loop must list the installed services so
+  # on/off/status manage every plist. The CI + Alert loops were removed; brief
+  # stays (its launchd schedule mirrors the Linux cron path).
   local roll_bin="${BATS_TEST_DIRNAME}/../../bin/roll"
-  run grep -c 'for svc in loop dream brief pr ci;' "$roll_bin"
+  run grep -c 'for svc in loop dream pr;' "$roll_bin"
   [ "$output" -eq 0 ]
-  run grep -c 'for svc in loop dream brief pr ci alert;' "$roll_bin"
+  run grep -c 'for svc in loop dream brief pr;' "$roll_bin"
   [ "$output" -eq 4 ]
 }
 
-@test "roll loop on help text lists the alert service (US-AUTO-046)" {
+@test "roll loop on help text lists the scheduled services" {
   local roll_bin="${BATS_TEST_DIRNAME}/../../bin/roll"
-  grep -q 'loop + dream + brief + pr + ci + alert' "$roll_bin"
+  grep -q 'loop + dream + brief + pr' "$roll_bin"
 }
 
-@test "_install_launchd_plists: CI Loop plist has StartInterval=300 and drives _ci_scan (US-AUTO-045)" {
+@test "_install_launchd_plists: brief plist defaults to StartInterval=86400 and drives roll-brief" {
+  # brief is a daily agent skill mirroring dream — FIX-148: macOS 26.x launchd
+  # silently refuses to fire a StartCalendarInterval, so the verified default is
+  # StartInterval=86400 (no Hour / no StartCalendarInterval).
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
   _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
   _SHARED_ROOT="${tmp_dir}/shared"
+  ROLL_CONFIG=$(mktemp)
 
   _install_launchd_plists "$proj"
 
   local slug; slug=$(_project_slug "$proj")
-  local ci_plist; ci_plist=$(_launchd_plist_path "ci" "$proj")
-  grep -q "com.roll.ci.${slug}" "$ci_plist"
-  grep -A1 "<key>StartInterval</key>" "$ci_plist" | grep -q "<integer>300</integer>"
-  grep -q "_ci_scan" "${_SHARED_ROOT}/ci/run-${slug}.sh"
-  rm -rf "$tmp_dir"
-}
-
-@test "_install_launchd_plists: Alert Loop plist has StartInterval=60 and drives _alert_dispatch (US-AUTO-046)" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"
-  mkdir -p "$proj"
-  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
-  _SHARED_ROOT="${tmp_dir}/shared"
-
-  _install_launchd_plists "$proj"
-
-  local slug; slug=$(_project_slug "$proj")
-  local alert_plist; alert_plist=$(_launchd_plist_path "alert" "$proj")
-  grep -q "com.roll.alert.${slug}" "$alert_plist"
-  # period=1 → StartInterval = 1 * 60 = 60 (every 1 minute)
-  grep -A1 "<key>StartInterval</key>" "$alert_plist" | grep -q "<integer>60</integer>"
-  # No calendar Hour key — sub-daily interval schedule, not a daily one.
-  ! grep -q "<key>Hour</key>" "$alert_plist"
-  grep -q "_alert_dispatch" "${_SHARED_ROOT}/alert/run-${slug}.sh"
-  rm -rf "$tmp_dir"
+  local brief_plist; brief_plist=$(_launchd_plist_path "brief" "$proj")
+  grep -q "com.roll.brief.${slug}" "$brief_plist"
+  grep -A1 "<key>StartInterval</key>" "$brief_plist" | grep -q "<integer>86400</integer>"
+  ! grep -q "<key>StartCalendarInterval</key>" "$brief_plist"
+  ! grep -q "<key>Hour</key>" "$brief_plist"
+  # Runner drives the roll-brief skill, logging to the project-local cron.log.
+  grep -q "roll-brief" "${_SHARED_ROOT}/brief/run-${slug}.sh"
+  rm -rf "$tmp_dir"; rm -f "$ROLL_CONFIG"
 }
 
 @test "_install_launchd_plists: idempotent — no plist mtime change on second call" {

@@ -1,42 +1,14 @@
 #!/usr/bin/env bats
-# Tests for _loop_pr_merge_self_eager and loop_self verdict routing.
+# Tests for _loop_pr_merge_self_eager — the inbox's direct-merge step.
 #
-# Covers the fix: loop_self PRs are merged directly when CI is green
-# instead of relying on repo-level GitHub auto-merge (unreliable).
+# Covers the fix: a green + mergeable PR is squash-merged directly instead of
+# relying on repo-level GitHub auto-merge (unreliable). Verdict routing itself
+# is covered canonically in roll_loop_pr_inbox.bats.
 
 load helpers
 
 setup()    { unit_setup_cd; }
 teardown() { unit_teardown_cd; }
-
-# ── _loop_pr_classify: loop/* → loop_self ────────────────────────────────────
-
-@test "_loop_pr_classify: loop/* branch returns loop_self" {
-  run _loop_pr_classify "loop/cycle-20260527-123456-99999" "" "" ""
-  [ "$status" -eq 0 ]
-  [ "$output" = "loop_self" ]
-}
-
-@test "_loop_pr_classify: non-loop branch does not return loop_self" {
-  run _loop_pr_classify "feat/my-feature" "" "" "MERGEABLE"
-  [ "$status" -eq 0 ]
-  [ "$output" != "loop_self" ]
-}
-
-# ── PR-loop closure: claude/* PRs are loop-owned when green ───────────────────
-
-@test "_loop_pr_classify: claude/* branch (green) returns loop_self" {
-  run _loop_pr_classify "claude/ci-fix-abc" "" "success" "CLEAN"
-  [ "$status" -eq 0 ]
-  [ "$output" = "loop_self" ]
-}
-
-@test "_loop_pr_classify: claude/* with CI failure is NOT auto-owned (human decides)" {
-  run _loop_pr_classify "claude/ci-fix-abc" "" "failure" "CLEAN"
-  [ "$status" -eq 0 ]
-  [ "$output" != "loop_self" ]
-  [ "$output" != "loop_self_ci_red" ]
-}
 
 # ── _loop_pr_merge_self_eager: merge only when CI green + MERGEABLE ────────────────
 

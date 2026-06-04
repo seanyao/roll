@@ -17,71 +17,64 @@ teardown() { unit_teardown_cd; }
 # ─── _loop_pr_classify ────────────────────────────────────────────────────────
 #
 # Args: <head_ref> <latest_human_review> <ci_state> <mergeable_state>
-# Prints exactly one of:
-#   loop_self
-#   blocked_human_request_changes
-#   blocked_human_approved
-#   stale
-#   eligible
+# The classifier is intentionally minimal: it routes purely on merge-state and
+# CI, ignoring head_ref and human review. The inbox handles bot reviews up front,
+# and GitHub branch protection enforces human gates at merge time. Prints one of:
+#   stale   — branch is BEHIND/DIRTY/CONFLICTING; rebase before anything else
+#   ci_red  — CI is failing on a mergeable branch; route to self-heal
+#   ready   — green + mergeable; eligible to merge
 
-@test "_loop_pr_classify: head_ref starting with loop/ → loop_self" {
-  run _loop_pr_classify "loop/cycle-123" "" "success" "MERGEABLE"
-  [ "$status" -eq 0 ]
-  [ "$output" = "loop_self" ]
-}
-
-# FIX-158: a loop/* PR whose CI is red must classify as loop_self_ci_red
-# (US-LOOP-049) so the inbox can route it instead of treating it like a green
-# self-PR and deferring to auto-merge (which can never merge a red PR).
-@test "_loop_pr_classify: loop/* with CI failure → loop_self_ci_red" {
-  run _loop_pr_classify "loop/cycle-123" "" "failure" "MERGEABLE"
-  [ "$status" -eq 0 ]
-  [ "$output" = "loop_self_ci_red" ]
-}
-
-@test "_loop_pr_classify: human CHANGES_REQUESTED beats CI / mergeable" {
-  run _loop_pr_classify "feat/foo" "CHANGES_REQUESTED" "success" "MERGEABLE"
-  [ "$output" = "blocked_human_request_changes" ]
-}
-
-@test "_loop_pr_classify: human APPROVED → blocked_human_approved (let GitHub merge)" {
-  run _loop_pr_classify "feat/foo" "APPROVED" "success" "MERGEABLE"
-  [ "$output" = "blocked_human_approved" ]
-}
-
-@test "_loop_pr_classify: CI failure → stale" {
-  run _loop_pr_classify "feat/foo" "" "failure" "MERGEABLE"
-  [ "$output" = "stale" ]
-}
-
-@test "_loop_pr_classify: mergeable CONFLICTING → stale" {
-  run _loop_pr_classify "feat/foo" "" "success" "CONFLICTING"
-  [ "$output" = "stale" ]
-}
-
-@test "_loop_pr_classify: mergeable BEHIND (out-of-date) → stale" {
+@test "_loop_pr_classify: BEHIND (out-of-date) → stale" {
   run _loop_pr_classify "feat/foo" "" "success" "BEHIND"
+  [ "$status" -eq 0 ]
   [ "$output" = "stale" ]
 }
 
-@test "_loop_pr_classify: mergeStateStatus DIRTY (conflict) → stale" {
+@test "_loop_pr_classify: DIRTY (conflict) → stale" {
   run _loop_pr_classify "feat/foo" "" "success" "DIRTY"
   [ "$output" = "stale" ]
 }
 
-@test "_loop_pr_classify: claude/* branch (green) → loop_self" {
-  run _loop_pr_classify "claude/ci-fix" "" "success" "CLEAN"
-  [ "$output" = "loop_self" ]
+@test "_loop_pr_classify: CONFLICTING → stale" {
+  run _loop_pr_classify "feat/foo" "" "success" "CONFLICTING"
+  [ "$output" = "stale" ]
 }
 
-@test "_loop_pr_classify: clean external PR → eligible" {
+# stale beats ci_red: an out-of-date/conflicting branch must be rebased first —
+# its CI verdict is meaningless until it sits on top of main again.
+@test "_loop_pr_classify: DIRTY + CI failure → stale (rebase precedence)" {
+  run _loop_pr_classify "feat/foo" "" "failure" "DIRTY"
+  [ "$output" = "stale" ]
+}
+
+@test "_loop_pr_classify: CI failure on a mergeable branch → ci_red" {
+  run _loop_pr_classify "feat/foo" "" "failure" "MERGEABLE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ci_red" ]
+}
+
+@test "_loop_pr_classify: green + MERGEABLE → ready" {
   run _loop_pr_classify "feat/foo" "" "success" "MERGEABLE"
-  [ "$output" = "eligible" ]
+  [ "$output" = "ready" ]
 }
 
-@test "_loop_pr_classify: human COMMENTED is not a block" {
-  run _loop_pr_classify "feat/foo" "COMMENTED" "success" "MERGEABLE"
-  [ "$output" = "eligible" ]
+@test "_loop_pr_classify: green + CLEAN (prod mergeStateStatus) → ready" {
+  run _loop_pr_classify "feat/foo" "" "success" "CLEAN"
+  [ "$output" = "ready" ]
+}
+
+# head_ref no longer changes the verdict — a green loop/* self-PR is classified
+# exactly like any other mergeable PR (ready), then merged by the inbox.
+@test "_loop_pr_classify: head_ref is ignored — green loop/* → ready" {
+  run _loop_pr_classify "loop/cycle-123" "" "success" "MERGEABLE"
+  [ "$output" = "ready" ]
+}
+
+# human review no longer changes the verdict — the inbox's bot-review gate and
+# GitHub branch protection own human approvals/blocks, not the classifier.
+@test "_loop_pr_classify: human review is ignored — CHANGES_REQUESTED + green → ready" {
+  run _loop_pr_classify "feat/foo" "CHANGES_REQUESTED" "success" "MERGEABLE"
+  [ "$output" = "ready" ]
 }
 
 # ─── _loop_pr_rebase_circuit ──────────────────────────────────────────────────
@@ -157,7 +150,11 @@ teardown() { unit_teardown_cd; }
   [ ! -f "${TEST_TMP}/review-fired" ]
 }
 
-@test "_loop_pr_inbox: eligible external PR invokes review hook" {
+# A green + clean external PR is eager-merged by the inbox (ready verdict).
+# Inline AI review is gone — review now runs as a GHA bot whose verdict the
+# inbox consumes up front (see loop_pr_inbox_bot.bats), so a PR that reaches
+# classify with all checks green is merged, not re-reviewed inline.
+@test "_loop_pr_inbox: green + clean external PR is merged (ready verdict)" {
   git remote add origin git@github.com:test/repo.git
   _gh_repo_slug() { echo "test/repo"; }
   gh() {
@@ -173,12 +170,12 @@ teardown() { unit_teardown_cd; }
     fi
     return 0
   }
-  _loop_pr_review_external() { echo "$1" > "${TEST_TMP}/review-fired"; }
+  _loop_pr_merge_self_eager() { echo "$1" > "${TEST_TMP}/merge-fired"; }
 
   run _loop_pr_inbox
   [ "$status" -eq 0 ]
-  [ -f "${TEST_TMP}/review-fired" ]
-  [ "$(cat "${TEST_TMP}/review-fired")" = "42" ]
+  [ -f "${TEST_TMP}/merge-fired" ]
+  [ "$(cat "${TEST_TMP}/merge-fired")" = "42" ]
 }
 
 # PR-loop closure: a green claude/* PR (CLEAN) must be merged like a loop_self
@@ -209,9 +206,10 @@ teardown() { unit_teardown_cd; }
 }
 
 # PR-loop closure (PR #410 regression): a green self-PR that conflicts with
-# main (DIRTY) must be rebased, not silently left — eager-merge can never
-# merge it, so without the rebase branch it stays open forever.
-@test "_loop_pr_inbox: green-but-DIRTY self-PR rebases instead of merging" {
+# main (DIRTY) must be rebased, not silently left. DIRTY classifies as `stale`,
+# which rebases first; the post-rebase re-check still sees DIRTY here, so the
+# eager merge must NOT fire on a conflicting branch.
+@test "_loop_pr_inbox: green-but-DIRTY self-PR is rebased, not merged" {
   git remote add origin git@github.com:test/repo.git
   _gh_repo_slug() { echo "test/repo"; }
   gh() {
@@ -224,16 +222,18 @@ teardown() { unit_teardown_cd; }
       echo '{"reviews":[],"mergeStateStatus":"DIRTY","statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
       return 0
     fi
+    # Record any real merge attempt so we can assert it never fires on DIRTY.
+    if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then touch "${TEST_TMP}/merge-attempted"; fi
     return 0
   }
-  _loop_pr_merge_self_eager() { touch "${TEST_TMP}/merge-fired"; }
   _loop_pr_rebase_stale() { echo "$1" > "${TEST_TMP}/rebase-fired"; }
 
   run _loop_pr_inbox
   [ "$status" -eq 0 ]
   [ -f "${TEST_TMP}/rebase-fired" ]
   [ "$(cat "${TEST_TMP}/rebase-fired")" = "410" ]
-  [ ! -f "${TEST_TMP}/merge-fired" ]
+  # Real _loop_pr_merge_self_eager runs but short-circuits on DIRTY → no merge.
+  [ ! -f "${TEST_TMP}/merge-attempted" ]
 }
 
 # FIX-158: a loop/* PR with red CI must NOT be silently dropped. The inbox

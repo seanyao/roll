@@ -50,16 +50,18 @@ teardown() { unit_teardown; }
 
 # ─── US-LOOP-049: PR classification ─────────────────────────────────────────
 
-@test "US-LOOP-049: _loop_pr_classify returns loop_self_ci_red for loop/* PR with CI failure" {
+# FIX-194: tokens follow the #440 contract — red loop/* PRs classify ci_red
+# (routed to heal), green ones ready (routed to eager merge).
+@test "US-LOOP-049: _loop_pr_classify returns ci_red for loop/* PR with CI failure" {
   run bash -c "source '${ROLL_BIN}' && _loop_pr_classify 'loop/cycle-123' '' 'failure' 'MERGEABLE'"
   [ "$status" -eq 0 ]
-  [ "$output" = "loop_self_ci_red" ]
+  [ "$output" = "ci_red" ]
 }
 
-@test "US-LOOP-049: _loop_pr_classify still returns loop_self for loop/* PR with green CI" {
+@test "US-LOOP-049: _loop_pr_classify returns ready for loop/* PR with green CI" {
   run bash -c "source '${ROLL_BIN}' && _loop_pr_classify 'loop/cycle-123' '' 'success' 'MERGEABLE'"
   [ "$status" -eq 0 ]
-  [ "$output" = "loop_self" ]
+  [ "$output" = "ready" ]
 }
 
 # ─── US-LOOP-050: PR hot-fix function ───────────────────────────────────────

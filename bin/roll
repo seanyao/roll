@@ -9676,11 +9676,14 @@ _install_launchd_plists() {
 
   # US-AUTO-044: "pr" is the 4th service — a 5-min PR Loop (period=5, empty hour
   # → StartInterval=300). No skill (it drives _loop_pr_inbox, not an agent).
-  local services=("loop" "dream" "pr")
-  local skill_names=("roll-loop" "roll-.dream" "")
-  local periods=("$loop_period" "60" "5")
-  local offsets=("$loop_offset" "$dream_minute" "0")
-  local hours=("" "$dream_hour" "")
+  # FIX-194: "brief" went missing from this array in the PR-loop architect
+  # rewrite (#440) — the brief runner stopped being installed and the
+  # project-local .roll/brief/ log dir was never created.
+  local services=("loop" "dream" "brief" "pr")
+  local skill_names=("roll-loop" "roll-.dream" "roll-brief" "")
+  local periods=("$loop_period" "60" "60" "5")
+  local offsets=("$loop_offset" "$dream_minute" "$brief_minute" "0")
+  local hours=("" "$dream_hour" "$brief_hour" "")
 
   local updated=0
   local slug; slug=$(_project_slug "$project_path")
@@ -9840,7 +9843,7 @@ cmd_loop() {
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
-  on            Install launchd scheduler (loop + dream + brief + pr + ci + alert)
+  on            Install launchd scheduler (loop + dream + brief + pr)
   off           Remove launchd scheduler
   now           Run one cycle immediately
   test          Quick smoke test (tmux/popup/stream chain)
@@ -9912,7 +9915,7 @@ _loop_on() {
     # does not disturb the overrides DB.
     local uid; uid=$(id -u)
     local all_loaded=true
-    for svc in loop dream pr; do
+    for svc in loop dream brief pr; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       local plist; plist=$(_launchd_plist_path "$svc" "$project_path")
       if ! _launchd_is_loaded "$label"; then
@@ -9979,7 +9982,7 @@ _loop_off() {
   if [[ "$(uname)" == "Darwin" ]]; then
     local any_loaded=false
     local _skip_off; _launchd_should_skip_registry && _skip_off=1 || _skip_off=0
-    for svc in loop dream pr; do
+    for svc in loop dream brief pr; do
       local label; label=$(_launchd_label "$svc" "$project_path")
       if _launchd_is_loaded "$label"; then
         any_loaded=true
@@ -9994,7 +9997,7 @@ _loop_off() {
     fi
     local slug; slug=$(_project_slug "$project_path")
     local uid; uid=$(id -u)
-    for svc in loop dream pr; do
+    for svc in loop dream brief pr; do
       rm -f "${_SHARED_ROOT}/${svc}/run-${slug}.sh"
       # FIX-081: reverse the FIX-059 auto-bootstrap guard. `_install_launchd_plists`
       # writes `launchctl disable gui/<UID>/<label>` for every brand-new plist
@@ -10330,7 +10333,7 @@ _legacy_loop_status() {
   echo ""
   if [[ "$(uname)" == "Darwin" ]]; then
     echo -e "  Services   Agent: ${CYAN}${agent}${NC}"
-    for svc in loop dream pr; do
+    for svc in loop dream brief pr; do
       local state; state=$(_launchd_svc_state "$svc" "$project_path")
       if [[ "$svc" == "loop" ]] && $_is_paused; then
         local _paused_at; _paused_at=$(grep '^paused_at:' "$_LOOP_STATE" 2>/dev/null | awk '{print $2}' | tr -d '"')
@@ -13123,6 +13126,106 @@ _loop_story_is_eligible() {
   return 0
 }
 
+# US-AUTO-047: ideation loop core — scan backlog for unconverted IDEA rows,
+# evaluate each for auto-convert simplicity, and emit a structured candidate list.
+# Args: [backlog-path] [limit]
+# stdout: JSON array of candidate objects
+#   [{"id":"IDEA-NNN","verdict":"candidate|manual","reason":"...","peer":true|false},...]
+_loop_ideation_scan() {
+  local backlog="${1:-.roll/backlog.md}"
+  local limit="${2:-}"
+
+  # Default limit: env > config > 3
+  if [ -z "$limit" ]; then
+    limit="${ROLL_IDEATION_LIMIT:-}"
+    if [ -z "$limit" ]; then
+      limit=$(_config_read_int "ideation_limit" "3" 2>/dev/null || echo 3)
+    fi
+  fi
+  case "$limit" in
+    ''|*[!0-9]*) limit=3 ;;
+  esac
+
+  if [ ! -f "$backlog" ]; then
+    echo '[]'
+    return 0
+  fi
+
+  local items=""
+  local count=0
+
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    case "$line" in
+      *'| IDEA-'*|*'| [IDEA-'*) ;;
+      *) continue ;;
+    esac
+
+    # Extract status from the last populated column
+    local _status
+    _status=$(printf '%s\n' "$line" | awk -F'|' '{for(i=NF;i>=1;i--) if($i ~ /[^ \t]/) {gsub(/^[ \t]+|[ \t]+$/, "", $i); print $i; exit}}')
+
+    # Skip Hold, Done, or already-converted IDEA rows
+    case "$_status" in
+      *'🚫 Hold'*) continue ;;
+      *'✅ Done'*) continue ;;
+      *'已转 '*) continue ;;
+      *'→ '*) continue ;;
+    esac
+
+    # Extract IDEA id from the first column
+    local idea_id
+    idea_id=$(printf '%s\n' "$line" | awk -F'|' '{print $2}' | grep -oE 'IDEA-[0-9]+' | head -1)
+    [ -n "$idea_id" ] || continue
+
+    # Extract description from the third column
+    local desc
+    desc=$(printf '%s\n' "$line" | awk -F'|' '{print $3}' | sed 's/^[ \t]*//;s/[ \t]*$//')
+    # Escape double quotes for JSON safety
+    desc=$(printf '%s\n' "$desc" | tr '"' "'")
+
+    # Evaluate simplicity heuristic
+    local verdict="manual" reason="需人工评估" peer="false"
+
+    case "$desc" in
+      *'大范围'*|*'高风险'*|*'重构'*|*'架构'*|*'breaking'*|*'迁移'*|*'基础设施'*|*'安全'*|*'支付'*|*'认证'*|*'auth'*|*'deprecate'*|*'核心'*|*'底层'*)
+        verdict="manual"
+        reason="涉及大范围/高风险/架构/基础设施变更"
+        ;;
+      *'简单'*|*'小'*|*'文案'*|*'文档'*|*'补'*|*'加一条'*|*'改个'*|*'微调'*|*'优化'*|*'修正'*|*'修复'*|*'bug'*)
+        verdict="candidate"
+        reason="评估为简单,可自动转卡"
+        ;;
+      *)
+        verdict="candidate"
+        reason="边界情况,建议过peer评审"
+        peer="true"
+        ;;
+    esac
+
+    local json_obj
+    json_obj=$(printf '{"id":"%s","verdict":"%s","reason":"%s","peer":%s}' \
+      "$idea_id" "$verdict" "$reason" "$peer")
+
+    if [ -z "$items" ]; then
+      items="$json_obj"
+    else
+      items="$items,$json_obj"
+    fi
+
+    count=$((count + 1))
+    [ "$count" -ge "$limit" ] && break
+  done < "$backlog"
+
+  if [ -z "$items" ]; then
+    echo '[]'
+  else
+    printf '[%s]\n' "$items"
+  fi
+  return 0
+}
+
+
 # US-AGENT-006: pick the next eligible 📋 Todo story from .roll/backlog.md
 # applying the same gates as the roll-loop SKILL Step 2:
 #   1. Status = 📋 Todo
@@ -13808,7 +13911,7 @@ _loop_monitor() {
       dream_sched=$(printf "%02d:%02d" "$dream_hour" "$dream_minute")
       brief_sched=$(printf "%02d:%02d" "$brief_hour" "$brief_minute")
 
-      local svcs=("loop" "dream" "pr")
+      local svcs=("loop" "dream" "brief" "pr")
       local scheds=("$loop_sched" "$dream_sched" "$brief_sched")
       for i in "${!svcs[@]}"; do
         local svc="${svcs[$i]}" schedule="${scheds[$i]}"
@@ -15241,6 +15344,7 @@ main() {
     config)        cmd_config "$@" ;;
     _loop_render_exit_summary) _loop_render_exit_summary "$@" ;;
     _loop_pr_inbox) _loop_pr_inbox "$@" ;;
+    _loop_ideation_scan) _loop_ideation_scan "$@" ;;
     version|--version|-v) echo "roll v${VERSION}" ;;
     help|--help|-h) _help "$@" ;;
     "") [[ -f ".roll/backlog.md" ]] && _home || { _help; _show_changelog; } ;;

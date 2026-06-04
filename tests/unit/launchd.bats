@@ -231,7 +231,7 @@ setup() {
 
 # ─── _install_launchd_plists ──────────────────────────────────────────────────
 
-@test "_install_launchd_plists: creates six plist files (loop/dream/brief/pr/ci/alert)" {
+@test "_install_launchd_plists: creates four plist files (loop/dream/brief/pr)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -244,12 +244,12 @@ setup() {
   [ -f "$(_launchd_plist_path "dream" "$proj")" ]
   [ -f "$(_launchd_plist_path "brief" "$proj")" ]
   [ -f "$(_launchd_plist_path "pr" "$proj")" ]      # US-AUTO-044 PR Loop
-  [ -f "$(_launchd_plist_path "ci" "$proj")" ]      # US-AUTO-045 CI Loop
-  [ -f "$(_launchd_plist_path "alert" "$proj")" ]   # US-AUTO-046 Alert Loop
+  # FIX-194: ci/alert services were retired by the #440 PR-loop architect
+  # rewrite (absorbed into the PR loop) — four services remain.
   rm -rf "$tmp_dir"
 }
 
-@test "_install_launchd_plists: creates six runner scripts (loop/dream/brief/pr/ci/alert)" {
+@test "_install_launchd_plists: creates four runner scripts (loop/dream/brief/pr)" {
   local tmp_dir; tmp_dir=$(mktemp -d)
   local proj="${tmp_dir}/proj"
   mkdir -p "$proj"
@@ -263,8 +263,6 @@ setup() {
   [ -x "${_SHARED_ROOT}/dream/run-${slug}.sh" ]
   [ -x "${_SHARED_ROOT}/brief/run-${slug}.sh" ]
   [ -x "${_SHARED_ROOT}/pr/run-${slug}.sh" ]      # US-AUTO-044 PR Loop
-  [ -x "${_SHARED_ROOT}/ci/run-${slug}.sh" ]      # US-AUTO-045 CI Loop
-  [ -x "${_SHARED_ROOT}/alert/run-${slug}.sh" ]   # US-AUTO-046 Alert Loop
   rm -rf "$tmp_dir"
 }
 
@@ -285,57 +283,22 @@ setup() {
   rm -rf "$tmp_dir"
 }
 
-@test "loop lifecycle loops include alert as the 6th service (US-AUTO-046)" {
-  # Every `for svc in loop dream brief pr ci ...` lifecycle loop must include
-  # alert, so on/off/status manage the Alert Loop plist alongside the others.
+@test "loop lifecycle loops manage all four services (FIX-194, post-#440)" {
+  # Every lifecycle loop must include brief, so on/off/status manage the brief
+  # plist alongside loop/dream/pr. ci/alert were retired into the PR loop.
   local roll_bin="${BATS_TEST_DIRNAME}/../../bin/roll"
-  run grep -c 'for svc in loop dream brief pr ci;' "$roll_bin"
+  run grep -c 'for svc in loop dream pr; do' "$roll_bin"
   [ "$output" -eq 0 ]
-  run grep -c 'for svc in loop dream brief pr ci alert;' "$roll_bin"
+  run grep -c 'for svc in loop dream brief pr; do' "$roll_bin"
   [ "$output" -eq 4 ]
 }
 
-@test "roll loop on help text lists the alert service (US-AUTO-046)" {
+@test "roll loop on help text lists the four services (FIX-194)" {
   local roll_bin="${BATS_TEST_DIRNAME}/../../bin/roll"
-  grep -q 'loop + dream + brief + pr + ci + alert' "$roll_bin"
+  grep -q 'loop + dream + brief + pr' "$roll_bin"
 }
 
-@test "_install_launchd_plists: CI Loop plist has StartInterval=300 and drives _ci_scan (US-AUTO-045)" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"
-  mkdir -p "$proj"
-  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
-  _SHARED_ROOT="${tmp_dir}/shared"
 
-  _install_launchd_plists "$proj"
-
-  local slug; slug=$(_project_slug "$proj")
-  local ci_plist; ci_plist=$(_launchd_plist_path "ci" "$proj")
-  grep -q "com.roll.ci.${slug}" "$ci_plist"
-  grep -A1 "<key>StartInterval</key>" "$ci_plist" | grep -q "<integer>300</integer>"
-  grep -q "_ci_scan" "${_SHARED_ROOT}/ci/run-${slug}.sh"
-  rm -rf "$tmp_dir"
-}
-
-@test "_install_launchd_plists: Alert Loop plist has StartInterval=60 and drives _alert_dispatch (US-AUTO-046)" {
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  local proj="${tmp_dir}/proj"
-  mkdir -p "$proj"
-  _LAUNCHD_DIR="${tmp_dir}/LaunchAgents"
-  _SHARED_ROOT="${tmp_dir}/shared"
-
-  _install_launchd_plists "$proj"
-
-  local slug; slug=$(_project_slug "$proj")
-  local alert_plist; alert_plist=$(_launchd_plist_path "alert" "$proj")
-  grep -q "com.roll.alert.${slug}" "$alert_plist"
-  # period=1 → StartInterval = 1 * 60 = 60 (every 1 minute)
-  grep -A1 "<key>StartInterval</key>" "$alert_plist" | grep -q "<integer>60</integer>"
-  # No calendar Hour key — sub-daily interval schedule, not a daily one.
-  ! grep -q "<key>Hour</key>" "$alert_plist"
-  grep -q "_alert_dispatch" "${_SHARED_ROOT}/alert/run-${slug}.sh"
-  rm -rf "$tmp_dir"
-}
 
 @test "_install_launchd_plists: idempotent — no plist mtime change on second call" {
   local tmp_dir; tmp_dir=$(mktemp -d)

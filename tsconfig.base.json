@@ -11,6 +11,9 @@
     "declaration": true,
     "sourceMap": true,
     "composite": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "types": [
+      "node"
+    ]
   }
 }

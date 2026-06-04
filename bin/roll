@@ -1416,6 +1416,13 @@ cmd_setup() {
     esac
   done
 
+  # P1-3.4 (v3 branch): skills/ is a git submodule — populate it for git clones
+  # whose skills/ is still empty. No-op for npm/curl installs (no .gitmodules).
+  if [[ -d "$ROLL_PKG_DIR/.git" ]] && [[ -f "$ROLL_PKG_DIR/.gitmodules" ]] \
+     && [[ -z "$(ls -A "$ROLL_PKG_DIR/skills" 2>/dev/null)" ]]; then
+    ( cd "$ROLL_PKG_DIR" && git submodule update --init --recursive --quiet ) || true
+  fi
+
   # Capture per-step outcomes for the v2 UI render at the end.
   local steps_buf=()
   _record() { steps_buf+=("$1|$2"); }

@@ -5,9 +5,16 @@
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { pricesCommand } from "../src/commands/prices.js";
+import { seedUpdateCheckCache } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
+// Isolated ROLL_HOME with a seeded update-check cache — keeps the bash
+// oracle's stdout free of the async upgrade nag (deterministic difftests).
+const ROLL_HOME = join(mkdtempSync(join(tmpdir(), "roll-prices-home-")), ".roll");
+seedUpdateCheckCache(ROLL_HOME);
 
 function bashPrices(args: string[], env: Record<string, string> = {}): {
   status: number;
@@ -18,7 +25,7 @@ function bashPrices(args: string[], env: Record<string, string> = {}): {
     const stdout = execFileSync(join(REPO, "bin", "roll"), ["prices", ...args], {
       cwd: REPO,
       encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1", ROLL_LANG: "en", ...env },
+      env: { ...process.env, NO_COLOR: "1", ROLL_LANG: "en", ROLL_HOME, ...env },
     });
     return { status: 0, stdout, stderr: "" };
   } catch (e) {

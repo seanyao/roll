@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { configGetCommand } from "../src/commands/config-get.js";
+import { seedUpdateCheckCache } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
@@ -19,6 +20,7 @@ beforeAll(() => {
   proj = mkdtempSync(join(tmpdir(), "roll-cfg-proj-"));
   dirs.push(home, proj);
   mkdirSync(join(home, ".roll"), { recursive: true });
+  seedUpdateCheckCache(join(home, ".roll"));
   writeFileSync(join(home, ".roll", "config.yaml"), "loop_dream_hour: 5   # comment\n");
   mkdirSync(join(proj, ".roll"), { recursive: true });
   writeFileSync(

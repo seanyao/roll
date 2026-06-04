@@ -8,8 +8,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { backlogCommand } from "../src/commands/backlog.js";
+import { seedUpdateCheckCache } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
+const ROLL_HOME = join(mkdtempSync(join(tmpdir(), "roll-bl-home-")), ".roll");
+seedUpdateCheckCache(ROLL_HOME);
 const dirs: string[] = [];
 
 afterAll(() => {
@@ -31,7 +34,7 @@ function bashBacklog(proj: string): { status: number; stdout: string; stderr: st
     const stdout = execFileSync(join(REPO, "bin", "roll"), ["backlog"], {
       cwd: proj,
       encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1", ROLL_LANG: "en" },
+      env: { ...process.env, NO_COLOR: "1", ROLL_LANG: "en", ROLL_HOME },
     });
     return { status: 0, stdout, stderr: "" };
   } catch (e) {

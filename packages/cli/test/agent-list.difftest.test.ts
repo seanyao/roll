@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { agentListCommand } from "../src/commands/agent-list.js";
+import { seedUpdateCheckCache } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
@@ -28,6 +29,7 @@ beforeAll(() => {
     chmodSync(p, 0o755);
   }
   PATH = `${fakeBin}:/usr/bin:/bin`;
+  seedUpdateCheckCache(join(home, ".roll"));
 });
 
 afterAll(() => {

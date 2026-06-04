@@ -67,3 +67,31 @@ teardown() {
   [ -n "$newest_line" ] && [ -n "$oldest_line" ]
   [ "$newest_line" -lt "$oldest_line" ]
 }
+
+# FIX-193: a stray non-object line in runs.jsonl (e.g. an agent pretty-printed a
+# record across lines, so a fragment like `"FIX-181"` parses as a bare JSON
+# scalar) must NOT crash the Python status loader — load_runs() skips anything
+# that isn't a dict and still returns the surrounding valid records.
+@test "FIX-193: load_runs skips a bare-scalar dirty line without crashing" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 required"
+  local pkg="${BATS_TEST_DIRNAME}/../.."
+  local rt="${BATS_TMPDIR}/fix193-${RANDOM}/.roll/loop"
+  mkdir -p "$rt"
+  printf '%s\n' \
+    '{"project":"projX","run_id":"loop-1","ts":"2026-06-01T00:00:00Z","status":"built"}' \
+    '"FIX-181"' \
+    '{"project":"projX","run_id":"loop-2","ts":"2026-06-01T01:00:00Z","status":"idle"}' \
+    > "${rt}/runs.jsonl"
+
+  run env ROLL_PROJECT_RUNTIME_DIR="$rt" python3 - "$pkg" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("rls", sys.argv[1] + "/lib/roll-loop-status.py")
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+runs = m.load_runs("projX")
+assert "loop-1" in runs and "loop-2" in runs, runs
+print("OK", len(runs))
+PY
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK 2"* ]]
+}

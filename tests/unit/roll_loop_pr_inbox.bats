@@ -17,41 +17,41 @@ teardown() { unit_teardown_cd; }
 # ─── _loop_pr_classify ────────────────────────────────────────────────────────
 #
 # Args: <head_ref> <latest_human_review> <ci_state> <mergeable_state>
-# Prints exactly one of:
-#   loop_self
-#   blocked_human_request_changes
-#   blocked_human_approved
+# FIX-194: classify contract follows the #440 architect rewrite — three tokens
+# only (stale > ci_red > ready). Branch prefix and human review are
+# intentionally irrelevant (CI is the only gate). Older loop_self / eligible /
+# blocked_human_* expectations were updated to this contract.
 #   stale
-#   eligible
+#   ci_red
+#   ready
 
-@test "_loop_pr_classify: head_ref starting with loop/ → loop_self" {
+@test "_loop_pr_classify: green loop/* PR → ready" {
   run _loop_pr_classify "loop/cycle-123" "" "success" "MERGEABLE"
   [ "$status" -eq 0 ]
-  [ "$output" = "loop_self" ]
+  [ "$output" = "ready" ]
 }
 
-# FIX-158: a loop/* PR whose CI is red must classify as loop_self_ci_red
-# (US-LOOP-049) so the inbox can route it instead of treating it like a green
-# self-PR and deferring to auto-merge (which can never merge a red PR).
-@test "_loop_pr_classify: loop/* with CI failure → loop_self_ci_red" {
+# FIX-158 lineage: a loop/* PR whose CI is red must classify distinctly so the
+# inbox routes it to heal instead of merge. Post-#440 the token is ci_red.
+@test "_loop_pr_classify: loop/* with CI failure → ci_red" {
   run _loop_pr_classify "loop/cycle-123" "" "failure" "MERGEABLE"
   [ "$status" -eq 0 ]
-  [ "$output" = "loop_self_ci_red" ]
+  [ "$output" = "ci_red" ]
 }
 
-@test "_loop_pr_classify: human CHANGES_REQUESTED beats CI / mergeable" {
+@test "_loop_pr_classify: human CHANGES_REQUESTED is irrelevant — CI green → ready" {
   run _loop_pr_classify "feat/foo" "CHANGES_REQUESTED" "success" "MERGEABLE"
-  [ "$output" = "blocked_human_request_changes" ]
+  [ "$output" = "ready" ]
 }
 
-@test "_loop_pr_classify: human APPROVED → blocked_human_approved (let GitHub merge)" {
+@test "_loop_pr_classify: human APPROVED is irrelevant — CI green → ready" {
   run _loop_pr_classify "feat/foo" "APPROVED" "success" "MERGEABLE"
-  [ "$output" = "blocked_human_approved" ]
+  [ "$output" = "ready" ]
 }
 
-@test "_loop_pr_classify: CI failure → stale" {
+@test "_loop_pr_classify: CI failure → ci_red" {
   run _loop_pr_classify "feat/foo" "" "failure" "MERGEABLE"
-  [ "$output" = "stale" ]
+  [ "$output" = "ci_red" ]
 }
 
 @test "_loop_pr_classify: mergeable CONFLICTING → stale" {
@@ -69,19 +69,19 @@ teardown() { unit_teardown_cd; }
   [ "$output" = "stale" ]
 }
 
-@test "_loop_pr_classify: claude/* branch (green) → loop_self" {
+@test "_loop_pr_classify: claude/* branch (green) → ready" {
   run _loop_pr_classify "claude/ci-fix" "" "success" "CLEAN"
-  [ "$output" = "loop_self" ]
+  [ "$output" = "ready" ]
 }
 
-@test "_loop_pr_classify: clean external PR → eligible" {
+@test "_loop_pr_classify: clean external PR → ready" {
   run _loop_pr_classify "feat/foo" "" "success" "MERGEABLE"
-  [ "$output" = "eligible" ]
+  [ "$output" = "ready" ]
 }
 
 @test "_loop_pr_classify: human COMMENTED is not a block" {
   run _loop_pr_classify "feat/foo" "COMMENTED" "success" "MERGEABLE"
-  [ "$output" = "eligible" ]
+  [ "$output" = "ready" ]
 }
 
 # ─── _loop_pr_rebase_circuit ──────────────────────────────────────────────────
@@ -157,7 +157,10 @@ teardown() { unit_teardown_cd; }
   [ ! -f "${TEST_TMP}/review-fired" ]
 }
 
-@test "_loop_pr_inbox: eligible external PR invokes review hook" {
+# FIX-194: post-#440 the inbox no longer fires the external review hook — a
+# green external PR is routed straight to the eager-merge path (CI is the only
+# gate). The old review-fired assertion tested removed behaviour.
+@test "_loop_pr_inbox: green external PR routes to eager merge" {
   git remote add origin git@github.com:test/repo.git
   _gh_repo_slug() { echo "test/repo"; }
   gh() {
@@ -173,12 +176,12 @@ teardown() { unit_teardown_cd; }
     fi
     return 0
   }
-  _loop_pr_review_external() { echo "$1" > "${TEST_TMP}/review-fired"; }
+  _loop_pr_merge_self_eager() { echo "$1" > "${TEST_TMP}/merge-fired"; }
 
   run _loop_pr_inbox
   [ "$status" -eq 0 ]
-  [ -f "${TEST_TMP}/review-fired" ]
-  [ "$(cat "${TEST_TMP}/review-fired")" = "42" ]
+  [ -f "${TEST_TMP}/merge-fired" ]
+  [ "$(cat "${TEST_TMP}/merge-fired")" = "42" ]
 }
 
 # PR-loop closure: a green claude/* PR (CLEAN) must be merged like a loop_self
@@ -233,7 +236,9 @@ teardown() { unit_teardown_cd; }
   [ "$status" -eq 0 ]
   [ -f "${TEST_TMP}/rebase-fired" ]
   [ "$(cat "${TEST_TMP}/rebase-fired")" = "410" ]
-  [ ! -f "${TEST_TMP}/merge-fired" ]
+  # FIX-194: post-#440 the stale path legitimately re-checks the PR after the
+  # rebase and attempts an eager merge (the real merge helper no-ops unless
+  # CLEAN/MERGEABLE + green). Asserting "merge never called" tested the old flow.
 }
 
 # FIX-158: a loop/* PR with red CI must NOT be silently dropped. The inbox

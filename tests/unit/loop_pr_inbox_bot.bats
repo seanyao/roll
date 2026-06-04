@@ -216,6 +216,8 @@ teardown() { unit_teardown_cd; }
   grep -q "bot review CHANGES_REQUESTED" "$_LOOP_ALERT"
 }
 
+# FIX-194: post-#440 the inbox no longer fires the external review hook — a
+# green non-bot PR classifies "ready" and routes to the eager-merge path.
 @test "_loop_pr_inbox: no bot review falls through to classify normally" {
   git remote add origin git@github.com:test/repo.git
   _gh_repo_slug() { echo "test/repo"; }
@@ -231,10 +233,10 @@ teardown() { unit_teardown_cd; }
     fi
     return 0
   }
-  _loop_pr_review_external() { echo "$1" > "${TEST_TMP}/review-fired"; }
+  _loop_pr_merge_self_eager() { echo "$1" > "${TEST_TMP}/merge-fired"; }
 
   run _loop_pr_inbox
   [ "$status" -eq 0 ]
-  [ -f "${TEST_TMP}/review-fired" ]
-  [ "$(cat "${TEST_TMP}/review-fired")" = "22" ]
+  [ -f "${TEST_TMP}/merge-fired" ]
+  [ "$(cat "${TEST_TMP}/merge-fired")" = "22" ]
 }

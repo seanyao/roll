@@ -9840,7 +9840,7 @@ cmd_loop() {
     *)  cat <<'HELP'
 Usage: roll loop <on|off|now|test|status|monitor|runs|log|story|events|attach|mute|unmute|pause|resume|reset|gc|branches>
 
-  on            Install launchd scheduler (loop + dream + brief + pr + ci + alert)
+  on            Install launchd scheduler (loop + dream + pr)
   off           Remove launchd scheduler
   now           Run one cycle immediately
   test          Quick smoke test (tmux/popup/stream chain)

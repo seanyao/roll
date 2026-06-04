@@ -306,7 +306,7 @@ case "\$1" in
   print-disabled)
     printf '\t"com.roll.loop.${slug}" => enabled\n'
     printf '\t"com.roll.dream.${slug}" => enabled\n'
-    printf '\t"com.roll.brief.${slug}" => enabled\n'
+    printf '\t"com.roll.pr.${slug}" => enabled\n'
     exit 0
     ;;
   *)
@@ -320,7 +320,8 @@ EOSHIM
   # codepath has a target — content doesn't matter, the shim swallows it).
   local launchd_dir="${TEST_TMP}/Library/LaunchAgents"
   mkdir -p "$launchd_dir"
-  for svc in loop dream brief; do
+  # FIX-194: brief/ci/alert loops retired — the three services are loop/dream/pr.
+  for svc in loop dream pr; do
     : > "${launchd_dir}/com.roll.${svc}.${slug}.plist"
   done
 
@@ -333,7 +334,7 @@ EOSHIM
   # Assert that for each service we saw exactly the symmetric pair: an
   # unload-or-bootout to take the service down, and an `enable` to clear
   # the disable flag the FIX-059 install had set.
-  for svc in loop dream brief; do
+  for svc in loop dream pr; do
     local label="com.roll.${svc}.${slug}"
     grep -qE "^enable gui/${uid}/${label}$" "$log" \
       || { echo "MISSING: enable gui/${uid}/${label} in launchctl log:" >&2

@@ -1,0 +1,170 @@
+/**
+ * `roll config` read surface — TS port of cmd_config's help/--list/key-read
+ * paths (US-CLI-003). Writes and the compact facades (loop-window /
+ * loop-schedule / dream-time) stay on the bash fallback via the registry
+ * router until their cards come up.
+ */
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+// key | scope | store | min | max | default — mirrors _config_keys verbatim.
+const CONFIG_KEYS: ReadonlyArray<readonly [string, "project" | "global", string, string, string, string]> = [
+  ["loop_active_start", "project", "nested:loop_schedule", "0", "23", "0"],
+  ["loop_active_end", "project", "nested:loop_schedule", "1", "24", "24"],
+  ["loop_schedule.period_minutes", "project", "nested:loop_schedule", "1", "1440", "60"],
+  ["loop_schedule.offset_minute", "project", "nested:loop_schedule", "0", "59", "0"],
+  ["loop_dream_hour", "global", "flat", "0", "23", "3"],
+  ["loop_dream_minute", "global", "flat", "0", "59", "-"],
+];
+
+export const CONFIG_FACADE_KEYS = ["loop-window", "loop-schedule", "dream-time"];
+
+const HELP = `Usage: roll config <key>                 print current value + source
+       roll config --list                list all loop schedule keys
+       roll config <key> <value> [--global|--project]   set a value
+                                                                  统一调度配置
+Read / list / set the loop and dream schedule keys without hand-editing
+yaml. Default write scope is --project (.roll/local.yaml); --global writes
+~/.roll/config.yaml.
+读 / 列 / 写 loop、dream 调度 key，免去手工编辑 yaml。默认写 --project
+（.roll/local.yaml）；--global 写 ~/.roll/config.yaml。
+
+Supported keys (range):
+  loop_active_start              0-23    loop active window start hour
+  loop_active_end                1-24    loop active window end hour
+  loop_schedule.period_minutes   1-1440  fire interval in minutes
+  loop_schedule.offset_minute    0-59    minute offset within the period
+  loop_dream_hour                0-23    dream daily fire hour
+  loop_dream_minute              0-59    dream daily fire minute
+
+Compact facades (write multiple keys at once):
+  roll config loop-window 9-18              loop_active_start + loop_active_end
+  roll config loop-schedule 30/7            period_minutes + offset_minute
+  roll config dream-time 03:20              loop_dream_hour + loop_dream_minute
+
+Examples:
+  roll config loop_dream_hour
+  roll config --list
+  roll config loop_schedule.period_minutes 30
+  roll config loop_dream_hour 3 --global
+  roll config dream-time 03:20
+`;
+
+function rollConfigPath(): string {
+  const rollHome = process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+  return join(rollHome, "config.yaml");
+}
+
+function keyFile(scope: "project" | "global"): string {
+  return scope === "global" ? rollConfigPath() : ".roll/local.yaml";
+}
+
+/** Mirrors _yaml_read_nested: value of `child:` inside the `parent:` block. */
+function yamlReadNested(file: string, parent: string, child: string): string {
+  if (!existsSync(file)) return "";
+  let found = false;
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (!found) {
+      if (new RegExp(`^${parent}:`).test(line)) found = true;
+      continue;
+    }
+    if (/^[^\s]/.test(line) && line !== "") return "";
+    if (new RegExp(`^\\s+${child}:`).test(line)) {
+      return line
+        .replace(/^\s*[^:]*:\s*/, "")
+        .replace(/\s*#.*$/, "")
+        .replace(/\s*$/, "");
+    }
+  }
+  return "";
+}
+
+/** Mirrors the flat branch: first `^key:` line, strip label/comment/ws. */
+function yamlReadFlat(file: string, key: string): string {
+  if (!existsSync(file)) return "";
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`).test(line)) {
+      return line
+        .replace(/^[^:]*:\s*/, "")
+        .replace(/\s*#.*$/, "")
+        .replace(/\s*$/, "");
+    }
+  }
+  return "";
+}
+
+/** Mirrors _config_resolve: returns [value, source]. */
+function configResolve(key: string): [string, string] | null {
+  const record = CONFIG_KEYS.find((r) => r[0] === key);
+  if (record === undefined) return null;
+  const [, scope, store, , , def] = record;
+  const file = keyFile(scope);
+  let val: string;
+  if (store.startsWith("nested:")) {
+    const parent = store.slice("nested:".length);
+    const child = key.includes(".") ? key.slice(key.indexOf(".") + 1) : key;
+    val = yamlReadNested(file, parent, child);
+  } else {
+    val = yamlReadFlat(file, key);
+  }
+  return val !== "" ? [val, file] : [def, "default"];
+}
+
+function err(line: string): void {
+  const noColor = (process.env["NO_COLOR"] ?? "") !== "";
+  const RED = noColor ? "" : "\x1b[0;31m";
+  const NC = noColor ? "" : "\x1b[0m";
+  process.stderr.write(`${RED}[roll]${NC} ${line}\n`);
+}
+
+const padEndW = (s: string, w: number): string => (s.length >= w ? s : s + " ".repeat(w - s.length));
+
+/**
+ * Read-surface handler. The registry router guarantees we only see:
+ * help / --list / single known-or-unknown key without a value.
+ */
+export function configGetCommand(args: string[]): number {
+  let key = "";
+  let wantList = false;
+  for (const a of args) {
+    if (a === "--help" || a === "-h" || a === "help") {
+      process.stdout.write(HELP);
+      return 0;
+    }
+    if (a === "--list") {
+      wantList = true;
+      continue;
+    }
+    if (a === "--global" || a === "--project") continue; // scope is write-only
+    if (key === "") key = a;
+  }
+
+  if (wantList) {
+    const out: string[] = [];
+    for (const [k] of CONFIG_KEYS) {
+      const resolved = configResolve(k);
+      if (resolved === null) continue;
+      const [v, src] = resolved;
+      out.push(`  ${padEndW(k, 30)} = ${padEndW(v, 8)} (${src})`);
+    }
+    process.stdout.write(out.join("\n") + "\n");
+    return 0;
+  }
+
+  if (key === "") {
+    process.stdout.write(HELP);
+    return 0;
+  }
+
+  const resolved = configResolve(key);
+  if (resolved === null) {
+    err(`config: unknown key '${key}'`);
+    err(`config：未知 key '${key}'`);
+    err("Try: roll config --list");
+    return 2;
+  }
+  const [v, src] = resolved;
+  process.stdout.write(`${key} = ${v}  (from ${src})\n`);
+  return 0;
+}

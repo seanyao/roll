@@ -19,6 +19,10 @@ importers:
         version: 4.1.8(@types/node@25.9.1)(vite@8.0.16(@types/node@25.9.1))
 
   packages/cli:
+    dependencies:
+      '@roll/spec':
+        specifier: workspace:*
+        version: link:../spec
     devDependencies:
       '@types/node':
         specifier: ^25.9.1

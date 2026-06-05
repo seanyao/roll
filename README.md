@@ -59,7 +59,7 @@ roll loop on        # let AI work through the backlog (optional)
 | `roll status` | Show current state and drift |
 | `roll agent [use <name>]` | Per-project agent selection |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |
-| `roll test [--where] [--reset]` | Run the test suite (routes through isolation adapter; Tart VM on Apple Silicon) |
+| `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll release` | Run the release script (human-only) |
 | `roll review-pr <number>` | AI-powered code review for a PR |
 | **Machine · global** | |
@@ -101,7 +101,7 @@ Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuil
 | Slides — Layouts reference | [guide/en/slides.md#layouts](guide/en/slides.md#layouts) | [guide/zh/slides.md#layouts布局](guide/zh/slides.md#layouts%E5%B8%83%E5%B1%80) |
 | Feedback (`roll feedback`) | [guide/en/feedback.md](guide/en/feedback.md) | [guide/zh/feedback.md](guide/zh/feedback.md) |
 | Backlog GitHub sync (`roll backlog sync`) | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
-| Test isolation (`roll test` + Tart VM) | [guide/en/test-isolation.md](guide/en/test-isolation.md) | [guide/zh/test-isolation.md](guide/zh/test-isolation.md) |
+| Test isolation (`roll test`) | [guide/en/test-isolation.md](guide/en/test-isolation.md) | [guide/zh/test-isolation.md](guide/zh/test-isolation.md) |
 | Cross-machine sync | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
 | Remote monitoring (watch loop from a phone via `remote-watch`) | [guide/en/loop.md#remote-monitoring](guide/en/loop.md#remote-monitoring) | [guide/zh/loop.md#远程监控remote-monitoring](guide/zh/loop.md#%E8%BF%9C%E7%A8%8B%E7%9B%91%E6%8E%A7remote-monitoring) |
 | Cycle result eval (`roll loop eval`) | [guide/en/loop.md#cycle-result-eval](guide/en/loop.md#cycle-result-eval) | [guide/zh/loop.md#cycle-结果评分result-eval](guide/zh/loop.md#cycle-%E7%BB%93%E6%9E%9C%E8%AF%84%E5%88%86result-eval) |

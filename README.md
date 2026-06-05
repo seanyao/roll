@@ -80,36 +80,14 @@ Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuil
 
 ## Documentation
 
-| Topic | English | 中文 |
-|-------|---------|------|
-| Overview & architecture | [guide/en/overview.md](guide/en/overview.md) | [guide/zh/overview.md](guide/zh/overview.md) |
-| Engineering methodology | [guide/en/methodology.md](guide/en/methodology.md) | [guide/zh/methodology.md](guide/zh/methodology.md) |
-| Loop (autonomous executor) | [guide/en/loop.md](guide/en/loop.md) | [guide/zh/loop.md](guide/zh/loop.md) |
-| Loop data layout (Phase 2.0) | [guide/en/loop-data-layout.md](guide/en/loop-data-layout.md) | [guide/zh/loop-data-layout.md](guide/zh/loop-data-layout.md) |
-| Dream (nightly health scan) | [guide/en/dream.md](guide/en/dream.md) | [guide/zh/dream.md](guide/zh/dream.md) |
-| Peer (cross-agent review) | [guide/en/peer.md](guide/en/peer.md) | [guide/zh/peer.md](guide/zh/peer.md) |
-| AI agents & complexity routing | [guide/en/ai-agents.md](guide/en/ai-agents.md) | [guide/zh/ai-agents.md](guide/zh/ai-agents.md) |
-| Configuration (env vars) | [guide/en/configuration.md](guide/en/configuration.md) | [guide/zh/configuration.md](guide/zh/configuration.md) |
-| Skill selection guide | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
-| roll-doc (legacy doc automation: four phases + Phase 3b deep read) | [guide/en/roll-doc.md](guide/en/roll-doc.md) | [guide/zh/roll-doc.md](guide/zh/roll-doc.md) |
-| Slides (deck generator) | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |
-| Slides — Layouts reference | [guide/en/slides.md#layouts](guide/en/slides.md#layouts) | [guide/zh/slides.md#layouts布局](guide/zh/slides.md#layouts%E5%B8%83%E5%B1%80) |
-| Feedback (`roll feedback`) | [guide/en/feedback.md](guide/en/feedback.md) | [guide/zh/feedback.md](guide/zh/feedback.md) |
-| Backlog GitHub sync (`roll backlog sync`) | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
-| Test isolation (`roll test`) | [guide/en/test-isolation.md](guide/en/test-isolation.md) | [guide/zh/test-isolation.md](guide/zh/test-isolation.md) |
-| Acceptance evidence (`roll attest`) | [guide/en/acceptance-evidence.md](guide/en/acceptance-evidence.md) | [guide/zh/acceptance-evidence.md](guide/zh/acceptance-evidence.md) |
-| Consistency & release gate | [guide/en/consistency.md](guide/en/consistency.md) | [guide/zh/consistency.md](guide/zh/consistency.md) |
-| Architecture (layers · domain · invariants) | [docs/architecture.md](docs/architecture.md) | — |
-| Verification system | [docs/verification.md](docs/verification.md) | — |
-| Manifesto · 理念 | [docs/manifesto.md](docs/manifesto.md) | — |
-| Acceptance evidence (`roll attest`) | [guide/en/acceptance-evidence.md](guide/en/acceptance-evidence.md) | [guide/zh/acceptance-evidence.md](guide/zh/acceptance-evidence.md) |
-| Cross-machine sync | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
-| Remote monitoring (watch loop from a phone via `remote-watch`) | [guide/en/loop.md#remote-monitoring](guide/en/loop.md#remote-monitoring) | [guide/zh/loop.md#远程监控remote-monitoring](guide/zh/loop.md#%E8%BF%9C%E7%A8%8B%E7%9B%91%E6%8E%A7remote-monitoring) |
-| Cycle result eval (`roll loop eval`) | [guide/en/loop.md#cycle-result-eval](guide/en/loop.md#cycle-result-eval) | [guide/zh/loop.md#cycle-结果评分result-eval](guide/zh/loop.md#cycle-%E7%BB%93%E6%9E%9C%E8%AF%84%E5%88%86result-eval) |
-| Cycle exit summary (`.command` window recap) | [guide/en/loop.md#cycle-exit-summary](guide/en/loop.md#cycle-exit-summary) | [guide/zh/loop.md#cycle-退出摘要cycle-exit-summary](guide/zh/loop.md#cycle-%E9%80%80%E5%87%BA%E6%91%98%E8%A6%81cycle-exit-summary) |
-| Pricing (cost visibility) | [guide/en/pricing.md](guide/en/pricing.md) | [guide/zh/pricing.md](guide/zh/pricing.md) |
-| FAQ (troubleshooting) | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
-| Adoption patterns | [guide/en/patterns/](guide/en/patterns/) | [guide/zh/patterns/](guide/zh/patterns/) |
+| | |
+|---|---|
+| **Start here** | [Overview & architecture](guide/en/overview.md) · [Engineering methodology](guide/en/methodology.md) |
+| **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
+| **Quality machinery** | [Acceptance evidence (`roll attest`)](guide/en/acceptance-evidence.md) · [Consistency & release gate](guide/en/consistency.md) · [Test isolation](guide/en/test-isolation.md) |
+| **Under the hood** | [Architecture: layers · domain · invariants](docs/architecture.md) · [Verification system](docs/verification.md) · [Manifesto](docs/manifesto.md) |
+
+Full guide index: [guide/en/](guide/en/) — agents, peer review, slides, feedback, backlog sync, adoption patterns, and more.
 
 ## Contributing
 

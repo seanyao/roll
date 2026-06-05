@@ -80,33 +80,14 @@ template/      roll init 安装的项目脚手架
 
 ## 文档
 
-| 主题 | English | 中文 |
-|------|---------|------|
-| 概述与架构 | [guide/en/overview.md](guide/en/overview.md) | [guide/zh/overview.md](guide/zh/overview.md) |
-| 工程方法论 | [guide/en/methodology.md](guide/en/methodology.md) | [guide/zh/methodology.md](guide/zh/methodology.md) |
-| 验收证据（`roll attest`） | [guide/en/acceptance-evidence.md](guide/en/acceptance-evidence.md) | [guide/zh/acceptance-evidence.md](guide/zh/acceptance-evidence.md) |
-| 一致性与发版闸 | [guide/en/consistency.md](guide/en/consistency.md) | [guide/zh/consistency.md](guide/zh/consistency.md) |
-| 架构（分层·领域·不变量） | [docs/architecture.md](docs/architecture.md) | — |
-| 验证体系 | [docs/verification.md](docs/verification.md) | — |
-| 理念宣言 | [docs/manifesto.md](docs/manifesto.md) | — |
-| Loop（自主执行器） | [guide/en/loop.md](guide/en/loop.md) | [guide/zh/loop.md](guide/zh/loop.md) |
-| Loop 数据布局（Phase 2.0） | [guide/en/loop-data-layout.md](guide/en/loop-data-layout.md) | [guide/zh/loop-data-layout.md](guide/zh/loop-data-layout.md) |
-| Dream（夜间健康巡检） | [guide/en/dream.md](guide/en/dream.md) | [guide/zh/dream.md](guide/zh/dream.md) |
-| Peer（跨 Agent 评审） | [guide/en/peer.md](guide/en/peer.md) | [guide/zh/peer.md](guide/zh/peer.md) |
-| AI Agent 与复杂度路由 | [guide/en/ai-agents.md](guide/en/ai-agents.md) | [guide/zh/ai-agents.md](guide/zh/ai-agents.md) |
-| 配置（环境变量） | [guide/en/configuration.md](guide/en/configuration.md) | [guide/zh/configuration.md](guide/zh/configuration.md) |
-| 技能选择指南 | [guide/en/skills.md](guide/en/skills.md) | [guide/zh/skills.md](guide/zh/skills.md) |
-| roll-doc（遗留文档自动化:四 phase + Phase 3b 深度读取） | [guide/en/roll-doc.md](guide/en/roll-doc.md) | [guide/zh/roll-doc.md](guide/zh/roll-doc.md) |
-| 幻灯片（deck 生成器） | [guide/en/slides.md](guide/en/slides.md) | [guide/zh/slides.md](guide/zh/slides.md) |
-| 幻灯片 —— 布局参考（Layouts） | [guide/en/slides.md#layouts](guide/en/slides.md#layouts) | [guide/zh/slides.md#layouts布局](guide/zh/slides.md#layouts%E5%B8%83%E5%B1%80) |
-| 反馈（`roll feedback`） | [guide/en/feedback.md](guide/en/feedback.md) | [guide/zh/feedback.md](guide/zh/feedback.md) |
-| Backlog GitHub 同步（`roll backlog sync`） | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
-| 跨机器同步 | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
-| Cycle 结果评分（`roll loop eval`） | [guide/en/loop.md#cycle-result-eval](guide/en/loop.md#cycle-result-eval) | [guide/zh/loop.md#cycle-结果评分result-eval](guide/zh/loop.md#cycle-%E7%BB%93%E6%9E%9C%E8%AF%84%E5%88%86result-eval) |
-| Cycle 退出摘要（`.command` 窗口复盘） | [guide/en/loop.md#cycle-exit-summary](guide/en/loop.md#cycle-exit-summary) | [guide/zh/loop.md#cycle-退出摘要cycle-exit-summary](guide/zh/loop.md#cycle-%E9%80%80%E5%87%BA%E6%91%98%E8%A6%81cycle-exit-summary) |
-| Pricing（成本可见性） | [guide/en/pricing.md](guide/en/pricing.md) | [guide/zh/pricing.md](guide/zh/pricing.md) |
-| 常见问题（排障） | [guide/en/faq.md](guide/en/faq.md) | [guide/zh/faq.md](guide/zh/faq.md) |
-| 接入模式 | [guide/en/patterns/](guide/en/patterns/) | [guide/zh/patterns/](guide/zh/patterns/) |
+| | |
+|---|---|
+| **从这里开始** | [概述与架构](guide/zh/overview.md) · [工程方法论](guide/zh/methodology.md) |
+| **日常使用** | [Loop（自主执行器）](guide/zh/loop.md) · [配置](guide/zh/configuration.md) · [价格与成本](guide/zh/pricing.md) · [FAQ](guide/zh/faq.md) |
+| **质量机制** | [验收证据（`roll attest`）](guide/zh/acceptance-evidence.md) · [一致性与发版闸](guide/zh/consistency.md) · [测试隔离](guide/zh/test-isolation.md) |
+| **底层设计** | [架构：分层·领域·不变量](docs/architecture.md) · [验证体系](docs/verification.md) · [理念宣言](docs/manifesto.md) |
+
+完整指南目录：[guide/zh/](guide/zh/) —— agent 路由、peer 评审、slides、feedback、backlog 同步、接入模式等。
 
 ## 贡献
 

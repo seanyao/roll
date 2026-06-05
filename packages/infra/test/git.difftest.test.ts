@@ -69,7 +69,13 @@ describe("diff-test: projectIdentity path-resolution == bash _project_slug", () 
     expect(id.slug).toBe(bashSlug(d));
   });
 
-  it("FIX-034 worktree resolves to the main-tree slug, == bash run from the worktree", async () => {
+  it("FIX-201 worktree identity is its OWN toplevel (WHITELISTED divergence from FIX-034/bash)", async () => {
+    // The v2 oracle (FIX-034) canonicalized every worktree to the MAIN tree via
+    // git-common-dir — sane when the only worktrees were cycle worktrees of one
+    // project, catastrophic for sibling dev worktrees post-cutover (the loop
+    // baked the frozen v2 checkout's path and idled there). The TS side now
+    // resolves to the current worktree's toplevel. Slug stays oracle-equal
+    // whenever a remote exists (slug derives from the remote URL).
     const main = tmp("wtmain");
     execSync(
       `git init -q -b main && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m x && git remote add origin https://github.com/x/wt-proj.git`,
@@ -77,11 +83,9 @@ describe("diff-test: projectIdentity path-resolution == bash _project_slug", () 
     );
     const wt = join(tmp("wtside"), "wt");
     execSync(`git worktree add -q '${wt}' -b side`, { cwd: main });
-    // infra canonicalizes the worktree path to the main tree; bash _project_slug
-    // run from the worktree does the same via git-common-dir.
-    expect(await canonicalProjectPath(wt)).toBe(main);
+    expect(await canonicalProjectPath(wt)).toBe(wt); // own toplevel, NOT main
     const id = await projectIdentity(wt);
-    expect(id.slug).toBe(bashSlug(wt));
+    expect(id.slug).toBe(bashSlug(wt)); // remote-derived slug — still oracle-equal
     execSync(`git worktree remove --force '${wt}'`, { cwd: main });
   });
 

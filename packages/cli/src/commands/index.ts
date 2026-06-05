@@ -2,6 +2,7 @@
 import { fallbackToBash, registerPorted } from "../bridge.js";
 import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
+import { attestCommand } from "./attest.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand } from "./ci.js";
@@ -43,6 +44,9 @@ export function registerAll(): void {
   registerPorted("alert", alertCommand);
   // `doctor`: all four health sections ported TS (agent/pr/skills/launchd).
   registerPorted("doctor", doctorCommand);
+  // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
+  // bash counterpart (additive; the evidence chain is new product surface).
+  registerPorted("attest", attestCommand);
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

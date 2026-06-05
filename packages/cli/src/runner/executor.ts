@@ -65,6 +65,7 @@ import {
   systemClock,
   writeHeartbeat,
   worktreeAdd,
+  worktreeFetchOrigin,
   worktreeRemove,
   push as gitPush,
 } from "@roll/infra";
@@ -92,6 +93,11 @@ export type ProcessClock = Clock;
  * an in-memory double without spawning git.
  */
 export interface GitPort {
+  /** FIX-209: `_worktree_fetch_origin` — refresh `origin/<branch>` before the
+   *  cycle branches its worktree off it, so a just-merged PR is visible locally.
+   *  LENIENT: never throws; `fetched:false` on a network blip / missing remote
+   *  so the cycle proceeds on the (stale) baseline rather than toppling. */
+  fetchOrigin(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
   /** `_worktree_create` — STRICT add (exit code propagated). */
   worktreeAdd(repoCwd: string, path: string, branch: string, base: string): Promise<{ code: number }>;
   /** `_worktree_cleanup` — tolerant remove (always code 0). */
@@ -239,6 +245,23 @@ export async function executeCommand(
         }
       } catch {
         /* heal is best-effort */
+      }
+      // FIX-209: refresh origin/main BEFORE the worktree branches off it. The
+      // worktree is created with base `origin/main` (create_worktree below);
+      // without this fetch a PR merged on the remote since the last fetch is
+      // invisible locally and the cycle opens on a stale baseline → conflicts.
+      // LENIENT (mirrors v2 `_worktree_fetch_origin`): a fetch failure leaves a
+      // WARN trace and the cycle proceeds on the existing baseline.
+      try {
+        const { fetched } = await ports.git.fetchOrigin(ports.repoCwd, "main");
+        if (!fetched) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `[WARN] cycle ${ctx.cycleId}: preflight fetch origin main failed; proceeding on existing baseline`,
+          );
+        }
+      } catch {
+        /* fetch is lenient — never topple the cycle on a network blip */
       }
       return { event: { type: "preflight_done" } };
     }
@@ -712,6 +735,10 @@ export function nodePorts(opts: {
     clock,
     agentSpawn: opts.agentSpawn ?? realAgentSpawn,
     git: {
+      async fetchOrigin(repoCwd, branch) {
+        const r = await worktreeFetchOrigin(repoCwd, branch);
+        return { fetched: r.fetched };
+      },
       async worktreeAdd(repoCwd, path, branch, base) {
         return worktreeAdd(repoCwd, path, branch, base);
       },

@@ -144,3 +144,29 @@ describe("attestCommand", () => {
     expect(await silenced(() => inDir(proj, () => attestCommand([], { run: quietRun })))).toBe(1);
   });
 });
+
+describe("US-ATTEST-009 — self-score notes feed the report", () => {
+  it("same-story notes render in the fold; unrelated stories don't", async () => {
+    const proj = project();
+    mkdirSync(join(proj, ".roll", "notes"), { recursive: true });
+    writeFileSync(
+      join(proj, ".roll", "notes", "2026-06-05-roll-fix-FIX-300-1780000000.md"),
+      ["---", "skill: roll-fix", "story: FIX-300", "score: 8", "verdict: good", "ts: 2026-06-05T20:00:00Z", "---", "", "干净的一刀。"].join("\n"),
+    );
+    writeFileSync(
+      join(proj, ".roll", "notes", "2026-06-05-roll-fix-FIX-999-1780000001.md"),
+      ["---", "skill: roll-fix", "story: FIX-999", "score: 2", "verdict: bad", "ts: 2026-06-05T21:00:00Z", "---", "", "无关条目"].join("\n"),
+    );
+    await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    const html = readFileSync(
+      join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"),
+      "utf8",
+    );
+    expect(html).toContain("Self-Score · 自评（1）");
+    expect(html).toContain("<b>8</b>/10 · good");
+    expect(html).toContain("干净的一刀。");
+    expect(html).not.toContain("无关条目");
+  });
+});

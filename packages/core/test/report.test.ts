@@ -107,3 +107,26 @@ describe("badge ladder", () => {
     expect(html).toContain("缺移动端验证");
   });
 });
+
+describe("US-ATTEST-009 — Self-Score fold", () => {
+  it("renders a collapsed details block with entries", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
+      selfScores: [
+        { skill: "roll-fix", score: 6, verdict: "ok", ts: "2026-06-03T18:32:04Z", note: "Empty flaky CI card" },
+        { skill: "roll-build", score: 9, verdict: "good", ts: "2026-06-04T01:00:00Z", note: "" },
+      ],
+    });
+    expect(html).toContain("Self-Score · 自评（2）");
+    expect(html).toContain("<details");
+    expect(html).toContain("<b>6</b>/10 · ok");
+    expect(html).toContain("Empty flaky CI card");
+  });
+
+  it("no entries ⇒ whole block skipped (no placeholder)", () => {
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain("<details"); // the CSS rules may ship; the BLOCK must not
+    expect(html).not.toContain("Self-Score");
+  });
+});

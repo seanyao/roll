@@ -34,7 +34,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 
 export interface AttestDeps {
   now?: () => Date;
@@ -118,6 +118,51 @@ function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): 
   return null;
 }
 
+/**
+ * US-ATTEST-009 — same-story Self-Score entries from `.roll/notes/`:
+ * `YYYY-MM-DD-<skill>-<STORY>-<ts>.md` with YAML frontmatter
+ * {skill, story, score, verdict, ts} + a prose body. Tolerant reader: files
+ * that fail to parse are skipped; no notes ⇒ empty list ⇒ block skipped.
+ */
+export function readSelfScores(
+  projectPath: string,
+  storyId: string,
+): Array<{ skill: string; score: number; verdict: string; ts: string; note: string }> {
+  const dir = join(projectPath, ".roll", "notes");
+  if (!existsSync(dir)) return [];
+  const out: Array<{ skill: string; score: number; verdict: string; ts: string; note: string }> = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir).filter((f) => f.endsWith(".md") && f.includes(`-${storyId}-`));
+  } catch {
+    return [];
+  }
+  for (const name of names.sort()) {
+    try {
+      const text = readFileSync(join(dir, name), "utf8");
+      const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
+      if (!m) continue;
+      const fm = new Map<string, string>();
+      for (const line of (m[1] ?? "").split("\n")) {
+        const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line.trim());
+        if (kv?.[1] !== undefined) fm.set(kv[1], (kv[2] ?? "").trim());
+      }
+      if (fm.get("story") !== storyId) continue;
+      const score = Number(fm.get("score") ?? "");
+      out.push({
+        skill: fm.get("skill") ?? basename(name),
+        score: Number.isFinite(score) ? score : 0,
+        verdict: fm.get("verdict") ?? "",
+        ts: fm.get("ts") ?? "",
+        note: (m[2] ?? "").trim().slice(0, 300),
+      });
+    } catch {
+      /* tolerant reader */
+    }
+  }
+  return out;
+}
+
 /** `roll attest <story-id> [--deploy-url <url>]` */
 export async function attestCommand(args: string[], deps: AttestDeps = {}): Promise<number> {
   const storyId = args.find((a) => !a.startsWith("-"));
@@ -184,12 +229,14 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       ? `${manifest.test_pass.age_seconds}s ago`
       : "present"
     : "absent";
+  const selfScores = readSelfScores(projectPath, storyId);
   const html = renderReport({
     storyId,
     title: `${storyId} — Acceptance Evidence`,
     generatedAt: now.toISOString(),
     items,
     facts: { tcrCount: manifest.tcr_commits.length, ciConclusion: manifest.ci.conclusion, testPassAge: age },
+    ...(selfScores.length > 0 ? { selfScores } : {}),
   });
   const reportPath = join(runDir, "report.html");
   writeFileSync(reportPath, html);

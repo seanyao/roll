@@ -49,6 +49,9 @@ export interface ReportInput {
   items: AcReportItem[];
   /** Summary facts row (counts come from evidence.json). */
   facts?: { tcrCount: number; ciConclusion: string; testPassAge: string };
+  /** US-ATTEST-009 — same-story Self-Score entries from .roll/notes/; the
+   *  whole collapsed block is SKIPPED when none exist (no placeholder). */
+  selfScores?: Array<{ skill: string; score: number; verdict: string; ts: string; note: string }>;
 }
 
 const BADGE: Record<AcStatus, { icon: string; en: string; zh: string; cls: string }> = {
@@ -93,6 +96,17 @@ function acSection(item: AcReportItem): string {
 ${note}
 ${evs}
 </section>`;
+}
+
+function selfScoreBlock(entries: ReportInput["selfScores"]): string {
+  if (entries === undefined || entries.length === 0) return "";
+  const li = entries
+    .map(
+      (e) =>
+        `<li><b>${esc(String(e.score))}</b>/10 · ${esc(e.verdict)} · <code>${esc(e.skill)}</code> · <span class="meta">${esc(e.ts)}</span>${e.note !== "" ? `<br><span class="note">${esc(e.note)}</span>` : ""}</li>`,
+    )
+    .join("\n");
+  return `<details class="selfscore"><summary>Self-Score · 自评（${entries.length}）</summary>\n<ul>\n${li}\n</ul>\n</details>`;
 }
 
 /** Render the single-file report. Pure: same input → same bytes. */
@@ -145,6 +159,9 @@ figure.shot { margin:10px 0; } figure.shot img { max-width:100%; border:1px soli
 figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 .ev { margin:6px 0; font-size:13.5px; } .ev-label { color:var(--muted); font-size:12.5px; margin-bottom:4px; }
 .discrepancies { border:1px dashed #e8793a; border-radius:10px; padding:8px 16px; margin-top:28px; }
+details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:10px; padding:8px 16px; }
+details.selfscore summary { cursor:pointer; font-weight:600; }
+details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
 @media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
 ${ANSI_CSS}
 </style>
@@ -156,6 +173,7 @@ ${ANSI_CSS}
 ${facts}
 ${items.map(acSection).join("\n")}
 ${disc}
+${selfScoreBlock(input.selfScores)}
 </body>
 </html>
 `;

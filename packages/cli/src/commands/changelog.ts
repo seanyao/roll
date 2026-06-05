@@ -87,16 +87,26 @@ const LINT_PATH_FRAG = /(^|[^A-Za-z0-9_])(\.roll|docs|bin|tests|scripts)\//;
 type Row = { storyId: string; desc: string; source: string };
 type Entry = { storyId: string; desc: string; source: string; cat: string };
 
-/** Port of _read_done_stories. */
+/**
+ * Port of _read_done_stories — PLUS the FIX-196 bare-ID fix (whitelisted
+ * divergence from the frozen python oracle): the oracle only recognises the
+ * markdown-link form `[FIX-196](…)`, so bare-ID rows (the v3 backlog house
+ * style) lose their storyId and are silently DROPPED by the release-tag
+ * filter downstream. The TS reader accepts both forms; a lowercase suffix
+ * (`FIX-150b`) is part of the ID grammar.
+ */
 function readDoneStories(text: string): Row[] {
   const rows: Row[] = [];
+  const ID = /([A-Z]+(?:-[A-Z0-9]+)*-\d+[a-z]?)/; // US-ATTEST-001 · FIX-196 · FIX-150b · REFACTOR-046
   for (const line of text.split("\n")) {
     if (!line.startsWith("|") || countOccurrences(line, "|") < 4) continue;
     if (!line.includes("✅ Done")) continue;
     const parts = line.split("|");
     if (parts.length < 4) continue;
     const col1 = parts[1] ?? "";
-    const idM = /\[([A-Z]+-[A-Z0-9-]+-\d+|FIX-\d+|REFACTOR-\d+)\]/.exec(col1);
+    // Link form wins when present (anchored extraction); else bare form.
+    const linked = /\[([^\]]+)\]/.exec(col1);
+    const idM = ID.exec(linked ? (linked[1] ?? "") : col1);
     const storyId = idM ? (idM[1] ?? "") : "";
     const desc = (parts[2] ?? "").trim();
     if (!desc || desc.toLowerCase() === "description") continue;

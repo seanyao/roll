@@ -1,6 +1,6 @@
 {
   "name": "@seanyao/roll",
-  "version": "3.606.1",
+  "version": "3.606.2",
   "description": "Roll \u2014 Roll out features with AI agents",
   "packageManager": "pnpm@11.1.3",
   "scripts": {

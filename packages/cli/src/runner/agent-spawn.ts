@@ -107,6 +107,9 @@ export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: st
 
 /** Options for an {@link AgentSpawn} call. */
 export interface AgentSpawnOptions {
+  /** US-PORT-011: live sink — called with every raw stdout/stderr chunk as it
+   *  arrives (the observation window tails the file this feeds). */
+  onChunk?: (chunk: Buffer) => void;
   /** The agent's working directory — the cycle worktree. */
   cwd: string;
   /** The skill-document body to drive the agent with. */
@@ -184,10 +187,12 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
     const live = (process.env["ROLL_LOOP_STREAM"] ?? "") === "1";
     child.stdout?.on("data", (d: Buffer) => {
       if (live) process.stdout.write(d);
+      opts.onChunk?.(d);
       stdout += d.toString("utf8");
     });
     child.stderr?.on("data", (d: Buffer) => {
       if (live) process.stderr.write(d);
+      opts.onChunk?.(d);
       stderr += d.toString("utf8");
     });
     let settled = false;

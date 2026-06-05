@@ -293,9 +293,28 @@ export async function executeCommand(
     // execute: spawn the agent (TCR commits happen inside the worktree). The
     // exit code + timeout feed back as agent_exited; usage is captured for cost.
     case "spawn_agent": {
+      // US-PORT-011: the live observation file — one stable path per project,
+      // truncated at each agent start, fed every chunk in real time. The popup
+      // (runner template) and any `tail -f` watcher read THIS, not buffers.
+      const livePath = join(dirname(ports.paths.eventsPath), "live.log");
+      try {
+        writeFileSync(
+          livePath,
+          `── cycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} · agent ${cmd.agent} ──\n`,
+        );
+      } catch {
+        /* observation is best-effort */
+      }
       const res = await ports.agentSpawn(cmd.agent, {
         cwd: ports.paths.worktreePath,
         skillBody: ports.skillBody,
+        onChunk: (d: Buffer) => {
+          try {
+            appendFileSync(livePath, d);
+          } catch {
+            /* best-effort */
+          }
+        },
       });
       // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
       // per-cycle log next to events/runs — v2 keeps cycle logs; without this

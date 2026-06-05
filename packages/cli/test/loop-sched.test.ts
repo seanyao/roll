@@ -329,3 +329,22 @@ describe("FIX-197 — loop now legacy self-heal", async () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe("US-PORT-011 — observation window in the runner template", () => {
+  const s = buildLoopRunnerScript({ projectPath: "/p", slug: "s9", activeStart: 0, activeEnd: 24 });
+
+  it("pops a Terminal tail of live.log only when unmuted, before the cycle", () => {
+    expect(s).toContain('mute-s9');
+    expect(s).toContain("osascript");
+    expect(s).toContain("live.log");
+    expect(s.indexOf("osascript")).toBeLessThan(s.indexOf('loop run-once >>'));
+    // both mute flags gate the popup
+    expect(s).toContain('MUTE1="$RT/mute-s9"');
+    expect(s).toContain('loop/mute-s9');
+  });
+
+  it("generation-time rollBin override is baked verbatim", () => {
+    const o = buildLoopRunnerScript({ projectPath: "/p", slug: "s9", activeStart: 0, activeEnd: 24, rollBin: "/dev/roll-cli.js" });
+    expect(o).toContain('ROLL_BIN="${ROLL_BIN:-/dev/roll-cli.js}"');
+  });
+});

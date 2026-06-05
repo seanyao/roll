@@ -412,3 +412,25 @@ describe("FIX-198 status flips on the gitignored-.roll layout", () => {
     expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done");
   });
 });
+
+describe("US-PORT-011 — live.log streams the agent transcript", () => {
+  it("happy path leaves the shim output in .roll-side live.log (header + chunks)", async () => {
+    const { repo } = makeFixture("live");
+    const rt = tmp("live-rt");
+    const cycleId = "20260606-030000-3001";
+    const p = paths(rt, cycleId);
+    // The shim honours the real-spawn contract: feed stdout through onChunk.
+    const streamingShim: AgentSpawn = async (agent, opts) => {
+      const r = await shimAgentTcr(agent, opts);
+      opts.onChunk?.(Buffer.from(r.stdout));
+      return r;
+    };
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: streamingShim, github: fakeGithub(0) };
+    const result = await runCycleOnce({ ports, ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never } });
+    expect(result.terminal).toBe("done");
+    const live = readFileSync(join(rt, "live.log"), "utf8");
+    expect(live).toContain(`── cycle ${cycleId}`);
+    expect(live).toContain("model: claude"); // shim stdout chunk streamed through
+  });
+});

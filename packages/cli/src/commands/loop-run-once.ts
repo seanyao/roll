@@ -17,6 +17,35 @@ import { projectIdentity } from "@roll/infra";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type RunnerPaths, dryRunPlan, nodePorts, runCycleOnce } from "../runner/index.js";
+import { spawn } from "node:child_process";
+
+/** US-PORT-011: after a delivered cycle, surface the acceptance report —
+ *  print its path always; auto-open in the browser unless the project is
+ *  muted (mute-<slug> flag, same gate as the popup). Best-effort. */
+export function announceReport(
+  projectPath: string,
+  slug: string,
+  storyId: string,
+  opener: (p: string) => void = (p) => {
+    try {
+      spawn("open", [p], { stdio: "ignore", detached: true }).unref();
+    } catch {
+      /* best-effort */
+    }
+  },
+): string | null {
+  if (storyId === "") return null;
+  const report = join(projectPath, ".roll", "verification", storyId, "latest", "report.html");
+  if (!existsSync(report)) return null;
+  process.stdout.write(`evidence: ${report}\n验收报告: ${report}\n`);
+  const muted =
+    existsSync(join(projectPath, ".roll", "loop", `mute-${slug}`)) ||
+    existsSync(
+      join(process.env["ROLL_SHARED_ROOT"] || join(process.env["HOME"] ?? "", ".shared", "roll"), "loop", `mute-${slug}`),
+    );
+  if (!muted) opener(report);
+  return report;
+}
 
 /** Build the cycle id `<YYYYmmdd-HHMMSS>-<pid>` (mirrors bin/roll:8828). */
 function makeCycleId(now = new Date(), pid = process.pid): string {
@@ -106,5 +135,11 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 0;
   }
   process.stdout.write(`loop run-once: cycle ${cycleId} → ${result.terminal ?? "unknown"}\n`);
+  // US-PORT-011: delivered? surface the acceptance report (print + auto-open
+  // unless muted) — the owner's "做完想看 attest html" loop closure.
+  if (result.terminal === "done") {
+    const storyId = (result.state?.ctx?.storyId ?? "").trim();
+    announceReport(id.path, id.slug, storyId);
+  }
   return result.terminal === "failed" || result.terminal === "blocked" ? 1 : 0;
 }

@@ -79,6 +79,8 @@ function realDeps(): LoopSchedDeps {
 export interface LoopRunnerInput {
   projectPath: string;
   slug: string;
+  /** Optional generation-time roll binary override (dev installs). */
+  rollBin?: string;
   /** Active window [start, end) in hours; full window = 0..24. */
   activeStart: number;
   activeEnd: number;
@@ -112,7 +114,15 @@ if [ -z "$ROLL_LOOP_FORCE" ]; then
 fi
 # Keep the box awake for the duration of the cycle.
 caffeinate -i -w $$ 2>/dev/null &
-ROLL_BIN="\${ROLL_BIN:-$(command -v roll || echo /opt/homebrew/bin/roll)}"
+# US-PORT-011 observation window: unless muted (mute-<slug> in the project rt
+# dir or the shared root), pop a Terminal tailing the per-cycle live stream.
+MUTE1="$RT/mute-${input.slug}"
+MUTE2="\${ROLL_SHARED_ROOT:-$HOME/.shared/roll}/loop/mute-${input.slug}"
+if [ ! -f "$MUTE1" ] && [ ! -f "$MUTE2" ] && command -v osascript >/dev/null 2>&1; then
+  : > "$RT/live.log" 2>/dev/null || true
+  osascript -e "tell application \\"Terminal\\" to do script \\"printf 'roll live · ${input.slug}\\\\n'; tail -n +1 -f $RT/live.log\\"" >/dev/null 2>&1 || true
+fi
+ROLL_BIN="\${ROLL_BIN:-${input.rollBin ?? '$(command -v roll || echo /opt/homebrew/bin/roll)'}}"
 cd "${input.projectPath}" || exit 0
 echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] cycle start (v3 run-once)" >> "$LOG"
 "$ROLL_BIN" loop run-once >> "$LOG" 2>&1
@@ -252,9 +262,16 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
 
   // 1. loop service — the v3 heart.
   const loopRunner = join(shared, "loop", `run-${id.slug}.sh`);
+  const rollBinOverride = (process.env["ROLL_RUNNER_ROLL_BIN"] ?? "").trim();
   writeExecutable(
     loopRunner,
-    buildLoopRunnerScript({ projectPath: id.path, slug: id.slug, activeStart: 0, activeEnd: 24 }),
+    buildLoopRunnerScript({
+      projectPath: id.path,
+      slug: id.slug,
+      activeStart: 0,
+      activeEnd: 24,
+      ...(rollBinOverride !== "" ? { rollBin: rollBinOverride } : {}),
+    }),
   );
   const loopLabel = launchdLabel("loop", id.slug);
   const loopPlist = launchdPlistPath("loop", id.slug, ld);

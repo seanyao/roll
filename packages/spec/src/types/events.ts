@@ -33,6 +33,9 @@ export type RollEvent =
   | { type: "ci:rerun"; prNumber: number; ts: number }
   // Alert (BC2/BC6)
   | { type: "alert:notify"; channel: string; message: string; ts: number }
+  // Peer gate (FIX-150b) — the hard-trigger audit trail: every high-complexity
+  // delivery records whether peer review happened ("consulted") or was skipped.
+  | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped"; reasons: string[]; ts: number }
   // Policy (BC6) — governance decisions as facts
   | { type: "policy:auto_merge"; prNumber: number; rule: string; ts: number }
   | { type: "policy:flag_review"; prNumber: number; rule: string; ts: number }

@@ -9,6 +9,7 @@ import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand } from "./dashboard.js";
 import { doctorCommand } from "./doctor.js";
 import { feedbackCommand } from "./feedback.js";
+import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import { migrateCommand } from "./migrate.js";
@@ -78,6 +79,15 @@ export function registerAll(): void {
   // `feedback`: full surface TS (arg parse, repo resolution, env block,
   // print-url + gh issue create). No sub-paths left on bash.
   registerPorted("feedback", feedbackCommand);
+  // `init`: the DETERMINISTIC scaffolding paths are TS (fresh project init +
+  // re-init section-merge, with the v2 roll-init.py UI rendered natively). The
+  // legacy-codebase onboarding flow, `init --apply`, unknown -flags, and the
+  // no-templates guard all RETURN null → fall back to bash (which owns the
+  // interactive agent launch and the i18n'd error messages).
+  registerPorted("init", (args) => {
+    const r = initCommand(args);
+    return r ?? fallbackToBash(["init", ...args]).status;
+  });
   // `migrate`: full surface TS (three-state idempotency, dry-run preview,
   // git-mv execute with the single atomic commit). No sub-paths on bash.
   registerPorted("migrate", migrateCommand);

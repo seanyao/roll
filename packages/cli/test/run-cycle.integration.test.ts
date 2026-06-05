@@ -27,7 +27,7 @@
  * event STILL written, lock released, and a fresh runCycleOnce takes over cleanly.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -345,24 +345,25 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
  *   4. a dead claim left by a killed cycle is recycled to 📋 Todo at the next
  *      cycle's preflight (the inner lock guarantees single-flight).
  */
+function makeGitignoredFixture(tag: string): { repo: string } {
+  const remote = tmp(`${tag}-remote`);
+  git(remote, ["init", "-q", "--bare", "-b", "main"]);
+  const seed = tmp(`${tag}-seed`);
+  git(seed, ["clone", "-q", remote, "."]);
+  writeFileSync(join(seed, ".gitignore"), ".roll/\n", "utf8");
+  writeFileSync(join(seed, "app.txt"), "app\n", "utf8");
+  git(seed, [...GIT_ID, "add", "-A"]);
+  git(seed, [...GIT_ID, "commit", "-q", "-m", "seed app (.roll gitignored)"]);
+  git(seed, ["push", "-q", "origin", "main"]);
+  const repo = tmp(`${tag}-repo`);
+  git(repo, ["clone", "-q", remote, "."]);
+  // .roll exists ONLY in the main checkout — exactly the SoloGo layout.
+  mkdirSync(join(repo, ".roll"), { recursive: true });
+  writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
+  return { repo };
+}
+
 describe("FIX-198 status flips on the gitignored-.roll layout", () => {
-  function makeGitignoredFixture(tag: string): { repo: string } {
-    const remote = tmp(`${tag}-remote`);
-    git(remote, ["init", "-q", "--bare", "-b", "main"]);
-    const seed = tmp(`${tag}-seed`);
-    git(seed, ["clone", "-q", remote, "."]);
-    writeFileSync(join(seed, ".gitignore"), ".roll/\n", "utf8");
-    writeFileSync(join(seed, "app.txt"), "app\n", "utf8");
-    git(seed, [...GIT_ID, "add", "-A"]);
-    git(seed, [...GIT_ID, "commit", "-q", "-m", "seed app (.roll gitignored)"]);
-    git(seed, ["push", "-q", "origin", "main"]);
-    const repo = tmp(`${tag}-repo`);
-    git(repo, ["clone", "-q", remote, "."]);
-    // .roll exists ONLY in the main checkout — exactly the SoloGo layout.
-    mkdirSync(join(repo, ".roll"), { recursive: true });
-    writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
-    return { repo };
-  }
 
   it("pick from main · In-Progress mid-cycle · Done at terminal", async () => {
     const { repo } = makeGitignoredFixture("ord");
@@ -372,10 +373,11 @@ describe("FIX-198 status flips on the gitignored-.roll layout", () => {
     const backlogPath = join(repo, ".roll", "backlog.md");
 
     let inProgressDuringRun = "";
-    let worktreeHadRoll: boolean | null = null;
+    let worktreeRollIsLink: boolean | null = null;
     const shim: AgentSpawn = async (agent, opts) => {
       inProgressDuringRun = readFileSync(backlogPath, "utf8");
-      worktreeHadRoll = existsSync(join(opts.cwd, ".roll"));
+      // FIX-204C: the worktree now SEES .roll — as a symlink to the main one.
+      worktreeRollIsLink = lstatSync(join(opts.cwd, ".roll"), { throwIfNoEntry: false })?.isSymbolicLink() === true;
       return shimAgentTcr(agent, opts);
     };
 
@@ -387,7 +389,7 @@ describe("FIX-198 status flips on the gitignored-.roll layout", () => {
     });
 
     expect(result.terminal).toBe("done");
-    expect(worktreeHadRoll).toBe(false); // the layout under test is real
+    expect(worktreeRollIsLink).toBe(true); // FIX-204C: linked, not checked out
     expect(inProgressDuringRun).toContain("🔨 In Progress"); // claimed on MAIN, mid-cycle
     expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done"); // flipped at terminal
     expect(readFileSync(backlogPath, "utf8")).not.toContain("🔨 In Progress");
@@ -454,5 +456,68 @@ describe("FIX-204B — the executor pins the picked story into the agent spawn",
     });
     expect(result.terminal).toBe("done");
     expect(seenStoryId).toBe("US-RUN-001");
+  });
+});
+
+describe("FIX-204C — worktree sees the main .roll via symlink", () => {
+  it("links on create, agent reads backlog through it, commit stays clean, cleanup spares the target", async () => {
+    const { repo } = makeGitignoredFixture("link");
+    const rt = tmp("link-rt");
+    const cycleId = "20260606-032000-3201";
+    const p = paths(rt, cycleId);
+
+    let linkTarget = "";
+    let backlogViaWorktree = "";
+    let wtStatus = "";
+    let committed = "";
+    const shim: AgentSpawn = async (agent, opts) => {
+      linkTarget = readlinkSync(join(opts.cwd, ".roll"));
+      backlogViaWorktree = readFileSync(join(opts.cwd, ".roll", "backlog.md"), "utf8");
+      const r = await shimAgentTcr(agent, opts);
+      // AFTER the shim's `git add -A` + commit: the symlink must NOT be tracked
+      // (info/exclude guard — `.gitignore`'s dir-only `.roll/` misses links).
+      wtStatus = git(opts.cwd, ["status", "--porcelain"]);
+      committed = git(opts.cwd, ["show", "--name-only", "--format=", "HEAD"]);
+      return r;
+    };
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    expect(linkTarget).toBe(join(repo, ".roll"));
+    expect(backlogViaWorktree).toContain("US-RUN-001");
+    expect(wtStatus).not.toContain(".roll");
+    // the delivered commit carries the work, never the link
+    expect(committed).toContain("delivered.txt");
+    expect(committed).not.toContain(".roll");
+    // cleanup: worktree gone, MAIN .roll intact (the LINK died, not the target)
+    expect(existsSync(p.worktreePath)).toBe(false);
+    expect(readFileSync(join(repo, ".roll", "backlog.md"), "utf8")).toContain("✅ Done");
+  });
+
+  it("a project that TRACKS .roll keeps its real checked-out dir (no link, no exclude line)", async () => {
+    const { repo } = makeFixture("tracked");
+    const rt = tmp("tracked-rt");
+    const cycleId = "20260606-032000-3202";
+    const p = paths(rt, cycleId);
+    let isLink: boolean | null = null;
+    const shim: AgentSpawn = async (agent, opts) => {
+      isLink = lstatSync(join(opts.cwd, ".roll")).isSymbolicLink();
+      return shimAgentTcr(agent, opts);
+    };
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+    expect(result.terminal).toBe("done");
+    expect(isLink).toBe(false);
+    expect(existsSync(join(repo, ".git", "info", "exclude")) ? readFileSync(join(repo, ".git", "info", "exclude"), "utf8") : "").not.toMatch(/^\.roll$/m);
   });
 });

@@ -18,6 +18,7 @@ import {
   c,
   cycleRow,
   dayBand,
+  fmtDur,
   metric,
   metricDollar,
   metricDur,
@@ -28,6 +29,14 @@ import {
   trunc,
   type CycleView,
 } from "../render.js";
+import {
+  INNER_LOCK_STALE_SEC,
+  isLockHeld,
+  livenessVerdict,
+  parseLock,
+  systemPidAlive,
+  type PidAlive,
+} from "@roll/infra";
 import { computeListCost, currencyFor } from "./prices-cost.js";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -377,7 +386,7 @@ function normalizeCycleLabel(lbl: string): string {
   return lbl;
 }
 
-interface Cycle {
+export interface Cycle {
   label: string;
   start: Date | null;
   end: Date | null;
@@ -514,6 +523,57 @@ function aggregate(events: RawEvent[], cron: CronEntry[]): Cycle[] {
     }
   }
   return cycles;
+}
+
+/** A live-cycle verdict — the dashboard eyebrow and the US-PORT-011 observation
+ *  window share this single determination (FIX-203, req 4). */
+export interface LiveCycle {
+  /** A v3 cycle is executing right now. */
+  running: boolean;
+  /** The story being worked, when known (from the open cycle's `pick_todo`). */
+  story: string | null;
+  /** Wall-clock seconds since the open cycle's `cycle_start`. */
+  elapsedSec: number;
+}
+
+/**
+ * Decide whether a v3 cycle is live RIGHT NOW, reading the signals the v3 heart
+ * actually emits (FIX-203). The v2 `state.yaml` `status:` line the old eyebrow
+ * trusted is never written by the TS runner, so liveness must come from:
+ *   - a held `inner.lock` — pid alive AND fresh (`isLockHeld`, 4h staleness), and
+ *   - a fresh `heartbeat` (`livenessVerdict`, 30-min default), and
+ *   - a most-recent `cycle_start` with no matching `cycle_end` (an open cycle).
+ *
+ * All three must hold; any missing/stale signal → not running. This is
+ * deliberately conservative so a crashed cycle (dead pid / stale heartbeat)
+ * does not masquerade as live. `rtDir === null` (fixture / unresolved project)
+ * → not running.
+ */
+export function detectLiveCycle(
+  rtDir: string | null,
+  cycles: Cycle[],
+  now: Date,
+  pidAlive: PidAlive = systemPidAlive,
+): LiveCycle {
+  const dead: LiveCycle = { running: false, story: null, elapsedSec: 0 };
+  if (rtDir === null) return dead;
+  const lockPath = join(rtDir, "inner.lock");
+  if (!existsSync(lockPath)) return dead;
+  const nowSec = Math.floor(now.getTime() / 1000);
+  let lockRaw: string;
+  try {
+    lockRaw = readFileSync(lockPath, "utf8");
+  } catch {
+    return dead;
+  }
+  if (!isLockHeld(parseLock(lockRaw), nowSec, INNER_LOCK_STALE_SEC, pidAlive)) return dead;
+  const hb = livenessVerdict(join(rtDir, "heartbeat"), { now: () => nowSec });
+  if (!hb.alive) return dead;
+  // cycles are sorted newest-first; the open one (no end) is the live cycle.
+  const open = cycles.find((cy) => cy.start !== null && cy.end === null);
+  if (open === undefined || open.start === null) return dead;
+  const elapsedSec = Math.max(0, Math.trunc((now.getTime() - open.start.getTime()) / 1000));
+  return { running: true, story: open.story, elapsedSec };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1397,6 +1457,8 @@ interface RenderArgs {
   gitMerges: Record<string, GitMerge>;
   claudeSlug: string | null;
   now: Date;
+  /** Loop runtime dir for live-cycle detection (null in fixture mode). */
+  rtDir: string | null;
 }
 
 function render(
@@ -1420,19 +1482,45 @@ function render(
     if ((lang === "both" || lang === "zh") && zhLine !== null) out.push(zhLine);
   };
 
+  // Liveness is derived from the v3 heart's own signals (inner.lock + heartbeat
+  // + open cycle_start), not the v2 `state.yaml` the TS runner never writes
+  // (FIX-203). Computed once here; the title caption and the eyebrow share it.
+  const live = detectLiveCycle(args.rtDir, cycles, now);
+
   // ── Title row ──
   const nCycles = cycles.length;
+  // When a cycle is live, split the count so a not-yet-completed cycle is not
+  // miscounted as a finished one (FIX-203 req 3: "0 cycles" was misleading —
+  // completed cycles are one tally, the running one is listed apart).
+  const runningCount = cycles.filter((cy) => cy.outcome === "running").length;
+  const caption = live.running
+    ? `${nCycles - runningCount} done · ${runningCount} running / ${days * 24}h`
+    : `${nCycles} cycles / ${days * 24}h`;
   const titleL = c("fg", "roll loop", { bold: true }) + c("muted", "  ·  ") + c("dim", "health");
-  const titleR =
-    c("dim", shYmdHm(now)) + c("muted", " · ") + c("muted", `${nCycles} cycles / ${days * 24}h`);
+  const titleR = c("dim", shYmdHm(now)) + c("muted", " · ") + c("muted", caption);
   out.push(row(titleL, titleR));
   out.push("");
 
   // ── Status eyebrow ──
+  // A live verdict (computed above) trumps a stale state.yaml.
   const statusWord = (state["status"] ?? "idle").toLowerCase();
   let ebL: string;
   let ebZh = "";
-  if (statusWord === "running") {
+  if (live.running) {
+    const item = live.story || state["current_item"] || "—";
+    const elapsed = fmtDur(live.elapsedSec);
+    ebL =
+      c("purple", "⏵", { bold: true }) +
+      " " +
+      c("purple", "RUNNING", { bold: true }) +
+      c("muted", "   ") +
+      c("dim", "story ") +
+      c("blue", item, { bold: true }) +
+      c("muted", " · ") +
+      c("dim", "elapsed ") +
+      c("fg", elapsed);
+    ebZh = c("dim", "  正在运行 · 当前 ") + c("blue", item) + c("dim", " · 已运行 ") + c("fg", elapsed);
+  } else if (statusWord === "running") {
     const item = state["current_item"] || "—";
     ebL =
       c("purple", "⏵", { bold: true }) +
@@ -1857,6 +1945,7 @@ export function dashboardCommand(argv: string[]): number {
     gitMerges,
     claudeSlug: slug,
     now,
+    rtDir: useFixture || slug === null ? null : loopRuntimeDir(slug),
   });
   process.stdout.write(out.join("\n") + "\n");
   return 0;

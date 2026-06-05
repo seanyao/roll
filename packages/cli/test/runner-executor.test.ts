@@ -114,6 +114,40 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     );
     expect(failed["built"]).toEqual([]);
   });
+
+  it("FIX-208: tcr_count comes from ctx (was hardcoded 0); cost fields mirror ctx.cost", () => {
+    const withFacts: CycleContext = {
+      ...CTX,
+      tcrCount: 5,
+      cost: {
+        cycleId: CTX.cycleId,
+        agent: "claude",
+        model: "claude-opus-4-8",
+        tokensIn: 150,
+        tokensOut: 60,
+        estimatedCost: 0.42,
+        revertCount: 0,
+        effectiveCost: 0.42,
+      },
+    };
+    const row = buildRunRow(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      withFacts,
+    );
+    expect(row["tcr_count"]).toBe(5);
+    expect(row["cost_usd"]).toBe(0.42);
+    expect(row["tokens_in"]).toBe(150);
+    expect(row["tokens_out"]).toBe(60);
+  });
+
+  it("FIX-208: absent ctx.cost omits cost fields; absent tcrCount defaults to 0", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "idle", outcome: "built", cycleId: CTX.cycleId },
+      CTX,
+    );
+    expect(row["tcr_count"]).toBe(0);
+    expect(row).not.toHaveProperty("cost_usd");
+  });
 });
 
 describe("dryRunPlan", () => {
@@ -153,6 +187,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       worktreeRemove: vi.fn(async () => ({ code: 0 })),
       push: vi.fn(async () => ({ code: 0 })),
       commitsAhead: vi.fn(async () => 3),
+      tcrCount: vi.fn(async () => 4),
     },
     github: {
       repoSlug: vi.fn(async () => "o/r"),
@@ -219,10 +254,37 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
   });
 
+  it("FIX-208: spawn_agent parses claude stream-json stdout → ctxPatch.cost", async () => {
+    const stream = [
+      JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage: { input_tokens: 120, output_tokens: 30 } } }),
+      JSON.stringify({ type: "result", subtype: "success", total_cost_usd: 0.05 }),
+    ].join("\n");
+    const { ports } = fakePorts({
+      agentSpawn: vi.fn(async () => ({ stdout: stream, stderr: "", exitCode: 0, timedOut: false })),
+    });
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    expect(r.ctxPatch?.cost).toBeDefined();
+    expect(r.ctxPatch?.cost?.tokensIn).toBe(120);
+    expect(r.ctxPatch?.cost?.tokensOut).toBe(30);
+    expect(r.ctxPatch?.cost?.model).toBe("claude-opus-4-8");
+  });
+
+  it("FIX-208: spawn_agent with no parseable usage → no cost patch (no fake zero)", async () => {
+    const { ports } = fakePorts(); // default stdout is "" → sumClaudeStream null
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    expect(r.ctxPatch?.cost).toBeUndefined();
+  });
+
   it("capture_facts reads commits ahead via git port", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3, usedWorktree: true } });
+  });
+
+  it("FIX-208: capture_facts returns real tcr count via git port → ctxPatch.tcrCount", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(r.ctxPatch?.tcrCount).toBe(4);
   });
 
   // FIX-207 — attest gate is wired into capture_facts (delivery without a fresh

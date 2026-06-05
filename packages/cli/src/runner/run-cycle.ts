@@ -134,6 +134,11 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
         const res = await executeCommand(cmd, ports, liveCtx);
         if (res.lockReleased === true) lockReleased = true;
         if (res.event !== undefined) nextEvent = res.event;
+        // FIX-208: fold executor-captured truth (real tcr count, parsed cost)
+        // into the live context so the later append_run / cycle:end commands —
+        // which read liveCtx — carry it. The orchestrator never owns these (it
+        // is pure), so this is the only place they merge.
+        if (res.ctxPatch !== undefined) liveCtx = { ...liveCtx, ...res.ctxPatch };
       }
 
       // Terminal? stop the walk once a status is stamped and no feedback remains.

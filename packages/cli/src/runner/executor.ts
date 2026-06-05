@@ -50,8 +50,10 @@ import {
   planPublishPr,
   resolveRoute,
   resolveFallback,
+  sumClaudeStream,
+  toCycleCost,
 } from "@roll/core";
-import type { RollEvent } from "@roll/spec";
+import type { CycleCost, RollEvent } from "@roll/spec";
 import {
   type Clock,
   acquireLock,
@@ -98,6 +100,9 @@ export interface GitPort {
   push(repoCwd: string, branch: string): Promise<{ code: number }>;
   /** `git rev-list --count origin/main..HEAD` in the worktree → commits ahead. */
   commitsAhead(worktreeCwd: string): Promise<number>;
+  /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
+   *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree. */
+  tcrCount(worktreeCwd: string): Promise<number>;
 }
 
 /** GitHub facet — the publish-plan executor + slug resolution. */
@@ -196,6 +201,10 @@ export interface ExecuteResult {
   event?: CycleEvent;
   /** True iff this command released the inner lock (driver stops re-releasing). */
   lockReleased?: boolean;
+  /** FIX-208: live-context enrichment the orchestrator never owns (it is pure
+   *  and clock/spawn-free) — real tcr count + parsed cost. The driver folds
+   *  this into liveCtx so the later append_run / cycle:end carry truthful data. */
+  ctxPatch?: Partial<CycleContext>;
 }
 
 /**
@@ -341,7 +350,29 @@ export async function executeCommand(
       } catch {
         /* logging must never fail the cycle */
       }
-      return { event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut } };
+      // FIX-208: fold the agent's real usage into a per-cycle cost. claude runs
+      // with --output-format stream-json, so its stdout carries per-turn usage +
+      // a final total_cost_usd (cost/tracker.sumClaudeStream mirrors loop-fmt).
+      // Best-effort: a parse miss leaves cost absent (cycle:end keeps the zero
+      // placeholder) — usage accounting must never fail the cycle.
+      let costPatch: CycleCost | undefined;
+      try {
+        const usage = sumClaudeStream(res.stdout.split("\n"));
+        if (usage !== null) {
+          costPatch = toCycleCost(usage, {
+            cycleId: ctx.cycleId,
+            agent: ctx.agent ?? cmd.agent,
+            // TCR reverts are not tracked at this layer yet; nominal == effective.
+            revertCount: 0,
+          });
+        }
+      } catch {
+        /* usage parse is best-effort */
+      }
+      return {
+        event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut },
+        ...(costPatch !== undefined ? { ctxPatch: { cost: costPatch } } : {}),
+      };
     }
 
     // watchdog teardown — SIGKILL is owned by the spawn-local timeout; here the
@@ -362,6 +393,15 @@ export async function executeCommand(
     // short-circuits before capture).
     case "capture_facts": {
       const commitsAhead = await ports.git.commitsAhead(ports.paths.worktreePath);
+      // FIX-208: count real `tcr:` commits while the worktree is still alive
+      // (the done/cleanup path removes it before the runs row is written). Folded
+      // into liveCtx so buildRunRow stops hardcoding 0. Best-effort → 0 on error.
+      let tcrCount = 0;
+      try {
+        tcrCount = await ports.git.tcrCount(ports.paths.worktreePath);
+      } catch {
+        /* count is best-effort; a git miss must not fail the cycle */
+      }
       // FIX-150b peer hard-trigger gate: agent-agnostic, runs in EVERY cycle's
       // capture step. High-complexity delivery without peer evidence → ALERT +
       // `peer:gate` event (auditable); soft by default — the gate records, it
@@ -421,7 +461,7 @@ export async function executeCommand(
         timedOut: false,
         commitsAhead,
       };
-      return { event: { type: "facts_captured", facts } };
+      return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount } };
     }
 
     // delivery/pr planPublishPr → github.runPublishPlan → published result.
@@ -491,7 +531,14 @@ export async function executeCommand(
 
     // events/bus appendEvent (I8 — terminal event written unconditionally).
     case "emit_event":
-      ports.events.appendEvent(ports.paths.eventsPath, stampTs(cmd.event, ports.clock()));
+      // FIX-208: the orchestrator is pure (no clock/spawn) so it builds cycle:end
+      // with a zero-cost placeholder. Enrich it here with the real per-cycle cost
+      // folded into liveCtx after spawn_agent, so the terminal event and the runs
+      // row report the SAME cost. Other events pass through untouched.
+      ports.events.appendEvent(
+        ports.paths.eventsPath,
+        stampTs(withRealCost(cmd.event, ctx), ports.clock()),
+      );
       return {};
 
     // events/bus upsertRun — the dashboard terminal record (v2 runs.jsonl shape).
@@ -535,22 +582,41 @@ function stampTs(event: RollEvent, ts: number): RollEvent {
   return { ...event, ts } as RollEvent;
 }
 
+/** FIX-208: replace a cycle:end event's zero-cost placeholder with the real cost
+ *  folded into liveCtx after spawn_agent. Non-cycle:end events pass through; a
+ *  cycle with no parsed usage (`ctx.cost` absent) keeps the placeholder. */
+function withRealCost(event: RollEvent, ctx: CycleContext): RollEvent {
+  if (event.type !== "cycle:end" || ctx.cost === undefined) return event;
+  return { ...event, cost: ctx.cost };
+}
+
 /** Build the v2-shaped runs.jsonl row (keys verified against the dashboard
  *  difftest fixture: project/run_id/ts/tcr_count/built[]/status/agent/duration_sec).
- *  The bus upsert adds story_id + cycle_id for the dedupe key. */
+ *  The bus upsert adds story_id + cycle_id for the dedupe key. FIX-208: tcr_count
+ *  is the real captured count (was hardcoded 0); cost fields are added from the
+ *  same liveCtx cost the cycle:end event carries, so the two records agree. */
 export function buildRunRow(
   cmd: Extract<CycleCommand, { kind: "append_run" }>,
   ctx: CycleContext,
 ): Record<string, unknown> {
   const built = cmd.status === "done" || cmd.status === "built" ? [ctx.storyId ?? ""].filter(Boolean) : [];
-  return {
+  const row: Record<string, unknown> = {
     run_id: cmd.cycleId,
     status: cmd.status,
     agent: ctx.agent ?? "",
     built,
-    tcr_count: 0,
+    tcr_count: ctx.tcrCount ?? 0,
     outcome: cmd.outcome,
   };
+  // Additive cost fields (v2 runs rows omit cost — the dashboard reads it from
+  // the cycle:end event; surfacing it here keeps the human-facing 可回溯链 row
+  // truthful too, sourced from the SAME ctx.cost as cycle:end → consistent).
+  if (ctx.cost !== undefined) {
+    row["cost_usd"] = ctx.cost.estimatedCost;
+    row["tokens_in"] = ctx.cost.tokensIn;
+    row["tokens_out"] = ctx.cost.tokensOut;
+  }
+  return row;
 }
 
 /** Compose the gh pr-create body (commit-count-style; kept simple + pure). */
@@ -662,6 +728,16 @@ export function nodePorts(opts: {
         }).catch(() => ({ stdout: "0" }));
         const n = Number((r.stdout ?? "0").trim());
         return Number.isFinite(n) ? n : 0;
+      },
+      async tcrCount(worktreeCwd) {
+        // v2口径 (bin/roll:8724): git log --oneline origin/main..HEAD | grep -c ' tcr:'.
+        const r = await execFileAsync("git", ["log", "--oneline", "origin/main..HEAD"], {
+          cwd: worktreeCwd,
+          encoding: "utf8",
+        }).catch(() => ({ stdout: "" }));
+        return (r.stdout ?? "")
+          .split("\n")
+          .filter((l) => l.includes(" tcr:")).length;
       },
     },
     github: {

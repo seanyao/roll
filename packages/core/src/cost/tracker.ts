@@ -311,6 +311,66 @@ export function sumKimiWire(lines: readonly string[]): SessionAgg | null {
   };
 }
 
+const CLAUDE_DEFAULT_MODEL = "claude";
+
+/**
+ * Sum claude `--output-format stream-json` usage, mirroring loop-fmt.py
+ * `_handle_assistant` + `_handle_result` (lib/loop-fmt.py:171-182, 414-436).
+ * `result.usage` carries the LAST turn only, so the cumulative totals come from
+ * accumulating each `type:assistant` `message.usage` across every turn; cache
+ * fields map cache_creation_input_tokens→cache_creation,
+ * cache_read_input_tokens→cache_read. The model is the last assistant turn's
+ * (or the `result` event's). claude's self-reported `total_cost_usd` is carried
+ * as `cost_reported` for audit only — the authoritative list cost is computed
+ * downstream from the price table ({@link toCycleCost}), exactly as loop-fmt
+ * freezes cost at the snapshot rather than trusting the wire number. `lines` are
+ * the agent's raw stdout lines (one JSON object per line). Returns null when no
+ * assistant `usage` block was seen ("n/a, never fake zero").
+ */
+export function sumClaudeStream(lines: readonly string[]): AgentUsage | null {
+  let tin = 0;
+  let tout = 0;
+  let tcr = 0;
+  let tcw = 0;
+  let costReported = 0;
+  let model: string | null = null;
+  let seen = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === "") continue;
+    let o: Record<string, unknown>;
+    try {
+      o = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (o["type"] === "assistant") {
+      const m = (o["message"] ?? {}) as Record<string, unknown>;
+      const u = m["usage"] as Record<string, unknown> | undefined | null;
+      if (u) {
+        seen = true;
+        tin += intOr(u["input_tokens"]);
+        tout += intOr(u["output_tokens"]);
+        tcw += intOr(u["cache_creation_input_tokens"]);
+        tcr += intOr(u["cache_read_input_tokens"]);
+      }
+      if (typeof m["model"] === "string" && m["model"]) model = m["model"];
+    } else if (o["type"] === "result") {
+      costReported += floatOr(o["total_cost_usd"]);
+      if (typeof o["model"] === "string" && o["model"]) model = o["model"];
+    }
+  }
+  if (!seen) return null;
+  return {
+    model: model ?? CLAUDE_DEFAULT_MODEL,
+    input_tokens: tin,
+    output_tokens: tout,
+    cache_creation_tokens: tcw,
+    cache_read_tokens: tcr,
+    cost_reported: costReported,
+  };
+}
+
 /**
  * Aggregate several per-file summaries into one, mirroring the SUM loop in
  * `usage_from_session` (pi.py:169-200 / kimi.py:249-278): the first non-null

@@ -288,6 +288,8 @@ TCR Micro-commits → git push → CI Pass → Deploy → Verification Gate
 
 **验证门禁（Verification Gate）** 是最后一道关卡：要求提供**鲜活证据**（测试输出截图、curl 响应、浏览器截图），AI 的自述（"I confirmed it works"）不被接受。
 
+这些证据现在会固化成每个 story 的验收报告——见[验收证据（`roll attest`）](acceptance-evidence.md)：逐条 AC 判定、零证据红线、一个非工程角色也能审计的离线单文件 HTML。
+
 > **场景**：执行 US-007（写入审计事件）。
 >
 > Action 1：为 `AuditService.record()` 写 RED 测试，断言任务创建时触发审计写入 → 实现最小代码 → GREEN → code-review 通过 → `tcr: audit event on task create`。

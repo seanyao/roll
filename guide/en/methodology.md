@@ -294,6 +294,8 @@ TCR Micro-commits → git push → CI Pass → Deploy → Verification Gate
 
 The **Verification Gate** is the final checkpoint: it requires **live evidence** (test output screenshots, curl responses, browser screenshots). The AI's own assertions ("I confirmed it works") are not accepted.
 
+That evidence now crystallizes into a per-story acceptance report — see [Acceptance Evidence (`roll attest`)](acceptance-evidence.md): per-AC verdicts, the no-evidence red line, and a single offline HTML non-engineers can audit.
+
 > **Scenario**: Executing US-007 (write audit events).
 >
 > Action 1: Write a RED test for `AuditService.record()` asserting that task creation triggers an audit write → implement minimal code → GREEN → code-review passes → `tcr: audit event on task create`.

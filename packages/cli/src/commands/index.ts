@@ -7,6 +7,7 @@ import { dashboardCommand } from "./dashboard.js";
 import { langCommand } from "./lang.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import { pricesCommand } from "./prices.js";
+import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
 
 let registered = false;
@@ -17,6 +18,8 @@ export function registerAll(): void {
   registerPorted("status", statusCommand);
   // `lang`: show/set/reset/invalid all TS (full surface ported).
   registerPorted("lang", langCommand);
+  // `skills`: generate/check/help/unknown all TS (full surface ported).
+  registerPorted("skills", skillsCommand);
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

@@ -183,6 +183,20 @@ export async function captureScreenshot(
     : skip("empty capture (tool exit code lied)");
 }
 
+/**
+ * Deletion-contract bridge between a capture and the acceptance report: a TAKEN
+ * shot becomes a `screenshot` evidence ref the report renders as a figure; a
+ * SKIPPED shot becomes `null`, so the unattended gate references no placeholder
+ * and the report drops the block entirely (US-ATTEST-011 honest-skip path).
+ * `href` is the screenshot path relative to the report's run dir.
+ */
+export function screenshotEvidenceRef(
+  result: ScreenshotResult,
+  href: string,
+): { kind: "screenshot"; label: string; href: string } | null {
+  return result.taken ? { kind: "screenshot", label: result.kind, href } : null;
+}
+
 /** Capture a batch; results keep request order. Skips never abort the batch. */
 export async function captureAll(
   reqs: readonly ScreenshotRequest[],

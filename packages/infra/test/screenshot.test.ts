@@ -8,7 +8,14 @@ import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { captureAll, captureScreenshot, type ShotRun, type ScreenshotRequest } from "../src/screenshot.js";
+import {
+  captureAll,
+  captureScreenshot,
+  screenshotEvidenceRef,
+  type ScreenshotResult,
+  type ShotRun,
+  type ScreenshotRequest,
+} from "../src/screenshot.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -197,6 +204,23 @@ describe("terminal", () => {
     );
     expect(r.taken).toBe(false);
     expect(r.skipped).toContain("empty capture");
+  });
+});
+
+describe("screenshotEvidenceRef (deletion-contract bridge)", () => {
+  const taken: ScreenshotResult = { kind: "terminal", out: "/x/terminal.png", taken: true };
+  const skipped: ScreenshotResult = { kind: "terminal", out: "/x/terminal.png", taken: false, skipped: "no GUI session" };
+
+  it("a TAKEN capture yields a screenshot evidence ref the report can render", () => {
+    expect(screenshotEvidenceRef(taken, "../screenshots/terminal.png")).toEqual({
+      kind: "screenshot",
+      label: "terminal",
+      href: "../screenshots/terminal.png",
+    });
+  });
+
+  it("a SKIPPED capture yields null — no placeholder ref reaches the report", () => {
+    expect(screenshotEvidenceRef(skipped, "../screenshots/terminal.png")).toBeNull();
   });
 });
 

@@ -18,6 +18,7 @@ import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
 import { setupCommand } from "./setup.js";
 import { skillsCommand } from "./skills.js";
+import { slidesCommand } from "./slides/index.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
 import { updateCommand } from "./update.js";
@@ -126,6 +127,17 @@ export function registerAll(): void {
   // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.
   // No sub-paths on bash.
   registerPorted("update", updateCommand);
+  // `slides`: the DETERMINISTIC surface is TS — build (native validator +
+  // renderer, byte-identical to the python oracle), list, preview, logs,
+  // templates, delete --force, help, and the unknown-subcommand error. Two
+  // sub-paths RETURN null → fall back to the frozen bash: `new` (launches the
+  // selected project AI agent with the roll-deck skill to author deck.md — an
+  // agent-shelling path that must not run from TS, same policy as changelog's
+  // AI styling) and the interactive `delete` confirm (the live TTY y/N read).
+  registerPorted("slides", (args) => {
+    const r = slidesCommand(args);
+    return r ?? fallbackToBash(["slides", ...args]).status;
+  });
   // `loop status` + `loop run-once` are TS; every other loop subcommand falls
   // back to bash. `run-once` is the v3 single-cycle runner adapter (US-LOOP-006
   // prerequisite); --dry-run prints the command plan without executing.

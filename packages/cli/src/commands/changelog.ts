@@ -213,6 +213,13 @@ function escapeRegExp(s: string): string {
 }
 
 // ─── git helpers (port of the subprocess git calls in the py module) ─────────
+/**
+ * Git probe signature. `null` ≡ the command FAILED (threw); an empty string ≡
+ * it ran and produced no output. Keeping those two distinct is the crux of
+ * FIX-199 (see SinceTagLog below).
+ */
+export type GitProbe = (args: string[]) => string | null;
+
 function gitOutput(args: string[]): string | null {
   try {
     return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -221,16 +228,41 @@ function gitOutput(args: string[]): string | null {
   }
 }
 
-function latestReleaseTag(): string | null {
-  const out = gitOutput(["describe", "--tags", "--abbrev=0", "--match", "v*"]);
+function latestReleaseTag(git: GitProbe = gitOutput): string | null {
+  const out = git(["describe", "--tags", "--abbrev=0", "--match", "v*"]);
   return out === null ? null : out.trim();
 }
 
-/** Port of _commit_log_since_last_release. */
-function commitLogSinceLastRelease(): string | null {
-  const tag = latestReleaseTag();
-  if (!tag) return null;
-  return gitOutput(["log", `${tag}..HEAD`, "--pretty=format:%s"]);
+/**
+ * FIX-199: the since-tag commit log resolved into THREE explicit states.
+ *
+ * The pre-fix port collapsed all three into `null`, so a TRANSIENT git failure
+ * (ref/lock contention while the loop + PR loop run git concurrently during
+ * release prep) was indistinguishable from "no release tag yet". The caller
+ * then silently swapped the changelog filter from the tag-aware branch to the
+ * no-tag dedup branch — the observed `stories_drafted` 17→2 drift, with no
+ * signal to tell two consecutive runs apart.
+ *
+ * Now: a missing tag is `no-tag` (the legitimate first-release dedup path); a
+ * present tag whose `git log` succeeds is `ok` (even when the log is empty); a
+ * present tag whose probe keeps failing after bounded retries is `error` —
+ * surfaced loudly by the caller instead of silently degrading. The bounded
+ * retry absorbs the common transient blip so repeat runs stay byte-identical.
+ */
+export type SinceTagLog =
+  | { kind: "no-tag" }
+  | { kind: "ok"; log: string }
+  | { kind: "error"; tag: string };
+
+/** Port of _commit_log_since_last_release, hardened against transient failure. */
+function commitLogSinceLastRelease(git: GitProbe = gitOutput, attempts = 3): SinceTagLog {
+  const tag = latestReleaseTag(git);
+  if (!tag) return { kind: "no-tag" };
+  for (let i = 0; i < attempts; i++) {
+    const out = git(["log", `${tag}..HEAD`, "--pretty=format:%s"]);
+    if (out !== null) return { kind: "ok", log: out };
+  }
+  return { kind: "error", tag };
 }
 
 function ghAvailable(): boolean {
@@ -243,8 +275,8 @@ function ghAvailable(): boolean {
 }
 
 /** Port of _merged_prs_since_tag. Returns [prNum, title, commitMsg]. */
-function mergedPrsSinceTag(tag: string): Array<[string, string, string]> {
-  const out = gitOutput(["log", `${tag}..HEAD`, "--pretty=format:%H %s"]);
+function mergedPrsSinceTag(tag: string, git: GitProbe = gitOutput): Array<[string, string, string]> {
+  const out = git(["log", `${tag}..HEAD`, "--pretty=format:%H %s"]);
   if (out === null) return [];
   const prs: Array<[string, string, string]> = [];
   const seen = new Set<string>();
@@ -306,6 +338,8 @@ export interface GenerateOptions {
   changelog?: string;
   write?: boolean;
   json?: boolean;
+  /** FIX-199: injectable git probe (tests simulate transient/persistent failure). */
+  gitProbe?: GitProbe;
 }
 
 /** Result of the deterministic generator (mirrors main()'s stdout/stderr/code). */
@@ -321,6 +355,7 @@ export interface GenerateResult {
  * mutation is applied here (writeToChangelog) before returning the stdout note.
  */
 export function generateDraft(opts: GenerateOptions): GenerateResult {
+  const git = opts.gitProbe ?? gitOutput;
   const backlogPath = opts.backlog ?? ".roll/backlog.md";
   const changelogPath = opts.changelog ?? "CHANGELOG.md";
 
@@ -332,8 +367,22 @@ export function generateDraft(opts: GenerateOptions): GenerateResult {
     ? readFileSync(changelogPath, "utf8")
     : null;
 
+  let stderr = "";
   const rows = readDoneStories(backlogText);
-  const sinceTagLog = commitLogSinceLastRelease();
+
+  // FIX-199: resolve the since-tag log explicitly. A transient probe failure is
+  // retried away (so repeat runs don't drift); a persistent one warns loudly and
+  // degrades to the no-tag dedup branch instead of silently swapping into it.
+  const since = commitLogSinceLastRelease(git);
+  let sinceTagLog: string | null;
+  if (since.kind === "ok") {
+    sinceTagLog = since.log;
+  } else {
+    if (since.kind === "error") {
+      stderr += `warn: 无法读取 ${since.tag}..HEAD 提交日志(git 探针重试后仍失败);本次回退为按 CHANGELOG 去重,条目可能不完整——修复 git 后重跑以恢复发布窗口过滤\n`;
+    }
+    sinceTagLog = null;
+  }
 
   const filtered: Entry[] = [];
   for (const { storyId, desc, source } of rows) {
@@ -351,9 +400,9 @@ export function generateDraft(opts: GenerateOptions): GenerateResult {
 
   // US-CL-007: gap detection.
   const uncarded: Array<[string, string]> = [];
-  const tag = latestReleaseTag();
+  const tag = latestReleaseTag(git);
   if (tag && ghAvailable()) {
-    const mergedPrs = mergedPrsSinceTag(tag);
+    const mergedPrs = mergedPrsSinceTag(tag, git);
     const doneStoryIds = new Set(rows.map((r) => r.storyId));
     const clText = changelogText ?? "";
     for (const [prNum, prTitle, commitMsg] of mergedPrs) {
@@ -371,14 +420,13 @@ export function generateDraft(opts: GenerateOptions): GenerateResult {
       uncarded_merged: uncarded.map(([num, title]) => ({ pr: num, title })),
     };
     // python json.dump(indent=2, ensure_ascii=False) + a trailing print().
-    return { stdout: jsonDump(payload) + "\n", stderr: "", status: 0 };
+    return { stdout: jsonDump(payload) + "\n", stderr, status: 0 };
   }
 
   if (filtered.length === 0 && uncarded.length === 0) {
-    return { stdout: "# No new ✅ Done stories found for CHANGELOG.\n", stderr: "", status: 0 };
+    return { stdout: "# No new ✅ Done stories found for CHANGELOG.\n", stderr, status: 0 };
   }
 
-  let stderr = "";
   const allEntries: Entry[] = [...filtered, ...uncardedToEntries(uncarded)];
   if (uncarded.length > 0) {
     const prList = uncarded.map(([p]) => `#${p}`).join(" ");

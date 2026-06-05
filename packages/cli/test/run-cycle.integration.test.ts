@@ -363,6 +363,71 @@ function makeGitignoredFixture(tag: string): { repo: string } {
   return { repo };
 }
 
+/**
+ * FIX-206 — the PARTIAL-fossil layout. `.roll/` is gitignored, yet a few stray
+ * paths were force-committed before the ignore rule landed (the roll-meta
+ * migration leak: `.roll/ops/release.sh` et al.). `git worktree add` checks
+ * those fossils out, materializing a REAL `.roll/ops/` dir that shadows the
+ * gitignored, main-only backlog the loop must read — the link guard saw `dst`
+ * exist and skipped, so the worktree never saw the backlog (production blind
+ * spot of FIX-204C, observed on the first v3 cycle).
+ */
+function makePartialFossilFixture(tag: string): { repo: string } {
+  const remote = tmp(`${tag}-remote`);
+  git(remote, ["init", "-q", "--bare", "-b", "main"]);
+  const seed = tmp(`${tag}-seed`);
+  git(seed, ["clone", "-q", remote, "."]);
+  writeFileSync(join(seed, ".gitignore"), ".roll/\n", "utf8");
+  writeFileSync(join(seed, "app.txt"), "app\n", "utf8");
+  // The fossil: force-added past the ignore rule, exactly like the leaked
+  // `.roll/ops/release.sh` the real repo still tracked.
+  mkdirSync(join(seed, ".roll", "ops"), { recursive: true });
+  writeFileSync(join(seed, ".roll", "ops", "release.sh"), "#!/bin/sh\n", "utf8");
+  git(seed, [...GIT_ID, "add", "app.txt", ".gitignore"]);
+  git(seed, [...GIT_ID, "add", "-f", ".roll/ops/release.sh"]);
+  git(seed, [...GIT_ID, "commit", "-q", "-m", "seed app + fossil .roll/ops/release.sh"]);
+  git(seed, ["push", "-q", "origin", "main"]);
+  const repo = tmp(`${tag}-repo`);
+  git(repo, ["clone", "-q", remote, "."]);
+  // The real backlog lives ONLY in the main checkout (gitignored, main-only) —
+  // alongside the checked-out fossil. The worktree will materialize the fossil
+  // but never this backlog.
+  writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
+  return { repo };
+}
+
+describe("FIX-206 — a partial-fossil .roll is relinked so the backlog is visible", () => {
+  it("replaces the fossil dir with the symlink; agent reads the main-only backlog", async () => {
+    const { repo } = makePartialFossilFixture("fossil");
+    const rt = tmp("fossil-rt");
+    const cycleId = "20260606-032000-3203";
+    const p = paths(rt, cycleId);
+    let isLink: boolean | null = null;
+    let backlogViaWorktree = "";
+    const shim: AgentSpawn = async (agent, opts) => {
+      isLink = lstatSync(join(opts.cwd, ".roll"), { throwIfNoEntry: false })?.isSymbolicLink() === true;
+      backlogViaWorktree = existsSync(join(opts.cwd, ".roll", "backlog.md"))
+        ? readFileSync(join(opts.cwd, ".roll", "backlog.md"), "utf8")
+        : "";
+      return shimAgentTcr(agent, opts);
+    };
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    // Before the fix: the materialized fossil dir blocked the link (real dir,
+    // backlog shadowed). After: the guard replaces it with the link.
+    expect(isLink).toBe(true);
+    expect(backlogViaWorktree).toContain("US-RUN-001");
+    // MAIN .roll untouched — the fossil's contents survive at the source.
+    expect(readFileSync(join(repo, ".roll", "ops", "release.sh"), "utf8")).toContain("#!/bin/sh");
+  });
+});
+
 describe("FIX-198 status flips on the gitignored-.roll layout", () => {
 
   it("pick from main · In-Progress mid-cycle · Done at terminal", async () => {

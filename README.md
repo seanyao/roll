@@ -103,6 +103,7 @@ Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuil
 | Backlog GitHub sync (`roll backlog sync`) | [guide/en/backlog-github-sync.md](guide/en/backlog-github-sync.md) | [guide/zh/backlog-github-sync.md](guide/zh/backlog-github-sync.md) |
 | Test isolation (`roll test`) | [guide/en/test-isolation.md](guide/en/test-isolation.md) | [guide/zh/test-isolation.md](guide/zh/test-isolation.md) |
 | Acceptance evidence (`roll attest`) | [guide/en/acceptance-evidence.md](guide/en/acceptance-evidence.md) | [guide/zh/acceptance-evidence.md](guide/zh/acceptance-evidence.md) |
+| Consistency & release gate | [guide/en/consistency.md](guide/en/consistency.md) | [guide/zh/consistency.md](guide/zh/consistency.md) |
 | Acceptance evidence (`roll attest`) | [guide/en/acceptance-evidence.md](guide/en/acceptance-evidence.md) | [guide/zh/acceptance-evidence.md](guide/zh/acceptance-evidence.md) |
 | Cross-machine sync | [guide/en/loop.md#cross-machine-sync](guide/en/loop.md#cross-machine-sync) | [guide/zh/loop.md#跨机器同步](guide/zh/loop.md#%E8%B7%A8%E6%9C%BA%E5%99%A8%E5%90%8C%E6%AD%A5) |
 | Remote monitoring (watch loop from a phone via `remote-watch`) | [guide/en/loop.md#remote-monitoring](guide/en/loop.md#remote-monitoring) | [guide/zh/loop.md#远程监控remote-monitoring](guide/zh/loop.md#%E8%BF%9C%E7%A8%8B%E7%9B%91%E6%8E%A7remote-monitoring) |

@@ -67,7 +67,7 @@ import {
   push as gitPush,
 } from "@roll/infra";
 import { execFile } from "node:child_process";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -541,7 +541,12 @@ function sleep(ms: number): Promise<void> {
  * Two moves, both idempotent and best-effort (a failure here must never kill
  * the cycle — the FIX-198 main-anchored reads still work without it):
  *   1. `<wt>/.roll` → symlink to `<repo>/.roll` (only when the worktree did
- *      not check one out — projects that TRACK .roll keep their real dir).
+ *      not check one out — projects that TRACK their whole .roll keep their
+ *      real dir). FIX-206: a PARTIAL checkout — a handful of fossil paths
+ *      force-committed past a `.roll/` ignore rule (e.g. a leaked
+ *      `.roll/ops/release.sh`) — materializes a real `.roll` that shadows the
+ *      gitignored, main-only backlog. That incomplete dir is detected (main
+ *      has a backlog the worktree's dir lacks) and replaced with the link.
  *   2. one `.roll` line in the repo-common `info/exclude`: the usual
  *      `.gitignore` pattern `.roll/` is DIRECTORY-only and does NOT match a
  *      symlink, so without this the agent's `git add -A` would commit the
@@ -552,7 +557,21 @@ async function linkRollIntoWorktree(repoCwd: string, worktreePath: string): Prom
   try {
     const src = join(repoCwd, ".roll");
     const dst = join(worktreePath, ".roll");
-    if (!existsSync(src) || existsSync(dst)) return;
+    if (!existsSync(src)) return;
+    const dstStat = lstatSync(dst, { throwIfNoEntry: false });
+    if (dstStat) {
+      // Already linked → idempotent re-entry, nothing to do.
+      if (dstStat.isSymbolicLink()) return;
+      // A real dir at dst is either a project that genuinely TRACKS its whole
+      // .roll (keep it) or a PARTIAL fossil materialization (FIX-206). The
+      // backlog is the discriminator: if the main .roll carries one and the
+      // worktree's checked-out dir does NOT, the dir is an incomplete fossil
+      // shadowing the source of truth → drop it and link. A fully-tracked
+      // .roll carries its own backlog and is left untouched.
+      const incompleteFossil = existsSync(join(src, "backlog.md")) && !existsSync(join(dst, "backlog.md"));
+      if (!incompleteFossil) return;
+      rmSync(dst, { recursive: true, force: true });
+    }
     symlinkSync(src, dst);
     const common = (
       await execFileAsync("git", ["-C", repoCwd, "rev-parse", "--path-format=absolute", "--git-common-dir"])

@@ -591,7 +591,7 @@ export async function executeCommand(
     // events/bus upsertRun — the dashboard terminal record (v2 runs.jsonl shape).
     case "append_run": {
       const key: RunKey = { storyId: ctx.storyId ?? "", cycleId: cmd.cycleId };
-      ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx));
+      ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx, ports.clock()));
       // FIX-211: Done ≡ merged (backlog.md:4) — no publish-time 抢跑. A
       // publish-status-0 `done` terminal means the PR was OPENED and merge
       // handed to the async PR loop (US-AUTO-044), NOT that it merged. FIX-198
@@ -653,6 +653,7 @@ function withRealCost(event: RollEvent, ctx: CycleContext): RollEvent {
 export function buildRunRow(
   cmd: Extract<CycleCommand, { kind: "append_run" }>,
   ctx: CycleContext,
+  nowSec?: number,
 ): Record<string, unknown> {
   const built = cmd.status === "done" || cmd.status === "built" ? [ctx.storyId ?? ""].filter(Boolean) : [];
   const row: Record<string, unknown> = {
@@ -663,6 +664,19 @@ export function buildRunRow(
     tcr_count: ctx.tcrCount ?? 0,
     outcome: cmd.outcome,
   };
+  // FIX-213: stamp the cycle's terminal time (same clock the cycle:end event
+  // uses) as a canonical ISO-8601 UTC string + the cycle duration. Without
+  // these the dashboard could not bucket the row by day — the runs row was the
+  // only record of a real delivery yet read as "0 cycles / 72h". `nowSec` is
+  // epoch seconds (the runner's `ports.clock()`); millis are dropped to match
+  // the v2 `…Z` schema.
+  if (nowSec !== undefined) {
+    row["ts"] = new Date(nowSec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    if (ctx.startSec !== undefined) {
+      const dur = nowSec - ctx.startSec;
+      if (dur >= 0) row["duration_sec"] = dur;
+    }
+  }
   // Additive cost fields (v2 runs rows omit cost — the dashboard reads it from
   // the cycle:end event; surfacing it here keeps the human-facing 可回溯链 row
   // truthful too, sourced from the SAME ctx.cost as cycle:end → consistent).

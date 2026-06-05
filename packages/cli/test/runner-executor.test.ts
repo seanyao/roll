@@ -148,6 +148,29 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(row["tcr_count"]).toBe(0);
     expect(row).not.toHaveProperty("cost_usd");
   });
+
+  it("FIX-213: nowSec stamps ISO-UTC ts (no millis) + duration_sec from startSec", () => {
+    const start = 1780688082; // 2026-06-05T19:34:42Z (UTC; the cycle id's 0334 is UTC+8 local)
+    const end = start + 380;
+    const row = buildRunRow(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      { ...CTX, startSec: start },
+      end,
+    );
+    expect(row["ts"]).toBe("2026-06-05T19:41:02Z");
+    expect(String(row["ts"])).not.toContain("."); // canonical form, no millis
+    expect(row["duration_sec"]).toBe(380);
+  });
+
+  it("FIX-213: no startSec → ts still stamped, duration_sec omitted (no negative)", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      CTX,
+      1780688082,
+    );
+    expect(row["ts"]).toBe("2026-06-05T19:34:42Z");
+    expect(row).not.toHaveProperty("duration_sec");
+  });
 });
 
 describe("dryRunPlan", () => {

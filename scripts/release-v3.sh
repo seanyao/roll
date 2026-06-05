@@ -22,6 +22,11 @@
 # (branch v2 + tag v2-freeze-2026-06-04) — nothing is ever lost.
 set -euo pipefail
 
+# The whole release path authenticates via SSH keys + gh/npm tokens. git must
+# never block on an interactive credential prompt — if anything tries HTTPS
+# auth, fail loudly with the offending URL instead of hanging the TTY.
+export GIT_TERMINAL_PROMPT=0
+
 REPO="seanyao/roll"
 META_REPO="seanyao/roll-meta"
 TAG="v3.0.0"

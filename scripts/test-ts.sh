@@ -5,6 +5,10 @@
 # porting completes). New file on the v3 branch — frozen v2 bash untouched.
 set -euo pipefail
 
+# Hermetic gate: tests must behave identically on a TTY, headless, and in CI.
+# Any git credential prompt is a bug — fail it loudly instead of blocking.
+export GIT_TERMINAL_PROMPT=0
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 

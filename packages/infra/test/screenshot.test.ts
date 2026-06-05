@@ -112,6 +112,94 @@ describe("mobile-android", () => {
   });
 });
 
+describe("terminal", () => {
+  // A GUI macOS host: launchctl reports the Aqua session manager.
+  const aqua = { code: 0, stdout: "Aqua\n" };
+
+  it("ROLL_ATTEST_NO_TERMINAL=1 skips before any spawn", async () => {
+    const { run, calls } = fake({});
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: { ROLL_ATTEST_NO_TERMINAL: "1" }, platform: "darwin" },
+    );
+    expect(r).toMatchObject({ taken: false, skipped: "ROLL_ATTEST_NO_TERMINAL=1" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("non-macOS skips before any spawn (osascript/screencapture are mac-only)", async () => {
+    const { run, calls } = fake({});
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "linux" },
+    );
+    expect(r.skipped).toBe("not macOS");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("no GUI session (launchctl not Aqua) → skip, never opens a window", async () => {
+    const { run, calls } = fake({ launchctl: { code: 0, stdout: "Background\n" } });
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r).toMatchObject({ taken: false, skipped: "no GUI session" });
+    expect(calls).toEqual(["launchctl managername"]); // probed, then stopped
+  });
+
+  it("no screen-recording permission (screencapture fails) → skip with reason", async () => {
+    const { run } = fake({ launchctl: aqua, osascript: { code: 0 }, screencapture: { code: 1 } });
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("permission");
+  });
+
+  it("GUI + capture lands non-empty → taken; positions window, runs cmd, closes window", async () => {
+    const { run, calls } = fake({
+      launchctl: aqua,
+      osascript: { code: 0 },
+      screencapture: { code: 0, writes: true },
+    });
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true);
+    const joined = calls.join("\n");
+    expect(joined).toContain("launchctl managername");
+    expect(joined).toContain("do script");
+    expect(joined).toContain("roll status");
+    expect(joined).toContain("screencapture -x -R");
+    expect(joined).toContain("close"); // window cleaned up
+  });
+
+  it("tmux variant attaches the observability session instead of a command", async () => {
+    const { run, calls } = fake({
+      launchctl: aqua,
+      osascript: { code: 0 },
+      screencapture: { code: 0, writes: true },
+    });
+    const r = await captureScreenshot(
+      { kind: "terminal", tmux: "roll-loop-roll-d9dfa0", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true);
+    expect(calls.join("\n")).toContain("tmux attach -t roll-loop-roll-d9dfa0");
+  });
+
+  it("empty capture (screencapture exits 0 but writes nothing) is NOT taken", async () => {
+    const { run } = fake({ launchctl: aqua, osascript: { code: 0 }, screencapture: { code: 0 } });
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("empty capture");
+  });
+});
+
 describe("captureAll", () => {
   it("keeps request order and never aborts on skips", async () => {
     const { run } = fake({ npx: { code: 0, writes: true } });

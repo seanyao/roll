@@ -13,6 +13,14 @@
  *                 skip: non-macOS · no booted simulator
  *   mobile-android`adb exec-out screencap -p > <out>` (sh -c redirect)
  *                 skip: adb absent · no connected device
+ *   terminal      osascript opens a positioned Terminal window running an
+ *                 acceptance command (or attaching the tmux observability
+ *                 session), then `screencapture -x -R <rect>` grabs the pixels
+ *                 and the window is closed. This is the UNATTENDED lane
+ *                 (US-ATTEST-011): a headless loop cycle self-produces a real
+ *                 terminal screenshot instead of waiting for a human to grab it.
+ *                 skip: ROLL_ATTEST_NO_TERMINAL=1 · non-macOS · no GUI (Aqua)
+ *                 session · no screen-recording permission (screencapture fails)
  *
  * All process touches go through an injectable runner; a capture only counts
  * as TAKEN when the output file exists and is non-empty (tool exit codes lie).
@@ -40,7 +48,7 @@ const defaultRun: ShotRun = async (cmd, argv) => {
   }
 };
 
-export type ScreenshotKind = "web" | "mobile-ios" | "mobile-android";
+export type ScreenshotKind = "web" | "mobile-ios" | "mobile-android" | "terminal";
 
 export interface ScreenshotRequest {
   kind: ScreenshotKind;
@@ -48,6 +56,12 @@ export interface ScreenshotRequest {
   out: string;
   /** Target URL — required for kind=web. */
   url?: string;
+  /** kind=terminal: acceptance command to run in the Terminal window. */
+  command?: string;
+  /** kind=terminal: tmux session to attach instead of running a command. */
+  tmux?: string;
+  /** kind=terminal: screencapture `-R` rectangle "x,y,w,h"; defaults to a 1280×800 window. */
+  region?: string;
 }
 
 export interface ScreenshotResult {
@@ -72,6 +86,41 @@ function fileNonEmpty(p: string): boolean {
   }
 }
 
+const DEFAULT_REGION = "0,0,1280,800";
+
+/** Parse a screencapture `-R` rect "x,y,w,h" into numbers; null when malformed. */
+export function parseRegion(region: string): { x: number; y: number; w: number; h: number } | null {
+  const parts = region.split(",").map((s) => Number(s.trim()));
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [x, y, w, h] = parts as [number, number, number, number];
+  if (w <= 0 || h <= 0) return null;
+  return { x, y, w, h };
+}
+
+/**
+ * AppleScript that opens one Terminal window running `line`, sizes it to the
+ * capture rectangle (bounds are {x1,y1,x2,y2} — top-left + bottom-right, so we
+ * derive them from the -R rect's origin + size), and gives it a moment to
+ * render before the screenshot is taken. `line` is embedded inside a quoted
+ * `do script "…"`, so its double-quotes/backslashes are escaped.
+ */
+export function terminalOpenScript(line: string, r: { x: number; y: number; w: number; h: number }): string {
+  const esc = line.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return [
+    'tell application "Terminal"',
+    "  activate",
+    `  do script "${esc}"`,
+    "  delay 1.5",
+    `  set bounds of front window to {${r.x}, ${r.y}, ${r.x + r.w}, ${r.y + r.h}}`,
+    "end tell",
+  ].join("\n");
+}
+
+/** AppleScript that closes the front Terminal window without a save prompt. */
+export function terminalCloseScript(): string {
+  return 'tell application "Terminal" to close front window saving no';
+}
+
 /** Capture one screenshot; never throws — skip reasons over exceptions. */
 export async function captureScreenshot(
   req: ScreenshotRequest,
@@ -94,7 +143,7 @@ export async function captureScreenshot(
       if (booted.code !== 0 || !booted.stdout.includes("(Booted)")) return skip("no booted simulator");
       const r = await run("xcrun", ["simctl", "io", "booted", "screenshot", req.out]);
       if (r.code !== 0) return skip("simctl screenshot failed");
-    } else {
+    } else if (req.kind === "mobile-android") {
       const devices = await run("adb", ["devices"]);
       const connected = devices.stdout
         .split("\n")
@@ -104,6 +153,26 @@ export async function captureScreenshot(
       // binary stdout → shell redirect through the same seam.
       const r = await run("sh", ["-c", `adb exec-out screencap -p > '${req.out}'`]);
       if (r.code !== 0) return skip("screencap failed");
+    } else {
+      // terminal lane (US-ATTEST-011): unattended self-capture on macOS GUI hosts.
+      if ((env["ROLL_ATTEST_NO_TERMINAL"] ?? "") === "1") return skip("ROLL_ATTEST_NO_TERMINAL=1");
+      if (platform !== "darwin") return skip("not macOS");
+      // GUI-session probe: launchctl reports "Aqua" only inside a graphical login.
+      const gui = await run("launchctl", ["managername"]);
+      if (gui.code !== 0 || !gui.stdout.includes("Aqua")) return skip("no GUI session");
+      const rect = parseRegion(req.region ?? DEFAULT_REGION);
+      if (rect === null) return skip("bad region");
+      const line =
+        req.tmux !== undefined && req.tmux !== "" ? `tmux attach -t ${req.tmux}` : (req.command ?? "");
+      const opened = await run("osascript", ["-e", terminalOpenScript(line, rect)]);
+      if (opened.code !== 0) return skip("osascript Terminal open failed");
+      const shot = await run("screencapture", ["-x", "-R", req.region ?? DEFAULT_REGION, req.out]);
+      // screencapture exits non-zero when Screen Recording permission is absent.
+      if (shot.code !== 0) {
+        await run("osascript", ["-e", terminalCloseScript()]); // best-effort cleanup
+        return skip("screencapture failed (screen-recording permission?)");
+      }
+      await run("osascript", ["-e", terminalCloseScript()]); // close the window we opened
     }
   } catch {
     return skip("capture errored");

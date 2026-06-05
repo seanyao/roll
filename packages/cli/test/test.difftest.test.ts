@@ -227,7 +227,10 @@ function both(
   expect(t).toEqual(b);
 }
 
-describe("diff-test: roll test == bash oracle", () => {
+// Each case spawns the bash oracle (bin/roll) once; solo that's ~1-2s, but under
+// the full suite's parallel load it can blow vitest's 5s default — generous
+// suite-level timeout is contention headroom, not the expected cost.
+describe("diff-test: roll test == bash oracle", { timeout: 30_000 }, () => {
   for (const lang of ["en", "zh"]) {
     it(`--help → usage + exit 0 (${lang})`, () => {
       both("none", ["--help"], binNpm, { ROLL_LANG: lang });

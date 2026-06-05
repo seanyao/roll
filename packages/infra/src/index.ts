@@ -5,3 +5,4 @@ export * from "./process.js";
 export * from "./schedule.js";
 export * from "./tmux.js";
 export * from "./evidence.js";
+export * from "./screenshot.js";

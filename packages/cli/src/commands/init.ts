@@ -41,6 +41,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { c, renderState, row, COLS } from "../render.js";
 import { repoRoot } from "../bridge.js";
+import { syncConventions as sharedSyncConventions } from "./setup-shared.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — used only for err() here ─────────────
 function err(line: string): void {
@@ -59,9 +60,6 @@ function rollGlobal(): string {
 }
 function rollTemplates(): string {
   return join(rollHome(), "conventions", "templates");
-}
-function rollConfig(): string {
-  return join(rollHome(), "config.yaml");
 }
 /** bin/roll VERSION= — the frozen oracle's own version (for the .version stamp). */
 function binRollVersion(): string {
@@ -374,50 +372,16 @@ installed_at: "${installedAt}"
   summary.push("created|.roll/.version");
 }
 
-// ─── _sync_conventions (1300-1303) → per-tool convention copy ─────────────────
-/** _get_ai_tools: ai_* entries from ROLL_CONFIG, ~→HOME expanded. */
-function getAiTools(): string[] {
-  const cfg = rollConfig();
-  if (!existsSync(cfg)) return [];
-  const out: string[] = [];
-  for (const line of readFileSync(cfg, "utf8").split("\n")) {
-    if (/^ai_[a-z]+:/.test(line)) {
-      let entry = line.replace(/^[^:]*:[ \t]*/, "");
-      entry = entry.replace(/^~/, homedir());
-      out.push(entry);
-    }
-  }
-  return out;
-}
-function aiField(entry: string, idx: number): string {
-  return entry.split("|")[idx] ?? "";
-}
-/** Port of _sync_convention_for_tool — copies roll.md + ensures @roll.md include. */
-function syncConventionForTool(src: string, mainDst: string, force: boolean): void {
-  if (!existsSync(src)) return;
-  const dstDir = dirname(mainDst);
-  // Claude (always) or the convention dir already exists. (_is_ai_installed is a
-  // PATH probe we conservatively treat as false here; an existing dir suffices.)
-  if (dstDir !== join(homedir(), ".claude") && !existsSync(dstDir)) return;
-  mkdirSync(dstDir, { recursive: true });
-  const wkFile = join(dstDir, "roll.md");
-  const same = existsSync(wkFile) && readFileSync(wkFile, "utf8") === readFileSync(src, "utf8");
-  if (force || !same) copyFileSync(src, wkFile);
-  if (!existsSync(mainDst)) {
-    writeFileSync(mainDst, "@roll.md\n");
-  } else if (!readFileSync(mainDst, "utf8").includes("@roll.md")) {
-    writeFileSync(mainDst, readFileSync(mainDst, "utf8") + "\n@roll.md\n");
-  }
-}
-/** Returns "ok" unless a sync op throws (mirrors `_sync_conventions || fail`). */
+// ─── _sync_conventions (1300-1303) — shared with setup.ts ────────────────────
+/**
+ * Returns "ok" unless a sync op throws (mirrors `_sync_conventions || fail`).
+ * Delegates to the shared port (setup-shared.ts) so init + setup run the exact
+ * same per-tool copy logic the oracle does (`_sync_one_tool`). init never
+ * forces.
+ */
 function syncConventions(): "ok" | "fail" {
   try {
-    for (const entry of getAiTools()) {
-      const aiDir = aiField(entry, 0);
-      const cfgName = aiField(entry, 1);
-      const src = aiField(entry, 2);
-      syncConventionForTool(join(rollGlobal(), src), join(aiDir, cfgName), false);
-    }
+    sharedSyncConventions(false);
     return "ok";
   } catch {
     return "fail";

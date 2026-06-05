@@ -79,21 +79,28 @@ export interface ClaudeArgvInput {
  * 9768-9809). Returns argv WITHOUT the binary at [0] folded into args — the
  * caller spawns `bin` with these args.
  *
- *   claude -p --verbose --dangerously-skip-permissions
- *          --output-format stream-json --add-dir <wt> "<autorun + skill body>"
+ *   claude -p "<autorun + skill body>" --verbose --dangerously-skip-permissions
+ *          --output-format stream-json --add-dir <wt>
+ *
+ * DELIBERATE DIVERGENCE from the v2 oracle's arg ORDER (whitelisted): v2 puts
+ * the prompt last, AFTER `--add-dir <wt>` — but `--add-dir` is variadic in
+ * claude CLI ≥2.1.x and swallows the trailing prompt ("Input must be provided
+ * either through stdin or as a prompt argument"). v2's order is a live bug
+ * against current claude; v3 binds the prompt directly to `-p`. Flag set and
+ * semantics are otherwise identical. (Caught by scripts/parallel-verify.sh.)
  */
 export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: string[] } {
   const bin = input.bin ?? "claude";
   const prompt = `${AUTORUN_DIRECTIVE}${input.skillBody}`;
   const args = [
     "-p",
+    prompt,
     "--verbose",
     "--dangerously-skip-permissions",
     "--output-format",
     "stream-json",
     "--add-dir",
     input.worktree,
-    prompt,
   ];
   return { bin, args };
 }

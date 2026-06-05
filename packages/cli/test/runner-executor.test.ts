@@ -27,12 +27,14 @@ const CTX: CycleContext = {
   model: "",
 };
 
-describe("buildClaudeArgv — mirrors v2 _loop_cycle_agent_cmd", () => {
-  it("produces the claude loop-enhanced argv with autorun directive + skill body", () => {
+describe("buildClaudeArgv — v2 flag set, fixed arg order", () => {
+  it("binds the prompt to -p (v2's prompt-after---add-dir order is a live bug vs claude ≥2.1.x)", () => {
     const { bin, args } = buildClaudeArgv({ worktree: "/wt", skillBody: "DO WORK", bin: "claude" });
     expect(bin).toBe("claude");
-    expect(args.slice(0, 7)).toEqual([
-      "-p",
+    expect(args[0]).toBe("-p");
+    // The prompt is the DIRECT -p value = autorun directive + skill body.
+    expect(args[1]).toBe(`${AUTORUN_DIRECTIVE}DO WORK`);
+    expect(args.slice(2)).toEqual([
       "--verbose",
       "--dangerously-skip-permissions",
       "--output-format",
@@ -40,8 +42,6 @@ describe("buildClaudeArgv — mirrors v2 _loop_cycle_agent_cmd", () => {
       "--add-dir",
       "/wt",
     ]);
-    // The single positional prompt = autorun directive + skill body.
-    expect(args[7]).toBe(`${AUTORUN_DIRECTIVE}DO WORK`);
   });
 });
 

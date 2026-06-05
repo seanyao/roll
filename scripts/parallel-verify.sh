@@ -209,27 +209,61 @@ real_claude_cmd() { echo 'claude -p "Read .roll/backlog.md, deliver the single T
 # a temp HOME would run claude unauthenticated and it exits without working.
 REAL_CLAUDE_DIR=""
 REAL_HOME="${HOME}"
+REAL_CLAUDE_BIN=""
 resolve_real_claude() {
   local bin
   bin="$(command -v claude || true)"
   [ -n "$bin" ] || { echo "[parallel-verify] --real: no \`claude\` on PATH" >&2; exit 3; }
   REAL_CLAUDE_DIR="$(cd "$(dirname "$bin")" && pwd)"
+  REAL_CLAUDE_BIN="$REAL_CLAUDE_DIR/$(basename "$bin")"
+}
+
+# v2's frozen runner puts the prompt LAST, after `--add-dir <wt>` — but
+# `--add-dir` is variadic in claude CLI ≥2.1.x and swallows it. This wrapper
+# (installed as the shim `claude` in --real mode) rebinds the trailing
+# positional to `-p` and execs the REAL claude. v3's own argv is already
+# fixed (agent-spawn.ts); the wrapper is a no-op for it.
+write_real_claude_wrapper() {
+  cat > "$SHIM/claude" <<WRAP
+#!/usr/bin/env bash
+real="$REAL_CLAUDE_BIN"
+args=("\$@")
+n=\${#args[@]}
+if [ "\$n" -ge 2 ] && [ "\${args[0]}" = "-p" ]; then
+  last="\${args[n-1]}"
+  case "\$last" in
+    -*) exec "\$real" "\$@" ;;
+  esac
+  unset 'args[n-1]'
+  exec "\$real" -p "\$last" "\${args[@]:1}"
+fi
+exec "\$real" "\$@"
+WRAP
+  chmod +x "$SHIM/claude"
 }
 
 # v3 leg: returns the terminal status by reading the runs.jsonl / events it wrote.
 run_v3_leg() {
   local clone="$1" rt="$2" shim="$3" home="$4"
   local path_herm="$shim:/usr/bin:/bin"
-  local leg_home="$home"
   if [ "$REAL" -eq 1 ]; then
-    path_herm="$path_herm:$REAL_CLAUDE_DIR:/opt/homebrew/bin:/usr/local/bin"
-    leg_home="$REAL_HOME"
+    # real mode: FULL inherited env (macOS keychain auth needs the session
+    # env — env -i yields 401), shim-gh dir prepended so no real PRs happen.
+    (
+      cd "$clone" || exit 9
+      PATH="$shim:$PATH" \
+      ROLL_MAIN_SLUG="pv-sandbox" \
+      ROLL_LOOP_AGENT="claude" \
+      ROLL_PROJECT_RUNTIME_DIR="$rt" \
+      node "$V3_BIN" loop run-once
+    ) >"$rt/leg.out" 2>&1
+    return
   fi
   (
     cd "$clone" || exit 9
     env -i \
       PATH="$path_herm" \
-      HOME="$leg_home" \
+      HOME="$home" \
       ROLL_MAIN_SLUG="pv-sandbox" \
       ROLL_LOOP_AGENT="claude" \
       ROLL_PROJECT_RUNTIME_DIR="$rt" \
@@ -269,6 +303,21 @@ run_v2_leg() {
     cycle_timeout=900 hb_timeout=600 watchdog_iters=480   # 16min外层兜底
   fi
   mkdir -p "$shared/loop"
+  if [ "$REAL" -eq 1 ]; then
+    # real mode: FULL inherited env (keychain auth — see run_v3_leg note),
+    # shim-gh first on PATH so no real PRs are created.
+    (
+      cd "$clone" || exit 9
+      PATH="$shim:$PATH" \
+      ROLL_LOOP_FORCE=1 \
+      ROLL_LOOP_NO_POPUP=1 \
+      ROLL_LOOP_CYCLE_TIMEOUT_SEC="$cycle_timeout" \
+      ROLL_HEARTBEAT_TIMEOUT="$hb_timeout" \
+      ROLL_PROJECT_RUNTIME_DIR="$rt" \
+      _SHARED_ROOT="$shared" \
+      bash "$inner"
+    ) >"$rt/leg.out" 2>&1 &
+  else
   (
     cd "$clone" || exit 9
     env -i \
@@ -282,6 +331,7 @@ run_v2_leg() {
       _SHARED_ROOT="$shared" \
       bash "$inner"
   ) >"$rt/leg.out" 2>&1 &
+  fi
   local pid=$!
   # Manual watchdog (no `timeout` dependency): 90s cap (shim) / 16min (real).
   local i
@@ -460,9 +510,10 @@ for round in $(seq 1 "$ROUNDS"); do
   build_shim_dir "$SHIM"
   HOME_DIR="$RD/home"
   seed_home "$HOME_DIR"
-  # For --real, do NOT inject the shim claude (use the real one if installed);
-  # resolve its dir + real HOME for the leg env before env -i strips them.
-  if [ "$REAL" -eq 1 ]; then rm -f "$SHIM/claude"; resolve_real_claude; fi
+  # For --real, replace the shim claude with an argv-reordering wrapper around
+  # the REAL claude (v2's frozen prompt-after---add-dir order is a live bug
+  # against claude ≥2.1.x; see write_real_claude_wrapper).
+  if [ "$REAL" -eq 1 ]; then resolve_real_claude; write_real_claude_wrapper; fi
 
   # v3 leg
   IFS='|' read -r V3_CLONE V3_BARE <<EOF

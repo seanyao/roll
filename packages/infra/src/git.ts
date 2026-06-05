@@ -301,12 +301,16 @@ export async function canonicalProjectPath(
     const real = await realpathQuiet(p);
     if (real !== undefined) p = real;
   }
-  const common = await git(["-C", p, "rev-parse", "--git-common-dir"]);
-  if (common.code === 0) {
-    const c = common.stdout.trim();
-    if (c.endsWith("/.git")) {
-      p = c.slice(0, -"/.git".length);
-    }
+  // FIX-201: resolve to the CURRENT worktree's toplevel, never the main
+  // worktree. `--git-common-dir` drags every linked worktree back to the
+  // primary checkout — correct for cycle worktrees only by accident, and
+  // catastrophically wrong for sibling dev worktrees (the loop baked
+  // ~/Workspace/roll — the FROZEN v2 checkout — as the project path and
+  // idled there forever while roll-v3's backlog sat untouched).
+  const top = await git(["-C", p, "rev-parse", "--show-toplevel"]);
+  if (top.code === 0) {
+    const t = top.stdout.trim();
+    if (t !== "") p = t;
   }
   return p;
 }

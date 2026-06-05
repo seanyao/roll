@@ -117,12 +117,14 @@ describe("raw wrappers", () => {
 });
 
 describe("canonicalProjectPath", () => {
-  it("resolves a git worktree to its main tree (FIX-034)", async () => {
+  it("resolves a worktree to its OWN toplevel (FIX-201; supersedes FIX-034)", async () => {
+    // FIX-034's main-tree canonicalization hijacked sibling dev worktrees onto
+    // the frozen v2 checkout — identity is now the current worktree's toplevel.
     const main = initRepo("canonmain");
     const wt = join(tmp("canonwt"), "wt");
     execFileSync("git", ["worktree", "add", "-q", wt, "-b", "side"], { cwd: main });
     const canon = await canonicalProjectPath(wt);
-    expect(canon).toBe(main);
+    expect(canon).toBe(realpathSync(wt));
     execFileSync("git", ["worktree", "remove", "--force", wt], { cwd: main });
   });
 

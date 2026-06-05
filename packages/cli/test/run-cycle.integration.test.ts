@@ -126,8 +126,11 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
   return { stdout: CLAUDE_STREAM_JSON, stderr: "", exitCode: 0, timedOut: false };
 };
 
-/** A fake github facet that returns a canned publish status without any gh. */
-function fakeGithub(status: 0 | 1 | 2): Ports["github"] {
+/** A fake github facet that returns a canned publish status without any gh.
+ *  `prState` defaults to "MERGED" (the auto-merge already completed) but can be
+ *  overridden — FIX-211 needs to drive the "published-but-OPEN" path where the
+ *  backlog row must rest at 🔨 (delivered, pending merge), never premature Done. */
+function fakeGithub(status: 0 | 1 | 2, prState: string = "MERGED"): Ports["github"] {
   return {
     async repoSlug() {
       return "fixture/runner";
@@ -136,7 +139,7 @@ function fakeGithub(status: 0 | 1 | 2): Ports["github"] {
       return { status, prUrl: status === 0 ? "https://example/pr/1" : "", ok: status === 0 };
     },
     async prState() {
-      return "MERGED";
+      return prState;
     },
   };
 }
@@ -500,6 +503,59 @@ describe("FIX-198 status flips on the gitignored-.roll layout", () => {
 
     expect(result.terminal).toBe("done"); // recycled → re-picked → delivered
     expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done");
+  });
+});
+
+describe("FIX-211 — Done ≡ merged: no publish-time 抢跑 on the gitignored layout", () => {
+  // v2 对拍: in v2 the cycle writes ✅ Done into the WORKTREE backlog, which rides
+  // the PR diff and only reaches main when the PR MERGES — main is never flipped
+  // at publish. For roll-self (FIX-198 anchors Done to main directly) the same
+  // invariant must hold: an OPENED-but-unmerged PR leaves the row at 🔨, and a
+  // MERGED PR flips ✅ Done. These two cases assert exactly that parity.
+
+  it("AC1: a published-but-OPEN delivery rests at 🔨, never premature ✅ Done", async () => {
+    const { repo } = makeGitignoredFixture("fix211-open");
+    const rt = tmp("fix211-open-rt");
+    const cycleId = "20260606-051000-5101";
+    const p = paths(rt, cycleId);
+    const backlogPath = join(repo, ".roll", "backlog.md");
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    // Publish succeeds (status 0) but the PR is still OPEN (CI pending — the
+    // real shape right after `gh pr create --auto`). Merge is handed off.
+    const ports: Ports = { ...base, agentSpawn: shimAgentTcr, github: fakeGithub(0, "OPEN") };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    // Cycle still lands `done` (published, handed to the async PR loop) and the
+    // runs row keeps that for dashboard/v2 parity …
+    expect(result.terminal).toBe("done");
+    const backlog = readFileSync(backlogPath, "utf8");
+    // … but the MAIN backlog row must NOT have flipped Done — it rests at 🔨.
+    expect(backlog).toContain("🔨 In Progress");
+    expect(backlog).not.toContain("✅ Done");
+  });
+
+  it("AC2: a MERGED PR deterministically flips ✅ Done", async () => {
+    const { repo } = makeGitignoredFixture("fix211-merged");
+    const rt = tmp("fix211-merged-rt");
+    const cycleId = "20260606-051000-5102";
+    const p = paths(rt, cycleId);
+    const backlogPath = join(repo, ".roll", "backlog.md");
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shimAgentTcr, github: fakeGithub(0, "MERGED") };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    const backlog = readFileSync(backlogPath, "utf8");
+    expect(backlog).toContain("✅ Done");
+    expect(backlog).not.toContain("🔨 In Progress");
   });
 });
 

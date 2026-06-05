@@ -568,13 +568,21 @@ export async function executeCommand(
     case "append_run": {
       const key: RunKey = { storyId: ctx.storyId ?? "", cycleId: cmd.cycleId };
       ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx));
-      // FIX-198 end-to-end status flow: the `done` terminal (publish status 0
-      // with auto-merge set, or the gh-missing ff merge-back — i.e. the
-      // delivery left the building) flips the MAIN backlog row to ✅ Done
-      // deterministically — never an agent-discipline hope. A merge that later
-      // falls through is the reconcile engine's job (假 Done 检测 flips back).
+      // FIX-211: Done ≡ merged (backlog.md:4) — no publish-time 抢跑. A
+      // publish-status-0 `done` terminal means the PR was OPENED and merge
+      // handed to the async PR loop (US-AUTO-044), NOT that it merged. FIX-198
+      // wrongly flipped the MAIN backlog ✅ the moment the PR opened, so a card
+      // read Done while its PR was still open (the conductor merged minutes
+      // later). Flip ✅ Done ONLY on confirmed MERGED evidence; otherwise the row
+      // rests at 🔨 In Progress (delivered, pending merge) and a later
+      // preflight reconcile (decideClaimReconcile) flips it once the async PR
+      // loop merges. The runs row keeps `done` for v2/dashboard parity — only
+      // the backlog flip waits for the merge evidence.
       if (cmd.status === "done" && (ctx.storyId ?? "") !== "") {
-        ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", "✅ Done");
+        const state = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => "UNKNOWN");
+        if (state === "MERGED") {
+          ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", "✅ Done");
+        }
       }
       return {};
     }

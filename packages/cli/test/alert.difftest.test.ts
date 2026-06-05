@@ -119,8 +119,14 @@ const LOG_BODY = [
 ].join("\n");
 
 // Strip the wall-clock second from ack output / footer (the only non-injectable
-// byte). Replaces a `YYYY-MM-DD HH:MM:SS` timestamp with a fixed token.
-const stripTs = (s: string): string => s.replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/g, "<TS>");
+// byte). The en ack message word-splits the date (printf format-reuse quirk),
+// so date and time can appear as SEPARATE fragments — strip them independently
+// or a second-boundary straddle between the two legs flakes the compare.
+const stripTs = (s: string): string =>
+  s
+    .replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/g, "<TS>")
+    .replace(/\d{4}-\d{2}-\d{2}/g, "<D>")
+    .replace(/\d{2}:\d{2}:\d{2}/g, "<T>");
 
 describe("diff-test: roll alert == bash oracle", () => {
   for (const lang of ["en", "zh"]) {

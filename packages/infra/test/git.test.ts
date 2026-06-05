@@ -37,11 +37,12 @@ function tmp(tag: string): string {
 function initRepo(tag: string): string {
   const d = tmp(tag);
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: d });
-  execFileSync(
-    "git",
-    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"],
-    { cwd: d },
-  );
+  // Repo-local identity: CI runners have no global git config, and the
+  // wrappers under test deliberately don't inject one (AGENTS: identity
+  // comes from git config, never hardcoded).
+  execFileSync("git", ["config", "user.email", "t@t"], { cwd: d });
+  execFileSync("git", ["config", "user.name", "t"], { cwd: d });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: d });
   return d;
 }
 

@@ -3,9 +3,12 @@ import { fallbackToBash, registerPorted } from "../bridge.js";
 import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
+import { changelogCommand } from "./changelog.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
+import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand } from "./dashboard.js";
 import { doctorCommand } from "./doctor.js";
+import { feedbackCommand } from "./feedback.js";
 import { langCommand } from "./lang.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import { pricesCommand } from "./prices.js";
@@ -53,6 +56,26 @@ export function registerAll(): void {
     }
     return configGetCommand(args);
   });
+  // `changelog`: the DETERMINISTIC paths are TS (generate --no-ai / --json,
+  // --write of the deterministic draft, help, unknown). The default `generate`
+  // (without --no-ai/--json) attempts the live AI-style agent in v2 — a path
+  // that must NOT run an agent from TS — so it FALLS BACK to bash, preserving
+  // v2's agent-styling behavior exactly. (changelog.ts keeps an injectable,
+  // default-off styler used only by difftests; see its header.)
+  registerPorted("changelog", (args) => {
+    if (args[0] === "generate") {
+      const flags = args.slice(1);
+      const deterministic = flags.includes("--no-ai") || flags.includes("--json");
+      if (!deterministic) return fallbackToBash(["changelog", ...args]).status;
+    }
+    return changelogCommand(args);
+  });
+  // `consistency`: check/--json/--project-dir + help + unknown all TS (full
+  // surface ported; the python orchestrator is reimplemented byte-for-byte).
+  registerPorted("consistency", consistencyCommand);
+  // `feedback`: full surface TS (arg parse, repo resolution, env block,
+  // print-url + gh issue create). No sub-paths left on bash.
+  registerPorted("feedback", feedbackCommand);
   // `loop status` + `loop run-once` are TS; every other loop subcommand falls
   // back to bash. `run-once` is the v3 single-cycle runner adapter (US-LOOP-006
   // prerequisite); --dry-run prints the command plan without executing.

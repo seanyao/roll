@@ -14,8 +14,8 @@
  */
 import { type RouteDeps } from "@roll/core";
 import { projectIdentity } from "@roll/infra";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { type RunnerPaths, dryRunPlan, nodePorts, runCycleOnce } from "../runner/index.js";
 import { spawn } from "node:child_process";
 
@@ -62,16 +62,37 @@ function runtimeDir(projectPath: string): string {
   return env !== "" ? env : join(projectPath, ".roll", "loop");
 }
 
-/** Read the loop SKILL.md body the agent runs (best-effort; empty when absent). */
-function readSkillBody(projectPath: string): string {
+/**
+ * Resolve + read the loop SKILL.md body the agent runs, frontmatter stripped.
+ *
+ * FIX-204A: the v2-era path (`.roll/skills/roll-loop/SKILL.md`) became a
+ * fossil when skills moved to the `skills/` submodule — every live cycle got
+ * an EMPTY body and the agent drove blind (2026-06-06, the v3 heart's first
+ * live run). Resolution order: `ROLL_LOOP_SKILL` env (explicit override) →
+ * legacy `.roll/skills/` (projects vendoring a private copy) → `skills/`
+ * submodule (the shipped truth). Returns null when nothing resolves to a
+ * non-empty body — the caller must fail LOUD, never spawn a blind agent.
+ */
+export function readSkillBody(projectPath: string): string | null {
   const candidates = [
-    join(projectPath, ".roll", "skills", "roll-loop", "SKILL.md"),
     process.env["ROLL_LOOP_SKILL"] ?? "",
+    join(projectPath, ".roll", "skills", "roll-loop", "SKILL.md"),
+    join(projectPath, "skills", "roll-loop", "SKILL.md"),
   ].filter((p) => p !== "");
   for (const p of candidates) {
-    if (existsSync(p)) return readFileSync(p, "utf8");
+    if (!existsSync(p)) continue;
+    let raw = "";
+    try {
+      raw = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    // Strip YAML frontmatter — the v2 oracle hands the agent the body only
+    // (`_agent_skill_cmd` splices the "stripped SKILL.md body").
+    const body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+    if (body !== "") return body;
   }
-  return "";
+  return null;
 }
 
 /**
@@ -113,6 +134,26 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
   };
 
+  // FIX-204A: an empty workflow document = a blind agent burning tokens for
+  // nothing — halt loudly BEFORE any lock/worktree/agent side effect.
+  const skillBody = readSkillBody(id.path);
+  if (skillBody === null) {
+    const msg =
+      `[${new Date().toISOString()}] ALERT loop run-once: roll-loop SKILL.md not found ` +
+      `(checked ROLL_LOOP_SKILL, .roll/skills/, skills/) — cycle ${cycleId} refused to start`;
+    try {
+      mkdirSync(dirname(paths.alertsPath), { recursive: true });
+      appendFileSync(paths.alertsPath, `${msg}\n`, "utf8");
+    } catch {
+      /* the stderr line below still fires */
+    }
+    process.stderr.write(
+      `loop run-once: roll-loop SKILL.md not found — refusing to spawn a blind agent (ALERT written)\n` +
+        `loop run-once: 找不到 roll-loop SKILL.md — 拒绝盲开 agent(已写 ALERT)\n`,
+    );
+    return 1;
+  }
+
   // Minimal route deps: read agents.yaml slots would be the real wiring; for the
   // single-cycle runner default to the project agent via firstInstalled.
   const routeDeps: RouteDeps = {
@@ -123,7 +164,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   const ports = nodePorts({
     repoCwd: id.path,
     paths,
-    skillBody: readSkillBody(id.path),
+    skillBody,
     routeDeps,
   });
 

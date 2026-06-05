@@ -13,6 +13,12 @@ import { feedbackCommand } from "./feedback.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
+import {
+  loopOffCommand,
+  loopOnCommand,
+  loopPauseCommand,
+  loopResumeCommand,
+} from "./loop-sched.js";
 import { migrateCommand } from "./migrate.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
@@ -138,12 +144,17 @@ export function registerAll(): void {
     const r = slidesCommand(args);
     return r ?? fallbackToBash(["slides", ...args]).status;
   });
-  // `loop status` + `loop run-once` are TS; every other loop subcommand falls
-  // back to bash. `run-once` is the v3 single-cycle runner adapter (US-LOOP-006
-  // prerequisite); --dry-run prints the command plan without executing.
+  // `loop status` + `loop run-once` are TS; `on|off|pause|resume` are TS as of
+  // US-LOOP-009 — `on` generates the v3 runner (a self-contained wrapper around
+  // `loop run-once`; DELIBERATE divergence from the v2 tmux outer/inner pair,
+  // whitelisted in AGENTS.md). Every other loop subcommand falls back to bash.
   registerPorted("loop", (args) => {
     if (args[0] === "status") return dashboardCommand(args.slice(1));
     if (args[0] === "run-once") return loopRunOnceCommand(args.slice(1));
+    if (args[0] === "on") return loopOnCommand(args.slice(1));
+    if (args[0] === "off") return loopOffCommand(args.slice(1));
+    if (args[0] === "pause") return loopPauseCommand(args.slice(1));
+    if (args[0] === "resume") return loopResumeCommand(args.slice(1));
     return fallbackToBash(["loop", ...args]).status;
   });
 }

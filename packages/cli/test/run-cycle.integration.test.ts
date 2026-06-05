@@ -609,3 +609,41 @@ describe("FIX-204C — worktree sees the main .roll via symlink", () => {
     expect(existsSync(join(repo, ".git", "info", "exclude")) ? readFileSync(join(repo, ".git", "info", "exclude"), "utf8") : "").not.toMatch(/^\.roll$/m);
   });
 });
+
+describe("FIX-209 — cycle baseline freshness: preflight fetches the remote merge", () => {
+  it("a commit merged to the remote AFTER clone is visible in the worktree baseline", async () => {
+    const { repo, remote } = makeFixture("freshness");
+    const rt = tmp("freshness-rt");
+    const cycleId = "20260606-050000-2090";
+    const p = paths(rt, cycleId);
+
+    // A PR lands on the remote AFTER `repo` was cloned+fetched: advance the bare
+    // remote's main via a throwaway clone. `repo`'s local `origin/main` ref is
+    // now STALE — without the preflight fetch the worktree would branch off the
+    // pre-merge baseline (the exact conflict/rework risk FIX-209 fixes).
+    const advance = tmp("freshness-advance");
+    git(advance, ["clone", "-q", remote, "."]);
+    writeFileSync(join(advance, "merged-on-remote.txt"), "landed via PR after clone\n", "utf8");
+    git(advance, [...GIT_ID, "add", "-A"]);
+    git(advance, [...GIT_ID, "commit", "-q", "-m", "remote: merge PR #999"]);
+    git(advance, ["push", "-q", "origin", "main"]);
+
+    // Capture, at execute time, whether the worktree baseline carries the merge.
+    let mergeVisibleInWorktree = false;
+    const shim: AgentSpawn = async (agent, opts) => {
+      mergeVisibleInWorktree = existsSync(join(opts.cwd, "merged-on-remote.txt"));
+      return shimAgentTcr(agent, opts);
+    };
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    // The crown assertion: the worktree branched off the FRESH baseline.
+    expect(mergeVisibleInWorktree).toBe(true);
+  });
+});

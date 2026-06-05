@@ -183,6 +183,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     clock: () => 42,
     agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
     git: {
+      fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
       worktreeRemove: vi.fn(async () => ({ code: 0 })),
       push: vi.fn(async () => ({ code: 0 })),
@@ -226,6 +227,28 @@ describe("executeCommand — command → executor mapping", () => {
     });
     const r2 = await executeCommand({ kind: "create_worktree", branch: "b" }, bad.ports, CTX);
     expect(r2.event).toEqual({ type: "worktree_failed" });
+  });
+
+  it("FIX-209: preflight fetches origin main before the worktree branches off it", async () => {
+    const { ports, calls } = fakePorts();
+    const r = await executeCommand({ kind: "preflight" }, ports, CTX);
+    expect(r.event).toEqual({ type: "preflight_done" });
+    expect(ports.git.fetchOrigin).toHaveBeenCalledWith("/repo", "main");
+    // success → no WARN noise.
+    expect(calls["alert"]).toBeUndefined();
+  });
+
+  it("FIX-209: a failed preflight fetch leaves a WARN trace and still proceeds (lenient)", async () => {
+    const { ports, calls } = fakePorts({
+      git: { ...fakePorts().ports.git, fetchOrigin: vi.fn(async () => ({ fetched: false })) },
+    });
+    const r = await executeCommand({ kind: "preflight" }, ports, CTX);
+    // Lenient: the cycle is NOT toppled by a fetch failure.
+    expect(r.event).toEqual({ type: "preflight_done" });
+    // A WARN trace was written to the alerts log.
+    const warn = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(warn).toContain("[WARN]");
+    expect(warn).toContain("fetch origin main failed");
   });
 
   it("pick_story returns story_picked when a Todo exists, no_story when empty", async () => {

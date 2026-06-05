@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.606.1
+
+### 新功能
+
+- **`roll attest` 验收证据链上线** — 每个交付的 story 可生成单文件验收报告：逐条 AC 判定（五档徽章）、证据卡片（截图 / 可搜索的 CLI 文本 / commit·CI·部署链接）、零证据强制降级红线 + 缺口附录；离线可开、可打印 PDF。web/iOS/Android 三端截屏各带前置自动跳过；同 story 自评条目折叠展示
+- **发版一致性闸** — 每个 v* tag 在创建 Release 前先过 `roll consistency check`：任一维度对不上即中止发版，差异清单见 job 日志
+- **loop 调度面 TS 化** — `loop on/off/pause/resume/now` 原生实现；`loop on` 生成自包含 v3 runner（周期心脏 = `loop run-once`）；`loop now` 检测旧版模板自动再生成后再跑（根治 command not found）
+
+### 稳定性
+
+- **backlog 状态端到端确定性** — 取卡即标 🔨 进行中、交付完成确定性翻 ✅ Done、崩溃残留的认领自动回收；普通项目（.roll 被 gitignore）布局下状态不再悬空
+- **changelog 不再漏卡** — 裸 ID（非链接形）的 Done 行正确入草稿；空草稿时 `--write` 不写占位句
+- **peer 硬触发留痕** — 高复杂度交付未经评审会在事件流与 ALERT 留下可审计记录
+
+### 精简
+
+- **tart 隔离 lane 移除** — `test_isolation.type` 只留 `none`；残留 tart 配置显式报错退出，绝不静默回落宿主
+- **bats 测试套件退役** — 51k 行 bash 测试由 TS diff-test 体系接管（对使用者无感；v2 分支保留全量历史）
+
+### 文档
+
+- **架构与理念文档归仓** — `docs/architecture.md`（分层 / 领域 / 12 条不变量）、`docs/verification.md`、`docs/manifesto.md`
+- **双语新章** — 验收证据指南、一致性与发版闸指南、README 仓库结构章节与环境要求修正
+
+
 ## v3.0.0
 
 ### TypeScript 重写

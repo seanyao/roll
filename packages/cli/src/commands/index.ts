@@ -1,6 +1,7 @@
 /** Ported-command registry — one line per migrated subcommand. */
 import { fallbackToBash, registerPorted } from "../bridge.js";
 import { agentListCommand } from "./agent-list.js";
+import { alertCommand } from "./alert.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
 import { dashboardCommand } from "./dashboard.js";
@@ -20,6 +21,8 @@ export function registerAll(): void {
   registerPorted("lang", langCommand);
   // `skills`: generate/check/help/unknown all TS (full surface ported).
   registerPorted("skills", skillsCommand);
+  // `alert`: list/ack/resolve/clear/log/unknown all TS (full surface ported).
+  registerPorted("alert", alertCommand);
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

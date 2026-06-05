@@ -84,7 +84,8 @@ describe("npm pack → install → run (release packaging)", () => {
       const bin = join(prefix, "node_modules", ".bin", "roll");
       expect(existsSync(bin), `installed bin shim missing at ${bin}`).toBe(true);
 
-      // 3a. Bash fallback: `version` prints the frozen engine version stamp.
+      // 3a. TS-native `version` (FIX-202): prints the install tree's package.json
+      //     version (single source of truth), not the fossil bin/roll literal.
       const version = run(bin, ["version"], prefix);
       expect(version).toMatch(/^roll v\d+\.\d+\.\d+/);
 

@@ -18,21 +18,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { repoRoot } from "../bridge.js";
-
-/**
- * The running bin/roll's VERSION= value — the same source the env block's
- * `roll version:` line uses in the oracle ($VERSION is set near the top of
- * bin/roll). Read from the frozen script so TS and bash agree byte-for-byte.
- */
-function binRollVersion(): string {
-  try {
-    const m = /^VERSION="([^"]+)"/m.exec(readFileSync(join(repoRoot(), "bin", "roll"), "utf8"));
-    return m?.[1] ?? "unknown";
-  } catch {
-    return "unknown";
-  }
-}
+import { rollVersion } from "./version.js";
 
 function err(line: string): void {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "";
@@ -184,7 +170,9 @@ export function urlencode(s: string): string {
 
 /** Port of _feedback_env_block. The trailing newline-prefixed `---` block. */
 function feedbackEnvBlock(): string {
-  const rollV = binRollVersion() || "unknown";
+  // FIX-202: same package.json-first probe the env block's `roll version:` line
+  // now uses in the oracle ($VERSION resolved from package.json near bin/roll top).
+  const rollV = rollVersion() || "unknown";
   let osName = "unknown";
   try {
     osName = execFileSync("uname", ["-srm"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || "unknown";

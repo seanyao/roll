@@ -40,8 +40,8 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { c, renderState, row, COLS } from "../render.js";
-import { repoRoot } from "../bridge.js";
 import { syncConventions as sharedSyncConventions } from "./setup-shared.js";
+import { rollVersion } from "./version.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — used only for err() here ─────────────
 function err(line: string): void {
@@ -61,16 +61,6 @@ function rollGlobal(): string {
 function rollTemplates(): string {
   return join(rollHome(), "conventions", "templates");
 }
-/** bin/roll VERSION= — the frozen oracle's own version (for the .version stamp). */
-function binRollVersion(): string {
-  try {
-    const m = /^VERSION="([^"]+)"/m.exec(readFileSync(join(repoRoot(), "bin", "roll"), "utf8"));
-    return m?.[1] ?? "unknown";
-  } catch {
-    return "unknown";
-  }
-}
-
 // merge-summary accumulator (mirrors _ROLL_MERGE_SUMMARY entries "action|file").
 type Summary = string[];
 
@@ -365,7 +355,7 @@ function writeVersionStamp(projectDir: string, summary: Summary): void {
     `# Roll project version stamp — written by \`roll init\` (US-ONBOARD-019).
 # Used by \`_check_structure\` to recognise a previously-onboarded Roll project
 # without depending on directory-name heuristics.
-roll_version: "${binRollVersion()}"
+roll_version: "${rollVersion() || "unknown"}"
 installed_at: "${installedAt}"
 `,
   );

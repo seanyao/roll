@@ -4,6 +4,7 @@ import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { changelogCommand } from "./changelog.js";
+import { ciCommand } from "./ci.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
 import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand } from "./dashboard.js";
@@ -105,6 +106,14 @@ export function registerAll(): void {
   registerPorted("setup", (args) => {
     const r = setupCommand(args);
     return r ?? fallbackToBash(["setup", ...args]).status;
+  });
+  // `ci`: the READ surface is TS (no-flag / `--timeout=N` status report:
+  // gh-absent warn, not-a-git-repo err, gh-run-list failure, no-runs note, and
+  // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate
+  // (_ci_wait's polling loop) returns null → falls back to the frozen bash.
+  registerPorted("ci", (args) => {
+    const r = ciCommand(args);
+    return r ?? fallbackToBash(["ci", ...args]).status;
   });
   // `test`: full surface TS (arg parse, --where routing, --reset lock+dispatch,
   // the default exec path through the isolation adapter). type=none runs the

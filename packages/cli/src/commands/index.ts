@@ -124,8 +124,8 @@ export function registerAll(): void {
   });
   // `test`: full surface TS (arg parse, --where routing, --reset lock+dispatch,
   // the default exec path through the isolation adapter). type=none runs the
-  // suite on the host via a forwarded `npm test`; type=tart drives the VM via
-  // PATH-resolved tart/ssh and, when unreachable, errors non-zero WITHOUT a
+  // suite on the host via a forwarded `npm test`; any other configured type
+  // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
   // `update`: full surface TS (npm + curl upgrade paths, cache invalidation, the

@@ -15,8 +15,10 @@ import { loopRunOnceCommand } from "./loop-run-once.js";
 import { migrateCommand } from "./migrate.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
+import { setupCommand } from "./setup.js";
 import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
+import { updateCommand } from "./update.js";
 
 let registered = false;
 
@@ -94,6 +96,20 @@ export function registerAll(): void {
   // `offboard`: full surface TS (changeset parse, cross-project guard, plan
   // print, FIX-125 in-cycle plist tripwire, --confirm apply). No bash fallback.
   registerPorted("offboard", offboardCommand);
+  // `setup`: the DETERMINISTIC install/sync pipeline + v2 UI are TS (fresh /
+  // --force / already-synced re-run; the unknown-argument error is owned by the
+  // TS port too — byte-identical catalog message). The only fallback is the
+  // no-conventions-source guard (rollPkgConventions missing → returns null), so
+  // bash owns the convention-source-not-found error + exit. No other sub-paths.
+  registerPorted("setup", (args) => {
+    const r = setupCommand(args);
+    return r ?? fallbackToBash(["setup", ...args]).status;
+  });
+  // `update`: full surface TS (npm + curl upgrade paths, cache invalidation, the
+  // post-update `roll setup` chain, changelog). The real install is driven via
+  // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.
+  // No sub-paths on bash.
+  registerPorted("update", updateCommand);
   // `loop status` + `loop run-once` are TS; every other loop subcommand falls
   // back to bash. `run-once` is the v3 single-cycle runner adapter (US-LOOP-006
   // prerequisite); --dry-run prints the command plan without executing.

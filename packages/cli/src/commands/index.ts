@@ -11,6 +11,7 @@ import { doctorCommand } from "./doctor.js";
 import { feedbackCommand } from "./feedback.js";
 import { langCommand } from "./lang.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
+import { migrateCommand } from "./migrate.js";
 import { pricesCommand } from "./prices.js";
 import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
@@ -76,6 +77,9 @@ export function registerAll(): void {
   // `feedback`: full surface TS (arg parse, repo resolution, env block,
   // print-url + gh issue create). No sub-paths left on bash.
   registerPorted("feedback", feedbackCommand);
+  // `migrate`: full surface TS (three-state idempotency, dry-run preview,
+  // git-mv execute with the single atomic commit). No sub-paths on bash.
+  registerPorted("migrate", migrateCommand);
   // `loop status` + `loop run-once` are TS; every other loop subcommand falls
   // back to bash. `run-once` is the v3 single-cycle runner adapter (US-LOOP-006
   // prerequisite); --dry-run prints the command plan without executing.

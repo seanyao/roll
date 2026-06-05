@@ -33,7 +33,7 @@ import {
   uninstall as launchdUninstall,
   projectIdentity,
 } from "@roll/infra";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -50,6 +50,10 @@ export interface LoopSchedDeps {
   };
   /** Run the generated loop runner once, FORCE env set (loop now). */
   execRunner?: (runnerPath: string) => Promise<number>;
+  /** FIX-204E: is tmux available? Decides the `loop now` UX branch. */
+  hasTmux?: () => boolean;
+  /** FIX-204E: inline observation — tail live.log for the cycle's duration. */
+  observe?: (runtimeDir: string) => Promise<void>;
 }
 
 function realDeps(): LoopSchedDeps {
@@ -59,17 +63,54 @@ function realDeps(): LoopSchedDeps {
     sharedRoot: () => process.env["ROLL_SHARED_ROOT"] || join(homedir(), ".shared", "roll"),
     launchdDir: () => join(homedir(), "Library", "LaunchAgents"),
     launchd: { reinstall: launchdReinstall, uninstall: launchdUninstall },
-    execRunner: () =>
+    execRunner: (runner) =>
       new Promise((resolve) => {
-        // Re-enter THIS cli (`loop run-once`) in the foreground — not the
-        // launchd runner script, whose whole job is redirecting to cron.log.
-        const cli = process.argv[1] ?? "";
-        const child = spawn(process.execPath, [cli, "loop", "run-once"], {
+        // FIX-204E: run the GENERATED runner — it self-wraps the cycle into
+        // the tmux session and returns immediately (fallback: direct run).
+        // The cycle must never be a child of the invoking session again.
+        const child = spawn("bash", [runner], {
           stdio: "inherit",
-          env: { ...process.env, ROLL_LOOP_FORCE: "1", ROLL_LOOP_STREAM: "1" },
+          env: { ...process.env, ROLL_LOOP_FORCE: "1" },
         });
         child.on("exit", (code) => resolve(code ?? 1));
         child.on("error", () => resolve(1));
+      }),
+    hasTmux: () => {
+      try {
+        return spawnSync("tmux", ["-V"], { stdio: "ignore" }).status === 0;
+      } catch {
+        return false;
+      }
+    },
+    // The `loop now` inline observation: tail live.log while the cycle holds
+    // the inner lock; Ctrl-C stops the TAIL only (the cycle lives in tmux).
+    observe: (rt) =>
+      new Promise((resolve) => {
+        const lock = join(rt, "inner.lock");
+        const tail = spawn("tail", ["-n", "+1", "-F", join(rt, "live.log")], { stdio: "inherit" });
+        let sawLock = false;
+        const t0 = Date.now();
+        const finish = (): void => {
+          try {
+            tail.kill("SIGTERM");
+          } catch {
+            /* gone */
+          }
+          process.removeListener("SIGINT", finish);
+          resolve();
+        };
+        const timer = setInterval(() => {
+          if (existsSync(lock)) sawLock = true;
+          const done = sawLock ? !existsSync(lock) : Date.now() - t0 > 30_000;
+          if (done) {
+            clearInterval(timer);
+            finish();
+          }
+        }, 500);
+        process.on("SIGINT", () => {
+          clearInterval(timer);
+          finish();
+        });
       }),
   };
 }
@@ -112,17 +153,25 @@ if [ -z "$ROLL_LOOP_FORCE" ]; then
   h=$((10#$(date +%H)))
   if [ "$h" -lt ${input.activeStart} ] || [ "$h" -ge ${input.activeEnd} ]; then exit 0; fi
 fi
+ROLL_BIN="\${ROLL_BIN:-${input.rollBin ?? '$(command -v roll || echo /opt/homebrew/bin/roll)'}}"
+# FIX-204E observation window: every cycle runs inside tmux session
+# roll-loop-${input.slug} (v2's session model around the TS heart): window 0
+# tails the live agent transcript ($RT/live.log), each cycle gets its own
+# window, and the cycle SURVIVES whoever invoked it — a dying terminal or
+# agent session can no longer TERM a half-done cycle (2026-06-06 rc=143).
+# ROLL_LOOP_NO_TMUX=1 or no tmux on PATH → direct run (previous contract).
+# ROLL_TMUX_BIN: test seam (the PATH bootstrap above outranks any shim dir).
+TMUX_BIN="\${ROLL_TMUX_BIN:-tmux}"
+if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TMUX_BIN" >/dev/null 2>&1; then
+  _sess="roll-loop-${input.slug}"
+  "$TMUX_BIN" has-session -t "$_sess" 2>/dev/null || \\
+    "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "printf 'roll live · ${input.slug} — agent transcript\\n'; exec tail -n +1 -F '$RT/live.log'" 2>/dev/null || true
+  if "$TMUX_BIN" new-window -d -t "$_sess" -n "c$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
+    exit 0
+  fi
+fi
 # Keep the box awake for the duration of the cycle.
 caffeinate -i -w $$ 2>/dev/null &
-# US-PORT-011 observation window: unless muted (mute-<slug> in the project rt
-# dir or the shared root), pop a Terminal tailing the per-cycle live stream.
-MUTE1="$RT/mute-${input.slug}"
-MUTE2="\${ROLL_SHARED_ROOT:-$HOME/.shared/roll}/loop/mute-${input.slug}"
-if [ ! -f "$MUTE1" ] && [ ! -f "$MUTE2" ] && command -v osascript >/dev/null 2>&1; then
-  : > "$RT/live.log" 2>/dev/null || true
-  osascript -e "tell application \\"Terminal\\" to do script \\"printf 'roll live · ${input.slug}\\\\n'; tail -n +1 -f $RT/live.log\\"" >/dev/null 2>&1 || true
-fi
-ROLL_BIN="\${ROLL_BIN:-${input.rollBin ?? '$(command -v roll || echo /opt/homebrew/bin/roll)'}}"
 cd "${input.projectPath}" || exit 0
 echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] cycle start (v3 run-once)" >> "$LOG"
 "$ROLL_BIN" loop run-once >> "$LOG" 2>&1
@@ -310,6 +359,7 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       `Loop 已启用 — 周期心脏:roll loop run-once(v3)`,
       `  • roll-loop  every ${period}min  /  每 ${period} 分钟`,
       `  • pr-loop    every 5min  /  每 5 分钟`,
+      `  • observe    tmux attach -t roll-loop-${id.slug}  /  观测窗`,
       `  • dream      untouched (legacy runner, see FIX-197)  /  未改动(旧 runner,见 FIX-197)`,
       ``,
     ].join("\n"),
@@ -366,7 +416,11 @@ export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = r
  * that does not delegate to `loop run-once` is treated as legacy.
  */
 export function isLegacyRunner(text: string): boolean {
-  return /_loop_migrate_legacy_paths|_loop_runtime_dir/.test(text) || !text.includes("loop run-once");
+  if (/_loop_migrate_legacy_paths|_loop_runtime_dir/.test(text)) return true;
+  if (!text.includes("loop run-once")) return true;
+  // FIX-204E: a v3 runner generated before the observation window lacks the
+  // tmux self-wrap — regenerate so cycles detach from the invoking session.
+  return !text.includes("ROLL_TMUX_WRAPPED");
 }
 
 /**
@@ -398,16 +452,32 @@ export async function loopNowCommand(_args: string[], deps: LoopSchedDeps = real
     if (rc !== 0) return rc;
   }
 
-  // US-PORT-011: `loop now` is a FOREGROUND experience — the cycle runs in
-  // this terminal with the agent transcript streaming live (ROLL_LOOP_STREAM),
-  // no popup, no tail, no silence. launchd keeps using the silent runner.
+  // FIX-204E: the runner wraps the cycle into tmux (detached — survives this
+  // session); `loop now` then tails live.log inline until the cycle releases
+  // the inner lock. Ctrl-C stops the OBSERVATION only, never the cycle.
+  const useTmux =
+    (deps.hasTmux?.() ?? false) && (process.env["ROLL_LOOP_NO_TMUX"] ?? "").trim() === "";
+  const sess = `roll-loop-${id.slug}`;
   process.stdout.write(
-    `Starting one loop cycle — live transcript below\n强制启动一个 loop 周期 — 实时转录如下\n\n`,
+    useTmux
+      ? `Starting one loop cycle in tmux — attach anytime: tmux attach -t ${sess}\n` +
+        `强制启动一个 loop 周期(tmux 内) — 随时观察:tmux attach -t ${sess}\n` +
+        `live transcript below — Ctrl-C stops watching, never the cycle\n` +
+        `实时转录如下 — Ctrl-C 只退出观察,不影响周期\n\n`
+      : `Starting one loop cycle (no tmux — runs inline)\n强制启动一个 loop 周期(无 tmux — 内联运行)\n\n`,
   );
   const exec = deps.execRunner;
   if (exec === undefined) {
     process.stderr.write("loop now: no runner executor available\n");
     return 1;
   }
-  return exec(runner);
+  const rc = await exec(runner);
+  if (rc === 0 && useTmux && deps.observe !== undefined) {
+    await deps.observe(join(id.path, ".roll", "loop"));
+    process.stdout.write(
+      `\ncycle finished — logs: .roll/loop/cron.log · .roll/loop/cycle-logs/\n` +
+        `周期结束 — 日志: .roll/loop/cron.log · .roll/loop/cycle-logs/\n`,
+    );
+  }
+  return rc;
 }

@@ -228,17 +228,13 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
         child.kill("SIGKILL");
       }, opts.timeoutMs);
     }
-    // US-PORT-011: live passthrough — when ROLL_LOOP_STREAM=1 (set by
-    // `roll loop now`), every agent chunk also flows to the CURRENT terminal
-    // in real time. The buffered copy still feeds cost/usage exactly as before.
-    const live = (process.env["ROLL_LOOP_STREAM"] ?? "") === "1";
+    // FIX-204E: live.log (fed via onChunk by the executor) is the single live
+    // channel — observers tail it from the tmux watch window / `loop now`.
     child.stdout?.on("data", (d: Buffer) => {
-      if (live) process.stdout.write(d);
       opts.onChunk?.(d);
       stdout += d.toString("utf8");
     });
     child.stderr?.on("data", (d: Buffer) => {
-      if (live) process.stderr.write(d);
       opts.onChunk?.(d);
       stderr += d.toString("utf8");
     });

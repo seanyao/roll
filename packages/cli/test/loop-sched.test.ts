@@ -156,6 +156,9 @@ describe("v3 loop runner — EXECUTION in a sandbox (the contract that matters)"
       // the shim with a REAL installed roll — pin via the ROLL_BIN override
       // (a supported contract: launchd env / operators may set it too).
       ROLL_BIN: join(dir, "roll"),
+      // These cases assert the DIRECT-run contract — pin the FIX-204E opt-out
+      // so a tmux on the host PATH can't hijack the sandbox.
+      ROLL_LOOP_NO_TMUX: "1",
       ...(opts.force !== undefined ? { ROLL_LOOP_FORCE: opts.force } : {}),
     };
     const r = execSync(`bash '${sp}'; echo rc=$?`, { env, encoding: "utf8" });
@@ -287,10 +290,12 @@ describe("loop pause/resume (marker file)", () => {
 describe("FIX-197 — loop now legacy self-heal", async () => {
   const { isLegacyRunner, loopNowCommand } = await import("../src/commands/loop-sched.js");
 
-  it("isLegacyRunner: bare-engine-call templates and non-run-once wrappers are legacy", () => {
+  it("isLegacyRunner: bare-engine calls, non-run-once wrappers AND tmux-less v3 runners are legacy", () => {
     expect(isLegacyRunner('#!/bin/bash -l\n_loop_migrate_legacy_paths "x"\n')).toBe(true);
     expect(isLegacyRunner("#!/bin/bash\nsomething else entirely\n")).toBe(true);
-    expect(isLegacyRunner('#!/bin/bash -l\n"$ROLL_BIN" loop run-once >> "$LOG" 2>&1\n')).toBe(false);
+    // FIX-204E: a pre-observation-window v3 runner regenerates too
+    expect(isLegacyRunner('#!/bin/bash -l\n"$ROLL_BIN" loop run-once >> "$LOG" 2>&1\n')).toBe(true);
+    expect(isLegacyRunner(buildLoopRunnerScript({ projectPath: "/p", slug: "x", activeStart: 0, activeEnd: 24 }))).toBe(false);
   });
 
   it("legacy runner → regenerated via loop on, then executed with the v3 template", async () => {
@@ -321,7 +326,7 @@ describe("FIX-197 — loop now legacy self-heal", async () => {
     deps.execRunner = (): Promise<number> => Promise.resolve(7);
     const runner = join(shared, "loop", "run-proj-abc123.sh");
     mkdirSync(join(shared, "loop"), { recursive: true });
-    writeFileSync(runner, '#!/bin/bash -l\n"$ROLL_BIN" loop run-once >> "$LOG" 2>&1\n', { mode: 0o755 });
+    writeFileSync(runner, buildLoopRunnerScript({ projectPath: proj, slug: "proj-abc123", activeStart: 0, activeEnd: 24 }), { mode: 0o755 });
 
     const { code, out } = await captureStdout(() => loopNowCommand([], deps));
     expect(code).toBe(7);
@@ -330,21 +335,155 @@ describe("FIX-197 — loop now legacy self-heal", async () => {
   });
 });
 
-describe("US-PORT-011 — observation window in the runner template", () => {
+describe("FIX-204E — tmux observation window in the runner template", () => {
   const s = buildLoopRunnerScript({ projectPath: "/p", slug: "s9", activeStart: 0, activeEnd: 24 });
 
-  it("pops a Terminal tail of live.log only when unmuted, before the cycle", () => {
-    expect(s).toContain('mute-s9');
-    expect(s).toContain("osascript");
-    expect(s).toContain("live.log");
-    expect(s.indexOf("osascript")).toBeLessThan(s.indexOf('loop run-once >>'));
-    // both mute flags gate the popup
-    expect(s).toContain('MUTE1="$RT/mute-s9"');
-    expect(s).toContain('loop/mute-s9');
+  it("wraps the cycle into tmux session roll-loop-<slug> with a live.log watch window", () => {
+    expect(s).toContain('_sess="roll-loop-s9"');
+    expect(s).toContain('"$TMUX_BIN" has-session');
+    expect(s).toContain('"$TMUX_BIN" new-session -d -s');
+    expect(s).toContain("-x 200 -y 50"); // v2 oracle geometry
+    expect(s).toContain("tail -n +1 -F '$RT/live.log'");
+    expect(s).toContain('"$TMUX_BIN" new-window -d');
+    expect(s).toContain("ROLL_TMUX_WRAPPED=1");
+  });
+
+  it("the wrap precedes caffeinate AND the cycle invocation; guards allow opt-out + re-entry", () => {
+    expect(s.indexOf("new-window")).toBeLessThan(s.indexOf("caffeinate"));
+    expect(s.indexOf("new-window")).toBeLessThan(s.indexOf('loop run-once >>'));
+    expect(s).toContain('[ -z "$ROLL_TMUX_WRAPPED" ]');
+    expect(s).toContain('[ -z "$ROLL_LOOP_NO_TMUX" ]');
+    expect(s).toContain('command -v "$TMUX_BIN"');
+    // PAUSE short-circuits BEFORE any tmux session is spawned
+    expect(s.indexOf("PAUSE-s9")).toBeLessThan(s.indexOf("has-session"));
   });
 
   it("generation-time rollBin override is baked verbatim", () => {
     const o = buildLoopRunnerScript({ projectPath: "/p", slug: "s9", activeStart: 0, activeEnd: 24, rollBin: "/dev/roll-cli.js" });
     expect(o).toContain('ROLL_BIN="${ROLL_BIN:-/dev/roll-cli.js}"');
+  });
+});
+
+describe("FIX-204E — tmux path EXECUTION in a sandbox", () => {
+  function tmuxSandbox(opts: { hasSession?: boolean } = {}): {
+    dir: string;
+    rollArgv: string;
+    tmuxArgv: string;
+  } {
+    const dir = tmp("tmuxsb");
+    const rollArgv = join(dir, "roll-argv.log");
+    const tmuxArgv = join(dir, "tmux-argv.log");
+    writeFileSync(join(dir, "roll"), `#!/bin/sh\necho "$@" >> "${rollArgv}"\nexit 0\n`, { mode: 0o755 });
+    // fake tmux: records argv; has-session reflects the fixture's wish
+    writeFileSync(
+      join(dir, "tmux"),
+      `#!/bin/sh\necho "$@" >> "${tmuxArgv}"\ncase "$1" in has-session) exit ${opts.hasSession === true ? 0 : 1} ;; esac\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    return { dir, rollArgv, tmuxArgv };
+  }
+
+  function runOuter(
+    proj: string,
+    slug: string,
+    sb: { dir: string },
+    env: Record<string, string> = {},
+  ): number {
+    const script = buildLoopRunnerScript({ projectPath: proj, slug, activeStart: 0, activeEnd: 24 });
+    const sp = join(sb.dir, "runner.sh");
+    writeFileSync(sp, script, { mode: 0o755 });
+    const r = execSync(`bash '${sp}'; echo rc=$?`, {
+      // ROLL_TMUX_BIN pins the SHIM — the template's PATH bootstrap prepends
+      // brew dirs, which would shadow the sandbox with the real tmux.
+      env: {
+        PATH: `${sb.dir}:/usr/bin:/bin`,
+        HOME: proj,
+        ROLL_BIN: join(sb.dir, "roll"),
+        ROLL_TMUX_BIN: join(sb.dir, "tmux"),
+        ...env,
+      },
+      encoding: "utf8",
+    });
+    return Number(/rc=(\d+)/.exec(r)?.[1] ?? "1");
+  }
+
+  it("outer invocation dispatches into tmux (session + window) and does NOT run the cycle itself", () => {
+    const proj = tmp("tmux1");
+    const sb = tmuxSandbox();
+    const rc = runOuter(proj, "t1", sb);
+    expect(rc).toBe(0);
+    expect(existsSync(sb.rollArgv)).toBe(false); // no direct run
+    const calls = readFileSync(sb.tmuxArgv, "utf8");
+    expect(calls).toContain("has-session");
+    expect(calls).toContain("new-session -d -s roll-loop-t1");
+    expect(calls).toContain("new-window -d -t roll-loop-t1");
+    expect(calls).toContain("ROLL_TMUX_WRAPPED=1");
+    // the cycle log stays untouched — the WRAPPED run owns it
+    expect(existsSync(join(proj, ".roll", "loop", "cron.log"))).toBe(false);
+  });
+
+  it("existing session → no second new-session, still a new cycle window", () => {
+    const proj = tmp("tmux2");
+    const sb = tmuxSandbox({ hasSession: true });
+    runOuter(proj, "t2", sb);
+    const calls = readFileSync(sb.tmuxArgv, "utf8");
+    expect(calls).not.toContain("new-session");
+    expect(calls).toContain("new-window -d -t roll-loop-t2");
+  });
+
+  it("ROLL_TMUX_WRAPPED=1 (inside the window) runs the cycle directly", () => {
+    const proj = tmp("tmux3");
+    const sb = tmuxSandbox();
+    const rc = runOuter(proj, "t3", sb, { ROLL_TMUX_WRAPPED: "1" });
+    expect(rc).toBe(0);
+    expect(readFileSync(sb.rollArgv, "utf8").trim()).toBe("loop run-once");
+    expect(readFileSync(join(proj, ".roll", "loop", "cron.log"), "utf8")).toContain("cycle end rc=0");
+    expect(existsSync(sb.tmuxArgv)).toBe(false); // no tmux calls in the wrapped run
+  });
+
+  it("ROLL_LOOP_NO_TMUX=1 opts out — direct run even with tmux present", () => {
+    const proj = tmp("tmux4");
+    const sb = tmuxSandbox();
+    const rc = runOuter(proj, "t4", sb, { ROLL_LOOP_NO_TMUX: "1" });
+    expect(rc).toBe(0);
+    expect(readFileSync(sb.rollArgv, "utf8").trim()).toBe("loop run-once");
+    expect(existsSync(sb.tmuxArgv)).toBe(false);
+  });
+});
+
+describe("FIX-204E — loop now UX branches (injected deps)", () => {
+  async function nowWith(hasTmux: boolean, observeSpy: { called: number }): Promise<{ code: number; out: string }> {
+    const proj = tmp("nowux");
+    const shared = tmp("nowuxsh");
+    const { deps } = fakeDeps(proj, shared, tmp("nowuxld"));
+    deps.execRunner = (): Promise<number> => Promise.resolve(0);
+    deps.hasTmux = (): boolean => hasTmux;
+    deps.observe = (): Promise<void> => {
+      observeSpy.called += 1;
+      return Promise.resolve();
+    };
+    const runner = join(shared, "loop", "run-proj-abc123.sh");
+    mkdirSync(join(shared, "loop"), { recursive: true });
+    writeFileSync(runner, buildLoopRunnerScript({ projectPath: proj, slug: "proj-abc123", activeStart: 0, activeEnd: 24 }), { mode: 0o755 });
+    const { loopNowCommand } = await import("../src/commands/loop-sched.js");
+    return captureStdout(() => loopNowCommand([], deps));
+  }
+
+  it("tmux available: prints the attach hint and observes until the cycle ends", async () => {
+    const spy = { called: 0 };
+    const { code, out } = await nowWith(true, spy);
+    expect(code).toBe(0);
+    expect(out).toContain("tmux attach -t roll-loop-proj-abc123");
+    expect(out).toContain("Ctrl-C");
+    expect(spy.called).toBe(1);
+    expect(out).toContain("cycle finished");
+  });
+
+  it("no tmux: inline message, no observation pass", async () => {
+    const spy = { called: 0 };
+    const { code, out } = await nowWith(false, spy);
+    expect(code).toBe(0);
+    expect(out).toContain("no tmux");
+    expect(spy.called).toBe(0);
   });
 });

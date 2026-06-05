@@ -1,6 +1,0 @@
-# Test config
-ai_claude: ~/.claude|CLAUDE.md|CLAUDE.md
-ai_agy: ~/.gemini|GEMINI.md|GEMINI.md
-sync_claude: ~/.claude/CLAUDE.md
-editor: vim
-empty_val:

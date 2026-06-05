@@ -75,7 +75,6 @@ lib/           运行时伴生（python/sh），loop 与回落路径在用
 skills/        Git submodule → seanyao/roll-skills（agent 技能契约）
 conventions/   roll setup 同步到各 AI 客户端的约定
 template/      roll init 安装的项目脚手架
-tests/         看护 bash 引擎的冻结 bats 套件（CI 非阻塞道）
 ```
 
 发布为单一 npm 包 `@seanyao/roll`：`dist/`（esbuild 打平的 TS）+ `bin/` + `lib/` + `skills/` + `conventions/` + `template/`。

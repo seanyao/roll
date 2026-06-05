@@ -1,6 +1,0 @@
-{"type":"session","cwd":"/sandbox/worktrees/roll-cycle-TESTCYCLE","id":"019e6894-test"}
-{"type":"message","message":{"role":"user","content":"do the thing"}}
-{"type":"message","message":{"role":"assistant","model":"deepseek-v4-pro","content":"working","usage":{"input":1000,"output":200,"cacheRead":500,"cacheWrite":0,"totalTokens":1700,"cost":{"input":0.000435,"output":0.000174,"cacheRead":0.0000018,"cacheWrite":0,"total":0.01}}}}
-{"type":"model_change","model":"deepseek-v4-pro"}
-{"type":"message","message":{"role":"assistant","model":"deepseek-v4-pro","content":"done","usage":{"input":2000,"output":300,"cacheRead":1000,"cacheWrite":100,"totalTokens":3400,"cost":{"input":0.00087,"output":0.000261,"cacheRead":0.0000036,"cacheWrite":0,"total":0.02}}}}
-{"type":"message","message":{"role":"assistant","model":"deepseek-v4-pro","content":"no usage here"}}

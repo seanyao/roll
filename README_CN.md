@@ -87,6 +87,9 @@ template/      roll init 安装的项目脚手架
 | 工程方法论 | [guide/en/methodology.md](guide/en/methodology.md) | [guide/zh/methodology.md](guide/zh/methodology.md) |
 | 验收证据（`roll attest`） | [guide/en/acceptance-evidence.md](guide/en/acceptance-evidence.md) | [guide/zh/acceptance-evidence.md](guide/zh/acceptance-evidence.md) |
 | 一致性与发版闸 | [guide/en/consistency.md](guide/en/consistency.md) | [guide/zh/consistency.md](guide/zh/consistency.md) |
+| 架构（分层·领域·不变量） | [docs/architecture.md](docs/architecture.md) | — |
+| 验证体系 | [docs/verification.md](docs/verification.md) | — |
+| 理念宣言 | [docs/manifesto.md](docs/manifesto.md) | — |
 | Loop（自主执行器） | [guide/en/loop.md](guide/en/loop.md) | [guide/zh/loop.md](guide/zh/loop.md) |
 | Loop 数据布局（Phase 2.0） | [guide/en/loop-data-layout.md](guide/en/loop-data-layout.md) | [guide/zh/loop-data-layout.md](guide/zh/loop-data-layout.md) |
 | Dream（夜间健康巡检） | [guide/en/dream.md](guide/en/dream.md) | [guide/zh/dream.md](guide/zh/dream.md) |

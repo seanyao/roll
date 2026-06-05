@@ -9,8 +9,10 @@ import {
   type UnstickEvent,
   applyStuckReverts,
   cycleEndForPick,
+  decideClaimReconcile,
   detectStuckStories,
   inProgressStories,
+  latestDeliveringCycle,
   reconcileBranchName,
   reconcileMergeEvidence,
   reconcileStuckBacklog,
@@ -146,5 +148,51 @@ describe("inProgressStories + applyStuckReverts", () => {
       { stage: "cycle_end", label: "c", outcome: "failed", ts: now - 6 * HOUR },
     ];
     expect(reconcileStuckBacklog(backlog, events, now).map((r) => r.storyId)).toEqual(["US-1"]);
+  });
+});
+
+describe("decideClaimReconcile — FIX-211: Done ≡ merged (no publish-time抢跑)", () => {
+  it("flips ✅ Done only on MERGED evidence", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, prState: "MERGED" })).toBe("done");
+  });
+
+  it("leaves an OPEN (delivered, pending merge) claim at 🔨", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, prState: "OPEN" })).toBe("keep");
+  });
+
+  it("treats unknown/unprobed PR state as pending — keep, never premature Done", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true })).toBe("keep");
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, prState: "UNKNOWN" })).toBe("keep");
+  });
+
+  it("reverts a CLOSED (abandoned, unmerged) claim to 📋 Todo for re-pick", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, prState: "CLOSED" })).toBe("todo");
+  });
+
+  it("reverts a dead claim with no delivering cycle to 📋 Todo (orphan recovery)", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: false })).toBe("todo");
+    expect(decideClaimReconcile({ hasDeliveringCycle: false, prState: "MERGED" })).toBe("todo");
+  });
+});
+
+describe("latestDeliveringCycle — map a 🔨 story to the cycle that delivered it", () => {
+  const rows: ReconcileRunRow[] = [
+    { story_id: "US-1", cycle_id: "c-early", status: "failed" },
+    { story_id: "US-1", cycle_id: "c-built", status: "built" },
+    { story_id: "US-2", cycle_id: "c-other", status: "done" },
+    { story_id: "US-1", cycle_id: "c-done", status: "done" },
+  ];
+
+  it("returns the newest delivering (done|built|merged) cycle for the story", () => {
+    expect(latestDeliveringCycle(rows, "US-1")).toBe("c-done");
+    expect(latestDeliveringCycle(rows, "US-2")).toBe("c-other");
+  });
+
+  it("ignores non-delivering rows (failed/aborted) — undefined when none deliver", () => {
+    expect(latestDeliveringCycle([{ story_id: "US-9", cycle_id: "c", status: "failed" }], "US-9")).toBeUndefined();
+  });
+
+  it("returns undefined for a story with no runs row (dead claim, no PR)", () => {
+    expect(latestDeliveringCycle(rows, "US-404")).toBeUndefined();
   });
 });

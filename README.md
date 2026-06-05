@@ -1,8 +1,8 @@
-> ⚠️ **This is the Roll v3 work-in-progress branch — the stable version lives on `main` (bash, anchor tag `v2-freeze-2026-06-04`).**
-> **这是 Roll v3 在建分支——稳定版在 `main` 分支（bash）。**
-> What's new on this branch: `packages/` — TypeScript monorepo growing layer by layer; `skills/` — git submodule → [seanyao/roll-skills](https://github.com/seanyao/roll-skills); commands not yet ported fall back to bash automatically (see [AGENTS.md](AGENTS.md)).
-> 本分支新增：`packages/`（TS monorepo，逐层生长）；`skills/`（git submodule 独立仓）；未迁完的命令自动回落 bash（见 [AGENTS.md](AGENTS.md)）。
-> Build & test: `pnpm install && pnpm -r test`. Bash entry `bin/roll` unchanged.
+> **Roll v3 — the engine is now TypeScript (`packages/`, a pnpm monorepo). The commands are unchanged.**
+> **Roll v3——引擎已是 TypeScript（`packages/`，pnpm monorepo）；命令保持不变。**
+> The bash implementation stays in-tree as `bin/roll`: the automatic fallback for any command the TS layer doesn't yet own, and the oracle the TS suite diff-tests against. `skills/` is a git submodule → [seanyao/roll-skills](https://github.com/seanyao/roll-skills). v2 is archived on the `v2` branch (anchor tag `v2-freeze-2026-06-04`).
+> bash 实现作为 `bin/roll` 留在仓内：TS 层未接管命令的自动回落，也是 TS 套件对拍的 oracle。`skills/` 是 git submodule。v2 归档在 `v2` 分支（锚点 tag `v2-freeze-2026-06-04`）。
+> Build & test: `pnpm install && pnpm -r test`.
 
 ```
  ██████╗  ██████╗ ██╗     ██╗     

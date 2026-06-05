@@ -1,3 +1,6 @@
+> **Roll v3——引擎已是 TypeScript（`packages/`，pnpm monorepo）；命令保持不变。**
+> bash 实现作为 `bin/roll` 留在仓内：TS 层未接管命令的自动回落，也是 TS 套件对拍的 oracle。`skills/` 是 git submodule。v2 归档在 `v2` 分支（锚点 tag `v2-freeze-2026-06-04`）。
+
 ```
  ██████╗  ██████╗ ██╗     ██╗     
  ██╔══██╗██╔═══██╗██║     ██║     

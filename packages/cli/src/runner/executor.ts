@@ -73,6 +73,7 @@ import {
   type AgentSpawn,
   realAgentSpawn,
 } from "./agent-spawn.js";
+import { runPeerGate } from "./peer-gate.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -300,6 +301,27 @@ export async function executeCommand(
     // short-circuits before capture).
     case "capture_facts": {
       const commitsAhead = await ports.git.commitsAhead(ports.paths.worktreePath);
+      // FIX-150b peer hard-trigger gate: agent-agnostic, runs in EVERY cycle's
+      // capture step. High-complexity delivery without peer evidence → ALERT +
+      // `peer:gate` event (auditable); soft by default — the gate records, it
+      // never fails the cycle (unattended deliveries must not deadlock on a
+      // flaky peer; a policy.yaml escalation can consume the same verdict later).
+      await runPeerGate(
+        ports.paths.worktreePath,
+        dirname(ports.paths.eventsPath),
+        ctx.cycleId ?? "",
+        {
+          alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+          event: (p) =>
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "peer:gate",
+              cycleId: p.cycleId,
+              verdict: p.verdict as "consulted" | "skipped",
+              reasons: p.reasons,
+              ts: ports.clock(),
+            }),
+        },
+      );
       const facts: CapturedFacts = {
         usedWorktree: true,
         agentExit: 0, // accept-path only reaches capture (retryPlan accept = exit 0)

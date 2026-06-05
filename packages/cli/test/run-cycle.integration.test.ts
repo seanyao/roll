@@ -332,3 +332,83 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(events).toContain('"cycle:end"');
   });
 });
+
+/**
+ * FIX-198 — the OWNER-OBSERVED scenario, end to end on the ORDINARY project
+ * layout (`.roll/` GITIGNORED, never checked out into worktrees):
+ *   1. pick must read the MAIN checkout's backlog (a worktree read sees no
+ *      .roll at all and idles forever),
+ *   2. 🔨 In Progress must land on the MAIN backlog the moment the story is
+ *      claimed (anti duplicate-pick, visible to `roll backlog`/brief),
+ *   3. ✅ Done must land deterministically at the done terminal — never an
+ *      agent-discipline hope (the "嘴上 Done" lesson),
+ *   4. a dead claim left by a killed cycle is recycled to 📋 Todo at the next
+ *      cycle's preflight (the inner lock guarantees single-flight).
+ */
+describe("FIX-198 status flips on the gitignored-.roll layout", () => {
+  function makeGitignoredFixture(tag: string): { repo: string } {
+    const remote = tmp(`${tag}-remote`);
+    git(remote, ["init", "-q", "--bare", "-b", "main"]);
+    const seed = tmp(`${tag}-seed`);
+    git(seed, ["clone", "-q", remote, "."]);
+    writeFileSync(join(seed, ".gitignore"), ".roll/\n", "utf8");
+    writeFileSync(join(seed, "app.txt"), "app\n", "utf8");
+    git(seed, [...GIT_ID, "add", "-A"]);
+    git(seed, [...GIT_ID, "commit", "-q", "-m", "seed app (.roll gitignored)"]);
+    git(seed, ["push", "-q", "origin", "main"]);
+    const repo = tmp(`${tag}-repo`);
+    git(repo, ["clone", "-q", remote, "."]);
+    // .roll exists ONLY in the main checkout — exactly the SoloGo layout.
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
+    return { repo };
+  }
+
+  it("pick from main · In-Progress mid-cycle · Done at terminal", async () => {
+    const { repo } = makeGitignoredFixture("ord");
+    const rt = tmp("ord-rt");
+    const cycleId = "20260606-000000-2001";
+    const p = paths(rt, cycleId);
+    const backlogPath = join(repo, ".roll", "backlog.md");
+
+    let inProgressDuringRun = "";
+    let worktreeHadRoll: boolean | null = null;
+    const shim: AgentSpawn = async (agent, opts) => {
+      inProgressDuringRun = readFileSync(backlogPath, "utf8");
+      worktreeHadRoll = existsSync(join(opts.cwd, ".roll"));
+      return shimAgentTcr(agent, opts);
+    };
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    expect(worktreeHadRoll).toBe(false); // the layout under test is real
+    expect(inProgressDuringRun).toContain("🔨 In Progress"); // claimed on MAIN, mid-cycle
+    expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done"); // flipped at terminal
+    expect(readFileSync(backlogPath, "utf8")).not.toContain("🔨 In Progress");
+  });
+
+  it("dead claim (🔨 left by a killed cycle) is recycled at the next preflight", async () => {
+    const { repo } = makeGitignoredFixture("orphan");
+    const backlogPath = join(repo, ".roll", "backlog.md");
+    writeFileSync(backlogPath, readFileSync(backlogPath, "utf8").replace("📋 Todo", "🔨 In Progress"), "utf8");
+
+    const rt = tmp("orphan-rt");
+    const cycleId = "20260606-000000-2002";
+    const p = paths(rt, cycleId);
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shimAgentTcr, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done"); // recycled → re-picked → delivered
+    expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done");
+  });
+});

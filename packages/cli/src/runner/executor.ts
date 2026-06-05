@@ -31,6 +31,7 @@
  * {@link CycleEvent} to feed back into the next {@link cycleStep}.
  */
 import {
+  BacklogStore,
   type CapturedFacts,
   type CycleCommand,
   type CycleContext,
@@ -130,7 +131,15 @@ export interface BacklogPort {
   /** Read backlog rows from the worktree's `.roll/backlog.md`. */
   read(worktreeCwd: string): { id: string; desc: string; status: string }[];
   /** Mark a story id to a status (e.g. 🔨 In Progress) in the worktree backlog. */
-  markStatus?(worktreeCwd: string, id: string, status: string): void;
+  /**
+   * Flip a story row's status in the MAIN project's backlog (`<projectCwd>/
+   * .roll/backlog.md`). FIX-198: state lives in the main checkout — ordinary
+   * projects gitignore `.roll/` so a cycle worktree carries NO copy at all;
+   * any worktree-anchored write lands in the void (the owner-observed "stuck
+   * red" / "never Done" pair). For roll itself the main checkout's `.roll` IS
+   * the nested meta repo — same path, both layouts correct.
+   */
+  markStatus?(projectCwd: string, id: string, status: string): void;
 }
 
 /** Routing facet — resolve tier→agent for a story (router.ts). */
@@ -206,8 +215,23 @@ export async function executeCommand(
     // recovery.ts preflightPlan + orphan recovery. The pure plan is consulted by
     // the driver before the loop; here we just acknowledge readiness (the driver
     // already healed orphan state / verified hooks). Feeds back preflight_done.
-    case "preflight":
+    case "preflight": {
+      // FIX-198/FIX-112 — orphan-claim recovery: the inner lock guarantees a
+      // single live cycle per project, so at preflight ANY 🔨 In Progress row
+      // is a dead claim (crashed/killed cycle) — reset it to 📋 Todo so the
+      // takeover cycle can re-pick instead of idling forever.
+      try {
+        const rows = ports.backlog.read(ports.repoCwd);
+        for (const r of rows as Array<{ id: string; status?: string }>) {
+          if ((r.status ?? "").includes("🔨")) {
+            ports.backlog.markStatus?.(ports.repoCwd, r.id, "📋 Todo");
+          }
+        }
+      } catch {
+        /* heal is best-effort */
+      }
       return { event: { type: "preflight_done" } };
+    }
 
     // infra/git _worktree_create (STRICT). worktree_created on success, else
     // worktree_failed (→ failed terminal, bin/roll:9000).
@@ -223,17 +247,23 @@ export async function executeCommand(
 
     // backlog/picker pickStory (read backlog INSIDE the worktree, bin/roll:8938).
     case "pick_story": {
-      const items = ports.backlog.read(ports.paths.worktreePath);
+      // Read from the MAIN project (FIX-198): ordinary projects gitignore
+      // .roll/, so the worktree has no backlog at all — a worktree read picks
+      // nothing and the loop silently idles.
+      const items = ports.backlog.read(ports.repoCwd);
       const story = pickStory(items as never);
       if (story === undefined) return { event: { type: "no_story" } };
-      // Mark 🔨 In Progress so the open-PR dedup sees the claim (best-effort).
-      ports.backlog.markStatus?.(ports.paths.worktreePath, story.id, "🔨 In Progress");
+      // Claim immediately on the MAIN backlog: 🔨 In Progress is the
+      // anti-duplicate-pick signal and must be visible to `roll backlog`/brief
+      // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
+      // 写在 worktree 的虚空里，且真实 ports 从未绑定 markStatus).
+      ports.backlog.markStatus?.(ports.repoCwd, story.id, "🔨 In Progress");
       return { event: { type: "story_picked", storyId: story.id } };
     }
 
     // agent/router resolveRoute (+ pre-spawn availability fallback).
     case "resolve_route": {
-      const items = ports.backlog.read(ports.paths.worktreePath);
+      const items = ports.backlog.read(ports.repoCwd);
       const story = items.find((i) => i.id === cmd.storyId);
       const estMin = story === undefined ? undefined : parseEstMin(story.desc);
       const r = ports.route.resolve(cmd.storyId, estMin);
@@ -396,6 +426,14 @@ export async function executeCommand(
     case "append_run": {
       const key: RunKey = { storyId: ctx.storyId ?? "", cycleId: cmd.cycleId };
       ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx));
+      // FIX-198 end-to-end status flow: the `done` terminal (publish status 0
+      // with auto-merge set, or the gh-missing ff merge-back — i.e. the
+      // delivery left the building) flips the MAIN backlog row to ✅ Done
+      // deterministically — never an agent-discipline hope. A merge that later
+      // falls through is the reconcile engine's job (假 Done 检测 flips back).
+      if (cmd.status === "done" && (ctx.storyId ?? "") !== "") {
+        ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", "✅ Done");
+      }
       return {};
     }
 
@@ -542,10 +580,25 @@ export function nodePorts(opts: {
       },
     },
     backlog: {
-      read(worktreeCwd) {
-        const p = join(worktreeCwd, ".roll", "backlog.md");
+      read(projectCwd) {
+        const p = join(projectCwd, ".roll", "backlog.md");
         if (!existsSync(p)) return [];
         return parseBacklog(readFileSync(p, "utf8"));
+      },
+      // FIX-198: the production binding was MISSING entirely (the optional
+      // chain made every In-Progress claim a silent no-op). ID-anchored mark
+      // under optimistic concurrency; best-effort — a conflict/IO failure must
+      // never kill the cycle, the reconcile pass is the safety net.
+      markStatus(projectCwd, id, status) {
+        try {
+          const p = join(projectCwd, ".roll", "backlog.md");
+          if (!existsSync(p)) return;
+          const store = new BacklogStore();
+          const snap = store.readBacklog(p);
+          store.mark(p, snap.hash, id, status);
+        } catch {
+          /* best-effort: reconcile owns the fallback */
+        }
       },
     },
     route: opts.routeDeps

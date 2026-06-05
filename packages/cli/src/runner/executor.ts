@@ -38,16 +38,20 @@ import {
   type CycleEvent,
   EventBus,
   type PublishResult,
+  type ReconcileRunRow,
   type RouteDeps,
   type RunKey,
   type Tier,
   budgetVerdict,
   classifyComplexity,
+  decideClaimReconcile,
+  latestDeliveringCycle,
   parseClaimedIdsFromBacklog,
   parseBacklog,
   pickStory,
   planPublishDocPr,
   planPublishPr,
+  reconcileBranchName,
   resolveRoute,
   resolveFallback,
   sumClaudeStream,
@@ -232,15 +236,35 @@ export async function executeCommand(
     // the driver before the loop; here we just acknowledge readiness (the driver
     // already healed orphan state / verified hooks). Feeds back preflight_done.
     case "preflight": {
-      // FIX-198/FIX-112 — orphan-claim recovery: the inner lock guarantees a
-      // single live cycle per project, so at preflight ANY 🔨 In Progress row
-      // is a dead claim (crashed/killed cycle) — reset it to 📋 Todo so the
-      // takeover cycle can re-pick instead of idling forever.
+      // FIX-198/FIX-112/FIX-211 — PR-aware claim reconcile. The inner lock
+      // guarantees a single live cycle per project, so a 🔨 In Progress row is
+      // from a PRIOR cycle. It is NOT always a dead claim (FIX-211): a cycle
+      // that delivered — opened a PR and handed merge to the async PR loop
+      // (US-AUTO-044) — legitimately rests at 🔨 until the PR merges; blindly
+      // resetting it to 📋 Todo would re-pick and duplicate the work. Reconcile
+      // each claim against REAL merge evidence (decideClaimReconcile):
+      //   MERGED      → ✅ Done  (补翻 the async-merged delivery — Done ≡ merged),
+      //   CLOSED/no-PR→ 📋 Todo  (genuine dead claim / abandoned — re-pickable),
+      //   OPEN/unknown→ leave 🔨 (delivered, pending merge; TTL unstick is the
+      //                          safety net for a claim that never resolves).
       try {
-        const rows = ports.backlog.read(ports.repoCwd);
-        for (const r of rows as Array<{ id: string; status?: string }>) {
-          if ((r.status ?? "").includes("🔨")) {
-            ports.backlog.markStatus?.(ports.repoCwd, r.id, "📋 Todo");
+        const rows = ports.backlog.read(ports.repoCwd) as Array<{ id: string; status?: string }>;
+        const claims = rows.filter((r) => (r.status ?? "").includes("🔨"));
+        if (claims.length > 0) {
+          const runRows = readRunsRows(ports.paths.runsPath);
+          const slug = await ports.github.repoSlug(ports.repoCwd).catch(() => undefined);
+          for (const claim of claims) {
+            const cycle = latestDeliveringCycle(runRows, claim.id);
+            let prState: string | undefined;
+            if (cycle !== undefined && slug !== undefined) {
+              prState = await ports.github
+                .prState(ports.repoCwd, reconcileBranchName(cycle))
+                .catch(() => undefined);
+            }
+            const decision = decideClaimReconcile({ hasDeliveringCycle: cycle !== undefined, prState });
+            if (decision === "done") ports.backlog.markStatus?.(ports.repoCwd, claim.id, "✅ Done");
+            else if (decision === "todo") ports.backlog.markStatus?.(ports.repoCwd, claim.id, "📋 Todo");
+            // "keep" → leave 🔨 (delivered, pending merge).
           }
         }
       } catch {
@@ -648,6 +672,28 @@ export function buildRunRow(
     row["tokens_out"] = ctx.cost.tokensOut;
   }
   return row;
+}
+
+/** Read runs.jsonl as {@link ReconcileRunRow}[] for the preflight claim
+ *  reconcile (FIX-211). Tolerant: missing file / malformed lines → skipped, so
+ *  a corrupt row never topples the cycle's orphan-recovery pass. */
+function readRunsRows(runsPath: string): ReconcileRunRow[] {
+  try {
+    if (!existsSync(runsPath)) return [];
+    return readFileSync(runsPath, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => {
+        try {
+          return JSON.parse(l) as ReconcileRunRow;
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((r): r is ReconcileRunRow => r !== undefined);
+  } catch {
+    return [];
+  }
 }
 
 /** Compose the gh pr-create body (commit-count-style; kept simple + pure). */

@@ -69,6 +69,9 @@ export interface LoopSafetyConfig {
   actionOnStoryBreach: string;
   /** Cost ceiling (§6.1 budget) — shape mirrors @roll/spec BudgetPolicy + hints. */
   budget?: PolicyBudget;
+  /** FIX-207 acceptance-report gate escalation. Absent ⇒ soft (record-only);
+   *  `hard` makes a delivery with no fresh acceptance report fail the cycle. */
+  attestGate?: "soft" | "hard";
 }
 
 /** Budget block under loop_safety — superset of @roll/spec {@link BudgetPolicy}
@@ -311,6 +314,9 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     maxStoryFailures: numOr(flat["max_story_failures"], DEFAULT_MAX_STORY_FAILURES),
     actionOnStoryBreach: flat["action_on_story_breach"] ?? DEFAULT_ACTION_ON_STORY_BREACH,
     ...(budget ? { budget } : {}),
+    ...(flat["attest_gate"] === "hard" || flat["attest_gate"] === "soft"
+      ? { attestGate: flat["attest_gate"] as "soft" | "hard" }
+      : {}),
   };
   return [i, cfg];
 }

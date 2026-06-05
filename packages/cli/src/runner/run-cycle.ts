@@ -89,7 +89,9 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
   let state: CycleState = initialCycleState(ctx);
   let lockReleased = false;
   let terminalEmitted = false;
-  let liveCtx: CycleContext = ctx;
+  // Stamp the cycle start onto the live context so the attest gate (FIX-207) in
+  // capture_facts can tell a report written THIS cycle from a stale one.
+  let liveCtx: CycleContext = { ...ctx, startSec };
 
   /** Mark whether the orchestrator already wrote the terminal event for I8. */
   const noteTerminal = (cmds: CycleCommand[]): void => {

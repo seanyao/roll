@@ -426,6 +426,9 @@ export interface CycleContext {
   storyId?: string;
   agent?: AgentId;
   model?: ModelId;
+  /** Cycle start (epoch seconds) — set by the driver; used by the attest gate
+   *  (FIX-207) to decide whether an acceptance report was produced THIS cycle. */
+  startSec?: number;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

@@ -106,6 +106,26 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
     });
   });
 
+  it("parses loop_safety.attest_gate (FIX-207); absent ⇒ undefined (soft)", () => {
+    expect(parsePolicy("").loopSafety.attestGate).toBeUndefined();
+    const hard = parsePolicy(`
+loop_safety:
+  attest_gate: hard
+`);
+    expect(hard.loopSafety.attestGate).toBe("hard");
+    const soft = parsePolicy(`
+loop_safety:
+  attest_gate: soft
+`);
+    expect(soft.loopSafety.attestGate).toBe("soft");
+    // junk value → ignored (stays undefined ⇒ soft default)
+    const junk = parsePolicy(`
+loop_safety:
+  attest_gate: maybe
+`);
+    expect(junk.loopSafety.attestGate).toBeUndefined();
+  });
+
   it("ignores comments and unknown keys (forward-compatible)", () => {
     const p = parsePolicy(`
 # leading comment

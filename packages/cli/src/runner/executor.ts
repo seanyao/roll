@@ -75,6 +75,7 @@ import {
   realAgentSpawn,
 } from "./agent-spawn.js";
 import { runPeerGate } from "./peer-gate.js";
+import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -382,9 +383,41 @@ export async function executeCommand(
             }),
         },
       );
+      // FIX-207 attest gate: a delivery (commits ahead + a real story) that ships
+      // with no FRESH acceptance report leaves an auditable ALERT + `attest:gate`
+      // event. SOFT by default (record only); `loop_safety.attest_gate: hard` in
+      // policy.yaml escalates — a hard-blocked delivery is captured as a failed
+      // agent exit so the story is NOT marked Done without acceptance evidence.
+      // Scoped to actual deliveries: an idle cycle has nothing to attest.
+      let attestBlocked = false;
+      const storyId = ctx.storyId ?? "";
+      if (commitsAhead > 0 && storyId !== "") {
+        const mode = readAttestGateMode(ports.repoCwd);
+        const res = runAttestGate(
+          ports.paths.worktreePath,
+          storyId,
+          ctx.cycleId ?? "",
+          mode,
+          ctx.startSec,
+          {
+            alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+            event: (p) =>
+              ports.events.appendEvent(ports.paths.eventsPath, {
+                type: "attest:gate",
+                cycleId: p.cycleId,
+                verdict: p.verdict,
+                reasons: p.reasons,
+                ts: ports.clock(),
+              }),
+          },
+        );
+        attestBlocked = res.blocked;
+      }
       const facts: CapturedFacts = {
         usedWorktree: true,
-        agentExit: 0, // accept-path only reaches capture (retryPlan accept = exit 0)
+        // accept-path reaches capture at exit 0; a HARD attest block fails the
+        // capture (classifyCaptured: exit ≠ 0 → failed) so Done is withheld.
+        agentExit: attestBlocked ? 1 : 0,
         timedOut: false,
         commitsAhead,
       };

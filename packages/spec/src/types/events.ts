@@ -36,6 +36,9 @@ export type RollEvent =
   // Peer gate (FIX-150b) — the hard-trigger audit trail: every high-complexity
   // delivery records whether peer review happened ("consulted") or was skipped.
   | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped"; reasons: string[]; ts: number }
+  // Attest gate (FIX-207) — every actual delivery records whether a fresh
+  // acceptance report was produced ("produced") or silently skipped ("skipped").
+  | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }
   // Policy (BC6) — governance decisions as facts
   | { type: "policy:auto_merge"; prNumber: number; rule: string; ts: number }
   | { type: "policy:flag_review"; prNumber: number; rule: string; ts: number }

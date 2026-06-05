@@ -4,7 +4,11 @@
  * dispatch (every CycleCommand kind, via fully faked Ports), the v2-shaped runs
  * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
  */
-import { describe, expect, it, vi } from "vitest";
+import { execSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent } from "@roll/core";
 import {
   AGENT_ARGV_TODO,
@@ -17,6 +21,12 @@ import {
   parseEstMin,
   realAgentSpawn,
 } from "../src/runner/index.js";
+
+/** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
+const execDirs: string[] = [];
+afterAll(() => {
+  for (const d of execDirs) execSync(`rm -rf '${d}'`);
+});
 
 const CTX: CycleContext = {
   cycleId: "20260605-000000-1",
@@ -213,6 +223,28 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3, usedWorktree: true } });
+  });
+
+  // FIX-207 — attest gate is wired into capture_facts (delivery without a fresh
+  // acceptance report). Soft (default) records an event + alert but never blocks;
+  // hard (policy.yaml) captures a failed exit so the story is not marked Done.
+  it("capture_facts soft attest gate: missing report → attest:gate event + alert, NOT blocked", async () => {
+    const { ports, calls } = fakePorts(); // repoCwd /repo has no policy → soft
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "attest:gate" && e.verdict === "skipped")).toBe(true);
+    expect((calls["alert"] ?? []).length).toBeGreaterThan(0);
+  });
+
+  it("capture_facts hard attest gate: missing report → captured as failed (agentExit 1)", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-207-exec-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: hard\n");
+    const { ports } = fakePorts({ repoCwd: repo, paths: { ...fakePorts().ports.paths, worktreePath: join(repo, "wt") } });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
   });
 
   it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {

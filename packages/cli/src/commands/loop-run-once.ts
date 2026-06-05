@@ -12,11 +12,11 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { type RouteDeps } from "@roll/core";
-import { projectIdentity } from "@roll/infra";
+import { EventBus, type RouteDeps, cycleEndEvent, mapV2Status } from "@roll/core";
+import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type RunnerPaths, dryRunPlan, nodePorts, runCycleOnce } from "../runner/index.js";
+import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, runCycleOnce } from "../runner/index.js";
 import { spawn } from "node:child_process";
 
 /** US-PORT-011: after a delivered cycle, surface the acceptance report —
@@ -45,6 +45,107 @@ export function announceReport(
     );
   if (!muted) opener(report);
   return report;
+}
+
+// ─── FIX-204D — signal teardown ───────────────────────────────────────────────
+
+/** Injectable seams for {@link cycleSignalTeardown} (tests must not exit). */
+export interface SignalTeardownDeps {
+  killAgents?: (sig: NodeJS.Signals) => number;
+  exit?: (code: number) => void;
+  pid?: number;
+  now?: () => number;
+}
+
+const SIGNUM: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
+
+/**
+ * The I8 invariant ("a terminal cycle:end + runs row exists on EVERY exit
+ * path") has a hole the 2026-06-06 first live run fell through: SIGTERM kills
+ * the process without running `finally` — no terminal event, no runs row, a
+ * dead-pid lock, an orphan worktree, and `loop status` swearing nothing ever
+ * ran. This handler closes the hole for TERM/INT/HUP:
+ *
+ *   kill the in-flight agent → (iff WE own the inner lock) write the aborted
+ *   cycle:end + runs row, release the lock → exit 128+signum.
+ *
+ * The lock-ownership guard matters twice over: a signal during the
+ * skip-on-contention path must not touch the LIVE cycle's state, and a signal
+ * after a clean terminal (lock already released) must not double-write.
+ */
+export function cycleSignalTeardown(
+  paths: Pick<RunnerPaths, "eventsPath" | "runsPath" | "lockPath">,
+  cycleId: string,
+  branch: string,
+  sig: NodeJS.Signals,
+  deps: SignalTeardownDeps = {},
+): void {
+  const kill = deps.killAgents ?? killLiveAgents;
+  const exit = deps.exit ?? ((c: number): void => process.exit(c));
+  const pid = deps.pid ?? process.pid;
+  const now = deps.now ?? ((): number => Math.floor(Date.now() / 1000));
+
+  try {
+    kill("SIGKILL");
+  } catch {
+    /* no agent in flight */
+  }
+
+  let owned = false;
+  try {
+    owned = existsSync(paths.lockPath) && parseLock(readFileSync(paths.lockPath, "utf8")).pid === pid;
+  } catch {
+    owned = false;
+  }
+  if (owned) {
+    const bus = new EventBus();
+    const tctx = { cycleId, branch, agent: "", model: "" };
+    try {
+      bus.appendEvent(paths.eventsPath, { ...cycleEndEvent(tctx, "aborted"), ts: now() });
+    } catch {
+      /* best-effort: the exit below still happens */
+    }
+    try {
+      bus.upsertRun(
+        paths.runsPath,
+        { storyId: "", cycleId },
+        buildRunRow(
+          { kind: "append_run", status: "aborted", outcome: mapV2Status("aborted"), cycleId },
+          { cycleId, branch, loop: "ci" as never },
+        ),
+      );
+    } catch {
+      /* best-effort */
+    }
+    try {
+      releaseLock(paths.lockPath);
+    } catch {
+      /* best-effort */
+    }
+  }
+  process.stderr.write(
+    `loop run-once: ${sig} — aborted terminal recorded, lock released, agent killed\n` +
+      `loop run-once: 收到 ${sig} — 已补 aborted 终态、释放锁、终止 agent\n`,
+  );
+  exit(128 + (SIGNUM[sig] ?? 15));
+}
+
+/** Register TERM/INT/HUP teardown for one cycle; returns the disposer. */
+export function installCycleSignalTeardown(
+  paths: Pick<RunnerPaths, "eventsPath" | "runsPath" | "lockPath">,
+  cycleId: string,
+  branch: string,
+): () => void {
+  const sigs: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
+  const handlers = new Map<NodeJS.Signals, () => void>();
+  for (const sig of sigs) {
+    const h = (): void => cycleSignalTeardown(paths, cycleId, branch, sig);
+    handlers.set(sig, h);
+    process.on(sig, h);
+  }
+  return (): void => {
+    for (const [sig, h] of handlers) process.removeListener(sig, h);
+  };
 }
 
 /** Build the cycle id `<YYYYmmdd-HHMMSS>-<pid>` (mirrors bin/roll:8828). */
@@ -168,7 +269,15 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     routeDeps,
   });
 
-  const result = await runCycleOnce({ ports, ctx });
+  // FIX-204D: between here and the walk's own finally, signals get a clean
+  // teardown instead of a half-state corpse.
+  const disposeSignals = installCycleSignalTeardown(paths, cycleId, branch);
+  let result;
+  try {
+    result = await runCycleOnce({ ports, ctx });
+  } finally {
+    disposeSignals();
+  }
   if (!result.ran) {
     process.stdout.write(
       `loop run-once: another cycle holds the inner lock (pid ${result.heldByPid ?? "?"}); skipped\n`,

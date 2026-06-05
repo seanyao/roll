@@ -172,3 +172,89 @@ describe("FIX-204A — skill resolution + blind-agent refusal", () => {
     expect(ex(join(rt, "worktrees"))).toBe(false);
   });
 });
+
+describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
+  function teardownFixture(tag: string): {
+    rt: string;
+    paths: { eventsPath: string; runsPath: string; lockPath: string };
+  } {
+    const rt = tmp(`sig-${tag}`);
+    return {
+      rt,
+      paths: {
+        eventsPath: join(rt, "events.ndjson"),
+        runsPath: join(rt, "runs.jsonl"),
+        lockPath: join(rt, "inner.lock"),
+      },
+    };
+  }
+
+  it("owned lock: writes aborted cycle:end + runs row, releases the lock, kills agents, exit 143", async () => {
+    const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
+    const { paths: p } = teardownFixture("owned");
+    writeFileSync(p.lockPath, `${process.pid}:1780680000\n`, "utf8");
+    let exitCode = -1;
+    let killed = 0;
+    cycleSignalTeardown(p, "20260606-040000-9001", "loop/cycle-20260606-040000-9001", "SIGTERM", {
+      killAgents: () => {
+        killed += 1;
+        return 1;
+      },
+      exit: (c) => {
+        exitCode = c;
+      },
+      now: () => 1780680123,
+    });
+    expect(exitCode).toBe(143);
+    expect(killed).toBe(1);
+    const { readFileSync: rf, existsSync: ex } = await import("node:fs");
+    const events = rf(p.eventsPath, "utf8");
+    expect(events).toContain('"cycle:end"');
+    expect(events).toContain("20260606-040000-9001");
+    expect(events).toContain("aborted");
+    const runs = rf(p.runsPath, "utf8");
+    expect(runs).toContain('"status":"aborted"');
+    expect(runs).toContain("20260606-040000-9001");
+    expect(ex(p.lockPath)).toBe(false);
+  });
+
+  it("foreign lock (skip-on-contention path): touches NOTHING, still exits with the signal code", async () => {
+    const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
+    const { paths: p } = teardownFixture("foreign");
+    writeFileSync(p.lockPath, `99999999:1780680000\n`, "utf8");
+    let exitCode = -1;
+    cycleSignalTeardown(p, "20260606-040000-9002", "loop/cycle-x", "SIGINT", {
+      killAgents: () => 0,
+      exit: (c) => {
+        exitCode = c;
+      },
+    });
+    expect(exitCode).toBe(130); // SIGINT = 128+2
+    const { existsSync: ex } = await import("node:fs");
+    expect(ex(p.eventsPath)).toBe(false);
+    expect(ex(p.runsPath)).toBe(false);
+    expect(ex(p.lockPath)).toBe(true); // the live owner's lock survives
+  });
+
+  it("SIGHUP maps to 129", async () => {
+    const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
+    const { paths: p } = teardownFixture("hup");
+    let exitCode = -1;
+    cycleSignalTeardown(p, "c", "b", "SIGHUP", { killAgents: () => 0, exit: (c) => { exitCode = c; } });
+    expect(exitCode).toBe(129);
+  });
+
+  it("killLiveAgents reaps a hanging registered agent (registry path, no timeout involved)", async () => {
+    const { killLiveAgents } = await import("../src/runner/index.js");
+    const dir = tmp("reap");
+    const shim = join(dir, "claude");
+    writeFileSync(shim, "#!/bin/sh\nsleep 30\n", "utf8");
+    chmodSync(shim, 0o755);
+    const pending = realAgentSpawn("claude", { cwd: dir, skillBody: "x", bin: shim });
+    await new Promise((r) => setTimeout(r, 300)); // let it spawn + register
+    const n = killLiveAgents("SIGKILL");
+    expect(n).toBe(1);
+    const res = await pending;
+    expect(res.exitCode).not.toBe(0); // killed, promise still settles
+  });
+});

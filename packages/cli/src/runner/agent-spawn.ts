@@ -34,7 +34,29 @@
  * PATH (a fake binary that makes a `tcr:` commit in the worktree), so no real
  * agent ever runs in tests.
  */
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
+
+/**
+ * FIX-204D — live-children registry. The signal teardown must kill an
+ * in-flight agent BEFORE the runner dies: a TERM'd run-once whose claude
+ * child survives keeps editing the worktree headless (and the next cycle's
+ * preflight would meet a haunted checkout).
+ */
+const liveAgents = new Set<ChildProcess>();
+
+/** Kill every registered in-flight agent. Returns how many were signalled. */
+export function killLiveAgents(signal: NodeJS.Signals = "SIGKILL"): number {
+  let n = 0;
+  for (const c of liveAgents) {
+    try {
+      if (c.kill(signal)) n += 1;
+    } catch {
+      /* already gone */
+    }
+  }
+  liveAgents.clear();
+  return n;
+}
 
 /** The FIX-152 autonomous-execution directive prepended to the skill body
  *  (bin/roll:9791). Kept byte-identical so the shim/real argv match the oracle. */
@@ -220,10 +242,12 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
       opts.onChunk?.(d);
       stderr += d.toString("utf8");
     });
+    liveAgents.add(child); // FIX-204D
     let settled = false;
     const settle = (result: AgentSpawnResult): void => {
       if (settled) return;
       settled = true;
+      liveAgents.delete(child); // FIX-204D
       if (timer !== undefined) clearTimeout(timer);
       resolve(result);
     };

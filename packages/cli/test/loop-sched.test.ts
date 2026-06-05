@@ -283,3 +283,49 @@ describe("loop pause/resume (marker file)", () => {
     expect(r2.code).toBe(0); // idempotent
   });
 });
+
+describe("FIX-197 — loop now legacy self-heal", async () => {
+  const { isLegacyRunner, loopNowCommand } = await import("../src/commands/loop-sched.js");
+
+  it("isLegacyRunner: bare-engine-call templates and non-run-once wrappers are legacy", () => {
+    expect(isLegacyRunner('#!/bin/bash -l\n_loop_migrate_legacy_paths "x"\n')).toBe(true);
+    expect(isLegacyRunner("#!/bin/bash\nsomething else entirely\n")).toBe(true);
+    expect(isLegacyRunner('#!/bin/bash -l\n"$ROLL_BIN" loop run-once >> "$LOG" 2>&1\n')).toBe(false);
+  });
+
+  it("legacy runner → regenerated via loop on, then executed with the v3 template", async () => {
+    const proj = tmp("nowproj");
+    const shared = tmp("nowshared");
+    const ld = tmp("nowld");
+    const { deps, calls } = fakeDeps(proj, shared, ld);
+    const execed: string[] = [];
+    deps.execRunner = (p): Promise<number> => {
+      execed.push(readFileSync(p, "utf8").includes("loop run-once") ? "v3" : "legacy");
+      return Promise.resolve(0);
+    };
+    const runner = join(shared, "loop", "run-proj-abc123.sh");
+    mkdirSync(join(shared, "loop"), { recursive: true });
+    writeFileSync(runner, '#!/bin/bash -l\n_loop_migrate_legacy_paths "proj-abc123"\n', { mode: 0o755 });
+
+    const { code, out } = await captureStdout(() => loopNowCommand([], deps));
+    expect(code).toBe(0);
+    expect(out).toContain("FIX-197");
+    expect(execed).toEqual(["v3"]); // regenerated BEFORE execution
+    expect(calls.some((c) => c.startsWith("reinstall 501 com.roll.loop"))).toBe(true);
+  });
+
+  it("fresh v3 runner → no regeneration, straight exec; rc propagates", async () => {
+    const proj = tmp("nowproj2");
+    const shared = tmp("nowshared2");
+    const { deps, calls } = fakeDeps(proj, shared, tmp("nowld2"));
+    deps.execRunner = (): Promise<number> => Promise.resolve(7);
+    const runner = join(shared, "loop", "run-proj-abc123.sh");
+    mkdirSync(join(shared, "loop"), { recursive: true });
+    writeFileSync(runner, '#!/bin/bash -l\n"$ROLL_BIN" loop run-once >> "$LOG" 2>&1\n', { mode: 0o755 });
+
+    const { code, out } = await captureStdout(() => loopNowCommand([], deps));
+    expect(code).toBe(7);
+    expect(out).not.toContain("FIX-197");
+    expect(calls).toHaveLength(0);
+  });
+});

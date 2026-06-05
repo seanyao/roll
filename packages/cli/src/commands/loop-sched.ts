@@ -33,6 +33,7 @@ import {
   uninstall as launchdUninstall,
   projectIdentity,
 } from "@roll/infra";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -47,6 +48,8 @@ export interface LoopSchedDeps {
     reinstall: (uid: number, label: string, plist: string) => Promise<LaunchctlResult>;
     uninstall: (uid: number, label: string) => Promise<LaunchctlResult>;
   };
+  /** Run the generated loop runner once, FORCE env set (loop now). */
+  execRunner?: (runnerPath: string) => Promise<number>;
 }
 
 function realDeps(): LoopSchedDeps {
@@ -56,6 +59,15 @@ function realDeps(): LoopSchedDeps {
     sharedRoot: () => process.env["ROLL_SHARED_ROOT"] || join(homedir(), ".shared", "roll"),
     launchdDir: () => join(homedir(), "Library", "LaunchAgents"),
     launchd: { reinstall: launchdReinstall, uninstall: launchdUninstall },
+    execRunner: (runner) =>
+      new Promise((resolve) => {
+        const child = spawn("bash", [runner], {
+          stdio: "inherit",
+          env: { ...process.env, ROLL_LOOP_FORCE: "1" },
+        });
+        child.on("exit", (code) => resolve(code ?? 1));
+        child.on("error", () => resolve(1));
+      }),
   };
 }
 
@@ -323,4 +335,54 @@ export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = r
       : `Loop was not paused\nLoop 本就未暂停\n`,
   );
   return 0;
+}
+
+// ─── FIX-197: loop now + legacy-runner self-heal ──────────────────────────────
+
+/**
+ * A v2-generation outer runner: it bare-calls bash-engine functions that were
+ * never sourced into it (`_loop_migrate_legacy_paths` & co.) — `command not
+ * found` on every manual run, and its PAUSE check silently no-ops. Any runner
+ * that does not delegate to `loop run-once` is treated as legacy.
+ */
+export function isLegacyRunner(text: string): boolean {
+  return /_loop_migrate_legacy_paths|_loop_runtime_dir/.test(text) || !text.includes("loop run-once");
+}
+
+/**
+ * `roll loop now` — force one cycle immediately (FIX-197 self-heal included):
+ * a missing or v2-legacy runner is regenerated via `loop on` first (with a
+ * note), then the v3 runner executes synchronously with ROLL_LOOP_FORCE=1.
+ * DELIBERATE divergence from v2: no tmux popup — output streams inline and the
+ * cycle transcript lands in .roll/loop/cron.log (same whitelist as US-LOOP-009).
+ */
+export async function loopNowCommand(_args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
+  const id = await deps.identity();
+  const runner = join(deps.sharedRoot(), "loop", `run-${id.slug}.sh`);
+
+  let legacy = false;
+  if (existsSync(runner)) {
+    try {
+      legacy = isLegacyRunner(readFileSync(runner, "utf8"));
+    } catch {
+      legacy = true;
+    }
+  }
+  if (!existsSync(runner) || legacy) {
+    process.stdout.write(
+      legacy
+        ? `Legacy v2 runner detected — regenerating templates (FIX-197)\n检测到 v2 旧版 runner — 正在再生成模板（FIX-197）\n`
+        : `No runner yet — generating templates\n尚无 runner — 正在生成模板\n`,
+    );
+    const rc = await loopOnCommand([], deps);
+    if (rc !== 0) return rc;
+  }
+
+  process.stdout.write(`Starting one loop cycle (forced)\n强制启动一个 loop 周期\n`);
+  const exec = deps.execRunner;
+  if (exec === undefined) {
+    process.stderr.write("loop now: no runner executor available\n");
+    return 1;
+  }
+  return exec(runner);
 }

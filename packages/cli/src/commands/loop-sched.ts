@@ -59,11 +59,14 @@ function realDeps(): LoopSchedDeps {
     sharedRoot: () => process.env["ROLL_SHARED_ROOT"] || join(homedir(), ".shared", "roll"),
     launchdDir: () => join(homedir(), "Library", "LaunchAgents"),
     launchd: { reinstall: launchdReinstall, uninstall: launchdUninstall },
-    execRunner: (runner) =>
+    execRunner: () =>
       new Promise((resolve) => {
-        const child = spawn("bash", [runner], {
+        // Re-enter THIS cli (`loop run-once`) in the foreground — not the
+        // launchd runner script, whose whole job is redirecting to cron.log.
+        const cli = process.argv[1] ?? "";
+        const child = spawn(process.execPath, [cli, "loop", "run-once"], {
           stdio: "inherit",
-          env: { ...process.env, ROLL_LOOP_FORCE: "1" },
+          env: { ...process.env, ROLL_LOOP_FORCE: "1", ROLL_LOOP_STREAM: "1" },
         });
         child.on("exit", (code) => resolve(code ?? 1));
         child.on("error", () => resolve(1));
@@ -378,7 +381,12 @@ export async function loopNowCommand(_args: string[], deps: LoopSchedDeps = real
     if (rc !== 0) return rc;
   }
 
-  process.stdout.write(`Starting one loop cycle (forced)\n强制启动一个 loop 周期\n`);
+  // US-PORT-011: `loop now` is a FOREGROUND experience — the cycle runs in
+  // this terminal with the agent transcript streaming live (ROLL_LOOP_STREAM),
+  // no popup, no tail, no silence. launchd keeps using the silent runner.
+  process.stdout.write(
+    `Starting one loop cycle — live transcript below\n强制启动一个 loop 周期 — 实时转录如下\n\n`,
+  );
   const exec = deps.execRunner;
   if (exec === undefined) {
     process.stderr.write("loop now: no runner executor available\n");

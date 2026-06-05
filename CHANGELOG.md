@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.606.2
+
+### 稳定性
+
+- **修复 loop 在姊妹 worktree 布局下整体空转** — 项目身份此前会被解析到 git 主 worktree（对 roll 自身即 v2 冻结 checkout），所有周期在错误目录 idle；现在身份 = 当前 worktree 顶层，状态、日志、取卡全部回到正确项目
+
 ## v3.606.1
 
 ### 新功能

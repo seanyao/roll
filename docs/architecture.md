@@ -1,0 +1,219 @@
+# 01 · 系统设计
+
+> 迁入自 roll-meta v3 规划包（2026-06-06，cutover 完成后归家）；按现状校订，过程性内容留 meta。
+
+## 产品定位
+
+roll 是 AI coding agent 的**外层控制系统**（agent harness / reliability layer）。它不进入 agent 内部（不管理 token 窗口、不压缩对话、不干预单次推理），而是在外部建立一个闭环：设定目标 → 调度执行 → 感知结果 → 修正方向。
+
+用户通过 CLI 或 Web 控制台与 roll 交互。安装方式：`npm install -g roll`。
+
+## 为什么重写：散落诊断
+
+v2 做了很多，但**没有经过科学的系统化设计**——同一个能力域被摊在 **bash / skill(markdown) / python / 配置(yaml)** 多种异构载体上：
+
+| 能力域 | 散落在（实测，见 [specs/capability-map](specs/capability-map.md)） |
+|---|---|
+| Orchestration 编排 | bash 主循环 + python(`loop_unstick`/`loop_pick_agent`) + skill(`roll-loop`) + 配置(launchd/cron) |
+| Evals 验证 | skill(spar/review-pr/.qa/.dream) + python(`loop_result_eval`/`test_quality_gate`) + bash(TCR) + 278 bats |
+| Observability 可观测 | bash(`_loop_event`) + python(78KB `roll-loop-status`) + ndjson/jsonl 文件 |
+| Context Engineering 上下文 | markdown(`.roll/` 文档纪律) + shell(`context_feed_budget`) + skill(design/doc/notes) |
+| Tool Use 工具/多 agent | bash(`_agent_argv`) + python(`agent_usage/*`) + yaml(`agent-routes`) + skill(`roll-peer`) |
+
+**问题不在任何单一载体，在载体之间的「缝」**：bash↔python 靠 stdout 文本解析、bash↔skill 靠 heredoc 现生成脚本（还要"compound bash 静态拒绝"这种补丁）、状态散在 ndjson/jsonl/markdown/锁文件里。**那 100+ 个 loop FIX，绝大多数就长在这些缝上**（引号地狱、解析漂移、状态不一致）。
+
+一个好的调节器必须是被控系统的一个连贯模型（[specs/theory-foundation](specs/theory-foundation.md)）。而现在这台调节器被劈成四块、用文本缝合——协调开销本身在吃掉控制带宽。**散，本身就是不稳定与低效的根因。** 这就是 v3 要重做的，而不是把 bash 逐行翻成 TS。
+
+## 设计五原则
+
+1. **每个能力域一个家。** 把摊在四种载体上的同一个域（Orchestration / Observability / Evals / Guardrails / Context Engineering / Tool Use / Sandboxing），收敛成一个连贯的 owner/包。这是 roll 缺的那层"系统设计"。
+2. **反馈闭环是脊柱，层是它的器官。** 别把能力域做成并列模块；按"结构核心 + 控制平面"接成一个闭环：核心作动（编排/执行/工具/上下文）→ 控制平面传感/评分/限幅（可观测/Evals/Guardrails）→ 反哺下一轮。
+3. **TS 类型 = 层与层之间的契约。** 用类型化接口替掉今天的 stdout 解析 / heredoc 缝——缝消失，长在缝上的那类 FIX 失去土壤。这是"换 TS"的真实收益所在。
+4. **守住黑盒边界（外层 harness）。** roll 不打开黑盒：token 级压缩、工具 schema 强制、单次 ReAct 委派给内层 agent。不必建模被控对象内部，靠反馈就能控制（[specs/theory-foundation](specs/theory-foundation.md)）。
+5. **反馈要有 Goodhart 护栏。** 闭环一旦把度量当目标就会被钻空子。所以 Evals 信号**不自动激活**、只生成"待人确认"候选；人在环上（human-on-the-loop）作监督限幅；retry 设上限并转 replan（anti-windup）；不对噪声反复 replan（deadband）。**roll v2 已经这么做了——v3 把它显性化为设计纪律。**
+
+## 系统架构
+
+```
+spec         共享类型与事件合同（零依赖）
+
+core         领域逻辑（纯函数，不碰 I/O，通过接口注入外部依赖）
+             BacklogStore · StoryPicker · AgentRouter
+             PRLifecycle · TCRPipeline · ReconcileEngine
+             CostTracker · PolicyEngine · EventBus
+
+infra        I/O 适配层
+             Config · Git · GitHub · launchd/cron · Tmux · ProcessManager
+
+daemon       事件观察者（只读，fs.watch → WebSocket 广播，挂了不影响 loop）
+
+cli          命令入口（薄壳，解析参数 → 调 core → 格式化输出）
+
+web          控制台（React，WebSocket 订阅 daemon）
+```
+
+依赖单向向上。下层不感知上层。
+
+**技术选择**：TypeScript（类型安全）、vitest（自带进程沙箱）、commander + chalk（CLI）、simple-git + octokit（Git/GitHub）、handlebars（模板，替代 heredoc）、proper-fs-lock（替代手写锁）、React + shadcn/ui（前端）。
+
+### 能力收敛去向（每域一个家）
+
+v2 散落的每个能力域，在 6 包里的家：
+
+| 能力域 | v3 的家 | 从 v2 哪里收敛过来 |
+|---|---|---|
+| **Orchestration** 编排 | `core`（StoryPicker / TCRPipeline / ReconcileEngine / CycleOrchestrator）+ `infra`（launchd/cron 调度） | bash 主循环 + `loop_unstick`/`loop_pick_agent` + `roll-loop` skill |
+| **Sandboxing** 执行隔离 | `infra`（Git worktree / ProcessManager / Tmux） | bash worktree 段 + `roll test`/Tart |
+| **Tool Use** 工具/多 agent | `core`（AgentRouter / AgentRegistry / CostTracker 的 usage 解析）+ `infra`（spawn / GitHub） | `_agent_argv` + `agent_usage/*` + `agent-routes.yaml` + `roll-peer` 桥接 |
+| **Context Engineering** 上下文 | skill 桥接（独立仓）+ `.roll/` 文档纪律（保留，是契约） | `context_feed_budget` + design/doc/notes skill |
+| **Observability** 可观测 | `spec`（事件 schema）+ `core`（EventBus 写端）+ `daemon`（只读广播） | `_loop_event` + `roll-loop-status` + runs/心跳 |
+| **Evals** 验证/评分 | `core`（Evals 六维 + 测试质量门） | `loop_result_eval` + `test_quality_gate` + spar/review-pr/.qa（skill 桥接留存） |
+| **Guardrails** 治理 | `core`（PolicyEngine + Budget guardrails） | manual-only 门 + `model_prices` + allowed-tools |
+
+> skills 不重写：仍是 markdown + shell，经桥接 spawn（它们是"灵魂/契约"，归 `roll-skills` 独立仓）。v3 收敛的是**控制器代码**，不是 skill 内容。
+
+## 领域模型
+
+系统分为 8 个 Bounded Context。每个上下文内部一致，上下文之间通过共享 artifact 和事件流协作——没有中央调度器。
+
+### BC1 · Backlog
+
+管理项目意图。一个故事一棵层级树：Epic → Feature → Story。
+
+**核心概念**：
+- 故事有唯一 ID，处于四种状态之一：待办 / 进行中 / 完成 / 暂缓
+- 故事之间有依赖边（`depends-on`）
+- 状态翻转必须使用精确整行匹配（杜绝子串误伤）
+
+**写规则**：多写并发使用乐观锁——读出全文哈希，修改后写前校验哈希未变，冲突即重试。写操作原子完成。
+
+### BC2 · Loop 编排
+
+这是系统的引擎。一个 Loop 是一个自治进程，按定时器唤醒，执行一个 Cycle。
+
+**Cycle 生命周期**：选故事 → 路由 agent → 创建隔离工作区 → agent 执行（TCR 循环）→ 送交 PR → 等合并 → 对账 → 收尾。
+
+**关键约束**：
+- 一 Cycle 只做一个 Story。前一个未交付，不拿下一个。
+- 进程可能被 SIGKILL。下次唤醒时，通过锁龄、心跳、PID 判断孤儿态，安全接管或重做。
+- 心跳每 60 秒写入一次。超时无心跳 → 判定死亡并落终态。
+- 退出时无条件写入终态。这是硬约束——trap 兜底。
+- 连续失败达阈值 → 暂停并告警，等用户决策。不自动换 agent。不无限重试。
+
+**Loop 类型**：
+| 类型 | 职责 |
+|------|------|
+| main | 消费待办，执行完整的 pick→TCR→PR→对账 周期 |
+| pr | 监控 open loop PR：CI 挂了自愈，绿了合并 |
+| ci | 监控 CI 状态 |
+| alert | 消费 ALERT 文件，推送到用户 |
+
+### BC3 · Agent 路由
+
+管理可用的 AI agent 及其路由规则。
+
+**路由规则**：根据任务的层级（epic/feature/story）和类型（US/FIX/REFACTOR）映射到 `(agent, model)`。同一输入永远返回同一路由——结果可审计、可复现。
+
+**探活**：spawn agent 前进行秒级探测并缓存结果。不可用时依次尝试 fallback 槽。全部不可用 → 暂停并告警。
+
+**反规则**：不因历史表现自动调整路由偏好。不做跨 agent 自动切换（失败不偷偷换人重试）。
+
+### BC4 · 交付
+
+每次交付是一个 Pull Request。一个 Story 至多同时有一个 open PR。
+
+**生命周期**：开 PR → CI 通过 → 合并入 main → 删除分支。
+
+**交付判定**：合并入 main 才算交付。PR 已开、CI 已绿、agent 声称完成都不算——事后对账，只认 main 上真实的 merge commit。
+
+### BC5 · 演化
+
+追踪一个 Story 的完整生长过程。每一次 TCR 微提交、每一次回退都可追溯。支持对比不同 agent 对同一 Story 的实现，支持回退到任意历史节点。
+
+### BC6 · 策略
+
+解析并执行 `.roll/policy.yaml` 中的人类意图。
+
+**策略类型**：
+- 自动合并：满足条件自动 merge PR
+- 审查标记：特定文件或层级标记需人审查
+- 安全限幅：连续失败 N 次 → 暂停并告警
+- 路由规则：覆盖默认 agent-模型映射
+
+策略是规则源——它不直接执行动作，而是被其他上下文读取并遵循。
+
+### BC7 · 可观测
+
+不可变事件流是唯一的真相源。所有状态都从事件重建，无独立缓存。
+
+**三类持久化文件**：
+| 文件 | 内容 |
+|------|------|
+| `events.ndjson` | 全量事件（每行一个 JSON，原子追加） |
+| `runs.jsonl` | 运行摘要（按 story+cycle_id 去重） |
+| `heartbeat` | 活性心跳（idle 也写） |
+
+**事件类型**：`cycle:start/phase/tcr/end`、`pr:open/merge`、`route:resolve`、`loop:heartbeat/fire/paused`、`policy:safety_pause`、`alert`。
+
+**daemon**：独立进程，fs.watch 监控事件文件，通过 WebSocket 广播。它是只读观察者——挂了不影响任何 loop。loop 只写文件，不依赖 daemon。
+
+### BC8 · 成本
+
+归集每个 Cycle 的实际消耗并设闸。
+
+**记录内容**：`(agent, model, 输入 token, 输出 token, 预估成本, 回退次数, 含回退的有效成本)`。
+
+**Budget guardrails**：项目/全局设日和周上限。逼近上限 → 自动降级到便宜模型或暂停并通知。便宜模型回退率高导致总成本反超 → 建议升级。
+
+### 上下文协作
+
+```
+人（写故事 / 定策略）
+    │                          ┌──────────────┐
+    ▼                          │ BC6 策略      │
+┌──────────┐   Backlog         │ 规则          │
+│ BC1      │◄──────────────────│               │
+│ 意图管理  │                    └──┬───┬───────┘
+└────┬─────┘                      │   │
+     │ Todo                       ▼   ▼
+     ▼                      ┌──────────────────┐
+┌──────────┐  Route 请求     │ BC2 编排          │
+│ BC3 路由  │◄───────────────│ pick→TCR→PR→对账 │──cycle:*/heartbeat──┐
+└──────────┘──route:resolve─►│                  │                     │
+                             └──┬───┬───────────┘                     │
+                                │   │ git/PR                          ▼
+                          cost  │   ▼                    ┌──────────────────┐
+                                ▼  ┌──────────────────┐  │ BC4 交付          │
+                           ┌──────────┐               │  │ PR → CI → merge  │
+                           │ BC8 成本  │               │  └──────┬───────────┘
+                           │ 记录 + 闸 │               │         │ merged
+                           └──────────┘               │         ▼
+                                                      │     main (真相)
+                                                      │         │
+  全部事件 append ────────────────────────────────────────────► ┌──────────────────┐
+                                                                │ BC7 可观测        │
+  ALERT ← loop 写 ← alert loop 推 → 人                           │ 事件流 (唯一源)   │
+                                                                │ → BC5 + UI       │
+                                                                └──────────────────┘
+```
+
+**协作模式**：策略被下游遵从（Conformist）、Backlog 和 git/PR 是共享真相（Shared Kernel）、路由结果写事件（Customer/Supplier）、对账层过滤假交付（Anti-Corruption）、事件追加（Published Language）。loops coordinate via shared artifacts——多 loop 独立、event-driven，互不直接调用。
+
+## 行为合同
+
+以下 12 条不变量定义了系统的可靠性边界。每条必须可测试（与 [specs/harness-principles](specs/harness-principles.md) 的 C1–C12 一一对应，那里有每条的 FIX 证据）。
+
+| # | 不变量 |
+|---|--------|
+| I1 | 在跑 Cycle 每 ≤60s 写心跳。超 watchdog 阈值必回收并落终态。进程活性 ⟂ 业务健康。 |
+| I2 | 任意时刻进程被 SIGKILL，下次重入检测孤儿态并安全接管。不依赖优雅退出。 |
+| I3 | 同一 Story 至多一个 open PR。开 PR 前先查去重。 |
+| I4 | Backlog 是愿望，main 是真相。每 Cycle 末对账——标了完成但未合并的自动退回。退出码 0 ≠ 已交付，CI 绿 ≠ 已交付。 |
+| I5 | 一个坏 Story 不冻结其他工作。连败 N 次 → 永久暂缓。不靠手动干预无限重试。 |
+| I6 | 连续失败 → 暂停 + 告警 + 通知，人决策。不自动跨 agent fallback。 |
+| I7 | 路径即身份。所有运行态数据放在 `<project>/.roll/loop/`。不同项目并行互不污染，无共享可变状态。 |
+| I8 | 状态从不可变事件流重建，无独立缓存。追加原子（tmp→rename）。退出无条件写终态。 |
+| I9 | 多写并发用乐观锁。标记 Story 精确匹配，不用子串。 |
+| I10 | 按可预测规则路由（任务层级/类型）。spawn 前秒级探活。同输入路由恒定。 |
+| I11 | 每 Cycle 记录 `(agent, model, token, cost, 回退次数, 有效成本)`。逼近预算上限 → 降级或暂停并通知。有效成本含回退。 |
+| I12 | 一 Cycle 一个 Story，全新上下文，TCR 每步 green-or-revert。0 个 TCR 提交 → 判定失败并告警。 |

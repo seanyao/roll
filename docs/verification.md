@@ -1,0 +1,72 @@
+# 02 · 质量体系
+
+> 迁入自 roll-meta v3 规划包（2026-06-06，cutover 完成后归家）；按现状校订，过程性内容留 meta。
+
+roll 的可靠性不靠「线上没出事」来证明，靠可执行、可证伪的测试来证明。分三层。
+
+## L1 · 混沌测试
+
+对 12 条不变量（[01-system](01-system.md) I1–I12）的每一条，主动注入故障，验证系统正确响应。这些测试进 CI，红即阻塞发布。
+
+| # | 注入的故障 | 期望行为 |
+|---|-----------|---------|
+| I1 | Cycle 跑到一半 kill agent 进程 | ≤watchdog 阈值内落 failed，无僵尸 running |
+| I2 | spawn 后立即 SIGKILL 整个进程组 | 重入检测孤儿（锁龄/心跳/PID）→ 安全接管，无脏锁，无丢提交 |
+| I3 | 并发两个 Cycle 选同一 Story | 只产生 1 个 PR；已有 open PR 的 Story 不再新建 |
+| I4 | 标 Done 但 PR 不 merge | Cycle 末对账 → 自动退回 |
+| I5 | 注入一个永远失败的 Story | 其他 Story 照常交付；毒 Story 连败 N 次 → 进暂缓，不再被选取 |
+| I6 | primary agent 连败 3 次 | PAUSE + ALERT + 通知均发生；不自动换 agent 重试 |
+| I7 | 两个名字重叠的项目并行跑 | 状态互不污染（路径即身份） |
+| I8 | 写 cycle_end 前杀进程 | 仅凭事件流重建出正确终态；trap 补写 |
+| I9 | 两个 loop 同时写 Backlog | 乐观锁重试，不丢更新；精确匹配不误伤 depends-on 行 |
+| I10 | 路由目标 agent 不可用 | 切 fallback 槽；同输入路由结果恒定 |
+| I11 | 模拟成本逼近日上限 | 自动降级到便宜槽 或 暂停 + ALERT |
+| I12 | 制造 0 个 TCR 提交的 Cycle | 判定失败 + ALERT；Feature 可 revert 到 Cycle 1 且仓库干净 |
+
+## L2 · Evals（结果评估）
+
+每个 Cycle 收尾按六维打分，0–1 加权汇总为 1–10。
+
+| 维度 | 权重 | 评估内容 |
+|------|------|---------|
+| outcome | 3 | 是否真的 merge 进 main（对齐 I4） |
+| correctness | 2 | 产出 PR 的 CI 是否绿 |
+| scope_fidelity | 2 | 是否完成了被路由的那个 Story（无漂移、无空转） |
+| quality | 1 | 是否加了测试、是否立刻返工 |
+| efficiency | 1 | 实际耗时 vs 预估 |
+| cleanliness | 1 | 无孤儿 worktree/分支、无 ALERT |
+
+缺失维度记 unknown，从加权中剔除并重新归一——缺数据 ≠ 0 分。连续多 Cycle 同一维度低分 → 生成改进候选（落 signals 候选文件，标「待人确认」，不自动改代码——Goodhart 护栏）。
+
+## L3 · 成熟度评级
+
+12 条能力逐条评 S/A/B。每个 release 更新 scorecard。目标 = 消灭所有 B。
+
+| 能力 | 起点 | 目标 | 度量 |
+|------|------|------|------|
+| I1–I4, I7, I8, I12 | S | 保持 S | 对应 L1 混沌测试常绿 + L2 outcome/cleanliness 趋势 |
+| I5 | A | S | L1-I5 通过 + 毒 Story 不拖累吞吐 |
+| I9 | A | S | L1-I9 通过 + 无 Backlog 写冲突丢更新 |
+| I10 | A | S | L1-I10 通过 + 路由可预测性 |
+| I11 | B | S | L1-I11 通过 + 成本不破上限 |
+
+任何能力从 S 降级 = 回归，触发 ALERT。
+
+## diff-test
+
+port 期间，每个从 v2.0 迁移的函数和命令，输出必须与 bash 版对齐：
+
+```bash
+diff <(v2.0-bash <cmd>) <(v3-ts <cmd>)
+```
+
+分层验收：每完成一层，该层 difftest 全绿才进下一层。允许白名单例外——TS 版刻意改进的输出差异须显式声明并记录原因。
+
+## 门
+
+| 门 | 条件 | 频率 |
+|----|------|------|
+| 持续门 | L1 混沌 12 项全绿 + TCR 硬校验 + CI 绿 + 关键路径 difftest 全绿 | 每次合并 |
+| 层级门 | 每层全部卡 difftest 对齐 v2.0 + 向 owner 汇报、点头后进下一层 | 每层收尾 |
+| 切换门（P4） | v3 loop 连跑 20 Cycle ≥90%、unstick <10% + L1 全绿 + difftest 达标 | 一次 |
+| 发布门 | 成熟度 scorecard 无 B + 稳定性基线 ≥ v2.0 + release 永远人点头 | 每次发布 |

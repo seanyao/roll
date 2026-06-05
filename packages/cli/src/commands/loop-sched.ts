@@ -26,6 +26,7 @@
  */
 import {
   type LaunchctlResult,
+  isLoaded as launchdIsLoaded,
   launchdLabel,
   launchdPlistPath,
   plistContent,
@@ -47,6 +48,9 @@ export interface LoopSchedDeps {
   launchd: {
     reinstall: (uid: number, label: string, plist: string) => Promise<LaunchctlResult>;
     uninstall: (uid: number, label: string) => Promise<LaunchctlResult>;
+    /** FIX-212: post-bootstrap probe (`launchctl print gui/<uid>/<label>` exit 0)
+     *  — proves the job actually mounted, not just that bootstrap returned 0. */
+    isLoaded?: (uid: number, label: string) => Promise<boolean>;
   };
   /** Run the generated loop runner once, FORCE env set (loop now). */
   execRunner?: (runnerPath: string) => Promise<number>;
@@ -62,7 +66,7 @@ function realDeps(): LoopSchedDeps {
     uid: () => process.getuid?.() ?? 501,
     sharedRoot: () => process.env["ROLL_SHARED_ROOT"] || join(homedir(), ".shared", "roll"),
     launchdDir: () => join(homedir(), "Library", "LaunchAgents"),
-    launchd: { reinstall: launchdReinstall, uninstall: launchdUninstall },
+    launchd: { reinstall: launchdReinstall, uninstall: launchdUninstall, isLoaded: launchdIsLoaded },
     execRunner: (runner) =>
       new Promise((resolve) => {
         // FIX-204E: run the GENERATED runner — it self-wraps the cycle into
@@ -290,6 +294,38 @@ function installedRollBashBin(): string {
 
 const LOOP_SERVICES = ["loop", "dream", "pr"] as const;
 
+/**
+ * FIX-212 — (re)install a service plist and PROVE it mounted.
+ *
+ * The bootout+bootstrap dance (FIX-027/098) races: `launchctl bootstrap` can
+ * return non-zero, OR return 0 while the job silently never mounts. Either way
+ * the old `loop on` reported success and the scheduler died quietly for hours.
+ * So we treat "mounted" as the authoritative signal (`launchctl print` exit 0,
+ * via `deps.launchd.isLoaded`), reinstall once more if the first pass did not
+ * land it, and surface the launchctl stderr on failure.
+ *
+ * Returns `{ ok, detail }` — `detail` is the launchctl evidence: "loaded" on
+ * success, else the last bootstrap stderr / exit code.
+ */
+async function mountService(
+  deps: LoopSchedDeps,
+  uid: number,
+  label: string,
+  plist: string,
+): Promise<{ ok: boolean; detail: string }> {
+  let last: LaunchctlResult = { code: 0, stdout: "", stderr: "" };
+  // Two attempts max: the initial install + a single retry (FIX-212 spec).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    last = await deps.launchd.reinstall(uid, label, plist);
+    const loaded = deps.launchd.isLoaded
+      ? await deps.launchd.isLoaded(uid, label)
+      : last.code === 0;
+    if (loaded) return { ok: true, detail: "loaded" };
+  }
+  const detail = last.stderr.trim() !== "" ? last.stderr.trim() : `bootstrap exit ${last.code}`;
+  return { ok: false, detail };
+}
+
 /** `roll loop on` — generate v3 runners + plists, (re)load loop & pr. */
 export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
   const id = await deps.identity();
@@ -334,7 +370,7 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       schedule: { kind: "interval", periodMinutes: period },
     }),
   );
-  await deps.launchd.reinstall(uid, loopLabel, loopPlist);
+  const loopMount = await mountService(deps, uid, loopLabel, loopPlist);
 
   // 2. pr service — v2-shape tick every 5 min.
   const prRunner = join(shared, "pr", `run-${id.slug}.sh`);
@@ -351,7 +387,29 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       schedule: { kind: "interval", periodMinutes: 5 },
     }),
   );
-  await deps.launchd.reinstall(uid, prLabel, prPlist);
+  const prMount = await mountService(deps, uid, prLabel, prPlist);
+
+  // FIX-212: a silent mount failure is the bug. If either job did not actually
+  // land in launchd (even after the retry), fail LOUD — name the label, echo
+  // the launchctl evidence, and exit non-zero so `loop on` can never report a
+  // green that the scheduler will not honor.
+  const failed = [
+    { label: loopLabel, m: loopMount },
+    { label: prLabel, m: prMount },
+  ].filter((s) => !s.m.ok);
+  if (failed.length > 0) {
+    process.stderr.write(
+      [
+        `loop on: failed to mount ${failed.length} launchd job(s) after retry — scheduling NOT active`,
+        `loop on:重试后仍有 ${failed.length} 个 launchd 任务挂载失败 — 排程未生效`,
+        ...failed.map((s) => `  ✗ ${s.label}: ${s.m.detail}`),
+        `  Inspect: launchctl print gui/${uid}/<label>  ·  retry: roll loop on`,
+        `  排查:launchctl print gui/${uid}/<label>  ·  重试:roll loop on`,
+        ``,
+      ].join("\n"),
+    );
+    return 1;
+  }
 
   process.stdout.write(
     [
@@ -361,6 +419,9 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       `  • pr-loop    every 5min  /  每 5 分钟`,
       `  • observe    tmux attach -t roll-loop-${id.slug}  /  观测窗`,
       `  • dream      untouched (legacy runner, see FIX-197)  /  未改动(旧 runner,见 FIX-197)`,
+      // FIX-212: evidence the jobs are actually mounted (launchctl print exit 0),
+      // not merely that bootstrap was issued.
+      `  • verified mounted / 已验证挂载: ${loopLabel}, ${prLabel}`,
       ``,
     ].join("\n"),
   );

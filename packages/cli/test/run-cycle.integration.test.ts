@@ -126,8 +126,11 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
   return { stdout: CLAUDE_STREAM_JSON, stderr: "", exitCode: 0, timedOut: false };
 };
 
-/** A fake github facet that returns a canned publish status without any gh. */
-function fakeGithub(status: 0 | 1 | 2): Ports["github"] {
+/** A fake github facet that returns a canned publish status without any gh.
+ *  `prState` defaults to "MERGED" (the auto-merge already completed) but can be
+ *  overridden — FIX-211 needs to drive the "published-but-OPEN" path where the
+ *  backlog row must rest at 🔨 (delivered, pending merge), never premature Done. */
+function fakeGithub(status: 0 | 1 | 2, prState: string = "MERGED"): Ports["github"] {
   return {
     async repoSlug() {
       return "fixture/runner";
@@ -136,7 +139,7 @@ function fakeGithub(status: 0 | 1 | 2): Ports["github"] {
       return { status, prUrl: status === 0 ? "https://example/pr/1" : "", ok: status === 0 };
     },
     async prState() {
-      return "MERGED";
+      return prState;
     },
   };
 }
@@ -500,6 +503,186 @@ describe("FIX-198 status flips on the gitignored-.roll layout", () => {
 
     expect(result.terminal).toBe("done"); // recycled → re-picked → delivered
     expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done");
+  });
+});
+
+describe("FIX-211 — Done ≡ merged: no publish-time 抢跑 on the gitignored layout", () => {
+  // v2 对拍: in v2 the cycle writes ✅ Done into the WORKTREE backlog, which rides
+  // the PR diff and only reaches main when the PR MERGES — main is never flipped
+  // at publish. For roll-self (FIX-198 anchors Done to main directly) the same
+  // invariant must hold: an OPENED-but-unmerged PR leaves the row at 🔨, and a
+  // MERGED PR flips ✅ Done. These two cases assert exactly that parity.
+
+  it("AC1: a published-but-OPEN delivery rests at 🔨, never premature ✅ Done", async () => {
+    const { repo } = makeGitignoredFixture("fix211-open");
+    const rt = tmp("fix211-open-rt");
+    const cycleId = "20260606-051000-5101";
+    const p = paths(rt, cycleId);
+    const backlogPath = join(repo, ".roll", "backlog.md");
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    // Publish succeeds (status 0) but the PR is still OPEN (CI pending — the
+    // real shape right after `gh pr create --auto`). Merge is handed off.
+    const ports: Ports = { ...base, agentSpawn: shimAgentTcr, github: fakeGithub(0, "OPEN") };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    // Cycle still lands `done` (published, handed to the async PR loop) and the
+    // runs row keeps that for dashboard/v2 parity …
+    expect(result.terminal).toBe("done");
+    const backlog = readFileSync(backlogPath, "utf8");
+    // … but the MAIN backlog row must NOT have flipped Done — it rests at 🔨.
+    expect(backlog).toContain("🔨 In Progress");
+    expect(backlog).not.toContain("✅ Done");
+  });
+
+  it("AC2: a MERGED PR deterministically flips ✅ Done", async () => {
+    const { repo } = makeGitignoredFixture("fix211-merged");
+    const rt = tmp("fix211-merged-rt");
+    const cycleId = "20260606-051000-5102";
+    const p = paths(rt, cycleId);
+    const backlogPath = join(repo, ".roll", "backlog.md");
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shimAgentTcr, github: fakeGithub(0, "MERGED") };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    const backlog = readFileSync(backlogPath, "utf8");
+    expect(backlog).toContain("✅ Done");
+    expect(backlog).not.toContain("🔨 In Progress");
+  });
+});
+
+describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a stuck 🔨", () => {
+  // The async case from the card: a PRIOR cycle published US-PRIOR (rests at 🔨
+  // + open PR), the dedicated PR loop merged it between cycles. The NEXT cycle's
+  // preflight must flip ✅ Done on the merge evidence — and must NOT reset a
+  // still-OPEN claim (that would re-pick + duplicate) nor a dead claim's revert.
+  const PRIOR_BACKLOG = [
+    "| ID | Description | Status |",
+    "|----|-------------|--------|",
+    "| US-PRIOR | a delivered-and-since-merged story | 🔨 In Progress |",
+    "| US-RUN-001 | Runner adapter smoke story est_min:5 | 📋 Todo |",
+    "",
+  ].join("\n");
+
+  /** A github fake that maps cycle branch → PR state (branch-aware), so a prior
+   *  delivery's branch and the current cycle's branch can report differently. */
+  function branchAwareGithub(byBranch: Record<string, string>): Ports["github"] {
+    return {
+      async repoSlug() {
+        return "fixture/runner";
+      },
+      async runPublishPlan() {
+        return { status: 0, prUrl: "https://example/pr/1", ok: true };
+      },
+      async prState(_repoCwd, branch) {
+        return byBranch[branch] ?? "OPEN";
+      },
+    };
+  }
+
+  function seedPriorRun(runsPath: string, storyId: string, cycleId: string): void {
+    writeFileSync(
+      runsPath,
+      `${JSON.stringify({ run_id: cycleId, status: "done", story_id: storyId, cycle_id: cycleId, built: [storyId] })}\n`,
+      "utf8",
+    );
+  }
+
+  it("MERGED prior PR → preflight flips US-PRIOR ✅ Done; current publish-OPEN stays 🔨", async () => {
+    const { repo } = makeGitignoredFixture("fix211-async-merged");
+    const rt = tmp("fix211-async-merged-rt");
+    const backlogPath = join(repo, ".roll", "backlog.md");
+    writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    const cycleId = "20260606-052000-5201";
+    const p = paths(rt, cycleId);
+    seedPriorRun(p.runsPath, "US-PRIOR", "c-prior");
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = {
+      ...base,
+      agentSpawn: shimAgentTcr,
+      github: branchAwareGithub({
+        "loop/cycle-c-prior": "MERGED", // the async PR loop merged it
+        [`loop/cycle-${cycleId}`]: "OPEN", // this cycle's own PR not yet merged
+      }),
+    };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    const backlog = readFileSync(backlogPath, "utf8");
+    // 补翻: the merged prior delivery flipped ✅ Done.
+    expect(backlog).toMatch(/US-PRIOR \|.*✅ Done/);
+    // this cycle's own delivery published-but-OPEN → rests at 🔨, not Done.
+    expect(backlog).toMatch(/US-RUN-001 \|.*🔨 In Progress/);
+  });
+
+  it("OPEN prior PR → preflight keeps US-PRIOR at 🔨 (no re-pick, no premature Done)", async () => {
+    const { repo } = makeGitignoredFixture("fix211-async-open");
+    const rt = tmp("fix211-async-open-rt");
+    const backlogPath = join(repo, ".roll", "backlog.md");
+    writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    const cycleId = "20260606-052000-5202";
+    const p = paths(rt, cycleId);
+    seedPriorRun(p.runsPath, "US-PRIOR", "c-prior");
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = {
+      ...base,
+      agentSpawn: shimAgentTcr,
+      github: branchAwareGithub({ "loop/cycle-c-prior": "OPEN", [`loop/cycle-${cycleId}`]: "MERGED" }),
+    };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    const backlog = readFileSync(backlogPath, "utf8");
+    // prior delivery still pending merge → stays 🔨 (not reverted, not Done).
+    expect(backlog).toMatch(/US-PRIOR \|.*🔨 In Progress/);
+  });
+
+  it("dead claim (🔨 with NO delivering cycle in runs) → preflight reverts to 📋 Todo", async () => {
+    const { repo } = makeGitignoredFixture("fix211-deadclaim");
+    const rt = tmp("fix211-deadclaim-rt");
+    const backlogPath = join(repo, ".roll", "backlog.md");
+    writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    const cycleId = "20260606-052000-5203";
+    const p = paths(rt, cycleId);
+    // No runs.jsonl seeded → US-PRIOR has no delivering cycle → dead claim.
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    // This cycle's own PR merges, so a re-picked-and-delivered story reaches Done.
+    const ports: Ports = {
+      ...base,
+      agentSpawn: shimAgentTcr,
+      github: branchAwareGithub({ [`loop/cycle-${cycleId}`]: "MERGED" }),
+    };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    // The dead claim (no PR ever opened) was recycled to 📋 Todo at preflight —
+    // FIX-112 orphan-recovery preserved — so US-PRIOR (highest priority) was
+    // re-picked, delivered, and merged this cycle → ✅ Done, while US-RUN-001
+    // waits its turn. Had the revert NOT fired, US-PRIOR would still read 🔨 and
+    // US-RUN-001 would be the one delivered instead.
+    const backlog = readFileSync(backlogPath, "utf8");
+    expect(backlog).toMatch(/US-PRIOR \|.*✅ Done/);
+    expect(backlog).toMatch(/US-RUN-001 \|.*📋 Todo/);
   });
 });
 

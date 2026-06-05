@@ -315,6 +315,70 @@ export function reconcileStuckBacklog(
   return detectStuckStories({ inProgress, events, now, ttlHours });
 }
 
+// ── 3. In-progress claim reconcile (FIX-211: Done ≡ merged, no publish抢跑) ────
+
+/**
+ * The decision for ONE 🔨 In Progress backlog claim at cycle preflight, gating
+ * the ✅ Done flip on REAL merge evidence — the FIX-211 regression: FIX-198
+ * anchored the Done write to the main checkout (correct), but flipped ✅ the
+ * moment a PR was OPENED (publish-time), so a card read Done while its PR was
+ * still open (the loop conductor merged minutes later). "Done ≡ 已合进 main"
+ * (backlog.md:4) demands the flip wait for merge:
+ *   - the claim's cycle PR is MERGED       → "done"  (reconcile 补翻 → ✅ Done).
+ *   - no recorded delivering cycle          → "todo" (dead claim — a crashed
+ *                                             cycle that never published a PR;
+ *                                             the orphan-recovery reset).
+ *   - its PR is CLOSED (unmerged)           → "todo" (abandoned → re-pickable).
+ *   - its PR is still OPEN / state unknown  → "keep" (delivered, pending merge —
+ *                                             rest at 🔨 + PR; the async PR loop
+ *                                             merges it, a later preflight flips).
+ *
+ * Conservative by construction: an unknown/unprobed PR state NEVER flips Done
+ * (the whole point — no premature Done) and never reverts a live delivery (no
+ * duplicate re-pick); it rests at 🔨 until merge evidence is definitive.
+ */
+export type ClaimReconcileDecision = "done" | "todo" | "keep";
+
+/** Evidence the caller resolves (runs.jsonl + a gh PR-state probe) per claim. */
+export interface ClaimEvidence {
+  /** A delivering cycle for this story exists in runs.jsonl (its branch known). */
+  hasDeliveringCycle: boolean;
+  /** The cycle branch's PR state, when probed (undefined ⇒ unprobed/unknown). */
+  prState?: string;
+}
+
+/** Decide the preflight reconcile action for one 🔨 claim (see type doc). */
+export function decideClaimReconcile(ev: ClaimEvidence): ClaimReconcileDecision {
+  if (!ev.hasDeliveringCycle) return "todo";
+  if (ev.prState === "MERGED") return "done";
+  if (ev.prState === "CLOSED") return "todo";
+  return "keep";
+}
+
+/**
+ * Resolve the latest cycle_id that DELIVERED `storyId` from runs rows — the row
+ * whose `story_id` matches and whose status is a delivery (`done`/`built`/
+ * `merged`). Rows are appended oldest→newest, so the LAST match wins. Returns
+ * `undefined` when no delivering cycle is recorded (a dead claim that never
+ * opened a PR — there is no branch to probe). The caller derives the branch via
+ * {@link reconcileBranchName} and probes its PR state.
+ */
+export function latestDeliveringCycle(
+  rows: readonly ReconcileRunRow[],
+  storyId: string,
+): string | undefined {
+  let found: string | undefined;
+  for (const row of rows) {
+    const sid = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
+    if (sid !== storyId) continue;
+    const status = typeof row.status === "string" ? row.status : "";
+    if (status !== "done" && status !== "built" && status !== "merged") continue;
+    const cid = typeof row.cycle_id === "string" ? row.cycle_id : "";
+    if (cid !== "") found = cid;
+  }
+  return found;
+}
+
 /** Apply a stuck-story revert to backlog text: flip the FIRST `| 🔨 In Progress |`
  *  → `| 📋 Todo |` on each reverted story's row, mirroring loop_unstick.py:162
  *  (`lines[idx].replace("| 🔨 In Progress |", "| 📋 Todo |")`, first occurrence).

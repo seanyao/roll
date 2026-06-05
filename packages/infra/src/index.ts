@@ -4,3 +4,4 @@ export * from "./github.js";
 export * from "./process.js";
 export * from "./schedule.js";
 export * from "./tmux.js";
+export * from "./evidence.js";

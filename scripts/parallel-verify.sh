@@ -203,15 +203,33 @@ seed_home() {
 # Resolve the claude argv used for `--real`. The shim path ignores this.
 real_claude_cmd() { echo 'claude -p "Read .roll/backlog.md, deliver the single Todo story via TCR, commit with a tcr: message."'; }
 
+# --real prerequisites, resolved from the INVOKING environment (before env -i):
+# the real claude binary dir (appended to leg PATH after the shim, whose claude
+# is deleted in real mode) and the real HOME — claude auth/config lives there;
+# a temp HOME would run claude unauthenticated and it exits without working.
+REAL_CLAUDE_DIR=""
+REAL_HOME="${HOME}"
+resolve_real_claude() {
+  local bin
+  bin="$(command -v claude || true)"
+  [ -n "$bin" ] || { echo "[parallel-verify] --real: no \`claude\` on PATH" >&2; exit 3; }
+  REAL_CLAUDE_DIR="$(cd "$(dirname "$bin")" && pwd)"
+}
+
 # v3 leg: returns the terminal status by reading the runs.jsonl / events it wrote.
 run_v3_leg() {
   local clone="$1" rt="$2" shim="$3" home="$4"
   local path_herm="$shim:/usr/bin:/bin"
+  local leg_home="$home"
+  if [ "$REAL" -eq 1 ]; then
+    path_herm="$path_herm:$REAL_CLAUDE_DIR:/opt/homebrew/bin:/usr/local/bin"
+    leg_home="$REAL_HOME"
+  fi
   (
     cd "$clone" || exit 9
     env -i \
       PATH="$path_herm" \
-      HOME="$home" \
+      HOME="$leg_home" \
       ROLL_MAIN_SLUG="pv-sandbox" \
       ROLL_LOOP_AGENT="claude" \
       ROLL_PROJECT_RUNTIME_DIR="$rt" \
@@ -243,24 +261,31 @@ run_v2_leg() {
   # a real, unauthenticated gh would shadow the shim and the publish would fall
   # to the orphan path instead of the status-0 `done` path).
   local path_herm="$shim:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$home/.local/bin:$home/.kimi-code/bin:/usr/bin:/bin"
+  # Timeouts: shim cycles finish in seconds; a REAL claude needs minutes.
+  local cycle_timeout=60 hb_timeout=45 watchdog_iters=45 leg_home="$home"
+  if [ "$REAL" -eq 1 ]; then
+    path_herm="$path_herm:$REAL_CLAUDE_DIR"
+    leg_home="$REAL_HOME"
+    cycle_timeout=900 hb_timeout=600 watchdog_iters=480   # 16min外层兜底
+  fi
   mkdir -p "$shared/loop"
   (
     cd "$clone" || exit 9
     env -i \
       PATH="$path_herm" \
-      HOME="$home" \
+      HOME="$leg_home" \
       ROLL_LOOP_FORCE=1 \
       ROLL_LOOP_NO_POPUP=1 \
-      ROLL_LOOP_CYCLE_TIMEOUT_SEC=60 \
-      ROLL_HEARTBEAT_TIMEOUT=45 \
+      ROLL_LOOP_CYCLE_TIMEOUT_SEC="$cycle_timeout" \
+      ROLL_HEARTBEAT_TIMEOUT="$hb_timeout" \
       ROLL_PROJECT_RUNTIME_DIR="$rt" \
       _SHARED_ROOT="$shared" \
       bash "$inner"
   ) >"$rt/leg.out" 2>&1 &
   local pid=$!
-  # Manual watchdog (no `timeout` dependency): 90s cap.
+  # Manual watchdog (no `timeout` dependency): 90s cap (shim) / 16min (real).
   local i
-  for i in $(seq 1 45); do kill -0 "$pid" 2>/dev/null || break; sleep 2; done
+  for i in $(seq 1 "$watchdog_iters"); do kill -0 "$pid" 2>/dev/null || break; sleep 2; done
   if kill -0 "$pid" 2>/dev/null; then
     echo "[v2] inner runner exceeded watchdog — killing" >>"$rt/leg.out"
     kill -9 "$pid" 2>/dev/null || true
@@ -435,8 +460,9 @@ for round in $(seq 1 "$ROUNDS"); do
   build_shim_dir "$SHIM"
   HOME_DIR="$RD/home"
   seed_home "$HOME_DIR"
-  # For --real, do NOT inject the shim claude (use the real one if installed).
-  if [ "$REAL" -eq 1 ]; then rm -f "$SHIM/claude"; fi
+  # For --real, do NOT inject the shim claude (use the real one if installed);
+  # resolve its dir + real HOME for the leg env before env -i strips them.
+  if [ "$REAL" -eq 1 ]; then rm -f "$SHIM/claude"; resolve_real_claude; fi
 
   # v3 leg
   IFS='|' read -r V3_CLONE V3_BARE <<EOF

@@ -174,13 +174,29 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
     child.stderr?.on("data", (d: Buffer) => {
       stderr += d.toString("utf8");
     });
-    child.on("error", (e) => {
+    let settled = false;
+    const settle = (result: AgentSpawnResult): void => {
+      if (settled) return;
+      settled = true;
       if (timer !== undefined) clearTimeout(timer);
-      reject(e);
+      resolve(result);
+    };
+    child.on("error", (e) => {
+      // Mirror shell semantics: a missing/unspawnable binary is exit 127 —
+      // the v2 oracle classifies that as agent FAILURE (feeds the retry
+      // ladder → failed), never an abort. Parallel-verify caught this live.
+      settle({ stdout, stderr: `${stderr}${String(e)}\n`, exitCode: 127, timedOut });
+    });
+    // `exit` (not only `close`): a SIGKILLed agent can leave grandchildren
+    // holding the stdio pipes, so `close` may never fire — settle on process
+    // death after one tick of stream drain.
+    child.on("exit", (code, signal) => {
+      setImmediate(() =>
+        settle({ stdout, stderr, exitCode: code ?? (signal !== null ? 137 : 1), timedOut }),
+      );
     });
     child.on("close", (code) => {
-      if (timer !== undefined) clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode: code ?? 1, timedOut });
+      settle({ stdout, stderr, exitCode: code ?? 1, timedOut });
     });
   });
 };

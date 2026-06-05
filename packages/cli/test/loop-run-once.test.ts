@@ -81,8 +81,10 @@ describe("realAgentSpawn child-process path (PATH shim, no real claude)", () => 
       cwd: dir,
       skillBody: "x",
       bin: shim,
-      timeoutMs: 150,
+      // generous margin: slow CI runners need spawn headroom before the timer
+      timeoutMs: 800,
     });
     expect(res.timedOut).toBe(true);
+    expect(res.exitCode).not.toBe(0);
   });
 });

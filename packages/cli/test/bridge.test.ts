@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   dispatch,
   fallbackToBash,
@@ -9,8 +11,22 @@ import {
   registerPorted,
   repoRoot,
 } from "../src/bridge.js";
+import { seedUpdateCheckCache } from "./helpers.js";
 
 const ROOT = repoRoot();
+// Isolated ROLL_HOME with a seeded update-check cache: CI runners have no
+// ~/.roll, so the oracle's async checker would spray stderr noise otherwise.
+const ROLL_HOME = join(mkdtempSync(join(tmpdir(), "roll-bridge-home-")), ".roll");
+seedUpdateCheckCache(ROLL_HOME);
+let savedRollHome: string | undefined;
+beforeAll(() => {
+  savedRollHome = process.env["ROLL_HOME"];
+  process.env["ROLL_HOME"] = ROLL_HOME; // fallbackToBash inherits process.env
+});
+afterAll(() => {
+  if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
+  else process.env["ROLL_HOME"] = savedRollHome;
+});
 
 /** Run the frozen bash CLI directly — the oracle side of the diff-tests. */
 function bashDirect(argv: string[]): { status: number; stdout: string; stderr: string } {
@@ -18,6 +34,7 @@ function bashDirect(argv: string[]): { status: number; stdout: string; stderr: s
     const stdout = execFileSync(join(ROOT, "bin", "roll"), argv, {
       cwd: ROOT,
       encoding: "utf8",
+      env: { ...process.env, ROLL_HOME },
     });
     return { status: 0, stdout, stderr: "" };
   } catch (e) {

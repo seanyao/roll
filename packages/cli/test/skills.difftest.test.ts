@@ -127,11 +127,22 @@ describe("diff-test: roll skills == bash oracle", () => {
     expect(tsSkills(["help"], { ROLL_LANG: "en" })).toEqual(bashSkills(["help"], { ROLL_LANG: "en" }));
   });
 
-  it("check (real frozen skills/ — up to date) en", () => {
-    expect(tsSkills(["check"], { ROLL_LANG: "en" })).toEqual(bashSkills(["check"], { ROLL_LANG: "en" }));
-  });
-  it("check (real frozen skills/ — up to date) zh", () => {
-    expect(tsSkills(["check"], { ROLL_LANG: "zh" })).toEqual(bashSkills(["check"], { ROLL_LANG: "zh" }));
+  // Self-consistent up-to-date fixture: generate the catalog with the bash
+  // oracle ON THIS PLATFORM first, then check with both legs. (Checking the
+  // repo's committed guide/skills.md is platform-fragile: glob collation on
+  // Linux CI reorders entries → both legs see drift with diverging diffs.)
+  it("check (self-generated catalog — up to date) en+zh", () => {
+    const pkg = freshPkg();
+    symlinkSync(join(REPO, "skills"), join(pkg, "skills"));
+    mkdirSync(join(pkg, "guide"), { recursive: true });
+    const gen = bashSkills(["generate"], { ROLL_LANG: "en", ROLL_PKG_DIR: pkg });
+    expect(gen.status).toBe(0);
+    for (const lang of ["en", "zh"]) {
+      expect(
+        tsSkills(["check"], { ROLL_LANG: lang, ROLL_PKG_DIR: pkg }),
+        `lang=${lang}`,
+      ).toEqual(bashSkills(["check"], { ROLL_LANG: lang, ROLL_PKG_DIR: pkg }));
+    }
   });
 
   it("unknown subcommand en", () => {

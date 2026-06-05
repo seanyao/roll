@@ -224,18 +224,28 @@ resolve_real_claude() {
 # positional to `-p` and execs the REAL claude. v3's own argv is already
 # fixed (agent-spawn.ts); the wrapper is a no-op for it.
 write_real_claude_wrapper() {
+  # IDEMPOTENT reorder: only the frozen v2 leg emits the broken
+  # `-p <flags...> --add-dir <wt> "<prompt>"` shape (prompt trailing, -p bare).
+  # The v3 leg already binds the prompt to -p — if args[1] is NOT a flag, -p
+  # has its value and we must pass through untouched (otherwise we'd steal the
+  # trailing --add-dir VALUE as a "prompt", reintroducing the very bug).
   cat > "$SHIM/claude" <<WRAP
 #!/usr/bin/env bash
 real="$REAL_CLAUDE_BIN"
 args=("\$@")
 n=\${#args[@]}
 if [ "\$n" -ge 2 ] && [ "\${args[0]}" = "-p" ]; then
-  last="\${args[n-1]}"
-  case "\$last" in
-    -*) exec "\$real" "\$@" ;;
+  case "\${args[1]}" in
+    -*)
+      # -p is bare (v2 shape): move the trailing positional up to -p.
+      last="\${args[n-1]}"
+      case "\$last" in
+        -*) exec "\$real" "\$@" ;;
+      esac
+      unset 'args[n-1]'
+      exec "\$real" -p "\$last" "\${args[@]:1}"
+      ;;
   esac
-  unset 'args[n-1]'
-  exec "\$real" -p "\$last" "\${args[@]:1}"
 fi
 exec "\$real" "\$@"
 WRAP
@@ -249,11 +259,16 @@ run_v3_leg() {
   if [ "$REAL" -eq 1 ]; then
     # real mode: FULL inherited env (macOS keychain auth needs the session
     # env — env -i yields 401), shim-gh dir prepended so no real PRs happen.
+    # ROLL_LOOP_SKILL feeds v3 the SAME prompt the v2 leg's agent_cmd carries
+    # (the sandbox has no .roll/skills/roll-loop/SKILL.md to read).
+    local prompt_file="$rt/prompt.md"
+    printf '%s\n' "Read .roll/backlog.md, deliver the single Todo story via TCR, commit with a tcr: message." > "$prompt_file"
     (
       cd "$clone" || exit 9
       PATH="$shim:$PATH" \
       ROLL_MAIN_SLUG="pv-sandbox" \
       ROLL_LOOP_AGENT="claude" \
+      ROLL_LOOP_SKILL="$prompt_file" \
       ROLL_PROJECT_RUNTIME_DIR="$rt" \
       node "$V3_BIN" loop run-once
     ) >"$rt/leg.out" 2>&1

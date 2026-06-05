@@ -159,6 +159,9 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
     skillBody: opts.skillBody,
     bin: opts.bin,
   });
+  // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,
+  // which leg/cycle logs capture — argv mismatches become diagnosable.
+  process.stderr.write(`[runner] spawn ${bin} argv=${JSON.stringify(args.map((a) => (a.length > 80 ? `${a.slice(0, 77)}...` : a)))}\n`);
   return new Promise<AgentSpawnResult>((resolve, reject) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,

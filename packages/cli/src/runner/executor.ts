@@ -66,7 +66,7 @@ import {
   push as gitPush,
 } from "@roll/infra";
 import { execFile } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -266,6 +266,19 @@ export async function executeCommand(
         cwd: ports.paths.worktreePath,
         skillBody: ports.skillBody,
       });
+      // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
+      // per-cycle log next to events/runs — v2 keeps cycle logs; without this
+      // an agent that "ran but delivered nothing" is undiagnosable.
+      try {
+        const logDir = join(dirname(ports.paths.eventsPath), "cycle-logs");
+        mkdirSync(logDir, { recursive: true });
+        writeFileSync(
+          join(logDir, `${ctx.cycleId ?? "cycle"}.agent.log`),
+          `# exit=${res.exitCode} timedOut=${res.timedOut}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}\n`,
+        );
+      } catch {
+        /* logging must never fail the cycle */
+      }
       return { event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut } };
     }
 

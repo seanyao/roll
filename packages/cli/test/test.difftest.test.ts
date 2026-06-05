@@ -1,27 +1,30 @@
 /**
- * diff-test: TS `roll test` == bash `bin/roll test` (frozen v2 oracle).
+ * diff-test: TS `roll test` == bash `bin/roll test` (frozen v2 oracle) — for
+ * the surface that REMAINS oracle-aligned after REFACTOR-046 removed the tart
+ * isolation lane.
  *
- * cmd_test routes through the isolation dispatcher, so every scenario fabricates
- * a cwd with a `.roll/local.yaml` pinning `test_isolation.type`, plus PATH shims
- * for the external binaries the adapters touch (`npm`, `tart`, `uname`, `ssh`).
+ * cmd_test routes through the isolation dispatcher, so every scenario
+ * fabricates a cwd with a `.roll/local.yaml` pinning `test_isolation.type`,
+ * plus PATH shims for the external binaries the none adapter touches (`npm`).
  * Both sides run the SAME shims, so the forwarded child stdout/stderr stays
  * byte-identical and the routing/exec verdicts agree regardless of host OS.
  *
- * Covered:
- *   - --help / -h, and `--help` appearing after other pre-`--` args (en/zh).
+ * Still difftested (byte-identical vs the oracle):
  *   - --where on type=none → `host`.
- *   - --where on type=tart with a present+ready VM (uname/tart/ssh shimmed) →
- *     `tart:<ip>`, and with the tart binary absent → `tart:not-installed`.
- *   - default exec on type=none → forwarded `npm test -- --affected` (shim npm
- *     records argv + emits canned output); explicit `-- tests/` passthrough.
+ *   - --where on an unknown type → `unknown:<type>` (the `<type>:<detail>`
+ *     token format survives as the adapter extension point).
+ *   - default exec on type=none → forwarded `npm test -- --affected`; explicit
+ *     `-- tests/` passthrough.
  *   - --reset on type=none → "nothing to reset" note (exit 0); a held lock →
  *     fast-fail (exit 1).
- *   - the UNREACHABLE-VM contract: type=tart with no tart binary on the exec
- *     path → explicit error + exit 1, NO silent host fallback.
  *
- * CI portability: fabricated HOME/ROLL_HOME (seeded update-check cache), all
- * external binaries shimmed on a sandboxed PATH, cwd is a throwaway dir (not a
- * git repo — cmd_test never shells git), locale pinned. No network, no real VM.
+ * WHITELISTED divergences (REFACTOR-046 — TS-only assertions below):
+ *   - `--help`: the oracle still documents the tart lane; the TS help is
+ *     tart-free. Asserted TS-only (exit 0, mentions type:none, no tart).
+ *   - unknown-type EXEC error: both sides err + exit 1, but the oracle lists
+ *     `supported types: none, tart` while TS lists `none` only. Asserted
+ *     TS-only. A stale `type: tart` config lands exactly here — fail-loud,
+ *     never a silent host fallback.
  *
  * One harness subtlety: bash's `_isolation_get_type` shells `python3`+PyYAML to
  * read `.roll/local.yaml`, and PyYAML is imported from the *user* site-packages
@@ -29,8 +32,7 @@
  * import yaml and fall back to type=none, diverging from the TS native parser.
  * To make BOTH sides resolve the type identically and host-independently, every
  * shim dir carries a tiny `python3` shim that prints `test_isolation.type` with
- * a stdlib-only regex reader (no yaml import). The TS port's native parser and
- * this shim agree on the trivial fixtures used here.
+ * a stdlib-only regex reader (no yaml import).
  */
 import { execSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
@@ -44,20 +46,14 @@ const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 let home = "";
 
-// Shim dirs: a `none` shim set (npm only) and a `tart-ready` shim set.
-let binNpm = ""; // npm recorder
-let binTartReady = ""; // uname=Darwin/arm64 + tart(list/ip) + ssh ok
-let binNoTart = ""; // uname=Darwin/arm64, NO tart
-
-const FAKE_IP = "192.168.64.42";
+// Shim dir: npm recorder + python3 yaml-reader (see header).
+let binNpm = "";
 
 /**
  * A POSIX-sh `python3` that mirrors `_isolation_get_type`'s yaml read for the
  * trivial fixtures here: drain the heredoc script from stdin, then print the
  * indented `type:` scalar under a top-level `test_isolation:` block in
- * .roll/local.yaml (empty if absent). Avoids the PyYAML-under-$HOME import that
- * the sandboxed HOME would break — and avoids `env python3` recursion (the shim
- * shadows the real interpreter on PATH), so it's plain awk, not python.
+ * .roll/local.yaml (empty if absent).
  */
 const PY_SHIM = [
   "#!/bin/sh",
@@ -74,10 +70,6 @@ const PY_SHIM = [
   "",
 ].join("\n");
 
-function writePyShim(dir: string): void {
-  writeFileSync(join(dir, "python3"), PY_SHIM, { mode: 0o755 });
-}
-
 beforeAll(() => {
   home = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-home-")));
   dirs.push(home);
@@ -92,47 +84,7 @@ beforeAll(() => {
     ["#!/bin/sh", 'echo "npm-shim ran: $*"', "exit 0", ""].join("\n"),
     { mode: 0o755 },
   );
-  writePyShim(binNpm);
-
-  // tart-ready shim: uname reports Apple Silicon; tart list shows the VM
-  // running; tart ip returns a fixed IP; ssh true → exit 0 (ready).
-  binTartReady = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-tart-")));
-  dirs.push(binTartReady);
-  writeFileSync(
-    join(binTartReady, "uname"),
-    ["#!/bin/sh", 'if [ "$1" = "-m" ]; then echo arm64; else echo Darwin; fi', ""].join("\n"),
-    { mode: 0o755 },
-  );
-  writeFileSync(
-    join(binTartReady, "tart"),
-    [
-      "#!/bin/sh",
-      'if [ "$1" = "list" ]; then',
-      '  printf "%s\\n" "Source Name State"',
-      `  printf "%s\\n" "local roll-dev-test running"`,
-      "  exit 0",
-      "fi",
-      'if [ "$1" = "ip" ]; then',
-      `  echo ${FAKE_IP}`,
-      "  exit 0",
-      "fi",
-      "exit 0",
-      "",
-    ].join("\n"),
-    { mode: 0o755 },
-  );
-  writeFileSync(join(binTartReady, "ssh"), ["#!/bin/sh", "exit 0", ""].join("\n"), { mode: 0o755 });
-  writePyShim(binTartReady);
-
-  // no-tart shim: Apple Silicon uname, but NO tart binary on PATH.
-  binNoTart = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-notart-")));
-  dirs.push(binNoTart);
-  writeFileSync(
-    join(binNoTart, "uname"),
-    ["#!/bin/sh", 'if [ "$1" = "-m" ]; then echo arm64; else echo Darwin; fi', ""].join("\n"),
-    { mode: 0o755 },
-  );
-  writePyShim(binNoTart);
+  writeFileSync(join(binNpm, "python3"), PY_SHIM, { mode: 0o755 });
 });
 
 afterAll(() => {
@@ -227,26 +179,13 @@ function both(
   expect(t).toEqual(b);
 }
 
-describe("diff-test: roll test == bash oracle", () => {
-  for (const lang of ["en", "zh"]) {
-    it(`--help → usage + exit 0 (${lang})`, () => {
-      both("none", ["--help"], binNpm, { ROLL_LANG: lang });
-    });
-    it(`-h after another arg still shows help (${lang})`, () => {
-      both("none", ["--reset", "--help"], binNpm, { ROLL_LANG: lang });
-    });
-  }
-
+describe("diff-test: roll test == bash oracle (post-REFACTOR-046 surface)", () => {
   it("--where type=none → host", () => {
     both("none", ["--where"], binNpm);
   });
 
-  it("--where type=tart ready VM → tart:<ip>", () => {
-    both("tart", ["--where"], binTartReady);
-  });
-
-  it("--where type=tart, tart binary absent → tart:not-installed", () => {
-    both("tart", ["--where"], binNoTart);
+  it("--where unknown type → unknown:<type> token (extension point)", () => {
+    both("docker", ["--where"], binNpm);
   });
 
   it("default exec type=none → forwarded npm test -- --affected", () => {
@@ -274,8 +213,39 @@ describe("diff-test: roll test == bash oracle", () => {
     const t = tsTest(tp, ["--reset"], binNpm);
     expect(t).toEqual(b);
   });
+});
 
-  it("UNREACHABLE-VM: type=tart exec with no tart binary → error, exit 1 (no host fallback)", () => {
-    both("tart", [], binNoTart);
+describe("REFACTOR-046 whitelisted divergences (TS-only)", () => {
+  it("--help: tart-free usage, exit 0", () => {
+    const t = tsTest(projWith("none"), ["--help"], binNpm);
+    expect(t.status).toBe(0);
+    expect(t.stdout).toContain("type: none");
+    expect(t.stdout).not.toMatch(/tart/i);
+  });
+
+  it("-h after another arg still shows help", () => {
+    const t = tsTest(projWith("none"), ["--reset", "-h"], binNpm);
+    expect(t.status).toBe(0);
+    expect(t.stdout).toContain("Usage: roll test");
+  });
+
+  it("unknown-type exec fails loud, lists only none, never falls back to host", () => {
+    const t = tsTest(projWith("docker"), [], binNpm);
+    expect(t.status).toBe(1);
+    expect(t.stderr).toContain("unknown type 'docker'");
+    expect(t.stderr).toContain("supported types: none");
+    expect(t.stderr).not.toMatch(/tart/i);
+    expect(t.stdout).not.toContain("npm-shim ran"); // host suite NOT executed
+  });
+
+  it("a stale `type: tart` config is now an unknown type — fail-loud", () => {
+    const where = tsTest(projWith("tart"), ["--where"], binNpm);
+    expect(where.status).toBe(0);
+    expect(where.stdout).toBe("unknown:tart\n");
+
+    const exec = tsTest(projWith("tart"), [], binNpm);
+    expect(exec.status).toBe(1);
+    expect(exec.stderr).toContain("unknown type 'tart'");
+    expect(exec.stdout).not.toContain("npm-shim ran"); // no silent host fallback
   });
 });

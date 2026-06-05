@@ -1,11 +1,13 @@
 {
   "name": "@seanyao/roll",
-  "version": "2.604.2",
+  "version": "3.0.0",
   "description": "Roll \u2014 Roll out features with AI agents",
   "packageManager": "pnpm@11.1.3",
   "scripts": {
     "test": "bash scripts/test-ts.sh",
-    "test:bats": "bash tests/run.sh"
+    "test:bats": "bash tests/run.sh",
+    "bundle": "node scripts/bundle.mjs",
+    "prepack": "pnpm -r build && pnpm bundle"
   },
   "keywords": [
     "ai",
@@ -20,11 +22,12 @@
     "url": "git+https://github.com/seanyao/roll.git"
   },
   "bin": {
-    "roll": "bin/roll"
+    "roll": "dist/roll.mjs"
   },
   "license": "MIT",
   "author": "Sean Yao <sean.dlut@gmail.com>",
   "files": [
+    "dist/",
     "bin/",
     "conventions/",
     "lib/",
@@ -33,8 +36,12 @@
     "README.md",
     "CHANGELOG.md"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
     "@types/node": "^25.9.1",
+    "esbuild": "^0.28.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   }

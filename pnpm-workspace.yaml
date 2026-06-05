@@ -1,2 +1,6 @@
 packages:
   - "packages/*"
+# esbuild ships a native binary via a postinstall build script; allow it so the
+# `bundle` step (release-tarball CLI) can run. Only trusted build deps belong here.
+allowBuilds:
+  esbuild: true

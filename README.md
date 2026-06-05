@@ -78,7 +78,6 @@ lib/           Runtime companions (python/sh) used by the loop & fallback paths
 skills/        Git submodule → seanyao/roll-skills (the agent skill contracts)
 conventions/   Conventions synced into AI clients by `roll setup`
 template/      Project scaffolding installed by `roll init`
-tests/         Frozen bats suite guarding the bash engine (non-blocking CI lane)
 ```
 
 Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuild) + `bin/` + `lib/` + `skills/` + `conventions/` + `template/`.

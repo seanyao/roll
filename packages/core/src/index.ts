@@ -22,3 +22,4 @@ export * from "./loop/recovery.js";
 export * from "./loop/sentinel.js";
 export * from "./policy/engine.js";
 export * from "./reconcile/engine.js";
+export * from "./attest/ac-parser.js";

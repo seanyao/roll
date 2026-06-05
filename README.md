@@ -80,6 +80,8 @@ conventions/   Conventions synced into AI clients by `roll setup`
 template/      Project scaffolding installed by `roll init`
 ```
 
+The frozen v2 bash lives on the `v2` branch (anchor tag `v2-freeze-2026-06-04`). Build & test: `pnpm install && pnpm -r test`.
+
 Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuild) + `bin/` + `lib/` + `skills/` + `conventions/` + `template/`.
 
 ## Documentation

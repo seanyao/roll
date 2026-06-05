@@ -1482,19 +1482,27 @@ function render(
     if ((lang === "both" || lang === "zh") && zhLine !== null) out.push(zhLine);
   };
 
+  // Liveness is derived from the v3 heart's own signals (inner.lock + heartbeat
+  // + open cycle_start), not the v2 `state.yaml` the TS runner never writes
+  // (FIX-203). Computed once here; the title caption and the eyebrow share it.
+  const live = detectLiveCycle(args.rtDir, cycles, now);
+
   // ── Title row ──
   const nCycles = cycles.length;
+  // When a cycle is live, split the count so a not-yet-completed cycle is not
+  // miscounted as a finished one (FIX-203 req 3: "0 cycles" was misleading —
+  // completed cycles are one tally, the running one is listed apart).
+  const runningCount = cycles.filter((cy) => cy.outcome === "running").length;
+  const caption = live.running
+    ? `${nCycles - runningCount} done · ${runningCount} running / ${days * 24}h`
+    : `${nCycles} cycles / ${days * 24}h`;
   const titleL = c("fg", "roll loop", { bold: true }) + c("muted", "  ·  ") + c("dim", "health");
-  const titleR =
-    c("dim", shYmdHm(now)) + c("muted", " · ") + c("muted", `${nCycles} cycles / ${days * 24}h`);
+  const titleR = c("dim", shYmdHm(now)) + c("muted", " · ") + c("muted", caption);
   out.push(row(titleL, titleR));
   out.push("");
 
   // ── Status eyebrow ──
-  // Liveness is derived from the v3 heart's own signals (inner.lock + heartbeat
-  // + open cycle_start), not the v2 `state.yaml` the TS runner never writes
-  // (FIX-203). A live verdict trumps a stale state.yaml.
-  const live = detectLiveCycle(args.rtDir, cycles, now);
+  // A live verdict (computed above) trumps a stale state.yaml.
   const statusWord = (state["status"] ?? "idle").toLowerCase();
   let ebL: string;
   let ebZh = "";

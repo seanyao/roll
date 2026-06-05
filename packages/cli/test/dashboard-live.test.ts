@@ -164,5 +164,9 @@ describe("FIX-203: dashboard eyebrow surfaces the live cycle", () => {
     expect(out).toContain("RUNNING");
     expect(out).toContain("FIX-199");
     expect(out).toContain("elapsed");
+    // req 3: the title caption distinguishes completed cycles from the running
+    // one (here: 0 completed, 1 running) instead of a flat "N cycles".
+    expect(out).toContain("0 done");
+    expect(out).toContain("1 running");
   });
 });

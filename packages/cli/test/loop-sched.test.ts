@@ -29,6 +29,7 @@ import {
   loopResumeCommand,
   type LoopSchedDeps,
 } from "../src/commands/loop-sched.js";
+import type { LaunchctlResult } from "@roll/infra";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -63,6 +64,48 @@ function fakeDeps(proj: string, shared: string, launchdDir: string): {
           calls.push(`uninstall ${uid} ${label}`);
           return Promise.resolve({ code: 0, stdout: "", stderr: "" });
         },
+        isLoaded: (uid, label) => {
+          calls.push(`isLoaded ${uid} ${label}`);
+          return Promise.resolve(true);
+        },
+      },
+    },
+  };
+}
+
+/**
+ * FIX-212 fake: reinstall fails for the first `failBefore[label]` attempts, and
+ * `isLoaded` reports loaded only once that label has been (re)installed past its
+ * failing attempts. Mirrors the bootout+bootstrap race (FIX-027/098) where the
+ * job silently does not mount.
+ */
+function fakeFlakyDeps(
+  proj: string,
+  shared: string,
+  launchdDir: string,
+  failBefore: Record<string, number>,
+): { deps: LoopSchedDeps; attempts: Record<string, number> } {
+  const attempts: Record<string, number> = {};
+  return {
+    attempts,
+    deps: {
+      identity: () => Promise.resolve({ path: proj, slug: "proj-abc123" }),
+      uid: () => 501,
+      sharedRoot: () => shared,
+      launchdDir: () => launchdDir,
+      launchd: {
+        reinstall: (_uid, label) => {
+          attempts[label] = (attempts[label] ?? 0) + 1;
+          const fails = (failBefore[label] ?? 0) >= attempts[label];
+          return Promise.resolve({
+            code: fails ? 5 : 0,
+            stdout: "",
+            stderr: fails ? `Bootstrap failed: 5: Input/output error` : "",
+          });
+        },
+        uninstall: () => Promise.resolve({ code: 0, stdout: "", stderr: "" }),
+        isLoaded: (_uid, label) =>
+          Promise.resolve((attempts[label] ?? 0) > (failBefore[label] ?? 0)),
       },
     },
   };
@@ -77,6 +120,25 @@ function captureStdout(fn: () => Promise<number>): Promise<{ code: number; out: 
     .then((code) => ({ code, out: chunks.join("") }))
     .finally(() => {
       process.stdout.write = real;
+    });
+}
+
+function captureBoth(
+  fn: () => Promise<number>,
+): Promise<{ code: number; out: string; err: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const realOut = process.stdout.write.bind(process.stdout);
+  const realErr = process.stderr.write.bind(process.stderr);
+  // @ts-expect-error capture-only
+  process.stdout.write = (c: string | Uint8Array): boolean => (out.push(String(c)), true);
+  // @ts-expect-error capture-only
+  process.stderr.write = (c: string | Uint8Array): boolean => (err.push(String(c)), true);
+  return fn()
+    .then((code) => ({ code, out: out.join(""), err: err.join("") }))
+    .finally(() => {
+      process.stdout.write = realOut;
+      process.stderr.write = realErr;
     });
 }
 
@@ -262,6 +324,63 @@ describe("loop on/off (injected launchd)", () => {
     expect(calls).toContain("uninstall 501 com.roll.loop.proj-abc123");
     expect(calls).toContain("uninstall 501 com.roll.dream.proj-abc123");
     expect(calls).toContain("uninstall 501 com.roll.pr.proj-abc123");
+  });
+});
+
+describe("FIX-212 — loop on verifies the mount & fails loud", () => {
+  function project(): { proj: string; shared: string; ld: string } {
+    const proj = tmp("f212");
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "local.yaml"), "loop_schedule:\n  period_minutes: 30\n");
+    return { proj, shared: tmp("f212sh"), ld: tmp("f212ld") };
+  }
+
+  it("AC1: bootstrap failing persistently → non-zero exit naming the failed label", async () => {
+    const { proj, shared, ld } = project();
+    // loop label never mounts (race never resolves); pr mounts fine.
+    const { deps } = fakeFlakyDeps(proj, shared, ld, { "com.roll.loop.proj-abc123": 99 });
+    const { code, err } = await captureBoth(() => loopOnCommand([], deps));
+    expect(code).not.toBe(0);
+    expect(err).toContain("com.roll.loop.proj-abc123");
+    expect(err.toLowerCase()).toContain("mount"); // EN error
+    expect(err).toContain("挂载"); // ZH error
+  });
+
+  it("AC3: a transient bootstrap failure recovers on the single retry → exit 0", async () => {
+    const { proj, shared, ld } = project();
+    // both labels fail their first attempt, succeed on the retry.
+    const { deps, attempts } = fakeFlakyDeps(proj, shared, ld, {
+      "com.roll.loop.proj-abc123": 1,
+      "com.roll.pr.proj-abc123": 1,
+    });
+    const { code } = await captureBoth(() => loopOnCommand([], deps));
+    expect(code).toBe(0);
+    expect(attempts["com.roll.loop.proj-abc123"]).toBe(2); // one retry, no more
+    expect(attempts["com.roll.pr.proj-abc123"]).toBe(2);
+  });
+
+  it("does NOT retry more than once — a third attempt is never made", async () => {
+    const { proj, shared, ld } = project();
+    const { deps, attempts } = fakeFlakyDeps(proj, shared, ld, { "com.roll.loop.proj-abc123": 99 });
+    await captureBoth(() => loopOnCommand([], deps));
+    expect(attempts["com.roll.loop.proj-abc123"]).toBe(2); // initial + 1 retry, capped
+  });
+
+  it("AC2: success path output carries the verified-mount evidence for both labels", async () => {
+    const proj = tmp("f212ok");
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "local.yaml"), "loop_schedule:\n  period_minutes: 30\n");
+    const { deps, calls } = fakeDeps(proj, tmp("f212oksh"), tmp("f212okld"));
+    const { code, out } = await captureBoth(() => loopOnCommand([], deps));
+    expect(code).toBe(0);
+    // evidence line (bilingual) + the two verified labels
+    expect(out).toContain("已验证挂载");
+    expect(out.toLowerCase()).toContain("verified");
+    expect(out).toContain("com.roll.loop.proj-abc123");
+    expect(out).toContain("com.roll.pr.proj-abc123");
+    // the mount was actually probed, not assumed
+    expect(calls.some((c) => c.startsWith("isLoaded 501 com.roll.loop.proj-abc123"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("isLoaded 501 com.roll.pr.proj-abc123"))).toBe(true);
   });
 });
 

@@ -40,6 +40,13 @@
 # _SHARED_ROOT (v2 control-plane), the routed agent pinned to `claude`.
 set -uo pipefail
 
+# The sandbox origin's FETCH url is a github-looking https address that does
+# not exist (404 → git would prompt for credentials on /dev/tty and hang the
+# harness when run from a terminal; headless it fails instantly and the legs'
+# lenient fetch paths continue). Forbid the prompt everywhere — the var is also
+# injected into each leg's env -i block below, which this export cannot reach.
+export GIT_TERMINAL_PROMPT=0
+
 # ── Locate the repo root (works from anywhere) ────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
@@ -266,6 +273,7 @@ run_v3_leg() {
     (
       cd "$clone" || exit 9
       PATH="$shim:$PATH" \
+      GIT_TERMINAL_PROMPT=0 \
       ROLL_MAIN_SLUG="pv-sandbox" \
       ROLL_LOOP_AGENT="claude" \
       ROLL_LOOP_SKILL="$prompt_file" \
@@ -279,6 +287,7 @@ run_v3_leg() {
     env -i \
       PATH="$path_herm" \
       HOME="$home" \
+      GIT_TERMINAL_PROMPT=0 \
       ROLL_MAIN_SLUG="pv-sandbox" \
       ROLL_LOOP_AGENT="claude" \
       ROLL_PROJECT_RUNTIME_DIR="$rt" \
@@ -324,6 +333,7 @@ run_v2_leg() {
     (
       cd "$clone" || exit 9
       PATH="$shim:$PATH" \
+      GIT_TERMINAL_PROMPT=0 \
       ROLL_LOOP_FORCE=1 \
       ROLL_LOOP_NO_POPUP=1 \
       ROLL_LOOP_CYCLE_TIMEOUT_SEC="$cycle_timeout" \
@@ -338,6 +348,7 @@ run_v2_leg() {
     env -i \
       PATH="$path_herm" \
       HOME="$leg_home" \
+      GIT_TERMINAL_PROMPT=0 \
       ROLL_LOOP_FORCE=1 \
       ROLL_LOOP_NO_POPUP=1 \
       ROLL_LOOP_CYCLE_TIMEOUT_SEC="$cycle_timeout" \

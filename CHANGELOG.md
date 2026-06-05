@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.0
+
+### TypeScript 重写
+
+- **引擎从 bash 换成 TypeScript** — roll 的核心重写为 pnpm monorepo（`packages/`：spec/core/infra/cli/web 分层）。这是一次引擎替换，不是功能改版
+- **命令一个不变** — `roll init` / `loop` / `status` / `backlog` / `prices` / `slides` 等全部子命令的入参、输出、副作用、退出码保持原样；升级后照旧用
+- **逐层对拍迁移** — 地基、CLI、领域服务、infra、loop 各层逐条移植，每条命令写 diff-test 断言「TS 输出 == 原 bash 输出」，逐字节对齐冻结的 v2 oracle
+- **1031 项 TS 测试全绿** — 单测覆盖每个公共入口 + 跨层 diff-test；`npm i -g @seanyao/roll` 装的就是这套 TS-first CLI
+
+### 兼容与回滚
+
+- **bash 实现留作回落 + oracle** — `bin/roll` 随包一起发布：TS 层尚未接管的命令自动透传 bash，行为零差异；同一份 bash 也是测试套件的标准答案
+- **v2 归档在 `v2` 分支** — 锚点 tag `v2-freeze-2026-06-04`，需要时一键回滚
+
 ## v2.604.2
 
 ### 精简

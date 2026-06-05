@@ -228,6 +228,48 @@ interface RawEvent {
   _ts: Date;
 }
 
+/** v3 RollEvent `type` → the legacy bash `stage` the reader/aggregate expect. */
+const V3_TYPE_TO_STAGE: Record<string, string> = {
+  "cycle:start": "cycle_start",
+  "cycle:end": "cycle_end",
+  pick_todo: "pick_todo",
+};
+
+/**
+ * FIX-213: bridge the v3 heart's NATIVE RollEvent line to the legacy reader.
+ *
+ * The TS runner appends `{ type: "cycle:end", cycleId, ts: <epoch seconds> }`,
+ * but `loadEvents`/`aggregate` were written for the bash shape
+ * (`stage`/`label`/ISO `ts`). A numeric epoch is `Invalid Date` under
+ * `parseTs`, so v3 events were silently dropped and history read 0 cycles.
+ *
+ * A row that already carries a string `stage` is the legacy shape and passes
+ * through byte-identical (keeps the python-oracle difftest parity). A row with
+ * a string `type` is the v3 shape: map `type → stage`, `cycleId → label`, and
+ * the numeric epoch (seconds, or ms when ≥ 1e12) → an ISO string `parseTs`
+ * understands.
+ */
+export function normalizeRawEvent(raw: unknown): RawEvent {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return raw as RawEvent; // parseTs(undefined) will drop it downstream
+  }
+  const o = raw as Record<string, unknown>;
+  if (typeof o["stage"] === "string") return o as unknown as RawEvent; // legacy — untouched
+  if (typeof o["type"] !== "string") return o as unknown as RawEvent;
+  const type = o["type"] as string;
+  const tsNum = typeof o["ts"] === "number" ? (o["ts"] as number) : NaN;
+  const ms = Number.isFinite(tsNum) ? (tsNum < 1e12 ? tsNum * 1000 : tsNum) : NaN;
+  const isoTs = Number.isFinite(ms) ? new Date(ms).toISOString() : String(o["ts"] ?? "");
+  return {
+    ts: isoTs,
+    stage: V3_TYPE_TO_STAGE[type] ?? type,
+    label: typeof o["cycleId"] === "string" ? (o["cycleId"] as string) : ((o["label"] as string) ?? ""),
+    detail: o["detail"],
+    ...(typeof o["outcome"] === "string" ? { outcome: o["outcome"] as string } : {}),
+    _ts: new Date(NaN),
+  };
+}
+
 function loadEvents(slug: string, days: number): RawEvent[] {
   const candidates: string[] = [];
   const rtDir = loopRuntimeDir(slug);
@@ -259,7 +301,7 @@ function loadEvents(slug: string, days: number): RawEvent[] {
       if (seen.has(line)) continue;
       seen.add(line);
       try {
-        const e = JSON.parse(line) as RawEvent;
+        const e = normalizeRawEvent(JSON.parse(line));
         const ts = parseTs(String(e.ts));
         e._ts = ts;
         if (ts.getTime() >= cutoff) out.push(e);
@@ -619,7 +661,11 @@ function loadRuns(slug: string): Record<string, RunRecord> {
     if (r === null || typeof r !== "object" || Array.isArray(r)) continue;
     const rec = r as RunRecord;
     const p = rec.project ?? "";
-    if (p !== slug && p !== base && !p.startsWith(`${slug}-cycle-`)) {
+    // FIX-213: a project-less row (the shape buildRunRow wrote) read from the
+    // per-project runtime file is THIS project's — don't drop it. A stray row
+    // from another project can only ENRICH a cycle of ours via the id-match in
+    // mergeRunsIntoCycles (run_id == cycleId), so admitting it is harmless.
+    if (p !== "" && p !== slug && p !== base && !p.startsWith(`${slug}-cycle-`)) {
       if (projPath === null) continue;
       const otherProj = resolveProjectPath(p);
       if (otherProj === null || otherProj !== projPath) continue;
@@ -630,9 +676,64 @@ function loadRuns(slug: string): Record<string, RunRecord> {
   return out;
 }
 
-function mergeRunsIntoCycles(cycles: Cycle[], runs: Record<string, RunRecord>): void {
+/** Fold one runs row into its matched cycle. `ts` is the row's parsed timestamp
+ *  when known (used only to cap a reported duration against wall-clock); null
+ *  for a tsless v3 row matched by id. */
+function applyRunRow(cy: Cycle, r: RunRecord, ts: Date | null): void {
+  cy.tcr_count = r.tcr_count ?? 0;
+  cy.built = r.built && Array.isArray(r.built) ? r.built : [];
+  if (r.duration_sec) {
+    if (ts !== null && cy.start !== null) {
+      const cap = Math.trunc((ts.getTime() - cy.start.getTime()) / 1000);
+      cy.duration_s = cap > 0 ? Math.min(r.duration_sec, cap) : r.duration_sec;
+    } else if (!cy.duration_s) {
+      cy.duration_s = r.duration_sec;
+    }
+  }
+  if (
+    (cy.outcome === "unknown" ||
+      cy.outcome === "running" ||
+      cy.outcome === "idle" ||
+      cy.outcome === "failed" ||
+      cy.outcome === "orphan") &&
+    r.status
+  ) {
+    const map: Record<string, string> = { built: "done", interrupted: "fail" };
+    cy.outcome = map[r.status] ?? r.status;
+  }
+  // FIX-213: surface the v3 row's own cost/token fields. v2 rows omit these
+  // (cost arrives via `usage` events) so this is a no-op for them, but the v3
+  // heart emits no `usage` events — without this the cost columns stay blank
+  // for real deliveries.
+  if (typeof r["cost_usd"] === "number" && cy.cost_list == null) cy.cost_list = r["cost_usd"];
+  if (typeof r["tokens_in"] === "number" && !cy.input_tokens) cy.input_tokens = r["tokens_in"];
+  if (typeof r["tokens_out"] === "number" && !cy.output_tokens) cy.output_tokens = r["tokens_out"];
+  if (!cy.story && cy.built.length > 0) cy.story = cy.built[0] ?? null;
+  if (!cy.story && typeof r["story_id"] === "string" && r["story_id"] !== "") cy.story = r["story_id"];
+}
+
+export function mergeRunsIntoCycles(cycles: Cycle[], runs: Record<string, RunRecord>): void {
+  const consumed = new Set<string>();
+  const idMatched = new Set<Cycle>();
+
+  // FIX-213: id-match first. A v3 runs row is keyed by run_id == cycleId == the
+  // cycle's label, so it attaches directly with no ts (the row may lack one).
+  // This is what makes historical deliveries' story / tcr / cost surface in
+  // ROLLUP + RECENT instead of reading 0 cycles.
+  for (const cy of cycles) {
+    const r = runs[cy.label];
+    if (r === undefined) continue;
+    const tsRaw = parseTs(String(r.ts));
+    applyRunRow(cy, r, Number.isNaN(tsRaw.getTime()) ? null : tsRaw);
+    consumed.add(cy.label);
+    idMatched.add(cy);
+  }
+
+  // ts-window match for legacy v2 rows whose run_id ("loop-…") differs from the
+  // event label ("YYYYMMDD-…-pid") — unchanged heuristic, oracle-parity safe.
   const runsList: Array<[Date, string, RunRecord]> = [];
   for (const [rid, r] of Object.entries(runs)) {
+    if (consumed.has(rid)) continue;
     try {
       const ts = parseTs(String(r.ts));
       if (Number.isNaN(ts.getTime())) continue;
@@ -642,11 +743,10 @@ function mergeRunsIntoCycles(cycles: Cycle[], runs: Record<string, RunRecord>): 
     }
   }
   runsList.sort((a, b) => a[0].getTime() - b[0].getTime());
-  const consumed = new Set<string>();
 
   for (let i = 0; i < cycles.length; i++) {
     const cy = cycles[i];
-    if (cy === undefined || cy.start === null) continue;
+    if (cy === undefined || cy.start === null || idMatched.has(cy)) continue;
     const start = cy.start;
     const prevCy = i > 0 ? cycles[i - 1] : undefined;
     const nextStart =
@@ -671,24 +771,7 @@ function mergeRunsIntoCycles(cycles: Cycle[], runs: Record<string, RunRecord>): 
     if (best === null) continue;
     const [ts, rid, r] = best;
     consumed.add(rid);
-    cy.tcr_count = r.tcr_count ?? 0;
-    cy.built = r.built && Array.isArray(r.built) ? r.built : [];
-    if (r.duration_sec) {
-      const cap = Math.trunc((ts.getTime() - start.getTime()) / 1000);
-      cy.duration_s = cap > 0 ? Math.min(r.duration_sec, cap) : r.duration_sec;
-    }
-    if (
-      (cy.outcome === "unknown" ||
-        cy.outcome === "running" ||
-        cy.outcome === "idle" ||
-        cy.outcome === "failed" ||
-        cy.outcome === "orphan") &&
-      r.status
-    ) {
-      const map: Record<string, string> = { built: "done", interrupted: "fail" };
-      cy.outcome = map[r.status] ?? r.status;
-    }
-    if (!cy.story && cy.built.length > 0) cy.story = cy.built[0] ?? null;
+    applyRunRow(cy, r, ts);
   }
 }
 

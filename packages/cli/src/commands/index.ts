@@ -4,6 +4,7 @@ import { agentListCommand } from "./agent-list.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
 import { dashboardCommand } from "./dashboard.js";
+import { langCommand } from "./lang.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import { pricesCommand } from "./prices.js";
 import { statusCommand } from "./status.js";
@@ -14,6 +15,8 @@ export function registerAll(): void {
   if (registered) return;
   registered = true;
   registerPorted("status", statusCommand);
+  // `lang`: show/set/reset/invalid all TS (full surface ported).
+  registerPorted("lang", langCommand);
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

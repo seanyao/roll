@@ -276,13 +276,15 @@ WRAP
 run_v3_leg() {
   local clone="$1" rt="$2" shim="$3" home="$4"
   local path_herm="$shim:/usr/bin:/bin"
+  # ROLL_LOOP_SKILL feeds v3 the SAME prompt the v2 leg's agent_cmd carries —
+  # BOTH modes need it: the sandbox has no skills/roll-loop/SKILL.md, and since
+  # FIX-204A run-once refuses to start on an empty skill body (blind-agent
+  # guard) instead of silently running with one.
+  local prompt_file="$rt/prompt.md"
+  printf '%s\n' "Read .roll/backlog.md, deliver the single Todo story via TCR, commit with a tcr: message." > "$prompt_file"
   if [ "$REAL" -eq 1 ]; then
     # real mode: FULL inherited env (macOS keychain auth needs the session
     # env — env -i yields 401), shim-gh dir prepended so no real PRs happen.
-    # ROLL_LOOP_SKILL feeds v3 the SAME prompt the v2 leg's agent_cmd carries
-    # (the sandbox has no .roll/skills/roll-loop/SKILL.md to read).
-    local prompt_file="$rt/prompt.md"
-    printf '%s\n' "Read .roll/backlog.md, deliver the single Todo story via TCR, commit with a tcr: message." > "$prompt_file"
     (
       cd "$clone" || exit 9
       PATH="$shim:$PATH" \
@@ -303,6 +305,7 @@ run_v3_leg() {
       GIT_TERMINAL_PROMPT=0 \
       ROLL_MAIN_SLUG="pv-sandbox" \
       ROLL_LOOP_AGENT="claude" \
+      ROLL_LOOP_SKILL="$prompt_file" \
       ROLL_PROJECT_RUNTIME_DIR="$rt" \
       node "$V3_BIN" loop run-once
   ) >"$rt/leg.out" 2>&1

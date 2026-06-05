@@ -67,7 +67,7 @@ import {
   push as gitPush,
 } from "@roll/infra";
 import { execFile } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -242,6 +242,14 @@ export async function executeCommand(
         cmd.branch,
         "origin/main",
       );
+      // FIX-204C: `.roll/` is a nested gitignored repo — a fresh worktree has
+      // NONE of it, while the loop skill promises CWD-relative `.roll/*`. The
+      // 2026-06-06 first live run showed the failure mode: the agent went
+      // hunting, found the MAIN checkout's .roll, and edited THERE — worktree
+      // captured zero commits and the cycle idled. Symlink the main .roll into
+      // the worktree so the contract holds (single source of truth; the inner
+      // lock already guarantees one cycle at a time).
+      if (r.code === 0) await linkRollIntoWorktree(ports.repoCwd, ports.paths.worktreePath);
       return { event: r.code === 0 ? { type: "worktree_created" } : { type: "worktree_failed" } };
     }
 
@@ -293,9 +301,31 @@ export async function executeCommand(
     // execute: spawn the agent (TCR commits happen inside the worktree). The
     // exit code + timeout feed back as agent_exited; usage is captured for cost.
     case "spawn_agent": {
+      // US-PORT-011: the live observation file — one stable path per project,
+      // truncated at each agent start, fed every chunk in real time. The popup
+      // (runner template) and any `tail -f` watcher read THIS, not buffers.
+      const livePath = join(dirname(ports.paths.eventsPath), "live.log");
+      try {
+        writeFileSync(
+          livePath,
+          `── cycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} · agent ${cmd.agent} ──\n`,
+        );
+      } catch {
+        /* observation is best-effort */
+      }
       const res = await ports.agentSpawn(cmd.agent, {
         cwd: ports.paths.worktreePath,
         skillBody: ports.skillBody,
+        // FIX-204B: pin the executor-picked story into the agent prompt — the
+        // claim (pick_story → 🔨) and the work must be the same story.
+        ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
+        onChunk: (d: Buffer) => {
+          try {
+            appendFileSync(livePath, d);
+          } catch {
+            /* best-effort */
+          }
+        },
       });
       // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
       // per-cycle log next to events/runs — v2 keeps cycle logs; without this
@@ -414,6 +444,15 @@ export async function executeCommand(
 
     // _worktree_cleanup (tolerant). Side effect; no feedback (terminal path).
     case "cleanup_worktree":
+      // FIX-204C: drop OUR .roll symlink first — `git worktree remove` refuses
+      // untracked entries in repos that don't gitignore .roll, and removing the
+      // LINK explicitly (never the target) keeps the main .roll untouchable.
+      try {
+        const dst = join(ports.paths.worktreePath, ".roll");
+        if (lstatSync(dst, { throwIfNoEntry: false })?.isSymbolicLink() === true) unlinkSync(dst);
+      } catch {
+        /* tolerant cleanup, mirrors _worktree_cleanup */
+      }
       await ports.git.worktreeRemove(ports.repoCwd, ports.paths.worktreePath, cmd.branch);
       return {};
 
@@ -494,6 +533,40 @@ export function parseEstMin(desc: string): number | undefined {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * FIX-204C — make the MAIN checkout's `.roll` visible inside a cycle worktree.
+ *
+ * Two moves, both idempotent and best-effort (a failure here must never kill
+ * the cycle — the FIX-198 main-anchored reads still work without it):
+ *   1. `<wt>/.roll` → symlink to `<repo>/.roll` (only when the worktree did
+ *      not check one out — projects that TRACK .roll keep their real dir).
+ *   2. one `.roll` line in the repo-common `info/exclude`: the usual
+ *      `.gitignore` pattern `.roll/` is DIRECTORY-only and does NOT match a
+ *      symlink, so without this the agent's `git add -A` would commit the
+ *      link into the delivery PR. info/exclude is repo-local (never pushed)
+ *      and covers the main checkout + every worktree.
+ */
+async function linkRollIntoWorktree(repoCwd: string, worktreePath: string): Promise<void> {
+  try {
+    const src = join(repoCwd, ".roll");
+    const dst = join(worktreePath, ".roll");
+    if (!existsSync(src) || existsSync(dst)) return;
+    symlinkSync(src, dst);
+    const common = (
+      await execFileAsync("git", ["-C", repoCwd, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+    ).stdout.trim();
+    if (common === "") return;
+    const exclude = join(common, "info", "exclude");
+    const cur = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+    if (!/^\.roll$/m.test(cur)) {
+      mkdirSync(dirname(exclude), { recursive: true });
+      appendFileSync(exclude, `${cur === "" || cur.endsWith("\n") ? "" : "\n"}.roll\n`, "utf8");
+    }
+  } catch {
+    /* best-effort: the cycle must not die on an observation/layout nicety */
+  }
 }
 
 // ── Node-backed Ports wiring (real infra) ─────────────────────────────────────

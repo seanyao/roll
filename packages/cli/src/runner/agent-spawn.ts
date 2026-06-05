@@ -34,7 +34,29 @@
  * PATH (a fake binary that makes a `tcr:` commit in the worktree), so no real
  * agent ever runs in tests.
  */
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
+
+/**
+ * FIX-204D — live-children registry. The signal teardown must kill an
+ * in-flight agent BEFORE the runner dies: a TERM'd run-once whose claude
+ * child survives keeps editing the worktree headless (and the next cycle's
+ * preflight would meet a haunted checkout).
+ */
+const liveAgents = new Set<ChildProcess>();
+
+/** Kill every registered in-flight agent. Returns how many were signalled. */
+export function killLiveAgents(signal: NodeJS.Signals = "SIGKILL"): number {
+  let n = 0;
+  for (const c of liveAgents) {
+    try {
+      if (c.kill(signal)) n += 1;
+    } catch {
+      /* already gone */
+    }
+  }
+  liveAgents.clear();
+  return n;
+}
 
 /** The FIX-152 autonomous-execution directive prepended to the skill body
  *  (bin/roll:9791). Kept byte-identical so the shim/real argv match the oracle. */
@@ -62,6 +84,20 @@ export const AGENT_ARGV_TODO: Record<string, string> = {
   qwen: "qwen <prompt> (positional)",
 };
 
+/**
+ * FIX-204B — the story-pin directive. The executor picks + claims the story
+ * (pick_story marks 🔨 in the MAIN repo's backlog) BEFORE the agent spawns;
+ * without this segment the agent re-picks from whatever backlog it can find
+ * (2026-06-06 first live run: skill body was empty AND the agent free-styled —
+ * a second, unsanctioned pick). One cycle = one scheduler-locked story.
+ */
+export function storyPinDirective(storyId: string): string {
+  return (
+    `[本周期指定故事] 调度器已锁定 ${storyId} 并在 backlog 标记 🔨 In Progress——` +
+    `只执行这一个故事,严禁重新挑选或顺手做别的;若它确实不可执行,写 ALERT 说明原因后干净退出。\n\n`
+  );
+}
+
 /** Inputs for {@link buildClaudeArgv}: the worktree dir + the prompt body. */
 export interface ClaudeArgvInput {
   /** The agent's cwd / `--add-dir` target — the cycle worktree (`WT`). */
@@ -69,6 +105,10 @@ export interface ClaudeArgvInput {
   /** The skill-document body (already stripped of frontmatter by the caller).
    *  The autorun directive is prepended here, mirroring _agent_skill_cmd. */
   skillBody: string;
+  /** FIX-204B: the executor-picked story — pinned into the prompt so the agent
+   *  executes exactly this story (absent ⇒ legacy prompt, byte-identical to
+   *  the v2 oracle shape). */
+  storyId?: string;
   /** The claude binary (resolved path or "claude"); tests inject the shim name. */
   bin?: string;
 }
@@ -91,7 +131,11 @@ export interface ClaudeArgvInput {
  */
 export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: string[] } {
   const bin = input.bin ?? "claude";
-  const prompt = `${AUTORUN_DIRECTIVE}${input.skillBody}`;
+  // FIX-204B: the pin rides BETWEEN the autorun directive and the skill body —
+  // AUTORUN_DIRECTIVE itself stays byte-identical to the oracle; a cycle with
+  // no picked story (undefined) produces the exact pre-204 prompt.
+  const pin = input.storyId !== undefined && input.storyId !== "" ? storyPinDirective(input.storyId) : "";
+  const prompt = `${AUTORUN_DIRECTIVE}${pin}${input.skillBody}`;
   const args = [
     "-p",
     prompt,
@@ -107,10 +151,15 @@ export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: st
 
 /** Options for an {@link AgentSpawn} call. */
 export interface AgentSpawnOptions {
+  /** US-PORT-011: live sink — called with every raw stdout/stderr chunk as it
+   *  arrives (the observation window tails the file this feeds). */
+  onChunk?: (chunk: Buffer) => void;
   /** The agent's working directory — the cycle worktree. */
   cwd: string;
   /** The skill-document body to drive the agent with. */
   skillBody: string;
+  /** FIX-204B: the executor-picked story id, pinned into the prompt. */
+  storyId?: string;
   /** Hard wall-clock kill after this many ms (the watchdog also enforces this at
    *  the orchestrator layer; this is the spawn-local belt-and-braces). */
   timeoutMs?: number;
@@ -157,6 +206,7 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
   const { bin, args } = buildClaudeArgv({
     worktree: opts.cwd,
     skillBody: opts.skillBody,
+    ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
     bin: opts.bin,
   });
   // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,
@@ -178,22 +228,22 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
         child.kill("SIGKILL");
       }, opts.timeoutMs);
     }
-    // US-PORT-011: live passthrough — when ROLL_LOOP_STREAM=1 (set by
-    // `roll loop now`), every agent chunk also flows to the CURRENT terminal
-    // in real time. The buffered copy still feeds cost/usage exactly as before.
-    const live = (process.env["ROLL_LOOP_STREAM"] ?? "") === "1";
+    // FIX-204E: live.log (fed via onChunk by the executor) is the single live
+    // channel — observers tail it from the tmux watch window / `loop now`.
     child.stdout?.on("data", (d: Buffer) => {
-      if (live) process.stdout.write(d);
+      opts.onChunk?.(d);
       stdout += d.toString("utf8");
     });
     child.stderr?.on("data", (d: Buffer) => {
-      if (live) process.stderr.write(d);
+      opts.onChunk?.(d);
       stderr += d.toString("utf8");
     });
+    liveAgents.add(child); // FIX-204D
     let settled = false;
     const settle = (result: AgentSpawnResult): void => {
       if (settled) return;
       settled = true;
+      liveAgents.delete(child); // FIX-204D
       if (timer !== undefined) clearTimeout(timer);
       resolve(result);
     };

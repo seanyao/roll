@@ -429,6 +429,15 @@ export interface CycleContext {
   /** Cycle start (epoch seconds) — set by the driver; used by the attest gate
    *  (FIX-207) to decide whether an acceptance report was produced THIS cycle. */
   startSec?: number;
+  /** FIX-208: real `tcr:` commit count, captured by the executor while the
+   *  worktree is alive (capture_facts). Threaded into the runs row so the
+   *  可回溯链 stops reporting a hardcoded 0. Absent ⇒ not yet captured. */
+  tcrCount?: number;
+  /** FIX-208: the real per-cycle cost folded from the agent's parsed usage
+   *  (cost/tracker.ts), set by the executor after spawn_agent. Threaded into
+   *  BOTH the cycle:end event and the runs row so they agree. Absent ⇒ no
+   *  usage parsed (the cycle:end falls back to the zero-cost placeholder). */
+  cost?: CycleCost;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

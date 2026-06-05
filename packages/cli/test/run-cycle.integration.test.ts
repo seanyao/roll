@@ -110,13 +110,20 @@ const routeDeps: RouteDeps = {
   firstInstalled: () => "claude",
 };
 
-/** A SHIM agent: makes a passing `tcr:` commit in the worktree, exit 0. */
+/** A SHIM agent: makes a passing `tcr:` commit in the worktree, exit 0. Its
+ *  stdout mirrors the real `claude --output-format stream-json` wire shape (a
+ *  per-turn assistant `usage` + a final `result` with total_cost_usd) so the
+ *  cost parse (FIX-208) has real input, exactly as difftests fabricate stdout. */
+const CLAUDE_STREAM_JSON = [
+  JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 20 } } }),
+  JSON.stringify({ type: "result", subtype: "success", total_cost_usd: 0.12, duration_ms: 8000 }),
+].join("\n");
 const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult> => {
   const wt = opts.cwd;
   writeFileSync(join(wt, "delivered.txt"), "work done by shim agent\n", "utf8");
   git(wt, [...GIT_ID, "add", "-A"]);
   git(wt, [...GIT_ID, "commit", "-q", "--no-verify", "-m", "tcr: deliver US-RUN-001"]);
-  return { stdout: "model: claude\ninput: 100\noutput: 50\n", stderr: "", exitCode: 0, timedOut: false };
+  return { stdout: CLAUDE_STREAM_JSON, stderr: "", exitCode: 0, timedOut: false };
 };
 
 /** A fake github facet that returns a canned publish status without any gh. */
@@ -203,6 +210,22 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(row["cycle_id"]).toBe(cycleId);
     expect(row["story_id"]).toBe("US-RUN-001");
     expect(row["built"]).toEqual(["US-RUN-001"]);
+
+    // FIX-208 AC1: the runs row carries the REAL tcr commit count (the shim made
+    // one `tcr:` commit) — no longer the hardcoded 0 that lied about delivery.
+    expect(row["tcr_count"]).toBe(1);
+    // FIX-208 AC2: cost is folded from the parsed claude stream-json usage — a
+    // finite number with the real token split, not a zero placeholder.
+    expect(typeof row["cost_usd"]).toBe("number");
+    expect(row["tokens_in"]).toBe(100);
+    expect(row["tokens_out"]).toBe(50);
+
+    // FIX-208 AC3: the cycle:end event's cost AGREES with the runs row (one
+    // source of truth — liveCtx.cost feeds both).
+    const endCost = (end as { cost?: { tokensIn?: number; tokensOut?: number; estimatedCost?: number } }).cost;
+    expect(endCost?.tokensIn).toBe(row["tokens_in"]);
+    expect(endCost?.tokensOut).toBe(row["tokens_out"]);
+    expect(endCost?.estimatedCost).toBe(row["cost_usd"]);
 
     // The shim's tcr commit really landed in the worktree (captured at execute
     // time; the worktree is cleaned by the `done` terminal path afterward).
@@ -498,7 +521,7 @@ describe("US-PORT-011 — live.log streams the agent transcript", () => {
     expect(result.terminal).toBe("done");
     const live = readFileSync(join(rt, "live.log"), "utf8");
     expect(live).toContain(`── cycle ${cycleId}`);
-    expect(live).toContain("model: claude"); // shim stdout chunk streamed through
+    expect(live).toContain("claude-opus-4-8"); // shim stream-json chunk streamed through
   });
 });
 

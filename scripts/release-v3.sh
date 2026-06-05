@@ -87,19 +87,28 @@ run "git push origin v3" git -C "$V3_WT" push origin v3
 say "P2 分支对调：main→v2，v3→main（GitHub rename 自动迁 redirect/PR/保护规则）"
 default_branch=$(gh api "repos/$REPO" --jq .default_branch 2>/dev/null || echo "?")
 note "current default branch: $default_branch"
-if [ "$default_branch" = "main" ]; then
-  if git -C "$V3_WT" ls-remote --exit-code origin refs/heads/v2 >/dev/null 2>&1; then
-    note "v2 branch already exists — skip rename main→v2?"
-    die "remote state unexpected: both main(default) and v2 exist — inspect manually"
+# State-based resume: judge by which refs EXIST, not by the default-branch name
+# (renaming the default branch drags the default pointer with it, so a run that
+# died between the two renames leaves default=v2 with main absent — which the
+# old default-name check misread as "swap done").
+has_ref() { git -C "$V3_WT" ls-remote --exit-code origin "refs/heads/$1" >/dev/null 2>&1; }
+if has_ref main && ! has_ref v3; then
+  note "swap already complete (main exists, v3 gone)"
+  if [ "$default_branch" != "main" ]; then
+    run "set default branch = main" gh repo edit "$REPO" --default-branch main
   fi
+elif ! has_ref main && has_ref v2 && has_ref v3; then
+  note "half-swapped: main→v2 done, v3→main pending — finishing the swap"
+  confirm
+  run "rename v3 → main"  gh api -X POST "repos/$REPO/branches/v3/rename"  -f new_name=main
+  run "set default branch = main" gh repo edit "$REPO" --default-branch main
+elif [ "$default_branch" = "main" ] && has_ref v3 && ! has_ref v2; then
   confirm
   run "rename main → v2"  gh api -X POST "repos/$REPO/branches/main/rename" -f new_name=v2
   run "rename v3 → main"  gh api -X POST "repos/$REPO/branches/v3/rename"  -f new_name=main
   run "set default branch = main" gh repo edit "$REPO" --default-branch main
-elif [ "$default_branch" = "v2" ] || gh api "repos/$REPO/branches/main" --jq .name 2>/dev/null | grep -q main; then
-  note "swap appears already done (default=$default_branch) — skipping P2"
 else
-  die "unexpected default branch: $default_branch"
+  die "unexpected remote state: default=$default_branch main=$(has_ref main && echo yes || echo no) v2=$(has_ref v2 && echo yes || echo no) v3=$(has_ref v3 && echo yes || echo no) — inspect manually"
 fi
 
 # ── P3 protect new main ───────────────────────────────────────────────────────

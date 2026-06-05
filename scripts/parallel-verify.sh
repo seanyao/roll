@@ -187,6 +187,19 @@ EOF
   git -C "$clone" remote set-url origin "$FIXTURE_FETCH_URL"
   git -C "$clone" remote set-url --push origin "file://$bare"
   git -C "$clone" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+  # HERMETIC SEAL: both legs assume a transport op against the github-looking
+  # FETCH url FAILS INSTANTLY (their lenient fetch paths continue). In reality
+  # github answers 401 for a missing repo, which detours git through credential
+  # helpers (osxkeychain can block forever, GIT_TERMINAL_PROMPT=0
+  # notwithstanding) and real network (throttled under a parallel suite's call
+  # storm — observed multi-minute git-remote-https hangs). A blackhole proxy
+  # makes every http(s) transport fail in milliseconds, offline and
+  # deterministically, while the url STRING stays github for slug resolution
+  # (NOT url.insteadOf — `git remote get-url` applies that rewrite and the
+  # legs' repo-slug readers would see file:// and lose the slug). The file://
+  # PUSH url never touches the proxy.
+  git -C "$clone" config http.proxy "http://127.0.0.1:1"
+  git -C "$clone" config credential.helper ""
   # Seed the local origin/main ref from the real (push) bare.
   git -C "$clone" fetch -q "file://$bare" 'main:refs/remotes/origin/main' 2>/dev/null || true
   echo "${clone}|${bare}"
@@ -319,8 +332,11 @@ run_v2_leg() {
   # a real, unauthenticated gh would shadow the shim and the publish would fall
   # to the orphan path instead of the status-0 `done` path).
   local path_herm="$shim:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$home/.local/bin:$home/.kimi-code/bin:/usr/bin:/bin"
-  # Timeouts: shim cycles finish in seconds; a REAL claude needs minutes.
-  local cycle_timeout=60 hb_timeout=45 watchdog_iters=45 leg_home="$home"
+  # Timeouts: a shim cycle finishes in seconds SOLO, but under the full vitest
+  # suite's parallel load it gets CPU-starved several-fold — the caps must
+  # absorb contention, not just hangs (a starved-but-alive leg that gets
+  # watchdog-killed leaves no terminal record and difftests as DIVERGE).
+  local cycle_timeout=180 hb_timeout=120 watchdog_iters=120 leg_home="$home"
   if [ "$REAL" -eq 1 ]; then
     path_herm="$path_herm:$REAL_CLAUDE_DIR"
     leg_home="$REAL_HOME"
@@ -365,6 +381,13 @@ run_v2_leg() {
   if kill -0 "$pid" 2>/dev/null; then
     echo "[v2] inner runner exceeded watchdog — killing" >>"$rt/leg.out"
     kill -9 "$pid" 2>/dev/null || true
+    # $pid is the wrapper SUBSHELL — kill -9 orphans the `bash $inner` child,
+    # which keeps looping and burning CPU forever (each leak slows the next run
+    # past the watchdog, leaking another: a load spiral). Reap by the ROUND
+    # dir, not the inner path: grandchildren like `git -C <clone> ls-remote`
+    # don't carry the inner path on their cmdline but do carry the round dir
+    # (observed as multi-minute parent-1 git-remote-https orphans).
+    pkill -9 -f "$(dirname "$inner")" 2>/dev/null || true
   fi
   wait "$pid" 2>/dev/null || true
 }

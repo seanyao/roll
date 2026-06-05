@@ -8,7 +8,10 @@
  *   - both legs reached the normalized `success` terminal,
  *   - the dry-run prints the planned commands for both legs without executing.
  *
- * Runtime budget: < 120s (a single shim round is ~5-10s on this machine).
+ * Runtime budget: a single shim round is ~5-10s SOLO, but under the full
+ * suite's parallel load the v2 leg gets CPU-starved several-fold; the budget
+ * must sit ABOVE the harness's own 240s watchdog so a starved leg is killed
+ * (and reported) by the harness, never by this test racing it.
  */
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -22,7 +25,7 @@ function runScript(args: string[]): { stdout: string; code: number } {
     const stdout = execFileSync("bash", [SCRIPT, ...args], {
       cwd: REPO,
       encoding: "utf8",
-      timeout: 110_000,
+      timeout: 290_000,
     });
     return { stdout, code: 0 };
   } catch (e) {
@@ -61,6 +64,6 @@ describe("parallel-verify.sh (shim mode)", () => {
       expect(stdout).toMatch(/tcr_present\s+true\s+true\s+PASS/);
       expect(stdout).toMatch(/story_id\s+US-PV-001\s+US-PV-001\s+PASS/);
     },
-    115_000,
+    300_000,
   );
 });

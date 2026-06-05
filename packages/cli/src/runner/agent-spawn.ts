@@ -62,6 +62,20 @@ export const AGENT_ARGV_TODO: Record<string, string> = {
   qwen: "qwen <prompt> (positional)",
 };
 
+/**
+ * FIX-204B — the story-pin directive. The executor picks + claims the story
+ * (pick_story marks 🔨 in the MAIN repo's backlog) BEFORE the agent spawns;
+ * without this segment the agent re-picks from whatever backlog it can find
+ * (2026-06-06 first live run: skill body was empty AND the agent free-styled —
+ * a second, unsanctioned pick). One cycle = one scheduler-locked story.
+ */
+export function storyPinDirective(storyId: string): string {
+  return (
+    `[本周期指定故事] 调度器已锁定 ${storyId} 并在 backlog 标记 🔨 In Progress——` +
+    `只执行这一个故事,严禁重新挑选或顺手做别的;若它确实不可执行,写 ALERT 说明原因后干净退出。\n\n`
+  );
+}
+
 /** Inputs for {@link buildClaudeArgv}: the worktree dir + the prompt body. */
 export interface ClaudeArgvInput {
   /** The agent's cwd / `--add-dir` target — the cycle worktree (`WT`). */
@@ -69,6 +83,10 @@ export interface ClaudeArgvInput {
   /** The skill-document body (already stripped of frontmatter by the caller).
    *  The autorun directive is prepended here, mirroring _agent_skill_cmd. */
   skillBody: string;
+  /** FIX-204B: the executor-picked story — pinned into the prompt so the agent
+   *  executes exactly this story (absent ⇒ legacy prompt, byte-identical to
+   *  the v2 oracle shape). */
+  storyId?: string;
   /** The claude binary (resolved path or "claude"); tests inject the shim name. */
   bin?: string;
 }
@@ -91,7 +109,11 @@ export interface ClaudeArgvInput {
  */
 export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: string[] } {
   const bin = input.bin ?? "claude";
-  const prompt = `${AUTORUN_DIRECTIVE}${input.skillBody}`;
+  // FIX-204B: the pin rides BETWEEN the autorun directive and the skill body —
+  // AUTORUN_DIRECTIVE itself stays byte-identical to the oracle; a cycle with
+  // no picked story (undefined) produces the exact pre-204 prompt.
+  const pin = input.storyId !== undefined && input.storyId !== "" ? storyPinDirective(input.storyId) : "";
+  const prompt = `${AUTORUN_DIRECTIVE}${pin}${input.skillBody}`;
   const args = [
     "-p",
     prompt,
@@ -114,6 +136,8 @@ export interface AgentSpawnOptions {
   cwd: string;
   /** The skill-document body to drive the agent with. */
   skillBody: string;
+  /** FIX-204B: the executor-picked story id, pinned into the prompt. */
+  storyId?: string;
   /** Hard wall-clock kill after this many ms (the watchdog also enforces this at
    *  the orchestrator layer; this is the spawn-local belt-and-braces). */
   timeoutMs?: number;
@@ -160,6 +184,7 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
   const { bin, args } = buildClaudeArgv({
     worktree: opts.cwd,
     skillBody: opts.skillBody,
+    ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
     bin: opts.bin,
   });
   // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,

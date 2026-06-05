@@ -308,6 +308,9 @@ export async function executeCommand(
       const res = await ports.agentSpawn(cmd.agent, {
         cwd: ports.paths.worktreePath,
         skillBody: ports.skillBody,
+        // FIX-204B: pin the executor-picked story into the agent prompt — the
+        // claim (pick_story → 🔨) and the work must be the same story.
+        ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
         onChunk: (d: Buffer) => {
           try {
             appendFileSync(livePath, d);

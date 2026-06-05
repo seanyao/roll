@@ -434,3 +434,25 @@ describe("US-PORT-011 — live.log streams the agent transcript", () => {
     expect(live).toContain("model: claude"); // shim stdout chunk streamed through
   });
 });
+
+describe("FIX-204B — the executor pins the picked story into the agent spawn", () => {
+  it("agentSpawn receives storyId === the story pick_story claimed", async () => {
+    const { repo } = makeFixture("pin");
+    const rt = tmp("pin-rt");
+    const cycleId = "20260606-031500-3101";
+    const p = paths(rt, cycleId);
+    let seenStoryId: string | undefined;
+    const pinProbe: AgentSpawn = async (agent, opts) => {
+      seenStoryId = opts.storyId;
+      return shimAgentTcr(agent, opts);
+    };
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: pinProbe, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+    expect(result.terminal).toBe("done");
+    expect(seenStoryId).toBe("US-RUN-001");
+  });
+});

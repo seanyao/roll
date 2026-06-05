@@ -43,6 +43,29 @@ describe("buildClaudeArgv — v2 flag set, fixed arg order", () => {
       "/wt",
     ]);
   });
+
+  it("FIX-204B: storyId pins the scheduler's pick between directive and skill body", () => {
+    const { args } = buildClaudeArgv({
+      worktree: "/wt",
+      skillBody: "DO WORK",
+      storyId: "FIX-042",
+      bin: "claude",
+    });
+    const prompt = args[1] ?? "";
+    expect(prompt.startsWith(AUTORUN_DIRECTIVE)).toBe(true);
+    expect(prompt).toContain("[本周期指定故事] 调度器已锁定 FIX-042");
+    expect(prompt.endsWith("DO WORK")).toBe(true);
+    // pin sits between directive and body
+    expect(prompt.indexOf("FIX-042")).toBeGreaterThan(AUTORUN_DIRECTIVE.length - 1);
+    expect(prompt.indexOf("FIX-042")).toBeLessThan(prompt.indexOf("DO WORK"));
+  });
+
+  it("FIX-204B: absent/empty storyId keeps the prompt byte-identical to the pre-pin shape", () => {
+    const legacy = buildClaudeArgv({ worktree: "/wt", skillBody: "DO WORK", bin: "claude" });
+    const empty = buildClaudeArgv({ worktree: "/wt", skillBody: "DO WORK", storyId: "", bin: "claude" });
+    expect(legacy.args[1]).toBe(`${AUTORUN_DIRECTIVE}DO WORK`);
+    expect(empty.args).toEqual(legacy.args);
+  });
 });
 
 describe("realAgentSpawn — only claude argv is ported", () => {

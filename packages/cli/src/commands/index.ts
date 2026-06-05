@@ -5,6 +5,7 @@ import { alertCommand } from "./alert.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
 import { dashboardCommand } from "./dashboard.js";
+import { doctorCommand } from "./doctor.js";
 import { langCommand } from "./lang.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import { pricesCommand } from "./prices.js";
@@ -23,6 +24,8 @@ export function registerAll(): void {
   registerPorted("skills", skillsCommand);
   // `alert`: list/ack/resolve/clear/log/unknown all TS (full surface ported).
   registerPorted("alert", alertCommand);
+  // `doctor`: all four health sections ported TS (agent/pr/skills/launchd).
+  registerPorted("doctor", doctorCommand);
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

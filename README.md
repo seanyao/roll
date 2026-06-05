@@ -32,7 +32,7 @@ curl -fsSL https://seanyao.github.io/roll/install | bash
 npm install -g @seanyao/roll
 ```
 
-Requirements: bash 3.2+. npm/Node.js not required — curl install is self-contained.
+Requirements: Node.js ≥ 22 (the CLI entry runs on node). bash 3.2+ for the bundled fallback engine.
 
 ## Use
 
@@ -66,6 +66,22 @@ roll loop on        # let AI work through the backlog (optional)
 | `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |
 | `roll version` | Print installed roll version |
+
+## Repository layout
+
+Dev side — a pnpm monorepo. Publish side — one npm package.
+
+```
+packages/      TypeScript engine (pnpm workspaces): spec · core · infra · cli · web
+bin/roll       Frozen bash v2 engine — automatic fallback + the diff-test oracle
+lib/           Runtime companions (python/sh) used by the loop & fallback paths
+skills/        Git submodule → seanyao/roll-skills (the agent skill contracts)
+conventions/   Conventions synced into AI clients by `roll setup`
+template/      Project scaffolding installed by `roll init`
+tests/         Frozen bats suite guarding the bash engine (non-blocking CI lane)
+```
+
+Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuild) + `bin/` + `lib/` + `skills/` + `conventions/` + `template/`.
 
 ## Documentation
 

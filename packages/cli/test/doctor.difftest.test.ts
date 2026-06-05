@@ -20,13 +20,13 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { doctorCommand } from "../src/commands/doctor.js";
 import { generateCatalog } from "../src/commands/skills.js";
-import { seedUpdateCheckCache } from "./helpers.js";
+import { seedUpdateCheckCache, pathWithout } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 // A PATH with no `gh` (and no git would break rev-parse, so keep /usr/bin for
 // git) → branch protection resolves "unknown" with zero network calls.
-const NOGH_PATH = "/usr/bin:/bin";
+const NOGH_PATH = pathWithout("gh");
 
 function freshHome(config?: string): string {
   const home = mkdtempSync(join(tmpdir(), "roll-doctor-home-"));

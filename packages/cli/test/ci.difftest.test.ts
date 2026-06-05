@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ciCommand } from "../src/commands/ci.js";
-import { seedUpdateCheckCache } from "./helpers.js";
+import { seedUpdateCheckCache, pathWithout } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
@@ -118,7 +118,7 @@ interface Run {
 
 function baseEnv(cwd: string, shimDir: string, extra: Record<string, string>): Record<string, string> {
   return {
-    PATH: `${shimDir}:/usr/bin:/bin`,
+    PATH: `${shimDir}:${pathWithout("gh")}`,
     HOME: cwd,
     ROLL_HOME: join(rollHome, ".roll"),
     NO_COLOR: "1",

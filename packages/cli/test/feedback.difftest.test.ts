@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { feedbackCommand } from "../src/commands/feedback.js";
-import { seedUpdateCheckCache } from "./helpers.js";
+import { seedUpdateCheckCache, pathWithout } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
@@ -62,7 +62,7 @@ beforeAll(() => {
   );
   PATH_WITH_GH = `${fakeBin}:/usr/bin:/bin`;
   // A PATH with NO gh (and no other gh on it) for the auto-print-url fallback.
-  PATH_NO_GH = `${realBin}:/usr/bin:/bin`;
+  PATH_NO_GH = `${realBin}:${pathWithout("gh")}`;
 });
 
 afterAll(() => {

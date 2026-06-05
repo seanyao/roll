@@ -1948,7 +1948,7 @@ _check_installed_version_or_retry() {
   local expected installed pkg_dir
   expected="$(npm view @seanyao/roll version 2>/dev/null || true)"
   pkg_dir="$(npm root -g 2>/dev/null || true)"
-  installed="$(grep "^VERSION=" "${pkg_dir}/@seanyao/roll/bin/roll" 2>/dev/null | sed 's/VERSION="\([^"]*\)"/\1/' || true)"
+  installed="$(_tree_version "${pkg_dir}/@seanyao/roll")"  # FIX-202: package.json, not fossil VERSION=
 
   [[ -z "$expected" || -z "$installed" ]] && return 0
 
@@ -1957,7 +1957,7 @@ _check_installed_version_or_retry() {
     npm cache clean --force &>/dev/null || true
     npm install -g @seanyao/roll@latest &>/dev/null || true
     local after
-    after="$(grep "^VERSION=" "${pkg_dir}/@seanyao/roll/bin/roll" 2>/dev/null | sed 's/VERSION="\([^"]*\)"/\1/' || true)"
+    after="$(_tree_version "${pkg_dir}/@seanyao/roll")"
     if [[ -n "$after" && "$after" != "$expected" ]]; then
       warn "$(msg update.still_mismatch "$after")"
     fi
@@ -1987,7 +1987,7 @@ cmd_update() {
     fi
 
     local new_version
-    new_version="$(grep "^VERSION=" "$ROLL_PKG_DIR/bin/roll" 2>/dev/null | sed 's/VERSION="\([^"]*\)"/\1/' || true)"
+    new_version="$(_tree_version "$ROLL_PKG_DIR")"  # FIX-202: package.json, not fossil VERSION=
     if [[ -n "$new_version" ]]; then
       info "$(msg update.new_version "$new_version")"
     fi
@@ -15325,6 +15325,31 @@ _notify_update() {
   echo ""
   warn "$(msg update.available "$latest")"
 }
+
+# FIX-202: read an install tree's version — package.json is the single source of
+# truth (v3 bumps it on release); the bin/roll VERSION= literal is only a
+# last-resort fallback for a tree predating the package.json convention. Used for
+# $VERSION (the running version) and by the update self-checks. Defined at the
+# foot so the resolution runs after every helper is sourced and so it adds no
+# lines above the line-coupled extraction regions other difftests rely on.
+_tree_version() {
+  local tree="$1" v=""
+  if [[ -f "${tree}/package.json" ]]; then
+    v="$(grep -m1 '"version"' "${tree}/package.json" 2>/dev/null \
+      | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || true)"
+  fi
+  if [[ -z "$v" ]]; then
+    v="$(grep "^VERSION=" "${tree}/bin/roll" 2>/dev/null \
+      | sed 's/.*VERSION="\([^"]*\)".*/\1/' || true)"
+  fi
+  echo "$v"
+}
+
+# The running version is the tree containing THIS bin/roll ($(dirname SCRIPT_DIR)),
+# independent of any ROLL_PKG_DIR override (tests isolate the curl-swap tree there).
+_running_v="$(_tree_version "$(dirname "$SCRIPT_DIR")")"
+[[ -n "$_running_v" ]] && VERSION="$_running_v"
+unset _running_v
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   _check_update_async

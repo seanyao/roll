@@ -30,6 +30,7 @@ import { slidesCommand } from "./slides/index.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
 import { updateCommand } from "./update.js";
+import { versionCommand } from "./version.js";
 
 let registered = false;
 
@@ -138,6 +139,12 @@ export function registerAll(): void {
   // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.
   // No sub-paths on bash.
   registerPorted("update", updateCommand);
+  // `version` / `--version` / `-v`: TS-native (FIX-202). Reads the install
+  // tree's package.json (single source of truth), so it no longer reports the
+  // fossil bin/roll VERSION= literal. No bash fallback for these.
+  registerPorted("version", versionCommand);
+  registerPorted("--version", versionCommand);
+  registerPorted("-v", versionCommand);
   // `slides`: the DETERMINISTIC surface is TS — build (native validator +
   // renderer, byte-identical to the python oracle), list, preview, logs,
   // templates, delete --force, help, and the unknown-subcommand error. Two

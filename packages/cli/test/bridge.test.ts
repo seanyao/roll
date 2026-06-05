@@ -68,14 +68,16 @@ describe("ported routing", () => {
   });
 
   it("unregistered commands are not marked ported", () => {
-    expect(isPorted("version")).toBe(false);
+    // `help` stays a bash fallback (never registered in registerAll); `version`
+    // is now TS-ported (FIX-202), so it is no longer a valid "unported" example.
+    expect(isPorted("help")).toBe(false);
   });
 });
 
 describe("diff-test: bash fallback == bash direct (frozen v2 oracle)", () => {
-  it("`version` passes through byte-for-byte with exit 0", async () => {
-    const bridge = await dispatch(["version"], { capture: true, cwd: ROOT });
-    const direct = bashDirect(["version"]);
+  it("`help` passes through byte-for-byte with exit 0", async () => {
+    const bridge = await dispatch(["help"], { capture: true, cwd: ROOT });
+    const direct = bashDirect(["help"]);
     expect(bridge.status).toBe(direct.status);
     expect(bridge.stdout).toBe(direct.stdout);
     expect(bridge.stderr).toBe(direct.stderr);

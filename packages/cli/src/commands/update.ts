@@ -29,9 +29,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
-import { repoRoot } from "../bridge.js";
 import { rollHome, rollPkgDir } from "./setup-shared.js";
 import { setupCommand } from "./setup.js";
+import { rollVersion, treeVersion } from "./version.js";
 
 // ─── bash UI helpers (bin/roll:41-56) ────────────────────────────────────────
 function pal(): { CYAN: string; GREEN: string; YELLOW: string; RED: string; BOLD: string; NC: string } {
@@ -85,24 +85,6 @@ function runForward(cmd: string, argv: string[]): number {
   return r.status ?? 1;
 }
 
-/** Read VERSION="x" from a bin/roll script. */
-function versionOf(binRoll: string): string {
-  try {
-    const mm = /^VERSION="([^"]+)"/m.exec(readFileSync(binRoll, "utf8"));
-    return mm?.[1] ?? "";
-  } catch {
-    return "";
-  }
-}
-/**
- * The RUNNING binary's VERSION — bash uses its own `$VERSION` constant, which
- * is the script being executed (the repo's bin/roll), independent of any
- * ROLL_PKG_DIR override. Mirror by reading repoRoot()/bin/roll, not pkgDir.
- */
-function runningVersion(): string {
-  return versionOf(join(repoRoot(), "bin", "roll"));
-}
-
 // ─── _resolve_remote_version (1888) ───────────────────────────────────────────
 function resolveRemoteVersion(): string | null {
   const pinned = process.env["ROLL_VERSION"];
@@ -153,9 +135,10 @@ function downloadAndInstallCurl(tag: string): { ok: boolean; newVersion?: string
       return { ok: false };
     }
     // Whitelisted gap: the oracle now mv-swaps extract → ROLL_PKG_DIR. The TS
-    // port reads the new VERSION from the post-extract tree instead of the
+    // port reads the new version from the post-extract tree instead of the
     // post-swap tree (identical bytes) and skips the irreversible swap.
-    return { ok: true, newVersion: versionOf(join(extractDir, "bin", "roll")) };
+    // FIX-202: package.json is the single source of truth, bin/roll the fallback.
+    return { ok: true, newVersion: treeVersion(extractDir) };
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -165,14 +148,16 @@ function downloadAndInstallCurl(tag: string): { ok: boolean; newVersion?: string
 function checkInstalledVersionOrRetry(): void {
   const expected = (spawnSync("npm", ["view", "@seanyao/roll", "version"], { encoding: "utf8" }).stdout ?? "").trim();
   const pkgRoot = (spawnSync("npm", ["root", "-g"], { encoding: "utf8" }).stdout ?? "").trim();
-  const installedBin = join(pkgRoot, "@seanyao", "roll", "bin", "roll");
-  const installed = versionOf(installedBin);
+  // FIX-202: read the installed package's package.json (single source of truth),
+  // not its fossil bin/roll VERSION= literal.
+  const installedTree = join(pkgRoot, "@seanyao", "roll");
+  const installed = treeVersion(installedTree);
   if (expected === "" || installed === "") return;
   if (installed !== expected) {
     warn(m("update.version_mismatch", installed, expected));
     spawnSync("npm", ["cache", "clean", "--force"], { stdio: "ignore" });
     spawnSync("npm", ["install", "-g", "@seanyao/roll@latest"], { stdio: "ignore" });
-    const after = versionOf(installedBin);
+    const after = treeVersion(installedTree);
     if (after !== "" && after !== expected) warn(m("update.still_mismatch", after));
   }
 }
@@ -208,7 +193,7 @@ function showChangelog(): void {
 // ─── cmd_update (1967) ────────────────────────────────────────────────────────
 export function updateCommand(args: string[]): number {
   void args; // cmd_update takes no flags.
-  info(m("update.current_version", runningVersion()));
+  info(m("update.current_version", rollVersion()));
 
   let installMethod = "npm";
   const methodFile = join(rollPkgDir(), ".install-method");

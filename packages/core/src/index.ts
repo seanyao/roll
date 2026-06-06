@@ -21,6 +21,7 @@ export * from "./loop/orchestrator.js";
 export * from "./loop/recovery.js";
 export * from "./loop/sentinel.js";
 export * from "./loop/transcript.js";
+export * from "./loop/stream-fmt.js";
 export * from "./policy/engine.js";
 export * from "./reconcile/engine.js";
 export * from "./attest/ac-parser.js";

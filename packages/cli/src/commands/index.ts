@@ -14,6 +14,7 @@ import { dashboardCommand } from "./dashboard.js";
 import { doctorCommand } from "./doctor.js";
 import { feedbackCommand } from "./feedback.js";
 import { gcCommand } from "./gc.js";
+import { ideaCommand } from "./idea.js";
 import { indexCommand } from "./index-gen.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
@@ -89,6 +90,13 @@ export function registerAll(): void {
   // Output follows the resolved locale single-language. `--full` expands lists.
   // No bash fallback: the digest is data-derived and always fresh.
   registerPorted("brief", briefCommand);
+  // `idea`: v3-native deterministic backlog capture (US-PORT-003). Classifies
+  // bug→FIX / idea→IDEA, auto-numbers (max suffix + 1), lint-gates the
+  // description with the same rules as the bash _backlog_lint oracle, and
+  // appends through BacklogStore's optimistic atomic write (与 backlog 存取同源).
+  // A lint violation reports and refuses — no bad card is ever written.
+  // No bash fallback: v2 had no `roll idea` command (capture was skill-only).
+  registerPorted("idea", ideaCommand);
   // `prices`: show/help/unknown are TS; `refresh` (network write) is bash.
   registerPorted("prices", (args) => {
     const r = pricesCommand(args);

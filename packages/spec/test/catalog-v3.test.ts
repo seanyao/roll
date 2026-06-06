@@ -3,7 +3,21 @@ import { v3Catalog } from "../src/i18n/catalog-v3.js";
 import { t } from "../src/i18n/index.js";
 
 describe("v3Catalog", () => {
-  const keys = ["briefv3.full_hint", "briefv3.all_clear", "briefv3.queue_breakdown"];
+  const keys = [
+    "briefv3.full_hint",
+    "briefv3.all_clear",
+    "briefv3.queue_breakdown",
+    "ideav3.recorded",
+    "ideav3.type",
+    "ideav3.section",
+    "ideav3.text",
+    "ideav3.kind_bug",
+    "ideav3.kind_idea",
+    "ideav3.usage",
+    "ideav3.empty",
+    "ideav3.lint_failed",
+    "ideav3.lint_hint",
+  ];
 
   it("every v3 key carries both en and zh (no mixed-language gap)", () => {
     for (const k of keys) {
@@ -12,6 +26,15 @@ describe("v3Catalog", () => {
       expect(e?.en, k).toBeTruthy();
       expect(e?.zh, k).toBeTruthy();
     }
+  });
+
+  it("idea capture labels resolve single-language with no prose bleed", () => {
+    // The interpolated %s carries diagnostic category tokens (path/filename/…),
+    // so assert on the prose labels, which must be fully localized.
+    expect(t(v3Catalog, "en", "ideav3.recorded", "FIX-001")).toContain("FIX-001");
+    expect(t(v3Catalog, "zh", "ideav3.recorded", "FIX-001")).toContain("已记录");
+    expect(t(v3Catalog, "zh", "ideav3.text")).not.toMatch(/[A-Za-z]/);
+    expect(t(v3Catalog, "zh", "ideav3.lint_hint")).not.toMatch(/[A-Za-z]/);
   });
 
   it("t() resolves a v3 key to a single language with no cross-language bleed", () => {

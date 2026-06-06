@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v3.606.3 — 2026-06-06
 
 ### 新功能
 
@@ -15,7 +15,7 @@
 - 完成状态抢跑：PR 还没合并卡片就翻了完成，违反完成即已合主干的纪律（FIX-211） `[loop]`
 - 面板对历史全瞎：周期记录缺时间戳，八次真实交付显示零，统计无从分桶（FIX-213） `[loop]`
 - 面板对运行中的周期全盲：活性探测还读旧信号，真在干活却显示空闲零周期（FIX-203） `[loop]`
-- (核): roll loop now 前台实时转录（US-PORT-011）
+- (最小核) — roll loop now 改前台直跑:重入本 CLI run-once,agent 转录经 ROLL_LOOP_STREAM 实时打到当前终端(零 tmux 零弹窗零 tail);launchd 排程仍走静默 runner;buffered 用量采集不变 (#470)（US-PORT-011）
 
 ### 自动化流水线
 
@@ -23,13 +23,14 @@
 - 无人值守周期自产实拍：给截屏调度器加终端通道，无图形环境时诚实跳过留痕（US-ATTEST-011）
 - roll release v3 原生重写：版本号引导、changelog、PR 与 tag 流程提示；发版闸已在 CI（US-PORT-004）
 - loop 读面子命令 TS 薄读取（eval、runs、story、signals）；tmux 流的 monitor 与 attach 退役（US-PORT-007）
-- loop cycle cycle-20260606-143234-1425（PR#497）
-- loop cycle cycle-20260606-044623-48242（PR#476）
+- dream 服务出 v3 runner（复用调度模板模式）或裁定退役；现状是断链僵尸（US-PORT-008）
+- loop cycle cycle-20260606-050516-6852 (#477)（PR#477）
 
 ### 工程和测试
 
 - 迁移命令嵌套仓盲区：对私仓的搬迁打到主仓上，吞错自报成功，修执行面并补嵌套形态测试（FIX-215） `[loop]`
 - 档案迁移命令：读索引按清单搬树改名重建链，演练模式先行，可重入有测试（US-META-002a）
+- difftest 卸 oracle：领域服务层一批对拍全部转冻结期望，测试期不再起 bash 或 python 引擎（US-PORT-009b）
 
 ### 其他
 
@@ -48,7 +49,8 @@
 - roll idea TS 化：分类、自动编号、过 lint 规则落卡，与 backlog 存取同源（US-PORT-003）
 - changelog 确定性输出转正：AI 润色降级为可选路径或退役，默认不再回落 bash（US-PORT-005）
 - config 写面 TS 化，整个 config 命令收口（US-PORT-006）
-- skills bump — before/after 对照证据惯例（PR#485）
+- difftest 卸 oracle 第一步：立可复用的冻结期望转换范式，先转规格层与基础设施层两批验证可行（US-PORT-009a）
+- difftest 卸 oracle：命令行只读命令一批对拍转冻结期望（US-PORT-009c）
 
 ## v3.606.2
 

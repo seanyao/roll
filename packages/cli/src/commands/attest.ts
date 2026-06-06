@@ -224,7 +224,11 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     return 1;
   }
 
-  const acItems = acForStory(readFileSync(featureFile, "utf8"), storyId);
+  // US-ATTEST-012: an ID-named card file (`<storyId>.md`) owns its whole body —
+  // a `##` heading that merely names another card can't hijack the trailing AC
+  // (FIX-214 实案). Content-matched files keep ordinary section attribution.
+  const fileOwned = basename(featureFile) === `${storyId}.md`;
+  const acItems = acForStory(readFileSync(featureFile, "utf8"), storyId, { fileOwned });
   if (acItems.length === 0) warn(`no **AC:** block for ${storyId} — report will carry facts only`);
 
   // run dir + latest symlink (never overwrite history).

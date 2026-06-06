@@ -108,15 +108,27 @@ export function parseAcBlocks(markdown: string): AcSection[] {
   return sections;
 }
 
+export interface AcForStoryOptions {
+  /**
+   * US-ATTEST-012 — the markdown is an ID-NAMED card file (`<storyId>.md`), so
+   * the WHOLE file belongs to this story: every AC block is attributed to it
+   * regardless of `##` section headings. Filename wins over section attribution
+   * — this stops a heading that merely mentions ANOTHER card id (FIX-214 实案)
+   * from hijacking the trailing AC. Default false keeps section attribution.
+   */
+  fileOwned?: boolean;
+}
+
 /**
  * The AC items for ONE story: its section blocks (concatenated in order, ids
  * re-derived across the whole story so they stay stable), falling back to the
  * file-level block when the document carries no story-scoped AC (the one-card
- * FIX-XXX.md house style).
+ * FIX-XXX.md house style). With `fileOwned`, ALL blocks in the document are
+ * claimed by the story (the filename is authoritative).
  */
-export function acForStory(markdown: string, storyId: string): AcItem[] {
+export function acForStory(markdown: string, storyId: string, opts: AcForStoryOptions = {}): AcItem[] {
   const sections = parseAcBlocks(markdown);
-  const scoped = sections.filter((s) => s.storyId === storyId);
+  const scoped = opts.fileOwned === true ? sections : sections.filter((s) => s.storyId === storyId);
   const chosen = scoped.length > 0 ? scoped : sections.filter((s) => s.storyId === "");
   const items: AcItem[] = [];
   for (const s of chosen) {

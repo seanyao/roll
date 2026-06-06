@@ -131,3 +131,38 @@ describe("acForStory", () => {
     expect(MULTI_STORY).toBe(before);
   });
 });
+
+describe("US-ATTEST-012 — fileOwned: filename owns the whole card (FIX-214 实案)", () => {
+  // A card file named US-ATTEST-012.md whose body has a ## heading mentioning
+  // ANOTHER card id — under section attribution the trailing AC gets stolen by
+  // FIX-214; when the file is ID-named the whole file belongs to the ID.
+  const STOLEN = `# US-ATTEST-012 — 验收口径补全
+
+**AC:**
+- [ ] 第一条本卡验收
+
+## 杜绝 FIX-214 实案那种 AC 劫持
+
+**AC:**
+- [ ] 第二条本卡验收
+`;
+
+  it("default attribution lets a他卡号 heading steal the second block", () => {
+    // proves the bug exists without the flag: the 2nd block is attributed to FIX-214
+    const owned = acForStory(STOLEN, "US-ATTEST-012");
+    expect(owned).toHaveLength(1); // only the pre-heading block survives
+  });
+
+  it("fileOwned=true binds EVERY AC block to the story regardless of headings", () => {
+    const items = acForStory(STOLEN, "US-ATTEST-012", { fileOwned: true });
+    expect(items.map((i) => i.id)).toEqual(["US-ATTEST-012:AC1", "US-ATTEST-012:AC2"]);
+    expect(items[1]!.text).toContain("第二条");
+  });
+
+  it("fileOwned keeps ids stable and source pure", () => {
+    const before = STOLEN;
+    const items = acForStory(STOLEN, "US-ATTEST-012", { fileOwned: true });
+    expect(items.every((i, n) => i.id === `US-ATTEST-012:AC${n + 1}`)).toBe(true);
+    expect(STOLEN).toBe(before);
+  });
+});

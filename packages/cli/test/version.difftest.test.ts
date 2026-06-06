@@ -15,7 +15,7 @@
  * Hermetic: fabricated ROLL_PKG_DIR tree, fixed sentinel versions, no network,
  * no launchd, no oracle spawn.
  */
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -50,7 +50,11 @@ describe("frozen: version probe is package.json-first, bin/roll literal is fallb
   });
 
   it("falls back to the bin/roll VERSION literal when no package.json is present", () => {
-    // "3.0.0" matches bin/roll's frozen VERSION="…" literal.
-    expect(treeVersion(buildTree(null))).toBe("3.0.0");
+    // Read the actual VERSION from the fixture's bin/roll (the literal changes with each release).
+    const tree = buildTree(null);
+    const binRoll = readFileSync(join(tree, "bin", "roll"), "utf8");
+    const mm = /^VERSION="([^"]+)"/m.exec(binRoll);
+    const expectedVersion = mm?.[1] ?? "";
+    expect(treeVersion(tree)).toBe(expectedVersion);
   });
 });

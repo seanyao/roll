@@ -23,7 +23,15 @@
  * still writes the best report it can, exit 0 — attest must never block
  * delivery.
  */
-import { acForStory, renderReport, ansiPre, type AcReportItem, type AcStatus, type EvidenceRef } from "@roll/core";
+import {
+  acForStory,
+  renderReport,
+  ansiPre,
+  smokeCheckReport,
+  type AcReportItem,
+  type AcStatus,
+  type EvidenceRef,
+} from "@roll/core";
 import {
   captureScreenshot,
   collectEvidence,
@@ -308,6 +316,15 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     warn("latest symlink update failed (report still written)");
   }
 
+  // Render smoke (US-ATTEST-012): the report exists — but is it actually
+  // openable? A broken <img> ref or an external CDN asset is a real defect, so
+  // (unlike the never-block degrade path) a smoke failure is surfaced as a
+  // NON-ZERO exit. The report file stays on disk — evidence is never discarded.
+  const smoke = smokeCheckReport(html, (rel) => existsSync(join(runDir, rel)));
   process.stdout.write(`Acceptance report written\n验收报告已生成\n  ${relative(projectPath, reportPath)}\n`);
+  if (!smoke.ok) {
+    for (const p of smoke.problems) warn(`render smoke: ${p}`);
+    return 2;
+  }
   return 0;
 }

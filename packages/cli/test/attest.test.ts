@@ -182,6 +182,44 @@ describe("attestCommand", () => {
     expect(errs.join("")).toMatch(/redact/i); // 留痕: never silent
   });
 
+  it("US-ATTEST-012 — a report with a broken img reference exits non-zero (render smoke)", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    mkdirSync(storyDir, { recursive: true });
+    // ac-map references a screenshot that was never captured → broken <img>.
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "首页", href: "screenshots/ghost.png" }] },
+      ]),
+    );
+    const code = await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(code).not.toBe(0); // broken reference → non-zero
+    // report is still written (evidence preserved) even though the smoke failed
+    expect(existsSync(join(storyDir, "2026-06-06T01-02-03", "report.html"))).toBe(true);
+  });
+
+  it("US-ATTEST-012 — a report whose img IS present passes smoke (exit 0)", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const runDir = join(storyDir, "2026-06-06T01-02-03");
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "screenshots", "home.png"), "PNGDATA");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "首页", href: "screenshots/home.png" }] },
+      ]),
+    );
+    const code = await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(code).toBe(0);
+  });
+
   it("re-run lands a second run dir and re-points latest (history preserved)", async () => {
     const proj = project();
     const opts = { run: quietRun, ghProbe: (): Promise<boolean> => Promise.resolve(false) };

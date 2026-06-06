@@ -5,12 +5,16 @@
  *
  * FIX-204A lineage: the v2-era path (`.roll/skills/<name>/SKILL.md`) became a
  * fossil when skills moved to the `skills/` submodule — every live cycle got an
- * EMPTY body and the agent drove blind. Resolution order: explicit env override
- * → legacy `.roll/skills/` (projects vendoring a private copy) → `skills/`
- * submodule (the shipped truth). Returns null when nothing resolves to a
- * non-empty body — the caller MUST fail loud, never spawn a blind agent.
+ * EMPTY body and the agent drove blind. Resolution order, highest to lowest:
+ *   1. Explicit env override (ROLL_LOOP_SKILL / ROLL_DREAM_SKILL)
+ *   2. `.roll/skills/<name>/SKILL.md` — project vendored private copy
+ *   3. `skills/<name>/SKILL.md` — git submodule (shipped truth)
+ *   4. `~/.roll/skills/<name>/SKILL.md` — roll update/setup global sync target
+ * Returns null when nothing resolves to a non-empty body — the caller MUST fail
+ * loud, never spawn a blind agent.
  */
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface SkillBodyOptions {
@@ -26,6 +30,7 @@ export function readSkillBody(projectPath: string, opts: SkillBodyOptions): stri
     opts.envOverride ?? "",
     join(projectPath, ".roll", "skills", opts.skillName, "SKILL.md"),
     join(projectPath, "skills", opts.skillName, "SKILL.md"),
+    join(homedir(), ".roll", "skills", opts.skillName, "SKILL.md"),
   ].filter((p) => p !== "");
   for (const p of candidates) {
     if (!existsSync(p)) continue;

@@ -4,6 +4,10 @@
 它由 launchd 在凌晨 3 点触发（通过 `roll loop on` 安装），
 并将发现的问题以 `REFACTOR-NNN` 条目的形式追加到 BACKLOG.md，等待 loop 执行。
 
+调度触发的是一个自包含的 v3 runner，其心脏是 `roll dream run-once`
+（解析 `roll-.dream` skill 并就地起 agent 扫描的 TS 命令）——与 loop runner 同形，
+不依赖任何 bash 引擎函数。
+
 ## Dream 做什么
 
 每晚 dream 完整扫描一次代码库，输出两份结果：
@@ -52,21 +56,21 @@ Dream **不会**生成 REFACTOR 条目的场景：
 
 ## 调度配置
 
-Dream 默认在凌晨 3 点运行。在 `~/.roll/config.yaml` 中配置：
+Dream 默认在凌晨 3 点运行。推荐用 `roll config dream-time` 改时间——
+一条命令同时写 `loop_dream_hour` 与 `loop_dream_minute` 两个 key：
 
-```yaml
-loop:
-  loop_dream_hour: 3     # 0-23
-  loop_dream_minute: 10  # 0-59
+```bash
+roll config dream-time 03:20   # 同时写 loop_dream_hour + loop_dream_minute
 ```
 
-`roll loop on` 会同时安装 loop、dream、brief 三个 plist。
+改完时间只写配置；用 `roll loop on` 重挂应用新调度（config 写入不再自动重挂
+launchd —— US-PORT-006）。`roll loop on` 会把 dream plist 和 loop、pr plist 一起安装。
 三个服务统一管理：
 
 ```bash
-roll loop on       # 安装三个服务
+roll loop on       # 安装 loop + pr + dream
+roll loop off      # 卸载 loop + pr + dream
 roll loop status   # 查看三个服务的状态
-roll loop monitor  # 三个服务的实时监控台
 ```
 
 ## 手动触发
@@ -74,7 +78,10 @@ roll loop monitor  # 三个服务的实时监控台
 无需等到凌晨 3 点，随时可以手动跑一次 dream 巡检：
 
 ```bash
-# 在 Claude Code 里直接调用
+# v3 原生——与夜间 runner 同一个心脏
+roll dream run-once
+
+# 或在 Claude Code 里直接调用 skill
 $roll-.dream
 ```
 

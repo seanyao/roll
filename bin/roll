@@ -4074,9 +4074,12 @@ _peer_call() {
 _peer_parse_resolution() {
   local output="$1"
   local resolution
-  # Match AGREE/REFINE/OBJECT/ESCALATE near line start (only non-letters before it)
-  # Covers: **AGREE**, ### 结论：AGREE, - AGREE:, * REFINE, OBJECT — ...
-  resolution="$(printf '%s\n' "$output" | grep -oiE '^[^a-zA-Z]*\b(AGREE|REFINE|OBJECT|ESCALATE)\b' | head -1 | grep -oiE '\b(AGREE|REFINE|OBJECT|ESCALATE)\b' | tr '[:lower:]' '[:upper:]')"
+  # Prefer explicit "Resolution:" or "决议：" line (most reliable).
+  resolution="$(printf '%s\n' "$output" | grep -oiE '^(Resolution|决议)\s*:\s*(AGREE|REFINE|OBJECT|ESCALATE)\b' | head -1 | grep -oiE '\b(AGREE|REFINE|OBJECT|ESCALATE)\b' | tr '[:lower:]' '[:upper:]')"
+  if [[ -z "$resolution" ]]; then
+    # Fallback: keyword at line start (legacy, kimi natural-language detection).
+    resolution="$(printf '%s\n' "$output" | grep -oiE '^[^a-zA-Z]*\b(AGREE|REFINE|OBJECT|ESCALATE)\b' | head -1 | grep -oiE '\b(AGREE|REFINE|OBJECT|ESCALATE)\b' | tr '[:lower:]' '[:upper:]')"
+  fi
   printf '%s\n' "$resolution"
 }
 
@@ -4197,7 +4200,7 @@ cmd_peer() {
   fi
 
   local prompt
-  prompt="[PEER_REVIEW round=${round} tool=${from_tool}→${to_tool}]\n\n${context}"
+  prompt="[PEER_REVIEW round=${round} tool=${from_tool}→${to_tool}]\n\n${context}\n\n---\n请以以下格式结束你的回复（必须单独一行）：\nResolution: AGREE|REFINE|OBJECT"
 
   local peer_session=""
   if command -v tmux >/dev/null 2>&1; then

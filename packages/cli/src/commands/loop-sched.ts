@@ -189,19 +189,21 @@ exit 0
 
 export interface PrRunnerInput {
   projectPath: string;
-  /** The installed bash engine the PR inbox orchestrator lives in. */
-  rollBin: string;
+  /** The `roll` binary (TS CLI) the PR tick is driven through. */
+  rollBin?: string;
 }
 
 /**
- * PR-loop runner — transcription of the v2 `_write_pr_loop_runner_script`
- * shape (bin/roll 8306-8341): portable PATH, single-flight pid:ts lock with
- * 15-min staleness self-heal, then drive `_loop_pr_inbox` through the bash
- * engine. Unchanged behavior; only the GENERATOR moved to TS.
+ * PR-loop runner — keeps the v2 `_write_pr_loop_runner_script` shape (portable
+ * PATH, single-flight pid:ts lock with 15-min staleness self-heal) but drives
+ * the v3 TS tick `roll loop pr-inbox` (US-PORT-001) instead of the retired bash
+ * `_loop_pr_inbox`. The lock contract / log path are unchanged so status and
+ * dashboard keep reading the same world.
  */
 export function buildPrRunnerScript(input: PrRunnerInput): string {
   const lock = `${input.projectPath}/.roll/loop/.pr-loop.lock`;
   const log = `${input.projectPath}/.roll/loop/pr.log`;
+  const rollBin = input.rollBin ?? "$(command -v roll || echo /opt/homebrew/bin/roll)";
   return `#!/bin/bash -l
 set -o pipefail
 # Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
@@ -224,8 +226,9 @@ if [ -f "$LOCK" ]; then
 fi
 printf '%s:%s\\n' "$$" "$(date -u +%s)" > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
+ROLL_BIN="\${ROLL_BIN:-${rollBin}}"
 cd "${input.projectPath}" || exit 0
-bash "${input.rollBin}" _loop_pr_inbox >> "${log}" 2>&1 || true
+"$ROLL_BIN" loop pr-inbox >> "${log}" 2>&1 || true
 `;
 }
 
@@ -275,21 +278,6 @@ function writeExecutable(path: string, content: string): void {
 
 function pauseMarkerPath(projectPath: string, slug: string): string {
   return join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
-}
-
-/** Resolve the installed bash engine for the PR runner (package bin/roll). */
-function installedRollBashBin(): string {
-  // The TS CLI and bin/roll ship in the same package; walk from this module.
-  // dist layout: <pkg>/packages/cli/dist/commands/loop-sched.js → <pkg>/bin/roll
-  let dir = dirname(new URL(import.meta.url).pathname);
-  for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, "bin", "roll");
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return "/opt/homebrew/lib/node_modules/@seanyao/roll/bin/roll";
 }
 
 // ─── commands ─────────────────────────────────────────────────────────────────
@@ -374,9 +362,15 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
   );
   const loopMount = await mountService(deps, uid, loopLabel, loopPlist);
 
-  // 2. pr service — v2-shape tick every 5 min.
+  // 2. pr service — v3 TS tick (roll loop pr-inbox) every 5 min.
   const prRunner = join(shared, "pr", `run-${id.slug}.sh`);
-  writeExecutable(prRunner, buildPrRunnerScript({ projectPath: id.path, rollBin: installedRollBashBin() }));
+  writeExecutable(
+    prRunner,
+    buildPrRunnerScript({
+      projectPath: id.path,
+      ...(rollBinOverride !== "" ? { rollBin: rollBinOverride } : {}),
+    }),
+  );
   const prLabel = launchdLabel("pr", id.slug);
   const prPlist = launchdPlistPath("pr", id.slug, ld);
   writeFileSync(

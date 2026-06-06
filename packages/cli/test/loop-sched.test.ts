@@ -9,7 +9,7 @@
  *   - runner template: self-contained (no bash-engine function calls — the
  *     FIX-197 family bug), honors PAUSE marker, active window, ROLL_LOOP_FORCE,
  *     logs to .roll/loop/cron.log, delegates to `loop run-once`.
- *   - pr runner template: transcribed v2 shape (lock + _loop_pr_inbox drive).
+ *   - pr runner template: v2 lock shape driving the v3 `roll loop pr-inbox` tick.
  *   - on/off: plist install/uninstall via injected launchd ops (no real
  *     launchctl in tests), dream service left untouched (FIX-197 lineage).
  *   - pause/resume: PAUSE-<slug> marker file under <project>/.roll/loop/.
@@ -261,17 +261,24 @@ describe("v3 loop runner — EXECUTION in a sandbox (the contract that matters)"
   });
 });
 
-describe("pr runner template (transcribed v2 shape)", () => {
+describe("pr runner template (v3 TS tick)", () => {
   const script = buildPrRunnerScript({
     projectPath: "/Users/u/proj",
-    rollBin: "/opt/homebrew/lib/node_modules/@seanyao/roll/bin/roll",
+    rollBin: "/opt/homebrew/bin/roll",
   });
 
-  it("drives _loop_pr_inbox through the bash engine with a single-flight lock", () => {
-    expect(script).toContain("_loop_pr_inbox");
+  it("drives `roll loop pr-inbox` with the single-flight lock (US-PORT-001)", () => {
+    expect(script).toContain("loop pr-inbox");
+    expect(script).not.toContain("_loop_pr_inbox"); // bash inbox retired
     expect(script).toContain(".pr-loop.lock");
     expect(script).toContain("900"); // 15-min staleness self-heal
     expect(script).toContain("/Users/u/proj/.roll/loop/pr.log");
+    expect(script).toContain('"$ROLL_BIN" loop pr-inbox');
+  });
+
+  it("defaults ROLL_BIN to command -v roll when no override given", () => {
+    const s = buildPrRunnerScript({ projectPath: "/Users/u/proj" });
+    expect(s).toContain("command -v roll");
   });
 });
 

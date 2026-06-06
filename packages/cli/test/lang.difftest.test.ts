@@ -81,11 +81,16 @@ function cfgBytes(home: string): string | null {
 
 describe("frozen: roll lang", () => {
   it("no-arg display, source=default (no env, no config)", () => {
-    expect(tsLang([], freshHome(), { LANG: "", LC_ALL: "" })).toMatchInlineSnapshot(`
+    const t = tsLang([], freshHome(), { LANG: "", LC_ALL: "" });
+    // The default-resolved language is platform-dependent (macOS reads
+    // AppleLanguages → zh here; Linux CI falls to the "en" default) → scrub the
+    // language token; `source: default` is the deterministic contract here.
+    const stdout = t.stdout.replace(/current: \w+/, "current: <LANG>");
+    expect({ status: t.status, stdout, stderr: t.stderr }).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "current: zh, source: default
+        "stdout": "current: <LANG>, source: default
       ",
       }
     `);
@@ -184,11 +189,15 @@ describe("frozen: roll lang", () => {
 
   it("--reset strips the lang line", () => {
     const ht = freshHome("primary_agent: claude\nlang: zh\n");
-    expect(tsLang(["--reset"], ht, { LANG: "", LC_ALL: "" })).toMatchInlineSnapshot(`
+    // Pin ROLL_LANG so the confirmation message language is deterministic — after
+    // --reset removes the config key the message would otherwise fall to the
+    // platform locale (macOS AppleLanguages vs Linux "en"). --reset still strips
+    // the lang line regardless of ROLL_LANG.
+    expect(tsLang(["--reset"], ht, { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "[roll] 语言偏好已清除（跟随系统 locale）
+        "stdout": "[roll] Language preference cleared (will follow locale)
       ",
       }
     `);

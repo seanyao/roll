@@ -12,11 +12,10 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { statusCommand } from "../src/commands/status.js";
 
-const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 
 afterAll(() => {
@@ -56,9 +55,13 @@ function tsStatus(env: Record<string, string | undefined>, cwd?: string): string
 describe("frozen: roll status render", () => {
   it("fixture render", () => {
     // In fixture mode every section is fixtured EXCEPT the THIS PROJECT header,
-    // which is `basename(cwd)` (the checkout dir name) → scrub to a placeholder
-    // so the frozen value stays portable across checkouts.
-    const ts = tsStatus({ ROLL_RENDER_FIXTURE: "1" }, REPO).split(basename(REPO)).join("<PROJECT>");
+    // which is `basename(cwd)`. Run in a uniquely-named temp dir and scrub that
+    // basename → a placeholder. (Must NOT use the repo root: its basename is
+    // "roll" on CI, which would scrub every "roll"/".roll"/"roll setup" in the
+    // output.)
+    const fixProj = mkdtempSync(join(tmpdir(), "roll-status-fixproj-"));
+    dirs.push(fixProj);
+    const ts = tsStatus({ ROLL_RENDER_FIXTURE: "1" }, fixProj).split(basename(fixProj)).join("<PROJECT>");
     expect(ts).toMatchInlineSnapshot(`
       "
         ! drift  1/3 AI clients in sync · 12 skills · 4 templates
@@ -93,7 +96,7 @@ describe("frozen: roll status render", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        THIS PROJECT  ·  本项目                                                <PROJECT>
+        THIS PROJECT  ·  本项目                                                 <PROJECT>
 
         + AGENTS.md
         + .roll/backlog.md

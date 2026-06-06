@@ -108,6 +108,28 @@ describe("US-ATTEST-011 — Gate self-capture section", () => {
   });
 });
 
+describe("US-ATTEST-013 — explicit layering order", () => {
+  it("business body (context → badges → AC) precedes the closing (quality gate → evidence index)", () => {
+    const html = renderReport({
+      ...BASE,
+      context: { oneLiner: "卡一句话" },
+      items: [item({ id: "A:AC1", evidence: [{ kind: "test-pass", label: "suite green" }] })],
+      facts: { tcrCount: 5, ciConclusion: "success", testPassAge: "30s" },
+    });
+    const ctxAt = html.indexOf("卡上下文");
+    const acAt = html.indexOf('class="ac ');
+    const gateAt = html.indexOf("质量门禁 · Quality gate");
+    const idxAt = html.indexOf("证据索引");
+    // 主体 leads, 收口 trails — and the quality gate now lives in the closing,
+    // after the AC body, not at the top.
+    expect(ctxAt).toBeGreaterThan(-1);
+    expect(ctxAt).toBeLessThan(acAt);
+    expect(acAt).toBeLessThan(gateAt);
+    expect(gateAt).toBeLessThan(idxAt);
+    expect(html).toContain("TCR commits: <b>5</b>");
+  });
+});
+
 describe("US-ATTEST-013 — card context leads the business body", () => {
   it("renders one-liner / epic / summary / backlog status / delivery chain before the AC sections", () => {
     const html = renderReport({

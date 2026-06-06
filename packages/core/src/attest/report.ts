@@ -303,6 +303,15 @@ export function renderReport(input: ReportInput): string {
 </section>`
       : "";
 
+  // US-ATTEST-013 — 收口 (closing): quality gate → discrepancies → evidence
+  // index → self-score. Assembled then wrapped only when non-empty (trim, no
+  // hollow section).
+  const gate = facts !== "" ? `<h2>质量门禁 · Quality gate</h2>\n${facts}` : "";
+  const evIndex = evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures);
+  const selfScore = selfScoreBlock(input.selfScores);
+  const closingInner = [gate, disc, evIndex, selfScore].filter((s) => s !== "").join("\n");
+  const closing = closingInner !== "" ? `<section class="closing">\n${closingInner}\n</section>` : "";
+
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -345,6 +354,7 @@ table.ev-index { width:100%; border-collapse:collapse; font-size:13px; margin-to
 table.ev-index th, table.ev-index td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
 table.ev-index th { color:var(--muted); font-weight:600; }
 table.ev-index td a { word-break:break-all; }
+section.closing { margin-top:32px; border-top:2px solid var(--line); padding-top:8px; }
 @media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
 ${ANSI_CSS}
 </style>
@@ -352,15 +362,12 @@ ${ANSI_CSS}
 <body>
 <h1>${esc(input.title)}</h1>
 <p class="meta"><code>${esc(input.storyId)}</code> · generated ${esc(input.generatedAt)} · Gate: PASS</p>
-<p>${summary}</p>
 ${cardContextBlock(input.context)}
-${facts}
+<p>${summary}</p>
 ${items.map(acSection).join("\n")}
 ${beforeAfterBlock(input.beforeAfter)}
 ${selfCaptureBlock(input.selfCaptures)}
-${disc}
-${evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures)}
-${selfScoreBlock(input.selfScores)}
+${closing}
 </body>
 </html>
 `;

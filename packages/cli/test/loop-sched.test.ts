@@ -467,6 +467,12 @@ describe("FIX-204E — tmux observation window in the runner template", () => {
     expect(s).toContain("ROLL_TMUX_WRAPPED=1");
   });
 
+  it("US-PORT-012: pipes the live.log tail through `roll loop fmt` (three-tier window)", () => {
+    // the raw stream still lands in live.log upstream (AC3); the WATCH window
+    // tails it through the formatter so the pane shows key nodes, not raw JSON.
+    expect(s).toMatch(/tail -n \+1 -F '\$RT\/live\.log' \| '\$ROLL_BIN' loop fmt/);
+  });
+
   it("the wrap precedes caffeinate AND the cycle invocation; guards allow opt-out + re-entry", () => {
     expect(s.indexOf("new-window")).toBeLessThan(s.indexOf("caffeinate"));
     expect(s.indexOf("new-window")).toBeLessThan(s.indexOf('loop run-once >>'));

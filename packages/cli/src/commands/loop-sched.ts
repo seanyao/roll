@@ -160,16 +160,18 @@ fi
 ROLL_BIN="\${ROLL_BIN:-${input.rollBin ?? '$(command -v roll || echo /opt/homebrew/bin/roll)'}}"
 # FIX-204E observation window: every cycle runs inside tmux session
 # roll-loop-${input.slug} (v2's session model around the TS heart): window 0
-# tails the live agent transcript ($RT/live.log), each cycle gets its own
-# window, and the cycle SURVIVES whoever invoked it — a dying terminal or
-# agent session can no longer TERM a half-done cycle (2026-06-06 rc=143).
+# tails the live agent transcript ($RT/live.log) THROUGH \`roll loop fmt\`
+# (US-PORT-012 three-tier formatter — key nodes, not raw stream-json; the raw
+# bytes still land in live.log upstream so machine readers are unaffected),
+# each cycle gets its own window, and the cycle SURVIVES whoever invoked it —
+# a dying terminal or agent session can no longer TERM a half-done cycle.
 # ROLL_LOOP_NO_TMUX=1 or no tmux on PATH → direct run (previous contract).
 # ROLL_TMUX_BIN: test seam (the PATH bootstrap above outranks any shim dir).
 TMUX_BIN="\${ROLL_TMUX_BIN:-tmux}"
 if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TMUX_BIN" >/dev/null 2>&1; then
   _sess="roll-loop-${input.slug}"
   "$TMUX_BIN" has-session -t "$_sess" 2>/dev/null || \\
-    "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "printf 'roll live · ${input.slug} — agent transcript\\n'; exec tail -n +1 -F '$RT/live.log'" 2>/dev/null || true
+    "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "printf 'roll live · ${input.slug} — agent transcript\\n'; tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt" 2>/dev/null || true
   if "$TMUX_BIN" new-window -d -t "$_sess" -n "c$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
     exit 0
   fi

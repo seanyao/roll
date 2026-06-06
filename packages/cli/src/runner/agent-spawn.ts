@@ -119,7 +119,7 @@ export interface ClaudeArgvInput {
  * 9768-9809). Returns argv WITHOUT the binary at [0] folded into args — the
  * caller spawns `bin` with these args.
  *
- *   claude -p "<autorun + skill body>" --verbose --dangerously-skip-permissions
+ *   claude -p "<autorun + skill body>" --dangerously-skip-permissions
  *          --output-format stream-json --add-dir <wt>
  *
  * DELIBERATE DIVERGENCE from the v2 oracle's arg ORDER (whitelisted): v2 puts
@@ -139,7 +139,6 @@ export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: st
   const args = [
     "-p",
     prompt,
-    "--verbose",
     "--dangerously-skip-permissions",
     "--output-format",
     "stream-json",

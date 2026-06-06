@@ -1,94 +1,54 @@
 /**
- * diff-test: projectSlug == bash _project_slug (frozen v2 oracle).
- * Extracts the function from bin/roll and runs it against fixture git repos
- * covering: remote-based, ssh-remote normalization, no-remote path fallback,
- * ROLL_MAIN_SLUG override, and worktree → main-tree resolution.
+ * diff-test (frozen): projectSlug == bash `_project_slug` (v2 oracle).
+ *
+ * Per the US-PORT-009a freeze paradigm (docs/difftest-freeze-paradigm.md): the
+ * v2 `_project_slug` outputs were captured once — while bin/roll was still
+ * present and proven byte-for-byte equal — and frozen below. The test no longer
+ * `sed`-extracts the bash function from bin/roll.
+ *
+ * projectSlug is a PURE function of (path string, remoteUrl, override). To keep
+ * the frozen slugs portable across machines/CI, the path-based cases feed FIXED
+ * path *strings* — not `realpath`'d temp dirs whose `md5` prefix differs between
+ * macOS (`/private/tmp`) and Linux CI. The worktree→main-tree path resolution is
+ * an infra concern and is diff-tested in packages/infra/test/git.difftest.test.ts.
  */
-import { execFileSync, execSync } from "node:child_process";
-import { mkdtempSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { projectSlug } from "../src/project.js";
 
-const REPO = resolve(__dirname, "../../..");
-const dirs: string[] = [];
-
-function tmp(name: string): string {
-  const d = mkdtempSync(join(tmpdir(), `roll-slug-${name}-`));
-  dirs.push(d);
-  return realpathSync(d);
-}
-
-afterAll(() => {
-  for (const d of dirs) execSync(`rm -rf '${d}'`);
-});
-
-/** Run the extracted bash _project_slug for a path, with optional env. */
-function bashSlug(path: string, env: Record<string, string> = {}): string {
-  const script = [
-    `eval "$(sed -n '/^_project_slug()/,/^}$/p' '${REPO}/bin/roll')"`,
-    `config_get() { echo ""; }`,
-    `_project_slug '${path}'`,
-  ].join("\n");
-  return execFileSync("bash", ["-c", script], {
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-  });
-}
-
-function gitRemote(path: string): string | undefined {
-  try {
-    return execSync("git remote get-url origin", { cwd: path, encoding: "utf8" }).trim();
-  } catch {
-    return undefined;
-  }
-}
-
-describe("diff-test: projectSlug == bash _project_slug", () => {
+describe("diff-test: projectSlug == frozen v2 _project_slug oracle", () => {
   it("remote-based identity (https remote)", () => {
-    const d = tmp("https");
-    execSync(
-      `git init -q && git remote add origin https://github.com/SeanYao/Some.Project.git`,
-      { cwd: d },
-    );
-    expect(projectSlug({ path: d, remoteUrl: gitRemote(d) })).toBe(bashSlug(d));
+    expect(
+      projectSlug({ path: "/x", remoteUrl: "https://github.com/SeanYao/Some.Project.git" }),
+    ).toBe("some-project-c52293");
   });
 
   it("ssh remote normalizes like the oracle (git@ → https, lowercase)", () => {
-    const d = tmp("ssh");
-    execSync(`git init -q && git remote add origin git@github.com:SeanYao/roll.git`, { cwd: d });
-    expect(projectSlug({ path: d, remoteUrl: gitRemote(d) })).toBe(bashSlug(d));
-  });
-
-  it("no remote → path-based fallback", () => {
-    const d = tmp("noremote");
-    execSync(`git init -q`, { cwd: d });
-    expect(projectSlug({ path: d, remoteUrl: undefined })).toBe(bashSlug(d));
-  });
-
-  it("non-git directory → path-based fallback", () => {
-    const d = tmp("plain.dir-with_chars");
-    expect(projectSlug({ path: d, remoteUrl: undefined })).toBe(bashSlug(d));
-  });
-
-  it("ROLL_MAIN_SLUG override wins on both sides", () => {
-    const d = tmp("override");
-    expect(projectSlug({ path: d, mainSlugOverride: "main-abc123" })).toBe(
-      bashSlug(d, { ROLL_MAIN_SLUG: "main-abc123" }),
+    expect(projectSlug({ path: "/x", remoteUrl: "git@github.com:SeanYao/roll.git" })).toBe(
+      "roll-ecf079",
     );
   });
 
-  it("worktree resolves to the main tree slug (caller injects resolved path)", () => {
-    const d = tmp("wtmain");
-    execSync(
-      `git init -q -b main && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m x && git remote add origin https://github.com/x/wt-proj.git`,
-      { cwd: d },
+  it("no remote → path-based fallback (slug = basename-md5 of the path string)", () => {
+    expect(projectSlug({ path: "/some/fixed/path/My.Proj", remoteUrl: undefined })).toBe(
+      "My-Proj-66005e",
     );
-    const wt = join(tmp("wtside"), "wt");
-    execSync(`git worktree add -q '${wt}' -b side`, { cwd: d });
-    // Oracle resolves the worktree itself; TS side receives the main-tree path
-    // (infra duty per project.ts contract) + the remote.
-    expect(projectSlug({ path: d, remoteUrl: gitRemote(d) })).toBe(bashSlug(wt));
+  });
+
+  it("non-git directory → path-based fallback (special chars slugified)", () => {
+    expect(projectSlug({ path: "/var/data/plain.dir-with_chars", remoteUrl: undefined })).toBe(
+      "plain-dir-with-chars-0bea79",
+    );
+  });
+
+  it("ROLL_MAIN_SLUG override wins", () => {
+    expect(projectSlug({ path: "/x", mainSlugOverride: "main-abc123" })).toBe("main-abc123");
+  });
+
+  it("slug derives from the remote, independent of the (worktree) path", () => {
+    // The oracle resolves a worktree to its main tree before slugging; the pure
+    // slug math only sees the remote, so any path yields the remote-derived slug.
+    expect(projectSlug({ path: "/anything", remoteUrl: "https://github.com/x/wt-proj.git" })).toBe(
+      "wt-proj-e4b45a",
+    );
   });
 });

@@ -1,24 +1,28 @@
 /**
- * diff-test: TS configGet / yamlReadNested vs the frozen bash oracle
- * `config_get` (bin/roll 794-818) and `_yaml_read_nested` (778-792).
+ * diff-test (frozen): configGet / yamlReadNested == bash `config_get`
+ * (bin/roll 794-818) and `_yaml_read_nested` (778-792).
  *
- * Harness mirrors packages/spec/test/project.difftest.test.ts: extract the bash
- * function(s) with `sed`, `eval` them, run against fixture yaml in a temp dir,
- * compare stdout to the TS port. `config_get` reads the global `$ROLL_CONFIG`
- * and expands `~` against `$HOME`, so both are set per invocation.
+ * Per the US-PORT-009a freeze paradigm (docs/difftest-freeze-paradigm.md): the
+ * v2 oracle outputs were captured once — while bin/roll was still present and
+ * proven byte-for-byte equal — and frozen below. The test no longer `sed`-
+ * extracts the bash functions from bin/roll.
+ *
+ * Outputs are deterministic given the fixture yaml. The only volatile substring
+ * is the tilde expansion (`~` → `$HOME`), which differs per machine; we
+ * normalize the live `homedir()` back to a fixed token before asserting, so the
+ * frozen literals stay portable across machines/CI.
  */
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import { configGet, yamlReadNested } from "../src/index.js";
 
-const REPO = resolve(__dirname, "../../..");
 const HOME = "/home/fixtureuser";
 const dirs: string[] = [];
 afterAll(() => {
-  for (const d of dirs) execFileSync("rm", ["-rf", d]);
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
 function fixture(content: string): string {
@@ -29,75 +33,48 @@ function fixture(content: string): string {
   return f;
 }
 
-/** Extract + run bash `config_get key [default]` against a config file. */
-function bashConfigGet(file: string, key: string, def = ""): string {
-  const script = [
-    `eval "$(sed -n '/^_yaml_read_nested()/,/^}$/p' '${REPO}/bin/roll')"`,
-    `eval "$(sed -n '/^config_get()/,/^}$/p' '${REPO}/bin/roll')"`,
-    `ROLL_CONFIG='${file}'`,
-    `HOME='${HOME}'`,
-    `config_get "$1" "$2"`,
-  ].join("\n");
-  return execFileSync("bash", ["-c", script, "bash", key, def], { encoding: "utf8" });
-}
+/** Normalize the machine's home to the fixed fixture token. */
+const sub = (s: string): string => s.replace(homedir(), HOME);
 
-/** Extract + run bash `_yaml_read_nested file parent child`. */
-function bashYamlNested(file: string, parent: string, child: string): string {
-  const script = [
-    `eval "$(sed -n '/^_yaml_read_nested()/,/^}$/p' '${REPO}/bin/roll')"`,
-    `_yaml_read_nested "$1" "$2" "$3"`,
-  ].join("\n");
-  return execFileSync("bash", ["-c", script, "bash", file, parent, child], { encoding: "utf8" });
-}
-
-describe("diff-test: configGet == bash config_get", () => {
+describe("diff-test: configGet == frozen bash config_get", () => {
   const flat = ["loop_dream_hour: 5   # comment", "ai_claude: ~/.claude", "quoted: hello world", ""].join("\n");
   const nested = ["loop_schedule:", "  period_minutes: 30  # half hour", "  offset_minute: 7", "other:", "  x: 1", ""].join("\n");
 
   it("flat key, comment stripped", () => {
-    const f = fixture(flat);
-    expect(configGet("loop_dream_hour", "", f) + "\n").toBe(bashConfigGet(f, "loop_dream_hour"));
+    expect(configGet("loop_dream_hour", "", fixture(flat))).toBe("5");
   });
   it("flat key with leading-tilde expansion", () => {
-    const f = fixture(flat);
-    expect(configGet("ai_claude", "", f).replace(process.env["HOME"] ?? "", HOME) + "\n").toBe(
-      bashConfigGet(f, "ai_claude"),
-    );
+    expect(sub(configGet("ai_claude", "", fixture(flat)))).toBe("/home/fixtureuser/.claude");
   });
   it("flat value with embedded spaces preserved", () => {
-    const f = fixture(flat);
-    expect(configGet("quoted", "", f) + "\n").toBe(bashConfigGet(f, "quoted"));
+    expect(configGet("quoted", "", fixture(flat))).toBe("hello world");
   });
   it("missing flat key → default (tilde-expanded)", () => {
-    const f = fixture(flat);
-    expect(configGet("absent", "~/fallback", f).replace(process.env["HOME"] ?? "", HOME) + "\n").toBe(
-      bashConfigGet(f, "absent", "~/fallback"),
-    );
+    expect(sub(configGet("absent", "~/fallback", fixture(flat)))).toBe("/home/fixtureuser/fallback");
   });
   it("missing flat key → empty default", () => {
-    const f = fixture(flat);
-    expect(configGet("absent", "", f) + "\n").toBe(bashConfigGet(f, "absent"));
+    expect(configGet("absent", "", fixture(flat))).toBe("");
   });
   it("dotted nested key, set", () => {
-    const f = fixture(nested);
-    expect(configGet("loop_schedule.period_minutes", "60", f) + "\n").toBe(
-      bashConfigGet(f, "loop_schedule.period_minutes", "60"),
-    );
+    expect(configGet("loop_schedule.period_minutes", "60", fixture(nested))).toBe("30");
   });
   it("dotted nested key, absent → default", () => {
-    const f = fixture(nested);
-    expect(configGet("loop_schedule.missing", "99", f) + "\n").toBe(
-      bashConfigGet(f, "loop_schedule.missing", "99"),
-    );
+    expect(configGet("loop_schedule.missing", "99", fixture(nested))).toBe("99");
   });
   it("dotted key, parent block absent → default", () => {
-    const f = fixture(flat);
-    expect(configGet("noblock.child", "def", f) + "\n").toBe(bashConfigGet(f, "noblock.child", "def"));
+    expect(configGet("noblock.child", "def", fixture(flat))).toBe("def");
   });
 });
 
-describe("diff-test: yamlReadNested == bash _yaml_read_nested", () => {
+describe("diff-test: yamlReadNested == frozen bash _yaml_read_nested", () => {
   const nested = ["loop_schedule:", "  period_minutes: 30  # c", "  offset_minute: 0", "after:", "  y: 2", ""].join("\n");
+  const frozen: Record<string, string> = {
+    "loop_schedule.period_minutes": "30",
+    "loop_schedule.offset_minute": "0",
+    "loop_schedule.absent": "",
+    "after.y": "2",
+    "missing.x": "",
+  };
   for (const [parent, child] of [
     ["loop_schedule", "period_minutes"],
     ["loop_schedule", "offset_minute"],
@@ -106,11 +83,7 @@ describe("diff-test: yamlReadNested == bash _yaml_read_nested", () => {
     ["missing", "x"],
   ] as const) {
     it(`${parent}.${child}`, () => {
-      const f = fixture(nested);
-      const bash = bashYamlNested(f, parent, child);
-      const ts = yamlReadNested(f, parent, child);
-      // bash prints a trailing newline only when it printed a value.
-      expect(ts === "" ? "" : ts + "\n").toBe(bash);
+      expect(yamlReadNested(fixture(nested), parent, child)).toBe(frozen[`${parent}.${child}`]);
     });
   }
 });

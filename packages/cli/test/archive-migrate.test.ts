@@ -130,6 +130,22 @@ describe("buildArchiveMigratePlan", () => {
     expect(s.runsMoved).toBe(1); // only the recent run migrates
   });
 
+  it("surfaces a conflict (never silently orphans) when src AND dst both exist", () => {
+    const proj = project({ "FIX-204": "loop-engine" });
+    legacyCard(proj, "FIX-204", "2026-06-05T00-00-00");
+    // A v3-native run already landed at the destination run dir.
+    file(join(proj, ".roll", "features", "loop-engine", "FIX-204", "2026-06-05T00-00-00", "FIX-204-report.html"), "native");
+    // And a card-level ac-map.json already exists at the destination.
+    file(join(proj, ".roll", "features", "loop-engine", "FIX-204", "ac-map.json"), "native");
+    const plan = buildArchiveMigratePlan(proj, OPTS);
+    const paths = plan.conflicts.map((c) => c.path);
+    expect(paths).toContain(".roll/verification/FIX-204/2026-06-05T00-00-00");
+    expect(paths).toContain(".roll/verification/FIX-204/ac-map.json");
+    // The colliding legacy run is NOT moved (no silent overwrite/orphan).
+    const s = summarizePlan(plan);
+    expect(s.runsMoved).toBe(0);
+  });
+
   it("exempts non-card files under verification/", () => {
     const proj = project({});
     file(join(proj, ".roll", "verification", "loop-autorun-verification.md"), "notes");

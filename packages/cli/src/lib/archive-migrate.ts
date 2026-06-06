@@ -43,10 +43,22 @@ export interface CardMigratePlan {
   ops: MigrateOp[];
 }
 
+/** A legacy item whose destination ALREADY exists — never overwritten or
+ *  silently dropped; surfaced so the operator can reconcile it by hand
+ *  (manifest §0: dry-run-first + human review). */
+export interface MigrateConflict {
+  storyId: string;
+  /** The legacy path left in place (relative to project root). */
+  path: string;
+  reason: string;
+}
+
 export interface ArchiveMigratePlan {
   cards: CardMigratePlan[];
   /** Non-card entries under verification/ left untouched (manifest §1). */
   exempt: string[];
+  /** Collisions where the destination already exists; left for manual review. */
+  conflicts: MigrateConflict[];
 }
 
 export interface MigratePlanOptions {
@@ -105,13 +117,14 @@ export function buildArchiveMigratePlan(projectPath: string, opts: MigratePlanOp
   const verRoot = join(projectPath, ".roll", "verification");
   const cards: CardMigratePlan[] = [];
   const exempt: string[] = [];
-  if (!existsSync(verRoot)) return { cards, exempt };
+  const conflicts: MigrateConflict[] = [];
+  if (!existsSync(verRoot)) return { cards, exempt, conflicts };
 
   let entries: import("node:fs").Dirent[] = [];
   try {
     entries = readdirSync(verRoot, { withFileTypes: true });
   } catch {
-    return { cards, exempt };
+    return { cards, exempt, conflicts };
   }
 
   for (const e of [...entries].sort((a, b) => (a.name < b.name ? -1 : 1))) {
@@ -140,9 +153,18 @@ export function buildArchiveMigratePlan(projectPath: string, opts: MigratePlanOp
       const dstRun = join(cardRel, runId);
       const srcRunAbs = join(projectPath, srcRun);
       const dstRunAbs = join(projectPath, dstRun);
+      const srcExists = existsSync(srcRunAbs);
+      const dstExists = existsSync(dstRunAbs);
+      // Both present → a destination run dir already exists while the legacy copy
+      // lingers. Never overwrite or silently drop it: record a conflict and leave
+      // both runs in place for the operator (manifest §0 human-review premise).
+      if (srcExists && dstExists) {
+        conflicts.push({ storyId, path: srcRun, reason: "destination run dir already exists — legacy copy left for manual review" });
+        continue;
+      }
       // Dir move: only when the source still exists and the destination is free
       // (a prior partial run may have already moved it — then skip, idempotent).
-      if (existsSync(srcRunAbs) && !existsSync(dstRunAbs)) {
+      if (srcExists) {
         ops.push({ kind: "mv", src: srcRun, dst: dstRun });
       }
       // Report rename: report.html → <ID>-report.html (runs AFTER the dir move,
@@ -156,7 +178,11 @@ export function buildArchiveMigratePlan(projectPath: string, opts: MigratePlanOp
 
     // Card-level deliverables: move only what is not already at the destination.
     for (const name of cardLevelEntries(legacyAbs)) {
-      if (existsSync(join(cardAbs, name))) continue; // already migrated
+      if (existsSync(join(cardAbs, name))) {
+        // Destination already has this card-level file — surface, don't orphan.
+        conflicts.push({ storyId, path: join(legacyRel, name), reason: "destination already exists — legacy copy left for manual review" });
+        continue;
+      }
       ops.push({ kind: "mv", src: join(legacyRel, name), dst: join(cardRel, name) });
     }
 
@@ -181,7 +207,7 @@ export function buildArchiveMigratePlan(projectPath: string, opts: MigratePlanOp
     }
   }
 
-  return { cards, exempt };
+  return { cards, exempt, conflicts };
 }
 
 export interface PlanSummary {

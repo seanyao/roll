@@ -65,6 +65,9 @@ function printPlan(plan: ArchiveMigratePlan, dryRun: boolean): void {
   for (const name of plan.exempt) {
     process.stdout.write(`\n  (exempt, left in place) .roll/verification/${name}\n`);
   }
+  for (const c of plan.conflicts) {
+    process.stderr.write(`\n  ⚠ conflict (${c.storyId}): ${c.path}\n    ${c.reason}\n`);
+  }
   const s = summarizePlan(plan);
   process.stdout.write(
     `\n  ${dryRun ? "would migrate" : "migrated"}: ${s.cards} card(s), ${s.runsMoved} run(s), ` +
@@ -76,6 +79,12 @@ function printPlan(plan: ArchiveMigratePlan, dryRun: boolean): void {
       `${s.reportsRenamed} 份报告改名，${s.cardFilesMoved} 个卡级文件，` +
       `${s.latestRebuilt} 个 latest 重建，${s.gcDeleted} 个 run 预清理\n`,
   );
+  if (plan.conflicts.length > 0) {
+    process.stdout.write(
+      `\n  ⚠ ${plan.conflicts.length} conflict(s) left for manual review — see stderr\n` +
+        `  ⚠ ${plan.conflicts.length} 处冲突待人工核对（见 stderr）\n`,
+    );
+  }
   if (dryRun && s.totalOps > 0) {
     process.stdout.write("\n  run without --dry-run to execute\n  去掉 --dry-run 执行迁移\n");
   }

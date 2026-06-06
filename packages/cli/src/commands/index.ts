@@ -11,6 +11,7 @@ import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand } from "./dashboard.js";
 import { doctorCommand } from "./doctor.js";
 import { feedbackCommand } from "./feedback.js";
+import { gcCommand } from "./gc.js";
 import { indexCommand } from "./index-gen.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
@@ -52,6 +53,8 @@ export function registerAll(): void {
   registerPorted("attest", attestCommand);
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
   registerPorted("index", indexCommand);
+  // `gc`: age out old surplus attest runs across the archive layout (US-META-001).
+  registerPorted("gc", gcCommand);
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

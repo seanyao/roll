@@ -14,7 +14,8 @@
  */
 import { EventBus, type RouteDeps, cycleEndEvent, mapV2Status } from "@roll/core";
 import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, runCycleOnce } from "../runner/index.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
@@ -164,6 +165,64 @@ function runtimeDir(projectPath: string): string {
   return env !== "" ? env : join(projectPath, ".roll", "loop");
 }
 
+// ── FIX-216b: consecutive-failure auto-PAUSE ──────────────────────────────────
+
+const PAUSE_THRESHOLD = 3;
+
+/**
+ * Increment the consecutive-failure counter for a project. If threshold is
+ * reached, write a PAUSE marker and an alert so the scheduler skips future
+ * ticks. Idempotent: a pre-existing PAUSE marker is not overwritten.
+ */
+function incrementConsecutiveFails(
+  projectPath: string,
+  slug: string,
+  alertsPath: string,
+  cycleId: string,
+  storyId: string,
+  terminal: string,
+): void {
+  const rt = runtimeDir(projectPath);
+  const counterFile = join(rt, "consecutive-fails");
+  let count = 0;
+  try {
+    if (existsSync(counterFile)) {
+      count = parseInt(readFileSync(counterFile, "utf8").trim(), 10) || 0;
+    }
+  } catch { /* best-effort */ }
+  count += 1;
+  try {
+    writeFileSync(counterFile, String(count), "utf8");
+  } catch { /* best-effort */ }
+
+  if (count < PAUSE_THRESHOLD) return;
+
+  const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+  const alertMsg =
+    `# ALERT — loop auto-paused after ${count} consecutive failures\n\n` +
+    `**Cycle**: ${cycleId}\n` +
+    `**Story**: ${storyId}\n` +
+    `**Terminal**: ${terminal}\n` +
+    `**Action**: ${count} consecutive cycles failed — loop paused to prevent burn.\n` +
+    `  Resolve the root cause, then: \`roll loop resume\`\n`;
+  try {
+    writeFileSync(pauseMarker, alertMsg, "utf8");
+    appendFileSync(alertsPath, `${alertMsg}\n`, "utf8");
+  } catch { /* best-effort */ }
+  process.stderr.write(
+    `loop run-once: auto-PAUSED after ${count} consecutive failures — PAUSE marker written\n` +
+      `loop run-once: 连续 ${count} 次失败后自动暂停 — 已写 PAUSE 标记\n`,
+  );
+}
+
+/** Reset the consecutive-failure counter (called on a successful delivery). */
+function resetConsecutiveFails(projectPath: string): void {
+  const rt = runtimeDir(projectPath);
+  try {
+    writeFileSync(join(rt, "consecutive-fails"), "0", "utf8");
+  } catch { /* best-effort */ }
+}
+
 /**
  * Resolve + read the loop SKILL.md body the agent runs, frontmatter stripped.
  * Thin wrapper over the shared {@link readSkillBodyGeneric} pinned to the
@@ -207,10 +266,21 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   }
 
   const rt = runtimeDir(id.path);
+  // FIX-216a: alertsPath must match the file `roll alert` reads — the shared
+  // ALERT-<slug>.md, same as v2's $_LOOP_ALERT.  The old `alerts.log` was a
+  // siloed file that neither the bash dashboard nor `roll alert` consumed.
+  // Honors ROLL_PROJECT_RUNTIME_DIR (test redirect), then _SHARED_ROOT, then ~/.shared/roll.
+  const sharedRoot = process.env["_SHARED_ROOT"] ?? join(homedir(), ".shared", "roll");
+  const alertRt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+  const alertsPath = alertRt !== ""
+    ? join(alertRt, `ALERT-${id.slug}.md`)
+    : join(sharedRoot, "loop", `ALERT-${id.slug}.md`);
+  mkdirSync(dirname(alertsPath), { recursive: true });
+
   const paths: RunnerPaths = {
     eventsPath: join(rt, "events.ndjson"),
     runsPath: join(rt, "runs.jsonl"),
-    alertsPath: join(rt, "alerts.log"),
+    alertsPath,
     lockPath: join(rt, "inner.lock"),
     heartbeatPath: join(rt, "heartbeat"),
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
@@ -224,8 +294,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       `[${new Date().toISOString()}] ALERT loop run-once: roll-loop SKILL.md not found ` +
       `(checked ROLL_LOOP_SKILL, .roll/skills/, skills/) — cycle ${cycleId} refused to start`;
     try {
-      mkdirSync(dirname(paths.alertsPath), { recursive: true });
-      appendFileSync(paths.alertsPath, `${msg}\n`, "utf8");
+      appendFileSync(alertsPath, `${msg}\n`, "utf8");
     } catch {
       /* the stderr line below still fires */
     }
@@ -233,6 +302,8 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       `loop run-once: roll-loop SKILL.md not found — refusing to spawn a blind agent (ALERT written)\n` +
         `loop run-once: 找不到 roll-loop SKILL.md — 拒绝盲开 agent(已写 ALERT)\n`,
     );
+    // FIX-216b: SKILL-not-found is also a persistent failure — count it.
+    incrementConsecutiveFails(id.path, id.slug, alertsPath, cycleId, "", "skill_missing");
     return 1;
   }
 
@@ -271,6 +342,14 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   if (result.terminal === "done") {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
     announceReport(id.path, id.slug, storyId);
+    resetConsecutiveFails(id.path);
   }
-  return result.terminal === "failed" || result.terminal === "blocked" ? 1 : 0;
+
+  const isFail = result.terminal === "failed" || result.terminal === "blocked";
+  if (isFail) {
+    const storyId = (result.state?.ctx?.storyId ?? "").trim();
+    incrementConsecutiveFails(id.path, id.slug, alertsPath, cycleId, storyId, result.terminal ?? "unknown");
+  }
+
+  return isFail ? 1 : 0;
 }

@@ -167,7 +167,12 @@ describe("FIX-204A — skill resolution + blind-agent refusal", () => {
     }
     expect(err).toContain("refusing to spawn a blind agent");
     const { readFileSync: rf, existsSync: ex } = await import("node:fs");
-    expect(rf(join(rt, "alerts.log"), "utf8")).toContain("SKILL.md not found");
+    // FIX-216a: alert writes to ALERT-<slug>.md.  The slug is hash-based
+    // (projectIdentity→projectSlug), so we match any ALERT-*.md in the rt dir.
+    const { readdirSync: rds } = await import("node:fs");
+    const alertFiles = rds(rt).filter((f) => f.startsWith("ALERT-") && f.endsWith(".md"));
+    expect(alertFiles.length).toBe(1);
+    expect(rf(join(rt, alertFiles[0]), "utf8")).toContain("SKILL.md not found");
     expect(ex(join(rt, "inner.lock"))).toBe(false);
     expect(ex(join(rt, "worktrees"))).toBe(false);
   });
@@ -256,5 +261,57 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     expect(n).toBe(1);
     const res = await pending;
     expect(res.exitCode).not.toBe(0); // killed, promise still settles
+  });
+});
+
+describe("FIX-216 — auto-PAUSE on consecutive failures", () => {
+  it("increments the failure counter + writes PAUSE marker at threshold", async () => {
+    // Dynamically import fs functions not in the top-level imports.
+    const { readFileSync: rf, existsSync: ex, mkdirSync: mks } =
+      await import("node:fs");
+
+    const p = tmp("consec-fail");
+    execFileSync("git", ["init", "-q", p]);
+    const rt = join(p, ".roll", "loop");
+    mks(rt, { recursive: true });
+    const counterFile = join(rt, "consecutive-fails");
+
+    // Seed: 2 prior failures.
+    writeFileSync(counterFile, "2", "utf8");
+
+    // Force a deterministic slug so PAUSE-<slug> and ALERT-<slug>.md are predictable.
+    const prevRt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const prevSlug = process.env["ROLL_MAIN_SLUG"];
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = rt;
+    process.env["ROLL_MAIN_SLUG"] = "default";
+    registerAll();
+
+    // Suppress stderr noise.
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    const prevCwd = process.cwd();
+    try {
+      process.chdir(p);
+      const r = await dispatch(["loop", "run-once"]);
+      expect(r.status).toBe(1);
+    } finally {
+      process.stderr.write = write;
+      process.chdir(prevCwd);
+      if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
+      if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+      else process.env["ROLL_MAIN_SLUG"] = prevSlug;
+    }
+
+    // Counter should be 3.
+    expect(ex(counterFile)).toBe(true);
+    expect(rf(counterFile, "utf8").trim()).toBe("3");
+
+    // PAUSE marker should exist (threshold = 3).
+    const pauseMarker = join(p, ".roll", "loop", "PAUSE-default");
+    expect(ex(pauseMarker)).toBe(true);
+    const body = rf(pauseMarker, "utf8");
+    expect(body).toContain("# ALERT — loop auto-paused");
+    expect(body).toContain("roll loop resume");
   });
 });

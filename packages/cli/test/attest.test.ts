@@ -149,6 +149,39 @@ describe("attestCommand", () => {
     expect(html).not.toContain("Discrepancies");
   });
 
+  it("US-ATTEST-012 — text evidence carrying a secret is masked before it lands in the report + WARN留痕", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const runDir = join(storyDir, "2026-06-06T01-02-03");
+    mkdirSync(join(runDir, "evidence"), { recursive: true });
+    const secret = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+    writeFileSync(join(runDir, "evidence", "log.txt"), `deploy ok\ntoken=${secret}\n`);
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "pass", evidence: [{ kind: "text", label: "log", textFile: "evidence/log.txt" }] },
+      ]),
+    );
+    const errs: string[] = [];
+    const oErr = process.stderr.write.bind(process.stderr);
+    const oOut = process.stdout.write.bind(process.stdout);
+    // @ts-expect-error capture-only
+    process.stderr.write = (s: string): boolean => (errs.push(String(s)), true);
+    // @ts-expect-error quiet stdout
+    process.stdout.write = (): boolean => true;
+    try {
+      await inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }));
+    } finally {
+      process.stderr.write = oErr;
+      process.stdout.write = oOut;
+    }
+    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    expect(html).not.toContain(secret);
+    expect(html).toContain("«REDACTED");
+    expect(errs.join("")).toMatch(/redact/i); // 留痕: never silent
+  });
+
   it("re-run lands a second run dir and re-points latest (history preserved)", async () => {
     const proj = project();
     const opts = { run: quietRun, ghProbe: (): Promise<boolean> => Promise.resolve(false) };

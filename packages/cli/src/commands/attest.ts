@@ -27,6 +27,7 @@ import { acForStory, renderReport, ansiPre, type AcReportItem, type AcStatus, ty
 import {
   captureScreenshot,
   collectEvidence,
+  redactSecrets,
   screenshotEvidenceRef,
   writeEvidenceJson,
   type EvidenceRun,
@@ -116,7 +117,12 @@ function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): 
     const p = join(runDir, e.textFile);
     if (!existsSync(p)) return null;
     try {
-      return { kind, label, inlineHtml: ansiPre(readFileSync(p, "utf8")) };
+      // RED LINE (US-ATTEST-012): scrub secrets/PII BEFORE the text is inlined
+      // into the report — once archived, the run dir is never overwritten. A
+      // hit is WARNed, never silent (留痕).
+      const { redacted, hits } = redactSecrets(readFileSync(p, "utf8"));
+      if (hits.length > 0) warn(`redacted secret(s) in ${e.textFile}: ${hits.join(", ")}`);
+      return { kind, label, inlineHtml: ansiPre(redacted) };
     } catch {
       return null;
     }

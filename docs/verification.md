@@ -62,6 +62,15 @@ diff <(v2.0-bash <cmd>) <(v3-ts <cmd>)
 
 分层验收：每完成一层，该层 difftest 全绿才进下一层。允许白名单例外——TS 版刻意改进的输出差异须显式声明并记录原因。
 
+## 验收档案布局
+
+一张卡的交付物收口在卡夹 `.roll/features/<epic>/<ID>/`：
+
+- **落位**：`roll attest <ID>` 把一次验收写进 `<ID>/<run-id>/`（run-id 为时间戳，永不覆盖），`latest` 软链指向最新；报告名带卡号 `<ID>-report.html`，多标签页/下载/分享一眼识别归属。
+- **索引**：`roll index` 从 `backlog.md` 生成 `.roll/index.json`（ID→epic，确定性、幂等）。attest 先查索引定位 epic，查不到回落 `features/uncategorized/<ID>/`——定位绝不阻塞写入。
+- **回收**：`roll gc` 按阈值清理陈旧 run（保最近 N 次 + M 天内，二者满足其一即留；只删「又旧又超额」的尾部）。阈值 `--keep-latest`（默认 10）/`--keep-days`（默认 30），`--dry-run` 预演。
+- **读取兼容**：迁移窗口内旧布局 `.roll/verification/<ID>/` 仍可读（attest gate、ac-map、报告解析都先查卡夹再回落旧树）；存量迁移与兼容代码移除由 US-META-002 收尾。
+
 ## 门
 
 | 门 | 条件 | 频率 |

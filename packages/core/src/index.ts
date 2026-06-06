@@ -24,6 +24,7 @@ export * from "./loop/transcript.js";
 export * from "./policy/engine.js";
 export * from "./reconcile/engine.js";
 export * from "./attest/ac-parser.js";
+export * from "./attest/gc.js";
 export * from "./attest/ansi-html.js";
 export * from "./attest/report.js";
 export * from "./attest/report-smoke.js";

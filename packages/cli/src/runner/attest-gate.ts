@@ -29,18 +29,54 @@
 import { parsePolicy } from "@roll/core";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { cardArchiveDir, legacyArchiveDir, reportFileName } from "../lib/archive.js";
 
 export type AttestMode = "soft" | "hard";
 
-/** The acceptance report a delivered story must produce (skill step 10.6). */
+/**
+ * Candidate report paths, NEW layout first (US-META-001:
+ * `features/<epic>/<ID>/latest/<ID>-report.html`), legacy second
+ * (`verification/<ID>/latest/report.html`). Read-compat for the migration window
+ * (US-META-002 collapses this to the card folder only).
+ */
+function reportCandidates(worktreeCwd: string, storyId: string): string[] {
+  return [
+    join(cardArchiveDir(worktreeCwd, storyId), "latest", reportFileName(storyId)),
+    join(legacyArchiveDir(worktreeCwd, storyId), "latest", "report.html"),
+  ];
+}
+
+/** ac-map candidates in the same NEW-then-legacy order. */
+function acMapCandidates(worktreeCwd: string, storyId: string): string[] {
+  return [
+    join(cardArchiveDir(worktreeCwd, storyId), "ac-map.json"),
+    join(legacyArchiveDir(worktreeCwd, storyId), "ac-map.json"),
+  ];
+}
+
+/** The acceptance report a delivered story must produce (skill step 10.6) —
+ *  the canonical NEW-layout path, used for messaging. */
 export function verificationReportPath(worktreeCwd: string, storyId: string): string {
-  return join(worktreeCwd, ".roll", "verification", storyId, "latest", "report.html");
+  return reportCandidates(worktreeCwd, storyId)[0] as string;
+}
+
+/** First candidate report that exists on disk, or null. */
+function existingReport(worktreeCwd: string, storyId: string): string | null {
+  for (const p of reportCandidates(worktreeCwd, storyId)) {
+    try {
+      if (statSync(p).isFile()) return p;
+    } catch {
+      /* try next candidate */
+    }
+  }
+  return null;
 }
 
 /**
  * Report exists as a file AND — when a cycle-start bound is given — was written
  * this cycle (mtime ≥ `sinceSec`). No bound ⇒ existence alone (graceful: callers
- * that can't determine cycle start still detect a wholly-absent report).
+ * that can't determine cycle start still detect a wholly-absent report). Either
+ * archive layout counts (US-META-001 read-compat).
  */
 export function verificationReportFresh(
   worktreeCwd: string,
@@ -48,13 +84,14 @@ export function verificationReportFresh(
   sinceSec?: number,
 ): boolean {
   if (storyId === "") return false;
+  const p = existingReport(worktreeCwd, storyId);
+  if (p === null) return false;
   try {
-    const st = statSync(verificationReportPath(worktreeCwd, storyId));
-    if (!st.isFile()) return false;
+    const st = statSync(p);
     if (sinceSec === undefined) return true;
     return st.mtimeMs / 1000 >= sinceSec;
   } catch {
-    return false; // missing path / stat error → not present
+    return false;
   }
 }
 
@@ -64,14 +101,17 @@ export function verificationReportFresh(
  * heading mentioning another card id stole all the AC, so attest rendered a
  * report with no AC sections). "存在性"过闸不等于"有内容". A delivery's report must
  * carry ≥1 rendered AC section AND an `ac-map.json` (the AI intent layer the
- * skill writes for every real delivery). Missing either ⇒ no content.
+ * skill writes for every real delivery). Missing either ⇒ no content. Either
+ * archive layout counts (US-META-001 read-compat).
  */
 export function verificationReportHasContent(worktreeCwd: string, storyId: string): boolean {
   if (storyId === "") return false;
+  const p = existingReport(worktreeCwd, storyId);
+  if (p === null) return false;
   try {
-    const html = readFileSync(verificationReportPath(worktreeCwd, storyId), "utf8");
+    const html = readFileSync(p, "utf8");
     const hasAc = /<section class="ac[\s">]/.test(html);
-    const hasMap = existsSync(join(worktreeCwd, ".roll", "verification", storyId, "ac-map.json"));
+    const hasMap = acMapCandidates(worktreeCwd, storyId).some((m) => existsSync(m));
     return hasAc && hasMap;
   } catch {
     return false;

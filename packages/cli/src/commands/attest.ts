@@ -59,6 +59,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
+import { cardArchiveDir, findFeatureFile, reportFileName } from "../lib/archive.js";
+
+// Re-export so existing importers (tests, callers) keep their entry point.
+export { findFeatureFile } from "../lib/archive.js";
 
 export interface AttestDeps {
   now?: () => Date;
@@ -209,35 +213,6 @@ const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "fail", "b
 
 function warn(msg: string): void {
   process.stderr.write(`[roll] attest WARN: ${msg}\n`);
-}
-
-/** Locate the feature markdown that defines the story (heading or AC owner). */
-export function findFeatureFile(projectPath: string, storyId: string): string | null {
-  const root = join(projectPath, ".roll", "features");
-  if (!existsSync(root)) return null;
-  const hits: string[] = [];
-  const walk = (dir: string): void => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile() && e.name.endsWith(".md")) {
-        if (e.name === `${storyId}.md`) hits.unshift(p); // ID-named file wins
-        else {
-          try {
-            if (readFileSync(p, "utf8").includes(storyId)) hits.push(p);
-          } catch {
-            /* unreadable file: skip */
-          }
-        }
-      }
-    }
-  };
-  try {
-    walk(root);
-  } catch {
-    return null;
-  }
-  return hits[0] ?? null;
 }
 
 interface AcMapEntry {
@@ -488,7 +463,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const now = (deps.now ?? ((): Date => new Date()))();
   const p2 = (n: number): string => String(n).padStart(2, "0");
   const runId = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}T${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`;
-  const storyDir = join(projectPath, ".roll", "verification", storyId);
+  // US-META-001: deliverables land in the card folder `features/<epic>/<ID>/`
+  // (epic via the backlog-generated index, uncategorized fallback). Runs never
+  // overwrite history; `latest` symlinks the newest.
+  const storyDir = cardArchiveDir(projectPath, storyId);
   const runDir = join(storyDir, runId);
   mkdirSync(runDir, { recursive: true });
 
@@ -527,7 +505,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   writeEvidenceJson(manifest, runDir);
 
   // intent map (AI layer) → report items; absent ⇒ honest all-Claimed.
-  const acMap = readAcMap(storyDir);
+  // Read-compat (US-META-001): prefer the card folder, fall back to the legacy
+  // `verification/<ID>/` dir so a card whose Gate still writes there is honoured
+  // until US-META-002 migrates the write side of the skill.
+  const acMap = readAcMap(storyDir) ?? readAcMap(join(projectPath, ".roll", "verification", storyId));
   const items: AcReportItem[] = acItems.map((ac) => {
     const mapped = acMap?.get(ac.id);
     const status: AcStatus =
@@ -578,7 +559,9 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(selfScores.length > 0 ? { selfScores } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
   });
-  const reportPath = join(runDir, "report.html");
+  // US-META-001: report carries the card id (`<ID>-report.html`) so a tab /
+  // download / share is self-identifying.
+  const reportPath = join(runDir, reportFileName(storyId));
   writeFileSync(reportPath, html);
 
   // latest symlink (replace — rm is force-tolerant of absence).

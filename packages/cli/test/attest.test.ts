@@ -77,10 +77,10 @@ describe("attestCommand", () => {
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
     expect(code).toBe(0);
-    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     const runDir = join(storyDir, "2026-06-06T01-02-03");
     expect(existsSync(join(runDir, "evidence.json"))).toBe(true);
-    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
     expect(html).toContain("FIX-300 — Acceptance Evidence");
     expect(lstatSync(join(storyDir, "latest")).isSymbolicLink()).toBe(true);
     expect(readlinkSync(join(storyDir, "latest"))).toBe("2026-06-06T01-02-03");
@@ -92,7 +92,7 @@ describe("attestCommand", () => {
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
     const html = readFileSync(
-      join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"),
+      join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
       "utf8",
     );
     expect(html).toContain("🟧 Claimed 仅声明 × 2");
@@ -100,7 +100,7 @@ describe("attestCommand", () => {
 
   it("ac-map.json drives statuses + inline text evidence from the run dir", async () => {
     const proj = project();
-    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     const runDir = join(storyDir, "2026-06-06T01-02-03");
     mkdirSync(join(runDir, "evidence"), { recursive: true });
     writeFileSync(join(runDir, "evidence", "vitest.txt"), "\x1b[32m✓ 8 passed\x1b[0m\n");
@@ -119,7 +119,7 @@ describe("attestCommand", () => {
     await silenced(() =>
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
-    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
     expect(html).toContain("✅ Pass 通过 × 1");
     expect(html).toContain("🟨 Partial 部分满足 × 1");
     expect(html).toContain('<span class="a-fg32">✓ 8 passed</span>');
@@ -127,9 +127,29 @@ describe("attestCommand", () => {
     expect(html).not.toContain("Discrepancies"); // mapped evidence ⇒ no red-line downgrades
   });
 
+  it("US-META-001 — ac-map read-compat: a legacy verification/<ID>/ac-map.json still drives statuses", async () => {
+    const proj = project();
+    // No card-folder ac-map; only the legacy location (as the un-migrated Gate writes it).
+    const legacy = join(proj, ".roll", "verification", "FIX-300");
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(
+      join(legacy, "ac-map.json"),
+      JSON.stringify([{ ac: "FIX-300:AC1", status: "blocked", note: "等下游" }]),
+    );
+    await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    // Report lands in the NEW card folder, but honoured the LEGACY ac-map.
+    const html = readFileSync(
+      join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
+      "utf8",
+    );
+    expect(html).toContain("⛔ Blocked");
+  });
+
   it("US-ATTEST-012 — ac-map fail/blocked statuses flow through to the report", async () => {
     const proj = project();
-    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     mkdirSync(storyDir, { recursive: true });
     writeFileSync(
       join(storyDir, "ac-map.json"),
@@ -141,7 +161,7 @@ describe("attestCommand", () => {
     await silenced(() =>
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
-    const html = readFileSync(join(storyDir, "2026-06-06T01-02-03", "report.html"), "utf8");
+    const html = readFileSync(join(storyDir, "2026-06-06T01-02-03", "FIX-300-report.html"), "utf8");
     expect(html).toContain("❌ Fail 未通过 × 1");
     expect(html).toContain("⛔ Blocked 受阻 × 1");
     expect(html).toContain("等 iOS 真机");
@@ -151,7 +171,7 @@ describe("attestCommand", () => {
 
   it("US-ATTEST-012 — text evidence carrying a secret is masked before it lands in the report + WARN留痕", async () => {
     const proj = project();
-    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     const runDir = join(storyDir, "2026-06-06T01-02-03");
     mkdirSync(join(runDir, "evidence"), { recursive: true });
     const secret = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
@@ -176,7 +196,7 @@ describe("attestCommand", () => {
       process.stderr.write = oErr;
       process.stdout.write = oOut;
     }
-    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
     expect(html).not.toContain(secret);
     expect(html).toContain("«REDACTED");
     expect(errs.join("")).toMatch(/redact/i); // 留痕: never silent
@@ -184,7 +204,7 @@ describe("attestCommand", () => {
 
   it("US-ATTEST-012 — a report with a broken img reference exits non-zero (render smoke)", async () => {
     const proj = project();
-    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     mkdirSync(storyDir, { recursive: true });
     // ac-map references a screenshot that was never captured → broken <img>.
     writeFileSync(
@@ -198,12 +218,12 @@ describe("attestCommand", () => {
     );
     expect(code).not.toBe(0); // broken reference → non-zero
     // report is still written (evidence preserved) even though the smoke failed
-    expect(existsSync(join(storyDir, "2026-06-06T01-02-03", "report.html"))).toBe(true);
+    expect(existsSync(join(storyDir, "2026-06-06T01-02-03", "FIX-300-report.html"))).toBe(true);
   });
 
   it("US-ATTEST-012 — a report whose img IS present passes smoke (exit 0)", async () => {
     const proj = project();
-    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     const runDir = join(storyDir, "2026-06-06T01-02-03");
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
     writeFileSync(join(runDir, "screenshots", "home.png"), "PNGDATA");
@@ -226,8 +246,8 @@ describe("attestCommand", () => {
     await silenced(() => inDir(proj, () => attestCommand(["FIX-300"], { ...opts, now: () => T0 })));
     const T1 = new Date("2026-06-06T02:00:00");
     await silenced(() => inDir(proj, () => attestCommand(["FIX-300"], { ...opts, now: () => T1 })));
-    const storyDir = join(proj, ".roll", "verification", "FIX-300");
-    expect(existsSync(join(storyDir, "2026-06-06T01-02-03", "report.html"))).toBe(true);
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    expect(existsSync(join(storyDir, "2026-06-06T01-02-03", "FIX-300-report.html"))).toBe(true);
     expect(readlinkSync(join(storyDir, "latest"))).toBe("2026-06-06T02-00-00");
   });
 
@@ -273,7 +293,7 @@ describe("US-ATTEST-013 — self-contained card context wiring", () => {
 
   it("detectBeforeAfter pairs before-/after- shots by stem; unmatched ignored", () => {
     const proj = project();
-    const runDir = join(proj, ".roll", "verification", "FIX-300", "run");
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "run");
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
     for (const f of ["before-home.png", "after-home.png", "before-orphan.png", "noise.png"]) {
       writeFileSync(join(runDir, "screenshots", f), "PNG");
@@ -292,7 +312,7 @@ describe("US-ATTEST-013 — self-contained card context wiring", () => {
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
     const html = readFileSync(
-      join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"),
+      join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
       "utf8",
     );
     expect(html).toContain("卡上下文 · Context");
@@ -326,9 +346,9 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
         }),
       ),
     );
-    const runDir = join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03");
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
     expect(existsSync(join(runDir, "screenshots", "terminal.png"))).toBe(true);
-    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
     expect(html).toContain("Gate self-capture · 自产实拍");
     expect(html).toContain('<img src="screenshots/terminal.png"');
   });
@@ -345,9 +365,9 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
         }),
       ),
     );
-    const runDir = join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03");
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
     expect(existsSync(join(runDir, "screenshots", "terminal.png"))).toBe(false);
-    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
     expect(html).not.toContain("Gate self-capture");
   });
 
@@ -388,7 +408,7 @@ describe("US-ATTEST-009 — self-score notes feed the report", () => {
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
     const html = readFileSync(
-      join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"),
+      join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
       "utf8",
     );
     expect(html).toContain("Self-Score · 自评（1）");
@@ -488,7 +508,7 @@ describe("attestCommand — process trace inline (US-ATTEST-014)", () => {
       withRuntimeEnv(proj, () => inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }))),
     );
     expect(code).toBe(0);
-    const html = readFileSync(join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"), "utf8");
+    const html = readFileSync(join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"), "utf8");
     expect(html).toContain("过程档案 · Process trace");
     expect(html).toContain("cyc-1");
     expect(html).toContain("first step"); // tcr signal
@@ -504,7 +524,7 @@ describe("attestCommand — process trace inline (US-ATTEST-014)", () => {
       withRuntimeEnv(proj, () => inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }))),
     );
     expect(code).toBe(0);
-    const html = readFileSync(join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"), "utf8");
+    const html = readFileSync(join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"), "utf8");
     expect(html).not.toContain("过程档案");
   });
 });

@@ -148,6 +148,42 @@ describe("US-ATTEST-013 — card context leads the business body", () => {
   });
 });
 
+describe("US-ATTEST-013 — evidence index closing section", () => {
+  it("lists every evidence file in one table (AC + before/after + self-capture)", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [
+        item({
+          id: "A:AC1",
+          evidence: [
+            { kind: "screenshot", label: "首页", href: "./screenshots/a.png" },
+            { kind: "ci", label: "CI run", href: "https://github.com/x/y/actions/runs/1" },
+          ],
+        }),
+      ],
+      beforeAfter: [
+        {
+          label: "首屏",
+          before: { kind: "screenshot", label: "改前", href: "./screenshots/before.png" },
+          after: { kind: "screenshot", label: "改后", href: "./screenshots/after.png" },
+        },
+      ],
+      selfCaptures: [{ kind: "screenshot", label: "terminal", href: "./screenshots/terminal.png" }],
+    });
+    expect(html).toContain("证据索引 · Evidence index");
+    expect(html).toContain("./screenshots/a.png");
+    expect(html).toContain("./screenshots/before.png");
+    expect(html).toContain("./screenshots/after.png");
+    expect(html).toContain("./screenshots/terminal.png");
+    expect(html).toContain("https://github.com/x/y/actions/runs/1");
+  });
+
+  it("no evidence at all ⇒ index skipped (no empty table)", () => {
+    const html = renderReport({ ...BASE, items: [item({ status: "missing" })] });
+    expect(html).not.toContain("证据索引");
+  });
+});
+
 describe("US-ATTEST-013 — before/after comparison", () => {
   it("renders paired before/after figures side by side", () => {
     const html = renderReport({

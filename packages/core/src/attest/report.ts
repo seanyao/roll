@@ -235,6 +235,37 @@ function selfCaptureBlock(refs: ReportInput["selfCaptures"]): string {
   return `<section class="self-capture"><h2>Gate self-capture · 自产实拍</h2>\n${figs}\n</section>`;
 }
 
+/**
+ * US-ATTEST-013 — closing evidence index. Every evidence file referenced
+ * anywhere in the report (per-AC, before/after, self-capture) appears once in a
+ * single table so a reviewer can reach the raw artifact directly. Screenshots /
+ * external links show their locator; inlined text shows "inline". Skipped
+ * entirely when nothing was collected (no empty table).
+ */
+function evidenceIndexBlock(
+  items: AcReportItem[],
+  beforeAfter: ReportInput["beforeAfter"],
+  selfCaptures: ReportInput["selfCaptures"],
+): string {
+  const rows: string[] = [];
+  const row = (ref: EvidenceRef): void => {
+    const loc =
+      ref.href !== undefined
+        ? `<a href="${esc(ref.href)}">${esc(ref.href)}</a>`
+        : ref.inlineHtml !== undefined
+          ? "inline"
+          : "—";
+    rows.push(`<tr><td><code>${esc(ref.kind)}</code></td><td>${esc(ref.label)}</td><td>${loc}</td></tr>`);
+  };
+  for (const it of items) for (const e of it.evidence) row(e);
+  if (beforeAfter !== undefined) for (const p of beforeAfter) for (const r of [p.before, p.after]) if (r.href !== undefined) row(r);
+  if (selfCaptures !== undefined) for (const r of selfCaptures) row(r);
+  if (rows.length === 0) return "";
+  return `<section class="evidence-index"><h2>证据索引 · Evidence index</h2>
+<table class="ev-index"><thead><tr><th>Kind</th><th>Label</th><th>Locator</th></tr></thead>
+<tbody>${rows.join("\n")}</tbody></table></section>`;
+}
+
 function selfScoreBlock(entries: ReportInput["selfScores"]): string {
   if (entries === undefined || entries.length === 0) return "";
   const li = entries
@@ -310,6 +341,10 @@ dl.delivery { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin
 dl.delivery dt { color:var(--muted); } dl.delivery dd { margin:0; }
 .before-after { margin:10px 0; } .before-after h3 { font-size:14px; margin:0 0 6px; }
 .ba-pair { display:flex; flex-wrap:wrap; gap:12px; } .ba-pair figure.shot { flex:1 1 280px; margin:0; }
+table.ev-index { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+table.ev-index th, table.ev-index td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
+table.ev-index th { color:var(--muted); font-weight:600; }
+table.ev-index td a { word-break:break-all; }
 @media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
 ${ANSI_CSS}
 </style>
@@ -324,6 +359,7 @@ ${items.map(acSection).join("\n")}
 ${beforeAfterBlock(input.beforeAfter)}
 ${selfCaptureBlock(input.selfCaptures)}
 ${disc}
+${evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures)}
 ${selfScoreBlock(input.selfScores)}
 </body>
 </html>

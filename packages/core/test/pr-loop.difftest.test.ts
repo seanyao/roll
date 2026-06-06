@@ -1,9 +1,10 @@
 /**
- * diff-test: pr-loop pure decisions vs the frozen bash/jq oracle (bin/roll).
+ * Frozen-expectation test: pr-loop pure decisions.
  *
- * Two load-bearing, byte-diffable rules are transcribed VERBATIM from bin/roll
- * and run against `jq` / `bash` (both confirmed on PATH), then asserted equal to
- * the TS port across an exhaustive input matrix:
+ * Two load-bearing rules were proven byte-equal to the bash/jq oracle (bin/roll)
+ * under diff-test across an exhaustive input matrix. Per US-PORT-009b the oracle
+ * is retired: the `jq`/`bash` spawns are dropped and each matrix row asserts
+ * against the frozen verdict captured while the oracle agreed.
  *
  *   - the CI statusCheckRollup reduction jq (bin/roll 11996-12000) vs
  *     {@link reduceCiRollup}.
@@ -14,7 +15,6 @@
  * processes + side effects, so it stays behaviour-tested in pr-loop.test.ts and
  * documented-not-difftested per the module header.
  */
-import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import {
   type CheckConclusion,
@@ -24,60 +24,42 @@ import {
   reduceCiRollup,
 } from "../src/loop/pr-loop.js";
 
-/** The exact jq from bin/roll 11996-12000 (the statusCheckRollup reduction). */
-const ROLLUP_JQ = `
-  if (.statusCheckRollup | length) == 0 then ""
-  elif any(.statusCheckRollup[]?; .conclusion == "FAILURE") then "failure"
-  elif all(.statusCheckRollup[]?; .conclusion == "SUCCESS" or .conclusion == "SKIPPED") then "success"
-  else "pending" end`;
-
-function bashRollup(conclusions: readonly CheckConclusion[]): string {
-  const rollup = conclusions.map((c) => (c === null ? { conclusion: null } : { conclusion: c }));
-  const input = JSON.stringify({ statusCheckRollup: rollup });
-  return execFileSync("jq", ["-r", ROLLUP_JQ], { input, encoding: "utf8" }).trim();
-}
-
-/** Transcribed `_loop_pr_classify` body (bin/roll 11754-11762). */
-function bashClassify(ciState: string, mergeable: string): string {
-  const script = `
-    mergeable="$1"; ci_state="$2"
-    case "$mergeable" in
-      BEHIND|DIRTY|CONFLICTING) echo "stale"; exit 0 ;;
-    esac
-    if [ "$ci_state" = "failure" ]; then echo "ci_red"; exit 0; fi
-    echo "ready"`;
-  return execFileSync("bash", ["-c", script, "bash", mergeable, ciState], { encoding: "utf8" }).trim();
-}
-
-describe("diff-test: reduceCiRollup == jq rollup reduction (bin/roll 11996-12000)", () => {
-  const matrix: CheckConclusion[][] = [
-    [],
-    ["SUCCESS"],
-    ["SUCCESS", "SKIPPED"],
-    ["SUCCESS", "FAILURE"],
-    ["FAILURE"],
-    ["SUCCESS", null],
-    ["SUCCESS", "NEUTRAL"],
-    ["SKIPPED", "SKIPPED"],
-    ["FAILURE", "SUCCESS", "SKIPPED"],
-    ["CANCELLED"],
-    [null, null],
+describe("frozen: reduceCiRollup == jq rollup reduction (bin/roll 11996-12000)", () => {
+  const cases: Array<{ rollup: CheckConclusion[]; expected: CiRollupState }> = [
+    { rollup: [], expected: "" },
+    { rollup: ["SUCCESS"], expected: "success" },
+    { rollup: ["SUCCESS", "SKIPPED"], expected: "success" },
+    { rollup: ["SUCCESS", "FAILURE"], expected: "failure" },
+    { rollup: ["FAILURE"], expected: "failure" },
+    { rollup: ["SUCCESS", null], expected: "pending" },
+    { rollup: ["SUCCESS", "NEUTRAL"], expected: "pending" },
+    { rollup: ["SKIPPED", "SKIPPED"], expected: "success" },
+    { rollup: ["FAILURE", "SUCCESS", "SKIPPED"], expected: "failure" },
+    { rollup: ["CANCELLED"], expected: "pending" },
+    { rollup: [null, null], expected: "pending" },
   ];
-  for (const m of matrix) {
-    it(`[${m.join(",")}] agrees`, () => {
-      const expected = bashRollup(m) as CiRollupState;
-      expect(reduceCiRollup(m)).toBe(expected);
+  for (const { rollup, expected } of cases) {
+    it(`[${rollup.join(",")}] → ${expected || "(empty)"}`, () => {
+      expect(reduceCiRollup(rollup)).toBe(expected);
     });
   }
 });
 
-describe("diff-test: classifyPr == _loop_pr_classify case (bin/roll 11748-11763)", () => {
+describe("frozen: classifyPr == _loop_pr_classify case (bin/roll 11748-11763)", () => {
   const cis: CiRollupState[] = ["failure", "success", "pending", ""];
   const mergeables: MergeStateStatus[] = ["CLEAN", "BEHIND", "DIRTY", "CONFLICTING", "BLOCKED", "UNKNOWN"];
+  // Frozen verdicts in (ci × mergeable) row-major order, captured from the agreed oracle.
+  const FROZEN = [
+    "ci_red", "stale", "stale", "stale", "ci_red", "ci_red",
+    "ready", "stale", "stale", "stale", "ready", "ready",
+    "ready", "stale", "stale", "stale", "ready", "ready",
+    "ready", "stale", "stale", "stale", "ready", "ready",
+  ];
+  let i = 0;
   for (const ci of cis) {
     for (const mb of mergeables) {
-      it(`ci='${ci}' mergeable='${mb}' agrees`, () => {
-        const expected = bashClassify(ci, mb);
+      const expected = FROZEN[i++];
+      it(`ci='${ci}' mergeable='${mb}' → ${expected}`, () => {
         expect(classifyPr(ci, mb)).toBe(expected);
       });
     }

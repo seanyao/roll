@@ -1,67 +1,24 @@
 /**
- * diff-test: TS pickStory vs the frozen bash oracle `_loop_pick_next_story`
- * (bin/roll ~13129), with its helpers `_loop_story_is_eligible` (~13094) and
- * `_loop_check_depends_on` (~11652).
+ * Frozen-expectation test: TS pickStory.
  *
- * Extraction: the three functions are cleanly extractable (harness style from
- * packages/spec/test/project.difftest.test.ts). The only external dependency is
- * the `gh pr list` open-PR probe (FIX-141); we stub `command` to report `gh`
- * unavailable, which the oracle treats as "no PR skipping" — so the diff-test
- * exercises the status + depends-on + file-order gates against an identical
- * empty open-PR set on both sides.
- *
- * The TS side parses the same fixture via `parseBacklog`, then `pickStory` with
- * the default (no open PR) predicate, mirroring the stubbed bash.
+ * pickStory was proven byte-equal to the bash oracle `_loop_pick_next_story`
+ * (bin/roll ~13129) + helpers `_loop_story_is_eligible` (~13094) and
+ * `_loop_check_depends_on` (~11652) under diff-test, with `gh` stubbed
+ * unavailable so the open-PR gate (FIX-141) was empty on both sides. Per
+ * US-PORT-009b the oracle is retired: the `sed`-extract + `bash` spawn is
+ * dropped and each fixture carries the frozen picked id captured while the
+ * oracle agreed. The TS side parses via `parseBacklog`, then `pickStory` with
+ * the default (no open PR) predicate.
  */
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseBacklog, pickStory } from "../src/index.js";
 
-const REPO = resolve(__dirname, "../../..");
-const dirs: string[] = [];
-
-afterAll(() => {
-  for (const d of dirs) execFileSync("rm", ["-rf", d]);
-});
-
-/** Run the extracted bash pick over a fixture; return the chosen id ("" if none). */
-function bashPick(backlogContent: string): string {
-  const proj = mkdtempSync(join(tmpdir(), "roll-pick-"));
-  dirs.push(proj);
-  mkdirSync(join(proj, ".roll"), { recursive: true });
-  writeFileSync(join(proj, ".roll", "backlog.md"), backlogContent, "utf8");
-  const script = [
-    "command() { return 1; }", // gh unavailable → oracle skips the PR gate
-    `eval "$(sed -n '/^_loop_check_depends_on()/,/^}$/p' "$ROLLBIN")"`,
-    `eval "$(sed -n '/^_loop_story_is_eligible()/,/^}$/p' "$ROLLBIN")"`,
-    `eval "$(sed -n '/^_loop_pick_next_story()/,/^}$/p' "$ROLLBIN")"`,
-    "_loop_pick_next_story .roll/backlog.md",
-  ].join("\n");
-  // The oracle exits 1 (and prints nothing) when no story is eligible; that is
-  // a valid "no pick" result, not a harness error — capture stdout regardless.
-  try {
-    const out = execFileSync("bash", ["-c", script], {
-      cwd: proj,
-      encoding: "utf8",
-      env: { ...process.env, ROLLBIN: `${REPO}/bin/roll` },
-    });
-    return out.trim();
-  } catch (err) {
-    const e = err as { status?: number; stdout?: string };
-    if (e.status === 1) return (e.stdout ?? "").trim();
-    throw err;
-  }
-}
-
-/** TS pick over the same fixture (default = no open PRs, matching stubbed gh). */
+/** TS pick over a fixture (default = no open PRs, matching the retired stubbed gh). */
 function tsPick(backlogContent: string): string {
   return pickStory(parseBacklog(backlogContent))?.id ?? "";
 }
 
-const FIXTURES: Array<{ name: string; content: string }> = [
+const FIXTURES: Array<{ name: string; content: string; expected: string }> = [
   {
     name: "FIX priority + satisfied depends-on",
     content: [
@@ -73,6 +30,7 @@ const FIXTURES: Array<{ name: string; content: string }> = [
       "| REFACTOR-1 | cleanup | 📋 Todo |",
       "",
     ].join("\n"),
+    expected: "FIX-9",
   },
   {
     name: "status skips (Hold/Blocked/Deferred) + missing dep skip",
@@ -84,6 +42,7 @@ const FIXTURES: Array<{ name: string; content: string }> = [
       "| US-4 | good | 📋 Todo |",
       "",
     ].join("\n"),
+    expected: "US-4",
   },
   {
     name: "multi-dep one not done — dependent skipped, the dep row itself picked",
@@ -93,6 +52,7 @@ const FIXTURES: Array<{ name: string; content: string }> = [
       "| US-B | b | 📋 Todo |",
       "",
     ].join("\n"),
+    expected: "US-B",
   },
   {
     name: "dep id mentioned in another row's description (FIX-161)",
@@ -101,10 +61,12 @@ const FIXTURES: Array<{ name: string; content: string }> = [
       "| US-TODO | mentions US-DONE here | 📋 Todo |",
       "",
     ].join("\n"),
+    expected: "US-TODO",
   },
   {
     name: "nothing eligible — empty pick on both sides",
     content: ["| US-1 | a | ✅ Done |", "| FIX-1 | b | 🚫 Hold |", ""].join("\n"),
+    expected: "",
   },
   {
     name: "US falls through after FIX/REFACTOR not eligible",
@@ -114,13 +76,14 @@ const FIXTURES: Array<{ name: string; content: string }> = [
       "| US-9 | u | 📋 Todo |",
       "",
     ].join("\n"),
+    expected: "US-9",
   },
 ];
 
-describe("diff-test: pickStory == bash _loop_pick_next_story", () => {
+describe("frozen: pickStory == bash _loop_pick_next_story", () => {
   for (const f of FIXTURES) {
     it(f.name, () => {
-      expect(tsPick(f.content)).toBe(bashPick(f.content));
+      expect(tsPick(f.content)).toBe(f.expected);
     });
   }
 });

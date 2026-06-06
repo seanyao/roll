@@ -21,16 +21,14 @@
  * Harness mirrors store.difftest.test.ts: sed-slice the bash fn, eval it, run
  * against a temp ROLL_PROJECT_RUNTIME_DIR, inspect the resulting file.
  */
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterAll, describe, expect, it } from "vitest";
 import { EventBus, nodeEventStore } from "../src/index.js";
 import type { RollEvent } from "@roll/spec";
 
-const REPO = resolve(__dirname, "../../..");
-const ROLLBIN = `${REPO}/bin/roll`;
 const dirs: string[] = [];
 
 afterAll(() => {
@@ -38,45 +36,20 @@ afterAll(() => {
 });
 
 /**
- * Run bash `_loop_event stage label detail outcome` with ROLL_PROJECT_RUNTIME_DIR
- * pointed at a fresh temp dir, then return the written events.ndjson content.
- * HOME is also redirected into the temp dir so the FIX-065 prod-write tripwire
- * treats this as a sandbox.
+ * Frozen v2 `_loop_event` output line (bin/roll:7902-7989). The oracle wrote a
+ * single newline-terminated flat-schema line `{ts, stage, label, detail,
+ * outcome}` per call. Captured while the diff-test agreed; `ts` is a live epoch
+ * in the real oracle so it is canonicalised to a fixed value here (no assertion
+ * inspects it — only the per-call line count, trailing newline, and key set).
  */
-function bashLoopEvent(stage: string, label: string, detail: string, outcome: string): {
-  rtDir: string;
-  content: string;
-} {
-  const home = mkdtempSync(join(tmpdir(), "roll-bus-home-"));
-  const rtDir = mkdtempSync(join(tmpdir(), "roll-bus-rt-"));
-  dirs.push(home, rtDir);
-  // Slice the small helpers _loop_event depends on so it can resolve the dir.
-  const script = [
-    `_project_slug() { echo "testslug"; }`,
-    `_loop_runtime_dir() { echo "${rtDir}"; }`,
-    `_loop_event_rotate() { :; }`, // rotation tested separately
-    `eval "$(sed -n '/^_loop_event()/,/^}$/p' "${ROLLBIN}")"`,
-    `_loop_event "$1" "$2" "$3" "$4"`,
-  ].join("\n");
-  execFileSync("bash", ["-c", script, "bash", stage, label, detail, outcome], {
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      HOME: home,
-      ROLL_PROJECT_RUNTIME_DIR: rtDir,
-      ROLL_LANG: "en",
-      NO_COLOR: "1",
-    },
-  });
-  return { rtDir, content: readFileSync(join(rtDir, "events.ndjson"), "utf8") };
-}
+const V2_EVENT_LINE =
+  '{"ts":1700000000,"stage":"cycle_end","label":"cyc-2","detail":"branch-x","outcome":"delivered"}\n';
 
-describe("diff-test: EventBus append mechanics == bash _loop_event", () => {
-  it("writes ONE line under the ROLL_PROJECT_RUNTIME_DIR (file location parity)", () => {
-    const bash = bashLoopEvent("cycle_start", "cyc-1", "US-1", "ok");
-    // bash: exactly one trailing-newline line lands in <rtDir>/events.ndjson.
-    expect(bash.content.endsWith("\n")).toBe(true);
-    expect(bash.content.split("\n").filter((l) => l !== "")).toHaveLength(1);
+describe("frozen: EventBus append mechanics == bash _loop_event", () => {
+  it("writes ONE newline-terminated line per call (file location parity)", () => {
+    // v2: exactly one trailing-newline line landed in <rtDir>/events.ndjson.
+    expect(V2_EVENT_LINE.endsWith("\n")).toBe(true);
+    expect(V2_EVENT_LINE.split("\n").filter((l) => l !== "")).toHaveLength(1);
 
     // TS: appending one RollEvent lands exactly one line in the same file name.
     const rtDir = mkdtempSync(join(tmpdir(), "roll-bus-ts-"));
@@ -109,8 +82,7 @@ describe("diff-test: EventBus append mechanics == bash _loop_event", () => {
   });
 
   it("DOCUMENTED divergence: v2 flat schema vs v3 RollEvent schema", () => {
-    const bash = bashLoopEvent("cycle_end", "cyc-2", "branch-x", "delivered");
-    const bashLine = JSON.parse(bash.content.trim()) as Record<string, unknown>;
+    const bashLine = JSON.parse(V2_EVENT_LINE.trim()) as Record<string, unknown>;
     // v2 line shape: flat {ts, stage, label, detail, outcome}.
     expect(Object.keys(bashLine).sort()).toEqual(["detail", "label", "outcome", "stage", "ts"]);
 

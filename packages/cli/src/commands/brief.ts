@@ -28,6 +28,7 @@ import {
   type BriefModel,
   composeBrief,
   decideCount,
+  parseBacklog,
   queueTotal,
   releaseReady,
 } from "@roll/core";
@@ -181,33 +182,11 @@ export function briefCommand(args: string[]): number {
     return 1;
   }
 
-  const content = readFileSync(BACKLOG_PATH, "utf8");
-  const items: BacklogItem[] = parseRows(content);
+  const items: BacklogItem[] = parseBacklog(readFileSync(BACKLOG_PATH, "utf8"));
   const model = composeBrief(items, activeAlerts());
   const dateStr = formatNow(new Date());
   process.stdout.write(renderBrief(model, lang, { full }, dateStr).join("\n") + "\n");
   return 0;
-}
-
-/** Local backlog row parse (same recognition as @roll/core parseBacklog, kept
- *  inline to avoid coupling the command to the store's snapshot/hash surface). */
-function parseRows(content: string): BacklogItem[] {
-  const items: BacklogItem[] = [];
-  const ID_LINK = /\[([^\]]+)\]\([^)]+\)/;
-  for (const raw of content.split("\n")) {
-    const line = raw.replace(/\r$/, "");
-    if (!line.startsWith("|")) continue;
-    const parts = line.split("|");
-    if (parts.length < 5) continue;
-    let id = (parts[1] ?? "").trim();
-    const m = ID_LINK.exec(id);
-    if (m !== null) id = (m[1] ?? id).trim();
-    if (!/^(US|FIX|REFACTOR|IDEA)-/.test(id)) continue;
-    const desc = (parts[2] ?? "").trim();
-    const status = (parts[parts.length - 2] ?? "").trim();
-    items.push({ id, desc, status });
-  }
-  return items;
 }
 
 /** `YYYY-MM-DD HH:MM` in local time (mirrors the v2 brief title stamp). */

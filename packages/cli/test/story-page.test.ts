@@ -1,7 +1,9 @@
 /**
  * Story-card page contract (US-META-005/006/007): one generator emits the
- * skeleton, markPhaseDone flips its sections — the round-trip locks the markup
- * contract that previously drifted between two hand-rolled skeletons.
+ * skeleton, markPhaseDone flips its sections by data-phase key — the
+ * round-trip locks the markup contract that previously drifted between two
+ * hand-rolled skeletons. Pages carry the shared dossier chrome (bilingual
+ * copy + lang/theme toggles, one inline script, no external assets).
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -48,22 +50,33 @@ describe("renderSpecMd", () => {
 describe("renderStoryPage + markPhaseDone round-trip", () => {
   const page = renderStoryPage({ id: "FIX-9", title: 'fix "it"', created: "2026-06-07" });
 
-  it("emits every phase as pending with a family badge", () => {
-    for (const [phase] of STORY_PHASES) {
-      expect(page).toContain(`<section class="phase-pending"><h2>${phase}</h2>`);
+  it("emits every phase as pending, keyed by data-phase, with bilingual copy", () => {
+    for (const p of STORY_PHASES) {
+      expect(page).toContain(`<section class="phase phase-pending" data-phase="${p.key}">`);
+      expect(page).toContain(`<span class="lang-en">${p.en}</span><span class="lang-zh">${p.zh}</span>`);
     }
     expect(page).toContain("<code>FIX</code>");
     expect(page).toContain("fix &quot;it&quot;");
   });
 
-  it("markPhaseDone flips exactly the named phase", () => {
-    const done = markPhaseDone(page, "Delivery", "<p>shipped</p>");
-    expect(done).toContain('<section class="phase-done"><h2>Delivery</h2><p>shipped</p></section>');
-    expect(done).not.toContain('<section class="phase-pending"><h2>Delivery</h2>');
-    expect(done).toContain('<section class="phase-pending"><h2>Design</h2>');
+  it("carries the standard chrome: lang + theme toggles, one inline script, no external assets", () => {
+    expect(page).toContain('data-set-lang="zh"');
+    expect(page).toContain('data-set-theme="dark"');
+    expect(page).toContain("localStorage");
+    expect(page).not.toContain("<script src=");
+    expect(page).not.toContain("<link");
   });
 
-  it("returns the html unchanged when the section is absent", () => {
-    expect(markPhaseDone("<html></html>", "Delivery", "x")).toBe("<html></html>");
+  it("markPhaseDone flips exactly the named phase", () => {
+    const done = markPhaseDone(page, "delivery", "<p>shipped</p>");
+    expect(done).toContain('<section class="phase phase-done" data-phase="delivery">');
+    expect(done).toContain("<p>shipped</p>");
+    expect(done).not.toContain('<section class="phase phase-pending" data-phase="delivery">');
+    expect(done).toContain('<section class="phase phase-pending" data-phase="design">');
+  });
+
+  it("returns the html unchanged for unknown keys or absent sections", () => {
+    expect(markPhaseDone(page, "nope", "x")).toBe(page);
+    expect(markPhaseDone("<html></html>", "delivery", "x")).toBe("<html></html>");
   });
 });

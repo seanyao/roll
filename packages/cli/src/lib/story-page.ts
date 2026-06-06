@@ -7,7 +7,13 @@
  * done through `markPhaseDone` — so the emitters and the updater can never
  * drift apart (previously two hand-rolled skeletons disagreed on the section
  * markup and attest's update regex silently matched only one of them).
+ *
+ * Pages wear the shared「交付档案 · Delivery Dossier」chrome from @roll/core:
+ * bilingual copy with an EN/中 toggle and a light/dark toggle, single
+ * self-contained file. Phase sections are addressed by `data-phase` keys, not
+ * by heading text — headings are bilingual and free to change.
  */
+import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 
 /** Story-ID families the archive layout recognizes (`<FAMILY>-<n>` dirs). */
 export const STORY_ID_RE = /^(FIX|US|IDEA|REFACTOR)-/;
@@ -32,13 +38,13 @@ export interface StoryCardMeta {
   note?: string;
 }
 
-/** Lifecycle phases every story page carries, with their pending placeholders. */
-export const STORY_PHASES: ReadonlyArray<readonly [string, string]> = [
-  ["Design", "Not yet started"],
-  ["Execution", "No cycles yet"],
-  ["Delivery", "Not yet delivered"],
-  ["Retrospective", "Not yet written"],
-];
+/** Lifecycle phases every story page carries, addressed by stable key. */
+export const STORY_PHASES = [
+  { key: "design", en: "Design", zh: "设计", emptyEn: "Not yet started", emptyZh: "尚未开始" },
+  { key: "execution", en: "Execution", zh: "执行", emptyEn: "No cycles yet", emptyZh: "暂无周期" },
+  { key: "delivery", en: "Delivery", zh: "交付", emptyEn: "Not yet delivered", emptyZh: "尚未交付" },
+  { key: "retrospective", en: "Retrospective", zh: "复盘", emptyEn: "Not yet written", emptyZh: "尚未撰写" },
+] as const;
 
 /** Render the `spec.md` definition file for a story card. */
 export function renderSpecMd(meta: StoryCardMeta): string {
@@ -56,37 +62,25 @@ export function renderSpecMd(meta: StoryCardMeta): string {
   );
 }
 
-/** Shared stylesheet — same visual language as the attest report (US-META-003). */
-const STORY_PAGE_CSS =
-  `:root { color-scheme: light dark; --fg:#1f2328; --bg:#ffffff; --muted:#57606a; --line:#d0d7de; }\n` +
-  `@media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --bg:#0d1117; --muted:#8b949e; --line:#30363d; } }\n` +
-  `body { margin:0 auto; max-width:880px; padding:32px 20px 80px; background:var(--bg); color:var(--fg);\n` +
-  `  font:15px/1.65 -apple-system, "PingFang SC", "Segoe UI", sans-serif; }\n` +
-  `h1 { font-size:22px; } h2 { font-size:18px; border-bottom:1px solid var(--line); padding-bottom:6px; }\n` +
-  `code { background:rgba(127,127,127,.12); padding:1px 6px; border-radius:6px; font-size:.92em; }\n` +
-  `pre { background:rgba(127,127,127,.08); padding:12px; border-radius:8px; overflow-x:auto; }\n` +
-  `section { border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:14px 0; }\n` +
-  `.empty { color:var(--muted); font-style:italic; }\n` +
-  `footer { color:var(--muted); font-size:13px; margin-top:36px; border-top:1px solid var(--line); padding-top:12px; }\n` +
-  `.phase-done { border-left:4px solid #2da44e; } .phase-pending { border-left:4px solid #d0d7de; }\n` +
-  `@media print { body { max-width:none; padding:0; } section { break-inside:avoid; } }\n`;
-
 /** Render the `index.html` skeleton for a story card (all phases pending). */
 export function renderStoryPage(meta: StoryCardMeta): string {
   const q = (s: string): string => s.replace(/"/g, "&quot;");
   const badge = storyFamilyOf(meta.id) ?? meta.id.split("-")[0];
   const sections = STORY_PHASES.map(
-    ([phase, empty]) =>
-      `<section class="phase-pending"><h2>${phase}</h2><p class="empty">${empty}</p></section>`,
+    (p) =>
+      `<section class="phase phase-pending" data-phase="${p.key}"><h2>${bi(p.en, p.zh)}</h2><p class="empty">${bi(p.emptyEn, p.emptyZh)}</p></section>`,
   ).join("\n");
   return (
-    `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n` +
+    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${meta.title !== undefined ? `${meta.id} — ${q(meta.title)}` : meta.id}</title>\n` +
-    `<style>\n${STORY_PAGE_CSS}</style>\n` +
-    `</head>\n<body>\n` +
+    `<style>\n${CHROME_CSS}` +
+    `.phase-done { border-left:4px solid var(--pass); } .phase-pending { border-left:4px solid var(--line); }\n` +
+    `</style>\n${CHROME_SCRIPT}\n` +
+    `</head>\n<body>\n${CHROME_CONTROLS}\n` +
+    `<p class="kicker">Roll · ${bi("Story Dossier", "故事档案")}</p>\n` +
     `<h1>${meta.id}</h1>\n` +
-    `<p class="meta"><code>${badge}</code> · Created ${meta.created}</p>\n` +
+    `<p class="meta"><code>${badge}</code> · ${bi("Created", "创建于")} ${meta.created}</p>\n` +
     (meta.title !== undefined ? `<p>${q(meta.title)}</p>\n` : "") +
     `${sections}\n` +
     `<footer>Roll · <a href="spec.md">spec.md</a></footer>\n</body>\n</html>\n`
@@ -94,12 +88,16 @@ export function renderStoryPage(meta: StoryCardMeta): string {
 }
 
 /**
- * Flip a phase section from pending to done, replacing its body. Returns the
- * html unchanged when the section is absent (legacy / hand-edited pages).
+ * Flip a phase section from pending to done, replacing its body. Sections are
+ * matched by `data-phase` key (markup-stable), and the bilingual heading is
+ * regenerated from STORY_PHASES. Returns the html unchanged when the section
+ * is absent (legacy / hand-edited pages) or the key is unknown.
  */
-export function markPhaseDone(html: string, phase: string, innerHtml: string): string {
+export function markPhaseDone(html: string, phaseKey: string, innerHtml: string): string {
+  const p = STORY_PHASES.find((x) => x.key === phaseKey);
+  if (p === undefined) return html;
   return html.replace(
-    new RegExp(`<section class="phase-pending">\\s*<h2>${phase}</h2>[\\s\\S]*?</section>`),
-    `<section class="phase-done"><h2>${phase}</h2>${innerHtml}</section>`,
+    new RegExp(`<section class="phase phase-pending" data-phase="${p.key}">[\\s\\S]*?</section>`),
+    `<section class="phase phase-done" data-phase="${p.key}"><h2>${bi(p.en, p.zh)}</h2>${innerHtml}</section>`,
   );
 }

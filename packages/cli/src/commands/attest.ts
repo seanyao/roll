@@ -25,6 +25,7 @@
  */
 import {
   acForStory,
+  bi,
   renderReport,
   ansiPre,
   boundTranscript,
@@ -580,9 +581,9 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     try {
       const reportRel = join(runId, reportFileName(storyId));
       const deliveryHtml =
-        `<p><a href="${reportRel}">Attestation report</a></p>\n` +
-        `<p class="muted">Delivered ${new Date().toISOString().slice(0, 10)}</p>\n`;
-      const idx = markPhaseDone(readFileSync(indexPath, "utf8"), "Delivery", deliveryHtml);
+        `<p><a href="${reportRel}">${bi("Attestation report", "验收报告")}</a></p>\n` +
+        `<p class="muted">${bi("Delivered", "交付于")} ${new Date().toISOString().slice(0, 10)}</p>\n`;
+      const idx = markPhaseDone(readFileSync(indexPath, "utf8"), "delivery", deliveryHtml);
       writeFileSync(indexPath, idx, "utf8");
     } catch {
       /* best-effort: index.html update is non-blocking */

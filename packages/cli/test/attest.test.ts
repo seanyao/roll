@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { EvidenceRun, ShotRun } from "@roll/infra";
+import { bi } from "@roll/core";
 import { attestCommand, buildCardContext, detectBeforeAfter, findFeatureFile, readBacklogRow } from "../src/commands/attest.js";
 
 const dirs: string[] = [];
@@ -95,7 +96,7 @@ describe("attestCommand", () => {
       join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
       "utf8",
     );
-    expect(html).toContain("🟧 Claimed 仅声明 × 2");
+    expect(html).toContain(`🟧 ${bi("Claimed", "仅声明")} × 2`);
   });
 
   it("ac-map.json drives statuses + inline text evidence from the run dir", async () => {
@@ -120,8 +121,8 @@ describe("attestCommand", () => {
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
     const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
-    expect(html).toContain("✅ Pass 通过 × 1");
-    expect(html).toContain("🟨 Partial 部分满足 × 1");
+    expect(html).toContain(`✅ ${bi("Pass", "通过")} × 1`);
+    expect(html).toContain(`🟨 ${bi("Partial", "部分满足")} × 1`);
     expect(html).toContain('<span class="a-fg32">✓ 8 passed</span>');
     expect(html).toContain("移动端未验");
     expect(html).not.toContain("Discrepancies"); // mapped evidence ⇒ no red-line downgrades
@@ -144,7 +145,7 @@ describe("attestCommand", () => {
       join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
       "utf8",
     );
-    expect(html).toContain("⛔ Blocked");
+    expect(html).toContain(`⛔ ${bi("Blocked", "受阻")}`);
   });
 
   it("US-ATTEST-012 — ac-map fail/blocked statuses flow through to the report", async () => {
@@ -162,8 +163,8 @@ describe("attestCommand", () => {
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
     const html = readFileSync(join(storyDir, "2026-06-06T01-02-03", "FIX-300-report.html"), "utf8");
-    expect(html).toContain("❌ Fail 未通过 × 1");
-    expect(html).toContain("⛔ Blocked 受阻 × 1");
+    expect(html).toContain(`❌ ${bi("Fail", "未通过")} × 1`);
+    expect(html).toContain(`⛔ ${bi("Blocked", "受阻")} × 1`);
     expect(html).toContain("等 iOS 真机");
     // blocked w/o evidence is NOT a red-line discrepancy (verified-state ≠ 嘴上 claim)
     expect(html).not.toContain("Discrepancies");
@@ -315,7 +316,7 @@ describe("US-ATTEST-013 — self-contained card context wiring", () => {
       join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
       "utf8",
     );
-    expect(html).toContain("卡上下文 · Context");
+    expect(html).toContain(bi("Context", "卡上下文"));
     expect(html).toContain("端到端一句话");
     expect(html).toContain("Backlog：🔨 In Progress");
   });
@@ -349,7 +350,7 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
     const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
     expect(existsSync(join(runDir, "screenshots", "terminal.png"))).toBe(true);
     const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
-    expect(html).toContain("Gate self-capture · 自产实拍");
+    expect(html).toContain(bi("Gate self-capture", "Gate 自产实拍"));
     expect(html).toContain('<img src="screenshots/terminal.png"');
   });
 
@@ -411,7 +412,7 @@ describe("US-ATTEST-009 — self-score notes feed the report", () => {
       join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
       "utf8",
     );
-    expect(html).toContain("Self-Score · 自评（1）");
+    expect(html).toContain(`${bi("Self-Score", "自评")}（1）`);
     expect(html).toContain("<b>8</b>/10 · good");
     expect(html).toContain("干净的一刀。");
     expect(html).not.toContain("无关条目");
@@ -509,7 +510,7 @@ describe("attestCommand — process trace inline (US-ATTEST-014)", () => {
     );
     expect(code).toBe(0);
     const html = readFileSync(join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"), "utf8");
-    expect(html).toContain("过程档案 · Process trace");
+    expect(html).toContain(bi("Process trace", "过程档案"));
     expect(html).toContain("cyc-1");
     expect(html).toContain("first step"); // tcr signal
     expect(html).toContain("完整转录"); // folded transcript present

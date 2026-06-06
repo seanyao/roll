@@ -1,16 +1,22 @@
 /**
- * diff-test: TS `roll status` == python lib/roll-status.py (frozen v2 oracle).
- * Fixture render (deterministic) + live render in a fabricated HOME/project.
+ * Frozen-expectation test: TS `roll status`.
+ *
+ * `statusCommand` was proven byte-equal to the python oracle lib/roll-status.py
+ * under diff-test (fixture render + live render in a fabricated HOME/project).
+ * Per US-PORT-009c the oracle is retired: the `python3 roll-status.py` spawn is
+ * dropped and each case freezes the TS render as an inline snapshot (zero engine
+ * spawn). The fixture render (ROLL_RENDER_FIXTURE=1) is fully deterministic; the
+ * live render embeds the random HOME/project paths, scrubbed to `<HOME>`/`<PROJ>`
+ * so the frozen value stays portable (macOS `/var/folders` vs Linux CI `/tmp`).
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { statusCommand } from "../src/commands/status.js";
 
 const REPO = resolve(__dirname, "../../..");
-const PY = join(REPO, "lib", "roll-status.py");
 const dirs: string[] = [];
 
 afterAll(() => {
@@ -47,22 +53,59 @@ function tsStatus(env: Record<string, string | undefined>, cwd?: string): string
   return chunks.join("");
 }
 
-function pyStatus(env: Record<string, string>, cwd?: string): string {
-  return execFileSync("python3", [PY, "--no-color"], {
-    cwd: cwd ?? REPO,
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-  });
-}
+describe("frozen: roll status render", () => {
+  it("fixture render", () => {
+    // In fixture mode every section is fixtured EXCEPT the THIS PROJECT header,
+    // which is `basename(cwd)` (the checkout dir name) → scrub to a placeholder
+    // so the frozen value stays portable across checkouts.
+    const ts = tsStatus({ ROLL_RENDER_FIXTURE: "1" }, REPO).split(basename(REPO)).join("<PROJECT>");
+    expect(ts).toMatchInlineSnapshot(`
+      "
+        ! drift  1/3 AI clients in sync · 12 skills · 4 templates
 
-describe("diff-test: roll status == roll-status.py", () => {
-  it("fixture render matches byte-for-byte", () => {
-    const py = pyStatus({ ROLL_RENDER_FIXTURE: "1" });
-    const ts = tsStatus({ ROLL_RENDER_FIXTURE: "1" }, REPO);
-    expect(ts).toBe(py);
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        GLOBAL CONVENTIONS  ·  全局约定                                        ~/.roll/conventions/global/
+
+        + AGENTS.md
+        + CLAUDE.md
+        − GEMINI.md  missing
+        + .cursor-rules
+        − project_rules.md  missing
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        AI CLIENTS  ·  AI 客户端同步                                     convention · path · sync · skills
+
+        name          convention    sync          skills
+        ────────────────────────────────────────────────────────────────────────────────────────────────
+        claude        CLAUDE.md     ✓ in sync     12
+        cursor        AGENTS.md     ~ out of sync 12
+             fix: roll setup -f cursor
+        agy           GEMINI.md     − missing     0
+             fix: roll setup -f agy
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        PROJECT TEMPLATES  ·  项目模板                                      ~/.roll/conventions/templates/
+
+        fullstack 14f  ·  frontend-only 9f  ·  backend-service 11f  ·  cli 7f
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        THIS PROJECT  ·  本项目                                                <PROJECT>
+
+        + AGENTS.md
+        + .roll/backlog.md
+        + .roll/features/  23 feature docs
+        ● loop · launchd enabled
+        ○ dream · launchd not installed
+
+      "
+    `);
   });
 
-  it("live render matches in a fabricated HOME + project", () => {
+  it("live render in a fabricated HOME + project", () => {
     const home = mkdtempSync(join(tmpdir(), "roll-status-home-"));
     const proj = mkdtempSync(join(tmpdir(), "roll-status-proj-"));
     dirs.push(home, proj);
@@ -110,8 +153,59 @@ describe("diff-test: roll status == roll-status.py", () => {
     writeFileSync(join(proj, ".roll", "features", "f2.md"), "f\n");
 
     const env = { HOME: home, ROLL_HOME: rollHome };
-    const py = pyStatus(env, proj);
-    const ts = tsStatus(env, proj);
-    expect(ts).toBe(py);
+    // Live render embeds the random HOME/project paths → scrub to placeholders
+    // so the frozen value stays portable (rollHome/claudeDir live under home; the
+    // THIS PROJECT header is `basename(cwd)`). The loop/dream lines read launchd:
+    // a fresh fabricated proj has no installed job on macOS and Linux has no
+    // launchd at all → both render "launchd not installed" deterministically.
+    const ts = tsStatus(env, proj)
+      .split(proj)
+      .join("<PROJ>")
+      .split(home)
+      .join("<HOME>")
+      .split(basename(proj))
+      .join("<PROJ>");
+    expect(ts).toMatchInlineSnapshot(`
+      "
+        ! drift  1/2 AI clients in sync · 2 skills · 2 templates
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        GLOBAL CONVENTIONS  ·  全局约定                                        ~/.roll/conventions/global/
+
+        + AGENTS.md
+        + CLAUDE.md
+        − GEMINI.md  missing
+        + .cursor-rules
+        − project_rules.md  missing
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        AI CLIENTS  ·  AI 客户端同步                                     convention · path · sync · skills
+
+        name          convention    sync          skills
+        ────────────────────────────────────────────────────────────────────────────────────────────────
+        claude        CLAUDE.md     ✓ in sync     2
+        cursor        AGENTS.md     − missing     0
+             fix: roll setup -f cursor
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        PROJECT TEMPLATES  ·  项目模板                                      ~/.roll/conventions/templates/
+
+        fullstack 2f  ·  − frontend-only missing  ·  − backend-service missing  ·  cli 1f
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        THIS PROJECT  ·  本项目                                                    <PROJ>
+
+        + AGENTS.md
+        + .roll/backlog.md
+        + .roll/features/  2 feature docs
+        ○ loop · launchd not installed
+        ○ dream · launchd not installed
+
+      "
+    `);
   });
 });

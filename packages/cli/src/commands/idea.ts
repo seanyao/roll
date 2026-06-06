@@ -18,7 +18,7 @@
  * Output follows the resolved locale (single-language).
  */
 import { existsSync } from "node:fs";
-import { BacklogStore, IDEA_SECTIONS, appendIdea, planIdea } from "@roll/core";
+import { BacklogStore, ConflictError, IDEA_SECTIONS, appendIdea, planIdea } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { c, renderState } from "../render.js";
 
@@ -51,9 +51,9 @@ export function ideaCommand(args: string[]): number {
     return 1;
   }
 
+  const RED = noColor ? "" : "\x1b[0;31m";
+  const NC = noColor ? "" : "\x1b[0m";
   if (!existsSync(BACKLOG_PATH)) {
-    const RED = noColor ? "" : "\x1b[0;31m";
-    const NC = noColor ? "" : "\x1b[0m";
     process.stderr.write(
       `${RED}[roll]${NC} ${t(v2Catalog, lang, "backlog.roll_backlog_md_not_found_run")}\n`,
     );
@@ -72,9 +72,19 @@ export function ideaCommand(args: string[]): number {
     return 1;
   }
 
-  store.writeBacklog(BACKLOG_PATH, snap.hash, (content) =>
-    appendIdea(content, plan.id, plan.kind, text).content,
-  );
+  try {
+    store.writeBacklog(BACKLOG_PATH, snap.hash, (content) =>
+      appendIdea(content, plan.id, plan.kind, text).content,
+    );
+  } catch (e) {
+    // The optimistic-write guard fired: the backlog changed between read and
+    // write. Emit a clean localized message instead of a raw stack trace.
+    if (e instanceof ConflictError) {
+      process.stderr.write(`${RED}[roll]${NC} ${label(lang, "ideav3.conflict")}\n`);
+      return 1;
+    }
+    throw e;
+  }
 
   const kindLabel = label(lang, plan.kind === "bug" ? "ideav3.kind_bug" : "ideav3.kind_idea");
   const section = IDEA_SECTIONS[plan.kind].replace(/^#+\s*/, "");

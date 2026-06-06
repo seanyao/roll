@@ -66,4 +66,8 @@ export const v3Catalog: Catalog = {
     en: "Shorten to one plain sentence: ≤120 chars, no code, paths, filenames, or function names",
     zh: "精简为一句人话：≤120 字，不含代码、路径、文件名或函数名",
   },
+  "ideav3.conflict": {
+    en: "Backlog changed on disk — re-run to capture",
+    zh: "待办文件已变更 — 请重试以记录",
+  },
 };

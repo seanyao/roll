@@ -21,15 +21,13 @@ export type IdeaKind = "bug" | "idea";
 export type IdeaPrefix = "FIX" | "IDEA";
 
 /**
- * Keyword signals that mark a capture as a bug rather than an idea. Scanned
- * case-insensitively against the raw text regardless of the output locale (a
- * user may type either language). DELIBERATE divergence from the roll-idea
- * skill's loose "也要/没/不" heuristic: those bare characters are far too noisy
- * for a deterministic classifier (they appear in ordinary feature requests), so
- * v3 keys on bug-signal phrases instead and documents it here.
+ * English defect vocabulary. Matched with letter boundaries (so "error" does
+ * not fire on "terror", nor "broken" on "unbroken") — see {@link classifyIdea}.
+ * DELIBERATE divergence from the roll-idea skill's loose "也要/没/不" heuristic:
+ * those bare characters are far too noisy for a deterministic classifier (they
+ * appear in ordinary feature requests), so v3 keys on bug-signal words instead.
  */
-const BUG_SIGNALS: readonly string[] = [
-  // English defect vocabulary
+const BUG_SIGNALS_EN: readonly string[] = [
   "bug",
   "broken",
   "breaks",
@@ -50,7 +48,11 @@ const BUG_SIGNALS: readonly string[] = [
   "hangs",
   "leak",
   "stale",
-  // Chinese defect vocabulary
+];
+
+/** Chinese defect vocabulary. Matched as substrings (CJK has no word
+ *  boundaries), scanned regardless of the output locale (users type either). */
+const BUG_SIGNALS_ZH: readonly string[] = [
   "报错",
   "错误",
   "崩溃",
@@ -68,11 +70,17 @@ const BUG_SIGNALS: readonly string[] = [
   "不对",
 ];
 
-/** Classify a capture as `bug` (defect signals present) or `idea` (otherwise). */
+/** Classify a capture as `bug` (defect signals present) or `idea` (otherwise).
+ *  English signals match on letter boundaries to avoid false positives like
+ *  "terror" → error; Chinese signals match as substrings. */
 export function classifyIdea(text: string): IdeaKind {
   const lower = text.toLowerCase();
-  for (const sig of BUG_SIGNALS) {
+  for (const sig of BUG_SIGNALS_ZH) {
     if (lower.includes(sig)) return "bug";
+  }
+  for (const sig of BUG_SIGNALS_EN) {
+    const escaped = sig.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(?<![a-z])${escaped}(?![a-z])`).test(lower)) return "bug";
   }
   return "idea";
 }
@@ -207,8 +215,9 @@ export function appendIdea(
   if (lastTable !== -1) {
     out.splice(lastTable + 1, 0, row);
   } else {
-    // Heading present but no table — insert a fresh table right after heading.
-    out.splice(h + 1, 0, "", TABLE_HEADER, TABLE_SEPARATOR, row);
+    // Heading present but no table — insert a fresh table right after heading,
+    // with a trailing blank so the row never abuts a following heading.
+    out.splice(h + 1, 0, "", TABLE_HEADER, TABLE_SEPARATOR, row, "");
   }
   return { content: out.join("\n"), section: heading };
 }

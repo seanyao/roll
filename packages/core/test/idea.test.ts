@@ -33,6 +33,12 @@ describe("classifyIdea", () => {
   it("empty text defaults to idea", () => {
     expect(classifyIdea("")).toBe("idea");
   });
+
+  it("English signals match on word boundaries (no substring false positives)", () => {
+    expect(classifyIdea("add a terror-alert banner")).toBe("idea"); // not "error"
+    expect(classifyIdea("ship the unbroken streak widget")).toBe("idea"); // not "broken"
+    expect(classifyIdea("a memory leak in the cache")).toBe("bug"); // whole word still fires
+  });
 });
 
 describe("prefixForKind", () => {

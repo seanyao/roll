@@ -115,7 +115,7 @@ function gitRemoteUrl(repoPath: string): string | null {
   return null;
 }
 
-function projectSlug(p?: string): string {
+export function projectSlug(p?: string): string {
   const envSlug = (process.env["ROLL_MAIN_SLUG"] ?? "").trim();
   if (envSlug) return envSlug;
 
@@ -151,7 +151,7 @@ function projectSlug(p?: string): string {
   return `${base}-${h}`;
 }
 
-function sharedRoot(): string {
+export function sharedRoot(): string {
   return process.env["ROLL_SHARED_ROOT"] || join(homedir(), ".shared", "roll");
 }
 
@@ -208,7 +208,7 @@ function resolveProjectPath(slug: string): string | null {
   return null;
 }
 
-function loopRuntimeDir(slug: string): string | null {
+export function loopRuntimeDir(slug: string): string | null {
   const envRt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
   if (envRt) return envRt;
   const proj = resolveProjectPath(slug);
@@ -382,7 +382,7 @@ function loadState(slug: string): Record<string, string> {
   return out;
 }
 
-function loadBacklog(projectRoot?: string): Record<string, string> {
+export function loadBacklog(projectRoot?: string): Record<string, string> {
   const path = join(projectRoot ?? "", ".roll/backlog.md");
   if (!existsSync(path)) return {};
   const out: Record<string, string> = {};
@@ -1955,6 +1955,307 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
   return r;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// `roll loop story <ID>` — per-story cycle rollup (US-PORT-007, port of
+// lib/roll-loop-story.py). Reuses the SAME cycle pipeline as the dashboard:
+// load events/cron/runs/git-merges → aggregate → merge runs → repair orphans →
+// backfill usage, then fold the cycles belonging to one story id.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Build the cycle history exactly as the dashboard does (py collect_cycles). */
+function collectCycles(slug: string, days: number): Cycle[] {
+  const events = loadEvents(slug, days);
+  const cron = loadCronLog(slug);
+  const runs = loadRuns(slug);
+  const gitMerges = loadPrMergesFromGit(days);
+  const cycles = aggregate(events, cron);
+  if (Object.keys(runs).length > 0) mergeRunsIntoCycles(cycles, runs);
+  if (Object.keys(gitMerges).length > 0) repairOrphanCyclesFromGit(cycles, gitMerges);
+  backfillUsageFromClaudeSessions(cycles, slug);
+  return cycles;
+}
+
+interface StoryPr {
+  num: number;
+  outcome: string;
+}
+
+/** The per-story rollup (py rollup_for_story). */
+export interface StoryRollup {
+  story_id: string;
+  cycles: Cycle[];
+  count: number;
+  ok_count: number;
+  fail_count: number;
+  running_count: number;
+  span_start: Date | null;
+  span_end: Date | null;
+  duration_s: number;
+  cost: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  prs: StoryPr[];
+  model: string | null;
+}
+
+/** Aggregate the cycles belonging to one story id (case-insensitive). Faithful
+ *  port of py rollup_for_story (lib/roll-loop-status.py:761). */
+export function rollupForStory(cycles: Cycle[], storyId: string): StoryRollup {
+  const sidLower = (storyId || "").toLowerCase();
+  const matched = cycles.filter((cy) => (cy.story ?? "").toLowerCase() === sidLower);
+  const r: StoryRollup = {
+    story_id: storyId,
+    cycles: matched,
+    count: matched.length,
+    ok_count: 0,
+    fail_count: 0,
+    running_count: 0,
+    span_start: null,
+    span_end: null,
+    duration_s: 0,
+    cost: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_tokens: 0,
+    cache_read_tokens: 0,
+    prs: [],
+    model: null,
+  };
+  for (const cy of matched) {
+    const outcome = cy.outcome ?? "";
+    if (outcome === "fail") r.fail_count += 1;
+    else if (outcome === "running") r.running_count += 1;
+    else r.ok_count += 1;
+    if (cy.start !== null) {
+      if (r.span_start === null || cy.start < r.span_start) r.span_start = cy.start;
+    }
+    if (cy.end !== null && cy.end !== undefined) {
+      if (r.span_end === null || cy.end > r.span_end) r.span_end = cy.end;
+    }
+    if (cy.duration_s) r.duration_s += cy.duration_s;
+    r.input_tokens += cy.input_tokens ?? 0;
+    r.output_tokens += cy.output_tokens ?? 0;
+    r.cache_creation_tokens += cy.cache_creation_tokens ?? 0;
+    r.cache_read_tokens += cy.cache_read_tokens ?? 0;
+    if (cy.cost_list !== null && cy.cost_list !== undefined) r.cost += cy.cost_list;
+    else if (cy.cron) r.cost += cy.cron.cost;
+    if (cy.pr_num) r.prs.push({ num: cy.pr_num, outcome: cy.pr_outcome ?? "open" });
+    if (cy.model && !r.model) r.model = cy.model;
+  }
+  return r;
+}
+
+/** py _fmt_dt — "YYYY-MM-DD HH:MM" in the fixed display TZ. roll-loop-status.py
+ *  pins the process TZ to Asia/Shanghai (UTC+8) before .astimezone(), so the
+ *  story panel must convert to +8 too (NOT the host's local TZ — that only
+ *  agreed by accident on a +8 dev box; CI runs UTC). Reuse shYmdHm. */
+function storyFmtDt(d: Date): string {
+  return shYmdHm(d);
+}
+
+/** py _fmt_dur. */
+function storyFmtDur(s: number): string {
+  if (!s) return "—";
+  const h = Math.trunc(s / 3600);
+  const m = Math.trunc((s % 3600) / 60);
+  return h ? `${h}h ${m < 10 ? `0${m}` : m}m` : `${m}m`;
+}
+
+/** py _fmt_tokens. */
+function storyFmtTokens(n: number): string {
+  if (!n) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+  return String(n);
+}
+
+/** py _fmt_pr. */
+function storyFmtPr(p: StoryPr): string {
+  const g = p.outcome === "merged" ? "✓" : p.outcome === "closed" ? "✗" : "⏵";
+  return `#${p.num} ${g}`;
+}
+
+function storyOutcomeGlyph(o: string): string {
+  if (o === "fail") return "✗";
+  if (o === "running") return "⏵";
+  if (o === "idle") return "·";
+  return "✓";
+}
+
+/** Render the per-story panel (py render_panel). */
+export function renderStoryPanel(r: StoryRollup, description = ""): string {
+  let head = `── ${r.story_id}`;
+  if (description) head += ` · ${description}`;
+  head += " " + "─".repeat(Math.max(0, 78 - head.length));
+
+  let span = "—";
+  if (r.span_start && r.span_end) span = `${storyFmtDt(r.span_start)}  →  ${storyFmtDt(r.span_end)}`;
+  else if (r.span_start) span = `${storyFmtDt(r.span_start)}  →  (running)`;
+
+  const counts = `  cycles    ${r.count}  (✓ ${r.ok_count}  ✗ ${r.fail_count}  ⏵ ${r.running_count})`;
+  const lineSpan = `  span      ${span}`;
+  const lineDur =
+    `  duration  ${storyFmtDur(r.duration_s)}` +
+    `   tokens  in ${storyFmtTokens(r.input_tokens)}` +
+    `  out ${storyFmtTokens(r.output_tokens)}` +
+    `  cache w ${storyFmtTokens(r.cache_creation_tokens)}` +
+    `  r ${storyFmtTokens(r.cache_read_tokens)}`;
+  const model = r.model || "—";
+  const lineCost = `  cost      $${r.cost.toFixed(2)}    model  ${model}`;
+  const prs = r.prs;
+  const linePrs = "  PRs       " + (prs.length ? prs.slice(0, 8).map(storyFmtPr).join(" ") : "—");
+
+  // Recent 3 cycles, oldest→newest of the matched set.
+  const recent = [...r.cycles]
+    .sort((a, b) => (a.start?.getTime() ?? -Infinity) - (b.start?.getTime() ?? -Infinity))
+    .slice(-3);
+  const recentLines: string[] = [];
+  recent.forEach((cy, i) => {
+    const label = cy.label || "—";
+    const glyph = storyOutcomeGlyph(cy.outcome ?? "");
+    const cost = cy.cost_list;
+    const costS = cost !== null && cost !== undefined ? `$${cost.toFixed(2)}` : "—";
+    const prefix = i === 0 ? "  recent   " : "           ";
+    recentLines.push(`${prefix} ${label}  ${glyph}  ${costS}`);
+  });
+  if (recentLines.length === 0) recentLines.push("  recent    —");
+
+  return [head, counts, lineSpan, lineDur, lineCost, linePrs, ...recentLines].join("\n");
+}
+
+/** Render the per-story rollup as JSON (py to_json — UTC ISO datetimes). */
+export function storyJson(r: StoryRollup): string {
+  const isoUtc = (d: Date | null): string | null => (d === null ? null : d.toISOString().replace(/\.\d{3}Z$/, "+00:00"));
+  const payload: Record<string, unknown> = {
+    story_id: r.story_id,
+    count: r.count,
+    ok_count: r.ok_count,
+    fail_count: r.fail_count,
+    running_count: r.running_count,
+    span_start: isoUtc(r.span_start),
+    span_end: isoUtc(r.span_end),
+    duration_s: r.duration_s,
+    cost: r.cost,
+    input_tokens: r.input_tokens,
+    output_tokens: r.output_tokens,
+    cache_creation_tokens: r.cache_creation_tokens,
+    cache_read_tokens: r.cache_read_tokens,
+    prs: r.prs,
+    model: r.model,
+    cycles: r.cycles.map((cy) => ({
+      label: cy.label,
+      start: isoUtc(cy.start),
+      end: isoUtc(cy.end ?? null),
+      outcome: cy.outcome,
+      duration_s: cy.duration_s ?? null,
+      input_tokens: cy.input_tokens ?? null,
+      output_tokens: cy.output_tokens ?? null,
+      cache_creation_tokens: cy.cache_creation_tokens ?? null,
+      cache_read_tokens: cy.cache_read_tokens ?? null,
+      cost_list: cy.cost_list ?? null,
+      model: cy.model ?? null,
+      pr_num: cy.pr_num ?? null,
+      pr_outcome: cy.pr_outcome ?? null,
+    })),
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+const STORY_HELP = `Usage: roll loop story <STORY-ID> [--days N] [--json]
+
+  Show a per-story rollup across cycles: count, span, duration, tokens,
+  cost, model, PR landings, and the last 3 cycles. Story ID is case-
+  insensitive (us-loop-004 == US-LOOP-004).
+
+Examples:
+  roll loop story US-LOOP-004
+  roll loop story us-loop-004 --days 90
+  roll loop story US-LOOP-004 --json | jq .cost
+`;
+
+/** `roll loop story <ID>` adapter. Exit 0 = ≥1 cycle, 2 = none, 1 = usage. */
+export function loopStoryCommand(argv: string[]): number {
+  const first = argv[0];
+  if (first === undefined || first === "-h" || first === "--help") {
+    process.stdout.write(STORY_HELP);
+    return 1;
+  }
+  let storyId = "";
+  let days = 30;
+  let wantJson = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--json") wantJson = true;
+    else if (a === "--days") {
+      const v = argv[++i];
+      const n = parseInt(v ?? "", 10);
+      if (Number.isFinite(n)) days = n;
+    } else if (a !== undefined && a.startsWith("--days=")) {
+      const n = parseInt(a.slice("--days=".length), 10);
+      if (Number.isFinite(n)) days = n;
+    } else if (a !== undefined && storyId === "") {
+      storyId = a;
+    }
+  }
+
+  const slug = projectSlug();
+  const cycles = collectCycles(slug, days);
+  const r = rollupForStory(cycles, storyId);
+
+  if (wantJson) {
+    process.stdout.write(storyJson(r) + "\n");
+    return r.count > 0 ? 0 : 2;
+  }
+  if (r.count === 0) {
+    process.stderr.write(
+      `roll loop story: no cycles found for ${storyId} in the last ${days} days\n` +
+        `未找到 ${storyId} 在最近 ${days} 天内的循环\n`,
+    );
+    return 2;
+  }
+  const backlog = loadBacklog();
+  const description = backlog[storyId.toUpperCase()] ?? "";
+  process.stdout.write(renderStoryPanel(r, description) + "\n");
+  return 0;
+}
+
+const EVAL_HELP = `Usage: roll loop eval [N]
+
+  Result-eval trend over the last N scored cycles (default 14).
+  Reads each runs.jsonl record's result_eval block and reports the mean and
+  minimum cycle score (1..10), each rubric dimension's hit-rate, and a trend
+  arrow. Cycles without a result_eval (older schema) are skipped. With fewer
+  than 3 scored cycles, prints an "(n/a) need 3" notice.
+
+  近 N 轮 cycle 的结果评分趋势（默认 14）。
+  读取每条 runs.jsonl 的 result_eval，输出均分 / 最低分 / 各维度命中率 / 趋势箭头。
+  无 result_eval 的旧记录跳过；样本不足 3 个时提示 (n/a) need 3。
+
+Examples:
+  roll loop eval
+  roll loop eval 30
+`;
+
+/** `roll loop eval [N]` adapter — validates N then delegates to the --eval view
+ *  (py _loop_eval → roll-loop-status.py --eval). */
+export function loopEvalCommand(argv: string[]): number {
+  const first = argv[0];
+  if (first === "-h" || first === "--help") {
+    process.stdout.write(EVAL_HELP);
+    return 0;
+  }
+  const noColor = (process.env["NO_COLOR"] ?? "") !== "";
+  if (first !== undefined && !/^[0-9]+$/.test(first)) {
+    const RED = noColor ? "" : "\x1b[0;31m";
+    const NC = noColor ? "" : "\x1b[0m";
+    process.stderr.write(`${RED}[roll]${NC} roll loop eval: N must be a positive integer (got '${first}')\n`);
+    return 1;
+  }
+  return dashboardCommand(first !== undefined ? ["--eval", first] : ["--eval"]);
 }
 
 export function dashboardCommand(argv: string[]): number {

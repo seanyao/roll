@@ -33,6 +33,8 @@ describe("v3Catalog", () => {
     "releasev3.gate_note",
     "releasev3.gate_preview",
     "releasev3.no_pkg",
+    "loopv3.monitor_retired",
+    "loopv3.attach_retired",
   ];
 
   it("every v3 key carries both en and zh (no mixed-language gap)", () => {

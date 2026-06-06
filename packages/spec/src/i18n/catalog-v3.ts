@@ -140,4 +140,18 @@ export const v3Catalog: Catalog = {
     en: "package.json version not found — run from the repo root",
     zh: "未找到 package.json 版本号 — 请在仓库根目录运行",
   },
+
+  // `loopv3.*` — the retirement notices for the v2 tmux-popup commands
+  // `loop monitor` / `loop attach` (US-PORT-007). The v3 self-contained runner
+  // already streams every cycle into the tmux session roll-loop-<slug>, so the
+  // old auto-refresh popup (monitor) has no object, and attaching is just a
+  // plain `tmux attach`. Both en and zh present (single-language contract).
+  "loopv3.monitor_retired": {
+    en: "roll loop monitor is retired. Use `roll loop status` for a snapshot, or watch the live cycle: tmux attach -t roll-loop-%s",
+    zh: "roll loop monitor 已退役。用 `roll loop status` 看快照，或观察实时周期：tmux attach -t roll-loop-%s",
+  },
+  "loopv3.attach_retired": {
+    en: "roll loop attach is retired. Attach to the live cycle directly: tmux attach -t roll-loop-%s",
+    zh: "roll loop attach 已退役。直接观察实时周期：tmux attach -t roll-loop-%s",
+  },
 };

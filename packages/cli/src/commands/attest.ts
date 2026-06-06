@@ -172,11 +172,21 @@ export function readSelfScores(
   return out;
 }
 
-/** `roll attest <story-id> [--deploy-url <url>]` */
+const USAGE = [
+  "Usage: roll attest <story-id> [--deploy-url <url>]",
+  "                   [--capture-terminal | --capture-tmux <session> | --capture-command <cmd>]",
+  "                   [--capture-region <x,y,w,h>]",
+  "  --capture-tmux <session>   self-capture a terminal attached to a tmux session (unattended Gate)",
+  "  --capture-command <cmd>    self-capture a terminal running <cmd>",
+  "  --capture-region <rect>    screencapture -R rectangle (default 0,0,1280,800)",
+  "  (terminal lane honestly skips off-GUI / without screen-recording permission)",
+].join("\n");
+
+/** `roll attest <story-id> [--deploy-url <url>] [--capture-tmux <s> | --capture-command <c>]` */
 export async function attestCommand(args: string[], deps: AttestDeps = {}): Promise<number> {
   const storyId = args.find((a) => !a.startsWith("-"));
   if (storyId === undefined || storyId === "") {
-    process.stderr.write("Usage: roll attest <story-id> [--deploy-url <url>]\n");
+    process.stderr.write(USAGE + "\n");
     return 1;
   }
   const flagVal = (name: string): string | undefined => {

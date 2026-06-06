@@ -1,22 +1,11 @@
 /**
- * diff-test: TS `roll ci` == bash `bin/roll ci` (frozen v2 oracle).
+ * diff-test: TS `roll ci` — frozen v2 oracle output.
  *
  * cmd_ci reports GitHub Actions status for the HEAD commit. The harness shims
- * `gh` on PATH (the oracle shells `gh run list … --json` then pipes through jq);
- * both sides run the SAME shim + a REAL git, so the parsed/formatted run lines
- * stay byte-identical. The TS port reimplements the `jq -r '.[] | "\(.name):
- * \(.status)/\(.conclusion)"'` interpolation natively (null → literal "null").
+ * `gh` on PATH; both sides run the SAME shim + a REAL git.
  *
- * Covered:
- *   - gh absent → warn + exit 0 (en/zh).
- *   - non-git dir (git rev-parse HEAD fails) → err + exit 1 (en/zh).
- *   - `gh run list` non-zero exit → warn "gh run list failed" + exit 0.
- *   - no runs ("[]") → "No CI runs for <short-sha>" + exit 0 (en/zh).
- *   - canned mixed runs (green / red / pending=null conclusion) → one line each.
- *   - unknown argument → usage err + exit 1 (en/zh).
- *
- * CI portability: a per-run scratch git repo (repo-local identity, one commit)
- * gives a stable HEAD; gh is a PATH shim; locale pinned. No network.
+ * Per US-PORT-009d the bash oracle spawn is dropped; values below were captured
+ * while tests were green (TS == oracle) and then frozen.
  */
 import { execSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
@@ -26,9 +15,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ciCommand } from "../src/commands/ci.js";
 import { seedUpdateCheckCache, pathWithout } from "./helpers.js";
 
-const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
-let rollHome = ""; // seeded ROLL_HOME so bin/roll's update-check write is silent
+let rollHome = "";
 
 // gh shims: one that returns canned JSON, one that exits non-zero, one absent.
 let binGhRuns = "";
@@ -57,7 +45,6 @@ beforeAll(() => {
   dirs.push(rollHome);
   seedUpdateCheckCache(join(rollHome, ".roll"));
 
-  // `gh run list … --json …` → canned JSON; anything else exits 0.
   writeGh(binGhRuns, [
     'if [ "$1" = "run" ] && [ "$2" = "list" ]; then',
     `  cat <<'JSON'`,
@@ -67,17 +54,14 @@ beforeAll(() => {
     "fi",
     "exit 0",
   ]);
-  // `gh run list` → "[]" (no runs).
   writeGh(binGhEmpty, [
     'if [ "$1" = "run" ] && [ "$2" = "list" ]; then echo "[]"; exit 0; fi',
     "exit 0",
   ]);
-  // `gh run list` → non-zero (gh failure).
   writeGh(binGhFail, [
     'if [ "$1" = "run" ] && [ "$2" = "list" ]; then echo "boom" >&2; exit 1; fi',
     "exit 0",
   ]);
-  // binNoGh: no gh binary at all.
 });
 
 afterAll(() => {
@@ -130,15 +114,6 @@ function baseEnv(cwd: string, shimDir: string, extra: Record<string, string>): R
   };
 }
 
-function bashCi(cwd: string, args: string[], shimDir: string, extra: Record<string, string> = {}): Run {
-  const r = spawnSync(join(REPO, "bin", "roll"), ["ci", ...args], {
-    cwd,
-    encoding: "utf8",
-    env: baseEnv(cwd, shimDir, extra),
-  });
-  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
-
 const ENV_KEYS = [
   "PATH", "HOME", "ROLL_HOME", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "PWD",
   "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
@@ -176,48 +151,76 @@ function tsCi(cwd: string, args: string[], shimDir: string, extra: Record<string
   return { status: status ?? 0, stdout: outChunks.join(""), stderr: errChunks.join("") };
 }
 
-/**
- * cmd_ci is read-only, so bash and TS run against the SAME cwd — crucial for the
- * paths that echo the HEAD short-sha (two separate repos would carry different
- * commit hashes and never byte-match).
- */
-function both(
-  buildCwd: () => string,
-  args: string[],
-  shimDir: string,
-  extra: Record<string, string> = {},
-): void {
-  const cwd = buildCwd();
-  const b = bashCi(cwd, args, shimDir, extra);
-  const t = tsCi(cwd, args, shimDir, extra);
-  expect(t).toEqual(b);
-}
+// HEAD short-sha varies per repo; scrub it before compare.
+const scrubSha = (s: string): string => s.replace(/[0-9a-f]{7}/g, "<SHA>");
 
-describe("diff-test: roll ci == bash oracle", () => {
-  for (const lang of ["en", "zh"]) {
-    it(`gh not installed → warn + exit 0 (${lang})`, () => {
-      both(gitRepo, [], binNoGh, { ROLL_LANG: lang });
-    });
-    it(`non-git dir → err + exit 1 (${lang})`, () => {
-      both(nonGitDir, [], binGhRuns, { ROLL_LANG: lang });
-    });
-    it(`no CI runs ("[]") → note + exit 0 (${lang})`, () => {
-      both(gitRepo, [], binGhEmpty, { ROLL_LANG: lang });
-    });
-    it(`unknown argument → usage err + exit 1 (${lang})`, () => {
-      both(gitRepo, ["--bogus"], binGhRuns, { ROLL_LANG: lang });
-    });
-  }
+describe("frozen: roll ci", () => {
+  it("gh not installed → warn + exit 0 (en)", () => {
+    const cwd = gitRepo();
+    expect(tsCi(cwd, [], binNoGh, { ROLL_LANG: "en" })).toEqual({ status: 0, stdout: "[roll] gh not installed  gh\n", stderr: "" });
+  });
+
+  it("non-git dir → err + exit 1 (en)", () => {
+    const cwd = nonGitDir();
+    expect(tsCi(cwd, [], binGhRuns, { ROLL_LANG: "en" })).toEqual({ status: 1, stdout: "", stderr: "[roll] Not a git repo\n" });
+  });
+
+  it('no CI runs ("[]") → note + exit 0 (en)', () => {
+    const cwd = gitRepo();
+    const r = tsCi(cwd, [], binGhEmpty, { ROLL_LANG: "en" });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(scrubSha(r.stdout)).toBe("No CI runs for <SHA>\n");
+  });
+
+  it("unknown argument → usage err + exit 1 (en)", () => {
+    const cwd = gitRepo();
+    expect(tsCi(cwd, ["--bogus"], binGhRuns, { ROLL_LANG: "en" })).toEqual({ status: 1, stdout: "", stderr: "[roll] Usage: roll ci [--wait] [--timeout=N]\n" });
+  });
+
+  it("gh not installed → warn + exit 0 (zh)", () => {
+    const cwd = gitRepo();
+    expect(tsCi(cwd, [], binNoGh, { ROLL_LANG: "zh" })).toEqual({ status: 0, stdout: "[roll] 未安装\n", stderr: "" });
+  });
+
+  it("non-git dir → err + exit 1 (zh)", () => {
+    const cwd = nonGitDir();
+    expect(tsCi(cwd, [], binGhRuns, { ROLL_LANG: "zh" })).toEqual({ status: 1, stdout: "", stderr: "[roll] 非 git 仓库\n" });
+  });
+
+  it('no CI runs ("[]") → note + exit 0 (zh)', () => {
+    const cwd = gitRepo();
+    const r = tsCi(cwd, [], binGhEmpty, { ROLL_LANG: "zh" });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(scrubSha(r.stdout)).toBe("<SHA> 无 CI 记录\n");
+  });
+
+  it("unknown argument → usage err + exit 1 (zh)", () => {
+    const cwd = gitRepo();
+    expect(tsCi(cwd, ["--bogus"], binGhRuns, { ROLL_LANG: "zh" })).toEqual({ status: 1, stdout: "", stderr: "[roll] 用法: roll ci [--wait] [--timeout=N]\n" });
+  });
 
   it("canned mixed runs → one line each (green/red/pending)", () => {
-    both(gitRepo, [], binGhRuns);
+    const cwd = gitRepo();
+    expect(tsCi(cwd, [], binGhRuns)).toEqual({
+      status: 0,
+      stdout: "build: completed/success\nlint: completed/failure\ne2e: in_progress/null\n",
+      stderr: "",
+    });
   });
 
   it("gh run list failure → warn + exit 0", () => {
-    both(gitRepo, [], binGhFail);
+    const cwd = gitRepo();
+    expect(tsCi(cwd, [], binGhFail)).toEqual({ status: 0, stdout: "[roll] gh run list failed\n", stderr: "" });
   });
 
   it("--timeout=N without --wait → falls through to read surface", () => {
-    both(gitRepo, ["--timeout=60"], binGhRuns);
+    const cwd = gitRepo();
+    expect(tsCi(cwd, ["--timeout=60"], binGhRuns)).toEqual({
+      status: 0,
+      stdout: "build: completed/success\nlint: completed/failure\ne2e: in_progress/null\n",
+      stderr: "",
+    });
   });
 });

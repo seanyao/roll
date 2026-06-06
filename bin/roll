@@ -3960,7 +3960,7 @@ _peer_dispatch_in_tmux() {
   local session="$1" cmd_str="$2" out_file="$3" err_file="$4" timeout="${5:-180}"
   local done_file="${out_file}.done"
   local inner
-  inner=$(mktemp /tmp/roll-peer-inner-XXXXXX.sh)
+  inner=$(mktemp /tmp/roll-peer-inner-$$-XXXXXX.sh)
   {
     printf '#!/bin/bash -l\n'
     # FIX-050: portable PATH assembly (was hardcoded /opt/homebrew/bin)

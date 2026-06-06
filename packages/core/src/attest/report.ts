@@ -78,6 +78,45 @@ export interface BeforeAfterPair {
   after: EvidenceRef;
 }
 
+/**
+ * US-ATTEST-014 — one timeline entry of the process trace (structurally the
+ * core extractor's {@link TimelineEntry}, restated here so the renderer stays
+ * decoupled from the loop module). `offsetSec` is seconds since cycle start.
+ */
+export interface ProcessTimelineEntry {
+  offsetSec: number;
+  layer: "outline" | "signal";
+  marker: string;
+  label: string;
+}
+
+/**
+ * US-ATTEST-014 — the cycle process archive a reviewer traces to answer "how
+ * did this card actually get built". Loop-delivered cards carry a cycle id +
+ * agent + timeline + (bounded) transcript; a card delivered by hand degrades to
+ * `delivery: "manual"` ("conductor 手工交付") with whatever process evidence is
+ * available. Any missing segment is named in {@link missing} (D1 degrade, never
+ * a hard error). Absent archive ⇒ the whole section is trimmed.
+ */
+export interface ProcessArchive {
+  delivery: "loop" | "manual";
+  cycleId?: string;
+  agent?: string;
+  /** Chronological timeline (outline spine + signal turning points). */
+  timeline?: ProcessTimelineEntry[];
+  /** Bounded raw transcript, pre-rendered to inline HTML (ANSI→HTML). */
+  transcript?: {
+    inlineHtml: string;
+    truncated: boolean;
+    totalLen: number;
+    shownLen: number;
+    /** Path to the machine original (indexed, never embedded whole). */
+    originalPath?: string;
+  };
+  /** Segments unavailable for this card (e.g. ["transcript"]) — degrade markers. */
+  missing?: string[];
+}
+
 export interface ReportInput {
   storyId: string;
   title: string;
@@ -93,6 +132,9 @@ export interface ReportInput {
   /** US-ATTEST-009 — same-story Self-Score entries from .roll/notes/; the
    *  whole collapsed block is SKIPPED when none exist (no placeholder). */
   selfScores?: Array<{ skill: string; score: number; verdict: string; ts: string; note: string }>;
+  /** US-ATTEST-014 — the cycle process archive (timeline + signal layer +
+   *  folded transcript). Absent ⇒ section trimmed; `manual` delivery degrades. */
+  process?: ProcessArchive;
   /** US-ATTEST-011 — screenshots an unattended cycle's Gate produced for itself
    *  (terminal lane). Renders a dedicated figure section; the block is SKIPPED
    *  when empty (deletion-not-placeholder — a headless host that honestly
@@ -266,6 +308,63 @@ function evidenceIndexBlock(
 <tbody>${rows.join("\n")}</tbody></table></section>`;
 }
 
+/** Format whole seconds as `+MM:SS` (minutes grow past 59; timezone-free). */
+function fmtOffset(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const mm = Math.floor(s / 60);
+  const ss = s % 60;
+  return `+${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+}
+
+/**
+ * US-ATTEST-014 — the process trace section. Loop-delivered cards lead with the
+ * cycle id + agent, then the timeline (outline spine + signal turning points,
+ * the signal layer styled so it is 一眼可辨), then the full transcript folded in
+ * a `<details>` appendix carrying its truncation note and the machine-original
+ * path index. A hand-delivered card degrades to "conductor 手工交付" and names
+ * the missing segments. The whole section is trimmed when no archive is present.
+ */
+function processTraceBlock(p: ProcessArchive | undefined): string {
+  if (p === undefined) return "";
+  const rows: string[] = [];
+
+  const mode =
+    p.delivery === "manual"
+      ? `<p class="delivery-mode">🧑‍🔧 conductor 手工交付 · delivered by hand（无自动周期 · no loop cycle）</p>`
+      : `<p class="delivery-mode">🔁 loop cycle${p.cycleId !== undefined && p.cycleId !== "" ? ` <code>${esc(p.cycleId)}</code>` : ""}${p.agent !== undefined && p.agent !== "" ? ` · agent <code>${esc(p.agent)}</code>` : ""}</p>`;
+  rows.push(mode);
+
+  if (p.timeline !== undefined && p.timeline.length > 0) {
+    const li = p.timeline
+      .map(
+        (t) =>
+          `<li class="tl-${t.layer === "signal" ? "signal" : "outline"}"><span class="tl-offset">${esc(fmtOffset(t.offsetSec))}</span> <span class="tl-label">${esc(t.label)}</span></li>`,
+      )
+      .join("\n");
+    rows.push(`<ol class="timeline">\n${li}\n</ol>`);
+  }
+
+  if (p.missing !== undefined && p.missing.length > 0) {
+    rows.push(`<p class="trace-missing">过程数据缺失 · missing process data：${p.missing.map(esc).join(" · ")}</p>`);
+  }
+
+  if (p.transcript !== undefined) {
+    const t = p.transcript;
+    const note = t.truncated
+      ? `已截断 · truncated（展示 ${t.shownLen} / ${t.totalLen} 字符 · chars shown）`
+      : `完整内联 · full inline（${t.totalLen} 字符 · chars）`;
+    const idx =
+      t.originalPath !== undefined && t.originalPath !== ""
+        ? `<p class="orig-path">机器原件 · machine original：<code>${esc(t.originalPath)}</code></p>`
+        : "";
+    rows.push(
+      `<details class="transcript"><summary>完整转录 · Full transcript（${esc(note)}）</summary>\n${idx}\n${t.inlineHtml}\n</details>`,
+    );
+  }
+
+  return `<section class="process-trace"><h2>过程档案 · Process trace</h2>\n${rows.join("\n")}\n</section>`;
+}
+
 function selfScoreBlock(entries: ReportInput["selfScores"]): string {
   if (entries === undefined || entries.length === 0) return "";
   const li = entries
@@ -354,6 +453,17 @@ table.ev-index { width:100%; border-collapse:collapse; font-size:13px; margin-to
 table.ev-index th, table.ev-index td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
 table.ev-index th { color:var(--muted); font-weight:600; }
 table.ev-index td a { word-break:break-all; }
+section.process-trace { margin-top:28px; border:1px solid var(--line); border-radius:10px; padding:6px 16px 12px; }
+.delivery-mode { font-size:13.5px; color:var(--muted); }
+ol.timeline { list-style:none; margin:8px 0; padding:0; font-size:13.5px; }
+ol.timeline li { padding:3px 0 3px 10px; border-left:2px solid var(--line); }
+ol.timeline li.tl-signal { border-left:3px solid #218bff; font-weight:600; }
+ol.timeline li.tl-outline { color:var(--muted); }
+ol.timeline .tl-offset { display:inline-block; min-width:58px; color:var(--muted); font-variant-numeric:tabular-nums; font-size:12.5px; }
+.trace-missing { color:#bf6a02; font-size:13px; }
+details.transcript { margin-top:8px; border:1px solid var(--line); border-radius:8px; padding:6px 12px; background:rgba(127,127,127,.04); }
+details.transcript summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+details.transcript .orig-path { font-size:12.5px; color:var(--muted); margin:6px 0; }
 section.closing { margin-top:32px; border-top:2px solid var(--line); padding-top:8px; }
 @media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
 ${ANSI_CSS}
@@ -367,6 +477,7 @@ ${cardContextBlock(input.context)}
 ${items.map(acSection).join("\n")}
 ${beforeAfterBlock(input.beforeAfter)}
 ${selfCaptureBlock(input.selfCaptures)}
+${processTraceBlock(input.process)}
 ${closing}
 </body>
 </html>

@@ -15,6 +15,7 @@ import {
   readAttestGateMode,
   runAttestGate,
   verificationReportFresh,
+  verificationReportHasContent,
 } from "../src/runner/attest-gate.js";
 
 const dirs: string[] = [];
@@ -28,14 +29,31 @@ function tmp(tag: string): string {
   return d;
 }
 
-/** Write a report.html under the verification layout; return the worktree root. */
+/**
+ * Write a CONTENT-BEARING report.html (≥1 AC section) + an ac-map under the
+ * verification layout; return the worktree root. A real delivery has both —
+ * the empty-shell case is exercised separately by {@link withEmptyShell}.
+ */
 function withReport(storyId: string, mtimeSec?: number): string {
   const wt = tmp("wt");
+  const storyDir = join(wt, ".roll", "verification", storyId);
+  const dir = join(storyDir, "latest");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(storyDir, "ac-map.json"), "[]\n");
+  const p = join(dir, "report.html");
+  writeFileSync(p, `<html><body><section class="ac s-pass" id="${storyId}:AC1">x</section></body></html>\n`);
+  if (mtimeSec !== undefined) utimesSync(p, mtimeSec, mtimeSec);
+  return wt;
+}
+
+/** A fresh report that is an EMPTY SHELL: parseable but zero AC content, no ac-map. */
+function withEmptyShell(storyId: string, mtimeSec: number): string {
+  const wt = tmp("shell");
   const dir = join(wt, ".roll", "verification", storyId, "latest");
   mkdirSync(dir, { recursive: true });
   const p = join(dir, "report.html");
-  writeFileSync(p, "<html>report</html>\n");
-  if (mtimeSec !== undefined) utimesSync(p, mtimeSec, mtimeSec);
+  writeFileSync(p, "<html><body><h1>no ACs here</h1></body></html>\n");
+  utimesSync(p, mtimeSec, mtimeSec);
   return wt;
 }
 
@@ -65,6 +83,22 @@ describe("verificationReportFresh", () => {
 
   it("empty storyId is never fresh", () => {
     expect(verificationReportFresh(tmp("x"), "", 1)).toBe(false);
+  });
+});
+
+describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
+  it("report with ≥1 AC section + ac-map → has content", () => {
+    const wt = withReport("FIX-320", 2000);
+    expect(verificationReportHasContent(wt, "FIX-320")).toBe(true);
+  });
+
+  it("empty shell (parseable but zero AC, no ac-map) → NO content (FIX-214)", () => {
+    const wt = withEmptyShell("FIX-321", 2000);
+    expect(verificationReportHasContent(wt, "FIX-321")).toBe(false);
+  });
+
+  it("absent report → no content", () => {
+    expect(verificationReportHasContent(tmp("none"), "FIX-322")).toBe(false);
   });
 });
 
@@ -107,6 +141,16 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.blocked).toBe(true);
     expect(alerts[0]).toContain("attest gate (hard)");
     expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("US-ATTEST-012: a fresh but EMPTY-SHELL report is skipped (存在性≠有内容, FIX-214)", () => {
+    const wt = withEmptyShell("FIX-314", 2000); // fresh (≥ start 1000) but zero AC
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-314", "c-5", "soft", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatch(/empty|content|shell/i);
     expect(events[0]?.verdict).toBe("skipped");
   });
 

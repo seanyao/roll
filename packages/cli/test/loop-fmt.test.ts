@@ -6,9 +6,14 @@
  * pipes a whole stream. Color is asserted off for determinism — the structure
  * (category + label + detail present) is what matters.
  */
+import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { renderState } from "../src/render.js";
 import { formatStream, renderFmtLine } from "../src/commands/loop-fmt.js";
+
+const CLI_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "roll.js");
 
 renderState.useColor = false; // deterministic, plain-text assertions
 
@@ -66,5 +71,34 @@ describe("formatStream — whole-stream folding", () => {
     const out = formatStream(lines, "claude");
     expect(out.length).toBe(1);
     expect(out[0]).toContain("FIX-1");
+  });
+});
+
+describe("E2E — `roll loop fmt` golden path (spawned binary, stdin→stdout)", () => {
+  it("folds a real cycle stream into a readable transcript via the pipe", () => {
+    const stream = [
+      "── cycle 20260606-1 · US-PORT-012 · agent claude ──",
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking: "planning" }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "x.ts" } }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "src/loop-fmt.ts" } }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'tcr: ship it'" } }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: false, content: "[loop/x abc1234] tcr: ship it" }] } }),
+      JSON.stringify({ type: "result", subtype: "success", duration_ms: 12000, total_cost_usd: 0.05 }),
+    ].join("\n") + "\n";
+
+    const out = execFileSync("node", [CLI_BIN, "loop", "fmt"], {
+      input: stream,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    // signals surfaced, noise gone
+    expect(out).toContain("US-PORT-012"); // cycle banner
+    expect(out).toContain("loop-fmt.ts"); // muted edit
+    expect(out).toContain("abc1234"); // tcr signal
+    expect(out).toContain("ship it");
+    expect(out).toContain("cycle done");
+    expect(out).not.toContain("planning"); // thinking suppressed
+    expect(out).not.toContain('"type"'); // no raw json leaked through
   });
 });

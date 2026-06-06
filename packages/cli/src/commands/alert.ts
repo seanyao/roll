@@ -66,15 +66,20 @@ function projectSlug(): string {
 }
 
 /**
- * Resolve the ACTIVE alert file ($_LOOP_ALERT). Honors ROLL_PROJECT_RUNTIME_DIR
- * (test rt-dir) first, then $_SHARED_ROOT/loop, then ~/.shared/roll/loop — the
- * shared-root path being the one a live `roll alert` actually uses (see header).
+ * Resolve the ACTIVE alert file ($_LOOP_ALERT). Project-local first:
+ * `.roll/loop/ALERT-<slug>.md` (FIX-052: per-project state). Falls back to
+ * the v2 shared location for backward compat with pre-existing alerts.
+ * ROLL_PROJECT_RUNTIME_DIR (test only) overrides all.
  */
 function loopAlertPath(): string {
   const slug = projectSlug();
   const name = alertFileName(slug);
   const rt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
   if (rt !== undefined && rt !== "") return join(rt, name);
+  // Project-local first (FIX-052 / FIX-216).
+  const local = join(".roll", "loop", name);
+  if (existsSync(local)) return local;
+  // V2 shared fallback — backward compat for pre-existing alerts from old loops.
   const shared = process.env["_SHARED_ROOT"] ?? join(homedir(), ".shared", "roll");
   return join(shared, "loop", name);
 }

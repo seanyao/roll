@@ -15,7 +15,6 @@
 import { EventBus, type RouteDeps, cycleEndEvent, mapV2Status } from "@roll/core";
 import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, runCycleOnce } from "../runner/index.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
@@ -266,15 +265,10 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   }
 
   const rt = runtimeDir(id.path);
-  // FIX-216a: alertsPath must match the file `roll alert` reads — the shared
-  // ALERT-<slug>.md, same as v2's $_LOOP_ALERT.  The old `alerts.log` was a
-  // siloed file that neither the bash dashboard nor `roll alert` consumed.
-  // Honors ROLL_PROJECT_RUNTIME_DIR (test redirect), then _SHARED_ROOT, then ~/.shared/roll.
-  const sharedRoot = process.env["_SHARED_ROOT"] ?? join(homedir(), ".shared", "roll");
-  const alertRt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
-  const alertsPath = alertRt !== ""
-    ? join(alertRt, `ALERT-${id.slug}.md`)
-    : join(sharedRoot, "loop", `ALERT-${id.slug}.md`);
+  // FIX-216a: alerts go to project-local .roll/loop/ALERT-<slug>.md —
+  // same location `roll alert` reads from (FIX-052: per-project state).
+  // The old `alerts.log` was a siloed file no consumer could find.
+  const alertsPath = join(rt, `ALERT-${id.slug}.md`);
   mkdirSync(dirname(alertsPath), { recursive: true });
 
   const paths: RunnerPaths = {

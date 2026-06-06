@@ -1,14 +1,11 @@
 /**
- * diff-test: TS `roll loop signals` == bash `bin/roll loop signals` (frozen
- * oracle). The detector itself is a verified direct port (@roll/core
- * detectSignals == lib/loop_result_eval.py, covered in core); this test pins
- * the CLI adapter's observable contract: stdout lines, the candidates.md draft
- * blocks, dedup on re-run, and --quiet. US-PORT-007.
+ * diff-test: TS `roll loop signals` — frozen v2 oracle output.
  *
- * Bash and TS run in SEPARATE sandboxes with identical seeds (a shared sandbox
- * would let one side's dedup mask the other). stdout's final line embeds the
- * absolute candidates.md path, so it is normalized before comparison; the
- * volatile `- Detected:` timestamp line is stripped from candidates.md.
+ * The detector itself is a verified direct port (@roll/core detectSignals);
+ * this test pins the CLI adapter's observable contract.
+ *
+ * Per US-PORT-009d the bash oracle spawn is dropped; values below were captured
+ * while tests were green (TS == oracle) and then frozen.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,8 +14,6 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { loopSignalsCommand } from "../src/commands/loop-signals.js";
 
-const REPO = resolve(__dirname, "../../..");
-const BASH = join(REPO, "bin", "roll");
 const dirs: string[] = [];
 const SLUG = "test-sig-abc123";
 
@@ -72,14 +67,6 @@ function tsRun(env: Record<string, string>, argv: string[]): string {
   return out.join("");
 }
 
-function bashRun(env: Record<string, string>, argv: string[]): string {
-  try {
-    return execFileSync(BASH, ["loop", "signals", ...argv], { cwd: env["ROLL_MAIN_PROJECT"], encoding: "utf8", env: { ...process.env, ...env } });
-  } catch (e) {
-    return (e as { stdout?: string }).stdout ?? "";
-  }
-}
-
 /** Replace the sandbox's candidates.md absolute path with a placeholder. */
 function normalize(out: string, proj: string): string {
   return out.split(join(proj, ".roll", "signals", "candidates.md")).join("<CAND>");
@@ -105,17 +92,18 @@ function lowOutcomeRows(): object[] {
   }));
 }
 
-describe("diff-test: roll loop signals == bin/roll loop signals", () => {
+const FROZEN_FRESH = "signal: CAND-001 outcome → candidate FIX (cycles keep failing to merge into main for 3 cycles in a row)\n1 candidate draft(s) → <CAND> (📋 待人确认, not activated)\n";
+const FROZEN_CAND = "\n## CAND-001 — outcome (FIX) 📋 待人确认\n- Pattern: lowdim:outcome\n- Signal: cycles keep failing to merge into main for 3 cycles in a row\n- 信号：result-eval 维度 outcome 连续 3 轮低分；候选 FIX，待人确认后再激活。\n";
+
+describe("frozen: roll loop signals", () => {
   it("fresh signal → identical stdout + candidates.md draft", () => {
-    const a = sandbox(lowOutcomeRows());
     const b = sandbox(lowOutcomeRows());
-    const bashOut = bashRun(a.env, []);
     const tsOut = tsRun(b.env, []);
-    expect(normalize(tsOut, b.proj)).toBe(normalize(bashOut, a.proj));
-    expect(candBody(b.proj)).toBe(candBody(a.proj));
+    expect(normalize(tsOut, b.proj)).toBe(FROZEN_FRESH);
+    expect(candBody(b.proj)).toBe(FROZEN_CAND);
   });
 
-  it("no signal → 'no new improvement signals' on both sides", () => {
+  it("no signal → 'no new improvement signals'", () => {
     const good = [0, 1, 2].map((k) => ({
       project: SLUG,
       run_id: `r${k}`,
@@ -123,23 +111,19 @@ describe("diff-test: roll loop signals == bin/roll loop signals", () => {
       status: "built",
       result_eval: { version: 1, score: 9, dims: { outcome: 1.0, correctness: 1.0 } },
     }));
-    const a = sandbox(good);
     const b = sandbox(good);
-    expect(tsRun(b.env, [])).toBe(bashRun(a.env, []));
+    expect(tsRun(b.env, [])).toBe("no new improvement signals (result-eval patterns)\n");
   });
 
   it("no runs file → 'No loop runs yet'", () => {
-    const a = sandbox([]);
     const b = sandbox([]);
-    expect(tsRun(b.env, [])).toBe(bashRun(a.env, []));
+    expect(tsRun(b.env, [])).toBe("No loop runs yet\n");
   });
 
   it("--quiet suppresses output", () => {
-    const a = sandbox(lowOutcomeRows());
     const b = sandbox(lowOutcomeRows());
-    expect(tsRun(b.env, ["--quiet"])).toBe(bashRun(a.env, ["--quiet"]));
-    // ...but the candidate is still written.
-    expect(candBody(b.proj)).toBe(candBody(a.proj));
+    expect(tsRun(b.env, ["--quiet"])).toBe("");
+    expect(candBody(b.proj)).toBe(FROZEN_CAND);
     expect(candBody(b.proj)).toContain("lowdim:outcome");
   });
 
@@ -152,8 +136,7 @@ describe("diff-test: roll loop signals == bin/roll loop signals", () => {
   });
 
   it("--streak below the run length still fires; help exits 0", () => {
-    const a = sandbox(lowOutcomeRows());
     const b = sandbox(lowOutcomeRows());
-    expect(normalize(tsRun(b.env, ["--streak", "2"]), b.proj)).toBe(normalize(bashRun(a.env, ["--streak", "2"]), a.proj));
+    expect(normalize(tsRun(b.env, ["--streak", "2"]), b.proj)).toBe(FROZEN_FRESH);
   });
 });

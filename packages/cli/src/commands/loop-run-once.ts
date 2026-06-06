@@ -12,7 +12,7 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, type RouteDeps, cycleEndEvent, mapV2Status } from "@roll/core";
+import { EventBus, cycleEndEvent, mapV2Status, readSlotFromText, type AgentSlot, type RouteDeps } from "@roll/core";
 import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -236,6 +236,77 @@ export function readSkillBody(projectPath: string): string | null {
 }
 
 /**
+ * Build route deps that read the project's agents.yaml, local.yaml,
+ * and ROLL_LOOP_AGENT env override — the same priority chain bash
+ * `_loop_pick_agent_for_story` walks.
+ */
+function buildLoopRouteDeps(projectPath: string): RouteDeps {
+  function readSlot(slot: AgentSlot): string | undefined {
+    // 1. ROLL_LOOP_AGENT env override wins everything (only for the "any" case;
+    //    the caller iterates tiers, so we just honour env for each slot read).
+    const envAgent = (process.env["ROLL_LOOP_AGENT"] ?? "").trim();
+    if (envAgent !== "") return envAgent;
+
+    // 2. Read local.yaml's `agent:` field (project override).
+    const localAgent = readField(join(projectPath, ".roll", "local.yaml"), /^agent:/);
+    if (localAgent !== undefined) return localAgent;
+
+    // 3. Read agents.yaml slot.
+    const agentsYaml = join(projectPath, ".roll", "agents.yaml");
+    try {
+      const text = readFileSync(agentsYaml, "utf8");
+      const agent = readSlotFromText(text, slot);
+      if (agent !== undefined) return agent;
+    } catch {
+      // agents.yaml missing — fall through.
+    }
+    return undefined;
+  }
+
+  function firstInstalled(): string | undefined {
+    const envAgent = (process.env["ROLL_LOOP_AGENT"] ?? "").trim();
+    if (envAgent !== "") return envAgent;
+    // Try agents.yaml default slot, then local.yaml agent, then hardcoded
+    // installed-agent scan (mirrors _first_installed_agent).
+    const fromAgents = readSlot("default");
+    if (fromAgents !== undefined) return fromAgents;
+    const fromLocal = readField(join(projectPath, ".roll", "local.yaml"), /^agent:/);
+    if (fromLocal !== undefined) return fromLocal;
+    // Last resort: pick first available from the known list.
+    for (const candidate of ["claude", "codex", "kimi", "deepseek", "qwen", "agy", "pi"]) {
+      try {
+        const r = spawn(candidate, ["--version"], { stdio: "ignore" });
+        // Don't wait — if it spawned, it's there.
+        r.unref();
+        return candidate;
+      } catch {
+        continue;
+      }
+    }
+    return "claude"; // absolute last resort.
+  }
+
+  return { readSlot, firstInstalled };
+}
+
+/** Read the first matching field value from a YAML/text file. */
+function readField(path: string, re: RegExp): string | undefined {
+  try {
+    const text = readFileSync(path, "utf8");
+    for (const line of text.split("\n")) {
+      const m = line.match(re);
+      if (m !== null) {
+        const v = line.slice((m.index ?? 0) + m[0].length).trim();
+        if (v !== "") return v.replace(/^["']|["']$/g, "");
+      }
+    }
+  } catch {
+    // file missing — ok.
+  }
+  return undefined;
+}
+
+/**
  * The `loop run-once` entry. Returns a process exit code (0 ok).
  */
 export async function loopRunOnceCommand(args: string[]): Promise<number> {
@@ -301,12 +372,10 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 1;
   }
 
-  // Minimal route deps: read agents.yaml slots would be the real wiring; for the
-  // single-cycle runner default to the project agent via firstInstalled.
-  const routeDeps: RouteDeps = {
-    readSlot: () => undefined,
-    firstInstalled: () => process.env["ROLL_LOOP_AGENT"] ?? "claude",
-  };
+  // Resolve agent from the project's agents.yaml and local.yaml, then fall
+  // back through ROLL_LOOP_AGENT → first installed agent (the same chain bash
+  // `_loop_pick_agent_for_story` walks).
+  const routeDeps: RouteDeps = buildLoopRouteDeps(id.path);
 
   const ports = nodePorts({
     repoCwd: id.path,

@@ -196,23 +196,32 @@ export type AgentSpawn = (
  * The child runs with CWD = the worktree, where the agent makes its TCR commits
  * (exactly as v2: the loop hands the agent the worktree and it commits inside).
  */
-export const realAgentSpawn: AgentSpawn = (agent, opts) => {
-  if (agent !== "claude") {
-    const hint = AGENT_ARGV_TODO[agent] ?? "unknown agent";
-    throw new Error(
-      `runner: agent '${agent}' argv not yet ported (only 'claude' is). v2 shape: ${hint}`,
-    );
+function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: string; args: string[] } {
+  const prompt = `${AUTORUN_DIRECTIVE}${opts.storyId !== undefined && opts.storyId !== "" ? storyPinDirective(opts.storyId) : ""}${opts.skillBody}`;
+  if (agent === "claude") {
+    return buildClaudeArgv({
+      worktree: opts.cwd,
+      skillBody: opts.skillBody,
+      ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
+      bin: opts.bin,
+    });
   }
-  const { bin, args } = buildClaudeArgv({
-    worktree: opts.cwd,
-    skillBody: opts.skillBody,
-    ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
-    bin: opts.bin,
-  });
+  if (agent === "pi") {
+    // pi -p "<prompt>" in the worktree CWD — no stream-json, no --add-dir.
+    // The agent's stdout is plain text; onChunk feeds it to the live log.
+    return { bin: opts.bin ?? "pi", args: ["-p", prompt] };
+  }
+  const hint = AGENT_ARGV_TODO[agent] ?? "unknown agent";
+  throw new Error(
+    `runner: agent '${agent}' argv not yet ported. v2 shape: ${hint}`,
+  );
+}
+
+function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions): Promise<AgentSpawnResult> {
   // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,
   // which leg/cycle logs capture — argv mismatches become diagnosable.
   process.stderr.write(`[runner] spawn ${bin} argv=${JSON.stringify(args.map((a) => (a.length > 80 ? `${a.slice(0, 77)}...` : a)))}\n`);
-  return new Promise<AgentSpawnResult>((resolve, reject) => {
+  return new Promise<AgentSpawnResult>((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
@@ -265,4 +274,9 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
       settle({ stdout, stderr, exitCode: code ?? 1, timedOut });
     });
   });
+}
+
+export const realAgentSpawn: AgentSpawn = (agent, opts) => {
+  const { bin, args } = buildSpawnCommand(agent, opts);
+  return spawnAndWait(bin, args, opts);
 };

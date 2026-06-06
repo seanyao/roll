@@ -137,8 +137,29 @@ describe("FIX-204A — skill resolution + blind-agent refusal", () => {
     expect(readSkillBody(p)).toBe("real body");
   });
 
-  it("returns null when nothing resolves", () => {
-    expect(readSkillBody(proj("none"))).toBeNull();
+  it("falls back to ~/.roll/skills/ when project-local paths are absent (no-submodule project)", () => {
+    const p = proj("global-fallback");
+    const homeSkills = join(tmpdir(), `.roll-skill-test-${process.pid}`, ".roll", "skills", "roll-loop");
+    execFileSync("mkdir", ["-p", homeSkills]);
+    writeFileSync(join(homeSkills, "SKILL.md"), "# Loop\n\nglobal fallback body\n");
+    const prevHome = process.env["HOME"];
+    process.env["HOME"] = join(tmpdir(), `.roll-skill-test-${process.pid}`);
+    try {
+      expect(readSkillBody(p)).toBe("# Loop\n\nglobal fallback body");
+    } finally {
+      process.env["HOME"] = prevHome;
+      try { execFileSync("rm", ["-rf", join(tmpdir(), `.roll-skill-test-${process.pid}`)]); } catch { /* ok */ }
+    }
+  });
+
+  it("returns null when nothing resolves (no project files, no ~/.roll/skills)", () => {
+    const prevHome = process.env["HOME"];
+    process.env["HOME"] = join(tmpdir(), `.roll-skill-none-${process.pid}`);
+    try {
+      expect(readSkillBody(proj("none"))).toBeNull();
+    } finally {
+      process.env["HOME"] = prevHome;
+    }
   });
 
   it("run-once refuses to start a cycle on a null skill body: rc=1 + ALERT, no lock/worktree", async () => {
@@ -148,7 +169,11 @@ describe("FIX-204A — skill resolution + blind-agent refusal", () => {
     const rt = join(p, ".roll", "loop");
     const prevCwd = process.cwd();
     const prevRt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const prevHome = process.env["HOME"];
     process.env["ROLL_PROJECT_RUNTIME_DIR"] = rt;
+    // Isolate HOME so the new ~/.roll/skills/ fallback doesn't resolve
+    // against the developer's real ~/.roll/skills/roll-loop/SKILL.md.
+    process.env["HOME"] = join(tmpdir(), `.roll-skill-refuse-${process.pid}`);
     let err = "";
     const write = process.stderr.write.bind(process.stderr);
     process.stderr.write = ((s: string) => {
@@ -162,6 +187,7 @@ describe("FIX-204A — skill resolution + blind-agent refusal", () => {
     } finally {
       process.stderr.write = write;
       process.chdir(prevCwd);
+      process.env["HOME"] = prevHome;
       if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
       else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
     }

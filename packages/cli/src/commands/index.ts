@@ -17,6 +17,7 @@ import { indexCommand } from "./index-gen.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopFmtCommand } from "./loop-fmt.js";
+import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import {
   loopNowCommand,
@@ -185,6 +186,10 @@ export function registerAll(): void {
     // `loop fmt`: the observation-window formatter (US-PORT-012) — stdin
     // stream-json → three-tier transcript. v3-native; the watch pipe feeds it.
     if (args[0] === "fmt") return loopFmtCommand(args.slice(1));
+    // `loop pr-inbox`: the dedicated PR-loop tick (US-PORT-001) — drives the
+    // pure core/pr-loop.ts decisions; the pr runner calls this instead of the
+    // retired bash `_loop_pr_inbox`.
+    if (args[0] === "pr-inbox") return loopPrInboxCommand(args.slice(1));
     if (args[0] === "on") return loopOnCommand(args.slice(1));
     if (args[0] === "off") return loopOffCommand(args.slice(1));
     if (args[0] === "pause") return loopPauseCommand(args.slice(1));

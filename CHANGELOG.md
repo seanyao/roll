@@ -24,6 +24,8 @@
   <!-- evidence: .roll/features/bash-endgame/US-PORT-001/latest/US-PORT-001-report.html -->
 - roll brief TS 化：默认一屏三块（已完成 / 进行中与队列 / 需 owner 拍板），数字优先、细节折叠，`--full` 展开全量；输出跟随 locale 单语不混排；从 backlog 读取器实时合成，不再 shell agent（思考过程零泄漏）（US-PORT-002） `[loop]`
   <!-- evidence: .roll/features/bash-endgame/US-PORT-002/latest/US-PORT-002-report.html -->
+- roll idea TS 化：分类（缺陷→FIX / 想法→IDEA）、家族内自动编号、过 backlog lint 规则才落卡（违规拒收不写脏卡），读写经 BacklogStore 与 backlog 同源；输出跟随 locale 单语（US-PORT-003） `[loop]`
+  <!-- evidence: .roll/features/bash-endgame/US-PORT-003/latest/US-PORT-003-report.html -->
 - 终态失真：真实交付已合并完成，周期记录却写失败，失败语义被稀释（FIX-214） `[loop]`
 - 无人值守周期自产实拍：给截屏调度器加终端通道，无图形环境时诚实跳过留痕（US-ATTEST-011）
 - loop cycle cycle-20260606-050516-6852（PR#477）

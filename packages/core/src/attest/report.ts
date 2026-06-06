@@ -43,12 +43,51 @@ export interface AcReportItem {
   note?: string;
 }
 
+/**
+ * US-ATTEST-013 — the delivery chain a reviewer needs to trace a story end to
+ * end without leaving the report. Every field is optional; empties are trimmed.
+ */
+export interface DeliveryChain {
+  prLinks?: Array<{ label: string; href: string }>;
+  cycleId?: string;
+  timeline?: string;
+  cost?: string;
+}
+
+/**
+ * US-ATTEST-013 — self-contained card context (the business body's lead): what
+ * the todo is, in plain language, plus where it sits and how it shipped. Drawn
+ * from the card README + backlog + delivery facts by the caller. Any subset may
+ * be present; a context with no populated sub-field renders nothing (trim).
+ */
+export interface CardContext {
+  oneLiner?: string;
+  epic?: string;
+  summary?: string;
+  backlogStatus?: string;
+  delivery?: DeliveryChain;
+}
+
+/**
+ * US-ATTEST-013 — a坏态/好态 pair for FIX / behaviour-changing US. `before-*.png`
+ * / `after-*.png` shots render side by side. Brand-new features carry none.
+ */
+export interface BeforeAfterPair {
+  label: string;
+  before: EvidenceRef;
+  after: EvidenceRef;
+}
+
 export interface ReportInput {
   storyId: string;
   title: string;
   /** ISO timestamp injected by the caller (clock-free renderer). */
   generatedAt: string;
   items: AcReportItem[];
+  /** US-ATTEST-013 — business-body lead: self-contained card context. */
+  context?: CardContext;
+  /** US-ATTEST-013 — before/after comparison pairs (empty ⇒ section trimmed). */
+  beforeAfter?: BeforeAfterPair[];
   /** Summary facts row (counts come from evidence.json). */
   facts?: { tcrCount: number; ciConclusion: string; testPassAge: string };
   /** US-ATTEST-009 — same-story Self-Score entries from .roll/notes/; the
@@ -102,16 +141,86 @@ function evidenceCard(ref: EvidenceRef): string {
   return `<div class="ev ev-${ref.kind}">${body}</div>`;
 }
 
+/**
+ * US-ATTEST-013 — information layering. Each AC carries business-facing evidence
+ * (screenshots, PR/CI/deploy links — what a product reviewer reads) inline, and
+ * technical evidence (ANSI command output / logs — kind=text) tucked into a
+ * collapsed `<details>` that defaults closed. The fold is omitted entirely when
+ * there is no technical evidence (deletion-not-placeholder).
+ */
+/** Delivery chain as a `<dl>`; empty when no sub-field is populated (trim). */
+function deliveryBlock(d: DeliveryChain): string {
+  const parts: string[] = [];
+  if (d.prLinks !== undefined && d.prLinks.length > 0)
+    parts.push(`<dt>PR</dt><dd>${d.prLinks.map((p) => `<a href="${esc(p.href)}">${esc(p.label)}</a>`).join(" · ")}</dd>`);
+  if (d.cycleId !== undefined && d.cycleId !== "") parts.push(`<dt>Cycle</dt><dd><code>${esc(d.cycleId)}</code></dd>`);
+  if (d.timeline !== undefined && d.timeline !== "") parts.push(`<dt>时间线 · Timeline</dt><dd>${esc(d.timeline)}</dd>`);
+  if (d.cost !== undefined && d.cost !== "") parts.push(`<dt>成本 · Cost</dt><dd>${esc(d.cost)}</dd>`);
+  return parts.length > 0 ? `<dl class="delivery">${parts.join("")}</dl>` : "";
+}
+
+/**
+ * US-ATTEST-013 — the business body's lead. A product/business reviewer reads
+ * this first and learns the whole story without leaving the report. Rendered
+ * ONLY when at least one sub-field is populated; a fully-empty context is
+ * trimmed (deletion-not-placeholder).
+ */
+function cardContextBlock(ctx: CardContext | undefined): string {
+  if (ctx === undefined) return "";
+  const rows: string[] = [];
+  if (ctx.oneLiner !== undefined && ctx.oneLiner !== "") rows.push(`<p class="one-liner">${esc(ctx.oneLiner)}</p>`);
+  const meta: string[] = [];
+  if (ctx.epic !== undefined && ctx.epic !== "") meta.push(`Epic：${esc(ctx.epic)}`);
+  if (ctx.backlogStatus !== undefined && ctx.backlogStatus !== "") meta.push(`Backlog：${esc(ctx.backlogStatus)}`);
+  if (meta.length > 0) rows.push(`<p class="ctx-meta">${meta.join(" · ")}</p>`);
+  if (ctx.summary !== undefined && ctx.summary !== "") rows.push(`<p class="summary">${esc(ctx.summary)}</p>`);
+  const delivery = ctx.delivery !== undefined ? deliveryBlock(ctx.delivery) : "";
+  if (delivery !== "") rows.push(delivery);
+  if (rows.length === 0) return "";
+  return `<section class="card-context"><h2>卡上下文 · Context</h2>\n${rows.join("\n")}\n</section>`;
+}
+
 function acSection(item: AcReportItem): string {
   const b = BADGE[item.status];
   const note = item.note !== undefined && item.note !== "" ? `<p class="note">${esc(item.note)}</p>` : "";
-  const evs = item.evidence.map(evidenceCard).join("\n");
+  const business = item.evidence.filter((e) => e.kind !== "text");
+  const technical = item.evidence.filter((e) => e.kind === "text");
+  const bizHtml = business.map(evidenceCard).join("\n");
+  const techHtml =
+    technical.length > 0
+      ? `<details class="tech"><summary>技术细节 · Technical detail（${technical.length}）</summary>\n${technical.map(evidenceCard).join("\n")}\n</details>`
+      : "";
   return `<section class="ac ${b.cls}" id="${esc(item.id)}">
 <h3><span class="badge">${b.icon} ${b.en} · ${b.zh}</span> <code>${esc(item.id)}</code></h3>
 <p class="ac-text">${esc(item.text)}</p>
 ${note}
-${evs}
+${bizHtml}
+${techHtml}
 </section>`;
+}
+
+/**
+ * US-ATTEST-013 — before/after comparison. Each pair renders its two shots side
+ * by side (a flex row that wraps to stacked on narrow viewports). A figure is
+ * emitted only for a ref that carries an href; a pair with neither shot is
+ * dropped, and an empty list trims the whole section (全新功能免出).
+ */
+function beforeAfterBlock(pairs: ReportInput["beforeAfter"]): string {
+  if (pairs === undefined || pairs.length === 0) return "";
+  const fig = (ref: EvidenceRef, side: string, cls: string): string =>
+    ref.href !== undefined
+      ? `<figure class="shot ${cls}"><img src="${esc(ref.href)}" alt="${esc(ref.label)}"><figcaption>${side}：${esc(ref.label)}</figcaption></figure>`
+      : "";
+  const groups = pairs
+    .map((p) => {
+      const before = fig(p.before, "Before · 改前", "ba-before");
+      const after = fig(p.after, "After · 改后", "ba-after");
+      if (before === "" && after === "") return "";
+      return `<div class="before-after"><h3>${esc(p.label)}</h3><div class="ba-pair">${before}${after}</div></div>`;
+    })
+    .filter((s) => s !== "");
+  if (groups.length === 0) return "";
+  return `<section class="before-after-section"><h2>对照实拍 · Before / After</h2>\n${groups.join("\n")}\n</section>`;
 }
 
 /**
@@ -124,6 +233,37 @@ function selfCaptureBlock(refs: ReportInput["selfCaptures"]): string {
   if (refs === undefined || refs.length === 0) return "";
   const figs = refs.map(evidenceCard).join("\n");
   return `<section class="self-capture"><h2>Gate self-capture · 自产实拍</h2>\n${figs}\n</section>`;
+}
+
+/**
+ * US-ATTEST-013 — closing evidence index. Every evidence file referenced
+ * anywhere in the report (per-AC, before/after, self-capture) appears once in a
+ * single table so a reviewer can reach the raw artifact directly. Screenshots /
+ * external links show their locator; inlined text shows "inline". Skipped
+ * entirely when nothing was collected (no empty table).
+ */
+function evidenceIndexBlock(
+  items: AcReportItem[],
+  beforeAfter: ReportInput["beforeAfter"],
+  selfCaptures: ReportInput["selfCaptures"],
+): string {
+  const rows: string[] = [];
+  const row = (ref: EvidenceRef): void => {
+    const loc =
+      ref.href !== undefined
+        ? `<a href="${esc(ref.href)}">${esc(ref.href)}</a>`
+        : ref.inlineHtml !== undefined
+          ? "inline"
+          : "—";
+    rows.push(`<tr><td><code>${esc(ref.kind)}</code></td><td>${esc(ref.label)}</td><td>${loc}</td></tr>`);
+  };
+  for (const it of items) for (const e of it.evidence) row(e);
+  if (beforeAfter !== undefined) for (const p of beforeAfter) for (const r of [p.before, p.after]) if (r.href !== undefined) row(r);
+  if (selfCaptures !== undefined) for (const r of selfCaptures) row(r);
+  if (rows.length === 0) return "";
+  return `<section class="evidence-index"><h2>证据索引 · Evidence index</h2>
+<table class="ev-index"><thead><tr><th>Kind</th><th>Label</th><th>Locator</th></tr></thead>
+<tbody>${rows.join("\n")}</tbody></table></section>`;
 }
 
 function selfScoreBlock(entries: ReportInput["selfScores"]): string {
@@ -163,6 +303,15 @@ export function renderReport(input: ReportInput): string {
 </section>`
       : "";
 
+  // US-ATTEST-013 — 收口 (closing): quality gate → discrepancies → evidence
+  // index → self-score. Assembled then wrapped only when non-empty (trim, no
+  // hollow section).
+  const gate = facts !== "" ? `<h2>质量门禁 · Quality gate</h2>\n${facts}` : "";
+  const evIndex = evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures);
+  const selfScore = selfScoreBlock(input.selfScores);
+  const closingInner = [gate, disc, evIndex, selfScore].filter((s) => s !== "").join("\n");
+  const closing = closingInner !== "" ? `<section class="closing">\n${closingInner}\n</section>` : "";
+
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -191,6 +340,21 @@ figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:10px; padding:8px 16px; }
 details.selfscore summary { cursor:pointer; font-weight:600; }
 details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
+details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:8px; padding:6px 12px; background:rgba(127,127,127,.04); }
+details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+details.tech[open] summary { margin-bottom:6px; }
+section.card-context { border:1px solid var(--line); border-radius:10px; padding:6px 16px 12px; margin:14px 0; }
+section.card-context .one-liner { font-size:15.5px; font-weight:600; }
+section.card-context .ctx-meta { color:var(--muted); font-size:13px; }
+dl.delivery { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0 0; font-size:13.5px; }
+dl.delivery dt { color:var(--muted); } dl.delivery dd { margin:0; }
+.before-after { margin:10px 0; } .before-after h3 { font-size:14px; margin:0 0 6px; }
+.ba-pair { display:flex; flex-wrap:wrap; gap:12px; } .ba-pair figure.shot { flex:1 1 280px; margin:0; }
+table.ev-index { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+table.ev-index th, table.ev-index td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
+table.ev-index th { color:var(--muted); font-weight:600; }
+table.ev-index td a { word-break:break-all; }
+section.closing { margin-top:32px; border-top:2px solid var(--line); padding-top:8px; }
 @media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
 ${ANSI_CSS}
 </style>
@@ -198,12 +362,12 @@ ${ANSI_CSS}
 <body>
 <h1>${esc(input.title)}</h1>
 <p class="meta"><code>${esc(input.storyId)}</code> · generated ${esc(input.generatedAt)} · Gate: PASS</p>
+${cardContextBlock(input.context)}
 <p>${summary}</p>
-${facts}
 ${items.map(acSection).join("\n")}
+${beforeAfterBlock(input.beforeAfter)}
 ${selfCaptureBlock(input.selfCaptures)}
-${disc}
-${selfScoreBlock(input.selfScores)}
+${closing}
 </body>
 </html>
 `;

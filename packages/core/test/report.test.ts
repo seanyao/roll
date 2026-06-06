@@ -108,6 +108,163 @@ describe("US-ATTEST-011 — Gate self-capture section", () => {
   });
 });
 
+describe("US-ATTEST-013 — explicit layering order", () => {
+  it("business body (context → badges → AC) precedes the closing (quality gate → evidence index)", () => {
+    const html = renderReport({
+      ...BASE,
+      context: { oneLiner: "卡一句话" },
+      items: [item({ id: "A:AC1", evidence: [{ kind: "test-pass", label: "suite green" }] })],
+      facts: { tcrCount: 5, ciConclusion: "success", testPassAge: "30s" },
+    });
+    const ctxAt = html.indexOf("卡上下文");
+    const acAt = html.indexOf('class="ac ');
+    const gateAt = html.indexOf("质量门禁 · Quality gate");
+    const idxAt = html.indexOf("证据索引");
+    // 主体 leads, 收口 trails — and the quality gate now lives in the closing,
+    // after the AC body, not at the top.
+    expect(ctxAt).toBeGreaterThan(-1);
+    expect(ctxAt).toBeLessThan(acAt);
+    expect(acAt).toBeLessThan(gateAt);
+    expect(gateAt).toBeLessThan(idxAt);
+    expect(html).toContain("TCR commits: <b>5</b>");
+  });
+});
+
+describe("US-ATTEST-013 — card context leads the business body", () => {
+  it("renders one-liner / epic / summary / backlog status / delivery chain before the AC sections", () => {
+    const html = renderReport({
+      ...BASE,
+      context: {
+        oneLiner: "报告分层且自含待办全貌",
+        epic: "acceptance-evidence",
+        summary: "报告原是工程师向 AC 堆，现按受众分层",
+        backlogStatus: "🔨 In Progress",
+        delivery: {
+          prLinks: [{ label: "#486", href: "https://github.com/seanyao/roll/pull/486" }],
+          cycleId: "cycle-20260606-092227-79062",
+          timeline: "09:22 → 09:40",
+          cost: "$0.42",
+        },
+      },
+      items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
+    });
+    expect(html).toContain("卡上下文 · Context");
+    expect(html).toContain("报告分层且自含待办全貌");
+    expect(html).toContain("acceptance-evidence");
+    expect(html).toContain("🔨 In Progress");
+    expect(html).toContain("cycle-20260606-092227-79062");
+    expect(html).toContain('href="https://github.com/seanyao/roll/pull/486"');
+    expect(html).toContain("$0.42");
+    // context (business) precedes the first AC section
+    expect(html.indexOf("卡上下文")).toBeLessThan(html.indexOf('class="ac '));
+  });
+
+  it("absent context ⇒ no context section (trim, no placeholder)", () => {
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain("卡上下文");
+  });
+
+  it("context with only empty sub-fields is trimmed away", () => {
+    const html = renderReport({ ...BASE, context: { delivery: {} }, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain("卡上下文");
+  });
+});
+
+describe("US-ATTEST-013 — evidence index closing section", () => {
+  it("lists every evidence file in one table (AC + before/after + self-capture)", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [
+        item({
+          id: "A:AC1",
+          evidence: [
+            { kind: "screenshot", label: "首页", href: "./screenshots/a.png" },
+            { kind: "ci", label: "CI run", href: "https://github.com/x/y/actions/runs/1" },
+          ],
+        }),
+      ],
+      beforeAfter: [
+        {
+          label: "首屏",
+          before: { kind: "screenshot", label: "改前", href: "./screenshots/before.png" },
+          after: { kind: "screenshot", label: "改后", href: "./screenshots/after.png" },
+        },
+      ],
+      selfCaptures: [{ kind: "screenshot", label: "terminal", href: "./screenshots/terminal.png" }],
+    });
+    expect(html).toContain("证据索引 · Evidence index");
+    expect(html).toContain("./screenshots/a.png");
+    expect(html).toContain("./screenshots/before.png");
+    expect(html).toContain("./screenshots/after.png");
+    expect(html).toContain("./screenshots/terminal.png");
+    expect(html).toContain("https://github.com/x/y/actions/runs/1");
+  });
+
+  it("no evidence at all ⇒ index skipped (no empty table)", () => {
+    const html = renderReport({ ...BASE, items: [item({ status: "missing" })] });
+    expect(html).not.toContain("证据索引");
+  });
+});
+
+describe("US-ATTEST-013 — before/after comparison", () => {
+  it("renders paired before/after figures side by side", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
+      beforeAfter: [
+        {
+          label: "报告首屏",
+          before: { kind: "screenshot", label: "工程师向 AC 堆", href: "./screenshots/before-home.png" },
+          after: { kind: "screenshot", label: "业务分层", href: "./screenshots/after-home.png" },
+        },
+      ],
+    });
+    expect(html).toContain("对照实拍 · Before / After");
+    expect(html).toContain('<img src="./screenshots/before-home.png"');
+    expect(html).toContain('<img src="./screenshots/after-home.png"');
+    expect(html).toContain("Before · 改前");
+    expect(html).toContain("After · 改后");
+  });
+
+  it("empty / absent before-after ⇒ section skipped (全新功能免出)", () => {
+    const none = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(none).not.toContain("对照实拍");
+    const empty = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })], beforeAfter: [] });
+    expect(empty).not.toContain("对照实拍");
+  });
+});
+
+describe("US-ATTEST-013 — layered IA: technical evidence folds", () => {
+  it("text/ANSI evidence sits inside a collapsed <details class=\"tech\">", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [
+        item({
+          evidence: [
+            { kind: "screenshot", label: "首页", href: "./screenshots/a.png" },
+            { kind: "text", label: "vitest", inlineHtml: ansiPre("plain log line") },
+          ],
+        }),
+      ],
+    });
+    expect(html).toContain('<details class="tech"');
+    // collapsed by default — no `open` attribute on the tech fold
+    expect(html).not.toMatch(/<details class="tech" open/);
+    // the ANSI pre is INSIDE the fold (business screenshot is outside, before it)
+    const detailsAt = html.indexOf('<details class="tech"');
+    const ansiAt = html.indexOf('<pre class="ansi">plain log line</pre>');
+    const shotAt = html.indexOf('<img src="./screenshots/a.png"');
+    expect(detailsAt).toBeGreaterThan(-1);
+    expect(ansiAt).toBeGreaterThan(detailsAt); // ANSI after the fold opens
+    expect(shotAt).toBeLessThan(detailsAt); // business screenshot before technical fold
+  });
+
+  it("no text evidence ⇒ no tech fold (deletion-not-placeholder)", () => {
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain('<details class="tech"');
+  });
+});
+
 describe("badge ladder", () => {
   it("summary counts every present status with bilingual badges", () => {
     const html = renderReport({

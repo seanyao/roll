@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { EvidenceRun, ShotRun } from "@roll/infra";
-import { attestCommand, findFeatureFile } from "../src/commands/attest.js";
+import { attestCommand, buildCardContext, detectBeforeAfter, findFeatureFile, readBacklogRow } from "../src/commands/attest.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -235,6 +235,69 @@ describe("attestCommand", () => {
     const proj = project();
     expect(await silenced(() => inDir(proj, () => attestCommand(["US-NOPE-9"], { run: quietRun })))).toBe(1);
     expect(await silenced(() => inDir(proj, () => attestCommand([], { run: quietRun })))).toBe(1);
+  });
+});
+
+describe("US-ATTEST-013 — self-contained card context wiring", () => {
+  it("readBacklogRow pulls description + status, ID-anchored", () => {
+    const proj = project();
+    writeFileSync(
+      join(proj, ".roll", "backlog.md"),
+      ["| Story | Description | Status |", "|--|--|--|", "| FIX-300 | demo 卡一句话 depends-on:FIX-1 | 🔨 In Progress |", ""].join("\n"),
+    );
+    const row = readBacklogRow(proj, "FIX-300");
+    expect(row.description).toContain("demo 卡一句话");
+    expect(row.status).toBe("🔨 In Progress");
+  });
+
+  it("buildCardContext assembles one-liner / epic / summary / status / cycle id", () => {
+    const proj = project();
+    writeFileSync(
+      join(proj, ".roll", "backlog.md"),
+      ["| FIX-300 | 业务一句话 depends-on:FIX-1 | 🔨 In Progress |"].join("\n"),
+    );
+    // overwrite the feature file with a blockquote goal
+    writeFileSync(
+      join(proj, ".roll", "features", "demo", "FIX-300.md"),
+      ["# FIX-300 — demo", "", "> 这是规格摘要", "> 第二行", "", "**AC:**", "- [ ] x", ""].join("\n"),
+    );
+    const ctx = buildCardContext(proj, join(proj, ".roll", "features", "demo", "FIX-300.md"), "FIX-300", {
+      LOOP_CYCLE_ID: "cycle-xyz",
+    });
+    expect(ctx?.oneLiner).toBe("业务一句话"); // depends-on stripped
+    expect(ctx?.epic).toBe("demo");
+    expect(ctx?.summary).toBe("这是规格摘要 第二行");
+    expect(ctx?.backlogStatus).toBe("🔨 In Progress");
+    expect(ctx?.delivery?.cycleId).toBe("cycle-xyz");
+  });
+
+  it("detectBeforeAfter pairs before-/after- shots by stem; unmatched ignored", () => {
+    const proj = project();
+    const runDir = join(proj, ".roll", "verification", "FIX-300", "run");
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    for (const f of ["before-home.png", "after-home.png", "before-orphan.png", "noise.png"]) {
+      writeFileSync(join(runDir, "screenshots", f), "PNG");
+    }
+    const pairs = detectBeforeAfter(runDir);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0]?.label).toBe("home");
+    expect(pairs[0]?.before.href).toBe("screenshots/before-home.png");
+    expect(pairs[0]?.after.href).toBe("screenshots/after-home.png");
+  });
+
+  it("attest renders the card-context section end to end", async () => {
+    const proj = project();
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| FIX-300 | 端到端一句话 | 🔨 In Progress |\n");
+    await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    const html = readFileSync(
+      join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"),
+      "utf8",
+    );
+    expect(html).toContain("卡上下文 · Context");
+    expect(html).toContain("端到端一句话");
+    expect(html).toContain("Backlog：🔨 In Progress");
   });
 });
 

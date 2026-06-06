@@ -19,6 +19,135 @@ import { basename, dirname, join } from "node:path";
 /** The uncategorized epic slug — the never-block fallback bucket. */
 export const UNCATEGORIZED = "uncategorized";
 
+/** Locate the feature markdown that defines a story (heading or AC owner).
+ *  ID-named `<storyId>.md` wins over a prose mention. null when nothing matches. */
+export function findFeatureFile(projectPath: string, storyId: string): string | null {
+  const root = join(projectPath, ".roll", "features");
+  if (!existsSync(root)) return null;
+  const hits: string[] = [];
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile() && e.name.endsWith(".md")) {
+        if (e.name === `${storyId}.md`) hits.unshift(p); // ID-named file wins
+        else {
+          try {
+            if (readFileSync(p, "utf8").includes(storyId)) hits.push(p);
+          } catch {
+            /* unreadable file: skip */
+          }
+        }
+      }
+    }
+  };
+  try {
+    walk(root);
+  } catch {
+    return null;
+  }
+  return hits[0] ?? null;
+}
+
+/** The card's report filename — carries the ID so a tab/download/share is
+ *  self-identifying (owner 2026-06-06): `<ID>-report.html`. */
+export function reportFileName(storyId: string): string {
+  return `${storyId}-report.html`;
+}
+
+/**
+ * Resolve a story's epic by LIVE filesystem walk: the epic is the directory the
+ * feature file lives under (`features/<epic>/<ID|slug>.md`). Returns null when
+ * the file is missing or sits directly under `features/` (no epic dir) — both
+ * fall back to `uncategorized` at the call site.
+ */
+export function liveEpicOf(projectPath: string, storyId: string): string | null {
+  const file = findFeatureFile(projectPath, storyId);
+  if (file === null) return null;
+  const epic = basename(dirname(file));
+  if (epic === "" || epic === "." || epic === "features") return null;
+  return epic;
+}
+
+/** Read `.roll/index.json` → ID→epic map; {} on absence / malformed (lenient). */
+export function readIndex(projectPath: string): Record<string, string> {
+  const p = join(projectPath, ".roll", "index.json");
+  if (!existsSync(p)) return {};
+  try {
+    const obj = JSON.parse(readFileSync(p, "utf8")) as { stories?: Record<string, string> };
+    const s = obj?.stories;
+    if (s === undefined || s === null || typeof s !== "object") return {};
+    return s;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * (Re)generate `.roll/index.json` from the backlog: every backlog story id whose
+ * epic the live walk can place is recorded. Deterministic + idempotent (sorted,
+ * no volatile fields). Returns the written map.
+ */
+export function generateIndex(projectPath: string): Record<string, string> {
+  const backlogPath = join(projectPath, ".roll", "backlog.md");
+  let ids: string[] = [];
+  if (existsSync(backlogPath)) {
+    try {
+      ids = parseBacklog(readFileSync(backlogPath, "utf8")).map((it) => it.id);
+    } catch {
+      ids = [];
+    }
+  }
+  const stories = buildStoryIndex(ids, (id) => liveEpicOf(projectPath, id));
+  const rollDir = join(projectPath, ".roll");
+  if (!existsSync(rollDir)) mkdirSync(rollDir, { recursive: true });
+  writeFileSync(join(rollDir, "index.json"), serializeIndex(stories));
+  return stories;
+}
+
+/**
+ * The epic to place a story under, consulting the authoritative index first,
+ * then a live walk, then null (→ uncategorized). attest stays usable even when
+ * the index has not been regenerated yet.
+ */
+export function epicForStory(projectPath: string, storyId: string): string | null {
+  const fromIndex = readIndex(projectPath)[storyId];
+  if (fromIndex !== undefined && fromIndex !== "") return fromIndex;
+  return liveEpicOf(projectPath, storyId);
+}
+
+/**
+ * The WRITE destination for a card's deliverables: `features/<epic>/<ID>/`, or
+ * `features/uncategorized/<ID>/` when no epic resolves. Never throws — resolution
+ * never blocks a write (D1).
+ */
+export function cardArchiveDir(projectPath: string, storyId: string): string {
+  const epic = epicForStory(projectPath, storyId) ?? UNCATEGORIZED;
+  return join(projectPath, ".roll", "features", epic, storyId);
+}
+
+/** The legacy run-store location (pre-archive layout): `.roll/verification/<ID>`. */
+export function legacyArchiveDir(projectPath: string, storyId: string): string {
+  return join(projectPath, ".roll", "verification", storyId);
+}
+
+/**
+ * Read-compat resolver (US-META-001 → retired by US-META-002): the story-level
+ * dir that actually holds runs. Prefers the new card folder; falls back to the
+ * legacy `verification/<ID>` tree so already-delivered cards stay readable during
+ * the migration window. null when neither exists yet.
+ */
+export function resolveReadArchiveDir(
+  projectPath: string,
+  storyId: string,
+): { dir: string; layout: "card" | "legacy" } | null {
+  const card = cardArchiveDir(projectPath, storyId);
+  if (existsSync(card)) return { dir: card, layout: "card" };
+  const legacy = legacyArchiveDir(projectPath, storyId);
+  if (existsSync(legacy)) return { dir: legacy, layout: "legacy" };
+  return null;
+}
+
 /**
  * Pure: build the ID→epic map from a list of story ids and an epic resolver.
  * Stories the resolver can't place (returns null) are OMITTED — at lookup time

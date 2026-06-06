@@ -11,6 +11,7 @@ import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand } from "./dashboard.js";
 import { doctorCommand } from "./doctor.js";
 import { feedbackCommand } from "./feedback.js";
+import { indexCommand } from "./index-gen.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
@@ -49,6 +50,8 @@ export function registerAll(): void {
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand);
+  // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
+  registerPorted("index", indexCommand);
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

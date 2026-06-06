@@ -573,6 +573,25 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     warn("latest symlink update failed (report still written)");
   }
 
+  // US-META-006: update index.html delivery section if the skeleton exists.
+  const indexPath = join(storyDir, "index.html");
+  if (existsSync(indexPath)) {
+    try {
+      let idx = readFileSync(indexPath, "utf8");
+      const reportRel = join(runId, reportFileName(storyId));
+      const deliveryHtml =
+        `<p><a href="${reportRel}">Attestation report</a></p>\n` +
+        `<p class="muted">Delivered ${new Date().toISOString().slice(0, 10)}</p>\n`;
+      idx = idx.replace(
+        /<section id="delivery">[\s\S]*?<\/section>/,
+        `<section id="delivery"><h2>Delivery</h2>${deliveryHtml}</section>`,
+      );
+      writeFileSync(indexPath, idx, "utf8");
+    } catch {
+      /* best-effort: index.html update is non-blocking */
+    }
+  }
+
   // Render smoke (US-ATTEST-012): the report exists — but is it actually
   // openable? A broken <img> ref or an external CDN asset is a real defect, so
   // (unlike the never-block degrade path) a smoke failure is surfaced as a

@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BacklogStore, ConflictError, IDEA_SECTIONS, appendIdea, planIdea } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
+import { renderSpecMd, renderStoryPage } from "../lib/story-page.js";
 import { c, renderState } from "../render.js";
 
 const BACKLOG_PATH = ".roll/backlog.md";
@@ -99,45 +100,14 @@ export function ideaCommand(args: string[]): number {
   const cardDir = join(projectPath, ".roll", "features", "uncategorized", plan.id);
   try {
     mkdirSync(cardDir, { recursive: true });
-    const today = new Date().toISOString().slice(0, 10);
-    const specMd =
-      `---\n` +
-      `id: ${plan.id}\n` +
-      `title: ${text}\n` +
-      `type: ${plan.kind}\n` +
-      `created: ${today}\n` +
-      `---\n\n` +
-      `# ${plan.id} — ${text}\n`;
-    writeFileSync(join(cardDir, "spec.md"), specMd, "utf8");
-
-    const indexHtml =
-      `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n` +
-      `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
-      `<title>${plan.id} — ${text.replace(/"/g, "&quot;")}</title>\n` +
-      `<style>\n` +
-      `:root { color-scheme: light dark; --fg:#1f2328; --bg:#ffffff; --muted:#57606a; --line:#d0d7de; }\n` +
-      `@media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --bg:#0d1117; --muted:#8b949e; --line:#30363d; } }\n` +
-      `body { margin:0 auto; max-width:880px; padding:32px 20px 80px; background:var(--bg); color:var(--fg);\n` +
-      `  font:15px/1.65 -apple-system, "PingFang SC", "Segoe UI", sans-serif; }\n` +
-      `h1 { font-size:22px; } h2 { font-size:18px; border-bottom:1px solid var(--line); padding-bottom:6px; }\n` +
-      `code { background:rgba(127,127,127,.12); padding:1px 6px; border-radius:6px; font-size:.92em; }\n` +
-      `pre { background:rgba(127,127,127,.08); padding:12px; border-radius:8px; overflow-x:auto; }\n` +
-      `section { border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:14px 0; }\n` +
-      `.empty { color:var(--muted); font-style:italic; }\n` +
-      `footer { color:var(--muted); font-size:13px; margin-top:36px; border-top:1px solid var(--line); padding-top:12px; }\n` +
-      `.phase-done { border-left:4px solid #2da44e; } .phase-pending { border-left:4px solid #d0d7de; }\n` +
-      `@media print { body { max-width:none; padding:0; } section { break-inside:avoid; } }\n` +
-      `</style>\n` +
-      `</head>\n<body>\n` +
-      `<h1>${plan.id}</h1>\n` +
-      `<p class="meta"><code>${plan.kind === "bug" ? "FIX" : "IDEA"}</code> · Created ${today}</p>\n` +
-      `<p>${text.replace(/"/g, "&quot;")}</p>\n` +
-      `<section class="phase-pending"><h2>Design</h2><p class="empty">Not yet started</p></section>\n` +
-      `<section class="phase-pending"><h2>Execution</h2><p class="empty">No cycles yet</p></section>\n` +
-      `<section class="phase-pending"><h2>Delivery</h2><p class="empty">Not yet delivered</p></section>\n` +
-      `<section class="phase-pending"><h2>Retrospective</h2><p class="empty">Not yet written</p></section>\n` +
-      `<footer>Roll · <a href="spec.md">spec.md</a></footer>\n</body>\n</html>\n`;
-    writeFileSync(join(cardDir, "index.html"), indexHtml, "utf8");
+    const card = {
+      id: plan.id,
+      title: text,
+      type: plan.kind,
+      created: new Date().toISOString().slice(0, 10),
+    };
+    writeFileSync(join(cardDir, "spec.md"), renderSpecMd(card), "utf8");
+    writeFileSync(join(cardDir, "index.html"), renderStoryPage(card), "utf8");
   } catch {
     /* best-effort: folder creation is non-blocking */
   }

@@ -6,7 +6,9 @@
  */
 import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { generateIndex } from "../lib/archive.js";
+import { STORY_ID_RE } from "../lib/story-page.js";
 
 /** `roll index` — regenerate the backlog-derived ID→epic index + features root page. */
 export function indexCommand(args: string[]): number {
@@ -22,50 +24,57 @@ export function indexCommand(args: string[]): number {
   // US-META-003: regenerate features/index.html
   const featuresDir = join(cwd, ".roll", "features");
   if (existsSync(featuresDir)) {
-    const epics = new Map<string, string[]>();
+    const epics = new Map<string, Set<string>>();
     for (const [sid, epic] of Object.entries(stories)) {
-      epics.set(epic, [...(epics.get(epic) || []), sid]);
+      if (!epics.has(epic)) epics.set(epic, new Set());
+      epics.get(epic)!.add(sid);
     }
     // Also scan for story folders not in index.json
     try {
       for (const d of readdirSync(featuresDir)) {
         const epicDir = join(featuresDir, d);
         if (!statSync(epicDir).isDirectory()) continue;
-        if (!epics.has(d)) epics.set(d, []);
+        if (!epics.has(d)) epics.set(d, new Set());
         for (const s of readdirSync(epicDir)) {
           const storyDir = join(epicDir, s);
           if (!statSync(storyDir).isDirectory()) continue;
-          if (/^(FIX|US|IDEA|REFACTOR)-/.test(s) && !epics.get(d)!.includes(s)) {
-            epics.get(d)!.push(s);
-          }
+          if (STORY_ID_RE.test(s)) epics.get(d)!.add(s);
         }
       }
     } catch { /* best-effort */ }
 
     const rows: string[] = [];
-    for (const [epic, storyList] of [...epics].sort()) {
-      const unique = [...new Set(storyList)].sort();
+    for (const epic of [...epics.keys()].sort()) {
+      const unique = [...epics.get(epic)!].sort();
       let delivered = 0;
       for (const s of unique) {
         const latest = join(featuresDir, epic, s, "latest");
-        try { if (statSync(latest).isDirectory() || statSync(latest).isSymbolicLink()) delivered++; } catch { /* */ }
+        // statSync follows symlinks, so a `latest` symlink → run dir counts.
+        try { if (statSync(latest).isDirectory()) delivered++; } catch { /* */ }
       }
       const links = unique.slice(0, 20).map((s) => `<a href="${epic}/${s}/index.html">${s}</a>`).join(", ");
-      const more = unique.length > 20 ? ` ... +${unique.length - 20} more` : "";
-      rows.push(`<tr>\n<td><strong><a href="${epic}/">${epic}</a></strong></td>\n<td>${unique.length} stories (${delivered} delivered)</td>\n<td style="font-size:0.85em">${links}${more}</td>\n</tr>`);
+      const more = unique.length > 20 ? ` ${bi(`… +${unique.length - 20} more`, `… 另 ${unique.length - 20} 个`)}` : "";
+      rows.push(`<tr>\n<td><strong><a href="${epic}/">${epic}</a></strong></td>\n<td>${bi(`${unique.length} stories (${delivered} delivered)`, `${unique.length} 个故事（已交付 ${delivered}）`)}</td>\n<td style="font-size:0.85em">${links}${more}</td>\n</tr>`);
     }
 
-    const html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<title>Roll Features Index</title>\n` +
-      `<style>body{font-family:system-ui;max-width:1000px;margin:2rem auto;padding:0 1rem;` +
-      `line-height:1.6;color:#1a1a1a}h1{color:#333}table{width:100%;border-collapse:collapse}` +
-      `th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #e0e0e0}` +
-      `th{background:#f5f5f5}tr:hover{background:#fafafa}` +
-      `a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}` +
-      `footer{color:#666;font-size:.85rem;margin-top:3rem;border-top:1px solid #eee;padding-top:1rem}</style>\n` +
-      `</head>\n<body>\n<h1>🎯 Roll Features Index</h1>\n<p>${epics.size} epics · ${n} stories</p>\n` +
-      `<table><thead><tr><th>Epic</th><th>Stories</th><th>Recent</th></tr></thead>\n` +
+    const html = `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+      `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
+      `<title>Roll Features Index · 功能档案</title>\n` +
+      `<style>\n${CHROME_CSS}` +
+      `body { max-width:1000px; }\n` +
+      `table { width:100%; border-collapse:collapse; position:relative; z-index:2; }\n` +
+      `th, td { padding:8px 12px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }\n` +
+      `th { font-family:var(--serif); letter-spacing:.04em; color:var(--muted); }\n` +
+      `tr:hover td { background:var(--bg-raise); }\n` +
+      `td code, td strong a { font-family:var(--mono); }\n` +
+      `</style>\n${CHROME_SCRIPT}\n` +
+      `</head>\n<body>\n${CHROME_CONTROLS}\n` +
+      `<p class="kicker">Roll · ${bi("Delivery Dossier", "交付档案")}</p>\n` +
+      `<h1>${bi("Features Index", "功能档案")}</h1>\n` +
+      `<p class="meta">${bi(`${epics.size} epics · ${n} stories`, `${epics.size} 个史诗 · ${n} 个故事`)}</p>\n` +
+      `<table><thead><tr><th>Epic</th><th>${bi("Stories", "故事")}</th><th>${bi("Recent", "最近")}</th></tr></thead>\n` +
       `<tbody>\n${rows.join("\n")}\n</tbody></table>\n` +
-      `<footer>Generated by roll index</footer>\n</body>\n</html>\n`;
+      `<footer>${bi("Generated by", "生成自")} <code>roll index</code></footer>\n</body>\n</html>\n`;
 
     try {
       writeFileSync(join(featuresDir, "index.html"), html, "utf8");

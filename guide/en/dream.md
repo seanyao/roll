@@ -4,6 +4,10 @@
 dead code, and technical debt. It runs automatically at 3am (via launchd, installed by
 `roll loop on`) and deposits `REFACTOR-NNN` entries into `BACKLOG.md` for loop to execute.
 
+The schedule fires a self-contained v3 runner whose heart is `roll dream run-once`
+(the TS command that resolves the `roll-.dream` skill and spawns the agent in place) —
+the same shape as the loop runner, with no bash-engine dependency.
+
 ## What Dream Does
 
 Dream runs one full scan per night and produces two outputs:
@@ -79,17 +83,17 @@ loop_dream_hour: 3     # 0-23, default 3
 loop_dream_minute: 12  # 0-59, omit to auto-derive
 ```
 
-`roll config` reloads the schedule automatically, so a separate `roll loop on` is
-not required after changing the time. `roll loop on` installs the dream plist
-alongside the loop and brief plists.
-改完时间 `roll config` 会自动重载调度，无需再跑 `roll loop on`。`roll loop on`
-会把 dream plist 和 loop、brief plist 一起安装。
+Changing the time writes config only; apply the new schedule by re-running
+`roll loop on` (a config write no longer remounts launchd — US-PORT-006).
+`roll loop on` installs the dream plist alongside the loop and pr plists.
+改完时间只写配置；用 `roll loop on` 重挂应用新调度（config 写入不再自动重挂
+launchd —— US-PORT-006）。`roll loop on` 会把 dream plist 和 loop、pr plist 一起安装。
 All three services are managed together:
 
 ```bash
-roll loop on       # install loop + dream + brief
+roll loop on       # install loop + pr + dream
+roll loop off      # boot out loop + pr + dream
 roll loop status   # shows all three service states
-roll loop monitor  # live dashboard for all three
 ```
 
 ## Manual Run
@@ -97,7 +101,10 @@ roll loop monitor  # live dashboard for all three
 To run a dream scan immediately (without waiting for the scheduled 3am run):
 
 ```bash
-# Using Claude Code directly
+# v3-native — same heart the nightly runner uses
+roll dream run-once
+
+# Or drive the skill via Claude Code directly
 $roll-.dream
 ```
 

@@ -70,4 +70,74 @@ export const v3Catalog: Catalog = {
     en: "Backlog changed on disk — re-run to capture",
     zh: "待办文件已变更 — 请重试以记录",
   },
+
+  // `releasev3.*` — the read-only release-guidance command (US-PORT-004). `roll
+  // release` computes the next calver version, surfaces changelog readiness, and
+  // prints the PR/tag flow; it NEVER pushes a tag or publishes (release is always
+  // a human decision). Both en and zh present so the single-language contract
+  // (output follows ROLL_LANG, never mixes) holds.
+  "releasev3.usage": {
+    en: "Usage: roll release [--json]",
+    zh: "用法：roll release [--json]",
+  },
+  "releasev3.title": {
+    en: "Release plan",
+    zh: "发版计划",
+  },
+  "releasev3.current": {
+    en: "Current version",
+    zh: "当前版本",
+  },
+  "releasev3.next": {
+    en: "Suggested next",
+    zh: "建议下一版",
+  },
+  "releasev3.tag": {
+    en: "Tag",
+    zh: "标签",
+  },
+  "releasev3.changelog": {
+    en: "Changelog",
+    zh: "更新日志",
+  },
+  "releasev3.changelog_ready": {
+    en: "Unreleased section has content",
+    zh: "未发布区有内容",
+  },
+  "releasev3.changelog_empty": {
+    en: "nothing under Unreleased — run: roll changelog generate --write",
+    zh: "未发布区为空 — 请先运行：roll changelog generate --write",
+  },
+  "releasev3.flow_title": {
+    en: "Release flow (run these yourself — a release is always a human decision):",
+    zh: "发版流程（请亲手执行 — 发版始终由人拍板）：",
+  },
+  "releasev3.step_bump": {
+    en: "Bump package.json version to %s",
+    zh: "把 package.json 版本号改为 %s",
+  },
+  "releasev3.step_commit": {
+    en: "Commit the bump and open a PR to main",
+    zh: "提交版本号变更并向 main 开 PR",
+  },
+  "releasev3.step_merge": {
+    en: "After CI is green and the PR is merged, pull main",
+    zh: "CI 通过且 PR 合并后，拉取 main",
+  },
+  "releasev3.step_tag": {
+    en: "Tag %s and push the tag — this triggers the release workflow",
+    zh: "打标签 %s 并推送 — 触发发版流水线",
+  },
+  "releasev3.gate_note": {
+    en: "The consistency gate runs on tag push and aborts the release on any gap.",
+    zh: "一致性闸在推送标签时运行，任一维度对不上即中止发版。",
+  },
+  "releasev3.gate_preview": {
+    en: "Preview locally with: roll consistency check",
+    zh: "本地预检：roll consistency check",
+  },
+  "releasev3.no_pkg": {
+    en: "package.json version not found — run from the repo root",
+    zh: "未找到 package.json 版本号 — 请在仓库根目录运行",
+  },
 };

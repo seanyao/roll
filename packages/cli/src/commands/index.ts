@@ -31,6 +31,7 @@ import {
 import { migrateCommand } from "./migrate.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
+import { releaseCommand } from "./release.js";
 import { setupCommand } from "./setup.js";
 import { skillsCommand } from "./skills.js";
 import { slidesCommand } from "./slides/index.js";
@@ -97,6 +98,13 @@ export function registerAll(): void {
   // A lint violation reports and refuses — no bad card is ever written.
   // No bash fallback: v2 had no `roll idea` command (capture was skill-only).
   registerPorted("idea", ideaCommand);
+  // `release`: v3-native read-only release guidance (US-PORT-004). Computes the
+  // next calver version from package.json + today, surfaces changelog readiness,
+  // and prints the PR/tag flow + the CI consistency-gate note. It NEVER bumps,
+  // commits, tags, or publishes — a release is always a human decision (loop
+  // hard rule). No bash fallback: v2 had no `roll release` subcommand (the flow
+  // lived in the private ops wrapper, which stays for the actual publish).
+  registerPorted("release", (args) => releaseCommand(args));
   // `prices`: show/help/unknown are TS; `refresh` (network write) is bash.
   registerPorted("prices", (args) => {
     const r = pricesCommand(args);

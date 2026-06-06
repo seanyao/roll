@@ -28,6 +28,7 @@ import {
   renderReport,
   ansiPre,
   boundTranscript,
+  EventBus,
   extractCycleSignals,
   smokeCheckReport,
   type AcReportItem,
@@ -38,7 +39,7 @@ import {
   type ProcessArchive,
   type RunRow,
 } from "@roll/core";
-import { type RollEvent, parseEventLine } from "@roll/spec";
+import type { RollEvent } from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
@@ -86,33 +87,13 @@ export interface ProcessReaders {
 /** Default readers over `<runtimeDir>/{runs.jsonl,events.ndjson,cycle-logs/}`. */
 function defaultProcessReaders(projectPath: string, env: Record<string, string | undefined>): ProcessReaders {
   const rt = (env.ROLL_PROJECT_RUNTIME_DIR ?? "").trim() || join(projectPath, ".roll", "loop");
-  const readJsonl = <T>(p: string, parse: (line: string) => T | null): T[] => {
-    if (!existsSync(p)) return [];
-    let text: string;
-    try {
-      text = readFileSync(p, "utf8");
-    } catch {
-      return [];
-    }
-    const out: T[] = [];
-    for (const line of text.split("\n")) {
-      const v = parse(line);
-      if (v !== null) out.push(v);
-    }
-    return out;
-  };
+  // Reuse the event bus's read side — it already parses runs.jsonl / events.ndjson
+  // and returns [] for a missing file (readText → "" on absence), no throw.
+  const bus = new EventBus();
   const logPath = (cid: string): string => join(rt, "cycle-logs", `${cid}.agent.log`);
   return {
-    runs: () =>
-      readJsonl<RunRow>(join(rt, "runs.jsonl"), (line) => {
-        if (line.trim() === "") return null;
-        try {
-          return JSON.parse(line) as RunRow;
-        } catch {
-          return null;
-        }
-      }),
-    events: () => readJsonl<RollEvent>(join(rt, "events.ndjson"), parseEventLine),
+    runs: () => bus.readRuns(join(rt, "runs.jsonl")),
+    events: () => bus.readEvents(join(rt, "events.ndjson")),
     transcript: (cid) => {
       const p = logPath(cid);
       if (!existsSync(p)) return null;

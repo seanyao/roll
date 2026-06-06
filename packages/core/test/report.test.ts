@@ -89,6 +89,25 @@ describe("single-file self-containment", () => {
   });
 });
 
+describe("US-ATTEST-011 — Gate self-capture section", () => {
+  it("renders a figure for an unattended terminal self-capture", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
+      selfCaptures: [{ kind: "screenshot", label: "terminal", href: "./screenshots/terminal.png" }],
+    });
+    expect(html).toContain("Gate self-capture · 自产实拍");
+    expect(html).toContain('<img src="./screenshots/terminal.png"');
+  });
+
+  it("no self-captures ⇒ block skipped, no placeholder (deletion contract)", () => {
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain("Gate self-capture");
+    const empty = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })], selfCaptures: [] });
+    expect(empty).not.toContain("Gate self-capture");
+  });
+});
+
 describe("badge ladder", () => {
   it("summary counts every present status with bilingual badges", () => {
     const html = renderReport({

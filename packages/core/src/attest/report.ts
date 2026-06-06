@@ -52,6 +52,11 @@ export interface ReportInput {
   /** US-ATTEST-009 — same-story Self-Score entries from .roll/notes/; the
    *  whole collapsed block is SKIPPED when none exist (no placeholder). */
   selfScores?: Array<{ skill: string; score: number; verdict: string; ts: string; note: string }>;
+  /** US-ATTEST-011 — screenshots an unattended cycle's Gate produced for itself
+   *  (terminal lane). Renders a dedicated figure section; the block is SKIPPED
+   *  when empty (deletion-not-placeholder — a headless host that honestly
+   *  skipped the capture surfaces NOTHING here, never a placeholder). */
+  selfCaptures?: EvidenceRef[];
 }
 
 const BADGE: Record<AcStatus, { icon: string; en: string; zh: string; cls: string }> = {
@@ -96,6 +101,18 @@ function acSection(item: AcReportItem): string {
 ${note}
 ${evs}
 </section>`;
+}
+
+/**
+ * US-ATTEST-011 — the unattended Gate's own screenshots. Renders ONLY when the
+ * terminal lane actually produced pixels (the bridge yields no ref on skip), so
+ * a headless cycle drops the whole block — deletion-not-placeholder, same red
+ * line as the per-AC screenshot figure.
+ */
+function selfCaptureBlock(refs: ReportInput["selfCaptures"]): string {
+  if (refs === undefined || refs.length === 0) return "";
+  const figs = refs.map(evidenceCard).join("\n");
+  return `<section class="self-capture"><h2>Gate self-capture · 自产实拍</h2>\n${figs}\n</section>`;
 }
 
 function selfScoreBlock(entries: ReportInput["selfScores"]): string {
@@ -172,6 +189,7 @@ ${ANSI_CSS}
 <p>${summary}</p>
 ${facts}
 ${items.map(acSection).join("\n")}
+${selfCaptureBlock(input.selfCaptures)}
 ${disc}
 ${selfScoreBlock(input.selfScores)}
 </body>

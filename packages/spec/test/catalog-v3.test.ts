@@ -17,6 +17,22 @@ describe("v3Catalog", () => {
     "ideav3.empty",
     "ideav3.lint_failed",
     "ideav3.lint_hint",
+    "releasev3.usage",
+    "releasev3.title",
+    "releasev3.current",
+    "releasev3.next",
+    "releasev3.tag",
+    "releasev3.changelog",
+    "releasev3.changelog_ready",
+    "releasev3.changelog_empty",
+    "releasev3.flow_title",
+    "releasev3.step_bump",
+    "releasev3.step_commit",
+    "releasev3.step_merge",
+    "releasev3.step_tag",
+    "releasev3.gate_note",
+    "releasev3.gate_preview",
+    "releasev3.no_pkg",
   ];
 
   it("every v3 key carries both en and zh (no mixed-language gap)", () => {

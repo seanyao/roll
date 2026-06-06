@@ -1805,7 +1805,8 @@ function render(
 
   let skillLine = "";
   try {
-    skillLine = selfScoreSummaryLine();
+    skillLine = selfScoreSummaryLine(process.env["ROLL_NOTES_DIR"]);
+
   } catch {
     skillLine = "";
   }

@@ -60,11 +60,13 @@ function sandboxEnv(extra: Record<string, string> = {}): Record<string, string> 
   const home = mkdtempSync(join(tmpdir(), "roll-dash-home-"));
   const rt = mkdtempSync(join(tmpdir(), "roll-dash-rt-"));
   const shared = mkdtempSync(join(tmpdir(), "roll-dash-shared-"));
-  dirs.push(home, rt, shared);
+  const notes = mkdtempSync(join(tmpdir(), "roll-dash-notes-"));
+  dirs.push(home, rt, shared, notes);
   return {
     HOME: home,
     ROLL_PROJECT_RUNTIME_DIR: rt,
     ROLL_SHARED_ROOT: shared,
+    ROLL_NOTES_DIR: notes,
     ROLL_MAIN_SLUG: "test-abc123",
     _LAUNCHD_DIR: join(home, "la"),
     ...extra,
@@ -113,7 +115,6 @@ describe("frozen: roll loop status (fixture)", () => {
         cache reads          —  —           —         —       
         output tokens        —  —           —         —       
         cost             $0.00  —           $0.00     $0.00   
-        self-score: mean 8.9 / min 8 / redo 0 (last 14)
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -163,7 +164,6 @@ describe("frozen: roll loop status (fixture)", () => {
         cache reads          —  —           —         —       
         output tokens        —  —           —         —       
         cost             $0.00  —           $0.00     $0.00   
-        self-score: mean 8.9 / min 8 / redo 0 (last 14)
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -214,7 +214,6 @@ describe("frozen: roll loop status (fixture)", () => {
         cache reads          —  —           —         —       
         output tokens        —  —           —         —       
         cost             $0.00  —           $0.00     $0.00   
-        self-score: mean 8.9 / min 8 / redo 0 (last 14)
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -266,7 +265,6 @@ describe("frozen: roll loop status (fixture)", () => {
         cache reads          —  —           —         —       
         output tokens        —  —           —         —       
         cost             $0.00  —           $0.00     $0.00   
-        self-score: mean 8.9 / min 8 / redo 0 (last 14)
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -567,7 +565,6 @@ describe("frozen: roll loop status (live)", () => {
         output tokens       2K  ▲ new       —         —       
         cost             ¥0.42  ▲ new       ¥0.00     ¥0.00   
         agents: pi 4/4 (n/a)
-        self-score: mean 6.7 / min 5 / redo 2 (last 14)
         result-eval: mean 7.5↑ / min 6 / out 50% ci 100% scope 100% qual 0% (last 14)
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────

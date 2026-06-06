@@ -20,6 +20,7 @@ export * from "./loop/quality-gate.js";
 export * from "./loop/orchestrator.js";
 export * from "./loop/recovery.js";
 export * from "./loop/sentinel.js";
+export * from "./loop/signals.js";
 export * from "./loop/transcript.js";
 export * from "./policy/engine.js";
 export * from "./reconcile/engine.js";

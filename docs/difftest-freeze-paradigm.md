@@ -61,6 +61,36 @@ and parse canned output. They already satisfy the US-PORT-009e gate and stay
 as-is.
 用 PATH 上假二进制（假 gh/tmux/launchctl）的测试本就不起旧引擎，无需转换。
 
+## Freezing form: literal `toBe` vs inline snapshot
+
+Both are frozen expectations with **zero engine spawn** — pick by output shape:
+
+- **Scalar / small structured values** (a count, a sorted JSON object, a one-line
+  string): freeze a literal with `expect(ts).toBe(FROZEN)` / `toEqual(FROZEN)`.
+  Used by the spec/infra/core batches (009a/009b).
+- **Multi-line, ANSI-coloured, or CJK CLI render output** (`roll status`,
+  `agent list`, `backlog`, `doctor`, …): freeze with vitest
+  `expect(ts).toMatchInlineSnapshot()`, captured once via `vitest -u`. The
+  snapshot lives in the test file (visible, reviewable), auto-escapes ANSI/CJK,
+  and is byte-exact — hand-transcribing such literals is error-prone and a single
+  wrong byte reds CI. Used by the CLI read-only batch (009c).
+
+Inline snapshots are keyed by **call site**, so a parametrized `for` loop whose
+iterations produce *different* values cannot share one — **unroll** such loops
+into explicit `it` blocks (one snapshot each). Loops whose iterations all yield
+the *same* value may stay.
+
+### Scrubbing volatile substrings before the snapshot
+
+When the otherwise-deterministic output embeds a volatile fragment (a tmp path, a
+`basename(cwd)`, a uid, `uname -srm`, the package.json version), do **not** freeze
+the raw bytes (step 2). Instead scrub the known fragment to a placeholder *before*
+the snapshot, e.g. `out.split(home).join("<HOME>")`, `…/${uid}/… → /<UID>/`,
+`/- OS: .*/ → "- OS: <OS>"`. The test already knows the fabricated path/uid, so
+the scrub is exact. For an inherently host-specific appendix (the `roll feedback`
+Environment block), assert the deterministic prefix + structural markers and
+replace the whole appendix with `<ENV>`.
+
 ## The portability trap (why step 2 matters)
 
 A slug like `basename-<md5(path)>` looks freezable, but `md5` of a `realpath`'d

@@ -12,8 +12,15 @@
  *   - launchd : _LAUNCHD_DIR pointed at an empty dir → no stale section, AND a
  *               fixture with one stale com.roll.*.plist → the warning block.
  * PATH excludes gh so branch-protection is "unknown" without any network.
+ *
+ * Frozen-expectation test (US-PORT-009c): `doctorCommand` was proven byte-equal
+ * to the bash oracle `bin/roll doctor` under diff-test; the oracle is retired and
+ * each case freezes the TS `{status, stdout, stderr}` as an inline snapshot (zero
+ * engine spawn). Volatile bits are scrubbed to placeholders so the frozen value
+ * stays portable: the random ROLL_HOME/project/ROLL_PKG_DIR paths → `<HOME>` /
+ * `<CWD>` / `<PKG>`, and the launchd bootout hint's `$(id -u)` → `<UID>`.
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -84,25 +91,6 @@ interface Run {
   stderr: string;
 }
 
-function bashDoctor(e: Env): Run {
-  const env: Record<string, string> = {
-    PATH: NOGH_PATH,
-    HOME: e.home,
-    ROLL_HOME: join(e.home, ".roll"),
-    _LAUNCHD_DIR: e.launchd,
-    NO_COLOR: "1",
-    ROLL_LANG: e.lang,
-  };
-  if (e.pkg !== undefined) env["ROLL_PKG_DIR"] = e.pkg;
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["doctor"], { cwd: e.cwd, encoding: "utf8", env });
-    return { status: 0, stdout, stderr: "" };
-  } catch (err) {
-    const x = err as { status?: number; stdout?: string; stderr?: string };
-    return { status: x.status ?? 1, stdout: x.stdout ?? "", stderr: x.stderr ?? "" };
-  }
-}
-
 function tsDoctor(e: Env): Run {
   const keys = ["PATH", "HOME", "ROLL_HOME", "_LAUNCHD_DIR", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "ROLL_PKG_DIR"];
   const save: Record<string, string | undefined> = {};
@@ -143,40 +131,219 @@ function tsDoctor(e: Env): Run {
 
 const CONFIG = "primary_agent: claude\nai_claude: ~/.claude\nai_kimi: ~/.kimi | extra\n";
 
-describe("diff-test: roll doctor == bash oracle", () => {
-  for (const lang of ["en", "zh"]) {
-    it(`healthy: git repo + config + matching skills + empty launchd (${lang})`, () => {
-      const pkg = freshPkg();
-      // Make the committed catalog match a fresh scan so skills section = OK.
-      mkdirSync(join(pkg, "guide"), { recursive: true });
-      // generateCatalog reads ROLL_PKG_DIR — set it for this synchronous call.
-      const savePkg = process.env["ROLL_PKG_DIR"];
-      process.env["ROLL_PKG_DIR"] = pkg;
-      writeFileSync(join(pkg, "guide", "skills.md"), generateCatalog());
-      if (savePkg === undefined) delete process.env["ROLL_PKG_DIR"];
-      else process.env["ROLL_PKG_DIR"] = savePkg;
-      const e: Env = { home: freshHome(CONFIG), cwd: makeGitRepo(), pkg, launchd: emptyLaunchd(), lang };
-      expect(tsDoctor(e)).toEqual(bashDoctor(e));
-    });
+/** Seed pkg/guide/skills.md with the TS catalog so the skills section reads OK. */
+function seedCatalog(pkg: string): void {
+  mkdirSync(join(pkg, "guide"), { recursive: true });
+  const savePkg = process.env["ROLL_PKG_DIR"];
+  process.env["ROLL_PKG_DIR"] = pkg;
+  writeFileSync(join(pkg, "guide", "skills.md"), generateCatalog());
+  if (savePkg === undefined) delete process.env["ROLL_PKG_DIR"];
+  else process.env["ROLL_PKG_DIR"] = savePkg;
+}
 
-    it(`broken: no config (agent section skipped), non-git, skills drift (${lang})`, () => {
-      const pkg = freshPkg();
-      mkdirSync(join(pkg, "guide"), { recursive: true });
-      writeFileSync(join(pkg, "guide", "skills.md"), "# stale\n"); // drift
-      const nonGit = mkdtempSync(join(tmpdir(), "roll-doctor-nongit-"));
-      dirs.push(nonGit);
-      const e: Env = { home: freshHome(), cwd: nonGit, pkg, launchd: emptyLaunchd(), lang };
-      expect(tsDoctor(e)).toEqual(bashDoctor(e));
-    });
+/** Scrub the random fixture paths + the launchd `$(id -u)` → portable. */
+function scrub(r: Run, e: Env): Run {
+  const uid = String(process.getuid?.() ?? 0);
+  const s = (x: string): string => {
+    let out = x;
+    if (e.pkg !== undefined) out = out.split(e.pkg).join("<PKG>");
+    out = out.split(e.home).join("<HOME>").split(e.cwd).join("<CWD>").split(e.launchd).join("<LAUNCHD>");
+    return out.split(`/${uid}/`).join("/<UID>/");
+  };
+  return { status: r.status, stdout: s(r.stdout), stderr: s(r.stderr) };
+}
 
-    it(`broken: skills target missing → drift (${lang})`, () => {
-      const pkg = freshPkg(); // no guide/skills.md written at all
-      const nonGit = mkdtempSync(join(tmpdir(), "roll-doctor-nog2-"));
-      dirs.push(nonGit);
-      const e: Env = { home: freshHome(), cwd: nonGit, pkg, launchd: emptyLaunchd(), lang };
-      expect(tsDoctor(e)).toEqual(bashDoctor(e));
-    });
-  }
+// Unrolled (inline snapshots are keyed by call site — a loop can't hold distinct
+// per-case frozen values).
+describe("frozen: roll doctor", () => {
+  it("healthy: git repo + config + matching skills + empty launchd (en)", () => {
+    const pkg = freshPkg();
+    seedCatalog(pkg);
+    const e: Env = { home: freshHome(CONFIG), cwd: makeGitRepo(), pkg, launchd: emptyLaunchd(), lang: "en" };
+    expect(scrub(tsDoctor(e), e)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "
+      Agent detection
+      Agent 检测
+
+        claude      CLI not found   config dir missing  (primary)
+        kimi        CLI not found   config dir missing
+
+      PR review extras
+      PR 评审两档开关
+
+        ⚪ AI review double gate state unknown — requires gh auth
+
+        Optional — enable AI review as a hard merge gate (path C).
+        可选 —— 启用 AI 评审作为合并双门（路径 C）。
+
+        Run once per repo (requires admin token), then claude-code-review.yml
+        approvals become a required merge gate alongside CI:
+        每个仓库执行一次（需要管理员 token），之后 claude-code-review.yml 的
+        approve 将与 CI 一起成为合并必经的双门：
+
+            gh api -X PATCH repos/<owner>/<repo>/branches/main/protection \\
+              -f required_pull_request_reviews.required_approving_review_count=1
+
+        Escape hatch: add [skip-ai-review] to a PR body, or include
+        SKIP_AI_REVIEW in any commit message, to bypass AI review for that PR.
+        紧急通道：在 PR body 加 [skip-ai-review]，或在任一 commit message
+        里包含 SKIP_AI_REVIEW，可对该 PR 绕过 AI 评审。
+
+        ⚪ Event-driven PR review not installed
+
+        Optional — enable event-driven PR review (seconds-fast, GitHub only).
+        doctor.pr_event_optional_zh
+
+        Without this, Roll reviews PRs each loop cycle (~1h). With it,
+        contributors get AI feedback on PR open/update immediately.
+
+            cp templates/workflows/pr-review-event.yml .github/workflows/
+
+        Then set the API key secret for your configured agent in GitHub repo settings.
+        doctor.pr_event_secret_zh
+
+
+      Skill catalog
+      技能清单
+        ✅ guide/skills.md matches skills/*/SKILL.md
+      ",
+      }
+    `);
+  });
+  it("healthy: git repo + config + matching skills + empty launchd (zh)", () => {
+    const pkg = freshPkg();
+    seedCatalog(pkg);
+    const e: Env = { home: freshHome(CONFIG), cwd: makeGitRepo(), pkg, launchd: emptyLaunchd(), lang: "zh" };
+    expect(scrub(tsDoctor(e), e)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "
+      Agent detection
+      Agent 检测
+
+        claude      CLI 未安装   配置目录不存在  (默认)
+        kimi        CLI 未安装   配置目录不存在
+
+      PR review extras
+      PR 评审两档开关
+
+        ⚪ 状态未知（需要 gh auth）
+
+        Optional — enable AI review as a hard merge gate (path C).
+        可选 —— 启用 AI 评审作为合并双门（路径 C）。
+
+        Run once per repo (requires admin token), then claude-code-review.yml
+        approvals become a required merge gate alongside CI:
+        每个仓库执行一次（需要管理员 token），之后 claude-code-review.yml 的
+        approve 将与 CI 一起成为合并必经的双门：
+
+            gh api -X PATCH repos/<owner>/<repo>/branches/main/protection \\
+              -f required_pull_request_reviews.required_approving_review_count=1
+
+        Escape hatch: add [skip-ai-review] to a PR body, or include
+        SKIP_AI_REVIEW in any commit message, to bypass AI review for that PR.
+        紧急通道：在 PR body 加 [skip-ai-review]，或在任一 commit message
+        里包含 SKIP_AI_REVIEW，可对该 PR 绕过 AI 评审。
+
+        ⚪ 事件驱动 PR 评审未安装
+
+        可选 —— 启用事件驱动 PR 评审（秒级响应，仅限 GitHub）。
+        doctor.pr_event_optional_zh
+
+        不安装也行 — loop 每轮会兜底评审。安装后
+        PR 一开即触发 AI 评审。
+
+            cp templates/workflows/pr-review-event.yml .github/workflows/
+
+        然后在 GitHub 仓库设置中添加你配置的 agent 对应的 API key secret。
+        doctor.pr_event_secret_zh
+
+
+      Skill catalog
+      技能清单
+        ✅ guide/skills.md 与 skills/*/SKILL.md 一致
+      ",
+      }
+    `);
+  });
+
+  it("broken: no config (agent section skipped), non-git, skills drift (en)", () => {
+    const pkg = freshPkg();
+    mkdirSync(join(pkg, "guide"), { recursive: true });
+    writeFileSync(join(pkg, "guide", "skills.md"), "# stale\n"); // drift
+    const nonGit = mkdtempSync(join(tmpdir(), "roll-doctor-nongit-"));
+    dirs.push(nonGit);
+    const e: Env = { home: freshHome(), cwd: nonGit, pkg, launchd: emptyLaunchd(), lang: "en" };
+    expect(scrub(tsDoctor(e), e)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "
+      Skill catalog
+      技能清单
+        ⚠️  guide/skills.md is stale — run 'roll skills generate'
+      ",
+      }
+    `);
+  });
+  it("broken: no config (agent section skipped), non-git, skills drift (zh)", () => {
+    const pkg = freshPkg();
+    mkdirSync(join(pkg, "guide"), { recursive: true });
+    writeFileSync(join(pkg, "guide", "skills.md"), "# stale\n"); // drift
+    const nonGit = mkdtempSync(join(tmpdir(), "roll-doctor-nongit-"));
+    dirs.push(nonGit);
+    const e: Env = { home: freshHome(), cwd: nonGit, pkg, launchd: emptyLaunchd(), lang: "zh" };
+    expect(scrub(tsDoctor(e), e)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "
+      Skill catalog
+      技能清单
+        ⚠️  guide/skills.md 已过期 — 请运行 'roll skills generate'
+      ",
+      }
+    `);
+  });
+
+  it("broken: skills target missing → drift (en)", () => {
+    const pkg = freshPkg(); // no guide/skills.md written at all
+    const nonGit = mkdtempSync(join(tmpdir(), "roll-doctor-nog2-"));
+    dirs.push(nonGit);
+    const e: Env = { home: freshHome(), cwd: nonGit, pkg, launchd: emptyLaunchd(), lang: "en" };
+    expect(scrub(tsDoctor(e), e)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "
+      Skill catalog
+      技能清单
+        ⚠️  guide/skills.md is stale — run 'roll skills generate'
+      ",
+      }
+    `);
+  });
+  it("broken: skills target missing → drift (zh)", () => {
+    const pkg = freshPkg(); // no guide/skills.md written at all
+    const nonGit = mkdtempSync(join(tmpdir(), "roll-doctor-nog2-"));
+    dirs.push(nonGit);
+    const e: Env = { home: freshHome(), cwd: nonGit, pkg, launchd: emptyLaunchd(), lang: "zh" };
+    expect(scrub(tsDoctor(e), e)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "
+      Skill catalog
+      技能清单
+        ⚠️  guide/skills.md 已过期 — 请运行 'roll skills generate'
+      ",
+      }
+    `);
+  });
 
   it("launchd: a stale com.roll plist surfaces the warning block (Darwin, en)", () => {
     if (process.platform !== "darwin") return; // section is Darwin-only
@@ -188,18 +355,26 @@ describe("diff-test: roll doctor == bash oracle", () => {
       `<plist><dict>\n<key>WorkingDirectory</key>\n<string>${missing}</string>\n</dict></plist>\n`,
     );
     const pkg = freshPkg();
-    mkdirSync(join(pkg, "guide"), { recursive: true });
-    const savePkg = process.env["ROLL_PKG_DIR"];
-    process.env["ROLL_PKG_DIR"] = pkg;
-    writeFileSync(join(pkg, "guide", "skills.md"), generateCatalog());
-    if (savePkg === undefined) delete process.env["ROLL_PKG_DIR"];
-    else process.env["ROLL_PKG_DIR"] = savePkg;
+    seedCatalog(pkg);
     const nonGit = mkdtempSync(join(tmpdir(), "roll-doctor-la-proj-"));
     dirs.push(nonGit);
     const e: Env = { home: freshHome(), cwd: nonGit, pkg, launchd: la, lang: "en" };
-    const t = tsDoctor(e);
-    const b = bashDoctor(e);
-    // The launchctl bootout hint embeds $(id -u); both use the same uid here.
-    expect(t).toEqual(b);
+    expect(scrub(tsDoctor(e), e)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "
+      Skill catalog
+      技能清单
+        ✅ guide/skills.md matches skills/*/SKILL.md
+
+      Stale launchd plists
+
+        ⚠ com.roll.loop.demo
+          WorkingDirectory missing: /tmp/roll-doctor-this-dir-does-not-exist-xyz
+          Path is stale, clean up with: launchctl bootout gui/<UID>/com.roll.loop.demo; rm '<LAUNCHD>/com.roll.loop.demo.plist'
+      ",
+      }
+    `);
   });
 });

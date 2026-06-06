@@ -1,19 +1,22 @@
 /**
- * diff-test: TS `roll skills` == bash `bin/roll skills` (frozen v2 oracle).
+ * Frozen-expectation test: TS `roll skills`.
  *
- * Two probe surfaces:
- *  - the REAL frozen skills/ submodule (ROLL_PKG_DIR = repo) for `check` (the
- *    committed guide/skills.md is up to date) and `generate` stdout;
- *  - a fabricated ROLL_PKG_DIR with a hand-built skills/ tree + stale target to
- *    exercise the drift path (`diff -u` output) and the missing-target path.
- * All cases compare stdout/stderr/exit byte-for-byte, en + zh.
+ * `skillsCommand` was proven byte-equal to the bash oracle `bin/roll skills`
+ * under diff-test. Per US-PORT-009c the oracle is retired: the `bin/roll skills`
+ * spawn is dropped and each case freezes the TS `{status, stdout, stderr}` as an
+ * inline snapshot (zero engine spawn). The up-to-date `check` fixture is now
+ * seeded with the TS `generateCatalog()` (not the bash `generate` oracle). The
+ * drift `diff -u` output carries a `--- <file> <mtime>` / `+++ <tmp> <mtime>`
+ * header whose temp path + timestamp are environment artifacts — the two header
+ * lines are stripped (WHITELIST) and the diff BODY frozen; the random ROLL_PKG_DIR
+ * path is scrubbed to `<PKG>` so the frozen value stays portable.
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { skillsCommand } from "../src/commands/skills.js";
+import { skillsCommand, generateCatalog } from "../src/commands/skills.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
@@ -35,20 +38,6 @@ interface Run {
   status: number;
   stdout: string;
   stderr: string;
-}
-
-function bashSkills(args: string[], env: Record<string, string>): Run {
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["skills", ...args], {
-      cwd: REPO,
-      encoding: "utf8",
-      env: { ...process.env, HOME: home, ROLL_HOME: join(home, ".roll"), NO_COLOR: "1", ...env },
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
 }
 
 function tsSkills(args: string[], env: Record<string, string>): Run {
@@ -116,75 +105,177 @@ function makeStalePkg(): string {
   return pkg;
 }
 
-describe("diff-test: roll skills == bash oracle", () => {
+/** Seed pkg/guide/skills.md with the TS catalog (replaces the bash `generate`). */
+function seedCatalog(pkg: string): void {
+  mkdirSync(join(pkg, "guide"), { recursive: true });
+  const savePkg = process.env["ROLL_PKG_DIR"];
+  process.env["ROLL_PKG_DIR"] = pkg;
+  writeFileSync(join(pkg, "guide", "skills.md"), generateCatalog());
+  if (savePkg === undefined) delete process.env["ROLL_PKG_DIR"];
+  else process.env["ROLL_PKG_DIR"] = savePkg;
+}
+
+/** Scrub the random ROLL_PKG_DIR path → portable. */
+function scrub(r: Run, pkg: string): Run {
+  const s = (x: string): string => x.split(pkg).join("<PKG>");
+  return { status: r.status, stdout: s(r.stdout), stderr: s(r.stderr) };
+}
+
+// The diff -u STDOUT carries a `--- <file> <mtime>` / `+++ <tmp> <mtime>` header
+// whose temp path + timestamp are environment artifacts (WHITELIST): strip the
+// two header lines and freeze the diff BODY (hunk header + content).
+const stripDiffHeader = (s: string): string =>
+  s.split("\n").filter((l) => !l.startsWith("--- ") && !l.startsWith("+++ ")).join("\n");
+
+describe("frozen: roll skills", () => {
   it("help (no-arg) en", () => {
-    expect(tsSkills([], { ROLL_LANG: "en" })).toEqual(bashSkills([], { ROLL_LANG: "en" }));
+    expect(tsSkills([], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Usage: roll skills <generate|check>
+      ",
+      }
+    `);
   });
   it("help (no-arg) zh", () => {
-    expect(tsSkills([], { ROLL_LANG: "zh" })).toEqual(bashSkills([], { ROLL_LANG: "zh" }));
+    expect(tsSkills([], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "用法：roll skills <generate|check>
+      ",
+      }
+    `);
   });
   it("help (explicit) en", () => {
-    expect(tsSkills(["help"], { ROLL_LANG: "en" })).toEqual(bashSkills(["help"], { ROLL_LANG: "en" }));
+    expect(tsSkills(["help"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Usage: roll skills <generate|check>
+      ",
+      }
+    `);
   });
 
-  // Self-consistent up-to-date fixture: generate the catalog with the bash
-  // oracle ON THIS PLATFORM first, then check with both legs. (Checking the
-  // repo's committed guide/skills.md is platform-fragile: glob collation on
-  // Linux CI reorders entries → both legs see drift with diverging diffs.)
-  it("check (self-generated catalog — up to date) en+zh", () => {
+  // Self-consistent up-to-date fixture: seed the catalog with the TS
+  // generateCatalog() ON THIS PLATFORM, then check. (Freezing the repo's
+  // committed guide/skills.md is platform-fragile: glob collation on Linux CI
+  // reorders entries → drift with diverging diffs.)
+  it("check (self-generated catalog — up to date) en", () => {
     const pkg = freshPkg();
     symlinkSync(join(REPO, "skills"), join(pkg, "skills"));
-    mkdirSync(join(pkg, "guide"), { recursive: true });
-    const gen = bashSkills(["generate"], { ROLL_LANG: "en", ROLL_PKG_DIR: pkg });
-    expect(gen.status).toBe(0);
-    for (const lang of ["en", "zh"]) {
-      expect(
-        tsSkills(["check"], { ROLL_LANG: lang, ROLL_PKG_DIR: pkg }),
-        `lang=${lang}`,
-      ).toEqual(bashSkills(["check"], { ROLL_LANG: lang, ROLL_PKG_DIR: pkg }));
-    }
+    seedCatalog(pkg);
+    expect(scrub(tsSkills(["check"], { ROLL_LANG: "en", ROLL_PKG_DIR: pkg }), pkg)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "[roll] Skill catalog is up to date.
+      ",
+      }
+    `);
+  });
+  it("check (self-generated catalog — up to date) zh", () => {
+    const pkg = freshPkg();
+    symlinkSync(join(REPO, "skills"), join(pkg, "skills"));
+    seedCatalog(pkg);
+    expect(scrub(tsSkills(["check"], { ROLL_LANG: "zh", ROLL_PKG_DIR: pkg }), pkg)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "[roll] 技能清单已是最新。
+      ",
+      }
+    `);
   });
 
   it("unknown subcommand en", () => {
-    expect(tsSkills(["bogus"], { ROLL_LANG: "en" })).toEqual(bashSkills(["bogus"], { ROLL_LANG: "en" }));
+    expect(tsSkills(["bogus"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] Unknown 'roll skills' subcommand: bogus
+      ",
+        "stdout": "Usage: roll skills <generate|check>
+      ",
+      }
+    `);
   });
   it("unknown subcommand zh", () => {
-    expect(tsSkills(["bogus"], { ROLL_LANG: "zh" })).toEqual(bashSkills(["bogus"], { ROLL_LANG: "zh" }));
+    expect(tsSkills(["bogus"], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] 未知的 'roll skills' 子命令：bogus
+      ",
+        "stdout": "用法：roll skills <generate|check>
+      ",
+      }
+    `);
   });
 
-  // Drift path: stderr (drift message) + exit code are the behavioral contract
-  // and must match byte-for-byte. The diff -u STDOUT carries the `--- <file>
-  // <mtime>` / `+++ <tmp> <mtime>` header — both the temp path (mktemp vs
-  // mkdtemp) and the timestamp are oracle-environment artifacts that cannot
-  // agree across two independent runs. WHITELIST: we strip the two `---`/`+++`
-  // header lines and compare the diff BODY (hunk header + content) byte-for-byte.
-  const stripDiffHeader = (s: string): string =>
-    s
-      .split("\n")
-      .filter((l) => !l.startsWith("--- ") && !l.startsWith("+++ "))
-      .join("\n");
   it("check drift (stale fixture) prints diff -u + exit 1, en", () => {
     const pkg = makeStalePkg();
     const t = tsSkills(["check"], { ROLL_LANG: "en", ROLL_PKG_DIR: pkg });
-    const b = bashSkills(["check"], { ROLL_LANG: "en", ROLL_PKG_DIR: pkg });
-    expect(t.status).toBe(b.status);
-    expect(t.stderr).toBe(b.stderr);
-    expect(stripDiffHeader(t.stdout)).toBe(stripDiffHeader(b.stdout));
+    expect(scrub({ status: t.status, stdout: stripDiffHeader(t.stdout), stderr: t.stderr }, pkg)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] Skill catalog drift: <PKG>/guide/skills.md differs from a fresh scan. Run 'roll skills generate'.
+      ",
+        "stdout": "@@ -1,3 +1,12 @@
+       # Roll Skill Catalog
+       
+      -stale
+      +> GENERATED by \`roll skills generate\` — do not edit by hand.
+      +> 由 \`roll skills generate\` 生成 — 请勿手工编辑。
+      +>
+      +> Source of truth: each skill's \`skills/<name>/SKILL.md\` frontmatter.
+      +> 事实源：各 skill 的 \`skills/<name>/SKILL.md\` frontmatter。
+      +
+      +| Skill | Description |
+      +|-------|-------------|
+      +| \`alpha\` | First skill description. |
+      +| \`beta\` | Second skill \\| with a pipe. |
+      ",
+      }
+    `);
   });
   it("check drift (stale fixture) zh", () => {
     const pkg = makeStalePkg();
     const t = tsSkills(["check"], { ROLL_LANG: "zh", ROLL_PKG_DIR: pkg });
-    const b = bashSkills(["check"], { ROLL_LANG: "zh", ROLL_PKG_DIR: pkg });
-    expect(t.status).toBe(b.status);
-    expect(t.stderr).toBe(b.stderr);
-    expect(stripDiffHeader(t.stdout)).toBe(stripDiffHeader(b.stdout));
+    expect(scrub({ status: t.status, stdout: stripDiffHeader(t.stdout), stderr: t.stderr }, pkg)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] 技能清单漂移：<PKG>/guide/skills.md 与最新扫描不一致。请运行 'roll skills generate'。
+      ",
+        "stdout": "@@ -1,3 +1,12 @@
+       # Roll Skill Catalog
+       
+      -stale
+      +> GENERATED by \`roll skills generate\` — do not edit by hand.
+      +> 由 \`roll skills generate\` 生成 — 请勿手工编辑。
+      +>
+      +> Source of truth: each skill's \`skills/<name>/SKILL.md\` frontmatter.
+      +> 事实源：各 skill 的 \`skills/<name>/SKILL.md\` frontmatter。
+      +
+      +| Skill | Description |
+      +|-------|-------------|
+      +| \`alpha\` | First skill description. |
+      +| \`beta\` | Second skill \\| with a pipe. |
+      ",
+      }
+    `);
   });
 
   it("check missing target (empty fixture pkg) en", () => {
     const pkg = freshPkg();
     mkdirSync(join(pkg, "skills"), { recursive: true });
-    expect(tsSkills(["check"], { ROLL_LANG: "en", ROLL_PKG_DIR: pkg })).toEqual(
-      bashSkills(["check"], { ROLL_LANG: "en", ROLL_PKG_DIR: pkg }),
-    );
+    expect(scrub(tsSkills(["check"], { ROLL_LANG: "en", ROLL_PKG_DIR: pkg }), pkg)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] Skill catalog not found at <PKG>/guide/skills.md. Run 'roll skills generate'.
+      ",
+        "stdout": "",
+      }
+    `);
   });
 });

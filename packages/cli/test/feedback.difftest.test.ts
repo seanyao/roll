@@ -1,28 +1,28 @@
 /**
- * diff-test: TS `roll feedback` == bash `bin/roll feedback` (frozen v2 oracle).
+ * Frozen-expectation test: TS `roll feedback`.
  *
- * The gh invocation is dispatched through a PATH-installed fake `gh` that
- * records its argv to a file and prints a canned issue URL (the shim pattern
- * used elsewhere for fake binaries). The composed issue body is byte-compared
- * via that recording: bash and TS each invoke the shim, and we assert the two
- * recorded argv files are identical (so --repo/--title/--body/--label match
- * exactly). The --print-url path is compared directly (URL bytes).
+ * `feedbackCommand` was proven byte-equal to the bash oracle `bin/roll feedback`
+ * under diff-test. Per US-PORT-009c the oracle is retired: the `bin/roll feedback`
+ * spawn is dropped and each case freezes the TS output as an inline snapshot
+ * (zero engine spawn). The gh invocation still runs through a PATH-installed fake
+ * `gh` shim (a fabricated binary, not the v2 engine — paradigm-exempt) that
+ * records its argv; gh-create cases freeze that recorded argv.
  *
- * CI portability: repo is pinned via ROLL_FEEDBACK_REPO (no git origin needed);
- * SHELL is pinned so the env block's `shell:` line is deterministic; both sides
- * run in the SAME cwd so OS/project/version/agent/lang lines match. The env
- * block's `OS:` line comes from `uname -srm` — identical for both processes on
- * the same host, so no host-specific value leaks into the assertion.
+ * Portability: repo is pinned via ROLL_FEEDBACK_REPO, SHELL + LANG are pinned so
+ * the env block's shell/language lines are deterministic. The env block's
+ * `roll version` / `OS` (uname -srm) / `project` (basename cwd) lines are
+ * host-specific → scrubbed to `<VER>` / `<OS>` / `<PROJECT>` (raw cases) or the
+ * whole URL-encoded env appendix replaced with `<ENV>` (print-url case), so the
+ * frozen value stays portable across machines.
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { feedbackCommand } from "../src/commands/feedback.js";
 import { seedUpdateCheckCache, pathWithout } from "./helpers.js";
 
-const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 let home = "";
 let proj = "";
@@ -88,20 +88,6 @@ function envBase(path: string, extra: Record<string, string>): Record<string, st
   };
 }
 
-function bashFb(args: string[], path: string, extra: Record<string, string> = {}): Run {
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["feedback", ...args], {
-      cwd: proj,
-      encoding: "utf8",
-      env: envBase(path, extra),
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
-}
-
 const ENV_KEYS = [
   "PATH", "HOME", "ROLL_HOME", "NO_COLOR", "SHELL", "LANG", "LC_ALL",
   "ROLL_LANG", "ROLL_FEEDBACK_REPO",
@@ -144,63 +130,137 @@ function readGhLog(): string {
   return s;
 }
 
-describe("diff-test: roll feedback == bash oracle", () => {
+// Scrub the host-specific env-block lines (raw form, as recorded in gh argv).
+const scrubEnvRaw = (s: string): string =>
+  s
+    .replace(/- roll version: .*/g, "- roll version: <VER>")
+    .replace(/- OS: .*/g, "- OS: <OS>")
+    .replace(/- project: .*/g, "- project: <PROJECT>");
+
+// Scrub the URL-encoded env appendix: everything from the encoded `\n---\n`
+// onward is the host-specific Environment block → replace with a marker.
+const scrubEnvUrl = (s: string): string => s.replace(/%0A---%0A.*/s, "%0A---%0A<ENV>");
+
+describe("frozen: roll feedback", () => {
   // ── --print-url path (no env block; exact URL bytes) ─────────────────────
   it("--print-url --no-env bug → exact prefilled URL", () => {
     const args = ["--print-url", "--no-env", "--title", "Crash on `roll loop`", "--body", "boom & co", "--type", "bug"];
-    expect(tsFb(args, PATH_WITH_GH)).toEqual(bashFb(args, PATH_WITH_GH));
+    expect(tsFb(args, PATH_WITH_GH)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "https://github.com/acme/widgets/issues/new?title=Crash%20on%20%60roll%20loop%60&body=boom%20%26%20co&labels=bug%2CFIX
+      ",
+      }
+    `);
   });
 
   it("--print-url --no-env idea (label set) with special chars", () => {
     const args = ["--print-url", "--no-env", "--type", "idea", "--title", "Add 100% coverage + e=mc²", "--body", "线程/并发 issue?"];
-    expect(tsFb(args, PATH_WITH_GH)).toEqual(bashFb(args, PATH_WITH_GH));
+    expect(tsFb(args, PATH_WITH_GH)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "https://github.com/acme/widgets/issues/new?title=Add%20100%25%20coverage%20%2B%20e%3Dmc%C2%B2&body=%E7%BA%BF%E7%A8%8B%2F%E5%B9%B6%E5%8F%91%20issue%3F&labels=idea%2Cenhancement%2CUS
+      ",
+      }
+    `);
   });
 
   it("--print-url --no-env ux (default body empty)", () => {
     const args = ["--print-url", "--no-env", "--type", "ux", "--title", "tighten spacing"];
-    expect(tsFb(args, PATH_WITH_GH)).toEqual(bashFb(args, PATH_WITH_GH));
+    expect(tsFb(args, PATH_WITH_GH)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "https://github.com/acme/widgets/issues/new?title=tighten%20spacing&body=&labels=ux%2Cenhancement
+      ",
+      }
+    `);
   });
 
-  // ── --print-url WITH env block (deterministic under pinned env/cwd) ───────
+  // ── --print-url WITH env block: the deterministic URL prefix is frozen; the
+  // host-specific encoded Environment appendix is scrubbed to <ENV>. ──────────
   it("--print-url WITH env block → URL incl. composed env appendix", () => {
     const args = ["--print-url", "--type", "bug", "--title", "T", "--body", "B"];
-    expect(tsFb(args, PATH_WITH_GH)).toEqual(bashFb(args, PATH_WITH_GH));
+    const t = tsFb(args, PATH_WITH_GH);
+    expect(t.stdout).toContain("%0A---%0A%0A%23%23%23%20Environment");
+    expect({ status: t.status, stdout: scrubEnvUrl(t.stdout), stderr: t.stderr }).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "https://github.com/acme/widgets/issues/new?title=T&body=B%0A---%0A<ENV>",
+      }
+    `);
   });
 
   // ── gh fallback when gh is ABSENT → auto print-url ───────────────────────
   it("no gh on PATH → auto print-url (no env)", () => {
     const args = ["--no-env", "--title", "no gh here", "--body", "x"];
-    expect(tsFb(args, PATH_NO_GH)).toEqual(bashFb(args, PATH_NO_GH));
+    expect(tsFb(args, PATH_NO_GH)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "https://github.com/acme/widgets/issues/new?title=no%20gh%20here&body=x&labels=bug%2CFIX
+      ",
+      }
+    `);
   });
 
-  // ── gh issue create path → compare recorded argv byte-for-byte ───────────
-  // gh's own stdout (the canned URL) is passed through INHERITED stdio in both
-  // the oracle and the TS port (spawnSync stdio:"inherit") — so it is identical
-  // by construction but NOT capturable through the JS process.stdout override
-  // the test uses. We therefore compare the EXIT code + the recorded gh argv
-  // (the real contract: repo/title/body/label, incl. the composed body) rather
-  // than the child's inherited stdout. (Documented harness boundary.)
-  it("gh issue create → argv (repo/title/body/label) byte-identical", () => {
+  // ── gh issue create path → freeze the recorded gh argv ───────────────────
+  // gh's own stdout (the canned URL) is passed through INHERITED stdio, so it is
+  // not capturable via the process.stdout override; the contract frozen here is
+  // the EXIT code + the recorded gh argv (repo/title/body/label, incl. body).
+  it("gh issue create → argv (repo/title/body/label)", () => {
     const args = ["--no-env", "--type", "idea", "--title", "Ship it", "--body", "please & thanks"];
-    const b = bashFb(args, PATH_WITH_GH);
-    const bLog = readGhLog();
     const t = tsFb(args, PATH_WITH_GH);
     const tLog = readGhLog();
-    expect(t.status).toBe(b.status);
-    expect(tLog).toBe(bLog); // identical gh argv (incl. composed body)
-    expect(bLog).toContain("--label\nidea,enhancement,US\n");
-    expect(bLog).toContain("--repo\nacme/widgets\n");
+    expect(t.status).toBe(0);
+    expect(tLog).toContain("--label\nidea,enhancement,US\n");
+    expect(tLog).toContain("--repo\nacme/widgets\n");
+    expect(tLog).toMatchInlineSnapshot(`
+      "issue
+      create
+      --repo
+      acme/widgets
+      --title
+      Ship it
+      --body
+      please & thanks
+      --label
+      idea,enhancement,US
+      "
+    `);
   });
 
-  it("gh issue create WITH env block → argv (incl. body env appendix) identical", () => {
+  it("gh issue create WITH env block → argv (incl. body env appendix)", () => {
     const args = ["--type", "bug", "--title", "with env", "--body", "see below"];
-    const b = bashFb(args, PATH_WITH_GH);
-    const bLog = readGhLog();
     const t = tsFb(args, PATH_WITH_GH);
     const tLog = readGhLog();
-    expect(t.status).toBe(b.status);
-    expect(tLog).toBe(bLog);
-    expect(bLog).toContain("### Environment");
+    expect(t.status).toBe(0);
+    expect(tLog).toContain("### Environment");
+    expect(scrubEnvRaw(tLog)).toMatchInlineSnapshot(`
+      "issue
+      create
+      --repo
+      acme/widgets
+      --title
+      with env
+      --body
+      see below
+      ---
+
+      ### Environment
+      - roll version: <VER>
+      - OS: <OS>
+      - shell: zsh
+      - current agent: claude
+      - language: en_US.UTF-8
+      - project: <PROJECT>
+      --label
+      bug,FIX
+      "
+    `);
   });
 
   // ── repo resolution: .roll/local.yaml feedback_repo ──────────────────────
@@ -210,34 +270,87 @@ describe("diff-test: roll feedback == bash oracle", () => {
     const args = ["--print-url", "--no-env", "--title", "from local yaml"];
     // Drop ROLL_FEEDBACK_REPO so the yaml field wins.
     const extra = { ROLL_FEEDBACK_REPO: "" };
-    expect(tsFb(args, PATH_WITH_GH, extra)).toEqual(bashFb(args, PATH_WITH_GH, extra));
+    expect(tsFb(args, PATH_WITH_GH, extra)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "https://github.com/local/repo/issues/new?title=from%20local%20yaml&body=&labels=bug%2CFIX
+      ",
+      }
+    `);
     rmSync(join(proj, ".roll", "local.yaml"), { force: true });
   });
 
   // ── error paths ──────────────────────────────────────────────────────────
   it("missing --title → exit 1", () => {
-    const args = ["--type", "bug"];
-    expect(tsFb(args, PATH_WITH_GH)).toEqual(bashFb(args, PATH_WITH_GH));
+    expect(tsFb(["--type", "bug"], PATH_WITH_GH)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] feedback: --title is required
+      ",
+        "stdout": "",
+      }
+    `);
   });
 
   it("unknown --type → exit 1", () => {
-    const args = ["--type", "weird", "--title", "x"];
-    expect(tsFb(args, PATH_WITH_GH)).toEqual(bashFb(args, PATH_WITH_GH));
+    expect(tsFb(["--type", "weird", "--title", "x"], PATH_WITH_GH)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] feedback: unknown --type 'weird' (expected one of: bug, idea, ux)
+      ",
+        "stdout": "",
+      }
+    `);
   });
 
   it("unknown flag → exit 1", () => {
-    const args = ["--bogus", "--title", "x"];
-    expect(tsFb(args, PATH_WITH_GH)).toEqual(bashFb(args, PATH_WITH_GH));
+    expect(tsFb(["--bogus", "--title", "x"], PATH_WITH_GH)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] feedback: unknown flag --bogus
+      ",
+        "stdout": "",
+      }
+    `);
   });
 
   it("cannot derive repo (no env, no yaml, no origin) → exit 1", () => {
-    // Run in a cwd with no git origin and no feedback_repo anywhere.
     const args = ["--print-url", "--no-env", "--title", "x"];
     const extra = { ROLL_FEEDBACK_REPO: "" };
-    expect(tsFb(args, PATH_NO_GH, extra)).toEqual(bashFb(args, PATH_NO_GH, extra));
+    expect(tsFb(args, PATH_NO_GH, extra)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] feedback: cannot derive owner/repo from origin; pass --repo owner/repo
+      ",
+        "stdout": "",
+      }
+    `);
   });
 
   it("--help → usage, exit 0", () => {
-    expect(tsFb(["--help"], PATH_WITH_GH)).toEqual(bashFb(["--help"], PATH_WITH_GH));
+    expect(tsFb(["--help"], PATH_WITH_GH)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Usage: roll feedback [options]
+              roll feedback (一句话提反馈)
+
+      Open a GitHub issue from the CLI. Type auto-labels (bug → FIX label;
+      idea → US label; ux → ux label).
+
+      Options:
+        --type <bug|idea|ux>      Classify the feedback (default: bug)
+        --title <text>            Issue title (required)
+        --body <text>             Issue body
+        --repo <owner/repo>       Target repo (default: derived from origin)
+        --no-env                  Skip the auto-attached Environment section
+                                  (roll version, OS, agent, language, project)
+        --print-url               Print the prefilled github.com URL instead of
+                                  invoking \`gh\`. Falls back to this automatically
+                                  when \`gh\` is not installed.
+      ",
+      }
+    `);
   });
 });

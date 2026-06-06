@@ -1,24 +1,23 @@
 /**
- * diff-test: TS `roll consistency` == bash `bin/roll consistency` (frozen v2
- * oracle, which shells lib/consistency_check.py). The TS port reimplements the
- * python orchestrator; both read a fabricated --project-dir fixture so every
- * dimension (code/docs/i18n/tests/site) is deterministic.
+ * Frozen-expectation test: TS `roll consistency`.
  *
- * Fixtures are derived directly from the py check_* logic: a healthy tree (all
- * pass) plus per-dimension violating trees. Comparison is byte-for-byte over
- * stdout/stderr/exit for human + --json, and en/zh for the i18n'd unknown-
- * subcommand path. No git/gh/network dependency — every check is pure file I/O,
- * so this is CI-portable with no host-specific guards.
+ * `consistencyCommand` was proven byte-equal to the bash oracle `bin/roll
+ * consistency` (which shelled lib/consistency_check.py) under diff-test, both
+ * reading a fabricated --project-dir fixture per dimension (code/docs/i18n/tests/
+ * site). Per US-PORT-009c the oracle is retired: the `bin/roll consistency` spawn
+ * is dropped and each case freezes the TS `{status, stdout, stderr}` as an inline
+ * snapshot (zero engine spawn). Fixtures are fixed file trees → every dimension
+ * verdict is deterministic; the random --project-dir path is scrubbed to `<PROJ>`
+ * so the frozen value stays portable (macOS `/var/folders` vs Linux CI `/tmp`).
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { consistencyCommand } from "../src/commands/consistency.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
-const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 let home = "";
 let cwd = ""; // an empty dir the commands run *in* (project-dir is explicit)
@@ -109,20 +108,6 @@ function envBase(extra: Record<string, string>): Record<string, string> {
   };
 }
 
-function bashCn(args: string[], extra: Record<string, string>): Run {
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["consistency", ...args], {
-      cwd,
-      encoding: "utf8",
-      env: envBase(extra),
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
-}
-
 const ENV_KEYS = ["PATH", "HOME", "ROLL_HOME", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG"];
 
 function tsCn(args: string[], extra: Record<string, string>): Run {
@@ -156,41 +141,378 @@ function tsCn(args: string[], extra: Record<string, string>): Run {
   return { status, stdout: outChunks.join(""), stderr: errChunks.join("") };
 }
 
-function both(args: string[], extra: Record<string, string> = {}): void {
-  expect(tsCn(args, extra)).toEqual(bashCn(args, extra));
+/** Run the TS command and scrub the random --project-dir path → portable. */
+function cn(args: string[], proj: string, extra: Record<string, string> = {}): Run {
+  const t = tsCn(args, extra);
+  const scrub = (s: string): string => (proj ? s.split(proj).join("<PROJ>") : s);
+  return { status: t.status, stdout: scrub(t.stdout), stderr: scrub(t.stderr) };
 }
 
-describe("diff-test: roll consistency == bash oracle", () => {
-  const scenarios: Array<[string, () => string]> = [
-    ["healthy (all pass)", healthy],
-    ["code dimension gap", codeViolation],
-    ["i18n dimension gaps (guide parity + key parity)", i18nViolation],
-    ["tests dimension gaps (coverage + stale)", testsViolation],
-    ["site dimension gap", siteViolation],
-  ];
+// Unrolled (inline snapshots are keyed by call site — a loop can't hold distinct
+// per-case frozen values).
+describe("frozen: roll consistency", () => {
+  it("check (human) — healthy (all pass)", () => {
+    const p = healthy();
+    expect(cn(["check", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Consistency Report
+      ==================================================
+      ✅ code: pass
+      ✅ docs: pass
+         ℹ placeholder — will be implemented in US-CONSIST-002
+      ✅ i18n: pass
+      ✅ tests: pass
+      ✅ site: pass
+      --------------------------------------------------
+      Overall: pass
+      ",
+      }
+    `);
+  });
+  it("check --json — healthy (all pass)", () => {
+    const p = healthy();
+    expect(cn(["check", "--json", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "{
+        "overall": "pass",
+        "dimensions": {
+          "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "docs": {
+            "status": "pass",
+            "gaps": [],
+            "note": "placeholder — will be implemented in US-CONSIST-002"
+          },
+          "i18n": {
+            "status": "pass",
+            "gaps": []
+          },
+          "tests": {
+            "status": "pass",
+            "gaps": []
+          },
+          "site": {
+            "status": "pass",
+            "gaps": []
+          }
+        }
+      }
+      ",
+      }
+    `);
+  });
 
-  for (const [label, build] of scenarios) {
-    it(`check (human) — ${label}`, () => {
-      const proj = build();
-      both(["check", "--project-dir", proj]);
-    });
-    it(`check --json — ${label}`, () => {
-      const proj = build();
-      both(["check", "--json", "--project-dir", proj]);
-    });
-  }
+  it("check (human) — code dimension gap", () => {
+    const p = codeViolation();
+    expect(cn(["check", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "Consistency Report
+      ==================================================
+      ❌ code: fail
+         • Feature 'orphan' has Done stories but is missing from features.md catalog
+      ✅ docs: pass
+         ℹ placeholder — will be implemented in US-CONSIST-002
+      ✅ i18n: pass
+      ✅ tests: pass
+      ✅ site: pass
+      --------------------------------------------------
+      Overall: fail
+      ",
+      }
+    `);
+  });
+  it("check --json — code dimension gap", () => {
+    const p = codeViolation();
+    expect(cn(["check", "--json", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "{
+        "overall": "fail",
+        "dimensions": {
+          "code": {
+            "status": "fail",
+            "gaps": [
+              "Feature 'orphan' has Done stories but is missing from features.md catalog"
+            ]
+          },
+          "docs": {
+            "status": "pass",
+            "gaps": [],
+            "note": "placeholder — will be implemented in US-CONSIST-002"
+          },
+          "i18n": {
+            "status": "pass",
+            "gaps": []
+          },
+          "tests": {
+            "status": "pass",
+            "gaps": []
+          },
+          "site": {
+            "status": "pass",
+            "gaps": []
+          }
+        }
+      }
+      ",
+      }
+    `);
+  });
+
+  it("check (human) — i18n dimension gaps (guide parity + key parity)", () => {
+    const p = i18nViolation();
+    expect(cn(["check", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "Consistency Report
+      ==================================================
+      ✅ code: pass
+      ✅ docs: pass
+         ℹ placeholder — will be implemented in US-CONSIST-002
+      ❌ i18n: fail
+         • guide/en/extra.md has no corresponding guide/zh/extra.md
+         • i18n key 'only.en' has EN but is missing ZH translation
+         • i18n key 'only.zh' has ZH but is missing EN translation
+      ✅ tests: pass
+      ✅ site: pass
+      --------------------------------------------------
+      Overall: fail
+      ",
+      }
+    `);
+  });
+  it("check --json — i18n dimension gaps (guide parity + key parity)", () => {
+    const p = i18nViolation();
+    expect(cn(["check", "--json", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "{
+        "overall": "fail",
+        "dimensions": {
+          "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "docs": {
+            "status": "pass",
+            "gaps": [],
+            "note": "placeholder — will be implemented in US-CONSIST-002"
+          },
+          "i18n": {
+            "status": "fail",
+            "gaps": [
+              "guide/en/extra.md has no corresponding guide/zh/extra.md",
+              "i18n key 'only.en' has EN but is missing ZH translation",
+              "i18n key 'only.zh' has ZH but is missing EN translation"
+            ]
+          },
+          "tests": {
+            "status": "pass",
+            "gaps": []
+          },
+          "site": {
+            "status": "pass",
+            "gaps": []
+          }
+        }
+      }
+      ",
+      }
+    `);
+  });
+
+  it("check (human) — tests dimension gaps (coverage + stale)", () => {
+    const p = testsViolation();
+    expect(cn(["check", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "Consistency Report
+      ==================================================
+      ✅ code: pass
+      ✅ docs: pass
+         ℹ placeholder — will be implemented in US-CONSIST-002
+      ✅ i18n: pass
+      ❌ tests: fail
+         • Feature 'authentication' has Done stories but no test file appears to cover it (heuristic: no test file name matches keywords ['authentication'])
+         • Test file 'stalefeature.bats' appears to reference feature 'stalefeature' which does not exist in backlog — may be stale
+      ✅ site: pass
+      --------------------------------------------------
+      Overall: fail
+      ",
+      }
+    `);
+  });
+  it("check --json — tests dimension gaps (coverage + stale)", () => {
+    const p = testsViolation();
+    expect(cn(["check", "--json", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "{
+        "overall": "fail",
+        "dimensions": {
+          "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "docs": {
+            "status": "pass",
+            "gaps": [],
+            "note": "placeholder — will be implemented in US-CONSIST-002"
+          },
+          "i18n": {
+            "status": "pass",
+            "gaps": []
+          },
+          "tests": {
+            "status": "fail",
+            "gaps": [
+              "Feature 'authentication' has Done stories but no test file appears to cover it (heuristic: no test file name matches keywords ['authentication'])",
+              "Test file 'stalefeature.bats' appears to reference feature 'stalefeature' which does not exist in backlog — may be stale"
+            ]
+          },
+          "site": {
+            "status": "pass",
+            "gaps": []
+          }
+        }
+      }
+      ",
+      }
+    `);
+  });
+
+  it("check (human) — site dimension gap", () => {
+    const p = siteViolation();
+    expect(cn(["check", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "Consistency Report
+      ==================================================
+      ✅ code: pass
+      ✅ docs: pass
+         ℹ placeholder — will be implemented in US-CONSIST-002
+      ✅ i18n: pass
+      ✅ tests: pass
+      ❌ site: fail
+         • Feature 'dashboard' has Done stories but is not mentioned on the landing page — site may be missing this capability
+      --------------------------------------------------
+      Overall: fail
+      ",
+      }
+    `);
+  });
+  it("check --json — site dimension gap", () => {
+    const p = siteViolation();
+    expect(cn(["check", "--json", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "{
+        "overall": "fail",
+        "dimensions": {
+          "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "docs": {
+            "status": "pass",
+            "gaps": [],
+            "note": "placeholder — will be implemented in US-CONSIST-002"
+          },
+          "i18n": {
+            "status": "pass",
+            "gaps": []
+          },
+          "tests": {
+            "status": "pass",
+            "gaps": []
+          },
+          "site": {
+            "status": "fail",
+            "gaps": [
+              "Feature 'dashboard' has Done stories but is not mentioned on the landing page — site may be missing this capability"
+            ]
+          }
+        }
+      }
+      ",
+      }
+    `);
+  });
 
   it("check on an empty project-dir → all pass", () => {
-    both(["check", "--project-dir", mk()]);
+    const p = mk();
+    expect(cn(["check", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Consistency Report
+      ==================================================
+      ✅ code: pass
+      ✅ docs: pass
+         ℹ placeholder — will be implemented in US-CONSIST-002
+      ✅ i18n: pass
+      ✅ tests: pass
+      ✅ site: pass
+      --------------------------------------------------
+      Overall: pass
+      ",
+      }
+    `);
   });
 
   it("help output (long)", () => {
-    both(["--help"]);
+    expect(cn(["--help"], "")).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Usage: roll consistency <subcommand>
+
+        check [--json] [--project-dir DIR]    逐维度跑一致性检查
+          Run checks across five dimensions (code, docs, i18n, tests, site)
+          and produce a structured pass/gap report.
+
+        roll consistency check                # human-readable report
+        roll consistency check --json         # machine-readable JSON
+      ",
+      }
+    `);
   });
 
-  for (const lang of ["en", "zh"]) {
-    it(`unknown subcommand → exit 1 (${lang})`, () => {
-      both(["bogus"], { ROLL_LANG: lang });
-    });
-  }
+  it("unknown subcommand → exit 1 (en)", () => {
+    expect(cn(["bogus"], "", { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] Unknown consistency subcommand: bogus
+      [roll] Try: roll consistency check
+      ",
+        "stdout": "",
+      }
+    `);
+  });
+  it("unknown subcommand → exit 1 (zh)", () => {
+    expect(cn(["bogus"], "", { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] 未知的一致性子命令: bogus
+      [roll] Try: roll consistency check
+      ",
+        "stdout": "",
+      }
+    `);
+  });
 });

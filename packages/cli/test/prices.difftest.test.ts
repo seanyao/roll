@@ -1,38 +1,24 @@
 /**
- * diff-test: TS `roll prices` == bash oracle (show renders the frozen
- * lib/prices snapshots — fully deterministic on the frozen branch).
+ * Frozen-expectation test: TS `roll prices` render.
+ *
+ * `pricesCommand` was proven byte-equal to the bash oracle `bin/roll prices`
+ * under diff-test (show renders the frozen lib/prices snapshots). Per
+ * US-PORT-009c the oracle is retired: the `bin/roll prices` spawn is dropped and
+ * each case freezes the TS `{status, stdout, stderr}` as an inline snapshot
+ * (zero engine spawn). show/help/bilingual-error are fully deterministic and
+ * path-free (portable); the `refresh` route still just asserts the null fallback.
  */
-import { execFileSync } from "node:child_process";
-import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pricesCommand } from "../src/commands/prices.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
-const REPO = resolve(__dirname, "../../..");
-// Isolated ROLL_HOME with a seeded update-check cache — keeps the bash
-// oracle's stdout free of the async upgrade nag (deterministic difftests).
+// Isolated ROLL_HOME with a seeded update-check cache — keeps the async upgrade
+// nag out of stdout (deterministic render).
 const ROLL_HOME = join(mkdtempSync(join(tmpdir(), "roll-prices-home-")), ".roll");
 seedUpdateCheckCache(ROLL_HOME);
-
-function bashPrices(args: string[], env: Record<string, string> = {}): {
-  status: number;
-  stdout: string;
-  stderr: string;
-} {
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["prices", ...args], {
-      cwd: REPO,
-      encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1", ROLL_LANG: "en", ROLL_HOME, ...env },
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
-}
 
 function tsPrices(args: string[], env: Record<string, string> = {}): {
   status: number;
@@ -68,31 +54,150 @@ function tsPrices(args: string[], env: Record<string, string> = {}): {
   return { status: status ?? -1, stdout: outChunks.join(""), stderr: errChunks.join("") };
 }
 
-describe("diff-test: roll prices == bash oracle", () => {
-  it("show renders the snapshot table byte-for-byte", () => {
-    const b = bashPrices(["show"]);
-    const t = tsPrices(["show"]);
-    expect(t.status).toBe(b.status);
-    expect(t.stdout).toBe(b.stdout);
+describe("frozen: roll prices render", () => {
+  it("show renders the snapshot table", () => {
+    expect(tsPrices(["show"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "price snapshot  价格快照
+        version        2026-06-02
+        effective_at   2026-06-02
+        snapshots      3 loaded  已加载
+          anthropic     USD  https://platform.claude.com/docs/en/about-claude/pricing
+          deepseek      CNY  https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
+          kimi          CNY  https://platform.kimi.com/docs/pricing/chat
+
+        model                    cur        in       out        cw        cr
+        claude-haiku-4-5         USD    1.0000    5.0000    1.2500    0.1000
+        claude-opus-4-6          USD    5.0000   25.0000    6.2500    0.5000
+        claude-opus-4-7          USD    5.0000   25.0000    6.2500    0.5000
+        claude-sonnet-4-5        USD    3.0000   15.0000    3.7500    0.3000
+        claude-sonnet-4-6        USD    3.0000   15.0000    3.7500    0.3000
+        deepseek-v4-flash        CNY    1.0000    2.0000    1.0000    0.0200
+        deepseek-v4-pro          CNY    3.0000    6.0000    3.0000    0.0250
+        kimi-for-coding          CNY    6.5000   27.0000    6.5000    1.1000
+        kimi-k2.5                CNY    4.0000   21.0000    4.0000    0.7000
+        kimi-k2.6                CNY    6.5000   27.0000    6.5000    1.1000
+
+      rates per million tokens  每百万 token 单价
+      ",
+      }
+    `);
   });
 
-  it("bare/help renders usage byte-for-byte", () => {
-    for (const args of [[], ["--help"], ["help"]] as string[][]) {
-      const b = bashPrices(args);
-      const t = tsPrices(args);
-      expect(t.status, args.join(" ")).toBe(b.status);
-      expect(t.stdout, args.join(" ")).toBe(b.stdout);
-    }
+  it("bare renders usage", () => {
+    expect(tsPrices([])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Usage: roll prices <subcommand> [--url URL] [--vendor VENDOR]
+            roll prices <子命令> [--url 网址] [--vendor 厂商]
+
+      Subcommands:
+        show     Print the current price snapshot table.
+                 显示当前价格快照表。
+        refresh  Fetch the official pricing docs, diff against the latest snapshot,
+                 and write a new snapshot only when rates have changed.
+                 拉取官方价格文档与最新快照对比，有变化才落新快照。
+
+      Options:
+        --vendor anthropic|deepseek|kimi  Target vendor for refresh (default: anthropic).
+                                          指定拉取价格的厂商（默认：anthropic）。
+      ",
+      }
+    `);
+  });
+  it("--help renders usage", () => {
+    expect(tsPrices(["--help"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Usage: roll prices <subcommand> [--url URL] [--vendor VENDOR]
+            roll prices <子命令> [--url 网址] [--vendor 厂商]
+
+      Subcommands:
+        show     Print the current price snapshot table.
+                 显示当前价格快照表。
+        refresh  Fetch the official pricing docs, diff against the latest snapshot,
+                 and write a new snapshot only when rates have changed.
+                 拉取官方价格文档与最新快照对比，有变化才落新快照。
+
+      Options:
+        --vendor anthropic|deepseek|kimi  Target vendor for refresh (default: anthropic).
+                                          指定拉取价格的厂商（默认：anthropic）。
+      ",
+      }
+    `);
+  });
+  it("help renders usage", () => {
+    expect(tsPrices(["help"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Usage: roll prices <subcommand> [--url URL] [--vendor VENDOR]
+            roll prices <子命令> [--url 网址] [--vendor 厂商]
+
+      Subcommands:
+        show     Print the current price snapshot table.
+                 显示当前价格快照表。
+        refresh  Fetch the official pricing docs, diff against the latest snapshot,
+                 and write a new snapshot only when rates have changed.
+                 拉取官方价格文档与最新快照对比，有变化才落新快照。
+
+      Options:
+        --vendor anthropic|deepseek|kimi  Target vendor for refresh (default: anthropic).
+                                          指定拉取价格的厂商（默认：anthropic）。
+      ",
+      }
+    `);
   });
 
-  it("unknown subcommand: bilingual stderr + help + exit 1 (en/zh)", () => {
-    for (const lang of ["en", "zh"]) {
-      const b = bashPrices(["bogus"], { ROLL_LANG: lang });
-      const t = tsPrices(["bogus"], { ROLL_LANG: lang });
-      expect(t.status, lang).toBe(b.status);
-      expect(t.stdout, lang).toBe(b.stdout);
-      expect(t.stderr, lang).toBe(b.stderr);
-    }
+  it("unknown subcommand: bilingual stderr + help + exit 1 (en)", () => {
+    expect(tsPrices(["bogus"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] Unknown subcommand: bogus
+      Usage: roll prices <subcommand> [--url URL] [--vendor VENDOR]
+            roll prices <子命令> [--url 网址] [--vendor 厂商]
+
+      Subcommands:
+        show     Print the current price snapshot table.
+                 显示当前价格快照表。
+        refresh  Fetch the official pricing docs, diff against the latest snapshot,
+                 and write a new snapshot only when rates have changed.
+                 拉取官方价格文档与最新快照对比，有变化才落新快照。
+
+      Options:
+        --vendor anthropic|deepseek|kimi  Target vendor for refresh (default: anthropic).
+                                          指定拉取价格的厂商（默认：anthropic）。
+      ",
+        "stdout": "",
+      }
+    `);
+  });
+  it("unknown subcommand: bilingual stderr + help + exit 1 (zh)", () => {
+    expect(tsPrices(["bogus"], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] 未知子命令：bogus
+      Usage: roll prices <subcommand> [--url URL] [--vendor VENDOR]
+            roll prices <子命令> [--url 网址] [--vendor 厂商]
+
+      Subcommands:
+        show     Print the current price snapshot table.
+                 显示当前价格快照表。
+        refresh  Fetch the official pricing docs, diff against the latest snapshot,
+                 and write a new snapshot only when rates have changed.
+                 拉取官方价格文档与最新快照对比，有变化才落新快照。
+
+      Options:
+        --vendor anthropic|deepseek|kimi  Target vendor for refresh (default: anthropic).
+                                          指定拉取价格的厂商（默认：anthropic）。
+      ",
+        "stdout": "",
+      }
+    `);
   });
 
   it("refresh routes to bash fallback (returns null)", () => {

@@ -1,16 +1,23 @@
 /**
- * diff-test: TS `roll config` read surface == bash oracle, with fixture
- * project + global yaml covering nested/flat/default resolution.
+ * Frozen-expectation test: TS `roll config` read surface.
+ *
+ * `configGetCommand` was proven byte-equal to the bash oracle `bin/roll config`
+ * under diff-test (fixture project + global yaml). Per US-PORT-009c the oracle is
+ * retired: the `bin/roll config` spawn is dropped and each case freezes the TS
+ * `{status, stdout, stderr}` as an inline snapshot (zero engine spawn). Inputs
+ * are fixed yaml content + fixed keys → values (help / list / resolved keys /
+ * bilingual error) are deterministic; the global-config source annotation echoes
+ * the absolute ROLL_HOME path, which is scrubbed to `<HOME>` so the frozen value
+ * stays portable across machines (macOS `/var/folders` vs Linux CI `/tmp`).
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { configGetCommand } from "../src/commands/config-get.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
-const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 let home = "";
 let proj = "";
@@ -32,20 +39,6 @@ beforeAll(() => {
 afterAll(() => {
   for (const d of dirs) execSync(`rm -rf '${d}'`);
 });
-
-function bashCfg(args: string[]): { status: number; stdout: string; stderr: string } {
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["config", ...args], {
-      cwd: proj,
-      encoding: "utf8",
-      env: { ...process.env, HOME: home, ROLL_HOME: join(home, ".roll"), NO_COLOR: "1" },
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
-}
 
 function tsCfg(args: string[]): { status: number; stdout: string; stderr: string } {
   const save = { HOME: process.env["HOME"], ROLL_HOME: process.env["ROLL_HOME"], NO_COLOR: process.env["NO_COLOR"] };
@@ -74,29 +67,139 @@ function tsCfg(args: string[]): { status: number; stdout: string; stderr: string
       else process.env[k] = v;
     }
   }
-  return { status, stdout: outChunks.join(""), stderr: errChunks.join("") };
+  // The global-config source annotation echoes the absolute ROLL_HOME path
+  // (random tmp dir, `/var/folders` on macOS vs `/tmp` on Linux CI) → scrub it
+  // to a placeholder so the frozen value stays portable.
+  const scrub = (s: string): string => s.split(home).join("<HOME>");
+  return { status, stdout: scrub(outChunks.join("")), stderr: scrub(errChunks.join("")) };
 }
 
-const CASES: string[][] = [
-  ["--help"],
-  ["--list"],
-  ["loop_active_start"], // project nested, set
-  ["loop_active_end"], // project nested, default
-  ["loop_schedule.period_minutes"], // dotted nested, set
-  ["loop_schedule.offset_minute"], // dotted nested, default
-  ["loop_dream_hour"], // global flat with comment strip
-  ["loop_dream_minute"], // global flat, '-' default
-  ["no_such_key"], // unknown → bilingual stderr + exit 2
-];
+// Unrolled (inline snapshots are keyed by call site — a loop can't hold distinct
+// per-case frozen values).
+describe("frozen: roll config (read) render", () => {
+  it("config --help", () => {
+    expect(tsCfg(["--help"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "Usage: roll config <key>                 print current value + source
+             roll config --list                list all loop schedule keys
+             roll config <key> <value> [--global|--project]   set a value
+                                                                        统一调度配置
+      Read / list / set the loop and dream schedule keys without hand-editing
+      yaml. Default write scope is --project (.roll/local.yaml); --global writes
+      ~/.roll/config.yaml.
+      读 / 列 / 写 loop、dream 调度 key，免去手工编辑 yaml。默认写 --project
+      （.roll/local.yaml）；--global 写 ~/.roll/config.yaml。
 
-describe("diff-test: roll config (read) == bash oracle", () => {
-  for (const args of CASES) {
-    it(`config ${args.join(" ")}`, () => {
-      const b = bashCfg(args);
-      const t = tsCfg(args);
-      expect(t.status, "exit code").toBe(b.status);
-      expect(t.stdout, "stdout").toBe(b.stdout);
-      expect(t.stderr, "stderr").toBe(b.stderr);
-    });
-  }
+      Supported keys (range):
+        loop_active_start              0-23    loop active window start hour
+        loop_active_end                1-24    loop active window end hour
+        loop_schedule.period_minutes   1-1440  fire interval in minutes
+        loop_schedule.offset_minute    0-59    minute offset within the period
+        loop_dream_hour                0-23    dream daily fire hour
+        loop_dream_minute              0-59    dream daily fire minute
+
+      Compact facades (write multiple keys at once):
+        roll config loop-window 9-18              loop_active_start + loop_active_end
+        roll config loop-schedule 30/7            period_minutes + offset_minute
+        roll config dream-time 03:20              loop_dream_hour + loop_dream_minute
+
+      Examples:
+        roll config loop_dream_hour
+        roll config --list
+        roll config loop_schedule.period_minutes 30
+        roll config loop_dream_hour 3 --global
+        roll config dream-time 03:20
+      ",
+      }
+    `);
+  });
+  it("config --list", () => {
+    expect(tsCfg(["--list"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  loop_active_start              = 9        (.roll/local.yaml)
+        loop_active_end                = 24       (default)
+        loop_schedule.period_minutes   = 30       (.roll/local.yaml)
+        loop_schedule.offset_minute    = 0        (default)
+        loop_dream_hour                = 5        (<HOME>/.roll/config.yaml)
+        loop_dream_minute              = -        (default)
+      ",
+      }
+    `);
+  });
+  it("config loop_active_start (project nested, set)", () => {
+    expect(tsCfg(["loop_active_start"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "loop_active_start = 9  (from .roll/local.yaml)
+      ",
+      }
+    `);
+  });
+  it("config loop_active_end (project nested, default)", () => {
+    expect(tsCfg(["loop_active_end"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "loop_active_end = 24  (from default)
+      ",
+      }
+    `);
+  });
+  it("config loop_schedule.period_minutes (dotted nested, set)", () => {
+    expect(tsCfg(["loop_schedule.period_minutes"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "loop_schedule.period_minutes = 30  (from .roll/local.yaml)
+      ",
+      }
+    `);
+  });
+  it("config loop_schedule.offset_minute (dotted nested, default)", () => {
+    expect(tsCfg(["loop_schedule.offset_minute"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "loop_schedule.offset_minute = 0  (from default)
+      ",
+      }
+    `);
+  });
+  it("config loop_dream_hour (global flat, comment strip)", () => {
+    expect(tsCfg(["loop_dream_hour"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "loop_dream_hour = 5  (from <HOME>/.roll/config.yaml)
+      ",
+      }
+    `);
+  });
+  it("config loop_dream_minute (global flat, '-' default)", () => {
+    expect(tsCfg(["loop_dream_minute"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "loop_dream_minute = -  (from default)
+      ",
+      }
+    `);
+  });
+  it("config no_such_key (unknown → bilingual stderr + exit 2)", () => {
+    expect(tsCfg(["no_such_key"])).toMatchInlineSnapshot(`
+      {
+        "status": 2,
+        "stderr": "[roll] config: unknown key 'no_such_key'
+      [roll] config：未知 key 'no_such_key'
+      [roll] Try: roll config --list
+      ",
+        "stdout": "",
+      }
+    `);
+  });
 });

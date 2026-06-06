@@ -1,16 +1,21 @@
 /**
- * diff-test: TS `roll agent list` == bash `bin/roll agent list` (frozen v2
- * oracle), under a fabricated PATH/HOME/project so results are deterministic.
+ * Frozen-expectation test: TS `roll agent list` render.
+ *
+ * `agentListCommand` was proven byte-equal to the bash oracle `bin/roll agent
+ * list` under diff-test (fabricated PATH/HOME/project). Per US-PORT-009c the
+ * oracle is retired: the `bin/roll agent list` spawn is dropped and each case
+ * freezes the TS render as an inline snapshot (zero engine spawn). The fabricated
+ * PATH/HOME/project is project I/O, not an oracle, so it stays — output is the
+ * agent roster + (current) marker, fully deterministic and path-free (portable).
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { agentListCommand } from "../src/commands/agent-list.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
-const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 let home = "";
 let proj = "";
@@ -35,14 +40,6 @@ beforeAll(() => {
 afterAll(() => {
   for (const d of dirs) execSync(`rm -rf '${d}'`);
 });
-
-function bashList(env: Record<string, string>): string {
-  return execFileSync(join(REPO, "bin", "roll"), ["agent", "list"], {
-    cwd: proj,
-    encoding: "utf8",
-    env: { PATH, HOME: home, ROLL_HOME: join(home, ".roll"), ...env },
-  });
-}
 
 function tsList(env: Record<string, string>): string {
   const save: Record<string, string | undefined> = {};
@@ -79,19 +76,62 @@ function tsList(env: Record<string, string>): string {
   return chunks.join("");
 }
 
-describe("diff-test: roll agent list == bash oracle", () => {
+describe("frozen: roll agent list render", () => {
   it("default current (claude), colors on, en", () => {
-    expect(tsList({ ROLL_LANG: "en" })).toBe(bashList({ ROLL_LANG: "en" }));
+    expect(tsList({ ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      "
+        Available agents
+
+          [0;32m✓ claude[0m  (current)
+          [0;32m✓ kimi[0m
+          [0;33m✗ deepseek[0m  (not installed)
+          [0;33m✗ opencode[0m  (not installed)
+          [0;33m✗ codex[0m  (not installed)
+          [0;33m✗ openai[0m  (not installed)
+          [0;33m✗ pi[0m  (not installed)
+          [0;33m✗ qwen[0m  (not installed)
+          [0;33m✗ antigravity (agy)[0m  (not installed)
+
+      "
+    `);
   });
 
   it("zh locale renders zh single-language", () => {
-    expect(tsList({ ROLL_LANG: "zh" })).toBe(bashList({ ROLL_LANG: "zh" }));
+    expect(tsList({ ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+      "
+        可用 agent
+
+          [0;32m✓ claude[0m  (current)
+          [0;32m✓ kimi[0m
+          [0;33m✗ deepseek[0m  (not installed)
+          [0;33m✗ opencode[0m  (not installed)
+          [0;33m✗ codex[0m  (not installed)
+          [0;33m✗ openai[0m  (not installed)
+          [0;33m✗ pi[0m  (not installed)
+          [0;33m✗ qwen[0m  (not installed)
+          [0;33m✗ antigravity (agy)[0m  (not installed)
+
+      "
+    `);
   });
 
   it("NO_COLOR strips colors identically", () => {
-    expect(tsList({ ROLL_LANG: "en", NO_COLOR: "1" })).toBe(
-      bashList({ ROLL_LANG: "en", NO_COLOR: "1" }),
-    );
+    expect(tsList({ ROLL_LANG: "en", NO_COLOR: "1" })).toMatchInlineSnapshot(`
+      "
+        Available agents
+
+          ✓ claude  (current)
+          ✓ kimi
+          ✗ deepseek  (not installed)
+          ✗ opencode  (not installed)
+          ✗ codex  (not installed)
+          ✗ openai  (not installed)
+          ✗ pi  (not installed)
+          ✗ qwen  (not installed)
+          ✗ antigravity (agy)  (not installed)
+
+      "
+    `);
   });
 
   it("project agent pref moves the (current) marker", () => {
@@ -99,9 +139,23 @@ describe("diff-test: roll agent list == bash oracle", () => {
     writeFileSync(join(proj, ".roll", "local.yaml"), 'agent: "kimi"\n');
     try {
       const ts = tsList({ ROLL_LANG: "en", NO_COLOR: "1" });
-      const bash = bashList({ ROLL_LANG: "en", NO_COLOR: "1" });
-      expect(ts).toBe(bash);
       expect(ts).toContain("✓ kimi  (current)");
+      expect(ts).toMatchInlineSnapshot(`
+        "
+          Available agents
+
+            ✓ claude
+            ✓ kimi  (current)
+            ✗ deepseek  (not installed)
+            ✗ opencode  (not installed)
+            ✗ codex  (not installed)
+            ✗ openai  (not installed)
+            ✗ pi  (not installed)
+            ✗ qwen  (not installed)
+            ✗ antigravity (agy)  (not installed)
+
+        "
+      `);
     } finally {
       execSync(`rm -f '${join(proj, ".roll", "local.yaml")}'`);
     }

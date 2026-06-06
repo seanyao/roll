@@ -148,6 +148,34 @@ describe("US-ATTEST-013 — card context leads the business body", () => {
   });
 });
 
+describe("US-ATTEST-013 — before/after comparison", () => {
+  it("renders paired before/after figures side by side", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
+      beforeAfter: [
+        {
+          label: "报告首屏",
+          before: { kind: "screenshot", label: "工程师向 AC 堆", href: "./screenshots/before-home.png" },
+          after: { kind: "screenshot", label: "业务分层", href: "./screenshots/after-home.png" },
+        },
+      ],
+    });
+    expect(html).toContain("对照实拍 · Before / After");
+    expect(html).toContain('<img src="./screenshots/before-home.png"');
+    expect(html).toContain('<img src="./screenshots/after-home.png"');
+    expect(html).toContain("Before · 改前");
+    expect(html).toContain("After · 改后");
+  });
+
+  it("empty / absent before-after ⇒ section skipped (全新功能免出)", () => {
+    const none = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(none).not.toContain("对照实拍");
+    const empty = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })], beforeAfter: [] });
+    expect(empty).not.toContain("对照实拍");
+  });
+});
+
 describe("US-ATTEST-013 — layered IA: technical evidence folds", () => {
   it("text/ANSI evidence sits inside a collapsed <details class=\"tech\">", () => {
     const html = renderReport({

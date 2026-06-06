@@ -68,6 +68,16 @@ export interface CardContext {
   delivery?: DeliveryChain;
 }
 
+/**
+ * US-ATTEST-013 — a坏态/好态 pair for FIX / behaviour-changing US. `before-*.png`
+ * / `after-*.png` shots render side by side. Brand-new features carry none.
+ */
+export interface BeforeAfterPair {
+  label: string;
+  before: EvidenceRef;
+  after: EvidenceRef;
+}
+
 export interface ReportInput {
   storyId: string;
   title: string;
@@ -76,6 +86,8 @@ export interface ReportInput {
   items: AcReportItem[];
   /** US-ATTEST-013 — business-body lead: self-contained card context. */
   context?: CardContext;
+  /** US-ATTEST-013 — before/after comparison pairs (empty ⇒ section trimmed). */
+  beforeAfter?: BeforeAfterPair[];
   /** Summary facts row (counts come from evidence.json). */
   facts?: { tcrCount: number; ciConclusion: string; testPassAge: string };
   /** US-ATTEST-009 — same-story Self-Score entries from .roll/notes/; the
@@ -188,6 +200,30 @@ ${techHtml}
 }
 
 /**
+ * US-ATTEST-013 — before/after comparison. Each pair renders its two shots side
+ * by side (a flex row that wraps to stacked on narrow viewports). A figure is
+ * emitted only for a ref that carries an href; a pair with neither shot is
+ * dropped, and an empty list trims the whole section (全新功能免出).
+ */
+function beforeAfterBlock(pairs: ReportInput["beforeAfter"]): string {
+  if (pairs === undefined || pairs.length === 0) return "";
+  const fig = (ref: EvidenceRef, side: string, cls: string): string =>
+    ref.href !== undefined
+      ? `<figure class="shot ${cls}"><img src="${esc(ref.href)}" alt="${esc(ref.label)}"><figcaption>${side}：${esc(ref.label)}</figcaption></figure>`
+      : "";
+  const groups = pairs
+    .map((p) => {
+      const before = fig(p.before, "Before · 改前", "ba-before");
+      const after = fig(p.after, "After · 改后", "ba-after");
+      if (before === "" && after === "") return "";
+      return `<div class="before-after"><h3>${esc(p.label)}</h3><div class="ba-pair">${before}${after}</div></div>`;
+    })
+    .filter((s) => s !== "");
+  if (groups.length === 0) return "";
+  return `<section class="before-after-section"><h2>对照实拍 · Before / After</h2>\n${groups.join("\n")}\n</section>`;
+}
+
+/**
  * US-ATTEST-011 — the unattended Gate's own screenshots. Renders ONLY when the
  * terminal lane actually produced pixels (the bridge yields no ref on skip), so
  * a headless cycle drops the whole block — deletion-not-placeholder, same red
@@ -272,6 +308,8 @@ section.card-context .one-liner { font-size:15.5px; font-weight:600; }
 section.card-context .ctx-meta { color:var(--muted); font-size:13px; }
 dl.delivery { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0 0; font-size:13.5px; }
 dl.delivery dt { color:var(--muted); } dl.delivery dd { margin:0; }
+.before-after { margin:10px 0; } .before-after h3 { font-size:14px; margin:0 0 6px; }
+.ba-pair { display:flex; flex-wrap:wrap; gap:12px; } .ba-pair figure.shot { flex:1 1 280px; margin:0; }
 @media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
 ${ANSI_CSS}
 </style>
@@ -283,6 +321,7 @@ ${ANSI_CSS}
 ${cardContextBlock(input.context)}
 ${facts}
 ${items.map(acSection).join("\n")}
+${beforeAfterBlock(input.beforeAfter)}
 ${selfCaptureBlock(input.selfCaptures)}
 ${disc}
 ${selfScoreBlock(input.selfScores)}

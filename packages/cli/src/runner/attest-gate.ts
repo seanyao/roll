@@ -169,8 +169,8 @@ export function runAttestGate(
     }
     const reasons = [
       fresh
-        ? `acceptance report at .roll/verification/${storyId}/latest/report.html is an empty shell (no AC content / no ac-map)`
-        : `no fresh acceptance report at .roll/verification/${storyId}/latest/report.html`,
+        ? `acceptance report at .roll/features/<epic>/${storyId}/latest/${storyId}-report.html is an empty shell (no AC content / no ac-map)`
+        : `no fresh acceptance report for ${storyId} (checked card archive + legacy verification paths)`,
     ];
     const blocked = mode === "hard";
     const lead = fresh

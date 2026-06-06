@@ -78,4 +78,38 @@ describe("loopFmtCommand — end to end", () => {
     // outline: a cycle-done stamp with the tcr count
     expect(all).toMatch(/done · 1 tcr/);
   });
+
+  it("golden path: a full cycle stream renders pick → tcr → ci → merge → done", async () => {
+    const lines = [
+      "[loop] cycle 42: picking story",
+      j({ type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "roll-build", args: "US-PORT-012" } }] } }),
+      j({ type: "user", message: { content: [{ type: "tool_result", content: "Launching skill: roll-build" }] } }), // clears pendingStory (as real claude does)
+      j({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "/noise" } }] } }), // suppressed
+      j({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/src/foo.ts", new_string: "export const x = 1" } }] } }),
+      j({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'tcr: ship it'" } }] } }),
+      j({ type: "user", message: { content: [{ type: "tool_result", content: "[loop/p 1234567] tcr: ship it" }] } }),
+      j({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "roll ci --wait" } }] } }),
+      j({ type: "user", message: { content: [{ type: "tool_result", content: "CI green for PR #99 in 8.0s" }] } }),
+      j({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "gh pr merge --squash" } }] } }),
+      j({ type: "user", message: { content: [{ type: "tool_result", content: "merged #99" }] } }),
+      j({ type: "result", subtype: "success", duration_ms: 9000, total_cost_usd: 0.5 }),
+    ];
+    const written: string[] = [];
+    const code = await loopFmtCommand([], {
+      stdin: () => Readable.from([`${lines.join("\n")}\n`]),
+      write: (s) => written.push(s),
+      env: {},
+      isTTY: () => false,
+    });
+    expect(code).toBe(0);
+    const all = written.join("");
+    expect(all).toContain("cycle #42 — picking story");
+    expect(all).toContain("US-PORT-012");
+    expect(all).toContain("✏ foo.ts");
+    expect(all).toContain("TCR 1234567 · tcr: ship it");
+    expect(all).toContain("Gate CI 通过 · PR #99");
+    expect(all).toContain("PR #99 合并 · merged");
+    expect(all).toMatch(/cycle #42 — done · 1 tcr · 9s · \$0\.50/);
+    expect(all).not.toContain("/noise"); // read-class tool stays suppressed
+  });
 });

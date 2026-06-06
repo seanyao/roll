@@ -334,3 +334,79 @@ describe("US-ATTEST-009 — Self-Score fold", () => {
     expect(html).not.toContain("Self-Score");
   });
 });
+
+describe("US-ATTEST-014 — process trace inline", () => {
+  const withEv = [item({ evidence: [{ kind: "commit", label: "c" }] })];
+
+  it("loop-delivered: renders timeline + signal layer + folded transcript with original-path index", () => {
+    const html = renderReport({
+      ...BASE,
+      items: withEv,
+      process: {
+        delivery: "loop",
+        cycleId: "20260606-093000-12345",
+        agent: "claude",
+        timeline: [
+          { offsetSec: 0, layer: "outline", marker: "cycle:start", label: "周期开始 · cycle start" },
+          { offsetSec: 20, layer: "signal", marker: "tcr", label: "TCR abcdef123 · add extractor" },
+          { offsetSec: 140, layer: "outline", marker: "cycle:end", label: "周期结束 · cycle end · delivered" },
+        ],
+        transcript: {
+          inlineHtml: "<pre class=\"ansi\">log body</pre>",
+          truncated: true,
+          totalLen: 300000,
+          shownLen: 48000,
+          originalPath: ".roll/loop/cycle-logs/20260606-093000-12345.agent.log",
+        },
+      },
+    });
+    expect(html).toContain("过程档案 · Process trace");
+    expect(html).toContain("20260606-093000-12345");
+    expect(html).toContain("claude");
+    // timeline entries with offsets
+    expect(html).toContain("+00:00");
+    expect(html).toContain("+02:20");
+    expect(html).toContain("add extractor");
+    // signal layer visually distinguished
+    expect(html).toContain("tl-signal");
+    expect(html).toContain("tl-outline");
+    // transcript folded, with truncation note + original-path index
+    expect(html).toContain("完整转录");
+    expect(html).toContain("log body");
+    expect(html).toContain(".roll/loop/cycle-logs/20260606-093000-12345.agent.log");
+    expect(html).toMatch(/截断|truncated/);
+  });
+
+  it("manual delivery: shows conductor 手工交付, no transcript fold", () => {
+    const html = renderReport({
+      ...BASE,
+      items: withEv,
+      process: { delivery: "manual", missing: ["cycle", "transcript"] },
+    });
+    expect(html).toContain("过程档案 · Process trace");
+    expect(html).toContain("手工交付");
+    expect(html).not.toContain("完整转录");
+    // degrade markers surface which segments are missing
+    expect(html).toContain("transcript");
+  });
+
+  it("absent process ⇒ whole section trimmed (no placeholder)", () => {
+    const html = renderReport({ ...BASE, items: withEv });
+    expect(html).not.toContain("过程档案");
+    expect(html).not.toContain("过程数据缺失");
+  });
+
+  it("escapes transcript original path and timeline labels", () => {
+    const html = renderReport({
+      ...BASE,
+      items: withEv,
+      process: {
+        delivery: "loop",
+        cycleId: "c1",
+        timeline: [{ offsetSec: 0, layer: "signal", marker: "alert", label: "ALERT · <script>" }],
+      },
+    });
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+});

@@ -397,3 +397,114 @@ describe("US-ATTEST-009 — self-score notes feed the report", () => {
     expect(html).not.toContain("无关条目");
   });
 });
+
+// ── US-ATTEST-014 — process trace wiring ────────────────────────────────────
+import { resolveStoryCycle, scopeCycleEvents } from "../src/commands/attest.js";
+import type { RollEvent } from "@roll/spec";
+
+describe("resolveStoryCycle", () => {
+  const runs = [
+    { run_id: "c1", story_id: "FIX-300", cycle_id: "c1", agent: "claude", built: ["FIX-300"] },
+    { run_id: "c2", story_id: "US-X-9", cycle_id: "c2", agent: "kimi", built: ["US-X-9"] },
+  ];
+  it("finds the cycle + agent for a story by story_id", () => {
+    const r = resolveStoryCycle(runs, "FIX-300");
+    expect(r.found).toBe(true);
+    expect(r.cycleId).toBe("c1");
+    expect(r.agent).toBe("claude");
+  });
+  it("matches via the built[] array too", () => {
+    expect(resolveStoryCycle([{ run_id: "z", cycle_id: "z", built: ["US-ATTEST-014"] }], "US-ATTEST-014").cycleId).toBe("z");
+  });
+  it("picks the latest matching row when a story was rebuilt", () => {
+    const dup = [...runs, { run_id: "c9", story_id: "FIX-300", cycle_id: "c9", agent: "pi", built: ["FIX-300"] }];
+    expect(resolveStoryCycle(dup, "FIX-300").cycleId).toBe("c9");
+  });
+  it("no match ⇒ found:false", () => {
+    expect(resolveStoryCycle(runs, "NOPE").found).toBe(false);
+  });
+});
+
+describe("scopeCycleEvents", () => {
+  const evs: RollEvent[] = [
+    { type: "cycle:start", cycleId: "c1", storyId: "FIX-300", agent: "claude", model: "m", ts: 100 },
+    { type: "cycle:tcr", cycleId: "c1", commitHash: "aa", message: "tcr: x", ts: 110 },
+    { type: "cycle:tcr", cycleId: "OTHER", commitHash: "bb", message: "tcr: foreign", ts: 111 },
+    { type: "pr:open", prNumber: 7, storyId: "FIX-300", ts: 120 },
+    { type: "ci:pass", prNumber: 7, ts: 130 },
+    { type: "ci:fail", prNumber: 99, failSummary: "other story pr", ts: 131 },
+    { type: "pr:merge", prNumber: 7, storyId: "FIX-300", ts: 140 },
+    { type: "alert:notify", channel: "x", message: "unattributable", ts: 150 },
+  ];
+  it("keeps this cycle's lifecycle/tcr + the story's PR and its CI, drops foreign", () => {
+    const scoped = scopeCycleEvents(evs, "c1", "FIX-300");
+    const types = scoped.map((e) => e.type);
+    expect(types).toContain("cycle:start");
+    expect(types).toContain("cycle:tcr"); // c1's
+    expect(scoped.some((e) => e.type === "cycle:tcr" && (e as { message: string }).message.includes("foreign"))).toBe(false);
+    expect(types).toContain("pr:open");
+    expect(types).toContain("ci:pass"); // PR #7 → in story's pr set
+    expect(scoped.some((e) => e.type === "ci:fail")).toBe(false); // PR #99 not the story's
+    expect(scoped.some((e) => e.type === "alert:notify")).toBe(false); // unattributable
+  });
+  it("manual (no cycleId) keeps only story-scoped PR/CI", () => {
+    const scoped = scopeCycleEvents(evs, undefined, "FIX-300");
+    expect(scoped.every((e) => ["pr:open", "pr:merge", "ci:pass"].includes(e.type))).toBe(true);
+  });
+});
+
+describe("attestCommand — process trace inline (US-ATTEST-014)", () => {
+  // Pin the runtime dir to the temp project so the default reader can't fall
+  // through to a real .roll/loop when the suite runs inside the loop itself.
+  function withRuntimeEnv<T>(proj: string, fn: () => Promise<T>): Promise<T> {
+    const save = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = join(proj, ".roll", "loop");
+    return fn().finally(() => {
+      if (save === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = save;
+    });
+  }
+  function writeRuntime(proj: string, opts: { transcript?: string } = {}): void {
+    const rt = join(proj, ".roll", "loop");
+    mkdirSync(join(rt, "cycle-logs"), { recursive: true });
+    writeFileSync(
+      join(rt, "runs.jsonl"),
+      JSON.stringify({ run_id: "cyc-1", story_id: "FIX-300", cycle_id: "cyc-1", agent: "claude", built: ["FIX-300"] }) + "\n",
+    );
+    const evs: RollEvent[] = [
+      { type: "cycle:start", cycleId: "cyc-1", storyId: "FIX-300", agent: "claude", model: "opus", ts: 1000 },
+      { type: "cycle:tcr", cycleId: "cyc-1", commitHash: "deadbeef00", message: "tcr: first step", ts: 1030 },
+      { type: "pr:open", prNumber: 42, storyId: "FIX-300", ts: 1060 },
+      { type: "cycle:end", cycleId: "cyc-1", outcome: "delivered", cost: { cycleId: "cyc-1", agent: "claude", model: "opus", tokensIn: 0, tokensOut: 0, estimatedCost: 0, revertCount: 0, effectiveCost: 0 }, ts: 1200 },
+    ];
+    writeFileSync(join(rt, "events.ndjson"), evs.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    if (opts.transcript !== undefined) writeFileSync(join(rt, "cycle-logs", "cyc-1.agent.log"), opts.transcript);
+  }
+
+  it("loop-delivered card: report carries timeline + signal + folded transcript, secrets redacted", async () => {
+    const proj = project();
+    writeRuntime(proj, { transcript: "starting cycle\nexport GITHUB_TOKEN=ghp_0123456789abcdef0123456789abcdef0123\ndone\n" });
+    const code = await silenced(() =>
+      withRuntimeEnv(proj, () => inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }))),
+    );
+    expect(code).toBe(0);
+    const html = readFileSync(join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"), "utf8");
+    expect(html).toContain("过程档案 · Process trace");
+    expect(html).toContain("cyc-1");
+    expect(html).toContain("first step"); // tcr signal
+    expect(html).toContain("完整转录"); // folded transcript present
+    expect(html).toContain("cycle-logs/cyc-1.agent.log"); // machine-original index
+    // AC2: the secret went through 012's redaction pipeline before inlining
+    expect(html).not.toContain("ghp_0123456789abcdef0123456789abcdef0123");
+  });
+
+  it("no process data ⇒ section trimmed, exit 0, no throw (degrade path)", async () => {
+    const proj = project(); // no .roll/loop runtime written
+    const code = await silenced(() =>
+      withRuntimeEnv(proj, () => inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }))),
+    );
+    expect(code).toBe(0);
+    const html = readFileSync(join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03", "report.html"), "utf8");
+    expect(html).not.toContain("过程档案");
+  });
+});

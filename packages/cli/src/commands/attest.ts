@@ -27,13 +27,19 @@ import {
   acForStory,
   renderReport,
   ansiPre,
+  boundTranscript,
+  EventBus,
+  extractCycleSignals,
   smokeCheckReport,
   type AcReportItem,
   type AcStatus,
   type BeforeAfterPair,
   type CardContext,
   type EvidenceRef,
+  type ProcessArchive,
+  type RunRow,
 } from "@roll/core";
+import type { RollEvent } from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
@@ -60,6 +66,143 @@ export interface AttestDeps {
   ghProbe?: () => Promise<boolean>;
   /** US-ATTEST-011 — seams for the terminal self-capture lane (run/env/platform). */
   capture?: ScreenshotDeps;
+  /** US-ATTEST-014 — injectable seam for the cycle process archive sources. */
+  process?: ProcessReaders;
+}
+
+/**
+ * US-ATTEST-014 — the process-archive data sources (runs.jsonl rows, the event
+ * stream, and the per-cycle transcript log). Injectable so the reverse-lookup +
+ * scoping logic is unit-testable without touching the real runtime dir.
+ */
+export interface ProcessReaders {
+  runs(): RunRow[];
+  events(): RollEvent[];
+  /** Raw transcript text for a cycle, or null when the log is absent. */
+  transcript(cycleId: string): string | null;
+  /** Project-relative path to the machine original (indexed, not embedded). */
+  transcriptPath(cycleId: string): string;
+}
+
+/** Default readers over `<runtimeDir>/{runs.jsonl,events.ndjson,cycle-logs/}`. */
+function defaultProcessReaders(projectPath: string, env: Record<string, string | undefined>): ProcessReaders {
+  const rt = (env.ROLL_PROJECT_RUNTIME_DIR ?? "").trim() || join(projectPath, ".roll", "loop");
+  // Reuse the event bus's read side — it already parses runs.jsonl / events.ndjson
+  // and returns [] for a missing file (readText → "" on absence), no throw.
+  const bus = new EventBus();
+  const logPath = (cid: string): string => join(rt, "cycle-logs", `${cid}.agent.log`);
+  return {
+    runs: () => bus.readRuns(join(rt, "runs.jsonl")),
+    events: () => bus.readEvents(join(rt, "events.ndjson")),
+    transcript: (cid) => {
+      const p = logPath(cid);
+      if (!existsSync(p)) return null;
+      try {
+        return readFileSync(p, "utf8");
+      } catch {
+        return null;
+      }
+    },
+    transcriptPath: (cid) => relative(projectPath, logPath(cid)),
+  };
+}
+
+/**
+ * US-ATTEST-014 — reverse-lookup the cycle that delivered a story. Scans
+ * runs.jsonl rows (latest wins, so a rebuilt story resolves to its newest
+ * cycle), matching `story_id` or membership in the `built[]` array. `found`
+ * distinguishes a loop delivery (row exists) from a hand-delivered card (none).
+ */
+export function resolveStoryCycle(runs: RunRow[], storyId: string): { cycleId?: string; agent?: string; found: boolean } {
+  let hit: RunRow | null = null;
+  for (const row of runs) {
+    const sid = row["story_id"];
+    const built = row["built"];
+    const match = sid === storyId || (Array.isArray(built) && built.includes(storyId));
+    if (match) hit = row; // keep scanning — latest match wins
+  }
+  if (hit === null) return { found: false };
+  const cycleId = typeof hit["cycle_id"] === "string" ? (hit["cycle_id"] as string) : undefined;
+  const agent = typeof hit["agent"] === "string" && hit["agent"] !== "" ? (hit["agent"] as string) : undefined;
+  return {
+    found: true,
+    ...(cycleId !== undefined && cycleId !== "" ? { cycleId } : {}),
+    ...(agent !== undefined ? { agent } : {}),
+  };
+}
+
+/**
+ * US-ATTEST-014 — scope the global event stream to ONE cycle+story for the
+ * trace extractor. cycleId-bearing events (lifecycle/tcr/gates) must match the
+ * cycle; PR events carry the storyId and are kept when it matches; CI events
+ * carry only a prNumber, so they ride along when their PR belongs to the story.
+ * alert:notify has no story link and is dropped (un-attributable, never guessed).
+ */
+export function scopeCycleEvents(events: RollEvent[], cycleId: string | undefined, storyId: string): RollEvent[] {
+  const prSet = new Set<number>();
+  for (const ev of events) {
+    if ((ev.type === "pr:open" || ev.type === "pr:merge") && ev.storyId === storyId) prSet.add(ev.prNumber);
+  }
+  return events.filter((ev) => {
+    if ("cycleId" in ev && typeof (ev as { cycleId?: unknown }).cycleId === "string") {
+      return cycleId !== undefined && (ev as { cycleId: string }).cycleId === cycleId;
+    }
+    if (ev.type === "pr:open" || ev.type === "pr:merge") return ev.storyId === storyId;
+    if (ev.type === "pr:rebase" || ev.type === "pr:close") return prSet.has(ev.prNumber);
+    if (ev.type === "ci:pass" || ev.type === "ci:fail" || ev.type === "ci:rerun") return prSet.has(ev.prNumber);
+    return false; // alert:notify, loop:*, policy:*, route:* — not story-scoped here
+  });
+}
+
+/**
+ * US-ATTEST-014 — assemble the cycle process archive (timeline + signal layer +
+ * bounded transcript). Tri-state, all degrading gracefully (D1, never throws):
+ *   1. run row found            → `loop` delivery, full archive.
+ *   2. no row but story events  → `manual` delivery (conductor 手工交付).
+ *   3. nothing at all           → undefined (the renderer trims the section).
+ * Sensitive strings in the transcript pass through 012's redaction pipeline
+ * BEFORE inlining (a hit is WARNed, never silent).
+ */
+export function buildProcessArchive(storyId: string, readers: ProcessReaders): ProcessArchive | undefined {
+  const { cycleId, agent, found } = resolveStoryCycle(readers.runs(), storyId);
+  const scoped = scopeCycleEvents(readers.events(), cycleId, storyId);
+  const { timeline } = extractCycleSignals(scoped, cycleId ?? "");
+
+  // case 3: nothing to show
+  if (!found && timeline.length === 0) return undefined;
+
+  const delivery: ProcessArchive["delivery"] = found && cycleId !== undefined ? "loop" : "manual";
+  const missing: string[] = [];
+  const archive: ProcessArchive = { delivery };
+  if (cycleId !== undefined) archive.cycleId = cycleId;
+  if (agent !== undefined) archive.agent = agent;
+  if (timeline.length > 0) archive.timeline = timeline;
+  else missing.push("timeline");
+  if (delivery === "manual") missing.push("cycle");
+
+  // transcript — only loop cycles have an agent log; redact → bound → ANSI.
+  if (cycleId !== undefined) {
+    const raw = readers.transcript(cycleId);
+    if (raw !== null) {
+      const { redacted, hits } = redactSecrets(raw);
+      if (hits.length > 0) warn(`redacted secret(s) in cycle transcript ${cycleId}: ${hits.join(", ")}`);
+      const bounded = boundTranscript(redacted);
+      archive.transcript = {
+        inlineHtml: ansiPre(bounded.text),
+        truncated: bounded.truncated,
+        totalLen: bounded.totalLen,
+        shownLen: bounded.shownLen,
+        originalPath: readers.transcriptPath(cycleId),
+      };
+    } else {
+      missing.push("transcript");
+    }
+  } else {
+    missing.push("transcript");
+  }
+
+  if (missing.length > 0) archive.missing = missing;
+  return archive;
 }
 
 const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "fail", "blocked", "claimed", "missing"];
@@ -412,6 +555,17 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // US-ATTEST-013 — self-contained card context + before/after comparison.
   const context = buildCardContext(projectPath, featureFile, storyId, process.env);
   const beforeAfter = detectBeforeAfter(runDir);
+  // US-ATTEST-014 — reverse-look up the delivering cycle and inline its process
+  // archive (timeline + signal layer + bounded, redacted transcript). Degrades
+  // gracefully: hand-delivered / no-data cards yield undefined (section trimmed).
+  const processReaders = deps.process ?? defaultProcessReaders(projectPath, process.env);
+  let processArchive: ProcessArchive | undefined;
+  try {
+    processArchive = buildProcessArchive(storyId, processReaders);
+  } catch {
+    warn("process archive build failed — report omits the process trace");
+    processArchive = undefined;
+  }
   const html = renderReport({
     storyId,
     title: `${storyId} — Acceptance Evidence`,
@@ -420,6 +574,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     facts: { tcrCount: manifest.tcr_commits.length, ciConclusion: manifest.ci.conclusion, testPassAge: age },
     ...(context !== undefined ? { context } : {}),
     ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
+    ...(processArchive !== undefined ? { process: processArchive } : {}),
     ...(selfScores.length > 0 ? { selfScores } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
   });

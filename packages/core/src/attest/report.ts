@@ -20,6 +20,7 @@
  * Deletion-not-placeholder: the screenshot <figure> renders ONLY when a
  * screenshot evidence ref exists (no placeholder image, no warning text — D6).
  */
+import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "../html/chrome.js";
 import { ANSI_CSS } from "./ansi-html.js";
 
 export type AcStatus = "pass" | "readonly" | "partial" | "fail" | "blocked" | "claimed" | "missing";
@@ -196,8 +197,8 @@ function deliveryBlock(d: DeliveryChain): string {
   if (d.prLinks !== undefined && d.prLinks.length > 0)
     parts.push(`<dt>PR</dt><dd>${d.prLinks.map((p) => `<a href="${esc(p.href)}">${esc(p.label)}</a>`).join(" · ")}</dd>`);
   if (d.cycleId !== undefined && d.cycleId !== "") parts.push(`<dt>Cycle</dt><dd><code>${esc(d.cycleId)}</code></dd>`);
-  if (d.timeline !== undefined && d.timeline !== "") parts.push(`<dt>时间线 · Timeline</dt><dd>${esc(d.timeline)}</dd>`);
-  if (d.cost !== undefined && d.cost !== "") parts.push(`<dt>成本 · Cost</dt><dd>${esc(d.cost)}</dd>`);
+  if (d.timeline !== undefined && d.timeline !== "") parts.push(`<dt>${bi("Timeline", "时间线")}</dt><dd>${esc(d.timeline)}</dd>`);
+  if (d.cost !== undefined && d.cost !== "") parts.push(`<dt>${bi("Cost", "成本")}</dt><dd>${esc(d.cost)}</dd>`);
   return parts.length > 0 ? `<dl class="delivery">${parts.join("")}</dl>` : "";
 }
 
@@ -219,7 +220,7 @@ function cardContextBlock(ctx: CardContext | undefined): string {
   const delivery = ctx.delivery !== undefined ? deliveryBlock(ctx.delivery) : "";
   if (delivery !== "") rows.push(delivery);
   if (rows.length === 0) return "";
-  return `<section class="card-context"><h2>卡上下文 · Context</h2>\n${rows.join("\n")}\n</section>`;
+  return `<section class="card-context"><h2>${bi("Context", "卡上下文")}</h2>\n${rows.join("\n")}\n</section>`;
 }
 
 function acSection(item: AcReportItem): string {
@@ -230,10 +231,10 @@ function acSection(item: AcReportItem): string {
   const bizHtml = business.map(evidenceCard).join("\n");
   const techHtml =
     technical.length > 0
-      ? `<details class="tech"><summary>技术细节 · Technical detail（${technical.length}）</summary>\n${technical.map(evidenceCard).join("\n")}\n</details>`
+      ? `<details class="tech"><summary>${bi(`Technical detail (${technical.length})`, `技术细节（${technical.length}）`)}</summary>\n${technical.map(evidenceCard).join("\n")}\n</details>`
       : "";
   return `<section class="ac ${b.cls}" id="${esc(item.id)}">
-<h3><span class="badge">${b.icon} ${b.en} · ${b.zh}</span> <code>${esc(item.id)}</code></h3>
+<h3><span class="badge">${b.icon} ${bi(b.en, b.zh)}</span> <code>${esc(item.id)}</code></h3>
 <p class="ac-text">${esc(item.text)}</p>
 ${note}
 ${bizHtml}
@@ -255,14 +256,14 @@ function beforeAfterBlock(pairs: ReportInput["beforeAfter"]): string {
       : "";
   const groups = pairs
     .map((p) => {
-      const before = fig(p.before, "Before · 改前", "ba-before");
-      const after = fig(p.after, "After · 改后", "ba-after");
+      const before = fig(p.before, bi("Before", "改前"), "ba-before");
+      const after = fig(p.after, bi("After", "改后"), "ba-after");
       if (before === "" && after === "") return "";
       return `<div class="before-after"><h3>${esc(p.label)}</h3><div class="ba-pair">${before}${after}</div></div>`;
     })
     .filter((s) => s !== "");
   if (groups.length === 0) return "";
-  return `<section class="before-after-section"><h2>对照实拍 · Before / After</h2>\n${groups.join("\n")}\n</section>`;
+  return `<section class="before-after-section"><h2>${bi("Before / After", "对照实拍")}</h2>\n${groups.join("\n")}\n</section>`;
 }
 
 /**
@@ -274,7 +275,7 @@ function beforeAfterBlock(pairs: ReportInput["beforeAfter"]): string {
 function selfCaptureBlock(refs: ReportInput["selfCaptures"]): string {
   if (refs === undefined || refs.length === 0) return "";
   const figs = refs.map(evidenceCard).join("\n");
-  return `<section class="self-capture"><h2>Gate self-capture · 自产实拍</h2>\n${figs}\n</section>`;
+  return `<section class="self-capture"><h2>${bi("Gate self-capture", "Gate 自产实拍")}</h2>\n${figs}\n</section>`;
 }
 
 /**
@@ -303,7 +304,7 @@ function evidenceIndexBlock(
   if (beforeAfter !== undefined) for (const p of beforeAfter) for (const r of [p.before, p.after]) if (r.href !== undefined) row(r);
   if (selfCaptures !== undefined) for (const r of selfCaptures) row(r);
   if (rows.length === 0) return "";
-  return `<section class="evidence-index"><h2>证据索引 · Evidence index</h2>
+  return `<section class="evidence-index"><h2>${bi("Evidence index", "证据索引")}</h2>
 <table class="ev-index"><thead><tr><th>Kind</th><th>Label</th><th>Locator</th></tr></thead>
 <tbody>${rows.join("\n")}</tbody></table></section>`;
 }
@@ -330,7 +331,7 @@ function processTraceBlock(p: ProcessArchive | undefined): string {
 
   const mode =
     p.delivery === "manual"
-      ? `<p class="delivery-mode">🧑‍🔧 conductor 手工交付 · delivered by hand（无自动周期 · no loop cycle）</p>`
+      ? `<p class="delivery-mode">🧑‍🔧 ${bi("delivered by hand (no loop cycle)", "conductor 手工交付（无自动周期）")}</p>`
       : `<p class="delivery-mode">🔁 loop cycle${p.cycleId !== undefined && p.cycleId !== "" ? ` <code>${esc(p.cycleId)}</code>` : ""}${p.agent !== undefined && p.agent !== "" ? ` · agent <code>${esc(p.agent)}</code>` : ""}</p>`;
   rows.push(mode);
 
@@ -345,24 +346,24 @@ function processTraceBlock(p: ProcessArchive | undefined): string {
   }
 
   if (p.missing !== undefined && p.missing.length > 0) {
-    rows.push(`<p class="trace-missing">过程数据缺失 · missing process data：${p.missing.map(esc).join(" · ")}</p>`);
+    rows.push(`<p class="trace-missing">${bi("missing process data", "过程数据缺失")}：${p.missing.map(esc).join(" · ")}</p>`);
   }
 
   if (p.transcript !== undefined) {
     const t = p.transcript;
     const note = t.truncated
-      ? `已截断 · truncated（展示 ${t.shownLen} / ${t.totalLen} 字符 · chars shown）`
-      : `完整内联 · full inline（${t.totalLen} 字符 · chars）`;
+      ? bi(`truncated — ${t.shownLen} / ${t.totalLen} chars shown`, `已截断（展示 ${t.shownLen} / ${t.totalLen} 字符）`)
+      : bi(`full inline — ${t.totalLen} chars`, `完整内联（${t.totalLen} 字符）`);
     const idx =
       t.originalPath !== undefined && t.originalPath !== ""
-        ? `<p class="orig-path">机器原件 · machine original：<code>${esc(t.originalPath)}</code></p>`
+        ? `<p class="orig-path">${bi("machine original", "机器原件")}：<code>${esc(t.originalPath)}</code></p>`
         : "";
     rows.push(
-      `<details class="transcript"><summary>完整转录 · Full transcript（${esc(note)}）</summary>\n${idx}\n${t.inlineHtml}\n</details>`,
+      `<details class="transcript"><summary>${bi("Full transcript", "完整转录")}（${note}）</summary>\n${idx}\n${t.inlineHtml}\n</details>`,
     );
   }
 
-  return `<section class="process-trace"><h2>过程档案 · Process trace</h2>\n${rows.join("\n")}\n</section>`;
+  return `<section class="process-trace"><h2>${bi("Process trace", "过程档案")}</h2>\n${rows.join("\n")}\n</section>`;
 }
 
 function selfScoreBlock(entries: ReportInput["selfScores"]): string {
@@ -373,7 +374,7 @@ function selfScoreBlock(entries: ReportInput["selfScores"]): string {
         `<li><b>${esc(String(e.score))}</b>/10 · ${esc(e.verdict)} · <code>${esc(e.skill)}</code> · <span class="meta">${esc(e.ts)}</span>${e.note !== "" ? `<br><span class="note">${esc(e.note)}</span>` : ""}</li>`,
     )
     .join("\n");
-  return `<details class="selfscore"><summary>Self-Score · 自评（${entries.length}）</summary>\n<ul>\n${li}\n</ul>\n</details>`;
+  return `<details class="selfscore"><summary>${bi("Self-Score", "自评")}（${entries.length}）</summary>\n<ul>\n${li}\n</ul>\n</details>`;
 }
 
 /** Render the single-file report. Pure: same input → same bytes. */
@@ -386,7 +387,7 @@ export function renderReport(input: ReportInput): string {
 
   const summary = (Object.keys(BADGE) as AcStatus[])
     .filter((s) => (counts.get(s) ?? 0) > 0)
-    .map((s) => `<span class="badge ${BADGE[s].cls}">${BADGE[s].icon} ${BADGE[s].en} ${BADGE[s].zh} × ${counts.get(s)}</span>`)
+    .map((s) => `<span class="badge ${BADGE[s].cls}">${BADGE[s].icon} ${bi(BADGE[s].en, BADGE[s].zh)} × ${counts.get(s)}</span>`)
     .join(" ");
 
   const facts =
@@ -396,8 +397,11 @@ export function renderReport(input: ReportInput): string {
 
   const disc =
     discrepancies.length > 0
-      ? `<section class="discrepancies"><h2>Discrepancies · 证据缺口</h2>
-<p>下列 AC 因<strong>没有任何证据条目</strong>被强制降级为 🟧 Claimed（红线，渲染层强制）：</p>
+      ? `<section class="discrepancies"><h2>${bi("Discrepancies", "证据缺口")}</h2>
+<p>${bi(
+          "The ACs below carried <strong>zero evidence entries</strong> and were force-downgraded to 🟧 Claimed (red line, enforced by the renderer):",
+          "下列 AC 因<strong>没有任何证据条目</strong>被强制降级为 🟧 Claimed（红线，渲染层强制）：",
+        )}</p>
 <ul>${discrepancies.map((d) => `<li><a href="#${esc(d.id)}"><code>${esc(d.id)}</code></a> ${esc(d.text)}</li>`).join("\n")}</ul>
 </section>`
       : "";
@@ -405,7 +409,7 @@ export function renderReport(input: ReportInput): string {
   // US-ATTEST-013 — 收口 (closing): quality gate → discrepancies → evidence
   // index → self-score. Assembled then wrapped only when non-empty (trim, no
   // hollow section).
-  const gate = facts !== "" ? `<h2>质量门禁 · Quality gate</h2>\n${facts}` : "";
+  const gate = facts !== "" ? `<h2>${bi("Quality gate", "质量门禁")}</h2>\n${facts}` : "";
   const evIndex = evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures);
   const selfScore = selfScoreBlock(input.selfScores);
   const closingInner = [gate, disc, evIndex, selfScore].filter((s) => s !== "").join("\n");
@@ -418,31 +422,31 @@ export function renderReport(input: ReportInput): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(input.storyId)} — Acceptance Evidence · 验收证据</title>
 <style>
-:root { color-scheme: light dark; --fg:#1f2328; --bg:#ffffff; --muted:#57606a; --line:#d0d7de; }
-@media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --bg:#0d1117; --muted:#8b949e; --line:#30363d; } }
-body { margin:0 auto; max-width:880px; padding:32px 20px 80px; background:var(--bg); color:var(--fg);
-  font:15px/1.65 -apple-system, "PingFang SC", "Segoe UI", sans-serif; }
-h1 { font-size:22px; } h2 { font-size:18px; border-bottom:1px solid var(--line); padding-bottom:6px; }
-code { background:rgba(127,127,127,.12); padding:1px 6px; border-radius:6px; font-size:.92em; }
+${CHROME_CSS}
 .badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12.5px; border:1px solid var(--line); }
-.meta, .facts, .note { color:var(--muted); font-size:13px; }
-section.ac { border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:14px 0; }
+.facts, .note { color:var(--muted); font-size:13px; }
+header.doc { position:relative; padding-right:96px; }
+.seal { position:absolute; right:0; top:2px; width:74px; height:74px; border:2px solid var(--accent);
+  border-radius:50%; transform:rotate(-12deg); color:var(--accent); font-family:var(--serif);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  font-size:17px; letter-spacing:.12em; opacity:.85; box-shadow:inset 0 0 0 2px transparent, inset 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.seal span { font-size:9.5px; letter-spacing:.34em; text-indent:.34em; }
 section.ac h3 { margin:0 0 6px; font-size:14.5px; }
-.s-pass { border-left:4px solid #2da44e; } .s-readonly { border-left:4px solid #218bff; }
-.s-partial { border-left:4px solid #d4a72c; } .s-claimed { border-left:4px solid #e8793a; }
-.s-fail { border-left:4px solid #cf222e; } .s-blocked { border-left:4px solid #8250df; }
-.s-missing { border-left:4px solid #cf222e; }
-figure.shot { margin:10px 0; } figure.shot img { max-width:100%; border:1px solid var(--line); border-radius:8px; }
+.s-pass { border-left:4px solid var(--pass); } .s-readonly { border-left:4px solid var(--info); }
+.s-partial { border-left:4px solid var(--warn); } .s-claimed { border-left:4px solid var(--claim); }
+.s-fail { border-left:4px solid var(--fail); } .s-blocked { border-left:4px solid var(--block); }
+.s-missing { border-left:4px solid var(--fail); }
+figure.shot { margin:10px 0; } figure.shot img { max-width:100%; border:1px solid var(--line); border-radius:6px; }
 figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 .ev { margin:6px 0; font-size:13.5px; } .ev-label { color:var(--muted); font-size:12.5px; margin-bottom:4px; }
-.discrepancies { border:1px dashed #e8793a; border-radius:10px; padding:8px 16px; margin-top:28px; }
-details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:10px; padding:8px 16px; }
+.discrepancies { border:1px dashed var(--claim); border-radius:8px; padding:8px 16px; margin-top:28px; }
+details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:8px; padding:8px 16px; background:var(--bg-raise); }
 details.selfscore summary { cursor:pointer; font-weight:600; }
 details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
-details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:8px; padding:6px 12px; background:rgba(127,127,127,.04); }
+details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
 details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.tech[open] summary { margin-bottom:6px; }
-section.card-context { border:1px solid var(--line); border-radius:10px; padding:6px 16px 12px; margin:14px 0; }
+section.card-context { padding:6px 18px 12px; }
 section.card-context .one-liner { font-size:15.5px; font-weight:600; }
 section.card-context .ctx-meta { color:var(--muted); font-size:13px; }
 dl.delivery { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0 0; font-size:13.5px; }
@@ -451,27 +455,32 @@ dl.delivery dt { color:var(--muted); } dl.delivery dd { margin:0; }
 .ba-pair { display:flex; flex-wrap:wrap; gap:12px; } .ba-pair figure.shot { flex:1 1 280px; margin:0; }
 table.ev-index { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
 table.ev-index th, table.ev-index td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
-table.ev-index th { color:var(--muted); font-weight:600; }
+table.ev-index th { color:var(--muted); font-weight:600; font-family:var(--serif); letter-spacing:.04em; }
 table.ev-index td a { word-break:break-all; }
-section.process-trace { margin-top:28px; border:1px solid var(--line); border-radius:10px; padding:6px 16px 12px; }
+section.process-trace { margin-top:28px; padding:6px 18px 12px; }
 .delivery-mode { font-size:13.5px; color:var(--muted); }
 ol.timeline { list-style:none; margin:8px 0; padding:0; font-size:13.5px; }
 ol.timeline li { padding:3px 0 3px 10px; border-left:2px solid var(--line); }
-ol.timeline li.tl-signal { border-left:3px solid #218bff; font-weight:600; }
+ol.timeline li.tl-signal { border-left:3px solid var(--info); font-weight:600; }
 ol.timeline li.tl-outline { color:var(--muted); }
-ol.timeline .tl-offset { display:inline-block; min-width:58px; color:var(--muted); font-variant-numeric:tabular-nums; font-size:12.5px; }
-.trace-missing { color:#bf6a02; font-size:13px; }
-details.transcript { margin-top:8px; border:1px solid var(--line); border-radius:8px; padding:6px 12px; background:rgba(127,127,127,.04); }
+ol.timeline .tl-offset { display:inline-block; min-width:58px; color:var(--muted); font-variant-numeric:tabular-nums; font-size:12.5px; font-family:var(--mono); }
+.trace-missing { color:var(--warn); font-size:13px; }
+details.transcript { margin-top:8px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
 details.transcript summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.transcript .orig-path { font-size:12.5px; color:var(--muted); margin:6px 0; }
-section.closing { margin-top:32px; border-top:2px solid var(--line); padding-top:8px; }
-@media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
+section.closing { margin-top:32px; border:none; background:none; border-radius:0; padding:8px 0 0; border-top:3px double var(--line); }
 ${ANSI_CSS}
 </style>
+${CHROME_SCRIPT}
 </head>
 <body>
+${CHROME_CONTROLS}
+<header class="doc">
+<p class="kicker">Roll · ${bi("Delivery Dossier", "交付档案")}</p>
 <h1>${esc(input.title)}</h1>
-<p class="meta"><code>${esc(input.storyId)}</code> · generated ${esc(input.generatedAt)} · Gate: PASS</p>
+<p class="meta"><code>${esc(input.storyId)}</code> · ${bi("generated", "生成于")} ${esc(input.generatedAt)} · Gate: PASS</p>
+<div class="seal" aria-hidden="true"><span>ROLL</span>验讫</div>
+</header>
 ${cardContextBlock(input.context)}
 <p>${summary}</p>
 ${items.map(acSection).join("\n")}
@@ -479,6 +488,7 @@ ${beforeAfterBlock(input.beforeAfter)}
 ${selfCaptureBlock(input.selfCaptures)}
 ${processTraceBlock(input.process)}
 ${closing}
+<footer>Roll · ${bi("Acceptance Evidence", "验收证据")} · <code>${esc(input.storyId)}</code></footer>
 </body>
 </html>
 `;

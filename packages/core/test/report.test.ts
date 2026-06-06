@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { ansiPre } from "../src/attest/ansi-html.js";
 import { enforceRedLine, renderReport, type AcReportItem } from "../src/attest/report.js";
+import { bi } from "../src/html/chrome.js";
 
 function item(over: Partial<AcReportItem>): AcReportItem {
   return { id: "US-X-001:AC1", text: "默认 AC 文本", status: "pass", evidence: [], ...over };
@@ -31,7 +32,7 @@ describe("red line — no evidence can't stay pass", () => {
 
   it("downgraded items surface in the Discrepancies appendix with anchors", () => {
     const html = renderReport({ ...BASE, items: [item({ status: "pass" })] });
-    expect(html).toContain("Discrepancies · 证据缺口");
+    expect(html).toContain(bi("Discrepancies", "证据缺口"));
     expect(html).toContain('href="#US-X-001:AC1"');
     expect(html).toContain("🟧 Claimed");
   });
@@ -59,7 +60,7 @@ describe("deletion-not-placeholder", () => {
 });
 
 describe("single-file self-containment", () => {
-  it("no external loads: no <script src>, no <link rel>, images only relative", () => {
+  it("no external loads: no <script src>, no <link rel>, images only relative; chrome script is inline", () => {
     const html = renderReport({
       ...BASE,
       items: [
@@ -73,9 +74,12 @@ describe("single-file self-containment", () => {
       ],
       facts: { tcrCount: 3, ciConclusion: "success", testPassAge: "90s" },
     });
-    expect(html).not.toContain("<script");
+    expect(html).not.toContain("<script src=");
     expect(html).not.toContain("<link");
     expect(html).not.toMatch(/<img src="https?:/);
+    // the ONLY script is the inline lang/theme chrome — no fetches, no third-party code
+    expect(html.match(/<script/g)).toHaveLength(1);
+    expect(html).toContain("localStorage");
     expect(html).toContain(".ansi"); // ANSI_CSS embedded
     expect(html).toContain('<span class="a-fg32">✓ ok</span>'); // text evidence inline
     expect(html).toContain("TCR commits: <b>3</b>");
@@ -96,7 +100,7 @@ describe("US-ATTEST-011 — Gate self-capture section", () => {
       items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
       selfCaptures: [{ kind: "screenshot", label: "terminal", href: "./screenshots/terminal.png" }],
     });
-    expect(html).toContain("Gate self-capture · 自产实拍");
+    expect(html).toContain(bi("Gate self-capture", "Gate 自产实拍"));
     expect(html).toContain('<img src="./screenshots/terminal.png"');
   });
 
@@ -118,7 +122,7 @@ describe("US-ATTEST-013 — explicit layering order", () => {
     });
     const ctxAt = html.indexOf("卡上下文");
     const acAt = html.indexOf('class="ac ');
-    const gateAt = html.indexOf("质量门禁 · Quality gate");
+    const gateAt = html.indexOf("质量门禁");
     const idxAt = html.indexOf("证据索引");
     // 主体 leads, 收口 trails — and the quality gate now lives in the closing,
     // after the AC body, not at the top.
@@ -148,7 +152,7 @@ describe("US-ATTEST-013 — card context leads the business body", () => {
       },
       items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
     });
-    expect(html).toContain("卡上下文 · Context");
+    expect(html).toContain(bi("Context", "卡上下文"));
     expect(html).toContain("报告分层且自含待办全貌");
     expect(html).toContain("acceptance-evidence");
     expect(html).toContain("🔨 In Progress");
@@ -192,7 +196,7 @@ describe("US-ATTEST-013 — evidence index closing section", () => {
       ],
       selfCaptures: [{ kind: "screenshot", label: "terminal", href: "./screenshots/terminal.png" }],
     });
-    expect(html).toContain("证据索引 · Evidence index");
+    expect(html).toContain(bi("Evidence index", "证据索引"));
     expect(html).toContain("./screenshots/a.png");
     expect(html).toContain("./screenshots/before.png");
     expect(html).toContain("./screenshots/after.png");
@@ -219,11 +223,11 @@ describe("US-ATTEST-013 — before/after comparison", () => {
         },
       ],
     });
-    expect(html).toContain("对照实拍 · Before / After");
+    expect(html).toContain(bi("Before / After", "对照实拍"));
     expect(html).toContain('<img src="./screenshots/before-home.png"');
     expect(html).toContain('<img src="./screenshots/after-home.png"');
-    expect(html).toContain("Before · 改前");
-    expect(html).toContain("After · 改后");
+    expect(html).toContain(bi("Before", "改前"));
+    expect(html).toContain(bi("After", "改后"));
   });
 
   it("empty / absent before-after ⇒ section skipped (全新功能免出)", () => {
@@ -276,10 +280,10 @@ describe("badge ladder", () => {
         item({ id: "A:AC4", status: "missing" }),
       ],
     });
-    expect(html).toContain("✅ Pass 通过 × 1");
-    expect(html).toContain("🟦 Read-only Pass 只读通过 × 1");
-    expect(html).toContain("🟨 Partial 部分满足 × 1");
-    expect(html).toContain("🟥 Missing 无证据 × 1");
+    expect(html).toContain(`✅ ${bi("Pass", "通过")} × 1`);
+    expect(html).toContain(`🟦 ${bi("Read-only Pass", "只读通过")} × 1`);
+    expect(html).toContain(`🟨 ${bi("Partial", "部分满足")} × 1`);
+    expect(html).toContain(`🟥 ${bi("Missing", "无证据")} × 1`);
     expect(html).toContain("缺移动端验证");
   });
 });
@@ -294,8 +298,8 @@ describe("US-ATTEST-012 — fail / blocked status口径", () => {
       ],
     });
     // distinct, non-color marker = icon + bilingual word
-    expect(html).toContain("❌ Fail 未通过 × 1");
-    expect(html).toContain("⛔ Blocked 受阻 × 1");
+    expect(html).toContain(`❌ ${bi("Fail", "未通过")} × 1`);
+    expect(html).toContain(`⛔ ${bi("Blocked", "受阻")} × 1`);
     // status colour classes present so the badge ladder is not color-only
     expect(html).toContain("s-fail");
     expect(html).toContain("s-blocked");
@@ -322,7 +326,7 @@ describe("US-ATTEST-009 — Self-Score fold", () => {
         { skill: "roll-build", score: 9, verdict: "good", ts: "2026-06-04T01:00:00Z", note: "" },
       ],
     });
-    expect(html).toContain("Self-Score · 自评（2）");
+    expect(html).toContain(`${bi("Self-Score", "自评")}（2）`);
     expect(html).toContain("<details");
     expect(html).toContain("<b>6</b>/10 · ok");
     expect(html).toContain("Empty flaky CI card");
@@ -360,7 +364,7 @@ describe("US-ATTEST-014 — process trace inline", () => {
         },
       },
     });
-    expect(html).toContain("过程档案 · Process trace");
+    expect(html).toContain(bi("Process trace", "过程档案"));
     expect(html).toContain("20260606-093000-12345");
     expect(html).toContain("claude");
     // timeline entries with offsets
@@ -383,7 +387,7 @@ describe("US-ATTEST-014 — process trace inline", () => {
       items: withEv,
       process: { delivery: "manual", missing: ["cycle", "transcript"] },
     });
-    expect(html).toContain("过程档案 · Process trace");
+    expect(html).toContain(bi("Process trace", "过程档案"));
     expect(html).toContain("手工交付");
     expect(html).not.toContain("完整转录");
     // degrade markers surface which segments are missing
@@ -406,7 +410,8 @@ describe("US-ATTEST-014 — process trace inline", () => {
         timeline: [{ offsetSec: 0, layer: "signal", marker: "alert", label: "ALERT · <script>" }],
       },
     });
-    expect(html).not.toContain("<script>");
+    // the raw label must never land unescaped (the only <script> is the chrome's own)
+    expect(html).not.toContain("ALERT · <script>");
     expect(html).toContain("&lt;script&gt;");
   });
 });

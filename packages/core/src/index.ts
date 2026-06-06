@@ -19,6 +19,7 @@ export * from "./loop/pr-loop.js";
 export * from "./loop/quality-gate.js";
 export * from "./loop/orchestrator.js";
 export * from "./loop/recovery.js";
+export * from "./loop/loop-fmt.js";
 export * from "./loop/sentinel.js";
 export * from "./loop/signals.js";
 export * from "./loop/transcript.js";

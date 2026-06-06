@@ -16,6 +16,7 @@ import { gcCommand } from "./gc.js";
 import { indexCommand } from "./index-gen.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
+import { loopFmtCommand } from "./loop-fmt.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import {
   loopNowCommand,
@@ -186,6 +187,7 @@ export function registerAll(): void {
     if (args[0] === "pause") return loopPauseCommand(args.slice(1));
     if (args[0] === "resume") return loopResumeCommand(args.slice(1));
     if (args[0] === "now") return loopNowCommand(args.slice(1));
+    if (args[0] === "fmt") return loopFmtCommand(args.slice(1));
     return fallbackToBash(["loop", ...args]).status;
   });
 }

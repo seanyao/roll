@@ -20,6 +20,11 @@
  * Freshness contract: the report at `.roll/verification/<storyId>/latest/report.html`
  * must have been written THIS cycle (mtime ≥ cycle start). A stale report left by
  * a previous delivery of the same story does not count as evidence.
+ *
+ * Content floor (US-ATTEST-012): freshness alone is mere "存在性". A fresh report
+ * that is an EMPTY SHELL — parseable but with zero AC sections / no ac-map (the
+ * FIX-214 case, where a heading naming another card stole all the AC) — is also
+ * "skipped", not "produced". A real delivery's report carries ≥1 AC + an ac-map.
  */
 import { parsePolicy } from "@roll/core";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -50,6 +55,26 @@ export function verificationReportFresh(
     return st.mtimeMs / 1000 >= sinceSec;
   } catch {
     return false; // missing path / stat error → not present
+  }
+}
+
+/**
+ * US-ATTEST-012 content floor: a report can be fresh yet be an EMPTY SHELL —
+ * parseable but carrying ZERO acceptance criteria (the FIX-214 case, where a
+ * heading mentioning another card id stole all the AC, so attest rendered a
+ * report with no AC sections). "存在性"过闸不等于"有内容". A delivery's report must
+ * carry ≥1 rendered AC section AND an `ac-map.json` (the AI intent layer the
+ * skill writes for every real delivery). Missing either ⇒ no content.
+ */
+export function verificationReportHasContent(worktreeCwd: string, storyId: string): boolean {
+  if (storyId === "") return false;
+  try {
+    const html = readFileSync(verificationReportPath(worktreeCwd, storyId), "utf8");
+    const hasAc = /<section class="ac[\s">]/.test(html);
+    const hasMap = existsSync(join(worktreeCwd, ".roll", "verification", storyId, "ac-map.json"));
+    return hasAc && hasMap;
+  } catch {
+    return false;
   }
 }
 
@@ -94,17 +119,25 @@ export function runAttestGate(
   sinks: AttestGateSinks,
 ): AttestGateResult {
   try {
-    if (verificationReportFresh(worktreeCwd, storyId, sinceSec)) {
+    const fresh = verificationReportFresh(worktreeCwd, storyId, sinceSec);
+    // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /
+    // no ac-map, the FIX-214 case) does NOT count as a produced report.
+    if (fresh && verificationReportHasContent(worktreeCwd, storyId)) {
       const reasons = ["fresh acceptance report present"];
       sinks.event({ cycleId, verdict: "produced", reasons });
       return { verdict: "produced", mode, reasons, blocked: false };
     }
     const reasons = [
-      `no fresh acceptance report at .roll/verification/${storyId}/latest/report.html`,
+      fresh
+        ? `acceptance report at .roll/verification/${storyId}/latest/report.html is an empty shell (no AC content / no ac-map)`
+        : `no fresh acceptance report at .roll/verification/${storyId}/latest/report.html`,
     ];
     const blocked = mode === "hard";
+    const lead = fresh
+      ? `delivery with an empty-shell acceptance report (no AC content / no ac-map)`
+      : `delivery without a fresh acceptance report`;
     sinks.alert(
-      `attest gate (${mode}): delivery without a fresh acceptance report (${storyId}) — cycle ${cycleId}` +
+      `attest gate (${mode}): ${lead} (${storyId}) — cycle ${cycleId}` +
         (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
     );
     sinks.event({ cycleId, verdict: "skipped", reasons });

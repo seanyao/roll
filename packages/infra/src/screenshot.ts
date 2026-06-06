@@ -29,6 +29,7 @@ import { existsSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { RunOut } from "./evidence.js";
+import { containsSecret } from "./redact.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -157,13 +158,17 @@ export async function captureScreenshot(
       // terminal lane (US-ATTEST-011): unattended self-capture on macOS GUI hosts.
       if ((env["ROLL_ATTEST_NO_TERMINAL"] ?? "") === "1") return skip("ROLL_ATTEST_NO_TERMINAL=1");
       if (platform !== "darwin") return skip("not macOS");
+      const line =
+        req.tmux !== undefined && req.tmux !== "" ? `tmux attach -t ${req.tmux}` : (req.command ?? "");
+      // RED LINE (US-ATTEST-012): a token baked into pixels can't be un-baked.
+      // Refuse to screen-capture a command that carries a secret — redact &
+      // reshoot. Checked BEFORE any spawn so the secret never reaches the screen.
+      if (containsSecret(line)) return skip("secret in capture command — redact & reshoot");
       // GUI-session probe: launchctl reports "Aqua" only inside a graphical login.
       const gui = await run("launchctl", ["managername"]);
       if (gui.code !== 0 || !gui.stdout.includes("Aqua")) return skip("no GUI session");
       const rect = parseRegion(req.region ?? DEFAULT_REGION);
       if (rect === null) return skip("bad region");
-      const line =
-        req.tmux !== undefined && req.tmux !== "" ? `tmux attach -t ${req.tmux}` : (req.command ?? "");
       const opened = await run("osascript", ["-e", terminalOpenScript(line, rect)]);
       if (opened.code !== 0) return skip("osascript Terminal open failed");
       const shot = await run("screencapture", ["-x", "-R", req.region ?? DEFAULT_REGION, req.out]);

@@ -11,7 +11,7 @@
  *
  * Intent hook (the AI layer's contract, consumed when present):
  *   `.roll/verification/<id>/ac-map.json` —
- *     [{ "ac": "<acId>", "status": "pass|readonly|partial|claimed|missing",
+ *     [{ "ac": "<acId>", "status": "pass|readonly|partial|fail|blocked|claimed|missing",
  *        "evidence": [{kind,label,href?,textFile?}], "note": "…" }]
  *   Written by the attest skill during the Gate session (US-ATTEST-007 wiring).
  *   ABSENT map ⇒ every AC renders honestly as 🟧 Claimed (the render-layer red
@@ -23,10 +23,19 @@
  * still writes the best report it can, exit 0 — attest must never block
  * delivery.
  */
-import { acForStory, renderReport, ansiPre, type AcReportItem, type AcStatus, type EvidenceRef } from "@roll/core";
+import {
+  acForStory,
+  renderReport,
+  ansiPre,
+  smokeCheckReport,
+  type AcReportItem,
+  type AcStatus,
+  type EvidenceRef,
+} from "@roll/core";
 import {
   captureScreenshot,
   collectEvidence,
+  redactSecrets,
   screenshotEvidenceRef,
   writeEvidenceJson,
   type EvidenceRun,
@@ -51,7 +60,7 @@ export interface AttestDeps {
   capture?: ScreenshotDeps;
 }
 
-const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "claimed", "missing"];
+const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "fail", "blocked", "claimed", "missing"];
 
 function warn(msg: string): void {
   process.stderr.write(`[roll] attest WARN: ${msg}\n`);
@@ -116,7 +125,12 @@ function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): 
     const p = join(runDir, e.textFile);
     if (!existsSync(p)) return null;
     try {
-      return { kind, label, inlineHtml: ansiPre(readFileSync(p, "utf8")) };
+      // RED LINE (US-ATTEST-012): scrub secrets/PII BEFORE the text is inlined
+      // into the report — once archived, the run dir is never overwritten. A
+      // hit is WARNed, never silent (留痕).
+      const { redacted, hits } = redactSecrets(readFileSync(p, "utf8"));
+      if (hits.length > 0) warn(`redacted secret(s) in ${e.textFile}: ${hits.join(", ")}`);
+      return { kind, label, inlineHtml: ansiPre(redacted) };
     } catch {
       return null;
     }
@@ -210,7 +224,11 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     return 1;
   }
 
-  const acItems = acForStory(readFileSync(featureFile, "utf8"), storyId);
+  // US-ATTEST-012: an ID-named card file (`<storyId>.md`) owns its whole body —
+  // a `##` heading that merely names another card can't hijack the trailing AC
+  // (FIX-214 实案). Content-matched files keep ordinary section attribution.
+  const fileOwned = basename(featureFile) === `${storyId}.md`;
+  const acItems = acForStory(readFileSync(featureFile, "utf8"), storyId, { fileOwned });
   if (acItems.length === 0) warn(`no **AC:** block for ${storyId} — report will carry facts only`);
 
   // run dir + latest symlink (never overwrite history).
@@ -302,6 +320,15 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     warn("latest symlink update failed (report still written)");
   }
 
+  // Render smoke (US-ATTEST-012): the report exists — but is it actually
+  // openable? A broken <img> ref or an external CDN asset is a real defect, so
+  // (unlike the never-block degrade path) a smoke failure is surfaced as a
+  // NON-ZERO exit. The report file stays on disk — evidence is never discarded.
+  const smoke = smokeCheckReport(html, (rel) => existsSync(join(runDir, rel)));
   process.stdout.write(`Acceptance report written\n验收报告已生成\n  ${relative(projectPath, reportPath)}\n`);
+  if (!smoke.ok) {
+    for (const p of smoke.problems) warn(`render smoke: ${p}`);
+    return 2;
+  }
   return 0;
 }

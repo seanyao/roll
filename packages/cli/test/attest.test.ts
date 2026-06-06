@@ -127,6 +127,99 @@ describe("attestCommand", () => {
     expect(html).not.toContain("Discrepancies"); // mapped evidence ⇒ no red-line downgrades
   });
 
+  it("US-ATTEST-012 — ac-map fail/blocked statuses flow through to the report", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "fail", evidence: [{ kind: "test-pass", label: "red suite" }] },
+        { ac: "FIX-300:AC2", status: "blocked", note: "等 iOS 真机" },
+      ]),
+    );
+    await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    const html = readFileSync(join(storyDir, "2026-06-06T01-02-03", "report.html"), "utf8");
+    expect(html).toContain("❌ Fail 未通过 × 1");
+    expect(html).toContain("⛔ Blocked 受阻 × 1");
+    expect(html).toContain("等 iOS 真机");
+    // blocked w/o evidence is NOT a red-line discrepancy (verified-state ≠ 嘴上 claim)
+    expect(html).not.toContain("Discrepancies");
+  });
+
+  it("US-ATTEST-012 — text evidence carrying a secret is masked before it lands in the report + WARN留痕", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const runDir = join(storyDir, "2026-06-06T01-02-03");
+    mkdirSync(join(runDir, "evidence"), { recursive: true });
+    const secret = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+    writeFileSync(join(runDir, "evidence", "log.txt"), `deploy ok\ntoken=${secret}\n`);
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "pass", evidence: [{ kind: "text", label: "log", textFile: "evidence/log.txt" }] },
+      ]),
+    );
+    const errs: string[] = [];
+    const oErr = process.stderr.write.bind(process.stderr);
+    const oOut = process.stdout.write.bind(process.stdout);
+    // @ts-expect-error capture-only
+    process.stderr.write = (s: string): boolean => (errs.push(String(s)), true);
+    // @ts-expect-error quiet stdout
+    process.stdout.write = (): boolean => true;
+    try {
+      await inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }));
+    } finally {
+      process.stderr.write = oErr;
+      process.stdout.write = oOut;
+    }
+    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    expect(html).not.toContain(secret);
+    expect(html).toContain("«REDACTED");
+    expect(errs.join("")).toMatch(/redact/i); // 留痕: never silent
+  });
+
+  it("US-ATTEST-012 — a report with a broken img reference exits non-zero (render smoke)", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    mkdirSync(storyDir, { recursive: true });
+    // ac-map references a screenshot that was never captured → broken <img>.
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "首页", href: "screenshots/ghost.png" }] },
+      ]),
+    );
+    const code = await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(code).not.toBe(0); // broken reference → non-zero
+    // report is still written (evidence preserved) even though the smoke failed
+    expect(existsSync(join(storyDir, "2026-06-06T01-02-03", "report.html"))).toBe(true);
+  });
+
+  it("US-ATTEST-012 — a report whose img IS present passes smoke (exit 0)", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    const runDir = join(storyDir, "2026-06-06T01-02-03");
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "screenshots", "home.png"), "PNGDATA");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "首页", href: "screenshots/home.png" }] },
+      ]),
+    );
+    const code = await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(code).toBe(0);
+  });
+
   it("re-run lands a second run dir and re-points latest (history preserved)", async () => {
     const proj = project();
     const opts = { run: quietRun, ghProbe: (): Promise<boolean> => Promise.resolve(false) };

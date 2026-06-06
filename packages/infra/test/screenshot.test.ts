@@ -143,6 +143,17 @@ describe("terminal", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("US-ATTEST-012 — a command carrying a secret is REFUSED (redact & reshoot), no window opened", async () => {
+    const { run, calls } = fake({ launchctl: aqua, osascript: { code: 0 }, screencapture: { code: 0, writes: true } });
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "curl -H 'Authorization: Bearer ghp_0123456789abcdefghijklmnopqrstuvwxyz'", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("secret");
+    expect(calls).toHaveLength(0); // refused before any spawn — secret never reaches the screen
+  });
+
   it("no GUI session (launchctl not Aqua) → skip, never opens a window", async () => {
     const { run, calls } = fake({ launchctl: { code: 0, stdout: "Background\n" } });
     const r = await captureScreenshot(

@@ -2,6 +2,7 @@
 import { fallbackToBash, registerPorted } from "../bridge.js";
 import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
+import { archiveMigrateCommand } from "./archive-migrate.js";
 import { attestCommand } from "./attest.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { changelogCommand } from "./changelog.js";
@@ -55,6 +56,17 @@ export function registerAll(): void {
   registerPorted("index", indexCommand);
   // `gc`: age out old surplus attest runs across the archive layout (US-META-001).
   registerPorted("gc", gcCommand);
+  // `archive` groups archive-layout maintenance; `migrate` ports the legacy
+  // verification/<ID>/ trees into features/<epic>/<ID>/ (US-META-002a). v3-native.
+  registerPorted("archive", (args) => {
+    if (args[0] === "migrate") return archiveMigrateCommand(args.slice(1));
+    if (args[0] === undefined || args[0] === "--help" || args[0] === "-h") {
+      process.stdout.write("Usage: roll archive migrate [--dry-run] [--keep-latest N] [--keep-days M]\n");
+      return args[0] === undefined ? 1 : 0;
+    }
+    process.stderr.write(`[roll] unknown archive subcommand: ${args[0]}\n`);
+    return 1;
+  });
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

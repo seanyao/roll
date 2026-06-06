@@ -114,16 +114,20 @@ export function ideaCommand(args: string[]): number {
       `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n` +
       `<title>${plan.id} — ${text.replace(/"/g, "&quot;")}</title>\n` +
       `<style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;` +
-      `line-height:1.6}section{margin:2rem 0;padding:1rem;border-left:3px solid #ddd}` +
+      `line-height:1.6;color:#1a1a1a}pre{background:#f5f5f5;padding:1rem;overflow-x:auto}` +
+      `section{margin:2rem 0;padding:1rem;border-left:3px solid #ddd}` +
       `.empty{color:#999;font-style:italic}footer{color:#666;font-size:.85rem;` +
-      `margin-top:3rem;border-top:1px solid #eee;padding-top:1rem}</style>\n` +
-      `</head>\n<body>\n<h1>${plan.id} — ${text.replace(/"/g, "&quot;")}</h1>\n` +
-      `<section id="spec"><h2>Definition</h2><p class="empty">See spec.md</p></section>\n` +
+      `margin-top:3rem;border-top:1px solid #eee;padding-top:1rem}` +
+      `h2{color:#333}</style>\n` +
+      `</head>\n<body>\n` +
+      `<h1>${plan.id}</h1>\n` +
+      `<p><strong>${text.replace(/"/g, "&quot;")}</strong></p>\n` +
+      `<p class="empty">Type: ${plan.kind === "bug" ? "Bug Fix" : "Idea"} · Created: ${today}</p>\n` +
       `<section id="design"><h2>Design</h2><p class="empty">Not yet started</p></section>\n` +
       `<section id="runs"><h2>Execution</h2><p class="empty">No cycles yet</p></section>\n` +
       `<section id="delivery"><h2>Delivery</h2><p class="empty">Not yet delivered</p></section>\n` +
       `<section id="notes"><h2>Retrospective</h2><p class="empty">Not yet written</p></section>\n` +
-      `<footer>Generated ${today}</footer>\n</body>\n</html>\n`;
+      `<footer>Generated ${today} · <a href="spec.md">spec.md</a></footer>\n</body>\n</html>\n`;
     writeFileSync(join(cardDir, "index.html"), indexHtml, "utf8");
   } catch {
     /* best-effort: folder creation is non-blocking */

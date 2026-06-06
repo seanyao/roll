@@ -108,6 +108,37 @@ describe("US-ATTEST-011 — Gate self-capture section", () => {
   });
 });
 
+describe("US-ATTEST-013 — layered IA: technical evidence folds", () => {
+  it("text/ANSI evidence sits inside a collapsed <details class=\"tech\">", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [
+        item({
+          evidence: [
+            { kind: "screenshot", label: "首页", href: "./screenshots/a.png" },
+            { kind: "text", label: "vitest", inlineHtml: ansiPre("plain log line") },
+          ],
+        }),
+      ],
+    });
+    expect(html).toContain('<details class="tech"');
+    // collapsed by default — no `open` attribute on the tech fold
+    expect(html).not.toMatch(/<details class="tech" open/);
+    // the ANSI pre is INSIDE the fold (business screenshot is outside, before it)
+    const detailsAt = html.indexOf('<details class="tech"');
+    const ansiAt = html.indexOf('<pre class="ansi">plain log line</pre>');
+    const shotAt = html.indexOf('<img src="./screenshots/a.png"');
+    expect(detailsAt).toBeGreaterThan(-1);
+    expect(ansiAt).toBeGreaterThan(detailsAt); // ANSI after the fold opens
+    expect(shotAt).toBeLessThan(detailsAt); // business screenshot before technical fold
+  });
+
+  it("no text evidence ⇒ no tech fold (deletion-not-placeholder)", () => {
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain('<details class="tech"');
+  });
+});
+
 describe("badge ladder", () => {
   it("summary counts every present status with bilingual badges", () => {
     const html = renderReport({

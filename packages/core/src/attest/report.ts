@@ -102,15 +102,29 @@ function evidenceCard(ref: EvidenceRef): string {
   return `<div class="ev ev-${ref.kind}">${body}</div>`;
 }
 
+/**
+ * US-ATTEST-013 — information layering. Each AC carries business-facing evidence
+ * (screenshots, PR/CI/deploy links — what a product reviewer reads) inline, and
+ * technical evidence (ANSI command output / logs — kind=text) tucked into a
+ * collapsed `<details>` that defaults closed. The fold is omitted entirely when
+ * there is no technical evidence (deletion-not-placeholder).
+ */
 function acSection(item: AcReportItem): string {
   const b = BADGE[item.status];
   const note = item.note !== undefined && item.note !== "" ? `<p class="note">${esc(item.note)}</p>` : "";
-  const evs = item.evidence.map(evidenceCard).join("\n");
+  const business = item.evidence.filter((e) => e.kind !== "text");
+  const technical = item.evidence.filter((e) => e.kind === "text");
+  const bizHtml = business.map(evidenceCard).join("\n");
+  const techHtml =
+    technical.length > 0
+      ? `<details class="tech"><summary>技术细节 · Technical detail（${technical.length}）</summary>\n${technical.map(evidenceCard).join("\n")}\n</details>`
+      : "";
   return `<section class="ac ${b.cls}" id="${esc(item.id)}">
 <h3><span class="badge">${b.icon} ${b.en} · ${b.zh}</span> <code>${esc(item.id)}</code></h3>
 <p class="ac-text">${esc(item.text)}</p>
 ${note}
-${evs}
+${bizHtml}
+${techHtml}
 </section>`;
 }
 
@@ -191,6 +205,9 @@ figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:10px; padding:8px 16px; }
 details.selfscore summary { cursor:pointer; font-weight:600; }
 details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
+details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:8px; padding:6px 12px; background:rgba(127,127,127,.04); }
+details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+details.tech[open] summary { margin-bottom:6px; }
 @media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
 ${ANSI_CSS}
 </style>

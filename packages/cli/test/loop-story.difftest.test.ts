@@ -90,6 +90,11 @@ function sandboxEnv(extra: Record<string, string> = {}): Record<string, string> 
     ROLL_SHARED_ROOT: shared,
     ROLL_MAIN_SLUG: "test-abc123",
     NO_COLOR: "1",
+    // Pin the display TZ: roll-loop-status.py does os.environ.setdefault("TZ",
+    // "Asia/Shanghai"), so a pre-set TZ here makes python honor +8 too — TS is
+    // already unconditional +8 (shYmdHm). Without this the panel's span line is
+    // host-TZ-dependent (the bug CI caught: UTC runner vs +8 dev box).
+    TZ: "Asia/Shanghai",
     ...extra,
   };
 }

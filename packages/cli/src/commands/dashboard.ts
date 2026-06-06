@@ -2049,13 +2049,12 @@ export function rollupForStory(cycles: Cycle[], storyId: string): StoryRollup {
   return r;
 }
 
-/** py _fmt_dt — system-local "YYYY-MM-DD HH:MM" (matches .astimezone()). */
+/** py _fmt_dt — "YYYY-MM-DD HH:MM" in the fixed display TZ. roll-loop-status.py
+ *  pins the process TZ to Asia/Shanghai (UTC+8) before .astimezone(), so the
+ *  story panel must convert to +8 too (NOT the host's local TZ — that only
+ *  agreed by accident on a +8 dev box; CI runs UTC). Reuse shYmdHm. */
 function storyFmtDt(d: Date): string {
-  const p = (n: number): string => (n < 10 ? `0${n}` : String(n));
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
-    `${p(d.getHours())}:${p(d.getMinutes())}`
-  );
+  return shYmdHm(d);
 }
 
 /** py _fmt_dur. */

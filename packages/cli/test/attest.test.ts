@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { EvidenceRun } from "@roll/infra";
+import type { EvidenceRun, ShotRun } from "@roll/infra";
 import { attestCommand, findFeatureFile } from "../src/commands/attest.js";
 
 const dirs: string[] = [];
@@ -142,6 +142,77 @@ describe("attestCommand", () => {
     const proj = project();
     expect(await silenced(() => inDir(proj, () => attestCommand(["US-NOPE-9"], { run: quietRun })))).toBe(1);
     expect(await silenced(() => inDir(proj, () => attestCommand([], { run: quietRun })))).toBe(1);
+  });
+});
+
+describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
+  // A GUI macOS host whose screencapture lands real pixels at the out path.
+  function guiShot(): ShotRun {
+    return (cmd, argv) => {
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNGDATA"); // out = last argv
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" }); // osascript etc.
+    };
+  }
+
+  it("a real GUI cycle self-captures a terminal shot into the report", async () => {
+    const proj = project();
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--capture-tmux", "roll-loop-demo"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: guiShot(), platform: "darwin", env: {} },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03");
+    expect(existsSync(join(runDir, "screenshots", "terminal.png"))).toBe(true);
+    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    expect(html).toContain("Gate self-capture · 自产实拍");
+    expect(html).toContain('<img src="screenshots/terminal.png"');
+  });
+
+  it("a headless host honestly skips — no shot, no self-capture block (deletion contract)", async () => {
+    const proj = project();
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--capture-tmux", "roll-loop-demo"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: guiShot(), platform: "linux", env: {} }, // not macOS → lane skips
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "verification", "FIX-300", "2026-06-06T01-02-03");
+    expect(existsSync(join(runDir, "screenshots", "terminal.png"))).toBe(false);
+    const html = readFileSync(join(runDir, "report.html"), "utf8");
+    expect(html).not.toContain("Gate self-capture");
+  });
+
+  it("no capture flag ⇒ lane never runs (back-compat: plain attest unchanged)", async () => {
+    const proj = project();
+    const calls: string[] = [];
+    const recorder: ShotRun = (cmd) => {
+      calls.push(cmd);
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: recorder, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+    expect(calls).toHaveLength(0); // no flag → dispatcher untouched
   });
 });
 

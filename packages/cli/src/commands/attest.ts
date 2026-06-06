@@ -24,7 +24,14 @@
  * delivery.
  */
 import { acForStory, renderReport, ansiPre, type AcReportItem, type AcStatus, type EvidenceRef } from "@roll/core";
-import { collectEvidence, writeEvidenceJson, type EvidenceRun } from "@roll/infra";
+import {
+  captureScreenshot,
+  collectEvidence,
+  screenshotEvidenceRef,
+  writeEvidenceJson,
+  type EvidenceRun,
+  type ScreenshotDeps,
+} from "@roll/infra";
 import {
   existsSync,
   mkdirSync,
@@ -40,6 +47,8 @@ export interface AttestDeps {
   now?: () => Date;
   run?: EvidenceRun;
   ghProbe?: () => Promise<boolean>;
+  /** US-ATTEST-011 — seams for the terminal self-capture lane (run/env/platform). */
+  capture?: ScreenshotDeps;
 }
 
 const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "claimed", "missing"];
@@ -170,8 +179,18 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     process.stderr.write("Usage: roll attest <story-id> [--deploy-url <url>]\n");
     return 1;
   }
-  const di = args.indexOf("--deploy-url");
-  const deployUrl = di >= 0 ? args[di + 1] : undefined;
+  const flagVal = (name: string): string | undefined => {
+    const i = args.indexOf(name);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+  const deployUrl = flagVal("--deploy-url");
+  // US-ATTEST-011 — unattended terminal self-capture lane. Driven by the Gate
+  // session in a headless cycle; on a non-GUI / no-permission host the lane
+  // honestly skips and the report drops the self-capture block (no placeholder).
+  const captureTmux = flagVal("--capture-tmux");
+  const captureCommand = flagVal("--capture-command");
+  const captureRegion = flagVal("--capture-region");
+  const captureTerminal = args.includes("--capture-terminal") || captureTmux !== undefined || captureCommand !== undefined;
 
   const projectPath = process.cwd();
   const featureFile = findFeatureFile(projectPath, storyId);
@@ -191,6 +210,28 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const storyDir = join(projectPath, ".roll", "verification", storyId);
   const runDir = join(storyDir, runId);
   mkdirSync(runDir, { recursive: true });
+
+  // terminal self-capture (US-ATTEST-011): drive the dispatcher's terminal lane
+  // into this run's screenshots/ BEFORE evidence sweep, then bridge a TAKEN shot
+  // to a report figure. A SKIP (headless / no permission) yields null → the
+  // self-capture block is dropped entirely (deletion-not-placeholder).
+  let selfCaptures: EvidenceRef[] = [];
+  if (captureTerminal) {
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    const shot = await captureScreenshot(
+      {
+        kind: "terminal",
+        out: join(runDir, "screenshots", "terminal.png"),
+        ...(captureTmux !== undefined ? { tmux: captureTmux } : {}),
+        ...(captureCommand !== undefined ? { command: captureCommand } : {}),
+        ...(captureRegion !== undefined ? { region: captureRegion } : {}),
+      },
+      deps.capture ?? {},
+    );
+    const ref = screenshotEvidenceRef(shot, "screenshots/terminal.png");
+    if (ref !== null) selfCaptures = [ref];
+    else warn(`terminal self-capture skipped: ${shot.skipped ?? "unknown"}`);
+  }
 
   // hard facts.
   const manifest = await collectEvidence({
@@ -237,6 +278,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     items,
     facts: { tcrCount: manifest.tcr_commits.length, ciConclusion: manifest.ci.conclusion, testPassAge: age },
     ...(selfScores.length > 0 ? { selfScores } : {}),
+    ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
   });
   const reportPath = join(runDir, "report.html");
   writeFileSync(reportPath, html);

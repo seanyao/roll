@@ -110,6 +110,12 @@ export type SignalInput =
   | { kind: "pr:close"; prNumber: number; reason?: string }
   | { kind: "alert"; message: string };
 
+/** ` · PR #N`, or "" when the number is absent (0) — the watch path's CI
+ *  result text doesn't always carry one, and "PR #0" would read as a bug. */
+function prSuffix(prNumber: number): string {
+  return prNumber > 0 ? ` · PR #${prNumber}` : "";
+}
+
 /**
  * The single source of truth for a signal's human label. Both the attest
  * timeline and the tmux watch formatter call this, so "tmux 里看到的关键节点 =
@@ -121,11 +127,11 @@ export function signalLabel(input: SignalInput): string {
     case "tcr":
       return `TCR ${input.commitHash.slice(0, 9)} · ${clip(input.message)}`;
     case "ci:pass":
-      return `Gate CI 通过 · PR #${input.prNumber}`;
+      return `Gate CI 通过${prSuffix(input.prNumber)}`;
     case "ci:fail":
-      return `Gate CI 失败 · PR #${input.prNumber}${input.failSummary !== undefined && input.failSummary !== "" ? ` · ${clip(input.failSummary)}` : ""}`;
+      return `Gate CI 失败${prSuffix(input.prNumber)}${input.failSummary !== undefined && input.failSummary !== "" ? ` · ${clip(input.failSummary)}` : ""}`;
     case "ci:rerun":
-      return `Gate CI 重跑 · PR #${input.prNumber}`;
+      return `Gate CI 重跑${prSuffix(input.prNumber)}`;
     case "peer:gate":
       return `Peer gate · ${input.verdict}`;
     case "attest:gate":

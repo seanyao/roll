@@ -147,6 +147,12 @@ describe("signal vocabulary — single source of 口径 (US-PORT-012)", () => {
     }
   });
 
+  it("ci label omits the PR segment when no number is known (watch path)", () => {
+    expect(signalLabel({ kind: "ci:pass", prNumber: 0 })).toBe("Gate CI 通过");
+    expect(signalLabel({ kind: "ci:pass", prNumber: 490 })).toBe("Gate CI 通过 · PR #490");
+    expect(signalLabel({ kind: "ci:fail", prNumber: 0 })).toBe("Gate CI 失败");
+  });
+
   it("isSignalMarker rejects non-signal markers", () => {
     expect(isSignalMarker("cycle:start")).toBe(false);
     expect(isSignalMarker("phase:execute")).toBe(false);

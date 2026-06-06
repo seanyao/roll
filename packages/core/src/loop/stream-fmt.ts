@@ -117,13 +117,6 @@ export class StreamFormatter {
     return this.c(DARK_GRAY, text);
   }
 
-  private signal(marker: SignalMarker, detail = "", ok = true): FmtLine {
-    const category = marker.includes(":") ? marker.split(":")[0]! : marker;
-    // The LABEL is the shared signalLabel text (carried in `detail`); the
-    // category column is the marker family (tcr/ci/pr/peer/attest/alert).
-    return { text: this.step(category, detail, "", ok), layer: "signal", marker };
-  }
-
   // ── edit streak (Tier 2) ────────────────────────────────────────────────────
   private editHint(input: Record<string, unknown>): string {
     if (input["replace_all"] === true) return "replace-all";

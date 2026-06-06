@@ -415,6 +415,10 @@ describe("FIX-197 — loop now legacy self-heal", async () => {
     // FIX-204E: a pre-observation-window v3 runner regenerates too
     expect(isLegacyRunner('#!/bin/bash -l\n"$ROLL_BIN" loop run-once >> "$LOG" 2>&1\n')).toBe(true);
     expect(isLegacyRunner(buildLoopRunnerScript({ projectPath: "/p", slug: "x", activeStart: 0, activeEnd: 24 }))).toBe(false);
+    // US-PORT-012: a v3 runner that tails live.log raw (no `loop fmt`) regenerates
+    expect(
+      isLegacyRunner('#!/bin/bash -l\nROLL_TMUX_WRAPPED check\ntail -n +1 -F "$RT/live.log"\n"$ROLL_BIN" loop run-once\n'),
+    ).toBe(true);
   });
 
   it("legacy runner → regenerated via loop on, then executed with the v3 template", async () => {
@@ -465,6 +469,10 @@ describe("FIX-204E — tmux observation window in the runner template", () => {
     expect(s).toContain("tail -n +1 -F '$RT/live.log'");
     expect(s).toContain('"$TMUX_BIN" new-window -d');
     expect(s).toContain("ROLL_TMUX_WRAPPED=1");
+  });
+
+  it("US-PORT-012: the watch window pipes live.log through `roll loop fmt`", () => {
+    expect(s).toContain("tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt");
   });
 
   it("the wrap precedes caffeinate AND the cycle invocation; guards allow opt-out + re-entry", () => {

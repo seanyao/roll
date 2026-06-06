@@ -38,6 +38,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { StreamFmtPipe } from "./loop-fmt.js";
 
 // ─── injectable deps (tests fake launchd + identity + paths) ─────────────────
 export interface LoopSchedDeps {
@@ -91,7 +92,20 @@ function realDeps(): LoopSchedDeps {
     observe: (rt) =>
       new Promise((resolve) => {
         const lock = join(rt, "inner.lock");
-        const tail = spawn("tail", ["-n", "+1", "-F", join(rt, "live.log")], { stdio: "inherit" });
+        // US-PORT-012: humanize the raw stream through the same三层 formatter the
+        // tmux watch window uses (live.log on disk stays raw). A formatter hiccup
+        // must never blank the window, so push() is wrapped — on any failure we
+        // fall back to echoing the raw chunk.
+        const pipe = new StreamFmtPipe({ color: process.stdout.isTTY === true });
+        const tail = spawn("tail", ["-n", "+1", "-F", join(rt, "live.log")], { stdio: ["ignore", "pipe", "inherit"] });
+        tail.stdout?.setEncoding("utf8");
+        tail.stdout?.on("data", (chunk: string) => {
+          try {
+            for (const line of pipe.push(chunk)) process.stdout.write(`${line}\n`);
+          } catch {
+            process.stdout.write(chunk);
+          }
+        });
         let sawLock = false;
         const t0 = Date.now();
         const finish = (): void => {
@@ -163,13 +177,16 @@ ROLL_BIN="\${ROLL_BIN:-${input.rollBin ?? '$(command -v roll || echo /opt/homebr
 # tails the live agent transcript ($RT/live.log), each cycle gets its own
 # window, and the cycle SURVIVES whoever invoked it — a dying terminal or
 # agent session can no longer TERM a half-done cycle (2026-06-06 rc=143).
+# US-PORT-012: the watch window pipes the raw stream through \`roll loop fmt\`
+# (v2 loop-fmt 三层口径) so it shows tcr/gate/PR/merge signals, not 裸 JSON.
+# live.log itself stays raw (machine channel) — the formatter is read-only.
 # ROLL_LOOP_NO_TMUX=1 or no tmux on PATH → direct run (previous contract).
 # ROLL_TMUX_BIN: test seam (the PATH bootstrap above outranks any shim dir).
 TMUX_BIN="\${ROLL_TMUX_BIN:-tmux}"
 if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TMUX_BIN" >/dev/null 2>&1; then
   _sess="roll-loop-${input.slug}"
   "$TMUX_BIN" has-session -t "$_sess" 2>/dev/null || \\
-    "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "printf 'roll live · ${input.slug} — agent transcript\\n'; exec tail -n +1 -F '$RT/live.log'" 2>/dev/null || true
+    "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "printf 'roll live · ${input.slug} — agent transcript (三层)\\n'; tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt" 2>/dev/null || true
   if "$TMUX_BIN" new-window -d -t "$_sess" -n "c$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
     exit 0
   fi
@@ -481,7 +498,10 @@ export function isLegacyRunner(text: string): boolean {
   if (!text.includes("loop run-once")) return true;
   // FIX-204E: a v3 runner generated before the observation window lacks the
   // tmux self-wrap — regenerate so cycles detach from the invoking session.
-  return !text.includes("ROLL_TMUX_WRAPPED");
+  if (!text.includes("ROLL_TMUX_WRAPPED")) return true;
+  // US-PORT-012: a runner that tails live.log raw (no `loop fmt` pipe) predates
+  // the three-tier formatter — regenerate so the watch window is readable.
+  return text.includes("live.log") && !text.includes("loop fmt");
 }
 
 /**

@@ -10,7 +10,7 @@ import { changelogCommand } from "./changelog.js";
 import { ciCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { consistencyCommand } from "./consistency.js";
-import { dashboardCommand } from "./dashboard.js";
+import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { doctorCommand } from "./doctor.js";
 import { feedbackCommand } from "./feedback.js";
 import { gcCommand } from "./gc.js";
@@ -196,6 +196,10 @@ export function registerAll(): void {
   // whitelisted in AGENTS.md). Every other loop subcommand falls back to bash.
   registerPorted("loop", (args) => {
     if (args[0] === "status") return dashboardCommand(args.slice(1));
+    // `loop eval` / `loop story`: read-face commands (US-PORT-007) — thin TS
+    // readers over the same cycle pipeline `loop status` owns. No bash fallback.
+    if (args[0] === "eval") return loopEvalCommand(args.slice(1));
+    if (args[0] === "story") return loopStoryCommand(args.slice(1));
     if (args[0] === "run-once") return loopRunOnceCommand(args.slice(1));
     // `loop fmt`: the observation-window formatter (US-PORT-012) — stdin
     // stream-json → three-tier transcript. v3-native; the watch pipe feeds it.

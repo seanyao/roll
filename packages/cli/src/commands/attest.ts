@@ -30,6 +30,8 @@ import {
   smokeCheckReport,
   type AcReportItem,
   type AcStatus,
+  type BeforeAfterPair,
+  type CardContext,
   type EvidenceRef,
 } from "@roll/core";
 import {
@@ -50,7 +52,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
 export interface AttestDeps {
   now?: () => Date;
@@ -186,6 +188,114 @@ export function readSelfScores(
   return out;
 }
 
+/**
+ * US-ATTEST-013 — read the human one-liner + current status straight from the
+ * backlog table row (ID-anchored). The description is the "一句人话"; the status
+ * cell tells the reviewer where the card sits right now. Lenient: missing
+ * backlog / no matching row ⇒ {}.
+ */
+export function readBacklogRow(projectPath: string, storyId: string): { description?: string; status?: string } {
+  const p = join(projectPath, ".roll", "backlog.md");
+  if (!existsSync(p)) return {};
+  let text: string;
+  try {
+    text = readFileSync(p, "utf8");
+  } catch {
+    return {};
+  }
+  for (const line of text.split("\n")) {
+    if (!line.includes("|") || !line.includes(storyId)) continue;
+    const cells = line.split("|").map((c) => c.trim());
+    const idIdx = cells.findIndex((c) => c === storyId || c.includes(`${storyId}]`) || c.includes(`${storyId} `) || c === `[${storyId}]`);
+    const at = idIdx >= 0 ? idIdx : cells.findIndex((c) => c.includes(storyId));
+    if (at < 0) continue;
+    const description = cells[at + 1];
+    const status = cells[at + 2];
+    return {
+      ...(description !== undefined && description !== "" ? { description } : {}),
+      ...(status !== undefined && status !== "" ? { status } : {}),
+    };
+  }
+  return {};
+}
+
+/** Join the FIRST `>` blockquote block of a feature md as the spec/方案 summary. */
+function extractSummary(featureText: string): string | undefined {
+  const quote: string[] = [];
+  for (const l of featureText.split("\n")) {
+    const m = /^>\s?(.*)$/.exec(l);
+    if (m !== null) quote.push(m[1] ?? "");
+    else if (quote.length > 0) break;
+  }
+  const s = quote.join(" ").replace(/\s+/g, " ").trim();
+  return s !== "" ? s : undefined;
+}
+
+/**
+ * US-ATTEST-013 — assemble the self-contained card context: 一句人话 + epic +
+ * spec 摘要 + backlog 现状 + 交付链(cycle id). Empty when nothing resolves (trim
+ * upstream). The renderer further trims any empty sub-field.
+ */
+export function buildCardContext(
+  projectPath: string,
+  featureFile: string,
+  storyId: string,
+  env: Record<string, string | undefined>,
+): CardContext | undefined {
+  const row = readBacklogRow(projectPath, storyId);
+  const oneLiner =
+    row.description !== undefined ? row.description.replace(/\s*depends-on:\S+/gi, "").trim() : undefined;
+  let summary: string | undefined;
+  try {
+    summary = extractSummary(readFileSync(featureFile, "utf8"));
+  } catch {
+    /* unreadable: skip summary */
+  }
+  const epic = basename(dirname(featureFile));
+  const cycleId = env.LOOP_CYCLE_ID;
+  const ctx: CardContext = {
+    ...(oneLiner !== undefined && oneLiner !== "" ? { oneLiner } : {}),
+    ...(epic !== "" && epic !== "." && epic !== "features" ? { epic } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+    ...(row.status !== undefined ? { backlogStatus: row.status } : {}),
+    ...(cycleId !== undefined && cycleId !== "" ? { delivery: { cycleId } } : {}),
+  };
+  return Object.keys(ctx).length > 0 ? ctx : undefined;
+}
+
+/**
+ * US-ATTEST-013 — pair `before-<stem>.png` with `after-<stem>.png` shots the
+ * Gate dropped in the run's screenshots/. Only matched pairs surface; an
+ * unmatched before/after is ignored (the renderer needs both sides). Brand-new
+ * features carry none → empty list → section trimmed.
+ */
+export function detectBeforeAfter(runDir: string): BeforeAfterPair[] {
+  const dir = join(runDir, "screenshots");
+  if (!existsSync(dir)) return [];
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
+  } catch {
+    return [];
+  }
+  const pairs: BeforeAfterPair[] = [];
+  for (const f of files.slice().sort()) {
+    const m = /^before-(.+)\.(png|jpe?g|webp)$/i.exec(f);
+    if (m === null) continue;
+    const stem = m[1] ?? "";
+    const ext = m[2] ?? "";
+    const want = `after-${stem}.${ext}`.toLowerCase();
+    const after = files.find((x) => x.toLowerCase() === want);
+    if (after === undefined) continue;
+    pairs.push({
+      label: stem,
+      before: { kind: "screenshot", label: `改前 ${stem}`, href: `screenshots/${f}` },
+      after: { kind: "screenshot", label: `改后 ${stem}`, href: `screenshots/${after}` },
+    });
+  }
+  return pairs;
+}
+
 const USAGE = [
   "Usage: roll attest <story-id> [--deploy-url <url>]",
   "                   [--capture-terminal | --capture-tmux <session> | --capture-command <cmd>]",
@@ -299,12 +409,17 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       : "present"
     : "absent";
   const selfScores = readSelfScores(projectPath, storyId);
+  // US-ATTEST-013 — self-contained card context + before/after comparison.
+  const context = buildCardContext(projectPath, featureFile, storyId, process.env);
+  const beforeAfter = detectBeforeAfter(runDir);
   const html = renderReport({
     storyId,
     title: `${storyId} — Acceptance Evidence`,
     generatedAt: now.toISOString(),
     items,
     facts: { tcrCount: manifest.tcr_commits.length, ciConclusion: manifest.ci.conclusion, testPassAge: age },
+    ...(context !== undefined ? { context } : {}),
+    ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
     ...(selfScores.length > 0 ? { selfScores } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
   });

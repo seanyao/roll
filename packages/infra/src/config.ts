@@ -54,9 +54,9 @@
  * semantics with regex. Zero runtime deps. (Divergence from any "use a yaml
  * lib" suggestion is deliberate — behavioral fidelity outranks it.)
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /**
  * Leading-only tilde expansion — mirrors bash `${val/#\~/$HOME}`.
@@ -286,4 +286,143 @@ export function resolveConfig(inputs: LayeredConfigInputs): { value: string; lay
     if (v !== undefined && v !== "") return { value: v, layer };
   }
   return { value: inputs.default ?? "", layer: "default" };
+}
+
+// ─── write surface (US-PORT-006) ────────────────────────────────────────────
+// TS ports of the cmd_config write helpers (bin/roll): `_config_key_file`
+// (5781-5788), `_config_validate` (5820-5840), and `_config_set` (5846-5890).
+// Kept here next to the read surface so both layers share one byte-faithful
+// model; the cli handler orchestrates these into the user-facing command.
+
+/** Scope → backing yaml file. Mirrors `_config_key_file` (bin/roll 5781). */
+export function configKeyFile(scope: "project" | "global"): string {
+  return scope === "global" ? rollConfigPath() : projectConfigPath();
+}
+
+/** A validation failure — the two bilingual message lines WITHOUT the `[roll]`
+ *  prefix (the cli `err` helper prepends it, exactly as bash's `err` does). */
+export interface ConfigValidateError {
+  ok: false;
+  lines: [en: string, zh: string];
+}
+
+/**
+ * TS port of `_config_validate key value` (bin/roll 5820-5840): the registry
+ * key must hold an integer within `[min, max]`. Returns `{ ok: true }` or the
+ * two bilingual error lines (caller prints to stderr and exits 2). An unknown
+ * key yields `{ ok: false }` with empty lines — but the write path validates
+ * only AFTER the unknown-key guard, so that branch is unreachable in practice
+ * (kept total for safety, mirroring bash `return 1`).
+ */
+export function configValidate(key: string, value: string): { ok: true } | ConfigValidateError {
+  const rec = CONFIG_KEYS.find((r) => r.key === key);
+  if (rec === undefined) return { ok: false, lines: ["", ""] };
+  if (!/^-?[0-9]+$/.test(value)) {
+    return {
+      ok: false,
+      lines: [
+        `config: '${key}' expects an integer, got '${value}'`,
+        `config：'${key}' 需要整数，收到 '${value}'`,
+      ],
+    };
+  }
+  const n = Number(value);
+  if (rec.min !== "" && n < Number(rec.min)) {
+    return {
+      ok: false,
+      lines: [`config: '${key}' must be >= ${rec.min} (got ${value})`, `config：'${key}' 必须 >= ${rec.min}（收到 ${value}）`],
+    };
+  }
+  if (rec.max !== "" && n > Number(rec.max)) {
+    return {
+      ok: false,
+      lines: [`config: '${key}' must be <= ${rec.max} (got ${value})`, `config：'${key}' 必须 <= ${rec.max}（收到 ${value}）`],
+    };
+  }
+  return { ok: true };
+}
+
+/** awk record semantics: a trailing `\n` yields no extra empty record. */
+function configSplitLines(text: string): string[] {
+  return text === "" ? [] : text.replace(/\n$/, "").split("\n");
+}
+
+/**
+ * Pure form of `_config_set` (bin/roll 5846-5890): given the current file text,
+ * return the new text with `key` set to `value`. Reproduces both awk branches
+ * exactly — flat top-level keys and nested `parent.child` keys — preserving
+ * every other line, comment and ordering. Output always ends in one `\n`
+ * (awk emits a newline per record, including the appended one).
+ *
+ * Unknown key → text returned unchanged (bash `_config_key_record` `return 1`).
+ */
+export function applyConfigSet(text: string, key: string, value: string): string {
+  const rec = CONFIG_KEYS.find((r) => r.key === key);
+  if (rec === undefined) return text;
+  const lines = configSplitLines(text);
+  const out: string[] = [];
+  let done = false;
+
+  if (rec.store.startsWith("nested:")) {
+    const parent = rec.store.slice("nested:".length);
+    const child = key.includes(".") ? key.slice(key.indexOf(".") + 1) : key;
+    const parentRe = new RegExp(`^${parent}:`);
+    const childRe = new RegExp(`^[ \\t]+${child}:`);
+    let inBlock = false;
+    for (const line of lines) {
+      if (parentRe.test(line)) {
+        inBlock = true;
+        out.push(line);
+        continue;
+      }
+      if (inBlock && childRe.test(line)) {
+        out.push(`  ${child}: ${value}`);
+        done = true;
+        inBlock = false;
+        continue;
+      }
+      if (inBlock && /^[^ \t]/.test(line)) {
+        if (!done) {
+          out.push(`  ${child}: ${value}`);
+          done = true;
+        }
+        inBlock = false;
+        out.push(line);
+        continue;
+      }
+      out.push(line);
+    }
+    if (inBlock && !done) {
+      out.push(`  ${child}: ${value}`);
+      done = true;
+    }
+    if (!done) {
+      out.push(`${parent}:`);
+      out.push(`  ${child}: ${value}`);
+    }
+  } else {
+    const keyRe = new RegExp(`^${escapeRegExp(key)}:`);
+    for (const line of lines) {
+      if (keyRe.test(line) && !done) {
+        out.push(`${key}: ${value}`);
+        done = true;
+        continue;
+      }
+      out.push(line);
+    }
+    if (!done) out.push(`${key}: ${value}`);
+  }
+  return out.join("\n") + "\n";
+}
+
+/**
+ * File wrapper around {@link applyConfigSet}, mirroring `_config_set`'s I/O:
+ * ensure the parent dir exists, read current text (missing file → empty, as
+ * bash `[[ -f ]] || : > file`), transform, write back atomically-enough for a
+ * single-writer CLI (write through; bash uses mktemp+mv — equivalent here).
+ */
+export function configSet(key: string, value: string, file: string): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+  writeFileSync(file, applyConfigSet(text, key, value));
 }

@@ -611,6 +611,16 @@ export async function runPublishPlan(
   if (prUrl === "" && create !== undefined) {
     const r = await run(create.tool, create.argv);
     prUrl = r.code === 0 ? r.stdout.trim() : "";
+    // FIX-214: a non-zero `create` is NOT proof the publish failed — a PR may
+    // already exist for this branch (the first `view` probe can miss it under
+    // eventual consistency, or it was opened by an earlier tick; `gh pr create`
+    // then exits with "a pull request already exists"). Re-probe before
+    // declaring a PR-fail, so a real (and later-merged) delivery is never
+    // mislabeled `failed`/`built:[]`. Only a genuine no-PR result stays status 1.
+    if (prUrl === "" && view !== undefined) {
+      const reprobe = await run(view.tool, view.argv);
+      if (reprobe.code === 0) prUrl = reprobe.stdout.trim();
+    }
     if (prUrl === "") return { prUrl: "", ok: false, status: 1 };
   }
 

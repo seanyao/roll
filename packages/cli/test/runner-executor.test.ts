@@ -76,6 +76,26 @@ describe("buildClaudeArgv — v2 flag set, fixed arg order", () => {
     expect(legacy.args[1]).toBe(`${AUTORUN_DIRECTIVE}DO WORK`);
     expect(empty.args).toEqual(legacy.args);
   });
+
+  it("FIX-220: interactive mode drops --verbose and --output-format stream-json for human readability", () => {
+    const { args } = buildClaudeArgv({ worktree: "/wt", skillBody: "DO WORK", bin: "claude", interactive: true });
+    expect(args.slice(2)).toEqual(["--dangerously-skip-permissions", "--add-dir", "/wt"]);
+    expect(args).not.toContain("--verbose");
+    expect(args).not.toContain("--output-format");
+    expect(args).not.toContain("stream-json");
+  });
+
+  it("FIX-220: default (non-interactive) keeps --verbose and stream-json for cost tracking", () => {
+    const { args } = buildClaudeArgv({ worktree: "/wt", skillBody: "DO WORK", bin: "claude" });
+    expect(args.slice(2)).toEqual([
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--output-format",
+      "stream-json",
+      "--add-dir",
+      "/wt",
+    ]);
+  });
 });
 
 describe("realAgentSpawn — only claude argv is ported", () => {

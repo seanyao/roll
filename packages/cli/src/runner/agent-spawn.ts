@@ -111,6 +111,10 @@ export interface ClaudeArgvInput {
   storyId?: string;
   /** The claude binary (resolved path or "claude"); tests inject the shim name. */
   bin?: string;
+  /** FIX-220: when the user manually triggers `roll loop now`, the terminal is
+   *  interactive — drop --verbose and --output-format stream-json so the
+   *  output is human-readable instead of a JSON flood. */
+  interactive?: boolean;
 }
 
 /**
@@ -136,16 +140,21 @@ export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: st
   // no picked story (undefined) produces the exact pre-204 prompt.
   const pin = input.storyId !== undefined && input.storyId !== "" ? storyPinDirective(input.storyId) : "";
   const prompt = `${AUTORUN_DIRECTIVE}${pin}${input.skillBody}`;
-  const args = [
-    "-p",
-    prompt,
-    "--verbose",
-    "--dangerously-skip-permissions",
-    "--output-format",
-    "stream-json",
-    "--add-dir",
-    input.worktree,
-  ];
+  // FIX-220: manual `roll loop now` runs in an interactive terminal — strip
+  // --verbose and --output-format stream-json so the user sees plain text
+  // instead of a JSON flood. Cost tracking is best-effort on this path.
+  const args = input.interactive
+    ? ["-p", prompt, "--dangerously-skip-permissions", "--add-dir", input.worktree]
+    : [
+        "-p",
+        prompt,
+        "--verbose",
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "stream-json",
+        "--add-dir",
+        input.worktree,
+      ];
   return { bin, args };
 }
 
@@ -167,6 +176,9 @@ export interface AgentSpawnOptions {
   bin?: string;
   /** Extra env for the child (tests inject PATH with the shim dir prepended). */
   env?: NodeJS.ProcessEnv;
+  /** FIX-220: when the user manually triggers `roll loop now`, drop --verbose
+   *  and --output-format stream-json for a human-readable terminal. */
+  interactive?: boolean;
 }
 
 /** Result of an agent spawn — the orchestrator feeds `exitCode` back as
@@ -204,6 +216,7 @@ function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: strin
       skillBody: opts.skillBody,
       ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
       bin: opts.bin,
+      interactive: opts.interactive,
     });
   }
   if (agent === "pi") {

@@ -3,10 +3,12 @@
  * (all CSS inline, no external assets; screenshots referenced RELATIVELY as
  * `./screenshots/*.png`), offline-openable and print-to-PDF friendly.
  *
- * Status ladder (design D5, roll's 5-level simplification):
+ * Status ladder (design D5 + US-ATTEST-012 状态口径补全):
  *   ✅ pass      live evidence from this session (command output / shot / curl)
  *   🟦 readonly  boundary observation (config visible, log line exists)
  *   🟨 partial   partly satisfied — note MUST say which sub-condition is open
+ *   ❌ fail      verified AND failed — 验证过且失败 ≠ 缺证据 (not a positive claim)
+ *   ⛔ blocked   a precondition blocks verification (note SHOULD say which)
  *   🟧 claimed   statement only (commit/PR text), no artifact
  *   🟥 missing   nothing found at all
  *
@@ -20,7 +22,7 @@
  */
 import { ANSI_CSS } from "./ansi-html.js";
 
-export type AcStatus = "pass" | "readonly" | "partial" | "claimed" | "missing";
+export type AcStatus = "pass" | "readonly" | "partial" | "fail" | "blocked" | "claimed" | "missing";
 
 export interface EvidenceRef {
   kind: "screenshot" | "text" | "commit" | "ci" | "deploy" | "test-pass";
@@ -63,6 +65,8 @@ const BADGE: Record<AcStatus, { icon: string; en: string; zh: string; cls: strin
   pass: { icon: "✅", en: "Pass", zh: "通过", cls: "s-pass" },
   readonly: { icon: "🟦", en: "Read-only Pass", zh: "只读通过", cls: "s-readonly" },
   partial: { icon: "🟨", en: "Partial", zh: "部分满足", cls: "s-partial" },
+  fail: { icon: "❌", en: "Fail", zh: "未通过", cls: "s-fail" },
+  blocked: { icon: "⛔", en: "Blocked", zh: "受阻", cls: "s-blocked" },
   claimed: { icon: "🟧", en: "Claimed", zh: "仅声明", cls: "s-claimed" },
   missing: { icon: "🟥", en: "Missing", zh: "无证据", cls: "s-missing" },
 };
@@ -71,9 +75,16 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** The red line: no evidence ⇒ at best `claimed` (missing stays missing). */
+/**
+ * The red line: a POSITIVE claim with no evidence ⇒ at best `claimed`. Only the
+ * three positive verdicts (pass/readonly/partial) are downgraded — `fail` and
+ * `blocked` are NOT positive claims (US-ATTEST-012: 验证过且失败 ≠ 缺证据), so a
+ * fail/blocked with zero refs stays itself and never surfaces as a discrepancy;
+ * `claimed`/`missing` are already at/below the floor.
+ */
+const POSITIVE: ReadonlySet<AcStatus> = new Set<AcStatus>(["pass", "readonly", "partial"]);
 export function enforceRedLine(item: AcReportItem): { item: AcReportItem; downgraded: boolean } {
-  if (item.evidence.length === 0 && item.status !== "missing" && item.status !== "claimed") {
+  if (item.evidence.length === 0 && POSITIVE.has(item.status)) {
     return { item: { ...item, status: "claimed" }, downgraded: true };
   }
   return { item, downgraded: false };
@@ -171,6 +182,7 @@ section.ac { border:1px solid var(--line); border-radius:10px; padding:14px 16px
 section.ac h3 { margin:0 0 6px; font-size:14.5px; }
 .s-pass { border-left:4px solid #2da44e; } .s-readonly { border-left:4px solid #218bff; }
 .s-partial { border-left:4px solid #d4a72c; } .s-claimed { border-left:4px solid #e8793a; }
+.s-fail { border-left:4px solid #cf222e; } .s-blocked { border-left:4px solid #8250df; }
 .s-missing { border-left:4px solid #cf222e; }
 figure.shot { margin:10px 0; } figure.shot img { max-width:100%; border:1px solid var(--line); border-radius:8px; }
 figure.shot figcaption { color:var(--muted); font-size:12.5px; }

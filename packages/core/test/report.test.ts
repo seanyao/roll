@@ -127,6 +127,34 @@ describe("badge ladder", () => {
   });
 });
 
+describe("US-ATTEST-012 — fail / blocked status口径", () => {
+  it("fail and blocked render with own badge (icon+text, not color-only) and section class", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [
+        item({ id: "A:AC1", status: "fail", evidence: [{ kind: "test-pass", label: "red suite" }] }),
+        item({ id: "A:AC2", status: "blocked", note: "等 iOS 真机", evidence: [{ kind: "commit", label: "c" }] }),
+      ],
+    });
+    // distinct, non-color marker = icon + bilingual word
+    expect(html).toContain("❌ Fail 未通过 × 1");
+    expect(html).toContain("⛔ Blocked 受阻 × 1");
+    // status colour classes present so the badge ladder is not color-only
+    expect(html).toContain("s-fail");
+    expect(html).toContain("s-blocked");
+    expect(html).toContain(".s-fail { border-left:");
+    expect(html).toContain(".s-blocked { border-left:");
+  });
+
+  it("fail/blocked are NOT a no-evidence red-line downgrade (verified-and-failed ≠ missing)", () => {
+    expect(enforceRedLine(item({ status: "fail", evidence: [] })).downgraded).toBe(false);
+    expect(enforceRedLine(item({ status: "blocked", evidence: [] })).downgraded).toBe(false);
+    // and they never appear in the Discrepancies appendix
+    const html = renderReport({ ...BASE, items: [item({ status: "blocked", evidence: [] })] });
+    expect(html).not.toContain("Discrepancies");
+  });
+});
+
 describe("US-ATTEST-009 — Self-Score fold", () => {
   it("renders a collapsed details block with entries", () => {
     const html = renderReport({

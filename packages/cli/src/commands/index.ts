@@ -5,6 +5,7 @@ import { alertCommand } from "./alert.js";
 import { archiveMigrateCommand } from "./archive-migrate.js";
 import { attestCommand } from "./attest.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
+import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand } from "./ci.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
@@ -81,6 +82,13 @@ export function registerAll(): void {
     }
     return backlogCommand(args);
   });
+  // `brief`: v3-native live owner digest (US-PORT-002). Composes the three-block
+  // one-screen digest from the backlog reader (+ active ALERT file) instead of
+  // rendering a cached, agent-authored .roll/briefs/*.md — no agent is shelled,
+  // so no reasoning can leak (the "agent 绝不漏思考过程" AC, strongest form).
+  // Output follows the resolved locale single-language. `--full` expands lists.
+  // No bash fallback: the digest is data-derived and always fresh.
+  registerPorted("brief", briefCommand);
   // `prices`: show/help/unknown are TS; `refresh` (network write) is bash.
   registerPorted("prices", (args) => {
     const r = pricesCommand(args);

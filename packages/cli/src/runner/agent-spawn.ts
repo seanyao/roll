@@ -72,16 +72,8 @@ export const AUTORUN_DIRECTIVE =
  * (NEVER a silent no-op) so the parallel-verification protocol surfaces the gap.
  */
 export const AGENT_ARGV_TODO: Record<string, string> = {
-  kimi: "kimi-code|kimi-cli|kimi -p <prompt> (FIX-126/133; no stream-json splice)",
-  pi: "pi -p <prompt> (text mode; no usage on stdout — cost via session file)",
-  deepseek: "deepseek <prompt> (positional)",
-  codex: "codex exec <prompt>",
   openai: "codex exec <prompt>",
   opencode: "opencode run <prompt>",
-  gemini: "agy -p --dangerously-skip-permissions <prompt> (FIX-153)",
-  agy: "agy -p --dangerously-skip-permissions <prompt> (FIX-153)",
-  antigravity: "agy -p --dangerously-skip-permissions <prompt> (FIX-153)",
-  qwen: "qwen <prompt> (positional)",
 };
 
 /**
@@ -111,6 +103,10 @@ export interface ClaudeArgvInput {
   storyId?: string;
   /** The claude binary (resolved path or "claude"); tests inject the shim name. */
   bin?: string;
+  /** FIX-220: when the user manually triggers `roll loop now`, the terminal is
+   *  interactive — drop --verbose and --output-format stream-json so the
+   *  output is human-readable instead of a JSON flood. */
+  interactive?: boolean;
 }
 
 /**
@@ -136,16 +132,21 @@ export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: st
   // no picked story (undefined) produces the exact pre-204 prompt.
   const pin = input.storyId !== undefined && input.storyId !== "" ? storyPinDirective(input.storyId) : "";
   const prompt = `${AUTORUN_DIRECTIVE}${pin}${input.skillBody}`;
-  const args = [
-    "-p",
-    prompt,
-    "--verbose",
-    "--dangerously-skip-permissions",
-    "--output-format",
-    "stream-json",
-    "--add-dir",
-    input.worktree,
-  ];
+  // FIX-220: manual `roll loop now` runs in an interactive terminal — strip
+  // --verbose and --output-format stream-json so the user sees plain text
+  // instead of a JSON flood. Cost tracking is best-effort on this path.
+  const args = input.interactive
+    ? ["-p", prompt, "--dangerously-skip-permissions", "--add-dir", input.worktree]
+    : [
+        "-p",
+        prompt,
+        "--verbose",
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "stream-json",
+        "--add-dir",
+        input.worktree,
+      ];
   return { bin, args };
 }
 
@@ -167,6 +168,9 @@ export interface AgentSpawnOptions {
   bin?: string;
   /** Extra env for the child (tests inject PATH with the shim dir prepended). */
   env?: NodeJS.ProcessEnv;
+  /** FIX-220: when the user manually triggers `roll loop now`, drop --verbose
+   *  and --output-format stream-json for a human-readable terminal. */
+  interactive?: boolean;
 }
 
 /** Result of an agent spawn — the orchestrator feeds `exitCode` back as
@@ -196,7 +200,8 @@ export type AgentSpawn = (
  * The child runs with CWD = the worktree, where the agent makes its TCR commits
  * (exactly as v2: the loop hands the agent the worktree and it commits inside).
  */
-function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: string; args: string[] } {
+/** Build the spawn argv for a resolved agent — exported for unit tests. */
+export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: string; args: string[] } {
   const prompt = `${AUTORUN_DIRECTIVE}${opts.storyId !== undefined && opts.storyId !== "" ? storyPinDirective(opts.storyId) : ""}${opts.skillBody}`;
   if (agent === "claude") {
     return buildClaudeArgv({
@@ -204,12 +209,28 @@ function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: strin
       skillBody: opts.skillBody,
       ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
       bin: opts.bin,
+      interactive: opts.interactive,
     });
   }
   if (agent === "pi") {
     // pi -p "<prompt>" in the worktree CWD — no stream-json, no --add-dir.
     // The agent's stdout is plain text; onChunk feeds it to the live log.
     return { bin: opts.bin ?? "pi", args: ["-p", prompt] };
+  }
+  if (agent === "kimi") {
+    return { bin: opts.bin ?? "kimi", args: ["-p", prompt] };
+  }
+  if (agent === "codex") {
+    return { bin: opts.bin ?? "codex", args: ["exec", prompt] };
+  }
+  if (agent === "deepseek") {
+    return { bin: opts.bin ?? "deepseek", args: [prompt] };
+  }
+  if (agent === "qwen") {
+    return { bin: opts.bin ?? "qwen", args: [prompt] };
+  }
+  if (agent === "agy" || agent === "gemini" || agent === "antigravity") {
+    return { bin: opts.bin ?? "agy", args: ["-p", "--dangerously-skip-permissions", prompt] };
   }
   const hint = AGENT_ARGV_TODO[agent] ?? "unknown agent";
   throw new Error(

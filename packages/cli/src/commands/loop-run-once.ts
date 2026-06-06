@@ -16,7 +16,7 @@ import { EventBus, cycleEndEvent, mapV2Status, readSlotFromText, type AgentSlot,
 import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, runCycleOnce } from "../runner/index.js";
+import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { spawn } from "node:child_process";
 
@@ -377,11 +377,22 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // `_loop_pick_agent_for_story` walks).
   const routeDeps: RouteDeps = buildLoopRouteDeps(id.path);
 
+  // FIX-220: manual `roll loop now` (ROLL_LOOP_FORCE=1) runs in an interactive
+  // terminal — strip --verbose and --output-format stream-json so the user sees
+  // readable text instead of a JSON flood.
+  const isInteractive = (process.env["ROLL_LOOP_FORCE"] ?? "").trim() !== "";
+
   const ports = nodePorts({
     repoCwd: id.path,
     paths,
     skillBody,
     routeDeps,
+    ...(isInteractive
+      ? {
+          agentSpawn: (agent: string, opts: Parameters<typeof realAgentSpawn>[1]) =>
+            realAgentSpawn(agent, { ...opts, interactive: true }),
+        }
+      : {}),
   });
 
   // FIX-204D: between here and the walk's own finally, signals get a clean

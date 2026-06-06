@@ -1,13 +1,13 @@
 /**
- * diff-test: TS `roll loop status` == python lib/roll-loop-status.py (frozen
- * v2 oracle). Fixture render (deterministic) + live render in a fabricated
- * runtime dir with synthetic events/runs. Byte-for-byte.
+ * Frozen-expectation test: TS `roll loop status` (US-PORT-009e).
  *
- * Both sides run with a controlled HOME + empty ROLL_SHARED_ROOT + temp
- * ROLL_PROJECT_RUNTIME_DIR so the eyebrow's launchd/dream/pr probes resolve
- * deterministically (not-installed, no daily/tick lines).
+ * Previously diff-tested against python lib/roll-loop-status.py; the oracle is
+ * now retired. Fixture render (deterministic) + live render in a fabricated
+ * runtime dir freeze their TS stdout as inline snapshots. The title-row timestamp
+ * (minute-resolution) is scrubbed to `<NOW>` so the snapshot stays stable across
+ * runs. Zero engine spawn.
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,14 +16,14 @@ import { dashboardCommand } from "../src/commands/dashboard.js";
 import { renderState } from "../src/render.js";
 
 const REPO = resolve(__dirname, "../../..");
-const PY = join(REPO, "lib", "roll-loop-status.py");
 const dirs: string[] = [];
 
 afterAll(() => {
   for (const d of dirs) execSync(`rm -rf '${d}'`);
 });
 
-/** Run the TS dashboard in-process with env/cwd, capturing stdout. */
+/** Run the TS dashboard in-process with env/cwd, capturing stdout.
+ *  Scrubs the real-time title timestamp so snapshots are stable. */
 function tsRun(env: Record<string, string | undefined>, argv: string[], cwd?: string): string {
   const saveEnv: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(env)) {
@@ -51,15 +51,8 @@ function tsRun(env: Record<string, string | undefined>, argv: string[], cwd?: st
       else process.env[k] = v;
     }
   }
-  return chunks.join("");
-}
-
-function pyRun(env: Record<string, string>, argv: string[], cwd?: string): string {
-  return execFileSync("python3", [PY, ...argv], {
-    cwd: cwd ?? REPO,
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-  });
+  // Scrub the title-row timestamp: "YYYY-MM-DD HH:MM" (minute-resolution).
+  return chunks.join("").replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g, "<NOW>");
 }
 
 /** A sandbox that neutralizes all host-dependent eyebrow probes. */
@@ -67,11 +60,13 @@ function sandboxEnv(extra: Record<string, string> = {}): Record<string, string> 
   const home = mkdtempSync(join(tmpdir(), "roll-dash-home-"));
   const rt = mkdtempSync(join(tmpdir(), "roll-dash-rt-"));
   const shared = mkdtempSync(join(tmpdir(), "roll-dash-shared-"));
-  dirs.push(home, rt, shared);
+  const notes = mkdtempSync(join(tmpdir(), "roll-dash-notes-"));
+  dirs.push(home, rt, shared, notes);
   return {
     HOME: home,
     ROLL_PROJECT_RUNTIME_DIR: rt,
     ROLL_SHARED_ROOT: shared,
+    ROLL_NOTES_DIR: notes,
     ROLL_MAIN_SLUG: "test-abc123",
     _LAUNCHD_DIR: join(home, "la"),
     ...extra,
@@ -95,49 +90,241 @@ function label(d: Date): string {
   );
 }
 
-describe("diff-test: roll loop status == roll-loop-status.py (fixture)", () => {
-  for (const variant of [["--no-color"], ["--no-color", "--en"], ["--no-color", "--zh"], ["--no-color", "--days", "7"]]) {
-    it(`fixture ${variant.join(" ")} matches byte-for-byte`, () => {
-      const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
-      // Guard against a once-a-day minute-boundary flake: the title row prints
-      // `now` at minute resolution. Run py first, ts immediately after; retry
-      // once if they straddle a minute tick.
-      let py = pyRun(env, variant, REPO);
-      let ts = tsRun(env, variant, REPO);
-      if (ts !== py) {
-        py = pyRun(env, variant, REPO);
-        ts = tsRun(env, variant, REPO);
-      }
-      expect(ts).toBe(py);
-    });
-  }
-
-  it("--eval fixture view matches", () => {
+describe("frozen: roll loop status (fixture)", () => {
+  it("fixture --no-color", () => {
     const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
-    const py = pyRun(env, ["--eval", "--no-color"], REPO);
+    const ts = tsRun(env, ["--no-color"], REPO);
+    expect(ts).toMatchInlineSnapshot(`
+      "roll loop  ·  health                                              <NOW> · 12 cycles / 72h
+
+      ○ not installed   run roll loop on to enable         last ✓ 04:48  FIX-040  8/12 tests failed → bail
+        未安装 · 运行 roll loop on 启用
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        ROLLUP  ·  近 3 天                                             ↑ today vs yesterday · 今日 vs 昨日
+
+                      Today                 Yesterday −2d     
+                      今日                  昨日      前天    
+        cycles               1  ▼ −3        4         4       
+        merged PRs           0  —           0         0       
+        failed               0  —           0         1       
+        duration           17m  ▼ −31m      48m       48m     
+        input tokens         —  —           —         —       
+        cache writes         —  —           —         —       
+        cache reads          —  —           —         —       
+        output tokens        —  —           —         —       
+        cost             $0.00  —           $0.00     $0.00   
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        RECENT  ·  最近 12 个 cycle       t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+
+        ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────  1 cycles · 0 failed  ·  in progress
+        ✓  04:48    17m  —/—                         —                 —   FIX-040 #61 …
+
+        ─ Yesterday · 昨日 · 2026-06-06 · Sat · 周六 ────────────────────────────────  4 cycles · 0 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #57 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #58 …
+        ✓  18:48    13m  —/—                         —                 —   FIX-047 #59 …
+        ✓  23:48    15m  —/—                         —                 —   REFACT-9 #60 …
+
+        ─ −2 days · 前 2 天 · 2026-06-05 · Fri · 周五 ───────────────────────────────  4 cycles · 1 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #53 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #54 …
+        ✗  18:48    13m  —/—                         —                 —   FIX-047
+        ✓  23:48    15m  —/—                         —                 —   REFACT-9 #56 …
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+      "
+    `);
+  });
+
+  it("fixture --no-color --en", () => {
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const ts = tsRun(env, ["--no-color", "--en"], REPO);
+    expect(ts).toMatchInlineSnapshot(`
+      "roll loop  ·  health                                              <NOW> · 12 cycles / 72h
+
+      ○ not installed   run roll loop on to enable         last ✓ 04:48  FIX-040  8/12 tests failed → bail
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        ROLLUP  ·  近 3 天                                             ↑ today vs yesterday · 今日 vs 昨日
+
+                      Today                 Yesterday −2d     
+        cycles               1  ▼ −3        4         4       
+        merged PRs           0  —           0         0       
+        failed               0  —           0         1       
+        duration           17m  ▼ −31m      48m       48m     
+        input tokens         —  —           —         —       
+        cache writes         —  —           —         —       
+        cache reads          —  —           —         —       
+        output tokens        —  —           —         —       
+        cost             $0.00  —           $0.00     $0.00   
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        RECENT  ·  最近 12 个 cycle       t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+
+        ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────  1 cycles · 0 failed  ·  in progress
+        ✓  04:48    17m  —/—                         —                 —   FIX-040 #61 …
+
+        ─ Yesterday · 昨日 · 2026-06-06 · Sat · 周六 ────────────────────────────────  4 cycles · 0 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #57 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #58 …
+        ✓  18:48    13m  —/—                         —                 —   FIX-047 #59 …
+        ✓  23:48    15m  —/—                         —                 —   REFACT-9 #60 …
+
+        ─ −2 days · 前 2 天 · 2026-06-05 · Fri · 周五 ───────────────────────────────  4 cycles · 1 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #53 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #54 …
+        ✗  18:48    13m  —/—                         —                 —   FIX-047
+        ✓  23:48    15m  —/—                         —                 —   REFACT-9 #56 …
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+      "
+    `);
+  });
+
+  it("fixture --no-color --zh", () => {
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const ts = tsRun(env, ["--no-color", "--zh"], REPO);
+    expect(ts).toMatchInlineSnapshot(`
+      "roll loop  ·  health                                              <NOW> · 12 cycles / 72h
+
+      ○ not installed   run roll loop on to enable         last ✓ 04:48  FIX-040  8/12 tests failed → bail
+        未安装 · 运行 roll loop on 启用
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        ROLLUP  ·  近 3 天                                             ↑ today vs yesterday · 今日 vs 昨日
+
+                      今日                  昨日      前天    
+        cycles               1  ▼ −3        4         4       
+        merged PRs           0  —           0         0       
+        failed               0  —           0         1       
+        duration           17m  ▼ −31m      48m       48m     
+        input tokens         —  —           —         —       
+        cache writes         —  —           —         —       
+        cache reads          —  —           —         —       
+        output tokens        —  —           —         —       
+        cost             $0.00  —           $0.00     $0.00   
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        RECENT  ·  最近 12 个 cycle       t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+
+        ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────  1 cycles · 0 failed  ·  in progress
+        ✓  04:48    17m  —/—                         —                 —   FIX-040 #61 …
+
+        ─ Yesterday · 昨日 · 2026-06-06 · Sat · 周六 ────────────────────────────────  4 cycles · 0 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #57 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #58 …
+        ✓  18:48    13m  —/—                         —                 —   FIX-047 #59 …
+        ✓  23:48    15m  —/—                         —                 —   REFACT-9 #60 …
+
+        ─ −2 days · 前 2 天 · 2026-06-05 · Fri · 周五 ───────────────────────────────  4 cycles · 1 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #53 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #54 …
+        ✗  18:48    13m  —/—                         —                 —   FIX-047
+        ✓  23:48    15m  —/—                         —                 —   REFACT-9 #56 …
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+      "
+    `);
+  });
+
+  it("fixture --no-color --days 7", () => {
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const ts = tsRun(env, ["--no-color", "--days", "7"], REPO);
+    expect(ts).toMatchInlineSnapshot(`
+      "roll loop  ·  health                                             <NOW> · 12 cycles / 168h
+
+      ○ not installed   run roll loop on to enable         last ✓ 04:48  FIX-040  8/12 tests failed → bail
+        未安装 · 运行 roll loop on 启用
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        ROLLUP  ·  近 7 天                                             ↑ today vs yesterday · 今日 vs 昨日
+
+                      Today                 Yesterday −2d     
+                      今日                  昨日      前天    
+        cycles               1  ▼ −3        4         4       
+        merged PRs           0  —           0         0       
+        failed               0  —           0         1       
+        duration           17m  ▼ −31m      48m       48m     
+        input tokens         —  —           —         —       
+        cache writes         —  —           —         —       
+        cache reads          —  —           —         —       
+        output tokens        —  —           —         —       
+        cost             $0.00  —           $0.00     $0.00   
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        RECENT  ·  最近 12 个 cycle       t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+
+        ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────  1 cycles · 0 failed  ·  in progress
+        ✓  04:48    17m  —/—                         —                 —   FIX-040 #61 …
+
+        ─ Yesterday · 昨日 · 2026-06-06 · Sat · 周六 ────────────────────────────────  4 cycles · 0 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #57 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #58 …
+        ✓  18:48    13m  —/—                         —                 —   FIX-047 #59 …
+        ✓  23:48    15m  —/—                         —                 —   REFACT-9 #60 …
+
+        ─ −2 days · 前 2 天 · 2026-06-05 · Fri · 周五 ───────────────────────────────  4 cycles · 1 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #53 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #54 …
+        ✗  18:48    13m  —/—                         —                 —   FIX-047
+        ✓  23:48    15m  —/—                         —                 —   REFACT-9 #56 …
+
+        ─ −3 days · 前 3 天 · 2026-06-04 · Thu · 周四 ───────────────────────────────  3 cycles · 0 failed
+        ✓  08:48     9m  —/—                         —                 —   FIX-048 #50 …
+        ✓  13:48    11m  —/—                         —                 —   US-112 #51 …
+        ✓  18:48    13m  —/—                         —                 —   FIX-047 #52 …
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+      "
+    `);
+  });
+
+  it("--eval fixture view", () => {
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
     const ts = tsRun(env, ["--eval", "--no-color"], REPO);
-    expect(ts).toBe(py);
+    expect(ts).toMatchInlineSnapshot(`
+      "Loop result-eval — last 14 cycles
+      循环结果评分 — 最近 14 轮
+
+      no scored cycles yet (need result_eval in runs.jsonl)
+      尚无评分 cycle（runs.jsonl 需含 result_eval）
+      "
+    `);
   });
 
-  it("--eval 5 (numeric arg, fixture) matches", () => {
+  it("--eval 5 (numeric arg, fixture)", () => {
     const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
-    const py = pyRun(env, ["--eval", "5", "--no-color"], REPO);
     const ts = tsRun(env, ["--eval", "5", "--no-color"], REPO);
-    expect(ts).toBe(py);
+    expect(ts).toMatchInlineSnapshot(`
+      "Loop result-eval — last 5 cycles
+      循环结果评分 — 最近 5 轮
+
+      no scored cycles yet (need result_eval in runs.jsonl)
+      尚无评分 cycle（runs.jsonl 需含 result_eval）
+      "
+    `);
   });
 
-  it("unknown flag errors with exit 2 (argparse parity)", () => {
+  it("unknown flag errors with exit 2", () => {
     const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
-    let pyCode = 0;
-    let pyErr = "";
-    try {
-      execFileSync("python3", [PY, "--bogus"], { cwd: REPO, encoding: "utf8", env: { ...process.env, ...env } });
-    } catch (e) {
-      const ex = e as { status?: number; stderr?: string };
-      pyCode = ex.status ?? -1;
-      pyErr = ex.stderr ?? "";
-    }
-    // Capture TS stderr + exit code.
     const realErr = process.stderr.write.bind(process.stderr);
     let tsErr = "";
     // @ts-expect-error — capture-only override
@@ -151,22 +338,25 @@ describe("diff-test: roll loop status == roll-loop-status.py (fixture)", () => {
     } finally {
       process.stderr.write = realErr;
     }
-    expect(tsCode).toBe(pyCode);
-    expect(tsErr).toBe(pyErr);
+    expect({ status: tsCode, stderr: tsErr }).toMatchInlineSnapshot(`
+      {
+        "status": 2,
+        "stderr": "usage: roll-loop-status.py [-h] [--days DAYS] [--no-color] [--en] [--zh]
+                                 [--eval [N]]
+      roll-loop-status.py: error: unrecognized arguments: --bogus
+      ",
+      }
+    `);
   });
 });
 
-describe("diff-test: roll loop status == roll-loop-status.py (live)", () => {
-  it("synthetic events + runs render identically", () => {
+describe("frozen: roll loop status (live)", () => {
+  it("synthetic events + runs render", () => {
     const env = sandboxEnv();
     const rt = env["ROLL_PROJECT_RUNTIME_DIR"] as string;
     const slug = env["ROLL_MAIN_SLUG"] as string;
 
-    // Anchor timestamps to a stable mid-minute instant ~30min ago to dodge
-    // boundary flake. now() is computed inside each renderer, but cycle
-    // timestamps are fixed here.
-    const base = new Date();
-    base.setUTCSeconds(30, 0);
+    const base = new Date("2026-06-07T03:18:30Z");
     const start1 = new Date(base.getTime() - 30 * 60 * 1000);
     const end1 = new Date(start1.getTime() + 600 * 1000);
     const start2 = new Date(base.getTime() - 90 * 60 * 1000);
@@ -174,7 +364,6 @@ describe("diff-test: roll loop status == roll-loop-status.py (live)", () => {
     const lab1 = label(start1);
     const lab2 = label(start2);
 
-    // events.ndjson: one done cycle w/ usage event, one failed cycle.
     const usage = {
       model: "claude-opus-4-7-20251001",
       input_tokens: 12000,
@@ -207,7 +396,6 @@ describe("diff-test: roll loop status == roll-loop-status.py (live)", () => {
       events.map((e) => JSON.stringify(e)).join("\n") + "\n",
     );
 
-    // runs.jsonl: tcr + built + a result_eval for the eval line, plus agent.
     const runs = [
       {
         project: slug,
@@ -233,7 +421,6 @@ describe("diff-test: roll loop status == roll-loop-status.py (live)", () => {
     ];
     writeFileSync(join(rt, "runs.jsonl"), runs.map((r) => JSON.stringify(r)).join("\n") + "\n");
 
-    // backlog in cwd (.roll/backlog.md). Use a fresh project dir.
     const proj = mkdtempSync(join(tmpdir(), "roll-dash-proj-"));
     dirs.push(proj);
     mkdirSync(join(proj, ".roll"), { recursive: true });
@@ -248,33 +435,62 @@ describe("diff-test: roll loop status == roll-loop-status.py (live)", () => {
       ].join("\n"),
     );
 
-    let py = pyRun(env, ["--no-color"], proj);
-    let ts = tsRun(env, ["--no-color"], proj);
-    if (ts !== py) {
-      py = pyRun(env, ["--no-color"], proj);
-      ts = tsRun(env, ["--no-color"], proj);
-    }
-    expect(ts).toBe(py);
+    const ts = tsRun(env, ["--no-color"], proj);
+    expect(ts).toMatchInlineSnapshot(`
+      "roll loop  ·  health                                               <NOW> · 2 cycles / 72h
+
+      ○ not installed   run roll loop on to enable                              last ✓ 10:48  US-CLI-006  
+        未安装 · 运行 roll loop on 启用
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        ROLLUP  ·  近 3 天                                             ↑ today vs yesterday · 今日 vs 昨日
+
+                      Today                 Yesterday −2d     
+                      今日                  昨日      前天    
+        cycles               2  ▲ new       0         0       
+        merged PRs           1  ▲ new       0         0       
+        failed               1  ▲ new       0         0       
+        duration           18m  ▲ new       0m        0m      
+        input tokens       12K  ▲ new       —         —       
+        cache writes       50K  ▲ new       —         —       
+        cache reads       800K  ▲ new       —         —       
+        output tokens     3.4K  ▲ new       —         —       
+        cost             $1.23  ▲ new       $0.00     $0.00   
+        agents: pi 0/1 (n/a) · claude 1/1 (n/a)
+        result-eval: (n/a) — 2 sample(s), need 3 (last 14)
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        RECENT  ·  最近 2 个 cycle        t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+
+        ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────────────────────  2 cycles · 1 failed
+        ✗  09:48     8m  —/—                         —                 —   FIX-200
+              → roll loop show 20260607-014830-99999
+        ✓  10:48    10m  12K/50K↑ 800K↓/3.4K         opus-4-7      $1.23   US-CLI-006 #777 ✓
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+      "
+    `);
   });
 
-  it("paused state + CNY cost + populated eval/self-score render identically", () => {
+  it("paused state + CNY cost + populated eval/self-score render", () => {
     const env = sandboxEnv();
     const rt = env["ROLL_PROJECT_RUNTIME_DIR"] as string;
     const slug = env["ROLL_MAIN_SLUG"] as string;
 
-    // state.yaml → paused eyebrow (no host-dependent install probe).
     writeFileSync(
       join(rt, "state.yaml"),
       ['status: "paused"', 'paused_at: "2026-06-04T10:00:00Z"', 'paused_reason: "manual hold"', ""].join("\n"),
     );
 
-    const base = new Date();
-    base.setUTCSeconds(30, 0);
+    const base = new Date("2026-06-07T03:18:30Z");
     const start1 = new Date(base.getTime() - 40 * 60 * 1000);
     const end1 = new Date(start1.getTime() + 420 * 1000);
     const lab1 = label(start1);
 
-    // deepseek (pi) cycle → native CNY cost row + agent "pi".
     const usage = {
       model: "deepseek-v4-pro",
       input_tokens: 9000,
@@ -294,7 +510,6 @@ describe("diff-test: roll loop status == roll-loop-status.py (live)", () => {
     ];
     writeFileSync(join(rt, "events.ndjson"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
-    // 4 result_eval records → populated result-eval line (mean/min/trend/dims).
     const runs = [0, 1, 2, 3].map((k) => ({
       project: slug,
       run_id: `e${k}`,
@@ -311,7 +526,6 @@ describe("diff-test: roll loop status == roll-loop-status.py (live)", () => {
     }));
     writeFileSync(join(rt, "runs.jsonl"), runs.map((r) => JSON.stringify(r)).join("\n") + "\n");
 
-    // self-score notes (.roll/notes/*.md) → self-score summary line.
     const proj = mkdtempSync(join(tmpdir(), "roll-dash-proj2-"));
     dirs.push(proj);
     mkdirSync(join(proj, ".roll", "notes"), { recursive: true });
@@ -328,12 +542,42 @@ describe("diff-test: roll loop status == roll-loop-status.py (live)", () => {
       ["| FIX-300 | A CNY-billed bugfix | Done |", ""].join("\n"),
     );
 
-    let py = pyRun(env, ["--no-color"], proj);
-    let ts = tsRun(env, ["--no-color"], proj);
-    if (ts !== py) {
-      py = pyRun(env, ["--no-color"], proj);
-      ts = tsRun(env, ["--no-color"], proj);
-    }
-    expect(ts).toBe(py);
+    const ts = tsRun(env, ["--no-color"], proj);
+    expect(ts).toMatchInlineSnapshot(`
+      "roll loop  ·  health                                               <NOW> · 1 cycles / 72h
+
+      ⏸ PAUSED   since 2026-06-04T10:00:00Z · manual hold       last ✓ 10:38  FIX-300  A CNY-billed bugfix
+        已暂停 · run: roll loop resume
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        ROLLUP  ·  近 3 天                                             ↑ today vs yesterday · 今日 vs 昨日
+
+                      Today                 Yesterday −2d     
+                      今日                  昨日      前天    
+        cycles               1  ▲ new       0         0       
+        merged PRs           0  —           0         0       
+        failed               0  —           0         0       
+        duration            7m  ▲ new       0m        0m      
+        input tokens        9K  ▲ new       —         —       
+        cache writes         —  —           —         —       
+        cache reads          —  —           —         —       
+        output tokens       2K  ▲ new       —         —       
+        cost             ¥0.42  ▲ new       ¥0.00     ¥0.00   
+        agents: pi 4/4 (n/a)
+        result-eval: mean 7.5↑ / min 6 / out 50% ci 100% scope 100% qual 0% (last 14)
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        RECENT  ·  最近 1 个 cycle        t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+
+        ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────────────────────  1 cycles · 0 failed
+        ✓  10:38     7m  9K/2K                       deepseek-v4-pro   ¥0.42   FIX-300
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+      "
+    `);
   });
 });

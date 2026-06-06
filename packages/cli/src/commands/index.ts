@@ -16,6 +16,7 @@ import { gcCommand } from "./gc.js";
 import { indexCommand } from "./index-gen.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
+import { loopFmtCommand } from "./loop-fmt.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import {
   loopNowCommand,
@@ -181,6 +182,9 @@ export function registerAll(): void {
   registerPorted("loop", (args) => {
     if (args[0] === "status") return dashboardCommand(args.slice(1));
     if (args[0] === "run-once") return loopRunOnceCommand(args.slice(1));
+    // `loop fmt`: the observation-window formatter (US-PORT-012) — stdin
+    // stream-json → three-tier transcript. v3-native; the watch pipe feeds it.
+    if (args[0] === "fmt") return loopFmtCommand(args.slice(1));
     if (args[0] === "on") return loopOnCommand(args.slice(1));
     if (args[0] === "off") return loopOffCommand(args.slice(1));
     if (args[0] === "pause") return loopPauseCommand(args.slice(1));

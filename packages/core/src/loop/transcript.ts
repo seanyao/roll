@@ -26,6 +26,7 @@
  * cycle's story (it scopes them by storyId / prNumber upstream).
  */
 import type { RollEvent } from "@roll/spec";
+import { signalKindForMarker } from "./signals.js";
 
 export type SignalLayer = "outline" | "signal";
 
@@ -61,41 +62,42 @@ function clip(s: string, n = 80): string {
 }
 
 /**
- * Map ONE event to a timeline entry, or null when the event type is not part of
- * the per-cycle process trace (loop:* / policy:* / route:* / stdout are skipped
- * — they are not the turning points a reviewer traces). `offsetSec` is filled
- * by the caller (it needs the cycle's base ts).
+ * Map ONE event to a timeline entry (minus `layer`, derived centrally from the
+ * shared taxonomy in {@link extractCycleSignals}), or null when the event type
+ * is not part of the per-cycle process trace (loop:* / policy:* / route:* /
+ * stdout are skipped — they are not the turning points a reviewer traces).
+ * `offsetSec` is filled by the caller (it needs the cycle's base ts).
  */
-function toEntry(ev: RollEvent): Omit<TimelineEntry, "offsetSec"> | null {
+function toEntry(ev: RollEvent): Omit<TimelineEntry, "offsetSec" | "layer"> | null {
   switch (ev.type) {
     case "cycle:start":
-      return { ts: ev.ts, layer: "outline", marker: "cycle:start", label: `周期开始 · cycle start${ev.storyId !== "" ? ` · ${ev.storyId}` : ""}` };
+      return { ts: ev.ts, marker: "cycle:start", label: `周期开始 · cycle start${ev.storyId !== "" ? ` · ${ev.storyId}` : ""}` };
     case "cycle:phase":
-      return { ts: ev.ts, layer: "outline", marker: `phase:${ev.phase}`, label: `阶段 · phase · ${ev.phase}` };
+      return { ts: ev.ts, marker: `phase:${ev.phase}`, label: `阶段 · phase · ${ev.phase}` };
     case "cycle:end":
-      return { ts: ev.ts, layer: "outline", marker: "cycle:end", label: `周期结束 · cycle end · ${ev.outcome}` };
+      return { ts: ev.ts, marker: "cycle:end", label: `周期结束 · cycle end · ${ev.outcome}` };
     case "cycle:tcr":
-      return { ts: ev.ts, layer: "signal", marker: "tcr", label: `TCR ${ev.commitHash.slice(0, 9)} · ${clip(ev.message)}` };
+      return { ts: ev.ts, marker: "tcr", label: `TCR ${ev.commitHash.slice(0, 9)} · ${clip(ev.message)}` };
     case "ci:pass":
-      return { ts: ev.ts, layer: "signal", marker: "ci:pass", label: `Gate CI 通过 · PR #${ev.prNumber}` };
+      return { ts: ev.ts, marker: "ci:pass", label: `Gate CI 通过 · PR #${ev.prNumber}` };
     case "ci:fail":
-      return { ts: ev.ts, layer: "signal", marker: "ci:fail", label: `Gate CI 失败 · PR #${ev.prNumber}${ev.failSummary !== "" ? ` · ${clip(ev.failSummary)}` : ""}` };
+      return { ts: ev.ts, marker: "ci:fail", label: `Gate CI 失败 · PR #${ev.prNumber}${ev.failSummary !== "" ? ` · ${clip(ev.failSummary)}` : ""}` };
     case "ci:rerun":
-      return { ts: ev.ts, layer: "signal", marker: "ci:rerun", label: `Gate CI 重跑 · PR #${ev.prNumber}` };
+      return { ts: ev.ts, marker: "ci:rerun", label: `Gate CI 重跑 · PR #${ev.prNumber}` };
     case "peer:gate":
-      return { ts: ev.ts, layer: "signal", marker: "peer:gate", label: `Peer gate · ${ev.verdict}` };
+      return { ts: ev.ts, marker: "peer:gate", label: `Peer gate · ${ev.verdict}` };
     case "attest:gate":
-      return { ts: ev.ts, layer: "signal", marker: "attest:gate", label: `Attest gate · ${ev.verdict}` };
+      return { ts: ev.ts, marker: "attest:gate", label: `Attest gate · ${ev.verdict}` };
     case "pr:open":
-      return { ts: ev.ts, layer: "signal", marker: "pr:open", label: `PR #${ev.prNumber} 开启 · opened` };
+      return { ts: ev.ts, marker: "pr:open", label: `PR #${ev.prNumber} 开启 · opened` };
     case "pr:merge":
-      return { ts: ev.ts, layer: "signal", marker: "pr:merge", label: `PR #${ev.prNumber} 合并 · merged` };
+      return { ts: ev.ts, marker: "pr:merge", label: `PR #${ev.prNumber} 合并 · merged` };
     case "pr:rebase":
-      return { ts: ev.ts, layer: "signal", marker: "pr:rebase", label: `PR #${ev.prNumber} rebase` };
+      return { ts: ev.ts, marker: "pr:rebase", label: `PR #${ev.prNumber} rebase` };
     case "pr:close":
-      return { ts: ev.ts, layer: "signal", marker: "pr:close", label: `PR #${ev.prNumber} 关闭 · closed${ev.reason !== "" ? ` · ${clip(ev.reason)}` : ""}` };
+      return { ts: ev.ts, marker: "pr:close", label: `PR #${ev.prNumber} 关闭 · closed${ev.reason !== "" ? ` · ${clip(ev.reason)}` : ""}` };
     case "alert:notify":
-      return { ts: ev.ts, layer: "signal", marker: "alert", label: `ALERT · ${clip(ev.message)}` };
+      return { ts: ev.ts, marker: "alert", label: `ALERT · ${clip(ev.message)}` };
     default:
       return null;
   }
@@ -117,9 +119,18 @@ export function extractCycleSignals(events: RollEvent[], cycleId: string): Cycle
   // stable chronological sort (ts asc, original order as tiebreaker)
   indexed.sort((a, b) => toSeconds(a.ev.ts) - toSeconds(b.ev.ts) || a.i - b.i);
 
-  const partial = indexed.map(({ ev }) => toEntry(ev)).filter((e): e is Omit<TimelineEntry, "offsetSec"> => e !== null);
+  const partial = indexed
+    .map(({ ev }) => toEntry(ev))
+    .filter((e): e is Omit<TimelineEntry, "offsetSec" | "layer"> => e !== null);
   const baseSec = partial.length > 0 ? toSeconds(partial[0]!.ts) : 0;
-  const timeline: TimelineEntry[] = partial.map((e) => ({ ...e, offsetSec: Math.max(0, toSeconds(e.ts) - baseSec) }));
+  // Layer is derived from the SHARED taxonomy (signals.ts), not hard-coded per
+  // case — a marker is `signal` iff signalKindForMarker classifies it. This is
+  // the single口径 the observation-window formatter also consumes.
+  const timeline: TimelineEntry[] = partial.map((e) => ({
+    ...e,
+    layer: signalKindForMarker(e.marker) !== null ? "signal" : "outline",
+    offsetSec: Math.max(0, toSeconds(e.ts) - baseSec),
+  }));
 
   return {
     cycleId,

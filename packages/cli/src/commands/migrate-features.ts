@@ -20,15 +20,25 @@ import { bi } from "@roll/core";
 import { readIndex, reportFileName } from "../lib/archive.js";
 import { markPhaseDone, renderSpecMd, renderStoryPage } from "../lib/story-page.js";
 
-/** Pull `title:` / `created:` out of an existing spec.md frontmatter (line scan). */
-function specFrontmatter(specFile: string): { title?: string; created?: string } {
+/**
+ * Pull `title:` / `created:` out of an existing spec.md (line scan). Migrated
+ * specs carry no frontmatter — their title lives in the `# <ID> — <title>`
+ * heading, so that is the fallback.
+ */
+function specFrontmatter(specFile: string, storyId: string): { title?: string; created?: string } {
   try {
     const lines = readFileSync(specFile, "utf8").split("\n").slice(0, 12);
     const pick = (key: string): string | undefined => {
       const row = lines.find((l) => l.startsWith(`${key}: `));
       return row?.slice(key.length + 2).trim();
     };
-    return { title: pick("title"), created: pick("created") };
+    let title = pick("title");
+    if (title === undefined) {
+      const heading = lines.find((l) => l.startsWith("# "));
+      const m = heading?.match(new RegExp(`^# ${storyId}\\s*[—–-]+\\s*(.+)$`));
+      if (m !== undefined && m !== null) title = m[1];
+    }
+    return { ...(title !== undefined ? { title } : {}), ...(pick("created") !== undefined ? { created: pick("created") } : {}) };
   } catch {
     return {};
   }
@@ -82,7 +92,7 @@ export function migrateFeaturesCommand(args: string[]): number {
     const htmlFile = join(storyDir, "index.html");
     if (!existsSync(htmlFile) || refresh) {
       // Keep the human-authored bits: title + original creation date live in spec.md.
-      const fm = specFrontmatter(specFile);
+      const fm = specFrontmatter(specFile, storyId);
       const card = { id: storyId, epic, created: fm.created ?? today, ...(fm.title !== undefined ? { title: fm.title } : {}) };
       let html = renderStoryPage(card);
       // Delivery state is re-derivable from the archive: latest run + report.

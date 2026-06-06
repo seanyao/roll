@@ -33,6 +33,7 @@ import {
   loopResumeCommand,
 } from "./loop-sched.js";
 import { migrateCommand } from "./migrate.js";
+import { migrateFeaturesCommand } from "./migrate-features.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
@@ -151,6 +152,7 @@ export function registerAll(): void {
     const r = initCommand(args);
     return r ?? fallbackToBash(["init", ...args]).status;
   });
+  registerPorted("migrate-features", migrateFeaturesCommand);
   // `migrate`: full surface TS (three-state idempotency, dry-run preview,
   // git-mv execute with the single atomic commit). No sub-paths on bash.
   registerPorted("migrate", migrateCommand);

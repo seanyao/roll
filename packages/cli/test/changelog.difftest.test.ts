@@ -200,9 +200,31 @@ describe("diff-test: roll changelog == bash oracle", () => {
     expect(tsCl(["generate", "--no-ai"], pt, {})).toEqual(bashCl(["generate", "--no-ai"], pb, {}));
   });
 
-  it("help output (long)", () => {
-    const pt = freshProj();
-    expect(tsCl(["--help"], pt, {})).toEqual(bashCl(["--help"], freshProj(), {}));
+  // US-PORT-005: the DEFAULT `generate` (no flags) is now the deterministic
+  // path — no AI polish, no bash fallback, no warn noise. It must produce the
+  // exact same bytes as the explicit `--no-ai` deterministic path, on both
+  // stdout AND stderr (the v2 default emitted a "AI 润色不可用" warn here).
+  it("generate (default) == deterministic draft, no AI, no warn (US-PORT-005)", () => {
+    const def = tsCl(["generate"], freshProj(), {});
+    const det = tsCl(["generate", "--no-ai"], freshProj(), {});
+    expect(def.stdout).toBe(det.stdout);
+    expect(def.stderr).toBe(det.stderr);
+    expect(def.status).toBe(0);
+    expect(def.stderr).not.toContain("润色");
+    expect(def.stdout).toContain("US-CL-006");
+  });
+
+  // US-PORT-005: help diverges from the frozen v2 bash oracle on purpose (the
+  // AI-polish lines are gone), so this asserts the v3 deterministic-canonical
+  // help text directly instead of comparing to bash.
+  it("help output (long) — v3 deterministic-canonical (US-PORT-005)", () => {
+    const t = tsCl(["--help"], freshProj(), {});
+    expect(t.status).toBe(0);
+    expect(t.stdout).toContain("确定性草稿");
+    // the v2 agent-polish menu lines and default description are gone
+    expect(t.stdout).not.toContain("(AI 润色)");
+    expect(t.stdout).not.toContain("默认用配置的 agent");
+    expect(t.stdout).not.toContain("--no-ai");
   });
 
   for (const lang of ["en", "zh"]) {

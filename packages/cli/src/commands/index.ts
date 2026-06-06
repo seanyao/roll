@@ -120,20 +120,12 @@ export function registerAll(): void {
     }
     return configGetCommand(args);
   });
-  // `changelog`: the DETERMINISTIC paths are TS (generate --no-ai / --json,
-  // --write of the deterministic draft, help, unknown). The default `generate`
-  // (without --no-ai/--json) attempts the live AI-style agent in v2 — a path
-  // that must NOT run an agent from TS — so it FALLS BACK to bash, preserving
-  // v2's agent-styling behavior exactly. (changelog.ts keeps an injectable,
-  // default-off styler used only by difftests; see its header.)
-  registerPorted("changelog", (args) => {
-    if (args[0] === "generate") {
-      const flags = args.slice(1);
-      const deterministic = flags.includes("--no-ai") || flags.includes("--json");
-      if (!deterministic) return fallbackToBash(["changelog", ...args]).status;
-    }
-    return changelogCommand(args);
-  });
+  // `changelog`: fully TS, deterministic-canonical (US-PORT-005). The v2 default
+  // `generate` shelled the configured agent to AI-restyle the draft (and the
+  // dispatch fell back to bash to do it); that path is RETIRED. The deterministic
+  // draft is now the only output, produced natively in TS — no bash fallback,
+  // no agent, no warn noise. `--no-ai` is kept as an accepted no-op.
+  registerPorted("changelog", changelogCommand);
   // `consistency`: check/--json/--project-dir + help + unknown all TS (full
   // surface ported; the python orchestrator is reimplemented byte-for-byte).
   registerPorted("consistency", consistencyCommand);

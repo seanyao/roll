@@ -1,28 +1,26 @@
 /**
  * `roll changelog` — TS port of bin/roll cmd_changelog (5655-5708) plus the
- * deterministic draft generator lib/changelog_generate.py (ported in full) and
- * the AI-style polish step _changelog_ai_style (5590-5627).
+ * deterministic draft generator lib/changelog_generate.py (ported in full).
  *
  * Subcommands: generate (default) | --help/-h/help | unknown.
  *
- * generate flags (mirrors the bash arg scan 5660-5669):
- *   --no-ai → skip the AI polish (deterministic draft only)
+ * generate flags:
  *   --write → write the result into CHANGELOG.md's ## Unreleased section
- *   --json  → machine-readable; implies --no-ai; passed through to the generator
+ *   --json  → machine-readable; passed through to the generator
+ *   --no-ai → accepted as a no-op (deterministic output is now the only path)
  *   everything else → forwarded to the generator (--backlog/--changelog paths)
  *
- * AI-STYLE DECISION (documented divergence, per port brief):
- * bin/roll's _changelog_ai_style shells the configured agent (claude/kimi/…)
- * with a 150s watchdog and echoes the styled draft, falling back to the raw
- * deterministic draft on ANY failure (empty output, missing `- ` bullets, or a
- * non-zero/killed agent). v2 ALWAYS attempts the agent unless --no-ai/--json.
- * Running a live agent inside a port is non-deterministic and unsuitable for
- * difftests, so the TS attempt is INJECTABLE via an optional styler callback
- * and DEFAULT-OFF (no styler → behaves exactly like the v2 fallback path:
- * raw draft + the same `warn` line v2 prints when styling is unavailable).
- * The deterministic draft path is mirrored byte-for-byte; the difftest spawns
- * the python oracle for that path and runs the TS with --no-ai (the path a
- * test environment with no agent collapses to in v2 as well).
+ * AI-STYLE RETIREMENT (US-PORT-005, owner ruling "drop 倾向"):
+ * v2's _changelog_ai_style shelled the configured agent (claude/kimi/…) to
+ * restyle the draft, and the bash dispatch fell back to bash whenever the
+ * default `generate` ran (the only way to shell that agent). That path is now
+ * RETIRED: the deterministic draft is the canonical and ONLY output. The
+ * default `generate` produces it natively in TS — no agent, no bash fallback,
+ * and no warn noise — which also removes the reasoning-leak risk of shelling an
+ * agent whose CLI has no final-only mode (see port-or-drop.md "Agent-shelling
+ * 输出纪律"). `--no-ai` is kept as an accepted no-op so existing scripts/flags
+ * keep working. The deterministic path stays byte-identical to the python
+ * oracle (difftested).
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -38,10 +36,6 @@ function palette(): { CYAN: string; YELLOW: string; RED: string; NC: string } {
 function info(line: string): void {
   const p = palette();
   process.stdout.write(`${p.CYAN}[roll]${p.NC} ${line}\n`);
-}
-function warn(line: string): void {
-  const p = palette();
-  process.stdout.write(`${p.YELLOW}[roll]${p.NC} ${line}\n`);
 }
 function err(line: string): void {
   const p = palette();
@@ -510,33 +504,32 @@ function writeToChangelog(draft: string, changelogPath: string): void {
 const GENERATE_HELP = `Usage: roll changelog generate [options]
 
   从 backlog ✅ Done 故事 + 上次发布以来的提交,生成 ## Unreleased 发布说明。
-  默认用配置的 agent(roll agent use)按项目风格润色;失败自动回退确定性草稿。
+  输出为确定性草稿(按关键词分类、过 lint),不再调用 AI 润色。
 
-  roll changelog generate               # 预览(AI 润色)
-  roll changelog generate --write       # 写入 CHANGELOG.md(AI 润色)
-  roll changelog generate --no-ai       # 仅确定性草稿,不调 AI
-  roll changelog generate --json        # 机器可读(确定性)
+  roll changelog generate               # 预览(确定性草稿)
+  roll changelog generate --write       # 写入 CHANGELOG.md
+  roll changelog generate --json        # 机器可读(JSON)
 `;
 
-/** Optional AI styler injection (default-off; see header). */
-export type Styler = (raw: string) => string | null;
-
-export function changelogCommand(args: string[], styler?: Styler): number {
+export function changelogCommand(args: string[]): number {
   const subcmd = args[0] ?? "generate";
   const rest = args.slice(1);
 
   if (subcmd === "generate") {
-    let wantAi = true;
     let toWrite = false;
     let isJson = false;
     const genOpts: GenerateOptions = {};
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i] ?? "";
-      if (a === "--no-ai") wantAi = false;
-      else if (a === "--write") toWrite = true;
-      else if (a === "--json") {
+      // --no-ai: accepted as a no-op. Deterministic output is now the canonical
+      // and only path (US-PORT-005), so the flag is redundant but still honored
+      // so existing scripts/flags keep working.
+      if (a === "--no-ai") {
+        /* no-op */
+      } else if (a === "--write") {
+        toWrite = true;
+      } else if (a === "--json") {
         isJson = true;
-        wantAi = false;
       } else if (a === "--backlog") {
         genOpts.backlog = rest[++i];
       } else if (a === "--changelog") {
@@ -556,40 +549,18 @@ export function changelogCommand(args: string[], styler?: Styler): number {
       return 0;
     }
 
-    // res.stdout for the non-write path IS the raw deterministic draft. We must
-    // mirror cmd_changelog's `final="$raw"` then optional styling/write.
-    const raw = res.stdout;
-    let final = raw;
-    if (wantAi) {
-      // v2 attempts the agent; on empty/no-`- `-bullet output it warns + falls
-      // back to raw. With no injected styler (the default + test path) we take
-      // exactly that fallback branch (styled empty) and emit the same warn.
-      const styled = styler ? styler(raw) : null;
-      if (styled !== null && styled !== "" && /^- /m.test(styled)) {
-        final = styled;
-      } else {
-        warn("changelog: AI 润色不可用/失败,输出确定性草稿(可加 --no-ai 跳过)");
-      }
-    }
-
+    // res.stdout IS the raw deterministic draft — the canonical output.
+    const draft = res.stdout;
     if (toWrite) {
-      // The deterministic generator already wrote on --write; but with AI/warn
-      // semantics the bash path writes `final` via _changelog_write_unreleased.
-      // To mirror exactly, re-run the generator WITHOUT --write to get the raw
-      // draft, decide final, then write final. Since styler is default-off,
-      // final===raw and the generator's own --write produced the same bytes —
-      // but the message differs (bash prints `info "Updated CHANGELOG.md"`).
-      // Simplest faithful path: generator did NOT write (we passed no write),
-      // so write `final` here through the bash-equivalent unreleased splicer.
-      writeUnreleased(final, genOpts.changelog ?? "CHANGELOG.md");
+      // Write through the bash-equivalent ## Unreleased splicer for byte parity
+      // with v2's _changelog_write_unreleased.
+      writeUnreleased(draft, genOpts.changelog ?? "CHANGELOG.md");
       info("Updated CHANGELOG.md");
       return 0;
     }
-    // printf '%s\n' "$final" — final already ends in "\n"; bash printf adds one
-    // more only if the value lacks it. The draft ends with exactly one "\n", and
-    // bash `printf '%s\n'` on a value ending in "\n" yields a trailing blank
-    // line. Mirror that: ensure exactly the bash bytes.
-    process.stdout.write(final.endsWith("\n") ? final : final + "\n");
+    // printf '%s\n' "$draft" — the draft already ends with exactly one "\n",
+    // and bash `printf '%s\n'` on such a value yields a trailing blank line.
+    process.stdout.write(draft.endsWith("\n") ? draft : draft + "\n");
     return 0;
   }
 

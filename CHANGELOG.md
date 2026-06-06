@@ -2,43 +2,53 @@
 
 ## Unreleased
 
+### 新功能
+
+- 档案制写入端：待办与交付物同夹的布局支持，含编号到史诗的索引与垃圾回收命令（US-META-001）
+
 ### 稳定性
 
 - 版本探针读冻结引擎的化石串：version 显示旧号、update 自检误报、升级 nag 永不消失，三症同根（FIX-202） `[loop]`
 
 ### 可见性
 
-- 验收报告内联交付过程：时间线、关键转折与折叠全转录，无人值守周期也能回溯怎么建出来的（US-ATTEST-014）
-  <!-- evidence: .roll/features/acceptance-evidence/US-ATTEST-014/latest/US-ATTEST-014-report.html -->
-- 验收档案与待办同夹：attest 落卡夹并带卡号报告名，配 ID→史诗索引（roll index）与回收命令（roll gc），旧布局保持读取兼容（US-META-001）
-  <!-- evidence: .roll/features/backlog-lifecycle/US-META-001/latest/US-META-001-report.html -->
 - 完成状态抢跑：PR 还没合并卡片就翻了完成，违反完成即已合主干的纪律（FIX-211） `[loop]`
 - 面板对历史全瞎：周期记录缺时间戳，八次真实交付显示零，统计无从分桶（FIX-213） `[loop]`
 - 面板对运行中的周期全盲：活性探测还读旧信号，真在干活却显示空闲零周期（FIX-203） `[loop]`
 - (核): roll loop now 前台实时转录（US-PORT-011）
-- 观测窗从裸 JSON 换三层关键节点转录：抑制噪声、弱化编辑、高亮 tcr/story/gate/pr/error 信号，信号口径与验收报告时间线同源；裸流仍落 live.log（US-PORT-012） `[loop]`
 
 ### 自动化流水线
 
-- PR-loop 运行时心脏 TS 化：pr runner 改驱 `roll loop pr-inbox`（驱动纯 pr-loop 决策层），bash inbox 退役；rebase 熔断从被吞结果改为真正生效（US-PORT-001） `[loop]`
-  <!-- evidence: .roll/features/bash-endgame/US-PORT-001/latest/US-PORT-001-report.html -->
-- roll brief TS 化：默认一屏三块（已完成 / 进行中与队列 / 需 owner 拍板），数字优先、细节折叠，`--full` 展开全量；输出跟随 locale 单语不混排；从 backlog 读取器实时合成，不再 shell agent（思考过程零泄漏）（US-PORT-002） `[loop]`
-  <!-- evidence: .roll/features/bash-endgame/US-PORT-002/latest/US-PORT-002-report.html -->
-- roll idea TS 化：分类（缺陷→FIX / 想法→IDEA）、家族内自动编号、过 backlog lint 规则才落卡（违规拒收不写脏卡），读写经 BacklogStore 与 backlog 同源；输出跟随 locale 单语（US-PORT-003） `[loop]`
-  <!-- evidence: .roll/features/bash-endgame/US-PORT-003/latest/US-PORT-003-report.html -->
 - 终态失真：真实交付已合并完成，周期记录却写失败，失败语义被稀释（FIX-214） `[loop]`
 - 无人值守周期自产实拍：给截屏调度器加终端通道，无图形环境时诚实跳过留痕（US-ATTEST-011）
-- loop cycle cycle-20260606-050516-6852（PR#477）
+- roll release v3 原生重写：版本号引导、changelog、PR 与 tag 流程提示；发版闸已在 CI（US-PORT-004）
+- loop 读面子命令 TS 薄读取（eval、runs、story、signals）；tmux 流的 monitor 与 attach 退役（US-PORT-007）
+- loop cycle cycle-20260606-143234-1425（PR#497）
+- loop cycle cycle-20260606-044623-48242（PR#476）
+
+### 工程和测试
+
+- 迁移命令嵌套仓盲区：对私仓的搬迁打到主仓上，吞错自报成功，修执行面并补嵌套形态测试（FIX-215） `[loop]`
+- 档案迁移命令：读索引按清单搬树改名重建链，演练模式先行，可重入有测试（US-META-002a）
 
 ### 其他
 
 - v3 心脏首跑即瘫：skill 路径化石致 agent 盲开、改动漏回主仓、被杀不留痕、cycle 不可观测；修解析+钉题+连 .roll+信号善后+tmux 观测窗（FIX-204） `[loop]`
 - 交付可以悄悄跳过验收报告：文本约束没牙，缺报告要在运行时留痕可审计，政策可升硬闸（FIX-207） `[loop]`
 - 排程静默死亡：启用命令吞掉挂载失败照报成功，三小时无 tick 全靠人肉掩盖（FIX-212） `[loop]`
-- 档案迁移命令打错仓：对嵌套 roll-meta 私仓的搬迁 git mv 打到主仓上、被宽容层吞错却按计划自报成功；改为走 .roll 所属仓做 git 操作、据实汇总、任一搬迁失败即非零退出（FIX-215） `[loop]`
 - 验收证据惯例升级：文本证据属 agent 自述可伪造，CLI 卡默认改为真实终端截屏走独立捕获通道，文本降级为补充（US-ATTEST-010）
 - 验收口径补全：失败与阻塞有名分、敏感信息进档前遮蔽、报告生成后冒烟自检（US-ATTEST-012）
+- 验收报告分层且自含待办全貌：卡情上下文与业务结论在前技术折叠，空章节裁剪，设计审查不改证据（US-ATTEST-013）
+- 过程内联进报告：时间线与关键转折加折叠全转录，无人过程也可回溯（US-ATTEST-014）
+- 执行存量迁移：演练过目后真跑，重写唯一活引用，全仓对账校验存档（US-META-002b）
+- skills 验收文案同步新档案布局，跨仓改 roll-skills 后 bump submodule manual-only（US-META-004）
 - changelog 生成同输入两次运行结果漂移：探针偶发失败静默切换过滤分支，17 条目消失（FIX-199） `[loop]`
+- 观测窗可读性：裸流换三层关键节点转录，信号口径与验收报告时间线同源（US-PORT-012）
+- roll brief TS 化：汇报口吻保留，默认一屏精简、细节折叠，跟随 locale 单语；agent 经结构化流只取终稿，绝不漏思考过程（US-PORT-002）
+- roll idea TS 化：分类、自动编号、过 lint 规则落卡，与 backlog 存取同源（US-PORT-003）
+- changelog 确定性输出转正：AI 润色降级为可选路径或退役，默认不再回落 bash（US-PORT-005）
+- config 写面 TS 化，整个 config 命令收口（US-PORT-006）
+- skills bump — before/after 对照证据惯例（PR#485）
 
 ## v3.606.2
 

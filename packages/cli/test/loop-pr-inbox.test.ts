@@ -7,7 +7,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { PrTick } from "@roll/core";
-import { type PrInboxDeps, type PrViewFacts, reducePrView, runPrInbox } from "../src/commands/loop-pr-inbox.js";
+import {
+  type PrInboxDeps,
+  type PrViewFacts,
+  reducePrView,
+  runPrInbox,
+  upsertRebaseAttempts,
+} from "../src/commands/loop-pr-inbox.js";
+import { parseRebaseAttempts } from "@roll/core";
 
 interface Recorder {
   ticks: PrTick[];
@@ -73,6 +80,34 @@ describe("reducePrView — last BOT/APP review + rollup reduction (bin/roll 1199
   it("any FAILURE → failure ci", () => {
     const f = reducePrView({ statusCheckRollup: [{ conclusion: "SUCCESS" }, { conclusion: "FAILURE" }] });
     expect(f.ciState).toBe("failure");
+  });
+});
+
+describe("upsertRebaseAttempts — minimal YAML round-trip (bin/roll 11838-11871)", () => {
+  it("creates pr_state from an empty body", () => {
+    const out = upsertRebaseAttempts("", "5", "100 200");
+    expect(out).toBe(`pr_state:\n  "5":\n    attempts_at: "100 200"\n`);
+    expect(parseRebaseAttempts(out, "5")).toEqual([100, 200]);
+  });
+  it("appends a new pr alongside an existing one (no extra blank lines)", () => {
+    let s = upsertRebaseAttempts("", "5", "100");
+    s = upsertRebaseAttempts(s, "9", "300");
+    expect(s).not.toMatch(/\n\n/); // no accreted blank lines
+    expect(parseRebaseAttempts(s, "5")).toEqual([100]);
+    expect(parseRebaseAttempts(s, "9")).toEqual([300]);
+  });
+  it("overwrites an existing pr's value, idempotent across repeats", () => {
+    let s = upsertRebaseAttempts("", "5", "100");
+    s = upsertRebaseAttempts(s, "5", "100 200");
+    s = upsertRebaseAttempts(s, "5", "100 200 300");
+    expect(parseRebaseAttempts(s, "5")).toEqual([100, 200, 300]);
+    expect(s.match(/"5":/g)?.length).toBe(1); // exactly one entry, not duplicated
+    expect(s).not.toMatch(/\n\n/);
+  });
+  it("preserves a leading non-pr_state field", () => {
+    const s = upsertRebaseAttempts("status: idle\n", "7", "42");
+    expect(s).toContain("status: idle");
+    expect(parseRebaseAttempts(s, "7")).toEqual([42]);
   });
 });
 

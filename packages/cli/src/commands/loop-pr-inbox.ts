@@ -278,7 +278,8 @@ function rebaseCircuitAllowed(num: string): boolean {
     const file = alertPath();
     mkdirSync(dirname(file), { recursive: true });
     const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-    appendFileSync(
+    // bash `cat > "${_LOOP_ALERT}"` (bin/roll 11816) — OVERWRITE, not append.
+    writeFileSync(
       file,
       [
         `# ALERT — PR rebase circuit breaker tripped`,
@@ -298,18 +299,15 @@ function rebaseCircuitAllowed(num: string): boolean {
   return true;
 }
 
-/** Minimal YAML writer for `pr_state.<pr>.attempts_at` (mirrors bin/roll 11838-11871). */
-function writeRebaseAttempts(state: string, pr: string, timestamps: readonly number[]): void {
-  mkdirSync(dirname(state), { recursive: true });
-  let body = "";
-  try {
-    body = readFileSync(state, "utf8");
-  } catch {
-    /* fresh */
-  }
-  const value = renderRebaseAttempts(timestamps);
+/**
+ * Pure upsert of `pr_state.<pr>.attempts_at = "<value>"` into a loop-state YAML
+ * body — mirrors the awk at bin/roll 11838-11871. Returns the new body (always
+ * exactly one trailing newline). The single trailing-newline artifact of
+ * `split("\n")` is stripped first so repeated upserts never accrete blank lines.
+ */
+export function upsertRebaseAttempts(stateBody: string, pr: string, value: string): string {
   const prKey = `"${pr}":`;
-  const lines = body === "" ? [] : body.split("\n");
+  const lines = stateBody.replace(/\n$/, "").split("\n").filter((l, i, a) => !(a.length === 1 && l === ""));
   const out: string[] = [];
   let inPr = false;
   let inTarget = false;
@@ -339,7 +337,19 @@ function writeRebaseAttempts(state: string, pr: string, timestamps: readonly num
     out.push(`  ${prKey}`);
     out.push(`    attempts_at: "${value}"`);
   }
-  writeFileSync(state, `${out.filter((l, i) => !(i === out.length - 1 && l === "")).join("\n")}\n`);
+  return `${out.join("\n")}\n`;
+}
+
+/** Persist `pr_state.<pr>.attempts_at` to the state file (via {@link upsertRebaseAttempts}). */
+function writeRebaseAttempts(state: string, pr: string, timestamps: readonly number[]): void {
+  mkdirSync(dirname(state), { recursive: true });
+  let body = "";
+  try {
+    body = readFileSync(state, "utf8");
+  } catch {
+    /* fresh */
+  }
+  writeFileSync(state, upsertRebaseAttempts(body, pr, renderRebaseAttempts(timestamps)));
 }
 
 /** Spawn a bridged bash-engine helper detached; resolve when it exits (or errors). */

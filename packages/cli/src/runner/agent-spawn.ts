@@ -72,16 +72,8 @@ export const AUTORUN_DIRECTIVE =
  * (NEVER a silent no-op) so the parallel-verification protocol surfaces the gap.
  */
 export const AGENT_ARGV_TODO: Record<string, string> = {
-  kimi: "kimi-code|kimi-cli|kimi -p <prompt> (FIX-126/133; no stream-json splice)",
-  pi: "pi -p <prompt> (text mode; no usage on stdout — cost via session file)",
-  deepseek: "deepseek <prompt> (positional)",
-  codex: "codex exec <prompt>",
   openai: "codex exec <prompt>",
   opencode: "opencode run <prompt>",
-  gemini: "agy -p --dangerously-skip-permissions <prompt> (FIX-153)",
-  agy: "agy -p --dangerously-skip-permissions <prompt> (FIX-153)",
-  antigravity: "agy -p --dangerously-skip-permissions <prompt> (FIX-153)",
-  qwen: "qwen <prompt> (positional)",
 };
 
 /**
@@ -208,7 +200,8 @@ export type AgentSpawn = (
  * The child runs with CWD = the worktree, where the agent makes its TCR commits
  * (exactly as v2: the loop hands the agent the worktree and it commits inside).
  */
-function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: string; args: string[] } {
+/** Build the spawn argv for a resolved agent — exported for unit tests. */
+export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: string; args: string[] } {
   const prompt = `${AUTORUN_DIRECTIVE}${opts.storyId !== undefined && opts.storyId !== "" ? storyPinDirective(opts.storyId) : ""}${opts.skillBody}`;
   if (agent === "claude") {
     return buildClaudeArgv({
@@ -223,6 +216,21 @@ function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: strin
     // pi -p "<prompt>" in the worktree CWD — no stream-json, no --add-dir.
     // The agent's stdout is plain text; onChunk feeds it to the live log.
     return { bin: opts.bin ?? "pi", args: ["-p", prompt] };
+  }
+  if (agent === "kimi") {
+    return { bin: opts.bin ?? "kimi", args: ["-p", prompt] };
+  }
+  if (agent === "codex") {
+    return { bin: opts.bin ?? "codex", args: ["exec", prompt] };
+  }
+  if (agent === "deepseek") {
+    return { bin: opts.bin ?? "deepseek", args: [prompt] };
+  }
+  if (agent === "qwen") {
+    return { bin: opts.bin ?? "qwen", args: [prompt] };
+  }
+  if (agent === "agy" || agent === "gemini" || agent === "antigravity") {
+    return { bin: opts.bin ?? "agy", args: ["-p", "--dangerously-skip-permissions", prompt] };
   }
   const hint = AGENT_ARGV_TODO[agent] ?? "unknown agent";
   throw new Error(

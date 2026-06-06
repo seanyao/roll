@@ -16,6 +16,7 @@ import {
   type Ports,
   buildClaudeArgv,
   buildRunRow,
+  buildSpawnCommand,
   dryRunPlan,
   executeCommand,
   parseEstMin,
@@ -98,14 +99,76 @@ describe("buildClaudeArgv — v2 flag set, fixed arg order", () => {
   });
 });
 
-describe("realAgentSpawn — only claude argv is ported", () => {
+describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
+  const prompt = `${AUTORUN_DIRECTIVE}DO WORK`;
+
+  it("claude (default) gets full loop-enhanced argv", () => {
+    const { bin, args } = buildSpawnCommand("claude", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("claude");
+    expect(args[0]).toBe("-p");
+    expect(args.slice(2)).toEqual([
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--output-format",
+      "stream-json",
+      "--add-dir",
+      "/wt",
+    ]);
+  });
+
+  it("pi: pi -p <prompt>", () => {
+    const { bin, args } = buildSpawnCommand("pi", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("pi");
+    expect(args).toEqual(["-p", prompt]);
+  });
+
+  it("kimi: kimi -p <prompt>", () => {
+    const { bin, args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("kimi");
+    expect(args).toEqual(["-p", prompt]);
+  });
+
+  it("codex: codex exec <prompt>", () => {
+    const { bin, args } = buildSpawnCommand("codex", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("codex");
+    expect(args).toEqual(["exec", prompt]);
+  });
+
+  it("deepseek: deepseek <prompt> (positional)", () => {
+    const { bin, args } = buildSpawnCommand("deepseek", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("deepseek");
+    expect(args).toEqual([prompt]);
+  });
+
+  it("qwen: qwen <prompt> (positional)", () => {
+    const { bin, args } = buildSpawnCommand("qwen", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("qwen");
+    expect(args).toEqual([prompt]);
+  });
+
+  it("agy: agy -p --dangerously-skip-permissions <prompt>", () => {
+    const { bin, args } = buildSpawnCommand("agy", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("agy");
+    expect(args).toEqual(["-p", "--dangerously-skip-permissions", prompt]);
+  });
+
+  it("gemini aliases to agy argv", () => {
+    const { bin, args } = buildSpawnCommand("gemini", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("agy");
+    expect(args).toEqual(["-p", "--dangerously-skip-permissions", prompt]);
+  });
+
+  it("antigravity aliases to agy argv", () => {
+    const { bin, args } = buildSpawnCommand("antigravity", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("agy");
+    expect(args).toEqual(["-p", "--dangerously-skip-permissions", prompt]);
+  });
+
   it("throws a loud, documented error for an un-ported agent (fail-loud, not silent)", () => {
-    expect(() => realAgentSpawn("kimi", { cwd: "/wt", skillBody: "x" })).toThrow(
-      /agent 'kimi' argv not yet ported/,
+    expect(() => buildSpawnCommand("opencode", { cwd: "/wt", skillBody: "x" })).toThrow(
+      /agent 'opencode' argv not yet ported/,
     );
-    // The TODO map documents the deferred agents' v2 shapes.
-    expect(Object.keys(AGENT_ARGV_TODO)).toContain("kimi");
-    expect(Object.keys(AGENT_ARGV_TODO)).toContain("codex");
+    expect(Object.keys(AGENT_ARGV_TODO)).toContain("opencode");
   });
 });
 

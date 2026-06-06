@@ -17,6 +17,7 @@ import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, runCycleOnce } from "../runner/index.js";
+import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { spawn } from "node:child_process";
 
 /** US-PORT-011: after a delivered cycle, surface the acceptance report —
@@ -165,35 +166,15 @@ function runtimeDir(projectPath: string): string {
 
 /**
  * Resolve + read the loop SKILL.md body the agent runs, frontmatter stripped.
- *
- * FIX-204A: the v2-era path (`.roll/skills/roll-loop/SKILL.md`) became a
- * fossil when skills moved to the `skills/` submodule — every live cycle got
- * an EMPTY body and the agent drove blind (2026-06-06, the v3 heart's first
- * live run). Resolution order: `ROLL_LOOP_SKILL` env (explicit override) →
- * legacy `.roll/skills/` (projects vendoring a private copy) → `skills/`
- * submodule (the shipped truth). Returns null when nothing resolves to a
- * non-empty body — the caller must fail LOUD, never spawn a blind agent.
+ * Thin wrapper over the shared {@link readSkillBodyGeneric} pinned to the
+ * `roll-loop` skill + the `ROLL_LOOP_SKILL` env override (FIX-204A lineage —
+ * resolution order documented there).
  */
 export function readSkillBody(projectPath: string): string | null {
-  const candidates = [
-    process.env["ROLL_LOOP_SKILL"] ?? "",
-    join(projectPath, ".roll", "skills", "roll-loop", "SKILL.md"),
-    join(projectPath, "skills", "roll-loop", "SKILL.md"),
-  ].filter((p) => p !== "");
-  for (const p of candidates) {
-    if (!existsSync(p)) continue;
-    let raw = "";
-    try {
-      raw = readFileSync(p, "utf8");
-    } catch {
-      continue;
-    }
-    // Strip YAML frontmatter — the v2 oracle hands the agent the body only
-    // (`_agent_skill_cmd` splices the "stripped SKILL.md body").
-    const body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
-    if (body !== "") return body;
-  }
-  return null;
+  return readSkillBodyGeneric(projectPath, {
+    skillName: "roll-loop",
+    envOverride: process.env["ROLL_LOOP_SKILL"],
+  });
 }
 
 /**

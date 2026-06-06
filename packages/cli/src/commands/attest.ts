@@ -583,8 +583,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         `<p><a href="${reportRel}">Attestation report</a></p>\n` +
         `<p class="muted">Delivered ${new Date().toISOString().slice(0, 10)}</p>\n`;
       idx = idx.replace(
-        /<section id="delivery">[\s\S]*?<\/section>/,
-        `<section id="delivery"><h2>Delivery</h2>${deliveryHtml}</section>`,
+        /<section class="phase-pending">\s*<h2>Delivery<\/h2>[\s\S]*?<\/section>/,
+        `<section class="phase-done"><h2>Delivery</h2>${deliveryHtml}</section>`,
       );
       writeFileSync(indexPath, idx, "utf8");
     } catch {

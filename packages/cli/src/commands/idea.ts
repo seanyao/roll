@@ -112,22 +112,31 @@ export function ideaCommand(args: string[]): number {
 
     const indexHtml =
       `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n` +
+      `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
       `<title>${plan.id} — ${text.replace(/"/g, "&quot;")}</title>\n` +
-      `<style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;` +
-      `line-height:1.6;color:#1a1a1a}pre{background:#f5f5f5;padding:1rem;overflow-x:auto}` +
-      `section{margin:2rem 0;padding:1rem;border-left:3px solid #ddd}` +
-      `.empty{color:#999;font-style:italic}footer{color:#666;font-size:.85rem;` +
-      `margin-top:3rem;border-top:1px solid #eee;padding-top:1rem}` +
-      `h2{color:#333}</style>\n` +
+      `<style>\n` +
+      `:root { color-scheme: light dark; --fg:#1f2328; --bg:#ffffff; --muted:#57606a; --line:#d0d7de; }\n` +
+      `@media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --bg:#0d1117; --muted:#8b949e; --line:#30363d; } }\n` +
+      `body { margin:0 auto; max-width:880px; padding:32px 20px 80px; background:var(--bg); color:var(--fg);\n` +
+      `  font:15px/1.65 -apple-system, "PingFang SC", "Segoe UI", sans-serif; }\n` +
+      `h1 { font-size:22px; } h2 { font-size:18px; border-bottom:1px solid var(--line); padding-bottom:6px; }\n` +
+      `code { background:rgba(127,127,127,.12); padding:1px 6px; border-radius:6px; font-size:.92em; }\n` +
+      `pre { background:rgba(127,127,127,.08); padding:12px; border-radius:8px; overflow-x:auto; }\n` +
+      `section { border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:14px 0; }\n` +
+      `.empty { color:var(--muted); font-style:italic; }\n` +
+      `footer { color:var(--muted); font-size:13px; margin-top:36px; border-top:1px solid var(--line); padding-top:12px; }\n` +
+      `.phase-done { border-left:4px solid #2da44e; } .phase-pending { border-left:4px solid #d0d7de; }\n` +
+      `@media print { body { max-width:none; padding:0; } section { break-inside:avoid; } }\n` +
+      `</style>\n` +
       `</head>\n<body>\n` +
       `<h1>${plan.id}</h1>\n` +
-      `<p><strong>${text.replace(/"/g, "&quot;")}</strong></p>\n` +
-      `<p class="empty">Type: ${plan.kind === "bug" ? "Bug Fix" : "Idea"} · Created: ${today}</p>\n` +
-      `<section id="design"><h2>Design</h2><p class="empty">Not yet started</p></section>\n` +
-      `<section id="runs"><h2>Execution</h2><p class="empty">No cycles yet</p></section>\n` +
-      `<section id="delivery"><h2>Delivery</h2><p class="empty">Not yet delivered</p></section>\n` +
-      `<section id="notes"><h2>Retrospective</h2><p class="empty">Not yet written</p></section>\n` +
-      `<footer>Generated ${today} · <a href="spec.md">spec.md</a></footer>\n</body>\n</html>\n`;
+      `<p class="meta"><code>${plan.kind === "bug" ? "FIX" : "IDEA"}</code> · Created ${today}</p>\n` +
+      `<p>${text.replace(/"/g, "&quot;")}</p>\n` +
+      `<section class="phase-pending"><h2>Design</h2><p class="empty">Not yet started</p></section>\n` +
+      `<section class="phase-pending"><h2>Execution</h2><p class="empty">No cycles yet</p></section>\n` +
+      `<section class="phase-pending"><h2>Delivery</h2><p class="empty">Not yet delivered</p></section>\n` +
+      `<section class="phase-pending"><h2>Retrospective</h2><p class="empty">Not yet written</p></section>\n` +
+      `<footer>Roll · <a href="spec.md">spec.md</a></footer>\n</body>\n</html>\n`;
     writeFileSync(join(cardDir, "index.html"), indexHtml, "utf8");
   } catch {
     /* best-effort: folder creation is non-blocking */

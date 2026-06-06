@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { generateIndex } from "../lib/archive.js";
+import { STORY_ID_RE } from "../lib/story-page.js";
 
 /** `roll index` — regenerate the backlog-derived ID→epic index + features root page. */
 export function indexCommand(args: string[]): number {
@@ -22,33 +23,33 @@ export function indexCommand(args: string[]): number {
   // US-META-003: regenerate features/index.html
   const featuresDir = join(cwd, ".roll", "features");
   if (existsSync(featuresDir)) {
-    const epics = new Map<string, string[]>();
+    const epics = new Map<string, Set<string>>();
     for (const [sid, epic] of Object.entries(stories)) {
-      epics.set(epic, [...(epics.get(epic) || []), sid]);
+      if (!epics.has(epic)) epics.set(epic, new Set());
+      epics.get(epic)!.add(sid);
     }
     // Also scan for story folders not in index.json
     try {
       for (const d of readdirSync(featuresDir)) {
         const epicDir = join(featuresDir, d);
         if (!statSync(epicDir).isDirectory()) continue;
-        if (!epics.has(d)) epics.set(d, []);
+        if (!epics.has(d)) epics.set(d, new Set());
         for (const s of readdirSync(epicDir)) {
           const storyDir = join(epicDir, s);
           if (!statSync(storyDir).isDirectory()) continue;
-          if (/^(FIX|US|IDEA|REFACTOR)-/.test(s) && !epics.get(d)!.includes(s)) {
-            epics.get(d)!.push(s);
-          }
+          if (STORY_ID_RE.test(s)) epics.get(d)!.add(s);
         }
       }
     } catch { /* best-effort */ }
 
     const rows: string[] = [];
-    for (const [epic, storyList] of [...epics].sort()) {
-      const unique = [...new Set(storyList)].sort();
+    for (const epic of [...epics.keys()].sort()) {
+      const unique = [...epics.get(epic)!].sort();
       let delivered = 0;
       for (const s of unique) {
         const latest = join(featuresDir, epic, s, "latest");
-        try { if (statSync(latest).isDirectory() || statSync(latest).isSymbolicLink()) delivered++; } catch { /* */ }
+        // statSync follows symlinks, so a `latest` symlink → run dir counts.
+        try { if (statSync(latest).isDirectory()) delivered++; } catch { /* */ }
       }
       const links = unique.slice(0, 20).map((s) => `<a href="${epic}/${s}/index.html">${s}</a>`).join(", ");
       const more = unique.length > 20 ? ` ... +${unique.length - 20} more` : "";

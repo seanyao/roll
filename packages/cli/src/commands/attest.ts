@@ -60,6 +60,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { cardArchiveDir, findFeatureFile, reportFileName } from "../lib/archive.js";
+import { markPhaseDone } from "../lib/story-page.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
 export { findFeatureFile } from "../lib/archive.js";
@@ -577,15 +578,11 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const indexPath = join(storyDir, "index.html");
   if (existsSync(indexPath)) {
     try {
-      let idx = readFileSync(indexPath, "utf8");
       const reportRel = join(runId, reportFileName(storyId));
       const deliveryHtml =
         `<p><a href="${reportRel}">Attestation report</a></p>\n` +
         `<p class="muted">Delivered ${new Date().toISOString().slice(0, 10)}</p>\n`;
-      idx = idx.replace(
-        /<section class="phase-pending">\s*<h2>Delivery<\/h2>[\s\S]*?<\/section>/,
-        `<section class="phase-done"><h2>Delivery</h2>${deliveryHtml}</section>`,
-      );
+      const idx = markPhaseDone(readFileSync(indexPath, "utf8"), "Delivery", deliveryHtml);
       writeFileSync(indexPath, idx, "utf8");
     } catch {
       /* best-effort: index.html update is non-blocking */

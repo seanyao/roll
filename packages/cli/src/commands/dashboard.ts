@@ -611,11 +611,17 @@ export function detectLiveCycle(
   if (!isLockHeld(parseLock(lockRaw), nowSec, INNER_LOCK_STALE_SEC, pidAlive)) return dead;
   const hb = livenessVerdict(join(rtDir, "heartbeat"), { now: () => nowSec });
   if (!hb.alive) return dead;
-  // cycles are sorted newest-first; the open one (no end) is the live cycle.
-  const open = cycles.find((cy) => cy.start !== null && cy.end === null);
-  if (open === undefined || open.start === null) return dead;
-  const elapsedSec = Math.max(0, Math.trunc((now.getTime() - open.start.getTime()) / 1000));
-  return { running: true, story: open.story, elapsedSec };
+  // cycles are sorted newest-first; the MOST RECENT open cycle (no end) is the
+  // live cycle — but we skip zombies: a cycle open > ZOMBIE_THRESHOLD_SEC is a
+  // crash artifact, not a running cycle (FIX-217).
+  const ZOMBIE_THRESHOLD_SEC = 2 * 3600; // 2 hours
+  for (const cy of cycles) {
+    if (cy.start === null || cy.end !== null) continue;
+    const elapsedSec = Math.max(0, Math.trunc((now.getTime() - cy.start.getTime()) / 1000));
+    if (elapsedSec > ZOMBIE_THRESHOLD_SEC) continue; // zombie — skip
+    return { running: true, story: cy.story, elapsedSec };
+  }
+  return dead;
 }
 
 // ════════════════════════════════════════════════════════════════════════════

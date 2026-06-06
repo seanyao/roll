@@ -11,10 +11,12 @@
  *     logs to .roll/loop/cron.log, delegates to `loop run-once`.
  *   - pr runner template: v2 lock shape driving the v3 `roll loop pr-inbox` tick.
  *   - on/off: plist install/uninstall via injected launchd ops (no real
- *     launchctl in tests), dream service left untouched (FIX-197 lineage).
+ *     launchctl in tests); dream IS generated too (US-PORT-008) — same self-
+ *     contained shape, daily schedule, delegating to `roll dream run-once`.
  *   - pause/resume: PAUSE-<slug> marker file under <project>/.roll/loop/.
  */
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +24,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   buildLoopRunnerScript,
   buildPrRunnerScript,
+  buildDreamRunnerScript,
+  deriveMinute,
   parseLoopPeriodMinutes,
   loopOnCommand,
   loopOffCommand,
@@ -282,6 +286,55 @@ describe("pr runner template (v3 TS tick)", () => {
   });
 });
 
+describe("v3 dream runner template (US-PORT-008)", () => {
+  const script = buildDreamRunnerScript({
+    projectPath: "/Users/u/proj",
+    slug: "proj-abc123",
+    rollBin: "/opt/homebrew/bin/roll",
+  });
+
+  it("delegates the scan to `roll dream run-once` (the v3 heart)", () => {
+    expect(script).toContain('"$ROLL_BIN" dream run-once');
+    expect(script).toContain('cd "/Users/u/proj"');
+    expect(script).toContain('RT="/Users/u/proj/.roll/dream"'); // project-local log dir (FIX-139)
+    expect(script).toContain('LOG="$RT/cron.log"');
+  });
+
+  it("is self-contained — calls NO bash-engine functions, no source, no tmux", () => {
+    expect(script).not.toMatch(/_loop_migrate|_agent_skill_cmd|_loop_runtime_dir|_write_runner_script/);
+    expect(script).not.toContain("source ");
+    expect(script).not.toContain("tmux"); // dream is non-interactive — no observation window
+  });
+
+  it("honors the shared PAUSE marker before running the scan", () => {
+    expect(script).toContain("PAUSE-proj-abc123");
+    const pauseIdx = script.indexOf("PAUSE-proj-abc123");
+    const runIdx = script.indexOf('"$ROLL_BIN" dream run-once');
+    expect(pauseIdx).toBeGreaterThan(-1);
+    expect(pauseIdx).toBeLessThan(runIdx);
+  });
+
+  it("defaults ROLL_BIN to command -v roll when no override given", () => {
+    const s = buildDreamRunnerScript({ projectPath: "/Users/u/proj", slug: "s" });
+    expect(s).toContain("command -v roll");
+  });
+});
+
+describe("deriveMinute (ports _loop_derive_minute)", () => {
+  it("is a stable md5-derived minute in [1,55]", () => {
+    const m = deriveMinute("/Users/u/proj");
+    expect(m).toBeGreaterThanOrEqual(1);
+    expect(m).toBeLessThanOrEqual(55);
+    expect(deriveMinute("/Users/u/proj")).toBe(m); // deterministic
+  });
+
+  it("matches the bash formula (md5 hex[0:6] + offset) % 55 + 1", () => {
+    const p = "/some/project/path";
+    const dec = parseInt(createHash("md5").update(p).digest("hex").slice(0, 6), 16);
+    expect(deriveMinute(p, 2)).toBe(((dec + 2) % 55) + 1);
+  });
+});
+
 describe("parseLoopPeriodMinutes", () => {
   it("reads loop_schedule.period_minutes from local.yaml text", () => {
     expect(parseLoopPeriodMinutes("loop_schedule:\n  period_minutes: 30\n  offset_minute: 7\n")).toBe(30);
@@ -294,7 +347,7 @@ describe("parseLoopPeriodMinutes", () => {
 });
 
 describe("loop on/off (injected launchd)", () => {
-  it("on: writes loop+pr runners & plists, reinstalls both labels, skips dream", async () => {
+  it("on: writes loop+pr+dream runners & plists, reinstalls all three labels", async () => {
     const proj = tmp("proj");
     mkdirSync(join(proj, ".roll"), { recursive: true });
     writeFileSync(join(proj, ".roll", "local.yaml"), "loop_schedule:\n  period_minutes: 30\n");
@@ -307,17 +360,24 @@ describe("loop on/off (injected launchd)", () => {
 
     const loopRunner = join(shared, "loop", "run-proj-abc123.sh");
     const prRunner = join(shared, "pr", "run-proj-abc123.sh");
+    const dreamRunner = join(shared, "dream", "run-proj-abc123.sh");
     expect(existsSync(loopRunner)).toBe(true);
     expect(existsSync(prRunner)).toBe(true);
+    expect(existsSync(dreamRunner)).toBe(true);
     expect(readFileSync(loopRunner, "utf8")).toContain("loop run-once");
+    expect(readFileSync(dreamRunner, "utf8")).toContain("dream run-once"); // US-PORT-008
     expect(existsSync(join(ld, "com.roll.loop.proj-abc123.plist"))).toBe(true);
     expect(existsSync(join(ld, "com.roll.pr.proj-abc123.plist"))).toBe(true);
+    expect(existsSync(join(ld, "com.roll.dream.proj-abc123.plist"))).toBe(true);
     const plist = readFileSync(join(ld, "com.roll.loop.proj-abc123.plist"), "utf8");
     expect(plist).toContain("<integer>1800</integer>"); // 30min × 60
+    // dream default daily path = StartInterval 86400 (FIX-105), no calendar.
+    const dreamPlist = readFileSync(join(ld, "com.roll.dream.proj-abc123.plist"), "utf8");
+    expect(dreamPlist).toContain("<integer>86400</integer>");
 
     expect(calls.some((c) => c.startsWith("reinstall 501 com.roll.loop.proj-abc123"))).toBe(true);
     expect(calls.some((c) => c.startsWith("reinstall 501 com.roll.pr.proj-abc123"))).toBe(true);
-    expect(calls.some((c) => c.includes("dream"))).toBe(false); // FIX-197 lineage: untouched
+    expect(calls.some((c) => c.startsWith("reinstall 501 com.roll.dream.proj-abc123"))).toBe(true); // US-PORT-008
 
     expect(out).toContain("Loop enabled");
     expect(out).toContain("run-once"); // the new heart is stated

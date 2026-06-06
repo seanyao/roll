@@ -10,6 +10,8 @@
 
 - 验收报告内联交付过程：时间线、关键转折与折叠全转录，无人值守周期也能回溯怎么建出来的（US-ATTEST-014）
   <!-- evidence: .roll/verification/US-ATTEST-014/latest/report.html -->
+- 验收档案与待办同夹：attest 落卡夹并带卡号报告名，配 ID→史诗索引（roll index）与回收命令（roll gc），旧布局保持读取兼容（US-META-001）
+  <!-- evidence: .roll/features/backlog-lifecycle/US-META-001/latest/US-META-001-report.html -->
 - 完成状态抢跑：PR 还没合并卡片就翻了完成，违反完成即已合主干的纪律（FIX-211） `[loop]`
 - 面板对历史全瞎：周期记录缺时间戳，八次真实交付显示零，统计无从分桶（FIX-213） `[loop]`
 - 面板对运行中的周期全盲：活性探测还读旧信号，真在干活却显示空闲零周期（FIX-203） `[loop]`

@@ -17,7 +17,8 @@
  *
  * Output follows the resolved locale (single-language).
  */
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { BacklogStore, ConflictError, IDEA_SECTIONS, appendIdea, planIdea } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { c, renderState } from "../render.js";
@@ -92,5 +93,41 @@ export function ideaCommand(args: string[]): number {
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.type") + ":")}    ${kindLabel}\n`);
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.section") + ":")} ${section}\n`);
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.text") + ":")}    ${text}\n\n`);
+
+  // US-META-005: create story folder skeleton on card creation.
+  const projectPath = process.cwd();
+  const cardDir = join(projectPath, ".roll", "features", "uncategorized", plan.id);
+  try {
+    mkdirSync(cardDir, { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    const specMd =
+      `---\n` +
+      `id: ${plan.id}\n` +
+      `title: ${text}\n` +
+      `type: ${plan.kind}\n` +
+      `created: ${today}\n` +
+      `---\n\n` +
+      `# ${plan.id} — ${text}\n`;
+    writeFileSync(join(cardDir, "spec.md"), specMd, "utf8");
+
+    const indexHtml =
+      `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n` +
+      `<title>${plan.id} — ${text.replace(/"/g, "&quot;")}</title>\n` +
+      `<style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;` +
+      `line-height:1.6}section{margin:2rem 0;padding:1rem;border-left:3px solid #ddd}` +
+      `.empty{color:#999;font-style:italic}footer{color:#666;font-size:.85rem;` +
+      `margin-top:3rem;border-top:1px solid #eee;padding-top:1rem}</style>\n` +
+      `</head>\n<body>\n<h1>${plan.id} — ${text.replace(/"/g, "&quot;")}</h1>\n` +
+      `<section id="spec"><h2>Definition</h2><p class="empty">See spec.md</p></section>\n` +
+      `<section id="design"><h2>Design</h2><p class="empty">Not yet started</p></section>\n` +
+      `<section id="runs"><h2>Execution</h2><p class="empty">No cycles yet</p></section>\n` +
+      `<section id="delivery"><h2>Delivery</h2><p class="empty">Not yet delivered</p></section>\n` +
+      `<section id="notes"><h2>Retrospective</h2><p class="empty">Not yet written</p></section>\n` +
+      `<footer>Generated ${today}</footer>\n</body>\n</html>\n`;
+    writeFileSync(join(cardDir, "index.html"), indexHtml, "utf8");
+  } catch {
+    /* best-effort: folder creation is non-blocking */
+  }
+
   return 0;
 }

@@ -8,7 +8,7 @@ import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand } from "./ci.js";
-import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
+import { configCommand } from "./config.js";
 import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand } from "./dashboard.js";
 import { doctorCommand } from "./doctor.js";
@@ -110,16 +110,14 @@ export function registerAll(): void {
     const r = pricesCommand(args);
     return r ?? fallbackToBash(["prices", ...args]).status;
   });
-  // `config` read surface is TS; facades and writes stay on bash.
-  registerPorted("config", (args) => {
-    const flags = new Set(["--list", "--global", "--project", "--help", "-h"]);
-    const positionals = args.filter((a) => !flags.has(a));
-    const key = positionals[0] ?? "";
-    if (CONFIG_FACADE_KEYS.includes(key) || positionals.length >= 2) {
-      return fallbackToBash(["config", ...args]).status;
-    }
-    return configGetCommand(args);
-  });
+  // `config`: FULLY TS now (US-PORT-006 — 整个 config 命令收口). Read surface
+  // (help/--list/key read) + write surface + the three compact facades
+  // (loop-window/loop-schedule/dream-time) all run native; no bash fallback.
+  // DELIBERATE divergence: a config write no longer implicitly remounts launchd
+  // (apply a new schedule with `roll loop on`); CLI output stays byte-identical
+  // to v2, and the v2 `_config_resolve` `set -u` crash on a missing global file
+  // is fixed. See config.ts header.
+  registerPorted("config", configCommand);
   // `changelog`: fully TS, deterministic-canonical (US-PORT-005). The v2 default
   // `generate` shelled the configured agent to AI-restyle the draft (and the
   // dispatch fell back to bash to do it); that path is RETIRED. The deterministic

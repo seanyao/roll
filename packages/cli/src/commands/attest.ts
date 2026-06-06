@@ -11,7 +11,7 @@
  *
  * Intent hook (the AI layer's contract, consumed when present):
  *   `.roll/verification/<id>/ac-map.json` —
- *     [{ "ac": "<acId>", "status": "pass|readonly|partial|claimed|missing",
+ *     [{ "ac": "<acId>", "status": "pass|readonly|partial|fail|blocked|claimed|missing",
  *        "evidence": [{kind,label,href?,textFile?}], "note": "…" }]
  *   Written by the attest skill during the Gate session (US-ATTEST-007 wiring).
  *   ABSENT map ⇒ every AC renders honestly as 🟧 Claimed (the render-layer red
@@ -51,7 +51,7 @@ export interface AttestDeps {
   capture?: ScreenshotDeps;
 }
 
-const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "claimed", "missing"];
+const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "fail", "blocked", "claimed", "missing"];
 
 function warn(msg: string): void {
   process.stderr.write(`[roll] attest WARN: ${msg}\n`);

@@ -127,6 +127,28 @@ describe("attestCommand", () => {
     expect(html).not.toContain("Discrepancies"); // mapped evidence ⇒ no red-line downgrades
   });
 
+  it("US-ATTEST-012 — ac-map fail/blocked statuses flow through to the report", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "verification", "FIX-300");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "fail", evidence: [{ kind: "test-pass", label: "red suite" }] },
+        { ac: "FIX-300:AC2", status: "blocked", note: "等 iOS 真机" },
+      ]),
+    );
+    await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    const html = readFileSync(join(storyDir, "2026-06-06T01-02-03", "report.html"), "utf8");
+    expect(html).toContain("❌ Fail 未通过 × 1");
+    expect(html).toContain("⛔ Blocked 受阻 × 1");
+    expect(html).toContain("等 iOS 真机");
+    // blocked w/o evidence is NOT a red-line discrepancy (verified-state ≠ 嘴上 claim)
+    expect(html).not.toContain("Discrepancies");
+  });
+
   it("re-run lands a second run dir and re-points latest (history preserved)", async () => {
     const proj = project();
     const opts = { run: quietRun, ghProbe: (): Promise<boolean> => Promise.resolve(false) };

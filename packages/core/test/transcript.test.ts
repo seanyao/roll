@@ -10,7 +10,7 @@
  */
 import type { RollEvent } from "@roll/spec";
 import { describe, expect, it } from "vitest";
-import { boundTranscript, extractCycleSignals } from "../src/loop/transcript.js";
+import { boundTranscript, extractCycleSignals, isSignalMarker, SIGNAL_MARKERS, signalLabel } from "../src/loop/transcript.js";
 
 const CYCLE = "20260606-093000-12345";
 
@@ -106,6 +106,51 @@ describe("extractCycleSignals — three-layer reduction", () => {
     expect(r.timeline.some((t) => ["cycle:start", "cycle:end", "tcr", "attest:gate"].includes(t.marker))).toBe(false);
     // cycleId-less PR/CI events stay (caller scoped them by story upstream)
     expect(r.timeline.map((t) => t.marker)).toEqual(["pr:open", "ci:pass", "pr:merge"]);
+  });
+});
+
+describe("signal vocabulary — single source of 口径 (US-PORT-012)", () => {
+  it("every signal-layer marker toEntry emits is a canonical SIGNAL_MARKER", () => {
+    const r = extractCycleSignals(events(), CYCLE);
+    for (const t of r.timeline.filter((e) => e.layer === "signal")) {
+      expect(isSignalMarker(t.marker)).toBe(true);
+    }
+  });
+
+  it("the attest timeline's signal labels come from signalLabel (one source)", () => {
+    const r = extractCycleSignals(events(), CYCLE);
+    // The tcr entry in the timeline must equal what signalLabel produces for
+    // the same logical signal — proving the report timeline and any other
+    // consumer (the watch formatter) share one label, not two copies.
+    const tcr = r.timeline.find((t) => t.marker === "tcr");
+    expect(tcr?.label).toBe(signalLabel({ kind: "tcr", commitHash: "abcdef1234", message: "tcr: add extractor" }));
+    const merge = r.timeline.find((t) => t.marker === "pr:merge");
+    expect(merge?.label).toBe(signalLabel({ kind: "pr:merge", prNumber: 490 }));
+  });
+
+  it("signalLabel covers every SIGNAL_MARKER (no marker without a label)", () => {
+    const samples: Record<string, string> = {
+      tcr: signalLabel({ kind: "tcr", commitHash: "deadbeef99", message: "tcr: x" }),
+      "ci:pass": signalLabel({ kind: "ci:pass", prNumber: 1 }),
+      "ci:fail": signalLabel({ kind: "ci:fail", prNumber: 1 }),
+      "ci:rerun": signalLabel({ kind: "ci:rerun", prNumber: 1 }),
+      "peer:gate": signalLabel({ kind: "peer:gate", verdict: "AGREE" }),
+      "attest:gate": signalLabel({ kind: "attest:gate", verdict: "produced" }),
+      "pr:open": signalLabel({ kind: "pr:open", prNumber: 1 }),
+      "pr:merge": signalLabel({ kind: "pr:merge", prNumber: 1 }),
+      "pr:rebase": signalLabel({ kind: "pr:rebase", prNumber: 1 }),
+      "pr:close": signalLabel({ kind: "pr:close", prNumber: 1 }),
+      alert: signalLabel({ kind: "alert", message: "boom" }),
+    };
+    for (const m of SIGNAL_MARKERS) {
+      expect(samples[m]).toBeTruthy();
+    }
+  });
+
+  it("isSignalMarker rejects non-signal markers", () => {
+    expect(isSignalMarker("cycle:start")).toBe(false);
+    expect(isSignalMarker("phase:execute")).toBe(false);
+    expect(isSignalMarker("story")).toBe(false);
   });
 });
 

@@ -61,6 +61,89 @@ function clip(s: string, n = 80): string {
 }
 
 /**
+ * US-PORT-012 — the canonical signal vocabulary (the "信号口径"). These are the
+ * cross-cut turning points a reviewer traces: TCR commits, Gate (CI / peer /
+ * attest), PR lifecycle, ALERT. BOTH consumers draw from this one list —
+ * {@link extractCycleSignals} (RollEvent → timeline, for the attest report) and
+ * the watch-window stream formatter (claude stream-json → tmux). "一处定义两处消费":
+ * the markers and their human labels live here so the two surfaces can never
+ * drift into two口径.
+ */
+export const SIGNAL_MARKERS = [
+  "tcr",
+  "ci:pass",
+  "ci:fail",
+  "ci:rerun",
+  "peer:gate",
+  "attest:gate",
+  "pr:open",
+  "pr:merge",
+  "pr:rebase",
+  "pr:close",
+  "alert",
+] as const;
+
+export type SignalMarker = (typeof SIGNAL_MARKERS)[number];
+
+const SIGNAL_MARKER_SET: ReadonlySet<string> = new Set(SIGNAL_MARKERS);
+
+/** Is `m` one of the canonical signal markers? */
+export function isSignalMarker(m: string): m is SignalMarker {
+  return SIGNAL_MARKER_SET.has(m);
+}
+
+/**
+ * A logical signal, source-agnostic: whether it came from a {@link RollEvent}
+ * (attest) or was sniffed out of a claude stream-json line (watch), it lands
+ * here. {@link signalLabel} turns it into the one canonical human one-liner.
+ */
+export type SignalInput =
+  | { kind: "tcr"; commitHash: string; message: string }
+  | { kind: "ci:pass"; prNumber: number }
+  | { kind: "ci:fail"; prNumber: number; failSummary?: string }
+  | { kind: "ci:rerun"; prNumber: number }
+  | { kind: "peer:gate"; verdict: string }
+  | { kind: "attest:gate"; verdict: string }
+  | { kind: "pr:open"; prNumber: number }
+  | { kind: "pr:merge"; prNumber: number }
+  | { kind: "pr:rebase"; prNumber: number }
+  | { kind: "pr:close"; prNumber: number; reason?: string }
+  | { kind: "alert"; message: string };
+
+/**
+ * The single source of truth for a signal's human label. Both the attest
+ * timeline and the tmux watch formatter call this, so "tmux 里看到的关键节点 =
+ * 报告里 TCR log/时间线的同一份事实" is enforced by construction, not by
+ * keeping two strings in sync.
+ */
+export function signalLabel(input: SignalInput): string {
+  switch (input.kind) {
+    case "tcr":
+      return `TCR ${input.commitHash.slice(0, 9)} · ${clip(input.message)}`;
+    case "ci:pass":
+      return `Gate CI 通过 · PR #${input.prNumber}`;
+    case "ci:fail":
+      return `Gate CI 失败 · PR #${input.prNumber}${input.failSummary !== undefined && input.failSummary !== "" ? ` · ${clip(input.failSummary)}` : ""}`;
+    case "ci:rerun":
+      return `Gate CI 重跑 · PR #${input.prNumber}`;
+    case "peer:gate":
+      return `Peer gate · ${input.verdict}`;
+    case "attest:gate":
+      return `Attest gate · ${input.verdict}`;
+    case "pr:open":
+      return `PR #${input.prNumber} 开启 · opened`;
+    case "pr:merge":
+      return `PR #${input.prNumber} 合并 · merged`;
+    case "pr:rebase":
+      return `PR #${input.prNumber} rebase`;
+    case "pr:close":
+      return `PR #${input.prNumber} 关闭 · closed${input.reason !== undefined && input.reason !== "" ? ` · ${clip(input.reason)}` : ""}`;
+    case "alert":
+      return `ALERT · ${clip(input.message)}`;
+  }
+}
+
+/**
  * Map ONE event to a timeline entry, or null when the event type is not part of
  * the per-cycle process trace (loop:* / policy:* / route:* / stdout are skipped
  * — they are not the turning points a reviewer traces). `offsetSec` is filled
@@ -75,27 +158,27 @@ function toEntry(ev: RollEvent): Omit<TimelineEntry, "offsetSec"> | null {
     case "cycle:end":
       return { ts: ev.ts, layer: "outline", marker: "cycle:end", label: `周期结束 · cycle end · ${ev.outcome}` };
     case "cycle:tcr":
-      return { ts: ev.ts, layer: "signal", marker: "tcr", label: `TCR ${ev.commitHash.slice(0, 9)} · ${clip(ev.message)}` };
+      return { ts: ev.ts, layer: "signal", marker: "tcr", label: signalLabel({ kind: "tcr", commitHash: ev.commitHash, message: ev.message }) };
     case "ci:pass":
-      return { ts: ev.ts, layer: "signal", marker: "ci:pass", label: `Gate CI 通过 · PR #${ev.prNumber}` };
+      return { ts: ev.ts, layer: "signal", marker: "ci:pass", label: signalLabel({ kind: "ci:pass", prNumber: ev.prNumber }) };
     case "ci:fail":
-      return { ts: ev.ts, layer: "signal", marker: "ci:fail", label: `Gate CI 失败 · PR #${ev.prNumber}${ev.failSummary !== "" ? ` · ${clip(ev.failSummary)}` : ""}` };
+      return { ts: ev.ts, layer: "signal", marker: "ci:fail", label: signalLabel({ kind: "ci:fail", prNumber: ev.prNumber, failSummary: ev.failSummary }) };
     case "ci:rerun":
-      return { ts: ev.ts, layer: "signal", marker: "ci:rerun", label: `Gate CI 重跑 · PR #${ev.prNumber}` };
+      return { ts: ev.ts, layer: "signal", marker: "ci:rerun", label: signalLabel({ kind: "ci:rerun", prNumber: ev.prNumber }) };
     case "peer:gate":
-      return { ts: ev.ts, layer: "signal", marker: "peer:gate", label: `Peer gate · ${ev.verdict}` };
+      return { ts: ev.ts, layer: "signal", marker: "peer:gate", label: signalLabel({ kind: "peer:gate", verdict: ev.verdict }) };
     case "attest:gate":
-      return { ts: ev.ts, layer: "signal", marker: "attest:gate", label: `Attest gate · ${ev.verdict}` };
+      return { ts: ev.ts, layer: "signal", marker: "attest:gate", label: signalLabel({ kind: "attest:gate", verdict: ev.verdict }) };
     case "pr:open":
-      return { ts: ev.ts, layer: "signal", marker: "pr:open", label: `PR #${ev.prNumber} 开启 · opened` };
+      return { ts: ev.ts, layer: "signal", marker: "pr:open", label: signalLabel({ kind: "pr:open", prNumber: ev.prNumber }) };
     case "pr:merge":
-      return { ts: ev.ts, layer: "signal", marker: "pr:merge", label: `PR #${ev.prNumber} 合并 · merged` };
+      return { ts: ev.ts, layer: "signal", marker: "pr:merge", label: signalLabel({ kind: "pr:merge", prNumber: ev.prNumber }) };
     case "pr:rebase":
-      return { ts: ev.ts, layer: "signal", marker: "pr:rebase", label: `PR #${ev.prNumber} rebase` };
+      return { ts: ev.ts, layer: "signal", marker: "pr:rebase", label: signalLabel({ kind: "pr:rebase", prNumber: ev.prNumber }) };
     case "pr:close":
-      return { ts: ev.ts, layer: "signal", marker: "pr:close", label: `PR #${ev.prNumber} 关闭 · closed${ev.reason !== "" ? ` · ${clip(ev.reason)}` : ""}` };
+      return { ts: ev.ts, layer: "signal", marker: "pr:close", label: signalLabel({ kind: "pr:close", prNumber: ev.prNumber, reason: ev.reason }) };
     case "alert:notify":
-      return { ts: ev.ts, layer: "signal", marker: "alert", label: `ALERT · ${clip(ev.message)}` };
+      return { ts: ev.ts, layer: "signal", marker: "alert", label: signalLabel({ kind: "alert", message: ev.message }) };
     default:
       return null;
   }

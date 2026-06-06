@@ -89,6 +89,23 @@ function silenced<T>(fn: () => T): T {
   }
 }
 
+/** Run fn while capturing everything written to stdout + stderr. */
+function captured<T>(fn: () => T): { value: T; out: string } {
+  const o = process.stdout.write.bind(process.stdout);
+  const e = process.stderr.write.bind(process.stderr);
+  let buf = "";
+  // @ts-expect-error capture-only
+  process.stdout.write = (s: string): boolean => ((buf += s), true);
+  // @ts-expect-error capture-only
+  process.stderr.write = (s: string): boolean => ((buf += s), true);
+  try {
+    return { value: fn(), out: buf };
+  } finally {
+    process.stdout.write = o;
+    process.stderr.write = e;
+  }
+}
+
 describe("buildArchiveMigratePlan", () => {
   it("plans run move + report rename + card files + latest + legacy retire", () => {
     const proj = project({ "US-ATTEST-010": "acceptance-evidence" });
@@ -211,6 +228,60 @@ describe("archiveMigrateCommand", () => {
     expect(plan.cards).toHaveLength(0);
     // And a second invocation still exits 0 without error.
     expect(withCwd(proj, () => silenced(() => archiveMigrateCommand([], { now: () => NOW })))).toBe(0);
+  });
+
+  it("nested-repo form: .roll is its own git repo — git mv runs inside it, files actually move", () => {
+    // Mirror the production reality (FIX-215): the project root is one repo and
+    // `.roll` is an INDEPENDENT nested roll-meta repo (gitignored by the root).
+    // The legacy verification tree is tracked only by the nested repo, so a
+    // `git mv` from the project root would fail — the command must run it inside
+    // `.roll` instead.
+    const proj = project({ "US-ATTEST-010": "acceptance-evidence" });
+    execSync("git init -q", { cwd: proj });
+    execSync("git config user.email a@b.c && git config user.name t", { cwd: proj });
+    writeFileSync(join(proj, ".gitignore"), ".roll/\n");
+    // .roll is its OWN repo — the root does not track anything under it.
+    execSync("git init -q", { cwd: join(proj, ".roll") });
+    execSync("git config user.email a@b.c && git config user.name t", { cwd: join(proj, ".roll") });
+    legacyCard(proj, "US-ATTEST-010", "2026-06-05T00-00-00");
+    execSync("git add -A && git commit -q -m init", { cwd: join(proj, ".roll") });
+    execSync("git add -A && git commit -q -m root", { cwd: proj });
+
+    const code = withCwd(proj, () => silenced(() => archiveMigrateCommand([], { now: () => NOW })));
+    expect(code).toBe(0);
+
+    const cardRun = join(proj, ".roll", "features", "acceptance-evidence", "US-ATTEST-010", "2026-06-05T00-00-00");
+    expect(existsSync(join(cardRun, "US-ATTEST-010-report.html"))).toBe(true); // renamed
+    expect(existsSync(join(cardRun, "evidence.json"))).toBe(true); // moved
+    const card = join(proj, ".roll", "features", "acceptance-evidence", "US-ATTEST-010");
+    expect(readlinkSync(join(card, "latest"))).toBe("2026-06-05T00-00-00"); // rebuilt
+    expect(existsSync(join(proj, ".roll", "verification", "US-ATTEST-010"))).toBe(false); // retired
+    // The move was staged in the NESTED repo (history preserved there), not the root.
+    const status = execSync("git status --porcelain", { cwd: join(proj, ".roll"), encoding: "utf8" });
+    expect(status).toMatch(/features\/acceptance-evidence\/US-ATTEST-010/);
+    execSync("git commit -q -m migrate", { cwd: join(proj, ".roll") });
+    const log = execSync(
+      "git log --follow --oneline -- 'features/acceptance-evidence/US-ATTEST-010/2026-06-05T00-00-00/US-ATTEST-010-report.html'",
+      { cwd: join(proj, ".roll"), encoding: "utf8" },
+    );
+    expect(log).toContain("init");
+  });
+
+  it("a failed git mv is counted and exits non-zero — never self-reports success", () => {
+    // No git repo anywhere → every `git mv` fails. The command must NOT print a
+    // clean "migrated N runs" success line and must exit non-zero (FIX-215: the
+    // lenient layer used to swallow the error and report the plan as done).
+    const proj = project({ "US-ATTEST-010": "acceptance-evidence" });
+    legacyCard(proj, "US-ATTEST-010", "2026-06-05T00-00-00");
+    const { value, out } = withCwd(proj, () =>
+      captured(() => archiveMigrateCommand([], { now: () => NOW })),
+    );
+    expect(value).toBe(1); // non-zero exit
+    expect(out).toMatch(/fail/i); // failure surfaced, not swallowed
+    // The legacy tree is still in place — nothing was actually migrated.
+    expect(existsSync(join(proj, ".roll", "verification", "US-ATTEST-010", "2026-06-05T00-00-00"))).toBe(true);
+    // And it must not claim the run was migrated.
+    expect(out).not.toMatch(/migrated: 1 card\(s\), 1 run/);
   });
 
   it("--help never migrates", () => {

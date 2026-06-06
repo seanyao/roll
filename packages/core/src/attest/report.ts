@@ -43,12 +43,39 @@ export interface AcReportItem {
   note?: string;
 }
 
+/**
+ * US-ATTEST-013 — the delivery chain a reviewer needs to trace a story end to
+ * end without leaving the report. Every field is optional; empties are trimmed.
+ */
+export interface DeliveryChain {
+  prLinks?: Array<{ label: string; href: string }>;
+  cycleId?: string;
+  timeline?: string;
+  cost?: string;
+}
+
+/**
+ * US-ATTEST-013 — self-contained card context (the business body's lead): what
+ * the todo is, in plain language, plus where it sits and how it shipped. Drawn
+ * from the card README + backlog + delivery facts by the caller. Any subset may
+ * be present; a context with no populated sub-field renders nothing (trim).
+ */
+export interface CardContext {
+  oneLiner?: string;
+  epic?: string;
+  summary?: string;
+  backlogStatus?: string;
+  delivery?: DeliveryChain;
+}
+
 export interface ReportInput {
   storyId: string;
   title: string;
   /** ISO timestamp injected by the caller (clock-free renderer). */
   generatedAt: string;
   items: AcReportItem[];
+  /** US-ATTEST-013 — business-body lead: self-contained card context. */
+  context?: CardContext;
   /** Summary facts row (counts come from evidence.json). */
   facts?: { tcrCount: number; ciConclusion: string; testPassAge: string };
   /** US-ATTEST-009 — same-story Self-Score entries from .roll/notes/; the
@@ -109,6 +136,38 @@ function evidenceCard(ref: EvidenceRef): string {
  * collapsed `<details>` that defaults closed. The fold is omitted entirely when
  * there is no technical evidence (deletion-not-placeholder).
  */
+/** Delivery chain as a `<dl>`; empty when no sub-field is populated (trim). */
+function deliveryBlock(d: DeliveryChain): string {
+  const parts: string[] = [];
+  if (d.prLinks !== undefined && d.prLinks.length > 0)
+    parts.push(`<dt>PR</dt><dd>${d.prLinks.map((p) => `<a href="${esc(p.href)}">${esc(p.label)}</a>`).join(" · ")}</dd>`);
+  if (d.cycleId !== undefined && d.cycleId !== "") parts.push(`<dt>Cycle</dt><dd><code>${esc(d.cycleId)}</code></dd>`);
+  if (d.timeline !== undefined && d.timeline !== "") parts.push(`<dt>时间线 · Timeline</dt><dd>${esc(d.timeline)}</dd>`);
+  if (d.cost !== undefined && d.cost !== "") parts.push(`<dt>成本 · Cost</dt><dd>${esc(d.cost)}</dd>`);
+  return parts.length > 0 ? `<dl class="delivery">${parts.join("")}</dl>` : "";
+}
+
+/**
+ * US-ATTEST-013 — the business body's lead. A product/business reviewer reads
+ * this first and learns the whole story without leaving the report. Rendered
+ * ONLY when at least one sub-field is populated; a fully-empty context is
+ * trimmed (deletion-not-placeholder).
+ */
+function cardContextBlock(ctx: CardContext | undefined): string {
+  if (ctx === undefined) return "";
+  const rows: string[] = [];
+  if (ctx.oneLiner !== undefined && ctx.oneLiner !== "") rows.push(`<p class="one-liner">${esc(ctx.oneLiner)}</p>`);
+  const meta: string[] = [];
+  if (ctx.epic !== undefined && ctx.epic !== "") meta.push(`Epic：${esc(ctx.epic)}`);
+  if (ctx.backlogStatus !== undefined && ctx.backlogStatus !== "") meta.push(`Backlog：${esc(ctx.backlogStatus)}`);
+  if (meta.length > 0) rows.push(`<p class="ctx-meta">${meta.join(" · ")}</p>`);
+  if (ctx.summary !== undefined && ctx.summary !== "") rows.push(`<p class="summary">${esc(ctx.summary)}</p>`);
+  const delivery = ctx.delivery !== undefined ? deliveryBlock(ctx.delivery) : "";
+  if (delivery !== "") rows.push(delivery);
+  if (rows.length === 0) return "";
+  return `<section class="card-context"><h2>卡上下文 · Context</h2>\n${rows.join("\n")}\n</section>`;
+}
+
 function acSection(item: AcReportItem): string {
   const b = BADGE[item.status];
   const note = item.note !== undefined && item.note !== "" ? `<p class="note">${esc(item.note)}</p>` : "";
@@ -208,6 +267,11 @@ details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
 details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:8px; padding:6px 12px; background:rgba(127,127,127,.04); }
 details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.tech[open] summary { margin-bottom:6px; }
+section.card-context { border:1px solid var(--line); border-radius:10px; padding:6px 16px 12px; margin:14px 0; }
+section.card-context .one-liner { font-size:15.5px; font-weight:600; }
+section.card-context .ctx-meta { color:var(--muted); font-size:13px; }
+dl.delivery { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0 0; font-size:13.5px; }
+dl.delivery dt { color:var(--muted); } dl.delivery dd { margin:0; }
 @media print { body { max-width:none; padding:0; } section.ac { break-inside:avoid; } }
 ${ANSI_CSS}
 </style>
@@ -216,6 +280,7 @@ ${ANSI_CSS}
 <h1>${esc(input.title)}</h1>
 <p class="meta"><code>${esc(input.storyId)}</code> · generated ${esc(input.generatedAt)} · Gate: PASS</p>
 <p>${summary}</p>
+${cardContextBlock(input.context)}
 ${facts}
 ${items.map(acSection).join("\n")}
 ${selfCaptureBlock(input.selfCaptures)}

@@ -108,6 +108,46 @@ describe("US-ATTEST-011 — Gate self-capture section", () => {
   });
 });
 
+describe("US-ATTEST-013 — card context leads the business body", () => {
+  it("renders one-liner / epic / summary / backlog status / delivery chain before the AC sections", () => {
+    const html = renderReport({
+      ...BASE,
+      context: {
+        oneLiner: "报告分层且自含待办全貌",
+        epic: "acceptance-evidence",
+        summary: "报告原是工程师向 AC 堆，现按受众分层",
+        backlogStatus: "🔨 In Progress",
+        delivery: {
+          prLinks: [{ label: "#486", href: "https://github.com/seanyao/roll/pull/486" }],
+          cycleId: "cycle-20260606-092227-79062",
+          timeline: "09:22 → 09:40",
+          cost: "$0.42",
+        },
+      },
+      items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
+    });
+    expect(html).toContain("卡上下文 · Context");
+    expect(html).toContain("报告分层且自含待办全貌");
+    expect(html).toContain("acceptance-evidence");
+    expect(html).toContain("🔨 In Progress");
+    expect(html).toContain("cycle-20260606-092227-79062");
+    expect(html).toContain('href="https://github.com/seanyao/roll/pull/486"');
+    expect(html).toContain("$0.42");
+    // context (business) precedes the first AC section
+    expect(html.indexOf("卡上下文")).toBeLessThan(html.indexOf('class="ac '));
+  });
+
+  it("absent context ⇒ no context section (trim, no placeholder)", () => {
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain("卡上下文");
+  });
+
+  it("context with only empty sub-fields is trimmed away", () => {
+    const html = renderReport({ ...BASE, context: { delivery: {} }, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain("卡上下文");
+  });
+});
+
 describe("US-ATTEST-013 — layered IA: technical evidence folds", () => {
   it("text/ANSI evidence sits inside a collapsed <details class=\"tech\">", () => {
     const html = renderReport({

@@ -20,6 +20,7 @@ import { feedbackCommand } from "./feedback.js";
 import { gcCommand } from "./gc.js";
 import { ideaCommand } from "./idea.js";
 import { indexCommand } from "./index-gen.js";
+import { storyNewCommand } from "./story-new.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopFmtCommand } from "./loop-fmt.js";
@@ -64,6 +65,12 @@ export function registerAll(): void {
   registerPorted("attest", attestCommand);
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
   registerPorted("index", indexCommand);
+  // `story new`: the single channel for minting a card folder (US-META-009).
+  registerPorted("story", (args) => {
+    if (args[0] === "new") return storyNewCommand(args.slice(1));
+    process.stdout.write("Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>]\n");
+    return args[0] === undefined || args[0] === "--help" || args[0] === "-h" ? 0 : 1;
+  });
   // `gc`: age out old surplus attest runs across the archive layout (US-META-001).
   registerPorted("gc", gcCommand);
   // `archive` groups archive-layout maintenance; `migrate` ports the legacy

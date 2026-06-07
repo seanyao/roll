@@ -49,13 +49,32 @@ export function killLiveAgents(signal: NodeJS.Signals = "SIGKILL"): number {
   let n = 0;
   for (const c of liveAgents) {
     try {
-      if (c.kill(signal)) n += 1;
+      if (killHard(c, signal)) n += 1;
     } catch {
       /* already gone */
     }
   }
   liveAgents.clear();
   return n;
+}
+
+/**
+ * FIX-224: kill the child's whole process GROUP when it leads one (the
+ * PTY-wrapped `script` child is spawned detached, so SIGKILLing only `script`
+ * would orphan the agent underneath — the exact haunted-worktree scenario
+ * FIX-204D exists to prevent). Non-detached children share the runner's group
+ * (pgid ≠ pid), so the group signal throws and we fall back to the plain kill.
+ */
+function killHard(c: ChildProcess, signal: NodeJS.Signals): boolean {
+  if (c.pid !== undefined) {
+    try {
+      process.kill(-c.pid, signal);
+      return true;
+    } catch {
+      /* not a group leader — plain child kill below */
+    }
+  }
+  return c.kill(signal);
 }
 
 /** The FIX-152 autonomous-execution directive prepended to the skill body
@@ -238,7 +257,26 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
   );
 }
 
-function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions): Promise<AgentSpawnResult> {
+/**
+ * FIX-224 (v2 `_AGENT_PTY_PREFIX`, FIX-136 lineage): non-claude agents
+ * (pi/kimi/…) buffer their stdout when piped, blacking out the live
+ * observation window (tmux watch / `roll loop now`) for the whole phase —
+ * wrap them in `script -q /dev/null` so they see a PTY and stream line by
+ * line. claude is never wrapped: its stream-json protocol runs on plain
+ * pipes. Only darwin gets the wrap (BSD `script` takes the command as argv;
+ * util-linux needs a single `-c` string — quote-splicing a multi-KB prompt
+ * is a worse failure mode than buffered output).
+ */
+export function withPtyWrap(
+  cmd: { bin: string; args: string[] },
+  agent: string,
+  platform: NodeJS.Platform = process.platform,
+): { bin: string; args: string[]; pty: boolean } {
+  if (agent === "claude" || platform !== "darwin") return { ...cmd, pty: false };
+  return { bin: "script", args: ["-q", "/dev/null", cmd.bin, ...cmd.args], pty: true };
+}
+
+function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty = false): Promise<AgentSpawnResult> {
   // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,
   // which leg/cycle logs capture — argv mismatches become diagnosable.
   process.stderr.write(`[runner] spawn ${bin} argv=${JSON.stringify(args.map((a) => (a.length > 80 ? `${a.slice(0, 77)}...` : a)))}\n`);
@@ -247,6 +285,9 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions): Pro
       cwd: opts.cwd,
       env: opts.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      // FIX-224: the PTY-wrapped `script` leads its own process group so the
+      // timeout/teardown can reap script AND the agent under it (killHard).
+      detached: pty,
     });
     let stdout = "";
     let stderr = "";
@@ -255,7 +296,7 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions): Pro
     if (opts.timeoutMs !== undefined && opts.timeoutMs > 0) {
       timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGKILL");
+        killHard(child, "SIGKILL");
       }, opts.timeoutMs);
     }
     // FIX-204E: live.log (fed via onChunk by the executor) is the single live
@@ -298,6 +339,6 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions): Pro
 }
 
 export const realAgentSpawn: AgentSpawn = (agent, opts) => {
-  const { bin, args } = buildSpawnCommand(agent, opts);
-  return spawnAndWait(bin, args, opts);
+  const { bin, args, pty } = withPtyWrap(buildSpawnCommand(agent, opts), agent);
+  return spawnAndWait(bin, args, opts, pty);
 };

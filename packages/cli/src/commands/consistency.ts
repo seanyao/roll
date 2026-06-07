@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
 
-const DIMENSIONS = ["code", "docs", "i18n", "tests", "site"];
+const DIMENSIONS = ["code", "cards", "docs", "i18n", "tests", "site"];
 
 interface DimResult {
   status: "pass" | "fail";
@@ -88,6 +88,71 @@ function checkFeaturesCatalog(projectDir: string): DimResult {
     }
   }
   return { status: gaps.length === 0 ? "pass" : "fail", gaps };
+}
+
+// ─── cards dimension: check_cards (US-CONSIST-006) ──────────────────────────
+//
+// The card-folder contract, reverse-derived from the features/ layout: every
+// backlog ID must own `features/<epic>/<ID>/spec.md`, and a row's evidence
+// link must point at a file that exists. Catches the two real-world failure
+// shapes observed 2026-06-08: a story split that wrote backlog rows with no
+// card folders (broken links), and a ✅ Done row carrying an evidence link to
+// a report that was never produced. Done-without-report is informational
+// (pre-ATTEST history is legitimate); a BROKEN link is a hard gap.
+function checkCards(projectDir: string): DimResult {
+  const backlog = join(projectDir, ".roll", "backlog.md");
+  const featuresDir = join(projectDir, ".roll", "features");
+  if (!existsSync(backlog) || !existsSync(featuresDir)) return { status: "pass", gaps: [] };
+
+  // Map every card folder: <ID> → epic (first wins; folders are the truth).
+  const cardEpic = new Map<string, string>();
+  try {
+    for (const epic of readdirSync(featuresDir, { withFileTypes: true })) {
+      if (!epic.isDirectory()) continue;
+      for (const card of readdirSync(join(featuresDir, epic.name), { withFileTypes: true })) {
+        if (!card.isDirectory()) continue;
+        if (existsSync(join(featuresDir, epic.name, card.name, "spec.md")) && !cardEpic.has(card.name)) {
+          cardEpic.set(card.name, epic.name);
+        }
+      }
+    }
+  } catch {
+    return { status: "pass", gaps: [], note: "features/ unreadable — skipped" };
+  }
+
+  const gaps: string[] = [];
+  let doneNoReport = 0;
+  let doneNoFolder = 0;
+  for (const line of readText(backlog).split("\n")) {
+    const row = /^\|\s*\[?((?:US|FIX|REFACTOR|IDEA)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)\]?/.exec(line);
+    if (row === null) continue;
+    const id = row[1] ?? "";
+    if (!cardEpic.has(id)) {
+      // LIVE rows must own a card folder (a split that writes rows without
+      // cards breaks every link downstream). Pre-card-era ✅ Done rows are
+      // legitimate history — counted, not failed.
+      if (line.includes("✅ Done")) doneNoFolder += 1;
+      else gaps.push(`Live backlog row ${id} has no card folder (features/<epic>/${id}/spec.md)`);
+      continue;
+    }
+    // Evidence links must not dangle.
+    const ev = /\[evidence\]\(([^)]+)\)/.exec(line);
+    if (ev !== null) {
+      const target = (ev[1] ?? "").replace(/^\.roll\//, "");
+      if (!existsSync(join(projectDir, ".roll", target))) {
+        gaps.push(`Backlog row ${id} evidence link is broken: ${ev[1] ?? ""}`);
+      }
+    } else if (line.includes("✅ Done")) {
+      const epic = cardEpic.get(id) ?? "";
+      if (!existsSync(join(featuresDir, epic, id, "latest", `${id}-report.html`))) doneNoReport += 1;
+    }
+  }
+  const result: DimResult = { status: gaps.length === 0 ? "pass" : "fail", gaps };
+  const notes: string[] = [];
+  if (doneNoFolder > 0) notes.push(`${doneNoFolder} pre-card-era Done rows without a card folder`);
+  if (doneNoReport > 0) notes.push(`${doneNoReport} Done rows without an attest report`);
+  if (notes.length > 0) result.note = `${notes.join("; ")} (informational)`;
+  return result;
 }
 
 // ─── site dimension: check_site ──────────────────────────────────────────────
@@ -341,6 +406,7 @@ function runAll(projectDir: string): Report {
   for (const dim of DIMENSIONS) {
     let result: DimResult;
     if (dim === "code") result = checkFeaturesCatalog(projectDir);
+    else if (dim === "cards") result = checkCards(projectDir);
     else if (dim === "i18n") result = checkI18n(projectDir);
     else if (dim === "tests") result = checkTests(projectDir);
     else if (dim === "docs")

@@ -11,6 +11,7 @@ import { collectDossier } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
 import { renderFeaturesIndex, spineMotif } from "../src/lib/dossier-index.js";
 import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
+import { renderStoryDossier, storySpine } from "../src/lib/story-dossier.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -153,5 +154,60 @@ describe("renderEpicPage — US-DOSSIER-001b", () => {
     expect(html).not.toContain("<script src=");
     expect(html).not.toContain("<link");
     expect(html).toContain("localStorage");
+  });
+});
+
+describe("renderStoryDossier — US-DOSSIER-001c", () => {
+  const story = { id: "US-A-1", epic: "alpha", type: "US", title: "Alpha story", created: "2026-06-01", delivered: true };
+  const full = renderStoryDossier({
+    story,
+    wish: "用户希望一键看到全部交付真相",
+    design: ["生成器读真实数据", "复用 chrome"],
+    commits: ["tcr: step one", "tcr: step two"],
+    acRows: [
+      { ac: "US-A-1:AC1", status: "pass" },
+      { ac: "US-A-1:AC2", status: "partial", note: "截屏待补" },
+    ],
+    reportHref: "latest/US-A-1-report.html",
+    retro: "score 9 good",
+  });
+
+  it("masthead: breadcrumb chain + mono id + kv metadata", () => {
+    expect(full).toContain('href="../../index.html"');
+    expect(full).toContain('href="../index.html"');
+    expect(full).toContain("<code>US-A-1</code>");
+    expect(full).toContain('class="type type-US"');
+  });
+
+  it("spine: all five stations done, delivery in truth-green", () => {
+    const spine = storySpine({ story, wish: "w", design: ["d"], commits: ["c"], retro: "r" });
+    expect(spine.match(/node (done|truth)/g)).toHaveLength(5);
+    expect(spine).toContain("node truth");
+  });
+
+  it("five sections with real content: wish-quote, design bullets, commits, attest banner + AC table, retro", () => {
+    expect(full).toContain('class="wish-quote"');
+    expect(full).toContain("一键看到全部交付真相");
+    expect(full).toContain("<li>生成器读真实数据</li>");
+    expect(full).toContain("2 TCR commits");
+    expect(full).toContain('class="attest-banner"');
+    expect(full).toContain('href="latest/US-A-1-report.html"');
+    expect(full).toContain("◑ partial");
+    expect(full).toContain("截屏待补");
+    expect(full).toContain("score 9 good");
+  });
+
+  it("wish-only story: empty states render honestly, delivery pending", () => {
+    const bare = renderStoryDossier({ story: { ...story, delivered: false } });
+    expect(bare).toContain("尚未设计");
+    expect(bare).toContain("暂无周期");
+    expect(bare).toContain("尚未交付");
+    expect(bare).not.toContain('class="attest-banner"');
+  });
+
+  it("self-containment holds", () => {
+    expect(full).not.toContain("<script src=");
+    expect(full).not.toContain("<link");
+    expect(full).toContain("localStorage");
   });
 });

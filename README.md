@@ -50,8 +50,11 @@ roll loop on        # let AI work through the backlog (optional)
 | `roll alert` | View / clear loop alerts |
 | **Project · per repo** | |
 | `roll init` | Set up Roll in this project |
+| `roll story new <ID> --title <t> [--epic <e>]` | Mint a story's card folder (spec + page + index) — the single creation channel |
+| `roll attest <ID>` | Render the acceptance-evidence report into the card folder |
+| `roll index` | Rebuild the three-layer Delivery Dossier (front page · epics · story dossiers) |
 | `roll status` | Show current state and drift |
-| `roll agent [use <name>]` | Per-project agent selection |
+| `roll agent [use <name>]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll release` | Run the release script (human-only) |

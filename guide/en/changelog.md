@@ -29,11 +29,13 @@ completed story or fix. It filters for user-visible changes only:
 The skill enforces a style gate — bullets are short, plain-language,
 user-facing. Technical jargon triggers a rewrite loop.
 
-## `## Unreleased` Section
+## Release-ready sections
 
-All new entries go under `## Unreleased` at the top of `CHANGELOG.md`.
-Roll never guesses version numbers — only Roll's release process assigns them
-at release time.
+`roll release` treats the changelog as ready in either shape: an
+`## Unreleased` section with bullets, **or** a pre-written next-version
+section at the top (`## v3.608.1 — 2026-06-08`) naming a version newer than
+package.json's current — the release flow's own convention. A first section
+matching the current version means everything is already shipped.
 
 ```markdown
 ## Unreleased

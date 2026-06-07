@@ -26,9 +26,9 @@ Roll 自动保持 `CHANGELOG.md` 同步，无需手动编写或更新。
 
 技能内置风格守门——bullet 必须简洁、白话、面向用户。技术黑话会触发重写循环。
 
-## `## Unreleased` 段
+## 可发版的两种形态
 
-所有新条目写入 `CHANGELOG.md` 顶部的 `## Unreleased`。Roll 永远不猜测版本号——只有 Roll 的发布流程在发版时赋予版本。
+`roll release` 认两种"changelog 就绪"形态：顶部 `## Unreleased` 段且有条目，**或**预写好的下一版本段（`## v3.608.1 — 2026-06-08`，版本号比 package.json 当前新）——后者正是发布流程自己的惯例。首段版本等于当前版本意味着全部已发完。
 
 ```markdown
 ## Unreleased

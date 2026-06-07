@@ -9,6 +9,7 @@
 | AGENTS.md | Roll Project — Internal Conventions | convention | 2026-05-28 |
 | CONTRIBUTING.md | Contributing to Roll | convention | 2026-05-23 |
 | guide/en/ai-agents.md | Roll — AI Agent Support | guide | 2026-05-28 |
+| guide/en/acceptance-evidence.md | Acceptance Evidence — roll attest | guide | 2026-06-08 |
 | guide/en/changelog.md | Roll — Changelog | guide | 2026-05-21 |
 | guide/en/configuration.md | Roll — Configuration | guide | 2026-05-27 |
 | guide/en/conventions.md | Roll — Conventions & AGENTS.md | guide | 2026-05-19 |
@@ -44,6 +45,7 @@
 | guide/zh/installation.md | Roll — 安装与更新 | guide | 2026-05-19 |
 | guide/zh/legacy-onboarding.md | 遗留项目接入 Roll | guide | 2026-05-20 |
 | guide/zh/loop-driven-architecture.md | Loop 驱动的 Agent 架构 | guide | 2026-05-27 |
+| guide/zh/acceptance-evidence.md | 验收证据 — roll attest | guide | 2026-06-08 |
 | guide/zh/loop.md | roll loop — 自主 BACKLOG 执行器 | guide | 2026-05-28 |
 | guide/zh/methodology.md | Roll 工程方法论 | guide | 2026-05-25 |
 | guide/zh/migration-2.0.md | 迁移到 Roll 2.0 | guide | 2026-05-19 |

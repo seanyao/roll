@@ -6,20 +6,22 @@ readable by non-engineers.
 
 ## Where reports live
 
+Every story has ONE home — its card folder under the epic:
+
 ```
-.roll/verification/<story-id>/<run-id>/report.html   ← the report (self-contained)
-.roll/verification/<story-id>/<run-id>/evidence.json ← collected hard facts
-.roll/verification/<story-id>/latest                 ← symlink to the newest run
+.roll/features/<epic>/<id>/<run-id>/<id>-report.html  ← the report (self-contained)
+.roll/features/<epic>/<id>/<run-id>/evidence.json     ← collected hard facts
+.roll/features/<epic>/<id>/latest                     ← symlink to the newest run
 ```
 
 Runs are timestamped and never overwritten. The backlog `✅ Done` row links to
-`latest/report.html`; CHANGELOG bullets may carry an invisible
+`latest/<id>-report.html`; CHANGELOG bullets may carry an invisible
 `<!-- evidence: ... -->` marker for traceability.
 
 ## How a report gets made
 
 1. During the build/fix **Verification Gate**, the agent dumps raw outputs to
-   `.roll/verification/<id>/evidence/*.txt` and screenshots to
+   `.roll/features/<epic>/<id>/evidence/*.txt` and screenshots to
    `…/screenshots/*.png` (web via Playwright, iOS via simctl, Android via adb —
    each surface skips cleanly when its tooling is absent; CLI stories capture
    ANSI text instead, rendered searchable in the report).
@@ -41,3 +43,23 @@ down to 🟧 Claimed and lists it under **Discrepancies**. Verbal completion
 
 When `.roll/notes/` carries same-story self-score entries, the report ends
 with a collapsed *Self-Score · 自评* section. No entries → no section.
+
+## The Delivery Dossier — `roll index`
+
+`roll index` regenerates the whole archive as a browsable, three-layer
+**Delivery Dossier** (every page a self-contained HTML file — bilingual,
+theme-aware, printable):
+
+```
+.roll/features/index.html              ← front page: ledger (wish→truth bar),
+                                         lifecycle spine, searchable epic cards
+.roll/features/<epic>/index.html       ← epic page: epic ledger + stories in three
+                                         groups (merged / in a cycle / in backlog)
+.roll/features/<epic>/<id>/index.html  ← story dossier: five stations — Definition,
+                                         Design, Execution, Delivery (attest banner
+                                         + AC table), Retrospective
+```
+
+Every figure is computed from the real model — `spec.md`, `ac-map.json`, the
+`latest/` pointer, self-score notes, `tcr:` commits — never typed in. The
+guiding line: **backlog is wish, main is truth, done ≡ merged.**

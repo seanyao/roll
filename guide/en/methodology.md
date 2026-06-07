@@ -608,18 +608,26 @@ On macOS, Roll uses **launchd** (plists installed to `~/Library/LaunchAgents/`);
 
 If the agent supports native scheduling (Claude Code hooks, opencode scheduled tasks), that is preferred over raw launchd/cron for cleaner lifecycle management.
 
-### 9.4 Per-Project Agent Configuration
+### 9.4 Per-Machine Agent Routing
 
-When multiple projects use Roll, each can use a different agent. `roll agent use <name>` writes a `.roll.yaml` file in the project root:
+Agent selection is **per-machine**, via `.roll/agents.yaml` — four complexity
+slots, each mapped to a locally-installed agent:
 
 ```yaml
-# .roll.yaml
-agent: kimi   # overrides ~/.roll/config.yaml for this project
+# .roll/agents.yaml (per-machine; never committed)
+schema: v3
+easy:     { agent: pi }
+default:  { agent: pi }
+hard:     { agent: claude }
+fallback: { agent: kimi }
 ```
 
-The lookup order is: `.roll.yaml` (project) → `~/.roll/config.yaml` (global) → `claude` (default).
-
-Commit `.roll.yaml` if the team should share the same agent preference; add it to `.gitignore` for personal preference.
+A story's `est_min` picks the tier (easy ≤ 8 < default ≤ 20 < hard); the tier
+slot picks the agent. When a tier's slot is empty, routing falls back to the
+`default` slot → the `local.yaml` single-agent default (non-loop contexts'
+preference, if present) → the first installed agent. `roll agent use <name>`
+updates the slots. There is no per-tier override outside `agents.yaml` — one
+project field never collapses the complexity tiers onto a single agent.
 
 ### 9.5 Human Authority
 

@@ -600,18 +600,20 @@ macOS 上使用 **launchd**（plist 安装到 `~/Library/LaunchAgents/`），Lin
 
 如果使用的 agent 支持原生调度（如 Claude Code hooks、opencode 定时任务），优先使用原生调度，生命周期管理更干净。
 
-### 9.4 Per-Project Agent 配置
+### 9.4 按机器的 Agent 路由
 
-多个项目同时使用 Roll 时，每个项目可以独立配置 agent。`roll agent use <name>` 在项目根目录写入 `.roll.yaml`：
+Agent 选择是**按机器**的，配置在 `.roll/agents.yaml`——四个复杂度槽位，各自映射到一个本机已装 agent：
 
 ```yaml
-# .roll.yaml
-agent: kimi   # 覆盖 ~/.roll/config.yaml 中的全局设置
+# .roll/agents.yaml（按机器；永不提交）
+schema: v3
+easy:     { agent: pi }
+default:  { agent: pi }
+hard:     { agent: claude }
+fallback: { agent: kimi }
 ```
 
-查找顺序：`.roll.yaml`（项目）→ `~/.roll/config.yaml`（全局）→ `claude`（默认）。
-
-团队希望统一 agent 时提交 `.roll.yaml`；个人偏好则加入 `.gitignore`。
+故事的 `est_min` 决定档位（easy ≤ 8 < default ≤ 20 < hard），档位槽决定 agent。档位槽为空时依次回落：`default` 槽 → `local.yaml` 的单 agent 默认（非 loop 场景的偏好，存在时）→ 首个已装 agent。`roll agent use <name>` 更新槽位。`agents.yaml` 之外不存在逐档覆盖——任何项目级单字段都不会把全部复杂度档坍缩到一个 agent 上。
 
 ### 9.5 人类保留的权力
 

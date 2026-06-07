@@ -24,7 +24,7 @@ This is a one-time, breaking change. Your existing files keep their git history 
 | `docs/dream/` | `.roll/dream/` | `roll-.dream` output (auto-generated) |
 | `docs/design/` | `.roll/design/` | Design exploration docs |
 | `docs/domain/` | `.roll/domain/` | DDD models |
-| `docs/practices/loop-autorun-verification.md` | `.roll/verification/loop-autorun-verification.md` | Execution records |
+| `docs/practices/loop-autorun-verification.md` | `.roll/features/loop-engine/loop-autorun-verification.md` | Execution records |
 | `docs/practices/engineering-common-sense.md` | `guide/en/practices/engineering-common-sense.md` | Engineering norm (user-facing) |
 | `docs/intro/` | `site/slides/` | Promotional HTML pages |
 | `docs/guide/en/` | `guide/en/` | User docs (English) |

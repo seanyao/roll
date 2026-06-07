@@ -69,6 +69,15 @@ describe("findFeatureFile", () => {
   it("missing story → null", () => {
     expect(findFeatureFile(project(), "US-NOPE-9")).toBeNull();
   });
+  it("FIX-225: story-dir <ID>/spec.md wins over a prose mention walked earlier", () => {
+    const proj = project();
+    // The hijack case: an alphabetically-earlier epic mentions the ID in prose.
+    mkdirSync(join(proj, ".roll", "features", "aa-epic"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "features", "aa-epic", "other.md"), "mentions FIX-400 in prose\n");
+    mkdirSync(join(proj, ".roll", "features", "demo", "FIX-400"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "features", "demo", "FIX-400", "spec.md"), "# FIX-400\n\n**AC:**\n- [ ] x\n");
+    expect(findFeatureFile(proj, "FIX-400")).toContain(join("demo", "FIX-400", "spec.md"));
+  });
 });
 
 describe("attestCommand", () => {

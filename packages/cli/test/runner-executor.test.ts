@@ -4,8 +4,8 @@
  * dispatch (every CycleCommand kind, via fully faked Ports), the v2-shaped runs
  * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
  */
-import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -536,4 +536,53 @@ describe("withPtyWrap — FIX-224 non-claude agents get a PTY (v2 _AGENT_PTY_PRE
     const w = withPtyWrap({ bin: "/tmp/shim/pi", args: ["-p", "X"] }, "pi", "darwin");
     expect(w.args).toEqual(["-q", "/dev/null", "/tmp/shim/pi", "-p", "X"]);
   });
+});
+
+describe.runIf(process.platform === "darwin")("FIX-224 darwin integration — real script PTY", () => {
+  it("pi shim under script: stdout streams through and exit code survives", async () => {
+    const shimDir = mkdtempSync(join(tmpdir(), "roll-pty-shim-"));
+    const shim = join(shimDir, "pi");
+    writeFileSync(shim, "#!/bin/sh\n[ -t 1 ] && echo TTY=yes || echo TTY=no\necho HELLO-FROM-PI\nexit 0\n");
+    chmodSync(shim, 0o755);
+    const chunks: string[] = [];
+    const r = await realAgentSpawn("pi", {
+      cwd: shimDir,
+      skillBody: "X",
+      bin: shim,
+      timeoutMs: 15000,
+      onChunk: (d) => chunks.push(d.toString("utf8")),
+    });
+    expect(r.exitCode).toBe(0);
+    // The agent saw a PTY (the whole point of the wrap)…
+    expect(r.stdout).toContain("TTY=yes");
+    // …and its output streamed through onChunk to the live log.
+    expect(chunks.join("")).toContain("HELLO-FROM-PI");
+    execFileSync("rm", ["-rf", shimDir]);
+  });
+
+  it("timeout group-kill reaps the agent UNDER script (no haunted worktree)", async () => {
+    const shimDir = mkdtempSync(join(tmpdir(), "roll-pty-kill-"));
+    const marker = `roll-fix224-${process.pid}`;
+    const shim = join(shimDir, "pi");
+    writeFileSync(shim, `#!/bin/sh\necho ALIVE ${marker}\nsleep 600\n`);
+    chmodSync(shim, 0o755);
+    const r = await realAgentSpawn("pi", {
+      cwd: shimDir,
+      skillBody: "X",
+      bin: shim,
+      timeoutMs: 1500,
+    });
+    expect(r.timedOut).toBe(true);
+    // One settle tick later, NOTHING carrying the marker may survive —
+    // neither script nor the sleeping shim under it.
+    await new Promise((res) => setTimeout(res, 500));
+    let survivors = "";
+    try {
+      survivors = execFileSync("pgrep", ["-lf", marker]).toString("utf8");
+    } catch {
+      /* pgrep exit 1 = no match = good */
+    }
+    expect(survivors).toBe("");
+    execFileSync("rm", ["-rf", shimDir]);
+  }, 20000);
 });

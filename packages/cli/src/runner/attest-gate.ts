@@ -29,29 +29,23 @@
 import { parsePolicy } from "@roll/core";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { cardArchiveDir, legacyArchiveDir, reportFileName } from "../lib/archive.js";
+import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 
 export type AttestMode = "soft" | "hard";
 
 /**
- * Candidate report paths, NEW layout first (US-META-001:
- * `features/<epic>/<ID>/latest/<ID>-report.html`), legacy second
- * (`verification/<ID>/latest/report.html`). Read-compat for the migration window
- * (US-META-002 collapses this to the card folder only).
+ * Report path candidates — the card folder ONLY
+ * (`features/<epic>/<ID>/latest/<ID>-report.html`). The legacy
+ * `verification/<ID>/` read-compat window closed with US-META-002c: the old
+ * tree was migrated (002b) and deleted; nothing writes or reads it anymore.
  */
 function reportCandidates(worktreeCwd: string, storyId: string): string[] {
-  return [
-    join(cardArchiveDir(worktreeCwd, storyId), "latest", reportFileName(storyId)),
-    join(legacyArchiveDir(worktreeCwd, storyId), "latest", "report.html"),
-  ];
+  return [join(cardArchiveDir(worktreeCwd, storyId), "latest", reportFileName(storyId))];
 }
 
-/** ac-map candidates in the same NEW-then-legacy order. */
+/** ac-map candidates, same single-home rule. */
 function acMapCandidates(worktreeCwd: string, storyId: string): string[] {
-  return [
-    join(cardArchiveDir(worktreeCwd, storyId), "ac-map.json"),
-    join(legacyArchiveDir(worktreeCwd, storyId), "ac-map.json"),
-  ];
+  return [join(cardArchiveDir(worktreeCwd, storyId), "ac-map.json")];
 }
 
 /** The acceptance report a delivered story must produce (skill step 10.6) —

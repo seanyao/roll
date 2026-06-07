@@ -24,7 +24,7 @@ Roll 2.0 把所有"过程"产物（BACKLOG、PROPOSALS、feature 规格、briefs
 | `docs/dream/` | `.roll/dream/` | `roll-.dream` 自动产出 |
 | `docs/design/` | `.roll/design/` | 设计探索文档 |
 | `docs/domain/` | `.roll/domain/` | DDD 模型 |
-| `docs/practices/loop-autorun-verification.md` | `.roll/verification/loop-autorun-verification.md` | 执行验证记录 |
+| `docs/practices/loop-autorun-verification.md` | `.roll/features/loop-engine/loop-autorun-verification.md` | 执行验证记录 |
 | `docs/practices/engineering-common-sense.md` | `guide/en/practices/engineering-common-sense.md` | 工程规范（对外） |
 | `docs/intro/` | `site/slides/` | 宣传 HTML 页面 |
 | `docs/guide/en/` | `guide/en/` | 用户文档（英文） |

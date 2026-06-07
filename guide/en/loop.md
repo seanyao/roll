@@ -208,8 +208,10 @@ fallback: { agent: pi }
 
 `agents.yaml` is per-machine — it lives in `.roll/.gitignore` and is never
 committed, so each machine manages its own slots. When a tier's slot is empty,
-routing falls back to the `default` slot; if that is also empty it WARNs and
-uses the first installed agent.
+routing falls back to the `default` slot → the `local.yaml` single-agent
+default (if present) → WARNs and uses the first installed agent. Per-tier
+selection reads `agents.yaml` only; `ROLL_LOOP_AGENT` is the route's OUTPUT
+(consumed by display/dream), never a selection input.
 
 每轮 cycle 启动时 cron log 会打印一行（`via <tier>` 是复杂度档，不是硬规则命中）：
 
@@ -989,3 +991,15 @@ attach scripts) and the global mute switch stay in `~/.shared/roll/`. See
 | `<project>/.roll/loop/ALERT-<slug>.md` | Accumulated alerts (failures, TCR violations) |
 | `<project>/.roll/loop/PAUSE-<slug>` | Pause marker (created by `roll loop pause`) |
 | `~/.shared/roll/mute` | Global auto-attach mute marker (shared across projects) |
+
+## Degraded modes & observation
+
+- **Offline**: when a cycle fails while the network is unreachable, the loop
+  degrades to **local-only delivery** — TCR commits and green tests stay on the
+  branch, a bilingual notice is printed, the consecutive-failure counter is NOT
+  ticked (offline never accumulates into an auto-PAUSE), and the scheduler
+  keeps breathing. The next online cycle's push/PR catches up naturally.
+- **Live window for every agent**: non-claude agents (pi, kimi, codex, …) run
+  under a pseudo-terminal on macOS so their output streams line-by-line into
+  the observation window instead of buffering until exit; claude streams over
+  its own protocol unchanged.

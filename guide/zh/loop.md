@@ -179,8 +179,9 @@ fallback: { agent: pi }
 ```
 
 `agents.yaml` 是 per-machine 的 —— 它在 `.roll/.gitignore` 里，绝不进 git，
-所以每台机器各管各的槽。某档的槽为空时路由回退到 `default` 槽；`default` 也空
-则 WARN 并用首个已装 agent。
+所以每台机器各管各的槽。某档的槽为空时依次回落：`default` 槽 → `local.yaml`
+的单 agent 默认（存在时）→ WARN 并用首个已装 agent。逐档选择只读
+`agents.yaml`；`ROLL_LOOP_AGENT` 是路由的输出（供展示/dream 消费），不是选择输入。
 
 每轮 cycle 启动时 cron log 打印一行（`via <tier>` 是复杂度档，不是硬规则命中）：
 
@@ -843,3 +844,12 @@ Since Phase 2.0, loop state lives inside the project at `<project>/.roll/loop/`.
 | `<project>/.roll/loop/ALERT-<slug>.md` | 累积的告警（失败、TCR 违规）|
 | `<project>/.roll/loop/PAUSE-<slug>` | 暂停标记（由 `roll loop pause` 创建）|
 | `~/.shared/roll/mute` | 全局静音标记（跨项目共享）|
+
+## 降级与观察
+
+- **断网**：周期在网络不可达时失败，loop 降级为**本地交付**——TCR 提交与
+  绿测试留在分支上，打印双语提示，连败计数**不**累加（断网永远不该累计触发
+  自动暂停），调度照常呼吸。下次联网的周期 push/PR 自然补上。
+- **每个 agent 都有实时观察窗**：非 claude agent（pi、kimi、codex 等）在
+  macOS 上套伪终端运行，输出逐行流入观察窗，不再憋到进程退出；claude 走
+  自己的流式协议，行为不变。

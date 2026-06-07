@@ -3,7 +3,7 @@
  * 001a: design tokens + Features Index front page (collectDossier + renderFeaturesIndex).
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -209,5 +209,49 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(full).not.toContain("<script src=");
     expect(full).not.toContain("<link");
     expect(full).toContain("localStorage");
+  });
+});
+
+describe("roll index — US-DOSSIER-001d three-layer integration", () => {
+  it("generates front page + epic pages + story dossiers with cross-links", async () => {
+    const p = project();
+    // Give US-A-1 an ac-map + a report so the dossier shows delivery truth.
+    const f = join(p, ".roll", "features");
+    writeFileSync(
+      join(f, "alpha", "US-A-1", "ac-map.json"),
+      JSON.stringify([{ ac: "US-A-1:AC1", status: "pass", evidence: [] }]),
+    );
+    writeFileSync(join(f, "alpha", "US-A-1", "2026-06-01T00-00-00", "US-A-1-report.html"), "<html></html>");
+    writeFileSync(join(p, ".roll", "backlog.md"), "| US-A-1 | Alpha story | ✅ Done |\n");
+
+    const { indexCommand } = await import("../src/commands/index-gen.js");
+    const save = process.cwd();
+    process.chdir(p);
+    const out: string[] = [];
+    const w = process.stdout.write.bind(process.stdout);
+    // @ts-expect-error capture-only
+    process.stdout.write = (s: string): boolean => (out.push(String(s)), true);
+    try {
+      expect(indexCommand([])).toBe(0);
+    } finally {
+      process.stdout.write = w;
+      process.chdir(save);
+    }
+    expect(out.join("")).toContain("Delivery Dossier regenerated");
+
+    const idx = readFileSync(join(f, "index.html"), "utf8");
+    const epic = readFileSync(join(f, "alpha", "index.html"), "utf8");
+    const story = readFileSync(join(f, "alpha", "US-A-1", "index.html"), "utf8");
+    // index → epic → story → back.
+    expect(idx).toContain('href="alpha/index.html"');
+    expect(epic).toContain('href="US-A-1/index.html"');
+    expect(epic).toContain('href="../index.html"');
+    expect(story).toContain('href="../../index.html"');
+    expect(story).toContain('href="../index.html"');
+    // Story dossier carries the real delivery data.
+    expect(story).toContain('class="attest-banner"');
+    expect(story).toContain('href="latest/US-A-1-report.html"');
+    expect(story).toContain("US-A-1:AC1");
+    expect(story).toContain("✓ pass");
   });
 });

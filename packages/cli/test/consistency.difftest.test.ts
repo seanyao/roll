@@ -160,6 +160,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "Consistency Report
       ==================================================
       ✅ code: pass
+      ✅ cards: pass
       ✅ docs: pass
          ℹ placeholder — will be implemented in US-CONSIST-002
       ✅ i18n: pass
@@ -181,6 +182,10 @@ describe("frozen: roll consistency", () => {
         "overall": "pass",
         "dimensions": {
           "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "cards": {
             "status": "pass",
             "gaps": []
           },
@@ -218,6 +223,7 @@ describe("frozen: roll consistency", () => {
       ==================================================
       ❌ code: fail
          • Feature 'orphan' has Done stories but is missing from features.md catalog
+      ✅ cards: pass
       ✅ docs: pass
          ℹ placeholder — will be implemented in US-CONSIST-002
       ✅ i18n: pass
@@ -243,6 +249,10 @@ describe("frozen: roll consistency", () => {
             "gaps": [
               "Feature 'orphan' has Done stories but is missing from features.md catalog"
             ]
+          },
+          "cards": {
+            "status": "pass",
+            "gaps": []
           },
           "docs": {
             "status": "pass",
@@ -277,6 +287,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "Consistency Report
       ==================================================
       ✅ code: pass
+      ✅ cards: pass
       ✅ docs: pass
          ℹ placeholder — will be implemented in US-CONSIST-002
       ❌ i18n: fail
@@ -301,6 +312,10 @@ describe("frozen: roll consistency", () => {
         "overall": "fail",
         "dimensions": {
           "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "cards": {
             "status": "pass",
             "gaps": []
           },
@@ -341,6 +356,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "Consistency Report
       ==================================================
       ✅ code: pass
+      ✅ cards: pass
       ✅ docs: pass
          ℹ placeholder — will be implemented in US-CONSIST-002
       ✅ i18n: pass
@@ -364,6 +380,10 @@ describe("frozen: roll consistency", () => {
         "overall": "fail",
         "dimensions": {
           "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "cards": {
             "status": "pass",
             "gaps": []
           },
@@ -403,6 +423,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "Consistency Report
       ==================================================
       ✅ code: pass
+      ✅ cards: pass
       ✅ docs: pass
          ℹ placeholder — will be implemented in US-CONSIST-002
       ✅ i18n: pass
@@ -425,6 +446,10 @@ describe("frozen: roll consistency", () => {
         "overall": "fail",
         "dimensions": {
           "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "cards": {
             "status": "pass",
             "gaps": []
           },
@@ -463,6 +488,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "Consistency Report
       ==================================================
       ✅ code: pass
+      ✅ cards: pass
       ✅ docs: pass
          ℹ placeholder — will be implemented in US-CONSIST-002
       ✅ i18n: pass

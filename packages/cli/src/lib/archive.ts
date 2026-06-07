@@ -55,18 +55,37 @@ export function reportFileName(storyId: string): string {
   return `${storyId}-report.html`;
 }
 
+/** A directory name that can serve as an epic (not empty/`.`/the `features` root itself). */
+function isEpicName(name: string): boolean {
+  return name !== "" && name !== "." && name !== "features";
+}
+
 /**
- * Resolve a story's epic by LIVE filesystem walk: the epic is the directory the
- * feature file lives under (`features/<epic>/<ID|slug>.md`). Returns null when
- * the file is missing or sits directly under `features/` (no epic dir) — both
- * fall back to `uncategorized` at the call site.
+ * Derive the epic from a feature file path — the single owner of the
+ * `features/<epic>/<ID>/spec.md` layout knowledge.
+ *
+ * The file lives inside the story directory, so the epic is TWO levels up:
+ *   spec.md → <ID>/ → <epic>/
+ * Legacy fallback: a file directly under `features/<epic>/` (no story subdir)
+ * takes its epic from ONE level up. Returns null when neither level yields one.
+ */
+export function epicFromFeaturePath(featureFile: string): string | null {
+  const storyDir = dirname(featureFile);
+  const epic = basename(dirname(storyDir));
+  if (isEpicName(epic)) return epic;
+  const legacy = basename(storyDir);
+  return isEpicName(legacy) ? legacy : null;
+}
+
+/**
+ * Resolve a story's epic by LIVE filesystem walk (see {@link epicFromFeaturePath}
+ * for the layout rules). Returns null when the file is missing or has no epic
+ * parent — falls back to `uncategorized` at the call site.
  */
 export function liveEpicOf(projectPath: string, storyId: string): string | null {
   const file = findFeatureFile(projectPath, storyId);
   if (file === null) return null;
-  const epic = basename(dirname(file));
-  if (epic === "" || epic === "." || epic === "features") return null;
-  return epic;
+  return epicFromFeaturePath(file);
 }
 
 /** Read `.roll/index.json` → ID→epic map; {} on absence / malformed (lenient). */

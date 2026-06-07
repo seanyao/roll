@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.607.2 — 2026-06-07
+
+### 自动化流水线
+
+- 无技能子模块的项目跑 loop 找不到技能、选 agent 无视项目配置；补全局技能兜底、读项目配置选人、新增 pi 接管（FIX-221） `[loop]`
+- loop 选 agent 被项目级单一默认一票否决：所有难度档坍缩成一个 agent，难题不再给 claude；装机探测永真空转；按 v2 链路修复（FIX-223） `[loop]`
+- 非 claude agent 的 loop 接管命令全量 port（kimi/codex/deepseek/qwen/agy/gemini/antigravity）（US-PORT-010）
+- roll loop now 手动触发降噪：交互终端只看关键节点，不再被逐行 JSON 淹没（FIX-220） `[loop]`
+
+### 工程和测试
+
+- difftest 卸 oracle 收尾：全仓断言测试期不再起任何旧引擎，桥接表与文档记 oracle 卸任（US-PORT-009e）
+- 看板冻结测试时钟钉死：快照不再随墙钟与时区漂移，任意日期任意时区可复现，提交闸不再被误堵（FIX-222）
+
+### 其他
+
+- 验收卡史诗归属适配新档案布局：两级目录解析收敛为单一解析点（PR#513）
+
 ## v3.607.1 — 2026-06-07
 
 ### 可见性

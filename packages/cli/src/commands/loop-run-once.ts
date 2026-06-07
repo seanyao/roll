@@ -12,12 +12,13 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, cycleEndEvent, mapV2Status, readSlotFromText, type AgentSlot, type RouteDeps } from "@roll/core";
+import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, readSlotFromText, type AgentSlot, type RouteDeps } from "@roll/core";
 import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
+import { realAgentEnv } from "./agent-list.js";
 import { spawn } from "node:child_process";
 
 /** US-PORT-011: after a delivered cycle, surface the acceptance report —
@@ -236,54 +237,34 @@ export function readSkillBody(projectPath: string): string | null {
 }
 
 /**
- * Build route deps that read the project's agents.yaml, local.yaml,
- * and ROLL_LOOP_AGENT env override — the same priority chain bash
- * `_loop_pick_agent_for_story` walks.
+ * Build route deps mirroring bash `_loop_pick_agent_for_story`: the per-tier
+ * slot comes from agents.yaml ONLY (the router walks tier → default →
+ * firstInstalled). `local.yaml agent:` is NOT a tier override — in v2 it is
+ * the single-agent default for non-loop contexts and the cold-start seed for
+ * the `default` slot; consulting it per-slot would collapse all tiers to one
+ * agent (FIX-223). `ROLL_LOOP_AGENT` is likewise routing OUTPUT consumed by
+ * loop-fmt/dream, never a selection input.
+ *
+ * Exported for tests.
  */
-function buildLoopRouteDeps(projectPath: string): RouteDeps {
+export function buildLoopRouteDeps(projectPath: string): RouteDeps {
   function readSlot(slot: AgentSlot): string | undefined {
-    // 1. ROLL_LOOP_AGENT env override wins everything (only for the "any" case;
-    //    the caller iterates tiers, so we just honour env for each slot read).
-    const envAgent = (process.env["ROLL_LOOP_AGENT"] ?? "").trim();
-    if (envAgent !== "") return envAgent;
-
-    // 2. Read local.yaml's `agent:` field (project override).
-    const localAgent = readField(join(projectPath, ".roll", "local.yaml"), /^agent:/);
-    if (localAgent !== undefined) return localAgent;
-
-    // 3. Read agents.yaml slot.
     const agentsYaml = join(projectPath, ".roll", "agents.yaml");
     try {
-      const text = readFileSync(agentsYaml, "utf8");
-      const agent = readSlotFromText(text, slot);
-      if (agent !== undefined) return agent;
+      return readSlotFromText(readFileSync(agentsYaml, "utf8"), slot);
     } catch {
-      // agents.yaml missing — fall through.
+      return undefined; // agents.yaml missing — router falls through.
     }
-    return undefined;
   }
 
   function firstInstalled(): string | undefined {
-    const envAgent = (process.env["ROLL_LOOP_AGENT"] ?? "").trim();
-    if (envAgent !== "") return envAgent;
-    // Try agents.yaml default slot, then local.yaml agent, then hardcoded
-    // installed-agent scan (mirrors _first_installed_agent).
-    const fromAgents = readSlot("default");
-    if (fromAgents !== undefined) return fromAgents;
+    // Project single-agent default (only reached when agents.yaml gave the
+    // router nothing for tier AND default), then the real installed-agent
+    // scan (core mirrors bash `_first_installed_agent` order + probes).
+    // undefined when nothing is installed — the router throws, like bash.
     const fromLocal = readField(join(projectPath, ".roll", "local.yaml"), /^agent:/);
     if (fromLocal !== undefined) return fromLocal;
-    // Last resort: pick first available from the known list.
-    for (const candidate of ["claude", "codex", "kimi", "deepseek", "qwen", "agy", "pi"]) {
-      try {
-        const r = spawn(candidate, ["--version"], { stdio: "ignore" });
-        // Don't wait — if it spawned, it's there.
-        r.unref();
-        return candidate;
-      } catch {
-        continue;
-      }
-    }
-    return "claude"; // absolute last resort.
+    return firstInstalledAgent(realAgentEnv());
   }
 
   return { readSlot, firstInstalled };
@@ -372,9 +353,9 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 1;
   }
 
-  // Resolve agent from the project's agents.yaml and local.yaml, then fall
-  // back through ROLL_LOOP_AGENT → first installed agent (the same chain bash
-  // `_loop_pick_agent_for_story` walks).
+  // Resolve agent from the project's agents.yaml per tier, falling back to
+  // local.yaml's single-agent default → first installed agent (the same chain
+  // bash `_loop_pick_agent_for_story` walks).
   const routeDeps: RouteDeps = buildLoopRouteDeps(id.path);
 
   // FIX-220: manual `roll loop now` (ROLL_LOOP_FORCE=1) runs in an interactive

@@ -18,7 +18,6 @@ import {
   liveEpicOf,
   readIndex,
   reportFileName,
-  resolveReadArchiveDir,
   serializeIndex,
 } from "../src/lib/archive.js";
 
@@ -136,25 +135,4 @@ describe("roll index command", () => {
   });
 });
 
-describe("resolveReadArchiveDir (US-META-002 retires this compat)", () => {
-  it("prefers the new card folder when present", () => {
-    const proj = project(["| US-A-1 | x | 📋 Todo |"], [["alpha/US-A-1.md", "# US-A-1\n"]]);
-    mkdirSync(join(proj, ".roll", "features", "alpha", "US-A-1"), { recursive: true });
-    expect(resolveReadArchiveDir(proj, "US-A-1")).toEqual({
-      dir: join(proj, ".roll", "features", "alpha", "US-A-1"),
-      layout: "card",
-    });
-  });
-  it("falls back to the legacy verification/<ID> tree (already-delivered cards stay readable)", () => {
-    const proj = project(["| US-A-1 | x | 📋 Todo |"], [["alpha/US-A-1.md", "# US-A-1\n"]]);
-    mkdirSync(join(proj, ".roll", "verification", "US-A-1"), { recursive: true });
-    expect(resolveReadArchiveDir(proj, "US-A-1")).toEqual({
-      dir: join(proj, ".roll", "verification", "US-A-1"),
-      layout: "legacy",
-    });
-  });
-  it("null when neither layout exists", () => {
-    const proj = project(["| US-A-1 | x | 📋 Todo |"]);
-    expect(resolveReadArchiveDir(proj, "US-A-1")).toBeNull();
-  });
-});
+// US-META-002c: resolveReadArchiveDir retired with the legacy verification/ tree.

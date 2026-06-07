@@ -8,9 +8,9 @@
  * place falls back to `features/uncategorized/<ID>/` — resolution NEVER blocks a
  * write (D1, same posture as attest's never-block failure policy).
  *
- * 不动存量 (this card): only the write side + the index + a GC command. The bulk
- * migration of existing `verification/<ID>/` trees into card folders is US-META-002;
- * until then attest keeps READING the old layout (see {@link resolveReadArchiveDir}).
+ * Lifecycle note: US-META-002a/b migrated the legacy `verification/<ID>/` trees
+ * into card folders; US-META-002c retired the read-compat — the card folder is
+ * the single home for a story's run artifacts.
  */
 import { parseBacklog } from "@roll/core";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -149,27 +149,9 @@ export function cardArchiveDir(projectPath: string, storyId: string): string {
   return join(projectPath, ".roll", "features", epic, storyId);
 }
 
-/** The legacy run-store location (pre-archive layout): `.roll/verification/<ID>`. */
-export function legacyArchiveDir(projectPath: string, storyId: string): string {
-  return join(projectPath, ".roll", "verification", storyId);
-}
-
-/**
- * Read-compat resolver (US-META-001 → retired by US-META-002): the story-level
- * dir that actually holds runs. Prefers the new card folder; falls back to the
- * legacy `verification/<ID>` tree so already-delivered cards stay readable during
- * the migration window. null when neither exists yet.
- */
-export function resolveReadArchiveDir(
-  projectPath: string,
-  storyId: string,
-): { dir: string; layout: "card" | "legacy" } | null {
-  const card = cardArchiveDir(projectPath, storyId);
-  if (existsSync(card)) return { dir: card, layout: "card" };
-  const legacy = legacyArchiveDir(projectPath, storyId);
-  if (existsSync(legacy)) return { dir: legacy, layout: "legacy" };
-  return null;
-}
+// US-META-002c: the legacy `.roll/verification/<ID>` read-compat
+// (legacyArchiveDir / resolveReadArchiveDir) is retired — the tree is migrated
+// (002b) and deleted; the card folder is the single home for run artifacts.
 
 /**
  * Pure: build the ID→epic map from a list of story ids and an epic resolver.

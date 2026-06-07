@@ -30,17 +30,19 @@ function tmp(tag: string): string {
 }
 
 /**
- * Write a CONTENT-BEARING report.html (≥1 AC section) + an ac-map under the
- * verification layout; return the worktree root. A real delivery has both —
- * the empty-shell case is exercised separately by {@link withEmptyShell}.
+ * Write a CONTENT-BEARING <ID>-report.html (≥1 AC section) + an ac-map under
+ * the CARD layout (US-META-002c: the single home — the fixture carries no
+ * index.json, so cardArchiveDir falls back to `uncategorized`); return the
+ * worktree root. A real delivery has both — the empty-shell case is exercised
+ * separately by {@link withEmptyShell}.
  */
 function withReport(storyId: string, mtimeSec?: number): string {
   const wt = tmp("wt");
-  const storyDir = join(wt, ".roll", "verification", storyId);
+  const storyDir = join(wt, ".roll", "features", "uncategorized", storyId);
   const dir = join(storyDir, "latest");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(storyDir, "ac-map.json"), "[]\n");
-  const p = join(dir, "report.html");
+  const p = join(dir, `${storyId}-report.html`);
   writeFileSync(p, `<html><body><section class="ac s-pass" id="${storyId}:AC1">x</section></body></html>\n`);
   if (mtimeSec !== undefined) utimesSync(p, mtimeSec, mtimeSec);
   return wt;
@@ -49,9 +51,9 @@ function withReport(storyId: string, mtimeSec?: number): string {
 /** A fresh report that is an EMPTY SHELL: parseable but zero AC content, no ac-map. */
 function withEmptyShell(storyId: string, mtimeSec: number): string {
   const wt = tmp("shell");
-  const dir = join(wt, ".roll", "verification", storyId, "latest");
+  const dir = join(wt, ".roll", "features", "uncategorized", storyId, "latest");
   mkdirSync(dir, { recursive: true });
-  const p = join(dir, "report.html");
+  const p = join(dir, `${storyId}-report.html`);
   writeFileSync(p, "<html><body><h1>no ACs here</h1></body></html>\n");
   utimesSync(p, mtimeSec, mtimeSec);
   return wt;

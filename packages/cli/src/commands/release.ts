@@ -135,6 +135,14 @@ export function releaseCommand(args: string[], now?: ReleaseDate): number {
   lines.push(`  ${c("dim", label(lang, "releasev3.gate_note"))}`);
   lines.push(`  ${c("dim", label(lang, "releasev3.gate_preview"))}`);
   lines.push("");
+  // US-REL-SHIP: once the version is bumped + merged, `roll release ship`
+  // runs the gate and the tag-push for you (step 4); npm publish stays manual.
+  lines.push(
+    `  ${c("dim", lang === "zh"
+      ? "版本合入后：roll release ship 自动过闸并打 tag 推送（步骤 4）；npm publish 仍由你手动跑"
+      : "after the bump merges: `roll release ship` gates + tags + pushes (step 4); npm publish stays manual")}`,
+  );
+  lines.push("");
   process.stdout.write(lines.join("\n") + "\n");
   return 0;
 }

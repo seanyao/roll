@@ -401,6 +401,11 @@ function pyListRepr(items: string[]): string {
 }
 
 // ─── orchestration ────────────────────────────────────────────────────────────
+/** Programmatic pass/fail for the six dimensions — reused by `roll release ship`. */
+export function consistencyPasses(projectDir: string): boolean {
+  return runAll(projectDir).overall === "pass";
+}
+
 function runAll(projectDir: string): Report {
   const report: Report = { overall: "pass", dimensions: {} };
   for (const dim of DIMENSIONS) {

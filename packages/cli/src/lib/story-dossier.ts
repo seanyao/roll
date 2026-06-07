@@ -15,6 +15,9 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
+import { execFileSync } from "node:child_process";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join as joinPath } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES } from "./dossier-index.js";
@@ -151,4 +154,124 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("Retrospective", "复盘", retro, d.retro === undefined || d.retro === "") +
     `<footer>Roll · <a href="spec.md">spec.md</a></footer>\n</body>\n</html>\n`
   );
+}
+
+// ── US-DOSSIER-001d — fill the dossier input from the real card folder ──────
+
+/**
+ * Read everything renderStoryDossier needs from the card folder + repo:
+ * spec.md (wish = first blockquote; design = bullets under a 方案/Solution/
+ * Design heading), ac-map.json, the latest/ report, the newest self-score
+ * note, and the story's `tcr:` commits from git history. Every read is
+ * best-effort — a missing source renders as an honest empty state.
+ */
+export function collectStoryDossierInput(projectPath: string, story: DossierStory): StoryDossierInput {
+  const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id);
+  const out: StoryDossierInput = { story };
+
+  // spec.md → wish + design bullets.
+  try {
+    const spec = readFile(joinPath(dir, "spec.md"));
+    const quote: string[] = [];
+    for (const l of spec.split("\n")) {
+      const m = /^>\s?(.*)$/.exec(l);
+      if (m !== null) quote.push((m[1] ?? "").trim());
+      else if (quote.length > 0) break;
+    }
+    const wish = quote.join(" ").replace(/\s+/g, " ").trim();
+    if (wish !== "") out.wish = wish;
+    const design: string[] = [];
+    let inDesign = false;
+    for (const l of spec.split("\n")) {
+      if (/^#{2,3}\s*(方案|Solution|Design)/i.test(l)) inDesign = true;
+      else if (/^#{1,3}\s/.test(l)) inDesign = false;
+      else if (inDesign) {
+        const m = /^[-*]\s+(.*)$/.exec(l.trim());
+        if (m !== null) design.push((m[1] ?? "").trim());
+      }
+    }
+    if (design.length > 0) out.design = design;
+  } catch {
+    /* no spec — bare card */
+  }
+
+  // ac-map.json → AC rows.
+  try {
+    const rows = JSON.parse(readFile(joinPath(dir, "ac-map.json"))) as Array<{
+      ac?: string;
+      status?: string;
+      note?: string;
+    }>;
+    if (Array.isArray(rows)) {
+      const acRows = rows
+        .filter((r) => typeof r.ac === "string" && typeof r.status === "string")
+        .map((r) => ({ ac: r.ac as string, status: r.status as string, ...(r.note !== undefined ? { note: r.note } : {}) }));
+      if (acRows.length > 0) out.acRows = acRows;
+    }
+  } catch {
+    /* no ac-map yet */
+  }
+
+  // latest/<ID>-report.html → banner link.
+  try {
+    if (statDir(joinPath(dir, "latest", `${story.id}-report.html`))) out.reportHref = `latest/${story.id}-report.html`;
+  } catch {
+    /* no report */
+  }
+
+  // newest self-score note → retrospective line.
+  try {
+    const notesDir = joinPath(projectPath, ".roll", "notes");
+    const notes = listDir(notesDir)
+      .filter((f) => f.includes(`-${story.id}-`) && f.endsWith(".md"))
+      .sort();
+    const last = notes[notes.length - 1];
+    if (last !== undefined) {
+      const body = readFile(joinPath(notesDir, last));
+      const score = /^score:\s*(.+)$/m.exec(body);
+      const verdict = /^verdict:\s*(.+)$/m.exec(body);
+      const para = body
+        .split(/\n{2,}/)
+        .map((p) => p.trim())
+        .find((p) => p !== "" && !p.startsWith("---") && !/^score:|^verdict:/m.test(p));
+      out.retro = [
+        score !== null ? `score ${(score[1] ?? "").trim()}` : "",
+        verdict !== null ? `· ${(verdict[1] ?? "").trim()}` : "",
+        para !== undefined ? `— ${para.replace(/\s+/g, " ").slice(0, 240)}` : "",
+      ]
+        .join(" ")
+        .trim();
+    }
+  } catch {
+    /* no notes */
+  }
+
+  // git history → tcr commits mentioning the story (oldest first).
+  try {
+    const log = execGit(projectPath, ["log", "--format=%s", "--fixed-strings", "--grep", story.id, "--reverse"]);
+    const commits = log
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "")
+      .slice(0, 40);
+    if (commits.length > 0) out.commits = commits;
+  } catch {
+    /* not a git repo / git unavailable */
+  }
+
+  return out;
+}
+
+// Thin fs/git seams (kept local so the renderer stays pure above).
+function readFile(p: string): string {
+  return readFileSync(p, "utf8");
+}
+function listDir(p: string): string[] {
+  return readdirSync(p);
+}
+function statDir(p: string): boolean {
+  return statSync(p).isFile();
+}
+function execGit(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8", timeout: 10_000 });
 }

@@ -60,7 +60,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join, relative } from "node:path";
-import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, reportFileName } from "../lib/archive.js";
+import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, generateIndex, reportFileName } from "../lib/archive.js";
 import { markPhaseDone } from "../lib/story-page.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
@@ -596,6 +596,15 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // NON-ZERO exit. The report file stays on disk — evidence is never discarded.
   const smoke = smokeCheckReport(html, (rel) => existsSync(join(runDir, rel)));
   process.stdout.write(`Acceptance report written\n验收报告已生成\n  ${relative(projectPath, reportPath)}\n`);
+  // US-META-009: archive self-heal — a fresh report changes the dossier's
+  // truth, so refresh the ID→epic index right here (best-effort, never blocks
+  // the evidence path). Projects that never ran `roll index` converge on
+  // their first attest instead of drifting (SoloGo shape).
+  try {
+    generateIndex(projectPath);
+  } catch {
+    /* never block the evidence path */
+  }
   if (!smoke.ok) {
     for (const p of smoke.problems) warn(`render smoke: ${p}`);
     return 2;

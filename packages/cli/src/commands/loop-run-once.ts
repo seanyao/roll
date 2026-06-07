@@ -19,7 +19,9 @@ import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { realAgentEnv } from "./agent-list.js";
+import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { spawn } from "node:child_process";
+import { lookup } from "node:dns/promises";
 
 /** US-PORT-011: after a delivered cycle, surface the acceptance report —
  *  print its path always; auto-open in the browser unless the project is
@@ -37,7 +39,8 @@ export function announceReport(
   },
 ): string | null {
   if (storyId === "") return null;
-  const report = join(projectPath, ".roll", "verification", storyId, "latest", "report.html");
+  // US-META-002c: the card folder is the single home for the attest report.
+  const report = join(cardArchiveDir(projectPath, storyId), "latest", reportFileName(storyId));
   if (!existsSync(report)) return null;
   process.stdout.write(`evidence: ${report}\n验收报告: ${report}\n`);
   const muted =
@@ -402,9 +405,46 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
 
   const isFail = result.terminal === "failed" || result.terminal === "blocked";
   if (isFail) {
+    // IDEA-001: a cycle that failed while the network is unreachable is NOT a
+    // delivery failure — the local work (TCR commits, green tests) is intact;
+    // only push/PR could not happen. Degrade to local-only with a notice:
+    // no consecutive-fails tick (offline must never accumulate into an
+    // auto-PAUSE), exit 0 (the schedule keeps breathing; the next online
+    // cycle's push/PR catches up naturally).
+    if (await isOffline()) {
+      process.stderr.write(
+        "loop run-once: network unreachable — degraded to local-only delivery (commits stay on the branch; push/PR catch up when back online)\n" +
+          "loop run-once: 网络不可达——已降级为本地交付（提交保留在分支上，联网后 push/PR 自然补上）\n",
+      );
+      return 0;
+    }
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
     incrementConsecutiveFails(id.path, id.slug, alertsPath, cycleId, storyId, result.terminal ?? "unknown");
   }
 
   return isFail ? 1 : 0;
+}
+
+/**
+ * IDEA-001 — offline probe: can we resolve github.com within 1.5s? DNS lookup
+ * is the cheapest universal signal for "the network is gone" (a captive
+ * portal can still fool it — acceptable for a degrade-notice heuristic).
+ * The resolver is injectable for tests.
+ */
+export async function isOffline(
+  resolve: (host: string) => Promise<unknown> = (h) => lookup(h),
+): Promise<boolean> {
+  try {
+    await Promise.race([
+      resolve("github.com"),
+      new Promise((_, rej) => {
+        const t = setTimeout(() => rej(new Error("dns timeout")), 1500);
+        // Don't hold the process open for the probe timer.
+        if (typeof t === "object") t.unref();
+      }),
+    ]);
+    return false;
+  } catch {
+    return true;
+  }
 }

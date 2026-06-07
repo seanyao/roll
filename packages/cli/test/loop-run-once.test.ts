@@ -410,3 +410,49 @@ describe("FIX-223 — loop agent selection (tier routing vs local.yaml collapse)
     }
   });
 });
+
+describe("IDEA-001 — offline degrade probe", () => {
+  it("online: resolver succeeds → not offline", async () => {
+    const { isOffline } = await import("../src/commands/loop-run-once.js");
+    expect(await isOffline(() => Promise.resolve([{ address: "1.2.3.4" }]))).toBe(false);
+  });
+  it("offline: resolver rejects (ENOTFOUND) → offline", async () => {
+    const { isOffline } = await import("../src/commands/loop-run-once.js");
+    expect(await isOffline(() => Promise.reject(new Error("ENOTFOUND")))).toBe(true);
+  });
+  it("dead network: resolver hangs → 1.5s timeout → offline", async () => {
+    const { isOffline } = await import("../src/commands/loop-run-once.js");
+    const start = Date.now();
+    expect(await isOffline(() => new Promise(() => {}))).toBe(true);
+    expect(Date.now() - start).toBeLessThan(3000);
+  });
+});
+
+describe("announceReport — card-layout report surface (US-META-002c follow-through)", () => {
+  it("finds the report in the card folder and announces it", async () => {
+    const { announceReport } = await import("../src/commands/loop-run-once.js");
+    const p = tmp("announce");
+    const dir = join(p, ".roll", "features", "uncategorized", "FIX-9", "latest");
+    execFileSync("mkdir", ["-p", dir]);
+    writeFileSync(join(dir, "FIX-9-report.html"), "<html></html>");
+    const opened: string[] = [];
+    // mute flag absent → opener fires; capture instead of really opening.
+    const w = process.stdout.write.bind(process.stdout);
+    let out = "";
+    // @ts-expect-error capture-only
+    process.stdout.write = (s: string): boolean => ((out += String(s)), true);
+    let got: string | null;
+    try {
+      got = announceReport(p, "slug-x", "FIX-9", (path) => opened.push(path));
+    } finally {
+      process.stdout.write = w;
+    }
+    expect(got).toContain(join("features", "uncategorized", "FIX-9", "latest", "FIX-9-report.html"));
+    expect(out).toContain("验收报告");
+    expect(opened).toHaveLength(1);
+  });
+  it("no report anywhere → null, no announcement", async () => {
+    const { announceReport } = await import("../src/commands/loop-run-once.js");
+    expect(announceReport(tmp("announce-none"), "slug-x", "FIX-9", () => {})).toBeNull();
+  });
+});

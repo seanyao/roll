@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { collectDossier } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
 import { renderFeaturesIndex, spineMotif } from "../src/lib/dossier-index.js";
+import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -116,5 +117,41 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(DOSSIER_CSS).toContain("var(--pass)");
     expect(DOSSIER_CSS).toContain("var(--accent)");
     expect(DOSSIER_CSS).toContain("@media (max-width:680px)");
+  });
+});
+
+describe("renderEpicPage — US-DOSSIER-001b", () => {
+  const epics = collectDossier(project());
+  const alpha = epics.find((e) => e.name === "alpha")!;
+  const html = renderEpicPage(alpha);
+
+  it("masthead carries breadcrumb home + epic ledger with truth figure", () => {
+    expect(html).toContain('href="../index.html"');
+    expect(html).toContain("Epic Dossier");
+    expect(html).toContain("史诗档案");
+    expect(html).toContain("Merged to main");
+    expect(html).toContain('style="width:50%"'); // 1 of 2 delivered
+  });
+
+  it("three groups: merged first, backlog after; rows link to story dossiers", () => {
+    expect(html.indexOf("已合主干")).toBeLessThan(html.indexOf("仍在待办"));
+    expect(html).toContain('href="US-A-1/index.html"');
+    expect(html).toContain('class="type type-FIX"');
+    expect(html).toContain('class="pill merged"');
+    expect(html).toContain('class="pill backlog"');
+  });
+
+  it("mini-spine: truth story fills all five dots with delivery in truth-green", () => {
+    const truthSpine = miniSpine({ id: "X-1", epic: "e", type: "US", delivered: true });
+    expect(truthSpine.match(/<i[ >]/g)).toHaveLength(5);
+    expect(truthSpine).toContain('class="truth"');
+    const wishSpine = miniSpine({ id: "X-2", epic: "e", type: "US", delivered: false });
+    expect(wishSpine.match(/class="done"/g)).toHaveLength(1); // definition only
+  });
+
+  it("self-containment holds", () => {
+    expect(html).not.toContain("<script src=");
+    expect(html).not.toContain("<link");
+    expect(html).toContain("localStorage");
   });
 });

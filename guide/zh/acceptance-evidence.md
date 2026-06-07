@@ -27,7 +27,8 @@
 2. agent 写 `ac-map.json`——哪条证据支撑哪条 AC，每条 AC 一个状态：
    `pass` · `readonly` · `partial` · `claimed` · `missing`。
 3. `roll attest <story-id>` 清扫硬事实（TCR commits、最新 CI、可选部署探针、
-   test-pass 凭证）并渲染报告。
+   test-pass 凭证）并渲染报告——收尾自动刷新 `.roll/index.json`，
+   从未建索引的项目在第一次验收时即收敛。
 
 `roll attest` 也可独立运行——没有意图映射时，每条 AC 诚实渲染为 🟧 仅声明。
 
@@ -41,6 +42,18 @@
 
 `.roll/notes/` 里存在同 story 自评条目时，报告底部出现折叠的
 *Self-Score · 自评* 区；没有自评则整块不出现。
+
+## 卡片从哪来 —— `roll story new`
+
+卡片文件夹只有一个铸造通道：
+
+```bash
+roll story new US-PAY-001 --title "退款流程" --epic payments
+```
+
+它写出带 frontmatter 的 `spec.md`、故事页骨架，并刷新 `.roll/index.json`。
+已存在的卡拒绝覆盖——卡只出生一次，之后由人补充 AC、设计与证据。
+技能从不手写卡片文件；任何没有卡的活卡行会被一致性 `cards` 维度在发版闸拦下。
 
 ## 交付档案 —— `roll index`
 

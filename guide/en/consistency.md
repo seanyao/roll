@@ -1,9 +1,11 @@
 # Consistency — `roll consistency check`
 
-Five dimensions are continuously reconciled against the backlog's `✅ Done`
-rows as the source of truth: ① code ↔ backlog · ② docs (changelog / features /
-guide / README / --help) · ③ tests · ④ bilingual parity (guide en↔zh + i18n
-keys) · ⑤ site.
+Six dimensions are continuously reconciled against the backlog's `✅ Done`
+rows as the source of truth: ① code ↔ backlog · ② cards (every live backlog
+row owns `features/<epic>/<ID>/spec.md`; evidence links never dangle —
+pre-card-era Done rows are counted, not failed) · ③ docs (changelog /
+features / guide / README / --help) · ④ tests · ⑤ bilingual parity (guide
+en↔zh + i18n keys) · ⑥ site.
 
 ```bash
 roll consistency check          # human-readable report

@@ -87,12 +87,14 @@ User Input
 ## Self-scoring (US-SKILL-010..014)
 
 `roll-build`, `roll-fix`, and `roll-design` each write one structured
-self-score note to `.roll/notes/` whenever they complete:
+self-score note into the story's card folder whenever they complete
+(US-META-008 — the card folder is the story's single home; the flat
+`.roll/notes/` keeps the project diary and pre-migration history, and both
+the dashboard trend and the story dossier merge the two sources):
 
 ```
-.roll/notes/2026-05-29-roll-build-US-AUTH-001-1717000000.md
-.roll/notes/2026-05-29-roll-fix-FIX-072-1717000123.md
-.roll/notes/2026-05-29-roll-design-US-FOO-001-1717000456.md
+.roll/features/<epic>/US-AUTH-001/notes/2026-05-29-roll-build-US-AUTH-001-1717000000.md
+.roll/features/<epic>/FIX-072/notes/2026-05-29-roll-fix-FIX-072-1717000123.md
 ```
 
 Each note is YAML frontmatter + rationale:

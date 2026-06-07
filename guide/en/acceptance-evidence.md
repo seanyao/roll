@@ -28,7 +28,9 @@ Runs are timestamped and never overwritten. The backlog `✅ Done` row links to
 2. The agent writes `ac-map.json` — which evidence backs which AC, with a
    status per AC: `pass` · `readonly` · `partial` · `claimed` · `missing`.
 3. `roll attest <story-id>` sweeps the hard facts (TCR commits, latest CI run,
-   optional deploy probe, test-pass proof) and renders the report.
+   optional deploy probe, test-pass proof) and renders the report — and ends
+   by refreshing `.roll/index.json`, so an un-indexed project converges on its
+   first attest.
 
 `roll attest` also runs standalone — without an intent map every AC renders as
 🟧 Claimed, honestly.
@@ -43,6 +45,20 @@ down to 🟧 Claimed and lists it under **Discrepancies**. Verbal completion
 
 When `.roll/notes/` carries same-story self-score entries, the report ends
 with a collapsed *Self-Score · 自评* section. No entries → no section.
+
+## Where cards come from — `roll story new`
+
+Card folders are minted through ONE channel:
+
+```bash
+roll story new US-PAY-001 --title "Refund flow" --epic payments
+```
+
+This writes the frontmatter'd `spec.md`, the story page skeleton, and
+refreshes `.roll/index.json`. It refuses to overwrite an existing card —
+cards are born once, then evolved by hand (AC, design, evidence). Skills
+never hand-create card files; the `cards` consistency dimension fails the
+release gate on any live backlog row without a card.
 
 ## The Delivery Dossier — `roll index`
 

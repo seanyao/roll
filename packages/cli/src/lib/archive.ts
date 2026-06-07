@@ -20,7 +20,9 @@ import { basename, dirname, join } from "node:path";
 export const UNCATEGORIZED = "uncategorized";
 
 /** Locate the feature markdown that defines a story (heading or AC owner).
- *  ID-named `<storyId>.md` wins over a prose mention. null when nothing matches. */
+ *  An ID-named owner wins over a prose mention — both the legacy flat form
+ *  (`<storyId>.md`) and the card-folder form (`<storyId>/spec.md`, FIX-225;
+ *  US-META-001 layout). null when nothing matches. */
 export function findFeatureFile(projectPath: string, storyId: string): string | null {
   const root = join(projectPath, ".roll", "features");
   if (!existsSync(root)) return null;
@@ -30,7 +32,9 @@ export function findFeatureFile(projectPath: string, storyId: string): string | 
       const p = join(dir, e.name);
       if (e.isDirectory()) walk(p);
       else if (e.isFile() && e.name.endsWith(".md")) {
-        if (e.name === `${storyId}.md`) hits.unshift(p); // ID-named file wins
+        const idOwned =
+          e.name === `${storyId}.md` || (e.name === "spec.md" && basename(dir) === storyId);
+        if (idOwned) hits.unshift(p); // ID-named owner wins
         else {
           try {
             if (readFileSync(p, "utf8").includes(storyId)) hits.push(p);

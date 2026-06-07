@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
+import { type AgentEnv } from "@roll/core";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
 
 // ── i18n (mirrors bash msg/_i18n_resolve_lang inputs) ───────────────────────
@@ -88,6 +89,24 @@ function agentBinNames(agent: string): string[] | null {
     default:
       return null;
   }
+}
+
+/** Real-filesystem {@link AgentEnv} for core registry probes
+ *  (`firstInstalledAgent` / core `agentInstalledByName`). */
+export function realAgentEnv(): AgentEnv {
+  return {
+    home: homedir(),
+    commandOnPath,
+    dirExists: (p) => existsSync(p),
+    fileExecutable: (p) => {
+      try {
+        accessSync(p, constants.X_OK);
+        return statSync(p).isFile();
+      } catch {
+        return false;
+      }
+    },
+  };
 }
 
 function commandOnPath(bin: string): boolean {

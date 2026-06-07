@@ -3,12 +3,13 @@
  * path (driven against a PATH shim 'claude', never a real agent).
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { readSkillBody } from "../src/commands/loop-run-once.js";
+import { buildLoopRouteDeps, readSkillBody } from "../src/commands/loop-run-once.js";
+import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
 
 const dirs: string[] = [];
@@ -339,5 +340,73 @@ describe("FIX-216 — auto-PAUSE on consecutive failures", () => {
     const body = rf(pauseMarker, "utf8");
     expect(body).toContain("# ALERT — loop auto-paused");
     expect(body).toContain("roll loop resume");
+  });
+});
+
+describe("FIX-223 — loop agent selection (tier routing vs local.yaml collapse)", () => {
+  /** A project with both local.yaml `agent:` and per-tier agents.yaml. */
+  function project(files: Record<string, string>): string {
+    const p = tmp("route");
+    mkdirSync(join(p, ".roll"), { recursive: true });
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(p, ".roll", name), body);
+    return p;
+  }
+
+  const AGENTS_YAML = 'schema: v3\neasy: { agent: pi }\ndefault: { agent: pi }\nhard: { agent: claude }\nfallback: { agent: kimi }\n';
+
+  it("agents.yaml tier slots win — local.yaml `agent:` must NOT collapse tiers", () => {
+    const p = project({ "local.yaml": "agent: pi\n", "agents.yaml": AGENTS_YAML });
+    const deps = buildLoopRouteDeps(p);
+    expect(resolveRoute("hard", deps).agent).toBe("claude");
+    expect(resolveRoute("easy", deps).agent).toBe("pi");
+    expect(resolveRoute("default", deps).agent).toBe("pi");
+  });
+
+  it("ROLL_LOOP_AGENT is routing output, never a selection input", () => {
+    const p = project({ "local.yaml": "agent: pi\n", "agents.yaml": AGENTS_YAML });
+    const prev = process.env["ROLL_LOOP_AGENT"];
+    process.env["ROLL_LOOP_AGENT"] = "deepseek";
+    try {
+      expect(resolveRoute("hard", buildLoopRouteDeps(p)).agent).toBe("claude");
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_LOOP_AGENT"];
+      else process.env["ROLL_LOOP_AGENT"] = prev;
+    }
+  });
+
+  it("empty tier slot falls to the default slot", () => {
+    const p = project({ "agents.yaml": "schema: v3\ndefault: { agent: kimi }\n" });
+    const d = resolveRoute("hard", buildLoopRouteDeps(p));
+    expect(d.agent).toBe("kimi");
+  });
+
+  it("no agents.yaml → local.yaml single-agent default (with router WARN)", () => {
+    const p = project({ "local.yaml": "agent: pi\n" });
+    const d = resolveRoute("hard", buildLoopRouteDeps(p));
+    expect(d.agent).toBe("pi");
+    expect(d.warning).toBeTruthy();
+  });
+
+  it("installed-agent scan actually probes PATH (missing binaries are skipped)", () => {
+    const p = project({});
+    const shim = tmp("shim");
+    // Only a `kimi` executable exists on PATH; HOME is empty (no GUI agents).
+    writeFileSync(join(shim, "kimi"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(shim, "kimi"), 0o755);
+    const home = tmp("home");
+    const prevPath = process.env["PATH"];
+    const prevHome = process.env["HOME"];
+    process.env["PATH"] = shim;
+    process.env["HOME"] = home;
+    try {
+      expect(buildLoopRouteDeps(p).firstInstalled()).toBe("kimi");
+      // Nothing installed at all → undefined (router then throws, like bash).
+      process.env["PATH"] = home;
+      expect(buildLoopRouteDeps(p).firstInstalled()).toBeUndefined();
+    } finally {
+      process.env["PATH"] = prevPath;
+      if (prevHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = prevHome;
+    }
   });
 });

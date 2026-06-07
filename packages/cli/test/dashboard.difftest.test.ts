@@ -55,6 +55,14 @@ function tsRun(env: Record<string, string | undefined>, argv: string[], cwd?: st
   return chunks.join("").replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g, "<NOW>");
 }
 
+/** Pinned clocks (ROLL_RENDER_NOW) so snapshots never drift with wall time/TZ.
+ *  Fixture: 2026-06-06 21:00 UTC = 05:00 UTC+8 on 06-07 — the fixture generates
+ *  UTC-day cycles whose last one (20:48 UTC) is 04:48 next +8 day, so an
+ *  early-morning +8 pin keeps every generated cycle in the past.
+ *  Live: the synthetic events' own base instant. */
+const FIXTURE_NOW = "2026-06-06T21:00:00Z";
+const LIVE_NOW = "2026-06-07T03:18:30Z";
+
 /** A sandbox that neutralizes all host-dependent eyebrow probes. */
 function sandboxEnv(extra: Record<string, string> = {}): Record<string, string> {
   const home = mkdtempSync(join(tmpdir(), "roll-dash-home-"));
@@ -92,7 +100,7 @@ function label(d: Date): string {
 
 describe("frozen: roll loop status (fixture)", () => {
   it("fixture --no-color", () => {
-    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1", ROLL_RENDER_NOW: FIXTURE_NOW });
     const ts = tsRun(env, ["--no-color"], REPO);
     expect(ts).toMatchInlineSnapshot(`
       "roll loop  ·  health                                              <NOW> · 12 cycles / 72h
@@ -143,7 +151,7 @@ describe("frozen: roll loop status (fixture)", () => {
   });
 
   it("fixture --no-color --en", () => {
-    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1", ROLL_RENDER_NOW: FIXTURE_NOW });
     const ts = tsRun(env, ["--no-color", "--en"], REPO);
     expect(ts).toMatchInlineSnapshot(`
       "roll loop  ·  health                                              <NOW> · 12 cycles / 72h
@@ -192,7 +200,7 @@ describe("frozen: roll loop status (fixture)", () => {
   });
 
   it("fixture --no-color --zh", () => {
-    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1", ROLL_RENDER_NOW: FIXTURE_NOW });
     const ts = tsRun(env, ["--no-color", "--zh"], REPO);
     expect(ts).toMatchInlineSnapshot(`
       "roll loop  ·  health                                              <NOW> · 12 cycles / 72h
@@ -242,7 +250,7 @@ describe("frozen: roll loop status (fixture)", () => {
   });
 
   it("fixture --no-color --days 7", () => {
-    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1", ROLL_RENDER_NOW: FIXTURE_NOW });
     const ts = tsRun(env, ["--no-color", "--days", "7"], REPO);
     expect(ts).toMatchInlineSnapshot(`
       "roll loop  ·  health                                             <NOW> · 12 cycles / 168h
@@ -298,7 +306,7 @@ describe("frozen: roll loop status (fixture)", () => {
   });
 
   it("--eval fixture view", () => {
-    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1", ROLL_RENDER_NOW: FIXTURE_NOW });
     const ts = tsRun(env, ["--eval", "--no-color"], REPO);
     expect(ts).toMatchInlineSnapshot(`
       "Loop result-eval — last 14 cycles
@@ -311,7 +319,7 @@ describe("frozen: roll loop status (fixture)", () => {
   });
 
   it("--eval 5 (numeric arg, fixture)", () => {
-    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1", ROLL_RENDER_NOW: FIXTURE_NOW });
     const ts = tsRun(env, ["--eval", "5", "--no-color"], REPO);
     expect(ts).toMatchInlineSnapshot(`
       "Loop result-eval — last 5 cycles
@@ -324,7 +332,7 @@ describe("frozen: roll loop status (fixture)", () => {
   });
 
   it("unknown flag errors with exit 2", () => {
-    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1" });
+    const env = sandboxEnv({ ROLL_RENDER_FIXTURE: "1", ROLL_RENDER_NOW: FIXTURE_NOW });
     const realErr = process.stderr.write.bind(process.stderr);
     let tsErr = "";
     // @ts-expect-error — capture-only override
@@ -352,11 +360,11 @@ describe("frozen: roll loop status (fixture)", () => {
 
 describe("frozen: roll loop status (live)", () => {
   it("synthetic events + runs render", () => {
-    const env = sandboxEnv();
+    const env = sandboxEnv({ ROLL_RENDER_NOW: LIVE_NOW });
     const rt = env["ROLL_PROJECT_RUNTIME_DIR"] as string;
     const slug = env["ROLL_MAIN_SLUG"] as string;
 
-    const base = new Date("2026-06-07T03:18:30Z");
+    const base = new Date(LIVE_NOW);
     const start1 = new Date(base.getTime() - 30 * 60 * 1000);
     const end1 = new Date(start1.getTime() + 600 * 1000);
     const start2 = new Date(base.getTime() - 90 * 60 * 1000);
@@ -477,7 +485,7 @@ describe("frozen: roll loop status (live)", () => {
   });
 
   it("paused state + CNY cost + populated eval/self-score render", () => {
-    const env = sandboxEnv();
+    const env = sandboxEnv({ ROLL_RENDER_NOW: LIVE_NOW });
     const rt = env["ROLL_PROJECT_RUNTIME_DIR"] as string;
     const slug = env["ROLL_MAIN_SLUG"] as string;
 
@@ -486,7 +494,7 @@ describe("frozen: roll loop status (live)", () => {
       ['status: "paused"', 'paused_at: "2026-06-04T10:00:00Z"', 'paused_reason: "manual hold"', ""].join("\n"),
     );
 
-    const base = new Date("2026-06-07T03:18:30Z");
+    const base = new Date(LIVE_NOW);
     const start1 = new Date(base.getTime() - 40 * 60 * 1000);
     const end1 = new Date(start1.getTime() + 420 * 1000);
     const lab1 = label(start1);

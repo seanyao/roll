@@ -1463,8 +1463,20 @@ interface FixtureBundle {
   backlog: Record<string, string>;
 }
 
+/** Test-only pinned clock: `ROLL_RENDER_NOW=<ISO|epoch-ms>` freezes "now" for
+ *  both fixture generation and live-render day bucketing, so frozen snapshots
+ *  never drift with wall time or host TZ. Falls back to the wall clock. */
+function renderNow(): Date {
+  const v = process.env["ROLL_RENDER_NOW"] ?? "";
+  if (v !== "") {
+    const ms = /^\d+$/.test(v) ? Number(v) : Date.parse(v);
+    if (!Number.isNaN(ms)) return new Date(ms);
+  }
+  return new Date();
+}
+
 function fixtureData(): FixtureBundle {
-  const now = new Date(); // UTC instant
+  const now = renderNow(); // UTC instant (pinnable via ROLL_RENDER_NOW)
   const events: RawEvent[] = [];
   const cron: CronEntry[] = [];
   let cycleId = 0;
@@ -2299,7 +2311,7 @@ export function dashboardCommand(argv: string[]): number {
     (process.stdout.isTTY === true || (process.env["FORCE_COLOR"] ?? "") !== "");
 
   const lang: "both" | "en" | "zh" = args.en ? "en" : args.zh ? "zh" : "both";
-  const now = new Date();
+  const now = renderNow();
 
   let events: RawEvent[];
   let cron: CronEntry[];

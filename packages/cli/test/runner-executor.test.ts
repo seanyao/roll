@@ -21,6 +21,7 @@ import {
   executeCommand,
   parseEstMin,
   realAgentSpawn,
+  withPtyWrap,
 } from "../src/runner/index.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
@@ -508,3 +509,31 @@ function zeroCost(): RollEvent extends { type: "cycle:end"; cost: infer C } ? C 
 // Touch a CycleCommand type so the import is load-bearing in the test file.
 const _sample: CycleCommand = { kind: "release_lock" };
 void _sample;
+
+describe("withPtyWrap — FIX-224 non-claude agents get a PTY (v2 _AGENT_PTY_PREFIX)", () => {
+  it("pi on darwin wraps in `script -q /dev/null` preserving argv order", () => {
+    const w = withPtyWrap({ bin: "pi", args: ["-p", "PROMPT"] }, "pi", "darwin");
+    expect(w).toEqual({ bin: "script", args: ["-q", "/dev/null", "pi", "-p", "PROMPT"], pty: true });
+  });
+
+  it("kimi on darwin wraps too (any non-claude agent)", () => {
+    const w = withPtyWrap({ bin: "kimi", args: ["-p", "X"] }, "kimi", "darwin");
+    expect(w.bin).toBe("script");
+    expect(w.pty).toBe(true);
+  });
+
+  it("claude is NEVER wrapped — stream-json stays on plain pipes", () => {
+    const w = withPtyWrap({ bin: "claude", args: ["-p", "X"] }, "claude", "darwin");
+    expect(w).toEqual({ bin: "claude", args: ["-p", "X"], pty: false });
+  });
+
+  it("non-darwin platforms are not wrapped (util-linux script needs -c quoting)", () => {
+    const w = withPtyWrap({ bin: "pi", args: ["-p", "X"] }, "pi", "linux");
+    expect(w).toEqual({ bin: "pi", args: ["-p", "X"], pty: false });
+  });
+
+  it("bin override (test shims) still wraps — script runs the shim", () => {
+    const w = withPtyWrap({ bin: "/tmp/shim/pi", args: ["-p", "X"] }, "pi", "darwin");
+    expect(w.args).toEqual(["-q", "/dev/null", "/tmp/shim/pi", "-p", "X"]);
+  });
+});

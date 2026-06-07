@@ -1043,16 +1043,34 @@ function rollupForDay(dayCycles: Cycle[]): DayRollup {
 // ════════════════════════════════════════════════════════════════════════════
 // self-score / result-eval / agent summary lines
 // ════════════════════════════════════════════════════════════════════════════
-function selfScoreSummaryLine(notesDir = ".roll/notes", windowN = 14): string {
-  if (!existsSync(notesDir)) return "";
-  let files: string[];
+function selfScoreSummaryLine(notesDir = ".roll/notes", windowN = 14, featuresDir = ".roll/features"): string {
+  // US-META-008: self-score notes live in each card's notes/; the flat
+  // .roll/notes carries the diary + pre-migration history. The trend window
+  // merges both sources, ordered by the date-prefixed basename.
+  const entries: Array<{ name: string; path: string }> = [];
   try {
-    files = readdirSync(notesDir).filter((n) => n.endsWith(".md"));
+    for (const n of readdirSync(notesDir)) if (n.endsWith(".md")) entries.push({ name: n, path: join(notesDir, n) });
   } catch {
-    return "";
+    /* flat dir absent */
   }
-  files.sort();
-  files = files.slice(-windowN);
+  try {
+    for (const epic of readdirSync(featuresDir, { withFileTypes: true })) {
+      if (!epic.isDirectory()) continue;
+      for (const card of readdirSync(join(featuresDir, epic.name), { withFileTypes: true })) {
+        if (!card.isDirectory()) continue;
+        const nd = join(featuresDir, epic.name, card.name, "notes");
+        try {
+          for (const n of readdirSync(nd)) if (n.endsWith(".md")) entries.push({ name: n, path: join(nd, n) });
+        } catch {
+          /* card without notes */
+        }
+      }
+    }
+  } catch {
+    /* features dir absent */
+  }
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const files = entries.slice(-windowN);
   if (files.length === 0) return "";
   let total = 0;
   let count = 0;
@@ -1063,7 +1081,7 @@ function selfScoreSummaryLine(notesDir = ".roll/notes", windowN = 14): string {
     let verdict: string | null = null;
     let content: string;
     try {
-      content = readFileSync(join(notesDir, f), "utf8");
+      content = readFileSync(f.path, "utf8");
     } catch {
       content = "";
     }
@@ -1817,7 +1835,7 @@ function render(
 
   let skillLine = "";
   try {
-    skillLine = selfScoreSummaryLine(process.env["ROLL_NOTES_DIR"]);
+    skillLine = selfScoreSummaryLine(process.env["ROLL_NOTES_DIR"], 14, process.env["ROLL_FEATURES_DIR"]);
 
   } catch {
     skillLine = "";

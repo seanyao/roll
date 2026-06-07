@@ -11,7 +11,7 @@ import { collectDossier } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
 import { renderFeaturesIndex, spineMotif } from "../src/lib/dossier-index.js";
 import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
-import { renderStoryDossier, storySpine } from "../src/lib/story-dossier.js";
+import { collectStoryDossierInput, renderStoryDossier, storySpine } from "../src/lib/story-dossier.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -253,5 +253,39 @@ describe("roll index — US-DOSSIER-001d three-layer integration", () => {
     expect(story).toContain('href="latest/US-A-1-report.html"');
     expect(story).toContain("US-A-1:AC1");
     expect(story).toContain("✓ pass");
+  });
+});
+
+describe("US-META-008 — self-score notes live in the card folder", () => {
+  it("retro reads the card's notes/ first (card-local beats .roll/notes)", () => {
+    const p = project();
+    const card = join(p, ".roll", "features", "alpha", "US-A-1");
+    mkdirSync(join(card, "notes"), { recursive: true });
+    writeFileSync(
+      join(card, "notes", "2026-06-08-roll-build-US-A-1-1.md"),
+      "---\nscore: 9\nverdict: good\n---\n\nscore: 9\nverdict: good\n\n卡内自评正文。\n",
+    );
+    // A stale copy in the legacy flat dir must NOT win.
+    mkdirSync(join(p, ".roll", "notes"), { recursive: true });
+    writeFileSync(
+      join(p, ".roll", "notes", "2026-06-01-roll-build-US-A-1-0.md"),
+      "---\nscore: 3\nverdict: regression\n---\n\nscore: 3\n\n旧位置残留。\n",
+    );
+    const input = collectStoryDossierInput(p, {
+      id: "US-A-1", epic: "alpha", type: "US", delivered: true,
+    });
+    expect(input.retro).toContain("9");
+    expect(input.retro).toContain("卡内自评正文");
+  });
+
+  it("legacy .roll/notes still serves cards that have no local notes/", () => {
+    const p = project();
+    mkdirSync(join(p, ".roll", "notes"), { recursive: true });
+    writeFileSync(
+      join(p, ".roll", "notes", "2026-06-01-roll-fix-FIX-2-7.md"),
+      "---\nscore: 8\nverdict: ok\n---\n\nscore: 8\n\n旧档兼容。\n",
+    );
+    const input = collectStoryDossierInput(p, { id: "FIX-2", epic: "alpha", type: "FIX", delivered: false });
+    expect(input.retro).toContain("旧档兼容");
   });
 });

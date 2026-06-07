@@ -219,12 +219,24 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     /* no report */
   }
 
-  // newest self-score note → retrospective line.
+  // newest self-score note → retrospective line. Card-local notes/ is the
+  // home (US-META-008); the flat .roll/notes serves pre-migration history.
   try {
-    const notesDir = joinPath(projectPath, ".roll", "notes");
-    const notes = listDir(notesDir)
-      .filter((f) => f.includes(`-${story.id}-`) && f.endsWith(".md"))
-      .sort();
+    const cardNotes = joinPath(dir, "notes");
+    const legacyNotes = joinPath(projectPath, ".roll", "notes");
+    let notesDir = cardNotes;
+    let notes: string[] = [];
+    try {
+      notes = listDir(cardNotes).filter((f) => f.endsWith(".md")).sort();
+    } catch {
+      /* no card-local notes yet */
+    }
+    if (notes.length === 0) {
+      notesDir = legacyNotes;
+      notes = listDir(legacyNotes)
+        .filter((f) => f.includes(`-${story.id}-`) && f.endsWith(".md"))
+        .sort();
+    }
     const last = notes[notes.length - 1];
     if (last !== undefined) {
       const body = readFile(joinPath(notesDir, last));

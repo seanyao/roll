@@ -13,7 +13,7 @@
  * until then attest keeps READING the old layout (see {@link resolveReadArchiveDir}).
  */
 import { parseBacklog } from "@roll/core";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 /** The uncategorized epic slug — the never-block fallback bucket. */
@@ -193,4 +193,102 @@ export function serializeIndex(stories: Record<string, string>): string {
   const sorted: Record<string, string> = {};
   for (const k of Object.keys(stories).sort()) sorted[k] = stories[k] as string;
   return JSON.stringify({ stories: sorted }, null, 2) + "\n";
+}
+
+// ── US-DOSSIER-001 — dossier data model ──────────────────────────────────────
+
+/** One story as the dossier sees it (US-DOSSIER-001a minimal shape;
+ *  001d extends with phases / AC status). */
+export interface DossierStory {
+  id: string;
+  epic: string;
+  /** ID family: US | FIX | REFACTOR | IDEA | … (prefix before the first dash). */
+  type: string;
+  /** Human title — spec.md frontmatter `title:`, else the H1 remainder. */
+  title?: string;
+  /** spec.md frontmatter `created:` when present. */
+  created?: string;
+  /** truth: a `latest/` attestation pointer exists for the card. */
+  delivered: boolean;
+}
+
+/** One epic group with its wish→truth tally. */
+export interface DossierEpic {
+  name: string;
+  stories: DossierStory[];
+  delivered: number;
+}
+
+/** Read a story's title/created from its spec.md (frontmatter first, H1 fallback). */
+function specMeta(specPath: string): { title?: string; created?: string } {
+  let text: string;
+  try {
+    text = readFileSync(specPath, "utf8");
+  } catch {
+    return {};
+  }
+  const out: { title?: string; created?: string } = {};
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text);
+  if (fm !== null) {
+    const t = /^title:\s*(.+)$/m.exec(fm[1] ?? "");
+    const c = /^created:\s*(.+)$/m.exec(fm[1] ?? "");
+    if (t !== null) out.title = (t[1] ?? "").trim();
+    if (c !== null) out.created = (c[1] ?? "").trim();
+  }
+  if (out.title === undefined) {
+    // H1 fallback: `# <ID> — title` / `# <ID> · title` (hand-written specs).
+    const h1 = /^#\s+\S+\s*(?:[—·:-]\s*)?(.*)$/m.exec(text);
+    if (h1 !== null && (h1[1] ?? "").trim() !== "") out.title = (h1[1] ?? "").trim().replace(/\s*[✅🚫🔨].*$/u, "");
+  }
+  return out;
+}
+
+/**
+ * Walk `.roll/features/` into the dossier model: every `<epic>/<ID>/` card
+ * folder becomes a story (spec.md enriches it; a `latest/` pointer marks
+ * truth). Epics sorted by name; stories by id. Pure read — no writes.
+ */
+export function collectDossier(projectPath: string): DossierEpic[] {
+  const root = join(projectPath, ".roll", "features");
+  if (!existsSync(root)) return [];
+  const epics: DossierEpic[] = [];
+  let epicDirs: string[] = [];
+  try {
+    epicDirs = readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+  for (const epic of epicDirs) {
+    const stories: DossierStory[] = [];
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(join(root, epic), { withFileTypes: true })
+        .filter((e) => e.isDirectory() && /^[A-Z][A-Z0-9]*-/.test(e.name))
+        .map((e) => e.name)
+        .sort();
+    } catch {
+      continue;
+    }
+    for (const id of entries) {
+      const dir = join(root, epic, id);
+      let delivered = false;
+      try {
+        delivered = statSync(join(dir, "latest")).isDirectory(); // follows symlink
+      } catch {
+        /* no latest → wish only */
+      }
+      stories.push({
+        id,
+        epic,
+        type: (id.split("-")[0] ?? id).toUpperCase(),
+        ...specMeta(join(dir, "spec.md")),
+        delivered,
+      });
+    }
+    if (stories.length > 0) epics.push({ name: epic, stories, delivered: stories.filter((s) => s.delivered).length });
+  }
+  return epics;
 }

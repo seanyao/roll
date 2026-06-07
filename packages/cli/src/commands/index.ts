@@ -38,6 +38,7 @@ import { migrateFeaturesCommand } from "./migrate-features.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
+import { releaseShipCommand } from "./release-ship.js";
 import { setupCommand } from "./setup.js";
 import { skillsCommand } from "./skills.js";
 import { slidesCommand } from "./slides/index.js";
@@ -124,7 +125,7 @@ export function registerAll(): void {
   // commits, tags, or publishes — a release is always a human decision (loop
   // hard rule). No bash fallback: v2 had no `roll release` subcommand (the flow
   // lived in the private ops wrapper, which stays for the actual publish).
-  registerPorted("release", (args) => releaseCommand(args));
+  registerPorted("release", (args) => (args[0] === "ship" ? releaseShipCommand(args.slice(1)) : releaseCommand(args)));
   // `prices`: show/help/unknown are TS; `refresh` (network write) is bash.
   registerPorted("prices", (args) => {
     const r = pricesCommand(args);

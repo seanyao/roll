@@ -51,20 +51,33 @@ function currentVersion(cwd: string): string {
 }
 
 /**
- * True when CHANGELOG.md has at least one bullet under `## Unreleased` — i.e.
- * there is something to release. An absent file or an empty section → false.
+ * True when CHANGELOG.md carries something to release. Two accepted shapes
+ * (FIX-226 — the repo's actual convention is the second):
+ *   1. an `## Unreleased` section with at least one bullet;
+ *   2. a pre-written NEXT-version section — the FIRST `## v<semver>` heading
+ *      names a version OTHER than the current one and has at least one bullet.
+ * Absent file / empty section / first section == current version → false.
  */
-function changelogReady(cwd: string): boolean {
+function changelogReady(cwd: string, current: string): boolean {
   const path = join(cwd, "CHANGELOG.md");
   if (!existsSync(path)) return false;
   const text = readFileSync(path, "utf8");
-  const idx = text.indexOf("## Unreleased");
-  if (idx === -1) return false;
-  // The Unreleased section runs from its heading to the next `## ` heading (or EOF).
-  let section = text.slice(idx + "## Unreleased".length);
-  const nextHeading = section.search(/\n## /);
-  if (nextHeading !== -1) section = section.slice(0, nextHeading);
-  return /^\s*-\s+\S/m.test(section);
+
+  const sectionAfter = (idx: number, headingLen: number): string => {
+    let section = text.slice(idx + headingLen);
+    const nextHeading = section.search(/\n## /);
+    if (nextHeading !== -1) section = section.slice(0, nextHeading);
+    return section;
+  };
+  const hasBullet = (s: string): boolean => /^\s*-\s+\S/m.test(s);
+
+  const unreleased = text.indexOf("## Unreleased");
+  if (unreleased !== -1 && hasBullet(sectionAfter(unreleased, "## Unreleased".length))) return true;
+
+  const m = /^## v(\d+\.\d+\.\d+)\b.*$/m.exec(text);
+  if (m === null) return false;
+  if (m[1] === current) return false; // newest section already shipped
+  return hasBullet(sectionAfter(m.index, m[0].length));
 }
 
 export function releaseCommand(args: string[], now?: ReleaseDate): number {
@@ -89,7 +102,7 @@ export function releaseCommand(args: string[], now?: ReleaseDate): number {
     return 1;
   }
 
-  const ready = changelogReady(cwd);
+  const ready = changelogReady(cwd, cur);
   const plan = planRelease({
     currentVersion: cur,
     date: now ?? dateOf(new Date()),

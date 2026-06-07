@@ -67,6 +67,10 @@ const READY_CHANGELOG = ["# Changelog", "", "## Unreleased", "", "### 新功能"
   "\n",
 );
 const EMPTY_CHANGELOG = ["# Changelog", "", "## Unreleased", ""].join("\n");
+// FIX-226: the repo's actual convention — a pre-written NEXT-version section
+// (no Unreleased heading anywhere in the file's history since v3.606.x).
+const VERSIONED_READY = ["# Changelog", "", "## v3.606.3 — 2026-06-06", "", "### 修复", "", "- a fix", ""].join("\n");
+const VERSIONED_STALE = ["# Changelog", "", "## v3.606.2 — 2026-06-06", "", "- already shipped", ""].join("\n");
 
 describe("releaseCommand (guidance, read-only)", () => {
   it("prints the version bump, tag, and PR/tag flow (exit 0)", () => {
@@ -91,6 +95,16 @@ describe("releaseCommand (guidance, read-only)", () => {
     const r = run([], { version: "3.606.2", changelog: EMPTY_CHANGELOG });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("roll changelog generate");
+  });
+
+  it("FIX-226: a pre-written next-version section counts as ready (repo convention)", () => {
+    const r = run(["--json"], { version: "3.606.2", changelog: VERSIONED_READY });
+    expect((JSON.parse(r.stdout) as Record<string, unknown>)["changelogReady"]).toBe(true);
+  });
+
+  it("FIX-226: a section matching the CURRENT version is already shipped — not ready", () => {
+    const r = run(["--json"], { version: "3.606.2", changelog: VERSIONED_STALE });
+    expect((JSON.parse(r.stdout) as Record<string, unknown>)["changelogReady"]).toBe(false);
   });
 
   it("--json emits a machine-readable plan", () => {

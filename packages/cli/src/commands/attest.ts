@@ -59,8 +59,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
-import { cardArchiveDir, findFeatureFile, reportFileName } from "../lib/archive.js";
+import { basename, join, relative } from "node:path";
+import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, reportFileName } from "../lib/archive.js";
 import { markPhaseDone } from "../lib/story-page.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
@@ -371,11 +371,11 @@ export function buildCardContext(
   } catch {
     /* unreadable: skip summary */
   }
-  const epic = basename(dirname(featureFile));
+  const epic = epicFromFeaturePath(featureFile);
   const cycleId = env.LOOP_CYCLE_ID;
   const ctx: CardContext = {
     ...(oneLiner !== undefined && oneLiner !== "" ? { oneLiner } : {}),
-    ...(epic !== "" && epic !== "." && epic !== "features" ? { epic } : {}),
+    ...(epic !== null ? { epic } : {}),
     ...(summary !== undefined ? { summary } : {}),
     ...(row.status !== undefined ? { backlogStatus: row.status } : {}),
     ...(cycleId !== undefined && cycleId !== "" ? { delivery: { cycleId } } : {}),

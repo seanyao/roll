@@ -75,6 +75,7 @@ function sandboxEnv(extra: Record<string, string> = {}): Record<string, string> 
     ROLL_PROJECT_RUNTIME_DIR: rt,
     ROLL_SHARED_ROOT: shared,
     ROLL_NOTES_DIR: notes,
+    ROLL_FEATURES_DIR: join(notes, "features-empty"),
     ROLL_MAIN_SLUG: "test-abc123",
     _LAUNCHD_DIR: join(home, "la"),
     ...extra,

@@ -2,10 +2,6 @@
 
 ## Unreleased
 
-### 可见性
-
-- roll pair status 显示谁在结对池与其异构标签和能力，谁因何没进池（US-PAIR-002）
-
 ### 自动化流水线
 
 - 把 dream 调度剩余子命令改写为 TS，脱离 bash 回落引擎（US-PORT-020）
@@ -15,8 +11,6 @@
 ### 工程和测试
 
 - 确定性证据自动落盘，测试输出与覆盖率与产物都写进证据框（US-EVID-002）
-- 每条验收标准配一条任何人可重跑的验证命令加测试清单（US-EVID-010）
-- 把结对从代码阶段推广到设计测试与周期复盘，每阶段可配可关（US-PAIR-004）
 - attest 从迁移后的多故事 epic 文件抽取验收条目返回空，致已有 ac-map 的 Done 故事渲染成零条 AC（US-PORT-001 实证），改 resolveStoryAcItems 越过空壳 owner 取真 AC 文件（FIX-226）
 
 ### 其他
@@ -35,13 +29,10 @@
 - 自评分作为评分门禁参与通过与否，回归或低分能真的拦下完成（US-EVID-013）
 - 无人值守执行器，出错先归因再自动纠正，默认保守且不自动合主干且振荡移交刹车 — report: `.roll/features/acceptance-evidence/US-EVID-014/2026-06-08T23-03-10/US-EVID-014-report.html`
 - 无人值守安全刹车，同卡反复退回自动熔断暂停并加一页夜间运行晨报 — report: `.roll/features/acceptance-evidence/US-EVID-016/2026-06-08T23-54-55/US-EVID-016-report.html`
-- 结对候选选择器纯函数加脚手架配置：理性筛合格候选、强制不同厂商、可复现轮换、无候选直报，一条命令从代理列表物化一份可读可改的配置文件（US-PAIR-001）
-- 代码阶段交付后由一个不同代理单向互检改动，结论留证据与事件，硬超时不阻塞且记成本（US-PAIR-003）
 - 跨代理结对的中英双轨文档刷新收尾（US-PAIR-007）
 - roll init 顺带生成 pairing 配置并在界面告知，新用户少一步且仍显式（US-PAIR-008）
 - site: roll-build explainer page (site-aligned, bilingual) + homepage CTA（PR#546）
 - site: track site/diagrams/ + roll-build skill infographic（PR#545）
-- Design doc link opens rendered spec.html (not raw markdown)（US-DOSSIER-004）
 
 ## v3.608.2 — 2026-06-08
 

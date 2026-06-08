@@ -13,6 +13,8 @@
  * (same vendor, different model does NOT count); MVP rotation is pure seeded
  * round-robin (hit-rate bias deferred to US-PAIR-006); fail-loud when no peer.
  */
+import type { RollEvent } from "@roll/spec";
+import { extractUsage, sumClaudeStream, toCycleCost } from "../cost/tracker.js";
 import { AGENT_REGISTRY_NAMES, agentIsKnown, canonicalAgentName } from "./registry.js";
 
 export type PairingStage = "design" | "test" | "code" | "cycle";
@@ -226,6 +228,128 @@ export function renderPairingConfig(cfg: PairingConfig): string {
   return lines.join("\n") + "\n";
 }
 
+// ── US-PAIR-006: cost observability ──────────────────────────────────────────
+
+/**
+ * Turn a peer agent's raw stdout into a REAL list cost (USD) for the
+ * pair:verdict `cost` field — never the 0 placeholder again (owner's top
+ * priority: "至少知道花了多少钱"). claude runs with `--output-format stream-json`
+ * so its usage is summed via {@link sumClaudeStream}; the four stdout-scrape
+ * agents (openai/codex, gemini, kimi, qwen) go through {@link extractUsage};
+ * pi/text-mode and unknown agents have no parseable usage and record 0. The peer
+ * is canonicalised first (codex → openai) so the alias hits the right extractor.
+ *
+ * Best-effort by contract: a parse miss or any throw yields 0, NEVER an
+ * exception — pairing must stay non-blocking, and cost accounting must not fail
+ * the cycle. The returned figure is the kept-work list cost (revertCount 0 — a
+ * one-way peer review never reverts).
+ */
+export function peerReviewCost(peer: string, stdout: string): number {
+  try {
+    const canon = canonicalAgentName(peer);
+    const lines = stdout.split("\n");
+    const usage = canon === "claude" ? sumClaudeStream(lines) : extractUsage(canon, lines);
+    if (usage === null) return 0;
+    // pi pair-review: a parsed-but-empty usage (0 in / 0 out) has no cost to
+    // compute — short-circuit so the price table never sees a zero-token split.
+    if ((usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0) return 0;
+    const { estimatedCost } = toCycleCost(usage, { cycleId: "pair", agent: canon, revertCount: 0 });
+    return Number.isFinite(estimatedCost) && estimatedCost > 0 ? estimatedCost : 0;
+  } catch {
+    return 0; // cost accounting is best-effort — never throw
+  }
+}
+
+/** Aggregate pairing activity + spend, rebuilt from the pair:* event stream. */
+export interface PairingCostSummary {
+  /** pair:verdict events seen (a completed pairing). */
+  pairings: number;
+  /** count of pairings per peer agent (canonical), e.g. { codex: 2, kimi: 1 }. */
+  byPeer: Record<string, number>;
+  /** sum of pair:verdict `cost` across all pairings (USD list cost). */
+  totalCost: number;
+  /** sum of `findings` across all pairings (the real-problem signal). */
+  totalFindings: number;
+  /** pair:none-available events (fail-loud absences — a pairing that did not happen). */
+  noneAvailable: number;
+}
+
+/**
+ * Fold the pair:* events into an activity/spend summary for `roll pair status`
+ * and the dashboard: "pairings to date: N, by peer (codex×K, kimi×J…), total
+ * cost $X, M findings". Pure (events → summary) so the CLI is a thin renderer
+ * and this is unit-testable. Non-pair events are ignored.
+ *
+ * `totalCost` is the sum of each pair:verdict's RECORDED `cost` — the real spend
+ * captured at write time by {@link peerReviewCost} (pi pair-review): this is NOT
+ * recomputed from stdout here, so any legacy event written before US-PAIR-006
+ * (with the old `cost: 0` placeholder) contributes 0. Forward-correct, not
+ * backfilled — the spend becomes visible from the first PAIR-006 cycle on.
+ */
+export function aggregatePairingCost(events: readonly RollEvent[]): PairingCostSummary {
+  const summary: PairingCostSummary = { pairings: 0, byPeer: {}, totalCost: 0, totalFindings: 0, noneAvailable: 0 };
+  for (const e of events) {
+    if (e.type === "pair:verdict") {
+      summary.pairings += 1;
+      const peer = canonicalAgentName(e.peer);
+      summary.byPeer[peer] = (summary.byPeer[peer] ?? 0) + 1;
+      summary.totalCost += Number.isFinite(e.cost) ? e.cost : 0;
+      summary.totalFindings += Number.isFinite(e.findings) ? e.findings : 0;
+    } else if (e.type === "pair:none-available") {
+      summary.noneAvailable += 1;
+    }
+  }
+  return summary;
+}
+
+// ── US-PAIR-006: hit-rate-driven rotation ────────────────────────────────────
+
+/** One peer's pairing track record: how often it reviewed and how often it hit. */
+export interface PeerStat {
+  /** pair:verdict events for this peer. */
+  count: number;
+  /** verdicts that surfaced ≥1 real finding (a "hit"). */
+  hits: number;
+}
+
+/** Per-peer history (canonical agent → {count, hits}), rebuilt from pair:verdict. */
+export type PairingHistory = Record<string, PeerStat>;
+
+/**
+ * Rebuild per-peer pairing history from the event stream: a HIT is a
+ * pair:verdict that produced ≥1 finding (a real problem caught), regardless of
+ * the agree/refine/object label — a zero-finding "agree" counts toward `count`
+ * but never toward `hits`. This is the signal the ε-greedy rotation prefers on.
+ */
+export function pairingHistory(events: readonly RollEvent[]): PairingHistory {
+  const hist: PairingHistory = {};
+  for (const e of events) {
+    if (e.type !== "pair:verdict") continue;
+    const peer = canonicalAgentName(e.peer);
+    const stat = hist[peer] ?? { count: 0, hits: 0 };
+    stat.count += 1;
+    // pi pair-review: guard a malformed event's `findings` (negative / NaN) —
+    // only a finite, positive count is a real hit; corruption never inflates it.
+    if (Number.isFinite(e.findings) && e.findings > 0) stat.hits += 1;
+    hist[peer] = stat;
+  }
+  return hist;
+}
+
+/** Default exploration rate: 20% explore / 80% exploit (pi's ε-greedy 80/20). */
+export const DEFAULT_PAIRING_EPSILON = 0.2;
+
+/**
+ * A peer's hit-rate, Laplace-smoothed so a single lucky hit on one sample does
+ * not pin the rate at 1.0 (and an unproven peer starts at the prior, not 0):
+ * (hits + 1) / (count + 2). No history → the neutral prior 0.5, so a cold peer
+ * is neither favoured nor punished.
+ */
+function hitRate(stat: PeerStat | undefined): number {
+  if (stat === undefined || stat.count <= 0) return 0.5;
+  return (stat.hits + 1) / (stat.count + 2);
+}
+
 export interface SelectInput {
   /** Installed agents (canonical), e.g. from agentsInstalled(). */
   installed: string[];
@@ -239,6 +363,15 @@ export interface SelectInput {
   cfg: PairingConfig;
   /** Seeds the deterministic round-robin rotation (replayable, not RNG). */
   cycleId: string;
+  /**
+   * US-PAIR-006 (optional, backward-compatible): per-peer track record from
+   * {@link pairingHistory}. Absent / empty → pure seeded round-robin (the
+   * US-PAIR-001 behaviour, unchanged). Present → ε-greedy preference for the
+   * highest-hit-rate heterogeneous peer.
+   */
+  history?: PairingHistory;
+  /** ε for the ε-greedy rotation (default {@link DEFAULT_PAIRING_EPSILON}). */
+  epsilon?: number;
 }
 
 /** Stable string hash (FNV-1a-ish) for the rotation seed — deterministic. */
@@ -259,7 +392,7 @@ function seedOf(s: string): number {
  * — never a silently-skipped pairing.
  */
 export function selectPairingCandidates(input: SelectInput): string[] {
-  const { installed, isAvailable, workingAgent, stage, cfg, cycleId } = input;
+  const { installed, isAvailable, workingAgent, stage, cfg, cycleId, history } = input;
   if (!cfg.enabled) return [];
   if (!cfg.stages.includes(stage)) return [];
   const working = canonicalAgentName(workingAgent);
@@ -278,8 +411,46 @@ export function selectPairingCandidates(input: SelectInput): string[] {
     .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
 
   if (qualified.length === 0) return [];
-  // Seeded round-robin: rotate the stable list so pairings don't fixate on one
-  // agent over time, yet stay replayable for the same cycleId.
-  const start = seedOf(cycleId) % qualified.length;
-  return [...qualified.slice(start), ...qualified.slice(0, start)];
+
+  // Seeded round-robin baseline (US-PAIR-001): rotate the stable list so
+  // pairings don't fixate on one agent over time, yet stay replayable. This is
+  // the EXPLORE arm — and the whole behaviour when there is no history.
+  const seed = seedOf(cycleId);
+  const start = seed % qualified.length;
+  const explore = [...qualified.slice(start), ...qualified.slice(0, start)];
+
+  // US-PAIR-006: ε-greedy hit-rate preference. With no history we stay on pure
+  // round-robin (backward compatible). With history, an (1-ε) fraction of cycles
+  // EXPLOIT — lead with the highest-hit-rate heterogeneous peer — while ε of
+  // cycles keep exploring via the round-robin above. The explore/exploit coin is
+  // itself seeded by cycleId, so selection stays deterministic/replayable, and
+  // the ε floor is kimi's guardrail: a high scorer can never monopolise (every
+  // peer still leads on some cycles). The peer SET is never trimmed — only the
+  // head order changes, so a failed exploit peer falls back to the rest.
+  if (history === undefined || Object.keys(history).length === 0) return explore;
+  const epsilon = clampEpsilon(input.epsilon ?? DEFAULT_PAIRING_EPSILON);
+  // Deterministic coin in [0,1): a second, independent seed dimension so the
+  // explore/exploit decision is not correlated with the round-robin offset.
+  const coin = (seedOf(`eps:${cycleId}`) % 100_000) / 100_000;
+  if (coin < epsilon) return explore; // EXPLORE: keep the round-robin order
+
+  // EXPLOIT: rank the SAME qualified set by descending hit-rate (registry order
+  // breaks ties). The set is never trimmed — only re-ordered — so a failed
+  // top-ranked peer falls back to the next; reachability is preserved.
+  // pi pair-review caveat: with NO hits anywhere, the Laplace prior
+  // (hits+1)/(count+2) favours the LEAST-used peer (a peer used once scores
+  // 1/3, used ten times scores 1/12) — i.e. exploit degrades to "spread the
+  // load" until a real finding lands. That is the intended cold behaviour, not
+  // a bug: nothing is yet "proven", so diversification is the rational default.
+  const ranked = [...qualified].sort((x, y) => {
+    const d = hitRate(history[y]) - hitRate(history[x]);
+    return d !== 0 ? d : (order.get(x) ?? 999) - (order.get(y) ?? 999);
+  });
+  return ranked;
+}
+
+/** Clamp ε to [0,1]; a NaN / out-of-range value falls back to the default. */
+function clampEpsilon(e: number): number {
+  if (!Number.isFinite(e)) return DEFAULT_PAIRING_EPSILON;
+  return Math.min(1, Math.max(0, e));
 }

@@ -11,12 +11,16 @@ import { dirname, join } from "node:path";
 import {
   agentDisplayName,
   agentsInstalled,
+  aggregatePairingCost,
   defaultPairingConfig,
   pairingPoolView,
   parsePairingConfig,
   renderPairingConfig,
+  type PairingCostSummary,
 } from "@roll/core";
+import { parseEventLine, type RollEvent } from "@roll/spec";
 import { realAgentEnv } from "./agent-list.js";
+import { loopRuntimeDir, projectSlug, sharedRoot } from "./dashboard.js";
 
 const HELP = `Usage: roll pair <init|status>
   init [--force]   Scaffold .roll/pairing.yaml from installed agents.
@@ -115,7 +119,78 @@ function pairStatus(rest: string[]): number {
       out.push(`    ${DIM}· ${disp}  vendor=${a.vendor} · ${cap} · excluded: ${a.reason}${NC}`);
     }
   }
+  // US-PAIR-006 cost observability: surface pairing activity + spend from the
+  // event stream. Best-effort — no events file / read error → a zero-activity line.
   out.push("");
+  out.push(renderPairingActivity(pairingActivitySummary(), { noColor }));
   process.stdout.write(out.join("\n") + "\n");
   return 0;
+}
+
+/** ndjson files holding this project's events (loop runtime dir, then shared). */
+function pairingEventFiles(): string[] {
+  const slug = projectSlug();
+  const candidates: string[] = [];
+  const rtDir = loopRuntimeDir(slug);
+  if (rtDir !== null) {
+    candidates.push(join(rtDir, "events.ndjson"));
+    for (let i = 1; i < 5; i++) candidates.push(join(rtDir, `events.ndjson.${i}`));
+  }
+  candidates.push(join(sharedRoot(), "loop", `events-${slug}.ndjson`));
+  for (let i = 1; i < 5; i++) candidates.push(join(sharedRoot(), "loop", `events-${slug}.ndjson.${i}`));
+  return candidates.filter((p) => existsSync(p));
+}
+
+/**
+ * Read this project's pair:* events and fold them into a {@link PairingCostSummary}.
+ * Best-effort: a missing/unreadable stream yields the zero summary (never throws),
+ * so `roll pair status` always renders something.
+ */
+function pairingActivitySummary(): PairingCostSummary {
+  const events: RollEvent[] = [];
+  // De-dup identical lines across rotated/shared files (pi pair-review): a
+  // rotation that copies rather than moves could otherwise double-count.
+  const seen = new Set<string>();
+  for (const p of pairingEventFiles()) {
+    let content: string;
+    try {
+      content = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed === "" || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      const e = parseEventLine(trimmed);
+      if (e !== null) events.push(e);
+    }
+  }
+  return aggregatePairingCost(events);
+}
+
+/**
+ * Render the pairing activity/spend block (US-PAIR-006, cost observability):
+ * "pairings to date: N, by peer (codex×K…), total cost $X, M findings". Pure
+ * (summary → string) so it is unit-testable; the CLI locates the events and
+ * prints this. Bilingual: English + Chinese on separate lines (project
+ * convention). Always renders, even at zero activity.
+ */
+export function renderPairingActivity(summary: PairingCostSummary, opts: { noColor: boolean }): string {
+  const DIM = opts.noColor ? "" : "\x1b[0;90m";
+  const NC = opts.noColor ? "" : "\x1b[0m";
+  const byPeer = Object.keys(summary.byPeer)
+    .sort((a, b) => (summary.byPeer[b] ?? 0) - (summary.byPeer[a] ?? 0) || a.localeCompare(b))
+    .map((p) => `${agentDisplayName(p)}×${summary.byPeer[p]}`)
+    .join(", ");
+  const cost = `$${summary.totalCost.toFixed(2)}`;
+  const peerStr = byPeer === "" ? "—" : byPeer;
+  const lines: string[] = [
+    `  Pairing activity — 结对活动`,
+    `  ${DIM}pairings to date: ${summary.pairings} · by peer: ${peerStr}${NC}`,
+    `  ${DIM}total cost: ${cost} · findings: ${summary.totalFindings} · none-available: ${summary.noneAvailable}${NC}`,
+    `  ${DIM}累计结对：${summary.pairings} 次 · 各 peer：${peerStr}${NC}`,
+    `  ${DIM}总花费：${cost} · 发现问题：${summary.totalFindings} · 无可用 peer：${summary.noneAvailable}${NC}`,
+  ];
+  return lines.join("\n");
 }

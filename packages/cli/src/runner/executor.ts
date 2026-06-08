@@ -57,8 +57,10 @@ import {
   resolveFallback,
   sumClaudeStream,
   toCycleCost,
+  pairingHistory,
+  peerReviewCost,
 } from "@roll/core";
-import type { CycleCost, RollEvent } from "@roll/spec";
+import { parseEventLine, type CycleCost, type RollEvent } from "@roll/spec";
 import {
   type Clock,
   acquireLock,
@@ -501,12 +503,33 @@ export async function executeCommand(
           const vm = /VERDICT:\s*(agree|refine|object)/i.exec(res.stdout);
           const verdict = (vm?.[1]?.toLowerCase() ?? "agree") as PairReview["verdict"];
           const findings = [...res.stdout.matchAll(/^\s*FINDING:\s*(.+)$/gim)].map((m) => (m[1] ?? "").trim());
-          return { verdict, findings, cost: 0 }; // cost: usage parsing is a US-PAIR-005/006 refinement
+          // US-PAIR-006 cost observability (owner's top priority "至少知道花了多少钱"):
+          // the pair:verdict cost is now the peer's REAL list cost, parsed from its
+          // own stdout (claude stream-json or the per-agent stdout-scrape extractors).
+          // Best-effort by contract — an unparseable peer records 0, never throws.
+          const cost = peerReviewCost(peer, res.stdout);
+          return { verdict, findings, cost };
         };
+        // US-PAIR-006: per-peer track record from the event stream drives the
+        // ε-greedy hit-rate preference. Best-effort: an unreadable/absent events
+        // file → no history → pure seeded round-robin (US-PAIR-001 behaviour).
+        let pairHistory;
+        try {
+          if (existsSync(ports.paths.eventsPath)) {
+            const events = readFileSync(ports.paths.eventsPath, "utf8")
+              .split("\n")
+              .map(parseEventLine)
+              .filter((e): e is RollEvent => e !== null);
+            pairHistory = pairingHistory(events);
+          }
+        } catch {
+          /* history is best-effort — a read miss must not affect the cycle */
+        }
         await runPairing(ports.repoCwd, ports.paths.worktreePath, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", {
           installed: agentsInstalled(realAgentEnv()),
           isAvailable: () => true, // MVP: `installed` is the hard gate; a dead peer → reviewPeer null (non-blocking). Real probe is a refinement.
           reviewPeer,
+          ...(pairHistory !== undefined ? { history: pairHistory } : {}),
           changedFiles: cycleChangedFiles,
           diff: async (cwd) => {
             try {

@@ -140,6 +140,21 @@ function detectCategory(desc: string): string {
 }
 
 /** Port of _already_in_changelog. */
+const STORY_ID_RE = /\b((?:US|FIX|REFACTOR|BUG|IDEA)-[A-Z0-9]+(?:-[A-Z0-9]+)*-?\d+[a-z]?)\b/g;
+
+/** Story ids already published in a RELEASED (`## v…`) changelog section. Used to
+ *  prune them from a regenerated `## Unreleased` (FIX-227): the since-tag window
+ *  re-includes a version that was changelogged but never tagged, and the merge
+ *  writer only ever adds — so without this, shipped stories accumulate forever. */
+function releasedStoryIds(changelogText: string | null): Set<string> {
+  const out = new Set<string>();
+  if (changelogText === null) return out;
+  const firstV = changelogText.search(/^## v/m);
+  if (firstV < 0) return out;
+  for (const m of changelogText.slice(firstV).matchAll(STORY_ID_RE)) out.add(m[1] as string);
+  return out;
+}
+
 function alreadyInChangelog(storyId: string, desc: string, changelogText: string | null): boolean {
   if (changelogText === null) return false;
   if (storyId && changelogText.includes(storyId)) return true;
@@ -378,8 +393,14 @@ export function generateDraft(opts: GenerateOptions): GenerateResult {
     sinceTagLog = null;
   }
 
+  // FIX-227: a story already published in a `## vX` section is shipped — never
+  // re-draft it into Unreleased even if the since-tag window still spans it
+  // (e.g. a version that was changelogged but never tagged).
+  const shipped = releasedStoryIds(changelogText);
+
   const filtered: Entry[] = [];
   for (const { storyId, desc, source } of rows) {
+    if (storyId && shipped.has(storyId)) continue;
     if (sinceTagLog !== null) {
       if (!storyId || !sinceTagLog.includes(storyId)) continue;
     } else if (alreadyInChangelog(storyId, desc, changelogText)) {
@@ -481,7 +502,20 @@ function writeToChangelog(draft: string, changelogPath: string): void {
     if (!m) {
       text = text.replace(/\n+$/, "") + "\n\n" + draft;
     } else {
-      const existing = m[2] ?? "";
+      const existingRaw = m[2] ?? "";
+      // FIX-227: prune any existing Unreleased bullet whose story already shipped
+      // in a `## vX` section — the merge writer otherwise keeps shipped entries
+      // forever (over-accumulation). Non-bullet lines and PR-only/manual bullets
+      // (no shipped story id) are preserved.
+      const shipped = releasedStoryIds(text);
+      const existing = existingRaw
+        .split("\n")
+        .filter((ln) => {
+          if (!ln.trim().startsWith("- ")) return true;
+          const ids = [...ln.matchAll(STORY_ID_RE)].map((mm) => mm[1] as string);
+          return !(ids.length > 0 && ids.every((id) => shipped.has(id)));
+        })
+        .join("\n");
       const newLines = draft.split("\n").slice(2); // drop "## Unreleased" + blank
       let merged = existing.replace(/\n+$/, "") + "\n";
       for (const line of newLines) {

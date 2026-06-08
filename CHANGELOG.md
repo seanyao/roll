@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.609.1 — 2026-06-09
+
 ### 自动化流水线
 
 - 把 dream 调度剩余子命令改写为 TS，脱离 bash 回落引擎（US-PORT-020）
@@ -33,6 +35,7 @@
 - roll init 顺带生成 pairing 配置并在界面告知，新用户少一步且仍显式（US-PAIR-008）
 - site: roll-build explainer page (site-aligned, bilingual) + homepage CTA（PR#546）
 - site: track site/diagrams/ + roll-build skill infographic（PR#545）
+- site: roll-build 技能卡可点击跳转讲解页（PR#547）
 
 ## v3.608.2 — 2026-06-08
 

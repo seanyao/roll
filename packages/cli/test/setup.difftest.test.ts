@@ -1,26 +1,23 @@
 /**
- * diff-test: TS `roll setup` == bash `bin/roll setup` (frozen v2 oracle, which
- * shells lib/roll-setup.py for the v2 UI). The TS port reimplements the install
- * pipeline + the python UI renderer. Both read the SAME fabricated ROLL_PKG_DIR
- * (a copy of the repo's conventions/ tree + a tiny skills/ tree, with NO
- * .git/.gitmodules so the submodule guard is a no-op) and the SAME fabricated
- * ROLL_HOME, and run with cwd = a fabricated (non-git) project dir so the
- * git-hooks-path step is a deterministic skip on both sides.
+ * frozen: TS `roll setup` output and side effects.
  *
- * cmd_setup mutates ROLL_HOME (+ host AI dirs under HOME), so each scenario is
- * built TWICE (one fixture for bash, one for TS) from an identical builder and
- * we byte-compare stdout/stderr/exit. The "already synced" scenario seeds both
- * fixtures from a SINGLE golden ROLL_HOME produced by one bash run, so the
- * snapshot-diff verdict (unchanged → ↷) is identical regardless of cksum bytes.
- *
- * CI portability: fabricated HOME + ROLL_HOME (seeded update-check cache);
- * config carries only ai_claude so convention/skill sync touches just the
- * sandboxed $HOME/.claude; a PATH-shimmed `tmux` makes step 6 a deterministic
- * skip; the cwd is not a git repo so step 5 is a deterministic skip. No network,
- * no launchd. Locale pinned (en/zh cases override).
+ * This command was previously proven byte-equal to the frozen bash oracle. The
+ * oracle spawn is now retired for US-PORT-014: every case calls the TS command
+ * directly and freezes `{status, stdout, stderr}` inline. The fixture still
+ * exercises the real setup filesystem side effects in a sandboxed HOME.
  */
-import { execFileSync, execSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -33,21 +30,13 @@ let fakeBin = "";
 let pkgDir = "";
 
 beforeAll(() => {
-  // PATH shim: a fake `tmux` so the tmux step is a deterministic skip.
   fakeBin = realpathSync(mkdtempSync(join(tmpdir(), "roll-setup-bin-")));
   dirs.push(fakeBin);
   writeFileSync(join(fakeBin, "tmux"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
-  // Fabricated ROLL_PKG_DIR: conventions + a tiny skills tree, NO .git/.gitmodules.
   pkgDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-setup-pkg-")));
   dirs.push(pkgDir);
   cpSync(join(REPO, "conventions"), join(pkgDir, "conventions"), { recursive: true });
-  // The bash oracle sources lib/i18n.sh etc. and shells lib/roll-setup.py +
-  // lib/roll_render.py from ROLL_PKG_DIR; bring lib/ along so the override dir
-  // is a complete enough package root for the renderer to run.
-  cpSync(join(REPO, "lib"), join(pkgDir, "lib"), { recursive: true });
-  // Also stage the top-level agent-routes templates the way `roll setup` expects
-  // them under conventions/templates (kept minimal — not needed by setup itself).
   for (const s of ["roll-alpha", "roll-beta"]) {
     mkdirSync(join(pkgDir, "skills", s), { recursive: true });
     writeFileSync(join(pkgDir, "skills", s, "SKILL.md"), `# ${s}\n`);
@@ -63,17 +52,21 @@ interface Fixture {
   proj: string;
 }
 
+interface Run {
+  status: number;
+  stdout: string;
+  stderr: string;
+}
+
 function seedHome(home: string): void {
   mkdirSync(join(home, ".roll"), { recursive: true });
   const v = binRollVersion();
   writeFileSync(join(home, ".roll", ".update-check"), `${Math.floor(Date.now() / 1000)} ${v} ${v}\n`);
 }
 
-/** A fresh, empty HOME + non-git project dir. */
 function freshFixture(): Fixture {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "roll-setup-home-")));
   dirs.push(home);
-  // config with ONLY ai_claude so sync is scoped to the sandboxed ~/.claude.
   mkdirSync(join(home, ".roll"), { recursive: true });
   writeFileSync(
     join(home, ".roll", "config.yaml"),
@@ -85,33 +78,10 @@ function freshFixture(): Fixture {
   return { home, proj };
 }
 
-/** Two fixtures sharing a SINGLE golden ROLL_HOME (already synced by one bash run). */
-function syncedPair(): [Fixture, Fixture] {
-  // Produce the golden state with one bash run over a throwaway HOME.
-  const golden = freshFixture();
-  bashSetup(golden, [], { ROLL_LANG: "en" });
-  const mk = (): Fixture => {
-    const home = realpathSync(mkdtempSync(join(tmpdir(), "roll-setup-home-")));
-    dirs.push(home);
-    cpSync(join(golden.home, ".roll"), join(home, ".roll"), { recursive: true });
-    // Copy the synced ~/.claude too so step 2/3 see no change.
-    try {
-      cpSync(join(golden.home, ".claude"), join(home, ".claude"), { recursive: true });
-    } catch {
-      /* may not exist */
-    }
-    seedHome(home);
-    const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-setup-proj-")));
-    dirs.push(proj);
-    return { home, proj };
-  };
-  return [mk(), mk()];
-}
-
-interface Run {
-  status: number;
-  stdout: string;
-  stderr: string;
+function syncedFixture(): Fixture {
+  const fx = freshFixture();
+  tsSetup(fx, [], { ROLL_LANG: "en" });
+  return fx;
 }
 
 function envBase(fx: Fixture, extra: Record<string, string>): Record<string, string> {
@@ -125,20 +95,6 @@ function envBase(fx: Fixture, extra: Record<string, string>): Record<string, str
     PWD: fx.proj,
     ...extra,
   };
-}
-
-function bashSetup(fx: Fixture, args: string[], extra: Record<string, string>): Run {
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["setup", ...args], {
-      cwd: fx.proj,
-      encoding: "utf8",
-      env: { ...envBase(fx, extra), PWD: fx.proj },
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
 }
 
 const ENV_KEYS = [
@@ -161,7 +117,7 @@ function tsSetup(fx: Fixture, args: string[], extra: Record<string, string>): Ru
   process.stdout.write = (cnk: string | Uint8Array): boolean => (outChunks.push(String(cnk)), true);
   // @ts-expect-error capture-only
   process.stderr.write = (cnk: string | Uint8Array): boolean => (errChunks.push(String(cnk)), true);
-  let status: number | null;
+  let status: number;
   try {
     status = setupCommand(args);
   } finally {
@@ -174,43 +130,210 @@ function tsSetup(fx: Fixture, args: string[], extra: Record<string, string>): Ru
       else process.env[k] = v;
     }
   }
-  return { status: status ?? 0, stdout: outChunks.join(""), stderr: errChunks.join("") };
+  return { status, stdout: outChunks.join(""), stderr: errChunks.join("") };
 }
 
-function both(build: () => Fixture, args: string[], extra: Record<string, string> = {}): void {
-  const bf = build();
-  const tf = build();
-  const b = bashSetup(bf, args, extra);
-  const t = tsSetup(tf, args, extra);
-  expect(t).toEqual(b);
+function assertFreshSideEffects(fx: Fixture): void {
+  expect(readFileSync(join(fx.home, ".roll", "conventions", "global", "AGENTS.md"), "utf8")).toContain(
+    "# Agent Conventions",
+  );
+  expect(readFileSync(join(fx.home, ".claude", "roll.md"), "utf8")).toContain(
+    "# Global Preferences — Claude Code",
+  );
+  expect(readFileSync(join(fx.home, ".claude", "CLAUDE.md"), "utf8")).toContain("@roll.md");
+  expect(readFileSync(join(fx.home, ".roll", "skills", "roll-alpha", "SKILL.md"), "utf8")).toBe("# roll-alpha\n");
+  const skillLink = join(fx.home, ".claude", "skills", "roll-alpha");
+  expect(lstatSync(skillLink).isSymbolicLink()).toBe(true);
+  expect(readlinkSync(skillLink)).toBe(`${join(fx.home, ".roll", "skills", "roll-alpha")}/`);
+  expect(existsSync(join(fx.home, ".roll", ".peer-state", "logs"))).toBe(true);
 }
 
-describe("diff-test: roll setup == bash oracle", () => {
-  for (const lang of ["en", "zh"]) {
-    it(`fresh setup → install + sync, all ok (${lang})`, () => {
-      both(freshFixture, [], { ROLL_LANG: lang });
-    });
+describe("frozen: roll setup", () => {
+  it("fresh setup → install + sync, all ok (en)", () => {
+    const fx = freshFixture();
+    expect(tsSetup(fx, [], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  SETUP  ·  初始化                                                                                  
+      ────────────────────────────────────────────────────────────────────────────────
 
-    it(`--force fresh setup → forced markers (${lang})`, () => {
-      both(freshFixture, ["--force"], { ROLL_LANG: lang });
-    });
+        1. ✓  Install templates & conventions to ~/.roll
+        2. ✓  Sync conventions to AI tools
+        3. ✓  Install skills to ~/.claude
+        4. ✓  Initialize peer-review state directory
+        5. ↷  Configure git hooks path
+        6. ↷  Ensure tmux is installed (already present)
 
-    it(`unknown argument → err + exit 1 (${lang})`, () => {
-      both(freshFixture, ["--bogus"], { ROLL_LANG: lang });
-    });
-  }
-
-  it("already-synced re-run → all skip (no changes)", () => {
-    const [bf, tf] = syncedPair();
-    const b = bashSetup(bf, [], { ROLL_LANG: "en" });
-    const t = tsSetup(tf, [], { ROLL_LANG: "en" });
-    expect(t).toEqual(b);
+      ────────────────────────────────────────────────────────────────────────────────
+        Setup complete (4 items refreshed)  —  run roll init inside a project
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    assertFreshSideEffects(fx);
   });
 
-  it("already-synced --force re-run → forced markers", () => {
-    const [bf, tf] = syncedPair();
-    const b = bashSetup(bf, ["--force"], { ROLL_LANG: "en" });
-    const t = tsSetup(tf, ["--force"], { ROLL_LANG: "en" });
-    expect(t).toEqual(b);
+  it("fresh setup → install + sync, all ok (zh)", () => {
+    const fx = freshFixture();
+    expect(tsSetup(fx, [], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  SETUP  ·  初始化                                                                                  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ✓  Install templates & conventions to ~/.roll
+        2. ✓  Sync conventions to AI tools
+        3. ✓  Install skills to ~/.claude
+        4. ✓  Initialize peer-review state directory
+        5. ↷  Configure git hooks path
+        6. ↷  Ensure tmux is installed (already present)
+
+      ────────────────────────────────────────────────────────────────────────────────
+        Setup complete (4 items refreshed)  —  run roll init inside a project
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    assertFreshSideEffects(fx);
+  });
+
+  it("--force fresh setup → forced markers (en)", () => {
+    const fx = freshFixture();
+    expect(tsSetup(fx, ["--force"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  SETUP  ·  初始化                                                                                  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ~  Install templates & conventions to ~/.roll
+        2. ~  Sync conventions to AI tools
+        3. ~  Install skills to ~/.claude
+        4. ~  Initialize peer-review state directory
+        5. ↷  Configure git hooks path
+        6. ↷  Ensure tmux is installed (already present)
+
+      ────────────────────────────────────────────────────────────────────────────────
+        Setup re-installed (forced — 4 items)  —  run roll init inside a project
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    assertFreshSideEffects(fx);
+  });
+
+  it("--force fresh setup → forced markers (zh)", () => {
+    const fx = freshFixture();
+    expect(tsSetup(fx, ["--force"], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  SETUP  ·  初始化                                                                                  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ~  Install templates & conventions to ~/.roll
+        2. ~  Sync conventions to AI tools
+        3. ~  Install skills to ~/.claude
+        4. ~  Initialize peer-review state directory
+        5. ↷  Configure git hooks path
+        6. ↷  Ensure tmux is installed (already present)
+
+      ────────────────────────────────────────────────────────────────────────────────
+        Setup re-installed (forced — 4 items)  —  run roll init inside a project
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    assertFreshSideEffects(fx);
+  });
+
+  it("unknown argument → err + exit 1 (en)", () => {
+    expect(tsSetup(freshFixture(), ["--bogus"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] Unknown argument: 
+      ",
+        "stdout": "",
+      }
+    `);
+  });
+
+  it("unknown argument → err + exit 1 (zh)", () => {
+    expect(tsSetup(freshFixture(), ["--bogus"], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] 未知参数: 
+      ",
+        "stdout": "",
+      }
+    `);
+  });
+
+  it("already-synced re-run → all skip (no changes)", () => {
+    const fx = syncedFixture();
+    expect(tsSetup(fx, [], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  SETUP  ·  初始化                                                                                  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ↷  Install templates & conventions to ~/.roll
+        2. ↷  Sync conventions to AI tools
+        3. ↷  Install skills to ~/.claude
+        4. ↷  Initialize peer-review state directory
+        5. ↷  Configure git hooks path
+        6. ↷  Ensure tmux is installed (already present)
+
+      ────────────────────────────────────────────────────────────────────────────────
+        Setup complete (no changes)  —  everything already up to date
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    assertFreshSideEffects(fx);
+  });
+
+  it("already-synced --force re-run keeps content stable", () => {
+    const fx = syncedFixture();
+    expect(tsSetup(fx, ["--force"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  SETUP  ·  初始化                                                                                  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ↷  Install templates & conventions to ~/.roll
+        2. ↷  Sync conventions to AI tools
+        3. ↷  Install skills to ~/.claude
+        4. ↷  Initialize peer-review state directory
+        5. ↷  Configure git hooks path
+        6. ↷  Ensure tmux is installed (already present)
+
+      ────────────────────────────────────────────────────────────────────────────────
+        Setup complete (no changes)  —  everything already up to date
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    assertFreshSideEffects(fx);
+  });
+
+  it("missing conventions source is owned by TS without bash fallback", () => {
+    const missingPkg = realpathSync(mkdtempSync(join(tmpdir(), "roll-setup-missing-pkg-")));
+    dirs.push(missingPkg);
+    const run = tsSetup(freshFixture(), [], { ROLL_LANG: "en", ROLL_PKG_DIR: missingPkg });
+    expect({ ...run, stderr: run.stderr.replace(`${missingPkg}/conventions`, "<pkg>/conventions") })
+      .toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] Convention source not found at: <pkg>/conventions
+      [roll] Run this from the roll repo, or symlink bin/roll to PATH.
+      ",
+        "stdout": "",
+      }
+    `);
   });
 });

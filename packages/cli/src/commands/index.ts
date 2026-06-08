@@ -172,15 +172,9 @@ export function registerAll(): void {
   // `offboard`: full surface TS (changeset parse, cross-project guard, plan
   // print, FIX-125 in-cycle plist tripwire, --confirm apply). No bash fallback.
   registerPorted("offboard", offboardCommand);
-  // `setup`: the DETERMINISTIC install/sync pipeline + v2 UI are TS (fresh /
-  // --force / already-synced re-run; the unknown-argument error is owned by the
-  // TS port too — byte-identical catalog message). The only fallback is the
-  // no-conventions-source guard (rollPkgConventions missing → returns null), so
-  // bash owns the convention-source-not-found error + exit. No other sub-paths.
-  registerPorted("setup", (args) => {
-    const r = setupCommand(args);
-    return r ?? fallbackToBash(["setup", ...args]).status;
-  });
+  // `setup`: full surface TS (fresh / --force / already-synced re-run,
+  // unknown-argument, and no-conventions-source guard). No sub-paths on bash.
+  registerPorted("setup", setupCommand);
   // `ci`: the READ surface is TS (no-flag / `--timeout=N` status report:
   // gh-absent warn, not-a-git-repo err, gh-run-list failure, no-runs note, and
   // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate

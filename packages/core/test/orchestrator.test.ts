@@ -83,6 +83,9 @@ describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)"
   it("status 2 + mergedBack → done (gh missing, ff)", () => {
     expect(classifyPublish({ status: 2, mergedBack: true })).toBe("done");
   });
+  it("manual merge + gh missing never counts merge_back as done", () => {
+    expect(classifyPublish({ status: 2, manualMerge: true, mergedBack: true })).toBe("failed");
+  });
   it("status 2 + orphanPushed → orphan", () => {
     expect(classifyPublish({ status: 2, orphanPushed: true })).toBe("orphan");
   });

@@ -361,6 +361,47 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     });
   });
 
+  it("US-EVID-014: collectStoryDossierInput renders correction action trace from events", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-CORR-14");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# US-CORR-14\n");
+    writeFileSync(
+      join(p, ".roll", "loop", "events.ndjson"),
+      JSON.stringify({
+        type: "correction:action",
+        cycleId: "cycle-1",
+        storyId: "US-CORR-14",
+        action: "open_fix",
+        plannedAction: "open_fix",
+        signal: "missing_acceptance_report",
+        reason: "no fresh acceptance report",
+        targetId: "FIX-001",
+        mode: "auto",
+        source: "attest:gate",
+        ts: 1780912800,
+      }) + "\n",
+    );
+
+    const got = collectStoryDossierInput(p, { id: "US-CORR-14", epic: "alpha", type: "US", delivered: false });
+    expect(got.correctionActions).toEqual([
+      {
+        action: "open_fix",
+        at: "2026-06-08T10:00:00.000Z",
+        mode: "auto",
+        reason: "no fresh acceptance report",
+        signal: "missing_acceptance_report",
+        source: "attest:gate",
+        targetId: "FIX-001",
+      },
+    ]);
+    const html = renderStoryDossier(got);
+    expect(html).toContain("Correction trace");
+    expect(html).toContain("FIX-001");
+    expect(html).toContain("missing_acceptance_report");
+  });
+
   it("wish-only story: empty states render honestly, delivery pending", () => {
     const bare = renderStoryDossier({ story: { ...story, delivered: false } });
     expect(bare).toContain("尚未设计");

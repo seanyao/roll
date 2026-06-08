@@ -48,7 +48,19 @@ export type RollEvent =
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }
   // Correction loop (US-EVID-014/016) — story-level negative feedback and the
   // safety brake that stops oscillation before the loop burns cycles.
-  | { type: "correction:action"; cycleId?: string; storyId: string; action: string; signal: string; reason: string; ts: number }
+  | {
+      type: "correction:action";
+      cycleId?: string;
+      storyId: string;
+      action: string;
+      plannedAction?: string;
+      signal: string;
+      reason: string;
+      mode?: string;
+      source?: string;
+      targetId?: string;
+      ts: number;
+    }
   | { type: "correction:circuit_breaker"; storyId?: string; signal: string; count: number; threshold: number; reason: string; ts: number }
   // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
   // frame before spawning an agent, so later phases have a durable run dir.

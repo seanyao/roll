@@ -78,6 +78,8 @@ export interface LoopSafetyConfig {
   correctionSignalThreshold: number;
   /** US-EVID-016: seconds in the repeated-signal window. */
   correctionSignalWindowSec: number;
+  /** US-EVID-014: conservative records/alerts only; auto mutates backlog. */
+  correctionActuator: "conservative" | "auto";
 }
 
 /** Budget block under loop_safety — superset of @roll/spec {@link BudgetPolicy}
@@ -106,6 +108,7 @@ export const DEFAULT_ACTION_ON_STORY_BREACH = "hold";
 export const DEFAULT_CORRECTION_OSCILLATION_THRESHOLD = 3;
 export const DEFAULT_CORRECTION_SIGNAL_THRESHOLD = 3;
 export const DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC = 12 * 60 * 60;
+export const DEFAULT_CORRECTION_ACTUATOR = "conservative";
 
 // ── Minimal YAML parser for the policy.yaml shape ────────────────────────────
 //
@@ -215,6 +218,7 @@ export function parsePolicy(yaml: string): Policy {
     correctionOscillationThreshold: DEFAULT_CORRECTION_OSCILLATION_THRESHOLD,
     correctionSignalThreshold: DEFAULT_CORRECTION_SIGNAL_THRESHOLD,
     correctionSignalWindowSec: DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC,
+    correctionActuator: DEFAULT_CORRECTION_ACTUATOR,
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -331,6 +335,7 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     ),
     correctionSignalThreshold: numOr(flat["correction_signal_threshold"], DEFAULT_CORRECTION_SIGNAL_THRESHOLD),
     correctionSignalWindowSec: numOr(flat["correction_signal_window_sec"], DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC),
+    correctionActuator: flat["correction_actuator"] === "auto" ? "auto" : DEFAULT_CORRECTION_ACTUATOR,
     ...(budget ? { budget } : {}),
     ...(flat["attest_gate"] === "hard" || flat["attest_gate"] === "soft"
       ? { attestGate: flat["attest_gate"] as "soft" | "hard" }

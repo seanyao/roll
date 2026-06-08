@@ -564,7 +564,7 @@ describe("executeCommand — command → executor mapping", () => {
   it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
-    expect(r.event).toEqual({ type: "published", result: { status: 0 } });
+    expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
   });
 
   it("publish_pr with no slug → gh-missing tier (status 2)", async () => {
@@ -572,7 +572,24 @@ describe("executeCommand — command → executor mapping", () => {
       github: { ...fakePorts().ports.github, repoSlug: async () => undefined },
     });
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
-    expect(r.event).toEqual({ type: "published", result: { status: 2, mergedBack: false, orphanPushed: false } });
+    expect(r.event).toEqual({ type: "published", result: { status: 2, mergedBack: false, orphanPushed: false, manualMerge: false } });
+  });
+
+  it("US-EVID-014: manual-merge story keeps gh-missing publish from local merge-back success", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-manual-merge-publish-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(
+      join(repo, ".roll", "backlog.md"),
+      "| ID | Description | Status |\n|----|-------------|--------|\n| US-RUN-001 | autofix [roll:manual-merge] | 🔨 In Progress |\n",
+      "utf8",
+    );
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      github: { ...fakePorts().ports.github, repoSlug: async () => undefined },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(r.event).toEqual({ type: "published", result: { status: 2, mergedBack: false, orphanPushed: false, manualMerge: true } });
   });
 
   it("wait_merge polls prState → merge_polled", async () => {

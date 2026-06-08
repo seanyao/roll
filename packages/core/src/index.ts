@@ -18,6 +18,7 @@ export * from "./events/bus.js";
 export * from "./events/infra-default.js";
 export * from "./loop/alert-loop.js";
 export * from "./loop/ci-loop.js";
+export * from "./loop/correction-actuator.js";
 export * from "./loop/correction-safety.js";
 export * from "./loop/morning-report.js";
 export * from "./loop/pr-loop.js";

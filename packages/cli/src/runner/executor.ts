@@ -91,6 +91,7 @@ import {
 } from "./agent-spawn.js";
 import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
+import { applyCorrectionAction } from "./correction-actuator.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
@@ -690,6 +691,17 @@ export async function executeCommand(
               }),
           },
         );
+        if (res.verdict === "skipped") {
+          applyCorrectionAction({
+            projectPath: ports.repoCwd,
+            eventsPath: ports.paths.eventsPath,
+            alertsPath: ports.paths.alertsPath,
+            storyId,
+            cycleId: ctx.cycleId ?? "",
+            reasons: res.reasons,
+            nowSec: ports.clock(),
+          });
+        }
         attestBlocked = res.blocked;
       }
       const facts: CapturedFacts = {
@@ -705,18 +717,18 @@ export async function executeCommand(
 
     // delivery/pr planPublishPr → github.runPublishPlan → published result.
     case "publish_pr": {
+      const manualMerge = storyRequiresManualMerge(ports.repoCwd, ctx.storyId);
       const slug = await ports.github.repoSlug(ports.repoCwd);
       if (slug === undefined) {
         // gh unavailable / no github remote → status 2 (gh-missing tier).
-        const pub: PublishResult = { status: 2, mergedBack: false, orphanPushed: false };
+        const pub: PublishResult = { status: 2, mergedBack: false, orphanPushed: false, manualMerge };
         return { event: { type: "published", result: pub } };
       }
-      const manualMerge = storyRequiresManualMerge(ports.repoCwd, ctx.storyId);
       const plan = cmd.docOnly
         ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge })
         : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge });
       const r = await ports.github.runPublishPlan(plan);
-      const pub: PublishResult = { status: r.status };
+      const pub: PublishResult = { status: r.status, manualMerge };
       return { event: { type: "published", result: pub } };
     }
 
@@ -911,11 +923,14 @@ function publishBody(ctx: CycleContext): string {
 function storyRequiresManualMerge(repoCwd: string, storyId: string | undefined): boolean {
   if (storyId === undefined || storyId.trim() === "") return false;
   const needles = ["manual_merge", "manual-merge", "[roll:manual-merge]", "autofix"];
-  const containsMarker = (text: string): boolean => needles.some((n) => text.includes(n));
+  const containsMarker = (text: string): boolean => {
+    const lower = text.toLowerCase();
+    return needles.some((n) => lower.includes(n));
+  };
   try {
     const backlog = readFileSync(join(repoCwd, ".roll", "backlog.md"), "utf8");
-    const row = backlog.split("\n").find((line) => line.includes(storyId));
-    if (row !== undefined && containsMarker(row)) return true;
+    const row = parseBacklog(backlog).find((it) => it.id === storyId);
+    if (row !== undefined && containsMarker(row.desc)) return true;
   } catch {
     /* absent backlog */
   }

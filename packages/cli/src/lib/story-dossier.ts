@@ -15,6 +15,7 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
+import { parseEventLine } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -62,6 +63,16 @@ export interface DeliveryTimelineEntry {
   at: string;
 }
 
+export interface CorrectionTraceEntry {
+  action: string;
+  signal: string;
+  reason: string;
+  at: string;
+  mode?: string;
+  source?: string;
+  targetId?: string;
+}
+
 export interface DeliveryEvidence {
   prs?: DeliveryPrEvidence[];
   diffHref?: string;
@@ -94,6 +105,8 @@ export interface StoryDossierInput {
   reportHref?: string;
   /** Reconstructable delivery facts: PR/CI/diff/agent/cost/timeline. */
   deliveryEvidence?: DeliveryEvidence;
+  /** US-EVID-014: traceable automatic correction decisions for this story. */
+  correctionActions?: CorrectionTraceEntry[];
   /** Retrospective text (self-score note body). */
   retro?: string;
   /** Structured latest self-score note for the retrospective station. */
@@ -228,6 +241,18 @@ function deliveryEvidenceHtml(e: DeliveryEvidence | undefined): string {
   return `<div class="delivery-evidence"><h3>${bi("Delivery evidence", "交付证据")}</h3><dl>${rows.join("")}</dl></div>`;
 }
 
+function correctionTraceHtml(actions: readonly CorrectionTraceEntry[] | undefined): string {
+  if (actions === undefined || actions.length === 0) return "";
+  return `<ul class="correction-trace">${actions
+    .map((a) => {
+      const target = a.targetId !== undefined ? ` · <code>${esc(a.targetId)}</code>` : "";
+      const mode = a.mode !== undefined ? ` · <code>${esc(a.mode)}</code>` : "";
+      const source = a.source !== undefined ? ` · <code>${esc(a.source)}</code>` : "";
+      return `<li><p><code>${esc(a.action)}</code> <b>${esc(a.signal)}</b>${target}${mode}${source}</p><p class="muted"><code>${esc(a.at)}</code> ${esc(a.reason)}</p></li>`;
+    })
+    .join("")}</ul>`;
+}
+
 function selfScoreClass(verdict: string): string {
   const v = verdict.toLowerCase();
   if (v === "good" || v === "ok" || v === "regression") return v;
@@ -335,6 +360,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence)
       ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + acTable
       : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
+  const corrections = correctionTraceHtml(d.correctionActions);
   const retroContent = selfScoreHtml(d.selfScore, d.selfScoreTrend, d.retro);
   const retro = retroContent !== "" ? retroContent : `<p class="empty">${bi("Not yet written", "尚未撰写")}</p>`;
 
@@ -358,6 +384,8 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.delivery-evidence dd { margin:0; }\n` +
     `.delivery-files { list-style:none; padding:0; margin:0; } .delivery-files li { margin:2px 0; }\n` +
     `.delivery-timeline { margin:0; padding-left:18px; } .delivery-timeline li { margin:2px 0; }\n` +
+    `.correction-trace { list-style:none; padding:0; margin:0; } .correction-trace li { border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin:8px 0; background:var(--bg-raise); }\n` +
+    `.correction-trace p { margin:0 0 3px; } .correction-trace p:last-child { margin-bottom:0; }\n` +
     `.selfscore-card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--bg-raise); }\n` +
     `.selfscore-card p { margin:0 0 6px; } .selfscore-card p:last-child { margin-bottom:0; }\n` +
     `.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
@@ -382,6 +410,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("Design", "设计", design, (d.design?.length ?? 0) === 0) +
     section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
     section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence))) +
+    (corrections !== "" ? section("Correction trace", "纠正留痕", corrections, false) : "") +
     section("Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
     `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
     // EVID-010: inline copy handler (display only — never executes the command).
@@ -532,6 +561,9 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   const deliveryEvidence = collectDeliveryEvidence(projectPath, story, searchableCardText);
   if (hasDeliveryEvidence(deliveryEvidence)) out.deliveryEvidence = deliveryEvidence;
 
+  const correctionActions = collectCorrectionActions(projectPath, story.id);
+  if (correctionActions.length > 0) out.correctionActions = correctionActions;
+
   return out;
 }
 
@@ -609,6 +641,13 @@ interface EventRow {
   cycleId?: string;
   prNumber?: number;
   agent?: string;
+  action?: string;
+  plannedAction?: string;
+  signal?: string;
+  reason?: string;
+  mode?: string;
+  source?: string;
+  targetId?: string;
   ts?: number;
 }
 
@@ -790,11 +829,31 @@ function readEventRows(projectPath: string): EventRow[] {
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line !== "")
-      .map((line) => JSON.parse(line) as unknown)
+      .map((line) => parseEventLine(line) as unknown)
       .filter((row): row is EventRow => isEventRow(row));
   } catch {
     return [];
   }
+}
+
+function collectCorrectionActions(projectPath: string, storyId: string): CorrectionTraceEntry[] {
+  const out: CorrectionTraceEntry[] = [];
+  for (const ev of readEventRows(projectPath)) {
+    if (ev.type !== "correction:action" || ev.storyId !== storyId) continue;
+    if (ev.action === undefined || ev.signal === undefined || ev.reason === undefined) continue;
+    const at = isoFromEventTs(ev.ts);
+    if (at === undefined) continue;
+    out.push({
+      action: ev.action,
+      signal: ev.signal,
+      reason: ev.reason,
+      at,
+      ...(ev.mode !== undefined ? { mode: ev.mode } : {}),
+      ...(ev.source !== undefined ? { source: ev.source } : {}),
+      ...(ev.targetId !== undefined ? { targetId: ev.targetId } : {}),
+    });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at)).slice(-20);
 }
 
 function isEventRow(row: unknown): row is EventRow {

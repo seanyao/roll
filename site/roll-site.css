@@ -900,6 +900,24 @@ button { font-family: inherit; }
   font-size: 14.5px;
   letter-spacing: -0.01em;
 }
+/* Clickable feature card (e.g. $roll-build → its explainer page). */
+.r-feature-link {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.r-feature-link:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-card-hover);
+}
+.r-feature-go {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.85em;
+  margin-left: 7px;
+  opacity: 0.75;
+}
+.r-feature-link:hover .r-feature-go { opacity: 1; }
 .r-feature-desc {
   margin: 0;
   font-size: 13.5px;

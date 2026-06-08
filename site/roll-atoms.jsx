@@ -332,18 +332,36 @@ function TerminalLine({ line }) {
 // FeatureCard — reused across feature groups
 // ─────────────────────────────────────────────────────────────────────────────
 function FeatureCard({ feature, domain }) {
-  return (
-    <article className="r-card r-feature">
+  const inner = (
+    <>
       {domain && <div className="r-domain">{domain}</div>}
-      <div className={`r-feature-name${feature.mono ? " is-mono" : ""}`}>{feature.name}</div>
+      <div className={`r-feature-name${feature.mono ? " is-mono" : ""}`}>
+        {feature.name}
+        {feature.href && <span className="r-feature-go" aria-hidden="true">↗</span>}
+      </div>
       <p className="r-feature-desc">{feature.desc}</p>
       {feature.badges?.length > 0 && (
         <div className="r-feature-badges">
           {feature.badges.map((b, i) => <Badge key={i} kind={b} />)}
         </div>
       )}
-    </article>
+    </>
   );
+  // A feature with an href becomes a clickable card (e.g. the $roll-build skill
+  // card links to its explainer page).
+  if (feature.href) {
+    return (
+      <a
+        className="r-card r-feature r-feature-link"
+        href={feature.href}
+        target={feature.external ? "_blank" : undefined}
+        rel={feature.external ? "noreferrer" : undefined}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return <article className="r-card r-feature">{inner}</article>;
 }
 
 // Expose

@@ -26,6 +26,7 @@
 | guide/en/patterns/graft-pattern.md | Graft Pattern | guide | 2026-05-19 |
 | guide/en/patterns/replant-pattern.md | Replant Pattern | guide | 2026-05-19 |
 | guide/en/patterns/seed-pattern.md | Seed Pattern | guide | 2026-05-19 |
+| guide/en/pairing.md | Cross-Agent Pairing — heterogeneous second eyes | guide | 2026-06-08 |
 | guide/en/peer.md | roll peer — Cross-Agent Code Review | guide | 2026-05-27 |
 | guide/en/pr-review.md | Roll — PR Review | guide | 2026-05-19 |
 | guide/en/practices/engineering-common-sense.md | Roll Engineering Common Sense Checklist | guide | 2026-05-27 |
@@ -55,6 +56,7 @@
 | guide/zh/patterns/graft-pattern.md | Graft Pattern（续写路径）| guide | 2026-05-19 |
 | guide/zh/patterns/replant-pattern.md | Replant Pattern（翻种路径）| guide | 2026-05-19 |
 | guide/zh/patterns/seed-pattern.md | Seed Pattern（播种路径）| guide | 2026-05-19 |
+| guide/zh/pairing.md | 跨 Agent 结对 — 异构的第二双眼睛 | guide | 2026-06-08 |
 | guide/zh/peer.md | roll peer — 跨 Agent 代码评审 | guide | 2026-05-27 |
 | guide/zh/pr-review.md | Roll — PR 评审 | guide | 2026-05-19 |
 | guide/zh/pricing.md | Pricing — 成本可见性与价格快照 | guide | 2026-05-24 |

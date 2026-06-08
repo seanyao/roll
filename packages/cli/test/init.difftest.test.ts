@@ -1,113 +1,32 @@
 /**
- * diff-test: TS `roll init` == bash `bin/roll init` (frozen v2 oracle, which
- * shells lib/roll-init.py for the v2 UI). The TS port reimplements the
- * scaffolding + the python UI renderer; both read the SAME fabricated ROLL_HOME
- * (a copy of the repo's conventions/ tree) so AGENTS.md/CLAUDE.md/agent-routes
- * sources are identical, and run in the SAME fabricated project dir.
+ * frozen: TS `roll init` output and side effects.
  *
- * cmd_init mutates the project dir, so each scenario is built TWICE (one fixture
- * for bash, one for TS) and we byte-compare stdout/stderr/exit AND the resulting
- * AGENTS.md / .claude/CLAUDE.md / .roll tree. The banner embeds the project path
- * (right-aligned, width-sensitive), so both sides run with cwd = the SAME
- * realpath'd dir and PWD pinned to it — bash uses logical `$(pwd)` while Node's
- * cwd is physical, so resolving up front keeps the banner byte-identical.
- *
- * CI portability: fabricated HOME/ROLL_HOME (seeded update-check cache); the
- * config has NO ai_* tools so `_sync_conventions` is a clean no-op pass on both
- * sides (sync_status = ok) and nothing touches host AI-client dirs. Locale is
- * pinned (en/zh cases override). No network, no gh, no launchd, no git.
+ * The bash oracle spawn is retired for US-PORT-013. Every case calls the TS
+ * command directly, freezes visible output, and asserts the scaffold/apply
+ * filesystem side effects in sandboxed project + ROLL_HOME fixtures.
  */
-import { execFileSync, execSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, existsSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { initCommand } from "../src/commands/init.js";
-import { binRollVersion } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 
-/** A fabricated ROLL_HOME containing a copy of the repo conventions/ tree. */
-function freshHome(): string {
-  const home = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-home-")));
-  dirs.push(home);
-  cpSync(join(REPO, "conventions"), join(home, "conventions"), { recursive: true });
-  // `roll setup` populates ROLL_TEMPLATES (conventions/templates) with the repo's
-  // top-level agent-routes templates; mirror that so init seeds agent-routes.yaml.
-  cpSync(join(REPO, "templates", "agent-routes"), join(home, "conventions", "templates", "agent-routes"), {
-    recursive: true,
-  });
-  // Seed update-check cache so the oracle never nags / fetches releases.
-  const v = binRollVersion();
-  writeFileSync(join(home, ".update-check"), `${Math.floor(Date.now() / 1000)} ${v} ${v}\n`);
-  // Config with NO ai_* tools → _sync_conventions is a no-op pass.
-  writeFileSync(join(home, "config.yaml"), "# Roll config\nlang: en\n");
-  return home;
-}
-
-beforeAll(() => {
-  /* per-fixture homes built on demand */
-});
-afterAll(() => {
-  for (const d of dirs) execSync(`rm -rf '${d}'`);
-});
-
 interface Fixture {
   proj: string;
   home: string;
-}
-
-function freshProj(): string {
-  return realpathSync(mkdtempSync(join(tmpdir(), "roll-init-proj-")));
-}
-
-// ── Fixture builders ─────────────────────────────────────────────────────────
-/** Empty dir → project type "unknown", fresh init. */
-function freshUnknown(): Fixture {
-  const proj = freshProj();
-  dirs.push(proj);
-  return { proj, home: freshHome() };
-}
-
-/** A `bin/` dir → project type "cli", fresh init (gets a CLAUDE.md template). */
-function freshCli(): Fixture {
-  const proj = freshProj();
-  dirs.push(proj);
-  mkdirSync(join(proj, "bin"), { recursive: true });
-  // a non-empty file keeps the dir, but stays under the legacy ≥10 threshold.
-  writeFileSync(join(proj, "bin", "tool"), "#!/bin/sh\n");
-  return { proj, home: freshHome() };
-}
-
-/** Fresh init with NO global AGENTS.md present → AGENTS.md step skipped. */
-function freshNoGlobalAgents(): Fixture {
-  const proj = freshProj();
-  dirs.push(proj);
-  const home = freshHome();
-  // Remove the global AGENTS.md so _merge_global_to_project warns (discarded)
-  // and creates nothing — step 2 renders as "not modified".
-  execSync(`rm -f '${join(home, "conventions", "global", "AGENTS.md")}'`);
-  return { proj, home };
-}
-
-/** Existing AGENTS.md (no global-only sections missing) → re-init unchanged. */
-function reinitExisting(): Fixture {
-  const proj = freshProj();
-  dirs.push(proj);
-  const home = freshHome();
-  // Copy the global AGENTS.md verbatim so the section-merge finds nothing new.
-  cpSync(join(home, "conventions", "global", "AGENTS.md"), join(proj, "AGENTS.md"));
-  return { proj, home };
-}
-
-/** Existing partial AGENTS.md missing some global sections → re-init merges. */
-function reinitPartial(): Fixture {
-  const proj = freshProj();
-  dirs.push(proj);
-  const home = freshHome();
-  writeFileSync(join(proj, "AGENTS.md"), "# Project AGENTS\n\n## 1. Communication\n\nlocal stuff\n");
-  return { proj, home };
+  bin: string;
 }
 
 interface Run {
@@ -116,39 +35,172 @@ interface Run {
   stderr: string;
 }
 
-function envBase(home: string, extra: Record<string, string>): Record<string, string> {
+function freshHome(): string {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-home-")));
+  dirs.push(home);
+  cpSync(join(REPO, "conventions"), join(home, "conventions"), { recursive: true });
+  cpSync(join(REPO, "templates", "agent-routes"), join(home, "conventions", "templates", "agent-routes"), {
+    recursive: true,
+  });
+  writeFileSync(join(home, "config.yaml"), "# Roll config\nlang: en\n");
+  return home;
+}
+
+function noTemplateHome(): string {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-home-")));
+  dirs.push(home);
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "config.yaml"), "# Roll config\nlang: en\n");
+  return home;
+}
+
+function freshProj(): string {
+  const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-proj-")));
+  dirs.push(proj);
+  return proj;
+}
+
+function freshFixture(): Fixture {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-bin-")));
+  dirs.push(bin);
+  return { proj: freshProj(), home: freshHome(), bin };
+}
+
+function noTemplateFixture(): Fixture {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-bin-")));
+  dirs.push(bin);
+  return { proj: freshProj(), home: noTemplateHome(), bin };
+}
+
+function cliFixture(): Fixture {
+  const fx = freshFixture();
+  mkdirSync(join(fx.proj, "bin"), { recursive: true });
+  writeFileSync(join(fx.proj, "bin", "tool"), "#!/bin/sh\n");
+  return fx;
+}
+
+function reinitFixture(): Fixture {
+  const fx = freshFixture();
+  cpSync(join(fx.home, "conventions", "global", "AGENTS.md"), join(fx.proj, "AGENTS.md"));
+  return fx;
+}
+
+function applyFixture(planBody: string): Fixture {
+  const fx = freshFixture();
+  mkdirSync(join(fx.proj, ".roll"), { recursive: true });
+  writeFileSync(join(fx.proj, ".roll", "onboard-plan.yaml"), planBody);
+  return fx;
+}
+
+function legacyFixtureWithFakeClaude(): Fixture {
+  const fx = freshFixture();
+  writeFileSync(join(fx.proj, "package.json"), "{\"scripts\":{\"test\":\"vitest\"}}\n");
+  writeFileSync(
+    join(fx.home, "config.yaml"),
+    "# Roll config\nlang: en\nai_claude: ~/.claude|CLAUDE.md|CLAUDE.md\n",
+  );
+  const claude = join(fx.bin, "claude");
+  writeFileSync(
+    claude,
+    [
+      "#!/bin/sh",
+      "mkdir -p .roll",
+      "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "cat > .roll/onboard-plan.yaml <<EOF",
+      "version: 1",
+      "generated_at: \"$ts\"",
+      "project_understanding:",
+      "  type: cli",
+      "  description: legacy cli",
+      "scope:",
+      "  approved: [backlog, features]",
+      "  declined: []",
+      "privacy:",
+      "  gitignore_dot_roll: false",
+      "agent_routes_template: skip",
+      "EOF",
+      "exit 0",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return fx;
+}
+
+function validPlan(extra = ""): string {
+  const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  return `version: 1
+generated_at: "${ts}"
+project_understanding:
+  type: cli
+  description: test cli
+  domains: []
+  key_modules: []
+scope:
+  approved: [backlog, features, domain, briefs]
+  declined: []
+include_existing: []
+privacy:
+  gitignore_dot_roll: true
+sync_targets: []
+enable_loop: false
+agent_routes_template: default
+${extra}`;
+}
+
+function planWithPhase2(): string {
+  return validPlan(`domain_model:
+  bounded_contexts:
+    - name: Delivery
+      aggregates: [Story]
+      ubiquitous_language:
+        - term: Done
+          definition: merged and evidenced
+tech_analysis:
+  stack: [TypeScript]
+  dependencies: [Vitest]
+  architecture_notes: [Uses Roll harness]
+  risks:
+    - description: no release smoke
+      severity: HIGH
+      evidence: detected
+test_assessment:
+  current_layers:
+    - claim: unit tests exist
+      evidence: detected
+  gaps:
+    - claim: no smoke test
+      evidence: detected
+  recommended_actions:
+    - claim: add release smoke test
+      evidence: inferred
+`);
+}
+
+afterAll(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+
+const ENV_KEYS = [
+  "PATH", "HOME", "ROLL_HOME", "ROLL_PKG_DIR", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "PWD",
+  "ROLL_AGENT_ROUTES_TEMPLATE", "ROLL_ONBOARD_AGENT", "ROLL_ASSUME_TTY",
+];
+
+function envBase(fx: Fixture, extra: Record<string, string>): Record<string, string> {
   return {
-    PATH: process.env["PATH"] ?? "",
-    HOME: home,
-    ROLL_HOME: home,
+    PATH: `${fx.bin}:${process.env["PATH"] ?? ""}`,
+    HOME: fx.home,
+    ROLL_HOME: fx.home,
+    ROLL_PKG_DIR: REPO,
     NO_COLOR: "1",
     ROLL_LANG: "en",
-    PWD: "", // set per-run to the proj dir
+    PWD: fx.proj,
     ...extra,
   };
 }
 
-function bashInit(fx: Fixture, args: string[], extra: Record<string, string>): Run {
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["init", ...args], {
-      cwd: fx.proj,
-      encoding: "utf8",
-      env: { ...envBase(fx.home, extra), PWD: fx.proj },
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
-}
-
-const ENV_KEYS = [
-  "PATH", "HOME", "ROLL_HOME", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "PWD",
-  "ROLL_AGENT_ROUTES_TEMPLATE",
-];
-
-function tsInit(fx: Fixture, args: string[], extra: Record<string, string>): Run {
-  const target = { ...envBase(fx.home, extra), PWD: fx.proj };
+function tsInit(fx: Fixture, args: string[], extra: Record<string, string> = {}): Run {
+  const target = envBase(fx, extra);
   const save: Record<string, string | undefined> = {};
   for (const k of ENV_KEYS) save[k] = process.env[k];
   for (const k of ENV_KEYS) delete process.env[k];
@@ -163,7 +215,7 @@ function tsInit(fx: Fixture, args: string[], extra: Record<string, string>): Run
   process.stdout.write = (c: string | Uint8Array): boolean => (outChunks.push(String(c)), true);
   // @ts-expect-error capture-only
   process.stderr.write = (c: string | Uint8Array): boolean => (errChunks.push(String(c)), true);
-  let status: number | null;
+  let status: number;
   try {
     status = initCommand(args);
   } finally {
@@ -176,105 +228,323 @@ function tsInit(fx: Fixture, args: string[], extra: Record<string, string>): Run
       else process.env[k] = v;
     }
   }
-  return { status: status ?? 0, stdout: outChunks.join(""), stderr: errChunks.join("") };
+  return { status, stdout: outChunks.join(""), stderr: errChunks.join("") };
 }
 
-function read(p: string): string {
-  return existsSync(p) ? readFileSync(p, "utf8") : "<MISSING>";
-}
-
-/**
- * Replace a fixture's (per-run, random) project path with a fixed-WIDTH
- * placeholder so the width-sensitive right-aligned banner still compares. The
- * mkdtemp suffix has a constant length, so a constant-length token preserves
- * the `row()` gap exactly for both sides.
- */
-function norm(run: Run, proj: string): Run {
-  const token = "X".repeat(proj.length);
-  const repl = (s: string): string => s.split(proj).join(token);
-  return { status: run.status, stdout: repl(run.stdout), stderr: repl(run.stderr) };
-}
-
-/**
- * US-PAIR-008: v3 init adds a pairing scaffold step + NEXT item the frozen v2
- * oracle lacks. Strip those (and ONLY those) lines so the rest stays byte-
- * identical to v2; a dedicated test asserts the pairing lines ARE present.
- */
-function stripPairing(r: Run): Run {
-  return {
-    ...r,
-    stdout: r.stdout
-      .split("\n")
-      .filter((l) => !/pairing/i.test(l) && !/roll pair status/i.test(l) && !/\.roll\/pairing\.yaml/.test(l))
-      .join("\n"),
-  };
-}
-
-/** Compare stdout/stderr/exit AND the scaffolded artefacts. */
-function bothFull(
-  build: () => Fixture,
-  args: string[],
-  extra: Record<string, string> = {},
-): void {
-  const bf = build();
-  const tf = build();
-  const b = norm(bashInit(bf, args, extra), bf.proj);
-  const t = norm(tsInit(tf, args, extra), tf.proj);
-  expect(stripPairing(t)).toEqual(b);
-  // Scaffolded artefacts byte-identical.
-  for (const rel of [
-    "AGENTS.md",
-    ".claude/CLAUDE.md",
-    ".roll/backlog.md",
-    ".roll/features.md",
-    ".roll/agent-routes.yaml",
-  ]) {
-    expect(read(join(tf.proj, rel))).toBe(read(join(bf.proj, rel)));
+function norm(run: Run, fx: Fixture): Run {
+  let stdout = run.stdout;
+  let stderr = run.stderr;
+  for (const path of [fx.proj, fx.home, REPO]) {
+    const token = path === REPO ? "<repo>" : "X".repeat(path.length);
+    stdout = stdout.split(path).join(token);
+    stderr = stderr.split(path).join(token);
   }
+  return { status: run.status, stdout, stderr };
 }
 
-describe("diff-test: roll init == bash oracle", () => {
-  for (const lang of ["en", "zh"]) {
-    it(`fresh init (unknown type) → scaffold + UI (${lang})`, () => {
-      bothFull(freshUnknown, [], { ROLL_LANG: lang });
-    });
+function read(relBase: string, rel: string): string {
+  const path = join(relBase, rel);
+  return existsSync(path) ? readFileSync(path, "utf8") : "<MISSING>";
+}
 
-    it(`fresh init (cli type, has CLAUDE.md template) → scaffold + UI (${lang})`, () => {
-      bothFull(freshCli, [], { ROLL_LANG: lang });
-    });
+function assertScaffold(fx: Fixture): void {
+  expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+  expect(read(fx.proj, ".roll/backlog.md")).toContain("# Project Backlog");
+  expect(existsSync(join(fx.proj, ".roll", "features"))).toBe(true);
+  expect(read(fx.proj, ".roll/features.md")).toContain("# Features");
+  expect(read(fx.proj, ".roll/.version")).toContain("roll_version:");
+  expect(read(fx.proj, ".roll/pairing.yaml")).toContain("# .roll/pairing.yaml");
+}
 
-    it(`re-init over identical AGENTS.md → unchanged merge (${lang})`, () => {
-      bothFull(reinitExisting, [], { ROLL_LANG: lang });
-    });
+describe("frozen: roll init", () => {
+  it("fresh init scaffolds an unknown project", () => {
+    const fx = freshFixture();
+    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  INIT  ·  项目初始化 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  
+      ────────────────────────────────────────────────────────────────────────────────
 
-    it(`re-init over partial AGENTS.md → section merge (${lang})`, () => {
-      bothFull(reinitPartial, [], { ROLL_LANG: lang });
-    });
+        1. ✓  Detect project type
+        2. ✓  Create AGENTS.md
+             +  AGENTS.md
+        3. ✓  Create .roll/backlog.md
+             +  .roll/backlog.md
+        4. ✓  Create .roll/features/
+             +  .roll/features/
+        5. ↷  Merge existing CLAUDE.md
+             not modified
+        6. ✓  Link skills to AI clients
+        7. ✓  Scaffold cross-agent pairing
+             +  .roll/pairing.yaml
 
-    it(`fresh init with no global AGENTS.md → step skipped (${lang})`, () => {
-      bothFull(freshNoGlobalAgents, [], { ROLL_LANG: lang });
-    });
-  }
+      ────────────────────────────────────────────────────────────────────────────────
+        ✓ Initialized
 
-  it("US-PAIR-008: v3 init scaffolds pairing (the deliberate divergence is present)", () => {
-    const tf = freshUnknown();
-    const t = tsInit(tf, [], {});
-    expect(t.stdout).toMatch(/Scaffold cross-agent pairing/);
-    expect(t.stdout).toMatch(/\.roll\/pairing\.yaml/);
-    expect(t.stdout).toMatch(/roll pair status/);
-    expect(read(join(tf.proj, ".roll", "pairing.yaml"))).toContain("# .roll/pairing.yaml");
+        NEXT  ·  下一步
+        1. Edit .roll/backlog.md
+           open the backlog and add your first US
+        2. Run roll loop now
+           execute one cycle manually to test the flow
+        3. Enable loop scheduling
+           roll loop on  — let it run hourly
+        4. Run roll pair status
+           see the cross-agent pairing pool and what it cost
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    assertScaffold(fx);
   });
 
-  it("idempotent re-run: second init over a TS-scaffolded fresh project", () => {
-    // Build one fixture, run TS init twice; compare the SECOND run to a bash
-    // run over a separately TS-initialized identical project.
-    const bf = freshUnknown();
-    const tf = freshUnknown();
-    // First pass on both (now both have AGENTS.md → re-init path next).
-    tsInit(bf, [], {});
-    tsInit(tf, [], {});
-    const b = norm(bashInit(bf, [], {}), bf.proj);
-    const t = norm(tsInit(tf, [], {}), tf.proj);
-    expect(stripPairing(t)).toEqual(b);
+  it("fresh cli project gets a CLAUDE.md template", () => {
+    const fx = cliFixture();
+    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  INIT  ·  项目初始化 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ✓  Detect project type
+        2. ✓  Create AGENTS.md
+             +  AGENTS.md
+        3. ✓  Create .roll/backlog.md
+             +  .roll/backlog.md
+        4. ✓  Create .roll/features/
+             +  .roll/features/
+        5. ✓  Merge existing CLAUDE.md
+             +  .claude/CLAUDE.md
+        6. ✓  Link skills to AI clients
+        7. ✓  Scaffold cross-agent pairing
+             +  .roll/pairing.yaml
+
+      ────────────────────────────────────────────────────────────────────────────────
+        ✓ Initialized
+
+        NEXT  ·  下一步
+        1. Edit .roll/backlog.md
+           open the backlog and add your first US
+        2. Run roll loop now
+           execute one cycle manually to test the flow
+        3. Enable loop scheduling
+           roll loop on  — let it run hourly
+        4. Run roll pair status
+           see the cross-agent pairing pool and what it cost
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    expect(read(fx.proj, ".claude/CLAUDE.md")).toContain("CLI");
+    assertScaffold(fx);
+  });
+
+  it("re-init over existing AGENTS.md renders re-merge", () => {
+    const fx = reinitFixture();
+    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  REINIT  ·  重新合并约定 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ✓  Detect project type
+        2. ↷  Create AGENTS.md
+             ·  AGENTS.md
+        3. ✓  Create .roll/backlog.md
+             +  .roll/backlog.md
+        4. ✓  Create .roll/features/
+             +  .roll/features/
+        5. ↷  Merge existing CLAUDE.md
+             not modified
+        6. ✓  Link skills to AI clients
+        7. ✓  Scaffold cross-agent pairing
+             +  .roll/pairing.yaml
+
+      ────────────────────────────────────────────────────────────────────────────────
+        ✓ Re-merged
+
+        NEXT  ·  下一步
+        1. Edit .roll/backlog.md
+           open the backlog and add your first US
+        2. Run roll loop now
+           execute one cycle manually to test the flow
+        3. Enable loop scheduling
+           roll loop on  — let it run hourly
+        4. Run roll pair status
+           see the cross-agent pairing pool and what it cost
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+  });
+
+  it("unknown flag is owned by TS", () => {
+    const fx = freshFixture();
+    expect(norm(tsInit(fx, ["--bogus"]), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] Unknown flag: 
+      ",
+        "stdout": "",
+      }
+    `);
+  });
+
+  it("missing templates guard is owned by TS", () => {
+    const fx = noTemplateFixture();
+    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] No templates found. Run 'roll setup' first.
+      ",
+        "stdout": "",
+      }
+    `);
+  });
+
+  it("--apply without onboard plan is owned by TS", () => {
+    const fx = freshFixture();
+    expect(norm(tsInit(fx, ["--apply"]), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "[roll] No onboard plan found at .roll/onboard-plan.yaml
+
+        Run $roll-onboard in your AI agent first to generate the plan.
+      [EN:  请先在 AI agent 里运行 \\$roll-onboard 生成 plan，再回来执行 ap...]
+      ",
+        "stdout": "",
+      }
+    `);
+  });
+
+  it("--apply consumes a valid plan and records offboard changeset", () => {
+    const fx = applyFixture(validPlan());
+    expect(norm(tsInit(fx, ["--apply"]), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "[roll] Applying onboard plan...
+
+        ┌─
+        │  + created     AGENTS.md                     │
+        │  + created     .roll/.version                │
+        │  + created     .roll/backlog.md              │
+        │  + created     .roll/agent-routes.yaml       │
+        │  + created     .roll/features/               │
+        │  + created     .roll/features.md             │
+        └─────────────────────────────────────────────────────┘
+      [roll] Added .roll/ to .gitignore
+
+      [roll] Syncing conventions to AI tools...
+
+      [roll] Onboard apply complete.  Onboard
+      ",
+      }
+    `);
+    expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain("scope_approved:");
+    expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain(".roll/backlog.md");
+    expect(read(fx.proj, ".gitignore")).toContain(".roll/");
+    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+    expect(read(fx.proj, ".roll/backlog.md")).toContain("# Project Backlog");
+    expect(existsSync(join(fx.proj, ".roll", "features"))).toBe(true);
+    expect(read(fx.proj, ".roll/features.md")).toContain("# Features");
+    expect(read(fx.proj, ".roll/.version")).toContain("roll_version:");
+    expect(existsSync(join(fx.proj, ".roll", "domain"))).toBe(true);
+    expect(existsSync(join(fx.proj, ".roll", "briefs"))).toBe(true);
+  });
+
+  it("--apply renders Phase 2 markdown and skips seed in non-interactive mode", () => {
+    const fx = applyFixture(planWithPhase2());
+    expect(norm(tsInit(fx, ["--apply"]), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "
+      [roll] About to seed 1 candidate stories to BACKLOG:
+          US-SEED-001  add release smoke test
+
+      Non-interactive stdin — skipping BACKLOG seeding (markdown still generated).
+
+      [roll] About to seed 1 HIGH-severity risks as FIX entries:
+          FIX-SEED-001  no release smoke
+
+      Non-interactive stdin — skipping BACKLOG seeding (markdown still generated).
+      ",
+        "stdout": "[roll] Applying onboard plan...
+      [roll] Rendered: .roll/domain/context-map.md
+      [roll] Rendered: .roll/tech-analysis.md
+      [roll] Rendered: .roll/test-assessment.md
+      [roll] Seeding cancelled. The analysis markdown was still generated.
+      [roll] Seeding cancelled. The analysis markdown was still generated.
+
+        ┌─
+        │  + created     AGENTS.md                     │
+        │  + created     .roll/.version                │
+        │  + created     .roll/backlog.md              │
+        │  + created     .roll/agent-routes.yaml       │
+        │  + created     .roll/features/               │
+        │  + created     .roll/features.md             │
+        └─────────────────────────────────────────────────────┘
+      [roll] Added .roll/ to .gitignore
+
+      [roll] Syncing conventions to AI tools...
+
+      [roll] Onboard apply complete.  Onboard
+      ",
+      }
+    `);
+    expect(read(fx.proj, ".roll/domain/context-map.md")).toContain("## Delivery");
+    expect(read(fx.proj, ".roll/tech-analysis.md")).toContain("no release smoke");
+    expect(read(fx.proj, ".roll/test-assessment.md")).toContain("add release smoke test");
+    expect(read(fx.proj, ".roll/backlog.md")).not.toContain("US-SEED-001");
+  });
+
+  it("legacy project launches a selected agent then applies its plan", () => {
+    const fx = legacyFixtureWithFakeClaude();
+    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "
+      ",
+        "stdout": "[roll] Detected: legacy project (no AGENTS.md, manifest: package.json)
+
+        Onboarding
+        Onboarding requires an AI agent to read your code. Detected:
+
+          ✓ claude   (installed)
+
+      The process will use your agent to call models. Token cost is on your own account.
+        Onboarding uses your agent to call models — tokens are billed to your account.
+
+      Code and conversations stay in your agent tool — Roll does not upload anything.
+        Your code and conversation stay in your agent — Roll never uploads anything.
+
+
+      [roll] Launching claude…
+        Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you.
+      Use /exit to end (or Ctrl-C). Roll will auto-apply after exit.
+
+      [roll] Plan written. Running apply…
+      [roll] Applying onboard plan...
+
+        ┌─
+        │  + created     AGENTS.md                     │
+        │  + created     .roll/.version                │
+        │  + created     .roll/backlog.md              │
+        │  + created     .roll/features/               │
+        │  + created     .roll/features.md             │
+        └─────────────────────────────────────────────────────┘
+
+      [roll] Syncing conventions to AI tools...
+
+      [roll] Onboard apply complete.  Onboard
+      ",
+      }
+    `);
+    expect(read(fx.proj, ".roll/onboard-plan.yaml")).toContain("legacy cli");
+    expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain(".roll/backlog.md");
+    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
   });
 });

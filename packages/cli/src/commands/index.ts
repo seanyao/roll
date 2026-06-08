@@ -156,15 +156,10 @@ export function registerAll(): void {
   // `feedback`: full surface TS (arg parse, repo resolution, env block,
   // print-url + gh issue create). No sub-paths left on bash.
   registerPorted("feedback", feedbackCommand);
-  // `init`: the DETERMINISTIC scaffolding paths are TS (fresh project init +
-  // re-init section-merge, with the v2 roll-init.py UI rendered natively). The
-  // legacy-codebase onboarding flow, `init --apply`, unknown -flags, and the
-  // no-templates guard all RETURN null → fall back to bash (which owns the
-  // interactive agent launch and the i18n'd error messages).
-  registerPorted("init", (args) => {
-    const r = initCommand(args);
-    return r ?? fallbackToBash(["init", ...args]).status;
-  });
+  // `init`: full surface TS (fresh/re-init scaffold, legacy-codebase onboard
+  // launcher, --apply plan consumption, unknown flags, and no-template guard).
+  // No sub-paths on bash.
+  registerPorted("init", initCommand);
   registerPorted("migrate-features", migrateFeaturesCommand);
   // `migrate`: full surface TS (three-state idempotency, dry-run preview,
   // git-mv execute with the single atomic commit). No sub-paths on bash.

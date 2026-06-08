@@ -15,11 +15,9 @@
  * _sync_conventions (1300-1303 → _sync_one_tool → _sync_convention_for_tool),
  * and _emit_init_v2_ui (2215-2276) re-implementing lib/roll-init.py.
  *
- * Sub-paths LEFT ON BASH (registered as fallback in commands/index.ts):
- *   - `roll init --apply …`            (consumes onboard-plan.yaml; agent flow)
- *   - `roll init -<flag>`              (unknown-flag error owned by bash msg)
- *   - legacy-codebase onboarding       (_init_is_legacy_project → interactive
- *                                       agent launch; never runnable from TS)
+ * The legacy-codebase onboarding guide and `--apply` path are also owned here:
+ * TS launches the selected agent directly, then applies `.roll/onboard-plan.yaml`
+ * without entering the frozen bash engine.
  *
  * Whitelisted divergence: cmd_init calls `_install_launchd_plists` with all
  * output redirected to /dev/null (`>/dev/null 2>&1 || true`). It contributes
@@ -32,25 +30,73 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { agentsInstalled, defaultPairingConfig, renderPairingConfig } from "@roll/core";
+import {
+  agentInstalledByName as coreAgentInstalledByName,
+  agentsInstalled,
+  defaultPairingConfig,
+  renderPairingConfig,
+} from "@roll/core";
+import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
 import { c, renderState, row, COLS } from "../render.js";
 import { realAgentEnv } from "./agent-list.js";
-import { syncConventions as sharedSyncConventions } from "./setup-shared.js";
+import { onPath, rollPkgDir, syncConventions as sharedSyncConventions } from "./setup-shared.js";
 import { rollVersion } from "./version.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — used only for err() here ─────────────
 function err(line: string): void {
-  const noColor = (process.env["NO_COLOR"] ?? "") !== "";
-  const RED = noColor ? "" : "\x1b[0;31m";
-  const NC = noColor ? "" : "\x1b[0m";
+  const { RED, NC } = pal();
   process.stderr.write(`${RED}[roll]${NC} ${line}\n`);
+}
+function info(line: string): void {
+  const { CYAN, NC } = pal();
+  process.stdout.write(`${CYAN}[roll]${NC} ${line}\n`);
+}
+function ok(line: string): void {
+  const { GREEN, NC } = pal();
+  process.stdout.write(`${GREEN}[roll]${NC} ${line}\n`);
+}
+function warn(line: string): void {
+  const { YELLOW, NC } = pal();
+  process.stderr.write(`${YELLOW}[roll]${NC} ${line}\n`);
+}
+function pal(): {
+  RED: string;
+  GREEN: string;
+  YELLOW: string;
+  CYAN: string;
+  BOLD: string;
+  NC: string;
+} {
+  const noColor = (process.env["NO_COLOR"] ?? "") !== "";
+  return noColor
+    ? { RED: "", GREEN: "", YELLOW: "", CYAN: "", BOLD: "", NC: "" }
+    : {
+        RED: "\x1b[0;31m",
+        GREEN: "\x1b[0;32m",
+        YELLOW: "\x1b[0;33m",
+        CYAN: "\x1b[0;36m",
+        BOLD: "\x1b[1m",
+        NC: "\x1b[0m",
+      };
+}
+function msgLang(): Lang {
+  return resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+}
+function m(key: string, ...args: Array<string | number>): string {
+  return t(v2Catalog, msgLang(), key, ...args);
 }
 
 // ─── env (bin/roll:7-11) ──────────────────────────────────────────────────────
@@ -141,6 +187,227 @@ function isLegacyProject(projectDir: string): boolean {
     if (g.status === 0) return true;
   }
   return false;
+}
+
+function legacyFileSummary(projectDir: string): string {
+  const parts: string[] = [];
+  for (const dir of ["src", "app", "lib", "pkg", "cmd"]) {
+    const p = join(projectDir, dir);
+    if (existsSync(p) && statSync(p).isDirectory()) {
+      const count = countNonEmptyFiles(p);
+      if (count >= 10) parts.push(`${count} files in ${dir}/`);
+    }
+  }
+  const manifests = [
+    "package.json", "pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile",
+    "go.mod", "Cargo.toml", "Gemfile", "pom.xml", "build.gradle", "build.gradle.kts",
+    "Makefile", "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
+    "app.json", "project.config.json", "mix.exs", "composer.json", "deno.json", "deno.jsonc",
+  ];
+  for (const man of manifests) {
+    if (existsSync(join(projectDir, man))) {
+      parts.push(`manifest: ${man}`);
+      break;
+    }
+  }
+  try {
+    if (readdirSync(projectDir).some((name) => name.endsWith(".tf"))) parts.push("Terraform .tf files");
+  } catch {
+    /* ignore */
+  }
+  if (
+    parts.length === 0 &&
+    existsSync(join(projectDir, ".git")) &&
+    spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: projectDir, stdio: "ignore" }).status === 0
+  ) {
+    parts.push("git history present");
+  }
+  return `no AGENTS.md, ${parts.join(" ")}`;
+}
+
+function expandHome(path: string): string {
+  const home = process.env["HOME"] ?? homedir();
+  return path.replace(/^~/, home);
+}
+
+function discoverOnboardAgents(): { installed: string[]; missing: string[] } {
+  const installed: string[] = [];
+  const missing: string[] = [];
+  const cfg = join(rollHome(), "config.yaml");
+  if (!existsSync(cfg)) return { installed, missing };
+  const env = realAgentEnv();
+  for (const line of readFileSync(cfg, "utf8").split("\n")) {
+    const match = /^(ai_[^:]+):\s*(.*)$/.exec(line);
+    if (match === null) continue;
+    let name = (match[1] ?? "").slice("ai_".length);
+    if (name === "kimi_code") name = "kimi";
+    const dir = expandHome(((match[2] ?? "").split("|")[0] ?? "").trim());
+    const target = coreAgentInstalledByName(env, name, dir) ? installed : missing;
+    if (!target.includes(name)) target.push(name);
+  }
+  return { installed, missing };
+}
+
+function readLineFromStdin(): string | null {
+  const chunks: number[] = [];
+  const buf = Buffer.alloc(1);
+  while (true) {
+    let n = 0;
+    try {
+      n = readSync(0, buf, 0, 1, null);
+    } catch {
+      return null;
+    }
+    if (n === 0) return chunks.length === 0 ? null : Buffer.from(chunks).toString("utf8");
+    const b = buf[0] ?? 0;
+    if (b === 10) break;
+    if (b !== 13) chunks.push(b);
+  }
+  return Buffer.from(chunks).toString("utf8");
+}
+
+function selectOnboardAgent(candidates: string[]): string | null {
+  if (candidates.length === 0) return null;
+  const forced = process.env["ROLL_ONBOARD_AGENT"] ?? "";
+  if (forced !== "") {
+    if (candidates.includes(forced)) return forced;
+    err(`ROLL_ONBOARD_AGENT='${forced}' is not in installed agents.`);
+    return null;
+  }
+  if (candidates.length === 1) return candidates[0] ?? null;
+
+  process.stderr.write(`${m("init.pick_an_agent")}\n`);
+  candidates.forEach((candidate, index) => {
+    process.stderr.write(`    ${index + 1}) ${candidate}\n`);
+  });
+  process.stderr.write(`  Enter number [1-${candidates.length}]: `);
+  const choice = readLineFromStdin();
+  if (choice === null) {
+    err(m("init.no_input_received_aborting_onboard"));
+    return null;
+  }
+  const n = Number(choice);
+  if (!Number.isInteger(n) || n < 1 || n > candidates.length) {
+    err(m("init.invalid_choice", choice));
+    return null;
+  }
+  return candidates[n - 1] ?? null;
+}
+
+function readOnboardPrompt(): string | null {
+  const skillFile = join(rollPkgDir(), "skills", "roll-onboard", "SKILL.md");
+  if (!existsSync(skillFile)) {
+    err(`Skill file missing: ${skillFile}`);
+    return null;
+  }
+  const body = readFileSync(skillFile, "utf8").replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+  return `Run the $roll-onboard skill below for this project. Follow it end-to-end and write .roll/onboard-plan.yaml when done.\n\n${body}`;
+}
+
+function kimiBin(): string {
+  if (onPath("kimi-code")) return "kimi-code";
+  if (onPath("kimi-cli")) return "kimi-cli";
+  return "kimi";
+}
+
+function interactiveAgentCommand(agent: string, prompt: string): { bin: string; args: string[] } | null {
+  switch (agent) {
+    case "claude":
+      return { bin: "claude", args: [prompt] };
+    case "kimi":
+      return { bin: kimiBin(), args: [prompt] };
+    case "deepseek":
+      return { bin: "deepseek", args: [prompt] };
+    case "pi":
+      return { bin: "pi", args: [prompt] };
+    case "codex":
+    case "openai":
+      return { bin: "codex", args: [prompt] };
+    case "opencode":
+      return { bin: "opencode", args: [prompt] };
+    case "gemini":
+    case "agy":
+    case "antigravity":
+      return { bin: "agy", args: ["-i", prompt] };
+    case "qwen":
+      return { bin: "qwen", args: [prompt] };
+    default:
+      return null;
+  }
+}
+
+function onboardFailureHint(agent: string, code: number): void {
+  process.stderr.write("\n");
+  if (code === 130) err(m("init.onboard_cancelled"));
+  else err(m("init.onboard_agent_exited", agent, code));
+  process.stderr.write("\n");
+  process.stderr.write(`  ${m("init.onboard_next_step")}\n`);
+  process.stderr.write(`    - ${m("init.onboard_retry")}\n`);
+  process.stderr.write(`    - ${m("init.onboard_retry_en")}\n`);
+  process.stderr.write(`    - ${m("init.onboard_switch")}\n`);
+  process.stderr.write(`    - ${m("init.onboard_switch_en")}\n`);
+  process.stderr.write("\n");
+}
+
+function runOnboardAgent(agent: string, projectDir: string): number {
+  const prompt = readOnboardPrompt();
+  if (prompt === null) return 1;
+  const cmd = interactiveAgentCommand(agent, prompt);
+  if (cmd === null) {
+    err(m("init.agent_has_no_interactive_mode_wired", agent));
+    return 1;
+  }
+  const result = spawnSync(cmd.bin, cmd.args, {
+    cwd: projectDir,
+    stdio: "inherit",
+    env: process.env,
+  });
+  const rc = result.status ?? (result.signal === null ? 1 : 130);
+  if (rc !== 0) {
+    onboardFailureHint(agent, rc);
+    return rc;
+  }
+  if (!existsSync(join(projectDir, ".roll", "onboard-plan.yaml"))) {
+    process.stderr.write("\n");
+    err("Agent exited cleanly but did not write .roll/onboard-plan.yaml.");
+    err(m("init.agent"));
+    process.stderr.write("  Re-run `roll init` once you've completed the conversation.\n");
+    process.stderr.write(`${m("init.en_roll_init")}\n`);
+    return 1;
+  }
+  process.stderr.write("\n");
+  info(m("init.plan_written_running_apply"));
+  return initApply(projectDir);
+}
+
+function legacyOnboardGuide(projectDir: string): number {
+  const { GREEN, RED, NC } = pal();
+  info(m("init.detected_legacy_project", legacyFileSummary(projectDir)));
+  process.stdout.write("\n");
+  const { installed, missing } = discoverOnboardAgents();
+  process.stdout.write(`${m("init.onboarding")}\n`);
+  process.stdout.write("  Onboarding requires an AI agent to read your code. Detected:\n\n");
+  for (const name of installed) process.stdout.write(`    ${GREEN}✓${NC} ${name}   (installed)\n`);
+  for (const name of missing) process.stdout.write(`    ${RED}✗${NC} ${name}   (not found)\n`);
+  if (installed.length === 0) {
+    process.stdout.write("\n");
+    err("No AI agent detected. Install one (e.g., 'claude', 'codex', 'kimi') and try again.");
+    err(m("init.no_ai_agent_detected_install_one"));
+    return 1;
+  }
+  process.stdout.write("\n");
+  process.stdout.write(`${m("init.the_process_will_use_your_agent")}\n`);
+  process.stdout.write("  Onboarding uses your agent to call models — tokens are billed to your account.\n\n");
+  process.stdout.write(`${m("init.code_and_conversations_stay_in_your")}\n`);
+  process.stdout.write("  Your code and conversation stay in your agent — Roll never uploads anything.\n\n");
+
+  const chosen = selectOnboardAgent(installed);
+  if (chosen === null) return 1;
+  process.stdout.write("\n");
+  info(m("init.launching", chosen));
+  process.stdout.write("  Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you.\n");
+  process.stdout.write(`${m("init.use_exit_to_end_or_ctrl")}\n\n`);
+  return runOnboardAgent(chosen, projectDir);
 }
 
 // ─── _merge_global_to_project (2022-2093) ─────────────────────────────────────
@@ -399,6 +666,320 @@ function syncConventions(): "ok" | "fail" {
   }
 }
 
+type ChangesetSection =
+  | "scope_approved"
+  | "files_created"
+  | "dirs_created"
+  | "gitignore_entries_added"
+  | "launchd_plists_installed";
+
+interface OnboardChangeset {
+  onboardedAt: string;
+  rollVersion: string;
+  scopeApproved: string[];
+  filesCreated: string[];
+  dirsCreated: string[];
+  gitignoreEntriesAdded: string[];
+  launchdPlistsInstalled: string[];
+}
+
+function changesetPath(projectDir: string): string {
+  return join(projectDir, ".roll", "onboard-changeset.yaml");
+}
+
+function isoNow(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function renderYamlList(name: string, values: string[]): string {
+  if (values.length === 0) return `${name}: []\n`;
+  return `${name}:\n${values.map((v) => `  - "${v.replace(/"/g, '\\"')}"`).join("\n")}\n`;
+}
+
+function renderChangeset(changeset: OnboardChangeset): string {
+  return (
+    "# Generated by `roll init --apply`. Used by `roll offboard` to reverse\n" +
+    "# the changes onboard made. Do not edit by hand.\n" +
+    `onboarded_at: "${changeset.onboardedAt}"\n` +
+    `roll_version: "${changeset.rollVersion}"\n` +
+    renderYamlList("scope_approved", changeset.scopeApproved) +
+    renderYamlList("files_created", changeset.filesCreated) +
+    renderYamlList("dirs_created", changeset.dirsCreated) +
+    renderYamlList("gitignore_entries_added", changeset.gitignoreEntriesAdded) +
+    renderYamlList("launchd_plists_installed", changeset.launchdPlistsInstalled)
+  );
+}
+
+function writeChangeset(projectDir: string, changeset: OnboardChangeset): void {
+  const path = changesetPath(projectDir);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, renderChangeset(changeset));
+}
+
+function beginChangeset(projectDir: string): OnboardChangeset {
+  const changeset: OnboardChangeset = {
+    onboardedAt: isoNow(),
+    rollVersion: rollVersion() || "unknown",
+    scopeApproved: [],
+    filesCreated: [],
+    dirsCreated: [],
+    gitignoreEntriesAdded: [],
+    launchdPlistsInstalled: [],
+  };
+  writeChangeset(projectDir, changeset);
+  return changeset;
+}
+
+function recordChangeset(projectDir: string, changeset: OnboardChangeset, section: ChangesetSection, value: string): void {
+  const target =
+    section === "scope_approved"
+      ? changeset.scopeApproved
+      : section === "files_created"
+        ? changeset.filesCreated
+        : section === "dirs_created"
+          ? changeset.dirsCreated
+          : section === "gitignore_entries_added"
+            ? changeset.gitignoreEntriesAdded
+            : changeset.launchdPlistsInstalled;
+  target.push(value);
+  writeChangeset(projectDir, changeset);
+}
+
+interface PlanFields {
+  approved: string[];
+  gitignoreDotRoll: boolean;
+  agentRoutesTemplate: string;
+}
+
+function readPlanFields(plan: string): PlanFields {
+  const script = `
+import json, sys, yaml
+p = yaml.safe_load(open(sys.argv[1])) or {}
+print(json.dumps({
+  "approved": p.get("scope", {}).get("approved", []) or [],
+  "gitignoreDotRoll": bool(p.get("privacy", {}).get("gitignore_dot_roll", False)),
+  "agentRoutesTemplate": p.get("agent_routes_template", "") or "",
+}))
+`;
+  const r = spawnSync("python3", ["-c", script, plan], { encoding: "utf8" });
+  if (r.status !== 0) return { approved: [], gitignoreDotRoll: false, agentRoutesTemplate: "" };
+  try {
+    const parsed = JSON.parse(r.stdout) as Partial<PlanFields>;
+    return {
+      approved: Array.isArray(parsed.approved) ? parsed.approved.filter((v): v is string => typeof v === "string") : [],
+      gitignoreDotRoll: parsed.gitignoreDotRoll === true,
+      agentRoutesTemplate: typeof parsed.agentRoutesTemplate === "string" ? parsed.agentRoutesTemplate : "",
+    };
+  } catch {
+    return { approved: [], gitignoreDotRoll: false, agentRoutesTemplate: "" };
+  }
+}
+
+function runPythonScript(scriptPath: string, args: string[]): number {
+  const r = spawnSync("python3", [scriptPath, ...args], { encoding: "utf8" });
+  if (r.stdout !== undefined && r.stdout !== "") process.stdout.write(r.stdout);
+  if (r.stderr !== undefined && r.stderr !== "") process.stderr.write(r.stderr);
+  return r.status ?? 1;
+}
+
+function printMergeSummary(summary: Summary): void {
+  if (summary.length === 0) return;
+  const { GREEN, YELLOW, CYAN, NC } = pal();
+  process.stdout.write("\n");
+  process.stdout.write(`${m("migrate.summary")}\n`);
+  for (const entry of summary) {
+    const idx = entry.indexOf("|");
+    const action = idx >= 0 ? entry.slice(0, idx) : entry;
+    const file = idx >= 0 ? entry.slice(idx + 1) : "";
+    if (action === "merged") process.stdout.write(`  │  ${GREEN}✦ merged${NC}      ${file.padEnd(30)}│\n`);
+    else if (action === "created") process.stdout.write(`  │  ${GREEN}+ created${NC}     ${file.padEnd(30)}│\n`);
+    else if (action === "overwritten") process.stdout.write(`  │  ${YELLOW}↺ overwritten${NC} ${file.padEnd(30)}│\n`);
+    else if (action === "kept") process.stdout.write(`  │  ${CYAN}· kept${NC}        ${file.padEnd(30)}│\n`);
+    else if (action === "unchanged") process.stdout.write(`  │    unchanged    ${file.padEnd(30)}│\n`);
+  }
+  process.stdout.write("  └─────────────────────────────────────────────────────┘\n");
+}
+
+function seedBacklogRow(backlog: string, heading: string, row: string, id: string): boolean {
+  if (!existsSync(backlog)) return false;
+  const text = readFileSync(backlog, "utf8");
+  if (text.includes(`| ${id} |`)) return false;
+  const lines = text.split("\n");
+  let seen = false;
+  let inserted = false;
+  const out: string[] = [];
+  for (const line of lines) {
+    out.push(line);
+    if (line === heading) seen = true;
+    else if (seen && !inserted && /^\|-+\|-+\|-+\|$/.test(line)) {
+      out.push(row);
+      inserted = true;
+    }
+  }
+  if (!inserted) out.push(row);
+  writeFileSync(backlog, out.join("\n"));
+  return true;
+}
+
+function seedBacklogStory(backlog: string, id: string, title: string): boolean {
+  return seedBacklogRow(backlog, "## Epic: Initial Setup", `| ${id} | ${title} | 📋 Todo |`, id);
+}
+
+function seedBacklogFix(backlog: string, id: string, title: string): boolean {
+  return seedBacklogRow(backlog, "## Bug Fixes", `| ${id} | ${title} | 📋 Todo |`, id);
+}
+
+function confirmSeed(count: number, noun: "story" | "fix", ids: string[], titles: string[]): boolean {
+  process.stderr.write("\n");
+  warn(noun === "fix" ? m("init.onboard_seed_preview_fix", count) : m("init.onboard_seed_preview_story", count));
+  ids.forEach((id, index) => {
+    process.stderr.write(`    ${id}  ${titles[index] ?? ""}\n`);
+  });
+  process.stderr.write("\n");
+  if ((process.env["ROLL_ASSUME_TTY"] ?? "") !== "1" && process.stdin.isTTY !== true) {
+    process.stderr.write(`${m("init.onboard_seed_noninteractive")}\n`);
+    return false;
+  }
+  const { BOLD, NC } = pal();
+  process.stderr.write(`  ${BOLD}${m("init.onboard_seed_prompt")}${NC} [y/N] \n`);
+  const reply = readLineFromStdin() ?? "";
+  return reply === "y" || reply === "Y" || reply === "yes" || reply === "YES";
+}
+
+function renderAndSeed(projectDir: string, plan: string, changeset: OnboardChangeset): void {
+  const renderer = join(rollPkgDir(), "lib", "roll-onboard-render.py");
+  if (!existsSync(renderer)) return;
+  const r = spawnSync("python3", [renderer, plan, projectDir], { encoding: "utf8" });
+  if (r.status === 2) return;
+  if (r.status !== 0) {
+    if (r.stderr !== undefined && r.stderr !== "") process.stderr.write(r.stderr);
+    warn(m("init.onboard_render_failed"));
+    return;
+  }
+  const seedIds: string[] = [];
+  const seedTitles: string[] = [];
+  const fixIds: string[] = [];
+  const fixTitles: string[] = [];
+  for (const raw of (r.stdout ?? "").split("\n")) {
+    if (raw === "") continue;
+    const [kind, a = "", b = ""] = raw.split("|");
+    if (kind === "FILE") {
+      recordChangeset(projectDir, changeset, "files_created", a);
+      ok(m("init.onboard_rendered", a));
+    } else if (kind === "SEED") {
+      seedIds.push(a);
+      seedTitles.push(b);
+    } else if (kind === "FIX") {
+      fixIds.push(a);
+      fixTitles.push(b);
+    }
+  }
+  const backlog = join(projectDir, ".roll", "backlog.md");
+  if (seedIds.length > 0) {
+    if (!existsSync(backlog)) info(m("init.onboard_seed_no_backlog"));
+    else if (confirmSeed(seedIds.length, "story", seedIds, seedTitles)) {
+      let seeded = 0;
+      seedIds.forEach((id, index) => {
+        if (seedBacklogStory(backlog, id, seedTitles[index] ?? "")) seeded += 1;
+      });
+      ok(m("init.onboard_seeded_stories", seeded));
+    } else info(m("init.onboard_seed_cancelled"));
+  }
+  if (fixIds.length > 0) {
+    if (!existsSync(backlog)) info(m("init.onboard_seed_no_backlog"));
+    else if (confirmSeed(fixIds.length, "fix", fixIds, fixTitles)) {
+      let seeded = 0;
+      fixIds.forEach((id, index) => {
+        if (seedBacklogFix(backlog, id, fixTitles[index] ?? "")) seeded += 1;
+      });
+      ok(m("init.onboard_seeded_fixes", seeded));
+    } else info(m("init.onboard_seed_cancelled"));
+  }
+}
+
+function addRollToGitignore(projectDir: string, changeset: OnboardChangeset): void {
+  const gi = join(projectDir, ".gitignore");
+  const current = existsSync(gi) ? readFileSync(gi, "utf8") : "";
+  if (current.split("\n").includes(".roll/")) return;
+  writeFileSync(gi, current + (current === "" || current.endsWith("\n") ? "" : "\n") + ".roll/\n");
+  recordChangeset(projectDir, changeset, "gitignore_entries_added", ".roll/");
+  ok(m("init.added_roll_to_gitignore"));
+}
+
+function initApply(projectDir: string): number {
+  const plan = join(projectDir, ".roll", "onboard-plan.yaml");
+  const validator = join(rollPkgDir(), "lib", "roll-plan-validate.py");
+  if (!existsSync(plan)) {
+    err(m("init.no_onboard_plan_found_at_roll"));
+    process.stderr.write("\n");
+    process.stderr.write("  Run $roll-onboard in your AI agent first to generate the plan.\n");
+    process.stderr.write(`${m("init.en_ai_agent_onboard_plan_ap", "$roll")}\n`);
+    return 1;
+  }
+  if (!existsSync(validator)) {
+    err(m("init.plan_validator_missing", validator));
+    return 1;
+  }
+  if (runPythonScript(validator, [plan]) !== 0) {
+    err(m("init.plan_validation_failed_see_errors_above"));
+    process.stderr.write("\n");
+    process.stderr.write("  If the plan is stale (>24h), regenerate by running $roll-onboard again.\n");
+    return 1;
+  }
+  info(m("init.applying_onboard_plan"));
+  const summary: Summary = [];
+  const changeset = beginChangeset(projectDir);
+  const fields = readPlanFields(plan);
+  for (const item of fields.approved) recordChangeset(projectDir, changeset, "scope_approved", item);
+
+  mergeGlobalToProject(projectDir, summary);
+  mergeClaudeToProject(projectDir, summary);
+
+  const stamp = join(projectDir, ".roll", ".version");
+  const stampExisted = existsSync(stamp);
+  writeVersionStamp(projectDir, summary);
+  if (!stampExisted && existsSync(stamp)) recordChangeset(projectDir, changeset, "files_created", ".roll/.version");
+
+  const approved = new Set(fields.approved);
+  if (approved.has("backlog")) {
+    writeBacklog(join(projectDir, ".roll", "backlog.md"), summary);
+    recordChangeset(projectDir, changeset, "files_created", ".roll/backlog.md");
+  }
+  let routesTemplate = fields.agentRoutesTemplate;
+  if (routesTemplate === "") routesTemplate = process.env["ROLL_AGENT_ROUTES_TEMPLATE"] ?? "default";
+  if (routesTemplate !== "skip") {
+    if (initSeedAgentRoutes(routesTemplate, projectDir, summary) === 0) {
+      recordChangeset(projectDir, changeset, "files_created", ".roll/agent-routes.yaml");
+    }
+  }
+  if (approved.has("features")) {
+    ensureFeaturesDir(join(projectDir, ".roll", "features"), summary);
+    writeFeaturesMd(join(projectDir, ".roll", "features.md"), summary);
+    recordChangeset(projectDir, changeset, "dirs_created", ".roll/features");
+    recordChangeset(projectDir, changeset, "files_created", ".roll/features.md");
+  }
+  if (approved.has("domain")) {
+    mkdirSync(join(projectDir, ".roll", "domain"), { recursive: true });
+    recordChangeset(projectDir, changeset, "dirs_created", ".roll/domain");
+  }
+  if (approved.has("briefs")) {
+    mkdirSync(join(projectDir, ".roll", "briefs"), { recursive: true });
+    recordChangeset(projectDir, changeset, "dirs_created", ".roll/briefs");
+  }
+
+  renderAndSeed(projectDir, plan, changeset);
+  printMergeSummary(summary);
+
+  if (fields.gitignoreDotRoll) addRollToGitignore(projectDir, changeset);
+
+  process.stdout.write("\n");
+  info(m("init.syncing_conventions_to_ai_tools"));
+  syncConventions();
+  process.stdout.write("\n");
+  ok(m("init.onboard_apply_complete_onboard"));
+  return 0;
+}
+
 // ─── _emit_init_v2_ui (2215-2276) — re-implements lib/roll-init.py ────────────
 type StepStatus = "ok" | "skip" | "fail";
 interface Step {
@@ -531,14 +1112,31 @@ function emitInitUi(
 
 // ─── cmd_init (2147-2210) ─────────────────────────────────────────────────────
 /**
- * Returns the exit code, or `null` to signal the caller it must fall back to
- * bash (legacy onboarding, --apply, and unknown -flags are bash-owned).
+ * Returns the exit code for the fully ported init surface.
  */
-export function initCommand(args: string[]): number | null {
-  if (args[0] === "--apply") return null; // bash owns _init_apply.
-  if (args[0] !== undefined && args[0].startsWith("-")) return null; // bash owns the flag-error msg.
+export function initCommand(args: string[]): number {
+  if (args[0] === "--apply") {
+    if (!existsSync(rollTemplates())) {
+      err(m("init.no_templates_found_run_roll_setup"));
+      return 1;
+    }
+    let projectDir: string;
+    try {
+      projectDir = realpathSync(process.cwd());
+    } catch {
+      projectDir = process.cwd();
+    }
+    return initApply(projectDir);
+  }
+  if (args[0] !== undefined && args[0].startsWith("-")) {
+    err(m("init.unknown_flag_1"));
+    return 1;
+  }
 
-  if (!existsSync(rollTemplates())) return null; // bash owns the no-templates msg.
+  if (!existsSync(rollTemplates())) {
+    err(m("init.no_templates_found_run_roll_setup_2"));
+    return 1;
+  }
 
   let projectDir: string;
   try {
@@ -552,8 +1150,7 @@ export function initCommand(args: string[]): number | null {
   if (existsSync(join(projectDir, "AGENTS.md"))) {
     hasAgents = true;
   } else if (isLegacyProject(projectDir)) {
-    // Legacy codebase onboarding launches an interactive agent — bash-owned.
-    return null;
+    return legacyOnboardGuide(projectDir);
   }
 
   // Suppressed step echoes (the `{ … } >/dev/null` block) — outcomes captured

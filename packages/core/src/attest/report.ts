@@ -26,7 +26,7 @@ import { ANSI_CSS } from "./ansi-html.js";
 export type AcStatus = "pass" | "readonly" | "partial" | "fail" | "blocked" | "claimed" | "missing";
 
 export interface EvidenceRef {
-  kind: "screenshot" | "text" | "commit" | "ci" | "deploy" | "test-pass";
+  kind: "screenshot" | "text" | "commit" | "ci" | "deploy" | "test-pass" | "cast" | "video";
   /** Short human label (e.g. `tcr: FIX-200 修正偏移` / `CI run`). */
   label: string;
   /** Relative path (screenshots) or external URL (ci/deploy) — optional. */
@@ -190,6 +190,19 @@ function evidenceCard(ref: EvidenceRef): string {
   if (ref.kind === "screenshot" && ref.href !== undefined) {
     // deletion contract: figure exists ONLY because the artifact exists.
     return `<figure class="shot"><img src="${esc(ref.href)}" alt="${esc(ref.label)}"><figcaption>${esc(ref.label)}</figcaption></figure>`;
+  }
+  if (ref.kind === "cast" && ref.href !== undefined) {
+    const inline = ref.inlineHtml !== undefined ? ref.inlineHtml : "";
+    return (
+      `<details class="ev ev-cast cast-replay"><summary>${bi("Dynamic replay", "动态复现")} · ${esc(ref.label)}</summary>` +
+      `<p><a href="${esc(ref.href)}">${esc(ref.href)}</a></p>${inline}</details>`
+    );
+  }
+  if (ref.kind === "video" && ref.href !== undefined) {
+    return (
+      `<figure class="ev ev-video replay-video"><video controls preload="metadata" src="${esc(ref.href)}"></video>` +
+      `<figcaption>${bi("Dynamic replay", "动态复现")} · ${esc(ref.label)}</figcaption></figure>`
+    );
   }
   if (ref.kind === "text" && ref.inlineHtml !== undefined) {
     return `<div class="ev ev-text"><div class="ev-label">${esc(ref.label)}</div>${ref.inlineHtml}</div>`;
@@ -490,6 +503,10 @@ section.ac h3 { margin:0 0 6px; font-size:14.5px; }
 figure.shot { margin:10px 0; } figure.shot img { max-width:100%; border:1px solid var(--line); border-radius:6px; }
 figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 .ev { margin:6px 0; font-size:13.5px; } .ev-label { color:var(--muted); font-size:12.5px; margin-bottom:4px; }
+.cast-replay { border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
+.cast-replay summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+.replay-video { margin:10px 0; } .replay-video video { width:100%; max-width:760px; border:1px solid var(--line); border-radius:6px; background:#000; }
+.replay-video figcaption { color:var(--muted); font-size:12.5px; }
 .discrepancies { border:1px dashed var(--claim); border-radius:8px; padding:8px 16px; margin-top:28px; }
 details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:8px; padding:8px 16px; background:var(--bg-raise); }
 details.selfscore summary { cursor:pointer; font-weight:600; }

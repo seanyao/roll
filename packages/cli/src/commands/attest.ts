@@ -60,6 +60,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -229,6 +230,21 @@ interface AcMapEntry {
   evidence?: Array<{ kind?: string; label?: string; href?: string; textFile?: string }>;
 }
 
+const DEFAULT_MAX_CAST_BYTES = 1024 * 1024;
+const DEFAULT_MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+
+function maxBytes(kind: "cast" | "video"): number {
+  const envKey = kind === "cast" ? "ROLL_EVIDENCE_MAX_CAST_BYTES" : "ROLL_EVIDENCE_MAX_VIDEO_BYTES";
+  const raw = Number(process.env[envKey]);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return kind === "cast" ? DEFAULT_MAX_CAST_BYTES : DEFAULT_MAX_VIDEO_BYTES;
+}
+
+function localEvidencePath(runDir: string, href: string): string | null {
+  if (href === "" || href.startsWith("/") || href.includes("..") || /^[a-z]+:/i.test(href)) return null;
+  return join(runDir, href);
+}
+
 /** Read + validate the optional AI intent map; null when absent/malformed. */
 function readAcMap(storyDir: string): Map<string, AcMapEntry> | null {
   const p = join(storyDir, "ac-map.json");
@@ -258,6 +274,26 @@ function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): 
       const { redacted, hits } = redactSecrets(readFileSync(p, "utf8"));
       if (hits.length > 0) warn(`redacted secret(s) in ${e.textFile}: ${hits.join(", ")}`);
       return { kind, label, inlineHtml: ansiPre(redacted) };
+    } catch {
+      return null;
+    }
+  }
+  if ((kind === "cast" || kind === "video") && e.href !== undefined) {
+    const p = localEvidencePath(runDir, e.href);
+    if (p === null || !existsSync(p)) return null;
+    try {
+      const size = statSync(p).size;
+      if (size > maxBytes(kind)) {
+        warn(`${kind} evidence too large (${size} bytes > ${maxBytes(kind)}): ${e.href}`);
+        return null;
+      }
+      if (kind === "cast") {
+        const { redacted, hits } = redactSecrets(readFileSync(p, "utf8"));
+        if (hits.length > 0) warn(`redacted secret(s) in ${e.href}: ${hits.join(", ")}`);
+        const bounded = boundTranscript(redacted);
+        return { kind, label, href: e.href, inlineHtml: ansiPre(bounded.text) };
+      }
+      return { kind, label, href: e.href };
     } catch {
       return null;
     }

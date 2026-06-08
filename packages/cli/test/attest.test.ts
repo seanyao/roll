@@ -295,6 +295,74 @@ describe("attestCommand", () => {
     expect(html).not.toContain("Discrepancies"); // mapped evidence ⇒ no red-line downgrades
   });
 
+  it("US-EVID-012 — ac-map can reference cast/video replay evidence", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const runDir = join(storyDir, "2026-06-06T01-02-03");
+    mkdirSync(join(runDir, "evidence"), { recursive: true });
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "evidence", "demo.cast"), '{"version":2}\n');
+    writeFileSync(join(runDir, "screenshots", "flow.mp4"), "MP4");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        {
+          ac: "FIX-300:AC1",
+          status: "pass",
+          evidence: [
+            { kind: "cast", label: "terminal replay", href: "evidence/demo.cast" },
+            { kind: "video", label: "web flow", href: "screenshots/flow.mp4" },
+          ],
+        },
+      ]),
+    );
+    const code = await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(code).toBe(0);
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
+    expect(html).toContain("Dynamic replay");
+    expect(html).toContain("terminal replay");
+    expect(html).toContain("evidence/demo.cast");
+    expect(html).toContain("<video controls");
+    expect(html).toContain('src="screenshots/flow.mp4"');
+  });
+
+  it("US-EVID-012 — oversized video evidence is guarded and red-line downgraded", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const runDir = join(storyDir, "2026-06-06T01-02-03");
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "screenshots", "huge.mp4"), "0123456789");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        {
+          ac: "FIX-300:AC1",
+          status: "pass",
+          evidence: [{ kind: "video", label: "huge video", href: "screenshots/huge.mp4" }],
+        },
+      ]),
+    );
+    const prev = process.env["ROLL_EVIDENCE_MAX_VIDEO_BYTES"];
+    process.env["ROLL_EVIDENCE_MAX_VIDEO_BYTES"] = "5";
+    try {
+      const code = await silenced(() =>
+        inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+      );
+      expect(code).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_EVIDENCE_MAX_VIDEO_BYTES"];
+      else process.env["ROLL_EVIDENCE_MAX_VIDEO_BYTES"] = prev;
+    }
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
+    expect(html).not.toContain("<video controls");
+    expect(html).toContain(`🟧 ${bi("Claimed", "仅声明")} × 2`);
+    expect(html).toContain("Discrepancies");
+  });
+
   it("US-META-001 — ac-map read-compat: a legacy verification/<ID>/ac-map.json still drives statuses", async () => {
     const proj = project();
     // No card-folder ac-map; only the legacy location (as the un-migrated Gate writes it).

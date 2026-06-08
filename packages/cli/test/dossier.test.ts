@@ -361,6 +361,39 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     });
   });
 
+  it("US-EVID-012: delivery station renders dynamic replay evidence", () => {
+    const html = renderStoryDossier({
+      story,
+      dynamicEvidence: [
+        { kind: "cast", label: "terminal replay", href: "latest/evidence/demo.cast" },
+        { kind: "video", label: "web flow", href: "latest/screenshots/flow.mp4" },
+      ],
+    });
+    expect(html).toContain("Dynamic replay");
+    expect(html).toContain("动态复现");
+    expect(html).toContain('href="latest/evidence/demo.cast"');
+    expect(html).toContain("<video controls");
+    expect(html).toContain('src="latest/screenshots/flow.mp4"');
+  });
+
+  it("US-EVID-012: collectStoryDossierInput discovers casts and videos from the latest run", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-DYN-12");
+    const run = join(dir, "2026-06-08T12-00-00");
+    mkdirSync(join(run, "evidence"), { recursive: true });
+    mkdirSync(join(run, "screenshots"), { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# US-DYN-12\n");
+    writeFileSync(join(run, "evidence", "demo.cast"), '{"version":2}\n');
+    writeFileSync(join(run, "screenshots", "flow.mp4"), "MP4");
+    symlinkSync("2026-06-08T12-00-00", join(dir, "latest"));
+
+    const got = collectStoryDossierInput(p, { id: "US-DYN-12", epic: "alpha", type: "US", delivered: true });
+    expect(got.dynamicEvidence).toEqual([
+      { kind: "cast", label: "demo.cast", href: "latest/evidence/demo.cast" },
+      { kind: "video", label: "flow.mp4", href: "latest/screenshots/flow.mp4" },
+    ]);
+  });
+
   it("US-EVID-014: collectStoryDossierInput renders correction action trace from events", () => {
     const p = project();
     const dir = join(p, ".roll", "features", "alpha", "US-CORR-14");

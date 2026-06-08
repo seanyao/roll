@@ -89,6 +89,12 @@ export interface PeerReviewEvidence {
   rounds: PeerReviewRound[];
 }
 
+export interface DynamicEvidence {
+  kind: "cast" | "video";
+  label: string;
+  href: string;
+}
+
 export interface DeliveryEvidence {
   prs?: DeliveryPrEvidence[];
   diffHref?: string;
@@ -121,6 +127,8 @@ export interface StoryDossierInput {
   reportHref?: string;
   /** Reconstructable delivery facts: PR/CI/diff/agent/cost/timeline. */
   deliveryEvidence?: DeliveryEvidence;
+  /** US-EVID-012: optional cast/video replay artifacts from the latest run. */
+  dynamicEvidence?: DynamicEvidence[];
   /** US-EVID-011: peer-review decisions captured from runtime pairing records. */
   peerReview?: PeerReviewEvidence;
   /** US-EVID-014: traceable automatic correction decisions for this story. */
@@ -202,6 +210,10 @@ function hasDeliveryEvidence(e: DeliveryEvidence | undefined): boolean {
   );
 }
 
+function hasDynamicEvidence(items: readonly DynamicEvidence[] | undefined): boolean {
+  return items !== undefined && items.length > 0;
+}
+
 function ciText(v: CiVerdict | undefined): [string, string] {
   if (v === "green") return ["CI green", "CI 通过"];
   if (v === "red") return ["CI red", "CI 失败"];
@@ -258,6 +270,23 @@ function deliveryEvidenceHtml(e: DeliveryEvidence | undefined): string {
   }
   return `<div class="delivery-evidence"><h3>${bi("Delivery evidence", "交付证据")}</h3><dl>${rows.join("")}</dl></div>`;
 }
+
+function dynamicEvidenceHtml(items: readonly DynamicEvidence[] | undefined): string {
+  if (!hasDynamicEvidence(items)) return "";
+  const body = (items ?? [])
+    .map((it) => {
+      if (it.kind === "cast") {
+        return `<li><a href="${esc(it.href)}">${esc(it.label)}</a> <span class="muted">cast</span></li>`;
+      }
+      const media = /\.(mp4|webm|mov)$/i.test(it.href)
+        ? `<video controls preload="metadata" src="${esc(it.href)}"></video>`
+        : `<a href="${esc(it.href)}">${esc(it.label)}</a>`;
+      return `<li>${media}<p class="muted">${esc(it.label)}</p></li>`;
+    })
+    .join("");
+  return `<div class="dynamic-evidence"><h3>${bi("Dynamic replay", "动态复现")}</h3><ul>${body}</ul></div>`;
+}
+
 
 function correctionTraceHtml(actions: readonly CorrectionTraceEntry[] | undefined): string {
   if (actions === undefined || actions.length === 0) return "";
@@ -403,8 +432,8 @@ export function renderStoryDossier(d: StoryDossierInput): string {
         `</tbody></table>`
       : "";
   const delivery =
-    s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence)
-      ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + acTable
+    s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence) || hasDynamicEvidence(d.dynamicEvidence)
+      ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acTable
       : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
   const corrections = correctionTraceHtml(d.correctionActions);
   const retroContent = selfScoreHtml(d.selfScore, d.selfScoreTrend, d.retro);
@@ -430,6 +459,10 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.delivery-evidence dd { margin:0; }\n` +
     `.delivery-files { list-style:none; padding:0; margin:0; } .delivery-files li { margin:2px 0; }\n` +
     `.delivery-timeline { margin:0; padding-left:18px; } .delivery-timeline li { margin:2px 0; }\n` +
+    `.dynamic-evidence h3 { font:600 14px/1.4 var(--serif); margin:12px 0 6px; }\n` +
+    `.dynamic-evidence ul { list-style:none; padding:0; margin:0; display:grid; gap:8px; }\n` +
+    `.dynamic-evidence video { width:100%; max-width:680px; border:1px solid var(--line); border-radius:6px; background:#000; }\n` +
+    `.dynamic-evidence p { margin:3px 0 0; }\n` +
     `.correction-trace { list-style:none; padding:0; margin:0; } .correction-trace li { border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin:8px 0; background:var(--bg-raise); }\n` +
     `.correction-trace p { margin:0 0 3px; } .correction-trace p:last-child { margin-bottom:0; }\n` +
     `.peer-review { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; background:var(--bg-raise); }\n` +
@@ -461,7 +494,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
     section("Design", "设计", design, (d.design?.length ?? 0) === 0 && d.peerReview === undefined) +
     section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
-    section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence))) +
+    section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence) || hasDynamicEvidence(d.dynamicEvidence))) +
     (corrections !== "" ? section("Correction trace", "纠正留痕", corrections, false) : "") +
     section("Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
     `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
@@ -612,6 +645,9 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
 
   const deliveryEvidence = collectDeliveryEvidence(projectPath, story, searchableCardText);
   if (hasDeliveryEvidence(deliveryEvidence)) out.deliveryEvidence = deliveryEvidence;
+
+  const dynamicEvidence = collectDynamicEvidence(projectPath, story);
+  if (dynamicEvidence.length > 0) out.dynamicEvidence = dynamicEvidence;
 
   const peerReview = collectPeerReview(projectPath, story.id);
   if (peerReview !== undefined) out.peerReview = peerReview;
@@ -806,6 +842,38 @@ function collectDeliveryEvidence(projectPath: string, story: DossierStory, text:
   if (cost !== undefined) out.cost = cost;
   if (timeline.length > 0) out.timeline = sortTimeline(timeline);
   return out;
+}
+
+function collectDynamicEvidence(projectPath: string, story: DossierStory): DynamicEvidence[] {
+  const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id, "latest");
+  const out: DynamicEvidence[] = [];
+  const add = (item: DynamicEvidence): void => {
+    if (out.some((x) => x.href === item.href)) return;
+    out.push(item);
+  };
+  try {
+    const evidenceDir = joinPath(dir, "evidence");
+    if (existsSync(evidenceDir)) {
+      for (const file of readdirSync(evidenceDir).sort()) {
+        if (!/\.(?:cast|asciinema)$/i.test(file)) continue;
+        add({ kind: "cast", label: file, href: `latest/evidence/${file}` });
+      }
+    }
+  } catch {
+    /* no dynamic evidence */
+  }
+  try {
+    const screenshotsDir = joinPath(dir, "screenshots");
+    if (existsSync(screenshotsDir)) {
+      for (const file of readdirSync(screenshotsDir).sort()) {
+        if (!/\.(?:mp4|webm|mov|gif)$/i.test(file)) continue;
+        add({ kind: "video", label: file, href: `latest/screenshots/${file}` });
+      }
+    }
+  } catch {
+    /* no video evidence */
+  }
+  return out.slice(0, 12);
 }
 
 function sortTimeline(timeline: DeliveryTimelineEntry[]): DeliveryTimelineEntry[] {

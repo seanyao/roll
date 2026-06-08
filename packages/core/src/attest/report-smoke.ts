@@ -23,6 +23,7 @@ export interface SmokeResult {
 }
 
 const IMG_SRC = /<img\b[^>]*\bsrc\s*=\s*"([^"]*)"/gi;
+const VIDEO_SRC = /<(?:video|source)\b[^>]*\bsrc\s*=\s*"([^"]*)"/gi;
 const SCRIPT_SRC = /<script\b[^>]*\bsrc\s*=\s*"(https?:[^"]*)"/gi;
 const LINK_HREF = /<link\b[^>]*\bhref\s*=\s*"(https?:[^"]*)"/gi;
 
@@ -51,6 +52,15 @@ export function smokeCheckReport(html: string, fileExists: (relPath: string) => 
     }
     const rel = src.replace(/^\.\//, "");
     if (!fileExists(rel)) problems.push(`broken img reference: ${src}`);
+  }
+  for (const m of html.matchAll(VIDEO_SRC)) {
+    const src = m[1] ?? "";
+    if (isExternal(src)) {
+      problems.push(`external video (CDN, breaks offline): ${src}`);
+      continue;
+    }
+    const rel = src.replace(/^\.\//, "");
+    if (!fileExists(rel)) problems.push(`broken video reference: ${src}`);
   }
   for (const m of html.matchAll(SCRIPT_SRC)) problems.push(`external script (CDN): ${m[1] ?? ""}`);
   for (const m of html.matchAll(LINK_HREF)) problems.push(`external link asset (CDN): ${m[1] ?? ""}`);

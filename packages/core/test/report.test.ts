@@ -59,6 +59,45 @@ describe("deletion-not-placeholder", () => {
   });
 });
 
+describe("US-EVID-012 — dynamic replay evidence", () => {
+  it("renders asciinema casts inline and videos as local players", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [
+        item({
+          evidence: [
+            { kind: "cast", label: "terminal replay", href: "evidence/demo.cast", inlineHtml: ansiPre("asciinema cast body") },
+            { kind: "video", label: "web flow", href: "screenshots/flow.mp4" },
+          ],
+        }),
+      ],
+    });
+    expect(html).toContain("Dynamic replay");
+    expect(html).toContain("terminal replay");
+    expect(html).toContain("asciinema cast body");
+    expect(html).toContain('href="evidence/demo.cast"');
+    expect(html).toContain("<video controls");
+    expect(html).toContain('src="screenshots/flow.mp4"');
+    expect(html).toContain("@media print");
+  });
+
+  it("evidence index includes cast/video locators", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [
+        item({
+          evidence: [
+            { kind: "cast", label: "cast", href: "evidence/demo.cast", inlineHtml: ansiPre("{}") },
+            { kind: "video", label: "video", href: "screenshots/flow.gif" },
+          ],
+        }),
+      ],
+    });
+    expect(html).toContain("evidence/demo.cast");
+    expect(html).toContain("screenshots/flow.gif");
+  });
+});
+
 describe("single-file self-containment", () => {
   it("no external loads: no <script src>, no <link rel>, images only relative; chrome script is inline", () => {
     const html = renderReport({

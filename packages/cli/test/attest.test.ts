@@ -98,6 +98,49 @@ describe("attestCommand", () => {
     expect(readlinkSync(join(storyDir, "latest"))).toBe("2026-06-06T01-02-03");
   });
 
+  it("US-EVID-007: backfill creates one pre-evidence report for old Done cards and never overwrites existing latest", async () => {
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-backfill-")));
+    dirs.push(proj);
+    const features = join(proj, ".roll", "features", "demo");
+    mkdirSync(join(features, "FIX-OLD"), { recursive: true });
+    mkdirSync(join(features, "FIX-DONE", "2026-06-01T00-00-00"), { recursive: true });
+    writeFileSync(
+      join(proj, ".roll", "backlog.md"),
+      [
+        "| Story | Description | Status |",
+        "|-------|-------------|--------|",
+        "| [FIX-OLD](.roll/features/demo/FIX-OLD/spec.md) | old done | ✅ Done |",
+        "| [FIX-DONE](.roll/features/demo/FIX-DONE/spec.md) | already attested | ✅ Done |",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(features, "FIX-OLD", "spec.md"), "# FIX-OLD\n\n**AC:**\n- [ ] legacy AC\n");
+    writeFileSync(join(features, "FIX-DONE", "spec.md"), "# FIX-DONE\n\n**AC:**\n- [ ] done AC\n");
+    writeFileSync(join(features, "FIX-DONE", "2026-06-01T00-00-00", "FIX-DONE-report.html"), "original report\n");
+    symlinkSync("2026-06-01T00-00-00", join(features, "FIX-DONE", "latest"));
+
+    const rc = await silenced(() =>
+      inDir(proj, () => attestCommand(["backfill"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(rc).toBe(0);
+
+    const oldDir = join(features, "FIX-OLD");
+    const runDir = join(oldDir, "pre-evidence-backfill");
+    expect(readlinkSync(join(oldDir, "latest"))).toBe("pre-evidence-backfill");
+    expect(existsSync(join(runDir, "FIX-OLD-report.html"))).toBe(true);
+    expect(readFileSync(join(runDir, "evidence", "pre-evidence-history.txt"), "utf8")).toContain("pre-evidence history");
+    expect(readFileSync(join(oldDir, "ac-map.json"), "utf8")).toContain("readonly");
+
+    expect(readlinkSync(join(features, "FIX-DONE", "latest"))).toBe("2026-06-01T00-00-00");
+    expect(readFileSync(join(features, "FIX-DONE", "2026-06-01T00-00-00", "FIX-DONE-report.html"), "utf8")).toBe("original report\n");
+
+    const again = await silenced(() =>
+      inDir(proj, () => attestCommand(["backfill"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(again).toBe(0);
+    expect(readlinkSync(join(oldDir, "latest"))).toBe("pre-evidence-backfill");
+  });
+
   it("US-EVID-001: --run-dir reuses an already-opened evidence frame and points latest at it", async () => {
     const proj = project();
     const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");

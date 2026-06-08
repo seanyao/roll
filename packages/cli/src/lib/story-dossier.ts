@@ -36,6 +36,12 @@ export interface AcRow {
   tests?: string[];
 }
 
+export interface ExecutionRef {
+  kind: "merged-pr" | "cycle" | "pre-evidence";
+  label: string;
+  commitCount?: number;
+}
+
 /** Everything the dossier needs beyond the 001a story model. */
 export interface StoryDossierInput {
   story: DossierStory;
@@ -51,6 +57,8 @@ export interface StoryDossierInput {
   design?: string[];
   /** TCR commit subjects touching this story (oldest first). */
   commits?: string[];
+  /** PR/cycle evidence that proves execution even when squash removed TCR commit subjects. */
+  executionRefs?: ExecutionRef[];
   /** Parsed ac-map.json rows. */
   acRows?: AcRow[];
   /** Relative href to the attest report (when latest/ carries one). */
@@ -63,7 +71,7 @@ export interface StoryDossierInput {
 export function stationsDone(d: StoryDossierInput): Set<string> {
   const done = new Set<string>(["definition"]); // a card existing IS the definition
   if ((d.design?.length ?? 0) > 0) done.add("design");
-  if ((d.commits?.length ?? 0) > 0) done.add("execution");
+  if ((d.commits?.length ?? 0) > 0 || (d.executionRefs?.length ?? 0) > 0) done.add("execution");
   if (d.story.delivered) done.add("delivery");
   if (d.retro !== undefined && d.retro !== "") done.add("retrospective");
   return done;
@@ -90,6 +98,31 @@ const AC_BADGE: Record<string, [string, string]> = {
   claimed: ["△ claimed", "△ 仅声称"],
   missing: ["○ missing", "○ 缺失"],
 };
+
+function executionSummary(refs: readonly ExecutionRef[]): [string, string] {
+  const mergedPrs = refs.filter((r) => r.kind === "merged-pr").length;
+  if (mergedPrs > 0) return [`${mergedPrs} merged PR${mergedPrs === 1 ? "" : "s"}`, `${mergedPrs} 个已合 PR`];
+  const cycles = refs.filter((r) => r.kind === "cycle").length;
+  if (cycles > 0) return [`${cycles} delivery cycle${cycles === 1 ? "" : "s"}`, `${cycles} 个交付周期`];
+  return ["pre-evidence history", "证据纪律前历史卡"];
+}
+
+function executionRefsHtml(refs: readonly ExecutionRef[]): string {
+  if (refs.length === 0) return "";
+  const [en, zh] = executionSummary(refs);
+  return (
+    `<p>${bi(en, zh)}</p>` +
+    `<ul class="muted">${refs
+      .map((r) => {
+        const count =
+          r.commitCount !== undefined && Number.isFinite(r.commitCount)
+            ? ` · ${bi(`${r.commitCount} commits`, `${r.commitCount} 个提交`)}`
+            : "";
+        return `<li><code>${esc(r.label)}</code>${count}</li>`;
+      })
+      .join("")}</ul>`
+  );
+}
 
 function section(en: string, zh: string, body: string, empty: boolean): string {
   return (
@@ -131,8 +164,11 @@ export function renderStoryDossier(d: StoryDossierInput): string {
   const execution =
     (d.commits?.length ?? 0) > 0
       ? `<p>${bi(`${(d.commits ?? []).length} TCR commits`, `${(d.commits ?? []).length} 个 TCR 提交`)}</p>` +
-        `<ul class="muted">${(d.commits ?? []).map((c) => `<li><code>${esc(c)}</code></li>`).join("")}</ul>`
-      : `<p class="empty">${bi("No cycles yet", "暂无周期")}</p>`;
+        `<ul class="muted">${(d.commits ?? []).map((c) => `<li><code>${esc(c)}</code></li>`).join("")}</ul>` +
+        executionRefsHtml(d.executionRefs ?? [])
+      : (d.executionRefs?.length ?? 0) > 0
+        ? executionRefsHtml(d.executionRefs ?? [])
+        : `<p class="empty">${bi("No cycles yet", "暂无周期")}</p>`;
   const banner = s.delivered
     ? `<div class="attest-banner"><span class="mark">✓</span><div>` +
       `${bi("Merged to main — attested", "已合主干 · 已验收")}` +
@@ -224,10 +260,12 @@ export function renderStoryDossier(d: StoryDossierInput): string {
 export function collectStoryDossierInput(projectPath: string, story: DossierStory): StoryDossierInput {
   const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id);
   const out: StoryDossierInput = { story };
+  let searchableCardText = "";
 
   // spec.md → wish + design bullets.
   try {
     const spec = readFile(joinPath(dir, "spec.md"));
+    searchableCardText += `\n${spec}`;
     const quote: string[] = [];
     for (const l of spec.split("\n")) {
       const m = /^>\s?(.*)$/.exec(l);
@@ -329,6 +367,7 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     const last = notes[notes.length - 1];
     if (last !== undefined) {
       const body = readFile(joinPath(notesDir, last));
+      searchableCardText += `\n${body}`;
       const score = /^score:\s*(.+)$/m.exec(body);
       const verdict = /^verdict:\s*(.+)$/m.exec(body);
       const para = body
@@ -360,7 +399,63 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     /* not a git repo / git unavailable */
   }
 
+  const executionRefs = collectExecutionRefs(projectPath, story.id, searchableCardText);
+  if (executionRefs.length > 0) out.executionRefs = executionRefs;
+
   return out;
+}
+
+function collectExecutionRefs(projectPath: string, storyId: string, text: string): ExecutionRef[] {
+  const refs: ExecutionRef[] = [];
+  const seen = new Set<string>();
+  const add = (ref: ExecutionRef): void => {
+    const key = `${ref.kind}:${ref.label}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    refs.push(ref);
+  };
+
+  for (const match of text.matchAll(/\bPR\s*#?\s*(\d+)\b/gi)) {
+    const pr = match[1];
+    if (pr === undefined) continue;
+    const start = Math.max(0, match.index - 120);
+    const end = Math.min(text.length, match.index + 160);
+    const nearby = text.slice(start, end);
+    if (!/(merged|squash|合并|已合|CI\s*green|通过)/i.test(nearby)) continue;
+    add({ kind: "merged-pr", label: `PR #${pr} merged`, ...commitCountFromText(nearby) });
+  }
+
+  try {
+    for (const line of readFile(joinPath(projectPath, ".roll", "loop", "runs.jsonl")).split("\n")) {
+      if (line.trim() === "") continue;
+      const row = JSON.parse(line) as {
+        story_id?: string;
+        built?: unknown;
+        status?: string;
+        outcome?: string;
+        cycle_id?: string;
+        run_id?: string;
+        tcr_count?: unknown;
+      };
+      const built = Array.isArray(row.built) && row.built.some((x) => x === storyId);
+      if (row.story_id !== storyId && !built) continue;
+      if (row.status !== "done" && row.status !== "merged" && row.outcome !== "delivered") continue;
+      const label = `cycle ${row.cycle_id ?? row.run_id ?? "delivered"}`;
+      const n = typeof row.tcr_count === "number" && Number.isFinite(row.tcr_count) ? row.tcr_count : undefined;
+      add({ kind: "cycle", label, ...(n !== undefined ? { commitCount: n } : {}) });
+    }
+  } catch {
+    /* no loop rows */
+  }
+
+  return refs.slice(0, 20);
+}
+
+function commitCountFromText(text: string): { commitCount?: number } {
+  const m = /(\d+)\s*(?:commits?|TCR commits?|micro-commits?|个\s*(?:TCR\s*)?提交|个\s*TCR)/i.exec(text);
+  if (m?.[1] === undefined) return {};
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? { commitCount: n } : {};
 }
 
 // Thin fs/git seams (kept local so the renderer stays pure above).

@@ -197,6 +197,38 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(full).toContain("score 9 good");
   });
 
+  it("US-EVID-007: execution station can be filled by merged PR evidence when squash removed tcr commits", () => {
+    const html = renderStoryDossier({
+      story,
+      executionRefs: [{ kind: "merged-pr", label: "PR #481 merged", commitCount: 5 }],
+      reportHref: "latest/US-A-1-report.html",
+    });
+    expect(html).toContain("1 merged PR");
+    expect(html).toContain("PR #481 merged");
+    expect(html).toContain("5 commits");
+    expect(html).not.toContain("No cycles yet");
+
+    const spine = storySpine({
+      story,
+      executionRefs: [{ kind: "merged-pr", label: "PR #481 merged", commitCount: 5 }],
+    });
+    expect(spine).toContain("node truth");
+    expect(spine.match(/node done/g)).toHaveLength(2); // definition + execution
+  });
+
+  it("US-EVID-007: collectStoryDossierInput derives execution refs from merged PR notes", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-PR-9");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "spec.md"),
+      "# US-PR-9\n\n**Fixed**: 2026-06-06（PR#481，squash 5be97d3，5 commits）\n\n**AC:**\n- [x] shipped\n",
+    );
+    const got = collectStoryDossierInput(p, { id: "US-PR-9", epic: "alpha", type: "US", delivered: true });
+    expect(got.executionRefs).toEqual([{ kind: "merged-pr", label: "PR #481 merged", commitCount: 5 }]);
+    expect(storySpine(got)).toContain("node done");
+  });
+
   it("wish-only story: empty states render honestly, delivery pending", () => {
     const bare = renderStoryDossier({ story: { ...story, delivered: false } });
     expect(bare).toContain("尚未设计");

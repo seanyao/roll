@@ -13,8 +13,20 @@ explicit config file.
 ## Turning it on — explicit, never silent
 
 ```bash
+# New project: nothing to do — `roll init` already scaffolds it.
+# Existing project: one command adds it.
 roll pair init        # scaffold .roll/pairing.yaml from your installed agents
 ```
+
+- **New projects**: `roll init` scaffolds `.roll/pairing.yaml` for you (and the
+  init UI says so) — no separate step.
+- **Existing roll projects**: just run `roll pair init`. It is the precise,
+  minimal command — you do **not** need to re-run the full `roll init` (that
+  would also re-merge conventions; overkill for adding pairing).
+
+Both paths produce the identical file (same scaffold logic), and `roll pair init`
+is idempotent (it won't overwrite an existing `pairing.yaml` — use `--force` to
+regenerate).
 
 This is the "third way" between a hidden default-on and hand-authored opt-in:
 the command **generates** an explicit, auditable `.roll/pairing.yaml` from
@@ -40,9 +52,6 @@ capability:
 - `capability` — per agent, the stages it is declared competent to review.
   Declarations are cross-checked against the registry, so a bogus name is
   rejected.
-
-`roll pair init` is idempotent: it will not overwrite your edits (use
-`roll pair init --force` to regenerate).
 
 ## Seeing what it does — observability
 

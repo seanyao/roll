@@ -1,0 +1,410 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="2460" viewBox="0 0 1800 2460" role="img" aria-labelledby="title desc">
+  <title id="title">roll-build skill infographic workflow</title>
+  <desc id="desc">An infographic layout of the roll-build workflow: input routing, Story Mode, Fly Mode, shared TCR delivery, evidence, write-back, and definition of done.</desc>
+  <defs>
+    <style>
+      .page { fill: #f6f8fb; }
+      .hero-title { fill: #ffffff; font: 850 52px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .hero-sub { fill: #dbeafe; font: 600 22px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .h2 { fill: #102033; font: 850 28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .h3 { fill: #102033; font: 800 21px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .body { fill: #42526a; font: 560 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .small { fill: #64748b; font: 650 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .label { fill: #334155; font: 800 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .white-h3 { fill: #ffffff; font: 850 22px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .white-body { fill: #e0f2fe; font: 650 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .panel { fill: #ffffff; stroke: #dbe3ee; stroke-width: 2; }
+      .story-bg { fill: #eff6ff; stroke: #bfdbfe; stroke-width: 2; }
+      .fly-bg { fill: #ecfeff; stroke: #a5f3fc; stroke-width: 2; }
+      .shared-bg { fill: #f7fee7; stroke: #d9f99d; stroke-width: 2; }
+      .done-bg { fill: #ffffff; stroke: #dbe3ee; stroke-width: 2; }
+      .card { fill: #ffffff; stroke: #d6dde8; stroke-width: 2; }
+      .story-card { fill: #ffffff; stroke: #3b82f6; stroke-width: 2; }
+      .fly-card { fill: #ffffff; stroke: #06b6d4; stroke-width: 2; }
+      .tcr-card { fill: #ffffff; stroke: #22c55e; stroke-width: 2; }
+      .review-card { fill: #ffffff; stroke: #8b5cf6; stroke-width: 2; }
+      .risk-card { fill: #fff1f2; stroke: #fb7185; stroke-width: 2; }
+      .evidence-card { fill: #fdf2f8; stroke: #ec4899; stroke-width: 2; }
+      .decision-card { fill: #fff7ed; stroke: #f59e0b; stroke-width: 2; }
+      .dark-card { fill: #0f172a; stroke: #0f172a; stroke-width: 2; }
+      .num { fill: #ffffff; font: 900 18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .num-dark { fill: #0f172a; font: 900 18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .arrow { fill: none; stroke: #475569; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .arrow-soft { fill: none; stroke: #94a3b8; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowSoft); }
+      .arrow-red { fill: none; stroke: #e11d48; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowRed); }
+      .dash { stroke-dasharray: 7 8; }
+      .lane-line { stroke: #cbd5e1; stroke-width: 3; stroke-linecap: round; }
+      .pill-text { fill: #334155; font: 800 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .shadow { filter: url(#shadow); }
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.11"/>
+    </filter>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="0.5" stop-color="#1d4ed8"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="strokeWidth">
+      <path d="M 2 2 L 11 7 L 2 12 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowSoft" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="strokeWidth">
+      <path d="M 2 2 L 11 7 L 2 12 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="strokeWidth">
+      <path d="M 2 2 L 11 7 L 2 12 z" fill="#e11d48"/>
+    </marker>
+  </defs>
+
+  <rect class="page" width="1800" height="2460"/>
+
+  <!-- Header -->
+  <rect x="70" y="48" width="1660" height="190" rx="26" fill="url(#hero)" class="shadow"/>
+  <text class="hero-title" x="118" y="122">roll-build Skill 信息图</text>
+  <text class="hero-sub" x="118" y="168">从任意输入到上线完成：先路由，再规划，随后进入 TCR 交付闭环。</text>
+  <text class="hero-sub" x="118" y="204">读法：上方看入口，中间看 Story/Fly 两种模式，下方看共享交付流水线。</text>
+  <g transform="translate(1270 88)">
+    <rect x="0" y="0" width="410" height="110" rx="18" fill="#ffffff" opacity="0.16"/>
+    <text class="white-h3" x="26" y="40">核心约束</text>
+    <text class="white-body" x="26" y="70">Test first / green commits / push</text>
+    <text class="white-body" x="26" y="96">fresh evidence / backlog write-back</text>
+  </g>
+
+  <!-- Input routing -->
+  <rect class="panel shadow" x="70" y="280" width="1660" height="260" rx="24"/>
+  <text class="h2" x="112" y="332">1. 输入路由</text>
+  <text class="body" x="112" y="364">roll-build 是统一入口。输入决定是直接执行已有 Story，还是先澄清和设计。</text>
+
+  <g transform="translate(126 404)">
+    <rect class="dark-card" x="0" y="0" width="250" height="86" rx="16"/>
+    <text class="white-h3" x="26" y="36">Input</text>
+    <text class="white-body" x="26" y="62">用户输入 / loop pick</text>
+  </g>
+  <path class="arrow" d="M 376 447 L 454 447"/>
+
+  <g transform="translate(454 390)">
+    <path d="M 130 0 L 260 57 L 130 114 L 0 57 Z" fill="#fff7ed" stroke="#f59e0b" stroke-width="2"/>
+    <text class="h3" x="68" y="52">模式匹配</text>
+    <text class="small" x="76" y="76">US / FIX / IDEA</text>
+  </g>
+  <path class="arrow-soft" d="M 714 447 L 778 447"/>
+
+  <g transform="translate(778 392)">
+    <rect class="story-card" x="0" y="0" width="214" height="110" rx="16"/>
+    <text class="h3" x="22" y="38">US-XXX</text>
+    <text class="body" x="22" y="66">Story Mode</text>
+    <text class="small" x="22" y="90">执行已规划 Story</text>
+  </g>
+  <g transform="translate(1018 392)">
+    <rect class="risk-card" x="0" y="0" width="214" height="110" rx="16"/>
+    <text class="h3" x="22" y="38">FIX / BUG</text>
+    <text class="body" x="22" y="66">redirect</text>
+    <text class="small" x="22" y="90">交给 roll-fix</text>
+  </g>
+  <g transform="translate(1258 392)">
+    <rect class="risk-card" x="0" y="0" width="214" height="110" rx="16"/>
+    <text class="h3" x="22" y="38">IDEA</text>
+    <text class="body" x="22" y="66">lookup + expand</text>
+    <text class="small" x="22" y="90">交给 roll-idea</text>
+  </g>
+  <g transform="translate(1498 392)">
+    <rect class="fly-card" x="0" y="0" width="176" height="110" rx="16"/>
+    <text class="h3" x="22" y="38">其它输入</text>
+    <text class="body" x="22" y="66">Fly Mode</text>
+    <text class="small" x="22" y="90">先澄清</text>
+  </g>
+
+  <!-- Two lanes -->
+  <rect class="story-bg shadow" x="70" y="585" width="805" height="690" rx="24"/>
+  <rect class="fly-bg shadow" x="925" y="585" width="805" height="690" rx="24"/>
+
+  <text class="h2" x="112" y="640">2A. Story Mode</text>
+  <text class="body" x="112" y="672">已有 US，重点是把 backlog/spec 中的需求安全交付。</text>
+  <text class="h2" x="967" y="640">2B. Fly Mode</text>
+  <text class="body" x="967" y="672">没有 US，重点是先把想法变成可执行 Story。</text>
+
+  <!-- Story timeline -->
+  <line class="lane-line" x1="130" y1="726" x2="130" y2="1190"/>
+  <g transform="translate(106 714)">
+    <circle cx="24" cy="24" r="24" fill="#2563eb"/>
+    <text class="num" x="18" y="31">0</text>
+    <rect class="story-card" x="70" y="0" width="440" height="78" rx="14"/>
+    <text class="h3" x="94" y="32">Pre-flight self-check</text>
+    <text class="body" x="94" y="58">按 est_min / chain_depth 判断是否太大</text>
+  </g>
+  <g transform="translate(106 815)">
+    <circle cx="24" cy="24" r="24" fill="#2563eb"/>
+    <text class="num" x="18" y="31">1</text>
+    <rect class="story-card" x="70" y="0" width="440" height="78" rx="14"/>
+    <text class="h3" x="94" y="32">Read Story</text>
+    <text class="body" x="94" y="58">backlog row -> spec.md -> AC / Files</text>
+  </g>
+  <g transform="translate(106 916)">
+    <circle cx="24" cy="24" r="24" fill="#2563eb"/>
+    <text class="num" x="18" y="31">2</text>
+    <rect class="story-card" x="70" y="0" width="440" height="88" rx="14"/>
+    <text class="h3" x="94" y="32">Split Actions</text>
+    <text class="body" x="94" y="58">2-6 个 Action；每个 2-5 分钟</text>
+    <text class="small" x="94" y="79">无 placeholder，测试必须调项目入口</text>
+  </g>
+  <g transform="translate(106 1032)">
+    <circle cx="24" cy="24" r="24" fill="#2563eb"/>
+    <text class="num" x="18" y="31">3</text>
+    <rect class="story-card" x="70" y="0" width="440" height="88" rx="14"/>
+    <text class="h3" x="94" y="32">Parallel Decision</text>
+    <text class="body" x="94" y="58">同文件串行；不同文件/目录可并行</text>
+    <text class="small" x="94" y="79">并行时使用 worktree isolation</text>
+  </g>
+  <g transform="translate(106 1148)">
+    <circle cx="24" cy="24" r="24" fill="#2563eb"/>
+    <text class="num" x="18" y="31">4</text>
+    <rect class="story-card" x="70" y="0" width="440" height="78" rx="14"/>
+    <text class="h3" x="94" y="32">Define Verification</text>
+    <text class="body" x="94" y="58">happy / edge / failure / regression</text>
+  </g>
+
+  <g transform="translate(650 714)">
+    <rect class="risk-card" x="0" y="0" width="180" height="180" rx="16"/>
+    <text class="h3" x="22" y="34">too_big</text>
+    <text class="body" x="22" y="62">先查 cap</text>
+    <text class="body" x="22" y="89">roll-design</text>
+    <text class="body" x="22" y="116">拆子 Story</text>
+    <text class="small" x="22" y="148">父 Story -> Hold</text>
+  </g>
+  <g transform="translate(650 928)">
+    <rect class="decision-card" x="0" y="0" width="180" height="154" rx="16"/>
+    <text class="h3" x="22" y="34">并行派发</text>
+    <text class="body" x="22" y="62">sub-agent</text>
+    <text class="body" x="22" y="89">self-contained</text>
+    <text class="small" x="22" y="120">merge 后跑集成测试</text>
+  </g>
+
+  <!-- Fly timeline -->
+  <line class="lane-line" x1="985" y1="726" x2="985" y2="1190"/>
+  <g transform="translate(961 714)">
+    <circle cx="24" cy="24" r="24" fill="#0891b2"/>
+    <text class="num" x="18" y="31">1</text>
+    <rect class="fly-card" x="70" y="0" width="456" height="92" rx="14"/>
+    <text class="h3" x="94" y="32">Clarify &amp; Assess</text>
+    <text class="body" x="94" y="58">输出目标、复杂度、不确定点</text>
+    <text class="small" x="94" y="79">small 直做；medium mini-plan；large 拆 Story</text>
+  </g>
+  <g transform="translate(961 836)">
+    <circle cx="24" cy="24" r="24" fill="#0891b2"/>
+    <text class="num" x="18" y="31">2</text>
+    <rect class="decision-card" x="70" y="0" width="456" height="92" rx="14"/>
+    <text class="h3" x="94" y="32">Clarity Gate</text>
+    <text class="body" x="94" y="58">模糊就触发 roll-.clarify</text>
+    <text class="small" x="94" y="79">问 3-5 个问题，然后等待</text>
+  </g>
+  <g transform="translate(961 958)">
+    <circle cx="24" cy="24" r="24" fill="#0891b2"/>
+    <text class="num" x="18" y="31">3</text>
+    <rect class="fly-card" x="70" y="0" width="456" height="92" rx="14"/>
+    <text class="h3" x="94" y="32">Approach Confirmation</text>
+    <text class="body" x="94" y="58">涉及 UX / 格式 / 自动化 / 架构时先确认</text>
+    <text class="small" x="94" y="79">用户没有异议后再编辑文件</text>
+  </g>
+  <g transform="translate(961 1080)">
+    <circle cx="24" cy="24" r="24" fill="#0891b2"/>
+    <text class="num" x="18" y="31">4</text>
+    <rect class="fly-card" x="70" y="0" width="456" height="92" rx="14"/>
+    <text class="h3" x="94" y="32">Create US / Actions</text>
+    <text class="body" x="94" y="58">roll-design 生成 INVEST Story</text>
+    <text class="small" x="94" y="79">写入 backlog/spec 后切回 Story Mode</text>
+  </g>
+  <g transform="translate(1518 792)">
+    <rect class="risk-card" x="0" y="0" width="170" height="170" rx="16"/>
+    <text class="h3" x="22" y="34">停止点</text>
+    <text class="body" x="22" y="62">需求不清</text>
+    <text class="body" x="22" y="89">先问问题</text>
+    <text class="small" x="22" y="120">不猜范围</text>
+  </g>
+  <g transform="translate(1518 1000)">
+    <rect class="decision-card" x="0" y="0" width="170" height="146" rx="16"/>
+    <text class="h3" x="22" y="34">切换点</text>
+    <text class="body" x="22" y="62">创建 US</text>
+    <text class="body" x="22" y="89">随后进入</text>
+    <text class="small" x="22" y="120">Story Mode</text>
+  </g>
+
+  <path class="arrow-soft dash" d="M 1603 1146 C 1603 1235 855 1235 855 1288"/>
+  <text class="small" x="1038" y="1228">Fly Mode 的产物是 Story；真正交付仍进入共享 TCR 流水线</text>
+
+  <!-- Shared delivery pipeline -->
+  <rect class="shared-bg shadow" x="70" y="1320" width="1660" height="700" rx="24"/>
+  <text class="h2" x="112" y="1375">3. 共享交付流水线</text>
+  <text class="body" x="112" y="1407">Story/Fly 完成规划后，所有实现都走同一套 TCR、审查、推送、验证和证据链。</text>
+
+  <!-- Row 1 -->
+  <g transform="translate(112 1454)">
+    <rect class="decision-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#f59e0b"/>
+    <text class="num" x="19" y="37">3.5</text>
+    <text class="h3" x="62" y="34">Peer Gate</text>
+    <text class="small" x="24" y="70">高风险 / 跨模块 / 架构决策</text>
+    <text class="small" x="24" y="94">需要时触发 roll-peer</text>
+  </g>
+  <g transform="translate(382 1454)">
+    <rect class="tcr-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#22c55e"/>
+    <text class="num" x="22" y="37">4</text>
+    <text class="h3" x="62" y="34">Test Design</text>
+    <text class="small" x="24" y="70">先定义测试场景</text>
+    <text class="small" x="24" y="94">happy / edge / failure</text>
+  </g>
+  <g transform="translate(652 1454)">
+    <rect class="tcr-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#22c55e"/>
+    <text class="num" x="22" y="37">5</text>
+    <text class="h3" x="62" y="34">TCR Loop</text>
+    <text class="small" x="24" y="70">test -> RED</text>
+    <text class="small" x="24" y="94">code -> GREEN commit</text>
+  </g>
+  <g transform="translate(922 1454)">
+    <rect class="tcr-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#22c55e"/>
+    <text class="num" x="18" y="37">5.5</text>
+    <text class="h3" x="62" y="34">E2E Deposit</text>
+    <text class="small" x="24" y="70">一条 golden path</text>
+    <text class="small" x="24" y="94">跟随现有 E2E 模式</text>
+  </g>
+  <g transform="translate(1192 1454)">
+    <rect class="tcr-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#22c55e"/>
+    <text class="num" x="22" y="37">6</text>
+    <text class="h3" x="62" y="34">Local CI</text>
+    <text class="small" x="24" y="70">format + lint + build</text>
+    <text class="small" x="24" y="94">test fresh output</text>
+  </g>
+  <g transform="translate(1462 1454)">
+    <rect class="review-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#8b5cf6"/>
+    <text class="num" x="22" y="37">7</text>
+    <text class="h3" x="62" y="34">Review</text>
+    <text class="small" x="24" y="70">reuse / quality / efficiency</text>
+    <text class="small" x="24" y="94">critical -> TCR fix</text>
+  </g>
+
+  <path class="arrow-soft" d="M 342 1513 L 382 1513"/>
+  <path class="arrow-soft" d="M 612 1513 L 652 1513"/>
+  <path class="arrow-soft" d="M 882 1513 L 922 1513"/>
+  <path class="arrow-soft" d="M 1152 1513 L 1192 1513"/>
+  <path class="arrow-soft" d="M 1422 1513 L 1462 1513"/>
+
+  <!-- Row 2 -->
+  <g transform="translate(112 1710)">
+    <rect class="done-bg" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#0f766e"/>
+    <text class="num" x="22" y="37">8</text>
+    <text class="h3" x="62" y="34">Push</text>
+    <text class="small" x="24" y="70">pull --rebase</text>
+    <text class="small" x="24" y="94">push origin main</text>
+  </g>
+  <g transform="translate(382 1710)">
+    <rect class="done-bg" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#0f766e"/>
+    <text class="num" x="22" y="37">9</text>
+    <text class="h3" x="62" y="34">CI + Deploy</text>
+    <text class="small" x="24" y="70">远端 CI 绿</text>
+    <text class="small" x="24" y="94">按仓库路径部署</text>
+  </g>
+  <g transform="translate(652 1710)">
+    <rect class="done-bg" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#0f766e"/>
+    <text class="num" x="18" y="37">10</text>
+    <text class="h3" x="62" y="34">Runtime Verify</text>
+    <text class="small" x="24" y="70">Web / CLI / library</text>
+    <text class="small" x="24" y="94">真实环境验证</text>
+  </g>
+  <g transform="translate(922 1710)">
+    <rect class="decision-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#f59e0b"/>
+    <text class="num" x="14" y="37">10.5</text>
+    <text class="h3" x="62" y="34">Verify Gate</text>
+    <text class="small" x="24" y="70">tests / build / online</text>
+    <text class="small" x="24" y="94">no regression</text>
+  </g>
+  <g transform="translate(1192 1710)">
+    <rect class="evidence-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#ec4899"/>
+    <text class="num" x="14" y="37">10.6</text>
+    <text class="h3" x="62" y="34">Evidence</text>
+    <text class="small" x="24" y="70">screenshots + txt</text>
+    <text class="small" x="24" y="94">ac-map + roll attest</text>
+  </g>
+  <g transform="translate(1462 1710)">
+    <rect class="done-bg" x="0" y="0" width="230" height="118" rx="16"/>
+    <circle cx="30" cy="30" r="20" fill="#0f766e"/>
+    <text class="num" x="18" y="37">11</text>
+    <text class="h3" x="62" y="34">Write-back</text>
+    <text class="small" x="24" y="70">backlog + spec</text>
+    <text class="small" x="24" y="94">CHANGELOG bundled</text>
+  </g>
+
+  <path class="arrow-soft" d="M 342 1769 L 382 1769"/>
+  <path class="arrow-soft" d="M 612 1769 L 652 1769"/>
+  <path class="arrow-soft" d="M 882 1769 L 922 1769"/>
+  <path class="arrow-soft" d="M 1152 1769 L 1192 1769"/>
+  <path class="arrow-soft" d="M 1422 1769 L 1462 1769"/>
+  <path class="arrow-soft" d="M 1577 1572 C 1577 1635 227 1635 227 1710"/>
+
+  <!-- Recovery and quality notes -->
+  <g transform="translate(172 1904)">
+    <rect class="risk-card" x="0" y="0" width="430" height="74" rx="16"/>
+    <text class="h3" x="24" y="31">Red recovery</text>
+    <text class="body" x="24" y="56">同一 micro-step 连续失败 3 次：revert，拆更小，再试。</text>
+  </g>
+  <g transform="translate(686 1904)">
+    <rect class="decision-card" x="0" y="0" width="430" height="74" rx="16"/>
+    <text class="h3" x="24" y="31">Architectural friction</text>
+    <text class="body" x="24" y="56">跨 3+ 无关模块或边界变形：记录 REFACTOR，不阻塞当前 Story。</text>
+  </g>
+  <g transform="translate(1200 1904)">
+    <rect class="evidence-card" x="0" y="0" width="430" height="74" rx="16"/>
+    <text class="h3" x="24" y="31">Evidence rule</text>
+    <text class="body" x="24" y="56">“我确认通过”不算证据；必须是本轮新跑出的输出或截图。</text>
+  </g>
+
+  <!-- Completion / DoD -->
+  <rect class="panel shadow" x="70" y="2070" width="1660" height="330" rx="24"/>
+  <text class="h2" x="112" y="2125">4. 完成定义</text>
+  <text class="body" x="112" y="2157">roll-build 的完成不是本地代码能跑，而是远端、证据、文档状态都闭环。</text>
+
+  <g transform="translate(112 2204)">
+    <rect class="done-bg" x="0" y="0" width="240" height="118" rx="16"/>
+    <text class="h3" x="22" y="36">Green commits</text>
+    <text class="body" x="22" y="64">每个 TCR commit</text>
+    <text class="small" x="22" y="89">都是可工作的状态</text>
+  </g>
+  <g transform="translate(382 2204)">
+    <rect class="done-bg" x="0" y="0" width="240" height="118" rx="16"/>
+    <text class="h3" x="22" y="36">Remote done</text>
+    <text class="body" x="22" y="64">push + CI + deploy</text>
+    <text class="small" x="22" y="89">不能 local-only done</text>
+  </g>
+  <g transform="translate(652 2204)">
+    <rect class="evidence-card" x="0" y="0" width="240" height="118" rx="16"/>
+    <text class="h3" x="22" y="36">Acceptance evidence</text>
+    <text class="body" x="22" y="64">screenshots / txt</text>
+    <text class="small" x="22" y="89">ac-map + attest report</text>
+  </g>
+  <g transform="translate(922 2204)">
+    <rect class="done-bg" x="0" y="0" width="240" height="118" rx="16"/>
+    <text class="h3" x="22" y="36">Status write-back</text>
+    <text class="body" x="22" y="64">backlog row -> Done</text>
+    <text class="small" x="22" y="89">spec AC checked</text>
+  </g>
+  <g transform="translate(1192 2204)">
+    <rect class="done-bg" x="0" y="0" width="240" height="118" rx="16"/>
+    <text class="h3" x="22" y="36">Changelog bundled</text>
+    <text class="body" x="22" y="64">roll-.changelog</text>
+    <text class="small" x="22" y="89">随完成 commit 一起进</text>
+  </g>
+  <g transform="translate(1462 2204)">
+    <rect class="dark-card" x="0" y="0" width="230" height="118" rx="16"/>
+    <text class="white-h3" x="22" y="36">Final report</text>
+    <text class="white-body" x="22" y="64">self-score note</text>
+    <text class="white-body" x="22" y="89">summary to user</text>
+  </g>
+</svg>

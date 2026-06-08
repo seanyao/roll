@@ -42,6 +42,34 @@ export interface ExecutionRef {
   commitCount?: number;
 }
 
+export type CiVerdict = "green" | "red" | "none";
+
+export interface DeliveryPrEvidence {
+  number: number;
+  href?: string;
+  ci?: CiVerdict;
+}
+
+export interface DeliveryCostEvidence {
+  usd?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+}
+
+export interface DeliveryTimelineEntry {
+  label: string;
+  at: string;
+}
+
+export interface DeliveryEvidence {
+  prs?: DeliveryPrEvidence[];
+  diffHref?: string;
+  filesChanged?: string[];
+  agent?: string;
+  cost?: DeliveryCostEvidence;
+  timeline?: DeliveryTimelineEntry[];
+}
+
 /** Everything the dossier needs beyond the 001a story model. */
 export interface StoryDossierInput {
   story: DossierStory;
@@ -63,6 +91,8 @@ export interface StoryDossierInput {
   acRows?: AcRow[];
   /** Relative href to the attest report (when latest/ carries one). */
   reportHref?: string;
+  /** Reconstructable delivery facts: PR/CI/diff/agent/cost/timeline. */
+  deliveryEvidence?: DeliveryEvidence;
   /** Retrospective text (self-score note body). */
   retro?: string;
 }
@@ -122,6 +152,75 @@ function executionRefsHtml(refs: readonly ExecutionRef[]): string {
       })
       .join("")}</ul>`
   );
+}
+
+function hasDeliveryEvidence(e: DeliveryEvidence | undefined): boolean {
+  if (e === undefined) return false;
+  return (
+    (e.prs?.length ?? 0) > 0 ||
+    (e.filesChanged?.length ?? 0) > 0 ||
+    (e.timeline?.length ?? 0) > 0 ||
+    e.diffHref !== undefined ||
+    e.agent !== undefined ||
+    e.cost !== undefined
+  );
+}
+
+function ciText(v: CiVerdict | undefined): [string, string] {
+  if (v === "green") return ["CI green", "CI 通过"];
+  if (v === "red") return ["CI red", "CI 失败"];
+  if (v === "none") return ["CI none", "无 CI"];
+  return ["CI —", "CI —"];
+}
+
+function fmtTokens(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(Math.round(n));
+}
+
+function deliveryCostHtml(cost: DeliveryCostEvidence): string {
+  const parts: string[] = [];
+  if (cost.usd !== undefined && Number.isFinite(cost.usd)) parts.push(`$${cost.usd.toFixed(2)}`);
+  if (cost.tokensIn !== undefined && Number.isFinite(cost.tokensIn)) parts.push(`${fmtTokens(cost.tokensIn)} in`);
+  if (cost.tokensOut !== undefined && Number.isFinite(cost.tokensOut)) parts.push(`${fmtTokens(cost.tokensOut)} out`);
+  return parts.length > 0 ? parts.map(esc).join(" · ") : "—";
+}
+
+function deliveryEvidenceHtml(e: DeliveryEvidence | undefined): string {
+  if (!hasDeliveryEvidence(e) || e === undefined) return "";
+  const rows: string[] = [];
+  if ((e.prs?.length ?? 0) > 0) {
+    const prs = (e.prs ?? [])
+      .map((p) => {
+        const label = `PR #${p.number}`;
+        const link = p.href !== undefined ? `<a href="${esc(p.href)}">${esc(label)}</a>` : `<code>${esc(label)}</code>`;
+        const [ciEn, ciZh] = ciText(p.ci);
+        return `${link} <span class="pill ${p.ci === "green" ? "merged" : p.ci === "red" ? "cycle" : "backlog"}">${bi(ciEn, ciZh)}</span>`;
+      })
+      .join(" · ");
+    rows.push(`<dt>${bi("Merged PR", "合并 PR")}</dt><dd>${prs}</dd>`);
+  }
+  if (e.diffHref !== undefined) {
+    rows.push(`<dt>${bi("Diff", "Diff")}</dt><dd><a href="${esc(e.diffHref)}">${bi("Changed diff", "改动 diff")}</a></dd>`);
+  }
+  if ((e.filesChanged?.length ?? 0) > 0) {
+    rows.push(
+      `<dt>${bi("Files changed", "改动文件")}</dt><dd><ul class="delivery-files">${(e.filesChanged ?? [])
+        .map((f) => `<li><code>${esc(f)}</code></li>`)
+        .join("")}</ul></dd>`,
+    );
+  }
+  if (e.agent !== undefined) rows.push(`<dt>${bi("Agent", "交付 agent")}</dt><dd><code>${esc(e.agent)}</code></dd>`);
+  if (e.cost !== undefined) rows.push(`<dt>${bi("Cost", "成本")}</dt><dd>${deliveryCostHtml(e.cost)}</dd>`);
+  if ((e.timeline?.length ?? 0) > 0) {
+    rows.push(
+      `<dt>${bi("Timeline", "时间线")}</dt><dd><ol class="delivery-timeline">${(e.timeline ?? [])
+        .map((t) => `<li><code>${esc(t.at)}</code> ${esc(t.label)}</li>`)
+        .join("")}</ol></dd>`,
+    );
+  }
+  return `<div class="delivery-evidence"><h3>${bi("Delivery evidence", "交付证据")}</h3><dl>${rows.join("")}</dl></div>`;
 }
 
 function section(en: string, zh: string, body: string, empty: boolean): string {
@@ -200,8 +299,8 @@ export function renderStoryDossier(d: StoryDossierInput): string {
         `</tbody></table>`
       : "";
   const delivery =
-    s.delivered || (d.acRows?.length ?? 0) > 0
-      ? banner + acTable
+    s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence)
+      ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + acTable
       : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
   const retro =
     d.retro !== undefined && d.retro !== ""
@@ -222,6 +321,13 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.verify-cell .copy-btn.copied { color:var(--pass); border-color:var(--pass); }\n` +
     `.ac-tests { list-style:none; padding:0; margin:4px 0 0; } .ac-tests li { font-size:11.5px; color:var(--muted); margin:1px 0; }\n` +
     `.verify-empty { color:var(--muted); font-size:12px; }\n` +
+    `.delivery-evidence h3 { font:600 14px/1.4 var(--serif); margin:12px 0 6px; }\n` +
+    `.delivery-evidence dl { display:grid; grid-template-columns:120px 1fr; gap:6px 12px; margin:0; }\n` +
+    `.delivery-evidence dt { color:var(--muted); font:600 12px/1.7 var(--sans); }\n` +
+    `.delivery-evidence dd { margin:0; }\n` +
+    `.delivery-files { list-style:none; padding:0; margin:0; } .delivery-files li { margin:2px 0; }\n` +
+    `.delivery-timeline { margin:0; padding-left:18px; } .delivery-timeline li { margin:2px 0; }\n` +
+    `@media (max-width:680px) { .delivery-evidence dl { grid-template-columns:1fr; } }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
     `<p class="crumb"><a href="../../index.html">${bi("Features Index", "功能档案")}</a> / <a href="../index.html">${esc(s.epic)}</a> / ${esc(s.id)}</p>\n` +
@@ -238,8 +344,8 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("Definition", "立项", definition, defEmpty) +
     section("Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
     section("Design", "设计", design, (d.design?.length ?? 0) === 0) +
-    section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0) +
-    section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0)) +
+    section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
+    section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence))) +
     section("Retrospective", "复盘", retro, d.retro === undefined || d.retro === "") +
     `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
     // EVID-010: inline copy handler (display only — never executes the command).
@@ -402,6 +508,9 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   const executionRefs = collectExecutionRefs(projectPath, story.id, searchableCardText);
   if (executionRefs.length > 0) out.executionRefs = executionRefs;
 
+  const deliveryEvidence = collectDeliveryEvidence(projectPath, story, searchableCardText);
+  if (hasDeliveryEvidence(deliveryEvidence)) out.deliveryEvidence = deliveryEvidence;
+
   return out;
 }
 
@@ -456,6 +565,267 @@ function commitCountFromText(text: string): { commitCount?: number } {
   if (m?.[1] === undefined) return {};
   const n = Number(m[1]);
   return Number.isFinite(n) ? { commitCount: n } : {};
+}
+
+interface RunRow {
+  run_id?: string;
+  cycle_id?: string;
+  story_id?: string;
+  built?: unknown;
+  status?: string;
+  outcome?: string;
+  agent?: string;
+  ts?: string;
+  duration_sec?: number;
+  cost_usd?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+}
+
+interface EventRow {
+  type?: string;
+  storyId?: string;
+  cycleId?: string;
+  prNumber?: number;
+  agent?: string;
+  ts?: number;
+}
+
+function collectDeliveryEvidence(projectPath: string, story: DossierStory, text: string): DeliveryEvidence {
+  const prs = new Map<number, DeliveryPrEvidence>();
+  const files = new Set<string>();
+  const timeline: DeliveryTimelineEntry[] = [];
+  let diffHref: string | undefined;
+  let agent: string | undefined;
+  let cost: DeliveryCostEvidence | undefined;
+
+  const addPr = (number: number, patch: Omit<DeliveryPrEvidence, "number"> = {}): void => {
+    if (!Number.isFinite(number)) return;
+    const cur = prs.get(number) ?? { number };
+    if (patch.href !== undefined && cur.href === undefined) cur.href = patch.href;
+    if (patch.ci !== undefined) cur.ci = patch.ci;
+    prs.set(number, cur);
+  };
+  const addTimeline = (label: string, at: string | undefined): void => {
+    if (at === undefined || at === "") return;
+    if (timeline.some((t) => t.label === label)) return;
+    timeline.push({ label, at });
+  };
+
+  if (story.created !== undefined && story.created !== "") addTimeline("definition", story.created);
+
+  for (const match of text.matchAll(/https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/(\d+)(?:\/files|\.diff|\.patch)?/g)) {
+    const raw = match[0];
+    const n = numberFromString(match[1]);
+    if (n === undefined) continue;
+    const href = raw.replace(/(?:\/files|\.diff|\.patch)$/, "");
+    addPr(n, { href, ...ciPatch(nearbyText(text, match.index, 120, 160)) });
+    if (/\/files$|\.diff$|\.patch$/.test(raw)) diffHref = raw;
+    else if (diffHref === undefined) diffHref = `${href}/files`;
+  }
+
+  for (const match of text.matchAll(/\bPR\s*#?\s*(\d+)\b/gi)) {
+    const n = numberFromString(match[1]);
+    if (n === undefined) continue;
+    addPr(n, ciPatch(nearbyText(text, match.index, 120, 160)));
+  }
+  for (const n of gitPrNumbers(projectPath, story.id)) addPr(n);
+
+  const explicitDiff = /(?:^|\n)\s*(?:Diff|PR diff|差异|改动\s*diff)\s*[:：]\s*(https?:\/\/\S+)/i.exec(text);
+  if (explicitDiff?.[1] !== undefined) diffHref = explicitDiff[1].trim();
+
+  for (const line of text.split("\n")) {
+    const m = /^\s*(?:[-*]\s*)?(?:Files changed|Changed files|files-changed|改动文件|文件清单)\s*[:：]\s*(.+)$/i.exec(line);
+    if (m?.[1] === undefined) continue;
+    for (const f of splitFiles(m[1])) files.add(f);
+  }
+
+  const runs = readRunRows(projectPath, story.id);
+  const deliveredRuns = runs.filter((r) => runMatchesStory(r, story.id) && isDeliveredRun(r));
+  const latestRun = deliveredRuns[deliveredRuns.length - 1];
+  if (latestRun !== undefined) {
+    if (latestRun.agent !== undefined && latestRun.agent !== "") agent = latestRun.agent;
+    cost = costFromRun(latestRun);
+    addTimeline("delivery", latestRun.ts);
+  }
+
+  for (const f of gitChangedFiles(projectPath, story.id)) files.add(f);
+  const slug = githubSlug(projectPath);
+  if (slug !== undefined) {
+    for (const p of prs.values()) if (p.href === undefined) p.href = `https://github.com/${slug}/pull/${p.number}`;
+  }
+  if (diffHref === undefined) {
+    const firstPr = [...prs.values()].find((p) => p.href !== undefined);
+    if (firstPr?.href !== undefined) diffHref = `${firstPr.href}/files`;
+  }
+
+  const knownCycles = new Set(deliveredRuns.flatMap((r) => [r.cycle_id, r.run_id].filter((x): x is string => typeof x === "string" && x !== "")));
+  const knownPrs = (): Set<number> => new Set([...prs.keys()]);
+  for (const ev of readEventRows(projectPath)) {
+    const sameStory = ev.storyId === story.id || (ev.cycleId !== undefined && knownCycles.has(ev.cycleId));
+    if (ev.type === "cycle:start" && sameStory) {
+      addTimeline("execution", isoFromEventTs(ev.ts));
+      if (agent === undefined && ev.agent !== undefined && ev.agent !== "") agent = ev.agent;
+    }
+    if (ev.type === "pr:merge" && ev.prNumber !== undefined && sameStory) {
+      addPr(ev.prNumber);
+      addTimeline("delivery", isoFromEventTs(ev.ts));
+    }
+    if ((ev.type === "ci:pass" || ev.type === "ci:fail") && ev.prNumber !== undefined && knownPrs().has(ev.prNumber)) {
+      addPr(ev.prNumber, { ci: ev.type === "ci:pass" ? "green" : "red" });
+    }
+  }
+
+  const out: DeliveryEvidence = {};
+  const prRows = [...prs.values()].sort((a, b) => a.number - b.number);
+  if (prRows.length > 0) out.prs = prRows;
+  if (diffHref !== undefined) out.diffHref = diffHref;
+  const fileRows = [...files].sort();
+  if (fileRows.length > 0) out.filesChanged = fileRows.slice(0, 40);
+  if (agent !== undefined) out.agent = agent;
+  if (cost !== undefined) out.cost = cost;
+  if (timeline.length > 0) out.timeline = sortTimeline(timeline);
+  return out;
+}
+
+function sortTimeline(timeline: DeliveryTimelineEntry[]): DeliveryTimelineEntry[] {
+  const stageOrder = new Map([
+    ["definition", 0],
+    ["design", 1],
+    ["execution", 2],
+    ["delivery", 3],
+    ["retrospective", 4],
+  ]);
+  return [...timeline].sort((a, b) => {
+    const ao = stageOrder.get(a.label) ?? 100;
+    const bo = stageOrder.get(b.label) ?? 100;
+    if (ao !== bo) return ao - bo;
+    return a.at.localeCompare(b.at);
+  });
+}
+
+function nearbyText(text: string, index: number | undefined, before: number, after: number): string {
+  const i = index ?? 0;
+  return text.slice(Math.max(0, i - before), Math.min(text.length, i + after));
+}
+
+function numberFromString(s: string | undefined): number | undefined {
+  if (s === undefined) return undefined;
+  const n = Number(s);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function ciPatch(text: string): { ci?: CiVerdict } {
+  if (/(CI|check|status).{0,32}(green|pass|passed|success|successful|绿|通过|成功)/i.test(text)) return { ci: "green" };
+  if (/(CI|check|status).{0,32}(red|fail|failed|failure|红|失败)/i.test(text)) return { ci: "red" };
+  if (/(no CI|CI none|无 CI|没有 CI)/i.test(text)) return { ci: "none" };
+  return {};
+}
+
+function splitFiles(s: string): string[] {
+  return s
+    .split(/[,，;；]/)
+    .map((f) => f.trim())
+    .filter((f) => f !== "" && !/\s/.test(f))
+    .slice(0, 80);
+}
+
+function readRunRows(projectPath: string, storyId: string): RunRow[] {
+  try {
+    return readFile(joinPath(projectPath, ".roll", "loop", "runs.jsonl"))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .map((line) => JSON.parse(line) as unknown)
+      .filter((row): row is RunRow => isRunRow(row) && runMatchesStory(row, storyId));
+  } catch {
+    return [];
+  }
+}
+
+function isRunRow(row: unknown): row is RunRow {
+  return typeof row === "object" && row !== null;
+}
+
+function runMatchesStory(row: RunRow, storyId: string): boolean {
+  return row.story_id === storyId || (Array.isArray(row.built) && row.built.some((x) => x === storyId));
+}
+
+function isDeliveredRun(row: RunRow): boolean {
+  return row.status === "done" || row.status === "merged" || row.outcome === "delivered";
+}
+
+function costFromRun(row: RunRow): DeliveryCostEvidence | undefined {
+  const cost: DeliveryCostEvidence = {};
+  if (typeof row.cost_usd === "number" && Number.isFinite(row.cost_usd)) cost.usd = row.cost_usd;
+  if (typeof row.tokens_in === "number" && Number.isFinite(row.tokens_in)) cost.tokensIn = row.tokens_in;
+  if (typeof row.tokens_out === "number" && Number.isFinite(row.tokens_out)) cost.tokensOut = row.tokens_out;
+  return Object.keys(cost).length > 0 ? cost : undefined;
+}
+
+function readEventRows(projectPath: string): EventRow[] {
+  try {
+    return readFile(joinPath(projectPath, ".roll", "loop", "events.ndjson"))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .map((line) => JSON.parse(line) as unknown)
+      .filter((row): row is EventRow => isEventRow(row));
+  } catch {
+    return [];
+  }
+}
+
+function isEventRow(row: unknown): row is EventRow {
+  if (typeof row !== "object" || row === null) return false;
+  const r = row as Record<string, unknown>;
+  return typeof r["type"] === "string";
+}
+
+function isoFromEventTs(ts: number | undefined): string | undefined {
+  if (ts === undefined || !Number.isFinite(ts)) return undefined;
+  const ms = ts > 10_000_000_000 ? ts : ts * 1000;
+  return new Date(ms).toISOString();
+}
+
+function gitChangedFiles(projectPath: string, storyId: string): string[] {
+  try {
+    return execGit(projectPath, ["log", "--name-only", "--pretty=format:", "--fixed-strings", "--grep", storyId])
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "" && !l.includes(" "))
+      .slice(0, 80);
+  } catch {
+    return [];
+  }
+}
+
+function gitPrNumbers(projectPath: string, storyId: string): number[] {
+  try {
+    const nums = new Set<number>();
+    for (const subject of execGit(projectPath, ["log", "--format=%s", "--fixed-strings", "--grep", storyId]).split("\n")) {
+      for (const match of subject.matchAll(/(?:\(#|PR\s*#?)(\d+)\)?/gi)) {
+        const n = numberFromString(match[1]);
+        if (n !== undefined) nums.add(n);
+      }
+    }
+    return [...nums];
+  } catch {
+    return [];
+  }
+}
+
+function githubSlug(projectPath: string): string | undefined {
+  try {
+    const remote = execGit(projectPath, ["config", "--get", "remote.origin.url"]).trim();
+    const https = /^https:\/\/github\.com\/([^/]+\/[^/.]+)(?:\.git)?$/.exec(remote);
+    if (https?.[1] !== undefined) return https[1];
+    const ssh = /^git@github\.com:([^/]+\/[^/.]+)(?:\.git)?$/.exec(remote);
+    if (ssh?.[1] !== undefined) return ssh[1];
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // Thin fs/git seams (kept local so the renderer stays pure above).

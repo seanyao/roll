@@ -229,12 +229,112 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(storySpine(got)).toContain("node done");
   });
 
+  it("US-EVID-008: delivery station renders PR, CI, diff/files, agent, cost, tokens, and timeline", () => {
+    const html = renderStoryDossier({
+      story,
+      reportHref: "latest/US-A-1-report.html",
+      deliveryEvidence: {
+        prs: [
+          {
+            number: 481,
+            href: "https://github.com/acme/roll/pull/481",
+            ci: "green",
+          },
+        ],
+        diffHref: "https://github.com/acme/roll/pull/481/files",
+        filesChanged: ["packages/cli/src/lib/story-dossier.ts", "packages/cli/test/dossier.test.ts"],
+        agent: "claude",
+        cost: { usd: 1.23, tokensIn: 1200, tokensOut: 345 },
+        timeline: [
+          { label: "definition", at: "2026-06-08" },
+          { label: "execution", at: "2026-06-08T10:00:00Z" },
+          { label: "delivery", at: "2026-06-08T10:15:00Z" },
+        ],
+      },
+    });
+
+    expect(html).toContain("Delivery evidence");
+    expect(html).toContain('href="https://github.com/acme/roll/pull/481"');
+    expect(html).toContain("PR #481");
+    expect(html).toContain("CI green");
+    expect(html).toContain('href="https://github.com/acme/roll/pull/481/files"');
+    expect(html).toContain("packages/cli/src/lib/story-dossier.ts");
+    expect(html).toContain("claude");
+    expect(html).toContain("$1.23");
+    expect(html).toContain("1.2k in");
+    expect(html).toContain("345 out");
+    expect(html).toContain("definition");
+    expect(html).toContain("delivery");
+  });
+
+  it("US-EVID-008: collectStoryDossierInput reconstructs delivery facts from card text, runs, and events", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-DEL-8");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "spec.md"),
+      [
+        "# US-DEL-8",
+        "",
+        "**Delivery:**",
+        "- PR https://github.com/acme/roll/pull/481 merged; CI green",
+        "- Files changed: packages/a.ts, packages/b.ts",
+        "- Diff: https://github.com/acme/roll/pull/481/files",
+        "",
+        "**AC:**",
+        "- [x] shipped",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "runs.jsonl"),
+      JSON.stringify({
+        run_id: "cycle-1",
+        cycle_id: "cycle-1",
+        story_id: "US-DEL-8",
+        built: ["US-DEL-8"],
+        status: "done",
+        outcome: "delivered",
+        agent: "pi",
+        ts: "2026-06-08T10:15:00Z",
+        duration_sec: 900,
+        cost_usd: 2.5,
+        tokens_in: 2000,
+        tokens_out: 300,
+      }) + "\n",
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "events.ndjson"),
+      [
+        { type: "cycle:start", cycleId: "cycle-1", storyId: "US-DEL-8", agent: "pi", model: "m", ts: 1780912800 },
+        { type: "pr:merge", prNumber: 481, storyId: "US-DEL-8", ts: 1780904000 },
+        { type: "ci:pass", prNumber: 481, ts: 1780904100 },
+      ].map((row) => JSON.stringify(row)).join("\n") + "\n",
+    );
+
+    const got = collectStoryDossierInput(p, { id: "US-DEL-8", epic: "alpha", type: "US", delivered: true, created: "2026-06-08" });
+    expect(got.deliveryEvidence).toEqual({
+      prs: [{ number: 481, href: "https://github.com/acme/roll/pull/481", ci: "green" }],
+      diffHref: "https://github.com/acme/roll/pull/481/files",
+      filesChanged: ["packages/a.ts", "packages/b.ts"],
+      agent: "pi",
+      cost: { usd: 2.5, tokensIn: 2000, tokensOut: 300 },
+      timeline: [
+        { label: "definition", at: "2026-06-08" },
+        { label: "execution", at: "2026-06-08T10:00:00.000Z" },
+        { label: "delivery", at: "2026-06-08T10:15:00Z" },
+      ],
+    });
+  });
+
   it("wish-only story: empty states render honestly, delivery pending", () => {
     const bare = renderStoryDossier({ story: { ...story, delivered: false } });
     expect(bare).toContain("尚未设计");
     expect(bare).toContain("暂无周期");
     expect(bare).toContain("尚未交付");
     expect(bare).not.toContain('class="attest-banner"');
+    expect(bare).not.toContain("Delivery evidence");
   });
 
   it("self-containment holds", () => {

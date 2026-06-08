@@ -212,6 +212,57 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
   });
 });
 
+describe("renderStoryDossier — EVID-010 re-runnable verify commands", () => {
+  const story = { id: "US-V-1", epic: "alpha", type: "US", title: "Verify story", created: "2026-06-08", delivered: true };
+  const html = renderStoryDossier({
+    story,
+    acRows: [
+      { ac: "US-V-1:AC1", status: "pass", verify: "roll test", tests: ["test/foo.test.ts", "test/bar.test.ts"] },
+      { ac: "US-V-1:AC2", status: "readonly" },
+    ],
+  });
+
+  it("renders a Verify column header", () => {
+    expect(html).toContain("Verify");
+  });
+
+  it("renders the verify command as copyable text (re-runnable, agent-agnostic)", () => {
+    expect(html).toContain("roll test");
+    expect(html).toContain('data-copy="roll test"');
+  });
+
+  it("lists the covering tests inline", () => {
+    expect(html).toContain("test/foo.test.ts");
+    expect(html).toContain("test/bar.test.ts");
+  });
+
+  it("an AC without a verify command degrades gracefully — no invented command", () => {
+    // exactly one copy affordance (AC1), AC2 carries none
+    expect(html.match(/data-copy=/g)).toHaveLength(1);
+    expect(html).toContain("verify-empty");
+  });
+
+  it("the copy handler is inline — page stays self-contained", () => {
+    expect(html).not.toContain("<script src=");
+    expect(html).toContain("data-copy");
+  });
+});
+
+describe("collectStoryDossierInput — EVID-010 parses verify/tests from ac-map.json", () => {
+  it("threads verify command and tests through to acRows", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-V-2");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "ac-map.json"),
+      JSON.stringify([{ ac: "US-V-2:AC1", status: "pass", verify: "node bin/roll.js ci --wait", tests: ["test/ci.test.ts"] }]),
+    );
+    const got = collectStoryDossierInput(p, { id: "US-V-2", epic: "alpha", type: "US", delivered: true });
+    expect(got.acRows?.[0]?.verify).toBe("node bin/roll.js ci --wait");
+    expect(got.acRows?.[0]?.tests).toEqual(["test/ci.test.ts"]);
+  });
+});
+
 describe("roll index — US-DOSSIER-001d three-layer integration", () => {
   it("generates front page + epic pages + story dossiers with cross-links", async () => {
     const p = project();

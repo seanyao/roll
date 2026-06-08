@@ -30,6 +30,10 @@ export interface AcRow {
   ac: string;
   status: string;
   note?: string;
+  /** EVID-010: a re-runnable command that independently verifies this AC. */
+  verify?: string;
+  /** EVID-010: test files/cases covering this AC. */
+  tests?: string[];
 }
 
 /** Everything the dossier needs beyond the 001a story model. */
@@ -137,11 +141,24 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     : "";
   const acTable =
     (d.acRows?.length ?? 0) > 0
-      ? `<table class="ac-table"><thead><tr><th>AC</th><th>${bi("Status", "状态")}</th><th>${bi("Note", "备注")}</th></tr></thead><tbody>` +
+      ? `<table class="ac-table"><thead><tr><th>AC</th><th>${bi("Status", "状态")}</th><th>${bi("Verify", "验证")}</th><th>${bi("Note", "备注")}</th></tr></thead><tbody>` +
         (d.acRows ?? [])
           .map((r) => {
             const [en, zh] = AC_BADGE[r.status] ?? [r.status, r.status];
-            return `<tr><td><code>${esc(r.ac)}</code></td><td>${bi(en, zh)}</td><td>${esc(r.note ?? "")}</td></tr>`;
+            // EVID-010: a re-runnable command makes the AC independently verifiable;
+            // absent → degrade honestly (no invented command), readonly/doc ACs say so.
+            const verifyCell =
+              r.verify !== undefined && r.verify !== ""
+                ? `<button class="copy-btn" data-copy="${esc(r.verify)}" title="copy 复制" type="button">⧉</button><code>${esc(r.verify)}</code>` +
+                  (r.tests !== undefined && r.tests.length > 0
+                    ? `<ul class="ac-tests">${r.tests.map((t) => `<li><code>${esc(t)}</code></li>`).join("")}</ul>`
+                    : "")
+                : `<span class="verify-empty">${
+                    r.status === "readonly" || r.status === "claimed" || r.status === "missing"
+                      ? bi("no re-run", "无需重验")
+                      : "—"
+                  }</span>`;
+            return `<tr><td><code>${esc(r.ac)}</code></td><td>${bi(en, zh)}</td><td class="verify-cell">${verifyCell}</td><td>${esc(r.note ?? "")}</td></tr>`;
           })
           .join("") +
         `</tbody></table>`
@@ -165,6 +182,10 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.story-primitive dt { flex:0 0 64px; color:var(--muted); font:600 12.5px/1.7 var(--sans); }\n` +
     `.story-primitive dd { margin:0; flex:1; }\n` +
     `.ac-checklist { list-style:none; padding:0; margin:0; } .ac-checklist li { margin:3px 0; }\n` +
+    `.verify-cell code { font-size:12px; } .verify-cell .copy-btn { margin-right:6px; cursor:pointer; border:1px solid var(--line); background:var(--bg-raise); color:var(--muted); border-radius:4px; padding:0 5px; font-size:12px; }\n` +
+    `.verify-cell .copy-btn.copied { color:var(--pass); border-color:var(--pass); }\n` +
+    `.ac-tests { list-style:none; padding:0; margin:4px 0 0; } .ac-tests li { font-size:11.5px; color:var(--muted); margin:1px 0; }\n` +
+    `.verify-empty { color:var(--muted); font-size:12px; }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
     `<p class="crumb"><a href="../../index.html">${bi("Features Index", "功能档案")}</a> / <a href="../index.html">${esc(s.epic)}</a> / ${esc(s.id)}</p>\n` +
@@ -184,7 +205,10 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0) +
     section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0)) +
     section("Retrospective", "复盘", retro, d.retro === undefined || d.retro === "") +
-    `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n</body>\n</html>\n`
+    `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
+    // EVID-010: inline copy handler (display only — never executes the command).
+    `<script>document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest(".copy-btn");if(!b)return;var t=b.getAttribute("data-copy")||"";if(navigator.clipboard)navigator.clipboard.writeText(t);b.classList.add("copied");setTimeout(function(){b.classList.remove("copied")},1200);});</script>\n` +
+    `</body>\n</html>\n`
   );
 }
 
@@ -255,11 +279,19 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
       ac?: string;
       status?: string;
       note?: string;
+      verify?: string;
+      tests?: string[];
     }>;
     if (Array.isArray(rows)) {
       const acRows = rows
         .filter((r) => typeof r.ac === "string" && typeof r.status === "string")
-        .map((r) => ({ ac: r.ac as string, status: r.status as string, ...(r.note !== undefined ? { note: r.note } : {}) }));
+        .map((r) => ({
+          ac: r.ac as string,
+          status: r.status as string,
+          ...(r.note !== undefined ? { note: r.note } : {}),
+          ...(typeof r.verify === "string" && r.verify !== "" ? { verify: r.verify } : {}),
+          ...(Array.isArray(r.tests) && r.tests.length > 0 ? { tests: r.tests.filter((t) => typeof t === "string") } : {}),
+        }));
       if (acRows.length > 0) out.acRows = acRows;
     }
   } catch {

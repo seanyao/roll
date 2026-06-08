@@ -288,6 +288,8 @@ describe("REFACTOR-046 whitelisted divergences (TS-only)", () => {
 
     expect(t.status).toBe(0);
     expect(t.stdout).toContain("npm-shim ran: test -- e2e");
+    expect(t.stdout).toContain("child ROLL_RUN_DIR=");
+    expect(t.stdout).not.toContain(`child ROLL_RUN_DIR=${runDir}`);
     expect(readFileSync(join(runDir, "evidence", "roll-test-output.log"), "utf8")).toContain("npm-shim ran: test -- e2e");
     expect(readFileSync(join(runDir, "evidence", "roll-test-summary.txt"), "utf8")).toContain('"exitCode":0');
     expect(readFileSync(join(runDir, "evidence", "e2e-artifact.txt"), "utf8")).toBe("e2e artifact\n");

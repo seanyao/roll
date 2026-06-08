@@ -95,12 +95,11 @@ function childEnvForEvidence(frame: EvidenceFrameEnv | null): NodeJS.ProcessEnv 
     delete env["ROLL_SCREENSHOTS_DIR"];
     return env;
   }
-  return {
-    ...process.env,
-    ROLL_RUN_DIR: frame.runDir,
-    ROLL_EVIDENCE_DIR: frame.evidenceDir,
-    ROLL_SCREENSHOTS_DIR: frame.screenshotsDir,
-  };
+  const env = { ...process.env };
+  delete env["ROLL_RUN_DIR"];
+  env["ROLL_EVIDENCE_DIR"] = frame.evidenceDir;
+  env["ROLL_SCREENSHOTS_DIR"] = frame.screenshotsDir;
+  return env;
 }
 
 function appendRollTestEvidence(

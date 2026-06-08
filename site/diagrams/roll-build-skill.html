@@ -1,88 +1,84 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh" data-lang="zh">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>roll-build · Universal Delivery — 信息图</title>
+<title>roll-build · Universal Delivery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+  /* Aligned to the roll site stylesheet (roll-site.css dark theme tokens). */
   :root{
-    --bg:#0b0b0f; --bg2:#101017; --panel:#14141d; --panel2:#191923;
-    --fg:#f3f3f7; --soft:#bdbdca; --muted:#7d7d8c; --faint:#56565f;
-    --line:#23232e; --line2:#2e2e3b;
-    --accent:#6aa6ff; --accent-d:#3b6fd6;
-    --plan:#7c8cff; --build:#54c08a; --ship:#e0a13c; --verify:#e0653e; --gate:#c879e6;
-    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
-    --sans:"Geist","Noto Sans SC",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --bg:#0a0a0c; --bg2:#0d0d10; --panel:#131319; --panel2:#1a1a1f;
+    --fg:#f4f4f6; --soft:#c8c8d0; --muted:#8a8a95; --faint:#5b5b66;
+    --line:#1d1d22; --line2:#26262d; --accent-soft:hsl(226 88% 72% / .13);
+    --accent:hsl(226 88% 72%); --accent-fg:hsl(226 88% 80%);
+    --plan:hsl(226 88% 72%); --build:#4ade80; --ship:#fbbf24; --verify:#f87171; --gate:#c084fc;
+    --radius:10px; --radius-lg:14px;
+    --mono:"Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, "PingFang SC", "Microsoft YaHei", monospace;
+    --sans:"Geist", "Noto Sans SC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
+  html[data-lang="en"] .lang-zh{display:none}
+  html[data-lang="zh"] .lang-en{display:none}
   body{
     margin:0; background:
       radial-gradient(1200px 600px at 80% -10%, #16161f 0%, transparent 60%),
       radial-gradient(900px 500px at -10% 10%, #131320 0%, transparent 55%),
       var(--bg);
-    color:var(--fg); font-family:var(--sans); line-height:1.5;
-    -webkit-font-smoothing:antialiased;
+    color:var(--fg); font-family:var(--sans); line-height:1.5; -webkit-font-smoothing:antialiased;
   }
   .wrap{max-width:1080px; margin:0 auto; padding:48px 28px 72px}
-
-  /* ── Masthead ─────────────────────────────────── */
-  .mast{margin-bottom:8px}
+  .chrome{position:fixed; top:16px; right:16px; z-index:20; display:flex; border:1px solid var(--line2);
+    border-radius:999px; overflow:hidden; background:rgba(20,20,29,.8); backdrop-filter:blur(8px)}
+  .chrome button{all:unset; cursor:pointer; font:600 12px/1 var(--mono); padding:8px 13px; color:var(--muted)}
+  .chrome button.on{background:var(--accent); color:#0b0b0f}
+  .chrome button:not(.on):hover{color:var(--fg)}
   .kicker{font:600 12px/1 var(--mono); letter-spacing:.22em; text-transform:uppercase; color:var(--accent); margin:0 0 14px}
   h1{font-size:clamp(30px,5vw,46px); line-height:1.05; margin:0 0 12px; letter-spacing:-.02em; font-weight:680}
-  h1 .sub{display:block; font-size:.5em; font-weight:520; color:var(--soft); letter-spacing:0; margin-top:10px}
-  .lede{color:var(--soft); max-width:60ch; font-size:15.5px; margin:0}
+  h1 .sub{display:block; font-size:.46em; font-weight:520; color:var(--soft); letter-spacing:0; margin-top:10px}
+  .lede{color:var(--soft); max-width:62ch; font-size:15.5px; margin:0}
   .lede b{color:var(--fg); font-weight:620}
   .rule{height:1px;background:linear-gradient(90deg,var(--line2),transparent);margin:34px 0}
-
-  /* ── Funnel: two modes → one pipeline ─────────── */
   .funnel{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px}
+  @media(max-width:600px){.funnel{grid-template-columns:1fr}}
   .mode{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px 20px; position:relative; overflow:hidden}
   .mode::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--accent)}
   .mode h3{margin:0 0 4px; font-size:15px; display:flex; align-items:center; gap:9px}
-  .mode .tag{font:600 10.5px/1 var(--mono); letter-spacing:.08em; padding:3px 7px; border-radius:5px; background:var(--accent-soft,rgba(106,166,255,.14)); color:var(--accent)}
+  .mode .tag{font:600 10.5px/1 var(--mono); letter-spacing:.08em; padding:3px 7px; border-radius:5px; background:var(--accent-soft); color:var(--accent)}
   .mode p{margin:6px 0 0; color:var(--muted); font-size:13px}
   .mode code{font-family:var(--mono); font-size:12px; color:var(--soft); background:var(--bg2); padding:1px 6px; border-radius:5px; border:1px solid var(--line)}
-  .merge{text-align:center; color:var(--faint); font:600 12px/1 var(--mono); letter-spacing:.15em; margin:4px 0 26px}
-
-  /* ── Stage legend ─────────────────────────────── */
+  .merge{text-align:center; color:var(--faint); font:600 12px/1 var(--mono); letter-spacing:.1em; margin:4px 0 26px}
   .legend{display:flex; flex-wrap:wrap; gap:8px 16px; margin:0 0 26px; font-size:12.5px; color:var(--muted)}
   .legend span{display:inline-flex; align-items:center; gap:7px}
   .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
   .gatekey{width:13px;height:13px;border-radius:3px;display:inline-grid;place-items:center;font-size:9px;color:#0b0b0f;font-weight:800}
-
-  /* ── Pipeline spine ───────────────────────────── */
   .spine{position:relative; margin-left:6px; padding-left:34px}
   .spine::before{content:"";position:absolute;left:11px;top:6px;bottom:6px;width:2px;
     background:linear-gradient(180deg,var(--plan),var(--build) 38%,var(--ship) 66%,var(--verify))}
   .step{position:relative; margin:0 0 12px}
   .step::before{content:"";position:absolute;left:-28px;top:18px;width:16px;height:16px;border-radius:50%;
     background:var(--bg); border:3px solid var(--c); box-shadow:0 0 0 4px var(--bg)}
-  .step.loop::before, .step.gate::before{border-radius:4px}
-  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 18px;
-    border-left:3px solid var(--c)}
+  .step.loop::before,.step.gate::before{border-radius:4px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 18px; border-left:3px solid var(--c)}
   .card:hover{border-color:var(--line2); background:var(--panel2)}
   .step .no{font:700 11px/1 var(--mono); color:var(--c); letter-spacing:.04em}
   .step .ttl{font-size:15px; font-weight:620; margin:4px 0 0; display:flex; align-items:center; gap:9px; flex-wrap:wrap}
-  .step .desc{color:var(--muted); font-size:13px; margin:5px 0 0; max-width:64ch}
+  .step .desc{color:var(--muted); font-size:13px; margin:5px 0 0; max-width:66ch}
   .step .desc b{color:var(--soft); font-weight:600}
+  .step .desc code{font-family:var(--mono);font-size:12px;color:var(--soft);background:var(--bg2);padding:1px 5px;border-radius:5px;border:1px solid var(--line)}
   .chip{font:600 10px/1 var(--mono); letter-spacing:.06em; padding:3px 7px; border-radius:999px; border:1px solid var(--c); color:var(--c); white-space:nowrap}
   .chip.solid{background:var(--c); color:#0b0b0f; border-color:var(--c)}
-
-  /* TCR loop centerpiece */
   .tcr{background:linear-gradient(180deg,rgba(84,192,138,.08),transparent); border:1px solid rgba(84,192,138,.3)}
   .tcrflow{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:11px; font:600 12.5px/1 var(--mono)}
   .tcrflow .n{padding:6px 11px; border-radius:8px; background:var(--bg2); border:1px solid var(--line2); color:var(--soft)}
   .tcrflow .g{color:var(--build); border-color:rgba(84,192,138,.45)}
   .tcrflow .r{color:var(--verify); border-color:rgba(224,101,62,.45)}
   .tcrflow .ar{color:var(--faint)}
-
-  /* group bands */
-  .band{font:700 11px/1 var(--mono); letter-spacing:.18em; text-transform:uppercase; color:var(--c);
-    margin:22px 0 12px; padding-left:2px; display:flex; align-items:center; gap:10px}
+  .band{font:700 11px/1 var(--mono); letter-spacing:.18em; text-transform:uppercase; color:var(--c); margin:22px 0 12px; padding-left:2px; display:flex; align-items:center; gap:10px}
   .band::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--c),transparent);opacity:.4}
-
-  /* ── Principles + Hard Rule ───────────────────── */
   .foot{display:grid; grid-template-columns:1.3fr 1fr; gap:18px; margin-top:38px}
   @media(max-width:720px){.foot{grid-template-columns:1fr}}
   .box{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px 22px}
@@ -92,198 +88,229 @@
   .box li::before{content:"→";position:absolute;left:0;color:var(--accent);font-weight:700}
   .box li b{color:var(--fg)}
   .hard{background:linear-gradient(180deg,rgba(200,121,230,.09),transparent); border-color:rgba(200,121,230,.32)}
-  .hard h4{color:var(--gate)}
-  .hard li::before{content:"⛩";color:var(--gate)}
-
-  footer{margin-top:42px; padding-top:18px; border-top:1px solid var(--line); color:var(--faint); font-size:12px;
-    display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-family:var(--mono)}
-
-  @media print{
-    body{background:#fff;color:#111}
-    .card,.box,.mode{break-inside:avoid}
-    .wrap{max-width:none}
-  }
+  .hard h4{color:var(--gate)} .hard li::before{content:"⛩";color:var(--gate)}
+  .home{display:inline-flex;align-items:center;gap:7px;margin-top:30px;font:600 12.5px/1 var(--mono);color:var(--accent);text-decoration:none;border:1px solid var(--line2);border-radius:999px;padding:9px 15px}
+  .home:hover{background:var(--accent-soft)}
+  footer{margin-top:42px; padding-top:18px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-family:var(--mono)}
+  @media print{body{background:#fff;color:#111}.chrome{display:none}.card,.box,.mode{break-inside:avoid}.wrap{max-width:none}}
 </style>
 </head>
 <body>
+
+<nav class="chrome" aria-label="language">
+  <button type="button" data-set="en">EN</button>
+  <button type="button" data-set="zh">中</button>
+</nav>
+
 <div class="wrap">
 
-  <header class="mast">
-    <p class="kicker">roll skill · 通用交付</p>
+  <header>
+    <p class="kicker"><span class="lang-en">roll skill · universal delivery</span><span class="lang-zh">roll 技能 · 通用交付</span></p>
     <h1>roll-build
-      <span class="sub">One entry. Any input. Full delivery. · 一个入口，任意输入，完整交付。</span>
+      <span class="sub">One entry. Any input. Full delivery.<span class="lang-zh"> · 一个入口，任意输入，完整交付。</span></span>
     </h1>
-    <p class="lede">把一条需求——无论是 <b>US 编号</b>还是<b>一句模糊的话</b>——经一条<b>可逆、测试守护、证据落地</b>的流水线，送到合入主干。每一步留绿色可回退状态，最后必须有<b>新鲜证据</b>才算完成。</p>
+    <p class="lede">
+      <span class="lang-en">Take one request — whether a <b>US id</b> or a <b>single vague sentence</b> — down a <b>reversible, test-guarded, evidence-landing</b> pipeline to merged-on-main. Every micro-step leaves a green, revertible state; nothing is "done" without <b>fresh evidence</b>.</span>
+      <span class="lang-zh">把一条需求——无论是 <b>US 编号</b>还是<b>一句模糊的话</b>——经一条<b>可逆、测试守护、证据落地</b>的流水线送到合入主干。每个微步都留绿色可回退态；没有<b>新鲜证据</b>就不算完成。</span>
+    </p>
   </header>
 
   <div class="rule"></div>
 
-  <!-- Two modes funnel -->
   <div class="funnel">
     <div class="mode">
-      <h3><span class="tag">A</span> Story mode</h3>
-      <p>输入是 <code>US-XXX</code> —— 读 backlog → 拆 Action → 进 TCR。已规划好的故事直接执行。</p>
+      <h3><span class="tag">A</span> <span class="lang-en">Story mode</span><span class="lang-zh">Story 模式</span></h3>
+      <p>
+        <span class="lang-en">Input is <code>US-XXX</code> — read backlog → split Actions → TCR. A planned story executes directly.</span>
+        <span class="lang-zh">输入是 <code>US-XXX</code> —— 读 backlog → 拆 Action → 进 TCR。已规划好的故事直接执行。</span>
+      </p>
     </div>
     <div class="mode">
-      <h3><span class="tag">B</span> Fly mode</h3>
-      <p>输入是一句话 —— 先 clarify → design → 创建 US，再切回 Story mode 执行。</p>
+      <h3><span class="tag">B</span> <span class="lang-en">Fly mode</span><span class="lang-zh">Fly 模式</span></h3>
+      <p>
+        <span class="lang-en">Input is one sentence — clarify → design → create the US, then switch to Story mode to execute.</span>
+        <span class="lang-zh">输入是一句话 —— 先 clarify → design → 创建 US，再切回 Story 模式执行。</span>
+      </p>
     </div>
   </div>
-  <div class="merge">▼ &nbsp; 殊途同归：共享 TCR 流水线 &nbsp; ▼</div>
+  <div class="merge"><span class="lang-en">▼ &nbsp; both converge on the shared TCR pipeline &nbsp; ▼</span><span class="lang-zh">▼ &nbsp; 殊途同归：共享 TCR 流水线 &nbsp; ▼</span></div>
 
-  <!-- Legend -->
   <div class="legend">
-    <span><i class="dot" style="background:var(--plan)"></i>规划 Plan</span>
-    <span><i class="dot" style="background:var(--build)"></i>构建 Build</span>
-    <span><i class="dot" style="background:var(--ship)"></i>交付 Ship</span>
-    <span><i class="dot" style="background:var(--verify)"></i>验证 Verify</span>
-    <span><i class="gatekey" style="background:var(--gate)">⛩</i>硬闸 Gate（不过不放行）</span>
-    <span><i class="gatekey" style="background:var(--build)">♻</i>TCR 循环</span>
+    <span><i class="dot" style="background:var(--plan)"></i><span class="lang-en">Plan</span><span class="lang-zh">规划</span></span>
+    <span><i class="dot" style="background:var(--build)"></i><span class="lang-en">Build</span><span class="lang-zh">构建</span></span>
+    <span><i class="dot" style="background:var(--ship)"></i><span class="lang-en">Ship</span><span class="lang-zh">交付</span></span>
+    <span><i class="dot" style="background:var(--verify)"></i><span class="lang-en">Verify</span><span class="lang-zh">验证</span></span>
+    <span><i class="gatekey" style="background:var(--gate)">⛩</i><span class="lang-en">Hard gate (no pass, no go)</span><span class="lang-zh">硬闸（不过不放行）</span></span>
+    <span><i class="gatekey" style="background:var(--build)">♻</i><span class="lang-en">TCR loop</span><span class="lang-zh">TCR 循环</span></span>
   </div>
 
-  <!-- Pipeline -->
   <div class="spine">
 
-    <div class="band" style="--c:var(--plan)">规划 · Plan</div>
+    <div class="band" style="--c:var(--plan)"><span class="lang-en">Plan</span><span class="lang-zh">规划</span></div>
 
-    <div class="step" style="--c:var(--plan)">
-      <div class="card">
-        <div class="no">STEP 0</div>
-        <div class="ttl">Pre-flight 自检 <span class="chip">est_min</span></div>
-        <p class="desc">按 <b>est_min</b> 估这轮能不能闭环。太大 → <b>自降级</b>（roll-design 再拆成子故事，chain_depth+1，连拆 2 次封顶），不硬啃必败的一轮。</p>
-      </div>
-    </div>
-    <div class="step" style="--c:var(--plan)">
-      <div class="card">
-        <div class="no">STEP 1 · 2</div>
-        <div class="ttl">读故事 → 拆 Action <span class="chip">2–5 min/步</span></div>
-        <p class="desc">读 spec 的 AC / Files / 依赖；拆成最小可交付 Action，先挑最小那块。无占位、可直接执行。</p>
-      </div>
-    </div>
-    <div class="step" style="--c:var(--plan)">
-      <div class="card">
-        <div class="no">STEP 2.5</div>
-        <div class="ttl">并行派发（自动判定） <span class="chip">worktree 隔离</span></div>
-        <p class="desc">Action 间无文件冲突 → 自动开 worktree 并行，子 agent 各自 TCR；完成后逐个审、合主干、跑集成。有冲突则串行。</p>
-      </div>
-    </div>
-    <div class="step" style="--c:var(--plan)">
-      <div class="card">
-        <div class="no">STEP 3</div>
-        <div class="ttl">定义验证</div>
-        <p class="desc">测试矩阵：happy path + 边界/失败/回归；明确本仓"线上验证"是什么（URL / 端点 / 日志信号）。</p>
-      </div>
-    </div>
+    <div class="step" style="--c:var(--plan)"><div class="card">
+      <div class="no">STEP 0</div>
+      <div class="ttl"><span class="lang-en">Pre-flight self-check</span><span class="lang-zh">Pre-flight 自检</span> <span class="chip">est_min</span></div>
+      <p class="desc">
+        <span class="lang-en">Estimate from <b>est_min</b> whether this cycle can realistically close. Too big → <b>self-downgrade</b> (roll-design re-splits into sub-stories, chain_depth+1, capped at 2 re-splits) instead of burning a guaranteed-miss cycle.</span>
+        <span class="lang-zh">按 <b>est_min</b> 估这轮能不能闭环。太大 → <b>自降级</b>（roll-design 再拆成子故事，chain_depth+1，连拆 2 次封顶），不硬啃必败的一轮。</span>
+      </p>
+    </div></div>
 
-    <div class="band" style="--c:var(--build)">构建 · Build</div>
+    <div class="step" style="--c:var(--plan)"><div class="card">
+      <div class="no">STEP 1 · 2</div>
+      <div class="ttl"><span class="lang-en">Read story → split Actions</span><span class="lang-zh">读故事 → 拆 Action</span> <span class="chip"><span class="lang-en">2–5 min each</span><span class="lang-zh">2–5 min/步</span></span></div>
+      <p class="desc">
+        <span class="lang-en">Read the spec's AC / Files / Dependencies; split into smallest shippable Actions, pick the smallest first. No placeholders, directly executable.</span>
+        <span class="lang-zh">读 spec 的 AC / Files / 依赖；拆成最小可交付 Action，先挑最小那块。无占位、可直接执行。</span>
+      </p>
+    </div></div>
 
-    <div class="step gate" style="--c:var(--gate)">
-      <div class="card">
-        <div class="no">PHASE 3.5</div>
-        <div class="ttl">同行评审闸 <span class="chip solid">⛩ GATE</span> <span class="chip">10s 可跳过</span></div>
-        <p class="desc">跨模块 / 架构决策 / 破坏性操作 / 高风险信号 → 触发<b>跨 agent 评审</b>。AGREE 放行；REFINE/OBJECT 改方案重审。</p>
-      </div>
-    </div>
-    <div class="step" style="--c:var(--build)">
-      <div class="card">
-        <div class="no">PHASE 4</div>
-        <div class="ttl">测试设计评审</div>
-        <p class="desc">写实现前先审测试：测的是不是对的行为？边界覆盖了吗？测试独立确定吗？——TCR 只保证过测，先确保测试对。</p>
-      </div>
-    </div>
-    <div class="step loop" style="--c:var(--build)">
-      <div class="card tcr">
-        <div class="no">PHASE 5 · 核心</div>
-        <div class="ttl">♻ TCR 实现循环 <span class="chip solid">Test &amp;&amp; Commit ‖ Revert</span></div>
-        <p class="desc">微步推进：先写测试（确认 <b>红</b>）→ 最小实现 → 跑测试。每步累积 3–5 个微提交，每个都是有保障的工作态。</p>
-        <div class="tcrflow">
-          <span class="n">写/改测试</span><span class="ar">→</span>
-          <span class="n">最小实现</span><span class="ar">→</span>
-          <span class="n">跑测试</span><span class="ar">→</span>
-          <span class="n g">🟢 绿 = commit</span><span class="ar">/</span>
-          <span class="n r">🔴 红 = revert ↺</span>
-        </div>
-      </div>
-    </div>
-    <div class="step" style="--c:var(--build)">
-      <div class="card">
-        <div class="no">PHASE 5.5</div>
-        <div class="ttl">E2E 沉淀</div>
-        <p class="desc">为这故事的黄金路径存一个 E2E 用例，沿用本仓既有 E2E 设施。每个沉淀的用例成为可重放的回归。</p>
-      </div>
-    </div>
+    <div class="step" style="--c:var(--plan)"><div class="card">
+      <div class="no">STEP 2.5</div>
+      <div class="ttl"><span class="lang-en">Parallel dispatch (auto)</span><span class="lang-zh">并行派发（自动判定）</span> <span class="chip"><span class="lang-en">worktree isolation</span><span class="lang-zh">worktree 隔离</span></span></div>
+      <p class="desc">
+        <span class="lang-en">No file conflict between Actions → auto-open worktrees, sub-agents each run TCR; then review each, merge to main, run integration. Conflicting → sequential.</span>
+        <span class="lang-zh">Action 间无文件冲突 → 自动开 worktree 并行，子 agent 各自 TCR；完成后逐个审、合主干、跑集成。有冲突则串行。</span>
+      </p>
+    </div></div>
 
-    <div class="band" style="--c:var(--ship)">交付 · Ship</div>
+    <div class="step" style="--c:var(--plan)"><div class="card">
+      <div class="no">STEP 3</div>
+      <div class="ttl"><span class="lang-en">Define verification</span><span class="lang-zh">定义验证</span></div>
+      <p class="desc">
+        <span class="lang-en">Test matrix: happy path + edge/failure/regression; define what "online verification" means for this repo (URL / endpoint / log signal).</span>
+        <span class="lang-zh">测试矩阵：happy path + 边界/失败/回归；明确本仓"线上验证"是什么（URL / 端点 / 日志信号）。</span>
+      </p>
+    </div></div>
 
-    <div class="step gate" style="--c:var(--gate)">
-      <div class="card">
-        <div class="no">PHASE 6</div>
-        <div class="ttl">推前 CI 本地闸 <span class="chip solid">⛩ GATE</span></div>
-        <p class="desc">推送前本地跑全套 CI（format + lint + build + test）。红则修到绿，绝不带红推送。</p>
-      </div>
-    </div>
-    <div class="step" style="--c:var(--ship)">
-      <div class="card">
-        <div class="no">PHASE 7</div>
-        <div class="ttl">推前三轴代码评审 <span class="chip">reuse · quality · efficiency</span></div>
-        <p class="desc">对整故事 diff 并行三个评审：<b>复用</b>（有没有重造轮子）/ <b>质量</b>（参数蔓延、复制粘贴、深嵌套）/ <b>效率</b>（冗余计算、N+1、热路径膨胀）。</p>
-      </div>
-    </div>
-    <div class="step" style="--c:var(--ship)">
-      <div class="card">
-        <div class="no">PHASE 8 · 9</div>
-        <div class="ttl">提交推送 → 盯 CI → 部署</div>
-        <p class="desc">worktree-first 开分支、PR、绿了合主干（<b>绝不直推 main</b>）。CI 红则诊断 → 新 TCR 微步修 → 重推。</p>
-      </div>
-    </div>
+    <div class="band" style="--c:var(--build)"><span class="lang-en">Build</span><span class="lang-zh">构建</span></div>
 
-    <div class="band" style="--c:var(--verify)">验证 · Verify</div>
+    <div class="step gate" style="--c:var(--gate)"><div class="card">
+      <div class="no">PHASE 3.5</div>
+      <div class="ttl"><span class="lang-en">Peer review gate</span><span class="lang-zh">同行评审闸</span> <span class="chip solid">⛩ GATE</span> <span class="chip"><span class="lang-en">10s opt-out</span><span class="lang-zh">10s 可跳过</span></span></div>
+      <p class="desc">
+        <span class="lang-en">Cross-module / architecture decisions / destructive ops / high-risk signals → trigger <b>cross-agent review</b>. AGREE proceeds; REFINE/OBJECT regenerate the plan and re-review.</span>
+        <span class="lang-zh">跨模块 / 架构决策 / 破坏性操作 / 高风险信号 → 触发<b>跨 agent 评审</b>。AGREE 放行；REFINE/OBJECT 改方案重审。</span>
+      </p>
+    </div></div>
 
-    <div class="step" style="--c:var(--verify)">
-      <div class="card">
-        <div class="no">PHASE 10</div>
-        <div class="ttl">运行时验证</div>
-        <p class="desc">web 在部署 URL 验、CLI 真跑命令验、库用示例脚本验。happy path + 边界 + 无回归。</p>
+    <div class="step" style="--c:var(--build)"><div class="card">
+      <div class="no">PHASE 4</div>
+      <div class="ttl"><span class="lang-en">Test design review</span><span class="lang-zh">测试设计评审</span></div>
+      <p class="desc">
+        <span class="lang-en">Review the tests before the code: are we testing the right behavior? edges covered? independent & deterministic? — TCR only guarantees passing; verify the tests are right first.</span>
+        <span class="lang-zh">写实现前先审测试：测的是不是对的行为？边界覆盖了吗？测试独立确定吗？——TCR 只保证过测，先确保测试对。</span>
+      </p>
+    </div></div>
+
+    <div class="step loop" style="--c:var(--build)"><div class="card tcr">
+      <div class="no"><span class="lang-en">PHASE 5 · core</span><span class="lang-zh">PHASE 5 · 核心</span></div>
+      <div class="ttl">♻ <span class="lang-en">TCR implementation loop</span><span class="lang-zh">TCR 实现循环</span> <span class="chip solid">Test &amp;&amp; Commit ‖ Revert</span></div>
+      <p class="desc">
+        <span class="lang-en">Micro-steps: write the test (confirm <b>RED</b>) → minimal code → run. 3–5 micro-commits accumulate, each a guaranteed working state.</span>
+        <span class="lang-zh">微步推进：先写测试（确认 <b>红</b>）→ 最小实现 → 跑测试。每步累积 3–5 个微提交，每个都是有保障的工作态。</span>
+      </p>
+      <div class="tcrflow">
+        <span class="n"><span class="lang-en">write/edit test</span><span class="lang-zh">写/改测试</span></span><span class="ar">→</span>
+        <span class="n"><span class="lang-en">minimal code</span><span class="lang-zh">最小实现</span></span><span class="ar">→</span>
+        <span class="n"><span class="lang-en">run test</span><span class="lang-zh">跑测试</span></span><span class="ar">→</span>
+        <span class="n g">🟢 <span class="lang-en">green = commit</span><span class="lang-zh">绿 = commit</span></span><span class="ar">/</span>
+        <span class="n r">🔴 <span class="lang-en">red = revert ↺</span><span class="lang-zh">红 = revert ↺</span></span>
       </div>
-    </div>
-    <div class="step gate" style="--c:var(--gate)">
-      <div class="card">
-        <div class="no">PHASE 10.5</div>
-        <div class="ttl">验证闸 <span class="chip solid">⛩ MANDATORY</span></div>
-        <p class="desc">翻 Done 前必须<b>本会话新鲜跑出</b>的证据：测试过、构建过、线上验证、无回归。"我确认过了"不算证据。</p>
-      </div>
-    </div>
-    <div class="step" style="--c:var(--verify)">
-      <div class="card">
-        <div class="no">PHASE 10.6</div>
-        <div class="ttl">验收证据落地 <span class="chip">ac-map · attest · 截屏</span></div>
-        <p class="desc">每条 AC 标 pass/partial/… + 引真实证据 → <code>roll attest</code> 出报告 → <code>roll index</code> 刷档案。改前/改后<b>成对截屏</b>是最强证据。</p>
-      </div>
-    </div>
+    </div></div>
+
+    <div class="step" style="--c:var(--build)"><div class="card">
+      <div class="no">PHASE 5.5</div>
+      <div class="ttl"><span class="lang-en">E2E deposit</span><span class="lang-zh">E2E 沉淀</span></div>
+      <p class="desc">
+        <span class="lang-en">Deposit one E2E test for the story's golden path, reusing the repo's existing E2E infra. Each becomes a replayable regression.</span>
+        <span class="lang-zh">为这故事的黄金路径存一个 E2E 用例，沿用本仓既有 E2E 设施。每个沉淀的用例成为可重放的回归。</span>
+      </p>
+    </div></div>
+
+    <div class="band" style="--c:var(--ship)"><span class="lang-en">Ship</span><span class="lang-zh">交付</span></div>
+
+    <div class="step gate" style="--c:var(--gate)"><div class="card">
+      <div class="no">PHASE 6</div>
+      <div class="ttl"><span class="lang-en">Pre-push CI gate</span><span class="lang-zh">推前 CI 本地闸</span> <span class="chip solid">⛩ GATE</span></div>
+      <p class="desc">
+        <span class="lang-en">Run the full CI locally before pushing (format + lint + build + test). Red → fix to green; never push red.</span>
+        <span class="lang-zh">推送前本地跑全套 CI（format + lint + build + test）。红则修到绿，绝不带红推送。</span>
+      </p>
+    </div></div>
+
+    <div class="step" style="--c:var(--ship)"><div class="card">
+      <div class="no">PHASE 7</div>
+      <div class="ttl"><span class="lang-en">Three-axis code review</span><span class="lang-zh">推前三轴代码评审</span> <span class="chip">reuse · quality · efficiency</span></div>
+      <p class="desc">
+        <span class="lang-en">Three parallel reviews on the full story diff: <b>reuse</b> (re-implementing existing helpers?) / <b>quality</b> (param sprawl, copy-paste, deep nesting) / <b>efficiency</b> (redundant compute, N+1, hot-path bloat).</span>
+        <span class="lang-zh">对整故事 diff 并行三个评审：<b>复用</b>（有没有重造轮子）/ <b>质量</b>（参数蔓延、复制粘贴、深嵌套）/ <b>效率</b>（冗余计算、N+1、热路径膨胀）。</span>
+      </p>
+    </div></div>
+
+    <div class="step" style="--c:var(--ship)"><div class="card">
+      <div class="no">PHASE 8 · 9</div>
+      <div class="ttl"><span class="lang-en">Commit & push → watch CI → deploy</span><span class="lang-zh">提交推送 → 盯 CI → 部署</span></div>
+      <p class="desc">
+        <span class="lang-en">Worktree-first branch, PR, merge to main when green (<b>never push main directly</b>). CI red → diagnose → new TCR micro-step → re-push.</span>
+        <span class="lang-zh">worktree-first 开分支、PR、绿了合主干（<b>绝不直推 main</b>）。CI 红则诊断 → 新 TCR 微步修 → 重推。</span>
+      </p>
+    </div></div>
+
+    <div class="band" style="--c:var(--verify)"><span class="lang-en">Verify</span><span class="lang-zh">验证</span></div>
+
+    <div class="step" style="--c:var(--verify)"><div class="card">
+      <div class="no">PHASE 10</div>
+      <div class="ttl"><span class="lang-en">Runtime verification</span><span class="lang-zh">运行时验证</span></div>
+      <p class="desc">
+        <span class="lang-en">web on the deployed URL, CLI by really running the command, libraries via an example script. Happy path + edges + no regression.</span>
+        <span class="lang-zh">web 在部署 URL 验、CLI 真跑命令验、库用示例脚本验。happy path + 边界 + 无回归。</span>
+      </p>
+    </div></div>
+
+    <div class="step gate" style="--c:var(--gate)"><div class="card">
+      <div class="no">PHASE 10.5</div>
+      <div class="ttl"><span class="lang-en">Verification gate</span><span class="lang-zh">验证闸</span> <span class="chip solid">⛩ MANDATORY</span></div>
+      <p class="desc">
+        <span class="lang-en">Before flipping Done, evidence <b>freshly produced this session</b>: tests passed, build succeeded, online-verified, no regression. "I confirm it passed" is not evidence.</span>
+        <span class="lang-zh">翻 Done 前必须<b>本会话新鲜跑出</b>的证据：测试过、构建过、线上验证、无回归。"我确认过了"不算证据。</span>
+      </p>
+    </div></div>
+
+    <div class="step" style="--c:var(--verify)"><div class="card">
+      <div class="no">PHASE 10.6</div>
+      <div class="ttl"><span class="lang-en">Acceptance evidence</span><span class="lang-zh">验收证据落地</span> <span class="chip">ac-map · attest · <span class="lang-en">screenshots</span><span class="lang-zh">截屏</span></span></div>
+      <p class="desc">
+        <span class="lang-en">Mark each AC pass/partial/… with real evidence → <code>roll attest</code> renders the report → <code>roll index</code> refreshes the dossier. A before/after <b>screenshot pair</b> is the strongest proof.</span>
+        <span class="lang-zh">每条 AC 标 pass/partial/… + 引真实证据 → <code>roll attest</code> 出报告 → <code>roll index</code> 刷档案。改前/改后<b>成对截屏</b>是最强证据。</span>
+      </p>
+    </div></div>
 
   </div>
 
-  <!-- Principles + Hard Rule -->
   <div class="foot">
     <div class="box">
-      <h4>核心理念 · Core Philosophy</h4>
+      <h4><span class="lang-en">Core philosophy</span><span class="lang-zh">核心理念</span></h4>
       <ul>
-        <li><b>Clarity over assumptions</b> — 范围不清先 clarify，不臆测。</li>
-        <li><b>Just-enough planning</b> — 规划到不确定性要求的深度即可。</li>
-        <li><b>TCR rhythm</b> — 测试先行、微步、绿则提交、红则回退。</li>
-        <li><b>Push to GitHub</b> — 完整实现 + 提交 + 推送，代码在远端。</li>
-        <li><b>Stay reversible</b> — 每个微步都让仓库停在干净的绿色态。</li>
+        <li><b>Clarity over assumptions</b> — <span class="lang-en">unclear scope → clarify first, don't assume.</span><span class="lang-zh">范围不清先 clarify，不臆测。</span></li>
+        <li><b>Just-enough planning</b> — <span class="lang-en">plan to the depth the uncertainty demands.</span><span class="lang-zh">规划到不确定性要求的深度即可。</span></li>
+        <li><b>TCR rhythm</b> — <span class="lang-en">test-first, micro-steps, green=commit, red=revert.</span><span class="lang-zh">测试先行、微步、绿则提交、红则回退。</span></li>
+        <li><b>Push to GitHub</b> — <span class="lang-en">full implementation + commit + push; code on remote.</span><span class="lang-zh">完整实现 + 提交 + 推送，代码在远端。</span></li>
+        <li><b>Stay reversible</b> — <span class="lang-en">every micro-step leaves a clean green repo.</span><span class="lang-zh">每个微步都让仓库停在干净的绿色态。</span></li>
       </ul>
     </div>
     <div class="box hard">
-      <h4>硬规则 · Hard Rule 0</h4>
+      <h4><span class="lang-en">Hard Rule 0</span><span class="lang-zh">硬规则 Hard Rule 0</span></h4>
       <ul>
-        <li><b>Worktree-first</b>：写类工作一律先开隔离 worktree，互不干扰。</li>
-        <li><b>PR-at-end</b>：最后开 PR 走评审，<b>绝不直推 main</b>。</li>
-        <li><b>三道硬闸</b>：同行评审(3.5) · CI(6) · 验证(10.5)，不过不放行。</li>
+        <li><b>Worktree-first</b><span class="lang-en"> — write work starts in an isolated worktree, no interference.</span><span class="lang-zh">：写类工作一律先开隔离 worktree，互不干扰。</span></li>
+        <li><b>PR-at-end</b><span class="lang-en"> — open a PR for review, <b>never push main directly</b>.</span><span class="lang-zh">：最后开 PR 走评审，<b>绝不直推 main</b>。</span></li>
+        <li><b><span class="lang-en">Three hard gates</span><span class="lang-zh">三道硬闸</span></b><span class="lang-en">: peer(3.5) · CI(6) · verification(10.5) — no pass, no go.</span><span class="lang-zh">：同行评审(3.5) · CI(6) · 验证(10.5)，不过不放行。</span></li>
       </ul>
     </div>
   </div>
+
+  <a class="home" href="../index.html">← <span class="lang-en">Back to roll</span><span class="lang-zh">回到 roll 主页</span></a>
 
   <footer>
     <span>Roll · roll-build skill</span>
@@ -291,5 +318,25 @@
   </footer>
 
 </div>
+
+<script>
+(function(){
+  var KEY="roll-ig-lang";
+  var root=document.documentElement;
+  function set(l){
+    root.setAttribute("data-lang",l);
+    root.setAttribute("lang",l==="zh"?"zh":"en");
+    try{localStorage.setItem(KEY,l)}catch(e){}
+    document.querySelectorAll(".chrome button").forEach(function(b){b.classList.toggle("on",b.getAttribute("data-set")===l)});
+  }
+  var init;try{init=localStorage.getItem(KEY)}catch(e){}
+  if(!init){
+    var p=new URLSearchParams(location.search).get("lang");
+    init=(p==="en"||p==="zh")?p:((navigator.language||"").toLowerCase().indexOf("zh")===0?"zh":"en");
+  }
+  set(init==="en"?"en":"zh");
+  document.querySelectorAll(".chrome button").forEach(function(b){b.addEventListener("click",function(){set(b.getAttribute("data-set"))})});
+})();
+</script>
 </body>
 </html>

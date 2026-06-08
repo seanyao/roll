@@ -40,6 +40,7 @@ window.RollData = (function () {
       sub: "Write a goal in Backlog. Roll picks it up hourly, executes it in an isolated worktree, opens a PR, waits for green CI — and ships. You stay on the loop, not in it.",
       install: "npm install -g @seanyao/roll",
       ctas: [
+        { label: "How roll-build works", href: "diagrams/roll-build-skill.html", primary: true, external: true },
         { label: "Read the guide", href: "#guides", primary: false },
         { label: "View on GitHub", href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
@@ -219,6 +220,7 @@ window.RollData = (function () {
       sub: "把目标写进 Backlog。Roll 每小时领取一个，在隔离的 worktree 里执行、开 PR、等 CI 绿、自动合入。你掌舵，不掌桨。",
       install: "npm install -g @seanyao/roll",
       ctas: [
+        { label: "roll-build 详解", href: "diagrams/roll-build-skill.html", primary: true, external: true },
         { label: "查看文档", href: "#guides", primary: false },
         { label: "GitHub",  href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],

@@ -123,13 +123,25 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(withReport).toContain('href="../reports/morning/latest.html"');
   });
 
-  it("epic groups: shipping first, backlog after; cards carry bar + chips", () => {
+  it("epic groups: shipping first, backlog after; table rows carry bar + chips (US-DOSSIER-005)", () => {
     expect(html.indexOf("Shipping to main")).toBeLessThan(html.indexOf("In backlog"));
     expect(html).toContain('href="alpha/index.html"');
     expect(html).toContain('href="alpha/US-A-1/index.html"');
     expect(html).toContain('class="chip truth"');
     expect(html).toContain('data-truth="1"');
     expect(html).toContain('class="epic-bar"');
+  });
+
+  it("US-DOSSIER-005: epics render as a table (rows, not cards), filter hooks intact", () => {
+    expect(html).toContain('<table class="epic-table">');
+    expect(html).toContain("<thead>");
+    expect(html).toContain('<tr class="epic-row"');
+    expect(html).toContain('<th scope="row" class="epic-name">');
+    // the old card-grid container is gone
+    expect(html).not.toContain('class="epic-grid"');
+    expect(html).not.toContain('class="epic-card"');
+    // search/filter still keys off data-search on the rows
+    expect(html).toContain("data-search=");
   });
 
   it("self-containment: no external scripts/links/images; chrome + tokens inline", () => {

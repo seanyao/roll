@@ -5,7 +5,7 @@
  * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
  */
 import { execFileSync, execSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -289,6 +289,15 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     skillBody: "work",
     clock: () => 42,
     agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
+    evidence: {
+      openFrame: vi.fn(() => "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1"),
+    },
+    capture: {
+      fromMarker: vi.fn(async () => ({ kind: "web", out: "/frame/screenshots/before-home.png", taken: true })),
+    },
+    attest: {
+      render: vi.fn(async () => 0),
+    },
     git: {
       fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
@@ -368,6 +377,21 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r2.event).toEqual({ type: "no_story" });
   });
 
+  it("US-EVID-001: pick_story opens an evidence frame before spawn and records the run dir", async () => {
+    const { ports, calls } = fakePorts();
+    const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+    expect(ports.evidence.openFrame).toHaveBeenCalledWith("/repo", "US-RUN-001", CTX.cycleId);
+    expect(r.ctxPatch?.evidenceRunDir).toBe("/repo/.roll/features/demo/US-RUN-001/20260605-000000-1");
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events).toContainEqual({
+      type: "evidence:frame-opened",
+      cycleId: CTX.cycleId,
+      storyId: "US-RUN-001",
+      runDir: "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1",
+      ts: 42,
+    });
+  });
+
   it("budget_check pause → budget_halt; ok → budget_ok", async () => {
     const halt = fakePorts({ budget: { check: () => "pause_and_notify" } });
     const r1 = await executeCommand({ kind: "budget_check", storyId: "US-RUN-001" }, halt.ports, CTX);
@@ -382,6 +406,69 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
+  });
+
+  it("US-EVID-001: spawn_agent passes the opened run dir explicitly to the child", async () => {
+    const { ports } = fakePorts();
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, evidenceRunDir: "/frame" },
+    );
+    expect(ports.agentSpawn).toHaveBeenCalledWith(
+      "claude",
+      expect.objectContaining({ runDir: "/frame" }),
+    );
+  });
+
+  it("US-EVID-003: spawn_agent listens for capture markers and dispatches screenshots into the run frame", async () => {
+    const { ports } = fakePorts({
+      agentSpawn: vi.fn(async (_agent, opts) => {
+        opts.onChunk?.(Buffer.from("agent says hi\n::roll-capture before web home https://app.test\n"));
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, evidenceRunDir: "/frame" },
+    );
+
+    expect(ports.capture.fromMarker).toHaveBeenCalledWith(
+      { phase: "before", kind: "web", stem: "home", target: "https://app.test" },
+      "/frame",
+    );
+  });
+
+  it("US-EVID-003: capture skips are recorded as evidence instead of placeholders", async () => {
+    const runDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-capture-log-")));
+    execDirs.push(runDir);
+    const { ports } = fakePorts({
+      agentSpawn: vi.fn(async (_agent, opts) => {
+        opts.onChunk?.(Buffer.from("::roll-capture gate terminal cli tmux:roll-loop-demo\n"));
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+      capture: {
+        fromMarker: vi.fn(async () => ({
+          kind: "terminal",
+          out: join(runDir, "screenshots", "gate-cli.png"),
+          taken: false,
+          skipped: "not macOS",
+        })),
+      },
+    });
+
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, evidenceRunDir: runDir },
+    );
+
+    const log = readFileSync(join(runDir, "evidence", "capture-markers.log"), "utf8");
+    expect(log).toContain('"taken":false');
+    expect(log).toContain('"skipped":"not macOS"');
+    expect(log).toContain('"phase":"gate"');
   });
 
   it("FIX-208: spawn_agent parses claude stream-json stdout → ctxPatch.cost", async () => {
@@ -417,11 +504,50 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.ctxPatch?.tcrCount).toBe(4);
   });
 
+  it("US-EVID-004: capture_facts renders attest into the opened run frame before the attest gate", async () => {
+    const order: string[] = [];
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      attest: {
+        render: vi.fn(async () => {
+          order.push("attest:render");
+          return 0;
+        }),
+      },
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path, event: RollEvent) => {
+          order.push(event.type);
+        }),
+      },
+    });
+
+    await executeCommand(
+      { kind: "capture_facts" },
+      ports,
+      { ...CTX, evidenceRunDir: "/frame" },
+    );
+
+    expect(ports.attest.render).toHaveBeenCalledWith("/rt/wt", "US-RUN-001", "/frame");
+    expect(order.indexOf("attest:render")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("attest:gate")).toBeGreaterThan(order.indexOf("attest:render"));
+  });
+
+  it("US-EVID-004: absent run frame means no deterministic render, preserving idle/back-compat paths", async () => {
+    const { ports } = fakePorts();
+    await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(ports.attest.render).not.toHaveBeenCalled();
+  });
+
   // FIX-207 — attest gate is wired into capture_facts (delivery without a fresh
   // acceptance report). Soft (default) records an event + alert but never blocks;
   // hard (policy.yaml) captures a failed exit so the story is not marked Done.
-  it("capture_facts soft attest gate: missing report → attest:gate event + alert, NOT blocked", async () => {
-    const { ports, calls } = fakePorts(); // repoCwd /repo has no policy → soft
+  it("capture_facts policy-soft attest gate: missing report → attest:gate event + alert, NOT blocked", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-207-soft-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n");
+    const { ports, calls } = fakePorts({ repoCwd: repo, paths: { ...fakePorts().ports.paths, worktreePath: join(repo, "wt") } });
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
@@ -429,12 +555,8 @@ describe("executeCommand — command → executor mapping", () => {
     expect((calls["alert"] ?? []).length).toBeGreaterThan(0);
   });
 
-  it("capture_facts hard attest gate: missing report → captured as failed (agentExit 1)", async () => {
-    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-207-exec-")));
-    execDirs.push(repo);
-    mkdirSync(join(repo, ".roll"), { recursive: true });
-    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: hard\n");
-    const { ports } = fakePorts({ repoCwd: repo, paths: { ...fakePorts().ports.paths, worktreePath: join(repo, "wt") } });
+  it("capture_facts default-hard attest gate: missing report → captured as failed (agentExit 1)", async () => {
+    const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
   });
@@ -442,7 +564,7 @@ describe("executeCommand — command → executor mapping", () => {
   it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
-    expect(r.event).toEqual({ type: "published", result: { status: 0 } });
+    expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
   });
 
   it("publish_pr with no slug → gh-missing tier (status 2)", async () => {
@@ -450,7 +572,24 @@ describe("executeCommand — command → executor mapping", () => {
       github: { ...fakePorts().ports.github, repoSlug: async () => undefined },
     });
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
-    expect(r.event).toEqual({ type: "published", result: { status: 2, mergedBack: false, orphanPushed: false } });
+    expect(r.event).toEqual({ type: "published", result: { status: 2, mergedBack: false, orphanPushed: false, manualMerge: false } });
+  });
+
+  it("US-EVID-014: manual-merge story keeps gh-missing publish from local merge-back success", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-manual-merge-publish-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(
+      join(repo, ".roll", "backlog.md"),
+      "| ID | Description | Status |\n|----|-------------|--------|\n| US-RUN-001 | autofix [roll:manual-merge] | 🔨 In Progress |\n",
+      "utf8",
+    );
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      github: { ...fakePorts().ports.github, repoSlug: async () => undefined },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(r.event).toEqual({ type: "published", result: { status: 2, mergedBack: false, orphanPushed: false, manualMerge: true } });
   });
 
   it("wait_merge polls prState → merge_polled", async () => {

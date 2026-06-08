@@ -89,6 +89,43 @@ describe("realAgentSpawn child-process path (PATH shim, no real claude)", () => 
     expect(res.timedOut).toBe(true);
     expect(res.exitCode).not.toBe(0);
   });
+
+  it("US-EVID-001: explicit runDir is exported to the child and overrides ambient ROLL_RUN_DIR", async () => {
+    const dir = tmp("run-dir-env");
+    const shim = join(dir, "claude");
+    writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        "echo \"ROLL_RUN_DIR=$ROLL_RUN_DIR\"",
+        "echo \"ROLL_EVIDENCE_DIR=$ROLL_EVIDENCE_DIR\"",
+        "echo \"ROLL_SCREENSHOTS_DIR=$ROLL_SCREENSHOTS_DIR\"",
+        "exit 0",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(shim, 0o755);
+    const runDir = join(dir, "frame");
+    const previous = process.env["ROLL_RUN_DIR"];
+    process.env["ROLL_RUN_DIR"] = "/wrong/frame";
+    try {
+      const res = await realAgentSpawn("claude", {
+        cwd: dir,
+        skillBody: "x",
+        bin: shim,
+        runDir,
+      });
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout).toContain(`ROLL_RUN_DIR=${runDir}`);
+      expect(res.stdout).toContain(`ROLL_EVIDENCE_DIR=${join(runDir, "evidence")}`);
+      expect(res.stdout).toContain(`ROLL_SCREENSHOTS_DIR=${join(runDir, "screenshots")}`);
+      expect(res.stdout).not.toContain("/wrong/frame");
+    } finally {
+      if (previous === undefined) delete process.env["ROLL_RUN_DIR"];
+      else process.env["ROLL_RUN_DIR"] = previous;
+    }
+  });
 });
 
 describe("FIX-204A — skill resolution + blind-agent refusal", () => {
@@ -340,6 +377,41 @@ describe("FIX-216 — auto-PAUSE on consecutive failures", () => {
     const body = rf(pauseMarker, "utf8");
     expect(body).toContain("# ALERT — loop auto-paused");
     expect(body).toContain("roll loop resume");
+    const events = rf(join(rt, "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"policy:safety_pause"');
+    expect(events).toContain('"type":"alert:notify"');
+  });
+
+  it("honors policy.yaml max_consecutive_failures before PAUSE", async () => {
+    const { existsSync: ex, mkdirSync: mks } = await import("node:fs");
+    const p = tmp("consec-policy");
+    execFileSync("git", ["init", "-q", p]);
+    mks(join(p, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(p, ".roll", "policy.yaml"), "loop_safety:\n  max_consecutive_failures: 4\n");
+    writeFileSync(join(p, ".roll", "loop", "consecutive-fails"), "2", "utf8");
+
+    const prevRt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const prevSlug = process.env["ROLL_MAIN_SLUG"];
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = join(p, ".roll", "loop");
+    process.env["ROLL_MAIN_SLUG"] = "default";
+    registerAll();
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    const prevCwd = process.cwd();
+    try {
+      process.chdir(p);
+      const r = await dispatch(["loop", "run-once"]);
+      expect(r.status).toBe(1);
+    } finally {
+      process.stderr.write = write;
+      process.chdir(prevCwd);
+      if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
+      if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+      else process.env["ROLL_MAIN_SLUG"] = prevSlug;
+    }
+
+    expect(ex(join(p, ".roll", "loop", "PAUSE-default"))).toBe(false);
   });
 });
 

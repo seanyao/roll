@@ -68,6 +68,9 @@ import {
   prViewState,
   releaseLock,
   remoteUrl,
+  captureFromMarker,
+  openEvidenceFrame,
+  parseCaptureMarker,
   runPublishPlan,
   systemClock,
   writeHeartbeat,
@@ -75,6 +78,8 @@ import {
   worktreeFetchOrigin,
   worktreeRemove,
   push as gitPush,
+  type CaptureMarker,
+  type ScreenshotResult,
 } from "@roll/infra";
 import { execFile } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -86,8 +91,11 @@ import {
 } from "./agent-spawn.js";
 import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
+import { applyCorrectionAction } from "./correction-actuator.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
+import { attestCommand } from "../commands/attest.js";
+import { cardArchiveDir } from "../lib/archive.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -173,6 +181,21 @@ export interface BudgetPort {
   check(storyId: string): "ok" | "downgrade" | "pause_and_notify";
 }
 
+/** Evidence frame facet — opens `.roll/features/<epic>/<ID>/<run-id>/`. */
+export interface EvidencePort {
+  openFrame(projectCwd: string, storyId: string, runId: string): string;
+}
+
+/** Screenshot marker facet — executes agent-emitted capture requests. */
+export interface CapturePort {
+  fromMarker(marker: CaptureMarker, runDir: string): Promise<ScreenshotResult>;
+}
+
+/** Acceptance evidence facet — renders the final report into a run frame. */
+export interface AttestPort {
+  render(projectCwd: string, storyId: string, runDir: string): Promise<number>;
+}
+
 /**
  * The full injectable Ports bundle. The runtime wiring ({@link nodePorts})
  * binds these to the real infra; tests pass fakes for every facet so NO real
@@ -186,6 +209,9 @@ export interface Ports {
   backlog: BacklogPort;
   route: RoutePort;
   budget: BudgetPort;
+  evidence: EvidencePort;
+  capture: CapturePort;
+  attest: AttestPort;
   agentSpawn: AgentSpawn;
   clock: ProcessClock;
   /** Runtime paths the executor writes to. */
@@ -220,6 +246,50 @@ export interface ExecuteResult {
    *  and clock/spawn-free) — real tcr count + parsed cost. The driver folds
    *  this into liveCtx so the later append_run / cycle:end carry truthful data. */
   ctxPatch?: Partial<CycleContext>;
+}
+
+function createCaptureMarkerSink(runDir: string, capture: CapturePort): { onChunk(chunk: Buffer): void; flush(): Promise<void> } {
+  let buf = "";
+  const pending: Promise<void>[] = [];
+  const logPath = join(runDir, "evidence", "capture-markers.log");
+  const record = (marker: CaptureMarker, result: ScreenshotResult): void => {
+    try {
+      mkdirSync(dirname(logPath), { recursive: true });
+      appendFileSync(logPath, JSON.stringify({ marker, result }) + "\n", "utf8");
+    } catch {
+      /* evidence logging is best-effort */
+    }
+  };
+  const runMarker = (line: string): void => {
+    const marker = parseCaptureMarker(line);
+    if (marker === null) return;
+    pending.push(
+      capture
+        .fromMarker(marker, runDir)
+        .then((result) => record(marker, result))
+        .catch((e: unknown) =>
+          record(marker, {
+            kind: marker.kind,
+            out: join(runDir, "screenshots", `${marker.phase}-${marker.stem}.png`),
+            taken: false,
+            skipped: `capture errored: ${String(e)}`,
+          }),
+        ),
+    );
+  };
+  return {
+    onChunk(chunk) {
+      buf += chunk.toString("utf8");
+      const lines = buf.split(/\r?\n/);
+      buf = lines.pop() ?? "";
+      for (const line of lines) runMarker(line);
+    },
+    async flush() {
+      if (buf.trim() !== "") runMarker(buf);
+      buf = "";
+      await Promise.allSettled(pending);
+    },
+  };
 }
 
 /**
@@ -328,7 +398,15 @@ export async function executeCommand(
       // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
       // 写在 worktree 的虚空里，且真实 ports 从未绑定 markStatus).
       ports.backlog.markStatus?.(ports.repoCwd, story.id, "🔨 In Progress");
-      return { event: { type: "story_picked", storyId: story.id } };
+      const evidenceRunDir = ports.evidence.openFrame(ports.repoCwd, story.id, ctx.cycleId);
+      ports.events.appendEvent(ports.paths.eventsPath, {
+        type: "evidence:frame-opened",
+        cycleId: ctx.cycleId,
+        storyId: story.id,
+        runDir: evidenceRunDir,
+        ts: ports.clock(),
+      });
+      return { event: { type: "story_picked", storyId: story.id }, ctxPatch: { evidenceRunDir } };
     }
 
     // agent/router resolveRoute (+ pre-spawn availability fallback).
@@ -375,13 +453,19 @@ export async function executeCommand(
       } catch {
         /* observation is best-effort */
       }
+      const captureSink =
+        ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== ""
+          ? createCaptureMarkerSink(ctx.evidenceRunDir, ports.capture)
+          : undefined;
       const res = await ports.agentSpawn(cmd.agent, {
         cwd: ports.paths.worktreePath,
         skillBody: ports.skillBody,
+        ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
         // FIX-204B: pin the executor-picked story into the agent prompt — the
         // claim (pick_story → 🔨) and the work must be the same story.
         ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
         onChunk: (d: Buffer) => {
+          captureSink?.onChunk(d);
           try {
             appendFileSync(livePath, d);
           } catch {
@@ -389,6 +473,7 @@ export async function executeCommand(
           }
         },
       });
+      await captureSink?.flush();
       // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
       // per-cycle log next to events/runs — v2 keeps cycle logs; without this
       // an agent that "ran but delivered nothing" is undiagnosable.
@@ -504,7 +589,12 @@ export async function executeCommand(
             // a wall clock so 30s is enforced even if an agent's spawn path ignores
             // its own timeoutMs. Whichever loses, the cycle is never stalled.
             res = await Promise.race([
-              ports.agentSpawn(peer, { cwd: ports.paths.worktreePath, skillBody: prompt, timeoutMs }),
+              ports.agentSpawn(peer, {
+                cwd: ports.paths.worktreePath,
+                skillBody: prompt,
+                timeoutMs,
+                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+              }),
               new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
             ]);
           } catch {
@@ -563,14 +653,24 @@ export async function executeCommand(
           await runPairing(ports.repoCwd, ports.paths.worktreePath, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", stage, pairingDeps);
         }
       }
+      const storyId = ctx.storyId ?? "";
+      if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
+        const rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
+        if (rc !== 0) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `attest render failed for ${storyId} in cycle ${ctx.cycleId ?? ""} (exit ${rc})`,
+          );
+        }
+      }
       // FIX-207 attest gate: a delivery (commits ahead + a real story) that ships
       // with no FRESH acceptance report leaves an auditable ALERT + `attest:gate`
-      // event. SOFT by default (record only); `loop_safety.attest_gate: hard` in
-      // policy.yaml escalates — a hard-blocked delivery is captured as a failed
-      // agent exit so the story is NOT marked Done without acceptance evidence.
+      // event. HARD by default; `loop_safety.attest_gate: soft` in policy.yaml
+      // records without blocking for explicit migration windows. A hard-blocked
+      // delivery is captured as a failed agent exit so the story is NOT marked
+      // Done without acceptance evidence.
       // Scoped to actual deliveries: an idle cycle has nothing to attest.
       let attestBlocked = false;
-      const storyId = ctx.storyId ?? "";
       if (commitsAhead > 0 && storyId !== "") {
         const mode = readAttestGateMode(ports.repoCwd);
         const res = runAttestGate(
@@ -591,6 +691,17 @@ export async function executeCommand(
               }),
           },
         );
+        if (res.verdict === "skipped") {
+          applyCorrectionAction({
+            projectPath: ports.repoCwd,
+            eventsPath: ports.paths.eventsPath,
+            alertsPath: ports.paths.alertsPath,
+            storyId,
+            cycleId: ctx.cycleId ?? "",
+            reasons: res.reasons,
+            nowSec: ports.clock(),
+          });
+        }
         attestBlocked = res.blocked;
       }
       const facts: CapturedFacts = {
@@ -606,17 +717,18 @@ export async function executeCommand(
 
     // delivery/pr planPublishPr → github.runPublishPlan → published result.
     case "publish_pr": {
+      const manualMerge = storyRequiresManualMerge(ports.repoCwd, ctx.storyId);
       const slug = await ports.github.repoSlug(ports.repoCwd);
       if (slug === undefined) {
         // gh unavailable / no github remote → status 2 (gh-missing tier).
-        const pub: PublishResult = { status: 2, mergedBack: false, orphanPushed: false };
+        const pub: PublishResult = { status: 2, mergedBack: false, orphanPushed: false, manualMerge };
         return { event: { type: "published", result: pub } };
       }
       const plan = cmd.docOnly
-        ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx) })
-        : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx) });
+        ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge })
+        : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge });
       const r = await ports.github.runPublishPlan(plan);
-      const pub: PublishResult = { status: r.status };
+      const pub: PublishResult = { status: r.status, manualMerge };
       return { event: { type: "published", result: pub } };
     }
 
@@ -806,6 +918,27 @@ function readRunsRows(runsPath: string): ReconcileRunRow[] {
 /** Compose the gh pr-create body (commit-count-style; kept simple + pure). */
 function publishBody(ctx: CycleContext): string {
   return `loop cycle ${ctx.cycleId}${ctx.storyId !== undefined ? ` — ${ctx.storyId}` : ""}`;
+}
+
+function storyRequiresManualMerge(repoCwd: string, storyId: string | undefined): boolean {
+  if (storyId === undefined || storyId.trim() === "") return false;
+  const needles = ["manual_merge", "manual-merge", "[roll:manual-merge]", "autofix"];
+  const containsMarker = (text: string): boolean => {
+    const lower = text.toLowerCase();
+    return needles.some((n) => lower.includes(n));
+  };
+  try {
+    const backlog = readFileSync(join(repoCwd, ".roll", "backlog.md"), "utf8");
+    const row = parseBacklog(backlog).find((it) => it.id === storyId);
+    if (row !== undefined && containsMarker(row.desc)) return true;
+  } catch {
+    /* absent backlog */
+  }
+  try {
+    return containsMarker(readFileSync(join(cardArchiveDir(repoCwd, storyId), "spec.md"), "utf8"));
+  } catch {
+    return false;
+  }
 }
 
 /** Parse an `est_min:<n>` tag from a backlog desc (router input). */
@@ -1000,6 +1133,27 @@ export function nodePorts(opts: {
         }
       : { resolve: () => ({ agent: "claude", model: "" }) },
     budget: opts.budget ?? { check: () => "ok" },
+    evidence: {
+      openFrame(projectCwd, storyId, runId) {
+        return openEvidenceFrame({ runDir: join(cardArchiveDir(projectCwd, storyId), runId) }).runDir;
+      },
+    },
+    capture: {
+      fromMarker(marker, runDir) {
+        return captureFromMarker(marker, { runDir });
+      },
+    },
+    attest: {
+      async render(projectCwd, storyId, runDir) {
+        const prev = process.cwd();
+        try {
+          process.chdir(projectCwd);
+          return await attestCommand([storyId, "--run-dir", runDir]);
+        } finally {
+          process.chdir(prev);
+        }
+      },
+    },
   };
 }
 

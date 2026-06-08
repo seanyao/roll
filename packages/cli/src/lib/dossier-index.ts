@@ -77,7 +77,7 @@ function epicCard(e: DossierEpic): string {
 }
 
 /** Render the Delivery Dossier front page from the collected model. */
-export function renderFeaturesIndex(epics: DossierEpic[]): string {
+export function renderFeaturesIndex(epics: DossierEpic[], opts: { morningReportHref?: string } = {}): string {
   const shipping = epics.filter((e) => e.delivered > 0);
   const backlog = epics.filter((e) => e.delivered === 0);
   const group = (title: string, zh: string, list: DossierEpic[]): string =>
@@ -100,6 +100,9 @@ export function renderFeaturesIndex(epics: DossierEpic[]): string {
     `</div>\n` +
     ledger(epics) +
     spineMotif() +
+    (opts.morningReportHref !== undefined
+      ? `<p class="ops-link"><a href="${esc(opts.morningReportHref)}">${bi("Morning report", "夜间运行晨报")}</a></p>\n`
+      : "") +
     `<div class="toolbar">` +
     `<input type="search" data-dossier-search placeholder="Search · 搜索" aria-label="search">` +
     `<label class="only"><input type="checkbox" data-dossier-only>${bi("Only shipping", "只看交付中")}</label>` +

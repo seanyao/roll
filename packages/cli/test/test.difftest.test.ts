@@ -35,7 +35,7 @@
  * a stdlib-only regex reader (no yaml import).
  */
 import { execSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -131,7 +131,19 @@ function bashTest(proj: string, args: string[], shimDir: string, extra: Record<s
   return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
-const ENV_KEYS = ["PATH", "HOME", "ROLL_HOME", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "PWD"];
+const ENV_KEYS = [
+  "PATH",
+  "HOME",
+  "ROLL_HOME",
+  "NO_COLOR",
+  "ROLL_LANG",
+  "LC_ALL",
+  "LANG",
+  "PWD",
+  "ROLL_RUN_DIR",
+  "ROLL_EVIDENCE_DIR",
+  "ROLL_SCREENSHOTS_DIR",
+];
 
 function tsTest(proj: string, args: string[], shimDir: string, extra: Record<string, string> = {}): Run {
   const target = baseEnv(proj, shimDir, extra);
@@ -247,5 +259,51 @@ describe("REFACTOR-046 whitelisted divergences (TS-only)", () => {
     expect(exec.status).toBe(1);
     expect(exec.stderr).toContain("unknown type 'tart'");
     expect(exec.stdout).not.toContain("npm-shim ran"); // no silent host fallback
+  });
+
+  it("US-EVID-002: existing run frame receives roll test output, summary, and e2e child artifacts", () => {
+    const shimDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-evidence-npm-")));
+    dirs.push(shimDir);
+    writeFileSync(
+      join(shimDir, "npm"),
+      [
+        "#!/bin/sh",
+        'echo "npm-shim ran: $*"',
+        'echo "child ROLL_RUN_DIR=$ROLL_RUN_DIR"',
+        'echo "child ROLL_EVIDENCE_DIR=$ROLL_EVIDENCE_DIR"',
+        'echo "child ROLL_SCREENSHOTS_DIR=$ROLL_SCREENSHOTS_DIR"',
+        'printf "e2e artifact\\n" > "$ROLL_EVIDENCE_DIR/e2e-artifact.txt"',
+        'printf "PNG\\n" > "$ROLL_SCREENSHOTS_DIR/e2e-shot.png"',
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const proj = projWith("none");
+    const runDir = join(proj, ".roll", "features", "demo", "US-EVID-002", "cycle-1");
+    mkdirSync(runDir, { recursive: true });
+
+    const t = tsTest(proj, ["--", "e2e"], shimDir, { ROLL_RUN_DIR: runDir });
+
+    expect(t.status).toBe(0);
+    expect(t.stdout).toContain("npm-shim ran: test -- e2e");
+    expect(t.stdout).toContain("child ROLL_RUN_DIR=");
+    expect(t.stdout).not.toContain(`child ROLL_RUN_DIR=${runDir}`);
+    expect(readFileSync(join(runDir, "evidence", "roll-test-output.log"), "utf8")).toContain("npm-shim ran: test -- e2e");
+    expect(readFileSync(join(runDir, "evidence", "roll-test-summary.txt"), "utf8")).toContain('"exitCode":0');
+    expect(readFileSync(join(runDir, "evidence", "e2e-artifact.txt"), "utf8")).toBe("e2e artifact\n");
+    expect(readFileSync(join(runDir, "screenshots", "e2e-shot.png"), "utf8")).toBe("PNG\n");
+  });
+
+  it("US-EVID-002: missing frame is a no-op, not an error", () => {
+    const proj = projWith("none");
+    const missing = join(proj, ".roll", "features", "demo", "US-EVID-002", "missing-cycle");
+
+    const t = tsTest(proj, [], binNpm, { ROLL_RUN_DIR: missing });
+
+    expect(t.status).toBe(0);
+    expect(t.stdout).toContain("npm-shim ran: test -- --affected");
+    expect(existsSync(missing)).toBe(false);
   });
 });

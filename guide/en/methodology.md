@@ -604,7 +604,7 @@ On macOS, Roll uses **launchd** (plists installed to `~/Library/LaunchAgents/`);
 ~/Library/LaunchAgents/com.roll.brief.<project-slug>.plist
 ```
 
-`roll loop monitor` provides a real-time `top`-like view of all three services: launchd status, current execution state, pending queue, alerts, and live log tail.
+`roll loop status` provides the scheduler snapshot: launchd status, current execution state, pending queue, alerts, and recent run history. For the live terminal, attach directly with `tmux attach -t roll-loop-<project-slug>`.
 
 If the agent supports native scheduling (Claude Code hooks, opencode scheduled tasks), that is preferred over raw launchd/cron for cleaner lifecycle management.
 

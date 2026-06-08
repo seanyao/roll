@@ -80,6 +80,33 @@ export interface CollectOptions {
   ghProbe?: () => Promise<boolean>;
 }
 
+export interface EvidenceFrame {
+  runDir: string;
+  evidenceDir: string;
+  screenshotsDir: string;
+}
+
+export interface OpenEvidenceFrameOptions {
+  /** Absolute or project-relative story run dir, e.g. `.roll/features/<epic>/<ID>/<run-id>`. */
+  runDir: string;
+}
+
+/**
+ * US-EVID-001 — open the cycle evidence frame before the agent runs.
+ * Idempotent by design: resuming a PAUSEd/crashed cycle reuses the same frame
+ * and never clears evidence already deposited by earlier phases.
+ */
+export function openEvidenceFrame(opts: OpenEvidenceFrameOptions): EvidenceFrame {
+  const frame = {
+    runDir: opts.runDir,
+    evidenceDir: join(opts.runDir, "evidence"),
+    screenshotsDir: join(opts.runDir, "screenshots"),
+  };
+  mkdirSync(frame.evidenceDir, { recursive: true });
+  mkdirSync(frame.screenshotsDir, { recursive: true });
+  return frame;
+}
+
 /** Sweep all sources; never throws — failures degrade to absent shapes. */
 export async function collectEvidence(opts: CollectOptions): Promise<EvidenceManifest> {
   const run = opts.run ?? defaultRun;

@@ -11,7 +11,8 @@ cd my-project
 roll setup && roll init
 
 roll loop on        # AI 按可配置频次执行 BACKLOG
-roll loop monitor   # 实时查看进度
+roll loop status    # 查看调度状态和最近 cycle
+tmux attach -t roll-loop-<project-slug>   # 可选：实时旁观当前 cycle
 ```
 
 ## 工作原理
@@ -29,8 +30,8 @@ Roll 运行在三个自主层上：
 ### 自主执行
 
 - `roll loop on` — AI 从 BACKLOG 领取故事，按可配置频次在隔离 worktree 里执行 `[core]`
-- `roll loop monitor` — 实时看板：loop / dream / brief 服务状态 `[core]`
-- `roll loop attach` — 附加到实时 tmux 会话，观看 AI 工作过程 `[highlight]`
+- `roll loop status` — 查看调度、最近 cycle、队列、告警和成本 `[core]`
+- `tmux attach -t roll-loop-<project-slug>` — 附加到实时 tmux 会话，观看 AI 工作过程 `[highlight]`
 - `roll loop pause / resume` — 手动编码时暂停，完成后让 AI 继续
 
 ### 质量门禁
@@ -111,6 +112,7 @@ Roll 支持三种接入模式，按项目起点选择 —— 决策树见
 
 | 主题 | 文档 |
 |------|------|
+| 第一次跑通项目 | [getting-started.md](getting-started.md) |
 | 调度、子命令、tmux 可见性 | [loop.md](loop.md) |
 | 夜间代码健康巡检与 REFACTOR 生成 | [dream.md](dream.md) |
 | 跨 Agent 评审协议 | [peer.md](peer.md) |

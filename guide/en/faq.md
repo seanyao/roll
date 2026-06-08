@@ -167,8 +167,8 @@ curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v2.601.1 bash
 **Short answer:** Yes — the dashboard shows model + cost per cycle at public
 pricing.
 
-**Details:** Since `v2026.521.1`, `roll loop monitor` and `roll loop status`
-show the model used and a cost number computed at public per-token pricing.
+**Details:** Since `v2026.521.1`, `roll loop status` shows the model used and
+a cost number computed at public per-token pricing.
 This is a comparable number, not your bill — your real cost depends on your
 subscription tier (Claude Pro, etc.).
 
@@ -186,7 +186,7 @@ new agent does not appear automatically; it ships as a small per-agent plugin
 **Try it:**
 
 ```bash
-roll loop monitor                # live dashboard with cost column
+roll loop status                 # scheduler snapshot with cost column
 roll loop status --days 7        # last 7 days of cycles with cost
 ```
 
@@ -452,7 +452,7 @@ cycles.
 
 ```bash
 roll loop status        # check LOCK + PID
-roll loop attach        # see what the agent is doing in tmux
+tmux attach -t roll-loop-<project-slug>  # see what the agent is doing in tmux
 roll loop runs          # last cycle outcomes and alerts
 roll alert              # any CI or TCR alerts?
 roll loop reset         # clear state + LOCK if truly stuck
@@ -511,12 +511,12 @@ conversation until the next cycle overwrites it.
 | Total spent on one story across all cycles | `roll loop story <ID>` |
 | Per-cycle JSONL records | `roll loop runs` |
 | Phase breakdown for one cycle | `roll loop runs --detail <cycle_id>` |
-| Live dashboard with cost column | `roll loop monitor` |
-| Watch the agent in real time | `roll loop attach` |
+| Snapshot dashboard with cost column | `roll loop status --days 7` |
+| Watch the agent in real time | `tmux attach -t roll-loop-<project-slug>` |
 | Human-readable daily summary | `roll brief` |
 | Alerts that need attention | `roll alert` |
 | Full cycle agent output (plain text) | `roll loop log` |
-| Full agent transcript | `roll loop attach`, scroll up |
+| Full agent transcript | `tmux attach -t roll-loop-<project-slug>`, scroll up |
 
 `status` rolls the dashboard forward (default 3-day window). When a story took
 several cycles spread over a week and you want the total — duration, tokens,

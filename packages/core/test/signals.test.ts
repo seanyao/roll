@@ -22,6 +22,7 @@ describe("signalKindForMarker — the shared taxonomy", () => {
     expect(signalKindForMarker("ci:rerun")).toBe("ci");
     expect(signalKindForMarker("peer:gate")).toBe("peer");
     expect(signalKindForMarker("attest:gate")).toBe("attest");
+    expect(signalKindForMarker("evidence:frame-opened")).toBe("attest");
     expect(signalKindForMarker("pr:open")).toBe("pr");
     expect(signalKindForMarker("pr:merge")).toBe("pr");
     expect(signalKindForMarker("pr:close")).toBe("pr");
@@ -38,7 +39,7 @@ describe("signalKindForMarker — the shared taxonomy", () => {
   });
 
   it("SIGNAL_KINDS is the closed set every classified kind belongs to", () => {
-    for (const m of ["tcr", "ci:pass", "peer:gate", "attest:gate", "pr:merge", "alert"]) {
+    for (const m of ["tcr", "ci:pass", "peer:gate", "attest:gate", "evidence:frame-opened", "pr:merge", "alert"]) {
       const k = signalKindForMarker(m);
       expect(k).not.toBeNull();
       expect(SIGNAL_KINDS).toContain(k!);
@@ -54,6 +55,7 @@ describe("signalKindForMarker — the shared taxonomy", () => {
       { type: "ci:fail", prNumber: 1, failSummary: "boom", ts: 1025 },
       { type: "peer:gate", cycleId: CYCLE, verdict: "consulted", reasons: [], ts: 1030 },
       { type: "attest:gate", cycleId: CYCLE, verdict: "produced", reasons: [], ts: 1035 },
+      { type: "evidence:frame-opened", cycleId: CYCLE, storyId: "S", runDir: "/r", ts: 1036 },
       { type: "pr:open", prNumber: 1, storyId: "S", ts: 1040 },
       { type: "pr:merge", prNumber: 1, storyId: "S", ts: 1050 },
       { type: "alert:notify", channel: "loop", message: "stuck", ts: 1060 },

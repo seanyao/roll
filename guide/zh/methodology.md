@@ -596,7 +596,7 @@ macOS 上使用 **launchd**（plist 安装到 `~/Library/LaunchAgents/`），Lin
 ~/Library/LaunchAgents/com.roll.brief.<project-slug>.plist
 ```
 
-`roll loop monitor` 提供类似 `top` 的实时面板，显示三服务 launchd 状态、当前执行状态、待办队列、告警和实时日志。
+`roll loop status` 提供调度快照，显示三服务 launchd 状态、当前执行状态、待办队列、告警和最近运行历史。实时终端请直接用 `tmux attach -t roll-loop-<project-slug>`。
 
 如果使用的 agent 支持原生调度（如 Claude Code hooks、opencode 定时任务），优先使用原生调度，生命周期管理更干净。
 

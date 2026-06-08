@@ -13,7 +13,7 @@
  *   2. `gh pr list --state open --json …` fails  → idle `gh_error`.
  *   3. empty / "[]" / zero-length                → idle `empty_response` /
  *      `no_open_prs` / `zero_prs` (via {@link prInboxGate}).
- *   4. per open PR: `gh pr view --json reviews,mergeStateStatus,statusCheckRollup`
+ *   4. per open PR: `gh pr view --json reviews,mergeStateStatus,statusCheckRollup,body,labels`
  *      → reduce {bot, ciState, mergeable} → {@link selectPrAction}:
  *        merge  → `gh pr merge --squash --delete-branch` (eager / bot-approved).
  *        alert  → bot CHANGES_REQUESTED ALERT row, skip.
@@ -62,13 +62,16 @@ export interface PrViewFacts {
   bot: string;
   ciState: CiRollupState;
   mergeable: MergeStateStatus;
+  manualMerge?: boolean;
 }
 
-/** The raw `gh pr view --json reviews,mergeStateStatus,statusCheckRollup` shape. */
+/** The raw `gh pr view --json reviews,mergeStateStatus,statusCheckRollup,body,labels` shape. */
 interface PrViewRaw {
   reviews?: Array<{ authorAssociation?: string; state?: string }>;
   mergeStateStatus?: string;
   statusCheckRollup?: Array<{ conclusion?: string | null }>;
+  body?: string;
+  labels?: Array<{ name?: string }>;
 }
 
 /**
@@ -87,6 +90,9 @@ export function reducePrView(raw: PrViewRaw): PrViewFacts {
     bot: lastBot?.state ?? "",
     ciState: reduceCiRollup(rollup),
     mergeable: raw.mergeStateStatus ?? "",
+    manualMerge:
+      (raw.body ?? "").includes("[roll:manual-merge]") ||
+      (raw.labels ?? []).some((label) => label.name === "manual-merge" || label.name === "roll:manual-merge"),
   };
 }
 
@@ -166,7 +172,7 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
         if (!deps.rebaseCircuitAllowed(num)) break; // tripped → ALERT written, skip.
         const rechecked = await deps.rebaseStale(num, headRef, slug);
         if (rechecked !== undefined) {
-          const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable);
+          const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable, rechecked.manualMerge === true);
           if (re.kind === "merge") await doMerge(deps, slug, num);
         }
         break;
@@ -384,7 +390,7 @@ function realDeps(): PrInboxDeps {
     viewPr: async (slug, num) => {
       const r = await gh([
         "-R", slug, "pr", "view", num,
-        "--json", "reviews,mergeStateStatus,statusCheckRollup",
+        "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels",
       ]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
@@ -401,7 +407,7 @@ function realDeps(): PrInboxDeps {
     rebaseStale: async (num, headRef, slug) => {
       await bridgeBash(["_loop_pr_rebase_stale", num, headRef]);
       // Re-fetch the PR state after the rebase to decide an eager merge.
-      const r = await gh(["-R", slug, "pr", "view", num, "--json", "mergeStateStatus,statusCheckRollup"]);
+      const r = await gh(["-R", slug, "pr", "view", num, "--json", "mergeStateStatus,statusCheckRollup,body,labels"]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
         return reducePrView(JSON.parse(r.stdout) as PrViewRaw);

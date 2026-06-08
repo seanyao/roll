@@ -97,8 +97,8 @@ function checkFeaturesCatalog(projectDir: string): DimResult {
 // link must point at a file that exists. Catches the two real-world failure
 // shapes observed 2026-06-08: a story split that wrote backlog rows with no
 // card folders (broken links), and a ✅ Done row carrying an evidence link to
-// a report that was never produced. Done-without-report is informational
-// (pre-ATTEST history is legitimate); a BROKEN link is a hard gap.
+// a report that was never produced. Pre-card-era Done rows remain informational;
+// card-era Done rows with ACs but no report are a hard gap.
 function checkCards(projectDir: string): DimResult {
   const backlog = join(projectDir, ".roll", "backlog.md");
   const featuresDir = join(projectDir, ".roll", "features");
@@ -120,8 +120,16 @@ function checkCards(projectDir: string): DimResult {
     return { status: "pass", gaps: [], note: "features/ unreadable — skipped" };
   }
 
+  const hasAcBlock = (epic: string, id: string): boolean => {
+    try {
+      return /\*\*AC:\*\*[\s\S]*?-\s+\[[ xX]\]\s+/.test(readText(join(featuresDir, epic, id, "spec.md")));
+    } catch {
+      return true;
+    }
+  };
+
   const gaps: string[] = [];
-  let doneNoReport = 0;
+  let doneNoReportNoAc = 0;
   let doneNoFolder = 0;
   for (const line of readText(backlog).split("\n")) {
     const row = /^\|\s*\[?((?:US|FIX|REFACTOR|IDEA)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)\]?/.exec(line);
@@ -144,13 +152,19 @@ function checkCards(projectDir: string): DimResult {
       }
     } else if (line.includes("✅ Done")) {
       const epic = cardEpic.get(id) ?? "";
-      if (!existsSync(join(featuresDir, epic, id, "latest", `${id}-report.html`))) doneNoReport += 1;
+      if (!existsSync(join(featuresDir, epic, id, "latest", `${id}-report.html`))) {
+        if (hasAcBlock(epic, id)) {
+          gaps.push(`Done backlog row ${id} has ACs but no attest report`);
+        } else {
+          doneNoReportNoAc += 1;
+        }
+      }
     }
   }
   const result: DimResult = { status: gaps.length === 0 ? "pass" : "fail", gaps };
   const notes: string[] = [];
   if (doneNoFolder > 0) notes.push(`${doneNoFolder} pre-card-era Done rows without a card folder`);
-  if (doneNoReport > 0) notes.push(`${doneNoReport} Done rows without an attest report`);
+  if (doneNoReportNoAc > 0) notes.push(`${doneNoReportNoAc} Done rows without AC blocks exempt from attest report`);
   if (notes.length > 0) result.note = `${notes.join("; ")} (informational)`;
   return result;
 }

@@ -4,11 +4,12 @@
  * collector's contract: facts only, never throws, absent shapes over errors.
  */
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { collectEvidence, writeEvidenceJson, type EvidenceRun, type RunOut } from "../src/evidence.js";
+import { openEvidenceFrame } from "../src/evidence.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -150,5 +151,27 @@ describe("writeEvidenceJson", () => {
     expect(JSON.parse(text)).toEqual(m);
     expect(text).toContain('  "story_id": "FIX-9"');
     expect(text.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("openEvidenceFrame", () => {
+  it("creates the run frame plus evidence/ and screenshots/ directories", () => {
+    const runDir = join(tmp("frame"), "US-EVID-001-run");
+    const frame = openEvidenceFrame({ runDir });
+    expect(frame.runDir).toBe(runDir);
+    expect(frame.evidenceDir).toBe(join(runDir, "evidence"));
+    expect(frame.screenshotsDir).toBe(join(runDir, "screenshots"));
+    expect(statSync(runDir).isDirectory()).toBe(true);
+    expect(statSync(frame.evidenceDir).isDirectory()).toBe(true);
+    expect(statSync(frame.screenshotsDir).isDirectory()).toBe(true);
+  });
+
+  it("is idempotent and never clears an already-opened frame", () => {
+    const runDir = join(tmp("frame-idem"), "cycle-1");
+    const frame = openEvidenceFrame({ runDir });
+    writeFileSync(join(frame.evidenceDir, "kept.txt"), "proof\n");
+    const again = openEvidenceFrame({ runDir });
+    expect(again).toEqual(frame);
+    expect(readFileSync(join(frame.evidenceDir, "kept.txt"), "utf8")).toBe("proof\n");
   });
 });

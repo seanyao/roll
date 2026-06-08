@@ -11,6 +11,9 @@ Every story has ONE home — its card folder under the epic:
 ```
 .roll/features/<epic>/<id>/<run-id>/<id>-report.html  ← the report (self-contained)
 .roll/features/<epic>/<id>/<run-id>/evidence.json     ← collected hard facts
+.roll/features/<epic>/<id>/<run-id>/evidence/         ← raw command/test artifacts
+.roll/features/<epic>/<id>/<run-id>/screenshots/      ← visual proof, when relevant
+.roll/features/<epic>/<id>/ac-map.json                ← AC → evidence intent map
 .roll/features/<epic>/<id>/latest                     ← symlink to the newest run
 ```
 
@@ -18,22 +21,42 @@ Runs are timestamped and never overwritten. The backlog `✅ Done` row links to
 `latest/<id>-report.html`; CHANGELOG bullets may carry an invisible
 `<!-- evidence: ... -->` marker for traceability.
 
-## How a report gets made
+## Lifecycle in three stages
 
-1. During the build/fix **Verification Gate**, the agent dumps raw outputs to
-   `.roll/features/<epic>/<id>/evidence/*.txt` and screenshots to
-   `…/screenshots/*.png` (web via Playwright, iOS via simctl, Android via adb —
-   each surface skips cleanly when its tooling is absent; CLI stories capture
-   ANSI text instead, rendered searchable in the report).
-2. The agent writes `ac-map.json` — which evidence backs which AC, with a
-   status per AC: `pass` · `readonly` · `partial` · `claimed` · `missing`.
-3. `roll attest <story-id>` sweeps the hard facts (TCR commits, latest CI run,
-   optional deploy probe, test-pass proof) and renders the report — and ends
-   by refreshing `.roll/index.json`, so an un-indexed project converges on its
-   first attest.
+1. Open the evidence frame. At the beginning of a loop cycle the runner creates
+   the timestamped run directory and exports it to the inner agent as
+   `ROLL_RUN_DIR`. The derived directories `ROLL_EVIDENCE_DIR` and
+   `ROLL_SCREENSHOTS_DIR` point at `<run-id>/evidence/` and
+   `<run-id>/screenshots/`.
+2. Collect during execution. `roll test` writes command output and summaries
+   into `ROLL_EVIDENCE_DIR`; visual lanes write screenshots into
+   `ROLL_SCREENSHOTS_DIR` when the surface requires inspection. The agent keeps
+   `ac-map.json` in the story card root, mapping each AC to the evidence files
+   that support it, with a status per AC: `pass` · `readonly` · `partial` ·
+   `claimed` · `missing`.
+3. Close with the hard attest gate. The runner calls
+   `roll attest <story-id> --run-dir "$ROLL_RUN_DIR"` at the end of delivery.
+   `roll attest` sweeps the hard facts (TCR commits, latest CI run, optional
+   deploy probe, test-pass proof), renders the report, moves `latest` to the
+   run, refreshes the story delivery section when a dossier page exists, and
+   refreshes `.roll/index.json`.
 
 `roll attest` also runs standalone — without an intent map every AC renders as
 🟧 Claimed, honestly.
+
+## Gate policy
+
+The attest gate is **hard by default**. A delivered story with ACs but no fresh,
+contentful report is blocked rather than marked `✅ Done`. During an explicit
+migration window a project may set `.roll/policy.yaml` to soft mode:
+
+```yaml
+loop_safety:
+  attest_gate: soft
+```
+
+Soft mode records the gap and raises the same audit signal, but it does not
+block the delivery cycle. Treat it as temporary compatibility, not the default.
 
 ## The red line
 

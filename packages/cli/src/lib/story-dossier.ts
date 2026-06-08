@@ -15,12 +15,14 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
+import { parseEventLine } from "@roll/spec";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES } from "./dossier-index.js";
+import { readLatestStorySelfScore, readSelfScoreTrend, type SelfScoreView } from "./self-score.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -34,6 +36,89 @@ export interface AcRow {
   verify?: string;
   /** EVID-010: test files/cases covering this AC. */
   tests?: string[];
+}
+
+export interface ExecutionRef {
+  kind: "merged-pr" | "cycle" | "pre-evidence";
+  label: string;
+  commitCount?: number;
+}
+
+export type CiVerdict = "green" | "red" | "none";
+
+export interface DeliveryPrEvidence {
+  number: number;
+  href?: string;
+  ci?: CiVerdict;
+}
+
+export interface DeliveryCostEvidence {
+  usd?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+}
+
+export interface DeliveryTimelineEntry {
+  label: string;
+  at: string;
+}
+
+export interface CorrectionTraceEntry {
+  action: string;
+  signal: string;
+  reason: string;
+  at: string;
+  mode?: string;
+  source?: string;
+  targetId?: string;
+}
+
+export type PeerReviewVerdict = "AGREE" | "REFINE" | "OBJECT" | "ESCALATE";
+
+export interface PeerReviewRound {
+  round: number;
+  verdict: PeerReviewVerdict;
+  peer?: string;
+  stage?: string;
+  findings: string[];
+  href?: string;
+}
+
+export interface PeerReviewEvidence {
+  finalVerdict: PeerReviewVerdict;
+  rounds: PeerReviewRound[];
+}
+
+export interface DynamicEvidence {
+  kind: "cast" | "video";
+  label: string;
+  href: string;
+}
+
+export interface StoryGraphLink {
+  id: string;
+  href?: string;
+}
+
+export interface StoryReleaseTrace {
+  label: string;
+  href?: string;
+}
+
+export interface StoryGraph {
+  dependsOn?: StoryGraphLink[];
+  dependedBy?: StoryGraphLink[];
+  fixes?: StoryGraphLink[];
+  release?: StoryReleaseTrace;
+}
+
+export interface DeliveryEvidence {
+  prs?: DeliveryPrEvidence[];
+  diffHref?: string;
+  filesChanged?: string[];
+  agent?: string;
+  cost?: DeliveryCostEvidence;
+  timeline?: DeliveryTimelineEntry[];
 }
 
 /** Everything the dossier needs beyond the 001a story model. */
@@ -51,21 +136,37 @@ export interface StoryDossierInput {
   design?: string[];
   /** TCR commit subjects touching this story (oldest first). */
   commits?: string[];
+  /** PR/cycle evidence that proves execution even when squash removed TCR commit subjects. */
+  executionRefs?: ExecutionRef[];
   /** Parsed ac-map.json rows. */
   acRows?: AcRow[];
   /** Relative href to the attest report (when latest/ carries one). */
   reportHref?: string;
+  /** Reconstructable delivery facts: PR/CI/diff/agent/cost/timeline. */
+  deliveryEvidence?: DeliveryEvidence;
+  /** US-EVID-012: optional cast/video replay artifacts from the latest run. */
+  dynamicEvidence?: DynamicEvidence[];
+  /** US-EVID-011: peer-review decisions captured from runtime pairing records. */
+  peerReview?: PeerReviewEvidence;
+  /** US-EVID-009: traversable inter-story graph and release trace. */
+  storyGraph?: StoryGraph;
+  /** US-EVID-014: traceable automatic correction decisions for this story. */
+  correctionActions?: CorrectionTraceEntry[];
   /** Retrospective text (self-score note body). */
   retro?: string;
+  /** Structured latest self-score note for the retrospective station. */
+  selfScore?: SelfScoreView;
+  /** US-SKILL-014 trend line, merged from card-local and legacy notes. */
+  selfScoreTrend?: string;
 }
 
 /** Which stations are complete, derived from the data we actually have. */
 export function stationsDone(d: StoryDossierInput): Set<string> {
   const done = new Set<string>(["definition"]); // a card existing IS the definition
-  if ((d.design?.length ?? 0) > 0) done.add("design");
-  if ((d.commits?.length ?? 0) > 0) done.add("execution");
+  if ((d.design?.length ?? 0) > 0 || d.peerReview !== undefined) done.add("design");
+  if ((d.commits?.length ?? 0) > 0 || (d.executionRefs?.length ?? 0) > 0) done.add("execution");
   if (d.story.delivered) done.add("delivery");
-  if (d.retro !== undefined && d.retro !== "") done.add("retrospective");
+  if (d.selfScore !== undefined || (d.retro !== undefined && d.retro !== "")) done.add("retrospective");
   return done;
 }
 
@@ -90,6 +191,231 @@ const AC_BADGE: Record<string, [string, string]> = {
   claimed: ["△ claimed", "△ 仅声称"],
   missing: ["○ missing", "○ 缺失"],
 };
+
+function executionSummary(refs: readonly ExecutionRef[]): [string, string] {
+  const mergedPrs = refs.filter((r) => r.kind === "merged-pr").length;
+  if (mergedPrs > 0) return [`${mergedPrs} merged PR${mergedPrs === 1 ? "" : "s"}`, `${mergedPrs} 个已合 PR`];
+  const cycles = refs.filter((r) => r.kind === "cycle").length;
+  if (cycles > 0) return [`${cycles} delivery cycle${cycles === 1 ? "" : "s"}`, `${cycles} 个交付周期`];
+  return ["pre-evidence history", "证据纪律前历史卡"];
+}
+
+function executionRefsHtml(refs: readonly ExecutionRef[]): string {
+  if (refs.length === 0) return "";
+  const [en, zh] = executionSummary(refs);
+  return (
+    `<p>${bi(en, zh)}</p>` +
+    `<ul class="muted">${refs
+      .map((r) => {
+        const count =
+          r.commitCount !== undefined && Number.isFinite(r.commitCount)
+            ? ` · ${bi(`${r.commitCount} commits`, `${r.commitCount} 个提交`)}`
+            : "";
+        return `<li><code>${esc(r.label)}</code>${count}</li>`;
+      })
+      .join("")}</ul>`
+  );
+}
+
+function hasDeliveryEvidence(e: DeliveryEvidence | undefined): boolean {
+  if (e === undefined) return false;
+  return (
+    (e.prs?.length ?? 0) > 0 ||
+    (e.filesChanged?.length ?? 0) > 0 ||
+    (e.timeline?.length ?? 0) > 0 ||
+    e.diffHref !== undefined ||
+    e.agent !== undefined ||
+    e.cost !== undefined
+  );
+}
+
+function hasDynamicEvidence(items: readonly DynamicEvidence[] | undefined): boolean {
+  return items !== undefined && items.length > 0;
+}
+
+function hasStoryGraph(graph: StoryGraph | undefined): boolean {
+  if (graph === undefined) return false;
+  return (
+    (graph.dependsOn?.length ?? 0) > 0 ||
+    (graph.dependedBy?.length ?? 0) > 0 ||
+    (graph.fixes?.length ?? 0) > 0 ||
+    graph.release !== undefined
+  );
+}
+
+function ciText(v: CiVerdict | undefined): [string, string] {
+  if (v === "green") return ["CI green", "CI 通过"];
+  if (v === "red") return ["CI red", "CI 失败"];
+  if (v === "none") return ["CI none", "无 CI"];
+  return ["CI —", "CI —"];
+}
+
+function fmtTokens(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(Math.round(n));
+}
+
+function deliveryCostHtml(cost: DeliveryCostEvidence): string {
+  const parts: string[] = [];
+  if (cost.usd !== undefined && Number.isFinite(cost.usd)) parts.push(`$${cost.usd.toFixed(2)}`);
+  if (cost.tokensIn !== undefined && Number.isFinite(cost.tokensIn)) parts.push(`${fmtTokens(cost.tokensIn)} in`);
+  if (cost.tokensOut !== undefined && Number.isFinite(cost.tokensOut)) parts.push(`${fmtTokens(cost.tokensOut)} out`);
+  return parts.length > 0 ? parts.map(esc).join(" · ") : "—";
+}
+
+function deliveryEvidenceHtml(e: DeliveryEvidence | undefined): string {
+  if (!hasDeliveryEvidence(e) || e === undefined) return "";
+  const rows: string[] = [];
+  if ((e.prs?.length ?? 0) > 0) {
+    const prs = (e.prs ?? [])
+      .map((p) => {
+        const label = `PR #${p.number}`;
+        const link = p.href !== undefined ? `<a href="${esc(p.href)}">${esc(label)}</a>` : `<code>${esc(label)}</code>`;
+        const [ciEn, ciZh] = ciText(p.ci);
+        return `${link} <span class="pill ${p.ci === "green" ? "merged" : p.ci === "red" ? "cycle" : "backlog"}">${bi(ciEn, ciZh)}</span>`;
+      })
+      .join(" · ");
+    rows.push(`<dt>${bi("Merged PR", "合并 PR")}</dt><dd>${prs}</dd>`);
+  }
+  if (e.diffHref !== undefined) {
+    rows.push(`<dt>${bi("Diff", "Diff")}</dt><dd><a href="${esc(e.diffHref)}">${bi("Changed diff", "改动 diff")}</a></dd>`);
+  }
+  if ((e.filesChanged?.length ?? 0) > 0) {
+    rows.push(
+      `<dt>${bi("Files changed", "改动文件")}</dt><dd><ul class="delivery-files">${(e.filesChanged ?? [])
+        .map((f) => `<li><code>${esc(f)}</code></li>`)
+        .join("")}</ul></dd>`,
+    );
+  }
+  if (e.agent !== undefined) rows.push(`<dt>${bi("Agent", "交付 agent")}</dt><dd><code>${esc(e.agent)}</code></dd>`);
+  if (e.cost !== undefined) rows.push(`<dt>${bi("Cost", "成本")}</dt><dd>${deliveryCostHtml(e.cost)}</dd>`);
+  if ((e.timeline?.length ?? 0) > 0) {
+    rows.push(
+      `<dt>${bi("Timeline", "时间线")}</dt><dd><ol class="delivery-timeline">${(e.timeline ?? [])
+        .map((t) => `<li><code>${esc(t.at)}</code> ${esc(t.label)}</li>`)
+        .join("")}</ol></dd>`,
+    );
+  }
+  return `<div class="delivery-evidence"><h3>${bi("Delivery evidence", "交付证据")}</h3><dl>${rows.join("")}</dl></div>`;
+}
+
+function dynamicEvidenceHtml(items: readonly DynamicEvidence[] | undefined): string {
+  if (!hasDynamicEvidence(items)) return "";
+  const body = (items ?? [])
+    .map((it) => {
+      if (it.kind === "cast") {
+        return `<li><a href="${esc(it.href)}">${esc(it.label)}</a> <span class="muted">cast</span></li>`;
+      }
+      const media = /\.(mp4|webm|mov)$/i.test(it.href)
+        ? `<video controls preload="metadata" src="${esc(it.href)}"></video>`
+        : `<a href="${esc(it.href)}">${esc(it.label)}</a>`;
+      return `<li>${media}<p class="muted">${esc(it.label)}</p></li>`;
+    })
+    .join("");
+  return `<div class="dynamic-evidence"><h3>${bi("Dynamic replay", "动态复现")}</h3><ul>${body}</ul></div>`;
+}
+
+function storyGraphLinkHtml(link: StoryGraphLink): string {
+  const label = `<code>${esc(link.id)}</code>`;
+  return link.href !== undefined ? `<a href="${esc(link.href)}">${label}</a>` : label;
+}
+
+function storyGraphLinksHtml(items: readonly StoryGraphLink[]): string {
+  return `<ul class="graph-links">${items.map((item) => `<li>${storyGraphLinkHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function storyGraphHtml(graph: StoryGraph | undefined): string {
+  if (!hasStoryGraph(graph) || graph === undefined) return "";
+  const rows: string[] = [];
+  if ((graph.dependsOn?.length ?? 0) > 0) {
+    rows.push(`<dt>${bi("Depends on", "依赖")}</dt><dd>${storyGraphLinksHtml(graph.dependsOn ?? [])}</dd>`);
+  }
+  if ((graph.dependedBy?.length ?? 0) > 0) {
+    rows.push(`<dt>${bi("Depended by", "被依赖")}</dt><dd>${storyGraphLinksHtml(graph.dependedBy ?? [])}</dd>`);
+  }
+  if ((graph.fixes?.length ?? 0) > 0) {
+    rows.push(`<dt>${bi("Fixes", "修复")}</dt><dd>${storyGraphLinksHtml(graph.fixes ?? [])}</dd>`);
+  }
+  if (graph.release !== undefined) {
+    const label = `<code>${esc(graph.release.label)}</code>`;
+    const release = graph.release.href !== undefined ? `<a href="${esc(graph.release.href)}">${label}</a>` : label;
+    rows.push(`<dt>${bi("Release", "发版")}</dt><dd>${release}</dd>`);
+  }
+  return (
+    `<section class="phase phase-done story-graph">` +
+    `<h2>${bi("Story graph", "故事图谱")}</h2>` +
+    `<dl>${rows.join("")}</dl>` +
+    `</section>`
+  );
+}
+
+function correctionTraceHtml(actions: readonly CorrectionTraceEntry[] | undefined): string {
+  if (actions === undefined || actions.length === 0) return "";
+  return `<ul class="correction-trace">${actions
+    .map((a) => {
+      const target = a.targetId !== undefined ? ` · <code>${esc(a.targetId)}</code>` : "";
+      const mode = a.mode !== undefined ? ` · <code>${esc(a.mode)}</code>` : "";
+      const source = a.source !== undefined ? ` · <code>${esc(a.source)}</code>` : "";
+      return `<li><p><code>${esc(a.action)}</code> <b>${esc(a.signal)}</b>${target}${mode}${source}</p><p class="muted"><code>${esc(a.at)}</code> ${esc(a.reason)}</p></li>`;
+    })
+    .join("")}</ul>`;
+}
+
+function peerReviewHtml(review: PeerReviewEvidence | undefined): string {
+  if (review === undefined || review.rounds.length === 0) return "";
+  const rounds = review.rounds
+    .map((r) => {
+      const peer = r.peer !== undefined ? ` · <code>${esc(r.peer)}</code>` : "";
+      const stage = r.stage !== undefined ? ` · <code>${esc(r.stage)}</code>` : "";
+      const link = r.href !== undefined ? ` · <a href="${esc(r.href)}">${bi("Full record", "完整记录")}</a>` : "";
+      const findings =
+        r.findings.length > 0
+          ? `<ul>${r.findings.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`
+          : `<p class="muted">${bi("No inline findings recorded", "未记录内联意见")}</p>`;
+      return (
+        `<li><p><span class="peer-verdict peer-${esc(r.verdict.toLowerCase())}">${esc(r.verdict)}</span> ` +
+        `${bi(`Round ${r.round}`, `第 ${r.round} 轮`)}${peer}${stage}${link}</p>${findings}</li>`
+      );
+    })
+    .join("");
+  return (
+    `<div class="peer-review">` +
+    `<h3>${bi("Peer review", "同行评审")}</h3>` +
+    `<p><span class="peer-verdict peer-${esc(review.finalVerdict.toLowerCase())}">${esc(review.finalVerdict)}</span> ` +
+    `${bi(`${review.rounds.length} rounds`, `${review.rounds.length} 轮`)}</p>` +
+    `<ol>${rounds}</ol>` +
+    `</div>`
+  );
+}
+
+function selfScoreClass(verdict: string): string {
+  const v = verdict.toLowerCase();
+  if (v === "good" || v === "ok" || v === "regression") return v;
+  return "unknown";
+}
+
+function selfScoreDimsHtml(score: SelfScoreView): string {
+  const dims = Object.entries(score.dimensions ?? {})
+    .filter(([, v]) => Number.isFinite(v))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (dims.length === 0) return "";
+  return `<div class="selfscore-dims">${dims.map(([k, v]) => `<span><code>${esc(k)}</code>: <b>${esc(String(v))}</b></span>`).join(" ")}</div>`;
+}
+
+function selfScoreHtml(score: SelfScoreView | undefined, trend: string | undefined, retro: string | undefined): string {
+  if (score === undefined) return retro !== undefined && retro !== "" ? `<p>${esc(retro)}</p>` : "";
+  const href = score.href !== undefined && score.href !== "" ? ` · <a href="${esc(score.href)}">${bi("Full note", "全文 note")}</a>` : "";
+  const trendLine = trend !== undefined && trend !== "" ? `<p class="selfscore-trend">${esc(trend)}</p>` : "";
+  return (
+    `<div class="selfscore-card selfscore-${selfScoreClass(score.verdict)}">` +
+    `<p><span class="selfscore-badge">${esc(score.verdict)}</span> <b>${esc(String(score.score))}</b>/10 · ${esc(score.verdict)} · <code>${esc(score.skill)}</code>${href}</p>` +
+    (score.note !== "" ? `<p class="note">${esc(score.note)}</p>` : "") +
+    selfScoreDimsHtml(score) +
+    trendLine +
+    `</div>`
+  );
+}
 
 function section(en: string, zh: string, body: string, empty: boolean): string {
   return (
@@ -124,15 +450,19 @@ export function renderStoryDossier(d: StoryDossierInput): string {
           .map((a) => `<li>${a.checked ? "☑" : "☐"} ${esc(a.text)}</li>`)
           .join("")}</ul>`
       : `<p class="empty">${bi("No AC in spec.md", "spec.md 未记录 AC")}</p>`;
-  const design =
-    (d.design?.length ?? 0) > 0
-      ? `<ul>${(d.design ?? []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`
-      : `<p class="empty">${bi("Not yet designed", "尚未设计")}</p>`;
+  const peerReview = peerReviewHtml(d.peerReview);
+  const designBits: string[] = [];
+  if ((d.design?.length ?? 0) > 0) designBits.push(`<ul>${(d.design ?? []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`);
+  if (peerReview !== "") designBits.push(peerReview);
+  const design = designBits.length > 0 ? designBits.join("\n") : `<p class="empty">${bi("Not yet designed", "尚未设计")}</p>`;
   const execution =
     (d.commits?.length ?? 0) > 0
       ? `<p>${bi(`${(d.commits ?? []).length} TCR commits`, `${(d.commits ?? []).length} 个 TCR 提交`)}</p>` +
-        `<ul class="muted">${(d.commits ?? []).map((c) => `<li><code>${esc(c)}</code></li>`).join("")}</ul>`
-      : `<p class="empty">${bi("No cycles yet", "暂无周期")}</p>`;
+        `<ul class="muted">${(d.commits ?? []).map((c) => `<li><code>${esc(c)}</code></li>`).join("")}</ul>` +
+        executionRefsHtml(d.executionRefs ?? [])
+      : (d.executionRefs?.length ?? 0) > 0
+        ? executionRefsHtml(d.executionRefs ?? [])
+        : `<p class="empty">${bi("No cycles yet", "暂无周期")}</p>`;
   const banner = s.delivered
     ? `<div class="attest-banner"><span class="mark">✓</span><div>` +
       `${bi("Merged to main — attested", "已合主干 · 已验收")}` +
@@ -164,13 +494,12 @@ export function renderStoryDossier(d: StoryDossierInput): string {
         `</tbody></table>`
       : "";
   const delivery =
-    s.delivered || (d.acRows?.length ?? 0) > 0
-      ? banner + acTable
+    s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence) || hasDynamicEvidence(d.dynamicEvidence)
+      ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acTable
       : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
-  const retro =
-    d.retro !== undefined && d.retro !== ""
-      ? `<p>${esc(d.retro)}</p>`
-      : `<p class="empty">${bi("Not yet written", "尚未撰写")}</p>`;
+  const corrections = correctionTraceHtml(d.correctionActions);
+  const retroContent = selfScoreHtml(d.selfScore, d.selfScoreTrend, d.retro);
+  const retro = retroContent !== "" ? retroContent : `<p class="empty">${bi("Not yet written", "尚未撰写")}</p>`;
 
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
@@ -186,6 +515,35 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.verify-cell .copy-btn.copied { color:var(--pass); border-color:var(--pass); }\n` +
     `.ac-tests { list-style:none; padding:0; margin:4px 0 0; } .ac-tests li { font-size:11.5px; color:var(--muted); margin:1px 0; }\n` +
     `.verify-empty { color:var(--muted); font-size:12px; }\n` +
+    `.delivery-evidence h3 { font:600 14px/1.4 var(--serif); margin:12px 0 6px; }\n` +
+    `.delivery-evidence dl { display:grid; grid-template-columns:120px 1fr; gap:6px 12px; margin:0; }\n` +
+    `.delivery-evidence dt { color:var(--muted); font:600 12px/1.7 var(--sans); }\n` +
+    `.delivery-evidence dd { margin:0; }\n` +
+    `.delivery-files { list-style:none; padding:0; margin:0; } .delivery-files li { margin:2px 0; }\n` +
+    `.delivery-timeline { margin:0; padding-left:18px; } .delivery-timeline li { margin:2px 0; }\n` +
+    `.dynamic-evidence h3 { font:600 14px/1.4 var(--serif); margin:12px 0 6px; }\n` +
+    `.dynamic-evidence ul { list-style:none; padding:0; margin:0; display:grid; gap:8px; }\n` +
+    `.dynamic-evidence video { width:100%; max-width:680px; border:1px solid var(--line); border-radius:6px; background:#000; }\n` +
+    `.dynamic-evidence p { margin:3px 0 0; }\n` +
+    `.story-graph dl { display:grid; grid-template-columns:120px 1fr; gap:8px 12px; margin:0; }\n` +
+    `.story-graph dt { color:var(--muted); font:600 12px/1.7 var(--sans); }\n` +
+    `.story-graph dd { margin:0; }\n` +
+    `.graph-links { list-style:none; display:flex; flex-wrap:wrap; gap:6px; padding:0; margin:0; }\n` +
+    `.graph-links li { margin:0; }\n` +
+    `.correction-trace { list-style:none; padding:0; margin:0; } .correction-trace li { border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin:8px 0; background:var(--bg-raise); }\n` +
+    `.correction-trace p { margin:0 0 3px; } .correction-trace p:last-child { margin-bottom:0; }\n` +
+    `.peer-review { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; background:var(--bg-raise); }\n` +
+    `.peer-review h3 { font:600 14px/1.4 var(--serif); margin:0 0 6px; }\n` +
+    `.peer-review p { margin:0 0 6px; } .peer-review ol { margin:6px 0 0; padding-left:22px; }\n` +
+    `.peer-review li { margin:7px 0; } .peer-review ul { margin:4px 0 0; padding-left:18px; color:var(--muted); }\n` +
+    `.peer-verdict { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
+    `.peer-agree { color:var(--pass); } .peer-refine { color:var(--warn); } .peer-object, .peer-escalate { color:var(--fail); }\n` +
+    `.selfscore-card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--bg-raise); }\n` +
+    `.selfscore-card p { margin:0 0 6px; } .selfscore-card p:last-child { margin-bottom:0; }\n` +
+    `.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
+    `.selfscore-good .selfscore-badge { color:var(--pass); } .selfscore-ok .selfscore-badge { color:var(--warn); } .selfscore-regression .selfscore-badge { color:var(--fail); }\n` +
+    `.selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }\n` +
+    `@media (max-width:680px) { .delivery-evidence dl, .story-graph dl { grid-template-columns:1fr; } }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
     `<p class="crumb"><a href="../../index.html">${bi("Features Index", "功能档案")}</a> / <a href="../index.html">${esc(s.epic)}</a> / ${esc(s.id)}</p>\n` +
@@ -199,12 +557,14 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `<span><a href="spec.html">${bi("Design doc", "设计文档")}</a></span>` +
     `</div>\n</div>\n` +
     storySpine(d) +
+    storyGraphHtml(d.storyGraph) +
     section("Definition", "立项", definition, defEmpty) +
     section("Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
-    section("Design", "设计", design, (d.design?.length ?? 0) === 0) +
-    section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0) +
-    section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0)) +
-    section("Retrospective", "复盘", retro, d.retro === undefined || d.retro === "") +
+    section("Design", "设计", design, (d.design?.length ?? 0) === 0 && d.peerReview === undefined) +
+    section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
+    section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence) || hasDynamicEvidence(d.dynamicEvidence))) +
+    (corrections !== "" ? section("Correction trace", "纠正留痕", corrections, false) : "") +
+    section("Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
     `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
     // EVID-010: inline copy handler (display only — never executes the command).
     `<script>document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest(".copy-btn");if(!b||!navigator.clipboard)return;var t=b.getAttribute("data-copy")||"";navigator.clipboard.writeText(t).then(function(){b.classList.add("copied");setTimeout(function(){b.classList.remove("copied")},1200);}).catch(function(){});});</script>\n` +
@@ -224,10 +584,12 @@ export function renderStoryDossier(d: StoryDossierInput): string {
 export function collectStoryDossierInput(projectPath: string, story: DossierStory): StoryDossierInput {
   const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id);
   const out: StoryDossierInput = { story };
+  let searchableCardText = "";
 
   // spec.md → wish + design bullets.
   try {
     const spec = readFile(joinPath(dir, "spec.md"));
+    searchableCardText += `\n${spec}`;
     const quote: string[] = [];
     for (const l of spec.split("\n")) {
       const m = /^>\s?(.*)$/.exec(l);
@@ -311,38 +673,24 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   // newest self-score note → retrospective line. Card-local notes/ is the
   // home (US-META-008); the flat .roll/notes serves pre-migration history.
   try {
-    const cardNotes = joinPath(dir, "notes");
-    const legacyNotes = joinPath(projectPath, ".roll", "notes");
-    let notesDir = cardNotes;
-    let notes: string[] = [];
-    try {
-      notes = listDir(cardNotes).filter((f) => f.endsWith(".md")).sort();
-    } catch {
-      /* no card-local notes yet */
-    }
-    if (notes.length === 0) {
-      notesDir = legacyNotes;
-      notes = listDir(legacyNotes)
-        .filter((f) => f.includes(`-${story.id}-`) && f.endsWith(".md"))
-        .sort();
-    }
-    const last = notes[notes.length - 1];
-    if (last !== undefined) {
-      const body = readFile(joinPath(notesDir, last));
-      const score = /^score:\s*(.+)$/m.exec(body);
-      const verdict = /^verdict:\s*(.+)$/m.exec(body);
-      const para = body
-        .split(/\n{2,}/)
-        .map((p) => p.trim())
-        .find((p) => p !== "" && !p.startsWith("---") && !/^score:|^verdict:/m.test(p));
-      out.retro = [
-        score !== null ? `score ${(score[1] ?? "").trim()}` : "",
-        verdict !== null ? `· ${(verdict[1] ?? "").trim()}` : "",
-        para !== undefined ? `— ${para.replace(/\s+/g, " ").slice(0, 240)}` : "",
-      ]
+    const latest = readLatestStorySelfScore(projectPath, story.id, dir);
+    if (latest !== undefined) {
+      out.selfScore = {
+        skill: latest.skill,
+        score: latest.score,
+        verdict: latest.verdict,
+        ts: latest.ts,
+        note: latest.note,
+        ...(latest.href !== undefined ? { href: latest.href } : {}),
+        ...(Object.keys(latest.dimensions).length > 0 ? { dimensions: latest.dimensions } : {}),
+      };
+      out.retro = [`score ${latest.score}`, `· ${latest.verdict}`, latest.note !== "" ? `— ${latest.note.slice(0, 240)}` : ""]
         .join(" ")
         .trim();
+      searchableCardText += `\n${readFile(latest.sourcePath)}`;
     }
+    const trend = readSelfScoreTrend(projectPath);
+    if (trend !== undefined) out.selfScoreTrend = trend;
   } catch {
     /* no notes */
   }
@@ -360,15 +708,730 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     /* not a git repo / git unavailable */
   }
 
+  const executionRefs = collectExecutionRefs(projectPath, story.id, searchableCardText);
+  if (executionRefs.length > 0) out.executionRefs = executionRefs;
+
+  const deliveryEvidence = collectDeliveryEvidence(projectPath, story, searchableCardText);
+  if (hasDeliveryEvidence(deliveryEvidence)) out.deliveryEvidence = deliveryEvidence;
+
+  const dynamicEvidence = collectDynamicEvidence(projectPath, story);
+  if (dynamicEvidence.length > 0) out.dynamicEvidence = dynamicEvidence;
+
+  const peerReview = collectPeerReview(projectPath, story.id);
+  if (peerReview !== undefined) out.peerReview = peerReview;
+
+  const storyGraph = collectStoryGraph(projectPath, story);
+  if (hasStoryGraph(storyGraph)) out.storyGraph = storyGraph;
+
+  const correctionActions = collectCorrectionActions(projectPath, story.id);
+  if (correctionActions.length > 0) out.correctionActions = correctionActions;
+
   return out;
+}
+
+function collectExecutionRefs(projectPath: string, storyId: string, text: string): ExecutionRef[] {
+  const refs: ExecutionRef[] = [];
+  const seen = new Set<string>();
+  const add = (ref: ExecutionRef): void => {
+    const key = `${ref.kind}:${ref.label}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    refs.push(ref);
+  };
+
+  for (const match of text.matchAll(/\bPR\s*#?\s*(\d+)\b/gi)) {
+    const pr = match[1];
+    if (pr === undefined) continue;
+    const start = Math.max(0, match.index - 120);
+    const end = Math.min(text.length, match.index + 160);
+    const nearby = text.slice(start, end);
+    if (!/(merged|squash|合并|已合|CI\s*green|通过)/i.test(nearby)) continue;
+    add({ kind: "merged-pr", label: `PR #${pr} merged`, ...commitCountFromText(nearby) });
+  }
+
+  try {
+    for (const line of readFile(joinPath(projectPath, ".roll", "loop", "runs.jsonl")).split("\n")) {
+      if (line.trim() === "") continue;
+      const row = JSON.parse(line) as {
+        story_id?: string;
+        built?: unknown;
+        status?: string;
+        outcome?: string;
+        cycle_id?: string;
+        run_id?: string;
+        tcr_count?: unknown;
+      };
+      const built = Array.isArray(row.built) && row.built.some((x) => x === storyId);
+      if (row.story_id !== storyId && !built) continue;
+      if (row.status !== "done" && row.status !== "merged" && row.outcome !== "delivered") continue;
+      const label = `cycle ${row.cycle_id ?? row.run_id ?? "delivered"}`;
+      const n = typeof row.tcr_count === "number" && Number.isFinite(row.tcr_count) ? row.tcr_count : undefined;
+      add({ kind: "cycle", label, ...(n !== undefined ? { commitCount: n } : {}) });
+    }
+  } catch {
+    /* no loop rows */
+  }
+
+  return refs.slice(0, 20);
+}
+
+function commitCountFromText(text: string): { commitCount?: number } {
+  const m = /(\d+)\s*(?:commits?|TCR commits?|micro-commits?|个\s*(?:TCR\s*)?提交|个\s*TCR)/i.exec(text);
+  if (m?.[1] === undefined) return {};
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? { commitCount: n } : {};
+}
+
+interface RunRow {
+  run_id?: string;
+  cycle_id?: string;
+  story_id?: string;
+  built?: unknown;
+  status?: string;
+  outcome?: string;
+  agent?: string;
+  ts?: string;
+  duration_sec?: number;
+  cost_usd?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+}
+
+interface EventRow {
+  type?: string;
+  storyId?: string;
+  cycleId?: string;
+  prNumber?: number;
+  agent?: string;
+  peer?: string;
+  verdict?: string;
+  findings?: number;
+  cost?: number;
+  stage?: string;
+  action?: string;
+  plannedAction?: string;
+  signal?: string;
+  reason?: string;
+  mode?: string;
+  source?: string;
+  targetId?: string;
+  ts?: number;
+}
+
+function collectDeliveryEvidence(projectPath: string, story: DossierStory, text: string): DeliveryEvidence {
+  const prs = new Map<number, DeliveryPrEvidence>();
+  const files = new Set<string>();
+  const timeline: DeliveryTimelineEntry[] = [];
+  let diffHref: string | undefined;
+  let agent: string | undefined;
+  let cost: DeliveryCostEvidence | undefined;
+
+  const addPr = (number: number, patch: Omit<DeliveryPrEvidence, "number"> = {}): void => {
+    if (!Number.isFinite(number)) return;
+    const cur = prs.get(number) ?? { number };
+    if (patch.href !== undefined && cur.href === undefined) cur.href = patch.href;
+    if (patch.ci !== undefined) cur.ci = patch.ci;
+    prs.set(number, cur);
+  };
+  const addTimeline = (label: string, at: string | undefined): void => {
+    if (at === undefined || at === "") return;
+    if (timeline.some((t) => t.label === label)) return;
+    timeline.push({ label, at });
+  };
+
+  if (story.created !== undefined && story.created !== "") addTimeline("definition", story.created);
+
+  for (const match of text.matchAll(/https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/(\d+)(?:\/files|\.diff|\.patch)?/g)) {
+    const raw = match[0];
+    const n = numberFromString(match[1]);
+    if (n === undefined) continue;
+    const href = raw.replace(/(?:\/files|\.diff|\.patch)$/, "");
+    addPr(n, { href, ...ciPatch(nearbyText(text, match.index, 120, 160)) });
+    if (/\/files$|\.diff$|\.patch$/.test(raw)) diffHref = raw;
+    else if (diffHref === undefined) diffHref = `${href}/files`;
+  }
+
+  for (const match of text.matchAll(/\bPR\s*#?\s*(\d+)\b/gi)) {
+    const n = numberFromString(match[1]);
+    if (n === undefined) continue;
+    addPr(n, ciPatch(nearbyText(text, match.index, 120, 160)));
+  }
+  for (const n of gitPrNumbers(projectPath, story.id)) addPr(n);
+
+  const explicitDiff = /(?:^|\n)\s*(?:Diff|PR diff|差异|改动\s*diff)\s*[:：]\s*(https?:\/\/\S+)/i.exec(text);
+  if (explicitDiff?.[1] !== undefined) diffHref = explicitDiff[1].trim();
+
+  for (const line of text.split("\n")) {
+    const m = /^\s*(?:[-*]\s*)?(?:Files changed|Changed files|files-changed|改动文件|文件清单)\s*[:：]\s*(.+)$/i.exec(line);
+    if (m?.[1] === undefined) continue;
+    for (const f of splitFiles(m[1])) files.add(f);
+  }
+
+  const runs = readRunRows(projectPath, story.id);
+  const deliveredRuns = runs.filter((r) => runMatchesStory(r, story.id) && isDeliveredRun(r));
+  const latestRun = deliveredRuns[deliveredRuns.length - 1];
+  if (latestRun !== undefined) {
+    if (latestRun.agent !== undefined && latestRun.agent !== "") agent = latestRun.agent;
+    cost = costFromRun(latestRun);
+    addTimeline("delivery", latestRun.ts);
+  }
+
+  for (const f of gitChangedFiles(projectPath, story.id)) files.add(f);
+  const slug = githubSlug(projectPath);
+  if (slug !== undefined) {
+    for (const p of prs.values()) if (p.href === undefined) p.href = `https://github.com/${slug}/pull/${p.number}`;
+  }
+  if (diffHref === undefined) {
+    const firstPr = [...prs.values()].find((p) => p.href !== undefined);
+    if (firstPr?.href !== undefined) diffHref = `${firstPr.href}/files`;
+  }
+
+  const knownCycles = new Set(deliveredRuns.flatMap((r) => [r.cycle_id, r.run_id].filter((x): x is string => typeof x === "string" && x !== "")));
+  const knownPrs = (): Set<number> => new Set([...prs.keys()]);
+  for (const ev of readEventRows(projectPath)) {
+    const sameStory = ev.storyId === story.id || (ev.cycleId !== undefined && knownCycles.has(ev.cycleId));
+    if (ev.type === "cycle:start" && sameStory) {
+      addTimeline("execution", isoFromEventTs(ev.ts));
+      if (agent === undefined && ev.agent !== undefined && ev.agent !== "") agent = ev.agent;
+    }
+    if (ev.type === "pr:merge" && ev.prNumber !== undefined && sameStory) {
+      addPr(ev.prNumber);
+      addTimeline("delivery", isoFromEventTs(ev.ts));
+    }
+    if ((ev.type === "ci:pass" || ev.type === "ci:fail") && ev.prNumber !== undefined && knownPrs().has(ev.prNumber)) {
+      addPr(ev.prNumber, { ci: ev.type === "ci:pass" ? "green" : "red" });
+    }
+  }
+
+  const out: DeliveryEvidence = {};
+  const prRows = [...prs.values()].sort((a, b) => a.number - b.number);
+  if (prRows.length > 0) out.prs = prRows;
+  if (diffHref !== undefined) out.diffHref = diffHref;
+  const fileRows = [...files].sort();
+  if (fileRows.length > 0) out.filesChanged = fileRows.slice(0, 40);
+  if (agent !== undefined) out.agent = agent;
+  if (cost !== undefined) out.cost = cost;
+  if (timeline.length > 0) out.timeline = sortTimeline(timeline);
+  return out;
+}
+
+function collectDynamicEvidence(projectPath: string, story: DossierStory): DynamicEvidence[] {
+  const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id, "latest");
+  const out: DynamicEvidence[] = [];
+  const add = (item: DynamicEvidence): void => {
+    if (out.some((x) => x.href === item.href)) return;
+    out.push(item);
+  };
+  try {
+    const evidenceDir = joinPath(dir, "evidence");
+    if (existsSync(evidenceDir)) {
+      for (const file of readdirSync(evidenceDir).sort()) {
+        if (!/\.(?:cast|asciinema)$/i.test(file)) continue;
+        add({ kind: "cast", label: file, href: `latest/evidence/${file}` });
+      }
+    }
+  } catch {
+    /* no dynamic evidence */
+  }
+  try {
+    const screenshotsDir = joinPath(dir, "screenshots");
+    if (existsSync(screenshotsDir)) {
+      for (const file of readdirSync(screenshotsDir).sort()) {
+        if (!/\.(?:mp4|webm|mov|gif)$/i.test(file)) continue;
+        add({ kind: "video", label: file, href: `latest/screenshots/${file}` });
+      }
+    }
+  } catch {
+    /* no video evidence */
+  }
+  return out.slice(0, 12);
+}
+
+interface StorySpecRef {
+  id: string;
+  epic: string;
+  storyDir: string;
+  specPath: string;
+}
+
+const STORY_ID_PATTERN = "\\b(?:US|FIX|REFACTOR|IDEA)(?:-[A-Z0-9]+)*-\\d+[a-z]?\\b";
+
+function collectStoryGraph(projectPath: string, story: DossierStory): StoryGraph {
+  const refs = scanStorySpecs(projectPath);
+  const byId = new Map(refs.map((ref) => [ref.id, ref]));
+  const current = byId.get(story.id) ?? {
+    id: story.id,
+    epic: story.epic,
+    storyDir: joinPath(projectPath, ".roll", "features", story.epic, story.id),
+    specPath: joinPath(projectPath, ".roll", "features", story.epic, story.id, "spec.md"),
+  };
+  let currentSpec = "";
+  try {
+    currentSpec = readFile(current.specPath);
+  } catch {
+    currentSpec = "";
+  }
+
+  const dependsOn = storyGraphLinks(extractDependsOnIds(currentSpec).filter((id) => id !== story.id), story, byId);
+  const dependedBy = storyGraphLinks(reverseDependencyIds(refs, story.id), story, byId);
+  const fixes =
+    story.id.startsWith("FIX-") || story.type === "FIX"
+      ? storyGraphLinks(extractFixesIds(currentSpec).filter((id) => id !== story.id), story, byId)
+      : [];
+  const release = collectReleaseTrace(projectPath, story.id);
+
+  const graph: StoryGraph = {};
+  if (dependsOn.length > 0) graph.dependsOn = dependsOn;
+  if (dependedBy.length > 0) graph.dependedBy = dependedBy;
+  if (fixes.length > 0) graph.fixes = fixes;
+  if (release !== undefined) graph.release = release;
+  return graph;
+}
+
+function scanStorySpecs(projectPath: string): StorySpecRef[] {
+  const featuresDir = joinPath(projectPath, ".roll", "features");
+  const refs: StorySpecRef[] = [];
+  try {
+    for (const epicEntry of readdirSync(featuresDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!epicEntry.isDirectory()) continue;
+      const epicDir = joinPath(featuresDir, epicEntry.name);
+      for (const storyEntry of readdirSync(epicDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!storyEntry.isDirectory()) continue;
+        const specPath = joinPath(epicDir, storyEntry.name, "spec.md");
+        if (!existsSync(specPath)) continue;
+        refs.push({ id: storyEntry.name, epic: epicEntry.name, storyDir: joinPath(epicDir, storyEntry.name), specPath });
+      }
+    }
+  } catch {
+    return [];
+  }
+  return refs;
+}
+
+function extractDependsOnIds(spec: string): string[] {
+  const ids: string[] = [];
+  for (const line of spec.split("\n")) {
+    if (!/\bdepends-on\b\s*[:：]/i.test(line)) continue;
+    for (const id of storyIdsFromText(line)) if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function extractFixesIds(spec: string): string[] {
+  const ids: string[] = [];
+  for (const line of spec.split("\n")) {
+    if (!/\bfix(?:es|ed)?\b\s*[:：]?|修复|所修上游/i.test(line)) continue;
+    for (const id of storyIdsFromText(line)) {
+      if (!id.startsWith("US-") || ids.includes(id)) continue;
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function reverseDependencyIds(refs: readonly StorySpecRef[], storyId: string): string[] {
+  const out: string[] = [];
+  for (const ref of refs) {
+    if (ref.id === storyId) continue;
+    let spec = "";
+    try {
+      spec = readFile(ref.specPath);
+    } catch {
+      continue;
+    }
+    if (!extractDependsOnIds(spec).includes(storyId)) continue;
+    if (!out.includes(ref.id)) out.push(ref.id);
+  }
+  return out;
+}
+
+function storyIdsFromText(text: string): string[] {
+  const ids: string[] = [];
+  const re = new RegExp(STORY_ID_PATTERN, "g");
+  for (const match of text.matchAll(re)) {
+    const id = match[0];
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function storyGraphLinks(ids: readonly string[], story: DossierStory, byId: ReadonlyMap<string, StorySpecRef>): StoryGraphLink[] {
+  return ids.map((id) => {
+    const href = storyIndexHref(story, id, byId);
+    return href !== undefined ? { id, href } : { id };
+  });
+}
+
+function storyIndexHref(story: DossierStory, targetId: string, byId: ReadonlyMap<string, StorySpecRef>): string | undefined {
+  const target = byId.get(targetId);
+  if (target === undefined) return undefined;
+  if (!existsSync(joinPath(target.storyDir, "index.html"))) return undefined;
+  if (target.epic === story.epic) return `../${target.id}/index.html`;
+  return `../../${target.epic}/${target.id}/index.html`;
+}
+
+function collectReleaseTrace(projectPath: string, storyId: string): StoryReleaseTrace | undefined {
+  let changelog = "";
+  try {
+    changelog = readFile(joinPath(projectPath, "CHANGELOG.md"));
+  } catch {
+    return undefined;
+  }
+  let heading: string | undefined;
+  const storyRe = new RegExp(`\\b${escapeRegExp(storyId)}\\b`);
+  for (const line of changelog.split("\n")) {
+    const h = /^##+\s+(.+?)\s*$/.exec(line);
+    if (h?.[1] !== undefined) heading = stripMarkdownLink(h[1].trim());
+    if (heading === undefined || !storyRe.test(line)) continue;
+    return { label: heading, href: `../../../../CHANGELOG.md#${markdownAnchor(heading)}` };
+  }
+  return undefined;
+}
+
+function stripMarkdownLink(text: string): string {
+  return text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+}
+
+function markdownAnchor(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[`~!@#$%^&*()+=[\]{}|;:'",.<>/?\\]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function sortTimeline(timeline: DeliveryTimelineEntry[]): DeliveryTimelineEntry[] {
+  const stageOrder = new Map([
+    ["definition", 0],
+    ["design", 1],
+    ["execution", 2],
+    ["delivery", 3],
+    ["retrospective", 4],
+  ]);
+  return [...timeline].sort((a, b) => {
+    const ao = stageOrder.get(a.label) ?? 100;
+    const bo = stageOrder.get(b.label) ?? 100;
+    if (ao !== bo) return ao - bo;
+    return a.at.localeCompare(b.at);
+  });
+}
+
+function nearbyText(text: string, index: number | undefined, before: number, after: number): string {
+  const i = index ?? 0;
+  return text.slice(Math.max(0, i - before), Math.min(text.length, i + after));
+}
+
+function numberFromString(s: string | undefined): number | undefined {
+  if (s === undefined) return undefined;
+  const n = Number(s);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function ciPatch(text: string): { ci?: CiVerdict } {
+  if (/(CI|check|status).{0,32}(green|pass|passed|success|successful|绿|通过|成功)/i.test(text)) return { ci: "green" };
+  if (/(CI|check|status).{0,32}(red|fail|failed|failure|红|失败)/i.test(text)) return { ci: "red" };
+  if (/(no CI|CI none|无 CI|没有 CI)/i.test(text)) return { ci: "none" };
+  return {};
+}
+
+function splitFiles(s: string): string[] {
+  return s
+    .split(/[,，;；]/)
+    .map((f) => f.trim())
+    .filter((f) => f !== "" && !/\s/.test(f))
+    .slice(0, 80);
+}
+
+function readRunRows(projectPath: string, storyId: string): RunRow[] {
+  try {
+    return readFile(joinPath(projectPath, ".roll", "loop", "runs.jsonl"))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .map((line) => JSON.parse(line) as unknown)
+      .filter((row): row is RunRow => isRunRow(row) && runMatchesStory(row, storyId));
+  } catch {
+    return [];
+  }
+}
+
+function isRunRow(row: unknown): row is RunRow {
+  return typeof row === "object" && row !== null;
+}
+
+function runMatchesStory(row: RunRow, storyId: string): boolean {
+  return row.story_id === storyId || (Array.isArray(row.built) && row.built.some((x) => x === storyId));
+}
+
+function isDeliveredRun(row: RunRow): boolean {
+  return row.status === "done" || row.status === "merged" || row.outcome === "delivered";
+}
+
+function costFromRun(row: RunRow): DeliveryCostEvidence | undefined {
+  const cost: DeliveryCostEvidence = {};
+  if (typeof row.cost_usd === "number" && Number.isFinite(row.cost_usd)) cost.usd = row.cost_usd;
+  if (typeof row.tokens_in === "number" && Number.isFinite(row.tokens_in)) cost.tokensIn = row.tokens_in;
+  if (typeof row.tokens_out === "number" && Number.isFinite(row.tokens_out)) cost.tokensOut = row.tokens_out;
+  return Object.keys(cost).length > 0 ? cost : undefined;
+}
+
+function readEventRows(projectPath: string): EventRow[] {
+  try {
+    return readFile(joinPath(projectPath, ".roll", "loop", "events.ndjson"))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .map((line) => parseEventLine(line) as unknown)
+      .filter((row): row is EventRow => isEventRow(row));
+  } catch {
+    return [];
+  }
+}
+
+function collectCorrectionActions(projectPath: string, storyId: string): CorrectionTraceEntry[] {
+  const out: CorrectionTraceEntry[] = [];
+  for (const ev of readEventRows(projectPath)) {
+    if (ev.type !== "correction:action" || ev.storyId !== storyId) continue;
+    if (ev.action === undefined || ev.signal === undefined || ev.reason === undefined) continue;
+    const at = isoFromEventTs(ev.ts);
+    if (at === undefined) continue;
+    out.push({
+      action: ev.action,
+      signal: ev.signal,
+      reason: ev.reason,
+      at,
+      ...(ev.mode !== undefined ? { mode: ev.mode } : {}),
+      ...(ev.source !== undefined ? { source: ev.source } : {}),
+      ...(ev.targetId !== undefined ? { targetId: ev.targetId } : {}),
+    });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at)).slice(-20);
+}
+
+interface PeerReviewRecord {
+  cycleId: string;
+  verdict: PeerReviewVerdict;
+  findings: string[];
+  sourceOrder: number;
+  source: string;
+  peer?: string;
+  stage?: string;
+  href?: string;
+}
+
+function collectPeerReview(projectPath: string, storyId: string): PeerReviewEvidence | undefined {
+  const cycles = storyCycleIds(projectPath, storyId);
+  if (cycles.length === 0) return undefined;
+  const records: PeerReviewRecord[] = [];
+  const seen = new Set<string>();
+  const add = (r: PeerReviewRecord): void => {
+    const key = `${r.cycleId}:${r.stage ?? ""}:${r.peer ?? ""}:${r.verdict}:${r.source}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    records.push(r);
+  };
+
+  const peerDir = joinPath(projectPath, ".roll", "loop", "peer");
+  if (existsSync(peerDir)) {
+    try {
+      const files = readdirSync(peerDir)
+        .filter((f) => cycles.some((cycle) => f.startsWith(`cycle-${cycle}.`)))
+        .sort();
+      files.forEach((file, index) => {
+        const cycleId = cycles.find((cycle) => file.startsWith(`cycle-${cycle}.`));
+        if (cycleId === undefined) return;
+        const parsed = parsePeerRecordFile(joinPath(peerDir, file), cycleId, index, `../../../loop/peer/${file}`);
+        if (parsed !== undefined) add(parsed);
+      });
+    } catch {
+      /* peer dir unreadable */
+    }
+  }
+
+  for (const ev of readEventRows(projectPath)) {
+    if (ev.type !== "pair:verdict" || ev.cycleId === undefined || !cycles.includes(ev.cycleId)) continue;
+    const verdict = normalizePeerVerdict(ev.verdict);
+    if (verdict === undefined) continue;
+    const findings =
+      typeof ev.findings === "number" && Number.isFinite(ev.findings) && ev.findings > 0
+        ? [`${ev.findings} findings`]
+        : [];
+    add({
+      cycleId: ev.cycleId,
+      verdict,
+      findings,
+      sourceOrder: 10_000 + records.length,
+      source: "event",
+      ...(ev.peer !== undefined ? { peer: ev.peer } : {}),
+      ...(ev.stage !== undefined ? { stage: ev.stage } : {}),
+    });
+  }
+
+  const sorted = records.sort((a, b) => {
+    const ac = cycles.indexOf(a.cycleId);
+    const bc = cycles.indexOf(b.cycleId);
+    if (ac !== bc) return ac - bc;
+    const as = peerStageOrder(a.stage);
+    const bs = peerStageOrder(b.stage);
+    if (as !== bs) return as - bs;
+    return a.sourceOrder - b.sourceOrder;
+  });
+  if (sorted.length === 0) return undefined;
+  const rounds = sorted.map((r, i) => ({
+    round: i + 1,
+    verdict: r.verdict,
+    findings: r.findings,
+    ...(r.peer !== undefined ? { peer: r.peer } : {}),
+    ...(r.stage !== undefined ? { stage: r.stage } : {}),
+    ...(r.href !== undefined ? { href: r.href } : {}),
+  }));
+  const final = rounds[rounds.length - 1]?.verdict;
+  return final !== undefined ? { finalVerdict: final, rounds } : undefined;
+}
+
+function storyCycleIds(projectPath: string, storyId: string): string[] {
+  const out: string[] = [];
+  const add = (id: string | undefined): void => {
+    if (id === undefined || id === "" || out.includes(id)) return;
+    out.push(id);
+  };
+  for (const row of readRunRows(projectPath, storyId)) {
+    if (!runMatchesStory(row, storyId)) continue;
+    add(row.cycle_id);
+    add(row.run_id);
+  }
+  for (const ev of readEventRows(projectPath)) {
+    if (ev.storyId === storyId) add(ev.cycleId);
+  }
+  return out;
+}
+
+function parsePeerRecordFile(path: string, cycleId: string, sourceOrder: number, href: string): PeerReviewRecord | undefined {
+  let text: string;
+  try {
+    text = readFile(path);
+  } catch {
+    return undefined;
+  }
+  if (path.endsWith(".json")) {
+    try {
+      const obj = JSON.parse(text) as Record<string, unknown>;
+      const verdict = normalizePeerVerdict(obj["verdict"]);
+      if (verdict === undefined) return undefined;
+      const findingsRaw = obj["findings"];
+      const findings = Array.isArray(findingsRaw)
+        ? findingsRaw.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim()).slice(0, 8)
+        : [];
+      return {
+        cycleId,
+        verdict,
+        findings,
+        sourceOrder,
+        source: path,
+        href,
+        ...(typeof obj["peer"] === "string" && obj["peer"] !== "" ? { peer: obj["peer"] } : {}),
+        ...(typeof obj["stage"] === "string" && obj["stage"] !== "" ? { stage: obj["stage"] } : {}),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+  const verdict = normalizePeerVerdict(text);
+  if (verdict === undefined) return undefined;
+  const peer = /^peer\s*[:：]\s*(\S+)/im.exec(text)?.[1];
+  const stage = /^stage\s*[:：]\s*(\S+)/im.exec(text)?.[1];
+  const findings = text
+    .split("\n")
+    .map((line) => /^[-*]\s+(.*)$/.exec(line.trim())?.[1]?.trim())
+    .filter((line): line is string => line !== undefined && line !== "")
+    .slice(0, 8);
+  return {
+    cycleId,
+    verdict,
+    findings,
+    sourceOrder,
+    source: path,
+    href,
+    ...(peer !== undefined && peer !== "" ? { peer } : {}),
+    ...(stage !== undefined && stage !== "" ? { stage } : {}),
+  };
+}
+
+function normalizePeerVerdict(value: unknown): PeerReviewVerdict | undefined {
+  const s = typeof value === "string" ? value : "";
+  const m = /\b(agree|refine|object|escalate)\b/i.exec(s);
+  if (m?.[1] === undefined) return undefined;
+  return m[1].toUpperCase() as PeerReviewVerdict;
+}
+
+function peerStageOrder(stage: string | undefined): number {
+  if (stage === "design") return 0;
+  if (stage === "code") return 1;
+  if (stage === "cycle") return 2;
+  return 10;
+}
+
+function isEventRow(row: unknown): row is EventRow {
+  if (typeof row !== "object" || row === null) return false;
+  const r = row as Record<string, unknown>;
+  return typeof r["type"] === "string";
+}
+
+function isoFromEventTs(ts: number | undefined): string | undefined {
+  if (ts === undefined || !Number.isFinite(ts)) return undefined;
+  const ms = ts > 10_000_000_000 ? ts : ts * 1000;
+  return new Date(ms).toISOString();
+}
+
+function gitChangedFiles(projectPath: string, storyId: string): string[] {
+  try {
+    return execGit(projectPath, ["log", "--name-only", "--pretty=format:", "--fixed-strings", "--grep", storyId])
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "" && !l.includes(" "))
+      .slice(0, 80);
+  } catch {
+    return [];
+  }
+}
+
+function gitPrNumbers(projectPath: string, storyId: string): number[] {
+  try {
+    const nums = new Set<number>();
+    for (const subject of execGit(projectPath, ["log", "--format=%s", "--fixed-strings", "--grep", storyId]).split("\n")) {
+      for (const match of subject.matchAll(/(?:\(#|PR\s*#?)(\d+)\)?/gi)) {
+        const n = numberFromString(match[1]);
+        if (n !== undefined) nums.add(n);
+      }
+    }
+    return [...nums];
+  } catch {
+    return [];
+  }
+}
+
+function githubSlug(projectPath: string): string | undefined {
+  try {
+    const remote = execGit(projectPath, ["config", "--get", "remote.origin.url"]).trim();
+    const https = /^https:\/\/github\.com\/([^/]+\/[^/.]+)(?:\.git)?$/.exec(remote);
+    if (https?.[1] !== undefined) return https[1];
+    const ssh = /^git@github\.com:([^/]+\/[^/.]+)(?:\.git)?$/.exec(remote);
+    if (ssh?.[1] !== undefined) return ssh[1];
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // Thin fs/git seams (kept local so the renderer stays pure above).
 function readFile(p: string): string {
   return readFileSync(p, "utf8");
-}
-function listDir(p: string): string[] {
-  return readdirSync(p);
 }
 function statDir(p: string): boolean {
   return statSync(p).isFile();

@@ -8,8 +8,9 @@
  * — reimplemented natively here via the shared render primitives.
  *
  * The full step pipeline + final v2 render are mirrored byte-for-byte. The
- * convention-sync / install / skill-link FS side effects (the ONLY thing the
- * snapshot-diff observes) live in setup-shared.ts and are shared with init.ts.
+ * convention-source guard, convention-sync / install / skill-link FS side
+ * effects (the ONLY thing the snapshot-diff observes) live in TS, so `setup`
+ * has no bash fallback.
  *
  * Whitelisted divergences (no contribution to stdout; FS-only or env-only):
  *   - The submodule guard's `git submodule update` is reproduced as a guarded
@@ -275,10 +276,9 @@ function emitSetupUi(steps: Step[]): void {
 
 // ─── cmd_setup (1410) ─────────────────────────────────────────────────────────
 /**
- * Returns the exit code, or `null` to signal the caller to fall back to bash
- * (the unknown-argument error message is bash-owned, like init's flag errors).
+ * Returns the exit code for the fully ported setup surface.
  */
-export function setupCommand(args: string[]): number | null {
+export function setupCommand(args: string[]): number {
   let force = false;
   for (const a of args) {
     if (a === "--force" || a === "-f") force = true;
@@ -292,7 +292,11 @@ export function setupCommand(args: string[]): number | null {
     }
   }
 
-  if (!existsSync(rollPkgConventions())) return null; // _install_local would err+exit 1 (bash-owned)
+  if (!existsSync(rollPkgConventions())) {
+    err(m("shared.convention_source_not_found_at_2", rollPkgConventions()));
+    err(m("shared.run_this_from_the_roll_repo"));
+    return 1;
+  }
 
   submoduleGuard();
 

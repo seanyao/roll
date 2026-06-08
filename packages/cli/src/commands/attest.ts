@@ -26,6 +26,7 @@
 import {
   acForStory,
   bi,
+  parseBacklog,
   renderReport,
   ansiPre,
   boundTranscript,
@@ -39,11 +40,13 @@ import {
   type EvidenceRef,
   type ProcessArchive,
   type RunRow,
+  type SelfScoreReportEntry,
 } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
+  openEvidenceFrame,
   redactSecrets,
   screenshotEvidenceRef,
   writeEvidenceJson,
@@ -55,12 +58,15 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, join, relative } from "node:path";
-import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, generateIndex, reportFileName } from "../lib/archive.js";
+import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
+import { readSelfScoreTrend, readStorySelfScores } from "../lib/self-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
@@ -224,6 +230,21 @@ interface AcMapEntry {
   evidence?: Array<{ kind?: string; label?: string; href?: string; textFile?: string }>;
 }
 
+const DEFAULT_MAX_CAST_BYTES = 1024 * 1024;
+const DEFAULT_MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+
+function maxBytes(kind: "cast" | "video"): number {
+  const envKey = kind === "cast" ? "ROLL_EVIDENCE_MAX_CAST_BYTES" : "ROLL_EVIDENCE_MAX_VIDEO_BYTES";
+  const raw = Number(process.env[envKey]);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return kind === "cast" ? DEFAULT_MAX_CAST_BYTES : DEFAULT_MAX_VIDEO_BYTES;
+}
+
+function localEvidencePath(runDir: string, href: string): string | null {
+  if (href === "" || href.startsWith("/") || href.includes("..") || /^[a-z]+:/i.test(href)) return null;
+  return join(runDir, href);
+}
+
 /** Read + validate the optional AI intent map; null when absent/malformed. */
 function readAcMap(storyDir: string): Map<string, AcMapEntry> | null {
   const p = join(storyDir, "ac-map.json");
@@ -257,10 +278,38 @@ function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): 
       return null;
     }
   }
+  if ((kind === "cast" || kind === "video") && e.href !== undefined) {
+    const p = localEvidencePath(runDir, e.href);
+    if (p === null || !existsSync(p)) return null;
+    try {
+      const size = statSync(p).size;
+      if (size > maxBytes(kind)) {
+        warn(`${kind} evidence too large (${size} bytes > ${maxBytes(kind)}): ${e.href}`);
+        return null;
+      }
+      if (kind === "cast") {
+        const { redacted, hits } = redactSecrets(readFileSync(p, "utf8"));
+        if (hits.length > 0) warn(`redacted secret(s) in ${e.href}: ${hits.join(", ")}`);
+        const bounded = boundTranscript(redacted);
+        return { kind, label, href: e.href, inlineHtml: ansiPre(bounded.text) };
+      }
+      return { kind, label, href: e.href };
+    } catch {
+      return null;
+    }
+  }
   if (["screenshot", "commit", "ci", "deploy", "test-pass"].includes(kind)) {
     return e.href !== undefined ? { kind, label, href: e.href } : { kind, label };
   }
   return null;
+}
+
+function relativeFromPhysical(fromDir: string, toPath: string): string {
+  try {
+    return relative(realpathSync(fromDir), realpathSync(toPath));
+  } catch {
+    return relative(fromDir, toPath);
+  }
 }
 
 /**
@@ -272,40 +321,17 @@ function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): 
 export function readSelfScores(
   projectPath: string,
   storyId: string,
-): Array<{ skill: string; score: number; verdict: string; ts: string; note: string }> {
-  const dir = join(projectPath, ".roll", "notes");
-  if (!existsSync(dir)) return [];
-  const out: Array<{ skill: string; score: number; verdict: string; ts: string; note: string }> = [];
-  let names: string[] = [];
-  try {
-    names = readdirSync(dir).filter((f) => f.endsWith(".md") && f.includes(`-${storyId}-`));
-  } catch {
-    return [];
-  }
-  for (const name of names.sort()) {
-    try {
-      const text = readFileSync(join(dir, name), "utf8");
-      const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
-      if (!m) continue;
-      const fm = new Map<string, string>();
-      for (const line of (m[1] ?? "").split("\n")) {
-        const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line.trim());
-        if (kv?.[1] !== undefined) fm.set(kv[1], (kv[2] ?? "").trim());
-      }
-      if (fm.get("story") !== storyId) continue;
-      const score = Number(fm.get("score") ?? "");
-      out.push({
-        skill: fm.get("skill") ?? basename(name),
-        score: Number.isFinite(score) ? score : 0,
-        verdict: fm.get("verdict") ?? "",
-        ts: fm.get("ts") ?? "",
-        note: (m[2] ?? "").trim().slice(0, 300),
-      });
-    } catch {
-      /* tolerant reader */
-    }
-  }
-  return out;
+  hrefFromDir?: string,
+): SelfScoreReportEntry[] {
+  return readStorySelfScores(projectPath, storyId, hrefFromDir).map((e) => ({
+    skill: e.skill,
+    score: e.score,
+    verdict: e.verdict,
+    ts: e.ts,
+    note: e.note,
+    ...(e.href !== undefined ? { href: e.href } : {}),
+    ...(Object.keys(e.dimensions).length > 0 ? { dimensions: e.dimensions } : {}),
+  }));
 }
 
 /**
@@ -416,8 +442,69 @@ export function detectBeforeAfter(runDir: string): BeforeAfterPair[] {
   return pairs;
 }
 
+export interface AfterOnlyShot {
+  label: string;
+  shot: EvidenceRef;
+}
+
+/** US-EVID-004: after-only delivery visuals for brand-new surfaces. */
+export function detectAfterOnly(runDir: string): AfterOnlyShot[] {
+  const dir = join(runDir, "screenshots");
+  if (!existsSync(dir)) return [];
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
+  } catch {
+    return [];
+  }
+  const lower = new Set(files.map((f) => f.toLowerCase()));
+  const shots: AfterOnlyShot[] = [];
+  for (const f of files.slice().sort()) {
+    const m = /^after-(.+)\.(png|jpe?g|webp)$/i.exec(f);
+    if (m === null) continue;
+    const stem = m[1] ?? "";
+    const ext = m[2] ?? "";
+    if (lower.has(`before-${stem}.${ext}`.toLowerCase())) continue;
+    shots.push({
+      label: stem,
+      shot: { kind: "screenshot", label: `改后 ${stem}`, href: `screenshots/${f}` },
+    });
+  }
+  return shots;
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function webJoin(...parts: string[]): string {
+  return parts.filter((p) => p !== "").join("/").replace(/\\/g, "/").replace(/\/+/g, "/");
+}
+
+function dossierVisualsHtml(runRel: string, pairs: BeforeAfterPair[], afterOnly: AfterOnlyShot[]): string {
+  const figs: string[] = [];
+  for (const p of pairs) {
+    const before = webJoin(runRel, p.before.href ?? "");
+    const after = webJoin(runRel, p.after.href ?? "");
+    figs.push(
+      `<div class="delivery-shot-pair" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0;">` +
+        `<figure style="margin:0;"><a href="${escHtml(before)}"><img src="${escHtml(before)}" alt="${escHtml(p.before.label)}" style="width:100%;height:auto;border-radius:6px;"></a><figcaption>${bi("Before", "改前")} ${escHtml(p.label)}</figcaption></figure>` +
+        `<figure style="margin:0;"><a href="${escHtml(after)}"><img src="${escHtml(after)}" alt="${escHtml(p.after.label)}" style="width:100%;height:auto;border-radius:6px;"></a><figcaption>${bi("After", "改后")} ${escHtml(p.label)}</figcaption></figure>` +
+      `</div>`,
+    );
+  }
+  for (const shot of afterOnly) {
+    const href = webJoin(runRel, shot.shot.href ?? "");
+    figs.push(
+      `<figure class="delivery-shot-single" style="margin:10px 0;"><a href="${escHtml(href)}"><img src="${escHtml(href)}" alt="${escHtml(shot.shot.label)}" style="width:100%;max-width:720px;height:auto;border-radius:6px;"></a><figcaption>${bi("After", "改后")} ${escHtml(shot.label)}</figcaption></figure>`,
+    );
+  }
+  return figs.length > 0 ? `<div class="delivery-shots">${figs.join("\n")}</div>\n` : "";
+}
+
 const USAGE = [
-  "Usage: roll attest <story-id> [--deploy-url <url>]",
+  "Usage: roll attest <story-id> [--deploy-url <url>] [--run-dir <path>]",
+  "       roll attest backfill [--dry-run]",
   "                   [--capture-terminal | --capture-tmux <session> | --capture-command <cmd>]",
   "                   [--capture-region <x,y,w,h>]",
   "  --capture-tmux <session>   self-capture a terminal attached to a tmux session (unattended Gate)",
@@ -426,9 +513,146 @@ const USAGE = [
   "  (terminal lane honestly skips off-GUI / without screen-recording permission)",
 ].join("\n");
 
+const PRE_EVIDENCE_RUN_ID = "pre-evidence-backfill";
+
+interface BackfillStats {
+  scanned: number;
+  backfilled: number;
+  skippedExisting: number;
+  skippedMissingCard: number;
+  failed: number;
+}
+
+function hasLatestReport(storyDir: string, storyId: string): boolean {
+  return existsSync(join(storyDir, "latest", reportFileName(storyId)));
+}
+
+function ensurePreEvidenceMarker(storyId: string, runDir: string): void {
+  const evidenceDir = join(runDir, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  mkdirSync(join(runDir, "screenshots"), { recursive: true });
+  writeFileSync(
+    join(evidenceDir, "pre-evidence-history.txt"),
+    [
+      `${storyId} pre-evidence history`,
+      "",
+      "This report was generated by `roll attest backfill` for a Done card that predates the acceptance-evidence gate.",
+      "It records the reconstructable hard facts and labels unreconstructable stations honestly; it is not a fresh delivery claim.",
+      "",
+    ].join("\n"),
+  );
+}
+
+/**
+ * The AC items for a story, resilient to a content-free stub owner (FIX-226).
+ * `findFeatureFile` returns the ID-owned card file, which after migrate-features
+ * (US-META-007) may be a stub `spec.md` carrying no `**AC:**` block while the
+ * story's real ACs still live in the epic feature file. Walk every candidate
+ * (ID-owned first) and return the FIRST non-empty AC set — so a stub that DOES
+ * carry its own ACs still wins first (FIX-225 preserved), and an empty stub
+ * falls through to the epic file instead of yielding a zero-AC report.
+ */
+export function resolveStoryAcItems(projectPath: string, storyId: string): ReturnType<typeof acForStory> {
+  for (const cand of findFeatureFiles(projectPath, storyId)) {
+    try {
+      const items = acForStory(readFileSync(cand, "utf8"), storyId, {
+        fileOwned: basename(cand) === `${storyId}.md`,
+      });
+      if (items.length > 0) return items;
+    } catch {
+      /* unreadable candidate: skip */
+    }
+  }
+  return [];
+}
+
+function ensurePreEvidenceAcMap(storyId: string, storyDir: string, projectPath: string, runDir: string): void {
+  const p = join(storyDir, "ac-map.json");
+  if (existsSync(p)) return;
+  const items = resolveStoryAcItems(projectPath, storyId);
+  if (items.length === 0) return;
+  ensurePreEvidenceMarker(storyId, runDir);
+  const rows = items.map((item) => ({
+    ac: item.id,
+    status: "readonly",
+    evidence: [
+      {
+        kind: "text",
+        label: "pre-evidence history marker",
+        textFile: "evidence/pre-evidence-history.txt",
+      },
+    ],
+    note: "pre-evidence history card: AC-specific live evidence cannot be reconstructed without inventing proof.",
+  }));
+  writeFileSync(p, JSON.stringify(rows, null, 2) + "\n");
+}
+
+async function attestBackfillCommand(args: string[], deps: AttestDeps): Promise<number> {
+  const dryRun = args.includes("--dry-run");
+  const projectPath = process.cwd();
+  const backlogPath = join(projectPath, ".roll", "backlog.md");
+  if (!existsSync(backlogPath)) {
+    process.stderr.write("[roll] attest backfill: .roll/backlog.md not found\n");
+    return 1;
+  }
+  const stats: BackfillStats = { scanned: 0, backfilled: 0, skippedExisting: 0, skippedMissingCard: 0, failed: 0 };
+  const items = parseBacklog(readFileSync(backlogPath, "utf8")).filter((item) => item.status.includes("✅ Done"));
+
+  for (const item of items) {
+    stats.scanned += 1;
+    const featureFile = findFeatureFile(projectPath, item.id);
+    if (featureFile === null) {
+      stats.skippedMissingCard += 1;
+      continue;
+    }
+    const storyDir = cardArchiveDir(projectPath, item.id);
+    if (hasLatestReport(storyDir, item.id)) {
+      stats.skippedExisting += 1;
+      continue;
+    }
+    if (dryRun) {
+      stats.backfilled += 1;
+      continue;
+    }
+    const runDir = join(storyDir, PRE_EVIDENCE_RUN_ID);
+    ensurePreEvidenceMarker(item.id, runDir);
+    ensurePreEvidenceAcMap(item.id, storyDir, projectPath, runDir);
+    const rc = await attestCommand([item.id, "--run-dir", runDir], deps);
+    if (rc === 0) stats.backfilled += 1;
+    else stats.failed += 1;
+  }
+
+  process.stdout.write(
+    [
+      dryRun ? "Acceptance evidence backfill dry-run" : "Acceptance evidence backfill complete",
+      `  scanned: ${stats.scanned}`,
+      `  backfilled: ${stats.backfilled}`,
+      `  skipped_existing: ${stats.skippedExisting}`,
+      `  skipped_missing_card: ${stats.skippedMissingCard}`,
+      `  failed: ${stats.failed}`,
+      "",
+    ].join("\n"),
+  );
+  return stats.failed === 0 ? 0 : 1;
+}
+
 /** `roll attest <story-id> [--deploy-url <url>] [--capture-tmux <s> | --capture-command <c>]` */
 export async function attestCommand(args: string[], deps: AttestDeps = {}): Promise<number> {
-  const storyId = args.find((a) => !a.startsWith("-"));
+  if (args[0] === "backfill") return attestBackfillCommand(args.slice(1), deps);
+  const flagsWithValue = new Set(["--deploy-url", "--run-dir", "--capture-tmux", "--capture-command", "--capture-region"]);
+  let storyId: string | undefined;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === undefined) continue;
+    if (flagsWithValue.has(arg)) {
+      i += 1;
+      continue;
+    }
+    if (!arg.startsWith("-")) {
+      storyId = arg;
+      break;
+    }
+  }
   if (storyId === undefined || storyId === "") {
     process.stderr.write(USAGE + "\n");
     return 1;
@@ -438,6 +662,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     return i >= 0 ? args[i + 1] : undefined;
   };
   const deployUrl = flagVal("--deploy-url");
+  const explicitRunDir = flagVal("--run-dir");
+  const envRunDir = (process.env["ROLL_RUN_DIR"] ?? "").trim();
+  const providedRunDir =
+    explicitRunDir !== undefined && explicitRunDir !== "" ? explicitRunDir : envRunDir !== "" ? envRunDir : undefined;
   // US-ATTEST-011 — unattended terminal self-capture lane. Driven by the Gate
   // session in a headless cycle; on a non-GUI / no-permission host the lane
   // honestly skips and the report drops the self-capture block (no placeholder).
@@ -454,23 +682,24 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     return 1;
   }
 
-  // US-ATTEST-012: an ID-named card file (`<storyId>.md`) owns its whole body —
-  // a `##` heading that merely names another card can't hijack the trailing AC
-  // (FIX-214 实案). Content-matched files keep ordinary section attribution.
-  const fileOwned = basename(featureFile) === `${storyId}.md`;
-  const acItems = acForStory(readFileSync(featureFile, "utf8"), storyId, { fileOwned });
+  // AC extraction (FIX-226): walk past a content-free stub owner — the ID-owned
+  // card file may be a migrate-features `spec.md` (US-META-007) with no `**AC:**`
+  // block, while the story's real ACs still live in the epic feature file. The
+  // ID-owned file is still tried first, so US-ATTEST-012 / FIX-214 / FIX-225
+  // (a real owner wins; no cross-card hijack) are all preserved.
+  const acItems = resolveStoryAcItems(projectPath, storyId);
   if (acItems.length === 0) warn(`no **AC:** block for ${storyId} — report will carry facts only`);
 
   // run dir + latest symlink (never overwrite history).
   const now = (deps.now ?? ((): Date => new Date()))();
   const p2 = (n: number): string => String(n).padStart(2, "0");
-  const runId = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}T${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`;
+  const generatedRunId = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}T${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`;
   // US-META-001: deliverables land in the card folder `features/<epic>/<ID>/`
   // (epic via the backlog-generated index, uncategorized fallback). Runs never
   // overwrite history; `latest` symlinks the newest.
   const storyDir = cardArchiveDir(projectPath, storyId);
-  const runDir = join(storyDir, runId);
-  mkdirSync(runDir, { recursive: true });
+  const runDir = providedRunDir ?? join(storyDir, generatedRunId);
+  openEvidenceFrame({ runDir });
 
   // terminal self-capture (US-ATTEST-011): drive the dispatcher's terminal lane
   // into this run's screenshots/ BEFORE evidence sweep, then bridge a TAKEN shot
@@ -534,10 +763,12 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       ? `${manifest.test_pass.age_seconds}s ago`
       : "present"
     : "absent";
-  const selfScores = readSelfScores(projectPath, storyId);
+  const selfScores = readSelfScores(projectPath, storyId, runDir);
+  const selfScoreTrend = readSelfScoreTrend(projectPath);
   // US-ATTEST-013 — self-contained card context + before/after comparison.
   const context = buildCardContext(projectPath, featureFile, storyId, process.env);
   const beforeAfter = detectBeforeAfter(runDir);
+  const afterOnly = detectAfterOnly(runDir);
   // US-ATTEST-014 — reverse-look up the delivering cycle and inline its process
   // archive (timeline + signal layer + bounded, redacted transcript). Degrades
   // gracefully: hand-delivered / no-data cards yield undefined (section trimmed).
@@ -559,6 +790,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
     ...(processArchive !== undefined ? { process: processArchive } : {}),
     ...(selfScores.length > 0 ? { selfScores } : {}),
+    ...(selfScoreTrend !== undefined ? { selfScoreTrend } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
   });
   // US-META-001: report carries the card id (`<ID>-report.html`) so a tab /
@@ -570,7 +802,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const latest = join(storyDir, "latest");
   try {
     rmSync(latest, { force: true });
-    symlinkSync(runId, latest);
+    symlinkSync(relativeFromPhysical(storyDir, runDir), latest);
   } catch {
     warn("latest symlink update failed (report still written)");
   }
@@ -579,9 +811,11 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const indexPath = join(storyDir, "index.html");
   if (existsSync(indexPath)) {
     try {
-      const reportRel = join(runId, reportFileName(storyId));
+      const runRel = relativeFromPhysical(storyDir, runDir).replace(/\\/g, "/");
+      const reportRel = join(runRel, reportFileName(storyId)).replace(/\\/g, "/");
       const deliveryHtml =
         `<p><a href="${reportRel}">${bi("Attestation report", "验收报告")}</a></p>\n` +
+        dossierVisualsHtml(runRel, beforeAfter, afterOnly) +
         `<p class="muted">${bi("Delivered", "交付于")} ${new Date().toISOString().slice(0, 10)}</p>\n`;
       const idx = markPhaseDone(readFileSync(indexPath, "utf8"), "delivery", deliveryHtml);
       writeFileSync(indexPath, idx, "utf8");

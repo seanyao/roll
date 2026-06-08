@@ -1,6 +1,6 @@
 /** Ported-command registry — one line per migrated subcommand. */
 import { fallbackToBash, registerPorted } from "../bridge.js";
-import { agentListCommand } from "./agent-list.js";
+import { agentCommand } from "./agent.js";
 import { pairCommand } from "./pair.js";
 import { alertCommand } from "./alert.js";
 import { archiveMigrateCommand } from "./archive-migrate.js";
@@ -16,7 +16,7 @@ import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
 import { loopAttachRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
-import { dreamRunOnceCommand } from "./dream-run-once.js";
+import { dreamCommand } from "./dream.js";
 import { feedbackCommand } from "./feedback.js";
 import { gcCommand } from "./gc.js";
 import { ideaCommand } from "./idea.js";
@@ -45,6 +45,7 @@ import { skillsCommand } from "./skills.js";
 import { slidesCommand } from "./slides/index.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
+import { tuneCommand } from "./tune.js";
 import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
 
@@ -86,19 +87,13 @@ export function registerAll(): void {
     process.stderr.write(`[roll] unknown archive subcommand: ${args[0]}\n`);
     return 1;
   });
-  // `dream run-once`: the v3-native heart of the dream service (US-PORT-008) —
-  // resolves the project + roll-.dream skill body and spawns the agent in place.
-  // The generated dream runner (roll loop on) delegates to this instead of the
-  // retired v2 bash runner that bare-called unsourced engine funcs (FIX-197).
-  registerPorted("dream", (args) => {
-    if (args[0] === "run-once") return dreamRunOnceCommand(args.slice(1));
-    return fallbackToBash(["dream", ...args]).status;
-  });
-  // `agent` routes per-subcommand: only `list` is ported so far.
-  registerPorted("agent", (args) => {
-    if (args[0] === "list") return agentListCommand(args.slice(1));
-    return fallbackToBash(["agent", ...args]).status;
-  });
+  // `dream`: full surface TS (US-PORT-020). `run-once` is the v3-native scan
+  // heart; every other arg mirrors v2's generic unknown-command surface without
+  // shelling to bin/roll.
+  registerPorted("dream", dreamCommand);
+  // `agent`: full surface TS (view/list/use/set/unknown). The write face owns
+  // .roll/agents.yaml plus legacy .roll/local.yaml sync; no bash fallback.
+  registerPorted("agent", agentCommand);
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
   // (v2 had no pairing).
@@ -131,11 +126,10 @@ export function registerAll(): void {
   // hard rule). No bash fallback: v2 had no `roll release` subcommand (the flow
   // lived in the private ops wrapper, which stays for the actual publish).
   registerPorted("release", (args) => (args[0] === "ship" ? releaseShipCommand(args.slice(1)) : releaseCommand(args)));
-  // `prices`: show/help/unknown are TS; `refresh` (network write) is bash.
-  registerPorted("prices", (args) => {
-    const r = pricesCommand(args);
-    return r ?? fallbackToBash(["prices", ...args]).status;
-  });
+  // `prices`: full surface TS (show/help/unknown + refresh network write).
+  // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
+  // fallback remains (US-PORT-017).
+  registerPorted("prices", pricesCommand);
   // `config`: FULLY TS now (US-PORT-006 — 整个 config 命令收口). Read surface
   // (help/--list/key read) + write surface + the three compact facades
   // (loop-window/loop-schedule/dream-time) all run native; no bash fallback.
@@ -156,15 +150,10 @@ export function registerAll(): void {
   // `feedback`: full surface TS (arg parse, repo resolution, env block,
   // print-url + gh issue create). No sub-paths left on bash.
   registerPorted("feedback", feedbackCommand);
-  // `init`: the DETERMINISTIC scaffolding paths are TS (fresh project init +
-  // re-init section-merge, with the v2 roll-init.py UI rendered natively). The
-  // legacy-codebase onboarding flow, `init --apply`, unknown -flags, and the
-  // no-templates guard all RETURN null → fall back to bash (which owns the
-  // interactive agent launch and the i18n'd error messages).
-  registerPorted("init", (args) => {
-    const r = initCommand(args);
-    return r ?? fallbackToBash(["init", ...args]).status;
-  });
+  // `init`: full surface TS (fresh/re-init scaffold, legacy-codebase onboard
+  // launcher, --apply plan consumption, unknown flags, and no-template guard).
+  // No sub-paths on bash.
+  registerPorted("init", initCommand);
   registerPorted("migrate-features", migrateFeaturesCommand);
   // `migrate`: full surface TS (three-state idempotency, dry-run preview,
   // git-mv execute with the single atomic commit). No sub-paths on bash.
@@ -172,15 +161,9 @@ export function registerAll(): void {
   // `offboard`: full surface TS (changeset parse, cross-project guard, plan
   // print, FIX-125 in-cycle plist tripwire, --confirm apply). No bash fallback.
   registerPorted("offboard", offboardCommand);
-  // `setup`: the DETERMINISTIC install/sync pipeline + v2 UI are TS (fresh /
-  // --force / already-synced re-run; the unknown-argument error is owned by the
-  // TS port too — byte-identical catalog message). The only fallback is the
-  // no-conventions-source guard (rollPkgConventions missing → returns null), so
-  // bash owns the convention-source-not-found error + exit. No other sub-paths.
-  registerPorted("setup", (args) => {
-    const r = setupCommand(args);
-    return r ?? fallbackToBash(["setup", ...args]).status;
-  });
+  // `setup`: full surface TS (fresh / --force / already-synced re-run,
+  // unknown-argument, and no-conventions-source guard). No sub-paths on bash.
+  registerPorted("setup", setupCommand);
   // `ci`: the READ surface is TS (no-flag / `--timeout=N` status report:
   // gh-absent warn, not-a-git-repo err, gh-run-list failure, no-runs note, and
   // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate
@@ -196,6 +179,13 @@ export function registerAll(): void {
   // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
+  // `tune`: v3-native US-EVID-015 second-order control loop, READ-ONLY. Aggregates
+  // four trend signals (self-score notes / runs.jsonl pass rate / events.ndjson
+  // misjudgments / runs result_eval.dims rubric relevance) into the pure
+  // buildSelfTuningPlan, which emits suggest-only proposals with evidence +
+  // rollback. NEVER writes policy/agents/rubric config; `tune reset` prints the
+  // default rollback values without touching disk. No bash fallback (v2 had none).
+  registerPorted("tune", tuneCommand);
   // `update`: full surface TS (npm + curl upgrade paths, cache invalidation, the
   // post-update `roll setup` chain, changelog). The real install is driven via
   // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.

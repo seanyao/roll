@@ -70,6 +70,25 @@ const BACKLOG = [
   "",
 ].join("\n");
 
+function seedFeatureCard(root: string, storyId: string, title: string = "Runner adapter smoke story"): void {
+  const storyDir = join(root, ".roll", "features", "uncategorized", storyId);
+  mkdirSync(storyDir, { recursive: true });
+  writeFileSync(
+    join(storyDir, "spec.md"),
+    [`# ${storyId} — ${title}`, "", "**AC:**", "- [ ] cycle delivers with evidence", ""].join("\n"),
+  );
+  writeFileSync(
+    join(storyDir, "ac-map.json"),
+    JSON.stringify([
+      {
+        ac: `${storyId}:AC1`,
+        status: "pass",
+        evidence: [{ kind: "test-pass", label: `${storyId} green path` }],
+      },
+    ]),
+  );
+}
+
 /**
  * Build a fixture: a bare remote with `main` (carrying .roll/backlog.md) + a
  * working clone whose `origin` is the bare remote (file://). Returns both paths.
@@ -83,6 +102,7 @@ function makeFixture(tag: string): { repo: string; remote: string } {
   git(seed, ["clone", "-q", remote, "."]);
   mkdirSync(join(seed, ".roll"), { recursive: true });
   writeFileSync(join(seed, ".roll", "backlog.md"), BACKLOG, "utf8");
+  seedFeatureCard(seed, "US-RUN-001");
   git(seed, [...GIT_ID, "add", "-A"]);
   git(seed, [...GIT_ID, "commit", "-q", "-m", "seed backlog"]);
   git(seed, ["push", "-q", "origin", "main"]);
@@ -120,9 +140,27 @@ const CLAUDE_STREAM_JSON = [
 ].join("\n");
 const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult> => {
   const wt = opts.cwd;
+  const storyId = opts.storyId ?? "US-RUN-001";
+  const notesDir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
+  mkdirSync(notesDir, { recursive: true });
+  writeFileSync(
+    join(notesDir, `2026-06-08-roll-build-${storyId}-shim.md`),
+    [
+      "---",
+      "skill: roll-build",
+      `story: ${storyId}`,
+      "score: 8",
+      "verdict: good",
+      "ts: 2026-06-08T00:00:00Z",
+      "---",
+      "",
+      "Shim delivery wrote the required self-score note.",
+    ].join("\n"),
+    "utf8",
+  );
   writeFileSync(join(wt, "delivered.txt"), "work done by shim agent\n", "utf8");
   git(wt, [...GIT_ID, "add", "-A"]);
-  git(wt, [...GIT_ID, "commit", "-q", "--no-verify", "-m", "tcr: deliver US-RUN-001"]);
+  git(wt, [...GIT_ID, "commit", "-q", "--no-verify", "-m", `tcr: deliver ${storyId}`]);
   return { stdout: CLAUDE_STREAM_JSON, stderr: "", exitCode: 0, timedOut: false };
 };
 
@@ -234,6 +272,47 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     // time; the worktree is cleaned by the `done` terminal path afterward).
     expect(tcrLogAtExecute).toContain("tcr: deliver US-RUN-001");
     expect(existsSync(p.worktreePath)).toBe(false);
+  });
+
+  it("US-EVID-001: opens the evidence frame before agent spawn and keeps agent-deposited evidence after cleanup", async () => {
+    const { repo } = makeFixture("evid");
+    const rt = tmp("evid-rt");
+    const cycleId = "20260608-010101-9999";
+    const p = paths(rt, cycleId);
+    const expectedRunDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001", cycleId);
+    let seenRunDir = "";
+
+    const shim: AgentSpawn = async (agent, opts) => {
+      expect(opts.runDir).toBe(expectedRunDir);
+      seenRunDir = opts.runDir ?? "";
+      expect(existsSync(join(seenRunDir, "evidence"))).toBe(true);
+      expect(existsSync(join(seenRunDir, "screenshots"))).toBe(true);
+      writeFileSync(join(seenRunDir, "evidence", "probe.txt"), "agent proof\n", "utf8");
+      return shimAgentTcr(agent, opts);
+    };
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    expect(seenRunDir).toBe(expectedRunDir);
+    expect(readFileSync(join(expectedRunDir, "evidence", "probe.txt"), "utf8")).toBe("agent proof\n");
+    const events = readFileSync(p.eventsPath, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as { type: string; runDir?: string });
+    expect(events).toContainEqual({
+      type: "evidence:frame-opened",
+      cycleId,
+      storyId: "US-RUN-001",
+      runDir: expectedRunDir,
+      ts: expect.any(Number),
+    });
   });
 
   it("kill-mid-execute (watchdog breach): terminal still written, lock released, next cycle takes over (I2)", async () => {
@@ -386,6 +465,7 @@ function makeGitignoredFixture(tag: string): { repo: string } {
   // .roll exists ONLY in the main checkout — exactly the SoloGo layout.
   mkdirSync(join(repo, ".roll"), { recursive: true });
   writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
+  seedFeatureCard(repo, "US-RUN-001");
   return { repo };
 }
 
@@ -419,6 +499,7 @@ function makePartialFossilFixture(tag: string): { repo: string } {
   // alongside the checked-out fossil. The worktree will materialize the fossil
   // but never this backlog.
   writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
+  seedFeatureCard(repo, "US-RUN-001");
   return { repo };
 }
 
@@ -601,6 +682,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const rt = tmp("fix211-async-merged-rt");
     const backlogPath = join(repo, ".roll", "backlog.md");
     writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    seedFeatureCard(repo, "US-PRIOR", "a delivered-and-since-merged story");
     const cycleId = "20260606-052000-5201";
     const p = paths(rt, cycleId);
     seedPriorRun(p.runsPath, "US-PRIOR", "c-prior");
@@ -632,6 +714,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const rt = tmp("fix211-async-open-rt");
     const backlogPath = join(repo, ".roll", "backlog.md");
     writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    seedFeatureCard(repo, "US-PRIOR", "a delivered-and-since-merged story");
     const cycleId = "20260606-052000-5202";
     const p = paths(rt, cycleId);
     seedPriorRun(p.runsPath, "US-PRIOR", "c-prior");
@@ -658,6 +741,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const rt = tmp("fix211-deadclaim-rt");
     const backlogPath = join(repo, ".roll", "backlog.md");
     writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    seedFeatureCard(repo, "US-PRIOR", "a delivered-and-since-merged story");
     const cycleId = "20260606-052000-5203";
     const p = paths(rt, cycleId);
     // No runs.jsonl seeded → US-PRIOR has no delivering cycle → dead claim.

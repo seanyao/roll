@@ -20,6 +20,9 @@ shared conventions.
 | `ROLL_LOOP_GC_RETENTION_DAYS` | `30` | Override the GC retention period for `roll loop gc`. Takes precedence over `loop_gc.retention_days` in `.roll/local.yaml`. |
 | `ROLL_FEED_BUDGET_BYTES` | `16384` | Byte budget for the context feed handed to the inner agent each cycle. Set it to a positive integer to dial the feed to the inner agent's capacity; non-numeric or non-positive values fall back to the default. |
 | `ROLL_AGENT_NUDGE` | `1` (on) | The in-tier nudge that picks the best agent within the routed complexity tier from recent run history. Set to `0` (or `off`/`false`/`no`) to disable it; the tier itself is never changed either way. |
+| `ROLL_RUN_DIR` | unset | Canonical acceptance-evidence run directory. The loop runner sets it before agent spawn; `roll attest --run-dir` and standalone `roll attest` can also consume it. |
+| `ROLL_EVIDENCE_DIR` | derived from `ROLL_RUN_DIR` | Directory for raw command/test artifacts inside the open evidence frame. Normally set by the runner or `roll test`, not by hand. |
+| `ROLL_SCREENSHOTS_DIR` | derived from `ROLL_RUN_DIR` | Directory for visual proof inside the open evidence frame. Normally set by the runner or capture lane, not by hand. |
 
 `ROLL_CONFIG` and `ROLL_GLOBAL` derive from `ROLL_HOME`, so usually you only
 need to override `ROLL_HOME` to relocate everything together.
@@ -46,6 +49,20 @@ Point `ROLL_CONFIG` at a one-off config file to test changes:
 ```bash
 ROLL_CONFIG=/tmp/test-config.yaml roll status
 ```
+
+## Project Policy
+
+Project-local safety policy lives in `.roll/policy.yaml`. The acceptance
+evidence gate defaults to `hard`: a delivered story with ACs needs a fresh,
+contentful attest report before it can be marked `✅ Done`.
+
+```yaml
+loop_safety:
+  attest_gate: hard
+```
+
+Use `attest_gate: soft` only for an explicit migration window. Soft mode keeps
+the audit trail and alert, but it does not block the delivery cycle.
 
 ## Verifying
 

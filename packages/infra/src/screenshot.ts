@@ -25,9 +25,10 @@
  * All process touches go through an injectable runner; a capture only counts
  * as TAKEN when the output file exists and is non-empty (tool exit codes lie).
  */
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { join } from "node:path";
 import type { RunOut } from "./evidence.js";
 import { containsSecret } from "./redact.js";
 
@@ -79,6 +80,23 @@ export interface ScreenshotDeps {
   platform?: NodeJS.Platform;
 }
 
+export type CapturePhase = "before" | "after" | "gate";
+
+export interface CaptureMarker {
+  phase: CapturePhase;
+  kind: ScreenshotKind;
+  stem: string;
+  target?: string;
+}
+
+export interface CaptureMarkerOptions {
+  runDir: string;
+  deps?: ScreenshotDeps;
+  region?: string;
+}
+
+const SAFE_STEM = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
+
 function fileNonEmpty(p: string): boolean {
   try {
     return existsSync(p) && statSync(p).size > 0;
@@ -88,6 +106,48 @@ function fileNonEmpty(p: string): boolean {
 }
 
 const DEFAULT_REGION = "0,0,1280,800";
+
+/** Parse one agent→harness screenshot signal line. */
+export function parseCaptureMarker(line: string): CaptureMarker | null {
+  const m = /^::roll-capture\s+(before|after|gate)\s+(web|mobile-ios|mobile-android|terminal)\s+([A-Za-z0-9_.-]+)(?:\s+(.+))?\s*$/.exec(
+    line.trim(),
+  );
+  if (m === null) return null;
+  const phase = m[1] as CapturePhase;
+  const kind = m[2] as ScreenshotKind;
+  const stem = m[3] ?? "";
+  if (!SAFE_STEM.test(stem)) return null;
+  const target = (m[4] ?? "").trim();
+  return { phase, kind, stem, ...(target !== "" ? { target } : {}) };
+}
+
+function markerOutPath(runDir: string, marker: CaptureMarker): string {
+  return join(runDir, "screenshots", `${marker.phase}-${marker.stem}.png`);
+}
+
+function requestFromMarker(marker: CaptureMarker, out: string, region?: string): ScreenshotRequest {
+  if (marker.kind === "web") {
+    return { kind: "web", out, ...(marker.target !== undefined ? { url: marker.target } : {}) };
+  }
+  if (marker.kind === "terminal") {
+    const target = marker.target ?? "";
+    if (target.startsWith("tmux:")) {
+      return { kind: "terminal", out, tmux: target.slice("tmux:".length), ...(region !== undefined ? { region } : {}) };
+    }
+    return { kind: "terminal", out, command: target, ...(region !== undefined ? { region } : {}) };
+  }
+  return { kind: marker.kind, out };
+}
+
+/** Execute a parsed capture marker against one run frame. */
+export function captureFromMarker(
+  marker: CaptureMarker,
+  opts: CaptureMarkerOptions,
+): Promise<ScreenshotResult> {
+  const out = markerOutPath(opts.runDir, marker);
+  mkdirSync(join(opts.runDir, "screenshots"), { recursive: true });
+  return captureScreenshot(requestFromMarker(marker, out, opts.region), opts.deps ?? {});
+}
 
 /** Parse a screencapture `-R` rect "x,y,w,h" into numbers; null when malformed. */
 export function parseRegion(region: string): { x: number; y: number; w: number; h: number } | null {

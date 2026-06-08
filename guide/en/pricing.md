@@ -7,8 +7,7 @@ how historical costs survive price changes.
 
 ## Where Costs Appear
 
-The dashboard (`roll loop status` / `roll loop monitor`) shows two cost-related
-columns per cycle:
+The dashboard (`roll loop status`) shows two cost-related columns per cycle:
 
 | Column | What it means |
 |--------|---------------|

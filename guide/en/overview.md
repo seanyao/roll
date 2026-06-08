@@ -11,7 +11,8 @@ cd my-project
 roll setup && roll init
 
 roll loop on        # AI starts executing BACKLOG on a configurable schedule
-roll loop monitor   # watch it work
+roll loop status    # check scheduler state and recent cycles
+tmux attach -t roll-loop-<project-slug>   # optional: watch the live cycle
 ```
 
 ## How It Works
@@ -29,8 +30,8 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 ### Autonomous Execution
 
 - `roll loop on` — AI picks stories from BACKLOG and executes on a configurable schedule in an isolated worktree `[core]`
-- `roll loop monitor` — live dashboard: loop / dream / brief service status `[core]`
-- `roll loop attach` — attach to the live tmux session and watch AI work in real time `[highlight]`
+- `roll loop status` — scheduler snapshot, recent cycles, queue, alerts, and cost `[core]`
+- `tmux attach -t roll-loop-<project-slug>` — attach to the live tmux session and watch AI work in real time `[highlight]`
 - `roll loop pause / resume` — hand-code yourself; let AI resume when you're done
 
 ### Quality Gates
@@ -113,6 +114,7 @@ point — see [patterns/](patterns/README.md) for the decision tree:
 
 | Topic | Document |
 |-------|----------|
+| First working project | [getting-started.md](getting-started.md) |
 | Scheduling, subcommands, tmux visibility | [loop.md](loop.md) |
 | Nightly code health and REFACTOR generation | [dream.md](dream.md) |
 | Cross-agent review protocol | [peer.md](peer.md) |

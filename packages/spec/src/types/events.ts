@@ -46,6 +46,28 @@ export type RollEvent =
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }
+  // Correction loop (US-EVID-014/016) — story-level negative feedback and the
+  // safety brake that stops oscillation before the loop burns cycles.
+  | {
+      type: "correction:action";
+      cycleId?: string;
+      storyId: string;
+      action: string;
+      plannedAction?: string;
+      signal: string;
+      reason: string;
+      mode?: string;
+      source?: string;
+      targetId?: string;
+      ts: number;
+    }
+  | { type: "correction:circuit_breaker"; storyId?: string; signal: string; count: number; threshold: number; reason: string; ts: number }
+  // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
+  // frame before spawning an agent, so later phases have a durable run dir.
+  | { type: "evidence:frame-opened"; cycleId: string; storyId: string; runDir: string; ts: number }
+  // Morning report (US-EVID-016) — one fixed human-readable page is rebuilt from
+  // events/runs and linked from the dossier front page.
+  | { type: "report:morning"; path: string; windowStart: number; windowEnd: number; cycles: number; corrections: number; paused: boolean; ts: number }
   // Policy (BC6) — governance decisions as facts
   | { type: "policy:auto_merge"; prNumber: number; rule: string; ts: number }
   | { type: "policy:flag_review"; prNumber: number; rule: string; ts: number }

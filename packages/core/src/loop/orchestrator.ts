@@ -203,6 +203,8 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
 export interface PublishResult {
   /** `_publish_status`: 0 ok / 2 gh-missing / other PR-fail (bin/roll:9238). */
   status: number;
+  /** Human merge required: PR may open, but no local merge-back may count done. */
+  manualMerge?: boolean;
   /** Did the gh-missing ff `_worktree_merge_back` succeed? (bin/roll:9272). */
   mergedBack?: boolean;
   /** Did the orphan branch+tag push succeed? (bin/roll:9303-9305 etc). */
@@ -222,6 +224,7 @@ export interface PublishResult {
 export function classifyPublish(pub: PublishResult): V2CycleStatus {
   if (pub.status === 0) return "done";
   if (pub.status === 2) {
+    if (pub.manualMerge === true) return "failed";
     if (pub.mergedBack === true) return "done";
     if (pub.orphanPushed === true) return "orphan";
     return "failed";
@@ -438,6 +441,8 @@ export interface CycleContext {
    *  BOTH the cycle:end event and the runs row so they agree. Absent ⇒ no
    *  usage parsed (the cycle:end falls back to the zero-cost placeholder). */
   cost?: CycleCost;
+  /** US-EVID-001: per-cycle acceptance evidence frame opened before agent spawn. */
+  evidenceRunDir?: string;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

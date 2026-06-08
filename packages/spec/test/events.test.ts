@@ -30,4 +30,13 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     const a: RollEvent = { type: "attest:gate", cycleId: "c", verdict: "produced", reasons: [], ts: 1 };
     expect(a.ts).toBe(1);
   });
+  it("parses an evidence:frame-opened line (US-EVID-001)", () => {
+    const e = parseEventLine(
+      '{"type":"evidence:frame-opened","cycleId":"c1","storyId":"US-EVID-001","runDir":"/repo/.roll/features/e/US-EVID-001/c1","ts":3}',
+    );
+    expect(e).not.toBeNull();
+    expect(e?.type).toBe("evidence:frame-opened");
+    const a: RollEvent = { type: "evidence:frame-opened", cycleId: "c", storyId: "US-EVID-001", runDir: "/r", ts: 1 };
+    expect(a.runDir).toBe("/r");
+  });
 });

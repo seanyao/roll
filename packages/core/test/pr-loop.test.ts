@@ -120,6 +120,16 @@ describe("selectPrAction — composed inbox body (bin/roll 12003-12048)", () => 
       reason: "bot_approved",
     });
   });
+  it("manualMerge blocks bot-approved and eager merges", () => {
+    expect(selectPrAction({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: true })).toEqual({
+      kind: "skip",
+      reason: "manual_merge_required",
+    });
+    expect(selectPrAction({ bot: "", ciState: "success", mergeable: "CLEAN", manualMerge: true })).toEqual({
+      kind: "skip",
+      reason: "manual_merge_required",
+    });
+  });
   it("bot APPROVED but not clean → skip", () => {
     expect(selectPrAction({ bot: "APPROVED", ciState: "pending", mergeable: "CLEAN" })).toEqual({
       kind: "skip",
@@ -155,6 +165,9 @@ describe("selectPrAction — composed inbox body (bin/roll 12003-12048)", () => 
 describe("rebaseRecheckAction (bin/roll 12030-12043)", () => {
   it("clean after rebase → merge eager_after_rebase", () => {
     expect(rebaseRecheckAction("success", "CLEAN")).toEqual({ kind: "merge", reason: "eager_after_rebase" });
+  });
+  it("manualMerge stays open after rebase", () => {
+    expect(rebaseRecheckAction("success", "CLEAN", true)).toEqual({ kind: "skip", reason: "manual_merge_required" });
   });
   it("still not mergeable → skip", () => {
     expect(rebaseRecheckAction("pending", "CLEAN")).toEqual({

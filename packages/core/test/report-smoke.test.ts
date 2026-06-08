@@ -52,4 +52,24 @@ describe("smokeCheckReport", () => {
     });
     expect(seen).toContain("screenshots/terminal.png");
   });
+
+  it("video sources are local assets and must resolve", () => {
+    const seen: string[] = [];
+    const ok = smokeCheckReport(`<html><body><video controls src="./screenshots/flow.mp4"></video></body></html>`, (rel) => {
+      seen.push(rel);
+      return rel === "screenshots/flow.mp4";
+    });
+    expect(ok.ok).toBe(true);
+    expect(seen).toContain("screenshots/flow.mp4");
+
+    const broken = smokeCheckReport(`<html><body><video><source src="screenshots/missing.webm"></video></body></html>`, () => false);
+    expect(broken.ok).toBe(false);
+    expect(broken.problems.some((p) => /broken video|screenshots\/missing\.webm/.test(p))).toBe(true);
+  });
+
+  it("external video sources are rejected as offline-breaking assets", () => {
+    const r = smokeCheckReport(`<html><body><video src="https://cdn.example.com/flow.mp4"></video></body></html>`, () => true);
+    expect(r.ok).toBe(false);
+    expect(r.problems.some((p) => /external video|cdn/i.test(p))).toBe(true);
+  });
 });

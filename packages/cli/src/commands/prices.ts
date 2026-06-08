@@ -2,12 +2,13 @@
  * `roll prices` — TS port of cmd_prices show/help (US-CLI-004).
  * Loads the versioned price snapshots under lib/prices/ (frozen v2 data),
  * merges them later-overrides-earlier, and renders the same table bytes as
- * the inline-python oracle. `refresh` (network write) stays on bash fallback.
+ * the inline-python oracle. `refresh` is TS-owned as of US-PORT-017.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, t, v2Catalog } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
+import { pricesRefreshCommand, type PricesRefreshDeps } from "./prices-refresh.js";
 
 interface Snapshot {
   version: string;
@@ -103,14 +104,18 @@ function showCommand(): number {
   return 0;
 }
 
-export function pricesCommand(args: string[]): number | null {
+export interface PricesCommandDeps {
+  refresh?: PricesRefreshDeps;
+}
+
+export function pricesCommand(args: string[], deps: PricesCommandDeps = {}): number | Promise<number> {
   const [sub] = args;
   if (sub === "show") return showCommand();
   if (sub === undefined || sub === "--help" || sub === "-h" || sub === "help") {
     process.stdout.write(HELP);
     return 0;
   }
-  if (sub === "refresh") return null; // bash fallback (network write path)
+  if (sub === "refresh") return pricesRefreshCommand(args.slice(1), deps.refresh);
   // Unknown subcommand: bilingual err + help on stderr, exit 1 (mirrors bash).
   const noColor = (process.env["NO_COLOR"] ?? "") !== "";
   const RED = noColor ? "" : "\x1b[0;31m";

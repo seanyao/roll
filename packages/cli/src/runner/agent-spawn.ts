@@ -35,6 +35,7 @@
  * agent ever runs in tests.
  */
 import { type ChildProcess, spawn } from "node:child_process";
+import { join } from "node:path";
 
 /**
  * FIX-204D — live-children registry. The signal teardown must kill an
@@ -187,6 +188,8 @@ export interface AgentSpawnOptions {
   bin?: string;
   /** Extra env for the child (tests inject PATH with the shim dir prepended). */
   env?: NodeJS.ProcessEnv;
+  /** US-EVID-001: explicit evidence frame for this child; overrides ambient env. */
+  runDir?: string;
   /** FIX-220: when the user manually triggers `roll loop now`, drop --verbose
    *  and --output-format stream-json for a human-readable terminal. */
   interactive?: boolean;
@@ -276,6 +279,19 @@ export function withPtyWrap(
   return { bin: "script", args: ["-q", "/dev/null", cmd.bin, ...cmd.args], pty: true };
 }
 
+function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {
+  return {
+    ROLL_RUN_DIR: runDir,
+    ROLL_EVIDENCE_DIR: join(runDir, "evidence"),
+    ROLL_SCREENSHOTS_DIR: join(runDir, "screenshots"),
+  };
+}
+
+function childEnv(opts: AgentSpawnOptions): NodeJS.ProcessEnv {
+  const base = opts.env ?? process.env;
+  return opts.runDir !== undefined && opts.runDir !== "" ? { ...base, ...evidenceFrameEnv(opts.runDir) } : base;
+}
+
 function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty = false): Promise<AgentSpawnResult> {
   // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,
   // which leg/cycle logs capture — argv mismatches become diagnosable.
@@ -283,7 +299,7 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
   return new Promise<AgentSpawnResult>((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,
-      env: opts.env ?? process.env,
+      env: childEnv(opts),
       stdio: ["ignore", "pipe", "pipe"],
       // FIX-224: the PTY-wrapped `script` leads its own process group so the
       // timeout/teardown can reap script AND the agent under it (killHard).

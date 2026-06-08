@@ -94,6 +94,13 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).toContain(DOSSIER_FILTER_SCRIPT);
   });
 
+  it("US-EVID-016: links the fixed morning report when present", () => {
+    const withReport = renderFeaturesIndex(collectDossier(project()), { morningReportHref: "../reports/morning/latest.html" });
+    expect(withReport).toContain("Morning report");
+    expect(withReport).toContain("夜间运行晨报");
+    expect(withReport).toContain('href="../reports/morning/latest.html"');
+  });
+
   it("epic groups: shipping first, backlog after; cards carry bar + chips", () => {
     expect(html.indexOf("Shipping to main")).toBeLessThan(html.indexOf("In backlog"));
     expect(html).toContain('href="alpha/index.html"');
@@ -197,12 +204,401 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(full).toContain("score 9 good");
   });
 
+  it("US-EVID-013: retrospective renders structured self-score summary, note link, dimensions, and trend", () => {
+    const html = renderStoryDossier({
+      story,
+      selfScore: {
+        skill: "roll-build",
+        score: 9,
+        verdict: "good",
+        ts: "2026-06-08T12:00:00Z",
+        note: "证据链完整，门禁干净。",
+        href: "notes/2026-06-08-roll-build-US-A-1.md",
+        dimensions: { "test-quality": 8 },
+      },
+      selfScoreTrend: "self-score: mean 8.0 / min 7 / redo 0 (last 14)",
+    });
+    expect(html).toContain('class="selfscore-card selfscore-good"');
+    expect(html).toContain("<b>9</b>/10");
+    expect(html).toContain("good");
+    expect(html).toContain("证据链完整，门禁干净。");
+    expect(html).toContain('href="notes/2026-06-08-roll-build-US-A-1.md"');
+    expect(html).toContain("<code>test-quality</code>: <b>8</b>");
+    expect(html).toContain("self-score: mean 8.0 / min 7 / redo 0 (last 14)");
+    expect(storySpine({ story, selfScore: { skill: "roll-build", score: 9, verdict: "good", ts: "", note: "" } })).toContain(
+      "Retrospective",
+    );
+  });
+
+  it("US-EVID-007: execution station can be filled by merged PR evidence when squash removed tcr commits", () => {
+    const html = renderStoryDossier({
+      story,
+      executionRefs: [{ kind: "merged-pr", label: "PR #481 merged", commitCount: 5 }],
+      reportHref: "latest/US-A-1-report.html",
+    });
+    expect(html).toContain("1 merged PR");
+    expect(html).toContain("PR #481 merged");
+    expect(html).toContain("5 commits");
+    expect(html).not.toContain("No cycles yet");
+
+    const spine = storySpine({
+      story,
+      executionRefs: [{ kind: "merged-pr", label: "PR #481 merged", commitCount: 5 }],
+    });
+    expect(spine).toContain("node truth");
+    expect(spine.match(/node done/g)).toHaveLength(2); // definition + execution
+  });
+
+  it("US-EVID-007: collectStoryDossierInput derives execution refs from merged PR notes", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-PR-9");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "spec.md"),
+      "# US-PR-9\n\n**Fixed**: 2026-06-06（PR#481，squash 5be97d3，5 commits）\n\n**AC:**\n- [x] shipped\n",
+    );
+    const got = collectStoryDossierInput(p, { id: "US-PR-9", epic: "alpha", type: "US", delivered: true });
+    expect(got.executionRefs).toEqual([{ kind: "merged-pr", label: "PR #481 merged", commitCount: 5 }]);
+    expect(storySpine(got)).toContain("node done");
+  });
+
+  it("US-EVID-008: delivery station renders PR, CI, diff/files, agent, cost, tokens, and timeline", () => {
+    const html = renderStoryDossier({
+      story,
+      reportHref: "latest/US-A-1-report.html",
+      deliveryEvidence: {
+        prs: [
+          {
+            number: 481,
+            href: "https://github.com/acme/roll/pull/481",
+            ci: "green",
+          },
+        ],
+        diffHref: "https://github.com/acme/roll/pull/481/files",
+        filesChanged: ["packages/cli/src/lib/story-dossier.ts", "packages/cli/test/dossier.test.ts"],
+        agent: "claude",
+        cost: { usd: 1.23, tokensIn: 1200, tokensOut: 345 },
+        timeline: [
+          { label: "definition", at: "2026-06-08" },
+          { label: "execution", at: "2026-06-08T10:00:00Z" },
+          { label: "delivery", at: "2026-06-08T10:15:00Z" },
+        ],
+      },
+    });
+
+    expect(html).toContain("Delivery evidence");
+    expect(html).toContain('href="https://github.com/acme/roll/pull/481"');
+    expect(html).toContain("PR #481");
+    expect(html).toContain("CI green");
+    expect(html).toContain('href="https://github.com/acme/roll/pull/481/files"');
+    expect(html).toContain("packages/cli/src/lib/story-dossier.ts");
+    expect(html).toContain("claude");
+    expect(html).toContain("$1.23");
+    expect(html).toContain("1.2k in");
+    expect(html).toContain("345 out");
+    expect(html).toContain("definition");
+    expect(html).toContain("delivery");
+  });
+
+  it("US-EVID-008: collectStoryDossierInput reconstructs delivery facts from card text, runs, and events", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-DEL-8");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "spec.md"),
+      [
+        "# US-DEL-8",
+        "",
+        "**Delivery:**",
+        "- PR https://github.com/acme/roll/pull/481 merged; CI green",
+        "- Files changed: packages/a.ts, packages/b.ts",
+        "- Diff: https://github.com/acme/roll/pull/481/files",
+        "",
+        "**AC:**",
+        "- [x] shipped",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "runs.jsonl"),
+      JSON.stringify({
+        run_id: "cycle-1",
+        cycle_id: "cycle-1",
+        story_id: "US-DEL-8",
+        built: ["US-DEL-8"],
+        status: "done",
+        outcome: "delivered",
+        agent: "pi",
+        ts: "2026-06-08T10:15:00Z",
+        duration_sec: 900,
+        cost_usd: 2.5,
+        tokens_in: 2000,
+        tokens_out: 300,
+      }) + "\n",
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "events.ndjson"),
+      [
+        { type: "cycle:start", cycleId: "cycle-1", storyId: "US-DEL-8", agent: "pi", model: "m", ts: 1780912800 },
+        { type: "pr:merge", prNumber: 481, storyId: "US-DEL-8", ts: 1780904000 },
+        { type: "ci:pass", prNumber: 481, ts: 1780904100 },
+      ].map((row) => JSON.stringify(row)).join("\n") + "\n",
+    );
+
+    const got = collectStoryDossierInput(p, { id: "US-DEL-8", epic: "alpha", type: "US", delivered: true, created: "2026-06-08" });
+    expect(got.deliveryEvidence).toEqual({
+      prs: [{ number: 481, href: "https://github.com/acme/roll/pull/481", ci: "green" }],
+      diffHref: "https://github.com/acme/roll/pull/481/files",
+      filesChanged: ["packages/a.ts", "packages/b.ts"],
+      agent: "pi",
+      cost: { usd: 2.5, tokensIn: 2000, tokensOut: 300 },
+      timeline: [
+        { label: "definition", at: "2026-06-08" },
+        { label: "execution", at: "2026-06-08T10:00:00.000Z" },
+        { label: "delivery", at: "2026-06-08T10:15:00Z" },
+      ],
+    });
+  });
+
+  it("US-EVID-009: story graph renders traversable links, release trace, and dead-link fallbacks", () => {
+    const html = renderStoryDossier({
+      story,
+      storyGraph: {
+        dependsOn: [
+          { id: "US-UP-1", href: "../US-UP-1/index.html" },
+          { id: "US-MISSING-1" },
+        ],
+        dependedBy: [{ id: "US-DOWN-1", href: "../US-DOWN-1/index.html" }],
+        fixes: [{ id: "US-BASE-1", href: "../US-BASE-1/index.html" }],
+        release: { label: "v3.700.0 — 2026-06-09", href: "../../../../CHANGELOG.md#v37000-2026-06-09" },
+      },
+    });
+
+    expect(html).toContain("Story graph");
+    expect(html).toContain("故事图谱");
+    expect(html).toContain("Depends on");
+    expect(html).toContain('href="../US-UP-1/index.html"');
+    expect(html).toContain("<code>US-MISSING-1</code>");
+    expect(html).not.toContain('href="undefined"');
+    expect(html).toContain("Depended by");
+    expect(html).toContain("Fixes");
+    expect(html).toContain('href="../../../../CHANGELOG.md#v37000-2026-06-09"');
+    expect(renderStoryDossier({ story })).not.toContain("Story graph");
+  });
+
+  it("US-EVID-009: collectStoryDossierInput reconstructs dependencies, reverse edges, FIX source, and changelog release", () => {
+    const p = project();
+    const f = join(p, ".roll", "features", "alpha");
+    const up = join(f, "US-UP-1");
+    const current = join(f, "US-GRAPH-9");
+    const down = join(f, "US-DOWN-1");
+    const fix = join(f, "FIX-GRAPH-9");
+    mkdirSync(up, { recursive: true });
+    mkdirSync(current, { recursive: true });
+    mkdirSync(down, { recursive: true });
+    mkdirSync(fix, { recursive: true });
+    writeFileSync(join(up, "spec.md"), "# US-UP-1\n");
+    writeFileSync(join(up, "index.html"), "<!doctype html>");
+    writeFileSync(join(current, "spec.md"), "# US-GRAPH-9\n\n**Dependencies:**\n- depends-on: US-UP-1, US-MISSING-1\n");
+    writeFileSync(join(down, "spec.md"), "# US-DOWN-1\n\n- depends-on: US-GRAPH-9\n");
+    writeFileSync(join(down, "index.html"), "<!doctype html>");
+    writeFileSync(join(fix, "spec.md"), "# FIX-GRAPH-9\n\nfixes: US-UP-1\n");
+    writeFileSync(join(p, "CHANGELOG.md"), "## v3.700.0 — 2026-06-09\n\n- Delivered US-GRAPH-9 with graph evidence.\n");
+
+    const got = collectStoryDossierInput(p, { id: "US-GRAPH-9", epic: "alpha", type: "US", delivered: true });
+    expect(got.storyGraph?.dependsOn).toEqual([{ id: "US-UP-1", href: "../US-UP-1/index.html" }, { id: "US-MISSING-1" }]);
+    expect(got.storyGraph?.dependedBy).toEqual([{ id: "US-DOWN-1", href: "../US-DOWN-1/index.html" }]);
+    expect(got.storyGraph?.release?.label).toBe("v3.700.0 — 2026-06-09");
+    expect(got.storyGraph?.release?.href).toContain("../../../../CHANGELOG.md#");
+
+    const fixGraph = collectStoryDossierInput(p, { id: "FIX-GRAPH-9", epic: "alpha", type: "FIX", delivered: false }).storyGraph;
+    expect(fixGraph?.fixes).toEqual([{ id: "US-UP-1", href: "../US-UP-1/index.html" }]);
+  });
+
+  it("US-EVID-012: delivery station renders dynamic replay evidence", () => {
+    const html = renderStoryDossier({
+      story,
+      dynamicEvidence: [
+        { kind: "cast", label: "terminal replay", href: "latest/evidence/demo.cast" },
+        { kind: "video", label: "web flow", href: "latest/screenshots/flow.mp4" },
+      ],
+    });
+    expect(html).toContain("Dynamic replay");
+    expect(html).toContain("动态复现");
+    expect(html).toContain('href="latest/evidence/demo.cast"');
+    expect(html).toContain("<video controls");
+    expect(html).toContain('src="latest/screenshots/flow.mp4"');
+  });
+
+  it("US-EVID-012: collectStoryDossierInput discovers casts and videos from the latest run", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-DYN-12");
+    const run = join(dir, "2026-06-08T12-00-00");
+    mkdirSync(join(run, "evidence"), { recursive: true });
+    mkdirSync(join(run, "screenshots"), { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# US-DYN-12\n");
+    writeFileSync(join(run, "evidence", "demo.cast"), '{"version":2}\n');
+    writeFileSync(join(run, "screenshots", "flow.mp4"), "MP4");
+    symlinkSync("2026-06-08T12-00-00", join(dir, "latest"));
+
+    const got = collectStoryDossierInput(p, { id: "US-DYN-12", epic: "alpha", type: "US", delivered: true });
+    expect(got.dynamicEvidence).toEqual([
+      { kind: "cast", label: "demo.cast", href: "latest/evidence/demo.cast" },
+      { kind: "video", label: "flow.mp4", href: "latest/screenshots/flow.mp4" },
+    ]);
+  });
+
+  it("US-EVID-014: collectStoryDossierInput renders correction action trace from events", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-CORR-14");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# US-CORR-14\n");
+    writeFileSync(
+      join(p, ".roll", "loop", "events.ndjson"),
+      JSON.stringify({
+        type: "correction:action",
+        cycleId: "cycle-1",
+        storyId: "US-CORR-14",
+        action: "open_fix",
+        plannedAction: "open_fix",
+        signal: "missing_acceptance_report",
+        reason: "no fresh acceptance report",
+        targetId: "FIX-001",
+        mode: "auto",
+        source: "attest:gate",
+        ts: 1780912800,
+      }) + "\n",
+    );
+
+    const got = collectStoryDossierInput(p, { id: "US-CORR-14", epic: "alpha", type: "US", delivered: false });
+    expect(got.correctionActions).toEqual([
+      {
+        action: "open_fix",
+        at: "2026-06-08T10:00:00.000Z",
+        mode: "auto",
+        reason: "no fresh acceptance report",
+        signal: "missing_acceptance_report",
+        source: "attest:gate",
+        targetId: "FIX-001",
+      },
+    ]);
+    const html = renderStoryDossier(got);
+    expect(html).toContain("Correction trace");
+    expect(html).toContain("FIX-001");
+    expect(html).toContain("missing_acceptance_report");
+  });
+
+  it("US-EVID-011: design station renders peer-review verdicts, rounds, findings, and full-record links", () => {
+    const html = renderStoryDossier({
+      story,
+      peerReview: {
+        finalVerdict: "AGREE",
+        rounds: [
+          {
+            round: 1,
+            verdict: "REFINE",
+            peer: "kimi",
+            stage: "design",
+            findings: ["tighten the AC evidence wording"],
+            href: "../../../loop/peer/cycle-c1.design.pair.json",
+          },
+          {
+            round: 2,
+            verdict: "AGREE",
+            peer: "pi",
+            stage: "code",
+            findings: ["no blocking concerns"],
+            href: "../../../loop/peer/cycle-c1.pair.json",
+          },
+        ],
+      },
+    });
+
+    expect(html).toContain("Peer review");
+    expect(html).toContain("同行评审");
+    expect(html).toContain("AGREE");
+    expect(html).toContain("2 rounds");
+    expect(html).toContain("kimi");
+    expect(html).toContain("tighten the AC evidence wording");
+    expect(html).toContain('href="../../../loop/peer/cycle-c1.design.pair.json"');
+  });
+
+  it("US-EVID-011: collectStoryDossierInput reconstructs peer review from cycle runtime records", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-PEER-11");
+    mkdirSync(join(p, ".roll", "loop", "peer"), { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# US-PEER-11\n");
+    writeFileSync(
+      join(p, ".roll", "loop", "runs.jsonl"),
+      JSON.stringify({
+        run_id: "c1",
+        cycle_id: "c1",
+        story_id: "US-PEER-11",
+        built: ["US-PEER-11"],
+        status: "done",
+        outcome: "delivered",
+      }) + "\n",
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "peer", "cycle-c1.design.pair.json"),
+      JSON.stringify({
+        cycleId: "c1",
+        workingAgent: "codex",
+        peer: "kimi",
+        stage: "design",
+        verdict: "refine",
+        findings: ["clarify the fallback behavior"],
+        cost: 0.12,
+      }),
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "peer", "cycle-c1.pair.json"),
+      JSON.stringify({
+        cycleId: "c1",
+        workingAgent: "codex",
+        peer: "pi",
+        stage: "code",
+        verdict: "agree",
+        findings: ["no blocker"],
+        cost: 0,
+      }),
+    );
+
+    const got = collectStoryDossierInput(p, { id: "US-PEER-11", epic: "alpha", type: "US", delivered: true });
+    expect(got.peerReview).toEqual({
+      finalVerdict: "AGREE",
+      rounds: [
+        {
+          round: 1,
+          verdict: "REFINE",
+          peer: "kimi",
+          stage: "design",
+          findings: ["clarify the fallback behavior"],
+          href: "../../../loop/peer/cycle-c1.design.pair.json",
+        },
+        {
+          round: 2,
+          verdict: "AGREE",
+          peer: "pi",
+          stage: "code",
+          findings: ["no blocker"],
+          href: "../../../loop/peer/cycle-c1.pair.json",
+        },
+      ],
+    });
+  });
+
   it("wish-only story: empty states render honestly, delivery pending", () => {
     const bare = renderStoryDossier({ story: { ...story, delivered: false } });
     expect(bare).toContain("尚未设计");
     expect(bare).toContain("暂无周期");
     expect(bare).toContain("尚未交付");
     expect(bare).not.toContain('class="attest-banner"');
+    expect(bare).not.toContain("Delivery evidence");
+    expect(bare).not.toContain("Peer review");
   });
 
   it("self-containment holds", () => {
@@ -353,6 +749,8 @@ describe("US-META-008 — self-score notes live in the card folder", () => {
     });
     expect(input.retro).toContain("9");
     expect(input.retro).toContain("卡内自评正文");
+    expect(input.selfScore?.score).toBe(9);
+    expect(input.selfScore?.href).toContain("notes/2026-06-08-roll-build-US-A-1-1.md");
   });
 
   it("legacy .roll/notes still serves cards that have no local notes/", () => {
@@ -364,5 +762,30 @@ describe("US-META-008 — self-score notes live in the card folder", () => {
     );
     const input = collectStoryDossierInput(p, { id: "FIX-2", epic: "alpha", type: "FIX", delivered: false });
     expect(input.retro).toContain("旧档兼容");
+    expect(input.selfScore?.score).toBe(8);
+  });
+
+  it("US-EVID-013: collected self-score carries dimensions and trend context", () => {
+    const p = project();
+    const card = join(p, ".roll", "features", "alpha", "US-A-1");
+    mkdirSync(join(card, "notes"), { recursive: true });
+    writeFileSync(
+      join(card, "notes", "2026-06-08-roll-build-US-A-1-1.md"),
+      "---\nskill: roll-build\nstory: US-A-1\nscore: 7\nverdict: ok\nts: 2026-06-08T12:00:00Z\ntest-quality: 6\n---\n\n证据足够，但测试质量还要补强。\n",
+    );
+    mkdirSync(join(p, ".roll", "notes"), { recursive: true });
+    writeFileSync(
+      join(p, ".roll", "notes", "2026-06-01-roll-build-US-OLD-1.md"),
+      "---\nskill: roll-build\nstory: US-OLD\nscore: 9\nverdict: good\nts: 2026-06-01T12:00:00Z\n---\n\n旧好卡。\n",
+    );
+    writeFileSync(
+      join(p, ".roll", "notes", "2026-06-02-roll-build-US-OLD-2.md"),
+      "---\nskill: roll-build\nstory: US-OLD\nscore: 5\nverdict: ok\nts: 2026-06-02T12:00:00Z\n---\n\n旧低分。\n",
+    );
+    const input = collectStoryDossierInput(p, {
+      id: "US-A-1", epic: "alpha", type: "US", delivered: true,
+    });
+    expect(input.selfScore?.dimensions).toEqual({ "test-quality": 6 });
+    expect(input.selfScoreTrend).toBe("self-score: mean 7.0 / min 5 / redo 1 (last 14)");
   });
 });

@@ -19,19 +19,26 @@ import { basename, dirname, join } from "node:path";
 /** The uncategorized epic slug — the never-block fallback bucket. */
 export const UNCATEGORIZED = "uncategorized";
 
-/** Locate the feature markdown that defines a story (heading or AC owner).
- *  An ID-named owner wins over a prose mention — both the legacy flat form
- *  (`<storyId>.md`) and the card-folder form (`<storyId>/spec.md`, FIX-225;
- *  US-META-001 layout). null when nothing matches. */
-export function findFeatureFile(projectPath: string, storyId: string): string | null {
+/** Every feature markdown that could define a story, in resolution priority:
+ *  ID-named owners (the legacy flat `<storyId>.md` and the card-folder
+ *  `<storyId>/spec.md`, FIX-225 / US-META-001) first, then prose/content
+ *  mentions in walk order. `findFeatureFile` takes the top candidate; AC
+ *  extraction (attest) may walk PAST a content-free stub owner — a
+ *  migrate-features `spec.md` (US-META-007) owns the card folder yet carries no
+ *  `**AC:**` block, while the real ACs still live in the epic feature file
+ *  (FIX-226). Exposing the full list lets that caller fall through. */
+export function findFeatureFiles(projectPath: string, storyId: string): string[] {
   const root = join(projectPath, ".roll", "features");
-  if (!existsSync(root)) return null;
+  if (!existsSync(root)) return [];
   const hits: string[] = [];
   const walk = (dir: string): void => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile() && e.name.endsWith(".md")) {
+      if (e.isDirectory()) {
+        if (e.name === "notes" || e.name === "evidence" || e.name === "screenshots" || e.name === "latest") continue;
+        if (/^\d{4}-\d{2}-\d{2}T/.test(e.name) || e.name.startsWith("cycle-") || e.name === "pre-evidence-backfill") continue;
+        walk(p);
+      } else if (e.isFile() && e.name.endsWith(".md")) {
         const idOwned =
           e.name === `${storyId}.md` || (e.name === "spec.md" && basename(dir) === storyId);
         if (idOwned) hits.unshift(p); // ID-named owner wins
@@ -48,9 +55,15 @@ export function findFeatureFile(projectPath: string, storyId: string): string | 
   try {
     walk(root);
   } catch {
-    return null;
+    return [];
   }
-  return hits[0] ?? null;
+  return hits;
+}
+
+/** The top feature markdown that defines a story (heading or AC owner); null
+ *  when nothing matches. See {@link findFeatureFiles} for the full priority. */
+export function findFeatureFile(projectPath: string, storyId: string): string | null {
+  return findFeatureFiles(projectPath, storyId)[0] ?? null;
 }
 
 /** The card's report filename — carries the ID so a tab/download/share is

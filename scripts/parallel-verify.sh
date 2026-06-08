@@ -129,6 +129,18 @@ build_shim_dir() {
 printf '%s\n' '{"type":"system","subtype":"init","model":"claude-shim"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"appending marker"}]}}'
 echo "parallel-verify marker $(date -u +%s)-$$" >> CHANGELOG.md
+mkdir -p .roll/features/uncategorized/US-PV-001/notes
+cat > .roll/features/uncategorized/US-PV-001/notes/2026-06-08-roll-build-US-PV-001-shim.md <<'NOTE'
+---
+skill: roll-build
+story: US-PV-001
+score: 8
+verdict: good
+ts: 2026-06-08T00:00:00Z
+---
+
+Parallel-verify shim wrote the required self-score note.
+NOTE
 git -c user.email=shim@roll.test -c user.name=roll-shim add -A >/dev/null 2>&1
 git -c user.email=shim@roll.test -c user.name=roll-shim commit -q --no-verify \
   -m "tcr: deliver US-PV-001 (parallel-verify shim)" >/dev/null 2>&1
@@ -174,6 +186,26 @@ fabricate_sandbox() {
 | ID | Description | Status |
 |----|-------------|--------|
 | ${STORY_ID} | 在 ${MARKER_FILE} 末尾追加一行 "parallel-verify marker" est_min:5 | 📋 Todo |
+EOF
+  # v3's default-hard attest gate requires a real card + AC evidence. v2 ignores
+  # this archive data, so the oracle leg remains unchanged while the TS leg can
+  # render a dense acceptance report after the shim commit.
+  local story_dir="$seed/.roll/features/uncategorized/${STORY_ID}"
+  mkdir -p "$story_dir"
+  cat > "$story_dir/spec.md" <<EOF
+# ${STORY_ID} — parallel verify smoke story
+
+**AC:**
+- [ ] shim delivery appends a marker through TCR
+EOF
+  cat > "$story_dir/ac-map.json" <<EOF
+[
+  {
+    "ac": "${STORY_ID}:AC1",
+    "status": "pass",
+    "evidence": [{ "kind": "test-pass", "label": "parallel verify shim commit" }]
+  }
+]
 EOF
   # Pin the agent so routing is deterministic (no auto-downgrade).
   printf 'agent: claude\n' > "$seed/.roll/local.yaml"

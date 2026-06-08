@@ -36,6 +36,11 @@ export type RollEvent =
   // Peer gate (FIX-150b) — the hard-trigger audit trail: every high-complexity
   // delivery records whether peer review happened ("consulted") or was skipped.
   | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped"; reasons: string[]; ts: number }
+  // Cross-Agent Pairing (US-PAIR-003) — a heterogeneous peer one-way reviews a
+  // delivery. `pair:*` is deliberately distinct from `peer:gate` (decoupled audit).
+  | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; ts: number }
+  | { type: "pair:verdict"; cycleId: string; peer: string; verdict: "agree" | "refine" | "object"; findings: number; cost: number; ts: number }
+  | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }

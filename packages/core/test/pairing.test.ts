@@ -8,6 +8,7 @@ import {
   agentVendor,
   defaultPairingConfig,
   isHeterogeneous,
+  pairingPoolView,
   parsePairingConfig,
   PairingConfigError,
   renderPairingConfig,
@@ -171,5 +172,43 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
   });
   it("disabled config carries the reason as a comment", () => {
     expect(renderPairingConfig(defaultPairingConfig(["claude"]))).toContain("# Disabled:");
+  });
+});
+
+describe("pairingPoolView (US-PAIR-002 observability)", () => {
+  const cfg2 = { enabled: true, stages: ["code"] as const, capability: { claude: ["code"], codex: ["code"] } } as any;
+  it("marks capable heterogeneous agents in-pool, others excluded with a reason", () => {
+    const v = pairingPoolView(["claude", "codex", "kimi"], cfg2);
+    const byName = Object.fromEntries(v.agents.map((a) => [a.agent, a]));
+    expect(byName["claude"].inPool).toBe(true);
+    expect(byName["claude"].vendor).toBe("anthropic");
+    expect(byName["codex"].inPool).toBe(true);
+    // kimi has no capability entry → excluded with a reason
+    expect(byName["kimi"].inPool).toBe(false);
+    expect(byName["kimi"].reason).toContain("no capability");
+  });
+  it("when disabled, nobody is in-pool and reason says disabled", () => {
+    const v = pairingPoolView(["claude", "codex"], { ...cfg2, enabled: false });
+    expect(v.enabled).toBe(false);
+    expect(v.agents.every((a) => !a.inPool)).toBe(true);
+    expect(v.agents[0].reason).toContain("disabled");
+  });
+  it("single vendor → heterogeneity reason", () => {
+    const v = pairingPoolView(["codex"], { enabled: true, stages: ["code"], capability: { codex: ["code"] } } as any);
+    expect(v.agents[0].inPool).toBe(false);
+    expect(v.agents[0].reason).toContain("heterogeneous");
+  });
+});
+
+describe("pairingPoolView — capability must overlap an enabled stage (codex pair-review)", () => {
+  it("excludes an agent capable only for a non-enabled stage", () => {
+    const v = pairingPoolView(["claude", "codex"], {
+      enabled: true,
+      stages: ["code"],
+      capability: { claude: ["code"], codex: ["design"] }, // codex only design, code enabled
+    } as any);
+    const codex = v.agents.find((a) => a.agent === "codex")!;
+    expect(codex.inPool).toBe(false);
+    expect(codex.reason).toContain("enabled stage");
   });
 });

@@ -261,6 +261,32 @@ describe("collectStoryDossierInput — EVID-010 parses verify/tests from ac-map.
     expect(got.acRows?.[0]?.verify).toBe("node bin/roll.js ci --wait");
     expect(got.acRows?.[0]?.tests).toEqual(["test/ci.test.ts"]);
   });
+
+  it("survives a malformed ac-map (codex review): null row / non-string note / whitespace verify", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-V-3");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "ac-map.json"),
+      JSON.stringify([null, { ac: "US-V-3:AC1", status: "pass", note: 42, verify: "   " }]),
+    );
+    const got = collectStoryDossierInput(p, { id: "US-V-3", epic: "alpha", type: "US", delivered: true });
+    // the null row is skipped, not fatal; the valid row survives
+    expect(got.acRows).toHaveLength(1);
+    expect(got.acRows?.[0]?.ac).toBe("US-V-3:AC1");
+    // non-string note dropped, whitespace-only verify dropped (no fake command)
+    expect(got.acRows?.[0]?.note).toBeUndefined();
+    expect(got.acRows?.[0]?.verify).toBeUndefined();
+  });
+
+  it("escapes an unknown status (codex review): no HTML injection from ac-map", () => {
+    const html = renderStoryDossier({
+      story: { id: "US-V-4", epic: "alpha", type: "US", delivered: true },
+      acRows: [{ ac: "US-V-4:AC1", status: "<img src=x onerror=alert(1)>" }],
+    });
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img src=x");
+  });
 });
 
 describe("roll index — US-DOSSIER-001d three-layer integration", () => {

@@ -144,7 +144,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
       ? `<table class="ac-table"><thead><tr><th>AC</th><th>${bi("Status", "状态")}</th><th>${bi("Verify", "验证")}</th><th>${bi("Note", "备注")}</th></tr></thead><tbody>` +
         (d.acRows ?? [])
           .map((r) => {
-            const [en, zh] = AC_BADGE[r.status] ?? [r.status, r.status];
+            const [en, zh] = AC_BADGE[r.status] ?? [esc(r.status), esc(r.status)];
             // EVID-010: a re-runnable command makes the AC independently verifiable;
             // absent → degrade honestly (no invented command), readonly/doc ACs say so.
             const verifyCell =
@@ -207,7 +207,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("Retrospective", "复盘", retro, d.retro === undefined || d.retro === "") +
     `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
     // EVID-010: inline copy handler (display only — never executes the command).
-    `<script>document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest(".copy-btn");if(!b)return;var t=b.getAttribute("data-copy")||"";if(navigator.clipboard)navigator.clipboard.writeText(t);b.classList.add("copied");setTimeout(function(){b.classList.remove("copied")},1200);});</script>\n` +
+    `<script>document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest(".copy-btn");if(!b||!navigator.clipboard)return;var t=b.getAttribute("data-copy")||"";navigator.clipboard.writeText(t).then(function(){b.classList.add("copied");setTimeout(function(){b.classList.remove("copied")},1200);}).catch(function(){});});</script>\n` +
     `</body>\n</html>\n`
   );
 }
@@ -284,14 +284,17 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     }>;
     if (Array.isArray(rows)) {
       const acRows = rows
-        .filter((r) => typeof r.ac === "string" && typeof r.status === "string")
-        .map((r) => ({
-          ac: r.ac as string,
-          status: r.status as string,
-          ...(r.note !== undefined ? { note: r.note } : {}),
-          ...(typeof r.verify === "string" && r.verify !== "" ? { verify: r.verify } : {}),
-          ...(Array.isArray(r.tests) && r.tests.length > 0 ? { tests: r.tests.filter((t) => typeof t === "string") } : {}),
-        }));
+        .filter((r): r is NonNullable<typeof r> => r != null && typeof r.ac === "string" && typeof r.status === "string")
+        .map((r) => {
+          const verify = typeof r.verify === "string" ? r.verify.trim() : "";
+          return {
+            ac: r.ac as string,
+            status: r.status as string,
+            ...(typeof r.note === "string" ? { note: r.note } : {}),
+            ...(verify !== "" ? { verify } : {}),
+            ...(Array.isArray(r.tests) && r.tests.length > 0 ? { tests: r.tests.filter((t) => typeof t === "string") } : {}),
+          };
+        });
       if (acRows.length > 0) out.acRows = acRows;
     }
   } catch {

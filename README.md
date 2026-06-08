@@ -87,7 +87,7 @@ Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuil
 |---|---|
 | **Start here** | [Overview & architecture](guide/en/overview.md) · [Engineering methodology](guide/en/methodology.md) |
 | **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
-| **Quality machinery** | [Acceptance evidence (`roll attest`)](guide/en/acceptance-evidence.md) · [Consistency & release gate](guide/en/consistency.md) · [Cross-agent pairing](guide/en/pairing.md) · [Test isolation](guide/en/test-isolation.md) |
+| **Quality machinery** | [Acceptance evidence (`roll attest`)](guide/en/acceptance-evidence.md) · [Evidence lifecycle](guide/en/acceptance-evidence.md#lifecycle-in-three-stages) · [Consistency & release gate](guide/en/consistency.md) · [Cross-agent pairing](guide/en/pairing.md) · [Test isolation](guide/en/test-isolation.md) |
 | **Under the hood** | [Architecture: layers · domain · invariants](docs/architecture.md) · [Verification system](docs/verification.md) · [Manifesto](docs/manifesto.md) |
 
 Full guide index: [guide/en/](guide/en/) — agents, peer review, slides, feedback, backlog sync, adoption patterns, and more.

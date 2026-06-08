@@ -10,6 +10,9 @@
 ```
 .roll/features/<epic>/<id>/<run-id>/<id>-report.html  ← 报告（自包含）
 .roll/features/<epic>/<id>/<run-id>/evidence.json     ← 采集的硬事实
+.roll/features/<epic>/<id>/<run-id>/evidence/         ← 原始命令/测试产物
+.roll/features/<epic>/<id>/<run-id>/screenshots/      ← 需要视觉验收时的截图
+.roll/features/<epic>/<id>/ac-map.json                ← AC → 证据的意图映射
 .roll/features/<epic>/<id>/latest                     ← 指向最新一次的软链
 ```
 
@@ -17,20 +20,37 @@
 `latest/<id>-report.html`；CHANGELOG 条目旁可带不可见的
 `<!-- evidence: ... -->` 注释 marker 供追溯。
 
-## 报告怎么产生
+## 三段式生命周期
 
-1. build/fix 的**验证门**阶段，agent 把原始输出 dump 到
-   `.roll/features/<epic>/<id>/evidence/*.txt`，截屏放
-   `…/screenshots/*.png`（web 用 Playwright、iOS 用 simctl、Android 用
-   adb——工具缺失时各端干净跳过；CLI 类 story 不截屏，改为捕获 ANSI 文本，
-   报告内可搜索）。
-2. agent 写 `ac-map.json`——哪条证据支撑哪条 AC，每条 AC 一个状态：
-   `pass` · `readonly` · `partial` · `claimed` · `missing`。
-3. `roll attest <story-id>` 清扫硬事实（TCR commits、最新 CI、可选部署探针、
-   test-pass 凭证）并渲染报告——收尾自动刷新 `.roll/index.json`，
-   从未建索引的项目在第一次验收时即收敛。
+1. 立框。loop 周期一开始，runner 先创建带时间戳的 run 目录，并把它通过
+   `ROLL_RUN_DIR` 交给内层 agent。派生目录 `ROLL_EVIDENCE_DIR` 与
+   `ROLL_SCREENSHOTS_DIR` 分别指向 `<run-id>/evidence/` 和
+   `<run-id>/screenshots/`。
+2. 过程采集。`roll test` 把命令输出和摘要写入 `ROLL_EVIDENCE_DIR`；需要视觉
+   验收的端面把截图写入 `ROLL_SCREENSHOTS_DIR`。agent 在故事卡根目录维护
+   `ac-map.json`，把每条 AC 映射到支撑证据，并标注状态：`pass` ·
+   `readonly` · `partial` · `claimed` · `missing`。
+3. 收尾硬闸。交付结束时 runner 调用
+   `roll attest <story-id> --run-dir "$ROLL_RUN_DIR"`。`roll attest` 清扫硬事实
+   （TCR commits、最新 CI、可选部署探针、test-pass 凭证），渲染报告，把
+   `latest` 指向本次 run；若故事档案页存在，则刷新交付段，并刷新
+   `.roll/index.json`。
 
 `roll attest` 也可独立运行——没有意图映射时，每条 AC 诚实渲染为 🟧 仅声明。
+
+## 闸口策略
+
+验收闸**默认是 hard**。带 AC 的 story 若交付完成却没有新鲜且内容充足的报告，
+不会被标成 `✅ Done`，而是直接拦住。显式迁移窗口可在 `.roll/policy.yaml`
+里改成 soft：
+
+```yaml
+loop_safety:
+  attest_gate: soft
+```
+
+soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交付。它是临时兼容口，
+不是默认行为。
 
 ## 红线
 

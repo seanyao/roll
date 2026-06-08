@@ -84,7 +84,7 @@ template/      roll init 安装的项目脚手架
 |---|---|
 | **从这里开始** | [概述与架构](guide/zh/overview.md) · [工程方法论](guide/zh/methodology.md) |
 | **日常使用** | [Loop（自主执行器）](guide/zh/loop.md) · [配置](guide/zh/configuration.md) · [价格与成本](guide/zh/pricing.md) · [FAQ](guide/zh/faq.md) |
-| **质量机制** | [验收证据（`roll attest`）](guide/zh/acceptance-evidence.md) · [一致性与发版闸](guide/zh/consistency.md) · [测试隔离](guide/zh/test-isolation.md) |
+| **质量机制** | [验收证据（`roll attest`）](guide/zh/acceptance-evidence.md) · [证据生命周期](guide/zh/acceptance-evidence.md#三段式生命周期) · [一致性与发版闸](guide/zh/consistency.md) · [测试隔离](guide/zh/test-isolation.md) |
 | **底层设计** | [架构：分层·领域·不变量](docs/architecture.md) · [验证体系](docs/verification.md) · [理念宣言](docs/manifesto.md) |
 
 完整指南目录：[guide/zh/](guide/zh/) —— agent 路由、peer 评审、slides、feedback、backlog 同步、接入模式等。

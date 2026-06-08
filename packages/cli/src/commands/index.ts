@@ -1,6 +1,6 @@
 /** Ported-command registry — one line per migrated subcommand. */
 import { fallbackToBash, registerPorted } from "../bridge.js";
-import { agentListCommand } from "./agent-list.js";
+import { agentCommand } from "./agent.js";
 import { pairCommand } from "./pair.js";
 import { alertCommand } from "./alert.js";
 import { archiveMigrateCommand } from "./archive-migrate.js";
@@ -90,11 +90,9 @@ export function registerAll(): void {
   // heart; every other arg mirrors v2's generic unknown-command surface without
   // shelling to bin/roll.
   registerPorted("dream", dreamCommand);
-  // `agent` routes per-subcommand: only `list` is ported so far.
-  registerPorted("agent", (args) => {
-    if (args[0] === "list") return agentListCommand(args.slice(1));
-    return fallbackToBash(["agent", ...args]).status;
-  });
+  // `agent`: full surface TS (view/list/use/set/unknown). The write face owns
+  // .roll/agents.yaml plus legacy .roll/local.yaml sync; no bash fallback.
+  registerPorted("agent", agentCommand);
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
   // (v2 had no pairing).

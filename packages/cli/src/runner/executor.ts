@@ -68,7 +68,9 @@ import {
   prViewState,
   releaseLock,
   remoteUrl,
+  captureFromMarker,
   openEvidenceFrame,
+  parseCaptureMarker,
   runPublishPlan,
   systemClock,
   writeHeartbeat,
@@ -76,6 +78,8 @@ import {
   worktreeFetchOrigin,
   worktreeRemove,
   push as gitPush,
+  type CaptureMarker,
+  type ScreenshotResult,
 } from "@roll/infra";
 import { execFile } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -180,6 +184,11 @@ export interface EvidencePort {
   openFrame(projectCwd: string, storyId: string, runId: string): string;
 }
 
+/** Screenshot marker facet — executes agent-emitted capture requests. */
+export interface CapturePort {
+  fromMarker(marker: CaptureMarker, runDir: string): Promise<ScreenshotResult>;
+}
+
 /**
  * The full injectable Ports bundle. The runtime wiring ({@link nodePorts})
  * binds these to the real infra; tests pass fakes for every facet so NO real
@@ -194,6 +203,7 @@ export interface Ports {
   route: RoutePort;
   budget: BudgetPort;
   evidence: EvidencePort;
+  capture: CapturePort;
   agentSpawn: AgentSpawn;
   clock: ProcessClock;
   /** Runtime paths the executor writes to. */
@@ -228,6 +238,50 @@ export interface ExecuteResult {
    *  and clock/spawn-free) — real tcr count + parsed cost. The driver folds
    *  this into liveCtx so the later append_run / cycle:end carry truthful data. */
   ctxPatch?: Partial<CycleContext>;
+}
+
+function createCaptureMarkerSink(runDir: string, capture: CapturePort): { onChunk(chunk: Buffer): void; flush(): Promise<void> } {
+  let buf = "";
+  const pending: Promise<void>[] = [];
+  const logPath = join(runDir, "evidence", "capture-markers.log");
+  const record = (marker: CaptureMarker, result: ScreenshotResult): void => {
+    try {
+      mkdirSync(dirname(logPath), { recursive: true });
+      appendFileSync(logPath, JSON.stringify({ marker, result }) + "\n", "utf8");
+    } catch {
+      /* evidence logging is best-effort */
+    }
+  };
+  const runMarker = (line: string): void => {
+    const marker = parseCaptureMarker(line);
+    if (marker === null) return;
+    pending.push(
+      capture
+        .fromMarker(marker, runDir)
+        .then((result) => record(marker, result))
+        .catch((e: unknown) =>
+          record(marker, {
+            kind: marker.kind,
+            out: join(runDir, "screenshots", `${marker.phase}-${marker.stem}.png`),
+            taken: false,
+            skipped: `capture errored: ${String(e)}`,
+          }),
+        ),
+    );
+  };
+  return {
+    onChunk(chunk) {
+      buf += chunk.toString("utf8");
+      const lines = buf.split(/\r?\n/);
+      buf = lines.pop() ?? "";
+      for (const line of lines) runMarker(line);
+    },
+    async flush() {
+      if (buf.trim() !== "") runMarker(buf);
+      buf = "";
+      await Promise.allSettled(pending);
+    },
+  };
 }
 
 /**
@@ -391,6 +445,10 @@ export async function executeCommand(
       } catch {
         /* observation is best-effort */
       }
+      const captureSink =
+        ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== ""
+          ? createCaptureMarkerSink(ctx.evidenceRunDir, ports.capture)
+          : undefined;
       const res = await ports.agentSpawn(cmd.agent, {
         cwd: ports.paths.worktreePath,
         skillBody: ports.skillBody,
@@ -399,6 +457,7 @@ export async function executeCommand(
         // claim (pick_story → 🔨) and the work must be the same story.
         ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
         onChunk: (d: Buffer) => {
+          captureSink?.onChunk(d);
           try {
             appendFileSync(livePath, d);
           } catch {
@@ -406,6 +465,7 @@ export async function executeCommand(
           }
         },
       });
+      await captureSink?.flush();
       // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
       // per-cycle log next to events/runs — v2 keeps cycle logs; without this
       // an agent that "ran but delivered nothing" is undiagnosable.
@@ -1025,6 +1085,11 @@ export function nodePorts(opts: {
     evidence: {
       openFrame(projectCwd, storyId, runId) {
         return openEvidenceFrame({ runDir: join(cardArchiveDir(projectCwd, storyId), runId) }).runDir;
+      },
+    },
+    capture: {
+      fromMarker(marker, runDir) {
+        return captureFromMarker(marker, { runDir });
       },
     },
   };

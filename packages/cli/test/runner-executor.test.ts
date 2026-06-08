@@ -5,7 +5,7 @@
  * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
  */
 import { execFileSync, execSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -292,6 +292,9 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     evidence: {
       openFrame: vi.fn(() => "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1"),
     },
+    capture: {
+      fromMarker: vi.fn(async () => ({ kind: "web", out: "/frame/screenshots/before-home.png", taken: true })),
+    },
     git: {
       fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
@@ -413,6 +416,56 @@ describe("executeCommand — command → executor mapping", () => {
       "claude",
       expect.objectContaining({ runDir: "/frame" }),
     );
+  });
+
+  it("US-EVID-003: spawn_agent listens for capture markers and dispatches screenshots into the run frame", async () => {
+    const { ports } = fakePorts({
+      agentSpawn: vi.fn(async (_agent, opts) => {
+        opts.onChunk?.(Buffer.from("agent says hi\n::roll-capture before web home https://app.test\n"));
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, evidenceRunDir: "/frame" },
+    );
+
+    expect(ports.capture.fromMarker).toHaveBeenCalledWith(
+      { phase: "before", kind: "web", stem: "home", target: "https://app.test" },
+      "/frame",
+    );
+  });
+
+  it("US-EVID-003: capture skips are recorded as evidence instead of placeholders", async () => {
+    const runDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-capture-log-")));
+    execDirs.push(runDir);
+    const { ports } = fakePorts({
+      agentSpawn: vi.fn(async (_agent, opts) => {
+        opts.onChunk?.(Buffer.from("::roll-capture gate terminal cli tmux:roll-loop-demo\n"));
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+      capture: {
+        fromMarker: vi.fn(async () => ({
+          kind: "terminal",
+          out: join(runDir, "screenshots", "gate-cli.png"),
+          taken: false,
+          skipped: "not macOS",
+        })),
+      },
+    });
+
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, evidenceRunDir: runDir },
+    );
+
+    const log = readFileSync(join(runDir, "evidence", "capture-markers.log"), "utf8");
+    expect(log).toContain('"taken":false');
+    expect(log).toContain('"skipped":"not macOS"');
+    expect(log).toContain('"phase":"gate"');
   });
 
   it("FIX-208: spawn_agent parses claude stream-json stdout → ctxPatch.cost", async () => {

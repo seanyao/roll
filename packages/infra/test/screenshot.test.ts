@@ -4,13 +4,15 @@
  * "file must be non-empty" truth test over tool exit codes.
  */
 import { execSync } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   captureAll,
+  captureFromMarker,
   captureScreenshot,
+  parseCaptureMarker,
   screenshotEvidenceRef,
   type ScreenshotResult,
   type ShotRun,
@@ -244,5 +246,78 @@ describe("captureAll", () => {
     ];
     const rs = await captureAll(reqs, { run, env: {}, platform: "linux" });
     expect(rs.map((r) => r.taken)).toEqual([false, true]);
+  });
+});
+
+describe("US-EVID-003 capture markers", () => {
+  it("parses the agent stdout marker protocol", () => {
+    expect(parseCaptureMarker("::roll-capture before web home https://app.test")).toEqual({
+      phase: "before",
+      kind: "web",
+      stem: "home",
+      target: "https://app.test",
+    });
+    expect(parseCaptureMarker("::roll-capture gate terminal cli tmux:roll-loop-demo")).toEqual({
+      phase: "gate",
+      kind: "terminal",
+      stem: "cli",
+      target: "tmux:roll-loop-demo",
+    });
+    expect(parseCaptureMarker("noise")).toBeNull();
+    expect(parseCaptureMarker("::roll-capture before web ../bad https://x")).toBeNull();
+  });
+
+  it("captures before/after web shots into the run frame screenshots dir", async () => {
+    const runDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-marker-run-")));
+    dirs.push(runDir);
+    const { run, calls } = fake({ npx: { code: 0, writes: true } });
+
+    const before = await captureFromMarker(
+      { phase: "before", kind: "web", stem: "home", target: "https://app.test" },
+      { runDir, deps: { run, env: {} } },
+    );
+    const after = await captureFromMarker(
+      { phase: "after", kind: "web", stem: "home", target: "https://app.test" },
+      { runDir, deps: { run, env: {} } },
+    );
+
+    expect(before.taken).toBe(true);
+    expect(after.taken).toBe(true);
+    expect(existsSync(join(runDir, "screenshots", "before-home.png"))).toBe(true);
+    expect(existsSync(join(runDir, "screenshots", "after-home.png"))).toBe(true);
+    expect(calls.join("\n")).toContain("playwright@latest screenshot https://app.test");
+  });
+
+  it("captures terminal gate markers through tmux into the same screenshots dir", async () => {
+    const runDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-marker-terminal-")));
+    dirs.push(runDir);
+    const { run, calls } = fake({
+      launchctl: { code: 0, stdout: "Aqua\n" },
+      osascript: { code: 0 },
+      screencapture: { code: 0, writes: true },
+    });
+
+    const res = await captureFromMarker(
+      { phase: "gate", kind: "terminal", stem: "cli", target: "tmux:roll-loop-demo" },
+      { runDir, deps: { run, env: {}, platform: "darwin" } },
+    );
+
+    expect(res.taken).toBe(true);
+    expect(existsSync(join(runDir, "screenshots", "gate-cli.png"))).toBe(true);
+    expect(calls.join("\n")).toContain("tmux attach -t roll-loop-demo");
+  });
+
+  it("honestly skips when the surface cannot capture; no placeholder file is written", async () => {
+    const runDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-marker-skip-")));
+    dirs.push(runDir);
+    const { run } = fake({});
+    const res = await captureFromMarker(
+      { phase: "gate", kind: "terminal", stem: "cli", target: "tmux:roll-loop-demo" },
+      { runDir, deps: { run, env: {}, platform: "linux" } },
+    );
+
+    expect(res.taken).toBe(false);
+    expect(res.skipped).toBe("not macOS");
+    expect(existsSync(join(runDir, "screenshots", "gate-cli.png"))).toBe(false);
   });
 });

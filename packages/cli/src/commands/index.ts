@@ -127,11 +127,10 @@ export function registerAll(): void {
   // hard rule). No bash fallback: v2 had no `roll release` subcommand (the flow
   // lived in the private ops wrapper, which stays for the actual publish).
   registerPorted("release", (args) => (args[0] === "ship" ? releaseShipCommand(args.slice(1)) : releaseCommand(args)));
-  // `prices`: show/help/unknown are TS; `refresh` (network write) is bash.
-  registerPorted("prices", (args) => {
-    const r = pricesCommand(args);
-    return r ?? fallbackToBash(["prices", ...args]).status;
-  });
+  // `prices`: full surface TS (show/help/unknown + refresh network write).
+  // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
+  // fallback remains (US-PORT-017).
+  registerPorted("prices", pricesCommand);
   // `config`: FULLY TS now (US-PORT-006 — 整个 config 命令收口). Read surface
   // (help/--list/key read) + write surface + the three compact facades
   // (loop-window/loop-schedule/dream-time) all run native; no bash fallback.

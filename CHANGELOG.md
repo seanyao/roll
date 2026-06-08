@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v3.609.2 — 2026-06-09
+
+### 可见性
+
+- 交付档案首页改表格视图：epic 列表以 Epic / Progress / Stories 表格呈现，扫读对齐更顺（US-DOSSIER-005）
+- 交付档案按证据标完成：迁移来的 V2 历史卡按其标题 ✅ 标记显示为已交付，不再因缺 v3 验收报告而全标未交付（US-DOSSIER-006）
+
+### 其他
+
+- changelog generate 剔除已在某版本段发布的故事，不再在 Unreleased 过度累积；纯 PR / 手工条目保留（FIX-227）
+- roll release ship 的交互确认改为按行读 stdin，不再因等 EOF 在交互终端永久挂起（FIX-228）
+
 ## v3.609.1 — 2026-06-09
 
 ### 自动化流水线

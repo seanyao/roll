@@ -203,7 +203,8 @@ export interface DossierStory {
   title?: string;
   /** spec.md frontmatter `created:` when present. */
   created?: string;
-  /** truth: a `latest/` attestation pointer exists for the card. */
+  /** truth: a `latest/` attest pointer exists, OR the spec heading marks it ✅
+   *  done (IDEA-003 — v2-migrated cards that predate the attest chain). */
   delivered: boolean;
 }
 
@@ -214,15 +215,31 @@ export interface DossierEpic {
   delivered: number;
 }
 
-/** Read a story's title/created from its spec.md (frontmatter first, H1 fallback). */
-function specMeta(specPath: string): { title?: string; created?: string } {
+/**
+ * A story heading whose text carries a ✅ status marker (IDEA-003 / owner ruling).
+ * v2-migrated cards record their status in the heading itself
+ * (`## US-XXX … ✅` done / `📋` todo / `🔨` wip). These predate the attest chain
+ * and will never get a `latest/` report, so the ✅ on the heading is the card's
+ * own evidence of completion — the dossier honours it as a delivered signal. The
+ * FIRST story-id heading decides (a ✅ elsewhere in prose does not count). */
+function specMarkedDone(text: string): boolean {
+  for (const line of text.split("\n")) {
+    if (!/^#{1,4}\s/.test(line)) continue;
+    if (!/\b(?:US|FIX|REFACTOR|BUG|IDEA)-[A-Z0-9]/.test(line)) continue;
+    return /✅/u.test(line);
+  }
+  return false;
+}
+
+/** Read a story's title/created/done-marker from its spec.md (frontmatter first, H1 fallback). */
+function specMeta(specPath: string): { title?: string; created?: string; markedDone: boolean } {
   let text: string;
   try {
     text = readFileSync(specPath, "utf8");
   } catch {
-    return {};
+    return { markedDone: false };
   }
-  const out: { title?: string; created?: string } = {};
+  const out: { title?: string; created?: string; markedDone: boolean } = { markedDone: specMarkedDone(text) };
   const fm = /^---\n([\s\S]*?)\n---/.exec(text);
   if (fm !== null) {
     const t = /^title:\s*(.+)$/m.exec(fm[1] ?? "");
@@ -269,19 +286,25 @@ export function collectDossier(projectPath: string): DossierEpic[] {
     }
     for (const id of entries) {
       const dir = join(root, epic, id);
-      let delivered = false;
+      const meta = specMeta(join(dir, "spec.md"));
+      // Delivered = a v3 attest `latest/` report exists OR (IDEA-003) the card's
+      // own heading marks it ✅ done — so v2-migrated history that predates the
+      // attest chain reads as delivered when it carries evidence of completion.
+      let delivered = meta.markedDone;
       try {
-        delivered = statSync(join(dir, "latest")).isDirectory(); // follows symlink
+        if (statSync(join(dir, "latest")).isDirectory()) delivered = true; // follows symlink
       } catch {
-        /* no latest → wish only */
+        /* no latest → fall back to the heading marker */
       }
-      stories.push({
+      const story: DossierStory = {
         id,
         epic,
         type: (id.split("-")[0] ?? id).toUpperCase(),
-        ...specMeta(join(dir, "spec.md")),
         delivered,
-      });
+      };
+      if (meta.title !== undefined) story.title = meta.title;
+      if (meta.created !== undefined) story.created = meta.created;
+      stories.push(story);
     }
     if (stories.length > 0) epics.push({ name: epic, stories, delivered: stories.filter((s) => s.delivered).length });
   }

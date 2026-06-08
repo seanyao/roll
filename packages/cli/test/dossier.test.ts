@@ -32,9 +32,10 @@ function project(): string {
   symlinkSync(join(f, "alpha", "US-A-1", "2026-06-01T00-00-00"), join(f, "alpha", "US-A-1", "latest"));
   mkdirSync(join(f, "alpha", "FIX-2"), { recursive: true });
   writeFileSync(join(f, "alpha", "FIX-2", "spec.md"), "# FIX-2 · 修一个洞\n");
-  // epic "beta": wish only, hand-written spec without frontmatter.
+  // epic "beta": wish only, hand-written spec without frontmatter. The 🚫 marker
+  // exercises title-emoji stripping without counting as a ✅ done marker.
   mkdirSync(join(f, "beta", "REFACTOR-3"), { recursive: true });
-  writeFileSync(join(f, "beta", "REFACTOR-3", "spec.md"), "# REFACTOR-3 — tidy things ✅\n");
+  writeFileSync(join(f, "beta", "REFACTOR-3", "spec.md"), "# REFACTOR-3 — tidy things 🚫\n");
   return p;
 }
 
@@ -56,6 +57,27 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-empty-")));
     dirs.push(p);
     expect(collectDossier(p)).toEqual([]);
+  });
+
+  it("IDEA-003: a ✅ heading marks a card delivered even without a latest/ report (v2-migrated history)", () => {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-v2-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "autonomous-evolution");
+    // v2-migrated card shapes: status emoji lives in the H2 story heading.
+    mkdirSync(join(f, "US-AUTO-9"), { recursive: true });
+    writeFileSync(join(f, "US-AUTO-9", "spec.md"), "## US-AUTO-9 一个 v2 做完的故事 ✅\n\n**Created**: 2026-05-29\n");
+    mkdirSync(join(f, "US-AUTO-10"), { recursive: true });
+    writeFileSync(join(f, "US-AUTO-10", "spec.md"), "## US-AUTO-10 一个 v2 没做的故事 📋\n");
+    mkdirSync(join(f, "US-AUTO-11"), { recursive: true });
+    writeFileSync(join(f, "US-AUTO-11", "spec.md"), "## US-AUTO-11 v2 在做的故事 🔨\n");
+    const epic = collectDossier(p)[0]!;
+    const done = epic.stories.find((s) => s.id === "US-AUTO-9")!;
+    const todo = epic.stories.find((s) => s.id === "US-AUTO-10")!;
+    const wip = epic.stories.find((s) => s.id === "US-AUTO-11")!;
+    expect(done.delivered).toBe(true); // ✅ heading = evidence of v2 completion
+    expect(todo.delivered).toBe(false); // 📋 = genuinely not done
+    expect(wip.delivered).toBe(false); // 🔨 = in progress, not done
+    expect(epic.delivered).toBe(1); // only the ✅ card counts
   });
 });
 

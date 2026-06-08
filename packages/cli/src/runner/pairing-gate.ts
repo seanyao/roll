@@ -18,7 +18,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parsePairingConfig, selectPairingCandidates, type PairingStage } from "@roll/core";
+import { parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
 import { assessComplexity } from "./peer-gate.js";
 
 export interface PairReview {
@@ -48,6 +48,14 @@ export interface RunPairingDeps {
   now: () => number;
   /** Override the 30s default (tests). */
   timeoutMs?: number;
+  /**
+   * US-PAIR-006 (optional): per-peer pairing track record from
+   * {@link pairingHistory}. Drives the ε-greedy hit-rate preference in the
+   * selector. Absent → pure seeded round-robin (US-PAIR-001 behaviour).
+   */
+  history?: PairingHistory;
+  /** ε for the ε-greedy rotation (default 0.2). */
+  epsilon?: number;
 }
 
 export interface RunPairingResult {
@@ -89,6 +97,9 @@ export async function runPairing(
       stage,
       cfg,
       cycleId,
+      // US-PAIR-006: history-driven ε-greedy preference (no-op when absent).
+      ...(deps.history !== undefined ? { history: deps.history } : {}),
+      ...(deps.epsilon !== undefined ? { epsilon: deps.epsilon } : {}),
     });
     if (candidates.length === 0) {
       // fail-loud: no silent skip — the absence is itself an audited event.

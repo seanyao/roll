@@ -16,12 +16,41 @@
  * `--dry-run` prints the plan and exits; `--yes` skips the confirm prompt.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { planShip, type ShipFacts } from "@roll/core";
 import { type Lang, resolveLang } from "@roll/spec";
 import { c, renderState } from "../render.js";
 import { consistencyPasses } from "./consistency.js";
+
+/**
+ * Read one line from a fd synchronously, stopping at the FIRST newline or EOF.
+ *
+ * FIX-228: the confirm prompt used `readFileSync("/dev/stdin")`, which reads to
+ * EOF — fine when stdin is piped (`echo y | …`) but in an interactive TTY the
+ * user types `y`⏎ and never sends EOF, so the read blocks forever (the 7-minute
+ * "super slow" ship hang). Reading byte-by-byte until "\n" terminates on the
+ * newline an interactive answer ends with, while still honouring piped EOF.
+ * `fd` is injectable so the line semantics are unit-testable without a real TTY.
+ */
+export function readLineSyncFromFd(fd: number): string {
+  const byte = Buffer.alloc(1);
+  let line = "";
+  for (let i = 0; i < 4096; i++) {
+    let n: number;
+    try {
+      n = readSync(fd, byte, 0, 1, null);
+    } catch {
+      break; // not readable (EAGAIN) — give up rather than spin
+    }
+    if (n === 0) break; // EOF (piped stdin closed)
+    const ch = byte.toString("utf8");
+    if (ch === "\n") break; // end of an interactive line
+    if (ch === "\r") continue;
+    line += ch;
+  }
+  return line;
+}
 
 /** Injectable seams (tests pass fakes; production wires real git/fs/consistency). */
 export interface ShipDeps {
@@ -94,8 +123,8 @@ const realDeps: ShipDeps = {
     // real confirm reads a single y/N line from the TTY.
     process.stdout.write(`\n  Tag and push ${tag}? This triggers the release workflow. [y/N] `);
     try {
-      const buf = readFileSync("/dev/stdin", "utf8");
-      return /^\s*y(es)?\s*$/i.test(buf.split("\n")[0] ?? "");
+      // fd 0 = stdin; read a single line (FIX-228: no longer blocks on EOF in a TTY).
+      return /^\s*y(es)?\s*$/i.test(readLineSyncFromFd(0));
     } catch {
       return false;
     }

@@ -97,6 +97,28 @@ export function redConclusions(runs: readonly CiRunRow[]): string[] {
   return [...reds].sort();
 }
 
+/** One poll's verdict for the `roll ci --wait` gate (US-PORT-015). */
+export type CiWaitTick = "no-runs" | "pending" | "failed" | "passed";
+
+/**
+ * Classify ONE poll of the HEAD-commit CI runs, mirroring `_ci_wait`'s per-loop
+ * decision order EXACTLY (bin/roll): no rows → "no-runs" (caller then checks for
+ * an open PR / keeps waiting); else any run whose status !== "completed" →
+ * "pending" (checked BEFORE failure, so a still-running sibling defers a verdict
+ * even when another already failed); else any completed conclusion that is not
+ * "success"/"skipped"/null → "failed"; otherwise "passed". A null conclusion on
+ * a completed run is NOT a failure (FIX-103 lenience).
+ */
+export function ciWaitTick(runs: readonly CiRunRow[]): CiWaitTick {
+  if (runs.length === 0) return "no-runs";
+  if (runs.some((r) => r.status !== "completed")) return "pending";
+  const failed = runs.some((r) => {
+    const c = r.conclusion;
+    return c !== "success" && c !== "skipped" && c !== null && c !== undefined;
+  });
+  return failed ? "failed" : "passed";
+}
+
 /** The pre-run CI gate verdict — maps 1:1 to the oracle's exit codes. */
 export type PrecheckVerdict =
   | { exit: 0; reason: "no_runs" | "green_or_pending" } // pass: build allowed.

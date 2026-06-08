@@ -49,6 +49,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll peer` | Cross-agent negotiation & review |
 | `roll alert` | View / clear loop alerts |
+| `roll tune [reset]` | Suggest-only self-tuning: surface threshold / route / rubric adjustments from loop trends — read-only, never auto-applies |
 | **Project · per repo** | |
 | `roll init` | Set up Roll in this project |
 | `roll story new <ID> --title <t> [--epic <e>]` | Mint a story's card folder (spec + page + index) — the single creation channel |

@@ -239,6 +239,9 @@ function norm(run: Run, fx: Fixture): Run {
     stdout = stdout.split(path).join(token);
     stderr = stderr.split(path).join(token);
   }
+  stdout = stdout
+    .replace(/(  INIT  ·  项目初始化 )[^\n]*(  \n)/, "$1<PROGRESS>$2")
+    .replace(/(  REINIT  ·  重新合并约定 )[^\n]*(  \n)/, "$1<PROGRESS>$2");
   return { status: run.status, stdout, stderr };
 }
 
@@ -263,7 +266,7 @@ describe("frozen: roll init", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  INIT  ·  项目初始化 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  
+        "stdout": "  INIT  ·  项目初始化 <PROGRESS>  
       ────────────────────────────────────────────────────────────────────────────────
 
         1. ✓  Detect project type
@@ -304,7 +307,7 @@ describe("frozen: roll init", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  INIT  ·  项目初始化 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  
+        "stdout": "  INIT  ·  项目初始化 <PROGRESS>  
       ────────────────────────────────────────────────────────────────────────────────
 
         1. ✓  Detect project type
@@ -346,7 +349,7 @@ describe("frozen: roll init", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  REINIT  ·  重新合并约定 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  
+        "stdout": "  REINIT  ·  重新合并约定 <PROGRESS>  
       ────────────────────────────────────────────────────────────────────────────────
 
         1. ✓  Detect project type

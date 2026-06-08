@@ -289,6 +289,9 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     skillBody: "work",
     clock: () => 42,
     agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
+    evidence: {
+      openFrame: vi.fn(() => "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1"),
+    },
     git: {
       fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
@@ -368,6 +371,21 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r2.event).toEqual({ type: "no_story" });
   });
 
+  it("US-EVID-001: pick_story opens an evidence frame before spawn and records the run dir", async () => {
+    const { ports, calls } = fakePorts();
+    const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+    expect(ports.evidence.openFrame).toHaveBeenCalledWith("/repo", "US-RUN-001", CTX.cycleId);
+    expect(r.ctxPatch?.evidenceRunDir).toBe("/repo/.roll/features/demo/US-RUN-001/20260605-000000-1");
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events).toContainEqual({
+      type: "evidence:frame-opened",
+      cycleId: CTX.cycleId,
+      storyId: "US-RUN-001",
+      runDir: "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1",
+      ts: 42,
+    });
+  });
+
   it("budget_check pause → budget_halt; ok → budget_ok", async () => {
     const halt = fakePorts({ budget: { check: () => "pause_and_notify" } });
     const r1 = await executeCommand({ kind: "budget_check", storyId: "US-RUN-001" }, halt.ports, CTX);
@@ -382,6 +400,19 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
+  });
+
+  it("US-EVID-001: spawn_agent passes the opened run dir explicitly to the child", async () => {
+    const { ports } = fakePorts();
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, evidenceRunDir: "/frame" },
+    );
+    expect(ports.agentSpawn).toHaveBeenCalledWith(
+      "claude",
+      expect.objectContaining({ runDir: "/frame" }),
+    );
   });
 
   it("FIX-208: spawn_agent parses claude stream-json stdout → ctxPatch.cost", async () => {

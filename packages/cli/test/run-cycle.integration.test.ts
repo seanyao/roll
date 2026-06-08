@@ -236,6 +236,47 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(existsSync(p.worktreePath)).toBe(false);
   });
 
+  it("US-EVID-001: opens the evidence frame before agent spawn and keeps agent-deposited evidence after cleanup", async () => {
+    const { repo } = makeFixture("evid");
+    const rt = tmp("evid-rt");
+    const cycleId = "20260608-010101-9999";
+    const p = paths(rt, cycleId);
+    const expectedRunDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001", cycleId);
+    let seenRunDir = "";
+
+    const shim: AgentSpawn = async (agent, opts) => {
+      expect(opts.runDir).toBe(expectedRunDir);
+      seenRunDir = opts.runDir ?? "";
+      expect(existsSync(join(seenRunDir, "evidence"))).toBe(true);
+      expect(existsSync(join(seenRunDir, "screenshots"))).toBe(true);
+      writeFileSync(join(seenRunDir, "evidence", "probe.txt"), "agent proof\n", "utf8");
+      return shimAgentTcr(agent, opts);
+    };
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("done");
+    expect(seenRunDir).toBe(expectedRunDir);
+    expect(readFileSync(join(expectedRunDir, "evidence", "probe.txt"), "utf8")).toBe("agent proof\n");
+    const events = readFileSync(p.eventsPath, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as { type: string; runDir?: string });
+    expect(events).toContainEqual({
+      type: "evidence:frame-opened",
+      cycleId,
+      storyId: "US-RUN-001",
+      runDir: expectedRunDir,
+      ts: expect.any(Number),
+    });
+  });
+
   it("kill-mid-execute (watchdog breach): terminal still written, lock released, next cycle takes over (I2)", async () => {
     const { repo } = makeFixture("kill");
     const rt = tmp("kill-rt");

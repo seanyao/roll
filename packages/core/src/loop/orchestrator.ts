@@ -438,6 +438,8 @@ export interface CycleContext {
    *  BOTH the cycle:end event and the runs row so they agree. Absent ⇒ no
    *  usage parsed (the cycle:end falls back to the zero-cost placeholder). */
   cost?: CycleCost;
+  /** US-EVID-001: per-cycle acceptance evidence frame opened before agent spawn. */
+  evidenceRunDir?: string;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

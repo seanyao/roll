@@ -46,6 +46,9 @@ export type RollEvent =
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }
+  // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
+  // frame before spawning an agent, so later phases have a durable run dir.
+  | { type: "evidence:frame-opened"; cycleId: string; storyId: string; runDir: string; ts: number }
   // Policy (BC6) — governance decisions as facts
   | { type: "policy:auto_merge"; prNumber: number; rule: string; ts: number }
   | { type: "policy:flag_review"; prNumber: number; rule: string; ts: number }

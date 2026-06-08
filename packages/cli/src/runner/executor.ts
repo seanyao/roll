@@ -68,6 +68,7 @@ import {
   prViewState,
   releaseLock,
   remoteUrl,
+  openEvidenceFrame,
   runPublishPlan,
   systemClock,
   writeHeartbeat,
@@ -88,6 +89,7 @@ import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
+import { cardArchiveDir } from "../lib/archive.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -173,6 +175,11 @@ export interface BudgetPort {
   check(storyId: string): "ok" | "downgrade" | "pause_and_notify";
 }
 
+/** Evidence frame facet — opens `.roll/features/<epic>/<ID>/<run-id>/`. */
+export interface EvidencePort {
+  openFrame(projectCwd: string, storyId: string, runId: string): string;
+}
+
 /**
  * The full injectable Ports bundle. The runtime wiring ({@link nodePorts})
  * binds these to the real infra; tests pass fakes for every facet so NO real
@@ -186,6 +193,7 @@ export interface Ports {
   backlog: BacklogPort;
   route: RoutePort;
   budget: BudgetPort;
+  evidence: EvidencePort;
   agentSpawn: AgentSpawn;
   clock: ProcessClock;
   /** Runtime paths the executor writes to. */
@@ -328,7 +336,15 @@ export async function executeCommand(
       // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
       // 写在 worktree 的虚空里，且真实 ports 从未绑定 markStatus).
       ports.backlog.markStatus?.(ports.repoCwd, story.id, "🔨 In Progress");
-      return { event: { type: "story_picked", storyId: story.id } };
+      const evidenceRunDir = ports.evidence.openFrame(ports.repoCwd, story.id, ctx.cycleId);
+      ports.events.appendEvent(ports.paths.eventsPath, {
+        type: "evidence:frame-opened",
+        cycleId: ctx.cycleId,
+        storyId: story.id,
+        runDir: evidenceRunDir,
+        ts: ports.clock(),
+      });
+      return { event: { type: "story_picked", storyId: story.id }, ctxPatch: { evidenceRunDir } };
     }
 
     // agent/router resolveRoute (+ pre-spawn availability fallback).
@@ -378,6 +394,7 @@ export async function executeCommand(
       const res = await ports.agentSpawn(cmd.agent, {
         cwd: ports.paths.worktreePath,
         skillBody: ports.skillBody,
+        ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
         // FIX-204B: pin the executor-picked story into the agent prompt — the
         // claim (pick_story → 🔨) and the work must be the same story.
         ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
@@ -504,7 +521,12 @@ export async function executeCommand(
             // a wall clock so 30s is enforced even if an agent's spawn path ignores
             // its own timeoutMs. Whichever loses, the cycle is never stalled.
             res = await Promise.race([
-              ports.agentSpawn(peer, { cwd: ports.paths.worktreePath, skillBody: prompt, timeoutMs }),
+              ports.agentSpawn(peer, {
+                cwd: ports.paths.worktreePath,
+                skillBody: prompt,
+                timeoutMs,
+                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+              }),
               new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
             ]);
           } catch {
@@ -1000,6 +1022,11 @@ export function nodePorts(opts: {
         }
       : { resolve: () => ({ agent: "claude", model: "" }) },
     budget: opts.budget ?? { check: () => "ok" },
+    evidence: {
+      openFrame(projectCwd, storyId, runId) {
+        return openEvidenceFrame({ runDir: join(cardArchiveDir(projectCwd, storyId), runId) }).runDir;
+      },
+    },
   };
 }
 

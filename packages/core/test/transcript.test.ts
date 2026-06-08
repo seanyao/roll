@@ -20,6 +20,7 @@ function events(): RollEvent[] {
     { type: "cycle:phase", cycleId: CYCLE, phase: "execute", ts: 1010 },
     { type: "cycle:tcr", cycleId: CYCLE, commitHash: "abcdef1234", message: "tcr: add extractor", ts: 1020 },
     { type: "cycle:tcr", cycleId: CYCLE, commitHash: "0987654321", message: "tcr: render block", ts: 1040 },
+    { type: "evidence:frame-opened", cycleId: CYCLE, storyId: "US-ATTEST-014", runDir: "/r", ts: 1050 },
     { type: "pr:open", prNumber: 490, storyId: "US-ATTEST-014", ts: 1060 },
     { type: "ci:pass", prNumber: 490, ts: 1080 },
     { type: "attest:gate", cycleId: CYCLE, verdict: "produced", reasons: [], ts: 1090 },
@@ -38,6 +39,7 @@ describe("extractCycleSignals — three-layer reduction", () => {
       "phase:execute",
       "tcr",
       "tcr",
+      "evidence:frame-opened",
       "pr:open",
       "ci:pass",
       "attest:gate",
@@ -52,6 +54,7 @@ describe("extractCycleSignals — three-layer reduction", () => {
     expect(r.turningPoints.map((t) => t.marker)).toEqual([
       "tcr",
       "tcr",
+      "evidence:frame-opened",
       "pr:open",
       "ci:pass",
       "attest:gate",
@@ -72,6 +75,7 @@ describe("extractCycleSignals — three-layer reduction", () => {
     const r = extractCycleSignals(events(), CYCLE);
     const tcr = r.timeline.find((t) => t.marker === "tcr");
     expect(tcr?.label).toContain("add extractor");
+    expect(r.timeline.find((t) => t.marker === "evidence:frame-opened")?.label).toContain("Evidence frame");
     expect(r.timeline.find((t) => t.marker === "pr:merge")?.label).toContain("490");
     expect(r.timeline.find((t) => t.marker === "attest:gate")?.label).toContain("produced");
   });

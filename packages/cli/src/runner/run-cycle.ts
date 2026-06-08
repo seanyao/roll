@@ -198,6 +198,7 @@ function mergeCtx(live: CycleContext, next: CycleContext): CycleContext {
     storyId: next.storyId ?? live.storyId,
     agent: next.agent ?? live.agent,
     model: next.model ?? live.model,
+    evidenceRunDir: next.evidenceRunDir ?? live.evidenceRunDir,
   };
 }
 

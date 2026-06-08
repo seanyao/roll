@@ -402,6 +402,107 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(html).toContain("missing_acceptance_report");
   });
 
+  it("US-EVID-011: design station renders peer-review verdicts, rounds, findings, and full-record links", () => {
+    const html = renderStoryDossier({
+      story,
+      peerReview: {
+        finalVerdict: "AGREE",
+        rounds: [
+          {
+            round: 1,
+            verdict: "REFINE",
+            peer: "kimi",
+            stage: "design",
+            findings: ["tighten the AC evidence wording"],
+            href: "../../../loop/peer/cycle-c1.design.pair.json",
+          },
+          {
+            round: 2,
+            verdict: "AGREE",
+            peer: "pi",
+            stage: "code",
+            findings: ["no blocking concerns"],
+            href: "../../../loop/peer/cycle-c1.pair.json",
+          },
+        ],
+      },
+    });
+
+    expect(html).toContain("Peer review");
+    expect(html).toContain("同行评审");
+    expect(html).toContain("AGREE");
+    expect(html).toContain("2 rounds");
+    expect(html).toContain("kimi");
+    expect(html).toContain("tighten the AC evidence wording");
+    expect(html).toContain('href="../../../loop/peer/cycle-c1.design.pair.json"');
+  });
+
+  it("US-EVID-011: collectStoryDossierInput reconstructs peer review from cycle runtime records", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-PEER-11");
+    mkdirSync(join(p, ".roll", "loop", "peer"), { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# US-PEER-11\n");
+    writeFileSync(
+      join(p, ".roll", "loop", "runs.jsonl"),
+      JSON.stringify({
+        run_id: "c1",
+        cycle_id: "c1",
+        story_id: "US-PEER-11",
+        built: ["US-PEER-11"],
+        status: "done",
+        outcome: "delivered",
+      }) + "\n",
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "peer", "cycle-c1.design.pair.json"),
+      JSON.stringify({
+        cycleId: "c1",
+        workingAgent: "codex",
+        peer: "kimi",
+        stage: "design",
+        verdict: "refine",
+        findings: ["clarify the fallback behavior"],
+        cost: 0.12,
+      }),
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "peer", "cycle-c1.pair.json"),
+      JSON.stringify({
+        cycleId: "c1",
+        workingAgent: "codex",
+        peer: "pi",
+        stage: "code",
+        verdict: "agree",
+        findings: ["no blocker"],
+        cost: 0,
+      }),
+    );
+
+    const got = collectStoryDossierInput(p, { id: "US-PEER-11", epic: "alpha", type: "US", delivered: true });
+    expect(got.peerReview).toEqual({
+      finalVerdict: "AGREE",
+      rounds: [
+        {
+          round: 1,
+          verdict: "REFINE",
+          peer: "kimi",
+          stage: "design",
+          findings: ["clarify the fallback behavior"],
+          href: "../../../loop/peer/cycle-c1.design.pair.json",
+        },
+        {
+          round: 2,
+          verdict: "AGREE",
+          peer: "pi",
+          stage: "code",
+          findings: ["no blocker"],
+          href: "../../../loop/peer/cycle-c1.pair.json",
+        },
+      ],
+    });
+  });
+
   it("wish-only story: empty states render honestly, delivery pending", () => {
     const bare = renderStoryDossier({ story: { ...story, delivered: false } });
     expect(bare).toContain("尚未设计");
@@ -409,6 +510,7 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(bare).toContain("尚未交付");
     expect(bare).not.toContain('class="attest-banner"');
     expect(bare).not.toContain("Delivery evidence");
+    expect(bare).not.toContain("Peer review");
   });
 
   it("self-containment holds", () => {

@@ -17,7 +17,7 @@
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { parseEventLine } from "@roll/spec";
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
@@ -73,6 +73,22 @@ export interface CorrectionTraceEntry {
   targetId?: string;
 }
 
+export type PeerReviewVerdict = "AGREE" | "REFINE" | "OBJECT" | "ESCALATE";
+
+export interface PeerReviewRound {
+  round: number;
+  verdict: PeerReviewVerdict;
+  peer?: string;
+  stage?: string;
+  findings: string[];
+  href?: string;
+}
+
+export interface PeerReviewEvidence {
+  finalVerdict: PeerReviewVerdict;
+  rounds: PeerReviewRound[];
+}
+
 export interface DeliveryEvidence {
   prs?: DeliveryPrEvidence[];
   diffHref?: string;
@@ -105,6 +121,8 @@ export interface StoryDossierInput {
   reportHref?: string;
   /** Reconstructable delivery facts: PR/CI/diff/agent/cost/timeline. */
   deliveryEvidence?: DeliveryEvidence;
+  /** US-EVID-011: peer-review decisions captured from runtime pairing records. */
+  peerReview?: PeerReviewEvidence;
   /** US-EVID-014: traceable automatic correction decisions for this story. */
   correctionActions?: CorrectionTraceEntry[];
   /** Retrospective text (self-score note body). */
@@ -118,7 +136,7 @@ export interface StoryDossierInput {
 /** Which stations are complete, derived from the data we actually have. */
 export function stationsDone(d: StoryDossierInput): Set<string> {
   const done = new Set<string>(["definition"]); // a card existing IS the definition
-  if ((d.design?.length ?? 0) > 0) done.add("design");
+  if ((d.design?.length ?? 0) > 0 || d.peerReview !== undefined) done.add("design");
   if ((d.commits?.length ?? 0) > 0 || (d.executionRefs?.length ?? 0) > 0) done.add("execution");
   if (d.story.delivered) done.add("delivery");
   if (d.selfScore !== undefined || (d.retro !== undefined && d.retro !== "")) done.add("retrospective");
@@ -253,6 +271,33 @@ function correctionTraceHtml(actions: readonly CorrectionTraceEntry[] | undefine
     .join("")}</ul>`;
 }
 
+function peerReviewHtml(review: PeerReviewEvidence | undefined): string {
+  if (review === undefined || review.rounds.length === 0) return "";
+  const rounds = review.rounds
+    .map((r) => {
+      const peer = r.peer !== undefined ? ` · <code>${esc(r.peer)}</code>` : "";
+      const stage = r.stage !== undefined ? ` · <code>${esc(r.stage)}</code>` : "";
+      const link = r.href !== undefined ? ` · <a href="${esc(r.href)}">${bi("Full record", "完整记录")}</a>` : "";
+      const findings =
+        r.findings.length > 0
+          ? `<ul>${r.findings.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`
+          : `<p class="muted">${bi("No inline findings recorded", "未记录内联意见")}</p>`;
+      return (
+        `<li><p><span class="peer-verdict peer-${esc(r.verdict.toLowerCase())}">${esc(r.verdict)}</span> ` +
+        `${bi(`Round ${r.round}`, `第 ${r.round} 轮`)}${peer}${stage}${link}</p>${findings}</li>`
+      );
+    })
+    .join("");
+  return (
+    `<div class="peer-review">` +
+    `<h3>${bi("Peer review", "同行评审")}</h3>` +
+    `<p><span class="peer-verdict peer-${esc(review.finalVerdict.toLowerCase())}">${esc(review.finalVerdict)}</span> ` +
+    `${bi(`${review.rounds.length} rounds`, `${review.rounds.length} 轮`)}</p>` +
+    `<ol>${rounds}</ol>` +
+    `</div>`
+  );
+}
+
 function selfScoreClass(verdict: string): string {
   const v = verdict.toLowerCase();
   if (v === "good" || v === "ok" || v === "regression") return v;
@@ -314,10 +359,11 @@ export function renderStoryDossier(d: StoryDossierInput): string {
           .map((a) => `<li>${a.checked ? "☑" : "☐"} ${esc(a.text)}</li>`)
           .join("")}</ul>`
       : `<p class="empty">${bi("No AC in spec.md", "spec.md 未记录 AC")}</p>`;
-  const design =
-    (d.design?.length ?? 0) > 0
-      ? `<ul>${(d.design ?? []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`
-      : `<p class="empty">${bi("Not yet designed", "尚未设计")}</p>`;
+  const peerReview = peerReviewHtml(d.peerReview);
+  const designBits: string[] = [];
+  if ((d.design?.length ?? 0) > 0) designBits.push(`<ul>${(d.design ?? []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`);
+  if (peerReview !== "") designBits.push(peerReview);
+  const design = designBits.length > 0 ? designBits.join("\n") : `<p class="empty">${bi("Not yet designed", "尚未设计")}</p>`;
   const execution =
     (d.commits?.length ?? 0) > 0
       ? `<p>${bi(`${(d.commits ?? []).length} TCR commits`, `${(d.commits ?? []).length} 个 TCR 提交`)}</p>` +
@@ -386,6 +432,12 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.delivery-timeline { margin:0; padding-left:18px; } .delivery-timeline li { margin:2px 0; }\n` +
     `.correction-trace { list-style:none; padding:0; margin:0; } .correction-trace li { border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin:8px 0; background:var(--bg-raise); }\n` +
     `.correction-trace p { margin:0 0 3px; } .correction-trace p:last-child { margin-bottom:0; }\n` +
+    `.peer-review { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; background:var(--bg-raise); }\n` +
+    `.peer-review h3 { font:600 14px/1.4 var(--serif); margin:0 0 6px; }\n` +
+    `.peer-review p { margin:0 0 6px; } .peer-review ol { margin:6px 0 0; padding-left:22px; }\n` +
+    `.peer-review li { margin:7px 0; } .peer-review ul { margin:4px 0 0; padding-left:18px; color:var(--muted); }\n` +
+    `.peer-verdict { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
+    `.peer-agree { color:var(--pass); } .peer-refine { color:var(--warn); } .peer-object, .peer-escalate { color:var(--fail); }\n` +
     `.selfscore-card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--bg-raise); }\n` +
     `.selfscore-card p { margin:0 0 6px; } .selfscore-card p:last-child { margin-bottom:0; }\n` +
     `.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
@@ -407,7 +459,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     storySpine(d) +
     section("Definition", "立项", definition, defEmpty) +
     section("Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
-    section("Design", "设计", design, (d.design?.length ?? 0) === 0) +
+    section("Design", "设计", design, (d.design?.length ?? 0) === 0 && d.peerReview === undefined) +
     section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
     section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence))) +
     (corrections !== "" ? section("Correction trace", "纠正留痕", corrections, false) : "") +
@@ -561,6 +613,9 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   const deliveryEvidence = collectDeliveryEvidence(projectPath, story, searchableCardText);
   if (hasDeliveryEvidence(deliveryEvidence)) out.deliveryEvidence = deliveryEvidence;
 
+  const peerReview = collectPeerReview(projectPath, story.id);
+  if (peerReview !== undefined) out.peerReview = peerReview;
+
   const correctionActions = collectCorrectionActions(projectPath, story.id);
   if (correctionActions.length > 0) out.correctionActions = correctionActions;
 
@@ -641,6 +696,11 @@ interface EventRow {
   cycleId?: string;
   prNumber?: number;
   agent?: string;
+  peer?: string;
+  verdict?: string;
+  findings?: number;
+  cost?: number;
+  stage?: string;
   action?: string;
   plannedAction?: string;
   signal?: string;
@@ -854,6 +914,169 @@ function collectCorrectionActions(projectPath: string, storyId: string): Correct
     });
   }
   return out.sort((a, b) => a.at.localeCompare(b.at)).slice(-20);
+}
+
+interface PeerReviewRecord {
+  cycleId: string;
+  verdict: PeerReviewVerdict;
+  findings: string[];
+  sourceOrder: number;
+  source: string;
+  peer?: string;
+  stage?: string;
+  href?: string;
+}
+
+function collectPeerReview(projectPath: string, storyId: string): PeerReviewEvidence | undefined {
+  const cycles = storyCycleIds(projectPath, storyId);
+  if (cycles.length === 0) return undefined;
+  const records: PeerReviewRecord[] = [];
+  const seen = new Set<string>();
+  const add = (r: PeerReviewRecord): void => {
+    const key = `${r.cycleId}:${r.stage ?? ""}:${r.peer ?? ""}:${r.verdict}:${r.source}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    records.push(r);
+  };
+
+  const peerDir = joinPath(projectPath, ".roll", "loop", "peer");
+  if (existsSync(peerDir)) {
+    try {
+      const files = readdirSync(peerDir)
+        .filter((f) => cycles.some((cycle) => f.startsWith(`cycle-${cycle}.`)))
+        .sort();
+      files.forEach((file, index) => {
+        const cycleId = cycles.find((cycle) => file.startsWith(`cycle-${cycle}.`));
+        if (cycleId === undefined) return;
+        const parsed = parsePeerRecordFile(joinPath(peerDir, file), cycleId, index, `../../../loop/peer/${file}`);
+        if (parsed !== undefined) add(parsed);
+      });
+    } catch {
+      /* peer dir unreadable */
+    }
+  }
+
+  for (const ev of readEventRows(projectPath)) {
+    if (ev.type !== "pair:verdict" || ev.cycleId === undefined || !cycles.includes(ev.cycleId)) continue;
+    const verdict = normalizePeerVerdict(ev.verdict);
+    if (verdict === undefined) continue;
+    const findings =
+      typeof ev.findings === "number" && Number.isFinite(ev.findings) && ev.findings > 0
+        ? [`${ev.findings} findings`]
+        : [];
+    add({
+      cycleId: ev.cycleId,
+      verdict,
+      findings,
+      sourceOrder: 10_000 + records.length,
+      source: "event",
+      ...(ev.peer !== undefined ? { peer: ev.peer } : {}),
+      ...(ev.stage !== undefined ? { stage: ev.stage } : {}),
+    });
+  }
+
+  const sorted = records.sort((a, b) => {
+    const ac = cycles.indexOf(a.cycleId);
+    const bc = cycles.indexOf(b.cycleId);
+    if (ac !== bc) return ac - bc;
+    const as = peerStageOrder(a.stage);
+    const bs = peerStageOrder(b.stage);
+    if (as !== bs) return as - bs;
+    return a.sourceOrder - b.sourceOrder;
+  });
+  if (sorted.length === 0) return undefined;
+  const rounds = sorted.map((r, i) => ({
+    round: i + 1,
+    verdict: r.verdict,
+    findings: r.findings,
+    ...(r.peer !== undefined ? { peer: r.peer } : {}),
+    ...(r.stage !== undefined ? { stage: r.stage } : {}),
+    ...(r.href !== undefined ? { href: r.href } : {}),
+  }));
+  const final = rounds[rounds.length - 1]?.verdict;
+  return final !== undefined ? { finalVerdict: final, rounds } : undefined;
+}
+
+function storyCycleIds(projectPath: string, storyId: string): string[] {
+  const out: string[] = [];
+  const add = (id: string | undefined): void => {
+    if (id === undefined || id === "" || out.includes(id)) return;
+    out.push(id);
+  };
+  for (const row of readRunRows(projectPath, storyId)) {
+    if (!runMatchesStory(row, storyId)) continue;
+    add(row.cycle_id);
+    add(row.run_id);
+  }
+  for (const ev of readEventRows(projectPath)) {
+    if (ev.storyId === storyId) add(ev.cycleId);
+  }
+  return out;
+}
+
+function parsePeerRecordFile(path: string, cycleId: string, sourceOrder: number, href: string): PeerReviewRecord | undefined {
+  let text: string;
+  try {
+    text = readFile(path);
+  } catch {
+    return undefined;
+  }
+  if (path.endsWith(".json")) {
+    try {
+      const obj = JSON.parse(text) as Record<string, unknown>;
+      const verdict = normalizePeerVerdict(obj["verdict"]);
+      if (verdict === undefined) return undefined;
+      const findingsRaw = obj["findings"];
+      const findings = Array.isArray(findingsRaw)
+        ? findingsRaw.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim()).slice(0, 8)
+        : [];
+      return {
+        cycleId,
+        verdict,
+        findings,
+        sourceOrder,
+        source: path,
+        href,
+        ...(typeof obj["peer"] === "string" && obj["peer"] !== "" ? { peer: obj["peer"] } : {}),
+        ...(typeof obj["stage"] === "string" && obj["stage"] !== "" ? { stage: obj["stage"] } : {}),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+  const verdict = normalizePeerVerdict(text);
+  if (verdict === undefined) return undefined;
+  const peer = /^peer\s*[:：]\s*(\S+)/im.exec(text)?.[1];
+  const stage = /^stage\s*[:：]\s*(\S+)/im.exec(text)?.[1];
+  const findings = text
+    .split("\n")
+    .map((line) => /^[-*]\s+(.*)$/.exec(line.trim())?.[1]?.trim())
+    .filter((line): line is string => line !== undefined && line !== "")
+    .slice(0, 8);
+  return {
+    cycleId,
+    verdict,
+    findings,
+    sourceOrder,
+    source: path,
+    href,
+    ...(peer !== undefined && peer !== "" ? { peer } : {}),
+    ...(stage !== undefined && stage !== "" ? { stage } : {}),
+  };
+}
+
+function normalizePeerVerdict(value: unknown): PeerReviewVerdict | undefined {
+  const s = typeof value === "string" ? value : "";
+  const m = /\b(agree|refine|object|escalate)\b/i.exec(s);
+  if (m?.[1] === undefined) return undefined;
+  return m[1].toUpperCase() as PeerReviewVerdict;
+}
+
+function peerStageOrder(stage: string | undefined): number {
+  if (stage === "design") return 0;
+  if (stage === "code") return 1;
+  if (stage === "cycle") return 2;
+  return 10;
 }
 
 function isEventRow(row: unknown): row is EventRow {

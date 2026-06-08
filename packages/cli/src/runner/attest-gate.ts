@@ -11,11 +11,9 @@
  *   actual delivery (commits ahead, real story)  AND  no fresh acceptance report
  *     ⇒ ALERT + an `attest:gate` event in events.ndjson (auditable forever).
  *
- * SOFT by default (record, don't block) — mirroring the peer gate: an unattended
- * cycle must not lose a legitimate delivery over a missing report. The escalation
- * hook is `loop_safety.attest_gate: hard` in policy.yaml: in HARD mode a delivery
- * without a fresh report is BLOCKED (the capture fails so the story is not marked
- * Done). Hard is strictly opt-in — production default stays soft.
+ * HARD by default: a delivery without dense, fresh acceptance evidence is
+ * BLOCKED (the capture fails so the story is not marked Done). The temporary
+ * migration hook is `loop_safety.attest_gate: soft` in policy.yaml.
  *
  * Freshness contract: the report at `.roll/verification/<storyId>/latest/report.html`
  * must have been written THIS cycle (mtime ≥ cycle start). A stale report left by
@@ -27,7 +25,7 @@
  * "skipped", not "produced". A real delivery's report carries ≥1 AC + an ac-map.
  */
 import { parsePolicy } from "@roll/core";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 
@@ -46,6 +44,42 @@ function reportCandidates(worktreeCwd: string, storyId: string): string[] {
 /** ac-map candidates, same single-home rule. */
 function acMapCandidates(worktreeCwd: string, storyId: string): string[] {
   return [join(cardArchiveDir(worktreeCwd, storyId), "ac-map.json")];
+}
+
+function storySpecPath(worktreeCwd: string, storyId: string): string | null {
+  const featuresDir = join(worktreeCwd, ".roll", "features");
+  try {
+    for (const epic of readdirSync(featuresDir, { withFileTypes: true })) {
+      if (!epic.isDirectory()) continue;
+      const spec = join(featuresDir, epic.name, storyId, "spec.md");
+      if (existsSync(spec)) return spec;
+      const legacy = join(featuresDir, epic.name, `${storyId}.md`);
+      if (existsSync(legacy)) return legacy;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function storyHasAcBlock(worktreeCwd: string, storyId: string): boolean | null {
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return null;
+  try {
+    return /\*\*AC:\*\*[\s\S]*?-\s+\[[ xX]\]\s+/.test(readFileSync(spec, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function storyRequiresScreenshot(worktreeCwd: string, storyId: string): boolean {
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return false;
+  try {
+    return /\b(CLI|web|UI|TUI)\b|界面|交互|截屏|截图|screenshot/i.test(readFileSync(spec, "utf8"));
+  } catch {
+    return false;
+  }
 }
 
 /** The acceptance report a delivered story must produce (skill step 10.6) —
@@ -104,22 +138,36 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
   if (p === null) return false;
   try {
     const html = readFileSync(p, "utf8");
-    const hasAc = /<section class="ac[\s">]/.test(html);
     const hasMap = acMapCandidates(worktreeCwd, storyId).some((m) => existsSync(m));
-    return hasAc && hasMap;
+    if (!hasMap) return false;
+    const sections = [...html.matchAll(/<section class="ac\s+([^"]+)"[\s\S]*?<\/section>/g)];
+    if (sections.length === 0) return false;
+    let positiveWithEvidence = 0;
+    for (const m of sections) {
+      const cls = m[1] ?? "";
+      const body = m[0] ?? "";
+      if (!/\bs-(pass|partial|readonly)\b/.test(cls)) continue;
+      if (!/(class="ev\b|class="shot\b|<figure class="shot\b)/.test(body)) return false;
+      positiveWithEvidence += 1;
+    }
+    if (positiveWithEvidence === 0) return false;
+    if (storyRequiresScreenshot(worktreeCwd, storyId)) {
+      return /<figure class="shot\b|href="screenshots\/|src="screenshots\/|taken":false|skipped|honest-skip/i.test(html);
+    }
+    return true;
   } catch {
     return false;
   }
 }
 
-/** Read `loop_safety.attest_gate` from `<repoCwd>/.roll/policy.yaml`; default soft. */
+/** Read `loop_safety.attest_gate` from `<repoCwd>/.roll/policy.yaml`; default hard. */
 export function readAttestGateMode(repoCwd: string): AttestMode {
   try {
     const p = join(repoCwd, ".roll", "policy.yaml");
-    if (!existsSync(p)) return "soft";
+    if (!existsSync(p)) return "hard";
     return parsePolicy(readFileSync(p, "utf8")).loopSafety.attestGate === "hard" ? "hard" : "soft";
   } catch {
-    return "soft"; // unreadable / unparseable policy → never escalate
+    return "hard"; // unreadable / unparseable policy → fail closed
   }
 }
 
@@ -153,6 +201,11 @@ export function runAttestGate(
   sinks: AttestGateSinks,
 ): AttestGateResult {
   try {
+    if (storyHasAcBlock(worktreeCwd, storyId) === false) {
+      const reasons = ["story has no AC block; acceptance report not required"];
+      sinks.event({ cycleId, verdict: "produced", reasons });
+      return { verdict: "produced", mode, reasons, blocked: false };
+    }
     const fresh = verificationReportFresh(worktreeCwd, storyId, sinceSec);
     // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /
     // no ac-map, the FIX-214 case) does NOT count as a produced report.

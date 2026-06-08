@@ -70,6 +70,25 @@ const BACKLOG = [
   "",
 ].join("\n");
 
+function seedFeatureCard(root: string, storyId: string, title: string = "Runner adapter smoke story"): void {
+  const storyDir = join(root, ".roll", "features", "uncategorized", storyId);
+  mkdirSync(storyDir, { recursive: true });
+  writeFileSync(
+    join(storyDir, "spec.md"),
+    [`# ${storyId} — ${title}`, "", "**AC:**", "- [ ] cycle delivers with evidence", ""].join("\n"),
+  );
+  writeFileSync(
+    join(storyDir, "ac-map.json"),
+    JSON.stringify([
+      {
+        ac: `${storyId}:AC1`,
+        status: "pass",
+        evidence: [{ kind: "test-pass", label: `${storyId} green path` }],
+      },
+    ]),
+  );
+}
+
 /**
  * Build a fixture: a bare remote with `main` (carrying .roll/backlog.md) + a
  * working clone whose `origin` is the bare remote (file://). Returns both paths.
@@ -83,6 +102,7 @@ function makeFixture(tag: string): { repo: string; remote: string } {
   git(seed, ["clone", "-q", remote, "."]);
   mkdirSync(join(seed, ".roll"), { recursive: true });
   writeFileSync(join(seed, ".roll", "backlog.md"), BACKLOG, "utf8");
+  seedFeatureCard(seed, "US-RUN-001");
   git(seed, [...GIT_ID, "add", "-A"]);
   git(seed, [...GIT_ID, "commit", "-q", "-m", "seed backlog"]);
   git(seed, ["push", "-q", "origin", "main"]);
@@ -427,6 +447,7 @@ function makeGitignoredFixture(tag: string): { repo: string } {
   // .roll exists ONLY in the main checkout — exactly the SoloGo layout.
   mkdirSync(join(repo, ".roll"), { recursive: true });
   writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
+  seedFeatureCard(repo, "US-RUN-001");
   return { repo };
 }
 
@@ -460,6 +481,7 @@ function makePartialFossilFixture(tag: string): { repo: string } {
   // alongside the checked-out fossil. The worktree will materialize the fossil
   // but never this backlog.
   writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
+  seedFeatureCard(repo, "US-RUN-001");
   return { repo };
 }
 
@@ -642,6 +664,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const rt = tmp("fix211-async-merged-rt");
     const backlogPath = join(repo, ".roll", "backlog.md");
     writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    seedFeatureCard(repo, "US-PRIOR", "a delivered-and-since-merged story");
     const cycleId = "20260606-052000-5201";
     const p = paths(rt, cycleId);
     seedPriorRun(p.runsPath, "US-PRIOR", "c-prior");
@@ -673,6 +696,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const rt = tmp("fix211-async-open-rt");
     const backlogPath = join(repo, ".roll", "backlog.md");
     writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    seedFeatureCard(repo, "US-PRIOR", "a delivered-and-since-merged story");
     const cycleId = "20260606-052000-5202";
     const p = paths(rt, cycleId);
     seedPriorRun(p.runsPath, "US-PRIOR", "c-prior");
@@ -699,6 +723,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const rt = tmp("fix211-deadclaim-rt");
     const backlogPath = join(repo, ".roll", "backlog.md");
     writeFileSync(backlogPath, PRIOR_BACKLOG, "utf8");
+    seedFeatureCard(repo, "US-PRIOR", "a delivered-and-since-merged story");
     const cycleId = "20260606-052000-5203";
     const p = paths(rt, cycleId);
     // No runs.jsonl seeded → US-PRIOR has no delivering cycle → dead claim.

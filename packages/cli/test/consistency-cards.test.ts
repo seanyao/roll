@@ -2,7 +2,7 @@
  * US-CONSIST-006 — cards dimension: the card-folder contract, reverse-derived
  * from the features/ layout (2026-06-08 audit). Live rows must own a card
  * folder; evidence links must not dangle; pre-card-era Done rows are counted,
- * never failed.
+ * never failed; card-era Done rows with ACs need an attest report.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
@@ -16,15 +16,15 @@ afterAll(() => {
   for (const d of dirs) execFileSync("rm", ["-rf", d]);
 });
 
-function project(backlogRows: string[], cards: Array<[string, string, boolean]> = []): string {
+function project(backlogRows: string[], cards: Array<[string, string, boolean, boolean?]> = []): string {
   const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-cards-")));
   dirs.push(p);
   mkdirSync(join(p, ".roll", "features"), { recursive: true });
   writeFileSync(join(p, ".roll", "backlog.md"), ["| ID | D | S |", "|---|---|---|", ...backlogRows, ""].join("\n"));
-  for (const [epic, id, withReport] of cards) {
+  for (const [epic, id, withReport, withAc = true] of cards) {
     const dir = join(p, ".roll", "features", epic, id);
     mkdirSync(join(dir, "latest"), { recursive: true });
-    writeFileSync(join(dir, "spec.md"), `# ${id}\n`);
+    writeFileSync(join(dir, "spec.md"), withAc ? `# ${id}\n\n**AC:**\n- [ ] must be verified\n` : `# ${id}\n`);
     if (withReport) writeFileSync(join(dir, "latest", `${id}-report.html`), "<html></html>");
   }
   return p;
@@ -78,10 +78,18 @@ describe("consistency cards dimension", () => {
     expect(r.dimensions["cards"]?.note).toContain("1 pre-card-era Done rows");
   });
 
-  it("Done with folder but no report: informational note, still pass", () => {
+  it("Done with folder + ACs but no report: fail", () => {
     const p = project(["| FIX-9 | z | ✅ Done |"], [["e", "FIX-9", false]]);
     const r = runJson(p);
+    expect(r.dimensions["cards"]?.status).toBe("fail");
+    expect(r.dimensions["cards"]?.gaps[0]).toContain("has ACs but no attest report");
+    expect(r.overall).toBe("fail");
+  });
+
+  it("Done with folder but no AC block: report requirement is exempt", () => {
+    const p = project(["| FIX-10 | z | ✅ Done |"], [["e", "FIX-10", false, false]]);
+    const r = runJson(p);
     expect(r.dimensions["cards"]?.status).toBe("pass");
-    expect(r.dimensions["cards"]?.note).toContain("without an attest report");
+    expect(r.dimensions["cards"]?.note).toContain("without AC blocks exempt");
   });
 });

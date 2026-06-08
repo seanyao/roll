@@ -664,9 +664,10 @@ export async function executeCommand(
       }
       // FIX-207 attest gate: a delivery (commits ahead + a real story) that ships
       // with no FRESH acceptance report leaves an auditable ALERT + `attest:gate`
-      // event. SOFT by default (record only); `loop_safety.attest_gate: hard` in
-      // policy.yaml escalates — a hard-blocked delivery is captured as a failed
-      // agent exit so the story is NOT marked Done without acceptance evidence.
+      // event. HARD by default; `loop_safety.attest_gate: soft` in policy.yaml
+      // records without blocking for explicit migration windows. A hard-blocked
+      // delivery is captured as a failed agent exit so the story is NOT marked
+      // Done without acceptance evidence.
       // Scoped to actual deliveries: an idle cycle has nothing to attest.
       let attestBlocked = false;
       if (commitsAhead > 0 && storyId !== "") {

@@ -542,8 +542,12 @@ describe("executeCommand — command → executor mapping", () => {
   // FIX-207 — attest gate is wired into capture_facts (delivery without a fresh
   // acceptance report). Soft (default) records an event + alert but never blocks;
   // hard (policy.yaml) captures a failed exit so the story is not marked Done.
-  it("capture_facts soft attest gate: missing report → attest:gate event + alert, NOT blocked", async () => {
-    const { ports, calls } = fakePorts(); // repoCwd /repo has no policy → soft
+  it("capture_facts policy-soft attest gate: missing report → attest:gate event + alert, NOT blocked", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-207-soft-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n");
+    const { ports, calls } = fakePorts({ repoCwd: repo, paths: { ...fakePorts().ports.paths, worktreePath: join(repo, "wt") } });
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
@@ -551,12 +555,8 @@ describe("executeCommand — command → executor mapping", () => {
     expect((calls["alert"] ?? []).length).toBeGreaterThan(0);
   });
 
-  it("capture_facts hard attest gate: missing report → captured as failed (agentExit 1)", async () => {
-    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-207-exec-")));
-    execDirs.push(repo);
-    mkdirSync(join(repo, ".roll"), { recursive: true });
-    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: hard\n");
-    const { ports } = fakePorts({ repoCwd: repo, paths: { ...fakePorts().ports.paths, worktreePath: join(repo, "wt") } });
+  it("capture_facts default-hard attest gate: missing report → captured as failed (agentExit 1)", async () => {
+    const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
   });

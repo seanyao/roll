@@ -12,6 +12,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -116,6 +117,27 @@ describe("attestCommand", () => {
     expect(existsSync(join(runDir, "evidence.json"))).toBe(true);
     expect(existsSync(join(runDir, "FIX-300-report.html"))).toBe(true);
     expect(readlinkSync(join(storyDir, "latest"))).toBe("cycle-20260608-001");
+  });
+
+  it("US-EVID-005: --run-dir from a main-checkout .roll stays resolvable through a worktree .roll symlink", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const runDir = join(storyDir, "cycle-symlink");
+    const worktree = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-wt-")));
+    dirs.push(worktree);
+    symlinkSync(join(proj, ".roll"), join(worktree, ".roll"));
+
+    const code = await silenced(() =>
+      inDir(worktree, () =>
+        attestCommand(["FIX-300", "--run-dir", runDir], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }),
+      ),
+    );
+
+    expect(code).toBe(0);
+    const latest = join(storyDir, "latest");
+    expect(lstatSync(latest).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(latest)).toBe("cycle-symlink");
+    expect(existsSync(join(latest, "FIX-300-report.html"))).toBe(true);
   });
 
   it("US-EVID-001: ROLL_RUN_DIR is the backward-compatible frame handoff for loop agents", async () => {

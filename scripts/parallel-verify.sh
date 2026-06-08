@@ -175,6 +175,26 @@ fabricate_sandbox() {
 |----|-------------|--------|
 | ${STORY_ID} | 在 ${MARKER_FILE} 末尾追加一行 "parallel-verify marker" est_min:5 | 📋 Todo |
 EOF
+  # v3's default-hard attest gate requires a real card + AC evidence. v2 ignores
+  # this archive data, so the oracle leg remains unchanged while the TS leg can
+  # render a dense acceptance report after the shim commit.
+  local story_dir="$seed/.roll/features/uncategorized/${STORY_ID}"
+  mkdir -p "$story_dir"
+  cat > "$story_dir/spec.md" <<EOF
+# ${STORY_ID} — parallel verify smoke story
+
+**AC:**
+- [ ] shim delivery appends a marker through TCR
+EOF
+  cat > "$story_dir/ac-map.json" <<EOF
+[
+  {
+    "ac": "${STORY_ID}:AC1",
+    "status": "pass",
+    "evidence": [{ "kind": "test-pass", "label": "parallel verify shim commit" }]
+  }
+]
+EOF
   # Pin the agent so routing is deterministic (no auto-downgrade).
   printf 'agent: claude\n' > "$seed/.roll/local.yaml"
   git -C "$seed" "${GIT_ID[@]}" add -A

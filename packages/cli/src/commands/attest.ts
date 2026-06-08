@@ -56,6 +56,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -262,6 +263,14 @@ function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): 
     return e.href !== undefined ? { kind, label, href: e.href } : { kind, label };
   }
   return null;
+}
+
+function relativeFromPhysical(fromDir: string, toPath: string): string {
+  try {
+    return relative(realpathSync(fromDir), realpathSync(toPath));
+  } catch {
+    return relative(fromDir, toPath);
+  }
 }
 
 /**
@@ -649,7 +658,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const latest = join(storyDir, "latest");
   try {
     rmSync(latest, { force: true });
-    symlinkSync(relative(storyDir, runDir), latest);
+    symlinkSync(relativeFromPhysical(storyDir, runDir), latest);
   } catch {
     warn("latest symlink update failed (report still written)");
   }
@@ -658,8 +667,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const indexPath = join(storyDir, "index.html");
   if (existsSync(indexPath)) {
     try {
-      const reportRel = join(relative(storyDir, runDir), reportFileName(storyId));
-      const runRel = relative(storyDir, runDir).replace(/\\/g, "/");
+      const runRel = relativeFromPhysical(storyDir, runDir).replace(/\\/g, "/");
+      const reportRel = join(runRel, reportFileName(storyId)).replace(/\\/g, "/");
       const deliveryHtml =
         `<p><a href="${reportRel}">${bi("Attestation report", "验收报告")}</a></p>\n` +
         dossierVisualsHtml(runRel, beforeAfter, afterOnly) +

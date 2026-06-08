@@ -3,8 +3,8 @@
  *
  * Runtime mechanism (executor capture step), not skill text: agent-agnostic,
  * fires on every actual delivery. A delivery with no fresh acceptance report
- * leaves an auditable ALERT + `attest:gate` event. Soft by default (record,
- * never block); `loop_safety.attest_gate: hard` blocks the delivery.
+ * leaves an auditable ALERT + `attest:gate` event. Hard by default; policy can
+ * explicitly downgrade to soft for migration windows.
  */
 import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
@@ -36,14 +36,14 @@ function tmp(tag: string): string {
  * worktree root. A real delivery has both — the empty-shell case is exercised
  * separately by {@link withEmptyShell}.
  */
-function withReport(storyId: string, mtimeSec?: number): string {
+function withReport(storyId: string, mtimeSec?: number, body = '<div class="ev ev-text">proof</div>'): string {
   const wt = tmp("wt");
   const storyDir = join(wt, ".roll", "features", "uncategorized", storyId);
   const dir = join(storyDir, "latest");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(storyDir, "ac-map.json"), "[]\n");
   const p = join(dir, `${storyId}-report.html`);
-  writeFileSync(p, `<html><body><section class="ac s-pass" id="${storyId}:AC1">x</section></body></html>\n`);
+  writeFileSync(p, `<html><body><section class="ac s-pass" id="${storyId}:AC1">${body}</section></body></html>\n`);
   if (mtimeSec !== undefined) utimesSync(p, mtimeSec, mtimeSec);
   return wt;
 }
@@ -89,7 +89,7 @@ describe("verificationReportFresh", () => {
 });
 
 describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
-  it("report with ≥1 AC section + ac-map → has content", () => {
+  it("report with ≥1 positive AC section + ac-map + evidence ref → has content", () => {
     const wt = withReport("FIX-320", 2000);
     expect(verificationReportHasContent(wt, "FIX-320")).toBe(true);
   });
@@ -102,15 +102,34 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
   it("absent report → no content", () => {
     expect(verificationReportHasContent(tmp("none"), "FIX-322")).toBe(false);
   });
+
+  it("pure claimed / zero evidence report → NO content", () => {
+    const wt = withReport("FIX-323", 2000, "statement only");
+    expect(verificationReportHasContent(wt, "FIX-323")).toBe(false);
+  });
+
+  it("interactive story requires screenshot evidence or honest-skip text", () => {
+    const noShot = withReport("FIX-CLI", 2000);
+    writeFileSync(join(noShot, ".roll", "features", "uncategorized", "FIX-CLI", "spec.md"), "**AC:**\n- [ ] CLI shows output\n");
+    expect(verificationReportHasContent(noShot, "FIX-CLI")).toBe(false);
+
+    const withShot = withReport("FIX-WEB", 2000, '<figure class="shot"><img src="screenshots/home.png"></figure>');
+    writeFileSync(join(withShot, ".roll", "features", "uncategorized", "FIX-WEB", "spec.md"), "**AC:**\n- [ ] web screen renders\n");
+    expect(verificationReportHasContent(withShot, "FIX-WEB")).toBe(true);
+
+    const withSkip = withReport("FIX-TUI", 2000, '<div class="ev ev-text">{"taken":false,"skipped":"no GUI session"}</div>');
+    writeFileSync(join(withSkip, ".roll", "features", "uncategorized", "FIX-TUI", "spec.md"), "**AC:**\n- [ ] TUI can be inspected\n");
+    expect(verificationReportHasContent(withSkip, "FIX-TUI")).toBe(true);
+  });
 });
 
 describe("readAttestGateMode", () => {
-  it("no policy → soft; attest_gate: hard → hard", () => {
-    expect(readAttestGateMode(tmp("nopol"))).toBe("soft");
+  it("no policy → hard; attest_gate: soft → soft", () => {
+    expect(readAttestGateMode(tmp("nopol"))).toBe("hard");
     const repo = tmp("repo");
     mkdirSync(join(repo, ".roll"), { recursive: true });
-    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: hard\n");
-    expect(readAttestGateMode(repo)).toBe("hard");
+    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n");
+    expect(readAttestGateMode(repo)).toBe("soft");
   });
 });
 
@@ -123,6 +142,19 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.blocked).toBe(false);
     expect(alerts).toHaveLength(0);
     expect(events).toEqual([{ cycleId: "c-1", verdict: "produced", reasons: r.reasons }]);
+  });
+
+  it("no AC block → exempt, even in hard mode", () => {
+    const wt = tmp("no-ac");
+    const storyDir = join(wt, ".roll", "features", "uncategorized", "FIX-NOAC");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(join(storyDir, "spec.md"), "# FIX-NOAC\n\nNo acceptance criteria for this chore.\n");
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-NOAC", "c-noac", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.reasons[0]).toContain("no AC block");
   });
 
   it("skipped (soft): missing report → ALERT + event, NOT blocked", () => {
@@ -153,6 +185,16 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.verdict).toBe("skipped");
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatch(/empty|content|shell/i);
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("US-EVID-005: a fresh all-claimed report is skipped and hard-blocked", () => {
+    const wt = withReport("FIX-315", 2000, "claimed only");
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-315", "c-6", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(alerts[0]).toContain("BLOCKED");
     expect(events[0]?.verdict).toBe("skipped");
   });
 

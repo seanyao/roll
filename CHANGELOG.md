@@ -37,10 +37,9 @@
 - 代码阶段交付后由一个不同代理单向互检改动，结论留证据与事件，硬超时不阻塞且记成本（US-PAIR-003）
 - 跨代理结对的中英双轨文档刷新收尾（US-PAIR-007）
 - roll init 顺带生成 pairing 配置并在界面告知，新用户少一步且仍显式（US-PAIR-008）
-- release: v3.608.2（PR#544）
-- pairing docs + site refresh for roll init scaffolding（PR#543）
+- site: roll-build explainer page (site-aligned, bilingual) + homepage CTA（PR#546）
+- site: track site/diagrams/ + roll-build skill infographic（PR#545）
 - Design doc link opens rendered spec.html (not raw markdown)（US-DOSSIER-004）
-
 
 ## v3.608.2 — 2026-06-08
 

@@ -35,8 +35,8 @@
  *     by a TS-only test, while the `--where` unknown TOKEN stays difftested.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 // ─── bash UI helpers (bin/roll:41-56) ────────────────────────────────────────
 function pal(): { CYAN: string; GREEN: string; YELLOW: string; RED: string; NC: string } {
@@ -56,6 +56,92 @@ function err(line: string): void {
 }
 
 const SUPPORTED_TYPES = ["none"] as const;
+
+interface EvidenceFrameEnv {
+  runDir: string;
+  evidenceDir: string;
+  screenshotsDir: string;
+}
+
+function currentEvidenceFrame(): EvidenceFrameEnv | null {
+  const raw = (process.env["ROLL_RUN_DIR"] ?? "").trim();
+  if (raw === "") return null;
+  const runDir = resolve(raw);
+  if (!existsSync(runDir)) return null;
+  const frame = {
+    runDir,
+    evidenceDir: join(runDir, "evidence"),
+    screenshotsDir: join(runDir, "screenshots"),
+  };
+  try {
+    mkdirSync(frame.evidenceDir, { recursive: true });
+    mkdirSync(frame.screenshotsDir, { recursive: true });
+  } catch {
+    return null;
+  }
+  return frame;
+}
+
+function childEnvForEvidence(frame: EvidenceFrameEnv | null): NodeJS.ProcessEnv | undefined {
+  const hasEvidenceInput =
+    process.env["ROLL_RUN_DIR"] !== undefined ||
+    process.env["ROLL_EVIDENCE_DIR"] !== undefined ||
+    process.env["ROLL_SCREENSHOTS_DIR"] !== undefined;
+  if (frame === null) {
+    if (!hasEvidenceInput) return undefined;
+    const env = { ...process.env };
+    delete env["ROLL_RUN_DIR"];
+    delete env["ROLL_EVIDENCE_DIR"];
+    delete env["ROLL_SCREENSHOTS_DIR"];
+    return env;
+  }
+  return {
+    ...process.env,
+    ROLL_RUN_DIR: frame.runDir,
+    ROLL_EVIDENCE_DIR: frame.evidenceDir,
+    ROLL_SCREENSHOTS_DIR: frame.screenshotsDir,
+  };
+}
+
+function appendRollTestEvidence(
+  frame: EvidenceFrameEnv,
+  cmd: string,
+  argv: readonly string[],
+  status: number,
+  stdout: string,
+  stderr: string,
+): void {
+  try {
+    const ts = new Date().toISOString();
+    const command = [cmd, ...argv];
+    appendFileSync(
+      join(frame.evidenceDir, "roll-test-output.log"),
+      [
+        `===== roll test ${ts} exit=${status} =====`,
+        `$ ${command.join(" ")}`,
+        "--- stdout ---",
+        stdout,
+        "--- stderr ---",
+        stderr,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    appendFileSync(
+      join(frame.evidenceDir, "roll-test-summary.txt"),
+      JSON.stringify({
+        ts,
+        command,
+        exitCode: status,
+        stdoutBytes: Buffer.byteLength(stdout),
+        stderrBytes: Buffer.byteLength(stderr),
+      }) + "\n",
+      "utf8",
+    );
+  } catch {
+    /* evidence deposit is best-effort; roll test result remains authoritative */
+  }
+}
 
 // ─── _isolation_get_type (6552) ──────────────────────────────────────────────
 /**
@@ -149,10 +235,15 @@ function resetReleaseLock(): void {
  * env-swap difftest harness captures it byte-identically (mirrors update.ts).
  */
 function runForward(cmd: string, argv: string[]): number {
-  const r = spawnSync(cmd, argv, { encoding: "utf8" });
-  if (typeof r.stdout === "string" && r.stdout !== "") process.stdout.write(r.stdout);
-  if (typeof r.stderr === "string" && r.stderr !== "") process.stderr.write(r.stderr);
-  return r.status ?? 1;
+  const frame = currentEvidenceFrame();
+  const r = spawnSync(cmd, argv, { encoding: "utf8", env: childEnvForEvidence(frame) });
+  const stdout = typeof r.stdout === "string" ? r.stdout : "";
+  const stderr = typeof r.stderr === "string" ? r.stderr : "";
+  const status = r.status ?? 1;
+  if (stdout !== "") process.stdout.write(stdout);
+  if (stderr !== "") process.stderr.write(stderr);
+  if (frame !== null) appendRollTestEvidence(frame, cmd, argv, status, stdout, stderr);
+  return status;
 }
 
 // ─── _isolation_dispatch exec / reset (6582) ─────────────────────────────────

@@ -237,6 +237,8 @@ export interface PrFacts {
   bot: BotReviewState;
   ciState: CiRollupState;
   mergeable: MergeStateStatus;
+  /** US-EVID-016: safety-created repair PRs must stay open for human merge. */
+  manualMerge?: boolean;
 }
 
 /**
@@ -254,6 +256,7 @@ export interface PrFacts {
 export function selectPrAction(f: PrFacts): PrAction {
   const bot = botReviewAction(f.bot);
   if (bot.kind === "merge_if_clean") {
+    if (f.manualMerge === true) return { kind: "skip", reason: "manual_merge_required" };
     return eagerMergeEligible(f.ciState, f.mergeable)
       ? { kind: "merge", reason: "bot_approved" }
       : { kind: "skip", reason: "bot_approved_not_clean" };
@@ -264,6 +267,7 @@ export function selectPrAction(f: PrFacts): PrAction {
   const verdict = classifyPr(f.ciState, f.mergeable);
   if (verdict === "ci_red") return { kind: "heal" };
   if (verdict === "stale") return { kind: "rebase" };
+  if (f.manualMerge === true) return { kind: "skip", reason: "manual_merge_required" };
   return eagerMergeEligible(f.ciState, f.mergeable)
     ? { kind: "merge", reason: "eager_ready" }
     : { kind: "skip", reason: "ready_not_mergeable" };
@@ -274,7 +278,8 @@ export function selectPrAction(f: PrFacts): PrAction {
  * `--json mergeStateStatus,statusCheckRollup` and eager-merges iff now clean
  * (bin/roll 12030-12043). Pure: given the re-checked facts, decide merge-or-skip.
  */
-export function rebaseRecheckAction(ciState: CiRollupState, mergeable: MergeStateStatus): PrAction {
+export function rebaseRecheckAction(ciState: CiRollupState, mergeable: MergeStateStatus, manualMerge = false): PrAction {
+  if (manualMerge) return { kind: "skip", reason: "manual_merge_required" };
   return eagerMergeEligible(ciState, mergeable)
     ? { kind: "merge", reason: "eager_after_rebase" }
     : { kind: "skip", reason: "still_not_mergeable_after_rebase" };

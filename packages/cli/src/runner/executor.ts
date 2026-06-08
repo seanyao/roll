@@ -711,9 +711,10 @@ export async function executeCommand(
         const pub: PublishResult = { status: 2, mergedBack: false, orphanPushed: false };
         return { event: { type: "published", result: pub } };
       }
+      const manualMerge = storyRequiresManualMerge(ports.repoCwd, ctx.storyId);
       const plan = cmd.docOnly
-        ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx) })
-        : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx) });
+        ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge })
+        : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge });
       const r = await ports.github.runPublishPlan(plan);
       const pub: PublishResult = { status: r.status };
       return { event: { type: "published", result: pub } };
@@ -905,6 +906,24 @@ function readRunsRows(runsPath: string): ReconcileRunRow[] {
 /** Compose the gh pr-create body (commit-count-style; kept simple + pure). */
 function publishBody(ctx: CycleContext): string {
   return `loop cycle ${ctx.cycleId}${ctx.storyId !== undefined ? ` — ${ctx.storyId}` : ""}`;
+}
+
+function storyRequiresManualMerge(repoCwd: string, storyId: string | undefined): boolean {
+  if (storyId === undefined || storyId.trim() === "") return false;
+  const needles = ["manual_merge", "manual-merge", "[roll:manual-merge]", "autofix"];
+  const containsMarker = (text: string): boolean => needles.some((n) => text.includes(n));
+  try {
+    const backlog = readFileSync(join(repoCwd, ".roll", "backlog.md"), "utf8");
+    const row = backlog.split("\n").find((line) => line.includes(storyId));
+    if (row !== undefined && containsMarker(row)) return true;
+  } catch {
+    /* absent backlog */
+  }
+  try {
+    return containsMarker(readFileSync(join(cardArchiveDir(repoCwd, storyId), "spec.md"), "utf8"));
+  } catch {
+    return false;
+  }
 }
 
 /** Parse an `est_min:<n>` tag from a backlog desc (router input). */

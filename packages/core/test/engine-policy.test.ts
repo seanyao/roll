@@ -50,6 +50,9 @@ loop_safety:
   action_on_breach: pause_and_notify
   max_story_failures: 3
   action_on_story_breach: hold
+  correction_oscillation_threshold: 3
+  correction_signal_threshold: 4
+  correction_signal_window_sec: 21600
   budget:
     daily_usd: 20
     weekly_usd: 100
@@ -85,6 +88,9 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
     expect(policy.loopSafety.actionOnBreach).toBe("pause_and_notify");
     expect(policy.loopSafety.maxStoryFailures).toBe(3);
     expect(policy.loopSafety.actionOnStoryBreach).toBe("hold");
+    expect(policy.loopSafety.correctionOscillationThreshold).toBe(3);
+    expect(policy.loopSafety.correctionSignalThreshold).toBe(4);
+    expect(policy.loopSafety.correctionSignalWindowSec).toBe(21600);
     expect(policy.loopSafety.budget).toMatchObject({
       dailyUsd: 20,
       weeklyUsd: 100,
@@ -103,6 +109,9 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
       actionOnBreach: "pause_and_notify",
       maxStoryFailures: 3,
       actionOnStoryBreach: "hold",
+      correctionOscillationThreshold: 3,
+      correctionSignalThreshold: 3,
+      correctionSignalWindowSec: 43200,
     });
   });
 

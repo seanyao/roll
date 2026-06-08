@@ -94,6 +94,13 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).toContain(DOSSIER_FILTER_SCRIPT);
   });
 
+  it("US-EVID-016: links the fixed morning report when present", () => {
+    const withReport = renderFeaturesIndex(collectDossier(project()), { morningReportHref: "../reports/morning/latest.html" });
+    expect(withReport).toContain("Morning report");
+    expect(withReport).toContain("夜间运行晨报");
+    expect(withReport).toContain('href="../reports/morning/latest.html"');
+  });
+
   it("epic groups: shipping first, backlog after; cards carry bar + chips", () => {
     expect(html.indexOf("Shipping to main")).toBeLessThan(html.indexOf("In backlog"));
     expect(html).toContain('href="alpha/index.html"');

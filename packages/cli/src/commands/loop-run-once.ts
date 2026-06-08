@@ -12,14 +12,16 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, readSlotFromText, type AgentSlot, type RouteDeps } from "@roll/core";
+import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, parsePolicy, readSlotFromText, type AgentSlot, type RouteDeps } from "@roll/core";
 import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
+import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
+import { writeLatestMorningReport } from "../lib/morning-report.js";
 import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 
@@ -181,6 +183,7 @@ function incrementConsecutiveFails(
   projectPath: string,
   slug: string,
   alertsPath: string,
+  eventsPath: string,
   cycleId: string,
   storyId: string,
   terminal: string,
@@ -198,9 +201,11 @@ function incrementConsecutiveFails(
     writeFileSync(counterFile, String(count), "utf8");
   } catch { /* best-effort */ }
 
-  if (count < PAUSE_THRESHOLD) return;
+  const threshold = readFailurePauseThreshold(projectPath);
+  if (count < threshold) return;
 
   const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+  if (existsSync(pauseMarker)) return;
   const alertMsg =
     `# ALERT — loop auto-paused after ${count} consecutive failures\n\n` +
     `**Cycle**: ${cycleId}\n` +
@@ -211,11 +216,35 @@ function incrementConsecutiveFails(
   try {
     writeFileSync(pauseMarker, alertMsg, "utf8");
     appendFileSync(alertsPath, `${alertMsg}\n`, "utf8");
+    const ts = Math.floor(Date.now() / 1000);
+    const bus = new EventBus();
+    bus.appendEvent(eventsPath, {
+      type: "policy:safety_pause",
+      loop: "ci",
+      reason: `consecutive failures ${count} >= ${threshold}`,
+      ts,
+    });
+    bus.appendEvent(eventsPath, {
+      type: "alert:notify",
+      channel: "loop-safety",
+      message: `loop auto-paused after ${count} consecutive failures`,
+      ts,
+    });
   } catch { /* best-effort */ }
   process.stderr.write(
     `loop run-once: auto-PAUSED after ${count} consecutive failures — PAUSE marker written\n` +
       `loop run-once: 连续 ${count} 次失败后自动暂停 — 已写 PAUSE 标记\n`,
   );
+}
+
+function readFailurePauseThreshold(projectPath: string): number {
+  try {
+    const policy = join(projectPath, ".roll", "policy.yaml");
+    if (!existsSync(policy)) return PAUSE_THRESHOLD;
+    return parsePolicy(readFileSync(policy, "utf8")).loopSafety.maxConsecutiveFailures;
+  } catch {
+    return PAUSE_THRESHOLD;
+  }
 }
 
 /** Reset the consecutive-failure counter (called on a successful delivery). */
@@ -352,7 +381,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
         `loop run-once: 找不到 roll-loop SKILL.md — 拒绝盲开 agent(已写 ALERT)\n`,
     );
     // FIX-216b: SKILL-not-found is also a persistent failure — count it.
-    incrementConsecutiveFails(id.path, id.slug, alertsPath, cycleId, "", "skill_missing");
+    incrementConsecutiveFails(id.path, id.slug, alertsPath, join(rt, "events.ndjson"), cycleId, "", "skill_missing");
     return 1;
   }
 
@@ -419,7 +448,20 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       return 0;
     }
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
-    incrementConsecutiveFails(id.path, id.slug, alertsPath, cycleId, storyId, result.terminal ?? "unknown");
+    incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
+  }
+
+  const breaker = applyCorrectionCircuitBreaker(id.path, id.slug, paths.eventsPath, alertsPath);
+  if (breaker.status === "paused") {
+    process.stderr.write(
+      `loop run-once: correction circuit breaker paused the loop — ${breaker.verdict.reason}\n` +
+        `loop run-once: 纠正熔断已暂停 loop — ${breaker.verdict.reason}\n`,
+    );
+  }
+  try {
+    writeLatestMorningReport(id.path, paths.eventsPath, paths.runsPath);
+  } catch {
+    /* morning report must never mask the cycle terminal result */
   }
 
   return isFail ? 1 : 0;

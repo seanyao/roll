@@ -71,6 +71,13 @@ describe("planPublishPr / planPublishDocPr", () => {
     expect(create?.argv).toContain("my title");
   });
 
+  it("manualMerge opens the PR but does not arm auto-merge", () => {
+    const steps = planPublishPr({ ...input, manualMerge: true });
+    expect(steps.map((s) => s.kind)).toEqual(["git-push", "gh-pr-view", "gh-pr-create"]);
+    const create = steps.find((s) => s.kind === "gh-pr-create");
+    expect(create?.argv).toContain("B\n\n[roll:manual-merge]");
+  });
+
   it("doc plan swaps the merge tail to --admin and titles `doc update`", () => {
     const steps = planPublishDocPr(input);
     expect(steps.map((s) => s.kind)).toEqual([
@@ -91,6 +98,14 @@ describe("planPublishPr / planPublishDocPr", () => {
     ]);
     const create = steps.find((s) => s.kind === "gh-pr-create");
     expect(create?.argv).toContain("doc update cycle-x");
+  });
+
+  it("manualMerge doc plan also leaves the PR open for a human", () => {
+    expect(planPublishDocPr({ ...input, manualMerge: true }).map((s) => s.kind)).toEqual([
+      "git-push",
+      "gh-pr-view",
+      "gh-pr-create",
+    ]);
   });
 });
 

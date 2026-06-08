@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { collectDossier, generateIndex } from "../lib/archive.js";
 import { renderFeaturesIndex } from "../lib/dossier-index.js";
+import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
 import { collectStoryDossierInput, renderStoryDossier } from "../lib/story-dossier.js";
 import { renderMarkdown } from "./slides/render.js";
@@ -57,7 +58,7 @@ export function indexCommand(args: string[]): number {
     const epics = collectDossier(cwd);
     let pages = 0;
     try {
-      writeFileSync(join(featuresDir, "index.html"), renderFeaturesIndex(epics), "utf8");
+      writeFileSync(join(featuresDir, "index.html"), renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd) }), "utf8");
       pages += 1;
     } catch {
       /* best-effort */

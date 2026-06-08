@@ -106,6 +106,8 @@ export interface PublishPlanInput {
   /** Body text for `gh pr create` (the oracle composes this with the commit
    *  count; the caller supplies the finished body so core stays string-pure). */
   body: string;
+  /** US-EVID-016: auto-created repair work may open a PR, but never arm merge. */
+  manualMerge?: boolean;
 }
 
 /**
@@ -121,7 +123,10 @@ export interface PublishPlanInput {
  */
 export function planPublishPr(input: PublishPlanInput): PublishStep[] {
   const title = input.title ?? `loop cycle ${branchTitleSuffix(input.branch)}`;
-  return [
+  const body = input.manualMerge === true && !input.body.includes("[roll:manual-merge]")
+    ? `${input.body}\n\n[roll:manual-merge]`
+    : input.body;
+  const steps: PublishStep[] = [
     { tool: "git", kind: "git-push", argv: ["push", "origin", input.branch] },
     {
       tool: "gh",
@@ -143,9 +148,13 @@ export function planPublishPr(input: PublishPlanInput): PublishStep[] {
         "--title",
         title,
         "--body",
-        input.body,
+        body,
       ],
     },
+  ];
+  if (input.manualMerge === true) return steps;
+  return [
+    ...steps,
     {
       tool: "gh",
       kind: "gh-pr-merge-auto",
@@ -163,6 +172,7 @@ export function planPublishPr(input: PublishPlanInput): PublishStep[] {
 export function planPublishDocPr(input: PublishPlanInput): PublishStep[] {
   const title = input.title ?? `doc update ${branchTitleSuffix(input.branch)}`;
   const steps = planPublishPr({ ...input, title });
+  if (input.manualMerge === true) return steps;
   // Replace the auto-merge tail with the admin merge.
   steps[steps.length - 1] = {
     tool: "gh",

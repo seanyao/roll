@@ -377,6 +377,41 @@ describe("FIX-216 — auto-PAUSE on consecutive failures", () => {
     const body = rf(pauseMarker, "utf8");
     expect(body).toContain("# ALERT — loop auto-paused");
     expect(body).toContain("roll loop resume");
+    const events = rf(join(rt, "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"policy:safety_pause"');
+    expect(events).toContain('"type":"alert:notify"');
+  });
+
+  it("honors policy.yaml max_consecutive_failures before PAUSE", async () => {
+    const { existsSync: ex, mkdirSync: mks } = await import("node:fs");
+    const p = tmp("consec-policy");
+    execFileSync("git", ["init", "-q", p]);
+    mks(join(p, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(p, ".roll", "policy.yaml"), "loop_safety:\n  max_consecutive_failures: 4\n");
+    writeFileSync(join(p, ".roll", "loop", "consecutive-fails"), "2", "utf8");
+
+    const prevRt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const prevSlug = process.env["ROLL_MAIN_SLUG"];
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = join(p, ".roll", "loop");
+    process.env["ROLL_MAIN_SLUG"] = "default";
+    registerAll();
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    const prevCwd = process.cwd();
+    try {
+      process.chdir(p);
+      const r = await dispatch(["loop", "run-once"]);
+      expect(r.status).toBe(1);
+    } finally {
+      process.stderr.write = write;
+      process.chdir(prevCwd);
+      if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
+      if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+      else process.env["ROLL_MAIN_SLUG"] = prevSlug;
+    }
+
+    expect(ex(join(p, ".roll", "loop", "PAUSE-default"))).toBe(false);
   });
 });
 

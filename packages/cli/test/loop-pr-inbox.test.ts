@@ -71,11 +71,15 @@ describe("reducePrView — last BOT/APP review + rollup reduction (bin/roll 1199
       mergeStateStatus: "CLEAN",
       statusCheckRollup: [{ conclusion: "SUCCESS" }],
     });
-    expect(f).toEqual({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN" });
+    expect(f).toEqual({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: false });
   });
   it("no bot reviews → empty bot; empty rollup → '' ci", () => {
     const f = reducePrView({ reviews: [{ authorAssociation: "MEMBER", state: "APPROVED" }] });
-    expect(f).toEqual({ bot: "", ciState: "", mergeable: "" });
+    expect(f).toEqual({ bot: "", ciState: "", mergeable: "", manualMerge: false });
+  });
+  it("detects manual-merge marker from PR body or labels", () => {
+    expect(reducePrView({ body: "fix\n\n[roll:manual-merge]" }).manualMerge).toBe(true);
+    expect(reducePrView({ labels: [{ name: "manual-merge" }] }).manualMerge).toBe(true);
   });
   it("any FAILURE → failure ci", () => {
     const f = reducePrView({ statusCheckRollup: [{ conclusion: "SUCCESS" }, { conclusion: "FAILURE" }] });

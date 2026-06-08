@@ -40,6 +40,7 @@ window.RollData = (function () {
       sub: "Write a goal in Backlog. Roll picks it up hourly, executes it in an isolated worktree, opens a PR, waits for green CI — and ships. You stay on the loop, not in it.",
       install: "npm install -g @seanyao/roll",
       ctas: [
+        { label: "How roll-build works", href: "diagrams/roll-build-skill.html", primary: true, external: true },
         { label: "Read the guide", href: "#guides", primary: false },
         { label: "View on GitHub", href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
@@ -48,7 +49,7 @@ window.RollData = (function () {
     TERMINAL: [
       { kind: "prompt", text: "roll loop on" },
       { kind: "ok",     text: "launchd scheduled",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
-      { kind: "ok",     text: "tmux session",       detail: "roll-loop-roll · attach with `roll loop attach`" },
+      { kind: "ok",     text: "tmux session",       detail: "roll-loop-roll · attach with `tmux attach -t roll-loop-roll`" },
       { kind: "ok",     text: "active window",      detail: "10:00 – 18:00 · idle outside" },
       { kind: "blank" },
       { kind: "stamp",  time: "11:05:02", text: "cycle #047 — picking story" },
@@ -64,7 +65,7 @@ window.RollData = (function () {
     FRAME_A: [
       { kind: "prompt", text: "roll loop on" },
       { kind: "ok",     text: "launchd scheduled",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
-      { kind: "ok",     text: "tmux session",       detail: "roll-loop-roll · attach with `roll loop attach`" },
+      { kind: "ok",     text: "tmux session",       detail: "roll-loop-roll · attach with `tmux attach -t roll-loop-roll`" },
       { kind: "ok",     text: "active window",      detail: "10:00 – 18:00 · idle outside" },
       { kind: "cursor" },
     ],
@@ -111,8 +112,8 @@ window.RollData = (function () {
       ]},
       { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
         { name: "roll loop on",        mono: true, desc: "AI picks stories from Backlog and executes hourly in an isolated worktree.", badges: ["core"] },
-        { name: "roll loop monitor",   mono: true, desc: "Live dashboard for loop, dream and brief service status, queues and recent runs.", badges: ["core"] },
-        { name: "roll loop attach",    mono: true, desc: "Attach to the live tmux session and watch AI work in real time.", badges: ["highlight"] },
+        { name: "roll loop status",    mono: true, desc: "Scheduler snapshot for loop, dream and brief service status, queues, alerts and recent runs.", badges: ["core"] },
+        { name: "tmux attach -t roll-loop-<slug>", mono: true, desc: "Attach to the live tmux session and watch AI work in real time.", badges: ["highlight"] },
         { name: "roll loop pause / resume", mono: true, desc: "Hand-code yourself; let the system resume when you're done.", badges: [] },
       ]},
       { id: "quality", title: "Quality Gates", blurb: "Four nets, caught while building.", features: [
@@ -219,6 +220,7 @@ window.RollData = (function () {
       sub: "把目标写进 Backlog。Roll 每小时领取一个，在隔离的 worktree 里执行、开 PR、等 CI 绿、自动合入。你掌舵，不掌桨。",
       install: "npm install -g @seanyao/roll",
       ctas: [
+        { label: "roll-build 详解", href: "diagrams/roll-build-skill.html", primary: true, external: true },
         { label: "查看文档", href: "#guides", primary: false },
         { label: "GitHub",  href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
@@ -228,7 +230,7 @@ window.RollData = (function () {
     TERMINAL: [
       { kind: "prompt", text: "roll loop on" },
       { kind: "ok",     text: "launchd 已调度",        detail: "loop :05/hr · dream 03:10 · brief 09:00" },
-      { kind: "ok",     text: "tmux 会话就绪",          detail: "roll-loop-roll · roll loop attach 可接入" },
+      { kind: "ok",     text: "tmux 会话就绪",          detail: "roll-loop-roll · tmux attach -t roll-loop-roll 可接入" },
       { kind: "ok",     text: "活跃窗口",              detail: "10:00 – 18:00 · 窗外静默" },
       { kind: "blank" },
       { kind: "stamp",  time: "11:05:02", text: "cycle #047 — 摘取故事" },
@@ -244,7 +246,7 @@ window.RollData = (function () {
     FRAME_A: [
       { kind: "prompt", text: "roll loop on" },
       { kind: "ok",     text: "launchd 已调度",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
-      { kind: "ok",     text: "tmux 会话就绪",    detail: "roll-loop-roll · roll loop attach 可接入" },
+      { kind: "ok",     text: "tmux 会话就绪",    detail: "roll-loop-roll · tmux attach -t roll-loop-roll 可接入" },
       { kind: "ok",     text: "活跃窗口",        detail: "10:00 – 18:00 · 窗外静默" },
       { kind: "cursor" },
     ],
@@ -291,8 +293,8 @@ window.RollData = (function () {
       ]},
       { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
         { name: "roll loop on",        mono: true, desc: "AI 从 Backlog 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },
-        { name: "roll loop monitor",   mono: true, desc: "实时看板:loop / dream / brief 服务状态、队列、最近执行。", badges: ["core"] },
-        { name: "roll loop attach",    mono: true, desc: "接入实时 tmux 会话,观看 AI 现场工作。", badges: ["highlight"] },
+        { name: "roll loop status",    mono: true, desc: "调度快照:loop / dream / brief 服务状态、队列、告警、最近执行。", badges: ["core"] },
+        { name: "tmux attach -t roll-loop-<slug>", mono: true, desc: "接入实时 tmux 会话,观看 AI 现场工作。", badges: ["highlight"] },
         { name: "roll loop pause / resume", mono: true, desc: "需要手动改时暂停,改完再让系统接力。", badges: [] },
       ]},
       { id: "quality", title: "质量门禁", blurb: "四张网,边做边接。", features: [

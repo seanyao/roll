@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.608.2 — 2026-06-08
+
+### 跨 Agent 结对（异构第二双眼睛）
+
+- 结对成为一等能力：交付后由一个**不同厂商**的 agent 单向复检改动，换视角多样性——理性挑选（只挑已装+可用+胜任+异构）、可复现轮换、无搭档如实留痕不静默（US-PAIR-001/003）`[pair]`
+- `roll pair init` 物化显式 `.roll/pairing.yaml`：文件在=开、删=关，默认值写进文件而非隐藏；`roll init` 也顺带生成，新项目零额外步骤，现有项目一条命令补上（US-PAIR-001/008）`[pair]`
+- `roll pair status` 看结对池：谁能结对、厂商、能力、谁因何被排除，外加**结对花了多少钱**（次数/搭档/成本），可观测不靠猜（US-PAIR-002/006）`[pair]`
+- 多阶段结对：设计/测试/代码/周期四个检查点可独立开关，默认仅代码（US-PAIR-004）`[pair]`
+- 配对越用越准：成本真实记账 + ε-greedy 偏好高命中异构对但保底探索不锁死多样性（US-PAIR-006）`[pair]`
+- 安全底线：30 秒硬超时、超时/出错不阻塞 cycle、绝不自行动主干（US-PAIR-003）`[pair]`
+
+### 可见性
+
+- 故事档案 = 一个故事的全部上下文入口：页顶 As a / I want / So that 原语 + CONTEXT + AC 内联 + 显眼可点的设计文档链接（US-DOSSIER-003）
+- 设计文档链接打开 markdown 渲染页而非裸文件（US-DOSSIER-004）
+- 验收证据可重跑：每条 AC 配一条任何人能照着重跑的验证命令 + 测试清单，证据从"看截图"升级到"自己能验"（US-EVID-010）
+
+### 工程和测试
+
+- `roll ci --wait` 移植到 TS：CI 等待门脱离 bash，逐轮裁定镜像 v2 顺序（US-PORT-015）
+- `roll release ship` 一条受闸命令完成 tag-push（发版第 4 步），一致性闸把关，npm publish 仍人工（US-REL-SHIP）
+- cleanup：`.codex/`、`.worktrees/` 进 .gitignore（per-machine 状态不入库）
+
 ## v3.608.1 — 2026-06-08
 
 ### 自动化流水线

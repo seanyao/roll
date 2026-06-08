@@ -30,6 +30,7 @@ export * from "./loop/sentinel.js";
 export * from "./loop/signals.js";
 export * from "./loop/transcript.js";
 export * from "./policy/engine.js";
+export * from "./policy/self-tuning.js";
 export * from "./reconcile/engine.js";
 export * from "./release/plan.js";
 export * from "./release/ship.js";

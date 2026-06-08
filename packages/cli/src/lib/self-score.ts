@@ -142,6 +142,10 @@ export function readStorySelfScores(projectPath: string, storyId: string, hrefFr
   return readCandidates(noteCandidates(join(projectPath, ".roll", "notes"), storyId), storyId, hrefFromDir);
 }
 
+export function readAllSelfScores(projectPath: string): SelfScoreEntry[] {
+  return readCandidates(allSelfScoreCandidates(projectPath), undefined, undefined);
+}
+
 export function readLatestStorySelfScore(projectPath: string, storyId: string, hrefFromDir?: string): SelfScoreEntry | undefined {
   const entries = readStorySelfScores(projectPath, storyId, hrefFromDir);
   return entries[entries.length - 1];

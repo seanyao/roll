@@ -45,6 +45,7 @@ import { skillsCommand } from "./skills.js";
 import { slidesCommand } from "./slides/index.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
+import { tuneCommand } from "./tune.js";
 import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
 
@@ -178,6 +179,13 @@ export function registerAll(): void {
   // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
+  // `tune`: v3-native US-EVID-015 second-order control loop, READ-ONLY. Aggregates
+  // four trend signals (self-score notes / runs.jsonl pass rate / events.ndjson
+  // misjudgments / runs result_eval.dims rubric relevance) into the pure
+  // buildSelfTuningPlan, which emits suggest-only proposals with evidence +
+  // rollback. NEVER writes policy/agents/rubric config; `tune reset` prints the
+  // default rollback values without touching disk. No bash fallback (v2 had none).
+  registerPorted("tune", tuneCommand);
   // `update`: full surface TS (npm + curl upgrade paths, cache invalidation, the
   // post-update `roll setup` chain, changelog). The real install is driven via
   // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.

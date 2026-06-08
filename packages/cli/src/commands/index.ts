@@ -1,6 +1,7 @@
 /** Ported-command registry — one line per migrated subcommand. */
 import { fallbackToBash, registerPorted } from "../bridge.js";
 import { agentListCommand } from "./agent-list.js";
+import { pairCommand } from "./pair.js";
 import { alertCommand } from "./alert.js";
 import { archiveMigrateCommand } from "./archive-migrate.js";
 import { attestCommand } from "./attest.js";
@@ -98,6 +99,10 @@ export function registerAll(): void {
     if (args[0] === "list") return agentListCommand(args.slice(1));
     return fallbackToBash(["agent", ...args]).status;
   });
+  // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
+  // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
+  // (v2 had no pairing).
+  registerPorted("pair", pairCommand);
   // `backlog` display is TS; management subcommands (writes) stay on bash.
   registerPorted("backlog", (args) => {
     if (args[0] !== undefined && BACKLOG_MGMT_SUBCOMMANDS.includes(args[0])) {

@@ -417,6 +417,66 @@ export function detectBeforeAfter(runDir: string): BeforeAfterPair[] {
   return pairs;
 }
 
+export interface AfterOnlyShot {
+  label: string;
+  shot: EvidenceRef;
+}
+
+/** US-EVID-004: after-only delivery visuals for brand-new surfaces. */
+export function detectAfterOnly(runDir: string): AfterOnlyShot[] {
+  const dir = join(runDir, "screenshots");
+  if (!existsSync(dir)) return [];
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
+  } catch {
+    return [];
+  }
+  const lower = new Set(files.map((f) => f.toLowerCase()));
+  const shots: AfterOnlyShot[] = [];
+  for (const f of files.slice().sort()) {
+    const m = /^after-(.+)\.(png|jpe?g|webp)$/i.exec(f);
+    if (m === null) continue;
+    const stem = m[1] ?? "";
+    const ext = m[2] ?? "";
+    if (lower.has(`before-${stem}.${ext}`.toLowerCase())) continue;
+    shots.push({
+      label: stem,
+      shot: { kind: "screenshot", label: `改后 ${stem}`, href: `screenshots/${f}` },
+    });
+  }
+  return shots;
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function webJoin(...parts: string[]): string {
+  return parts.filter((p) => p !== "").join("/").replace(/\\/g, "/").replace(/\/+/g, "/");
+}
+
+function dossierVisualsHtml(runRel: string, pairs: BeforeAfterPair[], afterOnly: AfterOnlyShot[]): string {
+  const figs: string[] = [];
+  for (const p of pairs) {
+    const before = webJoin(runRel, p.before.href ?? "");
+    const after = webJoin(runRel, p.after.href ?? "");
+    figs.push(
+      `<div class="delivery-shot-pair" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0;">` +
+        `<figure style="margin:0;"><a href="${escHtml(before)}"><img src="${escHtml(before)}" alt="${escHtml(p.before.label)}" style="width:100%;height:auto;border-radius:6px;"></a><figcaption>${bi("Before", "改前")} ${escHtml(p.label)}</figcaption></figure>` +
+        `<figure style="margin:0;"><a href="${escHtml(after)}"><img src="${escHtml(after)}" alt="${escHtml(p.after.label)}" style="width:100%;height:auto;border-radius:6px;"></a><figcaption>${bi("After", "改后")} ${escHtml(p.label)}</figcaption></figure>` +
+      `</div>`,
+    );
+  }
+  for (const shot of afterOnly) {
+    const href = webJoin(runRel, shot.shot.href ?? "");
+    figs.push(
+      `<figure class="delivery-shot-single" style="margin:10px 0;"><a href="${escHtml(href)}"><img src="${escHtml(href)}" alt="${escHtml(shot.shot.label)}" style="width:100%;max-width:720px;height:auto;border-radius:6px;"></a><figcaption>${bi("After", "改后")} ${escHtml(shot.label)}</figcaption></figure>`,
+    );
+  }
+  return figs.length > 0 ? `<div class="delivery-shots">${figs.join("\n")}</div>\n` : "";
+}
+
 const USAGE = [
   "Usage: roll attest <story-id> [--deploy-url <url>] [--run-dir <path>]",
   "                   [--capture-terminal | --capture-tmux <session> | --capture-command <cmd>]",
@@ -556,6 +616,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // US-ATTEST-013 — self-contained card context + before/after comparison.
   const context = buildCardContext(projectPath, featureFile, storyId, process.env);
   const beforeAfter = detectBeforeAfter(runDir);
+  const afterOnly = detectAfterOnly(runDir);
   // US-ATTEST-014 — reverse-look up the delivering cycle and inline its process
   // archive (timeline + signal layer + bounded, redacted transcript). Degrades
   // gracefully: hand-delivered / no-data cards yield undefined (section trimmed).
@@ -598,8 +659,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   if (existsSync(indexPath)) {
     try {
       const reportRel = join(relative(storyDir, runDir), reportFileName(storyId));
+      const runRel = relative(storyDir, runDir).replace(/\\/g, "/");
       const deliveryHtml =
         `<p><a href="${reportRel}">${bi("Attestation report", "验收报告")}</a></p>\n` +
+        dossierVisualsHtml(runRel, beforeAfter, afterOnly) +
         `<p class="muted">${bi("Delivered", "交付于")} ${new Date().toISOString().slice(0, 10)}</p>\n`;
       const idx = markPhaseDone(readFileSync(indexPath, "utf8"), "delivery", deliveryHtml);
       writeFileSync(indexPath, idx, "utf8");

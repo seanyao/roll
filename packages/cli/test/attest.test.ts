@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { EvidenceRun, ShotRun } from "@roll/infra";
 import { bi } from "@roll/core";
-import { attestCommand, buildCardContext, detectBeforeAfter, findFeatureFile, readBacklogRow } from "../src/commands/attest.js";
+import { attestCommand, buildCardContext, detectAfterOnly, detectBeforeAfter, findFeatureFile, readBacklogRow } from "../src/commands/attest.js";
 import { renderStoryPage } from "../src/lib/story-page.js";
 
 const dirs: string[] = [];
@@ -157,6 +157,36 @@ describe("attestCommand", () => {
     expect(html).toContain('class="phase phase-done" data-phase="delivery"');
     expect(html).toContain("2026-06-06T01-02-03/FIX-300-report.html");
     expect(html).not.toContain("Not yet delivered");
+  });
+
+  it("US-EVID-004: card dossier delivery phase renders before/after pairs and after-only shots", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const runDir = join(storyDir, "cycle-visuals");
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "screenshots", "before-home.png"), "PNG");
+    writeFileSync(join(runDir, "screenshots", "after-home.png"), "PNG");
+    writeFileSync(join(runDir, "screenshots", "after-new-panel.png"), "PNG");
+    writeFileSync(
+      join(storyDir, "index.html"),
+      renderStoryPage({ id: "FIX-300", title: "demo", created: "2026-06-06", type: "fix", epic: "demo" }),
+      "utf8",
+    );
+
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--run-dir", runDir], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }),
+      ),
+    );
+
+    expect(code).toBe(0);
+    const html = readFileSync(join(storyDir, "index.html"), "utf8");
+    expect(html).toContain('class="delivery-shot-pair"');
+    expect(html).toContain("cycle-visuals/screenshots/before-home.png");
+    expect(html).toContain("cycle-visuals/screenshots/after-home.png");
+    expect(html).toContain('class="delivery-shot-single"');
+    expect(html).toContain("cycle-visuals/screenshots/after-new-panel.png");
+    expect(html).not.toContain("before-new-panel.png");
   });
 
   it("no ac-map.json ⇒ every AC honestly Claimed (red line, no invented evidence)", async () => {
@@ -368,7 +398,7 @@ describe("US-ATTEST-013 — self-contained card context wiring", () => {
     const proj = project();
     const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "run");
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
-    for (const f of ["before-home.png", "after-home.png", "before-orphan.png", "noise.png"]) {
+    for (const f of ["before-home.png", "after-home.png", "before-orphan.png", "after-lonely.png", "noise.png"]) {
       writeFileSync(join(runDir, "screenshots", f), "PNG");
     }
     const pairs = detectBeforeAfter(runDir);
@@ -376,6 +406,10 @@ describe("US-ATTEST-013 — self-contained card context wiring", () => {
     expect(pairs[0]?.label).toBe("home");
     expect(pairs[0]?.before.href).toBe("screenshots/before-home.png");
     expect(pairs[0]?.after.href).toBe("screenshots/after-home.png");
+    const afterOnly = detectAfterOnly(runDir);
+    expect(afterOnly).toHaveLength(1);
+    expect(afterOnly[0]?.label).toBe("lonely");
+    expect(afterOnly[0]?.shot.href).toBe("screenshots/after-lonely.png");
   });
 
   it("attest renders the card-context section end to end", async () => {

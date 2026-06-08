@@ -20,6 +20,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { EvidenceRun, ShotRun } from "@roll/infra";
 import { bi } from "@roll/core";
 import { attestCommand, buildCardContext, detectBeforeAfter, findFeatureFile, readBacklogRow } from "../src/commands/attest.js";
+import { renderStoryPage } from "../src/lib/story-page.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -135,6 +136,27 @@ describe("attestCommand", () => {
     }
     expect(existsSync(join(runDir, "FIX-300-report.html"))).toBe(true);
     expect(readlinkSync(join(storyDir, "latest"))).toBe("cycle-env");
+  });
+
+  it("US-EVID-004: attest refreshes an existing card dossier delivery phase", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "index.html"),
+      renderStoryPage({ id: "FIX-300", title: "demo", created: "2026-06-06", type: "fix", epic: "demo" }),
+      "utf8",
+    );
+
+    const code = await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+
+    expect(code).toBe(0);
+    const html = readFileSync(join(storyDir, "index.html"), "utf8");
+    expect(html).toContain('class="phase phase-done" data-phase="delivery"');
+    expect(html).toContain("2026-06-06T01-02-03/FIX-300-report.html");
+    expect(html).not.toContain("Not yet delivered");
   });
 
   it("no ac-map.json ⇒ every AC honestly Claimed (red line, no invented evidence)", async () => {

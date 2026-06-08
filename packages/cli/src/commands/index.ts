@@ -7,7 +7,7 @@ import { attestCommand } from "./attest.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
 import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
-import { ciCommand } from "./ci.js";
+import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
@@ -181,6 +181,7 @@ export function registerAll(): void {
   // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate
   // (_ci_wait's polling loop) returns null → falls back to the frozen bash.
   registerPorted("ci", (args) => {
+    if (args.includes("--wait")) return ciWaitCommand(args); // US-PORT-015: TS CI gate
     const r = ciCommand(args);
     return r ?? fallbackToBash(["ci", ...args]).status;
   });

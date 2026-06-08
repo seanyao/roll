@@ -13,16 +13,16 @@
  *     conclusion rendered literally as `null`, matching jq's string interp).
  *   - unknown argument → usage err + exit 1.
  *
- * FALLBACK — `--wait` (the CI gate): `_ci_wait` (11003-11071) is a 15s-interval
- * polling loop with `sleep`, open-PR detection, and repo-slug resolution. It's a
- * long-running, network-bound wait with no deterministic terminal output, so it
- * stays on the frozen bash implementation (returns null from this handler so the
- * index.ts wrapper shells `bin/roll ci --wait …`). Reason: porting it buys no
- * surface coverage a difftest could pin without faking the passage of time and a
- * live run lifecycle; the read surface above is what `roll ci` is for.
+ * `--wait` (the CI gate, US-PORT-015): ported as {@link ciWaitCommand} — a
+ * 15s-interval poll loop with open-PR detection + repo-slug resolution, the
+ * per-poll verdict delegated to core {@link ciWaitTick}. All git/gh/clock
+ * touches are injectable seams so the loop is unit-tested without real sleeps
+ * or a live run lifecycle. No bash fallback remains for `roll ci`.
  */
 import { spawnSync } from "node:child_process";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { ciWaitTick, type CiRunRow } from "@roll/core";
+import { ghRepoSlug, prList, runList } from "@roll/infra";
 import { onPath } from "./setup-shared.js";
 
 // ─── bash UI helpers (bin/roll:41-56) ────────────────────────────────────────
@@ -131,4 +131,123 @@ export function ciCommand(args: string[]): number | null {
     process.stdout.write(`${jqInterp(r.name)}: ${jqInterp(r.status)}/${jqInterp(r.conclusion)}\n`);
   }
   return 0;
+}
+
+// ─── _ci_wait (bin/roll 11003-11071) — the CI gate (US-PORT-015) ─────────────
+/**
+ * Injectable seams for {@link ciWaitCommand}: every git/gh/clock touch is a
+ * dep so the poll loop is unit-testable without a live run lifecycle or real
+ * sleeps. The real factory ({@link realCiWaitDeps}) wires spawnSync git +
+ * infra gh helpers + setTimeout.
+ */
+export interface CiWaitDeps {
+  ghAvailable(): boolean;
+  headCommit(): string | null; // git rev-parse HEAD, null on non-repo
+  shortCommit(): string; // git rev-parse --short HEAD
+  branch(): string; // git rev-parse --abbrev-ref HEAD
+  repoSlug(): string | undefined; // ghRepoSlug(origin url)
+  fetchRuns(slug: string, commit: string): Promise<CiRunRow[]>;
+  openPrCount(slug: string, branch: string): Promise<number>;
+  sleep(seconds: number): Promise<void>;
+  now(): number; // epoch seconds
+}
+
+function gitOut(args: string[]): string | null {
+  const r = spawnSync("git", args, { encoding: "utf8" });
+  return r.status === 0 ? (r.stdout ?? "").trim() : null;
+}
+
+/** Production deps: real git/gh/clock. */
+export function realCiWaitDeps(): CiWaitDeps {
+  return {
+    ghAvailable: () => onPath("gh"),
+    headCommit: () => gitOut(["rev-parse", "HEAD"]),
+    shortCommit: () => gitOut(["rev-parse", "--short", "HEAD"]) ?? "",
+    branch: () => gitOut(["rev-parse", "--abbrev-ref", "HEAD"]) ?? "",
+    repoSlug: () => ghRepoSlug(gitOut(["remote", "get-url", "origin"]) ?? undefined),
+    fetchRuns: (slug, commit) =>
+      runList(slug, "status,conclusion", { commit }) as Promise<CiRunRow[]>,
+    openPrCount: (slug, branch) => prList(slug, "number", { head: branch }).then((a) => a.length),
+    sleep: (s) => new Promise((res) => setTimeout(res, s * 1000)),
+    now: () => Math.floor(Date.now() / 1000),
+  };
+}
+
+/**
+ * `roll ci --wait [--timeout=N]` — the sanctioned CI gate (roll-loop skill).
+ * Mirrors `_ci_wait`: poll the HEAD-commit runs every 15s until they pass
+ * (exit 0), one is red (exit 1), there is no open PR so CI will never fire
+ * (lenient exit 0, FIX-046), or the timeout elapses (exit 1). Decision per
+ * poll is delegated to core {@link ciWaitTick}.
+ */
+export async function ciWaitCommand(args: string[], deps: CiWaitDeps = realCiWaitDeps()): Promise<number> {
+  let timeout = 300;
+  for (const a of args) {
+    if (a === "--wait") continue;
+    if (a.startsWith("--timeout=")) {
+      const n = parseInt(a.slice("--timeout=".length), 10);
+      if (!Number.isNaN(n) && n > 0) timeout = n;
+    } else {
+      err(m("ci.usage_roll_ci_wait_timeout_n"));
+      return 1;
+    }
+  }
+  const interval = 15;
+
+  if (!deps.ghAvailable()) {
+    warn(m("loop.gh_not_installed_skipping_ci_gate"));
+    return 0;
+  }
+  const commit = deps.headCommit();
+  if (commit === null) {
+    err(m("loop.not_a_git_repo"));
+    return 1;
+  }
+  const short = deps.shortCommit();
+  const slug = deps.repoSlug();
+  if (slug === undefined || slug === "") {
+    err(m("loop.cannot_determine_github_repo_from_origin"));
+    return 1;
+  }
+  ok(m("loop.waiting_for_ci_on", short, slug));
+
+  const start = deps.now();
+  let first = true;
+  while (deps.now() - start < timeout) {
+    const runs = await deps.fetchRuns(slug, commit);
+    const tick = ciWaitTick(runs);
+    if (tick === "no-runs") {
+      const branch = deps.branch();
+      if (branch !== "" && (await deps.openPrCount(slug, branch)) === 0) {
+        warn(m("loop.no_open_pr_for_ci_not", branch));
+        return 0; // FIX-046: no PR ⇒ CI never fires ⇒ skip the gate.
+      }
+      if (first) process.stdout.write(m("loop.no_ci_runs_found_yet_waiting") + "\n");
+      first = false;
+      await deps.sleep(interval);
+      continue;
+    }
+    if (tick === "pending") {
+      const elapsed = deps.now() - start;
+      process.stdout.write(m("loop.ci_running_ds_ci", elapsed, elapsed) + "\n");
+      await deps.sleep(interval);
+      continue;
+    }
+    if (tick === "failed") {
+      err(m("loop.ci_failed_for_ci", short));
+      return 1;
+    }
+    ok(m("loop.ci_passed_ci"));
+    return 0;
+  }
+  warn(m("loop.ci_timed_out_after_s_ci", timeout));
+  return 1;
+}
+
+/** ok(): GREEN [roll] line to STDOUT (mirrors bin/roll ok()). */
+function ok(line: string): void {
+  const noColor = (process.env["NO_COLOR"] ?? "") !== "";
+  const GREEN = noColor ? "" : "\x1b[0;32m";
+  const NC = noColor ? "" : "\x1b[0m";
+  process.stdout.write(`${GREEN}[roll]${NC} ${line}\n`);
 }

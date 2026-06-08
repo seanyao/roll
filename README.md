@@ -37,13 +37,14 @@ roll loop on        # let AI work through the backlog (optional)
 ```
 
 `roll init` detects legacy code and routes you to `$roll-onboard` when appropriate.
+First time through? Start with [Getting started](guide/en/getting-started.md).
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | **Autonomy · daily use** | |
-| `roll loop <on\|off\|now\|status\|eval\|signals\|runs\|story\|monitor\|…>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
+| `roll loop <on\|off\|now\|status\|eval\|signals\|runs\|story\|…>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
 | `roll brief` | Show latest owner brief |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll peer` | Cross-agent negotiation & review |
@@ -85,7 +86,7 @@ Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuil
 
 | | |
 |---|---|
-| **Start here** | [Overview & architecture](guide/en/overview.md) · [Engineering methodology](guide/en/methodology.md) |
+| **Start here** | [Getting started](guide/en/getting-started.md) · [Overview & architecture](guide/en/overview.md) · [Engineering methodology](guide/en/methodology.md) |
 | **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
 | **Quality machinery** | [Acceptance evidence (`roll attest`)](guide/en/acceptance-evidence.md) · [Evidence lifecycle](guide/en/acceptance-evidence.md#lifecycle-in-three-stages) · [Consistency & release gate](guide/en/consistency.md) · [Cross-agent pairing](guide/en/pairing.md) · [Test isolation](guide/en/test-isolation.md) |
 | **Under the hood** | [Architecture: layers · domain · invariants](docs/architecture.md) · [Verification system](docs/verification.md) · [Manifesto](docs/manifesto.md) |

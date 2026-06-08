@@ -37,13 +37,14 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 ```
 
 `roll init` 会识别老项目并在合适时引导到 `$roll-onboard`。
+第一次跑建议从[快速上手](guide/zh/getting-started.md)开始。
 
 ## 命令
 
 | 命令 | 说明 |
 |------|------|
 | **Autonomy · 日常使用** | |
-| `roll loop <on\|off\|now\|status\|eval\|runs\|story\|monitor>` | 管理自主 BACKLOG 执行循环 |
+| `roll loop <on\|off\|now\|status\|eval\|runs\|story\|…>` | 管理自主 BACKLOG 执行循环 |
 | `roll brief` | 查看最新 owner 简报 |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
 | `roll peer` | 跨 Agent 协商对审 |
@@ -82,7 +83,7 @@ template/      roll init 安装的项目脚手架
 
 | | |
 |---|---|
-| **从这里开始** | [概述与架构](guide/zh/overview.md) · [工程方法论](guide/zh/methodology.md) |
+| **从这里开始** | [快速上手](guide/zh/getting-started.md) · [概述与架构](guide/zh/overview.md) · [工程方法论](guide/zh/methodology.md) |
 | **日常使用** | [Loop（自主执行器）](guide/zh/loop.md) · [配置](guide/zh/configuration.md) · [价格与成本](guide/zh/pricing.md) · [FAQ](guide/zh/faq.md) |
 | **质量机制** | [验收证据（`roll attest`）](guide/zh/acceptance-evidence.md) · [证据生命周期](guide/zh/acceptance-evidence.md#三段式生命周期) · [一致性与发版闸](guide/zh/consistency.md) · [测试隔离](guide/zh/test-isolation.md) |
 | **底层设计** | [架构：分层·领域·不变量](docs/architecture.md) · [验证体系](docs/verification.md) · [理念宣言](docs/manifesto.md) |

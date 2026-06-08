@@ -15,6 +15,7 @@
 | guide/en/conventions.md | Roll — Conventions & AGENTS.md | guide | 2026-05-19 |
 | guide/en/dream.md | roll-.dream — Nightly Code Health Scanner | guide | 2026-05-19 |
 | guide/en/faq.md | Roll FAQ | guide | 2026-05-28 |
+| guide/en/getting-started.md | Roll — Getting Started | guide | 2026-06-08 |
 | guide/en/installation.md | Roll — Installation & Updates | guide | 2026-05-19 |
 | guide/en/legacy-onboarding.md | Legacy Project Onboarding | guide | 2026-05-20 |
 | guide/en/loop-driven-architecture.md | Loop-Driven Agent Architecture | guide | 2026-05-27 |
@@ -43,6 +44,7 @@
 | guide/zh/conventions.md | Roll — 约定与 AGENTS.md | guide | 2026-05-19 |
 | guide/zh/dream.md | roll-.dream — 夜间代码健康巡检 | guide | 2026-05-19 |
 | guide/zh/faq.md | Roll 常见问题 | guide | 2026-05-28 |
+| guide/zh/getting-started.md | Roll — 快速上手 | guide | 2026-06-08 |
 | guide/zh/installation.md | Roll — 安装与更新 | guide | 2026-05-19 |
 | guide/zh/legacy-onboarding.md | 遗留项目接入 Roll | guide | 2026-05-20 |
 | guide/zh/loop-driven-architecture.md | Loop 驱动的 Agent 架构 | guide | 2026-05-27 |
@@ -71,8 +73,8 @@
 
 ## Coverage Summary
 
-- Total docs indexed: 58
-- By category: guide (54) / convention (2) / module (2)
+- Total docs indexed: 60
+- By category: guide (56) / convention (2) / module (2)
 
 ## Gap Report
 

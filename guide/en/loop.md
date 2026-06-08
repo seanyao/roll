@@ -135,7 +135,6 @@ roll loop now         # Run one cycle immediately (same as launchd fires)
 roll loop test        # Quick smoke test: verify tmux/popup/stream chain works
 
 roll loop status      # Show scheduler state and current loop state
-roll loop monitor     # Live dashboard: launchd status, queue, recent runs
 
 roll loop runs        # Show last 10 run summaries (story IDs, TCR count, duration, slowest phase)
 roll loop runs 20     # Show last 20 runs
@@ -150,7 +149,7 @@ roll loop eval 30    # Widen the window to the last 30 scored cycles
 roll loop signals    # Surface repeated low-score patterns as improvement signals
 roll loop signals --streak 4  # Require 4 consecutive low cycles before firing
 
-roll loop attach      # Attach to running loop tmux session (Ctrl-B D to detach)
+tmux attach -t roll-loop-<project-slug>  # Attach to the live loop tmux session
 roll loop mute        # Suppress auto-attach popup (loop still runs in tmux)
 roll loop unmute      # Re-enable auto-attach popup
 
@@ -456,7 +455,7 @@ Every loop run lives in a detached tmux session.
 When you're not muted, a terminal window opens automatically.
 
 ```bash
-roll loop attach      # join the running session at any time
+tmux attach -t roll-loop-<project-slug>  # join the running session at any time
 # Ctrl-B D            # detach (loop continues)
 
 roll loop mute        # 🔇 stop popup (mute file: ~/.shared/roll/mute)
@@ -468,10 +467,10 @@ The `mute` file is shared across all projects and all autonomous activity
 
 ### Edit fold
 
-When the agent edits the same file several times in a row, `roll loop attach`
-no longer repeats the identical long path on N separate lines (which used to
-look like a hang). Instead it folds consecutive same-file edits into a single
-line and refreshes it in place:
+When the live tmux stream shows the agent editing the same file several times
+in a row, Roll no longer repeats the identical long path on N separate lines
+(which used to look like a hang). Instead it folds consecutive same-file edits
+into a single line and refreshes it in place:
 
 ```text
 ✏ <basename> | <hint> ×N
@@ -591,7 +590,7 @@ Loop sees the `🔨 In Progress` marker and skips it.
 | TCR: 0 commits | Revert story to 📋 Todo, write ALERT.md |
 | HEAD CI red | Hot-fix attempt (see below), or ALERT if exhausted |
 
-ALERT entries surface in the next `roll loop monitor` and `roll-brief` output.
+ALERT entries surface in `roll loop status`, `roll alert`, and `roll-brief` output.
 
 ## CI Self-Healing (US-LOOP-046..050)
 

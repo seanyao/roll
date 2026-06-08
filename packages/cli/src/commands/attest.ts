@@ -65,7 +65,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join, relative } from "node:path";
-import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, generateIndex, reportFileName } from "../lib/archive.js";
+import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
 import { readSelfScoreTrend, readStorySelfScores } from "../lib/self-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
 
@@ -543,16 +543,33 @@ function ensurePreEvidenceMarker(storyId: string, runDir: string): void {
   );
 }
 
-function ensurePreEvidenceAcMap(storyId: string, storyDir: string, featureFile: string, runDir: string): void {
+/**
+ * The AC items for a story, resilient to a content-free stub owner (FIX-226).
+ * `findFeatureFile` returns the ID-owned card file, which after migrate-features
+ * (US-META-007) may be a stub `spec.md` carrying no `**AC:**` block while the
+ * story's real ACs still live in the epic feature file. Walk every candidate
+ * (ID-owned first) and return the FIRST non-empty AC set — so a stub that DOES
+ * carry its own ACs still wins first (FIX-225 preserved), and an empty stub
+ * falls through to the epic file instead of yielding a zero-AC report.
+ */
+export function resolveStoryAcItems(projectPath: string, storyId: string): ReturnType<typeof acForStory> {
+  for (const cand of findFeatureFiles(projectPath, storyId)) {
+    try {
+      const items = acForStory(readFileSync(cand, "utf8"), storyId, {
+        fileOwned: basename(cand) === `${storyId}.md`,
+      });
+      if (items.length > 0) return items;
+    } catch {
+      /* unreadable candidate: skip */
+    }
+  }
+  return [];
+}
+
+function ensurePreEvidenceAcMap(storyId: string, storyDir: string, projectPath: string, runDir: string): void {
   const p = join(storyDir, "ac-map.json");
   if (existsSync(p)) return;
-  let items: ReturnType<typeof acForStory> = [];
-  try {
-    const fileOwned = basename(featureFile) === `${storyId}.md`;
-    items = acForStory(readFileSync(featureFile, "utf8"), storyId, { fileOwned });
-  } catch {
-    items = [];
-  }
+  const items = resolveStoryAcItems(projectPath, storyId);
   if (items.length === 0) return;
   ensurePreEvidenceMarker(storyId, runDir);
   const rows = items.map((item) => ({
@@ -599,7 +616,7 @@ async function attestBackfillCommand(args: string[], deps: AttestDeps): Promise<
     }
     const runDir = join(storyDir, PRE_EVIDENCE_RUN_ID);
     ensurePreEvidenceMarker(item.id, runDir);
-    ensurePreEvidenceAcMap(item.id, storyDir, featureFile, runDir);
+    ensurePreEvidenceAcMap(item.id, storyDir, projectPath, runDir);
     const rc = await attestCommand([item.id, "--run-dir", runDir], deps);
     if (rc === 0) stats.backfilled += 1;
     else stats.failed += 1;
@@ -665,11 +682,12 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     return 1;
   }
 
-  // US-ATTEST-012: an ID-named card file (`<storyId>.md`) owns its whole body —
-  // a `##` heading that merely names another card can't hijack the trailing AC
-  // (FIX-214 实案). Content-matched files keep ordinary section attribution.
-  const fileOwned = basename(featureFile) === `${storyId}.md`;
-  const acItems = acForStory(readFileSync(featureFile, "utf8"), storyId, { fileOwned });
+  // AC extraction (FIX-226): walk past a content-free stub owner — the ID-owned
+  // card file may be a migrate-features `spec.md` (US-META-007) with no `**AC:**`
+  // block, while the story's real ACs still live in the epic feature file. The
+  // ID-owned file is still tried first, so US-ATTEST-012 / FIX-214 / FIX-225
+  // (a real owner wins; no cross-card hijack) are all preserved.
+  const acItems = resolveStoryAcItems(projectPath, storyId);
   if (acItems.length === 0) warn(`no **AC:** block for ${storyId} — report will carry facts only`);
 
   // run dir + latest symlink (never overwrite history).

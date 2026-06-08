@@ -28,6 +28,7 @@ import { parsePolicy } from "@roll/core";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
+import { evaluateSelfScoreGate } from "../lib/self-score.js";
 
 export type AttestMode = "soft" | "hard";
 
@@ -210,9 +211,20 @@ export function runAttestGate(
     // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /
     // no ac-map, the FIX-214 case) does NOT count as a produced report.
     if (fresh && verificationReportHasContent(worktreeCwd, storyId)) {
-      const reasons = ["fresh acceptance report present"];
-      sinks.event({ cycleId, verdict: "produced", reasons });
-      return { verdict: "produced", mode, reasons, blocked: false };
+      const score = evaluateSelfScoreGate(worktreeCwd, storyId);
+      if (score.status === "pass") {
+        const reasons = ["fresh acceptance report present", score.reason];
+        sinks.event({ cycleId, verdict: "produced", reasons });
+        return { verdict: "produced", mode, reasons, blocked: false };
+      }
+      const reasons = [score.reason];
+      const blocked = mode === "hard";
+      sinks.alert(
+        `attest gate (${mode}): self-score gate failed (${storyId}) — ${score.reason} — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+      return { verdict: "skipped", mode, reasons, blocked };
     }
     const reasons = [
       fresh

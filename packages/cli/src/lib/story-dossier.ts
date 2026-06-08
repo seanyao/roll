@@ -16,11 +16,12 @@
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES } from "./dossier-index.js";
+import { readLatestStorySelfScore, readSelfScoreTrend, type SelfScoreView } from "./self-score.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -95,6 +96,10 @@ export interface StoryDossierInput {
   deliveryEvidence?: DeliveryEvidence;
   /** Retrospective text (self-score note body). */
   retro?: string;
+  /** Structured latest self-score note for the retrospective station. */
+  selfScore?: SelfScoreView;
+  /** US-SKILL-014 trend line, merged from card-local and legacy notes. */
+  selfScoreTrend?: string;
 }
 
 /** Which stations are complete, derived from the data we actually have. */
@@ -103,7 +108,7 @@ export function stationsDone(d: StoryDossierInput): Set<string> {
   if ((d.design?.length ?? 0) > 0) done.add("design");
   if ((d.commits?.length ?? 0) > 0 || (d.executionRefs?.length ?? 0) > 0) done.add("execution");
   if (d.story.delivered) done.add("delivery");
-  if (d.retro !== undefined && d.retro !== "") done.add("retrospective");
+  if (d.selfScore !== undefined || (d.retro !== undefined && d.retro !== "")) done.add("retrospective");
   return done;
 }
 
@@ -223,6 +228,34 @@ function deliveryEvidenceHtml(e: DeliveryEvidence | undefined): string {
   return `<div class="delivery-evidence"><h3>${bi("Delivery evidence", "交付证据")}</h3><dl>${rows.join("")}</dl></div>`;
 }
 
+function selfScoreClass(verdict: string): string {
+  const v = verdict.toLowerCase();
+  if (v === "good" || v === "ok" || v === "regression") return v;
+  return "unknown";
+}
+
+function selfScoreDimsHtml(score: SelfScoreView): string {
+  const dims = Object.entries(score.dimensions ?? {})
+    .filter(([, v]) => Number.isFinite(v))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (dims.length === 0) return "";
+  return `<div class="selfscore-dims">${dims.map(([k, v]) => `<span><code>${esc(k)}</code>: <b>${esc(String(v))}</b></span>`).join(" ")}</div>`;
+}
+
+function selfScoreHtml(score: SelfScoreView | undefined, trend: string | undefined, retro: string | undefined): string {
+  if (score === undefined) return retro !== undefined && retro !== "" ? `<p>${esc(retro)}</p>` : "";
+  const href = score.href !== undefined && score.href !== "" ? ` · <a href="${esc(score.href)}">${bi("Full note", "全文 note")}</a>` : "";
+  const trendLine = trend !== undefined && trend !== "" ? `<p class="selfscore-trend">${esc(trend)}</p>` : "";
+  return (
+    `<div class="selfscore-card selfscore-${selfScoreClass(score.verdict)}">` +
+    `<p><span class="selfscore-badge">${esc(score.verdict)}</span> <b>${esc(String(score.score))}</b>/10 · ${esc(score.verdict)} · <code>${esc(score.skill)}</code>${href}</p>` +
+    (score.note !== "" ? `<p class="note">${esc(score.note)}</p>` : "") +
+    selfScoreDimsHtml(score) +
+    trendLine +
+    `</div>`
+  );
+}
+
 function section(en: string, zh: string, body: string, empty: boolean): string {
   return (
     `<section class="phase ${empty ? "phase-pending" : "phase-done"}">` +
@@ -302,10 +335,8 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence)
       ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + acTable
       : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
-  const retro =
-    d.retro !== undefined && d.retro !== ""
-      ? `<p>${esc(d.retro)}</p>`
-      : `<p class="empty">${bi("Not yet written", "尚未撰写")}</p>`;
+  const retroContent = selfScoreHtml(d.selfScore, d.selfScoreTrend, d.retro);
+  const retro = retroContent !== "" ? retroContent : `<p class="empty">${bi("Not yet written", "尚未撰写")}</p>`;
 
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
@@ -327,6 +358,11 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.delivery-evidence dd { margin:0; }\n` +
     `.delivery-files { list-style:none; padding:0; margin:0; } .delivery-files li { margin:2px 0; }\n` +
     `.delivery-timeline { margin:0; padding-left:18px; } .delivery-timeline li { margin:2px 0; }\n` +
+    `.selfscore-card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--bg-raise); }\n` +
+    `.selfscore-card p { margin:0 0 6px; } .selfscore-card p:last-child { margin-bottom:0; }\n` +
+    `.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
+    `.selfscore-good .selfscore-badge { color:var(--pass); } .selfscore-ok .selfscore-badge { color:var(--warn); } .selfscore-regression .selfscore-badge { color:var(--fail); }\n` +
+    `.selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }\n` +
     `@media (max-width:680px) { .delivery-evidence dl { grid-template-columns:1fr; } }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
@@ -346,7 +382,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("Design", "设计", design, (d.design?.length ?? 0) === 0) +
     section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
     section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence))) +
-    section("Retrospective", "复盘", retro, d.retro === undefined || d.retro === "") +
+    section("Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
     `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
     // EVID-010: inline copy handler (display only — never executes the command).
     `<script>document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest(".copy-btn");if(!b||!navigator.clipboard)return;var t=b.getAttribute("data-copy")||"";navigator.clipboard.writeText(t).then(function(){b.classList.add("copied");setTimeout(function(){b.classList.remove("copied")},1200);}).catch(function(){});});</script>\n` +
@@ -455,39 +491,24 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   // newest self-score note → retrospective line. Card-local notes/ is the
   // home (US-META-008); the flat .roll/notes serves pre-migration history.
   try {
-    const cardNotes = joinPath(dir, "notes");
-    const legacyNotes = joinPath(projectPath, ".roll", "notes");
-    let notesDir = cardNotes;
-    let notes: string[] = [];
-    try {
-      notes = listDir(cardNotes).filter((f) => f.endsWith(".md")).sort();
-    } catch {
-      /* no card-local notes yet */
-    }
-    if (notes.length === 0) {
-      notesDir = legacyNotes;
-      notes = listDir(legacyNotes)
-        .filter((f) => f.includes(`-${story.id}-`) && f.endsWith(".md"))
-        .sort();
-    }
-    const last = notes[notes.length - 1];
-    if (last !== undefined) {
-      const body = readFile(joinPath(notesDir, last));
-      searchableCardText += `\n${body}`;
-      const score = /^score:\s*(.+)$/m.exec(body);
-      const verdict = /^verdict:\s*(.+)$/m.exec(body);
-      const para = body
-        .split(/\n{2,}/)
-        .map((p) => p.trim())
-        .find((p) => p !== "" && !p.startsWith("---") && !/^score:|^verdict:/m.test(p));
-      out.retro = [
-        score !== null ? `score ${(score[1] ?? "").trim()}` : "",
-        verdict !== null ? `· ${(verdict[1] ?? "").trim()}` : "",
-        para !== undefined ? `— ${para.replace(/\s+/g, " ").slice(0, 240)}` : "",
-      ]
+    const latest = readLatestStorySelfScore(projectPath, story.id, dir);
+    if (latest !== undefined) {
+      out.selfScore = {
+        skill: latest.skill,
+        score: latest.score,
+        verdict: latest.verdict,
+        ts: latest.ts,
+        note: latest.note,
+        ...(latest.href !== undefined ? { href: latest.href } : {}),
+        ...(Object.keys(latest.dimensions).length > 0 ? { dimensions: latest.dimensions } : {}),
+      };
+      out.retro = [`score ${latest.score}`, `· ${latest.verdict}`, latest.note !== "" ? `— ${latest.note.slice(0, 240)}` : ""]
         .join(" ")
         .trim();
+      searchableCardText += `\n${readFile(latest.sourcePath)}`;
     }
+    const trend = readSelfScoreTrend(projectPath);
+    if (trend !== undefined) out.selfScoreTrend = trend;
   } catch {
     /* no notes */
   }
@@ -831,9 +852,6 @@ function githubSlug(projectPath: string): string | undefined {
 // Thin fs/git seams (kept local so the renderer stays pure above).
 function readFile(p: string): string {
   return readFileSync(p, "utf8");
-}
-function listDir(p: string): string[] {
-  return readdirSync(p);
 }
 function statDir(p: string): boolean {
   return statSync(p).isFile();

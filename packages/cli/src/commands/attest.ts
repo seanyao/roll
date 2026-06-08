@@ -40,6 +40,7 @@ import {
   type EvidenceRef,
   type ProcessArchive,
   type RunRow,
+  type SelfScoreReportEntry,
 } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
 import {
@@ -64,6 +65,7 @@ import {
 } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, generateIndex, reportFileName } from "../lib/archive.js";
+import { readSelfScoreTrend, readStorySelfScores } from "../lib/self-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
@@ -283,40 +285,17 @@ function relativeFromPhysical(fromDir: string, toPath: string): string {
 export function readSelfScores(
   projectPath: string,
   storyId: string,
-): Array<{ skill: string; score: number; verdict: string; ts: string; note: string }> {
-  const dir = join(projectPath, ".roll", "notes");
-  if (!existsSync(dir)) return [];
-  const out: Array<{ skill: string; score: number; verdict: string; ts: string; note: string }> = [];
-  let names: string[] = [];
-  try {
-    names = readdirSync(dir).filter((f) => f.endsWith(".md") && f.includes(`-${storyId}-`));
-  } catch {
-    return [];
-  }
-  for (const name of names.sort()) {
-    try {
-      const text = readFileSync(join(dir, name), "utf8");
-      const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
-      if (!m) continue;
-      const fm = new Map<string, string>();
-      for (const line of (m[1] ?? "").split("\n")) {
-        const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line.trim());
-        if (kv?.[1] !== undefined) fm.set(kv[1], (kv[2] ?? "").trim());
-      }
-      if (fm.get("story") !== storyId) continue;
-      const score = Number(fm.get("score") ?? "");
-      out.push({
-        skill: fm.get("skill") ?? basename(name),
-        score: Number.isFinite(score) ? score : 0,
-        verdict: fm.get("verdict") ?? "",
-        ts: fm.get("ts") ?? "",
-        note: (m[2] ?? "").trim().slice(0, 300),
-      });
-    } catch {
-      /* tolerant reader */
-    }
-  }
-  return out;
+  hrefFromDir?: string,
+): SelfScoreReportEntry[] {
+  return readStorySelfScores(projectPath, storyId, hrefFromDir).map((e) => ({
+    skill: e.skill,
+    score: e.score,
+    verdict: e.verdict,
+    ts: e.ts,
+    note: e.note,
+    ...(e.href !== undefined ? { href: e.href } : {}),
+    ...(Object.keys(e.dimensions).length > 0 ? { dimensions: e.dimensions } : {}),
+  }));
 }
 
 /**
@@ -730,7 +709,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       ? `${manifest.test_pass.age_seconds}s ago`
       : "present"
     : "absent";
-  const selfScores = readSelfScores(projectPath, storyId);
+  const selfScores = readSelfScores(projectPath, storyId, runDir);
+  const selfScoreTrend = readSelfScoreTrend(projectPath);
   // US-ATTEST-013 — self-contained card context + before/after comparison.
   const context = buildCardContext(projectPath, featureFile, storyId, process.env);
   const beforeAfter = detectBeforeAfter(runDir);
@@ -756,6 +736,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
     ...(processArchive !== undefined ? { process: processArchive } : {}),
     ...(selfScores.length > 0 ? { selfScores } : {}),
+    ...(selfScoreTrend !== undefined ? { selfScoreTrend } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
   });
   // US-META-001: report carries the card id (`<ID>-report.html`) so a tab /

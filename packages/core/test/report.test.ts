@@ -337,6 +337,32 @@ describe("US-ATTEST-009 — Self-Score fold", () => {
     expect(html).not.toContain("<details"); // the CSS rules may ship; the BLOCK must not
     expect(html).not.toContain("Self-Score");
   });
+
+  it("US-EVID-013: renders badge, dimensions, trend, full-note link, and discrepancy", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
+      selfScoreTrend: "self-score: mean 7.0 / min 5 / redo 1 (last 14)",
+      selfScores: [
+        {
+          skill: "roll-build",
+          score: 5,
+          verdict: "ok",
+          ts: "2026-06-08T12:00:00Z",
+          note: "测试覆盖不足，后续要补。",
+          href: "notes/2026-06-08-roll-build-US-EVID-013.md",
+          dimensions: { "test-quality": 7 },
+        },
+      ],
+    });
+    expect(html).toContain('class="selfscore-badge selfscore-ok"');
+    expect(html).toContain("<b>5</b>/10 · ok");
+    expect(html).toContain("<code>test-quality</code>: <b>7</b>");
+    expect(html).toContain("self-score: mean 7.0 / min 5 / redo 1 (last 14)");
+    expect(html).toContain('href="notes/2026-06-08-roll-build-US-EVID-013.md"');
+    expect(html).toContain("Self-score discrepancy");
+    expect(html).toContain("low self-score: ok 5/10");
+  });
 });
 
 describe("US-ATTEST-014 — process trace inline", () => {

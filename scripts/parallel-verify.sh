@@ -129,6 +129,18 @@ build_shim_dir() {
 printf '%s\n' '{"type":"system","subtype":"init","model":"claude-shim"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"appending marker"}]}}'
 echo "parallel-verify marker $(date -u +%s)-$$" >> CHANGELOG.md
+mkdir -p .roll/features/uncategorized/US-PV-001/notes
+cat > .roll/features/uncategorized/US-PV-001/notes/2026-06-08-roll-build-US-PV-001-shim.md <<'NOTE'
+---
+skill: roll-build
+story: US-PV-001
+score: 8
+verdict: good
+ts: 2026-06-08T00:00:00Z
+---
+
+Parallel-verify shim wrote the required self-score note.
+NOTE
 git -c user.email=shim@roll.test -c user.name=roll-shim add -A >/dev/null 2>&1
 git -c user.email=shim@roll.test -c user.name=roll-shim commit -q --no-verify \
   -m "tcr: deliver US-PV-001 (parallel-verify shim)" >/dev/null 2>&1

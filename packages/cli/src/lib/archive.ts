@@ -30,8 +30,11 @@ export function findFeatureFile(projectPath: string, storyId: string): string | 
   const walk = (dir: string): void => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile() && e.name.endsWith(".md")) {
+      if (e.isDirectory()) {
+        if (e.name === "notes" || e.name === "evidence" || e.name === "screenshots" || e.name === "latest") continue;
+        if (/^\d{4}-\d{2}-\d{2}T/.test(e.name) || e.name.startsWith("cycle-") || e.name === "pre-evidence-backfill") continue;
+        walk(p);
+      } else if (e.isFile() && e.name.endsWith(".md")) {
         const idOwned =
           e.name === `${storyId}.md` || (e.name === "spec.md" && basename(dir) === storyId);
         if (idOwned) hits.unshift(p); // ID-named owner wins

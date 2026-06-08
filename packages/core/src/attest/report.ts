@@ -118,6 +118,18 @@ export interface ProcessArchive {
   missing?: string[];
 }
 
+export const SELF_SCORE_LOW_THRESHOLD = 5;
+
+export interface SelfScoreReportEntry {
+  skill: string;
+  score: number;
+  verdict: string;
+  ts: string;
+  note: string;
+  href?: string;
+  dimensions?: Record<string, number>;
+}
+
 export interface ReportInput {
   storyId: string;
   title: string;
@@ -132,7 +144,9 @@ export interface ReportInput {
   facts?: { tcrCount: number; ciConclusion: string; testPassAge: string };
   /** US-ATTEST-009 — same-story Self-Score entries from .roll/notes/; the
    *  whole collapsed block is SKIPPED when none exist (no placeholder). */
-  selfScores?: Array<{ skill: string; score: number; verdict: string; ts: string; note: string }>;
+  selfScores?: SelfScoreReportEntry[];
+  /** US-EVID-013 — US-SKILL-014 trend line, computed by the CLI reader. */
+  selfScoreTrend?: string;
   /** US-ATTEST-014 — the cycle process archive (timeline + signal layer +
    *  folded transcript). Absent ⇒ section trimmed; `manual` delivery degrades. */
   process?: ProcessArchive;
@@ -366,15 +380,48 @@ function processTraceBlock(p: ProcessArchive | undefined): string {
   return `<section class="process-trace"><h2>${bi("Process trace", "过程档案")}</h2>\n${rows.join("\n")}\n</section>`;
 }
 
-function selfScoreBlock(entries: ReportInput["selfScores"]): string {
+function selfScoreClass(verdict: string): string {
+  const v = verdict.toLowerCase();
+  if (v === "good" || v === "ok" || v === "regression") return v;
+  return "unknown";
+}
+
+function selfScoreDimensions(e: SelfScoreReportEntry): string {
+  const dims = Object.entries(e.dimensions ?? {})
+    .filter(([, v]) => Number.isFinite(v))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (dims.length === 0) return "";
+  return `<div class="selfscore-dims">${dims.map(([k, v]) => `<span><code>${esc(k)}</code>: <b>${esc(String(v))}</b></span>`).join(" ")}</div>`;
+}
+
+function selfScoreIssues(entries: ReportInput["selfScores"]): string[] {
+  if (entries === undefined) return [];
+  const out: string[] = [];
+  for (const e of entries) {
+    const verdict = e.verdict.toLowerCase();
+    if (verdict === "regression") out.push(`self-score regression: ${e.score}/10`);
+    else if (verdict === "ok" && e.score <= SELF_SCORE_LOW_THRESHOLD) out.push(`low self-score: ok ${e.score}/10`);
+  }
+  return out;
+}
+
+function selfScoreBlock(entries: ReportInput["selfScores"], trend: string | undefined): string {
   if (entries === undefined || entries.length === 0) return "";
   const li = entries
-    .map(
-      (e) =>
-        `<li><b>${esc(String(e.score))}</b>/10 · ${esc(e.verdict)} · <code>${esc(e.skill)}</code> · <span class="meta">${esc(e.ts)}</span>${e.note !== "" ? `<br><span class="note">${esc(e.note)}</span>` : ""}</li>`,
-    )
+    .map((e) => {
+      const cls = selfScoreClass(e.verdict);
+      const href = e.href !== undefined && e.href !== "" ? ` · <a href="${esc(e.href)}">${bi("Full note", "全文 note")}</a>` : "";
+      return (
+        `<li><span class="selfscore-badge selfscore-${cls}">${esc(e.verdict)}</span> ` +
+        `<b>${esc(String(e.score))}</b>/10 · ${esc(e.verdict)} · <code>${esc(e.skill)}</code> · <span class="meta">${esc(e.ts)}</span>${href}` +
+        `${e.note !== "" ? `<br><span class="note">${esc(e.note)}</span>` : ""}` +
+        selfScoreDimensions(e) +
+        `</li>`
+      );
+    })
     .join("\n");
-  return `<details class="selfscore"><summary>${bi("Self-Score", "自评")}（${entries.length}）</summary>\n<ul>\n${li}\n</ul>\n</details>`;
+  const trendLine = trend !== undefined && trend !== "" ? `<p class="selfscore-trend">${esc(trend)}</p>\n` : "";
+  return `<details class="selfscore"><summary>${bi("Self-Score", "自评")}（${entries.length}）</summary>\n${trendLine}<ul>\n${li}\n</ul>\n</details>`;
 }
 
 /** Render the single-file report. Pure: same input → same bytes. */
@@ -382,6 +429,7 @@ export function renderReport(input: ReportInput): string {
   const enforced = input.items.map(enforceRedLine);
   const items = enforced.map((e) => e.item);
   const discrepancies = enforced.filter((e) => e.downgraded).map((e) => e.item);
+  const scoreIssues = selfScoreIssues(input.selfScores);
   const counts = new Map<AcStatus, number>();
   for (const it of items) counts.set(it.status, (counts.get(it.status) ?? 0) + 1);
 
@@ -396,13 +444,16 @@ export function renderReport(input: ReportInput): string {
       : "";
 
   const disc =
-    discrepancies.length > 0
+    discrepancies.length > 0 || scoreIssues.length > 0
       ? `<section class="discrepancies"><h2>${bi("Discrepancies", "证据缺口")}</h2>
+${discrepancies.length > 0 ? `
 <p>${bi(
           "The ACs below carried <strong>zero evidence entries</strong> and were force-downgraded to 🟧 Claimed (red line, enforced by the renderer):",
           "下列 AC 因<strong>没有任何证据条目</strong>被强制降级为 🟧 Claimed（红线，渲染层强制）：",
         )}</p>
 <ul>${discrepancies.map((d) => `<li><a href="#${esc(d.id)}"><code>${esc(d.id)}</code></a> ${esc(d.text)}</li>`).join("\n")}</ul>
+` : ""}
+${scoreIssues.length > 0 ? `<p><strong>Self-score discrepancy</strong></p><ul>${scoreIssues.map((i) => `<li>${esc(i)}</li>`).join("\n")}</ul>` : ""}
 </section>`
       : "";
 
@@ -411,7 +462,7 @@ export function renderReport(input: ReportInput): string {
   // hollow section).
   const gate = facts !== "" ? `<h2>${bi("Quality gate", "质量门禁")}</h2>\n${facts}` : "";
   const evIndex = evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures);
-  const selfScore = selfScoreBlock(input.selfScores);
+  const selfScore = selfScoreBlock(input.selfScores, input.selfScoreTrend);
   const closingInner = [gate, disc, evIndex, selfScore].filter((s) => s !== "").join("\n");
   const closing = closingInner !== "" ? `<section class="closing">\n${closingInner}\n</section>` : "";
 
@@ -443,6 +494,9 @@ figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:8px; padding:8px 16px; background:var(--bg-raise); }
 details.selfscore summary { cursor:pointer; font-weight:600; }
 details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
+.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }
+.selfscore-good { color:var(--pass); } .selfscore-ok { color:var(--warn); } .selfscore-regression { color:var(--fail); }
+.selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }
 details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
 details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.tech[open] summary { margin-bottom:6px; }

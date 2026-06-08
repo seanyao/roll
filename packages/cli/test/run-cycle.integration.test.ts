@@ -140,9 +140,27 @@ const CLAUDE_STREAM_JSON = [
 ].join("\n");
 const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult> => {
   const wt = opts.cwd;
+  const storyId = opts.storyId ?? "US-RUN-001";
+  const notesDir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
+  mkdirSync(notesDir, { recursive: true });
+  writeFileSync(
+    join(notesDir, `2026-06-08-roll-build-${storyId}-shim.md`),
+    [
+      "---",
+      "skill: roll-build",
+      `story: ${storyId}`,
+      "score: 8",
+      "verdict: good",
+      "ts: 2026-06-08T00:00:00Z",
+      "---",
+      "",
+      "Shim delivery wrote the required self-score note.",
+    ].join("\n"),
+    "utf8",
+  );
   writeFileSync(join(wt, "delivered.txt"), "work done by shim agent\n", "utf8");
   git(wt, [...GIT_ID, "add", "-A"]);
-  git(wt, [...GIT_ID, "commit", "-q", "--no-verify", "-m", "tcr: deliver US-RUN-001"]);
+  git(wt, [...GIT_ID, "commit", "-q", "--no-verify", "-m", `tcr: deliver ${storyId}`]);
   return { stdout: CLAUDE_STREAM_JSON, stderr: "", exitCode: 0, timedOut: false };
 };
 

@@ -197,6 +197,32 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(full).toContain("score 9 good");
   });
 
+  it("US-EVID-013: retrospective renders structured self-score summary, note link, dimensions, and trend", () => {
+    const html = renderStoryDossier({
+      story,
+      selfScore: {
+        skill: "roll-build",
+        score: 9,
+        verdict: "good",
+        ts: "2026-06-08T12:00:00Z",
+        note: "证据链完整，门禁干净。",
+        href: "notes/2026-06-08-roll-build-US-A-1.md",
+        dimensions: { "test-quality": 8 },
+      },
+      selfScoreTrend: "self-score: mean 8.0 / min 7 / redo 0 (last 14)",
+    });
+    expect(html).toContain('class="selfscore-card selfscore-good"');
+    expect(html).toContain("<b>9</b>/10");
+    expect(html).toContain("good");
+    expect(html).toContain("证据链完整，门禁干净。");
+    expect(html).toContain('href="notes/2026-06-08-roll-build-US-A-1.md"');
+    expect(html).toContain("<code>test-quality</code>: <b>8</b>");
+    expect(html).toContain("self-score: mean 8.0 / min 7 / redo 0 (last 14)");
+    expect(storySpine({ story, selfScore: { skill: "roll-build", score: 9, verdict: "good", ts: "", note: "" } })).toContain(
+      "Retrospective",
+    );
+  });
+
   it("US-EVID-007: execution station can be filled by merged PR evidence when squash removed tcr commits", () => {
     const html = renderStoryDossier({
       story,
@@ -485,6 +511,8 @@ describe("US-META-008 — self-score notes live in the card folder", () => {
     });
     expect(input.retro).toContain("9");
     expect(input.retro).toContain("卡内自评正文");
+    expect(input.selfScore?.score).toBe(9);
+    expect(input.selfScore?.href).toContain("notes/2026-06-08-roll-build-US-A-1-1.md");
   });
 
   it("legacy .roll/notes still serves cards that have no local notes/", () => {
@@ -496,5 +524,30 @@ describe("US-META-008 — self-score notes live in the card folder", () => {
     );
     const input = collectStoryDossierInput(p, { id: "FIX-2", epic: "alpha", type: "FIX", delivered: false });
     expect(input.retro).toContain("旧档兼容");
+    expect(input.selfScore?.score).toBe(8);
+  });
+
+  it("US-EVID-013: collected self-score carries dimensions and trend context", () => {
+    const p = project();
+    const card = join(p, ".roll", "features", "alpha", "US-A-1");
+    mkdirSync(join(card, "notes"), { recursive: true });
+    writeFileSync(
+      join(card, "notes", "2026-06-08-roll-build-US-A-1-1.md"),
+      "---\nskill: roll-build\nstory: US-A-1\nscore: 7\nverdict: ok\nts: 2026-06-08T12:00:00Z\ntest-quality: 6\n---\n\n证据足够，但测试质量还要补强。\n",
+    );
+    mkdirSync(join(p, ".roll", "notes"), { recursive: true });
+    writeFileSync(
+      join(p, ".roll", "notes", "2026-06-01-roll-build-US-OLD-1.md"),
+      "---\nskill: roll-build\nstory: US-OLD\nscore: 9\nverdict: good\nts: 2026-06-01T12:00:00Z\n---\n\n旧好卡。\n",
+    );
+    writeFileSync(
+      join(p, ".roll", "notes", "2026-06-02-roll-build-US-OLD-2.md"),
+      "---\nskill: roll-build\nstory: US-OLD\nscore: 5\nverdict: ok\nts: 2026-06-02T12:00:00Z\n---\n\n旧低分。\n",
+    );
+    const input = collectStoryDossierInput(p, {
+      id: "US-A-1", epic: "alpha", type: "US", delivered: true,
+    });
+    expect(input.selfScore?.dimensions).toEqual({ "test-quality": 6 });
+    expect(input.selfScoreTrend).toBe("self-score: mean 7.0 / min 5 / redo 1 (last 14)");
   });
 });

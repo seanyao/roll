@@ -588,6 +588,48 @@ describe("US-ATTEST-009 — self-score notes feed the report", () => {
     expect(html).toContain("干净的一刀。");
     expect(html).not.toContain("无关条目");
   });
+
+  it("US-EVID-013: card-local note dimensions, trend, and full-note link feed the report", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    mkdirSync(join(storyDir, "notes"), { recursive: true });
+    writeFileSync(
+      join(storyDir, "notes", "2026-06-08-roll-fix-FIX-300-1780000002.md"),
+      [
+        "---",
+        "skill: roll-fix",
+        "story: FIX-300",
+        "score: 5",
+        "verdict: ok",
+        "ts: 2026-06-08T20:00:00Z",
+        "test-quality: 6",
+        "---",
+        "",
+        "证据够用，但测试质量还要补强。",
+      ].join("\n"),
+    );
+    mkdirSync(join(proj, ".roll", "notes"), { recursive: true });
+    writeFileSync(
+      join(proj, ".roll", "notes", "2026-06-01-roll-fix-FIX-100-1780000000.md"),
+      "---\nskill: roll-fix\nstory: FIX-100\nscore: 9\nverdict: good\nts: 2026-06-01T20:00:00Z\n---\n\n旧好卡。\n",
+    );
+    writeFileSync(
+      join(proj, ".roll", "notes", "2026-06-02-roll-fix-FIX-101-1780000001.md"),
+      "---\nskill: roll-fix\nstory: FIX-101\nscore: 5\nverdict: ok\nts: 2026-06-02T20:00:00Z\n---\n\n旧低分。\n",
+    );
+
+    await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    const html = readFileSync(
+      join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
+      "utf8",
+    );
+    expect(html).toContain("<code>test-quality</code>: <b>6</b>");
+    expect(html).toContain("self-score: mean 6.3 / min 5 / redo 2 (last 14)");
+    expect(html).toContain('href="../notes/2026-06-08-roll-fix-FIX-300-1780000002.md"');
+    expect(html).toContain("low self-score: ok 5/10");
+  });
 });
 
 // ── US-ATTEST-014 — process trace wiring ────────────────────────────────────

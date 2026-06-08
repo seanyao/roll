@@ -48,6 +48,25 @@ function withReport(storyId: string, mtimeSec?: number, body = '<div class="ev e
   return wt;
 }
 
+function withSelfScore(wt: string, storyId: string, score: number, verdict: "good" | "ok" | "regression"): void {
+  const dir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `2026-06-08-roll-build-${storyId}-${score}.md`),
+    [
+      "---",
+      "skill: roll-build",
+      `story: ${storyId}`,
+      `score: ${score}`,
+      `verdict: ${verdict}`,
+      "ts: 2026-06-08T12:00:00Z",
+      "---",
+      "",
+      "自评理由首句。",
+    ].join("\n"),
+  );
+}
+
 /** A fresh report that is an EMPTY SHELL: parseable but zero AC content, no ac-map. */
 function withEmptyShell(storyId: string, mtimeSec: number): string {
   const wt = tmp("shell");
@@ -136,12 +155,47 @@ describe("readAttestGateMode", () => {
 describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", () => {
   it("produced: fresh report → event only, no alert, not blocked", () => {
     const wt = withReport("FIX-310", 2000);
+    withSelfScore(wt, "FIX-310", 8, "good");
     const { alerts, events, s } = sinks();
     const r = runAttestGate(wt, "FIX-310", "c-1", "soft", 1000, s);
     expect(r.verdict).toBe("produced");
     expect(r.blocked).toBe(false);
     expect(alerts).toHaveLength(0);
     expect(events).toEqual([{ cycleId: "c-1", verdict: "produced", reasons: r.reasons }]);
+  });
+
+  it("US-EVID-013: missing self-score note is skipped and hard-blocked", () => {
+    const wt = withReport("FIX-SCORE-MISSING", 2000);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-SCORE-MISSING", "c-score-missing", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons[0]).toMatch(/self-score/i);
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("US-EVID-013: regression self-score is a hard gate failure", () => {
+    const wt = withReport("FIX-SCORE-REG", 2000);
+    withSelfScore(wt, "FIX-SCORE-REG", 3, "regression");
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-SCORE-REG", "c-score-reg", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons[0]).toContain("regression");
+    expect(alerts[0]).toContain("self-score");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("US-EVID-013: low ok self-score is skipped with a discrepancy reason", () => {
+    const wt = withReport("FIX-SCORE-LOW", 2000);
+    withSelfScore(wt, "FIX-SCORE-LOW", 5, "ok");
+    const { alerts, s } = sinks();
+    const r = runAttestGate(wt, "FIX-SCORE-LOW", "c-score-low", "soft", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(false);
+    expect(r.reasons[0]).toMatch(/low self-score.*partial.*Discrepancy/i);
+    expect(alerts[0]).toContain("self-score");
   });
 
   it("no AC block → exempt, even in hard mode", () => {

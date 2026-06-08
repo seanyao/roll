@@ -86,7 +86,7 @@ import {
 } from "./agent-spawn.js";
 import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
-import { runPairing, type PairReview } from "./pairing-gate.js";
+import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 
 const execFileAsync = promisify(execFile);
@@ -480,6 +480,17 @@ export async function executeCommand(
       // this is inert until the owner opts in via `roll pair init` — no behavior
       // change for repos without the config. NEVER blocks the cycle (30s hard
       // timeout in reviewPeer; runPairing swallows all errors).
+      //
+      // US-PAIR-004 multi-stage: pairing fires at EVERY enabled stage
+      // (design/test/code/cycle), each independently opt-out via pairing.yaml
+      // `stages`. MVP-pragmatic: all enabled stages are invoked from this single
+      // capture hook — a true per-phase pre-code hook for design/test is a larger
+      // refactor (the loop has no distinct design/test phase boundary yet), so the
+      // diff a design-stage peer sees is the same cycle diff. The stage plumbing is
+      // real (each stage selects its own peer, writes its own evidence, stamps its
+      // own events); narrowing the per-stage context/diff is a future refinement.
+      // Every stage preserves the PAIR-003 invariants (timeout / non-blocking /
+      // cost / file-absent=off) since they all route through runPairing.
       {
         const reviewPeer = async (peer: string, diff: string, timeoutMs: number): Promise<PairReview | null> => {
           const prompt =
@@ -525,13 +536,14 @@ export async function executeCommand(
         } catch {
           /* history is best-effort — a read miss must not affect the cycle */
         }
-        await runPairing(ports.repoCwd, ports.paths.worktreePath, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", {
+        // US-PAIR-004: build the deps once, then run each enabled stage.
+        const pairingDeps = {
           installed: agentsInstalled(realAgentEnv()),
           isAvailable: () => true, // MVP: `installed` is the hard gate; a dead peer → reviewPeer null (non-blocking). Real probe is a refinement.
           reviewPeer,
           ...(pairHistory !== undefined ? { history: pairHistory } : {}),
           changedFiles: cycleChangedFiles,
-          diff: async (cwd) => {
+          diff: async (cwd: string) => {
             try {
               // Baseline mirrors peer-gate's cycleChangedFiles (origin/main...HEAD):
               // roll's loop always targets main (Done ≡ merged to main), so this is
@@ -542,9 +554,14 @@ export async function executeCommand(
               return "";
             }
           },
-          event: (e) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
+          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => ports.clock(),
-        });
+        };
+        // Iterate the enabled stages (config order). file-absent/disabled → [] →
+        // the loop body never runs, so a repo without pairing.yaml is untouched.
+        for (const stage of enabledPairingStages(ports.repoCwd)) {
+          await runPairing(ports.repoCwd, ports.paths.worktreePath, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", stage, pairingDeps);
+        }
       }
       // FIX-207 attest gate: a delivery (commits ahead + a real story) that ships
       // with no FRESH acceptance report leaves an auditable ALERT + `attest:gate`

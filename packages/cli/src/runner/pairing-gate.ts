@@ -21,6 +21,38 @@ import { join } from "node:path";
 import { parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
 import { assessComplexity } from "./peer-gate.js";
 
+/**
+ * US-PAIR-004 — the executor's stage-iteration seam. Reads `.roll/pairing.yaml`
+ * and returns the stages pairing should fire at THIS cycle, in config order.
+ * file-absent / disabled / malformed → `[]` (pairing off, never silent magic,
+ * never throws — a broken config must not topple a cycle). Pure-ish (fs read +
+ * parse) so the executor just maps `runPairing(stage, …)` over the result and
+ * the iteration decision is unit-tested without a live git repo.
+ */
+export function enabledPairingStages(projectDir: string): PairingStage[] {
+  try {
+    const cfgPath = join(projectDir, ".roll", "pairing.yaml");
+    if (!existsSync(cfgPath)) return [];
+    const cfg = parsePairingConfig(readFileSync(cfgPath, "utf8"));
+    if (!cfg.enabled) return [];
+    // De-dupe (kimi pair-review): a config that repeats a stage must not fire it
+    // twice — duplicate peer spawns, duplicate events, and a clobbered evidence
+    // file. Keep first-seen order so the config still reads top-to-bottom.
+    return cfg.stages.filter((s, i, arr) => arr.indexOf(s) === i);
+  } catch {
+    return []; // malformed config → pairing off, not a cycle failure
+  }
+}
+
+/** Evidence path for a stage's verdict. `code` keeps the PAIR-003 legacy contract
+ *  path (`cycle-<id>.pair.json`); other stages are namespaced so concurrent stages
+ *  in one cycle never clobber each other. */
+function evidencePath(runtimeDir: string, cycleId: string, stage: PairingStage): string {
+  const dir = join(runtimeDir, "peer");
+  const name = stage === "code" ? `cycle-${cycleId}.pair.json` : `cycle-${cycleId}.${stage}.pair.json`;
+  return join(dir, name);
+}
+
 export interface PairReview {
   verdict: "agree" | "refine" | "object";
   findings: string[];
@@ -29,7 +61,7 @@ export interface PairReview {
 
 export type PairEvent =
   | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; ts: number }
-  | { type: "pair:verdict"; cycleId: string; peer: string; verdict: PairReview["verdict"]; findings: number; cost: number; ts: number }
+  | { type: "pair:verdict"; cycleId: string; peer: string; verdict: PairReview["verdict"]; findings: number; cost: number; stage: string; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number };
 
 export interface RunPairingDeps {
@@ -67,9 +99,14 @@ export interface RunPairingResult {
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * Run one pairing for a cycle. Returns a status (callers/tests assert on it);
- * all side-effects go through the injected event sink + evidence file. Never
- * throws — pairing is an enhancement, never a cycle blocker.
+ * Run one pairing for a cycle AT A GIVEN STAGE. Returns a status (callers/tests
+ * assert on it); all side-effects go through the injected event sink + evidence
+ * file. Never throws — pairing is an enhancement, never a cycle blocker.
+ *
+ * US-PAIR-004: `stage` is now a parameter (was hardcoded `code`). The executor
+ * iterates {@link enabledPairingStages} and calls this once per enabled stage,
+ * each independently opt-out via pairing.yaml `stages`. All PAIR-003 invariants
+ * (30s timeout, non-blocking, cost in events, file-absent=off) hold per stage.
  */
 export async function runPairing(
   projectDir: string,
@@ -77,9 +114,9 @@ export async function runPairing(
   runtimeDir: string,
   cycleId: string,
   workingAgent: string,
+  stage: PairingStage,
   deps: RunPairingDeps,
 ): Promise<RunPairingResult> {
-  const stage: PairingStage = "code"; // MVP: code only; other stages are US-PAIR-004.
   try {
     const cfgPath = join(projectDir, ".roll", "pairing.yaml");
     if (!existsSync(cfgPath)) return { status: "off" }; // file absent = pairing off
@@ -116,14 +153,14 @@ export async function runPairing(
     const review = await deps.reviewPeer(peer, diff, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     if (review === null) return { status: "timeout", peer }; // non-blocking: move on
 
-    const dir = join(runtimeDir, "peer");
-    mkdirSync(dir, { recursive: true });
+    const path = evidencePath(runtimeDir, cycleId, stage);
+    mkdirSync(join(runtimeDir, "peer"), { recursive: true });
     writeFileSync(
-      join(dir, `cycle-${cycleId}.pair.json`),
+      path,
       JSON.stringify({ cycleId, workingAgent, peer, stage, ...review }, null, 2),
       "utf8",
     );
-    deps.event({ type: "pair:verdict", cycleId, peer, verdict: review.verdict, findings: review.findings.length, cost: review.cost, ts: deps.now() });
+    deps.event({ type: "pair:verdict", cycleId, peer, verdict: review.verdict, findings: review.findings.length, cost: review.cost, stage, ts: deps.now() });
     return { status: "reviewed", peer, verdict: review.verdict };
   } catch {
     return { status: "error" }; // never throw — pairing must not fail the cycle

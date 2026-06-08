@@ -35,7 +35,13 @@ export interface AcRow {
 /** Everything the dossier needs beyond the 001a story model. */
 export interface StoryDossierInput {
   story: DossierStory;
-  /** First blockquote / lede paragraph of spec.md — the wish. */
+  /** The story primitive parsed from spec.md (US-DOSSIER-003). */
+  narrative?: { asA?: string; iWant?: string; soThat?: string };
+  /** Domain Model Context line, e.g. "Acceptance Evidence" (US-DOSSIER-003). */
+  context?: string;
+  /** AC checklist items parsed from the spec's `**AC:**` block (US-DOSSIER-003). */
+  acItems?: { text: string; checked: boolean }[];
+  /** First blockquote / lede paragraph of spec.md — the wish (fallback). */
   wish?: string;
   /** Spec bullets under a 方案/Solution/Design heading. */
   design?: string[];
@@ -91,10 +97,29 @@ function section(en: string, zh: string, body: string, empty: boolean): string {
 /** Render the dossier page. */
 export function renderStoryDossier(d: StoryDossierInput): string {
   const s = d.story;
-  const definition =
-    d.wish !== undefined && d.wish !== ""
+  // US-DOSSIER-003: definition station = story primitive (As a / I want / So
+  // that). Falls back to the wish blockquote, then an honest empty state.
+  const n = d.narrative;
+  const hasNarr = n !== undefined && (n.asA !== undefined || n.iWant !== undefined || n.soThat !== undefined);
+  const narrRow = (label: [string, string], v: string | undefined): string =>
+    v === undefined || v === "" ? "" : `<div class="np-row"><dt>${bi(label[0], label[1])}</dt><dd>${esc(v)}</dd></div>`;
+  const definition = hasNarr
+    ? `<dl class="story-primitive">` +
+      narrRow(["As a", "作为"], n?.asA) +
+      narrRow(["I want", "我要"], n?.iWant) +
+      narrRow(["So that", "以便"], n?.soThat) +
+      `</dl>`
+    : d.wish !== undefined && d.wish !== ""
       ? `<div class="wish-quote">${esc(d.wish)}</div>`
-      : `<p class="empty">${bi("No wish recorded in spec.md", "spec.md 未记录愿望")}</p>`;
+      : `<p class="empty">${bi("No story primitive in spec.md", "spec.md 未记录故事原语")}</p>`;
+  const defEmpty = !hasNarr && (d.wish === undefined || d.wish === "");
+  // US-DOSSIER-003: AC checklist (the definition of done) rendered inline.
+  const acChecklist =
+    (d.acItems?.length ?? 0) > 0
+      ? `<ul class="ac-checklist">${(d.acItems ?? [])
+          .map((a) => `<li>${a.checked ? "☑" : "☐"} ${esc(a.text)}</li>`)
+          .join("")}</ul>`
+      : `<p class="empty">${bi("No AC in spec.md", "spec.md 未记录 AC")}</p>`;
   const design =
     (d.design?.length ?? 0) > 0
       ? `<ul>${(d.design ?? []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`
@@ -136,6 +161,10 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `<title>${esc(s.id)}${s.title !== undefined ? ` — ${esc(s.title)}` : ""}</title>\n` +
     `<style>\n${CHROME_CSS}${DOSSIER_CSS}` +
     `.phase-done { border-left:4px solid var(--pass); } .phase-pending { border-left:4px solid var(--line); }\n` +
+    `.story-primitive { margin:0; } .story-primitive .np-row { display:flex; gap:10px; margin:4px 0; }\n` +
+    `.story-primitive dt { flex:0 0 64px; color:var(--muted); font:600 12.5px/1.7 var(--sans); }\n` +
+    `.story-primitive dd { margin:0; flex:1; }\n` +
+    `.ac-checklist { list-style:none; padding:0; margin:0; } .ac-checklist li { margin:3px 0; }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
     `<p class="crumb"><a href="../../index.html">${bi("Features Index", "功能档案")}</a> / <a href="../index.html">${esc(s.epic)}</a> / ${esc(s.id)}</p>\n` +
@@ -144,10 +173,13 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     (s.title !== undefined ? `<p class="lede">${esc(s.title)}</p>\n` : "") +
     `<div class="kv"><span class="type type-${esc(s.type)}">${esc(s.type)}</span>` +
     `<span>${bi("epic", "史诗")} <b>${esc(s.epic)}</b></span>` +
+    (d.context !== undefined && d.context !== "" ? `<span>${bi("context", "上下文")} <b>${esc(d.context)}</b></span>` : "") +
     (s.created !== undefined ? `<span>${bi("created", "创建")} <b>${esc(s.created)}</b></span>` : "") +
+    `<span><a href="spec.md">${bi("Design doc · spec.md", "设计文档 · spec.md")}</a></span>` +
     `</div>\n</div>\n` +
     storySpine(d) +
-    section("Definition", "立项", definition, d.wish === undefined || d.wish === "") +
+    section("Definition", "立项", definition, defEmpty) +
+    section("Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
     section("Design", "设计", design, (d.design?.length ?? 0) === 0) +
     section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0) +
     section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0)) +
@@ -180,6 +212,28 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     }
     const wish = quote.join(" ").replace(/\s+/g, " ").trim();
     if (wish !== "") out.wish = wish;
+    // US-DOSSIER-003: story primitive (As a / I want / So that).
+    const narr: { asA?: string; iWant?: string; soThat?: string } = {};
+    const asA = /^[-*]\s*As a\s+(.*)$/im.exec(spec);
+    const iWant = /^[-*]\s*I want\s+(.*)$/im.exec(spec);
+    const soThat = /^[-*]\s*So that\s+(.*)$/im.exec(spec);
+    if (asA !== null) narr.asA = (asA[1] ?? "").trim();
+    if (iWant !== null) narr.iWant = (iWant[1] ?? "").trim();
+    if (soThat !== null) narr.soThat = (soThat[1] ?? "").trim();
+    if (narr.asA !== undefined || narr.iWant !== undefined || narr.soThat !== undefined) out.narrative = narr;
+    // US-DOSSIER-003: Domain Model Context line.
+    const ctx = /^[-*]\s*Context:\s*(.*)$/im.exec(spec);
+    if (ctx !== null) out.context = (ctx[1] ?? "").trim();
+    // US-DOSSIER-003: AC checklist (the `**AC:**` block's checkbox items).
+    const acItems: { text: string; checked: boolean }[] = [];
+    let inAc = false;
+    for (const l of spec.split("\n")) {
+      if (/^\*\*AC:?\*\*/i.test(l.trim())) { inAc = true; continue; }
+      if (inAc && /^\*\*[A-Z]/.test(l.trim())) break; // next bold section ends the block
+      const m = /^[-*]\s*\[([ xX])\]\s+(.*)$/.exec(l.trim());
+      if (inAc && m !== null) acItems.push({ checked: (m[1] ?? "").toLowerCase() === "x", text: (m[2] ?? "").trim() });
+    }
+    if (acItems.length > 0) out.acItems = acItems;
     const design: string[] = [];
     let inDesign = false;
     for (const l of spec.split("\n")) {

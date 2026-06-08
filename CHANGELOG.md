@@ -32,13 +32,15 @@
 - 档案脊柱口径对齐，老的已完成卡一次性补跑回填证据（US-EVID-007）
 - 自评分作为评分门禁参与通过与否，回归或低分能真的拦下完成（US-EVID-013）
 - 无人值守执行器，出错先归因再自动纠正，默认保守且不自动合主干且振荡移交刹车 — report: `.roll/features/acceptance-evidence/US-EVID-014/2026-06-08T23-03-10/US-EVID-014-report.html`
+- 二阶闭环把成功率趋势回灌去自整定门槛与路由（US-EVID-015）
 - 无人值守安全刹车，同卡反复退回自动熔断暂停并加一页夜间运行晨报 — report: `.roll/features/acceptance-evidence/US-EVID-016/2026-06-08T23-54-55/US-EVID-016-report.html`
 - 结对候选选择器纯函数加脚手架配置：理性筛合格候选、强制不同厂商、可复现轮换、无候选直报，一条命令从代理列表物化一份可读可改的配置文件（US-PAIR-001）
 - 代码阶段交付后由一个不同代理单向互检改动，结论留证据与事件，硬超时不阻塞且记成本（US-PAIR-003）
 - 跨代理结对的中英双轨文档刷新收尾（US-PAIR-007）
 - roll init 顺带生成 pairing 配置并在界面告知，新用户少一步且仍显式（US-PAIR-008）
-- site: roll-build explainer page (site-aligned, bilingual) + homepage CTA（PR#546）
-- site: track site/diagrams/ + roll-build skill infographic（PR#545）
+- attest 从迁移后的多故事 epic 文件抽取验收条目返回空，使已有 ac-map 的 Done 故事重渲染成零条 AC，US-PORT-001 实证，证据链失真（FIX-226） `[loop]`
+- release: v3.608.2（PR#544）
+- pairing docs + site refresh for roll init scaffolding（PR#543）
 - Design doc link opens rendered spec.html (not raw markdown)（US-DOSSIER-004）
 
 ## v3.608.2 — 2026-06-08

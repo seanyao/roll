@@ -10,8 +10,9 @@ roll init
 
 `roll init` 根据当前目录状态自动选择三种模式之一：
 
-1. **空目录** —— 全新起点。Roll 直接写入 `AGENTS.md` 和空的 `.roll/`
-   骨架（`backlog.md`、`features/`、`domain/`），不问问题。这是
+1. **空目录** —— 全新起点。Roll 直接写入 `AGENTS.md`、空的 `.roll/`
+   骨架（`backlog.md`、`features/`、`domain/`），以及一份
+   `.roll/pairing.yaml`（[跨 agent 结对](pairing.md)，界面会告知），不问问题。这是
    **seed（播种）** 接入模式 —— 见 [patterns/seed-pattern.md](patterns/seed-pattern.md)。
 2. **已有遗留代码库** —— Roll 检测到源码但没有 `.roll/`。它**不会**默默
    生成骨架，而是引导你用 `$roll-onboard`：扫描代码、问一组认知 / 范围 /

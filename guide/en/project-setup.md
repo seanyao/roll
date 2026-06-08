@@ -11,8 +11,10 @@ roll init
 `roll init` detects the current directory state and picks one of three modes:
 
 1. **Empty directory** — fresh start. Roll writes `AGENTS.md` plus an empty
-   `.roll/` scaffold (`backlog.md`, `features/`, `domain/`). No prompts. This is
-   the **seed** adoption pattern — see [patterns/seed-pattern.md](patterns/seed-pattern.md).
+   `.roll/` scaffold (`backlog.md`, `features/`, `domain/`) and a
+   `.roll/pairing.yaml` for [cross-agent pairing](pairing.md) (the init UI
+   announces it). No prompts. This is the **seed** adoption pattern — see
+   [patterns/seed-pattern.md](patterns/seed-pattern.md).
 2. **Existing legacy codebase** — Roll detects existing source files but no
    `.roll/` directory. It does **not** silently scaffold; instead it surfaces
    `$roll-onboard`, an interactive skill that scans the codebase, asks a short

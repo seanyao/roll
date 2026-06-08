@@ -10,8 +10,17 @@
 ## 开启 —— 显式，绝不静默
 
 ```bash
+# 新项目：无需操作——`roll init` 已经帮你生成。
+# 现有项目：一条命令补上。
 roll pair init        # 从已安装的 agent 物化 .roll/pairing.yaml
 ```
+
+- **新项目**：`roll init` 会顺带生成 `.roll/pairing.yaml`（界面会告知）——无需单独一步。
+- **现有 roll 项目**：直接跑 `roll pair init` 即可，这是最精准最小的命令——**不用**重跑完整
+  `roll init`（那还会 re-merge 约定，给 pairing 用是杀鸡用牛刀）。
+
+两条路生成的文件完全一致（同一套脚手架逻辑）；`roll pair init` 幂等（已有 pairing.yaml
+不会覆盖，要重生成才加 `--force`）。
 
 这是"默认隐式开"和"纯手写 opt-in"之间的第三条路：命令从 `roll agents list`
 **生成**一份显式、可审计的 `.roll/pairing.yaml`，把每个默认值都写进文件（而非藏在
@@ -33,8 +42,6 @@ capability:
   每个可独立关闭，默认仅 `code`。
 - `capability` —— 每个 agent 被声明能复检的阶段。声明会与 registry 交叉校验，
   乱写的名字会被拒绝。
-
-`roll pair init` 幂等：不会覆盖你的修改（用 `roll pair init --force` 才重新生成）。
 
 ## 看它做了什么 —— 可观测性
 

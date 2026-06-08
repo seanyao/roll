@@ -105,7 +105,7 @@ window.RollData = (function () {
     },
     FEATURE_GROUPS: [
       { id: "adoption", title: "Adoption Paths", blurb: "Three ways to bring roll on board.", features: [
-        { name: "roll init",     mono: true, desc: "Fresh project bootstrap — creates AGENTS.md, .roll/backlog.md, .roll/features/.", badges: ["core"] },
+        { name: "roll init",     mono: true, desc: "Fresh project bootstrap — creates AGENTS.md, .roll/backlog.md, .roll/features/, and .roll/pairing.yaml (cross-agent pairing).", badges: ["core"] },
         { name: "$roll-onboard", mono: true, desc: "Existing codebase: 3-minute survey, then roll init --apply lays down the .roll/ structure without surprise edits.", badges: ["new", "highlight"] },
         { name: "roll migrate",  mono: true, desc: "Upgrade a 1.x project: BACKLOG.md + docs/{features,briefs,dream,design,domain}/ → .roll/ in one atomic commit, git mv preserves history.", badges: ["new"] },
       ]},
@@ -149,6 +149,7 @@ window.RollData = (function () {
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
         { name: "Fallback Routing", desc: "Four complexity slots (easy/default/hard/fallback) each map to a locally-installed agent; when the slot agent is down or rate-limited, work fails over to the fallback-slot agent.", badges: ["highlight"] },
         { name: "roll peer", mono: true, desc: "Structured negotiation: propose → challenge → refine, up to 3 rounds.", badges: ["core"] },
+        { name: "Cross-Agent Pairing", desc: "A different-vendor agent auto-reviews each delivery for perspective diversity — rational heterogeneous selection, 30s-timeout non-blocking, cost shown in roll pair status. Scaffolded at roll init.", badges: ["new", "highlight"] },
         { name: "PR Inbox",  desc: "External PRs get AI review before merge; stale PRs auto-rebase onto main.", badges: ["new"] },
         { name: "roll review-pr", mono: true, desc: "On-demand AI review for any PR, any agent, any git host.", badges: ["new"] },
       ]},
@@ -284,7 +285,7 @@ window.RollData = (function () {
     },
     FEATURE_GROUPS: [
       { id: "adoption", title: "接入路径", blurb: "三种方式把 roll 接进项目。", features: [
-        { name: "roll init",     mono: true, desc: "新项目脚手架——创建 AGENTS.md、.roll/backlog.md、.roll/features/。", badges: ["core"] },
+        { name: "roll init",     mono: true, desc: "新项目脚手架——创建 AGENTS.md、.roll/backlog.md、.roll/features/、以及 .roll/pairing.yaml（跨 agent 结对）。", badges: ["core"] },
         { name: "$roll-onboard", mono: true, desc: "现有代码库:3 分钟问询,roll init --apply 落地 .roll/ 结构,不偷改任何源文件。", badges: ["new", "highlight"] },
         { name: "roll migrate",  mono: true, desc: "升级 1.x 老项目:BACKLOG.md + docs/{features,briefs,dream,design,domain}/ 一次性迁入 .roll/,git mv 保留历史。", badges: ["new"] },
       ]},
@@ -328,6 +329,7 @@ window.RollData = (function () {
       { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
         { name: "故障转移", desc: "四个复杂度槽位（easy/default/hard/fallback）各自映射到本机已装 agent；槽位 agent 宕机或限流时，工作转移到 fallback 槽位 agent。", badges: ["highlight"] },
         { name: "roll peer", mono: true, desc: "结构化协商:提案 → 挑战 → 精炼,最多三轮。", badges: ["core"] },
+        { name: "跨 Agent 结对", desc: "每次交付由一个不同厂商的 agent 自动复检换视角——理性异构选择、30秒超时不阻塞、成本在 roll pair status 可见。roll init 时即生成配置。", badges: ["new", "highlight"] },
         { name: "PR 收件箱",  desc: "外部 PR 先经 AI 评审再合入;过时 PR 自动 rebase。", badges: ["new"] },
         { name: "roll review-pr", mono: true, desc: "对任意 PR 按需发起 AI 评审,任意 agent、任意 git 平台。", badges: ["new"] },
       ]},

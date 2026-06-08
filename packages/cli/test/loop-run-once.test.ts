@@ -89,6 +89,43 @@ describe("realAgentSpawn child-process path (PATH shim, no real claude)", () => 
     expect(res.timedOut).toBe(true);
     expect(res.exitCode).not.toBe(0);
   });
+
+  it("US-EVID-001: explicit runDir is exported to the child and overrides ambient ROLL_RUN_DIR", async () => {
+    const dir = tmp("run-dir-env");
+    const shim = join(dir, "claude");
+    writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        "echo \"ROLL_RUN_DIR=$ROLL_RUN_DIR\"",
+        "echo \"ROLL_EVIDENCE_DIR=$ROLL_EVIDENCE_DIR\"",
+        "echo \"ROLL_SCREENSHOTS_DIR=$ROLL_SCREENSHOTS_DIR\"",
+        "exit 0",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(shim, 0o755);
+    const runDir = join(dir, "frame");
+    const previous = process.env["ROLL_RUN_DIR"];
+    process.env["ROLL_RUN_DIR"] = "/wrong/frame";
+    try {
+      const res = await realAgentSpawn("claude", {
+        cwd: dir,
+        skillBody: "x",
+        bin: shim,
+        runDir,
+      });
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout).toContain(`ROLL_RUN_DIR=${runDir}`);
+      expect(res.stdout).toContain(`ROLL_EVIDENCE_DIR=${join(runDir, "evidence")}`);
+      expect(res.stdout).toContain(`ROLL_SCREENSHOTS_DIR=${join(runDir, "screenshots")}`);
+      expect(res.stdout).not.toContain("/wrong/frame");
+    } finally {
+      if (previous === undefined) delete process.env["ROLL_RUN_DIR"];
+      else process.env["ROLL_RUN_DIR"] = previous;
+    }
+  });
 });
 
 describe("FIX-204A — skill resolution + blind-agent refusal", () => {

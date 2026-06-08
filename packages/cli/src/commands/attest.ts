@@ -44,6 +44,7 @@ import type { RollEvent } from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
+  openEvidenceFrame,
   redactSecrets,
   screenshotEvidenceRef,
   writeEvidenceJson,
@@ -417,7 +418,7 @@ export function detectBeforeAfter(runDir: string): BeforeAfterPair[] {
 }
 
 const USAGE = [
-  "Usage: roll attest <story-id> [--deploy-url <url>]",
+  "Usage: roll attest <story-id> [--deploy-url <url>] [--run-dir <path>]",
   "                   [--capture-terminal | --capture-tmux <session> | --capture-command <cmd>]",
   "                   [--capture-region <x,y,w,h>]",
   "  --capture-tmux <session>   self-capture a terminal attached to a tmux session (unattended Gate)",
@@ -428,7 +429,20 @@ const USAGE = [
 
 /** `roll attest <story-id> [--deploy-url <url>] [--capture-tmux <s> | --capture-command <c>]` */
 export async function attestCommand(args: string[], deps: AttestDeps = {}): Promise<number> {
-  const storyId = args.find((a) => !a.startsWith("-"));
+  const flagsWithValue = new Set(["--deploy-url", "--run-dir", "--capture-tmux", "--capture-command", "--capture-region"]);
+  let storyId: string | undefined;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === undefined) continue;
+    if (flagsWithValue.has(arg)) {
+      i += 1;
+      continue;
+    }
+    if (!arg.startsWith("-")) {
+      storyId = arg;
+      break;
+    }
+  }
   if (storyId === undefined || storyId === "") {
     process.stderr.write(USAGE + "\n");
     return 1;
@@ -438,6 +452,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     return i >= 0 ? args[i + 1] : undefined;
   };
   const deployUrl = flagVal("--deploy-url");
+  const explicitRunDir = flagVal("--run-dir");
+  const envRunDir = (process.env["ROLL_RUN_DIR"] ?? "").trim();
+  const providedRunDir =
+    explicitRunDir !== undefined && explicitRunDir !== "" ? explicitRunDir : envRunDir !== "" ? envRunDir : undefined;
   // US-ATTEST-011 — unattended terminal self-capture lane. Driven by the Gate
   // session in a headless cycle; on a non-GUI / no-permission host the lane
   // honestly skips and the report drops the self-capture block (no placeholder).
@@ -464,13 +482,13 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // run dir + latest symlink (never overwrite history).
   const now = (deps.now ?? ((): Date => new Date()))();
   const p2 = (n: number): string => String(n).padStart(2, "0");
-  const runId = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}T${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`;
+  const generatedRunId = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}T${p2(now.getHours())}-${p2(now.getMinutes())}-${p2(now.getSeconds())}`;
   // US-META-001: deliverables land in the card folder `features/<epic>/<ID>/`
   // (epic via the backlog-generated index, uncategorized fallback). Runs never
   // overwrite history; `latest` symlinks the newest.
   const storyDir = cardArchiveDir(projectPath, storyId);
-  const runDir = join(storyDir, runId);
-  mkdirSync(runDir, { recursive: true });
+  const runDir = providedRunDir ?? join(storyDir, generatedRunId);
+  openEvidenceFrame({ runDir });
 
   // terminal self-capture (US-ATTEST-011): drive the dispatcher's terminal lane
   // into this run's screenshots/ BEFORE evidence sweep, then bridge a TAKEN shot
@@ -570,7 +588,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const latest = join(storyDir, "latest");
   try {
     rmSync(latest, { force: true });
-    symlinkSync(runId, latest);
+    symlinkSync(relative(storyDir, runDir), latest);
   } catch {
     warn("latest symlink update failed (report still written)");
   }
@@ -579,7 +597,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const indexPath = join(storyDir, "index.html");
   if (existsSync(indexPath)) {
     try {
-      const reportRel = join(runId, reportFileName(storyId));
+      const reportRel = join(relative(storyDir, runDir), reportFileName(storyId));
       const deliveryHtml =
         `<p><a href="${reportRel}">${bi("Attestation report", "验收报告")}</a></p>\n` +
         `<p class="muted">${bi("Delivered", "交付于")} ${new Date().toISOString().slice(0, 10)}</p>\n`;

@@ -96,6 +96,47 @@ describe("attestCommand", () => {
     expect(readlinkSync(join(storyDir, "latest"))).toBe("2026-06-06T01-02-03");
   });
 
+  it("US-EVID-001: --run-dir reuses an already-opened evidence frame and points latest at it", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const runDir = join(storyDir, "cycle-20260608-001");
+    mkdirSync(join(runDir, "evidence"), { recursive: true });
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "evidence", "kept.txt"), "pre-spawn proof\n");
+
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--run-dir", runDir], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }),
+      ),
+    );
+
+    expect(code).toBe(0);
+    expect(readFileSync(join(runDir, "evidence", "kept.txt"), "utf8")).toBe("pre-spawn proof\n");
+    expect(existsSync(join(runDir, "evidence.json"))).toBe(true);
+    expect(existsSync(join(runDir, "FIX-300-report.html"))).toBe(true);
+    expect(readlinkSync(join(storyDir, "latest"))).toBe("cycle-20260608-001");
+  });
+
+  it("US-EVID-001: ROLL_RUN_DIR is the backward-compatible frame handoff for loop agents", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const runDir = join(storyDir, "cycle-env");
+    mkdirSync(join(runDir, "evidence"), { recursive: true });
+    const previous = process.env["ROLL_RUN_DIR"];
+    process.env["ROLL_RUN_DIR"] = runDir;
+    try {
+      const code = await silenced(() =>
+        inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+      );
+      expect(code).toBe(0);
+    } finally {
+      if (previous === undefined) delete process.env["ROLL_RUN_DIR"];
+      else process.env["ROLL_RUN_DIR"] = previous;
+    }
+    expect(existsSync(join(runDir, "FIX-300-report.html"))).toBe(true);
+    expect(readlinkSync(join(storyDir, "latest"))).toBe("cycle-env");
+  });
+
   it("no ac-map.json ⇒ every AC honestly Claimed (red line, no invented evidence)", async () => {
     const proj = project();
     await silenced(() =>

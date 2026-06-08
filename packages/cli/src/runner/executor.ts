@@ -93,6 +93,7 @@ import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
+import { attestCommand } from "../commands/attest.js";
 import { cardArchiveDir } from "../lib/archive.js";
 
 const execFileAsync = promisify(execFile);
@@ -189,6 +190,11 @@ export interface CapturePort {
   fromMarker(marker: CaptureMarker, runDir: string): Promise<ScreenshotResult>;
 }
 
+/** Acceptance evidence facet — renders the final report into a run frame. */
+export interface AttestPort {
+  render(projectCwd: string, storyId: string, runDir: string): Promise<number>;
+}
+
 /**
  * The full injectable Ports bundle. The runtime wiring ({@link nodePorts})
  * binds these to the real infra; tests pass fakes for every facet so NO real
@@ -204,6 +210,7 @@ export interface Ports {
   budget: BudgetPort;
   evidence: EvidencePort;
   capture: CapturePort;
+  attest: AttestPort;
   agentSpawn: AgentSpawn;
   clock: ProcessClock;
   /** Runtime paths the executor writes to. */
@@ -645,6 +652,16 @@ export async function executeCommand(
           await runPairing(ports.repoCwd, ports.paths.worktreePath, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", stage, pairingDeps);
         }
       }
+      const storyId = ctx.storyId ?? "";
+      if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
+        const rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
+        if (rc !== 0) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `attest render failed for ${storyId} in cycle ${ctx.cycleId ?? ""} (exit ${rc})`,
+          );
+        }
+      }
       // FIX-207 attest gate: a delivery (commits ahead + a real story) that ships
       // with no FRESH acceptance report leaves an auditable ALERT + `attest:gate`
       // event. SOFT by default (record only); `loop_safety.attest_gate: hard` in
@@ -652,7 +669,6 @@ export async function executeCommand(
       // agent exit so the story is NOT marked Done without acceptance evidence.
       // Scoped to actual deliveries: an idle cycle has nothing to attest.
       let attestBlocked = false;
-      const storyId = ctx.storyId ?? "";
       if (commitsAhead > 0 && storyId !== "") {
         const mode = readAttestGateMode(ports.repoCwd);
         const res = runAttestGate(
@@ -1090,6 +1106,17 @@ export function nodePorts(opts: {
     capture: {
       fromMarker(marker, runDir) {
         return captureFromMarker(marker, { runDir });
+      },
+    },
+    attest: {
+      async render(projectCwd, storyId, runDir) {
+        const prev = process.cwd();
+        try {
+          process.chdir(projectCwd);
+          return await attestCommand([storyId, "--run-dir", runDir]);
+        } finally {
+          process.chdir(prev);
+        }
       },
     },
   };

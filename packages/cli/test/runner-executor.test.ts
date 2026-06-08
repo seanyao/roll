@@ -295,6 +295,9 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     capture: {
       fromMarker: vi.fn(async () => ({ kind: "web", out: "/frame/screenshots/before-home.png", taken: true })),
     },
+    attest: {
+      render: vi.fn(async () => 0),
+    },
     git: {
       fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
@@ -499,6 +502,41 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(r.ctxPatch?.tcrCount).toBe(4);
+  });
+
+  it("US-EVID-004: capture_facts renders attest into the opened run frame before the attest gate", async () => {
+    const order: string[] = [];
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      attest: {
+        render: vi.fn(async () => {
+          order.push("attest:render");
+          return 0;
+        }),
+      },
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path, event: RollEvent) => {
+          order.push(event.type);
+        }),
+      },
+    });
+
+    await executeCommand(
+      { kind: "capture_facts" },
+      ports,
+      { ...CTX, evidenceRunDir: "/frame" },
+    );
+
+    expect(ports.attest.render).toHaveBeenCalledWith("/rt/wt", "US-RUN-001", "/frame");
+    expect(order.indexOf("attest:render")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("attest:gate")).toBeGreaterThan(order.indexOf("attest:render"));
+  });
+
+  it("US-EVID-004: absent run frame means no deterministic render, preserving idle/back-compat paths", async () => {
+    const { ports } = fakePorts();
+    await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(ports.attest.render).not.toHaveBeenCalled();
   });
 
   // FIX-207 — attest gate is wired into capture_facts (delivery without a fresh

@@ -16,7 +16,7 @@ import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
 import { loopAttachRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
-import { dreamRunOnceCommand } from "./dream-run-once.js";
+import { dreamCommand } from "./dream.js";
 import { feedbackCommand } from "./feedback.js";
 import { gcCommand } from "./gc.js";
 import { ideaCommand } from "./idea.js";
@@ -86,14 +86,10 @@ export function registerAll(): void {
     process.stderr.write(`[roll] unknown archive subcommand: ${args[0]}\n`);
     return 1;
   });
-  // `dream run-once`: the v3-native heart of the dream service (US-PORT-008) —
-  // resolves the project + roll-.dream skill body and spawns the agent in place.
-  // The generated dream runner (roll loop on) delegates to this instead of the
-  // retired v2 bash runner that bare-called unsourced engine funcs (FIX-197).
-  registerPorted("dream", (args) => {
-    if (args[0] === "run-once") return dreamRunOnceCommand(args.slice(1));
-    return fallbackToBash(["dream", ...args]).status;
-  });
+  // `dream`: full surface TS (US-PORT-020). `run-once` is the v3-native scan
+  // heart; every other arg mirrors v2's generic unknown-command surface without
+  // shelling to bin/roll.
+  registerPorted("dream", dreamCommand);
   // `agent` routes per-subcommand: only `list` is ported so far.
   registerPorted("agent", (args) => {
     if (args[0] === "list") return agentListCommand(args.slice(1));

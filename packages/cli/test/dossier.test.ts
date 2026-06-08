@@ -361,6 +361,61 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     });
   });
 
+  it("US-EVID-009: story graph renders traversable links, release trace, and dead-link fallbacks", () => {
+    const html = renderStoryDossier({
+      story,
+      storyGraph: {
+        dependsOn: [
+          { id: "US-UP-1", href: "../US-UP-1/index.html" },
+          { id: "US-MISSING-1" },
+        ],
+        dependedBy: [{ id: "US-DOWN-1", href: "../US-DOWN-1/index.html" }],
+        fixes: [{ id: "US-BASE-1", href: "../US-BASE-1/index.html" }],
+        release: { label: "v3.700.0 — 2026-06-09", href: "../../../../CHANGELOG.md#v37000-2026-06-09" },
+      },
+    });
+
+    expect(html).toContain("Story graph");
+    expect(html).toContain("故事图谱");
+    expect(html).toContain("Depends on");
+    expect(html).toContain('href="../US-UP-1/index.html"');
+    expect(html).toContain("<code>US-MISSING-1</code>");
+    expect(html).not.toContain('href="undefined"');
+    expect(html).toContain("Depended by");
+    expect(html).toContain("Fixes");
+    expect(html).toContain('href="../../../../CHANGELOG.md#v37000-2026-06-09"');
+    expect(renderStoryDossier({ story })).not.toContain("Story graph");
+  });
+
+  it("US-EVID-009: collectStoryDossierInput reconstructs dependencies, reverse edges, FIX source, and changelog release", () => {
+    const p = project();
+    const f = join(p, ".roll", "features", "alpha");
+    const up = join(f, "US-UP-1");
+    const current = join(f, "US-GRAPH-9");
+    const down = join(f, "US-DOWN-1");
+    const fix = join(f, "FIX-GRAPH-9");
+    mkdirSync(up, { recursive: true });
+    mkdirSync(current, { recursive: true });
+    mkdirSync(down, { recursive: true });
+    mkdirSync(fix, { recursive: true });
+    writeFileSync(join(up, "spec.md"), "# US-UP-1\n");
+    writeFileSync(join(up, "index.html"), "<!doctype html>");
+    writeFileSync(join(current, "spec.md"), "# US-GRAPH-9\n\n**Dependencies:**\n- depends-on: US-UP-1, US-MISSING-1\n");
+    writeFileSync(join(down, "spec.md"), "# US-DOWN-1\n\n- depends-on: US-GRAPH-9\n");
+    writeFileSync(join(down, "index.html"), "<!doctype html>");
+    writeFileSync(join(fix, "spec.md"), "# FIX-GRAPH-9\n\nfixes: US-UP-1\n");
+    writeFileSync(join(p, "CHANGELOG.md"), "## v3.700.0 — 2026-06-09\n\n- Delivered US-GRAPH-9 with graph evidence.\n");
+
+    const got = collectStoryDossierInput(p, { id: "US-GRAPH-9", epic: "alpha", type: "US", delivered: true });
+    expect(got.storyGraph?.dependsOn).toEqual([{ id: "US-UP-1", href: "../US-UP-1/index.html" }, { id: "US-MISSING-1" }]);
+    expect(got.storyGraph?.dependedBy).toEqual([{ id: "US-DOWN-1", href: "../US-DOWN-1/index.html" }]);
+    expect(got.storyGraph?.release?.label).toBe("v3.700.0 — 2026-06-09");
+    expect(got.storyGraph?.release?.href).toContain("../../../../CHANGELOG.md#");
+
+    const fixGraph = collectStoryDossierInput(p, { id: "FIX-GRAPH-9", epic: "alpha", type: "FIX", delivered: false }).storyGraph;
+    expect(fixGraph?.fixes).toEqual([{ id: "US-UP-1", href: "../US-UP-1/index.html" }]);
+  });
+
   it("US-EVID-012: delivery station renders dynamic replay evidence", () => {
     const html = renderStoryDossier({
       story,

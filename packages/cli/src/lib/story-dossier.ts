@@ -95,6 +95,23 @@ export interface DynamicEvidence {
   href: string;
 }
 
+export interface StoryGraphLink {
+  id: string;
+  href?: string;
+}
+
+export interface StoryReleaseTrace {
+  label: string;
+  href?: string;
+}
+
+export interface StoryGraph {
+  dependsOn?: StoryGraphLink[];
+  dependedBy?: StoryGraphLink[];
+  fixes?: StoryGraphLink[];
+  release?: StoryReleaseTrace;
+}
+
 export interface DeliveryEvidence {
   prs?: DeliveryPrEvidence[];
   diffHref?: string;
@@ -131,6 +148,8 @@ export interface StoryDossierInput {
   dynamicEvidence?: DynamicEvidence[];
   /** US-EVID-011: peer-review decisions captured from runtime pairing records. */
   peerReview?: PeerReviewEvidence;
+  /** US-EVID-009: traversable inter-story graph and release trace. */
+  storyGraph?: StoryGraph;
   /** US-EVID-014: traceable automatic correction decisions for this story. */
   correctionActions?: CorrectionTraceEntry[];
   /** Retrospective text (self-score note body). */
@@ -214,6 +233,16 @@ function hasDynamicEvidence(items: readonly DynamicEvidence[] | undefined): bool
   return items !== undefined && items.length > 0;
 }
 
+function hasStoryGraph(graph: StoryGraph | undefined): boolean {
+  if (graph === undefined) return false;
+  return (
+    (graph.dependsOn?.length ?? 0) > 0 ||
+    (graph.dependedBy?.length ?? 0) > 0 ||
+    (graph.fixes?.length ?? 0) > 0 ||
+    graph.release !== undefined
+  );
+}
+
 function ciText(v: CiVerdict | undefined): [string, string] {
   if (v === "green") return ["CI green", "CI 通过"];
   if (v === "red") return ["CI red", "CI 失败"];
@@ -287,6 +316,39 @@ function dynamicEvidenceHtml(items: readonly DynamicEvidence[] | undefined): str
   return `<div class="dynamic-evidence"><h3>${bi("Dynamic replay", "动态复现")}</h3><ul>${body}</ul></div>`;
 }
 
+function storyGraphLinkHtml(link: StoryGraphLink): string {
+  const label = `<code>${esc(link.id)}</code>`;
+  return link.href !== undefined ? `<a href="${esc(link.href)}">${label}</a>` : label;
+}
+
+function storyGraphLinksHtml(items: readonly StoryGraphLink[]): string {
+  return `<ul class="graph-links">${items.map((item) => `<li>${storyGraphLinkHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function storyGraphHtml(graph: StoryGraph | undefined): string {
+  if (!hasStoryGraph(graph) || graph === undefined) return "";
+  const rows: string[] = [];
+  if ((graph.dependsOn?.length ?? 0) > 0) {
+    rows.push(`<dt>${bi("Depends on", "依赖")}</dt><dd>${storyGraphLinksHtml(graph.dependsOn ?? [])}</dd>`);
+  }
+  if ((graph.dependedBy?.length ?? 0) > 0) {
+    rows.push(`<dt>${bi("Depended by", "被依赖")}</dt><dd>${storyGraphLinksHtml(graph.dependedBy ?? [])}</dd>`);
+  }
+  if ((graph.fixes?.length ?? 0) > 0) {
+    rows.push(`<dt>${bi("Fixes", "修复")}</dt><dd>${storyGraphLinksHtml(graph.fixes ?? [])}</dd>`);
+  }
+  if (graph.release !== undefined) {
+    const label = `<code>${esc(graph.release.label)}</code>`;
+    const release = graph.release.href !== undefined ? `<a href="${esc(graph.release.href)}">${label}</a>` : label;
+    rows.push(`<dt>${bi("Release", "发版")}</dt><dd>${release}</dd>`);
+  }
+  return (
+    `<section class="phase phase-done story-graph">` +
+    `<h2>${bi("Story graph", "故事图谱")}</h2>` +
+    `<dl>${rows.join("")}</dl>` +
+    `</section>`
+  );
+}
 
 function correctionTraceHtml(actions: readonly CorrectionTraceEntry[] | undefined): string {
   if (actions === undefined || actions.length === 0) return "";
@@ -463,6 +525,11 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.dynamic-evidence ul { list-style:none; padding:0; margin:0; display:grid; gap:8px; }\n` +
     `.dynamic-evidence video { width:100%; max-width:680px; border:1px solid var(--line); border-radius:6px; background:#000; }\n` +
     `.dynamic-evidence p { margin:3px 0 0; }\n` +
+    `.story-graph dl { display:grid; grid-template-columns:120px 1fr; gap:8px 12px; margin:0; }\n` +
+    `.story-graph dt { color:var(--muted); font:600 12px/1.7 var(--sans); }\n` +
+    `.story-graph dd { margin:0; }\n` +
+    `.graph-links { list-style:none; display:flex; flex-wrap:wrap; gap:6px; padding:0; margin:0; }\n` +
+    `.graph-links li { margin:0; }\n` +
     `.correction-trace { list-style:none; padding:0; margin:0; } .correction-trace li { border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin:8px 0; background:var(--bg-raise); }\n` +
     `.correction-trace p { margin:0 0 3px; } .correction-trace p:last-child { margin-bottom:0; }\n` +
     `.peer-review { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; background:var(--bg-raise); }\n` +
@@ -476,7 +543,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
     `.selfscore-good .selfscore-badge { color:var(--pass); } .selfscore-ok .selfscore-badge { color:var(--warn); } .selfscore-regression .selfscore-badge { color:var(--fail); }\n` +
     `.selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }\n` +
-    `@media (max-width:680px) { .delivery-evidence dl { grid-template-columns:1fr; } }\n` +
+    `@media (max-width:680px) { .delivery-evidence dl, .story-graph dl { grid-template-columns:1fr; } }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
     `<p class="crumb"><a href="../../index.html">${bi("Features Index", "功能档案")}</a> / <a href="../index.html">${esc(s.epic)}</a> / ${esc(s.id)}</p>\n` +
@@ -490,6 +557,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `<span><a href="spec.html">${bi("Design doc", "设计文档")}</a></span>` +
     `</div>\n</div>\n` +
     storySpine(d) +
+    storyGraphHtml(d.storyGraph) +
     section("Definition", "立项", definition, defEmpty) +
     section("Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
     section("Design", "设计", design, (d.design?.length ?? 0) === 0 && d.peerReview === undefined) +
@@ -651,6 +719,9 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
 
   const peerReview = collectPeerReview(projectPath, story.id);
   if (peerReview !== undefined) out.peerReview = peerReview;
+
+  const storyGraph = collectStoryGraph(projectPath, story);
+  if (hasStoryGraph(storyGraph)) out.storyGraph = storyGraph;
 
   const correctionActions = collectCorrectionActions(projectPath, story.id);
   if (correctionActions.length > 0) out.correctionActions = correctionActions;
@@ -874,6 +945,165 @@ function collectDynamicEvidence(projectPath: string, story: DossierStory): Dynam
     /* no video evidence */
   }
   return out.slice(0, 12);
+}
+
+interface StorySpecRef {
+  id: string;
+  epic: string;
+  storyDir: string;
+  specPath: string;
+}
+
+const STORY_ID_PATTERN = "\\b(?:US|FIX|REFACTOR|IDEA)(?:-[A-Z0-9]+)*-\\d+[a-z]?\\b";
+
+function collectStoryGraph(projectPath: string, story: DossierStory): StoryGraph {
+  const refs = scanStorySpecs(projectPath);
+  const byId = new Map(refs.map((ref) => [ref.id, ref]));
+  const current = byId.get(story.id) ?? {
+    id: story.id,
+    epic: story.epic,
+    storyDir: joinPath(projectPath, ".roll", "features", story.epic, story.id),
+    specPath: joinPath(projectPath, ".roll", "features", story.epic, story.id, "spec.md"),
+  };
+  let currentSpec = "";
+  try {
+    currentSpec = readFile(current.specPath);
+  } catch {
+    currentSpec = "";
+  }
+
+  const dependsOn = storyGraphLinks(extractDependsOnIds(currentSpec).filter((id) => id !== story.id), story, byId);
+  const dependedBy = storyGraphLinks(reverseDependencyIds(refs, story.id), story, byId);
+  const fixes =
+    story.id.startsWith("FIX-") || story.type === "FIX"
+      ? storyGraphLinks(extractFixesIds(currentSpec).filter((id) => id !== story.id), story, byId)
+      : [];
+  const release = collectReleaseTrace(projectPath, story.id);
+
+  const graph: StoryGraph = {};
+  if (dependsOn.length > 0) graph.dependsOn = dependsOn;
+  if (dependedBy.length > 0) graph.dependedBy = dependedBy;
+  if (fixes.length > 0) graph.fixes = fixes;
+  if (release !== undefined) graph.release = release;
+  return graph;
+}
+
+function scanStorySpecs(projectPath: string): StorySpecRef[] {
+  const featuresDir = joinPath(projectPath, ".roll", "features");
+  const refs: StorySpecRef[] = [];
+  try {
+    for (const epicEntry of readdirSync(featuresDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!epicEntry.isDirectory()) continue;
+      const epicDir = joinPath(featuresDir, epicEntry.name);
+      for (const storyEntry of readdirSync(epicDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!storyEntry.isDirectory()) continue;
+        const specPath = joinPath(epicDir, storyEntry.name, "spec.md");
+        if (!existsSync(specPath)) continue;
+        refs.push({ id: storyEntry.name, epic: epicEntry.name, storyDir: joinPath(epicDir, storyEntry.name), specPath });
+      }
+    }
+  } catch {
+    return [];
+  }
+  return refs;
+}
+
+function extractDependsOnIds(spec: string): string[] {
+  const ids: string[] = [];
+  for (const line of spec.split("\n")) {
+    if (!/\bdepends-on\b\s*[:：]/i.test(line)) continue;
+    for (const id of storyIdsFromText(line)) if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function extractFixesIds(spec: string): string[] {
+  const ids: string[] = [];
+  for (const line of spec.split("\n")) {
+    if (!/\bfix(?:es|ed)?\b\s*[:：]?|修复|所修上游/i.test(line)) continue;
+    for (const id of storyIdsFromText(line)) {
+      if (!id.startsWith("US-") || ids.includes(id)) continue;
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function reverseDependencyIds(refs: readonly StorySpecRef[], storyId: string): string[] {
+  const out: string[] = [];
+  for (const ref of refs) {
+    if (ref.id === storyId) continue;
+    let spec = "";
+    try {
+      spec = readFile(ref.specPath);
+    } catch {
+      continue;
+    }
+    if (!extractDependsOnIds(spec).includes(storyId)) continue;
+    if (!out.includes(ref.id)) out.push(ref.id);
+  }
+  return out;
+}
+
+function storyIdsFromText(text: string): string[] {
+  const ids: string[] = [];
+  const re = new RegExp(STORY_ID_PATTERN, "g");
+  for (const match of text.matchAll(re)) {
+    const id = match[0];
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function storyGraphLinks(ids: readonly string[], story: DossierStory, byId: ReadonlyMap<string, StorySpecRef>): StoryGraphLink[] {
+  return ids.map((id) => {
+    const href = storyIndexHref(story, id, byId);
+    return href !== undefined ? { id, href } : { id };
+  });
+}
+
+function storyIndexHref(story: DossierStory, targetId: string, byId: ReadonlyMap<string, StorySpecRef>): string | undefined {
+  const target = byId.get(targetId);
+  if (target === undefined) return undefined;
+  if (!existsSync(joinPath(target.storyDir, "index.html"))) return undefined;
+  if (target.epic === story.epic) return `../${target.id}/index.html`;
+  return `../../${target.epic}/${target.id}/index.html`;
+}
+
+function collectReleaseTrace(projectPath: string, storyId: string): StoryReleaseTrace | undefined {
+  let changelog = "";
+  try {
+    changelog = readFile(joinPath(projectPath, "CHANGELOG.md"));
+  } catch {
+    return undefined;
+  }
+  let heading: string | undefined;
+  const storyRe = new RegExp(`\\b${escapeRegExp(storyId)}\\b`);
+  for (const line of changelog.split("\n")) {
+    const h = /^##+\s+(.+?)\s*$/.exec(line);
+    if (h?.[1] !== undefined) heading = stripMarkdownLink(h[1].trim());
+    if (heading === undefined || !storyRe.test(line)) continue;
+    return { label: heading, href: `../../../../CHANGELOG.md#${markdownAnchor(heading)}` };
+  }
+  return undefined;
+}
+
+function stripMarkdownLink(text: string): string {
+  return text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+}
+
+function markdownAnchor(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[`~!@#$%^&*()+=[\]{}|;:'",.<>/?\\]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function sortTimeline(timeline: DeliveryTimelineEntry[]): DeliveryTimelineEntry[] {

@@ -2,8 +2,11 @@
  * US-REL-SHIP — `roll release ship` CLI: gate → confirm → tag + push.
  * Injected deps: no real git, no real network, no real publish.
  */
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { releaseShipCommand, type ShipDeps } from "../src/commands/release-ship.js";
+import { readLineSyncFromFd, releaseShipCommand, type ShipDeps } from "../src/commands/release-ship.js";
 
 function happyDeps(over: Partial<ShipDeps> = {}): { deps: ShipDeps; calls: string[] } {
   const calls: string[] = [];
@@ -39,6 +42,47 @@ beforeEach(() => {
 afterEach(() => {
   process.stdout.write = ow;
   process.stderr.write = oe;
+});
+
+describe("readLineSyncFromFd — FIX-228 (no EOF-wait hang)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ship-confirm-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  function fdWith(content: string): number {
+    const p = join(dir, "in");
+    writeFileSync(p, content);
+    return openSync(p, "r");
+  }
+
+  it("stops at the first newline (interactive `y`⏎) and does not read the rest", () => {
+    const fd = fdWith("y\nleftover that must not be read");
+    try {
+      expect(readLineSyncFromFd(fd)).toBe("y");
+    } finally {
+      closeSync(fd);
+    }
+  });
+
+  it("returns the buffered answer on EOF with no trailing newline (piped `echo -n y`)", () => {
+    const fd = fdWith("yes");
+    try {
+      expect(readLineSyncFromFd(fd)).toBe("yes");
+    } finally {
+      closeSync(fd);
+    }
+  });
+
+  it("strips a CR so CRLF input still matches y/N", () => {
+    const fd = fdWith("y\r\n");
+    try {
+      expect(readLineSyncFromFd(fd)).toBe("y");
+    } finally {
+      closeSync(fd);
+    }
+  });
 });
 
 describe("roll release ship", () => {

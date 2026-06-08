@@ -159,6 +159,52 @@ export function defaultPairingConfig(installed: string[]): PairingConfig {
   return { enabled: vendors.size >= 2, stages: ["code"], capability };
 }
 
+/** One installed agent's standing in the pairing pool (US-PAIR-002 observability). */
+export interface PoolAgentView {
+  agent: string;
+  vendor: string;
+  /** In the pool = declared capable for ≥1 stage AND has a heterogeneous partner. */
+  inPool: boolean;
+  capability: PairingStage[];
+  /** Why it is NOT in the pool (empty when inPool). */
+  reason: string;
+}
+
+export interface PairingPoolView {
+  enabled: boolean;
+  stages: PairingStage[];
+  agents: PoolAgentView[];
+}
+
+/**
+ * The observability view (US-PAIR-002): for each installed agent, its vendor,
+ * declared capability, and whether it is an eligible pairing candidate — and if
+ * not, why. Pure (installed + cfg → view) so it is testable and the CLI just
+ * renders it. Observability is a first-class need, not an afterthought.
+ */
+export function pairingPoolView(installed: string[], cfg: PairingConfig): PairingPoolView {
+  const agents = installed.map(canonicalAgentName).filter((a, i, arr) => arr.indexOf(a) === i);
+  const vendorCount = new Map<string, number>();
+  for (const a of agents) vendorCount.set(agentVendor(a), (vendorCount.get(agentVendor(a)) ?? 0) + 1);
+  const distinctVendors = vendorCount.size;
+
+  const rows: PoolAgentView[] = agents.map((agent) => {
+    const vendor = agentVendor(agent);
+    const capability = cfg.capability[agent] ?? [];
+    let reason = "";
+    if (capability.length === 0) reason = "no capability declared in pairing.yaml";
+    // codex pair-review: capable for SOME stage isn't enough — it must overlap an
+    // ENABLED stage, else it's never actually eligible (e.g. design-only while only
+    // code is on).
+    else if (!capability.some((s) => cfg.stages.includes(s))) reason = "capability does not overlap any enabled stage";
+    else if (distinctVendors < 2) reason = "no heterogeneous partner (only one vendor installed)";
+    // A same-vendor agent can still pair with a different vendor, so the only
+    // pool-blocking heterogeneity case is "everyone is the same vendor".
+    return { agent, vendor, capability, inPool: reason === "" && cfg.enabled, reason: cfg.enabled ? reason : "pairing disabled" };
+  });
+  return { enabled: cfg.enabled, stages: cfg.stages, agents: rows };
+}
+
 /**
  * Serialise a config to explicit pairing.yaml text — the scaffold writes every
  * default into the file (never a hidden code default), so the config is auditable

@@ -195,6 +195,21 @@ function norm(run: Run, proj: string): Run {
   return { status: run.status, stdout: repl(run.stdout), stderr: repl(run.stderr) };
 }
 
+/**
+ * US-PAIR-008: v3 init adds a pairing scaffold step + NEXT item the frozen v2
+ * oracle lacks. Strip those (and ONLY those) lines so the rest stays byte-
+ * identical to v2; a dedicated test asserts the pairing lines ARE present.
+ */
+function stripPairing(r: Run): Run {
+  return {
+    ...r,
+    stdout: r.stdout
+      .split("\n")
+      .filter((l) => !/pairing/i.test(l) && !/roll pair status/i.test(l) && !/\.roll\/pairing\.yaml/.test(l))
+      .join("\n"),
+  };
+}
+
 /** Compare stdout/stderr/exit AND the scaffolded artefacts. */
 function bothFull(
   build: () => Fixture,
@@ -205,7 +220,7 @@ function bothFull(
   const tf = build();
   const b = norm(bashInit(bf, args, extra), bf.proj);
   const t = norm(tsInit(tf, args, extra), tf.proj);
-  expect(t).toEqual(b);
+  expect(stripPairing(t)).toEqual(b);
   // Scaffolded artefacts byte-identical.
   for (const rel of [
     "AGENTS.md",
@@ -241,6 +256,15 @@ describe("diff-test: roll init == bash oracle", () => {
     });
   }
 
+  it("US-PAIR-008: v3 init scaffolds pairing (the deliberate divergence is present)", () => {
+    const tf = freshUnknown();
+    const t = tsInit(tf, [], {});
+    expect(t.stdout).toMatch(/Scaffold cross-agent pairing/);
+    expect(t.stdout).toMatch(/\.roll\/pairing\.yaml/);
+    expect(t.stdout).toMatch(/roll pair status/);
+    expect(read(join(tf.proj, ".roll", "pairing.yaml"))).toContain("# .roll/pairing.yaml");
+  });
+
   it("idempotent re-run: second init over a TS-scaffolded fresh project", () => {
     // Build one fixture, run TS init twice; compare the SECOND run to a bash
     // run over a separately TS-initialized identical project.
@@ -251,6 +275,6 @@ describe("diff-test: roll init == bash oracle", () => {
     tsInit(tf, [], {});
     const b = norm(bashInit(bf, [], {}), bf.proj);
     const t = norm(tsInit(tf, [], {}), tf.proj);
-    expect(t).toEqual(b);
+    expect(stripPairing(t)).toEqual(b);
   });
 });

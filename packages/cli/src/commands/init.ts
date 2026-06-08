@@ -39,7 +39,9 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { agentsInstalled, defaultPairingConfig, renderPairingConfig } from "@roll/core";
 import { c, renderState, row, COLS } from "../render.js";
+import { realAgentEnv } from "./agent-list.js";
 import { syncConventions as sharedSyncConventions } from "./setup-shared.js";
 import { rollVersion } from "./version.js";
 
@@ -362,6 +364,25 @@ installed_at: "${installedAt}"
   summary.push("created|.roll/.version");
 }
 
+// ─── US-PAIR-008: scaffold .roll/pairing.yaml during onboarding ──────────────
+/**
+ * Cross-agent pairing is a first-class quality feature, so a new project gets
+ * its config at init time — no separate `roll pair init` step. Stays EXPLICIT
+ * (a real, self-documenting file the user sees + the UI announces it) rather
+ * than an invisible default-on. Idempotent: never clobbers an existing file.
+ * A v3 divergence from the frozen v2 oracle (init.difftest accounts for it).
+ */
+function scaffoldPairing(projectDir: string, summary: Summary): void {
+  const path = join(projectDir, ".roll", "pairing.yaml");
+  if (existsSync(path)) {
+    summary.push("unchanged|.roll/pairing.yaml");
+    return;
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, renderPairingConfig(defaultPairingConfig(agentsInstalled(realAgentEnv()))));
+  summary.push("created|.roll/pairing.yaml");
+}
+
 // ─── _sync_conventions (1300-1303) — shared with setup.ts ────────────────────
 /**
  * Returns "ok" unless a sync op throws (mirrors `_sync_conventions || fail`).
@@ -455,6 +476,7 @@ function emitInitUi(
     step(4, "Create .roll/features/", ".roll/features/"),
     step(5, "Merge existing CLAUDE.md", ".claude/CLAUDE.md"),
     { num: 6, label: "Link skills to AI clients", status: syncStatus },
+    step(7, "Scaffold cross-agent pairing", ".roll/pairing.yaml"),
   ];
   const footerStatus: StepStatus = steps.some((s) => s.status === "fail") ? "fail" : "ok";
 
@@ -493,6 +515,7 @@ function emitInitUi(
     ["Edit .roll/backlog.md", "open the backlog and add your first US"],
     ["Run roll loop now", "execute one cycle manually to test the flow"],
     ["Enable loop scheduling", "roll loop on  — let it run hourly"],
+    ["Run roll pair status", "see the cross-agent pairing pool and what it cost"],
   ];
   lines.push("");
   lines.push("  " + c("pink", "NEXT", { bold: true }) + c("dim", "  ·  下一步"));
@@ -543,6 +566,7 @@ export function initCommand(args: string[]): number | null {
   const routesTemplate = process.env["ROLL_AGENT_ROUTES_TEMPLATE"] ?? "default";
   initSeedAgentRoutes(routesTemplate, projectDir, summary); // `|| true`
   writeVersionStamp(projectDir, summary);
+  scaffoldPairing(projectDir, summary); // US-PAIR-008 (v3 divergence from v2)
 
   const syncStatus = syncConventions();
 

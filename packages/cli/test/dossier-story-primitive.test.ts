@@ -37,7 +37,7 @@ describe("renderStoryDossier — US-DOSSIER-003 full context entry", () => {
   });
   it("prominent spec.md design-doc link in the masthead (not just footer)", () => {
     // the masthead kv carries a spec.md link
-    expect(html.split("</div>\n</div>")[0]).toContain('href="spec.md"');
+    expect(html.split("</div>\n</div>")[0]).toContain('href="spec.html"');
   });
   it("falls back to wish, then empty, when no narrative", () => {
     const noNarr = renderStoryDossier({ ...base, narrative: undefined, wish: "退回的愿望" });

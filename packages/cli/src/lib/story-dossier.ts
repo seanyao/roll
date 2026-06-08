@@ -175,7 +175,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `<span>${bi("epic", "史诗")} <b>${esc(s.epic)}</b></span>` +
     (d.context !== undefined && d.context !== "" ? `<span>${bi("context", "上下文")} <b>${esc(d.context)}</b></span>` : "") +
     (s.created !== undefined ? `<span>${bi("created", "创建")} <b>${esc(s.created)}</b></span>` : "") +
-    `<span><a href="spec.md">${bi("Design doc · spec.md", "设计文档 · spec.md")}</a></span>` +
+    `<span><a href="spec.html">${bi("Design doc", "设计文档")}</a></span>` +
     `</div>\n</div>\n` +
     storySpine(d) +
     section("Definition", "立项", definition, defEmpty) +
@@ -184,7 +184,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0) +
     section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0)) +
     section("Retrospective", "复盘", retro, d.retro === undefined || d.retro === "") +
-    `<footer>Roll · <a href="spec.md">spec.md</a></footer>\n</body>\n</html>\n`
+    `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n</body>\n</html>\n`
   );
 }
 

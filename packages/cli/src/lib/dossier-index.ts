@@ -136,19 +136,29 @@ function epicFold(e: DossierEpic): string {
   );
 }
 
+/** Count delivered stories that are legacy (pre-v3, no v3 evidence trail). */
+function countLegacy(epics: DossierEpic[]): number {
+  let n = 0;
+  for (const e of epics) for (const s of e.stories) if (s.legacy) n += 1;
+  return n;
+}
+
 /** The pulled-out status overview: tallies + the delivery spectrum. */
 function overview(epics: DossierEpic[]): string {
   const t = tallyStates(epics);
   const total = epics.reduce((n, e) => n + e.stories.length, 0);
   const pct = total > 0 ? Math.round((t.done / total) * 100) : 0;
-  const card = (k: State, mark: string, en: string, zh: string): string =>
+  // US-DOSSIER-008: split the Done tally so "v3-evidenced done" and "legacy
+  // (pre-v3) done" are legible at a glance instead of lumped together.
+  const legCount = countLegacy(epics);
+  const card = (k: State, mark: string, en: string, zh: string, sub = ""): string =>
     `<a class="tally ${k}" href="#" data-jump="${k}"><div class="mark">${mark}</div>` +
-    `<div class="num">${t[k]}</div><div class="lbl">${bi(en, zh)}</div><div class="accentbar"></div></a>`;
+    `<div class="num">${t[k]}</div><div class="lbl">${bi(en, zh)}</div>${sub}<div class="accentbar"></div></a>`;
   const leg = (k: string, en: string, zh: string): string =>
     `<span><i class="i-${k}"></i>${bi(en, zh)}</span>`;
   return (
     `<div class="statusboard">` +
-    card("done", "✅", "Done", "已交付") +
+    card("done", "✅", "Done", "已交付", legCount > 0 ? `<div class="tsub">${bi(`incl. ${legCount} legacy`, `含 ${legCount} 历史`)}</div>` : "") +
     card("wip", "🔨", "In progress", "进行中") +
     card("todo", "📋", "Todo", "待办") +
     card("hold", "🔒", "Hold", "挂起") +

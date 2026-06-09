@@ -133,6 +133,7 @@ export const DOSSIER_CSS = `
 .tally .mark{font:13px/1 var(--mono);color:var(--muted);}
 .tally .num{font:600 34px/1 var(--serif);letter-spacing:-.02em;margin:7px 0 2px;font-variant-numeric:tabular-nums;}
 .tally .lbl{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+.tally .tsub{font:500 9.5px/1.2 var(--mono);color:var(--muted);margin-top:4px;opacity:.85;}
 .tally.done .num{color:var(--pass);} .tally.wip .num{color:var(--warn);} .tally.todo .num{color:var(--fg);} .tally.hold .num{color:var(--block);}
 .tally .accentbar{position:absolute;left:0;bottom:0;height:3px;width:100%;}
 .tally.done .accentbar{background:var(--pass);} .tally.wip .accentbar{background:var(--warn);} .tally.todo .accentbar{background:var(--muted);} .tally.hold .accentbar{background:var(--block);}

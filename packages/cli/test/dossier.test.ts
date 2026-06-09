@@ -185,6 +185,21 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).not.toContain("lifespine legacy");
   });
 
+  it("US-DOSSIER-008: the Done tally annotates how many deliveries are legacy (pre-v3)", () => {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-legcount-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "hist");
+    mkdirSync(join(f, "US-OLD-1"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-1", "spec.md"), "## US-OLD-1 历史做完 ✅\n");
+    mkdirSync(join(f, "US-OLD-2"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-2", "spec.md"), "## US-OLD-2 也历史做完 ✅\n");
+    const leg = renderFeaturesIndex(collectDossier(p));
+    expect(leg).toContain('class="tsub"');
+    expect(leg).toContain("含 2 历史");
+    // no legacy in the v3 fixture (US-A-1 delivered via latest/) → no annotation.
+    expect(html).not.toContain('class="tsub"');
+  });
+
   it("self-containment: no external scripts/links/images; chrome + tokens inline", () => {
     expect(html).not.toContain("<script src=");
     expect(html).not.toContain("<link");

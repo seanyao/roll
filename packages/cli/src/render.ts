@@ -565,7 +565,7 @@ export function cycleRow(cy: CycleView): string[] {
     const linePad = Math.max(0, COLS - strw(inner));
     const innerPadded = inner + " ".repeat(linePad);
     lines.push(BG_FAIL + innerPadded.replaceAll(RESET_RAW, RESET_RAW + BG_FAIL) + RESET_RAW);
-    let hint = " ".repeat(8) + c("dim", "→ ") + c("amber", `roll loop show ${cy.label ?? ""}`);
+    let hint = " ".repeat(8) + c("dim", "→ ") + c("amber", `roll loop runs --detail ${cy.label ?? ""}`);
     if (cy.fail_detail) hint += c("muted", "   ") + c("dim", cy.fail_detail);
     const hintPad = Math.max(0, COLS - strw(hint));
     const hintPadded = hint + " ".repeat(hintPad);
@@ -573,7 +573,7 @@ export function cycleRow(cy: CycleView): string[] {
   } else {
     lines.push(inner);
     if (outcome === "fail" && cy.fail_detail) {
-      lines.push(" ".repeat(8) + "→ " + `roll loop show ${cy.label ?? ""}`);
+      lines.push(" ".repeat(8) + "→ " + `roll loop runs --detail ${cy.label ?? ""}`);
     }
   }
   return lines;

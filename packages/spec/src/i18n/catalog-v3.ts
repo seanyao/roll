@@ -154,4 +154,11 @@ export const v3Catalog: Catalog = {
     en: "roll loop attach is retired. Attach to the live cycle directly: tmux attach -t roll-loop-%s",
     zh: "roll loop attach 已退役。直接观察实时周期：tmux attach -t roll-loop-%s",
   },
+  // `loop branches` (US-PORT-022): pure user-introspection (listed loop-branch
+  // merge status); no internal caller, so it retires rather than port. The one
+  // line that reproduced it is offered for anyone who still wants the view.
+  "loopv3.branches_retired": {
+    en: "roll loop branches is retired. List loop branches directly: git ls-remote --heads origin 'loop/*'",
+    zh: "roll loop branches 已退役。直接列出 loop 分支：git ls-remote --heads origin 'loop/*'",
+  },
 };

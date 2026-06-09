@@ -16,7 +16,7 @@ import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
 import { loopLogCommand } from "./loop-log.js";
 import { loopEventsCommand } from "./loop-events.js";
-import { loopAttachRetired, loopMonitorRetired } from "./loop-retired.js";
+import { loopAttachRetired, loopBranchesRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
 import { dreamCommand } from "./dream.js";
 import { feedbackCommand } from "./feedback.js";
@@ -263,6 +263,9 @@ export function registerAll(): void {
     // `loop test` (≠ top-level `roll test`): manual smoke gate — generates the
     // v3 test runner and runs it once with ROLL_LOOP_FORCE=1 (US-PORT-022).
     if (args[0] === "test") return loopTestCommand(args.slice(1));
+    // `loop branches`: retired (US-PORT-022) — no internal caller; prints the
+    // one-line `git ls-remote` that reproduces it. Never shells to bash.
+    if (args[0] === "branches") return loopBranchesRetired();
     return fallbackToBash(["loop", ...args]).status;
   });
 }

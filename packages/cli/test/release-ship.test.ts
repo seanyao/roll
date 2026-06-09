@@ -2,11 +2,17 @@
  * US-REL-SHIP — `roll release ship` CLI: gate → confirm → tag + push.
  * Injected deps: no real git, no real network, no real publish.
  */
+import { execFileSync, spawn } from "node:child_process";
 import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { readLineSyncFromFd, releaseShipCommand, type ShipDeps } from "../src/commands/release-ship.js";
+import {
+  readConfirmLine,
+  readLineSyncFromFd,
+  releaseShipCommand,
+  type ShipDeps,
+} from "../src/commands/release-ship.js";
 
 function happyDeps(over: Partial<ShipDeps> = {}): { deps: ShipDeps; calls: string[] } {
   const calls: string[] = [];
@@ -81,6 +87,93 @@ describe("readLineSyncFromFd — FIX-228 (no EOF-wait hang)", () => {
       expect(readLineSyncFromFd(fd)).toBe("y");
     } finally {
       closeSync(fd);
+    }
+  });
+
+  // FIX-229: the regression FIX-228 missed — a NON-BLOCKING fd (what Node v26
+  // hands an interactive TTY stdin) yields EAGAIN before the line is typed, and
+  // FIX-228's loop broke on that EAGAIN and returned "" (silent "no"). Drive the
+  // byte reader deterministically: it throws EAGAIN twice, then delivers "y\n".
+  // The fix must POLL past the EAGAINs and still return the answer.
+  it("FIX-229: polls past EAGAIN (does not bail) and returns the answer", () => {
+    const feed = Buffer.from("y\n");
+    let call = 0;
+    const reader = (_fd: number, buf: Buffer): number => {
+      call += 1;
+      if (call <= 2) {
+        const e = new Error("resource temporarily unavailable") as NodeJS.ErrnoException;
+        e.code = "EAGAIN";
+        throw e;
+      }
+      const idx = call - 3; // 0 → 'y', 1 → '\n'
+      buf[0] = feed[idx] as number;
+      return 1;
+    };
+    expect(readLineSyncFromFd(0, reader)).toBe("y");
+    expect(call).toBeGreaterThan(2); // proves it waited through the EAGAINs
+  });
+
+  it("FIX-229: a non-EAGAIN read error still breaks (returns what was read)", () => {
+    const reader = (): number => {
+      throw new Error("EIO");
+    };
+    expect(readLineSyncFromFd(0, reader)).toBe("");
+  });
+
+  // Real-OS-handle coverage the spec asks for: read a line from a blocking
+  // FIFO whose writer delivers the bytes ASYNCHRONOUSLY (not a pre-filled
+  // file). openSync(fifo, "r") blocks until the writer opens — a kernel
+  // rendezvous that removes the ordering race — then readSync waits for the
+  // line, exactly the blocking behaviour /dev/tty provides. (A full PTY test
+  // needs node-pty, not a dependency here; the blocking FIFO is the portable,
+  // CI-runnable stand-in.)
+  it("FIX-229: reads a late line from a real blocking OS handle (FIFO)", () => {
+    const fifo = join(dir, "fifo");
+    execFileSync("mkfifo", [fifo]);
+    const writer = spawn("bash", ["-c", `sleep 0.1; printf 'y\\n' > '${fifo}'`]);
+    const fd = openSync(fifo, "r"); // blocks until the writer opens
+    try {
+      expect(readLineSyncFromFd(fd)).toBe("y");
+    } finally {
+      closeSync(fd);
+      writer.kill();
+    }
+  });
+});
+
+describe("readConfirmLine — FIX-229 (/dev/tty blocking read)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ship-tty-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("reads the line from the injected controlling-terminal fd, then closes it", () => {
+    const p = join(dir, "tty");
+    writeFileSync(p, "yes\nignored");
+    let openedFd = -1;
+    const line = readConfirmLine(() => {
+      openedFd = openSync(p, "r");
+      return openedFd;
+    });
+    expect(line).toBe("yes");
+    // The fd was closed by readConfirmLine — re-closing must throw EBADF.
+    expect(() => closeSync(openedFd)).toThrow();
+  });
+
+  it("falls back to the (injected) stdin fd when /dev/tty cannot be opened", () => {
+    // Production falls back to fd 0; the test injects a safe file fd so it
+    // never reads the runner's real stdin (which could block).
+    const p = join(dir, "stdin");
+    writeFileSync(p, "n\n");
+    const fbFd = openSync(p, "r");
+    try {
+      const line = readConfirmLine(() => {
+        throw new Error("ENXIO: no controlling terminal");
+      }, fbFd);
+      expect(line).toBe("n");
+    } finally {
+      closeSync(fbFd);
     }
   });
 });

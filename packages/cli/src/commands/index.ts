@@ -14,6 +14,8 @@ import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
+import { loopLogCommand } from "./loop-log.js";
+import { loopEventsCommand } from "./loop-events.js";
 import { loopAttachRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
 import { dreamCommand } from "./dream.js";
@@ -220,6 +222,10 @@ export function registerAll(): void {
     if (args[0] === "story") return loopStoryCommand(args.slice(1));
     if (args[0] === "runs") return loopRunsCommand(args.slice(1));
     if (args[0] === "signals") return loopSignalsCommand(args.slice(1));
+    // `loop log` / `loop events`: residual pure-read viewers (US-PORT-022) over
+    // .roll/cycle-logs and the shared events ndjson. No bash fallback.
+    if (args[0] === "log") return loopLogCommand(args.slice(1));
+    if (args[0] === "events") return loopEventsCommand(args.slice(1));
     // `loop monitor` / `loop attach`: the v2 tmux-popup stream retires under the
     // v3 self-contained runner (US-PORT-007) — TS stubs redirect, never run the
     // bash tmux behaviour.

@@ -92,13 +92,14 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).toContain("<em>事实</em>");
   });
 
-  it("ledger: four figures with real tallies + wish→truth bar", () => {
-    // 2 epics, 3 stories, 1 merged, 1 epic shipping → 33%
-    expect(html).toContain('class="figures"');
-    expect(html).toContain("Stories tracked");
-    expect(html).toContain("Merged to main");
+  it("status overview: tally cards by state + delivery spectrum + % merged", () => {
+    // fixture: 3 stories — US-A-1 done, FIX-2 todo, beta todo → done 1 / todo 2 → 33%
+    expect(html).toContain('class="statusboard"');
+    expect(html).toContain('class="tally done"');
+    expect(html).toContain("已交付"); // Done tally label
+    expect(html).toContain('class="spectrum"');
     expect(html).toContain("已合主干");
-    expect(html).toContain('style="width:33%"');
+    expect(html).toContain("33%");
   });
 
   it("lifecycle spine: five stations, delivery carries the truth badge", () => {
@@ -109,10 +110,11 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(spine).toContain("复盘");
   });
 
-  it("toolbar: search input + only-shipping toggle wired to the filter script", () => {
+  it("toolbar: search input + per-status filter chips wired to the filter script", () => {
     expect(html).toContain("data-dossier-search");
-    expect(html).toContain("data-dossier-only");
-    expect(html).toContain("Only shipping");
+    expect(html).toContain('class="statusfilter"');
+    expect(html).toContain('data-sf="done"');
+    expect(html).toContain('data-sf="hold"');
     expect(html).toContain(DOSSIER_FILTER_SCRIPT);
   });
 
@@ -123,25 +125,27 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(withReport).toContain('href="../reports/morning/latest.html"');
   });
 
-  it("epic groups: shipping first, backlog after; table rows carry bar + chips (US-DOSSIER-005)", () => {
+  it("epic groups: shipping before backlog; story rows carry type + status (US-DOSSIER)", () => {
     expect(html.indexOf("Shipping to main")).toBeLessThan(html.indexOf("In backlog"));
     expect(html).toContain('href="alpha/index.html"');
     expect(html).toContain('href="alpha/US-A-1/index.html"');
-    expect(html).toContain('class="chip truth"');
+    expect(html).toContain('class="story"');
+    expect(html).toContain('class="stype US"');
+    expect(html).toContain('class="sstat st-done"'); // US-A-1 delivered → done row
     expect(html).toContain('data-truth="1"');
-    expect(html).toContain('class="epic-bar"');
   });
 
-  it("US-DOSSIER-005: epics render as a table (rows, not cards), filter hooks intact", () => {
-    expect(html).toContain('<table class="epic-table">');
-    expect(html).toContain("<thead>");
-    expect(html).toContain('<tr class="epic-row"');
-    expect(html).toContain('<th scope="row" class="epic-name">');
-    // the old card-grid container is gone
+  it("US-DOSSIER: epics render as foldable <details> with a lifecycle spine, not a table", () => {
+    expect(html).toContain('<details class="epic"');
+    expect(html).toContain('summary class="epic-sum"');
+    expect(html).toContain('class="lifespine'); // per-story five-station spine
+    // the old table / card-grid layouts are gone
+    expect(html).not.toContain('<table class="epic-table">');
     expect(html).not.toContain('class="epic-grid"');
     expect(html).not.toContain('class="epic-card"');
-    // search/filter still keys off data-search on the rows
+    // filter still keys off data-search + data-status on the details
     expect(html).toContain("data-search=");
+    expect(html).toContain("data-status=");
   });
 
   it("self-containment: no external scripts/links/images; chrome + tokens inline", () => {
@@ -863,18 +867,20 @@ describe("dossier aligns status/type with the backlog (US-DOSSIER)", () => {
     expect(mix.delivered).toBe(1); // only the ✅ one counts
   });
 
-  it("a 100%-done epic lands in 'Delivered to main', partial in 'Shipping'", () => {
+  it("a 100%-done epic lands in 'Delivered to main', partial in 'Shipping' (shipping first)", () => {
     const html = renderFeaturesIndex(collectDossier(backlogProject()));
-    expect(html.indexOf("Delivered to main")).toBeGreaterThanOrEqual(0);
-    expect(html.indexOf("Delivered to main")).toBeLessThan(html.indexOf("Shipping to main"));
-    expect(html).toContain("已交付史诗"); // ledger figure renamed from "Epics shipping"
+    expect(html).toContain("Delivered to main");
+    expect(html).toContain("Shipping to main");
+    // board order: in-flight (Shipping) on top, then Delivered.
+    expect(html.indexOf("Shipping to main")).toBeLessThan(html.indexOf("Delivered to main"));
   });
 
-  it("chips are colored by backlog status (truth/wip/hold/plain)", () => {
+  it("story rows carry the backlog status (done/wip/hold/todo) + a lifecycle spine", () => {
     const html = renderFeaturesIndex(collectDossier(backlogProject()));
-    expect(html).toMatch(/class="chip truth"[^>]*>US-MIX-1</);
-    expect(html).toMatch(/class="chip wip"[^>]*>FIX-MIX-2</);
-    expect(html).toMatch(/class="chip hold"[^>]*>US-MIX-4</);
-    expect(html).toMatch(/class="chip"[^>]*>US-MIX-3</); // todo → plain
+    expect(html).toContain('data-status="done"><span class="stype US">US</span><span class="sid">US-MIX-1</span>');
+    expect(html).toContain('data-status="wip"><span class="stype FIX">FIX</span><span class="sid">FIX-MIX-2</span>');
+    expect(html).toContain('data-status="hold"><span class="stype US">US</span><span class="sid">US-MIX-4</span>');
+    expect(html).toContain('data-status="todo"><span class="stype US">US</span><span class="sid">US-MIX-3</span>');
+    expect(html).toContain('class="lifespine');
   });
 });

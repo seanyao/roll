@@ -12,7 +12,7 @@ import { collectDossier, generateIndex } from "../lib/archive.js";
 import { renderFeaturesIndex } from "../lib/dossier-index.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
-import { collectStoryDossierInput, renderStoryDossier } from "../lib/story-dossier.js";
+import { collectStoryDossierInput, renderStoryDossier, stationsDone } from "../lib/story-dossier.js";
 import { renderMarkdown } from "./slides/render.js";
 
 /** US-DOSSIER-004: render a card's spec.md → a self-contained spec.html (the
@@ -56,6 +56,18 @@ export function indexCommand(args: string[]): number {
   const featuresDir = join(cwd, ".roll", "features");
   if (existsSync(featuresDir)) {
     const epics = collectDossier(cwd);
+    // US-DOSSIER: enrich each story with its real lifecycle stations (read its
+    // evidence via the same collector the per-story page uses) so the index spine
+    // reflects definition→design→execution→delivery→retrospective accurately.
+    for (const epic of epics) {
+      for (const story of epic.stories) {
+        try {
+          story.stages = [...stationsDone(collectStoryDossierInput(cwd, story))];
+        } catch {
+          /* best-effort — spine just shows fewer stations */
+        }
+      }
+    }
     let pages = 0;
     try {
       writeFileSync(join(featuresDir, "index.html"), renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd) }), "utf8");

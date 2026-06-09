@@ -35,103 +35,158 @@ export function spineMotif(): string {
   return `<div class="spine" aria-hidden="true">${nodes.join("")}</div>`;
 }
 
-/** Project-level ledger: 4 figures + wish→truth bar. */
-function ledger(epics: DossierEpic[]): string {
-  const total = epics.reduce((n, e) => n + e.stories.length, 0);
-  const truth = epics.reduce((n, e) => n + e.delivered, 0);
-  // A fully-delivered epic (every story merged) is DONE, not "shipping" — the
-  // ledger counts those separately so a 100% epic never reads as in-flight.
-  const done = epics.filter((e) => e.stories.length > 0 && e.delivered === e.stories.length).length;
-  const pct = total > 0 ? Math.round((truth / total) * 100) : 0;
-  const fig = (num: string, en: string, zh: string, truthy = false): string =>
-    `<div class="figure"><div class="num${truthy ? " truth" : ""}">${num}</div><div class="lbl">${bi(en, zh)}</div></div>`;
+type StoryView = DossierEpic["stories"][number];
+type State = "done" | "wip" | "hold" | "todo";
+const STAGE_KEYS = SPINE_STAGES.map((s) => s.key);
+
+/** Backlog-aligned delivery state for one story (done/wip/hold/todo). */
+function storyState(s: StoryView): State {
+  if (s.status === "in_progress") return "wip";
+  if (s.status === "hold") return "hold";
+  if (s.delivered) return "done"; // backlog ✅ Done, or heuristic-delivered
+  return "todo";
+}
+
+/** Count stories by state across a list of epics. */
+function tallyStates(epics: DossierEpic[]): Record<State, number> {
+  const t: Record<State, number> = { done: 0, wip: 0, hold: 0, todo: 0 };
+  for (const e of epics) for (const s of e.stories) t[storyState(s)] += 1;
+  return t;
+}
+
+/** A segmented proportional bar (the "delivery spectrum") over a state tally. */
+function spectrum(t: Record<State, number>, cls: string): string {
+  const total = t.done + t.wip + t.todo + t.hold || 1;
+  const seg = (n: number, k: string): string =>
+    n > 0 ? `<span class="s-${k}" style="width:${(n / total) * 100}%"></span>` : "";
+  return `<div class="${cls}">${seg(t.done, "done")}${seg(t.wip, "wip")}${seg(t.todo, "todo")}${seg(t.hold, "hold")}</div>`;
+}
+
+/** The five-station lifecycle spine for one story, from its real `stages`. */
+function storySpine(s: StoryView): string {
+  // Enriched `stages` win; absent (un-enriched render) → derive from delivered.
+  const done = new Set<string>(
+    s.stages ?? (s.delivered ? ["definition", "design", "execution", "delivery"] : ["definition"]),
+  );
+  const state = storyState(s);
+  const firstUndone = STAGE_KEYS.findIndex((k) => !done.has(k));
+  const active = state === "wip" || state === "hold";
+  let html = "";
+  STAGE_KEYS.forEach((k, i) => {
+    const cls = done.has(k) ? "on" : active && i === firstUndone ? "now" : "";
+    html += `<i class="${cls}"></i>`;
+    if (i < STAGE_KEYS.length - 1) {
+      const segOn = done.has(k) && done.has(STAGE_KEYS[i + 1]!);
+      html += `<b class="${segOn ? "on" : ""}"></b>`;
+    }
+  });
+  const title = SPINE_STAGES.map((st) => `${st.zh}${done.has(st.key) ? "✓" : "—"}`).join(" ");
+  return `<span class="lifespine${state === "hold" ? " held" : ""}" title="${title}">${html}</span>`;
+}
+
+/** One story row inside an expanded epic: type · id · title · spine · status. */
+function storyRow(epic: string, s: StoryView): string {
+  const state = storyState(s);
+  const type = (s.type || "").toUpperCase();
+  const href = `${encodeURIComponent(epic)}/${encodeURIComponent(s.id)}/index.html`;
   return (
-    `<div class="ledger">` +
-    `<div class="figures">` +
-    fig(String(epics.length), "Epics", "史诗") +
-    fig(String(total), "Stories tracked", "在册故事") +
-    fig(String(truth), "Merged to main", "已合主干", true) +
-    fig(String(done), "Epics done", "已交付史诗", true) +
+    `<a class="story" href="${href}" data-status="${state}">` +
+    `<span class="stype ${esc(type)}">${esc(type)}</span>` +
+    `<span class="sid">${esc(s.id)}</span>` +
+    `<span class="stitle">${esc(s.title ?? s.id)}</span>` +
+    storySpine(s) +
+    `<span class="sstat st-${state}"><span class="sdot"></span>${state}</span>` +
+    `</a>`
+  );
+}
+
+/** One epic as a foldable <details>: summary (name + mini-spectrum + tally),
+ *  body = its story rows. data-search/data-status drive the toolbar filter. */
+function epicFold(e: DossierEpic): string {
+  const t = tallyStates([e]);
+  const states = [...new Set(e.stories.map(storyState))].join(" ");
+  const search = `${e.name} ${e.stories.map((s) => `${s.id} ${s.title ?? ""}`).join(" ")}`;
+  return (
+    `<details class="epic" data-search="${esc(search)}" data-status="${states}" data-truth="${e.delivered > 0 ? "1" : "0"}">` +
+    `<summary class="epic-sum">` +
+    `<span class="caret">▸</span>` +
+    `<span class="epic-main">` +
+    `<span class="epic-name"><a href="${encodeURIComponent(e.name)}/index.html">${esc(e.name)}</a></span>` +
+    spectrum(t, "epic-mini") +
+    `</span>` +
+    `<span class="epic-tally"><b>${e.delivered}</b><span class="of"> / ${e.stories.length}</span></span>` +
+    `</summary>` +
+    `<div class="stories">${e.stories.map((s) => storyRow(e.name, s)).join("")}</div>` +
+    `</details>`
+  );
+}
+
+/** The pulled-out status overview: tallies + the delivery spectrum. */
+function overview(epics: DossierEpic[]): string {
+  const t = tallyStates(epics);
+  const total = epics.reduce((n, e) => n + e.stories.length, 0);
+  const pct = total > 0 ? Math.round((t.done / total) * 100) : 0;
+  const card = (k: State, mark: string, en: string, zh: string): string =>
+    `<a class="tally ${k}" href="#" data-jump="${k}"><div class="mark">${mark}</div>` +
+    `<div class="num">${t[k]}</div><div class="lbl">${bi(en, zh)}</div><div class="accentbar"></div></a>`;
+  const leg = (k: string, en: string, zh: string): string =>
+    `<span><i class="i-${k}"></i>${bi(en, zh)}</span>`;
+  return (
+    `<div class="statusboard">` +
+    card("done", "✅", "Done", "已交付") +
+    card("wip", "🔨", "In progress", "进行中") +
+    card("todo", "📋", "Todo", "待办") +
+    card("hold", "🔒", "Hold", "挂起") +
     `</div>` +
-    `<div class="wt-bar" role="img" aria-label="${pct}% merged"><span class="truth" style="width:${pct}%"></span></div>` +
-    `<div class="wt-legend"><span>${bi("wish — backlog", "愿望 · 待办")}</span><span>${pct}%</span><span>${bi("truth — merged", "事实 · 已合")}</span></div>` +
+    `<div class="spectrum-wrap">` +
+    spectrum(t, "spectrum") +
+    `<div class="pctline">${bi(`${total} stories · ${epics.length} epics`, `在册 ${total} 故事 · ${epics.length} 史诗`)}` +
+    `<span><b>${pct}%</b> ${bi("merged to main", "已合主干")}</span></div>` +
+    `<div class="spectrum-legend">${leg("done", "merged", "已合")}${leg("wip", "in progress", "进行中")}${leg("todo", "todo", "待办")}${leg("hold", "hold", "挂起")}</div>` +
     `</div>`
   );
 }
 
-/** One epic row: name, tally + progress bar, story chips. Carries the same
- *  `data-search` / `data-truth` hooks the filter script reads, so search and
- *  "only shipping" work identically in the table view (US-DOSSIER-005). */
-/** Chip modifier class from the backlog status (aligned with .roll/backlog.md):
- *  done/heuristic-delivered → truth, in_progress → wip, hold → hold, todo → plain. */
-function chipStatusClass(s: DossierEpic["stories"][number]): string {
-  if (s.status === "in_progress") return " wip";
-  if (s.status === "hold") return " hold";
-  if (s.delivered) return " truth";
-  return "";
-}
-
-function epicRow(e: DossierEpic): string {
-  const pct = e.stories.length > 0 ? Math.round((e.delivered / e.stories.length) * 100) : 0;
-  const chips = e.stories
-    .map(
-      (s) =>
-        `<a class="chip${chipStatusClass(s)}" href="${encodeURIComponent(e.name)}/${encodeURIComponent(s.id)}/index.html" title="${esc(s.title ?? s.id)}">${esc(s.id)}</a>`,
-    )
-    .join("");
-  return (
-    `<tr class="epic-row" data-search="${esc(`${e.name} ${e.stories.map((s) => `${s.id} ${s.title ?? ""}`).join(" ")}`)}" data-truth="${e.delivered > 0 ? "1" : "0"}">` +
-    `<th scope="row" class="epic-name"><a href="${encodeURIComponent(e.name)}/index.html">${esc(e.name)}</a></th>` +
-    `<td class="epic-progress">` +
-    `<div class="stat">${bi(`${e.delivered} / ${e.stories.length} delivered`, `${e.delivered} / ${e.stories.length} 已交付`)}</div>` +
-    `<div class="epic-bar"><span class="truth" style="width:${pct}%"></span></div>` +
-    `</td>` +
-    `<td class="chips">${chips}</td>` +
-    `</tr>`
-  );
-}
-
-/** Render the Delivery Dossier front page from the collected model. */
+/** Render the Delivery Dossier front page — a delivery board: a pulled-out
+ *  status overview (tallies + spectrum), then foldable epics grouped by their
+ *  aggregate state, each story carrying its lifecycle spine + backlog status. */
 export function renderFeaturesIndex(epics: DossierEpic[], opts: { morningReportHref?: string } = {}): string {
-  // Three states, not two: a 100%-delivered epic is DONE (it was reading as
-  // "Shipping" because the only non-backlog bucket was "交付中"). Partially
-  // delivered → still shipping; nothing delivered → backlog.
   const done = epics.filter((e) => e.stories.length > 0 && e.delivered === e.stories.length);
   const shipping = epics.filter((e) => e.delivered > 0 && e.delivered < e.stories.length);
   const backlog = epics.filter((e) => e.delivered === 0);
   const group = (title: string, zh: string, list: DossierEpic[]): string =>
     list.length === 0
       ? ""
-      : `<h2>${bi(title, zh)}</h2>\n<table class="epic-table">\n` +
-        `<thead><tr><th scope="col">${bi("Epic", "史诗")}</th>` +
-        `<th scope="col">${bi("Progress", "进度")}</th>` +
-        `<th scope="col">${bi("Stories", "故事")}</th></tr></thead>\n` +
-        `<tbody>${list.map(epicRow).join("\n")}</tbody>\n</table>\n`;
+      : `<div class="section-h">${bi(title, zh)} <span class="ct">${list.length}</span><span class="rule"></span></div>\n` +
+        `${list.map(epicFold).join("\n")}\n`;
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>Roll · Delivery Dossier</title>\n` +
-    `<style>\n${CHROME_CSS}${DOSSIER_CSS}body { max-width:1000px; }\n</style>\n` +
+    `<style>\n${CHROME_CSS}${DOSSIER_CSS}body { max-width:1040px; }\n</style>\n` +
     `${CHROME_SCRIPT}\n${DOSSIER_FILTER_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
     `<p class="kicker">Roll · ${bi("Delivery Dossier", "交付档案")}</p>\n` +
     `<h1>${bi("Features Index", "功能档案")}</h1>\n` +
     `<p class="lede">${bi(
-      "The backlog is a <em>wish</em>; main is the <em>truth</em>. A story is done only when it has merged — this ledger keeps the two honest.",
-      "待办是<em>愿望</em>，主干是<em>事实</em>。故事只有合入主干才算完成——这本账让两者互相对得上。",
+      "The backlog is a <em>wish</em>; main is the <em>truth</em>. A story is done only when it has merged — this board keeps the two honest.",
+      "待办是<em>愿望</em>，主干是<em>事实</em>。故事只有合入主干才算完成——这块看板让两者互相对得上。",
     )}</p>\n` +
     `</div>\n` +
-    ledger(epics) +
-    spineMotif() +
+    overview(epics) +
     (opts.morningReportHref !== undefined
       ? `<p class="ops-link"><a href="${esc(opts.morningReportHref)}">${bi("Morning report", "夜间运行晨报")}</a></p>\n`
       : "") +
     `<div class="toolbar">` +
-    `<input type="search" data-dossier-search placeholder="Search · 搜索" aria-label="search">` +
-    `<label class="only"><input type="checkbox" data-dossier-only>${bi("Only shipping", "只看交付中")}</label>` +
-    `</div>\n` +
-    group("Delivered to main", "已交付", done) +
+    `<input type="search" data-dossier-search placeholder="Search epics &amp; stories · 搜索史诗与故事" aria-label="search">` +
+    `<div class="statusfilter" role="group">` +
+    `<button class="sf done" data-sf="done" aria-pressed="false">✅ ${bi("Done", "交付")}</button>` +
+    `<button class="sf wip" data-sf="wip" aria-pressed="false">🔨 ${bi("WIP", "进行")}</button>` +
+    `<button class="sf todo" data-sf="todo" aria-pressed="false">📋 ${bi("Todo", "待办")}</button>` +
+    `<button class="sf hold" data-sf="hold" aria-pressed="false">🔒 ${bi("Hold", "挂起")}</button>` +
+    `</div></div>\n` +
     group("Shipping to main", "交付中", shipping) +
+    group("Delivered to main", "已交付", done) +
     group("In backlog", "仍在待办", backlog) +
     `<footer>${bi("Generated by", "生成自")} <code>roll index</code></footer>\n</body>\n</html>\n`
   );

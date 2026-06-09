@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   backlogLintCommand,
   backlogSetStatusCommand,
+  backlogUnstickCommand,
+  type UnstickDeps,
   lintBacklogContent,
   statusFor,
 } from "../src/commands/backlog-mgmt.js";
@@ -150,5 +152,70 @@ describe("backlog lint — US-PORT-019", () => {
     const gated = capture(() => backlogLintCommand(["--gate"]));
     expect(gated.status).toBe(1);
     expect(gated.out).toContain("exiting 1");
+  });
+});
+
+describe("backlog unstick — US-PORT-019 (FIX-112)", () => {
+  const NOW = Date.parse("2026-06-09T12:00:00Z");
+  const SLUG = "t-aaa111";
+  let loopDir: string;
+
+  function ev(stage: string, extra: Record<string, unknown>): string {
+    return JSON.stringify({ stage, ...extra });
+  }
+  /** Seed events ndjson + return deps pointing the shared root at the sandbox. */
+  function setup(events: string[]): UnstickDeps {
+    const shared = join(dir, "shared");
+    loopDir = join(shared, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    writeFileSync(join(loopDir, `events-${SLUG}.ndjson`), events.join("\n") + "\n");
+    return { slug: () => SLUG, sharedRoot: () => shared, nowMs: () => NOW };
+  }
+  function iso(hoursAgo: number): string {
+    return new Date(NOW - hoursAgo * 3600_000).toISOString();
+  }
+
+  it("reverts a story whose failed cycle is older than the TTL", () => {
+    const deps = setup([
+      ev("pick_todo", { detail: "US-100", label: "c1", ts: iso(6) }),
+      ev("cycle_end", { label: "c1", outcome: "failed", ts: iso(5) }), // 5h ago > 4h TTL
+      ev("pick_todo", { detail: "US-101", label: "c2", ts: iso(2) }),
+      ev("cycle_end", { label: "c2", outcome: "failed", ts: iso(1) }), // 1h ago < 4h → keep
+      ev("pick_todo", { detail: "US-102", label: "c3", ts: iso(3) }), // still running → keep
+    ]);
+    seedBacklog(
+      "| [US-100](x) | one | 🔨 In Progress |\n" +
+        "| [US-101](x) | two | 🔨 In Progress |\n" +
+        "| [US-102](x) | three | 🔨 In Progress |\n",
+    );
+    const r = capture(() => backlogUnstickCommand([], deps));
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("reverted US-100 (cycle ended failed 5.0h ago)");
+    expect(statusOf("US-100")).toBe("📋 Todo");
+    expect(statusOf("US-101")).toBe("🔨 In Progress");
+    expect(statusOf("US-102")).toBe("🔨 In Progress");
+    // ALERT note appended
+    const alert = readFileSync(join(loopDir, `ALERT-${SLUG}.md`), "utf8");
+    expect(alert).toContain("unstick: reverted US-100");
+  });
+
+  it("--dry-run reports but writes nothing", () => {
+    const deps = setup([
+      ev("pick_todo", { detail: "US-100", label: "c1", ts: iso(6) }),
+      ev("cycle_end", { label: "c1", outcome: "aborted", ts: iso(5) }),
+    ]);
+    seedBacklog("| [US-100](x) | one | 🔨 In Progress |\n");
+    const r = capture(() => backlogUnstickCommand(["--dry-run"], deps));
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("would-revert US-100 (cycle ended aborted 5.0h ago)");
+    expect(statusOf("US-100")).toBe("🔨 In Progress"); // untouched
+  });
+
+  it("nothing stuck → exit 0, no output", () => {
+    const deps = setup([ev("pick_todo", { detail: "US-200", label: "c9", ts: iso(3) })]);
+    seedBacklog("| [US-200](x) | running | 🔨 In Progress |\n");
+    const r = capture(() => backlogUnstickCommand([], deps));
+    expect(r.status).toBe(0);
+    expect(r.out.trim()).toBe("");
   });
 });

@@ -6,7 +6,11 @@ import { alertCommand } from "./alert.js";
 import { archiveMigrateCommand } from "./archive-migrate.js";
 import { attestCommand } from "./attest.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
-import { backlogLintCommand, backlogSetStatusCommand } from "./backlog-mgmt.js";
+import {
+  backlogLintCommand,
+  backlogSetStatusCommand,
+  backlogUnstickCommand,
+} from "./backlog-mgmt.js";
 import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
@@ -117,8 +121,9 @@ export function registerAll(): void {
       return backlogSetStatusCommand(sub, args.slice(1));
     }
     if (sub === "lint") return backlogLintCommand(args.slice(1));
+    if (sub === "unstick") return backlogUnstickCommand(args.slice(1));
     if (sub !== undefined && BACKLOG_MGMT_SUBCOMMANDS.includes(sub)) {
-      return fallbackToBash(["backlog", ...args]).status;
+      return fallbackToBash(["backlog", ...args]).status; // sync (ported next)
     }
     return backlogCommand(args);
   });

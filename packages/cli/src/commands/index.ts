@@ -27,7 +27,13 @@ import { storyNewCommand } from "./story-new.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopFmtCommand } from "./loop-fmt.js";
-import { loopGcCommand, loopMuteCommand, loopResetCommand, loopUnmuteCommand } from "./loop-maint.js";
+import {
+  loopGcCommand,
+  loopMuteCommand,
+  loopResetCommand,
+  loopTestCommand,
+  loopUnmuteCommand,
+} from "./loop-maint.js";
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import {
@@ -254,6 +260,9 @@ export function registerAll(): void {
     // `loop gc` (≠ top-level `roll gc`): garbage-collect orphan slugs + tmp
     // debris + expired backups (US-PORT-022 / US-LOOP-021). FIX-125 gated.
     if (args[0] === "gc") return loopGcCommand(args.slice(1));
+    // `loop test` (≠ top-level `roll test`): manual smoke gate — generates the
+    // v3 test runner and runs it once with ROLL_LOOP_FORCE=1 (US-PORT-022).
+    if (args[0] === "test") return loopTestCommand(args.slice(1));
     return fallbackToBash(["loop", ...args]).status;
   });
 }

@@ -15,11 +15,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  defaultSmokeCmd,
   healDir,
   loopGcCommand,
   type LoopGcDeps,
   loopMuteCommand,
   loopResetCommand,
+  loopTestCommand,
+  type LoopTestDeps,
   loopUnmuteCommand,
   muteFile,
   stateFile,
@@ -238,5 +241,92 @@ describe("loop gc — US-PORT-022", () => {
     expect(r.status).toBe(0);
     expect(existsSync(join(loopDir, "a.bak"))).toBe(false);
     expect(r.out).toContain("keep-days=7");
+  });
+});
+
+describe("loop test — US-PORT-022", () => {
+  setEnv("ROLL_LANG", "en");
+  setEnv("NO_COLOR", "1");
+
+  /** A sandbox shared root; the installed runner exists unless `noRunner`. */
+  function testSandbox(opts: { exit?: number; noRunner?: boolean } = {}): {
+    shared: string;
+    slug: string;
+    deps: LoopTestDeps;
+    execed: string[];
+  } {
+    setEnv("ROLL_LANG", "en");
+    setEnv("NO_COLOR", "1");
+    const shared = tmp("roll-looptest-");
+    const loopDir = join(shared, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const slug = "tproj-aaa111";
+    if (!opts.noRunner) writeFileSync(join(loopDir, `run-${slug}.sh`), "#!/bin/bash\n");
+    let clock = 100;
+    const execed: string[] = [];
+    const deps: LoopTestDeps = {
+      slug: () => slug,
+      projectPath: () => shared,
+      sharedRoot: () => shared,
+      exec: (runner) => {
+        execed.push(runner);
+        clock += 3; // simulate 3s elapsed
+        return opts.exit ?? 0;
+      },
+      nowSec: () => clock,
+    };
+    return { shared, slug, deps, execed };
+  }
+
+  it("missing installed runner → err + exit 1, no exec", () => {
+    const { deps, execed } = testSandbox({ noRunner: true });
+    const r = capture(() => loopTestCommand([], deps));
+    expect(r.status).toBe(1);
+    expect(r.err).toContain("Runner not found");
+    expect(r.err).toContain("roll loop on");
+    expect(execed).toHaveLength(0);
+  });
+
+  it("default agent generates a claude smoke runner + reports pass", () => {
+    const { shared, slug, deps, execed } = testSandbox();
+    const r = capture(() => loopTestCommand([], deps));
+    expect(r.status).toBe(0);
+    expect(execed).toHaveLength(1);
+    const testRunner = join(shared, "loop", `run-${slug}-test.sh`);
+    expect(existsSync(testRunner)).toBe(true);
+    const body = readFileSync(testRunner, "utf8");
+    expect(body).toContain('claude -p "Reply with a single word: hello"');
+    expect(body).not.toContain("loop run-once"); // smoke runs the cmd, not a real cycle
+    expect(body).toContain("roll-loop-tproj-aaa111"); // tmux session preserved
+    expect(r.out).toContain("Smoke test passed (3s, agent: claude)");
+  });
+
+  it("--agent injects a mock command, no real claude", () => {
+    const { shared, slug, deps } = testSandbox();
+    const r = capture(() => loopTestCommand(["--agent", "pi"], deps));
+    expect(r.status).toBe(0);
+    const body = readFileSync(join(shared, "loop", `run-${slug}-test.sh`), "utf8");
+    expect(body).toContain("mock pi output line 1");
+    expect(body).not.toContain("claude -p");
+  });
+
+  it("--cmd overrides the agent default verbatim", () => {
+    const { shared, slug, deps } = testSandbox();
+    const r = capture(() => loopTestCommand(["--cmd", "echo CUSTOM_SMOKE"], deps));
+    expect(r.status).toBe(0);
+    const body = readFileSync(join(shared, "loop", `run-${slug}-test.sh`), "utf8");
+    expect(body).toContain("echo CUSTOM_SMOKE");
+  });
+
+  it("non-zero runner exit → smoke test failed, exit 1", () => {
+    const { deps } = testSandbox({ exit: 2 });
+    const r = capture(() => loopTestCommand([], deps));
+    expect(r.status).toBe(1);
+    expect(r.err).toContain("Smoke test failed (exit 2");
+  });
+
+  it("defaultSmokeCmd: claude vs non-claude", () => {
+    expect(defaultSmokeCmd("claude")).toContain("claude -p");
+    expect(defaultSmokeCmd("kimi")).toContain("mock kimi output");
   });
 });

@@ -823,3 +823,58 @@ describe("US-META-008 — self-score notes live in the card folder", () => {
     expect(input.selfScoreTrend).toBe("self-score: mean 7.0 / min 5 / redo 1 (last 14)");
   });
 });
+
+describe("dossier aligns status/type with the backlog (US-DOSSIER)", () => {
+  /** A project whose backlog drives status; features cards carry NO latest/. */
+  function backlogProject(): string {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-bk-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features");
+    for (const [epic, id] of [
+      ["done-epic", "US-DONE-1"],
+      ["mix-epic", "US-MIX-1"],
+      ["mix-epic", "FIX-MIX-2"],
+      ["mix-epic", "US-MIX-3"],
+      ["mix-epic", "US-MIX-4"],
+    ] as const) {
+      mkdirSync(join(f, epic, id), { recursive: true });
+      writeFileSync(join(f, epic, id, "spec.md"), `# ${id} — ${id}\n`);
+    }
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      "| ID | Description | Status |\n|----|----|----|\n" +
+        "| [US-DONE-1](x) | done epic story | ✅ Done |\n" +
+        "| [US-MIX-1](x) | merged one | ✅ Done |\n" +
+        "| FIX-MIX-2 | in flight | 🔨 In Progress |\n" +
+        "| US-MIX-3 | waiting | 📋 Todo |\n" +
+        "| US-MIX-4 | parked | 🚫 Hold |\n",
+    );
+    return p;
+  }
+
+  it("status comes from backlog: ✅→delivered (no latest/ needed), 🔨/📋/🚫 carried", () => {
+    const epics = collectDossier(backlogProject());
+    const mix = epics.find((e) => e.name === "mix-epic")!;
+    const byId = Object.fromEntries(mix.stories.map((s) => [s.id, s]));
+    expect(byId["US-MIX-1"]).toMatchObject({ delivered: true, status: "done" });
+    expect(byId["FIX-MIX-2"]).toMatchObject({ delivered: false, status: "in_progress" });
+    expect(byId["US-MIX-3"]).toMatchObject({ delivered: false, status: "todo" });
+    expect(byId["US-MIX-4"]).toMatchObject({ delivered: false, status: "hold" });
+    expect(mix.delivered).toBe(1); // only the ✅ one counts
+  });
+
+  it("a 100%-done epic lands in 'Delivered to main', partial in 'Shipping'", () => {
+    const html = renderFeaturesIndex(collectDossier(backlogProject()));
+    expect(html.indexOf("Delivered to main")).toBeGreaterThanOrEqual(0);
+    expect(html.indexOf("Delivered to main")).toBeLessThan(html.indexOf("Shipping to main"));
+    expect(html).toContain("已交付史诗"); // ledger figure renamed from "Epics shipping"
+  });
+
+  it("chips are colored by backlog status (truth/wip/hold/plain)", () => {
+    const html = renderFeaturesIndex(collectDossier(backlogProject()));
+    expect(html).toMatch(/class="chip truth"[^>]*>US-MIX-1</);
+    expect(html).toMatch(/class="chip wip"[^>]*>FIX-MIX-2</);
+    expect(html).toMatch(/class="chip hold"[^>]*>US-MIX-4</);
+    expect(html).toMatch(/class="chip"[^>]*>US-MIX-3</); // todo → plain
+  });
+});

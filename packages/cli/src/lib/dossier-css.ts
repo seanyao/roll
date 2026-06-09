@@ -84,6 +84,9 @@ export const DOSSIER_CSS = `
   color:var(--muted); text-decoration:none; }
 .chip:hover { border-color:var(--accent); color:var(--accent); }
 .chip.truth { border-color:color-mix(in srgb, var(--pass) 55%, transparent); color:var(--pass); }
+/* backlog-aligned status (US-DOSSIER): in-progress → warn, hold → block. */
+.chip.wip { border-color:color-mix(in srgb, var(--warn) 55%, transparent); color:var(--warn); }
+.chip.hold { border-color:color-mix(in srgb, var(--block) 50%, transparent); color:var(--block); }
 
 /* ── type chips + status pills ── */
 .type { font:10.5px/1 var(--mono); letter-spacing:.05em; border-radius:4px; padding:3px 6px; }

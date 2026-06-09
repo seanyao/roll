@@ -2,12 +2,22 @@
  * US-PORT-022 (part 2) — `roll loop reset | mute | unmute` TS ports.
  * Behavior aligned with bin/roll `_loop_reset` / `_loop_mute` / `_loop_unmute`.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   healDir,
+  loopGcCommand,
+  type LoopGcDeps,
   loopMuteCommand,
   loopResetCommand,
   loopUnmuteCommand,
@@ -124,5 +134,109 @@ describe("loop mute / unmute — US-PORT-022", () => {
   it("heal dir honors ROLL_LOOP_DIR override", () => {
     const { heal } = sandbox();
     expect(healDir()).toBe(heal);
+  });
+});
+
+describe("loop gc — US-PORT-022", () => {
+  const NOW_MS = 1_780_000_000_000; // frozen clock
+  const NOW_SEC = Math.floor(NOW_MS / 1000);
+
+  /** A throwaway plistDir + loopDir + frozen clock. */
+  function gcSandbox(): { plistDir: string; loopDir: string; deps: LoopGcDeps } {
+    const plistDir = tmp("roll-gc-plists-");
+    const loopDir = tmp("roll-gc-loop-");
+    delete process.env["ROLL_LOOP_GC_RETENTION_DAYS"];
+    const deps: LoopGcDeps = {
+      plistDir: () => plistDir,
+      loopDir: () => loopDir,
+      nowMs: () => NOW_MS,
+    };
+    return { plistDir, loopDir, deps };
+  }
+
+  function plist(dir: string, slug: string, workdir: string): void {
+    writeFileSync(
+      join(dir, `com.roll.loop.${slug}.plist`),
+      `<plist><dict>\n<key>WorkingDirectory</key>\n<string>${workdir}</string>\n</dict></plist>\n`,
+    );
+  }
+  /** Touch a file with an mtime `daysAgo` before the frozen clock. */
+  function aged(path: string, daysAgo: number, body = "x"): void {
+    writeFileSync(path, body);
+    const sec = NOW_SEC - daysAgo * 86400;
+    utimesSync(path, sec, sec);
+  }
+
+  it("refuses inside a loop cycle (FIX-125), exit 1", () => {
+    const { deps } = gcSandbox();
+    setEnv("ROLL_LOOP_AGENT", "claude");
+    const r = capture(() => loopGcCommand([], deps));
+    expect(r.status).toBe(1);
+    expect(r.err).toContain("FIX-125");
+    expect(r.out).toBe("");
+  });
+
+  it("dry-run flags an orphan slug but touches nothing", () => {
+    const { plistDir, deps } = gcSandbox();
+    plist(plistDir, "gone-abc123", "/no/such/project/path/xyz");
+    const r = capture(() => loopGcCommand(["--dry-run"], deps));
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("[DRY-RUN] orphan slug: gone-abc123");
+    expect(r.out).toContain("dry-run complete (1 items would be cleaned)");
+    expect(existsSync(join(plistDir, "com.roll.loop.gone-abc123.plist"))).toBe(true);
+  });
+
+  it("archives an orphan slug: moves plist+runners, removes data files", () => {
+    const { plistDir, loopDir, deps } = gcSandbox();
+    plist(plistDir, "gone-abc123", "/no/such/project/path/xyz");
+    writeFileSync(join(loopDir, "run-gone-abc123.sh"), "#!/bin/bash\n");
+    writeFileSync(join(loopDir, "state-gone-abc123.yaml"), "k: v\n");
+    const r = capture(() => loopGcCommand([], deps));
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("gc: archiving orphan slug gone-abc123");
+    expect(existsSync(join(plistDir, "com.roll.loop.gone-abc123.plist"))).toBe(false);
+    expect(existsSync(join(loopDir, "state-gone-abc123.yaml"))).toBe(false);
+    // archived under <loop>/archived/<slug>-<ts>/
+    const archived = join(loopDir, "archived");
+    expect(existsSync(archived)).toBe(true);
+  });
+
+  it("keeps a slug whose project directory still exists", () => {
+    const { plistDir, deps } = gcSandbox();
+    const live = tmp("roll-gc-liveproj-");
+    plist(plistDir, "live-def456", live);
+    const r = capture(() => loopGcCommand([], deps));
+    expect(r.status).toBe(0);
+    expect(existsSync(join(plistDir, "com.roll.loop.live-def456.plist"))).toBe(true);
+    expect(r.out).toContain("gc: 0 items cleaned, keep-days=30");
+  });
+
+  it("sweeps tmp debris always, and ages out backup/migrated/.bak by cutoff", () => {
+    const { loopDir, deps } = gcSandbox();
+    writeFileSync(join(loopDir, "runs.jsonl.tmp.9999"), "{}");
+    aged(join(loopDir, "backup-before-merge-old.tgz"), 6); // >5d → gone
+    aged(join(loopDir, "backup-before-merge-new.tgz"), 1); // <5d → kept
+    aged(join(loopDir, "events.migrated-1234"), 8); // >7d → gone
+    aged(join(loopDir, "runs.jsonl.bak"), 40); // >30d default → gone
+    aged(join(loopDir, "fresh.bak"), 5); // <30d → kept
+    const r = capture(() => loopGcCommand([], deps));
+    expect(r.status).toBe(0);
+    expect(existsSync(join(loopDir, "runs.jsonl.tmp.9999"))).toBe(false);
+    expect(existsSync(join(loopDir, "backup-before-merge-old.tgz"))).toBe(false);
+    expect(existsSync(join(loopDir, "backup-before-merge-new.tgz"))).toBe(true);
+    expect(existsSync(join(loopDir, "events.migrated-1234"))).toBe(false);
+    expect(existsSync(join(loopDir, "runs.jsonl.bak"))).toBe(false);
+    expect(existsSync(join(loopDir, "fresh.bak"))).toBe(true);
+    expect(r.out).toContain("4 items cleaned, keep-days=30");
+  });
+
+  it("ROLL_LOOP_GC_RETENTION_DAYS env overrides keep-days", () => {
+    const { loopDir, deps } = gcSandbox();
+    aged(join(loopDir, "a.bak"), 10);
+    setEnv("ROLL_LOOP_GC_RETENTION_DAYS", "7"); // 10d > 7d → gone
+    const r = capture(() => loopGcCommand(["--keep-days", "30"], deps));
+    expect(r.status).toBe(0);
+    expect(existsSync(join(loopDir, "a.bak"))).toBe(false);
+    expect(r.out).toContain("keep-days=7");
   });
 });

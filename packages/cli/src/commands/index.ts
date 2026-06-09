@@ -27,7 +27,7 @@ import { storyNewCommand } from "./story-new.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopFmtCommand } from "./loop-fmt.js";
-import { loopMuteCommand, loopResetCommand, loopUnmuteCommand } from "./loop-maint.js";
+import { loopGcCommand, loopMuteCommand, loopResetCommand, loopUnmuteCommand } from "./loop-maint.js";
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import {
@@ -251,6 +251,9 @@ export function registerAll(): void {
     if (args[0] === "reset") return loopResetCommand(args.slice(1));
     if (args[0] === "mute") return loopMuteCommand(args.slice(1));
     if (args[0] === "unmute") return loopUnmuteCommand(args.slice(1));
+    // `loop gc` (≠ top-level `roll gc`): garbage-collect orphan slugs + tmp
+    // debris + expired backups (US-PORT-022 / US-LOOP-021). FIX-125 gated.
+    if (args[0] === "gc") return loopGcCommand(args.slice(1));
     return fallbackToBash(["loop", ...args]).status;
   });
 }

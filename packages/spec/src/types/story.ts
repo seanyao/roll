@@ -20,14 +20,21 @@ export const STATUS_MARKER: Record<StoryStatus, string> = {
 /**
  * The ONE parser from a raw backlog status cell to the typed {@link StoryStatus}.
  *
- * Checks the most-specific terminal states (Done / In Progress / Hold) BEFORE
- * Todo so a "✅ Done — … 📋 Todo note" trailing comment is never miscounted as
- * pending. Historical triage markers `🔒 Blocked` / `⏸ Deferred` fold into
- * `hold` — the enum has no separate deferred state; all three mean "parked, not
- * pickable". Returns `null` for an unrecognized cell so callers fail loud rather
- * than silently dropping a row (the v2 renderer's blindness to `🚫 Hold` bug).
+ * Keys on the LEADING marker glyph — the status emoji appears only as the marker,
+ * never in the human reason text, so a hold whose reason reads "…全 Done 后…" is
+ * not misread as done (the loose-substring bug). Historical triage markers
+ * `🔒 Blocked` / `⏸ Deferred` fold into `hold` — the enum has no separate
+ * deferred state; all three mean "parked, not pickable". Falls back to the status
+ * WORD (terminal states first) only for emoji-less cells. Returns `null` for an
+ * unrecognized cell so callers fail loud rather than silently dropping a row (the
+ * v2 renderer's blindness to `🚫 Hold` bug).
  */
 export function classifyStatus(cell: string): StoryStatus | null {
+  if (cell.includes("✅")) return "done";
+  if (cell.includes("🔨")) return "in_progress";
+  if (cell.includes("🚫") || cell.includes("🔒") || cell.includes("⏸")) return "hold";
+  if (cell.includes("📋")) return "todo";
+  // Emoji-less fallback: match the status word, most-specific terminal first.
   if (cell.includes("Done")) return "done";
   if (cell.includes("In Progress")) return "in_progress";
   if (cell.includes("Hold") || cell.includes("Blocked") || cell.includes("Deferred")) return "hold";

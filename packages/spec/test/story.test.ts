@@ -33,6 +33,14 @@ describe("classifyStatus", () => {
     expect(classifyStatus("✅ Done — superseded a 📋 Todo note")).toBe("done");
   });
 
+  it("keys on the leading marker, not status WORDS buried in the reason text", () => {
+    // Real regression: US-PORT-021's hold reason mentions "全 Done 后" — a loose
+    // includes("Done") misclassified it as done and the row vanished from view.
+    expect(classifyStatus("🚫 Hold (待 013~020+022 全 Done 后 owner 确认放行)")).toBe("hold");
+    expect(classifyStatus("🔨 In Progress (blocks the Done rollup)")).toBe("in_progress");
+    expect(classifyStatus("📋 Todo (not Done yet)")).toBe("todo");
+  });
+
   it("returns null for an unrecognized cell (fail-loud, no silent drop)", () => {
     expect(classifyStatus("🚧 部分")).toBeNull();
     expect(classifyStatus("")).toBeNull();

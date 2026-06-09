@@ -27,6 +27,7 @@ import { storyNewCommand } from "./story-new.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopFmtCommand } from "./loop-fmt.js";
+import { loopMuteCommand, loopResetCommand, loopUnmuteCommand } from "./loop-maint.js";
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import {
@@ -244,6 +245,12 @@ export function registerAll(): void {
     if (args[0] === "pause") return loopPauseCommand(args.slice(1));
     if (args[0] === "resume") return loopResumeCommand(args.slice(1));
     if (args[0] === "now") return loopNowCommand(args.slice(1));
+    // `loop reset` / `loop mute` / `loop unmute`: residual write/maintenance
+    // subcommands (US-PORT-022) — clear per-project state + heal counters, and
+    // the auto-attach popup toggle pair. No bash fallback.
+    if (args[0] === "reset") return loopResetCommand(args.slice(1));
+    if (args[0] === "mute") return loopMuteCommand(args.slice(1));
+    if (args[0] === "unmute") return loopUnmuteCommand(args.slice(1));
     return fallbackToBash(["loop", ...args]).status;
   });
 }

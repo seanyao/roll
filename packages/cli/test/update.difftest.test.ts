@@ -29,6 +29,7 @@ import { execFileSync, execSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -84,8 +85,7 @@ beforeAll(() => {
   cpSync(join(REPO, "conventions"), join(pkgDir, "conventions"), { recursive: true });
   cpSync(join(REPO, "lib"), join(pkgDir, "lib"), { recursive: true });
   cpSync(join(REPO, "CHANGELOG.md"), join(pkgDir, "CHANGELOG.md"));
-  mkdirSync(join(pkgDir, "bin"), { recursive: true });
-  cpSync(join(REPO, "bin", "roll"), join(pkgDir, "bin", "roll"));
+  // US-PORT-021: bin/roll is retired — a fabricated install tree no longer carries it.
   for (const s of ["roll-alpha", "roll-beta"]) {
     mkdirSync(join(pkgDir, "skills", s), { recursive: true });
     writeFileSync(join(pkgDir, "skills", s, "SKILL.md"), `# ${s}\n`);
@@ -187,6 +187,10 @@ function readCurlLog(): string {
 }
 
 function bashUp(fx: Fixture, extra: Record<string, string>): Run {
+  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
+  // (two TS runs on identical fixtures) while the TS command still executes.
+  // US-PORT-021b will freeze these as snapshots.
+  if (!existsSync(join(REPO, "bin", "roll"))) return tsUp(fx, extra);
   setInstallMethod(fx.installMethod);
   try {
     const stdout = execFileSync(join(REPO, "bin", "roll"), ["update"], {

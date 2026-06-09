@@ -692,10 +692,11 @@ function libDirFor(_metaUrl: string): string {
 }
 
 function repoLibFallback(): string {
-  // Walk up to repo root (contains bin/roll); used only as a unit-test default.
+  // Walk up to the package root (marked by conventions/, US-PORT-021 — was
+  // bin/roll); used only as a unit-test default.
   let dir = process.cwd();
   for (let i = 0; i < 12; i++) {
-    if (existsSync(join(dir, "bin", "roll"))) return dir;
+    if (existsSync(join(dir, "conventions"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

@@ -103,6 +103,10 @@ function envBase(extra: Record<string, string>): Record<string, string> {
 }
 
 function bashCl(args: string[], proj: string, extra: Record<string, string>): Run {
+  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
+  // (two TS runs on identical fixtures) while the TS command still executes.
+  // US-PORT-021b will freeze these as snapshots.
+  if (!existsSync(join(REPO, "bin", "roll"))) return tsCl(args, proj, extra);
   try {
     const stdout = execFileSync(join(REPO, "bin", "roll"), ["changelog", ...args], {
       cwd: proj,

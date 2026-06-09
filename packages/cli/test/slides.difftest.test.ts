@@ -30,7 +30,7 @@
  * are byte-compared.
  */
 import { execSync, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -87,6 +87,10 @@ function baseEnv(cwd: string, extra: Record<string, string>): Record<string, str
 }
 
 function bashSlides(cwd: string, args: string[], extra: Record<string, string> = {}): Run {
+  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
+  // (two TS runs on identical fixtures) while the TS command still executes.
+  // US-PORT-021b will freeze these as snapshots.
+  if (!existsSync(join(REPO, "bin", "roll"))) return tsSlides(cwd, args, extra);
   const r = spawnSync(join(REPO, "bin", "roll"), ["slides", ...args], {
     cwd,
     encoding: "utf8",
@@ -373,12 +377,8 @@ describe("diff-test: roll slides == bash oracle", () => {
       () => {
         const d = scratch();
         writeCjkDeck(d, "built-deck");
-        // pre-render via the bash oracle so an HTML artefact exists for both.
-        const r = spawnSync(join(REPO, "bin", "roll"), ["slides", "build", "built-deck", "--no-open"], {
-          cwd: d,
-          encoding: "utf8",
-          env: baseEnv(d, {}),
-        });
+        // pre-render so an HTML artefact exists (US-PORT-021: bin/roll retired).
+        const r = tsSlides(d, ["build", "built-deck", "--no-open"]);
         if ((r.status ?? 1) !== 0) throw new Error(`prebuild failed: ${r.stderr}`);
         return d;
       },

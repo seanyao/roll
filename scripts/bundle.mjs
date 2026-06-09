@@ -14,11 +14,11 @@
  * with `node <binary>`, which fails. The JS API spawns the binary as a service
  * itself, so it is portable across platforms and pnpm versions.
  *
- * Runtime note: `dist/roll.mjs` resolves its data dirs (bin/roll for the bash
- * fallback, lib/prices snapshots, lib/slides templates) by walking up from its
- * own location to the package root containing `bin/roll` — see
+ * Runtime note: `dist/roll.mjs` resolves its data dirs (lib/prices snapshots,
+ * lib/slides templates, conventions/) by walking up from its own location to
+ * the package root, keyed on the shipped `conventions/` directory — see
  * `packages/cli/src/bridge.ts` repoRoot(). The package `files` array ships
- * dist/ + bin/ + lib/ + conventions/ + template/ so that walk succeeds from the
+ * dist/ + lib/ + conventions/ + template/ so that walk succeeds from the
  * installed location.
  */
 import { build } from "esbuild";

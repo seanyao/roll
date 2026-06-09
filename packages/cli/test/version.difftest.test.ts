@@ -29,14 +29,13 @@ afterAll(() => {
 });
 
 /**
- * A fabricated install tree: real bin/roll + lib copied in, optionally a
- * package.json with `version`.
+ * A fabricated install tree: a lib/ copy, optionally a package.json with
+ * `version`. US-PORT-021: bin/roll is retired, so it is no longer copied in —
+ * package.json is the sole version source.
  */
 function buildTree(pkgVersion: string | null): string {
   const tree = realpathSync(mkdtempSync(join(tmpdir(), "roll-ver-tree-")));
   dirs.push(tree);
-  mkdirSync(join(tree, "bin"), { recursive: true });
-  cpSync(join(REPO, "bin", "roll"), join(tree, "bin", "roll"));
   cpSync(join(REPO, "lib"), join(tree, "lib"), { recursive: true });
   if (pkgVersion !== null) {
     writeFileSync(join(tree, "package.json"), JSON.stringify({ name: "@seanyao/roll", version: pkgVersion }) + "\n");
@@ -44,17 +43,12 @@ function buildTree(pkgVersion: string | null): string {
   return tree;
 }
 
-describe("frozen: version probe is package.json-first, bin/roll literal is fallback", () => {
-  it("package.json version wins over the fossil bin/roll VERSION literal", () => {
+describe("frozen: version probe is package.json-only (bin/roll fallback retired)", () => {
+  it("reads the version from package.json", () => {
     expect(treeVersion(buildTree("7.7.7"))).toBe("7.7.7");
   });
 
-  it("falls back to the bin/roll VERSION literal when no package.json is present", () => {
-    // Read the actual VERSION from the fixture's bin/roll (the literal changes with each release).
-    const tree = buildTree(null);
-    const binRoll = readFileSync(join(tree, "bin", "roll"), "utf8");
-    const mm = /^VERSION="([^"]+)"/m.exec(binRoll);
-    const expectedVersion = mm?.[1] ?? "";
-    expect(treeVersion(tree)).toBe(expectedVersion);
+  it("no package.json → empty (US-PORT-021: the bin/roll VERSION fallback is gone)", () => {
+    expect(treeVersion(buildTree(null))).toBe("");
   });
 });

@@ -29,19 +29,18 @@ export function portedCommands(): string[] {
 /**
  * Walk up from this module to the package root. US-PORT-021 prep: the root
  * marker is the shipped `conventions/` directory (present in both the dev repo
- * and the published npm package's `files`), NOT `bin/roll` — so root resolution
- * survives the bash engine's retirement. `bin/roll` is still accepted during the
- * transition so a checkout that predates the deletion keeps resolving.
+ * and the published npm package's `files`) — the bash engine (`bin/roll`) is
+ * retired (US-PORT-021).
  */
 export function repoRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 10; i++) {
-    if (existsSync(join(dir, "conventions")) || existsSync(join(dir, "bin", "roll"))) return dir;
+    if (existsSync(join(dir, "conventions"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("bridge: cannot locate package root (no conventions/ or bin/roll marker)");
+  throw new Error("bridge: cannot locate package root (no conventions/ marker)");
 }
 
 export interface RunResult {

@@ -191,6 +191,10 @@ function readLcLog(): string {
 }
 
 function bashOb(fx: Fixture, args: string[], extra: Record<string, string>): Run {
+  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
+  // (two TS runs on identical fixtures) while the TS command still executes.
+  // US-PORT-021b will freeze these as snapshots.
+  if (!existsSync(join(REPO, "bin", "roll"))) return tsOb(fx, args, extra);
   try {
     const stdout = execFileSync(join(REPO, "bin", "roll"), ["offboard", ...args], {
       cwd: fx.proj,

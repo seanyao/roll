@@ -4,13 +4,19 @@ set -euo pipefail
 # For contributors working on roll itself.
 # Regular users: npm install -g roll
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_SRC="$REPO_DIR/bin/roll"
+# US-PORT-021: the bash engine (bin/roll) is retired. The dev entry is the
+# TS-first Node launcher; it imports the workspace's built dist/, so build first.
+BIN_SRC="$REPO_DIR/packages/cli/bin/roll.js"
 BIN_DIR="$HOME/.local/bin"
 BIN_DST="$BIN_DIR/roll"
 
 echo "[roll] Installing Roll from: $REPO_DIR"
 
-# 1. Grant execute permission
+# 1. Build the workspace so the launcher's dist/ imports resolve
+if [[ ! -f "$REPO_DIR/packages/cli/dist/index.js" ]]; then
+  echo "[roll] Building workspace…"
+  (cd "$REPO_DIR" && pnpm install --frozen-lockfile && pnpm -r build)
+fi
 chmod +x "$BIN_SRC"
 
 # 2. Ensure ~/.local/bin exists

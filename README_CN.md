@@ -68,8 +68,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 
 ```
 packages/      TypeScript 引擎（pnpm workspaces）：spec · core · infra · cli · web
-bin/roll       冻结的 bash v2 引擎 —— 自动回落 + diff-test oracle
-lib/           运行时伴生（python/sh），loop 与回落路径在用
+lib/           运行时伴生（python/sh），loop 在用
 skills/        Git submodule → seanyao/roll-skills（agent 技能契约）
 conventions/   roll setup 同步到各 AI 客户端的约定
 template/      roll init 安装的项目脚手架

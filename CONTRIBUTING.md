@@ -10,7 +10,7 @@ cd roll
 ./install.sh
 ```
 
-`install.sh` symlinks the dev tree into `~/.roll/`, so changes to `bin/roll` and `skills/` take effect immediately for any project on the same machine.
+`install.sh` builds the workspace and symlinks the TS launcher (`packages/cli/bin/roll.js`) into `~/.local/bin/roll`, so a rebuild (`pnpm -r build`) and `skills/` edits take effect immediately for any project on the same machine.
 
 ## Tests
 

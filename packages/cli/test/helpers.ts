@@ -43,20 +43,19 @@ export function pathWithout(...exclude: string[]): string {
 }
 
 /**
- * The running bin/roll version, resolved exactly as the oracle now resolves it
- * (FIX-202): package.json is the single source of truth; the bin/roll VERSION=
- * literal is the last-resort fallback. The cache-seeding helpers below rely on
- * this matching `$VERSION` so the upgrade nag stays suppressed in difftests.
+ * The running roll version (US-PORT-021): package.json is the single source of
+ * truth — the v2-era bin/roll VERSION= fallback is retired with the bash engine.
+ * The cache-seeding helpers below rely on this matching `$VERSION` so the upgrade
+ * nag stays suppressed in difftests.
  */
 export function binRollVersion(): string {
   try {
     const pkg = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as { version?: unknown };
     if (typeof pkg.version === "string" && pkg.version !== "") return pkg.version;
   } catch {
-    /* fall through to the literal */
+    /* fall through */
   }
-  const m = /^VERSION="([^"]+)"/m.exec(readFileSync(join(REPO, "bin", "roll"), "utf8"));
-  return m?.[1] ?? "0";
+  return "0";
 }
 
 /**

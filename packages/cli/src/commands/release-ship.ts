@@ -16,32 +16,59 @@
  * `--dry-run` prints the plan and exits; `--yes` skips the confirm prompt.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, readSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { planShip, type ShipFacts } from "@roll/core";
 import { type Lang, resolveLang } from "@roll/spec";
 import { c, renderState } from "../render.js";
 import { consistencyPasses } from "./consistency.js";
 
+/** Synchronous sleep (ms) via Atomics — polls a non-blocking fd without busy-spin. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// FIX-229: EAGAIN polling budget — 18000 × 10ms ≈ 3 min of patience for a
+// non-blocking fd before giving up. A blocking fd (the /dev/tty path) never
+// hits this; it waits on the kernel for as long as the user takes to answer.
+const EAGAIN_MAX_WAITS = 18_000;
+
 /**
  * Read one line from a fd synchronously, stopping at the FIRST newline or EOF.
  *
  * FIX-228: the confirm prompt used `readFileSync("/dev/stdin")`, which reads to
  * EOF — fine when stdin is piped (`echo y | …`) but in an interactive TTY the
- * user types `y`⏎ and never sends EOF, so the read blocks forever (the 7-minute
- * "super slow" ship hang). Reading byte-by-byte until "\n" terminates on the
- * newline an interactive answer ends with, while still honouring piped EOF.
- * `fd` is injectable so the line semantics are unit-testable without a real TTY.
+ * user types `y`⏎ and never sends EOF, so the read blocks forever. Reading
+ * byte-by-byte until "\n" terminates on the newline an interactive answer ends
+ * with, while still honouring piped EOF.
+ *
+ * FIX-229: that byte loop broke on the FIRST `readSync` throw — but a
+ * non-blocking fd (Node v26 marks an interactive stdin/TTY non-blocking) throws
+ * EAGAIN *before* the typed line is available, so the prompt silently returned
+ * "" (a "no") and the tag was never cut. Now an EAGAIN sleeps briefly and
+ * retries (bounded), so the read waits for the answer instead of aborting; any
+ * other error, or an exhausted budget, still breaks. `fd` is injectable so the
+ * semantics are testable (incl. a real O_NONBLOCK handle) without a TTY.
  */
-export function readLineSyncFromFd(fd: number): string {
+/** One-byte reader: returns bytes read (0 = EOF), throws on error (e.g. EAGAIN). */
+export type ByteReader = (fd: number, buf: Buffer) => number;
+const defaultByteReader: ByteReader = (fd, buf) => readSync(fd, buf, 0, 1, null);
+
+export function readLineSyncFromFd(fd: number, readByte: ByteReader = defaultByteReader): string {
   const byte = Buffer.alloc(1);
   let line = "";
-  for (let i = 0; i < 4096; i++) {
+  let eagainWaits = 0;
+  for (let i = 0; i < 1_000_000; i++) {
     let n: number;
     try {
-      n = readSync(fd, byte, 0, 1, null);
-    } catch {
-      break; // not readable (EAGAIN) — give up rather than spin
+      n = readByte(fd, byte);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EAGAIN" && eagainWaits < EAGAIN_MAX_WAITS) {
+        eagainWaits++;
+        sleepSync(10);
+        continue; // data not ready yet on a non-blocking fd — wait, don't bail
+      }
+      break; // other error, or polling budget exhausted
     }
     if (n === 0) break; // EOF (piped stdin closed)
     const ch = byte.toString("utf8");
@@ -50,6 +77,40 @@ export function readLineSyncFromFd(fd: number): string {
     line += ch;
   }
   return line;
+}
+
+/**
+ * FIX-229: read the confirm line from the CONTROLLING TERMINAL (`/dev/tty`) in
+ * blocking mode, not fd 0. On Node v26 + macOS an interactive stdin (fd 0) is
+ * non-blocking, so `readSync(0)` returns EAGAIN before the typed line lands.
+ * A freshly opened `/dev/tty` is a new blocking file description, so the read
+ * waits for the answer the way a confirm prompt must. When there is no
+ * controlling terminal (CI / piped input) the open fails and we fall back to
+ * fd 0, where piped input still terminates on EOF. `openTty` is injectable.
+ */
+export function readConfirmLine(
+  openTty: () => number = () => openSync("/dev/tty", "r"),
+  fallbackFd = 0,
+): string {
+  let fd = fallbackFd;
+  let opened = false;
+  try {
+    fd = openTty();
+    opened = true;
+  } catch {
+    fd = fallbackFd; // no /dev/tty — read piped stdin instead
+  }
+  try {
+    return readLineSyncFromFd(fd);
+  } finally {
+    if (opened) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+    }
+  }
 }
 
 /** Injectable seams (tests pass fakes; production wires real git/fs/consistency). */
@@ -123,8 +184,8 @@ const realDeps: ShipDeps = {
     // real confirm reads a single y/N line from the TTY.
     process.stdout.write(`\n  Tag and push ${tag}? This triggers the release workflow. [y/N] `);
     try {
-      // fd 0 = stdin; read a single line (FIX-228: no longer blocks on EOF in a TTY).
-      return /^\s*y(es)?\s*$/i.test(readLineSyncFromFd(0));
+      // FIX-229: read /dev/tty (blocking), not fd 0 (non-blocking in a Node v26 TTY).
+      return /^\s*y(es)?\s*$/i.test(readConfirmLine());
     } catch {
       return false;
     }

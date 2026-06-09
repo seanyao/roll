@@ -1,5 +1,5 @@
 /** Ported-command registry — one line per migrated subcommand. */
-import { fallbackToBash, registerPorted } from "../bridge.js";
+import { registerPorted } from "../bridge.js";
 import { agentCommand } from "./agent.js";
 import { pairCommand } from "./pair.js";
 import { alertCommand } from "./alert.js";
@@ -12,6 +12,15 @@ import {
   backlogUnstickCommand,
 } from "./backlog-mgmt.js";
 import { backlogSyncCommand } from "./backlog-sync.js";
+import {
+  loopAgentRoutesCommand,
+  loopEnforceTcrCommand,
+  loopHotfixHeadContextCommand,
+  loopNotifyCommand,
+  loopPrecheckCiCommand,
+  loopTestQualityCheckRetired,
+  loopUnknownSubcommand,
+} from "./loop-cycle-gates.js";
 import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
@@ -191,8 +200,10 @@ export function registerAll(): void {
   // (_ci_wait's polling loop) returns null → falls back to the frozen bash.
   registerPorted("ci", (args) => {
     if (args.includes("--wait")) return ciWaitCommand(args); // US-PORT-015: TS CI gate
-    const r = ciCommand(args);
-    return r ?? fallbackToBash(["ci", ...args]).status;
+    // The non-wait read surface is fully TS; ciCommand only returns null on the
+    // --wait path (intercepted above), so the coalesce is an unreachable guard
+    // (US-PORT-021 prep: no bash fallback remains).
+    return ciCommand(args) ?? 1;
   });
   // `test`: full surface TS (arg parse, --where routing, --reset lock+dispatch,
   // the default exec path through the isolation adapter). type=none runs the
@@ -223,12 +234,12 @@ export function registerAll(): void {
   // TS (owner ruling) and `delete`'s interactive confirm reads /dev/tty natively
   // (shared tty-confirm). No bash fallback remains.
   registerPorted("slides", slidesCommand);
-  // `loop status` + `loop run-once` are TS; `on|off|pause|resume` are TS as of
-  // US-LOOP-009 — `on` generates the v3 runner (a self-contained wrapper around
-  // `loop run-once`; DELIBERATE divergence from the v2 tmux outer/inner pair,
-  // whitelisted in AGENTS.md). Every other loop subcommand falls back to bash.
+  // `loop` is FULLY TS as of US-PORT-021 prep — no subcommand falls back to bash.
+  // `on` generates the v3 self-contained runner (DELIBERATE divergence from the
+  // v2 tmux outer/inner pair, whitelisted in AGENTS.md). Bare `roll loop`
+  // defaults to status (mirrors the v2 `${1:-status}`).
   registerPorted("loop", (args) => {
-    if (args[0] === "status") return dashboardCommand(args.slice(1));
+    if (args[0] === undefined || args[0] === "status") return dashboardCommand(args.slice(1));
     // `loop eval` / `loop story`: read-face commands (US-PORT-007) — thin TS
     // readers over the same cycle pipeline `loop status` owns. No bash fallback.
     if (args[0] === "eval") return loopEvalCommand(args.slice(1));
@@ -272,6 +283,16 @@ export function registerAll(): void {
     // `loop branches`: retired (US-PORT-022) — no internal caller; prints the
     // one-line `git ls-remote` that reproduces it. Never shells to bash.
     if (args[0] === "branches") return loopBranchesRetired();
-    return fallbackToBash(["loop", ...args]).status;
+    // Cycle-gate subcommands the loop AGENT invokes per the roll-loop skill
+    // (US-PORT-021 prerequisite — the last loop fallbacks, now native TS).
+    if (args[0] === "notify") return loopNotifyCommand(args.slice(1));
+    if (args[0] === "enforce-tcr") return loopEnforceTcrCommand(args.slice(1));
+    if (args[0] === "precheck-ci") return loopPrecheckCiCommand(args.slice(1));
+    if (args[0] === "hotfix-head-context") return loopHotfixHeadContextCommand(args.slice(1));
+    if (args[0] === "agent-routes") return loopAgentRoutesCommand(args.slice(1));
+    if (args[0] === "test-quality-check") return loopTestQualityCheckRetired();
+    // Anything else is an unknown loop subcommand — print the v2 usage, exit 1
+    // (no bash fallback remains; bin/roll is being retired in US-PORT-021).
+    return loopUnknownSubcommand(args[0]);
   });
 }

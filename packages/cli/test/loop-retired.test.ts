@@ -5,7 +5,11 @@
  * exits 0 — it never runs tmux itself.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { loopAttachRetired, loopMonitorRetired } from "../src/commands/loop-retired.js";
+import {
+  loopAttachRetired,
+  loopBranchesRetired,
+  loopMonitorRetired,
+} from "../src/commands/loop-retired.js";
 
 function capture(fn: () => number, env: Record<string, string>): { out: string; code: number } {
   const save: Record<string, string | undefined> = {};
@@ -67,5 +71,26 @@ describe("loop monitor / attach retirement stubs", () => {
     // No tmux binary needed; the function returns synchronously with exit 0.
     const r = capture(loopMonitorRetired, { ...SLUG_ENV, ROLL_LANG: "en" });
     expect(r.code).toBe(0);
+  });
+});
+
+describe("loop branches retirement stub (US-PORT-022)", () => {
+  afterEach(() => {
+    delete process.env["ROLL_LANG"];
+  });
+
+  it("en: offers the git ls-remote one-liner, exit 0", () => {
+    const r = capture(loopBranchesRetired, { ...SLUG_ENV, ROLL_LANG: "en" });
+    expect(r.code).toBe(0);
+    expect(r.out).toBe(
+      "roll loop branches is retired. List loop branches directly: git ls-remote --heads origin 'loop/*'\n",
+    );
+  });
+
+  it("zh: single-language prose, keeps the literal git command", () => {
+    const r = capture(loopBranchesRetired, { ...SLUG_ENV, ROLL_LANG: "zh" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("已退役");
+    expect(r.out).toContain("git ls-remote --heads origin 'loop/*'");
   });
 });

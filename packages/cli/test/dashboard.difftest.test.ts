@@ -146,7 +146,7 @@ describe("frozen: roll loop status (fixture)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+        drill   roll loop runs --detail <cycle>       watch   tmux attach -t roll-loop-<slug>       more   roll loop status --days 7
       "
     `);
   });
@@ -195,7 +195,7 @@ describe("frozen: roll loop status (fixture)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+        drill   roll loop runs --detail <cycle>       watch   tmux attach -t roll-loop-<slug>       more   roll loop status --days 7
       "
     `);
   });
@@ -245,7 +245,7 @@ describe("frozen: roll loop status (fixture)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+        drill   roll loop runs --detail <cycle>       watch   tmux attach -t roll-loop-<slug>       more   roll loop status --days 7
       "
     `);
   });
@@ -301,7 +301,7 @@ describe("frozen: roll loop status (fixture)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+        drill   roll loop runs --detail <cycle>       watch   tmux attach -t roll-loop-<slug>       more   roll loop status --days 7
       "
     `);
   });
@@ -475,12 +475,12 @@ describe("frozen: roll loop status (live)", () => {
 
         ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────────────────────  2 cycles · 1 failed
         ✗  09:48     8m  —/—                         —                 —   FIX-200
-              → roll loop show 20260607-014830-99999
+              → roll loop runs --detail 20260607-014830-99999
         ✓  10:48    10m  12K/50K↑ 800K↓/3.4K         opus-4-7      $1.23   US-CLI-006 #777 ✓
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+        drill   roll loop runs --detail <cycle>       watch   tmux attach -t roll-loop-<slug>       more   roll loop status --days 7
       "
     `);
   });
@@ -585,7 +585,7 @@ describe("frozen: roll loop status (live)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        drill   roll loop show <cycle>       watch   roll loop --watch       more   roll loop status --days 7
+        drill   roll loop runs --detail <cycle>       watch   tmux attach -t roll-loop-<slug>       more   roll loop status --days 7
       "
     `);
   });

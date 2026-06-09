@@ -16,7 +16,7 @@ import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
 import { loopLogCommand } from "./loop-log.js";
 import { loopEventsCommand } from "./loop-events.js";
-import { loopAttachRetired, loopMonitorRetired } from "./loop-retired.js";
+import { loopAttachRetired, loopBranchesRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
 import { dreamCommand } from "./dream.js";
 import { feedbackCommand } from "./feedback.js";
@@ -27,6 +27,13 @@ import { storyNewCommand } from "./story-new.js";
 import { initCommand } from "./init.js";
 import { langCommand } from "./lang.js";
 import { loopFmtCommand } from "./loop-fmt.js";
+import {
+  loopGcCommand,
+  loopMuteCommand,
+  loopResetCommand,
+  loopTestCommand,
+  loopUnmuteCommand,
+} from "./loop-maint.js";
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import {
@@ -244,6 +251,21 @@ export function registerAll(): void {
     if (args[0] === "pause") return loopPauseCommand(args.slice(1));
     if (args[0] === "resume") return loopResumeCommand(args.slice(1));
     if (args[0] === "now") return loopNowCommand(args.slice(1));
+    // `loop reset` / `loop mute` / `loop unmute`: residual write/maintenance
+    // subcommands (US-PORT-022) — clear per-project state + heal counters, and
+    // the auto-attach popup toggle pair. No bash fallback.
+    if (args[0] === "reset") return loopResetCommand(args.slice(1));
+    if (args[0] === "mute") return loopMuteCommand(args.slice(1));
+    if (args[0] === "unmute") return loopUnmuteCommand(args.slice(1));
+    // `loop gc` (≠ top-level `roll gc`): garbage-collect orphan slugs + tmp
+    // debris + expired backups (US-PORT-022 / US-LOOP-021). FIX-125 gated.
+    if (args[0] === "gc") return loopGcCommand(args.slice(1));
+    // `loop test` (≠ top-level `roll test`): manual smoke gate — generates the
+    // v3 test runner and runs it once with ROLL_LOOP_FORCE=1 (US-PORT-022).
+    if (args[0] === "test") return loopTestCommand(args.slice(1));
+    // `loop branches`: retired (US-PORT-022) — no internal caller; prints the
+    // one-line `git ls-remote` that reproduces it. Never shells to bash.
+    if (args[0] === "branches") return loopBranchesRetired();
     return fallbackToBash(["loop", ...args]).status;
   });
 }

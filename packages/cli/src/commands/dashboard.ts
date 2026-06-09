@@ -1894,13 +1894,15 @@ function render(
 
   out.push(c("faint", "─".repeat(COLS)));
   out.push("");
+  // US-PORT-022: `loop show` / `loop --watch` never existed (dead v2 hints).
+  // Drill repoints to the real per-cycle reader; live watch is a tmux attach.
   out.push(
     "  " +
       c("dim", "drill   ") +
-      c("blue", "roll loop show <cycle>") +
+      c("blue", "roll loop runs --detail <cycle>") +
       c("muted", "       ") +
       c("dim", "watch   ") +
-      c("blue", "roll loop --watch") +
+      c("blue", "tmux attach -t roll-loop-<slug>") +
       c("muted", "       ") +
       c("dim", "more   ") +
       c("blue", "roll loop status --days 7"),

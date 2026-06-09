@@ -22,3 +22,13 @@ export function loopAttachRetired(): number {
   process.stdout.write(t(v3Catalog, lang(), "loopv3.attach_retired", projectSlug()) + "\n");
   return 0;
 }
+
+/**
+ * `loop branches` (US-PORT-022). Pure user-introspection with no internal
+ * caller — retired rather than ported off bash. Prints the one-line `git
+ * ls-remote` that reproduces the view (single-language, follows ROLL_LANG).
+ */
+export function loopBranchesRetired(): number {
+  process.stdout.write(t(v3Catalog, lang(), "loopv3.branches_retired") + "\n");
+  return 0;
+}

@@ -5,7 +5,13 @@ import { pairCommand } from "./pair.js";
 import { alertCommand } from "./alert.js";
 import { archiveMigrateCommand } from "./archive-migrate.js";
 import { attestCommand } from "./attest.js";
-import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
+import { backlogCommand } from "./backlog.js";
+import {
+  backlogLintCommand,
+  backlogSetStatusCommand,
+  backlogUnstickCommand,
+} from "./backlog-mgmt.js";
+import { backlogSyncCommand } from "./backlog-sync.js";
 import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
@@ -107,11 +113,17 @@ export function registerAll(): void {
   // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
   // (v2 had no pairing).
   registerPorted("pair", pairCommand);
-  // `backlog` display is TS; management subcommands (writes) stay on bash.
+  // `backlog`: FULLY TS as of US-PORT-019. Display + block/defer/unblock/promote
+  // + lint + unstick + sync (GitHub issues→backlog) all run native; no bash
+  // fallback remains.
   registerPorted("backlog", (args) => {
-    if (args[0] !== undefined && BACKLOG_MGMT_SUBCOMMANDS.includes(args[0])) {
-      return fallbackToBash(["backlog", ...args]).status;
+    const sub = args[0];
+    if (sub === "block" || sub === "defer" || sub === "unblock" || sub === "promote") {
+      return backlogSetStatusCommand(sub, args.slice(1));
     }
+    if (sub === "lint") return backlogLintCommand(args.slice(1));
+    if (sub === "unstick") return backlogUnstickCommand(args.slice(1));
+    if (sub === "sync") return backlogSyncCommand(args.slice(1));
     return backlogCommand(args);
   });
   // `brief`: v3-native live owner digest (US-PORT-002). Composes the three-block

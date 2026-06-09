@@ -206,17 +206,11 @@ export function registerAll(): void {
   registerPorted("version", versionCommand);
   registerPorted("--version", versionCommand);
   registerPorted("-v", versionCommand);
-  // `slides`: the DETERMINISTIC surface is TS — build (native validator +
-  // renderer, byte-identical to the python oracle), list, preview, logs,
-  // templates, delete --force, help, and the unknown-subcommand error. Two
-  // sub-paths RETURN null → fall back to the frozen bash: `new` (launches the
-  // selected project AI agent with the roll-deck skill to author deck.md — an
-  // agent-shelling path that must not run from TS, same policy as changelog's
-  // AI styling) and the interactive `delete` confirm (the live TTY y/N read).
-  registerPorted("slides", (args) => {
-    const r = slidesCommand(args);
-    return r ?? fallbackToBash(["slides", ...args]).status;
-  });
+  // `slides`: FULLY TS as of US-PORT-016. build/list/preview/logs/templates +
+  // help/unknown were already native; `new` now launches the project agent from
+  // TS (owner ruling) and `delete`'s interactive confirm reads /dev/tty natively
+  // (shared tty-confirm). No bash fallback remains.
+  registerPorted("slides", slidesCommand);
   // `loop status` + `loop run-once` are TS; `on|off|pause|resume` are TS as of
   // US-LOOP-009 — `on` generates the v3 runner (a self-contained wrapper around
   // `loop run-once`; DELIBERATE divergence from the v2 tmux outer/inner pair,

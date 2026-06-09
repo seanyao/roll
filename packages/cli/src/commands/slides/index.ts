@@ -19,16 +19,16 @@
  *   cmd_slides_delete           5174-5224
  *   cmd_slides_templates        5227-5279
  *   _slides_topic_slug          5286-5294
- *   cmd_slides_new              5302-5458  (BASH FALLBACK — see header note)
+ *   cmd_slides_new              5302-5458
  *   cmd_slides (dispatch)       6183-6222
  *
- * FALLBACK — `new`: cmd_slides_new launches the selected project AI agent with
- * the roll-deck skill body to AUTHOR deck.md (background process, live spinner,
- * file-watch progress). Per the same policy as `changelog`'s AI styling, a path
- * that shells an agent must NOT run from TS — the handler returns null so the
- * registry shells the frozen bash `bin/roll slides new …`. Everything `new`
- * does after authoring (validate + build via cmd_slides_build) is the ported TS
- * path in bash anyway; only the agent-launch orchestration is bash-owned.
+ * `new` (US-PORT-016, owner ruling): the TS layer TAKES OVER the launch —
+ * resolve the project agent, compose the roll-deck authoring prompt, spawn the
+ * agent (stdio inherit) to write deck.md, then build unless --no-build. The v2
+ * progress spinner / background file-watch was UX theatre around the launch and
+ * is intentionally not ported. `delete`'s interactive y/N confirm is likewise
+ * native TS now (shared tty-confirm, FIX-229 blocking /dev/tty read). No
+ * `roll slides` subcommand falls back to bash any more.
  *
  * BROWSER: `open`/`xdg-open` auto-launch is suppressed in tests via the same
  * triggers the oracle honours (BATS_TEST_NUMBER / ROLL_SLIDES_NO_OPEN), and the
@@ -46,6 +46,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { confirmYesNo } from "../../lib/tty-confirm.js";
+import { projectAgent } from "../agent-list.js";
+import { readSkillBody } from "../../runner/skill-body.js";
 import { onPath, rollPkgDir } from "../setup-shared.js";
 import { renderDeck, ValueError } from "./render.js";
 import { validateDeckFile } from "./validate.js";
@@ -599,8 +602,174 @@ function cmdLogs(args: string[]): number {
   return 0;
 }
 
+// ─── new (5302) ───────────────────────────────────────────────────────────────
+// US-PORT-016 (owner ruling): the TS layer TAKES OVER the launch — resolve the
+// project agent, compose the roll-deck prompt, spawn the agent to author
+// deck.md, then build (unless --no-build). The v2 progress spinner / file-watch
+// theatre is intentionally NOT ported — it was UX polish around the launch.
+
+/** _slides_topic_slug (bin/roll): lowercase, non-alnum → single '-', trim '-'. */
+export function topicSlug(topic: string): string {
+  return topic
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** text-mode argv per agent (mirrors `_agent_argv <agent> text <prompt>`). */
+export function slidesTextArgv(agent: string, prompt: string): { bin: string; args: string[] } | null {
+  switch (agent) {
+    case "claude":
+      return { bin: "claude", args: ["-p", "--output-format", "text", prompt] };
+    case "kimi": {
+      const bin = onPath("kimi-code") ? "kimi-code" : onPath("kimi-cli") ? "kimi-cli" : "kimi";
+      return { bin, args: ["-p", prompt] };
+    }
+    case "deepseek":
+      return { bin: "deepseek", args: [prompt] };
+    case "pi":
+      return { bin: "pi", args: ["-p", prompt] };
+    case "codex":
+    case "openai":
+      return { bin: "codex", args: ["exec", prompt] };
+    case "opencode":
+      return { bin: "opencode", args: ["run", prompt] };
+    case "qwen":
+      return { bin: "qwen", args: [prompt] };
+    case "gemini":
+    case "agy":
+    case "antigravity":
+      return { bin: "agy", args: ["-p", "--dangerously-skip-permissions", prompt] };
+    default:
+      return null;
+  }
+}
+
+/** Compose the roll-deck authoring prompt (mirrors the v2 heredoc). */
+export function composeNewPrompt(
+  skillBody: string,
+  topic: string,
+  slug: string,
+  template: string,
+): string {
+  const target = `.roll/slides/${slug}/deck.md`;
+  return (
+    `${skillBody}\n\n---\n\n# Task\n\n` +
+    `topic: ${topic}\nslug: ${slug}\ntemplate: ${template}\ntarget_file: ${target}\n\n` +
+    `Generate the 18-slide bilingual deck.md for the topic above, following the workflow and hard constraints in this skill. Write exactly one file: ${target}. Then print the bilingual "Next" hint.\n\n` +
+    `按本 skill 的工作流和硬约束生成 18 张双语 slide 的 deck.md。只写一个文件：${target}，然后打印双语 "Next" 提示。\n`
+  );
+}
+
+/** Injectable seams so tests never resolve a real skill / spawn a real agent. */
+export interface SlidesNewDeps {
+  agent: () => string;
+  skillBody: () => string | null;
+  /** Spawn the agent (stdio inherit), return its exit code. */
+  spawn: (bin: string, args: string[]) => number;
+  /** Build the deck after authoring (chains cmdBuild); returns exit code. */
+  build: (slug: string) => number;
+}
+function realNewDeps(): SlidesNewDeps {
+  return {
+    agent: () => projectAgent(),
+    skillBody: () => readSkillBody(process.cwd(), { skillName: "roll-deck" }),
+    spawn: (bin, args) => spawnSync(bin, args, { stdio: "inherit" }).status ?? 1,
+    build: (slug) => cmdBuild([slug]),
+  };
+}
+
+export function cmdNew(args: string[], deps: SlidesNewDeps = realNewDeps()): number {
+  let topic = "";
+  let template = "introduction-v3";
+  let noBuild = false;
+  let i = 0;
+  while (i < args.length) {
+    const a = args[i]!;
+    if (a === "--template") {
+      if (args[i + 1] === undefined) {
+        err(m("slides_new.template_requires_value"));
+        return 1;
+      }
+      template = args[i + 1]!;
+      i += 2;
+    } else if (a.startsWith("--template=")) {
+      template = a.slice("--template=".length);
+      i += 1;
+    } else if (a === "--quiet") {
+      i += 1; // v2 suppressed the spinner; no spinner here, so accept + ignore.
+    } else if (a === "--no-build") {
+      noBuild = true;
+      i += 1;
+    } else if (a === "--help" || a === "-h") {
+      slidesHelp((s) => process.stdout.write(s));
+      return 0;
+    } else if (a.startsWith("--")) {
+      err(m("slides_new.unknown_option_1"));
+      return 1;
+    } else if (topic === "") {
+      topic = a;
+      i += 1;
+    } else {
+      err(m("slides_new.unexpected_argument_1"));
+      return 1;
+    }
+  }
+
+  if (topic === "") {
+    err('Usage: roll slides new "<topic>" [--template <name>] [--quiet] [--no-build]');
+    process.stderr.write(m("slides_new.en_roll_slides_new_template") + "\n");
+    return 1;
+  }
+
+  const slug = topicSlug(topic);
+  if (slug === "") {
+    err(`Could not derive a slug from topic: ${topic}`);
+    process.stderr.write(m("slides_new.en_slug", topic) + "\n");
+    return 1;
+  }
+
+  const skill = deps.skillBody();
+  if (skill === null || skill === "") {
+    err(`Skill not found or empty: roll-deck`);
+    return 1;
+  }
+
+  const agent = deps.agent();
+  const argv = slidesTextArgv(agent, composeNewPrompt(skill, topic, slug, template));
+  if (argv === null) {
+    err(
+      `Unknown agent '${agent}'. Run: roll agent use <claude|kimi|deepseek|pi|openai|codex|opencode|qwen|antigravity>`,
+    );
+    return 1;
+  }
+
+  const deckDir = join(".roll", "slides", slug);
+  mkdirSync(deckDir, { recursive: true });
+
+  const rc = deps.spawn(argv.bin, argv.args);
+  if (rc !== 0) {
+    err(`Agent '${agent}' exited ${rc} — deck may be incomplete`);
+    return rc;
+  }
+  if (!existsSync(join(deckDir, "deck.md"))) {
+    err(`Agent finished but ${join(deckDir, "deck.md")} was not written`);
+    return 1;
+  }
+
+  if (!noBuild) return deps.build(slug);
+  info(`Next: roll slides build ${slug}`);
+  process.stdout.write(`下一步：roll slides build ${slug}\n`);
+  return 0;
+}
+
 // ─── delete (5174) ────────────────────────────────────────────────────────────
-function cmdDelete(args: string[]): number {
+/** Interactive y/N confirm (US-PORT-016): prompt to stderr, read /dev/tty. */
+export type DeleteConfirm = (prompt: string) => boolean;
+const defaultDeleteConfirm: DeleteConfirm = (prompt) =>
+  confirmYesNo(prompt, (s) => process.stderr.write(s));
+
+export function cmdDelete(args: string[], confirm: DeleteConfirm = defaultDeleteConfirm): number {
   let slug = "";
   let force = false;
   let i = 0;
@@ -646,11 +815,13 @@ function cmdDelete(args: string[]): number {
       err(m("slides_delete.non_interactive_terminal_must_use_force"));
       return 1;
     }
-    // Interactive confirm: the prompt + read path is exercised only on a real
-    // TTY; tests always pass --force or run non-interactively. We return the
-    // null-signal upward is not applicable here (slug exists), so fall back to
-    // bash for the live interactive read to preserve exact prompt behaviour.
-    return BASH_INTERACTIVE_DELETE;
+    // US-PORT-016: interactive confirm is now native TS — prompt to stderr and
+    // read the answer from /dev/tty (shared tty-confirm; FIX-229 blocking read).
+    // No more bash fallback for the live TTY prompt.
+    if (!confirm(`${m("slides_delete.prompt", slug)} `)) {
+      info(m("slides_delete.cancelled"));
+      return 0;
+    }
   }
 
   try {
@@ -666,9 +837,6 @@ function cmdDelete(args: string[]): number {
   ok(m("slides_delete.deleted", slug));
   return 0;
 }
-
-/** Sentinel: interactive delete (TTY confirm) defers to bash. */
-const BASH_INTERACTIVE_DELETE = -777;
 
 // ─── templates (5227) ─────────────────────────────────────────────────────────
 function cmdTemplates(args: string[]): number {
@@ -717,14 +885,14 @@ function cmdTemplates(args: string[]): number {
  * Returns the exit code, or `null` to signal a bash fallback (the `new`
  * subcommand and the interactive `delete` confirm).
  */
-export function slidesCommand(args: string[]): number | null {
+export function slidesCommand(args: string[]): number {
   const subcmd = args[0] ?? "";
   const rest = args.slice(1);
   switch (subcmd) {
     case "build":
       return cmdBuild(rest);
     case "new":
-      return null; // AI agent authoring → bash (see module header).
+      return cmdNew(rest); // US-PORT-016: TS takes over the agent launch.
     case "list":
       return cmdList(rest);
     case "preview":
@@ -733,11 +901,8 @@ export function slidesCommand(args: string[]): number | null {
       return cmdLogs(rest);
     case "templates":
       return cmdTemplates(rest);
-    case "delete": {
-      const r = cmdDelete(rest);
-      if (r === BASH_INTERACTIVE_DELETE) return null; // TTY confirm → bash.
-      return r;
-    }
+    case "delete":
+      return cmdDelete(rest); // US-PORT-016: interactive confirm is native TS.
     case "--help":
     case "-h":
     case "help":

@@ -170,6 +170,21 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).toContain("data-status=");
   });
 
+  it("US-DOSSIER-008: a legacy row carries a 历史/legacy chip + a muted legacy spine; evidenced cards don't", () => {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-legrender-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "hist");
+    mkdirSync(join(f, "US-OLD-1"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-1", "spec.md"), "## US-OLD-1 历史做完的故事 ✅\n");
+    const leg = renderFeaturesIndex(collectDossier(p));
+    expect(leg).toContain('class="slegacy"'); // the 历史/legacy chip
+    expect(leg).toContain('class="lifespine legacy"'); // spine rendered muted, not evidence-dark
+    expect(leg).toContain("历史");
+    // a v3-evidenced delivered card (US-A-1 via latest/) gets neither.
+    expect(html).not.toContain('class="slegacy"');
+    expect(html).not.toContain("lifespine legacy");
+  });
+
   it("self-containment: no external scripts/links/images; chrome + tokens inline", () => {
     expect(html).not.toContain("<script src=");
     expect(html).not.toContain("<link");

@@ -168,7 +168,8 @@ details.epic[open] .caret{transform:rotate(90deg);color:var(--accent);}
 .epic-tally{font:13px/1 var(--mono);color:var(--muted);white-space:nowrap;text-align:right;}
 .epic-tally b{font-weight:600;color:var(--pass);font-variant-numeric:tabular-nums;}
 .stories{border-top:1px solid var(--line);padding:5px 8px 9px;}
-.story{display:grid;grid-template-columns:56px 120px 1fr 116px 72px;align-items:center;gap:12px;padding:7px 10px;border-radius:7px;text-decoration:none;color:inherit;}
+.story{display:grid;grid-template-columns:56px 120px 1fr 116px auto;align-items:center;gap:12px;padding:7px 10px;border-radius:7px;text-decoration:none;color:inherit;}
+.slegacy{font:600 9.5px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:2px 5px;border-radius:4px;border:1px dashed var(--line);color:var(--muted);background:color-mix(in srgb,var(--muted) 8%,transparent);}
 .story:hover{background:color-mix(in srgb,var(--accent) 7%,transparent);}
 .stype{font:600 10px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;text-align:center;padding:4px 0;border-radius:4px;border:1px solid var(--line);color:var(--muted);}
 .stype.US{color:var(--info);border-color:color-mix(in srgb,var(--info) 40%,transparent);}
@@ -189,6 +190,8 @@ details.epic[open] .caret{transform:rotate(90deg);color:var(--accent);}
 .lifespine i.on{border-color:var(--pass);background:var(--pass);} .lifespine b.on{background:var(--pass);}
 .lifespine i.now{border-color:var(--warn);background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 22%,transparent);}
 .lifespine.held i.now{border-color:var(--block);background:var(--block);box-shadow:0 0 0 3px color-mix(in srgb,var(--block) 22%,transparent);}
+.lifespine.legacy i{border-style:dashed;border-color:color-mix(in srgb,var(--muted) 55%,transparent);background:transparent;}
+.lifespine.legacy b{background:color-mix(in srgb,var(--muted) 35%,transparent);}
 @media (max-width:680px){.statusboard{grid-template-columns:repeat(2,1fr);} .story{grid-template-columns:48px 1fr auto;gap:8px;} .story .lifespine,.story .stitle{display:none;}}
 `;
 

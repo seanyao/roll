@@ -64,6 +64,17 @@ function spectrum(t: Record<State, number>, cls: string): string {
 
 /** The five-station lifecycle spine for one story, from its real `stages`. */
 function storySpine(s: StoryView): string {
+  // US-DOSSIER-008: a pre-v3 legacy delivery has no v3 evidence trail, so the
+  // evidence-based spine would render bare and read as half-finished. Show the
+  // whole spine in a uniform muted "legacy done" state instead of lying either way.
+  if (s.legacy) {
+    let lh = "";
+    STAGE_KEYS.forEach((_, i) => {
+      lh += `<i></i>`;
+      if (i < STAGE_KEYS.length - 1) lh += `<b></b>`;
+    });
+    return `<span class="lifespine legacy" title="历史交付 · pre-v3，无 v3 留痕 / legacy delivery">${lh}</span>`;
+  }
   // Enriched `stages` win; absent (un-enriched render) → derive from delivered.
   const done = new Set<string>(
     s.stages ?? (s.delivered ? ["definition", "design", "execution", "delivery"] : ["definition"]),
@@ -89,13 +100,17 @@ function storyRow(epic: string, s: StoryView): string {
   const state = storyState(s);
   const type = (s.type || "").toUpperCase();
   const href = `${encodeURIComponent(epic)}/${encodeURIComponent(s.id)}/index.html`;
+  // US-DOSSIER-008: legacy (pre-v3) deliveries are done, but flagged apart.
+  const chip = s.legacy
+    ? `<span class="slegacy" title="历史交付：pre-v3 已完成，无 v3 证据链">${bi("legacy", "历史")}</span>`
+    : "";
   return (
-    `<a class="story" href="${href}" data-status="${state}">` +
+    `<a class="story${s.legacy ? " is-legacy" : ""}" href="${href}" data-status="${state}">` +
     `<span class="stype ${esc(type)}">${esc(type)}</span>` +
     `<span class="sid">${esc(s.id)}</span>` +
     `<span class="stitle">${esc(s.title ?? s.id)}</span>` +
     storySpine(s) +
-    `<span class="sstat st-${state}"><span class="sdot"></span>${state}</span>` +
+    `<span class="sstat st-${state}"><span class="sdot"></span>${state}${chip}</span>` +
     `</a>`
   );
 }

@@ -50,10 +50,9 @@ import {
   selectPrAction,
 } from "@roll/core";
 import { gh, ghAvailable, ghRepoSlug, prMerge, remoteUrl } from "@roll/infra";
-import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
 
 // ─── reduced per-PR facts (the bash jq at bin/roll 11996-12007) ──────────────
 
@@ -220,19 +219,6 @@ function tickPath(): string {
   return join(runtimeDir(), "pr-tick.jsonl");
 }
 
-/** Resolve the package's bash engine (bin/roll) for the bridged heal/rebase helpers. */
-function engineBin(): string {
-  let dir = dirname(new URL(import.meta.url).pathname);
-  for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, "bin", "roll");
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return join(homedir(), ".local", "lib", "roll", "bin", "roll");
-}
-
 function pal(): { yellow: string; nc: string } {
   return (process.env["NO_COLOR"] ?? "") !== ""
     ? { yellow: "", nc: "" }
@@ -358,19 +344,6 @@ function writeRebaseAttempts(state: string, pr: string, timestamps: readonly num
   writeFileSync(state, upsertRebaseAttempts(body, pr, renderRebaseAttempts(timestamps)));
 }
 
-/** Spawn a bridged bash-engine helper detached; resolve when it exits (or errors). */
-function bridgeBash(args: string[]): Promise<number> {
-  return new Promise((resolve) => {
-    try {
-      const child = spawn("bash", [engineBin(), ...args], { stdio: "ignore" });
-      child.on("exit", (code) => resolve(code ?? 0));
-      child.on("error", () => resolve(0));
-    } catch {
-      resolve(0);
-    }
-  });
-}
-
 function realDeps(): PrInboxDeps {
   const { yellow, nc } = pal();
   return {
@@ -401,11 +374,12 @@ function realDeps(): PrInboxDeps {
     },
     merge: async (slug, num) => (await prMerge(slug, num, "plain")).code === 0,
     heal: async (num, headRef, slug) => {
-      await bridgeBash(["_loop_pr_heal_self", num, headRef, slug]);
+      // US-PORT-021: native TS gate; dispatches the heal detached, never blocks.
+      prHealSelf(num, headRef, slug);
     },
     rebaseCircuitAllowed,
     rebaseStale: async (num, headRef, slug) => {
-      await bridgeBash(["_loop_pr_rebase_stale", num, headRef]);
+      prRebaseStale(num, headRef); // US-PORT-021: native TS rebase (was bridged bash)
       // Re-fetch the PR state after the rebase to decide an eager merge.
       const r = await gh(["-R", slug, "pr", "view", num, "--json", "mergeStateStatus,statusCheckRollup,body,labels"]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;

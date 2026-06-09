@@ -1,12 +1,10 @@
 /**
- * CLI bridge — US-SCAF-004.
+ * CLI bridge — US-SCAF-004 / US-PORT-021.
  *
- * Commands route TS-first: a subcommand registered in the ported table runs
- * its TypeScript handler; anything else falls back to the frozen bash
- * `bin/roll` with argv, stdio and exit code passed through untouched.
- * This keeps the CLI fully usable for the entire migration window.
+ * Commands route TS-first: a subcommand registered in the ported table runs its
+ * TypeScript handler. Every command is now TS-native, so the bash `bin/roll`
+ * fallback is retired — an unregistered command prints the usage (no bash spawn).
  */
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,53 +26,53 @@ export function portedCommands(): string[] {
   return [...ported.keys()].sort();
 }
 
-/** Walk up from this module until the repo root (contains bin/roll). */
+/**
+ * Walk up from this module to the package root. US-PORT-021 prep: the root
+ * marker is the shipped `conventions/` directory (present in both the dev repo
+ * and the published npm package's `files`), NOT `bin/roll` — so root resolution
+ * survives the bash engine's retirement. `bin/roll` is still accepted during the
+ * transition so a checkout that predates the deletion keeps resolving.
+ */
 export function repoRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 10; i++) {
-    if (existsSync(join(dir, "bin", "roll"))) return dir;
+    if (existsSync(join(dir, "conventions")) || existsSync(join(dir, "bin", "roll"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("bridge: cannot locate repo root (bin/roll not found)");
+  throw new Error("bridge: cannot locate package root (no conventions/ or bin/roll marker)");
 }
 
 export interface RunResult {
   status: number;
-  stdout?: string;
-  stderr?: string;
 }
 
-export interface DispatchOptions {
-  /** Capture output instead of inheriting stdio (used by tests). */
-  capture?: boolean;
-  /** Override cwd for the bash fallback (defaults to process.cwd()). */
-  cwd?: string;
+/** Top-level usage — TS-native (no bash). Lists the registered commands. */
+export function usage(): string {
+  const cmds = portedCommands().filter((c) => !c.startsWith("-")).join(", ");
+  return (
+    `roll <command> [args]\n\n` +
+    `Commands: ${cmds}\n\n` +
+    `Run \`roll <command> --help\` for command-specific help.\n`
+  );
 }
 
-/** Spawn the frozen bash implementation with argv passed through. */
-export function fallbackToBash(argv: string[], opts: DispatchOptions = {}): RunResult {
-  const res = spawnSync(join(repoRoot(), "bin", "roll"), argv, {
-    cwd: opts.cwd ?? process.cwd(),
-    stdio: opts.capture ? ["inherit", "pipe", "pipe"] : "inherit",
-    encoding: "utf8",
-  });
-  return {
-    status: res.status ?? 1,
-    stdout: opts.capture ? (res.stdout ?? "") : undefined,
-    stderr: opts.capture ? (res.stderr ?? "") : undefined,
-  };
-}
-
-/** TS-first dispatch; unported subcommands fall back to bash transparently. */
-export async function dispatch(argv: string[], opts: DispatchOptions = {}): Promise<RunResult> {
+/**
+ * TS-first dispatch (US-PORT-021: no bash fallback). A registered command runs
+ * its handler; `help`/`--help`/`-h`/no command prints the usage (exit 0); any
+ * other unknown command prints "unknown command" + usage (exit 1).
+ */
+export async function dispatch(argv: string[]): Promise<RunResult> {
   const [command, ...rest] = argv;
   if (command !== undefined) {
     const handler = ported.get(command);
-    if (handler !== undefined) {
-      return { status: await handler(rest) };
-    }
+    if (handler !== undefined) return { status: await handler(rest) };
   }
-  return fallbackToBash(argv, opts);
+  if (command === undefined || command === "" || command === "help" || command === "--help" || command === "-h") {
+    process.stdout.write(usage());
+    return { status: 0 };
+  }
+  process.stderr.write(`roll: unknown command '${command}'\n\n${usage()}`);
+  return { status: 1 };
 }

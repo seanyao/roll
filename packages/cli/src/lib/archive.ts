@@ -13,6 +13,7 @@
  * the single home for a story's run artifacts.
  */
 import { parseBacklog } from "@roll/core";
+import { classifyStatus, type StoryStatus } from "@roll/spec";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -204,8 +205,13 @@ export interface DossierStory {
   /** spec.md frontmatter `created:` when present. */
   created?: string;
   /** truth: a `latest/` attest pointer exists, OR the spec heading marks it ✅
-   *  done (IDEA-003 — v2-migrated cards that predate the attest chain). */
+   *  done (IDEA-003 — v2-migrated cards that predate the attest chain). When the
+   *  card is in the backlog, that authoritative status decides (status==="done"). */
   delivered: boolean;
+  /** The backlog status when this card is in .roll/backlog.md — the live source
+   *  of truth the dossier aligns to (done | in_progress | hold | todo). Undefined
+   *  for cards absent from the backlog (archived history). */
+  status?: StoryStatus;
 }
 
 /** One epic group with its wish→truth tally. */
@@ -263,6 +269,20 @@ function specMeta(specPath: string): { title?: string; created?: string; markedD
 export function collectDossier(projectPath: string): DossierEpic[] {
   const root = join(projectPath, ".roll", "features");
   if (!existsSync(root)) return [];
+  // Align with the backlog: it is the live source of truth for type + status.
+  // Build id → backlog StoryStatus so each card's state matches what the owner
+  // reads in .roll/backlog.md (done/in_progress/hold/todo). Cards absent from
+  // the backlog (archived history) fall back to the features-folder heuristic.
+  const backlogStatus = new Map<string, StoryStatus>();
+  try {
+    const backlogText = readFileSync(join(projectPath, ".roll", "backlog.md"), "utf8");
+    for (const item of parseBacklog(backlogText)) {
+      const st = classifyStatus(item.status);
+      if (st !== null) backlogStatus.set(item.id, st);
+    }
+  } catch {
+    /* no backlog → heuristic-only */
+  }
   const epics: DossierEpic[] = [];
   let epicDirs: string[] = [];
   try {
@@ -296,12 +316,18 @@ export function collectDossier(projectPath: string): DossierEpic[] {
       } catch {
         /* no latest → fall back to the heading marker */
       }
+      // Backlog is authoritative when the card is in it: a story is delivered iff
+      // the backlog marks it ✅ Done (backlog rule: Done ≡ merged to main), and we
+      // carry the full status so the chips/groups mirror the backlog.
+      const status = backlogStatus.get(id);
+      if (status !== undefined) delivered = status === "done";
       const story: DossierStory = {
         id,
         epic,
         type: (id.split("-")[0] ?? id).toUpperCase(),
         delivered,
       };
+      if (status !== undefined) story.status = status;
       if (meta.title !== undefined) story.title = meta.title;
       if (meta.created !== undefined) story.created = meta.created;
       stories.push(story);

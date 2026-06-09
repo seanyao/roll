@@ -77,6 +77,7 @@ const RICH = `# Project Backlog
 | [US-200](.roll/x.md#e) | currently being built | 🔨 In Progress |
 | [FIX-002](.roll/x.md#f) | waiting on upstream | 🔒 Blocked [needs api key] |
 | [US-300](.roll/x.md#g) | parked for v3 | ⏸ Deferred [v2-freeze→v2-final] |
+| [US-400](.roll/x.md#i) | parked pending owner ruling | 🚫 Hold (part 1 landed) |
 | [DONE-1](.roll/x.md#h) | not an item type we list | ✅ Done |
 `;
 
@@ -87,7 +88,7 @@ describe("frozen: roll backlog render", () => {
         "status": 0,
         "stderr": "",
         "stdout": "
-        BACKLOG  ·  待处理任务                                          6 Pending · 1 Blocked · 1 Deferred
+        BACKLOG  ·  待处理任务                                                          6 Pending · 3 Hold
 
         ⏵ US-200  currently being built
 
@@ -104,11 +105,41 @@ describe("frozen: roll backlog render", () => {
         Ideas  ·  创意  (1)
           IDEA-3            someday maybe
 
-        Blocked  ·  已阻塞  (1)
-        🔒 FIX-002           waiting on upstream  (needs api key)
+        Hold  ·  已阻塞  (3)
+        🚫 FIX-002           waiting on upstream  (needs api key)
+        🚫 US-300            parked for v3  (v2-freeze→v2-final)
+        🚫 US-400            parked pending owner ruling
 
-        Deferred  ·  已推迟  (1)
-        ⏸ US-300            parked for v3  (v2-freeze→v2-final)
+        triage: roll backlog block/defer/unblock <pattern> [reason]
+
+      ",
+      }
+    `);
+  });
+
+  // REFACTOR-047 first regression case: the v2 renderer keyed on "Blocked" and
+  // was BLIND to the 🚫 Hold marker the data actually uses, so the real backlog's
+  // held cards silently vanished and only the Todo row showed. This pins the exact
+  // reported scenario — Todo counted as Pending, every 🚫 Hold row surfaced.
+  it("🚫 Hold rows surface (not silently dropped like the v2 renderer)", () => {
+    const HOLD = `| Story | Description | Status |
+| [FIX-9](a) | a pending fix | 📋 Todo |
+| [US-PORT-016](b) | port slides to TS | 🚫 Hold (claude 直做并行) |
+| [US-PORT-021](c) | retire bash engine | 🚫 Hold (待 owner 放行) |
+`;
+    expect(tsBacklog(mkProj(HOLD))).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "
+        BACKLOG  ·  待处理任务                                                          1 Pending · 2 Hold
+
+        Bug Fixes  ·  缺陷修复  (1)
+          FIX-9             a pending fix
+
+        Hold  ·  已阻塞  (2)
+        🚫 US-PORT-016       port slides to TS
+        🚫 US-PORT-021       retire bash engine
 
         triage: roll backlog block/defer/unblock <pattern> [reason]
 

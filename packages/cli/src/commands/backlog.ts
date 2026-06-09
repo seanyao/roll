@@ -4,7 +4,7 @@
  * subcommands (lint/unstick/sync/block/defer/unblock/promote) stay on bash.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { resolveLang, t, v2Catalog } from "@roll/spec";
+import { classifyStatus, resolveLang, t, v2Catalog } from "@roll/spec";
 import { c, pad, renderState, RESET_RAW, row, trunc } from "../render.js";
 
 export const BACKLOG_MGMT_SUBCOMMANDS = [
@@ -41,7 +41,7 @@ function parseBacklog(path: string): Item[] {
     const itemId = m !== null ? (m[1] ?? "") : idCell.trim();
     if (!/^(US|FIX|REFACTOR|IDEA)-/.test(itemId)) continue;
     let reason = "";
-    if (statusCell.includes("Blocked") || statusCell.includes("Deferred")) {
+    if (classifyStatus(statusCell) === "hold") {
       const rm = REASON_RE.exec(statusCell);
       reason = rm !== null ? (rm[1] ?? "") : "";
     }
@@ -80,18 +80,26 @@ export function backlogCommand(args: string[]): number {
   const todoRef: Item[] = [];
   const todoIdea: Item[] = [];
   const inProgress: Item[] = [];
-  const blocked: Item[] = [];
-  const deferred: Item[] = [];
+  const hold: Item[] = [];
+  // Single typed dispatch on StoryStatus (REFACTOR-047): the renderer no longer
+  // re-derives status by ad-hoc substring matching. `hold` collapses the legacy
+  // 🚫 Hold / 🔒 Blocked / ⏸ Deferred markers the v2 renderer split (and was
+  // blind to 🚫 Hold). Unknown markers (classifyStatus → null) drop out — Done
+  // included — exactly as a non-pending row should.
   for (const it of items) {
-    const st = it.status;
-    if (st.includes("In Progress")) inProgress.push(it);
-    else if (st.includes("Blocked")) blocked.push(it);
-    else if (st.includes("Deferred")) deferred.push(it);
-    else if (st.includes("Todo")) {
-      if (it.id.startsWith("FIX-")) todoFix.push(it);
-      else if (it.id.startsWith("US-")) todoUs.push(it);
-      else if (it.id.startsWith("REFACTOR-")) todoRef.push(it);
-      else if (it.id.startsWith("IDEA-")) todoIdea.push(it);
+    switch (classifyStatus(it.status)) {
+      case "in_progress":
+        inProgress.push(it);
+        break;
+      case "hold":
+        hold.push(it);
+        break;
+      case "todo":
+        if (it.id.startsWith("FIX-")) todoFix.push(it);
+        else if (it.id.startsWith("US-")) todoUs.push(it);
+        else if (it.id.startsWith("REFACTOR-")) todoRef.push(it);
+        else if (it.id.startsWith("IDEA-")) todoIdea.push(it);
+        break;
     }
   }
 
@@ -100,8 +108,7 @@ export function backlogCommand(args: string[]): number {
 
   out.push("");
   let tags = c("fg", `${todoTotal + inProgress.length} Pending`, { bold: true });
-  if (blocked.length > 0) tags += c("muted", " · ") + c("amber", `${blocked.length} Blocked`);
-  if (deferred.length > 0) tags += c("muted", " · ") + c("dim", `${deferred.length} Deferred`);
+  if (hold.length > 0) tags += c("muted", " · ") + c("amber", `${hold.length} Hold`);
   const headerLeft =
     "  " + c("pink", "BACKLOG", { bold: true }) + c("muted", "  ·  ") + c("dim", "待处理任务");
   out.push(row(headerLeft, "  " + tags));
@@ -141,23 +148,14 @@ export function backlogCommand(args: string[]): number {
     out.push("");
   }
 
-  if (blocked.length > 0) {
+  if (hold.length > 0) {
     out.push(
-      c("amber", "  Blocked", { bold: true }) + c("muted", "  ·  ") + c("dim", "已阻塞") +
-        c("muted", `  (${blocked.length})`),
+      c("amber", "  Hold", { bold: true }) + c("muted", "  ·  ") + c("dim", "已阻塞") +
+        c("muted", `  (${hold.length})`),
     );
-    for (const it of blocked) {
+    for (const it of hold) {
       const reasonStr = it.reason !== "" ? c("muted", `  (${it.reason})`) : "";
-      out.push(`  🔒 ${c("amber", pad(it.id, 16))}  ${c("dim", trunc(it.desc, 50))}${reasonStr}`);
-    }
-    out.push("");
-  }
-
-  if (deferred.length > 0) {
-    out.push(c("dim", `  Deferred  ·  已推迟  (${deferred.length})`));
-    for (const it of deferred) {
-      const reasonStr = it.reason !== "" ? c("muted", `  (${it.reason})`) : "";
-      out.push(`  ⏸ ${c("dim", pad(it.id, 16))}  ${c("dim", trunc(it.desc, 50))}${reasonStr}`);
+      out.push(`  🚫 ${c("amber", pad(it.id, 16))}  ${c("dim", trunc(it.desc, 50))}${reasonStr}`);
     }
     out.push("");
   }

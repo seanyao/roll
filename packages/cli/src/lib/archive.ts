@@ -212,6 +212,10 @@ export interface DossierStory {
    *  of truth the dossier aligns to (done | in_progress | hold | todo). Undefined
    *  for cards absent from the backlog (archived history). */
   status?: StoryStatus;
+  /** Completed lifecycle stations (definition/design/execution/delivery/
+   *  retrospective) for the index spine — computed from real evidence by the
+   *  index command (stationsDone) and attached here; undefined until enriched. */
+  stages?: readonly string[];
 }
 
 /** One epic group with its wish→truth tally. */

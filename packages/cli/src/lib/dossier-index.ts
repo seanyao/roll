@@ -57,8 +57,10 @@ function ledger(epics: DossierEpic[]): string {
   );
 }
 
-/** One epic card: name, tally, progress bar, story chips. */
-function epicCard(e: DossierEpic): string {
+/** One epic row: name, tally + progress bar, story chips. Carries the same
+ *  `data-search` / `data-truth` hooks the filter script reads, so search and
+ *  "only shipping" work identically in the table view (US-DOSSIER-005). */
+function epicRow(e: DossierEpic): string {
   const pct = e.stories.length > 0 ? Math.round((e.delivered / e.stories.length) * 100) : 0;
   const chips = e.stories
     .map(
@@ -67,12 +69,14 @@ function epicCard(e: DossierEpic): string {
     )
     .join("");
   return (
-    `<div class="epic-card" data-search="${esc(`${e.name} ${e.stories.map((s) => `${s.id} ${s.title ?? ""}`).join(" ")}`)}" data-truth="${e.delivered > 0 ? "1" : "0"}">` +
-    `<h3><a href="${encodeURIComponent(e.name)}/index.html">${esc(e.name)}</a></h3>` +
+    `<tr class="epic-row" data-search="${esc(`${e.name} ${e.stories.map((s) => `${s.id} ${s.title ?? ""}`).join(" ")}`)}" data-truth="${e.delivered > 0 ? "1" : "0"}">` +
+    `<th scope="row" class="epic-name"><a href="${encodeURIComponent(e.name)}/index.html">${esc(e.name)}</a></th>` +
+    `<td class="epic-progress">` +
     `<div class="stat">${bi(`${e.delivered} / ${e.stories.length} delivered`, `${e.delivered} / ${e.stories.length} 已交付`)}</div>` +
     `<div class="epic-bar"><span class="truth" style="width:${pct}%"></span></div>` +
-    `<div class="chips">${chips}</div>` +
-    `</div>`
+    `</td>` +
+    `<td class="chips">${chips}</td>` +
+    `</tr>`
   );
 }
 
@@ -83,7 +87,11 @@ export function renderFeaturesIndex(epics: DossierEpic[], opts: { morningReportH
   const group = (title: string, zh: string, list: DossierEpic[]): string =>
     list.length === 0
       ? ""
-      : `<h2>${bi(title, zh)}</h2>\n<div class="epic-grid">${list.map(epicCard).join("\n")}</div>\n`;
+      : `<h2>${bi(title, zh)}</h2>\n<table class="epic-table">\n` +
+        `<thead><tr><th scope="col">${bi("Epic", "史诗")}</th>` +
+        `<th scope="col">${bi("Progress", "进度")}</th>` +
+        `<th scope="col">${bi("Stories", "故事")}</th></tr></thead>\n` +
+        `<tbody>${list.map(epicRow).join("\n")}</tbody>\n</table>\n`;
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +

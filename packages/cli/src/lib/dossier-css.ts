@@ -63,14 +63,20 @@ export const DOSSIER_CSS = `
   cursor:pointer; white-space:nowrap; }
 [data-filtered="1"] .filtered-out { display:none; }
 
-/* ── epic cards + chips ── */
-.epic-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:14px; position:relative; z-index:2; }
-.epic-card { border:1px solid var(--line); border-radius:8px; background:var(--bg-raise); padding:14px 16px; }
-.epic-card h3 { font:600 15.5px/1.3 var(--serif); margin:0 0 2px; }
-.epic-card h3 a { color:var(--fg); text-decoration:none; }
-.epic-card h3 a:hover { color:var(--accent); }
-.epic-card .stat { font-size:12px; color:var(--muted); }
-.epic-bar { height:7px; border:1px solid var(--line); border-radius:999px; overflow:hidden; margin:8px 0;
+/* ── epic table + chips ── */
+.epic-table { width:100%; border-collapse:collapse; position:relative; z-index:2; margin:0 0 8px;
+  background:var(--bg-raise); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.epic-table thead th { font:600 11px/1 var(--mono); text-transform:uppercase; letter-spacing:.06em;
+  color:var(--muted); text-align:left; padding:9px 14px; border-bottom:1px solid var(--line); background:transparent; }
+.epic-table tbody tr { border-top:1px solid var(--line); }
+.epic-table tbody tr:first-child { border-top:none; }
+.epic-table td, .epic-table th[scope="row"] { padding:11px 14px; vertical-align:top; }
+.epic-name { font:600 14.5px/1.3 var(--serif); text-align:left; white-space:nowrap; }
+.epic-name a { color:var(--fg); text-decoration:none; }
+.epic-name a:hover { color:var(--accent); }
+.epic-progress { width:200px; }
+.epic-progress .stat { font-size:12px; color:var(--muted); }
+.epic-bar { height:7px; border:1px solid var(--line); border-radius:999px; overflow:hidden; margin:6px 0 0;
   background:repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--muted) 28%, transparent) 4px 5px); }
 .epic-bar .truth { display:block; height:100%; background:var(--pass); }
 .chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }

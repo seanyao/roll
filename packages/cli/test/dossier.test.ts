@@ -32,9 +32,10 @@ function project(): string {
   symlinkSync(join(f, "alpha", "US-A-1", "2026-06-01T00-00-00"), join(f, "alpha", "US-A-1", "latest"));
   mkdirSync(join(f, "alpha", "FIX-2"), { recursive: true });
   writeFileSync(join(f, "alpha", "FIX-2", "spec.md"), "# FIX-2 · 修一个洞\n");
-  // epic "beta": wish only, hand-written spec without frontmatter.
+  // epic "beta": wish only, hand-written spec without frontmatter. The 🚫 marker
+  // exercises title-emoji stripping without counting as a ✅ done marker.
   mkdirSync(join(f, "beta", "REFACTOR-3"), { recursive: true });
-  writeFileSync(join(f, "beta", "REFACTOR-3", "spec.md"), "# REFACTOR-3 — tidy things ✅\n");
+  writeFileSync(join(f, "beta", "REFACTOR-3", "spec.md"), "# REFACTOR-3 — tidy things 🚫\n");
   return p;
 }
 
@@ -56,6 +57,27 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-empty-")));
     dirs.push(p);
     expect(collectDossier(p)).toEqual([]);
+  });
+
+  it("IDEA-003: a ✅ heading marks a card delivered even without a latest/ report (v2-migrated history)", () => {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-v2-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "autonomous-evolution");
+    // v2-migrated card shapes: status emoji lives in the H2 story heading.
+    mkdirSync(join(f, "US-AUTO-9"), { recursive: true });
+    writeFileSync(join(f, "US-AUTO-9", "spec.md"), "## US-AUTO-9 一个 v2 做完的故事 ✅\n\n**Created**: 2026-05-29\n");
+    mkdirSync(join(f, "US-AUTO-10"), { recursive: true });
+    writeFileSync(join(f, "US-AUTO-10", "spec.md"), "## US-AUTO-10 一个 v2 没做的故事 📋\n");
+    mkdirSync(join(f, "US-AUTO-11"), { recursive: true });
+    writeFileSync(join(f, "US-AUTO-11", "spec.md"), "## US-AUTO-11 v2 在做的故事 🔨\n");
+    const epic = collectDossier(p)[0]!;
+    const done = epic.stories.find((s) => s.id === "US-AUTO-9")!;
+    const todo = epic.stories.find((s) => s.id === "US-AUTO-10")!;
+    const wip = epic.stories.find((s) => s.id === "US-AUTO-11")!;
+    expect(done.delivered).toBe(true); // ✅ heading = evidence of v2 completion
+    expect(todo.delivered).toBe(false); // 📋 = genuinely not done
+    expect(wip.delivered).toBe(false); // 🔨 = in progress, not done
+    expect(epic.delivered).toBe(1); // only the ✅ card counts
   });
 });
 
@@ -101,13 +123,25 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(withReport).toContain('href="../reports/morning/latest.html"');
   });
 
-  it("epic groups: shipping first, backlog after; cards carry bar + chips", () => {
+  it("epic groups: shipping first, backlog after; table rows carry bar + chips (US-DOSSIER-005)", () => {
     expect(html.indexOf("Shipping to main")).toBeLessThan(html.indexOf("In backlog"));
     expect(html).toContain('href="alpha/index.html"');
     expect(html).toContain('href="alpha/US-A-1/index.html"');
     expect(html).toContain('class="chip truth"');
     expect(html).toContain('data-truth="1"');
     expect(html).toContain('class="epic-bar"');
+  });
+
+  it("US-DOSSIER-005: epics render as a table (rows, not cards), filter hooks intact", () => {
+    expect(html).toContain('<table class="epic-table">');
+    expect(html).toContain("<thead>");
+    expect(html).toContain('<tr class="epic-row"');
+    expect(html).toContain('<th scope="row" class="epic-name">');
+    // the old card-grid container is gone
+    expect(html).not.toContain('class="epic-grid"');
+    expect(html).not.toContain('class="epic-card"');
+    // search/filter still keys off data-search on the rows
+    expect(html).toContain("data-search=");
   });
 
   it("self-containment: no external scripts/links/images; chrome + tokens inline", () => {

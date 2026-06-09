@@ -79,6 +79,28 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     expect(wip.delivered).toBe(false); // 🔨 = in progress, not done
     expect(epic.delivered).toBe(1); // only the ✅ card counts
   });
+
+  it("US-DOSSIER-008: pre-v3 done card (no latest/, no ac-map) is legacy; latest/ or ac-map cancels it", () => {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-legacy-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "hist");
+    // pre-v3 done: ✅ heading, no latest/, no ac-map.json → legacy
+    mkdirSync(join(f, "US-OLD-1"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-1", "spec.md"), "## US-OLD-1 历史做完的故事 ✅\n");
+    // done but carries v3 ac-map evidence (no latest/ yet) → NOT legacy
+    mkdirSync(join(f, "US-OLD-2"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-2", "spec.md"), "## US-OLD-2 有证据的故事 ✅\n");
+    writeFileSync(join(f, "US-OLD-2", "ac-map.json"), "[]\n");
+    // not done → not legacy
+    mkdirSync(join(f, "US-OLD-3"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-3", "spec.md"), "## US-OLD-3 没做 📋\n");
+    const epic = collectDossier(p)[0]!;
+    expect(epic.stories.find((s) => s.id === "US-OLD-1")!.legacy).toBe(true);
+    expect(epic.stories.find((s) => s.id === "US-OLD-2")!.legacy).toBe(false);
+    expect(epic.stories.find((s) => s.id === "US-OLD-3")!.legacy).toBe(false);
+    // a v3 card delivered via latest/ is never legacy.
+    expect(collectDossier(project())[0]!.stories.find((s) => s.id === "US-A-1")!.legacy).toBe(false);
+  });
 });
 
 describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {

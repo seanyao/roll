@@ -8,7 +8,7 @@ import {
   type CorrectionActuatorMode,
   type CorrectionDecision,
 } from "@roll/core";
-import { parseEventLine, type RollEvent } from "@roll/spec";
+import { classifyStatus, parseEventLine, STATUS_MARKER, type RollEvent } from "@roll/spec";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -81,8 +81,8 @@ function markStoryTodo(projectPath: string, storyId: string): CorrectionMutation
     const snap = store.readBacklog(path);
     const row = snap.items.find((it) => it.id === storyId);
     if (row === undefined) return "alert_only";
-    if (/Hold|Blocked|🚫|🔒/.test(row.status)) return "human_override";
-    store.mark(path, snap.hash, storyId, "📋 Todo");
+    if (classifyStatus(row.status) === "hold") return "human_override";
+    store.mark(path, snap.hash, storyId, STATUS_MARKER.todo);
     return "returned_story";
   } catch {
     return "alert_only";
@@ -118,7 +118,7 @@ function existingFixId(projectPath: string, storyId: string, signal: string): st
       if (!desc.includes("autofix")) return false;
       if (!desc.includes(`fixes:${storyId.toLowerCase()}`)) return false;
       if (!desc.includes(`signal:${signal.toLowerCase()}`)) return false;
-      return !it.status.includes("✅ Done");
+      return classifyStatus(it.status) !== "done";
     })?.id;
   } catch {
     return undefined;
@@ -183,7 +183,7 @@ function createFix(projectPath: string, decision: CorrectionDecision): { mutatio
           desc.includes("autofix") &&
           desc.includes(`fixes:${decision.storyId.toLowerCase()}`) &&
           desc.includes(`signal:${decision.signal.toLowerCase()}`) &&
-          !it.status.includes("✅ Done")
+          classifyStatus(it.status) !== "done"
         );
       });
       if (again !== undefined) return { mutation: "existing_fix", fixId: again.id };

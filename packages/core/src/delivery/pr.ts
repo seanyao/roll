@@ -58,6 +58,7 @@
  * parse helpers are all pure. {@link infra-default.ts ExecPort} wraps execFileSync
  * for the integration adapter.
  */
+import { STATUS_MARKER } from "@roll/spec";
 
 // ── Cycle branch naming (mirrors bin/roll:8828-8831) ─────────────────────────
 
@@ -279,7 +280,7 @@ export function prStateToOutcome(state: PrState): "merged" | "closed" | "open" {
 export function parseClaimedIdsFromBacklog(backlog: string): string[] {
   const ids: string[] = [];
   for (const line of backlog.split("\n")) {
-    if (!line.includes("🔨 In Progress")) continue;
+    if (!line.includes(STATUS_MARKER.in_progress)) continue;
     const fields = line.split("|");
     // awk $2 is the SECOND field (1-based). JS split index 1.
     let cell = fields[1];

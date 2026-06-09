@@ -42,7 +42,7 @@ import {
   type RunRow,
   type SelfScoreReportEntry,
 } from "@roll/core";
-import type { RollEvent } from "@roll/spec";
+import { classifyStatus, type RollEvent } from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
@@ -596,7 +596,7 @@ async function attestBackfillCommand(args: string[], deps: AttestDeps): Promise<
     return 1;
   }
   const stats: BackfillStats = { scanned: 0, backfilled: 0, skippedExisting: 0, skippedMissingCard: 0, failed: 0 };
-  const items = parseBacklog(readFileSync(backlogPath, "utf8")).filter((item) => item.status.includes("✅ Done"));
+  const items = parseBacklog(readFileSync(backlogPath, "utf8")).filter((item) => classifyStatus(item.status) === "done");
 
   for (const item of items) {
     stats.scanned += 1;

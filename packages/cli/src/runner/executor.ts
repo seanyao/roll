@@ -60,7 +60,7 @@ import {
   pairingHistory,
   peerReviewCost,
 } from "@roll/core";
-import { parseEventLine, type CycleCost, type RollEvent } from "@roll/spec";
+import { parseEventLine, STATUS_MARKER, type CycleCost, type RollEvent } from "@roll/spec";
 import {
   type Clock,
   acquireLock,
@@ -337,8 +337,8 @@ export async function executeCommand(
                 .catch(() => undefined);
             }
             const decision = decideClaimReconcile({ hasDeliveringCycle: cycle !== undefined, prState });
-            if (decision === "done") ports.backlog.markStatus?.(ports.repoCwd, claim.id, "✅ Done");
-            else if (decision === "todo") ports.backlog.markStatus?.(ports.repoCwd, claim.id, "📋 Todo");
+            if (decision === "done") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.done);
+            else if (decision === "todo") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
             // "keep" → leave 🔨 (delivered, pending merge).
           }
         }
@@ -397,7 +397,7 @@ export async function executeCommand(
       // anti-duplicate-pick signal and must be visible to `roll backlog`/brief
       // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
       // 写在 worktree 的虚空里，且真实 ports 从未绑定 markStatus).
-      ports.backlog.markStatus?.(ports.repoCwd, story.id, "🔨 In Progress");
+      ports.backlog.markStatus?.(ports.repoCwd, story.id, STATUS_MARKER.in_progress);
       const evidenceRunDir = ports.evidence.openFrame(ports.repoCwd, story.id, ctx.cycleId);
       ports.events.appendEvent(ports.paths.eventsPath, {
         type: "evidence:frame-opened",
@@ -810,7 +810,7 @@ export async function executeCommand(
       if (cmd.status === "done" && (ctx.storyId ?? "") !== "") {
         const state = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => "UNKNOWN");
         if (state === "MERGED") {
-          ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", "✅ Done");
+          ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", STATUS_MARKER.done);
         }
       }
       return {};

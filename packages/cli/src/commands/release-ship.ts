@@ -16,102 +16,19 @@
  * `--dry-run` prints the plan and exits; `--yes` skips the confirm prompt.
  */
 import { execFileSync } from "node:child_process";
-import { closeSync, openSync, readFileSync, readSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { planShip, type ShipFacts } from "@roll/core";
 import { type Lang, resolveLang } from "@roll/spec";
 import { c, renderState } from "../render.js";
 import { consistencyPasses } from "./consistency.js";
 
-/** Synchronous sleep (ms) via Atomics — polls a non-blocking fd without busy-spin. */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-// FIX-229: EAGAIN polling budget — 18000 × 10ms ≈ 3 min of patience for a
-// non-blocking fd before giving up. A blocking fd (the /dev/tty path) never
-// hits this; it waits on the kernel for as long as the user takes to answer.
-const EAGAIN_MAX_WAITS = 18_000;
-
-/**
- * Read one line from a fd synchronously, stopping at the FIRST newline or EOF.
- *
- * FIX-228: the confirm prompt used `readFileSync("/dev/stdin")`, which reads to
- * EOF — fine when stdin is piped (`echo y | …`) but in an interactive TTY the
- * user types `y`⏎ and never sends EOF, so the read blocks forever. Reading
- * byte-by-byte until "\n" terminates on the newline an interactive answer ends
- * with, while still honouring piped EOF.
- *
- * FIX-229: that byte loop broke on the FIRST `readSync` throw — but a
- * non-blocking fd (Node v26 marks an interactive stdin/TTY non-blocking) throws
- * EAGAIN *before* the typed line is available, so the prompt silently returned
- * "" (a "no") and the tag was never cut. Now an EAGAIN sleeps briefly and
- * retries (bounded), so the read waits for the answer instead of aborting; any
- * other error, or an exhausted budget, still breaks. `fd` is injectable so the
- * semantics are testable (incl. a real O_NONBLOCK handle) without a TTY.
- */
-/** One-byte reader: returns bytes read (0 = EOF), throws on error (e.g. EAGAIN). */
-export type ByteReader = (fd: number, buf: Buffer) => number;
-const defaultByteReader: ByteReader = (fd, buf) => readSync(fd, buf, 0, 1, null);
-
-export function readLineSyncFromFd(fd: number, readByte: ByteReader = defaultByteReader): string {
-  const byte = Buffer.alloc(1);
-  let line = "";
-  let eagainWaits = 0;
-  for (let i = 0; i < 1_000_000; i++) {
-    let n: number;
-    try {
-      n = readByte(fd, byte);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "EAGAIN" && eagainWaits < EAGAIN_MAX_WAITS) {
-        eagainWaits++;
-        sleepSync(10);
-        continue; // data not ready yet on a non-blocking fd — wait, don't bail
-      }
-      break; // other error, or polling budget exhausted
-    }
-    if (n === 0) break; // EOF (piped stdin closed)
-    const ch = byte.toString("utf8");
-    if (ch === "\n") break; // end of an interactive line
-    if (ch === "\r") continue;
-    line += ch;
-  }
-  return line;
-}
-
-/**
- * FIX-229: read the confirm line from the CONTROLLING TERMINAL (`/dev/tty`) in
- * blocking mode, not fd 0. On Node v26 + macOS an interactive stdin (fd 0) is
- * non-blocking, so `readSync(0)` returns EAGAIN before the typed line lands.
- * A freshly opened `/dev/tty` is a new blocking file description, so the read
- * waits for the answer the way a confirm prompt must. When there is no
- * controlling terminal (CI / piped input) the open fails and we fall back to
- * fd 0, where piped input still terminates on EOF. `openTty` is injectable.
- */
-export function readConfirmLine(
-  openTty: () => number = () => openSync("/dev/tty", "r"),
-  fallbackFd = 0,
-): string {
-  let fd = fallbackFd;
-  let opened = false;
-  try {
-    fd = openTty();
-    opened = true;
-  } catch {
-    fd = fallbackFd; // no /dev/tty — read piped stdin instead
-  }
-  try {
-    return readLineSyncFromFd(fd);
-  } finally {
-    if (opened) {
-      try {
-        closeSync(fd);
-      } catch {
-        /* already closed */
-      }
-    }
-  }
-}
+// FIX-228/229: the interactive confirm reader lives in the shared tty-confirm
+// module (also used by `slides delete`, US-PORT-016). Imported for local use in
+// `confirm`, and re-exported so the release-ship tests keep their import surface.
+import { readConfirmLine, readLineSyncFromFd } from "../lib/tty-confirm.js";
+import type { ByteReader } from "../lib/tty-confirm.js";
+export { readConfirmLine, readLineSyncFromFd, type ByteReader };
 
 /** Injectable seams (tests pass fakes; production wires real git/fs/consistency). */
 export interface ShipDeps {

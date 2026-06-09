@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { repoRoot } from "../bridge.js";
 import { dreamRunOnceCommand } from "./dream-run-once.js";
+import { rollVersion } from "./version.js";
 
 export type DreamRunOnce = (args: string[]) => number | Promise<number>;
 
@@ -86,12 +84,9 @@ function cmdBlock(entries: ReadonlyArray<readonly [string, string, string, strin
 }
 
 function legacyHelpVersion(): string {
-  try {
-    const mm = /^VERSION="([^"]+)"/m.exec(readFileSync(join(repoRoot(), "bin", "roll"), "utf8"));
-    return mm?.[1] ?? "—";
-  } catch {
-    return "—";
-  }
+  // US-PORT-021: the version comes from the TS source (package.json, FIX-202),
+  // not the bash bin/roll VERSION= literal — the bash engine is being retired.
+  return rollVersion() || "—";
 }
 
 export function renderMainHelp(version: string = legacyHelpVersion()): string {

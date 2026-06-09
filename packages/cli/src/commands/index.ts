@@ -50,6 +50,7 @@ import {
   loopUnmuteCommand,
 } from "./loop-maint.js";
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
+import { runPrHeal } from "./loop-pr-heal.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import {
   loopNowCommand,
@@ -263,6 +264,12 @@ export function registerAll(): void {
     // pure core/pr-loop.ts decisions; the pr runner calls this instead of the
     // retired bash `_loop_pr_inbox`.
     if (args[0] === "pr-inbox") return loopPrInboxCommand(args.slice(1));
+    // `loop pr-heal-run <num> <headRef> <slug>`: the detached heal worker the PR
+    // tick launches (US-PORT-021) — runs the agent-in-worktree fix natively in
+    // TS, replacing the bridged bash `_loop_pr_do_heal`.
+    if (args[0] === "pr-heal-run") {
+      return runPrHeal(args[1] ?? "", args[2] ?? "", args[3] ?? "");
+    }
     if (args[0] === "on") return loopOnCommand(args.slice(1));
     if (args[0] === "off") return loopOffCommand(args.slice(1));
     if (args[0] === "pause") return loopPauseCommand(args.slice(1));

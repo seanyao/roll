@@ -39,9 +39,13 @@ describe("roll dream command wrapper", () => {
     const r = await capture(() => dreamCommand([]));
     expect(r.code).toBe(1);
     expect(r.stderr).toBe("[roll] Unknown command: dream\n");
-    expect(r.stdout).toMatchInlineSnapshot(`
+    // US-PORT-021: the help version now comes from package.json (rollVersion),
+    // not the frozen bin/roll VERSION= fossil — scrub it so the snapshot is
+    // version-independent (it changes every release).
+    const out = r.stdout.replace(/^(  roll · autonomous delivery for software teams).*$/m, "$1  [VERSION]");
+    expect(out).toMatchInlineSnapshot(`
       "
-        roll · autonomous delivery for software teams                                           v3.606.3  
+        roll · autonomous delivery for software teams  [VERSION]
         自主交付，人只做三件事：提需求、审核、发版
 
         usage  roll <command> [options]

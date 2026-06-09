@@ -44,6 +44,7 @@
  * Purity: no filesystem, no clock, no `gh`/git. All evidence is injected as
  * data; all decisions come out as plain values.
  */
+import { STATUS_MARKER } from "@roll/spec";
 import { type BacklogItem, parseBacklog } from "../backlog/store.js";
 
 // ── 1. Merge-evidence reconcile (mirrors _loop_backfill_merged) ──────────────
@@ -155,9 +156,9 @@ export const DEFAULT_UNSTICK_TTL_HOURS = 4.0;
 export const FAILED_CYCLE_OUTCOMES: ReadonlySet<string> = new Set(["failed", "aborted", "blocked"]);
 
 /** The 🔨 In Progress marker the unstick scan keys on (loop_unstick.py:83). */
-export const IN_PROGRESS_MARK = "🔨 In Progress";
+export const IN_PROGRESS_MARK = STATUS_MARKER.in_progress;
 /** The 📋 Todo status a reverted story flips back to (loop_unstick.py:162). */
-export const TODO_STATUS = "📋 Todo";
+export const TODO_STATUS = STATUS_MARKER.todo;
 
 /**
  * A loop event, in the shape `loop_unstick.py` reads from events-<slug>.ndjson.

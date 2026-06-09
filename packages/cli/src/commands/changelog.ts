@@ -24,7 +24,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 
 // ─── log helpers (mirror bin/roll info/warn/err 53-56) ──────────────────────
 function palette(): { CYAN: string; YELLOW: string; RED: string; NC: string } {
@@ -94,7 +94,7 @@ function readDoneStories(text: string): Row[] {
   const ID = /([A-Z]+(?:-[A-Z0-9]+)*-\d+[a-z]?)/; // US-ATTEST-001 · FIX-196 · FIX-150b · REFACTOR-046
   for (const line of text.split("\n")) {
     if (!line.startsWith("|") || countOccurrences(line, "|") < 4) continue;
-    if (!line.includes("✅ Done")) continue;
+    if (!line.includes(STATUS_MARKER.done)) continue;
     const parts = line.split("|");
     if (parts.length < 4) continue;
     const col1 = parts[1] ?? "";
@@ -322,7 +322,7 @@ function mergedPrsSinceTag(tag: string, git: GitProbe = gitOutput): Array<[strin
 /** Port of _pr_in_done_rows. */
 function prInDoneRows(prNumber: string, backlogText: string): boolean {
   for (const line of backlogText.split("\n")) {
-    if (line.includes("✅ Done") && line.includes(`#${prNumber}`)) return true;
+    if (line.includes(STATUS_MARKER.done) && line.includes(`#${prNumber}`)) return true;
   }
   return false;
 }

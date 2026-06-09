@@ -13,6 +13,7 @@
  * This module is pure: backlog rows (+ any active ALERT identifiers) in, a
  * {@link BriefModel} out. Rendering and locale live in the cli adapter.
  */
+import { classifyStatus } from "@roll/spec";
 import type { BacklogItem } from "../backlog/store.js";
 
 /** The three-block owner digest, pre-bucketed for rendering. */
@@ -36,11 +37,11 @@ export interface BriefModel {
 }
 
 /**
- * Bucket backlog rows by status into the digest model. Status detection keys on
- * the canonical phrase tokens (mirroring the bash brief / backlog renderer), and
- * checks the most specific terminal states (Done / In Progress / Hold / Blocked /
- * Deferred) BEFORE Todo so a "✅ Done — … Todo note" trailing comment can never
- * be miscounted as pending.
+ * Bucket backlog rows by status into the digest model. Status comes from the ONE
+ * typed classifier ({@link classifyStatus}, REFACTOR-047) — no ad-hoc substring
+ * matching here. Within the `hold` state the digest keeps a display-only split:
+ * the canonical 🚫 Hold (awaiting an owner ruling) vs the legacy 🔒 Blocked /
+ * ⏸ Deferred triage markers; functionally both count toward {@link decideCount}.
  */
 export function composeBrief(items: BacklogItem[], alerts: string[]): BriefModel {
   const m: BriefModel = {
@@ -54,15 +55,23 @@ export function composeBrief(items: BacklogItem[], alerts: string[]): BriefModel
     alerts: [...alerts],
   };
   for (const it of items) {
-    const st = it.status;
-    if (st.includes("Done")) m.shipped.push(it);
-    else if (st.includes("In Progress")) m.inProgress.push(it);
-    else if (st.includes("Hold")) m.hold.push(it);
-    else if (st.includes("Blocked") || st.includes("Deferred")) m.blocked.push(it);
-    else if (st.includes("Todo")) {
-      if (it.id.startsWith("FIX-")) m.queueFix.push(it);
-      else if (it.id.startsWith("US-")) m.queueUs.push(it);
-      else m.queueOther.push(it);
+    switch (classifyStatus(it.status)) {
+      case "done":
+        m.shipped.push(it);
+        break;
+      case "in_progress":
+        m.inProgress.push(it);
+        break;
+      case "hold":
+        // Display-only refinement: canonical 🚫 Hold vs legacy 🔒 Blocked / ⏸ Deferred.
+        if (it.status.includes("Hold")) m.hold.push(it);
+        else m.blocked.push(it);
+        break;
+      case "todo":
+        if (it.id.startsWith("FIX-")) m.queueFix.push(it);
+        else if (it.id.startsWith("US-")) m.queueUs.push(it);
+        else m.queueOther.push(it);
+        break;
     }
   }
   return m;

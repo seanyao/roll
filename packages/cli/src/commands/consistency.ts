@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 
 const DIMENSIONS = ["code", "cards", "docs", "i18n", "tests", "site"];
 
@@ -59,7 +59,7 @@ function readDoneFeatures(backlogText: string): Map<string, string[]> {
       features.set(current, []);
       continue;
     }
-    if (current && line.includes("✅ Done")) {
+    if (current && line.includes(STATUS_MARKER.done)) {
       const m2 = /\[(US-|FIX-|REFACTOR-)([^\]]+)\]/.exec(line);
       if (m2) features.get(current)?.push((m2[1] ?? "") + (m2[2] ?? ""));
     }
@@ -139,7 +139,7 @@ function checkCards(projectDir: string): DimResult {
       // LIVE rows must own a card folder (a split that writes rows without
       // cards breaks every link downstream). Pre-card-era ✅ Done rows are
       // legitimate history — counted, not failed.
-      if (line.includes("✅ Done")) doneNoFolder += 1;
+      if (line.includes(STATUS_MARKER.done)) doneNoFolder += 1;
       else gaps.push(`Live backlog row ${id} has no card folder (features/<epic>/${id}/spec.md)`);
       continue;
     }
@@ -150,7 +150,7 @@ function checkCards(projectDir: string): DimResult {
       if (!existsSync(join(projectDir, ".roll", target))) {
         gaps.push(`Backlog row ${id} evidence link is broken: ${ev[1] ?? ""}`);
       }
-    } else if (line.includes("✅ Done")) {
+    } else if (line.includes(STATUS_MARKER.done)) {
       const epic = cardEpic.get(id) ?? "";
       if (!existsSync(join(featuresDir, epic, id, "latest", `${id}-report.html`))) {
         if (hasAcBlock(epic, id)) {
@@ -366,7 +366,7 @@ function checkTests(projectDir: string): DimResult {
       currentFeature = (m[1] ?? "").trim();
       continue;
     }
-    if (currentFeature && line.includes("✅ Done")) {
+    if (currentFeature && line.includes(STATUS_MARKER.done)) {
       const m2 = /\[(US-|FIX-|REFACTOR-)([^\]]+)\]/.exec(line);
       if (m2 && !doneFeatures.includes(currentFeature)) doneFeatures.push(currentFeature);
     }

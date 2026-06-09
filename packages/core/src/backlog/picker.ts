@@ -25,12 +25,13 @@
  * predicate; done-ness is computed from the parsed items themselves (mirroring
  * bash, which re-greps the same backlog file for each dep's status).
  */
+import { STATUS_MARKER } from "@roll/spec";
 import type { BacklogItem } from "./store.js";
 
 /** Status string that marks a row pickable (exact, like the oracle). */
-const TODO = "📋 Todo";
+const TODO = STATUS_MARKER.todo;
 /** Substring the oracle greps for to decide a dependency is satisfied. */
-const DONE = "✅ Done";
+const DONE = STATUS_MARKER.done;
 
 /** Type prefixes in oracle pick priority order. */
 const PREFIXES = ["FIX", "US", "REFACTOR"] as const;

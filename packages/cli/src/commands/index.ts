@@ -6,6 +6,7 @@ import { alertCommand } from "./alert.js";
 import { archiveMigrateCommand } from "./archive-migrate.js";
 import { attestCommand } from "./attest.js";
 import { BACKLOG_MGMT_SUBCOMMANDS, backlogCommand } from "./backlog.js";
+import { backlogLintCommand, backlogSetStatusCommand } from "./backlog-mgmt.js";
 import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
@@ -107,9 +108,16 @@ export function registerAll(): void {
   // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
   // (v2 had no pairing).
   registerPorted("pair", pairCommand);
-  // `backlog` display is TS; management subcommands (writes) stay on bash.
+  // `backlog`: display is TS; the WRITE/maintenance arms are being ported off
+  // bash (US-PORT-019). block/defer/unblock/promote + lint are native TS now;
+  // unstick/sync still fall back to bash until ported in this same card.
   registerPorted("backlog", (args) => {
-    if (args[0] !== undefined && BACKLOG_MGMT_SUBCOMMANDS.includes(args[0])) {
+    const sub = args[0];
+    if (sub === "block" || sub === "defer" || sub === "unblock" || sub === "promote") {
+      return backlogSetStatusCommand(sub, args.slice(1));
+    }
+    if (sub === "lint") return backlogLintCommand(args.slice(1));
+    if (sub !== undefined && BACKLOG_MGMT_SUBCOMMANDS.includes(sub)) {
       return fallbackToBash(["backlog", ...args]).status;
     }
     return backlogCommand(args);

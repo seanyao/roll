@@ -13,6 +13,7 @@
 
 - changelog generate 剔除已在某版本段发布的故事，不再在 Unreleased 过度累积；纯 PR / 手工条目保留（FIX-227）
 - roll release ship 的交互确认改为按行读 stdin，不再因等 EOF 在交互终端永久挂起（FIX-228）
+- 把 loop 日志与事件的只读子命令改写为 TS，脱离 bash 回落引擎（US-PORT-022 part 1）
 
 ## v3.609.1 — 2026-06-09
 

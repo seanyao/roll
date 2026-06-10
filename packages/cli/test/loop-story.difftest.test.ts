@@ -8,7 +8,7 @@
  * resolves deterministically.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -18,6 +18,11 @@ import { renderState } from "../src/render.js";
 const REPO = resolve(__dirname, "../../..");
 const PY_STORY = join(REPO, "lib", "roll-loop-story.py");
 const BASH = join(REPO, "bin", "roll");
+// US-PORT-021: the python/bash oracles are retired. When absent, parity degrades
+// to a determinism check (a second in-process TS run on the same fixture) while
+// the TS command still executes. US-PORT-021b will freeze these as snapshots.
+const PY_OK = existsSync(PY_STORY);
+const BASH_OK = existsSync(BASH);
 const dirs: string[] = [];
 
 afterAll(() => {
@@ -185,12 +190,10 @@ describe("diff-test: roll loop story == roll-loop-story.py", () => {
   it("panel for a story with cycles matches byte-for-byte", () => {
     const env = sandboxEnv();
     const proj = seedCycles(env);
-    let py = run("python3", [PY_STORY, "US-CLI-006"], env, proj);
-    let ts = tsRun(loopStoryCommand, env, ["US-CLI-006"], proj);
-    if (ts.stdout !== py.stdout) {
-      py = run("python3", [PY_STORY, "US-CLI-006"], env, proj);
-      ts = tsRun(loopStoryCommand, env, ["US-CLI-006"], proj);
-    }
+    const ts = tsRun(loopStoryCommand, env, ["US-CLI-006"], proj);
+    const py = PY_OK
+      ? run("python3", [PY_STORY, "US-CLI-006"], env, proj)
+      : tsRun(loopStoryCommand, env, ["US-CLI-006"], proj);
     expect(ts.stdout).toBe(py.stdout);
     expect(ts.code).toBe(py.code);
   });
@@ -198,8 +201,10 @@ describe("diff-test: roll loop story == roll-loop-story.py", () => {
   it("case-insensitive id matches", () => {
     const env = sandboxEnv();
     const proj = seedCycles(env);
-    const py = run("python3", [PY_STORY, "us-cli-006"], env, proj);
     const ts = tsRun(loopStoryCommand, env, ["us-cli-006"], proj);
+    const py = PY_OK
+      ? run("python3", [PY_STORY, "us-cli-006"], env, proj)
+      : tsRun(loopStoryCommand, env, ["us-cli-006"], proj);
     expect(ts.stdout).toBe(py.stdout);
     expect(ts.code).toBe(py.code);
   });
@@ -207,8 +212,10 @@ describe("diff-test: roll loop story == roll-loop-story.py", () => {
   it("unknown story → stderr notice + exit 2", () => {
     const env = sandboxEnv();
     const proj = seedCycles(env);
-    const py = run("python3", [PY_STORY, "US-NOPE-999"], env, proj);
     const ts = tsRun(loopStoryCommand, env, ["US-NOPE-999"], proj);
+    const py = PY_OK
+      ? run("python3", [PY_STORY, "US-NOPE-999"], env, proj)
+      : tsRun(loopStoryCommand, env, ["US-NOPE-999"], proj);
     expect(ts.stderr).toBe(py.stderr);
     expect(ts.code).toBe(py.code);
   });
@@ -227,8 +234,10 @@ describe("diff-test: roll loop story == roll-loop-story.py", () => {
 describe("loop eval wrapper (US-PORT-007)", () => {
   it("help text == bash `bin/roll loop eval -h`", () => {
     const env = sandboxEnv();
-    const py = run(BASH, ["loop", "eval", "-h"], env, REPO);
     const ts = tsRun(loopEvalCommand, env, ["-h"], REPO);
+    const py = BASH_OK
+      ? run(BASH, ["loop", "eval", "-h"], env, REPO)
+      : tsRun(loopEvalCommand, env, ["-h"], REPO);
     expect(ts.stdout).toBe(py.stdout);
     expect(ts.code).toBe(py.code);
   });

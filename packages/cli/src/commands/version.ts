@@ -23,22 +23,13 @@ function versionFromPackageJson(dir: string): string {
   }
 }
 
-/** Read `VERSION="x"` from `<dir>/bin/roll` (the v2-era fallback), or "". */
-function versionFromBinRoll(dir: string): string {
-  try {
-    const mm = /^VERSION="([^"]+)"/m.exec(readFileSync(join(dir, "bin", "roll"), "utf8"));
-    return mm?.[1] ?? "";
-  } catch {
-    return "";
-  }
-}
-
 /**
  * The version of an install tree rooted at `dir`: package.json is the single
- * source of truth; the bin/roll literal is the last-resort fallback.
+ * source of truth (US-PORT-021 — the v2-era bin/roll `VERSION=` fallback is
+ * retired with the bash engine).
  */
 export function treeVersion(dir: string): string {
-  return versionFromPackageJson(dir) || versionFromBinRoll(dir);
+  return versionFromPackageJson(dir);
 }
 
 /**

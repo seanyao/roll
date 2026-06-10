@@ -72,8 +72,7 @@ Dev side — a pnpm monorepo. Publish side — one npm package.
 
 ```
 packages/      TypeScript engine (pnpm workspaces): spec · core · infra · cli · web
-bin/roll       Frozen bash v2 engine — automatic fallback + the diff-test oracle
-lib/           Runtime companions (python/sh) used by the loop & fallback paths
+lib/           Runtime companions (python/sh) used by the loop
 skills/        Git submodule → seanyao/roll-skills (the agent skill contracts)
 conventions/   Conventions synced into AI clients by `roll setup`
 template/      Project scaffolding installed by `roll init`

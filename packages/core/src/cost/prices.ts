@@ -53,16 +53,18 @@ export interface PriceTable {
 
 let cached: PriceTable | null = null;
 
-/** Walk up from this module until the repo root (contains `bin/roll`). */
+/** Walk up from this module to the repo/package root, keyed on the shipped
+ *  `lib/prices/` data dir we actually read — the bash engine (`bin/roll`) is
+ *  retired (US-PORT-021), so the marker is the data, not the old binary. */
 function repoRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 12; i++) {
-    if (existsSync(join(dir, "bin", "roll"))) return dir;
+    if (existsSync(join(dir, "lib", "prices"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("prices: cannot locate repo root (bin/roll not found)");
+  throw new Error("prices: cannot locate repo root (no lib/prices marker)");
 }
 
 /**

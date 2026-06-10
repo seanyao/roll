@@ -12,7 +12,7 @@
  * the commit succeeds deterministically. No network, no gh, no launchd.
  */
 import { execFileSync, execSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -143,6 +143,11 @@ function envBase(extra: Record<string, string>): Record<string, string> {
 }
 
 function bashMg(cwd: string, args: string[], extra: Record<string, string>): Run {
+  // US-PORT-021: bin/roll is retired. This was a TS==bash parity test; with the
+  // oracle gone the comparison degrades to a determinism check (two TS runs on
+  // identical fixtures must match) while the TS command still executes.
+  // US-PORT-021b will freeze these as snapshots.
+  if (!existsSync(join(REPO, "bin", "roll"))) return tsMg(cwd, args, extra);
   try {
     const stdout = execFileSync(join(REPO, "bin", "roll"), ["migrate", ...args], {
       cwd,

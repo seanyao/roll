@@ -27,7 +27,6 @@
   "author": "Sean Yao <sean.dlut@gmail.com>",
   "files": [
     "dist/",
-    "bin/",
     "conventions/",
     "lib/",
     "skills/",

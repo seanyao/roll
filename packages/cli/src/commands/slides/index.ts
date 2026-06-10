@@ -269,15 +269,16 @@ function cmdBuild(args: string[]): number {
   }
 
   const libDir = slidesLib();
-  const validator = join(libDir, "slides-validate.py");
-  const renderer = join(libDir, "slides-render.py");
-  if (!isFile(validator) || !isFile(renderer)) {
+  const componentsDir = join(libDir, "slides", "components");
+  // US-PORT-021: the renderer + validator are native TS now (the slides-*.py
+  // oracles are retired with the bash engine). The real toolchain dependency is
+  // the shipped components dir — guard on that, not the removed .py files.
+  if (!isDir(componentsDir)) {
     err(m("slides_build.slides_toolchain_missing_re_run_roll"));
     return 1;
   }
 
   const errFile = join(".roll", "slides", slug, ".last-build.err");
-  const componentsDir = join(libDir, "slides", "components");
 
   // 1. Validate (native). Capture stderr-equivalent lines as a combined block
   //    (the bash oracle captures `python3 validator 2>&1`).

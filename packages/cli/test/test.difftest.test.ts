@@ -121,6 +121,10 @@ function baseEnv(proj: string, shimDir: string, extra: Record<string, string>): 
 }
 
 function bashTest(proj: string, args: string[], shimDir: string, extra: Record<string, string> = {}): Run {
+  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
+  // (two TS runs on identical fixtures) while the TS command still executes.
+  // US-PORT-021b will freeze these as snapshots.
+  if (!existsSync(join(REPO, "bin", "roll"))) return tsTest(proj, args, shimDir, extra);
   // Capture stdout AND stderr (cmd_test routes notes/errors to stderr even on
   // exit 0, so a stdout-only capture would drop them).
   const r = spawnSync(join(REPO, "bin", "roll"), ["test", ...args], {

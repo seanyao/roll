@@ -561,6 +561,103 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
   });
 
+  // FIX-246 — ac-map omission remediation. Agents consistently skip skill step
+  // 10.6 (ac-map.json) even on real deliveries, so the hard gate killed every
+  // cycle. capture_facts now spawns the SAME agent once with a surgical
+  // write-the-ac-map prompt BEFORE rendering attest, and records the outcome
+  // as an `attest:remediation` event. Honesty red line untouched.
+  function remediationFixture(opts: { withAcMap?: boolean; withAcBlock?: boolean } = {}): string {
+    const wt = realpathSync(mkdtempSync(join(tmpdir(), "roll-246-exec-")));
+    execDirs.push(wt);
+    const dir = join(wt, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "spec.md"),
+      opts.withAcBlock === false
+        ? "# US-RUN-001\n\nprose only\n"
+        : "# US-RUN-001\n\n**AC:**\n- [ ] AC1 works\n",
+    );
+    if (opts.withAcMap === true) writeFileSync(join(dir, "ac-map.json"), "[]\n");
+    return wt;
+  }
+
+  it("FIX-246: delivery with AC block and NO ac-map → one remediation spawn before render + attest:remediation event", async () => {
+    const wt = remediationFixture();
+    const order: string[] = [];
+    const spawn = vi.fn(async () => {
+      order.push("remediation:spawn");
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt },
+      agentSpawn: spawn,
+      attest: {
+        render: vi.fn(async () => {
+          order.push("attest:render");
+          return 0;
+        }),
+      },
+    });
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, evidenceRunDir: "/frame" });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [agent, opts] = spawn.mock.calls[0] as unknown as [string, { skillBody: string; cwd: string; timeoutMs: number; runDir: string }];
+    expect(agent).toBe("claude"); // the SAME agent that delivered
+    expect(opts.cwd).toBe(wt);
+    expect(opts.runDir).toBe("/frame");
+    expect(opts.skillBody).toContain("ac-map.json");
+    expect(opts.skillBody).toContain(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"));
+    expect(order.indexOf("remediation:spawn")).toBeLessThan(order.indexOf("attest:render")); // remediate, THEN render once
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "still-missing")).toBe(true);
+  });
+
+  it("FIX-246: remediation agent writes the ac-map → event outcome 'written'", async () => {
+    const wt = remediationFixture();
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt },
+      agentSpawn: vi.fn(async () => {
+        writeFileSync(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"), "[]\n");
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, evidenceRunDir: "/frame" });
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "written")).toBe(true);
+  });
+
+  it("FIX-246: ac-map already present → no remediation spawn", async () => {
+    const wt = remediationFixture({ withAcMap: true });
+    const base = fakePorts();
+    const { ports } = fakePorts({ paths: { ...base.ports.paths, worktreePath: wt } });
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, evidenceRunDir: "/frame" });
+    expect(ports.agentSpawn).not.toHaveBeenCalled();
+  });
+
+  it("FIX-246: story without AC block → no remediation spawn", async () => {
+    const wt = remediationFixture({ withAcBlock: false });
+    const base = fakePorts();
+    const { ports } = fakePorts({ paths: { ...base.ports.paths, worktreePath: wt } });
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, evidenceRunDir: "/frame" });
+    expect(ports.agentSpawn).not.toHaveBeenCalled();
+  });
+
+  it("FIX-246: remediation spawn throws → outcome 'spawn-failed', capture still completes", async () => {
+    const wt = remediationFixture();
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt },
+      agentSpawn: vi.fn(async () => {
+        throw new Error("agent unavailable");
+      }),
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, evidenceRunDir: "/frame" });
+    expect(r.event).toMatchObject({ type: "facts_captured" });
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "spawn-failed")).toBe(true);
+  });
+
   it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);

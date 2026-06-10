@@ -46,6 +46,10 @@ export type RollEvent =
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }
+  // ac-map remediation (FIX-246) — a real delivery that skipped skill step 10.6
+  // (no ac-map.json) gets ONE surgical same-agent second pass before attest
+  // renders. The outcome is auditable; honest statuses only — never a bypass.
+  | { type: "attest:remediation"; cycleId: string; storyId: string; agent: string; outcome: "written" | "still-missing" | "spawn-failed"; ts: number }
   // Correction loop (US-EVID-014/016) — story-level negative feedback and the
   // safety brake that stops oscillation before the loop burns cycles.
   | {

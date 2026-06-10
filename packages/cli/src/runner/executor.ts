@@ -91,6 +91,7 @@ import {
 } from "./agent-spawn.js";
 import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
+import { ACMAP_REMEDIATION_TIMEOUT_MS, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
@@ -655,6 +656,35 @@ export async function executeCommand(
       }
       const storyId = ctx.storyId ?? "";
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
+        // FIX-246: ac-map omission remediation. Agents deliver real work yet
+        // consistently skip skill step 10.6 (write ac-map.json) — the hard gate
+        // then kills every cycle as an empty shell. Before rendering, give the
+        // SAME agent ONE surgical second pass to write the ac-map (honest
+        // statuses only — the prompt and the render-layer red line both forbid
+        // fabricated passes). One retry structurally: capture runs once.
+        if (needsAcMapRemediation(ports.paths.worktreePath, storyId)) {
+          let outcome: "written" | "still-missing" | "spawn-failed";
+          try {
+            await ports.agentSpawn(ctx.agent ?? "claude", {
+              cwd: ports.paths.worktreePath,
+              skillBody: buildAcMapRemediationPrompt(ports.paths.worktreePath, storyId, ctx.evidenceRunDir),
+              storyId,
+              timeoutMs: ACMAP_REMEDIATION_TIMEOUT_MS,
+              runDir: ctx.evidenceRunDir,
+            });
+            outcome = needsAcMapRemediation(ports.paths.worktreePath, storyId) ? "still-missing" : "written";
+          } catch {
+            outcome = "spawn-failed";
+          }
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "attest:remediation",
+            cycleId: ctx.cycleId ?? "",
+            storyId,
+            agent: ctx.agent ?? "",
+            outcome,
+            ts: ports.clock(),
+          });
+        }
         const rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
         if (rc !== 0) {
           ports.events.appendAlert(

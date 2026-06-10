@@ -823,6 +823,7 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts({
       github: {
         ...base.ports.github,
+        prState: vi.fn(async () => "UNKNOWN"), // fresh branch — no pre-existing PR (FIX-245 probe)
         runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/42", ok: true })),
       },
     });
@@ -850,6 +851,7 @@ describe("executeCommand — command → executor mapping", () => {
       repoCwd: repo,
       github: {
         ...fakePorts().ports.github,
+        prState: vi.fn(async () => "UNKNOWN"), // fresh branch (FIX-245 probe)
         runPublishPlan: async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/321", ok: true }),
       },
     });
@@ -858,6 +860,21 @@ describe("executeCommand — command → executor mapping", () => {
     const out = readFileSync(join(dir, "index.html"), "utf8");
     expect(out).toContain("PR #321");
     expect(out).toContain('class="phase phase-done" data-phase="execution"');
+  });
+
+  it("FIX-245: a pre-existing OPEN PR on the cycle branch is ADOPTED — no second create, discipline alert logged", async () => {
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      github: {
+        ...base.ports.github,
+        prState: vi.fn(async () => "OPEN"), // the agent self-published mid-cycle
+      },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "loop/cycle-x", docOnly: false }, ports, CTX);
+    expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+    expect(ports.github.runPublishPlan).not.toHaveBeenCalled(); // adopted, not duplicated (I3)
+    const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+    expect(alerts.some((m) => m.includes("discipline") && m.includes("self-published"))).toBe(true);
   });
 
   it("publish_pr with no slug → gh-missing tier (status 2)", async () => {

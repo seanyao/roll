@@ -48,9 +48,11 @@ import {
   reduceCiRollup,
   renderRebaseAttempts,
   selectPrAction,
+  DEAD_TICK_NOTES,
+  deadTickVerdict,
 } from "@roll/core";
 import { gh, ghAvailable, ghRepoSlug, prMerge, remoteUrl } from "@roll/infra";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
 
@@ -103,7 +105,7 @@ export interface PrInboxDeps {
   /** `_gh_resolve` — owner/repo slug, or undefined (→ idle gh_unavailable). */
   resolveSlug: () => Promise<string | undefined>;
   /** `gh -R <slug> pr list --state open --json number,headRefName,author,title`. */
-  listOpenPrs: (slug: string) => Promise<{ code: number; stdout: string }>;
+  listOpenPrs: (slug: string) => Promise<{ code: number; stdout: string; stderr?: string }>;
   /** `gh -R <slug> pr view <num> --json …` → reduced facts, or undefined on failure (skip). */
   viewPr: (slug: string, num: string) => Promise<PrViewFacts | undefined>;
   /** `gh -R <slug> pr merge <num> --squash --delete-branch` → true on success. */
@@ -144,7 +146,13 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
       openCount = 0;
     }
   }
-  const gate = prInboxGate({ ghAvailable: true, listOk: list.code === 0, listStdout: stdout, openCount });
+  const gate = prInboxGate({
+    ghAvailable: true,
+    listOk: list.code === 0,
+    listStdout: stdout,
+    openCount,
+    ...(list.stderr !== undefined ? { listStderr: list.stderr } : {}),
+  });
   if (gate !== undefined) return emit(deps, gate);
 
   const prs = JSON.parse(stdout) as Array<{ number?: number; headRefName?: string }>;
@@ -240,6 +248,53 @@ function writeTickFile(tick: PrTick): void {
     if (lines.length > 500) writeFileSync(file, `${lines.slice(-500).join("\n")}\n`);
   } catch {
     /* rotation is best-effort */
+  }
+  // FIX-233 AC1: a dead loop must scream — 345 silent gh_error ticks over four
+  // days (proxy poison) is the incident this closes. Streak alert + recovery
+  // note, marker-deduped so one streak alerts once.
+  try {
+    checkDeadTickStreak(file, appendAlert);
+  } catch {
+    /* alerting must never break the tick */
+  }
+}
+
+/** FIX-233: marker path — present ⇔ the current abnormal streak was alerted. */
+function deadTickMarkerPath(): string {
+  return join(runtimeDir(), ".pr-deadtick-alerted");
+}
+
+/** Read the tick tail, fold through the pure verdict, act (exported for tests). */
+export function checkDeadTickStreak(file: string, alert: (line: string) => void, markerPath = deadTickMarkerPath()): void {
+  let rows: Array<{ ts?: string; note?: string }> = [];
+  try {
+    rows = readFileSync(file, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as { ts?: string; note?: string });
+  } catch {
+    return;
+  }
+  const notes = rows.map((r) => r.note ?? "");
+  const verdict = deadTickVerdict({ recentNotes: notes, alreadyAlerted: existsSync(markerPath) });
+  if (verdict === "alert") {
+    const streak = [...notes].reverse().findIndex((n) => !DEAD_TICK_NOTES.has(n));
+    const count = streak === -1 ? notes.length : streak;
+    const first = rows[rows.length - count]?.ts ?? "?";
+    const last = rows[rows.length - 1]?.ts ?? "?";
+    alert(`pr-loop dead ticks: ${count} consecutive abnormal ticks (${first} → ${last}) — check gh/network/launchd env (FIX-233)`);
+    try {
+      writeFileSync(markerPath, `${last}\n`);
+    } catch {
+      /* marker is best-effort */
+    }
+  } else if (verdict === "recovered") {
+    alert("pr-loop recovered: healthy tick after an alerted dead-tick streak (FIX-233)");
+    try {
+      rmSync(markerPath, { force: true });
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
@@ -358,7 +413,7 @@ function realDeps(): PrInboxDeps {
         "-R", slug, "pr", "list", "--state", "open",
         "--json", "number,headRefName,author,title",
       ]);
-      return { code: r.code, stdout: r.stdout };
+      return { code: r.code, stdout: r.stdout, stderr: r.stderr };
     },
     viewPr: async (slug, num) => {
       const r = await gh([

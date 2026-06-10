@@ -25,11 +25,10 @@
  * .git/.gitmodules). PATH shims for npm/curl/tmux; real tar. cwd = non-git proj
  * (deterministic hooks-path skip). No network, no launchd. Locale pinned.
  */
-import { execFileSync, execSync, spawnSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -186,23 +185,13 @@ function readCurlLog(): string {
   return s;
 }
 
-function bashUp(fx: Fixture, extra: Record<string, string>): Run {
-  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
-  // (two TS runs on identical fixtures) while the TS command still executes.
-  // US-PORT-021b will freeze these as snapshots.
-  if (!existsSync(join(REPO, "bin", "roll"))) return tsUp(fx, extra);
-  setInstallMethod(fx.installMethod);
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["update"], {
-      cwd: fx.proj,
-      encoding: "utf8",
-      env: { ...envBase(fx, extra), PWD: fx.proj },
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
+// US-PORT-021b: bash oracle retired → freeze the proven-correct TS output as a
+// snapshot. Scrub per-run temp paths (incl. macOS /private prefix) so it is
+// stable across machines; CI is the cross-platform gate.
+function scrub(r: Run): Run {
+  const n = (s: string): string =>
+    s.replace(/(?:\/private)?\/(?:var\/folders|tmp)\/[^\s"':)]*/g, "<TMP>");
+  return { status: r.status, stdout: n(r.stdout), stderr: n(r.stderr) };
 }
 
 const ENV_KEYS = [
@@ -246,35 +235,26 @@ function tsUp(fx: Fixture, extra: Record<string, string>): Run {
 describe("diff-test: roll update == bash oracle", () => {
   for (const lang of ["en", "zh"]) {
     it(`npm happy path → upgrade + setup + changelog (${lang})`, () => {
-      const bf = buildFixture("npm");
       const tf = buildFixture("npm");
-      const b = bashUp(bf, { ROLL_LANG: lang });
-      const t = tsUp(tf, { ROLL_LANG: lang });
-      expect(t).toEqual(b);
+      expect(scrub(tsUp(tf, { ROLL_LANG: lang }))).toMatchSnapshot();
     });
 
     it(`curl version-resolve failure → exit 1 (${lang})`, () => {
-      const bf = buildFixture("curl");
       const tf = buildFixture("curl");
-      const b = bashUp(bf, { ROLL_LANG: lang, ROLL_FAIL_CURL: "1" });
-      const t = tsUp(tf, { ROLL_LANG: lang, ROLL_FAIL_CURL: "1" });
-      expect(t).toEqual(b);
+      expect(scrub(tsUp(tf, { ROLL_LANG: lang, ROLL_FAIL_CURL: "1" }))).toMatchSnapshot();
     });
   }
 
-  it("curl happy path → download/extract + setup + changelog, curl argv identical", () => {
-    const bf = buildFixture("curl");
-    const b = bashUp(bf, { ROLL_VERSION: "v9.9.9" });
-    const bLog = readCurlLog();
+  it("curl happy path → download/extract + setup + changelog, curl argv frozen", () => {
     const tf = buildFixture("curl");
     const t = tsUp(tf, { ROLL_VERSION: "v9.9.9" });
     const tLog = readCurlLog();
-    expect(t).toEqual(b);
-    // The recorded `-o <tmp>/roll.tar.gz` target uses each side's own mktemp dir
-    // (bash `mktemp -d` vs Node `mkdtempSync`); normalize the random temp path so
-    // the argv comparison asserts the SHAPE (flags + URL + -o … roll.tar.gz).
+    expect(scrub(t)).toMatchSnapshot();
+    // The recorded `-o <tmp>/roll.tar.gz` target uses a per-run mkdtemp dir;
+    // normalize the random temp path so the snapshot asserts the SHAPE
+    // (flags + URL + -o … roll.tar.gz).
     const normLog = (s: string): string => s.replace(/^.*\/roll\.tar\.gz$/m, "<TMP>/roll.tar.gz");
-    expect(normLog(tLog)).toBe(normLog(bLog));
-    expect(bLog).toContain("v9.9.9.tar.gz");
+    expect(normLog(tLog)).toMatchSnapshot();
+    expect(tLog).toContain("v9.9.9.tar.gz");
   });
 });

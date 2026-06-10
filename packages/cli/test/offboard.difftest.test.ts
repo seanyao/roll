@@ -16,7 +16,7 @@
  * touches host launchd. No network, no gh, no git. Locale is pinned to keep the
  * bash oracle off the macOS AppleLanguages fallback (en/zh cases override).
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -190,24 +190,6 @@ function readLcLog(): string {
   return s;
 }
 
-function bashOb(fx: Fixture, args: string[], extra: Record<string, string>): Run {
-  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
-  // (two TS runs on identical fixtures) while the TS command still executes.
-  // US-PORT-021b will freeze these as snapshots.
-  if (!existsSync(join(REPO, "bin", "roll"))) return tsOb(fx, args, extra);
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["offboard", ...args], {
-      cwd: fx.proj,
-      encoding: "utf8",
-      env: envBase(fx.home, extra),
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
-}
-
 const ENV_KEYS = [
   "PATH", "HOME", "ROLL_HOME", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG",
   "_LAUNCHD_DIR", "ROLL_LOOP_AGENT", "ROLL_CYCLE_LOG_RAW",
@@ -259,12 +241,11 @@ function norm(run: Run, proj: string): Run {
   return { status: run.status, stdout: repl(run.stdout), stderr: repl(run.stderr) };
 }
 
+// US-PORT-021b: bash oracle retired → freeze the proven-correct, proj-normalized
+// TS output as a snapshot (CI is the cross-platform gate).
 function both(build: () => Fixture, args: string[], extra: Record<string, string> = {}): void {
-  const bf = build();
   const tf = build();
-  const b = norm(bashOb(bf, args, extra), bf.proj);
-  const t = norm(tsOb(tf, args, extra), tf.proj);
-  expect(t).toEqual(b);
+  expect(norm(tsOb(tf, args, extra), tf.proj)).toMatchSnapshot();
 }
 
 describe("diff-test: roll offboard == bash oracle", () => {
@@ -303,17 +284,14 @@ describe("diff-test: roll offboard == bash oracle", () => {
   }
 
   it("with-plists --confirm → launchctl argv identical", () => {
-    const bf = withPlists();
     const tf = withPlists();
-    const b = norm(bashOb(bf, ["--confirm"], {}), bf.proj);
-    const bLog = readLcLog().split(realpathSync(bf.home)).join("<HOME>").split(bf.home).join("<HOME>");
     const t = norm(tsOb(tf, ["--confirm"], {}), tf.proj);
     const tLog = readLcLog().split(realpathSync(tf.home)).join("<HOME>").split(tf.home).join("<HOME>");
-    expect(t).toEqual(b);
-    // Identical launchctl argv (HOME prefix normalized — each run has its own).
-    expect(tLog).toBe(bLog);
-    expect(bLog).toContain("unload\n-w\n");
-    expect(bLog).toContain("com.roll.test.loop.plist\n");
+    expect(t).toMatchSnapshot();
+    // launchctl argv frozen (HOME prefix normalized — each run has its own).
+    expect(tLog).toMatchSnapshot();
+    expect(tLog).toContain("unload\n-w\n");
+    expect(tLog).toContain("com.roll.test.loop.plist\n");
   });
 
   it("with-plists --confirm inside loop cycle → FIX-125 refuse", () => {

@@ -218,8 +218,9 @@ export interface SessionAgg {
   cost_reported: number;
 }
 
-const PI_DEFAULT_MODEL = "deepseek-v4-pro";
-const KIMI_DEFAULT_MODEL = "kimi-k2";
+/** FIX-249: exported — the cli session-recovery adapter needs the same default. */
+export const PI_DEFAULT_MODEL = "deepseek-v4-pro";
+export const KIMI_DEFAULT_MODEL = "kimi-k2";
 
 /**
  * Sum per-message assistant usage in one pi session jsonl, mirroring
@@ -460,6 +461,9 @@ export function toCycleCost(usage: AgentUsage, facts: CycleFacts): CycleCost {
     model: usage.model,
     tokensIn: usage.input_tokens,
     tokensOut: usage.output_tokens,
+    // FIX-249: keep the cache split when the adapter reported one (absent ≠ 0).
+    ...(usage.cache_read_tokens !== undefined ? { cacheRead: usage.cache_read_tokens } : {}),
+    ...(usage.cache_creation_tokens !== undefined ? { cacheWrite: usage.cache_creation_tokens } : {}),
     estimatedCost,
     revertCount: reverts,
     effectiveCost,

@@ -22,6 +22,9 @@ import { planShip, type ShipFacts } from "@roll/core";
 import { type Lang, resolveLang } from "@roll/spec";
 import { c, renderState } from "../render.js";
 import { consistencyPasses } from "./consistency.js";
+import { gatherAuditSnapshot } from "./consistency-audit.js";
+import { EventBus, decideReleaseGate, runConsistencyAudit, type AuditFinding, type ReleaseWaiver } from "@roll/core";
+import { parseEventLine } from "@roll/spec";
 
 // FIX-228/229: the interactive confirm reader lives in the shared tty-confirm
 // module. Imported for local use in `confirm`, and re-exported so the
@@ -41,6 +44,12 @@ export interface ShipDeps {
   tag: (cwd: string, tag: string, version: string) => void;
   pushTag: (cwd: string, tag: string) => void;
   confirm: (tag: string) => boolean;
+  /** US-TRUTH-005: drift findings for the gate (default: live shadow audit). */
+  auditFindings?: (cwd: string) => Promise<AuditFinding[]>;
+  /** Recorded waivers from the event stream (default: scan events.ndjson). */
+  waivers?: (cwd: string) => ReleaseWaiver[];
+  /** Append the gate verdict / waiver usage to the fact stream. */
+  recordGate?: (cwd: string, verdict: "pass" | "blocked" | "waived", tag: string, failCount: number, waivedRules: string[]) => void;
 }
 
 const DEFAULT_BRANCH = "main";
@@ -109,6 +118,49 @@ const realDeps: ShipDeps = {
   },
 };
 
+/** Runtime events path (same resolution the loop uses). */
+function eventsPath(cwd: string): string {
+  const rt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+  return join(rt !== "" ? rt : join(cwd, ".roll", "loop"), "events.ndjson");
+}
+
+/** US-TRUTH-005: read recorded waivers from the event stream. */
+export function readWaivers(cwd: string): ReleaseWaiver[] {
+  const out: ReleaseWaiver[] = [];
+  try {
+    for (const line of readFileSync(eventsPath(cwd), "utf8").split("\n")) {
+      const e = parseEventLine(line);
+      if (e === null || e.type !== "release:waiver") continue;
+      out.push({ reason: e.reason, scope: e.scope, expiresSec: e.expiresSec, operator: e.operator, tsSec: e.ts });
+    }
+  } catch {
+    /* no events yet — no waivers */
+  }
+  return out;
+}
+
+async function liveAuditFindings(cwd: string): Promise<AuditFinding[]> {
+  const rt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+  const runtimeDir = rt !== "" ? rt : join(cwd, ".roll", "loop");
+  const { snapshot } = await gatherAuditSnapshot(cwd, runtimeDir);
+  return runConsistencyAudit(snapshot).findings;
+}
+
+function recordGateEvent(cwd: string, verdict: "pass" | "blocked" | "waived", tag: string, failCount: number, waivedRules: string[]): void {
+  try {
+    new EventBus().appendEvent(eventsPath(cwd), {
+      type: "release:gate",
+      tag,
+      verdict,
+      failCount,
+      waivedRules,
+      ts: Math.floor(Date.now() / 1000),
+    });
+  } catch {
+    /* the gate decision stands; the record is best-effort */
+  }
+}
+
 const BLOCKER_MSG: Record<string, [string, string]> = {
   "not-default-branch": ["must be on the main branch", "必须在 main 分支"],
   "dirty-tree": ["working tree has uncommitted changes", "工作区有未提交改动"],
@@ -117,7 +169,7 @@ const BLOCKER_MSG: Record<string, [string, string]> = {
   "consistency-failed": ["consistency check failed — run `roll consistency check`", "一致性闸未过——先跑 roll consistency check"],
 };
 
-export function releaseShipCommand(args: string[], deps: ShipDeps = realDeps): number {
+export async function releaseShipCommand(args: string[], deps: ShipDeps = realDeps): Promise<number> {
   const noColor =
     args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
@@ -164,6 +216,30 @@ export function releaseShipCommand(args: string[], deps: ShipDeps = realDeps): n
     return 1;
   }
 
+  // US-TRUTH-005: the consistency audit gates the ship. fail-level drift
+  // blocks unless a LIVE recorded waiver covers it; warn/unknown/grandfathered
+  // allow (external flake and history must not kill releases). The verdict is
+  // itself a fact (release:gate event).
+  const findings = await (deps.auditFindings ?? liveAuditFindings)(cwd);
+  const gate = decideReleaseGate(findings, (deps.waivers ?? readWaivers)(cwd), Math.floor(Date.now() / 1000));
+  const record = deps.recordGate ?? recordGateEvent;
+  if (!gate.ok) {
+    record(cwd, "blocked", plan.tag, gate.blockedBy.length, []);
+    process.stderr.write(`${c("amber", zh ? `✗ 一致性审计拦截 ${plan.tag}：` : `✗ consistency audit blocks ${plan.tag}:`)}\n`);
+    for (const f of gate.blockedBy.slice(0, 10)) {
+      process.stderr.write(`  • ${f.rule} ${f.subject} — ${f.detail}\n`);
+    }
+    process.stderr.write(
+      `  ${zh ? "修复漂移，或 owner 显式豁免：roll release waiver --reason <为什么> --scope <rule|subject|all> --days <n>" : "fix the drift, or the owner records a waiver: roll release waiver --reason <why> --scope <rule|subject|all> --days <n>"}\n`,
+    );
+    return 1;
+  }
+  for (const w of gate.waived) {
+    process.stdout.write(
+      `${c("amber", "⚠")} ${zh ? "豁免放行" : "waived"}: ${w.finding.rule} ${w.finding.subject} — ${w.waiver.reason} (${w.waiver.operator})\n`,
+    );
+  }
+
   if (args.includes("--dry-run")) {
     process.stdout.write(`${c("green", "✓")} ${zh ? "前置闸全过；将打并推送" : "all gates pass; would tag and push"} ${plan.tag}\n`);
     return 0;
@@ -176,6 +252,7 @@ export function releaseShipCommand(args: string[], deps: ShipDeps = realDeps): n
 
   deps.tag(cwd, plan.tag, version);
   deps.pushTag(cwd, plan.tag);
+  record(cwd, gate.waived.length > 0 ? "waived" : "pass", plan.tag, 0, gate.waived.map((w) => w.finding.rule));
   process.stdout.write(
     `${c("green", "✓")} ${zh ? "已推送" : "pushed"} ${plan.tag} → release.yml\n` +
       `  ${c("dim", zh ? "等 release.yml 绿后，owner 跑 npm publish（需 2FA）" : "after release.yml is green, the owner runs npm publish (2FA)")}\n`,

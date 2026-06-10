@@ -26,6 +26,10 @@ function happyDeps(over: Partial<ShipDeps> = {}): { deps: ShipDeps; calls: strin
     tag: (_c, t) => calls.push(`tag:${t}`),
     pushTag: (_c, t) => calls.push(`push:${t}`),
     confirm: () => true,
+    // US-TRUTH-005 seams: a drift-free audit, no waivers, silent gate record.
+    auditFindings: async () => [],
+    waivers: () => [],
+    recordGate: () => {},
     ...over,
   };
   return { deps, calls };
@@ -63,7 +67,7 @@ describe("readLineSyncFromFd — FIX-228 (no EOF-wait hang)", () => {
     return openSync(p, "r");
   }
 
-  it("stops at the first newline (interactive `y`⏎) and does not read the rest", () => {
+  it("stops at the first newline (interactive `y`⏎) and does not read the rest", async () => {
     const fd = fdWith("y\nleftover that must not be read");
     try {
       expect(readLineSyncFromFd(fd)).toBe("y");
@@ -179,39 +183,39 @@ describe("readConfirmLine — FIX-229 (/dev/tty blocking read)", () => {
 });
 
 describe("roll release ship", () => {
-  it("all gates pass + confirm → tags v<version> and pushes it", () => {
+  it("all gates pass + confirm → tags v<version> and pushes it", async () => {
     const { deps, calls } = happyDeps();
-    const code = releaseShipCommand(["--no-color"], deps);
+    const code = await releaseShipCommand(["--no-color"], deps);
     expect(code).toBe(0);
     expect(calls).toEqual(["tag:v3.608.1", "push:v3.608.1"]);
     expect(out).toContain("v3.608.1");
   });
 
-  it("NEVER publishes — no publish seam exists in the happy path", () => {
+  it("NEVER publishes — no publish seam exists in the happy path", async () => {
     const { deps, calls } = happyDeps();
-    releaseShipCommand(["--yes", "--no-color"], deps);
+    await releaseShipCommand(["--yes", "--no-color"], deps);
     expect(calls.some((c) => c.includes("publish"))).toBe(false);
   });
 
-  it("--dry-run: gates pass but nothing is tagged or pushed", () => {
+  it("--dry-run: gates pass but nothing is tagged or pushed", async () => {
     const { deps, calls } = happyDeps();
-    const code = releaseShipCommand(["--dry-run", "--no-color"], deps);
+    const code = await releaseShipCommand(["--dry-run", "--no-color"], deps);
     expect(code).toBe(0);
     expect(calls).toEqual([]);
     expect(out).toContain("v3.608.1");
   });
 
-  it("--yes skips the confirm prompt", () => {
+  it("--yes skips the confirm prompt", async () => {
     let confirmed = false;
     const { deps, calls } = happyDeps({ confirm: () => ((confirmed = true), true) });
-    releaseShipCommand(["--yes", "--no-color"], deps);
+    await releaseShipCommand(["--yes", "--no-color"], deps);
     expect(confirmed).toBe(false);
     expect(calls).toEqual(["tag:v3.608.1", "push:v3.608.1"]);
   });
 
-  it("declining the confirm aborts — no tag, no push", () => {
+  it("declining the confirm aborts — no tag, no push", async () => {
     const { deps, calls } = happyDeps({ confirm: () => false });
-    const code = releaseShipCommand(["--no-color"], deps);
+    const code = await releaseShipCommand(["--no-color"], deps);
     expect(code).toBe(1);
     expect(calls).toEqual([]);
   });
@@ -222,12 +226,12 @@ describe("roll release ship", () => {
     ["out of sync", { synced: () => false }, "同步"],
     ["tag exists", { tagExists: () => true }, "已存在"],
     ["consistency red", { consistency: () => false }, "一致性"],
-  ])("blocks when %s — nothing tagged", (_label, over, zhFrag) => {
+  ])("blocks when %s — nothing tagged", async (_label, over, zhFrag) => {
     const { deps, calls } = happyDeps(over as Partial<ShipDeps>);
     const prev = process.env["ROLL_LANG"];
     process.env["ROLL_LANG"] = "zh";
     try {
-      const code = releaseShipCommand(["--no-color"], deps);
+      const code = await releaseShipCommand(["--no-color"], deps);
       expect(code).toBe(1);
       expect(calls).toEqual([]);
       expect(err).toContain(zhFrag);
@@ -237,9 +241,49 @@ describe("roll release ship", () => {
     }
   });
 
-  it("missing package.json version → exit 1, no git touched", () => {
+  // US-TRUTH-005 — the consistency audit gates the ship; waivers are recorded facts.
+  it("US-TRUTH-005: a fail-level drift blocks the ship and records a blocked verdict", async () => {
+    const recorded: string[] = [];
+    const { deps, calls } = happyDeps({
+      auditFindings: async () => [{ rule: "done-no-merge", severity: "fail" as const, subject: "US-9", detail: "premature" }],
+      recordGate: (_c, verdict) => recorded.push(verdict),
+    });
+    const code = await releaseShipCommand(["--yes", "--no-color"], deps);
+    expect(code).toBe(1);
+    expect(calls).toEqual([]); // nothing tagged
+    expect(recorded).toEqual(["blocked"]);
+    expect(err).toContain("done-no-merge");
+    expect(err).toContain("release waiver"); // the sanctioned next step is named
+  });
+
+  it("US-TRUTH-005: a live waiver lets the fail through — verdict 'waived', rule recorded", async () => {
+    const recorded: Array<[string, string[]]> = [];
+    const nowSec = Math.floor(Date.now() / 1000);
+    const { deps, calls } = happyDeps({
+      auditFindings: async () => [{ rule: "done-no-merge", severity: "fail" as const, subject: "US-9", detail: "premature" }],
+      waivers: () => [{ reason: "hotfix window", scope: "done-no-merge", expiresSec: nowSec + 3600, operator: "owner", tsSec: nowSec }],
+      recordGate: (_c, verdict, _t, _f, rules) => recorded.push([verdict, rules]),
+    });
+    const code = await releaseShipCommand(["--yes", "--no-color"], deps);
+    expect(code).toBe(0);
+    expect(calls).toContain("tag:v3.608.1");
+    expect(recorded).toEqual([["waived", ["done-no-merge"]]]);
+    expect(out).toContain("hotfix window");
+  });
+
+  it("US-TRUTH-005: an expired waiver blocks again", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const { deps, calls } = happyDeps({
+      auditFindings: async () => [{ rule: "done-no-merge", severity: "fail" as const, subject: "US-9", detail: "premature" }],
+      waivers: () => [{ reason: "stale", scope: "all", expiresSec: nowSec - 1, operator: "owner", tsSec: nowSec - 9999 }],
+    });
+    expect(await releaseShipCommand(["--yes", "--no-color"], deps)).toBe(1);
+    expect(calls).toEqual([]);
+  });
+
+  it("missing package.json version → exit 1, no git touched", async () => {
     const { deps, calls } = happyDeps({ version: () => "" });
-    expect(releaseShipCommand(["--no-color"], deps)).toBe(1);
+    expect(await releaseShipCommand(["--no-color"], deps)).toBe(1);
     expect(calls).toEqual([]);
   });
 });

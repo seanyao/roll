@@ -42,4 +42,5 @@ export * from "./attest/report.js";
 export * from "./attest/report-smoke.js";
 export * from "./html/chrome.js";
 export * from "./consistency/audit.js";
+export * from "./consistency/gate.js";
 export * from "./truth/selectors.js";

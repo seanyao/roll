@@ -39,7 +39,8 @@ import { ideaCommand } from "./idea.js";
 import { indexCommand } from "./index-gen.js";
 import { storyNewCommand } from "./story-new.js";
 import { initCommand } from "./init.js";
-import { langCommand } from "./lang.js";
+// REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
+// The lang module's write/clear/read surfaces are consumed by config.ts.
 import { loopFmtCommand } from "./loop-fmt.js";
 import {
   loopGcCommand,
@@ -77,8 +78,7 @@ export function registerAll(): void {
   if (registered) return;
   registered = true;
   registerPorted("status", statusCommand);
-  // `lang`: show/set/reset/invalid all TS (full surface ported).
-  registerPorted("lang", langCommand);
+  // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // `skills`: generate/check/help/unknown all TS (full surface ported).
   registerPorted("skills", skillsCommand);
   // `alert`: list/ack/resolve/clear/log/unknown all TS (full surface ported).

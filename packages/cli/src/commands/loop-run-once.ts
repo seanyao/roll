@@ -22,6 +22,7 @@ import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { writeLatestMorningReport } from "../lib/morning-report.js";
+import { gcCommand } from "./gc.js";
 import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 
@@ -463,8 +464,35 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   } catch {
     /* morning report must never mask the cycle terminal result */
   }
+  // REFACTOR-049 AC3: auto-gc after each loop cycle — best-effort, never blocks.
+  autoGc(id.path);
 
   return isFail ? 1 : 0;
+}
+
+/**
+ * REFACTOR-049 AC3 — auto-gc: age out old surplus attest runs after each
+ * loop cycle. Silently best-effort; a failed gc write NEVER blocks the cycle
+ * or increments the failure counter. Uses the default keep-latest/keep-days
+ * strategy (the same as `roll gc` with no flags).
+ */
+function autoGc(projectPath: string): void {
+  const save = process.cwd();
+  try {
+    process.chdir(projectPath);
+    // Trap stdout so gc chatter doesn't leak into the cycle's cron.log.
+    const realOut = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (): boolean => true;
+    try {
+      gcCommand([]);
+    } finally {
+      process.stdout.write = realOut;
+    }
+  } catch {
+    /* gc is best-effort — a missing dir / permissions blip must never fail the cycle */
+  } finally {
+    try { process.chdir(save); } catch { /* best-effort */ }
+  }
 }
 
 /**

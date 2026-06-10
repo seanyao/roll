@@ -7,6 +7,10 @@
  * dream-time), so the entire `config` command is now TS — the bash fallback in
  * the router is retired (整个 config 命令收口).
  *
+ * REFACTOR-049: the `config lang` sub-command subsumes the former top-level
+ * `roll lang` command. `roll lang` is removed from the command registry; the
+ * lang surface now lives exclusively under `roll config lang <zh|en|--reset>`.
+ *
  * ─── v2 oracle ──────────────────────────────────────────────────────────────
  *   cmd_config (bin/roll 6085-6181), _config_loop_window (5929), _config_loop_schedule
  *   (5974), _config_daily_time (6021). Validation / yaml writing / scope→file
@@ -26,6 +30,7 @@
  * `roll loop on` rather than an implicit side effect.
  */
 import { CONFIG_KEYS, configKeyFile, configResolve, configSet, configValidate } from "@roll/infra";
+import { clearLang, resolveCurrent, resolveSource, writeLang } from "./lang.js";
 import { CONFIG_FACADE_KEYS, configGetCommand } from "./config-get.js";
 
 type Scope = "project" | "global";
@@ -167,6 +172,33 @@ function dreamTime(value: string, scope: Scope): number {
   return 0;
 }
 
+// ─── lang facade (REFACTOR-049) ───────────────────────────────────────────
+
+/** `config lang [zh|en|--reset]` — the lang command merged into config. */
+function configLangSub(value: string, _scope: Scope): number {
+  if (value === "") {
+    const current = resolveCurrent();
+    const src = resolveSource();
+    process.stdout.write(`lang: ${current} (source: ${src})\n`);
+    return 0;
+  }
+  if (value === "zh" || value === "en") {
+    writeLang(value);
+    ok(`✓ set lang = ${value}`);
+    return 0;
+  }
+  if (value === "--reset") {
+    clearLang();
+    ok("✓ language preference cleared (will follow locale)");
+    return 0;
+  }
+  err(`config lang: unknown language '${value}'`);
+  err(`config lang: 未知语言 '${value}'`);
+  process.stdout.write("  Valid values: zh, en, --reset\n");
+  process.stdout.write("  可选值: zh, en, --reset\n");
+  return 2;
+}
+
 // ─── command ──────────────────────────────────────────────────────────────────
 
 /**
@@ -174,6 +206,10 @@ function dreamTime(value: string, scope: Scope): number {
  * help token → help; flags --list/--global/--project anywhere; the first two
  * bare args are key then value; a third bare arg is an error. Facades and the
  * read surface dispatch on the parsed key.
+ *
+ * REFACTOR-049 addition: `config lang <zh|en|--reset>` is a compact facade
+ * like loop-window/loop-schedule/dream-time — it translates into the
+ * lang.ts write/clear/read surface without needing a separate config key.
  */
 export function configCommand(args: string[]): number {
   let key = "";
@@ -202,6 +238,10 @@ export function configCommand(args: string[]): number {
       return 2;
     }
   }
+
+  // REFACTOR-049: `config lang` is a compact facade — it writes/reads the
+  // global ~/.roll/config.yaml `lang:` line, not a standard config key.
+  if (key === "lang") return configLangSub(value, scope === "" ? "global" : scope);
 
   // Compact facades (US-LOOP-034/035): translate one token into key writes.
   // loop-* default to project scope; dream-time defaults to global.

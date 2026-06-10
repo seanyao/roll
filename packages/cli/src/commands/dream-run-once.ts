@@ -17,6 +17,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { type AgentSpawn, realAgentSpawn } from "../runner/agent-spawn.js";
 import { readSkillBody } from "../runner/skill-body.js";
+import { gcCommand } from "./gc.js";
 
 /** Injectable seams — tests fake identity + agent spawn (no real agent runs). */
 export interface DreamRunOnceDeps {
@@ -92,5 +93,23 @@ export async function dreamRunOnceCommand(
     return 1;
   }
   append(`[${stamp()}] dream scan end rc=${exitCode}\n`);
+  // REFACTOR-049 AC3: auto-gc after each dream scan — best-effort, never blocks.
+  try {
+    const save = process.cwd();
+    try {
+      process.chdir(id.path);
+      const realOut = process.stdout.write.bind(process.stdout);
+      process.stdout.write = (): boolean => true;
+      try {
+        gcCommand([]);
+      } finally {
+        process.stdout.write = realOut;
+      }
+    } finally {
+      try { process.chdir(save); } catch { /* best-effort */ }
+    }
+  } catch {
+    /* gc is best-effort — a missing dir / permissions blip must never fail the scan */
+  }
   return exitCode;
 }

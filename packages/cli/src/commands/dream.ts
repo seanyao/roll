@@ -22,19 +22,23 @@ const PROJECT: ReadonlyArray<readonly [string, string, string, string, boolean]>
   ["ci", "[--wait]", "show or wait for current commit's CI status", "查看 / 等待 CI 状态", false],
   ["release", "", "run the release script (human-only)", "执行发版脚本（仅人工）", false],
   ["review-pr", "<number>", "AI-powered code review for a PR", "AI 代码评审", false],
+  // REFACTOR-049: `lang` moved to `roll config lang <x>`; kept as config sub-command.
+  ["config", "[<key> [<value>]]", "read or write roll config keys", "读取或写入配置项", false],
 ];
 
 const MACHINE: ReadonlyArray<readonly [string, string, string, string, boolean]> = [
   ["setup", "[-f]", "first-time install or re-sync", "首次安装或重新同步", false],
   ["update", "", "upgrade to latest + re-sync", "升级到最新版并重新同步", false],
-  ["version", "", "print installed roll version", "显示已安装版本", false],
+  // REFACTOR-049: `version` downgraded to `roll --version` / `-v` flag.
 ];
 
 const EXAMPLES: ReadonlyArray<readonly [string, string]> = [
+  ["roll --version", "显示已安装版本"],
   ["roll loop on", "启用自主执行循环"],
   ["roll brief", "查看最新简报"],
   ["roll backlog defer US-DOC '过早引入'", "推迟一类任务"],
   ["roll agent use kimi", "切换当前项目到 kimi"],
+  ["roll config lang zh", "设置语言为中文 (REFACTOR-049: `roll lang` 已移入 config)"],
 ];
 
 function isWide(code: number): boolean {
@@ -121,6 +125,7 @@ export function renderMainHelp(version: string = legacyHelpVersion()): string {
     ...EXAMPLES.map(([cmd, zh]) => `  ${cmd}  ${zh}`),
     "",
     "  docs: github.com/seanyao/roll  ·  issues: github.com/seanyao/roll/issues",
+    "  version: roll --version  ·  gc auto-runs per cycle (manual: roll loop gc)",
     "",
   ].join("\n");
 }

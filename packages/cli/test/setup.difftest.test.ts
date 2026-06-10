@@ -41,6 +41,11 @@ beforeAll(() => {
     mkdirSync(join(pkgDir, "skills", s), { recursive: true });
     writeFileSync(join(pkgDir, "skills", s, "SKILL.md"), `# ${s}\n`);
   }
+  mkdirSync(join(pkgDir, "skills", "roll-alpha", "references"), { recursive: true });
+  writeFileSync(
+    join(pkgDir, "skills", "roll-alpha", "references", "full-contract.md"),
+    "# roll-alpha full contract\n",
+  );
 });
 
 afterAll(() => {
@@ -142,9 +147,12 @@ function assertFreshSideEffects(fx: Fixture): void {
   );
   expect(readFileSync(join(fx.home, ".claude", "CLAUDE.md"), "utf8")).toContain("@roll.md");
   expect(readFileSync(join(fx.home, ".roll", "skills", "roll-alpha", "SKILL.md"), "utf8")).toBe("# roll-alpha\n");
+  expect(readFileSync(join(fx.home, ".roll", "skills", "roll-alpha", "references", "full-contract.md"), "utf8"))
+    .toBe("# roll-alpha full contract\n");
   const skillLink = join(fx.home, ".claude", "skills", "roll-alpha");
   expect(lstatSync(skillLink).isSymbolicLink()).toBe(true);
   expect(readlinkSync(skillLink)).toBe(`${join(fx.home, ".roll", "skills", "roll-alpha")}/`);
+  expect(readFileSync(join(skillLink, "references", "full-contract.md"), "utf8")).toBe("# roll-alpha full contract\n");
   expect(existsSync(join(fx.home, ".roll", ".peer-state", "logs"))).toBe(true);
 }
 

@@ -12,7 +12,7 @@
  * the commit succeeds deterministically. No network, no gh, no launchd.
  */
 import { execFileSync, execSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -142,25 +142,6 @@ function envBase(extra: Record<string, string>): Record<string, string> {
   };
 }
 
-function bashMg(cwd: string, args: string[], extra: Record<string, string>): Run {
-  // US-PORT-021: bin/roll is retired. This was a TS==bash parity test; with the
-  // oracle gone the comparison degrades to a determinism check (two TS runs on
-  // identical fixtures must match) while the TS command still executes.
-  // US-PORT-021b will freeze these as snapshots.
-  if (!existsSync(join(REPO, "bin", "roll"))) return tsMg(cwd, args, extra);
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["migrate", ...args], {
-      cwd,
-      encoding: "utf8",
-      env: envBase(extra),
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
-}
-
 const ENV_KEYS = ["PATH", "HOME", "ROLL_HOME", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG"];
 
 function tsMg(cwd: string, args: string[], extra: Record<string, string>): Run {
@@ -202,22 +183,30 @@ function lsFiles(dir: string): string {
 }
 
 /** Both sides on freshly-built identical fixtures; compare output + (optional) tree. */
+// US-PORT-021b: the bash oracle (bin/roll) is retired; these freeze the
+// proven-correct TS output as a snapshot. Scrub the per-run temp dir + git SHAs
+// + timestamps so the snapshot is stable across machines/runs (CI is the
+// cross-platform gate — locale is pinned via ROLL_LANG in envBase).
+function scrub(r: Run, dir: string): Run {
+  const n = (s: string): string =>
+    s
+      .split(dir)
+      .join("<DIR>")
+      .replace(/[0-9a-f]{7,40}/g, "<SHA>")
+      .replace(/\d{4}-\d{2}-\d{2}[T ][\d:]+Z?/g, "<TS>");
+  return { status: r.status, stdout: n(r.stdout), stderr: n(r.stderr) };
+}
+
 function both2(build: () => string, args: string[], extra: Record<string, string> = {}): void {
-  const bDir = build();
   const tDir = build();
-  const b = bashMg(bDir, args, extra);
-  const t = tsMg(tDir, args, extra);
-  expect(t).toEqual(b);
+  expect(scrub(tsMg(tDir, args, extra), tDir)).toMatchSnapshot();
 }
 
 function bothTrees(build: () => string, args: string[], extra: Record<string, string> = {}): void {
-  const bDir = build();
   const tDir = build();
-  const b = bashMg(bDir, args, extra);
-  const t = tsMg(tDir, args, extra);
-  expect(t).toEqual(b);
-  // After an executing migration, the tracked file set must match exactly.
-  expect(lsFiles(tDir)).toBe(lsFiles(bDir));
+  expect(scrub(tsMg(tDir, args, extra), tDir)).toMatchSnapshot();
+  // After an executing migration, the tracked file set is frozen too.
+  expect(lsFiles(tDir)).toMatchSnapshot();
 }
 
 describe("diff-test: roll migrate == bash oracle", () => {

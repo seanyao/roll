@@ -253,7 +253,7 @@ describe("frozen: roll setup", () => {
     expect(tsSetup(freshFixture(), ["--bogus"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
       {
         "status": 1,
-        "stderr": "[roll] Unknown argument: 
+        "stderr": "[roll] Unknown argument: --bogus
       ",
         "stdout": "",
       }
@@ -264,7 +264,7 @@ describe("frozen: roll setup", () => {
     expect(tsSetup(freshFixture(), ["--bogus"], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
       {
         "status": 1,
-        "stderr": "[roll] 未知参数: 
+        "stderr": "[roll] 未知参数: --bogus
       ",
         "stdout": "",
       }

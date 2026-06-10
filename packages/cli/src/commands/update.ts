@@ -192,7 +192,12 @@ function showChangelog(): void {
 
 // ─── cmd_update (1967) ────────────────────────────────────────────────────────
 export function updateCommand(args: string[]): number {
-  void args; // cmd_update takes no flags.
+  // FIX-238 AC1: update has side effects (network + global writes). ANY
+  // argument — help or unknown — prints usage and never starts the upgrade.
+  if (args.length > 0) {
+    process.stdout.write("Usage: roll update\n  Upgrade the global roll to the latest release.\n");
+    return args[0] === "--help" || args[0] === "-h" ? 0 : 1;
+  }
   info(m("update.current_version", rollVersion()));
 
   let installMethod = "npm";

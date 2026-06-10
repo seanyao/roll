@@ -283,10 +283,9 @@ export function setupCommand(args: string[]): number {
   for (const a of args) {
     if (a === "--force" || a === "-f") force = true;
     else {
-      // Oracle quirk: cmd_setup calls `msg setup.unknown_argument_1` with NO
-      // positional arg, so the template's %s renders empty — the offending arg
-      // is dropped. Reproduce byte-for-byte (do not pass `a`).
-      err(m("setup.unknown_argument_1"));
+      // FIX-238 AC2: name the offending argument (the v2 oracle quirk that
+      // dropped it is retired — an empty-name error was useless).
+      err(`${m("setup.unknown_argument_1")}${a}`);
       // bash exits 1; mirror via a real return so the caller propagates it.
       return 1;
     }

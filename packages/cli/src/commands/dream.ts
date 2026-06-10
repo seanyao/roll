@@ -132,7 +132,12 @@ export function renderMainHelp(version: string = legacyHelpVersion()): string {
 
 export function dreamCommand(args: string[], runOnce: DreamRunOnce = dreamRunOnceCommand): number | Promise<number> {
   if (args[0] === "run-once") return runOnce(args.slice(1));
-  process.stderr.write("[roll] Unknown command: dream\n");
-  process.stdout.write(renderMainHelp());
+  // FIX-239: bare `dream` gets real usage; an unknown subcommand is named —
+  // the old "Unknown command: dream" blamed the command itself.
+  if (args[0] === undefined || args[0] === "") {
+    process.stderr.write("Usage: roll dream run-once\n");
+    return 1;
+  }
+  process.stderr.write(`[roll] unknown dream subcommand: ${args[0]}\nUsage: roll dream run-once\n`);
   return 1;
 }

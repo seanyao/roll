@@ -1129,7 +1129,8 @@ export function initCommand(args: string[]): number {
     return initApply(projectDir);
   }
   if (args[0] !== undefined && args[0].startsWith("-")) {
-    err(m("init.unknown_flag_1"));
+    // FIX-238 AC2: name the offending flag (the empty-name message was useless).
+    err(`${m("init.unknown_flag_1")}${args[0]}`);
     return 1;
   }
 

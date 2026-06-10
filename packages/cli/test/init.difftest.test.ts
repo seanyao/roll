@@ -389,7 +389,7 @@ describe("frozen: roll init", () => {
     expect(norm(tsInit(fx, ["--bogus"]), fx)).toMatchInlineSnapshot(`
       {
         "status": 1,
-        "stderr": "[roll] Unknown flag: 
+        "stderr": "[roll] Unknown flag: --bogus
       ",
         "stdout": "",
       }

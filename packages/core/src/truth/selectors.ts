@@ -148,6 +148,7 @@ const ROW_TO_TERMINAL: Record<string, TerminalOutcome | "idle"> = {
   failed: "failed",
   blocked: "blocked",
   aborted: "aborted_no_delivery",
+  interrupted: "aborted_no_delivery",
   orphan: "aborted_with_delivery",
 };
 

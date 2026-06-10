@@ -475,6 +475,9 @@ export function cycleRow(cy: CycleView): string[] {
     fail: ["red", "✗"],
     running: ["purple", "⏵"],
     idle: ["muted", "·"],
+    // US-TRUTH-004 AC4: an unknown verdict must read as unknown — never as a
+    // neutral dot the eye parses as success.
+    unknown: ["amber", "?"],
   };
   let [glyphC, glyph] = glyphMap[outcome] ?? ["muted", "·"];
   if ((outcome === "done" || outcome === "ok") && prOutcome === "closed") {

@@ -29,10 +29,8 @@ import { cardArchiveDir, readIndex, reportFileName } from "../lib/archive.js";
 /** Max GitHub probes per lane — the fan-out must never stall the audit. */
 export const PROBE_CAP = 20;
 
-/** US-TRUTH-001 schema epoch — the moment PR #586 shipped the terminal-event
- *  schema (2026-06-10T18:00Z, rounded up). Cycles/rows before it are
- *  grandfathered; everything after owes the complete-or-reasoned twin. */
-export const TERMINAL_SCHEMA_EPOCH_SEC = Date.UTC(2026, 5, 10, 18) / 1000;
+export { TERMINAL_SCHEMA_EPOCH_SEC } from "@roll/spec";
+import { TERMINAL_SCHEMA_EPOCH_SEC } from "@roll/spec";
 
 /** Counting window for the failure-count cross-check (72h, the panel window). */
 const COUNT_WINDOW_SEC = 72 * 3600;

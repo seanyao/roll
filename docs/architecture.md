@@ -205,3 +205,13 @@ web          控制台（React，WebSocket 订阅 daemon）
 | I10 | 按可预测规则路由（任务层级/类型）。spawn 前秒级探活。同输入路由恒定。 |
 | I11 | 每 Cycle 记录 `(agent, model, token, cost, 回退次数, 有效成本)`。逼近预算上限 → 降级或暂停并通知。有效成本含回退。 |
 | I12 | 一 Cycle 一个 Story，全新上下文，TCR 每步 green-or-revert。0 个 TCR 提交 → 判定失败并告警。 |
+
+## 事实来源(US-TRUTH 系列)
+
+读侧三件套(dashboard / dossier / status)不再各自解析 backlog/events/runs:
+
+- **权威矩阵** `packages/spec/src/types/truth.ts`(`TRUTH_ANCHORS`):每个持久事实字段声明唯一权威源、唯一写者、派生视图、冲突仲裁与 unknown 判据。跨仓仲裁:`github_pr_merge > product_main > roll_meta`。
+- **终态事件** `cycle:terminal`(schema v1,`TERMINAL_SCHEMA_EPOCH_SEC` 起强制):每字段要么有完整值,要么带枚举化缺失原因——静默 0/"—" 在结构上不可能。
+- **选择器** `packages/core/src/truth/selectors.ts`:`deriveStoryTruth / deriveCycleTruth / deriveEvidenceTruth`,纯函数、闭合 reason code;输出 truth/warn/fail/unknown/grandfathered。
+- **唯一读侧适配器** `packages/cli/src/lib/truth-adapter.ts`:dashboard 的周期分类、dossier 的 delivered 判定全部经它走选择器;**新增消费者必须走这里,再写一个本地解析就是本 epic 关掉的回归**。unknown 一律渲染为 `?`,绝不静默显示成功。
+- **影子审计** `roll consistency audit`:只读漂移扫描,报告落 `.roll/reports/consistency/`,exit 0。

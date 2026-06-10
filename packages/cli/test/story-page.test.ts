@@ -79,4 +79,14 @@ describe("renderStoryPage + markPhaseDone round-trip", () => {
     expect(markPhaseDone(page, "nope", "x")).toBe(page);
     expect(markPhaseDone("<html></html>", "delivery", "x")).toBe("<html></html>");
   });
+
+  it("US-DOSSIER-007: markPhaseDone is idempotent — re-mounting replaces an already-done section's body", () => {
+    const once = markPhaseDone(page, "delivery", "<p>first</p>");
+    const twice = markPhaseDone(once, "delivery", "<p>second</p>");
+    expect(twice).toContain('<section class="phase phase-done" data-phase="delivery"><h2>');
+    expect(twice).toContain("<p>second</p>");
+    expect(twice).not.toContain("<p>first</p>");
+    // still exactly one delivery section (no duplication on re-mount).
+    expect(twice.match(/data-phase="delivery"/g)!.length).toBe(1);
+  });
 });

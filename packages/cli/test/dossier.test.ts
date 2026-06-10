@@ -12,6 +12,7 @@ import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
 import { renderFeaturesIndex, spineMotif } from "../src/lib/dossier-index.js";
 import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
 import { collectStoryDossierInput, renderStoryDossier, storySpine } from "../src/lib/story-dossier.js";
+import { markPhaseDone } from "../src/lib/story-page.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -303,6 +304,19 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     // (the CSS rule string is inlined on every page, so assert on the markup).
     expect(full).not.toContain('class="spine legacy"');
     expect(full).not.toContain('class="legacy-banner"');
+  });
+
+  it("US-DOSSIER-007: a fully-rendered dossier page carries data-phase anchors that markPhaseDone can mount onto (no longer a silent no-op)", () => {
+    // The renderer now shares the anchor contract — every lifecycle station is keyed.
+    for (const key of ["definition", "design", "execution", "delivery", "retrospective"]) {
+      expect(full).toContain(`data-phase="${key}"`);
+    }
+    // markPhaseDone finds the delivery section on the full page (previously the
+    // dossier emitted no data-phase, so this mount was a silent no-op).
+    const mounted = markPhaseDone(full, "delivery", "<p>mounted PR #999</p>");
+    expect(mounted).toContain("<p>mounted PR #999</p>");
+    expect(mounted).toContain('class="phase phase-done" data-phase="delivery"');
+    expect(mounted.match(/data-phase="delivery"/g)!.length).toBe(1);
   });
 
   it("US-EVID-013: retrospective renders structured self-score summary, note link, dimensions, and trend", () => {

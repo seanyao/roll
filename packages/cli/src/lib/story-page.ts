@@ -62,13 +62,24 @@ export function renderSpecMd(meta: StoryCardMeta): string {
   );
 }
 
+/**
+ * The shared phase-section opening tag — the single anchor contract used by BOTH
+ * the skeleton generator (renderStoryPage) and the full dossier renderer
+ * (story-dossier.ts), so a section is always addressable by its `data-phase` key
+ * regardless of which path wrote the page (US-DOSSIER-007). `markPhaseDone` keys
+ * off this exact shape; keep the three in lockstep.
+ */
+export function phaseSectionTag(phaseKey: string, done: boolean): string {
+  return `<section class="phase phase-${done ? "done" : "pending"}" data-phase="${phaseKey}">`;
+}
+
 /** Render the `index.html` skeleton for a story card (all phases pending). */
 export function renderStoryPage(meta: StoryCardMeta): string {
   const q = (s: string): string => s.replace(/"/g, "&quot;");
   const badge = storyFamilyOf(meta.id) ?? meta.id.split("-")[0];
   const sections = STORY_PHASES.map(
     (p) =>
-      `<section class="phase phase-pending" data-phase="${p.key}"><h2>${bi(p.en, p.zh)}</h2><p class="empty">${bi(p.emptyEn, p.emptyZh)}</p></section>`,
+      `${phaseSectionTag(p.key, false)}<h2>${bi(p.en, p.zh)}</h2><p class="empty">${bi(p.emptyEn, p.emptyZh)}</p></section>`,
   ).join("\n");
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
@@ -96,8 +107,11 @@ export function renderStoryPage(meta: StoryCardMeta): string {
 export function markPhaseDone(html: string, phaseKey: string, innerHtml: string): string {
   const p = STORY_PHASES.find((x) => x.key === phaseKey);
   if (p === undefined) return html;
+  // Match the section in EITHER state so re-mounting an already-done section is
+  // idempotent (US-DOSSIER-007) — the mount is the live update primitive, not a
+  // one-shot pending→done flip.
   return html.replace(
-    new RegExp(`<section class="phase phase-pending" data-phase="${p.key}">[\\s\\S]*?</section>`),
-    `<section class="phase phase-done" data-phase="${p.key}"><h2>${bi(p.en, p.zh)}</h2>${innerHtml}</section>`,
+    new RegExp(`<section class="phase phase-(?:pending|done)" data-phase="${p.key}">[\\s\\S]*?</section>`),
+    `${phaseSectionTag(p.key, true)}<h2>${bi(p.en, p.zh)}</h2>${innerHtml}</section>`,
   );
 }

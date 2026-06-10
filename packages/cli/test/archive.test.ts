@@ -16,6 +16,7 @@ import {
   epicForStory,
   generateIndex,
   liveEpicOf,
+  mountExecutionAtPublish,
   readIndex,
   reportFileName,
   serializeIndex,
@@ -132,6 +133,57 @@ describe("roll index command", () => {
     }
     expect(existsSync(join(proj, ".roll", "index.json"))).toBe(true);
     expect(readIndex(proj)).toEqual({ "US-A-1": "alpha" });
+  });
+
+  it("US-DOSSIER-007: default index preserves an existing story page (mount board); --rebuild re-renders it", () => {
+    const proj = project(
+      ["| US-A-1 | x | ✅ Done |"],
+      [["alpha/US-A-1/spec.md", "---\nid: US-A-1\ntitle: A\n---\n# US-A-1\n"]],
+    );
+    const storyIdx = join(proj, ".roll", "features", "alpha", "US-A-1", "index.html");
+    // a live page carrying content the source can't reconstruct (squash-removed PR).
+    writeFileSync(storyIdx, "<html>MOUNTED-PR-999</html>");
+    const save = process.cwd();
+    process.chdir(proj);
+    const o = process.stdout.write.bind(process.stdout);
+    // @ts-expect-error capture-only
+    process.stdout.write = (): boolean => true;
+    try {
+      // default: never clobber an existing story page.
+      expect(indexCommand([])).toBe(0);
+      expect(readFileSync(storyIdx, "utf8")).toContain("MOUNTED-PR-999");
+      // --rebuild: explicit reconciliation re-renders from source.
+      expect(indexCommand(["--rebuild"])).toBe(0);
+      const after = readFileSync(storyIdx, "utf8");
+      expect(after).not.toContain("MOUNTED-PR-999");
+      expect(after).toContain("Story Dossier");
+    } finally {
+      process.stdout.write = o;
+      process.chdir(save);
+    }
+  });
+});
+
+describe("mountExecutionAtPublish — US-DOSSIER-007 AC2", () => {
+  it("mounts PR# onto the execution section of an existing story page; no-op when the anchor is absent", () => {
+    const proj = project(["| US-A-1 | x | ✅ Done |"], [["alpha/US-A-1.md", "# US-A-1\n"]]);
+    const dir = join(proj, ".roll", "features", "alpha", "US-A-1");
+    mkdirSync(dir, { recursive: true });
+    const idx = join(dir, "index.html");
+    writeFileSync(
+      idx,
+      '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p class="empty">e</p></section></html>',
+    );
+    expect(mountExecutionAtPublish(proj, "US-A-1", "https://github.com/o/r/pull/777")).toBe(true);
+    const out = readFileSync(idx, "utf8");
+    expect(out).toContain('class="phase phase-done" data-phase="execution"');
+    expect(out).toContain("PR #777");
+    expect(out).toContain('href="https://github.com/o/r/pull/777"');
+    // no execution anchor on the page → best-effort no-op, returns false.
+    writeFileSync(idx, "<html>no anchor here</html>");
+    expect(mountExecutionAtPublish(proj, "US-A-1", "https://github.com/o/r/pull/777")).toBe(false);
+    // missing page → false, never throws.
+    expect(mountExecutionAtPublish(proj, "US-NOPE-9", "https://github.com/o/r/pull/1")).toBe(false);
   });
 });
 

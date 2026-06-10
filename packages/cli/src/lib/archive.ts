@@ -13,6 +13,7 @@
  * the single home for a story's run artifacts.
  */
 import { parseBacklog } from "@roll/core";
+import { markPhaseDone } from "./story-page.js";
 import { classifyStatus, type StoryStatus } from "@roll/spec";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -161,6 +162,30 @@ export function epicForStory(projectPath: string, storyId: string): string | nul
 export function cardArchiveDir(projectPath: string, storyId: string): string {
   const epic = epicForStory(projectPath, storyId) ?? UNCATEGORIZED;
   return join(projectPath, ".roll", "features", epic, storyId);
+}
+
+/**
+ * US-DOSSIER-007 AC2: at PR-open, mount the EXECUTION section onto the story's
+ * dossier page with the fact known *right now* — the PR number/link — rather
+ * than leaving it for a later full re-render to reconstruct from squash-flattened
+ * history (which loses it). Best-effort: returns false (never throws) when the
+ * page or its execution anchor is absent. Idempotent via `markPhaseDone`.
+ */
+export function mountExecutionAtPublish(projectPath: string, storyId: string, prUrl: string): boolean {
+  try {
+    const idxPath = join(cardArchiveDir(projectPath, storyId), "index.html");
+    if (!existsSync(idxPath)) return false;
+    const html = readFileSync(idxPath, "utf8");
+    const num = /\/pull\/(\d+)/.exec(prUrl)?.[1];
+    const label = num !== undefined ? `PR #${num}` : "PR";
+    const safe = prUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    const mounted = markPhaseDone(html, "execution", `<p><a href="${safe}">${label}</a></p>`);
+    if (mounted === html) return false; // no execution anchor matched
+    writeFileSync(idxPath, mounted, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // US-META-002c: the legacy `.roll/verification/<ID>` read-compat

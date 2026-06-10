@@ -157,7 +157,7 @@ everything.
 To pin a specific version (recommended for production):
 
 ```bash
-curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v2.601.1 bash
+curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v3.610.1 bash
 ```
 
 ---

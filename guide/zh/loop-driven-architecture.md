@@ -84,7 +84,7 @@ Loop 之间从不直接调用对方。完全通过 artifact 协调。
 
 ```
 规划器拆解：
-  → Agent 1：修改 bin/roll dispatch
+  → Agent 1：修改 CLI dispatch
   → Agent 2：更新英文文档
   → Agent 3：更新中文文档    ← 依赖 Agent 2
   → Agent 4：写测试

@@ -397,7 +397,7 @@ A deck about your project should *cite your project*. The convention:
 - **Threshold**: across the whole deck, citations must be at least
   `ceil(total_slides / 3)` — i.e. **one evidence citation per three
   slides** on average. For an 18-slide deck that's ≥ 6 citations.
-- **Format**: `<path>:<line>` (e.g. `bin/roll:3127`). Paths are
+- **Format**: `<path>:<line>` (e.g. `packages/cli/src/runner/executor.ts:719`). Paths are
   relative to the repo root.
 - **Coverage**: try to spread citations rather than dump them all on
   one slide. A clump means the rest is ungrounded.
@@ -603,7 +603,7 @@ Fix:
 - **Add evidence first, then write the body.** If you're forced to
   cite a real file and line, the slide body tends to follow.
 - **Regenerate with a sharper topic.** `roll slides new "How TCR
-  keeps Roll's bin/roll honest"` will outperform `roll slides new
+  keeps Roll's loop honest"` will outperform `roll slides new
   "Roll"`.
 
 ### Validation fails: `total_slides mismatch`

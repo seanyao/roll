@@ -341,7 +341,7 @@ The panel reports the totals you'd otherwise have to hand-add across multiple
             20260519-091112-44  ✓  $1.11
 ```
 
-**How history is preserved:** `bin/roll` rotates `events-<slug>.ndjson` at 10 MB,
+**How history is preserved:** the loop runner rotates `events-<slug>.ndjson` at 10 MB,
 keeping `.1` … `.4` archives. `roll loop status` and `roll loop story` both read
 the head plus all rotated files, so cycles never disappear once they're on disk.
 

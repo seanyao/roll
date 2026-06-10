@@ -1,6 +1,6 @@
 # 测试质量评分卷（中文）
 
-> 适用范围：`tests/` 下的 bats 测试。`roll-.dream` Scan 7 据此扫描代码并输出结构化 REFACTOR 条目。
+> 适用范围：`packages/*/test/` 下的 Vitest 测试。`roll-.dream` Scan 7 据此扫描代码并输出结构化 REFACTOR 条目。
 > 英文版本：[quality-rubric.md](./quality-rubric.md)
 
 本评分卷把六类常见反模式公开化：要么让测试在无关改动上误报红，要么让真正的回归绿着过线。
@@ -168,8 +168,8 @@ teardown() { rm -rf "$TMP"; }
 
 ### 真实代码反例
 
-`source bin/roll; _loop_check_depends_on US-X` 这种写法的测试，把函数名锁死了。正确
-做法是跑 `roll loop now` 然后从 run log 里观察 skip 决策 —— 测用户在乎的行为。
+从后门 import 一个未导出的私有函数（如 `_loopCheckDependsOn`）来测，把函数名锁死了。正确
+做法是跑命令、然后从 run log 里观察 skip 决策 —— 测用户在乎的行为。
 
 ---
 
@@ -177,24 +177,24 @@ teardown() { rm -rf "$TMP"; }
 
 ### 定义
 
-测试在测 bats 本身（或 pytest / jest 自身），不是项目代码：断言 `setup()` 会在测试
-之前跑、`run` 会捕获 stderr、`@test` 块存在……框架是对的，所以测试是绿的，但对项目
+测试在测 Vitest 本身（或任何框架），不是项目代码：断言 `beforeEach` 会在测试
+之前跑、mock 记录了调用、`expect` 存在……框架是对的，所以测试是绿的，但对项目
 没传递任何信息。
 
 ### 判定信号
 
-- 断言 bats 内部变量：`$BATS_TEST_NUMBER` / `$BATS_SUITE_NAME`。
+- 断言框架内部 / 测试运行器自身的行为。
 - 测试体里全是 setup/teardown 自检，没有任何对项目代码的调用。
-- 框架升级之后新增的"确认 bats 还能跑"的测试。
+- 框架升级之后新增的"确认 Vitest 还能跑"的测试。
 
 ### 最小修复模板
 
-删掉。框架验证应该在上游做。如果项目真的依赖某个框架契约，把它写进 `tests/helpers/`
-的文档里 + 一条 smoke 测试，而不是一整类断言。
+删掉。框架验证应该在上游做。如果项目真的依赖某个框架契约，把它写进一个共享
+测试 helper 模块的文档里 + 一条 smoke 测试，而不是一整类断言。
 
 ### 真实代码反例
 
-断言 `$BATS_TEST_NUMBER > 0` 的测试，每次 CI 都跑、从来没拦下过一次项目回归。如果
+断言测试运行器内部计数的测试，每次 CI 都跑、从来没拦下过一次项目回归。如果
 真要保留这种保障，放进 CI 配置里跑一次就够，不必落到测试套里。
 
 ---
@@ -215,16 +215,16 @@ teardown() { rm -rf "$TMP"; }
 
 ### 最小修复模板
 
-```bash
-# 改之前 —— 内联管道复刻了项目函数已经做的事
-label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+```ts
+// 改之前 —— 内联正则复刻了项目函数已经做的事
+const label = /<key>Label<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)?.[1];
 
-# 改之后 —— 调项目里处理这件事的函数
-source bin/roll
-label=$(_plist_get_string "$plist" Label)
+// 改之后 —— 调项目里处理这件事的函数
+import { plistString } from "../src/lib/plist.js";
+const label = plistString(plist, "Label");
 ```
 
-如果项目里还没有对应函数，把管道抽成一个有名字的 helper 放进 `tests/helpers/`，
+如果项目里还没有对应函数，把解析抽成一个有名字的 helper 模块，
 让逻辑共享、可被发现。
 
 ### 真实代码反例

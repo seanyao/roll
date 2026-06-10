@@ -16,6 +16,7 @@ import {
   epicForStory,
   generateIndex,
   liveEpicOf,
+  mountExecutionAtPublish,
   readIndex,
   reportFileName,
   serializeIndex,
@@ -160,6 +161,29 @@ describe("roll index command", () => {
       process.stdout.write = o;
       process.chdir(save);
     }
+  });
+});
+
+describe("mountExecutionAtPublish — US-DOSSIER-007 AC2", () => {
+  it("mounts PR# onto the execution section of an existing story page; no-op when the anchor is absent", () => {
+    const proj = project(["| US-A-1 | x | ✅ Done |"], [["alpha/US-A-1.md", "# US-A-1\n"]]);
+    const dir = join(proj, ".roll", "features", "alpha", "US-A-1");
+    mkdirSync(dir, { recursive: true });
+    const idx = join(dir, "index.html");
+    writeFileSync(
+      idx,
+      '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p class="empty">e</p></section></html>',
+    );
+    expect(mountExecutionAtPublish(proj, "US-A-1", "https://github.com/o/r/pull/777")).toBe(true);
+    const out = readFileSync(idx, "utf8");
+    expect(out).toContain('class="phase phase-done" data-phase="execution"');
+    expect(out).toContain("PR #777");
+    expect(out).toContain('href="https://github.com/o/r/pull/777"');
+    // no execution anchor on the page → best-effort no-op, returns false.
+    writeFileSync(idx, "<html>no anchor here</html>");
+    expect(mountExecutionAtPublish(proj, "US-A-1", "https://github.com/o/r/pull/777")).toBe(false);
+    // missing page → false, never throws.
+    expect(mountExecutionAtPublish(proj, "US-NOPE-9", "https://github.com/o/r/pull/1")).toBe(false);
   });
 });
 

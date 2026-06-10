@@ -567,6 +567,30 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
   });
 
+  it("US-DOSSIER-007 AC2: publish_pr mounts the execution section onto the story dossier at PR-open", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-exec-mount-")));
+    execDirs.push(repo);
+    const dir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "index.html"),
+      '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>',
+      "utf8",
+    );
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      github: {
+        ...fakePorts().ports.github,
+        runPublishPlan: async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/321", ok: true }),
+      },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+    const out = readFileSync(join(dir, "index.html"), "utf8");
+    expect(out).toContain("PR #321");
+    expect(out).toContain('class="phase phase-done" data-phase="execution"');
+  });
+
   it("publish_pr with no slug → gh-missing tier (status 2)", async () => {
     const { ports } = fakePorts({
       github: { ...fakePorts().ports.github, repoSlug: async () => undefined },

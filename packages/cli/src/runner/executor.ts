@@ -95,7 +95,7 @@ import { applyCorrectionAction } from "./correction-actuator.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
-import { cardArchiveDir } from "../lib/archive.js";
+import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -728,6 +728,12 @@ export async function executeCommand(
         ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge })
         : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge });
       const r = await ports.github.runPublishPlan(plan);
+      // US-DOSSIER-007 AC2: mount the execution section onto the story dossier at
+      // PR-open with the fact known now (the PR link), not reconstructed later
+      // from squash-flattened history. Best-effort; never blocks the cycle.
+      if (r.status === 0 && r.prUrl !== "" && !cmd.docOnly && ctx.storyId !== undefined) {
+        mountExecutionAtPublish(ports.repoCwd, ctx.storyId, r.prUrl);
+      }
       const pub: PublishResult = { status: r.status, manualMerge };
       return { event: { type: "published", result: pub } };
     }

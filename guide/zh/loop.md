@@ -415,6 +415,17 @@ roll loop unmute      # 🔔 重新开启弹窗
 `mute` 文件对所有项目、所有自主活动（loop + peer review）共享生效。
 一个开关控制全部。
 
+### 环境漂移与 session 生命周期
+
+tmux session 是长寿命的，但 cycle 的**网络环境永远跟随调用方**，不吃 session 的
+记忆：每次开 cycle 窗口时，代理族变量（`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/
+`NO_PROXY` 及小写）都从调用方重新注入。所以两次 cycle 之间本机代理开了又关，照常
+工作——不会再出现"session 在代理时代创建、代理关了之后每个 agent 都 ~45 秒超时
+`Connection error`"（FIX-230）。每个 cycle 还会把生效的代理变量记成一行 `env:`
+进 `.roll/loop/cron.log`，环境型故障从日志直读。其它变量仍来自 `roll loop on`
+时创建的 session；若你轮换了别的关键变量，`roll loop off && roll loop on`
+可重建一个干净 session。
+
 ### Edit 折叠
 
 当实时 tmux 流里出现 agent 连续 Edit 同一个文件时，Roll 不再把那条一模一样的

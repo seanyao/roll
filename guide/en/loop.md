@@ -465,6 +465,20 @@ roll loop unmute      # 🔔 re-enable popup
 The `mute` file is shared across all projects and all autonomous activity
 (loop + peer review). One switch controls everything.
 
+### Environment drift & session lifecycle
+
+The tmux session is long-lived, but a cycle's **network environment always
+follows the invoker**, not the session: the proxy family
+(`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` + lowercase) is re-injected
+from the caller every time a cycle window opens. So turning a local proxy on or
+off between cycles just works — a session created under a proxy that has since
+died can no longer starve every agent into `Connection error` (FIX-230). Each
+cycle also logs its effective proxy env as an `env:` line in
+`.roll/loop/cron.log`, so an environment-shaped failure is readable straight
+from the log. Other variables still come from the session created at `roll loop
+on` time; if you rotate something exotic, `roll loop off && roll loop on`
+rebuilds the session fresh.
+
 ### Edit fold
 
 When the live tmux stream shows the agent editing the same file several times

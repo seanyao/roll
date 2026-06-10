@@ -47,6 +47,28 @@ describe("toCycleCost", () => {
     expect(c.effectiveCost).toBe(0.2);
   });
 
+  // FIX-249: cache token split must survive into the CycleCost record — the
+  // runs row writes it; without it the dashboard can't show real usage and the
+  // budget ledger under-counts cache-heavy cycles.
+  it("FIX-249: cache read/write tokens ride into CycleCost", () => {
+    const withCache: AgentUsage = {
+      model: "deepseek-v4-pro",
+      input_tokens: 10,
+      output_tokens: 20,
+      cache_read_tokens: 3000,
+      cache_creation_tokens: 400,
+    };
+    const c = toCycleCost(withCache, { cycleId: "c", agent: "pi", revertCount: 0 });
+    expect(c.cacheRead).toBe(3000);
+    expect(c.cacheWrite).toBe(400);
+  });
+
+  it("FIX-249: no cache fields in usage → cache fields absent (not fake zeros)", () => {
+    const c = toCycleCost(usage, { cycleId: "c", agent: "openai", revertCount: 0 });
+    expect(c.cacheRead).toBeUndefined();
+    expect(c.cacheWrite).toBeUndefined();
+  });
+
   it("computes cost from tokens when adapter gave no cost_list_usd", () => {
     const noCost: AgentUsage = { model: "gpt-4o", input_tokens: 1_000_000, output_tokens: 0 };
     const c = toCycleCost(noCost, { cycleId: "c", agent: "openai", revertCount: 0 });

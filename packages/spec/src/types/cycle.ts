@@ -18,6 +18,9 @@ export interface CycleCost {
   model: string;
   tokensIn: number;
   tokensOut: number;
+  /** FIX-249: cache token split (pi/claude report it) — absent = adapter had none. */
+  cacheRead?: number;
+  cacheWrite?: number;
   /** USD estimate from real price table; missing prices stay explicit n/a upstream. */
   estimatedCost: number;
   /** TCR revert count this cycle. */

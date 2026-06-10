@@ -55,6 +55,7 @@ import {
   reconcileBranchName,
   resolveRoute,
   resolveFallback,
+  extractUsage,
   sumClaudeStream,
   toCycleCost,
   pairingHistory,
@@ -91,6 +92,8 @@ import {
 } from "./agent-spawn.js";
 import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
+import { recoverPiUsage } from "./usage-recovery.js";
+import { realBudgetCheck } from "./budget-check.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
@@ -488,18 +491,33 @@ export async function executeCommand(
       } catch {
         /* logging must never fail the cycle */
       }
-      // FIX-208: fold the agent's real usage into a per-cycle cost. claude runs
-      // with --output-format stream-json, so its stdout carries per-turn usage +
-      // a final total_cost_usd (cost/tracker.sumClaudeStream mirrors loop-fmt).
-      // Best-effort: a parse miss leaves cost absent (cycle:end keeps the zero
-      // placeholder) — usage accounting must never fail the cycle.
+      // FIX-208/FIX-249: fold the agent's real usage into a per-cycle cost,
+      // trying every adapter lane in order:
+      //   1. claude stream-json (per-turn usage + final total_cost_usd);
+      //   2. stdout-scrape footer agents (openai/gemini/kimi/qwen, REGISTRY);
+      //   3. pi session-store recovery (pi prints no usage; its session files
+      //      under ~/.pi/agent/sessions/<encoded-cwd>/ are authoritative,
+      //      scoped to this cycle's worktree + start time).
+      // Best-effort: a miss on every lane leaves cost absent (n/a, never a
+      // fake zero) — usage accounting must never fail the cycle.
       let costPatch: CycleCost | undefined;
       try {
-        const usage = sumClaudeStream(res.stdout.split("\n"));
+        const agentName = ctx.agent ?? cmd.agent;
+        const lines = res.stdout.split("\n");
+        let usage = sumClaudeStream(lines);
+        if (usage === null) usage = extractUsage(agentName, lines);
+        if (usage === null && agentName === "pi") {
+          const rootOverride = (process.env["ROLL_PI_SESSIONS_ROOT"] ?? "").trim();
+          usage = recoverPiUsage(
+            ports.paths.worktreePath,
+            ctx.startSec,
+            ...(rootOverride !== "" ? [rootOverride] : []),
+          );
+        }
         if (usage !== null) {
           costPatch = toCycleCost(usage, {
             cycleId: ctx.cycleId,
-            agent: ctx.agent ?? cmd.agent,
+            agent: agentName,
             // TCR reverts are not tracked at this layer yet; nominal == effective.
             revertCount: 0,
           });
@@ -937,8 +955,15 @@ export function buildRunRow(
   // truthful too, sourced from the SAME ctx.cost as cycle:end → consistent).
   if (ctx.cost !== undefined) {
     row["cost_usd"] = ctx.cost.estimatedCost;
+    // FIX-249: budget guardrails gate on EFFECTIVE cost (I11) — persist it so
+    // the ledger can be rebuilt from rows; plus model + the cache split for
+    // dashboard truth (tokens were "—", cost $0, guardrail blind).
+    row["cost_effective_usd"] = ctx.cost.effectiveCost;
+    row["model"] = ctx.cost.model;
     row["tokens_in"] = ctx.cost.tokensIn;
     row["tokens_out"] = ctx.cost.tokensOut;
+    if (ctx.cost.cacheRead !== undefined) row["tokens_cache_read"] = ctx.cost.cacheRead;
+    if (ctx.cost.cacheWrite !== undefined) row["tokens_cache_write"] = ctx.cost.cacheWrite;
   }
   return row;
 }
@@ -1182,7 +1207,9 @@ export function nodePorts(opts: {
           },
         }
       : { resolve: () => ({ agent: "claude", model: "" }) },
-    budget: opts.budget ?? { check: () => "ok" },
+    // FIX-249: the budget gate is LIVE — runs.jsonl cost rows + policy.yaml
+    // `loop_safety.budget` → budgetVerdict (I11). No budget block → "ok".
+    budget: opts.budget ?? { check: () => realBudgetCheck(opts.repoCwd, opts.paths.runsPath, clock() * 1000) },
     evidence: {
       openFrame(projectCwd, storyId, runId) {
         return openEvidenceFrame({ runDir: join(cardArchiveDir(projectCwd, storyId), runId) }).runDir;

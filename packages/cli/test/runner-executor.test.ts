@@ -222,6 +222,31 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(row["cost_usd"]).toBe(0.42);
     expect(row["tokens_in"]).toBe(150);
     expect(row["tokens_out"]).toBe(60);
+    // FIX-249: model + effective cost ride the row too (budget gates on effective).
+    expect(row["model"]).toBe("claude-opus-4-8");
+    expect(row["cost_effective_usd"]).toBe(0.42);
+  });
+
+  it("FIX-249: cache split rides the row when the adapter reported one", () => {
+    const withCache: CycleContext = {
+      ...CTX,
+      cost: {
+        cycleId: CTX.cycleId,
+        agent: "pi",
+        model: "deepseek-v4-pro",
+        tokensIn: 10,
+        tokensOut: 20,
+        cacheRead: 3000,
+        cacheWrite: 400,
+        estimatedCost: 0.01,
+        revertCount: 0,
+        effectiveCost: 0.01,
+      },
+    };
+    const row = buildRunRow({ kind: "append_run", status: "published", outcome: "delivered", cycleId: CTX.cycleId }, withCache);
+    expect(row["tokens_cache_read"]).toBe(3000);
+    expect(row["tokens_cache_write"]).toBe(400);
+    expect(row["model"]).toBe("deepseek-v4-pro");
   });
 
   it("FIX-208: absent ctx.cost omits cost fields; absent tcrCount defaults to 0", () => {
@@ -490,6 +515,50 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts(); // default stdout is "" → sumClaudeStream null
     const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
     expect(r.ctxPatch?.cost).toBeUndefined();
+  });
+
+  // FIX-249 — the two missing adapter lanes: stdout-scrape agents (openai/
+  // gemini/kimi/qwen print a usage footer) and pi (no stdout usage at all —
+  // recovered from its session store, scoped to the cycle worktree + window).
+  it("FIX-249: spawn_agent scrapes a stdout-footer agent (openai) → ctxPatch.cost", async () => {
+    const stdout = ["model: gpt-5.2", "input tokens: 1,200", "output tokens: 300", "total: 1,500", "cost: $0.07"].join("\n");
+    const { ports } = fakePorts({
+      agentSpawn: vi.fn(async () => ({ stdout, stderr: "", exitCode: 0, timedOut: false })),
+    });
+    const r = await executeCommand({ kind: "spawn_agent", agent: "openai", attempt: 1 }, ports, { ...CTX, agent: "openai" });
+    expect(r.ctxPatch?.cost?.tokensIn).toBe(1200);
+    expect(r.ctxPatch?.cost?.tokensOut).toBe(300);
+    expect(r.ctxPatch?.cost?.model).toBe("gpt-5.2");
+  });
+
+  it("FIX-249: spawn_agent recovers pi usage from the session store (cwd-scoped)", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-249-pi-")));
+    execDirs.push(root);
+    // pi encodes the cwd into the session dir name; the executor's worktree is /rt/wt.
+    const dir = join(root, "--rt-wt--");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "s.jsonl"),
+      JSON.stringify({
+        type: "message",
+        message: { role: "assistant", model: "deepseek-v4-pro", usage: { input: 42, output: 17, cacheRead: 500, cacheWrite: 20, cost: { total: 0.02 } } },
+      }) + "\n",
+    );
+    const prev = process.env["ROLL_PI_SESSIONS_ROOT"];
+    process.env["ROLL_PI_SESSIONS_ROOT"] = root;
+    try {
+      const { ports } = fakePorts({
+        agentSpawn: vi.fn(async () => ({ stdout: "plain text, no usage", stderr: "", exitCode: 0, timedOut: false })),
+      });
+      const r = await executeCommand({ kind: "spawn_agent", agent: "pi", attempt: 1 }, ports, { ...CTX, agent: "pi" });
+      expect(r.ctxPatch?.cost?.tokensIn).toBe(42);
+      expect(r.ctxPatch?.cost?.tokensOut).toBe(17);
+      expect(r.ctxPatch?.cost?.model).toBe("deepseek-v4-pro");
+      expect(r.ctxPatch?.cost?.cacheRead).toBe(500);
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_PI_SESSIONS_ROOT"];
+      else process.env["ROLL_PI_SESSIONS_ROOT"] = prev;
+    }
   });
 
   it("capture_facts reads commits ahead via git port", async () => {

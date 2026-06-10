@@ -1,0 +1,140 @@
+/**
+ * US-TRUTH-006 — the change-point guardrail: persistent fact FIELDS register
+ * their authority/source/cache semantics, and CI fails loud when a new field
+ * lands unregistered.
+ *
+ * Drift recurs because a feature "just adds" a runs column, an event field, or
+ * a dashboard counter without declaring whether it is authoritative fact or a
+ * derived view — the next consumer then guesses, and the guess diverges
+ * (the whole FIX-243/244/248/249 family). The rule:
+ *
+ *   any field that is PERSISTED and read by a second place must appear here,
+ *   bound to its US-TRUTH-000 anchor; a derived-cache field must say how it
+ *   rebuilds. Local variables and single-reader temp files don't register.
+ *
+ * The guard is mechanical: tests construct REAL rows/events via the production
+ * builders and assert every key is registered (or explicitly grandfathered).
+ * Adding a field without registering it turns CI red with a pointer here —
+ * never a silent skip (AC3). Registration is cheap and deliberate; that's the
+ * point.
+ */
+import { TRUTH_ANCHORS } from "./truth.js";
+
+/** Which persisted surface a field lives on. */
+export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver";
+
+export interface RegisteredField {
+  /** The literal key as persisted (e.g. "cost_usd"). */
+  field: string;
+  surface: TruthSurface;
+  /** The US-TRUTH-000 anchor that owns this field's semantics. */
+  anchor: string;
+  /** Who writes it (one writer per fact). */
+  writer: string;
+  /** Authoritative value vs a view derived from the anchor's source. */
+  kind: "authoritative" | "derived-cache";
+  /** Required for derived-cache: the rebuild command or source selector (AC4). */
+  rebuild?: string;
+}
+
+const RUNNER = "cycle runner append_run (buildRunRow)";
+const BACKFILL = "merge-evidence backfill (runs-backfill, FIX-243)";
+const REBUILD_BACKFILL = "roll loop run-once post-cycle backfill / backfillMergedRuns";
+
+/** The field registry. Surfaces covered: runs rows, the US-TRUTH-001 terminal
+ *  twin, and the US-TRUTH-005 release records. */
+export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
+  // ── runs.jsonl row (cycle_outcome anchor's primary view) ───────────────────
+  { field: "run_id", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "authoritative" },
+  { field: "cycle_id", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "authoritative" },
+  { field: "story_id", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "authoritative" },
+  { field: "status", surface: "runs", anchor: "cycle_outcome", writer: `${RUNNER}; corrected only by ${BACKFILL}`, kind: "authoritative" },
+  { field: "outcome", surface: "runs", anchor: "cycle_outcome", writer: `${RUNNER}; corrected only by ${BACKFILL}`, kind: "authoritative" },
+  { field: "agent", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "authoritative" },
+  { field: "built", surface: "runs", anchor: "story_delivery", writer: RUNNER, kind: "derived-cache", rebuild: "re-derive from story_id + delivery truth (deriveStoryTruth)" },
+  { field: "tcr_count", surface: "runs", anchor: "tcr_evidence", writer: RUNNER, kind: "derived-cache", rebuild: "recount tcr: commits on the cycle branch" },
+  { field: "ts", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "authoritative" },
+  { field: "duration_sec", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "derived-cache", rebuild: "ended_at - started_at from the cycle:terminal twin" },
+  { field: "model", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "re-extract from agent usage records (usage-recovery / stream parse)" },
+  { field: "tokens_in", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "re-extract from agent usage records" },
+  { field: "tokens_out", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "re-extract from agent usage records" },
+  { field: "tokens_cache_read", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "re-extract from agent usage records" },
+  { field: "tokens_cache_write", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "re-extract from agent usage records" },
+  { field: "cost_usd", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "recompute from tokens via the price table (toCycleCost)" },
+  { field: "cost_effective_usd", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "estimated × (reverts + 1) — toCycleCost" },
+  { field: "merged_at", surface: "runs", anchor: "pr_merge", writer: BACKFILL, kind: "derived-cache", rebuild: REBUILD_BACKFILL },
+  { field: "merge_commit", surface: "runs", anchor: "pr_merge", writer: BACKFILL, kind: "derived-cache", rebuild: REBUILD_BACKFILL },
+
+  // ── cycle:terminal event (US-TRUTH-001) ────────────────────────────────────
+  { field: "type", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "schema", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "cycleId", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "storyId", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "agent", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "startedAt", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "endedAt", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "outcome", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "pr", surface: "event:cycle:terminal", anchor: "pr_merge", writer: "buildTerminalEvent", kind: "derived-cache", rebuild: "gh pr view on the cycle branch" },
+  { field: "branch", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  { field: "commit", surface: "event:cycle:terminal", anchor: "tcr_evidence", writer: "buildTerminalEvent", kind: "derived-cache", rebuild: "git rev-parse on the cycle branch" },
+  { field: "tcr", surface: "event:cycle:terminal", anchor: "tcr_evidence", writer: "buildTerminalEvent", kind: "derived-cache", rebuild: "recount tcr: commits on the cycle branch" },
+  { field: "attest", surface: "event:cycle:terminal", anchor: "attest_evidence", writer: "buildTerminalEvent", kind: "derived-cache", rebuild: "probe the card archive (report + ac-map existence)" },
+  { field: "usage", surface: "event:cycle:terminal", anchor: "usage_cost", writer: "buildTerminalEvent", kind: "derived-cache", rebuild: "re-extract from agent usage records" },
+  { field: "cost", surface: "event:cycle:terminal", anchor: "usage_cost", writer: "buildTerminalEvent", kind: "derived-cache", rebuild: "recompute from tokens via the price table" },
+  { field: "ts", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+
+  // ── release records (US-TRUTH-005) ────────────────────────────────────────
+  { field: "type", surface: "event:release:gate", anchor: "release_verdict", writer: "release ship recordGate", kind: "authoritative" },
+  { field: "tag", surface: "event:release:gate", anchor: "release_verdict", writer: "release ship recordGate", kind: "authoritative" },
+  { field: "verdict", surface: "event:release:gate", anchor: "release_verdict", writer: "release ship recordGate", kind: "authoritative" },
+  { field: "failCount", surface: "event:release:gate", anchor: "release_verdict", writer: "release ship recordGate", kind: "authoritative" },
+  { field: "waivedRules", surface: "event:release:gate", anchor: "release_waiver", writer: "release ship recordGate", kind: "derived-cache", rebuild: "re-join gate findings with live waivers (decideReleaseGate)" },
+  { field: "ts", surface: "event:release:gate", anchor: "release_verdict", writer: "release ship recordGate", kind: "authoritative" },
+  { field: "type", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
+  { field: "reason", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
+  { field: "scope", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
+  { field: "expiresSec", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
+  { field: "operator", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
+  { field: "ts", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
+];
+
+/** Pre-guardrail history, listed not judged (AC: grandfather with a clear list):
+ *  v2-era runs columns nothing new writes. */
+export const GRANDFATHERED_FIELDS: readonly string[] = ["project", "result_eval", "self_score", "merged"];
+
+/**
+ * The guard: which of `keys` on `surface` are neither registered nor
+ * grandfathered? Empty result = compliant. CI asserts emptiness with a
+ * pointer-to-registration error message (AC3).
+ */
+export function unregisteredFields(surface: TruthSurface, keys: readonly string[]): string[] {
+  const known = new Set(TRUTH_FIELD_REGISTRY.filter((f) => f.surface === surface).map((f) => f.field));
+  const old = new Set(GRANDFATHERED_FIELDS);
+  return keys.filter((k) => !known.has(k) && !old.has(k));
+}
+
+/** Registry hygiene used by the guard tests: every entry binds to a declared
+ *  anchor, and every derived-cache declares its rebuild (AC4). */
+export function registryProblems(): string[] {
+  const anchors = new Set(TRUTH_ANCHORS.map((a) => a.field));
+  const problems: string[] = [];
+  for (const f of TRUTH_FIELD_REGISTRY) {
+    if (!anchors.has(f.anchor)) problems.push(`${f.surface}.${f.field}: unknown anchor "${f.anchor}"`);
+    if (f.kind === "derived-cache" && (f.rebuild === undefined || f.rebuild.trim() === "")) {
+      problems.push(`${f.surface}.${f.field}: derived-cache without a rebuild declaration`);
+    }
+  }
+  return problems;
+}
+
+/** The fail-loud message a red guard prints (AC3 — points at HOW to register). */
+export function registrationHint(surface: TruthSurface, fields: string[]): string {
+  return (
+    `unregistered persistent fact field(s) on ${surface}: ${fields.join(", ")}\n` +
+    `→ register each in packages/spec/src/types/truth-registry.ts (TRUTH_FIELD_REGISTRY):\n` +
+    `   bind it to a US-TRUTH-000 anchor, name its one writer, and declare\n` +
+    `   kind authoritative | derived-cache (derived caches must state a rebuild).\n` +
+    `   Local variables / single-reader temp files do NOT register — only\n` +
+    `   persisted fields a second place reads.`
+  );
+}

@@ -215,3 +215,5 @@ web          控制台（React，WebSocket 订阅 daemon）
 - **选择器** `packages/core/src/truth/selectors.ts`:`deriveStoryTruth / deriveCycleTruth / deriveEvidenceTruth`,纯函数、闭合 reason code;输出 truth/warn/fail/unknown/grandfathered。
 - **唯一读侧适配器** `packages/cli/src/lib/truth-adapter.ts`:dashboard 的周期分类、dossier 的 delivered 判定全部经它走选择器;**新增消费者必须走这里,再写一个本地解析就是本 epic 关掉的回归**。unknown 一律渲染为 `?`,绝不静默显示成功。
 - **影子审计** `roll consistency audit`:只读漂移扫描,报告落 `.roll/reports/consistency/`,exit 0。
+- **发版闸** `roll release ship`:审计 fail 级漂移拦截发版;owner 经 `roll release waiver --reason --scope --days` 显式豁免——豁免与闸判定都是事实流事件,审计可见,无影子绕行。
+- **变更点护栏** `packages/spec/src/types/truth-registry.ts`(`TRUTH_FIELD_REGISTRY`):落盘且被第二处读取的字段必须登记(绑锚点、记写者、derived-cache 必声明 rebuild);未登记字段 CI 红并指路登记——历史 v2 字段 grandfather 列单。局部变量不登记。

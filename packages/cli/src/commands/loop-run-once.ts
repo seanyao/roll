@@ -13,6 +13,7 @@
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
 import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, parsePolicy, readSlotFromText, type AgentSlot, type RouteDeps } from "@roll/core";
+import { absent, buildTerminalEvent, deriveOrphanVerdict, present } from "@roll/spec";
 import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -24,7 +25,7 @@ import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { writeLatestMorningReport } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { gcCommand } from "./gc.js";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 
 /** US-PORT-011: after a delivered cycle, surface the acceptance report —
@@ -122,6 +123,44 @@ export function cycleSignalTeardown(
           { kind: "append_run", status: "aborted", outcome: mapV2Status("aborted"), cycleId },
           { cycleId, branch, loop: "ci" as never },
         ),
+      );
+    } catch {
+      /* best-effort */
+    }
+    // US-TRUTH-001 AC4: the killed cycle still writes a DERIVABLE terminal
+    // verdict — probe the branch for commits (best-effort; null = unknown)
+    // instead of leaving a hole the dashboard guesses around.
+    try {
+      let commitsAhead: number | null = null;
+      try {
+        const raw = execFileSync("git", ["rev-list", "--count", `origin/main..${branch}`], {
+          encoding: "utf8",
+          timeout: 3000,
+        }).trim();
+        commitsAhead = Number.parseInt(raw, 10);
+        if (!Number.isFinite(commitsAhead)) commitsAhead = null;
+      } catch {
+        commitsAhead = null;
+      }
+      const verdict =
+        deriveOrphanVerdict({ pidAlive: false, commitsAhead, ageSec: 0, timeoutSec: 0 }) ?? "unknown";
+      bus.appendEvent(
+        paths.eventsPath,
+        buildTerminalEvent({
+          cycleId,
+          storyId: "",
+          agent: "",
+          startedAt: now(),
+          endedAt: now(),
+          outcome: verdict,
+          pr: absent("killed_before_publish"),
+          branch: present(branch),
+          commit: absent("killed_before_capture"),
+          tcr: commitsAhead !== null ? present(commitsAhead) : absent("probe_failed"),
+          attest: absent("killed_before_capture"),
+          usage: absent("killed_before_capture"),
+          cost: absent("killed_before_capture"),
+        }),
       );
     } catch {
       /* best-effort */

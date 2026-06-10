@@ -760,6 +760,76 @@ describe("executeCommand — command → executor mapping", () => {
     expect(ports.github.prState).not.toHaveBeenCalled();
   });
 
+  // US-TRUTH-001 — append_run writes the versioned complete-or-reasoned
+  // terminal twin alongside the runs row, from the SAME ctx facts.
+  it("US-TRUTH-001: append_run appends a cycle:terminal event with present-or-reasoned facts", async () => {
+    const { ports, calls } = fakePorts();
+    await executeCommand(
+      { kind: "append_run", status: "published", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      {
+        ...CTX,
+        startSec: 100,
+        tcrCount: 3,
+        prUrl: "https://github.com/o/r/pull/7",
+        cost: {
+          cycleId: CTX.cycleId,
+          agent: "pi",
+          model: "deepseek-v4-pro",
+          tokensIn: 10,
+          tokensOut: 5,
+          cacheRead: 100,
+          estimatedCost: 0.02,
+          revertCount: 0,
+          effectiveCost: 0.02,
+        },
+      },
+    );
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    const t = events.find((e) => e.type === "cycle:terminal");
+    expect(t).toBeDefined();
+    expect(t).toMatchObject({
+      schema: 1,
+      outcome: "published_pending_merge",
+      pr: { present: true, value: { url: "https://github.com/o/r/pull/7", state: "OPEN" } },
+      tcr: { present: true, value: 3 },
+      usage: { present: true, value: { model: "deepseek-v4-pro", tokensIn: 10, tokensOut: 5, cacheRead: 100 } },
+      cost: { present: true, value: { estimatedUsd: 0.02, effectiveUsd: 0.02 } },
+    });
+  });
+
+  it("US-TRUTH-001: missing usage/attest become enumerated absent reasons, never zeros", async () => {
+    const { ports, calls } = fakePorts();
+    await executeCommand(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, startSec: 100 },
+    );
+    const t = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as RollEvent)
+      .find((e) => e.type === "cycle:terminal");
+    expect(t).toMatchObject({
+      outcome: "failed",
+      pr: { present: false, reason: "no_publish_attempted" },
+      usage: { present: false, reason: "no_parseable_usage" },
+      cost: { present: false, reason: "no_parseable_usage" },
+      attest: { present: false, reason: "acmap_missing" },
+      tcr: { present: false, reason: "not_recorded" },
+    });
+  });
+
+  it("US-TRUTH-001: publish_pr success patches ctx.prUrl for the terminal record", async () => {
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      github: {
+        ...base.ports.github,
+        runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/42", ok: true })),
+      },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(r.ctxPatch).toMatchObject({ prUrl: "https://github.com/o/r/pull/42" });
+  });
+
   it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);

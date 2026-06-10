@@ -462,6 +462,9 @@ export interface CycleContext {
   cost?: CycleCost;
   /** US-EVID-001: per-cycle acceptance evidence frame opened before agent spawn. */
   evidenceRunDir?: string;
+  /** US-TRUTH-001: the cycle's published PR url, patched by the publish_pr
+   *  executor — feeds the terminal event's pr fact. Absent ⇒ no publish. */
+  prUrl?: string;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

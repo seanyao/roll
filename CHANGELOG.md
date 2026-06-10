@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.611.2 — 2026-06-11
+
+### 事实对齐(US-TRUTH 史诗全量交付)
+
+- 字段级事实权威矩阵:十类持久事实各自声明唯一权威源/唯一写者/冲突仲裁/unknown 判据,跨仓仲裁 github_pr_merge > product_main > roll_meta(US-TRUTH-000) `[truth]`
+- 周期终态事件 schema v1:每个事实字段要么有完整值要么带枚举化缺失原因,静默 0/"—" 在结构上不可能;被杀周期也能推导终态(US-TRUTH-001) `[truth]`
+- 影子一致性审计 `roll consistency audit`:七条漂移规则只读扫描,fail/warn/unknown/grandfathered 分级,报告落盘不报警不拦截(US-TRUTH-002) `[truth]`
+- 真相选择器:story/cycle/evidence 三类结论由纯函数统一推导,闭合 reason code,真实漂移案例冻结(US-TRUTH-003) `[truth]`
+- 读侧三件套(dashboard/dossier/status)统一走真相适配器,unknown 一律显示 ?,绝不静默装成功(US-TRUTH-004) `[truth]`
+- 发版闸接入审计:fail 级漂移拦截发版;owner 豁免必须记录原因/范围/期限/操作者并进事实流,过期失效(US-TRUTH-005) `[truth]`
+- 变更点护栏:落盘字段必须登记权威语义,未登记字段 CI 红灯并指路登记(US-TRUTH-006) `[truth]`
+
+### 稳定性
+
+- 死循环必须尖叫:连续异常 tick 触发 ALERT(带首末时间),恢复自动注记;gh_error 落底层错误首行(FIX-233) `[loop]`
+- 观察窗锚定本次 cycle:live.log 周期起始重置,不再回放上个周期的旧转录(FIX-237) `[loop]`
+- agent 自开 PR 被运行时收编登记并记违纪日志,绝不重复开 PR;skill 硬闸同步(FIX-245) `[loop]`
+- `loop off` 清扫全部 com.roll.* 僵尸 lane;`roll doctor` 列出全部 lane 及指向/加载态,陈旧标红(FIX-234) `[loop]`
+- 门禁判死 ≠ 产物丢弃:带提交的失败周期把分支推上远端可审计可营救;明确裁定不自动复用(FIX-247) `[loop]`
+
+### CLI 契约
+
+- 统一求助契约:--help 一律只读(update --help 曾真执行升级!)、stdout 用法、exit 0;未知子命令 stderr+非零;报错带上标志名(FIX-238/239) `[cli]`
+- loop 用法行只列现役子命令,monitor/attach 退役项移除(FIX-240) `[cli]`
+- `roll story new` 成为真正的单一建卡入口:卡夹+backlog 行+索引刷新一步完成,--no-index 支持批量(FIX-250) `[cli]`
+
+### 文档
+
+- 两份 README 命令表与现役注册表逐项对齐(中英一致),新增 README-vs-registry CI 防漂测试(FIX-241) `[docs]`
+- methodology/loop 指南子命令清单更新为现役全集,退役 branches 指到 git ls-remote(FIX-242) `[docs]`
+
+### 其他
+
+- 裁定删除 FIX-235(premature Done 已由审计+闸覆盖)与 FIX-236(TCR 闸一次性事件未复现);backlog 全量清零
+
 ## v3.611.1 — 2026-06-11
 
 ### 稳定性

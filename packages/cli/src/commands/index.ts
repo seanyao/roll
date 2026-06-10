@@ -78,14 +78,14 @@ let registered = false;
 export function registerAll(): void {
   if (registered) return;
   registered = true;
-  registerPorted("status", statusCommand);
+  registerPorted("status", statusCommand, { help: "Usage: roll status\n  Project health snapshot (backlog, loop, attest).\n项目健康速览。" });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // `skills`: generate/check/help/unknown all TS (full surface ported).
   registerPorted("skills", skillsCommand);
   // `alert`: list/ack/resolve/clear/log/unknown all TS (full surface ported).
-  registerPorted("alert", alertCommand);
+  registerPorted("alert", alertCommand, { help: "Usage: roll alert [run-once]\n  Alert lane: scan + notify once.\n告警通道:扫描并通知一次。" });
   // `doctor`: all four health sections ported TS (agent/pr/skills/launchd).
-  registerPorted("doctor", doctorCommand);
+  registerPorted("doctor", doctorCommand, { help: "Usage: roll doctor\n  Environment + install diagnosis.\n环境与安装体检。" });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand);
@@ -107,10 +107,10 @@ export function registerAll(): void {
   // `dream`: full surface TS (US-PORT-020). `run-once` is the v3-native scan
   // heart; every other arg mirrors v2's generic unknown-command surface without
   // shelling to bin/roll.
-  registerPorted("dream", dreamCommand);
+  registerPorted("dream", dreamCommand, { help: "Usage: roll dream run-once\n  Nightly self-scan (patterns, docs freshness, test quality) — run one pass now.\n夜间自检跑一遍。" });
   // `agent`: full surface TS (view/list/use/set/unknown). The write face owns
   // .roll/agents.yaml plus legacy .roll/local.yaml sync; no bash fallback.
-  registerPorted("agent", agentCommand);
+  registerPorted("agent", agentCommand, { help: "Usage: roll agent [set <slot> <agent>|use <name>|list]\n  View or change the agent slots.\n查看/切换 agent 槽位。" });
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
   // (v2 had no pairing).
@@ -127,14 +127,14 @@ export function registerAll(): void {
     if (sub === "unstick") return backlogUnstickCommand(args.slice(1));
     if (sub === "sync") return backlogSyncCommand(args.slice(1));
     return backlogCommand(args);
-  });
+  }, { help: "Usage: roll backlog\n  Render the backlog board.\n渲染任务板。" });
   // `brief`: v3-native live owner digest (US-PORT-002). Composes the three-block
   // one-screen digest from the backlog reader (+ active ALERT file) instead of
   // rendering a cached, agent-authored .roll/briefs/*.md — no agent is shelled,
   // so no reasoning can leak (the "agent 绝不漏思考过程" AC, strongest form).
   // Output follows the resolved locale single-language. `--full` expands lists.
   // No bash fallback: the digest is data-derived and always fresh.
-  registerPorted("brief", briefCommand);
+  registerPorted("brief", briefCommand, { help: "Usage: roll brief\n  Morning brief from the backlog + runs.\n晨报。" });
   // `idea`: v3-native deterministic backlog capture (US-PORT-003). Classifies
   // bug→FIX / idea→IDEA, auto-numbers (max suffix + 1), lint-gates the
   // description with the same rules as the bash _backlog_lint oracle, and
@@ -181,7 +181,7 @@ export function registerAll(): void {
   // `init`: full surface TS (fresh/re-init scaffold, legacy-codebase onboard
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
-  registerPorted("init", initCommand);
+  registerPorted("init", initCommand, { help: "Usage: roll init [apply]\n  Onboard this project (agent-driven; `apply` runs a written plan).\n项目接入。" });
   // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
   // stories, US-META-007) retired — that one-time backfill completed; new cards
   // are minted via `roll story new`.
@@ -194,7 +194,7 @@ export function registerAll(): void {
   registerPorted("offboard", offboardCommand);
   // `setup`: full surface TS (fresh / --force / already-synced re-run,
   // unknown-argument, and no-conventions-source guard). No sub-paths on bash.
-  registerPorted("setup", setupCommand);
+  registerPorted("setup", setupCommand, { help: "Usage: roll setup\n  Install roll conventions/templates for this machine.\n本机安装模板。" });
   // `ci`: the READ surface is TS (no-flag / `--timeout=N` status report:
   // gh-absent warn, not-a-git-repo err, gh-run-list failure, no-runs note, and
   // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate
@@ -218,12 +218,12 @@ export function registerAll(): void {
   // buildSelfTuningPlan, which emits suggest-only proposals with evidence +
   // rollback. NEVER writes policy/agents/rubric config; `tune reset` prints the
   // default rollback values without touching disk. No bash fallback (v2 had none).
-  registerPorted("tune", tuneCommand);
+  registerPorted("tune", tuneCommand, { help: "Usage: roll tune\n  Self-tuning report from self-score samples.\n自调参报告。" });
   // `update`: full surface TS (npm + curl upgrade paths, cache invalidation, the
   // post-update `roll setup` chain, changelog). The real install is driven via
   // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.
   // No sub-paths on bash.
-  registerPorted("update", updateCommand);
+  registerPorted("update", updateCommand, { help: "Usage: roll update\n  Upgrade the global roll to the latest release (network + global writes).\n升级全局 roll——有副作用,--help 永不触发。" });
   // `version` / `--version` / `-v`: TS-native (FIX-202). Reads the install
   // tree's package.json (single source of truth), so it no longer reports the
   // fossil bin/roll VERSION= literal. No bash fallback for these.
@@ -296,5 +296,5 @@ export function registerAll(): void {
     // Anything else is an unknown loop subcommand — print the v2 usage, exit 1
     // (no bash fallback remains; bin/roll is being retired in US-PORT-021).
     return loopUnknownSubcommand(args[0]);
-  });
+  }, { help: "Usage: roll loop <on|off|now|test|status|runs|log|story|events|eval|signals|fmt|pr-inbox|mute|unmute|pause|resume|reset|gc>\n  The autonomous delivery loop.\n自治交付循环。" });
 }

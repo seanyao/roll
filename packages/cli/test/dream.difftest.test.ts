@@ -38,84 +38,22 @@ describe("roll dream command wrapper", () => {
   it("freezes v2 unknown-command output for bare dream, without bash fallback", async () => {
     const r = await capture(() => dreamCommand([]));
     expect(r.code).toBe(1);
-    expect(r.stderr).toBe("[roll] Unknown command: dream\n");
+    expect(r.stderr).toBe("Usage: roll dream run-once\n");
     // US-PORT-021: the help version now comes from package.json (rollVersion),
     // not the frozen bin/roll VERSION= fossil — scrub it so the snapshot is
     // version-independent (it changes every release).
     const out = r.stdout.replace(/^(  roll · autonomous delivery for software teams).*$/m, "$1  [VERSION]");
-    expect(out).toMatchInlineSnapshot(`
-      "
-        roll · autonomous delivery for software teams  [VERSION]
-        自主交付，人只做三件事：提需求、审核、发版
-
-        usage  roll <command> [options]
-
-      ────────────────────────────────────────────────────────────────────────────────────────────────────
-
-        AUTONOMY  ·  日常使用                                                                ★ = most used
-
-        loop ★  <on|off|now|status|…>  manage the autonomous BACKLOG executor
-                管理自主执行循环
-        brief ★      show latest owner brief
-                 查看最新简报
-        backlog ★  [block|defer|…]  view and manage pending tasks
-                   查看和管理待处理任务
-        peer        cross-agent negotiation & review
-                跨 Agent 协商对审
-        alert        view and clear loop alerts
-                 查看 / 清除 loop 告警
-        feedback    --type bug|idea|ux …  open a GitHub issue for this project
-                    为本项目提交反馈
-
-      ────────────────────────────────────────────────────────────────────────────────────────────────────
-
-        PROJECT  ·  项目内                                                           per-repo setup and CI
-
-        init        create AGENTS.md + .roll/backlog.md + .roll/features/
-                初始化项目工作流文件
-        status        show current state and drift
-                  显示当前状态和漂移项
-        agent    [use <name>]  per-project agent selection
-                 切换项目 agent
-        ci    [--wait]  show or wait for current commit's CI status
-              查看 / 等待 CI 状态
-        release        run the release script (human-only)
-                   执行发版脚本（仅人工）
-        review-pr    <number>  AI-powered code review for a PR
-                     AI 代码评审
-        config    [<key> [<value>]]  read or write roll config keys
-                  读取或写入配置项
-
-      ────────────────────────────────────────────────────────────────────────────────────────────────────
-
-        MACHINE  ·  全局                                                         install, upgrade, version
-
-        setup    [-f]  first-time install or re-sync
-                 首次安装或重新同步
-        update        upgrade to latest + re-sync
-                  升级到最新版并重新同步
-
-      ────────────────────────────────────────────────────────────────────────────────────────────────────
-
-        examples
-
-        roll --version  显示已安装版本
-        roll loop on  启用自主执行循环
-        roll brief  查看最新简报
-        roll backlog defer US-DOC '过早引入'  推迟一类任务
-        roll agent use kimi  切换当前项目到 kimi
-        roll config lang zh  设置语言为中文 (REFACTOR-049: \`roll lang\` 已移入 config)
-
-        docs: github.com/seanyao/roll  ·  issues: github.com/seanyao/roll/issues
-        version: roll --version  ·  gc auto-runs per cycle (manual: roll loop gc)
-      "
-    `);
+    expect(out).toMatchInlineSnapshot(`""`);
   });
 
-  it.each([["--help"], ["anything"]])("keeps v2 command-level unknown behavior for dream %s", async (arg) => {
-    const bare = await capture(() => dreamCommand([]));
+  // FIX-239: an unknown subcommand is NAMED (stderr + exit 1, real usage);
+  // `dream --help` at the dispatch layer is bridge-intercepted (exit 0) — the
+  // direct-call path here keeps the unknown-subcommand contract.
+  it.each([["--help"], ["anything"]])("names the unknown subcommand for dream %s", async (arg) => {
     const r = await capture(() => dreamCommand([arg]));
-    expect(r).toEqual(bare);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toBe(`[roll] unknown dream subcommand: ${arg}\nUsage: roll dream run-once\n`);
   });
 
   it("removes the dream bash fallback from the ported registry", () => {

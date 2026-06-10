@@ -16,10 +16,22 @@ const ported = new Map<string, Handler>();
 // REFACTOR-049: commands that stay callable (aliases / emergency manual entry
 // points) but are hidden from the main usage list to keep the surface lean.
 const hidden = new Set<string>();
+// FIX-239: per-command usage text. When registered, the bridge enforces the
+// ONE help contract centrally — `roll <cmd> --help|-h` prints this to stdout
+// and exits 0 BEFORE the handler runs (so a cry for help can never trigger
+// side effects, the FIX-238 `update --help` upgrade incident). Commands with
+// richer internal help simply don't register a string and keep handling it.
+const helpText = new Map<string, string>();
 
-export function registerPorted(command: string, handler: Handler, opts?: { hidden?: boolean }): void {
+export function registerPorted(command: string, handler: Handler, opts?: { hidden?: boolean; help?: string }): void {
   ported.set(command, handler);
   if (opts?.hidden === true) hidden.add(command);
+  if (opts?.help !== undefined) helpText.set(command, opts.help);
+}
+
+/** Commands with bridge-enforced help (FIX-239 AC3's table). */
+export function registeredHelp(): string[] {
+  return [...helpText.keys()].sort();
 }
 
 export function isPorted(command: string): boolean {
@@ -71,7 +83,15 @@ export async function dispatch(argv: string[]): Promise<RunResult> {
   const [command, ...rest] = argv;
   if (command !== undefined) {
     const handler = ported.get(command);
-    if (handler !== undefined) return { status: await handler(rest) };
+    if (handler !== undefined) {
+      // FIX-238/239: the contract half the bridge owns — help is read-only.
+      const help = helpText.get(command);
+      if (help !== undefined && (rest[0] === "--help" || rest[0] === "-h")) {
+        process.stdout.write(help.endsWith("\n") ? help : `${help}\n`);
+        return { status: 0 };
+      }
+      return { status: await handler(rest) };
+    }
   }
   if (command === undefined || command === "" || command === "help" || command === "--help" || command === "-h") {
     process.stdout.write(usage());

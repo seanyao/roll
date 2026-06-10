@@ -83,6 +83,8 @@ describe("roll dream command wrapper", () => {
                    执行发版脚本（仅人工）
         review-pr    <number>  AI-powered code review for a PR
                      AI 代码评审
+        config    [<key> [<value>]]  read or write roll config keys
+                  读取或写入配置项
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -92,19 +94,20 @@ describe("roll dream command wrapper", () => {
                  首次安装或重新同步
         update        upgrade to latest + re-sync
                   升级到最新版并重新同步
-        version        print installed roll version
-                   显示已安装版本
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
         examples
 
+        roll --version  显示已安装版本
         roll loop on  启用自主执行循环
         roll brief  查看最新简报
         roll backlog defer US-DOC '过早引入'  推迟一类任务
         roll agent use kimi  切换当前项目到 kimi
+        roll config lang zh  设置语言为中文 (REFACTOR-049: \`roll lang\` 已移入 config)
 
         docs: github.com/seanyao/roll  ·  issues: github.com/seanyao/roll/issues
+        version: roll --version  ·  gc auto-runs per cycle (manual: roll loop gc)
       "
     `);
   });

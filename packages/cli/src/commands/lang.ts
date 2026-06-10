@@ -17,7 +17,7 @@ function rollConfigPath(): string {
 }
 
 /** Extract `lang:` value from config.yaml (mirrors agent-list configLang). */
-function configLang(): string | undefined {
+export function configLang(): string | undefined {
   const cfg = rollConfigPath();
   if (!existsSync(cfg)) return undefined;
   for (const line of readFileSync(cfg, "utf8").split("\n")) {
@@ -31,7 +31,7 @@ function configLang(): string | undefined {
 }
 
 /** True when config.yaml has any `^lang:` line (mirrors bash grep -qE). */
-function configHasLangLine(): boolean {
+export function configHasLangLine(): boolean {
   const cfg = rollConfigPath();
   if (!existsSync(cfg)) return false;
   return readFileSync(cfg, "utf8").split("\n").some((l) => /^lang:/.test(l));
@@ -52,7 +52,7 @@ function appleLang(): string | undefined {
   }
 }
 
-function resolveCurrent(): Lang {
+export function resolveCurrent(): Lang {
   const env = process.env;
   const direct = resolveLang({
     rollLang: env["ROLL_LANG"],
@@ -72,7 +72,7 @@ function resolveCurrent(): Lang {
 }
 
 /** Mirrors cmd_lang's source-attribution ladder verbatim. */
-function resolveSource(): string {
+export function resolveSource(): string {
   const env = process.env;
   if ((env["ROLL_LANG"] ?? "") !== "") return "ROLL_LANG env";
   if (existsSync(rollConfigPath()) && configHasLangLine()) return `config (${rollConfigPath()})`;
@@ -99,8 +99,11 @@ function err(line: string): void {
   process.stderr.write(`${RED}[roll]${NC} ${line}\n`);
 }
 
+/** Path to roll config.yaml. */
+export function configLangPath(): string { return rollConfigPath(); }
+
 /** Atomic: write all-but-lang lines + new lang line to a temp, then rename. */
-function writeLang(value: string): void {
+export function writeLang(value: string): void {
   const cfg = rollConfigPath();
   mkdirSync(dirname(cfg), { recursive: true });
   const existing = existsSync(cfg) ? readFileSync(cfg, "utf8") : "";
@@ -116,7 +119,7 @@ function writeLang(value: string): void {
   renameSync(tmp, cfg);
 }
 
-function clearLang(): void {
+export function clearLang(): void {
   const cfg = rollConfigPath();
   if (!existsSync(cfg)) return;
   const existing = readFileSync(cfg, "utf8");

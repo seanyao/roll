@@ -61,10 +61,11 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll release` | Run the release script (human-only) |
 | `roll review-pr <number>` | AI-powered code review for a PR |
+| `roll config lang <zh|en|--reset>` | Set the client language via config (REFACTOR-049: `roll lang` → `roll config lang`) |
 | **Machine · global** | |
 | `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |
-| `roll version` | Print installed roll version |
+| `roll --version` / `roll -v` | Print installed roll version (REFACTOR-049: `roll version` → `roll --version`) |
 
 ## Repository layout
 

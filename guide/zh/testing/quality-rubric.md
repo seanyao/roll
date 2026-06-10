@@ -29,34 +29,30 @@ loop cycle 的测试质量合并门（US-QA-012）会拒绝引入新的 ❼ 或 
 - `[[ "$output" == *"..."* ]]` / `[ "$output" = "..." ]` 里出现的裸数字 / 裸字符串字面量
   正好等于源模块里的值。
 - 同一个字面量在 ≥2 个测试文件出现（价格表、版本号、模型名）。
-- 测试文件不是该值的"产权方"（比如 runner 测试断言价格，价格定义在 `lib/model_prices.py`）。
+- 测试文件不是该值的"产权方"（比如 runner 测试断言价格，价格定义在 `packages/core/src/cost/prices.ts`）。
 
 ### 最小修复模板
 
-```bash
-# 改之前
-@test "opus rate is 5/25" {
-  run my_cmd
-  [[ "$output" == *"5.0 25.0"* ]]
-}
+```ts
+// 改之前
+it("opus rate is 5/25", () => {
+  expect(computeListCost("claude-opus-4-7", usage)).toBe("5.0 25.0");
+});
 
-# 改之后 —— 从源模块导入
-@test "opus rate matches PRICES[claude-opus-4-7]" {
-  expected=$(python3 -c "import lib.model_prices as m; \
-    p=m.PRICES['claude-opus-4-7']; print(p['in'], p['out'])")
-  run my_cmd
-  [[ "$output" == *"$expected"* ]]
-}
+// 改之后 —— 喂固定 fixture 费率表，断"公式"而非线上费率
+it("computeListCost 按 注入费率 × token 算", () => {
+  const rates = { m: { in: 2, out: 4 } };
+  expect(computeListCost("m", { input_tokens: 1000, output_tokens: 500 }, rates)).toBe(0.004);
+});
 ```
 
-或者把字面量替换成注入式 fixture（`tests/fixtures/prices.json`），让"数值"只在一处存在，
-测试体里只剩下对"公式"的断言。
+或者对线上费率只断结构不变量（如 `cache_read < input`、`out ≥ in`），调价就不会无谓打红。
 
 ### 真实代码反例
 
-`tests/unit/model_prices.bats` 第 15–31 行把 opus/sonnet/haiku 价格（`5.0 25.0`、
-`3.0 15.0`、`1.0 5.0`）硬编码进断言体。模型定价做一次调整，这批测试就一起红，但其实
-价格解析逻辑没坏。
+`packages/core/test/prices.difftest.test.ts` 早先在断言里直接读线上 opus/sonnet/haiku
+费率，每次调价就一起红、却没暴露任何回归。现在算术喂固定 fixture 表，对线上费率只断
+结构不变量。
 
 ---
 
@@ -72,25 +68,24 @@ loop cycle 的测试质量合并门（US-QA-012）会拒绝引入新的 ❼ 或 
 - 单元测试顶部出现 `function git() { … }` / `function gh() { … }` 这种全局覆写，
   而被测代码本来就该跑真 git / 真 gh。
 - 把 SQL 或文件系统调用换成内联返回手写串的 stub。
-- mock 写在测试文件自己里、不在 `tests/helpers/`，说明是临时打补丁，不是共享。
+- mock 写在测试文件自己里、不在共享的测试 helper 模块里，说明是临时打补丁，不是共享。
 
 ### 最小修复模板
 
-```bash
-# 用真实的临时基底（tmp git repo / sqlite 文件 / tmpdir），teardown 时清掉。
-setup() {
-  TMP=$(mktemp -d); cd "$TMP"; git init -q
-}
-teardown() { rm -rf "$TMP"; }
+```ts
+// 用真实的临时基底（tmp git repo / tmpdir），afterEach/afterAll 清掉。
+let dir: string;
+beforeEach(() => { dir = realpathSync(mkdtempSync(join(tmpdir(), "t-"))); execSync("git init -q", { cwd: dir }); });
+afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 ```
 
-如果某条边界在单元层确实跑不动（网络、launchctl 等），把测试搬到 `tests/integration/`，
-接受它跑慢层；但不要在单元层假装它能跑。
+如果某条边界在单元层确实跑不动（网络、gh、launchctl），把它做成可注入的 port/依赖、
+测试里传 fake —— 即 `runner-executor.test.ts` 用 `fakePorts()` 的那套。
 
 ### 真实代码反例
 
-任何在测试文件顶部用 `function gh() { echo '{...}' }` 来模拟 loop PR 路由的单元测试。
-修法是把 fake 收进 `tests/helpers/`，让它共享、明确、可被发现。
+任何在测试里零散用 `const gh = () => ({...})` 来模拟 loop PR 路由的写法。修法是注入
+`GithubPort`（见 `packages/cli/test/runner-executor.test.ts`），让同一个 fake 共享、明确、可被发现。
 
 ---
 
@@ -131,19 +126,19 @@ teardown() { rm -rf "$TMP"; }
 ### 判定信号
 
 - A 测试读 B 测试在同文件里写下的状态。
-- `setup_file()` 建了状态、`teardown_file()` 没清掉，后面的测试默默依赖它。
+- 模块级（或 `beforeAll`）fixture 改了共享状态、没人重置，后面的测试默默依赖它。
 - 单跑能过，跑全套就红；反过来也算。
 
 ### 最小修复模板
 
-把所有 setup 搬到 `setup()`（每条测试自己跑一遍），不再用 `setup_file()`。每条测试
-自己建 tmpdir / env / fixture，自己断言，自己拆掉。跨测试依赖只在真有必要时显式存在，
-而且要走一个有名字的 helper，绝不靠隐式顺序。
+每条测试的状态在 `beforeEach` 里建（自己的 tmpdir / env / fixture），断言，再在
+`afterEach` 清掉。跨测试依赖只在真有必要时显式存在，且走一个有名字的 helper，
+绝不靠隐式顺序或共享可变量。
 
 ### 真实代码反例
 
-任何 `setup_file()` 改写 `$HOME` 或写共享 state-`<slug>.yaml`、然后下一个测试不重置
-就直接读的 bats 文件都是候选。修法是用 `mktemp -d` + 显式 `HOME=$tmp` 做单测隔离。
+任何 `beforeAll` 改写 `$HOME` 或写共享 state-`<slug>.yaml`、然后下一个测试不重置
+就直接读的测试文件都是候选。修法是每条测试用一个新 `mkdtempSync` + 注入 home/root 做隔离。
 
 ---
 
@@ -156,7 +151,7 @@ teardown() { rm -rf "$TMP"; }
 
 ### 判定信号
 
-- 测试 `source lib/internal/foo.sh` 然后直接喊 `_private_helper`。
+- 测试从模块内部深 import 一个未导出的 helper、直接喊它名字。
 - 函数名以 `_` 开头（项目约定为私有），但测试却依赖它的签名。
 - 整个测试文件根本没碰公共 API；它测的是内部分解方式。
 
@@ -229,9 +224,9 @@ const label = plistString(plist, "Label");
 
 ### 真实代码反例
 
-`tests/integration/cmd_loop.bats` 第 181 行 —— 用内联的 `grep -A1 | grep | sed`
-链去解析 plist XML 提取 `<string>` 值。macOS 自带 `plutil`，项目完全可以包一层
-`_plist_get_string`。将来 plist schema 一改，所有抄了这段管道的测试都得跟着修。
+一条集成测试用手搓的正则链去解析 plist XML 提取 `<string>` 值，而不是 import 项目
+自己的 plist 解析器。将来 schema 一改，所有抄了这段的测试都得跟着修——解析器才是
+唯一该改的产权方。
 
 ---
 
@@ -245,36 +240,35 @@ const label = plistString(plist, "Label");
 
 ### 判定信号
 
-- 断言里出现 `[[ -f ~/.xxx/... ]]`、`[[ -d ~/.xxx/... ]]`、`cat ~/.xxx/...`。
-- `[[ -f /tmp/... ]]` 里的 `/tmp/...` 不是同一个测试文件的 `setup()` 创建的。
-- 路径以 `${HOME}` 或 `/Users/` 或 `/home/` 开头，并且不是测试文件自己建的。
+- 断言里读/检查 `~/.xxx/...` 下的文件。
+- 一个 tmp 路径不是测试文件自己创建的。
+- 路径以 `~`、`${HOME}`、`/Users/` 或 `/home/` 开头，并且不是测试文件自己建的。
 
 ### 最小修复模板
 
-```bash
-# 改之前 —— 断言了一个仓库外、依赖本机环境的文件
-@test "skill file is synced" {
-  grep -qE 'Scan 6' "${HOME}/.roll/skills/roll-.dream/SKILL.md"
-}
+```ts
+// 改之前 —— 断言了一个仓库外、依赖本机环境的文件
+it("skill file is synced", () => {
+  expect(readFileSync(`${homedir()}/.roll/skills/roll-.dream/SKILL.md`, "utf8")).toMatch(/Scan 6/);
+});
 
-# 改之后 —— 在测试自己控制的 tmpdir 里重建最小 fixture
-@test "skill file includes Scan 6" {
-  mkdir -p "$TMP/.roll/skills/roll-.dream"
-  echo '### Scan 6 — Doc Freshness' > "$TMP/.roll/skills/roll-.dream/SKILL.md"
-  ROLL_HOME="$TMP/.roll" run check_skill_has_scan6
-  [ "$status" -eq 0 ]
-}
+// 改之后 —— 在测试自己控制的 tmpdir 里重建最小 fixture
+it("skill file includes Scan 6", () => {
+  const home = mkdtempSync(join(tmpdir(), "h-"));
+  mkdirSync(join(home, ".roll/skills/roll-.dream"), { recursive: true });
+  writeFileSync(join(home, ".roll/skills/roll-.dream/SKILL.md"), "### Scan 6 — Doc Freshness\n");
+  expect(checkSkillHasScan6({ home })).toBe(true);
+});
 ```
 
-如果测试的目的确实是与外部文件打交道，用 `ROLL_HOME` 注入（setup 里设成 tmpdir），
+如果测试的目的确实是与外部文件打交道，注入 home/root 路径（一个 tmpdir），
 让测试在不同机器上结果一致。
 
 ### 真实代码反例
 
-`tests/unit/roll_dream_scan6.bats` 第 49 行 —— 断言了
-`${HOME}/.roll/skills/roll-.dream/SKILL.md`，一个仓库外的文件，它的内容取决于
-用户有没有跑过 `roll setup`。没装 Roll 的机器、或装了旧版本的机器上，这条测试
-会挂，但项目本身代码其实没问题。
+一条 dream-scan 测试断言 `${HOME}/.roll/skills/roll-.dream/SKILL.md`——一个仓库外的
+文件，内容取决于用户有没有跑过 `roll setup`。没装 Roll 的机器、或装了旧版本的机器上，
+这条测试会挂，但项目本身代码其实没问题。改法：把 fixture 沙箱进一个临时 `HOME`。
 
 ---
 

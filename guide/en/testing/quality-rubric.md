@@ -37,36 +37,33 @@ logic under test still works.
 - The same literal appears in ≥2 test files (price tables, version
   numbers, model identifiers).
 - The test file is not the canonical owner of the value (e.g. a runner
-  test asserts a price, but pricing lives in `lib/model_prices.py`).
+  test asserts a price, but pricing lives in `packages/core/src/cost/prices.ts`).
 
 ### Fix template
 
-```bash
-# BEFORE
-@test "opus rate is 5/25" {
-  run my_cmd
-  [[ "$output" == *"5.0 25.0"* ]]
-}
+```ts
+// BEFORE
+it("opus rate is 5/25", () => {
+  expect(computeListCost("claude-opus-4-7", usage)).toBe("5.0 25.0");
+});
 
-# AFTER — import the value from the source of truth
-@test "opus rate matches PRICES[claude-opus-4-7]" {
-  expected=$(python3 -c "import lib.model_prices as m; \
-    p=m.PRICES['claude-opus-4-7']; print(p['in'], p['out'])")
-  run my_cmd
-  [[ "$output" == *"$expected"* ]]
-}
+// AFTER — feed a fixed fixture rate table; assert the FORMULA, not the live rates
+it("computeListCost multiplies tokens × the injected rate", () => {
+  const rates = { "m": { in: 2, out: 4 } };
+  expect(computeListCost("m", { input_tokens: 1000, output_tokens: 500 }, rates)).toBe(/* 0.002 + 0.002 */ 0.004);
+});
 ```
 
-Or replace the literal with an injection fixture (`tests/fixtures/prices.json`)
-so the value lives in one place and only assertions on the **formula**
-remain in the test.
+Or assert only structural invariants on the production rates (e.g.
+`cache_read < input`, `out ≥ in`) so a rate-card move can't redden the suite.
 
 ### Real example
 
-`tests/unit/model_prices.bats` lines 15–31 hardcode the opus/sonnet/haiku
-rates (`5.0 25.0`, `3.0 15.0`, `1.0 5.0`) directly in the assertion bodies.
-Any pricing adjustment on the source module turns these tests red without
-revealing any actual regression in the rate-resolution logic.
+`packages/core/test/prices.difftest.test.ts` used to read the live opus/sonnet/haiku
+rates directly in the assertions — every rate-card move turned it red without
+revealing any regression in the rate-resolution logic. It now feeds a fixed
+fixture table for the arithmetic and asserts only structural invariants on the
+production rates.
 
 ---
 
@@ -85,29 +82,29 @@ first integration run breaks.
   a unit test that exercises real git or gh behavior.
 - A SQL or filesystem call replaced with an inline stub returning a
   hand-rolled string.
-- Mocks live in the test file itself rather than in `tests/helpers/`,
-  signaling they were added ad-hoc rather than shared.
+- Mocks live in the test file itself rather than in a shared test helper
+  module, signaling they were added ad-hoc rather than shared.
 
 ### Fix template
 
-```bash
-# Use a real ephemeral substrate (tmp git repo, sqlite file, tmpdir).
-# Tear it down in teardown(). The mock disappears entirely.
-setup() {
-  TMP=$(mktemp -d); cd "$TMP"; git init -q
-}
-teardown() { rm -rf "$TMP"; }
+```ts
+// Use a real ephemeral substrate (tmp git repo, tmpdir). Clean it up in
+// afterEach/afterAll. The mock disappears entirely.
+let dir: string;
+beforeEach(() => { dir = realpathSync(mkdtempSync(join(tmpdir(), "t-"))); execSync("git init -q", { cwd: dir }); });
+afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 ```
 
-If a true boundary cannot be exercised in unit scope (network calls,
-launchctl, etc.), move the test to `tests/integration/` and accept it
-runs in the slow tier — not mocked.
+If a true boundary cannot be exercised cheaply (network, gh, launchctl),
+inject it as a port/dependency and pass a fake in the test — the same pattern
+`runner-executor.test.ts` uses with `fakePorts()`.
 
 ### Real example
 
-Watch for ad-hoc `function gh() { echo '{...}' }` overrides at the top of
-unit tests that test loop-PR routing. The fix is to use bats helpers in
-`tests/helpers/` so the same fake is shared, deliberate, and discoverable.
+Watch for ad-hoc `const gh = () => ({...})` overrides scattered across tests
+that exercise loop-PR routing. The fix is an injected `GithubPort` (as in
+`packages/cli/test/runner-executor.test.ts`) so the same fake is shared,
+deliberate, and discoverable.
 
 ---
 
@@ -157,23 +154,23 @@ cause sporadic failures that look like flakes.
 ### Signals
 
 - A test reads state another test in the same file wrote.
-- `setup_file()` creates state that `teardown_file()` never tears down,
-  and a later test depends on it.
+- A module-level (or `beforeAll`) fixture mutates shared state that nothing
+  resets, and a later test depends on it.
 - The test passes alone but fails inside the suite (or vice versa).
 
 ### Fix template
 
-Move all setup into `setup()` (per-test) instead of `setup_file()`. Each
-test creates its own tmpdir / env / fixture, asserts, and tears down.
-Cross-test dependencies become explicit only when truly necessary, and
-even then they go through a named helper, not implicit ordering.
+Create per-test state in `beforeEach` (its own tmpdir / env / fixture), assert,
+and clean up in `afterEach`. Cross-test dependencies become explicit only when
+truly necessary, and even then they go through a named helper, not implicit
+ordering or a shared mutable.
 
 ### Real example
 
-Any bats file where `setup_file()` mutates `$HOME` or writes to a shared
+Any test file where a `beforeAll` mutates `$HOME` or writes a shared
 state-`<slug>.yaml` and a later test in the same file reads it without
-re-initializing is a candidate. The fix is per-test isolation through
-`mktemp -d` + an explicit `HOME=$tmp` override.
+re-initializing is a candidate. The fix is per-test isolation through a
+fresh `mkdtempSync` + an injected home/root.
 
 ---
 
@@ -187,8 +184,8 @@ removed without changing behavior — but the test claims regression.
 
 ### Signals
 
-- A test sources `lib/internal/foo.sh` and calls `_private_helper` by
-  name.
+- A test deep-imports an unexported helper from a module's internals and
+  calls it by name.
 - The function name starts with `_` (project convention for private),
   yet a test depends on its signature.
 - The public API isn't exercised at all in the file; the test is
@@ -234,9 +231,9 @@ test helper and run one smoke test, not a category of them.
 
 ### Real example
 
-A test that asserts `$BATS_TEST_NUMBER > 0` adds noise to every CI run
-without ever surfacing a project regression. The right place for that
-assurance is a one-time check in CI configuration, not in the suite.
+A test that asserts the test runner's own bookkeeping (e.g. that a mock was
+constructed, or that `beforeEach` ran) adds noise to every CI run without ever
+surfacing a project regression. Trust the framework; delete the test.
 
 ---
 
@@ -274,11 +271,10 @@ module so the logic is shared and deliberate.
 
 ### Real example
 
-`tests/integration/cmd_loop.bats` line 181 — inline `grep -A1 | grep | sed`
-chain parses a plist XML file to extract a `<string>` value. The project
-already has `plutil` available on macOS and could wrap the pattern in a
-`_plist_get_string` helper. Any plist schema change forces the test author
-to fix the inline pipeline in multiple test files.
+An integration test that hand-rolls a regex chain to parse a plist XML file
+for a `<string>` value, instead of importing the project's own plist parser.
+Any schema change then forces the test author to fix the inline pattern in
+multiple test files — the parser is the single owner that should change.
 
 ---
 
@@ -296,39 +292,38 @@ by coincidence while testing the wrong thing.
 
 - `[[ -f ~/.xxx/... ]]`, `[[ -d ~/.xxx/... ]]`, `cat ~/.xxx/...` inside
 an assertion.
-- `[[ -f /tmp/... ]]` where `/tmp/...` was not created by `setup()` in the
-same test file.
-- Paths starting with `${HOME}` or `/Users/` or `/home/` that the test
+- A tmp path that the test file did not create itself.
+- Paths starting with `~`, `${HOME}`, `/Users/`, or `/home/` that the test
 file did not create itself.
 
 ### Fix template
 
-```bash
-# BEFORE — asserts on a file that lives outside the repo
-@test "skill file is synced" {
-  grep -qE 'Scan 6' "${HOME}/.roll/skills/roll-.dream/SKILL.md"
-}
+```ts
+// BEFORE — asserts on a file that lives outside the repo
+it("skill file is synced", () => {
+  expect(readFileSync(`${homedir()}/.roll/skills/roll-.dream/SKILL.md`, "utf8")).toMatch(/Scan 6/);
+});
 
-# AFTER — recreate the fixture inside a tmpdir owned by the test
-@test "skill file includes Scan 6" {
-  mkdir -p "$TMP/.roll/skills/roll-.dream"
-  echo '### Scan 6 — Doc Freshness' > "$TMP/.roll/skills/roll-.dream/SKILL.md"
-  ROLL_HOME="$TMP/.roll" run check_skill_has_scan6
-  [ "$status" -eq 0 ]
-}
+// AFTER — recreate the fixture inside a tmpdir owned by the test
+it("skill file includes Scan 6", () => {
+  const home = mkdtempSync(join(tmpdir(), "h-"));
+  mkdirSync(join(home, ".roll/skills/roll-.dream"), { recursive: true });
+  writeFileSync(join(home, ".roll/skills/roll-.dream/SKILL.md"), "### Scan 6 — Doc Freshness\n");
+  expect(checkSkillHasScan6({ home })).toBe(true);
+});
 ```
 
 If the test's purpose is truly to verify interaction with an external file,
-use `ROLL_HOME` injection (set to a tmpdir in `setup()`) so the test stays
-deterministic across machines.
+inject the home/root path (a tmpdir) so the test stays deterministic across
+machines.
 
 ### Real example
 
-`tests/unit/roll_dream_scan6.bats` line 49 — asserts on
-`${HOME}/.roll/skills/roll-.dream/SKILL.md`, a file outside the repo whose
-content depends on whether the user ran `roll setup`. On a machine without
-Roll installed, or with an older version, the test fails even though the
-project code under test is correct.
+A dream-scan test that asserts on `${HOME}/.roll/skills/roll-.dream/SKILL.md`,
+a file outside the repo whose content depends on whether the user ran
+`roll setup`. On a machine without Roll installed, or with an older version,
+the test fails even though the project code under test is correct. Sandbox the
+fixture under a temp `HOME` instead.
 
 ---
 

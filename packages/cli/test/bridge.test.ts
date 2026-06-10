@@ -42,6 +42,17 @@ describe("ported routing (no bash fallback)", () => {
     expect(isPorted("migrate")).toBe(true);
   });
 
+  it("REFACTOR-049: version/gc stay callable but are hidden from the main usage; lang is gone", () => {
+    registerAll();
+    expect(isPorted("lang")).toBe(false); // moved into `roll config lang`
+    expect(isPorted("version")).toBe(true); // alias for --version
+    expect(isPorted("gc")).toBe(true); // emergency manual entry (auto-runs per cycle)
+    const listed = usage().split("Commands:")[1] ?? "";
+    expect(listed).not.toMatch(/\bversion\b/);
+    expect(listed).not.toMatch(/\bgc\b/);
+    expect(listed).not.toMatch(/\blang\b/);
+  });
+
   it("help / --help / -h / empty → usage, exit 0", async () => {
     for (const argv of [[], ["help"], ["--help"], ["-h"]]) {
       const res = await dispatch(argv);

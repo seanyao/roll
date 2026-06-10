@@ -97,7 +97,7 @@ export function registerAll(): void {
     return args[0] === undefined || args[0] === "--help" || args[0] === "-h" ? 0 : 1;
   });
   // `gc`: age out old surplus attest runs across the archive layout (US-META-001).
-  registerPorted("gc", gcCommand);
+  registerPorted("gc", gcCommand, { hidden: true }); // REFACTOR-049: auto-runs per cycle; manual entry stays callable, off the usage list
   // REFACTOR-048: `archive migrate` (old verification/<ID> tree port) retired —
   // that one-time migration completed (US-META-002a..c); cleanup lives in `gc`,
   // dossier reconciliation in `roll index --rebuild`.
@@ -219,7 +219,7 @@ export function registerAll(): void {
   // `version` / `--version` / `-v`: TS-native (FIX-202). Reads the install
   // tree's package.json (single source of truth), so it no longer reports the
   // fossil bin/roll VERSION= literal. No bash fallback for these.
-  registerPorted("version", versionCommand);
+  registerPorted("version", versionCommand, { hidden: true }); // REFACTOR-049: alias for roll --version, off the usage list
   registerPorted("--version", versionCommand);
   registerPorted("-v", versionCommand);
   // `loop` is FULLY TS as of US-PORT-021 prep — no subcommand falls back to bash.

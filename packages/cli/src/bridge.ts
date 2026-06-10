@@ -13,9 +13,13 @@ import { fileURLToPath } from "node:url";
 export type Handler = (args: string[]) => number | Promise<number>;
 
 const ported = new Map<string, Handler>();
+// REFACTOR-049: commands that stay callable (aliases / emergency manual entry
+// points) but are hidden from the main usage list to keep the surface lean.
+const hidden = new Set<string>();
 
-export function registerPorted(command: string, handler: Handler): void {
+export function registerPorted(command: string, handler: Handler, opts?: { hidden?: boolean }): void {
   ported.set(command, handler);
+  if (opts?.hidden === true) hidden.add(command);
 }
 
 export function isPorted(command: string): boolean {
@@ -47,9 +51,10 @@ export interface RunResult {
   status: number;
 }
 
-/** Top-level usage — TS-native (no bash). Lists the registered commands. */
+/** Top-level usage — TS-native (no bash). Lists the visible registered
+ *  commands (hidden aliases/manual entry points stay callable, unlisted). */
 export function usage(): string {
-  const cmds = portedCommands().filter((c) => !c.startsWith("-")).join(", ");
+  const cmds = portedCommands().filter((c) => !c.startsWith("-") && !hidden.has(c)).join(", ");
   return (
     `roll <command> [args]\n\n` +
     `Commands: ${cmds}\n\n` +

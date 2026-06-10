@@ -71,6 +71,11 @@ export interface MergeEvidence {
   mergeCommit?: string;
 }
 
+/** Statuses the merge-evidence backfill probes (FIX-243/244): the v2 "built"
+ *  claim plus v3's "published" (merge pending) and "failed" (phantom-failure
+ *  rows whose PR actually merged). */
+export const BACKFILL_CANDIDATE_STATUSES: ReadonlySet<string> = new Set(["built", "published", "failed"]);
+
 /** The cycle branch name for a cycle id (mirrors `loop/cycle-${cycle_id}`). */
 export function reconcileBranchName(cycleId: string): string {
   return `loop/cycle-${cycleId}`;
@@ -118,7 +123,11 @@ export function reconcileMergeEvidence(
   for (const row of rows) {
     const status = typeof row.status === "string" ? row.status : "";
     const cycleId = typeof row.cycle_id === "string" ? row.cycle_id : "";
-    if (status !== "built" || cycleId === "") {
+    // FIX-243/244: v2 backfilled only "built". v3 widens to every claim-shaped
+    // status — "published" (publish-ok, merge pending) and "failed" (phantom
+    // failures: cycle judged failed, its PR merged minutes later, observed
+    // 2026-06-10). The gate stays evidence-only: nothing flips without MERGED.
+    if (!BACKFILL_CANDIDATE_STATUSES.has(status) || cycleId === "") {
       out.push(row);
       continue;
     }
@@ -130,7 +139,9 @@ export function reconcileMergeEvidence(
     }
     const mergedAt = ev.mergedAt ?? "";
     const mergeCommit = ev.mergeCommit ?? "";
-    out.push({ ...row, status: "merged", merged_at: mergedAt, merge_commit: mergeCommit });
+    // v3 extension over the oracle's jq: also correct `outcome` — a credited
+    // row IS a delivery; leaving outcome=failed would keep dashboards lying.
+    out.push({ ...row, status: "merged", outcome: "delivered", merged_at: mergedAt, merge_commit: mergeCommit });
     credited.push({ cycleId, mergedAt, mergeCommit });
   }
   return { rows: out, credited };

@@ -57,6 +57,41 @@ describe("reconcileMergeEvidence — built ≠ merged (I4)", () => {
     const res = reconcileMergeEvidence(rows, lookup({}));
     expect(res.rows[0]?.status).toBe("built");
   });
+
+  // FIX-243/244 — the backfill credits ALL claim-shaped statuses, not just
+  // v2's "built": "published" (publish-ok, merge pending) and "failed" (the
+  // phantom-failure rows observed 2026-06-10 — cycle judged failed, its PR
+  // merged minutes later). Crediting also corrects `outcome` so dashboards
+  // stop reading a merged delivery as failed.
+  it("FIX-244: credits a published row on MERGED evidence (status merged + outcome delivered)", () => {
+    const rows: ReconcileRunRow[] = [{ status: "published", cycle_id: "c2", outcome: "delivered" }];
+    const res = reconcileMergeEvidence(
+      rows,
+      lookup({ [reconcileBranchName("c2")]: { state: "MERGED", mergedAt: "2026-06-11T00:00:00Z", mergeCommit: "def" } }),
+    );
+    expect(res.rows[0]).toMatchObject({ status: "merged", outcome: "delivered", merged_at: "2026-06-11T00:00:00Z" });
+    expect(res.credited).toHaveLength(1);
+  });
+
+  it("FIX-243: heals a phantom-failed row whose PR really merged (failed → merged, outcome → delivered)", () => {
+    const rows: ReconcileRunRow[] = [{ status: "failed", cycle_id: "c3", outcome: "failed", story_id: "FIX-9" }];
+    const res = reconcileMergeEvidence(
+      rows,
+      lookup({ [reconcileBranchName("c3")]: { state: "MERGED", mergedAt: "2026-06-11T01:00:00Z", mergeCommit: "ghi" } }),
+    );
+    expect(res.rows[0]).toMatchObject({ status: "merged", outcome: "delivered", merge_commit: "ghi" });
+    expect(res.rows[0]?.story_id).toBe("FIX-9"); // other fields preserved
+  });
+
+  it("a failed row with no PR / unmerged PR stays failed (no generosity without evidence)", () => {
+    const rows: ReconcileRunRow[] = [
+      { status: "failed", cycle_id: "c4", outcome: "failed" },
+      { status: "failed", cycle_id: "c5", outcome: "failed" },
+    ];
+    const res = reconcileMergeEvidence(rows, lookup({ [reconcileBranchName("c5")]: { state: "CLOSED" } }));
+    expect(res.rows).toEqual(rows);
+    expect(res.credited).toHaveLength(0);
+  });
 });
 
 describe("cycleEndForPick — latest pick → its cycle_end", () => {

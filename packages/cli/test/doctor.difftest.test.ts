@@ -368,6 +368,11 @@ describe("frozen: roll doctor", () => {
       技能清单
         ✅ guide/skills.md matches skills/*/SKILL.md
 
+      launchd lanes (all com.roll.* jobs)
+
+        ✗ com.roll.loop.demo · not loaded
+          → /tmp/roll-doctor-this-dir-does-not-exist-xyz  [missing — STALE lane]
+
       Stale launchd plists
 
         ⚠ com.roll.loop.demo

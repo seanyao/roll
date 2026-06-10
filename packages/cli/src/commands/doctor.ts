@@ -300,6 +300,43 @@ function skillsCatalogSection(lang: Lang): void {
   emit(`  ${t(v2Catalog, lang, drift ? "skills.doctor_drift" : "skills.doctor_ok")}`);
 }
 
+// ── FIX-234 AC3: all com.roll.* lanes — target path + load state, stale red ──
+export interface LaneProbe {
+  /** `launchctl list <label>` last-exit, or null when the job is not loaded. */
+  lastExit: (label: string) => number | null;
+}
+
+export function lanesSection(lang: Lang, probe?: LaneProbe): string[] {
+  const lines: string[] = [];
+  if (process.platform !== "darwin") return lines;
+  const dir = process.env["_LAUNCHD_DIR"] ?? join(homedir(), "Library", "LaunchAgents");
+  if (!safeIsDir(dir)) return lines;
+  let plists: string[] = [];
+  try {
+    plists = readdirSync(dir)
+      .filter((n) => n.startsWith("com.roll.") && n.endsWith(".plist"))
+      .sort();
+  } catch {
+    return lines;
+  }
+  if (plists.length === 0) return lines;
+  lines.push("");
+  lines.push(lang === "zh" ? "launchd lanes(全部 com.roll.* 任务)" : "launchd lanes (all com.roll.* jobs)");
+  lines.push("");
+  for (const name of plists) {
+    const label = name.replace(/\.plist$/, "");
+    const wd = readWorkingDirectory(join(dir, name));
+    const stale = wd !== "" && !safeIsDir(wd);
+    const exit = probe?.lastExit(label);
+    const state =
+      exit === undefined ? "" : exit === null ? (lang === "zh" ? " · 未加载" : " · not loaded") : ` · last exit ${exit}`;
+    lines.push(`  ${stale ? "✗" : "•"} ${label}${state}`);
+    lines.push(`    → ${wd === "" ? "(no WorkingDirectory)" : wd}${stale ? (lang === "zh" ? "  [目录已不存在——陈旧 lane]" : "  [missing — STALE lane]") : ""}`);
+  }
+  for (const l of lines) emit(l);
+  return lines;
+}
+
 // ── 4. launchd stale section (Darwin only) ───────────────────────────────────
 function launchdStaleSection(lang: Lang): void {
   if (process.platform !== "darwin") return; // [[ "$(uname)" == "Darwin" ]] || return 0
@@ -331,6 +368,25 @@ function launchdStaleSection(lang: Lang): void {
     emit(`    ${t(v2Catalog, lang, "doctor.stale_plists_cleanup")}: launchctl bootout gui/${process.getuid?.() ?? 0}/${label}; rm '${plist}'`);
   }
 }
+/** Real lane probe — `launchctl list <label>` parses "LastExitStatus" (Darwin). */
+function realLaneProbe(): LaneProbe {
+  return {
+    lastExit: (label) => {
+      try {
+        const out = execFileSync("launchctl", ["list", label], {
+          encoding: "utf8",
+          timeout: 3000,
+          stdio: ["ignore", "pipe", "pipe"], // swallow launchctl's stderr noise
+        });
+        const m2 = /"LastExitStatus"\s*=\s*(-?\d+)/.exec(out);
+        return m2 ? Number.parseInt(m2[1] ?? "0", 10) : 0;
+      } catch {
+        return null; // not loaded
+      }
+    },
+  };
+}
+
 /** Mirror the awk that extracts the line after <key>WorkingDirectory</key>. */
 function readWorkingDirectory(plist: string): string {
   let body: string;
@@ -356,6 +412,7 @@ export function doctorCommand(_args: string[]): number {
   agentSection(p);
   prSection(lang);
   skillsCatalogSection(lang);
+  lanesSection(lang, realLaneProbe());
   launchdStaleSection(lang);
   process.stdout.write(out.lines.join("\n") + "\n");
   return 0;

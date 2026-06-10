@@ -1016,3 +1016,14 @@ attach scripts) and the global mute switch stay in `~/.shared/roll/`. See
   under a pseudo-terminal on macOS so their output streams line-by-line into
   the observation window instead of buffering until exit; claude streams over
   its own protocol unchanged.
+
+## Launchd lanes
+
+Roll owns exactly three launchd jobs per project slug: `com.roll.loop.<slug>`
+(the cycle scheduler), `com.roll.dream.<slug>` (nightly scan) and
+`com.roll.pr.<slug>` (PR inbox). `roll loop on` installs them; `roll loop off`
+uninstalls them AND sweeps any other `com.roll.*.<slug>` plist it finds —
+retired shapes from older versions (ci/alert/brief) once survived for weeks as
+zombies pointing at deleted engines. `roll doctor` lists every `com.roll.*`
+job on the machine with its target directory and load state; a lane whose
+WorkingDirectory no longer exists is marked STALE in red.

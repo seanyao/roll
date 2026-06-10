@@ -427,10 +427,19 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   process.stdout.write(`loop run-once: cycle ${cycleId} → ${result.terminal ?? "unknown"}\n`);
   // US-PORT-011: delivered? surface the acceptance report (print + auto-open
   // unless muted) — the owner's "做完想看 attest html" loop closure.
-  if (result.terminal === "done") {
+  // FIX-244: "published" (PR open, merge pending) is a successful delivery for
+  // loop-health purposes — announce + reset the failure streak; the merge-
+  // evidence backfill (FIX-243) flips the runs row to merged once main proves it.
+  if (result.terminal === "done" || result.terminal === "published") {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
     announceReport(id.path, id.slug, storyId);
     resetConsecutiveFails(id.path);
+  }
+  if (result.terminal === "published") {
+    process.stdout.write(
+      "loop run-once: delivery published — PR open, merge pending (PR loop merges; backfill credits on merge evidence)\n" +
+        "loop run-once: 交付已发布——PR 已开,等待合并(PR loop 负责合并;合并证据落地后由回填记账)\n",
+    );
   }
 
   const isFail = result.terminal === "failed" || result.terminal === "blocked";

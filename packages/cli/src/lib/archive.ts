@@ -216,6 +216,11 @@ export interface DossierStory {
    *  retrospective) for the index spine — computed from real evidence by the
    *  index command (stationsDone) and attached here; undefined until enriched. */
   stages?: readonly string[];
+  /** US-DOSSIER-008: a *legacy* (pre-v3) delivery — done by the backlog's
+   *  authority but with NO v3 evidence chain (no `latest/` attest pointer, no
+   *  `ac-map.json`). Honoured as done, but marked apart so the board does not
+   *  read it as half-finished just because the evidence-based spine is bare. */
+  legacy: boolean;
 }
 
 /** One epic group with its wish→truth tally. */
@@ -315,8 +320,12 @@ export function collectDossier(projectPath: string): DossierEpic[] {
       // own heading marks it ✅ done — so v2-migrated history that predates the
       // attest chain reads as delivered when it carries evidence of completion.
       let delivered = meta.markedDone;
+      let hasLatest = false;
       try {
-        if (statSync(join(dir, "latest")).isDirectory()) delivered = true; // follows symlink
+        if (statSync(join(dir, "latest")).isDirectory()) {
+          delivered = true; // follows symlink
+          hasLatest = true;
+        }
       } catch {
         /* no latest → fall back to the heading marker */
       }
@@ -325,11 +334,16 @@ export function collectDossier(projectPath: string): DossierEpic[] {
       // carry the full status so the chips/groups mirror the backlog.
       const status = backlogStatus.get(id);
       if (status !== undefined) delivered = status === "done";
+      // US-DOSSIER-008: delivered with NO v3 evidence chain (no latest/ attest
+      // pointer, no ac-map.json) ⇒ a pre-v3 legacy delivery — done, but never
+      // re-instrumented to v3 rigor, so it is marked apart from evidenced cards.
+      const legacy = delivered && !hasLatest && !existsSync(join(dir, "ac-map.json"));
       const story: DossierStory = {
         id,
         epic,
         type: (id.split("-")[0] ?? id).toUpperCase(),
         delivered,
+        legacy,
       };
       if (status !== undefined) story.status = status;
       if (meta.title !== undefined) story.title = meta.title;

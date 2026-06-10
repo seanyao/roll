@@ -172,6 +172,16 @@ export function stationsDone(d: StoryDossierInput): Set<string> {
 
 /** The full spine for this story — done stations filled, delivery in truth-green. */
 export function storySpine(d: StoryDossierInput): string {
+  // US-DOSSIER-008: a pre-v3 legacy delivery has no v3 evidence trail; the
+  // evidence-derived spine would read as half-finished, so render the whole
+  // spine in a uniform muted "legacy" state instead.
+  if (d.story.legacy) {
+    const nodes = SPINE_STAGES.map((s, i) => {
+      const seg = i < SPINE_STAGES.length - 1 ? `<span class="seg"></span>` : "";
+      return `<span class="node legacy"><span class="dot"></span><span class="tag">${bi(s.en, s.zh)}</span></span>${seg}`;
+    });
+    return `<div class="spine legacy" title="历史交付 · pre-v3，无 v3 留痕">${nodes.join("")}</div>`;
+  }
   const done = stationsDone(d);
   const nodes = SPINE_STAGES.map((s, i) => {
     const cls = done.has(s.key) ? (s.key === "delivery" ? " truth" : " done") : "";
@@ -556,6 +566,12 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     (s.created !== undefined ? `<span>${bi("created", "创建")} <b>${esc(s.created)}</b></span>` : "") +
     `<span><a href="spec.html">${bi("Design doc", "设计文档")}</a></span>` +
     `</div>\n</div>\n` +
+    (s.legacy
+      ? `<div class="legacy-banner">${bi(
+          "Legacy delivery — completed before v3; honored as done, but without the v3 evidence trail (attest report / AC map / self-score). Not re-instrumented.",
+          "历史交付 —— v3 之前已完成；按完成对待，但没有 v3 的证据链（验收报告 / AC 映射 / 自评），也不会回头补做。",
+        )}</div>\n`
+      : "") +
     storySpine(d) +
     storyGraphHtml(d.storyGraph) +
     section("Definition", "立项", definition, defEmpty) +

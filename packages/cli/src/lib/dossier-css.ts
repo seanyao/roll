@@ -47,6 +47,9 @@ export const DOSSIER_CSS = `
 .spine .node.done .tag, .spine .node.truth .tag { color:var(--fg); }
 .spine .seg { flex:1 1 0; height:2px; background:var(--line); margin:0 6px 18px; }
 .spine .seg.done { background:var(--accent); }
+.spine.legacy .node .dot { border-style:dashed; border-color:color-mix(in srgb,var(--muted) 55%,transparent); background:transparent; }
+.spine.legacy .seg { background:color-mix(in srgb,var(--muted) 30%,transparent); }
+.legacy-banner { margin:14px 0; padding:10px 14px; border:1px dashed var(--line); border-radius:8px; background:color-mix(in srgb,var(--muted) 7%,transparent); color:var(--muted); font-size:13px; line-height:1.5; }
 .mini-spine { display:inline-flex; align-items:center; vertical-align:middle; }
 .mini-spine i { width:7px; height:7px; border-radius:50%; background:none; border:1.5px solid var(--line); box-sizing:border-box; }
 .mini-spine i.done { border-color:var(--accent); background:var(--accent); }
@@ -133,6 +136,7 @@ export const DOSSIER_CSS = `
 .tally .mark{font:13px/1 var(--mono);color:var(--muted);}
 .tally .num{font:600 34px/1 var(--serif);letter-spacing:-.02em;margin:7px 0 2px;font-variant-numeric:tabular-nums;}
 .tally .lbl{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+.tally .tsub{font:500 9.5px/1.2 var(--mono);color:var(--muted);margin-top:4px;opacity:.85;}
 .tally.done .num{color:var(--pass);} .tally.wip .num{color:var(--warn);} .tally.todo .num{color:var(--fg);} .tally.hold .num{color:var(--block);}
 .tally .accentbar{position:absolute;left:0;bottom:0;height:3px;width:100%;}
 .tally.done .accentbar{background:var(--pass);} .tally.wip .accentbar{background:var(--warn);} .tally.todo .accentbar{background:var(--muted);} .tally.hold .accentbar{background:var(--block);}
@@ -168,7 +172,8 @@ details.epic[open] .caret{transform:rotate(90deg);color:var(--accent);}
 .epic-tally{font:13px/1 var(--mono);color:var(--muted);white-space:nowrap;text-align:right;}
 .epic-tally b{font-weight:600;color:var(--pass);font-variant-numeric:tabular-nums;}
 .stories{border-top:1px solid var(--line);padding:5px 8px 9px;}
-.story{display:grid;grid-template-columns:56px 120px 1fr 116px 72px;align-items:center;gap:12px;padding:7px 10px;border-radius:7px;text-decoration:none;color:inherit;}
+.story{display:grid;grid-template-columns:56px 120px 1fr 116px auto;align-items:center;gap:12px;padding:7px 10px;border-radius:7px;text-decoration:none;color:inherit;}
+.slegacy{font:600 9.5px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:2px 5px;border-radius:4px;border:1px dashed var(--line);color:var(--muted);background:color-mix(in srgb,var(--muted) 8%,transparent);}
 .story:hover{background:color-mix(in srgb,var(--accent) 7%,transparent);}
 .stype{font:600 10px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;text-align:center;padding:4px 0;border-radius:4px;border:1px solid var(--line);color:var(--muted);}
 .stype.US{color:var(--info);border-color:color-mix(in srgb,var(--info) 40%,transparent);}
@@ -189,6 +194,8 @@ details.epic[open] .caret{transform:rotate(90deg);color:var(--accent);}
 .lifespine i.on{border-color:var(--pass);background:var(--pass);} .lifespine b.on{background:var(--pass);}
 .lifespine i.now{border-color:var(--warn);background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 22%,transparent);}
 .lifespine.held i.now{border-color:var(--block);background:var(--block);box-shadow:0 0 0 3px color-mix(in srgb,var(--block) 22%,transparent);}
+.lifespine.legacy i{border-style:dashed;border-color:color-mix(in srgb,var(--muted) 55%,transparent);background:transparent;}
+.lifespine.legacy b{background:color-mix(in srgb,var(--muted) 35%,transparent);}
 @media (max-width:680px){.statusboard{grid-template-columns:repeat(2,1fr);} .story{grid-template-columns:48px 1fr auto;gap:8px;} .story .lifespine,.story .stitle{display:none;}}
 `;
 

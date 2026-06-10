@@ -64,6 +64,17 @@ function spectrum(t: Record<State, number>, cls: string): string {
 
 /** The five-station lifecycle spine for one story, from its real `stages`. */
 function storySpine(s: StoryView): string {
+  // US-DOSSIER-008: a pre-v3 legacy delivery has no v3 evidence trail, so the
+  // evidence-based spine would render bare and read as half-finished. Show the
+  // whole spine in a uniform muted "legacy done" state instead of lying either way.
+  if (s.legacy) {
+    let lh = "";
+    STAGE_KEYS.forEach((_, i) => {
+      lh += `<i></i>`;
+      if (i < STAGE_KEYS.length - 1) lh += `<b></b>`;
+    });
+    return `<span class="lifespine legacy" title="历史交付 · pre-v3，无 v3 留痕 / legacy delivery">${lh}</span>`;
+  }
   // Enriched `stages` win; absent (un-enriched render) → derive from delivered.
   const done = new Set<string>(
     s.stages ?? (s.delivered ? ["definition", "design", "execution", "delivery"] : ["definition"]),
@@ -89,13 +100,17 @@ function storyRow(epic: string, s: StoryView): string {
   const state = storyState(s);
   const type = (s.type || "").toUpperCase();
   const href = `${encodeURIComponent(epic)}/${encodeURIComponent(s.id)}/index.html`;
+  // US-DOSSIER-008: legacy (pre-v3) deliveries are done, but flagged apart.
+  const chip = s.legacy
+    ? `<span class="slegacy" title="历史交付：pre-v3 已完成，无 v3 证据链">${bi("legacy", "历史")}</span>`
+    : "";
   return (
-    `<a class="story" href="${href}" data-status="${state}">` +
+    `<a class="story${s.legacy ? " is-legacy" : ""}" href="${href}" data-status="${state}">` +
     `<span class="stype ${esc(type)}">${esc(type)}</span>` +
     `<span class="sid">${esc(s.id)}</span>` +
     `<span class="stitle">${esc(s.title ?? s.id)}</span>` +
     storySpine(s) +
-    `<span class="sstat st-${state}"><span class="sdot"></span>${state}</span>` +
+    `<span class="sstat st-${state}"><span class="sdot"></span>${state}${chip}</span>` +
     `</a>`
   );
 }
@@ -121,19 +136,29 @@ function epicFold(e: DossierEpic): string {
   );
 }
 
+/** Count delivered stories that are legacy (pre-v3, no v3 evidence trail). */
+function countLegacy(epics: DossierEpic[]): number {
+  let n = 0;
+  for (const e of epics) for (const s of e.stories) if (s.legacy) n += 1;
+  return n;
+}
+
 /** The pulled-out status overview: tallies + the delivery spectrum. */
 function overview(epics: DossierEpic[]): string {
   const t = tallyStates(epics);
   const total = epics.reduce((n, e) => n + e.stories.length, 0);
   const pct = total > 0 ? Math.round((t.done / total) * 100) : 0;
-  const card = (k: State, mark: string, en: string, zh: string): string =>
+  // US-DOSSIER-008: split the Done tally so "v3-evidenced done" and "legacy
+  // (pre-v3) done" are legible at a glance instead of lumped together.
+  const legCount = countLegacy(epics);
+  const card = (k: State, mark: string, en: string, zh: string, sub = ""): string =>
     `<a class="tally ${k}" href="#" data-jump="${k}"><div class="mark">${mark}</div>` +
-    `<div class="num">${t[k]}</div><div class="lbl">${bi(en, zh)}</div><div class="accentbar"></div></a>`;
+    `<div class="num">${t[k]}</div><div class="lbl">${bi(en, zh)}</div>${sub}<div class="accentbar"></div></a>`;
   const leg = (k: string, en: string, zh: string): string =>
     `<span><i class="i-${k}"></i>${bi(en, zh)}</span>`;
   return (
     `<div class="statusboard">` +
-    card("done", "✅", "Done", "已交付") +
+    card("done", "✅", "Done", "已交付", legCount > 0 ? `<div class="tsub">${bi(`incl. ${legCount} legacy`, `含 ${legCount} 历史`)}</div>` : "") +
     card("wip", "🔨", "In progress", "进行中") +
     card("todo", "📋", "Todo", "待办") +
     card("hold", "🔒", "Hold", "挂起") +

@@ -79,6 +79,28 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     expect(wip.delivered).toBe(false); // 🔨 = in progress, not done
     expect(epic.delivered).toBe(1); // only the ✅ card counts
   });
+
+  it("US-DOSSIER-008: pre-v3 done card (no latest/, no ac-map) is legacy; latest/ or ac-map cancels it", () => {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-legacy-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "hist");
+    // pre-v3 done: ✅ heading, no latest/, no ac-map.json → legacy
+    mkdirSync(join(f, "US-OLD-1"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-1", "spec.md"), "## US-OLD-1 历史做完的故事 ✅\n");
+    // done but carries v3 ac-map evidence (no latest/ yet) → NOT legacy
+    mkdirSync(join(f, "US-OLD-2"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-2", "spec.md"), "## US-OLD-2 有证据的故事 ✅\n");
+    writeFileSync(join(f, "US-OLD-2", "ac-map.json"), "[]\n");
+    // not done → not legacy
+    mkdirSync(join(f, "US-OLD-3"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-3", "spec.md"), "## US-OLD-3 没做 📋\n");
+    const epic = collectDossier(p)[0]!;
+    expect(epic.stories.find((s) => s.id === "US-OLD-1")!.legacy).toBe(true);
+    expect(epic.stories.find((s) => s.id === "US-OLD-2")!.legacy).toBe(false);
+    expect(epic.stories.find((s) => s.id === "US-OLD-3")!.legacy).toBe(false);
+    // a v3 card delivered via latest/ is never legacy.
+    expect(collectDossier(project())[0]!.stories.find((s) => s.id === "US-A-1")!.legacy).toBe(false);
+  });
 });
 
 describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
@@ -146,6 +168,36 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     // filter still keys off data-search + data-status on the details
     expect(html).toContain("data-search=");
     expect(html).toContain("data-status=");
+  });
+
+  it("US-DOSSIER-008: a legacy row carries a 历史/legacy chip + a muted legacy spine; evidenced cards don't", () => {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-legrender-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "hist");
+    mkdirSync(join(f, "US-OLD-1"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-1", "spec.md"), "## US-OLD-1 历史做完的故事 ✅\n");
+    const leg = renderFeaturesIndex(collectDossier(p));
+    expect(leg).toContain('class="slegacy"'); // the 历史/legacy chip
+    expect(leg).toContain('class="lifespine legacy"'); // spine rendered muted, not evidence-dark
+    expect(leg).toContain("历史");
+    // a v3-evidenced delivered card (US-A-1 via latest/) gets neither.
+    expect(html).not.toContain('class="slegacy"');
+    expect(html).not.toContain("lifespine legacy");
+  });
+
+  it("US-DOSSIER-008: the Done tally annotates how many deliveries are legacy (pre-v3)", () => {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-legcount-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "hist");
+    mkdirSync(join(f, "US-OLD-1"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-1", "spec.md"), "## US-OLD-1 历史做完 ✅\n");
+    mkdirSync(join(f, "US-OLD-2"), { recursive: true });
+    writeFileSync(join(f, "US-OLD-2", "spec.md"), "## US-OLD-2 也历史做完 ✅\n");
+    const leg = renderFeaturesIndex(collectDossier(p));
+    expect(leg).toContain('class="tsub"');
+    expect(leg).toContain("含 2 历史");
+    // no legacy in the v3 fixture (US-A-1 delivered via latest/) → no annotation.
+    expect(html).not.toContain('class="tsub"');
   });
 
   it("self-containment: no external scripts/links/images; chrome + tokens inline", () => {
@@ -240,6 +292,17 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(full).toContain("◑ partial");
     expect(full).toContain("截屏待补");
     expect(full).toContain("score 9 good");
+  });
+
+  it("US-DOSSIER-008b: a legacy story's per-page spine is muted + carries a legacy banner; evidenced cards don't", () => {
+    const legacyFull = renderStoryDossier({ story: { ...story, legacy: true, delivered: true }, wish: "历史卡" });
+    expect(legacyFull).toContain('class="spine legacy"');
+    expect(legacyFull).toContain('class="legacy-banner"');
+    expect(legacyFull).toContain("历史交付");
+    // the evidenced fixture is not legacy → normal spine, no banner div
+    // (the CSS rule string is inlined on every page, so assert on the markup).
+    expect(full).not.toContain('class="spine legacy"');
+    expect(full).not.toContain('class="legacy-banner"');
   });
 
   it("US-EVID-013: retrospective renders structured self-score summary, note link, dimensions, and trend", () => {

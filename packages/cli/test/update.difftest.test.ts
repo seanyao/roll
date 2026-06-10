@@ -83,7 +83,10 @@ beforeAll(() => {
   dirs.push(pkgDir);
   cpSync(join(REPO, "conventions"), join(pkgDir, "conventions"), { recursive: true });
   cpSync(join(REPO, "lib"), join(pkgDir, "lib"), { recursive: true });
-  cpSync(join(REPO, "CHANGELOG.md"), join(pkgDir, "CHANGELOG.md"));
+  // US-PORT-021b: a FIXED fixture changelog — the update flow echoes it, so
+  // copying the live CHANGELOG.md would re-couple the snapshot to every release
+  // bump. The content is deterministic; only the flow is under test.
+  writeFileSync(join(pkgDir, "CHANGELOG.md"), "# Changelog\n\n## v0.0.0 — fixture\n\n- fixture changelog entry\n");
   // US-PORT-021: bin/roll is retired — a fabricated install tree no longer carries it.
   for (const s of ["roll-alpha", "roll-beta"]) {
     mkdirSync(join(pkgDir, "skills", s), { recursive: true });
@@ -190,7 +193,11 @@ function readCurlLog(): string {
 // stable across machines; CI is the cross-platform gate.
 function scrub(r: Run): Run {
   const n = (s: string): string =>
-    s.replace(/(?:\/private)?\/(?:var\/folders|tmp)\/[^\s"':)]*/g, "<TMP>");
+    s
+      .replace(/(?:\/private)?\/(?:var\/folders|tmp)\/[^\s"':)]*/g, "<TMP>")
+      // the running version is read from package.json — scrub it so the snapshot
+      // survives every release bump (US-PORT-021b: the version-coupling trap).
+      .replace(/v\d+\.\d+\.\d+/g, "v<VER>");
   return { status: r.status, stdout: n(r.stdout), stderr: n(r.stderr) };
 }
 

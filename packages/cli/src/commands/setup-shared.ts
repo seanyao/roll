@@ -268,6 +268,33 @@ function pullConventions(force: boolean): void {
 }
 
 // ─── _pull_skills (968) ───────────────────────────────────────────────────────
+function syncSkillTree(sourceDir: string, destDir: string): void {
+  mkdirSync(destDir, { recursive: true });
+  const sourceNames = new Set(listDirEntries(sourceDir));
+
+  for (const name of listDirEntries(destDir)) {
+    if (!sourceNames.has(name)) rmSync(join(destDir, name), { recursive: true, force: true });
+  }
+
+  for (const name of sourceNames) {
+    const src = join(sourceDir, name);
+    const dst = join(destDir, name);
+    let st;
+    try {
+      st = statSync(src);
+    } catch {
+      continue;
+    }
+    if (st.isDirectory()) {
+      if (lstatType(dst) !== "dir" && lstatType(dst) !== "none") rmSync(dst, { recursive: true, force: true });
+      syncSkillTree(src, dst);
+    } else if (st.isFile()) {
+      if (lstatType(dst) === "dir") rmSync(dst, { recursive: true, force: true });
+      if (!sameFile(src, dst)) copyFileSync(src, dst);
+    }
+  }
+}
+
 function pullSkills(): void {
   const pkgSkills = join(rollPkgDir(), "skills");
   if (!existsSync(pkgSkills)) return; // err+return 1; FS unchanged
@@ -281,16 +308,7 @@ function pullSkills(): void {
       continue;
     }
     const destDir = join(homeSkills, skillName);
-    mkdirSync(destDir, { recursive: true });
-    for (const name of listDirEntries(skillDir)) {
-      const f = join(skillDir, name);
-      try {
-        if (statSync(f).isFile()) copyFileSync(f, join(destDir, name));
-      } catch {
-        /* skip */
-      }
-    }
-    pruneDir(destDir, skillDir);
+    syncSkillTree(skillDir, destDir);
   }
   // Prune whole skills removed from the repo.
   for (const installedName of listDirEntries(homeSkills)) {

@@ -63,7 +63,10 @@ function storySpecPath(worktreeCwd: string, storyId: string): string | null {
   return null;
 }
 
-function storyHasAcBlock(worktreeCwd: string, storyId: string): boolean | null {
+/** Whether the story's spec carries an `**AC:**` checklist; null = spec not
+ *  found / unreadable. Exported for the FIX-246 remediation trigger, which must
+ *  share the gate's exact notion of "this delivery owes an ac-map". */
+export function storyHasAcBlock(worktreeCwd: string, storyId: string): boolean | null {
   const spec = storySpecPath(worktreeCwd, storyId);
   if (spec === null) return null;
   try {

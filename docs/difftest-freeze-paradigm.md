@@ -22,6 +22,16 @@ oracle's output as a literal captured at conversion time, and the test becomes a
 regression snapshot: it locks the behavior that was proven correct, with no
 engine spawn. This is the prerequisite for deleting `bin/roll` (US-PORT-010).
 
+**Status (US-PORT-021 / 021b): the bash/python oracles are gone.** `bin/roll`
+and the dead `lib/*.py` were deleted (US-PORT-021). The last 7 difftests that
+still shelled an oracle — `migrate` · `offboard` · `test` · `update` ·
+`changelog` · `slides` · `loop-story` — are now frozen snapshots
+(`toMatchSnapshot`) of the proven-correct TS output (US-PORT-021b). They scrub
+per-run volatility (the temp dir incl. macOS `/private` prefix, git SHAs,
+relative-time spans / cycle-id timestamps) so the snapshot is platform-stable;
+**CI (Linux/UTC) is the cross-platform gate** that catches any locale/TZ drift a
++8/macOS box would miss. No difftest spawns `bin/roll` / `python3` / `jq` anymore.
+
 ## The mechanical recipe
 
 For each `*.difftest.test.ts` that spawns a live oracle:

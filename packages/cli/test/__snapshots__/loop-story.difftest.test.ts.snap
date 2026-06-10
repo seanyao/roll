@@ -1,0 +1,66 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`diff-test: roll loop story == roll-loop-story.py > case-insensitive id matches 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "── us-cli-006 ─────────────────────────────────────────────────────────────────
+  cycles    2  (✓ 2  ✗ 0  ⏵ 0)
+  span      <DATE>  →  <DATE>
+  duration  18m   tokens  in 12k  out 3k  cache w 50k  r 800k
+  cost      $1.23    model  claude-opus-4-7-20251001
+  PRs       #777 ✓
+  recent    <CYCTS>-99999  ✓  —
+            <CYCTS>-99999  ✓  $1.23
+",
+}
+`;
+
+exports[`diff-test: roll loop story == roll-loop-story.py > panel for a story with cycles matches byte-for-byte 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "── US-CLI-006 ─────────────────────────────────────────────────────────────────
+  cycles    2  (✓ 2  ✗ 0  ⏵ 0)
+  span      <DATE>  →  <DATE>
+  duration  18m   tokens  in 12k  out 3k  cache w 50k  r 800k
+  cost      $1.23    model  claude-opus-4-7-20251001
+  PRs       #777 ✓
+  recent    <CYCTS>-99999  ✓  —
+            <CYCTS>-99999  ✓  $1.23
+",
+}
+`;
+
+exports[`diff-test: roll loop story == roll-loop-story.py > unknown story → stderr notice + exit 2 1`] = `
+{
+  "code": 2,
+  "stderr": "roll loop story: no cycles found for US-NOPE-999 in the last 30 days
+未找到 US-NOPE-999 在最近 30 天内的循环
+",
+  "stdout": "",
+}
+`;
+
+exports[`loop eval wrapper (US-PORT-007) > help text == bash \`bin/roll loop eval -h\` 1`] = `
+{
+  "code": 0,
+  "stderr": "",
+  "stdout": "Usage: roll loop eval [N]
+
+  Result-eval trend over the last N scored cycles (default 14).
+  Reads each runs.jsonl record's result_eval block and reports the mean and
+  minimum cycle score (1..10), each rubric dimension's hit-rate, and a trend
+  arrow. Cycles without a result_eval (older schema) are skipped. With fewer
+  than 3 scored cycles, prints an "(n/a) need 3" notice.
+
+  近 N 轮 cycle 的结果评分趋势（默认 14）。
+  读取每条 runs.jsonl 的 result_eval，输出均分 / 最低分 / 各维度命中率 / 趋势箭头。
+  无 result_eval 的旧记录跳过；样本不足 3 个时提示 (n/a) need 3。
+
+Examples:
+  roll loop eval
+  roll loop eval 30
+",
+}
+`;

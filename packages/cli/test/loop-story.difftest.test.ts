@@ -8,7 +8,7 @@
  * resolves deterministically.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -16,18 +16,28 @@ import { loopEvalCommand, loopStoryCommand } from "../src/commands/dashboard.js"
 import { renderState } from "../src/render.js";
 
 const REPO = resolve(__dirname, "../../..");
-const PY_STORY = join(REPO, "lib", "roll-loop-story.py");
-const BASH = join(REPO, "bin", "roll");
-// US-PORT-021: the python/bash oracles are retired. When absent, parity degrades
-// to a determinism check (a second in-process TS run on the same fixture) while
-// the TS command still executes. US-PORT-021b will freeze these as snapshots.
-const PY_OK = existsSync(PY_STORY);
-const BASH_OK = existsSync(BASH);
 const dirs: string[] = [];
 
 afterAll(() => {
   for (const d of dirs) execFileSync("rm", ["-rf", d]);
 });
+
+// US-PORT-021b: the python/bash oracles are retired; freeze the proven-correct
+// TS output as a snapshot. Scrub the per-run sandbox dirs (incl. macOS /private
+// prefix) so it is stable across machines; CI is the cross-platform gate.
+function scrub(r: { stdout: string; stderr: string; code: number }, dir: string): { stdout: string; stderr: string; code: number } {
+  // The panel's span + cycle ids are seeded RELATIVE to now (the fixture stamps
+  // cycles minutes-ago), so freeze them to stable tokens — the original parity
+  // test only matched because bash + TS ran at the same instant.
+  const n = (s: string): string =>
+    s
+      .split(dir)
+      .join("<DIR>")
+      .replace(/(?:\/private)?\/(?:var\/folders|tmp)\/[^\s"':)]*/g, "<TMP>")
+      .replace(/\d{8}-\d{6}/g, "<CYCTS>") // cycle-id timestamp prefix (keeps -<pid> suffix)
+      .replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g, "<DATE>"); // span dates
+  return { stdout: n(r.stdout), stderr: n(r.stderr), code: r.code };
+}
 
 /** Run a TS command in-process with env/cwd, capturing stdout + stderr + code. */
 function tsRun(
@@ -72,16 +82,6 @@ function tsRun(
     }
   }
   return { stdout: out.join(""), stderr: err.join(""), code };
-}
-
-function run(bin: string, args: string[], env: Record<string, string>, cwd: string): { stdout: string; stderr: string; code: number } {
-  try {
-    const stdout = execFileSync(bin, args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
-    return { stdout, stderr: "", code: 0 };
-  } catch (e) {
-    const ex = e as { status?: number; stdout?: string; stderr?: string };
-    return { stdout: ex.stdout ?? "", stderr: ex.stderr ?? "", code: ex.status ?? -1 };
-  }
 }
 
 function sandboxEnv(extra: Record<string, string> = {}): Record<string, string> {
@@ -191,33 +191,21 @@ describe("diff-test: roll loop story == roll-loop-story.py", () => {
     const env = sandboxEnv();
     const proj = seedCycles(env);
     const ts = tsRun(loopStoryCommand, env, ["US-CLI-006"], proj);
-    const py = PY_OK
-      ? run("python3", [PY_STORY, "US-CLI-006"], env, proj)
-      : tsRun(loopStoryCommand, env, ["US-CLI-006"], proj);
-    expect(ts.stdout).toBe(py.stdout);
-    expect(ts.code).toBe(py.code);
+    expect(scrub(ts, proj)).toMatchSnapshot();
   });
 
   it("case-insensitive id matches", () => {
     const env = sandboxEnv();
     const proj = seedCycles(env);
     const ts = tsRun(loopStoryCommand, env, ["us-cli-006"], proj);
-    const py = PY_OK
-      ? run("python3", [PY_STORY, "us-cli-006"], env, proj)
-      : tsRun(loopStoryCommand, env, ["us-cli-006"], proj);
-    expect(ts.stdout).toBe(py.stdout);
-    expect(ts.code).toBe(py.code);
+    expect(scrub(ts, proj)).toMatchSnapshot();
   });
 
   it("unknown story → stderr notice + exit 2", () => {
     const env = sandboxEnv();
     const proj = seedCycles(env);
     const ts = tsRun(loopStoryCommand, env, ["US-NOPE-999"], proj);
-    const py = PY_OK
-      ? run("python3", [PY_STORY, "US-NOPE-999"], env, proj)
-      : tsRun(loopStoryCommand, env, ["US-NOPE-999"], proj);
-    expect(ts.stderr).toBe(py.stderr);
-    expect(ts.code).toBe(py.code);
+    expect(scrub(ts, proj)).toMatchSnapshot();
   });
 
   it("--json on unknown story → exit 2, valid JSON with count 0", () => {
@@ -235,11 +223,7 @@ describe("loop eval wrapper (US-PORT-007)", () => {
   it("help text == bash `bin/roll loop eval -h`", () => {
     const env = sandboxEnv();
     const ts = tsRun(loopEvalCommand, env, ["-h"], REPO);
-    const py = BASH_OK
-      ? run(BASH, ["loop", "eval", "-h"], env, REPO)
-      : tsRun(loopEvalCommand, env, ["-h"], REPO);
-    expect(ts.stdout).toBe(py.stdout);
-    expect(ts.code).toBe(py.code);
+    expect(scrub(ts, REPO)).toMatchSnapshot();
   });
 
   it("non-integer N → [roll] error on stderr, exit 1", () => {

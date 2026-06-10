@@ -29,8 +29,8 @@
  * `delete` mutate the cwd, so each case builds a fixture per side and the two
  * are byte-compared.
  */
-import { execSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -86,18 +86,6 @@ function baseEnv(cwd: string, extra: Record<string, string>): Record<string, str
   };
 }
 
-function bashSlides(cwd: string, args: string[], extra: Record<string, string> = {}): Run {
-  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
-  // (two TS runs on identical fixtures) while the TS command still executes.
-  // US-PORT-021b will freeze these as snapshots.
-  if (!existsSync(join(REPO, "bin", "roll"))) return tsSlides(cwd, args, extra);
-  const r = spawnSync(join(REPO, "bin", "roll"), ["slides", ...args], {
-    cwd,
-    encoding: "utf8",
-    env: baseEnv(cwd, extra),
-  });
-  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
 
 const ENV_KEYS = [
   "PATH",
@@ -147,30 +135,30 @@ function tsSlides(cwd: string, args: string[], extra: Record<string, string> = {
   return { status: status ?? 0, stdout: outChunks.join(""), stderr: errChunks.join("") };
 }
 
-/** Run a builder for each side (cmd mutates cwd), then byte-compare Run. */
-function both(build: () => string, args: string[], extra: Record<string, string> = {}): void {
-  const bashCwd = build();
-  const tsCwd = build();
-  const b = bashSlides(bashCwd, args, extra);
-  const t = tsSlides(tsCwd, args, extra);
-  expect(t).toEqual(b);
+// US-PORT-021b: bash oracle retired → freeze the proven-correct TS output as a
+// snapshot. Scrub per-run temp paths (CI is the cross-platform gate).
+function scrub(r: Run, cwd: string): Run {
+  const n = (s: string): string =>
+    s.split(cwd).join("<DIR>").replace(/(?:\/private)?\/(?:var\/folders|tmp)\/[^\s"':)]*/g, "<TMP>");
+  return { status: r.status, stdout: n(r.stdout), stderr: n(r.stderr) };
 }
 
-/** Compare both the Run AND the rendered HTML artefact byte-for-byte. */
+/** Run the builder, freeze the Run as a snapshot. */
+function both(build: () => string, args: string[], extra: Record<string, string> = {}): void {
+  const tsCwd = build();
+  expect(scrub(tsSlides(tsCwd, args, extra), tsCwd)).toMatchSnapshot();
+}
+
+/** Freeze both the Run AND the rendered HTML artefact. */
 function bothWithHtml(
   build: () => string,
   args: string[],
   htmlRel: string,
   extra: Record<string, string> = {},
 ): void {
-  const bashCwd = build();
   const tsCwd = build();
-  const b = bashSlides(bashCwd, args, extra);
-  const t = tsSlides(tsCwd, args, extra);
-  expect(t).toEqual(b);
-  const bHtml = readFileSync(join(bashCwd, htmlRel), "utf8");
-  const tHtml = readFileSync(join(tsCwd, htmlRel), "utf8");
-  expect(tHtml).toEqual(bHtml);
+  expect(scrub(tsSlides(tsCwd, args, extra), tsCwd)).toMatchSnapshot();
+  expect(readFileSync(join(tsCwd, htmlRel), "utf8")).toMatchSnapshot();
 }
 
 // ── deck fixtures ─────────────────────────────────────────────────────────────

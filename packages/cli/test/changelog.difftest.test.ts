@@ -13,7 +13,7 @@
  * (the deterministic path); the live-agent step is never invoked (documented in
  * changelog.ts: the TS styler is injectable + default-off).
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -102,22 +102,13 @@ function envBase(extra: Record<string, string>): Record<string, string> {
   };
 }
 
-function bashCl(args: string[], proj: string, extra: Record<string, string>): Run {
-  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
-  // (two TS runs on identical fixtures) while the TS command still executes.
-  // US-PORT-021b will freeze these as snapshots.
-  if (!existsSync(join(REPO, "bin", "roll"))) return tsCl(args, proj, extra);
-  try {
-    const stdout = execFileSync(join(REPO, "bin", "roll"), ["changelog", ...args], {
-      cwd: proj,
-      encoding: "utf8",
-      env: envBase(extra),
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (e) {
-    const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { status: err.status ?? 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
-  }
+// US-PORT-021b: bash oracle retired → freeze the proven-correct TS output as a
+// snapshot. Scrub per-run temp paths so it is stable across machines (CI is the
+// cross-platform gate; locale pinned via envBase).
+function scrub(r: Run, proj: string): Run {
+  const n = (s: string): string =>
+    s.split(proj).join("<DIR>").replace(/\/(?:var\/folders|tmp)\/[^\s"':)]*/g, "<TMP>");
+  return { status: r.status, stdout: n(r.stdout), stderr: n(r.stderr) };
 }
 
 const ENV_KEYS = ["PATH", "HOME", "ROLL_HOME", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG"];
@@ -155,11 +146,9 @@ function tsCl(args: string[], proj: string, extra: Record<string, string>): Run 
 
 describe("diff-test: roll changelog == bash oracle", () => {
   it("generate --no-ai → deterministic draft (release-aware filter)", () => {
-    const pb = freshProj();
     const pt = freshProj();
-    const b = bashCl(["generate", "--no-ai"], pb, {});
     const t = tsCl(["generate", "--no-ai"], pt, {});
-    expect(t).toEqual(b);
+    expect(scrub(t, pt)).toMatchSnapshot();
     // sanity: only the two in-window stories appear, internal/old filtered out.
     expect(t.stdout).toContain("US-CL-006");
     expect(t.stdout).toContain("FIX-178");
@@ -168,40 +157,30 @@ describe("diff-test: roll changelog == bash oracle", () => {
   });
 
   it("generate --json → machine-readable (deterministic)", () => {
-    const pb = freshProj();
     const pt = freshProj();
-    expect(tsCl(["generate", "--json"], pt, {})).toEqual(bashCl(["generate", "--json"], pb, {}));
+    expect(scrub(tsCl(["generate", "--json"], pt, {}), pt)).toMatchSnapshot();
   });
 
   it("generate --no-ai --write → splices ## Unreleased into CHANGELOG.md", () => {
     const seed = "# Changelog\n\n## v1.0.0\n\n- old release note\n";
-    const pb = freshProj(seed);
     const pt = freshProj(seed);
-    const b = bashCl(["generate", "--no-ai", "--write"], pb, {});
     const t = tsCl(["generate", "--no-ai", "--write"], pt, {});
-    expect(t).toEqual(b);
-    expect(readFileSync(join(pt, "CHANGELOG.md"), "utf8")).toBe(
-      readFileSync(join(pb, "CHANGELOG.md"), "utf8"),
-    );
+    expect(scrub(t, pt)).toMatchSnapshot();
+    expect(readFileSync(join(pt, "CHANGELOG.md"), "utf8")).toMatchSnapshot();
   });
 
   it("generate --no-ai --write into a file with existing ## Unreleased (replace)", () => {
     const seed = "# Changelog\n\n## Unreleased\n\n### 旧分类\n\n- stale\n\n## v1.0.0\n\n- old\n";
-    const pb = freshProj(seed);
     const pt = freshProj(seed);
-    const b = bashCl(["generate", "--no-ai", "--write"], pb, {});
     const t = tsCl(["generate", "--no-ai", "--write"], pt, {});
-    expect(t).toEqual(b);
-    expect(readFileSync(join(pt, "CHANGELOG.md"), "utf8")).toBe(
-      readFileSync(join(pb, "CHANGELOG.md"), "utf8"),
-    );
+    expect(scrub(t, pt)).toMatchSnapshot();
+    expect(readFileSync(join(pt, "CHANGELOG.md"), "utf8")).toMatchSnapshot();
   });
 
   it("generate --no-ai with no Done stories → no-new note", () => {
     // A backlog without any ✅ Done rows in window → "# No new ... found".
-    const pb = mkProjEmpty();
     const pt = mkProjEmpty();
-    expect(tsCl(["generate", "--no-ai"], pt, {})).toEqual(bashCl(["generate", "--no-ai"], pb, {}));
+    expect(scrub(tsCl(["generate", "--no-ai"], pt, {}), pt)).toMatchSnapshot();
   });
 
   // US-PORT-005: the DEFAULT `generate` (no flags) is now the deterministic
@@ -233,11 +212,8 @@ describe("diff-test: roll changelog == bash oracle", () => {
 
   for (const lang of ["en", "zh"]) {
     it(`unknown subcommand → exit 1 (${lang})`, () => {
-      const pb = freshProj();
       const pt = freshProj();
-      expect(tsCl(["bogus"], pt, { ROLL_LANG: lang })).toEqual(
-        bashCl(["bogus"], pb, { ROLL_LANG: lang }),
-      );
+      expect(scrub(tsCl(["bogus"], pt, { ROLL_LANG: lang }), pt)).toMatchSnapshot();
     });
   }
 });

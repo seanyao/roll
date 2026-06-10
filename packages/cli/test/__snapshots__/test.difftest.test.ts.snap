@@ -1,0 +1,56 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`diff-test: roll test == bash oracle (post-REFACTOR-046 surface) > --reset type=none → nothing-to-reset note, exit 0 1`] = `
+{
+  "status": 0,
+  "stderr": "[roll] isolation type 'none' has nothing to reset (host execution is stateless)
+",
+  "stdout": "",
+}
+`;
+
+exports[`diff-test: roll test == bash oracle (post-REFACTOR-046 surface) > --reset with a held lock → fast-fail exit 1 1`] = `
+{
+  "status": 1,
+  "stderr": "[roll] roll test --reset: another reset is already in progress
+  lock: .roll/.iso-reset.lock (delete manually if stale)
+",
+  "stdout": "",
+}
+`;
+
+exports[`diff-test: roll test == bash oracle (post-REFACTOR-046 surface) > --where type=none → host 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "host
+",
+}
+`;
+
+exports[`diff-test: roll test == bash oracle (post-REFACTOR-046 surface) > --where unknown type → unknown:<type> token (extension point) 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "unknown:docker
+",
+}
+`;
+
+exports[`diff-test: roll test == bash oracle (post-REFACTOR-046 surface) > default exec type=none → forwarded npm test -- --affected 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "npm-shim ran: test -- --affected
+",
+}
+`;
+
+exports[`diff-test: roll test == bash oracle (post-REFACTOR-046 surface) > explicit -- tests/ passthrough type=none 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "npm-shim ran: test -- tests/
+",
+}
+`;

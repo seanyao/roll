@@ -34,7 +34,7 @@
  * shim dir carries a tiny `python3` shim that prints `test_isolation.type` with
  * a stdlib-only regex reader (no yaml import).
  */
-import { execSync, spawnSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -120,21 +120,6 @@ function baseEnv(proj: string, shimDir: string, extra: Record<string, string>): 
   };
 }
 
-function bashTest(proj: string, args: string[], shimDir: string, extra: Record<string, string> = {}): Run {
-  // US-PORT-021: bin/roll retired → parity degrades to a determinism check
-  // (two TS runs on identical fixtures) while the TS command still executes.
-  // US-PORT-021b will freeze these as snapshots.
-  if (!existsSync(join(REPO, "bin", "roll"))) return tsTest(proj, args, shimDir, extra);
-  // Capture stdout AND stderr (cmd_test routes notes/errors to stderr even on
-  // exit 0, so a stdout-only capture would drop them).
-  const r = spawnSync(join(REPO, "bin", "roll"), ["test", ...args], {
-    cwd: proj,
-    encoding: "utf8",
-    env: baseEnv(proj, shimDir, extra),
-  });
-  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
-
 const ENV_KEYS = [
   "PATH",
   "HOME",
@@ -182,17 +167,26 @@ function tsTest(proj: string, args: string[], shimDir: string, extra: Record<str
 }
 
 /** Run both against FRESH projects built from the same spec, byte-compare. */
+// US-PORT-021b: bash oracle retired → freeze the proven-correct TS output as a
+// snapshot. Scrub per-run temp paths so it is stable across machines (CI is the
+// cross-platform gate; locale pinned via env in tsTest).
+function scrub(r: Run, ...dirs: string[]): Run {
+  const n = (s: string): string => {
+    let o = s;
+    for (const d of dirs) o = o.split(d).join("<DIR>");
+    return o.replace(/\/(?:var\/folders|tmp)\/[^\s"':)]*/g, "<TMP>");
+  };
+  return { status: r.status, stdout: n(r.stdout), stderr: n(r.stderr) };
+}
+
 function both(
   buildType: string | null,
   args: string[],
   shimDir: string,
   extra: Record<string, string> = {},
 ): void {
-  const bp = projWith(buildType);
   const tp = projWith(buildType);
-  const b = bashTest(bp, args, shimDir, extra);
-  const t = tsTest(tp, args, shimDir, extra);
-  expect(t).toEqual(b);
+  expect(scrub(tsTest(tp, args, shimDir, extra), tp, shimDir)).toMatchSnapshot();
 }
 
 describe("diff-test: roll test == bash oracle (post-REFACTOR-046 surface)", () => {
@@ -223,11 +217,8 @@ describe("diff-test: roll test == bash oracle (post-REFACTOR-046 surface)", () =
       writeFileSync(join(proj, ".roll", ".iso-reset.lock"), "99999\n");
       return proj;
     };
-    const bp = build();
     const tp = build();
-    const b = bashTest(bp, ["--reset"], binNpm);
-    const t = tsTest(tp, ["--reset"], binNpm);
-    expect(t).toEqual(b);
+    expect(scrub(tsTest(tp, ["--reset"], binNpm), tp, binNpm)).toMatchSnapshot();
   });
 });
 

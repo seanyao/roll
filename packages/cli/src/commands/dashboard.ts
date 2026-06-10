@@ -249,6 +249,31 @@ const V3_TYPE_TO_STAGE: Record<string, string> = {
  * the numeric epoch (seconds, or ms when ≥ 1e12) → an ISO string `parseTs`
  * understands.
  */
+/**
+ * FIX-248 — fold every outcome literal (v2 stages, v3 events, v3 runs rows)
+ * onto the panel's classification vocabulary. The panel counts/glyphs key on
+ * exactly "fail" / "done" / "idle" / "running"; v3 emits "failed" / "blocked" /
+ * "aborted" / "delivered" / "published" / "merged" — without this fold the
+ * 2026-06-10 panel read "15 cycles · 0 failed" against 14 real failures.
+ */
+const OUTCOME_FOLD: Record<string, string> = {
+  // failure family
+  failed: "fail",
+  blocked: "fail",
+  aborted: "fail",
+  interrupted: "fail",
+  fail: "fail",
+  // success family ("published" = delivered, merge pending — FIX-244)
+  delivered: "done",
+  merged: "done",
+  published: "done",
+  done: "done",
+};
+
+export function panelOutcome(o: string): string {
+  return OUTCOME_FOLD[o] ?? o;
+}
+
 export function normalizeRawEvent(raw: unknown): RawEvent {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     return raw as RawEvent; // parseTs(undefined) will drop it downstream
@@ -490,7 +515,7 @@ function aggregate(events: RawEvent[], cron: CronEntry[]): Cycle[] {
       cy.start = e._ts;
     } else if (stage === "cycle_end") {
       cy.end = e._ts;
-      cy.outcome = e.outcome ?? "done";
+      cy.outcome = panelOutcome(e.outcome ?? "done"); // FIX-248: v3 literals fold
     } else if (stage === "idle") {
       cy.end = e._ts;
       cy.outcome = "idle";
@@ -696,16 +721,23 @@ function applyRunRow(cy: Cycle, r: RunRecord, ts: Date | null): void {
       cy.duration_s = r.duration_sec;
     }
   }
+  // FIX-248: the runs row carries the six-state truth (idle/done/published/
+  // failed/...) — let it refine any coarse or failure-class event outcome, and
+  // fold v3 literals onto the panel vocabulary either way. "built" appears
+  // both as the row claim (→ done, v2 parity) and as v3's idle-class
+  // cycle:end outcome — the row status always wins here.
   if (
     (cy.outcome === "unknown" ||
       cy.outcome === "running" ||
       cy.outcome === "idle" ||
+      cy.outcome === "fail" ||
       cy.outcome === "failed" ||
+      cy.outcome === "built" ||
       cy.outcome === "orphan") &&
     r.status
   ) {
-    const map: Record<string, string> = { built: "done", interrupted: "fail" };
-    cy.outcome = map[r.status] ?? r.status;
+    const map: Record<string, string> = { built: "done" };
+    cy.outcome = map[r.status] ?? panelOutcome(r.status);
   }
   // FIX-213: surface the v3 row's own cost/token fields. v2 rows omit these
   // (cost arrives via `usage` events) so this is a no-op for them, but the v3
@@ -714,11 +746,18 @@ function applyRunRow(cy: Cycle, r: RunRecord, ts: Date | null): void {
   if (typeof r["cost_usd"] === "number" && cy.cost_list == null) cy.cost_list = r["cost_usd"];
   if (typeof r["tokens_in"] === "number" && !cy.input_tokens) cy.input_tokens = r["tokens_in"];
   if (typeof r["tokens_out"] === "number" && !cy.output_tokens) cy.output_tokens = r["tokens_out"];
+  // FIX-249 AC3: the v3 row's cache split + model feed the same columns the
+  // v2 `usage` events used to fill.
+  if (typeof r["tokens_cache_read"] === "number" && !cy.cache_read_tokens) cy.cache_read_tokens = r["tokens_cache_read"];
+  if (typeof r["tokens_cache_write"] === "number" && !cy.cache_creation_tokens) cy.cache_creation_tokens = r["tokens_cache_write"];
+  if (typeof r["model"] === "string" && r["model"] !== "" && !cy.model) cy.model = r["model"];
   if (!cy.story && cy.built.length > 0) cy.story = cy.built[0] ?? null;
   if (!cy.story && typeof r["story_id"] === "string" && r["story_id"] !== "") cy.story = r["story_id"];
 }
 
-export function mergeRunsIntoCycles(cycles: Cycle[], runs: Record<string, RunRecord>): void {
+/** @returns the run_ids that matched a rendered cycle (id- or ts-window-match)
+ *  — FIX-248 AC2 pins the agents line to exactly this set. */
+export function mergeRunsIntoCycles(cycles: Cycle[], runs: Record<string, RunRecord>): Set<string> {
   const consumed = new Set<string>();
   const idMatched = new Set<Cycle>();
 
@@ -779,6 +818,7 @@ export function mergeRunsIntoCycles(cycles: Cycle[], runs: Record<string, RunRec
     consumed.add(rid);
     applyRunRow(cy, r, ts);
   }
+  return consumed;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1249,7 +1289,7 @@ function pyLjust(s: string, w: number): string {
   return s.length >= w ? s : s + " ".repeat(w - s.length);
 }
 
-function agentSummaryLine(records: RunRecord[], windowCycles = 50, minSample = 5): string {
+export function agentSummaryLine(records: RunRecord[], windowCycles = 50, minSample = 5): string {
   if (records.length === 0 || windowCycles <= 0) return "";
   const tail: RunRecord[] = [];
   for (const rec of records.slice(-windowCycles)) {
@@ -1270,7 +1310,9 @@ function agentSummaryLine(records: RunRecord[], windowCycles = 50, minSample = 5
     const cur = counts.get(agent);
     if (cur) {
       cur[1] += 1;
-      if (rec.status === "built") cur[0] += 1;
+      // FIX-248: v3 success statuses — done/published/merged (and v2's built).
+      const st = rec.status ?? "";
+      if (st === "built" || st === "done" || st === "published" || st === "merged" || st === "delivered") cur[0] += 1;
     }
   }
   if (order.length === 0) return "";
@@ -1590,7 +1632,7 @@ function render(
 ): void {
   const { days, lang, runs, gitMerges, claudeSlug, now } = args;
   const cycles = aggregate(events, cron);
-  if (Object.keys(runs).length > 0) mergeRunsIntoCycles(cycles, runs);
+  const matchedRunIds = Object.keys(runs).length > 0 ? mergeRunsIntoCycles(cycles, runs) : new Set<string>();
   if (Object.keys(gitMerges).length > 0) repairOrphanCyclesFromGit(cycles, gitMerges);
   backfillUsageFromClaudeSessions(cycles, claudeSlug ?? "");
   const byDay = bucketByDay(cycles);
@@ -1827,7 +1869,11 @@ function render(
   try {
     const runsRecords = Object.values(runs);
     runsRecords.sort((a, b) => String(a.ts ?? "").localeCompare(String(b.ts ?? "")));
-    agentLine = agentSummaryLine(runsRecords, 50);
+    // FIX-248 AC2: same window, same denominator — only the runs rows whose
+    // cycle the panel is actually rendering (was: tail-50 of ALL history,
+    // contradicting the ROLLUP/RECENT sections on the same screen).
+    const windowRecords = runsRecords.filter((r0) => matchedRunIds.has(String(r0.run_id ?? "")));
+    agentLine = agentSummaryLine(windowRecords, Math.max(windowRecords.length, 1));
   } catch {
     agentLine = "";
   }

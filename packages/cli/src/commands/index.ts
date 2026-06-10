@@ -64,6 +64,7 @@ import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
 import { releaseShipCommand } from "./release-ship.js";
+import { releaseWaiverCommand } from "./release-waiver.js";
 import { setupCommand } from "./setup.js";
 import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
@@ -147,7 +148,12 @@ export function registerAll(): void {
   // commits, tags, or publishes — a release is always a human decision (loop
   // hard rule). No bash fallback: v2 had no `roll release` subcommand (the flow
   // lived in the private ops wrapper, which stays for the actual publish).
-  registerPorted("release", (args) => (args[0] === "ship" ? releaseShipCommand(args.slice(1)) : releaseCommand(args)));
+  registerPorted("release", (args) => {
+    if (args[0] === "ship") return releaseShipCommand(args.slice(1));
+    // US-TRUTH-005: the recorded owner bypass for the consistency gate.
+    if (args[0] === "waiver") return releaseWaiverCommand(args.slice(1));
+    return releaseCommand(args);
+  });
   // `prices`: full surface TS (show/help/unknown + refresh network write).
   // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
   // fallback remains (US-PORT-017).

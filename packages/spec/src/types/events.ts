@@ -77,6 +77,11 @@ export type RollEvent =
   | { type: "policy:auto_merge"; prNumber: number; rule: string; ts: number }
   | { type: "policy:flag_review"; prNumber: number; rule: string; ts: number }
   | { type: "policy:safety_pause"; loop: LoopType; reason: string; ts: number }
+  // Release gate (US-TRUTH-005) — the gate verdict and any owner waiver are
+  // FACTS in the stream: a bypass with no record is itself drift, and a later
+  // audit must SEE every waiver (release_verdict / release_waiver anchors).
+  | { type: "release:gate"; tag: string; verdict: "pass" | "blocked" | "waived"; failCount: number; waivedRules: string[]; ts: number }
+  | { type: "release:waiver"; reason: string; scope: string; expiresSec: number; operator: string; ts: number }
   // US-TRUTH-001 — the versioned complete-or-reasoned terminal record. One per
   // cycle from schema v1 on; events older than the switch are GRANDFATHERED
   // (read under legacy rules, never retro-rewritten).

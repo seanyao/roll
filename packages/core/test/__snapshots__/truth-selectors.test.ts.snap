@@ -1,0 +1,35 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AC3/AC6 — outputs freeze on the US-TRUTH-002 drift fixtures and stay serializable > the five dated incidents derive stable verdicts 1`] = `
+{
+  "acmap-omission": {
+    "reason": "acmap_missing",
+    "state": "fail",
+    "storyId": "FIX-232",
+  },
+  "cost-blind": {
+    "cycleId": "C-NOCOST",
+    "outcome": "delivered",
+    "reason": "usage_missing",
+    "state": "warn",
+  },
+  "done-no-merge": {
+    "delivered": false,
+    "reason": "premature_done",
+    "state": "fail",
+    "storyId": "US-X-001",
+  },
+  "failed-cycle-merged-pr": {
+    "cycleId": "20260610-212711-40684",
+    "outcome": "delivered",
+    "reason": "phantom_failure_uncorrected",
+    "state": "fail",
+  },
+  "phantom-failure-pause": {
+    "cycleId": "20260610-222703-13871",
+    "outcome": "delivered",
+    "reason": "phantom_failure_uncorrected",
+    "state": "fail",
+  },
+}
+`;

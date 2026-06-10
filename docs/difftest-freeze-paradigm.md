@@ -1,26 +1,26 @@
 # Difftest Freeze Paradigm
 
-> Reusable convention for retiring the bash/python oracle from `*.difftest.test.ts`.
-> Established by US-PORT-009a; reused by US-PORT-009b–e.
+> How Roll locks a command's observable contract: a **frozen expectation
+> snapshot**, captured once and compared byte-for-byte thereafter — no engine
+> spawn, no live oracle.
 >
-> 范式：把对拍 live oracle 的 difftest 改成对拍冻结期望值。
-> US-PORT-009a 立，009b–e 复用。
+> 范式：命令的可观察契约用冻结期望快照守护——抓一次基线，之后逐字节对拍。
 
 ## Why
 
-The v3 port grew under a **diff-test discipline**: each TS function was proven
-byte-for-byte equal to its v2 bash (`bin/roll`) or python (`lib/*.py`) oracle by
-spawning the oracle at test time and comparing. That guaranteed faithful porting,
-but it also means ~50 test files keep the v2 engine alive — `bin/roll` cannot be
-deleted while tests still `sed`-extract functions from it or `source lib/*.sh`.
+A command's contract is its observable surface — args, stdout, side effects,
+exit code, the files and events it writes. Tests must lock *that*, not the
+implementation. The freeze paradigm captures the proven-correct output once and
+asserts against it forever: a regression snapshot, with no external process in
+the loop.
 
-差异测试在移植期证明了 TS 与 v2 引擎逐字节相等；但代价是测试期仍 spawn 旧引擎，
-`bin/roll` 因此删不掉。卸下 oracle 职务 = 测试期不再 spawn 引擎。
+一段行为的契约是它的可观察面（入参 / stdout / 副作用 / 退出码 / 写的文件与事件）。
+测试锁的是这个，不是实现。冻结范式抓一次正确输出、之后永久对拍——回归快照，测试期不起任何外部进程。
 
-Once a function is proven equal, the oracle's job is done. We **freeze** the
-oracle's output as a literal captured at conversion time, and the test becomes a
-regression snapshot: it locks the behavior that was proven correct, with no
-engine spawn. This is the prerequisite for deleting `bin/roll` (US-PORT-010).
+> History: this convention was established while porting Roll's engine to
+> TypeScript — each function was first proven byte-equal to its bash/python
+> predecessor, then that output was frozen so the predecessor could be retired.
+> Those engines are now gone; the snapshots remain as the regression guard.
 
 **Status (US-PORT-021 / 021b): the bash/python oracles are gone.** `bin/roll`
 and the dead `lib/*.py` were deleted (US-PORT-021). The last 7 difftests that

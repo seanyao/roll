@@ -125,6 +125,38 @@ export function parseBacklog(content: string): BacklogItem[] {
  * every row whose id matches `pattern` (ID-token-anchored). Returns the new
  * content and the count of rewritten rows. Line endings are preserved verbatim.
  */
+/**
+ * FIX-250 — append a freshly minted card's row. Placement: after the LAST row
+ * already linking `features/<epic>/` (the card's siblings); when the epic has
+ * no rows yet, after the last table row in the file. Returns the new content
+ * and whether a row was appended (an existing row for the id is a no-op so the
+ * command is idempotent).
+ */
+export function appendBacklogRow(
+  content: string,
+  row: { id: string; title: string; epic: string },
+): { content: string; appended: boolean } {
+  if (content.includes(`| [${row.id}]`)) return { content, appended: false };
+  const line = `| [${row.id}](.roll/features/${row.epic}/${row.id}/spec.md) | ${row.title} | 📋 Todo |`;
+  const lines = content.split("\n");
+  let anchor = -1;
+  let lastTableRow = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i] ?? "";
+    if (!l.startsWith("| [")) continue;
+    lastTableRow = i;
+    if (l.includes(`features/${row.epic}/`)) anchor = i;
+  }
+  const at = anchor !== -1 ? anchor : lastTableRow;
+  if (at === -1) {
+    // no tables at all — append a minimal section at the end.
+    const tail = `\n## Epic: ${row.epic}\n\n| ID | Description | Status |\n|----|----|----|\n${line}\n`;
+    return { content: content.replace(/\n*$/, "\n") + tail, appended: true };
+  }
+  lines.splice(at + 1, 0, line);
+  return { content: lines.join("\n"), appended: true };
+}
+
 export function markStatus(content: string, pattern: string, newStatus: string): MarkResult {
   let count = 0;
   const lines = content.split("\n");

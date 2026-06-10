@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { UNCATEGORIZED, generateIndex } from "../lib/archive.js";
+import { BacklogStore, appendBacklogRow } from "@roll/core";
 import { STORY_ID_RE, renderSpecMd, renderStoryPage } from "../lib/story-page.js";
 import { refreshAggregates } from "./index-gen.js";
 
@@ -34,8 +35,11 @@ function flagValue(args: string[], flag: string): string | undefined {
 export function storyNewCommand(args: string[]): number {
   if (args[0] === "--help" || args[0] === "-h" || args[0] === undefined) {
     process.stdout.write(
-      "Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>]\n" +
-        "  Mint the card folder: features/<epic>/<ID>/spec.md + index.html, refresh index.json\n",
+      "Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>] [--no-index]\n" +
+        "  The ONE card-minting entry: card folder (spec.md + index.html) + backlog row\n" +
+        "  + index/dossier refresh. --no-index defers the refresh for batch minting —\n" +
+        "  finish a batch with a single `roll index`.\n" +
+        "  单一建卡入口:卡夹 + backlog 行 + 索引刷新一步完成;批量建卡用 --no-index,收尾统一 roll index。\n",
     );
     return args[0] === undefined ? 1 : 0;
   }
@@ -68,14 +72,40 @@ export function storyNewCommand(args: string[]): number {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "spec.md"), renderSpecMd(meta), "utf8");
   writeFileSync(join(dir, "index.html"), renderStoryPage(meta), "utf8");
+  // FIX-250: a card is BORN with its backlog row — "单一建卡入口" was only half
+  // the chain while agents still hand-appended rows. Optimistically-locked
+  // write (I9); an existing row is a no-op so re-runs stay idempotent.
+  let rowNote = "";
   try {
-    generateIndex(cwd);
-  } catch {
-    /* index refresh is best-effort; attest re-derives via live walk */
+    const backlogPath = join(cwd, ".roll", "backlog.md");
+    if (existsSync(backlogPath)) {
+      const store = new BacklogStore();
+      const before = store.readBacklog(backlogPath);
+      let appended = false;
+      store.writeBacklog(backlogPath, before.hash, (content) => {
+        const r = appendBacklogRow(content, { id, title, epic });
+        appended = r.appended;
+        return r.content;
+      });
+      rowNote = appended ? `  backlog row appended (📋 Todo)\n` : `  backlog row already present — untouched\n`;
+    } else {
+      rowNote = "  no .roll/backlog.md — row skipped\n";
+    }
+  } catch (e) {
+    rowNote = `  backlog row append failed (${e instanceof Error ? e.message : "?"}) — append it manually\n`;
   }
-  // FIX-231: a new card changes the board's truth — refresh the aggregate
-  // pages so it appears on the front page immediately (never blocks).
-  refreshAggregates(cwd);
-  process.stdout.write(`card minted\n卡已建档\n  .roll/features/${epic}/${id}/spec.md\n`);
+  // FIX-250: --no-index defers the (linear-cost) index + aggregate refresh for
+  // batch minting; a batch ends with ONE `roll index`.
+  if (!args.includes("--no-index")) {
+    try {
+      generateIndex(cwd);
+    } catch {
+      /* index refresh is best-effort; attest re-derives via live walk */
+    }
+    // FIX-231: a new card changes the board's truth — refresh the aggregate
+    // pages so it appears on the front page immediately (never blocks).
+    refreshAggregates(cwd);
+  }
+  process.stdout.write(`card minted\n卡已建档\n  .roll/features/${epic}/${id}/spec.md\n${rowNote}`);
   return 0;
 }

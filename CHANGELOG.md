@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.610.2 — 2026-06-10
+
+### 可见性
+
+- 改变交付真相的节点不刷新看板聚合页，新卡新状态要等手动重建索引才出现，看板静默滞后（FIX-231） `[loop]`
+
+### 自动化流水线
+
+- loop 复用陈旧会话致 cycle 跑在冻结环境里，代理一关 agent 全部静默超时失败，连败到自动暂停（FIX-230） `[loop]`
+
+### 其他
+
+- 幻灯片功能整体下线——交付控制器不内置做 PPT；slides 命令、模板与文档全部移除（US-CLI-008）
+- 退役一次性迁移命令 archive migrate 与 migrate-features（能力分别归 gc 与 story new）；roll migrate 保留为 pre-2.0 项目升级路径（REFACTOR-048）
+- bump skills submodule → 32d9f5c (roll-deck removed)（PR#574）
+- docs(guide): port quality-rubric examples bats/bash → TS/Vitest（PR#570）
+- docs(guide): de-migrate the guides — current Vitest/TS reality (round 2)（PR#569）
+- reframe to current TS-native architecture (drop v2→v3 migration narrative)（PR#568）
+- coverage tooling (@vitest/coverage-v8 + pnpm test:cov)（PR#567）
+
+
 ## v3.610.1 — 2026-06-10
 
 ### 稳定性

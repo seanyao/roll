@@ -23,6 +23,7 @@ import { type DossierStory } from "./archive.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES } from "./dossier-index.js";
 import { readLatestStorySelfScore, readSelfScoreTrend, type SelfScoreView } from "./self-score.js";
+import { phaseSectionTag } from "./story-page.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -427,11 +428,11 @@ function selfScoreHtml(score: SelfScoreView | undefined, trend: string | undefin
   );
 }
 
-function section(en: string, zh: string, body: string, empty: boolean): string {
-  return (
-    `<section class="phase ${empty ? "phase-pending" : "phase-done"}">` +
-    `<h2>${bi(en, zh)}</h2>${body}</section>`
-  );
+// US-DOSSIER-007: emit the shared phase-section anchor (data-phase=<key>) so a
+// fully-rendered dossier page stays addressable by `markPhaseDone` — the renderer
+// (skeleton) and the mount primitive now share one contract.
+function section(phaseKey: string, en: string, zh: string, body: string, empty: boolean): string {
+  return `${phaseSectionTag(phaseKey, !empty)}<h2>${bi(en, zh)}</h2>${body}</section>`;
 }
 
 /** Render the dossier page. */
@@ -574,13 +575,13 @@ export function renderStoryDossier(d: StoryDossierInput): string {
       : "") +
     storySpine(d) +
     storyGraphHtml(d.storyGraph) +
-    section("Definition", "立项", definition, defEmpty) +
-    section("Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
-    section("Design", "设计", design, (d.design?.length ?? 0) === 0 && d.peerReview === undefined) +
-    section("Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
-    section("Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence) || hasDynamicEvidence(d.dynamicEvidence))) +
-    (corrections !== "" ? section("Correction trace", "纠正留痕", corrections, false) : "") +
-    section("Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
+    section("definition", "Definition", "立项", definition, defEmpty) +
+    section("acceptance", "Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
+    section("design", "Design", "设计", design, (d.design?.length ?? 0) === 0 && d.peerReview === undefined) +
+    section("execution", "Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
+    section("delivery", "Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence) || hasDynamicEvidence(d.dynamicEvidence))) +
+    (corrections !== "" ? section("corrections", "Correction trace", "纠正留痕", corrections, false) : "") +
+    section("retrospective", "Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
     `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
     // EVID-010: inline copy handler (display only — never executes the command).
     `<script>document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest(".copy-btn");if(!b||!navigator.clipboard)return;var t=b.getAttribute("data-copy")||"";navigator.clipboard.writeText(t).then(function(){b.classList.add("copied");setTimeout(function(){b.classList.remove("copied")},1200);}).catch(function(){});});</script>\n` +

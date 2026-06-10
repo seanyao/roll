@@ -41,6 +41,44 @@ function inProj(p: string, args: string[]): { code: number; out: string; err: st
   }
 }
 
+// FIX-250 — the ONE minting entry completes the chain: card + backlog row;
+// --no-index defers the linear-cost refresh for batch minting.
+describe("roll story new — FIX-250", () => {
+  it("appends the backlog row (📋 Todo) under the same epic", () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      "| ID | D | S |\n|--|--|--|\n| [FIX-1](.roll/features/pay/FIX-1/spec.md) | x | ✅ Done |\n",
+    );
+    const r = inProj(p, ["US-PAY-009", "--title", "refund flow", "--epic", "pay"]);
+    expect(r.code).toBe(0);
+    const backlog = readFileSync(join(p, ".roll", "backlog.md"), "utf8");
+    expect(backlog).toContain("| [US-PAY-009](.roll/features/pay/US-PAY-009/spec.md) | refund flow | 📋 Todo |");
+    expect(r.out).toContain("backlog row appended");
+  });
+
+  it("an already-present row stays untouched (idempotent)", () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      "| ID | D | S |\n|--|--|--|\n| [US-DUP-1](.roll/features/e/US-DUP-1/spec.md) | already | 🔨 In Progress |\n",
+    );
+    const r = inProj(p, ["US-DUP-1", "--title", "already", "--epic", "e2"]);
+    expect(r.code).toBe(0);
+    const backlog = readFileSync(join(p, ".roll", "backlog.md"), "utf8");
+    expect(backlog).toContain("🔨 In Progress"); // not duplicated, not flipped
+    expect((backlog.match(/\| \[US-DUP-1\]/g) ?? []).length).toBe(1); // one ROW (the link path repeats the id)
+  });
+
+  it("--no-index defers index.json + aggregate refresh (batch mode)", () => {
+    const p = project();
+    const r = inProj(p, ["US-BATCH-1", "--title", "t", "--epic", "e", "--no-index"]);
+    expect(r.code).toBe(0);
+    expect(existsSync(join(p, ".roll", "features", "e", "US-BATCH-1", "spec.md"))).toBe(true);
+    expect(existsSync(join(p, ".roll", "index.json"))).toBe(false); // deferred
+  });
+});
+
 describe("roll story new — US-META-009", () => {
   it("mints spec.md (frontmatter) + story page + refreshes index.json", () => {
     const p = project();

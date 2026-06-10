@@ -87,6 +87,8 @@ available:
 
 ```bash
 roll story new US-PAY-001 --title "Refund flow" --epic payments
+# the ONE minting entry: card folder + backlog row + index refresh in one step.
+# Batch minting: add --no-index per card, finish with a single `roll index`.
 ```
 
 Both channels write the frontmatter'd `spec.md`, the story page skeleton,

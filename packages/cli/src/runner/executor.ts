@@ -843,7 +843,7 @@ export async function executeCommand(
       // preflight reconcile (decideClaimReconcile) flips it once the async PR
       // loop merges. The runs row keeps `done` for v2/dashboard parity — only
       // the backlog flip waits for the merge evidence.
-      if (cmd.status === "done" && (ctx.storyId ?? "") !== "") {
+      if ((cmd.status === "done" || cmd.status === "published") && (ctx.storyId ?? "") !== "") {
         const state = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => "UNKNOWN");
         if (state === "MERGED") {
           ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", STATUS_MARKER.done);
@@ -896,7 +896,10 @@ export function buildRunRow(
   ctx: CycleContext,
   nowSec?: number,
 ): Record<string, unknown> {
-  const built = cmd.status === "done" || cmd.status === "built" ? [ctx.storyId ?? ""].filter(Boolean) : [];
+  const built =
+    cmd.status === "done" || cmd.status === "published" || cmd.status === "built"
+      ? [ctx.storyId ?? ""].filter(Boolean)
+      : [];
   const row: Record<string, unknown> = {
     run_id: cmd.cycleId,
     status: cmd.status,

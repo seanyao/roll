@@ -76,9 +76,38 @@ describe("classifyCaptured — pre-publish six-state (bin/roll:9127-9157)", () =
   });
 });
 
+describe("FIX-244 — phantom-failure classification (published terminal)", () => {
+  it("non-zero exit + commits + OPEN PR for the cycle branch → published, not failed", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3, prState: "OPEN" }),
+    ).toBe("published");
+  });
+  it("non-zero exit + commits + already-MERGED PR → published (backfill credits it)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3, prState: "MERGED" }),
+    ).toBe("published");
+  });
+  it("non-zero exit with no PR → failed (unchanged: a real no-output failure)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3 }),
+    ).toBe("failed");
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3, prState: "UNKNOWN" }),
+    ).toBe("failed");
+  });
+  it("OPEN PR but zero commits ahead → not published (nothing of this cycle is in it)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 0, prState: "OPEN" }),
+    ).toBe("failed");
+  });
+  it("mapV2Status(published) → delivered (spec literal already means published/merged)", () => {
+    expect(mapV2Status("published")).toBe("delivered");
+  });
+});
+
 describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)", () => {
-  it("status 0 → done", () => {
-    expect(classifyPublish({ status: 0 })).toBe("done");
+  it("FIX-244: status 0 → published (PR open, merge pending — done ≡ merged, I4)", () => {
+    expect(classifyPublish({ status: 0 })).toBe("published");
   });
   it("status 2 + mergedBack → done (gh missing, ff)", () => {
     expect(classifyPublish({ status: 2, mergedBack: true })).toBe("done");
@@ -140,11 +169,11 @@ describe("happy-path phase walk → done", () => {
       "capture_facts",
       "publish_pr",
       "cleanup_worktree",
-      "emit_event", // cycle:end (done)
+      "emit_event", // cycle:end (published — merge pending, FIX-244)
       "append_run",
     ]);
     expect(state.done).toBe(true);
-    expect(state.terminal).toBe("done");
+    expect(state.terminal).toBe("published");
     expect(state.phase).toBe("cleanup");
   });
 });
@@ -375,7 +404,7 @@ describe("resumability — late/duplicate events are no-ops (I8)", () => {
     const first = walk(evs);
     // Replay the same published event again → same terminal.
     const again = cycleStep(first.state, { type: "published", result: { status: 0 } });
-    expect(again.state.terminal).toBe("done");
+    expect(again.state.terminal).toBe("published");
   });
 });
 

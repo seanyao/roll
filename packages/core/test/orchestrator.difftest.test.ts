@@ -44,7 +44,7 @@ describe("frozen: capture cascade == classifyCaptured (bin/roll:9127-9157)", () 
 describe("frozen: publish ladder == classifyPublish (bin/roll:9239-9356)", () => {
   // (status × mergedBack × orphanPushed) in nested-loop order.
   const FROZEN: V2CycleStatus[] = [
-    "done", "done", "done", "done",
+    "published", "published", "published", "published",
     "failed", "orphan", "failed", "orphan",
     "failed", "orphan", "done", "done",
     "failed", "orphan", "failed", "orphan",

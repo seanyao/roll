@@ -123,7 +123,7 @@ import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
  *               (bin/roll:8756).
  *   - blocked : hard-timeout breach (bin/roll:8679).
  */
-export type V2CycleStatus = "idle" | "built" | "done" | "orphan" | "failed" | "aborted" | "blocked";
+export type V2CycleStatus = "idle" | "built" | "done" | "published" | "orphan" | "failed" | "aborted" | "blocked";
 
 /**
  * Bridge v2's runs.jsonl status onto the spec's {@link CycleOutcome} union. The
@@ -150,6 +150,11 @@ export type V2CycleStatus = "idle" | "built" | "done" | "orphan" | "failed" | "a
 export function mapV2Status(status: V2CycleStatus): CycleOutcome {
   switch (status) {
     case "done":
+    // FIX-244: "published" is the honest publish-ok terminal — PR open, merge
+    // pending. The spec's "delivered" literal already means published/merged,
+    // so the event-level outcome is unchanged; the runs-row status keeps the
+    // distinction for the merge-evidence backfill (FIX-243).
+    case "published":
       return "delivered";
     case "idle":
     case "built":
@@ -176,6 +181,10 @@ export interface CapturedFacts {
   timedOut: boolean;
   /** Commits ahead of origin/main in the worktree (bin/roll:9139). */
   commitsAhead: number;
+  /** FIX-244: PR state for the cycle branch ("OPEN"/"MERGED"/...), probed by the
+   *  capture step ONLY when the exit is non-zero with commits ahead — the
+   *  phantom-failure check. Absent = not probed / no PR. */
+  prState?: string;
 }
 
 /**
@@ -193,7 +202,15 @@ export interface CapturedFacts {
 export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
   if (facts.timedOut) return "blocked";
   if (!facts.usedWorktree) return "failed";
-  if (facts.agentExit !== 0) return "failed";
+  if (facts.agentExit !== 0) {
+    // FIX-244: a non-zero capture whose work is ALREADY out as a PR (observed
+    // 2026-06-10: attest-blocked cycles whose PR merged minutes later) is not a
+    // no-output failure — classify "published"; the merge-evidence backfill
+    // (FIX-243) arbitrates the final credit.
+    if (facts.commitsAhead > 0 && (facts.prState === "OPEN" || facts.prState === "MERGED"))
+      return "published";
+    return "failed";
+  }
   if (facts.commitsAhead === 0) return "idle";
   return "built";
 }
@@ -222,7 +239,9 @@ export interface PublishResult {
  * Only call on a `built` capture; idle/failed/blocked never reach the ladder.
  */
 export function classifyPublish(pub: PublishResult): V2CycleStatus {
-  if (pub.status === 0) return "done";
+  // FIX-244: publish-ok means the PR is OPEN, merge pending — "published", not
+  // "done" (done ≡ merged to main, I4). Backfill flips it on merge evidence.
+  if (pub.status === 0) return "published";
   if (pub.status === 2) {
     if (pub.manualMerge === true) return "failed";
     if (pub.mergedBack === true) return "done";
@@ -711,8 +730,12 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       const next = { ...state, phase: "reconcile" as CyclePhase, captured: event.facts };
       if (status !== "built") {
         // idle → clean + terminal; failed/blocked → terminal (no publish).
+        // idle: nothing to keep. published (FIX-244): branch + PR are on the
+        // remote — keep the worktree too would strand it (FIX-247's lesson).
         const extra: CycleCommand[] =
-          status === "idle" ? [{ kind: "cleanup_worktree", branch: state.ctx.branch }] : [];
+          status === "idle" || status === "published"
+            ? [{ kind: "cleanup_worktree", branch: state.ctx.branch }]
+            : [];
         return terminate(next, status, extra);
       }
       // built → publish ladder.
@@ -724,9 +747,10 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
 
     case "published": {
       const status = classifyPublish(event.result);
-      if (status === "done") {
-        // Published → hand merge to PR Loop (US-AUTO-044) → clean → done.
-        return terminate({ ...state, phase: "cleanup" }, "done", [
+      if (status === "published" || status === "done") {
+        // Published (PR open, merge → PR Loop, US-AUTO-044) or locally
+        // ff-merged (gh-missing tier → done) → clean worktree → terminal.
+        return terminate({ ...state, phase: "cleanup" }, status, [
           { kind: "cleanup_worktree", branch: state.ctx.branch },
         ]);
       }

@@ -70,6 +70,15 @@ export const v3Catalog: Catalog = {
     en: "Backlog changed on disk — re-run to capture",
     zh: "待办文件已变更 — 请重试以记录",
   },
+  // REFACTOR-050: card creation now lives in `roll idea`.
+  "ideav3.card_created": {
+    en: "Card folder created: .roll/features/%s/",
+    zh: "卡片文件夹已创建：.roll/features/%s/",
+  },
+  "ideav3.card_exists": {
+    en: "Card folder already exists — skipping creation (features/%s/%s)",
+    zh: "卡片文件夹已存在 — 跳过创建 (features/%s/%s)",
+  },
 
   // `releasev3.*` — the read-only release-guidance command (US-PORT-004). `roll
   // release` computes the next calver version, surfaces changelog readiness, and

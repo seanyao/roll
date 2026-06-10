@@ -3,6 +3,7 @@ import type { BacklogItem } from "../src/backlog/store.js";
 import {
   appendIdea,
   classifyIdea,
+  inferEpic,
   lintIdeaDescription,
   nextIdeaId,
   planIdea,
@@ -147,5 +148,60 @@ describe("appendIdea", () => {
     const r = appendIdea(content, "IDEA-001", "idea", "first idea");
     expect(r.content).toContain("| ID | Description | Status |");
     expect(r.content).toContain("| IDEA-001 | first idea | 📋 Todo |");
+  });
+});
+
+// REFACTOR-050: epic inference from natural-language description.
+describe("inferEpic", () => {
+  it("matches CLI-related terms to cli-simplification", () => {
+    expect(inferEpic("the CLI usage is broken")).toBe("cli-simplification");
+    expect(inferEpic("add a command flag for debug")).toBe("cli-simplification");
+  });
+
+  it("matches loop/cycle/runner terms to loop-engine", () => {
+    expect(inferEpic("loop runner needs a health check")).toBe("loop-engine");
+    expect(inferEpic("auto dispatch is broken")).toBe("loop-engine");
+  });
+
+  it("matches doc/guide terms to documentation", () => {
+    expect(inferEpic("write a getting-started guide")).toBe("documentation");
+    expect(inferEpic("update README with new tutorial")).toBe("documentation");
+  });
+
+  it("matches release/deploy terms to release-management", () => {
+    expect(inferEpic("ship a release workflow")).toBe("release-management");
+    expect(inferEpic("publish the new version")).toBe("release-management");
+  });
+
+  it("matches pair/review terms to cross-agent-pairing", () => {
+    expect(inferEpic("pair review with another agent")).toBe("cross-agent-pairing");
+    expect(inferEpic("cross-agent peer check")).toBe("cross-agent-pairing");
+  });
+
+  it("matches backlog/card/story terms to backlog-lifecycle", () => {
+    expect(inferEpic("improve backlog card lifecycle")).toBe("backlog-lifecycle");
+  });
+
+  it("matches evidence/attest terms to acceptance-evidence", () => {
+    expect(inferEpic("attest evidence missing")).toBe("acceptance-evidence");
+  });
+
+  it("matches skill terms to skill-ecosystem", () => {
+    expect(inferEpic("agent skill reload is slow")).toBe("skill-ecosystem");
+  });
+
+  it("matches dossier/index terms to delivery-dossier", () => {
+    expect(inferEpic("index page shows stale data")).toBe("delivery-dossier");
+    expect(inferEpic("delivery dossier report")).toBe("delivery-dossier");
+  });
+
+  it("returns undefined when no keyword matches", () => {
+    expect(inferEpic("do something completely generic")).toBeUndefined();
+    expect(inferEpic("make it better")).toBeUndefined();
+  });
+
+  it("is case-insensitive", () => {
+    expect(inferEpic("Fix the CLI USAGE")).toBe("cli-simplification");
+    expect(inferEpic("PAIR REVIEW needed")).toBe("cross-agent-pairing");
   });
 });

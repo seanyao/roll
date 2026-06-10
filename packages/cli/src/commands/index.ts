@@ -90,7 +90,9 @@ export function registerAll(): void {
   registerPorted("attest", attestCommand);
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
   registerPorted("index", indexCommand);
-  // `story new`: the single channel for minting a card folder (US-META-009).
+  // `story new`: internal/advanced explicit card-folder minting (US-META-009).
+  // REFACTOR-050: `roll idea` is now the one user-facing card-capture entry;
+  // `story new` is retained for agents/skills that need explicit ID+epic control.
   registerPorted("story", (args) => {
     if (args[0] === "new") return storyNewCommand(args.slice(1));
     process.stdout.write("Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>]\n");

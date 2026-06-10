@@ -26,19 +26,17 @@ may be routed into the legacy onboarding flow before files are written.
 
 ## 3. Add One Backlog Item
 
-Create a small story card and put it in `.roll/backlog.md`.
+Add a small story card with one sentence:
 
 ```bash
-roll story new US-DEMO-001 --title "Add a health check" --epic demo
+roll idea "Add a health check endpoint"
 ```
 
-Then edit `.roll/features/demo/US-DEMO-001/spec.md` so the ACs describe what
-"done" means, and add the story row to `.roll/backlog.md` if it is not already
-listed:
+`roll idea` auto-classifies, assigns an id, infers the epic, and creates the
+card folder — you get both the backlog row and the story folder in one step.
 
-```markdown
-| [US-DEMO-001](.roll/features/demo/US-DEMO-001/spec.md) | Add a health check | 📋 Todo |
-```
+Then edit `.roll/features/<epic>/<ID>/spec.md` so the ACs describe what
+"done" means.
 
 Keep the first story tiny: one visible behavior, one clear test path.
 

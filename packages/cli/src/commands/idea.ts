@@ -1,27 +1,38 @@
 /**
- * `roll idea <description>` — fast backlog capture (US-PORT-003, TS port).
+ * `roll idea <description>` — THE single user-facing card-capture entry point
+ * (US-PORT-003 + REFACTOR-050 card-creation unification).
  *
- * v2 had no `roll idea` command: capture lived in the roll-idea skill (an agent
- * editing `.roll/backlog.md`). This port makes capture deterministic and shares
- * the backlog reader/writer with the rest of v3 (与 backlog 存取同源):
+ * Before REFACTOR-050, `roll story new` and `roll idea` were two overlapping
+ * "add a card" verbs — idea handled fast capture to backlog, story new handled
+ * explicit card-folder minting. REFACTOR-050 unifies them: `roll idea` is now
+ * the one user-facing entry that does EVERYTHING:
  *
  *  1. 分类 — classify the text as a bug (→ FIX) or an idea (→ IDEA).
  *  2. 自动编号 — assign the next id in that family (max numeric suffix + 1).
  *  3. 过 lint 规则 — the description must clear the SAME backlog linter the
  *     toolchain enforces (≤120 chars, no code fence / filename / path / function
- *     name). A violation is reported and the row is NOT written — the backlog
- *     never gains a card that fails lint.
- *  4. 存取同源 — read + atomic optimistic write both go through `BacklogStore`;
- *     the row lands in the kind's section (🐛 Bug Fixes / 💡 Ideas, created if
- *     absent).
+ *     name). A violation is reported and the row is NOT written.
+ *  4. 存取同源 — read + atomic optimistic write both go through `BacklogStore`.
+ *  5. 推断 epic — light keyword-matching maps the description to a known epic
+ *     slug; falls back to "uncategorized" (AC3).
+ *  6. 建完整卡 — creates the full card folder (spec.md + index.html) just like
+ *     `story new` did (AC1).
+ *  7. 刷新索引 — rebuilds .roll/index.json and dossier aggregate pages so the
+ *     new card appears immediately (FIX-231).
+ *
+ * `roll story new` is retained as an internal/advanced explicit channel (AC2)
+ * but is no longer co-advertised as a user entry point.
  *
  * Output follows the resolved locale (single-language).
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BacklogStore, ConflictError, IDEA_SECTIONS, appendIdea, planIdea } from "@roll/core";
+import { BacklogStore, ConflictError, IDEA_SECTIONS, appendIdea, inferEpic, planIdea } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
+import { generateIndex } from "../lib/archive.js";
+import { UNCATEGORIZED } from "../lib/archive.js";
 import { renderSpecMd, renderStoryPage } from "../lib/story-page.js";
+import { refreshAggregates } from "./index-gen.js";
 import { c, renderState } from "../render.js";
 
 const BACKLOG_PATH = ".roll/backlog.md";
@@ -95,21 +106,43 @@ export function ideaCommand(args: string[]): number {
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.section") + ":")} ${section}\n`);
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.text") + ":")}    ${text}\n\n`);
 
-  // US-META-005: create story folder skeleton on card creation.
+  // REFACTOR-050 AC1/AC3: create the full story card folder, same as `story new`.
+  // Epic is inferred from the description text; falls back to "uncategorized".
+  const epic = inferEpic(text) ?? UNCATEGORIZED;
   const projectPath = process.cwd();
-  const cardDir = join(projectPath, ".roll", "features", "uncategorized", plan.id);
+  const cardDir = join(projectPath, ".roll", "features", epic, plan.id);
   try {
-    mkdirSync(cardDir, { recursive: true });
-    const card = {
-      id: plan.id,
-      title: text,
-      type: plan.kind,
-      created: new Date().toISOString().slice(0, 10),
-    };
-    writeFileSync(join(cardDir, "spec.md"), renderSpecMd(card), "utf8");
-    writeFileSync(join(cardDir, "index.html"), renderStoryPage(card), "utf8");
+    // Never overwrite an existing spec (cards are born once, same guard as `story new`).
+    if (existsSync(join(cardDir, "spec.md"))) {
+      process.stdout.write(
+        `${c("dim", label(lang, "ideav3.card_exists", epic, plan.id))}\n`,
+      );
+    } else {
+      mkdirSync(cardDir, { recursive: true });
+      const card = {
+        id: plan.id,
+        title: text,
+        type: plan.kind,
+        epic: epic !== UNCATEGORIZED ? epic : undefined,
+        created: new Date().toISOString().slice(0, 10),
+      };
+      writeFileSync(join(cardDir, "spec.md"), renderSpecMd(card), "utf8");
+      writeFileSync(join(cardDir, "index.html"), renderStoryPage(card), "utf8");
+      process.stdout.write(
+        `  ${c("dim", label(lang, "ideav3.card_created", epic))}\n`,
+      );
+    }
   } catch {
     /* best-effort: folder creation is non-blocking */
+  }
+
+  // FIX-231: a new card changes the board's truth — refresh index and dossier
+  // aggregate pages so it appears on the front page immediately.
+  try {
+    generateIndex(projectPath);
+    refreshAggregates(projectPath);
+  } catch {
+    /* index refresh is best-effort; attest re-derives via live walk */
   }
 
   return 0;

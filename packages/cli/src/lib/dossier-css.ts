@@ -47,6 +47,9 @@ export const DOSSIER_CSS = `
 .spine .node.done .tag, .spine .node.truth .tag { color:var(--fg); }
 .spine .seg { flex:1 1 0; height:2px; background:var(--line); margin:0 6px 18px; }
 .spine .seg.done { background:var(--accent); }
+.spine.legacy .node .dot { border-style:dashed; border-color:color-mix(in srgb,var(--muted) 55%,transparent); background:transparent; }
+.spine.legacy .seg { background:color-mix(in srgb,var(--muted) 30%,transparent); }
+.legacy-banner { margin:14px 0; padding:10px 14px; border:1px dashed var(--line); border-radius:8px; background:color-mix(in srgb,var(--muted) 7%,transparent); color:var(--muted); font-size:13px; line-height:1.5; }
 .mini-spine { display:inline-flex; align-items:center; vertical-align:middle; }
 .mini-spine i { width:7px; height:7px; border-radius:50%; background:none; border:1.5px solid var(--line); box-sizing:border-box; }
 .mini-spine i.done { border-color:var(--accent); background:var(--accent); }

@@ -294,6 +294,17 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(full).toContain("score 9 good");
   });
 
+  it("US-DOSSIER-008b: a legacy story's per-page spine is muted + carries a legacy banner; evidenced cards don't", () => {
+    const legacyFull = renderStoryDossier({ story: { ...story, legacy: true, delivered: true }, wish: "历史卡" });
+    expect(legacyFull).toContain('class="spine legacy"');
+    expect(legacyFull).toContain('class="legacy-banner"');
+    expect(legacyFull).toContain("历史交付");
+    // the evidenced fixture is not legacy → normal spine, no banner div
+    // (the CSS rule string is inlined on every page, so assert on the markup).
+    expect(full).not.toContain('class="spine legacy"');
+    expect(full).not.toContain('class="legacy-banner"');
+  });
+
   it("US-EVID-013: retrospective renders structured self-score summary, note link, dimensions, and trend", () => {
     const html = renderStoryDossier({
       story,

@@ -26,7 +26,6 @@ const SAMPLE: ReadonlyArray<[string, ...string[]]> = [
   ["prices_show.header"],
   ["backlog.no_backlog_found"],
   ["doctor.all_checks_passed"],
-  ["slides_delete.prompt", "deck-a"],
   ["setup.unknown_argument_1"],
   ["no.such.key.fallback", "x"],
 ];
@@ -44,7 +43,6 @@ const FROZEN: Record<Lang, readonly string[]> = {
     "prices_show.header",
     "backlog.no_backlog_found",
     "doctor.all_checks_passed",
-    'Delete deck "deck-a"? (y/N)',
     "Unknown argument: ",
     "no.such.key.fallback",
   ],
@@ -59,7 +57,6 @@ const FROZEN: Record<Lang, readonly string[]> = {
     "prices_show.header",
     "backlog.no_backlog_found",
     "doctor.all_checks_passed",
-    '删除幻灯片 "deck-a"？(y/N)',
     "未知参数: ",
     "no.such.key.fallback",
   ],

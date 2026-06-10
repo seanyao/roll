@@ -67,7 +67,6 @@ import { releaseCommand } from "./release.js";
 import { releaseShipCommand } from "./release-ship.js";
 import { setupCommand } from "./setup.js";
 import { skillsCommand } from "./skills.js";
-import { slidesCommand } from "./slides/index.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
 import { tuneCommand } from "./tune.js";
@@ -230,11 +229,6 @@ export function registerAll(): void {
   registerPorted("version", versionCommand);
   registerPorted("--version", versionCommand);
   registerPorted("-v", versionCommand);
-  // `slides`: FULLY TS as of US-PORT-016. build/list/preview/logs/templates +
-  // help/unknown were already native; `new` now launches the project agent from
-  // TS (owner ruling) and `delete`'s interactive confirm reads /dev/tty natively
-  // (shared tty-confirm). No bash fallback remains.
-  registerPorted("slides", slidesCommand);
   // `loop` is FULLY TS as of US-PORT-021 prep — no subcommand falls back to bash.
   // `on` generates the v3 self-contained runner (DELIBERATE divergence from the
   // v2 tmux outer/inner pair, whitelisted in AGENTS.md). Bare `roll loop`

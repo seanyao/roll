@@ -34,7 +34,6 @@
 | guide/en/pricing.md | Pricing — Cost Visibility & Price Snapshots | guide | 2026-05-24 |
 | guide/en/project-setup.md | Roll — Project Setup | guide | 2026-05-28 |
 | guide/en/skills.md | Roll Skill Selection Guide | guide | 2026-05-19 |
-| guide/en/slides.md | Roll — Slides | guide | 2026-05-26 |
 | guide/en/test-isolation.md | Roll — Test Isolation (roll test) | guide | 2026-05-28 |
 | guide/en/testing.md | Roll — Testing Workflow | guide | 2026-05-23 |
 | guide/en/testing/quality-rubric.md | Test Quality Rubric | guide | 2026-05-23 |
@@ -64,12 +63,10 @@
 | guide/zh/pricing.md | Pricing — 成本可见性与价格快照 | guide | 2026-05-24 |
 | guide/zh/project-setup.md | Roll — 项目初始化 | guide | 2026-05-28 |
 | guide/zh/skills.md | Roll 技能选择指南 | guide | 2026-05-19 |
-| guide/zh/slides.md | Roll — 幻灯片 | guide | 2026-05-26 |
 | guide/zh/test-isolation.md | Roll — 测试隔离（roll test）| guide | 2026-05-28 |
 | guide/zh/testing.md | Roll — 测试工作流 | guide | 2026-05-23 |
 | guide/zh/testing/quality-rubric.md | 测试质量评分卷 | guide | 2026-05-23 |
 | lib/agent_usage/README.md | Agent Usage Tracking | module | — |
-| lib/slides/components/README.md | Slides Components | module | — |
 
 ## Coverage Summary
 

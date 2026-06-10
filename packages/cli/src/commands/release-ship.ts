@@ -24,8 +24,8 @@ import { c, renderState } from "../render.js";
 import { consistencyPasses } from "./consistency.js";
 
 // FIX-228/229: the interactive confirm reader lives in the shared tty-confirm
-// module (also used by `slides delete`, US-PORT-016). Imported for local use in
-// `confirm`, and re-exported so the release-ship tests keep their import surface.
+// module. Imported for local use in `confirm`, and re-exported so the
+// release-ship tests keep their import surface.
 import { readConfirmLine, readLineSyncFromFd } from "../lib/tty-confirm.js";
 import type { ByteReader } from "../lib/tty-confirm.js";
 export { readConfirmLine, readLineSyncFromFd, type ByteReader };

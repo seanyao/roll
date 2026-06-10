@@ -22,7 +22,6 @@ const PROJECT: ReadonlyArray<readonly [string, string, string, string, boolean]>
   ["ci", "[--wait]", "show or wait for current commit's CI status", "查看 / 等待 CI 状态", false],
   ["release", "", "run the release script (human-only)", "执行发版脚本（仅人工）", false],
   ["review-pr", "<number>", "AI-powered code review for a PR", "AI 代码评审", false],
-  ["slides", "build <slug>", "render a deck.md to HTML and open in browser", "渲染 deck.md 为 HTML 并打开", false],
 ];
 
 const MACHINE: ReadonlyArray<readonly [string, string, string, string, boolean]> = [

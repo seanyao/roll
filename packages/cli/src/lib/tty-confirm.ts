@@ -1,6 +1,6 @@
 /**
- * Synchronous interactive y/N confirm — shared by `release ship` (FIX-228/229)
- * and `slides delete` (US-PORT-016).
+ * Synchronous interactive y/N confirm — used by `release ship` (FIX-228/229)
+ * and any other command that needs a blocking terminal prompt.
  *
  * The hard-won lesson (FIX-229): read the CONTROLLING TERMINAL `/dev/tty` as a
  * fresh BLOCKING file description, NOT fd 0. On Node v26 + macOS an interactive

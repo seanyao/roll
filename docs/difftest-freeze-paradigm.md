@@ -23,9 +23,9 @@ the loop.
 > Those engines are now gone; the snapshots remain as the regression guard.
 
 **Status (US-PORT-021 / 021b): the bash/python oracles are gone.** `bin/roll`
-and the dead `lib/*.py` were deleted (US-PORT-021). The last 7 difftests that
+and the dead `lib/*.py` were deleted (US-PORT-021). The difftests that
 still shelled an oracle — `migrate` · `offboard` · `test` · `update` ·
-`changelog` · `slides` · `loop-story` — are now frozen snapshots
+`changelog` · `loop-story` — are now frozen snapshots
 (`toMatchSnapshot`) of the proven-correct TS output (US-PORT-021b). They scrub
 per-run volatility (the temp dir incl. macOS `/private` prefix, git SHAs,
 relative-time spans / cycle-id timestamps) so the snapshot is platform-stable;

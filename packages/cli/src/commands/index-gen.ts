@@ -61,59 +61,86 @@ export function indexCommand(args: string[]): number {
   const n = Object.keys(stories).length;
   process.stdout.write(`index.json regenerated\n索引已重建\n  ${n} stories mapped to epics (.roll/index.json)\n`);
 
-  // US-DOSSIER-001a/b/c/d: the three dossier layers, from the live card tree.
-  const featuresDir = join(cwd, ".roll", "features");
-  if (existsSync(featuresDir)) {
-    const epics = collectDossier(cwd);
-    // US-DOSSIER: enrich each story with its real lifecycle stations (read its
-    // evidence via the same collector the per-story page uses) so the index spine
-    // reflects definition→design→execution→delivery→retrospective accurately.
-    for (const epic of epics) {
-      for (const story of epic.stories) {
-        try {
-          story.stages = [...stationsDone(collectStoryDossierInput(cwd, story))];
-        } catch {
-          /* best-effort — spine just shows fewer stations */
-        }
-      }
-    }
-    let pages = 0;
-    try {
-      writeFileSync(join(featuresDir, "index.html"), renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd) }), "utf8");
-      pages += 1;
-    } catch {
-      /* best-effort */
-    }
-    for (const epic of epics) {
-      try {
-        writeFileSync(join(featuresDir, epic.name, "index.html"), renderEpicPage(epic), "utf8");
-        pages += 1;
-      } catch {
-        /* best-effort */
-      }
-      for (const story of epic.stories) {
-        const storyDir = join(featuresDir, epic.name, story.id);
-        try {
-          const storyIndex = join(storyDir, "index.html");
-          // Mount board: only (re)render when forced or when the page is missing
-          // (a brand-new card needs its initial skeleton).
-          if (rebuild || !existsSync(storyIndex)) {
-            writeFileSync(storyIndex, renderStoryDossier(collectStoryDossierInput(cwd, story)), "utf8");
-            pages += 1;
-          }
-          // US-DOSSIER-004: rendered spec.html the "Design doc" link points at.
-          const specHtml = renderSpecHtml(storyDir, story.id);
-          if (specHtml !== null) {
-            writeFileSync(join(storyDir, "spec.html"), specHtml, "utf8");
-            pages += 1;
-          }
-        } catch {
-          /* best-effort */
-        }
-      }
-    }
+  if (existsSync(join(cwd, ".roll", "features"))) {
+    const pages = generateDossierPages(cwd, rebuild);
     process.stdout.write(`Delivery Dossier regenerated (${pages} pages)\n交付档案已重建（${pages} 页）\n`);
   }
 
   return 0;
+}
+
+/**
+ * Generate the dossier pages from the live card tree (US-DOSSIER-001a/b/c/d):
+ * front page + every epic page always; story pages only when missing (mount
+ * board, US-DOSSIER-007) unless `rebuild` forces a full re-render. Per-page
+ * best-effort; returns the page count.
+ */
+export function generateDossierPages(cwd: string, rebuild: boolean): number {
+  const featuresDir = join(cwd, ".roll", "features");
+  if (!existsSync(featuresDir)) return 0;
+  const epics = collectDossier(cwd);
+  // US-DOSSIER: enrich each story with its real lifecycle stations (read its
+  // evidence via the same collector the per-story page uses) so the index spine
+  // reflects definition→design→execution→delivery→retrospective accurately.
+  for (const epic of epics) {
+    for (const story of epic.stories) {
+      try {
+        story.stages = [...stationsDone(collectStoryDossierInput(cwd, story))];
+      } catch {
+        /* best-effort — spine just shows fewer stations */
+      }
+    }
+  }
+  let pages = 0;
+  try {
+    writeFileSync(join(featuresDir, "index.html"), renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd) }), "utf8");
+    pages += 1;
+  } catch {
+    /* best-effort */
+  }
+  for (const epic of epics) {
+    try {
+      writeFileSync(join(featuresDir, epic.name, "index.html"), renderEpicPage(epic), "utf8");
+      pages += 1;
+    } catch {
+      /* best-effort */
+    }
+    for (const story of epic.stories) {
+      const storyDir = join(featuresDir, epic.name, story.id);
+      try {
+        const storyIndex = join(storyDir, "index.html");
+        // Mount board: only (re)render when forced or when the page is missing
+        // (a brand-new card needs its initial skeleton).
+        if (rebuild || !existsSync(storyIndex)) {
+          writeFileSync(storyIndex, renderStoryDossier(collectStoryDossierInput(cwd, story)), "utf8");
+          pages += 1;
+        }
+        // US-DOSSIER-004: rendered spec.html the "Design doc" link points at.
+        const specHtml = renderSpecHtml(storyDir, story.id);
+        if (specHtml !== null) {
+          writeFileSync(join(storyDir, "spec.html"), specHtml, "utf8");
+          pages += 1;
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  return pages;
+}
+
+/**
+ * FIX-231: truth-changing nodes (story new / attest / backlog set-status) call
+ * this to keep the board's AGGREGATE pages fresh — front + epic pages follow
+ * every state change instead of waiting for a manual `roll index`. Story pages
+ * stay mount boards (only missing ones get a skeleton; mounted content is never
+ * clobbered — US-DOSSIER-007). Best-effort by contract: a refresh failure WARNs
+ * and never blocks the caller's main path.
+ */
+export function refreshAggregates(cwd: string): void {
+  try {
+    generateDossierPages(cwd, false);
+  } catch (e) {
+    process.stderr.write(`[roll] WARN dossier refresh failed (board may lag until \`roll index\`): ${String(e)}\n`);
+  }
 }

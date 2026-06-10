@@ -99,6 +99,17 @@ describe("backlog block/defer/unblock/promote — US-PORT-019", () => {
     expect(statusOf("US-002")).toBe("📋 Todo");
   });
 
+  it("FIX-231: a status flip refreshes the dossier front page (board reflects the new state)", () => {
+    seedBacklog("| [FIX-001](x) | fix a thing | 📋 Todo |\n");
+    // a card folder so the dossier walk sees the story.
+    mkdirSync(join(".roll", "features", "alpha", "FIX-001"), { recursive: true });
+    writeFileSync(join(".roll", "features", "alpha", "FIX-001", "spec.md"), "# FIX-001 — fix a thing\n");
+    capture(() => backlogSetStatusCommand("block", ["FIX-001", "waiting"]));
+    const front = readFileSync(join(".roll", "features", "index.html"), "utf8");
+    expect(front).toContain("FIX-001");
+    expect(front).toContain('data-status="hold"'); // 🔒 Blocked classifies as hold
+  });
+
   it("no match → 'No items matched', exit 0, file unchanged", () => {
     seedBacklog("| [FIX-001](x) | fix a thing | 📋 Todo |\n");
     const before = readFileSync(join(".roll", "backlog.md"), "utf8");

@@ -20,6 +20,7 @@ import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { projectSlug, sharedRoot } from "./dashboard.js";
+import { refreshAggregates } from "./index-gen.js";
 
 const BACKLOG_PATH = ".roll/backlog.md";
 
@@ -76,7 +77,12 @@ export function backlogSetStatusCommand(
   const snap = store.readBacklog(BACKLOG_PATH);
   const { count } = store.mark(BACKLOG_PATH, snap.hash, pattern, newStatus);
   if (count === 0) out(msg("backlog.no_items_matched", pattern));
-  else out(msg("backlog.updated_item_s", count, newStatus));
+  else {
+    out(msg("backlog.updated_item_s", count, newStatus));
+    // FIX-231: a status flip changes the board's truth — refresh the aggregate
+    // pages so the front page reflects it immediately (never blocks).
+    refreshAggregates(process.cwd());
+  }
   return 0;
 }
 

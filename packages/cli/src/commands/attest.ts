@@ -68,6 +68,7 @@ import { basename, join, relative } from "node:path";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
 import { readSelfScoreTrend, readStorySelfScores } from "../lib/self-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
+import { refreshAggregates } from "./index-gen.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
 export { findFeatureFile } from "../lib/archive.js";
@@ -839,6 +840,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   } catch {
     /* never block the evidence path */
   }
+  // FIX-231: same truth change must reach the board's aggregate pages (front +
+  // epic) — without this the new report is invisible until a manual `roll
+  // index`. Mounted story pages are never clobbered (US-DOSSIER-007).
+  refreshAggregates(projectPath);
   if (!smoke.ok) {
     for (const p of smoke.problems) warn(`render smoke: ${p}`);
     return 2;

@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { UNCATEGORIZED, generateIndex } from "../lib/archive.js";
 import { STORY_ID_RE, renderSpecMd, renderStoryPage } from "../lib/story-page.js";
+import { refreshAggregates } from "./index-gen.js";
 
 function todayYmd(): string {
   const d = new Date();
@@ -72,6 +73,9 @@ export function storyNewCommand(args: string[]): number {
   } catch {
     /* index refresh is best-effort; attest re-derives via live walk */
   }
+  // FIX-231: a new card changes the board's truth — refresh the aggregate
+  // pages so it appears on the front page immediately (never blocks).
+  refreshAggregates(cwd);
   process.stdout.write(`card minted\n卡已建档\n  .roll/features/${epic}/${id}/spec.md\n`);
   return 0;
 }

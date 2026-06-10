@@ -74,4 +74,16 @@ describe("roll story new — US-META-009", () => {
     expect(inProj(p, ["IDEA-9", "--title", "想法"]).code).toBe(0);
     expect(existsSync(join(p, ".roll", "features", "uncategorized", "IDEA-9", "spec.md"))).toBe(true);
   });
+
+  it("FIX-231: minting refreshes the dossier aggregate pages — the new card is on the front page immediately", () => {
+    const p = project();
+    expect(inProj(p, ["US-NEW-1", "--title", "一条新故事", "--epic", "alpha"]).code).toBe(0);
+    const front = readFileSync(join(p, ".roll", "features", "index.html"), "utf8");
+    expect(front).toContain("US-NEW-1");
+    // the existing story page (mount board) must NOT be clobbered by the refresh.
+    const storyIdx = join(p, ".roll", "features", "alpha", "US-NEW-1", "index.html");
+    writeFileSync(storyIdx, "<html>MOUNTED-MARK</html>");
+    expect(inProj(p, ["FIX-8", "--title", "另一张"]).code).toBe(0);
+    expect(readFileSync(storyIdx, "utf8")).toContain("MOUNTED-MARK");
+  });
 });

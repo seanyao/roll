@@ -136,6 +136,22 @@ export interface LoopRunnerInput {
 }
 
 /**
+ * FIX-230: a long-lived tmux session freezes the environment it was created
+ * under — a cycle window opened into it inherits THAT snapshot, not the
+ * caller's. When a proxy is later turned off (HTTP(S)_PROXY/ALL_PROXY now
+ * point at a dead port), every agent in every cycle times out with
+ * "Connection error" until someone kills the session. The new-window command
+ * therefore inlines the caller's proxy family at window-creation time
+ * (`VAR='${VAR:-}'` expands in the runner's shell, OUTSIDE tmux): the cycle's
+ * network env always mirrors the invoker — empty when the caller has none,
+ * which HTTP clients treat as unset. Trade-off (recorded on the card): only
+ * the proxy family is synced — it is the network-reaching class that rots;
+ * PATH is already bootstrapped above, and agent auth lives in $HOME files.
+ */
+const PROXY_VARS = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"] as const;
+const proxyPassthrough = PROXY_VARS.map((v) => `${v}='\${${v}:-}'`).join(" ");
+
+/**
  * The v3 loop runner: a thin, self-contained launchd wrapper around
  * `roll loop run-once`. Everything cycle-shaped (lock, heartbeat, watchdog,
  * worktree, agent, publish, events/runs) lives in run-once — NOT here.
@@ -176,7 +192,7 @@ if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TM
   _sess="roll-loop-${input.slug}"
   "$TMUX_BIN" has-session -t "$_sess" 2>/dev/null || \\
     "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "printf 'roll live · ${input.slug} — agent transcript\\n'; tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt" 2>/dev/null || true
-  if "$TMUX_BIN" new-window -d -t "$_sess" -n "c$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
+  if "$TMUX_BIN" new-window -d -t "$_sess" -n "c$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ${proxyPassthrough} ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
     exit 0
   fi
 fi
@@ -184,6 +200,9 @@ fi
 caffeinate -i -w $$ 2>/dev/null &
 cd "${input.projectPath}" || exit 0
 echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] cycle start (v3 run-once)" >> "$LOG"
+# FIX-230 observability: the effective proxy env, so an env-drift failure is
+# readable straight from the log instead of needing a session autopsy.
+echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] env: HTTP_PROXY='\${HTTP_PROXY:-}' HTTPS_PROXY='\${HTTPS_PROXY:-}' ALL_PROXY='\${ALL_PROXY:-}' NO_PROXY='\${NO_PROXY:-}'" >> "$LOG"
 "$ROLL_BIN" loop run-once >> "$LOG" 2>&1
 rc=$?
 echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] cycle end rc=$rc" >> "$LOG"
@@ -230,7 +249,7 @@ if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TM
   _sess="roll-loop-${input.slug}"
   "$TMUX_BIN" has-session -t "$_sess" 2>/dev/null || \\
     "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "printf 'roll smoke · ${input.slug}\\n'; tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt" 2>/dev/null || true
-  if "$TMUX_BIN" new-window -d -t "$_sess" -n "test$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
+  if "$TMUX_BIN" new-window -d -t "$_sess" -n "test$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ${proxyPassthrough} ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
     exit 0
   fi
 fi

@@ -163,7 +163,7 @@ roll loop gc --dry-run        # Preview what would be removed without deleting
 roll loop gc --keep-days 14   # Override retention (also: loop_gc.retention_days in .roll/local.yaml)
                               # See guide/en/loop-data-layout.md for the full gc manual
 
-roll loop branches    # List loop-related branches (merged temp branches, open PRs, etc.)
+# loop-related branches: `git ls-remote --heads origin 'loop/*'` (the `branches` subcommand is retired)
 
 roll loop events      # Show last 20 cycle events
 roll loop events 50   # Show last 50 events

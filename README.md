@@ -44,29 +44,38 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | Command | Description |
 |---------|-------------|
 | **Autonomy · daily use** | |
-| `roll loop <on\|off\|now\|status\|eval\|signals\|runs\|story\|…>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
+| `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|fmt\|pr-inbox\|mute\|unmute\|pause\|resume\|reset\|gc>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
 | `roll brief` | Show latest owner brief |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
-| `roll peer` | Cross-agent negotiation & review |
-| `roll alert` | View / clear loop alerts |
-| `roll tune [reset]` | Suggest-only self-tuning: surface threshold / route / rubric adjustments from loop trends — read-only, never auto-applies |
-| **Project · per repo** | |
-| `roll init` | Set up Roll in this project |
-| `roll idea "<one-sentence description>"` | Capture a card: auto-classify, number, lint, infer epic, and mint the full story folder — the one user entry for adding cards |
-| `roll story new <ID> --title <t> [--epic <e>]` | Internal/advanced explicit card-folder minting (agents and skills use this; users reach for `roll idea`) |
+| `roll alert [run-once]` | View / clear loop alerts |
+| `roll status` | Show current state and drift |
+| `roll doctor` | Environment + install diagnosis (agents, plists, launchd lanes) |
+| `roll dream run-once` | Nightly self-scan (patterns, docs freshness, test quality) — one pass now |
+| `roll tune [reset]` | Suggest-only self-tuning from loop trends — read-only, never auto-applies |
+| **Cards & evidence** | |
+| `roll idea "<one-sentence description>"` | Capture a card: auto-classify, number, lint, infer epic, mint the full story folder — the one user entry for adding cards |
+| `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | The one minting entry agents/skills use: card folder + backlog row + index refresh (`--no-index` for batches) |
 | `roll attest <ID>` | Render the acceptance-evidence report into the card folder |
 | `roll index` | Rebuild the three-layer Delivery Dossier (front page · epics · story dossiers) |
-| `roll status` | Show current state and drift |
-| `roll agent [use <name>]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
-| `roll ci [--wait]` | Show or wait for current commit's CI status |
+| `roll consistency <check\|audit>` | Five-dimension gap check · US-TRUTH shadow drift audit (read-only, exit 0) |
+| `roll changelog` | Sync CHANGELOG from merged work |
+| **Project · per repo** | |
+| `roll init` | Set up Roll in this project (agent-driven onboarding for legacy code) |
+| `roll offboard` | Remove Roll from this project |
+| `roll migrate` | Upgrade a pre-2.0 project layout |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
-| `roll release` | Run the release script (human-only) |
-| `roll review-pr <number>` | AI-powered code review for a PR |
-| `roll config lang <zh|en|--reset>` | Set the client language via config (REFACTOR-049: `roll lang` → `roll config lang`) |
-| **Machine · global** | |
+| `roll ci [--wait]` | Show or wait for current commit's CI status |
+| `roll release [ship\|waiver]` | Release guidance · gated tag push (`ship`) · recorded drift waiver (`waiver`) — npm publish stays human |
+| `roll feedback --type bug\|idea\|ux` | Open a GitHub issue for this project |
+| `roll pair [init\|status]` | Cross-agent pairing: heterogeneous peer re-checks during builds |
+| **Config & machine** | |
+| `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |
+| `roll agent [set <slot> <agent>\|use <name>\|list]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
+| `roll prices [refresh]` | Model price table (cost accounting source) |
+| `roll skills` | Skill catalog status |
 | `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |
-| `roll --version` / `roll -v` | Print installed roll version (REFACTOR-049: `roll version` → `roll --version`) |
+| `roll --version` / `roll -v` | Print installed roll version |
 
 ## Repository layout
 

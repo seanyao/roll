@@ -43,7 +43,7 @@ Compact facades (write multiple keys at once):
   roll config loop-schedule 30/7            period_minutes + offset_minute
   roll config dream-time 03:20              loop_dream_hour + loop_dream_minute
 
-Language (REFACTOR-049: `roll lang` → `roll config lang`):
+Language (REFACTOR-049: roll lang → roll config lang):
   roll config lang                          show current language + source
   roll config lang zh                       set language to zh
   roll config lang en                       set language to en

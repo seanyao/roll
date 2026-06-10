@@ -61,7 +61,20 @@ import {
   pairingHistory,
   peerReviewCost,
 } from "@roll/core";
-import { parseEventLine, STATUS_MARKER, type CycleCost, type RollEvent } from "@roll/spec";
+import {
+  parseEventLine,
+  STATUS_MARKER,
+  absent,
+  buildTerminalEvent,
+  present,
+  type CycleCost,
+  type FactOr,
+  type RollEvent,
+  type TerminalAttestFact,
+  type TerminalEvent,
+  type TerminalOutcome,
+  type TerminalUsageFact,
+} from "@roll/spec";
 import {
   type Clock,
   acquireLock,
@@ -91,10 +104,10 @@ import {
   realAgentSpawn,
 } from "./agent-spawn.js";
 import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
-import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
+import { readAttestGateMode, runAttestGate, verificationReportPath } from "./attest-gate.js";
 import { recoverPiUsage } from "./usage-recovery.js";
 import { realBudgetCheck } from "./budget-check.js";
-import { ACMAP_REMEDIATION_TIMEOUT_MS, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
+import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
@@ -794,7 +807,12 @@ export async function executeCommand(
         mountExecutionAtPublish(ports.repoCwd, ctx.storyId, r.prUrl);
       }
       const pub: PublishResult = { status: r.status, manualMerge };
-      return { event: { type: "published", result: pub } };
+      return {
+        event: { type: "published", result: pub },
+        // US-TRUTH-001: thread the PR url into the cycle context so the
+        // terminal event records the publish fact instead of guessing.
+        ...(r.status === 0 && r.prUrl !== "" ? { ctxPatch: { prUrl: r.prUrl } } : {}),
+      };
     }
 
     // _worktree_merge_back (gh-missing ff tier). Drive a push + ff; report via a
@@ -862,6 +880,17 @@ export async function executeCommand(
     case "append_run": {
       const key: RunKey = { storyId: ctx.storyId ?? "", cycleId: cmd.cycleId };
       ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx, ports.clock()));
+      // US-TRUTH-001: the versioned complete-or-reasoned terminal record —
+      // written at the same moment, from the same facts, as the runs row.
+      // Best-effort: the truth twin must never fail the cycle terminal.
+      try {
+        ports.events.appendEvent(
+          ports.paths.eventsPath,
+          buildTerminalRecord(cmd, ctx, ports.paths.worktreePath, ports.clock()),
+        );
+      } catch {
+        /* the runs row above already landed; audit flags the missing twin */
+      }
       // FIX-211: Done ≡ merged (backlog.md:4) — no publish-time 抢跑. A
       // publish-status-0 `done` terminal means the PR was OPENED and merge
       // handed to the async PR loop (US-AUTO-044), NOT that it merged. FIX-198
@@ -966,6 +995,76 @@ export function buildRunRow(
     if (ctx.cost.cacheWrite !== undefined) row["tokens_cache_write"] = ctx.cost.cacheWrite;
   }
   return row;
+}
+
+/**
+ * US-TRUTH-001 — fold the terminal command + cycle context into the versioned
+ * complete-or-reasoned TerminalEvent. Every fact is present with a value or
+ * carries an enumerated absent reason; a missing usage can never read as $0.
+ */
+export function buildTerminalRecord(
+  cmd: Extract<CycleCommand, { kind: "append_run" }>,
+  ctx: CycleContext,
+  worktreePath: string,
+  nowSec: number,
+): TerminalEvent {
+  const storyId = ctx.storyId ?? "";
+  // v2 six-state → closed terminal vocabulary. `orphan` (publish failed,
+  // branch+tag pushed for audit) is an abort WITH delivery by definition.
+  const OUTCOME: Record<string, TerminalOutcome> = {
+    done: "delivered",
+    published: "published_pending_merge",
+    built: "published_pending_merge",
+    idle: "idle_no_work",
+    failed: "failed",
+    blocked: "blocked",
+    aborted: "aborted_no_delivery",
+    orphan: "aborted_with_delivery",
+  };
+  let attest: FactOr<TerminalAttestFact>;
+  if (storyId === "") {
+    attest = absent("not_applicable");
+  } else {
+    const report = verificationReportPath(worktreePath, storyId);
+    const hasReport = existsSync(report);
+    const hasMap = existsSync(acMapPath(worktreePath, storyId));
+    if (hasReport) attest = present({ reportPath: report, acMap: hasMap });
+    else attest = absent(hasMap ? "not_rendered" : "acmap_missing");
+  }
+  let usage: FactOr<TerminalUsageFact>;
+  if (ctx.cost !== undefined) {
+    usage = present({
+      model: ctx.cost.model,
+      tokensIn: ctx.cost.tokensIn,
+      tokensOut: ctx.cost.tokensOut,
+      ...(ctx.cost.cacheRead !== undefined ? { cacheRead: ctx.cost.cacheRead } : {}),
+      ...(ctx.cost.cacheWrite !== undefined ? { cacheWrite: ctx.cost.cacheWrite } : {}),
+    });
+  } else {
+    usage = absent("no_parseable_usage");
+  }
+  return buildTerminalEvent({
+    cycleId: cmd.cycleId,
+    storyId,
+    agent: ctx.agent ?? "",
+    startedAt: ctx.startSec ?? nowSec,
+    endedAt: nowSec,
+    outcome: OUTCOME[cmd.status] ?? "unknown",
+    pr:
+      ctx.prUrl !== undefined && ctx.prUrl !== ""
+        ? present({ url: ctx.prUrl, state: "OPEN" })
+        : absent("no_publish_attempted"),
+    branch: present(ctx.branch),
+    // the runner does not track the head sha at this layer — reasoned, not faked.
+    commit: absent("not_recorded"),
+    tcr: ctx.tcrCount !== undefined ? present(ctx.tcrCount) : absent("not_recorded"),
+    attest,
+    usage,
+    cost:
+      ctx.cost !== undefined
+        ? present({ estimatedUsd: ctx.cost.estimatedCost, effectiveUsd: ctx.cost.effectiveCost })
+        : absent("no_parseable_usage"),
+  });
 }
 
 /** Read runs.jsonl as {@link ReconcileRunRow}[] for the preflight claim

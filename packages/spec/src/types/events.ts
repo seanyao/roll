@@ -6,6 +6,7 @@
 import type { AgentId } from "./agent.js";
 import type { CycleCost, CycleOutcome, CyclePhase } from "./cycle.js";
 import type { LoopType } from "./loop.js";
+import type { TerminalEvent } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
 
 export type RollEvent =
@@ -75,7 +76,11 @@ export type RollEvent =
   // Policy (BC6) — governance decisions as facts
   | { type: "policy:auto_merge"; prNumber: number; rule: string; ts: number }
   | { type: "policy:flag_review"; prNumber: number; rule: string; ts: number }
-  | { type: "policy:safety_pause"; loop: LoopType; reason: string; ts: number };
+  | { type: "policy:safety_pause"; loop: LoopType; reason: string; ts: number }
+  // US-TRUTH-001 — the versioned complete-or-reasoned terminal record. One per
+  // cycle from schema v1 on; events older than the switch are GRANDFATHERED
+  // (read under legacy rules, never retro-rewritten).
+  | TerminalEvent;
 
 export type RollEventType = RollEvent["type"];
 

@@ -134,6 +134,9 @@ describe("attestCommand", () => {
     expect(html).toContain("FIX-300 — Acceptance Evidence");
     expect(lstatSync(join(storyDir, "latest")).isSymbolicLink()).toBe(true);
     expect(readlinkSync(join(storyDir, "latest"))).toBe("2026-06-06T01-02-03");
+    // FIX-231: a fresh report changes the dossier's truth — the front page is
+    // refreshed in the same hot path (best-effort), so the board never lags.
+    expect(readFileSync(join(proj, ".roll", "features", "index.html"), "utf8")).toContain("FIX-300");
   });
 
   it("US-EVID-007: backfill creates one pre-evidence report for old Done cards and never overwrites existing latest", async () => {

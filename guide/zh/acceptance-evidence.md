@@ -92,3 +92,10 @@ HTML——双语、明暗主题、可打印）：
 页面上每个数字都来自真实模型——`spec.md`、`ac-map.json`、`latest/` 指针、
 自评 note、`tcr:` 提交——绝不手填。一句话：**待办是愿望，主干是事实，
 done ≡ merged。**
+
+**新鲜度模型（FIX-231）：** 看板自己保鲜——每个改变交付真相的节点
+（`roll story new`、`roll attest`、`roll backlog block/defer/unblock/promote`）
+都会顺手刷新聚合页（首页 + 史诗页，best-effort），新卡、新状态立即可见。
+故事页仍是*挂载板*：各生命周期节点就地挂载自己的产出，刷新绝不覆盖已挂载内容。
+只有对账才需要手跑 `roll index`——`--rebuild` 会把每张故事页从源重渲
+（用于手工合并、历史迁移之后）。

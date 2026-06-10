@@ -304,7 +304,7 @@ roll loop story US-LOOP-004 --json    # JSON 输出，给脚本/仪表盘消费
             20260519-091112-44  ✓  $1.11
 ```
 
-**历史是怎么留下来的：** `bin/roll` 在 `events-<slug>.ndjson` 超过 10 MB 时轮转，
+**历史是怎么留下来的：** loop runner 在 `events-<slug>.ndjson` 超过 10 MB 时轮转，
 保留 `.1` … `.4` 四份归档。`roll loop status` 和 `roll loop story` 都会读 head
 加全部轮转文件，cycle 一旦落盘就不会从汇总里消失。
 

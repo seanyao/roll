@@ -341,7 +341,7 @@ evidence:
 讲项目的 deck 必须**引用项目本身**。约定：
 
 - **阈值**：整份 deck 的 evidence 总数不少于 `ceil(total_slides / 3)`——即**平均每 3 张 slide 至少 1 条 evidence**。18 张 deck 即 ≥ 6 条。
-- **格式**：`<path>:<line>`（如 `bin/roll:3127`），路径相对仓库根。
+- **格式**：`<path>:<line>`（如 `packages/cli/src/runner/executor.ts:719`），路径相对仓库根。
 - **覆盖**：证据要分散，不要一股脑堆在某一张上。聚集意味着其余 slide 无 grounding。
 - **无法取证的论断**：实在没法引用时，在 body 前加 `⚠️ unverified` 和一行原因。校验仍会通过，但读者知道该重点审视哪些 slide。
 
@@ -517,7 +517,7 @@ roll slides delete my-deck --force  # 跳过确认（CI/脚本用）
 
 - **直接改 `deck.md`**。纯文本文件，重写某张 slide 的 `body_en` / `body_zh` 让它具体起来。再跑 `roll slides build <slug>` 重渲染。
 - **先加 evidence 再写正文**。一旦被迫引用真实文件和行号，slide 内容自然就具体了。
-- **用更尖锐的主题重新生成**。`roll slides new "How TCR keeps Roll's bin/roll honest"` 会比 `roll slides new "Roll"` 好很多。
+- **用更尖锐的主题重新生成**。`roll slides new "How TCR keeps Roll's loop honest"` 会比 `roll slides new "Roll"` 好很多。
 
 ### 校验失败：`total_slides mismatch`
 

@@ -1,7 +1,7 @@
 # Test Quality Rubric
 
-> Scope: bats tests in `tests/`, used by `roll-.dream` Scan 7 to surface
-> anti-patterns as structured REFACTOR entries.
+> Scope: Vitest tests in `packages/*/test/`, used by `roll-.dream` Scan 7 to
+> surface anti-patterns as structured REFACTOR entries.
 > Chinese version: [quality-rubric.zh.md](./quality-rubric.zh.md)
 
 This rubric publishes eight anti-patterns that make tests give wrong signal —
@@ -203,10 +203,10 @@ test) or the public API needs a new flag (add it intentionally).
 
 ### Real example
 
-A test that does `source bin/roll; _loop_check_depends_on US-X` instead
-of running `roll loop now` and observing the skip decision in the run
-log. The first form locks the helper name; the second tests the
-behavior the user cares about.
+A test that reaches into a private helper (importing an unexported
+`_loopCheckDependsOn` via a back door) instead of running the command and
+observing the skip decision in the run log. The first form locks the helper
+name; the second tests the behavior the user cares about.
 
 ---
 
@@ -214,23 +214,23 @@ behavior the user cares about.
 
 ### Definition
 
-The test exercises bats itself (or pytest, jest, etc.) rather than the
-project code: asserting that `setup()` runs before tests, that `run`
-captures stderr, that a `@test` block exists. These assertions pass
-because the framework works; they tell us nothing about the project.
+The test exercises Vitest itself (or any framework) rather than the
+project code: asserting that `beforeEach` runs before tests, that a mock
+records calls, that `expect` exists. These assertions pass because the
+framework works; they tell us nothing about the project.
 
 ### Signals
 
-- Assertions on bats internals: `$BATS_TEST_NUMBER`, `$BATS_SUITE_NAME`.
+- Assertions on framework internals / the test runner's own behavior.
 - A test whose body is only setup/teardown verification with no call to
   project code.
-- Tests added after a framework upgrade to "make sure bats still works."
+- Tests added after a framework upgrade to "make sure Vitest still works."
 
 ### Fix template
 
 Delete the test. Framework verification belongs upstream. If the project
-relies on a specific framework guarantee, document that contract in
-`tests/helpers/` and run one smoke test, not a category of them.
+relies on a specific framework guarantee, document that contract in a shared
+test helper and run one smoke test, not a category of them.
 
 ### Real example
 
@@ -260,17 +260,17 @@ parsing, but the test bypasses it and rolls its own inline version.
 
 ### Fix template
 
-```bash
-# BEFORE — inline pipeline replicates what a project function already does
-label=$(grep -A1 '<key>Label</key>' "$plist" | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+```ts
+// BEFORE — inline regex replicates what a project function already does
+const label = /<key>Label<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)?.[1];
 
-# AFTER — call the project function that owns the parsing
-source bin/roll
-label=$(_plist_get_string "$plist" Label)
+// AFTER — call the project function that owns the parsing
+import { plistString } from "../src/lib/plist.js";
+const label = plistString(plist, "Label");
 ```
 
-If no project function exists, extract the pipeline into a named test helper
-in `tests/helpers/` so the logic is shared and deliberate.
+If no project function exists, extract the parsing into a named test helper
+module so the logic is shared and deliberate.
 
 ### Real example
 

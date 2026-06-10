@@ -52,59 +52,28 @@ layer of the test pyramid:
 
 | Layer | Run command | Triage starting point |
 |-------|-------------|-----------------------|
-| Unit | `bats tests/unit/` | Failing test file → function name |
-| Integration | `bats tests/integration/` | Setup/teardown, real processes |
+| Unit | `pnpm --filter @roll/<pkg> test` | Failing test file → function name |
+| Integration | `pnpm --filter @roll/cli test` | Captured stdout/exit, fixture cwd |
 | E2E | `<project E2E command>` | User path, environment |
 | Smoke | `roll doctor` | Toolchain health |
 
 ## TCR Test Strategy (Phase 3.0)
 
-Each TCR micro-step needs second-level feedback. The test runner has two
-levers that keep that fast without giving up coverage in CI.
+Each TCR micro-step needs second-level feedback. The suite is **Vitest** across
+the pnpm workspace; the gate runs only what the diff touched.
 
-### `--affected` — run only the tests touched by the diff
-
-```bash
-bash tests/run.sh --affected              # default base = HEAD~1
-bash tests/run.sh --affected main         # explicit base ref
-bash tests/run.sh --affected --dry-run    # print the file list, don't run
-```
-
-Mapping rules (precise → fuzzy → conservative):
-
-1. The changed file *is* the .bats — run it (self-test).
-2. Source-naming convention: `lib/foo.py` → `tests/unit/foo*.bats`,
-   `tests/integration/*foo*.bats`.
-3. Changes to `tests/helpers/*`, `tests/preconditions.bash`, or `tests/run.sh`
-   → run everything (no safe subset).
-
-When the affected set is empty (e.g. doc-only change) the runner prints
-`no affected tests, skipping suite` and exits 0.
-
-### `--tier` — fast (TCR / local) vs slow (CI / pre-push)
+### `roll test` — run only the tests touched by the diff
 
 ```bash
-bash tests/run.sh                   # implicit --tier=fast (default)
-bash tests/run.sh --tier=slow
-bash tests/run.sh --tier=all        # run everything; CI uses this
+roll test               # affected-only (the TCR micro-step gate); writes the test-pass proof
+pnpm --filter @roll/cli exec vitest run test/<file>.test.ts   # one file
+pnpm -r test            # the full suite (pre-push / CI / release)
+pnpm test:cov           # full suite with v8 coverage
 ```
 
-Classification order (first hit wins):
-
-1. Explicit `# bats tier: fast|slow` header in the .bats file.
-2. Path under `tests/integration/` → slow.
-3. References `launchctl`, `crontab`, or `sleep N` with N ≥ 5 → slow.
-4. Default → fast.
-
-With `ROLL_TEST_TIME_CAP=1` (set in CI), `--tier=fast` enforces a
-60-second wall-clock cap (`ROLL_TEST_FAST_CAP_SEC` override). A creeping
-perf regression turns the suite red immediately rather than rotting silently.
-
-User-named .bats files bypass the tier filter:
-`bash tests/run.sh tests/integration/foo.bats` runs even with `--tier=fast`.
-
-The default combination is `--affected --tier=fast`; pre-push / release run
-`--tier=all`.
+`roll test` maps the diff to affected Vitest files, runs them, and writes the
+proof the commit gate checks (see below). A doc-only change has no affected
+tests and exits 0. Pre-push / CI / release always run the full `pnpm -r test`.
 
 ## Test Quality Rubric
 
@@ -119,9 +88,9 @@ catalogs eight recurring antipatterns the dream nightly scan flags as
 | ❸ | Asserting implementation details (private symbol names, internal data shape) | Assert observable behaviour through the public API |
 | ❹ | Fixture order coupling (shared mutable state between tests) | Setup/teardown each test independently; use immutable fixtures |
 | ❺ | Testing private functions / bypassing the public API | Re-route through the public entry point; if it's hard to reach, the API is wrong |
-| ❻ | Asserting framework behaviour (testing bats itself) | Delete the test; trust the framework |
-| ❼ | Inlining external-tool behaviour (`sed`/`grep`/`awk` pipelines duplicated in test bodies) | Call the project helper that owns the parsing, or extract into `tests/helpers/` |
-| ❽ | Asserting on a file outside this repo (`~/.codex`, `~/.kimi`, `~/.roll`, system paths) | Sandbox via `BATS_TMPDIR`, redirect env vars to a tmp dir, never touch live config |
+| ❻ | Asserting framework behaviour (testing Vitest itself) | Delete the test; trust the framework |
+| ❼ | Inlining external-tool behaviour (`sed`/`grep`/`awk` pipelines duplicated in test bodies) | Call the project helper that owns the parsing, or extract into a test helper module |
+| ❽ | Asserting on a file outside this repo (`~/.codex`, `~/.kimi`, `~/.roll`, system paths) | Sandbox in a temp dir (`mkdtempSync`), redirect env vars there, never touch live config |
 
 The dream skill emits at most 5 REFACTOR entries per scan, so the backlog
 doesn't drown in noise. Refactor them in priority order.
@@ -129,7 +98,7 @@ doesn't drown in noise. Refactor them in priority order.
 ### Test-quality merge gate (US-QA-012 / 013)
 
 Categories ❼ and ❽ are **blocking**: loop runs
-`roll loop test-quality-check <changed-bats-files>` between CI green and
+`roll loop test-quality-check <changed-test-files>` between CI green and
 auto-merge. Violations write `ALERT-<slug>.md` and hold the PR until either
 the test is reshaped or the PR description carries `[skip-test-quality]`
 (case-insensitive). Use the bypass sparingly — the violation still gets
@@ -142,12 +111,11 @@ Lines with `# test-quality:allow` are skipped by the scanner — reserved for
 doc-validation tests that legitimately inline `awk` to parse markdown
 without ever touching production code.
 
-`tests/unit/model_prices.bats` is the canonical ❶ exemplar — assertions
-that read live production rates were broken every time the rate card moved,
-even when the arithmetic logic was unchanged. The current file uses a
-monkey-patched fixture price table for arithmetic tests and asserts
-structural invariants (cache_read < input, etc.) on the production PRICES
-dict.
+`packages/core/test/prices.difftest.test.ts` is the canonical ❶ exemplar —
+assertions that read live production rates broke every time the rate card moved,
+even when the arithmetic was unchanged. It now feeds a fixed fixture price table
+for the arithmetic and asserts only structural invariants (cache_read < input,
+etc.) on the production rates.
 
 ## See Also
 

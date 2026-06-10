@@ -13,7 +13,7 @@ curl -fsSL https://seanyao.github.io/roll/install | bash
 钉版本：
 
 ```bash
-curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v2.601.1 bash
+curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v3.610.1 bash
 ```
 
 ### npm

@@ -84,7 +84,7 @@ Choreography is the pattern behind Unix pipelines, microservices event buses, an
 
 ```
 Planner decomposes:
-  → Agent 1: edit bin/roll dispatch
+  → Agent 1: edit the CLI dispatch
   → Agent 2: update docs (EN)
   → Agent 3: update docs (ZH)      ← depends on Agent 2
   → Agent 4: write tests

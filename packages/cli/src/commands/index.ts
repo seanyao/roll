@@ -3,7 +3,6 @@ import { registerPorted } from "../bridge.js";
 import { agentCommand } from "./agent.js";
 import { pairCommand } from "./pair.js";
 import { alertCommand } from "./alert.js";
-import { archiveMigrateCommand } from "./archive-migrate.js";
 import { attestCommand } from "./attest.js";
 import { backlogCommand } from "./backlog.js";
 import {
@@ -60,7 +59,6 @@ import {
   loopResumeCommand,
 } from "./loop-sched.js";
 import { migrateCommand } from "./migrate.js";
-import { migrateFeaturesCommand } from "./migrate-features.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
@@ -100,17 +98,9 @@ export function registerAll(): void {
   });
   // `gc`: age out old surplus attest runs across the archive layout (US-META-001).
   registerPorted("gc", gcCommand);
-  // `archive` groups archive-layout maintenance; `migrate` ports the legacy
-  // verification/<ID>/ trees into features/<epic>/<ID>/ (US-META-002a). v3-native.
-  registerPorted("archive", (args) => {
-    if (args[0] === "migrate") return archiveMigrateCommand(args.slice(1));
-    if (args[0] === undefined || args[0] === "--help" || args[0] === "-h") {
-      process.stdout.write("Usage: roll archive migrate [--dry-run] [--keep-latest N] [--keep-days M]\n");
-      return args[0] === undefined ? 1 : 0;
-    }
-    process.stderr.write(`[roll] unknown archive subcommand: ${args[0]}\n`);
-    return 1;
-  });
+  // REFACTOR-048: `archive migrate` (old verification/<ID> tree port) retired —
+  // that one-time migration completed (US-META-002a..c); cleanup lives in `gc`,
+  // dossier reconciliation in `roll index --rebuild`.
   // `dream`: full surface TS (US-PORT-020). `run-once` is the v3-native scan
   // heart; every other arg mirrors v2's generic unknown-command surface without
   // shelling to bin/roll.
@@ -184,9 +174,12 @@ export function registerAll(): void {
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
   registerPorted("init", initCommand);
-  registerPorted("migrate-features", migrateFeaturesCommand);
-  // `migrate`: full surface TS (three-state idempotency, dry-run preview,
-  // git-mv execute with the single atomic commit). No sub-paths on bash.
+  // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
+  // stories, US-META-007) retired — that one-time backfill completed; new cards
+  // are minted via `roll story new`.
+  // `migrate` STAYS: the pre-2.0 → 2.0 user-project upgrade path that
+  // `roll init` directs users to (three-state idempotency, dry-run preview,
+  // git-mv execute with the single atomic commit).
   registerPorted("migrate", migrateCommand);
   // `offboard`: full surface TS (changeset parse, cross-project guard, plan
   // print, FIX-125 in-cycle plist tripwire, --confirm apply). No bash fallback.

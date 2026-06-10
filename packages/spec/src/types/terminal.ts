@@ -18,6 +18,12 @@
 /** Bump on breaking shape changes; consumers branch on it. */
 export const TERMINAL_EVENT_SCHEMA_VERSION = 1 as const;
 
+/** The moment schema v1 SHIPPED (PR #586 merged 2026-06-10 ~17:10Z; pinned
+ *  17:30Z). Cycles/rows before it are grandfathered in audits and selectors;
+ *  everything after owes the complete-or-reasoned terminal twin. ONE home —
+ *  the audit gatherer and the truth adapter import this, never re-declare. */
+export const TERMINAL_SCHEMA_EPOCH_SEC = Date.UTC(2026, 5, 10, 17, 30) / 1000;
+
 /** AC2 — the closed outcome vocabulary. `idle_no_work` is the honest name for
  *  an exit-0 zero-commit cycle (the spec's minimum eight + idle). */
 export const TERMINAL_OUTCOMES = [

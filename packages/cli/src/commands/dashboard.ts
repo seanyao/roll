@@ -38,6 +38,7 @@ import {
   type PidAlive,
 } from "@roll/infra";
 import { computeListCost, currencyFor } from "./prices-cost.js";
+import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
 
 // ════════════════════════════════════════════════════════════════════════════
 // Display-time helpers — fixed UTC+8, no DST.
@@ -721,11 +722,10 @@ function applyRunRow(cy: Cycle, r: RunRecord, ts: Date | null): void {
       cy.duration_s = r.duration_sec;
     }
   }
-  // FIX-248: the runs row carries the six-state truth (idle/done/published/
-  // failed/...) — let it refine any coarse or failure-class event outcome, and
-  // fold v3 literals onto the panel vocabulary either way. "built" appears
-  // both as the row claim (→ done, v2 parity) and as v3's idle-class
-  // cycle:end outcome — the row status always wins here.
+  // US-TRUTH-004: the runs row is the cycle_outcome anchor's view — classify
+  // it through the ONE truth adapter (selector-backed) instead of a local
+  // literal map. Eligibility unchanged (richer event verdicts not downgraded);
+  // "built" keeps its v2 done-parity via the published_pending_merge fold.
   if (
     (cy.outcome === "unknown" ||
       cy.outcome === "running" ||
@@ -736,8 +736,8 @@ function applyRunRow(cy: Cycle, r: RunRecord, ts: Date | null): void {
       cy.outcome === "orphan") &&
     r.status
   ) {
-    const map: Record<string, string> = { built: "done" };
-    cy.outcome = map[r.status] ?? panelOutcome(r.status);
+    const truth = cycleTruthFromRow(r as Record<string, unknown>, { nowSec: Math.floor(Date.now() / 1000) });
+    cy.outcome = outcomeToPanel(truth.outcome, truth.state);
   }
   // FIX-213: surface the v3 row's own cost/token fields. v2 rows omit these
   // (cost arrives via `usage` events) so this is a no-op for them, but the v3
@@ -1633,6 +1633,16 @@ function render(
   const { days, lang, runs, gitMerges, claudeSlug, now } = args;
   const cycles = aggregate(events, cron);
   const matchedRunIds = Object.keys(runs).length > 0 ? mergeRunsIntoCycles(cycles, runs) : new Set<string>();
+  // US-TRUTH-004 AC4: a COMPLETED post-epoch cycle with no runs row has no
+  // terminal truth — render it as unknown, never as the success-looking dot.
+  // (Running cycles and pre-epoch history keep their lanes.)
+  for (const cy of cycles) {
+    if (cy.tcr_count !== undefined) continue; // a row matched (applyRunRow ran)
+    if (cy.end === null || cy.end === undefined) continue; // still running
+    if (cy.end.getTime() / 1000 < TRUTH_SCHEMA_EPOCH_SEC) continue; // grandfathered
+    if (cy.outcome === "running" || cy.outcome === "idle") continue;
+    cy.outcome = "unknown";
+  }
   if (Object.keys(gitMerges).length > 0) repairOrphanCyclesFromGit(cycles, gitMerges);
   backfillUsageFromClaudeSessions(cycles, claudeSlug ?? "");
   const byDay = bucketByDay(cycles);
@@ -2168,6 +2178,7 @@ function storyOutcomeGlyph(o: string): string {
   if (o === "fail") return "✗";
   if (o === "running") return "⏵";
   if (o === "idle") return "·";
+  if (o === "unknown") return "?"; // US-TRUTH-004 AC4
   return "✓";
 }
 

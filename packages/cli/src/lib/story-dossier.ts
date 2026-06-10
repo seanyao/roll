@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { type DossierStory } from "./archive.js";
+import { rowDelivered } from "./truth-adapter.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES } from "./dossier-index.js";
 import { readLatestStorySelfScore, readSelfScoreTrend, type SelfScoreView } from "./self-score.js";
@@ -780,7 +781,7 @@ function collectExecutionRefs(projectPath: string, storyId: string, text: string
       };
       const built = Array.isArray(row.built) && row.built.some((x) => x === storyId);
       if (row.story_id !== storyId && !built) continue;
-      if (row.status !== "done" && row.status !== "merged" && row.outcome !== "delivered") continue;
+      if (!rowDelivered(row as Record<string, unknown>)) continue; // US-TRUTH-004: selector-backed, no local literals
       const label = `cycle ${row.cycle_id ?? row.run_id ?? "delivered"}`;
       const n = typeof row.tcr_count === "number" && Number.isFinite(row.tcr_count) ? row.tcr_count : undefined;
       add({ kind: "cycle", label, ...(n !== undefined ? { commitCount: n } : {}) });
@@ -1187,7 +1188,9 @@ function runMatchesStory(row: RunRow, storyId: string): boolean {
 }
 
 function isDeliveredRun(row: RunRow): boolean {
-  return row.status === "done" || row.status === "merged" || row.outcome === "delivered";
+  // US-TRUTH-004: one adapter, no per-consumer literals — published/built
+  // (delivery pending merge) count exactly where pre-FIX-244 "done" counted.
+  return rowDelivered(row as Record<string, unknown>);
 }
 
 function costFromRun(row: RunRow): DeliveryCostEvidence | undefined {

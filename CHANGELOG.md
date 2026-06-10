@@ -1,6 +1,28 @@
 # Changelog
 
-## Unreleased
+## v3.610.1 — 2026-06-10
+
+### 稳定性
+
+- 故事档案改"按节点增量挂载"为主路：各生命周期节点把当场已知的产出挂上页面，全量重渲降级为显式 rebuild 修复工具，根治"合了但页面没动"（US-DOSSIER-007）
+
+### 可见性
+
+- 历史交付卡 legacy 状态语义：pre-v3 已 Done 卡(无 latest/无 ac-map)派生 legacy 标记，状态仍=完成+历史 chip，脊柱不再读证据假装半成品（US-DOSSIER-008）
+- backlog 状态机归一到单一强类型真相，渲染与调度与对账全部消费它，不再各自拿字符串猜状态（REFACTOR-047） `[loop]`
+
+### 工程和测试
+
+- 把 7 个曾比对旧引擎 oracle、现退化为确定性自校验的差异测试升级为真冻结期望快照（US-PORT-021b）
+
+### 其他
+
+- 把幻灯片渲染命令改写为 TS，脱离 bash 回落引擎（US-PORT-016）
+- 把待办管理写端命令改写为 TS，脱离 bash 回落引擎（US-PORT-019）
+- 所有命令脱回落后退役 bash 引擎并清残件（高爆破坏性收尾，人工放行）（US-PORT-021）
+- release ship 的确认提示在新版 Node 上仍会卡住，敲回车没反应，目前只能用免确认参数绕过，需彻底修交互读取（FIX-229） `[loop]`
+- dossier: redesign features index as a delivery board (status overview + foldable epics + lifecycle spine)（PR#560）
+- dossier: align features index status/type with backlog + 3-state grouping (delivery board)（PR#559）
 
 ## v3.609.2 — 2026-06-09
 

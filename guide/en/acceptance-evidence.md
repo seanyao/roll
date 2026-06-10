@@ -102,3 +102,12 @@ theme-aware, printable):
 Every figure is computed from the real model — `spec.md`, `ac-map.json`, the
 `latest/` pointer, self-score notes, `tcr:` commits — never typed in. The
 guiding line: **backlog is wish, main is truth, done ≡ merged.**
+
+**Freshness model (FIX-231):** the board keeps itself fresh — every
+truth-changing node (`roll story new`, `roll attest`, `roll backlog
+block/defer/unblock/promote`) refreshes the aggregate pages (front + epic) on
+its own, best-effort, so a new card or status flip appears immediately. Story
+pages stay *mount boards*: lifecycle nodes mount their facts in place and a
+refresh never clobbers them. You only need `roll index` by hand for
+reconciliation — `--rebuild` re-renders every story page from source (after
+hand-merges or history migrations).

@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
+import { consistencyAuditCommand } from "./consistency-audit.js";
 
 const DIMENSIONS = ["code", "cards", "docs", "i18n", "tests", "site"];
 
@@ -501,11 +502,15 @@ const CHECK_HELP = `Usage: roll consistency <subcommand>
 
   roll consistency check                # human-readable report
   roll consistency check --json         # machine-readable JSON
+  roll consistency audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
 `;
 
-export function consistencyCommand(args: string[]): number {
+export function consistencyCommand(args: string[]): number | Promise<number> {
   const subcmd = args[0] ?? "check";
   const rest = args.slice(1);
+
+  // US-TRUTH-002: the shadow drift scanner — read-only, never blocks (exit 0).
+  if (subcmd === "audit") return consistencyAuditCommand(rest);
 
   if (subcmd === "check") {
     let isJson = false;

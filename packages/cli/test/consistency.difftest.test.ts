@@ -514,6 +514,7 @@ describe("frozen: roll consistency", () => {
 
         roll consistency check                # human-readable report
         roll consistency check --json         # machine-readable JSON
+        roll consistency audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
       ",
       }
     `);

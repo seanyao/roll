@@ -41,3 +41,4 @@ export * from "./attest/ansi-html.js";
 export * from "./attest/report.js";
 export * from "./attest/report-smoke.js";
 export * from "./html/chrome.js";
+export * from "./consistency/audit.js";

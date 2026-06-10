@@ -218,7 +218,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
 
     // Terminal: published → done.
     expect(result.ran).toBe(true);
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
 
     // Heartbeat existed during the agent run.
     expect(heartbeatExistedDuringRun).toBe(true);
@@ -246,7 +246,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     for (const key of ["run_id", "status", "agent", "built", "tcr_count", "story_id", "cycle_id"]) {
       expect(Object.keys(row)).toContain(key);
     }
-    expect(row["status"]).toBe("done");
+    expect(row["status"]).toBe("published"); // FIX-244: runs row keeps the pending-merge distinction for backfill
     expect(row["agent"]).toBe("claude");
     expect(row["cycle_id"]).toBe(cycleId);
     expect(row["story_id"]).toBe("US-RUN-001");
@@ -299,7 +299,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     expect(seenRunDir).toBe(expectedRunDir);
     expect(readFileSync(join(expectedRunDir, "evidence", "probe.txt"), "utf8")).toBe("agent proof\n");
     const events = readFileSync(p.eventsPath, "utf8")
@@ -378,7 +378,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       ctx: { cycleId: cycleId2, branch: `loop/cycle-${cycleId2}`, loop: "ci" as never },
     });
     expect(result2.ran).toBe(true);
-    expect(result2.terminal).toBe("done");
+    expect(result2.terminal).toBe("published"); // FIX-244
   });
 
   it("lock contention: a second concurrent cycle is skipped (ran=false)", async () => {
@@ -525,7 +525,7 @@ describe("FIX-206 — a partial-fossil .roll is relinked so the backlog is visib
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     // Before the fix: the materialized fossil dir blocked the link (real dir,
     // backlog shadowed). After: the guard replaces it with the link.
     expect(isLink).toBe(true);
@@ -560,7 +560,7 @@ describe("FIX-198 status flips on the gitignored-.roll layout", () => {
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     expect(worktreeRollIsLink).toBe(true); // FIX-204C: linked, not checked out
     expect(inProgressDuringRun).toContain("🔨 In Progress"); // claimed on MAIN, mid-cycle
     expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done"); // flipped at terminal
@@ -582,7 +582,7 @@ describe("FIX-198 status flips on the gitignored-.roll layout", () => {
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done"); // recycled → re-picked → delivered
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending // recycled → re-picked → delivered
     expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done");
   });
 });
@@ -612,7 +612,7 @@ describe("FIX-211 — Done ≡ merged: no publish-time 抢跑 on the gitignored 
 
     // Cycle still lands `done` (published, handed to the async PR loop) and the
     // runs row keeps that for dashboard/v2 parity …
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     const backlog = readFileSync(backlogPath, "utf8");
     // … but the MAIN backlog row must NOT have flipped Done — it rests at 🔨.
     expect(backlog).toContain("🔨 In Progress");
@@ -633,7 +633,7 @@ describe("FIX-211 — Done ≡ merged: no publish-time 抢跑 on the gitignored 
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     const backlog = readFileSync(backlogPath, "utf8");
     expect(backlog).toContain("✅ Done");
     expect(backlog).not.toContain("🔨 In Progress");
@@ -701,7 +701,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     const backlog = readFileSync(backlogPath, "utf8");
     // 补翻: the merged prior delivery flipped ✅ Done.
     expect(backlog).toMatch(/US-PRIOR \|.*✅ Done/);
@@ -730,7 +730,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     const backlog = readFileSync(backlogPath, "utf8");
     // prior delivery still pending merge → stays 🔨 (not reverted, not Done).
     expect(backlog).toMatch(/US-PRIOR \|.*🔨 In Progress/);
@@ -758,7 +758,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     // The dead claim (no PR ever opened) was recycled to 📋 Todo at preflight —
     // FIX-112 orphan-recovery preserved — so US-PRIOR (highest priority) was
     // re-picked, delivered, and merged this cycle → ✅ Done, while US-RUN-001
@@ -785,7 +785,7 @@ describe("US-PORT-011 — live.log streams the agent transcript", () => {
     const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
     const ports: Ports = { ...base, agentSpawn: streamingShim, github: fakeGithub(0) };
     const result = await runCycleOnce({ ports, ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never } });
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     const live = readFileSync(join(rt, "live.log"), "utf8");
     expect(live).toContain(`── cycle ${cycleId}`);
     expect(live).toContain("claude-opus-4-8"); // shim stream-json chunk streamed through
@@ -809,7 +809,7 @@ describe("FIX-204B — the executor pins the picked story into the agent spawn",
       ports,
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     expect(seenStoryId).toBe("US-RUN-001");
   });
 });
@@ -843,7 +843,7 @@ describe("FIX-204C — worktree sees the main .roll via symlink", () => {
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     expect(linkTarget).toBe(join(repo, ".roll"));
     expect(backlogViaWorktree).toContain("US-RUN-001");
     expect(wtStatus).not.toContain(".roll");
@@ -871,7 +871,7 @@ describe("FIX-204C — worktree sees the main .roll via symlink", () => {
       ports,
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     expect(isLink).toBe(false);
     expect(existsSync(join(repo, ".git", "info", "exclude")) ? readFileSync(join(repo, ".git", "info", "exclude"), "utf8") : "").not.toMatch(/^\.roll$/m);
   });
@@ -909,7 +909,7 @@ describe("FIX-209 — cycle baseline freshness: preflight fetches the remote mer
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
 
-    expect(result.terminal).toBe("done");
+    expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
     // The crown assertion: the worktree branched off the FRESH baseline.
     expect(mergeVisibleInWorktree).toBe(true);
   });

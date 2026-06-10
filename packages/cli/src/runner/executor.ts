@@ -734,13 +734,24 @@ export async function executeCommand(
         }
         attestBlocked = res.blocked;
       }
+      // FIX-244: phantom-failure probe. A hard-blocked delivery whose work is
+      // ALREADY out as a PR (agent self-published, observed 2026-06-10: cycles
+      // judged failed whose PRs merged minutes later) is "published", not a
+      // no-output failure. Probe the cycle branch's PR state into the facts so
+      // classifyCaptured can see it; a failed probe degrades to plain failed.
+      let prState: string | undefined;
+      if (attestBlocked && commitsAhead > 0) {
+        prState = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => undefined);
+      }
       const facts: CapturedFacts = {
         usedWorktree: true,
         // accept-path reaches capture at exit 0; a HARD attest block fails the
-        // capture (classifyCaptured: exit ≠ 0 → failed) so Done is withheld.
+        // capture (classifyCaptured: exit ≠ 0 → failed) so Done is withheld —
+        // unless the PR-state probe reclassifies it "published" (FIX-244).
         agentExit: attestBlocked ? 1 : 0,
         timedOut: false,
         commitsAhead,
+        ...(prState !== undefined ? { prState } : {}),
       };
       return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount } };
     }
@@ -843,7 +854,7 @@ export async function executeCommand(
       // preflight reconcile (decideClaimReconcile) flips it once the async PR
       // loop merges. The runs row keeps `done` for v2/dashboard parity — only
       // the backlog flip waits for the merge evidence.
-      if (cmd.status === "done" && (ctx.storyId ?? "") !== "") {
+      if ((cmd.status === "done" || cmd.status === "published") && (ctx.storyId ?? "") !== "") {
         const state = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => "UNKNOWN");
         if (state === "MERGED") {
           ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", STATUS_MARKER.done);
@@ -896,7 +907,10 @@ export function buildRunRow(
   ctx: CycleContext,
   nowSec?: number,
 ): Record<string, unknown> {
-  const built = cmd.status === "done" || cmd.status === "built" ? [ctx.storyId ?? ""].filter(Boolean) : [];
+  const built =
+    cmd.status === "done" || cmd.status === "published" || cmd.status === "built"
+      ? [ctx.storyId ?? ""].filter(Boolean)
+      : [];
   const row: Record<string, unknown> = {
     run_id: cmd.cycleId,
     status: cmd.status,

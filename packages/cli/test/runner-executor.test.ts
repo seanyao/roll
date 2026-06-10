@@ -658,6 +658,39 @@ describe("executeCommand — command → executor mapping", () => {
     expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "spawn-failed")).toBe(true);
   });
 
+  // FIX-244 — phantom-failure probe: a hard-blocked delivery whose work is
+  // already out as a PR is "published", not a no-output failure. The capture
+  // step probes the cycle branch's PR state into the facts so the classifier
+  // (core classifyCaptured) can see it.
+  it("FIX-244: hard-blocked capture probes the cycle-branch PR state into facts", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(ports.github.prState).toHaveBeenCalledWith("/repo", CTX.branch);
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1, prState: "MERGED" } });
+  });
+
+  it("FIX-244: probe failure (gh down) degrades to plain failed facts — no crash, no prState", async () => {
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      github: { ...base.ports.github, prState: vi.fn(async () => { throw new Error("gh down"); }) },
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
+    const facts = (r.event as { facts: Record<string, unknown> }).facts;
+    expect(facts["prState"]).toBeUndefined();
+  });
+
+  it("FIX-244: a clean capture (gate not blocking) never probes PR state", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-244-soft-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n");
+    const base = fakePorts();
+    const { ports } = fakePorts({ repoCwd: repo, paths: { ...base.ports.paths, worktreePath: join(repo, "wt") } });
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(ports.github.prState).not.toHaveBeenCalled();
+  });
+
   it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);

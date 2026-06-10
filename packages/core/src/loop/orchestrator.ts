@@ -735,10 +735,23 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         // idle → clean + terminal; failed/blocked → terminal (no publish).
         // idle: nothing to keep. published (FIX-244): branch + PR are on the
         // remote — keep the worktree too would strand it (FIX-247's lesson).
+        // failed WITH commits (FIX-247 AC1): a gate-kill is not a discard —
+        // push the branch so the work is reachable on the remote, and say so.
+        // Ruling (AC2): the next cycle does NOT auto-reuse stranded work —
+        // I12's fresh-context contract stands; rescue is a human decision on
+        // an auditable branch.
         const extra: CycleCommand[] =
           status === "idle" || status === "published"
             ? [{ kind: "cleanup_worktree", branch: state.ctx.branch }]
-            : [];
+            : status === "failed" && event.facts.commitsAhead > 0
+              ? [
+                  { kind: "push_orphan", branch: state.ctx.branch },
+                  {
+                    kind: "append_alert",
+                    message: `cycle ${state.ctx.cycleId}: gate-killed with ${event.facts.commitsAhead} commit(s) — branch ${state.ctx.branch} pushed for audit/rescue; next cycle starts fresh by design (FIX-247)`,
+                  },
+                ]
+              : [];
         return terminate(next, status, extra);
       }
       // built → publish ladder.

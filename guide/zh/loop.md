@@ -863,3 +863,12 @@ Since Phase 2.0, loop state lives inside the project at `<project>/.roll/loop/`.
 - **每个 agent 都有实时观察窗**：非 claude agent（pi、kimi、codex 等）在
   macOS 上套伪终端运行，输出逐行流入观察窗，不再憋到进程退出；claude 走
   自己的流式协议，行为不变。
+
+## Launchd lanes(任务清单)
+
+每个项目 slug 下 Roll 只拥有三个 launchd 任务:`com.roll.loop.<slug>`(周期调度)、
+`com.roll.dream.<slug>`(夜间扫描)、`com.roll.pr.<slug>`(PR 收件)。`roll loop on`
+安装它们;`roll loop off` 卸载它们**并清扫**发现的任何其它 `com.roll.*.<slug>`
+plist——旧版本退役的形态(ci/alert/brief)曾以僵尸身份指着已删除的引擎存活数周。
+`roll doctor` 列出本机全部 `com.roll.*` 任务及其目标目录与加载状态;目标目录
+已不存在的 lane 标红 STALE。

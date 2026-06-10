@@ -39,7 +39,7 @@ import {
 } from "@roll/infra";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -613,8 +613,38 @@ export async function loopOffCommand(_args: string[], deps: LoopSchedDeps = real
   for (const svc of LOOP_SERVICES) {
     await deps.launchd.uninstall(uid, launchdLabel(svc, id.slug));
   }
+  // FIX-234 AC2: off owns the FULL lane set — retired shapes (ci/alert/brief
+  // from older versions) left zombie jobs pointing at deleted engines; sweep
+  // every com.roll.*.<slug> plist, not just the three we install.
+  for (const label of listRollLaneLabels(id.slug)) {
+    if (LOOP_SERVICES.some((svc) => label === launchdLabel(svc, id.slug))) continue;
+    await deps.launchd.uninstall(uid, label);
+    try {
+      rmSync(join(launchAgentsDir(), `${label}.plist`), { force: true });
+    } catch {
+      /* best-effort */
+    }
+    process.stdout.write(`  swept zombie lane: ${label}\n`);
+  }
   process.stdout.write(`Loop disabled (loop/dream/pr booted out)\nLoop 已停用(loop/dream/pr 均已卸载)\n`);
   return 0;
+}
+
+/** The user LaunchAgents dir (test override via _LAUNCHD_DIR). */
+export function launchAgentsDir(): string {
+  return process.env["_LAUNCHD_DIR"] ?? join(homedir(), "Library", "LaunchAgents");
+}
+
+/** All com.roll.* lane labels for a slug found on disk (FIX-234). */
+export function listRollLaneLabels(slug: string): string[] {
+  try {
+    return readdirSync(launchAgentsDir())
+      .filter((n) => n.startsWith("com.roll.") && n.endsWith(`.${slug}.plist`))
+      .map((n) => n.replace(/\.plist$/, ""))
+      .sort();
+  } catch {
+    return [];
+  }
 }
 
 /** `roll loop pause` — write the PAUSE marker the runner honors. */

@@ -685,8 +685,8 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 | `roll status` | 显示同步状态、技能软链接、检测到的 AI 工具 |
 | `roll backlog` | 显示 `.roll/backlog.md` 中所有待处理任务 |
 | `roll agent [use <name>\|list]` | 切换项目 agent——影响所有 🤖 命令 |
-| `roll loop <on\|off\|now\|status\|monitor\|resume\|reset>` | 🤖 管理自主 BACKLOG 执行器（三服务：loop/dream/brief） |
+| `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 管理自主 BACKLOG 执行器(三通道:loop/dream/pr) |
 | `roll brief` | 🤖 展示最新简报（超过 24h 自动重新生成） |
-| `roll peer` | 🤖 跨 Agent 代码评审与协商 |
-| `roll release` | 🤖 同步日志 + 版本号 + tag + npm publish + GitHub Release |
+| `roll pair [init\|status]` | 🤖 跨 Agent 配对:建造期异构同行复检 |
+| `roll release [ship\|waiver]` | 发版指引 · 过闸打 tag · 记录化漂移豁免——npm publish 永远人工 |
 | `roll`（无参数，在项目目录） | Dashboard：loop 状态、待办数量、最新简报摘要 |

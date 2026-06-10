@@ -141,7 +141,7 @@ roll loop gc --dry-run        # 预览将被清理的内容，不实际删除
 roll loop gc --keep-days 14   # 覆盖保留天数（也可用 .roll/local.yaml 中的 loop_gc.retention_days）
                               # 完整 gc 手册见 guide/zh/loop-data-layout.md
 
-roll loop branches    # 列出 loop 相关分支（已合并临时分支、开放 PR 等）
+# loop 相关分支:`git ls-remote --heads origin 'loop/*'`(branches 子命令已退役)
 
 roll loop events      # 显示最近 20 条 cycle 事件
 roll loop events 50   # 显示最近 50 条

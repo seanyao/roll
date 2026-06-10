@@ -43,24 +43,39 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 
 | 命令 | 说明 |
 |------|------|
-| **Autonomy · 日常使用** | |
-| `roll loop <on\|off\|now\|status\|eval\|runs\|story\|…>` | 管理自主 BACKLOG 执行循环 |
+| **自治 · 日常** | |
+| `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|fmt\|pr-inbox\|mute\|unmute\|pause\|resume\|reset\|gc>` | 管理自主 BACKLOG 执行循环(含每周期结果评分) |
 | `roll brief` | 查看最新 owner 简报 |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
-| `roll peer` | 跨 Agent 协商对审 |
-| `roll alert` | 查看 / 清除 loop 告警 |
-| **Project · 项目内** | |
-| `roll init` | 在当前项目落地 Roll |
+| `roll alert [run-once]` | 查看 / 清除 loop 告警 |
 | `roll status` | 显示当前状态和漂移项 |
-| `roll agent [use <name>]` | 切换当前项目使用的 agent |
+| `roll doctor` | 环境与安装体检(agents、plist、launchd lanes) |
+| `roll dream run-once` | 夜间自检(模式、文档新鲜度、测试质量)立即跑一遍 |
+| `roll tune [reset]` | 只建议不自动应用的自调参报告 |
+| **卡片与证据** | |
+| `roll idea "<一句话描述>"` | 收卡:自动分类、编号、lint、推断 epic、铸全套卡夹——用户加卡的唯一入口 |
+| `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | agent/skill 用的单一建卡入口:卡夹 + backlog 行 + 索引刷新(批量用 --no-index) |
+| `roll attest <ID>` | 渲染验收证据报告进卡夹 |
+| `roll index` | 重建三层交付档案(首页 · epic · 故事页) |
+| `roll consistency <check\|audit>` | 五维一致性检查 · US-TRUTH 影子漂移审计(只读,exit 0) |
+| `roll changelog` | 从已合并工作同步 CHANGELOG |
+| **项目 · 每仓** | |
+| `roll init` | 在当前项目落地 Roll(历史代码走 agent 接入) |
+| `roll offboard` | 从项目移除 Roll |
+| `roll migrate` | 升级 pre-2.0 项目布局 |
+| `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |
 | `roll ci [--wait]` | 查看 / 等待当前 commit 的 CI 状态 |
-| `roll test [--where] [--reset]` | 运行测试套件（通过隔离适配器分发；未知类型显式报错） |
-| `roll release` | 执行发版脚本（仅人工） |
-| `roll review-pr <number>` | 对指定 PR 做 AI 代码评审 |
-| **Machine · 全局** | |
+| `roll release [ship\|waiver]` | 发版指引 · 过闸打 tag(`ship`) · 记录化漂移豁免(`waiver`)——npm publish 永远人工 |
+| `roll feedback --type bug\|idea\|ux` | 为本项目提交 GitHub issue |
+| `roll pair [init\|status]` | 跨 Agent 配对:建造期异构同行复检 |
+| **配置 · 本机** | |
+| `roll config [lang <zh\|en\|--reset>\|…]` | 读写 roll 配置(语言、loop 窗口、dream 时间) |
+| `roll agent [set <slot> <agent>\|use <name>\|list]` | 本机复杂度槽位路由(easy/default/hard/fallback) |
+| `roll prices [refresh]` | 模型价目表(成本核算来源) |
+| `roll skills` | 技能目录状态 |
 | `roll setup [-f]` | 首次安装或重新同步约定到所有 AI 客户端 |
 | `roll update` | 升级到最新版本并重新同步 |
-| `roll version` | 显示已安装的 roll 版本 |
+| `roll --version` / `roll -v` | 显示已安装的 roll 版本 |
 
 ## 仓库结构
 

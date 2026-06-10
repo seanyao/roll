@@ -699,8 +699,8 @@ Commands fall into two categories: bash commands run pure shell logic; agent com
 | `roll status` | Display current sync status, skill links, and detected AI tools |
 | `roll backlog` | Show all pending tasks from `.roll/backlog.md` |
 | `roll agent [use <name>\|list]` | Per-project agent selection — affects all 🤖 commands |
-| `roll loop <on\|off\|now\|status\|monitor\|resume\|reset>` | 🤖 Manage the autonomous BACKLOG executor (three-service: loop/dream/brief) |
+| `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 Manage the autonomous BACKLOG executor (three lanes: loop/dream/pr) |
 | `roll brief` | 🤖 Show latest owner brief (regenerate if stale >24h) |
-| `roll peer` | 🤖 Cross-agent code review and negotiation |
-| `roll release` | 🤖 Sync changelog + version bump + tag + npm publish + GitHub Release |
+| `roll pair [init\|status]` | 🤖 Cross-agent pairing: heterogeneous peer re-checks during builds |
+| `roll release [ship\|waiver]` | Release guidance · gated tag push · recorded drift waiver — npm publish stays human |
 | `roll` (no args, in project dir) | Dashboard: loop status, pending count, latest brief summary |

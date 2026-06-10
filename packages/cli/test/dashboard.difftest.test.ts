@@ -573,7 +573,7 @@ describe("frozen: roll loop status (live)", () => {
         cache reads          —  —           —         —       
         output tokens       2K  ▲ new       —         —       
         cost             ¥0.42  ▲ new       ¥0.00     ¥0.00   
-        agents: pi 4/4 (n/a)
+        agents: pi 1/1 (n/a)
         result-eval: mean 7.5↑ / min 6 / out 50% ci 100% scope 100% qual 0% (last 14)
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────

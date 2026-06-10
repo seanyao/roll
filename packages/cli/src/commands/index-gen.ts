@@ -43,10 +43,19 @@ function renderSpecHtml(storyDir: string, id: string): string | null {
 export function indexCommand(args: string[]): number {
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(
-      "Usage: roll index\n  Regenerate .roll/index.json + the Delivery Dossier pages\n  (features/index.html, every epic page, every story dossier)\n",
+      "Usage: roll index [--rebuild]\n" +
+        "  Regenerate .roll/index.json + the Delivery Dossier (front page, every epic page).\n" +
+        "  Story dossier pages are living mount boards: each lifecycle node mounts its own\n" +
+        "  facts onto the existing page, so by default an existing story page is left intact.\n" +
+        "  --rebuild  force a full re-render of every story page from source (reconciliation:\n" +
+        "             derailed/hand-merged or migrated history cards). Overwrites mounted content.\n",
     );
     return 0;
   }
+  // US-DOSSIER-007 (AC3): full re-render is the explicit reconciliation tool, not
+  // the hot path — by default we never overwrite an existing story page (its
+  // incremental mounts would be lost when source can't reconstruct them).
+  const rebuild = args.includes("--rebuild");
   const cwd = process.cwd();
   const stories = generateIndex(cwd);
   const n = Object.keys(stories).length;
@@ -85,12 +94,13 @@ export function indexCommand(args: string[]): number {
       for (const story of epic.stories) {
         const storyDir = join(featuresDir, epic.name, story.id);
         try {
-          writeFileSync(
-            join(storyDir, "index.html"),
-            renderStoryDossier(collectStoryDossierInput(cwd, story)),
-            "utf8",
-          );
-          pages += 1;
+          const storyIndex = join(storyDir, "index.html");
+          // Mount board: only (re)render when forced or when the page is missing
+          // (a brand-new card needs its initial skeleton).
+          if (rebuild || !existsSync(storyIndex)) {
+            writeFileSync(storyIndex, renderStoryDossier(collectStoryDossierInput(cwd, story)), "utf8");
+            pages += 1;
+          }
           // US-DOSSIER-004: rendered spec.html the "Design doc" link points at.
           const specHtml = renderSpecHtml(storyDir, story.id);
           if (specHtml !== null) {

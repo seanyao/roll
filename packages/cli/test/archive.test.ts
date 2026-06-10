@@ -133,6 +133,34 @@ describe("roll index command", () => {
     expect(existsSync(join(proj, ".roll", "index.json"))).toBe(true);
     expect(readIndex(proj)).toEqual({ "US-A-1": "alpha" });
   });
+
+  it("US-DOSSIER-007: default index preserves an existing story page (mount board); --rebuild re-renders it", () => {
+    const proj = project(
+      ["| US-A-1 | x | ✅ Done |"],
+      [["alpha/US-A-1/spec.md", "---\nid: US-A-1\ntitle: A\n---\n# US-A-1\n"]],
+    );
+    const storyIdx = join(proj, ".roll", "features", "alpha", "US-A-1", "index.html");
+    // a live page carrying content the source can't reconstruct (squash-removed PR).
+    writeFileSync(storyIdx, "<html>MOUNTED-PR-999</html>");
+    const save = process.cwd();
+    process.chdir(proj);
+    const o = process.stdout.write.bind(process.stdout);
+    // @ts-expect-error capture-only
+    process.stdout.write = (): boolean => true;
+    try {
+      // default: never clobber an existing story page.
+      expect(indexCommand([])).toBe(0);
+      expect(readFileSync(storyIdx, "utf8")).toContain("MOUNTED-PR-999");
+      // --rebuild: explicit reconciliation re-renders from source.
+      expect(indexCommand(["--rebuild"])).toBe(0);
+      const after = readFileSync(storyIdx, "utf8");
+      expect(after).not.toContain("MOUNTED-PR-999");
+      expect(after).toContain("Story Dossier");
+    } finally {
+      process.stdout.write = o;
+      process.chdir(save);
+    }
+  });
 });
 
 // US-META-002c: resolveReadArchiveDir retired with the legacy verification/ tree.

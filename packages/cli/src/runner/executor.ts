@@ -93,6 +93,7 @@ import {
 import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate } from "./attest-gate.js";
 import { recoverPiUsage } from "./usage-recovery.js";
+import { realBudgetCheck } from "./budget-check.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
@@ -1206,7 +1207,9 @@ export function nodePorts(opts: {
           },
         }
       : { resolve: () => ({ agent: "claude", model: "" }) },
-    budget: opts.budget ?? { check: () => "ok" },
+    // FIX-249: the budget gate is LIVE — runs.jsonl cost rows + policy.yaml
+    // `loop_safety.budget` → budgetVerdict (I11). No budget block → "ok".
+    budget: opts.budget ?? { check: () => realBudgetCheck(opts.repoCwd, opts.paths.runsPath, clock() * 1000) },
     evidence: {
       openFrame(projectCwd, storyId, runId) {
         return openEvidenceFrame({ runDir: join(cardArchiveDir(projectCwd, storyId), runId) }).runDir;

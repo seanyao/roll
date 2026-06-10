@@ -796,6 +796,19 @@ export async function executeCommand(
         const pub: PublishResult = { status: 2, mergedBack: false, orphanPushed: false, manualMerge };
         return { event: { type: "published", result: pub } };
       }
+      // FIX-245 AC2: an agent that opened its own PR inside the cycle bypassed
+      // every runner gate (observed: PR #578, single un-prefixed commit). The
+      // runner detects it at publish time, ADOPTS the registration (the PR is
+      // real — the books must say published) and logs the discipline breach.
+      const preState = await ports.github.prState(ports.repoCwd, cmd.branch).catch(() => "UNKNOWN");
+      if (preState === "OPEN" || preState === "MERGED") {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `discipline: agent self-published a PR for ${cmd.branch} (cycle ${ctx.cycleId}) — runner adopted it; gates ran post-hoc (FIX-245)`,
+        );
+        const pub: PublishResult = { status: 0, manualMerge };
+        return { event: { type: "published", result: pub } };
+      }
       const plan = cmd.docOnly
         ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge })
         : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge });

@@ -62,11 +62,14 @@ export interface PrTick {
   loop: "pr";
   outcome: PrTickOutcome;
   note: string;
+  /** FIX-233 AC2: the underlying error's first stderr line (truncated) — a bare
+   *  `gh_error` told the 4-day proxy-poison incident nothing. */
+  detail?: string;
 }
 
 /** Build the idle tick for one of the early-return gates (bin/roll 11965-11974). */
-export function prIdleTick(note: PrIdleNote): PrTick {
-  return { loop: "pr", outcome: "idle", note };
+export function prIdleTick(note: PrIdleNote, detail?: string): PrTick {
+  return { loop: "pr", outcome: "idle", note, ...(detail !== undefined && detail !== "" ? { detail: detail.slice(0, 200) } : {}) };
 }
 
 /** The terminal tick after the inbox walks ≥1 PR (bin/roll 12053). */
@@ -86,6 +89,8 @@ export interface PrInboxInventory {
   listStdout: string;
   /** The parsed open-PR count (jq length, bin/roll 11973). */
   openCount: number;
+  /** FIX-233 AC2: first stderr line of a failed `gh pr list` (diagnosis). */
+  listStderr?: string;
 }
 
 /**
@@ -95,7 +100,7 @@ export interface PrInboxInventory {
  */
 export function prInboxGate(inv: PrInboxInventory): PrTick | undefined {
   if (!inv.ghAvailable) return prIdleTick("gh_unavailable");
-  if (!inv.listOk) return prIdleTick("gh_error");
+  if (!inv.listOk) return prIdleTick("gh_error", (inv.listStderr ?? "").split("\n")[0]);
   const out = inv.listStdout.trim();
   if (out === "") return prIdleTick("empty_response");
   if (out === "[]") return prIdleTick("no_open_prs");
@@ -403,3 +408,34 @@ export function rebaseable(isCrossRepository: boolean): boolean {
 // caller imports the fallback from one place.
 export { decidePublishOutcome };
 export type { PublishOutcome, PublishStatus };
+
+// ── FIX-233 — dead-tick streak alerting (pure verdict) ───────────────────────
+
+/** Tick notes that count as an abnormal tick for the streak. */
+export const DEAD_TICK_NOTES: ReadonlySet<string> = new Set(["gh_error", "lock_fail"]);
+
+export interface DeadTickStreakInput {
+  /** Most-recent-last tick notes (the caller reads the tail of pr-tick.jsonl). */
+  recentNotes: readonly string[];
+  /** Has the current streak already been alerted (marker present)? */
+  alreadyAlerted: boolean;
+  /** Consecutive abnormal ticks that trip the alert (default 5). */
+  threshold?: number;
+}
+
+/**
+ * The 4-day silent pr-loop death (2026-06-06→10, launchctl proxy poison) had
+ * 345 gh_error ticks and zero alerts. Verdict ladder:
+ *   - last `threshold` ticks all abnormal and not yet alerted → "alert"
+ *   - last tick healthy after an alerted streak → "recovered"
+ *   - otherwise → null (no action)
+ */
+export function deadTickVerdict(input: DeadTickStreakInput): "alert" | "recovered" | null {
+  const n = input.threshold ?? 5;
+  const tail = input.recentNotes.slice(-n);
+  const last = input.recentNotes[input.recentNotes.length - 1];
+  const lastAbnormal = last !== undefined && DEAD_TICK_NOTES.has(last);
+  if (input.alreadyAlerted) return lastAbnormal ? null : "recovered";
+  if (tail.length >= n && tail.every((t) => DEAD_TICK_NOTES.has(t))) return "alert";
+  return null;
+}

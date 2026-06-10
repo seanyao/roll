@@ -57,6 +57,17 @@ export function announceReport(
   return report;
 }
 
+/** FIX-237 — anchor the observation window to THIS cycle: truncate live.log
+ *  and stamp the new cycle's header so a tail can never replay the previous
+ *  cycle's transcript. Best-effort (observation must not block the cycle). */
+export function resetLiveLog(runtimeDirPath: string, cycleId: string): void {
+  try {
+    writeFileSync(join(runtimeDirPath, "live.log"), `=== cycle ${cycleId} ===\n`, "utf8");
+  } catch {
+    /* best-effort */
+  }
+}
+
 // ─── FIX-204D — signal teardown ───────────────────────────────────────────────
 
 /** Injectable seams for {@link cycleSignalTeardown} (tests must not exit). */
@@ -448,6 +459,11 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
         }
       : {}),
   });
+
+  // FIX-237: the observation window tails live.log — left over from the LAST
+  // cycle it replays a stale transcript with old cycle ids (two misled debug
+  // sessions). Reset it with this cycle's header before anything streams.
+  resetLiveLog(rt, cycleId);
 
   // FIX-204D: between here and the walk's own finally, signals get a clean
   // teardown instead of a half-state corpse.

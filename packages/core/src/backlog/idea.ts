@@ -138,6 +138,36 @@ export interface IdeaPlan {
   violations: string[];
 }
 
+/**
+ * REFACTOR-050: lightweight epic inference from the description text.
+ * Matches short keyword → known epic slug; returns undefined when no
+ * signal is found (caller falls back to the default/"uncategorized" bucket
+ * or interactive confirmation at the CLI layer).
+ *
+ * The mapping is intentionally small and conservative — a "loader" rather
+ * than a classifier. Add pairs as the project's epic set grows.
+ */
+export function inferEpic(text: string): string | undefined {
+  const lower = text.toLowerCase();
+  const KW = [
+    [/\bcli\b|\bcommand\b|\bflag\b|\busage\b/, "cli-simplification"],
+    [/\blog\b|\bloop\b|auto(?:matic)?\b|\bcycle\b|\brunner\b|\bdispatch/, "loop-engine"],
+    [/\bskill\b|\bagent\b.*\bskill\b|\bskill\b.*\bagent\b/, "skill-ecosystem"],
+    [/\bdossier\b|\bindex\b|\bpage\b|\breport\b|\bdelivery dossier/, "delivery-dossier"],
+    [/\bevidence\b|\battest\b|\bacceptance\b|\bverify/, "acceptance-evidence"],
+    [/\bdoc\b|\bguide\b|\breadme\b|\btutorial\b|\bgetting.?started/, "documentation"],
+    [/\brelease\b|\bdeploy\b|\bship\b|\bpublish\b|\bversion/, "release-management"],
+    [/\bbuild\b|\bbundle\b|\bcompile\b|\btypescript\b|\bproject/, "bash-endgame"],
+    [/\bpair\b|\bcross.?agent\b|\breview\b|\bpeer\b/, "cross-agent-pairing"],
+    [/\bbacklog\b|\bcard\b|\bstory\b.*(?:create|new|lifecycle)/, "backlog-lifecycle"],
+    [/\bengineer(?:ing)?\b|\binfra\b|\bci\b|\bgithub\b.*action/, "engineering-infrastructure"],
+  ] as const;
+  for (const [re, slug] of KW) {
+    if (re.test(lower)) return slug;
+  }
+  return undefined;
+}
+
 /** Compose classify → next-id → lint into a single plan over the parsed rows. */
 export function planIdea(items: readonly BacklogItem[], text: string): IdeaPlan {
   const kind = classifyIdea(text);

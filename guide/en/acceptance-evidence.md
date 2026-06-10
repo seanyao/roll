@@ -69,19 +69,31 @@ down to 🟧 Claimed and lists it under **Discrepancies**. Verbal completion
 When `.roll/notes/` carries same-story self-score entries, the report ends
 with a collapsed *Self-Score · 自评* section. No entries → no section.
 
-## Where cards come from — `roll story new`
+## Where cards come from — `roll idea`
 
-Card folders are minted through ONE channel:
+Add a card with one natural-language sentence:
+
+```bash
+roll idea "Refund flow is broken for partial payments"
+```
+
+`roll idea` auto-classifies it (bug → FIX / feature → IDEA), assigns the
+next id in that family, lint-checks the description, infers the right epic
+folder, and mints the full card folder (spec.md + story page + index
+refresh). All in one command.
+
+For explicit control over id and epic, the internal `roll story new` is
+available:
 
 ```bash
 roll story new US-PAY-001 --title "Refund flow" --epic payments
 ```
 
-This writes the frontmatter'd `spec.md`, the story page skeleton, and
-refreshes `.roll/index.json`. It refuses to overwrite an existing card —
-cards are born once, then evolved by hand (AC, design, evidence). Skills
-never hand-create card files; the `cards` consistency dimension fails the
-release gate on any live backlog row without a card.
+Both channels write the frontmatter'd `spec.md`, the story page skeleton,
+and refresh `.roll/index.json`. They refuse to overwrite an existing card —
+cards are born once, then evolved by hand. Skills never hand-create card
+files; the `cards` consistency dimension fails the release gate on any
+live backlog row without a card.
 
 ## The Delivery Dossier — `roll index`
 

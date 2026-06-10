@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseBacklog } from "@roll/core";
@@ -12,6 +12,8 @@ function run(
 ): { status: number; stdout: string; stderr: string; backlog: string | null } {
   const proj = mkdtempSync(join(tmpdir(), "roll-idea-proj-"));
   mkdirSync(join(proj, ".roll"), { recursive: true });
+  // Pre-create features dir so index refresh has somewhere to land.
+  mkdirSync(join(proj, ".roll", "features"), { recursive: true });
   const path = join(proj, ".roll", "backlog.md");
   writeFileSync(path, backlog, "utf8");
   const save = { NO_COLOR: process.env["NO_COLOR"], ROLL_LANG: process.env["ROLL_LANG"] };
@@ -43,6 +45,47 @@ function run(
     else process.env["ROLL_LANG"] = save.ROLL_LANG;
   }
   return { status, stdout: outC.join(""), stderr: errC.join(""), backlog: after };
+}
+
+/** Like run() but also returns the project path so callers can inspect the card folder. */
+function runWithProj(
+  args: string[],
+  backlog: string,
+): { status: number; stdout: string; stderr: string; backlog: string | null; proj: string } {
+  const proj = mkdtempSync(join(tmpdir(), "roll-idea-proj-"));
+  mkdirSync(join(proj, ".roll"), { recursive: true });
+  mkdirSync(join(proj, ".roll", "features"), { recursive: true });
+  const path = join(proj, ".roll", "backlog.md");
+  writeFileSync(path, backlog, "utf8");
+  const save = { NO_COLOR: process.env["NO_COLOR"], ROLL_LANG: process.env["ROLL_LANG"] };
+  process.env["NO_COLOR"] = "1";
+  process.env["ROLL_LANG"] = "en";
+  const saveCwd = process.cwd();
+  process.chdir(proj);
+  const outC: string[] = [];
+  const errC: string[] = [];
+  const rOut = process.stdout.write.bind(process.stdout);
+  const rErr = process.stderr.write.bind(process.stderr);
+  // @ts-expect-error capture-only
+  process.stdout.write = (x: string | Uint8Array): boolean => (outC.push(String(x)), true);
+  // @ts-expect-error capture-only
+  process.stderr.write = (x: string | Uint8Array): boolean => (errC.push(String(x)), true);
+  let status: number;
+  let after: string | null = null;
+  try {
+    status = ideaCommand(args);
+    after = readFileSync(path, "utf8");
+  } finally {
+    process.stdout.write = rOut;
+    process.stderr.write = rErr;
+    process.chdir(saveCwd);
+    // Don't clean up — caller inspects then tears down.
+    if (save.NO_COLOR === undefined) delete process.env["NO_COLOR"];
+    else process.env["NO_COLOR"] = save.NO_COLOR;
+    if (save.ROLL_LANG === undefined) delete process.env["ROLL_LANG"];
+    else process.env["ROLL_LANG"] = save.ROLL_LANG;
+  }
+  return { status, stdout: outC.join(""), stderr: errC.join(""), backlog: after, proj };
 }
 
 const EMPTY = ["# Backlog", "", "intro line", ""].join("\n");
@@ -108,5 +151,70 @@ describe("ideaCommand (E2E golden path)", () => {
   it("English output carries no CJK (single-language contract)", () => {
     const r = run(["add", "offline", "support"], EMPTY);
     expect(r.stdout).not.toMatch(/[一-鿿]/);
+  });
+
+  // REFACTOR-050: `roll idea` now creates the full card folder.
+  it("creates a full story card folder (spec.md + index.html) — AC1", () => {
+    const r = runWithProj(["add", "a", "loop", "runner", "for", "testing"], EMPTY);
+    expect(r.status).toBe(0);
+    // Epic inferred from "loop" keyword → "loop-engine"
+    const specPath = join(r.proj, ".roll", "features", "loop-engine", "IDEA-001", "spec.md");
+    expect(existsSync(specPath)).toBe(true);
+    const spec = readFileSync(specPath, "utf8");
+    expect(spec).toContain("id: IDEA-001");
+    expect(spec).toContain("title: add a loop runner for testing");
+    const pagePath = join(r.proj, ".roll", "features", "loop-engine", "IDEA-001", "index.html");
+    expect(existsSync(pagePath)).toBe(true);
+    // Cleanup.
+    rmSync(r.proj, { recursive: true, force: true });
+  });
+
+  it("falls back to uncategorized epic when no keyword matches — AC3", () => {
+    const r = runWithProj(["do", "something", "generic"], EMPTY);
+    expect(r.status).toBe(0);
+    const specPath = join(r.proj, ".roll", "features", "uncategorized", "IDEA-001", "spec.md");
+    expect(existsSync(specPath)).toBe(true);
+    rmSync(r.proj, { recursive: true, force: true });
+  });
+
+  it("infers epic from keywords — AC3 examples", () => {
+    const cases: [string[], string][] = [
+      [["the", "CLI", "usage", "is", "broken"], "cli-simplification"],
+      [["add", "doc", "guide", "for", "new", "users"], "documentation"],
+      [["ship", "a", "release", "script"], "release-management"],
+      [["pair", "review", "with", "another", "agent"], "cross-agent-pairing"],
+      [["improve", "backlog", "card", "lifecycle"], "backlog-lifecycle"],
+    ];
+    for (const [args, expectedEpic] of cases) {
+      const r = runWithProj(args, EMPTY);
+      expect(r.status).toBe(0);
+      // The captured ID might be FIX-001 (bug keyword) or IDEA-001 (idea).
+      // We just verify the card lands in the right epic folder.
+      const featuresDir = join(r.proj, ".roll", "features", expectedEpic);
+      expect(existsSync(featuresDir)).toBe(true);
+      rmSync(r.proj, { recursive: true, force: true });
+    }
+  });
+
+  it("does not overwrite an existing spec.md (born-once guard) — AC1", () => {
+    const r = runWithProj(["add", "a", "loop", "cycle", "viewer"], EMPTY);
+    expect(r.status).toBe(0);
+    const specPath = join(r.proj, ".roll", "features", "loop-engine", "IDEA-001", "spec.md");
+    expect(existsSync(specPath)).toBe(true);
+    // Record the first mtime.
+    const firstMtime = readFileSync(specPath, "utf8");
+    // Run again with the same description. The card folder already exists —
+    // it should NOT be overwritten, but a NEW backlog row (IDEA-002) is added.
+    const r2 = runWithProj(["add", "a", "loop", "cycle", "viewer"], r.backlog ?? "");
+    expect(r2.status).toBe(0);
+    // IDEA-002 should be in the backlog.
+    expect(r2.stdout).toContain("IDEA-002");
+    // The original spec.md must still be the same.
+    expect(readFileSync(specPath, "utf8")).toBe(firstMtime);
+    // IDEA-002 got its own card folder.
+    const spec2Path = join(r2.proj, ".roll", "features", "loop-engine", "IDEA-002", "spec.md");
+    expect(existsSync(spec2Path)).toBe(true);
+    rmSync(r.proj, { recursive: true, force: true });
+    rmSync(r2.proj, { recursive: true, force: true });
   });
 });

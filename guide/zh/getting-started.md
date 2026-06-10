@@ -26,18 +26,15 @@ legacy onboarding，再真正写文件。
 
 ## 3. 写第一条 Backlog
 
-先创建一张小故事卡，再把它放进 `.roll/backlog.md`。
+用一句话建一张小故事卡：
 
 ```bash
-roll story new US-DEMO-001 --title "Add a health check" --epic demo
+roll idea "Add a health check endpoint"
 ```
 
-然后编辑 `.roll/features/demo/US-DEMO-001/spec.md`，把 AC 写清楚；如果
-`.roll/backlog.md` 里还没有这条，把下面这一行加进去：
+`roll idea` 自动分类、取号、推断史诗、建卡片文件夹 — 一步完成待办行和故事文件夹。
 
-```markdown
-| [US-DEMO-001](.roll/features/demo/US-DEMO-001/spec.md) | Add a health check | 📋 Todo |
-```
+然后编辑 `.roll/features/<史诗>/<ID>/spec.md`，把 AC 写清楚。
 
 第一条故事要小：一个可见行为，一条明确测试路径。
 

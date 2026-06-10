@@ -63,17 +63,26 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
 `.roll/notes/` 里存在同 story 自评条目时，报告底部出现折叠的
 *Self-Score · 自评* 区；没有自评则整块不出现。
 
-## 卡片从哪来 —— `roll story new`
+## 卡片从哪来 —— `roll idea`
 
-卡片文件夹只有一个铸造通道：
+用一句自然语言加卡：
+
+```bash
+roll idea "退款流程在部分支付时会崩溃"
+```
+
+`roll idea` 自动分类（bug→FIX / 功能→IDEA）、取下一号、lint 校验、推断归属史诗，
+并创建完整卡片文件夹（spec.md + 故事页 + 刷新索引）。一个命令全搞定。
+
+如需显式指定 ID 与史诗，内部命令 `roll story new` 仍在：
 
 ```bash
 roll story new US-PAY-001 --title "退款流程" --epic payments
 ```
 
-它写出带 frontmatter 的 `spec.md`、故事页骨架，并刷新 `.roll/index.json`。
-已存在的卡拒绝覆盖——卡只出生一次，之后由人补充 AC、设计与证据。
-技能从不手写卡片文件；任何没有卡的活卡行会被一致性 `cards` 维度在发版闸拦下。
+两条通道都写出带 frontmatter 的 `spec.md`、故事页骨架，并刷新 `.roll/index.json`。
+已存在的卡拒绝覆盖——卡只出生一次，之后由人补充。技能从不手写卡片文件；
+任何没有卡的活卡行会被一致性 `cards` 维度在发版闸拦下。
 
 ## 交付档案 —— `roll index`
 

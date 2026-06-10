@@ -52,7 +52,8 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll tune [reset]` | Suggest-only self-tuning: surface threshold / route / rubric adjustments from loop trends — read-only, never auto-applies |
 | **Project · per repo** | |
 | `roll init` | Set up Roll in this project |
-| `roll story new <ID> --title <t> [--epic <e>]` | Mint a story's card folder (spec + page + index) — the single creation channel |
+| `roll idea "<one-sentence description>"` | Capture a card: auto-classify, number, lint, infer epic, and mint the full story folder — the one user entry for adding cards |
+| `roll story new <ID> --title <t> [--epic <e>]` | Internal/advanced explicit card-folder minting (agents and skills use this; users reach for `roll idea`) |
 | `roll attest <ID>` | Render the acceptance-evidence report into the card folder |
 | `roll index` | Rebuild the three-layer Delivery Dossier (front page · epics · story dossiers) |
 | `roll status` | Show current state and drift |

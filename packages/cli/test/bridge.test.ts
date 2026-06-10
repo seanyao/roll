@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { dispatch, isPorted, portedCommands, registerPorted, repoRoot, usage } from "../src/bridge.js";
+import { registerAll } from "../src/index.js";
 
 describe("repoRoot", () => {
   it("locates the package root via the conventions/ (or bin/roll) marker", () => {
@@ -28,6 +29,17 @@ describe("ported routing (no bash fallback)", () => {
     expect(got).toEqual(["a b", "--flag"]);
     expect(isPorted("__test_cmd")).toBe(true);
     expect(portedCommands()).toContain("__test_cmd");
+  });
+
+  it("REFACTOR-048: one-shot migration commands are retired; the user upgrade path stays", () => {
+    registerAll();
+    // internal one-time migrations (card-skeleton backfill, old attest-layout
+    // port) completed long ago — off the command surface.
+    expect(isPorted("migrate-features")).toBe(false);
+    expect(isPorted("archive")).toBe(false);
+    // `roll migrate` STAYS: it is the live pre-2.0 → 2.0 user-project upgrade
+    // path that `roll init` directs users to (recorded deviation on the card).
+    expect(isPorted("migrate")).toBe(true);
   });
 
   it("help / --help / -h / empty → usage, exit 0", async () => {

@@ -188,6 +188,23 @@ describe("v3 loop runner template", () => {
   it("resolves the roll binary from PATH with a brew fallback", () => {
     expect(script).toMatch(/command -v roll/);
   });
+
+  it("FIX-230: the tmux cycle window inherits the CALLER's proxy env, not the session's frozen snapshot", () => {
+    // The new-window command must inline the caller's proxy family at window
+    // creation time (`VAR='${VAR:-}'` expands in the runner's shell, outside
+    // tmux) — a stale session created under a now-dead proxy must not leak its
+    // HTTP(S)_PROXY/ALL_PROXY into the cycle (agents would time out with
+    // "Connection error", the reproduced incident).
+    const win = script.split("\n").find((l) => l.includes("new-window") && l.includes("ROLL_TMUX_WRAPPED=1"));
+    expect(win).toBeDefined();
+    for (const v of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"]) {
+      expect(win).toContain(`${v}='\${${v}:-}'`);
+    }
+  });
+
+  it("FIX-230: cycle start logs the effective proxy env (observability for env drift)", () => {
+    expect(script).toMatch(/env: HTTP_PROXY=.*HTTPS_PROXY=.*ALL_PROXY=/);
+  });
 });
 
 describe("v3 loop runner — EXECUTION in a sandbox (the contract that matters)", () => {

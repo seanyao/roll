@@ -13,10 +13,10 @@ import { renderFeaturesIndex } from "../lib/dossier-index.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
 import { collectStoryDossierInput, renderStoryDossier, stationsDone } from "../lib/story-dossier.js";
-import { renderMarkdown } from "./slides/render.js";
+import { renderMarkdown } from "../lib/markdown.js";
 
 /** US-DOSSIER-004: render a card's spec.md → a self-contained spec.html (the
- *  slides markdown renderer + dossier chrome), so the "Design doc" link opens
+ *  minimal markdown renderer + dossier chrome), so the "Design doc" link opens
  *  a rendered page, not raw markdown. Returns null when spec.md is absent. */
 function renderSpecHtml(storyDir: string, id: string): string | null {
   const specPath = join(storyDir, "spec.md");

@@ -72,7 +72,7 @@ Dev side — a pnpm monorepo. Publish side — one npm package.
 
 ```
 packages/      TypeScript engine (pnpm workspaces): spec · core · infra · cli · web
-lib/           Runtime companions (prices snapshots, slides templates, i18n catalog)
+lib/           Runtime companions (prices snapshots, i18n catalog)
 skills/        Git submodule → seanyao/roll-skills (the agent skill contracts)
 conventions/   Conventions synced into AI clients by `roll setup`
 template/      Project scaffolding installed by `roll init`
@@ -91,7 +91,7 @@ Published as a single npm package `@seanyao/roll`: `dist/` (the CLI bundled to o
 | **Quality machinery** | [Acceptance evidence (`roll attest`)](guide/en/acceptance-evidence.md) · [Evidence lifecycle](guide/en/acceptance-evidence.md#lifecycle-in-three-stages) · [Consistency & release gate](guide/en/consistency.md) · [Cross-agent pairing](guide/en/pairing.md) · [Test isolation](guide/en/test-isolation.md) |
 | **Under the hood** | [Architecture: layers · domain · invariants](docs/architecture.md) · [Verification system](docs/verification.md) · [Manifesto](docs/manifesto.md) |
 
-Full guide index: [guide/en/](guide/en/) — agents, peer review, slides, feedback, backlog sync, adoption patterns, and more.
+Full guide index: [guide/en/](guide/en/) — agents, peer review, feedback, backlog sync, adoption patterns, and more.
 
 ## Contributing
 

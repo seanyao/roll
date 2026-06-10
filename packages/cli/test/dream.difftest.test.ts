@@ -83,8 +83,6 @@ describe("roll dream command wrapper", () => {
                    执行发版脚本（仅人工）
         review-pr    <number>  AI-powered code review for a PR
                      AI 代码评审
-        slides    build <slug>  render a deck.md to HTML and open in browser
-                  渲染 deck.md 为 HTML 并打开
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 

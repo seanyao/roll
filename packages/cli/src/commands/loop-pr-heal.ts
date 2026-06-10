@@ -15,8 +15,7 @@
  *                     ALERT on conflict / push failure.
  *
  * git/gh/fs/spawn are injectable so the gate + rebase decisions are unit-testable
- * without the real toolchain (the agent spawn itself is the one untested seam,
- * same posture as `slides new`).
+ * without the real toolchain (the agent spawn itself is the one untested seam).
  */
 import {
   type HealLockState,
@@ -34,7 +33,7 @@ import { dirname, join } from "node:path";
 import { projectAgent } from "./agent-list.js";
 import { stateGet, stateUpsert } from "./loop-cycle-gates.js";
 import { healDir } from "./loop-maint.js";
-import { slidesTextArgv } from "./slides/index.js";
+import { textAgentArgv } from "../lib/text-agent-argv.js";
 
 // ─── per-project paths (mirror loop-pr-inbox: rt = <cwd>/.roll/loop) ──────────
 function runtimeDir(): string {
@@ -218,7 +217,7 @@ export function runPrHeal(num: string, headRef: string, slug: string): number {
   const prompt =
     `[roll PR 自愈] PR #${num} (${headRef}) 的 CI 红了。失败上下文见 ${ctx}。` +
     `请只修使 CI 转绿所需的最小改动,保持 TCR 微提交节奏,改完直接 commit。不要改无关代码,不要反问。`;
-  const argv = slidesTextArgv(agent, prompt);
+  const argv = textAgentArgv(agent, prompt);
   if (argv !== null) {
     try {
       execFileSync(argv.bin, argv.args, { cwd: wt, stdio: "ignore" });

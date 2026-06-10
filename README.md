@@ -26,7 +26,7 @@ curl -fsSL https://seanyao.github.io/roll/install | bash
 npm install -g @seanyao/roll
 ```
 
-Requirements: Node.js ≥ 22 (the CLI entry runs on node). bash 3.2+ for the bundled fallback engine.
+Requirements: Node.js ≥ 22. Roll is a self-contained TypeScript CLI — no runtime engine beyond node.
 
 ## Use
 
@@ -72,15 +72,15 @@ Dev side — a pnpm monorepo. Publish side — one npm package.
 
 ```
 packages/      TypeScript engine (pnpm workspaces): spec · core · infra · cli · web
-lib/           Runtime companions (python/sh) used by the loop
+lib/           Runtime companions (prices snapshots, slides templates, i18n catalog)
 skills/        Git submodule → seanyao/roll-skills (the agent skill contracts)
 conventions/   Conventions synced into AI clients by `roll setup`
 template/      Project scaffolding installed by `roll init`
 ```
 
-The frozen v2 bash lives on the `v2` branch (anchor tag `v2-freeze-2026-06-04`). Build & test: `pnpm install && pnpm -r test`.
+Build & test: `pnpm install && pnpm -r test`.
 
-Published as a single npm package `@seanyao/roll`: `dist/` (TS bundled by esbuild) + `bin/` + `lib/` + `skills/` + `conventions/` + `template/`.
+Published as a single npm package `@seanyao/roll`: `dist/` (the CLI bundled to one self-contained ESM by esbuild) + `lib/` + `skills/` + `conventions/` + `template/`.
 
 ## Documentation
 

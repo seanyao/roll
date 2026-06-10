@@ -26,7 +26,7 @@ curl -fsSL https://seanyao.github.io/roll/install | bash
 npm install -g @seanyao/roll
 ```
 
-环境要求：Node.js ≥ 22（CLI 入口运行在 node 上）。内置回落引擎需要 bash 3.2+。
+环境要求：Node.js ≥ 22。Roll 是自包含的 TypeScript CLI —— 除 node 外无其它运行时引擎。
 
 ## 使用
 
@@ -68,15 +68,15 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 
 ```
 packages/      TypeScript 引擎（pnpm workspaces）：spec · core · infra · cli · web
-lib/           运行时伴生（python/sh），loop 在用
+lib/           运行时伴生（价格快照、slides 模板、i18n 文案目录）
 skills/        Git submodule → seanyao/roll-skills（agent 技能契约）
 conventions/   roll setup 同步到各 AI 客户端的约定
 template/      roll init 安装的项目脚手架
 ```
 
-冻结的 v2 bash 在 `v2` 分支（锚点 tag `v2-freeze-2026-06-04`）。构建与测试：`pnpm install && pnpm -r test`。
+构建与测试：`pnpm install && pnpm -r test`。
 
-发布为单一 npm 包 `@seanyao/roll`：`dist/`（esbuild 打平的 TS）+ `bin/` + `lib/` + `skills/` + `conventions/` + `template/`。
+发布为单一 npm 包 `@seanyao/roll`：`dist/`（CLI 经 esbuild 打平为单个自包含 ESM）+ `lib/` + `skills/` + `conventions/` + `template/`。
 
 ## 文档
 

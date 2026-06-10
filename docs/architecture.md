@@ -1,36 +1,24 @@
-# 01 · 系统设计
-
-> 迁入自 roll-meta v3 规划包（2026-06-06，cutover 完成后归家）；按现状校订，过程性内容留 meta。
+# 系统设计
 
 ## 产品定位
 
 roll 是 AI coding agent 的**外层控制系统**（agent harness / reliability layer）。它不进入 agent 内部（不管理 token 窗口、不压缩对话、不干预单次推理），而是在外部建立一个闭环：设定目标 → 调度执行 → 感知结果 → 修正方向。
 
-用户通过 CLI 或 Web 控制台与 roll 交互。安装方式：`npm install -g roll`。
+用户通过 CLI 或 Web 控制台与 roll 交互。安装方式：`npm install -g @seanyao/roll`。
 
-## 为什么重写：散落诊断
+## 为什么是分层闭环
 
-v2 做了很多，但**没有经过科学的系统化设计**——同一个能力域被摊在 **bash / skill(markdown) / python / 配置(yaml)** 多种异构载体上：
+一个可靠的控制器，必须是被控系统的一个**连贯模型**（[specs/theory-foundation](specs/theory-foundation.md)）。当同一个能力域被摊在多种异构载体上、靠文本缝合（stdout 解析、现生成脚本、散落的状态文件）时，协调开销本身就在吃掉控制带宽——**散，是不稳定与低效的根因**：那类"引号地狱 / 解析漂移 / 状态不一致"的故障，长的正是载体之间的缝。
 
-| 能力域 | 散落在（实测，见 [specs/capability-map](specs/capability-map.md)） |
-|---|---|
-| Orchestration 编排 | bash 主循环 + python(`loop_unstick`/`loop_pick_agent`) + skill(`roll-loop`) + 配置(launchd/cron) |
-| Evals 验证 | skill(spar/review-pr/.qa/.dream) + python(`loop_result_eval`/`test_quality_gate`) + bash(TCR) + 278 bats |
-| Observability 可观测 | bash(`_loop_event`) + python(78KB `roll-loop-status`) + ndjson/jsonl 文件 |
-| Context Engineering 上下文 | markdown(`.roll/` 文档纪律) + shell(`context_feed_budget`) + skill(design/doc/notes) |
-| Tool Use 工具/多 agent | bash(`_agent_argv`) + python(`agent_usage/*`) + yaml(`agent-routes`) + skill(`roll-peer`) |
-
-**问题不在任何单一载体，在载体之间的「缝」**：bash↔python 靠 stdout 文本解析、bash↔skill 靠 heredoc 现生成脚本（还要"compound bash 静态拒绝"这种补丁）、状态散在 ndjson/jsonl/markdown/锁文件里。**那 100+ 个 loop FIX，绝大多数就长在这些缝上**（引号地狱、解析漂移、状态不一致）。
-
-一个好的调节器必须是被控系统的一个连贯模型（[specs/theory-foundation](specs/theory-foundation.md)）。而现在这台调节器被劈成四块、用文本缝合——协调开销本身在吃掉控制带宽。**散，本身就是不稳定与低效的根因。** 这就是 v3 要重做的，而不是把 bash 逐行翻成 TS。
+所以 roll 是一台**分层的 TypeScript 控制器**：每个能力域一个家，层与层用类型化契约相连，反馈闭环作脊柱。缝消失，长在缝上的那类故障也就失去土壤。
 
 ## 设计五原则
 
 1. **每个能力域一个家。** 把摊在四种载体上的同一个域（Orchestration / Observability / Evals / Guardrails / Context Engineering / Tool Use / Sandboxing），收敛成一个连贯的 owner/包。这是 roll 缺的那层"系统设计"。
 2. **反馈闭环是脊柱，层是它的器官。** 别把能力域做成并列模块；按"结构核心 + 控制平面"接成一个闭环：核心作动（编排/执行/工具/上下文）→ 控制平面传感/评分/限幅（可观测/Evals/Guardrails）→ 反哺下一轮。
-3. **TS 类型 = 层与层之间的契约。** 用类型化接口替掉今天的 stdout 解析 / heredoc 缝——缝消失，长在缝上的那类 FIX 失去土壤。这是"换 TS"的真实收益所在。
+3. **TS 类型 = 层与层之间的契约。** 层与层用类型化接口相连，而不是 stdout 解析 / 现生成脚本——缝消失，长在缝上的那类故障失去土壤。
 4. **守住黑盒边界（外层 harness）。** roll 不打开黑盒：token 级压缩、工具 schema 强制、单次 ReAct 委派给内层 agent。不必建模被控对象内部，靠反馈就能控制（[specs/theory-foundation](specs/theory-foundation.md)）。
-5. **反馈要有 Goodhart 护栏。** 闭环一旦把度量当目标就会被钻空子。所以 Evals 信号**不自动激活**、只生成"待人确认"候选；人在环上（human-on-the-loop）作监督限幅；retry 设上限并转 replan（anti-windup）；不对噪声反复 replan（deadband）。**roll v2 已经这么做了——v3 把它显性化为设计纪律。**
+5. **反馈要有 Goodhart 护栏。** 闭环一旦把度量当目标就会被钻空子。所以 Evals 信号**不自动激活**、只生成"待人确认"候选；人在环上（human-on-the-loop）作监督限幅；retry 设上限并转 replan（anti-windup）；不对噪声反复 replan（deadband）。这是一条显性的设计纪律。
 
 ## 系统架构
 
@@ -56,21 +44,21 @@ web          控制台（React，WebSocket 订阅 daemon）
 
 **技术选择**：TypeScript（类型安全）、vitest（自带进程沙箱）、commander + chalk（CLI）、simple-git + octokit（Git/GitHub）、handlebars（模板，替代 heredoc）、proper-fs-lock（替代手写锁）、React + shadcn/ui（前端）。
 
-### 能力收敛去向（每域一个家）
+### 能力域归宿（每域一个家）
 
-v2 散落的每个能力域，在 6 包里的家：
+每个能力域在 6 包里的家：
 
-| 能力域 | v3 的家 | 从 v2 哪里收敛过来 |
-|---|---|---|
-| **Orchestration** 编排 | `core`（StoryPicker / TCRPipeline / ReconcileEngine / CycleOrchestrator）+ `infra`（launchd/cron 调度） | bash 主循环 + `loop_unstick`/`loop_pick_agent` + `roll-loop` skill |
-| **Sandboxing** 执行隔离 | `infra`（Git worktree / ProcessManager / Tmux） | bash worktree 段 + `roll test`/Tart |
-| **Tool Use** 工具/多 agent | `core`（AgentRouter / AgentRegistry / CostTracker 的 usage 解析）+ `infra`（spawn / GitHub） | `_agent_argv` + `agent_usage/*` + `agent-routes.yaml` + `roll-peer` 桥接 |
-| **Context Engineering** 上下文 | skill 桥接（独立仓）+ `.roll/` 文档纪律（保留，是契约） | `context_feed_budget` + design/doc/notes skill |
-| **Observability** 可观测 | `spec`（事件 schema）+ `core`（EventBus 写端）+ `daemon`（只读广播） | `_loop_event` + `roll-loop-status` + runs/心跳 |
-| **Evals** 验证/评分 | `core`（Evals 六维 + 测试质量门） | `loop_result_eval` + `test_quality_gate` + spar/review-pr/.qa（skill 桥接留存） |
-| **Guardrails** 治理 | `core`（PolicyEngine + Budget guardrails） | manual-only 门 + `model_prices` + allowed-tools |
+| 能力域 | 家 |
+|---|---|
+| **Orchestration** 编排 | `core`（StoryPicker / TCRPipeline / ReconcileEngine / CycleOrchestrator）+ `infra`（launchd/cron 调度） |
+| **Sandboxing** 执行隔离 | `infra`（Git worktree / ProcessManager / Tmux） |
+| **Tool Use** 工具/多 agent | `core`（AgentRouter / AgentRegistry / CostTracker 的 usage 解析）+ `infra`（spawn / GitHub） |
+| **Context Engineering** 上下文 | skill 桥接（独立仓）+ `.roll/` 文档纪律（是契约） |
+| **Observability** 可观测 | `spec`（事件 schema）+ `core`（EventBus 写端）+ `daemon`（只读广播） |
+| **Evals** 验证/评分 | `core`（Evals 六维 + 测试质量门） |
+| **Guardrails** 治理 | `core`（PolicyEngine + Budget guardrails） |
 
-> skills 不重写：仍是 markdown + shell，经桥接 spawn（它们是"灵魂/契约"，归 `roll-skills` 独立仓）。v3 收敛的是**控制器代码**，不是 skill 内容。
+> skills 不进 TS：仍是 markdown + shell，经桥接 spawn（它们是"灵魂/契约"，归 `roll-skills` 独立仓）。roll 收敛的是**控制器代码**，不是 skill 内容。
 
 ## 领域模型
 

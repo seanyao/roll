@@ -34,7 +34,7 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v2026.529.5",
+      version: "v3.610.1",
       tagline: "It just works.",
       sub2: "Write a goal. Ship it autonomously.",
       sub: "Write a goal in Backlog. Roll picks it up hourly, executes it in an isolated worktree, opens a PR, waits for green CI — and ships. You stay on the loop, not in it.",
@@ -214,7 +214,7 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v2026.529.5",
+      version: "v3.610.1",
       tagline: "It just works.",
       sub2: "把目标写下来。让它自主交付。",
       sub: "把目标写进 Backlog。Roll 每小时领取一个，在隔离的 worktree 里执行、开 PR、等 CI 绿、自动合入。你掌舵，不掌桨。",

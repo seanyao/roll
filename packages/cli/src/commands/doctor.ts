@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { resolveLang, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
 import { generateCatalog } from "./skills.js";
 
@@ -387,6 +387,106 @@ function realLaneProbe(): LaneProbe {
   };
 }
 
+
+// ── 5. launchd proxy env section (Darwin only, FIX-232 AC1) ──────────────────
+
+/** Proxy-related environment variable names that launchctl setenv may poison. */
+const PROXY_ENV_NAMES = [
+  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NO_PROXY",
+];
+
+/** Read the value of a launchctl-managed environment variable. Returns
+ *  `undefined` if the variable is NOT set (launchctl prints "<<default>>"
+ *  when the key is absent or was unset; the 0 exit code is always 0). */
+function launchctlGetenv(name: string): string | undefined {
+  try {
+    const out = execFileSync("launchctl", ["getenv", name], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    // launchctl getenv for an unset key prints nothing (empty) or a message.
+    // An actually set proxy var prints the value (e.g. "127.0.0.1:7897").
+    if (out === "" || out.includes(">") || out.includes("default")) return undefined;
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Probe whether a TCP port on a given host is reachable. Uses a non-
+ *  blocking connect with a 2s timeout via a sub-shell to keep the doctor
+ *  snappy. Returns true if the connect succeeds, false otherwise. */
+function tcpProbe(host: string, port: number, timeoutMs = 2000): boolean {
+  try {
+    // Use a bash + /dev/tcp probe — the simplest portable way on macOS
+    // without pulling in net.createConnection asynchronous complexity.
+    const result = execFileSync(
+      "bash",
+      [
+        "-c",
+        `timeout ${Math.ceil(timeoutMs / 1000)} bash -c 'echo >/dev/tcp/${host}/${port}' 2>/dev/null && echo ok || echo fail`,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: timeoutMs + 500 },
+    ).trim();
+    return result === "ok";
+  } catch {
+    return false;
+  }
+}
+
+/** Parse a proxy URL into { host, port }. Supports formats:
+ *   - `127.0.0.1:7897`
+ *   - `http://127.0.0.1:7897`
+ *   - `socks5://127.0.0.1:7890`
+ *  Returns undefined on unparseable input. */
+function parseProxyTarget(raw: string): { host: string; port: number } | undefined {
+  if (raw === "") return undefined;
+  let s = raw.trim();
+  // Strip scheme
+  const schemeIdx = s.indexOf("://");
+  if (schemeIdx !== -1) s = s.slice(schemeIdx + 3);
+  // Strip trailing slash
+  if (s.endsWith("/")) s = s.slice(0, -1);
+  const colonIdx = s.lastIndexOf(":");
+  if (colonIdx === -1) return undefined;
+  const host = s.slice(0, colonIdx);
+  const port = Number(s.slice(colonIdx + 1));
+  if (!Number.isFinite(port) || port < 1 || port > 65535) return undefined;
+  return { host, port };
+}
+
+/** FIX-232 AC1: check launchctl proxy env vars vs actual port liveness.
+ *  Warns when a proxy is SET but the target port is unreachable — the
+ *  exact signature of a poisoned launchd environment from a closed
+ *  proxy app. */
+function launchdProxySection(lang: Lang): void {
+  if (process.platform !== "darwin") return;
+  // Read all proxy-family launchctl env vars.
+  const stale: { name: string; value: string; target: string }[] = [];
+  for (const name of PROXY_ENV_NAMES) {
+    const value = launchctlGetenv(name);
+    if (value === undefined) continue;
+    const target = parseProxyTarget(value);
+    if (target === undefined) continue;
+    if (!tcpProbe(target.host, target.port)) {
+      stale.push({ name, value, target: `${target.host}:${target.port}` });
+    }
+  }
+  if (stale.length === 0) return;
+  emit("");
+  // v3-native keys — emit en then zh line (same bilingual pattern).
+  emit(t(v3Catalog, "en", "doctor.proxy_env_warning"));
+  emit(t(v3Catalog, "zh", "doctor.proxy_env_warning"));
+  emit("");
+  for (const { name, target } of stale) {
+    emit(`  ⚠ ${name}=${target}`);
+  }
+  emit("");
+  emit(`  ${t(v3Catalog, lang, "doctor.proxy_env_hint")}`);
+  for (const { name } of stale) {
+    emit(`    launchctl unsetenv ${name}`);
+  }
+}
 /** Mirror the awk that extracts the line after <key>WorkingDirectory</key>. */
 function readWorkingDirectory(plist: string): string {
   let body: string;
@@ -414,6 +514,7 @@ export function doctorCommand(_args: string[]): number {
   skillsCatalogSection(lang);
   lanesSection(lang, realLaneProbe());
   launchdStaleSection(lang);
+  launchdProxySection(lang);
   process.stdout.write(out.lines.join("\n") + "\n");
   return 0;
 }

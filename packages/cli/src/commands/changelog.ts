@@ -535,17 +535,19 @@ function writeToChangelog(draft: string, changelogPath: string): void {
 // Command entry — mirrors cmd_changelog's case dispatch.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const GENERATE_HELP = `Usage: roll changelog generate [options]
+function generateHelp(command: string): string {
+  return `Usage: ${command} generate [options]
 
   从 backlog ✅ Done 故事 + 上次发布以来的提交,生成 ## Unreleased 发布说明。
   输出为确定性草稿(按关键词分类、过 lint),不再调用 AI 润色。
 
-  roll changelog generate               # 预览(确定性草稿)
-  roll changelog generate --write       # 写入 CHANGELOG.md
-  roll changelog generate --json        # 机器可读(JSON)
+  ${command} generate               # 预览(确定性草稿)
+  ${command} generate --write       # 写入 CHANGELOG.md
+  ${command} generate --json        # 机器可读(JSON)
 `;
+}
 
-export function changelogCommand(args: string[]): number {
+export function changelogCommand(args: string[], command = "roll changelog"): number {
   const subcmd = args[0] ?? "generate";
   const rest = args.slice(1);
 
@@ -599,13 +601,13 @@ export function changelogCommand(args: string[]): number {
   }
 
   if (subcmd === "--help" || subcmd === "-h" || subcmd === "help") {
-    process.stdout.write(GENERATE_HELP);
+    process.stdout.write(generateHelp(command));
     return 0;
   }
 
   const lang = msgLang();
   err(t(v2Catalog, lang, "changelog.unknown_subcommand", subcmd));
-  err("Try: roll changelog generate");
+  err(`Try: ${command} generate`);
   return 1;
 }
 

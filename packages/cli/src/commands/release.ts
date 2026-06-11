@@ -9,11 +9,12 @@
  *  1. 版本号引导 — compute the next calver version (`<major>.<MMDD>.<seq>`) from
  *     package.json (the single source of truth, FIX-202) and today's date.
  *  2. changelog — surface whether `## Unreleased` has releasable content, and
- *     point at `roll changelog generate --write` when it does not.
+ *     point at `roll release changelog generate --write` when it does not.
  *  3. PR 与 tag 流程提示 — print the ordered commands the maintainer runs: bump,
  *     commit + PR, merge, then tag + push (which fires the release workflow).
  *  4. 发版闸已在 CI — note that release.yml's consistency-gate runs on tag push
- *     and aborts on any gap; offer `roll consistency check` for a local preview.
+ *     and aborts on any gap; offer `roll release consistency check` for a
+ *     local preview.
  *
  * AUTOMATION SCOPE (deliberate): `roll release` is READ-ONLY. It never bumps
  * package.json, commits, opens a PR, tags, or publishes — those stay manual and

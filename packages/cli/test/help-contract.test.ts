@@ -42,7 +42,7 @@ afterEach(() => {
 describe("help contract — table-driven across registered commands", () => {
   it("registers help for every smoke-audit offender", () => {
     const helped = registeredHelp();
-    for (const cmd of ["update", "init", "setup", "backlog", "brief", "status", "doctor", "tune", "agent", "alert", "dream", "loop"]) {
+    for (const cmd of ["update", "init", "setup", "backlog", "brief", "status", "doctor", "tune", "agent", "dream", "loop"]) {
       expect(helped, `${cmd} must register bridge help`).toContain(cmd);
     }
   });
@@ -93,8 +93,8 @@ describe("FIX-239 — unknown subcommands are errors (stderr + non-zero)", () =>
     expect(err).toContain("frobnicate");
   });
 
-  it("alert unknown subcommand → exit 1", async () => {
-    const r = await dispatch(["alert", "frobnicate"]);
+  it("loop alert unknown subcommand → exit 1", async () => {
+    const r = await dispatch(["loop", "alert", "frobnicate"]);
     expect(r.status).toBe(1);
   });
 

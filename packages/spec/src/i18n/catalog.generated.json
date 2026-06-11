@@ -160,12 +160,12 @@
   "zh": "未知子命令: %s"
  },
  "alert.run_roll_alert_ack_to_acknowledge": {
-  "en": "Run 'roll alert ack' to acknowledge alerts, 'roll alert resolve' to clear.",
-  "zh": "  运行 'roll alert ack' 确认告警，'roll alert resolve' 清除告警。"
+  "en": "Run 'roll loop alert ack' to acknowledge alerts, 'roll loop alert resolve' to clear.",
+  "zh": "  运行 'roll loop alert ack' 确认告警，'roll loop alert resolve' 清除告警。"
  },
  "alert.usage_roll_alert_list_ack_resolve": {
-  "en": "Usage: roll alert [list|ack|resolve]",
-  "zh": "  用法: roll alert [list|ack|resolve]"
+  "en": "Usage: roll loop alert [list|ack|resolve]",
+  "zh": "  用法: roll loop alert [list|ack|resolve]"
  },
  "backlog.roll_backlog_md_not_found_run": {
   "en": ".roll/backlog.md not found — run 'roll init' first",
@@ -400,8 +400,8 @@
   "zh": "无违规"
  },
  "consistency.usage": {
-  "en": "roll consistency check [--json] [--project-dir DIR]",
-  "zh": "roll consistency check [--json] [--project-dir DIR]"
+  "en": "roll release consistency check [--json] [--project-dir DIR]",
+  "zh": "roll release consistency check [--json] [--project-dir DIR]"
  },
  "consistency.unknown_sub": {
   "en": "Unknown consistency subcommand: %s",
@@ -1412,20 +1412,20 @@
   "zh": "技能清单已是最新。"
  },
  "skills.check_drift": {
-  "en": "Skill catalog drift: %s differs from a fresh scan. Run 'roll skills generate'.",
-  "zh": "技能清单漂移：%s 与最新扫描不一致。请运行 'roll skills generate'。"
+  "en": "Skill catalog drift: %s differs from a fresh scan. Run 'roll setup skills'.",
+  "zh": "技能清单漂移：%s 与最新扫描不一致。请运行 'roll setup skills'。"
  },
  "skills.check_missing": {
-  "en": "Skill catalog not found at %s. Run 'roll skills generate'.",
-  "zh": "未找到技能清单 %s。请运行 'roll skills generate'。"
+  "en": "Skill catalog not found at %s. Run 'roll setup skills'.",
+  "zh": "未找到技能清单 %s。请运行 'roll setup skills'。"
  },
  "skills.unknown_sub": {
   "en": "Unknown 'roll skills' subcommand: %s",
   "zh": "未知的 'roll skills' 子命令：%s"
  },
  "skills.usage": {
-  "en": "Usage: roll skills <generate|check>",
-  "zh": "用法：roll skills <generate|check>"
+  "en": "Usage: roll doctor skills | roll setup skills",
+  "zh": "用法：roll doctor skills | roll setup skills"
  },
  "skills.doctor_heading": {
   "en": "Skill catalog",
@@ -1436,8 +1436,8 @@
   "zh": "✅ guide/skills.md 与 skills/*/SKILL.md 一致"
  },
  "skills.doctor_drift": {
-  "en": "⚠️  guide/skills.md is stale — run 'roll skills generate'",
-  "zh": "⚠️  guide/skills.md 已过期 — 请运行 'roll skills generate'"
+  "en": "⚠️  guide/skills.md is stale — run 'roll setup skills'",
+  "zh": "⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'"
  },
  "status.loop_overview": {
   "en": "%sLoop Overview:",

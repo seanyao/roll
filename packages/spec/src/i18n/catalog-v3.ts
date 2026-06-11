@@ -77,8 +77,8 @@ export const v3Catalog: Catalog = {
   // a human decision). Both en and zh present so the single-language contract
   // (output follows ROLL_LANG, never mixes) holds.
   "releasev3.usage": {
-    en: "Usage: roll release [--json]",
-    zh: "用法：roll release [--json]",
+    en: "Usage: roll release [--json|ship|waiver|changelog|consistency]",
+    zh: "用法：roll release [--json|ship|waiver|changelog|consistency]",
   },
   "releasev3.title": {
     en: "Release plan",
@@ -105,8 +105,8 @@ export const v3Catalog: Catalog = {
     zh: "未发布区有内容",
   },
   "releasev3.changelog_empty": {
-    en: "nothing under Unreleased — run: roll changelog generate --write",
-    zh: "未发布区为空 — 请先运行：roll changelog generate --write",
+    en: "nothing under Unreleased — run: roll release changelog generate --write",
+    zh: "未发布区为空 — 请先运行：roll release changelog generate --write",
   },
   "releasev3.flow_title": {
     en: "Release flow (run these yourself — a release is always a human decision):",
@@ -133,8 +133,8 @@ export const v3Catalog: Catalog = {
     zh: "一致性闸在推送标签时运行，任一维度对不上即中止发版。",
   },
   "releasev3.gate_preview": {
-    en: "Preview locally with: roll consistency check",
-    zh: "本地预检：roll consistency check",
+    en: "Preview locally with: roll release consistency check",
+    zh: "本地预检：roll release consistency check",
   },
   "releasev3.no_pkg": {
     en: "package.json version not found — run from the repo root",

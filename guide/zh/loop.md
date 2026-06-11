@@ -567,7 +567,7 @@ loop 看到 `🔨 In Progress` 标记就会自动跳过。
 | TCR 提交数为 0 | 故事回退为 📋 Todo，写 ALERT.md |
 | HEAD CI 红 | 尝试自动热修（见下），用完次数后才写 ALERT |
 
-ALERT 条目会在 `roll loop status`、`roll alert` 和 `roll-brief` 输出中显示。
+ALERT 条目会在 `roll loop status`、`roll loop alert` 和 `roll-brief` 输出中显示。
 
 ## CI 自愈（US-LOOP-046..050）
 

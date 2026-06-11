@@ -60,7 +60,7 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 - `roll status` — project health: backlog queue, loop state, CI, release-ready verdict `[core]`
 - `roll index` — Delivery Dossier with a truth strip and Story / Cycle / Release truth board
 - `roll loop runs` — per-cycle TerminalOutcome history with TCR count and duration
-- `roll alert` — view, acknowledge, and clear loop alerts
+- `roll loop alert` — view, acknowledge, and clear loop alerts
 - `roll brief` — daily digest: what shipped, what's in-progress, next priorities `[highlight]`
 
 ### On-Demand Skills

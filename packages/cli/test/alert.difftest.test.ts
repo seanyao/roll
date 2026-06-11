@@ -121,7 +121,7 @@ describe("frozen: roll alert", () => {
     writeFileSync(alertFile(), "ALERT BODY line1\nline2\n");
     expect(tsAlert(["list"], { ROLL_LANG: "en" })).toEqual({
       status: 0,
-      stdout: "Active Alert\n\nALERT BODY line1\nline2\n\n  Run 'roll alert ack' to acknowledge, 'roll alert resolve' to clear.\nRun 'roll alert ack' to acknowledge alerts, 'roll alert resolve' to clear.\n",
+      stdout: "Active Alert\n\nALERT BODY line1\nline2\n\n  Run 'roll loop alert ack' to acknowledge, 'roll loop alert resolve' to clear.\nRun 'roll loop alert ack' to acknowledge alerts, 'roll loop alert resolve' to clear.\n",
       stderr: "",
     });
   });
@@ -130,7 +130,7 @@ describe("frozen: roll alert", () => {
     writeFileSync(alertFile(), "BODY\n");
     expect(tsAlert([], { ROLL_LANG: "en" })).toEqual({
       status: 0,
-      stdout: "Active Alert\n\nBODY\n\n  Run 'roll alert ack' to acknowledge, 'roll alert resolve' to clear.\nRun 'roll alert ack' to acknowledge alerts, 'roll alert resolve' to clear.\n",
+      stdout: "Active Alert\n\nBODY\n\n  Run 'roll loop alert ack' to acknowledge, 'roll loop alert resolve' to clear.\nRun 'roll loop alert ack' to acknowledge alerts, 'roll loop alert resolve' to clear.\n",
       stderr: "",
     });
   });
@@ -170,7 +170,7 @@ describe("frozen: roll alert", () => {
   it("unknown subcommand → exit 1 (en)", () => {
     expect(tsAlert(["bogus"], { ROLL_LANG: "en" })).toEqual({
       status: 1,
-      stdout: "  Usage: roll alert [list|ack|resolve|log]\n  用法：roll alert [list|ack|resolve|log]\n",
+      stdout: "  Usage: roll loop alert [list|ack|resolve|log]\n  用法：roll loop alert [list|ack|resolve|log]\n",
       stderr: "[roll] Unknown subcommand: bogus\n",
     });
   });
@@ -183,7 +183,7 @@ describe("frozen: roll alert", () => {
     writeFileSync(alertFile(), "ALERT BODY line1\nline2\n");
     expect(tsAlert(["list"], { ROLL_LANG: "zh" })).toEqual({
       status: 0,
-      stdout: "当前告警\n\nALERT BODY line1\nline2\n\n  Run 'roll alert ack' to acknowledge, 'roll alert resolve' to clear.\n  运行 'roll alert ack' 确认告警，'roll alert resolve' 清除告警。\n",
+      stdout: "当前告警\n\nALERT BODY line1\nline2\n\n  Run 'roll loop alert ack' to acknowledge, 'roll loop alert resolve' to clear.\n  运行 'roll loop alert ack' 确认告警，'roll loop alert resolve' 清除告警。\n",
       stderr: "",
     });
   });
@@ -192,7 +192,7 @@ describe("frozen: roll alert", () => {
     writeFileSync(alertFile(), "BODY\n");
     expect(tsAlert([], { ROLL_LANG: "zh" })).toEqual({
       status: 0,
-      stdout: "当前告警\n\nBODY\n\n  Run 'roll alert ack' to acknowledge, 'roll alert resolve' to clear.\n  运行 'roll alert ack' 确认告警，'roll alert resolve' 清除告警。\n",
+      stdout: "当前告警\n\nBODY\n\n  Run 'roll loop alert ack' to acknowledge, 'roll loop alert resolve' to clear.\n  运行 'roll loop alert ack' 确认告警，'roll loop alert resolve' 清除告警。\n",
       stderr: "",
     });
   });
@@ -232,7 +232,7 @@ describe("frozen: roll alert", () => {
   it("unknown subcommand → exit 1 (zh)", () => {
     expect(tsAlert(["bogus"], { ROLL_LANG: "zh" })).toEqual({
       status: 1,
-      stdout: "  Usage: roll alert [list|ack|resolve|log]\n  用法：roll alert [list|ack|resolve|log]\n",
+      stdout: "  Usage: roll loop alert [list|ack|resolve|log]\n  用法：roll loop alert [list|ack|resolve|log]\n",
       stderr: "[roll] 未知子命令: bogus\n",
     });
   });

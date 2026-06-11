@@ -405,7 +405,7 @@ agent 团队（`$ralplan`、`$ralph`、`$ultragoal`）、`.omx/` 持久状态、
 roll loop status        # 看 LOCK + 持有它的 PID
 tmux attach -t roll-loop-<project-slug>  # 看 agent 在 tmux 里干什么
 roll loop runs          # 上一个周期的结果和告警
-roll alert              # 有没有 CI 或 TCR 告警
+roll loop alert         # 有没有 CI 或 TCR 告警
 roll loop reset         # 实在卡死了清状态 + LOCK
 roll loop now           # 立即触发新周期
 # 如果代码确实做完了、测试也过，但 Phase 11 没走完：
@@ -461,7 +461,7 @@ git push --force-with-lease
 | 带成本列的快照 dashboard | `roll loop status --days 7` |
 | 实时看 agent 在做什么 | `tmux attach -t roll-loop-<project-slug>` |
 | 人类可读的每日摘要 | `roll brief` |
-| 需要关注的告警 | `roll alert` |
+| 需要关注的告警 | `roll loop alert` |
 | 完整 cycle agent 输出（纯文本） | `roll loop log` |
 | 完整 agent 对话记录 | `tmux attach -t roll-loop-<project-slug>` 后上翻 |
 
@@ -571,7 +571,7 @@ roll loop status                  # 确认新触发时间
 ### C8. period_minutes 设置不生效
 
 **症状：** `.roll/local.yaml` 里写了 `period_minutes: 0` 或 `1441`，loop 还是每小时
-触发，`roll alert` 显示一条 schedule ALERT。
+触发，`roll loop alert` 显示一条 schedule ALERT。
 
 **原因：** `period_minutes` 必须在 1–1440 范围。
 超出范围的值会被拒绝。
@@ -582,7 +582,7 @@ roll loop status                  # 确认新触发时间
 **解决：**
 
 ```bash
-roll alert                        # 看具体错误信息
+roll loop alert                   # 看具体错误信息
 # 编辑 .roll/local.yaml — 改用 1–1440 范围内的值
 roll loop off && roll loop on     # 重装
 roll loop status                  # 确认新频次

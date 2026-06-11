@@ -12,8 +12,18 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { portedCommands, repoRoot } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 
-/** Hidden manual entry points stay callable but unlisted (REFACTOR-049). */
-const HIDDEN = new Set(["gc", "version"]);
+/** Hidden manual/machine entry points stay callable but unlisted (REFACTOR-049/052). */
+const HIDDEN = new Set([
+  "alert",
+  "attest",
+  "changelog",
+  "consistency",
+  "dream",
+  "gc",
+  "index",
+  "skills",
+  "version",
+]);
 
 let en = "";
 let cn = "";

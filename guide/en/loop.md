@@ -620,7 +620,7 @@ Loop sees the `🔨 In Progress` marker and skips it.
 | TCR: 0 commits | Revert story to 📋 Todo, write ALERT.md |
 | HEAD CI red | Hot-fix attempt (see below), or ALERT if exhausted |
 
-ALERT entries surface in `roll loop status`, `roll alert`, and `roll-brief` output.
+ALERT entries surface in `roll loop status`, `roll loop alert`, and `roll-brief` output.
 
 ## CI Self-Healing (US-LOOP-046..050)
 

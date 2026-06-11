@@ -83,7 +83,7 @@ describe("releaseCommand (guidance, read-only)", () => {
     expect(r.stdout).toContain("PR");
     expect(r.stdout.toLowerCase()).toContain("tag");
     // The CI release gate is surfaced.
-    expect(r.stdout).toContain("roll consistency check");
+    expect(r.stdout).toContain("roll release consistency check");
   });
 
   it("resets the seq to 1 on a new day relative to the current version", () => {
@@ -94,7 +94,7 @@ describe("releaseCommand (guidance, read-only)", () => {
   it("flags an empty Unreleased section as not ready", () => {
     const r = run([], { version: "3.606.2", changelog: EMPTY_CHANGELOG });
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("roll changelog generate");
+    expect(r.stdout).toContain("roll release changelog generate");
   });
 
   it("FIX-226: a pre-written next-version section counts as ready (repo convention)", () => {
@@ -136,7 +136,7 @@ describe("releaseCommand (guidance, read-only)", () => {
 
   it("Chinese output carries no stray English prose words", () => {
     const r = run([], { version: "3.606.2", changelog: READY_CHANGELOG, lang: "zh" });
-    // Command tokens (roll consistency check / package.json) are allowed; prose is not.
+    // Command tokens (roll release consistency check / package.json) are allowed; prose is not.
     // Assert the localized header is in Chinese.
     expect(r.stdout).toContain("发版计划");
   });

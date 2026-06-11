@@ -73,22 +73,41 @@ import { versionCommand } from "./version.js";
 
 let registered = false;
 
+function redirectCommand(from: string, to: string) {
+  return (): number => {
+    process.stdout.write(`roll ${from} moved to roll ${to}\n`);
+    return 0;
+  };
+}
+
+function isHelp(arg: string | undefined): boolean {
+  return arg === "help" || arg === "--help" || arg === "-h";
+}
+
 export function registerAll(): void {
   if (registered) return;
   registered = true;
   registerPorted("status", statusCommand, { help: "Usage: roll status\n  Project health snapshot (backlog, loop, attest).\n项目健康速览。" });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
-  // `skills`: generate/check/help/unknown all TS (full surface ported).
-  registerPorted("skills", skillsCommand);
-  // `alert`: list/ack/resolve/clear/log/unknown all TS (full surface ported).
-  registerPorted("alert", alertCommand, { help: "Usage: roll alert [run-once]\n  Alert lane: scan + notify once.\n告警通道:扫描并通知一次。" });
+  // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
+  // Collected top-level verbs print a one-line redirect instead of behaving as
+  // long-lived aliases; the live surfaces are nested below loop/release/setup/doctor.
+  registerPorted("skills", redirectCommand("skills", "doctor skills / roll setup skills"), { hidden: true });
+  registerPorted("alert", redirectCommand("alert", "loop alert"), { hidden: true });
   // `doctor`: all four health sections ported TS (agent/pr/skills/launchd).
-  registerPorted("doctor", doctorCommand, { help: "Usage: roll doctor\n  Environment + install diagnosis.\n环境与安装体检。" });
+  registerPorted("doctor", (args) => {
+    if (args[0] === "skills") {
+      const rest = args.slice(1);
+      if (isHelp(rest[0])) return skillsCommand(["help"]);
+      return skillsCommand(["check", ...rest]);
+    }
+    return doctorCommand(args);
+  }, { help: "Usage: roll doctor [skills]\n  Environment + install diagnosis.\n环境与安装体检。" });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
-  registerPorted("attest", attestCommand);
+  registerPorted("attest", attestCommand, { hidden: true });
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
-  registerPorted("index", indexCommand);
+  registerPorted("index", indexCommand, { hidden: true });
   // `story new`: internal/advanced explicit card-folder minting (US-META-009).
   // REFACTOR-050: `roll idea` is now the one user-facing card-capture entry;
   // `story new` is retained for agents/skills that need explicit ID+epic control.
@@ -105,7 +124,7 @@ export function registerAll(): void {
   // `dream`: full surface TS (US-PORT-020). `run-once` is the v3-native scan
   // heart; every other arg mirrors v2's generic unknown-command surface without
   // shelling to bin/roll.
-  registerPorted("dream", dreamCommand, { help: "Usage: roll dream run-once\n  Nightly self-scan (patterns, docs freshness, test quality) — run one pass now.\n夜间自检跑一遍。" });
+  registerPorted("dream", dreamCommand, { hidden: true, help: "Usage: roll dream run-once\n  Nightly self-scan (patterns, docs freshness, test quality) — run one pass now.\n夜间自检跑一遍。" });
   // `agent`: full surface TS (view/list/use/set/unknown). The write face owns
   // .roll/agents.yaml plus legacy .roll/local.yaml sync; no bash fallback.
   registerPorted("agent", agentCommand, { help: "Usage: roll agent [set <slot> <agent>|use <name>|list]\n  View or change the agent slots.\n查看/切换 agent 槽位。" });
@@ -150,6 +169,8 @@ export function registerAll(): void {
     if (args[0] === "ship") return releaseShipCommand(args.slice(1));
     // US-TRUTH-005: the recorded owner bypass for the consistency gate.
     if (args[0] === "waiver") return releaseWaiverCommand(args.slice(1));
+    if (args[0] === "changelog") return changelogCommand(args.slice(1), "roll release changelog");
+    if (args[0] === "consistency") return consistencyCommand(args.slice(1), "roll release consistency");
     return releaseCommand(args);
   });
   // `prices`: full surface TS (show/help/unknown + refresh network write).
@@ -170,10 +191,10 @@ export function registerAll(): void {
   // dispatch fell back to bash to do it); that path is RETIRED. The deterministic
   // draft is now the only output, produced natively in TS — no bash fallback,
   // no agent, no warn noise. `--no-ai` is kept as an accepted no-op.
-  registerPorted("changelog", changelogCommand);
+  registerPorted("changelog", redirectCommand("changelog", "release changelog"), { hidden: true });
   // `consistency`: check/--json/--project-dir + help + unknown all TS (full
   // surface ported; the python orchestrator is reimplemented byte-for-byte).
-  registerPorted("consistency", consistencyCommand);
+  registerPorted("consistency", redirectCommand("consistency", "release consistency"), { hidden: true });
   // REFACTOR-051: `roll feedback` retired. Use `roll idea` for backlog capture
   // or `gh issue create` for GitHub issues.
   // `init`: full surface TS (fresh/re-init scaffold, legacy-codebase onboard
@@ -190,7 +211,14 @@ export function registerAll(): void {
   registerPorted("offboard", offboardCommand);
   // `setup`: full surface TS (fresh / --force / already-synced re-run,
   // unknown-argument, and no-conventions-source guard). No sub-paths on bash.
-  registerPorted("setup", setupCommand, { help: "Usage: roll setup\n  Install roll conventions/templates for this machine.\n本机安装模板。" });
+  registerPorted("setup", (args) => {
+    if (args[0] === "skills") {
+      const rest = args.slice(1);
+      if (isHelp(rest[0])) return skillsCommand(["help"]);
+      return skillsCommand(["generate", ...rest]);
+    }
+    return setupCommand(args);
+  }, { help: "Usage: roll setup [skills]\n  Install roll conventions/templates for this machine.\n本机安装模板。" });
   // `ci`: the READ surface is TS (no-flag / `--timeout=N` status report:
   // gh-absent warn, not-a-git-repo err, gh-run-list failure, no-runs note, and
   // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate
@@ -242,6 +270,7 @@ export function registerAll(): void {
     // .roll/cycle-logs and the shared events ndjson. No bash fallback.
     if (args[0] === "log") return loopLogCommand(args.slice(1));
     if (args[0] === "events") return loopEventsCommand(args.slice(1));
+    if (args[0] === "alert") return alertCommand(args.slice(1));
     // `loop monitor` / `loop attach`: the v2 tmux-popup stream retires under the
     // v3 self-contained runner (US-PORT-007) — TS stubs redirect, never run the
     // bash tmux behaviour.
@@ -292,5 +321,5 @@ export function registerAll(): void {
     // Anything else is an unknown loop subcommand — print the v2 usage, exit 1
     // (no bash fallback remains; bin/roll is being retired in US-PORT-021).
     return loopUnknownSubcommand(args[0]);
-  }, { help: "Usage: roll loop <on|off|now|test|status|runs|log|story|events|eval|signals|fmt|pr-inbox|mute|unmute|pause|resume|reset|gc>\n  The autonomous delivery loop.\n自治交付循环。" });
+  }, { help: "Usage: roll loop <on|off|now|test|status|runs|log|story|events|eval|signals|alert|fmt|pr-inbox|mute|unmute|pause|resume|reset|gc>\n  The autonomous delivery loop.\n自治交付循环。" });
 }

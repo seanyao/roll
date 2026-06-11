@@ -37,6 +37,7 @@ import {
   type AcStatus,
   type BeforeAfterPair,
   type CardContext,
+  type DocGapWarning,
   type EvidenceRef,
   type ProcessArchive,
   type RunRow,
@@ -64,6 +65,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { basename, join, relative } from "node:path";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
 import { readSelfScoreTrend, readStorySelfScores } from "../lib/self-score.js";
@@ -222,6 +224,91 @@ const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "fail", "b
 
 function warn(msg: string): void {
   process.stderr.write(`[roll] attest WARN: ${msg}\n`);
+}
+
+const DOC_ALIGNMENT_PATTERNS: readonly RegExp[] = [
+  /^README(?:_[A-Z]+)?\.md$/,
+  /^AGENTS\.md$/,
+  /^CHANGELOG\.md$/,
+  /^docs\//,
+  /^guide\//,
+  /^site\//,
+];
+
+const USER_VISIBLE_SURFACE_PATTERNS: readonly RegExp[] = [
+  /^packages\/cli\/src\/commands\/[^/]+\.ts$/,
+  /^packages\/cli\/src\/commands\/index\.ts$/,
+  /^packages\/cli\/src\/index\.ts$/,
+  /^packages\/cli\/src\/render\.ts$/,
+  /^packages\/spec\/src\/i18n\//,
+];
+
+function normalizeDiffPath(file: string): string {
+  return file.replace(/\\/g, "/").replace(/^\.\//, "").trim();
+}
+
+export function isDocAlignmentFile(file: string): boolean {
+  const normalized = normalizeDiffPath(file);
+  return DOC_ALIGNMENT_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function isUserVisibleSurfaceFile(file: string): boolean {
+  const normalized = normalizeDiffPath(file);
+  return USER_VISIBLE_SURFACE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function assessDocGapFromFiles(files: readonly string[]): DocGapWarning | undefined {
+  const seen = new Set<string>();
+  const changedFiles: string[] = [];
+  for (const file of files) {
+    const normalized = normalizeDiffPath(file);
+    if (normalized === "" || seen.has(normalized)) continue;
+    seen.add(normalized);
+    changedFiles.push(normalized);
+  }
+  const visibleFiles = changedFiles.filter(isUserVisibleSurfaceFile);
+  if (visibleFiles.length === 0) return undefined;
+  if (changedFiles.some(isDocAlignmentFile)) return undefined;
+  return { changedFiles, visibleFiles };
+}
+
+function gitNameOnly(projectPath: string, args: readonly string[]): string[] {
+  try {
+    const out = execFileSync("git", ["-C", projectPath, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out
+      .split("\n")
+      .map(normalizeDiffPath)
+      .filter((file) => file !== "");
+  } catch {
+    return [];
+  }
+}
+
+function collectChangedFiles(projectPath: string): string[] {
+  const candidates: readonly (readonly string[])[] = [
+    ["diff", "--name-only", "--diff-filter=ACMRTUXB", "origin/main...HEAD"],
+    ["diff", "--name-only", "--diff-filter=ACMRTUXB", "main...HEAD"],
+    ["diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD~1..HEAD"],
+    ["diff", "--name-only", "--diff-filter=ACMRTUXB"],
+    ["diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB"],
+  ];
+  const files: string[] = [];
+  const seen = new Set<string>();
+  for (const args of candidates) {
+    for (const file of gitNameOnly(projectPath, args)) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      files.push(file);
+    }
+  }
+  return files;
+}
+
+function detectDocGap(projectPath: string): DocGapWarning | undefined {
+  return assessDocGapFromFiles(collectChangedFiles(projectPath));
 }
 
 interface AcMapEntry {
@@ -770,6 +857,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const context = buildCardContext(projectPath, featureFile, storyId, process.env);
   const beforeAfter = detectBeforeAfter(runDir);
   const afterOnly = detectAfterOnly(runDir);
+  const docGap = detectDocGap(projectPath);
   // US-ATTEST-014 — reverse-look up the delivering cycle and inline its process
   // archive (timeline + signal layer + bounded, redacted transcript). Degrades
   // gracefully: hand-delivered / no-data cards yield undefined (section trimmed).
@@ -790,6 +878,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(context !== undefined ? { context } : {}),
     ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
     ...(processArchive !== undefined ? { process: processArchive } : {}),
+    ...(docGap !== undefined ? { docGap } : {}),
     ...(selfScores.length > 0 ? { selfScores } : {}),
     ...(selfScoreTrend !== undefined ? { selfScoreTrend } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),

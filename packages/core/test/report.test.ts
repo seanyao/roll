@@ -46,6 +46,23 @@ describe("red line — no evidence can't stay pass", () => {
   });
 });
 
+describe("US-META-010 — doc-gap shadow warning", () => {
+  it("renders a shadow warning without changing the quality gate verdict", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "test-pass", label: "suite green" }] })],
+      docGap: {
+        changedFiles: ["packages/cli/src/commands/status.ts"],
+        visibleFiles: ["packages/cli/src/commands/status.ts"],
+      },
+    });
+    expect(html).toContain("doc-gap");
+    expect(html).toContain("Shadow warning");
+    expect(html).toContain("packages/cli/src/commands/status.ts");
+    expect(html).toContain("不改变 Gate 结论");
+  });
+});
+
 describe("deletion-not-placeholder", () => {
   it("screenshot figure renders only when the ref exists", () => {
     const w = renderReport({

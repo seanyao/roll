@@ -70,6 +70,16 @@ export interface CardContext {
 }
 
 /**
+ * US-META-010 — shadow DoD signal: the delivery changed user-visible command
+ * surface or output copy without a docs touch in the same diff. This is warning
+ * evidence only; it never changes the acceptance gate verdict yet.
+ */
+export interface DocGapWarning {
+  changedFiles: string[];
+  visibleFiles: string[];
+}
+
+/**
  * US-ATTEST-013 — a坏态/好态 pair for FIX / behaviour-changing US. `before-*.png`
  * / `after-*.png` shots render side by side. Brand-new features carry none.
  */
@@ -150,6 +160,8 @@ export interface ReportInput {
   /** US-ATTEST-014 — the cycle process archive (timeline + signal layer +
    *  folded transcript). Absent ⇒ section trimmed; `manual` delivery degrades. */
   process?: ProcessArchive;
+  /** US-META-010 — doc/code/product alignment shadow warning. */
+  docGap?: DocGapWarning;
   /** US-ATTEST-011 — screenshots an unattended cycle's Gate produced for itself
    *  (terminal lane). Renders a dedicated figure section; the block is SKIPPED
    *  when empty (deletion-not-placeholder — a headless host that honestly
@@ -336,6 +348,21 @@ function evidenceIndexBlock(
 <tbody>${rows.join("\n")}</tbody></table></section>`;
 }
 
+function docGapBlock(warning: ReportInput["docGap"]): string {
+  if (warning === undefined || warning.visibleFiles.length === 0) return "";
+  const shown = warning.visibleFiles.slice(0, 12);
+  const extra = warning.visibleFiles.length - shown.length;
+  const list = shown.map((file) => `<li><code>${esc(file)}</code></li>`).join("\n");
+  const more = extra > 0 ? `<li>${bi(`and ${extra} more`, `另有 ${extra} 个`)}</li>` : "";
+  return `<section class="doc-gap"><h2>doc-gap · ${bi("Shadow warning", "Shadow 警示")}</h2>
+<p>${bi(
+    "User-visible command/copy files changed without a README/docs/guide/site update in the same diff. This is a shadow warning; it does not change the Gate verdict yet.",
+    "本次 diff 修改了用户可见命令面/输出文案，但没有同步 README/docs/guide/site。该项仍是 shadow 警示，不改变 Gate 结论。",
+  )}</p>
+<ul>${list}${more}</ul>
+</section>`;
+}
+
 /** Format whole seconds as `+MM:SS` (minutes grow past 59; timezone-free). */
 function fmtOffset(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
@@ -470,13 +497,14 @@ ${scoreIssues.length > 0 ? `<p><strong>Self-score discrepancy</strong></p><ul>${
 </section>`
       : "";
 
-  // US-ATTEST-013 — 收口 (closing): quality gate → discrepancies → evidence
-  // index → self-score. Assembled then wrapped only when non-empty (trim, no
-  // hollow section).
+  // US-ATTEST-013 + US-META-010 — 收口 (closing): quality gate → shadow doc-gap
+  // → discrepancies → evidence index → self-score. Assembled then wrapped only
+  // when non-empty (trim, no hollow section).
   const gate = facts !== "" ? `<h2>${bi("Quality gate", "质量门禁")}</h2>\n${facts}` : "";
+  const docGap = docGapBlock(input.docGap);
   const evIndex = evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures);
   const selfScore = selfScoreBlock(input.selfScores, input.selfScoreTrend);
-  const closingInner = [gate, disc, evIndex, selfScore].filter((s) => s !== "").join("\n");
+  const closingInner = [gate, docGap, disc, evIndex, selfScore].filter((s) => s !== "").join("\n");
   const closing = closingInner !== "" ? `<section class="closing">\n${closingInner}\n</section>` : "";
 
   return `<!doctype html>
@@ -507,6 +535,8 @@ figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 .cast-replay summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 .replay-video { margin:10px 0; } .replay-video video { width:100%; max-width:760px; border:1px solid var(--line); border-radius:6px; background:#000; }
 .replay-video figcaption { color:var(--muted); font-size:12.5px; }
+.doc-gap { border:1px dashed var(--warn); border-radius:8px; padding:8px 16px; margin-top:28px; }
+.doc-gap h2 { color:var(--warn); }
 .discrepancies { border:1px dashed var(--claim); border-radius:8px; padding:8px 16px; margin-top:28px; }
 details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:8px; padding:8px 16px; background:var(--bg-raise); }
 details.selfscore summary { cursor:pointer; font-weight:600; }

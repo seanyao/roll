@@ -24,3 +24,12 @@ drift — not skipping the gate.
 The acceptance-evidence gate is `hard` by default. `loop_safety.attest_gate: soft`
 is an explicit project policy for migration windows; consistency still reports
 missing or dangling evidence so the gap cannot disappear silently.
+
+## Doc alignment boundary
+
+Registry drift is already a hard red line: if the command registry, README,
+guide, or `--help` disagree, the FIX-242 guard fails consistency and release.
+The `doc-gap` signal in `roll attest` is shadow-only. It warns when a delivery
+diff changes user-visible command or output-copy files without a README/docs/guide/site
+touch in the same diff, but it does not change the report exit code or Gate
+verdict yet.

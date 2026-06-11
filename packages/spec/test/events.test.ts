@@ -110,6 +110,10 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
       verdict: "APPROVE",
       reason: "accepted",
       findings: ["AC and tests line up"],
+      commandFamily: "codex",
+      durationMs: 1250,
+      transcriptPath: ".roll/peer/transcripts/review.txt",
+      evidencePath: ".roll/peer/runs.jsonl",
       ts: 1_780_000_300,
     };
     const degraded: RollEvent = {
@@ -123,6 +127,8 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
       ts: 1_780_000_301,
     };
     expect(reviewed.verdict).toBe("APPROVE");
+    expect(reviewed.commandFamily).toBe("codex");
+    expect(reviewed.durationMs).toBe(1250);
     expect(degraded.to).toBe("self");
   });
 

@@ -376,7 +376,7 @@ CI PASS
 
 `$roll-peer` 实现跨 AI 客户端的双边协商式代码评审。支持 Claude、Kimi、DeepSeek、Codex 之间的任意配对。
 
-工作模式：发起方 agent 提交变更摘要和 diff，接收方 agent 独立审查并给出 APPROVE / REFINE / OBJECT 决议。REFINE 触发修改后重审，OBJECT 升级为讨论。整个过程通过 `roll peer` CLI 管理，状态持久化在本地，支持查看历史和重置。
+工作模式：发起方 agent 提交变更摘要和 diff，接收方 agent 独立审查并给出 APPROVE / REFINE / OBJECT 决议。REFINE 触发修改后重审，OBJECT 升级为讨论。多轮协议由 `$roll-peer` skill 负责；`roll peer` CLI 是 TS-native 的一次性 adapter，会把结构化 reviewer fact 写到 `.roll/peer/runs.jsonl`，并保留 transcript。
 
 自动触发场景：`$roll-design` 在方向评审和方案评审阶段可选触发 `$roll-peer`，由不同 agent 对设计方向或完整方案进行质疑。
 

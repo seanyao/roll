@@ -139,7 +139,10 @@ roll loop go          # Run goal mode manually for all backlog until complete/pa
 roll loop go --epic <name>              # Limit the goal to one epic
 roll loop go --cards US-1,FIX-2         # Limit the goal to selected cards
 roll loop go --budget 10                # Stop conservatively when goal cost reaches $10
+roll loop go --usage-threshold 0.85     # Pause when five-hour or weekly usage reaches this ratio
+roll loop go --no-wait                  # On usage limit, pause and return instead of waiting for reset
 roll loop go --for 5h                   # Stop after the current cycle once the timebox is reached
+roll loop go --max-cycles 3             # Stop after this many cycles
 roll loop go --review <auto|hetero|self|off>  # Set the final review policy
 roll loop goal        # Show persisted goal status, scope, review mode, usage, limits, and safety gate
 
@@ -193,6 +196,25 @@ goal pauses with reason `timebox`.
 Each safety trip records `goal:gate_tripped`, and `roll loop goal` shows the
 last safety gate reading.
 
+### `roll loop goal` Fields
+
+`roll loop goal` is the read face for `.roll/loop/goal.yaml` plus the latest
+goal events. The key fields are:
+
+| Field | Meaning |
+|-------|---------|
+| `Status` | `active`, `paused`, `budget_limited`, or `complete`. |
+| `Scope` | All backlog, one epic, or an explicit card list. |
+| `Review` | Completion review policy: `auto`, `hetero`, `self`, or `off`. |
+| `Usage` | Goal cycle count, effective cost, and unknown-cost-row count. |
+| `Limits` | Explicit `--budget`, `--max-cycles`, and `--for` settings. |
+| `Safety gate` | The latest budget, usage, or timebox trip and its reading. |
+| `Last decision` | Why the goal continued, paused, became budget-limited, or completed. |
+
+When `auto` final review degrades to same-provider review, the status view
+shows the recorded degradation reason from `goal:review_degraded`. When a goal
+cannot complete, `Last decision` carries the unmet truth or review reason.
+
 ### Goal Mode Final Review
 
 `roll loop go` persists its goal state in `.roll/loop/goal.yaml` and runs a
@@ -200,6 +222,11 @@ final review gate before a goal can become `complete`. The default policy is
 `--review auto`: Roll prefers a reviewer from a different provider family than
 the worker agents, and records `goal:review_degraded` when it must fall back to
 self review because only one provider is available.
+
+Final review uses the same structured adapter as `roll peer`. The
+`goal:final_review` event records reviewer agent, provider, command family,
+verdict, findings, timeout/error state, duration, and transcript/evidence
+paths when available.
 
 Use `--review hetero` when completion must fail closed unless a heterogeneous
 reviewer is installed. Use `--review self` to allow same-provider review. Use

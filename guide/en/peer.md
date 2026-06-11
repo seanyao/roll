@@ -1,114 +1,75 @@
-# roll peer — Cross-Agent Code Review
+# roll peer — Structured External Review
 
-`roll peer` sends a plan or diff to a second AI agent for review.
-Loop auto-triggers peer review before risky builds; you can also invoke it manually.
+`roll peer` runs one external-provider reviewer through the same structured
+adapter used by goal-mode final review. It is a TS-native command and never
+falls back to the retired bash peer surface.
 
-## How Peer Review Works
-
-```
-roll peer --from claude --to kimi --context plan.md
-
-  Claude submits plan → Kimi reviews → Returns verdict
-```
-
-Peer review is a one-round-or-more negotiation:
-
-| Verdict | Meaning | What happens next |
-|---------|---------|------------------|
-| **AGREE** | Plan looks good | Proceed to build |
-| **REFINE** | Plan needs adjustments | Incorporate feedback, re-submit |
-| **OBJECT** | Significant disagreement | Reconsider approach, re-submit |
-| **ESCALATE** | Cannot resolve | Human decision required |
-
-After 3 rounds without AGREE, the review escalates automatically.
+Use `$roll-peer` when you need the full multi-round negotiation protocol inside
+an agent workflow. Use `roll peer` when you need a durable one-shot reviewer
+fact from Claude, Codex, Kimi, Pi, or another installed external CLI.
 
 ## Command Reference
 
 ```bash
-# Basic: ask kimi to review a plan from claude
-roll peer --from claude --to kimi --context plan.md
-
-# Auto-select peer (uses capability map)
-roll peer --from claude
-
-# Specify round (used by loop internally on multi-round reviews)
-roll peer --from claude --to kimi --round 2 --context plan.md
-
-# Skip the 10-second opt-out prompt
-roll peer --from claude --yes
-
-# Tag-based routing (e.g. "security" or "architecture" tag)
-roll peer --from claude --tag security
-
-# Check peer pair health
-roll peer status
-
-# Reset a degraded/abandoned pair
-roll peer reset claude kimi
+roll peer --reviewer codex --prompt "Review this plan and return VERDICT/REASON/FINDING lines"
+roll peer --reviewer kimi --file /tmp/review-prompt.md --json
+roll peer --worker claude --mode hetero --file /tmp/final-review.md
+roll peer --mode self --reviewer claude --prompt "Self-check this evidence"
+roll peer --timeout-ms 300000 --reviewer pi --file /tmp/review.md
 ```
 
-## Auto-Trigger Conditions
+Options:
 
-Loop (and `$roll-build`) auto-triggers peer when:
+| Option | Meaning |
+|--------|---------|
+| `--reviewer <agent>` | Use one reviewer directly. |
+| `--worker <agent>` | Working agent used for heterogeneous selection. Defaults to this project's configured agent. |
+| `--mode auto` | Prefer a different provider, fall back to self-provider when necessary. |
+| `--mode hetero` | Require a different provider; unavailable reviewers produce an `ERROR` fact. |
+| `--mode self` | Allow same-provider review. |
+| `--prompt <text>` | Inline prompt text. |
+| `--file <path>` | Read the prompt from a file. |
+| `--json` | Print the structured reviewer fact as JSON. |
+| `--timeout-ms <ms>` | Per-review timeout. Default: 180000 ms. |
 
-- Plan affects >3 files or crosses module boundaries
-- Architecture decisions or non-obvious trade-offs are involved
-- Destructive operations (deletions, migrations, production deploys)
-- High-risk keywords in the request: "critical", "don't break", "关键", "别搞砸"
+Reviewer output must contain exactly one verdict line:
 
-A 10-second opt-out prompt appears before peer fires:
-
-```
-Plan affects 5 files across 3 modules. Estimated peer review: 2–3 rounds.
-Press Enter to launch, or type 'n' to skip. Auto-executing in 10s...
-```
-
-## Capability Map
-
-By default, peer routes to: `kimi → claude → pi` (in preference order).
-
-Configure in `~/.roll/config.yaml`:
-
-```yaml
-peer_capability_map_default: "kimi claude pi"
-peer_capability_map_security: "kimi deepseek claude"
-peer_capability_map_architecture: "claude kimi"
+```text
+VERDICT: APPROVE|REQUEST_CHANGES
+REASON: <short reason>
+FINDING: <concrete issue>
 ```
 
-Supported peer agents: `claude`, `kimi`, `pi`, `deepseek`, `codex`, `openai`, `opencode`.
-Loop skips agents that are not installed on the current machine.
+Malformed or multiple verdict lines fail closed as `REQUEST_CHANGES`.
 
-## Visibility (tmux + popup)
+## Recorded Facts
 
-Like loop, peer review runs inside a tmux session (`roll-peer-<from>-<to>`).
-When not muted, a terminal window opens so you can watch the negotiation in real time.
+Every run appends one JSON line to:
 
-The session stays alive across rounds so you can watch the entire multi-round negotiation
-in one window. After a terminal resolution (AGREE, ESCALATE, UNKNOWN, or round ≥ 3),
-the session is automatically cleaned up — the tmux session is killed and the terminal
-window closes.
-
-The `mute` file (`~/.shared/roll/mute`) controls popup for both loop and peer.
-`roll loop mute` / `roll loop unmute` applies to all autonomous activity.
-
-## Peer State Machine
-
-Each `from→to` pair maintains a health state:
-
-| State | Meaning |
-|-------|---------|
-| `active` | Pair is healthy, last outcome was AGREE |
-| `degraded` | 1–2 consecutive non-AGREE outcomes |
-| `abandoned` | 3+ consecutive failures — pair is suspended |
-
-Check state with `roll peer status`. Reset with `roll peer reset <from> <to>`.
-
-## Logs
-
-Peer review logs are saved to:
-
-```
-~/.local/share/roll/peer/logs/YYYYMMDD_HHMMSS_<from>_<to>.md
+```text
+.roll/peer/runs.jsonl
 ```
 
-Each log contains the full prompt and response for every round.
+When a reviewer process produced output, the transcript is also written under:
+
+```text
+.roll/peer/transcripts/
+```
+
+The recorded fact includes reviewer agent, provider, command family, verdict,
+reason, findings, timeout/error state, duration, transcript path, and evidence
+path. Goal-mode final review emits the same fact fields on `goal:final_review`.
+
+## External Reviewers vs Auxiliary Subagents
+
+`roll peer` is for external-provider reviewer CLIs. Codex-internal subagents are
+useful auxiliary analysis workers, but they are not a substitute for external
+peer review. The adapter treats `codex-subagent:*` / `subagent:*` identities as
+auxiliary and excludes them from heterogeneous reviewer selection.
+
+## Relationship To Pairing
+
+`roll pair` is a build-time gate: a heterogeneous peer re-checks risky delivery
+diffs during autonomous cycles and writes cycle evidence. `roll peer` is an
+operator command and reusable adapter for one-shot structured reviews. They
+share the same provider-diversity principle but serve different workflows.

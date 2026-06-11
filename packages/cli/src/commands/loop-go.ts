@@ -1,4 +1,4 @@
-import { EventBus, agentsInstalled, parseBacklog, selectGoalFinalReviewer, type AuditPrEvidence, type StoryTruth } from "@roll/core";
+import { EventBus, parseBacklog, type AuditPrEvidence, type StoryTruth } from "@roll/core";
 import {
   GOAL_REVIEW_MODES,
   GOAL_SCHEMA_VERSION,
@@ -14,16 +14,16 @@ import {
   type RollGoal,
 } from "@roll/spec";
 import { acquireLock, ghRepoSlug, prViewMergeInfo, projectIdentity, releaseLock, remoteUrl } from "@roll/infra";
-import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
-import { agentInstalledByName, projectAgent, realAgentEnv } from "./agent-list.js";
-import { textAgentArgv } from "../lib/text-agent-argv.js";
+import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
 import { readAnthropicUsageLimits } from "../lib/anthropic-usage.js";
+import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
 const FINAL_REVIEW_TIMEOUT_MS = 300_000;
@@ -128,9 +128,13 @@ export interface GoalFinalReviewResult {
   effectiveMode: "hetero" | "self";
   reviewer: string;
   provider: string;
+  commandFamily?: string;
   verdict: "APPROVE" | "REQUEST_CHANGES" | "TIMEOUT" | "ERROR";
   reason: string;
   findings: string[];
+  durationMs?: number;
+  transcriptPath?: string;
+  evidencePath?: string;
   degradedReason?: string;
 }
 
@@ -672,78 +676,8 @@ async function workerAgentsForSession(projectPath: string, session: string): Pro
   return uniqueStrings(out);
 }
 
-function killFinalReviewChild(child: ChildProcess, signal: NodeJS.Signals): boolean {
-  if (child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, signal);
-      return true;
-    } catch {
-      /* not a group leader or already gone; fall back to the child handle */
-    }
-  }
-  return child.kill(signal);
-}
-
-function releaseFinalReviewChild(child: ChildProcess): void {
-  child.stdout?.destroy();
-  child.stderr?.destroy();
-  child.unref();
-}
-
 export function spawnFinalReviewAgent(agent: string, cwd: string, prompt: string, timeoutMs: number): Promise<FinalReviewProcessResult> {
-  const cmd = textAgentArgv(agent, prompt);
-  if (cmd === null) return Promise.resolve({ status: "error", reason: "unsupported_reviewer", stdout: "" });
-  return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-    const child = spawn(cmd.bin, cmd.args, {
-      cwd,
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-    });
-    const finish = (result: FinalReviewProcessResult): void => {
-      if (settled) return;
-      settled = true;
-      if (timer !== undefined) clearTimeout(timer);
-      resolve(result);
-    };
-    timer = setTimeout(() => {
-      timedOut = true;
-      killFinalReviewChild(child, "SIGKILL");
-      releaseFinalReviewChild(child);
-      finish({ status: "timeout", stdout });
-    }, timeoutMs);
-    timer.unref();
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout = boundedAppend(stdout, chunk);
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr = boundedAppend(stderr, chunk);
-    });
-    child.on("error", (error) => finish({ status: "error", reason: error.message, stdout }));
-    child.on("exit", (code, signal) => {
-      setImmediate(() => {
-        if (timedOut) finish({ status: "timeout", stdout });
-        else if (code === 0) finish({ status: "ok", stdout });
-        else finish({ status: "error", reason: `exit_${code ?? signal ?? "signal"}:${stderr.trim().slice(0, 200)}`, stdout });
-      });
-    });
-    child.on("close", (code) => {
-      if (timedOut) finish({ status: "timeout", stdout });
-      else if (code === 0) finish({ status: "ok", stdout });
-      else finish({ status: "error", reason: `exit_${code ?? "signal"}:${stderr.trim().slice(0, 200)}`, stdout });
-    });
-  });
-}
-
-function reviewAgentPool(): string[] {
-  const installed = agentsInstalled(realAgentEnv());
-  const current = projectAgent();
-  return uniqueStrings(agentInstalledByName(current) ? [...installed, current] : installed);
+  return spawnPeerReviewAgent({ agent, projectPath: cwd, prompt, timeoutMs });
 }
 
 function finalReviewPrompt(input: GoalFinalReviewInput): string {
@@ -766,86 +700,29 @@ function finalReviewPrompt(input: GoalFinalReviewInput): string {
 }
 
 type FinalReviewProcessResult =
-  | { status: "ok"; stdout: string }
-  | { status: "timeout"; stdout: string }
-  | { status: "error"; reason: string; stdout: string };
-
-function boundedAppend(current: string, chunk: Buffer): string {
-  const next = current + chunk.toString("utf8");
-  return next.length > 100_000 ? next.slice(-100_000) : next;
-}
-
-function reviewFindings(stdout: string): string[] {
-  const findings = [...stdout.matchAll(/^\s*FINDING:\s*(.+)$/gim)].map((m) => (m[1] ?? "").trim()).filter((line) => line !== "");
-  if (findings.length > 0) return findings.slice(0, 10);
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !/^VERDICT:/i.test(line) && !/^REASON:/i.test(line))
-    .slice(0, 5);
-}
-
-function reviewReason(stdout: string, fallback: string): string {
-  const explicit = /^\s*REASON:\s*(.+)$/im.exec(stdout)?.[1]?.trim();
-  if (explicit !== undefined && explicit !== "") return explicit.slice(0, 500);
-  return reviewFindings(stdout)[0]?.slice(0, 500) ?? fallback;
-}
-
-function reviewVerdict(stdout: string): "APPROVE" | "REQUEST_CHANGES" {
-  const lines = [...stdout.matchAll(/^\s*VERDICT:\s*(APPROVE|REQUEST_CHANGES)\s*$/gim)].map((m) => (m[1] ?? "").toUpperCase());
-  return lines.length === 1 && lines[0] === "APPROVE" ? "APPROVE" : "REQUEST_CHANGES";
-}
+  SpawnPeerReviewResult;
 
 async function defaultFinalReview(input: GoalFinalReviewInput): Promise<GoalFinalReviewResult> {
-  const workers = input.workerAgents.length > 0 ? input.workerAgents : [projectAgent()];
-  const selection = selectGoalFinalReviewer({
+  const facts = await runPeerReview({
+    projectPath: input.projectPath,
+    prompt: finalReviewPrompt(input),
     mode: input.mode,
-    installedAgents: reviewAgentPool(),
-    workerAgents: workers,
+    workerAgents: input.workerAgents.length > 0 ? input.workerAgents : [projectAgent()],
+    timeoutMs: input.timeoutMs,
+    purpose: "goal_final_review",
   });
-  if (selection.status === "unavailable") {
-    return {
-      effectiveMode: input.mode === "self" ? "self" : "hetero",
-      reviewer: "",
-      provider: "",
-      verdict: "ERROR",
-      reason: selection.reason,
-      findings: [],
-    };
-  }
-
-  const ran = await spawnFinalReviewAgent(selection.reviewer, input.projectPath, finalReviewPrompt(input), input.timeoutMs);
-  if (ran.status === "timeout") {
-    return {
-      effectiveMode: selection.effectiveMode,
-      reviewer: selection.reviewer,
-      provider: selection.provider,
-      verdict: "TIMEOUT",
-      reason: "final_review_timeout",
-      findings: reviewFindings(ran.stdout),
-      ...(selection.degraded ? { degradedReason: selection.reason ?? "single_provider_available" } : {}),
-    };
-  }
-  if (ran.status === "error") {
-    return {
-      effectiveMode: selection.effectiveMode,
-      reviewer: selection.reviewer,
-      provider: selection.provider,
-      verdict: "ERROR",
-      reason: ran.reason,
-      findings: reviewFindings(ran.stdout),
-      ...(selection.degraded ? { degradedReason: selection.reason ?? "single_provider_available" } : {}),
-    };
-  }
-  const verdict = reviewVerdict(ran.stdout);
   return {
-    effectiveMode: selection.effectiveMode,
-    reviewer: selection.reviewer,
-    provider: selection.provider,
-    verdict,
-    reason: reviewReason(ran.stdout, verdict === "APPROVE" ? "approved" : "review_requested_changes"),
-    findings: reviewFindings(ran.stdout),
-    ...(selection.degraded ? { degradedReason: selection.reason ?? "single_provider_available" } : {}),
+    effectiveMode: facts.effectiveMode ?? (input.mode === "self" ? "self" : "hetero"),
+    reviewer: facts.agent,
+    provider: facts.provider,
+    commandFamily: facts.commandFamily,
+    verdict: facts.verdict,
+    reason: facts.reason,
+    findings: facts.findings,
+    durationMs: facts.durationMs,
+    ...(facts.transcriptPath !== undefined ? { transcriptPath: facts.transcriptPath } : {}),
+    ...(facts.evidencePath !== undefined ? { evidencePath: facts.evidencePath } : {}),
+    ...(facts.degradedReason !== undefined ? { degradedReason: facts.degradedReason } : {}),
   };
 }
 
@@ -970,6 +847,10 @@ async function runFinalReviewGate(
     verdict: review.verdict,
     reason: review.reason,
     findings: review.findings,
+    ...(review.commandFamily !== undefined ? { commandFamily: review.commandFamily } : {}),
+    ...(review.durationMs !== undefined ? { durationMs: review.durationMs } : {}),
+    ...(review.transcriptPath !== undefined ? { transcriptPath: review.transcriptPath } : {}),
+    ...(review.evidencePath !== undefined ? { evidencePath: review.evidencePath } : {}),
     ts: deps.nowSec(),
   });
   writeFinalReviewNotes(projectPath, goal, session, review, deps.nowIso());

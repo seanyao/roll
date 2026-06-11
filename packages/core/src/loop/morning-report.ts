@@ -1,6 +1,7 @@
 import type { RollEvent } from "@roll/spec";
 
 export interface MorningRunRow {
+  [key: string]: unknown;
   story_id?: unknown;
   built?: unknown;
   status?: unknown;
@@ -25,6 +26,7 @@ export interface MorningReportModel {
 export interface MorningReportOptions {
   windowStart: number;
   windowEnd: number;
+  runDelivered?: (row: MorningRunRow, nowSec: number) => boolean;
 }
 
 function storyFromRun(row: MorningRunRow): string | undefined {
@@ -91,7 +93,7 @@ export function buildMorningReportModel(
     if (ts !== undefined && Number.isFinite(ts) && (ts < opts.windowStart || ts > opts.windowEnd)) continue;
     const story = storyFromRun(row);
     if (story === undefined) continue;
-    if (row.status === "done" || row.status === "merged" || row.outcome === "delivered") delivered.add(story);
+    if (opts.runDelivered?.(row, opts.windowEnd) === true) delivered.add(story);
     if (!hasCycleEnd && typeof row.cost_usd === "number" && Number.isFinite(row.cost_usd)) totalCostUsd += row.cost_usd;
   }
 

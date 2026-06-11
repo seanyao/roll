@@ -31,10 +31,11 @@ describe("US-EVID-016 morning report model", () => {
     });
   });
 
-  it("uses runs rows as a fallback for delivered cards when event story links are absent", () => {
+  it("uses the injected runs-row projection as a fallback when event story links are absent", () => {
     const model = buildMorningReportModel([], [{ story_id: "US-RUN", status: "done", cost_usd: 0.1, ts: "2026-06-08T10:00:00Z" }], {
       windowStart: Date.parse("2026-06-08T00:00:00Z") / 1000,
       windowEnd: Date.parse("2026-06-08T12:00:00Z") / 1000,
+      runDelivered: (row) => row.status === "done",
     });
     expect(model.deliveredStories).toEqual(["US-RUN"]);
     expect(model.totalCostUsd).toBe(0.1);

@@ -2,6 +2,7 @@ import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, buildMorningReportModel, ty
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { rowDelivered } from "./truth-adapter.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -81,7 +82,11 @@ export function writeLatestMorningReport(
 ): string {
   const windowEnd = nowSec;
   const windowStart = nowSec - 12 * 60 * 60;
-  const model = buildMorningReportModel(readEvents(eventsPath), readRuns(runsPath), { windowStart, windowEnd });
+  const model = buildMorningReportModel(readEvents(eventsPath), readRuns(runsPath), {
+    windowStart,
+    windowEnd,
+    runDelivered: (row, now) => rowDelivered(row, now),
+  });
   const dir = join(projectPath, ".roll", "reports", "morning");
   const latest = join(dir, "latest.html");
   const dated = join(dir, `${new Date(nowSec * 1000).toISOString().slice(0, 10)}.html`);

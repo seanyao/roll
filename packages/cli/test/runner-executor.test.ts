@@ -135,6 +135,27 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["exec", prompt]);
   });
 
+  it("FIX-253: codex gets explicit workspace-write roots for symlinked .roll and durable alerts", () => {
+    const { bin, args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      writableRoots: ["/repo/.roll-real", "/repo/.roll-real/loop"],
+    });
+    expect(bin).toBe("codex");
+    expect(args).toEqual([
+      "exec",
+      "--cd",
+      "/wt",
+      "--sandbox",
+      "workspace-write",
+      "--add-dir",
+      "/repo/.roll-real",
+      "--add-dir",
+      "/repo/.roll-real/loop",
+      prompt,
+    ]);
+  });
+
   it("deepseek: deepseek <prompt> (positional)", () => {
     const { bin, args } = buildSpawnCommand("deepseek", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("deepseek");
@@ -444,6 +465,46 @@ describe("executeCommand — command → executor mapping", () => {
       "claude",
       expect.objectContaining({ runDir: "/frame" }),
     );
+  });
+
+  it("FIX-253: spawn_agent passes writable roots for the real .roll and alert directory", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-253-repo-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    const wt = join(repo, "wt");
+    mkdirSync(wt, { recursive: true });
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        alertsPath: join(repo, ".roll", "loop", "ALERT-roll-test.md"),
+      },
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, CTX);
+    expect(ports.agentSpawn).toHaveBeenCalledWith(
+      "codex",
+      expect.objectContaining({
+        writableRoots: [join(repo, ".roll"), join(repo, ".roll", "loop")],
+      }),
+    );
+  });
+
+  it("FIX-253: spawn_agent persists worktree-local ALERT files before cleanup can delete them", async () => {
+    const wt = realpathSync(mkdtempSync(join(tmpdir(), "roll-253-alert-wt-")));
+    execDirs.push(wt);
+    const { ports, calls } = fakePorts({
+      paths: { ...fakePorts().ports.paths, worktreePath: wt },
+      agentSpawn: vi.fn(async (_agent, opts) => {
+        writeFileSync(join(opts.cwd, "ALERT-US-RUN-001.md"), "# ALERT\n\nblocked by sandbox\n");
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, CTX);
+    const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+    expect(alerts.join("\n")).toContain("worktree alert persisted");
+    expect(alerts.join("\n")).toContain("blocked by sandbox");
   });
 
   it("US-EVID-003: spawn_agent listens for capture markers and dispatches screenshots into the run frame", async () => {
@@ -816,6 +877,17 @@ describe("executeCommand — command → executor mapping", () => {
       attest: { present: false, reason: "acmap_missing" },
       tcr: { present: false, reason: "not_recorded" },
     });
+  });
+
+  it("FIX-253: idle terminal releases the claimed story back to Todo", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({ backlog: { read: vi.fn(() => []), markStatus } });
+    await executeCommand(
+      { kind: "append_run", status: "idle", outcome: "built", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
   });
 
   it("US-TRUTH-001: publish_pr success patches ctx.prUrl for the terminal record", async () => {

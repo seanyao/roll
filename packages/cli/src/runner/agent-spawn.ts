@@ -188,6 +188,8 @@ export interface AgentSpawnOptions {
   env?: NodeJS.ProcessEnv;
   /** US-EVID-001: explicit evidence frame for this child; overrides ambient env. */
   runDir?: string;
+  /** Extra writable roots for agents with an explicit workspace sandbox (codex). */
+  writableRoots?: string[];
   /** FIX-220: when the user manually triggers `roll loop now`, drop --verbose
    *  and --output-format stream-json for a human-readable terminal. */
   interactive?: boolean;
@@ -241,7 +243,12 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
     return { bin: opts.bin ?? "kimi", args: ["-p", prompt] };
   }
   if (agent === "codex") {
-    return { bin: opts.bin ?? "codex", args: ["exec", prompt] };
+    const roots = [...new Set(opts.writableRoots ?? [])].filter((p) => p.trim() !== "");
+    const sandboxArgs =
+      roots.length > 0
+        ? ["--cd", opts.cwd, "--sandbox", "workspace-write", ...roots.flatMap((p) => ["--add-dir", p])]
+        : [];
+    return { bin: opts.bin ?? "codex", args: ["exec", ...sandboxArgs, prompt] };
   }
   if (agent === "deepseek") {
     return { bin: opts.bin ?? "deepseek", args: [prompt] };

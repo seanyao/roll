@@ -96,7 +96,7 @@ import {
   type ScreenshotResult,
 } from "@roll/infra";
 import { execFile } from "node:child_process";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -478,6 +478,11 @@ export async function executeCommand(
         cwd: ports.paths.worktreePath,
         skillBody: ports.skillBody,
         ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+        writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+        env: {
+          ...process.env,
+          ROLL_LOOP_ALERT: ports.paths.alertsPath,
+        },
         // FIX-204B: pin the executor-picked story into the agent prompt — the
         // claim (pick_story → 🔨) and the work must be the same story.
         ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
@@ -491,6 +496,7 @@ export async function executeCommand(
         },
       });
       await captureSink?.flush();
+      persistWorktreeAlerts(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
       // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
       // per-cycle log next to events/runs — v2 keeps cycle logs; without this
       // an agent that "ran but delivered nothing" is undiagnosable.
@@ -919,6 +925,8 @@ export async function executeCommand(
         if (state === "MERGED") {
           ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", STATUS_MARKER.done);
         }
+      } else if (cmd.status === "idle" && (ctx.storyId ?? "") !== "") {
+        ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", STATUS_MARKER.todo);
       }
       return {};
     }
@@ -1136,6 +1144,42 @@ export function parseEstMin(desc: string): number | undefined {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function agentWritableRoots(repoCwd: string, alertsPath: string): string[] {
+  const roots: string[] = [];
+  const add = (p: string): void => {
+    if (p.trim() === "") return;
+    const real = existsSync(p) ? realpathSync(p) : p;
+    if (!roots.includes(real)) roots.push(real);
+  };
+  const rollDir = join(repoCwd, ".roll");
+  if (existsSync(rollDir)) add(rollDir);
+  add(dirname(alertsPath));
+  return roots;
+}
+
+function persistWorktreeAlerts(worktreePath: string, alertsPath: string, events: EventsPort): void {
+  let names: string[];
+  try {
+    names = readdirSync(worktreePath).filter((n) => /^ALERT.*\.md$/i.test(n));
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    try {
+      const path = join(worktreePath, name);
+      if (!lstatSync(path).isFile()) continue;
+      const body = readFileSync(path, "utf8").trim();
+      if (body === "") continue;
+      events.appendAlert(
+        alertsPath,
+        `# worktree alert persisted: ${name}\n\n${body}`,
+      );
+    } catch {
+      /* alert salvage is best-effort */
+    }
+  }
 }
 
 /**

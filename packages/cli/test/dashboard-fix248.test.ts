@@ -91,11 +91,18 @@ describe("FIX-248 AC3 — the 2026-06-10 day shape (14 failed + 1 idle, all pi) 
   it("ROLLUP failed=14, day band carries the count, rows show ✗, agents denominator = window", () => {
     const rt = mkdtempSync(join(tmpdir(), "roll-248-rt-"));
     const nowSec = Math.floor(Date.now() / 1000);
+    // Anchor all 15 cycles inside ONE UTC+8 calendar day — yesterday
+    // 08:00–15:00 (+8) — so the 14 failures never split across a midnight
+    // bucket no matter when the suite runs (now-relative offsets crossed
+    // 00:00 +8 for ~10h of every day). Yesterday stays inside the 72h window.
+    const TZ8 = 8 * 3600;
+    const startOfTodayPlus8 = Math.floor((nowSec + TZ8) / 86400) * 86400 - TZ8;
+    const base = startOfTodayPlus8 - 86400 + 8 * 3600;
     const events: object[] = [];
     const runs: object[] = [];
     for (let i = 0; i < 15; i++) {
       const id = `D${String(i).padStart(2, "0")}`;
-      const start = nowSec - 3600 * 10 + i * 1800;
+      const start = base + i * 1800;
       const failed = i < 14; // 14 failed + 1 idle — the real 6/10 ledger shape
       events.push({ type: "cycle:start", cycleId: id, storyId: "", ts: start });
       events.push({

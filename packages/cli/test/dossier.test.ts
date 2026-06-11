@@ -836,9 +836,9 @@ describe("roll index — US-DOSSIER-001d three-layer integration", () => {
     expect(epic).toContain('href="../index.html"');
     expect(story).toContain('href="../../index.html"');
     expect(story).toContain('href="../index.html"');
-    // Story dossier carries the real delivery data.
-    expect(story).toContain('class="attest-banner"');
-    expect(story).toContain('href="latest/US-A-1-report.html"');
+    // Story dossier carries the available delivery artifacts, but the delivered
+    // banner waits for merge truth instead of treating attest presence as enough.
+    expect(story).not.toContain('class="attest-banner"');
     expect(story).toContain("US-A-1:AC1");
     expect(story).toContain("✓ pass");
   });
@@ -933,19 +933,54 @@ describe("dossier aligns status/type with the backlog (US-DOSSIER)", () => {
     return p;
   }
 
-  it("status comes from backlog: ✅→delivered (no latest/ needed), 🔨/📋/🚫 carried", () => {
+  it("status carries backlog claim, but delivered is adjudicated by story truth", () => {
     const epics = collectDossier(backlogProject());
     const mix = epics.find((e) => e.name === "mix-epic")!;
     const byId = Object.fromEntries(mix.stories.map((s) => [s.id, s]));
-    expect(byId["US-MIX-1"]).toMatchObject({ delivered: true, status: "done" });
+    expect(byId["US-MIX-1"]).toMatchObject({ delivered: false, status: "done", truthState: "grandfathered" });
     expect(byId["FIX-MIX-2"]).toMatchObject({ delivered: false, status: "in_progress" });
     expect(byId["US-MIX-3"]).toMatchObject({ delivered: false, status: "todo" });
     expect(byId["US-MIX-4"]).toMatchObject({ delivered: false, status: "hold" });
-    expect(mix.delivered).toBe(1); // only the ✅ one counts
+    expect(mix.delivered).toBe(0); // backlog Done is a claim until truth confirms merge
   });
 
-  it("a 100%-done epic lands in 'Delivered to main', partial in 'Shipping' (shipping first)", () => {
-    const html = renderFeaturesIndex(collectDossier(backlogProject()));
+  it("US-TRUTH-009: premature Done shows claim and truth failure on index and epic pages", () => {
+    const p = backlogProject();
+    const epics = collectDossier(p, {
+      prEvidence: { "US-MIX-1": { state: "OPEN" } },
+    });
+    const mix = epics.find((e) => e.name === "mix-epic")!;
+    const story = mix.stories.find((s) => s.id === "US-MIX-1")!;
+    expect(story).toMatchObject({ status: "done", delivered: false, truthState: "fail", truthReason: "premature_done" });
+    expect(mix.delivered).toBe(0);
+
+    const index = renderFeaturesIndex(epics);
+    expect(index).toContain('data-status="fail"');
+    expect(index).toContain("claim done");
+    expect(index).toContain("truth fail");
+    expect(index).not.toContain('data-status="done"><span class="stype US">US</span><span class="sid">US-MIX-1</span>');
+
+    const epic = renderEpicPage(mix);
+    expect(epic).toContain('class="pill fail"');
+    expect(epic).toContain("premature_done");
+  });
+
+  it("merged PR evidence turns a Done claim into delivered truth", () => {
+    const epics = collectDossier(backlogProject(), {
+      prEvidence: { "US-MIX-1": { state: "MERGED", mergedAtSec: 1_781_000_000 } },
+    });
+    const mix = epics.find((e) => e.name === "mix-epic")!;
+    expect(mix.stories.find((s) => s.id === "US-MIX-1")).toMatchObject({ delivered: true, status: "done", truthState: "truth" });
+    expect(mix.delivered).toBe(1);
+  });
+
+  it("a truth-delivered epic lands in 'Delivered to main', partial in 'Shipping' (shipping first)", () => {
+    const html = renderFeaturesIndex(collectDossier(backlogProject(), {
+      prEvidence: {
+        "US-MIX-1": { state: "MERGED", mergedAtSec: 1_781_000_000 },
+        "US-DONE-1": { state: "MERGED", mergedAtSec: 1_781_000_000 },
+      },
+    }));
     expect(html).toContain("Delivered to main");
     expect(html).toContain("Shipping to main");
     // board order: in-flight (Shipping) on top, then Delivered.
@@ -954,7 +989,7 @@ describe("dossier aligns status/type with the backlog (US-DOSSIER)", () => {
 
   it("story rows carry the backlog status (done/wip/hold/todo) + a lifecycle spine", () => {
     const html = renderFeaturesIndex(collectDossier(backlogProject()));
-    expect(html).toContain('data-status="done"><span class="stype US">US</span><span class="sid">US-MIX-1</span>');
+    expect(html).toContain('data-status="unknown"><span class="stype US">US</span><span class="sid">US-MIX-1</span>');
     expect(html).toContain('data-status="wip"><span class="stype FIX">FIX</span><span class="sid">FIX-MIX-2</span>');
     expect(html).toContain('data-status="hold"><span class="stype US">US</span><span class="sid">US-MIX-4</span>');
     expect(html).toContain('data-status="todo"><span class="stype US">US</span><span class="sid">US-MIX-3</span>');

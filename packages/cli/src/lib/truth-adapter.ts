@@ -13,8 +13,11 @@
 import {
   deriveCycleTruth,
   deriveEvidenceTruth,
+  deriveStoryTruth,
   type CycleTruth,
   type EvidenceTruth,
+  type AuditPrEvidence,
+  type StoryTruth,
   type TruthState,
 } from "@roll/core";
 import { TERMINAL_SCHEMA_EPOCH_SEC, type TerminalOutcome } from "@roll/spec";
@@ -70,6 +73,24 @@ export function cycleTruthFromRow(
 export function rowDelivered(row: TruthRunRow, nowSec: number = Math.floor(Date.now() / 1000)): boolean {
   const t = cycleTruthFromRow(row, { nowSec });
   return t.outcome === "delivered" || t.outcome === "published_pending_merge";
+}
+
+/** Story truth for presentation consumers. The caller owns evidence gathering;
+ *  absence stays unknown/grandfathered per the selector, never guessed here. */
+export function storyTruthFromBacklog(
+  storyId: string,
+  backlogStatus: string,
+  opts: { prEvidence?: AuditPrEvidence; nowSec?: number } = {},
+): StoryTruth {
+  return deriveStoryTruth({
+    storyId,
+    backlogStatus,
+    ...(opts.prEvidence !== undefined ? { prEvidence: opts.prEvidence } : {}),
+    deliveringCycles: [],
+    nowSec: opts.nowSec ?? Math.floor(Date.now() / 1000),
+    graceSec: GRACE_SEC,
+    schemaEpochSec: TRUTH_SCHEMA_EPOCH_SEC,
+  });
 }
 
 /** Evidence truth for a story straight from artifact probes (delegates). */

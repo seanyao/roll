@@ -36,30 +36,33 @@ export function spineMotif(): string {
 }
 
 type StoryView = DossierEpic["stories"][number];
-type State = "done" | "wip" | "hold" | "todo";
+type State = "done" | "wip" | "hold" | "todo" | "fail" | "unknown";
 const STAGE_KEYS = SPINE_STAGES.map((s) => s.key);
 
-/** Backlog-aligned delivery state for one story (done/wip/hold/todo). */
+/** Claim/truth-aligned delivery state for one story. */
 function storyState(s: StoryView): State {
+  if (s.truthState === "fail") return "fail";
+  if (s.truthState === "unknown") return "unknown";
   if (s.status === "in_progress") return "wip";
   if (s.status === "hold") return "hold";
   if (s.delivered) return "done"; // backlog ✅ Done, or heuristic-delivered
+  if (s.status === "done") return "unknown";
   return "todo";
 }
 
 /** Count stories by state across a list of epics. */
 function tallyStates(epics: DossierEpic[]): Record<State, number> {
-  const t: Record<State, number> = { done: 0, wip: 0, hold: 0, todo: 0 };
+  const t: Record<State, number> = { done: 0, wip: 0, hold: 0, todo: 0, fail: 0, unknown: 0 };
   for (const e of epics) for (const s of e.stories) t[storyState(s)] += 1;
   return t;
 }
 
 /** A segmented proportional bar (the "delivery spectrum") over a state tally. */
 function spectrum(t: Record<State, number>, cls: string): string {
-  const total = t.done + t.wip + t.todo + t.hold || 1;
+  const total = t.done + t.wip + t.todo + t.hold + t.fail + t.unknown || 1;
   const seg = (n: number, k: string): string =>
     n > 0 ? `<span class="s-${k}" style="width:${(n / total) * 100}%"></span>` : "";
-  return `<div class="${cls}">${seg(t.done, "done")}${seg(t.wip, "wip")}${seg(t.todo, "todo")}${seg(t.hold, "hold")}</div>`;
+  return `<div class="${cls}">${seg(t.done, "done")}${seg(t.fail, "fail")}${seg(t.unknown, "unknown")}${seg(t.wip, "wip")}${seg(t.todo, "todo")}${seg(t.hold, "hold")}</div>`;
 }
 
 /** The five-station lifecycle spine for one story, from its real `stages`. */
@@ -100,6 +103,9 @@ function storyRow(epic: string, s: StoryView): string {
   const state = storyState(s);
   const type = (s.type || "").toUpperCase();
   const href = `${encodeURIComponent(epic)}/${encodeURIComponent(s.id)}/index.html`;
+  const claim = s.status !== undefined ? `<span class="sclaim cl-${state}">claim ${s.status === "in_progress" ? "wip" : s.status}</span>` : "";
+  const truthText = state === "unknown" ? "truth ?" : state === "fail" ? "truth fail" : s.delivered ? "truth done" : "";
+  const truth = truthText !== "" ? `<span class="struth tr-${state}" title="${esc(s.truthReason ?? "")}">${truthText}</span>` : "";
   // US-DOSSIER-008: legacy (pre-v3) deliveries are done, but flagged apart.
   const chip = s.legacy
     ? `<span class="slegacy" title="历史交付：pre-v3 已完成，无 v3 证据链">${bi("legacy", "历史")}</span>`
@@ -110,7 +116,7 @@ function storyRow(epic: string, s: StoryView): string {
     `<span class="sid">${esc(s.id)}</span>` +
     `<span class="stitle">${esc(s.title ?? s.id)}</span>` +
     storySpine(s) +
-    `<span class="sstat st-${state}"><span class="sdot"></span>${state}${chip}</span>` +
+    `<span class="sstat st-${state}"><span class="sdot"></span>${state}${chip}${claim}${truth}</span>` +
     `</a>`
   );
 }
@@ -159,6 +165,8 @@ function overview(epics: DossierEpic[]): string {
   return (
     `<div class="statusboard">` +
     card("done", "✅", "Done", "已交付", legCount > 0 ? `<div class="tsub">${bi(`incl. ${legCount} legacy`, `含 ${legCount} 历史`)}</div>` : "") +
+    card("fail", "!", "Drift", "漂移") +
+    card("unknown", "?", "Unknown", "未知") +
     card("wip", "🔨", "In progress", "进行中") +
     card("todo", "📋", "Todo", "待办") +
     card("hold", "🔒", "Hold", "挂起") +
@@ -167,7 +175,7 @@ function overview(epics: DossierEpic[]): string {
     spectrum(t, "spectrum") +
     `<div class="pctline">${bi(`${total} stories · ${epics.length} epics`, `在册 ${total} 故事 · ${epics.length} 史诗`)}` +
     `<span><b>${pct}%</b> ${bi("merged to main", "已合主干")}</span></div>` +
-    `<div class="spectrum-legend">${leg("done", "merged", "已合")}${leg("wip", "in progress", "进行中")}${leg("todo", "todo", "待办")}${leg("hold", "hold", "挂起")}</div>` +
+    `<div class="spectrum-legend">${leg("done", "merged", "已合")}${leg("fail", "drift", "漂移")}${leg("unknown", "unknown", "未知")}${leg("wip", "in progress", "进行中")}${leg("todo", "todo", "待办")}${leg("hold", "hold", "挂起")}</div>` +
     `</div>`
   );
 }
@@ -206,6 +214,8 @@ export function renderFeaturesIndex(epics: DossierEpic[], opts: { morningReportH
     `<input type="search" data-dossier-search placeholder="Search epics &amp; stories · 搜索史诗与故事" aria-label="search">` +
     `<div class="statusfilter" role="group">` +
     `<button class="sf done" data-sf="done" aria-pressed="false">✅ ${bi("Done", "交付")}</button>` +
+    `<button class="sf fail" data-sf="fail" aria-pressed="false">! ${bi("Drift", "漂移")}</button>` +
+    `<button class="sf unknown" data-sf="unknown" aria-pressed="false">? ${bi("Unknown", "未知")}</button>` +
     `<button class="sf wip" data-sf="wip" aria-pressed="false">🔨 ${bi("WIP", "进行")}</button>` +
     `<button class="sf todo" data-sf="todo" aria-pressed="false">📋 ${bi("Todo", "待办")}</button>` +
     `<button class="sf hold" data-sf="hold" aria-pressed="false">🔒 ${bi("Hold", "挂起")}</button>` +

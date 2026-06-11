@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { afterAll, describe, expect, it } from "vitest";
 import { initCommand } from "../src/commands/init.js";
 
@@ -43,6 +44,13 @@ function freshHome(): string {
     recursive: true,
   });
   writeFileSync(join(home, "config.yaml"), "# Roll config\nlang: en\n");
+  // plan-validate.py needs PyYAML; install it into this isolated HOME so the
+  // init --apply tests pass even when the real user's site-packages are lost
+  // after the HOME override.
+  spawnSync("pip3", ["install", "--user", "--quiet", "pyyaml"], {
+    encoding: "utf8",
+    env: { HOME: home, PATH: process.env["PATH"] ?? "" },
+  });
   return home;
 }
 

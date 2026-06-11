@@ -135,10 +135,10 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
         { name: "roll status",     mono: true, desc: "Project health: backlog queue, loop state, CI, release-ready verdict.", badges: ["core"] },
-        { name: "roll index",      mono: true, desc: "Delivery Dossier with truth strip plus Story / Cycle / Release tiles; unknown facts render as '?'.", badges: ["new"] },
+        { name: "Delivery Dossier", desc: "Truth strip plus Story / Cycle / Release tiles; unknown facts render as '?'.", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
-        { name: "roll alert",      mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
+        { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
         { name: "roll brief",      mono: true, desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
       ]},
       { id: "skills", title: "On-Demand Skills", blurb: "Specialized agents you can summon.", features: [
@@ -316,10 +316,10 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
         { name: "roll status",     mono: true, desc: "项目健康:backlog 队列、loop 状态、CI、发布就绪判断。", badges: ["core"] },
-        { name: "roll index",      mono: true, desc: "交付档案含真相条和 Story / Cycle / Release 卡片;未知事实显示为 '?'。", badges: ["new"] },
+        { name: "交付档案",          desc: "含真相条和 Story / Cycle / Release 卡片;未知事实显示为 '?'。", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
-        { name: "roll alert",      mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
+        { name: "roll loop alert", mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
         { name: "roll brief",      mono: true, desc: "每日摘要:已发布、进行中、下一优先级。", badges: ["highlight"] },
       ]},
       { id: "skills", title: "按需技能", blurb: "可召唤的专项 agent。", features: [

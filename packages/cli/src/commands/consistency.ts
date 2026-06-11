@@ -10,6 +10,7 @@
  * `return 0 if overall == "pass" else 1`.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import type { Dirent } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { consistencyAuditCommand } from "./consistency-audit.js";
@@ -24,6 +25,10 @@ interface DimResult {
 interface Report {
   overall: "pass" | "fail";
   dimensions: Record<string, DimResult>;
+}
+interface TextFile {
+  rel: string;
+  abs: string;
 }
 
 function err(line: string): void {
@@ -47,6 +52,113 @@ function escapeRegExp(s: string): string {
 
 function readText(p: string): string {
   return readFileSync(p, "utf8");
+}
+
+const COMMAND_SURFACE_REPLACEMENTS = new Map<string, string>([
+  ["migrate", "npx @seanyao/roll@2 migrate"],
+  ["feedback", "roll idea"],
+  ["alert", "roll loop alert"],
+  ["attest", "acceptance evidence report"],
+  ["changelog", "roll release changelog"],
+  ["consistency", "roll release consistency"],
+  ["dream", "the configured Dream schedule"],
+  ["index", "Delivery Dossier"],
+  ["skills", "roll doctor skills / roll setup skills"],
+]);
+const DOC_RETIRED_TOP_LEVEL_COMMANDS = new Set(["migrate", "feedback", "alert", "changelog", "skills", "consistency"]);
+const SITE_HIDDEN_TOP_LEVEL_COMMANDS = new Set(COMMAND_SURFACE_REPLACEMENTS.keys());
+
+function lineNumberAt(text: string, index: number): number {
+  return text.slice(0, index).split("\n").length;
+}
+
+function existingTextFiles(projectDir: string, rels: string[]): TextFile[] {
+  return rels
+    .map((rel) => ({ rel, abs: join(projectDir, rel) }))
+    .filter((f) => {
+      try {
+        return statSync(f.abs).isFile();
+      } catch {
+        return false;
+      }
+    });
+}
+
+function walkTextFiles(projectDir: string, relDir: string, extensions: Set<string>): TextFile[] {
+  const out: TextFile[] = [];
+  const walk = (dirRel: string): void => {
+    const dirAbs = join(projectDir, dirRel);
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dirAbs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const rel = join(dirRel, entry.name);
+      if (entry.isDirectory()) {
+        walk(rel);
+        continue;
+      }
+      const dot = entry.name.lastIndexOf(".");
+      const ext = dot === -1 ? "" : entry.name.slice(dot);
+      if (entry.isFile() && extensions.has(ext)) out.push({ rel, abs: join(projectDir, rel) });
+    }
+  };
+  walk(relDir);
+  return out;
+}
+
+function activeDocsFiles(projectDir: string): TextFile[] {
+  return [
+    ...existingTextFiles(projectDir, ["README.md", "README_CN.md"]),
+    ...walkTextFiles(projectDir, "docs", new Set([".md"])),
+    ...walkTextFiles(projectDir, "guide", new Set([".md"])),
+  ];
+}
+
+function activeSiteFiles(projectDir: string): TextFile[] {
+  return existingTextFiles(projectDir, [
+    "site/index.html",
+    "site/roll-app.jsx",
+    "site/roll-atoms.jsx",
+    "site/roll-data.js",
+    "site/roll-sections.jsx",
+    "site/roll-site.css",
+    "site/tweaks-panel.jsx",
+    "site/diagrams/roll-build-skill.html",
+  ]);
+}
+
+function commandSurfacePattern(commands: Set<string>): RegExp {
+  return new RegExp(
+    `(^|[^A-Za-z0-9_$@/.-])roll\\s+(${[...commands].map(escapeRegExp).join("|")})(?=\\b|[\\s\`|<\\[])`,
+    "g",
+  );
+}
+
+function checkTopLevelCommands(files: TextFile[], commands: Set<string>): string[] {
+  const gaps: string[] = [];
+  for (const file of files) {
+    let text = "";
+    try {
+      text = readText(file.abs);
+    } catch {
+      continue;
+    }
+    const re = commandSurfacePattern(commands);
+    for (const match of text.matchAll(re)) {
+      const prefix = match[1] ?? "";
+      const command = match[2] ?? "";
+      const start = (match.index ?? 0) + prefix.length;
+      const replacement = COMMAND_SURFACE_REPLACEMENTS.get(command) ?? "the nested owner command";
+      gaps.push(
+        `${file.rel}:${lineNumberAt(text, start)} references hidden/retired top-level ` +
+          `'roll ${command}' (use '${replacement}')`,
+      );
+    }
+  }
+  return gaps;
 }
 
 /** Port of _read_done_features: {feature: [story_id,...]} with ≥1 Done story. */
@@ -170,6 +282,17 @@ function checkCards(projectDir: string): DimResult {
   return result;
 }
 
+// ─── docs dimension: active command surface drift ───────────────────────────
+function checkDocs(projectDir: string): DimResult {
+  const gaps = checkTopLevelCommands(activeDocsFiles(projectDir), DOC_RETIRED_TOP_LEVEL_COMMANDS);
+  if (gaps.length > 0) return { status: "fail", gaps };
+  return {
+    status: "pass",
+    gaps: [],
+    note: "retired top-level command scan active; broader docs coverage remains US-CONSIST-002",
+  };
+}
+
 // ─── site dimension: check_site ──────────────────────────────────────────────
 const SITE_INTERNAL_FEATURES = new Set([
   "cycle-meta-sync", "loop-log-locality", "invoke-stream-visibility",
@@ -201,10 +324,10 @@ function siteTokens(name: string): Set<string> {
 }
 
 function checkSite(projectDir: string): DimResult {
-  const gaps: string[] = [];
+  const gaps = checkTopLevelCommands(activeSiteFiles(projectDir), SITE_HIDDEN_TOP_LEVEL_COMMANDS);
   const siteJs = join(projectDir, "site", "roll-data.js");
   const backlog = join(projectDir, ".roll", "backlog.md");
-  if (!existsSync(siteJs) || !existsSync(backlog)) return { status: "pass", gaps: [] };
+  if (!existsSync(siteJs) || !existsSync(backlog)) return { status: gaps.length === 0 ? "pass" : "fail", gaps };
 
   const siteText = readText(siteJs);
   const siteFeatures = new Set<string>();
@@ -429,8 +552,7 @@ function runAll(projectDir: string): Report {
     else if (dim === "cards") result = checkCards(projectDir);
     else if (dim === "i18n") result = checkI18n(projectDir);
     else if (dim === "tests") result = checkTests(projectDir);
-    else if (dim === "docs")
-      result = { status: "pass", gaps: [], note: "placeholder — will be implemented in US-CONSIST-002" };
+    else if (dim === "docs") result = checkDocs(projectDir);
     else if (dim === "site") result = checkSite(projectDir);
     else result = { status: "pass", gaps: [], note: `unknown dimension: ${dim}` };
     report.dimensions[dim] = result;

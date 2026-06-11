@@ -927,150 +927,6 @@
   "en": "PR #%s rebased %s× within 24h without CI resolution — possible workflow file error",
   "zh": "PR #%s rebase %s 次未解决（24h 内），可能是 workflow 文件错误"
  },
- "migrate.unknown_arg_1": {
-  "en": "Unknown arg: %s",
-  "zh": "未知参数: %s"
- },
- "migrate.not_a_git_repository_roll_migrate": {
-  "en": "Not a git repository. roll migrate requires git.",
-  "zh": "当前目录不是 git 仓库。"
- },
- "migrate.both_old_and_new_structures_exist": {
-  "en": "Both old and new structures exist (partial migration detected).",
-  "zh": "老结构与新结构同时存在（部分迁移）。"
- },
- "migrate.conflicting_paths": {
-  "en": "Conflicting paths:",
-  "zh": "冲突路径："
- },
- "migrate.resolve_manually_then_re_run": {
-  "en": "Resolve manually then re-run.",
-  "zh": "请手动解决冲突后重新运行。"
- },
- "migrate.already_migrated_roll_exists_no_old": {
-  "en": "Already migrated. .roll/ exists, no old paths found.",
-  "zh": "已迁移，无需重复操作。"
- },
- "migrate.no_old_structure_detected_nothing_to": {
-  "en": "No old structure detected. Nothing to migrate.",
-  "zh": "未发现老结构，无需迁移。"
- },
- "migrate.old_structure_markers_found_but_no": {
-  "en": "Old structure markers found but no migratable files.",
-  "zh": "未找到可迁移文件。"
- },
- "migrate.working_tree_not_clean_commit_or": {
-  "en": "Working tree not clean. Commit or stash changes before running migrate.",
-  "zh": "工作区有未提交改动，请先 commit 或 stash。"
- },
- "migrate.migration_preview_dry_run": {
-  "en": "Migration preview (dry-run):",
-  "zh": "迁移预览（dry-run）"
- },
- "migrate.run_without_dry_run_to_execute": {
-  "en": "Run without --dry-run to execute.",
-  "zh": "去掉 --dry-run 即可真实执行。"
- },
- "migrate.migrating_paths_via_git_mv": {
-  "en": "Migrating %s paths via git mv...",
-  "zh": "正在通过 git mv 迁移 %s 个路径..."
- },
- "migrate.aborting_previous_moves_are_staged_but": {
-  "en": "Aborting; previous moves are staged but not committed. Run 'git reset --hard' to undo.",
-  "zh": "已 stage 但未 commit，运行 'git reset --hard' 回滚。"
- },
- "migrate.migrated_paths_in_a_single_commit": {
-  "en": "Migrated %s paths in a single commit.",
-  "zh": "已在单 commit 中迁移 %s 个路径。"
- },
- "migrate.next_steps": {
-  "en": "  Next steps",
-  "zh": "下一步："
- },
- "migrate.summary": {
-  "en": "  ┌─",
-  "zh": "操作摘要 Summary ──────────────────────────────────┐"
- },
- "migrate.roll_convention_status_roll": {
-  "en": "%sRoll Convention Status  Roll",
-  "zh": "约定状态%s"
- },
- "migrate.roll_exists_roll": {
-  "en": "~/.roll/ exists  ~/.roll/",
-  "zh": "已存在"
- },
- "migrate.roll_not_found_run_roll_setup": {
-  "en": "~/.roll/ not found — run 'roll setup'  ~/.roll/",
-  "zh": "不存在 — 请运行 'roll setup'"
- },
- "migrate.global_conventions": {
-  "en": "%sGlobal conventions:",
-  "zh": "全局约定%s"
- },
- "migrate.missing": {
-  "en": "  %s-%s %s (missing /",
-  "zh": "缺失)"
- },
- "migrate.global_skills": {
-  "en": "%sGlobal skills:",
-  "zh": "全局技能%s"
- },
- "migrate.roll_skills_skills_installed": {
-  "en": "  %s+%s ~/.roll/skills (%s skills installed /",
-  "zh": "已安装 %s 个技能)"
- },
- "migrate.roll_skills_missing": {
-  "en": "  %s-%s ~/.roll/skills (missing /",
-  "zh": "缺失)"
- },
- "migrate.sync_targets": {
-  "en": "%sSync targets:",
-  "zh": "同步目标%s"
- },
- "migrate.no_ai_tools_configured_check_roll": {
-  "en": "No AI tools configured — check ~/.roll/config.yaml",
-  "zh": "未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
- },
- "migrate.add_ai_entries_or_run_roll": {
-  "en": "Add ai_* entries or run 'roll setup' to restore defaults.",
-  "zh": "添加 ai_* 条目或运行 'roll setup' 恢复默认配置。"
- },
- "migrate.skill_symlinks": {
-  "en": "%sSkill symlinks:",
-  "zh": "技能软链接%s"
- },
- "migrate.roll_skills_mounted": {
-  "en": "  %s=%s %s: %s -> ~/.roll/skills (mounted /",
-  "zh": "已挂载)"
- },
- "migrate.no_roll_skills_linked": {
-  "en": "  %s-%s %s: %s (no roll-* skills linked /",
-  "zh": "未链接 roll-* 技能)"
- },
- "migrate.not_found": {
-  "en": "  %s-%s %s: %s (not found /",
-  "zh": "未找到)"
- },
- "migrate.no_ai_tools_configured_check_roll_2": {
-  "en": "No AI tools configured — check ~/.roll/config.yaml",
-  "zh": "未配置 AI 工具 — 请检查 ~/.roll/config.yaml"
- },
- "migrate.templates": {
-  "en": "%sTemplates:",
-  "zh": "模板%s"
- },
- "migrate.missing_2": {
-  "en": "  %s-%s %s (missing /",
-  "zh": "缺失)"
- },
- "migrate.old_path": {
-  "en": "Old path",
-  "zh": "老路径"
- },
- "migrate.new_path": {
-  "en": "New path",
-  "zh": "新路径"
- },
  "offboard.no_changeset_en": {
   "en": "No onboard changeset found at .roll/onboard-changeset.yaml",
   "zh": "No onboard changeset found at .roll/onboard-changeset.yaml"
@@ -1267,54 +1123,6 @@
   "en": "No peer review history yet.",
   "zh": "暂无 peer review 记录。"
  },
- "prices.unknown_subcommand": {
-  "en": "Unknown subcommand: %s",
-  "zh": "未知子命令：%s"
- },
- "prices_refresh.unknown_flag_1": {
-  "en": "Unknown flag: %s",
-  "zh": "未知参数: %s"
- },
- "prices_refresh.roll_unknown_vendor_vendor": {
-  "en": "[roll] unknown vendor: {vendor}",
-  "zh": "未知厂商"
- },
- "prices_refresh.roll_known_vendors_join_sorted_vendor": {
-  "en": "[roll] known vendors: {', '.join(sorted(VENDOR_URLS))}",
-  "zh": "已知厂商"
- },
- "prices_refresh.roll_keeping_existing_snapshot_no_changes": {
-  "en": "[roll] keeping existing snapshot, no changes written",
-  "zh": "保留旧快照，未写入新文件"
- },
- "prices_refresh.roll_keeping_existing_snapshot_no_changes_2": {
-  "en": "[roll] keeping existing snapshot, no changes written",
-  "zh": "保留旧快照，未写入新文件"
- },
- "prices_refresh.roll_up_to_date": {
-  "en": "[roll] up to date",
-  "zh": "价格快照已是最新"
- },
- "prices_refresh.roll_baseline_snapshot_written": {
-  "en": "[roll] baseline snapshot written",
-  "zh": "写入首份基线快照"
- },
- "prices_refresh.roll_new_snapshot_written": {
-  "en": "[roll] new snapshot written",
-  "zh": "写入新版价格快照"
- },
- "prices_show.price_snapshot": {
-  "en": "price snapshot",
-  "zh": "价格快照"
- },
- "prices_show.snapshots_len_mp_snapshots_loaded": {
-  "en": "  snapshots      {len(mp._SNAPSHOTS)} loaded",
-  "zh": "已加载"
- },
- "prices_show.rates_per_million_tokens": {
-  "en": "rates per million tokens",
-  "zh": "每百万 token 单价"
- },
  "setup.unknown_argument_1": {
   "en": "Unknown argument: %s",
   "zh": "未知参数: %s"
@@ -1326,14 +1134,6 @@
  "changelog.heading": {
   "en": "Recent Changes",
   "zh": "最近更新"
- },
- "migrate.tips.inspect": {
-  "en": "Inspect the migration commit",
-  "zh": "查看迁移提交"
- },
- "migrate.tips.verify": {
-  "en": "Verify new structure",
-  "zh": "验证新结构"
  },
  "peer.help.from": {
   "en": "Originating agent",
@@ -2080,8 +1880,8 @@
   "zh": "正在扫描项目..."
  },
  "onboard.stop_migrate_first": {
-  "en": "This project has legacy Roll structure (BACKLOG.md or docs/features/). Run 'roll migrate' first before onboarding.",
-  "zh": "此项目还保留着旧版 Roll 结构（BACKLOG.md 或 docs/features/）。请先运行 'roll migrate' 再 onboard。"
+  "en": "This project has legacy Roll structure (BACKLOG.md or docs/features/). Run 'npx @seanyao/roll@2 migrate' first before onboarding.",
+  "zh": "此项目还保留着旧版 Roll 结构（BACKLOG.md 或 docs/features/）。请先运行 'npx @seanyao/roll@2 migrate' 再 onboard。"
  },
  "onboard.questions_group1": {
   "en": "Group 1/3: Understanding your project",

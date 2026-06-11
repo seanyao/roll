@@ -221,7 +221,7 @@ Clarify → Discuss → [peer: 方向评审] → Analyze+DDD → Design → [pee
 - **Graft（已有遗留代码且无 `.roll/`）**：引导执行 `$roll-onboard`，扫描代码、问澄清问题、产出 `.roll/onboard-plan.yaml` 供审阅 —— 见 [legacy-onboarding.md](legacy-onboarding.md)。
 - **Re-init（`.roll/` 已存在）**：按节重新合并全局约定到 `AGENTS.md`，保留所有项目特定内容。
 
-2.0 之前的项目（`BACKLOG.md` 在根目录、`docs/features/`）需要先跑 `roll migrate` —— 见 [migration-2.0.md](migration-2.0.md)。
+2.0 之前的项目（`BACKLOG.md` 在根目录、`docs/features/`）需要先跑 `npx @seanyao/roll@2 migrate` —— 见 [migration-2.0.md](migration-2.0.md)。
 
 **`roll init`（seed 模式）创建的内容：**
 

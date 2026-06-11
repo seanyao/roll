@@ -31,15 +31,19 @@ describe("ported routing (no bash fallback)", () => {
     expect(portedCommands()).toContain("__test_cmd");
   });
 
-  it("REFACTOR-048: one-shot migration commands are retired; the user upgrade path stays", () => {
+  it("REFACTOR-048/051: one-shot and legacy manual commands are retired", async () => {
     registerAll();
     // internal one-time migrations (card-skeleton backfill, old attest-layout
     // port) completed long ago — off the command surface.
     expect(isPorted("migrate-features")).toBe(false);
     expect(isPorted("archive")).toBe(false);
-    // `roll migrate` STAYS: it is the live pre-2.0 → 2.0 user-project upgrade
-    // path that `roll init` directs users to (recorded deviation on the card).
-    expect(isPorted("migrate")).toBe(true);
+
+    for (const command of ["migrate", "feedback", "prices"]) {
+      expect(isPorted(command)).toBe(false);
+      expect(usage()).not.toMatch(new RegExp(`\\b${command}\\b`));
+      const res = await dispatch([command]);
+      expect(res.status).toBe(1);
+    }
   });
 
   it("REFACTOR-049: version/gc stay callable but are hidden from the main usage; lang is gone", () => {

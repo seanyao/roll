@@ -223,7 +223,7 @@ Creates the minimal workflow scaffold needed to start a Roll-managed project. Th
 - **Graft** (existing legacy code, no `.roll/`): surfaces `$roll-onboard`, which scans the code, asks a short clarification set, and writes `.roll/onboard-plan.yaml` for review — see [legacy-onboarding.md](legacy-onboarding.md).
 - **Re-init** (`.roll/` already present): re-merges global conventions into `AGENTS.md`, preserves project-specific sections.
 
-Pre-2.0 projects (`BACKLOG.md` at root, `docs/features/`) should run `roll migrate` first — see [migration-2.0.md](migration-2.0.md).
+Pre-2.0 projects (`BACKLOG.md` at root, `docs/features/`) should run `npx @seanyao/roll@2 migrate` first — see [migration-2.0.md](migration-2.0.md).
 
 **What `roll init` creates:**
 

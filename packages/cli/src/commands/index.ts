@@ -33,7 +33,6 @@ import { loopEventsCommand } from "./loop-events.js";
 import { loopAttachRetired, loopBranchesRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
 import { dreamCommand } from "./dream.js";
-import { feedbackCommand } from "./feedback.js";
 import { gcCommand } from "./gc.js";
 import { ideaCommand } from "./idea.js";
 import { indexCommand } from "./index-gen.js";
@@ -59,9 +58,7 @@ import {
   loopPauseCommand,
   loopResumeCommand,
 } from "./loop-sched.js";
-import { migrateCommand } from "./migrate.js";
 import { offboardCommand } from "./offboard.js";
-import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
 import { releaseShipCommand } from "./release-ship.js";
 import { releaseWaiverCommand } from "./release-waiver.js";
@@ -154,10 +151,9 @@ export function registerAll(): void {
     if (args[0] === "waiver") return releaseWaiverCommand(args.slice(1));
     return releaseCommand(args);
   });
-  // `prices`: full surface TS (show/help/unknown + refresh network write).
-  // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
-  // fallback remains (US-PORT-017).
-  registerPorted("prices", pricesCommand);
+  // REFACTOR-051: `roll prices` retired. Cost accounting still reads the
+  // versioned `lib/prices/` snapshots through core; snapshot refresh is an
+  // internal maintenance action, not a public top-level command.
   // `config`: FULLY TS now (US-PORT-006 — 整个 config 命令收口). Read surface
   // (help/--list/key read) + write surface + the three compact facades
   // (loop-window/loop-schedule/dream-time) all run native; no bash fallback.
@@ -175,9 +171,8 @@ export function registerAll(): void {
   // `consistency`: check/--json/--project-dir + help + unknown all TS (full
   // surface ported; the python orchestrator is reimplemented byte-for-byte).
   registerPorted("consistency", consistencyCommand);
-  // `feedback`: full surface TS (arg parse, repo resolution, env block,
-  // print-url + gh issue create). No sub-paths left on bash.
-  registerPorted("feedback", feedbackCommand);
+  // REFACTOR-051: `roll feedback` retired. Use `roll idea` for backlog capture
+  // or `gh issue create` for GitHub issues.
   // `init`: full surface TS (fresh/re-init scaffold, legacy-codebase onboard
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
@@ -185,10 +180,8 @@ export function registerAll(): void {
   // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
   // stories, US-META-007) retired — that one-time backfill completed; new cards
   // are minted via `roll story new`.
-  // `migrate` STAYS: the pre-2.0 → 2.0 user-project upgrade path that
-  // `roll init` directs users to (three-state idempotency, dry-run preview,
-  // git-mv execute with the single atomic commit).
-  registerPorted("migrate", migrateCommand);
+  // REFACTOR-051: `roll migrate` retired from v3. Pre-2.0 projects should pin
+  // the old toolchain (`npx @seanyao/roll@2 migrate`) for the one-time upgrade.
   // `offboard`: full surface TS (changeset parse, cross-project guard, plan
   // print, FIX-125 in-cycle plist tripwire, --confirm apply). No bash fallback.
   registerPorted("offboard", offboardCommand);

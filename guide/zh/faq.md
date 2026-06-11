@@ -264,7 +264,7 @@ CI，Roll 优雅降级：TCR 仍是内层闸门（测试不过提交不留），
 
 **细节：** loop cycle 结束时，Roll 会把 `cost_list_usd`（按当时价格算出的成本）和
 `prices_version`（用了哪个快照版本）写入 usage 事件。dashboard 优先读固化值。厂商
-调价、`roll prices refresh`、Roll 升级都不会回头改写历史数字。
+调价、新快照、Roll 升级都不会回头改写历史数字。
 
 此功能上线之前的旧 cycle（没有 `cost_list_usd` 字段）会回退到用*当前*快照现算，
 行末显示浅灰色 `[legacy]` 标记 — 提醒你这个数字在调价时可能会漂移。
@@ -272,8 +272,6 @@ CI，Roll 优雅降级：TCR 仍是内层闸门（测试不过提交不留），
 **试试看：**
 
 ```bash
-roll prices show            # 查看当前价格快照
-roll prices refresh         # 拉取最新定价、对比、有变化落新快照
 roll loop status --days 7   # 历史 cycle 用的是固化成本
 ```
 
@@ -737,20 +735,20 @@ Why was my story flipped to 🚫 Hold instead of Done?
 
 ### C7. 怎么不离开终端发反馈（bug / idea / UX）？
 
-**用 `roll feedback`**（US-FB-001 / 005）。一条命令打开 GitHub
-issue,自动附环境信息 + label 对应 Roll backlog 约定。
+反馈走最小入口:本地 Roll backlog 用 `roll idea`,公开 GitHub issue 用
+`gh issue create`。
 
-How do I send feedback without leaving the terminal? Use `roll feedback`.
+How do I send feedback without leaving the terminal? Use `roll idea` for local
+backlog notes, or `gh issue create` for GitHub issues.
 
 ```bash
-roll feedback --type bug --title "Safari 上登录失败" --body "复现步骤: ..."
+roll idea "Safari redirect 后登录失败"
+gh issue create --title "Safari 上登录失败" --body "复现步骤: ..."
 ```
 
-装了 `gh` 直接调 `gh issue create` 提交;没装就打印一条预填 URL,
-浏览器打开就行。Environment 段（roll 版本 / OS / agent / 语言 /
-项目）默认自动附,`--no-env` 关。目标仓库通过 `--repo`、
-`ROLL_FEEDBACK_REPO`、`.roll/local.yaml`、`~/.roll/config.yaml` 任
-一层固定,详细规则见 [feedback.md](feedback.md)。
+`roll idea` 写入 Roll backlog;`gh issue create` 写入 GitHub。需要环境信息时
+可在 issue body 里附上 roll 版本 / OS / agent / 语言 / 项目等内容。详细分流见
+[feedback.md](feedback.md)。
 
 ### C8. 升级后我的 loop 状态 / ALERT 跑哪去了？（Phase 2.0）
 

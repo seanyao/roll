@@ -62,16 +62,13 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | **Project · per repo** | |
 | `roll init` | Set up Roll in this project (agent-driven onboarding for legacy code) |
 | `roll offboard` | Remove Roll from this project |
-| `roll migrate` | Upgrade a pre-2.0 project layout |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |
 | `roll release [ship\|waiver]` | Release guidance · gated tag push (`ship`) · recorded drift waiver (`waiver`) — npm publish stays human |
-| `roll feedback --type bug\|idea\|ux` | Open a GitHub issue for this project |
 | `roll pair [init\|status]` | Cross-agent pairing: heterogeneous peer re-checks during builds |
 | **Config & machine** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
-| `roll prices [refresh]` | Model price table (cost accounting source) |
 | `roll skills` | Skill catalog status |
 | `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |

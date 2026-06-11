@@ -76,13 +76,13 @@ export function loadTable(dir?: string): PriceTable {
   if (dir === undefined && cached !== null) return cached;
   const snapDir = dir ?? join(repoRoot(), "lib", "prices");
   if (!existsSync(snapDir)) {
-    throw new Error(`no price snapshots found in ${snapDir}; run \`roll prices refresh\``);
+    throw new Error(`no price snapshots found in ${snapDir}; install or restore lib/prices snapshots`);
   }
   const files = readdirSync(snapDir)
     .filter((n) => n.startsWith("snapshot-") && n.endsWith(".json"))
     .sort();
   if (files.length === 0) {
-    throw new Error(`no price snapshots found in ${snapDir}; run \`roll prices refresh\``);
+    throw new Error(`no price snapshots found in ${snapDir}; install or restore lib/prices snapshots`);
   }
   const snaps: Snapshot[] = files.map((name) => {
     const data = JSON.parse(readFileSync(join(snapDir, name), "utf8")) as Partial<Snapshot>;

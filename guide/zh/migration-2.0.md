@@ -1,6 +1,6 @@
 # 迁移到 Roll 2.0
 
-> **TL;DR:** 跑 `roll migrate --dry-run` 预览，确认后 `roll migrate`。单个原子 commit。完事。
+> **TL;DR:** 跑 `npx @seanyao/roll@2 migrate --dry-run` 预览，确认后 `npx @seanyao/roll@2 migrate`。单个原子 commit。完事。
 
 Roll 2.0 把所有"过程"产物（BACKLOG、PROPOSALS、feature 规格、briefs、dream 日志、设计文档）从项目根级和 `docs/` 搬进统一的 `.roll/` 目录。用户可见文档（`docs/guide/`、`docs/site/`）上移到项目根级。
 
@@ -9,7 +9,7 @@ Roll 2.0 把所有"过程"产物（BACKLOG、PROPOSALS、feature 规格、briefs
 ## 开工前
 
 - **想留后路就 pin 老版本**：`npm install -g @seanyao/roll@1`。npm 历史版本永远在，随时可以回滚。
-- **工作区必须干净**：`roll migrate` 不接受未提交改动，先 commit 或 stash。
+- **工作区必须干净**：`npx @seanyao/roll@2 migrate` 不接受未提交改动，先 commit 或 stash。
 - **建议把整页读完再开始。**
 
 ## 迁移内容
@@ -31,7 +31,7 @@ Roll 2.0 把所有"过程"产物（BACKLOG、PROPOSALS、feature 规格、briefs
 | `docs/guide/zh/` | `guide/zh/` | 用户文档（中文） |
 | `docs/site/` | `site/` | 网站源码 |
 
-迁移完成后 `docs/` 目录消失。如果你的 `docs/` 里有自己的文件不在上述列表中，`roll migrate` 不会动它们。
+迁移完成后 `docs/` 目录消失。如果你的 `docs/` 里有自己的文件不在上述列表中，`npx @seanyao/roll@2 migrate` 不会动它们。
 
 ## 为什么是两个目的地
 
@@ -44,7 +44,7 @@ Roll 2.0 强制做了架构分离：
 
 ## 三态幂等
 
-`roll migrate` 是幂等的，遇到危险就拒绝执行：
+`npx @seanyao/roll@2 migrate` 是幂等的，遇到危险就拒绝执行：
 
 | 状态 | 行为 |
 |------|------|
@@ -61,14 +61,14 @@ Roll 2.0 强制做了架构分离：
 
 ```bash
 npm install -g @seanyao/roll@2
-roll version    # 应该显示 2.x
+npx @seanyao/roll@2 version    # 应该显示 2.x
 ```
 
 ### 2. 预览迁移
 
 ```bash
 cd your-project
-roll migrate --dry-run
+npx @seanyao/roll@2 migrate --dry-run
 ```
 
 打印每条迁移的对照表，文件不会动。
@@ -76,7 +76,7 @@ roll migrate --dry-run
 ### 3. 执行
 
 ```bash
-roll migrate
+npx @seanyao/roll@2 migrate
 ```
 
 会在当前分支看到一个 commit：
@@ -145,7 +145,7 @@ npm install -g @seanyao/roll@1           # 重装老版本
 跟迁移在同一时间窗口内更新。迁移后 CI 红，99% 是 workflow 文件里的老路径引用没改。
 
 **Q: 我们团队多个项目都用 Roll，要不要全部迁移？**
-独立处理。Roll 2.0 遇到老结构会拒绝运行，提示 `roll migrate`，不会静默出错。
+独立处理。Roll 2.0 遇到老结构会拒绝运行，提示 `npx @seanyao/roll@2 migrate`，不会静默出错。
 
 **Q: 能不能不迁移，一直用 Roll 1.x？**
 可以。npm 历史版本永远在。但新特性（Legacy onboarding、agent 发现、plan 驱动 init）就用不到。

@@ -108,7 +108,6 @@ window.RollData = (function () {
       { id: "adoption", title: "Adoption Paths", blurb: "Three ways to bring roll on board.", features: [
         { name: "roll init",     mono: true, desc: "Fresh project bootstrap — creates AGENTS.md, .roll/backlog.md, .roll/features/, and .roll/pairing.yaml (cross-agent pairing).", badges: ["core"] },
         { name: "$roll-onboard", mono: true, desc: "Existing codebase: 3-minute survey, then roll init --apply lays down the .roll/ structure without surprise edits.", badges: ["new", "highlight"] },
-        { name: "roll migrate",  mono: true, desc: "Upgrade a 1.x project: BACKLOG.md + docs/{features,briefs,dream,design,domain}/ → .roll/ in one atomic commit, git mv preserves history.", badges: ["new"] },
       ]},
       { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
         { name: "roll loop on",        mono: true, desc: "AI picks stories from Backlog and executes hourly in an isolated worktree.", badges: ["core"] },
@@ -189,7 +188,7 @@ window.RollData = (function () {
         { name: "Dream",            path: "guide/en/dream.md",             desc: "Nightly code health scan and REFACTOR generation." },
         { name: "Peer",             path: "guide/en/peer.md",              desc: "Cross-agent review protocol — AGREE / REFINE / OBJECT / ESCALATE." },
         { name: "Skills",           path: "guide/en/skills.md",            desc: "Skill catalog and the decision tree for picking the right one." },
-        { name: "Migration 2.0",    path: "guide/en/migration-2.0.md",     desc: "Upgrade an existing 1.x project: BACKLOG.md + docs/* → .roll/ in one atomic commit." },
+        { name: "Migration 2.0",    path: "guide/en/migration-2.0.md",     desc: "Upgrade an existing 1.x project by pinning the old v2 toolchain for the one-time layout move." },
         { name: "Legacy Onboarding",path: "guide/en/legacy-onboarding.md", desc: "Bring roll into an existing codebase via $roll-onboard — 3-minute survey, no surprise edits." },
       ],
     },
@@ -290,7 +289,6 @@ window.RollData = (function () {
       { id: "adoption", title: "接入路径", blurb: "三种方式把 roll 接进项目。", features: [
         { name: "roll init",     mono: true, desc: "新项目脚手架——创建 AGENTS.md、.roll/backlog.md、.roll/features/、以及 .roll/pairing.yaml（跨 agent 结对）。", badges: ["core"] },
         { name: "$roll-onboard", mono: true, desc: "现有代码库:3 分钟问询,roll init --apply 落地 .roll/ 结构,不偷改任何源文件。", badges: ["new", "highlight"] },
-        { name: "roll migrate",  mono: true, desc: "升级 1.x 老项目:BACKLOG.md + docs/{features,briefs,dream,design,domain}/ 一次性迁入 .roll/,git mv 保留历史。", badges: ["new"] },
       ]},
       { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
         { name: "roll loop on",        mono: true, desc: "AI 从 Backlog 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },
@@ -371,7 +369,7 @@ window.RollData = (function () {
         { name: "Dream",      path: "guide/zh/dream.md",             desc: "夜间代码健康巡检与 REFACTOR 生成。" },
         { name: "Peer",       path: "guide/zh/peer.md",              desc: "跨 Agent 评审协议 — AGREE / REFINE / OBJECT / ESCALATE。" },
         { name: "技能",        path: "guide/zh/skills.md",            desc: "技能目录与选用决策树。" },
-        { name: "Migration 2.0", path: "guide/zh/migration-2.0.md",  desc: "升级 1.x 老项目：BACKLOG.md + docs/* 一次性迁入 .roll/，单原子 commit。" },
+        { name: "Migration 2.0", path: "guide/zh/migration-2.0.md",  desc: "升级 1.x 老项目：pin 旧版 v2 工具链执行一次性布局迁移。" },
         { name: "老项目接入",    path: "guide/zh/legacy-onboarding.md", desc: "通过 $roll-onboard 把 roll 带进现有代码库——3 分钟问询，不偷改文件。" },
       ],
     },

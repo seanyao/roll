@@ -297,9 +297,8 @@ PRs upstream like any human contributor.
 
 **Details:** When a loop cycle finishes, Roll writes `cost_list_usd` (the
 cost at that moment's prices) and `prices_version` (which snapshot was used)
-into the usage event. The dashboard reads the frozen value first. Vendor
-price changes, `roll prices refresh`, and Roll upgrades never rewrite
-historical costs.
+into the usage event. The dashboard reads the frozen value first. Vendor price
+changes, new snapshots, and Roll upgrades never rewrite historical costs.
 
 Cycles from before this feature shipped (no `cost_list_usd` field) fall back
 to computing with the *current* snapshot and show a dim `[legacy]` marker —
@@ -308,8 +307,6 @@ so you know those numbers might drift when prices change.
 **Try it:**
 
 ```bash
-roll prices show            # see current snapshot
-roll prices refresh         # fetch latest pricing, diff, snapshot if changed
 roll loop status --days 7   # historical cycles use frozen costs
 ```
 
@@ -817,23 +814,20 @@ edit the sub-stories or flip the original back to 📋 Todo with a tighter
 
 ### C7. How do I send feedback (bug / idea / UX) without leaving the terminal?
 
-**Use `roll feedback`** (US-FB-001 / 005). It opens a GitHub issue with
-auto-attached environment info and a label that maps back to the Roll
-backlog convention.
+Use the smallest target for the feedback: `roll idea` for the local Roll
+backlog, or `gh issue create` when it should become a GitHub issue.
 
-如何不离开终端发送反馈？用 `roll feedback`。
+如何不离开终端发送反馈？本地 backlog 用 `roll idea`，公开 GitHub issue 用 `gh issue
+create`。
 
 ```bash
-roll feedback --type bug --title "Login fails on Safari" --body "Repro: ..."
+roll idea "Safari login fails after redirect"
+gh issue create --title "Login fails on Safari" --body "Repro: ..."
 ```
 
-When `gh` is installed it calls `gh issue create` directly; otherwise it
-prints a pre-filled `github.com/.../issues/new?...` URL you open in a
-browser. The Environment section (roll version / OS / agent / language /
-project) auto-attaches; `--no-env` suppresses it. Pin the target repo
-via `--repo`, `ROLL_FEEDBACK_REPO`, `.roll/local.yaml`, or
-`~/.roll/config.yaml` — see [feedback.md](feedback.md) for the full
-precedence chain.
+`roll idea` writes to the Roll backlog. `gh issue create` writes to GitHub
+and can include the Environment section (roll version / OS / agent / language /
+project). See [feedback.md](feedback.md) for the split path.
 
 ### C10. Where did my loop state / ALERT go after upgrading? (Phase 2.0)
 

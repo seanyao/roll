@@ -28,7 +28,7 @@ roll init
    ensures missing scaffold pieces are filled in. Idempotent.
 
 Upgrading from a pre-2.0 layout (`BACKLOG.md` at root, `docs/features/`,
-`docs/domain/`)? Run `roll migrate` first — see
+`docs/domain/`)? Run `npx @seanyao/roll@2 migrate` first — see
 [migration-2.0.md](migration-2.0.md). `roll init` will refuse to scaffold on top
 of a half-migrated project.
 

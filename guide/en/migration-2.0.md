@@ -1,6 +1,6 @@
 # Migrating to Roll 2.0
 
-> **TL;DR:** Run `roll migrate --dry-run`, review, then `roll migrate`. One atomic commit. Done.
+> **TL;DR:** Run `npx @seanyao/roll@2 migrate --dry-run`, review, then `npx @seanyao/roll@2 migrate`. One atomic commit. Done.
 
 Roll 2.0 moves all "process" artifacts (BACKLOG, PROPOSALS, feature specs, briefs, dream logs, design docs) from your project root + `docs/` into a single `.roll/` directory. User-facing docs (`docs/guide/`, `docs/site/`) move up to the project root.
 
@@ -9,7 +9,7 @@ This is a one-time, breaking change. Your existing files keep their git history 
 ## Before you start
 
 - **Pin your old version** if you want a safety net: `npm install -g @seanyao/roll@1`. Old npm versions never go away, so you can always go back.
-- **Make sure your working tree is clean.** `roll migrate` refuses to run with uncommitted changes. Commit or stash first.
+- **Make sure your working tree is clean.** `npx @seanyao/roll@2 migrate` refuses to run with uncommitted changes. Commit or stash first.
 - **Optional but recommended**: read this whole page before running.
 
 ## What will move
@@ -31,7 +31,7 @@ This is a one-time, breaking change. Your existing files keep their git history 
 | `docs/guide/zh/` | `guide/zh/` | User docs (Chinese) |
 | `docs/site/` | `site/` | Marketing site source |
 
-After migration, your `docs/` directory is gone. If you had your own files in `docs/` outside this list, `roll migrate` won't touch them.
+After migration, your `docs/` directory is gone. If you had your own files in `docs/` outside this list, `npx @seanyao/roll@2 migrate` won't touch them.
 
 ## Why two destinations
 
@@ -44,7 +44,7 @@ Whether `.roll/` is gitignored is your choice (see [Privacy](#privacy) below). W
 
 ## Three-state safety
 
-`roll migrate` is idempotent and refuses to do anything dangerous:
+`npx @seanyao/roll@2 migrate` is idempotent and refuses to do anything dangerous:
 
 | State | Action |
 |-------|--------|
@@ -61,14 +61,14 @@ If you stop midway, the partial state goes into the "both" bucket and you'll get
 
 ```bash
 npm install -g @seanyao/roll@2
-roll version    # Should show 2.x
+npx @seanyao/roll@2 version    # Should show 2.x
 ```
 
 ### 2. Preview the migration
 
 ```bash
 cd your-project
-roll migrate --dry-run
+npx @seanyao/roll@2 migrate --dry-run
 ```
 
 This prints a table of every move. Nothing happens to your files.
@@ -76,7 +76,7 @@ This prints a table of every move. Nothing happens to your files.
 ### 3. Execute
 
 ```bash
-roll migrate
+npx @seanyao/roll@2 migrate
 ```
 
 You'll see a single commit on your current branch:
@@ -145,7 +145,7 @@ No. Migration is atomic — single commit. The "both" state intentionally errors
 Update them in the same commit window. If CI breaks after migration, that's almost always a stale path reference in a workflow file.
 
 **Q: My team uses Roll on multiple projects. Do I need to migrate all of them?**
-Each project independently. Roll 2.0 refuses to run on old structure with a clear hint pointing to `roll migrate`, so nothing silently breaks.
+Each project independently. Roll 2.0 refuses to run on old structure with a clear hint pointing to `npx @seanyao/roll@2 migrate`, so nothing silently breaks.
 
 **Q: Can I skip migration and stay on Roll 1.x forever?**
 Yes. Old npm versions are permanent. But you'll miss new features (legacy onboarding, agent discovery, plan-driven init).

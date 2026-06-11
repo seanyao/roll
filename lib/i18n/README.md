@@ -22,14 +22,12 @@ lib/i18n/
 ├── init.sh           # roll init setup messages
 ├── lang.sh           # locale detection + ROLL_LANG resolution
 ├── loop.sh           # roll loop subcommand output (largest file)
-├── migrate.sh        # roll migrate messages
 ├── offboard.sh       # roll offboard output
 ├── onboard.sh        # roll onboard / legacy-onboard output
 ├── peer.sh           # roll peer review messages
 ├── peer_help.sh      # peer --help text
 ├── peer_reset.sh     # peer reset confirmation messages
 ├── peer_status.sh    # peer status output
-├── prices_refresh.sh # prices refresh output
 └── skills/           # per-skill i18n overrides
 ```
 

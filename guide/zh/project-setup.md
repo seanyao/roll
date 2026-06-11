@@ -24,7 +24,7 @@ roll init
    `AGENTS.md`，保留所有项目特有内容，并补齐缺失的骨架文件。幂等可重复。
 
 正在从 2.0 之前的布局升级（`BACKLOG.md` 在根目录、`docs/features/`、
-`docs/domain/`）？先跑 `roll migrate` —— 见
+`docs/domain/`）？先跑 `npx @seanyao/roll@2 migrate` —— 见
 [migration-2.0.md](migration-2.0.md)。`roll init` 会拒绝在迁移到一半的
 项目上叠加骨架。
 

@@ -58,7 +58,8 @@ Roll 运行在三个自主层上：
 ### 可观测性
 
 - `roll status` — 项目健康：backlog 队列、loop 状态、CI、发布就绪判断 `[core]`
-- `roll loop runs` — 每轮历史，含结果、TCR 次数、耗时
+- `roll index` — 带真相条和 Story / Cycle / Release 真相板的交付档案
+- `roll loop runs` — 每轮 TerminalOutcome 历史，含 TCR 次数和耗时
 - `roll alert` — 查看、确认、清除 loop 告警
 - `roll brief` — 每日摘要：已发布、进行中、下一优先级 `[highlight]`
 

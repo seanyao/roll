@@ -333,12 +333,12 @@ progress, Dream results, and CI state — read-only, no local `roll` needed. See
 did, printed right before `press enter to close`.
 
 **Details:** When a cycle ends, the `.command` window renders a
-`─── Cycle <id> Summary ───` block covering five signals: the result
-(`built: <story>` or `idle`), CI status (`green` / `red` / `heal-attempting`),
-todo remaining, the top phases by time, and any failure / alert highlights
-(`✗` red for failures, `⚠` yellow for warnings). A fully green cycle prints in
-the default colour. Set `NO_COLOR=1` to disable colour. The `press enter to
-close` prompt is unchanged. See
+`─── Cycle <id> Summary ───` block covering five signals: the TerminalOutcome
+result, CI status (`green` / `red` / `heal-attempting`), todo remaining, the
+top phases by time, and any failure / alert highlights (`✗` red for failures,
+`⚠` yellow for warnings). A fully green cycle prints in the default colour.
+Set `NO_COLOR=1` to disable colour. The `press enter to close` prompt is
+unchanged. See
 [Cycle exit summary](loop.md#cycle-exit-summary) for the full breakdown.
 
 ---

@@ -56,7 +56,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll idea "<one-sentence description>"` | Capture a card: auto-classify, number, lint, infer epic, mint the full story folder — the one user entry for adding cards |
 | `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | The one minting entry agents/skills use: card folder + backlog row + index refresh (`--no-index` for batches) |
 | `roll attest <ID>` | Render the acceptance-evidence report into the card folder |
-| `roll index` | Rebuild the three-layer Delivery Dossier (front page · epics · story dossiers) |
+| `roll index` | Rebuild the truth-projected Delivery Dossier (front truth board · epics · story dossiers) |
 | `roll consistency <check\|audit>` | Five-dimension gap check · US-TRUTH shadow drift audit (read-only, exit 0) |
 | `roll changelog` | Sync CHANGELOG from merged work |
 | **Project · per repo** | |
@@ -76,6 +76,19 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |
 | `roll --version` / `roll -v` | Print installed roll version |
+
+## Truth Model In The UI
+
+The Delivery Dossier is a truth projection, not a backlog mirror. Persistent
+facts flow through one read path: anchors -> selectors -> adapter ->
+projections. `roll index` renders the front truth board from three aggregates:
+Story, Cycle, and Release.
+
+- A backlog row is a claim; merge evidence on `main` and recorded acceptance
+  evidence are truth. A premature `✅ Done` claim is shown as drift.
+- Cycle history is read through the TerminalOutcome vocabulary, not legacy
+  free-form summary text.
+- Missing facts render as `?`. A visible `0` means a known zero, not unknown.
 
 ## Repository layout
 

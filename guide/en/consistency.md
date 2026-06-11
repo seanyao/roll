@@ -1,9 +1,11 @@
 # Consistency — `roll consistency check`
 
-Six dimensions are continuously reconciled against the backlog's `✅ Done`
-rows as the source of truth: ① code ↔ backlog · ② cards (every live backlog
-row owns `features/<epic>/<ID>/spec.md`; evidence links never dangle; card-era
-Done rows with ACs own a `latest/<ID>-report.html`; pre-card-era Done rows are
+Six dimensions are continuously reconciled against truth anchors. A backlog
+`✅ Done` row is a claim; merge evidence on `main`, acceptance reports, terminal
+cycle events, and release-gate events are the facts. The dimensions are:
+① code ↔ backlog claims · ② cards (every live backlog row owns
+`features/<epic>/<ID>/spec.md`; evidence links never dangle; card-era delivered
+stories with ACs own a `latest/<ID>-report.html`; pre-card-era Done rows are
 counted, not failed) · ③ docs (changelog / features / guide / README / --help)
 · ④ tests · ⑤ bilingual parity (guide en↔zh + i18n keys) · ⑥ site.
 

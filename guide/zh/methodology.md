@@ -198,7 +198,7 @@ Clarify → Discuss → [peer: 方向评审] → Analyze+DDD → Design → [pee
 
 这种分离确保 `.roll/backlog.md` 保持简洁可读（作为进度看板），同时详细设计有独立的存放位置。
 
-> **设计理念 — Markdown 即代码**：在 Roll 中，`.roll/backlog.md` 和 `.roll/features/` 不是开发完成后生成的文档产物——它们是驱动开发的输入。Story 没有对应 Markdown 文件就等于不存在；Story 的 Verification Gate 证据未提交，就视为未完成。文件系统是唯一的数据源，不需要同步额外的项目管理工具。
+> **设计理念 — Markdown 即代码**：在 Roll 中，`.roll/backlog.md` 和 `.roll/features/` 不是开发完成后生成的文档产物——它们是驱动开发的规划输入。Story 没有对应 Markdown 文件就等于不存在；Story 必须同时具备 `main` 上的 merge 证据和 Verification Gate 证据，才算已交付。文件系统是持久规划记录；真相投影会把它与 git、证据锚点对账。
 
 ---
 

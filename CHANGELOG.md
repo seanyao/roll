@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### 新功能
+
+- `roll loop go` — 连续跑 backlog 到完成或暂停（US-GOAL-002） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/US-GOAL-002/latest/US-GOAL-002-report.html -->
+- `roll loop goal` — 查看目标、安全闸和最后裁定（US-GOAL-001） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/US-GOAL-001/latest/US-GOAL-001-report.html -->
+- `roll peer` — 一次性外部评审有结构化记录（FIX-255） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/FIX-255/latest/FIX-255-report.html -->
+
+### 可见性
+
+- 交付档案新增真相板，一眼看 Story/Cycle/Release（US-TRUTH-011） `[truth]`
+  <!-- evidence: .roll/features/feedback-truth-alignment/US-TRUTH-011/latest/US-TRUTH-011-report.html -->
+- epic 页能直接打开总览设计文档（US-DOSSIER-009）
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-009/latest/US-DOSSIER-009-report.html -->
+- 主帮助只显示常用命令，机器入口收进对应分组（REFACTOR-052） `[loop]`
+- 帮助与文档已跟 goal/peer 新命令对齐（US-GOAL-007）
+  <!-- evidence: .roll/features/goal-mode/US-GOAL-007/latest/US-GOAL-007-report.html -->
+
+### 自动化流水线
+
+- goal 完成前按主干证据裁定，不再提前报 Done（US-GOAL-003） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/US-GOAL-003/latest/US-GOAL-003-report.html -->
+- goal 无进展会跳卡报警，不再空转烧熔断（US-GOAL-004） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/US-GOAL-004/latest/US-GOAL-004-report.html -->
+- goal 连跑有预算、用量和时间盒安全闸（US-GOAL-005） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/US-GOAL-005/latest/US-GOAL-005-report.html -->
+- goal 完结前有异构终审，降级也会留痕（US-GOAL-006） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/US-GOAL-006/latest/US-GOAL-006-report.html -->
+- `roll loop resume` 清失败计数，不再恢复即熔断（FIX-251） `[loop]`
+  <!-- evidence: .roll/features/loop-engine/FIX-251/latest/FIX-251-report.html -->
+- 调度环境残留会被体检指出，不再静默污染 loop（FIX-232） `[loop]`
+
+
 ## v3.611.2 — 2026-06-11
 
 ### 事实对齐(US-TRUTH 史诗全量交付)

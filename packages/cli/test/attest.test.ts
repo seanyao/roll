@@ -20,7 +20,16 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { EvidenceRun, ShotRun } from "@roll/infra";
 import { bi } from "@roll/core";
-import { attestCommand, buildCardContext, detectAfterOnly, detectBeforeAfter, findFeatureFile, readBacklogRow, resolveStoryAcItems } from "../src/commands/attest.js";
+import {
+  assessDocGapFromFiles,
+  attestCommand,
+  buildCardContext,
+  detectAfterOnly,
+  detectBeforeAfter,
+  findFeatureFile,
+  readBacklogRow,
+  resolveStoryAcItems,
+} from "../src/commands/attest.js";
 import { renderStoryPage } from "../src/lib/story-page.js";
 
 const dirs: string[] = [];
@@ -79,6 +88,23 @@ describe("findFeatureFile", () => {
     mkdirSync(join(proj, ".roll", "features", "demo", "FIX-400"), { recursive: true });
     writeFileSync(join(proj, ".roll", "features", "demo", "FIX-400", "spec.md"), "# FIX-400\n\n**AC:**\n- [ ] x\n");
     expect(findFeatureFile(proj, "FIX-400")).toContain(join("demo", "FIX-400", "spec.md"));
+  });
+});
+
+describe("US-META-010 doc-gap shadow check", () => {
+  it("flags command-surface changes when no documentation file changed in the same diff", () => {
+    expect(assessDocGapFromFiles(["packages/cli/src/commands/status.ts"])).toEqual({
+      changedFiles: ["packages/cli/src/commands/status.ts"],
+      visibleFiles: ["packages/cli/src/commands/status.ts"],
+    });
+  });
+
+  it("does not flag the same command change when docs are updated", () => {
+    expect(assessDocGapFromFiles(["packages/cli/src/commands/status.ts", "guide/en/status.md"])).toBeUndefined();
+  });
+
+  it("ignores internal-only implementation files", () => {
+    expect(assessDocGapFromFiles(["packages/core/src/scoring/model.ts"])).toBeUndefined();
   });
 });
 

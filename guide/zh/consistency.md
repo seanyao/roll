@@ -21,3 +21,10 @@ roll consistency check --json   # 机器可判；exit 0 = 全部通过
 
 验收证据闸默认是 `hard`。`loop_safety.attest_gate: soft` 是显式项目策略，
 只用于迁移窗口；一致性检查仍会报告缺失或悬空的证据，避免缺口静默消失。
+
+## 文档对齐边界
+
+registry 漂移已经是硬红线：命令注册表、README、guide 或 `--help` 彼此不一致时，
+FIX-242 守卫会让一致性检查和发版闸失败。`roll attest` 里的 `doc-gap` 信号仍是
+shadow-only：当交付 diff 改了用户可见命令面或输出文案文件，却没有在同一 diff
+触及 README/docs/guide/site 时，它只在报告里给出警示，暂不改变退出码或 Gate 结论。

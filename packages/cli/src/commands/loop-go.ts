@@ -8,6 +8,7 @@ import {
   renderGoalYaml,
   transitionGoal,
   type GoalReviewMode,
+  type GoalSafetyGate,
   type GoalScope,
   type GoalStatus,
   type RollGoal,
@@ -22,6 +23,7 @@ import { agentInstalledByName, projectAgent, realAgentEnv } from "./agent-list.j
 import { textAgentArgv } from "../lib/text-agent-argv.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
+import { readAnthropicUsageLimits } from "../lib/anthropic-usage.js";
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
 const FINAL_REVIEW_TIMEOUT_MS = 300_000;
@@ -51,22 +53,42 @@ export interface LoopGoDeps {
   hasTmux: () => boolean;
   startTmux: (input: StartTmuxInput) => boolean;
   runOnce: (input: RunOnceInput) => Promise<number>;
+  readUsageLimits?: () => Promise<UsageLimitSnapshot>;
+  sleep?: (ms: number) => Promise<void>;
   prEvidence?: (projectPath: string, storyId: string, backlogStatus: string) => Promise<AuditPrEvidence | undefined>;
   finalReview?: (input: GoalFinalReviewInput) => Promise<GoalFinalReviewResult>;
 }
 
+export type UsageLimitWindowName = "five_hour" | "weekly";
+
+export interface UsageLimitWindow {
+  window: UsageLimitWindowName;
+  used: number;
+  limit: number;
+  resetAtSec?: number;
+}
+
+export type UsageLimitSnapshot =
+  | { status: "unknown"; reason: string }
+  | { status: "known"; windows: UsageLimitWindow[] };
+
 interface GoOptions {
   worker: boolean;
   noTmux: boolean;
+  noWait: boolean;
   scope: GoalScope;
   budgetUsd?: number;
   maxCycles?: number;
+  forSeconds?: number;
+  usageThreshold: number;
   reviewMode: GoalReviewMode;
+  reviewModeSpecified: boolean;
 }
 
 interface RunSummary {
   cycles: number;
   costUsd: number;
+  costUnknownRows: number;
 }
 
 interface RunRowSnapshot {
@@ -127,6 +149,8 @@ function realDeps(): LoopGoDeps {
     },
     startTmux: startGoTmux,
     runOnce: realRunOnce,
+    readUsageLimits: readAnthropicUsageLimits,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     prEvidence: defaultPrEvidence,
   };
 }
@@ -176,10 +200,14 @@ function parseOptions(args: string[]): GoOptions {
   let scope: GoalScope = { kind: "all" };
   let budgetUsd: number | undefined;
   let maxCycles: number | undefined;
+  let forSeconds: number | undefined;
+  let usageThreshold = 0.85;
   const cards: string[] = [];
   let worker = false;
   let noTmux = false;
+  let noWait = false;
   let reviewMode: GoalReviewMode = "auto";
+  let reviewModeSpecified = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
@@ -189,6 +217,10 @@ function parseOptions(args: string[]): GoOptions {
     }
     if (arg === "--no-tmux") {
       noTmux = true;
+      continue;
+    }
+    if (arg === "--no-wait") {
+      noWait = true;
       continue;
     }
     if (arg === "--epic") {
@@ -203,12 +235,12 @@ function parseOptions(args: string[]): GoOptions {
       continue;
     }
     if (arg === "--budget") {
-      budgetUsd = parseNonNegativeNumber(args[i + 1]);
+      budgetUsd = parseRequiredNonNegativeNumber(args[i + 1], "--budget");
       i += 1;
       continue;
     }
     if (arg.startsWith("--budget=")) {
-      budgetUsd = parseNonNegativeNumber(arg.slice("--budget=".length));
+      budgetUsd = parseRequiredNonNegativeNumber(arg.slice("--budget=".length), "--budget");
       continue;
     }
     if (arg === "--max-cycles") {
@@ -220,13 +252,33 @@ function parseOptions(args: string[]): GoOptions {
       maxCycles = parseNonNegativeInteger(arg.slice("--max-cycles=".length));
       continue;
     }
+    if (arg === "--for") {
+      forSeconds = parseRequiredDurationSeconds(args[i + 1], "--for");
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--for=")) {
+      forSeconds = parseRequiredDurationSeconds(arg.slice("--for=".length), "--for");
+      continue;
+    }
+    if (arg === "--usage-threshold") {
+      usageThreshold = parseRequiredRatio(args[i + 1], "--usage-threshold");
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--usage-threshold=")) {
+      usageThreshold = parseRequiredRatio(arg.slice("--usage-threshold=".length), "--usage-threshold");
+      continue;
+    }
     if (arg === "--review") {
       reviewMode = parseReviewMode(args[i + 1]);
+      reviewModeSpecified = true;
       i += 1;
       continue;
     }
     if (arg.startsWith("--review=")) {
       reviewMode = parseReviewMode(arg.slice("--review=".length));
+      reviewModeSpecified = true;
       continue;
     }
     if (arg === "--cards") {
@@ -245,10 +297,14 @@ function parseOptions(args: string[]): GoOptions {
   return {
     worker,
     noTmux,
+    noWait,
     scope,
     reviewMode,
+    reviewModeSpecified,
+    usageThreshold,
     ...(budgetUsd !== undefined ? { budgetUsd } : {}),
     ...(maxCycles !== undefined ? { maxCycles } : {}),
+    ...(forSeconds !== undefined ? { forSeconds } : {}),
   };
 }
 
@@ -258,17 +314,25 @@ function hasHelpArg(args: readonly string[]): boolean {
 
 function loopGoHelp(): string {
   return [
-    "Usage: roll loop go [--epic <name>|--cards <ids>] [--budget <usd>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--no-tmux]",
+    "Usage: roll loop go [--epic <name>|--cards <ids>] [--budget <usd>] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--no-wait] [--no-tmux]",
     "  Chain goal-mode cycles until the scoped backlog is complete, paused, budget-limited, or capped.",
     "  按 goal 范围连续执行 cycle，直到完成、暂停、预算受限或达到上限。",
     "",
     "Options:",
     "  --epic <name>       Limit the goal to one epic.",
     "  --cards <ids>       Limit the goal to comma/space separated card IDs.",
-    "  --budget <usd>      Stop once recorded goal cost reaches the budget.",
+    "  --budget <usd>      Move the goal to budget_limited once recorded cost reaches the budget.",
+    "  --for <duration>    Stop after the current cycle once the wall-clock box is reached (default unit: minutes).",
     "  --max-cycles <n>    Stop after n cycles in this go session.",
+    "  --usage-threshold <ratio>  Pause when account usage reaches this ratio; default 0.85.",
+    "  --no-wait           Do not wait for usage windows to recover after a usage-limit pause.",
     "  --review <mode>     Final review policy before completion: auto, hetero, self, or off.",
     "  --no-tmux           Run in the current process instead of starting a tmux session.",
+    "",
+    "Safety gates:",
+    "  budget  Uses effective run cost; missing cost rows are unknown, not zero, and stop conservatively.",
+    "  usage   Audits five-hour and weekly account headroom; unavailable usage APIs record an audit event but do not block.",
+    "  timebox Stops only at a cycle boundary and records a goal:gate_tripped event.",
     "",
     "Review modes:",
     "  auto    Default. Prefer a heterogeneous reviewer; degrade to self review only when no other provider is available.",
@@ -286,13 +350,53 @@ function parseReviewMode(value: string | undefined): GoalReviewMode {
 }
 
 function parseNonNegativeNumber(value: string | undefined): number | undefined {
-  const n = Number(value ?? "");
+  const raw = (value ?? "").trim();
+  if (raw === "") return undefined;
+  const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+function parseRequiredNonNegativeNumber(value: string | undefined, flag: string): number {
+  const n = parseNonNegativeNumber(value);
+  if (n === undefined) throw new Error(`roll loop go: ${flag} must be a non-negative number`);
+  return n;
 }
 
 function parseNonNegativeInteger(value: string | undefined): number | undefined {
   const n = parseNonNegativeNumber(value);
   return n !== undefined && Number.isInteger(n) ? n : undefined;
+}
+
+function parseRatio(value: string | undefined): number | undefined {
+  const n = parseNonNegativeNumber(value);
+  if (n === undefined || n > 1) return undefined;
+  return n;
+}
+
+function parseRequiredRatio(value: string | undefined, flag: string): number {
+  const n = parseRatio(value);
+  if (n === undefined) throw new Error(`roll loop go: ${flag} must be a ratio between 0 and 1`);
+  return n;
+}
+
+function parseDurationSeconds(value: string | undefined): number | undefined {
+  const raw = (value ?? "").trim().toLowerCase();
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(raw);
+  if (match === null) return undefined;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount < 0) return undefined;
+  const unit = match[2] ?? "m";
+  if (unit === "ms") return amount / 1000;
+  if (unit === "s") return amount;
+  if (unit === "m") return amount * 60;
+  if (unit === "h") return amount * 3600;
+  return amount * 86_400;
+}
+
+function parseRequiredDurationSeconds(value: string | undefined, flag: string): number {
+  const seconds = parseDurationSeconds(value);
+  if (seconds === undefined) throw new Error(`roll loop go: ${flag} must be a duration like 30m, 5h, or 1d`);
+  return seconds;
 }
 
 function parseCards(value: string | undefined): string[] {
@@ -370,6 +474,7 @@ function createGoal(opts: GoOptions, at: string): RollGoal {
     ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
     limits: {
       ...(opts.maxCycles !== undefined ? { maxCycles: opts.maxCycles } : {}),
+      ...(opts.forSeconds !== undefined ? { maxHours: opts.forSeconds / 3600 } : {}),
     },
     status: "active",
     usage: { cycles: 0, costUsd: 0 },
@@ -387,11 +492,12 @@ function readRunSnapshot(path: string): RunRowSnapshot {
   try {
     text = readFileSync(path, "utf8");
   } catch {
-    return { rows: [], summary: { cycles: 0, costUsd: 0 } };
+    return { rows: [], summary: { cycles: 0, costUsd: 0, costUnknownRows: 0 } };
   }
   const rows: Record<string, unknown>[] = [];
   let cycles = 0;
   let costUsd = 0;
+  let costUnknownRows = 0;
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line === "") continue;
@@ -403,11 +509,15 @@ function readRunSnapshot(path: string): RunRowSnapshot {
     }
     rows.push(row);
     cycles += 1;
-    const effective = typeof row["cost_effective_usd"] === "number" ? row["cost_effective_usd"] : undefined;
-    const estimated = typeof row["cost_usd"] === "number" ? row["cost_usd"] : undefined;
-    costUsd += effective ?? estimated ?? 0;
+    const effective = typeof row["cost_effective_usd"] === "number" && Number.isFinite(row["cost_effective_usd"]) ? row["cost_effective_usd"] : undefined;
+    const estimated = typeof row["cost_usd"] === "number" && Number.isFinite(row["cost_usd"]) ? row["cost_usd"] : undefined;
+    if (effective === undefined && estimated === undefined) {
+      costUnknownRows += 1;
+    } else {
+      costUsd += effective ?? estimated ?? 0;
+    }
   }
-  return { rows, summary: { cycles, costUsd } };
+  return { rows, summary: { cycles, costUsd, costUnknownRows } };
 }
 
 function readBacklogRows(projectPath: string): ScopeRow[] {
@@ -950,6 +1060,49 @@ function appendGoalState(bus: EventBus, path: string, from: GoalStatus, goal: Ro
   });
 }
 
+function money(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
+function percent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function withSafety(goal: RollGoal, gate: GoalSafetyGate, reason: string, reading: string, at: string): RollGoal {
+  return {
+    ...goal,
+    safety: {
+      lastGate: gate,
+      lastReason: reason,
+      lastAt: at,
+      lastReading: reading,
+    },
+  };
+}
+
+function appendGoalGate(
+  bus: EventBus,
+  path: string,
+  session: string,
+  gate: GoalSafetyGate,
+  action: "audit" | "paused" | "budget_limited",
+  reason: string,
+  reading: Record<string, string | number | boolean>,
+  ts: number,
+  waitUntilSec?: number,
+): void {
+  bus.appendEvent(path, {
+    type: "goal:gate_tripped",
+    sessionId: session,
+    gate,
+    action,
+    reason,
+    reading,
+    ...(waitUntilSec !== undefined ? { waitUntilSec } : {}),
+    ts,
+  });
+}
+
 function pauseGoal(projectPath: string, bus: EventBus, reason: string, at: string, ts: number): RollGoal | undefined {
   const path = goalPath(projectPath);
   const goal = readGoal(path);
@@ -963,14 +1116,151 @@ function pauseGoal(projectPath: string, bus: EventBus, reason: string, at: strin
 
 function updateUsage(projectPath: string, goal: RollGoal, baseline: RunSummary, initial: RunSummary, at: string): RollGoal {
   const current = summarizeRuns(runsPath(projectPath));
+  const costUnknownRows = initial.costUnknownRows + Math.max(0, current.costUnknownRows - baseline.costUnknownRows);
   return {
     ...goal,
     usage: {
       cycles: initial.cycles + Math.max(0, current.cycles - baseline.cycles),
       costUsd: initial.costUsd + Math.max(0, current.costUsd - baseline.costUsd),
+      ...(costUnknownRows > 0 ? { costUnknownRows } : {}),
     },
     updatedAt: at,
   };
+}
+
+function runSummaryFromGoal(goal: RollGoal): RunSummary {
+  return {
+    cycles: goal.usage.cycles,
+    costUsd: goal.usage.costUsd,
+    costUnknownRows: goal.usage.costUnknownRows ?? 0,
+  };
+}
+
+function applyRunOptions(goal: RollGoal, opts: GoOptions, at: string): RollGoal {
+  const maxHours = opts.forSeconds !== undefined ? opts.forSeconds / 3600 : goal.limits.maxHours;
+  return {
+    ...goal,
+    ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
+    review: opts.reviewModeSpecified ? { mode: opts.reviewMode } : goal.review,
+    limits: {
+      ...goal.limits,
+      ...(opts.maxCycles !== undefined ? { maxCycles: opts.maxCycles } : {}),
+      ...(maxHours !== undefined ? { maxHours } : {}),
+    },
+    updatedAt: at,
+  };
+}
+
+function applyBudgetGate(projectPath: string, bus: EventBus, session: string, goal: RollGoal, deps: LoopGoDeps): { goal: RollGoal; stopped: boolean; reason?: string } {
+  const budgetUsd = goal.budgetUsd;
+  if (budgetUsd === undefined) return { goal, stopped: false };
+  const unknownRows = goal.usage.costUnknownRows ?? 0;
+  const at = deps.nowIso();
+  const ts = deps.nowSec();
+  if (unknownRows > 0) {
+    const reason = "budget_unknown_cost";
+    const reading = { costUsd: goal.usage.costUsd, budgetUsd, unknownCostRows: unknownRows };
+    const labelled = withSafety(goal, "budget", reason, `${money(goal.usage.costUsd)} / ${money(budgetUsd)}; unknown cost rows ${unknownRows}`, at);
+    const next = transitionGoal(labelled, "budget_limited", { actor: "system", reason, at });
+    writeGoal(goalPath(projectPath), next);
+    appendGoalState(bus, eventsPath(projectPath), goal.status, next, "system", reason, ts);
+    appendGoalGate(bus, eventsPath(projectPath), session, "budget", "budget_limited", reason, reading, ts);
+    return { goal: next, stopped: true, reason };
+  }
+  if (goal.usage.costUsd < budgetUsd) return { goal, stopped: false };
+  const reason = "budget_exceeded";
+  const reading = { costUsd: goal.usage.costUsd, budgetUsd };
+  const labelled = withSafety(goal, "budget", reason, `${money(goal.usage.costUsd)} / ${money(budgetUsd)}`, at);
+  const next = transitionGoal(labelled, "budget_limited", { actor: "system", reason, at });
+  writeGoal(goalPath(projectPath), next);
+  appendGoalState(bus, eventsPath(projectPath), goal.status, next, "system", reason, ts);
+  appendGoalGate(bus, eventsPath(projectPath), session, "budget", "budget_limited", reason, reading, ts);
+  return { goal: next, stopped: true, reason };
+}
+
+function usageRatio(window: UsageLimitWindow): number {
+  return window.limit > 0 ? window.used / window.limit : 0;
+}
+
+function trippedUsageWindow(snapshot: UsageLimitSnapshot, threshold: number): UsageLimitWindow | undefined {
+  if (snapshot.status === "unknown") return undefined;
+  return snapshot.windows
+    .filter((window) => usageRatio(window) >= threshold)
+    .sort((a, b) => usageRatio(b) - usageRatio(a))[0];
+}
+
+async function enforceUsageGate(
+  projectPath: string,
+  bus: EventBus,
+  session: string,
+  goal: RollGoal,
+  opts: GoOptions,
+  deps: LoopGoDeps,
+): Promise<{ goal: RollGoal; stopped: boolean; reason?: string }> {
+  const read = deps.readUsageLimits;
+  if (read === undefined) return { goal, stopped: false };
+  let currentGoal = goal;
+  while (true) {
+    const snapshot = await read();
+    const ts = deps.nowSec();
+    if (snapshot.status === "unknown") {
+      appendGoalGate(bus, eventsPath(projectPath), session, "usage", "audit", snapshot.reason, { status: "unknown", reason: snapshot.reason }, ts);
+      return { goal: currentGoal, stopped: false };
+    }
+    const tripped = trippedUsageWindow(snapshot, opts.usageThreshold);
+    if (tripped === undefined) return { goal: currentGoal, stopped: false };
+
+    const ratio = usageRatio(tripped);
+    const reason = "usage_limit_threshold";
+    const at = deps.nowIso();
+    const reading = {
+      window: tripped.window,
+      used: tripped.used,
+      limit: tripped.limit,
+      ratio,
+      threshold: opts.usageThreshold,
+    };
+    const labelled = withSafety(currentGoal, "usage", reason, `${tripped.window} ${tripped.used}/${tripped.limit} (${percent(ratio)})`, at);
+    const paused = transitionGoal(labelled, "paused", { actor: "system", reason, at });
+    writeGoal(goalPath(projectPath), paused);
+    appendGoalState(bus, eventsPath(projectPath), currentGoal.status, paused, "system", reason, ts);
+    appendGoalGate(bus, eventsPath(projectPath), session, "usage", "paused", reason, reading, ts, tripped.resetAtSec);
+    if (opts.noWait) return { goal: paused, stopped: true, reason };
+
+    const waitUntilSec = tripped.resetAtSec ?? ts + 60;
+    await (deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))))(Math.max(0, waitUntilSec - ts) * 1000);
+    const resumedAt = deps.nowIso();
+    const resumed = transitionGoal(paused, "active", { actor: "system", reason: "usage_window_recovered", at: resumedAt });
+    writeGoal(goalPath(projectPath), resumed);
+    appendGoalState(bus, eventsPath(projectPath), paused.status, resumed, "system", "usage_window_recovered", deps.nowSec());
+    currentGoal = resumed;
+  }
+}
+
+function timeboxDeadlineSec(goal: RollGoal, opts: GoOptions, startedSec: number): number | undefined {
+  const seconds = opts.forSeconds ?? (goal.limits.maxHours !== undefined ? goal.limits.maxHours * 3600 : undefined);
+  return seconds === undefined ? undefined : startedSec + seconds;
+}
+
+function applyTimeboxGate(
+  projectPath: string,
+  bus: EventBus,
+  session: string,
+  goal: RollGoal,
+  deps: LoopGoDeps,
+  deadlineSec: number | undefined,
+): { goal: RollGoal; stopped: boolean; reason?: string } {
+  if (deadlineSec === undefined || deps.nowSec() < deadlineSec) return { goal, stopped: false };
+  const reason = "timebox";
+  const at = deps.nowIso();
+  const ts = deps.nowSec();
+  const reading = { nowSec: ts, deadlineSec };
+  const labelled = withSafety(goal, "timebox", reason, `now ${ts} >= deadline ${deadlineSec}`, at);
+  const paused = transitionGoal(labelled, "paused", { actor: "system", reason, at });
+  writeGoal(goalPath(projectPath), paused);
+  appendGoalState(bus, eventsPath(projectPath), goal.status, paused, "system", reason, ts);
+  appendGoalGate(bus, eventsPath(projectPath), session, "timebox", "paused", reason, reading, ts);
+  return { goal: paused, stopped: true, reason };
 }
 
 function installStopHandlers(onStop: (signal: string) => void): () => void {
@@ -1027,7 +1317,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
   const startedSec = deps.nowSec();
   const sid = sessionId(startedAt, deps.pid());
   const baseline = summarizeRuns(runsPath(id.path));
-  let initialUsage: RunSummary = { cycles: 0, costUsd: 0 };
+  let initialUsage: RunSummary = { cycles: 0, costUsd: 0, costUnknownRows: 0 };
   let goal: RollGoal;
   const progress: ProgressState = { zeroStreaks: new Map(), skippedCards: new Set() };
   let stopReason: string | undefined;
@@ -1063,7 +1353,10 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       writeGoal(gPath, goal);
       appendGoalState(bus, evPath, existing.status, goal, "owner", "go_start", startedSec);
     }
-    initialUsage = { ...goal.usage };
+    goal = applyRunOptions(goal, opts, startedAt);
+    writeGoal(gPath, goal);
+    initialUsage = runSummaryFromGoal(goal);
+    const deadlineSec = timeboxDeadlineSec(goal, opts, startedSec);
     bus.appendEvent(evPath, { type: "goal:session_start", sessionId: sid, scope: goal.scope, ts: startedSec });
 
     while (true) {
@@ -1075,6 +1368,18 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       const maxCycles = goal.limits.maxCycles;
       if (maxCycles !== undefined && goal.usage.cycles >= maxCycles) {
         stopReason = "max_cycles";
+        break;
+      }
+      const preBudgetGate = applyBudgetGate(id.path, bus, sid, goal, deps);
+      goal = preBudgetGate.goal;
+      if (preBudgetGate.stopped) {
+        stopReason = preBudgetGate.reason;
+        break;
+      }
+      const usageGate = await enforceUsageGate(id.path, bus, sid, goal, opts, deps);
+      goal = usageGate.goal;
+      if (usageGate.stopped) {
+        stopReason = usageGate.reason;
         break;
       }
 
@@ -1092,6 +1397,12 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       const appendedRows = after.rows.slice(before.rows.length);
       workerAgents = uniqueStrings([...workerAgents, ...workerAgentsFromRunRows(appendedRows)]);
       updateProgressFromRows(id.path, id.slug, sid, appendedRows, progress, deps, bus);
+      const budgetGate = applyBudgetGate(id.path, bus, sid, goal, deps);
+      goal = budgetGate.goal;
+      if (budgetGate.stopped) {
+        stopReason = budgetGate.reason;
+        break;
+      }
       if (allScopeCardsSkipped(id.path, goal, progress)) {
         stopReason = "no_progress_on_all_cards";
         goal = pauseGoal(id.path, bus, stopReason, deps.nowIso(), deps.nowSec()) ?? goal;
@@ -1105,6 +1416,12 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       }
       if (adjudication.reviewBlocked) {
         stopReason = adjudication.reason;
+        break;
+      }
+      const timeboxGate = applyTimeboxGate(id.path, bus, sid, goal, deps, deadlineSec);
+      goal = timeboxGate.goal;
+      if (timeboxGate.stopped) {
+        stopReason = timeboxGate.reason;
         break;
       }
 
@@ -1123,7 +1440,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
     }
 
     const finalReason = stopReason ?? "stop_requested";
-    const finalGoal = goal.status === "complete" ? goal : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
+    const finalGoal = goal.status === "complete" || goal.status === "budget_limited" ? goal : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
     bus.appendEvent(evPath, {
       type: "goal:session_end",
       sessionId: sid,

@@ -125,4 +125,28 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(reviewed.verdict).toBe("APPROVE");
     expect(degraded.to).toBe("self");
   });
+
+  it("types goal safety gate trip events (US-GOAL-005)", () => {
+    const budget: RollEvent = {
+      type: "goal:gate_tripped",
+      sessionId: "goal-20260611-110000",
+      gate: "budget",
+      action: "budget_limited",
+      reason: "budget_exceeded",
+      reading: { costUsd: 12.75, budgetUsd: 10 },
+      ts: 1_780_000_400,
+    };
+    const usage: RollEvent = {
+      type: "goal:gate_tripped",
+      sessionId: "goal-20260611-110000",
+      gate: "usage",
+      action: "paused",
+      reason: "usage_limit_threshold",
+      reading: { window: "five_hour", used: 86, limit: 100, ratio: 0.86 },
+      waitUntilSec: 1_780_003_000,
+      ts: 1_780_000_401,
+    };
+    expect(budget.gate).toBe("budget");
+    expect(usage.waitUntilSec).toBe(1_780_003_000);
+  });
 });

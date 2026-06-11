@@ -138,8 +138,10 @@ roll loop status      # Show scheduler state and current loop state
 roll loop go          # Run goal mode manually for all backlog until complete/pause/guardrail
 roll loop go --epic <name>              # Limit the goal to one epic
 roll loop go --cards US-1,FIX-2         # Limit the goal to selected cards
+roll loop go --budget 10                # Stop conservatively when goal cost reaches $10
+roll loop go --for 5h                   # Stop after the current cycle once the timebox is reached
 roll loop go --review <auto|hetero|self|off>  # Set the final review policy
-roll loop goal        # Show persisted goal status, scope, review mode, usage, and limits
+roll loop goal        # Show persisted goal status, scope, review mode, usage, limits, and safety gate
 
 roll loop runs        # Show last 10 run summaries (story IDs, TCR count, duration, slowest phase)
 roll loop runs 20     # Show last 20 runs
@@ -176,6 +178,20 @@ roll loop events 50   # Show last 50 events
 roll agent                           # Show the four complexity slots + online status
 roll agent list                      # Show agents installed on this machine
 ```
+
+### Goal Mode Safety Gates
+
+`roll loop go` enforces safety only at cycle boundaries. `--budget <usd>` uses
+the effective run cost ledger and moves the goal to `budget_limited` when the
+budget is reached; rows with missing cost are recorded as unknown and stop
+conservatively rather than being counted as zero. Usage headroom is checked
+against five-hour and weekly windows; by default Roll pauses at 85% and waits
+for the reset window, while `--no-wait` leaves the goal paused for the owner.
+`--for <duration>` is a wall-clock box: the in-flight cycle finishes, then the
+goal pauses with reason `timebox`.
+
+Each safety trip records `goal:gate_tripped`, and `roll loop goal` shows the
+last safety gate reading.
 
 ### Goal Mode Final Review
 

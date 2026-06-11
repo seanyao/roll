@@ -33,15 +33,22 @@ function limitLabel(goal: RollGoal): string {
   return parts.length > 0 ? parts.join(", ") : "-";
 }
 
+function safetyLabel(goal: RollGoal): string {
+  if (goal.safety === undefined) return "-";
+  return `${goal.safety.lastGate} ${goal.safety.lastReason} at ${goal.safety.lastAt} — ${goal.safety.lastReading}`;
+}
+
 function renderGoal(goal: RollGoal): string {
   const budget = money(goal.budgetUsd);
   const cost = money(goal.usage.costUsd);
+  const unknown = goal.usage.costUnknownRows !== undefined && goal.usage.costUnknownRows > 0 ? `, unknown cost rows ${goal.usage.costUnknownRows}` : "";
   return [
     `Goal status / 目标状态: ${goal.status}`,
     `Scope / 范围: ${scopeLabel(goal.scope)}`,
     `Review / 终审: ${goal.review.mode}`,
-    `Usage / 用量: cycles ${goal.usage.cycles}, cost ${cost} / ${budget}`,
+    `Usage / 用量: cycles ${goal.usage.cycles}, cost ${cost} / ${budget}${unknown}`,
     `Limits / 限制: ${limitLabel(goal)}`,
+    `Safety gate / 安全闸: ${safetyLabel(goal)}`,
     `Last decision / 最近裁定: ${goal.lastDecisionReason ?? "-"}`,
     `Created / 创建: ${goal.createdAt}`,
     `Updated / 更新: ${goal.updatedAt}`,
@@ -56,8 +63,8 @@ function hasHelpArg(args: readonly string[]): boolean {
 function loopGoalHelp(): string {
   return [
     "Usage: roll loop goal",
-    "  Show the persisted goal state from .roll/loop/goal.yaml, including scope, review mode, usage, limits, and last decision.",
-    "  显示 .roll/loop/goal.yaml 中持久化的 goal 状态，包括范围、终审模式、用量、限制和最近裁定。",
+    "  Show the persisted goal state from .roll/loop/goal.yaml, including scope, review mode, usage, limits, safety gate, and last decision.",
+    "  显示 .roll/loop/goal.yaml 中持久化的 goal 状态，包括范围、终审模式、用量、限制、安全闸和最近裁定。",
     "",
   ].join("\n");
 }

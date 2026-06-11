@@ -20,6 +20,12 @@ status: active
 usage:
   cycles: 2
   costUsd: 0.42
+  costUnknownRows: 1
+safety:
+  lastGate: usage
+  lastReason: usage_limit_threshold
+  lastAt: 2026-06-11T07:20:00Z
+  lastReading: five_hour 86/100 (86.0%)
 createdAt: 2026-06-11T07:00:00Z
 updatedAt: 2026-06-11T07:30:00Z
 lastDecisionReason: waiting_for_merge
@@ -34,7 +40,13 @@ describe("US-GOAL-001 — goal.yaml schema", () => {
     expect(goal.budgetUsd).toBe(12.5);
     expect(goal.limits).toEqual({ maxCycles: 7, maxHours: 5 });
     expect(goal.status).toBe("active");
-    expect(goal.usage).toEqual({ cycles: 2, costUsd: 0.42 });
+    expect(goal.usage).toEqual({ cycles: 2, costUsd: 0.42, costUnknownRows: 1 });
+    expect(goal.safety).toEqual({
+      lastGate: "usage",
+      lastReason: "usage_limit_threshold",
+      lastAt: "2026-06-11T07:20:00Z",
+      lastReading: "five_hour 86/100 (86.0%)",
+    });
     expect(goal.lastDecisionReason).toBe("waiting_for_merge");
   });
 
@@ -53,6 +65,8 @@ describe("US-GOAL-001 — goal.yaml schema", () => {
     expect(rendered).toContain("schema: goal.v1");
     expect(rendered).toContain("cards: [US-GOAL-001, US-GOAL-002]");
     expect(rendered).toContain("review: auto");
+    expect(rendered).toContain("costUnknownRows: 1");
+    expect(rendered).toContain("lastGate: usage");
     expect(parseGoalYaml(rendered)).toEqual(goal);
   });
 });

@@ -116,8 +116,10 @@ roll loop status      # 显示调度器状态和当前 loop 状态
 roll loop go          # 手动运行 goal mode，默认覆盖全部 backlog，直到完成/暂停/触发护栏
 roll loop go --epic <name>              # 将 goal 限定到一个 epic
 roll loop go --cards US-1,FIX-2         # 将 goal 限定到指定卡片
+roll loop go --budget 10                # goal 成本达到 $10 后保守停止
+roll loop go --for 5h                   # 到时间盒后等当前 cycle 收尾再停
 roll loop go --review <auto|hetero|self|off>  # 设置完成前终审策略
-roll loop goal        # 显示持久化 goal 状态、范围、终审模式、用量和限制
+roll loop goal        # 显示持久化 goal 状态、范围、终审模式、用量、限制和安全闸
 
 roll loop runs        # 显示最近 10 次运行摘要（故事 ID、tcr 提交数、耗时、最慢阶段）
 roll loop runs 20     # 显示最近 20 次
@@ -154,6 +156,16 @@ roll loop events 50   # 显示最近 50 条
 roll agent                           # 查看四个复杂度槽 + 在线状态
 roll agent list                      # 查看本机已装的 agent
 ```
+
+### Goal Mode 安全闸
+
+`roll loop go` 的安全闸只在 cycle 边界生效。`--budget <usd>` 使用有效成本账本；
+达到预算时 goal 进入 `budget_limited`。缺失成本字段的 runs 行记为 unknown，不当作 0，
+并按保守侧停止。用量闸检查 5 小时与 7 天窗口；默认 85% 暂停并等待窗口恢复，
+`--no-wait` 则停下等 owner。`--for <duration>` 是墙钟时间盒：当前 cycle 收尾后，
+goal 以 `timebox` 原因暂停。
+
+每次安全闸触发都会记录 `goal:gate_tripped`，`roll loop goal` 会显示最近一次安全闸读数。
 
 ### Goal Mode 终审
 

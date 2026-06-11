@@ -99,11 +99,41 @@ describe("US-GOAL-002 — roll loop go", () => {
     const r = await capture(() => loopGoCommand(["--help"], completeGoalDeps(p)));
     expect(r.code).toBe(0);
     expect(r.out).toContain("Usage: roll loop go");
+    expect(r.out).toContain("--budget <usd>");
+    expect(r.out).toContain("--for <duration>");
+    expect(r.out).toContain("--usage-threshold <ratio>");
+    expect(r.out).toContain("--no-wait");
+    expect(r.out).toContain("Safety gates");
     expect(r.out).toContain("--review <mode>");
     expect(r.out).toContain("hetero");
     expect(r.out).toContain("goal:final_review SKIPPED");
     expect(existsSync(join(p, ".roll", "loop", "goal.yaml"))).toBe(false);
     expect(r.err).toBe("");
+  });
+
+  it("fails loud for invalid safety gate option values before starting a session", async () => {
+    const cases: Array<{ args: string[]; message: string }> = [
+      { args: ["--worker", "--budget", "abc"], message: "--budget must be a non-negative number" },
+      { args: ["--worker", "--budget="], message: "--budget must be a non-negative number" },
+      { args: ["--worker", "--for", "never"], message: "--for must be a duration" },
+      { args: ["--worker", "--usage-threshold", "2"], message: "--usage-threshold must be a ratio between 0 and 1" },
+    ];
+
+    for (const item of cases) {
+      const p = project();
+      let identityCalls = 0;
+      const deps: LoopGoDeps = {
+        ...completeGoalDeps(p),
+        identity: () => {
+          identityCalls += 1;
+          return Promise.resolve({ path: p, slug: "proj-abc123" });
+        },
+      };
+
+      await expect(loopGoCommand(item.args, deps)).rejects.toThrow(item.message);
+      expect(identityCalls).toBe(0);
+      expect(existsSync(join(p, ".roll", "loop", "goal.yaml"))).toBe(false);
+    }
   });
 
   it("runs cycles back-to-back until a pause marker, then pauses the goal at the cycle boundary", async () => {
@@ -425,6 +455,315 @@ describe("US-GOAL-004 — no-progress suppression", () => {
     expect(allowed[0]).toEqual(["US-STUCK", "US-NEXT"]);
     expect(allowed[1]).toEqual(["US-STUCK", "US-NEXT"]);
     expect(allowed[2]).toEqual(["US-NEXT"]);
+  });
+});
+
+describe("US-GOAL-005 — goal safety gates", () => {
+  it("--budget moves the goal to budget_limited and records the actual cost reading", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-COST](.roll/features/goal-mode/US-COST/spec.md) | cost | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_500 + calls,
+      nowIso: () => `2026-06-11T11:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-COST", cycle_id: "cycle-1", ts: "2026-06-11T11:00:01Z", cost_usd: 6, cost_effective_usd: 6, status: "failed" })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-COST", "--budget", "5"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("budget_limited");
+    expect(goal.lastDecisionReason).toBe("budget_exceeded");
+    expect(goal.safety?.lastGate).toBe("budget");
+    expect(goal.safety?.lastReading).toContain("$6.00 / $5.00");
+    const event = readEvents(p).find((e) => e.type === "goal:gate_tripped" && e.gate === "budget");
+    expect(event).toMatchObject({ action: "budget_limited", reason: "budget_exceeded", reading: { costUsd: 6, budgetUsd: 5 } });
+  });
+
+  it("--budget treats missing usage_cost fields as unknown, not zero", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-UNKNOWN](.roll/features/goal-mode/US-UNKNOWN/spec.md) | unknown | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_600 + calls,
+      nowIso: () => `2026-06-11T11:10:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-UNKNOWN", cycle_id: "cycle-1", ts: "2026-06-11T11:10:01Z", status: "failed" })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-UNKNOWN", "--budget", "10"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("budget_limited");
+    expect(goal.usage.costUnknownRows).toBe(1);
+    expect(goal.lastDecisionReason).toBe("budget_unknown_cost");
+    const event = readEvents(p).find((e) => e.type === "goal:gate_tripped" && e.gate === "budget");
+    expect(event).toMatchObject({ reason: "budget_unknown_cost", reading: { unknownCostRows: 1, budgetUsd: 10 } });
+  });
+
+  it("--budget blocks an already over-budget resumed goal before starting another cycle", async () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: all
+review: auto
+budgetUsd: 5
+limits:
+status: active
+usage:
+  cycles: 2
+  costUsd: 6
+createdAt: 2026-06-11T11:15:00Z
+updatedAt: 2026-06-11T11:15:00Z
+`,
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_650,
+      nowIso: () => "2026-06-11T11:15:30Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--budget", "5"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("budget_limited");
+    expect(goal.lastDecisionReason).toBe("budget_exceeded");
+    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "budget" && e.action === "budget_limited")).toBe(true);
+  });
+
+  it("--budget 0 blocks a new goal before starting the first cycle", async () => {
+    const p = project();
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_675,
+      nowIso: () => "2026-06-11T11:17:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--budget", "0"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("budget_limited");
+    expect(goal.lastDecisionReason).toBe("budget_exceeded");
+    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "budget" && e.action === "budget_limited")).toBe(true);
+  });
+
+  it("usage limit waits for the next window by default, then resumes at the boundary", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-LIMIT](.roll/features/goal-mode/US-LIMIT/spec.md) | limit | 📋 Todo |",
+    ]);
+    let calls = 0;
+    let usageReads = 0;
+    let sleeps = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_700 + calls + usageReads,
+      nowIso: () => `2026-06-11T11:20:0${calls + usageReads}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      readUsageLimits: async () => {
+        usageReads += 1;
+        if (usageReads === 1) {
+          return { status: "known", windows: [{ window: "five_hour", used: 86, limit: 100, resetAtSec: 1_780_003_000 }] };
+        }
+        return { status: "known", windows: [{ window: "five_hour", used: 20, limit: 100, resetAtSec: 1_780_006_000 }] };
+      },
+      sleep: async () => {
+        sleeps += 1;
+      },
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-LIMIT", cycle_id: "cycle-1", ts: "2026-06-11T11:20:03Z", cost_usd: 1, cost_effective_usd: 1, status: "failed" })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-LIMIT", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    expect(sleeps).toBe(1);
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "usage" && e.action === "paused" && e.waitUntilSec === 1_780_003_000)).toBe(true);
+    expect(events.some((e) => e.type === "goal:state" && e.from === "paused" && e.to === "active" && e.reason === "usage_window_recovered")).toBe(true);
+  });
+
+  it("--no-wait leaves usage limit pauses for a human instead of resuming", async () => {
+    const p = project();
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_800,
+      nowIso: () => "2026-06-11T11:30:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      readUsageLimits: async () => ({ status: "known", windows: [{ window: "weekly", used: 85, limit: 100, resetAtSec: 1_780_500_000 }] }),
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--no-wait"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toBe("usage_limit_threshold");
+  });
+
+  it("unknown usage limit reads are audited but do not block a cycle", async () => {
+    const p = project();
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_900 + calls,
+      nowIso: () => `2026-06-11T11:40:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      readUsageLimits: async () => ({ status: "unknown", reason: "usage_api_unreachable" }),
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-UNKNOWN-LIMIT", cycle_id: "cycle-1", ts: "2026-06-11T11:40:01Z", cost_usd: 1, status: "failed" })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "usage" && e.action === "audit" && e.reason === "usage_api_unreachable")).toBe(true);
+  });
+
+  it("--for stops after the current cycle reaches the wall-clock box", async () => {
+    const p = project();
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => (calls === 0 ? 1_780_001_000 : 1_780_001_002),
+      nowIso: () => (calls === 0 ? "2026-06-11T11:50:00Z" : "2026-06-11T11:50:02Z"),
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-TIME", cycle_id: "cycle-1", ts: "2026-06-11T11:50:02Z", cost_usd: 1, cost_effective_usd: 1, status: "failed" })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--for", "1s"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toBe("timebox");
+    expect(goal.limits.maxHours).toBeCloseTo(1 / 3600, 8);
+    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "timebox" && e.reason === "timebox")).toBe(true);
+  });
+
+  it("preserves an existing goal review mode unless --review is explicit", async () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: all
+review: self
+limits:
+status: active
+usage:
+  cycles: 0
+  costUsd: 0
+createdAt: 2026-06-11T12:00:00Z
+updatedAt: 2026-06-11T12:00:00Z
+`,
+    );
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_001_100,
+      nowIso: () => "2026-06-11T12:10:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => 0,
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "0"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.review.mode).toBe("self");
   });
 });
 

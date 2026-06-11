@@ -1,113 +1,72 @@
-# roll peer — 跨 Agent 代码评审
+# roll peer — 结构化外部评审
 
-`roll peer` 把方案或代码变更发给第二个 AI Agent 评审。
-Loop 在高风险构建前会自动触发；你也可以随时手动调用。
+`roll peer` 通过与 goal-mode 终审相同的结构化 adapter，运行一次外部 provider
+reviewer。它是 TS-native 命令，不会回退到已退役的 bash peer surface。
 
-## 工作原理
-
-```
-roll peer --from claude --to kimi --context plan.md
-
-  Claude 提交方案 → Kimi 评审 → 返回裁决
-```
-
-Peer review 是一轮或多轮协商：
-
-| 裁决 | 含义 | 后续动作 |
-|------|------|---------|
-| **AGREE** | 方案通过 | 继续构建 |
-| **REFINE** | 需要调整 | 吸收反馈后重新提交 |
-| **OBJECT** | 有实质分歧 | 重新考量方案后再提交 |
-| **ESCALATE** | 协商无法收敛 | 需要人工决策 |
-
-连续 3 轮未达到 AGREE 时，自动升级为 ESCALATE。
+需要 agent 工作流里的多轮协商协议时，用 `$roll-peer`。需要从 Claude、Codex、
+Kimi、Pi 或其它已安装外部 CLI 留下一条耐久的一次性 reviewer fact 时，用
+`roll peer`。
 
 ## 命令参考
 
 ```bash
-# 基本用法：让 kimi 评审 claude 的方案
-roll peer --from claude --to kimi --context plan.md
-
-# 自动选择 peer（根据能力表路由）
-roll peer --from claude
-
-# 指定轮次（loop 内部多轮调用时使用）
-roll peer --from claude --to kimi --round 2 --context plan.md
-
-# 跳过 10 秒倒计时确认
-roll peer --from claude --yes
-
-# 按标签路由（如 "security"、"architecture"）
-roll peer --from claude --tag security
-
-# 查看 peer 对的健康状态
-roll peer status
-
-# 重置降级或废弃的 peer 对
-roll peer reset claude kimi
+roll peer --reviewer codex --prompt "Review this plan and return VERDICT/REASON/FINDING lines"
+roll peer --reviewer kimi --file /tmp/review-prompt.md --json
+roll peer --worker claude --mode hetero --file /tmp/final-review.md
+roll peer --mode self --reviewer claude --prompt "Self-check this evidence"
+roll peer --timeout-ms 300000 --reviewer pi --file /tmp/review.md
 ```
 
-## 自动触发条件
+参数：
 
-Loop（以及 `$roll-build`）在以下情况自动触发 peer review：
-
-- 方案涉及超过 3 个文件或跨越模块边界
-- 包含架构决策或不显而易见的取舍
-- 破坏性操作（删除、迁移、生产部署）
-- 请求中出现高风险信号词："critical"、"don't break"、"关键"、"别搞砸"
-
-触发前会显示 10 秒倒计时，可输入 `n` 跳过：
-
-```
-方案涉及 5 个文件，跨越 3 个模块。预计 peer review：2–3 轮。
-按 Enter 执行，或输入 n 跳过。10 秒后自动执行...
-```
-
-## 能力表（Capability Map）
-
-默认路由顺序：`kimi → claude → pi`。
-
-在 `~/.roll/config.yaml` 中配置：
-
-```yaml
-peer_capability_map_default: "kimi claude pi"
-peer_capability_map_security: "kimi deepseek claude"
-peer_capability_map_architecture: "claude kimi"
-```
-
-支持的 peer Agent：`claude`、`kimi`、`pi`、`deepseek`、`codex`、`openai`、`opencode`。
-未安装的 Agent 会被自动跳过。
-
-## 可见性（tmux + 弹窗）
-
-与 loop 一样，peer review 在 tmux session（`roll-peer-<from>-<to>`）里运行。
-未静音时，终端窗口自动弹出，你可以实时看到跨 AI 协商过程。
-
-Session 在多轮协商期间保持存活，你可以用一个窗口看完整个多轮协商。
-终态决议（AGREE、ESCALATE、UNKNOWN、或 round ≥ 3）后，session 会自动清理 ——
-tmux session 被终止，终端窗口随后关闭。
-
-`mute` 文件（`~/.shared/roll/mute`）对 loop 和 peer 同时生效。
-`roll loop mute` / `roll loop unmute` 控制所有自主活动的弹窗。
-
-## Peer 对状态机
-
-每个 `from→to` 对维护一个健康状态：
-
-| 状态 | 含义 |
+| 参数 | 含义 |
 |------|------|
-| `active` | 健康，最近一次裁决为 AGREE |
-| `degraded` | 连续 1–2 次非 AGREE |
-| `abandoned` | 连续 3+ 次失败 — peer 对已停用 |
+| `--reviewer <agent>` | 直接指定 reviewer。 |
+| `--worker <agent>` | 用于异构选择的工作 agent；默认取当前项目配置的 agent。 |
+| `--mode auto` | 优先不同 provider，必要时降级为同 provider self review。 |
+| `--mode hetero` | 必须不同 provider；不可用时写 `ERROR` fact。 |
+| `--mode self` | 允许同 provider review。 |
+| `--prompt <text>` | 内联 prompt 文本。 |
+| `--file <path>` | 从文件读取 prompt。 |
+| `--json` | 将结构化 reviewer fact 打印为 JSON。 |
+| `--timeout-ms <ms>` | 单次 review 超时；默认 180000 ms。 |
 
-用 `roll peer status` 查看状态，用 `roll peer reset <from> <to>` 重置。
+Reviewer 输出必须包含且只包含一行 verdict：
 
-## 评审日志
-
-每次 peer review 的日志保存在：
-
+```text
+VERDICT: APPROVE|REQUEST_CHANGES
+REASON: <short reason>
+FINDING: <concrete issue>
 ```
-~/.local/share/roll/peer/logs/YYYYMMDD_HHMMSS_<from>_<to>.md
+
+verdict 行缺失或出现多行时，adapter 保守判为 `REQUEST_CHANGES`。
+
+## 记录的事实
+
+每次运行都会向这里追加一行 JSON：
+
+```text
+.roll/peer/runs.jsonl
 ```
 
-日志包含每一轮的完整提示词和响应内容。
+如果 reviewer 进程产生了输出，transcript 也会写到：
+
+```text
+.roll/peer/transcripts/
+```
+
+记录字段包括 reviewer agent、provider、command family、verdict、reason、
+findings、timeout/error 状态、耗时、transcript 路径和 evidence 路径。
+goal-mode 终审会在 `goal:final_review` 事件上写入同一组事实字段。
+
+## 外部 reviewer 与辅助 subagent
+
+`roll peer` 面向外部 provider reviewer CLI。Codex 内部 subagent 可以辅助并行分析，
+但不等同于外部 peer review。adapter 会把 `codex-subagent:*` / `subagent:*`
+身份视为 auxiliary，排除在异构 reviewer 选择之外。
+
+## 与 pairing 的关系
+
+`roll pair` 是构建期 gate：自主 cycle 中风险较高的交付 diff 会被异构 peer 复查，
+并写入 cycle 证据。`roll peer` 是操作员命令和可复用 adapter，用于一次性结构化
+review。两者共享 provider 多样性原则，但服务的 workflow 不同。

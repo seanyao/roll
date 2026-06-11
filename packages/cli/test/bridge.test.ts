@@ -66,6 +66,24 @@ describe("ported routing (no bash fallback)", () => {
     expect(usage()).toMatch(/\bprices\b/);
   });
 
+  it("FIX-255: peer is a first-class TS command, not an unknown bash fallback", () => {
+    registerAll();
+    expect(isPorted("peer")).toBe(true);
+    expect(usage()).toMatch(/\bpeer\b/);
+  });
+
+  it("FIX-255: bridge-enforced peer help exposes the full command surface", async () => {
+    registerAll();
+    const res = await captureDispatch(["peer", "--help"]);
+
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("Usage: roll peer");
+    expect(res.stdout).toContain("--worker <agent>");
+    expect(res.stdout).toContain("--mode auto|hetero|self");
+    expect(res.stdout).toContain("--json");
+    expect(res.stdout).toContain("--timeout-ms <ms>");
+  });
+
   it("REFACTOR-049: version/gc stay callable but are hidden from the main usage; lang is gone", () => {
     registerAll();
     expect(isPorted("lang")).toBe(false); // moved into `roll config lang`

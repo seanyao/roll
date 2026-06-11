@@ -33,3 +33,7 @@ export function textAgentArgv(agent: string, prompt: string): { bin: string; arg
       return null;
   }
 }
+
+export function textAgentCommandFamily(agent: string): string | undefined {
+  return textAgentArgv(agent, "")?.bin;
+}

@@ -74,7 +74,7 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 ### Multi-Agent
 
 - Fallback Routing — primary agent down → automatic failover `[highlight]`
-- `roll peer` — structured negotiation: propose → challenge → refine, up to 3 rounds `[core]`
+- `$roll-peer` — multi-round negotiation; `roll peer` records one-shot structured review facts `[core]`
 - PR Inbox — external PRs get AI review before merge; stale PRs auto-rebase `[new]`
 - `roll review-pr` — on-demand AI review for any PR, any agent `[new]`
 

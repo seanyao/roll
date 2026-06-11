@@ -1,6 +1,7 @@
 export * from "./agent/registry.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";
+export * from "./agent/peer-review.js";
 export * from "./agent/final-review.js";
 export * from "./backlog/github-sync.js";
 export * from "./backlog/idea.js";

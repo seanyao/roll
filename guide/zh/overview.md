@@ -74,7 +74,7 @@ Roll 运行在三个自主层上：
 ### 多 Agent 协作
 
 - 故障转移路由 — 主 agent 宕机 → 自动切换备用 `[highlight]`
-- `roll peer` — 结构化协商：提案 → 挑战 → 精炼，最多 3 轮 `[core]`
+- `$roll-peer` — 多轮协商；`roll peer` 记录一次性结构化 review facts `[core]`
 - PR 收件箱 — 外部 PR 先经 AI 评审再合入；过时 PR 自动 rebase `[new]`
 - `roll review-pr` — 对任意 PR 按需发起 AI 评审，可指定 agent `[new]`
 

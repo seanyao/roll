@@ -384,7 +384,7 @@ Without CD there is no verifiable target, rendering the Verification Gate meanin
 
 `$roll-peer` implements bilateral negotiation-style code review across AI clients. Supports arbitrary pairing between Claude, Kimi, DeepSeek, and Codex.
 
-How it works: the initiating agent submits a change summary and diff; the receiving agent independently reviews and issues an APPROVE / REFINE / OBJECT verdict. REFINE triggers revision and re-review; OBJECT escalates to discussion. The entire process is managed via `roll peer` CLI, with state persisted locally and full history/reset support.
+How it works: the initiating agent submits a change summary and diff; the receiving agent independently reviews and issues an APPROVE / REFINE / OBJECT verdict. REFINE triggers revision and re-review; OBJECT escalates to discussion. The `$roll-peer` skill owns the multi-round protocol; the `roll peer` CLI is the TS-native one-shot adapter that records structured reviewer facts in `.roll/peer/runs.jsonl` plus transcripts.
 
 Automatic trigger: `$roll-design` optionally invokes `$roll-peer` during direction review and plan review phases, where a different agent challenges the chosen direction or complete plan.
 

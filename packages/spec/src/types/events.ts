@@ -63,6 +63,10 @@ export type RollEvent =
       verdict: "APPROVE" | "REQUEST_CHANGES" | "TIMEOUT" | "ERROR" | "SKIPPED";
       reason: string;
       findings: string[];
+      commandFamily?: string;
+      durationMs?: number;
+      transcriptPath?: string;
+      evidencePath?: string;
       ts: number;
     }
   | {

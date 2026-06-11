@@ -780,9 +780,13 @@ describe("US-GOAL-006 — goal final review gate", () => {
         effectiveMode: "hetero",
         reviewer: "codex",
         provider: "openai",
+        commandFamily: "codex",
         verdict: "APPROVE",
         reason: "accepted",
         findings: ["AC and tests line up"],
+        durationMs: 1250,
+        transcriptPath: join(p, ".roll", "peer", "transcripts", "review.txt"),
+        evidencePath: join(p, ".roll", "peer", "runs.jsonl"),
       };
     });
 
@@ -792,7 +796,18 @@ describe("US-GOAL-006 — goal final review gate", () => {
     const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
     expect(goal.status).toBe("complete");
     const events = readEvents(p);
-    expect(events.some((e) => e.type === "goal:final_review" && e.verdict === "APPROVE" && e.reviewer === "codex")).toBe(true);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "goal:final_review" &&
+          e.verdict === "APPROVE" &&
+          e.reviewer === "codex" &&
+          e.commandFamily === "codex" &&
+          e.durationMs === 1250 &&
+          typeof e.transcriptPath === "string" &&
+          typeof e.evidencePath === "string",
+      ),
+    ).toBe(true);
     expect(events.some((e) => e.type === "goal:state" && e.to === "complete" && e.actor === "adjudicator")).toBe(true);
   });
 

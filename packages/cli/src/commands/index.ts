@@ -2,6 +2,7 @@
 import { registerPorted } from "../bridge.js";
 import { agentCommand } from "./agent.js";
 import { pairCommand } from "./pair.js";
+import { PEER_HELP, peerCommand } from "./peer.js";
 import { alertCommand } from "./alert.js";
 import { attestCommand } from "./attest.js";
 import { backlogCommand } from "./backlog.js";
@@ -134,6 +135,10 @@ export function registerAll(): void {
   // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
   // (v2 had no pairing).
   registerPorted("pair", pairCommand);
+  // `peer`: v3-native one-shot heterogeneous peer review adapter (FIX-255).
+  // This is a product-level command, distinct from cycle `pair` gates, and does
+  // not fall back to the retired bash peer surface.
+  registerPorted("peer", peerCommand, { help: PEER_HELP });
   // `backlog`: FULLY TS as of US-PORT-019. Display + block/defer/unblock/promote
   // + lint + unstick + sync (GitHub issues→backlog) all run native; no bash
   // fallback remains.

@@ -573,6 +573,84 @@ updatedAt: 2026-06-11T11:15:00Z
     expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "budget" && e.action === "budget_limited")).toBe(true);
   });
 
+  it("FIX-259: explicit --cards replaces a resumed paused all-backlog goal scope", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-256](.roll/features/documentation/FIX-256/spec.md) | docs | 📋 Todo |",
+      "| [US-OTHER](.roll/features/documentation/US-OTHER/spec.md) | other | 📋 Todo |",
+    ]);
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: all
+review: auto
+limits:
+status: paused
+usage:
+  cycles: 0
+  costUsd: 0
+createdAt: 2026-06-11T16:11:49Z
+updatedAt: 2026-06-11T16:12:26Z
+lastDecisionReason: no_cycle_terminal
+`,
+    );
+    const allowed: Array<string[] | undefined> = [];
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_004_000,
+      nowIso: () => "2026-06-12T00:10:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ allowedCards }) => {
+        allowed.push(allowedCards);
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-256"], deps));
+
+    expect(r.code).toBe(0);
+    expect(allowed).toEqual([["FIX-256"]]);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.scope).toEqual({ kind: "cards", cards: ["FIX-256"] });
+    const sessionStart = readEvents(p).find((e) => e.type === "goal:session_start");
+    expect(sessionStart).toMatchObject({ scope: { kind: "cards", cards: ["FIX-256"] } });
+  });
+
+  it("FIX-260: a run-once refusal bubbles the ALERT reason into the goal terminal reason", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-256](.roll/features/documentation/FIX-256/spec.md) | docs | 📋 Todo |",
+    ]);
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_004_100,
+      nowIso: () => "2026-06-12T00:11:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "ALERT-proj-abc123.md"),
+          "[2026-06-11T16:11:49.869Z] ALERT egress blocked (proxy?): network pre-check failed — cycle 20260612-001149-63334 refused to start\n",
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-256"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("no_cycle_terminal");
+    expect(goal.lastDecisionReason).toContain("egress blocked");
+    const end = readEvents(p).find((e) => e.type === "goal:session_end");
+    expect(end).toMatchObject({ reason: expect.stringContaining("egress blocked") });
+  });
+
   it("--budget 0 blocks a new goal before starting the first cycle", async () => {
     const p = project();
     let calls = 0;

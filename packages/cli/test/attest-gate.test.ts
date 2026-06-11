@@ -14,6 +14,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   readAttestGateMode,
   runAttestGate,
+  storyHasAcBlock,
   verificationReportFresh,
   verificationReportHasContent,
 } from "../src/runner/attest-gate.js";
@@ -139,6 +140,16 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
     const withSkip = withReport("FIX-TUI", 2000, '<div class="ev ev-text">{"taken":false,"skipped":"no GUI session"}</div>');
     writeFileSync(join(withSkip, ".roll", "features", "uncategorized", "FIX-TUI", "spec.md"), "**AC:**\n- [ ] TUI can be inspected\n");
     expect(verificationReportHasContent(withSkip, "FIX-TUI")).toBe(true);
+  });
+
+  it("FIX-261/FIX-258: modern Acceptance Criteria makes CLI text-only reports fail the screenshot floor", () => {
+    const noShot = withReport("FIX-MODERN", 2000);
+    writeFileSync(
+      join(noShot, ".roll", "features", "uncategorized", "FIX-MODERN", "spec.md"),
+      "# FIX-MODERN\n\n## Acceptance Criteria\n\n- [ ] CLI output can be inspected\n",
+    );
+    expect(storyHasAcBlock(noShot, "FIX-MODERN")).toBe(true);
+    expect(verificationReportHasContent(noShot, "FIX-MODERN")).toBe(false);
   });
 });
 

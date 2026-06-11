@@ -15,7 +15,7 @@ import {
 } from "@roll/spec";
 import { acquireLock, ghRepoSlug, prViewMergeInfo, projectIdentity, releaseLock, remoteUrl } from "@roll/infra";
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
@@ -77,6 +77,7 @@ interface GoOptions {
   noTmux: boolean;
   noWait: boolean;
   scope: GoalScope;
+  scopeSpecified: boolean;
   budgetUsd?: number;
   maxCycles?: number;
   forSeconds?: number;
@@ -210,6 +211,7 @@ function parseOptions(args: string[]): GoOptions {
   let worker = false;
   let noTmux = false;
   let noWait = false;
+  let scopeSpecified = false;
   let reviewMode: GoalReviewMode = "auto";
   let reviewModeSpecified = false;
 
@@ -229,13 +231,19 @@ function parseOptions(args: string[]): GoOptions {
     }
     if (arg === "--epic") {
       const epic = args[i + 1]?.trim() ?? "";
-      if (epic !== "") scope = { kind: "epic", epic };
+      if (epic !== "") {
+        scope = { kind: "epic", epic };
+        scopeSpecified = true;
+      }
       i += 1;
       continue;
     }
     if (arg.startsWith("--epic=")) {
       const epic = arg.slice("--epic=".length).trim();
-      if (epic !== "") scope = { kind: "epic", epic };
+      if (epic !== "") {
+        scope = { kind: "epic", epic };
+        scopeSpecified = true;
+      }
       continue;
     }
     if (arg === "--budget") {
@@ -297,12 +305,16 @@ function parseOptions(args: string[]): GoOptions {
     if (!arg.startsWith("-")) cards.push(...parseCards(arg));
   }
 
-  if (cards.length > 0) scope = { kind: "cards", cards };
+  if (cards.length > 0) {
+    scope = { kind: "cards", cards };
+    scopeSpecified = true;
+  }
   return {
     worker,
     noTmux,
     noWait,
     scope,
+    scopeSpecified,
     reviewMode,
     reviewModeSpecified,
     usageThreshold,
@@ -1021,6 +1033,7 @@ function applyRunOptions(goal: RollGoal, opts: GoOptions, at: string): RollGoal 
   const maxHours = opts.forSeconds !== undefined ? opts.forSeconds / 3600 : goal.limits.maxHours;
   return {
     ...goal,
+    scope: opts.scopeSpecified ? opts.scope : goal.scope,
     ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
     review: opts.reviewModeSpecified ? { mode: opts.reviewMode } : goal.review,
     limits: {
@@ -1030,6 +1043,27 @@ function applyRunOptions(goal: RollGoal, opts: GoOptions, at: string): RollGoal 
     },
     updatedAt: at,
   };
+}
+
+function latestAlertSummary(projectPath: string, slug: string, sinceSec: number): string | undefined {
+  const path = alertPath(projectPath, slug);
+  try {
+    if (!existsSync(path) || statSync(path).mtimeMs / 1000 < sinceSec) return undefined;
+    const lines = readFileSync(path, "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+    const line = [...lines].reverse().find((candidate) => /\b(ALERT|WARN|BLOCKED|refused|failed)\b/i.test(candidate));
+    if (line === undefined) return undefined;
+    return line.replace(/\s+/g, " ").slice(0, 220);
+  } catch {
+    return undefined;
+  }
+}
+
+function noCycleTerminalReason(projectPath: string, slug: string, sinceSec: number): string {
+  const alert = latestAlertSummary(projectPath, slug, sinceSec);
+  return alert === undefined ? "no_cycle_terminal" : `no_cycle_terminal: ${alert}`;
 }
 
 function applyBudgetGate(projectPath: string, bus: EventBus, session: string, goal: RollGoal, deps: LoopGoDeps): { goal: RollGoal; stopped: boolean; reason?: string } {
@@ -1315,7 +1349,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         break;
       }
       if (after.summary.cycles <= before.summary.cycles) {
-        stopReason = "no_cycle_terminal";
+        stopReason = noCycleTerminalReason(id.path, id.slug, startedSec);
         break;
       }
     }

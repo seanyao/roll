@@ -24,7 +24,7 @@
  * FIX-214 case, where a heading naming another card stole all the AC) — is also
  * "skipped", not "produced". A real delivery's report carries ≥1 AC + an ac-map.
  */
-import { parsePolicy } from "@roll/core";
+import { acForStory, parsePolicy } from "@roll/core";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
@@ -70,7 +70,7 @@ export function storyHasAcBlock(worktreeCwd: string, storyId: string): boolean |
   const spec = storySpecPath(worktreeCwd, storyId);
   if (spec === null) return null;
   try {
-    return /\*\*AC:\*\*[\s\S]*?-\s+\[[ xX]\]\s+/.test(readFileSync(spec, "utf8"));
+    return acForStory(readFileSync(spec, "utf8"), storyId, { fileOwned: true }).length > 0;
   } catch {
     return null;
   }

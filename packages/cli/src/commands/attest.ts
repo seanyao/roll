@@ -226,6 +226,14 @@ function warn(msg: string): void {
   process.stderr.write(`[roll] attest WARN: ${msg}\n`);
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function commandInProject(projectPath: string, command: string): string {
+  return `cd ${shellQuote(projectPath)} && ${command}`;
+}
+
 const DOC_ALIGNMENT_PATTERNS: readonly RegExp[] = [
   /^README(?:_[A-Z]+)?\.md$/,
   /^AGENTS\.md$/,
@@ -776,7 +784,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // ID-owned file is still tried first, so US-ATTEST-012 / FIX-214 / FIX-225
   // (a real owner wins; no cross-card hijack) are all preserved.
   const acItems = resolveStoryAcItems(projectPath, storyId);
-  if (acItems.length === 0) warn(`no **AC:** block for ${storyId} — report will carry facts only`);
+  if (acItems.length === 0) warn(`no AC block for ${storyId} — report will carry facts only`);
 
   // run dir + latest symlink (never overwrite history).
   const now = (deps.now ?? ((): Date => new Date()))();
@@ -801,7 +809,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         kind: "terminal",
         out: join(runDir, "screenshots", "terminal.png"),
         ...(captureTmux !== undefined ? { tmux: captureTmux } : {}),
-        ...(captureCommand !== undefined ? { command: captureCommand } : {}),
+        ...(captureCommand !== undefined ? { command: commandInProject(projectPath, captureCommand) } : {}),
         ...(captureRegion !== undefined ? { region: captureRegion } : {}),
       },
       deps.capture ?? {},

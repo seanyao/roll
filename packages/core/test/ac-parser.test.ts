@@ -1,7 +1,8 @@
 /**
  * US-ATTEST-001 — AC parser pins. Fixtures mirror the live roll-meta corpus
- * shapes (story headings at ##/###, `**AC:**` + task-list items, the
- * `**AC refreshed**:` near-miss, file-level blocks in one-card FIX files).
+ * shapes (story headings at ##/###, `**AC:**` + task-list items,
+ * `## Acceptance Criteria` card sections, the `**AC refreshed**:` near-miss,
+ * file-level blocks in one-card FIX files).
  */
 import { describe, expect, it } from "vitest";
 import { acForStory, parseAcBlocks } from "../src/attest/ac-parser.js";
@@ -51,6 +52,23 @@ text
 - [ ] PAUSE 检查真实生效
 `;
 
+const MODERN_CARD = `---
+id: FIX-261
+title: new card AC section
+---
+
+# FIX-261 — new card AC section
+
+## Acceptance Criteria
+
+- [ ] AC1 parser reads modern card checklist
+- [x] AC2 checked state remains informational
+
+## Notes
+
+not part of the AC block
+`;
+
 describe("parseAcBlocks", () => {
   it("attributes blocks to their story sections; near-miss lines are ignored", () => {
     const sections = parseAcBlocks(MULTI_STORY);
@@ -79,6 +97,17 @@ describe("parseAcBlocks", () => {
     expect(sections).toHaveLength(1);
     expect(sections[0]!.storyId).toBe("");
     expect(sections[0]!.items).toHaveLength(2);
+  });
+
+  it("FIX-261: `## Acceptance Criteria` starts an AC block for modern story cards", () => {
+    const sections = parseAcBlocks(MODERN_CARD);
+    expect(sections).toHaveLength(1);
+    expect(sections[0]!.storyId).toBe("");
+    expect(sections[0]!.items.map((item) => item.text)).toEqual([
+      "AC1 parser reads modern card checklist",
+      "AC2 checked state remains informational",
+    ]);
+    expect(sections[0]!.items[1]!.checked).toBe(true);
   });
 });
 
@@ -119,6 +148,11 @@ describe("acForStory", () => {
     expect(items).toHaveLength(2);
     expect(items[0]!.id).toBe("FIX-197:AC1");
     expect(items[1]!.text).toContain("PAUSE");
+  });
+
+  it("FIX-261: modern card AC headings feed acForStory with stable ids", () => {
+    const items = acForStory(MODERN_CARD, "FIX-261", { fileOwned: true });
+    expect(items.map((item) => item.id)).toEqual(["FIX-261:AC1", "FIX-261:AC2"]);
   });
 
   it("no AC anywhere → empty list (caller renders the Claimed ladder)", () => {

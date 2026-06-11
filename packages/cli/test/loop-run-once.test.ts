@@ -551,6 +551,38 @@ describe("FIX-232 AC2 — egress pre-check", () => {
     }
   });
 
+  it("Darwin DNS ok + TCP probe ok → not blocked", async () => {
+    const { egressBlocked } = await import("../src/commands/loop-run-once.js");
+    const save = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+    try {
+      expect(
+        await egressBlocked(
+          () => Promise.resolve([{ address: "140.82.113.4" }]),
+          () => Promise.resolve()
+        )
+      ).toBe(false);
+    } finally {
+      Object.defineProperty(process, "platform", { value: save, configurable: true });
+    }
+  });
+
+  it("Darwin DNS ok + TCP probe fails → blocked", async () => {
+    const { egressBlocked } = await import("../src/commands/loop-run-once.js");
+    const save = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+    try {
+      expect(
+        await egressBlocked(
+          () => Promise.resolve([{ address: "140.82.113.4" }]),
+          () => Promise.reject(new Error("ECONNREFUSED"))
+        )
+      ).toBe(true);
+    } finally {
+      Object.defineProperty(process, "platform", { value: save, configurable: true });
+    }
+  });
+
   it("on Darwin with real DNS resolve → returns boolean (best-effort probe)", async () => {
     // This test verifies the code path runs without throwing. The result
     // depends on actual network state: github.com:443 reachable → false;

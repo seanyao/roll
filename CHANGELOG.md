@@ -33,6 +33,7 @@
   <!-- evidence: .roll/features/goal-mode/US-GOAL-006/latest/US-GOAL-006-report.html -->
 - `roll loop resume` 清失败计数，不再恢复即熔断（FIX-251） `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-251/latest/FIX-251-report.html -->
+- loop 出网预检不再依赖 macOS 默认缺失的 GNU `timeout`，避免直连正常时误报 `egress blocked`（FIX-257） `[loop]`
 - 调度环境残留会被体检指出，不再静默污染 loop（FIX-232） `[loop]`
 
 

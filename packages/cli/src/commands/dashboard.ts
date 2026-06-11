@@ -311,7 +311,7 @@ function loadEvents(slug: string, days: number): RawEvent[] {
   }
   const existing = candidates.filter((p) => existsSync(p));
   if (existing.length === 0) return [];
-  const cutoff = Date.now() - (days + 1) * 86400 * 1000;
+  const cutoff = renderNow().getTime() - (days + 1) * 86400 * 1000;
   const out: RawEvent[] = [];
   const seen = new Set<string>();
   for (const p of existing) {
@@ -736,7 +736,7 @@ function applyRunRow(cy: Cycle, r: RunRecord, ts: Date | null): void {
       cy.outcome === "orphan") &&
     r.status
   ) {
-    const truth = cycleTruthFromRow(r as Record<string, unknown>, { nowSec: Math.floor(Date.now() / 1000) });
+    const truth = cycleTruthFromRow(r as Record<string, unknown>, { nowSec: Math.floor(renderNow().getTime() / 1000) });
     cy.outcome = outcomeToPanel(truth.outcome, truth.state);
   }
   // FIX-213: surface the v3 row's own cost/token fields. v2 rows omit these
@@ -1497,7 +1497,7 @@ function readScheduleSpec(projectRoot?: string): ScheduleSpec {
 }
 
 function nextCronHint(zh: boolean): string {
-  const now = new Date();
+  const now = renderNow();
   const { period, offset } = readScheduleSpec();
   // next fire = today's HH:offset in UTC+8, advance by `period` minutes.
   const sh = toShanghai(now);

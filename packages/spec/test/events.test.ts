@@ -40,9 +40,10 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(a.runDir).toBe("/r");
   });
   it("types goal lifecycle events (US-GOAL-001)", () => {
-    const created: RollEvent = { type: "goal:created", schema: "goal.v1", scope: { kind: "epic", epic: "goal-mode" }, status: "active", ts: 1 };
+    const created: RollEvent = { type: "goal:created", schema: "goal.v1", scope: { kind: "epic", epic: "goal-mode" }, status: "active", review: "auto", ts: 1 };
     const state: RollEvent = { type: "goal:state", schema: "goal.v1", from: "active", to: "paused", actor: "system", reason: "owner_pause", ts: 2 };
     expect(created.type).toBe("goal:created");
+    expect(created.review).toBe("auto");
     expect(state.to).toBe("paused");
   });
   it("types goal go session events (US-GOAL-002)", () => {
@@ -96,5 +97,32 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     };
     expect(skipped.type).toBe("goal:card_skipped");
     expect(skipped.zeroDeliveries).toBe(2);
+  });
+
+  it("types goal final review events (US-GOAL-006)", () => {
+    const reviewed: RollEvent = {
+      type: "goal:final_review",
+      sessionId: "goal-20260611-100000",
+      mode: "auto",
+      effectiveMode: "hetero",
+      reviewer: "codex",
+      provider: "openai",
+      verdict: "APPROVE",
+      reason: "accepted",
+      findings: ["AC and tests line up"],
+      ts: 1_780_000_300,
+    };
+    const degraded: RollEvent = {
+      type: "goal:review_degraded",
+      sessionId: "goal-20260611-100000",
+      from: "auto",
+      to: "self",
+      reviewer: "claude",
+      provider: "anthropic",
+      reason: "single_provider_available",
+      ts: 1_780_000_301,
+    };
+    expect(reviewed.verdict).toBe("APPROVE");
+    expect(degraded.to).toBe("self");
   });
 });

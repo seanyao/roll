@@ -35,6 +35,16 @@ function capture(fn: () => Promise<number>): Promise<{ code: number; out: string
 }
 
 describe("US-GOAL-001 — roll loop goal", () => {
+  it("prints help for the goal status surface", async () => {
+    const p = project();
+    const r = await capture(() => loopGoalCommand(["--help"], { projectPath: () => p }));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Usage: roll loop goal");
+    expect(r.out).toContain("review mode");
+    expect(r.out).toContain(".roll/loop/goal.yaml");
+    expect(r.err).toBe("");
+  });
+
   it("prints a friendly empty state when goal.yaml is absent", async () => {
     const p = project();
     const r = await capture(() => loopGoalCommand([], { projectPath: () => p }));
@@ -58,6 +68,7 @@ limits:
   maxCycles: 12
   maxHours: 5
 status: budget_limited
+review: self
 usage:
   cycles: 4
   costUsd: 3.25
@@ -74,6 +85,8 @@ lastDecisionReason: weekly_limit_guard
     expect(r.out).toContain("epic goal-mode");
     expect(r.out).toContain("cycles 4");
     expect(r.out).toContain("$3.25 / $8.00");
+    expect(r.out).toContain("Review");
+    expect(r.out).toContain("self");
     expect(r.out).toContain("weekly_limit_guard");
   });
 

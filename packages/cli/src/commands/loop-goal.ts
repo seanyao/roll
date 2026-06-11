@@ -39,6 +39,7 @@ function renderGoal(goal: RollGoal): string {
   return [
     `Goal status / 目标状态: ${goal.status}`,
     `Scope / 范围: ${scopeLabel(goal.scope)}`,
+    `Review / 终审: ${goal.review.mode}`,
     `Usage / 用量: cycles ${goal.usage.cycles}, cost ${cost} / ${budget}`,
     `Limits / 限制: ${limitLabel(goal)}`,
     `Last decision / 最近裁定: ${goal.lastDecisionReason ?? "-"}`,
@@ -48,7 +49,24 @@ function renderGoal(goal: RollGoal): string {
   ].join("\n");
 }
 
-export async function loopGoalCommand(_args: string[], deps: LoopGoalDeps = realDeps()): Promise<number> {
+function hasHelpArg(args: readonly string[]): boolean {
+  return args.includes("--help") || args.includes("-h");
+}
+
+function loopGoalHelp(): string {
+  return [
+    "Usage: roll loop goal",
+    "  Show the persisted goal state from .roll/loop/goal.yaml, including scope, review mode, usage, limits, and last decision.",
+    "  显示 .roll/loop/goal.yaml 中持久化的 goal 状态，包括范围、终审模式、用量、限制和最近裁定。",
+    "",
+  ].join("\n");
+}
+
+export async function loopGoalCommand(args: string[], deps: LoopGoalDeps = realDeps()): Promise<number> {
+  if (hasHelpArg(args)) {
+    process.stdout.write(loopGoalHelp());
+    return 0;
+  }
   const project = deps.projectPath();
   const path = goalPath(project);
   if (!existsSync(path)) {

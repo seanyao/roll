@@ -1,10 +1,10 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseGoalYaml } from "@roll/spec";
-import { loopGoCommand, type LoopGoDeps } from "../src/commands/loop-go.js";
+import { loopGoCommand, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -55,7 +55,57 @@ function writeIndex(p: string, stories: Record<string, string>): void {
   writeFileSync(join(p, ".roll", "index.json"), `${JSON.stringify({ stories }, null, 2)}\n`);
 }
 
+function completeGoalDeps(p: string, review?: NonNullable<LoopGoDeps["finalReview"]>): LoopGoDeps {
+  let calls = 0;
+  const deps: LoopGoDeps = {
+    identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+    pid: () => 12345,
+    nowSec: () => 1_780_000_000 + calls,
+    nowIso: () => `2026-06-11T10:00:0${calls}Z`,
+    hasTmux: () => false,
+    startTmux: () => false,
+    prEvidence: () => Promise.resolve({ state: "MERGED", mergedAtSec: 1_779_999_000 }),
+    runOnce: async ({ projectPath }) => {
+      calls += 1;
+      writeFileSync(
+        join(projectPath, ".roll", "loop", "events.ndjson"),
+        `${JSON.stringify({ type: "cycle:start", cycleId: `cycle-${calls}`, storyId: "US-DONE", agent: "", model: "", ts: 1_780_000_000 + calls })}\n`,
+        { flag: "a" },
+      );
+      writeFileSync(
+        join(projectPath, ".roll", "loop", "runs.jsonl"),
+        `${JSON.stringify({ story_id: "US-DONE", cycle_id: `cycle-${calls}`, ts: `2026-06-11T10:00:0${calls}Z`, agent: "claude", status: "done" })}\n`,
+        { flag: "a" },
+      );
+      return 0;
+    },
+  };
+  if (review !== undefined) deps.finalReview = review;
+  return deps;
+}
+
+const approveFinalReview: NonNullable<LoopGoDeps["finalReview"]> = async () => ({
+  effectiveMode: "hetero",
+  reviewer: "codex",
+  provider: "openai",
+  verdict: "APPROVE",
+  reason: "accepted",
+  findings: [],
+});
+
 describe("US-GOAL-002 — roll loop go", () => {
+  it("prints help for review modes without starting a session", async () => {
+    const p = project();
+    const r = await capture(() => loopGoCommand(["--help"], completeGoalDeps(p)));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Usage: roll loop go");
+    expect(r.out).toContain("--review <mode>");
+    expect(r.out).toContain("hetero");
+    expect(r.out).toContain("goal:final_review SKIPPED");
+    expect(existsSync(join(p, ".roll", "loop", "goal.yaml"))).toBe(false);
+    expect(r.err).toBe("");
+  });
+
   it("runs cycles back-to-back until a pause marker, then pauses the goal at the cycle boundary", async () => {
     const p = project();
     let calls = 0;
@@ -101,6 +151,7 @@ describe("US-GOAL-002 — roll loop go", () => {
     expect(types).toContain("goal:session_start");
     expect(types).toContain("goal:state");
     expect(types).toContain("goal:session_end");
+    expect(readEvents(p).find((e) => e.type === "goal:created")).toMatchObject({ review: "auto" });
   });
 
   it("refuses a second go worker while the go session lock is held", async () => {
@@ -146,6 +197,7 @@ describe("US-GOAL-003 — goal truth adjudication", () => {
       hasTmux: () => false,
       startTmux: () => false,
       prEvidence: () => Promise.resolve({ state: "MERGED", mergedAtSec: 1_779_999_000 }),
+      finalReview: approveFinalReview,
       runOnce: async ({ projectPath }) => {
         calls += 1;
         writeFileSync(
@@ -223,6 +275,7 @@ describe("US-GOAL-003 — goal truth adjudication", () => {
       hasTmux: () => false,
       startTmux: () => false,
       prEvidence: () => Promise.resolve({ state: "MERGED", mergedAtSec: 1_779_999_000 }),
+      finalReview: approveFinalReview,
       runOnce: async ({ projectPath }) => {
         calls += 1;
         writeFileSync(
@@ -257,6 +310,7 @@ describe("US-GOAL-003 — goal truth adjudication", () => {
       nowIso: () => `2026-06-11T09:30:0${calls}Z`,
       hasTmux: () => false,
       startTmux: () => false,
+      finalReview: approveFinalReview,
       runOnce: async ({ projectPath }) => {
         calls += 1;
         writeFileSync(
@@ -371,5 +425,200 @@ describe("US-GOAL-004 — no-progress suppression", () => {
     expect(allowed[0]).toEqual(["US-STUCK", "US-NEXT"]);
     expect(allowed[1]).toEqual(["US-STUCK", "US-NEXT"]);
     expect(allowed[2]).toEqual(["US-NEXT"]);
+  });
+});
+
+describe("US-GOAL-006 — goal final review gate", () => {
+  it("APPROVE completes the goal and records the final review event", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    const deps = completeGoalDeps(p, async (input) => {
+      expect(input.mode).toBe("auto");
+      expect(input.evaluation.reason).toBe("all_delivered");
+      return {
+        effectiveMode: "hetero",
+        reviewer: "codex",
+        provider: "openai",
+        verdict: "APPROVE",
+        reason: "accepted",
+        findings: ["AC and tests line up"],
+      };
+    });
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("complete");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:final_review" && e.verdict === "APPROVE" && e.reviewer === "codex")).toBe(true);
+    expect(events.some((e) => e.type === "goal:state" && e.to === "complete" && e.actor === "adjudicator")).toBe(true);
+  });
+
+  it("REQUEST_CHANGES pauses the goal and records the review reason", async () => {
+    const p = project();
+    writeIndex(p, { "US-DONE": "goal-mode" });
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    const deps = completeGoalDeps(p, async () => ({
+      effectiveMode: "hetero",
+      reviewer: "codex",
+      provider: "openai",
+      verdict: "REQUEST_CHANGES",
+      reason: "missing edge test",
+      findings: ["Add regression coverage for empty scope"],
+    }));
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("missing edge test");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:final_review" && e.verdict === "REQUEST_CHANGES")).toBe(true);
+    expect(events.some((e) => e.type === "goal:state" && e.to === "complete")).toBe(false);
+    expect(events.some((e) => e.type === "goal:state" && e.to === "paused" && String(e.reason).includes("missing edge test"))).toBe(true);
+    const note = readFileSync(
+      join(p, ".roll", "features", "goal-mode", "US-DONE", "notes", "final-review-goal-20260611100000-12345.md"),
+      "utf8",
+    );
+    expect(note).toContain("missing edge test");
+    expect(note).toContain("Add regression coverage");
+  });
+
+  it("REQUEST_CHANGES stops the default go session instead of looping idle cycles", async () => {
+    const p = project();
+    writeIndex(p, { "US-DONE": "goal-mode" });
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    let reviewCalls = 0;
+    const deps = completeGoalDeps(p, async (input) => {
+      reviewCalls += 1;
+      expect(input.workerAgents).toEqual(["claude"]);
+      return {
+        effectiveMode: "hetero",
+        reviewer: "codex",
+        provider: "openai",
+        verdict: "REQUEST_CHANGES",
+        reason: "missing replay evidence",
+        findings: [],
+      };
+    });
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE"], deps));
+
+    expect(r.code).toBe(0);
+    expect(reviewCalls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    const events = readEvents(p);
+    expect(events.filter((e) => e.type === "goal:final_review")).toHaveLength(1);
+    expect(events.some((e) => e.type === "goal:session_end" && String(e.reason).includes("missing replay evidence"))).toBe(true);
+  });
+
+  it("anchors the reviewer verdict line and fails closed on quoted APPROVE text", async () => {
+    const p = project();
+    writeIndex(p, { "US-DONE": "goal-mode" });
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    const bin = join(p, "bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "claude"),
+      "#!/bin/sh\nprintf 'VERDICT: REQUEST_CHANGES\\nREASON: quoted approve is not approval\\nFINDING: do not treat VERDICT: APPROVE examples as approval\\n'\n",
+      "utf8",
+    );
+    chmodSync(join(bin, "claude"), 0o755);
+    const prevPath = process.env["PATH"];
+    process.env["PATH"] = `${bin}:${prevPath ?? ""}`;
+    try {
+      const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE", "--review", "self"], completeGoalDeps(p)));
+      expect(r.code).toBe(0);
+      const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+      expect(goal.status).toBe("paused");
+      const events = readEvents(p);
+      expect(events.some((e) => e.type === "goal:final_review" && e.verdict === "REQUEST_CHANGES")).toBe(true);
+      expect(events.some((e) => e.type === "goal:state" && e.to === "complete")).toBe(false);
+    } finally {
+      if (prevPath === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = prevPath;
+    }
+  });
+
+  it("--review off writes a skipped final_review event and completes", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    let reviewCalled = false;
+    const deps = completeGoalDeps(p, async () => {
+      reviewCalled = true;
+      return {
+        effectiveMode: "hetero",
+        reviewer: "codex",
+        provider: "openai",
+        verdict: "APPROVE",
+        reason: "accepted",
+        findings: [],
+      };
+    });
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE", "--review", "off"], deps));
+
+    expect(r.code).toBe(0);
+    expect(reviewCalled).toBe(false);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("complete");
+    expect(goal.review.mode).toBe("off");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:final_review" && e.effectiveMode === "off" && e.verdict === "SKIPPED")).toBe(true);
+  });
+
+  it("auto single-agent degradation is recorded before completion", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    const deps = completeGoalDeps(p, async () => ({
+      effectiveMode: "self",
+      reviewer: "claude",
+      provider: "anthropic",
+      verdict: "APPROVE",
+      reason: "accepted_self_review",
+      findings: [],
+      degradedReason: "single_provider_available",
+    }));
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE"], deps));
+
+    expect(r.code).toBe(0);
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:review_degraded" && e.to === "self" && e.reason === "single_provider_available")).toBe(true);
+    expect(events.some((e) => e.type === "goal:final_review" && e.effectiveMode === "self" && e.verdict === "APPROVE")).toBe(true);
+  });
+
+  it("final review timeout resolves without waiting for process close", async () => {
+    const p = project();
+    const bin = join(p, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\nsleep 30\n", "utf8");
+    chmodSync(join(bin, "claude"), 0o755);
+    const prevPath = process.env["PATH"];
+    process.env["PATH"] = `${bin}:${prevPath ?? ""}`;
+    const started = Date.now();
+    try {
+      const result = await spawnFinalReviewAgent("claude", p, "prompt", 50);
+      expect(result.status).toBe("timeout");
+      expect(Date.now() - started).toBeLessThan(1000);
+    } finally {
+      if (prevPath === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = prevPath;
+    }
   });
 });

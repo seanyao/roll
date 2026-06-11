@@ -30,6 +30,7 @@ describe("US-GOAL-001 — goal.yaml schema", () => {
     const goal = parseGoalYaml(GOAL_YAML);
     expect(goal.schema).toBe(GOAL_SCHEMA_VERSION);
     expect(goal.scope).toEqual({ kind: "cards", cards: ["US-GOAL-001", "US-GOAL-002"] });
+    expect(goal.review.mode).toBe("auto");
     expect(goal.budgetUsd).toBe(12.5);
     expect(goal.limits).toEqual({ maxCycles: 7, maxHours: 5 });
     expect(goal.status).toBe("active");
@@ -37,11 +38,21 @@ describe("US-GOAL-001 — goal.yaml schema", () => {
     expect(goal.lastDecisionReason).toBe("waiting_for_merge");
   });
 
+  it("defaults old goal.yaml files without review to auto", () => {
+    expect(parseGoalYaml(GOAL_YAML).review).toEqual({ mode: "auto" });
+  });
+
+  it("parses an explicit final review mode", () => {
+    const goal = parseGoalYaml(GOAL_YAML.replace("status: active", "review: hetero\nstatus: active"));
+    expect(goal.review.mode).toBe("hetero");
+  });
+
   it("renders an explicit, re-parseable goal.yaml", () => {
     const goal = parseGoalYaml(GOAL_YAML);
     const rendered = renderGoalYaml(goal);
     expect(rendered).toContain("schema: goal.v1");
     expect(rendered).toContain("cards: [US-GOAL-001, US-GOAL-002]");
+    expect(rendered).toContain("review: auto");
     expect(parseGoalYaml(rendered)).toEqual(goal);
   });
 });

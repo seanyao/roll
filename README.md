@@ -69,6 +69,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | **Config & machine** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
+| `roll prices [refresh]` | Model price table (cost accounting source) |
 | `roll skills` | Skill catalog status |
 | `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |

@@ -1123,6 +1123,54 @@
   "en": "No peer review history yet.",
   "zh": "暂无 peer review 记录。"
  },
+ "prices.unknown_subcommand": {
+  "en": "Unknown subcommand: %s",
+  "zh": "未知子命令：%s"
+ },
+ "prices_refresh.unknown_flag_1": {
+  "en": "Unknown flag: %s",
+  "zh": "未知参数: %s"
+ },
+ "prices_refresh.roll_unknown_vendor_vendor": {
+  "en": "[roll] unknown vendor: {vendor}",
+  "zh": "未知厂商"
+ },
+ "prices_refresh.roll_known_vendors_join_sorted_vendor": {
+  "en": "[roll] known vendors: {', '.join(sorted(VENDOR_URLS))}",
+  "zh": "已知厂商"
+ },
+ "prices_refresh.roll_keeping_existing_snapshot_no_changes": {
+  "en": "[roll] keeping existing snapshot, no changes written",
+  "zh": "保留旧快照，未写入新文件"
+ },
+ "prices_refresh.roll_keeping_existing_snapshot_no_changes_2": {
+  "en": "[roll] keeping existing snapshot, no changes written",
+  "zh": "保留旧快照，未写入新文件"
+ },
+ "prices_refresh.roll_up_to_date": {
+  "en": "[roll] up to date",
+  "zh": "价格快照已是最新"
+ },
+ "prices_refresh.roll_baseline_snapshot_written": {
+  "en": "[roll] baseline snapshot written",
+  "zh": "写入首份基线快照"
+ },
+ "prices_refresh.roll_new_snapshot_written": {
+  "en": "[roll] new snapshot written",
+  "zh": "写入新版价格快照"
+ },
+ "prices_show.price_snapshot": {
+  "en": "price snapshot",
+  "zh": "价格快照"
+ },
+ "prices_show.snapshots_len_mp_snapshots_loaded": {
+  "en": "  snapshots      {len(mp._SNAPSHOTS)} loaded",
+  "zh": "已加载"
+ },
+ "prices_show.rates_per_million_tokens": {
+  "en": "rates per million tokens",
+  "zh": "每百万 token 单价"
+ },
  "setup.unknown_argument_1": {
   "en": "Unknown argument: %s",
   "zh": "未知参数: %s"

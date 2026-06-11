@@ -59,6 +59,7 @@ import {
   loopResumeCommand,
 } from "./loop-sched.js";
 import { offboardCommand } from "./offboard.js";
+import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
 import { releaseShipCommand } from "./release-ship.js";
 import { releaseWaiverCommand } from "./release-waiver.js";
@@ -151,9 +152,11 @@ export function registerAll(): void {
     if (args[0] === "waiver") return releaseWaiverCommand(args.slice(1));
     return releaseCommand(args);
   });
-  // REFACTOR-051: `roll prices` retired. Cost accounting still reads the
-  // versioned `lib/prices/` snapshots through core; snapshot refresh is an
-  // internal maintenance action, not a public top-level command.
+  // `prices`: full surface TS (show/help/unknown + refresh network write).
+  // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
+  // fallback remains (US-PORT-017). REFACTOR-051 owner review kept this as the
+  // human-operated cost-accounting source.
+  registerPorted("prices", pricesCommand);
   // `config`: FULLY TS now (US-PORT-006 — 整个 config 命令收口). Read surface
   // (help/--list/key read) + write surface + the three compact facades
   // (loop-window/loop-schedule/dream-time) all run native; no bash fallback.

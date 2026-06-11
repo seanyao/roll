@@ -28,6 +28,7 @@ lib/i18n/
 ├── peer_help.sh      # peer --help text
 ├── peer_reset.sh     # peer reset confirmation messages
 ├── peer_status.sh    # peer status output
+├── prices_refresh.sh # prices refresh output
 └── skills/           # per-skill i18n overrides
 ```
 

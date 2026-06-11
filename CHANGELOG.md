@@ -36,6 +36,21 @@
 - loop 出网预检不再依赖 macOS 默认缺失的 GNU `timeout`，避免直连正常时误报 `egress blocked`（FIX-257） `[loop]`
 - 调度环境残留会被体检指出，不再静默污染 loop（FIX-232） `[loop]`
 
+### 稳定性
+
+- `roll loop go --cards` 不再沿用上次暂停的全量范围（FIX-259）
+- goal 失败原因现在直达状态页，不再只剩 `no_cycle_terminal`（FIX-260）
+- 验收证据不再只靠文字声明，缺截图会被指出（FIX-258）
+- `roll attest --capture-command` 不再把失败命令当验收通过（FIX-263）
+- `roll attest --capture-command` 相对路径按项目目录执行（FIX-262）
+
+### 工程和测试
+
+- `roll attest` 现在识别新卡的验收清单（FIX-261）
+  <!-- evidence: .roll/features/acceptance-evidence/FIX-261/latest/FIX-261-report.html -->
+- 新 worktree 跑 `roll test` 会自动补齐 skills（FIX-264）
+- goal/off/pause 的文档讲清了和定时 loop 的关系（FIX-256）
+
 
 ## v3.611.2 — 2026-06-11
 

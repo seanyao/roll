@@ -248,12 +248,16 @@ function epicFold(e: DossierEpic): string {
   const t = tallyStates([e]);
   const states = [...new Set(e.stories.map(storyState))].join(" ");
   const search = `${e.name} ${e.stories.map((s) => `${s.id} ${s.title ?? ""}`).join(" ")}`;
+  const hasOverview = (e.docs ?? []).some((d) => d.kind === "overview");
+  const docMark = hasOverview
+    ? `<span class="epic-docmark has-overview">${bi("overview", "总览")}</span>`
+    : `<span class="epic-docmark no-overview">${bi("no overview", "无总览")}</span>`;
   return (
     `<details class="epic" data-search="${esc(search)}" data-status="${states}" data-truth="${e.delivered > 0 ? "1" : "0"}">` +
     `<summary class="epic-sum">` +
     `<span class="caret">▸</span>` +
     `<span class="epic-main">` +
-    `<span class="epic-name"><a href="${encodeURIComponent(e.name)}/index.html">${esc(e.name)}</a></span>` +
+    `<span class="epic-name"><a href="${encodeURIComponent(e.name)}/index.html">${esc(e.name)}</a>${docMark}</span>` +
     spectrum(t, "epic-mini") +
     `</span>` +
     `<span class="epic-tally"><b>${e.delivered}</b><span class="of"> / ${e.stories.length}</span></span>` +

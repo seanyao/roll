@@ -40,6 +40,27 @@ function project(): string {
   return p;
 }
 
+function projectWithEpicDocs(): string {
+  const p = project();
+  const f = join(p, ".roll", "features");
+  writeFileSync(join(f, "alpha", "alpha.md"), "# Alpha overview\n");
+  writeFileSync(join(f, "alpha", "alpha-plan.md"), "# Alpha plan\n");
+  writeFileSync(join(f, "alpha", "deep dive.md"), "# Deep dive\n");
+  writeFileSync(join(f, "alpha", "notes.md"), "# Alpha notes\n");
+  return p;
+}
+
+function projectWithPlanOnlyDoc(): string {
+  const p = project();
+  const f = join(p, ".roll", "features");
+  writeFileSync(join(f, "beta", "beta-plan.md"), "# Beta plan\n");
+  return p;
+}
+
+function epicDocsSection(page: string): string {
+  return /<section class="epic-docs[\s\S]*?<\/section>\n/.exec(page)?.[0] ?? "";
+}
+
 describe("collectDossier — US-DOSSIER-001a data model", () => {
   it("walks epics/stories, reads spec meta, detects truth via latest pointer", () => {
     const epics = collectDossier(project());
@@ -101,6 +122,16 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     expect(epic.stories.find((s) => s.id === "US-OLD-3")!.legacy).toBe(false);
     // a v3 card delivered via latest/ is never legacy.
     expect(collectDossier(project())[0]!.stories.find((s) => s.id === "US-A-1")!.legacy).toBe(false);
+  });
+
+  it("US-DOSSIER-009: collects epic-root markdown docs with overview first, plan second, then other docs", () => {
+    const alpha = collectDossier(projectWithEpicDocs()).find((e) => e.name === "alpha")!;
+    expect(alpha.docs).toEqual([
+      { file: "alpha.md", href: "alpha.md", kind: "overview", title: "Alpha overview" },
+      { file: "alpha-plan.md", href: "alpha-plan.md", kind: "plan", title: "Alpha plan" },
+      { file: "deep dive.md", href: "deep%20dive.md", kind: "doc", title: "Deep dive" },
+      { file: "notes.md", href: "notes.md", kind: "doc", title: "Alpha notes" },
+    ]);
   });
 });
 
@@ -269,6 +300,16 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).not.toContain('class="tsub"');
   });
 
+  it("US-DOSSIER-009: epic folds mark whether an overview doc exists", () => {
+    const withDocs = renderFeaturesIndex(collectDossier(projectWithEpicDocs()));
+    expect(withDocs).toContain('class="epic-docmark has-overview"');
+    expect(withDocs).toContain("overview");
+    expect(withDocs).toContain("总览");
+    expect(withDocs).toContain('class="epic-docmark no-overview"');
+    expect(withDocs).toContain("no overview");
+    expect(withDocs).toContain("无总览");
+  });
+
   it("self-containment: no external scripts/links/images; chrome + tokens inline", () => {
     expect(html).not.toContain("<script src=");
     expect(html).not.toContain("<link");
@@ -320,6 +361,41 @@ describe("renderEpicPage — US-DOSSIER-001b", () => {
     expect(html).not.toContain("<script src=");
     expect(html).not.toContain("<link");
     expect(html).toContain("localStorage");
+  });
+
+  it("US-DOSSIER-009: masthead surfaces overview, plan, and other epic-root docs as file://-safe relative links", () => {
+    const alphaWithDocs = collectDossier(projectWithEpicDocs()).find((e) => e.name === "alpha")!;
+    const page = renderEpicPage(alphaWithDocs);
+    expect(page).toContain("Design docs");
+    expect(page).toContain("设计文档");
+    expect(page).toContain('href="alpha.md"');
+    expect(page).toContain('href="alpha-plan.md"');
+    expect(page).toContain('href="deep%20dive.md"');
+    expect(page).toContain('href="notes.md"');
+    expect(page).toContain("Overview");
+    expect(page).toContain("Plan");
+    expect(page).toContain("Alpha notes");
+    expect(epicDocsSection(page)).toMatchSnapshot();
+  });
+
+  it("US-DOSSIER-009: epics without root markdown show a quiet convention hint", () => {
+    const beta = collectDossier(project()).find((e) => e.name === "beta")!;
+    const page = renderEpicPage(beta);
+    expect(page).toContain("No epic-root design docs yet");
+    expect(page).toContain("暂无 epic 根设计文档");
+    expect(page).toContain(".roll/features/beta/beta.md");
+    expect(page).toContain(".roll/features/beta/beta-plan.md");
+    expect(epicDocsSection(page)).toMatchSnapshot();
+  });
+
+  it("US-DOSSIER-009: epics with plan docs but no overview still show the overview convention", () => {
+    const beta = collectDossier(projectWithPlanOnlyDoc()).find((e) => e.name === "beta")!;
+    const page = renderEpicPage(beta);
+    expect(page).toContain('href="beta-plan.md"');
+    expect(page).toContain("No overview doc yet");
+    expect(page).toContain("暂无总览文档");
+    expect(page).toContain(".roll/features/beta/beta.md");
+    expect(epicDocsSection(page)).toMatchSnapshot();
   });
 });
 

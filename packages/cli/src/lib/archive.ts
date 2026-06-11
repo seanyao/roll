@@ -255,11 +255,21 @@ export interface DossierStory {
   legacy: boolean;
 }
 
+export type DossierEpicDocKind = "overview" | "plan" | "doc";
+
+export interface DossierEpicDoc {
+  file: string;
+  href: string;
+  kind: DossierEpicDocKind;
+  title: string;
+}
+
 /** One epic group with its wish→truth tally. */
 export interface DossierEpic {
   name: string;
   stories: DossierStory[];
   delivered: number;
+  docs?: DossierEpicDoc[];
 }
 
 export interface CollectDossierOptions {
@@ -306,6 +316,59 @@ function specMeta(specPath: string): { title?: string; created?: string; markedD
     if (h1 !== null && (h1[1] ?? "").trim() !== "") out.title = (h1[1] ?? "").trim().replace(/\s*[✅🚫🔨].*$/u, "");
   }
   return out;
+}
+
+function markdownTitle(path: string, fallback: string): string {
+  try {
+    const text = readFileSync(path, "utf8");
+    const h1 = /^#\s+(.+)$/m.exec(text);
+    const title = (h1?.[1] ?? "").trim();
+    if (title !== "") return title;
+  } catch {
+    /* unreadable doc: use filename fallback */
+  }
+  return fallback;
+}
+
+function epicDocKind(epic: string, file: string): DossierEpicDocKind {
+  if (file === `${epic}.md`) return "overview";
+  if (file.endsWith("-plan.md")) return "plan";
+  return "doc";
+}
+
+function epicDocRank(kind: DossierEpicDocKind): number {
+  if (kind === "overview") return 0;
+  if (kind === "plan") return 1;
+  return 2;
+}
+
+function compareEpicDocFile(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+function collectEpicDocs(root: string, epic: string): DossierEpicDoc[] {
+  const dir = join(root, epic);
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".md"))
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+  return files
+    .map((file) => {
+      const kind = epicDocKind(epic, file);
+      const fallback = file.replace(/\.md$/, "");
+      return {
+        file,
+        href: encodeURIComponent(file),
+        kind,
+        title: markdownTitle(join(dir, file), fallback),
+      };
+    })
+    .sort((a, b) => epicDocRank(a.kind) - epicDocRank(b.kind) || compareEpicDocFile(a.file, b.file));
 }
 
 /**
@@ -399,7 +462,14 @@ export function collectDossier(projectPath: string, opts: CollectDossierOptions 
       if (meta.created !== undefined) story.created = meta.created;
       stories.push(story);
     }
-    if (stories.length > 0) epics.push({ name: epic, stories, delivered: stories.filter((s) => s.delivered).length });
+    if (stories.length > 0) {
+      epics.push({
+        name: epic,
+        stories,
+        delivered: stories.filter((s) => s.delivered).length,
+        docs: collectEpicDocs(root, epic),
+      });
+    }
   }
   return epics;
 }

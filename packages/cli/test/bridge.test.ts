@@ -38,12 +38,14 @@ describe("ported routing (no bash fallback)", () => {
     expect(isPorted("migrate-features")).toBe(false);
     expect(isPorted("archive")).toBe(false);
 
-    for (const command of ["migrate", "feedback", "prices"]) {
+    for (const command of ["migrate", "feedback"]) {
       expect(isPorted(command)).toBe(false);
       expect(usage()).not.toMatch(new RegExp(`\\b${command}\\b`));
       const res = await dispatch([command]);
       expect(res.status).toBe(1);
     }
+    expect(isPorted("prices")).toBe(true);
+    expect(usage()).toMatch(/\bprices\b/);
   });
 
   it("REFACTOR-049: version/gc stay callable but are hidden from the main usage; lang is gone", () => {

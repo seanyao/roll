@@ -69,6 +69,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | **配置 · 本机** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | 读写 roll 配置(语言、loop 窗口、dream 时间) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | 本机复杂度槽位路由(easy/default/hard/fallback) |
+| `roll prices [refresh]` | 模型价目表(成本核算来源) |
 | `roll skills` | 技能目录状态 |
 | `roll setup [-f]` | 首次安装或重新同步约定到所有 AI 客户端 |
 | `roll update` | 升级到最新版本并重新同步 |

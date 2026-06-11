@@ -32,6 +32,4 @@ CNY-priced models (pi, DeepSeek, Kimi) use `"currency": "CNY"`.
 
 ## Refresh
 
-Fresh snapshots are maintenance data, not a public CLI command. Add or update
-`snapshot-*.json` files through the normal review and release path so packaged
-installs keep the same `lib/prices/` read path.
+`prices_fetcher.py` fetches fresh snapshots from vendor pricing APIs and writes a new dated file here. Run via `roll prices refresh`.

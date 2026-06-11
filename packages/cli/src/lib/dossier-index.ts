@@ -39,6 +39,42 @@ type StoryView = DossierEpic["stories"][number];
 type State = "done" | "wip" | "hold" | "todo" | "fail" | "unknown";
 const STAGE_KEYS = SPINE_STAGES.map((s) => s.key);
 
+export type TruthBoardVerdict = "pass" | "warn" | "fail" | "unknown";
+
+export interface TruthBoardAudit {
+  fail: number;
+  warn: number;
+  unknown: number;
+  collectedAt?: string;
+}
+
+export interface TruthBoardCycle {
+  cycles3d: number;
+  failed3d: number;
+  costUsd3d: number;
+  collectedAt?: string;
+}
+
+export interface TruthBoardRelease {
+  latestTag?: string;
+  verdict: TruthBoardVerdict;
+  waiver?: string;
+  collectedAt?: string;
+}
+
+export interface TruthBoardInput {
+  generatedAt?: string;
+  collectedAt?: string;
+  audit?: TruthBoardAudit;
+  cycle?: TruthBoardCycle;
+  release?: TruthBoardRelease;
+}
+
+export interface RenderFeaturesIndexOptions {
+  morningReportHref?: string;
+  truth?: TruthBoardInput;
+}
+
 /** Claim/truth-aligned delivery state for one story. */
 function storyState(s: StoryView): State {
   if (s.truthState === "fail") return "fail";
@@ -55,6 +91,91 @@ function tallyStates(epics: DossierEpic[]): Record<State, number> {
   const t: Record<State, number> = { done: 0, wip: 0, hold: 0, todo: 0, fail: 0, unknown: 0 };
   for (const e of epics) for (const s of e.stories) t[storyState(s)] += 1;
   return t;
+}
+
+function dataOrQ(v: string | number | undefined): string {
+  return v === undefined ? "?" : esc(String(v));
+}
+
+function moneyOrQ(v: number | undefined): string {
+  return v === undefined ? "?" : `$${v.toFixed(2)}`;
+}
+
+function truthBoardVerdict(epics: DossierEpic[], truth: TruthBoardInput | undefined): TruthBoardVerdict {
+  const t = tallyStates(epics);
+  const audit = truth?.audit;
+  const release = truth?.release;
+  if ((audit?.fail ?? 0) > 0 || t.fail > 0 || release?.verdict === "fail") return "fail";
+  if ((audit?.warn ?? 0) > 0 || release?.verdict === "warn") return "warn";
+  if (truth === undefined || audit === undefined || release === undefined || (audit.unknown > 0) || t.unknown > 0 || release.verdict === "unknown") {
+    return "unknown";
+  }
+  return "pass";
+}
+
+function storyTruthTile(epics: DossierEpic[]): string {
+  const t = tallyStates(epics);
+  const total = epics.reduce((n, e) => n + e.stories.length, 0);
+  let covered = 0;
+  for (const e of epics) {
+    for (const s of e.stories) {
+      if (s.stages?.includes("delivery") === true || s.delivered) covered += 1;
+    }
+  }
+  const pct = total > 0 ? Math.round((covered / total) * 100) : 0;
+  return (
+    `<section class="truth-tile story">` +
+    `<h2>Story</h2>` +
+    `<div class="truth-metric"><b>${pct}%</b><span>${bi("attest coverage", "验收覆盖")}</span></div>` +
+    `<dl><dt>${bi("truth fail", "真相失败")}</dt><dd>${t.fail}</dd>` +
+    `<dt>${bi("unknown", "未知")}</dt><dd>${t.unknown}</dd></dl>` +
+    `</section>`
+  );
+}
+
+function cycleTruthTile(truth: TruthBoardInput | undefined): string {
+  const c = truth?.cycle;
+  return (
+    `<section class="truth-tile cycle">` +
+    `<h2>Cycle</h2>` +
+    `<div class="truth-metric"><b>${dataOrQ(c?.cycles3d)}</b><span>${bi("cycles / 3d", "近 3 天周期")}</span></div>` +
+    `<dl><dt>${bi("failed", "失败")}</dt><dd>${dataOrQ(c?.failed3d)}</dd>` +
+    `<dt>${bi("cost", "花费")}</dt><dd>${moneyOrQ(c?.costUsd3d)}</dd></dl>` +
+    `</section>`
+  );
+}
+
+function releaseTruthTile(truth: TruthBoardInput | undefined): string {
+  const r = truth?.release;
+  return (
+    `<section class="truth-tile release ${r?.verdict ?? "unknown"}">` +
+    `<h2>Release</h2>` +
+    `<div class="truth-metric"><b>${dataOrQ(r?.latestTag)}</b><span>${bi("latest tag", "最近标签")}</span></div>` +
+    `<dl><dt>${bi("verdict", "判定")}</dt><dd>${dataOrQ(r?.verdict)}</dd>` +
+    `<dt>${bi("waiver", "豁免")}</dt><dd>${dataOrQ(r?.waiver)}</dd></dl>` +
+    `</section>`
+  );
+}
+
+export function renderTruthBoard(epics: DossierEpic[], truth: TruthBoardInput | undefined): string {
+  const verdict = truthBoardVerdict(epics, truth);
+  const audit = truth?.audit;
+  const collectedAt = truth?.collectedAt ?? audit?.collectedAt ?? truth?.cycle?.collectedAt ?? truth?.release?.collectedAt;
+  const release = truth?.release;
+  const verdictText = verdict === "pass" ? bi("all clear", "全部通过") : verdict;
+  return (
+    `<section class="truth-board" data-truth-board="${verdict}">` +
+    `<div class="truth-strip ${verdict}">` +
+    `<span class="truth-label">${bi("Truth", "真相")}</span>` +
+    `<strong>${verdictText}</strong>` +
+    `<span>${bi("audit", "审计")} f:${dataOrQ(audit?.fail)} w:${dataOrQ(audit?.warn)} ?:${dataOrQ(audit?.unknown)}</span>` +
+    `<span>${bi("release", "发版")} ${dataOrQ(release?.verdict)}${release?.waiver !== undefined ? ` · ${bi("waiver", "豁免")} ${esc(release.waiver)}` : ""}</span>` +
+    `<span>${bi("generated", "生成")} ${dataOrQ(truth?.generatedAt)}</span>` +
+    `<span>${bi("collected", "采集")} ${dataOrQ(collectedAt)}</span>` +
+    `</div>` +
+    `<div class="truth-tiles">${storyTruthTile(epics)}${cycleTruthTile(truth)}${releaseTruthTile(truth)}</div>` +
+    `</section>`
+  );
 }
 
 /** A segmented proportional bar (the "delivery spectrum") over a state tally. */
@@ -183,7 +304,7 @@ function overview(epics: DossierEpic[]): string {
 /** Render the Delivery Dossier front page — a delivery board: a pulled-out
  *  status overview (tallies + spectrum), then foldable epics grouped by their
  *  aggregate state, each story carrying its lifecycle spine + backlog status. */
-export function renderFeaturesIndex(epics: DossierEpic[], opts: { morningReportHref?: string } = {}): string {
+export function renderFeaturesIndex(epics: DossierEpic[], opts: RenderFeaturesIndexOptions = {}): string {
   const done = epics.filter((e) => e.stories.length > 0 && e.delivered === e.stories.length);
   const shipping = epics.filter((e) => e.delivered > 0 && e.delivered < e.stories.length);
   const backlog = epics.filter((e) => e.delivered === 0);
@@ -206,6 +327,7 @@ export function renderFeaturesIndex(epics: DossierEpic[], opts: { morningReportH
       "待办是<em>愿望</em>，主干是<em>事实</em>。故事只有合入主干才算完成——这块看板让两者互相对得上。",
     )}</p>\n` +
     `</div>\n` +
+    renderTruthBoard(epics, opts.truth) +
     overview(epics) +
     (opts.morningReportHref !== undefined
       ? `<p class="ops-link"><a href="${esc(opts.morningReportHref)}">${bi("Morning report", "夜间运行晨报")}</a></p>\n`

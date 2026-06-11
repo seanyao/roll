@@ -128,6 +128,31 @@ export const DOSSIER_CSS = `
   .story-row .title { white-space:normal; }
 }
 
+/* ── truth board (US-TRUTH-011): aggregate strip + Story/Cycle/Release tiles ── */
+.truth-board{margin:26px 0 18px;}
+.truth-strip{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg-raise);font:600 11px/1.2 var(--mono);color:var(--muted);}
+.truth-strip strong{font:700 13px/1 var(--mono);text-transform:uppercase;color:var(--fg);}
+.truth-label{letter-spacing:.12em;text-transform:uppercase;color:var(--accent);}
+.truth-strip.pass{border-color:color-mix(in srgb,var(--pass) 42%,var(--line));}
+.truth-strip.pass strong{color:var(--pass);}
+.truth-strip.warn{border-color:color-mix(in srgb,var(--warn) 50%,var(--line));}
+.truth-strip.warn strong{color:var(--warn);}
+.truth-strip.fail{border-color:color-mix(in srgb,var(--fail) 50%,var(--line));}
+.truth-strip.fail strong{color:var(--fail);}
+.truth-strip.unknown{border-style:dashed;}
+.truth-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px;}
+.truth-tile{border:1px solid var(--line);border-radius:8px;background:var(--bg-raise);padding:13px 14px;min-height:112px;}
+.truth-tile h2{margin:0 0 10px;font:700 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}
+.truth-metric{display:flex;align-items:baseline;gap:9px;margin-bottom:12px;}
+.truth-metric b{font:700 28px/1 var(--serif);color:var(--fg);font-variant-numeric:tabular-nums;}
+.truth-metric span{font:600 10px/1.2 var(--mono);text-transform:uppercase;color:var(--muted);}
+.truth-tile dl{display:grid;grid-template-columns:1fr auto;gap:6px 10px;margin:0;font:11px/1.15 var(--mono);}
+.truth-tile dt{color:var(--muted);}
+.truth-tile dd{margin:0;color:var(--fg);font-weight:700;}
+.truth-tile.story .truth-metric b{color:var(--pass);}
+.truth-tile.release.fail dd,.truth-tile.release.fail .truth-metric b{color:var(--fail);}
+.truth-tile.release.warn dd,.truth-tile.release.warn .truth-metric b{color:var(--warn);}
+
 /* ── delivery board (US-DOSSIER): status overview + spectrum ── */
 .statusboard{display:grid;grid-template-columns:repeat(6,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg-raise);margin:28px 0 14px;}
 .tally{padding:16px 18px 14px;border-right:1px solid var(--line);position:relative;text-decoration:none;color:inherit;transition:background .15s;}
@@ -205,7 +230,7 @@ details.epic[open] .caret{transform:rotate(90deg);color:var(--accent);}
 .lifespine.held i.now{border-color:var(--block);background:var(--block);box-shadow:0 0 0 3px color-mix(in srgb,var(--block) 22%,transparent);}
 .lifespine.legacy i{border-style:dashed;border-color:color-mix(in srgb,var(--muted) 55%,transparent);background:transparent;}
 .lifespine.legacy b{background:color-mix(in srgb,var(--muted) 35%,transparent);}
-@media (max-width:680px){.statusboard{grid-template-columns:repeat(2,1fr);} .story{grid-template-columns:48px 1fr auto;gap:8px;} .story .lifespine,.story .stitle{display:none;}}
+@media (max-width:680px){.truth-tiles{grid-template-columns:1fr;} .statusboard{grid-template-columns:repeat(2,1fr);} .story{grid-template-columns:48px 1fr auto;gap:8px;} .story .lifespine,.story .stitle{display:none;}}
 `;
 
 /**

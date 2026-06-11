@@ -5,15 +5,190 @@
  * as the Delivery Dossier front page (US-DOSSIER-001a; supersedes the
  * US-META-003 flat table). Deterministic + idempotent.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
+import { parseEventLine } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
-import { renderFeaturesIndex } from "../lib/dossier-index.js";
+import { renderFeaturesIndex, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
 import { collectStoryDossierInput, renderStoryDossier, stationsDone } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
+import { cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
+
+function iso(sec: number): string {
+  return new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function renderNowSec(): number {
+  const v = process.env["ROLL_RENDER_NOW"] ?? "";
+  if (v.trim() !== "") {
+    const ms = /^\d+$/.test(v) ? Number(v) : Date.parse(v);
+    if (Number.isFinite(ms)) return Math.floor(ms / 1000);
+  }
+  return Math.floor(Date.now() / 1000);
+}
+
+function readJsonl(path: string): Array<Record<string, unknown>> | undefined {
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  const out: Array<Record<string, unknown>> = [];
+  for (const line of content.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      const v = JSON.parse(line) as unknown;
+      if (typeof v === "object" && v !== null && !Array.isArray(v)) out.push(v as Record<string, unknown>);
+    } catch {
+      /* lenient snapshot reader */
+    }
+  }
+  return out;
+}
+
+function num(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v !== "" ? v : undefined;
+}
+
+function tsSec(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v !== "string" || v === "") return undefined;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+}
+
+function latestConsistencyAudit(projectPath: string): TruthBoardInput["audit"] | undefined {
+  const dir = join(projectPath, ".roll", "reports", "consistency");
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+  } catch {
+    return undefined;
+  }
+  const latest = files.at(-1);
+  if (latest === undefined) return undefined;
+  try {
+    const obj = JSON.parse(readFileSync(join(dir, latest), "utf8")) as Record<string, unknown>;
+    const summary = obj["summary"];
+    if (typeof summary !== "object" || summary === null || Array.isArray(summary)) return undefined;
+    const rec = summary as Record<string, unknown>;
+    const generatedAt = str(obj["generatedAt"]);
+    return {
+      fail: num(rec["fail"]) ?? 0,
+      warn: num(rec["warn"]) ?? 0,
+      unknown: num(rec["unknown"]) ?? 0,
+      ...(generatedAt !== undefined ? { collectedAt: generatedAt } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function cycleTruthBoard(projectPath: string, nowSec: number): TruthBoardInput["cycle"] | undefined {
+  const path = join(projectPath, ".roll", "loop", "runs.jsonl");
+  const cutoff = nowSec - 72 * 3600;
+  const facts = readJsonl(path);
+  if (facts === undefined) return undefined;
+  const rows = facts.filter((r) => {
+    const ts = tsSec(r["ts"]);
+    return ts !== undefined && ts >= cutoff && ts <= nowSec;
+  });
+  let failed = 0;
+  let cost = 0;
+  let latestTs = 0;
+  for (const row of rows) {
+    const ts = tsSec(row["ts"]) ?? 0;
+    latestTs = Math.max(latestTs, ts);
+    const truth = cycleTruthFromRow(row, { nowSec });
+    if (outcomeToPanel(truth.outcome, truth.state) === "fail") failed += 1;
+    cost += num(row["cost_effective_usd"]) ?? num(row["cost_usd"]) ?? 0;
+  }
+  return {
+    cycles3d: rows.length,
+    failed3d: failed,
+    costUsd3d: Number(cost.toFixed(4)),
+    ...(latestTs > 0 ? { collectedAt: iso(latestTs) } : {}),
+  };
+}
+
+function releaseVerdict(v: string | undefined): TruthBoardVerdict {
+  if (v === "pass") return "pass";
+  if (v === "blocked") return "fail";
+  if (v === "waived") return "warn";
+  return "unknown";
+}
+
+function releaseTruthBoard(projectPath: string, nowSec: number): TruthBoardInput["release"] | undefined {
+  const path = join(projectPath, ".roll", "loop", "events.ndjson");
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  let latestGate: { tag?: string; verdict?: string; waivedRules: string[]; ts: number } | undefined;
+  const activeWaivers: string[] = [];
+  for (const line of content.split("\n")) {
+    const ev = parseEventLine(line);
+    if (ev === null) continue;
+    if (ev.type === "release:gate") {
+      latestGate = {
+        tag: ev.tag,
+        verdict: ev.verdict,
+        waivedRules: ev.waivedRules,
+        ts: ev.ts,
+      };
+    } else if (ev.type === "release:waiver" && ev.expiresSec > nowSec) {
+      activeWaivers.push(ev.scope);
+    }
+  }
+  if (latestGate === undefined) return undefined;
+  const waiver = [...latestGate.waivedRules, ...activeWaivers].filter((x) => x.trim() !== "").join(", ");
+  return {
+    ...(latestGate.tag !== undefined ? { latestTag: latestGate.tag } : {}),
+    verdict: releaseVerdict(latestGate.verdict),
+    ...(waiver !== "" ? { waiver } : {}),
+    collectedAt: iso(latestGate.ts),
+  };
+}
+
+function maxCollectedAt(parts: Array<string | undefined>): string | undefined {
+  let best = "";
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const p of parts) {
+    if (p === undefined || p === "") continue;
+    const ms = Date.parse(p);
+    if (Number.isFinite(ms) && ms > bestMs) {
+      best = p;
+      bestMs = ms;
+    } else if (!Number.isFinite(ms) && best === "") {
+      best = p;
+    }
+  }
+  return best === "" ? undefined : best;
+}
+
+export function collectTruthBoardInput(projectPath: string, nowSec = renderNowSec()): TruthBoardInput {
+  const audit = latestConsistencyAudit(projectPath);
+  const cycle = cycleTruthBoard(projectPath, nowSec);
+  const release = releaseTruthBoard(projectPath, nowSec);
+  const collectedAt = maxCollectedAt([audit?.collectedAt, cycle?.collectedAt, release?.collectedAt]);
+  return {
+    generatedAt: iso(nowSec),
+    ...(collectedAt !== undefined ? { collectedAt } : {}),
+    ...(audit !== undefined ? { audit } : {}),
+    ...(cycle !== undefined ? { cycle } : {}),
+    ...(release !== undefined ? { release } : {}),
+  };
+}
 
 /** US-DOSSIER-004: render a card's spec.md → a self-contained spec.html (the
  *  minimal markdown renderer + dossier chrome), so the "Design doc" link opens
@@ -93,7 +268,11 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   }
   let pages = 0;
   try {
-    writeFileSync(join(featuresDir, "index.html"), renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd) }), "utf8");
+    writeFileSync(
+      join(featuresDir, "index.html"),
+      renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd), truth: collectTruthBoardInput(cwd) }),
+      "utf8",
+    );
     pages += 1;
   } catch {
     /* best-effort */

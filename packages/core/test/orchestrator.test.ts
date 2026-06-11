@@ -71,6 +71,9 @@ describe("classifyCaptured — pre-publish six-state (bin/roll:9127-9157)", () =
   it("exit 0 + 0 commits → idle (bin/roll:9180)", () => {
     expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0 })).toBe("idle");
   });
+  it("FIX-252: exit 0 + 0 branch commits but local main ahead origin → failed drift, not idle", () => {
+    expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, mainAhead: 1 })).toBe("failed");
+  });
   it("exit 0 + commits → built (bin/roll:9142)", () => {
     expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 2 })).toBe("built");
   });
@@ -191,6 +194,25 @@ describe("failure branches", () => {
     expect(state.terminal).toBe("idle");
     expect(mapV2Status(state.terminal!)).toBe("built");
     expect(kinds.slice(-3)).toEqual(["cleanup_worktree", "emit_event", "append_run"]);
+  });
+
+  it("FIX-252: local-main drift fails loud, leaves worktree, and writes an alert", () => {
+    const { state, kinds, commands } = walk([
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "FIX-252" },
+      { type: "route_resolved", agent: "pi", model: "" },
+      { type: "budget_ok" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, mainAhead: 1 } },
+    ]);
+    expect(state.terminal).toBe("failed");
+    expect(kinds).not.toContain("cleanup_worktree");
+    expect(kinds.slice(-3)).toEqual(["append_alert", "emit_event", "append_run"]);
+    expect(commands.find((c) => c.kind === "append_alert")).toMatchObject({
+      message: expect.stringContaining("local main is ahead of origin/main"),
+    });
   });
 
   it("worktree setup fail → failed (bin/roll:8998-9007)", () => {

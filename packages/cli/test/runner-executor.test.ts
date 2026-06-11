@@ -350,6 +350,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       worktreeRemove: vi.fn(async () => ({ code: 0 })),
       push: vi.fn(async () => ({ code: 0 })),
       commitsAhead: vi.fn(async () => 3),
+      mainAhead: vi.fn(async () => 0),
       tcrCount: vi.fn(async () => 4),
     },
     github: {
@@ -626,6 +627,19 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3, usedWorktree: true } });
+  });
+
+  it("FIX-252: capture_facts records local main drift so zero branch commits cannot become idle", async () => {
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      git: {
+        ...base.ports.git,
+        commitsAhead: vi.fn(async () => 0),
+        mainAhead: vi.fn(async () => 2),
+      },
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 0, mainAhead: 2 } });
   });
 
   it("FIX-208: capture_facts returns real tcr count via git port → ctxPatch.tcrCount", async () => {

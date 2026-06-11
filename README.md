@@ -45,7 +45,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 |---------|-------------|
 | **Autonomy · daily use** | |
 | `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|alert\|fmt\|pr-inbox\|mute\|unmute\|pause\|resume\|reset\|gc>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
-| `roll loop go [--epic <e>\|--cards <ids>] [--budget <usd>] [--for <duration>] [--review <auto\|hetero\|self\|off>]` | Run goal mode manually until the scoped work completes, pauses, or hits a budget/usage/timebox guardrail; final review defaults to `auto` |
+| `roll loop go [--epic <e>\|--cards <ids>] [--budget <usd>] [--for <duration>] [--review <auto\|hetero\|self\|off>]` | Run goal mode manually until the scoped work completes, pauses, or hits a budget/usage/timebox guardrail; it can run while the scheduler is off, and a paused loop should be resumed first; final review defaults to `auto` |
 | `roll loop goal` | Show persisted goal scope, review mode, usage, limits, safety gate, and last decision |
 | `roll brief` | Show latest owner brief |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |

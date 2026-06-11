@@ -80,8 +80,8 @@ describe("gatherAuditSnapshot — read-only fact assembly", () => {
     expect(snapshot.prEvidence["US-DRIFT-1"]).toMatchObject({ state: "OPEN" });
     expect(snapshot.prEvidence["US-CLEAN-1"]).toMatchObject({ state: "MERGED" });
     expect(snapshot.cycleBranchEvidence["C1"]).toMatchObject({ state: "MERGED" });
-    expect(snapshot.attest["US-CLEAN-1"]).toEqual({ report: true, acMap: true });
-    expect(snapshot.attest["US-DRIFT-1"]).toEqual({ report: false, acMap: false });
+    expect(snapshot.attest["US-CLEAN-1"]).toMatchObject({ report: true, acMap: true, visualEvidence: false, machineSkip: false });
+    expect(snapshot.attest["US-DRIFT-1"]).toMatchObject({ report: false, acMap: false, visualEvidence: false, machineSkip: false });
     expect(snapshot.runsFailedCount).toBe(1);
     expect(snapshot.eventFailedCount).toBe(1);
   });

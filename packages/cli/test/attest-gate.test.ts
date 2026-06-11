@@ -49,6 +49,14 @@ function withReport(storyId: string, mtimeSec?: number, body = '<div class="ev e
   return wt;
 }
 
+function writeAcMap(wt: string, storyId: string, body: unknown): void {
+  writeFileSync(join(wt, ".roll", "features", "uncategorized", storyId, "ac-map.json"), JSON.stringify(body, null, 2) + "\n");
+}
+
+function writeEvidenceJson(wt: string, storyId: string, body: unknown): void {
+  writeFileSync(join(wt, ".roll", "features", "uncategorized", storyId, "latest", "evidence.json"), JSON.stringify(body, null, 2) + "\n");
+}
+
 function withSelfScore(wt: string, storyId: string, score: number, verdict: "good" | "ok" | "regression"): void {
   const dir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
   mkdirSync(dir, { recursive: true });
@@ -128,7 +136,7 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
     expect(verificationReportHasContent(wt, "FIX-323")).toBe(false);
   });
 
-  it("interactive story requires screenshot evidence or honest-skip text", () => {
+  it("interactive story requires screenshot evidence or a machine capture skip", () => {
     const noShot = withReport("FIX-CLI", 2000);
     writeFileSync(join(noShot, ".roll", "features", "uncategorized", "FIX-CLI", "spec.md"), "**AC:**\n- [ ] CLI shows output\n");
     expect(verificationReportHasContent(noShot, "FIX-CLI")).toBe(false);
@@ -139,6 +147,9 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
 
     const withSkip = withReport("FIX-TUI", 2000, '<div class="ev ev-text">{"taken":false,"skipped":"no GUI session"}</div>');
     writeFileSync(join(withSkip, ".roll", "features", "uncategorized", "FIX-TUI", "spec.md"), "**AC:**\n- [ ] TUI can be inspected\n");
+    writeEvidenceJson(withSkip, "FIX-TUI", {
+      captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI session" }],
+    });
     expect(verificationReportHasContent(withSkip, "FIX-TUI")).toBe(true);
   });
 
@@ -150,6 +161,33 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
     );
     expect(storyHasAcBlock(noShot, "FIX-MODERN")).toBe(true);
     expect(verificationReportHasContent(noShot, "FIX-MODERN")).toBe(false);
+  });
+
+  it("FIX-258: pass ACs backed only by text evidence fail the screenshot evidence floor", () => {
+    const wt = withReport("FIX-TEXT", 2000);
+    writeAcMap(wt, "FIX-TEXT", [
+      { ac: "FIX-TEXT:AC1", status: "pass", evidence: [{ kind: "text", label: "log", textFile: "evidence/proof.txt" }] },
+    ]);
+    expect(verificationReportHasContent(wt, "FIX-TEXT")).toBe(false);
+  });
+
+  it("FIX-258: pass ACs with screenshot evidence satisfy the visual floor", () => {
+    const wt = withReport("FIX-SHOT", 2000, '<figure class="shot"><img src="screenshots/terminal.png"></figure>');
+    writeAcMap(wt, "FIX-SHOT", [
+      { ac: "FIX-SHOT:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "terminal", href: "screenshots/terminal.png" }] },
+    ]);
+    expect(verificationReportHasContent(wt, "FIX-SHOT")).toBe(true);
+  });
+
+  it("FIX-258: machine capture skip is accepted as an honest degraded visual fact", () => {
+    const wt = withReport("FIX-SKIP", 2000);
+    writeAcMap(wt, "FIX-SKIP", [
+      { ac: "FIX-SKIP:AC1", status: "pass", evidence: [{ kind: "text", label: "log", textFile: "evidence/proof.txt" }] },
+    ]);
+    writeEvidenceJson(wt, "FIX-SKIP", {
+      captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "not macOS" }],
+    });
+    expect(verificationReportHasContent(wt, "FIX-SKIP")).toBe(true);
   });
 });
 

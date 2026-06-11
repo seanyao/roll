@@ -77,7 +77,7 @@ roll config dream-time 03:20 --global    # all projects (~/.roll/config.yaml)
 ```
 
 **Auto-reload.** After writing a schedule key, `roll config` re-installs the
-launchd plists for loop / dream / brief so the change fires on the next
+launchd plists for loop / pr / dream so the change fires on the next
 window. If reload fails (e.g. in a sandbox), the yaml is still the source of
 truth — run `roll loop on` to apply it by hand. See `roll config --help` for
 the full key list and ranges.
@@ -128,7 +128,7 @@ Project-level `.roll/local.yaml` always takes priority over the global default.
 ## Subcommands
 
 ```bash
-roll loop on          # Install launchd scheduler (loop + dream + brief)
+roll loop on          # Install launchd scheduler (loop + pr + dream)
 roll loop off         # Remove launchd scheduler
 
 roll loop now         # Run one cycle immediately (same as launchd fires)
@@ -181,6 +181,16 @@ roll loop events 50   # Show last 50 events
 roll agent                           # Show the four complexity slots + online status
 roll agent list                      # Show agents installed on this machine
 ```
+
+### Goal Mode vs Scheduled Mode
+
+`roll loop go` is a manual goal session, not a launchd scheduler tick. While it
+runs, Roll holds `.roll/loop/go.lock`; scheduled ticks yield when they see that
+lock, record `goal:tick_skipped`, and do not start another `roll loop run-once`.
+
+Goal mode can run when the scheduler is off because it starts its own session
+and does not depend on launchd. For paused projects, run `roll loop resume`
+first: the `PAUSE-<slug>` marker is still respected at cycle boundaries.
 
 ### Goal Mode Safety Gates
 

@@ -35,16 +35,16 @@
  * a stdlib-only regex reader (no yaml import).
  */
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testCommand } from "../src/commands/test.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
-const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
 let home = "";
+let defaultPkgDir = "";
 
 // Shim dir: npm recorder + python3 yaml-reader (see header).
 let binNpm = "";
@@ -75,6 +75,10 @@ beforeAll(() => {
   dirs.push(home);
   mkdirSync(join(home, ".roll"), { recursive: true });
   seedUpdateCheckCache(join(home, ".roll"));
+  defaultPkgDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-pkg-")));
+  dirs.push(defaultPkgDir);
+  mkdirSync(join(defaultPkgDir, "skills", "roll-onboard"), { recursive: true });
+  writeFileSync(join(defaultPkgDir, "skills", "roll-onboard", "SKILL.md"), "# roll-onboard\n");
 
   // npm shim: record argv + emit a canned line on stdout, exit 0.
   binNpm = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-npm-")));
@@ -115,6 +119,7 @@ function baseEnv(proj: string, shimDir: string, extra: Record<string, string>): 
     ROLL_HOME: join(home, ".roll"),
     NO_COLOR: "1",
     ROLL_LANG: "en",
+    ROLL_PKG_DIR: defaultPkgDir,
     PWD: proj,
     ...extra,
   };
@@ -132,6 +137,8 @@ const ENV_KEYS = [
   "ROLL_RUN_DIR",
   "ROLL_EVIDENCE_DIR",
   "ROLL_SCREENSHOTS_DIR",
+  "ROLL_PKG_DIR",
+  "GIT_RECORD",
 ];
 
 function tsTest(proj: string, args: string[], shimDir: string, extra: Record<string, string> = {}): Run {
@@ -300,5 +307,61 @@ describe("REFACTOR-046 whitelisted divergences (TS-only)", () => {
     expect(t.status).toBe(0);
     expect(t.stdout).toContain("npm-shim ran: test -- --affected");
     expect(existsSync(missing)).toBe(false);
+  });
+
+  it("FIX-264: empty skills submodule is initialized before running the suite", () => {
+    const proj = projWith("none");
+    const pkg = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-empty-skills-pkg-")));
+    dirs.push(pkg);
+    mkdirSync(join(pkg, "skills"), { recursive: true });
+    writeFileSync(join(pkg, ".git"), "gitdir: /tmp/fake\n");
+    writeFileSync(join(pkg, ".gitmodules"), "[submodule \"skills\"]\n\tpath = skills\n\turl = git@github.com:seanyao/roll-skills.git\n");
+
+    const shimDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-submodule-bin-")));
+    dirs.push(shimDir);
+    const record = join(shimDir, "git-record.txt");
+    writeFileSync(
+      join(shimDir, "git"),
+      [
+        "#!/bin/sh",
+        'echo "$*" >> "$GIT_RECORD"',
+        'if [ "$1" = "submodule" ]; then',
+        '  mkdir -p "$ROLL_PKG_DIR/skills/roll-onboard"',
+        '  echo "# onboard" > "$ROLL_PKG_DIR/skills/roll-onboard/SKILL.md"',
+        "  exit 0",
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    writeFileSync(join(shimDir, "npm"), "#!/bin/sh\necho npm-after-skills\nexit 0\n", { mode: 0o755 });
+
+    const t = tsTest(proj, [], shimDir, { ROLL_PKG_DIR: pkg, GIT_RECORD: record });
+    expect(t.status).toBe(0);
+    expect(t.stdout).toContain("npm-after-skills");
+    expect(readFileSync(record, "utf8")).toContain("submodule update --init --recursive --quiet skills");
+    expect(existsSync(join(pkg, "skills", "roll-onboard", "SKILL.md"))).toBe(true);
+  });
+
+  it("FIX-264: failed skills initialization is loud and does not run npm", () => {
+    const proj = projWith("none");
+    const pkg = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-empty-skills-pkg-fail-")));
+    dirs.push(pkg);
+    mkdirSync(join(pkg, "skills"), { recursive: true });
+    writeFileSync(join(pkg, ".git"), "gitdir: /tmp/fake\n");
+    writeFileSync(join(pkg, ".gitmodules"), "[submodule \"skills\"]\n\tpath = skills\n");
+
+    const shimDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-test-submodule-bin-fail-")));
+    dirs.push(shimDir);
+    writeFileSync(join(shimDir, "git"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(shimDir, "npm"), "#!/bin/sh\necho npm-should-not-run\nexit 0\n", { mode: 0o755 });
+
+    const t = tsTest(proj, [], shimDir, { ROLL_PKG_DIR: pkg });
+    expect(t.status).toBe(1);
+    expect(t.stderr).toContain("roll test: skills submodule is empty");
+    expect(t.stderr).toContain("git submodule update --init --recursive skills");
+    expect(t.stdout).not.toContain("npm-should-not-run");
+    rmSync(join(pkg, "skills"), { recursive: true, force: true });
   });
 });

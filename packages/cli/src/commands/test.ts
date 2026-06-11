@@ -37,6 +37,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { rollPkgDir } from "./setup-shared.js";
 
 // ─── bash UI helpers (bin/roll:41-56) ────────────────────────────────────────
 function pal(): { CYAN: string; GREEN: string; YELLOW: string; RED: string; NC: string } {
@@ -245,6 +246,22 @@ function runForward(cmd: string, argv: string[]): number {
   return status;
 }
 
+function ensureSkillsSubmoduleReady(): boolean {
+  const pkg = rollPkgDir();
+  const required = join(pkg, "skills", "roll-onboard", "SKILL.md");
+  if (existsSync(required)) return true;
+  if (existsSync(join(pkg, ".git")) && existsSync(join(pkg, ".gitmodules"))) {
+    spawnSync("git", ["submodule", "update", "--init", "--recursive", "--quiet", "skills"], {
+      cwd: pkg,
+      stdio: "ignore",
+    });
+    if (existsSync(required)) return true;
+  }
+  err("roll test: skills submodule is empty");
+  process.stderr.write("  run: git submodule update --init --recursive skills\n");
+  return false;
+}
+
 // ─── _isolation_dispatch exec / reset (6582) ─────────────────────────────────
 /** Returns the dispatch exit status, or null when the type is unknown-but-handled. */
 function isolationDispatch(method: "exec" | "reset", args: string[]): number {
@@ -344,5 +361,6 @@ export function testCommand(args: string[]): number {
 
   let npmArgs = argv;
   if (npmArgs.length === 0) npmArgs = ["--affected"];
+  if (!ensureSkillsSubmoduleReady()) return 1;
   return isolationDispatch("exec", ["npm", "test", "--", ...npmArgs]);
 }

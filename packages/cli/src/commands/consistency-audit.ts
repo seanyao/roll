@@ -13,8 +13,8 @@
  * skipped — a silent cap would read as "no drift" (no-silent-caps rule).
  */
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   emptyAuditSnapshot,
@@ -61,6 +61,54 @@ function readJsonl(path: string): Array<Record<string, unknown>> {
     }
   }
   return out;
+}
+
+function readJson(path: string): Record<string, unknown> | null {
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasScreenshotArtifact(reportPath: string): boolean {
+  const runDir = dirname(reportPath);
+  const manifest = readJson(join(runDir, "evidence.json"));
+  if (manifest !== null) {
+    const screenshots = manifest["screenshots"];
+    if (Array.isArray(screenshots) && screenshots.some((x) => typeof x === "string" && x !== "")) return true;
+    const captures = manifest["captures"];
+    if (Array.isArray(captures)) {
+      if (
+        captures.some((raw) => {
+          if (typeof raw !== "object" || raw === null) return false;
+          return (raw as Record<string, unknown>)["taken"] === true;
+        })
+      ) {
+        return true;
+      }
+    }
+  }
+  const dir = join(runDir, "screenshots");
+  if (!existsSync(dir)) return false;
+  try {
+    return readdirSync(dir).some((name) => /\.png$/i.test(name));
+  } catch {
+    return false;
+  }
+}
+
+function hasMachineCaptureSkip(reportPath: string): boolean {
+  const manifest = readJson(join(dirname(reportPath), "evidence.json"));
+  const captures = manifest?.["captures"];
+  if (!Array.isArray(captures)) return false;
+  return captures.some((raw) => {
+    if (typeof raw !== "object" || raw === null) return false;
+    const row = raw as Record<string, unknown>;
+    return row["taken"] === false && typeof row["skipped"] === "string" && row["skipped"] !== "";
+  });
 }
 
 async function gitLocalMainAhead(projectPath: string): Promise<number> {
@@ -126,9 +174,12 @@ export async function gatherAuditSnapshot(
     if (!row.status.includes("✅")) continue;
     const card = cardArchiveDir(projectPath, row.id);
     if (!existsSync(card)) continue; // pre-card era → grandfather lane in the rules
+    const reportPath = join(card, "latest", reportFileName(row.id));
     snapshot.attest[row.id] = {
-      report: existsSync(join(card, "latest", reportFileName(row.id))),
+      report: existsSync(reportPath),
       acMap: existsSync(join(card, "ac-map.json")),
+      visualEvidence: existsSync(reportPath) ? hasScreenshotArtifact(reportPath) : false,
+      machineSkip: existsSync(reportPath) ? hasMachineCaptureSkip(reportPath) : false,
     };
   }
 

@@ -39,6 +39,8 @@ export interface AuditBacklogRow {
 export interface AuditAttestProbe {
   report: boolean;
   acMap: boolean;
+  visualEvidence?: boolean;
+  machineSkip?: boolean;
 }
 
 export interface AuditSnapshot {
@@ -182,6 +184,13 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
     }
     if (!probe.report) {
       add("done-missing-attest", "fail", row.id, `Done without an acceptance report${probe.acMap ? "" : " (no ac-map either)"} — attest_evidence anchor`);
+    } else if (probe.acMap && !(probe.visualEvidence ?? false) && !(probe.machineSkip ?? false)) {
+      add(
+        "done-attest-no-visual",
+        "warn",
+        row.id,
+        "Done acceptance evidence has a report/ac-map but no screenshot and no machine-generated capture skip — visual evidence floor (FIX-258)",
+      );
     }
   }
 

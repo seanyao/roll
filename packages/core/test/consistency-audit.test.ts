@@ -126,6 +126,19 @@ describe("rule done-missing-attest — Done with no acceptance evidence", () => 
     const ancient = r.findings.filter((f) => f.subject === "US-ANCIENT" && f.rule === "done-missing-attest");
     expect(ancient.every((f) => f.severity === "grandfathered")).toBe(true);
   });
+
+  it("FIX-258: Done story with report/ac-map but no screenshot or machine skip is warned", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "FIX-TEXT", status: "✅ Done · PR#14 · evidence" }],
+        prEvidence: { "FIX-TEXT": { state: "MERGED", mergedAtSec: EPOCH } },
+        attest: { "FIX-TEXT": { report: true, acMap: true } },
+      }),
+    );
+    expect(r.findings).toContainEqual(
+      expect.objectContaining({ rule: "done-attest-no-visual", severity: "warn", subject: "FIX-TEXT" }),
+    );
+  });
 });
 
 describe("rule usage-missing — the cost-blind-guardrail incident", () => {

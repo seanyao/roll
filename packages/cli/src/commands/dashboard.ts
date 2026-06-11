@@ -1334,7 +1334,7 @@ export function agentSummaryLine(records: RunRecord[], windowCycles = 50, minSam
 function detectInstallState(): string {
   const slug = projectSlug();
   const label = `com.roll.loop.${slug}`;
-  const plist = join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
+  const plist = join(launchAgentsDir(), `${label}.plist`);
   if (!existsSync(plist)) return "not-installed";
   try {
     const uid = typeof process.getuid === "function" ? process.getuid() : 0;
@@ -1347,6 +1347,10 @@ function detectInstallState(): string {
   } catch {
     return "stale";
   }
+}
+
+function launchAgentsDir(): string {
+  return process.env["_LAUNCHD_DIR"] ?? join(homedir(), "Library", "LaunchAgents");
 }
 
 interface DailySchedule {
@@ -1456,61 +1460,105 @@ function tickAgeLine(loopType: string, now: Date): string | null {
   return `${loopType}: tick ${ageStr} ago`;
 }
 
-interface ScheduleSpec {
-  period: number;
-  offset: number;
-}
+type LoopPlistSchedule =
+  | { mode: "calendar"; minutes: number[] }
+  | { mode: "interval"; intervalSec: number };
 
-function scheduleValid(period: number, offset: number): boolean {
-  return period >= 1 && period <= 1440 && offset >= 0 && offset < 60;
-}
-
-function readScheduleSpec(projectRoot?: string): ScheduleSpec {
-  const root = realpathSync(projectRoot ?? process.cwd());
-  const localFile = join(root, ".roll", "local.yaml");
-  if (existsSync(localFile)) {
-    try {
-      const text = readFileSync(localFile, "utf8");
-      const pm = /period_minutes:\s*(\d+)/.exec(text);
-      const om = /offset_minute:\s*(\d+)/.exec(text);
-      if (pm && om) {
-        const period = parseInt(pm[1] ?? "0", 10);
-        const offset = parseInt(om[1] ?? "0", 10);
-        if (scheduleValid(period, offset)) return { period, offset };
-      }
-    } catch {
-      /* ignore */
-    }
+function readLoopPlistSchedule(): LoopPlistSchedule | null {
+  const slug = projectSlug();
+  const plist = join(launchAgentsDir(), `com.roll.loop.${slug}.plist`);
+  if (!existsSync(plist)) return null;
+  let text: string;
+  try {
+    text = readFileSync(plist, "utf8");
+  } catch {
+    return null;
   }
-  const configFile = join(homedir(), ".roll", "config.yaml");
-  if (existsSync(configFile)) {
-    try {
-      const text = readFileSync(configFile, "utf8");
-      const m = /^loop_minute:\s*(\d+)/m.exec(text);
-      if (m) return { period: 60, offset: parseInt(m[1] ?? "0", 10) };
-    } catch {
-      /* ignore */
-    }
+  if (text.includes("StartCalendarInterval")) {
+    const minutes = [...text.matchAll(/<key>Minute<\/key>\s*<integer>(\d+)<\/integer>/g)]
+      .map((m) => Number.parseInt(m[1] ?? "", 10))
+      .filter((n) => Number.isInteger(n) && n >= 0 && n < 60)
+      .sort((a, b) => a - b);
+    return minutes.length > 0 ? { mode: "calendar", minutes: [...new Set(minutes)] } : null;
   }
-  const h = parseInt(createHash("md5").update(root).digest("hex").slice(0, 2), 16) % 60;
-  return { period: 60, offset: h };
+  const interval = /<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(text);
+  if (interval) {
+    const intervalSec = Number.parseInt(interval[1] ?? "", 10);
+    if (Number.isInteger(intervalSec) && intervalSec > 0) return { mode: "interval", intervalSec };
+  }
+  return null;
 }
 
-function nextCronHint(zh: boolean): string {
+function lastLoopFireEpochSec(): number | null {
+  const slug = projectSlug();
+  const rtDir = loopRuntimeDir(slug);
+  const cronLog = rtDir !== null ? join(rtDir, "cron.log") : join(sharedRoot(), "loop", `cron-${slug}.log`);
+  if (!existsSync(cronLog)) return null;
+  try {
+    const lines = readFileSync(cronLog, "utf8").trim().split("\n").reverse();
+    for (const line of lines) {
+      if (!line.includes("cycle start")) continue;
+      const m = /^\[([^\]]+)\]/.exec(line);
+      if (!m) continue;
+      const raw = m[1] ?? "";
+      const normalized = raw.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+      const ms = Date.parse(normalized);
+      if (Number.isFinite(ms)) return Math.floor(ms / 1000);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function nextLoopScheduleHint(zh: boolean): string {
   const now = renderNow();
-  const { period, offset } = readScheduleSpec();
-  // next fire = today's HH:offset in UTC+8, advance by `period` minutes.
+  const sched = readLoopPlistSchedule();
+  if (sched === null) return "?";
+  const nowSec = Math.floor(now.getTime() / 1000);
+  const lastFire = lastLoopFireEpochSec();
+
+  if (sched.mode === "interval") {
+    if (lastFire === null || lastFire > nowSec || nowSec - lastFire > sched.intervalSec * 2) return "?";
+    let next = lastFire;
+    while (next <= nowSec) next += sched.intervalSec;
+    const delta = Math.max(next - nowSec, 0);
+    const mins = Math.floor(delta / 60);
+    const secs = delta % 60;
+    if (zh) return `约 ${mins} 分 ${pad2(secs)} 秒`;
+    const nxtSh = toShanghai(new Date(next * 1000));
+    return `${pad2(nxtSh.getUTCHours())}:${pad2(nxtSh.getUTCMinutes())} · est · in ${mins}m ${pad2(secs)}s`;
+  }
+
+  if (lastFire !== null && nowSec - lastFire <= 6 * 3600) {
+    const lastMinute = toShanghai(new Date(lastFire * 1000)).getUTCMinutes();
+    if (!sched.minutes.includes(lastMinute)) return "?";
+  }
+
   const sh = toShanghai(now);
-  let nxtEpoch =
-    Date.UTC(sh.getUTCFullYear(), sh.getUTCMonth(), sh.getUTCDate(), sh.getUTCHours(), offset, 0, 0) -
-    TZ_OFFSET_MS;
-  while (nxtEpoch <= now.getTime()) nxtEpoch += period * 60 * 1000;
-  const deltaMs = nxtEpoch - now.getTime();
+  let nextEpoch: number | null = null;
+  for (const minute of sched.minutes) {
+    const candidate =
+      Date.UTC(sh.getUTCFullYear(), sh.getUTCMonth(), sh.getUTCDate(), sh.getUTCHours(), minute, 0, 0) -
+      TZ_OFFSET_MS;
+    if (candidate > now.getTime()) {
+      nextEpoch = candidate;
+      break;
+    }
+  }
+  if (nextEpoch === null) {
+    const first = sched.minutes[0];
+    if (first === undefined) return "?";
+    nextEpoch =
+      Date.UTC(sh.getUTCFullYear(), sh.getUTCMonth(), sh.getUTCDate(), sh.getUTCHours() + 1, first, 0, 0) -
+      TZ_OFFSET_MS;
+  }
+  const deltaMs = nextEpoch - now.getTime();
   const mins = Math.floor(deltaMs / 1000 / 60);
   const secs = Math.floor((deltaMs / 1000) % 60);
   if (zh) return `${mins} 分 ${pad2(secs)} 秒`;
-  const nxtSh = toShanghai(new Date(nxtEpoch));
-  return `${pad2(nxtSh.getUTCHours())}:${pad2(nxtSh.getUTCMinutes())}` + ` · in ${mins}m ${pad2(secs)}s`;
+  const nxtSh = toShanghai(new Date(nextEpoch));
+  return `${pad2(nxtSh.getUTCHours())}:${pad2(nxtSh.getUTCMinutes())} · in ${mins}m ${pad2(secs)}s`;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1733,8 +1781,8 @@ function render(
         c("blue", "● IDLE", { bold: true }) +
         c("muted", " · ") +
         c("dim", "enabled · next run ") +
-        c("fg", nextCronHint(false), { bold: true });
-      ebZh = c("dim", `  已启用 · 闲置 · 距下一轮 ${nextCronHint(true)}`);
+        c("fg", nextLoopScheduleHint(false), { bold: true });
+      ebZh = c("dim", `  已启用 · 闲置 · 距下一轮 ${nextLoopScheduleHint(true)}`);
     }
   }
 

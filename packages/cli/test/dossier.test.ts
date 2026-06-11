@@ -7,9 +7,9 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeF
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { collectDossier } from "../src/lib/archive.js";
+import { collectDossier, type DossierEpic } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
-import { renderFeaturesIndex, spineMotif } from "../src/lib/dossier-index.js";
+import { renderFeaturesIndex, renderTruthBoard, spineMotif } from "../src/lib/dossier-index.js";
 import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
 import { collectStoryDossierInput, renderStoryDossier, storySpine } from "../src/lib/story-dossier.js";
 import { markPhaseDone } from "../src/lib/story-page.js";
@@ -146,6 +146,61 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(withReport).toContain("Morning report");
     expect(withReport).toContain("夜间运行晨报");
     expect(withReport).toContain('href="../reports/morning/latest.html"');
+  });
+
+  it("US-TRUTH-011: truth strip and aggregate tiles freeze a drift fixture", () => {
+    const epics: DossierEpic[] = [{
+      name: "truth",
+      delivered: 1,
+      stories: [
+        { id: "US-OK", epic: "truth", type: "US", delivered: true, stages: ["definition", "design", "execution", "delivery"] },
+        { id: "US-DRIFT", epic: "truth", type: "US", delivered: false, status: "done", truthState: "fail", truthReason: "premature_done" },
+      ],
+    }];
+    const board = renderTruthBoard(epics, {
+      generatedAt: "2026-06-11T04:00:00Z",
+      collectedAt: "2026-06-11T03:59:00Z",
+      audit: { fail: 2, warn: 1, unknown: 3 },
+      cycle: { cycles3d: 14, failed3d: 2, costUsd3d: 1.23 },
+      release: { latestTag: "v3.611.2", verdict: "fail", waiver: "REL-1" },
+    });
+
+    expect(board).toContain('data-truth-board="fail"');
+    expect(board).toMatchSnapshot();
+    expect(board).toContain("audit");
+    expect(board).toContain("f:2 w:1 ?:3");
+    expect(board).toContain("Story");
+    expect(board).toContain("50%");
+    expect(board).toContain("Cycle");
+    expect(board).toContain("14");
+    expect(board).toContain("$1.23");
+    expect(board).toContain("Release");
+    expect(board).toContain("v3.611.2");
+    expect(board).toContain("REL-1");
+  });
+
+  it("US-TRUTH-011: truth strip and aggregate tiles freeze an all-green fixture", () => {
+    const epics: DossierEpic[] = [{
+      name: "green",
+      delivered: 1,
+      stories: [{ id: "US-GREEN", epic: "green", type: "US", delivered: true, stages: ["definition", "design", "execution", "delivery"] }],
+    }];
+    const truth = {
+      generatedAt: "2026-06-11T05:00:00Z",
+      collectedAt: "2026-06-11T04:59:00Z",
+      audit: { fail: 0, warn: 0, unknown: 0 },
+      cycle: { cycles3d: 3, failed3d: 0, costUsd3d: 0.42 },
+      release: { latestTag: "v3.611.3", verdict: "pass" },
+    };
+    const board = renderTruthBoard(epics, truth);
+    const index = renderFeaturesIndex(epics, { truth });
+
+    expect(board).toMatchSnapshot();
+    expect(index).toContain('data-truth-board="pass"');
+    expect(index).toContain("all clear");
+    expect(index).toContain("100%");
+    expect(index).toContain("v3.611.3");
+    expect(index).toContain("$0.42");
   });
 
   it("epic groups: shipping before backlog; story rows carry type + status (US-DOSSIER)", () => {

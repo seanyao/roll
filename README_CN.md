@@ -45,6 +45,8 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 |------|------|
 | **自治 · 日常** | |
 | `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|alert\|fmt\|pr-inbox\|mute\|unmute\|pause\|resume\|reset\|gc>` | 管理自主 BACKLOG 执行循环(含每周期结果评分) |
+| `roll loop go [--epic <e>\|--cards <ids>] [--review <auto\|hetero\|self\|off>]` | 手动运行 goal mode，直到范围内工作完成、暂停或触发护栏；终审默认 `auto` |
+| `roll loop goal` | 显示持久化 goal 的范围、终审模式、用量、限制和最近裁定 |
 | `roll brief` | 查看最新 owner 简报 |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
 | `roll loop alert [list\|ack\|resolve\|log]` | 查看 / 清除 loop 告警 |

@@ -135,6 +135,11 @@ roll loop now         # Run one cycle immediately (same as launchd fires)
 roll loop test        # Quick smoke test: verify tmux/popup/stream chain works
 
 roll loop status      # Show scheduler state and current loop state
+roll loop go          # Run goal mode manually for all backlog until complete/pause/guardrail
+roll loop go --epic <name>              # Limit the goal to one epic
+roll loop go --cards US-1,FIX-2         # Limit the goal to selected cards
+roll loop go --review <auto|hetero|self|off>  # Set the final review policy
+roll loop goal        # Show persisted goal status, scope, review mode, usage, and limits
 
 roll loop runs        # Show last 10 run summaries (story IDs, TCR count, duration, slowest phase)
 roll loop runs 20     # Show last 20 runs
@@ -171,6 +176,19 @@ roll loop events 50   # Show last 50 events
 roll agent                           # Show the four complexity slots + online status
 roll agent list                      # Show agents installed on this machine
 ```
+
+### Goal Mode Final Review
+
+`roll loop go` persists its goal state in `.roll/loop/goal.yaml` and runs a
+final review gate before a goal can become `complete`. The default policy is
+`--review auto`: Roll prefers a reviewer from a different provider family than
+the worker agents, and records `goal:review_degraded` when it must fall back to
+self review because only one provider is available.
+
+Use `--review hetero` when completion must fail closed unless a heterogeneous
+reviewer is installed. Use `--review self` to allow same-provider review. Use
+`--review off` only as an explicit operator waiver; Roll skips the gate but
+still records a `goal:final_review` event with `verdict: SKIPPED`.
 
 ## Complexity-based agent routing
 

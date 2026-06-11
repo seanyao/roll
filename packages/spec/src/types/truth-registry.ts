@@ -47,6 +47,7 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   // ── goal.yaml (US-GOAL-001) ────────────────────────────────────────────────
   { field: "schema", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
   { field: "scope", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
+  { field: "review", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
   { field: "budgetUsd", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
   { field: "limits", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
   { field: "status", surface: "goal", anchor: "goal_state", writer: "goal control plane; complete only by adjudication", kind: "authoritative" },

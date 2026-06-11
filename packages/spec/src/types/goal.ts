@@ -1,7 +1,9 @@
 export const GOAL_SCHEMA_VERSION = "goal.v1" as const;
 export const GOAL_STATUSES = ["active", "paused", "budget_limited", "complete"] as const;
+export const GOAL_REVIEW_MODES = ["auto", "hetero", "self", "off"] as const;
 
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
+export type GoalReviewMode = (typeof GOAL_REVIEW_MODES)[number];
 export type GoalScope = { kind: "all" } | { kind: "epic"; epic: string } | { kind: "cards"; cards: string[] };
 export type GoalTransitionActor = "owner" | "system" | "adjudicator" | "worker" | "agent";
 
@@ -15,9 +17,14 @@ export interface GoalUsage {
   costUsd: number;
 }
 
+export interface GoalReviewConfig {
+  mode: GoalReviewMode;
+}
+
 export interface RollGoal {
   schema: typeof GOAL_SCHEMA_VERSION;
   scope: GoalScope;
+  review: GoalReviewConfig;
   budgetUsd?: number;
   limits: GoalLimits;
   status: GoalStatus;
@@ -108,6 +115,12 @@ function parseStatus(value: string | undefined): GoalStatus {
   return status as GoalStatus;
 }
 
+function parseReviewMode(value: string | undefined): GoalReviewMode {
+  const mode = cleanScalar(value ?? "auto");
+  if (!GOAL_REVIEW_MODES.includes(mode as GoalReviewMode)) throw new Error(`goal.yaml invalid: review '${mode}' is not one of ${GOAL_REVIEW_MODES.join(", ")}`);
+  return mode as GoalReviewMode;
+}
+
 function parseScope(all: readonly Line[]): GoalScope {
   const kind = required(readNested(all, "scope", "kind"), "scope.kind");
   if (kind === "all") return { kind: "all" };
@@ -131,6 +144,7 @@ export function parseGoalYaml(text: string): RollGoal {
   return {
     schema: GOAL_SCHEMA_VERSION,
     scope: parseScope(all),
+    review: { mode: parseReviewMode(readTop(all, "review")) },
     ...(budgetUsd !== undefined ? { budgetUsd } : {}),
     limits: {
       ...(maxCycles !== undefined ? { maxCycles } : {}),
@@ -157,6 +171,7 @@ export function renderGoalYaml(goal: RollGoal): string {
   const out = [
     `schema: ${goal.schema}`,
     ...renderScope(goal.scope),
+    `review: ${goal.review.mode}`,
     ...(goal.budgetUsd !== undefined ? [`budgetUsd: ${goal.budgetUsd}`] : []),
     "limits:",
     ...(goal.limits.maxCycles !== undefined ? [`  maxCycles: ${goal.limits.maxCycles}`] : []),

@@ -5,7 +5,7 @@
  */
 import type { AgentId } from "./agent.js";
 import type { CycleCost, CyclePhase } from "./cycle.js";
-import type { GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
+import type { GoalReviewMode, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
 import type { TerminalEvent, TerminalOutcome } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
@@ -36,13 +36,35 @@ export type RollEvent =
   // Alert (BC2/BC6)
   | { type: "alert:notify"; channel: string; message: string; ts: number }
   // Goal mode (US-GOAL-001) — the durable goal state machine facts.
-  | { type: "goal:created"; schema: "goal.v1"; scope: GoalScope; status: "active"; budgetUsd?: number; ts: number }
+  | { type: "goal:created"; schema: "goal.v1"; scope: GoalScope; status: "active"; review: GoalReviewMode; budgetUsd?: number; ts: number }
   | { type: "goal:state"; schema: "goal.v1"; from: GoalStatus; to: GoalStatus; actor: GoalTransitionActor; reason: string; ts: number }
   | { type: "goal:session_start"; sessionId: string; scope: GoalScope; ts: number }
   | { type: "goal:session_end"; sessionId: string; status: GoalStatus; reason: string; cycles: number; ts: number }
   | { type: "goal:tick_skipped"; sessionId?: string; reason: "go_session_lock"; heldByPid?: number; ts: number }
   | { type: "goal:evaluated"; sessionId: string; status: "continue" | "complete"; total: number; delivered: number; reason: string; blockers: string[]; ts: number }
   | { type: "goal:card_skipped"; sessionId: string; storyId: string; reason: "zero_delivery_streak"; zeroDeliveries: number; cycleId?: string; ts: number }
+  | {
+      type: "goal:final_review";
+      sessionId: string;
+      mode: GoalReviewMode;
+      effectiveMode: "hetero" | "self" | "off";
+      reviewer: string;
+      provider: string;
+      verdict: "APPROVE" | "REQUEST_CHANGES" | "TIMEOUT" | "ERROR" | "SKIPPED";
+      reason: string;
+      findings: string[];
+      ts: number;
+    }
+  | {
+      type: "goal:review_degraded";
+      sessionId: string;
+      from: "auto";
+      to: "self";
+      reviewer: string;
+      provider: string;
+      reason: string;
+      ts: number;
+    }
   // Peer gate (FIX-150b) — the hard-trigger audit trail: every high-complexity
   // delivery records whether peer review happened ("consulted") or was skipped.
   | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped"; reasons: string[]; ts: number }

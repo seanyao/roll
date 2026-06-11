@@ -83,7 +83,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   {
     field: "goal_state",
     aggregate: "goal",
-    description: "The persisted goal scope, budget, status, usage counters, and adjudication reason.",
+    description: "The persisted goal scope, review mode, budget, status, usage counters, and adjudication reason.",
     authoritativeSource: ".roll/loop/goal.yaml (schema goal.v1)",
     writer: "goal control plane; complete may only be written by adjudication",
     derivedViews: ["roll loop goal", "goal-mode dossier/status surfaces"],

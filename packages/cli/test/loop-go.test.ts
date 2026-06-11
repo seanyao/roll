@@ -43,6 +43,18 @@ function readEvents(p: string): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+function writeBacklog(p: string, rows: string[]): void {
+  mkdirSync(join(p, ".roll"), { recursive: true });
+  writeFileSync(
+    join(p, ".roll", "backlog.md"),
+    ["| ID | Title | Status |", "|---|---|---|", ...rows].join("\n") + "\n",
+  );
+}
+
+function writeIndex(p: string, stories: Record<string, string>): void {
+  writeFileSync(join(p, ".roll", "index.json"), `${JSON.stringify({ stories }, null, 2)}\n`);
+}
+
 describe("US-GOAL-002 — roll loop go", () => {
   it("runs cycles back-to-back until a pause marker, then pauses the goal at the cycle boundary", async () => {
     const p = project();
@@ -115,5 +127,154 @@ describe("US-GOAL-002 — roll loop go", () => {
     expect(r.out).toContain("go session already active");
     const events = readEvents(p);
     expect(events.some((e) => e.type === "goal:tick_skipped" && e.reason === "go_session_lock")).toBe(true);
+  });
+});
+
+describe("US-GOAL-003 — goal truth adjudication", () => {
+  it("--cards scope completes only through merge-backed story truth", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+      "| [FIX-DONE](.roll/features/goal-mode/FIX-DONE/spec.md) | done | ✅ Done · PR#2 |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_000 + calls,
+      nowIso: () => `2026-06-11T09:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      prEvidence: () => Promise.resolve({ state: "MERGED", mergedAtSec: 1_779_999_000 }),
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-DONE", cycle_id: `cycle-${calls}`, ts: `2026-06-11T09:00:0${calls}Z`, cost_usd: 1, cost_effective_usd: 1, status: "done" })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE,FIX-DONE"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("complete");
+    expect(goal.scope).toEqual({ kind: "cards", cards: ["US-DONE", "FIX-DONE"] });
+    expect(goal.lastDecisionReason).toContain("all_delivered");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:evaluated" && e.status === "complete")).toBe(true);
+    expect(events.some((e) => e.type === "goal:state" && e.to === "complete" && e.actor === "adjudicator")).toBe(true);
+  });
+
+  it("premature Done truth failure never completes the goal", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-DRIFT-1](.roll/features/e/US-DRIFT-1/spec.md) | premature done | ✅ Done · PR#10 |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_000 + calls,
+      nowIso: () => `2026-06-11T09:10:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      prEvidence: () => Promise.resolve({ state: "OPEN" }),
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-DRIFT-1", cycle_id: `cycle-${calls}`, ts: `2026-06-11T09:10:0${calls}Z`, cost_usd: 1, status: "done" })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DRIFT-1", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).not.toBe("complete");
+    const evaluated = readEvents(p).find((e) => e.type === "goal:evaluated");
+    expect(evaluated).toMatchObject({
+      status: "continue",
+      reason: "blocked:US-DRIFT-1:premature_done",
+    });
+  });
+
+  it("--epic scope resolves through index.json and ignores other epics", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-A](.roll/features/goal-mode/US-A/spec.md) | a | ✅ Done · PR#1 |",
+      "| [US-B](.roll/features/other/US-B/spec.md) | b | 📋 Todo |",
+    ]);
+    writeIndex(p, { "US-A": "goal-mode", "US-B": "other" });
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_000 + calls,
+      nowIso: () => `2026-06-11T09:20:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      prEvidence: () => Promise.resolve({ state: "MERGED", mergedAtSec: 1_779_999_000 }),
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-A", cycle_id: `cycle-${calls}`, ts: `2026-06-11T09:20:0${calls}Z`, status: "done" })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--epic", "goal-mode"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("complete");
+    expect(goal.scope).toEqual({ kind: "epic", epic: "goal-mode" });
+    const evaluated = readEvents(p).find((e) => e.type === "goal:evaluated");
+    expect(evaluated).toMatchObject({ total: 1, delivered: 1, status: "complete" });
+  });
+
+  it("default all scope completes once no backlog Todo rows remain", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_000 + calls,
+      nowIso: () => `2026-06-11T09:30:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-DONE", cycle_id: `cycle-${calls}`, ts: `2026-06-11T09:30:0${calls}Z`, status: "done" })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("complete");
+    expect(goal.scope).toEqual({ kind: "all" });
+    const evaluated = readEvents(p).find((e) => e.type === "goal:evaluated");
+    expect(evaluated).toMatchObject({ total: 0, delivered: 0, status: "complete", reason: "all_delivered" });
   });
 });

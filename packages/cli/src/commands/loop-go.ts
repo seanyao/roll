@@ -1,6 +1,7 @@
-import { EventBus } from "@roll/core";
+import { EventBus, parseBacklog, type AuditPrEvidence, type StoryTruth } from "@roll/core";
 import {
   GOAL_SCHEMA_VERSION,
+  classifyStatus,
   parseGoalYaml,
   renderGoalYaml,
   transitionGoal,
@@ -8,10 +9,11 @@ import {
   type GoalStatus,
   type RollGoal,
 } from "@roll/spec";
-import { acquireLock, projectIdentity, releaseLock } from "@roll/infra";
+import { acquireLock, ghRepoSlug, prViewMergeInfo, projectIdentity, releaseLock, remoteUrl } from "@roll/infra";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
 
@@ -39,6 +41,7 @@ export interface LoopGoDeps {
   hasTmux: () => boolean;
   startTmux: (input: StartTmuxInput) => boolean;
   runOnce: (input: RunOnceInput) => Promise<number>;
+  prEvidence?: (projectPath: string, storyId: string, backlogStatus: string) => Promise<AuditPrEvidence | undefined>;
 }
 
 interface GoOptions {
@@ -52,6 +55,19 @@ interface GoOptions {
 interface RunSummary {
   cycles: number;
   costUsd: number;
+}
+
+interface ScopeRow {
+  id: string;
+  status: string;
+}
+
+interface GoalEvaluation {
+  complete: boolean;
+  reason: string;
+  blockers: string[];
+  total: number;
+  delivered: number;
 }
 
 function realDeps(): LoopGoDeps {
@@ -69,7 +85,25 @@ function realDeps(): LoopGoDeps {
     },
     startTmux: startGoTmux,
     runOnce: realRunOnce,
+    prEvidence: defaultPrEvidence,
   };
+}
+
+async function defaultPrEvidence(projectPath: string, _storyId: string, backlogStatus: string): Promise<AuditPrEvidence | undefined> {
+  const pr = /PR#(\d+)/.exec(backlogStatus)?.[1];
+  if (pr === undefined) return undefined;
+  const slug = ghRepoSlug(await remoteUrl(projectPath));
+  if (slug === undefined) return undefined;
+  try {
+    const info = await prViewMergeInfo(slug, pr);
+    if (info === undefined) return undefined;
+    return {
+      state: info.state,
+      ...(info.mergedAt !== undefined ? { mergedAtSec: Date.parse(info.mergedAt) / 1000 } : {}),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function runtimeDir(projectPath: string): string {
@@ -143,7 +177,16 @@ function parseOptions(args: string[]): GoOptions {
       maxCycles = parseNonNegativeInteger(arg.slice("--max-cycles=".length));
       continue;
     }
-    if (!arg.startsWith("-")) cards.push(arg);
+    if (arg === "--cards") {
+      cards.push(...parseCards(args[i + 1]));
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--cards=")) {
+      cards.push(...parseCards(arg.slice("--cards=".length)));
+      continue;
+    }
+    if (!arg.startsWith("-")) cards.push(...parseCards(arg));
   }
 
   if (cards.length > 0) scope = { kind: "cards", cards };
@@ -164,6 +207,13 @@ function parseNonNegativeNumber(value: string | undefined): number | undefined {
 function parseNonNegativeInteger(value: string | undefined): number | undefined {
   const n = parseNonNegativeNumber(value);
   return n !== undefined && Number.isInteger(n) ? n : undefined;
+}
+
+function parseCards(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
 }
 
 function shellQuote(value: string): string {
@@ -263,6 +313,97 @@ function summarizeRuns(path: string): RunSummary {
   return { cycles, costUsd };
 }
 
+function readBacklogRows(projectPath: string): ScopeRow[] {
+  try {
+    return parseBacklog(readFileSync(join(projectPath, ".roll", "backlog.md"), "utf8")).map((row) => ({
+      id: row.id,
+      status: row.status,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function readStoryIndex(projectPath: string): Record<string, string> {
+  try {
+    const obj = JSON.parse(readFileSync(join(projectPath, ".roll", "index.json"), "utf8")) as { stories?: unknown };
+    if (typeof obj.stories !== "object" || obj.stories === null || Array.isArray(obj.stories)) return {};
+    const out: Record<string, string> = {};
+    for (const [id, epic] of Object.entries(obj.stories)) {
+      if (typeof epic === "string" && epic !== "") out[id] = epic;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function rowsForScope(projectPath: string, scope: GoalScope): ScopeRow[] {
+  const rows = readBacklogRows(projectPath);
+  if (scope.kind === "cards") {
+    const wanted = new Set(scope.cards);
+    return rows.filter((row) => wanted.has(row.id));
+  }
+  if (scope.kind === "epic") {
+    const index = readStoryIndex(projectPath);
+    return rows.filter((row) => index[row.id] === scope.epic);
+  }
+  return rows.filter((row) => classifyStatus(row.status) === "todo");
+}
+
+function goalEvaluationFromTruth(truths: StoryTruth[], scope: GoalScope, opts: { allowEmptyAllComplete: boolean }): GoalEvaluation {
+  const total = truths.length;
+  const delivered = truths.filter((truth) => truth.delivered).length;
+  const blockers = truths
+    .filter((truth) => !truth.delivered || truth.state === "fail" || truth.state === "unknown")
+    .map((truth) => `${truth.storyId}:${truth.state}:${truth.reason}`);
+  if ((total > 0 || (scope.kind === "all" && opts.allowEmptyAllComplete)) && blockers.length === 0) {
+    return { complete: true, reason: "all_delivered", blockers: [], total, delivered };
+  }
+  const first = blockers[0];
+  return {
+    complete: false,
+    reason: first === undefined ? "waiting:no_scope_cards" : `blocked:${first.replace(/:fail:/, ":").replace(/:unknown:/, ":")}`,
+    blockers,
+    total,
+    delivered,
+  };
+}
+
+function backlogExists(projectPath: string): boolean {
+  return existsSync(join(projectPath, ".roll", "backlog.md"));
+}
+
+async function evaluateGoal(projectPath: string, goal: RollGoal, deps: LoopGoDeps, session: string, bus: EventBus): Promise<{ goal: RollGoal; complete: boolean; reason: string }> {
+  const rows = rowsForScope(projectPath, goal.scope);
+  const truths: StoryTruth[] = [];
+  for (const row of rows) {
+    const prEvidence = deps.prEvidence !== undefined ? await deps.prEvidence(projectPath, row.id, row.status) : undefined;
+    truths.push(storyTruthFromBacklog(row.id, row.status, { ...(prEvidence !== undefined ? { prEvidence } : {}), nowSec: deps.nowSec() }));
+  }
+  const verdict = goalEvaluationFromTruth(truths, goal.scope, { allowEmptyAllComplete: backlogExists(projectPath) });
+  bus.appendEvent(eventsPath(projectPath), {
+    type: "goal:evaluated",
+    sessionId: session,
+    status: verdict.complete ? "complete" : "continue",
+    total: verdict.total,
+    delivered: verdict.delivered,
+    reason: verdict.reason,
+    blockers: verdict.blockers,
+    ts: deps.nowSec(),
+  });
+  const at = deps.nowIso();
+  if (verdict.complete) {
+    const next = transitionGoal(goal, "complete", { actor: "adjudicator", reason: verdict.reason, at });
+    writeGoal(goalPath(projectPath), next);
+    appendGoalState(bus, eventsPath(projectPath), goal.status, next, "adjudicator", verdict.reason, deps.nowSec());
+    return { goal: next, complete: true, reason: verdict.reason };
+  }
+  const next = { ...goal, updatedAt: at, lastDecisionReason: verdict.reason };
+  writeGoal(goalPath(projectPath), next);
+  return { goal: next, complete: false, reason: verdict.reason };
+}
+
 function hasSafetyPauseSince(path: string, since: number): boolean {
   let text = "";
   try {
@@ -288,7 +429,7 @@ function sessionId(at: string, pid: number): string {
   return `goal-${compact}-${pid}`;
 }
 
-function appendGoalState(bus: EventBus, path: string, from: GoalStatus, goal: RollGoal, actor: "owner" | "system", reason: string, ts: number): void {
+function appendGoalState(bus: EventBus, path: string, from: GoalStatus, goal: RollGoal, actor: "owner" | "system" | "adjudicator", reason: string, ts: number): void {
   bus.appendEvent(path, {
     type: "goal:state",
     schema: GOAL_SCHEMA_VERSION,
@@ -426,6 +567,12 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       goal = updateUsage(id.path, goal, baseline, initialUsage, deps.nowIso());
       writeGoal(gPath, goal);
       const after = summarizeRuns(runsPath(id.path));
+      const adjudication = await evaluateGoal(id.path, goal, deps, sid, bus);
+      goal = adjudication.goal;
+      if (adjudication.complete) {
+        stopReason = "goal_complete";
+        break;
+      }
 
       if (hasSafetyPauseSince(evPath, startedSec)) {
         stopReason = "safety_pause";
@@ -442,13 +589,13 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
     }
 
     const finalReason = stopReason ?? "stop_requested";
-    const paused = pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
+    const finalGoal = goal.status === "complete" ? goal : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
     bus.appendEvent(evPath, {
       type: "goal:session_end",
       sessionId: sid,
-      status: paused.status,
+      status: finalGoal.status,
       reason: finalReason,
-      cycles: paused.usage.cycles - initialUsage.cycles,
+      cycles: finalGoal.usage.cycles - initialUsage.cycles,
       ts: deps.nowSec(),
     });
     process.stdout.write(`roll loop go: stopped at cycle boundary (${finalReason})\n`);

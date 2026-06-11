@@ -70,4 +70,18 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(end.cycles).toBe(2);
     expect(tickYield.reason).toBe("go_session_lock");
   });
+  it("types goal truth evaluation events (US-GOAL-003)", () => {
+    const evaluated: RollEvent = {
+      type: "goal:evaluated",
+      sessionId: "goal-20260611-090000",
+      status: "continue",
+      total: 1,
+      delivered: 0,
+      reason: "blocked:US-DRIFT:premature_done",
+      blockers: ["US-DRIFT:fail:premature_done"],
+      ts: 1_780_000_200,
+    };
+    expect(evaluated.type).toBe("goal:evaluated");
+    expect(evaluated.blockers).toContain("US-DRIFT:fail:premature_done");
+  });
 });

@@ -32,6 +32,13 @@ const REQUIRED_FIELDS = [
   "release_waiver",
 ] as const;
 
+const EXPECTED_AGGREGATES = {
+  story: ["story_delivery", "attest_evidence"],
+  cycle: ["cycle_outcome", "pr_merge", "tcr_evidence", "usage_cost"],
+  release: ["release_verdict", "release_waiver"],
+  "view-meta": ["dossier_freshness", "index_freshness"],
+} as const;
+
 describe("US-TRUTH-000 AC1 — the matrix covers every drift-prone fact field", () => {
   it("declares all required fields (and only known shapes)", () => {
     const keys = TRUTH_ANCHORS.map((a) => a.field);
@@ -42,6 +49,24 @@ describe("US-TRUTH-000 AC1 — the matrix covers every drift-prone fact field", 
   it("truthAnchor() resolves a field, throws on an undeclared one", () => {
     expect(truthAnchor("story_delivery").authoritativeSource).toBeTruthy();
     expect(() => truthAnchor("not_a_field")).toThrow(/undeclared/i);
+  });
+});
+
+describe("US-TRUTH-007 — every anchor declares its owning aggregate", () => {
+  it("uses only legal aggregate names; see .roll/domain/truth-model.md", () => {
+    const legal = Object.keys(EXPECTED_AGGREGATES);
+    for (const anchor of TRUTH_ANCHORS) {
+      expect(legal, `${anchor.field}: aggregate must match .roll/domain/truth-model.md`).toContain(anchor.aggregate);
+    }
+  });
+
+  it("matches the Story/Cycle/Release/view-meta ownership model", () => {
+    for (const [aggregate, fields] of Object.entries(EXPECTED_AGGREGATES)) {
+      const actual = TRUTH_ANCHORS.filter((a) => a.aggregate === aggregate).map((a) => a.field).sort();
+      expect(actual, `${aggregate}: update .roll/domain/truth-model.md and truth-anchors.md when changing ownership`).toEqual(
+        [...fields].sort(),
+      );
+    }
   });
 });
 

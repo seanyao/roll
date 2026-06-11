@@ -13,10 +13,12 @@
  * the single home for a story's run artifacts.
  */
 import { parseBacklog } from "@roll/core";
+import { type AuditPrEvidence, type TruthReason, type TruthState } from "@roll/core";
 import { markPhaseDone } from "./story-page.js";
 import { classifyStatus, type StoryStatus } from "@roll/spec";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { storyTruthFromBacklog } from "./truth-adapter.js";
 
 /** The uncategorized epic slug — the never-block fallback bucket. */
 export const UNCATEGORIZED = "uncategorized";
@@ -237,6 +239,11 @@ export interface DossierStory {
    *  of truth the dossier aligns to (done | in_progress | hold | todo). Undefined
    *  for cards absent from the backlog (archived history). */
   status?: StoryStatus;
+  /** Raw backlog status cell: the owner's claim, including PR annotations. */
+  claim?: string;
+  /** Truth selector verdict for backlog-present cards. Undefined for archive-only history. */
+  truthState?: TruthState;
+  truthReason?: TruthReason;
   /** Completed lifecycle stations (definition/design/execution/delivery/
    *  retrospective) for the index spine — computed from real evidence by the
    *  index command (stationsDone) and attached here; undefined until enriched. */
@@ -253,6 +260,12 @@ export interface DossierEpic {
   name: string;
   stories: DossierStory[];
   delivered: number;
+}
+
+export interface CollectDossierOptions {
+  /** story id → delivery PR evidence snapshot. Absence means unavailable, not false. */
+  prEvidence?: Record<string, AuditPrEvidence>;
+  nowSec?: number;
 }
 
 /**
@@ -300,7 +313,7 @@ function specMeta(specPath: string): { title?: string; created?: string; markedD
  * folder becomes a story (spec.md enriches it; a `latest/` pointer marks
  * truth). Epics sorted by name; stories by id. Pure read — no writes.
  */
-export function collectDossier(projectPath: string): DossierEpic[] {
+export function collectDossier(projectPath: string, opts: CollectDossierOptions = {}): DossierEpic[] {
   const root = join(projectPath, ".roll", "features");
   if (!existsSync(root)) return [];
   // Align with the backlog: it is the live source of truth for type + status.
@@ -308,11 +321,13 @@ export function collectDossier(projectPath: string): DossierEpic[] {
   // reads in .roll/backlog.md (done/in_progress/hold/todo). Cards absent from
   // the backlog (archived history) fall back to the features-folder heuristic.
   const backlogStatus = new Map<string, StoryStatus>();
+  const backlogRawStatus = new Map<string, string>();
   try {
     const backlogText = readFileSync(join(projectPath, ".roll", "backlog.md"), "utf8");
     for (const item of parseBacklog(backlogText)) {
       const st = classifyStatus(item.status);
       if (st !== null) backlogStatus.set(item.id, st);
+      backlogRawStatus.set(item.id, item.status);
     }
   } catch {
     /* no backlog → heuristic-only */
@@ -354,11 +369,15 @@ export function collectDossier(projectPath: string): DossierEpic[] {
       } catch {
         /* no latest → fall back to the heading marker */
       }
-      // Backlog is authoritative when the card is in it: a story is delivered iff
-      // the backlog marks it ✅ Done (backlog rule: Done ≡ merged to main), and we
-      // carry the full status so the chips/groups mirror the backlog.
+      // Backlog carries the owner's claim; truth adjudication comes from the
+      // selector. Without a PR evidence snapshot the selector returns unknown or
+      // grandfathered instead of guessing that a Done claim has merged.
       const status = backlogStatus.get(id);
-      if (status !== undefined) delivered = status === "done";
+      const rawStatus = backlogRawStatus.get(id);
+      const storyTruth = rawStatus !== undefined
+        ? storyTruthFromBacklog(id, rawStatus, { prEvidence: opts.prEvidence?.[id], nowSec: opts.nowSec })
+        : undefined;
+      if (storyTruth !== undefined) delivered = storyTruth.delivered;
       // US-DOSSIER-008: delivered with NO v3 evidence chain (no latest/ attest
       // pointer, no ac-map.json) ⇒ a pre-v3 legacy delivery — done, but never
       // re-instrumented to v3 rigor, so it is marked apart from evidenced cards.
@@ -371,6 +390,11 @@ export function collectDossier(projectPath: string): DossierEpic[] {
         legacy,
       };
       if (status !== undefined) story.status = status;
+      if (rawStatus !== undefined) story.claim = rawStatus;
+      if (storyTruth !== undefined) {
+        story.truthState = storyTruth.state;
+        story.truthReason = storyTruth.reason;
+      }
       if (meta.title !== undefined) story.title = meta.title;
       if (meta.created !== undefined) story.created = meta.created;
       stories.push(story);

@@ -28,6 +28,7 @@ import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { gcCommand } from "./gc.js";
 import { execFileSync, spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
+import { createConnection } from "node:net";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 
 /** US-PORT-011: after a delivered cycle, surface the acceptance report —
@@ -649,6 +650,24 @@ export async function isOffline(
   }
 }
 
+export function tcpConnect(host: string, port: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host, port });
+    let settled = false;
+    const done = (err?: Error): void => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      if (err) reject(err);
+      else resolve();
+    };
+    socket.setTimeout(timeoutMs, () => done(new Error("tcp timeout")));
+    socket.once("connect", () => done());
+    socket.once("error", done);
+  });
+}
+
 /**
  * FIX-232 AC2 — lightweight egress pre-check. Before a cycle acquires the
  * inner lock and spawns an agent, verify that outbound connectivity to a
@@ -664,13 +683,16 @@ export async function isOffline(
  * The check is two-tier:
  *   1. DNS resolve github.com (the `isOffline` check Idea-001 already does).
  *   2. TCP connect to github.com:443 within 3s — catches proxy-poison where
- *      DNS works but the actual TCP connect hits a dead proxy endpoint.
+ *      DNS works but the actual TCP connect is blocked. This uses Node's
+ *      native socket timeout rather than GNU `timeout`, which macOS does not
+ *      ship by default.
  *
  * On Darwin only (the launchctl proxy-poison is a macOS-specific vector).
  * On other platforms, skips (returns false) to avoid false positives.
  */
 export async function egressBlocked(
   resolve: (host: string) => Promise<unknown> = (h) => lookup(h),
+  tcpProbe: () => Promise<void> = () => tcpConnect("github.com", 443, 3000),
 ): Promise<boolean> {
   // Only relevant on Darwin — launchctl setenv is macOS-specific.
   if (process.platform !== "darwin") return false;
@@ -681,17 +703,10 @@ export async function egressBlocked(
   if (offline) return false; // offline is not a poison signal — degrade, don't halt.
 
   // Tier 2: TCP connect to github.com:443. DNS succeeded but TCP may be
-  // routed to a dead proxy. Use a clean subprocess with an explicit 3s
-  // timeout; the probe itself must never stall the cycle (>5s wall).
+  // routed to a dead proxy or blocked egress. The probe itself must never
+  // stall the cycle (>5s wall).
   try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execFileAsync = promisify(execFile);
-    await execFileAsync(
-      "bash",
-      ["-c", "timeout 3 bash -c 'echo >/dev/tcp/github.com/443' 2>/dev/null"],
-      { timeout: 5000 },
-    );
+    await tcpProbe();
     return false; // TCP connect succeeded — egress is clear.
   } catch {
     // TCP connect failed — DNS worked but the actual connection didn't.

@@ -5,7 +5,7 @@
  * pure module (backlog/picker, agent/router, delivery/{pr,tcr}, reconcile/engine,
  * cost/budget, events/bus, loop/recovery). This module is the conductor — a PURE
  * state machine that walks the {@link CyclePhase} ladder, deciding at each step
- * WHICH building-block command to run next and WHAT terminal {@link CycleOutcome}
+ * WHICH building-block command to run next and WHAT terminal {@link TerminalOutcome}
  * the cycle lands on. It NEVER spawns a process, sleeps, or reads a clock; every
  * I/O result (story pick, route, worktree create, agent exit, publish status,
  * merge poll, reconcile evidence) is fed back in as an {@link CycleEvent}, and the
@@ -56,15 +56,13 @@
  *     the captured facts ({@link classifyCaptured}) and, when synchronous, folds
  *     merge evidence.
  *
- * ── Six-state outcome model (v2 terminal vocabulary) ──────────────────────────
+ * ── Terminal outcome model ────────────────────────────────────────────────────
  * v2 stamps one of SIX runs.jsonl statuses (idle/built/failed/orphan/aborted/done)
  * — see _runs_append callers + the EXIT trap. {@link classifyCaptured} and
- * {@link captureToSpecOutcome} map them; the spec's {@link CycleOutcome} is a
- * 6-member union (delivered/built/failed/blocked/aborted/reverted) that does NOT
- * carry v2's `idle`/`orphan`/`done` literals, so {@link mapV2Status} documents the
- * lossless bridge (see its doc). NO spec extension was needed: the v2 statuses map
- * cleanly onto the spec union plus the {@link V2CycleStatus} internal vocabulary
- * kept here for byte-faithful runs.jsonl parity (diff-tested).
+ * {@link captureToSpecOutcome} map v2 runner rows to TerminalOutcome. The
+ * {@link V2CycleStatus} internal vocabulary is kept for byte-faithful runs-row
+ * parity; emitted cycle:end events and new row `outcome` fields use the closed
+ * terminal vocabulary.
  *
  * ── Hard timeout (B-group AC) ─────────────────────────────────────────────────
  * v2 LOOP_CYCLE_TIMEOUT_SEC=2700 (bin/roll:8473). The watchdog (bin/roll:9044-9052)
@@ -102,7 +100,7 @@
  * state back in with the next observed event; the {@link CycleCommand}s name the
  * existing ports/plans so the adapter dispatches them 1:1.
  */
-import type { AgentId, CycleCost, CycleOutcome, CyclePhase, ModelId } from "@roll/spec";
+import type { AgentId, CycleCost, CyclePhase, ModelId, TerminalOutcome } from "@roll/spec";
 import type { RollEvent } from "@roll/spec";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
 
@@ -126,44 +124,32 @@ import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
 export type V2CycleStatus = "idle" | "built" | "done" | "published" | "orphan" | "failed" | "aborted" | "blocked";
 
 /**
- * Bridge v2's runs.jsonl status onto the spec's {@link CycleOutcome} union. The
- * spec union (delivered/built/failed/blocked/aborted/reverted) is intentionally
- * coarser than v2's runtime vocabulary; the mapping is lossless in MEANING:
- *   - idle    → "built"     : exit-0 no-op is a clean (zero-delta) build; the spec
- *                              has no `idle` literal, but a 0-commit cycle is not a
- *                              failure — `built` with an empty `built[]` is the
- *                              honest projection (reconcile leaves it uncredited).
- *   - built   → "built"     : claimed, pending merge evidence (I4).
- *   - done    → "delivered" : published/merged — the spec's success literal.
- *   - orphan  → "built"     : commits pushed for audit but no PR merged — still
- *                              uncredited until reconcile sees MERGED (I4).
+ * Bridge v2's runs.jsonl status onto the closed {@link TerminalOutcome}
+ * vocabulary. This is a write-side projection for new events/rows:
+ *   - idle    → "idle_no_work"              : exit-0 no-op.
+ *   - built   → "published_pending_merge"  : claimed, pending merge evidence.
+ *   - done    → "delivered"                : confirmed merged / locally ff-merged.
+ *   - published → "published_pending_merge": PR open, merge pending.
+ *   - orphan  → "aborted_with_delivery"    : pushed for audit but not delivered.
  *   - failed  → "failed".
- *   - aborted → "aborted".
+ *   - aborted → "aborted_no_delivery".
  *   - blocked → "blocked"   : hard-timeout breach.
- * `reverted` (spec) is produced by the TCR zero-commit path (delivery/tcr.ts), not
- * by a runs status, so it has no v2-status source here.
- *
- * NOTE: `idle` and `orphan` both fold to `built`. When a caller needs to preserve
- * the v2 distinction (dashboard parity), it keeps the {@link V2CycleStatus} on the
- * runs row and uses this mapping ONLY for the spec-typed cycle:end event.
  */
-export function mapV2Status(status: V2CycleStatus): CycleOutcome {
+export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
   switch (status) {
     case "done":
-    // FIX-244: "published" is the honest publish-ok terminal — PR open, merge
-    // pending. The spec's "delivered" literal already means published/merged,
-    // so the event-level outcome is unchanged; the runs-row status keeps the
-    // distinction for the merge-evidence backfill (FIX-243).
-    case "published":
       return "delivered";
-    case "idle":
+    case "published":
     case "built":
+      return "published_pending_merge";
+    case "idle":
+      return "idle_no_work";
     case "orphan":
-      return "built";
+      return "aborted_with_delivery";
     case "failed":
       return "failed";
     case "aborted":
-      return "aborted";
+      return "aborted_no_delivery";
     case "blocked":
       return "blocked";
   }
@@ -256,8 +242,8 @@ export function classifyPublish(pub: PublishResult): V2CycleStatus {
   return "failed";
 }
 
-/** Map a captured terminal straight to the spec outcome (idle/built → built). */
-export function captureToSpecOutcome(status: V2CycleStatus): CycleOutcome {
+/** Map a captured terminal straight to the closed terminal outcome vocabulary. */
+export function captureToSpecOutcome(status: V2CycleStatus): TerminalOutcome {
   return mapV2Status(status);
 }
 
@@ -437,7 +423,7 @@ export type CycleCommand =
   | { kind: "reconcile" } // reconcile/engine reconcileMergeEvidence.
   | { kind: "cleanup_worktree"; branch: string } // _worktree_cleanup.
   | { kind: "emit_event"; event: RollEvent } // events/bus appendEvent (I8).
-  | { kind: "append_run"; status: V2CycleStatus; outcome: CycleOutcome; cycleId: string } // events/bus upsertRun.
+  | { kind: "append_run"; status: V2CycleStatus; outcome: TerminalOutcome; cycleId: string } // events/bus upsertRun.
   | { kind: "append_alert"; message: string } // _worktree_alert.
   | { kind: "release_lock" }; // infra/process releaseLock.
 
@@ -845,7 +831,7 @@ export interface RebuiltCycle {
   storyId?: string;
   agent?: AgentId;
   /** The terminal outcome from the LAST cycle:end (undefined ⇒ never ended). */
-  outcome?: CycleOutcome;
+  outcome?: TerminalOutcome;
   /** Phases entered, in order (from cycle:phase events). */
   phases: CyclePhase[];
   /** True once a cycle:end was seen (terminal event written — I8). */

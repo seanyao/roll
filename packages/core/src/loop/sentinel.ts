@@ -55,7 +55,7 @@
  * Loop-cycle terminals that the v2 runner pushes a snapshot on. v2 invokes
  * `_loop_push_status_snapshot` from the `idle` and `done` cycle_end paths. We
  * model the runner's terminal vocabulary (not v3's reconcile-derived
- * CycleOutcome) because the push decision keys off the RUNNER terminal, which is
+ * TerminalOutcome) because the push decision keys off the RUNNER terminal, which is
  * decided BEFORE reconcile: `idle` (no commits) and `done` (published) both
  * push; a `failed`/`aborted`/`blocked` terminal does NOT (no push call on those
  * paths — bin/roll 9216/9218/9226 write the row and return without pushing).

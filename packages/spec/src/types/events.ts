@@ -4,9 +4,9 @@
  * Schema per specs/architecture §3 (v2-aligned).
  */
 import type { AgentId } from "./agent.js";
-import type { CycleCost, CycleOutcome, CyclePhase } from "./cycle.js";
+import type { CycleCost, CyclePhase } from "./cycle.js";
 import type { LoopType } from "./loop.js";
-import type { TerminalEvent } from "./terminal.js";
+import type { TerminalEvent, TerminalOutcome } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
 
 export type RollEvent =
@@ -21,7 +21,7 @@ export type RollEvent =
   | { type: "cycle:phase"; cycleId: string; phase: CyclePhase; ts: number }
   | { type: "cycle:stdout"; cycleId: string; data: string; ts: number }
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number }
-  | { type: "cycle:end"; cycleId: string; outcome: CycleOutcome; cost: CycleCost; ts: number }
+  | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number }
   // Routing (BC3) — auditable, reproducible (I10)
   | { type: "route:resolve"; storyId: string; level: TaskLevel; agent: AgentId; model: string; rule: string; ts: number }
   // Delivery (BC4)

@@ -9,8 +9,11 @@ export type CyclePhase =
   | "reconcile"
   | "cleanup";
 
-/** Exit code 0 ≠ delivered — outcome is decided by reconcile (I4). */
-export type CycleOutcome = "delivered" | "built" | "failed" | "blocked" | "aborted" | "reverted";
+/** @deprecated Legacy v2/read-side outcome vocabulary. New writes use TerminalOutcome. */
+export type LegacyCycleOutcome = "delivered" | "built" | "failed" | "blocked" | "aborted" | "reverted";
+
+/** @deprecated Use TerminalOutcome; keep only for legacy read-side callers. */
+export type CycleOutcome = LegacyCycleOutcome;
 
 export interface CycleCost {
   cycleId: string;

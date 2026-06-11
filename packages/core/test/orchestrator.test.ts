@@ -103,8 +103,8 @@ describe("FIX-244 — phantom-failure classification (published terminal)", () =
       classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 0, prState: "OPEN" }),
     ).toBe("failed");
   });
-  it("mapV2Status(published) → delivered (spec literal already means published/merged)", () => {
-    expect(mapV2Status("published")).toBe("delivered");
+  it("mapV2Status(published) → published_pending_merge (PR open, merge pending)", () => {
+    expect(mapV2Status("published")).toBe("published_pending_merge");
   });
 });
 
@@ -132,17 +132,17 @@ describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)"
   });
 });
 
-describe("mapV2Status — six-state → spec CycleOutcome bridge", () => {
-  it("idle/built/orphan all fold to built (uncredited until reconcile)", () => {
-    expect(mapV2Status("idle")).toBe("built");
-    expect(mapV2Status("built")).toBe("built");
-    expect(mapV2Status("orphan")).toBe("built");
+describe("mapV2Status — v2 rows → TerminalOutcome bridge", () => {
+  it("idle/built/orphan use closed terminal vocabulary", () => {
+    expect(mapV2Status("idle")).toBe("idle_no_work");
+    expect(mapV2Status("built")).toBe("published_pending_merge");
+    expect(mapV2Status("orphan")).toBe("aborted_with_delivery");
   });
-  it("done → delivered, blocked → blocked, failed/aborted passthrough", () => {
+  it("done → delivered, blocked/failed passthrough, aborted is reasoned", () => {
     expect(mapV2Status("done")).toBe("delivered");
     expect(mapV2Status("blocked")).toBe("blocked");
     expect(mapV2Status("failed")).toBe("failed");
-    expect(mapV2Status("aborted")).toBe("aborted");
+    expect(mapV2Status("aborted")).toBe("aborted_no_delivery");
   });
 });
 
@@ -192,7 +192,7 @@ describe("failure branches", () => {
       { type: "no_story" },
     ]);
     expect(state.terminal).toBe("idle");
-    expect(mapV2Status(state.terminal!)).toBe("built");
+    expect(mapV2Status(state.terminal!)).toBe("idle_no_work");
     expect(kinds.slice(-3)).toEqual(["cleanup_worktree", "emit_event", "append_run"]);
   });
 
@@ -495,6 +495,6 @@ describe("event-sourcing round-trip (I8)", () => {
     const emitted = commands.filter((c): c is Extract<CycleCommand, { kind: "emit_event" }> => c.kind === "emit_event").map((c) => c.event);
     const rebuilt = roundTrip(emitted);
     expect(rebuilt.ended).toBe(true);
-    expect(rebuilt.outcome).toBe("delivered");
+    expect(rebuilt.outcome).toBe("published_pending_merge");
   });
 });

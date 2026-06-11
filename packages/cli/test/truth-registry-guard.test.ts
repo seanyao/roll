@@ -11,7 +11,7 @@ import { buildRunRow } from "../src/runner/index.js";
 describe("US-TRUTH-006 — buildRunRow output is fully registered", () => {
   it("a maximal real row (cost + cache + merge-window fields) has no unregistered keys", () => {
     const row = buildRunRow(
-      { kind: "append_run", status: "published", outcome: "delivered", cycleId: "C-1" },
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: "C-1" },
       {
         cycleId: "C-1",
         branch: "loop/cycle-C-1",

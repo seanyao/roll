@@ -41,6 +41,16 @@ describe("cycleTruthFromRow / outcomeToPanel — selector-backed classification"
     expect(rowDelivered({ cycle_id: "C", status: "failed", outcome: "failed", ts: iso(NOW) }, NOW)).toBe(false);
     expect(rowDelivered({ cycle_id: "C", status: "idle", outcome: "built", ts: iso(NOW) }, NOW)).toBe(false);
   });
+  it("legacy built row and new TerminalOutcome row share selector and panel semantics", () => {
+    const oldRow = cycleTruthFromRow({ cycle_id: "C-OLD", status: "built", outcome: "built", ts: iso(NOW - 100) }, { nowSec: NOW });
+    const newRow = cycleTruthFromRow(
+      { cycle_id: "C-NEW", status: "published", outcome: "published_pending_merge", ts: iso(NOW - 100) },
+      { nowSec: NOW },
+    );
+    expect(oldRow.outcome).toBe("published_pending_merge");
+    expect(newRow.outcome).toBe("published_pending_merge");
+    expect(outcomeToPanel(oldRow.outcome, oldRow.state)).toBe(outcomeToPanel(newRow.outcome, newRow.state));
+  });
 });
 
 describe("AC4 — unknown renders as unknown, never as success", () => {

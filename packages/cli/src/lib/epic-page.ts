@@ -8,7 +8,7 @@
  * Same chrome, same tokens (001a), same single-file contract.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
-import { type DossierEpic, type DossierStory } from "./archive.js";
+import { type DossierEpic, type DossierEpicDoc, type DossierStory } from "./archive.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES } from "./dossier-index.js";
 
@@ -64,6 +64,45 @@ function storyRow(s: DossierStory): string {
   );
 }
 
+function docKindLabel(doc: DossierEpicDoc): string {
+  if (doc.kind === "overview") return bi("Overview", "总览");
+  if (doc.kind === "plan") return bi("Plan", "方案");
+  return bi("Doc", "文档");
+}
+
+function epicDocs(e: DossierEpic): string {
+  const docs = e.docs ?? [];
+  const overview = `.roll/features/${e.name}/${e.name}.md`;
+  const plan = `.roll/features/${e.name}/${e.name}-plan.md`;
+  if (docs.length === 0) {
+    return (
+      `<section class="epic-docs empty-docs">` +
+      `<h2>${bi("Design docs", "设计文档")}</h2>` +
+      `<p class="empty">${bi("No epic-root design docs yet", "暂无 epic 根设计文档")} · ` +
+      `<code>${esc(overview)}</code> / <code>${esc(plan)}</code></p>` +
+      `</section>\n`
+    );
+  }
+  const missingOverview = docs.some((doc) => doc.kind === "overview")
+    ? ""
+    : `<p class="empty overview-hint">${bi("No overview doc yet", "暂无总览文档")} · <code>${esc(overview)}</code></p>`;
+  return (
+    `<section class="epic-docs">` +
+    `<h2>${bi("Design docs", "设计文档")}</h2>` +
+    `<div class="epic-doclinks">` +
+    docs.map((doc) =>
+      `<a class="epic-doc ${doc.kind}" href="${esc(doc.href)}">` +
+      `<span class="doc-kind">${docKindLabel(doc)}</span>` +
+      `<span class="doc-title">${esc(doc.title)}</span>` +
+      `<code>${esc(doc.file)}</code>` +
+      `</a>`,
+    ).join("") +
+    `</div>` +
+    missingOverview +
+    `</section>\n`
+  );
+}
+
 /** Epic-level ledger (figures scoped to this epic). */
 function epicLedger(e: DossierEpic): string {
   const total = e.stories.length;
@@ -107,6 +146,7 @@ export function renderEpicPage(e: DossierEpic): string {
     `<h1>${esc(e.name)}</h1>\n` +
     `</div>\n` +
     epicLedger(e) +
+    epicDocs(e) +
     group("Merged to main", "已合主干", merged) +
     group("Truth drift", "真相漂移", drift) +
     group("Unknown", "未知", unknown) +

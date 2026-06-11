@@ -45,4 +45,29 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(created.type).toBe("goal:created");
     expect(state.to).toBe("paused");
   });
+  it("types goal go session events (US-GOAL-002)", () => {
+    const start: RollEvent = {
+      type: "goal:session_start",
+      sessionId: "goal-20260611-080000",
+      scope: { kind: "all" },
+      ts: 1_780_000_000,
+    };
+    const end: RollEvent = {
+      type: "goal:session_end",
+      sessionId: "goal-20260611-080000",
+      status: "paused",
+      reason: "pause_marker",
+      cycles: 2,
+      ts: 1_780_000_100,
+    };
+    const tickYield: RollEvent = {
+      type: "goal:tick_skipped",
+      reason: "go_session_lock",
+      heldByPid: 123,
+      ts: 1_780_000_001,
+    };
+    expect(start.type).toBe("goal:session_start");
+    expect(end.cycles).toBe(2);
+    expect(tickYield.reason).toBe("go_session_lock");
+  });
 });

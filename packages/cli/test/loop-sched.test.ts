@@ -34,6 +34,7 @@ import {
   type LoopSchedDeps,
 } from "../src/commands/loop-sched.js";
 import type { LaunchctlResult } from "@roll/infra";
+import { parseGoalYaml } from "@roll/spec";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -172,6 +173,15 @@ describe("v3 loop runner template", () => {
     expect(pauseIdx).toBeLessThan(runIdx);
   });
 
+  it("lets launchd ticks yield while a go session holds the session lock", () => {
+    expect(script).toContain("go.lock");
+    expect(script).toContain("goal:tick_skipped");
+    const lockIdx = script.indexOf("go.lock");
+    const runIdx = script.indexOf('"$ROLL_BIN" loop run-once');
+    expect(lockIdx).toBeGreaterThan(-1);
+    expect(lockIdx).toBeLessThan(runIdx);
+  });
+
   it("enforces the active window but lets ROLL_LOOP_FORCE bypass it", () => {
     expect(script).toContain("ROLL_LOOP_FORCE");
     const s = buildLoopRunnerScript({ projectPath: "/p", slug: "s", activeStart: 9, activeEnd: 18 });
@@ -256,6 +266,18 @@ describe("v3 loop runner — EXECUTION in a sandbox (the contract that matters)"
     const log = readFileSync(join(proj, ".roll", "loop", "cron.log"), "utf8");
     expect(log).toContain("cycle start (v3 run-once)");
     expect(log).toContain("cycle end rc=0");
+  });
+
+  it("really skips run-once and records an event when go.lock is held", () => {
+    const proj = tmp("go-lock");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "loop", "go.lock"), `${process.pid}:${Math.floor(Date.now() / 1000)}\n`);
+    const { status, argvLog } = runScript(proj, "s1", "12");
+    expect(status).toBe(0);
+    expect(existsSync(argvLog)).toBe(false);
+    const events = readFileSync(join(proj, ".roll", "loop", "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"goal:tick_skipped"');
+    expect(events).toContain('"reason":"go_session_lock"');
   });
 
   it("PAUSE marker short-circuits before any invocation", () => {
@@ -550,6 +572,36 @@ describe("loop pause/resume (marker file)", () => {
     // No events.ndjson should have been created (nothing to emit).
     const eventsPath = join(rt, "events.ndjson");
     expect(existsSync(eventsPath)).toBe(false);
+  });
+
+  it("pause marks an active goal paused without killing the current cycle", async () => {
+    const proj = tmp("goal-pause");
+    const { deps } = fakeDeps(proj, tmp("shared"), tmp("ld"));
+    const rt = join(proj, ".roll", "loop");
+    mkdirSync(rt, { recursive: true });
+    writeFileSync(
+      join(rt, "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: all
+status: active
+usage:
+  cycles: 1
+  costUsd: 0.5
+createdAt: 2026-06-11T08:00:00Z
+updatedAt: 2026-06-11T08:00:00Z
+`,
+    );
+
+    const r = await captureStdout(() => loopPauseCommand([], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(rt, "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("loop_pause");
+    const events = readFileSync(join(rt, "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"goal:state"');
+    expect(events).toContain('"to":"paused"');
   });
 });
 

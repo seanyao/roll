@@ -38,9 +38,10 @@ import {
   projectIdentity,
 } from "@roll/infra";
 import { EventBus } from "@roll/core";
+import { GOAL_SCHEMA_VERSION, parseGoalYaml, renderGoalYaml, transitionGoal } from "@roll/spec";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -177,6 +178,20 @@ if [ -f "$RT/PAUSE-${input.slug}" ]; then exit 0; fi
 if [ -z "$ROLL_LOOP_FORCE" ]; then
   h=$((10#$(date +%H)))
   if [ "$h" -lt ${input.activeStart} ] || [ "$h" -ge ${input.activeEnd} ]; then exit 0; fi
+fi
+# Goal go session lock — while \`roll loop go\` is chaining cycles, scheduled
+# launchd ticks yield instead of racing the next card between two run-once calls.
+GO_LOCK="$RT/go.lock"
+if [ -f "$GO_LOCK" ]; then
+  _gp=""; _gt=""
+  IFS=: read -r _gp _gt < "$GO_LOCK" 2>/dev/null || true
+  _now=$(date -u +%s)
+  if [ -n "$_gp" ] && [ -n "$_gt" ] && kill -0 "$_gp" 2>/dev/null && [ "$((_now - _gt))" -lt 21600 ]; then
+    printf '{"type":"goal:tick_skipped","reason":"go_session_lock","heldByPid":%s,"ts":%s}\\n' "$_gp" "$_now" >> "$RT/events.ndjson"
+    echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] goal go session lock held by pid $_gp; tick skipped" >> "$LOG"
+    exit 0
+  fi
+  rm -f "$GO_LOCK"
 fi
 ROLL_BIN="\${ROLL_BIN:-${input.rollBin ?? '$(command -v roll || echo /opt/homebrew/bin/roll)'}}"
 # FIX-204E observation window: every cycle runs inside tmux session
@@ -435,6 +450,33 @@ function pauseMarkerPath(projectPath: string, slug: string): string {
   return join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
 }
 
+function syncGoalPaused(projectPath: string, reason: string): void {
+  const rt = join(projectPath, ".roll", "loop");
+  const path = join(rt, "goal.yaml");
+  if (!existsSync(path)) return;
+  try {
+    const before = parseGoalYaml(readFileSync(path, "utf8"));
+    if (before.status === "paused" || before.status === "complete") return;
+    const at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const after = transitionGoal(before, "paused", { actor: "system", reason, at });
+    const tmp = `${path}.tmp-${process.pid}`;
+    writeFileSync(tmp, renderGoalYaml(after), "utf8");
+    renameSync(tmp, path);
+    new EventBus().appendEvent(join(rt, "events.ndjson"), {
+      type: "goal:state",
+      schema: GOAL_SCHEMA_VERSION,
+      from: before.status,
+      to: after.status,
+      actor: "system",
+      reason,
+      ts: Math.floor(Date.now() / 1000),
+    });
+  } catch {
+    // `roll loop pause` must still pause the scheduler marker even if goal.yaml
+    // is temporarily malformed; `roll loop goal` remains the fail-loud reader.
+  }
+}
+
 // ─── commands ─────────────────────────────────────────────────────────────────
 
 const LOOP_SERVICES = ["loop", "dream", "pr"] as const;
@@ -655,6 +697,7 @@ export async function loopPauseCommand(_args: string[], deps: LoopSchedDeps = re
   mkdirSync(dirname(marker), { recursive: true });
   const already = existsSync(marker);
   if (!already) writeFileSync(marker, `${new Date().toISOString()}\n`);
+  syncGoalPaused(id.path, "loop_pause");
   process.stdout.write(
     already
       ? `Loop already paused\nLoop 已处于暂停\n`

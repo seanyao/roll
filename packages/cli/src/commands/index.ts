@@ -30,6 +30,7 @@ import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
 import { loopLogCommand } from "./loop-log.js";
 import { loopGoalCommand } from "./loop-goal.js";
+import { loopGoCommand } from "./loop-go.js";
 import { loopEventsCommand } from "./loop-events.js";
 import { loopAttachRetired, loopBranchesRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
@@ -267,6 +268,7 @@ export function registerAll(): void {
     if (args[0] === "story") return loopStoryCommand(args.slice(1));
     if (args[0] === "runs") return loopRunsCommand(args.slice(1));
     if (args[0] === "goal") return loopGoalCommand(args.slice(1));
+    if (args[0] === "go") return loopGoCommand(args.slice(1));
     if (args[0] === "signals") return loopSignalsCommand(args.slice(1));
     // `loop log` / `loop events`: residual pure-read viewers (US-PORT-022) over
     // .roll/cycle-logs and the shared events ndjson. No bash fallback.
@@ -323,5 +325,5 @@ export function registerAll(): void {
     // Anything else is an unknown loop subcommand — print the v2 usage, exit 1
     // (no bash fallback remains; bin/roll is being retired in US-PORT-021).
     return loopUnknownSubcommand(args[0]);
-  }, { help: "Usage: roll loop <on|off|now|test|status|goal|runs|log|story|events|eval|signals|alert|fmt|pr-inbox|mute|unmute|pause|resume|reset|gc>\n  The autonomous delivery loop.\n自治交付循环。" });
+  }, { help: "Usage: roll loop <on|off|now|go|test|status|goal|runs|log|story|events|eval|signals|alert|fmt|pr-inbox|mute|unmute|pause|resume|reset|gc>\n  The autonomous delivery loop.\n自治交付循环。" });
 }

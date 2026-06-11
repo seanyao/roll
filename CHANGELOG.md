@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.612.1 — 2026-06-12
+
 ### 新功能
 
 - `roll loop go` — 连续跑 backlog 到完成或暂停（US-GOAL-002） `[loop]`

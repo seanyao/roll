@@ -195,7 +195,7 @@ function terminalCommandWithDoneFile(line: string, doneFile: string): string {
     "__roll_status=$?",
     `printf '%s' "$__roll_status" > ${done}`,
     'exit "$__roll_status"',
-  ].join("\n");
+  ].join("; ");
 }
 
 function terminalDoneWaitScript(doneFile: string): string {

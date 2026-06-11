@@ -37,6 +37,7 @@ import {
   uninstall as launchdUninstall,
   projectIdentity,
 } from "@roll/infra";
+import { EventBus } from "@roll/core";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from "node:fs";
@@ -662,12 +663,64 @@ export async function loopPauseCommand(_args: string[], deps: LoopSchedDeps = re
   return 0;
 }
 
-/** `roll loop resume` — remove the PAUSE marker. */
+/** `roll loop resume` — remove the PAUSE marker, reset failure/heal counters. */
 export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
   const id = await deps.identity();
   const marker = pauseMarkerPath(id.path, id.slug);
   const existed = existsSync(marker);
   rmSync(marker, { force: true });
+
+  // FIX-251: resume must clear the consecutive-failure counter so the first
+  // post-resume cycle failure does not immediately re-trip the auto-pause.
+  const rt = join(id.path, ".roll", "loop");
+  const counterFile = join(rt, "consecutive-fails");
+  if (existsSync(counterFile)) {
+    try {
+      writeFileSync(counterFile, "0", "utf8");
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  // Clear per-HEAD heal counters from the state file (heal_count_head_*).
+  const stateFile = join(rt, `state-${id.slug}.yaml`);
+  if (existsSync(stateFile)) {
+    try {
+      const body = readFileSync(stateFile, "utf8");
+      const lines = body.split("\n").filter((l) => /^(?!heal_count_head_)/.test(l));
+      writeFileSync(stateFile, lines.join("\n"), "utf8");
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  // Clear the heal dir (removes per-HEAD CI heal budget files).
+  const healDir = join(
+    (process.env["ROLL_LOOP_DIR"] ?? "").trim() || join(homedir(), ".shared", "roll", "loop"),
+    "heal",
+  );
+  try {
+    rmSync(healDir, { recursive: true, force: true });
+  } catch {
+    /* best-effort */
+  }
+
+  // Emit a loop:resumed event so dashboards/monitors see the reset and the
+  // correction circuit (events-based) can observe the boundary.
+  if (existed) {
+    try {
+      const eventsPath = join(rt, "events.ndjson");
+      mkdirSync(rt, { recursive: true });
+      new EventBus().appendEvent(eventsPath, {
+        type: "loop:resumed",
+        loop: "ci",
+        ts: Math.floor(Date.now() / 1000),
+      });
+    } catch {
+      /* event log is best-effort; the counter/file resets above are canonical */
+    }
+  }
+
   process.stdout.write(
     existed
       ? `Loop resumed — scheduling active again\nLoop 已恢复 — 排程重新生效\n`

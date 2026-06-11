@@ -488,6 +488,69 @@ describe("loop pause/resume (marker file)", () => {
     const r2 = await captureStdout(() => loopResumeCommand([], deps));
     expect(r2.code).toBe(0); // idempotent
   });
+
+  // FIX-251: resume must clear the consecutive-failure counter, heal counters,
+  // and emit a loop:resumed event so the post-resume cycle does not immediately
+  // re-trip the auto-pause.
+  it("resume resets consecutive-fails counter and heal state", async () => {
+    const proj = tmp("proj-fix251");
+    const { deps } = fakeDeps(proj, tmp("sh-fix251"), tmp("ld-fix251"));
+    const rt = join(proj, ".roll", "loop");
+    const marker = join(rt, "PAUSE-proj-abc123");
+    mkdirSync(rt, { recursive: true });
+
+    // Simulate a paused state with accumulated failure counters.
+    writeFileSync(marker, "2026-06-11T10:00:00Z\n");
+    writeFileSync(join(rt, "consecutive-fails"), "3");
+    const stateFile = join(rt, "state-proj-abc123.yaml");
+    writeFileSync(stateFile, "status: paused\nheal_count_head_abcd1234: 2\nlast_run: '...'\n");
+
+    const r = await captureStdout(() => loopResumeCommand([], deps));
+    expect(r.code).toBe(0);
+
+    // PAUSE marker removed.
+    expect(existsSync(marker)).toBe(false);
+    // consecutive-fails reset to 0.
+    expect(existsSync(join(rt, "consecutive-fails"))).toBe(true);
+    expect(readFileSync(join(rt, "consecutive-fails"), "utf8").trim()).toBe("0");
+    // heal_count_head_* entries cleared from state file.
+    const stateAfter = readFileSync(stateFile, "utf8");
+    expect(stateAfter).not.toContain("heal_count_head_");
+    expect(stateAfter).toContain("status: paused"); // non-heal lines preserved
+  });
+
+  it("resume emits loop:resumed event when a PAUSE marker was present", async () => {
+    const proj = tmp("proj-fix251b");
+    const { deps } = fakeDeps(proj, tmp("sh-fix251b"), tmp("ld-fix251b"));
+    const rt = join(proj, ".roll", "loop");
+    const marker = join(rt, "PAUSE-proj-abc123");
+    mkdirSync(rt, { recursive: true });
+    writeFileSync(marker, "2026-06-11T10:00:00Z\n");
+
+    const r = await captureStdout(() => loopResumeCommand([], deps));
+    expect(r.code).toBe(0);
+
+    // events.ndjson should contain a loop:resumed event.
+    const eventsPath = join(rt, "events.ndjson");
+    expect(existsSync(eventsPath)).toBe(true);
+    const eventsText = readFileSync(eventsPath, "utf8");
+    expect(eventsText).toContain('"type":"loop:resumed"');
+    expect(eventsText).toContain('"loop":"ci"');
+  });
+
+  it("resume without a PAUSE marker does not emit loop:resumed (was not paused)", async () => {
+    const proj = tmp("proj-fix251c");
+    const { deps } = fakeDeps(proj, tmp("sh-fix251c"), tmp("ld-fix251c"));
+    const rt = join(proj, ".roll", "loop");
+    mkdirSync(rt, { recursive: true });
+
+    const r = await captureStdout(() => loopResumeCommand([], deps));
+    expect(r.code).toBe(0);
+
+    // No events.ndjson should have been created (nothing to emit).
+    const eventsPath = join(rt, "events.ndjson");
+    expect(existsSync(eventsPath)).toBe(false);
+  });
 });
 
 describe("FIX-197 — loop now legacy self-heal", async () => {

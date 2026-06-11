@@ -3,7 +3,7 @@
  * deletion contract (taken:false + reason, never a placeholder), and the
  * "file must be non-empty" truth test over tool exit codes.
  */
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -213,6 +213,7 @@ describe("terminal", () => {
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
       }
       if (cmd === "sh") {
+        execFileSync("sh", ["-n"], { input: script });
         commandLive = false;
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
       }
@@ -248,7 +249,10 @@ describe("terminal", () => {
         writeFileSync(String(argv[argv.length - 1]), "PNG");
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
       }
-      if (cmd === "sh") return Promise.resolve({ code: 1, stdout: "", stderr: "timed out" });
+      if (cmd === "sh") {
+        execFileSync("sh", ["-n"], { input: script });
+        return Promise.resolve({ code: 1, stdout: "", stderr: "timed out" });
+      }
       if (cmd === "osascript" && script.includes("close front window")) closeCalled = true;
       return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     };

@@ -202,14 +202,7 @@ function terminalDoneWaitScript(doneFile: string): string {
   const attempts = Math.ceil(TERMINAL_DONE_TIMEOUT_MS / TERMINAL_DONE_POLL_MS);
   const sleepSeconds = String(TERMINAL_DONE_POLL_MS / 1000);
   const done = shellQuote(doneFile);
-  return [
-    "i=0",
-    `while [ ! -f ${done} ]; do`,
-    `  if [ "$i" -ge ${attempts} ]; then exit 1; fi`,
-    "  i=$((i + 1))",
-    `  sleep ${sleepSeconds}`,
-    "done",
-  ].join("; ");
+  return `i=0; while [ ! -f ${done} ]; do if [ "$i" -ge ${attempts} ]; then exit 1; fi; i=$((i + 1)); sleep ${sleepSeconds}; done`;
 }
 
 async function waitForTerminalCommandExit(doneFile: string, run: ShotRun): Promise<boolean> {

@@ -114,9 +114,9 @@ describe("orphanPostRebasePlan / orphanPostPublishPlan — C2 audit contract (88
 });
 
 describe("recoveredOutcome — terminal mapping (8738/8752)", () => {
-  it("published → built (pending reconcile); preserved → aborted", () => {
-    expect(recoveredOutcome(true)).toBe("built");
-    expect(recoveredOutcome(false)).toBe("aborted");
+  it("published → published_pending_merge; preserved → aborted_with_delivery", () => {
+    expect(recoveredOutcome(true)).toBe("published_pending_merge");
+    expect(recoveredOutcome(false)).toBe("aborted_with_delivery");
   });
 });
 

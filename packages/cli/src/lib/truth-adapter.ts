@@ -86,7 +86,6 @@ export function outcomeToPanel(outcome: CycleTruth["outcome"], state: TruthState
     case "published_pending_merge":
       return "done";
     case "idle_no_work":
-    case "idle":
       return "idle";
     case "failed":
     case "blocked":

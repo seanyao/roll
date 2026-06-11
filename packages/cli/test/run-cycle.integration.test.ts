@@ -233,7 +233,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       .map((l) => JSON.parse(l) as { type: string; outcome?: string });
     const end = events.find((e) => e.type === "cycle:end");
     expect(end).toBeDefined();
-    expect(end?.outcome).toBe("delivered");
+    expect(end?.outcome).toBe("published_pending_merge");
     expect(events.some((e) => e.type === "cycle:start")).toBe(true);
 
     // runs.jsonl row shape matches v2 (keys verified vs dashboard difftest).

@@ -17,7 +17,7 @@
  * grandfathered. `unknown` is a legal state (gh down, convergence window);
  * `grandfathered` marks pre-epoch history that is listed, never judged.
  */
-import type { TerminalOutcome } from "@roll/spec";
+import { TERMINAL_OUTCOMES, type TerminalOutcome } from "@roll/spec";
 import type { AuditPrEvidence } from "../consistency/audit.js";
 
 export type TruthState = "truth" | "warn" | "fail" | "unknown" | "grandfathered";
@@ -133,12 +133,16 @@ export interface CycleTruthInput {
 export interface CycleTruth {
   cycleId: string;
   /** The derived outcome in the US-TRUTH-001 vocabulary (best knowledge). */
-  outcome: TerminalOutcome | "idle" | "";
+  outcome: TerminalOutcome | "";
   state: TruthState;
   reason: TruthReason;
 }
 
-const ROW_TO_TERMINAL: Record<string, TerminalOutcome | "idle"> = {
+const TERMINAL_OUTCOME_SET: ReadonlySet<string> = new Set<string>(TERMINAL_OUTCOMES);
+
+// Historical runs-row boundary only. New row writes already carry TerminalOutcome
+// in `outcome` and must pass through before this table is consulted.
+const ROW_TO_TERMINAL: Record<string, TerminalOutcome> = {
   done: "delivered",
   merged: "delivered",
   delivered: "delivered",
@@ -181,7 +185,13 @@ export function deriveCycleTruth(input: CycleTruthInput): CycleTruth {
     };
   }
 
-  const outcome = ROW_TO_TERMINAL[input.runStatus] ?? "unknown";
+  const mappedStatus = ROW_TO_TERMINAL[input.runStatus];
+  const terminalOutcome = TERMINAL_OUTCOME_SET.has(input.runOutcome)
+    ? (input.runOutcome as TerminalOutcome)
+    : undefined;
+  const outcome = terminalOutcome === undefined || (mappedStatus !== undefined && terminalOutcome !== mappedStatus)
+    ? mappedStatus ?? ROW_TO_TERMINAL[input.runOutcome] ?? "unknown"
+    : terminalOutcome;
   if (input.hasCost === false && outcome === "delivered" && !pre) {
     return { cycleId: input.cycleId, outcome, state: "warn", reason: "usage_missing" };
   }

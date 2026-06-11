@@ -133,7 +133,7 @@ describe("rule usage-missing — the cost-blind-guardrail incident", () => {
     const r = runConsistencyAudit(
       snap({
         runs: [
-          { cycle_id: "C-NEW", status: "published", outcome: "delivered", ts: iso(EPOCH + 500) },
+          { cycle_id: "C-NEW", status: "done", outcome: "delivered", ts: iso(EPOCH + 500) },
           { cycle_id: "C-PRE", status: "done", outcome: "delivered", ts: iso(EPOCH - 500) },
         ],
       }),

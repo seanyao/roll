@@ -264,7 +264,10 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
         effectiveCost: 0.01,
       },
     };
-    const row = buildRunRow({ kind: "append_run", status: "published", outcome: "delivered", cycleId: CTX.cycleId }, withCache);
+    const row = buildRunRow(
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
+      withCache,
+    );
     expect(row["tokens_cache_read"]).toBe(3000);
     expect(row["tokens_cache_write"]).toBe(400);
     expect(row["model"]).toBe("deepseek-v4-pro");
@@ -272,7 +275,7 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
 
   it("FIX-208: absent ctx.cost omits cost fields; absent tcrCount defaults to 0", () => {
     const row = buildRunRow(
-      { kind: "append_run", status: "idle", outcome: "built", cycleId: CTX.cycleId },
+      { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
       CTX,
     );
     expect(row["tcr_count"]).toBe(0);
@@ -840,7 +843,7 @@ describe("executeCommand — command → executor mapping", () => {
   it("US-TRUTH-001: append_run appends a cycle:terminal event with present-or-reasoned facts", async () => {
     const { ports, calls } = fakePorts();
     await executeCommand(
-      { kind: "append_run", status: "published", outcome: "delivered", cycleId: CTX.cycleId },
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
       ports,
       {
         ...CTX,
@@ -897,7 +900,7 @@ describe("executeCommand — command → executor mapping", () => {
     const markStatus = vi.fn();
     const { ports } = fakePorts({ backlog: { read: vi.fn(() => []), markStatus } });
     await executeCommand(
-      { kind: "append_run", status: "idle", outcome: "built", cycleId: CTX.cycleId },
+      { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
       ports,
       CTX,
     );

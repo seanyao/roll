@@ -47,7 +47,7 @@
  *  1382-1392, and the TCR pre-commit gate it guards) into a single ordered
  *  action plan: self-heal what's healable, REPORT what is not.
  */
-import type { CycleOutcome } from "@roll/spec";
+import type { TerminalOutcome } from "@roll/spec";
 
 // ── (1) orphan STATE self-heal (bin/roll 9424-9481) ──────────────────────────
 
@@ -365,11 +365,10 @@ export function preflightHasUnhealed(actions: readonly PreflightAction[]): boole
  * Map a recovered orphan to its v2 cycle terminal — mirrors the runs/event rows
  * the orphan paths write (bin/roll 8738/8752): a recovered worktree that
  * published lands as `done`, the FIX-086 orphan-tag path as an orphan terminal.
- * Exposed so the caller can emit a consistent {@link CycleOutcome} without
- * re-deriving the mapping. (v3 has no `orphan`/`idle` literal in CycleOutcome —
- * a recovered+published orphan is `built` pending reconcile; an unpublished one
- * that we preserve is `aborted`.)
+ * Exposed so the caller can emit a consistent {@link TerminalOutcome} without
+ * re-deriving the mapping. A recovered+published orphan is pending merge; an
+ * unpublished preserved worktree is an abort with delivery material.
  */
-export function recoveredOutcome(publishOk: boolean): CycleOutcome {
-  return publishOk ? "built" : "aborted";
+export function recoveredOutcome(publishOk: boolean): TerminalOutcome {
+  return publishOk ? "published_pending_merge" : "aborted_with_delivery";
 }

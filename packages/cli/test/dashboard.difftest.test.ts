@@ -82,6 +82,35 @@ function sandboxEnv(extra: Record<string, string> = {}): Record<string, string> 
   };
 }
 
+function installLaunchctlShim(env: Record<string, string>): void {
+  const bin = mkdtempSync(join(tmpdir(), "roll-dash-bin-"));
+  dirs.push(bin);
+  writeFileSync(join(bin, "launchctl"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  env["PATH"] = `${bin}:${process.env["PATH"] ?? ""}`;
+}
+
+function writeLoopPlist(env: Record<string, string>, body: string): void {
+  const la = env["_LAUNCHD_DIR"] as string;
+  const slug = env["ROLL_MAIN_SLUG"] as string;
+  mkdirSync(la, { recursive: true });
+  writeFileSync(
+    join(la, `com.roll.loop.${slug}.plist`),
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<plist version="1.0">',
+      '<dict>',
+      '<key>Label</key>',
+      `<string>com.roll.loop.${slug}</string>`,
+      '<key>WorkingDirectory</key>',
+      '<string>/tmp/roll-test</string>',
+      body,
+      '</dict>',
+      '</plist>',
+      '',
+    ].join("\n"),
+  );
+}
+
 /** Pad a number to 2 digits. */
 const p2 = (n: number): string => (n < 10 ? `0${n}` : String(n));
 /** ISO UTC string with +00:00 suffix (matches the writer format). */
@@ -360,6 +389,49 @@ describe("frozen: roll loop status (fixture)", () => {
 });
 
 describe("frozen: roll loop status (live)", () => {
+  it("FIX-254: enabled interval schedule estimates next run from the latest real launchd fire", () => {
+    const env = sandboxEnv({ ROLL_RENDER_NOW: "2026-06-07T03:00:00Z" });
+    installLaunchctlShim(env);
+    writeLoopPlist(env, ["<key>StartInterval</key>", "<integer>1800</integer>"].join("\n"));
+    writeFileSync(
+      join(env["ROLL_PROJECT_RUNTIME_DIR"] as string, "cron.log"),
+      "[2026-06-07T10:52:00+0800] cycle start (v3 run-once)\n",
+    );
+    const proj = mkdtempSync(join(tmpdir(), "roll-dash-proj-fix254-"));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+
+    const ts = tsRun(env, ["--no-color"], proj);
+    expect(ts).toContain("● IDLE · enabled · next run 11:22 · est · in 22m 00s");
+    expect(ts).not.toContain("11:07");
+  });
+
+  it("FIX-254: calendar schedule and latest fire mismatch renders unknown instead of inventing a time", () => {
+    const env = sandboxEnv({ ROLL_RENDER_NOW: "2026-06-07T03:00:00Z" });
+    installLaunchctlShim(env);
+    writeLoopPlist(
+      env,
+      [
+        "<key>StartCalendarInterval</key>",
+        "<array>",
+        "<dict><key>Minute</key><integer>22</integer></dict>",
+        "<dict><key>Minute</key><integer>52</integer></dict>",
+        "</array>",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(env["ROLL_PROJECT_RUNTIME_DIR"] as string, "cron.log"),
+      "[2026-06-07T10:07:00+0800] cycle start (v3 run-once)\n",
+    );
+    const proj = mkdtempSync(join(tmpdir(), "roll-dash-proj-fix254-mismatch-"));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+
+    const ts = tsRun(env, ["--no-color"], proj);
+    expect(ts).toContain("● IDLE · enabled · next run ?");
+    expect(ts).not.toContain("11:22 · in 22m 00s");
+  });
+
   it("synthetic events + runs render", () => {
     const env = sandboxEnv({ ROLL_RENDER_NOW: LIVE_NOW });
     const rt = env["ROLL_PROJECT_RUNTIME_DIR"] as string;

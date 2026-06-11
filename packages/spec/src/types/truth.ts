@@ -38,9 +38,13 @@ export interface DriftFixture {
 }
 
 /** One field-level truth declaration (AC2's six attributes + grace + fixtures). */
+export type TruthAggregate = "story" | "cycle" | "release" | "view-meta";
+
 export interface TruthAnchor {
   /** Registry key — stable snake_case fact name. */
   field: string;
+  /** Domain aggregate that owns this truth anchor (US-TRUTH-007). */
+  aggregate: TruthAggregate;
   /** What the field asserts, in one line. */
   description: string;
   /** The ONE source whose value wins (AC2 authoritative_source). */
@@ -78,6 +82,7 @@ export const DEFAULT_GRACE_WINDOW_SEC = 3600;
 export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   {
     field: "story_delivery",
+    aggregate: "story",
     description: "A story is Done — its work is merged into the product repo's main.",
     authoritativeSource: "GitHub PR merge evidence for the story's delivery PR (state=MERGED + mergeCommit reachable from main)",
     writer: "GitHub (merge button / eager-merge by pr-loop) — never a local actor",
@@ -106,6 +111,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "cycle_outcome",
+    aggregate: "cycle",
     description: "What one loop cycle terminally produced (delivered/published/failed/idle/...).",
     authoritativeSource: "runs.jsonl terminal row for the cycle (after merge-evidence backfill corrections)",
     writer: "the cycle runner's append_run executor (+ the FIX-243 backfill as the one sanctioned corrector)",
@@ -137,6 +143,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "pr_merge",
+    aggregate: "cycle",
     description: "Whether a PR merged, when, and as which commit.",
     authoritativeSource: "GitHub PR record (state, mergedAt, mergeCommit.oid)",
     writer: "GitHub",
@@ -148,6 +155,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "tcr_evidence",
+    aggregate: "cycle",
     description: "How many test-guaranteed micro-commits a cycle produced.",
     authoritativeSource: "git log of the cycle branch (tcr: -prefixed commits) — commits are the proof",
     writer: "the agent's commit gate (roll test proof + commit hook)",
@@ -158,6 +166,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "attest_evidence",
+    aggregate: "story",
     description: "A delivered story's acceptance report + intent map (ac-map) + self-score.",
     authoritativeSource: ".roll/features/<epic>/<ID>/ (card archive: latest/<ID>-report.html + ac-map.json + notes self-score)",
     writer: "roll attest render layer (the only component allowed to mint verdict markup — evidence red line US-ATTEST-010)",
@@ -180,6 +189,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "usage_cost",
+    aggregate: "cycle",
     description: "Tokens (in/out/cache r+w), model and USD cost one cycle consumed.",
     authoritativeSource: "the agent's own usage records: claude stream-json totals / footer-printing agents' stdout / pi session store (~/.pi/agent/sessions/<encoded-cwd>)",
     writer: "the agent runtime; the executor's cost fold is the one sanctioned transcriber into runs.jsonl",
@@ -202,6 +212,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "dossier_freshness",
+    aggregate: "view-meta",
     description: "Whether generated dossier/story pages reflect the current card facts.",
     authoritativeSource: "the card folders + backlog they are generated FROM",
     writer: "index-gen/dossier generators (story new / attest / set-status hooks, FIX-231)",
@@ -213,6 +224,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "index_freshness",
+    aggregate: "view-meta",
     description: "Whether .roll/index.json maps every live card id to its epic.",
     authoritativeSource: ".roll/backlog.md rows + the features/ tree they link",
     writer: "generateIndex (backlog-driven, deterministic)",
@@ -223,6 +235,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "release_verdict",
+    aggregate: "release",
     description: "Whether a version was cleared to ship (consistency + tests + changelog).",
     authoritativeSource: "the release gate run record for the tag (consistency check outcome at ship time)",
     writer: "roll release ship (the only path allowed to push v* tags — v* tag IS a release)",
@@ -234,6 +247,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   },
   {
     field: "release_waiver",
+    aggregate: "release",
     description: "An owner's recorded decision to ship past a known drift.",
     authoritativeSource: "the waiver record (reason, scope, expiry, operator, timestamp) in the release fact stream",
     writer: "the owner via the explicit waiver command — never an env var or shell flag",

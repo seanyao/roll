@@ -5,6 +5,7 @@
  */
 import type { AgentId } from "./agent.js";
 import type { CycleCost, CyclePhase } from "./cycle.js";
+import type { GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
 import type { TerminalEvent, TerminalOutcome } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
@@ -34,6 +35,9 @@ export type RollEvent =
   | { type: "ci:rerun"; prNumber: number; ts: number }
   // Alert (BC2/BC6)
   | { type: "alert:notify"; channel: string; message: string; ts: number }
+  // Goal mode (US-GOAL-001) — the durable goal state machine facts.
+  | { type: "goal:created"; schema: "goal.v1"; scope: GoalScope; status: "active"; budgetUsd?: number; ts: number }
+  | { type: "goal:state"; schema: "goal.v1"; from: GoalStatus; to: GoalStatus; actor: GoalTransitionActor; reason: string; ts: number }
   // Peer gate (FIX-150b) — the hard-trigger audit trail: every high-complexity
   // delivery records whether peer review happened ("consulted") or was skipped.
   | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped"; reasons: string[]; ts: number }

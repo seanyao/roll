@@ -52,6 +52,12 @@ describe("US-TRUTH-006 AC2 — real builders' fields are all registered", () => 
     const missing = unregisteredFields("event:cycle:terminal", Object.keys(e));
     expect(missing, registrationHint("event:cycle:terminal", missing)).toEqual([]);
   });
+
+  it("US-GOAL-001 registers persisted goal.yaml fields", () => {
+    const keys = ["schema", "scope", "budgetUsd", "limits", "status", "usage", "createdAt", "updatedAt", "lastDecisionReason"];
+    const missing = unregisteredFields("goal", keys);
+    expect(missing, registrationHint("goal", missing)).toEqual([]);
+  });
 });
 
 describe("US-TRUTH-006 AC3/AC6 — the guard reds loudly on an unregistered field", () => {

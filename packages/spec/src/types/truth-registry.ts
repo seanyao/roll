@@ -21,7 +21,7 @@
 import { TRUTH_ANCHORS } from "./truth.js";
 
 /** Which persisted surface a field lives on. */
-export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver";
+export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver" | "goal";
 
 export interface RegisteredField {
   /** The literal key as persisted (e.g. "cost_usd"). */
@@ -44,6 +44,17 @@ const REBUILD_BACKFILL = "roll loop run-once post-cycle backfill / backfillMerge
 /** The field registry. Surfaces covered: runs rows, the US-TRUTH-001 terminal
  *  twin, and the US-TRUTH-005 release records. */
 export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
+  // ── goal.yaml (US-GOAL-001) ────────────────────────────────────────────────
+  { field: "schema", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
+  { field: "scope", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
+  { field: "budgetUsd", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
+  { field: "limits", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
+  { field: "status", surface: "goal", anchor: "goal_state", writer: "goal control plane; complete only by adjudication", kind: "authoritative" },
+  { field: "usage", surface: "goal", anchor: "goal_state", writer: "goal control plane from runs ledger", kind: "derived-cache", rebuild: "sum cycles/cost from scoped runs rows" },
+  { field: "createdAt", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
+  { field: "updatedAt", surface: "goal", anchor: "goal_state", writer: "goal control plane", kind: "authoritative" },
+  { field: "lastDecisionReason", surface: "goal", anchor: "goal_state", writer: "goal control plane / adjudicator", kind: "authoritative" },
+
   // ── runs.jsonl row (cycle_outcome anchor's primary view) ───────────────────
   { field: "run_id", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "authoritative" },
   { field: "cycle_id", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "authoritative" },

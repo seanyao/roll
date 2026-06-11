@@ -38,7 +38,7 @@ export interface DriftFixture {
 }
 
 /** One field-level truth declaration (AC2's six attributes + grace + fixtures). */
-export type TruthAggregate = "story" | "cycle" | "release" | "view-meta";
+export type TruthAggregate = "story" | "cycle" | "release" | "view-meta" | "goal";
 
 export interface TruthAnchor {
   /** Registry key — stable snake_case fact name. */
@@ -80,6 +80,17 @@ export const DEFAULT_GRACE_WINDOW_SEC = 3600;
 
 /** The authority matrix — one entry per drift-prone persistent fact field. */
 export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
+  {
+    field: "goal_state",
+    aggregate: "goal",
+    description: "The persisted goal scope, budget, status, usage counters, and adjudication reason.",
+    authoritativeSource: ".roll/loop/goal.yaml (schema goal.v1)",
+    writer: "goal control plane; complete may only be written by adjudication",
+    derivedViews: ["roll loop goal", "goal-mode dossier/status surfaces"],
+    conflictPolicy: "goal.yaml wins; derived views are regenerated/read-only and may never mark complete themselves.",
+    unknownPolicy: "missing goal.yaml means no active goal, not failure.",
+    rebuildability: "append-only",
+  },
   {
     field: "story_delivery",
     aggregate: "story",

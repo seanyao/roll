@@ -41,6 +41,7 @@ export type RollEvent =
   | { type: "goal:session_start"; sessionId: string; scope: GoalScope; ts: number }
   | { type: "goal:session_end"; sessionId: string; status: GoalStatus; reason: string; cycles: number; ts: number }
   | { type: "goal:tick_skipped"; sessionId?: string; reason: "go_session_lock"; heldByPid?: number; ts: number }
+  | { type: "goal:evaluated"; sessionId: string; status: "continue" | "complete"; total: number; delivered: number; reason: string; blockers: string[]; ts: number }
   // Peer gate (FIX-150b) — the hard-trigger audit trail: every high-complexity
   // delivery records whether peer review happened ("consulted") or was skipped.
   | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped"; reasons: string[]; ts: number }

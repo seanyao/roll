@@ -697,6 +697,30 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
     );
     expect(calls).toHaveLength(0); // no flag → dispatcher untouched
   });
+
+  it("FIX-262: --capture-command opens Terminal in the project cwd before running the command", async () => {
+    const proj = project();
+    const scripts: string[] = [];
+    const shotRun: ShotRun = (cmd, argv) => {
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript") scripts.push(String(argv[1] ?? ""));
+      if (cmd === "screencapture") writeFileSync(String(argv[argv.length - 1]), "PNGDATA");
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--capture-command", "node scripts/proof.js"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shotRun, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+
+    expect(scripts[0]).toContain(`do script "cd '${proj}' && node scripts/proof.js"`);
+  });
 });
 
 describe("US-ATTEST-009 — self-score notes feed the report", () => {

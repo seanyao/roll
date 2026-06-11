@@ -30,6 +30,7 @@ const REQUIRED_FIELDS = [
   "index_freshness",
   "release_verdict",
   "release_waiver",
+  "goal_state",
 ] as const;
 
 const EXPECTED_AGGREGATES = {
@@ -37,6 +38,7 @@ const EXPECTED_AGGREGATES = {
   cycle: ["cycle_outcome", "pr_merge", "tcr_evidence", "usage_cost"],
   release: ["release_verdict", "release_waiver"],
   "view-meta": ["dossier_freshness", "index_freshness"],
+  goal: ["goal_state"],
 } as const;
 
 describe("US-TRUTH-000 AC1 — the matrix covers every drift-prone fact field", () => {

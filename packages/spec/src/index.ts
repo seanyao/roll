@@ -12,3 +12,4 @@ export * from "./types/truth-registry.js";
 export * from "./types/story.js";
 export * from "./types/policy.js";
 export * from "./types/config.js";
+export * from "./types/goal.js";

@@ -51,7 +51,7 @@ function tsSec(row: TruthRunRow): number | null {
  */
 export function cycleTruthFromRow(
   row: TruthRunRow,
-  opts: { terminalOutcome?: TerminalOutcome; nowSec: number },
+  opts: { terminalOutcome?: TerminalOutcome; branchEvidence?: AuditPrEvidence; nowSec: number },
 ): CycleTruth {
   return deriveCycleTruth({
     cycleId: str(row, "cycle_id") !== "" ? str(row, "cycle_id") : str(row, "run_id"),
@@ -60,6 +60,7 @@ export function cycleTruthFromRow(
     hasMergeStamp: str(row, "merge_commit") !== "",
     hasCost: typeof row["cost_usd"] === "number",
     ...(opts.terminalOutcome !== undefined ? { terminalOutcome: opts.terminalOutcome } : {}),
+    ...(opts.branchEvidence !== undefined ? { branchEvidence: opts.branchEvidence } : {}),
     tsSec: tsSec(row),
     nowSec: opts.nowSec,
     graceSec: GRACE_SEC,

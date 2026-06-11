@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RollEvent } from "@roll/spec";
+import { buildMorningReportModel } from "@roll/core";
 import { renderMorningReportHtml, writeLatestMorningReport } from "../src/lib/morning-report.js";
+import { cycleTruthFromRow, outcomeToPanel, rowDelivered } from "../src/lib/truth-adapter.js";
 
 function tempProject(): { root: string; events: string; runs: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-morning-report-")));
@@ -57,5 +59,48 @@ describe("US-EVID-016 morning report renderer", () => {
     expect(existsSync(join(p.root, ".roll", "reports", "morning", "2026-06-08.html"))).toBe(true);
     expect(readFileSync(latest, "utf8")).toContain("US-A");
     expect(readFileSync(p.events, "utf8")).toContain('"type":"report:morning"');
+  });
+
+  it("US-TRUTH-010: normal run rows still render delivered through the truth adapter", () => {
+    const p = tempProject();
+    const base = Date.parse("2026-06-08T10:00:00Z") / 1000;
+    writeEvents(p.events, []);
+    writeFileSync(
+      p.runs,
+      `${JSON.stringify({ story_id: "US-DONE", status: "done", outcome: "delivered", cost_usd: 0.03, ts: "2026-06-08T10:10:00Z" })}\n`,
+      "utf8",
+    );
+
+    const latest = writeLatestMorningReport(p.root, p.events, p.runs, base + 7200);
+    const html = readFileSync(latest, "utf8");
+    expect(html).toContain("US-DONE");
+    expect(html).toContain("$0.0300");
+  });
+
+  it("US-TRUTH-010: a failed row with MERGED PR evidence is delivered by cycle truth", () => {
+    const base = Date.parse("2026-06-08T10:00:00Z") / 1000;
+    const run = {
+      cycle_id: "C-PHANTOM",
+      story_id: "US-MERGED",
+      status: "failed",
+      outcome: "failed",
+      cost_usd: 0.02,
+      ts: "2026-06-08T10:10:00Z",
+    };
+    const model = buildMorningReportModel([], [run], {
+      windowStart: base,
+      windowEnd: base + 7200,
+      runDelivered: (row, nowSec) => {
+        const truth = cycleTruthFromRow(row, {
+          nowSec,
+          branchEvidence: { state: "MERGED", mergedAtSec: base - 7200 },
+        });
+        return outcomeToPanel(truth.outcome, truth.state) === "done";
+      },
+    });
+
+    expect(rowDelivered(run, base + 7200)).toBe(false);
+    expect(model.deliveredStories).toEqual(["US-MERGED"]);
+    expect(renderMorningReportHtml(model)).toContain("US-MERGED");
   });
 });

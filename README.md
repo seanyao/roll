@@ -44,34 +44,30 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | Command | Description |
 |---------|-------------|
 | **Autonomy · daily use** | |
-| `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|fmt\|pr-inbox\|mute\|unmute\|pause\|resume\|reset\|gc>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
+| `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|alert\|fmt\|pr-inbox\|mute\|unmute\|pause\|resume\|reset\|gc>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
 | `roll brief` | Show latest owner brief |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
-| `roll alert [run-once]` | View / clear loop alerts |
+| `roll loop alert [list\|ack\|resolve\|log]` | View / clear loop alerts |
 | `roll status` | Show current state and drift |
-| `roll doctor` | Environment + install diagnosis (agents, plists, launchd lanes) |
-| `roll dream run-once` | Nightly self-scan (patterns, docs freshness, test quality) — one pass now |
+| `roll doctor [skills]` | Environment + install diagnosis (agents, skill catalog, plists, launchd lanes) |
 | `roll tune [reset]` | Suggest-only self-tuning from loop trends — read-only, never auto-applies |
 | **Cards & evidence** | |
 | `roll idea "<one-sentence description>"` | Capture a card: auto-classify, number, lint, infer epic, mint the full story folder — the one user entry for adding cards |
 | `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | The one minting entry agents/skills use: card folder + backlog row + index refresh (`--no-index` for batches) |
-| `roll attest <ID>` | Render the acceptance-evidence report into the card folder |
-| `roll index` | Rebuild the truth-projected Delivery Dossier (front truth board · epics · story dossiers) |
-| `roll consistency <check\|audit>` | Five-dimension gap check · US-TRUTH shadow drift audit (read-only, exit 0) |
-| `roll changelog` | Sync CHANGELOG from merged work |
 | **Project · per repo** | |
 | `roll init` | Set up Roll in this project (agent-driven onboarding for legacy code) |
 | `roll offboard` | Remove Roll from this project |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |
-| `roll release [ship\|waiver]` | Release guidance · gated tag push (`ship`) · recorded drift waiver (`waiver`) — npm publish stays human |
+| `roll release [ship\|waiver\|changelog\|consistency]` | Release guidance · changelog · consistency gate · gated tag push (`ship`) · recorded drift waiver (`waiver`) |
+| `roll release changelog generate [--write]` | Sync CHANGELOG from merged work |
+| `roll release consistency <check\|audit>` | Five-dimension gap check · US-TRUTH shadow drift audit (read-only, exit 0) |
 | `roll pair [init\|status]` | Cross-agent pairing: heterogeneous peer re-checks during builds |
 | **Config & machine** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
 | `roll prices [refresh]` | Model price table (cost accounting source) |
-| `roll skills` | Skill catalog status |
-| `roll setup [-f]` | First-time install or re-sync conventions to all AI clients |
+| `roll setup [skills\|-f]` | First-time install, skill catalog generation, or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |
 | `roll --version` / `roll -v` | Print installed roll version |
 

@@ -217,6 +217,6 @@ web          控制台（React，WebSocket 订阅 daemon）
 - **三聚合投影**:Story 判断 backlog 声明与 `main`/验收证据是否一致;Cycle 只认 TerminalOutcome 终态事实;Release 汇总发版闸 verdict 与有效 waiver。README / guide / site 只描述这些目标态语义。
 - **claim vs truth**:backlog 的 `✅ Done` 是声明,不是事实源;`main` 合并、证据报告、终态事件、发版闸事件才是事实锚点。所有 UI 投影必须把声明和真相分开呈现。
 - **truth board**:`roll index` 首页渲染 Story / Cycle / Release tiles 和真相条;未知事实显示 `?`,已知为零才显示 `0`。premature Done 会被标成 drift/fail,不会被当作已交付。
-- **影子审计** `roll consistency audit`:只读漂移扫描,报告落 `.roll/reports/consistency/`,exit 0。
+- **影子审计** `roll release consistency audit`:只读漂移扫描,报告落 `.roll/reports/consistency/`,exit 0。
 - **发版闸** `roll release ship`:审计 fail 级漂移拦截发版;owner 经 `roll release waiver --reason --scope --days` 显式豁免——豁免与闸判定都是事实流事件,审计可见,无影子绕行。
 - **变更点护栏** `packages/spec/src/types/truth-registry.ts`(`TRUTH_FIELD_REGISTRY`):落盘且被第二处读取的字段必须登记(绑锚点、记写者、derived-cache 必声明 rebuild);未登记字段 CI 红并指路登记——历史 v2 字段 grandfather 列单。局部变量不登记。

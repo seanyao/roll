@@ -1,5 +1,5 @@
 /**
- * US-TRUTH-002 — `roll consistency audit`: the shadow drift scanner.
+ * US-TRUTH-002 — `roll release consistency audit`: the shadow drift scanner.
  *
  * Read-only gatherer over the fact sources declared in US-TRUTH-000 (backlog,
  * index, runs, events, attest artifacts, GitHub PR evidence), folded through
@@ -219,7 +219,7 @@ function renderMarkdown(report: AuditReport, skipped: string[], dateTag: string)
   return lines.join("\n");
 }
 
-/** `roll consistency audit [--json]` — always exits 0 on a completed scan. */
+/** `roll release consistency audit [--json]` — always exits 0 on a completed scan. */
 export async function consistencyAuditCommand(args: string[], deps: AuditGatherDeps = {}): Promise<number> {
   const json = args.includes("--json");
   const projectPath = process.cwd();

@@ -166,7 +166,7 @@ const BLOCKER_MSG: Record<string, [string, string]> = {
   "dirty-tree": ["working tree has uncommitted changes", "工作区有未提交改动"],
   "out-of-sync": ["local HEAD is not in sync with origin/main", "本地 HEAD 与 origin/main 不同步"],
   "tag-exists": ["the release tag already exists (already shipped?)", "发版 tag 已存在（已发过？）"],
-  "consistency-failed": ["consistency check failed — run `roll consistency check`", "一致性闸未过——先跑 roll consistency check"],
+  "consistency-failed": ["consistency check failed — run `roll release consistency check`", "一致性闸未过——先跑 roll release consistency check"],
 };
 
 export async function releaseShipCommand(args: string[], deps: ShipDeps = realDeps): Promise<number> {

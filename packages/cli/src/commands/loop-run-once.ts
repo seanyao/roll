@@ -403,7 +403,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
 
   const rt = runtimeDir(id.path);
   // FIX-216a: alerts go to project-local .roll/loop/ALERT-<slug>.md —
-  // same location `roll alert` reads from (FIX-052: per-project state).
+  // same location `roll loop alert` reads from (FIX-052: per-project state).
   // The old `alerts.log` was a siloed file no consumer could find.
   const alertsPath = join(rt, `ALERT-${id.slug}.md`);
   mkdirSync(dirname(alertsPath), { recursive: true });

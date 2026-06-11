@@ -285,7 +285,7 @@ describe("frozen: roll doctor", () => {
         "stdout": "
       Skill catalog
       技能清单
-        ⚠️  guide/skills.md is stale — run 'roll skills generate'
+        ⚠️  guide/skills.md is stale — run 'roll setup skills'
       ",
       }
     `);
@@ -304,7 +304,7 @@ describe("frozen: roll doctor", () => {
         "stdout": "
       Skill catalog
       技能清单
-        ⚠️  guide/skills.md 已过期 — 请运行 'roll skills generate'
+        ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
       ",
       }
     `);
@@ -322,7 +322,7 @@ describe("frozen: roll doctor", () => {
         "stdout": "
       Skill catalog
       技能清单
-        ⚠️  guide/skills.md is stale — run 'roll skills generate'
+        ⚠️  guide/skills.md is stale — run 'roll setup skills'
       ",
       }
     `);
@@ -339,7 +339,7 @@ describe("frozen: roll doctor", () => {
         "stdout": "
       Skill catalog
       技能清单
-        ⚠️  guide/skills.md 已过期 — 请运行 'roll skills generate'
+        ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
       ",
       }
     `);

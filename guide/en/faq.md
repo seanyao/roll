@@ -454,7 +454,7 @@ cycles.
 roll loop status        # check LOCK + PID
 tmux attach -t roll-loop-<project-slug>  # see what the agent is doing in tmux
 roll loop runs          # last cycle outcomes and alerts
-roll alert              # any CI or TCR alerts?
+roll loop alert         # any CI or TCR alerts?
 roll loop reset         # clear state + LOCK if truly stuck
 roll loop now           # trigger a fresh cycle
 # If code is done and tests pass but Phase 11 didn't complete:
@@ -514,7 +514,7 @@ conversation until the next cycle overwrites it.
 | Snapshot dashboard with cost column | `roll loop status --days 7` |
 | Watch the agent in real time | `tmux attach -t roll-loop-<project-slug>` |
 | Human-readable daily summary | `roll brief` |
-| Alerts that need attention | `roll alert` |
+| Alerts that need attention | `roll loop alert` |
 | Full cycle agent output (plain text) | `roll loop log` |
 | Full agent transcript | `tmux attach -t roll-loop-<project-slug>`, scroll up |
 
@@ -633,7 +633,7 @@ roll loop status                  # verify the new trigger times
 ### C8. My period_minutes setting is not taking effect
 
 **Symptoms:** You set `period_minutes: 0` or `period_minutes: 1441` in
-`.roll/local.yaml`, the loop still runs every hour, and `roll alert` shows
+`.roll/local.yaml`, the loop still runs every hour, and `roll loop alert` shows
 a scheduling ALERT.
 
 **Why this happens:** `period_minutes` must be 1–1440.
@@ -646,7 +646,7 @@ and falls back to the default (period=60, project-derived offset).
 **Fix:**
 
 ```bash
-roll alert                        # check the exact error
+roll loop alert                   # check the exact error
 # Edit .roll/local.yaml — use a value 1–1440
 roll loop off && roll loop on     # re-install
 roll loop status                  # confirm the new schedule

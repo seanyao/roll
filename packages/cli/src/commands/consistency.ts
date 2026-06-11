@@ -494,18 +494,20 @@ function reportToJsonShape(report: Report): unknown {
   return { overall: report.overall, dimensions: dims };
 }
 
-const CHECK_HELP = `Usage: roll consistency <subcommand>
+function checkHelp(command: string): string {
+  return `Usage: ${command} <subcommand>
 
   check [--json] [--project-dir DIR]    逐维度跑一致性检查
     Run checks across five dimensions (code, docs, i18n, tests, site)
     and produce a structured pass/gap report.
 
-  roll consistency check                # human-readable report
-  roll consistency check --json         # machine-readable JSON
-  roll consistency audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
+  ${command} check                # human-readable report
+  ${command} check --json         # machine-readable JSON
+  ${command} audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
 `;
+}
 
-export function consistencyCommand(args: string[]): number | Promise<number> {
+export function consistencyCommand(args: string[], command = "roll consistency"): number | Promise<number> {
   const subcmd = args[0] ?? "check";
   const rest = args.slice(1);
 
@@ -531,12 +533,12 @@ export function consistencyCommand(args: string[]): number | Promise<number> {
   }
 
   if (subcmd === "--help" || subcmd === "-h" || subcmd === "help") {
-    process.stdout.write(CHECK_HELP);
+    process.stdout.write(checkHelp(command));
     return 0;
   }
 
   const lang = msgLang();
   err(t(v2Catalog, lang, "consistency.unknown_sub", subcmd));
-  err("Try: roll consistency check");
+  err(`Try: ${command} check`);
   return 1;
 }

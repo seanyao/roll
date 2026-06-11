@@ -8,6 +8,24 @@ import { describe, expect, it } from "vitest";
 import { dispatch, isPorted, portedCommands, registerPorted, repoRoot, usage } from "../src/bridge.js";
 import { registerAll } from "../src/index.js";
 
+async function captureDispatch(argv: string[]): Promise<{ status: number; stdout: string; stderr: string }> {
+  let stdout = "";
+  let stderr = "";
+  const ow = process.stdout.write.bind(process.stdout);
+  const oe = process.stderr.write.bind(process.stderr);
+  try {
+    // @ts-expect-error test capture
+    process.stdout.write = (s: string): boolean => ((stdout += String(s)), true);
+    // @ts-expect-error test capture
+    process.stderr.write = (s: string): boolean => ((stderr += String(s)), true);
+    const r = await dispatch(argv);
+    return { status: r.status, stdout, stderr };
+  } finally {
+    process.stdout.write = ow;
+    process.stderr.write = oe;
+  }
+}
+
 describe("repoRoot", () => {
   it("locates the package root via the conventions/ (or bin/roll) marker", () => {
     const root = repoRoot();
@@ -57,6 +75,34 @@ describe("ported routing (no bash fallback)", () => {
     expect(listed).not.toMatch(/\bversion\b/);
     expect(listed).not.toMatch(/\bgc\b/);
     expect(listed).not.toMatch(/\blang\b/);
+  });
+
+  it("REFACTOR-052: machine commands leave the main usage while callable surfaces remain", async () => {
+    registerAll();
+    const listed = usage().split("Commands:")[1] ?? "";
+    for (const command of ["alert", "changelog", "skills", "consistency", "attest", "index", "dream"]) {
+      expect(isPorted(command), `${command} must stay callable`).toBe(true);
+      expect(listed, `${command} must be hidden from main usage`).not.toMatch(new RegExp(`\\b${command}\\b`));
+    }
+
+    const redirects = [
+      ["alert", "roll alert moved to roll loop alert"],
+      ["changelog", "roll changelog moved to roll release changelog"],
+      ["skills", "roll skills moved to roll doctor skills / roll setup skills"],
+      ["consistency", "roll consistency moved to roll release consistency"],
+    ] as const;
+    for (const [oldCommand, message] of redirects) {
+      const r = await captureDispatch([oldCommand]);
+      expect(r.status).toBe(0);
+      expect(r.stderr).toBe("");
+      expect(r.stdout).toBe(`${message}\n`);
+    }
+
+    expect((await captureDispatch(["loop", "alert", "log"])).status).toBe(0);
+    expect((await captureDispatch(["release", "changelog", "help"])).stdout).toContain("roll release changelog generate");
+    expect((await captureDispatch(["release", "consistency", "help"])).stdout).toContain("roll release consistency check");
+    expect((await captureDispatch(["doctor", "skills", "--help"])).stdout).toContain("roll doctor skills");
+    expect((await captureDispatch(["setup", "skills", "--help"])).stdout).toContain("roll setup skills");
   });
 
   it("help / --help / -h / empty → usage, exit 0", async () => {

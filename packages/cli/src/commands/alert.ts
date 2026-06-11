@@ -1,5 +1,5 @@
 /**
- * `roll alert` — TS port of bin/roll cmd_alert (14056-14104) + _alert_log
+ * `roll loop alert` — TS port of bin/roll cmd_alert (14056-14104) + _alert_log
  * (14112-14149) + _alert_log_file (14246-14249). The DECISION layer is reused
  * from @roll/core's alert-loop (cli depends on core): alertConsumeAction,
  * parseLogCount, parseAlertLogTail. This module is the CLI adapter — it
@@ -104,7 +104,7 @@ function err(line: string, p: Palette): void {
   process.stderr.write(`${p.RED}[roll]${p.NC} ${line}\n`);
 }
 
-/** Render `roll alert log` exactly as _alert_log's python printer (14121-14148). */
+/** Render `roll loop alert log` exactly as _alert_log's python printer (14121-14148). */
 function renderLog(n: number, p: Palette, lang: Lang): number {
   const file = alertLogFile();
   // bash `[[ ! -s "$file" ]]` → absent OR empty → "no history yet".
@@ -165,7 +165,7 @@ export function alertCommand(args: string[]): number {
       process.stdout.write(action.contents);
       const tail: string[] = [];
       tail.push("");
-      tail.push(`  Run '${p.CYAN}roll alert ack${p.NC}' to acknowledge, '${p.CYAN}roll alert resolve${p.NC}' to clear.`);
+      tail.push(`  Run '${p.CYAN}roll loop alert ack${p.NC}' to acknowledge, '${p.CYAN}roll loop alert resolve${p.NC}' to clear.`);
       tail.push(t(v2Catalog, lang, "alert.run_roll_alert_ack_to_acknowledge"));
       process.stdout.write(tail.join("\n") + "\n");
       return 0;
@@ -187,8 +187,8 @@ export function alertCommand(args: string[]): number {
       return renderLog(action.n, p, lang);
     case "unknown":
       err(t(v2Catalog, lang, "alert.unknown_subcommand", action.subcommand), p);
-      process.stdout.write("  Usage: roll alert [list|ack|resolve|log]\n");
-      process.stdout.write("  用法：roll alert [list|ack|resolve|log]\n");
+      process.stdout.write("  Usage: roll loop alert [list|ack|resolve|log]\n");
+      process.stdout.write("  用法：roll loop alert [list|ack|resolve|log]\n");
       return 1;
   }
 }

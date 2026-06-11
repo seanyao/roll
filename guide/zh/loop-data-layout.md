@@ -205,11 +205,11 @@ roll loop gc --keep-days 14   # 本次覆盖保留期
 
 **我的 ALERT 跑到哪去了？**
 
-It is now at `<project>/.roll/loop/ALERT-<slug>.md`. Run `roll alert` inside the
-project.
+It is now at `<project>/.roll/loop/ALERT-<slug>.md`. Run `roll loop alert` inside
+the project.
 
-现在在 `<project>/.roll/loop/ALERT-<slug>.md`。在项目里跑 `roll alert`，或直接打
-开文件。
+现在在 `<project>/.roll/loop/ALERT-<slug>.md`。在项目里跑 `roll loop alert`，或直
+接打开文件。
 
 **How do I migrate manually?**
 

@@ -5,7 +5,7 @@
  */
 import type { AgentId } from "./agent.js";
 import type { CycleCost, CyclePhase } from "./cycle.js";
-import type { GoalReviewMode, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
+import type { GoalReviewMode, GoalSafetyGate, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
 import type { TerminalEvent, TerminalOutcome } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
@@ -43,6 +43,16 @@ export type RollEvent =
   | { type: "goal:tick_skipped"; sessionId?: string; reason: "go_session_lock"; heldByPid?: number; ts: number }
   | { type: "goal:evaluated"; sessionId: string; status: "continue" | "complete"; total: number; delivered: number; reason: string; blockers: string[]; ts: number }
   | { type: "goal:card_skipped"; sessionId: string; storyId: string; reason: "zero_delivery_streak"; zeroDeliveries: number; cycleId?: string; ts: number }
+  | {
+      type: "goal:gate_tripped";
+      sessionId: string;
+      gate: GoalSafetyGate;
+      action: "audit" | "paused" | "budget_limited";
+      reason: string;
+      reading: Record<string, string | number | boolean>;
+      waitUntilSec?: number;
+      ts: number;
+    }
   | {
       type: "goal:final_review";
       sessionId: string;

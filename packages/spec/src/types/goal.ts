@@ -15,10 +15,20 @@ export interface GoalLimits {
 export interface GoalUsage {
   cycles: number;
   costUsd: number;
+  costUnknownRows?: number;
 }
 
 export interface GoalReviewConfig {
   mode: GoalReviewMode;
+}
+
+export type GoalSafetyGate = "budget" | "usage" | "timebox";
+
+export interface GoalSafetySnapshot {
+  lastGate: GoalSafetyGate;
+  lastReason: string;
+  lastAt: string;
+  lastReading: string;
 }
 
 export interface RollGoal {
@@ -29,6 +39,7 @@ export interface RollGoal {
   limits: GoalLimits;
   status: GoalStatus;
   usage: GoalUsage;
+  safety?: GoalSafetySnapshot;
   createdAt: string;
   updatedAt: string;
   lastDecisionReason?: string;
@@ -140,6 +151,8 @@ export function parseGoalYaml(text: string): RollGoal {
   const budgetUsd = optionalNumber(readTop(all, "budgetUsd"), "budgetUsd");
   const maxCycles = optionalNumber(readNested(all, "limits", "maxCycles"), "limits.maxCycles");
   const maxHours = optionalNumber(readNested(all, "limits", "maxHours"), "limits.maxHours");
+  const costUnknownRows = optionalNumber(readNested(all, "usage", "costUnknownRows"), "usage.costUnknownRows");
+  const safety = parseSafety(all);
   const lastDecisionReason = cleanScalar(readTop(all, "lastDecisionReason") ?? "");
   return {
     schema: GOAL_SCHEMA_VERSION,
@@ -154,10 +167,26 @@ export function parseGoalYaml(text: string): RollGoal {
     usage: {
       cycles: requiredNumber(readNested(all, "usage", "cycles"), "usage.cycles"),
       costUsd: requiredNumber(readNested(all, "usage", "costUsd"), "usage.costUsd"),
+      ...(costUnknownRows !== undefined ? { costUnknownRows } : {}),
     },
+    ...(safety !== undefined ? { safety } : {}),
     createdAt: required(readTop(all, "createdAt"), "createdAt"),
     updatedAt: required(readTop(all, "updatedAt"), "updatedAt"),
     ...(lastDecisionReason !== "" ? { lastDecisionReason } : {}),
+  };
+}
+
+function parseSafety(all: readonly Line[]): GoalSafetySnapshot | undefined {
+  const lastGate = cleanScalar(readNested(all, "safety", "lastGate") ?? "");
+  if (lastGate === "") return undefined;
+  if (lastGate !== "budget" && lastGate !== "usage" && lastGate !== "timebox") {
+    throw new Error("goal.yaml invalid: safety.lastGate must be one of budget, usage, timebox");
+  }
+  return {
+    lastGate,
+    lastReason: required(readNested(all, "safety", "lastReason"), "safety.lastReason"),
+    lastAt: required(readNested(all, "safety", "lastAt"), "safety.lastAt"),
+    lastReading: required(readNested(all, "safety", "lastReading"), "safety.lastReading"),
   };
 }
 
@@ -180,6 +209,16 @@ export function renderGoalYaml(goal: RollGoal): string {
     "usage:",
     `  cycles: ${goal.usage.cycles}`,
     `  costUsd: ${goal.usage.costUsd}`,
+    ...(goal.usage.costUnknownRows !== undefined ? [`  costUnknownRows: ${goal.usage.costUnknownRows}`] : []),
+    ...(goal.safety !== undefined
+      ? [
+          "safety:",
+          `  lastGate: ${goal.safety.lastGate}`,
+          `  lastReason: ${goal.safety.lastReason}`,
+          `  lastAt: ${goal.safety.lastAt}`,
+          `  lastReading: ${goal.safety.lastReading}`,
+        ]
+      : []),
     `createdAt: ${goal.createdAt}`,
     `updatedAt: ${goal.updatedAt}`,
     ...(goal.lastDecisionReason !== undefined ? [`lastDecisionReason: ${goal.lastDecisionReason}`] : []),

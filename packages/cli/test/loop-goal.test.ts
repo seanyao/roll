@@ -41,6 +41,7 @@ describe("US-GOAL-001 — roll loop goal", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("Usage: roll loop goal");
     expect(r.out).toContain("review mode");
+    expect(r.out).toContain("safety gate");
     expect(r.out).toContain(".roll/loop/goal.yaml");
     expect(r.err).toBe("");
   });
@@ -72,6 +73,11 @@ review: self
 usage:
   cycles: 4
   costUsd: 3.25
+safety:
+  lastGate: budget
+  lastReason: budget_exceeded
+  lastAt: 2026-06-11T08:45:00Z
+  lastReading: $9.20 / $8.00
 createdAt: 2026-06-11T07:00:00Z
 updatedAt: 2026-06-11T09:00:00Z
 lastDecisionReason: weekly_limit_guard
@@ -87,6 +93,9 @@ lastDecisionReason: weekly_limit_guard
     expect(r.out).toContain("$3.25 / $8.00");
     expect(r.out).toContain("Review");
     expect(r.out).toContain("self");
+    expect(r.out).toContain("Safety gate");
+    expect(r.out).toContain("budget budget_exceeded");
+    expect(r.out).toContain("$9.20 / $8.00");
     expect(r.out).toContain("weekly_limit_guard");
   });
 

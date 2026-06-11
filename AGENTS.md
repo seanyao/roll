@@ -65,3 +65,7 @@ skills 是 markdown + shell，在独立仓 `seanyao/roll-skills`（submodule 挂
 ## 8. 完成 = 上线
 
 完成 ≡ 已合进 `main`。`main` 是 PR-protected（PR + 2 checks），`@seanyao/roll` 从这里发版。退出码、自我声明都不算数——事后按主干对账才算。发布永远人点头（见 §3.9 的 human-on-the-loop）。
+
+## 9. Where to Look
+
+- 领域上下文与真相边界见 `.roll/domain/context-map.md`。

@@ -399,6 +399,17 @@ result-eval: mean 6.8↓ / min 4 / out 75% ci 67% scope 75% qual 75% eff 50% cle
 | `efficiency` | IDEA | cycle 反复超出 `est_min` 预算 |
 | `cleanliness` | FIX | cycle 反复留孤儿 / 触发 ALERT |
 
+## TerminalOutcome 词汇表
+
+面向用户的 cycle 投影使用 TerminalOutcome，不再使用旧摘要文本。稳定词汇为：
+
+`delivered`, `published_pending_merge`, `failed`, `blocked`,
+`aborted_no_delivery`, `aborted_with_delivery`, `orphan_timeout`,
+`idle_no_work`, `unknown`。
+
+早期 `runs.jsonl` 可能含自由文本结果。dashboard、dossier、summary 渲染前
+都先经 truth adapter 转换。
+
 ## 可见性（tmux + 弹窗）
 
 每次 loop 运行都在一个独立的 tmux session 里。
@@ -475,7 +486,7 @@ Just before that prompt, the window renders a compact recap so you can review th
 
 ```text
 ─── Cycle 20260530-2301-94839 Summary ───
-  built: US-LOOP-040 · tcr commits: 4
+  outcome: delivered · story: US-LOOP-040 · tcr commits: 4
   ci: green
   todo remaining: 7
   phases (top 5 by time):
@@ -489,9 +500,11 @@ The summary covers five signals:
 
 摘要覆盖五类信号：
 
-1. Result — the cycle outcome from `runs.jsonl`: `built: <story> · tcr commits: N`, or `idle: no story picked`.
+1. Result — the cycle outcome from `runs.jsonl`, rendered as TerminalOutcome.
 
-   本轮处理结果——来自 `runs.jsonl`：成功时 `built: <story> · tcr commits: N`，idle 时显示 `idle: no story picked`。
+   本轮处理结果——来自 `runs.jsonl`，经 truth adapter 渲染为 `delivered`、
+   `published_pending_merge`、`failed`、`blocked`、`aborted_no_delivery`、
+   `aborted_with_delivery`、`orphan_timeout`、`idle_no_work` 或 `unknown`。
 2. CI / build status — the latest `ci` event outcome: `green` / `red` / `heal-attempting` / `ci: n/a`.
 
    测试 / 构建状态——最新 `ci` 事件结果：`green` / `red` / `heal-attempting`，无 ci 事件时 `ci: n/a`。

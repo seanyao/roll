@@ -296,7 +296,7 @@ Dream 结果和 CI 状态——只读，不需要本地 `roll`。配置与排障
 之前。
 
 **细节：** cycle 结束时，`.command` 窗口会渲染一段 `─── Cycle <id> Summary ───` 块，
-覆盖五类信号：处理结果（`built: <story>` 或 `idle`）、CI 状态（`green` / `red` /
+覆盖五类信号：TerminalOutcome 处理结果、CI 状态（`green` / `red` /
 `heal-attempting`）、Todo 剩余、按耗时排序的前几个阶段，以及失败 / 告警高亮（失败 `✗`
 红色，告警 `⚠` 黄色）。全绿状态以默认色输出。设 `NO_COLOR=1` 关闭颜色。`press enter
 to close` 提示不变。完整说明见 [Cycle 退出摘要](loop.md#cycle-退出摘要cycle-exit-summary)。

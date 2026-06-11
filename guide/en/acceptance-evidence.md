@@ -104,8 +104,8 @@ live backlog row without a card.
 theme-aware, printable):
 
 ```
-.roll/features/index.html              ← front page: ledger (wish→truth bar),
-                                         lifecycle spine, searchable epic cards
+.roll/features/index.html              ← front page: truth board (Story / Cycle /
+                                         Release), truth strip, searchable epic cards
 .roll/features/<epic>/index.html       ← epic page: epic ledger + stories in three
                                          groups (merged / in a cycle / in backlog)
 .roll/features/<epic>/<id>/index.html  ← story dossier: five stations — Definition,
@@ -113,9 +113,16 @@ theme-aware, printable):
                                          + AC table), Retrospective
 ```
 
-Every figure is computed from the real model — `spec.md`, `ac-map.json`, the
-`latest/` pointer, self-score notes, `tcr:` commits — never typed in. The
-guiding line: **backlog is wish, main is truth, done ≡ merged.**
+Every figure is computed from the truth model — anchors -> selectors -> adapter
+-> projections — never typed in. Story facts compare backlog claims with merge
+and evidence truth; Cycle facts use TerminalOutcome records; Release facts use
+the latest gate verdict and active waiver. The guiding line: **backlog is wish,
+main is truth, done ≡ merged.**
+
+The front-page truth board keeps unknown visible. `?` means the fact is absent
+or outside the known schema; `0` means a known zero. A premature backlog
+`✅ Done` row is treated as a claim that conflicts with truth and is rendered as
+drift, not as delivered work.
 
 **Freshness model (FIX-231):** the board keeps itself fresh — every
 truth-changing node (`roll story new`, `roll attest`, `roll backlog

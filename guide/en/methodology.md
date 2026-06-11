@@ -200,7 +200,7 @@ The core output is User Stories that conform to the **INVEST principles**:
 
 This separation keeps `.roll/backlog.md` concise and readable as a progress dashboard, while detailed design lives in a dedicated location.
 
-> **Design principle — Markdown as Code**: In Roll, `.roll/backlog.md` and `.roll/features/` are not documentation artifacts generated after development — they are the input that drives development. A Story does not exist until it has a Markdown file. A Story is not done until its Verification Gate evidence is committed. The file system is the single source of truth; there is no separate project management tool to stay in sync with.
+> **Design principle — Markdown as Code**: In Roll, `.roll/backlog.md` and `.roll/features/` are not documentation artifacts generated after development — they are the planning input that drives development. A Story does not exist until it has a Markdown file. A Story is not delivered until merge evidence on `main` and Verification Gate evidence both exist. The file system is the durable planning record; truth projections reconcile it with git and evidence anchors.
 
 ---
 

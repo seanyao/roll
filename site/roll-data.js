@@ -10,8 +10,8 @@ window.RollData = (function () {
     '{"ts":"2026-05-17T11:06:10Z","stage":"build","label":"2 commits","detail":"tcr micro-steps","outcome":"ok"}',
     '{"ts":"2026-05-17T11:07:45Z","stage":"peer","label":"1/3","detail":"AGREE","outcome":"agree"}',
     '{"ts":"2026-05-17T11:08:01Z","stage":"ci","label":"green","detail":"43s · 26 tests","outcome":"ok"}',
-    '{"ts":"2026-05-17T11:08:30Z","stage":"pr","label":"#312","detail":"auto-merged · loop/cycle-047","outcome":"ok"}',
-    '{"ts":"2026-05-17T11:09:18Z","stage":"cycle_end","label":"047","detail":"2 tcr · 6m 12s","outcome":"done"}',
+    '{"ts":"2026-05-17T11:08:30Z","stage":"pr","label":"#312","detail":"merged to main · loop/cycle-047","outcome":"ok"}',
+    '{"ts":"2026-05-17T11:09:18Z","stage":"cycle_end","label":"047","detail":"2 tcr · 6m 12s","outcome":"delivered"}',
   ].join('\n');
 
   // ─── EN ──────────────────────────────────────────────────────────────────
@@ -57,9 +57,9 @@ window.RollData = (function () {
       { kind: "step",   arrow: "peer",  label: "claude → kimi", text: "round 1/3 · AGREE" },
       { kind: "step",   arrow: "build", label: "13 TCR commits", text: "4m 12s · zero-diff reverts: 0" },
       { kind: "step",   arrow: "ci",    label: "green",  text: "Acceptance Check · 12/12 ✓", ok: true },
-      { kind: "step",   arrow: "pr",    label: "#312",   text: "auto-merged · loop/cycle-047", ok: true },
+      { kind: "step",   arrow: "pr",    label: "#312",   text: "merged to main · TerminalOutcome delivered", ok: true },
       { kind: "blank" },
-      { kind: "stamp",  time: "11:09:18", text: "cycle #047 — done · idle until 12:05", muted: true },
+      { kind: "stamp",  time: "11:09:18", text: "cycle #047 — delivered · idle until 12:05", muted: true },
       { kind: "cursor" },
     ],
     FRAME_A: [
@@ -136,7 +136,8 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
         { name: "roll status",     mono: true, desc: "Project health: backlog queue, loop state, CI, release-ready verdict.", badges: ["core"] },
-        { name: "roll loop runs",  mono: true, desc: "Per-cycle history with outcome, TCR count, and duration.", badges: [] },
+        { name: "roll index",      mono: true, desc: "Delivery Dossier with truth strip plus Story / Cycle / Release tiles; unknown facts render as '?'.", badges: ["new"] },
+        { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll alert",      mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
         { name: "roll brief",      mono: true, desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
@@ -238,9 +239,9 @@ window.RollData = (function () {
       { kind: "step",   arrow: "peer",  label: "claude → kimi", text: "第 1/3 轮 · AGREE" },
       { kind: "step",   arrow: "build", label: "13 次 TCR 提交", text: "4 分 12 秒 · 空 diff 回滚: 0" },
       { kind: "step",   arrow: "ci",    label: "绿灯",  text: "验收检查 · 12/12 ✓", ok: true },
-      { kind: "step",   arrow: "pr",    label: "#312",  text: "已自动合入 · loop/cycle-047", ok: true },
+      { kind: "step",   arrow: "pr",    label: "#312",  text: "已合入 main · TerminalOutcome delivered", ok: true },
       { kind: "blank" },
-      { kind: "stamp",  time: "11:09:18", text: "cycle #047 — 完成 · 静默至 12:05", muted: true },
+      { kind: "stamp",  time: "11:09:18", text: "cycle #047 — delivered · 静默至 12:05", muted: true },
       { kind: "cursor" },
     ],
     FRAME_A: [
@@ -317,7 +318,8 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
         { name: "roll status",     mono: true, desc: "项目健康:backlog 队列、loop 状态、CI、发布就绪判断。", badges: ["core"] },
-        { name: "roll loop runs",  mono: true, desc: "每轮执行记录,含结果、TCR 次数、耗时。", badges: [] },
+        { name: "roll index",      mono: true, desc: "交付档案含真相条和 Story / Cycle / Release 卡片;未知事实显示为 '?'。", badges: ["new"] },
+        { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll alert",      mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
         { name: "roll brief",      mono: true, desc: "每日摘要:已发布、进行中、下一优先级。", badges: ["highlight"] },

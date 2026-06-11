@@ -90,17 +90,22 @@ roll story new US-PAY-001 --title "退款流程" --epic payments
 HTML——双语、明暗主题、可打印）：
 
 ```
-.roll/features/index.html              ← 首页：总账（愿望→事实进度条）、
-                                         生命周期脊柱、可搜索的史诗卡片
+.roll/features/index.html              ← 首页：真相板（Story / Cycle / Release）、
+                                         真相条、可搜索的史诗卡片
 .roll/features/<epic>/index.html       ← 史诗页：史诗账本 + 故事三分组
                                          （已合主干 / 周期中 / 待办）
 .roll/features/<epic>/<id>/index.html  ← 故事档案：五站——立项、设计、执行、
                                          交付（验收横幅 + AC 表）、复盘
 ```
 
-页面上每个数字都来自真实模型——`spec.md`、`ac-map.json`、`latest/` 指针、
-自评 note、`tcr:` 提交——绝不手填。一句话：**待办是愿望，主干是事实，
-done ≡ merged。**
+页面上每个数字都来自真相模型——anchors -> selectors -> adapter ->
+projections——绝不手填。Story 聚合对比 backlog 声明与 merge/证据真相；
+Cycle 聚合只读 TerminalOutcome 终态记录；Release 聚合读取最新发版闸 verdict
+和有效 waiver。一句话：**待办是愿望，主干是事实，done ≡ merged。**
+
+首页真相板会显式保留未知。`?` 表示事实缺失或不在已知 schema 内；`0` 表示
+已知为零。过早写下的 backlog `✅ Done` 只是和真相冲突的声明，会显示为漂移，
+不会被当成已交付。
 
 **新鲜度模型（FIX-231）：** 看板自己保鲜——每个改变交付真相的节点
 （`roll story new`、`roll attest`、`roll backlog block/defer/unblock/promote`）

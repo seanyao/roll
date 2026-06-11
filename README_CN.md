@@ -56,7 +56,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll idea "<一句话描述>"` | 收卡:自动分类、编号、lint、推断 epic、铸全套卡夹——用户加卡的唯一入口 |
 | `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | agent/skill 用的单一建卡入口:卡夹 + backlog 行 + 索引刷新(批量用 --no-index) |
 | `roll attest <ID>` | 渲染验收证据报告进卡夹 |
-| `roll index` | 重建三层交付档案(首页 · epic · 故事页) |
+| `roll index` | 重建事实投影交付档案(首页真相板 · epic · 故事页) |
 | `roll consistency <check\|audit>` | 五维一致性检查 · US-TRUTH 影子漂移审计(只读,exit 0) |
 | `roll changelog` | 从已合并工作同步 CHANGELOG |
 | **项目 · 每仓** | |
@@ -76,6 +76,17 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll setup [-f]` | 首次安装或重新同步约定到所有 AI 客户端 |
 | `roll update` | 升级到最新版本并重新同步 |
 | `roll --version` / `roll -v` | 显示已安装的 roll 版本 |
+
+## UI 里的真相模型
+
+交付档案是真相投影，不是 backlog 镜像。持久事实只走一条读路径：
+anchors -> selectors -> adapter -> projections。`roll index` 用 Story、
+Cycle、Release 三个聚合渲染首页真相板。
+
+- backlog 行是声明；`main` 上的 merge 证据和记录化验收证据才是真相。过早写
+  `✅ Done` 会显示成漂移。
+- cycle 历史使用 TerminalOutcome 词汇，不再教旧的自由文本摘要。
+- 缺失事实显示 `?`。可见的 `0` 表示已知为零，不表示未知。
 
 ## 仓库结构
 

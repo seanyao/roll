@@ -449,6 +449,19 @@ human can decide. The cycle-finish hook runs the detector once per cycle;
 | `efficiency` | IDEA | cycles keep blowing past their `est_min` budget |
 | `cleanliness` | FIX | cycles keep leaving orphans / raising ALERTs |
 
+## TerminalOutcome vocabulary
+
+User-facing cycle projections use TerminalOutcome values, not legacy summary
+text. The stable vocabulary is:
+
+`delivered`, `published_pending_merge`, `failed`, `blocked`,
+`aborted_no_delivery`, `aborted_with_delivery`, `orphan_timeout`,
+`idle_no_work`, `unknown`.
+
+Older `runs.jsonl` records may contain free-form result strings. Readers
+convert them through the truth adapter before rendering dashboards, dossiers,
+or summaries.
+
 ## Visibility (tmux + popup)
 
 Every loop run lives in a detached tmux session.
@@ -532,7 +545,7 @@ log:
 
 ```text
 ─── Cycle 20260530-2301-94839 Summary ───
-  built: US-LOOP-040 · tcr commits: 4
+  outcome: delivered · story: US-LOOP-040 · tcr commits: 4
   ci: green
   todo remaining: 7
   phases (top 5 by time):
@@ -544,8 +557,11 @@ log:
 
 The summary covers five signals:
 
-1. **Result** — the cycle's outcome from `runs.jsonl`: `built: <story> · tcr
-   commits: N` on success, or `idle: no story picked` when nothing was worked.
+1. **Result** — the cycle outcome from `runs.jsonl`, rendered as
+   TerminalOutcome in the summary:
+   `delivered`, `published_pending_merge`, `failed`, `blocked`,
+   `aborted_no_delivery`, `aborted_with_delivery`, `orphan_timeout`,
+   `idle_no_work`, or `unknown`.
 2. **CI / build status** — the latest `ci` event outcome: `green`, `red`,
    `heal-attempting`, or `ci: n/a` when the cycle never ran CI.
 3. **Todo remaining** — count of `📋 Todo` lines still in `.roll/backlog.md`.

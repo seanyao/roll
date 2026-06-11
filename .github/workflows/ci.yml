@@ -25,6 +25,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - run: pip install pyyaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
       - run: pnpm -r test

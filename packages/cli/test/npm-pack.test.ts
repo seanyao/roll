@@ -19,16 +19,16 @@
  *      has zero runtime deps (esbuild is a devDep, everything else is inlined),
  *      so the install never reaches the registry.
  *   3. Run the INSTALLED bin shim for one TS command that reads packaged data
- *      (`prices show` → lib/prices/*.json), one pure-TS command (`config
- *      --list`), and one bash-fallback command (`help`, `version`). Assert each
- *      produces sane output — proving the repoRoot() walk resolves from the
- *      installed layout, not just from the dev checkout.
+ *      (`loop status` legacy cost calculation → lib/prices/*.json), one pure-TS
+ *      command (`config --list`), and one bash-fallback command (`help`,
+ *      `version`). Assert each produces sane output — proving the repoRoot()
+ *      walk resolves from the installed layout, not just from the dev checkout.
  *
  * Runtime: a few seconds (incremental tsc + a local-tarball install). The
  * generous `it` timeout is headroom for a cold CI build, not the expected cost.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -52,14 +52,14 @@ afterAll(() => {
 });
 
 /** Run a command, capturing combined stdout/stderr; throws on non-zero exit. */
-function run(cmd: string, args: string[], cwd: string): string {
+function run(cmd: string, args: string[], cwd: string, envExtra: Record<string, string> = {}): string {
   return execFileSync(cmd, args, {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     // The bash fallback's async update-checker would otherwise spray GitHub
     // fetch noise; point ROLL_HOME at a throwaway dir to keep it quiet/offline.
-    env: { ...process.env, ROLL_HOME: join(cwd, ".roll-home") },
+    env: { ...process.env, ROLL_HOME: join(cwd, ".roll-home"), ...envExtra },
   });
 }
 
@@ -98,11 +98,56 @@ describe("npm pack → install → run (release packaging)", () => {
       const config = run(bin, ["config", "--list"], prefix);
       expect(config).toContain("loop_active_start");
 
-      // 3d. TS handler that reads PACKAGED data: `prices show` loads the
-      //     lib/prices/*.json snapshots via the repoRoot() walk from the
-      //     installed dist/roll.mjs. This is the load-bearing assertion.
-      const prices = run(bin, ["prices", "show"], prefix);
-      expect(prices).toMatch(/snapshots\s+\d+ loaded/);
+      // 3d. TS handler that reads PACKAGED data: a legacy usage event has no
+      //     persisted cost, so `loop status` computes it from lib/prices/*.json
+      //     via the repoRoot() walk from installed dist/roll.mjs. This is the
+      //     load-bearing assertion now that `roll prices` is retired.
+      const rt = join(prefix, "runtime");
+      mkdirSync(rt, { recursive: true });
+      writeFileSync(
+        join(rt, "events.ndjson"),
+        [
+          {
+            ts: "2026-06-11T09:30:00+00:00",
+            stage: "cycle_start",
+            label: "pack-cost-1",
+            detail: "",
+            outcome: "",
+          },
+          {
+            ts: "2026-06-11T09:40:00+00:00",
+            stage: "usage",
+            label: "pack-cost-1",
+            detail: {
+              model: "claude-sonnet-4-6",
+              input_tokens: 100000,
+              output_tokens: 50000,
+              cache_creation_tokens: 0,
+              cache_read_tokens: 0,
+              duration_ms: 600000,
+            },
+            outcome: "ok",
+          },
+          {
+            ts: "2026-06-11T09:40:00+00:00",
+            stage: "cycle_end",
+            label: "pack-cost-1",
+            detail: "",
+            outcome: "done",
+          },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join("\n") + "\n",
+      );
+      const status = run(bin, ["loop", "status", "--no-color", "--en", "--days", "1"], prefix, {
+        NO_COLOR: "1",
+        ROLL_MAIN_SLUG: "pack-abc123",
+        ROLL_PROJECT_RUNTIME_DIR: rt,
+        ROLL_RENDER_NOW: "2026-06-11T10:00:00Z",
+        ROLL_SHARED_ROOT: join(prefix, "shared"),
+      });
+      expect(status).toContain("$1.05");
+      expect(status).toContain("[legacy]");
     },
     120_000,
   );

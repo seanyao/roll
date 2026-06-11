@@ -431,7 +431,7 @@ describe("frozen: roll init", () => {
         "stderr": "",
         "stdout": "[roll] Applying onboard plan...
 
-        ┌─
+      Roll convention sync summary
         │  + created     AGENTS.md                     │
         │  + created     .roll/.version                │
         │  + created     .roll/backlog.md              │
@@ -482,7 +482,7 @@ describe("frozen: roll init", () => {
       [roll] Seeding cancelled. The analysis markdown was still generated.
       [roll] Seeding cancelled. The analysis markdown was still generated.
 
-        ┌─
+      Roll convention sync summary
         │  + created     AGENTS.md                     │
         │  + created     .roll/.version                │
         │  + created     .roll/backlog.md              │
@@ -532,7 +532,7 @@ describe("frozen: roll init", () => {
       [roll] Plan written. Running apply…
       [roll] Applying onboard plan...
 
-        ┌─
+      Roll convention sync summary
         │  + created     AGENTS.md                     │
         │  + created     .roll/.version                │
         │  + created     .roll/backlog.md              │

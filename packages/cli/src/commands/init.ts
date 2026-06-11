@@ -99,6 +99,10 @@ function m(key: string, ...args: Array<string | number>): string {
   return t(v2Catalog, msgLang(), key, ...args);
 }
 
+function initMergeSummaryTitle(): string {
+  return msgLang() === "zh" ? "Roll 约定同步摘要" : "Roll convention sync summary";
+}
+
 // ─── env (bin/roll:7-11) ──────────────────────────────────────────────────────
 function rollHome(): string {
   return process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
@@ -786,7 +790,7 @@ function printMergeSummary(summary: Summary): void {
   if (summary.length === 0) return;
   const { GREEN, YELLOW, CYAN, NC } = pal();
   process.stdout.write("\n");
-  process.stdout.write(`${m("migrate.summary")}\n`);
+  process.stdout.write(`${initMergeSummaryTitle()}\n`);
   for (const entry of summary) {
     const idx = entry.indexOf("|");
     const action = idx >= 0 ? entry.slice(0, idx) : entry;

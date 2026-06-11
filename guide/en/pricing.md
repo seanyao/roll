@@ -2,8 +2,8 @@
 
 Roll computes per-cycle costs at **public per-token pricing** — not your
 subscription rate, but a comparable number you can track across projects and
-agents. This doc covers the `roll prices` command, snapshot mechanism, and
-how historical costs survive price changes.
+agents. This doc covers the snapshot mechanism and how historical costs survive
+price changes.
 
 ## Where Costs Appear
 
@@ -25,17 +25,10 @@ Snapshots live in `lib/prices/` under your Roll install directory.
 | DeepSeek | CNY | `api-docs.deepseek.com/zh-cn/quick_start/pricing/` |
 | Kimi (Moonshot) | CNY | `platform.kimi.com/docs/pricing/chat` |
 
-## `roll prices` Command
+## Reading the Active Snapshot
 
-```bash
-roll prices show        # Print the current price table (all vendors)
-roll prices refresh     # Fetch official pricing docs for all vendors, diff, write if changed
-```
-
-### `roll prices show`
-
-Prints the active snapshots' metadata and a table of all known models with
-their per-million-token rates:
+Runtime cost accounting reads the active snapshots directly from `lib/prices/`.
+The rate fields are:
 
 ```
 in       Base input tokens
@@ -46,19 +39,13 @@ cr       Cache read tokens (billed at a deep discount)
 
 Rates are **per million tokens**, in the vendor's native currency.
 
-### `roll prices refresh`
+## Price Snapshot Maintenance
 
-Fetches the official pricing page from each vendor, parses the rate table,
-and diffs it against the latest local snapshot. Supports per-vendor refresh:
-`roll prices refresh anthropic|deepseek|kimi`.
-
-- **Rates changed** → writes a new snapshot file (`snapshot-YYYY-MM-DD.json`),
-  prints a diff (red = removed, green = added), and the dashboard picks up the
-  new rates on the next render.
-- **No change** → prints `up to date` and exits.
-
-If the network is down or the page can't be parsed, the command exits with an
-error message — **existing snapshots are never overwritten by a failed fetch**.
+Snapshot refresh is an internal maintenance action now, not a public top-level
+CLI command. Maintainers compare the official vendor pricing pages, add a new
+`snapshot-YYYY-MM-DD.json` under `lib/prices/` when rates change, and ship that
+snapshot through the normal review and release flow. Existing snapshots are
+never overwritten by a failed scrape or partial update.
 
 ## Price Snapshots
 
@@ -97,9 +84,9 @@ If the field is missing (cycles from before this feature shipped), it falls
 back to computing with the *current* snapshot and appends a dim `[legacy]`
 marker.
 
-**Net effect:** vendor price changes, `roll prices refresh`, and Roll upgrades
-never rewrite historical cycle costs. "What you actually spent" is a fact —
-it stays put.
+**Net effect:** vendor price changes, new snapshots, and Roll upgrades never
+rewrite historical cycle costs. "What you actually spent" is a fact — it stays
+put.
 
 ## FAQ
 
@@ -108,9 +95,8 @@ No. It uses public per-token rates. If you're on a subscription (Claude Pro,
 Team, etc.) your real cost is lower. Think of it as a comparable number.
 
 **Q: What happens when prices change?**
-Run `roll prices refresh`. If rates changed, a new snapshot is written and new
-cycles use it. Old cycles keep their frozen `cost_list_usd`.
+Maintainers add a new snapshot and release it. New cycles use the new rates;
+old cycles keep their frozen `cost_list_usd`.
 
 **Q: Can I add prices for a different vendor?**
-Yes — `roll prices refresh --vendor deepseek` (or `kimi`). The `--vendor` flag
-tells the fetcher which vendor's pricing page to scrape.
+Yes, by adding a vendor entry and a reviewed snapshot under `lib/prices/`.

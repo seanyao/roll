@@ -16,12 +16,6 @@ _i18n_set zh init.onboard_retry "再试一次同一个 agent:  roll init"
 _i18n_set en init.onboard_switch "switch to another:      ROLL_ONBOARD_AGENT=<name> roll init"
 _i18n_set zh init.onboard_switch "换一个 agent:           ROLL_ONBOARD_AGENT=<name> roll init"
 
-# ── migrate ──
-_i18n_set en migrate.tips.inspect "Inspect the migration commit"
-_i18n_set zh migrate.tips.inspect "查看迁移提交"
-_i18n_set en migrate.tips.verify "Verify new structure"
-_i18n_set zh migrate.tips.verify "验证新结构"
-
 # ── peer help ──
 _i18n_set en peer.help.from "Originating agent"
 _i18n_set zh peer.help.from "发起方"

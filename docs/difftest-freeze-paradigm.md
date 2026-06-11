@@ -97,9 +97,9 @@ When the otherwise-deterministic output embeds a volatile fragment (a tmp path, 
 the raw bytes (step 2). Instead scrub the known fragment to a placeholder *before*
 the snapshot, e.g. `out.split(home).join("<HOME>")`, `…/${uid}/… → /<UID>/`,
 `/- OS: .*/ → "- OS: <OS>"`. The test already knows the fabricated path/uid, so
-the scrub is exact. For an inherently host-specific appendix (the `roll feedback`
-Environment block), assert the deterministic prefix + structural markers and
-replace the whole appendix with `<ENV>`.
+the scrub is exact. For an inherently host-specific appendix (for example an
+issue body Environment block), assert the deterministic prefix + structural
+markers and replace the whole appendix with `<ENV>`.
 
 ## The portability trap (why step 2 matters)
 

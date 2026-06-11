@@ -161,7 +161,7 @@ npm uninstall -g @seanyao/roll
 至少装一个。Claude Code、Codex CLI、Cursor 都可以——安装免费，AI 调用走你的账户消耗 token。
 
 **Q: 已经有从别的工具来的 `BACKLOG.md` 怎么办？**
-Roll 会检测为 pre-2.0 Roll 项目（不是 legacy），让你跑 `roll migrate`。如果文件来自完全不同的工具，先重命名（`mv BACKLOG.md old-backlog.md`）再跑 `roll init`。
+Roll 会检测为 pre-2.0 Roll 项目（不是 legacy），让你跑 `npx @seanyao/roll@2 migrate`。如果文件来自完全不同的工具，先重命名（`mv BACKLOG.md old-backlog.md`）再跑 `roll init`。
 
 **Q: roll-onboard 推断的项目类型不对，怎么改？**
 在对话里告诉它。第一组 3 问就是为了让你纠正。Skill 把纠正后的理解写进 plan，bash 信任 plan。

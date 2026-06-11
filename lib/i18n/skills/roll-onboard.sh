@@ -7,8 +7,8 @@ _i18n_set en onboard.welcome "Welcome to Roll Onboard"
 _i18n_set zh onboard.welcome "欢迎使用 Roll Onboard"
 _i18n_set en onboard.scanning "Scanning project..."
 _i18n_set zh onboard.scanning "正在扫描项目..."
-_i18n_set en onboard.stop_migrate_first "This project has legacy Roll structure (BACKLOG.md or docs/features/). Run 'roll migrate' first before onboarding."
-_i18n_set zh onboard.stop_migrate_first "此项目还保留着旧版 Roll 结构（BACKLOG.md 或 docs/features/）。请先运行 'roll migrate' 再 onboard。"
+_i18n_set en onboard.stop_migrate_first "This project has legacy Roll structure (BACKLOG.md or docs/features/). Run 'npx @seanyao/roll@2 migrate' first before onboarding."
+_i18n_set zh onboard.stop_migrate_first "此项目还保留着旧版 Roll 结构（BACKLOG.md 或 docs/features/）。请先运行 'npx @seanyao/roll@2 migrate' 再 onboard。"
 
 # ── Step 3: Nine Questions ──
 _i18n_set en onboard.questions_group1 "Group 1/3: Understanding your project"

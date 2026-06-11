@@ -62,16 +62,13 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | **项目 · 每仓** | |
 | `roll init` | 在当前项目落地 Roll(历史代码走 agent 接入) |
 | `roll offboard` | 从项目移除 Roll |
-| `roll migrate` | 升级 pre-2.0 项目布局 |
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |
 | `roll ci [--wait]` | 查看 / 等待当前 commit 的 CI 状态 |
 | `roll release [ship\|waiver]` | 发版指引 · 过闸打 tag(`ship`) · 记录化漂移豁免(`waiver`)——npm publish 永远人工 |
-| `roll feedback --type bug\|idea\|ux` | 为本项目提交 GitHub issue |
 | `roll pair [init\|status]` | 跨 Agent 配对:建造期异构同行复检 |
 | **配置 · 本机** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | 读写 roll 配置(语言、loop 窗口、dream 时间) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | 本机复杂度槽位路由(easy/default/hard/fallback) |
-| `roll prices [refresh]` | 模型价目表(成本核算来源) |
 | `roll skills` | 技能目录状态 |
 | `roll setup [-f]` | 首次安装或重新同步约定到所有 AI 客户端 |
 | `roll update` | 升级到最新版本并重新同步 |

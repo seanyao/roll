@@ -181,6 +181,8 @@ export interface CapturedFacts {
   timedOut: boolean;
   /** Commits ahead of origin/main in the worktree (bin/roll:9139). */
   commitsAhead: number;
+  /** FIX-252: commits on local main that are not on origin/main. */
+  mainAhead?: number;
   /** FIX-244: PR state for the cycle branch ("OPEN"/"MERGED"/...), probed by the
    *  capture step ONLY when the exit is non-zero with commits ahead — the
    *  phantom-failure check. Absent = not probed / no PR. */
@@ -193,7 +195,7 @@ export interface CapturedFacts {
  *   - timed out                       → blocked (the watchdog path owns teardown).
  *   - worktree-setup failed           → failed (bin/roll:9000-9007).
  *   - agent exit ≠ 0                  → failed (bin/roll:9132-9133).
- *   - exit 0, commitsAhead === 0      → idle (bin/roll:9180).
+ *   - exit 0, commitsAhead === 0 and local main not ahead → idle (bin/roll:9180).
  *   - exit 0, commitsAhead > 0        → built (bin/roll:9141-9142; refined by the
  *                                       publish ladder to done/orphan/failed).
  * Returns the status BEFORE the publish ladder runs; {@link classifyPublish}
@@ -211,6 +213,7 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
       return "published";
     return "failed";
   }
+  if (facts.commitsAhead === 0 && (facts.mainAhead ?? 0) > 0) return "failed";
   if (facts.commitsAhead === 0) return "idle";
   return "built";
 }
@@ -743,6 +746,13 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         const extra: CycleCommand[] =
           status === "idle" || status === "published"
             ? [{ kind: "cleanup_worktree", branch: state.ctx.branch }]
+            : status === "failed" && (event.facts.mainAhead ?? 0) > 0
+              ? [
+                  {
+                    kind: "append_alert",
+                    message: `cycle ${state.ctx.cycleId}: local main is ahead of origin/main by ${event.facts.mainAhead} commit(s) while cycle branch has ${event.facts.commitsAhead} commit(s); leaving state untouched for rescue (FIX-252)`,
+                  },
+                ]
             : status === "failed" && event.facts.commitsAhead > 0
               ? [
                   { kind: "push_orphan", branch: state.ctx.branch },

@@ -12,8 +12,10 @@
  * delivery PRs; claim-shaped cycle branches). The report records what was
  * skipped — a silent cap would read as "no drift" (no-silent-caps rule).
  */
+import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   emptyAuditSnapshot,
   parseBacklog,
@@ -34,12 +36,15 @@ import { TERMINAL_SCHEMA_EPOCH_SEC } from "@roll/spec";
 
 /** Counting window for the failure-count cross-check (72h, the panel window). */
 const COUNT_WINDOW_SEC = 72 * 3600;
+const execFileAsync = promisify(execFile);
 
 export interface AuditGatherDeps {
   /** PR merge-info fetcher (tests inject; default `gh pr view`). */
   fetchInfo?: (slug: string, ref: string) => Promise<PrMergeInfo | undefined>;
   /** Repo slug override (tests). */
   slug?: string;
+  /** Local main ahead count override (tests). */
+  localMainAhead?: () => Promise<number>;
   nowSec?: number;
 }
 
@@ -56,6 +61,19 @@ function readJsonl(path: string): Array<Record<string, unknown>> {
     }
   }
   return out;
+}
+
+async function gitLocalMainAhead(projectPath: string): Promise<number> {
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-list", "--count", "origin/main..main"], {
+      cwd: projectPath,
+      encoding: "utf8",
+    });
+    const count = Number.parseInt(stdout.trim(), 10);
+    return Number.isFinite(count) ? count : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Assemble the audit snapshot from the project's fact sources (read-only). */
@@ -76,6 +94,9 @@ export async function gatherAuditSnapshot(
 
   // index map
   snapshot.index = readIndex(projectPath);
+
+  // local main drift (FIX-252): read-only git probe; absence is not drift.
+  snapshot.localMainAhead = deps.localMainAhead !== undefined ? await deps.localMainAhead() : await gitLocalMainAhead(projectPath);
 
   // runs rows
   snapshot.runs = readJsonl(join(runtimeDir, "runs.jsonl"));

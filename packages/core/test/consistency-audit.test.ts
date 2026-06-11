@@ -200,6 +200,15 @@ describe("rule terminal-twin-missing — US-TRUTH-001 grandfather boundary", () 
   });
 });
 
+describe("rule local-main-ahead — FIX-252 local main is not a publish endpoint", () => {
+  it("local main ahead of origin/main → fail-level drift", () => {
+    const r = runConsistencyAudit(snap({ localMainAhead: 2 }));
+    expect(r.findings).toContainEqual(
+      expect.objectContaining({ rule: "local-main-ahead", severity: "fail", subject: "main" }),
+    );
+  });
+});
+
 describe("audit contract — shadow mode invariants", () => {
   it("summary tallies by severity; an all-clean snapshot yields zero findings", () => {
     const clean = runConsistencyAudit(snap({}));

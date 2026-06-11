@@ -140,6 +140,8 @@ export interface GitPort {
   push(repoCwd: string, branch: string): Promise<{ code: number }>;
   /** `git rev-list --count origin/main..HEAD` in the worktree → commits ahead. */
   commitsAhead(worktreeCwd: string): Promise<number>;
+  /** FIX-252: `git rev-list --count origin/main..main` in the main checkout. */
+  mainAhead(repoCwd: string): Promise<number>;
   /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
    *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree. */
   tcrCount(worktreeCwd: string): Promise<number>;
@@ -568,6 +570,12 @@ export async function executeCommand(
     // short-circuits before capture).
     case "capture_facts": {
       const commitsAhead = await ports.git.commitsAhead(ports.paths.worktreePath);
+      let mainAhead = 0;
+      try {
+        mainAhead = await ports.git.mainAhead(ports.repoCwd);
+      } catch {
+        /* drift probe is best-effort */
+      }
       // FIX-208: count real `tcr:` commits while the worktree is still alive
       // (the done/cleanup path removes it before the runs row is written). Folded
       // into liveCtx so buildRunRow stops hardcoding 0. Best-effort → 0 on error.
@@ -788,6 +796,7 @@ export async function executeCommand(
         agentExit: attestBlocked ? 1 : 0,
         timedOut: false,
         commitsAhead,
+        ...(mainAhead > 0 ? { mainAhead } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };
       return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount } };
@@ -1276,6 +1285,14 @@ export function nodePorts(opts: {
       async commitsAhead(worktreeCwd) {
         const r = await execFileAsync("git", ["rev-list", "--count", "origin/main..HEAD"], {
           cwd: worktreeCwd,
+          encoding: "utf8",
+        }).catch(() => ({ stdout: "0" }));
+        const n = Number((r.stdout ?? "0").trim());
+        return Number.isFinite(n) ? n : 0;
+      },
+      async mainAhead(repoCwd) {
+        const r = await execFileAsync("git", ["rev-list", "--count", "origin/main..main"], {
+          cwd: repoCwd,
           encoding: "utf8",
         }).catch(() => ({ stdout: "0" }));
         const n = Number((r.stdout ?? "0").trim());

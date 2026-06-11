@@ -64,6 +64,8 @@ export interface AuditSnapshot {
   /** failure counts computed over the SAME window by the two bookkeepers. */
   runsFailedCount?: number;
   eventFailedCount?: number;
+  /** Local publish-line drift: commits on main that have not reached origin/main. */
+  localMainAhead?: number;
 }
 
 export type AuditSeverity = "fail" | "warn" | "unknown" | "grandfathered";
@@ -120,6 +122,16 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
   const add = (rule: string, severity: AuditSeverity, subject: string, detail: string): void => {
     findings.push({ rule, severity, subject, detail });
   };
+
+  // ── local-main-ahead: local main must never be a publish endpoint ─────────
+  if ((s.localMainAhead ?? 0) > 0) {
+    add(
+      "local-main-ahead",
+      "fail",
+      "main",
+      `local main is ahead of origin/main by ${s.localMainAhead} commit(s) with no PR-backed publish evidence — local main is not a delivery endpoint (FIX-252)`,
+    );
+  }
 
   // ── done-no-merge: a ✅ Done backlog row must have MERGED PR evidence ──────
   for (const row of s.backlog) {

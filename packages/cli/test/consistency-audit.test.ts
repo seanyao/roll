@@ -85,6 +85,17 @@ describe("gatherAuditSnapshot — read-only fact assembly", () => {
     expect(snapshot.runsFailedCount).toBe(1);
     expect(snapshot.eventFailedCount).toBe(1);
   });
+
+  it("records local main drift from the injected git probe", async () => {
+    const { proj, rt } = project();
+    const { snapshot } = await gatherAuditSnapshot(proj, rt, {
+      slug: "o/r",
+      fetchInfo: fakeFetch,
+      localMainAhead: async () => 2,
+      nowSec: NOW,
+    });
+    expect(snapshot.localMainAhead).toBe(2);
+  });
 });
 
 describe("consistencyAuditCommand — shadow contract (AC5/AC6)", () => {
@@ -100,7 +111,7 @@ describe("consistencyAuditCommand — shadow contract (AC5/AC6)", () => {
     process.stdout.write = (c: string | Uint8Array): boolean => (out.push(String(c)), true);
     let rc: number;
     try {
-      rc = await consistencyAuditCommand([], { slug: "o/r", fetchInfo: fakeFetch, nowSec: NOW });
+      rc = await consistencyAuditCommand([], { slug: "o/r", fetchInfo: fakeFetch, localMainAhead: async () => 2, nowSec: NOW });
     } finally {
       process.stdout.write = realWrite;
       process.chdir(prevCwd);
@@ -117,6 +128,7 @@ describe("consistencyAuditCommand — shadow contract (AC5/AC6)", () => {
     expect(report.findings).toContainEqual(expect.objectContaining({ rule: "done-no-merge", subject: "US-DRIFT-1", severity: "fail" }));
     expect(report.findings).toContainEqual(expect.objectContaining({ rule: "merge-not-backfilled", subject: "C1", severity: "fail" }));
     expect(report.findings).toContainEqual(expect.objectContaining({ rule: "done-missing-attest", subject: "US-DRIFT-1", severity: "fail" }));
+    expect(report.findings).toContainEqual(expect.objectContaining({ rule: "local-main-ahead", subject: "main", severity: "fail" }));
     expect(report.findings).toContainEqual(expect.objectContaining({ rule: "index-missing-live-card", subject: "US-TODO-1", severity: "warn" }));
     expect(out.join("")).toContain("consistency audit (shadow)");
   });

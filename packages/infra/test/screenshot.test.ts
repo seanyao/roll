@@ -217,7 +217,7 @@ describe("terminal", () => {
         commandLive = false;
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
       }
-      if (cmd === "osascript" && script.includes("close front window")) {
+      if (cmd === "osascript" && script.includes("close w saving no")) {
         if (commandLive) unsafeClose = true;
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
       }
@@ -232,10 +232,12 @@ describe("terminal", () => {
     expect(r.taken).toBe(true);
     expect(unsafeClose).toBe(false);
     const waitIndex = calls.findIndex((c) => c.startsWith("sh -lc "));
-    const closeIndex = calls.findIndex((c) => c.includes("close front window"));
+    const closeIndex = calls.findIndex((c) => c.includes("close w saving no"));
     expect(waitIndex).toBeGreaterThan(-1);
     expect(closeIndex).toBeGreaterThan(waitIndex);
     expect(calls.find((c) => c.includes("do script"))).toContain("exit");
+    expect(calls.find((c) => c.includes("do script"))).toContain("set custom title");
+    expect(calls[closeIndex]).toContain("roll-attest-");
   });
 
   it("FIX-266: if a command is still running, it leaves the window open instead of prompting macOS to terminate it", async () => {
@@ -253,7 +255,7 @@ describe("terminal", () => {
         execFileSync("sh", ["-n"], { input: script });
         return Promise.resolve({ code: 1, stdout: "", stderr: "timed out" });
       }
-      if (cmd === "osascript" && script.includes("close front window")) closeCalled = true;
+      if (cmd === "osascript" && script.includes("close w saving no")) closeCalled = true;
       return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     };
 

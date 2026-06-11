@@ -167,25 +167,47 @@ export function parseRegion(region: string): { x: number; y: number; w: number; 
  * render before the screenshot is taken. `line` is embedded inside a quoted
  * `do script "…"`, so its double-quotes/backslashes are escaped.
  */
-export function terminalOpenScript(line: string, r: { x: number; y: number; w: number; h: number }): string {
-  const esc = line.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+export function terminalOpenScript(line: string, r: { x: number; y: number; w: number; h: number }, title?: string): string {
+  const esc = appleScriptString(line);
+  const setTitle = title === undefined ? [] : [`  set custom title of front window to "${appleScriptString(title)}"`];
   return [
     'tell application "Terminal"',
     "  activate",
     `  do script "${esc}"`,
+    ...setTitle,
     "  delay 1.5",
     `  set bounds of front window to {${r.x}, ${r.y}, ${r.x + r.w}, ${r.y + r.h}}`,
     "end tell",
   ].join("\n");
 }
 
-/** AppleScript that closes the front Terminal window without a save prompt. */
-export function terminalCloseScript(): string {
-  return 'tell application "Terminal" to close front window saving no';
+/** AppleScript that closes the Terminal window we opened without a save prompt. */
+export function terminalCloseScript(title?: string): string {
+  if (title === undefined) return 'tell application "Terminal" to close front window saving no';
+  const esc = appleScriptString(title);
+  return [
+    'tell application "Terminal"',
+    "  repeat with w in windows",
+    `    if custom title of w is "${esc}" then`,
+    "      close w saving no",
+    "      exit repeat",
+    "    end if",
+    "  end repeat",
+    "end tell",
+  ].join("\n");
 }
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function appleScriptString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function terminalWindowTitle(out: string): string {
+  const safe = out.replace(/[^A-Za-z0-9_.-]+/g, "-");
+  return `roll-attest-${safe.slice(Math.max(0, safe.length - 80))}`;
 }
 
 function terminalCommandWithDoneFile(line: string, doneFile: string): string {
@@ -272,7 +294,8 @@ export async function captureScreenshot(
         }
       }
       const line = commandDoneFile !== undefined ? terminalCommandWithDoneFile(rawLine, commandDoneFile) : rawLine;
-      const opened = await run("osascript", ["-e", terminalOpenScript(line, rect)]);
+      const windowTitle = terminalWindowTitle(req.out);
+      const opened = await run("osascript", ["-e", terminalOpenScript(line, rect, windowTitle)]);
       if (opened.code !== 0) return skip("osascript Terminal open failed");
       const shot = await run("screencapture", ["-x", "-R", req.region ?? DEFAULT_REGION, req.out]);
       // screencapture exits non-zero when Screen Recording permission is absent.
@@ -280,14 +303,14 @@ export async function captureScreenshot(
         if (commandDoneFile !== undefined && !(await waitForTerminalCommandExit(commandDoneFile, run))) {
           return skip("terminal command still running; window left open to avoid macOS termination prompt");
         }
-        const closed = await run("osascript", ["-e", terminalCloseScript()]);
+        const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]);
         if (closed.code !== 0) return skip("screencapture failed; Terminal close failed");
         return skip("screencapture failed (screen-recording permission?)");
       }
       if (commandDoneFile !== undefined && !(await waitForTerminalCommandExit(commandDoneFile, run))) {
         return skip("terminal command still running; window left open to avoid macOS termination prompt");
       }
-      const closed = await run("osascript", ["-e", terminalCloseScript()]); // close the window we opened
+      const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]); // close the window we opened
       if (closed.code !== 0) return skip("Terminal close failed after capture");
     }
   } catch {

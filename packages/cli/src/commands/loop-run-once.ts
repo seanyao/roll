@@ -27,6 +27,7 @@ import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { gcCommand } from "./gc.js";
 import { execFileSync, spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
+import { resolveLang, t, v3Catalog } from "@roll/spec";
 
 /** US-PORT-011: after a delivered cycle, surface the acceptance report —
  *  print its path always; auto-open in the browser unless the project is
@@ -416,6 +417,26 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
   };
 
+  // FIX-232 AC2: lightweight egress pre-check — detect proxy-poisoned
+  // launchd environment BEFORE acquiring the lock and burning agent tokens.
+  // DNS + TCP connect to github.com:443; a dead proxy at 127.0.0.1:7897
+  // passes DNS but fails TCP → blocked → ALERT + clean exit.
+  if (await egressBlocked()) {
+    const lang = resolveLang({
+      rollLang: process.env["ROLL_LANG"],
+      lcAll: process.env["LC_ALL"],
+      lang: process.env["LANG"],
+    });
+    const msg = t(v3Catalog, lang, "loop.egress_blocked", cycleId);
+    try {
+      appendFileSync(alertsPath, `[${new Date().toISOString()}] ALERT ${msg}\n`, "utf8");
+    } catch {
+      /* the stderr line below still fires */
+    }
+    process.stderr.write(`loop run-once: ${msg}\n`);
+    return 1;
+  }
+
   // FIX-204A: an empty workflow document = a blind agent burning tokens for
   // nothing — halt loudly BEFORE any lock/worktree/agent side effect.
   const skillBody = readSkillBody(id.path);
@@ -595,6 +616,58 @@ export async function isOffline(
     ]);
     return false;
   } catch {
+    return true;
+  }
+}
+
+/**
+ * FIX-232 AC2 — lightweight egress pre-check. Before a cycle acquires the
+ * inner lock and spawns an agent, verify that outbound connectivity to a
+ * well-known endpoint is actually working. A poisoned proxy env (e.g.
+ * launchctl setenv HTTP_PROXY=127.0.0.1:7897 from a closed proxy app) makes
+ * DNS resolve but TCP connect fail — this catches that signature before the
+ * agent burns 45s on a timeout.
+ *
+ * Returns `true` if egress is blocked (the cycle should halt with an ALERT),
+ * `false` if the check passed (or was skipped — offline is NOT a block;
+ * a plain offline is a degrade-notice, not a poison signal).
+ *
+ * The check is two-tier:
+ *   1. DNS resolve github.com (the `isOffline` check Idea-001 already does).
+ *   2. TCP connect to github.com:443 within 3s — catches proxy-poison where
+ *      DNS works but the actual TCP connect hits a dead proxy endpoint.
+ *
+ * On Darwin only (the launchctl proxy-poison is a macOS-specific vector).
+ * On other platforms, skips (returns false) to avoid false positives.
+ */
+export async function egressBlocked(
+  resolve: (host: string) => Promise<unknown> = (h) => lookup(h),
+): Promise<boolean> {
+  // Only relevant on Darwin — launchctl setenv is macOS-specific.
+  if (process.platform !== "darwin") return false;
+
+  // Tier 1: DNS — if DNS fails, we're offline entirely, not poisoned.
+  // isOffline already handles this; a plain offline is not a proxy-block.
+  const offline = await isOffline(resolve);
+  if (offline) return false; // offline is not a poison signal — degrade, don't halt.
+
+  // Tier 2: TCP connect to github.com:443. DNS succeeded but TCP may be
+  // routed to a dead proxy. Use a clean subprocess with an explicit 3s
+  // timeout; the probe itself must never stall the cycle (>5s wall).
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    await execFileAsync(
+      "bash",
+      ["-c", "timeout 3 bash -c 'echo >/dev/tcp/github.com/443' 2>/dev/null"],
+      { timeout: 5000 },
+    );
+    return false; // TCP connect succeeded — egress is clear.
+  } catch {
+    // TCP connect failed — DNS worked but the actual connection didn't.
+    // This is the proxy-poison signature: the dead proxy endpoint at
+    // 127.0.0.1:7897 intercepts the connection attempt.
     return true;
   }
 }

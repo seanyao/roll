@@ -70,15 +70,6 @@ export const v3Catalog: Catalog = {
     en: "Backlog changed on disk — re-run to capture",
     zh: "待办文件已变更 — 请重试以记录",
   },
-  // REFACTOR-050: card creation now lives in `roll idea`.
-  "ideav3.card_created": {
-    en: "Card folder created: .roll/features/%s/",
-    zh: "卡片文件夹已创建：.roll/features/%s/",
-  },
-  "ideav3.card_exists": {
-    en: "Card folder already exists — skipping creation (features/%s/%s)",
-    zh: "卡片文件夹已存在 — 跳过创建 (features/%s/%s)",
-  },
 
   // `releasev3.*` — the read-only release-guidance command (US-PORT-004). `roll
   // release` computes the next calver version, surfaces changelog readiness, and
@@ -169,5 +160,21 @@ export const v3Catalog: Catalog = {
   "loopv3.branches_retired": {
     en: "roll loop branches is retired. List loop branches directly: git ls-remote --heads origin 'loop/*'",
     zh: "roll loop branches 已退役。直接列出 loop 分支：git ls-remote --heads origin 'loop/*'",
+  },
+
+  // FIX-232: doctor proxy-environment check
+  "doctor.proxy_env_warning": {
+    en: "Stale proxy environment variables",
+    zh: "残留的代理环境变量",
+  },
+  "doctor.proxy_env_hint": {
+    en: "Proxy variables are set but unreachable — a closed proxy app may have poisoned launchd. Clean up:",
+    zh: "代理变量已设置但目标不可达 — 已关闭的代理软件可能毒化了 launchd。请清理：",
+  },
+
+  // FIX-232 AC2: loop egress pre-check messages
+  "loop.egress_blocked": {
+    en: "egress blocked (proxy?): network pre-check failed — cycle %s refused to start",
+    zh: "出网阻断（疑似代理？）：网络预检失败 — 周期 %s 拒绝启动",
   },
 };

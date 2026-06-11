@@ -11,8 +11,9 @@ import {
 } from "@roll/spec";
 import { acquireLock, ghRepoSlug, prViewMergeInfo, projectIdentity, releaseLock, remoteUrl } from "@roll/infra";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
 import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
@@ -24,6 +25,7 @@ interface ProjectId {
 
 export interface RunOnceInput {
   projectPath: string;
+  allowedCards?: string[];
 }
 
 export interface StartTmuxInput {
@@ -57,6 +59,11 @@ interface RunSummary {
   costUsd: number;
 }
 
+interface RunRowSnapshot {
+  rows: Record<string, unknown>[];
+  summary: RunSummary;
+}
+
 interface ScopeRow {
   id: string;
   status: string;
@@ -68,6 +75,11 @@ interface GoalEvaluation {
   blockers: string[];
   total: number;
   delivered: number;
+}
+
+interface ProgressState {
+  zeroStreaks: Map<string, number>;
+  skippedCards: Set<string>;
 }
 
 function realDeps(): LoopGoDeps {
@@ -252,7 +264,11 @@ function realRunOnce(input: RunOnceInput): Promise<number> {
     const child = spawn(cmd, args, {
       cwd: input.projectPath,
       detached: true,
-      env: { ...process.env, ROLL_LOOP_GO_CHILD: "1" },
+      env: {
+        ...process.env,
+        ROLL_LOOP_GO_CHILD: "1",
+        ...(input.allowedCards !== undefined ? { [GOAL_ALLOWED_CARDS_ENV]: input.allowedCards.join(",") } : {}),
+      },
       stdio: "inherit",
     });
     child.on("exit", (code) => resolve(code ?? 1));
@@ -288,12 +304,17 @@ function createGoal(opts: GoOptions, at: string): RollGoal {
 }
 
 function summarizeRuns(path: string): RunSummary {
+  return readRunSnapshot(path).summary;
+}
+
+function readRunSnapshot(path: string): RunRowSnapshot {
   let text = "";
   try {
     text = readFileSync(path, "utf8");
   } catch {
-    return { cycles: 0, costUsd: 0 };
+    return { rows: [], summary: { cycles: 0, costUsd: 0 } };
   }
+  const rows: Record<string, unknown>[] = [];
   let cycles = 0;
   let costUsd = 0;
   for (const raw of text.split("\n")) {
@@ -305,12 +326,13 @@ function summarizeRuns(path: string): RunSummary {
     } catch {
       continue;
     }
+    rows.push(row);
     cycles += 1;
     const effective = typeof row["cost_effective_usd"] === "number" ? row["cost_effective_usd"] : undefined;
     const estimated = typeof row["cost_usd"] === "number" ? row["cost_usd"] : undefined;
     costUsd += effective ?? estimated ?? 0;
   }
-  return { cycles, costUsd };
+  return { rows, summary: { cycles, costUsd } };
 }
 
 function readBacklogRows(projectPath: string): ScopeRow[] {
@@ -349,6 +371,61 @@ function rowsForScope(projectPath: string, scope: GoalScope): ScopeRow[] {
     return rows.filter((row) => index[row.id] === scope.epic);
   }
   return rows.filter((row) => classifyStatus(row.status) === "todo");
+}
+
+function allowedCardsForScope(projectPath: string, goal: RollGoal, progress: ProgressState): string[] {
+  return rowsForScope(projectPath, goal.scope)
+    .map((row) => row.id)
+    .filter((id) => !progress.skippedCards.has(id));
+}
+
+function allScopeCardsSkipped(projectPath: string, goal: RollGoal, progress: ProgressState): boolean {
+  const rows = rowsForScope(projectPath, goal.scope);
+  return rows.length > 0 && rows.every((row) => progress.skippedCards.has(row.id));
+}
+
+function alertPath(projectPath: string, slug: string): string {
+  return join(runtimeDir(projectPath), `ALERT-${slug}.md`);
+}
+
+function appendGoalAlert(projectPath: string, slug: string, storyId: string, cycleId: string | undefined, at: string): void {
+  const path = alertPath(projectPath, slug);
+  mkdirSync(dirname(path), { recursive: true });
+  const cycleLine = cycleId === undefined ? "" : ` cycle=${cycleId}`;
+  appendFileSync(path, `[${at}] goal card skipped: ${storyId}${cycleLine} reason=zero delivery streak\n`, "utf8");
+}
+
+function updateProgressFromRows(
+  projectPath: string,
+  slug: string,
+  session: string,
+  rows: Record<string, unknown>[],
+  progress: ProgressState,
+  deps: LoopGoDeps,
+  bus: EventBus,
+): void {
+  for (const row of rows) {
+    const attempt = runAttemptFromRow(row);
+    if (attempt === undefined || !attempt.known) continue;
+    if (!attempt.zeroDelivery) {
+      progress.zeroStreaks.delete(attempt.storyId);
+      continue;
+    }
+    const nextCount = (progress.zeroStreaks.get(attempt.storyId) ?? 0) + 1;
+    progress.zeroStreaks.set(attempt.storyId, nextCount);
+    if (nextCount < 2 || progress.skippedCards.has(attempt.storyId)) continue;
+    progress.skippedCards.add(attempt.storyId);
+    bus.appendEvent(eventsPath(projectPath), {
+      type: "goal:card_skipped",
+      sessionId: session,
+      storyId: attempt.storyId,
+      reason: "zero_delivery_streak",
+      zeroDeliveries: nextCount,
+      ...(attempt.cycleId !== undefined ? { cycleId: attempt.cycleId } : {}),
+      ts: deps.nowSec(),
+    });
+    appendGoalAlert(projectPath, slug, attempt.storyId, attempt.cycleId, deps.nowIso());
+  }
 }
 
 function goalEvaluationFromTruth(truths: StoryTruth[], scope: GoalScope, opts: { allowEmptyAllComplete: boolean }): GoalEvaluation {
@@ -516,6 +593,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
   const baseline = summarizeRuns(runsPath(id.path));
   let initialUsage: RunSummary = { cycles: 0, costUsd: 0 };
   let goal: RollGoal;
+  const progress: ProgressState = { zeroStreaks: new Map(), skippedCards: new Set() };
   let stopReason: string | undefined;
   let stopRequested = false;
   const disposeSignals = installStopHandlers((signal) => {
@@ -562,11 +640,23 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         break;
       }
 
-      const before = summarizeRuns(runsPath(id.path));
-      await deps.runOnce({ projectPath: id.path });
+      const allowedCards = allowedCardsForScope(id.path, goal, progress);
+      if (allScopeCardsSkipped(id.path, goal, progress)) {
+        stopReason = "no_progress_on_all_cards";
+        goal = pauseGoal(id.path, bus, stopReason, deps.nowIso(), deps.nowSec()) ?? goal;
+        break;
+      }
+      const before = readRunSnapshot(runsPath(id.path));
+      await deps.runOnce({ projectPath: id.path, allowedCards });
       goal = updateUsage(id.path, goal, baseline, initialUsage, deps.nowIso());
       writeGoal(gPath, goal);
-      const after = summarizeRuns(runsPath(id.path));
+      const after = readRunSnapshot(runsPath(id.path));
+      updateProgressFromRows(id.path, id.slug, sid, after.rows.slice(before.rows.length), progress, deps, bus);
+      if (allScopeCardsSkipped(id.path, goal, progress)) {
+        stopReason = "no_progress_on_all_cards";
+        goal = pauseGoal(id.path, bus, stopReason, deps.nowIso(), deps.nowSec()) ?? goal;
+        break;
+      }
       const adjudication = await evaluateGoal(id.path, goal, deps, sid, bus);
       goal = adjudication.goal;
       if (adjudication.complete) {
@@ -582,7 +672,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         stopReason = "pause_marker";
         break;
       }
-      if (after.cycles <= before.cycles) {
+      if (after.summary.cycles <= before.summary.cycles) {
         stopReason = "no_cycle_terminal";
         break;
       }

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { buildLoopRouteDeps, readSkillBody } from "../src/commands/loop-run-once.js";
+import { buildLoopRouteDeps, readSkillBody, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
 import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
 
@@ -51,6 +51,13 @@ describe("loop run-once CLI wiring", () => {
     expect(out).toContain("command plan (orchestrator → executor)");
     expect(out).toContain("spawn_agent");
     expect(out).toContain("nothing executed");
+  });
+
+  it("does not count goal-child zero-delivery failures as consecutive failures", () => {
+    expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: true, terminal: "failed", tcrCount: 0 })).toBe(true);
+    expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: true, terminal: "blocked", tcrCount: 0 })).toBe(true);
+    expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: true, terminal: "failed", tcrCount: 1 })).toBe(false);
+    expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: false, terminal: "failed", tcrCount: 0 })).toBe(false);
   });
 });
 

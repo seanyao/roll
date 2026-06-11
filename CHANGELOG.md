@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 稳定性
+
+- `roll attest --capture-command` 截图后不再弹 macOS 终止进程确认
+  <!-- evidence: .roll/features/acceptance-evidence/FIX-266/latest/FIX-266-report.html -->
+
 ## v3.612.1 — 2026-06-12
 
 ### 新功能

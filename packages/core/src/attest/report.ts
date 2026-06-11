@@ -140,6 +140,12 @@ export interface SelfScoreReportEntry {
   dimensions?: Record<string, number>;
 }
 
+export interface CaptureSkipReportEntry {
+  kind: string;
+  out: string;
+  skipped: string;
+}
+
 export interface ReportInput {
   storyId: string;
   title: string;
@@ -167,6 +173,10 @@ export interface ReportInput {
    *  when empty (deletion-not-placeholder — a headless host that honestly
    *  skipped the capture surfaces NOTHING here, never a placeholder). */
   selfCaptures?: EvidenceRef[];
+  /** FIX-258 — machine-generated capture skips. These are not screenshot
+   *  placeholders and do not count as pixels; they are structured facts that
+   *  explain why a screenshot could not be produced. */
+  captureSkips?: CaptureSkipReportEntry[];
 }
 
 const BADGE: Record<AcStatus, { icon: string; en: string; zh: string; cls: string }> = {
@@ -308,13 +318,24 @@ function beforeAfterBlock(pairs: ReportInput["beforeAfter"]): string {
 /**
  * US-ATTEST-011 — the unattended Gate's own screenshots. Renders ONLY when the
  * terminal lane actually produced pixels (the bridge yields no ref on skip), so
- * a headless cycle drops the whole block — deletion-not-placeholder, same red
- * line as the per-AC screenshot figure.
+ * a headless cycle drops this screenshot block — deletion-not-placeholder, same
+ * red line as the per-AC screenshot figure. Structured skips render separately.
  */
 function selfCaptureBlock(refs: ReportInput["selfCaptures"]): string {
   if (refs === undefined || refs.length === 0) return "";
   const figs = refs.map(evidenceCard).join("\n");
   return `<section class="self-capture"><h2>${bi("Gate self-capture", "Gate 自产实拍")}</h2>\n${figs}\n</section>`;
+}
+
+function captureSkipBlock(skips: ReportInput["captureSkips"]): string {
+  if (skips === undefined || skips.length === 0) return "";
+  const rows = skips
+    .map((s) => {
+      const json = JSON.stringify({ kind: s.kind, out: s.out, taken: false, skipped: s.skipped }, null, 2);
+      return `<details class="capture-skip"><summary>${bi("Capture skip", "截图跳过")} · ${esc(s.kind)}</summary><pre data-machine-capture-skip="true">${esc(json)}</pre></details>`;
+    })
+    .join("\n");
+  return `<section class="capture-skips"><h2>${bi("Capture skip", "截图跳过")}</h2>\n${rows}\n</section>`;
 }
 
 /**
@@ -544,6 +565,9 @@ details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
 .selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }
 .selfscore-good { color:var(--pass); } .selfscore-ok { color:var(--warn); } .selfscore-regression { color:var(--fail); }
 .selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }
+.capture-skip { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
+.capture-skip summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+.capture-skip pre { white-space:pre-wrap; font-size:12px; }
 details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
 details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.tech[open] summary { margin-bottom:6px; }
@@ -587,6 +611,7 @@ ${cardContextBlock(input.context)}
 ${items.map(acSection).join("\n")}
 ${beforeAfterBlock(input.beforeAfter)}
 ${selfCaptureBlock(input.selfCaptures)}
+${captureSkipBlock(input.captureSkips)}
 ${processTraceBlock(input.process)}
 ${closing}
 <footer>Roll · ${bi("Acceptance Evidence", "验收证据")} · <code>${esc(input.storyId)}</code></footer>

@@ -675,7 +675,12 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
     const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
     expect(existsSync(join(runDir, "screenshots", "terminal.png"))).toBe(false);
     const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
-    expect(html).not.toContain("Gate self-capture");
+    expect(html).not.toContain('<img src="screenshots/terminal.png"');
+    expect(html).toContain("Capture skip");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    expect(evidence.captures).toContainEqual({ kind: "terminal", out: join(runDir, "screenshots", "terminal.png"), taken: false, skipped: "not macOS" });
   });
 
   it("no capture flag ⇒ lane never runs (back-compat: plain attest unchanged)", async () => {
@@ -720,6 +725,40 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
     );
 
     expect(scripts[0]).toContain(`do script "cd '${proj}' && node scripts/proof.js"`);
+  });
+
+  it("FIX-263: --capture-command records command exit code and returns non-zero on failure", async () => {
+    const proj = project();
+    const calls: string[] = [];
+    const shotRun: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      if (cmd === "sh") return Promise.resolve({ code: 2, stdout: "before failure\n", stderr: "ERR_MODULE_NOT_FOUND\n" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--capture-command", "node scripts/proof.js"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shotRun, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      capture_command?: { exitCode?: number; stdoutTail?: string; stderrTail?: string };
+      captures?: Array<{ taken?: boolean; skipped?: string }>;
+    };
+    expect(code).toBe(3);
+    expect(calls.some((x) => x.startsWith("sh -lc "))).toBe(true);
+    expect(evidence.capture_command?.exitCode).toBe(2);
+    expect(evidence.capture_command?.stdoutTail).toContain("before failure");
+    expect(evidence.capture_command?.stderrTail).toContain("ERR_MODULE_NOT_FOUND");
+    expect(evidence.captures?.[0]?.taken).toBe(false);
+    expect(evidence.captures?.[0]?.skipped).toContain("capture command exited 2");
   });
 });
 

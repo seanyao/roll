@@ -64,6 +64,23 @@ export interface EvidenceManifest {
   test_pass: { present: boolean; age_seconds: number };
   screenshots: string[];
   texts: string[];
+  captures: CaptureFact[];
+  capture_command: CaptureCommandFact | null;
+}
+
+export interface CaptureFact {
+  kind: string;
+  out: string;
+  taken: boolean;
+  skipped?: string;
+}
+
+export interface CaptureCommandFact {
+  command: string;
+  wrappedCommand: string;
+  exitCode: number;
+  stdoutTail: string;
+  stderrTail: string;
 }
 
 export interface CollectOptions {
@@ -78,6 +95,8 @@ export interface CollectOptions {
   now: () => string;
   run?: EvidenceRun;
   ghProbe?: () => Promise<boolean>;
+  captures?: readonly CaptureFact[];
+  captureCommand?: CaptureCommandFact | null;
 }
 
 export interface EvidenceFrame {
@@ -195,6 +214,8 @@ export async function collectEvidence(opts: CollectOptions): Promise<EvidenceMan
     test_pass: testPass,
     screenshots: listDir("screenshots", /\.png$/i),
     texts: listDir("evidence", /\.(txt|log)$/i),
+    captures: [...(opts.captures ?? [])],
+    capture_command: opts.captureCommand ?? null,
   };
 }
 

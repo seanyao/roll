@@ -48,7 +48,7 @@ window.RollData = (function () {
     },
     TERMINAL: [
       { kind: "prompt", text: "roll loop on" },
-      { kind: "ok",     text: "launchd scheduled",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
+      { kind: "ok",     text: "launchd scheduled",  detail: "loop :05/hr · pr :05/5min · dream 03:10" },
       { kind: "ok",     text: "tmux session",       detail: "roll-loop-roll · attach with `tmux attach -t roll-loop-roll`" },
       { kind: "ok",     text: "active window",      detail: "10:00 – 18:00 · idle outside" },
       { kind: "blank" },
@@ -64,7 +64,7 @@ window.RollData = (function () {
     ],
     FRAME_A: [
       { kind: "prompt", text: "roll loop on" },
-      { kind: "ok",     text: "launchd scheduled",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
+      { kind: "ok",     text: "launchd scheduled",  detail: "loop :05/hr · pr :05/5min · dream 03:10" },
       { kind: "ok",     text: "tmux session",       detail: "roll-loop-roll · attach with `tmux attach -t roll-loop-roll`" },
       { kind: "ok",     text: "active window",      detail: "10:00 – 18:00 · idle outside" },
       { kind: "cursor" },
@@ -111,7 +111,8 @@ window.RollData = (function () {
       ]},
       { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
         { name: "roll loop on",        mono: true, desc: "AI picks stories from Backlog and executes hourly in an isolated worktree.", badges: ["core"] },
-        { name: "roll loop status",    mono: true, desc: "Scheduler snapshot for loop, dream and brief service status, queues, alerts and recent runs.", badges: ["core"] },
+        { name: "roll loop go",        mono: true, desc: "Manual goal mode for a scoped backlog run; scheduled ticks yield while the goal lock is held.", badges: ["new", "highlight"] },
+        { name: "roll loop status",    mono: true, desc: "Scheduler snapshot for loop / pr / dream service status, queues, alerts and recent runs.", badges: ["core"] },
         { name: "tmux attach -t roll-loop-<slug>", mono: true, desc: "Attach to the live tmux session and watch AI work in real time.", badges: ["highlight"] },
         { name: "roll loop pause / resume", mono: true, desc: "Hand-code yourself; let the system resume when you're done.", badges: [] },
       ]},
@@ -229,7 +230,7 @@ window.RollData = (function () {
     // Terminal stays mostly English — these are real CLI outputs.
     TERMINAL: [
       { kind: "prompt", text: "roll loop on" },
-      { kind: "ok",     text: "launchd 已调度",        detail: "loop :05/hr · dream 03:10 · brief 09:00" },
+      { kind: "ok",     text: "launchd 已调度",        detail: "loop :05/hr · pr :05/5min · dream 03:10" },
       { kind: "ok",     text: "tmux 会话就绪",          detail: "roll-loop-roll · tmux attach -t roll-loop-roll 可接入" },
       { kind: "ok",     text: "活跃窗口",              detail: "10:00 – 18:00 · 窗外静默" },
       { kind: "blank" },
@@ -245,7 +246,7 @@ window.RollData = (function () {
     ],
     FRAME_A: [
       { kind: "prompt", text: "roll loop on" },
-      { kind: "ok",     text: "launchd 已调度",  detail: "loop :05/hr · dream 03:10 · brief 09:00" },
+      { kind: "ok",     text: "launchd 已调度",  detail: "loop :05/hr · pr :05/5min · dream 03:10" },
       { kind: "ok",     text: "tmux 会话就绪",    detail: "roll-loop-roll · tmux attach -t roll-loop-roll 可接入" },
       { kind: "ok",     text: "活跃窗口",        detail: "10:00 – 18:00 · 窗外静默" },
       { kind: "cursor" },
@@ -292,7 +293,8 @@ window.RollData = (function () {
       ]},
       { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
         { name: "roll loop on",        mono: true, desc: "AI 从 Backlog 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },
-        { name: "roll loop status",    mono: true, desc: "调度快照:loop / dream / brief 服务状态、队列、告警、最近执行。", badges: ["core"] },
+        { name: "roll loop go",        mono: true, desc: "手动 goal mode，用于限定范围的 backlog 连跑；持有 goal lock 时定时 tick 会让路。", badges: ["new", "highlight"] },
+        { name: "roll loop status",    mono: true, desc: "调度快照:loop / pr / dream 服务状态、队列、告警、最近执行。", badges: ["core"] },
         { name: "tmux attach -t roll-loop-<slug>", mono: true, desc: "接入实时 tmux 会话,观看 AI 现场工作。", badges: ["highlight"] },
         { name: "roll loop pause / resume", mono: true, desc: "需要手动改时暂停,改完再让系统接力。", badges: [] },
       ]},

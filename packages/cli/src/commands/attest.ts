@@ -5,9 +5,9 @@
  *   AC parser (core)      → structured AC items from .roll/features/**
  *   evidence collector    → evidence.json hard facts (infra, injectable seams)
  *   ANSI→HTML + renderer  → single-file report.html (core, pure)
- *   screenshots           → CONSUMED if present in the run dir; this command
- *                           never captures (the skill drives the dispatcher —
- *                           AI owns intent, D7)
+ *   screenshots           → CONSUMED if present in the run dir; optional
+ *                           --capture-* flags drive the terminal self-capture
+ *                           lane and record machine capture facts.
  *
  * Intent hook (the AI layer's contract, consumed when present):
  *   `.roll/verification/<id>/ac-map.json` —
@@ -51,7 +51,10 @@ import {
   redactSecrets,
   screenshotEvidenceRef,
   writeEvidenceJson,
+  type CaptureCommandFact,
+  type CaptureFact,
   type EvidenceRun,
+  type RunOut,
   type ScreenshotDeps,
 } from "@roll/infra";
 import {
@@ -65,8 +68,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { basename, join, relative } from "node:path";
+import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
 import { readSelfScoreTrend, readStorySelfScores } from "../lib/self-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
@@ -221,6 +225,7 @@ export function buildProcessArchive(storyId: string, readers: ProcessReaders): P
 }
 
 const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "fail", "blocked", "claimed", "missing"];
+const execFileAsync = promisify(execFile);
 
 function warn(msg: string): void {
   process.stderr.write(`[roll] attest WARN: ${msg}\n`);
@@ -232,6 +237,38 @@ function shellQuote(value: string): string {
 
 function commandInProject(projectPath: string, command: string): string {
   return `cd ${shellQuote(projectPath)} && ${command}`;
+}
+
+function tail(text: string, max = 4000): string {
+  return text.length <= max ? text : text.slice(text.length - max);
+}
+
+async function runShell(line: string, deps: ScreenshotDeps | undefined): Promise<RunOut> {
+  const injected = deps?.run;
+  if (injected !== undefined) return injected("sh", ["-lc", line]);
+  try {
+    const { stdout, stderr } = await execFileAsync("sh", ["-lc", line], {
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: 120_000,
+    });
+    return { code: 0, stdout, stderr };
+  } catch (e) {
+    const err = e as { code?: number; stdout?: string; stderr?: string };
+    return { code: typeof err.code === "number" ? err.code : 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
+  }
+}
+
+async function captureCommandFact(projectPath: string, command: string, deps: ScreenshotDeps | undefined): Promise<CaptureCommandFact> {
+  const wrappedCommand = commandInProject(projectPath, command);
+  const r = await runShell(wrappedCommand, deps);
+  return {
+    command,
+    wrappedCommand,
+    exitCode: r.code,
+    stdoutTail: tail(r.stdout),
+    stderrTail: tail(r.stderr),
+  };
 }
 
 const DOC_ALIGNMENT_PATTERNS: readonly RegExp[] = [
@@ -800,20 +837,35 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // terminal self-capture (US-ATTEST-011): drive the dispatcher's terminal lane
   // into this run's screenshots/ BEFORE evidence sweep, then bridge a TAKEN shot
   // to a report figure. A SKIP (headless / no permission) yields null → the
-  // self-capture block is dropped entirely (deletion-not-placeholder).
+  // screenshot block is dropped, but FIX-258 records the structured skip fact.
   let selfCaptures: EvidenceRef[] = [];
+  const captureFacts: CaptureFact[] = [];
+  let commandFact: CaptureCommandFact | null = null;
   if (captureTerminal) {
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
-    const shot = await captureScreenshot(
-      {
-        kind: "terminal",
-        out: join(runDir, "screenshots", "terminal.png"),
-        ...(captureTmux !== undefined ? { tmux: captureTmux } : {}),
-        ...(captureCommand !== undefined ? { command: commandInProject(projectPath, captureCommand) } : {}),
-        ...(captureRegion !== undefined ? { region: captureRegion } : {}),
-      },
-      deps.capture ?? {},
-    );
+    const out = join(runDir, "screenshots", "terminal.png");
+    if (captureCommand !== undefined) {
+      commandFact = await captureCommandFact(projectPath, captureCommand, deps.capture);
+    }
+    const shot =
+      commandFact !== null && commandFact.exitCode !== 0
+        ? { kind: "terminal" as const, out, taken: false, skipped: `capture command exited ${commandFact.exitCode}` }
+        : await captureScreenshot(
+            {
+              kind: "terminal",
+              out,
+              ...(captureTmux !== undefined ? { tmux: captureTmux } : {}),
+              ...(captureCommand !== undefined ? { command: commandInProject(projectPath, captureCommand) } : {}),
+              ...(captureRegion !== undefined ? { region: captureRegion } : {}),
+            },
+            deps.capture ?? {},
+          );
+    captureFacts.push({
+      kind: shot.kind,
+      out: shot.out,
+      taken: shot.taken,
+      ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
+    });
     const ref = screenshotEvidenceRef(shot, "screenshots/terminal.png");
     if (ref !== null) selfCaptures = [ref];
     else warn(`terminal self-capture skipped: ${shot.skipped ?? "unknown"}`);
@@ -828,6 +880,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     now: () => now.toISOString(),
     ...(deps.run !== undefined ? { run: deps.run } : {}),
     ...(deps.ghProbe !== undefined ? { ghProbe: deps.ghProbe } : {}),
+    captures: captureFacts,
+    captureCommand: commandFact,
   });
   writeEvidenceJson(manifest, runDir);
 
@@ -890,6 +944,9 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(selfScores.length > 0 ? { selfScores } : {}),
     ...(selfScoreTrend !== undefined ? { selfScoreTrend } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
+    ...(captureFacts.some((x) => !x.taken && x.skipped !== undefined)
+      ? { captureSkips: captureFacts.filter((x) => !x.taken && x.skipped !== undefined).map((x) => ({ kind: x.kind, out: x.out, skipped: x.skipped ?? "" })) }
+      : {}),
   });
   // US-META-001: report carries the card id (`<ID>-report.html`) so a tab /
   // download / share is self-identifying.
@@ -944,6 +1001,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   if (!smoke.ok) {
     for (const p of smoke.problems) warn(`render smoke: ${p}`);
     return 2;
+  }
+  if (commandFact !== null && commandFact.exitCode !== 0) {
+    warn(`capture command failed with exit ${commandFact.exitCode}`);
+    return 3;
   }
   return 0;
 }

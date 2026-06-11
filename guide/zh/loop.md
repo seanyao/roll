@@ -61,7 +61,7 @@ roll config dream-time 03:20             # 当前项目（.roll/local.yaml）
 roll config dream-time 03:20 --global    # 所有项目（~/.roll/config.yaml）
 ```
 
-**自动 reload（Auto-reload）。** 写完调度 key 后，`roll config` 自动重装 loop / dream / brief 的 launchd plist，下个窗口即生效。reload 失败时（如沙箱里）yaml 仍是真相——跑 `roll loop on` 手工补刀。完整 key 列表与范围见 `roll config --help`。
+**自动 reload（Auto-reload）。** 写完调度 key 后，`roll config` 自动重装 loop / pr / dream 的 launchd plist，下个窗口即生效。reload 失败时（如沙箱里）yaml 仍是真相——跑 `roll loop on` 手工补刀。完整 key 列表与范围见 `roll config --help`。
 
 ### 项目级触发频次
 
@@ -106,7 +106,7 @@ roll config loop-schedule 60 --global    # 所有项目的默认间隔
 ## 子命令参考
 
 ```bash
-roll loop on          # 安装 launchd 调度器（loop + dream + brief 三个服务）
+roll loop on          # 安装 launchd 调度器（loop + pr + dream 三个服务）
 roll loop off         # 卸载 launchd 调度器
 
 roll loop now         # 立即执行一次循环（与 launchd 触发的流程完全一致）
@@ -159,6 +159,16 @@ roll loop events 50   # 显示最近 50 条
 roll agent                           # 查看四个复杂度槽 + 在线状态
 roll agent list                      # 查看本机已装的 agent
 ```
+
+### Goal Mode 与定时模式
+
+`roll loop go` 是手动 goal session，不是 launchd 定时 tick。运行期间 Roll 会持有
+`.roll/loop/go.lock`；定时 tick 看到该锁就让路，记录 `goal:tick_skipped`，不会再启动
+另一个 `roll loop run-once`。
+
+goal mode 在 scheduler off 时也能运行，因为它自己启动会话，不依赖 launchd。loop 处于
+paused 状态时不建议直接启动：`PAUSE-<slug>` 标记仍会在 cycle 边界生效，所以应先执行
+`roll loop resume`，再启动 `roll loop go`。
 
 ### Goal Mode 安全闸
 

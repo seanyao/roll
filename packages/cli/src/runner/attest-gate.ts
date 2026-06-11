@@ -26,7 +26,7 @@
  */
 import { acForStory, parsePolicy } from "@roll/core";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { evaluateSelfScoreGate } from "../lib/self-score.js";
 
@@ -84,6 +84,69 @@ function storyRequiresScreenshot(worktreeCwd: string, storyId: string): boolean 
   } catch {
     return false;
   }
+}
+
+interface AcMapEvidence {
+  kind?: string;
+  href?: string;
+  textFile?: string;
+}
+
+interface AcMapEntry {
+  ac?: string;
+  status?: string;
+  evidence?: AcMapEvidence[];
+}
+
+interface EvidenceManifestLike {
+  screenshots?: unknown;
+  captures?: unknown;
+}
+
+function readAcMapEntries(worktreeCwd: string, storyId: string): AcMapEntry[] | null {
+  const path = acMapCandidates(worktreeCwd, storyId)[0];
+  if (path === undefined || !existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return Array.isArray(parsed) ? (parsed.filter((x) => typeof x === "object" && x !== null) as AcMapEntry[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function evidenceManifest(worktreeCwd: string, storyId: string): EvidenceManifestLike | null {
+  const report = existingReport(worktreeCwd, storyId);
+  if (report === null) return null;
+  const path = join(dirname(report), "evidence.json");
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as EvidenceManifestLike) : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasMachineCaptureSkip(worktreeCwd: string, storyId: string): boolean {
+  const manifest = evidenceManifest(worktreeCwd, storyId);
+  if (manifest === null || !Array.isArray(manifest.captures)) return false;
+  return manifest.captures.some((raw) => {
+    if (typeof raw !== "object" || raw === null) return false;
+    const row = raw as Record<string, unknown>;
+    return row["taken"] === false && typeof row["skipped"] === "string" && row["skipped"] !== "";
+  });
+}
+
+function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
+  const entries = readAcMapEntries(worktreeCwd, storyId);
+  if (entries === null) return { ok: true };
+  const pass = entries.filter((e) => e.status === "pass");
+  if (pass.length === 0) return { ok: true };
+  const missing = pass.filter((e) => !(e.evidence ?? []).some((ev) => ev.kind === "screenshot" && typeof ev.href === "string" && ev.href !== ""));
+  if (missing.length === 0) return { ok: true };
+  if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
+  const ids = missing.map((e) => e.ac ?? "?").join(", ");
+  return { ok: false, reason: `pass AC(s) lack screenshot evidence or machine capture skip: ${ids}` };
 }
 
 /** The acceptance report a delivered story must produce (skill step 10.6) —
@@ -155,8 +218,9 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
       positiveWithEvidence += 1;
     }
     if (positiveWithEvidence === 0) return false;
+    if (!passAcVisualFloor(worktreeCwd, storyId).ok) return false;
     if (storyRequiresScreenshot(worktreeCwd, storyId)) {
-      return /<figure class="shot\b|href="screenshots\/|src="screenshots\/|taken":false|skipped|honest-skip/i.test(html);
+      return /<figure class="shot\b|href="screenshots\/|src="screenshots\//i.test(html) || hasMachineCaptureSkip(worktreeCwd, storyId);
     }
     return true;
   } catch {
@@ -216,7 +280,8 @@ export function runAttestGate(
     if (fresh && verificationReportHasContent(worktreeCwd, storyId)) {
       const score = evaluateSelfScoreGate(worktreeCwd, storyId);
       if (score.status === "pass") {
-        const reasons = ["fresh acceptance report present", score.reason];
+        const visual = passAcVisualFloor(worktreeCwd, storyId);
+        const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : [])];
         sinks.event({ cycleId, verdict: "produced", reasons });
         return { verdict: "produced", mode, reasons, blocked: false };
       }

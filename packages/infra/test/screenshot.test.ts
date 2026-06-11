@@ -167,7 +167,7 @@ describe("terminal", () => {
   });
 
   it("no screen-recording permission (screencapture fails) → skip with reason", async () => {
-    const { run } = fake({ launchctl: aqua, osascript: { code: 0 }, screencapture: { code: 1 } });
+    const { run } = fake({ launchctl: aqua, osascript: { code: 0 }, sh: { code: 0 }, screencapture: { code: 1 } });
     const r = await captureScreenshot(
       { kind: "terminal", command: "roll status", out: outPath() },
       { run, env: {}, platform: "darwin" },
@@ -180,6 +180,7 @@ describe("terminal", () => {
     const { run, calls } = fake({
       launchctl: aqua,
       osascript: { code: 0 },
+      sh: { code: 0 },
       screencapture: { code: 0, writes: true },
     });
     const r = await captureScreenshot(
@@ -193,6 +194,74 @@ describe("terminal", () => {
     expect(joined).toContain("roll status");
     expect(joined).toContain("screencapture -x -R");
     expect(joined).toContain("close"); // window cleaned up
+  });
+
+  it("FIX-266: command captures wait for the Terminal command to exit before closing", async () => {
+    let commandLive = false;
+    let unsafeClose = false;
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("do script")) {
+        commandLive = true;
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      if (cmd === "sh") {
+        commandLive = false;
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      if (cmd === "osascript" && script.includes("close front window")) {
+        if (commandLive) unsafeClose = true;
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "node scripts/proof.js", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+
+    expect(r.taken).toBe(true);
+    expect(unsafeClose).toBe(false);
+    const waitIndex = calls.findIndex((c) => c.startsWith("sh -lc "));
+    const closeIndex = calls.findIndex((c) => c.includes("close front window"));
+    expect(waitIndex).toBeGreaterThan(-1);
+    expect(closeIndex).toBeGreaterThan(waitIndex);
+    expect(calls.find((c) => c.includes("do script"))).toContain("exit");
+  });
+
+  it("FIX-266: if a command is still running, it leaves the window open instead of prompting macOS to terminate it", async () => {
+    let closeCalled = false;
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      if (cmd === "sh") return Promise.resolve({ code: 1, stdout: "", stderr: "timed out" });
+      if (cmd === "osascript" && script.includes("close front window")) closeCalled = true;
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "sleep 999", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("still running");
+    expect(closeCalled).toBe(false);
+    expect(calls.some((c) => c.startsWith("sh -lc "))).toBe(true);
   });
 
   it("tmux variant attaches the observability session instead of a command", async () => {
@@ -210,7 +279,7 @@ describe("terminal", () => {
   });
 
   it("empty capture (screencapture exits 0 but writes nothing) is NOT taken", async () => {
-    const { run } = fake({ launchctl: aqua, osascript: { code: 0 }, screencapture: { code: 0 } });
+    const { run } = fake({ launchctl: aqua, osascript: { code: 0 }, sh: { code: 0 }, screencapture: { code: 0 } });
     const r = await captureScreenshot(
       { kind: "terminal", command: "roll status", out: outPath() },
       { run, env: {}, platform: "darwin" },

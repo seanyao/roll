@@ -724,7 +724,9 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
       ),
     );
 
-    expect(scripts[0]).toContain(`do script "cd '${proj}' && node scripts/proof.js"`);
+    expect(scripts[0]).toContain(`cd '${proj}' && node scripts/proof.js`);
+    expect(scripts[0]).toContain("terminal.png.done");
+    expect(scripts[0]).toContain("exit");
   });
 
   it("FIX-263: --capture-command records command exit code and returns non-zero on failure", async () => {

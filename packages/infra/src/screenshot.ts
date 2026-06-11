@@ -25,7 +25,7 @@
  * All process touches go through an injectable runner; a capture only counts
  * as TAKEN when the output file exists and is non-empty (tool exit codes lie).
  */
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
@@ -106,6 +106,8 @@ function fileNonEmpty(p: string): boolean {
 }
 
 const DEFAULT_REGION = "0,0,1280,800";
+const TERMINAL_DONE_TIMEOUT_MS = 120_000;
+const TERMINAL_DONE_POLL_MS = 100;
 
 /** Parse one agent→harness screenshot signal line. */
 export function parseCaptureMarker(line: string): CaptureMarker | null {
@@ -182,6 +184,44 @@ export function terminalCloseScript(): string {
   return 'tell application "Terminal" to close front window saving no';
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function terminalCommandWithDoneFile(line: string, doneFile: string): string {
+  const done = shellQuote(doneFile);
+  return [
+    `(${line})`,
+    "__roll_status=$?",
+    `printf '%s' "$__roll_status" > ${done}`,
+    'exit "$__roll_status"',
+  ].join("\n");
+}
+
+function terminalDoneWaitScript(doneFile: string): string {
+  const attempts = Math.ceil(TERMINAL_DONE_TIMEOUT_MS / TERMINAL_DONE_POLL_MS);
+  const sleepSeconds = String(TERMINAL_DONE_POLL_MS / 1000);
+  const done = shellQuote(doneFile);
+  return [
+    "i=0",
+    `while [ ! -f ${done} ]; do`,
+    `  if [ "$i" -ge ${attempts} ]; then exit 1; fi`,
+    "  i=$((i + 1))",
+    `  sleep ${sleepSeconds}`,
+    "done",
+  ].join("; ");
+}
+
+async function waitForTerminalCommandExit(doneFile: string, run: ShotRun): Promise<boolean> {
+  const waited = await run("sh", ["-lc", terminalDoneWaitScript(doneFile)]);
+  try {
+    rmSync(doneFile, { force: true });
+  } catch {
+    // cleanup only; the wait result is the signal
+  }
+  return waited.code === 0;
+}
+
 /** Capture one screenshot; never throws — skip reasons over exceptions. */
 export async function captureScreenshot(
   req: ScreenshotRequest,
@@ -218,26 +258,44 @@ export async function captureScreenshot(
       // terminal lane (US-ATTEST-011): unattended self-capture on macOS GUI hosts.
       if ((env["ROLL_ATTEST_NO_TERMINAL"] ?? "") === "1") return skip("ROLL_ATTEST_NO_TERMINAL=1");
       if (platform !== "darwin") return skip("not macOS");
-      const line =
+      const rawLine =
         req.tmux !== undefined && req.tmux !== "" ? `tmux attach -t ${req.tmux}` : (req.command ?? "");
       // RED LINE (US-ATTEST-012): a token baked into pixels can't be un-baked.
       // Refuse to screen-capture a command that carries a secret — redact &
       // reshoot. Checked BEFORE any spawn so the secret never reaches the screen.
-      if (containsSecret(line)) return skip("secret in capture command — redact & reshoot");
+      if (containsSecret(rawLine)) return skip("secret in capture command — redact & reshoot");
       // GUI-session probe: launchctl reports "Aqua" only inside a graphical login.
       const gui = await run("launchctl", ["managername"]);
       if (gui.code !== 0 || !gui.stdout.includes("Aqua")) return skip("no GUI session");
       const rect = parseRegion(req.region ?? DEFAULT_REGION);
       if (rect === null) return skip("bad region");
+      const commandDoneFile =
+        req.tmux === undefined && req.command !== undefined && req.command !== "" ? `${req.out}.done` : undefined;
+      if (commandDoneFile !== undefined) {
+        try {
+          rmSync(commandDoneFile, { force: true });
+        } catch {
+          // stale sentinel cleanup only
+        }
+      }
+      const line = commandDoneFile !== undefined ? terminalCommandWithDoneFile(rawLine, commandDoneFile) : rawLine;
       const opened = await run("osascript", ["-e", terminalOpenScript(line, rect)]);
       if (opened.code !== 0) return skip("osascript Terminal open failed");
       const shot = await run("screencapture", ["-x", "-R", req.region ?? DEFAULT_REGION, req.out]);
       // screencapture exits non-zero when Screen Recording permission is absent.
       if (shot.code !== 0) {
-        await run("osascript", ["-e", terminalCloseScript()]); // best-effort cleanup
+        if (commandDoneFile !== undefined && !(await waitForTerminalCommandExit(commandDoneFile, run))) {
+          return skip("terminal command still running; window left open to avoid macOS termination prompt");
+        }
+        const closed = await run("osascript", ["-e", terminalCloseScript()]);
+        if (closed.code !== 0) return skip("screencapture failed; Terminal close failed");
         return skip("screencapture failed (screen-recording permission?)");
       }
-      await run("osascript", ["-e", terminalCloseScript()]); // close the window we opened
+      if (commandDoneFile !== undefined && !(await waitForTerminalCommandExit(commandDoneFile, run))) {
+        return skip("terminal command still running; window left open to avoid macOS termination prompt");
+      }
+      const closed = await run("osascript", ["-e", terminalCloseScript()]); // close the window we opened
+      if (closed.code !== 0) return skip("Terminal close failed after capture");
     }
   } catch {
     return skip("capture errored");

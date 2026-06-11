@@ -58,7 +58,7 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 ### Observability
 
 - `roll status` — project health: backlog queue, loop state, CI, release-ready verdict `[core]`
-- `roll index` — Delivery Dossier with a truth strip and Story / Cycle / Release truth board
+- Delivery Dossier — truth strip plus Story / Cycle / Release truth board
 - `roll loop runs` — per-cycle TerminalOutcome history with TCR count and duration
 - `roll loop alert` — view, acknowledge, and clear loop alerts
 - `roll brief` — daily digest: what shipped, what's in-progress, next priorities `[highlight]`
@@ -96,9 +96,9 @@ my-project/
     └── decisions/       # ADRs
 ```
 
-Upgrading a pre-2.0 project? See [migration-2.0.md](migration-2.0.md) — `roll
-migrate` moves `BACKLOG.md`, `docs/features/`, and `docs/domain/` into the
-new layout in one pass.
+Upgrading a pre-2.0 project? See [migration-2.0.md](migration-2.0.md) —
+`npx @seanyao/roll@2 migrate` moves `BACKLOG.md`, `docs/features/`, and
+`docs/domain/` into the new layout in one pass.
 
 ## Choosing an Adoption Mode
 

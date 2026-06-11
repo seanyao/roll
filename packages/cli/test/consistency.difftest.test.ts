@@ -92,6 +92,18 @@ function siteViolation(): string {
   return p;
 }
 
+function docsCommandSurfaceViolation(): string {
+  const p = mk();
+  w(p, "README.md", "Use `roll feedback` to file quick notes.\n");
+  return p;
+}
+
+function siteCommandSurfaceViolation(): string {
+  const p = mk();
+  w(p, "site/roll-data.js", 'const FEATURE_GROUPS = [{ name: "roll alert" }];\n');
+  return p;
+}
+
 interface Run {
   status: number;
   stdout: string;
@@ -162,7 +174,7 @@ describe("frozen: roll consistency", () => {
       ✅ code: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ placeholder — will be implemented in US-CONSIST-002
+         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
       ✅ i18n: pass
       ✅ tests: pass
       ✅ site: pass
@@ -192,7 +204,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "placeholder — will be implemented in US-CONSIST-002"
+            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
           "i18n": {
             "status": "pass",
@@ -225,7 +237,7 @@ describe("frozen: roll consistency", () => {
          • Feature 'orphan' has Done stories but is missing from features.md catalog
       ✅ cards: pass
       ✅ docs: pass
-         ℹ placeholder — will be implemented in US-CONSIST-002
+         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
       ✅ i18n: pass
       ✅ tests: pass
       ✅ site: pass
@@ -257,7 +269,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "placeholder — will be implemented in US-CONSIST-002"
+            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
           "i18n": {
             "status": "pass",
@@ -289,7 +301,7 @@ describe("frozen: roll consistency", () => {
       ✅ code: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ placeholder — will be implemented in US-CONSIST-002
+         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
       ❌ i18n: fail
          • guide/en/extra.md has no corresponding guide/zh/extra.md
          • i18n key 'only.en' has EN but is missing ZH translation
@@ -322,7 +334,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "placeholder — will be implemented in US-CONSIST-002"
+            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
           "i18n": {
             "status": "fail",
@@ -358,7 +370,7 @@ describe("frozen: roll consistency", () => {
       ✅ code: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ placeholder — will be implemented in US-CONSIST-002
+         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
       ✅ i18n: pass
       ❌ tests: fail
          • Feature 'authentication' has Done stories but no test file appears to cover it (heuristic: no test file name matches keywords ['authentication'])
@@ -390,7 +402,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "placeholder — will be implemented in US-CONSIST-002"
+            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
           "i18n": {
             "status": "pass",
@@ -425,7 +437,7 @@ describe("frozen: roll consistency", () => {
       ✅ code: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ placeholder — will be implemented in US-CONSIST-002
+         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
       ✅ i18n: pass
       ✅ tests: pass
       ❌ site: fail
@@ -456,7 +468,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "placeholder — will be implemented in US-CONSIST-002"
+            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
           "i18n": {
             "status": "pass",
@@ -479,6 +491,71 @@ describe("frozen: roll consistency", () => {
     `);
   });
 
+  it("check (human) — docs hidden/retired command surface gap", () => {
+    const p = docsCommandSurfaceViolation();
+    expect(cn(["check", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "Consistency Report
+      ==================================================
+      ✅ code: pass
+      ✅ cards: pass
+      ❌ docs: fail
+         • README.md:1 references hidden/retired top-level 'roll feedback' (use 'roll idea')
+      ✅ i18n: pass
+      ✅ tests: pass
+      ✅ site: pass
+      --------------------------------------------------
+      Overall: fail
+      ",
+      }
+    `);
+  });
+
+  it("check --json — site hidden/retired command surface gap", () => {
+    const p = siteCommandSurfaceViolation();
+    expect(cn(["check", "--json", "--project-dir", p], p)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "{
+        "overall": "fail",
+        "dimensions": {
+          "code": {
+            "status": "pass",
+            "gaps": []
+          },
+          "cards": {
+            "status": "pass",
+            "gaps": []
+          },
+          "docs": {
+            "status": "pass",
+            "gaps": [],
+            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
+          },
+          "i18n": {
+            "status": "pass",
+            "gaps": []
+          },
+          "tests": {
+            "status": "pass",
+            "gaps": []
+          },
+          "site": {
+            "status": "fail",
+            "gaps": [
+              "site/roll-data.js:1 references hidden/retired top-level 'roll alert' (use 'roll loop alert')"
+            ]
+          }
+        }
+      }
+      ",
+      }
+    `);
+  });
+
   it("check on an empty project-dir → all pass", () => {
     const p = mk();
     expect(cn(["check", "--project-dir", p], p)).toMatchInlineSnapshot(`
@@ -490,7 +567,7 @@ describe("frozen: roll consistency", () => {
       ✅ code: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ placeholder — will be implemented in US-CONSIST-002
+         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
       ✅ i18n: pass
       ✅ tests: pass
       ✅ site: pass

@@ -84,4 +84,17 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(evaluated.type).toBe("goal:evaluated");
     expect(evaluated.blockers).toContain("US-DRIFT:fail:premature_done");
   });
+  it("types goal card skip events (US-GOAL-004)", () => {
+    const skipped: RollEvent = {
+      type: "goal:card_skipped",
+      sessionId: "goal-20260611-100000",
+      storyId: "REFACTOR-048",
+      reason: "zero_delivery_streak",
+      zeroDeliveries: 2,
+      cycleId: "cycle-2",
+      ts: 1_780_000_300,
+    };
+    expect(skipped.type).toBe("goal:card_skipped");
+    expect(skipped.zeroDeliveries).toBe(2);
+  });
 });

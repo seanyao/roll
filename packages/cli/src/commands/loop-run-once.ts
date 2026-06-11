@@ -22,6 +22,7 @@ import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
+import { filterByAllowedCards, parseAllowedCardsEnv } from "../lib/goal-progress.js";
 import { writeLatestMorningReport } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { gcCommand } from "./gc.js";
@@ -308,6 +309,14 @@ function resetConsecutiveFails(projectPath: string): void {
   } catch { /* best-effort */ }
 }
 
+export function shouldSuppressGoalChildFailureCounter(input: {
+  isGoalChild: boolean;
+  terminal: string | undefined;
+  tcrCount: number | undefined;
+}): boolean {
+  return input.isGoalChild && (input.terminal === "failed" || input.terminal === "blocked") && input.tcrCount === 0;
+}
+
 /**
  * Resolve + read the loop SKILL.md body the agent runs, frontmatter stripped.
  * Thin wrapper over the shared {@link readSkillBodyGeneric} pinned to the
@@ -468,7 +477,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // readable text instead of a JSON flood.
   const isInteractive = (process.env["ROLL_LOOP_FORCE"] ?? "").trim() !== "";
 
-  const ports = nodePorts({
+  const basePorts = nodePorts({
     repoCwd: id.path,
     paths,
     skillBody,
@@ -480,6 +489,19 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
         }
       : {}),
   });
+  const allowedCards = parseAllowedCardsEnv();
+  const ports =
+    allowedCards === undefined
+      ? basePorts
+      : {
+          ...basePorts,
+          backlog: {
+            ...basePorts.backlog,
+            read(projectCwd: string) {
+              return filterByAllowedCards(basePorts.backlog.read(projectCwd), allowedCards);
+            },
+          },
+        };
 
   // FIX-237: the observation window tails live.log — left over from the LAST
   // cycle it replays a stale transcript with old cycle ids (two misled debug
@@ -534,8 +556,15 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       );
       return 0;
     }
-    const storyId = (result.state?.ctx?.storyId ?? "").trim();
-    incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
+    const suppressGoalZeroDelivery = shouldSuppressGoalChildFailureCounter({
+      isGoalChild: (process.env["ROLL_LOOP_GO_CHILD"] ?? "") === "1",
+      terminal: result.terminal,
+      tcrCount: result.state?.ctx?.tcrCount,
+    });
+    if (!suppressGoalZeroDelivery) {
+      const storyId = (result.state?.ctx?.storyId ?? "").trim();
+      incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
+    }
   }
 
   // FIX-243: merge-evidence backfill — claim-shaped rows (built/published/

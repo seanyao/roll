@@ -278,3 +278,98 @@ describe("US-GOAL-003 — goal truth adjudication", () => {
     expect(evaluated).toMatchObject({ total: 0, delivered: 0, status: "complete", reason: "all_delivered" });
   });
 });
+
+describe("US-GOAL-004 — no-progress suppression", () => {
+  it("skips a scoped card after two zero-delivery attempts and pauses when all scoped cards are skipped", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [REFACTOR-048](.roll/features/goal-mode/REFACTOR-048/spec.md) | stale merged card | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const allowed: Array<string[] | undefined> = [];
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_000 + calls,
+      nowIso: () => `2026-06-11T10:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath, allowedCards }) => {
+        calls += 1;
+        allowed.push(allowedCards);
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({
+            story_id: "REFACTOR-048",
+            cycle_id: `cycle-${calls}`,
+            ts: `2026-06-11T10:00:0${calls}Z`,
+            status: "failed",
+            outcome: "failed",
+            tcr_count: 0,
+          })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "REFACTOR-048", "--max-cycles", "5"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(2);
+    expect(allowed).toEqual([["REFACTOR-048"], ["REFACTOR-048"]]);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("no_progress_on_all_cards");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:card_skipped" && e.storyId === "REFACTOR-048")).toBe(true);
+    expect(events.some((e) => e.type === "goal:state" && e.to === "paused" && e.reason === "no_progress_on_all_cards")).toBe(true);
+    const alert = readFileSync(join(p, ".roll", "loop", "ALERT-proj-abc123.md"), "utf8");
+    expect(alert).toContain("REFACTOR-048");
+    expect(alert).toContain("zero delivery");
+  });
+
+  it("passes only unskipped scoped cards to run-once after a card is skipped", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-STUCK](.roll/features/goal-mode/US-STUCK/spec.md) | stuck | 📋 Todo |",
+      "| [US-NEXT](.roll/features/goal-mode/US-NEXT/spec.md) | next | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const allowed: Array<string[] | undefined> = [];
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_100 + calls,
+      nowIso: () => `2026-06-11T10:10:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath, allowedCards }) => {
+        calls += 1;
+        allowed.push(allowedCards);
+        const story = calls <= 2 ? "US-STUCK" : "US-NEXT";
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({
+            story_id: story,
+            cycle_id: `cycle-${calls}`,
+            ts: `2026-06-11T10:10:0${calls}Z`,
+            status: "failed",
+            outcome: "failed",
+            tcr_count: 0,
+          })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-STUCK,US-NEXT", "--max-cycles", "3"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(3);
+    expect(allowed[0]).toEqual(["US-STUCK", "US-NEXT"]);
+    expect(allowed[1]).toEqual(["US-STUCK", "US-NEXT"]);
+    expect(allowed[2]).toEqual(["US-NEXT"]);
+  });
+});

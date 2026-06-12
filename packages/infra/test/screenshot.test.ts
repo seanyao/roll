@@ -41,6 +41,9 @@ function fake(byCmd: Record<string, { code: number; stdout?: string; writes?: bo
     if (cmd === "osascript" && String(argv[1] ?? "").includes("bounds of w")) {
       return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
     }
+    if (cmd === "osascript" && String(argv[1] ?? "").includes("roll-attest-exists-probe")) {
+      return Promise.resolve({ code: 0, stdout: "no\n", stderr: "" });
+    }
     const c = byCmd[cmd] ?? { code: 1 };
     if (c.writes === true) {
       const out = cmd === "sh" ? /> '(.+)'$/.exec(argv[1] ?? "")?.[1] : argv[argv.length - 1];
@@ -197,7 +200,7 @@ describe("terminal", () => {
     expect(joined).toContain("do script");
     expect(joined).toContain("roll status");
     expect(joined).toContain("screencapture -x -R");
-    expect(joined).toContain("close"); // window cleaned up
+    expect(joined).toContain("roll-attest-exit-tab"); // window retired via shell exit (FIX-272)
   });
 
   it("FIX-266: command captures wait for the Terminal command to exit before closing", async () => {
@@ -208,6 +211,13 @@ describe("terminal", () => {
       calls.push(`${cmd} ${argv.join(" ")}`);
       const script = String(argv[1] ?? "");
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("roll-attest-exit-tab")) {
+        if (commandLive) unsafeClose = true; // exiting the shell mid-command is as unsafe as close
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      if (cmd === "osascript" && script.includes("roll-attest-exists-probe")) {
+        return Promise.resolve({ code: 0, stdout: "no\n", stderr: "" }); // window collapsed via shellExitAction
+      }
       if (cmd === "osascript" && script.includes("do script")) {
         commandLive = true;
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
@@ -239,14 +249,17 @@ describe("terminal", () => {
     expect(r.taken).toBe(true);
     expect(unsafeClose).toBe(false);
     const waitIndex = calls.findIndex((c) => c.startsWith("sh -lc "));
-    const closeIndex = calls.findIndex((c) => c.includes("close w saving no"));
+    // FIX-272: teardown is exit-first — the shell dies and the profile's own
+    // shellExitAction collapses the window; no AppleScript close needed.
+    const exitIndex = calls.findIndex((c) => c.includes("roll-attest-exit-tab"));
     expect(waitIndex).toBeGreaterThan(-1);
-    expect(closeIndex).toBeGreaterThan(waitIndex);
+    expect(exitIndex).toBeGreaterThan(waitIndex);
+    expect(calls.some((c) => c.includes("close w saving no"))).toBe(false);
     const doScript = calls.find((c) => c.includes("do script")) ?? "";
     expect(doScript).toContain("__roll_status"); // sentinel wrapper present
     expect(doScript).not.toMatch(/;\s*exit \\"\$__roll_status\\"/); // FIX-271: no self-closing exit
     expect(doScript).toContain("set custom title");
-    expect(calls[closeIndex]).toContain("roll-attest-");
+    expect(calls[exitIndex]).toContain("roll-attest-");
   });
 
   it("FIX-266: if a command is still running, it leaves the window open instead of prompting macOS to terminate it", async () => {
@@ -287,6 +300,9 @@ describe("terminal", () => {
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
       if (cmd === "osascript" && script.includes("bounds of w")) {
         return Promise.resolve({ code: 0, stdout: "100, 50, 900, 650\n", stderr: "" });
+      }
+      if (cmd === "osascript" && script.includes("roll-attest-exists-probe")) {
+        return Promise.resolve({ code: 0, stdout: "no\n", stderr: "" });
       }
       if (cmd === "screencapture") {
         writeFileSync(String(argv[argv.length - 1]), "PNG");
@@ -358,6 +374,9 @@ describe("terminal", () => {
       if (cmd === "osascript" && script.includes("bounds of w")) {
         return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
       }
+      if (cmd === "osascript" && script.includes("roll-attest-exists-probe")) {
+        return Promise.resolve({ code: 0, stdout: "no\n", stderr: "" });
+      }
       if (cmd === "screencapture") {
         writeFileSync(String(argv[argv.length - 1]), "PNG");
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
@@ -376,6 +395,52 @@ describe("terminal", () => {
     } finally {
       rmSync("rel-shots", { recursive: true, force: true });
     }
+  });
+
+  it("FIX-272: 'never close' profile — window survives the shell exit, fallback close fires", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "osascript" && script.includes("roll-attest-exists-probe")) {
+        return Promise.resolve({ code: 0, stdout: "yes\n", stderr: "" }); // shellExitAction=2 keeps it
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+
+    expect(r.taken).toBe(true);
+    const exitIndex = calls.findIndex((c) => c.includes("roll-attest-exit-tab"));
+    const closeIndex = calls.findIndex((c) => c.includes("close w saving no"));
+    expect(exitIndex).toBeGreaterThan(-1);
+    expect(closeIndex).toBeGreaterThan(exitIndex); // fallback close only after the probe gave up
+  }, 15000);
+
+  it("FIX-272: tmux lane never sends `exit` — it would land inside the attached session", async () => {
+    const { run, calls } = fake({
+      launchctl: { code: 0, stdout: "Aqua\n" },
+      osascript: { code: 0 },
+      screencapture: { code: 0, writes: true },
+    });
+    const r = await captureScreenshot(
+      { kind: "terminal", tmux: "roll-loop-demo", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true);
+    expect(calls.some((c) => c.includes("roll-attest-exit-tab"))).toBe(false);
+    expect(calls.some((c) => c.includes("close w saving no"))).toBe(true);
   });
 
   it("tmux variant attaches the observability session instead of a command", async () => {

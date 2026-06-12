@@ -22,6 +22,7 @@ import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
 import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
 import type { ReleasePanelVM } from "./release-panel.js";
+import type { ReleaseScopeVM, ScopeEpicGroup } from "./release-scope.js";
 
 export interface TruthConsoleBrand {
   /** Injected, never hardcoded (owner ruling): project name + slogan. */
@@ -72,6 +73,10 @@ export interface TruthConsoleInput {
   agents: AgentPanelRow[];
   /** Release gate head + six-dimension consistency panel (US-DOSSIER-015). */
   releasePanel: ReleasePanelVM;
+  /** Pending delivery + shipped changelog + version history (US-DOSSIER-016). */
+  releaseScope: ReleaseScopeVM;
+  /** GitHub repo slug (owner/name) for PR links, when known. */
+  githubSlug?: string;
 }
 
 const MONO = `font-family:'IBM Plex Mono',monospace;`;
@@ -600,8 +605,10 @@ function releaseTab(input: TruthConsoleInput): string {
   const rel = s.release;
   const relColor = rel?.verdict === "pass" ? C.green : rel?.verdict === "fail" ? C.red : rel?.verdict === "warn" ? C.amber : C.slate;
   const spectrum = s.story.spectrum;
+  // AC4 (US-DOSSIER-016): the head's merged/pending = the scope sections' counts
+  // by the same arithmetic — pending is EVERY not-yet-done story.
   const merged = spectrum.done;
-  const pending = spectrum.wip + spectrum.todo + spectrum.hold;
+  const pending = s.story.total - spectrum.done;
   const mergedPct = s.story.total > 0 ? Math.round((merged / s.story.total) * 100) : 0;
   const head = (label: string, value: string, mono = true): string =>
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};">${label}</div>` +
@@ -679,10 +686,74 @@ function releaseTab(input: TruthConsoleInput): string {
     proposedRow +
     totalRow +
     `</section>` +
-    `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:18px 20px;margin:18px 0 8px;color:${C.faint};font-size:13px;">${bi(
-      "Pending delivery & changelog by epic — being built (US-DOSSIER-016).",
-      "待交付与变更日志（按史诗）——建设中（US-DOSSIER-016）。",
-    )}</section>`
+    releaseScopeSections(input)
+  );
+}
+
+function scopeGroup(g: ScopeEpicGroup, input: TruthConsoleInput, shipped: boolean): string {
+  const rows = g.items
+    .map((it) => {
+      const meta = SPECTRUM_META[it.state] ?? (SPECTRUM_META["unknown"] as NonNullable<(typeof SPECTRUM_META)[string]>);
+      const prChip =
+        shipped && it.prNumber !== undefined
+          ? input.githubSlug !== undefined
+            ? `<a href="https://github.com/${esc(input.githubSlug)}/pull/${it.prNumber}" style="${MONO}font-size:10.5px;color:${C.green};border:1px solid ${C.green}55;border-radius:5px;padding:2px 7px;text-decoration:none;white-space:nowrap;">#${it.prNumber} merged</a>`
+            : `<span style="${MONO}font-size:10.5px;color:${C.green};">#${it.prNumber} merged</span>`
+          : shipped
+            ? `<span style="${MONO}font-size:10.5px;color:${C.faint};">merged</span>`
+            : "";
+      return (
+        `<a class="sc-row" href="${encodeURIComponent(it.epic)}/${encodeURIComponent(it.id)}/index.html" ` +
+        `style="display:grid;grid-template-columns:150px 1fr auto auto;gap:12px;align-items:center;padding:9px 16px;border-top:1px solid #f4f6f9;text-decoration:none;">` +
+        `<span style="${MONO}font-size:12px;color:${C.blue};font-weight:600;overflow:hidden;text-overflow:ellipsis;">${esc(it.id)}</span>` +
+        `<span style="font-size:13px;color:${C.sub};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.title)}</span>` +
+        `<span style="display:flex;align-items:center;gap:7px;${MONO}font-size:11px;"><span style="width:7px;height:7px;border-radius:50%;background:${meta.color};"></span><span style="color:${meta.color};font-weight:600;">${bi(meta.en, meta.zh)}</span></span>` +
+        prChip +
+        `</a>`
+      );
+    })
+    .join("");
+  return (
+    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 9px;box-shadow:0 1px 2px rgba(17,26,69,.04);">` +
+    `<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fbfcfe;border-bottom:1px solid ${C.hair};">` +
+    `<a href="${encodeURIComponent(g.epic)}/index.html" style="font-size:13.5px;font-weight:600;color:${C.ink};text-decoration:none;white-space:nowrap;">${esc(g.epic)}</a>` +
+    `<span style="${MONO}font-size:11px;color:${C.faint};">${g.items.length}</span></div>` +
+    rows +
+    `</section>`
+  );
+}
+
+function releaseScopeSections(input: TruthConsoleInput): string {
+  const sc = input.releaseScope;
+  const sectionHead = (label: string, count: number, color: string, sub: string): string =>
+    `<div style="display:flex;align-items:baseline;gap:12px;margin:28px 0 12px;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${label}</span>` +
+    `<span data-truth="${color === C.amber ? "pending-count" : "shipped-count"}" style="${MONO}font-size:12px;color:${color};font-weight:600;">${count}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${sub}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;"></span></div>`;
+  const history = sc.history
+    .map(
+      (h) =>
+        `<details class="rel-hist" style="border-top:1px solid ${C.hair};">` +
+        `<summary style="display:flex;align-items:center;gap:12px;padding:10px 16px;cursor:pointer;list-style:none;">` +
+        `<span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;">▶</span>` +
+        `<span style="${MONO}font-size:12.5px;font-weight:600;color:${C.ink};">${esc(h.tag)}</span>` +
+        `<span style="${MONO}font-size:11px;color:${C.faint};">${esc(h.date)}</span>` +
+        (h.waived ? `<span style="${MONO}font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:4px;border:1px solid ${C.amber}55;color:${C.amber};">${bi("waived", "曾豁免")}</span>` : "") +
+        `<span style="flex:1;"></span><span style="${MONO}font-size:11px;color:${C.faint};">${h.items.length} ${bi("entries", "条")}</span></summary>` +
+        `<ul style="margin:0;padding:6px 16px 12px 40px;font-size:12.5px;color:${C.sub};line-height:1.6;">${h.items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` +
+        `</details>`,
+    )
+    .join("");
+  return (
+    sectionHead(bi("Pending delivery", "待交付"), sc.pendingCount, C.amber, bi("wishes still open this cut", "本版仍开着的愿望")) +
+    (sc.pending.length > 0 ? sc.pending.map((g) => scopeGroup(g, input, false)).join("") : `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:16px 20px;color:${C.faint};font-size:12.5px;font-style:italic;">${bi("nothing pending — ship it", "没有待交付——可以发了")}</section>`) +
+    sectionHead(bi("Changelog (merged truth)", "变更日志（合并真相）"), sc.shippedCount, C.green, bi("generated from merged PRs, not claims", "从 merged PR 生成，不读声明")) +
+    sc.shipped.slice(0, 12).map((g) => scopeGroup(g, input, true)).join("") +
+    `<div style="display:flex;align-items:baseline;gap:12px;margin:28px 0 12px;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi("Version history", "历史版本")}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;"></span></div>` +
+    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;">${history}</section>`
   );
 }
 

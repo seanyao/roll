@@ -8,6 +8,9 @@
 
 ### 新功能
 
+- `roll cycles [--since 1d|3d|7d|all]` 升一等命令：周期账本每行周期号·结局·story·模型·tokens·花费·耗时，汇总行失败=failed+reverted+blocked 不吞，尾部 → roll cycle 提示；与 web 账本同聚合同词表（US-CLI-012） `[cli]`
+  <!-- evidence: .roll/features/cli-simplification/US-CLI-012/latest/US-CLI-012-report.html -->
+
 - 技能页签：审计条（N skills·violations·hub 总行数，与 audit-skills --strict 同口径）、四组契约清单带调用频次（自评分 note 口径），行展开看真实文件树（行数）、审计要件勾选、可复制目录路径与 SKILL.md 原文滚动区；清单从仓库目录实读防漂移（US-DOSSIER-017） `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-017/latest/US-DOSSIER-017-report.html -->
 - 发版页签待交付与变更日志：待交付按史诗分组（行点进档案），变更日志从 merged PR 真相生成（pr:merge 事件优先、Done 行 PR# 注记兜底，行带 #N merged 证据链）；页底历史版本可折叠展开（含曾豁免标记）；闸门头 merged/pending 与两段同算术（US-DOSSIER-016） `[dossier]`

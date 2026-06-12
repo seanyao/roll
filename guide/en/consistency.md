@@ -1,4 +1,4 @@
-# Consistency — `roll release consistency check`
+# Consistency — the release gate inside `roll release`
 
 Six dimensions are continuously reconciled against truth anchors. A backlog
 `✅ Done` row is a claim; merge evidence on `main`, acceptance reports, terminal
@@ -10,8 +10,9 @@ counted, not failed) · ③ docs (changelog / features / guide / README / --help
 · ④ tests · ⑤ bilingual parity (guide en↔zh + i18n keys) · ⑥ site.
 
 ```bash
-roll release consistency check          # human-readable report
-roll release consistency check --json   # machine-readable; exit 0 = all pass
+roll release              # the ONE release flow — the gate runs inside it
+roll release --dry-run    # preview the plan; nothing mutates
+roll release --gate-check # machine entry (CI uses it); exit 0 = all pass
 ```
 
 ## The release gate

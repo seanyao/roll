@@ -102,12 +102,12 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "failCount", surface: "event:release:gate", anchor: "release_verdict", writer: "release ship recordGate", kind: "authoritative" },
   { field: "waivedRules", surface: "event:release:gate", anchor: "release_waiver", writer: "release ship recordGate", kind: "derived-cache", rebuild: "re-join gate findings with live waivers (decideReleaseGate)" },
   { field: "ts", surface: "event:release:gate", anchor: "release_verdict", writer: "release ship recordGate", kind: "authoritative" },
-  { field: "type", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
-  { field: "reason", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
-  { field: "scope", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
-  { field: "expiresSec", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
-  { field: "operator", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
-  { field: "ts", surface: "event:release:waiver", anchor: "release_waiver", writer: "roll release waiver", kind: "authoritative" },
+  { field: "type", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
+  { field: "reason", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
+  { field: "scope", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
+  { field: "expiresSec", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
+  { field: "operator", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
+  { field: "ts", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
 ];
 
 /** Pre-guardrail history, listed not judged (AC: grandfather with a clear list):

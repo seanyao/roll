@@ -697,7 +697,7 @@ function releaseTab(input: TruthConsoleInput): string {
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Consistency gate", "一致性闸门")}</span>` +
     `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("six dimensions reconciled against truth anchors", "六维对真相锚点对账")}${rp.generatedAt !== undefined ? ` · ${shortTs(rp.generatedAt)}` : ""}</span>` +
     `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
-    `<code class="copy-chip" data-copy="roll release consistency check" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">roll release consistency check</code></div>` +
+    `<code class="copy-chip" data-copy="roll release --gate-check" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">roll release --gate-check</code></div>` +
     `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     dimRows +
     proposedRow +

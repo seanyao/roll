@@ -8,7 +8,7 @@ on:
 jobs:
   # US-CONSIST-005 — the release gate: any consistency dimension out of line
   # ABORTS the release before anything is published, with the gap list in the
-  # job log. `roll release consistency check` exits 0 only when every dimension passes.
+  # job log. `roll release --gate-check` exits 0 only when every dimension passes.
   consistency-gate:
     runs-on: ubuntu-latest
     steps:
@@ -23,7 +23,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
       - name: Consistency gate (blocks the release on any gap)
-        run: node packages/cli/bin/roll.js release consistency check
+        run: node packages/cli/bin/roll.js release --gate-check
 
   release:
     needs: consistency-gate

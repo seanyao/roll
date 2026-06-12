@@ -95,30 +95,32 @@ describe("ported routing (no bash fallback)", () => {
     expect(listed).not.toMatch(/\blang\b/);
   });
 
-  it("REFACTOR-052: machine commands leave the main usage while callable surfaces remain", async () => {
+  it("REFACTOR-052 (re-ruled by US-REL-007): machine commands stay hidden; the retired release sub-surfaces are GONE", async () => {
     registerAll();
     const listed = usage().split("Commands:")[1] ?? "";
-    for (const command of ["alert", "changelog", "skills", "consistency", "attest", "index", "dream"]) {
+    for (const command of ["alert", "skills", "attest", "index", "dream"]) {
       expect(isPorted(command), `${command} must stay callable`).toBe(true);
       expect(listed, `${command} must be hidden from main usage`).not.toMatch(new RegExp(`\\b${command}\\b`));
     }
-
-    const redirects = [
-      ["alert", "roll alert moved to roll loop alert"],
-      ["changelog", "roll changelog moved to roll release changelog"],
-      ["skills", "roll skills moved to roll doctor skills / roll setup skills"],
-      ["consistency", "roll consistency moved to roll release consistency"],
-    ] as const;
-    for (const [oldCommand, message] of redirects) {
-      const r = await captureDispatch([oldCommand]);
-      expect(r.status).toBe(0);
-      expect(r.stderr).toBe("");
-      expect(r.stdout).toBe(`${message}\n`);
+    // US-REL-007: top-level changelog/consistency are unknown commands now —
+    // the old REFACTOR-052 redirects were judged misleading, not compatibility.
+    for (const dead of ["changelog", "consistency"]) {
+      expect(isPorted(dead), `${dead} must be GONE`).toBe(false);
+      const r = await captureDispatch([dead]);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("unknown command");
     }
+    const r = await captureDispatch(["alert"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("roll alert moved to roll loop alert\n");
 
     expect((await captureDispatch(["loop", "alert", "log"])).status).toBe(0);
-    expect((await captureDispatch(["release", "changelog", "help"])).stdout).toContain("roll release changelog generate");
-    expect((await captureDispatch(["release", "consistency", "help"])).stdout).toContain("roll release consistency check");
+    // the retired release routes exit through the explicit removed-route error
+    for (const route of ["changelog", "consistency", "ship", "waiver"]) {
+      const rr = await captureDispatch(["release", route]);
+      expect(rr.status).toBe(1);
+      expect(rr.stderr).toContain("removed");
+    }
     expect((await captureDispatch(["doctor", "skills", "--help"])).stdout).toContain("roll doctor skills");
     expect((await captureDispatch(["setup", "skills", "--help"])).stdout).toContain("roll setup skills");
   });

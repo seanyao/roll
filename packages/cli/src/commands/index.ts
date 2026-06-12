@@ -22,12 +22,10 @@ import {
   loopUnknownSubcommand,
 } from "./loop-cycle-gates.js";
 import { briefCommand } from "./brief.js";
-import { changelogCommand } from "./changelog.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
 import { CYCLES_USAGE, cyclesCommand } from "./cycles.js";
-import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
@@ -66,8 +64,6 @@ import {
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
-import { releaseShipCommand } from "./release-ship.js";
-import { releaseWaiverCommand } from "./release-waiver.js";
 import { SELF_SCORE_USAGE, selfScoreCommand } from "./self-score.js";
 import { setupCommand } from "./setup.js";
 import { skillsCommand } from "./skills.js";
@@ -183,14 +179,12 @@ export function registerAll(): void {
   // commits, tags, or publishes — a release is always a human decision (loop
   // hard rule). No bash fallback: v2 had no `roll release` subcommand (the flow
   // lived in the private ops wrapper, which stays for the actual publish).
-  registerPorted("release", (args) => {
-    if (args[0] === "ship") return releaseShipCommand(args.slice(1));
-    // US-TRUTH-005: the recorded owner bypass for the consistency gate.
-    if (args[0] === "waiver") return releaseWaiverCommand(args.slice(1));
-    if (args[0] === "changelog") return changelogCommand(args.slice(1), "roll release changelog");
-    if (args[0] === "consistency") return consistencyCommand(args.slice(1), "roll release consistency");
-    return releaseCommand(args);
-  });
+  // US-REL-007: ONE release command. The transaction (bump → changelog fold →
+  // package gate → PR → merge → consistency gate → tag push) lives in the
+  // command itself; the old ship/waiver/changelog/consistency sub-routes exit
+  // through the normal unknown-route error. npm publish stays the owner's
+  // separate, 2FA-authenticated step.
+  registerPorted("release", releaseCommand);
   // `prices`: full surface TS (show/help/unknown + refresh network write).
   // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
   // fallback remains (US-PORT-017). REFACTOR-051 owner review kept this as the
@@ -209,10 +203,8 @@ export function registerAll(): void {
   // dispatch fell back to bash to do it); that path is RETIRED. The deterministic
   // draft is now the only output, produced natively in TS — no bash fallback,
   // no agent, no warn noise. `--no-ai` is kept as an accepted no-op.
-  registerPorted("changelog", redirectCommand("changelog", "release changelog"), { hidden: true });
   // `consistency`: check/--json/--project-dir + help + unknown all TS (full
   // surface ported; the python orchestrator is reimplemented byte-for-byte).
-  registerPorted("consistency", redirectCommand("consistency", "release consistency"), { hidden: true });
   // REFACTOR-051: `roll feedback` retired. Use `roll idea` for backlog capture
   // or `gh issue create` for GitHub issues.
   // `init`: full surface TS (fresh/re-init scaffold, legacy-codebase onboard

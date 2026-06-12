@@ -1,149 +1,324 @@
 /**
- * `roll release` — read-only release guidance (US-PORT-004, TS port).
+ * US-REL-007 — `roll release`: the ONLY release command.
  *
- * v2 had no `roll release` subcommand: the maintainer flow lived in the private
- * ops wrapper (`roll-meta/ops/roll-release` → release.sh) and the dashboard only
- * hinted "run: roll release". This native command makes the guidance first-class
- * and deterministic:
+ * The default flow owns the whole release transaction, in order, every
+ * irreversible step behind an earlier gate:
  *
- *  1. 版本号引导 — compute the next calver version (`<major>.<MMDD>.<seq>`) from
- *     package.json (the single source of truth, FIX-202) and today's date.
- *  2. changelog — surface whether `## Unreleased` has releasable content, and
- *     point at `roll release changelog generate --write` when it does not.
- *  3. PR 与 tag 流程提示 — print the ordered commands the maintainer runs: bump,
- *     commit + PR, merge, then tag + push (which fires the release workflow).
- *  4. 发版闸已在 CI — note that release.yml's consistency-gate runs on tag push
- *     and aborts on any gap; offer `roll release consistency check` for a
- *     local preview.
+ *   plan → fold-changelog → bump-version → package-gate → commit-push →
+ *   open-pr → wait-merge → sync-main → consistency-gate → tag-push
  *
- * AUTOMATION SCOPE (deliberate): `roll release` is READ-ONLY. It never bumps
- * package.json, commits, opens a PR, tags, or publishes — those stay manual and
- * require the maintainer's 2FA. This mirrors the loop's hard rule: a release is
- * always a human decision, never autonomous. The command's whole job is to tell
- * the human exactly what to run.
+ * The old sub-surfaces (`ship`, `waiver`, `changelog`, `consistency`) are
+ * GONE — not hidden, not redirected: they exit through the normal
+ * unknown-route error. There is no public waiver path: shipping over a known
+ * fail-level drift is blocked; fix the drift.
  *
- * Output follows the resolved locale (single-language, never mixed).
+ * It stops at the tag push (release.yml runs the remote gate + GitHub
+ * Release); `npm publish` stays the owner's separate, 2FA-authenticated step.
+ *
+ * Machine entries (CI, not advertised):
+ *   --gate-check   run the consistency gate only (release.yml's job)
+ *   --json         print the computed plan as JSON
  */
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ReleaseDate, planRelease } from "@roll/core";
+import { foldUnreleased, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { c, renderState } from "../render.js";
+import { runConsistencyCheck } from "../lib/release-consistency.js";
+import { readConfirmLine } from "../lib/tty-confirm.js";
 
-/** Locale label, single-language: v3 keys fall back to v2 keys then the key. */
 function label(lang: Lang, key: string, ...args: ReadonlyArray<string | number>): string {
   if (v3Catalog[key] !== undefined) return t(v3Catalog, lang, key, ...args);
   return t(v2Catalog, lang, key, ...args);
 }
 
-/** Today's release date from a Date (1-based month). */
-function dateOf(d: Date): ReleaseDate {
-  return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+const REMOVED_ROUTES = new Set(["ship", "waiver", "changelog", "consistency", "tag", "publish"]);
+
+/** Injectable seams — the transaction is unit-tested without git/gh/npm. */
+export interface ReleaseFlowDeps {
+  version: (cwd: string) => string;
+  branch: (cwd: string) => string;
+  clean: (cwd: string) => boolean;
+  synced: (cwd: string) => boolean;
+  tagExists: (cwd: string, tag: string) => boolean;
+  readChangelog: (cwd: string) => string;
+  writeChangelog: (cwd: string, text: string) => void;
+  bumpVersion: (cwd: string, version: string) => void;
+  packageGate: (cwd: string) => boolean;
+  commitPush: (cwd: string, branch: string, message: string) => void;
+  openPr: (cwd: string, branch: string, title: string) => string;
+  /** Polls until the PR is merged (the PR lane usually merges it); false on timeout. */
+  waitMerged: (cwd: string, prRef: string) => boolean;
+  syncMain: (cwd: string) => boolean;
+  consistencyGate: (cwd: string) => Promise<boolean> | boolean;
+  tag: (cwd: string, tag: string, version: string) => void;
+  pushTag: (cwd: string, tag: string) => void;
+  confirm: (tag: string) => boolean;
+  now: () => Date;
+  /** Step progress sink (stdout in production; recorded in tests). */
+  onStep?: (step: ReleaseStep, detail: string) => void;
 }
 
-/** Read the `version` field from `<cwd>/package.json`, or "" if unavailable. */
-function currentVersion(cwd: string): string {
-  try {
-    const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as { version?: unknown };
-    return typeof pkg.version === "string" ? pkg.version : "";
-  } catch {
-    return "";
-  }
+function git(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+export function realReleaseDeps(): ReleaseFlowDeps {
+  return {
+    version: (cwd) => {
+      try {
+        const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as { version?: unknown };
+        return typeof pkg.version === "string" ? pkg.version : "";
+      } catch {
+        return "";
+      }
+    },
+    branch: (cwd) => {
+      try {
+        return git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      } catch {
+        return "";
+      }
+    },
+    clean: (cwd) => {
+      try {
+        return git(cwd, ["status", "--porcelain"]) === "";
+      } catch {
+        return false;
+      }
+    },
+    synced: (cwd) => {
+      try {
+        git(cwd, ["fetch", "origin", "main"]);
+        return git(cwd, ["rev-list", "--count", "HEAD..origin/main"]) === "0";
+      } catch {
+        return false;
+      }
+    },
+    tagExists: (cwd, tagName) => {
+      try {
+        return git(cwd, ["tag", "-l", tagName]) !== "";
+      } catch {
+        return true; // unknowable → treat as a collision, never overwrite
+      }
+    },
+    readChangelog: (cwd) => readFileSync(join(cwd, "CHANGELOG.md"), "utf8"),
+    writeChangelog: (cwd, text) => writeFileSync(join(cwd, "CHANGELOG.md"), text, "utf8"),
+    bumpVersion: (cwd, version) => {
+      const path = join(cwd, "package.json");
+      const pkg = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      pkg["version"] = version;
+      writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
+    },
+    packageGate: (cwd) => {
+      try {
+        execFileSync("npm", ["pack", "--dry-run"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 300_000 });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    commitPush: (cwd, branch, message) => {
+      git(cwd, ["checkout", "-b", branch]);
+      git(cwd, ["add", "package.json", "CHANGELOG.md"]);
+      git(cwd, ["commit", "-m", message]);
+      git(cwd, ["push", "-u", "origin", branch]);
+    },
+    openPr: (cwd, branch, title) => {
+      const out = execFileSync(
+        "gh",
+        ["pr", "create", "--title", title, "--body", "Release PR — generated by `roll release` (US-REL-007).", "--head", branch],
+        { cwd, encoding: "utf8" },
+      ).trim();
+      return out.split("\n").at(-1) ?? branch;
+    },
+    waitMerged: (cwd, prRef) => {
+      const deadline = Date.now() + 20 * 60_000;
+      while (Date.now() < deadline) {
+        try {
+          const state = execFileSync("gh", ["pr", "view", prRef, "--json", "state", "--jq", ".state"], { cwd, encoding: "utf8" }).trim();
+          if (state === "MERGED") return true;
+          if (state === "CLOSED") return false;
+        } catch {
+          /* transient gh error — keep polling */
+        }
+        execFileSync("sleep", ["20"]);
+      }
+      return false;
+    },
+    syncMain: (cwd) => {
+      try {
+        git(cwd, ["checkout", "main"]);
+        git(cwd, ["pull", "--ff-only", "origin", "main"]);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    consistencyGate: async () => {
+      const code = await runConsistencyCheck(["check"], "roll release");
+      return code === 0;
+    },
+    tag: (cwd, tagName, version) => {
+      git(cwd, ["tag", "-a", tagName, "-m", `release v${version}`]);
+    },
+    pushTag: (cwd, tagName) => {
+      git(cwd, ["push", "origin", tagName]);
+    },
+    confirm: (tagName) => {
+      process.stdout.write(`release ${tagName}? [y/N] `);
+      const line = readConfirmLine();
+      return line !== null && /^y(es)?$/i.test(line.trim());
+    },
+    now: () => new Date(),
+  };
+}
+
+function fmtDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export interface ReleaseRunResult {
+  status: "released" | "aborted" | "dry-run";
+  step?: ReleaseStep;
+  reason?: string;
+  tag?: string;
 }
 
 /**
- * True when CHANGELOG.md carries something to release. Two accepted shapes
- * (FIX-226 — the repo's actual convention is the second):
- *   1. an `## Unreleased` section with at least one bullet;
- *   2. a pre-written NEXT-version section — the FIRST `## v<semver>` heading
- *      names a version OTHER than the current one and has at least one bullet.
- * Absent file / empty section / first section == current version → false.
+ * The transaction. Fail-loud and partial-release-free: every abort happens
+ * BEFORE the next irreversible step; nothing is tagged unless every gate
+ * passed and the release PR is on main.
  */
-function changelogReady(cwd: string, current: string): boolean {
-  const path = join(cwd, "CHANGELOG.md");
-  if (!existsSync(path)) return false;
-  const text = readFileSync(path, "utf8");
+export async function runReleaseFlow(cwd: string, deps: ReleaseFlowDeps, opts: { dryRun: boolean; yes: boolean }): Promise<ReleaseRunResult> {
+  const step = (s: ReleaseStep, detail: string): void => deps.onStep?.(s, detail);
+  const abort = (s: ReleaseStep, reason: string): ReleaseRunResult => ({ status: "aborted", step: s, reason });
 
-  const sectionAfter = (idx: number, headingLen: number): string => {
-    let section = text.slice(idx + headingLen);
-    const nextHeading = section.search(/\n## /);
-    if (nextHeading !== -1) section = section.slice(0, nextHeading);
-    return section;
-  };
-  const hasBullet = (s: string): boolean => /^\s*-\s+\S/m.test(s);
+  // plan
+  const current = deps.version(cwd);
+  if (current === "") return abort("plan", "package.json version unreadable");
+  if (deps.branch(cwd) !== "main") return abort("plan", "not on main");
+  if (!deps.clean(cwd)) return abort("plan", "working tree dirty");
+  if (!deps.synced(cwd)) return abort("plan", "main is behind origin — pull first");
+  const d = deps.now();
+  const date: ReleaseDate = { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+  const plan = planRelease({ currentVersion: current, date, changelogReady: true });
+  if (deps.tagExists(cwd, plan.tag)) return abort("plan", `tag ${plan.tag} already exists`);
+  step("plan", `${current} → ${plan.nextVersion} (${plan.tag})`);
 
-  const unreleased = text.indexOf("## Unreleased");
-  if (unreleased !== -1 && hasBullet(sectionAfter(unreleased, "## Unreleased".length))) return true;
+  // fold-changelog (computed before any mutation)
+  let changelog: string;
+  try {
+    changelog = deps.readChangelog(cwd);
+  } catch {
+    return abort("fold-changelog", "CHANGELOG.md unreadable");
+  }
+  const folded = foldUnreleased(changelog, plan.nextVersion, fmtDate(d));
+  if (folded === null) return abort("fold-changelog", "Unreleased is empty — nothing to release");
+  step("fold-changelog", `${folded.notes.split("\n").filter((l) => l.trim().startsWith("-")).length} entries`);
 
-  const m = /^## v(\d+\.\d+\.\d+)\b.*$/m.exec(text);
-  if (m === null) return false;
-  if (m[1] === current) return false; // newest section already shipped
-  return hasBullet(sectionAfter(m.index, m[0].length));
+  if (opts.dryRun) return { status: "dry-run", tag: plan.tag };
+  if (!opts.yes && !deps.confirm(plan.tag)) return abort("plan", "not confirmed");
+
+  // mutations begin — still nothing irreversible until tag-push
+  deps.writeChangelog(cwd, folded.text);
+  deps.bumpVersion(cwd, plan.nextVersion);
+  step("bump-version", plan.nextVersion);
+
+  if (!deps.packageGate(cwd)) return abort("package-gate", "npm pack --dry-run failed");
+  step("package-gate", "pack dry-run clean");
+
+  const branch = `release/${plan.tag}`;
+  deps.commitPush(cwd, branch, `Release: ${plan.tag}`);
+  step("commit-push", branch);
+
+  const prRef = deps.openPr(cwd, branch, `Release: ${plan.tag}`);
+  step("open-pr", prRef);
+
+  if (!deps.waitMerged(cwd, prRef)) return abort("wait-merge", "release PR not merged (checks failed or timeout)");
+  step("wait-merge", "merged");
+
+  if (!deps.syncMain(cwd)) return abort("sync-main", "fast-forward to origin/main failed");
+  step("sync-main", "main up to date");
+
+  if (!(await deps.consistencyGate(cwd))) return abort("consistency-gate", "a consistency dimension is failing — fix the drift (no waiver path)");
+  step("consistency-gate", "all dimensions pass");
+
+  if (deps.tagExists(cwd, plan.tag)) return abort("tag-push", `tag ${plan.tag} appeared concurrently`);
+  deps.tag(cwd, plan.tag, plan.nextVersion);
+  deps.pushTag(cwd, plan.tag);
+  step("tag-push", plan.tag);
+  return { status: "released", tag: plan.tag };
 }
 
-export function releaseCommand(args: string[], now?: ReleaseDate): number {
-  const noColor =
-    args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
+export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowDeps): Promise<number> {
+  const noColor = args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
-  const lang = resolveLang({
-    rollLang: process.env["ROLL_LANG"],
-    lcAll: process.env["LC_ALL"],
-    lang: process.env["LANG"],
-  });
+  const lang = resolveLang({ rollLang: process.env["ROLL_LANG"], lcAll: process.env["LC_ALL"], lang: process.env["LANG"] });
 
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(`${label(lang, "releasev3.usage")}\n`);
     return 0;
   }
 
-  const cwd = process.cwd();
-  const cur = currentVersion(cwd);
-  if (cur === "") {
-    process.stderr.write(`${c("amber", "✗ " + label(lang, "releasev3.no_pkg"))}\n`);
+  // US-REL-007 AC2: the retired sub-routes die through the normal unknown-route
+  // error — no redirect, no hidden logic.
+  const sub = args.find((a) => !a.startsWith("-"));
+  if (sub !== undefined && REMOVED_ROUTES.has(sub)) {
+    process.stderr.write(
+      lang === "zh"
+        ? `[roll] roll release ${sub} 已移除——发布面只有一条命令：roll release（见 roll release --help）\n`
+        : `[roll] roll release ${sub} was removed — the release surface is one command: roll release (see roll release --help)\n`,
+    );
+    return 1;
+  }
+  if (sub !== undefined) {
+    process.stderr.write(`[roll] unknown release argument: ${sub}\n`);
     return 1;
   }
 
-  const ready = changelogReady(cwd, cur);
-  const plan = planRelease({
-    currentVersion: cur,
-    date: now ?? dateOf(new Date()),
-    changelogReady: ready,
-  });
+  // machine entry for CI (release.yml): gate only, exit code is the verdict.
+  if (args.includes("--gate-check")) {
+    return await runConsistencyCheck(["check"], "roll release");
+  }
+
+  const deps = depsOverride ?? realReleaseDeps();
+  const cwd = process.cwd();
 
   if (args.includes("--json")) {
+    const d = deps.now();
+    const plan = planRelease({
+      currentVersion: deps.version(cwd),
+      date: { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() },
+      changelogReady: true,
+    });
     process.stdout.write(`${JSON.stringify(plan)}\n`);
     return 0;
   }
 
-  const clState = ready ? label(lang, "releasev3.changelog_ready") : label(lang, "releasev3.changelog_empty");
-  const clMark = ready ? c("green", "✓") : c("amber", "•");
-
-  const lines: string[] = [];
-  lines.push("");
-  lines.push(c("fg", "🚀 " + label(lang, "releasev3.title"), { bold: true }));
-  lines.push("");
-  lines.push(`  ${c("dim", label(lang, "releasev3.current") + ":")}  ${plan.currentVersion}`);
-  lines.push(`  ${c("dim", label(lang, "releasev3.next") + ":")}   ${c("green", plan.nextVersion)}`);
-  lines.push(`  ${c("dim", label(lang, "releasev3.tag") + ":")}    ${plan.tag}`);
-  lines.push(`  ${c("dim", label(lang, "releasev3.changelog") + ":")}  ${clMark} ${clState}`);
-  lines.push("");
-  lines.push(`  ${label(lang, "releasev3.flow_title")}`);
-  lines.push(`    1. ${label(lang, "releasev3.step_bump", plan.nextVersion)}`);
-  lines.push(`    2. ${label(lang, "releasev3.step_commit")}`);
-  lines.push(`    3. ${label(lang, "releasev3.step_merge")}`);
-  lines.push(`    4. ${label(lang, "releasev3.step_tag", plan.tag)}`);
-  lines.push("");
-  lines.push(`  ${c("dim", label(lang, "releasev3.gate_note"))}`);
-  lines.push(`  ${c("dim", label(lang, "releasev3.gate_preview"))}`);
-  lines.push("");
-  // US-REL-SHIP: once the version is bumped + merged, `roll release ship`
-  // runs the gate and the tag-push for you (step 4); npm publish stays manual.
-  lines.push(
-    `  ${c("dim", lang === "zh"
-      ? "版本合入后：roll release ship 自动过闸并打 tag 推送（步骤 4）；npm publish 仍由你手动跑"
-      : "after the bump merges: `roll release ship` gates + tags + pushes (step 4); npm publish stays manual")}`,
+  const dryRun = args.includes("--dry-run");
+  const yes = args.includes("--yes");
+  deps.onStep = (s, detail) => {
+    process.stdout.write(`${c("green", "✓")} ${s.padEnd(17)} ${detail}\n`);
+  };
+  const res = await runReleaseFlow(cwd, deps, { dryRun, yes });
+  if (res.status === "released") {
+    process.stdout.write(
+      lang === "zh"
+        ? `\n${c("green", `✓ ${res.tag} 已打 tag 并推送`)} — release.yml 跑远端闸与 GitHub Release；npm publish 仍由你手动执行\n`
+        : `\n${c("green", `✓ ${res.tag} tagged and pushed`)} — release.yml runs the remote gate + GitHub Release; npm publish stays yours\n`,
+    );
+    return 0;
+  }
+  if (res.status === "dry-run") {
+    process.stdout.write(lang === "zh" ? `dry-run 通过：将发 ${res.tag}（未做任何改动）\n` : `dry-run clean: would release ${res.tag} (nothing changed)\n`);
+    return 0;
+  }
+  process.stderr.write(
+    lang === "zh"
+      ? `${c("red", `✗ 发版在 ${res.step} 中止`)}：${res.reason}\n`
+      : `${c("red", `✗ release aborted at ${res.step}`)}: ${res.reason}\n`,
   );
-  lines.push("");
-  process.stdout.write(lines.join("\n") + "\n");
-  return 0;
+  return 1;
 }

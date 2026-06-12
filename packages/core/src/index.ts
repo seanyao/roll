@@ -36,7 +36,7 @@ export * from "./policy/engine.js";
 export * from "./policy/self-tuning.js";
 export * from "./reconcile/engine.js";
 export * from "./release/plan.js";
-export * from "./release/ship.js";
+export * from "./release/flow.js";
 export * from "./attest/ac-parser.js";
 export * from "./attest/gc.js";
 export * from "./attest/ansi-html.js";

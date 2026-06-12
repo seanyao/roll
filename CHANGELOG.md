@@ -8,6 +8,9 @@
 
 ### 新功能
 
+- `roll release` 收口为唯一发版命令：一条事务（版本号→折叠 changelog→包闸→发版 PR→等合并→快进 main→一致性闸→推 tag），每个不可逆步骤前都有闸，失败 fail-loud 零半成品；ship/waiver/changelog/consistency 旧子命令物理删除（豁免路径不复存在——修掉漂移才能发）；CI 闸入口改 `roll release --gate-check`（US-REL-007） `[release]`
+  <!-- evidence: .roll/features/release-management/US-REL-007/latest/US-REL-007-report.html -->
+
 - 全站可复制命令芯片与数据新鲜度：周期账本行 → roll cycle、待交付行 → roll loop go/backlog promote、故事档案头 → 拾取命令（全部真实存在，点击 ✓ copied）；总览 generated 超 6h 亮"数据过期"警示，心跳 next 做客户端倒计时（US-DOSSIER-018） `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-018/latest/US-DOSSIER-018-report.html -->
 

@@ -59,7 +59,7 @@ const COMMAND_SURFACE_REPLACEMENTS = new Map<string, string>([
   ["feedback", "roll idea"],
   ["alert", "roll loop alert"],
   ["attest", "acceptance evidence report"],
-  ["changelog", "roll release changelog"],
+  ["changelog", "roll release (changelog folds inside the one flow)"],
   ["consistency", "roll release consistency"],
   ["dream", "the configured Dream schedule"],
   ["index", "Delivery Dossier"],
@@ -539,7 +539,7 @@ function pyListRepr(items: string[]): string {
 }
 
 // ─── orchestration ────────────────────────────────────────────────────────────
-/** Programmatic pass/fail for the six dimensions — reused by `roll release ship`. */
+/** Programmatic pass/fail for the six dimensions — the `roll release` gate. */
 export function consistencyPasses(projectDir: string): boolean {
   return runAll(projectDir).overall === "pass";
 }
@@ -629,7 +629,8 @@ function checkHelp(command: string): string {
 `;
 }
 
-export function consistencyCommand(args: string[], command = "roll consistency"): number | Promise<number> {
+/** US-REL-007: the gate's internal check runner — no public command remains. */
+export function runConsistencyCheck(args: string[], command = "roll release --gate-check"): number | Promise<number> {
   const subcmd = args[0] ?? "check";
   const rest = args.slice(1);
 

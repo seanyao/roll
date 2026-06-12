@@ -26,7 +26,7 @@ import {
 } from "@roll/core";
 import { type PrMergeInfo, ghRepoSlug, prViewMergeInfo, remoteUrl } from "@roll/infra";
 import { parseEventLine } from "@roll/spec";
-import { cardArchiveDir, readIndex, reportFileName } from "../lib/archive.js";
+import { cardArchiveDir, readIndex, reportFileName } from "./archive.js";
 
 /** Max GitHub probes per lane — the fan-out must never stall the audit. */
 export const PROBE_CAP = 20;

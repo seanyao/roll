@@ -249,7 +249,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
     aggregate: "release",
     description: "Whether a version was cleared to ship (consistency + tests + changelog).",
     authoritativeSource: "the release gate run record for the tag (consistency check outcome at ship time)",
-    writer: "roll release ship (the only path allowed to push v* tags — v* tag IS a release)",
+    writer: "roll release (the ONE flow; the only path allowed to push v* tags — v* tag IS a release)",
     derivedViews: ["GitHub Release entry", "CHANGELOG.md section", "npm dist-tags (owner's 2FA action)"],
     conflictPolicy: "a v* tag without a gate record is drift(fail) — tags pushed around the gate are the violation, not an alternative truth.",
     unknownPolicy: "gate ran but GitHub Release/release.yml still in flight → unknown within grace.",

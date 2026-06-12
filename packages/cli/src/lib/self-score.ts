@@ -202,6 +202,12 @@ export interface SelfScoreWriteInput {
   rationale: string;
   /** ISO timestamp; defaults to now. Same skill/story/ts payload re-runs are idempotent. */
   ts?: string;
+  /** US-PAIR-009 provenance: the agent that produced the score (pair scoring). */
+  scoredBy?: string;
+  /** "pair" when a heterogeneous peer scored; defaults to "self". */
+  scoring?: "pair" | "self";
+  /** Why pair scoring fell back to self (recorded in the note for audit). */
+  fallbackReason?: string;
 }
 
 export interface SelfScoreWriteResult {
@@ -274,6 +280,7 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
     epochSec += 1; // same-second sibling note: keep filenames unique
     path = join(dir, `${date}-${skill}-${story}-${epochSec}.md`);
   }
+  const scoring = input.scoring ?? "self";
   const text = [
     "---",
     `skill: ${skill}`,
@@ -281,6 +288,11 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
     `score: ${input.score}`,
     `verdict: ${input.verdict}`,
     `ts: ${ts}`,
+    // US-PAIR-009 provenance: who scored, and why a pair score fell back to self.
+    // Readers tolerate the extra string fields (non-numeric → not a dimension).
+    `scoring: ${scoring}`,
+    ...(input.scoredBy !== undefined ? [`scored-by: ${input.scoredBy.trim()}`] : []),
+    ...(input.fallbackReason !== undefined ? [`fallback-reason: ${input.fallbackReason.trim()}`] : []),
     "---",
     "",
     rationale,

@@ -131,6 +131,26 @@ describe("writeSelfScoreNote", () => {
     expect(() => writeSelfScoreNote(p, { ...PAYLOAD, story: "" })).toThrow(/story/i);
   });
 
+  it("US-PAIR-009: provenance fields land in frontmatter and readers stay compatible", () => {
+    const p = project();
+    withCard(p, "goal-mode", "FIX-900");
+    const res = writeSelfScoreNote(p, { ...PAYLOAD, scoredBy: "codex", scoring: "pair" });
+    const text = readFileSync(res.path, "utf8");
+    expect(text).toContain("scored-by: codex");
+    expect(text).toContain("scoring: pair");
+    const entry = readLatestStorySelfScore(p, "FIX-900");
+    expect(entry?.score).toBe(9); // reader unaffected by extra fields
+  });
+
+  it("US-PAIR-009: defaults to scoring: self and records a fallback reason", () => {
+    const p = project();
+    withCard(p, "goal-mode", "FIX-900");
+    const res = writeSelfScoreNote(p, { ...PAYLOAD, fallbackReason: "no heterogeneous candidate" });
+    const text = readFileSync(res.path, "utf8");
+    expect(text).toContain("scoring: self");
+    expect(text).toContain("fallback-reason: no heterogeneous candidate");
+  });
+
   it("refuses to write outside a roll project (no stray .roll/ minting)", () => {
     const p = mkdtempSync(join(tmpdir(), "roll-noproject-"));
     dirs.push(p);

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 稳定性
+
+- cycle worktree 依赖安装失败会直接以失败终态和 `[FAIL] worktree deps bootstrap failed` ALERT 暴露，并清理空 worktree，不再继续烧 agent 后误落 `idle_no_work`（FIX-268） `[loop]`
+
 ## v3.612.2 — 2026-06-12
 
 ### 稳定性

@@ -67,12 +67,18 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
   }
   const delivered = within.filter((r) => r.verdict === "delivered").length;
   const failed = ledgerFailedCount(within);
-  const cost = within.reduce((a, r) => a + (r.cost.startsWith("$") ? Number(r.cost.slice(1)) : 0), 0);
+  const cost = within.reduce((a, r) => {
+    // kimi pair-review: a malformed cost cell must not turn the summary into $NaN.
+    const n = r.cost.startsWith("$") ? Number(r.cost.slice(1)) : 0;
+    return a + (Number.isFinite(n) ? n : 0);
+  }, 0);
   const summary =
     lang === "zh"
       ? `${within.length} 个周期 · ${delivered} 已交付 · ${c(failed > 0 ? "red" : "green", String(failed))} 失败/回滚/阻塞 · $${cost.toFixed(2)}`
       : `${within.length} cycles · ${delivered} delivered · ${c(failed > 0 ? "red" : "green", String(failed))} failed/reverted/blocked · $${cost.toFixed(2)}`;
   const latest = within[0];
+  // `roll cycle <handle>` is the spec'd companion (US-CLI-013, next card) —
+  // the hint is the contract between the two surfaces, not a dead end.
   const hint = latest !== undefined ? `\n→ roll cycle ${cycleNo(latest.cycleId)}` : "";
   if (within.length === 0) {
     return lang === "zh" ? `窗口内没有周期（--since ${sinceLabel}）\n` : `no cycles in the window (--since ${sinceLabel})\n`;

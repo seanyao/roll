@@ -9,8 +9,10 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { parseEventLine } from "@roll/spec";
+import { buildTruthSnapshot } from "@roll/core";
+import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
-import { renderFeaturesIndex, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
+import { countLegacyStories, renderFeaturesIndex, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
 import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, type StoryDossierInput } from "../lib/story-dossier.js";
@@ -277,9 +279,24 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   }
   let pages = 0;
   try {
+    // US-DOSSIER-010: ONE aggregation per run — the snapshot is serialized once,
+    // written to truth.json AND embedded verbatim in index.html, so every
+    // surface reads the same numbers from the same computation.
+    const truth = collectTruthBoardInput(cwd);
+    const snapshot = buildTruthSnapshot({
+      generatedAt: truth.generatedAt ?? new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      ...(truth.collectedAt !== undefined ? { collectedAt: truth.collectedAt } : {}),
+      storyStates: epics.flatMap((e) => e.stories.map(storySpectrumState)),
+      legacyCount: countLegacyStories(epics),
+      ...(truth.audit !== undefined ? { audit: truth.audit } : {}),
+      ...(truth.cycle !== undefined ? { cycle: truth.cycle } : {}),
+      ...(truth.release !== undefined ? { release: truth.release } : {}),
+    });
+    const snapshotJson = serializeTruthSnapshot(snapshot);
+    writeFileSync(join(featuresDir, "truth.json"), snapshotJson, "utf8");
     writeFileSync(
       join(featuresDir, "index.html"),
-      renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd), truth: collectTruthBoardInput(cwd) }),
+      renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd), truth, snapshotJson }),
       "utf8",
     );
     pages += 1;

@@ -153,6 +153,10 @@ const ROW_TO_TERMINAL: Record<string, TerminalOutcome> = {
   blocked: "blocked",
   aborted: "aborted_no_delivery",
   interrupted: "aborted_no_delivery",
+  // US-DOSSIER-010 AC4: a reverted cycle is a failure — the legacy row status
+  // was unmapped, fell to outcome "" → "unknown" panel, and the failure was
+  // silently swallowed from every failed count (the FIX-248 class).
+  reverted: "failed",
   orphan: "aborted_with_delivery",
 };
 

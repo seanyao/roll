@@ -599,7 +599,8 @@ export function renderStoryDossier(d: StoryDossierInput): string {
  * note, and the story's `tcr:` commits from git history. Every read is
  * best-effort — a missing source renders as an honest empty state.
  */
-export function collectStoryDossierInput(projectPath: string, story: DossierStory, gitFacts?: GitDossierFacts | null): StoryDossierInput {
+export function collectStoryDossierInput(projectPath: string, story: DossierStory, cache?: DossierRunCache): StoryDossierInput {
+  const gitFacts = cache === undefined ? undefined : cache.git;
   const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id);
   const out: StoryDossierInput = { story };
   let searchableCardText = "";
@@ -707,7 +708,7 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
         .trim();
       searchableCardText += `\n${readFile(latest.sourcePath)}`;
     }
-    const trend = readSelfScoreTrend(projectPath);
+    const trend = cache !== undefined ? cache.selfScoreTrend : readSelfScoreTrend(projectPath);
     if (trend !== undefined) out.selfScoreTrend = trend;
   } catch {
     /* no notes */
@@ -742,7 +743,7 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   const peerReview = collectPeerReview(projectPath, story.id);
   if (peerReview !== undefined) out.peerReview = peerReview;
 
-  const storyGraph = collectStoryGraph(projectPath, story);
+  const storyGraph = collectStoryGraph(projectPath, story, cache);
   if (hasStoryGraph(storyGraph)) out.storyGraph = storyGraph;
 
   const correctionActions = collectCorrectionActions(projectPath, story.id);
@@ -990,8 +991,8 @@ interface StorySpecRef {
 
 const STORY_ID_PATTERN = "\\b(?:US|FIX|REFACTOR|IDEA)(?:-[A-Z0-9]+)*-\\d+[a-z]?\\b";
 
-function collectStoryGraph(projectPath: string, story: DossierStory): StoryGraph {
-  const refs = scanStorySpecs(projectPath);
+function collectStoryGraph(projectPath: string, story: DossierStory, cache?: DossierRunCache): StoryGraph {
+  const refs = cache !== undefined ? cache.specRefs : scanStorySpecs(projectPath);
   const byId = new Map(refs.map((ref) => [ref.id, ref]));
   const current = byId.get(story.id) ?? {
     id: story.id,
@@ -1007,7 +1008,11 @@ function collectStoryGraph(projectPath: string, story: DossierStory): StoryGraph
   }
 
   const dependsOn = storyGraphLinks(extractDependsOnIds(currentSpec).filter((id) => id !== story.id), story, byId);
-  const dependedBy = storyGraphLinks(reverseDependencyIds(refs, story.id), story, byId);
+  const reverseIds =
+    cache !== undefined
+      ? refs.filter((r) => r.id !== story.id && (cache.dependsOnById.get(r.id) ?? []).includes(story.id)).map((r) => r.id)
+      : reverseDependencyIds(refs, story.id);
+  const dependedBy = storyGraphLinks(reverseIds, story, byId);
   const fixes =
     story.id.startsWith("FIX-") || story.type === "FIX"
       ? storyGraphLinks(extractFixesIds(currentSpec).filter((id) => id !== story.id), story, byId)
@@ -1502,6 +1507,41 @@ export function collectGitDossierFacts(projectPath: string): GitDossierFacts | n
     commits.push({ subject, message, files });
   }
   return { commits, slug: githubSlug(projectPath) };
+}
+
+/**
+ * FIX-275 — run-scoped shared facts for a whole dossier regeneration. Profiling
+ * showed three per-card O(all-cards) reads: ~3 git spawns, a full notes-tree
+ * scan for the project-wide self-score trend, and a full spec read for reverse
+ * dependencies. Build once per run; per-card collection becomes lookups. The
+ * single-card path (attest) simply omits the cache and keeps live reads.
+ */
+export interface DossierRunCache {
+  git: GitDossierFacts | null;
+  selfScoreTrend: string | undefined;
+  specRefs: StorySpecRef[];
+  /** id → the ids its spec declares under depends-on. */
+  dependsOnById: Map<string, string[]>;
+}
+
+export function buildDossierRunCache(projectPath: string): DossierRunCache {
+  const specRefs = scanStorySpecs(projectPath);
+  const dependsOnById = new Map<string, string[]>();
+  for (const ref of specRefs) {
+    let spec = "";
+    try {
+      spec = readFile(ref.specPath);
+    } catch {
+      /* unreadable spec → no deps */
+    }
+    dependsOnById.set(ref.id, extractDependsOnIds(spec));
+  }
+  return {
+    git: collectGitDossierFacts(projectPath),
+    selfScoreTrend: readSelfScoreTrend(projectPath),
+    specRefs,
+    dependsOnById,
+  };
 }
 
 /** Newest-first commits whose full message mentions the id (≡ --fixed-strings --grep). */

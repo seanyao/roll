@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { indexCommand } from "../src/commands/index-gen.js";
-import { collectGitDossierFacts, collectStoryDossierInput } from "../src/lib/story-dossier.js";
+import { buildDossierRunCache, collectGitDossierFacts, collectStoryDossierInput } from "../src/lib/story-dossier.js";
 import {
   buildStoryIndex,
   cardArchiveDir,
@@ -252,15 +252,16 @@ describe("FIX-275 — git dossier facts snapshot equivalence", () => {
 
     const story1 = { id: "US-G-1", epic: "alpha", title: "a", status: "done" } as never;
     const story2 = { id: "US-G-2", epic: "alpha", title: "b", status: "todo" } as never;
-    const facts = collectGitDossierFacts(proj);
-    expect(facts).not.toBeNull();
+    expect(collectGitDossierFacts(proj)).not.toBeNull();
+    const cache = buildDossierRunCache(proj);
+    expect(cache.git).not.toBeNull();
     for (const story of [story1, story2]) {
       const legacy = collectStoryDossierInput(proj, story);
-      const snap = collectStoryDossierInput(proj, story, facts);
+      const snap = collectStoryDossierInput(proj, story, cache);
       expect(snap).toEqual(legacy);
     }
     // body-only mention still counts (git --grep matches the full message)
-    const viaSnap = collectStoryDossierInput(proj, story2, facts);
+    const viaSnap = collectStoryDossierInput(proj, story2, cache);
     expect(viaSnap.commits?.some((c) => c.includes("unrelated change"))).toBe(true);
   });
 

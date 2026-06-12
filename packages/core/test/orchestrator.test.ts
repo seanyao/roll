@@ -215,14 +215,14 @@ describe("failure branches", () => {
     });
   });
 
-  it("worktree setup fail → failed (bin/roll:8998-9007)", () => {
+  it("worktree setup fail → failed + tolerant worktree cleanup", () => {
     const { state, kinds } = walk([
       { type: "start", ctx: CTX },
       { type: "preflight_done" },
       { type: "worktree_failed" },
     ]);
     expect(state.terminal).toBe("failed");
-    expect(kinds.slice(-2)).toEqual(["emit_event", "append_run"]);
+    expect(kinds.slice(-3)).toEqual(["cleanup_worktree", "emit_event", "append_run"]);
   });
 
   it("agent fail after retry budget → failed + ALERT (I6, no agent-swap)", () => {

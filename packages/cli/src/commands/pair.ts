@@ -82,8 +82,8 @@ function pairInit(rest: string[]): number {
       `  enabled: ${cfg.enabled} · stages: [${cfg.stages.join(", ")}]\n` +
       `  agents: ${peers}\n` +
       (cfg.enabled
-        ? `  Pairing is ON for the code stage — a different-vendor agent will cross-check each delivery.\n` +
-          `  已为 code 阶段开启结对——交付会由一个不同厂商的 agent 互检。\n`
+        ? `  Pairing is ON for stages [${cfg.stages.join(", ")}] — a different-vendor agent cross-checks and scores each delivery.\n` +
+          `  已为 [${cfg.stages.join(", ")}] 阶段开启结对——交付会由不同厂商的 agent 互检并打分。\n`
         : `  Pairing is OFF: fewer than two distinct vendors installed (no heterogeneous peer).\n` +
           `  结对未开启：已装 agent 不足两个不同厂商（无异构搭档）。\n`),
   );

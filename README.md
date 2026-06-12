@@ -64,7 +64,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll release [ship\|waiver\|changelog\|consistency]` | Release guidance · changelog · consistency gate · gated tag push (`ship`) · recorded drift waiver (`waiver`) |
 | `roll release changelog generate [--write]` | Sync CHANGELOG from merged work |
 | `roll release consistency <check\|audit>` | Five-dimension gap check · US-TRUTH shadow drift audit (read-only, exit 0) |
-| `roll pair [init\|status]` | Cross-agent pairing: heterogeneous peer re-checks during builds |
+| `roll pair [init\|status\|score]` | Cross-agent pairing: heterogeneous peer re-checks and scores deliveries |
 | `roll peer [--reviewer <agent>] (--prompt <text>\|--file <path>)` | One-shot structured external-provider review; records `.roll/peer/runs.jsonl` |
 | **Config & machine** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |

@@ -64,7 +64,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll release [ship\|waiver\|changelog\|consistency]` | 发版指引 · changelog · 一致性闸 · 过闸打 tag(`ship`) · 记录化漂移豁免(`waiver`) |
 | `roll release changelog generate [--write]` | 从已合并工作同步 CHANGELOG |
 | `roll release consistency <check\|audit>` | 五维一致性检查 · US-TRUTH 影子漂移审计(只读,exit 0) |
-| `roll pair [init\|status]` | 跨 Agent 配对:建造期异构同行复检 |
+| `roll pair [init\|status\|score]` | 跨 Agent 配对:异构同行复检与交付打分 |
 | `roll peer [--reviewer <agent>] (--prompt <text>\|--file <path>)` | 一次性结构化外部 provider 评审；记录 `.roll/peer/runs.jsonl` |
 | **配置 · 本机** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | 读写 roll 配置(语言、loop 窗口、dream 时间) |

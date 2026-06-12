@@ -12,6 +12,8 @@
 
 - 评分成为 pairing 场景：score 阶段由异构配对 agent 给交付打分（note 带 scored-by 溯源），无候选/超时回落自评，永不阻塞 cycle；`roll pair init` 默认开 code+score 两阶段（US-PAIR-009） `[pairing]`
   <!-- evidence: .roll/features/cross-agent-pairing/US-PAIR-009/latest/US-PAIR-009-report.html -->
+- `roll pair score <story>` 手动让配对 agent 打分；`roll self-score` 新增 `--fallback-reason` 记录回落原因；三技能契约改"配对优先、自评回落"，结对指南中英双轨更新（US-PAIR-010） `[pairing]`
+  <!-- evidence: .roll/features/cross-agent-pairing/US-PAIR-010/latest/US-PAIR-010-report.html -->
 
 ## v3.612.2 — 2026-06-12
 

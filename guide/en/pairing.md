@@ -100,10 +100,29 @@ qualified heterogeneous peer exists, that absence is itself recorded
 
 Each pairing emits `pair:selected`, then `pair:verdict` (with the verdict,
 findings count, cost, and stage) or `pair:none-available`. The verdict is also
-written as evidence under the run's `peer/cycle-<id>.pair.json`.
+written as evidence under the run's `peer/cycle-<id>.pair.json`. A score
+pairing emits `pair:score` (score, verdict, cost) and writes
+`peer/cycle-<id>.score.pair.json`.
 
 ## Stages
 
-`code` is the proven default — a heterogeneous peer reviews the delivered diff.
-`design`, `test`, and `cycle` extend the same mechanism to other checkpoints;
-enable them in `stages` when you want earlier or broader second eyes.
+`code` and `score` are the defaults — a heterogeneous peer reviews the
+delivered diff, and another scores the finished cycle. `design`, `test`, and
+`cycle` extend the same mechanism to other checkpoints; enable them in
+`stages` when you want earlier or broader second eyes.
+
+## Scoring — the pair grades the cycle, not the author
+
+An agent grading its own delivery is a conflict of interest, so the cycle's
+quality score is itself a pairing scenario (`score` stage):
+
+- **In the loop**: after the acceptance gate passes, the runner asks the
+  paired heterogeneous agent to score the delivery. The note lands in the
+  card's `notes/` with provenance — `scoring: pair` and `scored-by: <agent>`.
+- **Manually**: `roll pair score <story-id> --summary "<delivery summary>"`
+  runs the same adapter from a session.
+- **Fallback, never a blocker**: no heterogeneous candidate, a timeout, or a
+  protocol miss degrades to the classic self-score —
+  `roll self-score <skill> <story> <score> <verdict> "<rationale>"
+  --fallback-reason "<why>"` — and the absence is audited via a
+  `pair:none-available` event. Both commands are idempotent.

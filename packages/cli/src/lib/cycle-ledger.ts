@@ -78,8 +78,6 @@ interface CycleEventFacts {
   peer?: string;
   pairVerdicts: string[];
   attest?: string;
-  prMergedBy: Map<string, number>;
-  prOpenBy: Map<string, number>;
 }
 
 function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventFacts>; prMergedBy: Map<string, number>; prOpenBy: Map<string, number> } {
@@ -97,7 +95,7 @@ function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventF
   const facts = (id: string): CycleEventFacts => {
     let f = byCycle.get(id);
     if (f === undefined) {
-      f = { pairVerdicts: [], prMergedBy, prOpenBy };
+      f = { pairVerdicts: [] };
       byCycle.set(id, f);
     }
     return f;
@@ -118,6 +116,10 @@ function rowTape(row: Record<string, unknown>, verdict: CycleLedgerVerdict, ev: 
   const storyId = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
   const tcr = typeof row["tcr_count"] === "number" ? (row["tcr_count"] as number) : 0;
   const seg = (key: CycleTapeSegment["key"], detail: string, state: CycleTapeSegment["state"]): CycleTapeSegment => ({ key, detail, state });
+  // `cycle`/`story` segments record FACTS that already happened (the cycle ran,
+  // a story was picked) — they stay green even on a failed row; the failure
+  // shows where it actually bit (build/peer/ci/pr/end). kimi pair-review noted
+  // the ambiguity; this is the intended reading of the trace tape.
   const endState = verdict === "delivered" ? "pass" : verdict === "idle" ? "idle" : verdict === "unknown" ? "unknown" : "fail";
   return [
     seg("cycle", typeof row["ts"] === "string" ? (row["ts"] as string).replace("T", " ").replace(/:\d{2}Z$/, "Z") : "—", "pass"),
@@ -126,7 +128,8 @@ function rowTape(row: Record<string, unknown>, verdict: CycleLedgerVerdict, ev: 
     seg(
       "peer",
       ev?.pairVerdicts.length ? ev.pairVerdicts.join("/") : ev?.peer === "consulted" ? "consulted" : ev?.peer === "skipped" ? "skipped" : "—",
-      ev?.pairVerdicts.includes("object") ? "fail" : ev?.pairVerdicts.length || ev?.peer === "consulted" ? "pass" : "unknown",
+      // kimi pair-review: a skipped peer gate is an idle segment, not an unknown.
+      ev?.pairVerdicts.includes("object") ? "fail" : ev?.pairVerdicts.length || ev?.peer === "consulted" ? "pass" : ev?.peer === "skipped" ? "idle" : "unknown",
     ),
     seg("ci", ev?.attest === "produced" ? "attest ✓" : ev?.attest === "skipped" ? "attest skipped" : "—", ev?.attest === "produced" ? "pass" : ev?.attest === "skipped" ? "fail" : "unknown"),
     seg(
@@ -164,7 +167,9 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     const outcome = String(row["outcome"] ?? "");
     const verdict = ledgerVerdict(status, outcome);
     const storyId = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
-    const ts = typeof row["ts"] === "string" ? Date.parse(row["ts"] as string) : Number.NaN;
+    // ts may be ISO or epoch (kimi pair-review).
+    const rawTs = row["ts"];
+    const ts = typeof rawTs === "string" ? Date.parse(rawTs) : typeof rawTs === "number" ? (rawTs > 10_000_000_000 ? rawTs : rawTs * 1000) : Number.NaN;
     const cost = typeof row["cost_effective_usd"] === "number" ? (row["cost_effective_usd"] as number) : typeof row["cost_usd"] === "number" ? (row["cost_usd"] as number) : undefined;
     const ev = byCycle.get(cycleId);
     const prNumber = storyId !== "" ? prMergedBy.get(storyId) : undefined;
@@ -185,6 +190,11 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       evidence,
     });
   }
-  rows.sort((a, b) => b.tsSec - a.tsSec);
-  return rows;
+  // De-dupe duplicate cycle ids (kimi pair-review): the LAST row wins — runs.jsonl
+  // is append-only, so the newest record is the corrected truth.
+  const byId = new Map<string, CycleLedgerRow>();
+  for (const r of rows) byId.set(r.cycleId, r);
+  const out = [...byId.values()];
+  out.sort((a, b) => b.tsSec - a.tsSec);
+  return out;
 }

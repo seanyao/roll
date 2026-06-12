@@ -80,3 +80,34 @@ describe("collectCycleLedger", () => {
     expect(r.verdict).toBe("failed");
   });
 });
+
+describe("kimi pair-review regressions", () => {
+  it("duplicate cycle ids: the last (newest) record wins", () => {
+    const p = project([
+      { cycle_id: "dup", status: "failed", ts: "2026-06-12T01:00:00Z" },
+      { cycle_id: "dup", status: "merged", outcome: "delivered", ts: "2026-06-12T02:00:00Z" },
+    ]);
+    const rows = collectCycleLedger(p);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.verdict).toBe("delivered");
+  });
+
+  it("numeric epoch ts is understood (seconds and millis)", () => {
+    const p = project([
+      { cycle_id: "s", status: "idle", ts: 1781230000 },
+      { cycle_id: "ms", status: "idle", ts: 1781230000000 },
+    ]);
+    const rows = collectCycleLedger(p);
+    expect(rows.every((r) => r.tsSec === 1781230000)).toBe(true);
+  });
+
+  it("a skipped peer gate renders as an idle segment", () => {
+    const p = project(
+      [{ cycle_id: "c", status: "merged", outcome: "delivered", story_id: "US-1", ts: "2026-06-12T01:00:00Z" }],
+      [{ type: "peer:gate", cycleId: "c", verdict: "skipped", reasons: [], ts: 1 }],
+    );
+    const peer = collectCycleLedger(p)[0]?.tape.find((s) => s.key === "peer");
+    expect(peer?.state).toBe("idle");
+    expect(peer?.detail).toBe("skipped");
+  });
+});

@@ -236,19 +236,29 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
   }
   const rationale = input.rationale.trim();
   if (rationale === "") throw new Error("self-score: rationale must be non-empty");
+  const explicitTs = input.ts !== undefined;
   const ts = input.ts ?? new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const epochSec = Math.floor(Date.parse(ts) / 1000);
+  let epochSec = Math.floor(Date.parse(ts) / 1000);
   if (!Number.isFinite(epochSec)) throw new Error(`self-score: invalid ts ${ts}`);
 
   const dir = selfScoreNoteDir(projectPath, story);
   // Idempotency: an existing note for the same skill/story/ts is either the
-  // same payload (retry → reuse) or a contradiction (→ fail loud).
+  // same payload (retry → reuse) or a contradiction (→ fail loud). A retry
+  // usually arrives WITHOUT the original ts (the agent just re-runs the
+  // command), so an identical skill/story/score/verdict/rationale note also
+  // counts as the same write, whatever its timestamp.
+  const rationaleKey = rationale.replace(/\s+/g, " ").slice(0, 300);
   for (const c of noteCandidates(dir, story)) {
     const prior = parseSelfScoreNote(readFileSync(c.path, "utf8"), c.path, story);
-    if (prior === null || prior.skill !== skill || prior.ts !== ts) continue;
-    if (prior.score === input.score && prior.verdict === input.verdict) {
+    if (prior === null || prior.skill !== skill) continue;
+    const samePayload = prior.score === input.score && prior.verdict === input.verdict;
+    if (samePayload && (prior.ts === ts || prior.note === rationaleKey)) {
       return { path: c.path, written: false };
     }
+    // A contradiction needs an identity claim: only an EXPLICIT same-ts write
+    // with a different payload is rejected. Default-ts writes landing in the
+    // same second are just consecutive notes (the rescore-after-review path).
+    if (!explicitTs || prior.ts !== ts) continue;
     throw new Error(
       `self-score: contradicting note for ${skill}/${story}@${ts} already exists at ${c.path} ` +
         `(${prior.verdict} ${prior.score} vs ${input.verdict} ${input.score})`,
@@ -256,7 +266,11 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
   }
 
   const date = ts.slice(0, 10);
-  const path = join(dir, `${date}-${skill}-${story}-${epochSec}.md`);
+  let path = join(dir, `${date}-${skill}-${story}-${epochSec}.md`);
+  while (existsSync(path)) {
+    epochSec += 1; // same-second sibling note: keep filenames unique
+    path = join(dir, `${date}-${skill}-${story}-${epochSec}.md`);
+  }
   const text = [
     "---",
     `skill: ${skill}`,

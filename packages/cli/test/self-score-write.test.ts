@@ -98,6 +98,21 @@ describe("writeSelfScoreNote", () => {
     expect(readdirSync(notesDir)).toHaveLength(1);
   });
 
+  it("is idempotent across retries without an explicit ts (agent retry path)", () => {
+    const p = project();
+    withCard(p, "goal-mode", "FIX-900");
+    const { ts: _ts, ...noTs } = PAYLOAD;
+    const first = writeSelfScoreNote(p, noTs);
+    const second = writeSelfScoreNote(p, noTs);
+    expect(second.written).toBe(false);
+    expect(second.path).toBe(first.path);
+    const notesDir = join(p, ".roll", "features", "goal-mode", "FIX-900", "notes");
+    expect(readdirSync(notesDir)).toHaveLength(1);
+    // a genuinely different self-score (new rationale) is NOT swallowed
+    const third = writeSelfScoreNote(p, { ...noTs, score: 8, rationale: "second cycle after review fixes" });
+    expect(third.written).toBe(true);
+  });
+
   it("rejects a contradictory rewrite of the same skill/story/ts", () => {
     const p = project();
     withCard(p, "goal-mode", "FIX-900");

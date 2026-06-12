@@ -126,3 +126,45 @@ describe("roll self-score --fallback-reason — US-PAIR-010", () => {
     expect(text).toContain("fallback-reason: pair scoring timed out");
   });
 });
+
+describe("codex pair-review fixes — US-PAIR-010", () => {
+  it("--skill overrides the prefix heuristic (design sessions)", async () => {
+    const p = project(SCORE_CFG);
+    const r = await run(p, ["US-T-001", "--summary", "design session", "--skill", "roll-design"]);
+    expect(r.code).toBe(0);
+    const text = readFileSync(readStorySelfScores(p, "US-T-001")[0]?.sourcePath ?? "", "utf8");
+    expect(text).toContain("skill: roll-design");
+  });
+
+  it("--worker pins heterogeneity to the real author", async () => {
+    const p = project(SCORE_CFG);
+    // worker kimi → only hetero candidate is claude
+    const r = await run(p, ["US-T-001", "--summary", "s", "--worker", "kimi"]);
+    expect(r.code).toBe(0);
+    const text = readFileSync(readStorySelfScores(p, "US-T-001")[0]?.sourcePath ?? "", "utf8");
+    expect(text).toContain("scored-by: claude");
+  });
+
+  it("backlog row fallback never matches a longer id (US-X-1 vs US-X-10)", async () => {
+    const p = project(SCORE_CFG);
+    writeFileSync(join(p, ".roll", "backlog.md"), "| US-T-0010 | the other story | Todo |\n| US-T-001 | the right story | Todo |\n");
+    const r = await run(p, ["US-T-001"]);
+    expect(r.code).toBe(0);
+  });
+
+  it("a retry that adds a fallback reason writes a new audited note", async () => {
+    const p = project(null);
+    const old = process.cwd();
+    process.chdir(p);
+    try {
+      await selfScoreCommand(["roll-build", "US-T-009", "7", "ok", "same rationale"]);
+      await selfScoreCommand(["roll-build", "US-T-009", "7", "ok", "same rationale", "--fallback-reason", "pair timed out"]);
+    } finally {
+      process.chdir(old);
+    }
+    const notes = readStorySelfScores(p, "US-T-009");
+    expect(notes).toHaveLength(2);
+    const latest = readFileSync(notes[1]?.sourcePath ?? "", "utf8");
+    expect(latest).toContain("fallback-reason: pair timed out");
+  });
+});

@@ -109,7 +109,7 @@ import { recoverPiUsage } from "./usage-recovery.js";
 import { realBudgetCheck } from "./budget-check.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
-import { enabledPairingStages, parsePairScoreOutput, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
+import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
@@ -801,12 +801,7 @@ export async function executeCommand(
       // every pairing: never throws, never blocks, absences audited.
       if (!attestBlocked && commitsAhead > 0 && storyId !== "") {
         const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
-          const prompt =
-            `You are a heterogeneous PAIRING scorer. A different agent delivered the cycle below; ` +
-            `grade the delivery quality honestly (root-cause depth, test coverage, scope discipline, evidence). ` +
-            `Reply with exactly one "SCORE: <integer 1..10>" line, one "VERDICT: good|ok|regression" line, ` +
-            `and one "RATIONALE: <one sentence>" line.\n\nDELIVERY:\n` +
-            summary;
+          const prompt = buildPairScorePrompt(summary);
           let res;
           try {
             res = await Promise.race([

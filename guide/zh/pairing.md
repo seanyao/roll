@@ -84,8 +84,22 @@ roll pair status
 
 每次结对先发 `pair:selected`，再发 `pair:verdict`（含裁定、发现数、成本、阶段）
 或 `pair:none-available`。裁定同时作为证据写入本轮的 `peer/cycle-<id>.pair.json`。
+评分结对发 `pair:score`（分数、裁定、成本），证据写入
+`peer/cycle-<id>.score.pair.json`。
 
 ## 阶段
 
-`code` 是经过验证的默认——异构搭档复检交付的改动。`design`、`test`、`cycle`
-把同一套机制扩到其它检查点；想要更早或更广的第二双眼睛时在 `stages` 里开启。
+`code` 和 `score` 是默认——异构搭档复检交付的改动，另一位给完成的 cycle 打分。
+`design`、`test`、`cycle` 把同一套机制扩到其它检查点；想要更早或更广的第二双
+眼睛时在 `stages` 里开启。
+
+## 评分 —— 配对打分，不让作者给自己打分
+
+agent 给自己的交付打分是利益冲突，所以质量评分本身就是一个结对场景（`score` 阶段）：
+
+- **loop 内**：验收闸通过后，runner 让异构配对 agent 给交付打分。note 落在卡片
+  `notes/` 目录，带溯源——`scoring: pair` 与 `scored-by: <agent>`。
+- **手动**：`roll pair score <story-id> --summary "<交付摘要>"` 在会话里走同一适配器。
+- **回落，绝不阻塞**：无异构候选、超时或协议不符时退回经典自评——
+  `roll self-score <skill> <story> <score> <verdict> "<理由>" --fallback-reason "<原因>"`
+  ——缺席通过 `pair:none-available` 事件留痕。两条命令都幂等。

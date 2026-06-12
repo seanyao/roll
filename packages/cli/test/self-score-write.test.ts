@@ -211,9 +211,12 @@ describe("roll self-score command", () => {
 describe("skill contracts no longer source the CLI bundle", () => {
   const skillsRoot = join(__dirname, "..", "..", "..", "skills");
 
-  it.each(["roll-build", "roll-fix", "roll-design"])("%s contract calls the TS-native path", (skill) => {
+  it.each(["roll-build", "roll-fix", "roll-design"])("%s contract calls the TS-native path, pair-first", (skill) => {
     const contract = readFileSync(join(skillsRoot, skill, "references", "full-contract.md"), "utf8");
     expect(contract).not.toMatch(/source "\$\(command -v roll\)"[\s\S]{0,200}_skill_write_self_score/);
+    // US-PAIR-010: pair scoring is the primary path; self-score is the documented fallback.
+    expect(contract).toContain("roll pair score");
     expect(contract).toContain("roll self-score");
+    expect(contract).toContain("--fallback-reason");
   });
 });

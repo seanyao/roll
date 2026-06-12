@@ -308,3 +308,14 @@ export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | 
   if (!Number.isInteger(score) || score < 1 || score > 10) return null;
   return { score, verdict: vm[1].toLowerCase() as PairScore["verdict"], rationale: rm[1].trim() };
 }
+
+/** The score-stage prompt (shared by the loop executor and `roll pair score`). */
+export function buildPairScorePrompt(summary: string): string {
+  return (
+    `You are a heterogeneous PAIRING scorer. A different agent delivered the cycle below; ` +
+    `grade the delivery quality honestly (root-cause depth, test coverage, scope discipline, evidence). ` +
+    `Reply with exactly one "SCORE: <integer 1..10>" line, one "VERDICT: good|ok|regression" line, ` +
+    `and one "RATIONALE: <one sentence>" line.\n\nDELIVERY:\n` +
+    summary
+  );
+}

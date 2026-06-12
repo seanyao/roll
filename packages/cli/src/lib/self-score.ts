@@ -224,6 +224,9 @@ function selfScoreNoteDir(projectPath: string, storyId: string): string {
 }
 
 export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInput): SelfScoreWriteResult {
+  if (!existsSync(join(projectPath, ".roll"))) {
+    throw new Error(`self-score: ${projectPath} is not a roll project (no .roll/) — run from the main project root`);
+  }
   const skill = input.skill.trim();
   if (skill === "") throw new Error("self-score: skill must be non-empty");
   const story = input.story.trim();

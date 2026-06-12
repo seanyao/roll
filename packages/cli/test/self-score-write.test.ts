@@ -131,6 +131,13 @@ describe("writeSelfScoreNote", () => {
     expect(() => writeSelfScoreNote(p, { ...PAYLOAD, story: "" })).toThrow(/story/i);
   });
 
+  it("refuses to write outside a roll project (no stray .roll/ minting)", () => {
+    const p = mkdtempSync(join(tmpdir(), "roll-noproject-"));
+    dirs.push(p);
+    expect(() => writeSelfScoreNote(p, PAYLOAD)).toThrow(/not a roll project/i);
+    expect(existsSync(join(p, ".roll"))).toBe(false);
+  });
+
   it("two writers for different stories never collide", () => {
     const p = project();
     withCard(p, "goal-mode", "FIX-900");

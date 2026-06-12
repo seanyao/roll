@@ -16,6 +16,7 @@ import { SPINE_STAGES, countLegacyStories, storySpectrumState, type TruthBoardIn
 import { renderTruthConsole, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
+import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
@@ -344,6 +345,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         spineKeys: SPINE_STAGES.map((s) => s.key),
         cycles: collectCycleLedger(cwd),
         agents: collectAgentPanel(cwd),
+        releasePanel: collectReleasePanel(cwd),
       }),
       "utf8",
     );

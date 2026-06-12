@@ -56,6 +56,21 @@ const AGENTS = [
   },
 ];
 
+const RELEASE_PANEL = {
+  dims: [
+    { key: "code-backlog" as const, tally: { fail: 1, warn: 2, unknown: 3, subjects: ["US-X-1"] } },
+    { key: "cards" as const, tally: { fail: 0, warn: 1, unknown: 0, subjects: ["US-X-2"] } },
+    { key: "docs" as const, tally: { fail: 0, warn: 0, unknown: 1, subjects: ["FIX-9"] } },
+    { key: "tests" as const, tally: { fail: 0, warn: 0, unknown: 0, subjects: [] } },
+    { key: "bilingual" as const, tally: { fail: 0, warn: 0, unknown: 0, subjects: [] } },
+    { key: "site" as const, tally: { fail: 0, warn: 0, unknown: 0, subjects: [] } },
+  ],
+  total: { fail: 1, warn: 3, unknown: 4 },
+  blocking: true,
+  generatedAt: "2026-06-12T00:00:00Z",
+  prevTag: "v3.612.1",
+};
+
 const CYCLES = [
   {
     cycleId: "20260612-x-1234", tsSec: 1781230000, verdict: "delivered" as const, storyId: "US-A-1", agent: "claude",
@@ -87,6 +102,7 @@ function render(snapshot: TruthSnapshot = SNAP): string {
     spineKeys: SPINE,
     cycles: CYCLES,
     agents: AGENTS,
+    releasePanel: RELEASE_PANEL,
   });
 }
 
@@ -100,7 +116,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     }
     const order = ["overview", "loop", "release", "backlog", "skills"].map((k) => html.indexOf(`data-tab="${k}"`));
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(html).toContain("US-DOSSIER-015/016");
+    expect(html).toContain("US-DOSSIER-016"); // pending/changelog placeholder remains
     expect(html).toContain("US-DOSSIER-017");
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
   });
@@ -114,6 +130,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       spineKeys: SPINE,
       cycles: [],
       agents: [],
+      releasePanel: { dims: [], total: { fail: 0, warn: 0, unknown: 0 }, blocking: false },
     });
     expect(custom).toContain("acme");
     expect(custom).toContain("Ship truth.");
@@ -272,5 +289,47 @@ describe("agents panel — US-DOSSIER-014", () => {
   it("AC3: the 72h window is explicitly labelled (the documented trade-off)", () => {
     expect(html).toContain("72h");
     expect(html).toContain("近72h周期");
+  });
+});
+
+describe("release tab — US-DOSSIER-015", () => {
+  const html = render();
+
+  it("AC1: gate head carries tag, verdict, f/w/? totals, cut, previous, merged/pending bar", () => {
+    expect(html).toContain("v3.612.2");
+    expect(html).toContain("v3.612.1"); // previous tag
+    expect(html).toContain("f:1 w:3 ?:4");
+    expect(html).toContain("merged");
+    expect(html).toContain("pending");
+  });
+
+  it("AC2: six dimension rows + the strict-equality total row", () => {
+    for (const k of ["code-backlog", "cards", "docs", "tests", "bilingual", "site"]) expect(html).toContain(`data-dim="${k}"`);
+    expect(html).toContain('data-truth="gate-total"');
+    expect(html).toContain("① ");
+    expect(html).toContain("⑥ ");
+  });
+
+  it("AC3: a failing dimension shows the blocking banner", () => {
+    expect(html).toContain("blocks the release");
+    expect(html).toContain("挡发版");
+  });
+
+  it("AC4: dimension drift chips deep-link the backlog search (docs dim → FIX card)", () => {
+    expect(html).toContain('href="#backlog/q:FIX-9"');
+    expect(html).toContain('href="#backlog/q:US-X-1"');
+    expect(html).toContain("q:"); // hash query prefilter script
+  });
+
+  it("AC5: the proposed data dimension renders dashed with FIX-248/249 case links", () => {
+    expect(html).toContain('data-dim="data"');
+    expect(html).toContain("proposed");
+    expect(html).toContain("#backlog/q:FIX-248");
+    expect(html).toContain("#backlog/q:FIX-249");
+  });
+
+  it("AC6: the copyable consistency command chip is present", () => {
+    expect(html).toContain('data-copy="roll release consistency check"');
+    expect(html).toContain("✓ copied");
   });
 });

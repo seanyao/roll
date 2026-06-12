@@ -21,6 +21,7 @@
 import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
 import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
+import type { ReleasePanelVM } from "./release-panel.js";
 
 export interface TruthConsoleBrand {
   /** Injected, never hardcoded (owner ruling): project name + slogan. */
@@ -69,6 +70,8 @@ export interface TruthConsoleInput {
   cycles: CycleLedgerRow[];
   /** Agents on this machine (US-DOSSIER-014). */
   agents: AgentPanelRow[];
+  /** Release gate head + six-dimension consistency panel (US-DOSSIER-015). */
+  releasePanel: ReleasePanelVM;
 }
 
 const MONO = `font-family:'IBM Plex Mono',monospace;`;
@@ -573,6 +576,120 @@ function backlogTab(input: TruthConsoleInput): string {
   );
 }
 
+const DIM_META: Record<string, { no: string; en: string; zh: string; whatEn: string; whatZh: string }> = {
+  "code-backlog": { no: "①", en: "code ↔ backlog", zh: "代码↔待办", whatEn: "Done claims vs merge & cycle facts", whatZh: "Done 声明对合并与周期事实" },
+  cards: { no: "②", en: "cards / evidence", zh: "卡片/证据", whatEn: "every row owns its card; evidence never dangles", whatZh: "每行有卡，证据链接不悬空" },
+  docs: { no: "③", en: "docs", zh: "文档", whatEn: "changelog / guide / README / --help", whatZh: "changelog/guide/README/--help" },
+  tests: { no: "④", en: "tests", zh: "测试", whatEn: "suites green, coverage honest", whatZh: "套件全绿，覆盖诚实" },
+  bilingual: { no: "⑤", en: "bilingual", zh: "双语", whatEn: "guide en↔zh + i18n keys in parity", whatZh: "指南中英与 i18n key 对齐" },
+  site: { no: "⑥", en: "site", zh: "站点", whatEn: "published site matches the repo", whatZh: "站点与仓库一致" },
+};
+
+function fwu(f: number, w: number, u: number): string {
+  return (
+    `<span style="display:flex;gap:14px;justify-content:flex-end;${MONO}font-size:11.5px;white-space:nowrap;">` +
+    `<span style="color:${f > 0 ? C.red : "#b6bdc9"};font-weight:600;">f:${f}</span>` +
+    `<span style="color:${w > 0 ? C.amber : "#b6bdc9"};font-weight:600;">w:${w}</span>` +
+    `<span style="color:${u > 0 ? C.slate : "#b6bdc9"};">?:${u}</span></span>`
+  );
+}
+
+function releaseTab(input: TruthConsoleInput): string {
+  const s = input.snapshot;
+  const rp = input.releasePanel;
+  const rel = s.release;
+  const relColor = rel?.verdict === "pass" ? C.green : rel?.verdict === "fail" ? C.red : rel?.verdict === "warn" ? C.amber : C.slate;
+  const spectrum = s.story.spectrum;
+  const merged = spectrum.done;
+  const pending = spectrum.wip + spectrum.todo + spectrum.hold;
+  const mergedPct = s.story.total > 0 ? Math.round((merged / s.story.total) * 100) : 0;
+  const head = (label: string, value: string, mono = true): string =>
+    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};">${label}</div>` +
+    `<div style="${mono ? MONO : ""}font-size:13px;color:${C.body};margin-top:8px;white-space:nowrap;">${value}</div></div>`;
+
+  const gateHead =
+    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:20px 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:30px;padding:16px 20px;">` +
+    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};">${bi("release", "发版")}</div>` +
+    `<div style="${MONO}font-size:24px;font-weight:600;color:${C.ink};margin-top:3px;">${esc(rel?.latestTag ?? "—")}</div></div>` +
+    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};">${bi("verdict", "判定")}</div>` +
+    `<div style="margin-top:6px;"><span style="${MONO}font-size:11px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid ${relColor}55;color:${relColor};">${esc(rel?.verdict ?? "unknown")}</span></div></div>` +
+    head(bi("gate", "闸门"), fwuInline(rp.total)) +
+    head(bi("cut", "切版"), shortTs(rel?.collectedAt)) +
+    head(bi("previous", "上一版"), esc(rp.prevTag ?? "—")) +
+    `<span style="flex:1;"></span>` +
+    `<div style="${MONO}font-size:12px;color:${C.dim};white-space:nowrap;"><b style="color:${C.green};font-weight:600;">${merged}</b> ${bi("merged", "已合")} · <b style="color:${C.amber};font-weight:600;">${pending}</b> ${bi("pending", "待交付")}</div></div>` +
+    `<div style="padding:0 20px 16px;"><div style="display:flex;height:11px;border-radius:999px;overflow:hidden;border:1px solid #e4e8ef;">` +
+    `<span style="width:${mergedPct}%;background:${C.green};"></span><span style="flex:1;background:#eef1f5;"></span></div></div></section>`;
+
+  const dimRows = rp.dims
+    .map((d) => {
+      // runtime fallback (kimi pair-review): a future dimension renders honestly
+      // instead of crashing the whole page.
+      const meta = DIM_META[d.key] ?? { no: "·", en: d.key, zh: d.key, whatEn: "", whatZh: "" };
+      const dotColor = d.tally.fail > 0 ? C.red : d.tally.warn > 0 ? C.amber : d.tally.unknown > 0 ? C.slate : C.green;
+      const chips = d.tally.subjects
+        .map((sub) => `<a href="#backlog/q:${encodeURIComponent(sub)}" style="${MONO}font-size:10.5px;color:${C.blue};border:1px solid ${C.blue}55;border-radius:5px;padding:2px 7px;text-decoration:none;white-space:nowrap;">${esc(sub)}</a>`)
+        .join("");
+      return (
+        `<div class="rel-dim" data-dim="${d.key}" style="display:grid;grid-template-columns:215px 1fr 200px;gap:14px;align-items:center;padding:11px 18px;border-top:1px solid ${C.hair};">` +
+        `<span style="display:flex;align-items:center;gap:9px;min-width:0;">` +
+        `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>` +
+        `<span style="${MONO}font-size:12.5px;font-weight:600;color:${C.ink};white-space:nowrap;">${meta.no} ${bi(meta.en, meta.zh)}</span></span>` +
+        `<span style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="font-size:12.5px;color:#6b7488;">${bi(meta.whatEn, meta.whatZh)}</span>${chips}</span>` +
+        fwu(d.tally.fail, d.tally.warn, d.tally.unknown) +
+        `</div>`
+      );
+    })
+    .join("");
+
+  const proposedRow =
+    `<div class="rel-dim rel-dim-proposed" data-dim="data" style="display:grid;grid-template-columns:215px 1fr 200px;gap:14px;align-items:center;padding:11px 18px;border-top:1px dashed #c8ced6;opacity:.78;">` +
+    `<span style="display:flex;align-items:center;gap:9px;min-width:0;">` +
+    `<span style="width:8px;height:8px;border-radius:50%;border:1px dashed #c8ced6;background:transparent;flex:none;"></span>` +
+    `<span style="${MONO}font-size:12.5px;font-weight:600;color:${C.sub};white-space:nowrap;">⑦ ${bi("data", "数据")}</span>` +
+    `<span style="${MONO}font-size:9px;letter-spacing:.05em;text-transform:uppercase;padding:2px 5px;border-radius:4px;border:1px dashed #c8ced6;color:${C.faint};flex:none;">${bi("proposed", "提案")}</span></span>` +
+    `<span style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="font-size:12.5px;color:#6b7488;">${bi("schema contracts · the same number equal everywhere", "schema 契约 · 同一个数处处相等")}</span>` +
+    `<a href="#backlog/q:FIX-248" style="${MONO}font-size:10.5px;color:${C.blue};border:1px solid ${C.blue}55;border-radius:5px;padding:2px 7px;text-decoration:none;">FIX-248</a>` +
+    `<a href="#backlog/q:FIX-249" style="${MONO}font-size:10.5px;color:${C.blue};border:1px solid ${C.blue}55;border-radius:5px;padding:2px 7px;text-decoration:none;">FIX-249</a></span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};text-align:right;">—</span></div>`;
+
+  const totalRow =
+    `<div style="display:grid;grid-template-columns:215px 1fr 200px;gap:14px;align-items:center;padding:11px 18px;border-top:1px solid ${C.hair};background:#fbfcfe;">` +
+    `<span style="${MONO}font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi("gate total", "闸门合计")}</span>` +
+    `<span>${rp.blocking ? `<span style="${MONO}font-size:11px;font-weight:600;color:${C.red};">${bi("a failing dimension blocks the release", "有维度不通过——挡发版")}</span>` : ""}</span>` +
+    `<span data-truth="gate-total">${fwu(rp.total.fail, rp.total.warn, rp.total.unknown)}</span></div>`;
+
+  return (
+    `<div style="padding:30px 0 4px;">` +
+    kicker(bi("It says it will ship — the gate decides", "说要发——闸门说了算")) +
+    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Release", "发版")}</h1>` +
+    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
+      "Why can't it ship? Read it, don't guess it: six reconciled dimensions, every drift with an address.",
+      "为什么发不了版？读出来，不用猜：六个对账维度，每处漂移都有地址。",
+    )}</p></div>` +
+    gateHead +
+    `<div style="display:flex;align-items:baseline;gap:12px;margin:26px 0 12px;flex-wrap:wrap;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Consistency gate", "一致性闸门")}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("six dimensions reconciled against truth anchors", "六维对真相锚点对账")}${rp.generatedAt !== undefined ? ` · ${shortTs(rp.generatedAt)}` : ""}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
+    `<code class="copy-chip" data-copy="roll release consistency check" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">roll release consistency check</code></div>` +
+    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    dimRows +
+    proposedRow +
+    totalRow +
+    `</section>` +
+    `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:18px 20px;margin:18px 0 8px;color:${C.faint};font-size:13px;">${bi(
+      "Pending delivery & changelog by epic — being built (US-DOSSIER-016).",
+      "待交付与变更日志（按史诗）——建设中（US-DOSSIER-016）。",
+    )}</section>`
+  );
+}
+
+function fwuInline(t: { fail: number; warn: number; unknown: number }): string {
+  return `f:${t.fail} w:${t.warn} ?:${t.unknown}`;
+}
+
 function placeholderTab(titleEn: string, titleZh: string, fillerStory: string): string {
   return (
     `<div style="padding:34px 0 8px;">` +
@@ -674,9 +791,19 @@ const CONSOLE_SCRIPT = `<script>
   function applyPrefilter() {
     var parts = hashParts();
     if (parts[0] === "backlog" && parts[1]) {
-      active = {};
-      active[parts[1]] = true;
-      applyFilters();
+      if (parts[1].indexOf("q:") === 0) {
+        // US-DOSSIER-015: dimension drift chips deep-link a search query.
+        var q = parts[1].slice(2);
+        try { q = decodeURIComponent(q); } catch (e) { /* malformed escape — use raw */ }
+        var box = document.getElementById("bl-search");
+        if (box) { box.value = q; }
+        active = {};
+        applyFilters();
+      } else {
+        active = {};
+        active[parts[1]] = true;
+        applyFilters();
+      }
     }
   }
   window.addEventListener("hashchange", function () { applyTab(); applyPrefilter(); });
@@ -694,6 +821,20 @@ const CONSOLE_SCRIPT = `<script>
     }
     var search = document.getElementById("bl-search");
     if (search) search.addEventListener("input", applyFilters);
+    var chipsCopy = document.querySelectorAll(".copy-chip");
+    for (var cc = 0; cc < chipsCopy.length; cc++) {
+      chipsCopy[cc].addEventListener("click", function () {
+        var text = this.getAttribute("data-copy") || this.textContent;
+        var self = this;
+        try {
+          navigator.clipboard.writeText(text).then(function () {
+            var old = self.textContent;
+            self.textContent = "✓ copied";
+            setTimeout(function () { self.textContent = old; }, 1200);
+          });
+        } catch (e) { /* clipboard unavailable (file://) — chip stays copyable by selection */ }
+      });
+    }
     var rbs = document.querySelectorAll(".cy-range");
     for (var rb = 0; rb < rbs.length; rb++) {
       rbs[rb].addEventListener("click", function () { applyRange(this.getAttribute("data-range")); });
@@ -762,7 +903,7 @@ a{color:${C.blue};}
   const panes =
     `<div id="tab-overview">${overviewTab(input)}</div>` +
     `<div id="tab-loop" style="display:none;">${loopTab(input)}</div>` +
-    `<div id="tab-release" style="display:none;">${placeholderTab("Release", "发版", "US-DOSSIER-015/016")}</div>` +
+    `<div id="tab-release" style="display:none;">${releaseTab(input)}</div>` +
     `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
     `<div id="tab-skills" style="display:none;">${placeholderTab("Skills", "技能", "US-DOSSIER-017")}</div>`;
 

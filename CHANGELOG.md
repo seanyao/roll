@@ -8,6 +8,8 @@
 
 ### 新功能
 
+- 看板升级五页签真相控制台：总览页三十秒读完判定条、循环心跳、三聚合卡与六态光谱，页签 hash 路由下钻返回不丢；品牌与 slogan 注入式；旧 ledger 暂驻待办页签（US-DOSSIER-011） `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-011/latest/US-DOSSIER-011-report.html -->
 - 真相口径同源：`roll index` 一次聚合产出 TruthSnapshot，同一序列化同时内嵌 index.html 并写出 `truth.json`（机器可读）；reverted cycle 纳入失败计数不再被吞（US-DOSSIER-010） `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-010/latest/US-DOSSIER-010-report.html -->
 

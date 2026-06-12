@@ -347,6 +347,9 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         cycles: collectCycleLedger(cwd),
         agents: collectAgentPanel(cwd),
         releasePanel: collectReleasePanel(cwd),
+        // kimi pair-review: the PR links need the repo slug — reuse the
+        // FIX-275 git snapshot (one probe per run) instead of a fresh git call.
+        ...(runCache.git?.slug !== undefined ? { githubSlug: runCache.git.slug } : {}),
         releaseScope: collectReleaseScope(
           cwd,
           epics.flatMap((e) =>

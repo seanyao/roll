@@ -17,6 +17,7 @@ import { renderTruthConsole, type BacklogEpicVM, type BacklogVM } from "../lib/t
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
+import { collectReleaseScope } from "../lib/release-scope.js";
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
@@ -346,6 +347,18 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         cycles: collectCycleLedger(cwd),
         agents: collectAgentPanel(cwd),
         releasePanel: collectReleasePanel(cwd),
+        releaseScope: collectReleaseScope(
+          cwd,
+          epics.flatMap((e) =>
+            e.stories.map((st) => ({
+              id: st.id,
+              epic: st.epic,
+              title: st.title ?? st.id,
+              state: storySpectrumState(st),
+              ...(st.claim !== undefined ? { claim: st.claim } : {}),
+            })),
+          ),
+        ),
       }),
       "utf8",
     );

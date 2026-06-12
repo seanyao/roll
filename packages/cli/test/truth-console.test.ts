@@ -56,6 +56,21 @@ const AGENTS = [
   },
 ];
 
+const RELEASE_SCOPE = {
+  pending: [
+    { epic: "alpha", items: [{ id: "FIX-9", epic: "alpha", title: "fix it", state: "todo" }] },
+  ],
+  shipped: [
+    { epic: "alpha", items: [{ id: "US-A-1", epic: "alpha", title: "first", state: "done", prNumber: 638 }] },
+  ],
+  pendingCount: 5,
+  shippedCount: 5,
+  history: [
+    { tag: "v3.612.2", date: "2026-06-12", waived: false, items: ["item one"] },
+    { tag: "v3.611.2", date: "2026-06-11", waived: true, items: ["older"] },
+  ],
+};
+
 const RELEASE_PANEL = {
   dims: [
     { key: "code-backlog" as const, tally: { fail: 1, warn: 2, unknown: 3, subjects: ["US-X-1"] } },
@@ -103,6 +118,8 @@ function render(snapshot: TruthSnapshot = SNAP): string {
     cycles: CYCLES,
     agents: AGENTS,
     releasePanel: RELEASE_PANEL,
+    releaseScope: RELEASE_SCOPE,
+    githubSlug: "seanyao/roll",
   });
 }
 
@@ -116,7 +133,6 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     }
     const order = ["overview", "loop", "release", "backlog", "skills"].map((k) => html.indexOf(`data-tab="${k}"`));
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(html).toContain("US-DOSSIER-016"); // pending/changelog placeholder remains
     expect(html).toContain("US-DOSSIER-017");
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
   });
@@ -131,6 +147,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       cycles: [],
       agents: [],
       releasePanel: { dims: [], total: { fail: 0, warn: 0, unknown: 0 }, blocking: false },
+      releaseScope: { pending: [], shipped: [], pendingCount: 0, shippedCount: 0, history: [] },
     });
     expect(custom).toContain("acme");
     expect(custom).toContain("Ship truth.");
@@ -331,5 +348,34 @@ describe("release tab — US-DOSSIER-015", () => {
   it("AC6: the copyable consistency command chip is present", () => {
     expect(html).toContain('data-copy="roll release consistency check"');
     expect(html).toContain("✓ copied");
+  });
+});
+
+describe("release scope sections — US-DOSSIER-016", () => {
+  const html = render();
+
+  it("AC1: pending grouped by epic, rows link to story dossiers with status", () => {
+    expect(html).toContain("Pending delivery");
+    expect(html).toContain("待交付");
+    expect(html).toContain('href="alpha/FIX-9/index.html"');
+  });
+
+  it("AC2: changelog generated from merged truth with PR evidence links", () => {
+    expect(html).toContain("Changelog (merged truth)");
+    expect(html).toContain('href="https://github.com/seanyao/roll/pull/638"');
+    expect(html).toContain("#638 merged");
+  });
+
+  it("AC3: collapsible version history with waiver marks", () => {
+    expect(html).toContain("Version history");
+    expect(html).toContain("v3.612.2");
+    expect(html).toContain(">waived<");
+  });
+
+  it("AC4: head merged/pending equals the scope arithmetic (total - done)", () => {
+    // SNAP: total 10, done 5 → pending 5 in the gate head, equal to scope count anchors
+    expect(html).toMatch(/>5<\/b> <span class="lang-en">pending/);
+    expect(html).toContain('data-truth="pending-count"');
+    expect(html).toContain('data-truth="shipped-count"');
   });
 });

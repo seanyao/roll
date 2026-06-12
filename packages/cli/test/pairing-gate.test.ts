@@ -208,3 +208,82 @@ describe("enabledPairingStages — executor stage iteration seam (US-PAIR-004)",
     expect(enabledPairingStages(dir)).toEqual(["code", "design"]);
   });
 });
+
+// ── US-PAIR-009: score stage — heterogeneous peer scores the cycle ───────────
+import { runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
+import { readStorySelfScores } from "../src/lib/self-score.js";
+
+const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  claude: [code, score]\n  codex: [code, score]\n  kimi: [code, score]\n`;
+
+function scoreDeps(over: Partial<RunScorePairingDeps> = {}): { d: RunScorePairingDeps; events: PairEvent[] } {
+  const events: PairEvent[] = [];
+  const d: RunScorePairingDeps = {
+    installed: ["claude", "codex", "kimi"],
+    isAvailable: () => true,
+    scorePeer: async () => ({ score: 8, verdict: "good", rationale: "clean delivery, tests cover the seams", cost: 0.05 }),
+    event: (e) => events.push(e),
+    now: () => 1234,
+    ...over,
+  };
+  return { d, events };
+}
+
+describe("runScorePairing — US-PAIR-009", () => {
+  it("file absent / stage not enabled = off", async () => {
+    const off = project(null);
+    const { d } = scoreDeps();
+    expect((await runScorePairing(off.dir, off.rt, "c1", "claude", "US-X-001", "roll-build", "summary", d)).status).toBe("off");
+    const noScore = project(ENABLED); // stages: [code] only
+    expect((await runScorePairing(noScore.dir, noScore.rt, "c1", "claude", "US-X-001", "roll-build", "summary", scoreDeps().d)).status).toBe("off");
+  });
+
+  it("scores via a heterogeneous peer: note + evidence + pair:score event", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = scoreDeps();
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "delivery summary", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).not.toBe("claude");
+    // note: written with pair provenance, readable by existing readers
+    const notes = readStorySelfScores(dir, "US-X-001");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.score).toBe(8);
+    const noteText = readFileSync(notes[0]?.sourcePath ?? "", "utf8");
+    expect(noteText).toContain("scoring: pair");
+    expect(noteText).toContain(`scored-by: ${r.peer}`);
+    // evidence file in the stage namespace
+    const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.score.pair.json"), "utf8"));
+    expect(ev.score).toBe(8);
+    expect(ev.stage).toBe("score");
+    // events: selected + score, both stage-stamped
+    expect(events.map((e) => e.type)).toEqual(["pair:selected", "pair:score"]);
+    const scoreEvent = events[1] as Extract<PairEvent, { type: "pair:score" }>;
+    expect(scoreEvent.score).toBe(8);
+    expect(scoreEvent.cost).toBe(0.05);
+  });
+
+  it("no heterogeneous candidate → none-available event, never blocks", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = scoreDeps({ installed: ["claude"] });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("none-available");
+    expect(events.map((e) => e.type)).toEqual(["pair:none-available"]);
+    expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0); // fallback note is the caller's self path
+  });
+
+  it("peer timeout → status timeout, no note, no partial evidence", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d } = scoreDeps({ scorePeer: async () => null });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("timeout");
+    expect(existsSync(join(rt, "peer", "cycle-c1.score.pair.json"))).toBe(false);
+    expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0);
+  });
+
+  it("out-of-range / malformed peer score → error status, nothing written", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d } = scoreDeps({ scorePeer: async () => ({ score: 99, verdict: "good", rationale: "x", cost: 0 }) });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("error");
+    expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0);
+  });
+});

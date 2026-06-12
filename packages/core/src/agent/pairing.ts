@@ -300,6 +300,12 @@ export function aggregatePairingCost(events: readonly RollEvent[]): PairingCostS
       summary.byPeer[peer] = (summary.byPeer[peer] ?? 0) + 1;
       summary.totalCost += Number.isFinite(e.cost) ? e.cost : 0;
       summary.totalFindings += Number.isFinite(e.findings) ? e.findings : 0;
+    } else if (e.type === "pair:score") {
+      // US-PAIR-009: a score pairing is pairing activity + spend (no findings axis).
+      summary.pairings += 1;
+      const peer = canonicalAgentName(e.peer);
+      summary.byPeer[peer] = (summary.byPeer[peer] ?? 0) + 1;
+      summary.totalCost += Number.isFinite(e.cost) ? e.cost : 0;
     } else if (e.type === "pair:none-available") {
       summary.noneAvailable += 1;
     }

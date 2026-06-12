@@ -90,6 +90,8 @@ export type RollEvent =
   // US-PAIR-004: `stage` is optional for back-compat with PAIR-003 (code-only)
   // logs; multi-stage pairing stamps it so verdicts are distinguishable per stage.
   | { type: "pair:verdict"; cycleId: string; peer: string; verdict: "agree" | "refine" | "object"; findings: number; cost: number; stage?: string; ts: number }
+  // US-PAIR-009: the score stage's outcome — a heterogeneous peer scored the cycle.
+  | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: "good" | "ok" | "regression"; cost: number; stage: "score"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").

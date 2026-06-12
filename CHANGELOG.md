@@ -8,6 +8,9 @@
 
 ### 新功能
 
+- 全站可复制命令芯片与数据新鲜度：周期账本行 → roll cycle、待交付行 → roll loop go/backlog promote、故事档案头 → 拾取命令（全部真实存在，点击 ✓ copied）；总览 generated 超 6h 亮"数据过期"警示，心跳 next 做客户端倒计时（US-DOSSIER-018） `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-018/latest/US-DOSSIER-018-report.html -->
+
 - `roll cycle <id>` 单周期轨迹带：摘要行+story 行+垂直七段（色点+事实摘要，中途死掉的段显示"未达"不省略）+ PR/diff/story 证据指针；与 web 轨迹带同形同词表（US-CLI-013） `[cli]`
   <!-- evidence: .roll/features/cli-simplification/US-CLI-013/latest/US-CLI-013-report.html -->
 

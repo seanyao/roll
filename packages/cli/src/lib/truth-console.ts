@@ -169,7 +169,8 @@ function heartbeatRow(lane: TruthSnapshotLoopLane): string {
     cell(bi("mode", "模式"), esc(lane.mode ?? "—")) +
     cell(bi("every", "周期"), mins(lane.everyMin)) +
     cell(bi("last", "上次"), shortTs(lane.lastAt), true) +
-    cell(bi("next", "下次"), shortTs(lane.nextAt), true) +
+    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${bi("next", "下次")}</div>` +
+    `<div class="hb-next" data-next="${esc(lane.nextAt ?? "")}" style="${MONO}font-size:12.5px;color:${C.body};margin-top:3px;">${shortTs(lane.nextAt)}</div></div>` +
     `</div>`
   );
 }
@@ -318,6 +319,9 @@ function overviewTab(input: TruthConsoleInput): string {
     `</div></section>`;
 
   return (
+    `<div id="freshness-banner" data-generated="${esc(s.generatedAt)}" style="display:none;margin:16px 0 0;padding:10px 16px;border:1px solid ${C.amber}55;border-radius:10px;background:${C.amber}0d;${MONO}font-size:12px;color:${C.amber};">` +
+    bi("This snapshot is stale — run <code>roll index</code> to refresh.", "数据已过期——运行 <code>roll index</code> 刷新。") +
+    `</div>` +
     `<div style="padding:34px 0 8px;">` +
     kicker(`${esc(input.brand.name)} · ${bi("Truth Console", "真相控制台")}`) +
     `<h1 style="margin:10px 0 0;font-size:33px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Overview", "总览")}</h1>` +
@@ -361,6 +365,16 @@ function tapeSegment(seg: CycleTapeSegment, last: boolean): string {
   );
 }
 
+/** The trailing digit run — the SAME handle `roll cycle` resolves (US-CLI-012/013). */
+function cycleHandle(cycleId: string): string {
+  const m = /(\d+)$/.exec(cycleId);
+  return m?.[1] !== undefined ? m[1].slice(-5) : cycleId.slice(-5);
+}
+
+function copyChip(cmd: string): string {
+  return `<code class="copy-chip" data-copy="${esc(cmd)}" style="${MONO}font-size:10.5px;padding:3px 9px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">${esc(cmd)}</code>`;
+}
+
 function cycleRow(cy: CycleLedgerRow): string {
   const color = VERDICT_COLORS[cy.verdict] ?? C.slate;
   const n = cy.cycleId.slice(-6);
@@ -382,13 +396,13 @@ function cycleRow(cy: CycleLedgerRow): string {
     `<div style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:0;margin:12px 0 4px;padding-bottom:4px;">` +
     cy.tape.map((s, i) => tapeSegment(s, i === cy.tape.length - 1)).join("") +
     `</div>` +
-    (cy.evidence.length > 0
-      ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">` +
-        cy.evidence
-          .map((e) => `<a href="${esc(e.href)}" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};text-decoration:none;background:${C.card};">${esc(e.label)}</a>`)
-          .join("") +
-        `</div>`
-      : "") +
+    `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">` +
+    cy.evidence
+      .map((e) => `<a href="${esc(e.href)}" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};text-decoration:none;background:${C.card};">${esc(e.label)}</a>`)
+      .join("") +
+    // US-DOSSIER-018: the web teaches the CLI — this command really exists (US-CLI-013).
+    copyChip(`roll cycle ${cycleHandle(cy.cycleId)}`) +
+    `</div>` +
     `</div></details>`
   );
 }
@@ -697,6 +711,10 @@ function scopeGroup(g: ScopeEpicGroup, input: TruthConsoleInput, shipped: boolea
   const rows = g.items
     .map((it) => {
       const meta = SPECTRUM_META[it.state] ?? (SPECTRUM_META["unknown"] as NonNullable<(typeof SPECTRUM_META)[string]>);
+      const actionChip = !shipped
+        ? `<code class="copy-chip" data-copy="${esc(it.state === "hold" ? `roll backlog promote ${it.id}` : `roll loop go --cards ${it.id}`)}" ` +
+          `style="${MONO}font-size:10px;padding:2px 8px;border-radius:5px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;white-space:nowrap;" onclick="event.preventDefault();event.stopPropagation();">${esc(it.state === "hold" ? `roll backlog promote ${it.id}` : `roll loop go --cards ${it.id}`)}</code>`
+        : "";
       const prChip =
         shipped && it.prNumber !== undefined
           ? input.githubSlug !== undefined
@@ -711,7 +729,7 @@ function scopeGroup(g: ScopeEpicGroup, input: TruthConsoleInput, shipped: boolea
         `<span style="${MONO}font-size:12px;color:${C.blue};font-weight:600;overflow:hidden;text-overflow:ellipsis;">${esc(it.id)}</span>` +
         `<span style="font-size:13px;color:${C.sub};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.title)}</span>` +
         `<span style="display:flex;align-items:center;gap:7px;${MONO}font-size:11px;"><span style="width:7px;height:7px;border-radius:50%;background:${meta.color};"></span><span style="color:${meta.color};font-weight:600;">${bi(meta.en, meta.zh)}</span></span>` +
-        prChip +
+        (shipped ? prChip : actionChip) +
         `</a>`
       );
     })
@@ -956,6 +974,23 @@ const CONSOLE_SCRIPT = `<script>
       }
     }
   }
+  // US-DOSSIER-018: the snapshot is honest about being a snapshot.
+  function applyFreshness() {
+    var b = document.getElementById("freshness-banner");
+    if (!b) return;
+    var gen = Date.parse(b.getAttribute("data-generated") || "");
+    var STALE_MS = 6 * 3600 * 1000;
+    if (isFinite(gen) && Date.now() - gen > STALE_MS) b.style.display = "";
+  }
+  function tickCountdown() {
+    var els = document.querySelectorAll(".hb-next");
+    for (var i = 0; i < els.length; i++) {
+      var next = Date.parse(els[i].getAttribute("data-next") || "");
+      if (!isFinite(next)) continue;
+      var ms = next - Date.now();
+      els[i].textContent = ms <= 0 ? "due" : "in " + Math.max(1, Math.round(ms / 60000)) + "m";
+    }
+  }
   window.addEventListener("hashchange", function () { applyTab(); applyPrefilter(); });
   document.addEventListener("DOMContentLoaded", function () {
     applyLang();
@@ -990,6 +1025,9 @@ const CONSOLE_SCRIPT = `<script>
       rbs[rb].addEventListener("click", function () { applyRange(this.getAttribute("data-range")); });
     }
     applyRange("3");
+    applyFreshness();
+    tickCountdown();
+    setInterval(tickCountdown, 30000);
     var bs = document.querySelectorAll("[data-set-lang]");
     for (var i = 0; i < bs.length; i++) {
       bs[i].addEventListener("click", function () {

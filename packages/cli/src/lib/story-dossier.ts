@@ -561,6 +561,12 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `<p class="crumb"><a href="../../index.html#backlog">${bi("Backlog", "待办")}</a> / <a href="../index.html">${esc(s.epic)}</a> / ${esc(s.id)}</p>\n` +
     `<p class="kicker">Roll · ${bi("Story Dossier", "故事档案")}</p>\n` +
     `<h1><code>${esc(s.id)}</code></h1>\n` +
+    // US-DOSSIER-018: the dossier head teaches the CLI — an unfinished story
+    // carries its real pickup command as a copyable chip (✓ copied feedback).
+    (s.delivered
+      ? ""
+      : `<p><code class="copy-chip" data-copy="roll loop go --cards ${esc(s.id)}" style="cursor:pointer;border:1px dashed currentColor;border-radius:6px;padding:2px 8px;font-size:12px;">roll loop go --cards ${esc(s.id)}</code></p>\n` +
+        `<script>document.addEventListener("DOMContentLoaded",function(){var c=document.querySelector(".copy-chip");if(!c)return;c.addEventListener("click",function(){var t=this.getAttribute("data-copy");var s=this;try{navigator.clipboard.writeText(t).then(function(){var o=s.textContent;s.textContent="✓ copied";setTimeout(function(){s.textContent=o;},1200);});}catch(e){}});});</script>\n`) +
     (s.title !== undefined ? `<p class="lede">${esc(s.title)}</p>\n` : "") +
     `<div class="kv"><span class="type type-${esc(s.type)}">${esc(s.type)}</span>` +
     `<span>${bi("epic", "史诗")} <b>${esc(s.epic)}</b></span>` +

@@ -28,7 +28,7 @@
 import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { RunOut } from "./evidence.js";
 import { containsSecret } from "./redact.js";
 
@@ -340,8 +340,12 @@ export async function captureScreenshot(
       if (gui.code !== 0 || !gui.stdout.includes("Aqua")) return skip("no GUI session");
       const rect = parseRegion(req.region ?? DEFAULT_REGION);
       if (rect === null) return skip("bad region");
+      // FIX-271 follow-up: the sentinel path MUST be absolute — the Terminal
+      // window's shell starts at $HOME, so a relative done-file lands there
+      // while the waiter polls it relative to the attest process cwd: the two
+      // sides never meet and every capture "times out".
       const commandDoneFile =
-        req.tmux === undefined && req.command !== undefined && req.command !== "" ? `${req.out}.done` : undefined;
+        req.tmux === undefined && req.command !== undefined && req.command !== "" ? resolve(`${req.out}.done`) : undefined;
       if (commandDoneFile !== undefined) {
         try {
           rmSync(commandDoneFile, { force: true });

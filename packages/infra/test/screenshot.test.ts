@@ -4,7 +4,7 @@
  * "file must be non-empty" truth test over tool exit codes.
  */
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -347,6 +347,35 @@ describe("terminal", () => {
     expect(r.taken).toBe(false);
     expect(r.skipped).toContain("refusing a blind-region shot");
     expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false); // owner's screen never sampled
+  });
+
+  it("FIX-271: the exit sentinel path is absolute even when out is relative (Terminal shells start at $HOME)", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const rel = "rel-shots/terminal.png";
+    mkdirSync("rel-shots", { recursive: true });
+    try {
+      await captureScreenshot({ kind: "terminal", command: "roll status", out: rel }, { run, env: {}, platform: "darwin" });
+      const doScript = calls.find((c) => c.includes("do script")) ?? "";
+      const wait = calls.find((c) => c.startsWith("sh -lc ")) ?? "";
+      expect(doScript).toContain(`'${process.cwd()}/rel-shots/terminal.png.done'`); // writer side absolute
+      expect(wait).toContain(`'${process.cwd()}/rel-shots/terminal.png.done'`); // waiter side absolute
+    } finally {
+      rmSync("rel-shots", { recursive: true, force: true });
+    }
   });
 
   it("tmux variant attaches the observability session instead of a command", async () => {

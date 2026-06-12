@@ -109,6 +109,72 @@ export function liveEpicOf(projectPath: string, storyId: string): string | null 
   return epicFromFeaturePath(file);
 }
 
+/**
+ * FIX-275 — bulk epic resolution with ONE tree walk.
+ *
+ * `generateIndex` used to call {@link liveEpicOf} per backlog ID, each walking
+ * the whole `.roll/features/` tree (O(ids × tree); 1m28s on the real repo at
+ * card-count ~350). This resolver snapshots the walk once and resolves every ID
+ * against it with the EXACT per-ID semantics:
+ *   - ID-owned files (`<id>.md`, `<id>/spec.md`) beat content mentions; among
+ *     several owners the LAST in walk order wins (the original `unshift`).
+ *   - Otherwise the FIRST file in walk order whose content mentions the ID wins.
+ *   - No hit → null (→ uncategorized at the call site).
+ * Single-ID callers ({@link liveEpicOf} / {@link findFeatureFile}) are untouched.
+ */
+export function bulkLiveEpics(projectPath: string, ids: readonly string[]): Map<string, string | null> {
+  const result = new Map<string, string | null>();
+  const remaining = new Set(ids);
+  const files: Array<{ path: string; name: string; dirName: string }> = [];
+  const root = join(projectPath, ".roll", "features");
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name === "notes" || e.name === "evidence" || e.name === "screenshots" || e.name === "latest") continue;
+        if (/^\d{4}-\d{2}-\d{2}T/.test(e.name) || e.name.startsWith("cycle-") || e.name === "pre-evidence-backfill") continue;
+        walk(p);
+      } else if (e.isFile() && e.name.endsWith(".md")) {
+        files.push({ path: p, name: e.name, dirName: basename(dir) });
+      }
+    }
+  };
+  try {
+    if (existsSync(root)) walk(root);
+  } catch {
+    /* unreadable tree → every id resolves null, same as the per-ID walk */
+  }
+  // Pass 1: ID-owned files. Overwriting per walk order reproduces "later owner
+  // wins" (each unshift put the newest owner at the head).
+  const owner = new Map<string, string>();
+  for (const f of files) {
+    const id = f.name === "spec.md" ? f.dirName : f.name.slice(0, -3);
+    if (remaining.has(id)) owner.set(id, f.path);
+  }
+  for (const [id, p] of owner) {
+    result.set(id, epicFromFeaturePath(p));
+    remaining.delete(id);
+  }
+  // Pass 2: content mentions — each file read at most ONCE, first hit wins.
+  for (const f of files) {
+    if (remaining.size === 0) break;
+    let content: string;
+    try {
+      content = readFileSync(f.path, "utf8");
+    } catch {
+      continue;
+    }
+    for (const id of [...remaining]) {
+      if (content.includes(id)) {
+        result.set(id, epicFromFeaturePath(f.path));
+        remaining.delete(id);
+      }
+    }
+  }
+  for (const id of remaining) result.set(id, null);
+  return result;
+}
+
 /** Read `.roll/index.json` → ID→epic map; {} on absence / malformed (lenient). */
 export function readIndex(projectPath: string): Record<string, string> {
   const p = join(projectPath, ".roll", "index.json");
@@ -138,7 +204,9 @@ export function generateIndex(projectPath: string): Record<string, string> {
       ids = [];
     }
   }
-  const stories = buildStoryIndex(ids, (id) => liveEpicOf(projectPath, id));
+  // FIX-275: one walk for all ids (was a full-tree walk PER id).
+  const bulk = bulkLiveEpics(projectPath, ids);
+  const stories = buildStoryIndex(ids, (id) => bulk.get(id) ?? null);
   const rollDir = join(projectPath, ".roll");
   if (!existsSync(rollDir)) mkdirSync(rollDir, { recursive: true });
   writeFileSync(join(rollDir, "index.json"), serializeIndex(stories));

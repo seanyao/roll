@@ -14,6 +14,7 @@ import {
   buildStoryIndex,
   cardArchiveDir,
   epicForStory,
+  bulkLiveEpics,
   generateIndex,
   liveEpicOf,
   mountExecutionAtPublish,
@@ -188,3 +189,44 @@ describe("mountExecutionAtPublish — US-DOSSIER-007 AC2", () => {
 });
 
 // US-META-002c: resolveReadArchiveDir retired with the legacy verification/ tree.
+
+// FIX-275: the bulk one-walk resolver must produce EXACTLY what the per-ID
+// liveEpicOf walk produced — same owner priority (ID-owned, later-in-walk
+// wins), same content-mention fallback (first in walk order), same null.
+describe("FIX-275 — bulkLiveEpics equivalence", () => {
+  it("matches per-ID liveEpicOf across owner kinds, multi-owner, content mentions, misses", () => {
+    const proj = project(
+      [
+        "| US-A-1 | id-owned flat | 📋 Todo |",
+        "| US-B-2 | id-owned card folder | 📋 Todo |",
+        "| US-C-3 | content mention only | 📋 Todo |",
+        "| US-D-4 | multiple owners | 📋 Todo |",
+        "| US-E-5 | no trace anywhere | 📋 Todo |",
+        "| US-C-30 | id prefix sibling | 📋 Todo |",
+      ],
+      [
+        ["alpha/US-A-1.md", "# US-A-1\n"],
+        ["beta/US-B-2/spec.md", "# US-B-2\n"],
+        ["alpha/notes-page.md", "mentions US-C-3 and US-C-30 in prose\n"],
+        ["alpha/US-D-4.md", "# US-D-4 first owner\n"],
+        ["zeta/US-D-4/spec.md", "# US-D-4 second owner\n"],
+      ],
+    );
+    const ids = ["US-A-1", "US-B-2", "US-C-3", "US-D-4", "US-E-5", "US-C-30"];
+    const bulk = bulkLiveEpics(proj, ids);
+    for (const id of ids) {
+      expect(bulk.get(id) ?? null, id).toBe(liveEpicOf(proj, id));
+    }
+  });
+
+  it("generateIndex output is byte-identical to the per-ID construction", () => {
+    const proj = project(
+      ["| US-A-1 | x | 📋 Todo |", "| FIX-B-2 | y | ✅ Done |", "| US-C-3 | z | 📋 Todo |"],
+      [["alpha/US-A-1.md", "# US-A-1\n"], ["beta/FIX-B-2.md", "# FIX-B-2\n"]],
+    );
+    const viaBulk = generateIndex(proj);
+    const viaPerId = buildStoryIndex(["US-A-1", "FIX-B-2", "US-C-3"], (id) => liveEpicOf(proj, id));
+    expect(viaBulk).toEqual(viaPerId);
+    expect(readFileSync(join(proj, ".roll", "index.json"), "utf8")).toBe(serializeIndex(viaPerId));
+  });
+});

@@ -602,7 +602,7 @@ function releaseTab(input: TruthConsoleInput): string {
   const spectrum = s.story.spectrum;
   const merged = spectrum.done;
   const pending = spectrum.wip + spectrum.todo + spectrum.hold;
-  const mergedPct = s.story.total > 0 ? (merged / s.story.total) * 100 : 0;
+  const mergedPct = s.story.total > 0 ? Math.round((merged / s.story.total) * 100) : 0;
   const head = (label: string, value: string, mono = true): string =>
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};">${label}</div>` +
     `<div style="${mono ? MONO : ""}font-size:13px;color:${C.body};margin-top:8px;white-space:nowrap;">${value}</div></div>`;
@@ -624,7 +624,9 @@ function releaseTab(input: TruthConsoleInput): string {
 
   const dimRows = rp.dims
     .map((d) => {
-      const meta = DIM_META[d.key] as NonNullable<(typeof DIM_META)[string]>;
+      // runtime fallback (kimi pair-review): a future dimension renders honestly
+      // instead of crashing the whole page.
+      const meta = DIM_META[d.key] ?? { no: "·", en: d.key, zh: d.key, whatEn: "", whatZh: "" };
       const dotColor = d.tally.fail > 0 ? C.red : d.tally.warn > 0 ? C.amber : d.tally.unknown > 0 ? C.slate : C.green;
       const chips = d.tally.subjects
         .map((sub) => `<a href="#backlog/q:${encodeURIComponent(sub)}" style="${MONO}font-size:10.5px;color:${C.blue};border:1px solid ${C.blue}55;border-radius:5px;padding:2px 7px;text-decoration:none;white-space:nowrap;">${esc(sub)}</a>`)
@@ -791,7 +793,8 @@ const CONSOLE_SCRIPT = `<script>
     if (parts[0] === "backlog" && parts[1]) {
       if (parts[1].indexOf("q:") === 0) {
         // US-DOSSIER-015: dimension drift chips deep-link a search query.
-        var q = decodeURIComponent(parts[1].slice(2));
+        var q = parts[1].slice(2);
+        try { q = decodeURIComponent(q); } catch (e) { /* malformed escape — use raw */ }
         var box = document.getElementById("bl-search");
         if (box) { box.value = q; }
         active = {};

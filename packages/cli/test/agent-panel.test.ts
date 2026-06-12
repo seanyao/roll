@@ -46,4 +46,15 @@ describe("collectAgentPanel", () => {
     expect(kimi.version).toBe("1.2.3");
     expect(kimi.files.length === 0 || kimi.files !== undefined).toBe(true);
   });
+
+  it("live regression: alias config entries collapse into the canonical agent row", () => {
+    const p = project([]);
+    const rows = collectAgentPanel(p, {
+      installed: () => ["agy"],
+      versionOf: () => null,
+      nowSec: () => NOW,
+      aiEntries: () => [{ name: "antigravity", ai_dir: "/nonexistent/.antigravity", cfg_file: "AGENTS.md", src_file: "AGENTS.md" }],
+    });
+    expect(rows.filter((r) => r.name === "agy" || r.name === "antigravity")).toHaveLength(1);
+  });
 });

@@ -13,7 +13,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { agentDisplayName, agentsInstalled } from "@roll/core";
+import { agentDisplayName, agentsInstalled, canonicalAgentName } from "@roll/core";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { aiSyncStatus, parseAiEntries } from "../commands/status.js";
 

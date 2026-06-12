@@ -14,6 +14,7 @@ import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import { renderTruthConsole, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
+import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
@@ -340,6 +341,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         },
         backlog: backlogViewModel(epics),
         spineKeys: SPINE_STAGES.map((s) => s.key),
+        cycles: collectCycleLedger(cwd),
       }),
       "utf8",
     );

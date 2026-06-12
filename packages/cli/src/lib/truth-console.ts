@@ -19,6 +19,7 @@
  * (US-DOSSIER-012 redesigns it).
  */
 import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
+import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 
 export interface TruthConsoleBrand {
   /** Injected, never hardcoded (owner ruling): project name + slogan. */
@@ -63,6 +64,8 @@ export interface TruthConsoleInput {
   backlog: BacklogVM;
   /** Spine station keys in lifecycle order (definition→…→retrospective). */
   spineKeys: string[];
+  /** Cycle ledger rows, newest first (US-DOSSIER-013). */
+  cycles: CycleLedgerRow[];
 }
 
 const MONO = `font-family:'IBM Plex Mono',monospace;`;
@@ -314,6 +317,108 @@ function overviewTab(input: TruthConsoleInput): string {
   );
 }
 
+const VERDICT_COLORS: Record<string, string> = {
+  delivered: C.green,
+  reverted: C.amber,
+  failed: C.red,
+  blocked: C.purple,
+  idle: "#cbd2dc",
+  unknown: C.slate,
+};
+const VERDICT_ZH: Record<string, string> = {
+  delivered: "已交付",
+  reverted: "已回滚",
+  failed: "失败",
+  blocked: "被阻塞",
+  idle: "空转",
+  unknown: "未知",
+};
+const SEG_COLORS: Record<CycleTapeSegment["state"], string> = { pass: C.green, fail: C.red, idle: "#cbd2dc", unknown: "#c3cad6" };
+
+function tapeSegment(seg: CycleTapeSegment, last: boolean): string {
+  const color = SEG_COLORS[seg.state];
+  return (
+    `<div style="flex:none;width:120px;min-width:120px;">` +
+    `<div style="display:flex;align-items:center;"><span style="width:11px;height:11px;border-radius:50%;background:${color};flex:none;"></span>` +
+    (last ? "" : `<span style="flex:1;height:2px;background:#e4e8ef;"></span>`) +
+    `</div>` +
+    `<div style="margin-top:9px;${MONO}font-size:11px;font-weight:600;color:${seg.state === "fail" ? C.red : C.sub};">${esc(seg.key)}</div>` +
+    `<div style="margin-top:3px;${MONO}font-size:10.5px;color:${C.dim};line-height:1.35;padding-right:12px;">${esc(seg.detail)}</div></div>`
+  );
+}
+
+function cycleRow(cy: CycleLedgerRow): string {
+  const color = VERDICT_COLORS[cy.verdict] ?? C.slate;
+  const n = cy.cycleId.slice(-6);
+  return (
+    `<details class="cy-row" data-ts="${cy.tsSec}" data-verdict="${cy.verdict}" style="border-top:1px solid ${C.hair};">` +
+    `<summary style="display:grid;grid-template-columns:14px 70px 1fr auto;align-items:center;gap:14px;padding:12px 18px;cursor:pointer;list-style:none;">` +
+    `<span title="${cy.verdict}" style="width:10px;height:10px;border-radius:50%;background:${color};flex:none;"></span>` +
+    `<span style="${MONO}font-size:13px;font-weight:600;color:${C.ink};">${esc(n)}</span>` +
+    `<div style="min-width:0;display:flex;align-items:center;gap:10px;">` +
+    `<span style="${MONO}font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid ${color}44;color:${color};flex:none;">${bi(cy.verdict, VERDICT_ZH[cy.verdict] ?? cy.verdict)}</span>` +
+    `<span style="${MONO}font-size:12px;color:${C.blue};font-weight:600;flex:none;">${esc(cy.storyId || "—")}</span></div>` +
+    `<div style="display:flex;align-items:center;gap:14px;${MONO}font-size:11.5px;color:${C.dim};flex:none;">` +
+    `<span style="color:#5b6478;">${esc(cy.model)}</span>` +
+    `<span title="tokens in/out">${esc(cy.tokens)}</span>` +
+    `<span style="color:#5b6478;">${esc(cy.cost)}</span>` +
+    `<span>${esc(cy.duration)}</span>` +
+    `<span class="bl-caret" style="color:${C.faint};transition:transform .18s;font-size:10px;">▶</span></div></summary>` +
+    `<div style="padding:6px 18px 18px 60px;background:#fbfcfe;border-top:1px solid #f1f4f8;">` +
+    `<div style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:0;margin:12px 0 4px;padding-bottom:4px;">` +
+    cy.tape.map((s, i) => tapeSegment(s, i === cy.tape.length - 1)).join("") +
+    `</div>` +
+    (cy.evidence.length > 0
+      ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">` +
+        cy.evidence
+          .map((e) => `<a href="${esc(e.href)}" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};text-decoration:none;background:${C.card};">${esc(e.label)}</a>`)
+          .join("") +
+        `</div>`
+      : "") +
+    `</div></details>`
+  );
+}
+
+function loopTab(input: TruthConsoleInput): string {
+  const ranges: Array<[string, string, string]> = [
+    ["1", "Today", "今天"],
+    ["3", "3 days", "三天"],
+    ["7", "7 days", "七天"],
+    ["all", "All", "全部"],
+  ];
+  return (
+    `<div style="padding:30px 0 4px;">` +
+    kicker(bi("The engine says it runs — here is the tape", "引擎说在跑——这是轨迹带")) +
+    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Loop & Cycles", "循环与周期")}</h1>` +
+    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
+      "Every cycle, complete and replayable. Failures are first-class — never swallowed.",
+      "每一个 cycle 完整、可回溯。失败是一等公民——绝不吞。",
+    )}</p></div>` +
+    `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:18px 20px;margin:18px 0 8px;color:${C.faint};font-size:13px;">${bi(
+      "Agents on this machine — being built (US-DOSSIER-014).",
+      "本机 agents 面板——建设中（US-DOSSIER-014）。",
+    )}</section>` +
+    `<div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi("Cycle ledger", "周期账本")}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("what it actually did while you were away", "你不在的时候它到底干了什么")}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
+    `<div style="display:flex;border:1px solid #dfe4ec;border-radius:999px;overflow:hidden;background:${C.card};">` +
+    ranges
+      .map(
+        ([key, en, zh]) =>
+          `<button type="button" class="cy-range${key === "3" ? " on" : ""}" data-range="${key}" style="appearance:none;border:0;background:transparent;${MONO}font-size:11px;padding:6px 13px;cursor:pointer;color:${C.sub};">${bi(en, zh)}</button>`,
+      )
+      .join("") +
+    `</div>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;"><span id="cy-count">—</span> ${bi("cycles", "周期")} <span style="color:${C.faint};">·</span> <b id="cy-failed" style="color:#d23b3b;font-weight:600;">—</b> ${bi("failed", "失败")}</span></div>` +
+    `<section id="cy-ledger" style="border:1px solid ${C.line};border-radius:14px;background:${C.card};overflow:hidden;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    (input.cycles.length > 0
+      ? input.cycles.map(cycleRow).join("")
+      : `<div style="padding:16px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no cycles recorded yet", "尚无周期记录")}</div>`) +
+    `</section>`
+  );
+}
+
 const TYPE_COLORS: Record<string, string> = { US: C.blue, FIX: C.red, REFACTOR: C.purple, IDEA: C.amber };
 
 function typeBadge(type: string): string {
@@ -485,6 +590,29 @@ const CONSOLE_SCRIPT = `<script>
       chips[c].classList.toggle("on", !!active[chips[c].getAttribute("data-filter")]);
     }
   }
+  // US-DOSSIER-013: cycle ledger range filter (verdicts recounted, failures never hidden).
+  function applyRange(range) {
+    var rows = document.querySelectorAll(".cy-row");
+    var nowSec = Math.floor(Date.now() / 1000);
+    var horizon = range === "all" ? Infinity : Number(range) * 86400;
+    var count = 0, failed = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var ts = Number(rows[i].getAttribute("data-ts")) || 0;
+      var show = range === "all" || nowSec - ts <= horizon;
+      rows[i].style.display = show ? "" : "none";
+      if (show) {
+        count++;
+        var v = rows[i].getAttribute("data-verdict");
+        if (v === "failed" || v === "reverted" || v === "blocked") failed++;
+      }
+    }
+    var c = document.getElementById("cy-count");
+    var f = document.getElementById("cy-failed");
+    if (c) c.textContent = String(count);
+    if (f) f.textContent = String(failed);
+    var btns = document.querySelectorAll(".cy-range");
+    for (var b = 0; b < btns.length; b++) btns[b].classList.toggle("on", btns[b].getAttribute("data-range") === range);
+  }
   function applyPrefilter() {
     var parts = hashParts();
     if (parts[0] === "backlog" && parts[1]) {
@@ -508,6 +636,11 @@ const CONSOLE_SCRIPT = `<script>
     }
     var search = document.getElementById("bl-search");
     if (search) search.addEventListener("input", applyFilters);
+    var rbs = document.querySelectorAll(".cy-range");
+    for (var rb = 0; rb < rbs.length; rb++) {
+      rbs[rb].addEventListener("click", function () { applyRange(this.getAttribute("data-range")); });
+    }
+    applyRange("3");
     var bs = document.querySelectorAll("[data-set-lang]");
     for (var i = 0; i < bs.length; i++) {
       bs[i].addEventListener("click", function () {
@@ -559,11 +692,15 @@ a{color:${C.blue};}
 .bl-epic[open] .bl-caret{transform:rotate(90deg);}
 .bl-row:hover{background:#f6f8fb;}
 .bl-chip.on{border-color:${C.blue};box-shadow:0 0 0 1px ${C.blue}33;}
+.cy-row summary::-webkit-details-marker{display:none;}
+.cy-row[open] .bl-caret{transform:rotate(90deg);}
+.cy-row summary:hover{background:#fbfcfe;}
+.cy-range.on{background:${C.blue};color:#fff;}
 `;
 
   const panes =
     `<div id="tab-overview">${overviewTab(input)}</div>` +
-    `<div id="tab-loop" style="display:none;">${placeholderTab("Loop & Cycles", "循环与周期", "US-DOSSIER-013/014")}</div>` +
+    `<div id="tab-loop" style="display:none;">${loopTab(input)}</div>` +
     `<div id="tab-release" style="display:none;">${placeholderTab("Release", "发版", "US-DOSSIER-015/016")}</div>` +
     `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
     `<div id="tab-skills" style="display:none;">${placeholderTab("Skills", "技能", "US-DOSSIER-017")}</div>`;

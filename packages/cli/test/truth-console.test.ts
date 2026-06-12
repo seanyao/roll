@@ -37,6 +37,28 @@ const BACKLOG = {
   ],
 };
 
+const CYCLES = [
+  {
+    cycleId: "20260612-x-1234", tsSec: 1781230000, verdict: "delivered" as const, storyId: "US-A-1", agent: "claude",
+    model: "claude", tokens: "1k/400", cost: "$0.42", duration: "1m35s",
+    tape: [
+      { key: "cycle" as const, detail: "2026-06-12 01:00Z", state: "pass" as const },
+      { key: "story" as const, detail: "US-A-1", state: "pass" as const },
+      { key: "build" as const, detail: "5 commits", state: "pass" as const },
+      { key: "peer" as const, detail: "refine", state: "pass" as const },
+      { key: "ci" as const, detail: "attest ✓", state: "pass" as const },
+      { key: "pr" as const, detail: "#123 merged", state: "pass" as const },
+      { key: "end" as const, detail: "delivered", state: "pass" as const },
+    ],
+    evidence: [{ label: "US-A-1", href: "#backlog" }],
+  },
+  {
+    cycleId: "20260612-x-9999", tsSec: 1781230100, verdict: "reverted" as const, storyId: "", agent: "pi",
+    model: "pi", tokens: "—", cost: "—", duration: "—",
+    tape: [], evidence: [],
+  },
+];
+
 function render(snapshot: TruthSnapshot = SNAP): string {
   return renderTruthConsole({
     snapshot,
@@ -44,6 +66,7 @@ function render(snapshot: TruthSnapshot = SNAP): string {
     brand: { name: "roll", slogan: "It just works." },
     backlog: BACKLOG,
     spineKeys: SPINE,
+    cycles: CYCLES,
   });
 }
 
@@ -57,7 +80,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     }
     const order = ["overview", "loop", "release", "backlog", "skills"].map((k) => html.indexOf(`data-tab="${k}"`));
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(html).toContain("US-DOSSIER-013/014");
+    expect(html).toContain("US-DOSSIER-014"); // agents panel placeholder remains
     expect(html).toContain("US-DOSSIER-015/016");
     expect(html).toContain("US-DOSSIER-017");
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
@@ -70,6 +93,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       brand: { name: "acme", slogan: "Ship truth." },
       backlog: { shipping: [], settled: [] },
       spineKeys: SPINE,
+      cycles: [],
     });
     expect(custom).toContain("acme");
     expect(custom).toContain("Ship truth.");
@@ -168,5 +192,37 @@ describe("backlog tab — US-DOSSIER-012", () => {
     const rows = html.match(/class="bl-row"/g) ?? [];
     const total = BACKLOG.shipping.concat(BACKLOG.settled).reduce((a, e) => a + e.stories.length, 0);
     expect(rows.length).toBe(total);
+  });
+});
+
+describe("loop tab cycle ledger — US-DOSSIER-013", () => {
+  const html = render();
+
+  it("AC1: range buttons Today/3d/7d/All with live count recompute script", () => {
+    for (const r of ["1", "3", "7", "all"]) expect(html).toContain(`data-range="${r}"`);
+    expect(html).toContain('id="cy-count"');
+    expect(html).toContain('id="cy-failed"');
+    expect(html).toContain("applyRange");
+  });
+
+  it("AC2/AC4: rows carry verdict dot + CLI vocabulary + telemetry columns", () => {
+    expect(html).toContain('data-verdict="delivered"');
+    expect(html).toContain('data-verdict="reverted"');
+    expect(html).toContain("已回滚"); // bilingual verdict
+    expect(html).toContain("1k/400");
+    expect(html).toContain("$0.42");
+    expect(html).toContain("1m35s");
+  });
+
+  it("AC3: expanded row shows the seven-segment tape with facts + evidence chips", () => {
+    for (const k of ["cycle", "story", "build", "peer", "ci", "pr", "end"]) expect(html).toContain(`>${k}<`);
+    expect(html).toContain("5 commits");
+    expect(html).toContain("#123 merged");
+    expect(html).toContain("attest ✓");
+    expect(html).toContain('href="#backlog"');
+  });
+
+  it("failed counter script counts failed+reverted+blocked (never swallowed)", () => {
+    expect(html).toContain('v === "failed" || v === "reverted" || v === "blocked"');
   });
 });

@@ -8,6 +8,8 @@
 
 ### 新功能
 
+- 发版页签六维一致性面板：闸门头（tag·判定·f/w/?·切版·上一版·merged/pending 进度条）+ 六维对账行（漂移卡可点跳待办搜索），合计与状态行严格同数，任一维 fail 明示挡发版；⑦data 维以提案虚线行呈现并链 FIX-248/249；附可复制 roll release consistency check 芯片（US-DOSSIER-015） `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-015/latest/US-DOSSIER-015-report.html -->
 - 循环页签本机 agents 面板：每行运行器·版本·近72h周期与花费·可用状态（未检测置灰），展开看接入文件同步真相（✓/⟳/−），约定过期带琥珀标与可复制 roll setup 修复命令（US-DOSSIER-014） `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-014/latest/US-DOSSIER-014-report.html -->
 - 循环页签周期账本：Today/3d/7d/All 范围切换实时重算（失败=failed+reverted+blocked 不吞），每行结局点·周期号·story·模型·tokens·花费·耗时，展开成 cycle→story→build→peer→ci→pr→end 七段轨迹带带证据（US-DOSSIER-013） `[dossier]`

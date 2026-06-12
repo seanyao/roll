@@ -25,6 +25,7 @@ import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
+import { CYCLES_USAGE, cyclesCommand } from "./cycles.js";
 import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
@@ -110,6 +111,9 @@ export function registerAll(): void {
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });
+  // `cycles`: the cycle ledger as a first-class command (US-CLI-012) — same
+  // aggregation + verdict vocabulary as the web ledger; failures never swallowed.
+  registerPorted("cycles", cyclesCommand, { help: CYCLES_USAGE });
   // `self-score`: TS-native skill self-score note writer (FIX-274). Hidden,
   // agent-facing — replaces the dead `source "$(command -v roll)"` bash path.
   registerPorted("self-score", selfScoreCommand, { hidden: true, help: SELF_SCORE_USAGE });

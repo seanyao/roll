@@ -8,6 +8,8 @@
 
 ### 新功能
 
+- 待办页签重设计：愿望页头、搜索+六态筛选 chips（总览光谱点击预置）、史诗手风琴（交付中/已落定分组），故事行带类型徽标·ID·迷你脊柱·claim↔truth 对照；epic/story 面包屑根改 Backlog 页签（US-DOSSIER-012） `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-012/latest/US-DOSSIER-012-report.html -->
 - 看板升级五页签真相控制台：总览页三十秒读完判定条、循环心跳、三聚合卡与六态光谱，页签 hash 路由下钻返回不丢；品牌与 slogan 注入式；旧 ledger 暂驻待办页签（US-DOSSIER-011） `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-011/latest/US-DOSSIER-011-report.html -->
 - 真相口径同源：`roll index` 一次聚合产出 TruthSnapshot，同一序列化同时内嵌 index.html 并写出 `truth.json`（机器可读）；reverted cycle 纳入失败计数不再被吞（US-DOSSIER-010） `[dossier]`

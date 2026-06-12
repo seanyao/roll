@@ -8,6 +8,8 @@
 
 ### 新功能
 
+- 循环页签本机 agents 面板：每行运行器·版本·近72h周期与花费·可用状态（未检测置灰），展开看接入文件同步真相（✓/⟳/−），约定过期带琥珀标与可复制 roll setup 修复命令（US-DOSSIER-014） `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-014/latest/US-DOSSIER-014-report.html -->
 - 循环页签周期账本：Today/3d/7d/All 范围切换实时重算（失败=failed+reverted+blocked 不吞），每行结局点·周期号·story·模型·tokens·花费·耗时，展开成 cycle→story→build→peer→ci→pr→end 七段轨迹带带证据（US-DOSSIER-013） `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-013/latest/US-DOSSIER-013-report.html -->
 - 待办页签重设计：愿望页头、搜索+六态筛选 chips（总览光谱点击预置）、史诗手风琴（交付中/已落定分组），故事行带类型徽标·ID·迷你脊柱·claim↔truth 对照；epic/story 面包屑根改 Backlog 页签（US-DOSSIER-012） `[dossier]`

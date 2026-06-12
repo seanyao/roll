@@ -252,3 +252,75 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
   for (const f of findings) summary[f.severity] += 1;
   return { findings, summary };
 }
+
+// ── US-DOSSIER-015: the six-dimension split of the gate audit ────────────────
+
+/** The six reconciled dimensions (guide/en/consistency.md) + the proposed ⑦. */
+export type ConsistencyDimension = "code-backlog" | "cards" | "docs" | "tests" | "bilingual" | "site";
+export const CONSISTENCY_DIMENSIONS: readonly ConsistencyDimension[] = [
+  "code-backlog",
+  "cards",
+  "docs",
+  "tests",
+  "bilingual",
+  "site",
+];
+
+/**
+ * Map an audit rule to its dimension. TOTAL by construction: an unknown rule
+ * lands in ① code-backlog (the claims dimension) rather than vanishing — the
+ * panel's per-dimension sum must STRICTLY equal the status line's f/w/?
+ * (US-DOSSIER-015 AC2), so no finding may be unmapped.
+ */
+export function dimensionOfRule(rule: string): ConsistencyDimension {
+  switch (rule) {
+    case "done-no-merge":
+    case "terminal-twin-missing":
+    case "usage-missing":
+    case "failure-count-mismatch":
+      return "code-backlog";
+    case "done-missing-attest":
+    case "done-missing-screenshot":
+    case "index-missing-live-card":
+      return "cards";
+    case "doc-gap":
+    case "registry-drift":
+      return "docs";
+    case "test-gap":
+      return "tests";
+    case "bilingual-parity":
+      return "bilingual";
+    case "site-drift":
+      return "site";
+    default:
+      return "code-backlog";
+  }
+}
+
+export interface DimensionTally {
+  fail: number;
+  warn: number;
+  unknown: number;
+  /** Up to three finding subjects (drift-card handles) for drill-down chips. */
+  subjects: string[];
+}
+
+/**
+ * Fold findings into per-dimension tallies. Grandfathered findings are listed
+ * elsewhere, never judged — they stay OUT of f/w/? (same contract as the
+ * summary line), so the six rows sum exactly to the status line.
+ */
+export function tallyByDimension(findings: readonly AuditFinding[]): Record<ConsistencyDimension, DimensionTally> {
+  const out = Object.fromEntries(
+    CONSISTENCY_DIMENSIONS.map((d) => [d, { fail: 0, warn: 0, unknown: 0, subjects: [] as string[] }]),
+  ) as Record<ConsistencyDimension, DimensionTally>;
+  for (const f of findings) {
+    if (f.severity === "grandfathered") continue;
+    const dim = out[dimensionOfRule(f.rule)];
+    if (f.severity === "fail") dim.fail += 1;
+    else if (f.severity === "warn") dim.warn += 1;
+    else dim.unknown += 1;
+    if (dim.subjects.length < 3 && !dim.subjects.includes(f.subject)) dim.subjects.push(f.subject);
+  }
+  return out;
+}

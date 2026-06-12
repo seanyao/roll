@@ -65,6 +65,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll release changelog generate [--write]` | Sync CHANGELOG from merged work |
 | `roll release consistency <check\|audit>` | Five-dimension gap check · US-TRUTH shadow drift audit (read-only, exit 0) |
 | `roll pair [init\|status\|score]` | Cross-agent pairing: heterogeneous peer re-checks and scores deliveries |
+| `roll cycles [--since 1d\|3d\|7d\|all]` | The cycle ledger — one line per cycle, failures never swallowed |
 | `roll peer [--reviewer <agent>] (--prompt <text>\|--file <path>)` | One-shot structured external-provider review; records `.roll/peer/runs.jsonl` |
 | **Config & machine** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |

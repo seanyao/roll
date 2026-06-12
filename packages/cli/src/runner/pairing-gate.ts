@@ -280,3 +280,19 @@ export async function runScorePairing(
     return { status: "error" }; // never throw — scoring must not fail the cycle
   }
 }
+
+/**
+ * Parse a peer's score reply (the executor/manual command's stdout contract):
+ * one `SCORE: <1..10>` line, one `VERDICT: good|ok|regression` line, one
+ * `RATIONALE: <text>` line — anything missing/malformed → null (caller falls
+ * back to self-score; a peer that can't follow the protocol never writes a note).
+ */
+export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | null {
+  const sm = /^\s*SCORE:\s*(\d{1,2})\s*$/im.exec(stdout);
+  const vm = /^\s*VERDICT:\s*(good|ok|regression)\s*$/im.exec(stdout);
+  const rm = /^\s*RATIONALE:\s*(.+)$/im.exec(stdout);
+  if (sm?.[1] === undefined || vm?.[1] === undefined || rm?.[1] === undefined) return null;
+  const score = Number(sm[1]);
+  if (!Number.isInteger(score) || score < 1 || score > 10) return null;
+  return { score, verdict: vm[1].toLowerCase() as PairScore["verdict"], rationale: rm[1].trim() };
+}

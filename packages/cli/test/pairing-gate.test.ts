@@ -210,7 +210,7 @@ describe("enabledPairingStages — executor stage iteration seam (US-PAIR-004)",
 });
 
 // ── US-PAIR-009: score stage — heterogeneous peer scores the cycle ───────────
-import { runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
+import { parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
 import { readStorySelfScores } from "../src/lib/self-score.js";
 
 const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  claude: [code, score]\n  codex: [code, score]\n  kimi: [code, score]\n`;
@@ -285,5 +285,22 @@ describe("runScorePairing — US-PAIR-009", () => {
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("error");
     expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0);
+  });
+});
+
+describe("parsePairScoreOutput — US-PAIR-009", () => {
+  it("parses SCORE/VERDICT/RATIONALE lines from peer stdout", () => {
+    const out = parsePairScoreOutput("noise\nSCORE: 8\nVERDICT: good\nRATIONALE: tight TCR, ACs covered\nmore noise");
+    expect(out).toEqual({ score: 8, verdict: "good", rationale: "tight TCR, ACs covered" });
+  });
+  it("rejects missing or malformed fields (caller falls back to self)", () => {
+    expect(parsePairScoreOutput("VERDICT: good\nRATIONALE: x")).toBeNull(); // no score
+    expect(parsePairScoreOutput("SCORE: eleven\nVERDICT: good\nRATIONALE: x")).toBeNull();
+    expect(parsePairScoreOutput("SCORE: 12\nVERDICT: good\nRATIONALE: x")).toBeNull(); // out of range
+    expect(parsePairScoreOutput("SCORE: 7\nVERDICT: great\nRATIONALE: x")).toBeNull(); // bad verdict
+    expect(parsePairScoreOutput("SCORE: 7\nVERDICT: ok")).toBeNull(); // no rationale
+  });
+  it("is case/spacing tolerant", () => {
+    expect(parsePairScoreOutput("score:9\nverdict:  OK\nrationale: fine")).toEqual({ score: 9, verdict: "ok", rationale: "fine" });
   });
 });

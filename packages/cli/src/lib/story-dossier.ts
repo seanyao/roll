@@ -558,7 +558,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `@media (max-width:680px) { .delivery-evidence dl, .story-graph dl { grid-template-columns:1fr; } }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
-    `<p class="crumb"><a href="../../index.html">${bi("Features Index", "功能档案")}</a> / <a href="../index.html">${esc(s.epic)}</a> / ${esc(s.id)}</p>\n` +
+    `<p class="crumb"><a href="../../index.html#backlog">${bi("Backlog", "待办")}</a> / <a href="../index.html">${esc(s.epic)}</a> / ${esc(s.id)}</p>\n` +
     `<p class="kicker">Roll · ${bi("Story Dossier", "故事档案")}</p>\n` +
     `<h1><code>${esc(s.id)}</code></h1>\n` +
     (s.title !== undefined ? `<p class="lede">${esc(s.title)}</p>\n` : "") +

@@ -141,7 +141,7 @@ export function renderEpicPage(e: DossierEpic): string {
     `<style>\n${CHROME_CSS}${DOSSIER_CSS}body { max-width:1000px; }\n</style>\n` +
     `${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
-    `<p class="crumb"><a href="../index.html">${bi("Features Index", "功能档案")}</a> / ${esc(e.name)}</p>\n` +
+    `<p class="crumb"><a href="../index.html#backlog">${bi("Backlog", "待办")}</a> / ${esc(e.name)}</p>\n` +
     `<p class="kicker">Roll · ${bi("Epic Dossier", "史诗档案")}</p>\n` +
     `<h1>${esc(e.name)}</h1>\n` +
     `</div>\n` +

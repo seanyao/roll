@@ -3,6 +3,7 @@ export * from "./i18n/catalog.js";
 export * from "./i18n/catalog-v3.js";
 export * from "./project.js";
 export * from "./types/events.js";
+export * from "./types/truth-snapshot.js";
 export * from "./types/loop.js";
 export * from "./types/agent.js";
 export * from "./types/cycle.js";

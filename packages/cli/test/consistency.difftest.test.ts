@@ -15,7 +15,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { consistencyCommand } from "../src/commands/consistency.js";
+import { runConsistencyCheck as consistencyCommand } from "../src/lib/release-consistency.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
 const dirs: string[] = [];
@@ -583,15 +583,15 @@ describe("frozen: roll consistency", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "Usage: roll consistency <subcommand>
+        "stdout": "Usage: roll release --gate-check <subcommand>
 
         check [--json] [--project-dir DIR]    逐维度跑一致性检查
           Run checks across five dimensions (code, docs, i18n, tests, site)
           and produce a structured pass/gap report.
 
-        roll consistency check                # human-readable report
-        roll consistency check --json         # machine-readable JSON
-        roll consistency audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
+        roll release --gate-check check                # human-readable report
+        roll release --gate-check check --json         # machine-readable JSON
+        roll release --gate-check audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
       ",
       }
     `);
@@ -602,7 +602,7 @@ describe("frozen: roll consistency", () => {
       {
         "status": 1,
         "stderr": "[roll] Unknown consistency subcommand: bogus
-      [roll] Try: roll consistency check
+      [roll] Try: roll release --gate-check check
       ",
         "stdout": "",
       }
@@ -613,7 +613,7 @@ describe("frozen: roll consistency", () => {
       {
         "status": 1,
         "stderr": "[roll] 未知的一致性子命令: bogus
-      [roll] Try: roll consistency check
+      [roll] Try: roll release --gate-check check
       ",
         "stdout": "",
       }

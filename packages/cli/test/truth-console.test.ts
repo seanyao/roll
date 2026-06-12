@@ -366,7 +366,7 @@ describe("release tab — US-DOSSIER-015", () => {
   });
 
   it("AC6: the copyable consistency command chip is present", () => {
-    expect(html).toContain('data-copy="roll release consistency check"');
+    expect(html).toContain('data-copy="roll release --gate-check"'); // US-REL-007: the surviving real surface
     expect(html).toContain("✓ copied");
   });
 });

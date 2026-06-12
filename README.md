@@ -61,9 +61,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll offboard` | Remove Roll from this project |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |
-| `roll release [ship\|waiver\|changelog\|consistency]` | Release guidance · changelog · consistency gate · gated tag push (`ship`) · recorded drift waiver (`waiver`) |
-| `roll release changelog generate [--write]` | Sync CHANGELOG from merged work |
-| `roll release consistency <check\|audit>` | Five-dimension gap check · US-TRUTH shadow drift audit (read-only, exit 0) |
+| `roll release [--dry-run]` | The ONE release flow: bump → changelog fold → package gate → PR → merge → consistency gate → tag push |
 | `roll pair [init\|status\|score]` | Cross-agent pairing: heterogeneous peer re-checks and scores deliveries |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | The cycle ledger — one line per cycle, failures never swallowed |
 | `roll cycle <id>` | One cycle's full trace tape (cycle→story→build→peer→ci→pr→end) |

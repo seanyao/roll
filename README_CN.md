@@ -61,9 +61,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll offboard` | 从项目移除 Roll |
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |
 | `roll ci [--wait]` | 查看 / 等待当前 commit 的 CI 状态 |
-| `roll release [ship\|waiver\|changelog\|consistency]` | 发版指引 · changelog · 一致性闸 · 过闸打 tag(`ship`) · 记录化漂移豁免(`waiver`) |
-| `roll release changelog generate [--write]` | 从已合并工作同步 CHANGELOG |
-| `roll release consistency <check\|audit>` | 五维一致性检查 · US-TRUTH 影子漂移审计(只读,exit 0) |
+| `roll release [--dry-run]` | 唯一发版流:版本号→折叠changelog→包闸→PR→合并→一致性闸→推tag |
 | `roll pair [init\|status\|score]` | 跨 Agent 配对:异构同行复检与交付打分 |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | 周期账本——每行一个 cycle,失败不被吞 |
 | `roll cycle <id>` | 单个 cycle 的完整轨迹带(cycle→story→build→peer→ci→pr→end) |

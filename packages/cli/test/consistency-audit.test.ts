@@ -15,7 +15,7 @@ import {
   TERMINAL_SCHEMA_EPOCH_SEC,
   consistencyAuditCommand,
   gatherAuditSnapshot,
-} from "../src/commands/consistency-audit.js";
+} from "../src/lib/consistency-audit.js";
 
 const dirs: string[] = [];
 afterAll(() => {

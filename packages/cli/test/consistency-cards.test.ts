@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { consistencyCommand } from "../src/commands/consistency.js";
+import { runConsistencyCheck as consistencyCommand } from "../src/lib/release-consistency.js";
 
 const dirs: string[] = [];
 afterAll(() => {

@@ -304,3 +304,16 @@ describe("parsePairScoreOutput — US-PAIR-009", () => {
     expect(parsePairScoreOutput("score:9\nverdict:  OK\nrationale: fine")).toEqual({ score: 9, verdict: "ok", rationale: "fine" });
   });
 });
+
+describe("score never routes through the review loop (kimi pair-review)", () => {
+  it("enabledPairingStages filters score out", () => {
+    const { dir } = project(SCORE_CFG);
+    expect(enabledPairingStages(dir)).toEqual(["code"]);
+  });
+  it("runPairing early-offs on score (belt-and-braces)", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = deps();
+    expect((await runPairing(dir, dir, rt, "c1", "claude", "score", d)).status).toBe("off");
+    expect(events).toHaveLength(0);
+  });
+});

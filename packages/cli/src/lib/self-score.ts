@@ -206,7 +206,10 @@ export interface SelfScoreWriteInput {
   scoredBy?: string;
   /** "pair" when a heterogeneous peer scored; defaults to "self". */
   scoring?: "pair" | "self";
-  /** Why pair scoring fell back to self (recorded in the note for audit). */
+  /** Why pair scoring fell back to self (recorded in the note for audit).
+   *  Production writer: the manual `roll pair score` fallback path (US-PAIR-010);
+   *  the loop's fallback keeps the agent's own note untouched and audits the
+   *  reason via the pair:none-available event instead. */
   fallbackReason?: string;
 }
 

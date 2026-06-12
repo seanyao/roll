@@ -39,7 +39,11 @@ export function enabledPairingStages(projectDir: string): PairingStage[] {
     // De-dupe (kimi pair-review): a config that repeats a stage must not fire it
     // twice — duplicate peer spawns, duplicate events, and a clobbered evidence
     // file. Keep first-seen order so the config still reads top-to-bottom.
-    return cfg.stages.filter((s, i, arr) => arr.indexOf(s) === i);
+    // US-PAIR-009 (kimi pair-review): `score` is NOT a review stage — it fires
+    // post-attest via runScorePairing with its own prompt/protocol. Routing it
+    // through the generic review loop would double-spawn a peer and clobber
+    // the score evidence file with a pair:verdict.
+    return cfg.stages.filter((s, i, arr) => arr.indexOf(s) === i && s !== "score");
   } catch {
     return []; // malformed config → pairing off, not a cycle failure
   }
@@ -120,6 +124,7 @@ export async function runPairing(
   deps: RunPairingDeps,
 ): Promise<RunPairingResult> {
   try {
+    if (stage === "score") return { status: "off" }; // belt-and-braces: score never routes through the review loop (US-PAIR-009)
     const cfgPath = join(projectDir, ".roll", "pairing.yaml");
     if (!existsSync(cfgPath)) return { status: "off" }; // file absent = pairing off
     const cfg = parsePairingConfig(readFileSync(cfgPath, "utf8"));
@@ -216,7 +221,10 @@ export interface RunScorePairingResult {
  *
  * Validation is delegated to the FIX-274 writer (score 1..10 integer, verdict
  * whitelist): the note is written BEFORE the evidence file, so a malformed peer
- * score aborts with nothing on disk (status "error").
+ * score aborts with nothing on disk (status "error"). Once the note IS written
+ * the pairing counts as scored — the evidence file + event are best-effort
+ * auxiliaries (kimi pair-review: a post-note evidence failure must not report
+ * "error" with a live note on disk).
  */
 export async function runScorePairing(
   projectDir: string,
@@ -267,14 +275,18 @@ export async function runScorePairing(
       scoring: "pair",
     });
 
-    const path = evidencePath(runtimeDir, cycleId, "score");
-    mkdirSync(join(runtimeDir, "peer"), { recursive: true });
-    writeFileSync(
-      path,
-      JSON.stringify({ cycleId, workingAgent, peer, stage: "score", score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost }, null, 2),
-      "utf8",
-    );
-    deps.event({ type: "pair:score", cycleId, peer, score: scored.score, verdict: scored.verdict, cost: scored.cost, stage: "score", ts: deps.now() });
+    try {
+      const path = evidencePath(runtimeDir, cycleId, "score");
+      mkdirSync(join(runtimeDir, "peer"), { recursive: true });
+      writeFileSync(
+        path,
+        JSON.stringify({ cycleId, workingAgent, peer, stage: "score", score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost }, null, 2),
+        "utf8",
+      );
+      deps.event({ type: "pair:score", cycleId, peer, score: scored.score, verdict: scored.verdict, cost: scored.cost, stage: "score", ts: deps.now() });
+    } catch {
+      /* evidence/event are auxiliaries — the note is the product */
+    }
     return { status: "scored", peer, score: scored.score, notePath: note.path };
   } catch {
     return { status: "error" }; // never throw — scoring must not fail the cycle

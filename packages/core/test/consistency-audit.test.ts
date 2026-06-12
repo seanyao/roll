@@ -127,7 +127,7 @@ describe("rule done-missing-attest — Done with no acceptance evidence", () => 
     expect(ancient.every((f) => f.severity === "grandfathered")).toBe(true);
   });
 
-  it("FIX-258: Done story with report/ac-map but no screenshot or machine skip is warned", () => {
+  it("FIX-270: Done story with report/ac-map but no screenshot or machine skip FAILS (iron rule)", () => {
     const r = runConsistencyAudit(
       snap({
         backlog: [{ id: "FIX-TEXT", status: "✅ Done · PR#14 · evidence" }],
@@ -136,8 +136,30 @@ describe("rule done-missing-attest — Done with no acceptance evidence", () => 
       }),
     );
     expect(r.findings).toContainEqual(
-      expect.objectContaining({ rule: "done-attest-no-visual", severity: "warn", subject: "FIX-TEXT" }),
+      expect.objectContaining({ rule: "done-attest-no-visual", severity: "fail", subject: "FIX-TEXT" }),
     );
+  });
+
+  it("FIX-270: an honestly recorded machine capture skip keeps the exemption lane open", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "FIX-HEADLESS", status: "✅ Done · PR#15 · evidence" }],
+        prEvidence: { "FIX-HEADLESS": { state: "MERGED", mergedAtSec: EPOCH } },
+        attest: { "FIX-HEADLESS": { report: true, acMap: true, machineSkip: true } },
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "done-attest-no-visual")).toEqual([]);
+  });
+
+  it("FIX-270: screenshot evidence present → no finding", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "FIX-SHOT", status: "✅ Done · PR#16 · evidence" }],
+        prEvidence: { "FIX-SHOT": { state: "MERGED", mergedAtSec: EPOCH } },
+        attest: { "FIX-SHOT": { report: true, acMap: true, visualEvidence: true } },
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "done-attest-no-visual")).toEqual([]);
   });
 });
 

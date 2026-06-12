@@ -185,11 +185,14 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
     if (!probe.report) {
       add("done-missing-attest", "fail", row.id, `Done without an acceptance report${probe.acMap ? "" : " (no ac-map either)"} — attest_evidence anchor`);
     } else if (probe.acMap && !(probe.visualEvidence ?? false) && !(probe.machineSkip ?? false)) {
+      // FIX-270: owner-decreed iron rule — screenshot evidence (or an honestly
+      // recorded machine capture skip) is a RELEASE BLOCKER, not advice. The
+      // only bypass is a recorded owner waiver.
       add(
         "done-attest-no-visual",
-        "warn",
+        "fail",
         row.id,
-        "Done acceptance evidence has a report/ac-map but no screenshot and no machine-generated capture skip — visual evidence floor (FIX-258)",
+        "Done acceptance evidence has a report/ac-map but no screenshot and no machine-generated capture skip — screenshot iron rule (FIX-270)",
       );
     }
   }

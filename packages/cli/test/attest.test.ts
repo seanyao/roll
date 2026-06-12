@@ -640,6 +640,9 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
       if (cmd === "osascript" && String(argv[1] ?? "").includes("bounds of w")) {
         return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" }); // FIX-271 window-bounds query
       }
+      if (cmd === "sh" && String(argv[1] ?? "").includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" }); // FIX-273 frontmost guard
+      }
       return Promise.resolve({ code: 0, stdout: "", stderr: "" }); // osascript etc.
     };
   }

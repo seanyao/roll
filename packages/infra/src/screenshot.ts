@@ -426,6 +426,18 @@ export async function captureScreenshot(
         return skip("terminal command still running; window left open to avoid macOS termination prompt");
       }
       const liveRect = await resolveWindowRect(windowTitle, run);
+      // FIX-273: bounds exist ≠ window visible. If the window lives on another
+      // Space and activate didn't win, `screencapture -R` samples whatever the
+      // owner has on screen (live incidents: a Teams chat, the owner's own
+      // session terminal). Verify Terminal actually owns the foreground before
+      // pressing the shutter; otherwise retire the window and skip honestly.
+      if (liveRect !== null) {
+        const front = await run("sh", ["-c", "lsappinfo info -only name $(lsappinfo front)"]);
+        if (front.code !== 0 || !/Terminal|终端/.test(front.stdout)) {
+          await teardownCaptureWindow(windowTitle, commandDoneFile !== undefined, run);
+          return skip("Terminal not frontmost — refusing to shoot another app's pixels");
+        }
+      }
       // FIX-271: never shoot a blind rectangle — if our window can't be found
       // and raised, the configured rect would capture WHATEVER the owner has
       // on screen (live incident: a Teams chat landed in the evidence png).

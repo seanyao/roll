@@ -6,6 +6,11 @@
 
 - cycle worktree 依赖安装失败会直接以失败终态和 `[FAIL] worktree deps bootstrap failed` ALERT 暴露，并清理空 worktree，不再继续烧 agent 后误落 `idle_no_work`（FIX-268） `[loop]`
 
+### 新功能
+
+- 真相口径同源：`roll index` 一次聚合产出 TruthSnapshot，同一序列化同时内嵌 index.html 并写出 `truth.json`（机器可读）；reverted cycle 纳入失败计数不再被吞（US-DOSSIER-010） `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-010/latest/US-DOSSIER-010-report.html -->
+
 ### 性能
 
 - 建卡与 `roll index` 提速 5.4 倍（实测 41s → 7.6s，产物字节级不变）：索引一次树遍历、每卡 3 次 git 扫描合并为一次快照、全局趋势与反向依赖一次计算（FIX-275） `[cli]`

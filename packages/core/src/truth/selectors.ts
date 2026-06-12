@@ -153,6 +153,10 @@ const ROW_TO_TERMINAL: Record<string, TerminalOutcome> = {
   blocked: "blocked",
   aborted: "aborted_no_delivery",
   interrupted: "aborted_no_delivery",
+  // US-DOSSIER-010 AC4: a reverted cycle is a failure — the legacy row status
+  // was unmapped, fell to outcome "" → "unknown" panel, and the failure was
+  // silently swallowed from every failed count (the FIX-248 class).
+  reverted: "failed",
   orphan: "aborted_with_delivery",
 };
 
@@ -224,4 +228,45 @@ export function deriveEvidenceTruth(input: EvidenceTruthInput): EvidenceTruth {
   if (input.report && input.acMap) return { storyId: input.storyId, state: "truth", reason: "evidence_complete" };
   if (input.report) return { storyId: input.storyId, state: "fail", reason: "acmap_missing" };
   return { storyId: input.storyId, state: "fail", reason: "report_missing" };
+}
+
+// ── US-DOSSIER-010: the one truth aggregation ────────────────────────────────
+
+import {
+  TRUTH_SPECTRUM_STATES,
+  type TruthSnapshot,
+  type TruthSnapshotAudit,
+  type TruthSnapshotCycle,
+  type TruthSnapshotRelease,
+  type TruthSpectrumState,
+} from "@roll/spec";
+
+export interface TruthSnapshotInput {
+  generatedAt: string;
+  collectedAt?: string;
+  /** One pre-classified spectrum state per story (the index page's vocabulary). */
+  storyStates: readonly TruthSpectrumState[];
+  /** Delivered pre-v3 stories without a v3 evidence trail. */
+  legacyCount: number;
+  audit?: TruthSnapshotAudit;
+  cycle?: TruthSnapshotCycle;
+  release?: TruthSnapshotRelease;
+}
+
+/**
+ * Fold the pre-classified inputs into the ONE TruthSnapshot every surface
+ * serializes. Pure (input → snapshot): collection stays at the edges, the
+ * aggregation arithmetic lives here and is unit-tested once for all surfaces.
+ */
+export function buildTruthSnapshot(input: TruthSnapshotInput): TruthSnapshot {
+  const spectrum = Object.fromEntries(TRUTH_SPECTRUM_STATES.map((s) => [s, 0])) as Record<TruthSpectrumState, number>;
+  for (const s of input.storyStates) spectrum[s] += 1;
+  return {
+    generatedAt: input.generatedAt,
+    ...(input.collectedAt !== undefined ? { collectedAt: input.collectedAt } : {}),
+    story: { total: input.storyStates.length, spectrum, legacy: input.legacyCount },
+    ...(input.audit !== undefined ? { audit: input.audit } : {}),
+    ...(input.cycle !== undefined ? { cycle: input.cycle } : {}),
+    ...(input.release !== undefined ? { release: input.release } : {}),
+  };
 }

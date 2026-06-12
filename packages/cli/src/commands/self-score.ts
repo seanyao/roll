@@ -11,14 +11,26 @@ import { relative } from "node:path";
 import { SELF_SCORE_VERDICTS, writeSelfScoreNote } from "../lib/self-score.js";
 
 export const SELF_SCORE_USAGE =
-  "Usage: roll self-score <skill> <story> <score 1..10> <good|ok|regression> <rationale>\n" +
+  "Usage: roll self-score <skill> <story> <score 1..10> <good|ok|regression> <rationale> [--fallback-reason <why>]\n" +
   "  Write the skill self-score note for a finished cycle (TS-native; never source roll).\n" +
+  "  --fallback-reason  Record why pair scoring (roll pair score) fell back to self (US-PAIR-010).\n" +
   "写入技能自评分 note（TS 原生路径；不要把 roll 当 bash 库 source）。";
 
 export async function selfScoreCommand(args: string[]): Promise<number> {
   if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
     process.stdout.write(`${SELF_SCORE_USAGE}\n`);
     return 0;
+  }
+  // US-PAIR-010: `--fallback-reason <why>` audits why pair scoring fell back to self.
+  let fallbackReason: string | undefined;
+  const fi = args.indexOf("--fallback-reason");
+  if (fi >= 0) {
+    fallbackReason = (args[fi + 1] ?? "").trim();
+    if (fallbackReason === "") {
+      process.stderr.write(`${SELF_SCORE_USAGE}\n`);
+      return 1;
+    }
+    args = [...args.slice(0, fi), ...args.slice(fi + 2)];
   }
   const [skill, story, scoreRaw, verdictRaw, ...rest] = args;
   const rationale = rest.join(" ").trim();
@@ -34,6 +46,7 @@ export async function selfScoreCommand(args: string[]): Promise<number> {
       score,
       verdict: verdictRaw as (typeof SELF_SCORE_VERDICTS)[number],
       rationale,
+      ...(fallbackReason !== undefined ? { fallbackReason } : {}),
     });
     const rel = relative(process.cwd(), res.path);
     process.stdout.write(

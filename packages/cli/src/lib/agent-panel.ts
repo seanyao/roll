@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentDisplayName, agentsInstalled, canonicalAgentName } from "@roll/core";
 import { realAgentEnv } from "../commands/agent-list.js";
-import { aiSyncStatus, parseAiEntries } from "../commands/status.js";
+import { aiSyncStatus, parseAiEntries, type AiEntry } from "../commands/status.js";
 
 export interface AgentPanelFile {
   path: string;
@@ -41,6 +41,9 @@ export interface AgentPanelDeps {
   installed: () => string[];
   versionOf: (agent: string) => string | null;
   nowSec: () => number;
+  /** AI client entries (kimi pair-review: injectable so tests never read the
+   *  real ~/.roll config). */
+  aiEntries: () => AiEntry[];
 }
 
 const RUNNER_LABEL: Record<string, string> = {
@@ -61,6 +64,7 @@ export function defaultAgentPanelDeps(): AgentPanelDeps {
     installed: () => agentsInstalled(realAgentEnv()),
     versionOf: () => null, // version probing spawns; the panel stays honest with "—"
     nowSec: () => Math.floor(Date.now() / 1000),
+    aiEntries: parseAiEntries,
   };
 }
 
@@ -83,7 +87,15 @@ function spend72h(projectPath: string, nowSec: number): Map<string, { cycles: nu
     } catch {
       continue;
     }
-    const ts = typeof row["ts"] === "string" ? Date.parse(row["ts"] as string) / 1000 : Number.NaN;
+    const rawTs = row["ts"];
+    const ts =
+      typeof rawTs === "string"
+        ? Date.parse(rawTs) / 1000
+        : typeof rawTs === "number"
+          ? rawTs > 10_000_000_000
+            ? rawTs / 1000
+            : rawTs
+          : Number.NaN;
     if (!Number.isFinite(ts) || ts < cutoff || ts > nowSec) continue;
     const agent = String(row["agent"] ?? "");
     if (agent === "") continue;
@@ -97,14 +109,16 @@ function spend72h(projectPath: string, nowSec: number): Map<string, { cycles: nu
 }
 
 export function collectAgentPanel(projectPath: string, deps: AgentPanelDeps = defaultAgentPanelDeps()): AgentPanelRow[] {
-  const installed = new Set(deps.installed());
+  const installed = new Set(deps.installed().map(canonicalAgentName));
   const spend = spend72h(projectPath, deps.nowSec());
-  const entries = parseAiEntries();
+  const entries = deps.aiEntries();
   const rows: AgentPanelRow[] = [];
-  const names = new Set<string>([...installed, ...entries.map((e) => e.name)]);
+  // Canonicalize before merging (live finding: "antigravity" config entry and
+  // installed "agy" rendered as two rows of the same agent).
+  const names = new Set<string>([...installed, ...entries.map((e) => canonicalAgentName(e.name))]);
   for (const name of [...names].sort()) {
     const isInstalled = installed.has(name);
-    const entry = entries.find((e) => e.name === name);
+    const entry = entries.find((e) => canonicalAgentName(e.name) === name);
     const files: AgentPanelFile[] = [];
     if (entry !== undefined) {
       const sync = aiSyncStatus(entry);

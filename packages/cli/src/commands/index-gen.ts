@@ -13,7 +13,7 @@ import { collectDossier, generateIndex } from "../lib/archive.js";
 import { renderFeaturesIndex, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
-import { collectStoryDossierInput, renderStoryDossier, stationsDone } from "../lib/story-dossier.js";
+import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
 
@@ -257,10 +257,19 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   // US-DOSSIER: enrich each story with its real lifecycle stations (read its
   // evidence via the same collector the per-story page uses) so the index spine
   // reflects definition→design→execution→delivery→retrospective accurately.
+  // FIX-275: keep each card's collected input for the render phase below —
+  // the same spec.md/ac-map/latest/notes were previously read TWICE per card.
+  const inputs = new Map<string, StoryDossierInput>();
+  // FIX-275: ONE shared facts build for the whole run — git log snapshot,
+  // project-wide self-score trend, spec refs + depends-on map (each was
+  // previously recomputed per card).
+  const runCache = buildDossierRunCache(cwd);
   for (const epic of epics) {
     for (const story of epic.stories) {
       try {
-        story.stages = [...stationsDone(collectStoryDossierInput(cwd, story))];
+        const input = collectStoryDossierInput(cwd, story, runCache);
+        inputs.set(`${epic.name}/${story.id}`, input);
+        story.stages = [...stationsDone(input)];
       } catch {
         /* best-effort — spine just shows fewer stations */
       }
@@ -291,7 +300,11 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // Mount board: only (re)render when forced or when the page is missing
         // (a brand-new card needs its initial skeleton).
         if (rebuild || !existsSync(storyIndex)) {
-          writeFileSync(storyIndex, renderStoryDossier(collectStoryDossierInput(cwd, story)), "utf8");
+          writeFileSync(
+            storyIndex,
+            renderStoryDossier(inputs.get(`${epic.name}/${story.id}`) ?? collectStoryDossierInput(cwd, story, runCache)),
+            "utf8",
+          );
           pages += 1;
         }
         // US-DOSSIER-004: rendered spec.html the "Design doc" link points at.

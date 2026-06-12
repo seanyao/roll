@@ -5,6 +5,11 @@
 ### 稳定性
 
 - cycle worktree 依赖安装失败会直接以失败终态和 `[FAIL] worktree deps bootstrap failed` ALERT 暴露，并清理空 worktree，不再继续烧 agent 后误落 `idle_no_work`（FIX-268） `[loop]`
+
+### 性能
+
+- 建卡与 `roll index` 提速 5.4 倍（实测 41s → 7.6s，产物字节级不变）：索引一次树遍历、每卡 3 次 git 扫描合并为一次快照、全局趋势与反向依赖一次计算（FIX-275） `[cli]`
+  <!-- evidence: .roll/features/loop/FIX-275/latest/FIX-275-report.html -->
 - 技能自评分改走 TS 原生命令 `roll self-score`，幂等可重试；不再让 agent 把 TS bundle 当 bash 库 source（FIX-274） `[skills]`
   <!-- evidence: .roll/features/skill-ecosystem/FIX-274/latest/FIX-274-report.html -->
 

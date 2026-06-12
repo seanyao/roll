@@ -10,10 +10,12 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { indexCommand } from "../src/commands/index-gen.js";
+import { buildDossierRunCache, collectGitDossierFacts, collectStoryDossierInput } from "../src/lib/story-dossier.js";
 import {
   buildStoryIndex,
   cardArchiveDir,
   epicForStory,
+  bulkLiveEpics,
   generateIndex,
   liveEpicOf,
   mountExecutionAtPublish,
@@ -188,3 +190,83 @@ describe("mountExecutionAtPublish — US-DOSSIER-007 AC2", () => {
 });
 
 // US-META-002c: resolveReadArchiveDir retired with the legacy verification/ tree.
+
+// FIX-275: the bulk one-walk resolver must produce EXACTLY what the per-ID
+// liveEpicOf walk produced — same owner priority (ID-owned, later-in-walk
+// wins), same content-mention fallback (first in walk order), same null.
+describe("FIX-275 — bulkLiveEpics equivalence", () => {
+  it("matches per-ID liveEpicOf across owner kinds, multi-owner, content mentions, misses", () => {
+    const proj = project(
+      [
+        "| US-A-1 | id-owned flat | 📋 Todo |",
+        "| US-B-2 | id-owned card folder | 📋 Todo |",
+        "| US-C-3 | content mention only | 📋 Todo |",
+        "| US-D-4 | multiple owners | 📋 Todo |",
+        "| US-E-5 | no trace anywhere | 📋 Todo |",
+        "| US-C-30 | id prefix sibling | 📋 Todo |",
+      ],
+      [
+        ["alpha/US-A-1.md", "# US-A-1\n"],
+        ["beta/US-B-2/spec.md", "# US-B-2\n"],
+        ["alpha/notes-page.md", "mentions US-C-3 and US-C-30 in prose\n"],
+        ["alpha/US-D-4.md", "# US-D-4 first owner\n"],
+        ["zeta/US-D-4/spec.md", "# US-D-4 second owner\n"],
+      ],
+    );
+    const ids = ["US-A-1", "US-B-2", "US-C-3", "US-D-4", "US-E-5", "US-C-30"];
+    const bulk = bulkLiveEpics(proj, ids);
+    for (const id of ids) {
+      expect(bulk.get(id) ?? null, id).toBe(liveEpicOf(proj, id));
+    }
+  });
+
+  it("generateIndex output is byte-identical to the per-ID construction", () => {
+    const proj = project(
+      ["| US-A-1 | x | 📋 Todo |", "| FIX-B-2 | y | ✅ Done |", "| US-C-3 | z | 📋 Todo |"],
+      [["alpha/US-A-1.md", "# US-A-1\n"], ["beta/FIX-B-2.md", "# FIX-B-2\n"]],
+    );
+    const viaBulk = generateIndex(proj);
+    const viaPerId = buildStoryIndex(["US-A-1", "FIX-B-2", "US-C-3"], (id) => liveEpicOf(proj, id));
+    expect(viaBulk).toEqual(viaPerId);
+    expect(readFileSync(join(proj, ".roll", "index.json"), "utf8")).toBe(serializeIndex(viaPerId));
+  });
+});
+
+// FIX-275 (root cause, profiled): `roll index` spent 55% of wall-clock in
+// per-card `git log --grep` spawns (~3 per card). One snapshot spawn must
+// reproduce the per-card semantics exactly.
+describe("FIX-275 — git dossier facts snapshot equivalence", () => {
+  it("snapshot-backed input equals the per-card execGit input", () => {
+    const proj = project(
+      ["| US-G-1 | a | ✅ Done |", "| US-G-2 | b | 📋 Todo |"],
+      [["alpha/US-G-1/spec.md", "# US-G-1\n"], ["alpha/US-G-2/spec.md", "# US-G-2\n"]],
+    );
+    const git = (args: string) => execSync(`git ${args}`, { cwd: proj, env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+    git("init -q");
+    writeFileSync(join(proj, "a.ts"), "1");
+    git("add -A && git -C . commit -qm 'tcr: US-G-1 first step'");
+    writeFileSync(join(proj, "b.ts"), "2");
+    git("add -A && git -C . commit -qm 'Story US-G-1: shipped (#123)'");
+    writeFileSync(join(proj, "c.ts"), "3");
+    git("add -A && git -C . commit -qm 'unrelated change\n\nbody mentions US-G-2 only'");
+
+    const story1 = { id: "US-G-1", epic: "alpha", title: "a", status: "done" } as never;
+    const story2 = { id: "US-G-2", epic: "alpha", title: "b", status: "todo" } as never;
+    expect(collectGitDossierFacts(proj)).not.toBeNull();
+    const cache = buildDossierRunCache(proj);
+    expect(cache.git).not.toBeNull();
+    for (const story of [story1, story2]) {
+      const legacy = collectStoryDossierInput(proj, story);
+      const snap = collectStoryDossierInput(proj, story, cache);
+      expect(snap).toEqual(legacy);
+    }
+    // body-only mention still counts (git --grep matches the full message)
+    const viaSnap = collectStoryDossierInput(proj, story2, cache);
+    expect(viaSnap.commits?.some((c) => c.includes("unrelated change"))).toBe(true);
+  });
+
+  it("non-git directory yields null facts and a git-free input", () => {
+    const proj = project(["| US-G-1 | a | 📋 Todo |"], [["alpha/US-G-1/spec.md", "# US-G-1\n"]]);
+    expect(collectGitDossierFacts(proj)).toBeNull();
+  });
+});

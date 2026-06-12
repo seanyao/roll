@@ -599,7 +599,8 @@ export function renderStoryDossier(d: StoryDossierInput): string {
  * note, and the story's `tcr:` commits from git history. Every read is
  * best-effort — a missing source renders as an honest empty state.
  */
-export function collectStoryDossierInput(projectPath: string, story: DossierStory): StoryDossierInput {
+export function collectStoryDossierInput(projectPath: string, story: DossierStory, cache?: DossierRunCache): StoryDossierInput {
+  const gitFacts = cache === undefined ? undefined : cache.git;
   const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id);
   const out: StoryDossierInput = { story };
   let searchableCardText = "";
@@ -707,7 +708,7 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
         .trim();
       searchableCardText += `\n${readFile(latest.sourcePath)}`;
     }
-    const trend = readSelfScoreTrend(projectPath);
+    const trend = cache !== undefined ? cache.selfScoreTrend : readSelfScoreTrend(projectPath);
     if (trend !== undefined) out.selfScoreTrend = trend;
   } catch {
     /* no notes */
@@ -715,9 +716,13 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
 
   // git history → tcr commits mentioning the story (oldest first).
   try {
-    const log = execGit(projectPath, ["log", "--format=%s", "--fixed-strings", "--grep", story.id, "--reverse"]);
-    const commits = log
-      .split("\n")
+    const subjects =
+      gitFacts !== undefined
+        ? gitFacts === null
+          ? []
+          : [...factsSubjects(gitFacts, story.id)].reverse()
+        : execGit(projectPath, ["log", "--format=%s", "--fixed-strings", "--grep", story.id, "--reverse"]).split("\n");
+    const commits = subjects
       .map((l) => l.trim())
       .filter((l) => l !== "")
       .slice(0, 40);
@@ -726,10 +731,10 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     /* not a git repo / git unavailable */
   }
 
-  const executionRefs = collectExecutionRefs(projectPath, story.id, searchableCardText);
+  const executionRefs = collectExecutionRefs(projectPath, story.id, searchableCardText, gitFacts);
   if (executionRefs.length > 0) out.executionRefs = executionRefs;
 
-  const deliveryEvidence = collectDeliveryEvidence(projectPath, story, searchableCardText);
+  const deliveryEvidence = collectDeliveryEvidence(projectPath, story, searchableCardText, gitFacts);
   if (hasDeliveryEvidence(deliveryEvidence)) out.deliveryEvidence = deliveryEvidence;
 
   const dynamicEvidence = collectDynamicEvidence(projectPath, story);
@@ -738,7 +743,7 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   const peerReview = collectPeerReview(projectPath, story.id);
   if (peerReview !== undefined) out.peerReview = peerReview;
 
-  const storyGraph = collectStoryGraph(projectPath, story);
+  const storyGraph = collectStoryGraph(projectPath, story, cache);
   if (hasStoryGraph(storyGraph)) out.storyGraph = storyGraph;
 
   const correctionActions = collectCorrectionActions(projectPath, story.id);
@@ -747,7 +752,7 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   return out;
 }
 
-function collectExecutionRefs(projectPath: string, storyId: string, text: string): ExecutionRef[] {
+function collectExecutionRefs(projectPath: string, storyId: string, text: string, gitFacts?: GitDossierFacts | null): ExecutionRef[] {
   const refs: ExecutionRef[] = [];
   const seen = new Set<string>();
   const add = (ref: ExecutionRef): void => {
@@ -836,7 +841,7 @@ interface EventRow {
   ts?: number;
 }
 
-function collectDeliveryEvidence(projectPath: string, story: DossierStory, text: string): DeliveryEvidence {
+function collectDeliveryEvidence(projectPath: string, story: DossierStory, text: string, gitFacts?: GitDossierFacts | null): DeliveryEvidence {
   const prs = new Map<number, DeliveryPrEvidence>();
   const files = new Set<string>();
   const timeline: DeliveryTimelineEntry[] = [];
@@ -874,7 +879,13 @@ function collectDeliveryEvidence(projectPath: string, story: DossierStory, text:
     if (n === undefined) continue;
     addPr(n, ciPatch(nearbyText(text, match.index, 120, 160)));
   }
-  for (const n of gitPrNumbers(projectPath, story.id)) addPr(n);
+  const prNums =
+    gitFacts !== undefined
+      ? gitFacts === null
+        ? []
+        : factsPrNumbers(gitFacts, story.id)
+      : gitPrNumbers(projectPath, story.id);
+  for (const n of prNums) addPr(n);
 
   const explicitDiff = /(?:^|\n)\s*(?:Diff|PR diff|差异|改动\s*diff)\s*[:：]\s*(https?:\/\/\S+)/i.exec(text);
   if (explicitDiff?.[1] !== undefined) diffHref = explicitDiff[1].trim();
@@ -894,8 +905,14 @@ function collectDeliveryEvidence(projectPath: string, story: DossierStory, text:
     addTimeline("delivery", latestRun.ts);
   }
 
-  for (const f of gitChangedFiles(projectPath, story.id)) files.add(f);
-  const slug = githubSlug(projectPath);
+  const changed =
+    gitFacts !== undefined
+      ? gitFacts === null
+        ? []
+        : factsChangedFiles(gitFacts, story.id)
+      : gitChangedFiles(projectPath, story.id);
+  for (const f of changed) files.add(f);
+  const slug = gitFacts !== undefined ? gitFacts?.slug : githubSlug(projectPath);
   if (slug !== undefined) {
     for (const p of prs.values()) if (p.href === undefined) p.href = `https://github.com/${slug}/pull/${p.number}`;
   }
@@ -974,8 +991,8 @@ interface StorySpecRef {
 
 const STORY_ID_PATTERN = "\\b(?:US|FIX|REFACTOR|IDEA)(?:-[A-Z0-9]+)*-\\d+[a-z]?\\b";
 
-function collectStoryGraph(projectPath: string, story: DossierStory): StoryGraph {
-  const refs = scanStorySpecs(projectPath);
+function collectStoryGraph(projectPath: string, story: DossierStory, cache?: DossierRunCache): StoryGraph {
+  const refs = cache !== undefined ? cache.specRefs : scanStorySpecs(projectPath);
   const byId = new Map(refs.map((ref) => [ref.id, ref]));
   const current = byId.get(story.id) ?? {
     id: story.id,
@@ -991,7 +1008,11 @@ function collectStoryGraph(projectPath: string, story: DossierStory): StoryGraph
   }
 
   const dependsOn = storyGraphLinks(extractDependsOnIds(currentSpec).filter((id) => id !== story.id), story, byId);
-  const dependedBy = storyGraphLinks(reverseDependencyIds(refs, story.id), story, byId);
+  const reverseIds =
+    cache !== undefined
+      ? refs.filter((r) => r.id !== story.id && (cache.dependsOnById.get(r.id) ?? []).includes(story.id)).map((r) => r.id)
+      : reverseDependencyIds(refs, story.id);
+  const dependedBy = storyGraphLinks(reverseIds, story, byId);
   const fixes =
     story.id.startsWith("FIX-") || story.type === "FIX"
       ? storyGraphLinks(extractFixesIds(currentSpec).filter((id) => id !== story.id), story, byId)
@@ -1447,6 +1468,108 @@ function githubSlug(projectPath: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+// ── FIX-275: one-spawn git facts snapshot ────────────────────────────────────
+// Profiling `roll index` showed 55% of wall-clock in per-card
+// `git log --grep` spawns (~3 per card × ~640 cards). One full-history pass
+// captures everything those greps read; per-card resolution becomes string
+// matching over the snapshot with IDENTICAL semantics (--fixed-strings --grep
+// matches anywhere in the full commit message; default order newest-first).
+
+export interface GitDossierFacts {
+  /** Commits newest-first: subject, full message, changed files (name-only). */
+  commits: Array<{ subject: string; message: string; files: string[] }>;
+  slug: string | undefined;
+}
+
+/** One `git log` spawn for the whole dossier run; null when not a git repo. */
+export function collectGitDossierFacts(projectPath: string): GitDossierFacts | null {
+  let raw: string;
+  try {
+    raw = execGit(projectPath, ["log", "--name-only", "--pretty=format:%x01%s%x02%B%x03"]);
+  } catch {
+    return null;
+  }
+  const commits: GitDossierFacts["commits"] = [];
+  for (const rec of raw.split("\u0001")) {
+    if (rec.trim() === "") continue;
+    const subjEnd = rec.indexOf("\u0002");
+    const bodyEnd = rec.indexOf("\u0003");
+    if (subjEnd < 0 || bodyEnd < 0) continue;
+    const subject = rec.slice(0, subjEnd);
+    const message = rec.slice(subjEnd + 1, bodyEnd);
+    const files = rec
+      .slice(bodyEnd + 1)
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "");
+    commits.push({ subject, message, files });
+  }
+  return { commits, slug: githubSlug(projectPath) };
+}
+
+/**
+ * FIX-275 — run-scoped shared facts for a whole dossier regeneration. Profiling
+ * showed three per-card O(all-cards) reads: ~3 git spawns, a full notes-tree
+ * scan for the project-wide self-score trend, and a full spec read for reverse
+ * dependencies. Build once per run; per-card collection becomes lookups. The
+ * single-card path (attest) simply omits the cache and keeps live reads.
+ */
+export interface DossierRunCache {
+  git: GitDossierFacts | null;
+  selfScoreTrend: string | undefined;
+  specRefs: StorySpecRef[];
+  /** id → the ids its spec declares under depends-on. */
+  dependsOnById: Map<string, string[]>;
+}
+
+export function buildDossierRunCache(projectPath: string): DossierRunCache {
+  const specRefs = scanStorySpecs(projectPath);
+  const dependsOnById = new Map<string, string[]>();
+  for (const ref of specRefs) {
+    let spec = "";
+    try {
+      spec = readFile(ref.specPath);
+    } catch {
+      /* unreadable spec → no deps */
+    }
+    dependsOnById.set(ref.id, extractDependsOnIds(spec));
+  }
+  return {
+    git: collectGitDossierFacts(projectPath),
+    selfScoreTrend: readSelfScoreTrend(projectPath),
+    specRefs,
+    dependsOnById,
+  };
+}
+
+/** Newest-first commits whose full message mentions the id (≡ --fixed-strings --grep). */
+function factsCommitsFor(facts: GitDossierFacts, storyId: string): GitDossierFacts["commits"] {
+  return facts.commits.filter((c) => c.message.includes(storyId) || c.subject.includes(storyId));
+}
+
+function factsSubjects(facts: GitDossierFacts, storyId: string): string[] {
+  return factsCommitsFor(facts, storyId).map((c) => c.subject);
+}
+
+function factsChangedFiles(facts: GitDossierFacts, storyId: string): string[] {
+  return factsCommitsFor(facts, storyId)
+    .flatMap((c) => c.files)
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !l.includes(" "))
+    .slice(0, 80);
+}
+
+function factsPrNumbers(facts: GitDossierFacts, storyId: string): number[] {
+  const nums = new Set<number>();
+  for (const subject of factsSubjects(facts, storyId)) {
+    for (const match of subject.matchAll(/(?:\(#|PR\s*#?)(\d+)\)?/gi)) {
+      const n = numberFromString(match[1]);
+      if (n !== undefined) nums.add(n);
+    }
+  }
+  return [...nums];
 }
 
 // Thin fs/git seams (kept local so the renderer stays pure above).

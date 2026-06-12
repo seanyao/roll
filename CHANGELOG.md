@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+## v3.612.2 — 2026-06-12
+
 ### 稳定性
 
+- `roll loop go` 撞上运行中的 cycle 不再秒停，等锁释放后接着跑（FIX-269） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/FIX-269/spec.md -->
+- cycle worktree 在 agent 进场前先装好依赖，离线沙箱里测试也能跑（FIX-268 根因预防） `[loop]`
 - `roll attest --capture-command` 截图后不再弹 macOS 终止进程确认
   <!-- evidence: .roll/features/acceptance-evidence/FIX-266/latest/FIX-266-report.html -->
 

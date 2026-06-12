@@ -56,6 +56,25 @@ const AGENTS = [
   },
 ];
 
+const SKILLS = {
+  summary: { skills: 2, violations: 0, hubLines: 110 },
+  groups: [
+    { key: "delivery" as const, rows: [{
+      name: "roll-build", group: "delivery" as const, hubLines: 60, description: "Load when shipping a story",
+      violations: [], hasGotchas: true, hasLoadTrigger: true, routeCases: { positive: 2, negative: 2 },
+      usage: 7, files: [{ path: "SKILL.md", lines: 60, dir: false }, { path: "references/", lines: 0, dir: true }, { path: "references/full-contract.md", lines: 900, dir: false }],
+      dirPath: "/repo/skills/roll-build", hubText: "# Roll Build\nhub text here",
+    }] },
+    { key: "quality" as const, rows: [{
+      name: "roll-.review", group: "quality" as const, hubLines: 50, description: "Load when reviewing",
+      violations: [], hasGotchas: true, hasLoadTrigger: true, routeCases: { positive: 2, negative: 2 },
+      usage: 0, files: [{ path: "SKILL.md", lines: 50, dir: false }], dirPath: "/repo/skills/roll-.review", hubText: "# Review",
+    }] },
+    { key: "observe" as const, rows: [] },
+    { key: "lifecycle" as const, rows: [] },
+  ],
+};
+
 const RELEASE_SCOPE = {
   pending: [
     { epic: "alpha", items: [{ id: "FIX-9", epic: "alpha", title: "fix it", state: "todo" }] },
@@ -120,6 +139,7 @@ function render(snapshot: TruthSnapshot = SNAP): string {
     releasePanel: RELEASE_PANEL,
     releaseScope: RELEASE_SCOPE,
     githubSlug: "seanyao/roll",
+    skills: SKILLS,
   });
 }
 
@@ -133,7 +153,6 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     }
     const order = ["overview", "loop", "release", "backlog", "skills"].map((k) => html.indexOf(`data-tab="${k}"`));
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(html).toContain("US-DOSSIER-017");
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
   });
 
@@ -148,6 +167,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       agents: [],
       releasePanel: { dims: [], total: { fail: 0, warn: 0, unknown: 0 }, blocking: false },
       releaseScope: { pending: [], shipped: [], pendingCount: 0, shippedCount: 0, history: [] },
+      skills: { summary: { skills: 0, violations: 0, hubLines: 0 }, groups: [] },
     });
     expect(custom).toContain("acme");
     expect(custom).toContain("Ship truth.");
@@ -377,5 +397,38 @@ describe("release scope sections — US-DOSSIER-016", () => {
     expect(html).toMatch(/>5<\/b> <span class="lang-en">pending/);
     expect(html).toContain('data-truth="pending-count"');
     expect(html).toContain('data-truth="shipped-count"');
+  });
+});
+
+describe("skills tab — US-DOSSIER-017", () => {
+  const html = render();
+
+  it("AC1: audit strip — skills · violations · hub lines, same yardstick note", () => {
+    expect(html).toContain('data-truth="skills-count"');
+    expect(html).toContain("hub lines");
+    expect(html).toContain("audit-skills --strict");
+  });
+
+  it("AC2: grouped lists with usage counts (— when never invoked)", () => {
+    expect(html).toContain(">Delivery<");
+    expect(html).toContain(">Quality<");
+    expect(html).toContain("×7");
+    expect(html).toMatch(/roll-\.review[\s\S]{0,800}—/);
+  });
+
+  it("AC3: expanded anatomy — file tree with line counts, essentials checks, copyable dir chip", () => {
+    expect(html).toContain("references/full-contract.md");
+    expect(html).toContain("900");
+    expect(html).toContain("✓ Load when");
+    expect(html).toContain("✓ Gotchas");
+    expect(html).toContain("2+/2−");
+    expect(html).toContain('data-copy="/repo/skills/roll-build"');
+  });
+
+  it("AC4: SKILL.md hub inline in a scroll area; references stay pointers", () => {
+    expect(html).toContain("view SKILL.md hub");
+    expect(html).toContain("hub text here");
+    expect(html).toContain("max-height:280px");
+    expect(html).not.toContain("references full text"); // pointers only
   });
 });

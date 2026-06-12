@@ -18,6 +18,7 @@ import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
+import { collectSkillsPanel } from "../lib/skills-panel.js";
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
@@ -347,6 +348,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         cycles: collectCycleLedger(cwd),
         agents: collectAgentPanel(cwd),
         releasePanel: collectReleasePanel(cwd),
+        skills: collectSkillsPanel(cwd),
         // kimi pair-review: the PR links need the repo slug — reuse the
         // FIX-275 git snapshot (one probe per run) instead of a fresh git call.
         ...(runCache.git?.slug !== undefined ? { githubSlug: runCache.git.slug } : {}),

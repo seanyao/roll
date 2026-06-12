@@ -23,6 +23,7 @@ import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
 import type { ReleasePanelVM } from "./release-panel.js";
 import type { ReleaseScopeVM, ScopeEpicGroup } from "./release-scope.js";
+import type { SkillsPanelVM, SkillPanelRow } from "./skills-panel.js";
 
 export interface TruthConsoleBrand {
   /** Injected, never hardcoded (owner ruling): project name + slogan. */
@@ -77,6 +78,8 @@ export interface TruthConsoleInput {
   releaseScope: ReleaseScopeVM;
   /** GitHub repo slug (owner/name) for PR links, when known. */
   githubSlug?: string;
+  /** Skills catalog + strict-audit truth (US-DOSSIER-017). */
+  skills: SkillsPanelVM;
 }
 
 const MONO = `font-family:'IBM Plex Mono',monospace;`;
@@ -772,6 +775,82 @@ function placeholderTab(titleEn: string, titleZh: string, fillerStory: string): 
   );
 }
 
+const SKILL_GROUP_META: Record<string, { en: string; zh: string }> = {
+  delivery: { en: "Delivery", zh: "交付" },
+  quality: { en: "Quality", zh: "质量" },
+  observe: { en: "Observe", zh: "观察" },
+  lifecycle: { en: "Lifecycle", zh: "生命周期" },
+};
+
+function skillRow(r: SkillPanelRow): string {
+  const ok = r.violations.length === 0;
+  const check = (on: boolean, label: string): string =>
+    `<span style="${MONO}font-size:10.5px;color:${on ? C.green : C.red};font-weight:600;white-space:nowrap;">${on ? "✓" : "✗"} ${label}</span>`;
+  const tree = r.files
+    .map(
+      (f) =>
+        `<div style="display:flex;gap:12px;align-items:baseline;padding:1px 0;">` +
+        `<span style="${MONO}font-size:11px;color:${f.dir ? C.faint : C.ink};">${esc(f.path)}</span>` +
+        (f.dir ? "" : `<span style="${MONO}font-size:10px;color:${C.faint};">${f.lines} ${bi("lines", "行")}</span>`) +
+        `</div>`,
+    )
+    .join("");
+  return (
+    `<details class="sk-row" data-skill="${esc(r.name)}" style="border-top:1px solid ${C.hair};">` +
+    `<summary style="display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
+    `<span style="display:flex;align-items:center;gap:10px;min-width:0;"><span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
+    `<span style="width:8px;height:8px;border-radius:50%;background:${ok ? C.green : C.red};flex:none;"></span>` +
+    `<span style="${MONO}font-size:13px;font-weight:600;color:${C.ink};white-space:nowrap;">${esc(r.name)}</span>` +
+    `<span style="font-size:12px;color:${C.dim};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.description.slice(0, 110))}</span></span>` +
+    `<span style="${MONO}font-size:11px;color:${C.dim};white-space:nowrap;">${r.hubLines} ${bi("lines", "行")}</span>` +
+    `<span style="${MONO}font-size:11px;color:${r.usage > 0 ? C.blue : C.faint};font-weight:600;white-space:nowrap;" title="${bi("invocations (self-score notes)", "调用次数（自评分 note）")}">${r.usage > 0 ? `×${r.usage}` : "—"}</span>` +
+    `<span style="${MONO}font-size:10.5px;color:${ok ? C.green : C.red};white-space:nowrap;">${ok ? bi("clean", "无违规") : `${r.violations.length} ${bi("violations", "违规")}`}</span></summary>` +
+    `<div style="background:#fbfcfe;border-top:1px solid #f1f4f8;padding:12px 18px 14px 47px;display:grid;grid-template-columns:1fr 1fr;gap:18px;">` +
+    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("anatomy", "解剖")}</div>${tree}` +
+    `<div style="margin-top:9px;"><code class="copy-chip" data-copy="${esc(r.dirPath)}" style="${MONO}font-size:10.5px;padding:3px 9px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">${esc(r.dirPath)}</code></div></div>` +
+    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("audit essentials", "审计要件")}</div>` +
+    `<div style="display:flex;flex-wrap:wrap;gap:12px;">${check(r.hasLoadTrigger, "Load when")}${check(r.hasGotchas, "Gotchas")}` +
+    `<span style="${MONO}font-size:10.5px;color:${C.sub};">${r.routeCases.positive}+/${r.routeCases.negative}− ${bi("route cases", "路由用例")}</span></div>` +
+    (r.violations.length > 0 ? `<ul style="margin:8px 0 0;padding-left:16px;font-size:11.5px;color:${C.red};">${r.violations.map((v) => `<li>${esc(v)}</li>`).join("")}</ul>` : "") +
+    `<details style="margin-top:10px;"><summary style="${MONO}font-size:10.5px;color:${C.blue};cursor:pointer;">${bi("view SKILL.md hub", "查看 SKILL.md 原文")}</summary>` +
+    `<pre style="margin:8px 0 0;max-height:280px;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:8px;padding:10px 12px;${MONO}font-size:10.5px;line-height:1.5;color:${C.body};white-space:pre-wrap;">${esc(r.hubText)}</pre></details>` +
+    `</div></div></details>`
+  );
+}
+
+function skillsTab(input: TruthConsoleInput): string {
+  const sk = input.skills;
+  const groups = sk.groups
+    .map((g) => {
+      const meta = SKILL_GROUP_META[g.key] ?? { en: g.key, zh: g.key };
+      if (g.rows.length === 0) return "";
+      return (
+        `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;">` +
+        `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi(meta.en, meta.zh)}</span>` +
+        `<span style="${MONO}font-size:12px;color:${C.blue};font-weight:600;">${g.rows.length}</span>` +
+        `<span style="flex:1;height:1px;background:#dfe4ec;"></span></div>` +
+        `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.04);">${g.rows.map(skillRow).join("")}</section>`
+      );
+    })
+    .join("");
+  return (
+    `<div style="padding:30px 0 4px;">` +
+    kicker(bi("The contract says how — the audit says whether", "契约说该这样干——审计说有没有")) +
+    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Skills", "技能")}</h1>` +
+    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
+      "The catalog is read from the repo directory — a skill that is not on disk does not exist here.",
+      "清单从仓库目录实读——磁盘上不存在的技能这里也不存在。",
+    )}</p></div>` +
+    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};margin:18px 0 8px;padding:13px 18px;display:flex;gap:26px;align-items:center;flex-wrap:wrap;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<span data-truth="skills-count" style="${MONO}font-size:13px;color:${C.ink};font-weight:600;">${sk.summary.skills} ${bi("skills", "个技能")}</span>` +
+    `<span style="${MONO}font-size:13px;color:${sk.summary.violations > 0 ? C.red : C.green};font-weight:600;">${sk.summary.violations} ${bi("violations", "违规")}</span>` +
+    `<span style="${MONO}font-size:13px;color:${C.sub};">${sk.summary.hubLines} ${bi("hub lines", "hub 总行数")}</span>` +
+    `<span style="flex:1;"></span>` +
+    `<span style="${MONO}font-size:10.5px;color:${C.faint};">${bi("same yardstick as audit-skills --strict", "与 audit-skills --strict 同口径")}</span></section>` +
+    groups
+  );
+}
+
 const TABS = [
   { key: "overview", en: "Overview", zh: "总览" },
   { key: "loop", en: "Loop", zh: "循环" },
@@ -969,6 +1048,9 @@ a{color:${C.blue};}
 .ag-row summary::-webkit-details-marker{display:none;}
 .ag-row[open] .bl-caret{transform:rotate(90deg);}
 .ag-row summary:hover{background:#fbfcfe;}
+.sk-row summary::-webkit-details-marker{display:none;}
+.sk-row[open] .bl-caret{transform:rotate(90deg);}
+.sk-row summary:hover{background:#fbfcfe;}
 `;
 
   const panes =
@@ -976,7 +1058,7 @@ a{color:${C.blue};}
     `<div id="tab-loop" style="display:none;">${loopTab(input)}</div>` +
     `<div id="tab-release" style="display:none;">${releaseTab(input)}</div>` +
     `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
-    `<div id="tab-skills" style="display:none;">${placeholderTab("Skills", "技能", "US-DOSSIER-017")}</div>`;
+    `<div id="tab-skills" style="display:none;">${skillsTab(input)}</div>`;
 
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +

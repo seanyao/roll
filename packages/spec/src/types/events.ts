@@ -41,6 +41,8 @@ export type RollEvent =
   | { type: "goal:session_start"; sessionId: string; scope: GoalScope; ts: number }
   | { type: "goal:session_end"; sessionId: string; status: GoalStatus; reason: string; cycles: number; ts: number }
   | { type: "goal:tick_skipped"; sessionId?: string; reason: "go_session_lock"; heldByPid?: number; ts: number }
+  // FIX-269: the session is parked while a scheduled cycle holds the inner lock.
+  | { type: "goal:waiting_inner_lock"; sessionId: string; heldByPid: number; ts: number }
   | { type: "goal:evaluated"; sessionId: string; status: "continue" | "complete"; total: number; delivered: number; reason: string; blockers: string[]; ts: number }
   | { type: "goal:card_skipped"; sessionId: string; storyId: string; reason: "zero_delivery_streak"; zeroDeliveries: number; cycleId?: string; ts: number }
   | {

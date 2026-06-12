@@ -13,7 +13,7 @@ import {
   type GoalStatus,
   type RollGoal,
 } from "@roll/spec";
-import { acquireLock, ghRepoSlug, prViewMergeInfo, projectIdentity, releaseLock, remoteUrl } from "@roll/infra";
+import { acquireLock, ghRepoSlug, INNER_LOCK_STALE_SEC, isLockHeld, parseLock, prViewMergeInfo, projectIdentity, releaseLock, remoteUrl } from "@roll/infra";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -27,6 +27,10 @@ import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from 
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
 const FINAL_REVIEW_TIMEOUT_MS = 300_000;
+/** Poll interval while a scheduled cycle holds the inner lock. */
+const INNER_LOCK_WAIT_MS = 20_000;
+/** Give up waiting for the inner lock after this long (covers a full cycle). */
+const INNER_LOCK_WAIT_MAX_MS = 3_600_000;
 
 interface ProjectId {
   path: string;
@@ -1066,6 +1070,52 @@ function noCycleTerminalReason(projectPath: string, slug: string, sinceSec: numb
   return alert === undefined ? "no_cycle_terminal" : `no_cycle_terminal: ${alert}`;
 }
 
+/** Live owner pid of the runner's inner lock, or undefined when free/stale. */
+function innerLockHolder(projectPath: string, nowSec: number): number | undefined {
+  const path = join(runtimeDir(projectPath), "inner.lock");
+  try {
+    if (!existsSync(path)) return undefined;
+    const contents = parseLock(readFileSync(path, "utf8"));
+    return isLockHeld(contents, nowSec, INNER_LOCK_STALE_SEC) ? contents.pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Block until the inner lock is free (a scheduled cycle may be mid-flight),
+ * polling every {@link INNER_LOCK_WAIT_MS} up to {@link INNER_LOCK_WAIT_MAX_MS}.
+ * Emits one `goal:waiting_inner_lock` event when the wait begins so the
+ * session is observable while parked. Returns early on a stop signal.
+ */
+async function waitForInnerLock(
+  projectPath: string,
+  session: string,
+  deps: LoopGoDeps,
+  bus: EventBus,
+  evPath: string,
+  stopped: () => boolean,
+): Promise<"free" | "timeout"> {
+  const sleep = deps.sleep ?? ((ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms)));
+  let holder = innerLockHolder(projectPath, deps.nowSec());
+  if (holder === undefined) return "free";
+  bus.appendEvent(evPath, {
+    type: "goal:waiting_inner_lock",
+    sessionId: session,
+    heldByPid: holder,
+    ts: deps.nowSec(),
+  });
+  let waitedMs = 0;
+  while (holder !== undefined) {
+    if (waitedMs >= INNER_LOCK_WAIT_MAX_MS) return "timeout";
+    await sleep(INNER_LOCK_WAIT_MS);
+    waitedMs += INNER_LOCK_WAIT_MS;
+    if (stopped()) return "free";
+    holder = innerLockHolder(projectPath, deps.nowSec());
+  }
+  return "free";
+}
+
 function applyBudgetGate(projectPath: string, bus: EventBus, session: string, goal: RollGoal, deps: LoopGoDeps): { goal: RollGoal; stopped: boolean; reason?: string } {
   const budgetUsd = goal.budgetUsd;
   if (budgetUsd === undefined) return { goal, stopped: false };
@@ -1304,6 +1354,18 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         goal = pauseGoal(id.path, bus, stopReason, deps.nowIso(), deps.nowSec()) ?? goal;
         break;
       }
+      // FIX-269: a scheduled cycle may already hold the inner lock when the
+      // goal session starts — run-once would skip without producing a cycle
+      // terminal, and the session would pause (`no_cycle_terminal`, cycles=0)
+      // one second after `roll loop go` (observed live 2026-06-12 09:40).
+      // Contention is not failure: wait for the running cycle to finish.
+      const lockWait = await waitForInnerLock(id.path, sid, deps, bus, evPath, () => stopRequested);
+      if (lockWait === "timeout") {
+        stopReason = "inner_lock_busy";
+        break;
+      }
+      if (stopRequested) break;
+      if (existsSync(pauseMarkerPath(id.path, id.slug))) continue;
       const before = readRunSnapshot(runsPath(id.path));
       await deps.runOnce({ projectPath: id.path, allowedCards });
       goal = updateUsage(id.path, goal, baseline, initialUsage, deps.nowIso());

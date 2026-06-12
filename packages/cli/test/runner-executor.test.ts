@@ -14,6 +14,7 @@ import {
   AGENT_ARGV_TODO,
   AUTORUN_DIRECTIVE,
   type Ports,
+  bootstrapWorktreeDeps,
   buildClaudeArgv,
   buildRunRow,
   buildSpawnCommand,
@@ -1123,4 +1124,76 @@ describe.runIf(process.platform === "darwin")("FIX-224 darwin integration — re
     expect(survivors).toBe("");
     execFileSync("rm", ["-rf", shimDir]);
   }, 20000);
+});
+
+describe("FIX-268 — worktree deps bootstrap before agent spawn", () => {
+  function tmpWorktree(): string {
+    const d = realpathSync(mkdtempSync(join(tmpdir(), "roll-deps-")));
+    execDirs.push(d);
+    return d;
+  }
+  function alertSink(): { events: { appendAlert: ReturnType<typeof vi.fn> }; alerts: string[] } {
+    const alerts: string[] = [];
+    return { events: { appendAlert: vi.fn((_p: string, msg: string) => alerts.push(msg)) }, alerts };
+  }
+
+  it("skips a non-Node worktree (no package.json) without exec or alert", async () => {
+    const wt = tmpWorktree();
+    const exec = vi.fn(async () => ({}));
+    const { events, alerts } = alertSink();
+    await bootstrapWorktreeDeps(wt, join(wt, "alerts.md"), events as never, exec);
+    expect(exec).not.toHaveBeenCalled();
+    expect(alerts).toEqual([]);
+  });
+
+  it("runs pnpm install --prefer-offline in a pnpm worktree", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+    const exec = vi.fn(async () => ({}));
+    const { events } = alertSink();
+    await bootstrapWorktreeDeps(wt, join(wt, "alerts.md"), events as never, exec);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec.mock.calls[0]?.[0]).toBe("pnpm");
+    expect(exec.mock.calls[0]?.[1]).toEqual(["install", "--prefer-offline"]);
+    expect(exec.mock.calls[0]?.[2]).toMatchObject({ cwd: wt });
+  });
+
+  it("runs npm ci for a package-lock worktree", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "package-lock.json"), "{}\n");
+    const exec = vi.fn(async () => ({}));
+    const { events } = alertSink();
+    await bootstrapWorktreeDeps(wt, join(wt, "alerts.md"), events as never, exec);
+    expect(exec.mock.calls[0]?.[0]).toBe("npm");
+    expect(exec.mock.calls[0]?.[1]).toEqual(["ci", "--prefer-offline"]);
+  });
+
+  it("skips when node_modules already exists (idempotent re-entry)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+    mkdirSync(join(wt, "node_modules"));
+    const exec = vi.fn(async () => ({}));
+    const { events } = alertSink();
+    await bootstrapWorktreeDeps(wt, join(wt, "alerts.md"), events as never, exec);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("an install failure leaves a WARN alert and does not throw (lenient)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+    const exec = vi.fn(async () => {
+      throw new Error("ENOTFOUND registry.npmjs.org");
+    });
+    const { events, alerts } = alertSink();
+    await expect(
+      bootstrapWorktreeDeps(wt, join(wt, "alerts.md"), events as never, exec),
+    ).resolves.toBeUndefined();
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain("[WARN] worktree deps bootstrap failed");
+    expect(alerts[0]).toContain("ENOTFOUND");
+  });
 });

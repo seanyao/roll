@@ -8,6 +8,11 @@
 - 技能自评分改走 TS 原生命令 `roll self-score`，幂等可重试；不再让 agent 把 TS bundle 当 bash 库 source（FIX-274） `[skills]`
   <!-- evidence: .roll/features/skill-ecosystem/FIX-274/latest/FIX-274-report.html -->
 
+### 新功能
+
+- 评分成为 pairing 场景：score 阶段由异构配对 agent 给交付打分（note 带 scored-by 溯源），无候选/超时回落自评，永不阻塞 cycle；`roll pair init` 默认开 code+score 两阶段（US-PAIR-009） `[pairing]`
+  <!-- evidence: .roll/features/cross-agent-pairing/US-PAIR-009/latest/US-PAIR-009-report.html -->
+
 ## v3.612.2 — 2026-06-12
 
 ### 稳定性

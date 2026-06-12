@@ -5,6 +5,8 @@
 ### 稳定性
 
 - cycle worktree 依赖安装失败会直接以失败终态和 `[FAIL] worktree deps bootstrap failed` ALERT 暴露，并清理空 worktree，不再继续烧 agent 后误落 `idle_no_work`（FIX-268） `[loop]`
+- 技能自评分改走 TS 原生命令 `roll self-score`，幂等可重试；不再让 agent 把 TS bundle 当 bash 库 source（FIX-274） `[skills]`
+  <!-- evidence: .roll/features/skill-ecosystem/FIX-274/latest/FIX-274-report.html -->
 
 ## v3.612.2 — 2026-06-12
 

@@ -13,7 +13,7 @@ import { collectDossier, generateIndex } from "../lib/archive.js";
 import { renderFeaturesIndex, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
-import { collectStoryDossierInput, renderStoryDossier, stationsDone, type StoryDossierInput } from "../lib/story-dossier.js";
+import { collectGitDossierFacts, collectStoryDossierInput, renderStoryDossier, stationsDone, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
 
@@ -260,10 +260,12 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   // FIX-275: keep each card's collected input for the render phase below —
   // the same spec.md/ac-map/latest/notes were previously read TWICE per card.
   const inputs = new Map<string, StoryDossierInput>();
+  // FIX-275: ONE git-log snapshot for the whole run (was ~3 spawns per card).
+  const gitFacts = collectGitDossierFacts(cwd);
   for (const epic of epics) {
     for (const story of epic.stories) {
       try {
-        const input = collectStoryDossierInput(cwd, story);
+        const input = collectStoryDossierInput(cwd, story, gitFacts);
         inputs.set(`${epic.name}/${story.id}`, input);
         story.stages = [...stationsDone(input)];
       } catch {
@@ -298,7 +300,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         if (rebuild || !existsSync(storyIndex)) {
           writeFileSync(
             storyIndex,
-            renderStoryDossier(inputs.get(`${epic.name}/${story.id}`) ?? collectStoryDossierInput(cwd, story)),
+            renderStoryDossier(inputs.get(`${epic.name}/${story.id}`) ?? collectStoryDossierInput(cwd, story, gitFacts)),
             "utf8",
           );
           pages += 1;

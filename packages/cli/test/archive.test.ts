@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { indexCommand } from "../src/commands/index-gen.js";
+import { collectGitDossierFacts, collectStoryDossierInput } from "../src/lib/story-dossier.js";
 import {
   buildStoryIndex,
   cardArchiveDir,
@@ -228,5 +229,43 @@ describe("FIX-275 — bulkLiveEpics equivalence", () => {
     const viaPerId = buildStoryIndex(["US-A-1", "FIX-B-2", "US-C-3"], (id) => liveEpicOf(proj, id));
     expect(viaBulk).toEqual(viaPerId);
     expect(readFileSync(join(proj, ".roll", "index.json"), "utf8")).toBe(serializeIndex(viaPerId));
+  });
+});
+
+// FIX-275 (root cause, profiled): `roll index` spent 55% of wall-clock in
+// per-card `git log --grep` spawns (~3 per card). One snapshot spawn must
+// reproduce the per-card semantics exactly.
+describe("FIX-275 — git dossier facts snapshot equivalence", () => {
+  it("snapshot-backed input equals the per-card execGit input", () => {
+    const proj = project(
+      ["| US-G-1 | a | ✅ Done |", "| US-G-2 | b | 📋 Todo |"],
+      [["alpha/US-G-1/spec.md", "# US-G-1\n"], ["alpha/US-G-2/spec.md", "# US-G-2\n"]],
+    );
+    const git = (args: string) => execSync(`git ${args}`, { cwd: proj, env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+    git("init -q");
+    writeFileSync(join(proj, "a.ts"), "1");
+    git("add -A && git -C . commit -qm 'tcr: US-G-1 first step'");
+    writeFileSync(join(proj, "b.ts"), "2");
+    git("add -A && git -C . commit -qm 'Story US-G-1: shipped (#123)'");
+    writeFileSync(join(proj, "c.ts"), "3");
+    git("add -A && git -C . commit -qm 'unrelated change\n\nbody mentions US-G-2 only'");
+
+    const story1 = { id: "US-G-1", epic: "alpha", title: "a", status: "done" } as never;
+    const story2 = { id: "US-G-2", epic: "alpha", title: "b", status: "todo" } as never;
+    const facts = collectGitDossierFacts(proj);
+    expect(facts).not.toBeNull();
+    for (const story of [story1, story2]) {
+      const legacy = collectStoryDossierInput(proj, story);
+      const snap = collectStoryDossierInput(proj, story, facts);
+      expect(snap).toEqual(legacy);
+    }
+    // body-only mention still counts (git --grep matches the full message)
+    const viaSnap = collectStoryDossierInput(proj, story2, facts);
+    expect(viaSnap.commits?.some((c) => c.includes("unrelated change"))).toBe(true);
+  });
+
+  it("non-git directory yields null facts and a git-free input", () => {
+    const proj = project(["| US-G-1 | a | 📋 Todo |"], [["alpha/US-G-1/spec.md", "# US-G-1\n"]]);
+    expect(collectGitDossierFacts(proj)).toBeNull();
   });
 });

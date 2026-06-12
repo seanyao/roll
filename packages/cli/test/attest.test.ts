@@ -637,6 +637,9 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
         writeFileSync(String(argv[argv.length - 1]), "PNGDATA"); // out = last argv
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
       }
+      if (cmd === "osascript" && String(argv[1] ?? "").includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" }); // FIX-271 window-bounds query
+      }
       return Promise.resolve({ code: 0, stdout: "", stderr: "" }); // osascript etc.
     };
   }

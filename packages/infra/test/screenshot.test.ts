@@ -37,6 +37,10 @@ function fake(byCmd: Record<string, { code: number; stdout?: string; writes?: bo
   const calls: string[] = [];
   const run: ShotRun = (cmd, argv) => {
     calls.push(`${cmd} ${argv.join(" ")}`);
+    // bounds queries answer with a window rect so the happy paths proceed
+    if (cmd === "osascript" && String(argv[1] ?? "").includes("bounds of w")) {
+      return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+    }
     const c = byCmd[cmd] ?? { code: 1 };
     if (c.writes === true) {
       const out = cmd === "sh" ? /> '(.+)'$/.exec(argv[1] ?? "")?.[1] : argv[argv.length - 1];
@@ -208,6 +212,9 @@ describe("terminal", () => {
         commandLive = true;
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
       }
+      if (cmd === "osascript" && script.includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
       if (cmd === "screencapture") {
         writeFileSync(String(argv[argv.length - 1]), "PNG");
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
@@ -235,8 +242,10 @@ describe("terminal", () => {
     const closeIndex = calls.findIndex((c) => c.includes("close w saving no"));
     expect(waitIndex).toBeGreaterThan(-1);
     expect(closeIndex).toBeGreaterThan(waitIndex);
-    expect(calls.find((c) => c.includes("do script"))).toContain("exit");
-    expect(calls.find((c) => c.includes("do script"))).toContain("set custom title");
+    const doScript = calls.find((c) => c.includes("do script")) ?? "";
+    expect(doScript).toContain("__roll_status"); // sentinel wrapper present
+    expect(doScript).not.toMatch(/;\s*exit \\"\$__roll_status\\"/); // FIX-271: no self-closing exit
+    expect(doScript).toContain("set custom title");
     expect(calls[closeIndex]).toContain("roll-attest-");
   });
 
@@ -268,6 +277,76 @@ describe("terminal", () => {
     expect(r.skipped).toContain("still running");
     expect(closeCalled).toBe(false);
     expect(calls.some((c) => c.startsWith("sh -lc "))).toBe(true);
+  });
+
+  it("FIX-271: waits for command exit BEFORE shooting, and shoots the window's actual bounds", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "100, 50, 900, 650\n", stderr: "" });
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+
+    expect(r.taken).toBe(true);
+    const waitIndex = calls.findIndex((c) => c.startsWith("sh -lc "));
+    const shotIndex = calls.findIndex((c) => c.startsWith("screencapture "));
+    expect(waitIndex).toBeGreaterThan(-1);
+    expect(shotIndex).toBeGreaterThan(waitIndex); // exit sentinel first, pixels second
+    expect(calls[shotIndex]).toContain("-R 100,50,800,600"); // bounds → origin+size, not the configured rect
+  });
+
+  it("FIX-271: still-running command skips WITHOUT shooting (no blank-window evidence)", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "sh") return Promise.resolve({ code: 1, stdout: "", stderr: "timed out" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "sleep 999", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("still running");
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false);
+  });
+
+  it("FIX-271: window not found → honest skip, NEVER a blind-region shot", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" }); // window vanished
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("refusing a blind-region shot");
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false); // owner's screen never sampled
   });
 
   it("tmux variant attaches the observability session instead of a command", async () => {

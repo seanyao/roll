@@ -174,9 +174,15 @@ export function terminalOpenScript(line: string, r: { x: number; y: number; w: n
     'tell application "Terminal"',
     "  activate",
     `  do script "${esc}"`,
-    ...setTitle,
+    // FIX-271: on a cold Terminal launch "front window" may not exist yet —
+    // retry the title set instead of hard-failing the whole open.
+    ...(setTitle.length === 0
+      ? []
+      : ["  repeat 20 times", "    try", "  " + setTitle[0], "      exit repeat", "    on error", "      delay 0.2", "    end try", "  end repeat"]),
     "  delay 1.5",
-    `  set bounds of front window to {${r.x}, ${r.y}, ${r.x + r.w}, ${r.y + r.h}}`,
+    "  try",
+    `    set bounds of front window to {${r.x}, ${r.y}, ${r.x + r.w}, ${r.y + r.h}}`,
+    "  end try",
     "end tell",
   ].join("\n");
 }
@@ -185,16 +191,63 @@ export function terminalOpenScript(line: string, r: { x: number; y: number; w: n
 export function terminalCloseScript(title?: string): string {
   if (title === undefined) return 'tell application "Terminal" to close front window saving no';
   const esc = appleScriptString(title);
+  // FIX-271: match on the window NAME (a window-level property that embeds the
+  // custom title). `custom title of w` reads through the selected tab and
+  // throws -1728 once the tab is torn down — the try-guard then swallowed the
+  // error and the window survived as an unclosable ghost.
   return [
     'tell application "Terminal"',
     "  repeat with w in windows",
-    `    if custom title of w is "${esc}" then`,
-    "      close w saving no",
-    "      exit repeat",
-    "    end if",
+    "    try",
+    `      if name of w contains "${esc}" then`,
+    "        close w saving no",
+    "        exit repeat",
+    "      end if",
+    "    end try",
     "  end repeat",
     "end tell",
   ].join("\n");
+}
+
+/**
+ * FIX-271 — AppleScript that reads the bounds of the window we opened (matched
+ * by custom title). Returns "x1, y1, x2, y2" on stdout, or "" when the window
+ * is gone (caller falls back to the configured capture rectangle).
+ */
+export function terminalBoundsScript(title: string): string {
+  const esc = appleScriptString(title);
+  return [
+    'tell application "Terminal"',
+    "  repeat with w in windows",
+    "    try",
+    `      if name of w contains "${esc}" then`,
+    // FIX-271: raise the window before reporting bounds — `screencapture -R`
+    // shoots the VISIBLE screen, so a window left on another Space/behind
+    // others would yield someone else's pixels (privacy hazard, observed live).
+    "        set index of w to 1",
+    "        activate",
+    "        delay 0.3",
+    "        return bounds of w",
+    "      end if",
+    "    end try",
+    "  end repeat",
+    '  return ""',
+    "end tell",
+  ].join("\n");
+}
+
+/** Resolve the live window rect for `screencapture -R`; null → fall back to the configured rect. */
+async function resolveWindowRect(
+  title: string,
+  run: ShotRun,
+): Promise<{ x: number; y: number; w: number; h: number } | null> {
+  const r = await run("osascript", ["-e", terminalBoundsScript(title)]);
+  if (r.code !== 0) return null;
+  const parts = r.stdout.trim().split(",").map((part) => Number(part.trim()));
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [x1, y1, x2, y2] = parts as [number, number, number, number];
+  if (x2 <= x1 || y2 <= y1) return null;
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
 }
 
 function shellQuote(value: string): string {
@@ -212,11 +265,14 @@ function terminalWindowTitle(out: string): string {
 
 function terminalCommandWithDoneFile(line: string, doneFile: string): string {
   const done = shellQuote(doneFile);
+  // FIX-271: no trailing `exit` — a clean shell exit lets Terminal auto-close
+  // the window, and the new wait-then-shoot order needs the OUTPUT still on
+  // screen when the sentinel lands. The shell parks at its prompt; we close
+  // the window ourselves after the capture.
   return [
     `(${line})`,
     "__roll_status=$?",
     `printf '%s' "$__roll_status" > ${done}`,
-    'exit "$__roll_status"',
   ].join("; ");
 }
 
@@ -297,18 +353,29 @@ export async function captureScreenshot(
       const windowTitle = terminalWindowTitle(req.out);
       const opened = await run("osascript", ["-e", terminalOpenScript(line, rect, windowTitle)]);
       if (opened.code !== 0) return skip("osascript Terminal open failed");
-      const shot = await run("screencapture", ["-x", "-R", req.region ?? DEFAULT_REGION, req.out]);
+      // FIX-271: the old order shot the screen IMMEDIATELY after the window
+      // opened (blank prompt, command not yet rendered) at the CONFIGURED
+      // rectangle (whatever happened to live there). Correct order: wait for
+      // the command to exit, read the window's ACTUAL bounds, shoot that rectangle,
+      // then close the window we opened.
+      if (commandDoneFile !== undefined && !(await waitForTerminalCommandExit(commandDoneFile, run))) {
+        return skip("terminal command still running; window left open to avoid macOS termination prompt");
+      }
+      const liveRect = await resolveWindowRect(windowTitle, run);
+      // FIX-271: never shoot a blind rectangle — if our window can't be found
+      // and raised, the configured rect would capture WHATEVER the owner has
+      // on screen (live incident: a Teams chat landed in the evidence png).
+      if (liveRect === null) {
+        const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]);
+        if (closed.code !== 0) return skip("capture window not found; Terminal close failed");
+        return skip("capture window not found — refusing a blind-region shot");
+      }
+      const shot = await run("screencapture", ["-x", "-R", `${liveRect.x},${liveRect.y},${liveRect.w},${liveRect.h}`, req.out]);
       // screencapture exits non-zero when Screen Recording permission is absent.
       if (shot.code !== 0) {
-        if (commandDoneFile !== undefined && !(await waitForTerminalCommandExit(commandDoneFile, run))) {
-          return skip("terminal command still running; window left open to avoid macOS termination prompt");
-        }
         const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]);
         if (closed.code !== 0) return skip("screencapture failed; Terminal close failed");
         return skip("screencapture failed (screen-recording permission?)");
-      }
-      if (commandDoneFile !== undefined && !(await waitForTerminalCommandExit(commandDoneFile, run))) {
-        return skip("terminal command still running; window left open to avoid macOS termination prompt");
       }
       const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]); // close the window we opened
       if (closed.code !== 0) return skip("Terminal close failed after capture");

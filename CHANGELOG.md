@@ -8,6 +8,8 @@
 
 ### 新功能
 
+- 技能页签：审计条（N skills·violations·hub 总行数，与 audit-skills --strict 同口径）、四组契约清单带调用频次（自评分 note 口径），行展开看真实文件树（行数）、审计要件勾选、可复制目录路径与 SKILL.md 原文滚动区；清单从仓库目录实读防漂移（US-DOSSIER-017） `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-017/latest/US-DOSSIER-017-report.html -->
 - 发版页签待交付与变更日志：待交付按史诗分组（行点进档案），变更日志从 merged PR 真相生成（pr:merge 事件优先、Done 行 PR# 注记兜底，行带 #N merged 证据链）；页底历史版本可折叠展开（含曾豁免标记）；闸门头 merged/pending 与两段同算术（US-DOSSIER-016） `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-016/latest/US-DOSSIER-016-report.html -->
 - 发版页签六维一致性面板：闸门头（tag·判定·f/w/?·切版·上一版·merged/pending 进度条）+ 六维对账行（漂移卡可点跳待办搜索），合计与状态行严格同数，任一维 fail 明示挡发版；⑦data 维以提案虚线行呈现并链 FIX-248/249；附可复制 roll release consistency check 芯片（US-DOSSIER-015） `[dossier]`

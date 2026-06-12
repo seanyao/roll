@@ -66,6 +66,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll release consistency <check\|audit>` | 五维一致性检查 · US-TRUTH 影子漂移审计(只读,exit 0) |
 | `roll pair [init\|status\|score]` | 跨 Agent 配对:异构同行复检与交付打分 |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | 周期账本——每行一个 cycle,失败不被吞 |
+| `roll cycle <id>` | 单个 cycle 的完整轨迹带(cycle→story→build→peer→ci→pr→end) |
 | `roll peer [--reviewer <agent>] (--prompt <text>\|--file <path>)` | 一次性结构化外部 provider 评审；记录 `.roll/peer/runs.jsonl` |
 | **配置 · 本机** | |
 | `roll config [lang <zh\|en\|--reset>\|…]` | 读写 roll 配置(语言、loop 窗口、dream 时间) |

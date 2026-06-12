@@ -8,6 +8,9 @@
 
 ### 新功能
 
+- `roll cycle <id>` 单周期轨迹带：摘要行+story 行+垂直七段（色点+事实摘要，中途死掉的段显示"未达"不省略）+ PR/diff/story 证据指针；与 web 轨迹带同形同词表（US-CLI-013） `[cli]`
+  <!-- evidence: .roll/features/cli-simplification/US-CLI-013/latest/US-CLI-013-report.html -->
+
 - `roll cycles [--since 1d|3d|7d|all]` 升一等命令：周期账本每行周期号·结局·story·模型·tokens·花费·耗时，汇总行失败=failed+reverted+blocked 不吞，尾部 → roll cycle 提示；与 web 账本同聚合同词表（US-CLI-012） `[cli]`
   <!-- evidence: .roll/features/cli-simplification/US-CLI-012/latest/US-CLI-012-report.html -->
 

@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderCycleTrace > AC5: en/zh snapshots 1`] = `
+"#0311 · delivered · claude · 120k/22k · $0.05 · 8m20s
+story FIX-241
+
+● cycle   2026-06-12 19:00Z
+│
+● story   FIX-241
+│
+● build   3 commits
+│
+● peer    consulted
+│
+● ci      attest ✓
+│
+● pr      #461 merged
+│
+● end     delivered
+
+evidence  PR https://github.com/seanyao/roll/pull/461 · diff https://github.com/seanyao/roll/pull/461/files · story .roll/features/*/FIX-241/index.html
+"
+`;
+
+exports[`renderCycleTrace > AC5: en/zh snapshots 2`] = `
+"#0311 · delivered · claude · 120k/22k · $0.05 · 8m20s
+story FIX-241
+
+● cycle   2026-06-12 19:00Z
+│
+● story   FIX-241
+│
+● build   3 commits
+│
+● peer    consulted
+│
+● ci      attest ✓
+│
+● pr      #461 merged
+│
+● end     delivered
+
+evidence  PR https://github.com/seanyao/roll/pull/461 · diff https://github.com/seanyao/roll/pull/461/files · story .roll/features/*/FIX-241/index.html
+"
+`;

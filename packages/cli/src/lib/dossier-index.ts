@@ -321,6 +321,35 @@ function overview(epics: DossierEpic[]): string {
 /** Render the Delivery Dossier front page — a delivery board: a pulled-out
  *  status overview (tallies + spectrum), then foldable epics grouped by their
  *  aggregate state, each story carrying its lifecycle spine + backlog status. */
+/** US-DOSSIER-011: the searchable ledger (toolbar + epic groups) as a fragment —
+ *  the Truth Console embeds it under the Backlog tab until US-DOSSIER-012
+ *  redesigns that surface. Same markup the legacy front page renders. */
+export function featuresLedgerFragment(epics: DossierEpic[]): string {
+  const done = epics.filter((e) => e.stories.length > 0 && e.delivered === e.stories.length);
+  const shipping = epics.filter((e) => e.delivered > 0 && e.delivered < e.stories.length);
+  const backlog = epics.filter((e) => e.delivered === 0);
+  const group = (title: string, zh: string, list: DossierEpic[]): string =>
+    list.length === 0
+      ? ""
+      : `<div class="section-h">${bi(title, zh)} <span class="ct">${list.length}</span><span class="rule"></span></div>\n` +
+        `${list.map(epicFold).join("\n")}\n`;
+  return (
+    `<div class="toolbar">` +
+    `<input type="search" data-dossier-search placeholder="Search epics &amp; stories · 搜索史诗与故事" aria-label="search">` +
+    `<div class="statusfilter" role="group">` +
+    `<button class="sf done" data-sf="done" aria-pressed="false">✅ ${bi("Done", "交付")}</button>` +
+    `<button class="sf fail" data-sf="fail" aria-pressed="false">! ${bi("Drift", "漂移")}</button>` +
+    `<button class="sf unknown" data-sf="unknown" aria-pressed="false">? ${bi("Unknown", "未知")}</button>` +
+    `<button class="sf wip" data-sf="wip" aria-pressed="false">🔨 ${bi("WIP", "进行")}</button>` +
+    `<button class="sf todo" data-sf="todo" aria-pressed="false">📋 ${bi("Todo", "待办")}</button>` +
+    `<button class="sf hold" data-sf="hold" aria-pressed="false">🔒 ${bi("Hold", "挂起")}</button>` +
+    `</div></div>\n` +
+    group("Shipping to main", "交付中", shipping) +
+    group("Delivered to main", "已交付", done) +
+    group("In backlog", "仍在待办", backlog)
+  );
+}
+
 export function renderFeaturesIndex(epics: DossierEpic[], opts: RenderFeaturesIndexOptions = {}): string {
   const done = epics.filter((e) => e.stories.length > 0 && e.delivered === e.stories.length);
   const shipping = epics.filter((e) => e.delivered > 0 && e.delivered < e.stories.length);

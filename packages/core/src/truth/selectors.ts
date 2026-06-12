@@ -237,6 +237,7 @@ import {
   type TruthSnapshot,
   type TruthSnapshotAudit,
   type TruthSnapshotCycle,
+  type TruthSnapshotLoop,
   type TruthSnapshotRelease,
   type TruthSpectrumState,
 } from "@roll/spec";
@@ -251,6 +252,7 @@ export interface TruthSnapshotInput {
   audit?: TruthSnapshotAudit;
   cycle?: TruthSnapshotCycle;
   release?: TruthSnapshotRelease;
+  loop?: TruthSnapshotLoop;
 }
 
 /**
@@ -268,5 +270,6 @@ export function buildTruthSnapshot(input: TruthSnapshotInput): TruthSnapshot {
     ...(input.audit !== undefined ? { audit: input.audit } : {}),
     ...(input.cycle !== undefined ? { cycle: input.cycle } : {}),
     ...(input.release !== undefined ? { release: input.release } : {}),
+    ...(input.loop !== undefined ? { loop: input.loop } : {}),
   };
 }

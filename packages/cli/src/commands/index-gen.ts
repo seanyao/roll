@@ -12,7 +12,12 @@ import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
 import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
-import { countLegacyStories, renderFeaturesIndex, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
+import { countLegacyStories, featuresLedgerFragment, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
+import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../lib/dossier-css.js";
+import { renderTruthConsole } from "../lib/truth-console.js";
+import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
+import { launchAgentsDir } from "./loop-sched.js";
+import { projectSlug } from "./dashboard.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
 import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, type StoryDossierInput } from "../lib/story-dossier.js";
@@ -291,12 +296,26 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       ...(truth.audit !== undefined ? { audit: truth.audit } : {}),
       ...(truth.cycle !== undefined ? { cycle: truth.cycle } : {}),
       ...(truth.release !== undefined ? { release: truth.release } : {}),
+      // US-DOSSIER-011: the loop heartbeat is part of the ONE snapshot too.
+      loop: collectLoopHeartbeat(defaultHeartbeatDeps(cwd, projectSlug(), launchAgentsDir())),
     });
     const snapshotJson = serializeTruthSnapshot(snapshot);
     writeFileSync(join(featuresDir, "truth.json"), snapshotJson, "utf8");
+    // US-DOSSIER-011: index.html IS the Truth Console now — five sticky tabs,
+    // overview first; the legacy ledger lives on under the Backlog tab.
     writeFileSync(
       join(featuresDir, "index.html"),
-      renderFeaturesIndex(epics, { morningReportHref: morningReportHref(cwd), truth, snapshotJson }),
+      renderTruthConsole({
+        snapshot,
+        snapshotJson,
+        brand: {
+          name: process.env["ROLL_BRAND_NAME"] ?? "roll",
+          slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works.",
+        },
+        backlogFragment: featuresLedgerFragment(epics),
+        backlogScript: DOSSIER_FILTER_SCRIPT,
+        backlogStyle: DOSSIER_CSS,
+      }),
       "utf8",
     );
     pages += 1;

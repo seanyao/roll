@@ -1010,15 +1010,17 @@ describe("roll index — US-DOSSIER-001d three-layer integration", () => {
     expect(story).not.toContain('class="attest-banner"');
     expect(story).toContain("US-A-1:AC1");
     expect(story).toContain("✓ pass");
-    // US-TRUTH-011: the generated front page consumes live audit/run/release
-    // facts instead of rendering an un-fed fixture board full of unknowns.
-    expect(idx).toContain('data-truth-board="fail"');
-    expect(idx).toContain("f:1 w:2 ?:3");
-    expect(idx).toContain("2026-06-11T04:00:00Z");
+    // US-TRUTH-011 (re-frozen for the US-DOSSIER-011 console): the generated
+    // front page consumes live audit/run/release facts via the ONE snapshot.
+    expect(idx).toMatch(/data-truth="verdict"[^>]*>FAIL</); // audit fail:1 → FAIL
     expect(idx).toContain("v3.611.3");
-    expect(idx).toContain("truth-board");
-    expect(idx).toContain("<b>2</b>");
+    expect(idx).toContain("truth-board"); // waiver visible on the release tile
     expect(idx).toContain("$1.50");
+    const m = /<script id="roll-truth" type="application\/json">\n([\s\S]*?)<\/script>/.exec(idx);
+    const snap = JSON.parse((m?.[1] ?? "").replace(/<\\\//g, "</"));
+    expect(snap.audit).toMatchObject({ fail: 1, warn: 2, unknown: 3 });
+    expect(snap.cycle).toMatchObject({ cycles3d: 2, failed3d: 1, costUsd3d: 1.5 });
+    expect(snap.generatedAt).toBe("2026-06-11T04:00:00Z");
   });
 });
 

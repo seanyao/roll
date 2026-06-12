@@ -44,6 +44,23 @@ export interface TruthSnapshotRelease {
   collectedAt?: string;
 }
 
+/** One scheduled lane on this machine (US-DOSSIER-011 loop heartbeat). */
+export interface TruthSnapshotLoopLane {
+  name: string;
+  /** Installed and scheduled (the launchd plist exists). */
+  running: boolean;
+  mode?: string;
+  /** Schedule period in minutes. */
+  everyMin?: number;
+  lastAt?: string;
+  nextAt?: string;
+}
+
+export interface TruthSnapshotLoop {
+  lanes: TruthSnapshotLoopLane[];
+  collectedAt?: string;
+}
+
 export interface TruthSnapshot {
   generatedAt: string;
   collectedAt?: string;
@@ -51,6 +68,7 @@ export interface TruthSnapshot {
   audit?: TruthSnapshotAudit;
   cycle?: TruthSnapshotCycle;
   release?: TruthSnapshotRelease;
+  loop?: TruthSnapshotLoop;
 }
 
 /** The ONE serialization both index.html's embed and truth.json carry. */

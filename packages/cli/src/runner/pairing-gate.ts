@@ -19,6 +19,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
+import { writeSelfScoreNote } from "../lib/self-score.js";
 import { assessComplexity } from "./peer-gate.js";
 
 /**
@@ -38,7 +39,11 @@ export function enabledPairingStages(projectDir: string): PairingStage[] {
     // De-dupe (kimi pair-review): a config that repeats a stage must not fire it
     // twice — duplicate peer spawns, duplicate events, and a clobbered evidence
     // file. Keep first-seen order so the config still reads top-to-bottom.
-    return cfg.stages.filter((s, i, arr) => arr.indexOf(s) === i);
+    // US-PAIR-009 (kimi pair-review): `score` is NOT a review stage — it fires
+    // post-attest via runScorePairing with its own prompt/protocol. Routing it
+    // through the generic review loop would double-spawn a peer and clobber
+    // the score evidence file with a pair:verdict.
+    return cfg.stages.filter((s, i, arr) => arr.indexOf(s) === i && s !== "score");
   } catch {
     return []; // malformed config → pairing off, not a cycle failure
   }
@@ -62,6 +67,7 @@ export interface PairReview {
 export type PairEvent =
   | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; ts: number }
   | { type: "pair:verdict"; cycleId: string; peer: string; verdict: PairReview["verdict"]; findings: number; cost: number; stage: string; ts: number }
+  | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: PairScore["verdict"]; cost: number; stage: "score"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number };
 
 export interface RunPairingDeps {
@@ -118,6 +124,7 @@ export async function runPairing(
   deps: RunPairingDeps,
 ): Promise<RunPairingResult> {
   try {
+    if (stage === "score") return { status: "off" }; // belt-and-braces: score never routes through the review loop (US-PAIR-009)
     const cfgPath = join(projectDir, ".roll", "pairing.yaml");
     if (!existsSync(cfgPath)) return { status: "off" }; // file absent = pairing off
     const cfg = parsePairingConfig(readFileSync(cfgPath, "utf8"));
@@ -165,4 +172,139 @@ export async function runPairing(
   } catch {
     return { status: "error" }; // never throw — pairing must not fail the cycle
   }
+}
+
+// ── US-PAIR-009: score stage — the paired heterogeneous agent scores the cycle ─
+
+/** A peer's structured score for a finished cycle (the self-score note shape). */
+export interface PairScore {
+  score: number;
+  verdict: "good" | "ok" | "regression";
+  rationale: string;
+  cost: number;
+}
+
+export interface RunScorePairingDeps {
+  /** Installed agents (canonical). */
+  installed: string[];
+  /** Liveness probe over CANONICAL agent names. */
+  isAvailable: (agent: string) => boolean;
+  /** The peer reads the delivery summary and returns a structured score, or
+   *  null on timeout/error (the hard timeout lives in the implementation). */
+  scorePeer: (peer: string, summary: string, timeoutMs: number) => Promise<PairScore | null>;
+  event: (e: PairEvent) => void;
+  now: () => number;
+  timeoutMs?: number;
+  history?: PairingHistory;
+  epsilon?: number;
+  /** Note-writer seam (tests); defaults to {@link writeSelfScoreNote}. */
+  writeNote?: typeof writeSelfScoreNote;
+}
+
+export interface RunScorePairingResult {
+  status: "off" | "none-available" | "scored" | "timeout" | "error";
+  peer?: string;
+  score?: number;
+  notePath?: string;
+}
+
+/**
+ * Run the score stage for a delivered cycle: a heterogeneous peer (US-PAIR-001
+ * selector, stage "score") reads the delivery summary and produces the cycle's
+ * score note — self-score is the FALLBACK, not the default (owner ruling
+ * 2026-06-13: an agent grading its own delivery is a conflict of interest).
+ *
+ * All PAIR-003 invariants hold: never throws, never blocks the cycle, hard
+ * timeout in scorePeer, absences are audited (`pair:none-available`). On any
+ * non-"scored" status the caller's self-score path proceeds as before — the
+ * note the working agent already wrote stays the effective score.
+ *
+ * Validation is delegated to the FIX-274 writer (score 1..10 integer, verdict
+ * whitelist): the note is written BEFORE the evidence file, so a malformed peer
+ * score aborts with nothing on disk (status "error"). Once the note IS written
+ * the pairing counts as scored — the evidence file + event are best-effort
+ * auxiliaries (kimi pair-review: a post-note evidence failure must not report
+ * "error" with a live note on disk).
+ */
+export async function runScorePairing(
+  projectDir: string,
+  runtimeDir: string,
+  cycleId: string,
+  workingAgent: string,
+  storyId: string,
+  skill: string,
+  summary: string,
+  deps: RunScorePairingDeps,
+): Promise<RunScorePairingResult> {
+  try {
+    const cfgPath = join(projectDir, ".roll", "pairing.yaml");
+    if (!existsSync(cfgPath)) return { status: "off" }; // file absent = pairing off
+    const cfg = parsePairingConfig(readFileSync(cfgPath, "utf8"));
+    if (!cfg.enabled || !cfg.stages.includes("score")) return { status: "off" };
+
+    const candidates = selectPairingCandidates({
+      installed: deps.installed,
+      isAvailable: deps.isAvailable,
+      workingAgent,
+      stage: "score",
+      cfg,
+      cycleId,
+      ...(deps.history !== undefined ? { history: deps.history } : {}),
+      ...(deps.epsilon !== undefined ? { epsilon: deps.epsilon } : {}),
+    });
+    if (candidates.length === 0) {
+      deps.event({ type: "pair:none-available", cycleId, stage: "score", reason: "no qualified heterogeneous scorer", ts: deps.now() });
+      return { status: "none-available" };
+    }
+
+    const peer = candidates[0] as string;
+    deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", ts: deps.now() });
+
+    const scored = await deps.scorePeer(peer, summary, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    if (scored === null) return { status: "timeout", peer }; // non-blocking: self-score stands
+
+    // Note first (the writer is the validator): a bad peer payload throws here
+    // and leaves NOTHING on disk — no evidence, no event, status "error".
+    const note = (deps.writeNote ?? writeSelfScoreNote)(projectDir, {
+      skill,
+      story: storyId,
+      score: scored.score,
+      verdict: scored.verdict,
+      rationale: scored.rationale,
+      scoredBy: peer,
+      scoring: "pair",
+    });
+
+    try {
+      const path = evidencePath(runtimeDir, cycleId, "score");
+      mkdirSync(join(runtimeDir, "peer"), { recursive: true });
+      writeFileSync(
+        path,
+        JSON.stringify({ cycleId, workingAgent, peer, stage: "score", score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost }, null, 2),
+        "utf8",
+      );
+      deps.event({ type: "pair:score", cycleId, peer, score: scored.score, verdict: scored.verdict, cost: scored.cost, stage: "score", ts: deps.now() });
+    } catch {
+      /* evidence/event are auxiliaries — the note is the product */
+    }
+    return { status: "scored", peer, score: scored.score, notePath: note.path };
+  } catch {
+    return { status: "error" }; // never throw — scoring must not fail the cycle
+  }
+}
+
+/**
+ * Parse a peer's score reply (the executor/manual command's stdout contract):
+ * one `SCORE: <1..10>` line, one `VERDICT: good|ok|regression` line, one
+ * `RATIONALE: <text>` line — anything missing/malformed → null (caller falls
+ * back to self-score; a peer that can't follow the protocol never writes a note).
+ */
+export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | null {
+  const sm = /^\s*SCORE:\s*(\d{1,2})\s*$/im.exec(stdout);
+  const vm = /^\s*VERDICT:\s*(good|ok|regression)\s*$/im.exec(stdout);
+  const rm = /^\s*RATIONALE:\s*(.+)$/im.exec(stdout);
+  if (sm?.[1] === undefined || vm?.[1] === undefined || rm?.[1] === undefined) return null;
+  const score = Number(sm[1]);
+  if (!Number.isInteger(score) || score < 1 || score > 10) return null;
+  return { score, verdict: vm[1].toLowerCase() as PairScore["verdict"], rationale: rm[1].trim() };
 }

@@ -151,22 +151,42 @@ describe("parsePairingConfig", () => {
 });
 
 describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)", () => {
-  it("enables when ≥2 distinct vendors, declares all installed code-capable", () => {
+  it("enables when ≥2 distinct vendors, declares all installed code+score-capable", () => {
     const c = defaultPairingConfig(["claude", "codex"]);
     expect(c.enabled).toBe(true);
-    expect(c.stages).toEqual(["code"]);
-    expect(c.capability).toEqual({ claude: ["code"], codex: ["code"] });
+    expect(c.stages).toEqual(["code", "score"]);
+    expect(c.capability).toEqual({ claude: ["code", "score"], codex: ["code", "score"] });
   });
   it("disabled when fewer than 2 vendors (alias collapse)", () => {
     expect(defaultPairingConfig(["codex"]).enabled).toBe(false);
     // codex + an openai alias is still one vendor → no heterogeneous peer
     expect(defaultPairingConfig(["codex", "openai"]).enabled).toBe(false);
   });
+  it("US-PAIR-009: score is a legal stage and ships in the generated default", () => {
+    const c = parsePairingConfig("enabled: true\nstages: [code, score]\ncapability:\n  codex: [score]\n");
+    expect(c.stages).toEqual(["code", "score"]);
+    expect(c.capability).toEqual({ codex: ["score"] });
+    const d = defaultPairingConfig(["claude", "codex"]);
+    expect(d.stages).toEqual(["code", "score"]);
+    expect(d.capability["claude"]).toEqual(["code", "score"]);
+  });
+  it("US-PAIR-009: selector qualifies heterogeneous peers for the score stage", () => {
+    const picked = selectPairingCandidates({
+      installed: ["claude", "codex", "kimi"],
+      isAvailable: () => true,
+      workingAgent: "claude",
+      stage: "score",
+      cfg: cfg({ stages: ["score"], capability: { codex: ["score"], kimi: ["score"] } }),
+      cycleId: "c1",
+    });
+    expect(picked.length).toBe(2);
+    expect(picked).not.toContain("claude");
+  });
   it("renders explicit, re-parseable yaml (round-trip)", () => {
     const c = defaultPairingConfig(["claude", "codex", "kimi"]);
     const yaml = renderPairingConfig(c);
     expect(yaml).toContain("enabled: true");
-    expect(yaml).toContain("stages: [code]");
+    expect(yaml).toContain("stages: [code, score]");
     expect(yaml).toContain("# File present = pairing on");
     expect(parsePairingConfig(yaml)).toEqual(c); // explicit defaults survive a round-trip
   });

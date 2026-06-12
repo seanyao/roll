@@ -109,7 +109,7 @@ import { recoverPiUsage } from "./usage-recovery.js";
 import { realBudgetCheck } from "./budget-check.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
-import { enabledPairingStages, runPairing, type PairEvent, type PairReview } from "./pairing-gate.js";
+import { enabledPairingStages, parsePairScoreOutput, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
@@ -793,6 +793,55 @@ export async function executeCommand(
           });
         }
         attestBlocked = res.blocked;
+      }
+      // US-PAIR-009 score stage: AFTER the attest gate passes (a real, evidenced
+      // delivery), the heterogeneous paired agent produces the cycle's score
+      // note — the agent's own self-score note stays as the fallback (any
+      // non-"scored" outcome leaves it the effective score). Same invariants as
+      // every pairing: never throws, never blocks, absences audited.
+      if (!attestBlocked && commitsAhead > 0 && storyId !== "") {
+        const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
+          const prompt =
+            `You are a heterogeneous PAIRING scorer. A different agent delivered the cycle below; ` +
+            `grade the delivery quality honestly (root-cause depth, test coverage, scope discipline, evidence). ` +
+            `Reply with exactly one "SCORE: <integer 1..10>" line, one "VERDICT: good|ok|regression" line, ` +
+            `and one "RATIONALE: <one sentence>" line.\n\nDELIVERY:\n` +
+            summary;
+          let res;
+          try {
+            res = await Promise.race([
+              ports.agentSpawn(peer, {
+                cwd: ports.paths.worktreePath,
+                skillBody: prompt,
+                timeoutMs,
+                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+              }),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
+            ]);
+          } catch {
+            return null;
+          }
+          if (res === null || res.timedOut || res.exitCode !== 0) return null;
+          const parsed = parsePairScoreOutput(res.stdout);
+          if (parsed === null) return null;
+          return { ...parsed, cost: peerReviewCost(peer, res.stdout) };
+        };
+        let diffStat = "";
+        try {
+          const { stdout } = await execFileAsync("git", ["diff", "--stat", "origin/main...HEAD"], { cwd: ports.paths.worktreePath, encoding: "utf8" });
+          diffStat = stdout.slice(0, 4_000);
+        } catch {
+          /* summary degrades gracefully */
+        }
+        const summary = `Story: ${storyId}\nAttest gate: pass\nDiff stat:\n${diffStat}`;
+        const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
+        await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
+          installed: agentsInstalled(realAgentEnv()),
+          isAvailable: () => true,
+          scorePeer,
+          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
+          now: () => ports.clock(),
+        });
       }
       // FIX-244: phantom-failure probe. A hard-blocked delivery whose work is
       // ALREADY out as a PR (agent self-published, observed 2026-06-10: cycles

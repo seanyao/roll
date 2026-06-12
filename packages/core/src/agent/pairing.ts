@@ -17,8 +17,10 @@ import type { RollEvent } from "@roll/spec";
 import { extractUsage, sumClaudeStream, toCycleCost } from "../cost/tracker.js";
 import { AGENT_REGISTRY_NAMES, agentIsKnown, canonicalAgentName } from "./registry.js";
 
-export type PairingStage = "design" | "test" | "code" | "cycle";
-export const PAIRING_STAGES: readonly PairingStage[] = ["design", "test", "code", "cycle"];
+// US-PAIR-009: `score` — the finished cycle's quality score is produced by the
+// heterogeneous paired agent (self-score is the fallback, never the default).
+export type PairingStage = "design" | "test" | "code" | "cycle" | "score";
+export const PAIRING_STAGES: readonly PairingStage[] = ["design", "test", "code", "cycle", "score"];
 
 function isStage(s: string): s is PairingStage {
   return (PAIRING_STAGES as readonly string[]).includes(s);
@@ -157,8 +159,11 @@ export function defaultPairingConfig(installed: string[]): PairingConfig {
   const agents = installed.map(canonicalAgentName).filter((a, i, arr) => arr.indexOf(a) === i);
   const vendors = new Set(agents.map(agentVendor));
   const capability: Record<string, PairingStage[]> = {};
-  for (const a of agents) capability[a] = ["code"];
-  return { enabled: vendors.size >= 2, stages: ["code"], capability };
+  // US-PAIR-009: every installed agent is declared score-capable too — scoring a
+  // delivery summary needs no special tooling, so the default pool is the same
+  // as code review's.
+  for (const a of agents) capability[a] = ["code", "score"];
+  return { enabled: vendors.size >= 2, stages: ["code", "score"], capability };
 }
 
 /** One installed agent's standing in the pairing pool (US-PAIR-002 observability). */
@@ -295,6 +300,12 @@ export function aggregatePairingCost(events: readonly RollEvent[]): PairingCostS
       summary.byPeer[peer] = (summary.byPeer[peer] ?? 0) + 1;
       summary.totalCost += Number.isFinite(e.cost) ? e.cost : 0;
       summary.totalFindings += Number.isFinite(e.findings) ? e.findings : 0;
+    } else if (e.type === "pair:score") {
+      // US-PAIR-009: a score pairing is pairing activity + spend (no findings axis).
+      summary.pairings += 1;
+      const peer = canonicalAgentName(e.peer);
+      summary.byPeer[peer] = (summary.byPeer[peer] ?? 0) + 1;
+      summary.totalCost += Number.isFinite(e.cost) ? e.cost : 0;
     } else if (e.type === "pair:none-available") {
       summary.noneAvailable += 1;
     }

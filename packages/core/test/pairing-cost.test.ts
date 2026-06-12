@@ -184,3 +184,18 @@ describe("selectPairingCandidates — ε-greedy hit-rate preference (US-PAIR-006
     }
   });
 });
+
+// US-PAIR-009: pair:score joins the activity/spend ledger.
+import { describe as d9, expect as e9, it as i9 } from "vitest";
+d9("aggregatePairingCost — pair:score (US-PAIR-009)", () => {
+  i9("counts score pairings, their peer and cost (no findings)", () => {
+    const s = aggregatePairingCost([
+      { type: "pair:verdict", cycleId: "c1", peer: "codex", verdict: "refine", findings: 2, cost: 0.1, stage: "code", ts: 1 },
+      { type: "pair:score", cycleId: "c1", peer: "kimi", score: 8, verdict: "good", cost: 0.05, stage: "score", ts: 2 },
+    ] as never[]);
+    e9(s.pairings).toBe(2);
+    e9(s.byPeer).toEqual({ codex: 1, kimi: 1 });
+    e9(s.totalCost).toBeCloseTo(0.15);
+    e9(s.totalFindings).toBe(2);
+  });
+});

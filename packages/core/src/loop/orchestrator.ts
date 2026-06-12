@@ -647,9 +647,12 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       };
 
     case "worktree_failed":
-      // Isolation failed → skip the cycle as failed (bin/roll:8998-9007). No
-      // cycle:start was emitted, but a terminal runs row is still written.
-      return terminate({ ...state, phase: "worktree" }, "failed");
+      // Setup failed before story pick / agent spawn. Cleanup is tolerant, so it
+      // is safe for both git-worktree-add failure and post-create bootstrap
+      // failure; no cycle:start was emitted, but a terminal runs row is written.
+      return terminate({ ...state, phase: "worktree" }, "failed", [
+        { kind: "cleanup_worktree", branch: state.ctx.branch },
+      ]);
 
     case "no_story":
       // Nothing pickable → idle terminal (clean no-op; worktree reclaimed).

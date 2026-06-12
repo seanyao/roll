@@ -348,6 +348,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     attest: {
       render: vi.fn(async () => 0),
     },
+    depsExec: vi.fn(async () => ({})),
     git: {
       fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
@@ -394,6 +395,27 @@ describe("executeCommand — command → executor mapping", () => {
     });
     const r2 = await executeCommand({ kind: "create_worktree", branch: "b" }, bad.ports, CTX);
     expect(r2.event).toEqual({ type: "worktree_failed" });
+  });
+
+  it("FIX-268: deps bootstrap failure fails the worktree before agent spawn", async () => {
+    const wt = realpathSync(mkdtempSync(join(tmpdir(), "roll-deps-command-")));
+    execDirs.push(wt);
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+    const { ports, calls } = fakePorts({
+      paths: { ...fakePorts().ports.paths, worktreePath: wt },
+      depsExec: vi.fn(async () => {
+        throw new Error("ENOTFOUND registry.npmjs.org");
+      }),
+    });
+
+    const r = await executeCommand({ kind: "create_worktree", branch: "b" }, ports, CTX);
+
+    expect(r.event).toEqual({ type: "worktree_failed" });
+    const alert = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alert).toContain("[FAIL]");
+    expect(alert).toContain("worktree deps bootstrap failed");
+    expect(alert).toContain("ENOTFOUND");
   });
 
   it("FIX-209: preflight fetches origin main before the worktree branches off it", async () => {
@@ -1181,7 +1203,7 @@ describe("FIX-268 — worktree deps bootstrap before agent spawn", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it("an install failure leaves a WARN alert and does not throw (lenient)", async () => {
+  it("an install failure leaves a FAIL alert and reports failure (strict)", async () => {
     const wt = tmpWorktree();
     writeFileSync(join(wt, "package.json"), "{}\n");
     writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
@@ -1189,11 +1211,9 @@ describe("FIX-268 — worktree deps bootstrap before agent spawn", () => {
       throw new Error("ENOTFOUND registry.npmjs.org");
     });
     const { events, alerts } = alertSink();
-    await expect(
-      bootstrapWorktreeDeps(wt, join(wt, "alerts.md"), events as never, exec),
-    ).resolves.toBeUndefined();
+    await expect(bootstrapWorktreeDeps(wt, join(wt, "alerts.md"), events as never, exec)).resolves.toBe(false);
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toContain("[WARN] worktree deps bootstrap failed");
+    expect(alerts[0]).toContain("[FAIL] worktree deps bootstrap failed");
     expect(alerts[0]).toContain("ENOTFOUND");
   });
 });

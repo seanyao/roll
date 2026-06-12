@@ -803,7 +803,7 @@ function skillRow(r: SkillPanelRow): string {
     `<span style="${MONO}font-size:13px;font-weight:600;color:${C.ink};white-space:nowrap;">${esc(r.name)}</span>` +
     `<span style="font-size:12px;color:${C.dim};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.description.slice(0, 110))}</span></span>` +
     `<span style="${MONO}font-size:11px;color:${C.dim};white-space:nowrap;">${r.hubLines} ${bi("lines", "行")}</span>` +
-    `<span style="${MONO}font-size:11px;color:${r.usage > 0 ? C.blue : C.faint};font-weight:600;white-space:nowrap;" title="${bi("invocations (self-score notes)", "调用次数（自评分 note）")}">${r.usage > 0 ? `×${r.usage}` : "—"}</span>` +
+    `<span style="${MONO}font-size:11px;color:${r.usage > 0 ? C.blue : C.faint};font-weight:600;white-space:nowrap;" title="invocations (self-score notes) · 调用次数">${r.usage > 0 ? `×${r.usage}` : "—"}</span>` +
     `<span style="${MONO}font-size:10.5px;color:${ok ? C.green : C.red};white-space:nowrap;">${ok ? bi("clean", "无违规") : `${r.violations.length} ${bi("violations", "违规")}`}</span></summary>` +
     `<div style="background:#fbfcfe;border-top:1px solid #f1f4f8;padding:12px 18px 14px 47px;display:grid;grid-template-columns:1fr 1fr;gap:18px;">` +
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("anatomy", "解剖")}</div>${tree}` +

@@ -1054,3 +1054,80 @@ describe("US-GOAL-006 — goal final review gate", () => {
     }
   });
 });
+
+describe("FIX-269 — goal session waits for a running scheduled cycle", () => {
+  function heldLock(p: string, ts: number): void {
+    writeFileSync(join(p, ".roll", "loop", "inner.lock"), `${process.pid}:${ts}\n`);
+  }
+
+  it("waits on a held inner.lock, then runs the cycle once the lock frees", async () => {
+    const p = project();
+    heldLock(p, 1_780_000_000);
+    let sleeps = 0;
+    let runs = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_010,
+      nowIso: () => "2026-06-12T02:00:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      sleep: async () => {
+        sleeps += 1;
+        // The scheduled cycle finishes during the second poll interval.
+        if (sleeps === 2) execSync(`rm -f '${join(p, ".roll", "loop", "inner.lock")}'`);
+      },
+      runOnce: async ({ projectPath }) => {
+        runs += 1;
+        const rt = join(projectPath, ".roll", "loop");
+        writeFileSync(
+          join(rt, "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-1", cycle_id: "cycle-1", ts: "2026-06-12T02:05:00Z", cost_usd: 1, status: "done" })}\n`,
+          { flag: "a" },
+        );
+        writeFileSync(join(rt, "PAUSE-proj-abc123"), "owner pause\n");
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker"], deps));
+
+    expect(r.code).toBe(0);
+    expect(sleeps).toBe(2);
+    expect(runs).toBe(1);
+    const types = readEvents(p).map((e) => e.type);
+    expect(types).toContain("goal:waiting_inner_lock");
+    const waiting = readEvents(p).find((e) => e.type === "goal:waiting_inner_lock");
+    expect(waiting).toMatchObject({ heldByPid: process.pid });
+  });
+
+  it("pauses with inner_lock_busy when the lock never frees within the ceiling", async () => {
+    const p = project();
+    let now = 1_780_000_010;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => now,
+      nowIso: () => "2026-06-12T02:00:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      sleep: async () => {
+        // Keep the holder fresh so the lock never goes stale while we wait.
+        now += 20;
+        heldLock(p, now);
+      },
+      runOnce: async () => {
+        throw new Error("runOnce must not be called while the inner lock is held");
+      },
+    };
+    heldLock(p, now);
+
+    const r = await capture(() => loopGoCommand(["--worker"], deps));
+
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("inner_lock_busy");
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toBe("inner_lock_busy");
+  });
+});

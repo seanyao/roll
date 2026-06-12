@@ -400,7 +400,15 @@ export async function executeCommand(
       // captured zero commits and the cycle idled. Symlink the main .roll into
       // the worktree so the contract holds (single source of truth; the inner
       // lock already guarantees one cycle at a time).
-      if (r.code === 0) await linkRollIntoWorktree(ports.repoCwd, ports.paths.worktreePath);
+      if (r.code === 0) {
+        await linkRollIntoWorktree(ports.repoCwd, ports.paths.worktreePath);
+        // FIX-268 root cause: a fresh worktree has NO node_modules, and the
+        // agent sandbox has no network — its own install dies on ENOTFOUND,
+        // tests never run, the TCR gate never passes, and the whole cycle
+        // evaporates as idle_no_work. Install HERE, in the runner (outside
+        // the sandbox, with network), so the agent lands test-ready.
+        await bootstrapWorktreeDeps(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
+      }
       return { event: r.code === 0 ? { type: "worktree_created" } : { type: "worktree_failed" } };
     }
 
@@ -1241,6 +1249,56 @@ async function linkRollIntoWorktree(repoCwd: string, worktreePath: string): Prom
     }
   } catch {
     /* best-effort: the cycle must not die on an observation/layout nicety */
+  }
+}
+
+/** Ceiling for the worktree dependency install (cold pnpm store on first run). */
+export const DEPS_BOOTSTRAP_TIMEOUT_MS = 600_000;
+
+type DepsExec = (
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; timeout: number; maxBuffer: number },
+) => Promise<unknown>;
+
+/**
+ * Install dependencies into a fresh cycle worktree BEFORE the agent spawns.
+ *
+ * The agent sandbox (codex `--sandbox workspace-write`) has no network, so a
+ * worktree without node_modules is a worktree where tests can never run —
+ * every `pnpm install` inside the cycle dies on ENOTFOUND. The runner runs
+ * outside the sandbox with network and a warm package-manager store, so the
+ * install belongs here. Skips non-Node projects (no package.json) and projects
+ * without a recognized lockfile. Lenient on failure: a loud ALERT and the
+ * cycle proceeds — doc-only stories can still deliver, and the alert makes a
+ * later test failure diagnosable instead of silent.
+ */
+export async function bootstrapWorktreeDeps(
+  worktreePath: string,
+  alertsPath: string,
+  events: EventsPort,
+  exec: DepsExec = execFileAsync as unknown as DepsExec,
+): Promise<void> {
+  if (!existsSync(join(worktreePath, "package.json"))) return;
+  if (existsSync(join(worktreePath, "node_modules"))) return;
+  const plan = existsSync(join(worktreePath, "pnpm-lock.yaml"))
+    ? { cmd: "pnpm", args: ["install", "--prefer-offline"] }
+    : existsSync(join(worktreePath, "package-lock.json"))
+      ? { cmd: "npm", args: ["ci", "--prefer-offline"] }
+      : undefined;
+  if (plan === undefined) return;
+  try {
+    await exec(plan.cmd, plan.args, {
+      cwd: worktreePath,
+      timeout: DEPS_BOOTSTRAP_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
+    events.appendAlert(
+      alertsPath,
+      `[WARN] worktree deps bootstrap failed (${plan.cmd} ${plan.args.join(" ")}): ${msg} — agent tests will likely fail offline`,
+    );
   }
 }
 

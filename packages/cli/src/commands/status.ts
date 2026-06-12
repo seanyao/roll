@@ -76,14 +76,14 @@ function globalConventions(): Conventions {
   return CONVENTION_FILES.map((f) => [f, existsSync(join(globalDir(), f))]);
 }
 
-interface AiEntry {
+export interface AiEntry {
   name: string;
   ai_dir: string;
   cfg_file: string;
   src_file: string;
 }
 
-function parseAiEntries(): AiEntry[] {
+export function parseAiEntries(): AiEntry[] {
   const cfg = configPath();
   if (!existsSync(cfg)) return [];
   const entries: AiEntry[] = [];
@@ -105,7 +105,7 @@ function parseAiEntries(): AiEntry[] {
   return entries;
 }
 
-function aiSyncStatus(e: AiEntry): AiClient["sync"] {
+export function aiSyncStatus(e: AiEntry): AiClient["sync"] {
   const cfgFile = join(e.ai_dir, e.cfg_file);
   const rollMd = join(e.ai_dir, "roll.md");
   const src = join(globalDir(), e.src_file);

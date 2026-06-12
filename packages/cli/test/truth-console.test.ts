@@ -37,6 +37,25 @@ const BACKLOG = {
   ],
 };
 
+const AGENTS = [
+  {
+    name: "claude", display: "claude", runner: "Claude Code", version: "2.1.0", installed: true,
+    cycles72h: 4, costUsd72h: 1.25,
+    files: [{ path: "/home/u/.claude/CLAUDE.md", kind: "CLAUDE.md", state: "sync" as const }],
+    syncStale: false,
+  },
+  {
+    name: "kimi", display: "kimi", runner: "Kimi CLI", version: "—", installed: true,
+    cycles72h: 1, costUsd72h: 0.1,
+    files: [{ path: "/home/u/.kimi/AGENTS.md", kind: "AGENTS.md", state: "stale" as const }],
+    syncStale: true, setupCmd: "roll setup -f kimi",
+  },
+  {
+    name: "trae", display: "trae", runner: "trae CLI", version: "—", installed: false,
+    cycles72h: 0, costUsd72h: 0, files: [], syncStale: false,
+  },
+];
+
 const CYCLES = [
   {
     cycleId: "20260612-x-1234", tsSec: 1781230000, verdict: "delivered" as const, storyId: "US-A-1", agent: "claude",
@@ -67,6 +86,7 @@ function render(snapshot: TruthSnapshot = SNAP): string {
     backlog: BACKLOG,
     spineKeys: SPINE,
     cycles: CYCLES,
+    agents: AGENTS,
   });
 }
 
@@ -80,7 +100,6 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     }
     const order = ["overview", "loop", "release", "backlog", "skills"].map((k) => html.indexOf(`data-tab="${k}"`));
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(html).toContain("US-DOSSIER-014"); // agents panel placeholder remains
     expect(html).toContain("US-DOSSIER-015/016");
     expect(html).toContain("US-DOSSIER-017");
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
@@ -94,6 +113,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       backlog: { shipping: [], settled: [] },
       spineKeys: SPINE,
       cycles: [],
+      agents: [],
     });
     expect(custom).toContain("acme");
     expect(custom).toContain("Ship truth.");
@@ -224,5 +244,33 @@ describe("loop tab cycle ledger — US-DOSSIER-013", () => {
 
   it("failed counter script counts failed+reverted+blocked (never swallowed)", () => {
     expect(html).toContain('v === "failed" || v === "reverted" || v === "blocked"');
+  });
+});
+
+describe("agents panel — US-DOSSIER-014", () => {
+  const html = render();
+
+  it("AC1: rows carry runner/version/72h cycles+cost/availability; undetected greyed", () => {
+    expect(html).toContain("Claude Code");
+    expect(html).toContain("Kimi CLI");
+    expect(html).toContain(">4<"); // cycles 72h
+    expect(html).toContain("$1.25");
+    expect(html).toContain("available");
+    expect(html).toContain("not detected");
+    expect(html).toContain("opacity:.62"); // undetected greyed
+  });
+
+  it("AC2: expanded sync truth + amber stale badge + copyable setup command", () => {
+    expect(html).toContain("✓ in sync");
+    expect(html).toContain("⟳ stale");
+    expect(html).toContain("convention stale");
+    expect(html).toContain("约定过期");
+    expect(html).toContain("roll setup -f kimi");
+    expect(html).toContain("nothing to sync"); // empty file list honesty
+  });
+
+  it("AC3: the 72h window is explicitly labelled (the documented trade-off)", () => {
+    expect(html).toContain("72h");
+    expect(html).toContain("近72h周期");
   });
 });

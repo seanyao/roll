@@ -20,6 +20,7 @@
  */
 import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
 import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
+import type { AgentPanelRow } from "./agent-panel.js";
 
 export interface TruthConsoleBrand {
   /** Injected, never hardcoded (owner ruling): project name + slogan. */
@@ -66,6 +67,8 @@ export interface TruthConsoleInput {
   spineKeys: string[];
   /** Cycle ledger rows, newest first (US-DOSSIER-013). */
   cycles: CycleLedgerRow[];
+  /** Agents on this machine (US-DOSSIER-014). */
+  agents: AgentPanelRow[];
 }
 
 const MONO = `font-family:'IBM Plex Mono',monospace;`;
@@ -379,6 +382,56 @@ function cycleRow(cy: CycleLedgerRow): string {
   );
 }
 
+function agentRow(ag: AgentPanelRow): string {
+  const dot = ag.installed
+    ? `width:9px;height:9px;border-radius:50%;background:${C.green};flex:none;`
+    : `width:9px;height:9px;border-radius:50%;background:#cbd2dc;flex:none;`;
+  const ink = ag.installed ? C.ink : C.faint;
+  const cell = (label: string, value: string, mono = true): string =>
+    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${label}</div>` +
+    `<div style="${mono ? MONO : ""}font-size:12px;color:${ag.installed ? "#5b6478" : C.faint};margin-top:3px;white-space:nowrap;">${value}</div></div>`;
+  const FILE_STATE: Record<string, [string, string]> = {
+    sync: ["✓ in sync", C.green],
+    stale: ["⟳ stale", C.amber],
+    missing: ["− missing", C.faint],
+  };
+  return (
+    `<details class="ag-row" data-agent="${esc(ag.name)}" style="border-top:1px solid ${C.hair};${ag.installed ? "" : "opacity:.62;"}">` +
+    `<summary style="display:grid;grid-template-columns:1fr repeat(4,minmax(90px,auto)) auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
+    `<span style="display:flex;align-items:center;gap:10px;min-width:0;"><span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
+    `<span style="${dot}"></span><span style="${MONO}font-size:13px;font-weight:600;color:${ink};white-space:nowrap;">${esc(ag.display)}</span></span>` +
+    cell(bi("runner", "运行器"), esc(ag.runner), false) +
+    cell(bi("version", "版本"), esc(ag.version)) +
+    cell(bi("cycles 72h", "近72h周期"), String(ag.cycles72h)) +
+    cell(bi("cost 72h", "近72h花费"), ag.cycles72h > 0 ? `$${ag.costUsd72h.toFixed(2)}` : "—") +
+    `<span style="display:flex;align-items:center;gap:8px;justify-content:flex-end;">` +
+    (ag.syncStale
+      ? `<span style="${MONO}font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:4px;border:1px solid ${C.amber}55;color:${C.amber};white-space:nowrap;">${bi("convention stale", "约定过期")}</span>`
+      : "") +
+    `<span style="${MONO}font-size:11px;color:${ag.installed ? C.green : C.faint};font-weight:600;white-space:nowrap;">${ag.installed ? bi("available", "可用") : bi("not detected", "未检测到")}</span>` +
+    `</span></summary>` +
+    `<div style="background:#fbfcfe;border-top:1px solid #f1f4f8;padding:12px 18px 14px 47px;">` +
+    `<div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("convention files", "接入文件")}</div>` +
+    (ag.files.length === 0
+      ? `<div style="font-size:12.5px;color:${C.faint};font-style:italic;">${bi("nothing to sync", "无同步内容")}</div>`
+      : ag.files
+          .map((f) => {
+            const [label, color] = FILE_STATE[f.state] ?? ["?", C.slate];
+            return (
+              `<div style="display:flex;gap:12px;align-items:baseline;padding:2px 0;flex-wrap:wrap;">` +
+              `<span style="${MONO}font-size:11.5px;color:${C.ink};">${esc(f.path)}</span>` +
+              `<span style="${MONO}font-size:10.5px;color:${C.faint};">${esc(f.kind)}</span>` +
+              `<span style="${MONO}font-size:10.5px;color:${color};font-weight:600;">${label}</span></div>`
+            );
+          })
+          .join("")) +
+    (ag.setupCmd !== undefined
+      ? `<div style="margin-top:9px;"><code style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.amber}55;color:${C.amber};background:${C.card};">${esc(ag.setupCmd)}</code></div>`
+      : "") +
+    `</div></details>`
+  );
+}
+
 function loopTab(input: TruthConsoleInput): string {
   const ranges: Array<[string, string, string]> = [
     ["1", "Today", "今天"],
@@ -394,10 +447,15 @@ function loopTab(input: TruthConsoleInput): string {
       "Every cycle, complete and replayable. Failures are first-class — never swallowed.",
       "每一个 cycle 完整、可回溯。失败是一等公民——绝不吞。",
     )}</p></div>` +
-    `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:18px 20px;margin:18px 0 8px;color:${C.faint};font-size:13px;">${bi(
-      "Agents on this machine — being built (US-DOSSIER-014).",
-      "本机 agents 面板——建设中（US-DOSSIER-014）。",
-    )}</section>` +
+    `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Agents on this machine", "本机 agents")}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("who works here, what it costs, whether conventions are fresh (72h window)", "谁在干活、花了多少、约定新不新（72h 窗口）")}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;"></span></div>` +
+    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    (input.agents.length > 0
+      ? input.agents.map(agentRow).join("")
+      : `<div style="padding:14px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no agents detected", "未检测到 agent")}</div>`) +
+    `</section>` +
     `<div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi("Cycle ledger", "周期账本")}</span>` +
     `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("what it actually did while you were away", "你不在的时候它到底干了什么")}</span>` +
@@ -696,6 +754,9 @@ a{color:${C.blue};}
 .cy-row[open] .bl-caret{transform:rotate(90deg);}
 .cy-row summary:hover{background:#fbfcfe;}
 .cy-range.on{background:${C.blue};color:#fff;}
+.ag-row summary::-webkit-details-marker{display:none;}
+.ag-row[open] .bl-caret{transform:rotate(90deg);}
+.ag-row summary:hover{background:#fbfcfe;}
 `;
 
   const panes =

@@ -1,0 +1,135 @@
+/**
+ * US-DOSSIER-014 — the "agents on this machine" panel for the loop tab.
+ *
+ * One row per known agent: runner · version · 72h cycles & spend · availability.
+ * Expanding a row shows the convention-file sync truth (✓ in sync / ⟳ stale /
+ * − missing) — the SAME probes `roll status` runs — plus the copyable
+ * `roll setup -f <agent>` repair command when anything is stale.
+ *
+ * Window note (AC3 trade-off): the cycles/spend window is FIXED at 72h and
+ * labelled on the panel — linking it to the cycle ledger's range switch would
+ * require re-aggregating per range client-side; the explicit label keeps the
+ * number honest and matches the snapshot's cycle window.
+ */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { agentDisplayName, agentsInstalled } from "@roll/core";
+import { realAgentEnv } from "../commands/agent-list.js";
+import { aiSyncStatus, parseAiEntries } from "../commands/status.js";
+
+export interface AgentPanelFile {
+  path: string;
+  kind: string;
+  state: "sync" | "stale" | "missing";
+}
+
+export interface AgentPanelRow {
+  name: string;
+  display: string;
+  runner: string;
+  version: string;
+  installed: boolean;
+  cycles72h: number;
+  costUsd72h: number;
+  files: AgentPanelFile[];
+  /** Any convention file stale/missing → the amber "convention stale" badge. */
+  syncStale: boolean;
+  setupCmd?: string;
+}
+
+export interface AgentPanelDeps {
+  installed: () => string[];
+  versionOf: (agent: string) => string | null;
+  nowSec: () => number;
+}
+
+const RUNNER_LABEL: Record<string, string> = {
+  claude: "Claude Code",
+  codex: "Codex CLI",
+  openai: "Codex CLI",
+  kimi: "Kimi CLI",
+  gemini: "Gemini CLI",
+  agy: "Gemini CLI",
+  pi: "pi CLI",
+  cursor: "Cursor CLI",
+  qwen: "Qwen CLI",
+  deepseek: "DeepSeek CLI",
+};
+
+export function defaultAgentPanelDeps(): AgentPanelDeps {
+  return {
+    installed: () => agentsInstalled(realAgentEnv()),
+    versionOf: () => null, // version probing spawns; the panel stays honest with "—"
+    nowSec: () => Math.floor(Date.now() / 1000),
+  };
+}
+
+function spend72h(projectPath: string, nowSec: number): Map<string, { cycles: number; cost: number }> {
+  const out = new Map<string, { cycles: number; cost: number }>();
+  const path = join(projectPath, ".roll", "loop", "runs.jsonl");
+  if (!existsSync(path)) return out;
+  let content = "";
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return out;
+  }
+  const cutoff = nowSec - 72 * 3600;
+  for (const line of content.split("\n")) {
+    if (line.trim() === "") continue;
+    let row: Record<string, unknown>;
+    try {
+      row = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const ts = typeof row["ts"] === "string" ? Date.parse(row["ts"] as string) / 1000 : Number.NaN;
+    if (!Number.isFinite(ts) || ts < cutoff || ts > nowSec) continue;
+    const agent = String(row["agent"] ?? "");
+    if (agent === "") continue;
+    const cost = typeof row["cost_effective_usd"] === "number" ? (row["cost_effective_usd"] as number) : typeof row["cost_usd"] === "number" ? (row["cost_usd"] as number) : 0;
+    const cur = out.get(agent) ?? { cycles: 0, cost: 0 };
+    cur.cycles += 1;
+    cur.cost += cost;
+    out.set(agent, cur);
+  }
+  return out;
+}
+
+export function collectAgentPanel(projectPath: string, deps: AgentPanelDeps = defaultAgentPanelDeps()): AgentPanelRow[] {
+  const installed = new Set(deps.installed());
+  const spend = spend72h(projectPath, deps.nowSec());
+  const entries = parseAiEntries();
+  const rows: AgentPanelRow[] = [];
+  const names = new Set<string>([...installed, ...entries.map((e) => e.name)]);
+  for (const name of [...names].sort()) {
+    const isInstalled = installed.has(name);
+    const entry = entries.find((e) => e.name === name);
+    const files: AgentPanelFile[] = [];
+    if (entry !== undefined) {
+      const sync = aiSyncStatus(entry);
+      files.push({
+        path: join(entry.ai_dir, entry.cfg_file),
+        kind: entry.cfg_file,
+        state: sync === "sync" ? "sync" : sync === "missing" ? "missing" : "stale",
+      });
+    }
+    const s = spend.get(name) ?? { cycles: 0, cost: 0 };
+    const stale = files.some((f) => f.state !== "sync");
+    rows.push({
+      name,
+      display: agentDisplayName(name),
+      runner: RUNNER_LABEL[name] ?? `${agentDisplayName(name)} CLI`,
+      version: deps.versionOf(name) ?? "—",
+      installed: isInstalled,
+      cycles72h: s.cycles,
+      costUsd72h: Number(s.cost.toFixed(4)),
+      files,
+      syncStale: isInstalled && stale,
+      ...(isInstalled && stale ? { setupCmd: `roll setup -f ${name}` } : {}),
+    });
+  }
+  // installed first, then by 72h activity, then name.
+  rows.sort((a, b) => Number(b.installed) - Number(a.installed) || b.cycles72h - a.cycles72h || a.name.localeCompare(b.name));
+  return rows;
+}

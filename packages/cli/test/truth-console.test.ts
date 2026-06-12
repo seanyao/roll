@@ -432,3 +432,28 @@ describe("skills tab — US-DOSSIER-017", () => {
     expect(html).not.toContain("references full text"); // pointers only
   });
 });
+
+describe("command chips + freshness — US-DOSSIER-018", () => {
+  const html = render();
+
+  it("AC1/AC2: cycle row chip carries the REAL roll cycle command with the digit-run handle", () => {
+    expect(html).toContain('data-copy="roll cycle 1234"'); // digit-run handle of 20260612-x-1234
+  });
+
+  it("AC1: pending-delivery rows carry state-appropriate real commands", () => {
+    expect(html).toContain("roll loop go --cards FIX-9");
+  });
+
+  it("AC3: stale-snapshot banner bound to generatedAt with the refresh hint", () => {
+    expect(html).toContain('id="freshness-banner"');
+    expect(html).toContain('data-generated="2026-06-13T00:00:00Z"');
+    expect(html).toContain("数据已过期");
+    expect(html).toContain("applyFreshness");
+  });
+
+  it("AC4: heartbeat next is a client-side countdown anchor", () => {
+    expect(html).toContain('class="hb-next"');
+    expect(html).toContain('data-next="2026-06-13T00:30:00Z"');
+    expect(html).toContain("tickCountdown");
+  });
+});

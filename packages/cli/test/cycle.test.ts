@@ -90,3 +90,26 @@ describe("cycleCommand", () => {
     expect(err).toContain("no cycle matches");
   });
 });
+
+describe("kimi pair-review regressions", () => {
+  it("unknown flags fail loud", async () => {
+    const save = process.cwd();
+    process.chdir(project());
+    let err = "";
+    const se = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((s: string) => ((err += s), true)) as typeof process.stderr.write;
+    try {
+      expect(cycleCommand(["--foo", "0311"])).toBe(1);
+    } finally {
+      process.stderr.write = se;
+      process.chdir(save);
+    }
+    expect(err).toContain("unknown flag");
+  });
+
+  it("no slug / no story → honest evidence line, never a crash", () => {
+    const rows = collectCycleLedger(project());
+    const out = stripAnsi(renderCycleTrace({ ...rows[1]!, storyId: "" }, "en"));
+    expect(out).toContain("nothing addressable");
+  });
+});

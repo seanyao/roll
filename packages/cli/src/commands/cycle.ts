@@ -73,6 +73,12 @@ export function cycleCommand(args: string[]): number {
     process.stdout.write(`${CYCLE_USAGE}\n`);
     return args.length === 0 ? 1 : 0;
   }
+  // kimi pair-review: reject unknown flags like `roll cycles` does.
+  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h");
+  if (unknown.length > 0) {
+    process.stderr.write(`[roll] unknown flag: ${unknown[0]}\n${CYCLE_USAGE}\n`);
+    return 1;
+  }
   const handle = args.find((a) => !a.startsWith("-"));
   if (handle === undefined) {
     process.stderr.write(`${CYCLE_USAGE}\n`);

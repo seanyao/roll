@@ -66,6 +66,7 @@ import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
 import { releaseShipCommand } from "./release-ship.js";
 import { releaseWaiverCommand } from "./release-waiver.js";
+import { SELF_SCORE_USAGE, selfScoreCommand } from "./self-score.js";
 import { setupCommand } from "./setup.js";
 import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
@@ -109,6 +110,9 @@ export function registerAll(): void {
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });
+  // `self-score`: TS-native skill self-score note writer (FIX-274). Hidden,
+  // agent-facing — replaces the dead `source "$(command -v roll)"` bash path.
+  registerPorted("self-score", selfScoreCommand, { hidden: true, help: SELF_SCORE_USAGE });
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
   registerPorted("index", indexCommand, { hidden: true });
   // `story new`: internal/advanced explicit card-folder minting (US-META-009).

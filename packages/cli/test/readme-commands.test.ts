@@ -21,6 +21,7 @@ const HIDDEN = new Set([
   "dream",
   "gc",
   "index",
+  "self-score",
   "skills",
   "version",
 ]);

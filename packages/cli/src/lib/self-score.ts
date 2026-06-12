@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
-import { cardArchiveDir } from "./archive.js";
+import { cardArchiveDir, epicForStory } from "./archive.js";
 
 export type SelfScoreVerdict = "good" | "ok" | "regression" | string;
 export const SELF_SCORE_LOW_THRESHOLD = 5;
@@ -184,6 +184,99 @@ export function readSelfScoreTrend(projectPath: string, windowN = 14): string | 
   if (entries.length < 3) return `self-score: (n/a) — ${entries.length} sample(s), need 3 (last ${windowN})`;
   const mean = total / entries.length;
   return `self-score: mean ${mean.toFixed(1)} / min ${min} / redo ${redo} (last ${windowN})`;
+}
+
+// ─── FIX-274: TS-native writer ───────────────────────────────────────────────
+// The v2 contract had agents `source "$(command -v roll)"` to reach a bash
+// helper; v3's `roll` is a bundled TS CLI and cannot be sourced. This writer is
+// the replacement path. It emits the exact note shape the readers above (and
+// dossier / attest gate / dashboard trend) already parse.
+
+export const SELF_SCORE_VERDICTS = ["good", "ok", "regression"] as const;
+
+export interface SelfScoreWriteInput {
+  skill: string;
+  story: string;
+  score: number;
+  verdict: (typeof SELF_SCORE_VERDICTS)[number];
+  rationale: string;
+  /** ISO timestamp; defaults to now. Same skill/story/ts payload re-runs are idempotent. */
+  ts?: string;
+}
+
+export interface SelfScoreWriteResult {
+  path: string;
+  /** false when an identical note already existed (idempotent retry). */
+  written: boolean;
+}
+
+/**
+ * Note home: the card folder when the story's card exists
+ * (`features/<epic>/<ID>/notes/`, US-META-008), else `.roll/notes/` for
+ * design/session-level notes that are not card-owned.
+ */
+function selfScoreNoteDir(projectPath: string, storyId: string): string {
+  const epic = epicForStory(projectPath, storyId);
+  if (epic !== null && existsSync(cardArchiveDir(projectPath, storyId))) {
+    return join(cardArchiveDir(projectPath, storyId), "notes");
+  }
+  return join(projectPath, ".roll", "notes");
+}
+
+export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInput): SelfScoreWriteResult {
+  const skill = input.skill.trim();
+  if (skill === "") throw new Error("self-score: skill must be non-empty");
+  const story = input.story.trim();
+  if (story === "") throw new Error("self-score: story must be non-empty");
+  if (!Number.isInteger(input.score) || input.score < 1 || input.score > 10) {
+    throw new Error(`self-score: score must be an integer 1..10, got ${input.score}`);
+  }
+  if (!SELF_SCORE_VERDICTS.includes(input.verdict)) {
+    throw new Error(`self-score: verdict must be one of ${SELF_SCORE_VERDICTS.join("|")}, got ${input.verdict}`);
+  }
+  const rationale = input.rationale.trim();
+  if (rationale === "") throw new Error("self-score: rationale must be non-empty");
+  const ts = input.ts ?? new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const epochSec = Math.floor(Date.parse(ts) / 1000);
+  if (!Number.isFinite(epochSec)) throw new Error(`self-score: invalid ts ${ts}`);
+
+  const dir = selfScoreNoteDir(projectPath, story);
+  // Idempotency: an existing note for the same skill/story/ts is either the
+  // same payload (retry → reuse) or a contradiction (→ fail loud).
+  for (const c of noteCandidates(dir, story)) {
+    const prior = parseSelfScoreNote(readFileSync(c.path, "utf8"), c.path, story);
+    if (prior === null || prior.skill !== skill || prior.ts !== ts) continue;
+    if (prior.score === input.score && prior.verdict === input.verdict) {
+      return { path: c.path, written: false };
+    }
+    throw new Error(
+      `self-score: contradicting note for ${skill}/${story}@${ts} already exists at ${c.path} ` +
+        `(${prior.verdict} ${prior.score} vs ${input.verdict} ${input.score})`,
+    );
+  }
+
+  const date = ts.slice(0, 10);
+  const path = join(dir, `${date}-${skill}-${story}-${epochSec}.md`);
+  const text = [
+    "---",
+    `skill: ${skill}`,
+    `story: ${story}`,
+    `score: ${input.score}`,
+    `verdict: ${input.verdict}`,
+    `ts: ${ts}`,
+    "---",
+    "",
+    rationale,
+    "",
+  ].join("\n");
+  mkdirSync(dir, { recursive: true });
+  // Complete-file write: land on a tmp name, then rename into place so readers
+  // never observe partial YAML. The tmp name embeds the unique target basename,
+  // so concurrent writers for different stories cannot collide.
+  const tmp = join(dir, `.${date}-${skill}-${story}-${epochSec}.md.tmp`);
+  writeFileSync(tmp, text, "utf8");
+  renameSync(tmp, path);
+  return { path, written: true };
 }
 
 export function evaluateSelfScoreGate(projectPath: string, storyId: string): SelfScoreGateCheck {

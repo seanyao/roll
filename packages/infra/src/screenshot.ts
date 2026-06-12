@@ -250,6 +250,66 @@ async function resolveWindowRect(
   return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
 }
 
+/**
+ * FIX-272 — retire the shell INSIDE our window instead of AppleScript-closing
+ * the window. `close w` tears the tab while Terminal's own shellExitAction
+ * (profile "when the shell exits": 0=close, 1=close on clean exit) races to
+ * close the same window — the loser leaves a dead-tab ghost that no further
+ * `close` can remove. Sending `exit` lets the shell die cleanly and the
+ * user's own setting collapse the window; only the "never close" profile (2)
+ * needs the close fallback.
+ */
+export function terminalExitTabScript(title: string): string {
+  const esc = appleScriptString(title);
+  return [
+    "-- roll-attest-exit-tab",
+    'tell application "Terminal"',
+    "  repeat with w in windows",
+    "    try",
+    `      if name of w contains "${esc}" then`,
+    '        do script "exit" in tab 1 of w',
+    "        exit repeat",
+    "      end if",
+    "    end try",
+    "  end repeat",
+    "end tell",
+  ].join("\n");
+}
+
+/** Probe whether our capture window still exists (prints yes/no). */
+export function terminalWindowExistsScript(title: string): string {
+  const esc = appleScriptString(title);
+  return [
+    "-- roll-attest-exists-probe",
+    'tell application "Terminal"',
+    "  repeat with w in windows",
+    "    try",
+    `      if name of w contains "${esc}" then return "yes"`,
+    "    end try",
+    "  end repeat",
+    '  return "no"',
+    "end tell",
+  ].join("\n");
+}
+
+/**
+ * Tear down the capture window. Command lane: exit-first (FIX-272), close only
+ * as fallback. Tmux lane: plain close — `exit` would land inside the attached
+ * session. Returns false when the fallback close itself errored.
+ */
+async function teardownCaptureWindow(windowTitle: string, commandLane: boolean, run: ShotRun): Promise<boolean> {
+  if (commandLane) {
+    await run("osascript", ["-e", terminalExitTabScript(windowTitle)]);
+    for (let i = 0; i < 10; i++) {
+      const probe = await run("osascript", ["-e", terminalWindowExistsScript(windowTitle)]);
+      if (probe.code === 0 && probe.stdout.includes("no")) return true;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]);
+  return closed.code === 0;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -370,19 +430,22 @@ export async function captureScreenshot(
       // and raised, the configured rect would capture WHATEVER the owner has
       // on screen (live incident: a Teams chat landed in the evidence png).
       if (liveRect === null) {
-        const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]);
-        if (closed.code !== 0) return skip("capture window not found; Terminal close failed");
+        if (!(await teardownCaptureWindow(windowTitle, commandDoneFile !== undefined, run))) {
+          return skip("capture window not found; Terminal close failed");
+        }
         return skip("capture window not found — refusing a blind-region shot");
       }
       const shot = await run("screencapture", ["-x", "-R", `${liveRect.x},${liveRect.y},${liveRect.w},${liveRect.h}`, req.out]);
       // screencapture exits non-zero when Screen Recording permission is absent.
       if (shot.code !== 0) {
-        const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]);
-        if (closed.code !== 0) return skip("screencapture failed; Terminal close failed");
+        if (!(await teardownCaptureWindow(windowTitle, commandDoneFile !== undefined, run))) {
+          return skip("screencapture failed; Terminal close failed");
+        }
         return skip("screencapture failed (screen-recording permission?)");
       }
-      const closed = await run("osascript", ["-e", terminalCloseScript(windowTitle)]); // close the window we opened
-      if (closed.code !== 0) return skip("Terminal close failed after capture");
+      if (!(await teardownCaptureWindow(windowTitle, commandDoneFile !== undefined, run))) {
+        return skip("Terminal close failed after capture");
+      }
     }
   } catch {
     return skip("capture errored");

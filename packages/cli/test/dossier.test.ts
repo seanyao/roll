@@ -334,7 +334,7 @@ describe("renderEpicPage — US-DOSSIER-001b", () => {
   const html = renderEpicPage(alpha);
 
   it("masthead carries breadcrumb home + epic ledger with truth figure", () => {
-    expect(html).toContain('href="../index.html"');
+    expect(html).toContain('href="../index.html#backlog"');
     expect(html).toContain("Epic Dossier");
     expect(html).toContain("史诗档案");
     expect(html).toContain("Merged to main");
@@ -415,7 +415,7 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
   });
 
   it("masthead: breadcrumb chain + mono id + kv metadata", () => {
-    expect(full).toContain('href="../../index.html"');
+    expect(full).toContain('href="../../index.html#backlog"'); // root = Backlog tab (US-DOSSIER-012)
     expect(full).toContain('href="../index.html"');
     expect(full).toContain("<code>US-A-1</code>");
     expect(full).toContain('class="type type-US"');
@@ -1002,8 +1002,8 @@ describe("roll index — US-DOSSIER-001d three-layer integration", () => {
     // index → epic → story → back.
     expect(idx).toContain('href="alpha/index.html"');
     expect(epic).toContain('href="US-A-1/index.html"');
-    expect(epic).toContain('href="../index.html"');
-    expect(story).toContain('href="../../index.html"');
+    expect(epic).toContain('href="../index.html#backlog"'); // breadcrumb root is the Backlog tab (US-DOSSIER-012)
+    expect(story).toContain('href="../../index.html#backlog"');
     expect(story).toContain('href="../index.html"');
     // Story dossier carries the available delivery artifacts, but the delivered
     // banner waits for merge truth instead of treating attest presence as enough.

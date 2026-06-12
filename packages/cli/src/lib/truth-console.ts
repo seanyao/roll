@@ -26,17 +26,43 @@ export interface TruthConsoleBrand {
   slogan: string;
 }
 
+/** One story row on the Backlog tab (US-DOSSIER-012). */
+export interface BacklogStoryVM {
+  id: string;
+  epic: string;
+  /** ID family: US | FIX | REFACTOR | … */
+  type: string;
+  title: string;
+  /** Spectrum state — the SAME classifier the snapshot tally uses. */
+  state: "done" | "wip" | "hold" | "todo" | "fail" | "unknown";
+  legacy: boolean;
+  /** Lifecycle stations done (spine keys in order). */
+  stages: string[];
+}
+
+export interface BacklogEpicVM {
+  name: string;
+  done: number;
+  total: number;
+  stories: BacklogStoryVM[];
+}
+
+export interface BacklogVM {
+  /** Epics still shipping (not every story merged). */
+  shipping: BacklogEpicVM[];
+  /** Epics fully settled on main. */
+  settled: BacklogEpicVM[];
+}
+
 export interface TruthConsoleInput {
   snapshot: TruthSnapshot;
   /** The EXACT serialized snapshot written to truth.json (US-DOSSIER-010). */
   snapshotJson: string;
   brand: TruthConsoleBrand;
-  /** Existing ledger fragment (toolbar + epic groups) for the Backlog tab. */
-  backlogFragment: string;
-  /** Scripts the backlog fragment needs (search/filter). */
-  backlogScript: string;
-  /** Styles the backlog fragment needs (ledger CSS). */
-  backlogStyle?: string;
+  /** Backlog tab view model (US-DOSSIER-012). */
+  backlog: BacklogVM;
+  /** Spine station keys in lifecycle order (definition→…→retrospective). */
+  spineKeys: string[];
 }
 
 const MONO = `font-family:'IBM Plex Mono',monospace;`;
@@ -242,7 +268,7 @@ function overviewTab(input: TruthConsoleInput): string {
     const meta = SPECTRUM_META[k] as NonNullable<(typeof SPECTRUM_META)[string]>;
     const n = spectrum[k];
     return (
-      `<a href="#backlog" data-tab-link="backlog" data-prefilter="${k}" title="${meta.en} · ${meta.zh}" ` +
+      `<a href="#backlog/${k}" data-tab-link="backlog" data-prefilter="${k}" title="${meta.en} · ${meta.zh}" ` +
       `style="position:relative;display:block;padding:14px 14px 12px;text-decoration:none;border-left:1px solid ${C.hair};cursor:pointer;">` +
       `<span style="position:absolute;left:0;top:0;height:3px;width:100%;background:${meta.color};opacity:${n > 0 ? "1" : ".25"};"></span>` +
       `<span style="${MONO}font-size:11px;color:${meta.color};">${meta.mark}</span>` +
@@ -288,6 +314,102 @@ function overviewTab(input: TruthConsoleInput): string {
   );
 }
 
+const TYPE_COLORS: Record<string, string> = { US: C.blue, FIX: C.red, REFACTOR: C.purple, IDEA: C.amber };
+
+function typeBadge(type: string): string {
+  const color = TYPE_COLORS[type] ?? C.slate;
+  return `<span style="${MONO}font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;padding:2px 7px;border-radius:5px;border:1px solid ${color}44;color:${color};text-align:center;">${esc(type)}</span>`;
+}
+
+function miniSpine(stages: string[], spineKeys: string[], legacy: boolean): string {
+  if (legacy) {
+    return `<span title="legacy delivery · 历史交付" style="display:inline-flex;gap:3px;">${spineKeys
+      .map(() => `<span style="width:14px;height:5px;border-radius:3px;background:#d4dae3;"></span>`)
+      .join("")}</span>`;
+  }
+  const done = new Set(stages);
+  return `<span style="display:inline-flex;gap:3px;">${spineKeys
+    .map((k) => `<span title="${esc(k)}" style="width:14px;height:5px;border-radius:3px;background:${done.has(k) ? C.green : "#e4e8ef"};"></span>`)
+    .join("")}</span>`;
+}
+
+function truthChip(state: BacklogStoryVM["state"], legacy: boolean): string {
+  const mk = (label: string, color: string): string =>
+    `<span style="${MONO}font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:4px;border:1px solid ${color}55;color:${color};white-space:nowrap;">${label}</span>`;
+  if (legacy) return `<span style="${MONO}font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 5px;border-radius:4px;border:1px dashed #c8ced6;color:${C.faint};">legacy</span>`;
+  if (state === "done") return mk("truth ✓", C.green);
+  if (state === "fail") return mk("truth ✗", C.red);
+  if (state === "unknown") return mk("truth ?", C.slate);
+  return "";
+}
+
+function storyRow(s: BacklogStoryVM, spineKeys: string[]): string {
+  const meta = SPECTRUM_META[s.state] as NonNullable<(typeof SPECTRUM_META)[string]>;
+  return (
+    `<a class="bl-row" data-state="${s.state}" data-text="${esc(`${s.id} ${s.title}`.toLowerCase())}" href="${esc(s.epic)}/${esc(s.id)}/index.html" ` +
+    `style="display:grid;grid-template-columns:62px 150px 1fr 110px minmax(150px,auto);align-items:center;gap:12px;padding:8px 10px;border-radius:8px;cursor:pointer;text-decoration:none;">` +
+    typeBadge(s.type) +
+    `<span style="${MONO}font-size:12.5px;color:${C.blue};font-weight:600;overflow:hidden;text-overflow:ellipsis;">${esc(s.id)}</span>` +
+    `<span style="font-size:13.5px;color:${C.sub};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.title)}</span>` +
+    miniSpine(s.stages, spineKeys, s.legacy) +
+    `<span style="display:flex;align-items:center;gap:7px;justify-content:flex-end;${MONO}font-size:11px;">` +
+    `<span style="width:7px;height:7px;border-radius:50%;background:${meta.color};flex:none;"></span>` +
+    `<span style="color:${meta.color};font-weight:600;">${bi(meta.en, meta.zh)}</span>` +
+    truthChip(s.state, s.legacy) +
+    `</span></a>`
+  );
+}
+
+function epicAccordion(ep: BacklogEpicVM, spineKeys: string[]): string {
+  const donePct = ep.total > 0 ? (ep.done / ep.total) * 100 : 0;
+  return (
+    `<details class="bl-epic" data-epic="${esc(ep.name)}">` +
+    `<summary style="display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:14px;padding:13px 16px;cursor:pointer;list-style:none;">` +
+    `<span class="bl-caret" style="${MONO}font-size:11px;color:${C.faint};text-align:center;transition:transform .18s;">▶</span>` +
+    `<div style="min-width:0;"><a href="${esc(ep.name)}/index.html" style="font-size:16px;font-weight:600;letter-spacing:-.01em;color:${C.ink};text-decoration:none;">${esc(ep.name)}</a>` +
+    `<div style="display:flex;height:6px;border-radius:999px;overflow:hidden;margin-top:8px;max-width:320px;border:1px solid #e4e8ef;">` +
+    `<span style="width:${donePct}%;background:${C.green};"></span><span style="flex:1;background:#eef1f5;"></span></div></div>` +
+    `<span style="${MONO}font-size:13px;color:${C.dim};white-space:nowrap;"><b style="color:${C.green};font-weight:600;">${ep.done}</b> / ${ep.total}</span>` +
+    `</summary>` +
+    `<div style="border-top:1px solid ${C.hair};padding:5px 8px 9px;">${ep.stories.map((s) => storyRow(s, spineKeys)).join("")}</div>` +
+    `</details>`
+  );
+}
+
+function backlogTab(input: TruthConsoleInput): string {
+  const groupHead = (label: string, count: number, color: string): string =>
+    `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${label}</span>` +
+    `<span style="${MONO}font-size:12px;color:${color};font-weight:600;">${count}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;"></span></div>`;
+  const chips = SPECTRUM_ORDER.map((k) => {
+    const meta = SPECTRUM_META[k] as NonNullable<(typeof SPECTRUM_META)[string]>;
+    return (
+      `<button type="button" class="bl-chip" data-filter="${k}" ` +
+      `style="${MONO}font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid ${C.line};background:${C.card};color:${meta.color};cursor:pointer;">` +
+      `${meta.mark} ${bi(meta.en, meta.zh)}</button>`
+    );
+  }).join("");
+  return (
+    `<div style="padding:30px 0 4px;">` +
+    kicker(bi("Wishes, not yet truth", "愿望，尚未成真")) +
+    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Backlog", "待办")}</h1>` +
+    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
+      "Every card here is a wish until main proves the merge. Each row shows the claim beside the truth.",
+      "这里的每张卡都只是愿望，直到主干证明它合并才算完成。每行同时给出声明与真相。",
+    )}</p></div>` +
+    `<div style="display:flex;gap:10px;align-items:center;margin:22px 0 12px;flex-wrap:wrap;">` +
+    `<div style="flex:1 1 280px;display:flex;align-items:center;gap:9px;background:${C.card};border:1px solid #dfe4ec;border-radius:999px;padding:9px 16px;">` +
+    `<span style="color:${C.faint};font-size:13px;">⌕</span>` +
+    `<input type="search" id="bl-search" placeholder="Search epics &amp; stories · 搜索史诗与故事" style="flex:1;border:none;outline:none;background:none;font-family:inherit;font-size:13.5px;color:${C.body};"></div>` +
+    `<div style="display:flex;gap:6px;flex-wrap:wrap;">${chips}</div></div>` +
+    groupHead(bi("Shipping to main", "交付中"), input.backlog.shipping.length, C.blue) +
+    input.backlog.shipping.map((e) => epicAccordion(e, input.spineKeys)).join("") +
+    groupHead(bi("Settled on main", "已落定"), input.backlog.settled.length, C.green) +
+    input.backlog.settled.map((e) => epicAccordion(e, input.spineKeys)).join("")
+  );
+}
+
 function placeholderTab(titleEn: string, titleZh: string, fillerStory: string): string {
   return (
     `<div style="padding:34px 0 8px;">` +
@@ -324,8 +446,11 @@ const CONSOLE_SCRIPT = `<script>
     }
   }
   var TABS = ["overview", "loop", "release", "backlog", "skills"];
+  function hashParts() {
+    return (location.hash || "").replace(/^#/, "").split("/");
+  }
   function currentTab() {
-    var h = (location.hash || "").replace(/^#/, "");
+    var h = hashParts()[0];
     return TABS.indexOf(h) >= 0 ? h : "overview";
   }
   function applyTab() {
@@ -337,10 +462,52 @@ const CONSOLE_SCRIPT = `<script>
       if (btn) btn.classList.toggle("on", TABS[i] === cur);
     }
   }
-  window.addEventListener("hashchange", applyTab);
+  // US-DOSSIER-012: backlog search + state filters; #backlog/<state> pre-sets one.
+  var active = {};
+  function applyFilters() {
+    var q = (document.getElementById("bl-search") || { value: "" }).value.toLowerCase();
+    var any = Object.keys(active).some(function (k) { return active[k]; });
+    var rows = document.querySelectorAll(".bl-row");
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var okState = !any || active[r.getAttribute("data-state")];
+      var okText = q === "" || (r.getAttribute("data-text") || "").indexOf(q) >= 0;
+      r.style.display = okState && okText ? "" : "none";
+    }
+    var epics = document.querySelectorAll(".bl-epic");
+    for (var j = 0; j < epics.length; j++) {
+      var visible = epics[j].querySelectorAll('.bl-row:not([style*="display: none"])').length;
+      epics[j].style.display = visible > 0 ? "" : "none";
+      if ((any || q !== "") && visible > 0) epics[j].setAttribute("open", "");
+    }
+    var chips = document.querySelectorAll(".bl-chip");
+    for (var c = 0; c < chips.length; c++) {
+      chips[c].classList.toggle("on", !!active[chips[c].getAttribute("data-filter")]);
+    }
+  }
+  function applyPrefilter() {
+    var parts = hashParts();
+    if (parts[0] === "backlog" && parts[1]) {
+      active = {};
+      active[parts[1]] = true;
+      applyFilters();
+    }
+  }
+  window.addEventListener("hashchange", function () { applyTab(); applyPrefilter(); });
   document.addEventListener("DOMContentLoaded", function () {
     applyLang();
     applyTab();
+    applyPrefilter();
+    var chips = document.querySelectorAll(".bl-chip");
+    for (var c = 0; c < chips.length; c++) {
+      chips[c].addEventListener("click", function () {
+        var k = this.getAttribute("data-filter");
+        active[k] = !active[k];
+        applyFilters();
+      });
+    }
+    var search = document.getElementById("bl-search");
+    if (search) search.addEventListener("input", applyFilters);
     var bs = document.querySelectorAll("[data-set-lang]");
     for (var i = 0; i < bs.length; i++) {
       bs[i].addEventListener("click", function () {
@@ -387,21 +554,18 @@ html:not([data-lang]) .lang-zh{display:none;}
 .console-tab.on{background:${C.card};border-color:${C.line};color:${C.ink};box-shadow:0 -1px 2px rgba(17,26,69,.04);}
 .console-tab:hover{color:${C.ink};}
 a{color:${C.blue};}
+.bl-epic{border:1px solid ${C.line};border-radius:12px;background:${C.card};margin:0 0 9px;overflow:hidden;box-shadow:0 1px 2px rgba(17,26,69,.04);}
+.bl-epic summary::-webkit-details-marker{display:none;}
+.bl-epic[open] .bl-caret{transform:rotate(90deg);}
+.bl-row:hover{background:#f6f8fb;}
+.bl-chip.on{border-color:${C.blue};box-shadow:0 0 0 1px ${C.blue}33;}
 `;
 
   const panes =
     `<div id="tab-overview">${overviewTab(input)}</div>` +
     `<div id="tab-loop" style="display:none;">${placeholderTab("Loop & Cycles", "循环与周期", "US-DOSSIER-013/014")}</div>` +
     `<div id="tab-release" style="display:none;">${placeholderTab("Release", "发版", "US-DOSSIER-015/016")}</div>` +
-    `<div id="tab-backlog" style="display:none;">` +
-    `<div style="padding:30px 0 4px;">` +
-    kicker(bi("Truth Console", "真相控制台")) +
-    `<h1 style="margin:10px 0 0;font-size:28px;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Backlog", "待办")}</h1>` +
-    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
-      "A card is a wish; main is the proof. (Full redesign lands with US-DOSSIER-012.)",
-      "卡片只是愿望，主干证明才算完成。（完整重设计由 US-DOSSIER-012 落地。）",
-    )}</p></div>` +
-    `<div class="ledger-embed">${input.backlogFragment}</div></div>` +
+    `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
     `<div id="tab-skills" style="display:none;">${placeholderTab("Skills", "技能", "US-DOSSIER-017")}</div>`;
 
   return (
@@ -411,8 +575,8 @@ a{color:${C.blue};}
     `<link rel="preconnect" href="https://fonts.googleapis.com">\n` +
     `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n` +
     `<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n` +
-    `<style>${css}${input.backlogStyle ?? ""}</style>\n` +
-    `${CONSOLE_SCRIPT}\n${input.backlogScript}\n</head>\n<body>\n` +
+    `<style>${css}</style>\n` +
+    `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
     header +
     `<main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;">` +
     `<div style="display:flex;gap:6px;align-items:flex-end;border-bottom:1px solid #dfe4ec;position:sticky;top:54px;background:${C.bg};z-index:20;padding:16px 0 0;">${tabBar}</div>` +

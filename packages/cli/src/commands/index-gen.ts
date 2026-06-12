@@ -12,9 +12,8 @@ import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
 import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
-import { countLegacyStories, featuresLedgerFragment, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
-import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../lib/dossier-css.js";
-import { renderTruthConsole } from "../lib/truth-console.js";
+import { SPINE_STAGES, countLegacyStories, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
+import { renderTruthConsole, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
@@ -251,6 +250,33 @@ export function indexCommand(args: string[]): number {
   return 0;
 }
 
+/** US-DOSSIER-012: fold the dossier epics into the Backlog tab's view model —
+ *  the SAME spectrum classifier the snapshot tally uses, so the counts match
+ *  truth.json by construction. */
+function backlogViewModel(epics: ReturnType<typeof collectDossier>): BacklogVM {
+  const toVM = (e: (typeof epics)[number]): BacklogEpicVM => ({
+    name: e.name,
+    done: e.delivered,
+    total: e.stories.length,
+    stories: e.stories.map((s) => ({
+      id: s.id,
+      epic: s.epic,
+      type: s.type,
+      title: s.title ?? s.id,
+      state: storySpectrumState(s),
+      legacy: s.legacy === true,
+      stages: [...(s.stages ?? [])],
+    })),
+  });
+  const shipping: BacklogEpicVM[] = [];
+  const settled: BacklogEpicVM[] = [];
+  for (const e of epics) {
+    if (e.stories.length > 0 && e.delivered === e.stories.length) settled.push(toVM(e));
+    else shipping.push(toVM(e));
+  }
+  return { shipping, settled };
+}
+
 /**
  * Generate the dossier pages from the live card tree (US-DOSSIER-001a/b/c/d):
  * front page + every epic page always; story pages only when missing (mount
@@ -312,9 +338,8 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
           name: process.env["ROLL_BRAND_NAME"] ?? "roll",
           slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works.",
         },
-        backlogFragment: featuresLedgerFragment(epics),
-        backlogScript: DOSSIER_FILTER_SCRIPT,
-        backlogStyle: DOSSIER_CSS,
+        backlog: backlogViewModel(epics),
+        spineKeys: SPINE_STAGES.map((s) => s.key),
       }),
       "utf8",
     );

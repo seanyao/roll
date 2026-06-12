@@ -18,13 +18,32 @@ const SNAP: TruthSnapshot = {
   loop: { lanes: [{ name: "loop", running: true, mode: "cron", everyMin: 60, lastAt: "2026-06-12T23:30:00Z", nextAt: "2026-06-13T00:30:00Z" }] },
 };
 
+const SPINE = ["definition", "design", "execution", "delivery", "retrospective"];
+const BACKLOG = {
+  shipping: [
+    {
+      name: "alpha",
+      done: 1,
+      total: 3,
+      stories: [
+        { id: "US-A-1", epic: "alpha", type: "US", title: "first", state: "done" as const, legacy: false, stages: SPINE },
+        { id: "FIX-9", epic: "alpha", type: "FIX", title: "fix it", state: "todo" as const, legacy: false, stages: ["definition"] },
+        { id: "US-A-2", epic: "alpha", type: "US", title: "old one", state: "done" as const, legacy: true, stages: [] },
+      ],
+    },
+  ],
+  settled: [
+    { name: "omega", done: 1, total: 1, stories: [{ id: "US-O-1", epic: "omega", type: "US", title: "settled", state: "done" as const, legacy: false, stages: SPINE }] },
+  ],
+};
+
 function render(snapshot: TruthSnapshot = SNAP): string {
   return renderTruthConsole({
     snapshot,
     snapshotJson: serializeTruthSnapshot(snapshot),
     brand: { name: "roll", slogan: "It just works." },
-    backlogFragment: '<div class="toolbar">LEDGER-FRAGMENT</div>',
-    backlogScript: "<script>/*filter*/</script>",
+    backlog: BACKLOG,
+    spineKeys: SPINE,
   });
 }
 
@@ -41,7 +60,6 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(html).toContain("US-DOSSIER-013/014");
     expect(html).toContain("US-DOSSIER-015/016");
     expect(html).toContain("US-DOSSIER-017");
-    expect(html).toContain("LEDGER-FRAGMENT"); // existing ledger survives under Backlog
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
   });
 
@@ -50,8 +68,8 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       snapshot: SNAP,
       snapshotJson: serializeTruthSnapshot(SNAP),
       brand: { name: "acme", slogan: "Ship truth." },
-      backlogFragment: "",
-      backlogScript: "",
+      backlog: { shipping: [], settled: [] },
+      spineKeys: SPINE,
     });
     expect(custom).toContain("acme");
     expect(custom).toContain("Ship truth.");
@@ -113,5 +131,42 @@ describe("collectLoopHeartbeat — US-DOSSIER-011", () => {
   it("never throws on a machine with nothing scheduled", () => {
     const hb = collectLoopHeartbeat({ plistText: () => null, lastRunAt: () => null });
     expect(hb.lanes.every((l) => !l.running)).toBe(true);
+  });
+});
+
+describe("backlog tab — US-DOSSIER-012", () => {
+  const html = render();
+
+  it("AC1: wish header with bilingual kicker + lede", () => {
+    expect(html).toContain("Wishes, not yet truth");
+    expect(html).toContain("愿望，尚未成真");
+    expect(html).toContain("直到主干证明它合并才算完成");
+  });
+
+  it("AC2: search box + six state chips + prefilter hash route", () => {
+    expect(html).toContain('id="bl-search"');
+    for (const k of ["done", "fail", "unknown", "wip", "todo", "hold"]) expect(html).toContain(`data-filter="${k}"`);
+    expect(html).toContain('href="#backlog/done"'); // spectrum tally pre-sets the filter
+    expect(html).toContain("applyPrefilter"); // hash → chip activation script
+  });
+
+  it("AC3: epic accordions grouped shipping/settled; story rows carry type·id·title·spine·claim↔truth", () => {
+    expect(html).toContain("Shipping to main");
+    expect(html).toContain("Settled on main");
+    expect(html).toContain('data-epic="alpha"');
+    expect(html).toContain('data-epic="omega"');
+    expect(html).toContain('href="alpha/US-A-1/index.html"'); // row click → story dossier
+    expect(html).toContain('href="alpha/index.html"'); // epic name → epic page
+    expect(html).toContain(">US<"); // type badge
+    expect(html).toContain(">FIX<");
+    expect(html).toContain("truth ✓");
+    expect(html).toContain(">legacy<"); // legacy chip instead of a fake truth
+    expect(html).toMatch(/data-state="todo"/);
+  });
+
+  it("AC5: backlog rows tally to the snapshot story total by construction", () => {
+    const rows = html.match(/class="bl-row"/g) ?? [];
+    const total = BACKLOG.shipping.concat(BACKLOG.settled).reduce((a, e) => a + e.stories.length, 0);
+    expect(rows.length).toBe(total);
   });
 });

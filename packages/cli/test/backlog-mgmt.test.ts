@@ -107,7 +107,7 @@ describe("backlog block/defer/unblock/promote — US-PORT-019", () => {
     capture(() => backlogSetStatusCommand("block", ["FIX-001", "waiting"]));
     const front = readFileSync(join(".roll", "features", "index.html"), "utf8");
     expect(front).toContain("FIX-001");
-    expect(front).toContain('data-status="hold"'); // 🔒 Blocked classifies as hold
+    expect(front).toContain('data-state="hold"'); // 🔒 Blocked classifies as hold
   });
 
   it("no match → 'No items matched', exit 0, file unchanged", () => {

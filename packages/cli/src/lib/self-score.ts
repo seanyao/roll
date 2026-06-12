@@ -261,10 +261,16 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
   // counts as the same write, whatever its timestamp.
   const rationaleKey = rationale.replace(/\s+/g, " ").slice(0, 300);
   for (const c of noteCandidates(dir, story)) {
-    const prior = parseSelfScoreNote(readFileSync(c.path, "utf8"), c.path, story);
+    const raw = readFileSync(c.path, "utf8");
+    const prior = parseSelfScoreNote(raw, c.path, story);
     if (prior === null || prior.skill !== skill) continue;
     const samePayload = prior.score === input.score && prior.verdict === input.verdict;
-    if (samePayload && (prior.ts === ts || prior.note === rationaleKey)) {
+    // codex pair-review: a retry that NOW carries an audit field the prior note
+    // lacks (fallback-reason) is not the same write — reusing would lose the audit.
+    const sameProvenance =
+      (input.fallbackReason === undefined || raw.includes(`fallback-reason: ${input.fallbackReason.trim()}`)) &&
+      (input.scoredBy === undefined || raw.includes(`scored-by: ${input.scoredBy.trim()}`));
+    if (samePayload && sameProvenance && (prior.ts === ts || prior.note === rationaleKey)) {
       return { path: c.path, written: false };
     }
     // A contradiction needs an identity claim: only an EXPLICIT same-ts write

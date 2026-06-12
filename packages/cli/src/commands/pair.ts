@@ -29,7 +29,7 @@ const HELP = `Usage: roll pair <init|status|score>
   init [--force]   Scaffold .roll/pairing.yaml from installed agents.
                    File present = pairing on; delete it = off. --force overwrites.
   status           Show the pairing pool: who pairs, vendor, capability, why excluded.
-  score <story-id> [--summary <text>|--file <path>] [--timeout-ms <ms>]
+  score <story-id> [--summary <text>|--file <path>] [--skill <name>] [--worker <agent>] [--timeout-ms <ms>]
                    Ask the paired heterogeneous agent to score a finished cycle
                    (US-PAIR-009/010); falls back to self-score with a hint.
 
@@ -249,7 +249,10 @@ function resolveSummary(storyId: string, summaryFlag?: string, fileFlag?: string
   }
   try {
     const backlog = readFileSync(join(process.cwd(), ".roll", "backlog.md"), "utf8");
-    const row = backlog.split("\n").find((l) => l.includes(storyId));
+    // ID-boundary match (codex pair-review): a bare includes() would let
+    // US-X-1 swallow US-X-10's row.
+    const idRe = new RegExp(`${storyId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`);
+    const row = backlog.split("\n").find((l) => idRe.test(l));
     return row !== undefined ? `Story ${storyId} — backlog row:\n${row.trim()}` : null;
   } catch {
     return null;
@@ -257,7 +260,7 @@ function resolveSummary(storyId: string, summaryFlag?: string, fileFlag?: string
 }
 
 export async function pairScore(rest: string[], deps: PairScoreCmdDeps = defaultPairScoreDeps()): Promise<number> {
-  const flagsWithValue = new Set(["--summary", "--file", "--timeout-ms"]);
+  const flagsWithValue = new Set(["--summary", "--file", "--timeout-ms", "--skill", "--worker"]);
   let storyId: string | undefined;
   const flags = new Map<string, string>();
   for (let i = 0; i < rest.length; i++) {
@@ -297,7 +300,10 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
     return 1;
   }
 
-  const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
+  // --skill overrides the prefix heuristic (codex pair-review: a design session
+  // scoring a US id must not be labelled roll-build).
+  const skill =
+    flags.get("--skill") ?? (storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build");
   const cycleId = `manual-${storyId}-${Math.floor(Date.now() / 1000)}`;
   const scorePeer = async (peer: string, s: string, t: number) => {
     const res = await deps.spawnReviewer({ agent: peer, projectPath: process.cwd(), prompt: buildPairScorePrompt(s), timeoutMs: t });
@@ -306,7 +312,11 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
     return parsed === null ? null : { ...parsed, cost: peerReviewCost(peer, res.stdout) };
   };
 
-  const r = await runScorePairing(process.cwd(), join(process.cwd(), ".roll"), cycleId, deps.workingAgent(), storyId, skill, summary, {
+  // --worker pins the agent that actually delivered the cycle (codex
+  // pair-review: a tier-routed cycle may not match the project default, and
+  // heterogeneity must be computed against the real author).
+  const worker = flags.get("--worker") ?? deps.workingAgent();
+  const r = await runScorePairing(process.cwd(), join(process.cwd(), ".roll"), cycleId, worker, storyId, skill, summary, {
     installed: deps.installed,
     isAvailable: deps.isAvailable,
     scorePeer,

@@ -25,6 +25,7 @@ import { briefCommand } from "./brief.js";
 import { changelogCommand } from "./changelog.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
+import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
 import { CYCLES_USAGE, cyclesCommand } from "./cycles.js";
 import { consistencyCommand } from "./consistency.js";
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
@@ -114,6 +115,8 @@ export function registerAll(): void {
   // `cycles`: the cycle ledger as a first-class command (US-CLI-012) — same
   // aggregation + verdict vocabulary as the web ledger; failures never swallowed.
   registerPorted("cycles", cyclesCommand, { help: CYCLES_USAGE });
+  // `cycle`: one cycle's trace tape (US-CLI-013) — the `roll cycles` tail hint target.
+  registerPorted("cycle", cycleCommand, { help: CYCLE_USAGE });
   // `self-score`: TS-native skill self-score note writer (FIX-274). Hidden,
   // agent-facing — replaces the dead `source "$(command -v roll)"` bash path.
   registerPorted("self-score", selfScoreCommand, { hidden: true, help: SELF_SCORE_USAGE });

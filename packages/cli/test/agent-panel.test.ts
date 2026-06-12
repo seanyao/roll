@@ -28,7 +28,7 @@ describe("collectAgentPanel", () => {
       { agent: "pi", ts: "2026-06-12T03:00:00Z", cost_usd: 0.1 },
       { agent: "claude", ts: "2026-06-01T00:00:00Z", cost_usd: 9 }, // outside window
     ]);
-    const rows = collectAgentPanel(p, { installed: () => ["claude", "pi"], versionOf: () => null, nowSec: () => NOW });
+    const rows = collectAgentPanel(p, { installed: () => ["claude", "pi"], versionOf: () => null, nowSec: () => NOW, aiEntries: () => [] });
     const claude = rows.find((r) => r.name === "claude")!;
     expect(claude.cycles72h).toBe(2);
     expect(claude.costUsd72h).toBeCloseTo(0.75);
@@ -40,11 +40,30 @@ describe("collectAgentPanel", () => {
 
   it("agents without runs still appear with zero activity", () => {
     const p = project([]);
-    const rows = collectAgentPanel(p, { installed: () => ["kimi"], versionOf: () => "1.2.3", nowSec: () => NOW });
+    const rows = collectAgentPanel(p, { installed: () => ["kimi"], versionOf: () => "1.2.3", nowSec: () => NOW, aiEntries: () => [] });
     const kimi = rows.find((r) => r.name === "kimi")!;
     expect(kimi.cycles72h).toBe(0);
     expect(kimi.version).toBe("1.2.3");
-    expect(kimi.files.length === 0 || kimi.files !== undefined).toBe(true);
+  });
+
+  it("kimi pair-review: numeric epoch ts rows count toward the window", () => {
+    const p = project([{ agent: "claude", ts: NOW - 3600, cost_usd: 0.2 }]);
+    const rows = collectAgentPanel(p, { installed: () => ["claude"], versionOf: () => null, nowSec: () => NOW, aiEntries: () => [] });
+    expect(rows.find((r) => r.name === "claude")?.cycles72h).toBe(1);
+  });
+
+  it("kimi pair-review: sync truth comes from injected entries, not the real config", () => {
+    const p = project([]);
+    const rows = collectAgentPanel(p, {
+      installed: () => ["kimi"],
+      versionOf: () => null,
+      nowSec: () => NOW,
+      aiEntries: () => [{ name: "kimi", ai_dir: "/nonexistent/.kimi", cfg_file: "AGENTS.md", src_file: "AGENTS.md" }],
+    });
+    const kimi = rows.find((r) => r.name === "kimi")!;
+    expect(kimi.files[0]?.state).toBe("missing");
+    expect(kimi.syncStale).toBe(true);
+    expect(kimi.setupCmd).toBe("roll setup -f kimi");
   });
 
   it("live regression: alias config entries collapse into the canonical agent row", () => {

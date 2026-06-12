@@ -44,6 +44,10 @@ function fake(byCmd: Record<string, { code: number; stdout?: string; writes?: bo
     if (cmd === "osascript" && String(argv[1] ?? "").includes("roll-attest-exists-probe")) {
       return Promise.resolve({ code: 0, stdout: "no\n", stderr: "" });
     }
+    // frontmost probe answers Terminal (FIX-273 happy path)
+    if (cmd === "sh" && String(argv[1] ?? "").includes("lsappinfo")) {
+      return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+    }
     const c = byCmd[cmd] ?? { code: 1 };
     if (c.writes === true) {
       const out = cmd === "sh" ? /> '(.+)'$/.exec(argv[1] ?? "")?.[1] : argv[argv.length - 1];
@@ -211,6 +215,9 @@ describe("terminal", () => {
       calls.push(`${cmd} ${argv.join(" ")}`);
       const script = String(argv[1] ?? "");
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+      }
       if (cmd === "osascript" && script.includes("roll-attest-exit-tab")) {
         if (commandLive) unsafeClose = true; // exiting the shell mid-command is as unsafe as close
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
@@ -269,6 +276,9 @@ describe("terminal", () => {
       calls.push(`${cmd} ${argv.join(" ")}`);
       const script = String(argv[1] ?? "");
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+      }
       if (cmd === "screencapture") {
         writeFileSync(String(argv[argv.length - 1]), "PNG");
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
@@ -298,6 +308,9 @@ describe("terminal", () => {
       calls.push(`${cmd} ${argv.join(" ")}`);
       const script = String(argv[1] ?? "");
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+      }
       if (cmd === "osascript" && script.includes("bounds of w")) {
         return Promise.resolve({ code: 0, stdout: "100, 50, 900, 650\n", stderr: "" });
       }
@@ -328,7 +341,11 @@ describe("terminal", () => {
     const calls: string[] = [];
     const run: ShotRun = (cmd, argv) => {
       calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+      }
       if (cmd === "sh") return Promise.resolve({ code: 1, stdout: "", stderr: "timed out" });
       return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     };
@@ -349,6 +366,9 @@ describe("terminal", () => {
       calls.push(`${cmd} ${argv.join(" ")}`);
       const script = String(argv[1] ?? "");
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+      }
       if (cmd === "osascript" && script.includes("bounds of w")) {
         return Promise.resolve({ code: 0, stdout: "", stderr: "" }); // window vanished
       }
@@ -371,6 +391,9 @@ describe("terminal", () => {
       calls.push(`${cmd} ${argv.join(" ")}`);
       const script = String(argv[1] ?? "");
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+      }
       if (cmd === "osascript" && script.includes("bounds of w")) {
         return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
       }
@@ -403,6 +426,9 @@ describe("terminal", () => {
       calls.push(`${cmd} ${argv.join(" ")}`);
       const script = String(argv[1] ?? "");
       if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+      }
       if (cmd === "osascript" && script.includes("bounds of w")) {
         return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
       }
@@ -441,6 +467,35 @@ describe("terminal", () => {
     expect(r.taken).toBe(true);
     expect(calls.some((c) => c.includes("roll-attest-exit-tab"))).toBe(false);
     expect(calls.some((c) => c.includes("close w saving no"))).toBe(true);
+  });
+
+  it("FIX-273: another app frontmost → teardown + honest skip, shutter never pressed", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "osascript" && script.includes("roll-attest-exists-probe")) {
+        return Promise.resolve({ code: 0, stdout: "no\n", stderr: "" });
+      }
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Microsoft Teams"\n', stderr: "" }); // owner mid-use
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("not frontmost");
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false); // never sampled the screen
+    expect(calls.some((c) => c.includes("roll-attest-exit-tab"))).toBe(true); // window still retired
   });
 
   it("tmux variant attaches the observability session instead of a command", async () => {

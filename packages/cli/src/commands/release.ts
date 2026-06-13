@@ -20,7 +20,7 @@
  *   --json         print the computed plan as JSON
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { foldUnreleased, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
@@ -62,6 +62,36 @@ export interface ReleaseFlowDeps {
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+
+// FIX-277: repos with a test-proof commit gate (roll itself) reject a commit
+// whose proof is stale. In a roll-managed repo the proof is refreshed up front
+// — no error-message sniffing. Any failure rolls the release branch back so an
+// orderly abort leaves no stray branch behind.
+export function commitPushWithGate(opts: {
+  branch: string;
+  message: string;
+  rollManaged: boolean;
+  exec: (cmd: string, args: string[]) => string;
+}): void {
+  const { branch, message, rollManaged, exec } = opts;
+  const original = exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  exec("git", ["checkout", "-b", branch]);
+  try {
+    exec("git", ["add", "package.json", "CHANGELOG.md"]);
+    if (rollManaged) exec("roll", ["test"]);
+    exec("git", ["commit", "-m", message]);
+    exec("git", ["push", "-u", "origin", branch]);
+  } catch (e) {
+    try {
+      exec("git", ["checkout", original]);
+      exec("git", ["branch", "-D", branch]);
+    } catch {
+      // best-effort rollback; the original failure is the one worth reporting
+    }
+    throw e;
+  }
 }
 
 export function realReleaseDeps(): ReleaseFlowDeps {
@@ -120,20 +150,13 @@ export function realReleaseDeps(): ReleaseFlowDeps {
       }
     },
     commitPush: (cwd, branch, message) => {
-      git(cwd, ["checkout", "-b", branch]);
-      git(cwd, ["add", "package.json", "CHANGELOG.md"]);
-      try {
-        git(cwd, ["commit", "-m", message]);
-      } catch (e) {
-        // FIX-277: repos with a test-proof commit gate (roll itself) reject a
-        // commit whose proof is stale. Refresh the proof once and retry; any
-        // other failure (or a second rejection) propagates to the orderly abort.
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!/test/i.test(msg)) throw e;
-        execFileSync("roll", ["test"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 600_000 });
-        git(cwd, ["commit", "-m", message]);
-      }
-      git(cwd, ["push", "-u", "origin", branch]);
+      commitPushWithGate({
+        branch,
+        message,
+        rollManaged: existsSync(join(cwd, ".roll")),
+        exec: (cmd, args) =>
+          execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 600_000 }),
+      });
     },
     openPr: (cwd, branch, title) => {
       const out = execFileSync(
@@ -270,12 +293,15 @@ async function runReleaseFlowInner(
   const prRef = deps.openPr(cwd, branch, `Release: ${plan.tag}`);
   step("open-pr", prRef);
 
+  mark("wait-merge");
   if (!deps.waitMerged(cwd, prRef)) return abort("wait-merge", "release PR not merged (checks failed or timeout)");
   step("wait-merge", "merged");
 
+  mark("sync-main");
   if (!deps.syncMain(cwd)) return abort("sync-main", "fast-forward to origin/main failed");
   step("sync-main", "main up to date");
 
+  mark("consistency-gate");
   if (!(await deps.consistencyGate(cwd))) return abort("consistency-gate", "a consistency dimension is failing — fix the drift (no waiver path)");
   step("consistency-gate", "all dimensions pass");
 

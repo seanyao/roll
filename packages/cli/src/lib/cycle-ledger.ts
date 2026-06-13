@@ -60,7 +60,12 @@ export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
   return rows.filter((r) => r.verdict === "failed" || r.verdict === "reverted" || r.verdict === "blocked").length;
 }
 
-function fmtTokens(tin: unknown, tout: unknown): string {
+/** FIX-290 AC3: "?" when usage could not be read (UNKNOWN, model+duration still
+ *  present), "—" only when there is genuinely nothing to show; a real value
+ *  otherwise. A TRUE-0 (parsed usage that summed to 0) is never confused with
+ *  the unreadable-credentials case (which sets `usage_unknown`). */
+function fmtTokens(tin: unknown, tout: unknown, usageUnknown: boolean): string {
+  if (usageUnknown) return "?";
   const a = typeof tin === "number" ? tin : 0;
   const b = typeof tout === "number" ? tout : 0;
   if (a + b === 0) return "—";
@@ -171,6 +176,9 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     const rawTs = row["ts"];
     const ts = typeof rawTs === "string" ? Date.parse(rawTs) : typeof rawTs === "number" ? (rawTs > 10_000_000_000 ? rawTs : rawTs * 1000) : Number.NaN;
     const cost = typeof row["cost_effective_usd"] === "number" ? (row["cost_effective_usd"] as number) : typeof row["cost_usd"] === "number" ? (row["cost_usd"] as number) : undefined;
+    // FIX-290 AC3: a cycle whose usage was unreadable (usage_credentials_missing)
+    // carries `usage_unknown:true` — its tokens/cost are UNKNOWN ("?"), not 0/—.
+    const usageUnknown = row["usage_unknown"] === true;
     const ev = byCycle.get(cycleId);
     const prNumber = storyId !== "" ? prMergedBy.get(storyId) : undefined;
     const prOpen = storyId !== "" ? prOpenBy.get(storyId) : undefined;
@@ -183,8 +191,8 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       storyId,
       agent: String(row["agent"] ?? ""),
       model: typeof row["model"] === "string" && row["model"] !== "" ? (row["model"] as string) : String(row["agent"] ?? "—") || "—",
-      tokens: fmtTokens(row["tokens_in"], row["tokens_out"]),
-      cost: cost !== undefined ? `$${cost.toFixed(2)}` : "—",
+      tokens: fmtTokens(row["tokens_in"], row["tokens_out"], usageUnknown),
+      cost: cost !== undefined ? `$${cost.toFixed(2)}` : usageUnknown ? "?" : "—",
       duration: fmtDuration(row["duration_sec"]),
       tape: rowTape(row, verdict, ev, prNumber, prOpen),
       evidence,

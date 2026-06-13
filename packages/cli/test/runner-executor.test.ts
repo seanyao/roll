@@ -283,6 +283,51 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(row).not.toHaveProperty("cost_usd");
   });
 
+  it("FIX-290 AC2/AC3: a failed cycle with unreadable usage still records model (routing) + an unknown marker — not a 0/blank record", () => {
+    // usage_credentials_missing → ctx.cost absent. The routed model is fixed at
+    // dispatch; record it. tokens/cost are UNKNOWN, flagged so the ledger shows
+    // "?" not a misleading $0/0-0.
+    const row = buildRunRow(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      { ...CTX, agent: "pi", model: "kimi-k2-instruct" },
+      1780688082,
+    );
+    expect(row["model"]).toBe("kimi-k2-instruct"); // AC2: NEVER blank
+    expect(row["usage_unknown"]).toBe(true); // AC3: unknown ≠ 0
+    expect(row).not.toHaveProperty("cost_usd"); // no faked $0
+    expect(row).not.toHaveProperty("tokens_in");
+    expect(row["ts"]).toBe("2026-06-05T19:34:42Z"); // duration/time still present
+  });
+
+  it("FIX-290 AC2: model falls back to the agent id when the router left model empty (claude default)", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
+      { ...CTX, agent: "claude", model: "" },
+    );
+    expect(row["model"]).toBe("claude");
+  });
+
+  it("FIX-290 AC3: a delivered cycle WITH parsed usage carries no unknown marker (true values, not '?')", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      {
+        ...CTX,
+        cost: {
+          cycleId: CTX.cycleId,
+          agent: "claude",
+          model: "claude-opus-4-8",
+          tokensIn: 1200,
+          tokensOut: 400,
+          estimatedCost: 0.42,
+          effectiveCost: 0.42,
+          revertCount: 0,
+        },
+      },
+    );
+    expect(row).not.toHaveProperty("usage_unknown");
+    expect(row["model"]).toBe("claude-opus-4-8");
+  });
+
   it("FIX-213: nowSec stamps ISO-UTC ts (no millis) + duration_sec from startSec", () => {
     const start = 1780688082; // 2026-06-05T19:34:42Z (UTC; the cycle id's 0334 is UTC+8 local)
     const end = start + 380;
@@ -972,6 +1017,28 @@ describe("executeCommand — command → executor mapping", () => {
     const out = readFileSync(join(dir, "index.html"), "utf8");
     expect(out).toContain("PR #321");
     expect(out).toContain('class="phase phase-done" data-phase="execution"');
+  });
+
+  it("FIX-290 AC5/AC6: a non-delivery (idle) cycle terminal triggers a dossier refresh so it surfaces on #loop", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-290-idle-refresh-")));
+    execDirs.push(repo);
+    const featuresDir = join(repo, ".roll", "features");
+    mkdirSync(featuresDir, { recursive: true });
+    writeFileSync(join(repo, ".roll", "backlog.md"), "## Backlog\n\n- 📋 Todo US-RUN-001 demo card\n", "utf8");
+    // A STALE index.html carrying a marker the real regen never emits — if the
+    // idle terminal refreshes the dossier, the regenerate overwrites it and the
+    // marker is gone (the FIX-290 bug was: only DELIVERY regenerated the board).
+    const indexPath = join(featuresDir, "index.html");
+    writeFileSync(indexPath, "<!-- STALE-BEFORE-FIX290 -->", "utf8");
+    const { ports } = fakePorts({ repoCwd: repo });
+    await executeCommand(
+      { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    const out = readFileSync(indexPath, "utf8");
+    expect(out).not.toContain("STALE-BEFORE-FIX290"); // refresh ran → board regenerated
+    expect(out.length).toBeGreaterThan(100); // a real console, not the stale stub
   });
 
   it("FIX-245: a pre-existing OPEN PR on the cycle branch is ADOPTED — no second create, discipline alert logged", async () => {

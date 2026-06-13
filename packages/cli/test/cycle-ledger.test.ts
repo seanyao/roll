@@ -79,6 +79,39 @@ describe("collectCycleLedger", () => {
     expect(r.duration).toBe("—");
     expect(r.verdict).toBe("failed");
   });
+
+  it("FIX-290 AC3: usage_unknown renders tokens/cost as '?' (UNKNOWN), model+duration still present — never a misleading 0/$0", () => {
+    // The failed-cycle record the runner writes when usage_credentials_missing:
+    // model fixed by routing, duration known, tokens/cost unreadable → unknown.
+    const p = project([
+      {
+        cycle_id: "u",
+        status: "failed",
+        outcome: "failed",
+        story_id: "FIX-284",
+        agent: "pi",
+        model: "kimi-k2-instruct",
+        ts: "2026-06-12T00:57:00Z",
+        duration_sec: 1020,
+        usage_unknown: true,
+      },
+    ]);
+    const r = collectCycleLedger(p)[0]!;
+    expect(r.verdict).toBe("failed");
+    expect(r.model).toBe("kimi-k2-instruct"); // AC2: present
+    expect(r.duration).toBe("17m00s"); // present
+    expect(r.tokens).toBe("?"); // AC3: unknown, NOT "—" and NOT 0
+    expect(r.cost).toBe("?"); // AC3: unknown, NOT "$0.00"
+  });
+
+  it("FIX-290 AC3: a real 0-token cycle is '—' (TRUE-0), distinct from '?' (UNKNOWN)", () => {
+    const p = project([
+      { cycle_id: "z", status: "idle", outcome: "idle_no_work", ts: "2026-06-12T01:00:00Z", tokens_in: 0, tokens_out: 0 },
+    ]);
+    const r = collectCycleLedger(p)[0]!;
+    expect(r.tokens).toBe("—"); // not "?": this row was NOT marked usage_unknown
+    expect(r.cost).toBe("—");
+  });
 });
 
 describe("kimi pair-review regressions", () => {

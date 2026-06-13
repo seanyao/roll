@@ -24,7 +24,7 @@ import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
-import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, type StoryDossierInput } from "../lib/story-dossier.js";
+import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyHasMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
 
@@ -291,17 +291,20 @@ function backlogViewModel(epics: ReturnType<typeof collectDossier>): BacklogVM {
 export function generateDossierPages(cwd: string, rebuild: boolean): number {
   const featuresDir = join(cwd, ".roll", "features");
   if (!existsSync(featuresDir)) return 0;
-  const epics = collectDossier(cwd);
+  // FIX-275: ONE shared facts build for the whole run — git log snapshot,
+  // project-wide self-score trend, spec refs + depends-on map (each was
+  // previously recomputed per card). FIX-278: built BEFORE collectDossier so the
+  // git snapshot can supply offline merge truth to the delivered derivation —
+  // the rebuild path has no live PR-evidence snapshot, so a merge commit is what
+  // keeps an already-merged card's delivered banner from being stripped.
+  const runCache = buildDossierRunCache(cwd);
+  const epics = collectDossier(cwd, { mergeEvidence: (id) => storyHasMergeEvidence(runCache.git, id) });
   // US-DOSSIER: enrich each story with its real lifecycle stations (read its
   // evidence via the same collector the per-story page uses) so the index spine
   // reflects definition→design→execution→delivery→retrospective accurately.
   // FIX-275: keep each card's collected input for the render phase below —
   // the same spec.md/ac-map/latest/notes were previously read TWICE per card.
   const inputs = new Map<string, StoryDossierInput>();
-  // FIX-275: ONE shared facts build for the whole run — git log snapshot,
-  // project-wide self-score trend, spec refs + depends-on map (each was
-  // previously recomputed per card).
-  const runCache = buildDossierRunCache(cwd);
   for (const epic of epics) {
     for (const story of epic.stories) {
       try {

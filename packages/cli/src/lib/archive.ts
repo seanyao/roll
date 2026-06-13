@@ -344,6 +344,10 @@ export interface CollectDossierOptions {
   /** story id → delivery PR evidence snapshot. Absence means unavailable, not false. */
   prEvidence?: Record<string, AuditPrEvidence>;
   nowSec?: number;
+  /** FIX-278: durable, offline merge-truth probe — true when git history carries
+   *  a merge commit referencing this story id. Lets the rebuild path recover the
+   *  delivered state without a live PR-evidence snapshot. Absence ⇒ no signal. */
+  mergeEvidence?: (storyId: string) => boolean;
 }
 
 /**
@@ -505,10 +509,23 @@ export function collectDossier(projectPath: string, opts: CollectDossierOptions 
       // grandfathered instead of guessing that a Done claim has merged.
       const status = backlogStatus.get(id);
       const rawStatus = backlogRawStatus.get(id);
+      // FIX-278: durable merge truth, reconstructed OFFLINE from git history (a
+      // merge commit referencing this id, e.g. `… (#476)`). `roll index
+      // --rebuild` passes no live PR-evidence snapshot, so the backlog selector
+      // returns unknown for post-epoch cards — without this signal it would
+      // strip the delivered banner off already-merged story pages (143 in one
+      // real run). A merge commit IS the merge truth the selector is waiting on.
+      const merged = opts.mergeEvidence?.(id) ?? false;
       const storyTruth = rawStatus !== undefined
         ? storyTruthFromBacklog(id, rawStatus, { prEvidence: opts.prEvidence?.[id], nowSec: opts.nowSec })
         : undefined;
-      if (storyTruth !== undefined) delivered = storyTruth.delivered;
+      // The selector may PROMOTE a card to delivered (a confident live verdict);
+      // git merge evidence CORROBORATES a backlog Done claim — claim + merged
+      // code = delivered. Gating on status==="done" keeps this from promoting a
+      // Todo card a commit body merely references, and keeps a *premature* Done
+      // (claimed done but NOT merged) correctly not-delivered: the selector's
+      // unknown stands. The selector may never ERASE a confirmed-merged card.
+      if (storyTruth !== undefined) delivered = storyTruth.delivered || (status === "done" && merged);
       // US-DOSSIER-008: delivered with NO v3 evidence chain (no latest/ attest
       // pointer, no ac-map.json) ⇒ a pre-v3 legacy delivery — done, but never
       // re-instrumented to v3 rigor, so it is marked apart from evidenced cards.

@@ -11,7 +11,7 @@ import { collectDossier, type DossierEpic } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
 import { renderFeaturesIndex, renderTruthBoard, spineMotif } from "../src/lib/dossier-index.js";
 import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
-import { collectStoryDossierInput, renderStoryDossier, storySpine } from "../src/lib/story-dossier.js";
+import { collectStoryDossierInput, renderStoryDossier, storyHasMergeEvidence, storySpine } from "../src/lib/story-dossier.js";
 import { markPhaseDone } from "../src/lib/story-page.js";
 
 const dirs: string[] = [];
@@ -100,6 +100,54 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     expect(todo.delivered).toBe(false); // 📋 = genuinely not done
     expect(wip.delivered).toBe(false); // 🔨 = in progress, not done
     expect(epic.delivered).toBe(1); // only the ✅ card counts
+  });
+
+  it("FIX-278: offline merge evidence keeps a backlog-Done card delivered when the rebuild path has no live PR snapshot", () => {
+    // The exact `roll index --rebuild` regression: a merged card is ✅ Done in
+    // the backlog, but rebuild passes NO prEvidence snapshot, so the truth
+    // selector returns unknown for this (post-epoch) card → delivered=false,
+    // stripping the delivered banner off a page that git proves merged. The
+    // durable merge truth (a `… (#476)` merge commit) must keep it delivered.
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-fix278-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features", "loop-engine");
+    mkdirSync(join(f, "FIX-208", "2026-06-06T05-04-48"), { recursive: true });
+    writeFileSync(join(f, "FIX-208", "spec.md"), "---\nid: FIX-208\ntitle: runs 行证据保真\ntype: fix\ncreated: 2026-06-06\n---\n\n# FIX-208\n");
+    writeFileSync(join(f, "FIX-208", "2026-06-06T05-04-48", "FIX-208-report.html"), "<html>attested</html>\n");
+    symlinkSync(join(f, "FIX-208", "2026-06-06T05-04-48"), join(f, "FIX-208", "latest"));
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      "| Story | Desc | Status |\n|---|---|---|\n| [FIX-208](x) | runs 行证据保真 | ✅ Done |\n",
+    );
+    // A Todo card alongside it — must NEVER be promoted by merge evidence.
+    mkdirSync(join(f, "FIX-209"), { recursive: true });
+    writeFileSync(join(f, "FIX-209", "spec.md"), "---\nid: FIX-209\ntitle: not done\ntype: fix\ncreated: 2026-06-06\n---\n\n# FIX-209\n");
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      "| Story | Desc | Status |\n|---|---|---|\n| [FIX-208](x) | runs 行证据保真 | ✅ Done |\n| [FIX-209](x) | not done | 📋 Todo |\n",
+    );
+    // No merge-evidence probe (default): the selector erases delivered — the bug.
+    expect(collectDossier(p)[0]!.stories.find((s) => s.id === "FIX-208")!.delivered).toBe(false);
+    // With offline merge truth: the Done card stays delivered; the Todo card —
+    // even though the probe matches it — is NOT promoted (Done-gate).
+    const withMerge = collectDossier(p, { mergeEvidence: () => true })[0]!.stories;
+    expect(withMerge.find((s) => s.id === "FIX-208")!.delivered).toBe(true);
+    expect(withMerge.find((s) => s.id === "FIX-209")!.delivered).toBe(false);
+  });
+
+  it("FIX-278: storyHasMergeEvidence reads a `(#N)` merge commit that references the story id", () => {
+    const facts = {
+      slug: "seanyao/roll",
+      commits: [
+        { subject: "loop cycle cycle-20260606 (#476)", message: "Story body mentions FIX-208 root cause", files: [] },
+        { subject: "tcr: US-EVID-001 open runner evidence frame", message: "no PR number here", files: [] },
+        { subject: "chore: unrelated (#999)", message: "nothing relevant", files: [] },
+      ],
+    };
+    expect(storyHasMergeEvidence(facts, "FIX-208")).toBe(true); // (#476) merge commit body cites FIX-208
+    expect(storyHasMergeEvidence(facts, "US-EVID-001")).toBe(true); // tcr subject names it → own work landed
+    expect(storyHasMergeEvidence(facts, "FIX-999")).toBe(false); // no commit references it
+    expect(storyHasMergeEvidence(null, "FIX-208")).toBe(false); // not a git repo
   });
 
   it("US-DOSSIER-008: pre-v3 done card (no latest/, no ac-map) is legacy; latest/ or ac-map cancels it", () => {

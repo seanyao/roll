@@ -1567,6 +1567,22 @@ function factsChangedFiles(facts: GitDossierFacts, storyId: string): string[] {
     .slice(0, 80);
 }
 
+/** FIX-278: durable, offline merge truth. `collectGitDossierFacts` runs a plain
+ *  `git log` (current branch only), so every commit it returns is already
+ *  reachable from HEAD — i.e. merged. A story counts as merged when either:
+ *    1. a commit SUBJECT names the id — the story's own work landed (`tcr: US-X …`,
+ *       `Story US-X: … (#N)`); a bare depends-on mention lives in a body, not a
+ *       subject, so this does not over-promote a still-open dependant, or
+ *    2. a `(#N)` / `PR #N` PR-merge commit references the id (e.g. a loop-cycle
+ *       squash whose subject carries `(#N)` and whose body names the story).
+ *  The rebuild path feeds this to collectDossier so an already-merged card keeps
+ *  its delivered state without a live PR-evidence snapshot. */
+export function storyHasMergeEvidence(facts: GitDossierFacts | null, storyId: string): boolean {
+  if (facts === null) return false;
+  if (facts.commits.some((c) => c.subject.includes(storyId))) return true;
+  return factsPrNumbers(facts, storyId).length > 0;
+}
+
 function factsPrNumbers(facts: GitDossierFacts, storyId: string): number[] {
   const nums = new Set<number>();
   for (const subject of factsSubjects(facts, storyId)) {

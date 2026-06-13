@@ -194,12 +194,24 @@ first: the `PAUSE-<slug>` marker is still respected at cycle boundaries.
 
 ### Goal Mode Safety Gates
 
+Budget and run limits are explicit per `roll loop go`. `--budget`,
+`--max-cycles`, and `--for` apply to THIS invocation only; omitting one means no
+limit for this run — Roll never silently inherits a budget or cap from a prior
+session's persisted goal, so a flagless `roll loop go` can neither be capped nor
+bricked by a limit you set days ago. Scope (`--epic`/`--cards`) and `--review`
+still persist when unspecified, because they are the goal's identity, not a
+per-run safety knob.
+
 `roll loop go` enforces safety only at cycle boundaries. `--budget <usd>` uses
 the effective run cost ledger and moves the goal to `budget_limited` when the
-budget is reached; rows with missing cost are recorded as unknown and stop
-conservatively rather than being counted as zero. Usage headroom is checked
-against five-hour and weekly windows; by default Roll pauses at 85% and waits
-for the reset window, while `--no-wait` leaves the goal paused for the owner.
+budget is reached. An idle or aborted cycle that ran no agent counts as a known
+$0, not as an unknown-cost row. Only a row where an agent actually executed but
+left no parseable usage is recorded as unknown; those still stop conservatively
+rather than being counted as zero. Usage headroom is checked against five-hour
+and weekly windows; by default Roll pauses at 85% and waits for the reset
+window, while `--no-wait` leaves the goal paused for the owner. The recovery
+wait is bounded — a hung usage API cannot stall the session forever; on timeout
+Roll records a `usage_wait_timeout` audit event and leaves the goal paused.
 `--for <duration>` is a wall-clock box: the in-flight cycle finishes, then the
 goal pauses with reason `timebox`.
 
@@ -236,7 +248,9 @@ self review because only one provider is available.
 Final review uses the same structured adapter as `roll peer`. The
 `goal:final_review` event records reviewer agent, provider, command family,
 verdict, findings, timeout/error state, duration, and transcript/evidence
-paths when available.
+paths when available. A transient review crash is retried once; if it still
+fails Roll records the real error reason on the `ERROR` verdict and raises an
+ALERT, instead of collapsing into a reasonless generic error.
 
 Use `--review hetero` when completion must fail closed unless a heterogeneous
 reviewer is installed. Use `--review self` to allow same-provider review. Use

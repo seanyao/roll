@@ -588,10 +588,12 @@ describe("frozen: roll consistency", () => {
 
         check [--json] [--project-dir DIR]    逐维度跑一致性检查
           Run checks across six dimensions (code-backlog, cards, docs, tests,
-          bilingual, site) and produce a structured pass/gap report.
+          bilingual, site) and produce a verdict-first table. Any failing
+          dimension aborts the release.
+          跑六维一致性、判定优先输出；任一维失败即中止发版。
 
-        roll release --gate-check check                # human-readable report
-        roll release --gate-check check --json         # machine-readable JSON
+        roll release --gate-check check                # verdict-first six-dimension table
+        roll release --gate-check check --json         # machine-readable JSON (same computation)
         roll release --gate-check audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
       ",
       }
@@ -668,5 +670,93 @@ describe("US-DOSSIER-022: web + CLI read one dimension vocabulary", () => {
     const keys = Object.keys(reportJson(p).dimensions);
     expect(new Set(keys).size).toBe(CONSISTENCY_DIMENSIONS.length);
     expect(keys.length).toBe(CONSISTENCY_DIMENSIONS.length);
+  });
+});
+
+// ── US-DOSSIER-036: `roll release consistency check` verdict-first table ──────
+// The public command renders the verdict-first six-dimension table (renderMode
+// "table") from the SAME runAll computation the gate runs. AC3 (six dims, one
+// vocabulary, f/w/?), AC4 (any f>0 fails → exit non-zero, verdict first), AC7
+// (--json field-by-field parity with the human table).
+
+function tableRun(args: string[], proj: string, extra: Record<string, string> = {}): Run {
+  const save: Record<string, string | undefined> = {};
+  for (const k of ENV_KEYS) save[k] = process.env[k];
+  for (const k of ENV_KEYS) delete process.env[k];
+  for (const [k, v] of Object.entries(envBase(extra))) process.env[k] = v;
+  const saveCwd = process.cwd();
+  process.chdir(cwd);
+  const outChunks: string[] = [];
+  const errChunks: string[] = [];
+  const realOut = process.stdout.write.bind(process.stdout);
+  const realErr = process.stderr.write.bind(process.stderr);
+  // @ts-expect-error capture-only
+  process.stdout.write = (c: string | Uint8Array): boolean => (outChunks.push(String(c)), true);
+  // @ts-expect-error capture-only
+  process.stderr.write = (c: string | Uint8Array): boolean => (errChunks.push(String(c)), true);
+  let status: number;
+  try {
+    status = consistencyCommand(args, "roll release consistency", { renderMode: "table" }) as number;
+  } finally {
+    process.stdout.write = realOut;
+    process.stderr.write = realErr;
+    process.chdir(saveCwd);
+    for (const k of ENV_KEYS) {
+      const v = save[k];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  const scrub = (s: string): string => (proj ? s.split(proj).join("<PROJ>") : s);
+  return { status, stdout: scrub(outChunks.join("")), stderr: scrub(errChunks.join("")) };
+}
+
+describe("US-DOSSIER-036: roll release consistency check — verdict-first table", () => {
+  it("AC3/AC4: healthy → PASS first, six ①…⑥ dims, f:0 everywhere, exit 0", () => {
+    const r = tableRun(["check", "--project-dir", healthy()], "", { ROLL_LANG: "en" });
+    expect(r.status).toBe(0);
+    const first = r.stdout.split("\n")[0] ?? "";
+    expect(first).toContain("PASS");
+    expect(first).toContain("exit 0");
+    for (const glyph of ["① code ↔ backlog", "② cards / evidence", "③ docs", "④ tests", "⑤ bilingual", "⑥ site"]) {
+      expect(r.stdout).toContain(glyph);
+    }
+    expect(r.stdout).toContain("any f>0 aborts the release");
+  });
+
+  it("AC4: a failing dimension makes the verdict FAIL and exits non-zero", () => {
+    const r = tableRun(["check", "--project-dir", codeViolation()], "", { ROLL_LANG: "en" });
+    expect(r.status).toBe(1);
+    const first = r.stdout.split("\n")[0] ?? "";
+    expect(first).toContain("FAIL");
+    expect(first).toContain("1 fail");
+    expect(first).toContain("exit 1");
+    // the failing dim's row carries f:1.
+    expect(r.stdout).toMatch(/① code ↔ backlog[\s\S]*?f:1/);
+  });
+
+  it("AC7: --json carries the same overall verdict + per-dim f/w/? as the human table", () => {
+    const p = codeViolation();
+    const human = tableRun(["check", "--project-dir", p], "", { ROLL_LANG: "en" });
+    const j = JSON.parse(tableRun(["check", "--json", "--project-dir", p], "").stdout) as {
+      overall: string;
+      dimensions: Record<string, { status: string; fail: number; warn: number; unknown: number }>;
+    };
+    expect(j.overall).toBe("fail");
+    expect(human.stdout.split("\n")[0]).toContain("FAIL");
+    // The six dims, in the shared CONSISTENCY_DIMENSIONS order.
+    expect(Object.keys(j.dimensions)).toEqual([...CONSISTENCY_DIMENSIONS]);
+    // The failing dim's count equals the f:N the human row printed.
+    expect(j.dimensions["code-backlog"]?.fail).toBe(1);
+    expect(j.dimensions["cards"]?.fail).toBe(0);
+  });
+
+  it("AC8: bilingual dimension labels render on SEPARATE lines (zh)", () => {
+    const r = tableRun(["check", "--project-dir", healthy()], "", { ROLL_LANG: "zh" });
+    expect(r.status).toBe(0);
+    // The verdict word is localized; the zh dim names ride their own lines.
+    expect(r.stdout).toContain("通过");
+    expect(r.stdout).toContain("代码↔待办");
+    expect(r.stdout).toContain("站点");
   });
 });

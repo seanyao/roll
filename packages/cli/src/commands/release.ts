@@ -33,7 +33,12 @@ function label(lang: Lang, key: string, ...args: ReadonlyArray<string | number>)
   return t(v2Catalog, lang, key, ...args);
 }
 
-const REMOVED_ROUTES = new Set(["ship", "waiver", "changelog", "consistency", "tag", "publish"]);
+// US-DOSSIER-036: `consistency` is RESTORED as a public sub-route of `roll
+// release` — `roll release consistency check [--json]` prints the verdict-first
+// six-dimension table (the web gate panel's twin). The other old sub-surfaces
+// (ship/waiver/changelog/tag/publish) stay removed: the release transaction is
+// one command. `consistency` is intentionally NOT in this set.
+const REMOVED_ROUTES = new Set(["ship", "waiver", "changelog", "tag", "publish"]);
 
 /** Injectable seams — the transaction is unit-tested without git/gh/npm. */
 export interface ReleaseFlowDeps {
@@ -318,6 +323,28 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
   renderState.useColor = !noColor;
   const lang = resolveLang({ rollLang: process.env["ROLL_LANG"], lcAll: process.env["LC_ALL"], lang: process.env["LANG"] });
 
+  // US-DOSSIER-036: `roll release consistency check [--json]` — the public
+  // verdict-first six-dimension table, the terminal twin of the web gate panel.
+  // Reads the SAME runConsistencyCheck computation the gate runs (renderMode
+  // "table"); any f>0 dimension fails → exit non-zero (AC4). Detected BEFORE the
+  // top-level --help so `roll release consistency [check] --help` lands on the
+  // consistency help, not the release-flow usage. Passes the rest (incl. --help/
+  // --json) straight to the runner's own subcommand parser.
+  const sub = args.find((a) => !a.startsWith("-"));
+  if (sub === "consistency") {
+    const idx = args.indexOf("consistency");
+    const rest = args.slice(idx + 1);
+    // Default to `check` when no subcommand is given (the design chip is
+    // `roll release consistency check`, but a bare `roll release consistency`
+    // should also land on the table rather than an unknown-subcommand error).
+    // A leading `--help`/`-h` routes to the runner's help, not check.
+    const runnerArgs =
+      rest.length === 0 || (rest[0]?.startsWith("-") && rest[0] !== "--help" && rest[0] !== "-h")
+        ? ["check", ...rest]
+        : rest;
+    return await runConsistencyCheck(runnerArgs, "roll release consistency", { renderMode: "table" });
+  }
+
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(`${label(lang, "releasev3.usage")}\n`);
     return 0;
@@ -325,7 +352,6 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
 
   // US-REL-007 AC2: the retired sub-routes die through the normal unknown-route
   // error — no redirect, no hidden logic.
-  const sub = args.find((a) => !a.startsWith("-"));
   if (sub !== undefined && REMOVED_ROUTES.has(sub)) {
     process.stderr.write(
       lang === "zh"

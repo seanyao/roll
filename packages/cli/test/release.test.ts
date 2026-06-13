@@ -110,7 +110,10 @@ describe("runReleaseFlow — the one transaction", () => {
 });
 
 describe("removed routes — AC2: the old surface is gone, not redirected", () => {
-  for (const route of ["ship", "waiver", "changelog", "consistency", "tag"]) {
+  // US-DOSSIER-036: `consistency` is RESTORED as a public sub-route (the
+  // verdict-first six-dim table), so it is no longer in the removed set; the
+  // others (ship/waiver/changelog/tag) still die through the unknown-route error.
+  for (const route of ["ship", "waiver", "changelog", "tag"]) {
     it(`roll release ${route} exits non-zero through the unknown-route error`, async () => {
       let err = "";
       const se = process.stderr.write.bind(process.stderr);
@@ -128,7 +131,10 @@ describe("removed routes — AC2: the old surface is gone, not redirected", () =
 
 describe("cleanup guard — AC8: no active source re-advertises the removed surface", () => {
   const ROOT = join(__dirname, "..", "..", "..");
-  const BANNED = [/roll release ship/, /roll release waiver/, /roll release changelog/, /roll release consistency check/, /releaseShipCommand/, /releaseWaiverCommand/];
+  // US-DOSSIER-036: `roll release consistency check` is a RESTORED public
+  // command (it lands the design's six-dim gate chip), so it is intentionally
+  // NOT banned — the removed surfaces are ship/waiver/changelog only.
+  const BANNED = [/roll release ship/, /roll release waiver/, /roll release changelog/, /releaseShipCommand/, /releaseWaiverCommand/];
   const scan = (dir: string, hits: string[]): void => {
     for (const e of readdirSync(dir)) {
       const p = join(dir, e);

@@ -25,6 +25,7 @@ import type { AgentPanelRow } from "./agent-panel.js";
 import type { ReleasePanelVM } from "./release-panel.js";
 import type { ReleaseScopeVM, ScopeEpicGroup } from "./release-scope.js";
 import type { SkillsPanelVM, SkillPanelRow } from "./skills-panel.js";
+import type { CastingVM, CastingRow } from "./casting.js";
 
 export interface TruthConsoleBrand {
   /** Injected, never hardcoded (owner ruling): project name + slogan. */
@@ -111,6 +112,13 @@ export interface TruthConsoleInput {
   githubSlug?: string;
   /** Skills catalog + strict-audit truth (US-DOSSIER-017). */
   skills: SkillsPanelVM;
+  /**
+   * US-DOSSIER-030 — the Loop-tab Casting grid view-model: complexity slots
+   * (easy/default/hard/fallback → agent, from the router slot config) + the
+   * scenario roles (peer re-check, PR review, adversarial spar, onboard).
+   * Resolved by the pure `collectCasting()`; never a hardcoded array.
+   */
+  casting: CastingVM;
   /**
    * US-DOSSIER-027 — projects on this machine, read from `~/.roll/projects.json`
    * (US-DOSSIER-028 populates it). Degrades gracefully: when absent/empty the
@@ -499,6 +507,84 @@ function agentRow(ag: AgentPanelRow): string {
   );
 }
 
+/**
+ * US-DOSSIER-030 — one Casting row (Role | Agent | Note), matching the design
+ * reference's three-column grid. A bare agent token renders monospace ink; a
+ * prose rule (peer heterogeneity / onboard) renders sub prose; an unconfigured
+ * slot's em-dash renders faint so the honesty reads at a glance. A route-resolve
+ * rationale, when present, rides a second muted line beneath the agent.
+ */
+function castingRowHtml(cr: CastingRow): string {
+  const agentStyle = cr.empty
+    ? `${MONO}font-size:12.5px;font-weight:600;color:${C.faint};`
+    : cr.mono
+      ? `${MONO}font-size:12.5px;font-weight:600;color:${C.ink};`
+      : `font-size:12.5px;color:${C.sub};`;
+  const audit =
+    cr.audit !== ""
+      ? `<div style="${MONO}font-size:10px;color:${C.dim};margin-top:3px;white-space:normal;">${esc(cr.audit)}</div>`
+      : "";
+  return (
+    `<div data-casting="${esc(cr.key)}" style="display:grid;grid-template-columns:200px 1fr auto;align-items:center;gap:14px;padding:10px 18px;border-top:1px solid #f4f6f9;">` +
+    `<span style="font-size:12.5px;color:${C.sub};font-weight:600;white-space:nowrap;">${bi(cr.roleEn, cr.roleZh)}</span>` +
+    `<span><span style="${agentStyle}">${bi(esc(cr.agentEn), esc(cr.agentZh))}</span>${audit}</span>` +
+    `<span style="${MONO}font-size:10.5px;color:${C.faint};white-space:nowrap;">${bi(cr.noteEn, cr.noteZh)}</span>` +
+    `</div>`
+  );
+}
+
+/**
+ * US-DOSSIER-030 — the CASTING grid: who plays which role. Four complexity slots
+ * resolved from the router config + four scenario roles, rendered as the design
+ * reference's Role / Agent / Note grid. Header carries a copyable `roll agent
+ * list` chip (the command that reconciles these slots).
+ */
+function castingGrid(input: TruthConsoleInput): string {
+  return (
+    `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Casting", "角色分工")}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi(
+      "complexity slots + scenario roles — who plays what",
+      "复杂度槽位 + 场景角色——谁在什么场景演什么",
+    )}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;"></span>` +
+    copyChip("roll agent list") +
+    `</div>` +
+    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    input.casting.rows.map(castingRowHtml).join("") +
+    `</section>`
+  );
+}
+
+/**
+ * US-DOSSIER-030 — the HOOKS-this-repo panel: every scheduled launchd lane this
+ * repo runs, sourced from the SAME `collectLoopHeartbeat` output behind the
+ * Overview heartbeat tile (`snapshot.loop.lanes`) — one number on every surface.
+ * Distinct from the Overview tile: it enumerates ALL scheduled lanes (cycle loop
+ * + nightly dream + any future lane) as scheduled-lane rows, not just the cycle
+ * loop. Each row: name · running/off · mode · every · last · next.
+ */
+function hooksPanel(input: TruthConsoleInput): string {
+  const lanes = input.snapshot.loop?.lanes ?? [];
+  const runningN = lanes.filter((l) => l.running).length;
+  return (
+    `<div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Hooks · this repo", "钩子 · 本仓")}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi(
+      "scheduled launchd lanes wired into this checkout",
+      "本检出已挂的 launchd 调度 lane",
+    )}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;">${runningN}/${lanes.length} ${bi("scheduled", "已调度")}</span>` +
+    `</div>` +
+    `<section data-hooks="this-repo" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    (lanes.length > 0
+      ? lanes.map(heartbeatRow).join("")
+      : `<div style="padding:14px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no scheduled lanes on this machine", "本机没有已调度的 lane")}</div>`) +
+    `</section>`
+  );
+}
+
 function loopTab(input: TruthConsoleInput): string {
   const ranges: Array<[string, string, string]> = [
     ["1", "Today", "今天"],
@@ -523,6 +609,11 @@ function loopTab(input: TruthConsoleInput): string {
       ? input.agents.map(agentRow).join("")
       : `<div style="padding:14px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no agents detected", "未检测到 agent")}</div>`) +
     `</section>` +
+    // US-DOSSIER-030: the scheduled launchd lanes this repo runs (distinct from
+    // the single Overview heartbeat tile — it enumerates EVERY lane).
+    hooksPanel(input) +
+    // US-DOSSIER-030: who plays which role — complexity slots + scenario roles.
+    castingGrid(input) +
     `<div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi("Cycle ledger", "周期账本")}</span>` +
     `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("what it actually did while you were away", "你不在的时候它到底干了什么")}</span>` +

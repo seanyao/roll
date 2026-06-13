@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { serializeTruthSnapshot, type TruthSnapshot } from "@roll/spec";
 import { renderTruthConsole, renderMachineStubPage, type ProjectRegistryEntry } from "../src/lib/truth-console.js";
 import { collectLoopHeartbeat } from "../src/lib/loop-heartbeat.js";
+import { collectCasting } from "../src/lib/casting.js";
 import { parseProjectsRegistry } from "../src/lib/projects-registry.js";
 
 const SNAP: TruthSnapshot = {
@@ -76,6 +77,15 @@ const SKILLS = {
   ],
 };
 
+// US-DOSSIER-030 — Casting view-model: the four complexity slots fully resolved
+// (with one route-resolve audit rationale on `hard`) + the four scenario rows.
+const CASTING = collectCasting({
+  readSlot: (slot) => ({ easy: "kimi", default: "codex", hard: "claude", fallback: "claude" })[slot],
+  sparPair: () => ["claude", "kimi"],
+  onboardClient: () => undefined,
+  routeAudit: (slot) => (slot === "hard" ? "claude best for US in-tier (hit_rate 0.91, n=12); slot kept" : undefined),
+});
+
 const RELEASE_SCOPE = {
   pending: [
     { epic: "alpha", items: [{ id: "FIX-9", epic: "alpha", title: "fix it", state: "todo" }] },
@@ -144,6 +154,7 @@ function render(
     releaseScope: RELEASE_SCOPE,
     githubSlug: "seanyao/roll",
     skills: SKILLS,
+    casting: CASTING,
     ...extra,
   });
 }
@@ -186,6 +197,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       releasePanel: { dims: [], total: { fail: 0, warn: 0, unknown: 0 }, blocking: false },
       releaseScope: { pending: [], shipped: [], pendingCount: 0, shippedCount: 0, history: [] },
       skills: { summary: { skills: 0, violations: 0, hubLines: 0 }, groups: [] },
+      casting: collectCasting({ readSlot: () => undefined }),
     });
     expect(custom).toContain("acme");
     expect(custom).toContain("Ship truth.");
@@ -344,6 +356,114 @@ describe("agents panel — US-DOSSIER-014", () => {
   it("AC3: the 72h window is explicitly labelled (the documented trade-off)", () => {
     expect(html).toContain("72h");
     expect(html).toContain("近72h周期");
+  });
+});
+
+describe("collectCasting — US-DOSSIER-030 (pure)", () => {
+  const deps = {
+    readSlot: (slot: "easy" | "default" | "hard" | "fallback") =>
+      ({ easy: "kimi", default: "codex", hard: "claude", fallback: "claude" })[slot],
+    sparPair: () => ["claude", "kimi"] as [string, string],
+    onboardClient: () => undefined,
+    routeAudit: (slot: "easy" | "default" | "hard" | "fallback") =>
+      slot === "hard" ? "claude best for US in-tier (hit_rate 0.91, n=12); slot kept" : undefined,
+  };
+
+  it("AC1: four complexity-slot rows resolve from readSlot in design order", () => {
+    const vm = collectCasting(deps);
+    const slots = vm.rows.filter((r) => ["easy", "default", "hard", "fallback"].includes(r.key));
+    expect(slots.map((r) => r.key)).toEqual(["easy", "default", "hard", "fallback"]);
+    expect(slots.map((r) => r.agentEn)).toEqual(["kimi", "codex", "claude", "claude"]);
+    expect(slots.every((r) => r.mono && !r.empty)).toBe(true);
+    expect(vm.configured).toBe(true);
+  });
+
+  it("AC1: an empty/unconfigured slot renders an em-dash, never a guessed agent", () => {
+    const vm = collectCasting({ readSlot: () => undefined });
+    const easy = vm.rows.find((r) => r.key === "easy");
+    expect(easy?.agentEn).toBe("—");
+    expect(easy?.empty).toBe(true);
+    expect(easy?.mono).toBe(false);
+    // review-pr also reuses the (empty) default slot → em-dash, not invented.
+    expect(vm.rows.find((r) => r.key === "review-pr")?.agentEn).toBe("—");
+    expect(vm.configured).toBe(false);
+  });
+
+  it("AC2: scenario rows — peer differ-from-builder, spar pair, onboard follows client", () => {
+    const vm = collectCasting(deps);
+    const peer = vm.rows.find((r) => r.key === "peer");
+    expect(peer?.agentEn).toContain("must differ from builder");
+    expect(peer?.agentZh).toContain("强制异构");
+    expect(peer?.mono).toBe(false); // a rule, not a fixed agent
+    const spar = vm.rows.find((r) => r.key === "spar");
+    expect(spar?.agentEn).toBe("claude ⚔ kimi");
+    const onboard = vm.rows.find((r) => r.key === "onboard");
+    expect(onboard?.agentEn).toBe("follows the active client");
+    // full design row order
+    expect(vm.rows.map((r) => r.key)).toEqual(["easy", "default", "hard", "fallback", "peer", "review-pr", "spar", "onboard"]);
+  });
+
+  it("AC4: a route-resolve rationale is surfaced where present; absent ⇒ plain config", () => {
+    const vm = collectCasting(deps);
+    expect(vm.rows.find((r) => r.key === "hard")?.audit).toContain("hit_rate 0.91");
+    expect(vm.rows.find((r) => r.key === "easy")?.audit).toBe(""); // nothing inferred
+  });
+
+  it("AC6: deterministic — same inputs produce byte-identical view-models", () => {
+    expect(JSON.stringify(collectCasting(deps))).toBe(JSON.stringify(collectCasting(deps)));
+  });
+});
+
+describe("loop tab Casting grid + Hooks panel — US-DOSSIER-030", () => {
+  const html = render();
+
+  it("AC2: Casting grid renders Role / Agent / Note rows for all eight roles", () => {
+    expect(html).toContain("Casting");
+    expect(html).toContain("角色分工");
+    for (const key of ["easy", "default", "hard", "fallback", "peer", "review-pr", "spar", "onboard"]) {
+      expect(html).toContain(`data-casting="${key}"`);
+    }
+    expect(html).toContain("Executor · easy");
+    expect(html).toContain("执行 · easy");
+    // resolved slot agents from the router config (no hardcoded arrays)
+    expect(html).toContain(">kimi<");
+    expect(html).toContain(">codex<");
+    expect(html).toContain("roll agent list"); // reconcile command chip
+  });
+
+  it("AC2: peer differ-from-builder rule, spar pair, onboard follows the client", () => {
+    expect(html).toContain("must differ from builder");
+    expect(html).toContain("强制异构于执行者");
+    expect(html).toContain("claude ⚔ kimi");
+    expect(html).toContain("follows the active client");
+    expect(html).toContain("跟随当前交互客户端");
+  });
+
+  it("AC4: the route-resolve rationale rides the resolved slot row", () => {
+    expect(html).toContain("claude best for US in-tier (hit_rate 0.91, n=12); slot kept");
+  });
+
+  it("AC3: a Hooks-this-repo panel enumerates the scheduled lanes, distinct from Overview", () => {
+    expect(html).toContain('data-hooks="this-repo"');
+    expect(html).toContain("Hooks · this repo");
+    expect(html).toContain("钩子 · 本仓");
+    expect(html).toContain("scheduled launchd lanes wired into this checkout");
+    // the lane data is the SAME collectLoopHeartbeat output as the Overview tile
+    expect(html).toContain(">loop<"); // lane name from snapshot.loop.lanes
+    expect(html).toContain("1/1 "); // running / total scheduled count
+  });
+
+  it("AC5: every new Casting + Hooks label is bilingual (EN and 中 both present)", () => {
+    for (const [en, zh] of [
+      ["Casting", "角色分工"],
+      ["Hooks · this repo", "钩子 · 本仓"],
+      ["scheduled", "已调度"],
+      ["pairing rule", "结对规则"],
+      ["interactive", "交互式"],
+    ] as const) {
+      expect(html).toContain(en);
+      expect(html).toContain(zh);
+    }
   });
 });
 

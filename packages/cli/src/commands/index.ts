@@ -25,6 +25,9 @@ import {
   loopUnknownSubcommand,
 } from "./loop-cycle-gates.js";
 import { briefCommand } from "./brief.js";
+// US-DOSSIER-037: `roll cast` (routing view) + `roll doc --lang` (Charter/guide viewer).
+import { CAST_USAGE, castCommand } from "./cast.js";
+import { DOC_USAGE, docCommand } from "./doc.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
@@ -177,6 +180,17 @@ export function registerAll(): void {
   // Output follows the resolved locale single-language. `--full` expands lists.
   // No bash fallback: the digest is data-derived and always fresh.
   registerPorted("brief", briefCommand, { help: "Usage: roll brief\n  Morning brief from the backlog + runs.\n晨报。" });
+  // US-DOSSIER-037: `roll cast` — the same complexity-ladder → role Casting table
+  // the web console renders (US-DOSSIER-030 Casting grid). ONE computation, two
+  // surfaces: it calls the shared `collectCasting()` view-model (no re-read of the
+  // router); `--json` emits that view-model verbatim. Manual, read-only.
+  registerPorted("cast", castCommand, { help: CAST_USAGE });
+  // US-DOSSIER-037: `roll doc [--lang en|zh] [name]` — view Charter/guide markdown
+  // in the terminal via the SAME `collectCharter()` collector the web Charter
+  // browser uses (US-DOSSIER-033), rendered as readable text. `--lang` selects the
+  // guide tree, falling back to the configured language via the SAME resolver
+  // `roll lang` uses; an unknown --lang exits non-zero bilingually. Read-only viewer.
+  registerPorted("doc", docCommand, { help: DOC_USAGE });
   // `idea`: v3-native deterministic backlog capture (US-PORT-003). Classifies
   // bug→FIX / idea→IDEA, auto-numbers (max suffix + 1), lint-gates the
   // description with the same rules as the bash _backlog_lint oracle, and

@@ -172,11 +172,19 @@ paused 状态时不建议直接启动：`PAUSE-<slug>` 标记仍会在 cycle 边
 
 ### Goal Mode 安全闸
 
+预算与运行上限每次 `roll loop go` 都是显式的。`--budget`、`--max-cycles`、`--for`
+只对本次调用生效；省略某项即代表本轮不设该限制——Roll 绝不从上一次会话持久化的
+goal 静默沿用预算或上限，因此一条不带 flag 的 `roll loop go` 既不会被几天前设的
+上限封顶，也不会被它卡死。范围（`--epic`/`--cards`）与 `--review` 在省略时仍沿用，
+因为它们是 goal 的身份，而不是每次运行的安全旋钮。
+
 `roll loop go` 的安全闸只在 cycle 边界生效。`--budget <usd>` 使用有效成本账本；
-达到预算时 goal 进入 `budget_limited`。缺失成本字段的 runs 行记为 unknown，不当作 0，
-并按保守侧停止。用量闸检查 5 小时与 7 天窗口；默认 85% 暂停并等待窗口恢复，
-`--no-wait` 则停下等 owner。`--for <duration>` 是墙钟时间盒：当前 cycle 收尾后，
-goal 以 `timebox` 原因暂停。
+达到预算时 goal 进入 `budget_limited`。未执行 agent 的 idle 或 aborted 周期记为
+已知 $0，不算 unknown cost 行；只有真正执行了 agent 却测不到可解析用量的行才记为
+unknown，这类行仍按保守侧停止，不当作 0。用量闸检查 5 小时与 7 天窗口；默认 85%
+暂停并等待窗口恢复，`--no-wait` 则停下等 owner。恢复等待是有界的——卡死的用量 API
+不会让会话无限停摆；超时后 Roll 记录 `usage_wait_timeout` 审计事件并让 goal 保持暂停。
+`--for <duration>` 是墙钟时间盒：当前 cycle 收尾后，goal 以 `timebox` 原因暂停。
 
 每次安全闸触发都会记录 `goal:gate_tripped`，`roll loop goal` 会显示最近一次安全闸读数。
 
@@ -207,7 +215,8 @@ review，并记录 `goal:review_degraded` 事件。
 
 终审使用与 `roll peer` 相同的结构化 adapter。`goal:final_review` 事件会记录
 reviewer agent、provider、command family、verdict、findings、timeout/error 状态、
-耗时，以及可用时的 transcript/evidence 路径。
+耗时，以及可用时的 transcript/evidence 路径。瞬时崩溃会重试一次；仍失败时 Roll 会在
+`ERROR` verdict 上记录真实错误原因并抛出 ALERT，而不是塌成无原因的通用 error。
 
 当 completion 必须在缺少异构 reviewer 时 fail-closed，用 `--review hetero`。
 允许同 provider 终审时，用 `--review self`。`--review off` 只应作为显式人工豁免：

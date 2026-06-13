@@ -19,6 +19,7 @@ import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, 
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
+import { ledgerVerdict } from "../lib/cycle-ledger.js";
 import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
@@ -31,6 +32,13 @@ const FINAL_REVIEW_TIMEOUT_MS = 300_000;
 const INNER_LOCK_WAIT_MS = 20_000;
 /** Give up waiting for the inner lock after this long (covers a full cycle). */
 const INNER_LOCK_WAIT_MAX_MS = 3_600_000;
+/**
+ * FIX-280 (AC2): cap the usage-gate recovery wait. A hung usage API (a sleep
+ * that never resolves, or a reset time far in the future) must not stall the
+ * whole session forever — give up after this long, record an audit event, and
+ * exit the wait cleanly. Mirrors {@link INNER_LOCK_WAIT_MAX_MS}.
+ */
+const USAGE_GATE_WAIT_MAX_MS = 6 * 3_600_000; // 6h: longer than any single window reset.
 
 interface ProjectId {
   path: string;
@@ -349,8 +357,14 @@ function loopGoHelp(): string {
     "  --review <mode>     Final review policy before completion: auto, hetero, self, or off.",
     "  --no-tmux           Run in the current process instead of starting a tmux session.",
     "",
+    "Limits are explicit per run (FIX-279):",
+    "  --budget / --max-cycles / --for apply to THIS go only. Omit one and it is unset for this run — never inherited from a prior session.",
+    "  --budget / --max-cycles / --for 仅对本次 go 生效；省略即本轮不设限，绝不沿用上次会话的预算或上限。",
+    "  Scope (--epic/--cards) and --review still persist when unspecified — they are the goal's identity, not a per-run safety knob.",
+    "  范围 (--epic/--cards) 与 --review 省略时仍沿用——它们是 goal 的身份，不是每次的安全旋钮。",
+    "",
     "Safety gates:",
-    "  budget  Uses effective run cost; missing cost rows are unknown, not zero, and stop conservatively.",
+    "  budget  Uses effective run cost; an idle/aborted cycle that ran no agent counts as a known $0, but a row where an agent executed without parseable usage stays unknown and stops conservatively.",
     "  usage   Audits five-hour and weekly account headroom; unavailable usage APIs record an audit event but do not block.",
     "  timebox Stops only at a cycle boundary and records a goal:gate_tripped event.",
     "",
@@ -507,6 +521,27 @@ function summarizeRuns(path: string): RunSummary {
   return readRunSnapshot(path).summary;
 }
 
+/**
+ * FIX-280 (AC1): a run row that recorded NO parseable cost is only a genuine
+ * `unknown` when an agent actually executed and we lost its usage. A
+ * non-executing cycle — `idle_no_work` / aborted-before-delivery / any row the
+ * cycle ledger classifies as `idle` — spent $0 by definition (no agent ran), so
+ * it must count as a KNOWN $0, never as an unknown-cost row. Counting idle polls
+ * as unknown was the root cause of a live goal stuck in `budget_limited`: one
+ * idle poll tripped `applyBudgetGate`'s `unknownRows > 0` hard stop.
+ */
+function rowSpentZeroNoExecution(row: Record<string, unknown>): boolean {
+  const status = typeof row["status"] === "string" ? row["status"] : "";
+  const outcome = typeof row["outcome"] === "string" ? row["outcome"] : "";
+  if (ledgerVerdict(status, outcome) === "idle") return true;
+  // Aborted-before-delivery: the cycle never ran an agent (empty agent slot,
+  // zero micro-commits), so $0 is the truth, not a measurement gap.
+  const aborted = status === "aborted" || outcome === "aborted_no_delivery" || outcome === "orphan_timeout";
+  const agent = typeof row["agent"] === "string" ? row["agent"].trim() : "";
+  const tcr = typeof row["tcr_count"] === "number" && Number.isFinite(row["tcr_count"]) ? row["tcr_count"] : 0;
+  return aborted && agent === "" && tcr === 0;
+}
+
 function readRunSnapshot(path: string): RunRowSnapshot {
   let text = "";
   try {
@@ -531,10 +566,13 @@ function readRunSnapshot(path: string): RunRowSnapshot {
     cycles += 1;
     const effective = typeof row["cost_effective_usd"] === "number" && Number.isFinite(row["cost_effective_usd"]) ? row["cost_effective_usd"] : undefined;
     const estimated = typeof row["cost_usd"] === "number" && Number.isFinite(row["cost_usd"]) ? row["cost_usd"] : undefined;
-    if (effective === undefined && estimated === undefined) {
-      costUnknownRows += 1;
-    } else {
+    if (effective !== undefined || estimated !== undefined) {
       costUsd += effective ?? estimated ?? 0;
+    } else if (rowSpentZeroNoExecution(row)) {
+      // Known $0: no agent executed — do not count as unknown cost.
+    } else {
+      // An agent executed but its usage is unparseable — a genuine unknown.
+      costUnknownRows += 1;
     }
   }
   return { rows, summary: { cycles, costUsd, costUnknownRows } };
@@ -598,6 +636,17 @@ function appendGoalAlert(projectPath: string, slug: string, storyId: string, cyc
   mkdirSync(dirname(path), { recursive: true });
   const cycleLine = cycleId === undefined ? "" : ` cycle=${cycleId}`;
   appendFileSync(path, `[${at}] goal card skipped: ${storyId}${cycleLine} reason=zero delivery streak\n`, "utf8");
+}
+
+/**
+ * FIX-280 (AC3): a final-review crash is an ALERT, not a silent generic ERROR.
+ * Write the real failure reason to the session ALERT file so it surfaces in the
+ * session-end terminal reason ({@link latestAlertSummary} / {@link noCycleTerminalReason}).
+ */
+function appendReviewAlert(projectPath: string, slug: string, session: string, reason: string, at: string): void {
+  const path = alertPath(projectPath, slug);
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, `[${at}] ALERT goal final review failed: session=${session} reason=${reason.replace(/\s+/g, " ").slice(0, 200)}\n`, "utf8");
 }
 
 function updateProgressFromRows(
@@ -794,6 +843,7 @@ function writeFinalReviewNotes(projectPath: string, goal: RollGoal, session: str
 
 async function runFinalReviewGate(
   projectPath: string,
+  slug: string,
   goal: RollGoal,
   evaluation: GoalEvaluation,
   deps: LoopGoDeps,
@@ -818,27 +868,40 @@ async function runFinalReviewGate(
     return { passed: true, reason: "final_review:skipped:review_off" };
   }
 
+  // FIX-280 (AC3): the final review can throw on a TRANSIENT fault (a flaky peer
+  // spawn, a momentary network blip). Don't collapse that into an opaque generic
+  // ERROR with no reason — retry once, and if it still fails surface the REAL
+  // error and raise an ALERT so the crash is observable, not swallowed.
+  const inferredWorkers = workerAgents.length > 0 ? uniqueStrings(workerAgents) : await workerAgentsForSession(projectPath, session);
+  const reviewInput: GoalFinalReviewInput = {
+    projectPath,
+    sessionId: session,
+    mode,
+    goal,
+    evaluation,
+    workerAgents: inferredWorkers,
+    timeoutMs: FINAL_REVIEW_TIMEOUT_MS,
+  };
+  const runReview = deps.finalReview ?? defaultFinalReview;
   let review: GoalFinalReviewResult;
   try {
-    const inferredWorkers = workerAgents.length > 0 ? uniqueStrings(workerAgents) : await workerAgentsForSession(projectPath, session);
-    review = await (deps.finalReview ?? defaultFinalReview)({
-      projectPath,
-      sessionId: session,
-      mode,
-      goal,
-      evaluation,
-      workerAgents: inferredWorkers,
-      timeoutMs: FINAL_REVIEW_TIMEOUT_MS,
-    });
-  } catch (error) {
-    review = {
-      effectiveMode: mode === "self" ? "self" : "hetero",
-      reviewer: "",
-      provider: "",
-      verdict: "ERROR",
-      reason: error instanceof Error ? error.message : "final_review_error",
-      findings: [],
-    };
+    review = await runReview(reviewInput);
+  } catch (firstError) {
+    const firstReason = firstError instanceof Error ? firstError.message : "final_review_error";
+    try {
+      review = await runReview(reviewInput);
+    } catch (retryError) {
+      const reason = `final_review_error_after_retry: ${retryError instanceof Error ? retryError.message : firstReason}`;
+      review = {
+        effectiveMode: mode === "self" ? "self" : "hetero",
+        reviewer: "",
+        provider: "",
+        verdict: "ERROR",
+        reason,
+        findings: [],
+      };
+      appendReviewAlert(projectPath, slug, session, reason, deps.nowIso());
+    }
   }
 
   if (mode === "auto" && review.degradedReason !== undefined) {
@@ -878,6 +941,7 @@ async function runFinalReviewGate(
 
 async function evaluateGoal(
   projectPath: string,
+  slug: string,
   goal: RollGoal,
   deps: LoopGoDeps,
   session: string,
@@ -903,7 +967,7 @@ async function evaluateGoal(
   });
   const at = deps.nowIso();
   if (verdict.complete) {
-    const review = await runFinalReviewGate(projectPath, goal, verdict, deps, session, workerAgents, bus);
+    const review = await runFinalReviewGate(projectPath, slug, goal, verdict, deps, session, workerAgents, bus);
     if (!review.passed) {
       const next = { ...goal, updatedAt: at, lastDecisionReason: review.reason };
       writeGoal(goalPath(projectPath), next);
@@ -1030,6 +1094,31 @@ function runSummaryFromGoal(goal: RollGoal): RunSummary {
     cycles: goal.usage.cycles,
     costUsd: goal.usage.costUsd,
     costUnknownRows: goal.usage.costUnknownRows ?? 0,
+  };
+}
+
+/**
+ * FIX-280 (AC1/AC5): a goal persisted by the OLD `readRunSnapshot` may carry a
+ * stale `costUnknownRows` that was actually an idle/aborted (zero-cost) cycle.
+ * On resume, recompute the unknown count from the corrected runs ledger and
+ * clamp the persisted value down to it — a stale unknown that originated from an
+ * idle row now correctly reads as 0, so a resumed goal recovers to runnable
+ * instead of being instantly tripped by `applyBudgetGate`'s `unknownRows > 0`.
+ * The clamp never INFLATES the count: a genuine in-flight unknown is preserved.
+ */
+function reconcileResumedUsage(projectPath: string, goal: RollGoal): RollGoal {
+  const persistedUnknown = goal.usage.costUnknownRows ?? 0;
+  if (persistedUnknown === 0) return goal;
+  const ledgerUnknown = summarizeRuns(runsPath(projectPath)).costUnknownRows;
+  const reconciled = Math.min(persistedUnknown, ledgerUnknown);
+  if (reconciled === persistedUnknown) return goal;
+  const { costUnknownRows: _stale, ...usageRest } = goal.usage;
+  return {
+    ...goal,
+    usage: {
+      ...usageRest,
+      ...(reconciled > 0 ? { costUnknownRows: reconciled } : {}),
+    },
   };
 }
 
@@ -1199,8 +1288,30 @@ async function enforceUsageGate(
     appendGoalGate(bus, eventsPath(projectPath), session, "usage", "paused", reason, reading, ts, tripped.resetAtSec);
     if (opts.noWait) return { goal: paused, stopped: true, reason };
 
+    // FIX-280 (AC2): bound the recovery wait. A reset time far in the future or a
+    // never-resolving sleep (hung API) must not stall the session forever — cap
+    // the wait at USAGE_GATE_WAIT_MAX_MS, guard the sleep, and on a timeout (or a
+    // throwing sleep) record an audit event and leave the goal paused/stopped so
+    // the session ends cleanly instead of spinning.
+    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     const waitUntilSec = tripped.resetAtSec ?? ts + 60;
-    await (deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))))(Math.max(0, waitUntilSec - ts) * 1000);
+    const requestedMs = Math.max(0, waitUntilSec - ts) * 1000;
+    const cappedMs = Math.min(requestedMs, USAGE_GATE_WAIT_MAX_MS);
+    let waitFailed = false;
+    try {
+      await sleep(cappedMs);
+    } catch (error) {
+      waitFailed = true;
+      appendGoalGate(bus, eventsPath(projectPath), session, "usage", "audit", "usage_wait_error", { window: tripped.window, error: error instanceof Error ? error.message : "sleep_failed", waitedMs: cappedMs }, deps.nowSec());
+    }
+    if (waitFailed || cappedMs < requestedMs) {
+      // Timed out before the window could recover (or the sleep threw): do not
+      // spin. Record the bounded-wait timeout and exit with the goal paused.
+      if (!waitFailed) {
+        appendGoalGate(bus, eventsPath(projectPath), session, "usage", "audit", "usage_wait_timeout", { window: tripped.window, waitedMs: cappedMs, requestedMs }, deps.nowSec());
+      }
+      return { goal: paused, stopped: true, reason: "usage_wait_timeout" };
+    }
     const resumedAt = deps.nowIso();
     const resumed = transitionGoal(paused, "active", { actor: "system", reason: "usage_window_recovered", at: resumedAt });
     writeGoal(goalPath(projectPath), resumed);
@@ -1326,6 +1437,10 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       appendGoalState(bus, evPath, existing.status, goal, "owner", "go_start", startedSec);
     }
     goal = applyRunOptions(goal, opts, startedAt);
+    // FIX-280 (AC5): correct any stale unknown-cost row a prior session attributed
+    // to what was actually an idle/aborted (zero-cost) cycle, so a resumed goal
+    // recovers to runnable instead of being instantly tripped on budget_unknown_cost.
+    goal = reconcileResumedUsage(id.path, goal);
     writeGoal(gPath, goal);
     initialUsage = runSummaryFromGoal(goal);
     const deadlineSec = timeboxDeadlineSec(goal, opts, startedSec);
@@ -1392,7 +1507,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         goal = pauseGoal(id.path, bus, stopReason, deps.nowIso(), deps.nowSec()) ?? goal;
         break;
       }
-      const adjudication = await evaluateGoal(id.path, goal, deps, sid, workerAgents, bus);
+      const adjudication = await evaluateGoal(id.path, id.slug, goal, deps, sid, workerAgents, bus);
       goal = adjudication.goal;
       if (adjudication.complete) {
         stopReason = "goal_complete";

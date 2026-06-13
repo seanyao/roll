@@ -623,6 +623,112 @@ updatedAt: 2026-06-12T00:00:00Z
     expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.action === "budget_limited")).toBe(false);
   });
 
+  it("FIX-280: an idle_no_work cycle counts as a known $0 and does not trip budget_unknown_cost", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-IDLE](.roll/features/goal-mode/US-IDLE/spec.md) | idle | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_700 + calls,
+      nowIso: () => `2026-06-13T07:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        // A poll that found no runnable work: no agent ran, no cost recorded.
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-IDLE", cycle_id: "cycle-1", ts: "2026-06-13T07:00:01Z", agent: "", built: [], tcr_count: 0, status: "idle", outcome: "idle_no_work" })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-IDLE", "--budget", "10", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    // The idle cycle spent $0 (not unknown), so the budget gate never trips on
+    // unknown cost. The goal is capped by max-cycles, never budget-limited.
+    expect(goal.status).not.toBe("budget_limited");
+    expect(goal.usage.costUnknownRows ?? 0).toBe(0);
+    expect(goal.usage.costUsd).toBe(0);
+    expect(goal.lastDecisionReason).not.toBe("budget_unknown_cost");
+    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.reason === "budget_unknown_cost")).toBe(false);
+  });
+
+  it("FIX-280: a resumed goal with a stale idle-origin costUnknownRows recomputes to runnable even with a budget", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-RESUME](.roll/features/goal-mode/US-RESUME/spec.md) | resume | 📋 Todo |",
+    ]);
+    // Live-bug shape: a prior session attributed an idle poll as an unknown-cost
+    // row and parked the goal at budget_limited. The runs ledger holds only that
+    // idle row — under the fixed snapshot it reads as a known $0, not unknown.
+    writeFileSync(
+      join(p, ".roll", "loop", "runs.jsonl"),
+      `${JSON.stringify({ story_id: "US-RESUME", cycle_id: "stale-idle", ts: "2026-06-13T06:31:44Z", agent: "", built: [], tcr_count: 0, status: "idle", outcome: "idle_no_work" })}\n`,
+    );
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: cards
+  cards: [US-RESUME]
+review: auto
+budgetUsd: 5
+limits:
+status: budget_limited
+usage:
+  cycles: 0
+  costUsd: 0
+  costUnknownRows: 1
+safety:
+  lastGate: budget
+  lastReason: budget_unknown_cost
+  lastAt: 2026-06-13T06:33:03Z
+  lastReading: $0.00 / $5.00; unknown cost rows 1
+createdAt: 2026-06-11T16:11:49Z
+updatedAt: 2026-06-13T06:33:03Z
+lastDecisionReason: budget_unknown_cost
+`,
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_800 + calls,
+      nowIso: () => `2026-06-13T08:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-RESUME", cycle_id: "cycle-1", ts: "2026-06-13T08:00:01Z", agent: "claude", tcr_count: 1, cost_usd: 1, cost_effective_usd: 1, status: "done" })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    // Resume with the SAME budget — the stale unknown must recompute to 0 from the
+    // corrected ledger so the goal becomes runnable instead of instantly tripping.
+    const r = await capture(() => loopGoCommand(["--worker", "--budget", "5", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    // The pre-cycle budget gate did NOT brick the run on a stale unknown row.
+    expect(calls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.lastDecisionReason).not.toBe("budget_unknown_cost");
+    expect(goal.usage.costUnknownRows ?? 0).toBe(0);
+  });
+
   it("FIX-259: explicit --cards replaces a resumed paused all-backlog goal scope", async () => {
     const p = project();
     writeBacklog(p, [
@@ -797,6 +903,48 @@ lastDecisionReason: no_cycle_terminal
     const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
     expect(goal.status).toBe("paused");
     expect(goal.lastDecisionReason).toBe("usage_limit_threshold");
+  });
+
+  it("FIX-280: the usage-gate recovery wait is bounded — a far-future reset times out instead of stalling forever", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-HANG](.roll/features/goal-mode/US-HANG/spec.md) | hang | 📋 Todo |",
+    ]);
+    let calls = 0;
+    let sleeps = 0;
+    let sleptMs = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_700,
+      nowIso: () => "2026-06-11T11:50:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      // A weekly window over threshold whose reset is days away (far beyond the
+      // 6h bounded wait) — the old unbounded sleep would park the session for days.
+      readUsageLimits: async () => ({ status: "known", windows: [{ window: "weekly", used: 95, limit: 100, resetAtSec: 1_780_000_700 + 7 * 24 * 3600 }] }),
+      sleep: async (ms: number) => {
+        sleeps += 1;
+        sleptMs = ms;
+      },
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-HANG"], deps));
+
+    expect(r.code).toBe(0);
+    // Bounded: the gate stopped the session instead of spinning, and no cycle ran.
+    expect(calls).toBe(0);
+    expect(sleeps).toBe(1);
+    expect(sleptMs).toBeLessThanOrEqual(6 * 3_600_000); // capped, not the 7-day request
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "usage" && e.action === "audit" && e.reason === "usage_wait_timeout")).toBe(true);
+    expect(events.some((e) => e.type === "goal:state" && e.to === "active" && e.reason === "usage_window_recovered")).toBe(false);
   });
 
   it("unknown usage limit reads are audited but do not block a cycle", async () => {
@@ -1060,6 +1208,54 @@ describe("US-GOAL-006 — goal final review gate", () => {
     expect(goal.review.mode).toBe("off");
     const events = readEvents(p);
     expect(events.some((e) => e.type === "goal:final_review" && e.effectiveMode === "off" && e.verdict === "SKIPPED")).toBe(true);
+  });
+
+  it("FIX-280: a transient final-review crash is retried once and recovers", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    let reviewCalls = 0;
+    const deps = completeGoalDeps(p, async () => {
+      reviewCalls += 1;
+      if (reviewCalls === 1) throw new Error("peer spawn EPIPE");
+      return { effectiveMode: "hetero", reviewer: "codex", provider: "openai", verdict: "APPROVE", reason: "accepted", findings: [] };
+    });
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE"], deps));
+
+    expect(r.code).toBe(0);
+    expect(reviewCalls).toBe(2); // retried once after the transient throw
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("complete");
+  });
+
+  it("FIX-280: a final-review crash that persists surfaces the real reason and raises an ALERT", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    let reviewCalls = 0;
+    const deps = completeGoalDeps(p, async () => {
+      reviewCalls += 1;
+      throw new Error("reviewer unreachable: ECONNREFUSED");
+    });
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(reviewCalls).toBe(2); // one attempt + one retry
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).not.toBe("complete");
+    const events = readEvents(p);
+    const review = events.find((e) => e.type === "goal:final_review" && e.verdict === "ERROR");
+    expect(review).toBeDefined();
+    // The real error reason is surfaced, not a reasonless generic ERROR.
+    expect(String(review?.["reason"])).toContain("ECONNREFUSED");
+    // The crash is observable as an ALERT, not swallowed.
+    const alert = readFileSync(join(p, ".roll", "loop", "ALERT-proj-abc123.md"), "utf8");
+    expect(alert).toContain("ALERT goal final review failed");
+    expect(alert).toContain("ECONNREFUSED");
   });
 
   it("auto single-agent degradation is recorded before completion", async () => {

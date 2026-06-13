@@ -1,12 +1,15 @@
 /**
  * `roll skills` — TS port of bin/roll cmd_skills (1655-1693) plus the
  * _skills_catalog_generate / _skill_frontmatter_field / _skills_catalog_path
- * helpers (1567-1653). Subcommands: generate | gen, check, help, unknown.
+ * helpers (1567-1653). Subcommands: generate | gen, check, audit, help, unknown.
  *
  * generate: write the projected catalog to guide/skills.md.
  * check:    compare the committed catalog against a fresh scan; on drift print
  *           the SAME `diff -u` the oracle prints (we shell out to the system
  *           `diff` so the byte output matches the bash path exactly) + exit 1.
+ * audit:    (US-DOSSIER-032) run the strict skills audit — the SAME yardstick
+ *           the machine-global Skills page and `scripts/audit-skills.mjs` use.
+ *           `--json` emits the machine report; `--strict` exits 1 on violations.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -14,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
+import { auditSkills, formatHumanReport } from "../lib/skills-audit.js";
 
 function pkgDir(): string {
   return process.env["ROLL_PKG_DIR"] ?? repoRoot();
@@ -191,6 +195,20 @@ export function skillsCommand(args: string[]): number {
     // oracle's `diff -u` body; the `---`/`+++` header is diff's own bytes).
     process.stdout.write(diffOut);
     return 1;
+  }
+
+  if (sub === "audit") {
+    // US-DOSSIER-032: the ONE audit yardstick (skills-audit.ts), the SAME the
+    // Skills page and scripts/audit-skills.mjs consume. Reads the directory
+    // catalog from disk; --json emits the machine report; --strict gates on
+    // violations (exit 1).
+    const rest = args.slice(1);
+    const json = rest.includes("--json");
+    const strict = rest.includes("--strict");
+    const report = auditSkills({ skillsDir: skillsDir() });
+    if (json) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    else process.stdout.write(formatHumanReport(report));
+    return strict && report.summary.violations > 0 ? 1 : 0;
   }
 
   if (sub === "" || sub === "help" || sub === "-h" || sub === "--help") {

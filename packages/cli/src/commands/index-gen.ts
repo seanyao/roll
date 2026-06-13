@@ -21,6 +21,7 @@ import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
 import { collectSkillsPanel } from "../lib/skills-panel.js";
+import { renderSkillsPage } from "../lib/page-skills.js"; // US-DOSSIER-032
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { collectCasting, defaultCastingDeps } from "../lib/casting.js";
 import { launchAgentsDir } from "./loop-sched.js";
@@ -439,7 +440,13 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     ] as const;
     for (const [page, file] of MACHINE_PAGES) {
       try {
-        writeFileSync(join(featuresDir, file), renderMachineStubPage({ ...machineBar, page }), "utf8");
+        // US-DOSSIER-032: the Skills breadcrumb resolves to a real machine-global
+        // page (audit strip + grouped skills + SKILL.md viewer), not the stub.
+        const html =
+          page === "skills"
+            ? renderSkillsPage({ ...machineBar, skills: collectSkillsPanel(cwd) })
+            : renderMachineStubPage({ ...machineBar, page });
+        writeFileSync(join(featuresDir, file), html, "utf8");
         pages += 1;
       } catch {
         /* best-effort */

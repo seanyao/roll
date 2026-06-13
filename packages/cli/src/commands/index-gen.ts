@@ -5,9 +5,8 @@
  * as the Delivery Dossier front page (US-DOSSIER-001a; supersedes the
  * US-META-003 flat table). Deterministic + idempotent.
  */
-import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
@@ -20,7 +19,7 @@ import { renderAgentsMachinePage } from "../lib/page-agents.js";
 import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
 import { collectConventions, defaultConventionsDeps, renderConventionsPage } from "../lib/page-conventions.js";
-import { collectProjectsRegistry, writeProjectRow } from "../lib/projects-registry.js";
+import { collectProjectsRegistry, reachableProjects, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
@@ -48,42 +47,6 @@ function renderNowSec(): number {
     if (Number.isFinite(ms)) return Math.floor(ms / 1000);
   }
   return Math.floor(Date.now() / 1000);
-}
-
-/**
- * FIX-281: guard the US-DOSSIER-028 self-register so a `roll index` run inside a
- * tmp fixture (the test/CI hot path) never persists a throwaway row into the
- * REAL `~/.roll/projects.json`. Two seams cooperate:
- *   - the registry path honors `ROLL_HOME` — a sandboxed run (test/CI that sets
- *     `ROLL_HOME=<tmp>`) redirects the WHOLE file to its own dir, so writing a
- *     tmp project row there is intentional and harmless;
- *   - when `ROLL_HOME` is UNSET (a real machine, where the registry resolves to
- *     the real `~/.roll`), a cwd under the OS temp dir is a fixture, not a real
- *     project, and is skipped — this is what kept ~496 tmp rows out of the real
- *     file. A real single-project user (cwd outside tmp, `ROLL_HOME` unset) still
- *     self-registers to `~/.roll` exactly as before.
- * A cwd that no longer exists is never persisted either way.
- */
-function shouldSelfRegister(cwd: string): boolean {
-  let projectReal: string;
-  try {
-    projectReal = realpathSync(cwd);
-  } catch {
-    /* cwd vanished mid-run → never write a dead path into any registry */
-    return false;
-  }
-  // A sandboxed registry (ROLL_HOME set) is the test/CI seam: writing there is
-  // intentional and can never touch the real file.
-  if ((process.env["ROLL_HOME"] ?? "") !== "") return true;
-  // Real registry: skip fixture paths under the OS temp dir.
-  let tmpReal = tmpdir();
-  try {
-    tmpReal = realpathSync(tmpReal);
-  } catch {
-    /* fall back to the un-resolved tmpdir() */
-  }
-  const tmpPrefix = tmpReal.endsWith(sep) ? tmpReal : tmpReal + sep;
-  return projectReal !== tmpReal && !projectReal.startsWith(tmpPrefix);
 }
 
 function readJsonl(path: string): Array<Record<string, unknown>> | undefined {
@@ -425,9 +388,11 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     // the switcher and the project's own page can never show two values for one
     // number. UPSERT by slug (other projects' rows survive), best-effort: a
     // registry write failure never blocks the board generation.
-    // FIX-281: resolve home via `ROLL_HOME ?? homedir()` (the registry default)
-    // and skip tmp/non-existent fixture paths so a test/CI `roll index` can never
-    // pollute the SHARED `~/.roll/projects.json`. Best-effort throughout.
+    // FIX-281/FIX-283: resolve home via `ROLL_HOME ?? homedir()` (the registry
+    // default) and skip tmp/non-existent fixture paths so a test/CI `roll index`
+    // can never pollute the SHARED `~/.roll/projects.json`. The skip rule now
+    // lives in the shared `shouldSelfRegister` (reused by `roll init`).
+    // Best-effort throughout.
     try {
       if (shouldSelfRegister(cwd)) {
         const slug = projectSlug(cwd);
@@ -475,7 +440,10 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // US-DOSSIER-027: the top-bar project switcher reads the cross-project
         // registry (US-DOSSIER-028 writes it). Absent today → [] → the console
         // degrades to current-project-only via currentSlug, never erroring.
-        projects: collectProjectsRegistry(),
+        // FIX-283 (AC2): the switcher is a navigation control, so it shows only
+        // REACHABLE projects (path exists on disk) — a dead/stale entry would be
+        // an un-clickable 404 item. `roll ls` keeps the full list with flags.
+        projects: reachableProjects(collectProjectsRegistry()),
         currentSlug: projectSlug(cwd),
         // kimi pair-review: the PR links need the repo slug — reuse the
         // FIX-275 git snapshot (one probe per run) instead of a fresh git call.
@@ -503,7 +471,8 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     const machineBar = {
       brand: { name: process.env["ROLL_BRAND_NAME"] ?? "roll", slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works." },
       snapshot,
-      projects: collectProjectsRegistry(),
+      // FIX-283 (AC2): reachable-only on the machine pages too — same switcher.
+      projects: reachableProjects(collectProjectsRegistry()),
       currentSlug: projectSlug(cwd),
     };
     // US-DOSSIER-031: the machine-global Agents page — the SAME collectAgentPanel

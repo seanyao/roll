@@ -1464,6 +1464,13 @@ export function topBar(input: TopBarInput): string {
   const currentSlug = input.currentSlug ?? entries[0]?.slug ?? input.brand.name;
   const multi = entries.length > 1;
 
+  // FIX-283 (AC1): the current project's "home" target depends on the surface.
+  // On the console (index.html, `machinePage` undefined) `#overview` selects the
+  // overview tab in place. On a MACHINE page (agents/skills/conventions/about),
+  // `#overview` is a dead hash (no such tab there) — the link must hop to the
+  // console, a sibling file: `index.html#overview`.
+  const homeHref = input.machinePage !== undefined ? "index.html#overview" : "#overview";
+
   const dot = `<span style="width:9px;height:9px;border-radius:50%;background:${C.green};box-shadow:0 0 0 3px rgba(23,138,82,.22);flex:none;"></span>`;
   const projName = `<span style="${MONO}font-weight:600;font-size:15px;letter-spacing:.02em;color:#fff;white-space:nowrap;">${esc(input.brand.name)}</span>`;
 
@@ -1471,8 +1478,9 @@ export function topBar(input: TopBarInput): string {
     .map((p) => {
       const on = p.slug === currentSlug;
       // Other projects live at their own .roll/features/index.html on disk; the
-      // current project's row routes home to the console overview.
-      const href = on ? "#overview" : `${esc(p.path)}/.roll/features/index.html`;
+      // current project's row routes home to the console overview (FIX-283: to
+      // `index.html#overview` when this is a machine page, `#overview` on console).
+      const href = on ? homeHref : `${esc(p.path)}/.roll/features/index.html`;
       const tag = p.releaseTag !== undefined && p.releaseTag !== "" ? esc(p.releaseTag) : "";
       return (
         `<a class="proj-item${on ? " on" : ""}" href="${href}" role="menuitem"${on ? ' aria-current="true"' : ""} ` +
@@ -1499,7 +1507,7 @@ export function topBar(input: TopBarInput): string {
       `<div style="${MONO}font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#6f7892;padding:6px 13px 8px;">${esc(input.brand.name)} · ${bi("this machine", "这台机器")}</div>` +
       menuItems +
       `</div></div>`
-    : `<a href="#overview" class="proj-switch-btn" style="display:flex;align-items:center;gap:9px;cursor:pointer;flex:none;text-decoration:none;padding:5px 7px;">` +
+    : `<a href="${homeHref}" class="proj-switch-btn" style="display:flex;align-items:center;gap:9px;cursor:pointer;flex:none;text-decoration:none;padding:5px 7px;">` +
       dot +
       projName +
       `</a>`;

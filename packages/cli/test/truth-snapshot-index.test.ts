@@ -5,9 +5,15 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { indexCommand } from "../src/commands/index-gen.js";
+
+// FIX-283: a project root OUTSIDE the OS temp dir — the unconditional tmp-skip
+// (AC3) means a cwd under tmpdir() is NEVER self-registered, even with ROLL_HOME
+// set. The repo (worktree) root is not under tmpdir(), so a fixture under it is a
+// "real" path for the skip rule's purposes. Cleaned up like the tmp fixtures.
+const REPO_ROOT = resolve(__dirname, "../../..");
 
 const dirs: string[] = [];
 // FIX-281: redirect the cross-project registry into a tmp ROLL_HOME so the
@@ -27,8 +33,8 @@ afterEach(() => {
   else process.env["ROLL_HOME"] = savedRollHome;
 });
 
-function project(): string {
-  const p = mkdtempSync(join(tmpdir(), "roll-truthsnap-"));
+function project(root: string = tmpdir()): string {
+  const p = mkdtempSync(join(root, "roll-truthsnap-"));
   dirs.push(p);
   mkdirSync(join(p, ".roll", "loop"), { recursive: true });
   writeFileSync(
@@ -137,11 +143,12 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     expect(embedded).toBe(file);
   });
 
-  // FIX-281 regression — index-gen in a tmp project with ROLL_HOME set writes the
-  // cross-project row ONLY to <ROLL_HOME>/.roll/projects.json, and the real
-  // ~/.roll/projects.json is never touched by the run.
-  it("FIX-281: self-register honors ROLL_HOME — tmp registry only, real home untouched", async () => {
-    const p = project();
+  // FIX-283 — a REAL (non-tmp) project with ROLL_HOME set writes the cross-project
+  // row ONLY to <ROLL_HOME>/.roll/projects.json, and the real ~/.roll/projects.json
+  // is never touched. (Replaces the FIX-281 case that used a tmp project: under
+  // FIX-283 a tmp cwd is now skipped unconditionally — covered below.)
+  it("FIX-283: self-register honors ROLL_HOME — real project → sandbox registry only, real home untouched", async () => {
+    const p = project(REPO_ROOT); // OUTSIDE tmpdir → a "real" path for the skip rule
     const sandbox = process.env["ROLL_HOME"]!; // set in beforeEach
     const realRegistry = join(homedir(), ".roll", "projects.json");
     const realBefore = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
@@ -149,7 +156,7 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
     await runIndex(p);
 
-    // the row landed in the tmp ROLL_HOME registry, pointing at this tmp project.
+    // the row landed in the tmp ROLL_HOME registry, pointing at this project.
     const sandboxRegistry = join(sandbox, ".roll", "projects.json");
     expect(existsSync(sandboxRegistry)).toBe(true);
     const rows = JSON.parse(readFileSync(sandboxRegistry, "utf8")) as Array<{ path: string }>;
@@ -164,9 +171,30 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     expect(realAfter).toBe(realBefore);
   });
 
-  // FIX-281 belt-and-braces — with ROLL_HOME UNSET, a tmp fixture cwd is skipped:
-  // the self-register never persists a throwaway row into the real registry.
-  it("FIX-281: ROLL_HOME unset + tmp cwd → self-register skipped, real home untouched", async () => {
+  // FIX-283 (AC3) — robust tmp-skip: a tmp fixture cwd is skipped REGARDLESS of
+  // whether ROLL_HOME is set. Even with ROLL_HOME pointing at a sandbox, a tmp
+  // cwd is never self-registered (belt-and-suspenders beyond FIX-281), so a test
+  // fixture can never leak even when a test forgot to sandbox ROLL_HOME.
+  it("FIX-283: ROLL_HOME set + tmp cwd → self-register still skipped (sandbox stays empty)", async () => {
+    const p = project(); // under tmpdir()
+    const sandbox = process.env["ROLL_HOME"]!; // set in beforeEach
+    const realRegistry = join(homedir(), ".roll", "projects.json");
+    const realBefore = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
+
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    await runIndex(p); // index still succeeds and renders the board
+
+    expect(existsSync(join(p, ".roll", "features", "index.html"))).toBe(true);
+    // tmp cwd → no row written, even to the sandbox registry.
+    const sandboxRegistry = join(sandbox, ".roll", "projects.json");
+    expect(existsSync(sandboxRegistry)).toBe(false);
+    const realAfter = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
+    expect(realAfter).toBe(realBefore); // real registry untouched
+  });
+
+  // FIX-281/FIX-283 belt-and-braces — with ROLL_HOME UNSET, a tmp fixture cwd is
+  // skipped: the self-register never persists a throwaway row into the real registry.
+  it("FIX-283: ROLL_HOME unset + tmp cwd → self-register skipped, real home untouched", async () => {
     const p = project();
     delete process.env["ROLL_HOME"]; // resolve to the REAL ~/.roll
     const realRegistry = join(homedir(), ".roll", "projects.json");

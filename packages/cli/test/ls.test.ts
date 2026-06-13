@@ -9,9 +9,9 @@
  * render takes injected nowMs/staleMs and an injected pathExists, so the same
  * rows render byte-identically on any machine in any timezone.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_STALE_DAYS,
@@ -24,6 +24,7 @@ import {
   collectProjectsRegistry,
   projectsRegistryPath,
   serializeProjectsRegistry,
+  shouldSelfRegister,
   upsertProjectRow,
   writeProjectRow,
 } from "../src/lib/projects-registry.js";
@@ -117,6 +118,32 @@ describe("writeProjectRow — atomic read-modify-write of ~/.roll/projects.json"
 function NOW_ISO(): string {
   return new Date(NOW).toISOString();
 }
+
+// FIX-283 (AC3) — the shared tmp/non-existent skip rule `roll index` + `roll init`
+// both consume. Robust: a tmp cwd is skipped REGARDLESS of ROLL_HOME, and a cwd
+// that no longer exists is never registered either way.
+describe("shouldSelfRegister — FIX-283 robust tmp/non-existent skip", () => {
+  const REPO_ROOT = resolve(__dirname, "../../..");
+
+  it("skips a cwd under the OS temp dir (even with ROLL_HOME set)", () => {
+    const tmpProj = realpathSync(mkdtempSync(join(tmpdir(), "roll-ssr-tmp-")));
+    homes.push(tmpProj);
+    process.env["ROLL_HOME"] = "/some/sandbox";
+    expect(shouldSelfRegister(tmpProj)).toBe(false);
+    delete process.env["ROLL_HOME"];
+    expect(shouldSelfRegister(tmpProj)).toBe(false);
+  });
+
+  it("skips a cwd that no longer exists", () => {
+    expect(shouldSelfRegister("/no/such/path/roll-ssr-gone")).toBe(false);
+  });
+
+  it("registers a real (non-tmp) existing cwd", () => {
+    const realProj = realpathSync(mkdtempSync(join(REPO_ROOT, "roll-ssr-real-")));
+    homes.push(realProj);
+    expect(shouldSelfRegister(realProj)).toBe(true);
+  });
+});
 
 describe("projectStatus — AC4 fail-loud classifier", () => {
   it("missing when the path no longer exists (wins over staleness)", () => {

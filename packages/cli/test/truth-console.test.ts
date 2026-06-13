@@ -10,7 +10,7 @@ import { renderAgentsMachinePage } from "../src/lib/page-agents.js";
 import { renderSkillsPage } from "../src/lib/page-skills.js";
 import { collectLoopHeartbeat } from "../src/lib/loop-heartbeat.js";
 import { collectCasting } from "../src/lib/casting.js";
-import { parseProjectsRegistry } from "../src/lib/projects-registry.js";
+import { parseProjectsRegistry, reachableProjects } from "../src/lib/projects-registry.js";
 
 const SNAP: TruthSnapshot = {
   generatedAt: "2026-06-13T00:00:00Z",
@@ -761,6 +761,43 @@ describe("top-bar shell — US-DOSSIER-027", () => {
     expect(page).toContain('data-set-lang="zh"');
     expect(page).not.toContain("undefined");
   });
+
+  // FIX-283 (AC1): the current-project "home" link must hop to the console
+  // (index.html#overview) on a MACHINE page, where a bare #overview is a dead
+  // hash — but stay #overview on the console itself.
+  it("AC1 (FIX-283): machine page → current project links to index.html#overview; console keeps #overview", () => {
+    // Single-project (no dropdown): the switcher button is a plain home anchor.
+    const machineSolo = renderMachineStubPage({
+      brand: { name: "roll", slogan: "It just works." },
+      snapshot: SNAP,
+      projects: [REGISTRY[0]!],
+      currentSlug: "roll",
+      page: "about",
+    });
+    expect(machineSolo).toMatch(/href="index\.html#overview"[^>]*class="proj-switch-btn"/);
+    expect(machineSolo).not.toMatch(/href="#overview"[^>]*class="proj-switch-btn"/);
+
+    // Multi-project dropdown on a machine page: the CURRENT row routes to the
+    // console, not a dead #overview.
+    const machineMulti = renderMachineStubPage({
+      brand: { name: "roll", slogan: "It just works." },
+      snapshot: SNAP,
+      projects: REGISTRY,
+      currentSlug: "roll",
+      page: "conventions",
+    });
+    expect(machineMulti).toMatch(/class="proj-item on"[^>]*href="index\.html#overview"/);
+    // a NON-current project still links to its own dossier (unchanged)
+    expect(machineMulti).toContain('href="/Users/me/acme/.roll/features/index.html"');
+
+    // The console (no machinePage) keeps the in-page #overview hash.
+    const consoleSolo = render(SNAP, { projects: [REGISTRY[0]!], currentSlug: "roll" });
+    expect(consoleSolo).toMatch(/href="#overview"[^>]*class="proj-switch-btn"/);
+    expect(consoleSolo).not.toContain('href="index.html#overview"');
+    const consoleMulti = render(SNAP, { projects: REGISTRY, currentSlug: "roll" });
+    expect(consoleMulti).toMatch(/class="proj-item on"[^>]*href="#overview"/);
+    expect(consoleMulti).not.toContain('href="index.html#overview"');
+  });
 });
 
 describe("projects registry parser — US-DOSSIER-027", () => {
@@ -777,6 +814,26 @@ describe("projects registry parser — US-DOSSIER-027", () => {
   it("tolerates a { projects: [...] } wrapper", () => {
     const text = JSON.stringify({ projects: [{ name: "x", slug: "x", path: "/x" }] });
     expect(parseProjectsRegistry(text)).toHaveLength(1);
+  });
+
+  // FIX-283 (AC2): the web switcher shows only REACHABLE projects (path exists);
+  // a dead entry (a stale tmp fixture or a since-deleted project) is filtered out
+  // so it never renders as an un-clickable 404 item. `roll ls` keeps the full
+  // list with missing/stale flags — that honesty is for the CLI.
+  it("AC2 (FIX-283): reachableProjects drops rows whose path no longer exists", () => {
+    const rows: ProjectRegistryEntry[] = [
+      { name: "alive", slug: "alive", path: "/Users/me/alive" },
+      { name: "dead", slug: "dead", path: "/private/tmp/roll-dossier-040.s4kDrk" },
+      { name: "also-alive", slug: "also-alive", path: "/Users/me/zeta" },
+    ];
+    const present = (p: string): boolean => p !== "/private/tmp/roll-dossier-040.s4kDrk";
+    const out = reachableProjects(rows, present);
+    expect(out.map((r) => r.slug)).toEqual(["alive", "also-alive"]);
+    expect(out.find((r) => r.slug === "dead")).toBeUndefined();
+    // empty filter (all dead) → [] (single-project degrade is the caller's job)
+    expect(reachableProjects(rows, () => false)).toEqual([]);
+    // all reachable → identity (order preserved)
+    expect(reachableProjects(rows, () => true)).toEqual(rows);
   });
 
   it("degrades to [] on malformed JSON or wrong-shape rows (never throws)", () => {

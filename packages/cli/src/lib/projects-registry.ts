@@ -10,9 +10,9 @@
  * `--json` output of `roll ls` equals this file verbatim, so the registry is the
  * ONE source both the web switcher and the CLI listing read.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, sep } from "node:path";
 import type { ProjectRegistryEntry } from "./truth-console.js";
 
 /**
@@ -79,6 +79,59 @@ export function collectProjectsRegistry(home?: string): ProjectRegistryEntry[] {
     return [];
   }
   return parseProjectsRegistry(text);
+}
+
+/**
+ * FIX-283 (AC2): the registry rows whose `path` still exists on disk — the ONLY
+ * set the web switcher should render. The CLI `roll ls` keeps listing every row
+ * with missing/stale flags (that honesty is for the operator); the switcher is a
+ * navigation control, so a dead path (a stale tmp fixture that leaked, or a
+ * project since deleted) must never render as an un-clickable / 404 entry. Pure:
+ * `pathExists` is injected (defaults to `existsSync`) so the filter stays
+ * testable without touching the real filesystem. Order is preserved (the input
+ * is already name-sorted by `parseProjectsRegistry`).
+ */
+export function reachableProjects(
+  rows: ProjectRegistryEntry[],
+  pathExists: (p: string) => boolean = existsSync,
+): ProjectRegistryEntry[] {
+  return rows.filter((r) => pathExists(r.path));
+}
+
+/**
+ * FIX-283 (AC3) — the ONE self-register guard shared by `roll index` and
+ * `roll init` (so adopting roll registers a project immediately, AC4), with the
+ * SAME tmp/non-existent skip rule. A `roll index|init` run inside a tmp fixture
+ * (the test/CI hot path) must NEVER persist a throwaway row into the REAL
+ * `~/.roll/projects.json`. Two seams cooperate:
+ *   - the registry path honors `ROLL_HOME` — a sandboxed run (test/CI that sets
+ *     `ROLL_HOME=<tmp>`) redirects the WHOLE file to its own dir, so writing a
+ *     tmp project row there is intentional and harmless;
+ *   - belt-and-suspenders beyond FIX-281: a cwd under the OS temp dir is a
+ *     fixture, not a real project, and is skipped REGARDLESS of whether
+ *     `ROLL_HOME` is set — so a tmp test cwd can never leak even when a test
+ *     forgot to sandbox `ROLL_HOME`. A real single-project user (cwd outside
+ *     tmp) still self-registers exactly as before.
+ * A cwd that no longer exists is never persisted either way.
+ */
+export function shouldSelfRegister(cwd: string): boolean {
+  let projectReal: string;
+  try {
+    projectReal = realpathSync(cwd);
+  } catch {
+    /* cwd vanished mid-run → never write a dead path into any registry */
+    return false;
+  }
+  // FIX-283: skip fixture paths under the OS temp dir unconditionally (no longer
+  // gated on ROLL_HOME being unset) — a tmp cwd is never a real project.
+  let tmpReal = tmpdir();
+  try {
+    tmpReal = realpathSync(tmpReal);
+  } catch {
+    /* fall back to the un-resolved tmpdir() */
+  }
+  const tmpPrefix = tmpReal.endsWith(sep) ? tmpReal : tmpReal + sep;
+  return projectReal !== tmpReal && !projectReal.startsWith(tmpPrefix);
 }
 
 /** The ONE serialization both `roll index` writes and `roll ls --json` echoes

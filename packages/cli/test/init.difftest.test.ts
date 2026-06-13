@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { initCommand } from "../src/commands/init.js";
+import { collectProjectsRegistry } from "../src/lib/projects-registry.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
@@ -58,6 +59,21 @@ function freshProj(): string {
   const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-proj-")));
   dirs.push(proj);
   return proj;
+}
+
+// FIX-283 (AC4): a project root OUTSIDE the OS temp dir — the unconditional
+// tmp-skip (AC3) means a cwd under tmpdir() is never self-registered, so to
+// exercise the `roll init` registration we need a "real" path. REPO_ROOT is not
+// under tmpdir(); cleaned up with the other fixtures.
+function realProj(): string {
+  const proj = realpathSync(mkdtempSync(join(REPO, "roll-init-realproj-")));
+  dirs.push(proj);
+  return proj;
+}
+function realFixture(): Fixture {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-bin-")));
+  dirs.push(bin);
+  return { proj: realProj(), home: freshHome(), bin };
 }
 
 function freshFixture(): Fixture {
@@ -549,5 +565,31 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, ".roll/onboard-plan.yaml")).toContain("legacy cli");
     expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain(".roll/backlog.md");
     expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+  });
+
+  // FIX-283 (AC4): `roll init` registers the (real) project into the
+  // cross-project registry the switcher reads. tsInit sets ROLL_HOME=fx.home, so
+  // the row lands in the sandbox registry — never the real ~/.roll/projects.json.
+  // A real (non-tmp) project root is required because the shared tmp-skip (AC3)
+  // would otherwise skip the write.
+  it("AC4: fresh init registers the project into ~/.roll/projects.json (one row, path = project)", () => {
+    const fx = realFixture();
+    const run = tsInit(fx, []);
+    expect(run.status).toBe(0);
+    const rows = collectProjectsRegistry(fx.home);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.path).toBe(fx.proj);
+    expect(rows[0]?.name).toBe("roll");
+    expect(typeof rows[0]?.lastIndexedAt).toBe("string");
+  });
+
+  // FIX-283 (AC3): init on a tmp-dir project never registers, even with
+  // ROLL_HOME set — the freshFixture project is under tmpdir(), so the sandbox
+  // registry stays empty (belt-and-suspenders against fixture leakage).
+  it("AC3: init on a tmp project writes NO registry row (tmp-skip, sandbox empty)", () => {
+    const fx = freshFixture();
+    const run = tsInit(fx, []);
+    expect(run.status).toBe(0);
+    expect(collectProjectsRegistry(fx.home)).toEqual([]);
   });
 });

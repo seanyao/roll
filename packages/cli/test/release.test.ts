@@ -7,7 +7,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ReleaseStep } from "@roll/core";
-import { releaseCommand, runReleaseFlow, type ReleaseFlowDeps } from "../src/commands/release.js";
+import { commitPushWithGate, releaseCommand, runReleaseFlow, type ReleaseFlowDeps } from "../src/commands/release.js";
 
 function fakeDeps(over: Partial<ReleaseFlowDeps> = {}): { deps: ReleaseFlowDeps; steps: ReleaseStep[]; writes: string[] } {
   const steps: ReleaseStep[] = [];
@@ -176,5 +176,68 @@ describe("FIX-277 — throwing dependencies become orderly aborts", () => {
     expect(res.status).toBe("aborted");
     expect(res.step).toBe("tag-push");
     expect(res.reason).toContain("network down");
+  });
+});
+
+describe("FIX-277 review fixes — gate-aware commitPush helper and step marks", () => {
+  function fakeExec() {
+    const calls = [];
+    return {
+      calls,
+      exec: (cmd, args) => {
+        calls.push([cmd, ...args].join(" "));
+        if (cmd === "git" && args[0] === "rev-parse") return "main\n";
+        return "";
+      },
+    };
+  }
+
+  it("roll-managed repo refreshes the test proof BEFORE committing — no error-message sniffing", () => {
+    const { calls, exec } = fakeExec();
+    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+    const testIdx = calls.findIndex((c) => c === "roll test");
+    const commitIdx = calls.findIndex((c) => c.startsWith("git commit"));
+    expect(testIdx).toBeGreaterThan(-1);
+    expect(commitIdx).toBeGreaterThan(testIdx);
+  });
+
+  it("non-roll repo never runs roll test", () => {
+    const { calls, exec } = fakeExec();
+    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: false, exec });
+    expect(calls.some((c) => c.startsWith("roll "))).toBe(false);
+  });
+
+  it("a failing commit rolls the release branch back (no stray local branch) and rethrows", () => {
+    const calls = [];
+    const exec = (cmd, args) => {
+      calls.push([cmd, ...args].join(" "));
+      if (cmd === "git" && args[0] === "rev-parse") return "main\n";
+      if (cmd === "git" && args[0] === "commit") throw new Error("✗ Commit blocked by hook");
+      return "";
+    };
+    expect(() => commitPushWithGate({ branch: "release/v1", message: "m", rollManaged: false, exec })).toThrow(
+      "Commit blocked",
+    );
+    expect(calls).toContain("git checkout main");
+    expect(calls).toContain("git branch -D release/v1");
+    expect(calls.some((c) => c.startsWith("git push"))).toBe(false);
+  });
+
+  it("throwing waitMerged / syncMain / consistencyGate abort at their OWN step", async () => {
+    for (const [key, expectedStep] of [
+      ["waitMerged", "wait-merge"],
+      ["syncMain", "sync-main"],
+      ["consistencyGate", "consistency-gate"],
+    ]) {
+      const { deps } = fakeDeps({
+        [key]: () => {
+          throw new Error(`${key} exploded`);
+        },
+      });
+      const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+      expect(res.status).toBe("aborted");
+      expect(res.step).toBe(expectedStep);
+      expect(res.reason).toContain("exploded");
+    }
   });
 });

@@ -145,8 +145,8 @@ export interface TruthConsoleInput {
   machinePage?: MachineNavLink["key"];
 }
 
-const MONO = `font-family:'IBM Plex Mono',monospace;`;
-const C = {
+export const MONO = `font-family:'IBM Plex Mono',monospace;`;
+export const C = {
   bg: "#eef1f5",
   ink: "#161b26",
   body: "#3a4252",
@@ -165,7 +165,7 @@ const C = {
 };
 
 /** bi() with the console's own class names (kept compatible with roll-lang). */
-function esc(s: string): string {
+export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
@@ -194,7 +194,7 @@ function chip(k: string, v: string, color: string): string {
   );
 }
 
-function kicker(text: string): string {
+export function kicker(text: string): string {
   return `<div style="${MONO}font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:${C.blue};font-weight:600;">${text}</div>`;
 }
 
@@ -430,7 +430,7 @@ function cycleHandle(cycleId: string): string {
   return m?.[1] !== undefined ? m[1].slice(-5) : cycleId.slice(-5);
 }
 
-function copyChip(cmd: string): string {
+export function copyChip(cmd: string): string {
   return `<code class="copy-chip" data-copy="${esc(cmd)}" style="${MONO}font-size:10.5px;padding:3px 9px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">${esc(cmd)}</code>`;
 }
 
@@ -466,7 +466,7 @@ function cycleRow(cy: CycleLedgerRow): string {
   );
 }
 
-function agentRow(ag: AgentPanelRow): string {
+export function agentRow(ag: AgentPanelRow): string {
   const dot = ag.installed
     ? `width:9px;height:9px;border-radius:50%;background:${C.green};flex:none;`
     : `width:9px;height:9px;border-radius:50%;background:#cbd2dc;flex:none;`;
@@ -510,7 +510,9 @@ function agentRow(ag: AgentPanelRow): string {
           })
           .join("")) +
     (ag.setupCmd !== undefined
-      ? `<div style="margin-top:9px;"><code style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.amber}55;color:${C.amber};background:${C.card};">${esc(ag.setupCmd)}</code></div>`
+      ? `<div style="margin-top:9px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">` +
+        `<span style="${MONO}font-size:10.5px;color:${C.faint};">${bi("source: conventions/ + AGENTS.md · synced by roll setup", "来源:conventions/ + AGENTS.md · 由 roll setup 同步")}</span>` +
+        `<code class="copy-chip" data-copy="${esc(ag.setupCmd)}" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.amber}55;color:${C.amber};background:${C.card};cursor:pointer;">${esc(ag.setupCmd)}</code></div>`
       : "") +
     `</div></details>`
   );
@@ -940,7 +942,13 @@ const SKILL_GROUP_META: Record<string, { en: string; zh: string }> = {
 };
 
 function skillRow(r: SkillPanelRow): string {
-  const ok = r.violations.length === 0;
+  // AC4 — a row whose audit never ran is `unknown` (amber dot), never a clean
+  // green that fakes a passing audit.
+  const ok = r.auditKnown && r.violations.length === 0;
+  const dotColor = !r.auditKnown ? C.amber : ok ? C.green : C.red;
+  const verdict = !r.auditKnown
+    ? `<span style="${MONO}font-size:10.5px;color:${C.amber};white-space:nowrap;">${bi("unknown", "未知")}</span>`
+    : `<span style="${MONO}font-size:10.5px;color:${ok ? C.green : C.red};white-space:nowrap;">${ok ? bi("clean", "无违规") : `${r.violations.length} ${bi("violations", "违规")}`}</span>`;
   const check = (on: boolean, label: string): string =>
     `<span style="${MONO}font-size:10.5px;color:${on ? C.green : C.red};font-weight:600;white-space:nowrap;">${on ? "✓" : "✗"} ${label}</span>`;
   const tree = r.files
@@ -956,12 +964,12 @@ function skillRow(r: SkillPanelRow): string {
     `<details class="sk-row" data-skill="${esc(r.name)}" style="border-top:1px solid ${C.hair};">` +
     `<summary style="display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
     `<span style="display:flex;align-items:center;gap:10px;min-width:0;"><span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
-    `<span style="width:8px;height:8px;border-radius:50%;background:${ok ? C.green : C.red};flex:none;"></span>` +
+    `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>` +
     `<span style="${MONO}font-size:13px;font-weight:600;color:${C.ink};white-space:nowrap;">${esc(r.name)}</span>` +
     `<span style="font-size:12px;color:${C.dim};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.description.slice(0, 110))}</span></span>` +
     `<span style="${MONO}font-size:11px;color:${C.dim};white-space:nowrap;">${r.hubLines} ${bi("lines", "行")}</span>` +
     `<span style="${MONO}font-size:11px;color:${r.usage > 0 ? C.blue : C.faint};font-weight:600;white-space:nowrap;" title="invocations (self-score notes) · 调用次数">${r.usage > 0 ? `×${r.usage}` : "—"}</span>` +
-    `<span style="${MONO}font-size:10.5px;color:${ok ? C.green : C.red};white-space:nowrap;">${ok ? bi("clean", "无违规") : `${r.violations.length} ${bi("violations", "违规")}`}</span></summary>` +
+    verdict + `</summary>` +
     `<div style="background:#fbfcfe;border-top:1px solid #f1f4f8;padding:12px 18px 14px 47px;display:grid;grid-template-columns:1fr 1fr;gap:18px;">` +
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("anatomy", "解剖")}</div>${tree}` +
     `<div style="margin-top:9px;"><code class="copy-chip" data-copy="${esc(r.dirPath)}" style="${MONO}font-size:10.5px;padding:3px 9px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">${esc(r.dirPath)}</code></div></div>` +
@@ -1000,7 +1008,9 @@ function skillsTab(input: TruthConsoleInput): string {
     )}</p></div>` +
     `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};margin:18px 0 8px;padding:13px 18px;display:flex;gap:26px;align-items:center;flex-wrap:wrap;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     `<span data-truth="skills-count" style="${MONO}font-size:13px;color:${C.ink};font-weight:600;">${sk.summary.skills} ${bi("skills", "个技能")}</span>` +
-    `<span style="${MONO}font-size:13px;color:${sk.summary.violations > 0 ? C.red : C.green};font-weight:600;">${sk.summary.violations} ${bi("violations", "违规")}</span>` +
+    (sk.summary.auditRan
+      ? `<span style="${MONO}font-size:13px;color:${(sk.summary.violations as number) > 0 ? C.red : C.green};font-weight:600;">${sk.summary.violations} ${bi("violations", "违规")}</span>`
+      : `<span style="${MONO}font-size:13px;color:${C.amber};font-weight:600;">${bi("violations unknown — audit unavailable", "违规未知——审计不可用")}</span>`) +
     `<span style="${MONO}font-size:13px;color:${C.sub};">${sk.summary.hubLines} ${bi("hub lines", "hub 总行数")}</span>` +
     `<span style="flex:1;"></span>` +
     `<span style="${MONO}font-size:10.5px;color:${C.faint};">${bi("same yardstick as audit-skills --strict", "与 audit-skills --strict 同口径")}</span></section>` +
@@ -1140,7 +1150,7 @@ export interface MachinePageShellInput extends TopBarInput {
  * script + the markdown body styling). Self-contained: same fonts/CSS/script as
  * the console, no external fetch.
  */
-export function renderMachineShell(input: MachinePageShellInput): string {
+export function renderMdMachineShell(input: MachinePageShellInput): string {
   const header = topBar({ ...input, machinePage: input.page });
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
@@ -1155,10 +1165,7 @@ export function renderMachineShell(input: MachinePageShellInput): string {
   );
 }
 
-/** Shared machine-page helpers (kicker + section heading) the page files reuse. */
-export function machineKicker(text: string): string {
-  return kicker(text);
-}
+/** Shared machine-page palette token (kicker dedup'd to the US-DOSSIER-032 copy below). */
 export function machinePalette(): typeof C & { mono: string } {
   return { ...C, mono: MONO };
 }
@@ -1192,14 +1199,14 @@ const TAB_KEYS = TABS.map((t) => t.key);
  * is stable: each is a sibling HTML file of `features/index.html`. Order is
  * fixed (Agents → Skills → Conventions → About) so the bar never reshuffles.
  */
-const MACHINE_NAV: readonly MachineNavLink[] = [
+export const MACHINE_NAV: readonly MachineNavLink[] = [
   { key: "agents", en: "Agents", zh: "Agents", href: "agents.html" },
   { key: "skills", en: "Skills", zh: "技能", href: "skills.html" },
   { key: "conventions", en: "Conventions", zh: "约定", href: "conventions.html" },
   { key: "about", en: "About", zh: "关于", href: "about.html" },
 ] as const;
 
-const CONSOLE_SCRIPT = `<script>
+export const CONSOLE_SCRIPT = `<script>
 (function () {
   var d = document.documentElement;
   function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -1416,7 +1423,7 @@ const CONSOLE_SCRIPT = `<script>
  * pages, so the sticky top bar (switcher + breadcrumb + lang toggle) looks
  * identical everywhere. The console appends its own tab/row rules after this.
  */
-const SHELL_CSS = `
+export const SHELL_CSS = `
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
 body{background:${C.bg};color:${C.body};font-family:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;}
@@ -1434,7 +1441,7 @@ html:not([data-lang]) .lang-zh{display:none;}
 `;
 
 /** The shared web-font links (preconnect + IBM Plex), used by every page head. */
-const FONT_LINKS =
+export const FONT_LINKS =
   `<link rel="preconnect" href="https://fonts.googleapis.com">\n` +
   `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n` +
   `<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n`;
@@ -1447,7 +1454,7 @@ const FONT_LINKS =
  * RIGHT the release badge (from the truth snapshot) + EN/中 toggle. Geometry is
  * the design reference's (54px, rgba(27,34,56,.97), blur(8px), 1px #0e1424).
  */
-interface TopBarInput {
+export interface TopBarInput {
   brand: TruthConsoleBrand;
   projects?: ProjectRegistryEntry[];
   currentSlug?: string;
@@ -1456,7 +1463,7 @@ interface TopBarInput {
   snapshot: { release?: { latestTag?: string } };
 }
 
-function topBar(input: TopBarInput): string {
+export function topBar(input: TopBarInput): string {
   // Switcher rows: the registry when present, else this project alone — the
   // graceful single-project degrade (AC2). Self → no dropdown chevron, no menu.
   const registry = input.projects ?? [];
@@ -1646,4 +1653,56 @@ export function renderMachineStubPage(input: MachineStubInput): string {
     `</section>` +
     `</main>\n</body>\n</html>\n`
   );
+}
+
+/**
+ * US-DOSSIER-032 — the machine-global page shell, factored out of
+ * `renderMachineStubPage` so a real filled-in page (e.g. the Skills page in
+ * `page-skills.ts`) can wear the EXACT same sticky top-bar shell — switcher +
+ * machine breadcrumb + EN/中 toggle, the console's `CONSOLE_SCRIPT` (lang +
+ * copy-chip + switcher wiring) and fonts — without re-implementing the chrome.
+ * `extraCss` is appended after `SHELL_CSS`; `bodyHtml` is the page's own
+ * `<main>` content. The breadcrumb highlights `page`.
+ */
+export function renderMachineShell(input: {
+  page: MachineNavLink["key"];
+  titleEn: string;
+  brand: TruthConsoleBrand;
+  projects?: ProjectRegistryEntry[];
+  currentSlug?: string;
+  snapshot: { release?: { latestTag?: string } };
+  extraCss?: string;
+  bodyHtml: string;
+}): string {
+  const header = topBar({
+    brand: input.brand,
+    ...(input.projects !== undefined ? { projects: input.projects } : {}),
+    ...(input.currentSlug !== undefined ? { currentSlug: input.currentSlug } : {}),
+    snapshot: input.snapshot,
+    machinePage: input.page,
+  });
+  return (
+    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
+    `<title>${esc(input.brand.name)} · ${esc(input.titleEn)}</title>\n` +
+    FONT_LINKS +
+    `<style>${SHELL_CSS}${input.extraCss ?? ""}</style>\n` +
+    `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
+    header +
+    `<main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;">` +
+    input.bodyHtml +
+    `</main>\n</body>\n</html>\n`
+  );
+}
+
+/** US-DOSSIER-032 — palette/typography tokens + the bilingual `bi()` reused by
+ *  the dedicated machine-global page renderers, so they stay on one visual
+ *  system without re-deriving the design tokens. */
+export const CONSOLE_TOKENS = { C, MONO } as const;
+export { bi as biSpan };
+export function machineKicker(text: string): string {
+  return kicker(text);
+}
+export function escHtml(s: string): string {
+  return esc(s);
 }

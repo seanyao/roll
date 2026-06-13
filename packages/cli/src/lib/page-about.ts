@@ -16,7 +16,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { bi } from "@roll/core";
-import { machineKicker, machinePalette, renderMachineShell, type ProjectRegistryEntry, type TruthConsoleBrand } from "./truth-console.js";
+import { machineKicker, machinePalette, renderMdMachineShell, type ProjectRegistryEntry, type TruthConsoleBrand } from "./truth-console.js";
 
 export interface AboutDoc {
   /** Repo-relative source path (also the section anchor). */
@@ -196,7 +196,7 @@ export function renderAboutPage(input: RenderAboutInput): string {
     sectionLabel("Guide map", "指南索引") +
     (guideSection !== "" ? guideSection : `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:20px 22px;margin:14px 0;color:${C.faint};font-size:13px;">${bi("guide/INDEX.md not found.", "未找到 guide/INDEX.md。")}</section>`);
 
-  return renderMachineShell({
+  return renderMdMachineShell({
     page: "about",
     titleText: "About",
     brand,

@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { yamlReadFlat } from "@roll/infra";
 import { bi, canonicalAgentName } from "@roll/core";
 import type { AgentPanelRow } from "./agent-panel.js";
-import { machineKicker, machinePalette, renderMachineShell, type ProjectRegistryEntry, type TruthConsoleBrand } from "./truth-console.js";
+import { machineKicker, machinePalette, renderMdMachineShell, type ProjectRegistryEntry, type TruthConsoleBrand } from "./truth-console.js";
 
 /** One sync target row (config key → agent → freshness). */
 export interface ConventionsTarget {
@@ -185,7 +185,7 @@ export function renderConventionsPage(input: RenderConventionsInput): string {
     sectionLabel("Rulebook", "规则书") +
     rulebookSection;
 
-  return renderMachineShell({
+  return renderMdMachineShell({
     page: "conventions",
     titleText: "Conventions",
     brand,

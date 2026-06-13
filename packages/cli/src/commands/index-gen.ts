@@ -15,6 +15,7 @@ import { collectDossier, generateIndex } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import type { TruthSnapshotStoryEntry } from "@roll/spec";
 import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
+import { renderAgentsMachinePage } from "../lib/page-agents.js";
 import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
 import { collectConventions, defaultConventionsDeps, renderConventionsPage } from "../lib/page-conventions.js";
@@ -24,6 +25,7 @@ import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
 import { collectSkillsPanel } from "../lib/skills-panel.js";
+import { renderSkillsPage } from "../lib/page-skills.js"; // US-DOSSIER-032
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { collectCasting, defaultCastingDeps } from "../lib/casting.js";
 import { launchAgentsDir } from "./loop-sched.js";
@@ -442,13 +444,31 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       projects: collectProjectsRegistry(),
       currentSlug: projectSlug(cwd),
     };
+    // US-DOSSIER-031: the machine-global Agents page — the SAME collectAgentPanel
+    // output behind the Loop tab, promoted to a first-class breadcrumb page
+    // (machine scope: all installed agents, not just this project's ledger).
+    try {
+      writeFileSync(
+        join(featuresDir, "agents.html"),
+        renderAgentsMachinePage({ ...machineBar, agents: collectAgentPanel(cwd) }),
+        "utf8",
+      );
+      pages += 1;
+    } catch {
+      /* best-effort */
+    }
     const MACHINE_PAGES = [
-      ["agents", "agents.html"],
       ["skills", "skills.html"],
     ] as const;
     for (const [page, file] of MACHINE_PAGES) {
       try {
-        writeFileSync(join(featuresDir, file), renderMachineStubPage({ ...machineBar, page }), "utf8");
+        // US-DOSSIER-032: the Skills breadcrumb resolves to a real machine-global
+        // page (audit strip + grouped skills + SKILL.md viewer), not the stub.
+        const html =
+          page === "skills"
+            ? renderSkillsPage({ ...machineBar, skills: collectSkillsPanel(cwd) })
+            : renderMachineStubPage({ ...machineBar, page });
+        writeFileSync(join(featuresDir, file), html, "utf8");
         pages += 1;
       } catch {
         /* best-effort */

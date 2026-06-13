@@ -564,13 +564,53 @@ function selfScoreDimsHtml(score: SelfScoreView): string {
   return `<div class="selfscore-dims">${dims.map(([k, v]) => `<span><code>${esc(k)}</code>: <b>${esc(String(v))}</b></span>`).join(" ")}</div>`;
 }
 
-function selfScoreHtml(score: SelfScoreView | undefined, trend: string | undefined, retro: string | undefined): string {
+/**
+ * US-DOSSIER-019 — the retrospective score block, pair-score-first.
+ *
+ * Owner ruling (2026-06-13): pair scoring (a heterogeneous peer grades the
+ * delivery) is the main path now and is more reliable; an agent grading its
+ * own work is a conflict of interest. So when the score note carries pair
+ * provenance (`scoring: pair`, written by `runScorePairing` / `roll pair
+ * score`), it is shown FIRST and PROMINENT — the peer verdict, score, rationale
+ * and scorer agent lead the block, with the `.roll/peer/*.json`-backed full
+ * note linked. A self-score is shown only as a clearly LABELLED FALLBACK, with
+ * its `fallback-reason` (pairing off / no candidate / timeout) surfaced from the
+ * SAME execution-layer field so the page never silently passes a self-grade off
+ * as a peer grade.
+ *
+ * Dimensions render first/prominent; the project trend stays secondary prose.
+ */
+function scoreBlockHtml(score: SelfScoreView | undefined, trend: string | undefined, retro: string | undefined): string {
   if (score === undefined) return retro !== undefined && retro !== "" ? `<p>${esc(retro)}</p>` : "";
-  const href = score.href !== undefined && score.href !== "" ? ` · <a href="${esc(score.href)}">${bi("Full note", "全文 note")}</a>` : "";
+  const isPair = score.scoring === "pair";
+  const href =
+    score.href !== undefined && score.href !== "" ? `<a href="${esc(score.href)}">${bi("Full note", "全文 note")}</a>` : "";
+  // The line of record: who graded this delivery, and (for a fallback) why it
+  // is not a pair score. EN and 中 on separate lines per the bilingual rule.
+  const provenance = isPair
+    ? bi(
+        `Pair score — graded by peer ${score.scoredBy ?? "(peer)"}`,
+        `结对打分 —— 由评委 ${score.scoredBy ?? "（评委）"} 评判`,
+      )
+    : bi("Self-score (fallback — no pair score)", "自评（回落 —— 无结对打分）");
+  // AC2: the fallback reason, sourced from the SAME execution-layer field
+  // (`fallback-reason:` in the note), so a self-grade never masquerades as paired.
+  const fallbackLine =
+    !isPair && score.fallbackReason !== undefined && score.fallbackReason !== ""
+      ? `<p class="score-fallback-reason">${bi(
+          `Fallback reason: ${score.fallbackReason}`,
+          `回落原因：${score.fallbackReason}`,
+        )}</p>`
+      : "";
+  const kindCls = isPair ? "pairscore" : "selfscore";
+  const badgeLabel = isPair ? bi("PAIR", "结对") : bi("SELF", "自评");
   const trendLine = trend !== undefined && trend !== "" ? `<p class="selfscore-trend">${esc(trend)}</p>` : "";
+  // Dimensions first/prominent (AC3 — score/verdict/理由 齐备); trend secondary.
   return (
-    `<div class="selfscore-card selfscore-${selfScoreClass(score.verdict)}">` +
-    `<p><span class="selfscore-badge">${esc(score.verdict)}</span> <b>${esc(String(score.score))}</b>/10 · ${esc(score.verdict)} · <code>${esc(score.skill)}</code>${href}</p>` +
+    `<div class="selfscore-card score-card ${kindCls} selfscore-${selfScoreClass(score.verdict)}" data-scoring="${isPair ? "pair" : "self"}">` +
+    `<p class="score-provenance"><span class="score-kind-badge score-kind-${kindCls}">${badgeLabel}</span> ${provenance}</p>` +
+    fallbackLine +
+    `<p><span class="selfscore-badge">${esc(score.verdict)}</span> <b>${esc(String(score.score))}</b>/10 · ${esc(score.verdict)} · <code>${esc(score.skill)}</code>${href !== "" ? ` · ${href}` : ""}</p>` +
     (score.note !== "" ? `<p class="note">${esc(score.note)}</p>` : "") +
     selfScoreDimsHtml(score) +
     trendLine +
@@ -829,7 +869,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acBlocks
     : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
   const corrections = correctionTraceHtml(d.correctionActions);
-  const retroContent = selfScoreHtml(d.selfScore, d.selfScoreTrend, d.retro);
+  const retroContent = scoreBlockHtml(d.selfScore, d.selfScoreTrend, d.retro);
   const retro = retroContent !== "" ? retroContent : `<p class="empty">${bi("Not yet written", "尚未撰写")}</p>`;
 
   return (
@@ -925,6 +965,14 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
     `.selfscore-good .selfscore-badge { color:var(--pass); } .selfscore-ok .selfscore-badge { color:var(--warn); } .selfscore-regression .selfscore-badge { color:var(--fail); }\n` +
     `.selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }\n` +
+    // US-DOSSIER-019: pair-score-first retrospective. A pair score leads with a
+    // truth-green PAIR badge + prominent left accent; a self-score is the muted,
+    // dashed FALLBACK with its reason called out in amber.
+    `.score-provenance { font:600 13px/1.5 var(--sans); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }\n` +
+    `.score-kind-badge { display:inline-block; border-radius:4px; padding:2px 7px; font:700 10px/1 var(--mono); letter-spacing:.08em; }\n` +
+    `.score-card.pairscore { border-left:4px solid #178a52; } .score-kind-pairscore { color:#178a52; border:1px solid #178a5255; background:#178a521a; }\n` +
+    `.score-card.selfscore { border-left:4px solid #c77d12; border-left-style:dashed; } .score-kind-selfscore { color:#c77d12; border:1px solid #c77d1255; background:#c77d121a; }\n` +
+    `.score-fallback-reason { color:#c77d12; font-size:12.5px; }\n` +
     `@media (max-width:680px) { .delivery-evidence dl, .story-graph dl { grid-template-columns:1fr; } }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
@@ -1099,6 +1147,11 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
         note: latest.note,
         ...(latest.href !== undefined ? { href: latest.href } : {}),
         ...(Object.keys(latest.dimensions).length > 0 ? { dimensions: latest.dimensions } : {}),
+        // US-DOSSIER-019: carry pair/self provenance so the retrospective can
+        // show the pair score first and label a self-score as the fallback.
+        ...(latest.scoring !== undefined ? { scoring: latest.scoring } : {}),
+        ...(latest.scoredBy !== undefined ? { scoredBy: latest.scoredBy } : {}),
+        ...(latest.fallbackReason !== undefined ? { fallbackReason: latest.fallbackReason } : {}),
       };
       out.retro = [`score ${latest.score}`, `· ${latest.verdict}`, latest.note !== "" ? `— ${latest.note.slice(0, 240)}` : ""]
         .join(" ")

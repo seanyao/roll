@@ -451,6 +451,10 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
   const story = { id: "US-A-1", epic: "alpha", type: "US", title: "Alpha story", created: "2026-06-01", delivered: true };
   const full = renderStoryDossier({
     story,
+    // US-DOSSIER-023: the attested rung — merged AND full attest evidence on
+    // disk (report + ac-map + a real-pixel screenshot). The strongest rung.
+    ladder: "attested",
+    evidence: { report: true, acMap: true, visualEvidence: true },
     wish: "用户希望一键看到全部交付真相",
     design: ["生成器读真实数据", "复用 chrome"],
     commits: ["tcr: step one", "tcr: step two"],
@@ -469,10 +473,38 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(full).toContain('class="type type-US"');
   });
 
-  it("spine: all five stations done, delivery in truth-green", () => {
-    const spine = storySpine({ story, wish: "w", design: ["d"], commits: ["c"], retro: "r" });
-    expect(spine.match(/node (done|truth)/g)).toHaveLength(5);
-    expect(spine).toContain("node truth");
+  it("US-DOSSIER-023: spine delivery node is the ladder rung — attested → truth-green node, four upstream stations done", () => {
+    const spine = storySpine({
+      story,
+      ladder: "attested",
+      evidence: { report: true, acMap: true, visualEvidence: true },
+      wish: "w",
+      design: ["d"],
+      commits: ["c"],
+      retro: "r",
+    });
+    // four upstream stations (definition/design/execution/retrospective) keep
+    // the .node.done accent; the delivery node is .node.attested (not .done).
+    expect(spine.match(/node done/g)).toHaveLength(4);
+    expect(spine).toContain("node attested");
+    expect(spine).not.toContain("node truth"); // the old binary class is gone
+  });
+
+  it("US-DOSSIER-023: the three delivery rungs render distinct, never-faking node states", () => {
+    // claimed — backlog Done, NO merge evidence yet (delivered:false) → hatched/hollow.
+    const claimed = storySpine({ story: { ...story, delivered: false, status: "done" } });
+    expect(claimed).toContain("node claimed");
+    expect(claimed).not.toContain("node merged");
+    expect(claimed).not.toContain("node attested");
+    // merged — merge truth on main but attest chain incomplete → solid teal middle rung.
+    const merged = storySpine({ story, ladder: "merged", evidence: { report: false, acMap: true, visualEvidence: false } });
+    expect(merged).toContain("node merged");
+    expect(merged).not.toContain("node attested");
+    expect(merged).not.toContain("node claimed");
+    // attested — merged AND full evidence → truth-green.
+    const attested = storySpine({ story, ladder: "attested", evidence: { report: true, acMap: true, visualEvidence: true } });
+    expect(attested).toContain("node attested");
+    expect(attested).not.toContain("node merged");
   });
 
   it("five sections with real content: wish-quote, design bullets, commits, attest banner + AC table, retro", () => {
@@ -480,11 +512,50 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(full).toContain("一键看到全部交付真相");
     expect(full).toContain("<li>生成器读真实数据</li>");
     expect(full).toContain("2 TCR commits");
-    expect(full).toContain('class="attest-banner"');
+    expect(full).toContain('class="attest-banner"'); // attested rung keeps the truth-green banner
     expect(full).toContain('href="latest/US-A-1-report.html"');
     expect(full).toContain("◑ partial");
     expect(full).toContain("截屏待补");
     expect(full).toContain("score 9 good");
+  });
+
+  it("US-DOSSIER-023: the delivery banner is state-aware, bilingual EN/中 on separate lines, never hardcoded", () => {
+    // attested — truth-green attest banner, "Merged & attested".
+    expect(full).toContain('class="attest-banner"');
+    expect(full).toContain("Merged & attested");
+    expect(full).toContain("已合主干 · 已验收");
+    // merged — teal merge-banner, "Merged (not yet attested)".
+    const merged = renderStoryDossier({ story, ladder: "merged", evidence: { report: false, acMap: true, visualEvidence: false } });
+    expect(merged).toContain('class="attest-banner merge-banner"');
+    expect(merged).toContain("Merged (not yet attested)");
+    expect(merged).toContain("已合主干 — 尚未验收");
+    expect(merged).not.toContain('class="attest-banner"'); // not the bare truth-green attested class
+    // claimed — amber claim-banner, the honest "no merge evidence yet" copy.
+    const claimed = renderStoryDossier({ story: { ...story, delivered: false, status: "done" } });
+    expect(claimed).toContain('class="attest-banner claim-banner"');
+    expect(claimed).toContain("Claimed — backlog says Done, no merge evidence yet");
+    expect(claimed).toContain("仅声明 — 待办标记 Done，尚无合并证据");
+    // The old hardcoded banner copy is gone everywhere.
+    expect(full).not.toContain("Merged to main — attested");
+  });
+
+  it("US-DOSSIER-023: the claim ↔ truth reconciliation panel renders two columns (声明/claim vs 真相/truth) with a per-rung recColor", () => {
+    // attested — both sides green, fully reconciled.
+    expect(full).toContain('class="reconcile" data-rung="attested"');
+    expect(full).toContain('border-left-color:#178a52');
+    expect(full).toContain('class="reconcile-col reconcile-claim"');
+    expect(full).toContain('class="reconcile-col reconcile-truth"');
+    expect(full).toContain("声明"); // claim side label
+    expect(full).toContain("真相"); // truth side label
+    // claimed — amber recColor, truth side honest "no merge on main yet".
+    const claimed = renderStoryDossier({ story: { ...story, delivered: false, status: "done" } });
+    expect(claimed).toContain('data-rung="claimed"');
+    expect(claimed).toContain('border-left-color:#c77d12');
+    expect(claimed).toContain("主干尚无合并");
+    // merged — teal recColor.
+    const merged = renderStoryDossier({ story, ladder: "merged", evidence: { report: false, acMap: true, visualEvidence: false } });
+    expect(merged).toContain('data-rung="merged"');
+    expect(merged).toContain('border-left-color:#0d9488');
   });
 
   it("US-DOSSIER-008b: a legacy story's per-page spine is muted + carries a legacy banner; evidenced cards don't", () => {
@@ -496,6 +567,17 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     // (the CSS rule string is inlined on every page, so assert on the markup).
     expect(full).not.toContain('class="spine legacy"');
     expect(full).not.toContain('class="legacy-banner"');
+  });
+
+  it("US-DOSSIER-023 AC4: a legacy card keeps the uniform muted spine — the three-state ladder never fakes progress on it", () => {
+    const legacyFull = renderStoryDossier({ story: { ...story, legacy: true, delivered: true }, wish: "历史卡" });
+    // no three-state delivery node — legacy nodes are all `.node.legacy`.
+    expect(legacyFull).not.toContain("node claimed");
+    expect(legacyFull).not.toContain("node merged");
+    expect(legacyFull).not.toContain("node attested");
+    expect(legacyFull).toContain("node legacy");
+    // no claim↔truth reconciliation panel (nothing to reconcile pre-v3).
+    expect(legacyFull).not.toContain('class="reconcile"');
   });
 
   it("US-DOSSIER-007: a fully-rendered dossier page carries data-phase anchors that markPhaseDone can mount onto (no longer a silent no-op)", () => {
@@ -552,7 +634,9 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
       story,
       executionRefs: [{ kind: "merged-pr", label: "PR #481 merged", commitCount: 5 }],
     });
-    expect(spine).toContain("node truth");
+    // US-DOSSIER-023: delivered:true with no on-disk attest evidence flags
+    // falls back to the honest `merged` rung (never silently `attested`).
+    expect(spine).toContain("node merged");
     expect(spine.match(/node done/g)).toHaveLength(2); // definition + execution
   });
 

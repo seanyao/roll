@@ -15,14 +15,14 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
-import { parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
+import { type DeliveryLadder, parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { rowDelivered } from "./truth-adapter.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
-import { SPINE_STAGES } from "./dossier-index.js";
+import { SPINE_STAGES, deriveDeliveryLadder } from "./dossier-index.js";
 import { readLatestStorySelfScore, readSelfScoreTrend, type SelfScoreView } from "./self-score.js";
 import { phaseSectionTag } from "./story-page.js";
 
@@ -160,6 +160,38 @@ export interface StoryDossierInput {
   selfScore?: SelfScoreView;
   /** US-SKILL-014 trend line, merged from card-local and legacy notes. */
   selfScoreTrend?: string;
+  /** US-DOSSIER-023: the claimed→merged→attested rung this story reached, derived
+   *  from the SAME signals `deriveDeliveryLadder` folds (backlog ✅ Done claim +
+   *  FIX-278 merge truth via `story.delivered` + ac-map/report/screenshot evidence).
+   *  Set by `collectStoryDossierInput`; absent for ad-hoc inputs, in which case
+   *  the renderer derives it from `story` + `evidence`. */
+  ladder?: DeliveryLadder | "none";
+  /** US-DOSSIER-023: the on-disk evidence presence flags backing the `attested`
+   *  rung (report / ac-map / real-pixel screenshot). */
+  evidence?: StoryEvidenceFlags;
+}
+
+/**
+ * US-DOSSIER-023 — the delivery-node state on the lifecycle spine. The binary
+ * delivered model becomes three honest rungs (the design reference's truth model):
+ *   - `claimed`  — backlog says ✅ Done but main carries no merge evidence yet
+ *     (a wish recorded, not yet truth). Hatched/hollow node.
+ *   - `merged`   — merge truth on main (FIX-278) but the AC evidence chain is not
+ *     yet complete — the honest middle rung, attest-pending teal, never full green.
+ *   - `attested` — merged AND every attest artifact present (report + ac-map +
+ *     a real-pixel screenshot). Truth-green.
+ *   - `none`     — not even claimed Done; the delivery node stays empty.
+ * Derived deterministically from the same truth sources the ladder uses; the
+ * renderer prefers a pre-derived `d.ladder` and otherwise recomputes it locally
+ * from `d.story` + `d.evidence` so a missing source never fakes progress.
+ */
+export function storyDeliveryState(d: StoryDossierInput): DeliveryLadder | "none" {
+  if (d.ladder !== undefined) return d.ladder;
+  const evidence: StoryEvidenceFlags = d.evidence ?? { report: false, acMap: false, visualEvidence: false };
+  // The same derivation `deriveDeliveryLadder` performs, but tolerant of ad-hoc
+  // inputs: a `delivered:true` story with no live evidence flags still falls back
+  // to the honest `merged` rung (never silently `attested`).
+  return deriveDeliveryLadder({ delivered: d.story.delivered, status: d.story.status }, evidence);
 }
 
 /** Which stations are complete, derived from the data we actually have. */
@@ -172,11 +204,23 @@ export function stationsDone(d: StoryDossierInput): Set<string> {
   return done;
 }
 
-/** The full spine for this story — done stations filled, delivery in truth-green. */
+/**
+ * US-DOSSIER-023: the full lifecycle spine, with the delivery node refined into
+ * the three-rung claimed→merged→attested ladder (the design reference's truth
+ * model) instead of the old binary truth/empty:
+ *   - `.node.claimed`  — backlog ✅ Done, no merge evidence yet → hatched/hollow
+ *     (a wish recorded, not yet truth); the delivery node is reached-but-unproven.
+ *   - `.node.merged`   — merge truth on main but attest chain incomplete →
+ *     solid attest-pending teal, the honest middle rung, never full green.
+ *   - `.node.attested` — merged AND full attest evidence → solid truth-green.
+ * Upstream lifecycle stations (definition…execution, retrospective) keep their
+ * `.node.done` accent; legacy cards keep the uniform muted spine (US-DOSSIER-008).
+ */
 export function storySpine(d: StoryDossierInput): string {
   // US-DOSSIER-008: a pre-v3 legacy delivery has no v3 evidence trail; the
   // evidence-derived spine would read as half-finished, so render the whole
-  // spine in a uniform muted "legacy" state instead.
+  // spine in a uniform muted "legacy" state instead. The three-state ladder
+  // never touches legacy cards — they honestly show no v3 progress.
   if (d.story.legacy) {
     const nodes = SPINE_STAGES.map((s, i) => {
       const seg = i < SPINE_STAGES.length - 1 ? `<span class="seg"></span>` : "";
@@ -185,9 +229,18 @@ export function storySpine(d: StoryDossierInput): string {
     return `<div class="spine legacy" title="历史交付 · pre-v3，无 v3 留痕">${nodes.join("")}</div>`;
   }
   const done = stationsDone(d);
+  // US-DOSSIER-023: the delivery node's state is the ladder rung, not a binary.
+  // `claimed` is reached-but-unproven (backlog Done, no merge) — it lights the
+  // node hatched even though `stationsDone` (gated on merge truth) excludes it.
+  const ladder = storyDeliveryState(d);
+  const deliveryCls =
+    ladder === "attested" ? "attested" : ladder === "merged" ? "merged" : ladder === "claimed" ? "claimed" : "";
+  const deliveryReached = ladder !== "none";
+  const nodeReached = (key: string): boolean => (key === "delivery" ? deliveryReached : done.has(key));
   const nodes = SPINE_STAGES.map((s, i) => {
-    const cls = done.has(s.key) ? (s.key === "delivery" ? " truth" : " done") : "";
-    const segDone = done.has(s.key) && i < SPINE_STAGES.length - 1 && done.has(SPINE_STAGES[i + 1]!.key);
+    const cls = s.key === "delivery" ? (deliveryCls !== "" ? ` ${deliveryCls}` : "") : done.has(s.key) ? " done" : "";
+    const next = SPINE_STAGES[i + 1];
+    const segDone = nodeReached(s.key) && next !== undefined && nodeReached(next.key);
     const seg = i < SPINE_STAGES.length - 1 ? `<span class="seg${segDone ? " done" : ""}"></span>` : "";
     return `<span class="node${cls}"><span class="dot"></span><span class="tag">${bi(s.en, s.zh)}</span></span>${seg}`;
   });
@@ -429,6 +482,94 @@ function selfScoreHtml(score: SelfScoreView | undefined, trend: string | undefin
   );
 }
 
+// US-DOSSIER-023 — the three rungs' visual identity, taken verbatim from the
+// design reference's truth model: attested = truth-green #178a52, merged =
+// attest-pending teal #0d9488, claimed = claim amber #c77d12. "none" reuses the
+// muted line so an unreached delivery node never borrows a truth color.
+const LADDER_COLOR: Record<DeliveryLadder | "none", string> = {
+  attested: "#178a52",
+  merged: "#0d9488",
+  claimed: "#c77d12",
+  none: "#9aa3b2",
+};
+
+/**
+ * US-DOSSIER-023 — the state-aware delivery banner. Replaces the hardcoded
+ * "Merged to main — attested" with one of the three rungs' honest copy
+ * (bilingual, EN and 中 on separate lines via `bi`):
+ *   - attested → "Merged & attested"            (truth-green `.attest-banner`)
+ *   - merged   → "Merged (not yet attested)"    (teal `.merge-banner`)
+ *   - claimed  → "Claimed — backlog says Done, no merge evidence yet"
+ *                (amber `.claim-banner`)
+ * Only the `attested` rung keeps the `.attest-banner` class — the dossier.test
+ * stance (attest presence ≠ delivered: a claimed card must NOT carry the
+ * truth-green banner) stays true because claimed/merged use their own classes.
+ */
+function deliveryBanner(ladder: DeliveryLadder | "none", reportHref: string | undefined): string {
+  if (ladder === "none") return "";
+  const link =
+    reportHref !== undefined ? ` · <a href="${esc(reportHref)}">${bi("Attestation report", "验收报告")}</a>` : "";
+  if (ladder === "attested") {
+    return (
+      `<div class="attest-banner"><span class="mark">✓</span><div>` +
+      `${bi("Merged & attested", "已合主干 · 已验收")}${link}</div></div>`
+    );
+  }
+  if (ladder === "merged") {
+    return (
+      `<div class="attest-banner merge-banner"><span class="mark">◐</span><div>` +
+      `${bi("Merged (not yet attested)", "已合主干 — 尚未验收")}${link}</div></div>`
+    );
+  }
+  return (
+    `<div class="attest-banner claim-banner"><span class="mark">?</span><div>` +
+    `${bi("Claimed — backlog says Done, no merge evidence yet", "仅声明 — 待办标记 Done，尚无合并证据")}</div></div>`
+  );
+}
+
+/**
+ * US-DOSSIER-023 — the claim ↔ truth reconciliation panel (the design
+ * reference's two-column 声明/claim vs 真相/truth card). The `recColor`
+ * (per-rung border + mark) makes the gap between "what the backlog claims" and
+ * "what main proves" legible at a glance:
+ *   - claimed  → claim side lit, truth side honest "no merge evidence yet".
+ *   - merged   → both sides agree merge happened; truth notes attest pending.
+ *   - attested → both sides green, fully reconciled.
+ * Hidden for `none` (not even claimed Done — there is nothing to reconcile).
+ */
+function reconciliationPanel(d: StoryDossierInput, ladder: DeliveryLadder | "none"): string {
+  if (ladder === "none") return "";
+  const color = LADDER_COLOR[ladder];
+  const mark = ladder === "attested" ? "✓" : ladder === "merged" ? "◐" : "?";
+  const title =
+    ladder === "attested"
+      ? bi("Merged & attested", "已合主干 · 已验收")
+      : ladder === "merged"
+        ? bi("Merged — attestation pending", "已合主干 — 验收待补")
+        : bi("Claim recorded — merge evidence unavailable", "已记录声明 — 缺合并证据");
+  // 声明/claim side: what the backlog asserts. 真相/truth side: what main proves.
+  const claimColor = ladder === "claimed" ? "#c77d12" : "#178a52";
+  const claimTxt = bi("backlog ✅ Done", "待办 ✅ Done");
+  const truthColor = color;
+  const truthTxt =
+    ladder === "attested"
+      ? bi("merge evidence + full attest", "主干合并证据 + 完整验收")
+      : ladder === "merged"
+        ? bi("merge evidence on main", "主干有合并证据")
+        : bi("no merge on main yet", "主干尚无合并");
+  return (
+    `<section class="reconcile" data-rung="${ladder}" style="border-color:${color}55;border-left-color:${color}">` +
+    `<div class="reconcile-head"><span class="reconcile-mark" style="background:${color}1a;color:${color}">${mark}</span>` +
+    `<span class="reconcile-title" style="color:${color}">${title}</span></div>` +
+    `<div class="reconcile-cols">` +
+    `<div class="reconcile-col reconcile-claim"><div class="reconcile-side">${bi("Claim", "声明")}</div>` +
+    `<div class="reconcile-val" style="color:${claimColor}">${claimTxt}</div></div>` +
+    `<div class="reconcile-col reconcile-truth"><div class="reconcile-side">${bi("Truth", "真相")}</div>` +
+    `<div class="reconcile-val" style="color:${truthColor}">${truthTxt}</div></div>` +
+    `</div></section>`
+  );
+}
+
 // US-DOSSIER-007: emit the shared phase-section anchor (data-phase=<key>) so a
 // fully-rendered dossier page stays addressable by `markPhaseDone` — the renderer
 // (skeleton) and the mount primitive now share one contract.
@@ -475,12 +616,10 @@ export function renderStoryDossier(d: StoryDossierInput): string {
       : (d.executionRefs?.length ?? 0) > 0
         ? executionRefsHtml(d.executionRefs ?? [])
         : `<p class="empty">${bi("No cycles yet", "暂无周期")}</p>`;
-  const banner = s.delivered
-    ? `<div class="attest-banner"><span class="mark">✓</span><div>` +
-      `${bi("Merged to main — attested", "已合主干 · 已验收")}` +
-      (d.reportHref !== undefined ? ` · <a href="${esc(d.reportHref)}">${bi("Attestation report", "验收报告")}</a>` : "") +
-      `</div></div>`
-    : "";
+  // US-DOSSIER-023: the delivery node's ladder rung drives both the spine and the
+  // banner, so the page never contradicts itself (claimed→merged→attested).
+  const ladder = storyDeliveryState(d);
+  const banner = deliveryBanner(ladder, d.reportHref);
   const acTable =
     (d.acRows?.length ?? 0) > 0
       ? `<table class="ac-table"><thead><tr><th>AC</th><th>${bi("Status", "状态")}</th><th>${bi("Verify", "验证")}</th><th>${bi("Note", "备注")}</th></tr></thead><tbody>` +
@@ -505,10 +644,15 @@ export function renderStoryDossier(d: StoryDossierInput): string {
           .join("") +
         `</tbody></table>`
       : "";
-  const delivery =
-    s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence) || hasDynamicEvidence(d.dynamicEvidence)
-      ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acTable
-      : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
+  const hasDeliveryBody =
+    ladder !== "none" ||
+    s.delivered ||
+    (d.acRows?.length ?? 0) > 0 ||
+    hasDeliveryEvidence(d.deliveryEvidence) ||
+    hasDynamicEvidence(d.dynamicEvidence);
+  const delivery = hasDeliveryBody
+    ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acTable
+    : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
   const corrections = correctionTraceHtml(d.correctionActions);
   const retroContent = selfScoreHtml(d.selfScore, d.selfScoreTrend, d.retro);
   const retro = retroContent !== "" ? retroContent : `<p class="empty">${bi("Not yet written", "尚未撰写")}</p>`;
@@ -519,6 +663,31 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `<title>${esc(s.id)}${s.title !== undefined ? ` — ${esc(s.title)}` : ""}</title>\n` +
     `<style>\n${CHROME_CSS}${DOSSIER_CSS}` +
     `.phase-done { border-left:4px solid var(--pass); } .phase-pending { border-left:4px solid var(--line); }\n` +
+    // US-DOSSIER-023: the three delivery rungs on the lifecycle spine — claimed
+    // (hatched/hollow, a wish not yet truth) → merged (solid attest-pending teal,
+    // honest middle) → attested (solid truth-green). Distinct so the spine never
+    // paints "just claimed" as merged or "merged not attested" as full green.
+    `.spine .node.claimed .dot { border-color:#c77d12; background:repeating-linear-gradient(45deg,#c77d12 0 2px,transparent 2px 5px); }\n` +
+    `.spine .node.claimed .tag { color:#c77d12; }\n` +
+    `.spine .node.merged .dot { border-color:#0d9488; background:#0d9488; }\n` +
+    `.spine .node.merged .tag { color:var(--fg); }\n` +
+    `.spine .node.attested .dot { border-color:#178a52; background:#178a52; }\n` +
+    `.spine .node.attested .tag { color:var(--fg); }\n` +
+    // US-DOSSIER-023: the alternate-state delivery banners (merged = teal,
+    // claimed = amber); the truth-green `.attest-banner` is attested-only.
+    `.attest-banner.merge-banner { border-color:#0d948855; } .attest-banner.merge-banner .mark { color:#0d9488; }\n` +
+    `.attest-banner.claim-banner { border-color:#c77d1255; border-style:dashed; } .attest-banner.claim-banner .mark { color:#c77d12; }\n` +
+    // US-DOSSIER-023: the claim ↔ truth reconciliation panel (two columns, the
+    // design reference's 声明/claim vs 真相/truth card; recColor border per rung).
+    `.reconcile { border:1px solid var(--line); border-left-width:4px; border-radius:12px; background:var(--bg-raise); overflow:hidden; margin:18px 0; }\n` +
+    `.reconcile-head { display:flex; align-items:center; gap:11px; padding:13px 16px; border-bottom:1px solid var(--line); }\n` +
+    `.reconcile-mark { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; font-weight:700; font-size:13px; flex:none; }\n` +
+    `.reconcile-title { font-size:15px; font-weight:600; }\n` +
+    `.reconcile-cols { display:grid; grid-template-columns:1fr 1fr; }\n` +
+    `.reconcile-col { padding:13px 16px; } .reconcile-claim { border-right:1px solid var(--line); }\n` +
+    `.reconcile-side { font:600 10px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }\n` +
+    `.reconcile-val { margin-top:7px; font:13px/1.4 var(--mono); }\n` +
+    `@media (max-width:680px) { .reconcile-cols { grid-template-columns:1fr; } .reconcile-claim { border-right:none; border-bottom:1px solid var(--line); } }\n` +
     `.story-primitive { margin:0; } .story-primitive .np-row { display:flex; gap:10px; margin:4px 0; }\n` +
     `.story-primitive dt { flex:0 0 64px; color:var(--muted); font:600 12.5px/1.7 var(--sans); }\n` +
     `.story-primitive dd { margin:0; flex:1; }\n` +
@@ -581,12 +750,15 @@ export function renderStoryDossier(d: StoryDossierInput): string {
         )}</div>\n`
       : "") +
     storySpine(d) +
+    // US-DOSSIER-023: legacy cards carry no v3 truth chain → nothing to
+    // reconcile; the muted spine + legacy banner already tell the honest story.
+    (s.legacy ? "" : reconciliationPanel(d, ladder)) +
     storyGraphHtml(d.storyGraph) +
     section("definition", "Definition", "立项", definition, defEmpty) +
     section("acceptance", "Acceptance Criteria", "验收标准", acChecklist, (d.acItems?.length ?? 0) === 0) +
     section("design", "Design", "设计", design, (d.design?.length ?? 0) === 0 && d.peerReview === undefined) +
     section("execution", "Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
-    section("delivery", "Delivery", "交付", delivery, !(s.delivered || (d.acRows?.length ?? 0) > 0 || hasDeliveryEvidence(d.deliveryEvidence) || hasDynamicEvidence(d.dynamicEvidence))) +
+    section("delivery", "Delivery", "交付", delivery, !hasDeliveryBody) +
     (corrections !== "" ? section("corrections", "Correction trace", "纠正留痕", corrections, false) : "") +
     section("retrospective", "Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
     `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
@@ -754,6 +926,15 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
 
   const correctionActions = collectCorrectionActions(projectPath, story.id);
   if (correctionActions.length > 0) out.correctionActions = correctionActions;
+
+  // US-DOSSIER-023: pre-derive the claimed→merged→attested rung from the SAME
+  // truth sources the snapshot registry uses — the evidence flags on disk
+  // (report / ac-map / screenshot) + the already-folded `delivered` merge signal
+  // (truth selector + FIX-278 offline merge truth) — so the spine, banner, and
+  // reconciliation panel read one deterministic ladder, never re-derived merge.
+  const evidence = storyEvidenceFlags(projectPath, story);
+  out.evidence = evidence;
+  out.ladder = deriveDeliveryLadder(story, evidence);
 
   return out;
 }

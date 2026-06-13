@@ -1421,6 +1421,12 @@ describe("roll index — US-DOSSIER-001d three-layer integration", () => {
     const { indexCommand } = await import("../src/commands/index-gen.js");
     const save = process.cwd();
     const oldNow = process.env["ROLL_RENDER_NOW"];
+    // FIX-281: pin ROLL_HOME to a tmp dir so the US-DOSSIER-028 self-register
+    // writes a sandbox registry, never the real ~/.roll/projects.json.
+    const oldRollHome = process.env["ROLL_HOME"];
+    const homeSandbox = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-home-")));
+    dirs.push(homeSandbox);
+    process.env["ROLL_HOME"] = homeSandbox;
     process.env["ROLL_RENDER_NOW"] = "2026-06-11T04:00:00Z";
     process.chdir(p);
     const out: string[] = [];
@@ -1434,6 +1440,8 @@ describe("roll index — US-DOSSIER-001d three-layer integration", () => {
       process.chdir(save);
       if (oldNow === undefined) delete process.env["ROLL_RENDER_NOW"];
       else process.env["ROLL_RENDER_NOW"] = oldNow;
+      if (oldRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = oldRollHome;
     }
     expect(out.join("")).toContain("Delivery Dossier regenerated");
 

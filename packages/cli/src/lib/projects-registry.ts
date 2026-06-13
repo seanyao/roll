@@ -15,9 +15,20 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ProjectRegistryEntry } from "./truth-console.js";
 
+/**
+ * The home dir the registry lives under. Honors `ROLL_HOME` when set so tests
+ * (and any sandboxed run) can redirect the SHARED machine file to a tmp dir and
+ * never touch the real `~/.roll/projects.json`. A real single-project user with
+ * `ROLL_HOME` unset still resolves to `homedir()` exactly as before. The explicit
+ * `home` param seam is kept intact: an explicit argument always wins.
+ */
+function registryHome(home?: string): string {
+  return home ?? process.env["ROLL_HOME"] ?? homedir();
+}
+
 /** The machine-level registry path (`~/.roll/projects.json`). */
-export function projectsRegistryPath(home: string = homedir()): string {
-  return join(home, ".roll", "projects.json");
+export function projectsRegistryPath(home?: string): string {
+  return join(registryHome(home), ".roll", "projects.json");
 }
 
 /**
@@ -58,9 +69,9 @@ export function parseProjectsRegistry(text: string): ProjectRegistryEntry[] {
 /**
  * Read + parse `~/.roll/projects.json`. Returns `[]` when the file is missing or
  * unreadable — the single-project degrade is the caller's default (it falls back
- * to the current project alone). `home` is injectable for tests.
+ * to the current project alone). `home` (or `ROLL_HOME`) is injectable for tests.
  */
-export function collectProjectsRegistry(home: string = homedir()): ProjectRegistryEntry[] {
+export function collectProjectsRegistry(home?: string): ProjectRegistryEntry[] {
   let text: string;
   try {
     text = readFileSync(projectsRegistryPath(home), "utf8");
@@ -105,7 +116,7 @@ export function upsertProjectRow(
  * in-memory copy. Best-effort by contract: never throws into `roll index`'s
  * main path; returns the row list it wrote (or `existing` on failure).
  */
-export function writeProjectRow(entry: ProjectRegistryEntry, home: string = homedir()): ProjectRegistryEntry[] {
+export function writeProjectRow(entry: ProjectRegistryEntry, home?: string): ProjectRegistryEntry[] {
   const path = projectsRegistryPath(home);
   const existing = collectProjectsRegistry(home);
   const merged = upsertProjectRow(existing, entry);

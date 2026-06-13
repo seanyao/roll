@@ -20,6 +20,37 @@ export interface TruthSnapshotStory {
   legacy: number;
 }
 
+/**
+ * US-DOSSIER-020 — the claimed→merged→attested delivery ladder.
+ *
+ * Replaces the binary done/not-done with a three-rung truth ladder, the core
+ * interaction of the Delivery Dossier web console:
+ *   - `claimed`   — the backlog says done (weakest; may be drift).
+ *   - `merged`    — merge evidence on main (FIX-278 `storyHasMergeEvidence`).
+ *   - `attested`  — every AC proven with appropriate evidence; observable/UI
+ *                   ACs carry a real screenshot, test-shaped ACs carry test/PR
+ *                   chips. "Merged but not attested" is its own honest middle
+ *                   rung, never full green.
+ * Consumed by the truth snapshot's per-story registry (US-DOSSIER-021) and the
+ * story/epic spine + per-AC blocks (US-DOSSIER-023/024/025).
+ */
+export type DeliveryLadder = "claimed" | "merged" | "attested";
+export const DELIVERY_LADDER: readonly DeliveryLadder[] = ["claimed", "merged", "attested"];
+
+/**
+ * US-DOSSIER-020 — per-story evidence presence flags that back the ladder's
+ * `attested` rung and the per-AC evidence blocks. Presence only — never the
+ * agent's claim: each flag is set from a real artifact on disk.
+ */
+export interface StoryEvidenceFlags {
+  /** a `latest/<ID>-report.html` attest report exists. */
+  report: boolean;
+  /** an `ac-map.json` exists for the story. */
+  acMap: boolean;
+  /** at least one real-pixel screenshot / cast under `latest/` (US-ATTEST-010). */
+  visualEvidence: boolean;
+}
+
 export interface TruthSnapshotAudit {
   fail: number;
   warn: number;

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { TruthSnapshot } from "@roll/spec";
-import { renderTruthSummary } from "../src/commands/status.js";
+import { renderTruthSummary, statusTruthJson } from "../src/commands/status.js";
 import { attestCoverage, snapshotVerdict } from "../src/lib/truth-read.js";
 import { stripAnsi } from "../src/render.js";
 
@@ -89,5 +89,43 @@ describe("roll status truth summary — US-DOSSIER-035", () => {
   it("AC6: EN/中 snapshots (single-language per locale, color scrubbed)", () => {
     expect(sum(snap(), "en")).toMatchSnapshot();
     expect(sum(snap(), "zh")).toMatchSnapshot();
+  });
+});
+
+// US-DOSSIER-036 --json (AC5/AC7): the machine view reads the SAME snapshot +
+// selectors the human summary reads — a divergence is a 口径 bug.
+describe("roll status --json — US-DOSSIER-036", () => {
+  interface StatusJson {
+    verdict: string; exit: number; snapshot: boolean; stale: boolean;
+    loop: { lanes: number; running: number };
+    cycle: { cycles3d: number; failed3d: number; costUsd3d: number } | null;
+    release: { latestTag: string | null; verdict: string; fail: number | null; warn: number | null; unknown: number | null; merged: number; pending: number } | null;
+    story: { attestCoveragePct: number; fail: number; done: number; unknown: number; todo: number };
+  }
+
+  it("AC7: --json verdict/exit/loop/cycle/release/story match the human summary", () => {
+    const s = snap();
+    const human = sum(s, "en");
+    const j = statusTruthJson(s, false) as StatusJson;
+    // Same verdict word + exit intent the human first line carries (WARN, exit 1).
+    expect(j.verdict).toBe(snapshotVerdict(s));
+    expect(j.exit).toBe(1);
+    expect(human.trimStart().split("\n")[0]).toContain("exit 1");
+    // LOOP/CYCLE/RELEASE numbers identical to the rendered lines.
+    expect(j.loop).toEqual({ lanes: 2, running: 1 });
+    expect(j.cycle).toEqual({ cycles3d: 17, failed3d: 12, costUsd3d: 0.59 });
+    expect(j.release?.fail).toBe(0);
+    expect(j.release?.warn).toBe(44);
+    expect(j.release?.unknown).toBe(78);
+    expect(j.release?.merged).toBe(366);
+    expect(j.release?.pending).toBe(580 - 366);
+    // STORY attest coverage equals the same selector the human STORY line uses.
+    expect(j.story.attestCoveragePct).toBe(attestCoverage(s).pct);
+  });
+
+  it("AC6: a missing snapshot reports unknown honestly, never fabricates a verdict", () => {
+    const j = statusTruthJson(undefined, false) as StatusJson;
+    expect(j.verdict).toBe("unknown");
+    expect(j.snapshot).toBe(false);
   });
 });

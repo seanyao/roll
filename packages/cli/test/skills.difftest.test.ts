@@ -128,12 +128,17 @@ const stripDiffHeader = (s: string): string =>
   s.split("\n").filter((l) => !l.startsWith("--- ") && !l.startsWith("+++ ")).join("\n");
 
 describe("frozen: roll skills", () => {
+  // US-DOSSIER-036: `roll skills` is now a first-class audit+sync surface; the
+  // usage names both (AC1) — the frozen value moved with that deliberate change.
   it("help (no-arg) en", () => {
     expect(tsSkills([], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "Usage: roll doctor skills | roll setup skills
+        "stdout": "Usage: roll skills <audit|sync>
+        audit [--strict] [--json]   Strict skills audit (skills · violations · hub lines + 4 invocation groups)
+        sync                        Sync the skill catalog to guide/skills.md
+        (roll doctor skills checks · roll setup skills installs still work)
       ",
       }
     `);
@@ -143,7 +148,10 @@ describe("frozen: roll skills", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "用法：roll doctor skills | roll setup skills
+        "stdout": "用法：roll skills <audit|sync>
+        audit [--strict] [--json]   严格审计技能（技能·违规·hub 行数 + 四组调用频次）
+        sync                        同步技能目录到 guide/skills.md
+        （doctor skills 体检 · setup skills 安装仍可用）
       ",
       }
     `);
@@ -153,7 +161,10 @@ describe("frozen: roll skills", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "Usage: roll doctor skills | roll setup skills
+        "stdout": "Usage: roll skills <audit|sync>
+        audit [--strict] [--json]   Strict skills audit (skills · violations · hub lines + 4 invocation groups)
+        sync                        Sync the skill catalog to guide/skills.md
+        (roll doctor skills checks · roll setup skills installs still work)
       ",
       }
     `);
@@ -196,7 +207,10 @@ describe("frozen: roll skills", () => {
         "status": 1,
         "stderr": "[roll] Unknown 'roll skills' subcommand: bogus
       ",
-        "stdout": "Usage: roll doctor skills | roll setup skills
+        "stdout": "Usage: roll skills <audit|sync>
+        audit [--strict] [--json]   Strict skills audit (skills · violations · hub lines + 4 invocation groups)
+        sync                        Sync the skill catalog to guide/skills.md
+        (roll doctor skills checks · roll setup skills installs still work)
       ",
       }
     `);
@@ -207,7 +221,10 @@ describe("frozen: roll skills", () => {
         "status": 1,
         "stderr": "[roll] 未知的 'roll skills' 子命令：bogus
       ",
-        "stdout": "用法：roll doctor skills | roll setup skills
+        "stdout": "用法：roll skills <audit|sync>
+        audit [--strict] [--json]   严格审计技能（技能·违规·hub 行数 + 四组调用频次）
+        sync                        同步技能目录到 guide/skills.md
+        （doctor skills 体检 · setup skills 安装仍可用）
       ",
       }
     `);

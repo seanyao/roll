@@ -162,7 +162,7 @@ function skillRow(r: SkillPanelRow): string {
   const rendered = renderMarkdown(stripFrontmatter(r.hubText));
 
   return (
-    `<details class="sk-row" data-skill="${esc(r.name)}" style="border-top:1px solid #f4f6f9;">` +
+    `<details class="sk-row" data-skill="${esc(r.name)}" data-open-key="sk:${esc(r.name)}" style="border-top:1px solid #f4f6f9;">` +
     `<summary style="display:grid;grid-template-columns:220px 1fr 160px 56px 84px;gap:14px;align-items:center;padding:11px 18px;cursor:pointer;list-style:none;">` +
     `<div style="display:flex;align-items:center;gap:7px;min-width:0;">` +
     `<span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
@@ -199,7 +199,7 @@ function skillRow(r: SkillPanelRow): string {
     `<span style="${MONO}font-size:10.5px;color:${C.faint};white-space:nowrap;">${anatomy}</span>` +
     `</div></div>` +
     // inline rendered SKILL.md viewer (a nested <details> = the "view source" toggle)
-    `<details class="sk-md" style="margin-top:11px;"><summary style="${MONO}font-size:10.5px;color:${C.blue};cursor:pointer;list-style:none;">SKILL.md · ${bi("view source", "查看原文")}</summary>` +
+    `<details class="sk-md" data-open-key="skmd:${esc(r.name)}" style="margin-top:11px;"><summary style="${MONO}font-size:10.5px;color:${C.blue};cursor:pointer;list-style:none;">SKILL.md · ${bi("view source", "查看原文")}</summary>` +
     `<div class="sk-md-body" style="margin-top:8px;border:1px solid ${C.line};border-radius:8px;background:${C.card};max-height:360px;overflow:auto;padding:13px 16px;font-size:13px;line-height:1.65;color:${C.body};">${rendered}</div>` +
     `</details>` +
     `</div></details>`

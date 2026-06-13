@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cyclesCommand, renderCyclesLedger } from "../src/commands/cycles.js";
+import { cyclesCommand, cyclesLedgerJson, renderCyclesLedger } from "../src/commands/cycles.js";
 import { collectCycleLedger } from "../src/lib/cycle-ledger.js";
 import { stripAnsi } from "../src/render.js";
 
@@ -58,6 +58,44 @@ describe("roll cycles — US-CLI-012", () => {
     const p = project();
     expect(renderAt(p, "3d", "en")).toMatchSnapshot();
     expect(renderAt(p, "3d", "zh")).toMatchSnapshot();
+  });
+
+  // US-DOSSIER-036 AC5/AC7: --json is the SAME windowed computation as human.
+  it("AC7: --json matches the human view (same cycles/delivered/failed/cost/rows)", () => {
+    const p = project();
+    const rows = collectCycleLedger(p);
+    const human = stripAnsi(renderCyclesLedger(rows, "3d", "en", NOW));
+    const json = cyclesLedgerJson(rows, "3d", NOW) as {
+      cycles: number; delivered: number; failed: number; costUsd: number;
+      rows: Array<{ no: string; verdict: string }>;
+    };
+    // Same summary numbers the human line prints (4 cycles · 1 delivered · 3 …).
+    expect(json.cycles).toBe(4);
+    expect(json.delivered).toBe(1);
+    expect(json.failed).toBe(3);
+    expect(json.costUsd).toBe(0.11);
+    // Every JSON row's handle appears in the human render, in the same order.
+    const humanHandles = [...human.matchAll(/#(\d+)/g)].map((m) => m[1]);
+    expect(json.rows.map((r) => r.no)).toEqual(humanHandles);
+  });
+
+  it("AC5: cyclesCommand --json emits the windowed ledger, exit 0", async () => {
+    const save = process.cwd();
+    process.chdir(project());
+    const out: string[] = [];
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => (out.push(s), true)) as typeof process.stdout.write;
+    let status: number;
+    try {
+      status = cyclesCommand(["--since", "all", "--json", "--no-color"]);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(status).toBe(0);
+    const parsed = JSON.parse(out.join("")) as { since: string; cycles: number };
+    expect(parsed.since).toBe("all");
+    expect(parsed.cycles).toBe(5);
   });
 
   it("AC1: illegal --since fails loud", async () => {

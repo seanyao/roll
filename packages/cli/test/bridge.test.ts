@@ -116,11 +116,17 @@ describe("ported routing (no bash fallback)", () => {
 
     expect((await captureDispatch(["loop", "alert", "log"])).status).toBe(0);
     // the retired release routes exit through the explicit removed-route error
-    for (const route of ["changelog", "consistency", "ship", "waiver"]) {
+    // (US-DOSSIER-036: `consistency` is no longer here — it is a public route).
+    for (const route of ["changelog", "ship", "waiver"]) {
       const rr = await captureDispatch(["release", route]);
       expect(rr.status).toBe(1);
       expect(rr.stderr).toContain("removed");
     }
+    // US-DOSSIER-036: `roll release consistency check` IS a public command —
+    // the verdict-first six-dimension table (NOT a removed route).
+    const cc = await captureDispatch(["release", "consistency", "check"]);
+    expect(cc.stderr).not.toContain("removed");
+    expect(cc.stdout).toMatch(/① code ↔ backlog/);
     expect((await captureDispatch(["doctor", "skills", "--help"])).stdout).toContain("roll doctor skills");
     expect((await captureDispatch(["setup", "skills", "--help"])).stdout).toContain("roll setup skills");
   });

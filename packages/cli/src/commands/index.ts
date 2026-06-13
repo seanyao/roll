@@ -32,6 +32,7 @@ import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
 import { CYCLES_USAGE, cyclesCommand } from "./cycles.js";
+import { LS_USAGE, lsCommand } from "./ls.js"; // US-DOSSIER-028
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
@@ -100,13 +101,23 @@ export function registerAll(): void {
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
   // Collected top-level verbs print a one-line redirect instead of behaving as
   // long-lived aliases; the live surfaces are nested below loop/release/setup/doctor.
-  // US-DOSSIER-032: `roll skills audit` is the repo-side strict audit — the ONE
-  // yardstick the machine-global Skills page + scripts/audit-skills.mjs read, so
-  // the numbers match everywhere. Other `skills` subcommands keep redirecting to
-  // their live nests (doctor skills / setup skills).
+  // US-DOSSIER-032 / US-DOSSIER-036: `roll skills` is a first-class audit+sync
+  // surface (the build spec is authoritative; it overrides command-surface-round2
+  // which demotes skills to T2). `audit` runs the repo-side strict audit — the
+  // ONE yardstick the machine-global Skills page + scripts/audit-skills.mjs read;
+  // `sync` installs the catalog; a bare/`help` call prints the usage that names
+  // both. The legacy `generate`/`check` still route through the doctor skills /
+  // setup skills nests (registered below), so those redirects never break (AC2).
   registerPorted(
     "skills",
-    (args) => (args[0] === "audit" ? skillsCommand(args) : redirectCommand("skills", "doctor skills / roll setup skills")()),
+    (args) =>
+      // Route to the first-class surface for audit/sync/help/bare, AND whenever
+      // `--json` is present so the fail-loud `--json`-unsupported error (AC6)
+      // fires instead of a silent redirect. Everything else keeps redirecting to
+      // the doctor skills / setup skills nests (the legacy check/generate paths).
+      args[0] === "audit" || args[0] === "sync" || args[0] === "" || args[0] === undefined || isHelp(args[0]) || args.includes("--json")
+        ? skillsCommand(args)
+        : redirectCommand("skills", "doctor skills / roll setup skills")(),
     { hidden: true },
   );
   registerPorted("alert", redirectCommand("alert", "loop alert"), { hidden: true });
@@ -132,6 +143,10 @@ export function registerAll(): void {
   registerPorted("self-score", selfScoreCommand, { hidden: true, help: SELF_SCORE_USAGE });
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
   registerPorted("index", indexCommand, { hidden: true });
+  // `ls`: the cross-project registry listing (US-DOSSIER-028) — name·tag·verdict·path
+  // from ~/.roll/projects.json; --json echoes the file verbatim. ONE registry, two
+  // faces (this + the web switcher); missing/stale rows flagged, never dropped.
+  registerPorted("ls", lsCommand, { help: LS_USAGE });
   // `story new`: internal/advanced explicit card-folder minting (US-META-009).
   // REFACTOR-050: `roll idea` is now the one user-facing card-capture entry;
   // `story new` is retained for agents/skills that need explicit ID+epic control.

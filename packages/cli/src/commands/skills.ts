@@ -23,6 +23,19 @@ function catalogPath(): string {
   return join(pkgDir(), "guide", "skills.md");
 }
 
+/** FIX-276: an installed package ships no guide/ source dir — there is no
+ *  catalog to maintain there. Generate/check must skip with a one-line notice
+ *  (exit 0) instead of crashing with a raw ENOENT while WRITING into the
+ *  global install tree. */
+function isInstallTree(): boolean {
+  return !existsSync(join(pkgDir(), "guide"));
+}
+
+function installSkipNotice(): void {
+  info("skills catalog lives in the source repo — nothing to maintain on an installed roll");
+  info("技能目录清单在源码仓维护——安装环境无需生成");
+}
+
 function skillsDir(): string {
   return join(pkgDir(), "skills");
 }
@@ -139,6 +152,10 @@ export function skillsCommand(args: string[]): number {
   const lang = msgLang();
 
   if (sub === "generate" || sub === "gen") {
+    if (isInstallTree()) {
+      installSkipNotice();
+      return 0;
+    }
     const target = catalogPath();
     writeFileSync(target, generateCatalog());
     info(t(v2Catalog, lang, "skills.generated", target));

@@ -26,6 +26,7 @@ import type { ReleasePanelVM } from "./release-panel.js";
 import type { ReleaseScopeVM, ScopeEpicGroup } from "./release-scope.js";
 import type { SkillsPanelVM, SkillPanelRow } from "./skills-panel.js";
 import type { CastingVM, CastingRow } from "./casting.js";
+import type { CharterVM } from "./page-charter.js";
 
 export interface TruthConsoleBrand {
   /** Injected, never hardcoded (owner ruling): project name + slogan. */
@@ -119,6 +120,14 @@ export interface TruthConsoleInput {
    * Resolved by the pure `collectCasting()`; never a hardcoded array.
    */
   casting: CastingVM;
+  /**
+   * US-DOSSIER-033 — the Charter PROJECT TAB: a markdown browser over the
+   * project's own charter docs (docs/*.md, the per-epic plan .md files, and the
+   * guide map). Collected by the pure `collectCharter()`; doc bodies are baked
+   * in at generate time (self-contained, offline-faithful) and the guide/en↔zh
+   * pairs follow the EN/中 lang toggle.
+   */
+  charter: CharterVM;
   /**
    * US-DOSSIER-027 — projects on this machine, read from `~/.roll/projects.json`
    * (US-DOSSIER-028 populates it). Degrades gracefully: when absent/empty the
@@ -999,6 +1008,161 @@ function skillsTab(input: TruthConsoleInput): string {
   );
 }
 
+/* ============================ US-DOSSIER-033 — CHARTER ============================
+ * The Charter PROJECT TAB + the markdown body styling shared with the machine
+ * pages (About / Conventions). This is the dedicated Charter region — sibling
+ * machine-page renderers live in their own files and reuse `MD_BODY_CSS` +
+ * `renderMachineShell` below; no other tab's emission code is touched. */
+
+/**
+ * The read-only markdown body styling — a single, self-contained stylesheet
+ * (AC5: no CDN, no external font for the body) applied to every rendered doc,
+ * on the Charter tab AND the About / Conventions pages, so the SKILL.md-style
+ * render path looks identical everywhere.
+ */
+export const MD_BODY_CSS = `
+.md-body{font-size:14.5px;line-height:1.7;color:${C.body};word-break:break-word;}
+.md-body h1{font-size:23px;line-height:1.2;font-weight:700;letter-spacing:-.01em;color:${C.ink};margin:0 0 14px;}
+.md-body h2{font-size:18px;font-weight:700;color:${C.ink};margin:26px 0 10px;padding-top:14px;border-top:1px solid ${C.hair};}
+.md-body h3{font-size:15px;font-weight:600;color:${C.ink};margin:20px 0 8px;}
+.md-body h4,.md-body h5,.md-body h6{font-size:13.5px;font-weight:600;color:${C.sub};margin:16px 0 6px;}
+.md-body p{margin:10px 0;}
+.md-body ul{margin:10px 0;padding-left:22px;}
+.md-body li{margin:4px 0;}
+.md-body a{color:${C.blue};text-decoration:none;}
+.md-body a:hover{text-decoration:underline;}
+.md-body code{font-family:'IBM Plex Mono',monospace;font-size:12.5px;background:#eef1f7;border:1px solid ${C.line};border-radius:5px;padding:1px 5px;color:${C.ink};}
+.md-body strong{font-weight:600;color:${C.ink};}
+.md-tree-item.on{background:#eef2ff;border-color:${C.blue}55;}
+.md-tree-item:hover{background:#f6f8fb;}
+.md-doc{display:none;}
+.md-doc.on{display:block;}
+`;
+
+/** A directory-tree row that selects a doc into the right-hand reader. */
+function charterTreeRow(id: string, title: string, path: string, bilingual: boolean): string {
+  const blurb = bilingual ? `<span class="lang-en"> · EN/中</span><span class="lang-zh"> · 中/EN</span>` : "";
+  return (
+    `<a href="#charter/${esc(encodeURIComponent(id))}" class="md-tree-item" data-doc="${esc(id)}" ` +
+    `style="display:block;text-decoration:none;border:1px solid transparent;border-radius:8px;padding:7px 10px;cursor:pointer;">` +
+    `<span style="font-size:13px;color:${C.ink};font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(title)}</span>` +
+    `<span style="${MONO}font-size:10px;color:${C.faint};display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(path)}${blurb}</span></a>`
+  );
+}
+
+const CHARTER_GROUP_META: Record<CharterVM["groups"][number]["key"], { en: string; zh: string }> = {
+  charter: { en: "Charter", zh: "章程" },
+  guide: { en: "Guide", zh: "指南" },
+  plans: { en: "Epic plans", zh: "史诗计划" },
+};
+
+/**
+ * US-DOSSIER-033 — the Charter project tab: a markdown browser. LEFT a directory
+ * tree of the project's charter docs (docs/*.md, the per-epic plan .md files,
+ * guide/INDEX.md), grouped Charter · Guide · Plans; RIGHT the selected file
+ * rendered as markdown via the same render path the SKILL.md viewer uses. The
+ * guide/en↔zh pairs carry both bodies and the visible one follows the EN/中
+ * toggle. Read-only by design — a browser, not an editor.
+ */
+function charterTab(input: TruthConsoleInput): string {
+  const ch = input.charter;
+  const docs = ch.groups.flatMap((g) => g.docs);
+  if (docs.length === 0) {
+    return (
+      `<div style="padding:30px 0 4px;">` +
+      kicker(bi("Read-only · the rulebook you are governed by", "只读 · 你被约束的规则书")) +
+      `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Charter", "章程")}</h1></div>` +
+      `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:28px 24px;margin:18px 0;color:${C.faint};font-size:13.5px;">` +
+      bi("No charter documents found in this project.", "本项目未找到章程文档。") +
+      `</section>`
+    );
+  }
+  const defaultId = ch.defaultId ?? docs[0]!.id;
+
+  const tree = ch.groups
+    .map((g) => {
+      const meta = CHARTER_GROUP_META[g.key];
+      return (
+        `<div style="margin:0 0 14px;"><div style="${MONO}font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:${C.faint};font-weight:600;margin:0 0 6px;padding:0 4px;">${bi(meta.en, meta.zh)} <span style="color:${C.blue};">${g.docs.length}</span></div>` +
+        `<div style="display:flex;flex-direction:column;gap:2px;">${g.docs.map((d) => charterTreeRow(d.id, d.title, d.path, d.bilingual)).join("")}</div></div>`
+      );
+    })
+    .join("");
+
+  const readers = docs
+    .map((d) => {
+      const on = d.id === defaultId;
+      const langWrap = d.bilingual
+        ? `<div class="lang-en md-body">${d.bodyEn}</div><div class="lang-zh md-body">${d.bodyZh}</div>`
+        : `<div class="md-body">${d.bodyEn}</div>`;
+      return (
+        `<article class="md-doc${on ? " on" : ""}" data-doc="${esc(d.id)}" id="charter-doc-${esc(encodeURIComponent(d.id))}">` +
+        `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;padding:0 0 12px;border-bottom:1px solid ${C.hair};">` +
+        `<span style="${MONO}font-size:11px;color:${C.blue};background:${C.blue}0d;border:1px solid ${C.blue}33;border-radius:6px;padding:3px 9px;">${esc(d.path)}</span>` +
+        (d.bilingual ? `<span style="${MONO}font-size:10.5px;color:${C.faint};">${bi("follows EN/中 toggle", "随 EN/中 切换")}</span>` : "") +
+        `</div>${langWrap}</article>`
+      );
+    })
+    .join("");
+
+  return (
+    `<div style="padding:30px 0 4px;">` +
+    kicker(bi("Read-only · the rulebook you are governed by", "只读 · 你被约束的规则书")) +
+    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Charter", "章程")}</h1>` +
+    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
+      "Browse the project's own charter — manifesto, architecture, epic plans, and the guide map — rendered read-only from the repo. One markdown engine, no document drift.",
+      "浏览项目自身的章程——理念、架构、史诗计划、指南索引——从仓库只读渲染。一套 markdown 引擎，零文档漂移。",
+    )}</p></div>` +
+    `<section class="charter-browser" style="display:grid;grid-template-columns:268px 1fr;gap:18px;margin:18px 0 8px;align-items:start;">` +
+    `<nav class="charter-tree" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:12px 10px;position:sticky;top:108px;max-height:calc(100vh - 132px);overflow:auto;box-shadow:0 1px 2px rgba(17,26,69,.04);" aria-label="${bi("charter docs", "章程文档")}">${tree}</nav>` +
+    `<div class="charter-reader" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:22px 26px;min-width:0;box-shadow:0 1px 2px rgba(17,26,69,.04);">${readers}</div>` +
+    `</section>`
+  );
+}
+
+/* =================== US-DOSSIER-033 — MACHINE-PAGE SHELL (additive) ===================
+ * A self-contained full-page shell the About / Conventions renderers (in their
+ * own dedicated files) wrap their body in, so they wear the SAME sticky top bar,
+ * lang script, and markdown styling as the console without duplicating the
+ * chrome. Additive export — no existing emission code changes. */
+
+export interface MachinePageShellInput extends TopBarInput {
+  /** Which machine page this is — drives the breadcrumb highlight + <title>. */
+  page: MachineNavLink["key"];
+  /** Page <title> (already localized to a single language is fine; EN preferred). */
+  titleText: string;
+  /** The page body HTML (inside <main>); the caller renders its own sections. */
+  body: string;
+}
+
+/**
+ * Wrap a machine-page body in the shared sticky-shell page (top bar + lang
+ * script + the markdown body styling). Self-contained: same fonts/CSS/script as
+ * the console, no external fetch.
+ */
+export function renderMachineShell(input: MachinePageShellInput): string {
+  const header = topBar({ ...input, machinePage: input.page });
+  return (
+    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
+    `<title>${esc(input.brand.name)} · ${esc(input.titleText)}</title>\n` +
+    FONT_LINKS +
+    `<style>${SHELL_CSS}${MD_BODY_CSS}</style>\n` +
+    `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
+    header +
+    `<main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;">${input.body}</main>\n` +
+    `</body>\n</html>\n`
+  );
+}
+
+/** Shared machine-page helpers (kicker + section heading) the page files reuse. */
+export function machineKicker(text: string): string {
+  return kicker(text);
+}
+export function machinePalette(): typeof C & { mono: string } {
+  return { ...C, mono: MONO };
+}
+
 /**
  * US-DOSSIER-029 — the ONE tab set, in the order the design reference's nav
  * markup fixes (Overview → Loop → Release → Backlog → Skills, see
@@ -1013,6 +1177,9 @@ const TABS = [
   { key: "release", en: "Release", zh: "发版" },
   { key: "backlog", en: "Backlog", zh: "待办" },
   { key: "skills", en: "Skills", zh: "技能" },
+  // US-DOSSIER-033 — the Charter project tab: a read-only markdown browser over
+  // the project's own charter docs (manifesto/architecture/plans/guide).
+  { key: "charter", en: "Charter", zh: "章程" },
 ] as const;
 
 /** The router needs only the keys; serialized once, deterministic order. */
@@ -1063,6 +1230,28 @@ const CONSOLE_SCRIPT = `<script>
       if (pane) pane.style.display = TABS[i] === cur ? "" : "none";
       var btn = document.querySelector('[data-tab="' + TABS[i] + '"]');
       if (btn) btn.classList.toggle("on", TABS[i] === cur);
+    }
+    if (cur === "charter") applyCharter();
+  }
+  // US-DOSSIER-033: the Charter browser doc selector — pure client interaction
+  // (the doc bodies are already baked into the page; no fetch). #charter/<id>
+  // selects that doc; otherwise the first doc shows by default.
+  function applyCharter() {
+    var items = document.querySelectorAll(".md-tree-item");
+    if (!items.length) return;
+    var want = hashParts()[1] || "";
+    if (want) { try { want = decodeURIComponent(want); } catch (e) { /* raw */ } }
+    var found = false;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getAttribute("data-doc") === want) { found = true; break; }
+    }
+    if (!found) want = items[0].getAttribute("data-doc");
+    for (var j = 0; j < items.length; j++) {
+      items[j].classList.toggle("on", items[j].getAttribute("data-doc") === want);
+    }
+    var docs = document.querySelectorAll(".md-doc");
+    for (var k = 0; k < docs.length; k++) {
+      docs[k].classList.toggle("on", docs[k].getAttribute("data-doc") === want);
     }
   }
   // US-DOSSIER-012: backlog search + state filters; #backlog/<state> pre-sets one.
@@ -1388,14 +1577,16 @@ a{color:${C.blue};}
 .sk-row summary::-webkit-details-marker{display:none;}
 .sk-row[open] .bl-caret{transform:rotate(90deg);}
 .sk-row summary:hover{background:#fbfcfe;}
-`;
+@media (max-width:720px){.charter-browser{grid-template-columns:1fr !important;}.charter-tree{position:static !important;max-height:none !important;}}
+` + MD_BODY_CSS;
 
   const panes =
     `<div id="tab-overview">${overviewTab(input)}</div>` +
     `<div id="tab-loop" style="display:none;">${loopTab(input)}</div>` +
     `<div id="tab-release" style="display:none;">${releaseTab(input)}</div>` +
     `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
-    `<div id="tab-skills" style="display:none;">${skillsTab(input)}</div>`;
+    `<div id="tab-skills" style="display:none;">${skillsTab(input)}</div>` +
+    `<div id="tab-charter" style="display:none;">${charterTab(input)}</div>`;
 
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +

@@ -267,6 +267,33 @@ export const CONSISTENCY_DIMENSIONS: readonly ConsistencyDimension[] = [
 ];
 
 /**
+ * US-DOSSIER-022 — the ONE labeled dimension table both surfaces read.
+ *
+ * The web six-dimension panel (truth-console DIM_META) and the `roll release`
+ * gate report (release-consistency) must show the SAME six names in the SAME
+ * order so the same f/w/? reconcile across faces (Delivery Dossier ruling #3:
+ * 各面同口径). `no` is the panel's ①…⑥ glyph; `en`/`zh` are the bilingual
+ * label (rendered side-by-side in HTML via bi(), on separate lines in the CLI
+ * plaintext report — never inline-mixed). `whatEn`/`whatZh` is the one-line
+ * "what this dimension reconciles" caption the web panel shows.
+ */
+export interface ConsistencyDimensionLabel {
+  no: string;
+  en: string;
+  zh: string;
+  whatEn: string;
+  whatZh: string;
+}
+export const CONSISTENCY_DIMENSION_LABELS: Record<ConsistencyDimension, ConsistencyDimensionLabel> = {
+  "code-backlog": { no: "①", en: "code ↔ backlog", zh: "代码↔待办", whatEn: "Done claims vs merge & cycle facts", whatZh: "Done 声明对合并与周期事实" },
+  cards: { no: "②", en: "cards / evidence", zh: "卡片/证据", whatEn: "every row owns its card; evidence never dangles", whatZh: "每行有卡，证据链接不悬空" },
+  docs: { no: "③", en: "docs", zh: "文档", whatEn: "changelog / guide / README / --help", whatZh: "changelog/guide/README/--help" },
+  tests: { no: "④", en: "tests", zh: "测试", whatEn: "suites green, coverage honest", whatZh: "套件全绿，覆盖诚实" },
+  bilingual: { no: "⑤", en: "bilingual", zh: "双语", whatEn: "guide en↔zh + i18n keys in parity", whatZh: "指南中英与 i18n key 对齐" },
+  site: { no: "⑥", en: "site", zh: "站点", whatEn: "published site matches the repo", whatZh: "站点与仓库一致" },
+};
+
+/**
  * Map an audit rule to its dimension. TOTAL by construction: an unknown rule
  * lands in ① code-backlog (the claims dimension) rather than vanishing — the
  * panel's per-dimension sum must STRICTLY equal the status line's f/w/?

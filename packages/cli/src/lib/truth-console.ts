@@ -18,7 +18,7 @@
  * (US-DOSSIER-013/015/017 fill them) and Backlog embeds the existing ledger
  * (US-DOSSIER-012 redesigns it).
  */
-import { bi } from "@roll/core";
+import { bi, CONSISTENCY_DIMENSION_LABELS } from "@roll/core";
 import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
 import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
@@ -595,14 +595,11 @@ function backlogTab(input: TruthConsoleInput): string {
   );
 }
 
-const DIM_META: Record<string, { no: string; en: string; zh: string; whatEn: string; whatZh: string }> = {
-  "code-backlog": { no: "①", en: "code ↔ backlog", zh: "代码↔待办", whatEn: "Done claims vs merge & cycle facts", whatZh: "Done 声明对合并与周期事实" },
-  cards: { no: "②", en: "cards / evidence", zh: "卡片/证据", whatEn: "every row owns its card; evidence never dangles", whatZh: "每行有卡，证据链接不悬空" },
-  docs: { no: "③", en: "docs", zh: "文档", whatEn: "changelog / guide / README / --help", whatZh: "changelog/guide/README/--help" },
-  tests: { no: "④", en: "tests", zh: "测试", whatEn: "suites green, coverage honest", whatZh: "套件全绿，覆盖诚实" },
-  bilingual: { no: "⑤", en: "bilingual", zh: "双语", whatEn: "guide en↔zh + i18n keys in parity", whatZh: "指南中英与 i18n key 对齐" },
-  site: { no: "⑥", en: "site", zh: "站点", whatEn: "published site matches the repo", whatZh: "站点与仓库一致" },
-};
+// US-DOSSIER-022: the labels now live in @roll/core beside CONSISTENCY_DIMENSIONS,
+// so the web panel and the `roll release` gate report read ONE table and can
+// never re-diverge on a dimension name or order (Delivery Dossier ruling #3).
+const DIM_META: Record<string, { no: string; en: string; zh: string; whatEn: string; whatZh: string }> =
+  CONSISTENCY_DIMENSION_LABELS;
 
 function fwu(f: number, w: number, u: number): string {
   return (

@@ -67,6 +67,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll cycle <id>` | One cycle's full trace tape (cycle→story→build→peer→ci→pr→end) |
 | `roll peer [--reviewer <agent>] (--prompt <text>\|--file <path>)` | One-shot structured external-provider review; records `.roll/peer/runs.jsonl` |
 | **Config & machine** | |
+| `roll ls [--json] [--stale-days <n>]` | List the cross-project registry (`~/.roll/projects.json`): name · tag · verdict · path; missing/stale rows flagged, never dropped |
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
 | `roll prices [refresh]` | Model price table (cost accounting source) |

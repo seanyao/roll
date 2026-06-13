@@ -10,9 +10,9 @@
  * `--json` output of `roll ls` equals this file verbatim, so the registry is the
  * ONE source both the web switcher and the CLI listing read.
  */
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ProjectRegistryEntry } from "./truth-console.js";
 
 /** The machine-level registry path (`~/.roll/projects.json`). */
@@ -68,4 +68,54 @@ export function collectProjectsRegistry(home: string = homedir()): ProjectRegist
     return [];
   }
   return parseProjectsRegistry(text);
+}
+
+/** The ONE serialization both `roll index` writes and `roll ls --json` echoes
+ *  verbatim — a JSON array of rows, 2-space indented, trailing newline. The
+ *  array is the contract (US-DOSSIER-027 reads it as a bare array), so the
+ *  switcher and the CLI never disagree on shape. */
+export function serializeProjectsRegistry(rows: ProjectRegistryEntry[]): string {
+  return `${JSON.stringify(rows, null, 2)}\n`;
+}
+
+/**
+ * Pure upsert: replace (or append) the row whose `slug` matches `entry.slug`,
+ * keeping every other project's row untouched, and re-sort deterministically by
+ * name (then slug) — the SAME order `parseProjectsRegistry` guarantees, so the
+ * registry order never depends on which project last ran `roll index`. Other
+ * projects' rows are NEVER dropped (the machine file is shared; a concurrent
+ * `roll index` in another repo must survive this write).
+ */
+export function upsertProjectRow(
+  existing: ProjectRegistryEntry[],
+  entry: ProjectRegistryEntry,
+): ProjectRegistryEntry[] {
+  const out = existing.filter((r) => r.slug !== entry.slug);
+  out.push(entry);
+  out.sort((a, b) => (a.name === b.name ? a.slug.localeCompare(b.slug) : a.name.localeCompare(b.name)));
+  return out;
+}
+
+/**
+ * Read-modify-write `~/.roll/projects.json`: UPSERT this project's row by slug
+ * and write the whole array back atomically (temp file + rename), so a partial
+ * write can never corrupt the shared machine file and a concurrent index in
+ * another repo only loses the race, never its row. Re-reads the file just
+ * before writing (last-writer-wins per slug) — we never integrate a stale
+ * in-memory copy. Best-effort by contract: never throws into `roll index`'s
+ * main path; returns the row list it wrote (or `existing` on failure).
+ */
+export function writeProjectRow(entry: ProjectRegistryEntry, home: string = homedir()): ProjectRegistryEntry[] {
+  const path = projectsRegistryPath(home);
+  const existing = collectProjectsRegistry(home);
+  const merged = upsertProjectRow(existing, entry);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, serializeProjectsRegistry(merged), "utf8");
+    renameSync(tmp, path);
+    return merged;
+  } catch {
+    return existing;
+  }
 }

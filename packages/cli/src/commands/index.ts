@@ -29,6 +29,7 @@ import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
 import { CYCLES_USAGE, cyclesCommand } from "./cycles.js";
+import { LS_USAGE, lsCommand } from "./ls.js"; // US-DOSSIER-028
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
@@ -139,6 +140,10 @@ export function registerAll(): void {
   registerPorted("self-score", selfScoreCommand, { hidden: true, help: SELF_SCORE_USAGE });
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
   registerPorted("index", indexCommand, { hidden: true });
+  // `ls`: the cross-project registry listing (US-DOSSIER-028) — name·tag·verdict·path
+  // from ~/.roll/projects.json; --json echoes the file verbatim. ONE registry, two
+  // faces (this + the web switcher); missing/stale rows flagged, never dropped.
+  registerPorted("ls", lsCommand, { help: LS_USAGE });
   // `story new`: internal/advanced explicit card-folder minting (US-META-009).
   // REFACTOR-050: `roll idea` is now the one user-facing card-capture entry;
   // `story new` is retained for agents/skills that need explicit ID+epic control.

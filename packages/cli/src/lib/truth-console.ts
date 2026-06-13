@@ -169,6 +169,24 @@ export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/**
+ * US-DOSSIER-034 — the shared `<!DOCTYPE><html>` opening, stamping a stable
+ * per-project `data-roll-scope` so CONSOLE_SCRIPT can SCOPE its tab/section
+ * persistence per project (the switcher never carries one project's open rows or
+ * chosen tab into another). The scope is the project's slug when known, else its
+ * brand name. The reading language (`roll-lang`) stays global, deliberately not
+ * scoped. Used by every page head (console + machine pages) so the contract
+ * holds everywhere.
+ */
+export function rollScope(input: { currentSlug?: string; brand: TruthConsoleBrand }): string {
+  return input.currentSlug !== undefined && input.currentSlug !== "" ? input.currentSlug : input.brand.name;
+}
+export function htmlHead(scope: string): string {
+  return (
+    `<!DOCTYPE html>\n<html lang="zh-CN" data-roll-scope="${esc(scope)}">\n<head>\n<meta charset="UTF-8">\n`
+  );
+}
+
 const SPECTRUM_META: Record<string, { color: string; mark: string; en: string; zh: string; subEn: string; subZh: string }> = {
   done: { color: C.green, mark: "✓", en: "DONE", zh: "已交付", subEn: "merged to main", subZh: "已合主干" },
   fail: { color: C.red, mark: "!", en: "DRIFT", zh: "漂移", subEn: "claim ≠ truth", subZh: "声明≠真相" },
@@ -438,7 +456,7 @@ function cycleRow(cy: CycleLedgerRow): string {
   const color = VERDICT_COLORS[cy.verdict] ?? C.slate;
   const n = cy.cycleId.slice(-6);
   return (
-    `<details class="cy-row" data-ts="${cy.tsSec}" data-verdict="${cy.verdict}" style="border-top:1px solid ${C.hair};">` +
+    `<details class="cy-row" data-ts="${cy.tsSec}" data-verdict="${cy.verdict}" data-open-key="cy:${esc(cy.cycleId)}" style="border-top:1px solid ${C.hair};">` +
     `<summary style="display:grid;grid-template-columns:14px 70px 1fr auto;align-items:center;gap:14px;padding:12px 18px;cursor:pointer;list-style:none;">` +
     `<span title="${cy.verdict}" style="width:10px;height:10px;border-radius:50%;background:${color};flex:none;"></span>` +
     `<span style="${MONO}font-size:13px;font-weight:600;color:${C.ink};">${esc(n)}</span>` +
@@ -480,7 +498,7 @@ export function agentRow(ag: AgentPanelRow): string {
     missing: ["− missing", C.faint],
   };
   return (
-    `<details class="ag-row" data-agent="${esc(ag.name)}" style="border-top:1px solid ${C.hair};${ag.installed ? "" : "opacity:.62;"}">` +
+    `<details class="ag-row" data-agent="${esc(ag.name)}" data-open-key="ag:${esc(ag.name)}" style="border-top:1px solid ${C.hair};${ag.installed ? "" : "opacity:.62;"}">` +
     `<summary style="display:grid;grid-template-columns:1fr repeat(4,minmax(90px,auto)) auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
     `<span style="display:flex;align-items:center;gap:10px;min-width:0;"><span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
     `<span style="${dot}"></span><span style="${MONO}font-size:13px;font-weight:600;color:${ink};white-space:nowrap;">${esc(ag.display)}</span></span>` +
@@ -695,7 +713,7 @@ function storyRow(s: BacklogStoryVM, spineKeys: string[]): string {
 function epicAccordion(ep: BacklogEpicVM, spineKeys: string[]): string {
   const donePct = ep.total > 0 ? (ep.done / ep.total) * 100 : 0;
   return (
-    `<details class="bl-epic" data-epic="${esc(ep.name)}">` +
+    `<details class="bl-epic" data-epic="${esc(ep.name)}" data-open-key="ep:${esc(ep.name)}">` +
     `<summary style="display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:14px;padding:13px 16px;cursor:pointer;list-style:none;">` +
     `<span class="bl-caret" style="${MONO}font-size:11px;color:${C.faint};text-align:center;transition:transform .18s;">▶</span>` +
     `<div style="min-width:0;"><a href="${esc(ep.name)}/index.html" style="font-size:16px;font-weight:600;letter-spacing:-.01em;color:${C.ink};text-decoration:none;">${esc(ep.name)}</a>` +
@@ -896,7 +914,7 @@ function releaseScopeSections(input: TruthConsoleInput): string {
   const history = sc.history
     .map(
       (h) =>
-        `<details class="rel-hist" style="border-top:1px solid ${C.hair};">` +
+        `<details class="rel-hist" data-tag="${esc(h.tag)}" data-open-key="rel:${esc(h.tag)}" style="border-top:1px solid ${C.hair};">` +
         `<summary style="display:flex;align-items:center;gap:12px;padding:10px 16px;cursor:pointer;list-style:none;">` +
         `<span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;">▶</span>` +
         `<span style="${MONO}font-size:12.5px;font-weight:600;color:${C.ink};">${esc(h.tag)}</span>` +
@@ -961,7 +979,7 @@ function skillRow(r: SkillPanelRow): string {
     )
     .join("");
   return (
-    `<details class="sk-row" data-skill="${esc(r.name)}" style="border-top:1px solid ${C.hair};">` +
+    `<details class="sk-row" data-skill="${esc(r.name)}" data-open-key="sk:${esc(r.name)}" style="border-top:1px solid ${C.hair};">` +
     `<summary style="display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
     `<span style="display:flex;align-items:center;gap:10px;min-width:0;"><span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
     `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>` +
@@ -977,7 +995,7 @@ function skillRow(r: SkillPanelRow): string {
     `<div style="display:flex;flex-wrap:wrap;gap:12px;">${check(r.hasLoadTrigger, "Load when")}${check(r.hasGotchas, "Gotchas")}` +
     `<span style="${MONO}font-size:10.5px;color:${C.sub};">${r.routeCases.positive}+/${r.routeCases.negative}− ${bi("route cases", "路由用例")}</span></div>` +
     (r.violations.length > 0 ? `<ul style="margin:8px 0 0;padding-left:16px;font-size:11.5px;color:${C.red};">${r.violations.map((v) => `<li>${esc(v)}</li>`).join("")}</ul>` : "") +
-    `<details style="margin-top:10px;"><summary style="${MONO}font-size:10.5px;color:${C.blue};cursor:pointer;">${bi("view SKILL.md hub", "查看 SKILL.md 原文")}</summary>` +
+    `<details data-open-key="skmd:${esc(r.name)}" style="margin-top:10px;"><summary style="${MONO}font-size:10.5px;color:${C.blue};cursor:pointer;">${bi("view SKILL.md hub", "查看 SKILL.md 原文")}</summary>` +
     `<pre style="margin:8px 0 0;max-height:280px;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:8px;padding:10px 12px;${MONO}font-size:10.5px;line-height:1.5;color:${C.body};white-space:pre-wrap;">${esc(r.hubText)}</pre></details>` +
     `</div></div></details>`
   );
@@ -1153,7 +1171,7 @@ export interface MachinePageShellInput extends TopBarInput {
 export function renderMdMachineShell(input: MachinePageShellInput): string {
   const header = topBar({ ...input, machinePage: input.page });
   return (
-    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    htmlHead(rollScope(input)) +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(input.brand.name)} · ${esc(input.titleText)}</title>\n` +
     FONT_LINKS +
@@ -1212,6 +1230,43 @@ export const CONSOLE_SCRIPT = `<script>
   function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
   var lang = get("roll-lang") || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en");
+  // US-DOSSIER-034: persistence is SCOPED per project so the project switcher
+  // never carries one project's open rows / chosen tab into another. The scope
+  // is the project key stamped on <html data-roll-scope> at generate time; lang
+  // stays GLOBAL (roll-lang, one reading language across the machine).
+  var scope = d.getAttribute("data-roll-scope") || "";
+  function tabKey() { return "roll-tab:" + scope; }
+  function openKey() { return "roll-open:" + scope; }
+  // US-DOSSIER-034: the set of open <details> ids, keyed by their stable
+  // data-open-key (cycle id / agent / epic / skill / release tag — never DOM
+  // order), so a reader's expansions survive reload + drilldown re-render.
+  function readOpen() {
+    var raw = get(openKey());
+    if (!raw) return {};
+    try { var o = JSON.parse(raw); return o && typeof o === "object" ? o : {}; } catch (e) { return {}; }
+  }
+  function writeOpen(map) { set(openKey(), JSON.stringify(map)); }
+  function restoreOpen() {
+    var map = readOpen();
+    var els = document.querySelectorAll("[data-open-key]");
+    for (var i = 0; i < els.length; i++) {
+      var k = els[i].getAttribute("data-open-key");
+      if (!k) continue;
+      if (map[k]) els[i].setAttribute("open", ""); else els[i].removeAttribute("open");
+    }
+  }
+  function bindOpenPersistence() {
+    var els = document.querySelectorAll("[data-open-key]");
+    for (var i = 0; i < els.length; i++) {
+      els[i].addEventListener("toggle", function () {
+        var k = this.getAttribute("data-open-key");
+        if (!k) return;
+        var map = readOpen();
+        if (this.open) map[k] = 1; else delete map[k];
+        writeOpen(map);
+      });
+    }
+  }
   function applyLang() {
     d.setAttribute("data-lang", lang);
     d.setAttribute("lang", lang === "zh" ? "zh-CN" : "en");
@@ -1228,7 +1283,13 @@ export const CONSOLE_SCRIPT = `<script>
   }
   function currentTab() {
     var h = hashParts()[0];
-    return TABS.indexOf(h) >= 0 ? h : "overview";
+    if (TABS.indexOf(h) >= 0) return h;
+    // US-DOSSIER-034: no tab in the hash (a bare reload, or arriving back from a
+    // drilldown that dropped the hash) → restore the last tab from storage so a
+    // reader lands where they left off, not always on Overview.
+    var saved = get(tabKey());
+    if (TABS.indexOf(saved) >= 0) return saved;
+    return "overview";
   }
   function applyTab() {
     var cur = currentTab();
@@ -1238,6 +1299,8 @@ export const CONSOLE_SCRIPT = `<script>
       var btn = document.querySelector('[data-tab="' + TABS[i] + '"]');
       if (btn) btn.classList.toggle("on", TABS[i] === cur);
     }
+    // US-DOSSIER-034: remember the active tab so it survives reload / drilldown.
+    set(tabKey(), cur);
     if (cur === "charter") applyCharter();
   }
   // US-DOSSIER-033: the Charter browser doc selector — pure client interaction
@@ -1248,6 +1311,9 @@ export const CONSOLE_SCRIPT = `<script>
     if (!items.length) return;
     var want = hashParts()[1] || "";
     if (want) { try { want = decodeURIComponent(want); } catch (e) { /* raw */ } }
+    // US-DOSSIER-034: no doc in the hash → restore the last-read doc from storage
+    // (scoped per project) so a bare reload / back-nav keeps the reader's place.
+    if (!want) { var saved = get("roll-charter:" + scope); if (saved) want = saved; }
     var found = false;
     for (var i = 0; i < items.length; i++) {
       if (items[i].getAttribute("data-doc") === want) { found = true; break; }
@@ -1260,6 +1326,7 @@ export const CONSOLE_SCRIPT = `<script>
     for (var k = 0; k < docs.length; k++) {
       docs[k].classList.toggle("on", docs[k].getAttribute("data-doc") === want);
     }
+    set("roll-charter:" + scope, want);
   }
   // US-DOSSIER-012: backlog search + state filters; #backlog/<state> pre-sets one.
   var active = {};
@@ -1371,6 +1438,10 @@ export const CONSOLE_SCRIPT = `<script>
   document.addEventListener("DOMContentLoaded", function () {
     applyLang();
     applyTab();
+    // US-DOSSIER-034: restore the reader's expanded sections (keyed by stable id)
+    // before the filters run, then keep them in sync as the reader toggles rows.
+    restoreOpen();
+    bindOpenPersistence();
     applyPrefilter();
     setupSwitcher();
     var chips = document.querySelectorAll(".bl-chip");
@@ -1596,7 +1667,7 @@ a{color:${C.blue};}
     `<div id="tab-charter" style="display:none;">${charterTab(input)}</div>`;
 
   return (
-    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    htmlHead(rollScope(input)) +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(input.brand.name)} · Truth Console</title>\n` +
     FONT_LINKS +
@@ -1636,7 +1707,7 @@ export function renderMachineStubPage(input: MachineStubInput): string {
   };
   const note = COMING[input.page];
   return (
-    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    htmlHead(rollScope(input)) +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(input.brand.name)} · ${meta.en}</title>\n` +
     FONT_LINKS +
@@ -1682,7 +1753,7 @@ export function renderMachineShell(input: {
     machinePage: input.page,
   });
   return (
-    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    htmlHead(rollScope(input)) +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(input.brand.name)} · ${esc(input.titleEn)}</title>\n` +
     FONT_LINKS +

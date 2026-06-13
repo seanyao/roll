@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderProjectsTable — AC2/AC4/AC5 > AC5: deterministic en/zh snapshots (color scrubbed, time pinned) 1`] = `
+"alpha  v3.1.0   pass     /exists/alpha
+beta   —        fail     /gone/beta  [missing]
+
+[missing] path no longer exists
+"
+`;
+
+exports[`renderProjectsTable — AC2/AC4/AC5 > AC5: deterministic en/zh snapshots (color scrubbed, time pinned) 2`] = `
+"alpha  v3.1.0   pass     /exists/alpha
+beta   —        fail     /gone/beta  [缺失]
+
+[缺失] 路径已不存在
+"
+`;

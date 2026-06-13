@@ -31,8 +31,10 @@ import {
   CONSOLE_SCRIPT,
   esc,
   FONT_LINKS,
+  htmlHead,
   kicker,
   MONO,
+  rollScope,
   SHELL_CSS,
   topBar,
   type ProjectRegistryEntry,
@@ -109,7 +111,7 @@ export function renderAgentsMachinePage(input: AgentsPageInput): string {
     `</section>`;
 
   return (
-    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    htmlHead(rollScope(input)) +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(input.brand.name)} · Agents</title>\n` +
     FONT_LINKS +

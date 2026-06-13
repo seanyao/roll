@@ -32,6 +32,36 @@ export interface TruthConsoleBrand {
   slogan: string;
 }
 
+/**
+ * US-DOSSIER-027 — one project row in the cross-project registry
+ * (`~/.roll/projects.json`, produced by US-DOSSIER-028). The console consumes
+ * it READ-ONLY for the top-bar switcher; it never writes the file. Schema is
+ * the 028 contract: `{ name, slug, path, releaseTag, verdict, lastIndexedAt }`.
+ */
+export interface ProjectRegistryEntry {
+  name: string;
+  slug: string;
+  /** Absolute path to the project root (the switcher targets its dossier). */
+  path: string;
+  releaseTag?: string;
+  verdict?: string;
+  lastIndexedAt?: string;
+}
+
+/**
+ * US-DOSSIER-027 — the machine-global breadcrumb (MACHINE: Agents · Skills ·
+ * Conventions · About). These are above-project, machine-layer entry points;
+ * their pages are built by later stories (this story wires the stable routing
+ * contract and points at sibling HTML files). `current` highlights the active
+ * page when one of those pages renders this header; on the console it is unset.
+ */
+export interface MachineNavLink {
+  key: "agents" | "skills" | "conventions" | "about";
+  en: string;
+  zh: string;
+  href: string;
+}
+
 /** One story row on the Backlog tab (US-DOSSIER-012). */
 export interface BacklogStoryVM {
   id: string;
@@ -81,6 +111,21 @@ export interface TruthConsoleInput {
   githubSlug?: string;
   /** Skills catalog + strict-audit truth (US-DOSSIER-017). */
   skills: SkillsPanelVM;
+  /**
+   * US-DOSSIER-027 — projects on this machine, read from `~/.roll/projects.json`
+   * (US-DOSSIER-028 populates it). Degrades gracefully: when absent/empty the
+   * caller passes the current project alone (or omits this entirely), and the
+   * switcher renders single-project, no-dropdown, never erroring.
+   */
+  projects?: ProjectRegistryEntry[];
+  /** The current project's slug — marks the active row in the switcher. */
+  currentSlug?: string;
+  /**
+   * US-DOSSIER-027 — which machine-global page (if any) is rendering this
+   * header. On the console it is unset, so the project name is the home anchor
+   * and no breadcrumb link is highlighted.
+   */
+  machinePage?: MachineNavLink["key"];
 }
 
 const MONO = `font-family:'IBM Plex Mono',monospace;`;
@@ -882,6 +927,20 @@ const TABS = [
 /** The router needs only the keys; serialized once, deterministic order. */
 const TAB_KEYS = TABS.map((t) => t.key);
 
+/**
+ * US-DOSSIER-027 — the machine-global breadcrumb. These four are the
+ * machine-layer (above-project) entry points the design reference's top bar
+ * promises. Their pages are built by later stories; the routing contract here
+ * is stable: each is a sibling HTML file of `features/index.html`. Order is
+ * fixed (Agents → Skills → Conventions → About) so the bar never reshuffles.
+ */
+const MACHINE_NAV: readonly MachineNavLink[] = [
+  { key: "agents", en: "Agents", zh: "Agents", href: "agents.html" },
+  { key: "skills", en: "Skills", zh: "技能", href: "skills.html" },
+  { key: "conventions", en: "Conventions", zh: "约定", href: "conventions.html" },
+  { key: "about", en: "About", zh: "关于", href: "about.html" },
+] as const;
+
 const CONSOLE_SCRIPT = `<script>
 (function () {
   var d = document.documentElement;
@@ -996,11 +1055,37 @@ const CONSOLE_SCRIPT = `<script>
       els[i].textContent = ms <= 0 ? "due" : "in " + Math.max(1, Math.round(ms / 60000)) + "m";
     }
   }
+  // US-DOSSIER-027: the project switcher dropdown — pure client interaction
+  // (no data fetch). Opens "roll · this machine", closes on outside click / Esc.
+  function setupSwitcher() {
+    var btn = document.getElementById("proj-switch-btn");
+    var menu = document.getElementById("proj-menu");
+    if (!btn || !menu) return; // single-project degrade: no dropdown rendered
+    function close() {
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    }
+    function open() {
+      menu.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+    }
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (menu.hidden) open(); else close();
+    });
+    document.addEventListener("click", function (e) {
+      if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) close();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") close();
+    });
+  }
   window.addEventListener("hashchange", function () { applyTab(); applyPrefilter(); });
   document.addEventListener("DOMContentLoaded", function () {
     applyLang();
     applyTab();
     applyPrefilter();
+    setupSwitcher();
     var chips = document.querySelectorAll(".bl-chip");
     for (var c = 0; c < chips.length; c++) {
       chips[c].addEventListener("click", function () {
@@ -1046,25 +1131,12 @@ const CONSOLE_SCRIPT = `<script>
 })();
 </script>`;
 
-export function renderTruthConsole(input: TruthConsoleInput): string {
-  const tabBar = TABS.map(
-    (t) =>
-      `<a href="#${t.key}" data-tab="${t.key}" class="console-tab">${bi(t.en, t.zh)}</a>`,
-  ).join("");
-
-  const header =
-    `<header style="position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:16px;height:54px;padding:0 22px;background:rgba(27,34,56,.97);backdrop-filter:blur(8px);border-bottom:1px solid #0e1424;">` +
-    `<a href="#overview" style="display:flex;align-items:center;gap:9px;cursor:pointer;flex:none;text-decoration:none;">` +
-    `<span style="width:9px;height:9px;border-radius:50%;background:${C.green};box-shadow:0 0 0 3px rgba(23,138,82,.22);"></span>` +
-    `<span style="${MONO}font-weight:600;font-size:15px;letter-spacing:.02em;color:#fff;">${esc(input.brand.name)}</span></a>` +
-    `<span style="${MONO}font-size:11.5px;color:#8f98ad;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(input.brand.slogan)}</span>` +
-    `<span style="flex:1;"></span>` +
-    `<span style="${MONO}font-size:11px;color:#6f7892;letter-spacing:.02em;white-space:nowrap;">${bi("release", "发版")} <b style="color:#cfd5e3;font-weight:600;">${esc(input.snapshot.release?.latestTag ?? "—")}</b></span>` +
-    `<div style="display:flex;border:1px solid #313a55;border-radius:999px;overflow:hidden;">` +
-    `<button type="button" data-set-lang="en" class="lang-btn">EN</button>` +
-    `<button type="button" data-set-lang="zh" class="lang-btn">中</button></div></header>`;
-
-  const css = `
+/**
+ * US-DOSSIER-027 — the shell CSS shared by the console AND the machine-global
+ * pages, so the sticky top bar (switcher + breadcrumb + lang toggle) looks
+ * identical everywhere. The console appends its own tab/row rules after this.
+ */
+const SHELL_CSS = `
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
 body{background:${C.bg};color:${C.body};font-family:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;}
@@ -1075,6 +1147,137 @@ html[data-lang="zh"] .lang-en{display:none;}
 html:not([data-lang]) .lang-zh{display:none;}
 .lang-btn{appearance:none;border:0;background:transparent;color:#8f98ad;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:4px 11px;cursor:pointer;}
 .lang-btn.on{background:#2d54e8;color:#fff;}
+.proj-switch-btn:hover{background:rgba(255,255,255,.05);}
+.proj-switch-btn[aria-expanded="true"] .proj-caret{transform:rotate(180deg);}
+.proj-item:hover{background:rgba(255,255,255,.06);border-radius:7px;}
+.mach-link:hover{color:#fff;}
+`;
+
+/** The shared web-font links (preconnect + IBM Plex), used by every page head. */
+const FONT_LINKS =
+  `<link rel="preconnect" href="https://fonts.googleapis.com">\n` +
+  `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n` +
+  `<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n`;
+
+/**
+ * US-DOSSIER-027 — the sticky dark top bar: the stable shell across every
+ * surface. LEFT a green-dot project switcher (project name in Mono 600) that
+ * opens a "roll · this machine" dropdown of the registry; MIDDLE a
+ * machine-global breadcrumb (MACHINE: Agents · Skills · Conventions · About);
+ * RIGHT the release badge (from the truth snapshot) + EN/中 toggle. Geometry is
+ * the design reference's (54px, rgba(27,34,56,.97), blur(8px), 1px #0e1424).
+ */
+interface TopBarInput {
+  brand: TruthConsoleBrand;
+  projects?: ProjectRegistryEntry[];
+  currentSlug?: string;
+  machinePage?: MachineNavLink["key"];
+  /** Only the release tag is read off the snapshot (the right-side badge). */
+  snapshot: { release?: { latestTag?: string } };
+}
+
+function topBar(input: TopBarInput): string {
+  // Switcher rows: the registry when present, else this project alone — the
+  // graceful single-project degrade (AC2). Self → no dropdown chevron, no menu.
+  const registry = input.projects ?? [];
+  const entries: ProjectRegistryEntry[] =
+    registry.length > 0 ? registry : [{ name: input.brand.name, slug: input.currentSlug ?? input.brand.name, path: "." }];
+  const currentSlug = input.currentSlug ?? entries[0]?.slug ?? input.brand.name;
+  const multi = entries.length > 1;
+
+  const dot = `<span style="width:9px;height:9px;border-radius:50%;background:${C.green};box-shadow:0 0 0 3px rgba(23,138,82,.22);flex:none;"></span>`;
+  const projName = `<span style="${MONO}font-weight:600;font-size:15px;letter-spacing:.02em;color:#fff;white-space:nowrap;">${esc(input.brand.name)}</span>`;
+
+  const menuItems = entries
+    .map((p) => {
+      const on = p.slug === currentSlug;
+      // Other projects live at their own .roll/features/index.html on disk; the
+      // current project's row routes home to the console overview.
+      const href = on ? "#overview" : `${esc(p.path)}/.roll/features/index.html`;
+      const tag = p.releaseTag !== undefined && p.releaseTag !== "" ? esc(p.releaseTag) : "";
+      return (
+        `<a class="proj-item${on ? " on" : ""}" href="${href}" role="menuitem"${on ? ' aria-current="true"' : ""} ` +
+        `style="display:flex;align-items:center;gap:9px;padding:8px 13px;text-decoration:none;color:#cfd5e3;${MONO}font-size:12.5px;white-space:nowrap;">` +
+        `<span class="proj-check" style="width:12px;flex:none;color:${C.green};font-weight:600;">${on ? "✓" : ""}</span>` +
+        `<span style="flex:1;color:${on ? "#fff" : "#cfd5e3"};font-weight:${on ? "600" : "400"};">${esc(p.name)}</span>` +
+        (tag !== "" ? `<span style="color:#6f7892;font-size:10.5px;">${tag}</span>` : "") +
+        `</a>`
+      );
+    })
+    .join("");
+
+  // The switcher: a button that toggles the dropdown when there is more than one
+  // project; a plain home anchor (no chevron, no menu) when there is only one.
+  const switcher = multi
+    ? `<div class="proj-switch" style="position:relative;flex:none;">` +
+      `<button type="button" id="proj-switch-btn" class="proj-switch-btn" aria-haspopup="menu" aria-expanded="false" ` +
+      `style="display:flex;align-items:center;gap:9px;cursor:pointer;background:transparent;border:0;padding:5px 7px;border-radius:8px;">` +
+      dot +
+      projName +
+      `<span class="proj-caret" style="${MONO}font-size:9px;color:#8f98ad;flex:none;transition:transform .18s;">▾</span></button>` +
+      `<div id="proj-menu" class="proj-menu" role="menu" aria-label="switch project · 切换项目" hidden ` +
+      `style="position:absolute;top:42px;left:0;min-width:240px;background:rgba(27,34,56,.99);border:1px solid #313a55;border-radius:10px;padding:6px;box-shadow:0 10px 30px rgba(7,10,20,.5);z-index:40;">` +
+      `<div style="${MONO}font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#6f7892;padding:6px 13px 8px;">${esc(input.brand.name)} · ${bi("this machine", "这台机器")}</div>` +
+      menuItems +
+      `</div></div>`
+    : `<a href="#overview" class="proj-switch-btn" style="display:flex;align-items:center;gap:9px;cursor:pointer;flex:none;text-decoration:none;padding:5px 7px;">` +
+      dot +
+      projName +
+      `</a>`;
+
+  const crumbsNav =
+    `<nav style="flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:9px;${MONO}font-size:12px;color:#8f98ad;overflow:hidden;" aria-label="machine layer · 机器层">` +
+    `<span style="${MONO}font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#5b6480;flex:none;">${bi("Machine", "机器")}</span>` +
+    MACHINE_NAV.map((m, i) => {
+      const active = input.machinePage === m.key;
+      const sep = i > 0 ? `<span style="color:#3a4360;flex:none;">·</span>` : "";
+      return (
+        sep +
+        `<a class="mach-link${active ? " on" : ""}" data-machine="${m.key}" href="${esc(m.href)}"${active ? ' aria-current="page"' : ""} ` +
+        `style="text-decoration:none;color:${active ? "#fff" : "#8f98ad"};font-weight:${active ? "600" : "400"};white-space:nowrap;flex:none;">${bi(m.en, m.zh)}</a>`
+      );
+    }).join("") +
+    `</nav>`;
+
+  const releaseTag = input.snapshot.release?.latestTag;
+  const releaseBadge =
+    releaseTag !== undefined && releaseTag !== ""
+      ? `<span style="${MONO}font-size:11px;color:#6f7892;letter-spacing:.02em;white-space:nowrap;">${bi("release", "发版")} <b style="color:#cfd5e3;font-weight:600;">${esc(releaseTag)}</b></span>`
+      : "";
+
+  const langToggle =
+    `<div style="display:flex;border:1px solid #313a55;border-radius:999px;overflow:hidden;flex:none;">` +
+    `<button type="button" data-set-lang="en" class="lang-btn">EN</button>` +
+    `<button type="button" data-set-lang="zh" class="lang-btn">中</button></div>`;
+
+  // The injected slogan stays beside the project name (the reference's place),
+  // a quiet tagline; it remains injected brand data, never hardcoded.
+  const slogan =
+    input.brand.slogan !== ""
+      ? `<span style="${MONO}font-size:11.5px;color:#8f98ad;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none;max-width:220px;">${esc(input.brand.slogan)}</span>`
+      : "";
+
+  return (
+    `<header style="position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:16px;height:54px;padding:0 22px;background:rgba(27,34,56,.97);backdrop-filter:blur(8px);border-bottom:1px solid #0e1424;">` +
+    switcher +
+    slogan +
+    crumbsNav +
+    `<div style="flex:none;display:flex;align-items:center;gap:14px;">` +
+    releaseBadge +
+    langToggle +
+    `</div></header>`
+  );
+}
+
+export function renderTruthConsole(input: TruthConsoleInput): string {
+  const tabBar = TABS.map(
+    (t) =>
+      `<a href="#${t.key}" data-tab="${t.key}" class="console-tab">${bi(t.en, t.zh)}</a>`,
+  ).join("");
+
+  const header = topBar(input);
+
+  const css = SHELL_CSS + `
 .console-tab{appearance:none;border:1px solid transparent;border-bottom:0;background:transparent;color:${C.sub};font-size:13px;font-weight:600;padding:9px 16px;border-radius:9px 9px 0 0;cursor:pointer;text-decoration:none;}
 .console-tab.on{background:${C.card};border-color:${C.line};color:${C.ink};box-shadow:0 -1px 2px rgba(17,26,69,.04);}
 .console-tab:hover{color:${C.ink};}
@@ -1107,9 +1310,7 @@ a{color:${C.blue};}
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(input.brand.name)} · Truth Console</title>\n` +
-    `<link rel="preconnect" href="https://fonts.googleapis.com">\n` +
-    `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n` +
-    `<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n` +
+    FONT_LINKS +
     `<style>${css}</style>\n` +
     `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
     header +
@@ -1119,5 +1320,48 @@ a{color:${C.blue};}
     `</main>\n` +
     `<script id="roll-truth" type="application/json">\n${input.snapshotJson.replace(/<\//g, "<\\/")}</script>\n` +
     `</body>\n</html>\n`
+  );
+}
+
+export interface MachineStubInput extends TopBarInput {
+  /** Which machine-global page this is — drives the heading + highlighted link. */
+  page: MachineNavLink["key"];
+}
+
+/**
+ * US-DOSSIER-027 — the machine-global pages (Agents · Skills · Conventions ·
+ * About) the top-bar breadcrumb routes to. Later stories fill these with real
+ * content; THIS story emits them as the stub targets so the routing contract is
+ * live (no 404) and they already wear the same sticky top-bar shell. They share
+ * the console's switcher + lang script, so EN/中 and the project switcher work
+ * here too.
+ */
+export function renderMachineStubPage(input: MachineStubInput): string {
+  const meta = MACHINE_NAV.find((m) => m.key === input.page) ?? { key: input.page, en: input.page, zh: input.page, href: `${input.page}.html` };
+  const header = topBar({ ...input, machinePage: input.page });
+  const COMING: Record<MachineNavLink["key"], { en: string; zh: string }> = {
+    agents: { en: "The machine-wide agent roster lands here.", zh: "机器级 agent 名册将落在这里。" },
+    skills: { en: "The machine-wide skills catalog lands here.", zh: "机器级技能清单将落在这里。" },
+    conventions: { en: "The shared conventions live here.", zh: "共享约定将住在这里。" },
+    about: { en: "About roll on this machine.", zh: "关于本机上的 roll。" },
+  };
+  const note = COMING[input.page];
+  return (
+    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
+    `<title>${esc(input.brand.name)} · ${meta.en}</title>\n` +
+    FONT_LINKS +
+    `<style>${SHELL_CSS}</style>\n` +
+    `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
+    header +
+    `<main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;">` +
+    `<div style="padding:34px 0 8px;">` +
+    kicker(bi("Machine layer", "机器层")) +
+    `<h1 style="margin:10px 0 0;font-size:33px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi(meta.en, meta.zh)}</h1>` +
+    `<p style="margin:12px 0 0;max-width:660px;font-size:15.5px;line-height:1.6;color:${C.sub};">${bi(note.en, note.zh)}</p></div>` +
+    `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:28px 24px;margin:18px 0;color:${C.faint};font-size:13.5px;">` +
+    bi("This page is being built.", "本页建设中。") +
+    `</section>` +
+    `</main>\n</body>\n</html>\n`
   );
 }

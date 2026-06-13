@@ -5,8 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { serializeTruthSnapshot, type TruthSnapshot } from "@roll/spec";
-import { renderTruthConsole } from "../src/lib/truth-console.js";
+import { renderTruthConsole, renderMachineStubPage, type ProjectRegistryEntry } from "../src/lib/truth-console.js";
 import { collectLoopHeartbeat } from "../src/lib/loop-heartbeat.js";
+import { parseProjectsRegistry } from "../src/lib/projects-registry.js";
 
 const SNAP: TruthSnapshot = {
   generatedAt: "2026-06-13T00:00:00Z",
@@ -127,7 +128,10 @@ const CYCLES = [
   },
 ];
 
-function render(snapshot: TruthSnapshot = SNAP): string {
+function render(
+  snapshot: TruthSnapshot = SNAP,
+  extra: { projects?: ProjectRegistryEntry[]; currentSlug?: string } = {},
+): string {
   return renderTruthConsole({
     snapshot,
     snapshotJson: serializeTruthSnapshot(snapshot),
@@ -140,6 +144,7 @@ function render(snapshot: TruthSnapshot = SNAP): string {
     releaseScope: RELEASE_SCOPE,
     githubSlug: "seanyao/roll",
     skills: SKILLS,
+    ...extra,
   });
 }
 
@@ -468,5 +473,148 @@ describe("command chips + freshness — US-DOSSIER-018", () => {
     expect(html).toContain('class="hb-next"');
     expect(html).toContain('data-next="2026-06-13T00:30:00Z"');
     expect(html).toContain("tickCountdown");
+  });
+});
+
+// US-DOSSIER-027 — the sticky dark top-bar shell: project switcher + machine
+// breadcrumb. The header assertions below are updated deliberately for this
+// story: the old single-crumb slogan-only header is replaced by switcher +
+// machine breadcrumb + release badge + lang toggle.
+const REGISTRY: ProjectRegistryEntry[] = [
+  { name: "roll", slug: "roll", path: "/Users/me/roll", releaseTag: "v3.612.2", verdict: "pass" },
+  { name: "acme-api", slug: "acme-api", path: "/Users/me/acme", releaseTag: "v1.2.0", verdict: "warn" },
+  { name: "zeta", slug: "zeta", path: "/Users/me/zeta" },
+];
+
+describe("top-bar shell — US-DOSSIER-027", () => {
+  it("AC1: header geometry matches the design reference (54px, dark blur, hairline, green dot, Mono 600 name)", () => {
+    const html = render();
+    expect(html).toContain("position:sticky;top:0;z-index:30");
+    expect(html).toContain("height:54px");
+    expect(html).toContain("background:rgba(27,34,56,.97)");
+    expect(html).toContain("backdrop-filter:blur(8px)");
+    expect(html).toContain("border-bottom:1px solid #0e1424");
+    // 9px green dot with the box-shadow halo
+    expect(html).toContain("width:9px;height:9px;border-radius:50%;background:#178a52;box-shadow:0 0 0 3px rgba(23,138,82,.22)");
+    // project name in IBM Plex Mono 600 / 15px / white
+    expect(html).toMatch(/IBM Plex Mono[^"]*font-weight:600;font-size:15px;[^"]*color:#fff;[^>]*>roll</);
+    // the project tabs row stays sticky just below the bar
+    expect(html).toContain("position:sticky;top:54px");
+    expect(html).toContain("z-index:20");
+  });
+
+  it("AC2: multi-project registry → switcher dropdown lists every project, current marked, others link to their dossier", () => {
+    const html = render(SNAP, { projects: REGISTRY, currentSlug: "roll" });
+    expect(html).toContain('id="proj-switch-btn"');
+    expect(html).toContain('id="proj-menu"');
+    expect(html).toContain('aria-haspopup="menu"');
+    // dropdown header is "<brand> · this machine" (bilingual)
+    expect(html).toContain("这台机器");
+    expect(html).toContain("this machine");
+    // every registry project is listed
+    for (const p of REGISTRY) expect(html).toContain(`>${p.name}<`);
+    // current project marked + routes home; another project links to its dossier
+    expect(html).toContain('aria-current="true"');
+    expect(html).toContain('href="/Users/me/acme/.roll/features/index.html"');
+    // the dropdown open/close interaction is wired
+    expect(html).toContain("setupSwitcher");
+  });
+
+  it("AC2: missing/empty registry → single-project silent degrade (no dropdown, no error)", () => {
+    const none = render(SNAP, { projects: [], currentSlug: "roll" });
+    expect(none).not.toContain('id="proj-menu"');
+    expect(none).not.toContain('id="proj-switch-btn"');
+    // still renders the project name as a home anchor
+    expect(none).toMatch(/href="#overview"[^>]*class="proj-switch-btn"/);
+    expect(none).toContain(">roll<");
+    // omitting projects entirely behaves identically (graceful)
+    const omitted = render();
+    expect(omitted).not.toContain('id="proj-menu"');
+    // a lone registry row that IS the current project also stays single
+    const solo = render(SNAP, { projects: [REGISTRY[0]!], currentSlug: "roll" });
+    expect(solo).not.toContain('id="proj-menu"');
+  });
+
+  it("AC3: machine-global breadcrumb wires Agents · Skills · Conventions · About, bilingual, with stable routes", () => {
+    const html = render();
+    expect(html).toContain('aria-label="machine layer · 机器层"'); // nav has a localized aria-label
+    expect(html).toContain('data-machine="agents"');
+    expect(html).toContain('data-machine="skills"');
+    expect(html).toContain('data-machine="conventions"');
+    expect(html).toContain('data-machine="about"');
+    expect(html).toContain('href="agents.html"');
+    expect(html).toContain('href="conventions.html"');
+    expect(html).toContain('href="about.html"');
+    // bilingual machine kicker + an English/中 label pair
+    expect(html).toContain(">Machine<");
+    expect(html).toContain(">机器<");
+    expect(html).toContain(">Agents<");
+    expect(html).toContain(">约定<"); // Conventions zh
+    // on the console no machine page is current (project name is the home anchor)
+    expect(html).not.toContain('aria-current="page"');
+  });
+
+  it("AC4: EN/中 toggle persists to localStorage 'roll-lang'; first visit infers from navigator.language", () => {
+    const html = render();
+    expect(html).toContain('data-set-lang="en"');
+    expect(html).toContain('data-set-lang="zh"');
+    expect(html).toContain('set("roll-lang", lang)'); // write on toggle
+    expect(html).toContain('get("roll-lang")'); // read on load
+    expect(html).toContain('(navigator.language || "").toLowerCase().indexOf("zh") === 0'); // zh inference
+  });
+
+  it("AC5: release badge reads the snapshot tag; missing tag renders no undefined", () => {
+    const withTag = render();
+    expect(withTag).toMatch(/release[\s\S]{0,80}v3\.612\.2/);
+    const noRel: TruthSnapshot = { ...SNAP, release: undefined };
+    const html = render(noRel);
+    expect(html).not.toContain("undefined");
+    // the badge degrades to empty rather than rendering "release —"
+    expect(html).not.toMatch(/发版<\/span><b[^>]*>—/);
+  });
+
+  it("AC6: machine-global stub pages wear the same top-bar shell and self-highlight", () => {
+    const page = renderMachineStubPage({
+      brand: { name: "roll", slogan: "It just works." },
+      snapshot: SNAP,
+      projects: REGISTRY,
+      currentSlug: "roll",
+      page: "conventions",
+    });
+    // same sticky dark bar geometry
+    expect(page).toContain("background:rgba(27,34,56,.97)");
+    expect(page).toContain("height:54px");
+    // the breadcrumb highlights the current machine page
+    expect(page).toContain('data-machine="conventions"');
+    expect(page).toContain('aria-current="page"');
+    // switcher + lang script ride along
+    expect(page).toContain('id="proj-switch-btn"');
+    expect(page).toContain('data-set-lang="zh"');
+    expect(page).not.toContain("undefined");
+  });
+});
+
+describe("projects registry parser — US-DOSSIER-027", () => {
+  it("parses the 028 array contract, sorts by name, keeps optional fields", () => {
+    const text = JSON.stringify([
+      { name: "zeta", slug: "zeta", path: "/z" },
+      { name: "acme", slug: "acme", path: "/a", releaseTag: "v1", verdict: "pass", lastIndexedAt: "2026-06-13T00:00:00Z" },
+    ]);
+    const rows = parseProjectsRegistry(text);
+    expect(rows.map((r) => r.name)).toEqual(["acme", "zeta"]); // deterministic order
+    expect(rows[0]).toMatchObject({ slug: "acme", releaseTag: "v1", verdict: "pass" });
+  });
+
+  it("tolerates a { projects: [...] } wrapper", () => {
+    const text = JSON.stringify({ projects: [{ name: "x", slug: "x", path: "/x" }] });
+    expect(parseProjectsRegistry(text)).toHaveLength(1);
+  });
+
+  it("degrades to [] on malformed JSON or wrong-shape rows (never throws)", () => {
+    expect(parseProjectsRegistry("not json")).toEqual([]);
+    expect(parseProjectsRegistry("{}")).toEqual([]);
+    expect(parseProjectsRegistry("42")).toEqual([]);
+    // rows missing required string fields are dropped
+    expect(parseProjectsRegistry(JSON.stringify([{ name: "x" }, { slug: 1, path: "/p" }]))).toEqual([]);
   });
 });

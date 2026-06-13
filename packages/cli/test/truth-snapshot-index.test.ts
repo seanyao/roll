@@ -92,4 +92,36 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     const snap = JSON.parse(readFileSync(join(p, ".roll", "features", "truth.json"), "utf8"));
     expect(snap.cycle.failed3d).toBe(3); // c2 failed + c3 reverted + c4 blocked; c1 delivered not counted
   });
+
+  // US-DOSSIER-021 — the per-story ladder + evidence registry rides the ONE snapshot.
+  it("US-DOSSIER-021: truth.json carries stories[] with ladder + evidence; aggregate unchanged; embed === file", async () => {
+    const p = project();
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    await runIndex(p);
+    const file = readFileSync(join(p, ".roll", "features", "truth.json"), "utf8");
+    const snap = JSON.parse(file);
+    // aggregate is unchanged: still 4 stories, sums to total.
+    expect(snap.story.total).toBe(4);
+    expect(Object.values(snap.story.spectrum).reduce((a: number, b) => a + (b as number), 0)).toBe(4);
+    // the registry has one row per story, deterministic epic→id order.
+    expect(Array.isArray(snap.stories)).toBe(true);
+    expect(snap.stories.map((s: { id: string }) => s.id)).toEqual(["US-T-1", "US-T-2", "US-T-3", "US-T-4"]);
+    for (const row of snap.stories) {
+      expect(row).toHaveProperty("epic", "alpha");
+      expect(["claimed", "merged", "attested", "none"]).toContain(row.ladder);
+      expect(row.evidence).toHaveProperty("report");
+      expect(row.evidence).toHaveProperty("acMap");
+      expect(row.evidence).toHaveProperty("visualEvidence");
+      expect(typeof row.legacy).toBe("boolean");
+    }
+    // the spectrum aggregate equals folding the registry's truthState column.
+    const folded: Record<string, number> = { done: 0, wip: 0, hold: 0, todo: 0, fail: 0, unknown: 0 };
+    for (const row of snap.stories) folded[row.truthState] += 1;
+    expect(folded).toEqual(snap.story.spectrum);
+    // AC3 still holds with the larger payload: the page embed === truth.json bytes.
+    const html = readFileSync(join(p, ".roll", "features", "index.html"), "utf8");
+    const m = /<script id="roll-truth" type="application\/json">\n([\s\S]*?)<\/script>/.exec(html);
+    const embedded = (m?.[1] ?? "").replace(/<\\\//g, "</");
+    expect(embedded).toBe(file);
+  });
 });

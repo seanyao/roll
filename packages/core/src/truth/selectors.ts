@@ -239,6 +239,7 @@ import {
   type TruthSnapshotCycle,
   type TruthSnapshotLoop,
   type TruthSnapshotRelease,
+  type TruthSnapshotStoryEntry,
   type TruthSpectrumState,
 } from "@roll/spec";
 
@@ -253,6 +254,10 @@ export interface TruthSnapshotInput {
   cycle?: TruthSnapshotCycle;
   release?: TruthSnapshotRelease;
   loop?: TruthSnapshotLoop;
+  /** US-DOSSIER-021 — the per-story delivery-ladder + evidence registry, built
+   *  at the collection edge (index-gen) and carried verbatim onto the snapshot.
+   *  Optional/additive: omitting it keeps the snapshot byte-identical to before. */
+  stories?: readonly TruthSnapshotStoryEntry[];
 }
 
 /**
@@ -271,5 +276,6 @@ export function buildTruthSnapshot(input: TruthSnapshotInput): TruthSnapshot {
     ...(input.cycle !== undefined ? { cycle: input.cycle } : {}),
     ...(input.release !== undefined ? { release: input.release } : {}),
     ...(input.loop !== undefined ? { loop: input.loop } : {}),
+    ...(input.stories !== undefined ? { stories: [...input.stories] } : {}),
   };
 }

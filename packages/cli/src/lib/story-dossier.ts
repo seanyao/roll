@@ -15,7 +15,7 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
-import { parseEventLine } from "@roll/spec";
+import { parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -756,6 +756,49 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   if (correctionActions.length > 0) out.correctionActions = correctionActions;
 
   return out;
+}
+
+/**
+ * US-DOSSIER-021 — the per-story evidence presence flags behind the ladder's
+ * `attested` rung. Presence only, each from a real artifact on disk under the
+ * card folder `.roll/features/<epic>/<ID>/` (reusing the SAME probe locations
+ * the dossier collector already reads — `latest/<ID>-report.html`,
+ * `ac-map.json`, `latest/screenshots/`):
+ *   - `report`         — a `latest/<ID>-report.html` attest report exists.
+ *   - `acMap`          — an `ac-map.json` exists for the story.
+ *   - `visualEvidence` — at least one file under `latest/screenshots/`, OR a
+ *     screenshot-kind row in ac-map (a `kind: "screenshot"` entry). Best-effort:
+ *     a missing/unreadable source reads as the honest `false`.
+ */
+export function storyEvidenceFlags(projectPath: string, story: DossierStory): StoryEvidenceFlags {
+  const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id);
+  let report = false;
+  try {
+    report = statSync(joinPath(dir, "latest", `${story.id}-report.html`)).isFile();
+  } catch {
+    /* no report */
+  }
+  const acMap = existsSync(joinPath(dir, "ac-map.json"));
+  let visualEvidence = false;
+  try {
+    const screenshotsDir = joinPath(dir, "latest", "screenshots");
+    visualEvidence = existsSync(screenshotsDir) && readdirSync(screenshotsDir).some((f) => f.trim() !== "");
+  } catch {
+    /* no screenshots dir */
+  }
+  if (!visualEvidence && acMap) {
+    try {
+      const rows = JSON.parse(readFile(joinPath(dir, "ac-map.json"))) as unknown;
+      if (Array.isArray(rows)) {
+        visualEvidence = rows.some(
+          (r) => r != null && typeof r === "object" && (r as { kind?: unknown }).kind === "screenshot",
+        );
+      }
+    } catch {
+      /* unreadable ac-map → no screenshot-kind signal */
+    }
+  }
+  return { report, acMap, visualEvidence };
 }
 
 function collectExecutionRefs(projectPath: string, storyId: string, text: string, gitFacts?: GitDossierFacts | null): ExecutionRef[] {

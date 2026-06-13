@@ -36,4 +36,40 @@ describe("buildTruthSnapshot", () => {
     expect(a.endsWith("\n")).toBe(true);
     expect(JSON.parse(a).story.total).toBe(1);
   });
+
+  // US-DOSSIER-021 — the per-story ladder + evidence registry rides the snapshot.
+  it("carries the stories[] registry verbatim and stays additive when omitted", () => {
+    const stories = [
+      { id: "US-A-1", epic: "alpha", ladder: "attested" as const, evidence: { report: true, acMap: true, visualEvidence: true }, truthState: "done" as const, truthReason: "merge_evidence_confirms", legacy: false },
+      { id: "US-A-2", epic: "alpha", ladder: "claimed" as const, evidence: { report: false, acMap: false, visualEvidence: false }, truthState: "unknown" as const, legacy: false },
+    ];
+    const withStories = buildTruthSnapshot({ generatedAt: "t", storyStates: ["done", "unknown"], legacyCount: 0, stories });
+    expect(withStories.stories).toEqual(stories);
+    // additive: omitting stories leaves the key off entirely (byte-identical to before).
+    const without = buildTruthSnapshot({ generatedAt: "t", storyStates: ["done", "unknown"], legacyCount: 0 });
+    expect(without.stories).toBeUndefined();
+    expect("stories" in without).toBe(false);
+  });
+
+  it("the aggregate spectrum still folds from storyStates while stories[] rides alongside", () => {
+    const states = ["done", "done", "todo", "unknown"] as const;
+    const s = buildTruthSnapshot({
+      generatedAt: "t",
+      storyStates: states,
+      legacyCount: 1,
+      stories: states.map((st, i) => ({
+        id: `US-${i}`,
+        epic: "e",
+        ladder: st === "done" ? ("merged" as const) : ("none" as const),
+        evidence: { report: false, acMap: false, visualEvidence: false },
+        truthState: st,
+        legacy: i === 0,
+      })),
+    });
+    // aggregate = sum of storyStates, independent of how many stories[] rows exist.
+    expect(s.story.total).toBe(4);
+    expect(Object.values(s.story.spectrum).reduce((a, b) => a + b, 0)).toBe(s.story.total);
+    expect(s.story.spectrum).toEqual({ done: 2, wip: 0, hold: 0, todo: 1, fail: 0, unknown: 1 });
+    expect(s.stories).toHaveLength(4);
+  });
 });

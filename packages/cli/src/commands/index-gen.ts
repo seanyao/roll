@@ -12,7 +12,8 @@ import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
 import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
-import { SPINE_STAGES, countLegacyStories, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
+import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
+import type { TruthSnapshotStoryEntry } from "@roll/spec";
 import { renderTruthConsole, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
@@ -24,7 +25,7 @@ import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
-import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyHasMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
+import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
 
@@ -316,6 +317,25 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       }
     }
   }
+  // US-DOSSIER-021: the per-story delivery-ladder + evidence registry, built from
+  // the SAME epic-sorted/id-sorted `collectDossier` walk so order is deterministic
+  // (no Date.now()/Math.random()). The `merged` rung reuses the `delivered` signal
+  // collectDossier already folds (truth selector + FIX-278 offline merge truth);
+  // we never re-derive merge here. Carried onto the ONE snapshot below.
+  const storyRegistry: TruthSnapshotStoryEntry[] = epics.flatMap((epic) =>
+    epic.stories.map((story) => {
+      const evidence = storyEvidenceFlags(cwd, story);
+      return {
+        id: story.id,
+        epic: story.epic,
+        ladder: deriveDeliveryLadder(story, evidence),
+        evidence,
+        truthState: storySpectrumState(story),
+        ...(story.truthReason !== undefined ? { truthReason: story.truthReason } : {}),
+        legacy: story.legacy === true,
+      };
+    }),
+  );
   let pages = 0;
   try {
     // US-DOSSIER-010: ONE aggregation per run — the snapshot is serialized once,
@@ -332,6 +352,9 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       ...(truth.release !== undefined ? { release: truth.release } : {}),
       // US-DOSSIER-011: the loop heartbeat is part of the ONE snapshot too.
       loop: collectLoopHeartbeat(defaultHeartbeatDeps(cwd, projectSlug(), launchAgentsDir())),
+      // US-DOSSIER-021: the per-story ladder + evidence registry rides the SAME
+      // snapshot, so truth.json and the index.html embed carry it identically.
+      stories: storyRegistry,
     });
     const snapshotJson = serializeTruthSnapshot(snapshot);
     writeFileSync(join(featuresDir, "truth.json"), snapshotJson, "utf8");

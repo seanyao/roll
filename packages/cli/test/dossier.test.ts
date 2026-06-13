@@ -9,9 +9,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { collectDossier, type DossierEpic } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
-import { renderFeaturesIndex, renderTruthBoard, spineMotif } from "../src/lib/dossier-index.js";
+import { deriveDeliveryLadder, renderFeaturesIndex, renderTruthBoard, spineMotif } from "../src/lib/dossier-index.js";
 import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
-import { collectStoryDossierInput, renderStoryDossier, storyHasMergeEvidence, storySpine } from "../src/lib/story-dossier.js";
+import { collectStoryDossierInput, renderStoryDossier, storyEvidenceFlags, storyHasMergeEvidence, storySpine } from "../src/lib/story-dossier.js";
 import { markPhaseDone } from "../src/lib/story-page.js";
 
 const dirs: string[] = [];
@@ -1222,5 +1222,69 @@ describe("dossier aligns status/type with the backlog (US-DOSSIER)", () => {
     expect(html).toContain('data-status="hold"><span class="stype US">US</span><span class="sid">US-MIX-4</span>');
     expect(html).toContain('data-status="todo"><span class="stype US">US</span><span class="sid">US-MIX-3</span>');
     expect(html).toContain('class="lifespine');
+  });
+});
+
+describe("US-DOSSIER-021 — per-story delivery ladder", () => {
+  const full = { report: true, acMap: true, visualEvidence: true };
+  const bare = { report: false, acMap: false, visualEvidence: false };
+
+  it("attested = delivered AND full evidence (report + ac-map + screenshot)", () => {
+    expect(deriveDeliveryLadder({ delivered: true, status: "done" }, full)).toBe("attested");
+  });
+
+  it("merged = delivered but missing some attest evidence (the honest middle rung)", () => {
+    expect(deriveDeliveryLadder({ delivered: true, status: "done" }, { report: true, acMap: true, visualEvidence: false })).toBe("merged");
+    expect(deriveDeliveryLadder({ delivered: true, status: "done" }, bare)).toBe("merged");
+    // delivered even though the backlog claim is absent — merge truth promotes it.
+    expect(deriveDeliveryLadder({ delivered: true }, full).startsWith("attest")).toBe(true);
+  });
+
+  it("claimed = backlog Done but NO merge evidence (a premature Done)", () => {
+    expect(deriveDeliveryLadder({ delivered: false, status: "done" }, bare)).toBe("claimed");
+    // evidence presence cannot lift a not-delivered card past claimed.
+    expect(deriveDeliveryLadder({ delivered: false, status: "done" }, full)).toBe("claimed");
+  });
+
+  it("none = not even claimed done (todo / wip / hold / absent)", () => {
+    expect(deriveDeliveryLadder({ delivered: false, status: "todo" }, bare)).toBe("none");
+    expect(deriveDeliveryLadder({ delivered: false, status: "in_progress" }, bare)).toBe("none");
+    expect(deriveDeliveryLadder({ delivered: false, status: "hold" }, full)).toBe("none");
+    expect(deriveDeliveryLadder({ delivered: false }, bare)).toBe("none");
+  });
+});
+
+describe("US-DOSSIER-021 — storyEvidenceFlags probes the card folder", () => {
+  function evidenceProject(): string {
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-evid-")));
+    dirs.push(p);
+    const f = join(p, ".roll", "features");
+    // US-E-1: full evidence — report + ac-map + a screenshot under latest/.
+    const run = join(f, "evid", "US-E-1", "2026-06-01T00-00-00");
+    mkdirSync(join(run, "screenshots"), { recursive: true });
+    writeFileSync(join(run, "US-E-1-report.html"), "<html></html>");
+    writeFileSync(join(run, "screenshots", "shot.png"), "png");
+    symlinkSync(run, join(f, "evid", "US-E-1", "latest"));
+    writeFileSync(join(f, "evid", "US-E-1", "ac-map.json"), JSON.stringify([{ ac: "AC1", status: "pass" }]));
+    // US-E-2: report + ac-map but NO screenshot file (visualEvidence false).
+    const run2 = join(f, "evid", "US-E-2", "2026-06-02T00-00-00");
+    mkdirSync(run2, { recursive: true });
+    writeFileSync(join(run2, "US-E-2-report.html"), "<html></html>");
+    symlinkSync(run2, join(f, "evid", "US-E-2", "latest"));
+    writeFileSync(join(f, "evid", "US-E-2", "ac-map.json"), JSON.stringify([{ ac: "AC1", status: "pass", kind: "screenshot" }]));
+    // US-E-3: nothing on disk.
+    mkdirSync(join(f, "evid", "US-E-3"), { recursive: true });
+    return p;
+  }
+
+  it("sets each flag from a real artifact; a screenshot-kind ac-map row counts as visual", () => {
+    const p = evidenceProject();
+    const e1 = storyEvidenceFlags(p, { id: "US-E-1", epic: "evid", type: "US", delivered: true, legacy: false });
+    expect(e1).toEqual({ report: true, acMap: true, visualEvidence: true });
+    const e2 = storyEvidenceFlags(p, { id: "US-E-2", epic: "evid", type: "US", delivered: true, legacy: false });
+    // no screenshot file, but ac-map carries a kind:"screenshot" row → visual true.
+    expect(e2).toEqual({ report: true, acMap: true, visualEvidence: true });
+    const e3 = storyEvidenceFlags(p, { id: "US-E-3", epic: "evid", type: "US", delivered: false, legacy: false });
+    expect(e3).toEqual({ report: false, acMap: false, visualEvidence: false });
   });
 });

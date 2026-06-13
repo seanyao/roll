@@ -73,6 +73,7 @@ import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
 import { SELF_SCORE_USAGE, selfScoreCommand } from "./self-score.js";
 import { setupCommand } from "./setup.js";
+import { SHOWCASE_USAGE, showcaseCommand } from "./showcase.js";
 import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
@@ -225,6 +226,16 @@ export function registerAll(): void {
   // through the normal unknown-route error. npm publish stays the owner's
   // separate, 2FA-authenticated step.
   registerPorted("release", releaseCommand);
+  // US-SHOW-001: `roll showcase` — the golden-path standard E2E. Resets the
+  // target card in a throwaway sandbox, casts a heterogeneous real-agent trio
+  // (builder=kimi / reviewer=claude / scorer=pi), delivers it via `roll loop
+  // go`, captures fresh CLI+web screenshots, assembles the full evidence chain,
+  // and emits a pass/fail verdict. The real-agent step is the only
+  // non-deterministic one (delegated to `loop go`); the orchestration heart
+  // (reset / casting validation / chain assembly / verdict) is the pure
+  // ../lib/showcase.ts, unit-tested in the normal suite. Never touches the main
+  // repo or the real ~/.roll. Release-runnable (recommended, non-hard-blocking).
+  registerPorted("showcase", showcaseCommand, { help: SHOWCASE_USAGE });
   // `prices`: full surface TS (show/help/unknown + refresh network write).
   // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
   // fallback remains (US-PORT-017). REFACTOR-051 owner review kept this as the

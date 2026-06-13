@@ -386,6 +386,13 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
 
   const dryRun = args.includes("--dry-run");
   const yes = args.includes("--yes");
+  // US-SHOW-001: `--showcase` opts into running the golden-path standard E2E
+  // after a successful release. It is RECOMMENDED but NON-HARD-BLOCKING — the
+  // release transaction's pass/fail never couples to real-agent availability
+  // (kimi/claude/pi can be flaky/slow/cost money), so a failed/skipped showcase
+  // is reported but never reverts a tagged release. Without the flag, a release
+  // just prints a pointer to run it.
+  const showcase = args.includes("--showcase");
   deps.onStep = (s, detail) => {
     process.stdout.write(`${c("green", "✓")} ${s.padEnd(17)} ${detail}\n`);
   };
@@ -396,10 +403,12 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
         ? `\n${c("green", `✓ ${res.tag} 已打 tag 并推送`)} — release.yml 跑远端闸与 GitHub Release；npm publish 仍由你手动执行\n`
         : `\n${c("green", `✓ ${res.tag} tagged and pushed`)} — release.yml runs the remote gate + GitHub Release; npm publish stays yours\n`,
     );
+    await offerShowcase(lang, showcase);
     return 0;
   }
   if (res.status === "dry-run") {
     process.stdout.write(lang === "zh" ? `dry-run 通过：将发 ${res.tag}（未做任何改动）\n` : `dry-run clean: would release ${res.tag} (nothing changed)\n`);
+    await offerShowcase(lang, showcase);
     return 0;
   }
   process.stderr.write(
@@ -408,4 +417,46 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
       : `${c("red", `✗ release aborted at ${res.step}`)}: ${res.reason}\n`,
   );
   return 1;
+}
+
+/**
+ * US-SHOW-001 — offer the golden-path showcase as a RECOMMENDED, NON-HARD-
+ * BLOCKING post-release step. With `--showcase` it runs `roll showcase` now (its
+ * own verdict prints, but its exit never changes the release exit — the tag is
+ * already pushed); without it, it just prints a pointer so the operator can
+ * refresh the demo evidence on their own schedule. Any showcase failure here is
+ * swallowed: real-agent flakiness must never appear to have failed a release.
+ */
+async function offerShowcase(lang: Lang, run: boolean): Promise<void> {
+  if (!run) {
+    process.stdout.write(
+      lang === "zh"
+        ? `\n${c("dim", "→ 建议：跑一次黄金路径 showcase 刷新 demo 证据链（真模型，非硬卡）：")}\n  roll showcase\n`
+        : `\n${c("dim", "→ Recommended: run the golden-path showcase to refresh the demo evidence chain (real models, non-blocking):")}\n  roll showcase\n`,
+    );
+    return;
+  }
+  process.stdout.write(
+    lang === "zh"
+      ? `\n${c("dim", "→ 跑黄金路径 showcase（真模型；其判定不影响已完成的发版）…")}\n`
+      : `\n${c("dim", "→ Running the golden-path showcase (real models; its verdict does NOT affect the completed release)…")}\n`,
+  );
+  try {
+    const { showcaseCommand } = await import("./showcase.js");
+    const code = await showcaseCommand([]);
+    if (code !== 0) {
+      process.stdout.write(
+        lang === "zh"
+          ? `${c("dim", "（showcase 未通过/被跳过——已记录，但不影响本次发版）")}\n`
+          : `${c("dim", "(showcase failed/skipped — recorded, but the release stands)")}\n`,
+      );
+    }
+  } catch (e) {
+    // Best-effort: a showcase that cannot even launch must not taint the release.
+    process.stdout.write(
+      lang === "zh"
+        ? `${c("dim", `（showcase 无法启动：${e instanceof Error ? e.message : String(e)}——不影响发版）`)}\n`
+        : `${c("dim", `(showcase could not launch: ${e instanceof Error ? e.message : String(e)} — release unaffected)`)}\n`,
+    );
+  }
 }

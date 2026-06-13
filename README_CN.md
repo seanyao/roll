@@ -62,6 +62,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |
 | `roll ci [--wait]` | 查看 / 等待当前 commit 的 CI 状态 |
 | `roll release [--dry-run]` | 唯一发版流:版本号→折叠changelog→包闸→PR→合并→一致性闸→推tag |
+| `roll showcase [--card <ID>]` | 黄金路径标准 E2E(隔离沙箱):重置卡片→异构选角真模型三角(kimi/claude/pi)→走 loop 交付→采集 CLI+web 截屏→装配证据链→给出通过/失败判定 |
 | `roll pair [init\|status\|score]` | 跨 Agent 配对:异构同行复检与交付打分 |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | 周期账本——每行一个 cycle,失败不被吞 |
 | `roll cycle <id>` | 单个 cycle 的完整轨迹带(cycle→story→build→peer→ci→pr→end) |

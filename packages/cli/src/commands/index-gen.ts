@@ -15,6 +15,7 @@ import { collectDossier, generateIndex } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import type { TruthSnapshotStoryEntry } from "@roll/spec";
 import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
+import { renderAgentsMachinePage } from "../lib/page-agents.js";
 import { collectProjectsRegistry } from "../lib/projects-registry.js";
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
@@ -431,8 +432,20 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       projects: collectProjectsRegistry(),
       currentSlug: projectSlug(cwd),
     };
+    // US-DOSSIER-031: the machine-global Agents page — the SAME collectAgentPanel
+    // output behind the Loop tab, promoted to a first-class breadcrumb page
+    // (machine scope: all installed agents, not just this project's ledger).
+    try {
+      writeFileSync(
+        join(featuresDir, "agents.html"),
+        renderAgentsMachinePage({ ...machineBar, agents: collectAgentPanel(cwd) }),
+        "utf8",
+      );
+      pages += 1;
+    } catch {
+      /* best-effort */
+    }
     const MACHINE_PAGES = [
-      ["agents", "agents.html"],
       ["skills", "skills.html"],
       ["conventions", "conventions.html"],
       ["about", "about.html"],

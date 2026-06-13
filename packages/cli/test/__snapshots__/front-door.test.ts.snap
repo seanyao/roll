@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`roll front door — US-DOSSIER-035 > AC6: EN/中 snapshots (single-language per locale, color scrubbed) 1`] = `
+"roll v3.611.2 — It just works.
+
+WARN    main reconciled vs backlog  → roll status
+
+daily     status · cycles · brief · backlog · release
+cards     idea "<one sentence>" · story new <ID> --title <t>
+machine   loop · agent · doctor · skills · config · setup · update
+
+first time? → roll init        docs → guide/getting-started
+"
+`;
+
+exports[`roll front door — US-DOSSIER-035 > AC6: EN/中 snapshots (single-language per locale, color scrubbed) 2`] = `
+"roll v3.611.2 — It just works.
+
+WARN    主干对账待处理  → roll status
+
+daily     status · cycles · brief · backlog · release
+cards     idea "<one sentence>" · story new <ID> --title <t>
+machine   loop · agent · doctor · skills · config · setup · update
+
+首次使用？ → roll init        文档 → guide/getting-started
+"
+`;

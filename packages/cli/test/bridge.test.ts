@@ -125,11 +125,22 @@ describe("ported routing (no bash fallback)", () => {
     expect((await captureDispatch(["setup", "skills", "--help"])).stdout).toContain("roll setup skills");
   });
 
-  it("help / --help / -h / empty → usage, exit 0", async () => {
-    for (const argv of [[], ["help"], ["--help"], ["-h"]]) {
-      const res = await dispatch(argv);
+  it("help / --help / -h → usage, exit 0", async () => {
+    for (const argv of [["help"], ["--help"], ["-h"]]) {
+      const res = await captureDispatch(argv);
       expect(res.status).toBe(0);
+      expect(res.stdout).toContain("roll <command>");
     }
+  });
+
+  it("US-DOSSIER-035: bare roll (no args) → front door, not the usage dump, exit 0", async () => {
+    const res = await captureDispatch([]);
+    expect(res.status).toBe(0);
+    // identity + verdict pointer + command map — never the flat `Commands:` join.
+    expect(res.stdout).toMatch(/^roll v/m);
+    expect(res.stdout).toContain("→ roll status");
+    expect(res.stdout).toContain("daily");
+    expect(res.stdout).not.toContain("roll <command> [args]");
   });
 
   it("an unknown command → exit 1 (usage, not a bash spawn)", async () => {

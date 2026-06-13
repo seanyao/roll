@@ -17,7 +17,10 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { resolveLang, type Lang } from "@roll/spec";
+import type { TruthSnapshot } from "@roll/spec";
 import { c, COLS, hr, pad, renderState, row, sectionHead } from "../render.js";
+import { attestCoverage, isSnapshotStale, loadTruthSnapshot, renderNowMs, snapshotVerdict } from "../lib/truth-read.js";
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 function rollHome(): string {
@@ -362,14 +365,150 @@ function liveData(): StatusData {
   };
 }
 
+// ── US-DOSSIER-035: verdict-first truth summary (design frame 1) ─────────────
+// Reads the ONE TruthSnapshot the web Overview reads (.roll/features/truth.json)
+// and leads `roll status` with a verdict line + four tab-aligned lines —
+// LOOP · CYCLE · RELEASE · STORY — same names/order/口径 as the web tabs. No
+// number is recomputed here: a divergence from the web Overview is a 口径 bug.
+
+const VERDICT_WORD: Record<string, string> = { pass: "PASS", warn: "WARN", fail: "FAIL", unknown: "UNKNOWN" };
+const VERDICT_COLOR: Record<string, string> = { pass: "green", warn: "amber", fail: "red", unknown: "muted" };
+const VERDICT_REASON: Record<string, { en: string; zh: string }> = {
+  pass: { en: "all dimensions clear", zh: "全维度通过" },
+  warn: { en: "main reconciled vs backlog", zh: "主干对账待处理" },
+  fail: { en: "a dimension is failing", zh: "有维度不通过" },
+  unknown: { en: "no consistency audit yet", zh: "尚无一致性审计" },
+};
+
+/** Compact `HH:MMZ` for a lane's nextAt (UTC, byte-stable). */
+function laneNext(iso: string | undefined): string {
+  if (iso === undefined || iso === "") return "—";
+  const m = /T(\d{2}:\d{2})/.exec(iso);
+  return m?.[1] !== undefined ? `${m[1]}Z` : "—";
+}
+
+function statusLabel(label: string): string {
+  return c("muted", pad(label, 10));
+}
+
+/**
+ * Render the verdict line + LOOP/CYCLE/RELEASE/STORY block from the snapshot.
+ * Pure: (snapshot, stale, lang, nowMs) → text. When the snapshot is absent it
+ * falls back honestly (states it, points at `roll index`) — never undefined.
+ */
+export function renderTruthSummary(
+  snapshot: TruthSnapshot | undefined,
+  stale: boolean,
+  lang: Lang,
+  _nowMs: number,
+): string {
+  void _nowMs;
+  const out: string[] = [];
+  if (snapshot === undefined) {
+    const word = c("muted", pad("UNKNOWN", 6));
+    out.push(
+      "  " + word + "  " + (lang === "zh" ? "无真相快照——运行 roll index" : "no truth snapshot — run roll index"),
+    );
+    out.push("", hr(), "");
+    return out.join("\n");
+  }
+
+  const v = snapshotVerdict(snapshot);
+  const verdictWord = c(VERDICT_COLOR[v] ?? "muted", pad(VERDICT_WORD[v] ?? "UNKNOWN", 6), { bold: true });
+  const reasonPair = VERDICT_REASON[v] ?? { en: "no consistency audit yet", zh: "尚无一致性审计" };
+  let reason = lang === "zh" ? reasonPair.zh : reasonPair.en;
+  if (stale) reason += lang === "zh" ? "（快照已过期）" : " (snapshot stale)";
+  // exit-code intent (script/CI contract): pass 0, warn/unknown 1, fail 2.
+  const exit = v === "fail" ? 2 : v === "pass" ? 0 : 1;
+  out.push("  " + verdictWord + "  " + reason + "   " + c("muted", `exit ${exit}`));
+  out.push("");
+
+  // LOOP — loop lanes + running count (the web Overview's loop heartbeat).
+  const lanes = snapshot.loop?.lanes ?? [];
+  const running = lanes.filter((l) => l.running).length;
+  const nextLane = lanes.find((l) => l.running && l.nextAt !== undefined);
+  const loopRight =
+    lang === "zh"
+      ? `${lanes.length} 个循环 · ${c("green", `${running} 运行中`)}` + (nextLane !== undefined ? `   下次 ${c("fg", laneNext(nextLane.nextAt))}` : "")
+      : `${lanes.length} loops · ${c("green", `${running} running`)}` + (nextLane !== undefined ? `   next ${c("fg", laneNext(nextLane.nextAt))}` : "");
+  out.push("  " + statusLabel("LOOP") + loopRight);
+
+  // CYCLE — cycles/3d + failed + cost (the web Cycle tile).
+  const cyc = snapshot.cycle;
+  const cycleRight =
+    cyc !== undefined
+      ? (lang === "zh" ? `${cyc.cycles3d} / 3天   ` : `${cyc.cycles3d} / 3d   `) +
+        c(cyc.failed3d > 0 ? "red" : "green", lang === "zh" ? `${cyc.failed3d} 失败` : `${cyc.failed3d} failed`) +
+        ` · $${cyc.costUsd3d.toFixed(2)}`
+      : c("muted", lang === "zh" ? "无周期数据" : "no cycle data");
+  out.push("  " + statusLabel("CYCLE") + cycleRight);
+
+  // RELEASE — latest tag + gate verdict + f/w/? + merged/pending (web Release tile).
+  const rel = snapshot.release;
+  const a = snapshot.audit;
+  const spectrum = snapshot.story.spectrum;
+  const merged = spectrum.done;
+  const pending = snapshot.story.total - spectrum.done;
+  let releaseRight: string;
+  if (rel !== undefined) {
+    const relColor = rel.verdict === "pass" ? "green" : rel.verdict === "fail" ? "red" : rel.verdict === "warn" ? "amber" : "muted";
+    const fwu = a !== undefined ? ` · f:${a.fail} w:${a.warn} ?:${a.unknown}` : "";
+    releaseRight =
+      `${c("fg", rel.latestTag ?? "—")} ` + (lang === "zh" ? "已就绪   " : "staged   ") +
+      c(relColor, rel.verdict) + fwu +
+      ` · ${c("green", lang === "zh" ? `${merged} 已合` : `${merged} merged`)}` +
+      ` · ${c("amber", lang === "zh" ? `${pending} 待交付` : `${pending} pending`)}`;
+  } else {
+    releaseRight = c("muted", lang === "zh" ? "无发版数据" : "no release data");
+  }
+  out.push("  " + statusLabel("RELEASE") + releaseRight);
+
+  // STORY — attest coverage % + fail (drift) + unknown (web Story tile / AC4).
+  const cov = attestCoverage(snapshot);
+  const covColor = cov.pct >= 80 ? "green" : cov.pct >= 50 ? "amber" : "red";
+  const storyRight =
+    c(covColor, `${cov.pct}%`) + (lang === "zh" ? " 验收覆盖      " : " attest coverage      ") +
+    (lang === "zh" ? "失败 " : "fail ") + c("fg", String(spectrum.fail)) +
+    " · " + (lang === "zh" ? "未知 " : "unknown ") + c("fg", String(spectrum.unknown));
+  out.push("  " + statusLabel("STORY") + storyRight);
+  out.push("");
+
+  // The spectrum recap + the discoverability "next step" pointers.
+  out.push(
+    "  " +
+      (lang === "zh"
+        ? `漂移 ${c("fg", String(spectrum.fail))} · 已交付 ${c("fg", String(spectrum.done))}${c("muted", ` (含历史 ${snapshot.story.legacy})`)} · 未知 ${c("fg", String(spectrum.unknown))} · 待办 ${c("fg", String(spectrum.todo))}`
+        : `drift ${c("fg", String(spectrum.fail))} · done ${c("fg", String(spectrum.done))}${c("muted", ` (incl. legacy ${snapshot.story.legacy})`)} · unknown ${c("fg", String(spectrum.unknown))} · todo ${c("fg", String(spectrum.todo))}`),
+  );
+  out.push("");
+  out.push("  " + c("blue", "→ roll cycles --since 3d") + c("muted", "    ") + c("blue", "→ roll release") + c("muted", "    ") + c("blue", "→ roll backlog"));
+  out.push("", hr(), "");
+  return out.join("\n");
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────────
 export function statusCommand(args: string[]): number {
   const noColor = args.includes("--no-color");
   if (noColor || (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY) {
     renderState.useColor = false;
   }
+  const lang = resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
   const d = (process.env["ROLL_RENDER_FIXTURE"] ?? "") !== "" ? fixtureData() : liveData();
-  const out: string[] = [];
+  // US-DOSSIER-035: lead with the verdict-first truth summary read from the ONE
+  // snapshot the web Overview reads, then the existing sync-health body. Status
+  // stays read-only and exits 0; the verdict line carries the exit-code intent
+  // a script consumes, but `roll status` itself never fails the shell.
+  const fixtureMode = (process.env["ROLL_RENDER_FIXTURE"] ?? "") !== "";
+  const nowMs = renderNowMs();
+  const snapshot = fixtureMode ? truthFixture() : loadTruthSnapshot(process.cwd());
+  // Fixture mode is byte-deterministic by construction — never let the wall
+  // clock flip the stale flag (the diff-test pins no clock).
+  const stale = !fixtureMode && snapshot !== undefined && isSnapshotStale(snapshot, nowMs);
+  const out: string[] = [renderTruthSummary(snapshot, stale, lang, nowMs)];
   renderHealth(out, d);
   renderGlobalConventions(out, d.conventions);
   renderAiClients(out, d.ai_clients);
@@ -377,4 +516,31 @@ export function statusCommand(args: string[]): number {
   renderThisProject(out, d);
   process.stdout.write(out.join("\n") + "\n");
   return 0;
+}
+
+/** Deterministic snapshot for the diff-test fixture path (ROLL_RENDER_FIXTURE=1). */
+function truthFixture(): TruthSnapshot {
+  return {
+    generatedAt: "2026-06-13T00:00:00Z",
+    collectedAt: "2026-06-12T03:09:03Z",
+    story: {
+      total: 580,
+      spectrum: { done: 366, wip: 0, hold: 0, todo: 7, fail: 0, unknown: 197 },
+      legacy: 366,
+    },
+    audit: { fail: 0, warn: 44, unknown: 78, collectedAt: "2026-06-10" },
+    cycle: { cycles3d: 17, failed3d: 12, costUsd3d: 0.59, collectedAt: "2026-06-12T01:52:34Z" },
+    release: { latestTag: "v3.611.2", verdict: "pass", collectedAt: "2026-06-12T03:09:03Z" },
+    loop: {
+      lanes: [
+        { name: "loop", running: true, mode: "cron", everyMin: 30, lastAt: "2026-06-13T08:32:00Z", nextAt: "2026-06-13T08:55:00Z" },
+        { name: "dream", running: false, mode: "nightly", everyMin: 1440 },
+      ],
+    },
+    stories: [
+      { id: "US-A", epic: "e", ladder: "attested", evidence: { report: true, acMap: true, visualEvidence: true }, truthState: "done", legacy: false },
+      { id: "US-B", epic: "e", ladder: "attested", evidence: { report: true, acMap: true, visualEvidence: true }, truthState: "done", legacy: false },
+      { id: "US-C", epic: "e", ladder: "merged", evidence: { report: false, acMap: false, visualEvidence: false }, truthState: "done", legacy: false },
+    ],
+  };
 }

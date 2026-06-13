@@ -50,6 +50,31 @@ import { c, renderState, row, COLS } from "../render.js";
 import { realAgentEnv } from "./agent-list.js";
 import { onPath, rollPkgDir, syncConventions as sharedSyncConventions } from "./setup-shared.js";
 import { rollVersion } from "./version.js";
+import { shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
+import { projectSlug } from "./dashboard.js";
+
+/**
+ * FIX-283 (AC4): adopting roll registers the project into `~/.roll/projects.json`
+ * immediately, so it appears in the web switcher without waiting for the first
+ * `roll index`. Reuses the SAME `writeProjectRow` + the SAME tmp/non-existent
+ * skip rule (`shouldSelfRegister`) as `roll index`'s self-register — never a
+ * second dialect, never a tmp fixture leaking into the real registry. `roll
+ * index` keeps refreshing verdict/releaseTag; init seeds the row (name/slug/path
+ * + lastIndexedAt) and never throws into init's main path.
+ */
+function registerProject(projectDir: string): void {
+  try {
+    if (!shouldSelfRegister(projectDir)) return;
+    writeProjectRow({
+      name: process.env["ROLL_BRAND_NAME"] ?? "roll",
+      slug: projectSlug(projectDir),
+      path: projectDir,
+      lastIndexedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    });
+  } catch {
+    /* best-effort — the registry is additive; init still succeeds */
+  }
+}
 
 // ─── bash UI helpers (bin/roll:41-56) — used only for err() here ─────────────
 function err(line: string): void {
@@ -979,6 +1004,10 @@ function initApply(projectDir: string): number {
   process.stdout.write("\n");
   info(m("init.syncing_conventions_to_ai_tools"));
   syncConventions();
+
+  // FIX-283 (AC4): the legacy-onboard adoption path also registers the project.
+  registerProject(projectDir);
+
   process.stdout.write("\n");
   ok(m("init.onboard_apply_complete_onboard"));
   return 0;
@@ -1174,6 +1203,9 @@ export function initCommand(args: string[]): number {
 
   // _install_launchd_plists: output discarded; darwin side effect not reproduced
   // (see the file header's whitelisted-divergence note).
+
+  // FIX-283 (AC4): register this project in the cross-project switcher registry.
+  registerProject(projectDir);
 
   // Color decision mirrors _emit_init_v2_ui: NO_COLOR or non-TTY → no color.
   const noColor = (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY;

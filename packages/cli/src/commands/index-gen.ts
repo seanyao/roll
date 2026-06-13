@@ -14,7 +14,8 @@ import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import type { TruthSnapshotStoryEntry } from "@roll/spec";
-import { renderTruthConsole, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
+import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
+import { collectProjectsRegistry } from "../lib/projects-registry.js";
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
@@ -375,6 +376,11 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         agents: collectAgentPanel(cwd),
         releasePanel: collectReleasePanel(cwd),
         skills: collectSkillsPanel(cwd),
+        // US-DOSSIER-027: the top-bar project switcher reads the cross-project
+        // registry (US-DOSSIER-028 writes it). Absent today → [] → the console
+        // degrades to current-project-only via currentSlug, never erroring.
+        projects: collectProjectsRegistry(),
+        currentSlug: projectSlug(cwd),
         // kimi pair-review: the PR links need the repo slug — reuse the
         // FIX-275 git snapshot (one probe per run) instead of a fresh git call.
         ...(runCache.git?.slug !== undefined ? { githubSlug: runCache.git.slug } : {}),
@@ -394,6 +400,30 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       "utf8",
     );
     pages += 1;
+    // US-DOSSIER-027: emit the four machine-global pages the top-bar breadcrumb
+    // routes to (Agents · Skills · Conventions · About). Later stories fill them
+    // with real content; today they are stub targets so the links never 404 and
+    // already wear the sticky top-bar shell.
+    const machineBar = {
+      brand: { name: process.env["ROLL_BRAND_NAME"] ?? "roll", slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works." },
+      snapshot,
+      projects: collectProjectsRegistry(),
+      currentSlug: projectSlug(cwd),
+    };
+    const MACHINE_PAGES = [
+      ["agents", "agents.html"],
+      ["skills", "skills.html"],
+      ["conventions", "conventions.html"],
+      ["about", "about.html"],
+    ] as const;
+    for (const [page, file] of MACHINE_PAGES) {
+      try {
+        writeFileSync(join(featuresDir, file), renderMachineStubPage({ ...machineBar, page }), "utf8");
+        pages += 1;
+      } catch {
+        /* best-effort */
+      }
+    }
   } catch {
     /* best-effort */
   }

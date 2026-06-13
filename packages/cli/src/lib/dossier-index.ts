@@ -14,6 +14,10 @@ import { type DeliveryLadder, type StoryEvidenceFlags } from "@roll/spec";
 import { type DossierEpic } from "./archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "./dossier-css.js";
 
+/** Evidence flags fall back to all-false so a delivered story with no enriched
+ *  flags lands on the honest `merged` rung, never a silent `attested`. */
+const NO_EVIDENCE: StoryEvidenceFlags = { report: false, acMap: false, visualEvidence: false };
+
 /** The five lifecycle stations, shared with epic/story pages (001b/001c). */
 export const SPINE_STAGES = [
   { key: "definition", en: "Definition", zh: "立项" },
@@ -25,6 +29,45 @@ export const SPINE_STAGES = [
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/**
+ * US-DOSSIER-025 — the claimed→merged→attested ladder's visual identity for the
+ * list surfaces (front-page spectrum/tally/legend, epic-page rows + mini-spine).
+ * Taken verbatim from the design reference's truth model — attested = truth-green
+ * #178a52, merged = attest-pending teal #0d9488, claimed = claim amber #c77d12 —
+ * the SAME three hexes the story dossier spine + banners use (US-DOSSIER-023),
+ * so the same rung paints the same color on every surface. Injected as a small
+ * extra <style> block (NOT into DOSSIER_CSS, which stays hex-free) on both the
+ * front page and the epic page; idempotent — a page lists it once.
+ */
+export const LADDER_CSS = `
+/* front-page spectrum segments + tally + legend (US-DOSSIER-025 ladder) */
+.s-attested{background:#178a52;} .s-merged{background:#0d9488;} .s-claimed{background:#c77d12;}
+.statusboard.ladder{grid-template-columns:repeat(4,1fr);}
+.tally.attested .num{color:#178a52;} .tally.attested .accentbar{background:#178a52;}
+.tally.merged .num{color:#0d9488;} .tally.merged .accentbar{background:#0d9488;}
+.tally.claimed .num{color:#c77d12;} .tally.claimed .accentbar{background:#c77d12;}
+.i-attested{background:#178a52;} .i-merged{background:#0d9488;} .i-claimed{background:#c77d12;}
+/* epic / front-page row status pills + the row mini lifespine delivery node */
+.st-attested{color:#178a52;} .st-attested .sdot{background:#178a52;}
+.st-merged{color:#0d9488;} .st-merged .sdot{background:#0d9488;}
+.st-claimed{color:#c77d12;} .st-claimed .sdot{background:transparent;border:1px solid #c77d12;}
+.struth.tr-attested{color:#178a52;border-color:#178a5288;}
+.struth.tr-merged{color:#0d9488;border-color:#0d948888;}
+.struth.tr-claimed{color:#c77d12;border-color:#c77d1288;border-style:dashed;}
+.lifespine i.attested{border-color:#178a52;background:#178a52;}
+.lifespine i.merged{border-color:#0d9488;background:#0d9488;}
+.lifespine i.claimed{border-color:#c77d12;background:repeating-linear-gradient(45deg,#c77d12 0 1.5px,transparent 1.5px 3px);}
+/* epic-page row pill rungs (.pill.attested/.merged/.claimed) */
+.pill.attested{color:#178a52;border:1px solid #178a5288;}
+.pill.merged{color:#0d9488;border:1px solid #0d948888;}
+.pill.claimed{color:#c77d12;border:1px dashed #c77d1288;}
+/* toolbar status-filter chips on the ladder vocabulary (pressed = rung color) */
+.sf.attested[aria-pressed=true]{background:#178a52;color:#fff;}
+.sf.merged[aria-pressed=true]{background:#0d9488;color:#fff;}
+.sf.claimed[aria-pressed=true]{background:#c77d12;color:#fff;}
+@media (max-width:680px){.statusboard.ladder{grid-template-columns:repeat(2,1fr);}}
+`;
 
 /** The decorative full spine on index/epic mastheads — delivery carries the truth badge. */
 export function spineMotif(): string {
@@ -38,6 +81,20 @@ export function spineMotif(): string {
 
 type StoryView = DossierEpic["stories"][number];
 type State = "done" | "wip" | "hold" | "todo" | "fail" | "unknown";
+
+/**
+ * US-DOSSIER-025 — the front-page render vocabulary. It is the spectrum `State`
+ * with the lumped `done` split into the claimed→merged→attested ladder, so the
+ * spectrum bar, tally cards, legend, and epic rows reflect the SAME three rungs
+ * the story dossier (US-DOSSIER-023) and the truth.json registry (US-DOSSIER-021)
+ * report. `attested` (merged + full attest evidence) and `merged` (merge truth,
+ * attest pending) replace the binary `done`; `claimed` is a backlog ✅ Done with
+ * no merge evidence yet (was bucketed `unknown` before, now its own honest rung).
+ * The fail / wip / hold / todo / unknown buckets carry over unchanged.
+ */
+export type LadderState = "attested" | "merged" | "claimed" | "wip" | "hold" | "todo" | "fail" | "unknown";
+/** Render order: strongest rung first, so the bar reads attested → … → unknown. */
+const LADDER_STATES: readonly LadderState[] = ["attested", "merged", "claimed", "fail", "unknown", "wip", "todo", "hold"];
 const STAGE_KEYS = SPINE_STAGES.map((s) => s.key);
 
 export type TruthBoardVerdict = "pass" | "warn" | "fail" | "unknown";
@@ -113,6 +170,31 @@ export function deriveDeliveryLadder(
   return story.status === "done" ? "claimed" : "none";
 }
 
+/**
+ * US-DOSSIER-025 — the ONE ladder classifier every front-page surface shares,
+ * built on the SAME `deriveDeliveryLadder` the story dossier + truth.json
+ * registry use (zero duplicated rung logic — duplicating it per surface is the
+ * exact drift this story closes). Truth drift / unknown verdicts win first
+ * (they are not a rung); otherwise:
+ *   - delivered → `attested` (merge + full evidence) | `merged` (merge, attest
+ *     pending) via the shared ladder + the story's enriched `evidence` flags.
+ *   - backlog ✅ Done but no merge evidence → `claimed` (a wish, not yet truth).
+ *   - live work → `wip` | `hold` | `todo`.
+ * Deterministic: no clock/locale dependence, byte-stable across reruns.
+ */
+export function storyLadderState(s: StoryView): LadderState {
+  if (s.truthState === "fail") return "fail";
+  if (s.truthState === "unknown") return "unknown";
+  if (s.status === "in_progress") return "wip";
+  if (s.status === "hold") return "hold";
+  const rung = deriveDeliveryLadder(s, s.evidence ?? NO_EVIDENCE);
+  if (rung === "attested" || rung === "merged" || rung === "claimed") return rung;
+  // `none`: not delivered and not claimed Done. A `done` status with no merge
+  // evidence is `claimed` above; anything left that claims done is honest unknown.
+  if (s.status === "done") return "unknown";
+  return "todo";
+}
+
 function storyState(s: StoryView): State {
   if (s.truthState === "fail") return "fail";
   if (s.truthState === "unknown") return "unknown";
@@ -127,6 +209,15 @@ function storyState(s: StoryView): State {
 function tallyStates(epics: DossierEpic[]): Record<State, number> {
   const t: Record<State, number> = { done: 0, wip: 0, hold: 0, todo: 0, fail: 0, unknown: 0 };
   for (const e of epics) for (const s of e.stories) t[storyState(s)] += 1;
+  return t;
+}
+
+/** US-DOSSIER-025 — count stories by ladder rung (the `done` split into
+ *  attested vs merged + the claimed rung). The spectrum / tally / legend read
+ *  this so they stay one-to-one with the per-story rung and the registry. */
+function tallyLadder(epics: DossierEpic[]): Record<LadderState, number> {
+  const t = Object.fromEntries(LADDER_STATES.map((k) => [k, 0])) as Record<LadderState, number>;
+  for (const e of epics) for (const s of e.stories) t[storyLadderState(s)] += 1;
   return t;
 }
 
@@ -215,12 +306,16 @@ export function renderTruthBoard(epics: DossierEpic[], truth: TruthBoardInput | 
   );
 }
 
-/** A segmented proportional bar (the "delivery spectrum") over a state tally. */
-function spectrum(t: Record<State, number>, cls: string): string {
-  const total = t.done + t.wip + t.todo + t.hold + t.fail + t.unknown || 1;
-  const seg = (n: number, k: string): string =>
-    n > 0 ? `<span class="s-${k}" style="width:${(n / total) * 100}%"></span>` : "";
-  return `<div class="${cls}">${seg(t.done, "done")}${seg(t.fail, "fail")}${seg(t.unknown, "unknown")}${seg(t.wip, "wip")}${seg(t.todo, "todo")}${seg(t.hold, "hold")}</div>`;
+/** US-DOSSIER-025 — a segmented proportional bar (the "delivery spectrum") over
+ *  the ladder tally: the strongest rung (attested, truth-green) leads, then
+ *  merged (attest-pending teal), claimed (amber), then drift / unknown / live
+ *  work. The `done`-equivalent is split into attested vs merged so the bar never
+ *  disagrees with the per-story rung or the truth.json registry. */
+function spectrum(t: Record<LadderState, number>, cls: string): string {
+  const total = LADDER_STATES.reduce((n, k) => n + t[k], 0) || 1;
+  const seg = (k: LadderState): string =>
+    t[k] > 0 ? `<span class="s-${k}" style="width:${(t[k] / total) * 100}%"></span>` : "";
+  return `<div class="${cls}">${LADDER_STATES.map(seg).join("")}</div>`;
 }
 
 /** The five-station lifecycle spine for one story, from its real `stages`. */
@@ -240,29 +335,63 @@ function storySpine(s: StoryView): string {
   const done = new Set<string>(
     s.stages ?? (s.delivered ? ["definition", "design", "execution", "delivery"] : ["definition"]),
   );
-  const state = storyState(s);
-  const firstUndone = STAGE_KEYS.findIndex((k) => !done.has(k));
+  const state = storyLadderState(s);
+  // US-DOSSIER-025: the delivery node carries its ladder rung, not a binary fill —
+  // attested (truth-green) > merged (teal) > claimed (amber, reached-but-unproven;
+  // lit even though merge-gated `stages` exclude delivery). Same three rungs the
+  // story dossier spine + truth.json registry report, so a row never reads fully
+  // done unless it is at least `merged`.
+  const rung: DeliveryLadder | "none" =
+    state === "attested" ? "attested" : state === "merged" ? "merged" : state === "claimed" ? "claimed" : "none";
+  const deliveryReached = (k: string): boolean => (k === "delivery" ? rung !== "none" : done.has(k));
   const active = state === "wip" || state === "hold";
+  const firstUndone = STAGE_KEYS.findIndex((k) => !deliveryReached(k));
   let html = "";
   STAGE_KEYS.forEach((k, i) => {
-    const cls = done.has(k) ? "on" : active && i === firstUndone ? "now" : "";
+    let cls = "";
+    if (k === "delivery") {
+      cls = rung !== "none" ? rung : active && i === firstUndone ? "now" : "";
+    } else {
+      cls = done.has(k) ? "on" : active && i === firstUndone ? "now" : "";
+    }
     html += `<i class="${cls}"></i>`;
     if (i < STAGE_KEYS.length - 1) {
-      const segOn = done.has(k) && done.has(STAGE_KEYS[i + 1]!);
+      const segOn = deliveryReached(k) && deliveryReached(STAGE_KEYS[i + 1]!);
       html += `<b class="${segOn ? "on" : ""}"></b>`;
     }
   });
-  const title = SPINE_STAGES.map((st) => `${st.zh}${done.has(st.key) ? "✓" : "—"}`).join(" ");
+  const title = SPINE_STAGES.map((st) => `${st.zh}${deliveryReached(st.key) ? "✓" : "—"}`).join(" ");
   return `<span class="lifespine${state === "hold" ? " held" : ""}" title="${title}">${html}</span>`;
 }
 
-/** One story row inside an expanded epic: type · id · title · spine · status. */
+/** US-DOSSIER-025 — the ladder rung's short EN status word for the row pill. */
+const LADDER_WORD: Record<LadderState, string> = {
+  attested: "attested",
+  merged: "merged",
+  claimed: "claimed",
+  wip: "wip",
+  hold: "hold",
+  todo: "todo",
+  fail: "fail",
+  unknown: "unknown",
+};
+
+/** One story row inside an expanded epic: type · id · title · spine · status.
+ *  US-DOSSIER-025: the status pill is the ladder rung (attested / merged /
+ *  claimed / …), the SAME rung the row spine, the epic page, and the truth.json
+ *  registry carry — not the old binary `done`. */
 function storyRow(epic: string, s: StoryView): string {
-  const state = storyState(s);
+  const state = storyLadderState(s);
   const type = (s.type || "").toUpperCase();
   const href = `${encodeURIComponent(epic)}/${encodeURIComponent(s.id)}/index.html`;
   const claim = s.status !== undefined ? `<span class="sclaim cl-${state}">claim ${s.status === "in_progress" ? "wip" : s.status}</span>` : "";
-  const truthText = state === "unknown" ? "truth ?" : state === "fail" ? "truth fail" : s.delivered ? "truth done" : "";
+  const truthText =
+    state === "unknown" ? "truth ?"
+    : state === "fail" ? "truth fail"
+    : state === "attested" ? "truth attested"
+    : state === "merged" ? "truth merged"
+    : state === "claimed" ? "truth ?" // claimed = no merge evidence yet → unproven
+    : "";
   const truth = truthText !== "" ? `<span class="struth tr-${state}" title="${esc(s.truthReason ?? "")}">${truthText}</span>` : "";
   // US-DOSSIER-008: legacy (pre-v3) deliveries are done, but flagged apart.
   const chip = s.legacy
@@ -274,7 +403,7 @@ function storyRow(epic: string, s: StoryView): string {
     `<span class="sid">${esc(s.id)}</span>` +
     `<span class="stitle">${esc(s.title ?? s.id)}</span>` +
     storySpine(s) +
-    `<span class="sstat st-${state}"><span class="sdot"></span>${state}${chip}${claim}${truth}</span>` +
+    `<span class="sstat st-${state}"><span class="sdot"></span>${LADDER_WORD[state]}${chip}${claim}${truth}</span>` +
     `</a>`
   );
 }
@@ -282,8 +411,8 @@ function storyRow(epic: string, s: StoryView): string {
 /** One epic as a foldable <details>: summary (name + mini-spectrum + tally),
  *  body = its story rows. data-search/data-status drive the toolbar filter. */
 function epicFold(e: DossierEpic): string {
-  const t = tallyStates([e]);
-  const states = [...new Set(e.stories.map(storyState))].join(" ");
+  const t = tallyLadder([e]);
+  const states = [...new Set(e.stories.map(storyLadderState))].join(" ");
   const search = `${e.name} ${e.stories.map((s) => `${s.id} ${s.title ?? ""}`).join(" ")}`;
   const hasOverview = (e.docs ?? []).some((d) => d.kind === "overview");
   const docMark = hasOverview
@@ -311,22 +440,31 @@ function countLegacy(epics: DossierEpic[]): number {
   return n;
 }
 
-/** The pulled-out status overview: tallies + the delivery spectrum. */
+/** The pulled-out status overview: tallies + the delivery spectrum.
+ *  US-DOSSIER-025: the tallies + spectrum + legend are now the claimed→merged→
+ *  attested ladder. The old lumped "Done" card splits into Attested (merge + full
+ *  attest evidence) and Merged (merge truth, attest pending), and Claimed (backlog
+ *  Done with no merge evidence yet) is its own honest card — the same three rungs
+ *  the per-story dossier + truth.json registry report. `% merged to main` stays
+ *  (attested + merged) / total, the same `delivered` proportion as before. */
 function overview(epics: DossierEpic[]): string {
-  const t = tallyStates(epics);
+  const t = tallyLadder(epics);
   const total = epics.reduce((n, e) => n + e.stories.length, 0);
-  const pct = total > 0 ? Math.round((t.done / total) * 100) : 0;
-  // US-DOSSIER-008: split the Done tally so "v3-evidenced done" and "legacy
-  // (pre-v3) done" are legible at a glance instead of lumped together.
+  const mergedToMain = t.attested + t.merged; // delivered (merge truth) at either rung
+  const pct = total > 0 ? Math.round((mergedToMain / total) * 100) : 0;
+  // US-DOSSIER-008: the attested/merged cards annotate how many deliveries are
+  // legacy (pre-v3, no v3 evidence trail) — legacy sits at the `merged` rung.
   const legCount = countLegacy(epics);
-  const card = (k: State, mark: string, en: string, zh: string, sub = ""): string =>
+  const card = (k: LadderState, mark: string, en: string, zh: string, sub = ""): string =>
     `<a class="tally ${k}" href="#" data-jump="${k}"><div class="mark">${mark}</div>` +
     `<div class="num">${t[k]}</div><div class="lbl">${bi(en, zh)}</div>${sub}<div class="accentbar"></div></a>`;
-  const leg = (k: string, en: string, zh: string): string =>
+  const leg = (k: LadderState, en: string, zh: string): string =>
     `<span><i class="i-${k}"></i>${bi(en, zh)}</span>`;
   return (
-    `<div class="statusboard">` +
-    card("done", "✅", "Done", "已交付", legCount > 0 ? `<div class="tsub">${bi(`incl. ${legCount} legacy`, `含 ${legCount} 历史`)}</div>` : "") +
+    `<div class="statusboard ladder">` +
+    card("attested", "✓", "Attested", "已验收") +
+    card("merged", "◐", "Merged", "已合主干", legCount > 0 ? `<div class="tsub">${bi(`incl. ${legCount} legacy`, `含 ${legCount} 历史`)}</div>` : "") +
+    card("claimed", "△", "Claimed", "仅声称") +
     card("fail", "!", "Drift", "漂移") +
     card("unknown", "?", "Unknown", "未知") +
     card("wip", "🔨", "In progress", "进行中") +
@@ -337,8 +475,31 @@ function overview(epics: DossierEpic[]): string {
     spectrum(t, "spectrum") +
     `<div class="pctline">${bi(`${total} stories · ${epics.length} epics`, `在册 ${total} 故事 · ${epics.length} 史诗`)}` +
     `<span><b>${pct}%</b> ${bi("merged to main", "已合主干")}</span></div>` +
-    `<div class="spectrum-legend">${leg("done", "merged", "已合")}${leg("fail", "drift", "漂移")}${leg("unknown", "unknown", "未知")}${leg("wip", "in progress", "进行中")}${leg("todo", "todo", "待办")}${leg("hold", "hold", "挂起")}</div>` +
+    `<div class="spectrum-legend">${leg("attested", "attested", "已验收")}${leg("merged", "merged", "已合")}${leg("claimed", "claimed", "仅声称")}${leg("fail", "drift", "漂移")}${leg("unknown", "unknown", "未知")}${leg("wip", "in progress", "进行中")}${leg("todo", "todo", "待办")}${leg("hold", "hold", "挂起")}</div>` +
     `</div>`
+  );
+}
+
+/** US-DOSSIER-025 — the search + status-filter toolbar, chips on the ladder
+ *  vocabulary so a chip's `data-sf` matches the `data-status` rungs the epic
+ *  folds now carry (attested / merged / claimed / …); the filter script keys off
+ *  these unchanged. ONE definition shared by the front page and the fragment. */
+function toolbarFilter(): string {
+  const chip = (k: LadderState, mark: string, en: string, zh: string): string =>
+    `<button class="sf ${k}" data-sf="${k}" aria-pressed="false">${mark} ${bi(en, zh)}</button>`;
+  return (
+    `<div class="toolbar">` +
+    `<input type="search" data-dossier-search placeholder="Search epics &amp; stories · 搜索史诗与故事" aria-label="search">` +
+    `<div class="statusfilter" role="group">` +
+    chip("attested", "✓", "Attested", "已验收") +
+    chip("merged", "◐", "Merged", "已合") +
+    chip("claimed", "△", "Claimed", "仅声称") +
+    chip("fail", "!", "Drift", "漂移") +
+    chip("unknown", "?", "Unknown", "未知") +
+    chip("wip", "🔨", "WIP", "进行") +
+    chip("todo", "📋", "Todo", "待办") +
+    chip("hold", "🔒", "Hold", "挂起") +
+    `</div></div>\n`
   );
 }
 
@@ -358,16 +519,7 @@ export function featuresLedgerFragment(epics: DossierEpic[]): string {
       : `<div class="section-h">${bi(title, zh)} <span class="ct">${list.length}</span><span class="rule"></span></div>\n` +
         `${list.map(epicFold).join("\n")}\n`;
   return (
-    `<div class="toolbar">` +
-    `<input type="search" data-dossier-search placeholder="Search epics &amp; stories · 搜索史诗与故事" aria-label="search">` +
-    `<div class="statusfilter" role="group">` +
-    `<button class="sf done" data-sf="done" aria-pressed="false">✅ ${bi("Done", "交付")}</button>` +
-    `<button class="sf fail" data-sf="fail" aria-pressed="false">! ${bi("Drift", "漂移")}</button>` +
-    `<button class="sf unknown" data-sf="unknown" aria-pressed="false">? ${bi("Unknown", "未知")}</button>` +
-    `<button class="sf wip" data-sf="wip" aria-pressed="false">🔨 ${bi("WIP", "进行")}</button>` +
-    `<button class="sf todo" data-sf="todo" aria-pressed="false">📋 ${bi("Todo", "待办")}</button>` +
-    `<button class="sf hold" data-sf="hold" aria-pressed="false">🔒 ${bi("Hold", "挂起")}</button>` +
-    `</div></div>\n` +
+    toolbarFilter() +
     group("Shipping to main", "交付中", shipping) +
     group("Delivered to main", "已交付", done) +
     group("In backlog", "仍在待办", backlog)
@@ -387,7 +539,7 @@ export function renderFeaturesIndex(epics: DossierEpic[], opts: RenderFeaturesIn
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>Roll · Delivery Dossier</title>\n` +
-    `<style>\n${CHROME_CSS}${DOSSIER_CSS}body { max-width:1040px; }\n</style>\n` +
+    `<style>\n${CHROME_CSS}${DOSSIER_CSS}${LADDER_CSS}body { max-width:1040px; }\n</style>\n` +
     `${CHROME_SCRIPT}\n${DOSSIER_FILTER_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
     `<p class="kicker">Roll · ${bi("Delivery Dossier", "交付档案")}</p>\n` +
@@ -402,16 +554,7 @@ export function renderFeaturesIndex(epics: DossierEpic[], opts: RenderFeaturesIn
     (opts.morningReportHref !== undefined
       ? `<p class="ops-link"><a href="${esc(opts.morningReportHref)}">${bi("Morning report", "夜间运行晨报")}</a></p>\n`
       : "") +
-    `<div class="toolbar">` +
-    `<input type="search" data-dossier-search placeholder="Search epics &amp; stories · 搜索史诗与故事" aria-label="search">` +
-    `<div class="statusfilter" role="group">` +
-    `<button class="sf done" data-sf="done" aria-pressed="false">✅ ${bi("Done", "交付")}</button>` +
-    `<button class="sf fail" data-sf="fail" aria-pressed="false">! ${bi("Drift", "漂移")}</button>` +
-    `<button class="sf unknown" data-sf="unknown" aria-pressed="false">? ${bi("Unknown", "未知")}</button>` +
-    `<button class="sf wip" data-sf="wip" aria-pressed="false">🔨 ${bi("WIP", "进行")}</button>` +
-    `<button class="sf todo" data-sf="todo" aria-pressed="false">📋 ${bi("Todo", "待办")}</button>` +
-    `<button class="sf hold" data-sf="hold" aria-pressed="false">🔒 ${bi("Hold", "挂起")}</button>` +
-    `</div></div>\n` +
+    toolbarFilter() +
     group("Shipping to main", "交付中", shipping) +
     group("Delivered to main", "已交付", done) +
     group("In backlog", "仍在待办", backlog) +

@@ -8,52 +8,92 @@
  * Same chrome, same tokens (001a), same single-file contract.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
+import { type DeliveryLadder, type StoryEvidenceFlags } from "@roll/spec";
 import { type DossierEpic, type DossierEpicDoc, type DossierStory } from "./archive.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
-import { SPINE_STAGES } from "./dossier-index.js";
+import { LADDER_CSS, SPINE_STAGES, deriveDeliveryLadder } from "./dossier-index.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** Story state: merged truth > mid-cycle (evidence exists, no latest) > backlog. */
-export type StoryState = "merged" | "cycle" | "backlog" | "fail" | "unknown";
+/** Evidence flags fall back to all-false so a delivered story with no enriched
+ *  flags lands on the honest `merged` rung, never a silent `attested`. */
+const NO_EVIDENCE: StoryEvidenceFlags = { report: false, acMap: false, visualEvidence: false };
 
-/** Derive the story's display state. 001a's minimal model knows truth (latest)
- *  and wish; "in a cycle" arrives with 001d's phase data — until then a story
- *  with any non-definition phase marked done counts as mid-cycle. */
-export function storyState(s: DossierStory & { inCycle?: boolean }): StoryState {
+/**
+ * US-DOSSIER-025 — the epic row's display rung, aligned to the SAME
+ * claimed→merged→attested ladder the story dossier (US-DOSSIER-023) and the
+ * truth.json registry (US-DOSSIER-021) use, via the ONE shared
+ * `deriveDeliveryLadder` classifier (no duplicated rung logic — that drift is
+ * exactly what this story closes). `fail`/`unknown` error states are preserved
+ * unchanged; a delivered card is `attested` (merge + full attest evidence) or
+ * `merged` (merge truth, attest pending), and a backlog ✅ Done with no merge
+ * evidence is `claimed`. Deterministic: no clock/locale dependence.
+ */
+export type StoryState = "attested" | "merged" | "claimed" | "fail" | "unknown";
+
+/** Derive the story's ladder rung for the epic-page row. */
+export function storyState(s: DossierStory): StoryState {
   if (s.truthState === "fail") return "fail";
   if (s.truthState === "unknown") return "unknown";
-  if (s.delivered) return "merged";
-  if (s.status === "done") return "unknown";
-  if (s.inCycle === true) return "cycle";
-  return "backlog";
+  const rung = deriveDeliveryLadder(s, s.evidence ?? NO_EVIDENCE);
+  if (rung === "attested" || rung === "merged" || rung === "claimed") return rung;
+  // `none`: not delivered, not claimed Done. A `done` status with no merge
+  // evidence already mapped to `claimed`; what remains is honest unknown.
+  return "unknown";
 }
 
-/** The 5-dot mini-spine: filled up to the story's current station. */
+/**
+ * US-DOSSIER-025 — the 5-dot mini-spine, filled to the story's ladder rung:
+ *   - attested → all five stations, the delivery node truth-green (`i.attested`).
+ *   - merged   → filled through delivery, delivery node teal (`i.merged`); no
+ *     attest mark — never reads as full green.
+ *   - claimed  → only the definition/in-cycle stations + a hatched amber delivery
+ *     node (`i.claimed`, reached-but-unproven); upstream stays unfilled.
+ *   - fail/unknown → definition only.
+ * No row reads as fully done unless it is at least `merged`.
+ */
 export function miniSpine(s: DossierStory & { phasesDone?: number }): string {
-  // truth ⇒ all five; otherwise definition always done + phasesDone extra.
-  const done = s.delivered ? SPINE_STAGES.length : 1 + (s.phasesDone ?? 0);
+  const rung = storyState(s);
+  const reached: DeliveryLadder | "none" =
+    rung === "attested" ? "attested" : rung === "merged" ? "merged" : rung === "claimed" ? "claimed" : "none";
+  const delivered = reached === "attested" || reached === "merged";
+  // delivered (merge truth) ⇒ definition…delivery filled; otherwise definition
+  // (a card existing IS its definition) + any extra phases known.
+  const upstreamDone = delivered ? SPINE_STAGES.length - 1 : 1 + (s.phasesDone ?? 0);
   const bits = SPINE_STAGES.map((st, i) => {
-    const cls = s.delivered && st.key === "delivery" ? "truth" : i < done ? "done" : "";
-    const seg = i < SPINE_STAGES.length - 1 ? `<s${i < done - 1 ? ' class="done"' : ""}></s>` : "";
+    let cls = "";
+    if (st.key === "delivery") {
+      cls = reached !== "none" ? reached : "";
+    } else {
+      cls = i < upstreamDone ? "done" : "";
+    }
+    // segment is "done" only when both endpoints are reached (delivery counts as
+    // reached at any rung so the line into a claimed node still draws).
+    const here = st.key === "delivery" ? reached !== "none" : i < upstreamDone;
+    const nextKey = SPINE_STAGES[i + 1]?.key;
+    const nextReached = nextKey === "delivery" ? reached !== "none" : i + 1 < upstreamDone;
+    const seg = i < SPINE_STAGES.length - 1 ? `<s${here && nextReached ? ' class="done"' : ""}></s>` : "";
     return `<i${cls !== "" ? ` class="${cls}"` : ""}></i>${seg}`;
   });
   return `<span class="mini-spine" aria-hidden="true">${bits.join("")}</span>`;
 }
 
+/** US-DOSSIER-025 — the status pill carries the ladder rung, bilingual EN/中 on
+ *  separate lines (`bi`). `fail`/`unknown` keep their error treatment. */
 function pill(state: StoryState): string {
+  if (state === "attested") return `<span class="pill attested">${bi("attested", "已验收")}</span>`;
   if (state === "merged") return `<span class="pill merged">${bi("merged", "已合主干")}</span>`;
-  if (state === "cycle") return `<span class="pill cycle">${bi("in a cycle", "周期中")}</span>`;
+  if (state === "claimed") return `<span class="pill claimed">${bi("claimed", "仅声称")}</span>`;
   if (state === "fail") return `<span class="pill fail">${bi("truth fail", "真相失败")}</span>`;
-  if (state === "unknown") return `<span class="pill unknown">?</span>`;
-  return `<span class="pill backlog">${bi("in backlog", "待办")}</span>`;
+  return `<span class="pill unknown">?</span>`;
 }
 
 function storyRow(s: DossierStory): string {
   const st = storyState(s);
+  const delivered = st === "attested" || st === "merged";
   return (
-    `<a class="story-row" href="${encodeURIComponent(s.id)}/index.html" data-search="${esc(`${s.id} ${s.title ?? ""}`)}" data-truth="${s.delivered ? "1" : "0"}">` +
+    `<a class="story-row" href="${encodeURIComponent(s.id)}/index.html" data-search="${esc(`${s.id} ${s.title ?? ""}`)}" data-rung="${st}" data-truth="${delivered ? "1" : "0"}">` +
     `<span class="id">${esc(s.id)}</span>` +
     `<span class="type type-${esc(s.type)}">${esc(s.type)}</span>` +
     `<span class="title">${esc(s.title ?? "")}</span>` +
@@ -103,19 +143,25 @@ function epicDocs(e: DossierEpic): string {
   );
 }
 
-/** Epic-level ledger (figures scoped to this epic). */
+/** Epic-level ledger (figures scoped to this epic).
+ *  US-DOSSIER-025: the figures read the ladder — Attested (merge + full evidence)
+ *  and Merged (merge truth, attest pending) together are `e.delivered`, so the
+ *  aggregate stays consistent and never double-counts; the wish→truth bar still
+ *  shows `delivered / total` so % matches the front-page spectrum. */
 function epicLedger(e: DossierEpic): string {
   const total = e.stories.length;
   const pct = total > 0 ? Math.round((e.delivered / total) * 100) : 0;
-  const byType = new Set(e.stories.map((s) => s.type)).size;
+  let attested = 0;
+  for (const s of e.stories) if (storyState(s) === "attested") attested += 1;
+  const merged = e.delivered - attested; // delivered split: attested + merged-only
   const fig = (num: string, en: string, zh: string, truthy = false): string =>
     `<div class="figure"><div class="num${truthy ? " truth" : ""}">${num}</div><div class="lbl">${bi(en, zh)}</div></div>`;
   return (
     `<div class="ledger"><div class="figures">` +
     fig(String(total), "Stories", "故事") +
-    fig(String(e.delivered), "Merged to main", "已合主干", true) +
+    fig(String(attested), "Attested", "已验收", true) +
+    fig(String(merged), "Merged only", "仅已合") +
     fig(String(total - e.delivered), "Still wish", "仍是愿望") +
-    fig(String(byType), "Work types", "工种") +
     `</div>` +
     `<div class="wt-bar" role="img" aria-label="${pct}% merged"><span class="truth" style="width:${pct}%"></span></div>` +
     `<div class="wt-legend"><span>${bi("wish — backlog", "愿望 · 待办")}</span><span>${pct}%</span><span>${bi("truth — merged", "事实 · 已合")}</span></div>` +
@@ -123,13 +169,18 @@ function epicLedger(e: DossierEpic): string {
   );
 }
 
-/** Render one epic's page from the dossier model. */
+/** Render one epic's page from the dossier model.
+ *  US-DOSSIER-025: rows are grouped under the claimed→merged→attested ladder
+ *  rungs (attested / merged / claimed) plus the preserved drift + unknown groups
+ *  — the SAME rungs the front-page spectrum and the story dossier carry. Headings
+ *  are bilingual on separate lines (`bi`) and empty groups are omitted. */
 export function renderEpicPage(e: DossierEpic): string {
-  const merged = e.stories.filter((s) => storyState(s) === "merged");
-  const drift = e.stories.filter((s) => storyState(s) === "fail");
-  const unknown = e.stories.filter((s) => storyState(s) === "unknown");
-  const cycle = e.stories.filter((s) => storyState(s) === "cycle");
-  const backlog = e.stories.filter((s) => storyState(s) === "backlog");
+  const at = (st: StoryState): DossierStory[] => e.stories.filter((s) => storyState(s) === st);
+  const attested = at("attested");
+  const merged = at("merged");
+  const claimed = at("claimed");
+  const drift = at("fail");
+  const unknown = at("unknown");
   const group = (en: string, zh: string, list: DossierStory[]): string =>
     list.length === 0
       ? ""
@@ -138,7 +189,7 @@ export function renderEpicPage(e: DossierEpic): string {
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(e.name)} · Delivery Dossier</title>\n` +
-    `<style>\n${CHROME_CSS}${DOSSIER_CSS}body { max-width:1000px; }\n</style>\n` +
+    `<style>\n${CHROME_CSS}${DOSSIER_CSS}${LADDER_CSS}body { max-width:1000px; }\n</style>\n` +
     `${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
     `<p class="crumb"><a href="../index.html#backlog">${bi("Backlog", "待办")}</a> / ${esc(e.name)}</p>\n` +
@@ -147,11 +198,11 @@ export function renderEpicPage(e: DossierEpic): string {
     `</div>\n` +
     epicLedger(e) +
     epicDocs(e) +
-    group("Merged to main", "已合主干", merged) +
+    group("Merged & attested", "已合主干 · 已验收", attested) +
+    group("Merged to main", "已合主干 — 尚未验收", merged) +
+    group("Claimed only", "仅声称 — 尚无合并证据", claimed) +
     group("Truth drift", "真相漂移", drift) +
     group("Unknown", "未知", unknown) +
-    group("In a cycle", "周期中", cycle) +
-    group("In backlog", "仍在待办", backlog) +
     `<footer>${bi("Generated by", "生成自")} <code>roll index</code></footer>\n</body>\n</html>\n`
   );
 }

@@ -15,7 +15,7 @@
 import { parseBacklog } from "@roll/core";
 import { type AuditPrEvidence, type TruthReason, type TruthState } from "@roll/core";
 import { markPhaseDone } from "./story-page.js";
-import { classifyStatus, type StoryStatus } from "@roll/spec";
+import { classifyStatus, type StoryEvidenceFlags, type StoryStatus } from "@roll/spec";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { storyTruthFromBacklog } from "./truth-adapter.js";
@@ -321,6 +321,15 @@ export interface DossierStory {
    *  `ac-map.json`). Honoured as done, but marked apart so the board does not
    *  read it as half-finished just because the evidence-based spine is bare. */
   legacy: boolean;
+  /** US-DOSSIER-025: the on-disk attest evidence flags (report / ac-map / a
+   *  real-pixel screenshot) that back the `attested` rung. Attached by the index
+   *  command during enrichment (the SAME `storyEvidenceFlags` probe the per-story
+   *  registry reads), so the epic page rows and the front-page spectrum can call
+   *  the shared `deriveDeliveryLadder(story, evidence)` and land on the identical
+   *  claimed→merged→attested rung the story dossier + truth.json registry report.
+   *  Absent on un-enriched renders (tests / ad-hoc) — the ladder then falls back
+   *  to the honest `merged` rung for a delivered card, never silently `attested`. */
+  evidence?: StoryEvidenceFlags;
 }
 
 export type DossierEpicDocKind = "overview" | "plan" | "doc";

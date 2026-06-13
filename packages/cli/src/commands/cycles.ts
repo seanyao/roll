@@ -40,6 +40,8 @@ function pad(s: string, w: number): string {
 function tokensTotal(tokens: string): string {
   // ledger carries "in/out" (e.g. 104k/16k) — the CLI column shows one figure.
   if (tokens === "—") return "—";
+  // FIX-290 AC3: unreadable usage stays "?" (UNKNOWN), never collapses to 0.
+  if (tokens === "?") return "?";
   const parts = tokens.split("/");
   const num = (p: string): number => (p.endsWith("k") ? Number(p.slice(0, -1)) * 1000 : Number(p));
   const total = parts.reduce((a, p) => a + (Number.isFinite(num(p)) ? num(p) : 0), 0);

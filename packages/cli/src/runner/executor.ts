@@ -112,6 +112,7 @@ import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
+import { refreshAggregates } from "../commands/index-gen.js";
 import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
 
 const execFileAsync = promisify(execFile);
@@ -996,6 +997,12 @@ export async function executeCommand(
       } else if (cmd.status === "idle" && (ctx.storyId ?? "") !== "") {
         ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", STATUS_MARKER.todo);
       }
+      // FIX-290 AC5: a failed/idle cycle is first-class — refresh the dossier
+      // aggregates on EVERY cycle terminal so the cycle surfaces on the web #loop
+      // ledger immediately, not only after the next delivery (which mounted the
+      // execution section at publish) or a manual `roll index`. Best-effort: a
+      // refresh failure WARNs and never fails the cycle terminal.
+      refreshAggregates(ports.repoCwd);
       return {};
     }
 
@@ -1068,6 +1075,12 @@ export function buildRunRow(
       if (dur >= 0) row["duration_sec"] = dur;
     }
   }
+  // FIX-290 AC2: `model` is fixed by the ROUTING decision (ctx.model), known the
+  // moment the agent is dispatched — it is NEVER blank, even on a failed/idle
+  // cycle whose usage could not be parsed. Record it unconditionally (fall back
+  // to the agent id when the router left model empty, e.g. claude default).
+  const routedModel = (ctx.model ?? "").trim() !== "" ? (ctx.model as string) : (ctx.agent ?? "");
+  if (routedModel !== "") row["model"] = routedModel;
   // Additive cost fields (v2 runs rows omit cost — the dashboard reads it from
   // the cycle:end event; surfacing it here keeps the human-facing 可回溯链 row
   // truthful too, sourced from the SAME ctx.cost as cycle:end → consistent).
@@ -1077,11 +1090,19 @@ export function buildRunRow(
     // the ledger can be rebuilt from rows; plus model + the cache split for
     // dashboard truth (tokens were "—", cost $0, guardrail blind).
     row["cost_effective_usd"] = ctx.cost.effectiveCost;
-    row["model"] = ctx.cost.model;
+    // The parsed usage carries the authoritative model — prefer it over the
+    // routed fallback when present.
+    if (ctx.cost.model !== "") row["model"] = ctx.cost.model;
     row["tokens_in"] = ctx.cost.tokensIn;
     row["tokens_out"] = ctx.cost.tokensOut;
     if (ctx.cost.cacheRead !== undefined) row["tokens_cache_read"] = ctx.cost.cacheRead;
     if (ctx.cost.cacheWrite !== undefined) row["tokens_cache_write"] = ctx.cost.cacheWrite;
+  } else {
+    // FIX-290 AC3: usage could not be read (e.g. usage_credentials_missing). The
+    // tokens/cost are UNKNOWN, not zero — mark it so the ledger renders "?" with
+    // an unknown marker instead of a misleading "$0.00 · 0/0". model + duration
+    // above are still present (failure ≠ empty record).
+    row["usage_unknown"] = true;
   }
   return row;
 }

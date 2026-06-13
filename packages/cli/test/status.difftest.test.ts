@@ -63,7 +63,20 @@ describe("frozen: roll status render", () => {
     dirs.push(fixProj);
     const ts = tsStatus({ ROLL_RENDER_FIXTURE: "1" }, fixProj).split(basename(fixProj)).join("<PROJECT>");
     expect(ts).toMatchInlineSnapshot(`
-      "
+      "  WARN    main reconciled vs backlog   exit 1
+
+        LOOP      2 loops · 1 running   next 08:55Z
+        CYCLE     17 / 3d   12 failed · $0.59
+        RELEASE   v3.611.2 staged   pass · f:0 w:44 ?:78 · 366 merged · 214 pending
+        STORY     67% attest coverage      fail 0 · unknown 197
+
+        drift 0 · done 366 (incl. legacy 366) · unknown 197 · todo 7
+
+        → roll cycles --since 3d    → roll release    → roll backlog
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
         ! drift  1/3 AI clients in sync · 12 skills · 4 templates
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -169,7 +182,11 @@ describe("frozen: roll status render", () => {
       .split(basename(proj))
       .join("<PROJ>");
     expect(ts).toMatchInlineSnapshot(`
-      "
+      "  UNKNOWN  no truth snapshot — run roll index
+
+      ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
         ! drift  1/2 AI clients in sync · 2 skills · 2 templates
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────

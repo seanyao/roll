@@ -1,5 +1,8 @@
 /** Ported-command registry — one line per migrated subcommand. */
+import { resolveLang } from "@roll/spec";
 import { registerPorted } from "../bridge.js";
+import { renderState } from "../render.js";
+import { renderLoopHelp } from "../lib/loop-help.js";
 import { agentCommand } from "./agent.js";
 import { pairCommand } from "./pair.js";
 import { PEER_HELP, peerCommand } from "./peer.js";
@@ -333,5 +336,19 @@ export function registerAll(): void {
     // Anything else is an unknown loop subcommand — print the v2 usage, exit 1
     // (no bash fallback remains; bin/roll is being retired in US-PORT-021).
     return loopUnknownSubcommand(args[0]);
-  }, { help: "Usage: roll loop <on|off|now|go|test|status|goal|runs|log|story|events|eval|signals|alert|fmt|pr-inbox|mute|unmute|pause|resume|reset|gc>\n  The autonomous delivery loop.\n自治交付循环。" });
+  }, {
+    // US-DOSSIER-035: a help PROVIDER (not a static string) so `roll loop --help`
+    // renders the grouped (control/observe/alerts/maintain) bands locale-resolved
+    // — single-language per resolved locale — while still routing through the
+    // bridge's central read-only help contract (FIX-239).
+    help: () => {
+      const lang = resolveLang({
+        rollLang: process.env["ROLL_LANG"],
+        lcAll: process.env["LC_ALL"],
+        lang: process.env["LANG"],
+      });
+      if (!process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "") renderState.useColor = false;
+      return renderLoopHelp(lang);
+    },
+  });
 }

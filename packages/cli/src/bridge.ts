@@ -8,6 +8,11 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveLang } from "@roll/spec";
+import { renderFrontDoor } from "./lib/front-door.js";
+import { isSnapshotStale, loadTruthSnapshot, renderNowMs } from "./lib/truth-read.js";
+import { renderState } from "./render.js";
+import { treeVersion } from "./commands/version.js";
 
 /** A ported subcommand: receives args after the subcommand, returns exit code. */
 export type Handler = (args: string[]) => number | Promise<number>;
@@ -21,9 +26,15 @@ const hidden = new Set<string>();
 // and exits 0 BEFORE the handler runs (so a cry for help can never trigger
 // side effects, the FIX-238 `update --help` upgrade incident). Commands with
 // richer internal help simply don't register a string and keep handling it.
-const helpText = new Map<string, string>();
+//
+// US-DOSSIER-035: help may also be a `() => string` PROVIDER — the bridge calls
+// it (read-only, side-effect-free by contract) at `--help` time so a command can
+// render locale-resolved / grouped help (e.g. `roll loop --help`) while still
+// going through the central read-only enforcement.
+type HelpSpec = string | (() => string);
+const helpText = new Map<string, HelpSpec>();
 
-export function registerPorted(command: string, handler: Handler, opts?: { hidden?: boolean; help?: string }): void {
+export function registerPorted(command: string, handler: Handler, opts?: { hidden?: boolean; help?: HelpSpec }): void {
   ported.set(command, handler);
   if (opts?.hidden === true) hidden.add(command);
   if (opts?.help !== undefined) helpText.set(command, opts.help);
@@ -75,9 +86,41 @@ export function usage(): string {
 }
 
 /**
+ * US-DOSSIER-035 — the bare-`roll` front door (design frame 0). Read-only,
+ * exits 0: one identity line (version + injected slogan), one verdict line read
+ * from the ONE TruthSnapshot the web reads, and a three-row command map. When
+ * the snapshot is missing/stale the verdict falls back honestly (AC2). `roll
+ * help`/`--help`/`-h` keep the usage contract below — this fires only on no args.
+ */
+export function frontDoor(): string {
+  const lang = resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+  if (!process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "") renderState.useColor = false;
+  let snapshot: ReturnType<typeof loadTruthSnapshot>;
+  let stale = false;
+  try {
+    snapshot = loadTruthSnapshot(process.cwd());
+    if (snapshot !== undefined) stale = isSnapshotStale(snapshot, renderNowMs());
+  } catch {
+    snapshot = undefined;
+  }
+  return renderFrontDoor({
+    version: treeVersion(repoRoot()),
+    slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works.",
+    snapshot,
+    stale,
+    lang,
+  });
+}
+
+/**
  * TS-first dispatch (US-PORT-021: no bash fallback). A registered command runs
- * its handler; `help`/`--help`/`-h`/no command prints the usage (exit 0); any
- * other unknown command prints "unknown command" + usage (exit 1).
+ * its handler; `help`/`--help`/`-h` prints the usage (exit 0); no command at all
+ * prints the front door (US-DOSSIER-035, exit 0); any other unknown command
+ * prints "unknown command" + usage (exit 1).
  */
 export async function dispatch(argv: string[]): Promise<RunResult> {
   const [command, ...rest] = argv;
@@ -87,13 +130,18 @@ export async function dispatch(argv: string[]): Promise<RunResult> {
       // FIX-238/239: the contract half the bridge owns — help is read-only.
       const help = helpText.get(command);
       if (help !== undefined && (rest[0] === "--help" || rest[0] === "-h")) {
-        process.stdout.write(help.endsWith("\n") ? help : `${help}\n`);
+        const text = typeof help === "function" ? help() : help;
+        process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
         return { status: 0 };
       }
       return { status: await handler(rest) };
     }
   }
-  if (command === undefined || command === "" || command === "help" || command === "--help" || command === "-h") {
+  if (command === undefined || command === "") {
+    process.stdout.write(frontDoor());
+    return { status: 0 };
+  }
+  if (command === "help" || command === "--help" || command === "-h") {
     process.stdout.write(usage());
     return { status: 0 };
   }

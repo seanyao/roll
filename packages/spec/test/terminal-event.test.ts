@@ -87,6 +87,42 @@ describe("US-TRUTH-001 AC3 — every fact field is present-or-reasoned, never si
   });
 });
 
+describe("FIX-294 — the terminal event carries the routed model even when usage is unknown", () => {
+  it("a failed cycle with unreadable usage still records WHICH model ran", () => {
+    const e = buildTerminalEvent({
+      ...BASE,
+      model: "deepseek-v4-pro",
+      outcome: "failed",
+      pr: absent("no_publish_attempted"),
+      branch: present("loop/cycle-x"),
+      commit: absent("no_commits"),
+      tcr: present(0),
+      attest: absent("not_rendered"),
+      // usage absent ⇒ tokens/cost UNKNOWN (FIX-290 distinction preserved)…
+      usage: absent("no_parseable_usage"),
+      cost: absent("no_parseable_usage"),
+    });
+    // …but the routed model is a dispatch-time fact and is never lost.
+    expect(e.model).toBe("deepseek-v4-pro");
+    expect(e.usage).toEqual({ present: false, reason: "no_parseable_usage" });
+  });
+
+  it("model defaults to empty string when no routing context exists (killed-cycle twin)", () => {
+    const e = buildTerminalEvent({
+      ...BASE,
+      outcome: "aborted_no_delivery",
+      pr: absent("killed_before_publish"),
+      branch: present("loop/cycle-y"),
+      commit: absent("killed_before_capture"),
+      tcr: absent("probe_failed"),
+      attest: absent("killed_before_capture"),
+      usage: absent("killed_before_capture"),
+      cost: absent("killed_before_capture"),
+    });
+    expect(e.model).toBe("");
+  });
+});
+
 describe("US-TRUTH-001 AC4 — orphan/killed cycles derive a verdict instead of leaving a hole", () => {
   it("dead pid + commits on the branch → aborted_with_delivery", () => {
     expect(deriveOrphanVerdict({ pidAlive: false, commitsAhead: 2, ageSec: 900, timeoutSec: 2700 })).toBe(

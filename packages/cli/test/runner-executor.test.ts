@@ -18,6 +18,7 @@ import {
   buildClaudeArgv,
   buildRunRow,
   buildSpawnCommand,
+  buildTerminalRecord,
   dryRunPlan,
   executeCommand,
   parseEstMin,
@@ -349,6 +350,61 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     );
     expect(row["ts"]).toBe("2026-06-05T19:34:42Z");
     expect(row).not.toHaveProperty("duration_sec");
+  });
+});
+
+describe("buildTerminalRecord — the cycle:terminal twin (US-TRUTH-001 + FIX-294)", () => {
+  it("FIX-294: a failed cycle with UNREADABLE usage still records the routed model on the event", () => {
+    // ctx.cost absent (usage_credentials_missing). FIX-290 fixed this on the runs
+    // row; the terminal-event twin went through buildTerminalRecord → buildTerminalEvent
+    // and lost the model entirely (model only lived inside the usage fact). Now the
+    // top-level event.model carries the routed model even when usage is unknown.
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      { ...CTX, agent: "pi", model: "kimi-k2-instruct" },
+      "/wt",
+      1780688082,
+    );
+    expect(ev.type).toBe("cycle:terminal");
+    expect(ev.model).toBe("kimi-k2-instruct"); // FIX-294: NEVER blank on a routed cycle
+    // FIX-290 distinction preserved: usage is reasoned-absent, not a faked 0.
+    expect(ev.usage).toEqual({ present: false, reason: "no_parseable_usage" });
+    expect(ev.cost).toEqual({ present: false, reason: "no_parseable_usage" });
+  });
+
+  it("FIX-294: model falls back to the agent id when the router left model empty (claude default)", () => {
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
+      { ...CTX, agent: "claude", model: "" },
+      "/wt",
+      1780688082,
+    );
+    expect(ev.model).toBe("claude");
+  });
+
+  it("prefers the authoritative model from parsed usage when present", () => {
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      {
+        ...CTX,
+        agent: "pi",
+        model: "kimi-k2-instruct", // routed
+        cost: {
+          cycleId: CTX.cycleId,
+          agent: "pi",
+          model: "deepseek-v4-pro", // parsed (authoritative)
+          tokensIn: 1200,
+          tokensOut: 400,
+          estimatedCost: 0.42,
+          effectiveCost: 0.42,
+          revertCount: 0,
+        },
+      },
+      "/wt",
+      1780688082,
+    );
+    expect(ev.model).toBe("deepseek-v4-pro");
+    expect(ev.usage).toEqual({ present: true, value: { model: "deepseek-v4-pro", tokensIn: 1200, tokensOut: 400 } });
   });
 });
 

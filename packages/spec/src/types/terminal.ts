@@ -97,6 +97,15 @@ export interface TerminalEvent {
   cycleId: string;
   storyId: string;
   agent: string;
+  /** FIX-294: the routed model, fixed by the routing decision at dispatch and
+   *  therefore ALWAYS knowable — present even when usage could not be parsed.
+   *  The `usage` fact still owns the present-or-reasoned token/cost truth (a
+   *  true-0 usage stays distinguishable from unknown); this top-level model is
+   *  the answer to "which model ran this cycle" regardless of usage capture.
+   *  Empty string only when there was no routing context at all (e.g. a killed
+   *  cycle's signal-teardown twin). FIX-290 fixed the runs row's model; this
+   *  closes the same hole on the terminal-event twin. */
+  model: string;
   /** Epoch seconds. */
   startedAt: number;
   endedAt: number;
@@ -116,6 +125,11 @@ export interface TerminalEventInput {
   cycleId: string;
   storyId: string;
   agent: string;
+  /** FIX-294: routed model (always knowable at dispatch). Optional on the input
+   *  for backward compatibility with older call sites; defaults to "" — the
+   *  runner passes the routed model so a no-parseable-usage cycle still records
+   *  WHICH model ran. */
+  model?: string;
   startedAt: number;
   endedAt: number;
   outcome: TerminalOutcome;
@@ -138,6 +152,7 @@ export function buildTerminalEvent(input: TerminalEventInput): TerminalEvent {
     cycleId: input.cycleId,
     storyId: input.storyId,
     agent: input.agent,
+    model: input.model ?? "",
     startedAt: input.startedAt,
     endedAt: input.endedAt,
     outcome: input.outcome,

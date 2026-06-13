@@ -83,6 +83,10 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "cycleId", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
   { field: "storyId", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
   { field: "agent", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+  // FIX-294: routed model is a dispatch-time fact (like agent) — authoritative,
+  // ALWAYS present even when usage couldn't be parsed; the `usage` fact below
+  // still owns the present-or-reasoned token/cost truth.
+  { field: "model", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
   { field: "startedAt", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
   { field: "endedAt", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
   { field: "outcome", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },

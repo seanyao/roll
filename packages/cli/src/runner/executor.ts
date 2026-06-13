@@ -1153,10 +1153,22 @@ export function buildTerminalRecord(
   } else {
     usage = absent("no_parseable_usage");
   }
+  // FIX-294 (FIX-290 follow-up): the terminal-event twin must ALSO always carry
+  // the routed model — same rule as buildRunRow above. Model is fixed by the
+  // ROUTING decision (ctx.model), known the moment the agent is dispatched, so
+  // it is present even on a failed/idle cycle whose usage could not be parsed.
+  // Prefer the authoritative model from parsed usage when present, else the
+  // routed model, else fall back to the agent id (claude default leaves model
+  // empty). The `usage` fact stays present-or-reasoned so a true-0 is still
+  // distinguishable from unknown — but WHICH model ran is never lost.
+  const routedModel = (ctx.model ?? "").trim() !== "" ? (ctx.model as string) : (ctx.agent ?? "");
+  const model =
+    ctx.cost !== undefined && ctx.cost.model !== "" ? ctx.cost.model : routedModel;
   return buildTerminalEvent({
     cycleId: cmd.cycleId,
     storyId,
     agent: ctx.agent ?? "",
+    model,
     startedAt: ctx.startSec ?? nowSec,
     endedAt: nowSec,
     outcome: OUTCOME[cmd.status] ?? "unknown",

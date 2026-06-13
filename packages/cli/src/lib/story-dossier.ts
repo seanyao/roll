@@ -1096,7 +1096,10 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
         .filter((r): r is NonNullable<typeof r> => r != null && typeof r.ac === "string" && typeof r.status === "string")
         .map((r) => {
           const verify = typeof r.verify === "string" ? r.verify.trim() : "";
-          const evidence = parseAcEvidence(r.evidence);
+          // FIX-282: ac-map evidence hrefs are run-dir-relative (`../acceptance/x`);
+          // the story page sits at the story root, so re-base before rendering or
+          // every `<img>` resolves to the wrong parent dir (404).
+          const evidence = rebaseAcEvidenceToStoryRoot(parseAcEvidence(r.evidence));
           return {
             ac: r.ac as string,
             status: r.status as string,
@@ -2109,6 +2112,50 @@ export function parseAcEvidence(raw: unknown): AcEvidence[] {
     out.push({ kind, ...(label !== undefined ? { label } : {}), ...(href !== undefined ? { href } : {}) });
   }
   return out;
+}
+
+/**
+ * FIX-282 — re-base a run-dir-relative evidence href so it resolves from the
+ * STORY ROOT (`features/<epic>/<id>/index.html`), not from the run dir
+ * (`<ts>/<id>-report.html`).
+ *
+ * ac-map hrefs are authored relative to the run dir `<ts>/`:
+ *   - `../acceptance/x`, `../screenshots/x`, `../evidence/x` — STORY-LEVEL
+ *     artifacts that physically live at the story root (one level above the run
+ *     dir). From the story root these are reached directly → strip the `../`.
+ *   - `screenshots/x`, `evidence/x` (no `../`) — RUN-DIR-LOCAL artifacts under
+ *     `<ts>/`. From the story root the live run dir is the `latest/` symlink →
+ *     prefix with `latest/`.
+ *
+ * Absolute URLs, `/`-rooted paths, and hrefs already rooted at `latest/` are
+ * left untouched. This is applied ONLY when building the story-page view-model
+ * — the attest report (rendered at `<ts>/`) keeps its `../`-based hrefs, which
+ * are correct there.
+ */
+export function rebaseEvidenceHrefToStoryRoot(href: string): string {
+  const h = href.trim();
+  if (h === "") return h;
+  // Off-tree refs the page should never rewrite.
+  if (/^[a-z]+:/i.test(h) || h.startsWith("/") || h.startsWith("#")) return h;
+  // Already story-root-correct (on-disk hrefs minted by the collector).
+  if (h.startsWith("latest/")) return h;
+  // STORY-LEVEL: `../foo` (run-dir-relative to a sibling of `<ts>/`) → `foo`.
+  if (h.startsWith("../")) {
+    let rest = h.slice(3);
+    // Defensively collapse any further `../` (none expected) so we never keep
+    // an out-of-root segment on the story page.
+    while (rest.startsWith("../")) rest = rest.slice(3);
+    return rest;
+  }
+  // RUN-DIR-LOCAL: a bare `evidence/x` / `screenshots/x` lives under `<ts>/`;
+  // reach the live run dir from the story root via the `latest/` symlink.
+  return `latest/${h}`;
+}
+
+/** FIX-282 — apply {@link rebaseEvidenceHrefToStoryRoot} across a parsed
+ *  ac-map evidence list when rendering the STORY PAGE. */
+export function rebaseAcEvidenceToStoryRoot(ev: AcEvidence[]): AcEvidence[] {
+  return ev.map((e) => (e.href !== undefined ? { ...e, href: rebaseEvidenceHrefToStoryRoot(e.href) } : e));
 }
 
 // Thin fs/git seams (kept local so the renderer stays pure above).

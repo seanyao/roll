@@ -3,7 +3,7 @@
  * 001a: design tokens + Features Index front page (collectDossier + renderFeaturesIndex).
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -17,6 +17,7 @@ import {
   classifyAc,
   collectStoryDossierInput,
   parseAcEvidence,
+  rebaseEvidenceHrefToStoryRoot,
   renderStoryDossier,
   storyEvidenceFlags,
   storyHasMergeEvidence,
@@ -1816,18 +1817,96 @@ describe("US-DOSSIER-024 — per-AC evidence blocks", () => {
 
   it("collectStoryDossierInput: threads ac-map evidence[] + on-disk screenshots into the dossier input", () => {
     const p = project();
-    const dir = join(p, ".roll", "features", "alpha", "US-AC-7", "2026-06-13T00-00-00");
+    const storyDir = join(p, ".roll", "features", "alpha", "US-AC-7");
+    const dir = join(storyDir, "2026-06-13T00-00-00");
     mkdirSync(join(dir, "screenshots"), { recursive: true });
     writeFileSync(join(dir, "screenshots", "render.png"), "PNGDATA");
-    symlinkSync(dir, join(p, ".roll", "features", "alpha", "US-AC-7", "latest"));
+    symlinkSync(dir, join(storyDir, "latest"));
+    // FIX-282: a `../screenshots/x` ac-map href is STORY-LEVEL — the file lives at
+    // the story root, NOT the run dir. Mirror that on disk.
+    mkdirSync(join(storyDir, "screenshots"), { recursive: true });
+    writeFileSync(join(storyDir, "screenshots", "render.png"), "PNGDATA");
     writeFileSync(
-      join(p, ".roll", "features", "alpha", "US-AC-7", "ac-map.json"),
+      join(storyDir, "ac-map.json"),
       JSON.stringify([
         { ac: "US-AC-7:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "render", href: "../screenshots/render.png" }] },
       ]),
     );
     const got = collectStoryDossierInput(p, { id: "US-AC-7", epic: "alpha", type: "US", delivered: true });
-    expect(got.acRows?.[0]?.evidence).toEqual([{ kind: "screenshot", label: "render", href: "../screenshots/render.png" }]);
+    // FIX-282: the run-dir-relative `../screenshots/x` is re-based to the STORY
+    // ROOT (`screenshots/x`) so the `<img>` on the story page resolves.
+    expect(got.acRows?.[0]?.evidence).toEqual([{ kind: "screenshot", label: "render", href: "screenshots/render.png" }]);
     expect(got.screenshotFiles).toEqual(["latest/screenshots/render.png"]);
+  });
+});
+
+// ── FIX-282 — story-dossier evidence hrefs re-based to the story root ─────────
+describe("FIX-282 — story-page evidence hrefs resolve from the story root", () => {
+  it("rebaseEvidenceHrefToStoryRoot: story-level `../` is stripped; run-dir-local is via latest/; off-tree untouched", () => {
+    // STORY-LEVEL (`../acceptance|screenshots|evidence/x`) lives at the story
+    // root → strip the run-dir `../` so the story page reaches it directly.
+    expect(rebaseEvidenceHrefToStoryRoot("../acceptance/print.png")).toBe("acceptance/print.png");
+    expect(rebaseEvidenceHrefToStoryRoot("../screenshots/mobile.png")).toBe("screenshots/mobile.png");
+    expect(rebaseEvidenceHrefToStoryRoot("../evidence/vitest-report.txt")).toBe("evidence/vitest-report.txt");
+    // RUN-DIR-LOCAL (no `../`) lives under `<ts>/` → reach the live run dir via
+    // the `latest/` symlink from the story root.
+    expect(rebaseEvidenceHrefToStoryRoot("screenshots/terminal.png")).toBe("latest/screenshots/terminal.png");
+    expect(rebaseEvidenceHrefToStoryRoot("evidence/source-map.txt")).toBe("latest/evidence/source-map.txt");
+    // Already story-root-correct / off-tree refs are left untouched.
+    expect(rebaseEvidenceHrefToStoryRoot("latest/screenshots/x.png")).toBe("latest/screenshots/x.png");
+    expect(rebaseEvidenceHrefToStoryRoot("https://github.com/seanyao/roll/pull/6")).toBe("https://github.com/seanyao/roll/pull/6");
+    expect(rebaseEvidenceHrefToStoryRoot("/abs/path.png")).toBe("/abs/path.png");
+    // No re-based href ever keeps an out-of-root `../` segment.
+    for (const h of ["../acceptance/a.png", "../screenshots/b.png", "screenshots/c.png", "latest/d.png"]) {
+      expect(rebaseEvidenceHrefToStoryRoot(h).startsWith("../")).toBe(false);
+    }
+  });
+
+  it("AC1+AC2+AC4: a story-level screenshot href resolves to an EXISTING file from the story root (no out-of-root `../`)", () => {
+    const p = project();
+    const storyDir = join(p, ".roll", "features", "alpha", "US-FIX-282");
+    // A real run dir + `latest/` symlink, plus story-level acceptance/ pixels —
+    // the exact shape that broke 125 of 164 `<img>` refs.
+    const runDir = join(storyDir, "2026-06-13T10-00-00");
+    mkdirSync(runDir, { recursive: true });
+    symlinkSync(runDir, join(storyDir, "latest"));
+    mkdirSync(join(storyDir, "acceptance"), { recursive: true });
+    writeFileSync(join(storyDir, "acceptance", "print.png"), "PNGDATA");
+    writeFileSync(join(storyDir, "acceptance", "mobile-390.png"), "PNGDATA");
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        {
+          ac: "US-FIX-282:AC1",
+          status: "pass",
+          evidence: [
+            { kind: "screenshot", label: "print form", href: "../acceptance/print.png" },
+            { kind: "screenshot", label: "mobile form", href: "../acceptance/mobile-390.png" },
+          ],
+        },
+      ]),
+    );
+    const story = { id: "US-FIX-282", epic: "alpha", type: "US" as const, delivered: true };
+    const input = collectStoryDossierInput(p, story);
+    const ev = input.acRows?.[0]?.evidence ?? [];
+    expect(ev.length).toBe(2);
+    for (const e of ev) {
+      const href = e.href ?? "";
+      // AC1: re-based href never escapes the story root with `../`.
+      expect(href.startsWith("../")).toBe(false);
+      // AC4: the re-based href points at a file that actually exists, resolved
+      // from the STORY ROOT (where index.html lives).
+      expect(existsSync(join(storyDir, href))).toBe(true);
+    }
+    // AC2: every `<img>` src the renderer emits resolves to an existing file
+    // when read relative to the story root — zero broken images.
+    const html = renderStoryDossier(input);
+    const imgSrcs = [...html.matchAll(/<img[^>]+src="([^"]+)"/g)].map((m) => m[1] ?? "");
+    expect(imgSrcs.length).toBeGreaterThan(0);
+    for (const src of imgSrcs) {
+      if (/^[a-z]+:/i.test(src) || src.startsWith("/")) continue; // off-tree
+      expect(src.startsWith("../")).toBe(false);
+      expect(existsSync(join(storyDir, src))).toBe(true);
+    }
   });
 });

@@ -70,6 +70,8 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll ls [--json] [--stale-days <n>]` | 列出跨项目注册表(`~/.roll/projects.json`):名称 · 版本 · 判定 · 路径;缺失/过期行会被标注,绝不丢弃 |
 | `roll config [lang <zh\|en\|--reset>\|…]` | 读写 roll 配置(语言、loop 窗口、dream 时间) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | 本机复杂度槽位路由(easy/default/hard/fallback) |
+| `roll cast [--json]` | 打印复杂度阶梯→角色分工表(与 web 控制台网格同源同数据;`--json` 为机器视图) |
+| `roll doc [--lang en\|zh] [name]` | 在终端查看 Charter / 语言指南文档(`--lang` 缺省回落到配置语言) |
 | `roll prices [refresh]` | 模型价目表(成本核算来源) |
 | `roll setup [skills\|-f]` | 首次安装、生成技能目录或重新同步约定到所有 AI 客户端 |
 | `roll update` | 升级到最新版本并重新同步 |

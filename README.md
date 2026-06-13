@@ -70,6 +70,8 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll ls [--json] [--stale-days <n>]` | List the cross-project registry (`~/.roll/projects.json`): name · tag · verdict · path; missing/stale rows flagged, never dropped |
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
+| `roll cast [--json]` | Print the complexity-ladder → role Casting table (same data the web console grid shows; `--json` for the machine view) |
+| `roll doc [--lang en\|zh] [name]` | View the Charter / language guide markdown in the terminal (`--lang` falls back to the configured language) |
 | `roll prices [refresh]` | Model price table (cost accounting source) |
 | `roll setup [skills\|-f]` | First-time install, skill catalog generation, or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |

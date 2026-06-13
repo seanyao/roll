@@ -151,3 +151,30 @@ describe("cleanup guard — AC8: no active source re-advertises the removed surf
     expect(hits).toEqual([]);
   });
 });
+
+describe("FIX-277 — throwing dependencies become orderly aborts", () => {
+  it("a hook-blocked commit aborts at commit-push with the hook's reason, no raw throw", async () => {
+    const { deps, writes } = fakeDeps({
+      commitPush: () => {
+        throw new Error("✗ Commit blocked: tests not verified on current code.");
+      },
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("aborted");
+    expect(res.step).toBe("commit-push");
+    expect(res.reason).toContain("Commit blocked");
+    expect(writes.some((w) => w.startsWith("tag:"))).toBe(false);
+  });
+
+  it("a throwing tag push still reports tag-push, never an unhandled rejection", async () => {
+    const { deps } = fakeDeps({
+      pushTag: () => {
+        throw new Error("network down");
+      },
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("aborted");
+    expect(res.step).toBe("tag-push");
+    expect(res.reason).toContain("network down");
+  });
+});

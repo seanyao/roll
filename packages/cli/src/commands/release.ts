@@ -122,7 +122,17 @@ export function realReleaseDeps(): ReleaseFlowDeps {
     commitPush: (cwd, branch, message) => {
       git(cwd, ["checkout", "-b", branch]);
       git(cwd, ["add", "package.json", "CHANGELOG.md"]);
-      git(cwd, ["commit", "-m", message]);
+      try {
+        git(cwd, ["commit", "-m", message]);
+      } catch (e) {
+        // FIX-277: repos with a test-proof commit gate (roll itself) reject a
+        // commit whose proof is stale. Refresh the proof once and retry; any
+        // other failure (or a second rejection) propagates to the orderly abort.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/test/i.test(msg)) throw e;
+        execFileSync("roll", ["test"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 600_000 });
+        git(cwd, ["commit", "-m", message]);
+      }
       git(cwd, ["push", "-u", "origin", branch]);
     },
     openPr: (cwd, branch, title) => {
@@ -194,6 +204,28 @@ export interface ReleaseRunResult {
 export async function runReleaseFlow(cwd: string, deps: ReleaseFlowDeps, opts: { dryRun: boolean; yes: boolean }): Promise<ReleaseRunResult> {
   const step = (s: ReleaseStep, detail: string): void => deps.onStep?.(s, detail);
   const abort = (s: ReleaseStep, reason: string): ReleaseRunResult => ({ status: "aborted", step: s, reason });
+  let current_step: ReleaseStep = "plan";
+  try {
+    return await runReleaseFlowInner(cwd, deps, opts, (s) => {
+      current_step = s;
+      return s;
+    });
+  } catch (e) {
+    // FIX-277: a throwing dependency (hook-blocked commit, network failure…)
+    // is an ORDERLY abort at the step it bit — never a raw stack mid-release.
+    const msg = e instanceof Error ? e.message.split("\n").find((l) => l.trim() !== "") ?? "unknown failure" : String(e);
+    return abort(current_step, `step dependency failed: ${msg.trim()}`);
+  }
+}
+
+async function runReleaseFlowInner(
+  cwd: string,
+  deps: ReleaseFlowDeps,
+  opts: { dryRun: boolean; yes: boolean },
+  mark: (s: ReleaseStep) => ReleaseStep,
+): Promise<ReleaseRunResult> {
+  const step = (s: ReleaseStep, detail: string): void => deps.onStep?.(mark(s), detail);
+  const abort = (s: ReleaseStep, reason: string): ReleaseRunResult => ({ status: "aborted", step: s, reason });
 
   // plan
   const current = deps.version(cwd);
@@ -230,9 +262,11 @@ export async function runReleaseFlow(cwd: string, deps: ReleaseFlowDeps, opts: {
   step("package-gate", "pack dry-run clean");
 
   const branch = `release/${plan.tag}`;
+  mark("commit-push");
   deps.commitPush(cwd, branch, `Release: ${plan.tag}`);
   step("commit-push", branch);
 
+  mark("open-pr");
   const prRef = deps.openPr(cwd, branch, `Release: ${plan.tag}`);
   step("open-pr", prRef);
 
@@ -246,6 +280,7 @@ export async function runReleaseFlow(cwd: string, deps: ReleaseFlowDeps, opts: {
   step("consistency-gate", "all dimensions pass");
 
   if (deps.tagExists(cwd, plan.tag)) return abort("tag-push", `tag ${plan.tag} appeared concurrently`);
+  mark("tag-push");
   deps.tag(cwd, plan.tag, plan.nextVersion);
   deps.pushTag(cwd, plan.tag);
   step("tag-push", plan.tag);

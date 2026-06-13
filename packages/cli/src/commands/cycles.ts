@@ -46,10 +46,49 @@ function tokensTotal(tokens: string): string {
   return total >= 1000 ? `${Math.round(total / 1000)}k` : String(total);
 }
 
-export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, lang: Lang, nowSec: number): string {
+/** The window filter the human render applies — shared so --json is the SAME
+ *  computation (AC5/AC7), never a second derivation. */
+function windowRows(rows: CycleLedgerRow[], sinceLabel: string, nowSec: number): CycleLedgerRow[] {
   const horizonDays = WINDOWS[sinceLabel];
-  const within =
-    sinceLabel === "all" ? rows : rows.filter((r) => nowSec - r.tsSec <= (horizonDays ?? 3) * 86400 && r.tsSec > 0);
+  return sinceLabel === "all"
+    ? rows
+    : rows.filter((r) => nowSec - r.tsSec <= (horizonDays ?? 3) * 86400 && r.tsSec > 0);
+}
+
+/**
+ * US-DOSSIER-036 --json (AC5/AC7): the machine view of the ledger, built from
+ * the SAME windowed rows + the SAME `delivered`/`failed`/`cost` aggregation the
+ * human render computes — field-by-field parity, key/row order stable (recency).
+ */
+export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, nowSec: number): unknown {
+  const within = windowRows(rows, sinceLabel, nowSec);
+  const delivered = within.filter((r) => r.verdict === "delivered").length;
+  const failed = ledgerFailedCount(within);
+  const cost = within.reduce((a, r) => {
+    const n = r.cost.startsWith("$") ? Number(r.cost.slice(1)) : 0;
+    return a + (Number.isFinite(n) ? n : 0);
+  }, 0);
+  return {
+    since: sinceLabel,
+    cycles: within.length,
+    delivered,
+    failed,
+    costUsd: Number(cost.toFixed(2)),
+    rows: within.map((r) => ({
+      no: cycleNo(r.cycleId),
+      cycleId: r.cycleId,
+      verdict: r.verdict,
+      storyId: r.storyId,
+      model: r.model,
+      tokens: tokensTotal(r.tokens),
+      cost: r.cost,
+      duration: r.duration,
+    })),
+  };
+}
+
+export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, lang: Lang, nowSec: number): string {
+  const within = windowRows(rows, sinceLabel, nowSec);
   const lines: string[] = [];
   for (const r of within) {
     const color = VERDICT_COLOR[r.verdict] ?? "muted";
@@ -98,6 +137,7 @@ export function cyclesCommand(args: string[]): number {
     process.stdout.write(`${CYCLES_USAGE}\n`);
     return 0;
   }
+  const json = args.includes("--json");
   let since = "3d";
   const i = args.indexOf("--since");
   if (i >= 0) {
@@ -110,12 +150,17 @@ export function cyclesCommand(args: string[]): number {
     }
     since = v;
   }
-  const unknown = args.filter((a, idx) => a.startsWith("-") && a !== "--since" && a !== "--no-color" && !(idx > 0 && args[idx - 1] === "--since"));
+  const unknown = args.filter((a, idx) => a.startsWith("-") && a !== "--since" && a !== "--no-color" && a !== "--json" && !(idx > 0 && args[idx - 1] === "--since"));
   if (unknown.length > 0) {
     process.stderr.write(`[roll] unknown flag: ${unknown[0]}\n${CYCLES_USAGE}\n`);
     return 1;
   }
   const rows = collectCycleLedger(process.cwd());
-  process.stdout.write(renderCyclesLedger(rows, since, lang, Math.floor(Date.now() / 1000)));
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (json) {
+    process.stdout.write(JSON.stringify(cyclesLedgerJson(rows, since, nowSec), null, 2) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderCyclesLedger(rows, since, lang, nowSec));
   return 0;
 }

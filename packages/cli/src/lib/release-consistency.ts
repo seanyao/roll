@@ -13,8 +13,9 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { join } from "node:path";
-import { CONSISTENCY_DIMENSIONS, type ConsistencyDimension } from "@roll/core";
+import { CONSISTENCY_DIMENSIONS, CONSISTENCY_DIMENSION_LABELS, type ConsistencyDimension } from "@roll/core";
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
+import { c, renderState, strw, trunc } from "../render.js";
 import { consistencyAuditCommand } from "./consistency-audit.js";
 
 // US-DOSSIER-022: the gate report reads the SAME six-dimension vocabulary the
@@ -588,6 +589,124 @@ function formatHuman(report: Report): string {
   return lines.join("\n");
 }
 
+// ─── US-DOSSIER-036: the verdict-first six-dimension gate table ───────────────
+//
+// One vocabulary, one source: the table reads the SAME runAll() computation the
+// gate and the web panel read (CONSISTENCY_DIMENSION_LABELS from @roll/core), so
+// the terminal and the browser show the same ①…⑥ names in the same order. The
+// gate model is hard pass/fail with per-dimension gaps; a failing dimension's
+// gaps ARE its fails (f). The gate has no warn/unknown tier (those belong to the
+// broader shadow audit), so w/? read 0 here — but the row shape matches the web
+// panel's `f:/w:/?:` exactly. AC4: any f>0 ⇒ overall fail ⇒ exit non-zero, and
+// the verdict prints BEFORE the rows.
+
+interface DimCounts {
+  fail: number;
+  warn: number;
+  unknown: number;
+}
+
+/** Per-dimension f/w/? derived from the same runAll report (no re-derivation). */
+function dimCounts(result: DimResult | undefined): DimCounts {
+  return { fail: result?.status === "fail" ? result.gaps.length : 0, warn: 0, unknown: 0 };
+}
+
+const VERDICT_WORD: Record<"pass" | "fail", { en: string; zh: string }> = {
+  pass: { en: "PASS", zh: "通过" },
+  fail: { en: "FAIL", zh: "失败" },
+};
+
+/**
+ * Verdict-first table (AC3/AC4). Leads with the overall verdict + total
+ * f/w/? + exit-code intent, then one row per dimension:
+ *   `<no> <en> / <zh>   <caption>   f:N  w:N  ?:N`
+ * EN and ZH dimension labels and captions are on SEPARATE lines (AC8) — never
+ * inline-mixed. Pure: (report, lang) → text; color via render.c (NO_COLOR-aware).
+ */
+function formatGateTable(report: Report, lang: Lang): string {
+  const out: string[] = [];
+  let totalFail = 0;
+  let totalWarn = 0;
+  let totalUnknown = 0;
+  for (const dim of CONSISTENCY_DIMENSIONS) {
+    const ct = dimCounts(report.dimensions[dim]);
+    totalFail += ct.fail;
+    totalWarn += ct.warn;
+    totalUnknown += ct.unknown;
+  }
+
+  // Verdict line FIRST (AC4): PASS/FAIL · totals · exit intent.
+  const verdict = report.overall;
+  const word = VERDICT_WORD[verdict][lang === "zh" ? "zh" : "en"];
+  const verdictColored = c(verdict === "pass" ? "green" : "red", word, { bold: true });
+  const exit = verdict === "pass" ? 0 : 1;
+  const totals =
+    lang === "zh"
+      ? `${totalFail} 失败 · ${c(totalWarn > 0 ? "amber" : "fg", `${totalWarn} 警告`)} · ${totalUnknown} 未知`
+      : `${totalFail} fail · ${c(totalWarn > 0 ? "amber" : "fg", `${totalWarn} warn`)} · ${totalUnknown} unknown`;
+  out.push(`${verdictColored}  ${totals}   ${c("muted", `exit ${exit}`)}`);
+  out.push("");
+
+  // Per-dimension rows. The label column holds `<no> <en>`; the ZH name + the
+  // ZH caption ride a SECOND line beneath (separate-line bilingual, AC8).
+  const labelWidth = 20;
+  const captionWidth = 32;
+  for (const dim of CONSISTENCY_DIMENSIONS) {
+    const meta = CONSISTENCY_DIMENSION_LABELS[dim];
+    const ct = dimCounts(report.dimensions[dim]);
+    const fTxt = `f:${ct.fail}`;
+    const wTxt = `w:${ct.warn}`;
+    const uTxt = `?:${ct.unknown}`;
+    const counts =
+      pad(c(ct.fail > 0 ? "red" : "fg", fTxt), 6) +
+      pad(c(ct.warn > 0 ? "amber" : "muted", wTxt), 6) +
+      c("muted", uTxt);
+    // EN line: glyph + en name + en caption (truncated to the column so the
+    // counts stay aligned) + counts.
+    const enLabel = pad(c("fg", `${meta.no} ${meta.en}`), labelWidth);
+    const enCaption = pad(c("muted", trunc(meta.whatEn, captionWidth - 1)), captionWidth);
+    out.push(`${enLabel}${enCaption}${counts}`);
+    // ZH line beneath (separate line, no counts repeat — they belong to the row).
+    const zhLabel = pad(c("dim", `  ${meta.zh}`), labelWidth);
+    const zhCaption = c("muted", trunc(meta.whatZh, captionWidth - 1));
+    out.push(`${zhLabel}${zhCaption}`);
+  }
+  out.push("");
+  // Footer: the gate rule + the machine pointer (separate-line bilingual).
+  out.push(
+    lang === "zh"
+      ? c("muted", "任一维 f>0 即中止发版") + "   " + c("blue", "→ --json 供机器读取")
+      : c("muted", "any f>0 aborts the release") + "   " + c("blue", "→ --json for machines"),
+  );
+  return out.join("\n");
+}
+
+/** Build the machine JSON for the gate table: overall verdict + per-dimension
+ *  f/w/? + gaps, from the SAME runAll report the human table renders (AC7). */
+function gateTableJsonShape(report: Report): unknown {
+  const dims: Record<string, unknown> = {};
+  for (const dim of CONSISTENCY_DIMENSIONS) {
+    const r = report.dimensions[dim];
+    const ct = dimCounts(r);
+    const o: Record<string, unknown> = {
+      status: r?.status ?? "pass",
+      fail: ct.fail,
+      warn: ct.warn,
+      unknown: ct.unknown,
+      gaps: r?.gaps ?? [],
+    };
+    if (r?.note !== undefined) o["note"] = r.note;
+    dims[dim] = o;
+  }
+  return { overall: report.overall, dimensions: dims };
+}
+
+/** Local fixed-width pad accounting for CJK display width (render.strw). */
+function pad(s: string, w: number): string {
+  const len = strw(s);
+  return len >= w ? s : s + " ".repeat(w - len);
+}
+
 /** python json.dumps(indent=2, ensure_ascii=False) for the report shape. */
 function jsonDumps(value: unknown, indent = 0): string {
   const pad = " ".repeat(indent);
@@ -629,18 +748,34 @@ function checkHelp(command: string): string {
 
   check [--json] [--project-dir DIR]    逐维度跑一致性检查
     Run checks across six dimensions (code-backlog, cards, docs, tests,
-    bilingual, site) and produce a structured pass/gap report.
+    bilingual, site) and produce a verdict-first table. Any failing
+    dimension aborts the release.
+    跑六维一致性、判定优先输出；任一维失败即中止发版。
 
-  ${command} check                # human-readable report
-  ${command} check --json         # machine-readable JSON
+  ${command} check                # verdict-first six-dimension table
+  ${command} check --json         # machine-readable JSON (same computation)
   ${command} audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
 `;
 }
 
-/** US-REL-007: the gate's internal check runner — no public command remains. */
-export function runConsistencyCheck(args: string[], command = "roll release --gate-check"): number | Promise<number> {
+export interface ConsistencyRunOptions {
+  /** "report" (default) = the frozen pass/gap report the gate runs; "table" =
+   *  the US-DOSSIER-036 verdict-first six-dimension table the public command
+   *  `roll release consistency check` prints (same computation, richer render). */
+  renderMode?: "report" | "table";
+}
+
+/** US-REL-007: the gate's internal check runner. US-DOSSIER-036: also the
+ *  computation behind the public `roll release consistency check` (renderMode
+ *  "table" → verdict-first six-dim table); the gate keeps "report" byte-stable. */
+export function runConsistencyCheck(
+  args: string[],
+  command = "roll release --gate-check",
+  opts: ConsistencyRunOptions = {},
+): number | Promise<number> {
   const subcmd = args[0] ?? "check";
   const rest = args.slice(1);
+  const renderMode = opts.renderMode ?? "report";
 
   // US-TRUTH-002: the shadow drift scanner — read-only, never blocks (exit 0).
   if (subcmd === "audit") return consistencyAuditCommand(rest);
@@ -655,7 +790,15 @@ export function runConsistencyCheck(args: string[], command = "roll release --ga
       else if (a.startsWith("--project-dir=")) projectDir = a.slice("--project-dir=".length);
     }
     const report = runAll(projectDir);
-    if (isJson) {
+    if (renderMode === "table") {
+      // Public command: NO_COLOR-aware verdict-first table; JSON carries f/w/?.
+      if (!process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "") renderState.useColor = false;
+      if (isJson) {
+        process.stdout.write(jsonDumps(gateTableJsonShape(report)) + "\n");
+      } else {
+        process.stdout.write(formatGateTable(report, msgLang()) + "\n");
+      }
+    } else if (isJson) {
       process.stdout.write(jsonDumps(reportToJsonShape(report)) + "\n");
     } else {
       process.stdout.write(formatHuman(report) + "\n");

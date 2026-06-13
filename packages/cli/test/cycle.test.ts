@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cycleCommand, findCycle, renderCycleTrace } from "../src/commands/cycle.js";
+import { cycleCommand, cycleTraceJson, findCycle, renderCycleTrace } from "../src/commands/cycle.js";
 import { collectCycleLedger } from "../src/lib/cycle-ledger.js";
 import { stripAnsi } from "../src/render.js";
 
@@ -71,6 +71,46 @@ describe("renderCycleTrace", () => {
     const rows = collectCycleLedger(project());
     expect(stripAnsi(renderCycleTrace(findCycle(rows, "0311")!, "en", "seanyao/roll"))).toMatchSnapshot();
     expect(stripAnsi(renderCycleTrace(findCycle(rows, "0311")!, "zh", "seanyao/roll"))).toMatchSnapshot();
+  });
+});
+
+describe("US-DOSSIER-036 --json — AC5/AC7", () => {
+  it("AC7: --json carries the SAME row, tape segments and evidence as the human trace", () => {
+    const rows = collectCycleLedger(project());
+    const row = findCycle(rows, "0311")!;
+    const slug = "seanyao/roll";
+    const human = stripAnsi(renderCycleTrace(row, "en", slug));
+    const j = cycleTraceJson(row, slug) as {
+      no: string; verdict: string; storyId: string;
+      tape: Array<{ key: string; detail: string; state: string }>;
+      evidence: Array<{ label: string; href: string }>;
+    };
+    // Same identity numbers as the human header line.
+    expect(human).toContain(`#${j.no} · ${j.verdict}`);
+    expect(human).toContain(`story ${j.storyId}`);
+    // Same seven tape segment keys, in order.
+    expect(j.tape.map((s) => s.key)).toEqual(["cycle", "story", "build", "peer", "ci", "pr", "end"]);
+    // Same evidence hrefs the human trace prints.
+    for (const e of j.evidence) expect(human).toContain(e.href);
+  });
+
+  it("AC5: cycleCommand --json emits the trace JSON, exit 0", async () => {
+    const save = process.cwd();
+    process.chdir(project());
+    const out: string[] = [];
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => (out.push(s), true)) as typeof process.stdout.write;
+    let status: number;
+    try {
+      status = cycleCommand(["0311", "--json", "--no-color"]);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(status).toBe(0);
+    const parsed = JSON.parse(out.join("")) as { no: string; tape: unknown[] };
+    expect(parsed.no).toBe("0311");
+    expect(parsed.tape.length).toBe(7);
   });
 });
 

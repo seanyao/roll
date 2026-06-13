@@ -486,6 +486,57 @@ export function renderTruthSummary(
   return out.join("\n");
 }
 
+/**
+ * US-DOSSIER-036 --json (AC5/AC7): the machine view of the verdict-first truth
+ * summary — the SAME snapshot, the SAME `snapshotVerdict`/`attestCoverage`
+ * selectors the human summary reads (LOOP · CYCLE · RELEASE · STORY). No second
+ * derivation: a divergence from the human render is a 口径 bug. When the
+ * snapshot is absent it reports `{verdict:"unknown", snapshot:false}` honestly.
+ */
+export function statusTruthJson(snapshot: TruthSnapshot | undefined, stale: boolean): unknown {
+  if (snapshot === undefined) {
+    return { verdict: "unknown", exit: 1, snapshot: false, stale: false };
+  }
+  const v = snapshotVerdict(snapshot);
+  const exit = v === "fail" ? 2 : v === "pass" ? 0 : 1;
+  const lanes = snapshot.loop?.lanes ?? [];
+  const cov = attestCoverage(snapshot);
+  const spectrum = snapshot.story.spectrum;
+  const a = snapshot.audit;
+  const rel = snapshot.release;
+  return {
+    verdict: v,
+    exit,
+    snapshot: true,
+    stale,
+    loop: { lanes: lanes.length, running: lanes.filter((l) => l.running).length },
+    cycle:
+      snapshot.cycle !== undefined
+        ? { cycles3d: snapshot.cycle.cycles3d, failed3d: snapshot.cycle.failed3d, costUsd3d: snapshot.cycle.costUsd3d }
+        : null,
+    release:
+      rel !== undefined
+        ? {
+            latestTag: rel.latestTag ?? null,
+            verdict: rel.verdict,
+            fail: a?.fail ?? null,
+            warn: a?.warn ?? null,
+            unknown: a?.unknown ?? null,
+            merged: spectrum.done,
+            pending: snapshot.story.total - spectrum.done,
+          }
+        : null,
+    story: {
+      attestCoveragePct: cov.pct,
+      fail: spectrum.fail,
+      done: spectrum.done,
+      unknown: spectrum.unknown,
+      todo: spectrum.todo,
+      legacy: snapshot.story.legacy,
+    },
+  };
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────────
 export function statusCommand(args: string[]): number {
   const noColor = args.includes("--no-color");
@@ -497,6 +548,7 @@ export function statusCommand(args: string[]): number {
     lcAll: process.env["LC_ALL"],
     lang: process.env["LANG"],
   });
+  const json = args.includes("--json");
   const d = (process.env["ROLL_RENDER_FIXTURE"] ?? "") !== "" ? fixtureData() : liveData();
   // US-DOSSIER-035: lead with the verdict-first truth summary read from the ONE
   // snapshot the web Overview reads, then the existing sync-health body. Status
@@ -508,6 +560,10 @@ export function statusCommand(args: string[]): number {
   // Fixture mode is byte-deterministic by construction — never let the wall
   // clock flip the stale flag (the diff-test pins no clock).
   const stale = !fixtureMode && snapshot !== undefined && isSnapshotStale(snapshot, nowMs);
+  if (json) {
+    process.stdout.write(JSON.stringify(statusTruthJson(snapshot, stale), null, 2) + "\n");
+    return 0;
+  }
   const out: string[] = [renderTruthSummary(snapshot, stale, lang, nowMs)];
   renderHealth(out, d);
   renderGlobalConventions(out, d.conventions);

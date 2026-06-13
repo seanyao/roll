@@ -1,15 +1,22 @@
 /**
  * `roll skills` — TS port of bin/roll cmd_skills (1655-1693) plus the
  * _skills_catalog_generate / _skill_frontmatter_field / _skills_catalog_path
- * helpers (1567-1653). Subcommands: generate | gen, check, audit, help, unknown.
+ * helpers (1567-1653). Subcommands: audit, sync, generate | gen, check, help.
  *
- * generate: write the projected catalog to guide/skills.md.
- * check:    compare the committed catalog against a fresh scan; on drift print
- *           the SAME `diff -u` the oracle prints (we shell out to the system
- *           `diff` so the byte output matches the bash path exactly) + exit 1.
- * audit:    (US-DOSSIER-032) run the strict skills audit — the SAME yardstick
- *           the machine-global Skills page and `scripts/audit-skills.mjs` use.
- *           `--json` emits the machine report; `--strict` exits 1 on violations.
+ * US-DOSSIER-036 elevates `roll skills` to a first-class observation+sync
+ * surface (the build spec is authoritative; it overrides command-surface-round2
+ * which demotes skills to T2):
+ *   audit:    (US-DOSSIER-032) run the strict skills audit — the SAME yardstick
+ *             the machine-global Skills page and `scripts/audit-skills.mjs` use.
+ *             Reports skills · violations · hub lines + the four invocation
+ *             groups (delivery/quality/observe/lifecycle). `--json` emits the
+ *             machine view (same computation); `--strict` exits 1 on violations.
+ *   sync:     write the projected catalog to guide/skills.md — the install/sync
+ *             action (same write `roll setup skills` performs).
+ *
+ * The legacy callers keep working unchanged (AC2): `generate`/`gen` (the
+ * `roll setup skills` redirect target) and `check` (the `roll doctor skills`
+ * redirect target), including the install-tree skip path.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -17,7 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
-import { auditSkills, formatHumanReport } from "../lib/skills-audit.js";
+import { collectSkillsPanel, type SkillGroup, type SkillsPanelVM } from "../lib/skills-panel.js";
 
 function pkgDir(): string {
   return process.env["ROLL_PKG_DIR"] ?? repoRoot();
@@ -151,9 +158,73 @@ function msgLang(): Lang {
   });
 }
 
+const GROUP_LABEL: Record<SkillGroup, { en: string; zh: string }> = {
+  delivery: { en: "delivery", zh: "交付" },
+  quality: { en: "quality", zh: "质量" },
+  observe: { en: "observe", zh: "观测" },
+  lifecycle: { en: "lifecycle", zh: "生命周期" },
+};
+
+/** The project root the skills panel reads (skills/ on disk + self-score notes). */
+function projectRoot(): string {
+  // ROLL_PKG_DIR (the source repo) carries the skills/ catalog; fall back to the
+  // bridge repoRoot. The skills panel reads `<root>/skills` + `<root>/.roll`.
+  return process.env["ROLL_PKG_DIR"] ?? repoRoot();
+}
+
+/**
+ * Human render for `roll skills audit` (AC1): the summary bar — skills ·
+ * violations · hub lines — then the four invocation groups, each a header line
+ * and one line per skill (`name  ×usage  <violations|ok>`). EN + 中 on separate
+ * lines (AC8). When the audit could not run, violations reads `unknown`, never a
+ * silent 0 (the panel's AC4 contract carries through).
+ */
+function renderAuditPanel(vm: SkillsPanelVM, lang: Lang): string {
+  const out: string[] = [];
+  const v = vm.summary.violations === "unknown" ? (lang === "zh" ? "未知" : "unknown") : String(vm.summary.violations);
+  if (lang === "zh") {
+    out.push(`技能 ${vm.summary.skills} · 违规 ${v} · hub 行数 ${vm.summary.hubLines}`);
+  } else {
+    out.push(`${vm.summary.skills} skills · ${v} violations · ${vm.summary.hubLines} hub lines`);
+  }
+  out.push("");
+  for (const g of vm.groups) {
+    const lbl = GROUP_LABEL[g.key];
+    const total = g.rows.reduce((acc, r) => acc + r.usage, 0);
+    out.push(
+      lang === "zh"
+        ? `${lbl.zh}（${g.rows.length} 个技能 · ${total} 次调用）`
+        : `${lbl.en} (${g.rows.length} skills · ${total} invocations)`,
+    );
+    for (const r of g.rows) {
+      const usageTxt = r.usage > 0 ? `×${r.usage}` : "—";
+      const status = !r.auditKnown
+        ? lang === "zh" ? "未知" : "unknown"
+        : r.violations.length === 0
+          ? "ok"
+          : r.violations.join(", ");
+      out.push(`  ${r.name}  ${usageTxt}  ${status}`);
+    }
+  }
+  return out.join("\n") + "\n";
+}
+
 export function skillsCommand(args: string[]): number {
   const sub = args[0] ?? "";
   const lang = msgLang();
+
+  // AC6: `--json` is honored ONLY by `audit`. On any other subcommand it must
+  // fail loud (clear message, exit non-zero) — never silently print the human
+  // view or empty JSON. This guard fires BEFORE the generate/check/sync paths so
+  // they cannot quietly ignore the flag.
+  if (args.includes("--json") && sub !== "audit") {
+    err(
+      lang === "zh"
+        ? `'roll skills ${sub === "" ? "(无子命令)" : sub}' 不支持 --json（仅 audit 支持）`
+        : `'roll skills ${sub === "" ? "(no subcommand)" : sub}' does not support --json (only audit does)`,
+    );
+    return 1;
+  }
 
   if (sub === "generate" || sub === "gen") {
     if (isInstallTree()) {
@@ -197,26 +268,66 @@ export function skillsCommand(args: string[]): number {
     return 1;
   }
 
+  if (sub === "sync") {
+    // The install/sync action (AC1): write the projected catalog to
+    // guide/skills.md — the SAME write `roll setup skills` (generate) performs.
+    // On an install tree there is no source to maintain → skip (exit 0).
+    if (isInstallTree()) {
+      installSkipNotice();
+      return 0;
+    }
+    const target = catalogPath();
+    writeFileSync(target, generateCatalog());
+    if (lang === "zh") {
+      info(`已同步技能目录：${target}`);
+    } else {
+      info(`Synced skill catalog: ${target}`);
+    }
+    return 0;
+  }
+
   if (sub === "audit") {
     // US-DOSSIER-032: the ONE audit yardstick (skills-audit.ts), the SAME the
-    // Skills page and scripts/audit-skills.mjs consume. Reads the directory
-    // catalog from disk; --json emits the machine report; --strict gates on
-    // violations (exit 1).
+    // Skills page and scripts/audit-skills.mjs consume. US-DOSSIER-036: the
+    // audit reports skills · violations · hub lines + the four invocation groups
+    // (delivery/quality/observe/lifecycle) via collectSkillsPanel — the SAME
+    // panel VM the web Skills page renders, so the numbers match (AC1/AC7).
+    // --json emits that VM; --strict gates on violations (exit 1).
     const rest = args.slice(1);
     const json = rest.includes("--json");
     const strict = rest.includes("--strict");
-    const report = auditSkills({ skillsDir: skillsDir() });
-    if (json) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
-    else process.stdout.write(formatHumanReport(report));
-    return strict && report.summary.violations > 0 ? 1 : 0;
+    const vm = collectSkillsPanel(projectRoot());
+    if (json) process.stdout.write(JSON.stringify(vm, null, 2) + "\n");
+    else process.stdout.write(renderAuditPanel(vm, lang));
+    const violations = vm.summary.violations === "unknown" ? 0 : vm.summary.violations;
+    return strict && violations > 0 ? 1 : 0;
   }
 
   if (sub === "" || sub === "help" || sub === "-h" || sub === "--help") {
-    process.stdout.write(t(v2Catalog, lang, "skills.usage") + "\n");
+    process.stdout.write(skillsUsage(lang));
     return 0;
   }
 
   err(t(v2Catalog, lang, "skills.unknown_sub", sub));
-  process.stdout.write(t(v2Catalog, lang, "skills.usage") + "\n");
+  process.stdout.write(skillsUsage(lang));
   return 1;
+}
+
+/** Bilingual usage (AC1/AC8): audit · sync surfaced alongside the legacy nests,
+ *  EN and 中 on SEPARATE lines, never inline. */
+function skillsUsage(lang: Lang): string {
+  if (lang === "zh") {
+    return [
+      "用法：roll skills <audit|sync>",
+      "  audit [--strict] [--json]   严格审计技能（技能·违规·hub 行数 + 四组调用频次）",
+      "  sync                        同步技能目录到 guide/skills.md",
+      "  （doctor skills 体检 · setup skills 安装仍可用）",
+    ].join("\n") + "\n";
+  }
+  return [
+    "Usage: roll skills <audit|sync>",
+    "  audit [--strict] [--json]   Strict skills audit (skills · violations · hub lines + 4 invocation groups)",
+    "  sync                        Sync the skill catalog to guide/skills.md",
+    "  (roll doctor skills checks · roll setup skills installs still work)",
+  ].join("\n") + "\n";
 }

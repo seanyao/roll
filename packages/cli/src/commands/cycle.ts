@@ -65,6 +65,33 @@ export function renderCycleTrace(row: CycleLedgerRow, lang: "en" | "zh", slug?: 
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * US-DOSSIER-036 --json (AC5/AC7): the machine view of ONE cycle — the SAME
+ * row, the SAME tape segments (key · detail · state), and the SAME evidence
+ * pointers the human trace renders, derived from the same `row`+`slug` call.
+ */
+export function cycleTraceJson(row: CycleLedgerRow, slug: string | undefined): unknown {
+  const ev: Array<{ label: string; href: string }> = [];
+  const prMatch = /#(\d+)/.exec(row.tape.find((s) => s.key === "pr")?.detail ?? "");
+  if (prMatch?.[1] !== undefined && slug !== undefined) {
+    ev.push({ label: "PR", href: `https://github.com/${slug}/pull/${prMatch[1]}` });
+    ev.push({ label: "diff", href: `https://github.com/${slug}/pull/${prMatch[1]}/files` });
+  }
+  if (row.storyId !== "") ev.push({ label: "story", href: `.roll/features/*/${row.storyId}/index.html` });
+  return {
+    no: cycleNo(row.cycleId),
+    cycleId: row.cycleId,
+    verdict: row.verdict,
+    storyId: row.storyId,
+    model: row.model,
+    tokens: row.tokens,
+    cost: row.cost,
+    duration: row.duration,
+    tape: row.tape.map((s) => ({ key: s.key, detail: s.detail, state: s.state })),
+    evidence: ev,
+  };
+}
+
 export function cycleCommand(args: string[]): number {
   const noColor = args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
@@ -73,8 +100,9 @@ export function cycleCommand(args: string[]): number {
     process.stdout.write(`${CYCLE_USAGE}\n`);
     return args.length === 0 ? 1 : 0;
   }
+  const json = args.includes("--json");
   // kimi pair-review: reject unknown flags like `roll cycles` does.
-  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h");
+  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h" && a !== "--json");
   if (unknown.length > 0) {
     process.stderr.write(`[roll] unknown flag: ${unknown[0]}\n${CYCLE_USAGE}\n`);
     return 1;
@@ -91,6 +119,10 @@ export function cycleCommand(args: string[]): number {
     return 1;
   }
   const slug = collectGitDossierFacts(process.cwd())?.slug;
+  if (json) {
+    process.stdout.write(JSON.stringify(cycleTraceJson(row, slug), null, 2) + "\n");
+    return 0;
+  }
   process.stdout.write(renderCycleTrace(row, lang, slug));
   return 0;
 }

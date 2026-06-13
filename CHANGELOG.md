@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.613.2 — 2026-06-13
+
 ### 稳定性
 
 - `roll loop go` 的预算与运行上限改为每次启动显式设定：只取本次调用的 `--budget`/`--max-cycles`/`--for`，省略即本轮不设限，不再沿用上一次会话持久化的旧值（此前 flagless 连跑会继承几天前设的预算与单周期上限，一个 idle 周期即 budget_limited 收摊、整轮零产出）；scope/review 仍按需沿用（FIX-279） `[loop]`

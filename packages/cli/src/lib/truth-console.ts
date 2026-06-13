@@ -1734,6 +1734,20 @@ export function renderMachineStubPage(input: MachineStubInput): string {
  * `extraCss` is appended after `SHELL_CSS`; `bodyHtml` is the page's own
  * `<main>` content. The breadcrumb highlights `page`.
  */
+/**
+ * The IBM Plex font-family stack, inlined — the SAME face the `FONT_LINKS`
+ * Google Fonts request pulls, but resolved from the system when IBM Plex is
+ * installed and falling back to a cool system sans/mono otherwise. A
+ * `selfContained` machine page swaps the external `<link>` for this so the page
+ * opens offline as a single file and carries NO external `<link>` (the
+ * offline-openable single-file red line the suite enforces).
+ */
+export const SELF_CONTAINED_FONT_CSS =
+  `:root{` +
+  `--roll-sans:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;` +
+  `--roll-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;}` +
+  `body{font-family:var(--roll-sans);}`;
+
 export function renderMachineShell(input: {
   page: MachineNavLink["key"];
   titleEn: string;
@@ -1743,6 +1757,9 @@ export function renderMachineShell(input: {
   snapshot: { release?: { latestTag?: string } };
   extraCss?: string;
   bodyHtml: string;
+  /** When true, omit the external font `<link>` and inline the IBM Plex stack
+   *  instead — the page stays a single offline-openable file (no `<link>`). */
+  selfContained?: boolean;
 }): string {
   const header = topBar({
     brand: input.brand,
@@ -1751,12 +1768,14 @@ export function renderMachineShell(input: {
     snapshot: input.snapshot,
     machinePage: input.page,
   });
+  const fontHead = input.selfContained === true ? "" : FONT_LINKS;
+  const fontCss = input.selfContained === true ? SELF_CONTAINED_FONT_CSS : "";
   return (
     htmlHead(rollScope(input)) +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(input.brand.name)} · ${esc(input.titleEn)}</title>\n` +
-    FONT_LINKS +
-    `<style>${SHELL_CSS}${input.extraCss ?? ""}</style>\n` +
+    fontHead +
+    `<style>${fontCss}${SHELL_CSS}${input.extraCss ?? ""}</style>\n` +
     `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
     header +
     `<main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;">` +

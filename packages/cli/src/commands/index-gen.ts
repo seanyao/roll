@@ -554,7 +554,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     try {
       writeFileSync(
         join(featuresDir, "about.html"),
-        renderAboutPage({ ...machineBar, vm: collectAbout(defaultAboutDeps(cwd, renderMarkdown)) }),
+        renderAboutPage({ ...machineBar, vm: collectAbout(defaultAboutDeps(cwd)) }),
         "utf8",
       );
       pages += 1;

@@ -16,6 +16,9 @@ import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumSt
 import type { TruthSnapshotStoryEntry } from "@roll/spec";
 import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
 import { renderAgentsMachinePage } from "../lib/page-agents.js";
+import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
+import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
+import { collectConventions, defaultConventionsDeps, renderConventionsPage } from "../lib/page-conventions.js";
 import { collectProjectsRegistry } from "../lib/projects-registry.js";
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
@@ -378,6 +381,10 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     });
     const snapshotJson = serializeTruthSnapshot(snapshot);
     writeFileSync(join(featuresDir, "truth.json"), snapshotJson, "utf8");
+    // US-DOSSIER-033: collect the agents panel ONCE — the console reuses it, and
+    // the Conventions page derives its in-sync/stale freshness from the SAME rows
+    // (one口径 with the agents-on-machine panel, never a second probe).
+    const agentRows = collectAgentPanel(cwd);
     // US-DOSSIER-011: index.html IS the Truth Console now — five sticky tabs,
     // overview first; the legacy ledger lives on under the Backlog tab.
     writeFileSync(
@@ -392,9 +399,13 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         backlog: backlogViewModel(epics),
         spineKeys: SPINE_STAGES.map((s) => s.key),
         cycles: collectCycleLedger(cwd),
-        agents: collectAgentPanel(cwd),
+        agents: agentRows,
         releasePanel: collectReleasePanel(cwd),
         skills: collectSkillsPanel(cwd),
+        // US-DOSSIER-033: the Charter project tab — a markdown browser over the
+        // project's own charter docs, collected from the real doc tree (docs/*.md,
+        // per-epic plan .md files, guide map) and rendered via `renderMarkdown`.
+        charter: collectCharter(defaultCharterDeps(cwd, renderMarkdown)),
         // US-DOSSIER-030: the Loop-tab Casting grid — complexity slots + scenario
         // roles, resolved purely from the router slot config (agents.yaml) and the
         // route:resolve audit; the Hooks panel reuses the same `loop` heartbeat.
@@ -448,8 +459,6 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     }
     const MACHINE_PAGES = [
       ["skills", "skills.html"],
-      ["conventions", "conventions.html"],
-      ["about", "about.html"],
     ] as const;
     for (const [page, file] of MACHINE_PAGES) {
       try {
@@ -464,6 +473,31 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       } catch {
         /* best-effort */
       }
+    }
+    // US-DOSSIER-033: the About + Conventions machine pages are now REAL — About
+    // from docs/manifesto.md + docs/architecture.md + guide/INDEX.md + identity;
+    // Conventions from conventions/config.yaml sync targets cross-checked against
+    // the SAME agents-panel freshness, plus the AGENTS.md rulebook. Both reuse the
+    // SKILL.md-style `renderMarkdown` path and the shared machine shell.
+    try {
+      writeFileSync(
+        join(featuresDir, "conventions.html"),
+        renderConventionsPage({ ...machineBar, vm: collectConventions(defaultConventionsDeps(cwd, agentRows, renderMarkdown)) }),
+        "utf8",
+      );
+      pages += 1;
+    } catch {
+      /* best-effort */
+    }
+    try {
+      writeFileSync(
+        join(featuresDir, "about.html"),
+        renderAboutPage({ ...machineBar, vm: collectAbout(defaultAboutDeps(cwd, renderMarkdown)) }),
+        "utf8",
+      );
+      pages += 1;
+    } catch {
+      /* best-effort */
     }
   } catch {
     /* best-effort */

@@ -86,6 +86,32 @@ const CASTING = collectCasting({
   routeAudit: (slot) => (slot === "hard" ? "claude best for US in-tier (hit_rate 0.91, n=12); slot kept" : undefined),
 });
 
+// US-DOSSIER-033 — Charter browser view-model: a charter group (docs), a guide
+// group with one bilingual guide/en↔zh pair, and an epic-plans group.
+const CHARTER = {
+  defaultId: "docs/manifesto.md",
+  groups: [
+    {
+      key: "charter" as const,
+      docs: [
+        { id: "docs/manifesto.md", path: "docs/manifesto.md", title: "Manifesto", bodyEn: "<h1>Manifesto</h1><p>main is truth</p>", bodyZh: "<h1>Manifesto</h1><p>main is truth</p>", bilingual: false },
+        { id: "docs/architecture.md", path: "docs/architecture.md", title: "Architecture", bodyEn: "<h1>Architecture</h1>", bodyZh: "<h1>Architecture</h1>", bilingual: false },
+      ],
+    },
+    {
+      key: "guide" as const,
+      docs: [
+        { id: "guide/INDEX.md", path: "guide/INDEX.md", title: "Documentation Index", bodyEn: "<h1>Documentation Index</h1>", bodyZh: "<h1>Documentation Index</h1>", bilingual: false },
+        { id: "guide/en/loop.md", path: "guide/en/loop.md", title: "roll loop", bodyEn: "<h1>roll loop EN body</h1>", bodyZh: "<h1>roll loop ZH 正文</h1>", bilingual: true },
+      ],
+    },
+    {
+      key: "plans" as const,
+      docs: [{ id: ".roll/features/delivery-dossier/truth-console.md", path: ".roll/features/delivery-dossier/truth-console.md", title: "Truth Console plan", bodyEn: "<h1>Plan</h1>", bodyZh: "<h1>Plan</h1>", bilingual: false }],
+    },
+  ],
+};
+
 const RELEASE_SCOPE = {
   pending: [
     { epic: "alpha", items: [{ id: "FIX-9", epic: "alpha", title: "fix it", state: "todo" }] },
@@ -155,6 +181,7 @@ function render(
     githubSlug: "seanyao/roll",
     skills: SKILLS,
     casting: CASTING,
+    charter: CHARTER,
     ...extra,
   });
 }
@@ -164,11 +191,12 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
 
   // US-DOSSIER-029: the canonical tab order is fixed by the design reference's
   // nav markup (Delivery Dossier.dc.html): Overview → Loop → Release → Backlog
-  // → Skills. The rendered bar, the panes, and the CONSOLE_SCRIPT router all
-  // read ONE shared TABS constant, so this single order anchors all three.
-  const DC_TAB_ORDER = ["overview", "loop", "release", "backlog", "skills"] as const;
+  // → Skills. US-DOSSIER-033 appends the Charter project tab (the build spec's
+  // "+Charter" per FIDELITY-BAR). The rendered bar, the panes, and the
+  // CONSOLE_SCRIPT router all read ONE shared TABS constant, anchoring all three.
+  const DC_TAB_ORDER = ["overview", "loop", "release", "backlog", "skills", "charter"] as const;
 
-  it("AC1: five hash-routed tabs in the design-reference order, overview first, placeholders marked", () => {
+  it("AC1: hash-routed tabs in the design-reference order, overview first, placeholders marked", () => {
     for (const k of DC_TAB_ORDER) {
       expect(html).toContain(`data-tab="${k}"`);
       expect(html).toContain(`id="tab-${k}"`);
@@ -198,6 +226,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       releaseScope: { pending: [], shipped: [], pendingCount: 0, shippedCount: 0, history: [] },
       skills: { summary: { skills: 0, violations: 0, hubLines: 0, auditRan: true }, groups: [] },
       casting: collectCasting({ readSlot: () => undefined }),
+      charter: { groups: [] },
     });
     expect(custom).toContain("acme");
     expect(custom).toContain("Ship truth.");

@@ -1,0 +1,352 @@
+/**
+ * US-DOSSIER-033 — Charter markdown browser + About / Conventions machine pages.
+ *
+ * Structural-fidelity coverage: every reference component the build spec /
+ * FIDELITY-BAR names for these surfaces is asserted present —
+ *   Charter tab  : a directory tree (Charter · Guide · Plans groups) on the left,
+ *                  the selected file rendered as markdown on the right, the
+ *                  client doc-selector, and the guide/en↔zh lang-following body.
+ *   About page   : injected identity, manifesto + architecture rendered markdown,
+ *                  the guide map (rows link to source docs), the shared shell.
+ *   Conventions  : the four config.yaml sync targets with in-sync/stale freshness
+ *                  (the SAME ok/stale口径 as the agents panel), the AGENTS.md
+ *                  rulebook rendered markdown, the shared shell.
+ * Plus the pure collectors over injected deps (deterministic, offline).
+ */
+import { describe, expect, it } from "vitest";
+import { serializeTruthSnapshot, type TruthSnapshot } from "@roll/spec";
+import { renderTruthConsole } from "../src/lib/truth-console.js";
+import { collectCharter, type CharterDeps, type CharterVM } from "../src/lib/page-charter.js";
+import { collectAbout, parseGuideIndex, renderAboutPage } from "../src/lib/page-about.js";
+import { collectConventions, renderConventionsPage } from "../src/lib/page-conventions.js";
+import type { AgentPanelRow } from "../src/lib/agent-panel.js";
+
+const SNAP: TruthSnapshot = {
+  generatedAt: "2026-06-13T00:00:00Z",
+  story: { total: 1, spectrum: { done: 1, wip: 0, hold: 0, todo: 0, fail: 0, unknown: 0 }, legacy: 0 },
+  release: { latestTag: "v3.613.1", verdict: "pass" },
+};
+const BRAND = { name: "roll", slogan: "It just works." };
+
+// A passthrough markdown renderer so tests assert on the SOURCE → render mapping
+// without coupling to the markdown engine's exact HTML.
+const mdTag = (md: string): string => `<MD>${md}</MD>`;
+
+// ---------------------------------------------------------------- collectors
+
+describe("collectCharter — US-DOSSIER-033 (pure)", () => {
+  const tree: Record<string, string[]> = {
+    docs: ["docs/manifesto.md", "docs/architecture.md"],
+    "guide/en": ["guide/en/loop.md"],
+    "guide/zh": ["guide/zh/loop.md"],
+    ".roll/features/dossier": [".roll/features/dossier/plan.md"],
+  };
+  const files: Record<string, string> = {
+    "docs/manifesto.md": "# Manifesto\nmain is truth",
+    "docs/architecture.md": "# Architecture\nlayered control",
+    "guide/INDEX.md": "# Documentation Index\n| Path | Title |",
+    "guide/en/loop.md": "# roll loop\nEN body",
+    "guide/zh/loop.md": "# roll loop\n中文正文",
+    ".roll/features/dossier/plan.md": "# Dossier plan\nthe plan",
+  };
+  const deps: CharterDeps = {
+    readDoc: (rel) => files[rel],
+    listMd: (dir) => tree[dir] ?? [],
+    listEpics: () => ["dossier"],
+    render: mdTag,
+  };
+
+  it("groups docs into Charter · Guide · Plans, titles from first heading, default = first", () => {
+    const vm = collectCharter(deps);
+    expect(vm.groups.map((g) => g.key)).toEqual(["charter", "guide", "plans"]);
+    const charter = vm.groups.find((g) => g.key === "charter")!;
+    expect(charter.docs.map((d) => d.id)).toEqual(["docs/manifesto.md", "docs/architecture.md"]);
+    expect(charter.docs[0]!.title).toBe("Manifesto");
+    expect(vm.defaultId).toBe("docs/manifesto.md");
+    // INDEX.md leads the guide group, then guide/en docs.
+    const guide = vm.groups.find((g) => g.key === "guide")!;
+    expect(guide.docs[0]!.id).toBe("guide/INDEX.md");
+    expect(guide.docs[1]!.id).toBe("guide/en/loop.md");
+    // plans group reads .roll/features/<epic>/*.md
+    const plans = vm.groups.find((g) => g.key === "plans")!;
+    expect(plans.docs[0]!.id).toBe(".roll/features/dossier/plan.md");
+  });
+
+  it("AC2: a guide/en doc carries its guide/zh sibling as a distinct body (lang-aware)", () => {
+    const vm = collectCharter(deps);
+    const loop = vm.groups.find((g) => g.key === "guide")!.docs.find((d) => d.id === "guide/en/loop.md")!;
+    expect(loop.bilingual).toBe(true);
+    expect(loop.bodyEn).toContain("EN body");
+    expect(loop.bodyZh).toContain("中文正文");
+    expect(loop.bodyEn).not.toBe(loop.bodyZh);
+  });
+
+  it("AC5: doc bodies are rendered through the injected render path (deterministic)", () => {
+    const vm = collectCharter(deps);
+    expect(vm.groups[0]!.docs[0]!.bodyEn).toBe("<MD># Manifesto\nmain is truth</MD>");
+  });
+
+  it("empty tree → no groups, no default (graceful)", () => {
+    const empty = collectCharter({ readDoc: () => undefined, listMd: () => [], listEpics: () => [], render: mdTag });
+    expect(empty.groups).toEqual([]);
+    expect(empty.defaultId).toBeUndefined();
+  });
+});
+
+describe("parseGuideIndex + collectAbout — US-DOSSIER-033 (pure)", () => {
+  const INDEX = [
+    "# Documentation Index",
+    "",
+    "| Path | Title | Category | Last Modified |",
+    "|------|-------|----------|---------------|",
+    "| AGENTS.md | Conventions | convention | 2026-05-28 |",
+    "| guide/en/loop.md | roll loop | guide | 2026-05-28 |",
+  ].join("\n");
+
+  it("parses the roll-doc table, skips header + separator, keeps path/title/category in order", () => {
+    const rows = parseGuideIndex(INDEX);
+    expect(rows).toEqual([
+      { path: "AGENTS.md", title: "Conventions", category: "convention" },
+      { path: "guide/en/loop.md", title: "roll loop", category: "guide" },
+    ]);
+  });
+
+  it("missing index → []", () => {
+    expect(parseGuideIndex(undefined)).toEqual([]);
+  });
+
+  it("AC3: collectAbout renders manifesto + architecture and the guide map", () => {
+    const files: Record<string, string> = {
+      "docs/manifesto.md": "# 理念\nmain is truth",
+      "docs/architecture.md": "# 系统设计\nlayered",
+      "guide/INDEX.md": INDEX,
+    };
+    const vm = collectAbout({ readDoc: (rel) => files[rel], render: mdTag });
+    expect(vm.manifesto?.title).toBe("理念");
+    expect(vm.manifesto?.html).toBe("<MD># 理念\nmain is truth</MD>");
+    expect(vm.architecture?.title).toBe("系统设计");
+    expect(vm.guide).toHaveLength(2);
+    expect(vm.guide[0]).toMatchObject({ path: "AGENTS.md", category: "convention" });
+  });
+
+  it("absent docs degrade to undefined (never throws)", () => {
+    const vm = collectAbout({ readDoc: () => undefined, render: mdTag });
+    expect(vm.manifesto).toBeUndefined();
+    expect(vm.architecture).toBeUndefined();
+    expect(vm.guide).toEqual([]);
+  });
+});
+
+const AGENTS: AgentPanelRow[] = [
+  { name: "claude", display: "claude", runner: "Claude Code", version: "2.1.0", installed: true, cycles72h: 4, costUsd72h: 1, files: [], syncStale: false },
+  { name: "kimi", display: "kimi", runner: "Kimi CLI", version: "—", installed: true, cycles72h: 1, costUsd72h: 0, files: [], syncStale: true, setupCmd: "roll setup -f kimi" },
+  // codex / agy absent — not installed on this machine.
+];
+
+describe("collectConventions — US-DOSSIER-033 (pure)", () => {
+  const config: Record<string, string> = {
+    sync_claude: "~/.claude/CLAUDE.md",
+    sync_kimi: "~/.kimi/AGENTS.md",
+    sync_codex: "~/.codex/AGENTS.md",
+    sync_agy: "~/.gemini/GEMINI.md",
+  };
+  const deps = { readConfig: (k: string) => config[k] ?? "", agents: AGENTS, readDoc: (rel: string) => (rel === "AGENTS.md" ? "# Conventions\nrules" : undefined), render: mdTag };
+
+  it("AC4: lists the four sync targets with the SAME ok/stale freshness as the agents panel", () => {
+    const vm = collectConventions(deps);
+    expect(vm.targets.map((t) => t.configKey)).toEqual(["sync_claude", "sync_kimi", "sync_codex", "sync_agy"]);
+    const byAgent = Object.fromEntries(vm.targets.map((t) => [t.agent, t.state]));
+    expect(byAgent["claude"]).toBe("sync"); // installed + not stale
+    expect(byAgent["kimi"]).toBe("stale"); // installed + syncStale
+    expect(byAgent["codex"]).toBe("absent"); // not installed
+    expect(byAgent["agy"]).toBe("absent");
+    expect(vm.targets[0]!.dest).toBe("~/.claude/CLAUDE.md");
+  });
+
+  it("AC4: the rulebook (AGENTS.md) is rendered markdown via the same path", () => {
+    const vm = collectConventions(deps);
+    expect(vm.rulebook?.path).toBe("AGENTS.md");
+    expect(vm.rulebook?.html).toBe("<MD># Conventions\nrules</MD>");
+  });
+
+  it("missing AGENTS.md → rulebook undefined (graceful)", () => {
+    const vm = collectConventions({ ...deps, readDoc: () => undefined });
+    expect(vm.rulebook).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------- Charter tab
+
+const CHARTER_VM: CharterVM = {
+  defaultId: "docs/manifesto.md",
+  groups: [
+    {
+      key: "charter",
+      docs: [
+        { id: "docs/manifesto.md", path: "docs/manifesto.md", title: "Manifesto", bodyEn: "<h1>Manifesto</h1>", bodyZh: "<h1>Manifesto</h1>", bilingual: false },
+        { id: "docs/architecture.md", path: "docs/architecture.md", title: "Architecture", bodyEn: "<h1>Architecture</h1>", bodyZh: "<h1>Architecture</h1>", bilingual: false },
+      ],
+    },
+    {
+      key: "guide",
+      docs: [{ id: "guide/en/loop.md", path: "guide/en/loop.md", title: "roll loop", bodyEn: "<p>EN loop body</p>", bodyZh: "<p>ZH loop 正文</p>", bilingual: true }],
+    },
+    { key: "plans", docs: [{ id: ".roll/features/dossier/plan.md", path: ".roll/features/dossier/plan.md", title: "Dossier plan", bodyEn: "<p>plan</p>", bodyZh: "<p>plan</p>", bilingual: false }] },
+  ],
+};
+
+function consoleHtml(charter: CharterVM = CHARTER_VM): string {
+  return renderTruthConsole({
+    snapshot: SNAP,
+    snapshotJson: serializeTruthSnapshot(SNAP),
+    brand: BRAND,
+    backlog: { shipping: [], settled: [] },
+    spineKeys: ["definition", "design", "execution", "delivery", "retrospective"],
+    cycles: [],
+    agents: [],
+    releasePanel: { dims: [], total: { fail: 0, warn: 0, unknown: 0 }, blocking: false },
+    releaseScope: { pending: [], shipped: [], pendingCount: 0, shippedCount: 0, history: [] },
+    skills: { summary: { skills: 0, violations: 0, hubLines: 0 }, groups: [] },
+    casting: { rows: [], configured: false },
+    charter,
+  });
+}
+
+describe("Charter project tab — US-DOSSIER-033", () => {
+  const html = consoleHtml();
+
+  it("AC1: a Charter tab is hash-routed and present as a pane", () => {
+    expect(html).toContain('data-tab="charter"');
+    expect(html).toContain('id="tab-charter"');
+    expect(html).toContain(">Charter<");
+    expect(html).toContain(">章程<");
+  });
+
+  it("AC1: a directory tree (Charter · Guide · Plans) on the left, each doc a selectable row", () => {
+    expect(html).toContain("charter-tree");
+    expect(html).toContain('data-doc="docs/manifesto.md"');
+    expect(html).toContain('data-doc="docs/architecture.md"');
+    expect(html).toContain('data-doc="guide/en/loop.md"');
+    // group labels
+    expect(html).toContain(">Guide<");
+    expect(html).toContain(">Epic plans<");
+  });
+
+  it("AC1: the selected file is rendered as markdown on the right, default doc shown", () => {
+    expect(html).toContain("charter-reader");
+    expect(html).toContain('class="md-doc on" data-doc="docs/manifesto.md"');
+    expect(html).toContain("<h1>Manifesto</h1>");
+    expect(html).toContain("md-body");
+  });
+
+  it("AC2: a guide/en↔zh doc carries BOTH bodies, each behind a lang class (follows EN/中)", () => {
+    expect(html).toContain('<div class="lang-en md-body"><p>EN loop body</p></div>');
+    expect(html).toContain('<div class="lang-zh md-body"><p>ZH loop 正文</p></div>');
+  });
+
+  it("the client doc-selector + hash route are wired (no fetch — bodies are baked in)", () => {
+    expect(html).toContain("function applyCharter");
+    expect(html).toContain("#charter/");
+    // self-contained: no network markdown lib / fetch for the doc bodies
+    expect(html).not.toContain("fetch(");
+  });
+
+  it("empty charter degrades to a friendly empty state (no crash)", () => {
+    const empty = consoleHtml({ groups: [] });
+    expect(empty).toContain("No charter documents found");
+    expect(empty).not.toContain("undefined");
+  });
+});
+
+// ---------------------------------------------------------------- About page
+
+describe("About machine page — US-DOSSIER-033", () => {
+  const aboutVM = {
+    manifesto: { path: "docs/manifesto.md", title: "理念", html: "<h1>理念</h1><p>main is truth</p>" },
+    architecture: { path: "docs/architecture.md", title: "系统设计", html: "<h1>系统设计</h1>" },
+    guide: [
+      { path: "AGENTS.md", title: "Conventions", category: "convention" },
+      { path: "guide/en/loop.md", title: "roll loop", category: "guide" },
+    ],
+  };
+  const html = renderAboutPage({ brand: BRAND, snapshot: SNAP, vm: aboutVM });
+
+  it("AC2: wears the shared shell and self-highlights the About breadcrumb, bilingual crumb", () => {
+    expect(html).toContain("background:rgba(27,34,56,.97)"); // sticky dark bar
+    expect(html).toContain("height:54px");
+    expect(html).toContain('data-machine="about"');
+    expect(html).toContain('aria-current="page"');
+    expect(html).toContain("About — Charter");
+    expect(html).toContain("关于 — 章程");
+    expect(html).toContain('data-set-lang="zh"'); // lang toggle rides along
+  });
+
+  it("AC3: identity is the injected brand (not hardcoded), manifesto + architecture rendered", () => {
+    expect(html).toContain(">roll<");
+    expect(html).toContain("It just works.");
+    expect(html).toContain("<h1>理念</h1>");
+    expect(html).toContain("<h1>系统设计</h1>");
+    expect(html).toContain("docs/manifesto.md");
+    expect(html).toContain("docs/architecture.md");
+    expect(html).toContain("md-body");
+  });
+
+  it("AC3: the guide map lists entries that link to their source docs", () => {
+    expect(html).toContain('href="AGENTS.md"');
+    expect(html).toContain('href="guide/en/loop.md"');
+    expect(html).toContain(">Conventions<");
+    expect(html).toContain(">roll loop<");
+  });
+
+  it("no undefined leaks even when docs are absent", () => {
+    const bare = renderAboutPage({ brand: BRAND, snapshot: SNAP, vm: { manifesto: undefined, architecture: undefined, guide: [] } });
+    expect(bare).not.toContain("undefined");
+    expect(bare).toContain("docs/manifesto.md not found");
+  });
+});
+
+// -------------------------------------------------------- Conventions page
+
+describe("Conventions machine page — US-DOSSIER-033", () => {
+  const convVM = collectConventions({
+    readConfig: (k) => ({ sync_claude: "~/.claude/CLAUDE.md", sync_kimi: "~/.kimi/AGENTS.md", sync_codex: "~/.codex/AGENTS.md", sync_agy: "~/.gemini/GEMINI.md" })[k] ?? "",
+    agents: AGENTS,
+    readDoc: (rel) => (rel === "AGENTS.md" ? "# Conventions\n- main is truth" : undefined),
+    render: (md) => `<RB>${md}</RB>`,
+  });
+  const html = renderConventionsPage({ brand: BRAND, snapshot: SNAP, vm: convVM });
+
+  it("AC2: wears the shared shell, self-highlights Conventions, bilingual crumb", () => {
+    expect(html).toContain("background:rgba(27,34,56,.97)");
+    expect(html).toContain('data-machine="conventions"');
+    expect(html).toContain('aria-current="page"');
+    expect(html).toContain(">Conventions<");
+    expect(html).toContain(">约定<");
+  });
+
+  it("AC4: lists the four sync targets with in-sync/stale freshness (bilingual labels)", () => {
+    expect(html).toContain("sync_claude");
+    expect(html).toContain("sync_kimi");
+    expect(html).toContain("sync_codex");
+    expect(html).toContain("sync_agy");
+    // freshness labels — the same ok/stale口径 as the agents panel
+    expect(html).toContain("in sync");
+    expect(html).toContain("已同步");
+    expect(html).toContain("stale");
+    expect(html).toContain("已过期");
+    // claude row in-sync, kimi row stale (driven by the agents panel rows)
+    expect(html).toContain('data-target="claude" data-state="sync"');
+    expect(html).toContain('data-target="kimi" data-state="stale"');
+    expect(html).toContain('data-target="codex" data-state="absent"');
+  });
+
+  it("AC4: the rulebook (AGENTS.md) is rendered read-only via the markdown path", () => {
+    expect(html).toContain("<RB># Conventions");
+    expect(html).toContain("AGENTS.md");
+    expect(html).toContain("md-body");
+  });
+
+  it("no undefined leaks", () => {
+    expect(html).not.toContain("undefined");
+  });
+});

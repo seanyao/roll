@@ -67,7 +67,7 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 
 `roll index` renders `index.html`, the Delivery Dossier. Every number on it
 reads from one truth snapshot, so the web surface and the CLI print the same
-aggregates (`roll cast` ≡ the Casting grid, `roll skills audit` ≡ the Skills
+aggregates (`roll cast` ≡ the Casting grid, `roll doctor skills` ≡ the Skills
 page, `roll release consistency` ≡ the six-dimension panel, `roll status` ≡ the
 Story spectrum). One computation, two faces.
 

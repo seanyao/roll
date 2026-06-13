@@ -72,7 +72,8 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll config [lang <zh\|en\|--reset>\|…]` | 读写 roll 配置(语言、loop 窗口、dream 时间) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | 本机复杂度槽位路由(easy/default/hard/fallback) |
 | `roll cast [--json]` | 打印复杂度阶梯→角色分工表(与 web 控制台网格同源同数据;`--json` 为机器视图) |
-| `roll skills <audit\|sync>` | `audit [--strict] [--json]` 跑严格技能审计(技能 · 违规 · hub 行数 + 四组调用频次——与 web Skills 页同口径);`sync` 重新生成 `guide/skills.md` 技能目录 |
+| `roll doctor skills [--strict] [--json]` | 严格技能审计(技能 · 违规 · hub 行数 + 四组调用频次——与 web Skills 页同口径) |
+| `roll setup skills` | 同步 `guide/skills.md` 技能目录 |
 | `roll doc [--lang en\|zh] [name]` | 在终端查看 Charter / 语言指南文档(`--lang` 缺省回落到配置语言) |
 | `roll prices [refresh]` | 模型价目表(成本核算来源) |
 | `roll setup [skills\|-f]` | 首次安装、生成技能目录或重新同步约定到所有 AI 客户端 |

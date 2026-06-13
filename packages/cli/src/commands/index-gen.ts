@@ -19,7 +19,7 @@ import { renderAgentsMachinePage } from "../lib/page-agents.js";
 import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
 import { collectConventions, defaultConventionsDeps, renderConventionsPage } from "../lib/page-conventions.js";
-import { collectProjectsRegistry } from "../lib/projects-registry.js";
+import { collectProjectsRegistry, writeProjectRow } from "../lib/projects-registry.js";
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
@@ -381,6 +381,26 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     });
     const snapshotJson = serializeTruthSnapshot(snapshot);
     writeFileSync(join(featuresDir, "truth.json"), snapshotJson, "utf8");
+    // US-DOSSIER-028: lift this project's verdict + release tag into the shared
+    // cross-project registry (`~/.roll/projects.json`) the web switcher reads.
+    // SAME口径 by construction: verdict/releaseTag are taken verbatim from the
+    // SAME `snapshot.release` just written to truth.json — never re-derived — so
+    // the switcher and the project's own page can never show two values for one
+    // number. UPSERT by slug (other projects' rows survive), best-effort: a
+    // registry write failure never blocks the board generation.
+    try {
+      const slug = projectSlug(cwd);
+      writeProjectRow({
+        name: process.env["ROLL_BRAND_NAME"] ?? "roll",
+        slug,
+        path: cwd,
+        ...(snapshot.release?.latestTag !== undefined ? { releaseTag: snapshot.release.latestTag } : {}),
+        ...(snapshot.release?.verdict !== undefined ? { verdict: snapshot.release.verdict } : {}),
+        lastIndexedAt: snapshot.generatedAt,
+      });
+    } catch {
+      /* best-effort — the registry is additive; the board still renders */
+    }
     // US-DOSSIER-033: collect the agents panel ONCE — the console reuses it, and
     // the Conventions page derives its in-sync/stale freshness from the SAME rows
     // (one口径 with the agents-on-machine panel, never a second probe).

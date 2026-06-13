@@ -7,7 +7,15 @@
  * image, no warning text. CLI/TUI stories never reach this module (their
  * visual evidence is the ANSI→HTML text capture, US-ATTEST-002).
  *
- *   web           `npx -y playwright@latest screenshot <url> <out>`
+ *   web           FIX-291 fallback ladder — NEVER a silent DOM downgrade:
+ *                 (1) macOS GUI (Aqua session + screen-recording permission) →
+ *                     open the target in a REAL browser window, position it to
+ *                     the capture rect (AppleScript bounds), `screencapture -x -R`
+ *                     the live window rect, then close the window. Zero-install,
+ *                     real pixels, no Playwright/Chromium/tool-manager dependency.
+ *                 (2) no GUI / CI → headless Chromium via
+ *                     `npx -y playwright@latest screenshot <url> <out>`.
+ *                 (3) neither → honest machine-skip (taken:false + reason).
  *                 skip: ROLL_ATTEST_NO_BROWSER=1 · npx/network unavailable
  *   mobile-ios    `xcrun simctl io booted screenshot <out>`
  *                 skip: non-macOS · no booted simulator
@@ -56,13 +64,15 @@ export interface ScreenshotRequest {
   kind: ScreenshotKind;
   /** Absolute output path (.png). */
   out: string;
-  /** Target URL — required for kind=web. */
+  /** Target URL or local file:// path — required for kind=web. */
   url?: string;
+  /** kind=web GUI lane: browser app to drive (AppleScript-positioned); default Google Chrome. */
+  browser?: string;
   /** kind=terminal: acceptance command to run in the Terminal window. */
   command?: string;
   /** kind=terminal: tmux session to attach instead of running a command. */
   tmux?: string;
-  /** kind=terminal: screencapture `-R` rectangle "x,y,w,h"; defaults to a 1280×800 window. */
+  /** kind=terminal/web: screencapture `-R` rectangle "x,y,w,h"; defaults to a 1280×800 window. */
   region?: string;
 }
 
@@ -236,6 +246,16 @@ export function terminalBoundsScript(title: string): string {
   ].join("\n");
 }
 
+/**
+ * GUI-session probe: `launchctl managername` reports "Aqua" only inside a
+ * graphical login. Shared by the terminal lane and the FIX-291 web GUI lane —
+ * both need a real Aqua session before they can position a window + screencapture.
+ */
+async function hasGuiSession(run: ShotRun): Promise<boolean> {
+  const gui = await run("launchctl", ["managername"]);
+  return gui.code === 0 && gui.stdout.includes("Aqua");
+}
+
 /** Resolve the live window rect for `screencapture -R`; null → fall back to the configured rect. */
 async function resolveWindowRect(
   title: string,
@@ -248,6 +268,130 @@ async function resolveWindowRect(
   const [x1, y1, x2, y2] = parts as [number, number, number, number];
   if (x2 <= x1 || y2 <= y1) return null;
   return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+
+// ───────────────────────── FIX-291 web GUI lane ─────────────────────────
+// Mirror of the Terminal primitives, pointed at a real browser. The browser is
+// driven by AppleScript app name (default Google Chrome). We make a NEW window,
+// load the target into its active tab, position it to the capture rect, and
+// give the page a render-wait. Capture/teardown reuse the same pattern as the
+// Terminal lane: read the live window bounds, shoot `-R`, then close window 1.
+
+const DEFAULT_BROWSER = "Google Chrome";
+const BROWSER_RENDER_DELAY_S = 2;
+
+/**
+ * AppleScript that opens one fresh browser window on `target`, sizes it to the
+ * capture rectangle, and waits for the page to render before the shutter. The
+ * target is embedded inside a quoted `set URL of active tab`, so its
+ * double-quotes/backslashes are escaped. Chrome-family browsers expose the
+ * `active tab`/`URL` model; Safari uses `set URL of document 1`, so the script
+ * tries both and swallows the one that doesn't apply.
+ */
+export function browserOpenScript(target: string, browserApp: string, r: { x: number; y: number; w: number; h: number }): string {
+  const app = appleScriptString(browserApp);
+  const url = appleScriptString(target);
+  return [
+    `tell application "${app}"`,
+    "  activate",
+    "  make new window",
+    "  try",
+    `    set URL of active tab of front window to "${url}"`,
+    "  on error",
+    "    try",
+    `      set URL of front document to "${url}"`,
+    "    end try",
+    "  end try",
+    `  delay ${BROWSER_RENDER_DELAY_S}`,
+    "  try",
+    `    set bounds of front window to {${r.x}, ${r.y}, ${r.x + r.w}, ${r.y + r.h}}`,
+    "  end try",
+    "end tell",
+  ].join("\n");
+}
+
+/**
+ * AppleScript that raises the browser's front window and reports its bounds as
+ * "x1, y1, x2, y2" (or "" when no window). Raising matters for the same reason
+ * as the Terminal lane: `screencapture -R` shoots the VISIBLE screen, so a
+ * window behind others would yield someone else's pixels.
+ */
+export function browserBoundsScript(browserApp: string): string {
+  const app = appleScriptString(browserApp);
+  return [
+    `tell application "${app}"`,
+    "  try",
+    "    activate",
+    "    set index of front window to 1",
+    "    delay 0.3",
+    "    return bounds of front window",
+    "  on error",
+    '    return ""',
+    "  end try",
+    "end tell",
+  ].join("\n");
+}
+
+/** AppleScript that closes the browser window we opened without a save prompt. */
+export function browserCloseScript(browserApp: string): string {
+  const app = appleScriptString(browserApp);
+  return [
+    `tell application "${app}"`,
+    "  try",
+    "    close front window",
+    "  end try",
+    "end tell",
+  ].join("\n");
+}
+
+/** Resolve the live browser window rect for `screencapture -R`; null → fall back / skip. */
+async function resolveBrowserRect(
+  browserApp: string,
+  run: ShotRun,
+): Promise<{ x: number; y: number; w: number; h: number } | null> {
+  const r = await run("osascript", ["-e", browserBoundsScript(browserApp)]);
+  if (r.code !== 0) return null;
+  const parts = r.stdout.trim().split(",").map((part) => Number(part.trim()));
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [x1, y1, x2, y2] = parts as [number, number, number, number];
+  if (x2 <= x1 || y2 <= y1) return null;
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+
+/**
+ * FIX-291 — GUI web capture: open `target` in a real browser window, position
+ * + render-wait, verify the browser is frontmost (don't shoot another app's
+ * pixels), `screencapture -R` the live window rect, then close the window we
+ * opened. Returns a skip reason string on any honest failure, or null on
+ * success (the caller then applies the file-non-empty truth test).
+ */
+async function captureWebViaBrowser(
+  req: ScreenshotRequest,
+  run: ShotRun,
+): Promise<string | null> {
+  const browserApp = req.browser ?? DEFAULT_BROWSER;
+  const rect = parseRegion(req.region ?? DEFAULT_REGION);
+  if (rect === null) return "bad region";
+  const target = req.url as string;
+  const opened = await run("osascript", ["-e", browserOpenScript(target, browserApp, rect)]);
+  if (opened.code !== 0) return `osascript ${browserApp} open failed`;
+  const liveRect = await resolveBrowserRect(browserApp, run);
+  if (liveRect === null) {
+    await run("osascript", ["-e", browserCloseScript(browserApp)]);
+    return "browser window not found — refusing a blind-region shot";
+  }
+  // FIX-273-style guard: confirm the browser actually owns the foreground
+  // before pressing the shutter; otherwise close and skip honestly.
+  const front = await run("sh", ["-c", "lsappinfo info -only name $(lsappinfo front)"]);
+  if (front.code !== 0 || !front.stdout.includes(browserApp)) {
+    await run("osascript", ["-e", browserCloseScript(browserApp)]);
+    return `${browserApp} not frontmost — refusing to shoot another app's pixels`;
+  }
+  const shot = await run("screencapture", ["-x", "-R", `${liveRect.x},${liveRect.y},${liveRect.w},${liveRect.h}`, req.out]);
+  await run("osascript", ["-e", browserCloseScript(browserApp)]);
+  // screencapture exits non-zero when Screen Recording permission is absent.
+  if (shot.code !== 0) return "screencapture failed (screen-recording permission?)";
+  return null;
 }
 
 /**
@@ -367,8 +511,20 @@ export async function captureScreenshot(
     if (req.kind === "web") {
       if ((env["ROLL_ATTEST_NO_BROWSER"] ?? "") === "1") return skip("ROLL_ATTEST_NO_BROWSER=1");
       if (req.url === undefined || req.url === "") return skip("no url");
-      const r = await run("npx", ["-y", "playwright@latest", "screenshot", req.url, req.out]);
-      if (r.code !== 0) return skip("playwright unavailable or capture failed");
+      // FIX-291 fallback ladder — NEVER silently downgrade to DOM:
+      //   (1) macOS GUI (Aqua + screen-recording) → real-browser screencapture,
+      //   (2) no GUI / CI → headless Chromium via playwright,
+      //   (3) neither → honest machine-skip with a recorded reason.
+      if (platform === "darwin" && await hasGuiSession(run)) {
+        const reason = await captureWebViaBrowser(req, run);
+        if (reason !== null) return skip(`GUI browser capture: ${reason}`);
+      } else {
+        const r = await run("npx", ["-y", "playwright@latest", "screenshot", req.url, req.out]);
+        if (r.code !== 0) {
+          const why = platform === "darwin" ? "no GUI session" : "non-macOS host";
+          return skip(`headless Chromium unavailable or capture failed (${why}; screencapture fallback not applicable)`);
+        }
+      }
     } else if (req.kind === "mobile-ios") {
       if (platform !== "darwin") return skip("not macOS");
       const booted = await run("xcrun", ["simctl", "list", "devices", "booted"]);
@@ -395,9 +551,7 @@ export async function captureScreenshot(
       // Refuse to screen-capture a command that carries a secret — redact &
       // reshoot. Checked BEFORE any spawn so the secret never reaches the screen.
       if (containsSecret(rawLine)) return skip("secret in capture command — redact & reshoot");
-      // GUI-session probe: launchctl reports "Aqua" only inside a graphical login.
-      const gui = await run("launchctl", ["managername"]);
-      if (gui.code !== 0 || !gui.stdout.includes("Aqua")) return skip("no GUI session");
+      if (!(await hasGuiSession(run))) return skip("no GUI session");
       const rect = parseRegion(req.region ?? DEFAULT_REGION);
       if (rect === null) return skip("bad region");
       // FIX-271 follow-up: the sentinel path MUST be absolute — the Terminal

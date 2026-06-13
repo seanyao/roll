@@ -58,10 +58,10 @@ function fake(byCmd: Record<string, { code: number; stdout?: string; writes?: bo
   return { run, calls };
 }
 
-describe("web", () => {
+describe("web (headless Chromium lane — no GUI / CI)", () => {
   it("captures via npx playwright; taken only when the file lands non-empty", async () => {
     const { run, calls } = fake({ npx: { code: 0, writes: true } });
-    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {} });
+    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {}, platform: "linux" });
     expect(r.taken).toBe(true);
     expect(calls[0]).toContain("playwright@latest screenshot https://x");
   });
@@ -70,24 +70,203 @@ describe("web", () => {
     const { run, calls } = fake({});
     const r = await captureScreenshot(
       { kind: "web", url: "https://x", out: outPath() },
-      { run, env: { ROLL_ATTEST_NO_BROWSER: "1" } },
+      { run, env: { ROLL_ATTEST_NO_BROWSER: "1" }, platform: "linux" },
     );
     expect(r).toMatchObject({ taken: false, skipped: "ROLL_ATTEST_NO_BROWSER=1" });
     expect(calls).toHaveLength(0);
   });
 
-  it("npx unavailable → skip reason, no throw", async () => {
+  it("npx unavailable → honest skip with recorded reason, no throw, no silent DOM", async () => {
     const { run } = fake({ npx: { code: 127 } });
-    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {} });
+    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {}, platform: "linux" });
     expect(r.taken).toBe(false);
-    expect(r.skipped).toContain("playwright");
+    expect(r.skipped).toContain("headless Chromium unavailable");
   });
 
   it("zero-byte capture is NOT taken (exit codes lie)", async () => {
     const { run } = fake({ npx: { code: 0 } }); // exits 0 but writes nothing
-    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {} });
+    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {}, platform: "linux" });
     expect(r.taken).toBe(false);
     expect(r.skipped).toContain("empty capture");
+  });
+});
+
+describe("FIX-291 web fallback ladder — never a silent DOM downgrade", () => {
+  // A GUI macOS host: launchctl reports the Aqua session manager.
+  const aqua = { code: 0, stdout: "Aqua\n" };
+
+  it("AC1/AC2 tier-1: macOS GUI → opens a REAL browser window + screencapture, NO playwright", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of front window")) {
+        return Promise.resolve({ code: 0, stdout: "100, 50, 900, 650\n", stderr: "" });
+      }
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Google Chrome"\n', stderr: "" });
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/page.html", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true);
+    const joined = calls.join("\n");
+    expect(joined).toContain("launchctl managername"); // GUI probed
+    expect(joined).toContain('tell application "Google Chrome"'); // real browser driven
+    expect(joined).toContain("file:///tmp/page.html"); // target loaded
+    expect(joined).toContain("screencapture -x -R 100,50,800,600"); // live window rect, real pixels
+    expect(calls.some((c) => c.startsWith("npx "))).toBe(false); // tier-1 never touches Chromium/Playwright
+  });
+
+  it("AC1 tier-2: no GUI session on macOS → falls through to headless Chromium", async () => {
+    const { run, calls } = fake({
+      launchctl: { code: 0, stdout: "Background\n" }, // not Aqua
+      npx: { code: 0, writes: true },
+    });
+    const r = await captureScreenshot(
+      { kind: "web", url: "https://x", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true);
+    const joined = calls.join("\n");
+    expect(joined).toContain("launchctl managername"); // GUI probed first
+    expect(joined).toContain("playwright@latest screenshot https://x"); // then headless
+    expect(calls.some((c) => c.startsWith("osascript ") && c.includes("Chrome"))).toBe(false); // no browser window
+  });
+
+  it("AC1 tier-3: GUI screencapture blocked → honest skip, NEVER DOM", async () => {
+    // GUI present (Aqua) but no screen-recording permission (screencapture
+    // fails); the GUI lane is selected, so there is no further fallback —
+    // record the reason instead of substituting DOM.
+    const run: ShotRun = (cmd, argv) => {
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of front window")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Google Chrome"\n', stderr: "" });
+      }
+      if (cmd === "screencapture") return Promise.resolve({ code: 1, stdout: "", stderr: "" }); // permission absent
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/page.html", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("GUI browser capture");
+    expect(r.skipped).toContain("permission");
+  });
+
+  it("AC3 tier-2 headless absent on a CI/linux host records WHY, no silent substitute", async () => {
+    const { run } = fake({ npx: { code: 127 } });
+    const r = await captureScreenshot(
+      { kind: "web", url: "https://x", out: outPath() },
+      { run, env: {}, platform: "linux" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("headless Chromium unavailable");
+    expect(r.skipped).toContain("non-macOS host");
+  });
+
+  it("AC2 GUI lane does NOT depend on playwright/npx — none is ever spawned", async () => {
+    const npxCalls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      if (cmd === "npx") npxCalls.push(argv.join(" "));
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of front window")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Google Chrome"\n', stderr: "" });
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/page.html", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true);
+    expect(npxCalls).toHaveLength(0);
+  });
+
+  it("GUI lane: browser window vanished → honest skip, NEVER a blind-region shot", async () => {
+    const { run, calls } = fake({
+      launchctl: aqua,
+      osascript: { code: 0, stdout: "" }, // bounds query returns no window
+      screencapture: { code: 0, writes: true },
+    });
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/page.html", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("browser window not found");
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false); // owner's screen never sampled
+  });
+
+  it("GUI lane: another app frontmost → close + honest skip, shutter never pressed", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of front window")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Microsoft Teams"\n', stderr: "" }); // owner mid-use
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/page.html", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("not frontmost");
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false);
+    expect(calls.some((c) => c.includes("close front window"))).toBe(true); // window still retired
+  });
+
+  it("GUI lane honours a custom browser app and matches its frontmost name", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of front window")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Safari"\n', stderr: "" });
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/page.html", out: outPath(), browser: "Safari" },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true);
+    expect(calls.join("\n")).toContain('tell application "Safari"');
   });
 });
 
@@ -577,11 +756,11 @@ describe("US-EVID-003 capture markers", () => {
 
     const before = await captureFromMarker(
       { phase: "before", kind: "web", stem: "home", target: "https://app.test" },
-      { runDir, deps: { run, env: {} } },
+      { runDir, deps: { run, env: {}, platform: "linux" } },
     );
     const after = await captureFromMarker(
       { phase: "after", kind: "web", stem: "home", target: "https://app.test" },
-      { runDir, deps: { run, env: {} } },
+      { runDir, deps: { run, env: {}, platform: "linux" } },
     );
 
     expect(before.taken).toBe(true);

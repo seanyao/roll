@@ -64,6 +64,8 @@ export interface LoopGoDeps {
   nowIso: () => string;
   hasTmux: () => boolean;
   startTmux: (input: StartTmuxInput) => boolean;
+  /** FIX-289 (AC3): follow the read-only live feed in the foreground (`--attach`). */
+  followFeed?: (projectPath: string, rollBin: string) => Promise<void>;
   runOnce: (input: RunOnceInput) => Promise<number>;
   readUsageLimits?: () => Promise<UsageLimitSnapshot>;
   sleep?: (ms: number) => Promise<void>;
@@ -88,6 +90,7 @@ interface GoOptions {
   worker: boolean;
   noTmux: boolean;
   noWait: boolean;
+  attach: boolean;
   scope: GoalScope;
   scopeSpecified: boolean;
   budgetUsd?: number;
@@ -165,6 +168,7 @@ function realDeps(): LoopGoDeps {
       }
     },
     startTmux: startGoTmux,
+    followFeed: followGoLiveFeed,
     runOnce: realRunOnce,
     readUsageLimits: readAnthropicUsageLimits,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -223,6 +227,7 @@ function parseOptions(args: string[]): GoOptions {
   let worker = false;
   let noTmux = false;
   let noWait = false;
+  let attach = false;
   let scopeSpecified = false;
   let reviewMode: GoalReviewMode = "auto";
   let reviewModeSpecified = false;
@@ -239,6 +244,10 @@ function parseOptions(args: string[]): GoOptions {
     }
     if (arg === "--no-wait") {
       noWait = true;
+      continue;
+    }
+    if (arg === "--attach" || arg === "--follow") {
+      attach = true;
       continue;
     }
     if (arg === "--epic") {
@@ -325,6 +334,7 @@ function parseOptions(args: string[]): GoOptions {
     worker,
     noTmux,
     noWait,
+    attach,
     scope,
     scopeSpecified,
     reviewMode,
@@ -342,7 +352,7 @@ function hasHelpArg(args: readonly string[]): boolean {
 
 function loopGoHelp(): string {
   return [
-    "Usage: roll loop go [--epic <name>|--cards <ids>] [--budget <usd>] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--no-wait] [--no-tmux]",
+    "Usage: roll loop go [--epic <name>|--cards <ids>] [--budget <usd>] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--no-wait] [--attach] [--no-tmux]",
     "  Chain goal-mode cycles until the scoped backlog is complete, paused, budget-limited, or capped.",
     "  按 goal 范围连续执行 cycle，直到完成、暂停、预算受限或达到上限。",
     "",
@@ -355,6 +365,7 @@ function loopGoHelp(): string {
     "  --usage-threshold <ratio>  Pause when account usage reaches this ratio; default 0.85.",
     "  --no-wait           Do not wait for usage windows to recover after a usage-limit pause.",
     "  --review <mode>     Final review policy before completion: auto, hetero, self, or off.",
+    "  --attach, --follow  Start the session, then follow the read-only live feed in the foreground (Ctrl-C stops the view, not the loop).",
     "  --no-tmux           Run in the current process instead of starting a tmux session.",
     "",
     "Limits are explicit per run (FIX-279):",
@@ -448,24 +459,109 @@ function rollBin(): string {
   return (process.env["ROLL_BIN"] ?? "").trim() || process.argv[1] || "roll";
 }
 
-function startGoTmux(input: StartTmuxInput): boolean {
-  const session = `roll-loop-${input.slug}`;
-  const rt = runtimeDir(input.projectPath);
+/** tmux session name for a project slug. */
+function goSessionName(slug: string): string {
+  return `roll-loop-${slug}`;
+}
+
+/** Shell snippet for the read-only watch window / foreground follow. */
+function watchCommand(projectPath: string, slug: string, rollBin: string): string {
+  const live = shellQuote(join(runtimeDir(projectPath), "live.log"));
+  return `printf 'roll goal · ${slug}\\n'; tail -n +1 -F ${live} | ${shellQuote(rollBin)} loop fmt`;
+}
+
+/**
+ * FIX-289: an injectable view of the session's tmux state so the command
+ * planner is pure and unit-testable. `realStartGoTmux` probes tmux for it.
+ */
+export interface GoTmuxState {
+  /** Does the session `roll-loop-<slug>` already exist? */
+  sessionExists: boolean;
+  /** Does that session already have a window named `watch`? */
+  watchWindowExists: boolean;
+}
+
+/**
+ * FIX-289 (AC2): the tmux argv plan for starting a go cycle window, given the
+ * current session state. The `watch` (read-only live feed) window is created
+ * whenever it is MISSING — not only on first session creation — so attaching to
+ * a REUSED session still lands on a live feed instead of the raw worker window.
+ */
+export function planGoTmuxCommands(input: StartTmuxInput, state: GoTmuxState): string[][] {
+  const session = goSessionName(input.slug);
+  const watch = watchCommand(input.projectPath, input.slug, input.rollBin);
   const workerArgs = input.args
-    .filter((arg) => arg !== "--worker" && arg !== "--no-tmux")
+    .filter((arg) => arg !== "--worker" && arg !== "--no-tmux" && arg !== "--attach" && arg !== "--follow")
     .concat("--worker")
     .map(shellQuote)
     .join(" ");
-  const watch = `printf 'roll goal · ${input.slug}\\n'; tail -n +1 -F ${shellQuote(join(rt, "live.log"))} | ${shellQuote(input.rollBin)} loop fmt`;
+  const command = `cd ${shellQuote(input.projectPath)} && ROLL_LOOP_GO_WORKER=1 ROLL_LOOP_NO_TMUX=1 ROLL_BIN=${shellQuote(input.rollBin)} ${shellQuote(input.rollBin)} loop go ${workerArgs}`;
+  const plan: string[][] = [];
+  if (!state.sessionExists) {
+    plan.push(["new-session", "-d", "-s", session, "-x", "200", "-y", "50", "-n", "watch", watch]);
+  } else if (!state.watchWindowExists) {
+    // Session reused but its watch window is gone (closed, or never created by
+    // an older go): recreate it so observers always have the live feed.
+    plan.push(["new-window", "-d", "-t", session, "-n", "watch", watch]);
+  }
+  plan.push(["new-window", "-d", "-t", session, "-n", "go", command]);
+  return plan;
+}
+
+/** Probe tmux for the current session/watch-window state of a slug. */
+function probeGoTmuxState(slug: string): GoTmuxState {
+  const session = goSessionName(slug);
+  const sessionExists = spawnSync("tmux", ["has-session", "-t", session], { stdio: "ignore" }).status === 0;
+  if (!sessionExists) return { sessionExists: false, watchWindowExists: false };
+  const listed = spawnSync("tmux", ["list-windows", "-t", session, "-F", "#{window_name}"], { encoding: "utf8" });
+  const windows = listed.status === 0 ? String(listed.stdout ?? "").split("\n").map((w) => w.trim()) : [];
+  return { sessionExists: true, watchWindowExists: windows.includes("watch") };
+}
+
+function startGoTmux(input: StartTmuxInput): boolean {
+  const session = goSessionName(input.slug);
   try {
-    if (spawnSync("tmux", ["has-session", "-t", session], { stdio: "ignore" }).status !== 0) {
-      spawnSync("tmux", ["new-session", "-d", "-s", session, "-x", "200", "-y", "50", "-n", "watch", watch], { stdio: "ignore" });
+    const plan = planGoTmuxCommands(input, probeGoTmuxState(input.slug));
+    let goStarted = false;
+    for (const argv of plan) {
+      const ok = spawnSync("tmux", argv, { stdio: "ignore" }).status === 0;
+      if (argv[0] === "new-window" && argv.includes("go") && argv[argv.length - 1]?.startsWith("cd ")) goStarted = ok;
     }
-    const command = `cd ${shellQuote(input.projectPath)} && ROLL_LOOP_GO_WORKER=1 ROLL_LOOP_NO_TMUX=1 ROLL_BIN=${shellQuote(input.rollBin)} ${shellQuote(input.rollBin)} loop go ${workerArgs}`;
-    return spawnSync("tmux", ["new-window", "-d", "-t", session, "-n", "go", command], { stdio: "ignore" }).status === 0;
+    return goStarted;
   } catch {
     return false;
   }
+}
+
+/**
+ * FIX-289 (AC3): follow the read-only live feed in the foreground. Ctrl-C here
+ * stops only the VIEW — the cycle keeps running in its detached tmux window.
+ */
+function followGoLiveFeed(projectPath: string, rollBin: string): Promise<void> {
+  return new Promise((resolve) => {
+    const live = join(runtimeDir(projectPath), "live.log");
+    const tail = spawn("tail", ["-n", "+1", "-F", live], { stdio: ["ignore", "pipe", "inherit"] });
+    const fmt = spawn(rollBin.endsWith(".js") || rollBin.endsWith(".mjs") ? process.execPath : rollBin, rollBin.endsWith(".js") || rollBin.endsWith(".mjs") ? [rollBin, "loop", "fmt"] : ["loop", "fmt"], { stdio: ["pipe", "inherit", "inherit"] });
+    if (tail.stdout !== null && fmt.stdin !== null) tail.stdout.pipe(fmt.stdin);
+    const finish = (): void => {
+      try {
+        tail.kill("SIGTERM");
+      } catch {
+        /* gone */
+      }
+      try {
+        fmt.kill("SIGTERM");
+      } catch {
+        /* gone */
+      }
+      process.removeListener("SIGINT", finish);
+      resolve();
+    };
+    process.on("SIGINT", finish);
+    fmt.on("exit", finish);
+    tail.on("exit", finish);
+    tail.on("error", finish);
+  });
 }
 
 function realRunOnce(input: RunOnceInput): Promise<number> {
@@ -1358,6 +1454,34 @@ function installStopHandlers(onStop: (signal: string) => void): () => void {
   };
 }
 
+/** Human-readable scope line for startup feedback. */
+function describeScope(scope: GoalScope): string {
+  if (scope.kind === "cards") return `cards ${scope.cards.join(", ")}`;
+  if (scope.kind === "epic") return `epic ${scope.epic}`;
+  return "all Todo backlog cards";
+}
+
+/**
+ * FIX-289 (AC1): a clear, multi-line startup confirmation — the session name,
+ * the scope, that the first cycle is now running, and the read-only way to
+ * observe it. Replaces the vague one-liner that left no clue what was happening.
+ */
+function goStartupFeedback(slug: string, scope: GoalScope): string {
+  const session = goSessionName(slug);
+  return [
+    `Goal go session started: ${session}`,
+    `  scope:   ${describeScope(scope)}`,
+    "  cycles:  first cycle is running now; cycles chain until the scope is complete, paused, or capped.",
+    `  observe: tmux attach -t ${session}  (read-only watch window; the 'go' window is the worker — do not Ctrl-C it)`,
+    `           or follow inline:  roll loop go --attach`,
+    "",
+    `goal 连跑会话已启动: ${session}`,
+    "  第一个 cycle 正在运行；会持续连跑直到范围完成、暂停或达上限。",
+    `  观察 (只读): tmux attach -t ${session}  或  roll loop go --attach`,
+    "",
+  ].join("\n");
+}
+
 export async function loopGoCommand(args: string[], deps: LoopGoDeps = realDeps()): Promise<number> {
   if (hasHelpArg(args)) {
     process.stdout.write(loopGoHelp());
@@ -1368,10 +1492,17 @@ export async function loopGoCommand(args: string[], deps: LoopGoDeps = realDeps(
   if (!opts.worker && !opts.noTmux && deps.hasTmux()) {
     const started = deps.startTmux({ projectPath: id.path, slug: id.slug, args, rollBin: rollBin() });
     if (started) {
-      process.stdout.write(
-        `Goal go session started in tmux — attach anytime: tmux attach -t roll-loop-${id.slug}\n` +
-          `goal 连跑会话已在 tmux 启动 — 可随时观察: tmux attach -t roll-loop-${id.slug}\n`,
-      );
+      process.stdout.write(goStartupFeedback(id.slug, opts.scope));
+      // FIX-289 (AC3): --attach follows the read-only live feed in the
+      // foreground. Ctrl-C there only stops this view; the cycle keeps running
+      // in its detached tmux window.
+      if (opts.attach && deps.followFeed !== undefined) {
+        process.stdout.write(
+          "Following live feed (Ctrl-C stops the view, not the loop) …\n" +
+            "正在跟随实时输出 (Ctrl-C 只停止查看，不会停止 loop) …\n",
+        );
+        await deps.followFeed(id.path, rollBin());
+      }
       return 0;
     }
   }

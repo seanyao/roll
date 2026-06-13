@@ -4,6 +4,9 @@
 
 ### 稳定性
 
+- `roll release` 事务健壮性：任一步骤依赖抛错（提交闸拦截、网络故障…）都归为该步的有序中止而非裸栈；带测试证明提交闸的仓库（roll 自身）先刷新证明重试一次再提交（FIX-277，发版实战首跑揪出） `[release]`
+  <!-- evidence: .roll/features/release-management/FIX-277/latest/FIX-277-report.html -->
+
 - `roll setup skills` 在全局安装环境不再向安装树写 guide 文档撞 ENOENT 崩栈：安装树无目录清单可维护，单行提示后跳过；源码仓行为不变（FIX-276） `[cli]`
   <!-- evidence: .roll/features/documentation/FIX-276/latest/FIX-276-report.html -->
 

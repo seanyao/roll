@@ -316,6 +316,18 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       } catch {
         /* best-effort — spine just shows fewer stations */
       }
+      // US-DOSSIER-025: attach the on-disk attest evidence flags onto the story
+      // model itself (the SAME `storyEvidenceFlags` probe the registry reads, once
+      // per card). This is what lets the epic page rows AND the front-page spectrum
+      // call the shared `deriveDeliveryLadder(story, story.evidence)` and land on the
+      // identical claimed→merged→attested rung the story dossier + truth.json report
+      // — instead of the old `merged|cycle|backlog` / `done|wip|todo` dialects that
+      // never distinguished merged-but-unattested from merged-and-attested.
+      try {
+        story.evidence = storyEvidenceFlags(cwd, story);
+      } catch {
+        /* best-effort — absent flags fall back to the honest `merged` rung */
+      }
     }
   }
   // US-DOSSIER-021: the per-story delivery-ladder + evidence registry, built from
@@ -323,9 +335,13 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   // (no Date.now()/Math.random()). The `merged` rung reuses the `delivered` signal
   // collectDossier already folds (truth selector + FIX-278 offline merge truth);
   // we never re-derive merge here. Carried onto the ONE snapshot below.
+  // US-DOSSIER-025: the registry's `ladder` and the rendered surfaces now share
+  // the SAME `story.evidence` flags + `deriveDeliveryLadder`, so the rung in
+  // truth.json equals the rung on the epic row, the front-page spectrum, and the
+  // story dossier — one ladder, every surface.
   const storyRegistry: TruthSnapshotStoryEntry[] = epics.flatMap((epic) =>
     epic.stories.map((story) => {
-      const evidence = storyEvidenceFlags(cwd, story);
+      const evidence = story.evidence ?? storyEvidenceFlags(cwd, story);
       return {
         id: story.id,
         epic: story.epic,

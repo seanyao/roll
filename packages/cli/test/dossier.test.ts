@@ -7,10 +7,10 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeF
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { collectDossier, type DossierEpic } from "../src/lib/archive.js";
+import { collectDossier, type DossierEpic, type DossierStory } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
-import { deriveDeliveryLadder, renderFeaturesIndex, renderTruthBoard, spineMotif } from "../src/lib/dossier-index.js";
-import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
+import { LADDER_CSS, deriveDeliveryLadder, renderFeaturesIndex, renderTruthBoard, spineMotif, storyLadderState } from "../src/lib/dossier-index.js";
+import { miniSpine, renderEpicPage, storyState } from "../src/lib/epic-page.js";
 import { collectStoryDossierInput, renderStoryDossier, storyEvidenceFlags, storyHasMergeEvidence, storySpine } from "../src/lib/story-dossier.js";
 import { markPhaseDone } from "../src/lib/story-page.js";
 
@@ -194,13 +194,17 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).toContain("<em>事实</em>");
   });
 
-  it("status overview: tally cards by state + delivery spectrum + % merged", () => {
-    // fixture: 3 stories — US-A-1 done, FIX-2 todo, beta todo → done 1 / todo 2 → 33%
-    expect(html).toContain('class="statusboard"');
-    expect(html).toContain('class="tally done"');
-    expect(html).toContain("已交付"); // Done tally label
+  it("US-DOSSIER-025: status overview tally cards are the ladder (attested/merged/claimed) + delivery spectrum + % merged", () => {
+    // fixture: 3 stories — US-A-1 delivered via latest/ but NO ac-map/screenshot
+    // → `merged` rung (not attested); FIX-2 todo; beta todo → merged 1 / todo 2 → 33%.
+    expect(html).toContain('class="statusboard ladder"');
+    expect(html).toContain('class="tally attested"'); // the top rung card is present
+    expect(html).toContain('class="tally merged"'); // US-A-1 sits at merged (no attest evidence)
+    expect(html).toContain('class="tally claimed"');
+    expect(html).toContain("已验收"); // Attested tally label
+    expect(html).toContain("已合主干"); // Merged tally label
     expect(html).toContain('class="spectrum"');
-    expect(html).toContain("已合主干");
+    expect(html).toContain('class="s-merged"'); // the spectrum's `done`-equivalent split: merged segment
     expect(html).toContain("33%");
   });
 
@@ -212,11 +216,16 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(spine).toContain("复盘");
   });
 
-  it("toolbar: search input + per-status filter chips wired to the filter script", () => {
+  it("US-DOSSIER-025: toolbar search input + per-rung filter chips (ladder vocabulary) wired to the filter script", () => {
     expect(html).toContain("data-dossier-search");
     expect(html).toContain('class="statusfilter"');
-    expect(html).toContain('data-sf="done"');
+    // the chips are the ladder rungs now, so a chip's data-sf matches the
+    // data-status rungs the epic folds carry (attested/merged/claimed/…).
+    expect(html).toContain('data-sf="attested"');
+    expect(html).toContain('data-sf="merged"');
+    expect(html).toContain('data-sf="claimed"');
     expect(html).toContain('data-sf="hold"');
+    expect(html).not.toContain('data-sf="done"'); // the old lumped bucket is gone
     expect(html).toContain(DOSSIER_FILTER_SCRIPT);
   });
 
@@ -295,13 +304,16 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(index).toContain("<dd>?</dd>");
   });
 
-  it("epic groups: shipping before backlog; story rows carry type + status (US-DOSSIER)", () => {
+  it("epic groups: shipping before backlog; story rows carry type + ladder rung (US-DOSSIER-025)", () => {
     expect(html.indexOf("Shipping to main")).toBeLessThan(html.indexOf("In backlog"));
     expect(html).toContain('href="alpha/index.html"');
     expect(html).toContain('href="alpha/US-A-1/index.html"');
     expect(html).toContain('class="story"');
     expect(html).toContain('class="stype US"');
-    expect(html).toContain('class="sstat st-done"'); // US-A-1 delivered → done row
+    // US-DOSSIER-025: US-A-1 delivered via latest/ but no attest evidence → `merged`
+    // rung (the honest middle), not the old binary `done`.
+    expect(html).toContain('class="sstat st-merged"');
+    expect(html).toContain('data-status="merged"');
     expect(html).toContain('data-truth="1"');
   });
 
@@ -389,20 +401,44 @@ describe("renderEpicPage — US-DOSSIER-001b", () => {
     expect(html).toContain('style="width:50%"'); // 1 of 2 delivered
   });
 
-  it("three groups: merged first, backlog after; rows link to story dossiers", () => {
-    expect(html.indexOf("已合主干")).toBeLessThan(html.indexOf("仍在待办"));
+  it("US-DOSSIER-025: rungs grouped on the ladder (attested → merged → claimed) plus preserved drift/unknown; rows link to story dossiers", () => {
+    // The alpha fixture's US-A-1 is delivered via latest/ but unattested → it
+    // lands in the `merged` group; FIX-2 is wish-only (not even claimed) → it
+    // sits in NO rung group (only attested/merged/claimed/drift/unknown render).
     expect(html).toContain('href="US-A-1/index.html"');
     expect(html).toContain('class="type type-FIX"');
-    expect(html).toContain('class="pill merged"');
-    expect(html).toContain('class="pill backlog"');
+    // the group headings are the ladder rungs, bilingual on separate lines.
+    expect(html).toContain("Merged to main"); // the merged rung heading
+    expect(html).toContain('class="pill merged"'); // US-A-1's merged rung pill
+    expect(html).toContain("已合主干"); // 中 of the merged pill / heading
+    // the old `cycle`/`backlog` pills are gone — replaced by the ladder vocabulary.
+    expect(html).not.toContain('class="pill cycle"');
+    expect(html).not.toContain('class="pill backlog"');
   });
 
-  it("mini-spine: truth story fills all five dots with delivery in truth-green", () => {
-    const truthSpine = miniSpine({ id: "X-1", epic: "e", type: "US", delivered: true });
-    expect(truthSpine.match(/<i[ >]/g)).toHaveLength(5);
-    expect(truthSpine).toContain('class="truth"');
-    const wishSpine = miniSpine({ id: "X-2", epic: "e", type: "US", delivered: false });
-    expect(wishSpine.match(/class="done"/g)).toHaveLength(1); // definition only
+  it("US-DOSSIER-025: mini-spine fills to the rung — attested all five (delivery truth-green), merged through delivery (no attest mark), claimed definition + hatched delivery", () => {
+    // attested — merge + full attest evidence → all five, delivery node attested (truth-green).
+    const attested = miniSpine({
+      id: "X-1", epic: "e", type: "US", delivered: true, legacy: false,
+      evidence: { report: true, acMap: true, visualEvidence: true },
+    });
+    expect(attested.match(/<i[ >]/g)).toHaveLength(5);
+    expect(attested).toContain('class="attested"'); // delivery node carries the attested rung
+    expect(attested).not.toContain('class="merged"');
+    // merged — delivered but no attest evidence → filled through delivery (teal), never attested.
+    const merged = miniSpine({ id: "X-2", epic: "e", type: "US", delivered: true, legacy: false });
+    expect(merged).toContain('class="merged"');
+    expect(merged).not.toContain('class="attested"');
+    // claimed — backlog ✅ Done, no merge evidence → definition only + a hatched amber delivery node.
+    const claimed = miniSpine({ id: "X-3", epic: "e", type: "US", delivered: false, status: "done", legacy: false });
+    expect(claimed).toContain('class="claimed"');
+    expect(claimed.match(/class="done"/g)).toHaveLength(1); // definition station only
+    // wish-only — definition only, no rung class on the delivery node.
+    const wish = miniSpine({ id: "X-4", epic: "e", type: "US", delivered: false, legacy: false });
+    expect(wish.match(/class="done"/g)).toHaveLength(1);
+    expect(wish).not.toContain('class="attested"');
+    expect(wish).not.toContain('class="merged"');
+    expect(wish).not.toContain('class="claimed"');
   });
 
   it("self-containment holds", () => {
@@ -444,6 +480,169 @@ describe("renderEpicPage — US-DOSSIER-001b", () => {
     expect(page).toContain("暂无总览文档");
     expect(page).toContain(".roll/features/beta/beta.md");
     expect(epicDocsSection(page)).toMatchSnapshot();
+  });
+});
+
+describe("US-DOSSIER-025 — epic list page + mini-spine + index spectrum on the ladder", () => {
+  // A four-rung fixture, each story already enriched with the evidence flags the
+  // index command attaches, so storyState / storyLadderState resolve to a distinct
+  // rung — exactly what the per-story dossier + truth.json registry would report.
+  const ATTESTED: DossierStory = {
+    id: "US-AT-1", epic: "ladder", type: "US", title: "Attested story", delivered: true, legacy: false,
+    status: "done", evidence: { report: true, acMap: true, visualEvidence: true },
+  };
+  const MERGED: DossierStory = {
+    id: "US-MG-2", epic: "ladder", type: "US", title: "Merged story", delivered: true, legacy: false,
+    status: "done", evidence: { report: false, acMap: true, visualEvidence: false },
+  };
+  const CLAIMED: DossierStory = {
+    id: "US-CL-3", epic: "ladder", type: "US", title: "Claimed story", delivered: false, legacy: false,
+    status: "done",
+  };
+  const DRIFT: DossierStory = {
+    id: "US-DR-4", epic: "ladder", type: "US", title: "Drift story", delivered: false, legacy: false,
+    status: "done", truthState: "fail", truthReason: "premature_done",
+  };
+  const ladderEpic: DossierEpic = {
+    name: "ladder", stories: [ATTESTED, MERGED, CLAIMED, DRIFT], delivered: 2,
+  };
+
+  it("AC1: storyState returns the ternary ladder for non-error rows; fail/unknown preserved", () => {
+    expect(storyState(ATTESTED)).toBe("attested");
+    expect(storyState(MERGED)).toBe("merged");
+    expect(storyState(CLAIMED)).toBe("claimed");
+    expect(storyState(DRIFT)).toBe("fail");
+    expect(storyState({ id: "U", epic: "e", type: "US", delivered: false, legacy: false, truthState: "unknown" })).toBe("unknown");
+    // a delivered story with no enriched evidence flags is the honest `merged`
+    // rung, never a silent `attested`.
+    expect(storyState({ id: "U", epic: "e", type: "US", delivered: true, legacy: false })).toBe("merged");
+  });
+
+  it("AC2: epic story rows render the rung pill (attested/merged/claimed), bilingual EN/中 on separate lines", () => {
+    const page = renderEpicPage(ladderEpic);
+    expect(page).toContain('class="pill attested"');
+    expect(page).toContain('class="pill merged"');
+    expect(page).toContain('class="pill claimed"');
+    expect(page).toContain('class="pill fail"');
+    // bilingual, EN line then 中 line (the bi() two-span shape), never inline.
+    expect(page).toContain('<span class="lang-en">attested</span><span class="lang-zh">已验收</span>');
+    expect(page).toContain('<span class="lang-en">merged</span><span class="lang-zh">已合主干</span>');
+    expect(page).toContain('<span class="lang-en">claimed</span><span class="lang-zh">仅声称</span>');
+    // the old vocabulary is gone.
+    expect(page).not.toContain('class="pill cycle"');
+    expect(page).not.toContain('class="pill backlog"');
+  });
+
+  it("AC3: miniSpine fills to the rung — attested all five, merged through delivery (no attest mark), claimed definition + hatched delivery", () => {
+    const at = miniSpine(ATTESTED);
+    expect(at.match(/<i[ >]/g)).toHaveLength(5);
+    expect(at).toContain('class="attested"');
+    expect(at).not.toContain('class="merged"');
+    const mg = miniSpine(MERGED);
+    expect(mg).toContain('class="merged"');
+    expect(mg).not.toContain('class="attested"'); // merged never reads as full green
+    const cl = miniSpine(CLAIMED);
+    expect(cl).toContain('class="claimed"');
+    expect(cl.match(/class="done"/g)).toHaveLength(1); // definition station only
+    // no row reads fully done unless it is at least `merged`: claimed has no
+    // filled upstream stations beyond definition.
+    expect(cl).not.toContain('class="merged"');
+    expect(cl).not.toContain('class="attested"');
+  });
+
+  it("AC4: epic group headings are the ladder rungs + preserved drift/unknown; bilingual on separate lines; empty groups omitted", () => {
+    const page = renderEpicPage(ladderEpic);
+    // headings present and in rung order: attested → merged → claimed → drift.
+    const iAt = page.indexOf("Merged & attested");
+    const iMg = page.indexOf("Merged to main");
+    const iCl = page.indexOf("Claimed only");
+    const iDr = page.indexOf("Truth drift");
+    expect(iAt).toBeGreaterThan(-1);
+    expect(iAt).toBeLessThan(iMg);
+    expect(iMg).toBeLessThan(iCl);
+    expect(iCl).toBeLessThan(iDr);
+    // bilingual headings on separate lines.
+    expect(page).toContain('<span class="lang-en">Claimed only</span><span class="lang-zh">仅声称 — 尚无合并证据</span>');
+    // empty groups are omitted: an all-attested epic shows no merged/claimed/drift heading.
+    const allAttested = renderEpicPage({ name: "a", stories: [ATTESTED], delivered: 1 });
+    expect(allAttested).toContain("Merged & attested");
+    expect(allAttested).not.toContain("Claimed only");
+    expect(allAttested).not.toContain("Truth drift");
+  });
+
+  it("AC5: the front-page spectrum + storySpectrumState classify by the same ladder; done split into attested vs merged; tally + legend one-to-one", () => {
+    const html = renderFeaturesIndex([ladderEpic]);
+    // the spectrum bar carries distinct attested + merged + claimed segments.
+    expect(html).toContain('class="s-attested"');
+    expect(html).toContain('class="s-merged"');
+    expect(html).toContain('class="s-claimed"');
+    // tally cards split done → attested + merged, with a claimed card.
+    expect(html).toContain('class="tally attested"');
+    expect(html).toContain('class="tally merged"');
+    expect(html).toContain('class="tally claimed"');
+    // legend swatches one-to-one with the rungs.
+    expect(html).toContain('class="i-attested"');
+    expect(html).toContain('class="i-merged"');
+    expect(html).toContain('class="i-claimed"');
+    // % merged to main = (attested + merged) / total = 2/4 = 50%.
+    expect(html).toContain("<b>50%</b>");
+    // the row status pill on the index uses the same rung as the epic page.
+    expect(html).toContain('data-status="attested"');
+    expect(html).toContain('data-status="merged"');
+    expect(html).toContain('data-status="claimed"');
+  });
+
+  it("AC6: the rung is identical on every surface for the same story (epic page row, index spectrum, registry classifier)", () => {
+    // storyState (epic page) and storyLadderState (index) agree per story.
+    for (const s of ladderEpic.stories) {
+      expect(storyState(s)).toBe(storyLadderState(s));
+    }
+    // and they equal the registry's deriveDeliveryLadder rung for the delivered/
+    // claimed cases (the truth.json `ladder` field) — one ladder, every surface.
+    expect(deriveDeliveryLadder(ATTESTED, ATTESTED.evidence!)).toBe("attested");
+    expect(deriveDeliveryLadder(MERGED, MERGED.evidence!)).toBe("merged");
+    expect(deriveDeliveryLadder(CLAIMED, { report: false, acMap: false, visualEvidence: false })).toBe("claimed");
+  });
+
+  it("US-DOSSIER-025 fidelity: the EPIC list surface keeps every reference component (masthead crumb + ledger + wish→truth bar + doc links + grouped rows w/ type chip + id + mini 5-node spine + claim↔truth pill)", () => {
+    const page = renderEpicPage(ladderEpic);
+    // masthead + breadcrumb home + epic kicker.
+    expect(page).toContain('class="crumb"');
+    expect(page).toContain('href="../index.html#backlog"');
+    expect(page).toContain("Epic Dossier");
+    // epic-level ledger (figures) + wish→truth bar + legend.
+    expect(page).toContain('class="ledger"');
+    expect(page).toContain('class="figures"');
+    expect(page).toContain('class="wt-bar"');
+    expect(page).toContain('class="wt-legend"');
+    expect(page).toContain('style="width:50%"'); // 2 of 4 delivered
+    // a story row carries: type chip · id · title · mini 5-node spine · rung pill.
+    expect(page).toContain('class="type type-US"');
+    expect(page).toContain('class="id"');
+    expect(page).toContain('class="mini-spine"');
+    const rowSpine = miniSpine(ATTESTED);
+    expect(rowSpine.match(/<i[ >]/g)).toHaveLength(5); // exactly 5 nodes
+    expect(page).toContain('class="pill attested"');
+    // the ladder palette is injected (attest-green / teal / amber), self-contained.
+    expect(page).toContain(LADDER_CSS);
+    expect(page).not.toContain("<script src=");
+    expect(page).not.toContain("<link");
+  });
+
+  it("US-DOSSIER-025 fidelity: the front-page spectrum keeps the reference status overview (8-rung statusboard + segmented bar + corpus %line + legend)", () => {
+    const html = renderFeaturesIndex([ladderEpic]);
+    expect(html).toContain('class="statusboard ladder"'); // the tally board
+    expect(html).toContain('class="spectrum"'); // the segmented bar
+    expect(html).toContain('class="pctline"'); // corpus + % merged line
+    expect(html).toContain('class="spectrum-legend"'); // the legend
+    expect(html).toContain('class="lifespine'); // per-row lifecycle spine
+    // the ladder colors are injected once.
+    expect(html).toContain(LADDER_CSS);
+  });
+
+  it("US-DOSSIER-025: determinism — the same epic renders byte-identical across reruns (no clock/locale)", () => {
+    expect(renderEpicPage(ladderEpic)).toBe(renderEpicPage(ladderEpic));
+    expect(renderFeaturesIndex([ladderEpic])).toBe(renderFeaturesIndex([ladderEpic]));
   });
 });
 
@@ -1299,9 +1498,11 @@ describe("dossier aligns status/type with the backlog (US-DOSSIER)", () => {
     expect(html.indexOf("Shipping to main")).toBeLessThan(html.indexOf("Delivered to main"));
   });
 
-  it("story rows carry the backlog status (done/wip/hold/todo) + a lifecycle spine", () => {
+  it("US-DOSSIER-025: story rows carry the ladder rung (claimed/wip/hold/todo) + a lifecycle spine", () => {
     const html = renderFeaturesIndex(collectDossier(backlogProject()));
-    expect(html).toContain('data-status="unknown"><span class="stype US">US</span><span class="sid">US-MIX-1</span>');
+    // US-MIX-1 is backlog ✅ Done with NO merge evidence → `claimed` (a wish, not
+    // truth) — the new honest rung, where the old vocabulary lumped it as unknown.
+    expect(html).toContain('data-status="claimed"><span class="stype US">US</span><span class="sid">US-MIX-1</span>');
     expect(html).toContain('data-status="wip"><span class="stype FIX">FIX</span><span class="sid">FIX-MIX-2</span>');
     expect(html).toContain('data-status="hold"><span class="stype US">US</span><span class="sid">US-MIX-4</span>');
     expect(html).toContain('data-status="todo"><span class="stype US">US</span><span class="sid">US-MIX-3</span>');

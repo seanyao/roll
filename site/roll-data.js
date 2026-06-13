@@ -135,8 +135,8 @@ window.RollData = (function () {
         { name: "$roll-fix",    mono: true, desc: "Fast-path bug fix — same CI gate, lighter ceremony.", badges: [] },
       ]},
       { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
-        { name: "roll status",     mono: true, desc: "Project health: backlog queue, loop state, CI, release-ready verdict.", badges: ["core"] },
-        { name: "Delivery Dossier", desc: "Truth strip plus Story / Cycle / Release tiles; unknown facts render as '?'.", badges: ["new"] },
+        { name: "roll status",     mono: true, desc: "Verdict-first truth summary — LOOP · CYCLE · RELEASE · STORY with attest coverage — then convention sync health.", badges: ["core"] },
+        { name: "Delivery Dossier", desc: "The web console: dark top-bar + green-dot project switcher, machine-global breadcrumb (Agents · Skills · Conventions · About), a Charter markdown browser, the Casting page, and the claimed→merged→attested ladder (done ≡ merged ∧ attested). Web and CLI read one snapshot, so every number matches.", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
@@ -317,8 +317,8 @@ window.RollData = (function () {
         { name: "$roll-fix",    mono: true, desc: "Bug 修复快车道——同样的 CI 门禁,流程更轻。", badges: [] },
       ]},
       { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
-        { name: "roll status",     mono: true, desc: "项目健康:backlog 队列、loop 状态、CI、发布就绪判断。", badges: ["core"] },
-        { name: "交付档案",          desc: "含真相条和 Story / Cycle / Release 卡片;未知事实显示为 '?'。", badges: ["new"] },
+        { name: "roll status",     mono: true, desc: "判定优先的真相摘要——LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率——其后是约定同步健康。", badges: ["core"] },
+        { name: "交付档案",          desc: "web 控制台:深色顶栏 + 绿点项目切换器、机器全局面包屑(Agents · Skills · Conventions · About)、Charter markdown 浏览器、Casting 页,以及 claimed→merged→attested 阶梯(done ≡ 已合并 ∧ 已验收)。web 与 CLI 读同一份快照,每个数字都对得上。", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll loop alert", mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },

@@ -70,6 +70,11 @@ function readText(p: string): string {
   return readFileSync(p, "utf8");
 }
 
+// US-DOSSIER-036 promoted `roll skills audit|sync` to a first-class surface, so
+// `roll skills` is no longer a hidden/retired top-level command — it must NOT be
+// flagged when README/guide/site document it (US-DOSSIER-038 AC2/AC5: docs match
+// the shipped command surface). The legacy `generate`/`check` paths still nest
+// under doctor/setup, but the documented verb is the real command now.
 const COMMAND_SURFACE_REPLACEMENTS = new Map<string, string>([
   ["migrate", "npx @seanyao/roll@2 migrate"],
   ["feedback", "roll idea"],
@@ -79,9 +84,8 @@ const COMMAND_SURFACE_REPLACEMENTS = new Map<string, string>([
   ["consistency", "roll release consistency"],
   ["dream", "the configured Dream schedule"],
   ["index", "Delivery Dossier"],
-  ["skills", "roll doctor skills / roll setup skills"],
 ]);
-const DOC_RETIRED_TOP_LEVEL_COMMANDS = new Set(["migrate", "feedback", "alert", "changelog", "skills", "consistency"]);
+const DOC_RETIRED_TOP_LEVEL_COMMANDS = new Set(["migrate", "feedback", "alert", "changelog", "consistency"]);
 const SITE_HIDDEN_TOP_LEVEL_COMMANDS = new Set(COMMAND_SURFACE_REPLACEMENTS.keys());
 
 function lineNumberAt(text: string, index: number): number {

@@ -18,6 +18,7 @@
  * (US-DOSSIER-013/015/017 fill them) and Backlog embeds the existing ledger
  * (US-DOSSIER-012 redesigns it).
  */
+import { bi } from "@roll/core";
 import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
 import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
@@ -102,10 +103,6 @@ const C = {
 };
 
 /** bi() with the console's own class names (kept compatible with roll-lang). */
-function bi(en: string, zh: string): string {
-  return `<span class="lang-en">${en}</span><span class="lang-zh">${zh}</span>`;
-}
-
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

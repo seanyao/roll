@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 稳定性
+
+- `roll loop go` 的预算与运行上限改为每次启动显式设定：只取本次调用的 `--budget`/`--max-cycles`/`--for`，省略即本轮不设限，不再沿用上一次会话持久化的旧值（此前 flagless 连跑会继承几天前设的预算与单周期上限，一个 idle 周期即 budget_limited 收摊、整轮零产出）；scope/review 仍按需沿用（FIX-279） `[loop]`
+  <!-- evidence: .roll/features/goal-mode/FIX-279/latest/FIX-279-report.html -->
+
+- `roll index --rebuild` 不再把已合并故事页降级：delivered 判定补离线 git 合并真相（提交标题点名故事 id，或 `(#N)` PR 合并提交引用它），rebuild 无实时 PR 快照时也保住已合并卡的"已合主干·已验收"横幅与交付脊柱；选择器可提升但不再抹掉 git 证明已合的卡，Done 闸防止 Todo 卡被误提升（FIX-278） `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/FIX-278/latest/FIX-278-report.html -->
+
 ## v3.613.1 — 2026-06-13
 
 ### 稳定性

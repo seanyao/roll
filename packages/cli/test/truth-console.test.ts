@@ -59,17 +59,17 @@ const AGENTS = [
 ];
 
 const SKILLS = {
-  summary: { skills: 2, violations: 0, hubLines: 110 },
+  summary: { skills: 2, violations: 0 as number | "unknown", hubLines: 110, auditRan: true },
   groups: [
     { key: "delivery" as const, rows: [{
       name: "roll-build", group: "delivery" as const, hubLines: 60, description: "Load when shipping a story",
-      violations: [], hasGotchas: true, hasLoadTrigger: true, routeCases: { positive: 2, negative: 2 },
+      violations: [], auditKnown: true, hasGotchas: true, hasLoadTrigger: true, routeCases: { positive: 2, negative: 2 },
       usage: 7, files: [{ path: "SKILL.md", lines: 60, dir: false }, { path: "references/", lines: 0, dir: true }, { path: "references/full-contract.md", lines: 900, dir: false }],
       dirPath: "/repo/skills/roll-build", hubText: "# Roll Build\nhub text here",
     }] },
     { key: "quality" as const, rows: [{
       name: "roll-.review", group: "quality" as const, hubLines: 50, description: "Load when reviewing",
-      violations: [], hasGotchas: true, hasLoadTrigger: true, routeCases: { positive: 2, negative: 2 },
+      violations: [], auditKnown: true, hasGotchas: true, hasLoadTrigger: true, routeCases: { positive: 2, negative: 2 },
       usage: 0, files: [{ path: "SKILL.md", lines: 50, dir: false }], dirPath: "/repo/skills/roll-.review", hubText: "# Review",
     }] },
     { key: "observe" as const, rows: [] },
@@ -196,7 +196,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       agents: [],
       releasePanel: { dims: [], total: { fail: 0, warn: 0, unknown: 0 }, blocking: false },
       releaseScope: { pending: [], shipped: [], pendingCount: 0, shippedCount: 0, history: [] },
-      skills: { summary: { skills: 0, violations: 0, hubLines: 0 }, groups: [] },
+      skills: { summary: { skills: 0, violations: 0, hubLines: 0, auditRan: true }, groups: [] },
       casting: collectCasting({ readSlot: () => undefined }),
     });
     expect(custom).toContain("acme");

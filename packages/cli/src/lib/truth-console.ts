@@ -933,7 +933,13 @@ const SKILL_GROUP_META: Record<string, { en: string; zh: string }> = {
 };
 
 function skillRow(r: SkillPanelRow): string {
-  const ok = r.violations.length === 0;
+  // AC4 — a row whose audit never ran is `unknown` (amber dot), never a clean
+  // green that fakes a passing audit.
+  const ok = r.auditKnown && r.violations.length === 0;
+  const dotColor = !r.auditKnown ? C.amber : ok ? C.green : C.red;
+  const verdict = !r.auditKnown
+    ? `<span style="${MONO}font-size:10.5px;color:${C.amber};white-space:nowrap;">${bi("unknown", "未知")}</span>`
+    : `<span style="${MONO}font-size:10.5px;color:${ok ? C.green : C.red};white-space:nowrap;">${ok ? bi("clean", "无违规") : `${r.violations.length} ${bi("violations", "违规")}`}</span>`;
   const check = (on: boolean, label: string): string =>
     `<span style="${MONO}font-size:10.5px;color:${on ? C.green : C.red};font-weight:600;white-space:nowrap;">${on ? "✓" : "✗"} ${label}</span>`;
   const tree = r.files
@@ -949,12 +955,12 @@ function skillRow(r: SkillPanelRow): string {
     `<details class="sk-row" data-skill="${esc(r.name)}" style="border-top:1px solid ${C.hair};">` +
     `<summary style="display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
     `<span style="display:flex;align-items:center;gap:10px;min-width:0;"><span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
-    `<span style="width:8px;height:8px;border-radius:50%;background:${ok ? C.green : C.red};flex:none;"></span>` +
+    `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>` +
     `<span style="${MONO}font-size:13px;font-weight:600;color:${C.ink};white-space:nowrap;">${esc(r.name)}</span>` +
     `<span style="font-size:12px;color:${C.dim};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.description.slice(0, 110))}</span></span>` +
     `<span style="${MONO}font-size:11px;color:${C.dim};white-space:nowrap;">${r.hubLines} ${bi("lines", "行")}</span>` +
     `<span style="${MONO}font-size:11px;color:${r.usage > 0 ? C.blue : C.faint};font-weight:600;white-space:nowrap;" title="invocations (self-score notes) · 调用次数">${r.usage > 0 ? `×${r.usage}` : "—"}</span>` +
-    `<span style="${MONO}font-size:10.5px;color:${ok ? C.green : C.red};white-space:nowrap;">${ok ? bi("clean", "无违规") : `${r.violations.length} ${bi("violations", "违规")}`}</span></summary>` +
+    verdict + `</summary>` +
     `<div style="background:#fbfcfe;border-top:1px solid #f1f4f8;padding:12px 18px 14px 47px;display:grid;grid-template-columns:1fr 1fr;gap:18px;">` +
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("anatomy", "解剖")}</div>${tree}` +
     `<div style="margin-top:9px;"><code class="copy-chip" data-copy="${esc(r.dirPath)}" style="${MONO}font-size:10.5px;padding:3px 9px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">${esc(r.dirPath)}</code></div></div>` +
@@ -993,7 +999,9 @@ function skillsTab(input: TruthConsoleInput): string {
     )}</p></div>` +
     `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};margin:18px 0 8px;padding:13px 18px;display:flex;gap:26px;align-items:center;flex-wrap:wrap;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     `<span data-truth="skills-count" style="${MONO}font-size:13px;color:${C.ink};font-weight:600;">${sk.summary.skills} ${bi("skills", "个技能")}</span>` +
-    `<span style="${MONO}font-size:13px;color:${sk.summary.violations > 0 ? C.red : C.green};font-weight:600;">${sk.summary.violations} ${bi("violations", "违规")}</span>` +
+    (sk.summary.auditRan
+      ? `<span style="${MONO}font-size:13px;color:${(sk.summary.violations as number) > 0 ? C.red : C.green};font-weight:600;">${sk.summary.violations} ${bi("violations", "违规")}</span>`
+      : `<span style="${MONO}font-size:13px;color:${C.amber};font-weight:600;">${bi("violations unknown — audit unavailable", "违规未知——审计不可用")}</span>`) +
     `<span style="${MONO}font-size:13px;color:${C.sub};">${sk.summary.hubLines} ${bi("hub lines", "hub 总行数")}</span>` +
     `<span style="flex:1;"></span>` +
     `<span style="${MONO}font-size:10.5px;color:${C.faint};">${bi("same yardstick as audit-skills --strict", "与 audit-skills --strict 同口径")}</span></section>` +
@@ -1457,4 +1465,56 @@ export function renderMachineStubPage(input: MachineStubInput): string {
     `</section>` +
     `</main>\n</body>\n</html>\n`
   );
+}
+
+/**
+ * US-DOSSIER-032 — the machine-global page shell, factored out of
+ * `renderMachineStubPage` so a real filled-in page (e.g. the Skills page in
+ * `page-skills.ts`) can wear the EXACT same sticky top-bar shell — switcher +
+ * machine breadcrumb + EN/中 toggle, the console's `CONSOLE_SCRIPT` (lang +
+ * copy-chip + switcher wiring) and fonts — without re-implementing the chrome.
+ * `extraCss` is appended after `SHELL_CSS`; `bodyHtml` is the page's own
+ * `<main>` content. The breadcrumb highlights `page`.
+ */
+export function renderMachineShell(input: {
+  page: MachineNavLink["key"];
+  titleEn: string;
+  brand: TruthConsoleBrand;
+  projects?: ProjectRegistryEntry[];
+  currentSlug?: string;
+  snapshot: { release?: { latestTag?: string } };
+  extraCss?: string;
+  bodyHtml: string;
+}): string {
+  const header = topBar({
+    brand: input.brand,
+    ...(input.projects !== undefined ? { projects: input.projects } : {}),
+    ...(input.currentSlug !== undefined ? { currentSlug: input.currentSlug } : {}),
+    snapshot: input.snapshot,
+    machinePage: input.page,
+  });
+  return (
+    `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
+    `<title>${esc(input.brand.name)} · ${esc(input.titleEn)}</title>\n` +
+    FONT_LINKS +
+    `<style>${SHELL_CSS}${input.extraCss ?? ""}</style>\n` +
+    `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
+    header +
+    `<main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;">` +
+    input.bodyHtml +
+    `</main>\n</body>\n</html>\n`
+  );
+}
+
+/** US-DOSSIER-032 — palette/typography tokens + the bilingual `bi()` reused by
+ *  the dedicated machine-global page renderers, so they stay on one visual
+ *  system without re-deriving the design tokens. */
+export const CONSOLE_TOKENS = { C, MONO } as const;
+export { bi as biSpan };
+export function machineKicker(text: string): string {
+  return kicker(text);
+}
+export function escHtml(s: string): string {
+  return esc(s);
 }

@@ -97,7 +97,15 @@ export function registerAll(): void {
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
   // Collected top-level verbs print a one-line redirect instead of behaving as
   // long-lived aliases; the live surfaces are nested below loop/release/setup/doctor.
-  registerPorted("skills", redirectCommand("skills", "doctor skills / roll setup skills"), { hidden: true });
+  // US-DOSSIER-032: `roll skills audit` is the repo-side strict audit — the ONE
+  // yardstick the machine-global Skills page + scripts/audit-skills.mjs read, so
+  // the numbers match everywhere. Other `skills` subcommands keep redirecting to
+  // their live nests (doctor skills / setup skills).
+  registerPorted(
+    "skills",
+    (args) => (args[0] === "audit" ? skillsCommand(args) : redirectCommand("skills", "doctor skills / roll setup skills")()),
+    { hidden: true },
+  );
   registerPorted("alert", redirectCommand("alert", "loop alert"), { hidden: true });
   // `doctor`: all four health sections ported TS (agent/pr/skills/launchd).
   registerPorted("doctor", (args) => {

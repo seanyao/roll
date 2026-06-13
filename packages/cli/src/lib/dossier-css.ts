@@ -2,11 +2,12 @@
  * US-DOSSIER-001a — the Delivery Dossier design system, layered ON TOP of
  * CHROME_CSS (which owns the palette, type stack, chrome bar and print rules).
  *
- * Token ruling: the 001a spec sketches oxblood `#8B1A1A` / truth-green
- * `#2E7D32`; the chrome palette already carries those roles as `--accent`
- * (#a83825 / #e05b3e dark) and `--pass` (#2f7d3b / #57ab5a dark). "Zero new
- * colors/fonts" is taken literally: every dossier component reuses the chrome
- * variables — no new hex values appear in this file.
+ * Token ruling (US-DOSSIER-039: the cool design system): every dossier
+ * component reuses the chrome variables, which now carry the console's cool
+ * palette — `--accent` is indigo `#2d54e8`, `--pass` truth-green `#178a52`,
+ * type is IBM Plex. "Zero new colors/fonts" is taken literally: no new hex
+ * values appear in this file, so flipping CHROME_CSS to cool turns every
+ * component cool for free.
  *
  * Components (shared by index / epic / story pages):
  *   masthead+lede · ledger (4 figures) · wish→truth bar · lifecycle spine

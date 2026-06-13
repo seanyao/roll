@@ -191,14 +191,16 @@ function render(
 describe("renderTruthConsole — US-DOSSIER-011", () => {
   const html = render();
 
-  // US-DOSSIER-029: the canonical tab order is fixed by the design reference's
-  // nav markup (Delivery Dossier.dc.html): Overview → Loop → Release → Backlog
-  // → Skills. US-DOSSIER-033 appends the Charter project tab (the build spec's
-  // "+Charter" per FIDELITY-BAR). The rendered bar, the panes, and the
-  // CONSOLE_SCRIPT router all read ONE shared TABS constant, anchoring all three.
-  const DC_TAB_ORDER = ["overview", "loop", "release", "backlog", "skills", "charter"] as const;
+  // US-DOSSIER-040: the canonical PROJECT tab order is fixed by the CORRECT
+  // design reference's nav markup (Delivery Dossier.dc.html `<!-- tabs -->`,
+  // tabIndex/tabContext/tabEpics/tabLoop/tabRelease/tabCasting): Overview →
+  // Charter → Backlog → Loop → Release → Casting. Skills/Agents/Conventions/
+  // About are MACHINE-GLOBAL (the MACHINE breadcrumb), never project tabs. The
+  // rendered bar, the panes, and the CONSOLE_SCRIPT router all read ONE shared
+  // TABS constant, anchoring all three.
+  const DC_TAB_ORDER = ["overview", "charter", "backlog", "loop", "release", "casting"] as const;
 
-  it("AC1: hash-routed tabs in the design-reference order, overview first, placeholders marked", () => {
+  it("AC1: hash-routed tabs in the design-reference order, overview first, Skills not a project tab", () => {
     for (const k of DC_TAB_ORDER) {
       expect(html).toContain(`data-tab="${k}"`);
       expect(html).toContain(`id="tab-${k}"`);
@@ -213,6 +215,16 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     const scriptTabs = /var TABS = (\[[^\]]*\]);/.exec(html);
     expect(JSON.parse(scriptTabs?.[1] ?? "[]")).toEqual([...DC_TAB_ORDER]);
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
+    // US-DOSSIER-040: Casting is its OWN project tab; Skills is NOT a project tab
+    // (it stays machine-global, reached via the MACHINE breadcrumb → skills.html).
+    expect(barOrder).toContain("casting");
+    expect(barOrder).not.toContain("skills"); // no Skills PROJECT tab
+    expect(html).not.toContain('data-tab="skills"');
+    expect(html).not.toContain('id="tab-skills"');
+    expect(JSON.parse(scriptTabs?.[1] ?? "[]")).not.toContain("skills"); // router has no skills key
+    // the machine Skills breadcrumb still routes to the machine-global page
+    expect(html).toContain('data-machine="skills"');
+    expect(html).toContain('href="skills.html"');
   });
 
   it("AC2: brand name + slogan are injected, not hardcoded", () => {
@@ -362,33 +374,11 @@ describe("loop tab cycle ledger — US-DOSSIER-013", () => {
   });
 });
 
-describe("agents panel — US-DOSSIER-014", () => {
-  const html = render();
-
-  it("AC1: rows carry runner/version/72h cycles+cost/availability; undetected greyed", () => {
-    expect(html).toContain("Claude Code");
-    expect(html).toContain("Kimi CLI");
-    expect(html).toContain(">4<"); // cycles 72h
-    expect(html).toContain("$1.25");
-    expect(html).toContain("available");
-    expect(html).toContain("not detected");
-    expect(html).toContain("opacity:.62"); // undetected greyed
-  });
-
-  it("AC2: expanded sync truth + amber stale badge + copyable setup command", () => {
-    expect(html).toContain("✓ in sync");
-    expect(html).toContain("⟳ stale");
-    expect(html).toContain("convention stale");
-    expect(html).toContain("约定过期");
-    expect(html).toContain("roll setup -f kimi");
-    expect(html).toContain("nothing to sync"); // empty file list honesty
-  });
-
-  it("AC3: the 72h window is explicitly labelled (the documented trade-off)", () => {
-    expect(html).toContain("72h");
-    expect(html).toContain("近72h周期");
-  });
-});
+// US-DOSSIER-040: the agents inventory is MACHINE-GLOBAL — it left the Loop tab
+// and now lives only on the machine Agents page (agents.html, rendered by
+// renderAgentsMachinePage). Its rendering is covered by page-agents.test.ts; the
+// console no longer carries an inline agents panel (asserted in "loop tab IA"
+// below), so there is no agents-panel describe against the console here.
 
 describe("collectCasting — US-DOSSIER-030 (pure)", () => {
   const deps = {
@@ -445,8 +435,32 @@ describe("collectCasting — US-DOSSIER-030 (pure)", () => {
   });
 });
 
-describe("loop tab Casting grid + Hooks panel — US-DOSSIER-030", () => {
+// US-DOSSIER-040: Casting is its OWN top-level project tab (executor complexity
+// ladder + scenario roles), promoted OUT of the Loop tab. The Hooks-this-repo
+// panel stays in the Loop tab. The grid view-model is unchanged (collectCasting).
+describe("Casting tab + Loop tab IA — US-DOSSIER-030 / US-DOSSIER-040", () => {
   const html = render();
+
+  // The Casting tab pane wraps the grid; locate that pane to assert the ladder +
+  // roles live inside the Casting tab, not the Loop tab.
+  const paneOf = (id: string): string => {
+    const m = new RegExp(`<div id="${id}"[^>]*>([\\s\\S]*?)(?=<div id="tab-|</main>)`).exec(html);
+    return m?.[1] ?? "";
+  };
+  const castingPane = paneOf("tab-casting");
+  const loopPane = paneOf("tab-loop");
+
+  it("AC1/US-040: Casting is its OWN tab pane (kicker + title + the grid)", () => {
+    expect(html).toContain('id="tab-casting"');
+    expect(html).toContain('data-tab="casting"');
+    // the executor ladder + scenario roles render INSIDE the Casting pane
+    for (const key of ["easy", "default", "hard", "fallback", "peer", "review-pr", "spar", "onboard"]) {
+      expect(castingPane).toContain(`data-casting="${key}"`);
+    }
+    expect(castingPane).toContain("Casting");
+    expect(castingPane).toContain("选角"); // the Casting tab label (CORRECT稿)
+    expect(castingPane).toContain("角色分工"); // the grid section label
+  });
 
   it("AC2: Casting grid renders Role / Agent / Note rows for all eight roles", () => {
     expect(html).toContain("Casting");
@@ -482,6 +496,22 @@ describe("loop tab Casting grid + Hooks panel — US-DOSSIER-030", () => {
     // the lane data is the SAME collectLoopHeartbeat output as the Overview tile
     expect(html).toContain(">loop<"); // lane name from snapshot.loop.lanes
     expect(html).toContain("1/1 "); // running / total scheduled count
+  });
+
+  it("US-040: the Loop tab is cleaned — no inline agents panel, no inline casting ladder", () => {
+    expect(loopPane).not.toBe("");
+    // the casting grid + scenario roles are NOT inside the Loop pane (moved out)
+    expect(loopPane).not.toContain('data-casting="easy"');
+    expect(loopPane).not.toContain("Executor · easy");
+    expect(loopPane).not.toContain("roll agent list");
+    // the inline agents inventory left the Loop tab (it is the machine Agents page)
+    expect(loopPane).not.toContain("Agents on this machine");
+    expect(loopPane).not.toContain("本机 agents");
+    expect(loopPane).not.toContain('class="ag-row"');
+    // the Loop tab still keeps the Hooks panel + the Cycle ledger
+    expect(loopPane).toContain('data-hooks="this-repo"');
+    expect(loopPane).toContain('id="cy-ledger"');
+    expect(loopPane).toContain('class="cy-row"');
   });
 
   it("AC5: every new Casting + Hooks label is bilingual (EN and 中 both present)", () => {
@@ -569,36 +599,24 @@ describe("release scope sections — US-DOSSIER-016", () => {
   });
 });
 
-describe("skills tab — US-DOSSIER-017", () => {
+// US-DOSSIER-040: the Skills catalog (audit strip + grouped skills + SKILL.md
+// viewer) is MACHINE-GLOBAL — it is NOT a project tab. The console no longer
+// renders a Skills pane (asserted by AC1 above: no `data-tab="skills"` /
+// `id="tab-skills"`). The Skills page rendering is covered by page-skills.test.ts
+// (skills.html via renderSkillsPage), reached through the MACHINE breadcrumb.
+describe("Skills is machine-global, not a project tab — US-DOSSIER-040", () => {
   const html = render();
 
-  it("AC1: audit strip — skills · violations · hub lines, same yardstick note", () => {
-    expect(html).toContain('data-truth="skills-count"');
-    expect(html).toContain("hub lines");
-    expect(html).toContain("audit-skills --strict");
-  });
-
-  it("AC2: grouped lists with usage counts (— when never invoked)", () => {
-    expect(html).toContain(">Delivery<");
-    expect(html).toContain(">Quality<");
-    expect(html).toContain("×7");
-    expect(html).toMatch(/roll-\.review[\s\S]{0,800}—/);
-  });
-
-  it("AC3: expanded anatomy — file tree with line counts, essentials checks, copyable dir chip", () => {
-    expect(html).toContain("references/full-contract.md");
-    expect(html).toContain("900");
-    expect(html).toContain("✓ Load when");
-    expect(html).toContain("✓ Gotchas");
-    expect(html).toContain("2+/2−");
-    expect(html).toContain('data-copy="/repo/skills/roll-build"');
-  });
-
-  it("AC4: SKILL.md hub inline in a scroll area; references stay pointers", () => {
-    expect(html).toContain("view SKILL.md hub");
-    expect(html).toContain("hub text here");
-    expect(html).toContain("max-height:280px");
-    expect(html).not.toContain("references full text"); // pointers only
+  it("the console emits no Skills project tab pane / button / skills-tab content", () => {
+    expect(html).not.toContain('data-tab="skills"');
+    expect(html).not.toContain('id="tab-skills"');
+    // skills-tab-specific markers no longer render on the console
+    expect(html).not.toContain('data-truth="skills-count"');
+    expect(html).not.toContain("audit-skills --strict");
+    expect(html).not.toContain("view SKILL.md hub");
+    // the machine Skills breadcrumb still resolves to the machine-global page
+    expect(html).toContain('data-machine="skills"');
+    expect(html).toContain('href="skills.html"');
   });
 });
 
@@ -804,13 +822,16 @@ describe("lang/tab/section persistence + bilingual closer — US-DOSSIER-034", (
   });
 
   it("AC4: every collapsible carries a STABLE data-open-key (id, not DOM order)", () => {
-    // cycle ledger / agents / backlog epics / skills / release history rows
+    // US-DOSSIER-040: the console's collapsibles are now cycle ledger / backlog
+    // epics / release history. Agents + skills moved to their machine pages
+    // (their data-open-key coverage rides page-agents / page-skills below).
     expect(html).toContain('data-open-key="cy:20260612-x-1234"'); // cycle id
-    expect(html).toContain('data-open-key="ag:claude"'); // agent name
     expect(html).toContain('data-open-key="ep:alpha"'); // epic name
-    expect(html).toContain('data-open-key="sk:roll-build"'); // skill name
     expect(html).toContain('data-open-key="rel:v3.612.2"'); // release tag
     expect(html).toContain('data-tag="v3.612.2"'); // rel-hist keyed by tag, not order
+    // agents/skills collapsibles no longer render on the console
+    expect(html).not.toContain('data-open-key="ag:claude"');
+    expect(html).not.toContain('data-open-key="sk:roll-build"');
   });
 
   it("AC4: open-state restore + persist wiring is present and runs before filters", () => {

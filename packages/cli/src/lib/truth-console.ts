@@ -18,7 +18,7 @@
  * (US-DOSSIER-013/015/017 fill them) and Backlog embeds the existing ledger
  * (US-DOSSIER-012 redesigns it).
  */
-import { bi, CONSISTENCY_DIMENSION_LABELS } from "@roll/core";
+import { bi, CONSISTENCY_DIMENSION_LABELS, FONT_LINKS as CORE_FONT_LINKS } from "@roll/core";
 import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
 import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
@@ -1511,11 +1511,10 @@ html:not([data-lang]) .lang-zh{display:none;}
 .mach-link:hover{color:#fff;}
 `;
 
-/** The shared web-font links (preconnect + IBM Plex), used by every page head. */
-export const FONT_LINKS =
-  `<link rel="preconnect" href="https://fonts.googleapis.com">\n` +
-  `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n` +
-  `<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n`;
+/** The shared web-font links (preconnect + IBM Plex), used by every page head.
+ *  US-DOSSIER-039: re-exports core's `FONT_LINKS` so the console and the chrome
+ *  pages load the SAME IBM Plex faces from ONE source — no duplicated link tag. */
+export const FONT_LINKS = CORE_FONT_LINKS;
 
 /**
  * US-DOSSIER-027 — the sticky dark top bar: the stable shell across every

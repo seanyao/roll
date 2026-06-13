@@ -552,7 +552,7 @@ section.ac h3 { margin:0 0 6px; font-size:14.5px; }
 figure.shot { margin:10px 0; } figure.shot img { max-width:100%; border:1px solid var(--line); border-radius:6px; }
 figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 .ev { margin:6px 0; font-size:13.5px; } .ev-label { color:var(--muted); font-size:12.5px; margin-bottom:4px; }
-.cast-replay { border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
+.cast-replay { border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 .cast-replay summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 .replay-video { margin:10px 0; } .replay-video video { width:100%; max-width:760px; border:1px solid var(--line); border-radius:6px; background:#000; }
 .replay-video figcaption { color:var(--muted); font-size:12.5px; }
@@ -565,10 +565,10 @@ details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
 .selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }
 .selfscore-good { color:var(--pass); } .selfscore-ok { color:var(--warn); } .selfscore-regression { color:var(--fail); }
 .selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }
-.capture-skip { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
+.capture-skip { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 .capture-skip summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 .capture-skip pre { white-space:pre-wrap; font-size:12px; }
-details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
+details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.tech[open] summary { margin-bottom:6px; }
 section.card-context { padding:6px 18px 12px; }
@@ -590,7 +590,7 @@ ol.timeline li.tl-signal { border-left:3px solid var(--info); font-weight:600; }
 ol.timeline li.tl-outline { color:var(--muted); }
 ol.timeline .tl-offset { display:inline-block; min-width:58px; color:var(--muted); font-variant-numeric:tabular-nums; font-size:12.5px; font-family:var(--mono); }
 .trace-missing { color:var(--warn); font-size:13px; }
-details.transcript { margin-top:8px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:rgba(127,110,70,.04); }
+details.transcript { margin-top:8px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 details.transcript summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.transcript .orig-path { font-size:12.5px; color:var(--muted); margin:6px 0; }
 section.closing { margin-top:32px; border:none; background:none; border-radius:0; padding:8px 0 0; border-top:3px double var(--line); }

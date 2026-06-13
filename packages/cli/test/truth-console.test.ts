@@ -146,13 +146,26 @@ function render(snapshot: TruthSnapshot = SNAP): string {
 describe("renderTruthConsole — US-DOSSIER-011", () => {
   const html = render();
 
-  it("AC1: five hash-routed tabs in the ruled order, overview first, placeholders marked", () => {
-    for (const k of ["overview", "loop", "release", "backlog", "skills"]) {
+  // US-DOSSIER-029: the canonical tab order is fixed by the design reference's
+  // nav markup (Delivery Dossier.dc.html): Overview → Loop → Release → Backlog
+  // → Skills. The rendered bar, the panes, and the CONSOLE_SCRIPT router all
+  // read ONE shared TABS constant, so this single order anchors all three.
+  const DC_TAB_ORDER = ["overview", "loop", "release", "backlog", "skills"] as const;
+
+  it("AC1: five hash-routed tabs in the design-reference order, overview first, placeholders marked", () => {
+    for (const k of DC_TAB_ORDER) {
       expect(html).toContain(`data-tab="${k}"`);
       expect(html).toContain(`id="tab-${k}"`);
     }
-    const order = ["overview", "loop", "release", "backlog", "skills"].map((k) => html.indexOf(`data-tab="${k}"`));
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // Render bar order == pane order == router key order, all from one source.
+    const barOrder = [...html.matchAll(/data-tab="([a-z]+)"/g)].map((m) => m[1]);
+    expect(barOrder).toEqual([...DC_TAB_ORDER]);
+    const paneOrder = [...html.matchAll(/id="tab-([a-z]+)"/g)].map((m) => m[1]);
+    expect(paneOrder).toEqual([...DC_TAB_ORDER]);
+    // AC5: the router derives its key list from the same constant — no hand-copied
+    // literal — so the serialized array equals the canonical order exactly.
+    const scriptTabs = /var TABS = (\[[^\]]*\]);/.exec(html);
+    expect(JSON.parse(scriptTabs?.[1] ?? "[]")).toEqual([...DC_TAB_ORDER]);
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
   });
 

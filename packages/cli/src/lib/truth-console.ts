@@ -866,6 +866,14 @@ function skillsTab(input: TruthConsoleInput): string {
   );
 }
 
+/**
+ * US-DOSSIER-029 — the ONE tab set, in the order the design reference's nav
+ * markup fixes (Overview → Loop → Release → Backlog → Skills, see
+ * `Delivery Dossier.dc.html`). Both the rendered tab bar (which reads the
+ * bilingual `{ en, zh }` labels) and the `CONSOLE_SCRIPT` hash router (which
+ * only needs the `key` list, serialized in below) derive from this single
+ * source, so the visible bar and the runtime router can never desync.
+ */
 const TABS = [
   { key: "overview", en: "Overview", zh: "总览" },
   { key: "loop", en: "Loop", zh: "循环" },
@@ -873,6 +881,9 @@ const TABS = [
   { key: "backlog", en: "Backlog", zh: "待办" },
   { key: "skills", en: "Skills", zh: "技能" },
 ] as const;
+
+/** The router needs only the keys; serialized once, deterministic order. */
+const TAB_KEYS = TABS.map((t) => t.key);
 
 const CONSOLE_SCRIPT = `<script>
 (function () {
@@ -890,7 +901,7 @@ const CONSOLE_SCRIPT = `<script>
       bs[i].setAttribute("aria-pressed", String(on));
     }
   }
-  var TABS = ["overview", "loop", "release", "backlog", "skills"];
+  var TABS = ${JSON.stringify(TAB_KEYS)};
   function hashParts() {
     return (location.hash || "").replace(/^#/, "").split("/");
   }

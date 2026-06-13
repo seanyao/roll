@@ -10,6 +10,7 @@
  * Self-contained single file: chrome script + dossier filter script only.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
+import { type DeliveryLadder, type StoryEvidenceFlags } from "@roll/spec";
 import { type DossierEpic } from "./archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "./dossier-css.js";
 
@@ -87,6 +88,29 @@ export function storySpectrumState(s: StoryView): State {
 /** US-DOSSIER-010: delivered pre-v3 stories without a v3 trail, across epics. */
 export function countLegacyStories(epics: DossierEpic[]): number {
   return countLegacy(epics);
+}
+
+/**
+ * US-DOSSIER-021 — the claim↔truth ladder rung a story has reached, derived from
+ * the SAME `delivered` signal `collectDossier` already folds (it bakes in the
+ * truth selector + FIX-278 offline merge evidence), never re-deriving merge from
+ * scratch:
+ *   - `attested` — delivered (merge truth) AND full attest evidence on disk:
+ *     a report, an ac-map, and a real-pixel screenshot. The strongest rung.
+ *   - `merged`   — delivered (merge truth) but missing some attest evidence —
+ *     the honest middle rung, never full green.
+ *   - `claimed`  — the backlog claims Done (status==="done") but there is NO
+ *     merge evidence (a premature-Done: the selector keeps `delivered` false).
+ *   - `"none"`   — not even claimed done (todo / wip / hold / absent).
+ */
+export function deriveDeliveryLadder(
+  story: Pick<StoryView, "delivered" | "status">,
+  evidence: StoryEvidenceFlags,
+): DeliveryLadder | "none" {
+  if (story.delivered) {
+    return evidence.report && evidence.acMap && evidence.visualEvidence ? "attested" : "merged";
+  }
+  return story.status === "done" ? "claimed" : "none";
 }
 
 function storyState(s: StoryView): State {

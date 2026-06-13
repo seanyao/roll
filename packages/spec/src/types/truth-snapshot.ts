@@ -92,6 +92,35 @@ export interface TruthSnapshotLoop {
   collectedAt?: string;
 }
 
+/**
+ * US-DOSSIER-021 — one per-story registry row carried by the ONE snapshot.
+ *
+ * The aggregate `TruthSnapshotStory` answers "how many at each spectrum state";
+ * this answers "which card walked to which rung, and why" — the structured fact
+ * the Delivery Dossier todo spine (claim → merged → attested) and the release
+ * lane both need, written once into truth.json and embedded verbatim in
+ * index.html so web and machine read the same ladder.
+ *   - `ladder`   — the highest rung reached: `attested` (merged + full evidence)
+ *                  > `merged` (merge truth, FIX-278) > `claimed` (backlog Done,
+ *                  no merge) > `"none"` (not even claimed done).
+ *   - `evidence` — the presence flags backing the `attested` rung (report /
+ *                  ac-map / a real-pixel screenshot), each set from a real
+ *                  artifact on disk, never the agent's claim.
+ *   - `truthState` / `truthReason` — the spectrum verdict + closed reason code
+ *                  (the same selector signal the aggregate folds).
+ *   - `legacy`   — a pre-v3 delivery with no v3 evidence trail (US-DOSSIER-008),
+ *                  per-row so the aggregate `story.legacy` sums to it.
+ */
+export interface TruthSnapshotStoryEntry {
+  id: string;
+  epic: string;
+  ladder: DeliveryLadder | "none";
+  evidence: StoryEvidenceFlags;
+  truthState: TruthSpectrumState;
+  truthReason?: string;
+  legacy: boolean;
+}
+
 export interface TruthSnapshot {
   generatedAt: string;
   collectedAt?: string;
@@ -100,6 +129,10 @@ export interface TruthSnapshot {
   cycle?: TruthSnapshotCycle;
   release?: TruthSnapshotRelease;
   loop?: TruthSnapshotLoop;
+  /** US-DOSSIER-021 — the per-story delivery-ladder + evidence registry. Optional
+   *  and additive: older consumers and snapshots minted before this story stay
+   *  valid (a snapshot without it serializes byte-identically to before). */
+  stories?: TruthSnapshotStoryEntry[];
 }
 
 /** The ONE serialization both index.html's embed and truth.json carry. */

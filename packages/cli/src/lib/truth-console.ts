@@ -136,8 +136,8 @@ export interface TruthConsoleInput {
   machinePage?: MachineNavLink["key"];
 }
 
-const MONO = `font-family:'IBM Plex Mono',monospace;`;
-const C = {
+export const MONO = `font-family:'IBM Plex Mono',monospace;`;
+export const C = {
   bg: "#eef1f5",
   ink: "#161b26",
   body: "#3a4252",
@@ -156,7 +156,7 @@ const C = {
 };
 
 /** bi() with the console's own class names (kept compatible with roll-lang). */
-function esc(s: string): string {
+export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
@@ -185,7 +185,7 @@ function chip(k: string, v: string, color: string): string {
   );
 }
 
-function kicker(text: string): string {
+export function kicker(text: string): string {
   return `<div style="${MONO}font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:${C.blue};font-weight:600;">${text}</div>`;
 }
 
@@ -421,7 +421,7 @@ function cycleHandle(cycleId: string): string {
   return m?.[1] !== undefined ? m[1].slice(-5) : cycleId.slice(-5);
 }
 
-function copyChip(cmd: string): string {
+export function copyChip(cmd: string): string {
   return `<code class="copy-chip" data-copy="${esc(cmd)}" style="${MONO}font-size:10.5px;padding:3px 9px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">${esc(cmd)}</code>`;
 }
 
@@ -457,7 +457,7 @@ function cycleRow(cy: CycleLedgerRow): string {
   );
 }
 
-function agentRow(ag: AgentPanelRow): string {
+export function agentRow(ag: AgentPanelRow): string {
   const dot = ag.installed
     ? `width:9px;height:9px;border-radius:50%;background:${C.green};flex:none;`
     : `width:9px;height:9px;border-radius:50%;background:#cbd2dc;flex:none;`;
@@ -501,7 +501,9 @@ function agentRow(ag: AgentPanelRow): string {
           })
           .join("")) +
     (ag.setupCmd !== undefined
-      ? `<div style="margin-top:9px;"><code style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.amber}55;color:${C.amber};background:${C.card};">${esc(ag.setupCmd)}</code></div>`
+      ? `<div style="margin-top:9px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">` +
+        `<span style="${MONO}font-size:10.5px;color:${C.faint};">${bi("source: conventions/ + AGENTS.md · synced by roll setup", "来源:conventions/ + AGENTS.md · 由 roll setup 同步")}</span>` +
+        `<code class="copy-chip" data-copy="${esc(ag.setupCmd)}" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.amber}55;color:${C.amber};background:${C.card};cursor:pointer;">${esc(ag.setupCmd)}</code></div>`
       : "") +
     `</div></details>`
   );
@@ -1033,14 +1035,14 @@ const TAB_KEYS = TABS.map((t) => t.key);
  * is stable: each is a sibling HTML file of `features/index.html`. Order is
  * fixed (Agents → Skills → Conventions → About) so the bar never reshuffles.
  */
-const MACHINE_NAV: readonly MachineNavLink[] = [
+export const MACHINE_NAV: readonly MachineNavLink[] = [
   { key: "agents", en: "Agents", zh: "Agents", href: "agents.html" },
   { key: "skills", en: "Skills", zh: "技能", href: "skills.html" },
   { key: "conventions", en: "Conventions", zh: "约定", href: "conventions.html" },
   { key: "about", en: "About", zh: "关于", href: "about.html" },
 ] as const;
 
-const CONSOLE_SCRIPT = `<script>
+export const CONSOLE_SCRIPT = `<script>
 (function () {
   var d = document.documentElement;
   function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -1235,7 +1237,7 @@ const CONSOLE_SCRIPT = `<script>
  * pages, so the sticky top bar (switcher + breadcrumb + lang toggle) looks
  * identical everywhere. The console appends its own tab/row rules after this.
  */
-const SHELL_CSS = `
+export const SHELL_CSS = `
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
 body{background:${C.bg};color:${C.body};font-family:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;}
@@ -1253,7 +1255,7 @@ html:not([data-lang]) .lang-zh{display:none;}
 `;
 
 /** The shared web-font links (preconnect + IBM Plex), used by every page head. */
-const FONT_LINKS =
+export const FONT_LINKS =
   `<link rel="preconnect" href="https://fonts.googleapis.com">\n` +
   `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n` +
   `<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n`;
@@ -1266,7 +1268,7 @@ const FONT_LINKS =
  * RIGHT the release badge (from the truth snapshot) + EN/中 toggle. Geometry is
  * the design reference's (54px, rgba(27,34,56,.97), blur(8px), 1px #0e1424).
  */
-interface TopBarInput {
+export interface TopBarInput {
   brand: TruthConsoleBrand;
   projects?: ProjectRegistryEntry[];
   currentSlug?: string;
@@ -1275,7 +1277,7 @@ interface TopBarInput {
   snapshot: { release?: { latestTag?: string } };
 }
 
-function topBar(input: TopBarInput): string {
+export function topBar(input: TopBarInput): string {
   // Switcher rows: the registry when present, else this project alone — the
   // graceful single-project degrade (AC2). Self → no dropdown chevron, no menu.
   const registry = input.projects ?? [];

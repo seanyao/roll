@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CONSISTENCY_DIMENSIONS } from "@roll/core";
 import { runConsistencyCheck as consistencyCommand } from "../src/lib/release-consistency.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
@@ -171,12 +172,12 @@ describe("frozen: roll consistency", () => {
         "stderr": "",
         "stdout": "Consistency Report
       ==================================================
-      ✅ code: pass
+      ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
          ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
-      ✅ i18n: pass
       ✅ tests: pass
+      ✅ bilingual: pass
       ✅ site: pass
       --------------------------------------------------
       Overall: pass
@@ -193,7 +194,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "{
         "overall": "pass",
         "dimensions": {
-          "code": {
+          "code-backlog": {
             "status": "pass",
             "gaps": []
           },
@@ -206,11 +207,11 @@ describe("frozen: roll consistency", () => {
             "gaps": [],
             "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
-          "i18n": {
+          "tests": {
             "status": "pass",
             "gaps": []
           },
-          "tests": {
+          "bilingual": {
             "status": "pass",
             "gaps": []
           },
@@ -233,13 +234,13 @@ describe("frozen: roll consistency", () => {
         "stderr": "",
         "stdout": "Consistency Report
       ==================================================
-      ❌ code: fail
+      ❌ code-backlog: fail
          • Feature 'orphan' has Done stories but is missing from features.md catalog
       ✅ cards: pass
       ✅ docs: pass
          ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
-      ✅ i18n: pass
       ✅ tests: pass
+      ✅ bilingual: pass
       ✅ site: pass
       --------------------------------------------------
       Overall: fail
@@ -256,7 +257,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "{
         "overall": "fail",
         "dimensions": {
-          "code": {
+          "code-backlog": {
             "status": "fail",
             "gaps": [
               "Feature 'orphan' has Done stories but is missing from features.md catalog"
@@ -271,11 +272,11 @@ describe("frozen: roll consistency", () => {
             "gaps": [],
             "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
-          "i18n": {
+          "tests": {
             "status": "pass",
             "gaps": []
           },
-          "tests": {
+          "bilingual": {
             "status": "pass",
             "gaps": []
           },
@@ -298,15 +299,15 @@ describe("frozen: roll consistency", () => {
         "stderr": "",
         "stdout": "Consistency Report
       ==================================================
-      ✅ code: pass
+      ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
          ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
-      ❌ i18n: fail
+      ✅ tests: pass
+      ❌ bilingual: fail
          • guide/en/extra.md has no corresponding guide/zh/extra.md
          • i18n key 'only.en' has EN but is missing ZH translation
          • i18n key 'only.zh' has ZH but is missing EN translation
-      ✅ tests: pass
       ✅ site: pass
       --------------------------------------------------
       Overall: fail
@@ -323,7 +324,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "{
         "overall": "fail",
         "dimensions": {
-          "code": {
+          "code-backlog": {
             "status": "pass",
             "gaps": []
           },
@@ -336,17 +337,17 @@ describe("frozen: roll consistency", () => {
             "gaps": [],
             "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
-          "i18n": {
+          "tests": {
+            "status": "pass",
+            "gaps": []
+          },
+          "bilingual": {
             "status": "fail",
             "gaps": [
               "guide/en/extra.md has no corresponding guide/zh/extra.md",
               "i18n key 'only.en' has EN but is missing ZH translation",
               "i18n key 'only.zh' has ZH but is missing EN translation"
             ]
-          },
-          "tests": {
-            "status": "pass",
-            "gaps": []
           },
           "site": {
             "status": "pass",
@@ -367,14 +368,14 @@ describe("frozen: roll consistency", () => {
         "stderr": "",
         "stdout": "Consistency Report
       ==================================================
-      ✅ code: pass
+      ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
          ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
-      ✅ i18n: pass
       ❌ tests: fail
          • Feature 'authentication' has Done stories but no test file appears to cover it (heuristic: no test file name matches keywords ['authentication'])
          • Test file 'stalefeature.bats' appears to reference feature 'stalefeature' which does not exist in backlog — may be stale
+      ✅ bilingual: pass
       ✅ site: pass
       --------------------------------------------------
       Overall: fail
@@ -391,7 +392,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "{
         "overall": "fail",
         "dimensions": {
-          "code": {
+          "code-backlog": {
             "status": "pass",
             "gaps": []
           },
@@ -404,16 +405,16 @@ describe("frozen: roll consistency", () => {
             "gaps": [],
             "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
-          "i18n": {
-            "status": "pass",
-            "gaps": []
-          },
           "tests": {
             "status": "fail",
             "gaps": [
               "Feature 'authentication' has Done stories but no test file appears to cover it (heuristic: no test file name matches keywords ['authentication'])",
               "Test file 'stalefeature.bats' appears to reference feature 'stalefeature' which does not exist in backlog — may be stale"
             ]
+          },
+          "bilingual": {
+            "status": "pass",
+            "gaps": []
           },
           "site": {
             "status": "pass",
@@ -434,12 +435,12 @@ describe("frozen: roll consistency", () => {
         "stderr": "",
         "stdout": "Consistency Report
       ==================================================
-      ✅ code: pass
+      ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
          ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
-      ✅ i18n: pass
       ✅ tests: pass
+      ✅ bilingual: pass
       ❌ site: fail
          • Feature 'dashboard' has Done stories but is not mentioned on the landing page — site may be missing this capability
       --------------------------------------------------
@@ -457,7 +458,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "{
         "overall": "fail",
         "dimensions": {
-          "code": {
+          "code-backlog": {
             "status": "pass",
             "gaps": []
           },
@@ -470,11 +471,11 @@ describe("frozen: roll consistency", () => {
             "gaps": [],
             "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
-          "i18n": {
+          "tests": {
             "status": "pass",
             "gaps": []
           },
-          "tests": {
+          "bilingual": {
             "status": "pass",
             "gaps": []
           },
@@ -499,12 +500,12 @@ describe("frozen: roll consistency", () => {
         "stderr": "",
         "stdout": "Consistency Report
       ==================================================
-      ✅ code: pass
+      ✅ code-backlog: pass
       ✅ cards: pass
       ❌ docs: fail
          • README.md:1 references hidden/retired top-level 'roll feedback' (use 'roll idea')
-      ✅ i18n: pass
       ✅ tests: pass
+      ✅ bilingual: pass
       ✅ site: pass
       --------------------------------------------------
       Overall: fail
@@ -522,7 +523,7 @@ describe("frozen: roll consistency", () => {
         "stdout": "{
         "overall": "fail",
         "dimensions": {
-          "code": {
+          "code-backlog": {
             "status": "pass",
             "gaps": []
           },
@@ -535,11 +536,11 @@ describe("frozen: roll consistency", () => {
             "gaps": [],
             "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
           },
-          "i18n": {
+          "tests": {
             "status": "pass",
             "gaps": []
           },
-          "tests": {
+          "bilingual": {
             "status": "pass",
             "gaps": []
           },
@@ -564,12 +565,12 @@ describe("frozen: roll consistency", () => {
         "stderr": "",
         "stdout": "Consistency Report
       ==================================================
-      ✅ code: pass
+      ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
          ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
-      ✅ i18n: pass
       ✅ tests: pass
+      ✅ bilingual: pass
       ✅ site: pass
       --------------------------------------------------
       Overall: pass
@@ -586,8 +587,8 @@ describe("frozen: roll consistency", () => {
         "stdout": "Usage: roll release --gate-check <subcommand>
 
         check [--json] [--project-dir DIR]    逐维度跑一致性检查
-          Run checks across five dimensions (code, docs, i18n, tests, site)
-          and produce a structured pass/gap report.
+          Run checks across six dimensions (code-backlog, cards, docs, tests,
+          bilingual, site) and produce a structured pass/gap report.
 
         roll release --gate-check check                # human-readable report
         roll release --gate-check check --json         # machine-readable JSON
@@ -618,5 +619,54 @@ describe("frozen: roll consistency", () => {
         "stdout": "",
       }
     `);
+  });
+});
+
+// ── US-DOSSIER-022: same-vocabulary contract (AC2 / AC3) ─────────────────────
+// Both faces read @roll/core's CONSISTENCY_DIMENSIONS. The web panel proves it
+// in truth-console.test.ts (data-dim="<key>" for all six); here we prove the
+// `roll release` gate report emits the SAME six keys in the SAME order, so a
+// reader who sees `bilingual` in the browser sees `bilingual` (never `i18n`) in
+// the terminal — Delivery Dossier ruling #3, 各面同口径.
+
+/** Pull the dimension keys, in order, out of the human report's `<icon> key: status` lines. */
+function reportDimKeys(stdout: string): string[] {
+  const keys: string[] = [];
+  for (const line of stdout.split("\n")) {
+    const m = /^(?:✅|❌)\s+(\S+):\s+(?:pass|fail)$/.exec(line);
+    if (m?.[1] !== undefined) keys.push(m[1]);
+  }
+  return keys;
+}
+
+/** Parse `{overall, dimensions}` JSON from the --json report. */
+function reportJson(proj: string): { overall: string; dimensions: Record<string, { status: string }> } {
+  return JSON.parse(cn(["check", "--json", "--project-dir", proj], proj).stdout);
+}
+
+describe("US-DOSSIER-022: web + CLI read one dimension vocabulary", () => {
+  it("AC2: the gate report's six dimension keys equal CONSISTENCY_DIMENSIONS, in order", () => {
+    const p = healthy();
+    const cliKeys = reportDimKeys(cn(["check", "--project-dir", p], p).stdout);
+    // The exact constant the web panel (release-panel.ts) iterates.
+    expect(cliKeys).toEqual([...CONSISTENCY_DIMENSIONS]);
+    // …and the JSON report keys match the same sequence verbatim.
+    expect(Object.keys(reportJson(p).dimensions)).toEqual([...CONSISTENCY_DIMENSIONS]);
+  });
+
+  it("AC2: the retired vocabulary ('code', 'i18n') no longer appears as a dimension key", () => {
+    const p = healthy();
+    const keys = Object.keys(reportJson(p).dimensions);
+    expect(keys).not.toContain("code");
+    expect(keys).not.toContain("i18n");
+    expect(keys).toContain("code-backlog");
+    expect(keys).toContain("bilingual");
+  });
+
+  it("AC3: each dimension is accounted for exactly once — none lost, none duplicated", () => {
+    const p = healthy();
+    const keys = Object.keys(reportJson(p).dimensions);
+    expect(new Set(keys).size).toBe(CONSISTENCY_DIMENSIONS.length);
+    expect(keys.length).toBe(CONSISTENCY_DIMENSIONS.length);
   });
 });

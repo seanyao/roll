@@ -4,18 +4,33 @@
  *
  * Subcommands: check (default) | --help/-h/help | unknown.
  *
- * `check [--json] [--project-dir DIR]` runs five dimensions (code, docs, i18n,
- * tests, site) and prints a human report (format_human) or JSON. Exit 0 when
- * all dimensions pass, 1 when any dimension has gaps — mirroring main()'s
- * `return 0 if overall == "pass" else 1`.
+ * `check [--json] [--project-dir DIR]` runs the six reconciled dimensions
+ * (code-backlog, cards, docs, tests, bilingual, site — the SAME vocabulary the
+ * web panel reads, from @roll/core's CONSISTENCY_DIMENSIONS) and prints a human
+ * report (format_human) or JSON. Exit 0 when all dimensions pass, 1 when any
+ * dimension has gaps — mirroring main()'s `return 0 if overall == "pass" else 1`.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { join } from "node:path";
+import { CONSISTENCY_DIMENSIONS, type ConsistencyDimension } from "@roll/core";
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { consistencyAuditCommand } from "./consistency-audit.js";
 
-const DIMENSIONS = ["code", "cards", "docs", "i18n", "tests", "site"];
+// US-DOSSIER-022: the gate report reads the SAME six-dimension vocabulary the
+// web panel does (CONSISTENCY_DIMENSIONS from @roll/core: code-backlog · cards ·
+// docs · tests · bilingual · site). No more local `['code',…,'i18n',…]` table —
+// the two faces could never agree while they each named the dimensions. Each
+// key maps to the check that produces its gaps; `code-backlog`→features catalog,
+// `bilingual`→guide/i18n parity (Delivery Dossier ruling #3: 各面同口径).
+const DIM_CHECKS: Record<ConsistencyDimension, (projectDir: string) => DimResult> = {
+  "code-backlog": (p) => checkFeaturesCatalog(p),
+  cards: (p) => checkCards(p),
+  docs: (p) => checkDocs(p),
+  tests: (p) => checkTests(p),
+  bilingual: (p) => checkI18n(p),
+  site: (p) => checkSite(p),
+};
 
 interface DimResult {
   status: "pass" | "fail";
@@ -546,15 +561,8 @@ export function consistencyPasses(projectDir: string): boolean {
 
 function runAll(projectDir: string): Report {
   const report: Report = { overall: "pass", dimensions: {} };
-  for (const dim of DIMENSIONS) {
-    let result: DimResult;
-    if (dim === "code") result = checkFeaturesCatalog(projectDir);
-    else if (dim === "cards") result = checkCards(projectDir);
-    else if (dim === "i18n") result = checkI18n(projectDir);
-    else if (dim === "tests") result = checkTests(projectDir);
-    else if (dim === "docs") result = checkDocs(projectDir);
-    else if (dim === "site") result = checkSite(projectDir);
-    else result = { status: "pass", gaps: [], note: `unknown dimension: ${dim}` };
+  for (const dim of CONSISTENCY_DIMENSIONS) {
+    const result = DIM_CHECKS[dim](projectDir);
     report.dimensions[dim] = result;
     if (result.status === "fail") report.overall = "fail";
   }
@@ -566,7 +574,7 @@ function formatHuman(report: Report): string {
   const lines: string[] = [];
   lines.push("Consistency Report");
   lines.push("=".repeat(50));
-  for (const dim of DIMENSIONS) {
+  for (const dim of CONSISTENCY_DIMENSIONS) {
     const result = report.dimensions[dim];
     if (result === undefined) continue;
     const icon = result.status === "pass" ? "✅" : "❌";
@@ -606,7 +614,7 @@ function jsonDumps(value: unknown, indent = 0): string {
 /** Build the JSON-serializable report (dim result objects drop undefined note). */
 function reportToJsonShape(report: Report): unknown {
   const dims: Record<string, unknown> = {};
-  for (const dim of DIMENSIONS) {
+  for (const dim of CONSISTENCY_DIMENSIONS) {
     const r = report.dimensions[dim];
     if (r === undefined) continue;
     const o: Record<string, unknown> = { status: r.status, gaps: r.gaps };
@@ -620,8 +628,8 @@ function checkHelp(command: string): string {
   return `Usage: ${command} <subcommand>
 
   check [--json] [--project-dir DIR]    逐维度跑一致性检查
-    Run checks across five dimensions (code, docs, i18n, tests, site)
-    and produce a structured pass/gap report.
+    Run checks across six dimensions (code-backlog, cards, docs, tests,
+    bilingual, site) and produce a structured pass/gap report.
 
   ${command} check                # human-readable report
   ${command} check --json         # machine-readable JSON

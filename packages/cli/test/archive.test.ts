@@ -7,7 +7,7 @@ import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { indexCommand } from "../src/commands/index-gen.js";
 import { buildDossierRunCache, collectGitDossierFacts, collectStoryDossierInput } from "../src/lib/story-dossier.js";
@@ -25,8 +25,21 @@ import {
 } from "../src/lib/archive.js";
 
 const dirs: string[] = [];
+// FIX-281: the two `roll index command` cases below run indexCommand() in tmp
+// projects; pin ROLL_HOME to a tmp dir so the US-DOSSIER-028 self-register can
+// never write the real ~/.roll/projects.json.
+let savedRollHome: string | undefined;
+let rollHomeSandbox: string;
+beforeAll(() => {
+  savedRollHome = process.env["ROLL_HOME"];
+  rollHomeSandbox = mkdtempSync(join(tmpdir(), "roll-archive-home-"));
+  dirs.push(rollHomeSandbox);
+  process.env["ROLL_HOME"] = rollHomeSandbox;
+});
 afterAll(() => {
   for (const d of dirs) execSync(`rm -rf '${d}'`);
+  if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
+  else process.env["ROLL_HOME"] = savedRollHome;
 });
 
 function project(rows: string[], features: Array<[string, string]> = []): string {

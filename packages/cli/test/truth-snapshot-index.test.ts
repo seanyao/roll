@@ -3,16 +3,28 @@
  * the SAME serialized snapshot in the page, and never swallows failures in the
  * cycle aggregate (the FIX-248 regression pinned for good).
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { indexCommand } from "../src/commands/index-gen.js";
 
 const dirs: string[] = [];
+// FIX-281: redirect the cross-project registry into a tmp ROLL_HOME so the
+// US-DOSSIER-028 self-register `roll index` performs can never write the real
+// ~/.roll/projects.json during the suite.
+let savedRollHome: string | undefined;
+beforeEach(() => {
+  savedRollHome = process.env["ROLL_HOME"];
+  const h = mkdtempSync(join(tmpdir(), "roll-truthsnap-home-"));
+  dirs.push(h);
+  process.env["ROLL_HOME"] = h;
+});
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   delete process.env["ROLL_RENDER_NOW"];
+  if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
+  else process.env["ROLL_HOME"] = savedRollHome;
 });
 
 function project(): string {
@@ -123,5 +135,48 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     const m = /<script id="roll-truth" type="application\/json">\n([\s\S]*?)<\/script>/.exec(html);
     const embedded = (m?.[1] ?? "").replace(/<\\\//g, "</");
     expect(embedded).toBe(file);
+  });
+
+  // FIX-281 regression — index-gen in a tmp project with ROLL_HOME set writes the
+  // cross-project row ONLY to <ROLL_HOME>/.roll/projects.json, and the real
+  // ~/.roll/projects.json is never touched by the run.
+  it("FIX-281: self-register honors ROLL_HOME — tmp registry only, real home untouched", async () => {
+    const p = project();
+    const sandbox = process.env["ROLL_HOME"]!; // set in beforeEach
+    const realRegistry = join(homedir(), ".roll", "projects.json");
+    const realBefore = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
+
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    await runIndex(p);
+
+    // the row landed in the tmp ROLL_HOME registry, pointing at this tmp project.
+    const sandboxRegistry = join(sandbox, ".roll", "projects.json");
+    expect(existsSync(sandboxRegistry)).toBe(true);
+    const rows = JSON.parse(readFileSync(sandboxRegistry, "utf8")) as Array<{ path: string }>;
+    expect(rows.length).toBe(1);
+    // index-gen records process.cwd(), which is the resolved realpath on macOS
+    // (/var → /private/var); compare against the same resolution, not raw `p`.
+    expect(rows[0]?.path).toBe(realpathSync(p));
+
+    // the real ~/.roll/projects.json is byte-for-byte unchanged (and uncreated if
+    // it never existed) — the whole point of the fix.
+    const realAfter = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
+    expect(realAfter).toBe(realBefore);
+  });
+
+  // FIX-281 belt-and-braces — with ROLL_HOME UNSET, a tmp fixture cwd is skipped:
+  // the self-register never persists a throwaway row into the real registry.
+  it("FIX-281: ROLL_HOME unset + tmp cwd → self-register skipped, real home untouched", async () => {
+    const p = project();
+    delete process.env["ROLL_HOME"]; // resolve to the REAL ~/.roll
+    const realRegistry = join(homedir(), ".roll", "projects.json");
+    const realBefore = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
+
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    await runIndex(p); // index still succeeds and renders the board
+
+    expect(existsSync(join(p, ".roll", "features", "index.html"))).toBe(true);
+    const realAfter = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
+    expect(realAfter).toBe(realBefore); // tmp fixture row was NOT persisted
   });
 });

@@ -36,6 +36,9 @@ afterEach(() => {
   delete process.env["ROLL_LANG"];
   delete process.env["NO_COLOR"];
   delete process.env["HOME"];
+  // FIX-281: the registry path now honors ROLL_HOME — clear it so a stray value
+  // can never redirect lsCommand's read to a real ~/.roll.
+  delete process.env["ROLL_HOME"];
 });
 
 const NOW = Date.parse("2026-06-13T12:00:00Z");
@@ -202,6 +205,7 @@ describe("lsCommand — AC2 command surface", () => {
     writeProjectRow(ALPHA, home);
     writeProjectRow(BETA, home);
     process.env["HOME"] = home;
+    process.env["ROLL_HOME"] = home; // FIX-281: lsCommand reads via ROLL_HOME ?? homedir()
     const fileText = readFileSync(projectsRegistryPath(home), "utf8");
     const { code, out } = captureStdout(() => lsCommand(["--json", "--no-color"]));
     expect(code).toBe(0);
@@ -209,7 +213,9 @@ describe("lsCommand — AC2 command surface", () => {
   });
 
   it("--json on an absent registry is an empty array, never an error", () => {
-    process.env["HOME"] = freshHome();
+    const _h = freshHome();
+    process.env["HOME"] = _h;
+    process.env["ROLL_HOME"] = _h;
     const { code, out } = captureStdout(() => lsCommand(["--json", "--no-color"]));
     expect(code).toBe(0);
     expect(out.trim()).toBe("[]");
@@ -223,7 +229,9 @@ describe("lsCommand — AC2 command surface", () => {
   });
 
   it("illegal --stale-days fails loud (exit 1)", () => {
-    process.env["HOME"] = freshHome();
+    const _h = freshHome();
+    process.env["HOME"] = _h;
+    process.env["ROLL_HOME"] = _h;
     let err = "";
     const se = process.stderr.write.bind(process.stderr);
     process.stderr.write = ((s: string) => ((err += s), true)) as typeof process.stderr.write;
@@ -236,7 +244,9 @@ describe("lsCommand — AC2 command surface", () => {
   });
 
   it("unknown flag fails loud (exit 1)", () => {
-    process.env["HOME"] = freshHome();
+    const _h = freshHome();
+    process.env["HOME"] = _h;
+    process.env["ROLL_HOME"] = _h;
     let err = "";
     const se = process.stderr.write.bind(process.stderr);
     process.stderr.write = ((s: string) => ((err += s), true)) as typeof process.stderr.write;

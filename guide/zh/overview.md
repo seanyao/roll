@@ -57,11 +57,39 @@ Roll 运行在三个自主层上：
 
 ### 可观测性
 
-- `roll status` — 项目健康：backlog 队列、loop 状态、CI、发布就绪判断 `[core]`
-- 交付档案 — 带真相条和 Story / Cycle / Release 真相板
+- `roll status` — 判定优先的真相摘要（LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率），其后是约定/AI 客户端同步健康 `[core]`
+- 交付档案 — web 控制台：判定条、loop 心跳、三聚合、六态 Story 光谱，全部读自同一份真相快照
 - `roll loop runs` — 每轮 TerminalOutcome 历史，含 TCR 次数和耗时
 - `roll loop alert` — 查看、确认、清除 loop 告警
 - `roll brief` — 每日摘要：已发布、进行中、下一优先级 `[highlight]`
+
+### 交付档案 —— web 控制台
+
+`roll index` 渲染 `index.html`，即交付档案。上面每个数字都读自同一份真相快照，
+因此 web 面与 CLI 打印的聚合一致（`roll cast` ≡ Casting 网格、`roll skills audit`
+≡ Skills 页、`roll release consistency` ≡ 六维面板、`roll status` ≡ Story 光谱）。
+一处计算，两副面孔。
+
+控制台的信息架构：
+
+- **深色顶栏 + 绿点项目切换器** —— 当前项目带一个绿色状态点；切换器列出
+  `~/.roll/projects.json` 里的每个项目（与 `roll ls` 打印的同一份注册表），可在各项目
+  的控制台之间跳转。
+- **EN / 中 语言切换** —— 单语呈现；切换会把整个控制台在中英之间整体翻面。
+- **项目页签** —— Overview · Loop · Release · Backlog · Skills · Charter。Overview
+  以判定开头，随后是 loop 心跳、三块聚合卡片、六态 Story 光谱。
+- **机器全局面包屑（`MACHINE › …`）** —— Agents · Skills · Conventions · About。
+  这些页面描述的是机器而非单个项目：本机安装的 agents、治理本机每个项目的
+  `skills/<name>/SKILL.md` 契约、以及同步进各 AI 客户端的约定。
+- **Charter** —— 一个 markdown 浏览器，内联渲染项目的 charter 文档、语言指南
+  （`guide/en` ↔ `guide/zh`）与史诗规划。
+- **Casting** —— 谁演什么：四个复杂度槽位（easy / default / hard / fallback）加上
+  场景角色（peer · PR review · spar · onboard）。未配置的槽位显式打出破折号，绝不臆测。
+
+三态交付阶梯 —— **claimed → merged → attested** —— 取代二值的「完成」标志。
+backlog 行写了 Done 只是 `claimed`；交付 PR 合入 `main` 后变 `merged`，验收证据
+（报告 · AC 映射 · 视觉证据）齐备后变 `attested`。**一个故事当且仅当既已合并又已验收
+时才算完成**（`done ≡ 已合并 ∧ 已验收`）；不到这一步只会渲染成漂移或未知，绝不悄悄显示绿色。
 
 ### 按需技能
 

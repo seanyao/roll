@@ -179,7 +179,7 @@ function projectRoot(): string {
  * lines (AC8). When the audit could not run, violations reads `unknown`, never a
  * silent 0 (the panel's AC4 contract carries through).
  */
-function renderAuditPanel(vm: SkillsPanelVM, lang: Lang): string {
+export function renderAuditPanel(vm: SkillsPanelVM, lang: Lang): string {
   const out: string[] = [];
   const v = vm.summary.violations === "unknown" ? (lang === "zh" ? "未知" : "unknown") : String(vm.summary.violations);
   if (lang === "zh") {

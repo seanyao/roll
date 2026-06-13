@@ -57,11 +57,46 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 
 ### Observability
 
-- `roll status` — project health: backlog queue, loop state, CI, release-ready verdict `[core]`
-- Delivery Dossier — truth strip plus Story / Cycle / Release truth board
+- `roll status` — verdict-first truth summary (LOOP · CYCLE · RELEASE · STORY with attest coverage), then convention/AI-client sync health `[core]`
+- Delivery Dossier — the web console: a verdict strip, the loop heartbeat, three aggregates, and the six-state Story spectrum, all from the ONE truth snapshot
 - `roll loop runs` — per-cycle TerminalOutcome history with TCR count and duration
 - `roll loop alert` — view, acknowledge, and clear loop alerts
 - `roll brief` — daily digest: what shipped, what's in-progress, next priorities `[highlight]`
+
+### Delivery Dossier — the web console
+
+`roll index` renders `index.html`, the Delivery Dossier. Every number on it
+reads from one truth snapshot, so the web surface and the CLI print the same
+aggregates (`roll cast` ≡ the Casting grid, `roll skills audit` ≡ the Skills
+page, `roll release consistency` ≡ the six-dimension panel, `roll status` ≡ the
+Story spectrum). One computation, two faces.
+
+The console's information architecture:
+
+- **Dark top-bar with a green-dot project switcher** — the active project carries
+  a green status dot; the switcher lists every project in `~/.roll/projects.json`
+  (the same registry `roll ls` prints) and jumps between their consoles.
+- **EN / 中 language toggle** — single-language presentation; the toggle flips the
+  whole console between English and Chinese.
+- **Project tabs** — Overview · Loop · Release · Backlog · Skills · Charter. The
+  Overview leads with the verdict, the loop heartbeat, three aggregate tiles, and
+  the six-state Story spectrum.
+- **Machine-global breadcrumb (`MACHINE › …`)** — Agents · Skills · Conventions ·
+  About. These pages describe the machine, not one project: the agents installed
+  on this box, the `skills/<name>/SKILL.md` contracts that govern every project
+  here, and the conventions synced into each AI client.
+- **Charter** — a markdown browser over the project's charter docs, language
+  guides (`guide/en` ↔ `guide/zh`), and epic plans, rendered inline.
+- **Casting** — who plays which role: the four complexity slots
+  (easy / default / hard / fallback) plus the scenario roles (peer · PR review ·
+  spar · onboard). An unconfigured slot shows an explicit em-dash, never a guess.
+
+The three-state delivery ladder — **claimed → merged → attested** — replaces a
+binary done flag. A backlog row that says done is only `claimed`; it becomes
+`merged` when the delivery PR is merged to `main`, and `attested` when its
+acceptance evidence (report · AC map · visual evidence) is on file. **A story is
+done if and only if it is both merged and attested** (`done ≡ merged ∧ attested`);
+anything short of that renders as drift or unknown, never a silent green.
 
 ### On-Demand Skills
 

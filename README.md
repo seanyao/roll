@@ -50,7 +50,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll brief` | Show latest owner brief |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll loop alert [list\|ack\|resolve\|log]` | View / clear loop alerts |
-| `roll status` | Show current state and drift |
+| `roll status` | Verdict-first truth summary read from the ONE snapshot — LOOP · CYCLE · RELEASE · STORY, with the STORY line's attest-coverage % (`done ≡ merged ∧ attested`) — then convention/AI-client sync health |
 | `roll doctor [skills]` | Environment + install diagnosis (agents, skill catalog, plists, launchd lanes) |
 | `roll tune [reset]` | Suggest-only self-tuning from loop trends — read-only, never auto-applies |
 | **Cards & evidence** | |
@@ -71,6 +71,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
 | `roll cast [--json]` | Print the complexity-ladder → role Casting table (same data the web console grid shows; `--json` for the machine view) |
+| `roll skills <audit\|sync>` | `audit [--strict] [--json]` runs the strict skills audit (skills · violations · hub lines + the four invocation groups — the SAME yardstick the web Skills page reads); `sync` regenerates the `guide/skills.md` catalog |
 | `roll doc [--lang en\|zh] [name]` | View the Charter / language guide markdown in the terminal (`--lang` falls back to the configured language) |
 | `roll prices [refresh]` | Model price table (cost accounting source) |
 | `roll setup [skills\|-f]` | First-time install, skill catalog generation, or re-sync conventions to all AI clients |

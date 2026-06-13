@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { serializeTruthSnapshot, type TruthSnapshot } from "@roll/spec";
 import { renderTruthConsole } from "../src/lib/truth-console.js";
 import { collectCharter, type CharterDeps, type CharterVM } from "../src/lib/page-charter.js";
-import { collectAbout, parseGuideIndex, renderAboutPage } from "../src/lib/page-about.js";
+import { collectAbout, renderAboutPage } from "../src/lib/page-about.js";
 import { collectConventions, renderConventionsPage } from "../src/lib/page-conventions.js";
 import type { AgentPanelRow } from "../src/lib/agent-panel.js";
 
@@ -93,47 +93,37 @@ describe("collectCharter — US-DOSSIER-033 (pure)", () => {
   });
 });
 
-describe("parseGuideIndex + collectAbout — US-DOSSIER-033 (pure)", () => {
-  const INDEX = [
-    "# Documentation Index",
-    "",
-    "| Path | Title | Category | Last Modified |",
-    "|------|-------|----------|---------------|",
-    "| AGENTS.md | Conventions | convention | 2026-05-28 |",
-    "| guide/en/loop.md | roll loop | guide | 2026-05-28 |",
-  ].join("\n");
-
-  it("parses the roll-doc table, skips header + separator, keeps path/title/category in order", () => {
-    const rows = parseGuideIndex(INDEX);
-    expect(rows).toEqual([
-      { path: "AGENTS.md", title: "Conventions", category: "convention" },
-      { path: "guide/en/loop.md", title: "roll loop", category: "guide" },
-    ]);
+describe("collectAbout — US-DOSSIER-041 (pure, structured charter)", () => {
+  it("AC4: yields the structured charter — creed + 4-phase loop + 7 domains + 4 principle groups + 12 invariants", () => {
+    const vm = collectAbout({ docExists: () => true });
+    // creed — roll's one-line philosophy
+    expect(vm.creed.en).toContain("black box");
+    expect(vm.creed.zh).toContain("黑盒");
+    // feedback loop — exactly the 4 phases Act → Sense → Score → Correct
+    expect(vm.loop.map((s) => s.label.en)).toEqual(["Act", "Sense", "Score", "Correct"]);
+    // capability domains — exactly 7, Tool Use among them
+    expect(vm.domains).toHaveLength(7);
+    expect(vm.domains.map((d) => d.name.en)).toContain("Tool Use");
+    // principles — 4 groups, 14 items, numbered 1..14
+    expect(vm.principles.map((g) => g.group.en)).toEqual(["Control", "Truth", "Failure", "Structure"]);
+    const principleNums = vm.principles.flatMap((g) => g.items.map((p) => p.n));
+    expect(principleNums).toHaveLength(14);
+    expect(principleNums).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    // invariants — exactly 12, I1..I12
+    expect(vm.invariants).toHaveLength(12);
+    expect(vm.invariants.map((iv) => iv.n)).toEqual(["I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10", "I11", "I12"]);
   });
 
-  it("missing index → []", () => {
-    expect(parseGuideIndex(undefined)).toEqual([]);
-  });
-
-  it("AC3: collectAbout renders manifesto + architecture and the guide map", () => {
-    const files: Record<string, string> = {
-      "docs/manifesto.md": "# 理念\nmain is truth",
-      "docs/architecture.md": "# 系统设计\nlayered",
-      "guide/INDEX.md": INDEX,
-    };
-    const vm = collectAbout({ readDoc: (rel) => files[rel], render: mdTag });
-    expect(vm.manifesto?.title).toBe("理念");
-    expect(vm.manifesto?.html).toBe("<MD># 理念\nmain is truth</MD>");
-    expect(vm.architecture?.title).toBe("系统设计");
-    expect(vm.guide).toHaveLength(2);
-    expect(vm.guide[0]).toMatchObject({ path: "AGENTS.md", category: "convention" });
-  });
-
-  it("absent docs degrade to undefined (never throws)", () => {
-    const vm = collectAbout({ readDoc: () => undefined, render: mdTag });
-    expect(vm.manifesto).toBeUndefined();
-    expect(vm.architecture).toBeUndefined();
-    expect(vm.guide).toEqual([]);
+  it("AC2: records whether the source docs (manifesto/architecture) are present, to cite them honestly", () => {
+    const present = collectAbout({ docExists: (rel) => rel === "docs/manifesto.md" || rel === "docs/architecture.md" });
+    expect(present.manifestoPresent).toBe(true);
+    expect(present.architecturePresent).toBe(true);
+    const absent = collectAbout({ docExists: () => false });
+    expect(absent.manifestoPresent).toBe(false);
+    expect(absent.architecturePresent).toBe(false);
+    // the structured charter copy is constant — present whether or not docs exist
+    expect(absent.invariants).toHaveLength(12);
+    expect(absent.domains).toHaveLength(7);
   });
 });
 
@@ -260,48 +250,76 @@ describe("Charter project tab — US-DOSSIER-033", () => {
 
 // ---------------------------------------------------------------- About page
 
-describe("About machine page — US-DOSSIER-033", () => {
-  const aboutVM = {
-    manifesto: { path: "docs/manifesto.md", title: "理念", html: "<h1>理念</h1><p>main is truth</p>" },
-    architecture: { path: "docs/architecture.md", title: "系统设计", html: "<h1>系统设计</h1>" },
-    guide: [
-      { path: "AGENTS.md", title: "Conventions", category: "convention" },
-      { path: "guide/en/loop.md", title: "roll loop", category: "guide" },
-    ],
-  };
+describe("About machine page — US-DOSSIER-041 (structured charter)", () => {
+  const aboutVM = collectAbout({ docExists: () => true });
   const html = renderAboutPage({ brand: BRAND, snapshot: SNAP, vm: aboutVM });
 
-  it("AC2: wears the shared shell and self-highlights the About breadcrumb, bilingual crumb", () => {
+  it("AC3: wears the shared machine shell and self-highlights the About breadcrumb", () => {
     expect(html).toContain("background:rgba(27,34,56,.97)"); // sticky dark bar
     expect(html).toContain("height:54px");
     expect(html).toContain('data-machine="about"');
     expect(html).toContain('aria-current="page"');
-    expect(html).toContain("About — Charter");
-    expect(html).toContain("关于 — 章程");
     expect(html).toContain('data-set-lang="zh"'); // lang toggle rides along
   });
 
-  it("AC3: identity is the injected brand (not hardcoded), manifesto + architecture rendered", () => {
+  it("AC3: cool design, bilingual EN/中 (separate lines), self-contained — NO external <link>", () => {
+    // the injected brand rides the top bar (never hardcoded)
     expect(html).toContain(">roll<");
     expect(html).toContain("It just works.");
-    expect(html).toContain("<h1>理念</h1>");
-    expect(html).toContain("<h1>系统设计</h1>");
+    // bilingual masthead — EN and 中 each present (rendered on separate lines via bi())
+    expect(html).toContain("How roll works");
+    expect(html).toContain("roll 怎么运转");
+    // self-contained single file — no external font/style link
+    expect(html).not.toContain("<link");
+    expect(html).not.toContain("fetch(");
+    expect(html).not.toContain("undefined");
+  });
+
+  it("AC1/AC4: creed — roll's one-line philosophy", () => {
+    expect(html).toContain("black box");
+    expect(html).toContain("黑盒");
+  });
+
+  it("AC1/AC4: feedback loop — the 4 phases Act → Sense → Score → Correct", () => {
+    expect(html).toContain(">Act<");
+    expect(html).toContain(">Sense<");
+    expect(html).toContain(">Score<");
+    expect(html).toContain(">Correct<");
+    expect(html).toContain("作动");
+    expect(html).toContain("反哺");
+  });
+
+  it("AC1/AC4: capability domains — all 7 present (Tool Use among them)", () => {
+    for (const dm of ["Orchestration", "Execution / Sandbox", "Tool Use", "Context Engineering", "Observability", "Evals", "Guardrails"]) {
+      expect(html).toContain(dm);
+    }
+  });
+
+  it("AC1/AC4: principles — the 4 groups and all 14 numbered lines", () => {
+    for (const g of ["Control", "Truth", "Failure", "Structure"]) {
+      expect(html).toContain(g);
+    }
+    expect(html).toContain("Reliability lives in the harness, not the model"); // #1
+    expect(html).toContain("Humans on the loop, not in it"); // #14
+    expect(html).toContain("不打开黑盒"); // zh copy present
+  });
+
+  it("AC1/AC4: invariants — all 12 (I1..I12) present", () => {
+    for (let i = 1; i <= 12; i++) {
+      expect(html).toContain(`>I${i}<`);
+    }
+    expect(html).toContain("Heartbeat ≤60s");
+    expect(html).toContain("一周期一故事");
+  });
+
+  it("AC2: cites the source docs when present; degrades gracefully when absent", () => {
     expect(html).toContain("docs/manifesto.md");
     expect(html).toContain("docs/architecture.md");
-    expect(html).toContain("md-body");
-  });
-
-  it("AC3: the guide map lists entries that link to their source docs", () => {
-    expect(html).toContain('href="AGENTS.md"');
-    expect(html).toContain('href="guide/en/loop.md"');
-    expect(html).toContain(">Conventions<");
-    expect(html).toContain(">roll loop<");
-  });
-
-  it("no undefined leaks even when docs are absent", () => {
-    const bare = renderAboutPage({ brand: BRAND, snapshot: SNAP, vm: { manifesto: undefined, architecture: undefined, guide: [] } });
+    const bare = renderAboutPage({ brand: BRAND, snapshot: SNAP, vm: collectAbout({ docExists: () => false }) });
     expect(bare).not.toContain("undefined");
-    expect(bare).toContain("docs/manifesto.md not found");
+    // structured charter still fully renders even with no source docs
+    expect(bare).toContain(">I12<");
+    expect(bare).toContain("Tool Use");
   });
 });
 

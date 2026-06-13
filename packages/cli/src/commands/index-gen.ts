@@ -22,6 +22,7 @@ import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
 import { collectSkillsPanel } from "../lib/skills-panel.js";
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
+import { collectCasting, defaultCastingDeps } from "../lib/casting.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { morningReportHref } from "../lib/morning-report.js";
@@ -376,6 +377,10 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         agents: collectAgentPanel(cwd),
         releasePanel: collectReleasePanel(cwd),
         skills: collectSkillsPanel(cwd),
+        // US-DOSSIER-030: the Loop-tab Casting grid — complexity slots + scenario
+        // roles, resolved purely from the router slot config (agents.yaml) and the
+        // route:resolve audit; the Hooks panel reuses the same `loop` heartbeat.
+        casting: collectCasting(defaultCastingDeps(cwd)),
         // US-DOSSIER-027: the top-bar project switcher reads the cross-project
         // registry (US-DOSSIER-028 writes it). Absent today → [] → the console
         // degrades to current-project-only via currentSlug, never erroring.

@@ -11,7 +11,17 @@ import { collectDossier, type DossierEpic } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
 import { deriveDeliveryLadder, renderFeaturesIndex, renderTruthBoard, spineMotif } from "../src/lib/dossier-index.js";
 import { miniSpine, renderEpicPage } from "../src/lib/epic-page.js";
-import { collectStoryDossierInput, renderStoryDossier, storyEvidenceFlags, storyHasMergeEvidence, storySpine } from "../src/lib/story-dossier.js";
+import {
+  acDisplayState,
+  acHasVisualEvidence,
+  classifyAc,
+  collectStoryDossierInput,
+  parseAcEvidence,
+  renderStoryDossier,
+  storyEvidenceFlags,
+  storyHasMergeEvidence,
+  storySpine,
+} from "../src/lib/story-dossier.js";
 import { markPhaseDone } from "../src/lib/story-page.js";
 
 const dirs: string[] = [];
@@ -507,15 +517,21 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(attested).not.toContain("node merged");
   });
 
-  it("five sections with real content: wish-quote, design bullets, commits, attest banner + AC table, retro", () => {
+  it("five sections with real content: wish-quote, design bullets, commits, attest banner + per-AC blocks, retro", () => {
     expect(full).toContain('class="wish-quote"');
     expect(full).toContain("一键看到全部交付真相");
     expect(full).toContain("<li>生成器读真实数据</li>");
     expect(full).toContain("2 TCR commits");
     expect(full).toContain('class="attest-banner"'); // attested rung keeps the truth-green banner
     expect(full).toContain('href="latest/US-A-1-report.html"');
-    expect(full).toContain("◑ partial");
-    expect(full).toContain("截屏待补");
+    // US-DOSSIER-024: AC1 (pass, doc/contract heuristic) keeps its ✓ pass badge;
+    // AC2 ("截屏待补" — an observable AC with NO screenshot) is honestly demoted
+    // to the evidence-gap state, never shown as attested.
+    expect(full).toContain('data-ac="US-A-1:AC1"');
+    expect(full).toContain("✓ pass");
+    expect(full).toContain('data-ac="US-A-1:AC2"');
+    expect(full).toContain("截屏待补"); // the note still renders inline beneath the AC
+    expect(full).toContain("evidence gap"); // the gap chip on the observable, screenshot-less AC2
     expect(full).toContain("score 9 good");
   });
 
@@ -1009,8 +1025,9 @@ describe("renderStoryDossier — EVID-010 re-runnable verify commands", () => {
     ],
   });
 
-  it("renders a Verify column header", () => {
-    expect(html).toContain("Verify");
+  it("renders the verify command inline within its AC block (US-DOSSIER-024: no separate Verify column)", () => {
+    expect(html).toContain('class="ac-verify"');
+    expect(html).toContain('data-ac="US-V-1:AC1"');
   });
 
   it("renders the verify command as copyable text (re-runnable, agent-agnostic)", () => {
@@ -1024,9 +1041,11 @@ describe("renderStoryDossier — EVID-010 re-runnable verify commands", () => {
   });
 
   it("an AC without a verify command degrades gracefully — no invented command", () => {
-    // exactly one copy affordance (AC1), AC2 carries none
+    // exactly one copy affordance (AC1), AC2 (readonly, no verify) carries none —
+    // US-DOSSIER-024: the per-AC block simply omits the verify row, never invents one.
     expect(html.match(/data-copy=/g)).toHaveLength(1);
-    expect(html).toContain("verify-empty");
+    expect(html.match(/class="ac-verify"/g)).toHaveLength(1); // only AC1 has a verify row
+    expect(html).toContain('data-ac="US-V-1:AC2"'); // AC2 still renders as its own block
   });
 
   it("the copy handler is inline — page stays self-contained", () => {
@@ -1370,5 +1389,145 @@ describe("US-DOSSIER-021 — storyEvidenceFlags probes the card folder", () => {
     expect(e2).toEqual({ report: true, acMap: true, visualEvidence: true });
     const e3 = storyEvidenceFlags(p, { id: "US-E-3", epic: "evid", type: "US", delivered: false, legacy: false });
     expect(e3).toEqual({ report: false, acMap: false, visualEvidence: false });
+  });
+});
+
+// ── US-DOSSIER-024 — per-AC evidence blocks + observable-gap detection ────────
+describe("US-DOSSIER-024 — per-AC evidence blocks", () => {
+  const story = { id: "US-AC-1", epic: "alpha", type: "US", title: "AC story", created: "2026-06-13", delivered: true };
+
+  it("parseAcEvidence: normalizes ac-map evidence (screenshot href, text textFile→href); drops malformed", () => {
+    const ev = parseAcEvidence([
+      { kind: "screenshot", label: "terminal capture", href: "screenshots/terminal.png" },
+      { kind: "text", label: "source map", textFile: "evidence/source-map.txt" },
+      { kind: "bogus", href: "x" }, // unknown kind dropped
+      null, // null dropped
+      "string", // non-object dropped
+    ]);
+    expect(ev).toEqual([
+      { kind: "screenshot", label: "terminal capture", href: "screenshots/terminal.png" },
+      { kind: "text", label: "source map", href: "evidence/source-map.txt" },
+    ]);
+    expect(parseAcEvidence(undefined)).toEqual([]);
+    expect(parseAcEvidence("not-array")).toEqual([]);
+  });
+
+  it("classifyAc: a screenshot/cast evidence entry ⇒ observable; readonly status / doc copy ⇒ readonly", () => {
+    expect(classifyAc({ ac: "X:AC1", status: "pass", evidence: [{ kind: "screenshot", href: "a.png" }] })).toBe("observable");
+    expect(classifyAc({ ac: "X:AC2", status: "readonly" })).toBe("readonly");
+    expect(classifyAc({ ac: "X:AC3", status: "pass", note: "renders the dashboard panel" })).toBe("observable");
+    expect(classifyAc({ ac: "X:AC4", status: "pass", note: "writes a doc contract / 只读口径" })).toBe("readonly");
+    // text-only evidence + ambiguous copy ⇒ readonly (doc/contract).
+    expect(classifyAc({ ac: "X:AC5", status: "pass", evidence: [{ kind: "text", href: "d.txt" }] })).toBe("readonly");
+  });
+
+  it("acDisplayState (AC3 honesty): an OBSERVABLE AC with no screenshot/cast is DEMOTED to gap — never attested", () => {
+    const observableNoShot = { ac: "X:AC1", status: "pass", note: "renders the spine" };
+    expect(classifyAc(observableNoShot)).toBe("observable");
+    expect(acHasVisualEvidence(observableNoShot, [])).toBe(false);
+    expect(acDisplayState(observableNoShot, "observable", [])).toBe("gap");
+    // a real screenshot file on disk backs it → attested-green, not gap.
+    expect(acDisplayState(observableNoShot, "observable", ["latest/screenshots/spine.png"])).toBe("attested");
+    // a screenshot evidence entry in ac-map also backs it.
+    const withShot = { ac: "X:AC2", status: "pass", evidence: [{ kind: "screenshot" as const, href: "latest/screenshots/s.png" }] };
+    expect(acDisplayState(withShot, "observable", [])).toBe("attested");
+    // a READONLY AC may attest on doc/text evidence — never forced to gap.
+    expect(acDisplayState({ ac: "X:AC3", status: "readonly" }, "readonly", [])).toBe("attested");
+  });
+
+  it("AC1: each AC is its OWN block — AC id + status badge + inline evidence beneath it (no flat table)", () => {
+    const html = renderStoryDossier({
+      story,
+      acRows: [
+        { ac: "US-AC-1:AC1", status: "pass", note: "renders the page", evidence: [{ kind: "screenshot", label: "live render", href: "latest/screenshots/page.png" }] },
+        { ac: "US-AC-1:AC2", status: "readonly", note: "doc contract", evidence: [{ kind: "text", label: "source map", href: "latest/evidence/map.txt" }] },
+      ],
+      screenshotFiles: ["latest/screenshots/page.png"],
+    });
+    // each AC is its own block, addressable by data-ac
+    expect(html).toContain('class="ac-blocks"');
+    expect(html).toContain('data-ac="US-AC-1:AC1"');
+    expect(html).toContain('data-ac="US-AC-1:AC2"');
+    // the old flat table markup is gone
+    expect(html).not.toContain('class="ac-table"');
+    // AC1's inline screenshot thumbnail renders BENEATH it (real-pixel proof)
+    expect(html).toContain('class="ac-shot"');
+    expect(html).toContain('<img src="latest/screenshots/page.png"');
+    // AC2's text evidence is an inline doc link beneath it
+    expect(html).toContain('class="ac-evlink ac-ev-doc"');
+    expect(html).toContain('href="latest/evidence/map.txt"');
+  });
+
+  it("AC2: observable vs readonly class chip is labelled on each block", () => {
+    const html = renderStoryDossier({
+      story,
+      acRows: [
+        { ac: "US-AC-1:AC1", status: "pass", evidence: [{ kind: "screenshot", href: "latest/screenshots/a.png" }] },
+        { ac: "US-AC-1:AC2", status: "readonly", note: "doc only" },
+      ],
+      screenshotFiles: ["latest/screenshots/a.png"],
+    });
+    expect(html).toContain('class="ac-kind ac-kind-obs"');
+    expect(html).toContain("observable");
+    expect(html).toContain("可观测");
+    expect(html).toContain('class="ac-kind ac-kind-ro"');
+    expect(html).toContain("readonly");
+    expect(html).toContain("只读");
+  });
+
+  it("AC3: an observable AC WITHOUT a screenshot shows an evidence-gap chip and is NOT attested", () => {
+    const html = renderStoryDossier({
+      story,
+      acRows: [{ ac: "US-AC-1:AC1", status: "pass", note: "renders the truth banner" }], // observable copy, no screenshot
+      // no screenshotFiles
+    });
+    expect(html).toContain('class="ac-gap-chip"');
+    expect(html).toContain("evidence gap");
+    expect(html).toContain("证据缺口");
+    expect(html).toContain("ac-state-gap");
+    // the demoted block must NOT wear the attested truth-green badge / ✓ pass
+    expect(html).not.toContain("✓ pass");
+    expect(html).toContain("◇ unproven");
+    expect(html).toContain("◇ 未证实");
+    // readonly ACs are never forced to gap — they may attest on doc/text evidence.
+    const ro = renderStoryDossier({ story, acRows: [{ ac: "US-AC-1:AC9", status: "readonly", note: "doc contract" }] });
+    expect(ro).not.toContain("evidence gap");
+    expect(ro).toContain("◆ readonly");
+  });
+
+  it("AC4: AC block accent + gap colors align with the three-state spine ladder (claimed/merged/attested)", () => {
+    const html = renderStoryDossier({
+      story,
+      acRows: [
+        { ac: "US-AC-1:AC1", status: "pass", evidence: [{ kind: "screenshot", href: "latest/screenshots/a.png" }] }, // attested → truth-green
+        { ac: "US-AC-1:AC2", status: "partial", note: "doc partial" }, // merged → attest-pending teal
+        { ac: "US-AC-1:AC3", status: "claimed", note: "doc claim" }, // claimed → amber
+      ],
+      screenshotFiles: ["latest/screenshots/a.png"],
+    });
+    expect(html).toContain("border-left-color:#178a52"); // attested truth-green (US-DOSSIER-023 ladder)
+    expect(html).toContain("border-left-color:#0d9488"); // merged attest-pending teal
+    expect(html).toContain("border-left-color:#c77d12"); // claimed claim-amber
+    // EN/中 on separate lines via bi() — the gap chip carries both, not inline.
+    const gap = renderStoryDossier({ story, acRows: [{ ac: "US-AC-1:AC4", status: "pass", note: "renders a panel" }] });
+    expect(gap).toContain("evidence gap");
+    expect(gap).toContain("证据缺口");
+  });
+
+  it("collectStoryDossierInput: threads ac-map evidence[] + on-disk screenshots into the dossier input", () => {
+    const p = project();
+    const dir = join(p, ".roll", "features", "alpha", "US-AC-7", "2026-06-13T00-00-00");
+    mkdirSync(join(dir, "screenshots"), { recursive: true });
+    writeFileSync(join(dir, "screenshots", "render.png"), "PNGDATA");
+    symlinkSync(dir, join(p, ".roll", "features", "alpha", "US-AC-7", "latest"));
+    writeFileSync(
+      join(p, ".roll", "features", "alpha", "US-AC-7", "ac-map.json"),
+      JSON.stringify([
+        { ac: "US-AC-7:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "render", href: "../screenshots/render.png" }] },
+      ]),
+    );
+    const got = collectStoryDossierInput(p, { id: "US-AC-7", epic: "alpha", type: "US", delivered: true });
+    expect(got.acRows?.[0]?.evidence).toEqual([{ kind: "screenshot", label: "render", href: "../screenshots/render.png" }]);
+    expect(got.screenshotFiles).toEqual(["latest/screenshots/render.png"]);
   });
 });

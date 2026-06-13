@@ -29,6 +29,20 @@ import { phaseSectionTag } from "./story-page.js";
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** US-DOSSIER-024: one piece of inline evidence attached to an AC. `screenshot`
+ *  is real-pixel proof (renders a thumbnail); `text` is a doc/contract link. */
+export interface AcEvidence {
+  kind: "screenshot" | "text" | "cast" | "video";
+  label?: string;
+  /** Relative href to the artifact (screenshot/cast/video or a text file). */
+  href?: string;
+}
+
+/** US-DOSSIER-024: whether an AC is "observable" (visual/interactive UI — needs a
+ *  real screenshot/cast to attest) or "readonly" (doc/contract — may attest on
+ *  text evidence). Derived from ac-map evidence kinds, else a copy heuristic. */
+export type AcKind = "observable" | "readonly";
+
 /** One AC row as read from ac-map.json (001d wires the file in). */
 export interface AcRow {
   ac: string;
@@ -38,6 +52,8 @@ export interface AcRow {
   verify?: string;
   /** EVID-010: test files/cases covering this AC. */
   tests?: string[];
+  /** US-DOSSIER-024: the ac-map `evidence[]` entries (screenshot / text / cast). */
+  evidence?: AcEvidence[];
 }
 
 export interface ExecutionRef {
@@ -169,6 +185,10 @@ export interface StoryDossierInput {
   /** US-DOSSIER-023: the on-disk evidence presence flags backing the `attested`
    *  rung (report / ac-map / real-pixel screenshot). */
   evidence?: StoryEvidenceFlags;
+  /** US-DOSSIER-024: real image files under `latest/screenshots` (relative
+   *  hrefs). Backs the per-AC evidence thumbnail + observable-gap detection so
+   *  an observable AC with captured pixels is never falsely flagged a gap. */
+  screenshotFiles?: string[];
 }
 
 /**
@@ -256,6 +276,82 @@ const AC_BADGE: Record<string, [string, string]> = {
   claimed: ["△ claimed", "△ 仅声称"],
   missing: ["○ missing", "○ 缺失"],
 };
+
+// US-DOSSIER-024 — the AC-block status colors align with the three-state spine
+// ladder (US-DOSSIER-023). `attested` statuses → truth-green; `merged`/pending
+// → attest-pending teal; `claimed`/gap → claim amber; failures → drift red.
+const AC_STATE: Record<string, "attested" | "merged" | "claimed" | "fail" | "muted"> = {
+  pass: "attested",
+  readonly: "attested",
+  partial: "merged",
+  claimed: "claimed",
+  missing: "muted",
+  fail: "fail",
+  blocked: "fail",
+};
+const AC_STATE_COLOR: Record<"attested" | "merged" | "claimed" | "fail" | "muted" | "gap", string> = {
+  attested: "#178a52",
+  merged: "#0d9488",
+  claimed: "#c77d12",
+  gap: "#c77d12",
+  fail: "#d23b3b",
+  muted: "#9aa3b2",
+};
+
+// US-DOSSIER-024 — heuristic when ac-map carries no screenshot/cast evidence to
+// settle the class: AC copy that names a visual/interactive surface (render,
+// screenshot, UI, page, panel, banner, badge, chip, button, click, hover, tab,
+// 渲染/截图/界面/页面/面板/徽标/点击) is OBSERVABLE; otherwise READONLY (doc/contract).
+const OBSERVABLE_RE =
+  /\b(render|renders|rendered|screenshot|screencast|cast|recording|video|visual|UI|GUI|page|panel|banner|badge|chip|button|click|clicks|hover|tab|tabs|spine|ladder|thumbnail|pixel|layout|component|surface|dashboard|console)\b|渲染|截图|截屏|录屏|界面|页面|面板|徽标|芯片|按钮|点击|悬停|布局|组件|可视|可观测|缩略/i;
+const READONLY_RE = /\b(readonly|read-only|doc|docs|document|contract|schema|spec|config|exit code|stdout|invariant)\b|只读|文档|契约|口径|不变量|退出码/i;
+
+/**
+ * US-DOSSIER-024 — classify an AC as observable (visual/interactive UI, needs a
+ * real screenshot/cast to attest) vs readonly (doc/contract, may attest on text).
+ * Priority: ac-map evidence kinds (a screenshot/cast/video entry ⇒ observable;
+ * only-text evidence + `readonly` status ⇒ readonly) → the AC-copy heuristic.
+ */
+export function classifyAc(row: AcRow): AcKind {
+  const ev = row.evidence ?? [];
+  if (ev.some((e) => e.kind === "screenshot" || e.kind === "cast" || e.kind === "video")) return "observable";
+  if (row.status === "readonly") return "readonly";
+  const text = `${row.ac} ${row.note ?? ""}`;
+  if (READONLY_RE.test(text) && !OBSERVABLE_RE.test(text)) return "readonly";
+  if (OBSERVABLE_RE.test(text)) return "observable";
+  // Evidence is only text and copy is ambiguous → treat as readonly (doc/contract).
+  if (ev.length > 0 && ev.every((e) => e.kind === "text")) return "readonly";
+  return "readonly";
+}
+
+/** US-DOSSIER-024 — does this AC carry a real pixel/dynamic artifact (a
+ *  screenshot/cast/video evidence entry) under its ac-map evidence list, OR a
+ *  matching screenshot file on disk under `latest/screenshots`? */
+export function acHasVisualEvidence(row: AcRow, screenshotFiles: readonly string[]): boolean {
+  const ev = row.evidence ?? [];
+  if (ev.some((e) => (e.kind === "screenshot" || e.kind === "cast" || e.kind === "video") && e.href !== undefined && e.href !== "")) {
+    return true;
+  }
+  // Fall back to any real file under latest/screenshots — an observable AC is
+  // backed when the run captured pixels even if ac-map didn't enumerate them.
+  return screenshotFiles.length > 0;
+}
+
+/**
+ * US-DOSSIER-024 — the honest, never-faking per-AC display state. An OBSERVABLE
+ * AC with no real screenshot/cast (FIX-258 truth) is DEMOTED to a `gap` state —
+ * it can never render as attested even when ac-map claims `pass`. READONLY ACs
+ * keep their declared state (they may attest on doc/text evidence).
+ */
+export function acDisplayState(
+  row: AcRow,
+  kind: AcKind,
+  screenshotFiles: readonly string[],
+): "attested" | "merged" | "claimed" | "fail" | "muted" | "gap" {
+  const declared = AC_STATE[row.status] ?? "muted";
+  if (kind === "observable" && !acHasVisualEvidence(row, screenshotFiles)) return "gap";
+  return declared;
+}
 
 function executionSummary(refs: readonly ExecutionRef[]): [string, string] {
   const mergedPrs = refs.filter((r) => r.kind === "merged-pr").length;
@@ -577,6 +673,104 @@ function section(phaseKey: string, en: string, zh: string, body: string, empty: 
   return `${phaseSectionTag(phaseKey, !empty)}<h2>${bi(en, zh)}</h2>${body}</section>`;
 }
 
+/**
+ * US-DOSSIER-024 — one piece of inline evidence rendered BENEATH its AC: a
+ * screenshot is a real-pixel thumbnail (`<img>` linked to full size); a cast/
+ * video is a labelled replay link; a text entry is a doc/contract link. A
+ * screenshot whose `href` is missing degrades to a labelled link, never an
+ * empty `<img>`.
+ */
+function acEvidenceItemHtml(e: AcEvidence): string {
+  const label = esc(e.label ?? e.href ?? e.kind);
+  if (e.kind === "screenshot" && e.href !== undefined) {
+    return (
+      `<a class="ac-shot" href="${esc(e.href)}" title="${label}">` +
+      `<img src="${esc(e.href)}" alt="${label}" loading="lazy"><span class="ac-shot-cap">${label}</span></a>`
+    );
+  }
+  const tag = e.kind === "cast" ? "cast" : e.kind === "video" ? "video" : "doc";
+  if (e.href !== undefined) {
+    return `<a class="ac-evlink ac-ev-${tag}" href="${esc(e.href)}">${label}</a>`;
+  }
+  return `<span class="ac-evlink ac-ev-${tag}">${label}</span>`;
+}
+
+/**
+ * US-DOSSIER-024 — render ONE acceptance criterion as its own block (never a
+ * wall of text then a wall of screenshots): the AC id + a status badge + the
+ * observable/readonly class chip on the head, then the note, then the inline
+ * evidence (screenshot thumbs / text links) and the re-runnable verify command
+ * directly beneath it. The block's accent color aligns with the three-state
+ * spine ladder (US-DOSSIER-023). An OBSERVABLE AC missing real pixel/cast
+ * evidence carries an explicit "evidence gap / 证据缺口" chip and renders in the
+ * amber gap state — it is NEVER shown as attested.
+ */
+function acBlockHtml(row: AcRow, screenshotFiles: readonly string[]): string {
+  const kind = classifyAc(row);
+  const state = acDisplayState(row, kind, screenshotFiles);
+  const color = AC_STATE_COLOR[state];
+  const [badgeEn, badgeZh] = AC_BADGE[row.status] ?? [esc(row.status), esc(row.status)];
+  const gap = state === "gap";
+  // The status badge: a demoted observable-gap AC never wears its declared
+  // (possibly "✓ pass") badge — it shows the honest gap state instead.
+  const statusBadge = gap
+    ? `<span class="ac-badge ac-badge-gap">${bi("◇ unproven", "◇ 未证实")}</span>`
+    : `<span class="ac-badge" style="color:${color};border-color:${color}66">${bi(badgeEn, badgeZh)}</span>`;
+  const kindChip =
+    kind === "observable"
+      ? `<span class="ac-kind ac-kind-obs">${bi("observable", "可观测")}</span>`
+      : `<span class="ac-kind ac-kind-ro">${bi("readonly", "只读")}</span>`;
+  const gapChip = gap
+    ? `<span class="ac-gap-chip">${bi("evidence gap", "证据缺口")}</span>`
+    : "";
+  const note = row.note !== undefined && row.note !== "" ? `<p class="ac-note">${esc(row.note)}</p>` : "";
+  // Inline evidence beneath the AC. Screenshot entries from ac-map first, then
+  // on-disk screenshot files not already named by ac-map (real captured pixels),
+  // then text/cast links. Dedup by BASENAME — ac-map hrefs (`screenshots/x.png`,
+  // `../screenshots/x.png`) and on-disk hrefs (`latest/screenshots/x.png`) point
+  // at the same file under different relative prefixes. An observable gap shows
+  // the explicit honest empty state.
+  const evRows = row.evidence ?? [];
+  const baseName = (h: string): string => h.split("/").pop() ?? h;
+  const namedShots = new Set(evRows.filter((e) => e.kind === "screenshot" && e.href !== undefined).map((e) => baseName(e.href as string)));
+  const extraShots = screenshotFiles
+    .filter((h) => !namedShots.has(baseName(h)))
+    .map((h) => acEvidenceItemHtml({ kind: "screenshot", href: h, label: baseName(h) }));
+  const evItems = [...evRows.map(acEvidenceItemHtml), ...extraShots];
+  const evidenceBlock =
+    evItems.length > 0
+      ? `<div class="ac-evidence">${evItems.join("")}</div>`
+      : gap
+        ? `<p class="ac-evidence-empty">${bi(
+            "Observable AC — no screenshot/cast captured yet",
+            "可观测 AC — 尚无截图/录屏",
+          )}</p>`
+        : "";
+  // The re-runnable verify command (EVID-010), now inline within the AC block.
+  const verify =
+    row.verify !== undefined && row.verify !== ""
+      ? `<div class="ac-verify"><button class="copy-btn" data-copy="${esc(row.verify)}" title="copy 复制" type="button">⧉</button><code>${esc(row.verify)}</code>` +
+        (row.tests !== undefined && row.tests.length > 0
+          ? `<ul class="ac-tests">${row.tests.map((t) => `<li><code>${esc(t)}</code></li>`).join("")}</ul>`
+          : "") +
+        `</div>`
+      : "";
+  return (
+    `<div class="ac-block ac-state-${state}" data-ac="${esc(row.ac)}" data-kind="${kind}" style="border-left-color:${color}">` +
+    `<div class="ac-head"><code class="ac-id">${esc(row.ac)}</code>${statusBadge}${kindChip}${gapChip}</div>` +
+    note +
+    evidenceBlock +
+    verify +
+    `</div>`
+  );
+}
+
+/** US-DOSSIER-024 — the whole per-AC block list for the delivery station. */
+function acBlocksHtml(rows: readonly AcRow[], screenshotFiles: readonly string[]): string {
+  if (rows.length === 0) return "";
+  return `<div class="ac-blocks">${rows.map((r) => acBlockHtml(r, screenshotFiles)).join("")}</div>`;
+}
+
 /** Render the dossier page. */
 export function renderStoryDossier(d: StoryDossierInput): string {
   const s = d.story;
@@ -620,30 +814,11 @@ export function renderStoryDossier(d: StoryDossierInput): string {
   // banner, so the page never contradicts itself (claimed→merged→attested).
   const ladder = storyDeliveryState(d);
   const banner = deliveryBanner(ladder, d.reportHref);
-  const acTable =
-    (d.acRows?.length ?? 0) > 0
-      ? `<table class="ac-table"><thead><tr><th>AC</th><th>${bi("Status", "状态")}</th><th>${bi("Verify", "验证")}</th><th>${bi("Note", "备注")}</th></tr></thead><tbody>` +
-        (d.acRows ?? [])
-          .map((r) => {
-            const [en, zh] = AC_BADGE[r.status] ?? [esc(r.status), esc(r.status)];
-            // EVID-010: a re-runnable command makes the AC independently verifiable;
-            // absent → degrade honestly (no invented command), readonly/doc ACs say so.
-            const verifyCell =
-              r.verify !== undefined && r.verify !== ""
-                ? `<button class="copy-btn" data-copy="${esc(r.verify)}" title="copy 复制" type="button">⧉</button><code>${esc(r.verify)}</code>` +
-                  (r.tests !== undefined && r.tests.length > 0
-                    ? `<ul class="ac-tests">${r.tests.map((t) => `<li><code>${esc(t)}</code></li>`).join("")}</ul>`
-                    : "")
-                : `<span class="verify-empty">${
-                    r.status === "readonly" || r.status === "claimed" || r.status === "missing"
-                      ? bi("no re-run", "无需重验")
-                      : "—"
-                  }</span>`;
-            return `<tr><td><code>${esc(r.ac)}</code></td><td>${bi(en, zh)}</td><td class="verify-cell">${verifyCell}</td><td>${esc(r.note ?? "")}</td></tr>`;
-          })
-          .join("") +
-        `</tbody></table>`
-      : "";
+  // US-DOSSIER-024: each AC is its own block (AC text + ladder-aligned status
+  // badge + observable/readonly chip + inline evidence beneath it), replacing
+  // the old "wall of text then wall of screenshots" table. Observable ACs with
+  // no real screenshot/cast carry an explicit evidence-gap chip and never attest.
+  const acBlocks = acBlocksHtml(d.acRows ?? [], d.screenshotFiles ?? []);
   const hasDeliveryBody =
     ladder !== "none" ||
     s.delivered ||
@@ -651,7 +826,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     hasDeliveryEvidence(d.deliveryEvidence) ||
     hasDynamicEvidence(d.dynamicEvidence);
   const delivery = hasDeliveryBody
-    ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acTable
+    ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acBlocks
     : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
   const corrections = correctionTraceHtml(d.correctionActions);
   const retroContent = selfScoreHtml(d.selfScore, d.selfScoreTrend, d.retro);
@@ -696,6 +871,32 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.verify-cell .copy-btn.copied { color:var(--pass); border-color:var(--pass); }\n` +
     `.ac-tests { list-style:none; padding:0; margin:4px 0 0; } .ac-tests li { font-size:11.5px; color:var(--muted); margin:1px 0; }\n` +
     `.verify-empty { color:var(--muted); font-size:12px; }\n` +
+    // US-DOSSIER-024: per-AC evidence blocks — each AC is its own card (AC id +
+    // ladder-aligned status badge + observable/readonly chip), then note, then
+    // the inline evidence (screenshot thumbnails / text links) beneath it, then
+    // the re-runnable verify command. The left border + gap chip color follow
+    // the three-state spine ladder so an unproven observable AC reads honestly.
+    `.ac-blocks { display:grid; gap:12px; margin:6px 0 0; }\n` +
+    `.ac-block { border:1px solid var(--line); border-left:4px solid var(--line); border-radius:10px; padding:11px 14px; background:var(--bg-raise); }\n` +
+    `.ac-head { display:flex; align-items:center; flex-wrap:wrap; gap:9px; }\n` +
+    `.ac-head .ac-id { font:600 12.5px/1.4 var(--mono); }\n` +
+    `.ac-badge { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:999px; padding:1px 9px; font:600 11.5px/1.5 var(--sans); }\n` +
+    `.ac-badge-gap { color:#c77d12; border-color:#c77d1266; }\n` +
+    `.ac-kind { font:600 9.5px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase; border-radius:4px; padding:3px 6px; border:1px solid var(--line); }\n` +
+    `.ac-kind-obs { color:#2d54e8; border-color:#2d54e855; } .ac-kind-ro { color:var(--muted); }\n` +
+    `.ac-gap-chip { font:600 9.5px/1 var(--mono); letter-spacing:.06em; text-transform:uppercase; color:#c77d12; border:1px solid #c77d1266; background:#c77d121a; border-radius:4px; padding:3px 7px; }\n` +
+    `.ac-note { margin:8px 0 0; font-size:13px; line-height:1.5; }\n` +
+    `.ac-evidence { display:flex; flex-wrap:wrap; gap:10px; margin:9px 0 0; align-items:flex-start; }\n` +
+    `.ac-shot { display:flex; flex-direction:column; gap:4px; width:160px; text-decoration:none; }\n` +
+    `.ac-shot img { width:160px; height:96px; object-fit:cover; border:1px solid var(--line); border-radius:6px; background:#fff; display:block; }\n` +
+    `.ac-shot-cap { font:10.5px/1.3 var(--mono); color:var(--muted); word-break:break-word; }\n` +
+    `.ac-evlink { display:inline-flex; align-items:center; gap:5px; font:11.5px/1.5 var(--mono); border:1px solid var(--line); border-radius:6px; padding:5px 9px; color:var(--muted); text-decoration:none; }\n` +
+    `.ac-evlink.ac-ev-cast, .ac-evlink.ac-ev-video { color:#2d54e8; border-color:#2d54e855; }\n` +
+    `.ac-evidence-empty { margin:9px 0 0; font-size:12px; color:#c77d12; }\n` +
+    `.ac-verify { margin:9px 0 0; } .ac-verify code { font-size:12px; }\n` +
+    `.ac-verify .copy-btn { margin-right:6px; cursor:pointer; border:1px solid var(--line); background:var(--bg-raise); color:var(--muted); border-radius:4px; padding:0 5px; font-size:12px; }\n` +
+    `.ac-verify .copy-btn.copied { color:var(--pass); border-color:var(--pass); }\n` +
+    `@media (max-width:680px) { .ac-shot, .ac-shot img { width:100%; } }\n` +
     `.delivery-evidence h3 { font:600 14px/1.4 var(--serif); margin:12px 0 6px; }\n` +
     `.delivery-evidence dl { display:grid; grid-template-columns:120px 1fr; gap:6px 12px; margin:0; }\n` +
     `.delivery-evidence dt { color:var(--muted); font:600 12px/1.7 var(--sans); }\n` +
@@ -840,24 +1041,42 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
       note?: string;
       verify?: string;
       tests?: string[];
+      evidence?: unknown;
     }>;
     if (Array.isArray(rows)) {
       const acRows = rows
         .filter((r): r is NonNullable<typeof r> => r != null && typeof r.ac === "string" && typeof r.status === "string")
         .map((r) => {
           const verify = typeof r.verify === "string" ? r.verify.trim() : "";
+          const evidence = parseAcEvidence(r.evidence);
           return {
             ac: r.ac as string,
             status: r.status as string,
             ...(typeof r.note === "string" ? { note: r.note } : {}),
             ...(verify !== "" ? { verify } : {}),
             ...(Array.isArray(r.tests) && r.tests.length > 0 ? { tests: r.tests.filter((t) => typeof t === "string") } : {}),
+            ...(evidence.length > 0 ? { evidence } : {}),
           };
         });
       if (acRows.length > 0) out.acRows = acRows;
     }
   } catch {
     /* no ac-map yet */
+  }
+
+  // US-DOSSIER-024: real image files under latest/screenshots → per-AC evidence
+  // thumbnails + observable-gap detection. Best-effort; absent dir reads as none.
+  try {
+    const shotsDir = joinPath(dir, "latest", "screenshots");
+    if (existsSync(shotsDir)) {
+      const shots = readdirSync(shotsDir)
+        .filter((f) => /\.(?:png|jpe?g|webp|gif)$/i.test(f))
+        .sort()
+        .map((f) => `latest/screenshots/${f}`);
+      if (shots.length > 0) out.screenshotFiles = shots;
+    }
+  } catch {
+    /* no screenshots dir */
   }
 
   // latest/<ID>-report.html → banner link.
@@ -1816,6 +2035,27 @@ function factsPrNumbers(facts: GitDossierFacts, storyId: string): number[] {
     }
   }
   return [...nums];
+}
+
+/**
+ * US-DOSSIER-024 — normalize an ac-map `evidence` field into typed AcEvidence
+ * rows. Tolerant of malformed shapes (FIX-258/US-ATTEST-010 carry
+ * `{ kind, label, href }` for screenshots and `{ kind, label, textFile }` for
+ * text); a `textFile` is folded into `href`. Unknown/absent kinds drop.
+ */
+export function parseAcEvidence(raw: unknown): AcEvidence[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AcEvidence[] = [];
+  for (const e of raw) {
+    if (e == null || typeof e !== "object") continue;
+    const o = e as { kind?: unknown; label?: unknown; href?: unknown; textFile?: unknown };
+    const kind = o.kind;
+    if (kind !== "screenshot" && kind !== "text" && kind !== "cast" && kind !== "video") continue;
+    const href = typeof o.href === "string" && o.href.trim() !== "" ? o.href.trim() : typeof o.textFile === "string" && o.textFile.trim() !== "" ? o.textFile.trim() : undefined;
+    const label = typeof o.label === "string" && o.label.trim() !== "" ? o.label.trim() : undefined;
+    out.push({ kind, ...(label !== undefined ? { label } : {}), ...(href !== undefined ? { href } : {}) });
+  }
+  return out;
 }
 
 // Thin fs/git seams (kept local so the renderer stays pure above).

@@ -24,7 +24,7 @@ import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
 import type { ReleasePanelVM } from "./release-panel.js";
 import type { ReleaseScopeVM, ScopeEpicGroup } from "./release-scope.js";
-import type { SkillsPanelVM, SkillPanelRow } from "./skills-panel.js";
+import type { SkillsPanelVM } from "./skills-panel.js";
 import type { CastingVM, CastingRow } from "./casting.js";
 import type { CharterVM } from "./page-charter.js";
 
@@ -586,6 +586,27 @@ function castingGrid(input: TruthConsoleInput): string {
 }
 
 /**
+ * US-DOSSIER-040 — the CASTING PROJECT TAB: who plays which role, promoted out
+ * of the Loop tab into its own top-level tab to match the CORRECT design
+ * reference's CASTING TAB (`Delivery Dossier.dc.html` `isTabCasting`: the
+ * `<!-- executor complexity ladder -->` + `<!-- scenario roles -->`). The grid
+ * body reuses the SAME pure `collectCasting()` view-model rendered by
+ * `castingGrid`; only the tab header (kicker + title + lede) is added here.
+ */
+function castingTab(input: TruthConsoleInput): string {
+  return (
+    `<div style="padding:30px 0 4px;">` +
+    kicker(bi("Who plays which role — complexity slots + scenarios", "谁演什么——复杂度槽位 + 场景角色")) +
+    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Casting", "选角")}</h1>` +
+    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
+      "The executor complexity ladder and the scenario roles — resolved from the router slot config, never a guessed agent.",
+      "执行复杂度槽位与场景角色——从路由槽位配置解析，绝不臆测 agent。",
+    )}</p></div>` +
+    castingGrid(input)
+  );
+}
+
+/**
  * US-DOSSIER-030 — the HOOKS-this-repo panel: every scheduled launchd lane this
  * repo runs, sourced from the SAME `collectLoopHeartbeat` output behind the
  * Overview heartbeat tile (`snapshot.loop.lanes`) — one number on every surface.
@@ -629,20 +650,11 @@ function loopTab(input: TruthConsoleInput): string {
       "Every cycle, complete and replayable. Failures are first-class — never swallowed.",
       "每一个 cycle 完整、可回溯。失败是一等公民——绝不吞。",
     )}</p></div>` +
-    `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;">` +
-    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Agents on this machine", "本机 agents")}</span>` +
-    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("who works here, what it costs, whether conventions are fresh (72h window)", "谁在干活、花了多少、约定新不新（72h 窗口）")}</span>` +
-    `<span style="flex:1;height:1px;background:#dfe4ec;"></span></div>` +
-    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    (input.agents.length > 0
-      ? input.agents.map(agentRow).join("")
-      : `<div style="padding:14px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no agents detected", "未检测到 agent")}</div>`) +
-    `</section>` +
-    // US-DOSSIER-030: the scheduled launchd lanes this repo runs (distinct from
-    // the single Overview heartbeat tile — it enumerates EVERY lane).
+    // US-DOSSIER-040: the Loop tab is Loop&Cycle (heartbeat/lanes) + the
+    // project-scoped commit-hooks panel + the Cycle ledger. The inline agents
+    // panel (now the machine Agents page) and the inline casting ladder (now its
+    // own Casting tab) are NOT rendered here.
     hooksPanel(input) +
-    // US-DOSSIER-030: who plays which role — complexity slots + scenario roles.
-    castingGrid(input) +
     `<div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi("Cycle ledger", "周期账本")}</span>` +
     `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("what it actually did while you were away", "你不在的时候它到底干了什么")}</span>` +
@@ -941,101 +953,6 @@ function fwuInline(t: { fail: number; warn: number; unknown: number }): string {
   return `f:${t.fail} w:${t.warn} ?:${t.unknown}`;
 }
 
-function placeholderTab(titleEn: string, titleZh: string, fillerStory: string): string {
-  return (
-    `<div style="padding:34px 0 8px;">` +
-    kicker(bi("Truth Console", "真相控制台")) +
-    `<h1 style="margin:10px 0 0;font-size:28px;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi(titleEn, titleZh)}</h1></div>` +
-    `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:28px 24px;margin:8px 0;color:${C.faint};font-size:13.5px;">` +
-    bi(`This tab is being built (${fillerStory}).`, `本页签建设中（${fillerStory}）。`) +
-    `</section>`
-  );
-}
-
-const SKILL_GROUP_META: Record<string, { en: string; zh: string }> = {
-  delivery: { en: "Delivery", zh: "交付" },
-  quality: { en: "Quality", zh: "质量" },
-  observe: { en: "Observe", zh: "观察" },
-  lifecycle: { en: "Lifecycle", zh: "生命周期" },
-};
-
-function skillRow(r: SkillPanelRow): string {
-  // AC4 — a row whose audit never ran is `unknown` (amber dot), never a clean
-  // green that fakes a passing audit.
-  const ok = r.auditKnown && r.violations.length === 0;
-  const dotColor = !r.auditKnown ? C.amber : ok ? C.green : C.red;
-  const verdict = !r.auditKnown
-    ? `<span style="${MONO}font-size:10.5px;color:${C.amber};white-space:nowrap;">${bi("unknown", "未知")}</span>`
-    : `<span style="${MONO}font-size:10.5px;color:${ok ? C.green : C.red};white-space:nowrap;">${ok ? bi("clean", "无违规") : `${r.violations.length} ${bi("violations", "违规")}`}</span>`;
-  const check = (on: boolean, label: string): string =>
-    `<span style="${MONO}font-size:10.5px;color:${on ? C.green : C.red};font-weight:600;white-space:nowrap;">${on ? "✓" : "✗"} ${label}</span>`;
-  const tree = r.files
-    .map(
-      (f) =>
-        `<div style="display:flex;gap:12px;align-items:baseline;padding:1px 0;">` +
-        `<span style="${MONO}font-size:11px;color:${f.dir ? C.faint : C.ink};">${esc(f.path)}</span>` +
-        (f.dir ? "" : `<span style="${MONO}font-size:10px;color:${C.faint};">${f.lines} ${bi("lines", "行")}</span>`) +
-        `</div>`,
-    )
-    .join("");
-  return (
-    `<details class="sk-row" data-skill="${esc(r.name)}" data-open-key="sk:${esc(r.name)}" style="border-top:1px solid ${C.hair};">` +
-    `<summary style="display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
-    `<span style="display:flex;align-items:center;gap:10px;min-width:0;"><span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
-    `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>` +
-    `<span style="${MONO}font-size:13px;font-weight:600;color:${C.ink};white-space:nowrap;">${esc(r.name)}</span>` +
-    `<span style="font-size:12px;color:${C.dim};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.description.slice(0, 110))}</span></span>` +
-    `<span style="${MONO}font-size:11px;color:${C.dim};white-space:nowrap;">${r.hubLines} ${bi("lines", "行")}</span>` +
-    `<span style="${MONO}font-size:11px;color:${r.usage > 0 ? C.blue : C.faint};font-weight:600;white-space:nowrap;" title="invocations (self-score notes) · 调用次数">${r.usage > 0 ? `×${r.usage}` : "—"}</span>` +
-    verdict + `</summary>` +
-    `<div style="background:#fbfcfe;border-top:1px solid #f1f4f8;padding:12px 18px 14px 47px;display:grid;grid-template-columns:1fr 1fr;gap:18px;">` +
-    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("anatomy", "解剖")}</div>${tree}` +
-    `<div style="margin-top:9px;"><code class="copy-chip" data-copy="${esc(r.dirPath)}" style="${MONO}font-size:10.5px;padding:3px 9px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">${esc(r.dirPath)}</code></div></div>` +
-    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("audit essentials", "审计要件")}</div>` +
-    `<div style="display:flex;flex-wrap:wrap;gap:12px;">${check(r.hasLoadTrigger, "Load when")}${check(r.hasGotchas, "Gotchas")}` +
-    `<span style="${MONO}font-size:10.5px;color:${C.sub};">${r.routeCases.positive}+/${r.routeCases.negative}− ${bi("route cases", "路由用例")}</span></div>` +
-    (r.violations.length > 0 ? `<ul style="margin:8px 0 0;padding-left:16px;font-size:11.5px;color:${C.red};">${r.violations.map((v) => `<li>${esc(v)}</li>`).join("")}</ul>` : "") +
-    `<details data-open-key="skmd:${esc(r.name)}" style="margin-top:10px;"><summary style="${MONO}font-size:10.5px;color:${C.blue};cursor:pointer;">${bi("view SKILL.md hub", "查看 SKILL.md 原文")}</summary>` +
-    `<pre style="margin:8px 0 0;max-height:280px;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:8px;padding:10px 12px;${MONO}font-size:10.5px;line-height:1.5;color:${C.body};white-space:pre-wrap;">${esc(r.hubText)}</pre></details>` +
-    `</div></div></details>`
-  );
-}
-
-function skillsTab(input: TruthConsoleInput): string {
-  const sk = input.skills;
-  const groups = sk.groups
-    .map((g) => {
-      const meta = SKILL_GROUP_META[g.key] ?? { en: g.key, zh: g.key };
-      if (g.rows.length === 0) return "";
-      return (
-        `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;">` +
-        `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi(meta.en, meta.zh)}</span>` +
-        `<span style="${MONO}font-size:12px;color:${C.blue};font-weight:600;">${g.rows.length}</span>` +
-        `<span style="flex:1;height:1px;background:#dfe4ec;"></span></div>` +
-        `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.04);">${g.rows.map(skillRow).join("")}</section>`
-      );
-    })
-    .join("");
-  return (
-    `<div style="padding:30px 0 4px;">` +
-    kicker(bi("The contract says how — the audit says whether", "契约说该这样干——审计说有没有")) +
-    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Skills", "技能")}</h1>` +
-    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
-      "The catalog is read from the repo directory — a skill that is not on disk does not exist here.",
-      "清单从仓库目录实读——磁盘上不存在的技能这里也不存在。",
-    )}</p></div>` +
-    `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};margin:18px 0 8px;padding:13px 18px;display:flex;gap:26px;align-items:center;flex-wrap:wrap;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    `<span data-truth="skills-count" style="${MONO}font-size:13px;color:${C.ink};font-weight:600;">${sk.summary.skills} ${bi("skills", "个技能")}</span>` +
-    (sk.summary.auditRan
-      ? `<span style="${MONO}font-size:13px;color:${(sk.summary.violations as number) > 0 ? C.red : C.green};font-weight:600;">${sk.summary.violations} ${bi("violations", "违规")}</span>`
-      : `<span style="${MONO}font-size:13px;color:${C.amber};font-weight:600;">${bi("violations unknown — audit unavailable", "违规未知——审计不可用")}</span>`) +
-    `<span style="${MONO}font-size:13px;color:${C.sub};">${sk.summary.hubLines} ${bi("hub lines", "hub 总行数")}</span>` +
-    `<span style="flex:1;"></span>` +
-    `<span style="${MONO}font-size:10.5px;color:${C.faint};">${bi("same yardstick as audit-skills --strict", "与 audit-skills --strict 同口径")}</span></section>` +
-    groups
-  );
-}
-
 /* ============================ US-DOSSIER-033 — CHARTER ============================
  * The Charter PROJECT TAB + the markdown body styling shared with the machine
  * pages (About / Conventions). This is the dedicated Charter region — sibling
@@ -1189,22 +1106,27 @@ export function machinePalette(): typeof C & { mono: string } {
 }
 
 /**
- * US-DOSSIER-029 — the ONE tab set, in the order the design reference's nav
- * markup fixes (Overview → Loop → Release → Backlog → Skills, see
- * `Delivery Dossier.dc.html`). Both the rendered tab bar (which reads the
- * bilingual `{ en, zh }` labels) and the `CONSOLE_SCRIPT` hash router (which
- * only needs the `key` list, serialized in below) derive from this single
- * source, so the visible bar and the runtime router can never desync.
+ * US-DOSSIER-040 — the ONE project tab set, in the order the CORRECT design
+ * reference's nav markup fixes (Overview → Charter → Backlog → Loop → Release →
+ * Casting, see `Delivery Dossier.dc.html` `<!-- tabs -->`, lines 91–98:
+ * tabIndex/tabContext/tabEpics/tabLoop/tabRelease/tabCasting). Both the rendered
+ * tab bar (which reads the bilingual `{ en, zh }` labels) and the
+ * `CONSOLE_SCRIPT` hash router (which only needs the `key` list, serialized in
+ * below) derive from this single source, so the visible bar and the runtime
+ * router can never desync. Skills/Agents/Conventions/About are MACHINE-GLOBAL
+ * (reached via the MACHINE breadcrumb), never project tabs.
  */
 const TABS = [
   { key: "overview", en: "Overview", zh: "总览" },
-  { key: "loop", en: "Loop", zh: "循环" },
-  { key: "release", en: "Release", zh: "发版" },
-  { key: "backlog", en: "Backlog", zh: "待办" },
-  { key: "skills", en: "Skills", zh: "技能" },
   // US-DOSSIER-033 — the Charter project tab: a read-only markdown browser over
   // the project's own charter docs (manifesto/architecture/plans/guide).
   { key: "charter", en: "Charter", zh: "章程" },
+  { key: "backlog", en: "Backlog", zh: "待办" },
+  { key: "loop", en: "Loop", zh: "循环" },
+  { key: "release", en: "Release", zh: "发版" },
+  // US-DOSSIER-040 — Casting is its OWN top-level project tab (executor
+  // complexity ladder + scenario roles), no longer nested inside Loop.
+  { key: "casting", en: "Casting", zh: "选角" },
 ] as const;
 
 /** The router needs only the keys; serialized once, deterministic order. */
@@ -1657,13 +1579,16 @@ a{color:${C.blue};}
 @media (max-width:720px){.charter-browser{grid-template-columns:1fr !important;}.charter-tree{position:static !important;max-height:none !important;}}
 ` + MD_BODY_CSS;
 
+  // US-DOSSIER-040: pane order == tab order (Overview · Charter · Backlog · Loop
+  // · Release · Casting). Skills is NOT a project tab — it is a machine-global
+  // page (skills.html) reached via the MACHINE breadcrumb.
   const panes =
     `<div id="tab-overview">${overviewTab(input)}</div>` +
+    `<div id="tab-charter" style="display:none;">${charterTab(input)}</div>` +
+    `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
     `<div id="tab-loop" style="display:none;">${loopTab(input)}</div>` +
     `<div id="tab-release" style="display:none;">${releaseTab(input)}</div>` +
-    `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
-    `<div id="tab-skills" style="display:none;">${skillsTab(input)}</div>` +
-    `<div id="tab-charter" style="display:none;">${charterTab(input)}</div>`;
+    `<div id="tab-casting" style="display:none;">${castingTab(input)}</div>`;
 
   return (
     htmlHead(rollScope(input)) +

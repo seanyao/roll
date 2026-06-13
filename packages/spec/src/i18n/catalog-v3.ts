@@ -77,8 +77,8 @@ export const v3Catalog: Catalog = {
   // a human decision). Both en and zh present so the single-language contract
   // (output follows ROLL_LANG, never mixes) holds.
   "releasev3.usage": {
-    en: "Usage: roll release [--dry-run|--yes|--json]\n  The ONE release flow: bump → changelog fold → package gate → PR → merge → consistency gate → tag push.\n  Stops at the tag push; npm publish stays yours. No subcommands remain.",
-    zh: "用法：roll release [--dry-run|--yes|--json]\n  唯一发版流：版本号 → 折叠 changelog → 包闸 → PR → 合并 → 一致性闸 → 推 tag。\n  止步于推 tag；npm publish 仍由你执行。不再有子命令。",
+    en: "Usage: roll release [--dry-run|--yes|--showcase|--json]\n  The ONE release flow: bump → changelog fold → package gate → PR → merge → consistency gate → tag push.\n  Stops at the tag push; npm publish stays yours. No subcommands remain.\n  --showcase  After a successful release, run the golden-path showcase (real models; recommended, non-blocking — never fails the release).",
+    zh: "用法：roll release [--dry-run|--yes|--showcase|--json]\n  唯一发版流：版本号 → 折叠 changelog → 包闸 → PR → 合并 → 一致性闸 → 推 tag。\n  止步于推 tag；npm publish 仍由你执行。不再有子命令。\n  --showcase  发版成功后跑一次黄金路径 showcase（真模型；建议、非硬卡——绝不让发版失败）。",
   },
   "releasev3.title": {
     en: "Release plan",

@@ -129,6 +129,35 @@ describe("removed routes — AC2: the old surface is gone, not redirected", () =
   }
 });
 
+describe("US-SHOW-001 — release offers the golden-path showcase (recommended, non-blocking)", () => {
+  it("a successful dry-run prints the showcase pointer (no --showcase flag → just a pointer)", async () => {
+    const { deps } = fakeDeps();
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      // depsOverride goes via runReleaseFlow inside releaseCommand; dry-run keeps it side-effect free.
+      const code = await releaseCommand(["--dry-run", "--yes"], deps);
+      expect(code).toBe(0);
+    } finally {
+      process.stdout.write = so;
+    }
+    expect(out.toLowerCase()).toContain("roll showcase");
+  });
+
+  it("--showcase is advertised in the release usage", async () => {
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      await releaseCommand(["--help"]);
+    } finally {
+      process.stdout.write = so;
+    }
+    expect(out).toContain("--showcase");
+  });
+});
+
 describe("cleanup guard — AC8: no active source re-advertises the removed surface", () => {
   const ROOT = join(__dirname, "..", "..", "..");
   // US-DOSSIER-036: `roll release consistency check` is a RESTORED public

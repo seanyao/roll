@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseGoalYaml } from "@roll/spec";
-import { loopGoCommand, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
+import { loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -1375,5 +1375,142 @@ describe("FIX-269 — goal session waits for a running scheduled cycle", () => {
     const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
     expect(goal.status).toBe("paused");
     expect(goal.lastDecisionReason).toBe("inner_lock_busy");
+  });
+});
+
+describe("FIX-289 — go startup feedback + reliable watch window", () => {
+  function startTmuxDeps(p: string, overrides: Partial<LoopGoDeps> = {}): LoopGoDeps {
+    return {
+      ...completeGoalDeps(p),
+      hasTmux: () => true,
+      startTmux: () => true,
+      ...overrides,
+    };
+  }
+
+  it("AC1: prints session name, scope, first-cycle confirmation, and the read-only observe command", async () => {
+    const p = project();
+    const r = await capture(() => loopGoCommand(["--cards", "US-A,US-B"], startTmuxDeps(p)));
+
+    expect(r.code).toBe(0);
+    // Session name (not a vague one-liner).
+    expect(r.out).toContain("Goal go session started: roll-loop-proj-abc123");
+    // Scope.
+    expect(r.out).toContain("scope:");
+    expect(r.out).toContain("cards US-A, US-B");
+    // First cycle started confirmation.
+    expect(r.out).toContain("first cycle is running now");
+    // Read-only way to observe.
+    expect(r.out).toContain("tmux attach -t roll-loop-proj-abc123");
+    expect(r.out).toContain("roll loop go --attach");
+    // The worker window warning is present (do not Ctrl-C the worker).
+    expect(r.out).toContain("do not Ctrl-C it");
+  });
+
+  it("AC1: describes the default 'all' scope and an --epic scope", async () => {
+    const p = project();
+    const rAll = await capture(() => loopGoCommand([], startTmuxDeps(p)));
+    expect(rAll.out).toContain("all Todo backlog cards");
+
+    const rEpic = await capture(() => loopGoCommand(["--epic", "goal-mode"], startTmuxDeps(p)));
+    expect(rEpic.out).toContain("epic goal-mode");
+  });
+
+  it("AC2: a fresh session creates the watch window before the go window", () => {
+    const plan = planGoTmuxCommands(
+      { projectPath: "/proj", slug: "proj-abc123", args: ["--cards", "US-A"], rollBin: "roll" },
+      { sessionExists: false, watchWindowExists: false },
+    );
+    expect(plan).toHaveLength(2);
+    // First creates the session with a named `watch` window holding the live feed.
+    expect(plan[0]?.[0]).toBe("new-session");
+    expect(plan[0]).toContain("watch");
+    expect(plan[0]?.[plan[0].length - 1]).toContain("loop fmt");
+    // Then the detached worker `go` window.
+    expect(plan[1]?.[0]).toBe("new-window");
+    expect(plan[1]).toContain("go");
+  });
+
+  it("AC2: a reused session WITHOUT a watch window recreates the watch window", () => {
+    const plan = planGoTmuxCommands(
+      { projectPath: "/proj", slug: "proj-abc123", args: [], rollBin: "roll" },
+      { sessionExists: true, watchWindowExists: false },
+    );
+    expect(plan).toHaveLength(2);
+    // The missing watch window is recreated via new-window (NOT new-session).
+    expect(plan[0]?.[0]).toBe("new-window");
+    expect(plan[0]).toContain("watch");
+    expect(plan[0]?.[plan[0].length - 1]).toContain("loop fmt");
+    // Then the worker `go` window.
+    expect(plan[1]?.[0]).toBe("new-window");
+    expect(plan[1]).toContain("go");
+  });
+
+  it("AC2: a reused session that already has a watch window only adds the go window", () => {
+    const plan = planGoTmuxCommands(
+      { projectPath: "/proj", slug: "proj-abc123", args: [], rollBin: "roll" },
+      { sessionExists: true, watchWindowExists: true },
+    );
+    expect(plan).toHaveLength(1);
+    expect(plan[0]?.[0]).toBe("new-window");
+    expect(plan[0]).toContain("go");
+    expect(plan.some((argv) => argv.includes("watch"))).toBe(false);
+  });
+
+  it("AC3: --attach follows the read-only live feed in the foreground and explains Ctrl-C", async () => {
+    const p = project();
+    let followed: { path: string } | undefined;
+    const r = await capture(() =>
+      loopGoCommand(
+        ["--attach", "--cards", "US-A"],
+        startTmuxDeps(p, {
+          followFeed: async (path) => {
+            followed = { path };
+          },
+        }),
+      ),
+    );
+
+    expect(r.code).toBe(0);
+    expect(followed?.path).toBe(p);
+    expect(r.out).toContain("Following live feed");
+    expect(r.out).toContain("Ctrl-C stops the view, not the loop");
+  });
+
+  it("AC3: without --attach the command is fire-and-forget (no follow)", async () => {
+    const p = project();
+    let followCalls = 0;
+    const r = await capture(() =>
+      loopGoCommand(
+        ["--cards", "US-A"],
+        startTmuxDeps(p, {
+          followFeed: async () => {
+            followCalls += 1;
+          },
+        }),
+      ),
+    );
+
+    expect(r.code).toBe(0);
+    expect(followCalls).toBe(0);
+    expect(r.out).not.toContain("Following live feed");
+  });
+
+  it("AC3: --attach is stripped from the worker args handed to the tmux worker window", () => {
+    const plan = planGoTmuxCommands(
+      { projectPath: "/proj", slug: "proj-abc123", args: ["--attach", "--cards", "US-A"], rollBin: "roll" },
+      { sessionExists: false, watchWindowExists: false },
+    );
+    const goWindow = plan.find((argv) => argv.includes("go"));
+    expect(goWindow?.[goWindow.length - 1]).not.toContain("--attach");
+    // The scope flag the worker needs is preserved.
+    expect(goWindow?.[goWindow.length - 1]).toContain("--cards");
+  });
+
+  it("help documents the --attach flag", async () => {
+    const p = project();
+    const r = await capture(() => loopGoCommand(["--help"], completeGoalDeps(p)));
+    expect(r.out).toContain("--attach");
+    expect(r.out).toContain("follow the read-only live feed");
   });
 });

@@ -4,6 +4,9 @@
 
 ### 稳定性
 
+- `roll setup skills` 在全局安装环境不再向安装树写 guide 文档撞 ENOENT 崩栈：安装树无目录清单可维护，单行提示后跳过；源码仓行为不变（FIX-276） `[cli]`
+  <!-- evidence: .roll/features/documentation/FIX-276/latest/FIX-276-report.html -->
+
 - cycle worktree 依赖安装失败会直接以失败终态和 `[FAIL] worktree deps bootstrap failed` ALERT 暴露，并清理空 worktree，不再继续烧 agent 后误落 `idle_no_work`（FIX-268） `[loop]`
 
 ### 新功能

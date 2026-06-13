@@ -1034,16 +1034,23 @@ function runSummaryFromGoal(goal: RollGoal): RunSummary {
 }
 
 function applyRunOptions(goal: RollGoal, opts: GoOptions, at: string): RollGoal {
-  const maxHours = opts.forSeconds !== undefined ? opts.forSeconds / 3600 : goal.limits.maxHours;
+  // FIX-279: budget and run limits are EXPLICIT per `roll loop go` — they come
+  // only from THIS invocation's flags, never silently inherited from a prior
+  // session's persisted goal. Omitting --budget / --max-cycles / --for means
+  // "no limit this run" (the same defaults a fresh goal gets), so a flagless go
+  // can't be capped or bricked by a budget the user set days ago. (Scope and
+  // review still persist when unspecified — those are the goal's identity, not
+  // a per-run safety knob.) Strip the persisted budget/limits, then re-apply
+  // only what was passed now.
+  const { budgetUsd: _staleBudget, limits: _staleLimits, ...rest } = goal;
   return {
-    ...goal,
+    ...rest,
     scope: opts.scopeSpecified ? opts.scope : goal.scope,
     ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
     review: opts.reviewModeSpecified ? { mode: opts.reviewMode } : goal.review,
     limits: {
-      ...goal.limits,
       ...(opts.maxCycles !== undefined ? { maxCycles: opts.maxCycles } : {}),
-      ...(maxHours !== undefined ? { maxHours } : {}),
+      ...(opts.forSeconds !== undefined ? { maxHours: opts.forSeconds / 3600 } : {}),
     },
     updatedAt: at,
   };

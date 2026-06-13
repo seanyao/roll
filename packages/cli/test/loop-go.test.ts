@@ -573,6 +573,56 @@ updatedAt: 2026-06-11T11:15:00Z
     expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "budget" && e.action === "budget_limited")).toBe(true);
   });
 
+  it("FIX-279: a flagless go does not inherit a prior session's budget — budget is explicit per go", async () => {
+    const p = project();
+    // Stale goal from a prior session: $2 budget, capped at 1 cycle, already
+    // budget_limited with a leftover unknown-cost row. Today's flagless `go`
+    // must NOT inherit any of that — no --budget means no budget this run.
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: epic
+  epic: US-CLI
+review: auto
+budgetUsd: 2
+limits:
+  maxCycles: 1
+status: budget_limited
+usage:
+  cycles: 1
+  costUsd: 0
+  costUnknownRows: 1
+createdAt: 2026-06-11T16:11:49Z
+updatedAt: 2026-06-12T00:00:00Z
+`,
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_650,
+      nowIso: () => "2026-06-13T06:31:30Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--epic", "US-CLI"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    // budget cleared (not inherited), and the stale maxCycles:1 cap dropped.
+    expect(goal.budgetUsd).toBeUndefined();
+    expect(goal.limits.maxCycles).toBeUndefined();
+    // no budget gate trip — the run is not bricked before doing any work.
+    expect(goal.lastDecisionReason).not.toBe("budget_unknown_cost");
+    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.action === "budget_limited")).toBe(false);
+  });
+
   it("FIX-259: explicit --cards replaces a resumed paused all-backlog goal scope", async () => {
     const p = project();
     writeBacklog(p, [

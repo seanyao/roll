@@ -822,7 +822,10 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
       },
       selfScoreTrend: "self-score: mean 8.0 / min 7 / redo 0 (last 14)",
     });
-    expect(html).toContain('class="selfscore-card selfscore-good"');
+    // US-DOSSIER-019: with no pair provenance this score renders as the
+    // self-score FALLBACK card (the `selfscore-good` verdict class is preserved).
+    expect(html).toContain("selfscore-good");
+    expect(html).toContain('data-scoring="self"');
     expect(html).toContain("<b>9</b>/10");
     expect(html).toContain("good");
     expect(html).toContain("证据链完整，门禁干净。");
@@ -832,6 +835,94 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(storySpine({ story, selfScore: { skill: "roll-build", score: 9, verdict: "good", ts: "", note: "" } })).toContain(
       "Retrospective",
     );
+  });
+
+  it("US-DOSSIER-019: a pair score is shown FIRST and prominent (peer verdict, score, rationale, scorer, note link)", () => {
+    const html = renderStoryDossier({
+      story,
+      selfScore: {
+        skill: "roll-build",
+        score: 8,
+        verdict: "good",
+        ts: "2026-06-13T12:00:00Z",
+        note: "结对评委确认证据链完整。",
+        href: "notes/2026-06-13-roll-build-US-A-1-pair.md",
+        dimensions: { "test-quality": 8 },
+        scoring: "pair",
+        scoredBy: "kimi",
+      },
+    });
+    // The PAIR badge + scorer agent lead the block; it carries the pair data-attr.
+    expect(html).toContain('data-scoring="pair"');
+    expect(html).toContain("score-kind-pairscore");
+    expect(html).toContain("kimi"); // who graded it (AC3)
+    expect(html).toContain("Pair score — graded by peer kimi");
+    expect(html).toContain("结对打分 —— 由评委 kimi 评判");
+    expect(html).toContain("<b>8</b>/10");
+    expect(html).toContain("结对评委确认证据链完整。"); // rationale
+    expect(html).toContain('href="notes/2026-06-13-roll-build-US-A-1-pair.md"'); // note link
+    // A pair score must NOT be labelled a self-score fallback.
+    expect(html).not.toContain("Self-score (fallback");
+  });
+
+  it("US-DOSSIER-019: a self-score is the LABELLED fallback and surfaces its fallback-reason (AC2)", () => {
+    const html = renderStoryDossier({
+      story,
+      selfScore: {
+        skill: "roll-build",
+        score: 7,
+        verdict: "ok",
+        ts: "2026-06-13T12:00:00Z",
+        note: "无可用结对评委，自评留痕。",
+        scoring: "self",
+        fallbackReason: "no qualified heterogeneous scorer",
+      },
+    });
+    expect(html).toContain('data-scoring="self"');
+    expect(html).toContain("score-kind-selfscore");
+    expect(html).toContain("Self-score (fallback — no pair score)");
+    expect(html).toContain("自评（回落 —— 无结对打分）");
+    // The fallback reason comes from the SAME execution-layer field (not invented).
+    expect(html).toContain("Fallback reason: no qualified heterogeneous scorer");
+    expect(html).toContain("回落原因：no qualified heterogeneous scorer");
+    expect(html).not.toContain("Pair score");
+  });
+
+  it("US-DOSSIER-019: no score at all renders an honest empty retrospective, never throwing (AC4)", () => {
+    const html = renderStoryDossier({ story });
+    expect(html).toContain('data-phase="retrospective"');
+    expect(html).toContain("Not yet written");
+    // No score card is rendered (the `score-kind-*` strings still appear in the
+    // always-emitted CSS rules, so assert on the rendered card markup instead).
+    expect(html).not.toContain('data-scoring="pair"');
+    expect(html).not.toContain('data-scoring="self"');
+    expect(html).not.toContain('<span class="score-kind-badge');
+  });
+
+  it("US-DOSSIER-019: collected input lifts pair provenance from the score note's frontmatter", () => {
+    const p = project();
+    const card = join(p, ".roll", "features", "alpha", "US-A-1");
+    mkdirSync(join(card, "notes"), { recursive: true });
+    writeFileSync(
+      join(card, "notes", "2026-06-13-roll-build-US-A-1-1.md"),
+      "---\nskill: roll-build\nstory: US-A-1\nscore: 8\nverdict: good\nts: 2026-06-13T12:00:00Z\nscoring: pair\nscored-by: kimi\n---\n\n结对评委确认。\n",
+    );
+    const input = collectStoryDossierInput(p, { id: "US-A-1", epic: "alpha", type: "US", delivered: true });
+    expect(input.selfScore?.scoring).toBe("pair");
+    expect(input.selfScore?.scoredBy).toBe("kimi");
+  });
+
+  it("US-DOSSIER-019: a self-score note's fallback-reason flows through to collected input", () => {
+    const p = project();
+    const card = join(p, ".roll", "features", "alpha", "US-A-1");
+    mkdirSync(join(card, "notes"), { recursive: true });
+    writeFileSync(
+      join(card, "notes", "2026-06-13-roll-build-US-A-1-1.md"),
+      "---\nskill: roll-build\nstory: US-A-1\nscore: 7\nverdict: ok\nts: 2026-06-13T12:00:00Z\nscoring: self\nfallback-reason: pairing off\n---\n\n自评留痕。\n",
+    );
+    const input = collectStoryDossierInput(p, { id: "US-A-1", epic: "alpha", type: "US", delivered: true });
+    expect(input.selfScore?.scoring).toBe("self");
+    expect(input.selfScore?.fallbackReason).toBe("pairing off");
   });
 
   it("US-EVID-007: execution station can be filled by merged PR evidence when squash removed tcr commits", () => {

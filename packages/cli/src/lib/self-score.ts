@@ -13,6 +13,15 @@ export interface SelfScoreView {
   note: string;
   href?: string;
   dimensions?: Record<string, number>;
+  /** US-PAIR-009 / US-DOSSIER-019 provenance: "pair" when a heterogeneous peer
+   *  scored this delivery, "self" (or absent ⇒ self) when the working agent did.
+   *  Drives the dossier's pair-score-first vs self-score-fallback rendering. */
+  scoring?: "pair" | "self";
+  /** The agent that produced a pair score (US-PAIR-009 `scored-by:`). */
+  scoredBy?: string;
+  /** Why a pair score fell back to self (US-PAIR-010 `fallback-reason:`); only
+   *  present on a self-score note that recorded the fallback explicitly. */
+  fallbackReason?: string;
 }
 
 export interface SelfScoreEntry extends SelfScoreView {
@@ -94,6 +103,13 @@ export function parseSelfScoreNote(
   const story = field(fields, "story") ?? expectedStory ?? "";
   if (expectedStory !== undefined && story !== "" && story !== expectedStory) return null;
   const href = hrefFrom(hrefFromDir, sourcePath);
+  // US-PAIR-009 / US-DOSSIER-019 provenance from the note frontmatter: a
+  // `scoring: pair` note (with `scored-by:`) means a heterogeneous peer graded
+  // this delivery; otherwise it is a self-score (the working agent's own note).
+  const scoringRaw = (field(fields, "scoring") ?? "").toLowerCase();
+  const scoring = scoringRaw === "pair" ? "pair" : scoringRaw === "self" ? "self" : undefined;
+  const scoredBy = field(fields, "scored-by");
+  const fallbackReason = field(fields, "fallback-reason");
   return {
     skill: field(fields, "skill") ?? basename(sourcePath),
     story: story === "" ? expectedStory ?? "" : story,
@@ -104,6 +120,9 @@ export function parseSelfScoreNote(
     sourcePath,
     dimensions: dimensions(fields),
     ...(href !== undefined ? { href } : {}),
+    ...(scoring !== undefined ? { scoring } : {}),
+    ...(scoredBy !== undefined && scoredBy !== "" ? { scoredBy } : {}),
+    ...(fallbackReason !== undefined && fallbackReason !== "" ? { fallbackReason } : {}),
   };
 }
 

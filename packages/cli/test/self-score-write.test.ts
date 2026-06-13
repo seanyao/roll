@@ -140,6 +140,9 @@ describe("writeSelfScoreNote", () => {
     expect(text).toContain("scoring: pair");
     const entry = readLatestStorySelfScore(p, "FIX-900");
     expect(entry?.score).toBe(9); // reader unaffected by extra fields
+    // US-DOSSIER-019: the reader now also surfaces pair provenance.
+    expect(entry?.scoring).toBe("pair");
+    expect(entry?.scoredBy).toBe("codex");
   });
 
   it("US-PAIR-009: defaults to scoring: self and records a fallback reason", () => {
@@ -149,6 +152,10 @@ describe("writeSelfScoreNote", () => {
     const text = readFileSync(res.path, "utf8");
     expect(text).toContain("scoring: self");
     expect(text).toContain("fallback-reason: no heterogeneous candidate");
+    // US-DOSSIER-019: the reader surfaces the self provenance + fallback reason.
+    const entry = readLatestStorySelfScore(p, "FIX-900");
+    expect(entry?.scoring).toBe("self");
+    expect(entry?.fallbackReason).toBe("no heterogeneous candidate");
   });
 
   it("refuses to write outside a roll project (no stray .roll/ minting)", () => {

@@ -5,7 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { serializeTruthSnapshot, type TruthSnapshot } from "@roll/spec";
-import { renderTruthConsole, renderMachineStubPage, type ProjectRegistryEntry } from "../src/lib/truth-console.js";
+import { renderTruthConsole, renderMachineStubPage, rollScope, type ProjectRegistryEntry } from "../src/lib/truth-console.js";
+import { renderAgentsMachinePage } from "../src/lib/page-agents.js";
+import { renderSkillsPage } from "../src/lib/page-skills.js";
 import { collectLoopHeartbeat } from "../src/lib/loop-heartbeat.js";
 import { collectCasting } from "../src/lib/casting.js";
 import { parseProjectsRegistry } from "../src/lib/projects-registry.js";
@@ -765,5 +767,173 @@ describe("projects registry parser — US-DOSSIER-027", () => {
     expect(parseProjectsRegistry("42")).toEqual([]);
     // rows missing required string fields are dropped
     expect(parseProjectsRegistry(JSON.stringify([{ name: "x" }, { slug: 1, path: "/p" }]))).toEqual([]);
+  });
+});
+
+/**
+ * US-DOSSIER-034 — the bilingual + view-state closer for the 030–033 build wave.
+ * Two console-wide contracts are hardened and pinned: (1) every NEW user-visible
+ * string routes through bi() (EN and 中 as separate .lang-en/.lang-zh spans,
+ * never inline-mixed); (2) chosen language, active tab, and EVERY collapsible
+ * open-state persist to localStorage and restore across view changes + drilldown
+ * / back, scoped per project, degrading safely when storage is unavailable.
+ */
+describe("lang/tab/section persistence + bilingual closer — US-DOSSIER-034", () => {
+  const html = render();
+
+  it("AC2: chosen language persists globally (roll-lang), inferred from navigator on first visit", () => {
+    expect(html).toContain('set("roll-lang", lang)'); // write on toggle
+    expect(html).toContain('get("roll-lang")'); // read on load
+    expect(html).toContain('(navigator.language || "").toLowerCase().indexOf("zh") === 0'); // zh inference
+    expect(html).toContain('d.setAttribute("data-lang", lang)'); // applied before first paint
+    // lang is deliberately NOT project-scoped (one reading language per machine)
+    expect(html).not.toContain('"roll-lang:" + scope');
+  });
+
+  it("AC3: the active tab persists (roll-tab, scoped) and restores when the hash drops", () => {
+    // write the active tab on every applyTab
+    expect(html).toContain('set(tabKey(), cur)');
+    // restore from storage when no tab in the hash (bare reload / back from drilldown)
+    expect(html).toContain('var saved = get(tabKey());');
+    expect(html).toContain('if (TABS.indexOf(saved) >= 0) return saved;');
+    // hash routing still resolves first (deep links win over the saved tab)
+    expect(html).toContain('if (TABS.indexOf(h) >= 0) return h;');
+    expect(html).toContain('window.addEventListener("hashchange"');
+    // scoped per project so the switcher never carries one project's tab into another
+    expect(html).toContain('function tabKey() { return "roll-tab:" + scope; }');
+  });
+
+  it("AC4: every collapsible carries a STABLE data-open-key (id, not DOM order)", () => {
+    // cycle ledger / agents / backlog epics / skills / release history rows
+    expect(html).toContain('data-open-key="cy:20260612-x-1234"'); // cycle id
+    expect(html).toContain('data-open-key="ag:claude"'); // agent name
+    expect(html).toContain('data-open-key="ep:alpha"'); // epic name
+    expect(html).toContain('data-open-key="sk:roll-build"'); // skill name
+    expect(html).toContain('data-open-key="rel:v3.612.2"'); // release tag
+    expect(html).toContain('data-tag="v3.612.2"'); // rel-hist keyed by tag, not order
+  });
+
+  it("AC4: open-state restore + persist wiring is present and runs before filters", () => {
+    expect(html).toContain('function restoreOpen()');
+    expect(html).toContain('function bindOpenPersistence()');
+    expect(html).toContain('document.querySelectorAll("[data-open-key]")');
+    // toggle listener writes the open set keyed by data-open-key
+    expect(html).toContain('this.getAttribute("data-open-key")');
+    expect(html).toContain('if (this.open) map[k] = 1; else delete map[k];');
+    // restore happens on load, before applyPrefilter (so a filter force-open can still win)
+    expect(html).toMatch(/restoreOpen\(\);[\s\S]{0,60}bindOpenPersistence\(\);[\s\S]{0,60}applyPrefilter\(\);/);
+  });
+
+  it("AC4: open-section storage is SCOPED per project (no leak across the switcher)", () => {
+    expect(html).toContain('function openKey() { return "roll-open:" + scope; }');
+    expect(html).toContain('var scope = d.getAttribute("data-roll-scope")');
+    // the scope is stamped on <html> at generate time, from the current slug
+    const scoped = render(SNAP, { projects: REGISTRY, currentSlug: "roll" });
+    expect(scoped).toContain('data-roll-scope="roll"');
+    expect(rollScope({ brand: { name: "roll", slogan: "" }, currentSlug: "acme" })).toBe("acme");
+    expect(rollScope({ brand: { name: "roll", slogan: "" } })).toBe("roll"); // falls back to brand name
+  });
+
+  it("AC4: the Charter selected doc persists (scoped) so a bare reload keeps the reader's place", () => {
+    expect(html).toContain('get("roll-charter:" + scope)');
+    expect(html).toContain('set("roll-charter:" + scope, want)');
+  });
+
+  it("AC6: persistence degrades safely — all storage access is try/catch guarded", () => {
+    // the shared get/set swallow storage errors (file:// / private mode)
+    expect(html).toContain("function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }");
+    expect(html).toContain("function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }");
+    // readOpen tolerates malformed / absent JSON without throwing
+    expect(html).toContain("try { var o = JSON.parse(raw); return o && typeof o === \"object\" ? o : {}; } catch (e) { return {}; }");
+  });
+
+  it("AC1/AC5: every NEW surface label is bilingual — EN and 中 both present", () => {
+    for (const [en, zh] of [
+      // Casting + Hooks (US-DOSSIER-030)
+      ["Casting", "角色分工"],
+      ["Hooks · this repo", "钩子 · 本仓"],
+      ["Executor · easy", "执行 · easy"],
+      ["must differ from builder", "强制异构于执行者"],
+      ["follows the active client", "跟随当前交互客户端"],
+      // Charter tab (US-DOSSIER-033)
+      ["Charter", "章程"],
+      ["Read-only · the rulebook you are governed by", "只读 · 你被约束的规则书"],
+      ["Epic plans", "史诗计划"],
+    ] as const) {
+      expect(html).toContain(en);
+      expect(html).toContain(zh);
+    }
+  });
+
+  it("AC1/AC5: the new surfaces emit balanced .lang-en/.lang-zh spans, none inline-mixed", () => {
+    // the bilingual primitive emits paired spans; the count is balanced (every EN
+    // label has its 中 sibling) so neither side is a one-language string.
+    const enSpans = [...html.matchAll(/class="lang-en"/g)].length;
+    const zhSpans = [...html.matchAll(/class="lang-zh"/g)].length;
+    expect(enSpans).toBe(zhSpans);
+    expect(enSpans).toBeGreaterThan(0);
+    // a bilingual label never renders EN and 中 jammed in one text node
+    expect(html).not.toMatch(/>Casting\s*角色分工</);
+    expect(html).not.toMatch(/>Charter\s*章程</);
+  });
+
+  it("AC5: EN-view vs 中-view structure is identical (lang switch is CSS, not re-render)", () => {
+    // the same generated markup serves both languages — the lang attribute is set
+    // by the client script, the spans are always both present in the source. So
+    // an EN-only or 中-only translation gap is structurally impossible to hide.
+    expect(html).toContain('html[data-lang="en"] .lang-zh{display:none;}');
+    expect(html).toContain('html[data-lang="zh"] .lang-en{display:none;}');
+  });
+});
+
+/**
+ * US-DOSSIER-034 — the machine pages (Agents / Skills) carry the SAME persistence
+ * shell: per-project scope stamp + the open-state-keyed collapsibles inherit the
+ * shared CONSOLE_SCRIPT wiring, so a reader's expansions survive there too.
+ */
+describe("machine-page persistence parity — US-DOSSIER-034", () => {
+  const agentsPage = renderAgentsMachinePage({
+    brand: { name: "roll", slogan: "It just works." },
+    snapshot: { release: { latestTag: "v3.612.2" } },
+    agents: AGENTS,
+    projects: REGISTRY,
+    currentSlug: "roll",
+  });
+  const skillsPage = renderSkillsPage({
+    brand: { name: "roll", slogan: "It just works." },
+    snapshot: { release: { latestTag: "v3.612.2" } },
+    skills: SKILLS,
+    projects: REGISTRY,
+    currentSlug: "roll",
+  });
+
+  it("AC4: machine pages stamp the per-project scope so open-state never leaks", () => {
+    expect(agentsPage).toContain('data-roll-scope="roll"');
+    expect(skillsPage).toContain('data-roll-scope="roll"');
+  });
+
+  it("AC4: machine-page collapsibles carry stable data-open-key (agent / skill)", () => {
+    expect(agentsPage).toContain('data-open-key="ag:claude"');
+    expect(skillsPage).toContain('data-open-key="sk:roll-build"');
+    // the inline SKILL.md viewer toggle persists too, keyed by skill name
+    expect(skillsPage).toContain('data-open-key="skmd:roll-build"');
+  });
+
+  it("AC4: the shared open-state restore/persist wiring rides the machine pages", () => {
+    for (const page of [agentsPage, skillsPage]) {
+      expect(page).toContain('function restoreOpen()');
+      expect(page).toContain('function bindOpenPersistence()');
+      expect(page).toContain('var scope = d.getAttribute("data-roll-scope")');
+    }
+  });
+
+  it("AC1: machine-page copy is bilingual EN + 中 (balanced lang spans, no leak)", () => {
+    for (const page of [agentsPage, skillsPage]) {
+      const en = [...page.matchAll(/class="lang-en"/g)].length;
+      const zh = [...page.matchAll(/class="lang-zh"/g)].length;
+      expect(en).toBe(zh);
+      expect(en).toBeGreaterThan(0);
+      expect(page).not.toContain("undefined");
+    }
   });
 });

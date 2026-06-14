@@ -8,7 +8,16 @@
  * missing ⇒ FAIL). The non-deterministic real-agent step is NOT exercised here
  * — that is the ROLL_SHOWCASE=1-gated E2E.
  */
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  probeMissingAgents,
+  resetSandbox,
+  type RunRollOptions,
+  type SubResult,
+} from "../src/commands/showcase.js";
 import {
   assembleEvidenceChain,
   castingAgentsYaml,
@@ -185,5 +194,87 @@ describe("showcaseVerdict", () => {
   it("FAIL on an empty chain (defensive — never a vacuous PASS)", () => {
     const v = showcaseVerdict({ links: [], sameNumber: undefined });
     expect(v.pass).toBe(false);
+  });
+});
+
+describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)", () => {
+  const casting = { ...DEFAULT_SHOWCASE_CASTING }; // kimi / claude / pi
+
+  /** A runner that records the options it was invoked with and returns a canned `agent list`. */
+  function recordingRunner(stdout: string, code = 0): {
+    runner: (s: string, h: string, args: string[], opts?: RunRollOptions) => SubResult;
+    calls: { args: string[]; opts?: RunRollOptions }[];
+  } {
+    const calls: { args: string[]; opts?: RunRollOptions }[] = [];
+    const runner = (_s: string, _h: string, args: string[], opts?: RunRollOptions): SubResult => {
+      calls.push({ args, ...(opts !== undefined ? { opts } : {}) });
+      return { code, stdout, stderr: "" };
+    };
+    return { runner, calls };
+  }
+
+  it("probes `roll agent list` with {realHome:true} — NOT the throwaway sandbox home", () => {
+    const { runner, calls } = recordingRunner("claude\nkimi\npi\n");
+    probeMissingAgents("/sandbox", "/throwaway-home", casting, runner);
+    expect(calls.length).toBe(1);
+    expect(calls[0]?.args).toEqual(["agent", "list"]);
+    // The whole point of the fix: availability is a machine fact, so the probe
+    // must run against the real ROLL_HOME, never the empty sandbox home.
+    expect(calls[0]?.opts?.realHome).toBe(true);
+  });
+
+  it("when the cast trio IS available in the real env, nothing is missing (no false abort)", () => {
+    // The real `roll agent list` lists claude / kimi / pi — all cast agents present.
+    const { runner } = recordingRunner("Available agents:\n  claude\n  kimi\n  pi\n");
+    expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual([]);
+  });
+
+  it("a GENUINELY-missing cast agent fails loud (reported as missing)", () => {
+    // pi is NOT installed in the real env → only pi is reported missing.
+    const { runner } = recordingRunner("Available agents:\n  claude\n  kimi\n");
+    expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual(["pi"]);
+  });
+
+  it("an empty real env (the OLD sandbox-home bug) would report all cast agents missing", () => {
+    // This is exactly the false-abort the fix avoids: probing an EMPTY home lists
+    // zero agents. The probe must NOT do this (it uses realHome), but if the real
+    // env genuinely has no agents, fail loud — never fabricate availability.
+    const { runner } = recordingRunner("", 1);
+    expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual([
+      "kimi",
+      "claude",
+      "pi",
+    ]);
+  });
+});
+
+describe("resetSandbox — already-Todo is a benign success, not a failure (FIX-292)", () => {
+  function sandboxWithBacklog(backlog: string): string {
+    const root = mkdtempSync(join(tmpdir(), "roll-showcase-reset-"));
+    mkdirSync(join(root, ".roll"), { recursive: true });
+    writeFileSync(join(root, ".roll", "backlog.md"), backlog, "utf8");
+    return root;
+  }
+
+  it("flipping a Done card back to Todo is ok (and records the flip)", () => {
+    const sandbox = sandboxWithBacklog("| US-DEMO-001 | demo | ✅ Done |\n");
+    const r = resetSandbox(sandbox, "US-DEMO-001");
+    expect(r.ok).toBe(true);
+    expect(r.reset).toBe(true);
+    expect(readFileSync(join(sandbox, ".roll", "backlog.md"), "utf8")).toContain("📋 Todo");
+  });
+
+  it("a card ALREADY Todo is ok (benign no-op), NOT a failure", () => {
+    const sandbox = sandboxWithBacklog("| US-DEMO-001 | demo | 📋 Todo |\n");
+    const r = resetSandbox(sandbox, "US-DEMO-001");
+    expect(r.ok).toBe(true); // <- the fix: already-Todo must not mark the step ✗
+    expect(r.reset).toBe(false); // nothing physically flipped
+    expect(r.notes.join(" ")).toContain("already Todo");
+  });
+
+  it("a card row with no recognizable status token is NOT ok (genuinely can't reset)", () => {
+    const sandbox = sandboxWithBacklog("| US-DEMO-001 | demo | someday |\n");
+    const r = resetSandbox(sandbox, "US-DEMO-001");
+    expect(r.ok).toBe(false);
   });
 });

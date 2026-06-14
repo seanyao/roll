@@ -105,12 +105,62 @@ describe("collectCycleLedger", () => {
   });
 
   it("FIX-290 AC3: a real 0-token cycle is '—' (TRUE-0), distinct from '?' (UNKNOWN)", () => {
+    // A real cycle (story picked) whose parsed usage genuinely summed to 0 — kept
+    // (it is a cycle, not an idle heartbeat) and rendered "—", not "?".
     const p = project([
-      { cycle_id: "z", status: "idle", outcome: "idle_no_work", ts: "2026-06-12T01:00:00Z", tokens_in: 0, tokens_out: 0 },
+      { cycle_id: "z", status: "aborted", outcome: "aborted_no_delivery", story_id: "FIX-Z", ts: "2026-06-12T01:00:00Z", tokens_in: 0, tokens_out: 0 },
     ]);
     const r = collectCycleLedger(p)[0]!;
     expect(r.tokens).toBe("—"); // not "?": this row was NOT marked usage_unknown
     expect(r.cost).toBe("—");
+  });
+});
+
+describe("FIX-297 — idle heartbeats are not cycles", () => {
+  it("excludes idle_no_work heartbeats but keeps real cycles (delivered + failed)", () => {
+    const p = project([
+      // real delivered cycle
+      { cycle_id: "real-1", status: "merged", outcome: "delivered", story_id: "US-A-1", agent: "claude", ts: "2026-06-12T05:00:00Z" },
+      // idle heartbeat, explicit outcome form (the live runner's shape)
+      { cycle_id: "idle-1", status: "idle", outcome: "idle_no_work", story_id: "", agent: "", tcr_count: 0, built: [], ts: "2026-06-12T04:00:00Z" },
+      // real failed cycle
+      { cycle_id: "real-2", status: "failed", outcome: "failed", story_id: "US-A-2", agent: "pi", ts: "2026-06-12T03:00:00Z" },
+      // idle heartbeat, status-only form (older shape: status idle, no outcome)
+      { cycle_id: "idle-2", status: "idle", story_id: "", agent: "", tcr_count: 0, built: [], ts: "2026-06-12T02:00:00Z" },
+    ]);
+    const rows = collectCycleLedger(p);
+    expect(rows.map((r) => r.cycleId)).toEqual(["real-1", "real-2"]); // newest-first, idle excluded
+    expect(rows.some((r) => r.verdict === "idle")).toBe(false);
+  });
+
+  it("failures stay first-class: failed/blocked/aborted real cycles present and counted", () => {
+    const p = project([
+      { cycle_id: "f", status: "failed", outcome: "failed", story_id: "US-1", ts: "2026-06-12T05:00:00Z" },
+      { cycle_id: "b", status: "blocked", outcome: "blocked", story_id: "US-2", ts: "2026-06-12T04:00:00Z" },
+      { cycle_id: "ab", status: "aborted", outcome: "aborted_no_delivery", story_id: "US-3", ts: "2026-06-12T03:00:00Z" },
+      { cycle_id: "rev", status: "reverted", story_id: "US-4", ts: "2026-06-12T02:00:00Z" },
+      // a pile of idle heartbeats that must NOT dilute or hide the failures
+      { cycle_id: "i1", status: "idle", outcome: "idle_no_work", story_id: "", tcr_count: 0, built: [], ts: "2026-06-12T01:30:00Z" },
+      { cycle_id: "i2", status: "idle", outcome: "idle_no_work", story_id: "", tcr_count: 0, built: [], ts: "2026-06-12T01:00:00Z" },
+    ]);
+    const rows = collectCycleLedger(p);
+    expect(rows.map((r) => r.cycleId).sort()).toEqual(["ab", "b", "f", "rev"]); // all 4 failures kept, both idle dropped
+    expect(ledgerFailedCount(rows)).toBe(4); // failed + blocked + aborted + reverted, none swallowed
+  });
+
+  it("an idle-verdict row that DID pick a story or do work is a real cycle, not a heartbeat", () => {
+    const p = project([
+      // status idle but story present → real cycle, kept
+      { cycle_id: "with-story", status: "idle", story_id: "US-9", agent: "kimi", ts: "2026-06-12T05:00:00Z" },
+      // status idle, no story, but tcr work happened → real cycle, kept
+      { cycle_id: "with-work", status: "idle", story_id: "", tcr_count: 3, ts: "2026-06-12T04:00:00Z" },
+      // status idle, no story, but something was built → real cycle, kept
+      { cycle_id: "with-built", status: "idle", story_id: "", built: ["US-7"], ts: "2026-06-12T03:00:00Z" },
+      // genuine heartbeat → dropped
+      { cycle_id: "pure-idle", status: "idle", outcome: "idle_no_work", story_id: "", tcr_count: 0, built: [], ts: "2026-06-12T02:00:00Z" },
+    ]);
+    const rows = collectCycleLedger(p);
+    expect(rows.map((r) => r.cycleId).sort()).toEqual(["with-built", "with-story", "with-work"]);
   });
 });
 
@@ -126,11 +176,14 @@ describe("kimi pair-review regressions", () => {
   });
 
   it("numeric epoch ts is understood (seconds and millis)", () => {
+    // Real cycles (failed) — idle heartbeats are excluded (FIX-297), so use
+    // non-idle rows to exercise the epoch-ts parsing.
     const p = project([
-      { cycle_id: "s", status: "idle", ts: 1781230000 },
-      { cycle_id: "ms", status: "idle", ts: 1781230000000 },
+      { cycle_id: "s", status: "failed", ts: 1781230000 },
+      { cycle_id: "ms", status: "failed", ts: 1781230000000 },
     ]);
     const rows = collectCycleLedger(p);
+    expect(rows.length).toBe(2);
     expect(rows.every((r) => r.tsSec === 1781230000)).toBe(true);
   });
 

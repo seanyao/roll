@@ -60,6 +60,27 @@ export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
   return rows.filter((r) => r.verdict === "failed" || r.verdict === "reverted" || r.verdict === "blocked").length;
 }
 
+/**
+ * FIX-297: idle heartbeats are NOT cycles. The scheduled loop lane wakes on its
+ * interval, finds no eligible Todo, writes an idle row (no story picked, no work
+ * attempted) and sleeps. Those rows stay in runs.jsonl as loop-liveness data,
+ * but the cycle ledger must list ONLY real cycles — a story was picked and work
+ * was attempted. We drop a row only when it is genuinely a no-op heartbeat:
+ * idle verdict (outcome `idle_no_work` or status `idle`) AND no story AND no
+ * work (no tcr commits, nothing built). Failures/blocked/aborted carry a story
+ * or work and so remain first-class.
+ */
+function isIdleHeartbeat(row: Record<string, unknown>, verdict: CycleLedgerVerdict): boolean {
+  if (verdict !== "idle") return false;
+  const storyId = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
+  if (storyId !== "") return false;
+  const tcr = typeof row["tcr_count"] === "number" ? (row["tcr_count"] as number) : 0;
+  if (tcr > 0) return false;
+  const built = row["built"];
+  if (Array.isArray(built) && built.length > 0) return false;
+  return true;
+}
+
 /** FIX-290 AC3: "?" when usage could not be read (UNKNOWN, model+duration still
  *  present), "—" only when there is genuinely nothing to show; a real value
  *  otherwise. A TRUE-0 (parsed usage that summed to 0) is never confused with
@@ -171,6 +192,9 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     const status = String(row["status"] ?? "");
     const outcome = String(row["outcome"] ?? "");
     const verdict = ledgerVerdict(status, outcome);
+    // FIX-297: idle no-op heartbeats are loop liveness, not cycles — exclude them
+    // from the ledger here at the collection point (they stay in runs.jsonl).
+    if (isIdleHeartbeat(row, verdict)) continue;
     const storyId = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
     // ts may be ISO or epoch (kimi pair-review).
     const rawTs = row["ts"];

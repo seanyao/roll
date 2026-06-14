@@ -6,9 +6,12 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  CODEX_DEFAULT_MODEL,
   type AgentUsage,
   type SessionAgg,
   aggregateSessions,
+  cycleCurrency,
+  sumCodexSession,
   sumClaudeStream,
   toCycleCost,
 } from "../src/index.js";
@@ -192,5 +195,113 @@ describe("sumClaudeStream — claude stream-json usage accumulation", () => {
     expect(sumClaudeStream([JSON.stringify({ type: "result", total_cost_usd: 0 })])).toBeNull();
     expect(sumClaudeStream([])).toBeNull();
     expect(sumClaudeStream(["not json", ""])).toBeNull();
+  });
+});
+
+
+describe("sumCodexSession — codex CLI session token_count recovery (FIX-303)", () => {
+  // Mirror the real codex `rollout-*.jsonl` wire shape: per-turn `event_msg`
+  // lines whose `payload.type === "token_count"` carry a CUMULATIVE
+  // `info.total_token_usage` snapshot (each turn re-states the running total),
+  // plus a `session_meta`/`turn_context` line carrying the model. codex
+  // `input_tokens` INCLUDES `cached_input_tokens`.
+  const meta = (model: string): string =>
+    JSON.stringify({ type: "turn_context", payload: { model } });
+  const tokenCount = (input: number, cached: number, output: number): string =>
+    JSON.stringify({
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: input,
+            cached_input_tokens: cached,
+            output_tokens: output,
+            total_tokens: input + output,
+          },
+        },
+      },
+    });
+
+  it("splits the LAST cumulative snapshot into the 4-component model", () => {
+    const lines = [
+      meta("gpt-5.5"),
+      tokenCount(1000, 800, 30), // earlier cumulative snapshot
+      tokenCount(1500, 1200, 50), // latest cumulative snapshot (running total)
+    ];
+    const u = sumCodexSession(lines);
+    expect(u).not.toBeNull();
+    // cache_read = cached; input = input − cached (codex input includes cached).
+    expect(u?.cache_read_tokens).toBe(1200);
+    expect(u?.input_tokens).toBe(300);
+    expect(u?.output_tokens).toBe(50);
+    // OpenAI has no separate cache-write surcharge → cache_creation always 0.
+    expect(u?.cache_creation_tokens).toBe(0);
+    expect(u?.model).toBe("gpt-5.5");
+  });
+
+  it("does not SUM per-turn snapshots (they are cumulative, take the max)", () => {
+    const u = sumCodexSession([meta("gpt-5.5"), tokenCount(10, 0, 1), tokenCount(40, 0, 4)]);
+    expect(u?.input_tokens).toBe(40);
+    expect(u?.output_tokens).toBe(4);
+  });
+
+  it("defaults the model when no meta line is present", () => {
+    const u = sumCodexSession([tokenCount(100, 10, 5)]);
+    expect(u?.model).toBe(CODEX_DEFAULT_MODEL);
+  });
+
+  it("no token_count event → null (n/a, never fake zero)", () => {
+    expect(sumCodexSession([meta("gpt-5.5")])).toBeNull();
+    expect(sumCodexSession([])).toBeNull();
+    expect(sumCodexSession(["not json", ""])).toBeNull();
+  });
+
+  it("feeds toCycleCost to a finite cost priced in the codex (USD) currency", () => {
+    const u = sumCodexSession([meta("gpt-5.5"), tokenCount(1_000_000, 0, 0)]);
+    expect(u).not.toBeNull();
+    const c = toCycleCost(u as AgentUsage, { cycleId: "cyc-codex", agent: "codex", revertCount: 0 });
+    // gpt-5.5 in = $5/M → 1M non-cached input ≈ $5.00.
+    expect(c.estimatedCost).toBeCloseTo(5, 4);
+    expect(cycleCurrency(c.model)).toBe("USD");
+  });
+});
+
+describe("FIX-303: cost computed in each agent's native currency", () => {
+  it("codex (gpt-5.5) prices in USD, kimi (kimi-k2.6) prices in CNY", () => {
+    // Same component split, different agent → different unit price AND currency.
+    const codex: AgentUsage = {
+      model: "gpt-5.5",
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+    };
+    const kimi: AgentUsage = {
+      model: "kimi-k2.6",
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+    };
+    const cCodex = toCycleCost(codex, { cycleId: "x", agent: "codex", revertCount: 0 });
+    const cKimi = toCycleCost(kimi, { cycleId: "y", agent: "kimi", revertCount: 0 });
+    expect(cCodex.estimatedCost).toBeCloseTo(5, 4); // $5/M input
+    expect(cKimi.estimatedCost).toBeCloseTo(6.5, 4); // ¥6.5/M input
+    expect(cycleCurrency(cCodex.model)).toBe("USD");
+    expect(cycleCurrency(cKimi.model)).toBe("CNY");
+  });
+
+  it("the cache-read component is priced separately from cache-miss input", () => {
+    // gpt-5.5: input $5/M, cache_read $0.50/M → 1M cache-read = $0.50, not $5.
+    const cacheHeavy: AgentUsage = {
+      model: "gpt-5.5",
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 1_000_000,
+      cache_creation_tokens: 0,
+    };
+    const c = toCycleCost(cacheHeavy, { cycleId: "z", agent: "codex", revertCount: 0 });
+    expect(c.estimatedCost).toBeCloseTo(0.5, 4);
   });
 });

@@ -106,12 +106,13 @@ describe("frozen: roll prices render", () => {
         "status": 0,
         "stderr": "",
         "stdout": "price snapshot  价格快照
-        version        2026-06-02
-        effective_at   2026-06-02
-        snapshots      3 loaded  已加载
+        version        2026-06-14
+        effective_at   2026-06-14
+        snapshots      4 loaded  已加载
           anthropic     USD  https://platform.claude.com/docs/en/about-claude/pricing
           deepseek      CNY  https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
           kimi          CNY  https://platform.kimi.com/docs/pricing/chat
+          openai        USD  https://openrouter.ai/openai/gpt-5.5
 
         model                    cur        in       out        cw        cr
         claude-haiku-4-5         USD    1.0000    5.0000    1.2500    0.1000
@@ -121,6 +122,9 @@ describe("frozen: roll prices render", () => {
         claude-sonnet-4-6        USD    3.0000   15.0000    3.7500    0.3000
         deepseek-v4-flash        CNY    1.0000    2.0000    1.0000    0.0200
         deepseek-v4-pro          CNY    3.0000    6.0000    3.0000    0.0250
+        gpt-4o                   USD    2.5000   10.0000    2.5000    1.2500
+        gpt-5                    USD    2.5000   15.0000    2.5000    0.2500
+        gpt-5.5                  USD    5.0000   30.0000    5.0000    0.5000
         kimi-for-coding          CNY    6.5000   27.0000    6.5000    1.1000
         kimi-k2.5                CNY    4.0000   21.0000    4.0000    0.7000
         kimi-k2.6                CNY    6.5000   27.0000    6.5000    1.1000

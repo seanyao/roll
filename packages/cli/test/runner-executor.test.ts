@@ -465,6 +465,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       commitsAhead: vi.fn(async () => 3),
       mainAhead: vi.fn(async () => 0),
       tcrCount: vi.fn(async () => 4),
+      recentCommits: vi.fn(async () => []),
       // RESUME-PRIOR-WORK probes — defaults make every fakePorts cycle base on
       // origin/main (no recorded prior branch in the default runs.jsonl path).
       fetchRemoteBranch: vi.fn(async () => ({ fetched: true })),

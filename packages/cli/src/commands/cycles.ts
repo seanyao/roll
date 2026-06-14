@@ -5,14 +5,20 @@
  * (collectCycleLedger), same verdict vocabulary, and the summary line counts
  * failed = failed + reverted + blocked — never swallowed.
  */
-import { resolveLang, type Lang } from "@roll/spec";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { resolveLang, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
+import { extractCycleSignals, signalKindForMarker, type TimelineEntry } from "@roll/core";
 import { collectCycleLedger, ledgerFailedCount, type CycleLedgerRow } from "../lib/cycle-ledger.js";
+import { findCycle } from "./cycle.js";
 import { c, renderState, stripAnsi } from "../render.js";
 
 export const CYCLES_USAGE =
-  "Usage: roll cycles [--since 1d|3d|7d|all]\n" +
+  "Usage: roll cycles [--since 1d|3d|7d|all] [--detail <id>]\n" +
   "  The cycle ledger: one line per cycle, failures never swallowed (default --since 3d).\n" +
-  "周期账本：每行一个 cycle，失败不被吞（默认 --since 3d）。";
+  "  --detail <id>  the per-cycle build-phase timeline (per-commit / heartbeat timing).\n" +
+  "周期账本：每行一个 cycle，失败不被吞（默认 --since 3d）。\n" +
+  "  --detail <id>  单个 cycle 的 build 阶段时间线（每提交/心跳计时）。";
 
 const WINDOWS: Record<string, number> = { "1d": 1, "3d": 3, "7d": 7 };
 
@@ -127,6 +133,105 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
   return `${lines.join("\n")}\n\n${summary}${hint}\n`;
 }
 
+/** Read + parse every event from the project's events.ndjson (empty on miss). */
+function readAllEvents(projectPath: string): RollEvent[] {
+  const path = join(projectPath, ".roll", "loop", "events.ndjson");
+  if (!existsSync(path)) return [];
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  const out: RollEvent[] = [];
+  for (const line of text.split("\n")) {
+    const ev = parseEventLine(line);
+    if (ev !== null) out.push(ev);
+  }
+  return out;
+}
+
+/** mm:ss from whole seconds (the offset column). */
+function clock(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/** Human gap ("+3m" / "+45s") between two timeline entries. */
+function gap(sec: number): string {
+  if (sec <= 0) return "";
+  return sec >= 90 ? `+${Math.round(sec / 60)}m` : `+${sec}s`;
+}
+
+const MARKER_COLOR: Record<string, string> = {
+  tcr: "green",
+  "build:heartbeat": "amber",
+  "ci:fail": "red",
+  "pr:merge": "green",
+  alert: "red",
+};
+
+/**
+ * US-LOOP-076 — the per-cycle build-phase timeline. Built from the SAME pure
+ * {@link extractCycleSignals} reducer the acceptance report and web trace consume
+ * (one 口径, zero agent special-casing), so a 37-min/2-commit anomaly is legible:
+ * each turning point shows its mm:ss offset and the gap since the previous one.
+ * The summary line surfaces the build span and TCR cadence at a glance.
+ */
+export function renderCycleDetail(events: RollEvent[], cycleId: string, lang: Lang): string {
+  const { timeline } = extractCycleSignals(events, cycleId);
+  if (timeline.length === 0) {
+    return lang === "zh"
+      ? `周期 ${cycleNo(cycleId)} 没有事件记录（build 阶段未观测到信号）\n`
+      : `no events recorded for cycle ${cycleNo(cycleId)} (no build-phase signals observed)\n`;
+  }
+  const lines: string[] = [];
+  lines.push(c("bold", `#${cycleNo(cycleId)} · ${cycleId}`));
+  lines.push(lang === "zh" ? "build 阶段时间线 · build-phase timeline" : "build-phase timeline");
+  lines.push("");
+  let prevOffset = 0;
+  for (const e of timeline) {
+    const color = MARKER_COLOR[e.marker] ?? (signalKindForMarker(e.marker) !== null ? "blue" : "muted");
+    const g = gap(e.offsetSec - prevOffset);
+    prevOffset = e.offsetSec;
+    const gapCol = g === "" ? "" : "  " + c("faint", g);
+    lines.push(`${c("muted", clock(e.offsetSec))}  ${c(color, e.marker.padEnd(16))} ${e.label}${gapCol}`);
+  }
+  // Build-span + TCR cadence summary (the anomaly detector at a glance).
+  const tcrs = timeline.filter((t) => t.marker === "tcr");
+  const beats = timeline.filter((t) => t.marker === "build:heartbeat").length;
+  const spanSec = (timeline[timeline.length - 1]?.offsetSec ?? 0) - (timeline[0]?.offsetSec ?? 0);
+  lines.push("");
+  lines.push(
+    lang === "zh"
+      ? `${clock(spanSec)} 总时长 · ${tcrs.length} 个 TCR 提交 · ${beats} 次心跳`
+      : `${clock(spanSec)} span · ${tcrs.length} TCR commits · ${beats} heartbeats`,
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+/** Machine view of the detail timeline — the SAME reducer, fields per entry. */
+export function cycleDetailJson(events: RollEvent[], cycleId: string): unknown {
+  const { timeline } = extractCycleSignals(events, cycleId);
+  const tcrs = timeline.filter((t: TimelineEntry) => t.marker === "tcr");
+  const beats = timeline.filter((t: TimelineEntry) => t.marker === "build:heartbeat").length;
+  const spanSec = (timeline[timeline.length - 1]?.offsetSec ?? 0) - (timeline[0]?.offsetSec ?? 0);
+  return {
+    cycleId,
+    no: cycleNo(cycleId),
+    spanSec,
+    tcrCount: tcrs.length,
+    heartbeats: beats,
+    timeline: timeline.map((t: TimelineEntry) => ({
+      offsetSec: t.offsetSec,
+      layer: t.layer,
+      marker: t.marker,
+      label: t.label,
+    })),
+  };
+}
+
 export function cyclesCommand(args: string[]): number {
   const noColor = args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
@@ -140,6 +245,30 @@ export function cyclesCommand(args: string[]): number {
     return 0;
   }
   const json = args.includes("--json");
+
+  // US-LOOP-076 — `roll cycles --detail <id>`: the per-cycle build-phase timeline.
+  // Resolves the handle against the ledger (same tolerance as `roll cycle <id>`),
+  // then renders from the SAME pure extractCycleSignals reducer the report uses.
+  const di = args.indexOf("--detail");
+  if (di >= 0) {
+    const handle = args[di + 1];
+    if (handle === undefined || handle.startsWith("-")) {
+      process.stderr.write(lang === "zh" ? `[roll] --detail 需要一个 cycle id\n` : `[roll] --detail needs a cycle id\n`);
+      return 1;
+    }
+    const cwd = process.cwd();
+    const ledger = collectCycleLedger(cwd);
+    const matched = findCycle(ledger, handle);
+    const cycleId = matched?.cycleId ?? handle;
+    const events = readAllEvents(cwd);
+    if (json) {
+      process.stdout.write(JSON.stringify(cycleDetailJson(events, cycleId), null, 2) + "\n");
+      return 0;
+    }
+    process.stdout.write(renderCycleDetail(events, cycleId, lang));
+    return 0;
+  }
+
   let since = "3d";
   const i = args.indexOf("--since");
   if (i >= 0) {
@@ -152,7 +281,7 @@ export function cyclesCommand(args: string[]): number {
     }
     since = v;
   }
-  const unknown = args.filter((a, idx) => a.startsWith("-") && a !== "--since" && a !== "--no-color" && a !== "--json" && !(idx > 0 && args[idx - 1] === "--since"));
+  const unknown = args.filter((a, idx) => a.startsWith("-") && a !== "--since" && a !== "--detail" && a !== "--no-color" && a !== "--json" && !(idx > 0 && (args[idx - 1] === "--since" || args[idx - 1] === "--detail")));
   if (unknown.length > 0) {
     process.stderr.write(`[roll] unknown flag: ${unknown[0]}\n${CYCLES_USAGE}\n`);
     return 1;

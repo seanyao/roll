@@ -78,6 +78,14 @@ function toEntry(ev: RollEvent): Omit<TimelineEntry, "offsetSec" | "layer"> | nu
       return { ts: ev.ts, marker: "cycle:end", label: `周期结束 · cycle end · ${ev.outcome}` };
     case "cycle:tcr":
       return { ts: ev.ts, marker: "tcr", label: `TCR ${ev.commitHash.slice(0, 9)} · ${clip(ev.message)}` };
+    case "cycle:stdout":
+      // US-LOOP-076: the runner-observed build heartbeat lands as a tagged stdout
+      // line; surface it on the outline spine so a long quiet build phase shows
+      // its liveness beats (and a 37-min/2-commit anomaly is legible). Ordinary
+      // (un-tagged) stdout is firehose noise and stays out of the timeline.
+      return ev.data.startsWith("heartbeat:")
+        ? { ts: ev.ts, marker: "build:heartbeat", label: `心跳 · ${clip(ev.data.replace(/^heartbeat:\s*/, ""))}` }
+        : null;
     case "ci:pass":
       return { ts: ev.ts, marker: "ci:pass", label: `Gate CI 通过 · PR #${ev.prNumber}` };
     case "ci:fail":

@@ -144,6 +144,23 @@ loop_safety:
     expect(junk.loopSafety.attestGate).toBeUndefined();
   });
 
+  it("parses loop_safety.peer_gate (FIX-293); absent ⇒ undefined (the reader defaults hard)", () => {
+    expect(parsePolicy("").loopSafety.peerGate).toBeUndefined();
+    expect(parsePolicy(`
+loop_safety:
+  peer_gate: hard
+`).loopSafety.peerGate).toBe("hard");
+    expect(parsePolicy(`
+loop_safety:
+  peer_gate: soft
+`).loopSafety.peerGate).toBe("soft");
+    // junk value → ignored (undefined ⇒ readPeerGateMode treats it as hard)
+    expect(parsePolicy(`
+loop_safety:
+  peer_gate: maybe
+`).loopSafety.peerGate).toBeUndefined();
+  });
+
   it("ignores comments and unknown keys (forward-compatible)", () => {
     const p = parsePolicy(`
 # leading comment

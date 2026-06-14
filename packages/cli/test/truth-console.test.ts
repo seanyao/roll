@@ -374,6 +374,68 @@ describe("loop tab cycle ledger — US-DOSSIER-013", () => {
   });
 });
 
+describe("loop tab cycle ledger — FIX-297", () => {
+  // A real cycleId is YYYYMMDD-HHMMSS-PID; `.slice(-6)` used to grab the `-`
+  // separator and render a fake negative "-32144".
+  const REAL_ID = "20260614-020436-32144";
+  const html = render();
+  const withReal = renderTruthConsole({
+    snapshot: SNAP,
+    snapshotJson: serializeTruthSnapshot(SNAP),
+    brand: { name: "roll", slogan: "It just works." },
+    backlog: BACKLOG,
+    spineKeys: SPINE,
+    cycles: [
+      {
+        cycleId: REAL_ID, tsSec: 1781230000, verdict: "delivered" as const, storyId: "US-A-1", agent: "claude",
+        model: "claude", tokens: "1k/400", cost: "$0.42", duration: "1m35s",
+        tape: [], evidence: [],
+      },
+    ],
+    agents: AGENTS,
+    releasePanel: RELEASE_PANEL,
+    releaseScope: RELEASE_SCOPE,
+    githubSlug: "seanyao/roll",
+    skills: SKILLS,
+    casting: CASTING,
+    charter: CHARTER,
+  });
+
+  it("AC1: the displayed handle is the trailing digit run — never a fake negative", () => {
+    // The handle span shows 32144 with NO leading separator…
+    expect(withReal).toContain(">32144<");
+    // …and the copy-chip (roll cycle <handle>) resolves the SAME handle.
+    expect(withReal).toContain("roll cycle 32144");
+    // The fake "-NNNNN" the old `.slice(-6)` produced must never be DISPLAYED.
+    // (The full cycleId legitimately contains "-32144" in its data attributes;
+    //  what must be gone is the rendered handle "-32144" and "roll cycle -32144".)
+    expect(withReal).not.toContain(">-32144<");
+    expect(withReal).not.toContain("roll cycle -32144");
+  });
+
+  it("AC2: the ledger opens on a count-capped 'recent' window (not all history)", () => {
+    // A new default range exists and is the one toggled on at render time…
+    expect(html).toContain('data-range="recent"');
+    expect(html).toContain('class="cy-range on" data-range="recent"');
+    // …and the page boots into it, not the old 3-day default.
+    expect(html).toContain('applyRange("recent")');
+    expect(html).not.toContain('applyRange("3")');
+    // The count cap is real (newest N), expandable to the full history via "all".
+    expect(html).toContain("RECENT_CAP");
+    expect(html).toContain('data-range="all"');
+  });
+
+  it("AC2: failures stay first-class — always shown, counted over the full ledger", () => {
+    // Failed/reverted/blocked rows are forced visible regardless of the window…
+    expect(html).toContain("var show = isFail || inWindow");
+    // …and the failed tally is the full-ledger total, not the in-window subset.
+    expect(html).toContain("failedAll++"); // counted before any window test
+    expect(html).toContain("f.textContent = String(failedAll)");
+    // The badge says so in plain language (failures never hidden).
+    expect(html).toContain("failed (all)");
+  });
+});
+
 // US-DOSSIER-040: the agents inventory is MACHINE-GLOBAL — it left the Loop tab
 // and now lives only on the machine Agents page (agents.html, rendered by
 // renderAgentsMachinePage). Its rendering is covered by page-agents.test.ts; the

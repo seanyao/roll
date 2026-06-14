@@ -18,7 +18,7 @@ import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { type DeliveryLadder, parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join as joinPath } from "node:path";
+import { isAbsolute as isAbsolutePath, join as joinPath, relative as relativePath, resolve as resolvePath } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { rowDelivered } from "./truth-adapter.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
@@ -30,12 +30,14 @@ const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** US-DOSSIER-024: one piece of inline evidence attached to an AC. `screenshot`
- *  is real-pixel proof (renders a thumbnail); `text` is a doc/contract link. */
+ *  is real-pixel proof (renders a thumbnail); `text` may carry inline body. */
 export interface AcEvidence {
   kind: "screenshot" | "text" | "cast" | "video";
   label?: string;
   /** Relative href to the artifact (screenshot/cast/video or a text file). */
   href?: string;
+  /** Text evidence body read from the story card folder when available. */
+  text?: string;
 }
 
 /** US-DOSSIER-024: whether an AC is "observable" (visual/interactive UI — needs a
@@ -716,9 +718,9 @@ function section(phaseKey: string, en: string, zh: string, body: string, empty: 
 /**
  * US-DOSSIER-024 — one piece of inline evidence rendered BENEATH its AC: a
  * screenshot is a real-pixel thumbnail (`<img>` linked to full size); a cast/
- * video is a labelled replay link; a text entry is a doc/contract link. A
- * screenshot whose `href` is missing degrades to a labelled link, never an
- * empty `<img>`.
+ * video is a labelled replay link; a text entry renders inline in a collapsed
+ * `<details><pre>` block. A screenshot whose `href` is missing degrades to a
+ * labelled link, never an empty `<img>`.
  */
 function acEvidenceItemHtml(e: AcEvidence): string {
   const label = esc(e.label ?? e.href ?? e.kind);
@@ -727,6 +729,12 @@ function acEvidenceItemHtml(e: AcEvidence): string {
       `<a class="ac-shot" href="${esc(e.href)}" title="${label}">` +
       `<img src="${esc(e.href)}" alt="${label}" loading="lazy"><span class="ac-shot-cap">${label}</span></a>`
     );
+  }
+  if (e.kind === "text") {
+    if (e.text !== undefined) {
+      return `<details class="ac-text-evidence"><summary>${label}</summary><pre>${esc(e.text)}</pre></details>`;
+    }
+    return `<span class="ac-text-missing">${bi("Text evidence unavailable", "文本证据不可用")}: ${label}</span>`;
   }
   const tag = e.kind === "cast" ? "cast" : e.kind === "video" ? "video" : "doc";
   if (e.href !== undefined) {
@@ -766,7 +774,7 @@ function acBlockHtml(row: AcRow, screenshotFiles: readonly string[]): string {
   const note = row.note !== undefined && row.note !== "" ? `<p class="ac-note">${esc(row.note)}</p>` : "";
   // Inline evidence beneath the AC. Screenshot entries from ac-map first, then
   // on-disk screenshot files not already named by ac-map (real captured pixels),
-  // then text/cast links. Dedup by BASENAME — ac-map hrefs (`screenshots/x.png`,
+  // then text details / cast links. Dedup by BASENAME — ac-map hrefs (`screenshots/x.png`,
   // `../screenshots/x.png`) and on-disk hrefs (`latest/screenshots/x.png`) point
   // at the same file under different relative prefixes. An observable gap shows
   // the explicit honest empty state.
@@ -913,7 +921,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.verify-empty { color:var(--muted); font-size:12px; }\n` +
     // US-DOSSIER-024: per-AC evidence blocks — each AC is its own card (AC id +
     // ladder-aligned status badge + observable/readonly chip), then note, then
-    // the inline evidence (screenshot thumbnails / text links) beneath it, then
+    // the inline evidence (screenshot thumbnails / text details) beneath it, then
     // the re-runnable verify command. The left border + gap chip color follow
     // the three-state spine ladder so an unproven observable AC reads honestly.
     `.ac-blocks { display:grid; gap:12px; margin:6px 0 0; }\n` +
@@ -930,6 +938,10 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.ac-shot { display:flex; flex-direction:column; gap:4px; width:160px; text-decoration:none; }\n` +
     `.ac-shot img { width:160px; height:96px; object-fit:cover; border:1px solid var(--line); border-radius:6px; background:#fff; display:block; }\n` +
     `.ac-shot-cap { font:10.5px/1.3 var(--mono); color:var(--muted); word-break:break-word; }\n` +
+    `.ac-text-evidence { flex:1 1 280px; min-width:min(100%,280px); border:1px solid var(--line); border-radius:6px; padding:7px 9px; background:color-mix(in srgb, var(--fg) 3%, transparent); }\n` +
+    `.ac-text-evidence summary { cursor:pointer; font:600 11.5px/1.5 var(--mono); color:var(--muted); }\n` +
+    `.ac-text-evidence pre { margin:7px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11.5px; line-height:1.5; }\n` +
+    `.ac-text-missing { display:inline-flex; align-items:center; border:1px dashed #c77d1266; border-radius:6px; padding:5px 9px; color:#c77d12; font:11.5px/1.5 var(--mono); }\n` +
     `.ac-evlink { display:inline-flex; align-items:center; gap:5px; font:11.5px/1.5 var(--mono); border:1px solid var(--line); border-radius:6px; padding:5px 9px; color:var(--muted); text-decoration:none; }\n` +
     `.ac-evlink.ac-ev-cast, .ac-evlink.ac-ev-video { color:#2d54e8; border-color:#2d54e855; }\n` +
     `.ac-evidence-empty { margin:9px 0 0; font-size:12px; color:#c77d12; }\n` +
@@ -1099,7 +1111,7 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
           // FIX-282: ac-map evidence hrefs are run-dir-relative (`../acceptance/x`);
           // the story page sits at the story root, so re-base before rendering or
           // every `<img>` resolves to the wrong parent dir (404).
-          const evidence = rebaseAcEvidenceToStoryRoot(parseAcEvidence(r.evidence));
+          const evidence = hydrateTextEvidence(dir, rebaseAcEvidenceToStoryRoot(parseAcEvidence(r.evidence)));
           return {
             ac: r.ac as string,
             status: r.status as string,
@@ -2156,6 +2168,29 @@ export function rebaseEvidenceHrefToStoryRoot(href: string): string {
  *  ac-map evidence list when rendering the STORY PAGE. */
 export function rebaseAcEvidenceToStoryRoot(ev: AcEvidence[]): AcEvidence[] {
   return ev.map((e) => (e.href !== undefined ? { ...e, href: rebaseEvidenceHrefToStoryRoot(e.href) } : e));
+}
+
+function storyRootRelativePath(storyDir: string, href: string): string | undefined {
+  const h = href.trim();
+  if (h === "" || /^[a-z]+:/i.test(h) || h.startsWith("/") || h.startsWith("#")) return undefined;
+  const root = resolvePath(storyDir);
+  const target = resolvePath(root, h);
+  const rel = relativePath(root, target);
+  if (rel === "" || rel.startsWith("..") || isAbsolutePath(rel)) return undefined;
+  return target;
+}
+
+function hydrateTextEvidence(storyDir: string, ev: AcEvidence[]): AcEvidence[] {
+  return ev.map((e) => {
+    if (e.kind !== "text" || e.href === undefined) return e;
+    const textPath = storyRootRelativePath(storyDir, e.href);
+    if (textPath === undefined) return e;
+    try {
+      return { ...e, text: readFile(textPath) };
+    } catch {
+      return e;
+    }
+  });
 }
 
 // Thin fs/git seams (kept local so the renderer stays pure above).

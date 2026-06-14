@@ -23,6 +23,13 @@
  * that is an EMPTY SHELL — parseable but with zero AC sections / no ac-map (the
  * FIX-214 case, where a heading naming another card stole all the AC) — is also
  * "skipped", not "produced". A real delivery's report carries ≥1 AC + an ac-map.
+ *
+ * Red-assertion floor (FIX-295): a `fail` AC — a check that EXECUTED AND went
+ * red — blocks the delivery unconditionally. `main` is PR-protected and always
+ * green, so a red check on a cycle branch is a regression the cycle introduced,
+ * never an "environmental" quirk; it cannot be waived. The honest non-execution
+ * exceptions (a `blocked` AC, a machine capture skip) are NOT failures and stay
+ * waivable as before.
  */
 import { acForStory, parsePolicy } from "@roll/core";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -149,6 +156,27 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   return { ok: false, reason: `pass AC(s) lack screenshot evidence or machine capture skip: ${ids}` };
 }
 
+/**
+ * FIX-295 — the red-assertion floor (AC-FIX2/AC-FIX3).
+ *
+ * The acceptance ladder distinguishes a check that EXECUTED AND FAILED (`fail` —
+ * "verified AND failed") from a check that COULD NOT RUN (`blocked` — "a
+ * precondition blocks verification"). `main` is PR-protected and always green
+ * (every merge passed CI), so a `fail` AC on a cycle branch is, by definition, a
+ * regression the cycle introduced — NOT an environment quirk. It can never be
+ * waived as "environmental"; the only honest exception is a check that could not
+ * execute at all (the `blocked` non-execution path / a machine capture skip).
+ *
+ * Returns the ids of every `fail`-status AC (empty ⇒ no red assertion). A
+ * delivery carrying any of these MUST be blocked — a red assertion is a
+ * regression, full stop.
+ */
+function redAcFailures(worktreeCwd: string, storyId: string): string[] {
+  const entries = readAcMapEntries(worktreeCwd, storyId);
+  if (entries === null) return [];
+  return entries.filter((e) => e.status === "fail").map((e) => e.ac ?? "?");
+}
+
 /** The acceptance report a delivered story must produce (skill step 10.6) —
  *  the canonical NEW-layout path, used for messaging. */
 export function verificationReportPath(worktreeCwd: string, storyId: string): string {
@@ -259,6 +287,10 @@ export interface AttestGateSinks {
  * Call ONLY on an actual delivery (commits ahead + a real story) — an idle cycle
  * has nothing to attest. `produced` → event only; `skipped` → ALERT + event, and
  * `blocked` iff the policy is hard.
+ *
+ * FIX-295: a `fail` AC (a check that ran and went red) blocks unconditionally —
+ * a red assertion on a cycle branch is a regression (main is always green), not
+ * an environment issue, so it is never waivable.
  */
 export function runAttestGate(
   worktreeCwd: string,
@@ -273,6 +305,25 @@ export function runAttestGate(
       const reasons = ["story has no AC block; acceptance report not required"];
       sinks.event({ cycleId, verdict: "produced", reasons });
       return { verdict: "produced", mode, reasons, blocked: false };
+    }
+    // FIX-295 (AC-FIX2/AC-FIX3): a red assertion is a regression, never an
+    // "environmental" exception. A `fail` AC (a check that ran and went red) on
+    // a cycle branch can only be the cycle's own regression — main is always
+    // green — so it blocks the delivery and the story is NOT marked Done. The
+    // only honest non-pass an env exception covers is a check that COULD NOT RUN
+    // (`blocked` / a machine capture skip), which is not a `fail`.
+    const redAcs = redAcFailures(worktreeCwd, storyId);
+    if (redAcs.length > 0) {
+      const reasons = [
+        `acceptance check failed for ${storyId}: ${redAcs.join(", ")} went red — a failing check is a regression, not an environment issue, so it cannot be waived`,
+      ];
+      const blocked = mode === "hard";
+      sinks.alert(
+        `attest gate (${mode}): acceptance check failed (${storyId}) — ${redAcs.join(", ")} went red; a red check is a regression and is never waived as environmental — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+      return { verdict: "skipped", mode, reasons, blocked };
     }
     const fresh = verificationReportFresh(worktreeCwd, storyId, sinceSec);
     // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /

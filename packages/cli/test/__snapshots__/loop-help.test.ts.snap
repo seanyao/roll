@@ -5,7 +5,7 @@ exports[`roll loop --help groups — US-DOSSIER-035 > AC6: EN/中 snapshots (sin
 The autonomous delivery loop — grouped control / observe / alerts / maintain.
 
 control   on · off · now · pause · resume · reset · go · goal
-observe   status · runs · log · events · signals · eval
+observe   watch · status · runs · log · events · signals · eval
 alerts    alert list · alert ack · alert resolve · alert log
 maintain  gc · fmt · mute · unmute · pr-inbox
 internal  test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run
@@ -17,7 +17,7 @@ exports[`roll loop --help groups — US-DOSSIER-035 > AC6: EN/中 snapshots (sin
 自治交付循环——按作动/传感/告警/维护分组。
 
 作动      on · off · now · pause · resume · reset · go · goal
-传感      status · runs · log · events · signals · eval
+传感      watch · status · runs · log · events · signals · eval
 告警      alert list · alert ack · alert resolve · alert log
 维护      gc · fmt · mute · unmute · pr-inbox
 内部      test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run

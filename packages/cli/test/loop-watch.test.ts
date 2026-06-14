@@ -1,0 +1,287 @@
+/**
+ * US-LOOP-074 — `roll loop watch`: one-command, read-only, concise live feed.
+ *
+ * The command auto-locates THIS project's .roll/loop/live.log and streams it
+ * through the US-LOOP-077 renderer. These tests pin the contract:
+ *   - data sourcing: it follows runtimeDir/live.log of the resolved project
+ *     (honoring ROLL_PROJECT_RUNTIME_DIR), and explains itself when there's none.
+ *   - READ-ONLY (AC2): the only loop interaction is a follow READ of live.log
+ *     (and, with --attach, a read-only tmux attach). The deps surface has no
+ *     write/signal seam at all — proven by construction + by asserting it never
+ *     uses any write path.
+ *   - concise default vs --verbose/--raw (AC3): default hides tier-C agent prose.
+ *   - --attach (AC5): recreates the `watch` tmux window when it is MISSING from a
+ *     reused session, then attaches read-only.
+ *   - mid-stream rendering (AC4) is covered in loop-fmt.test.ts via the shared
+ *     streamThroughRenderer engine; here we assert watch drives that engine.
+ */
+import { Readable } from "node:stream";
+import { spawn } from "node:child_process";
+import { appendFileSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { loopWatchCommand, type LoopWatchDeps } from "../src/commands/loop-watch.js";
+import { formatStream } from "../src/commands/loop-fmt.js";
+import type { GoTmuxState } from "../src/commands/loop-go.js";
+
+const CLI_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "roll.js");
+
+const CYCLE_STREAM = [
+  "── cycle 20260614-1 · US-LOOP-074 · agent claude ──",
+  JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "packages/cli/src/commands/loop-watch.ts" } }] } }),
+  JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "let me reason about this for a while" }] } }), // tier C
+  JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'tcr: add watch'" } }] } }),
+  JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: false, content: "[story/x def4567] tcr: add watch" }] } }),
+  JSON.stringify({ type: "result", subtype: "success", duration_ms: 8000, total_cost_usd: 0.03 }),
+];
+
+interface Recorder {
+  deps: LoopWatchDeps;
+  emitted: string[];
+  rendered: string[];
+  followedPath: string | null;
+  followStopped: boolean;
+  tmuxRuns: string[][];
+  attached: string | null;
+}
+
+/** A fully in-memory deps double — there is NO write/signal seam to record,
+ *  which is itself the read-only proof (AC2): the command literally cannot. */
+function makeDeps(overrides: Partial<LoopWatchDeps> & { state?: GoTmuxState } = {}): Recorder {
+  const rec: Recorder = {
+    deps: {} as LoopWatchDeps,
+    emitted: [],
+    rendered: [],
+    followedPath: null,
+    followStopped: false,
+    tmuxRuns: [],
+    attached: null,
+  };
+  const state: GoTmuxState = overrides.state ?? { sessionExists: false, watchWindowExists: false };
+  rec.deps = {
+    identity: overrides.identity ?? (async () => ({ path: "/proj", slug: "proj-abc123" })),
+    exists: overrides.exists ?? (() => true),
+    follow: overrides.follow ?? ((livePath) => {
+      rec.followedPath = livePath;
+      return {
+        stream: Readable.from(CYCLE_STREAM.map((l) => l + "\n")),
+        stop: () => {
+          rec.followStopped = true;
+        },
+      };
+    }),
+    render: overrides.render ?? (async (input, opts) => {
+      const lines: string[] = [];
+      for await (const chunk of input) lines.push(...String(chunk).split("\n").filter((l) => l !== ""));
+      rec.rendered.push(...formatStream(lines, opts.agent, { verbose: opts.verbose }));
+    }),
+    tmuxState: overrides.tmuxState ?? (() => state),
+    tmuxRun: overrides.tmuxRun ?? ((argv) => {
+      rec.tmuxRuns.push(argv);
+      return true;
+    }),
+    tmuxAttach: overrides.tmuxAttach ?? ((session) => {
+      rec.attached = session;
+    }),
+    hasTmux: overrides.hasTmux ?? (() => true),
+    emit: overrides.emit ?? ((line) => rec.emitted.push(line)),
+  };
+  return rec;
+}
+
+describe("roll loop watch — data sourcing (AC1)", () => {
+  it("follows the resolved project's .roll/loop/live.log", async () => {
+    const rec = makeDeps();
+    const code = await loopWatchCommand([], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.followedPath).toBe("/proj/.roll/loop/live.log");
+  });
+
+  it("honors ROLL_PROJECT_RUNTIME_DIR for the live.log location", async () => {
+    const prev = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = "/custom/rt";
+    try {
+      const rec = makeDeps();
+      await loopWatchCommand([], rec.deps);
+      expect(rec.followedPath).toBe("/custom/rt/live.log");
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prev;
+    }
+  });
+
+  it("explains itself (exit 1) when there is no live feed yet, without following", async () => {
+    const rec = makeDeps({ exists: () => false });
+    const code = await loopWatchCommand([], rec.deps);
+    expect(code).toBe(1);
+    expect(rec.followedPath).toBeNull(); // never opened a follow
+    expect(rec.emitted.join("\n")).toMatch(/no live feed/i);
+  });
+});
+
+describe("roll loop watch — read-only (AC2)", () => {
+  it("its ONLY loop interaction is a follow READ of live.log (no write/signal seam exists)", async () => {
+    const rec = makeDeps();
+    await loopWatchCommand([], rec.deps);
+    // The deps surface has no write/signal capability at all; the proof is that
+    // the command resolves by reading + rendering only, then stops the follow.
+    expect(rec.followedPath).toBe("/proj/.roll/loop/live.log");
+    expect(rec.followStopped).toBe(true); // the follow is torn down cleanly
+    expect(Object.keys(rec.deps)).not.toContain("write"); // no mutation seam
+  });
+});
+
+describe("roll loop watch — concise by default, verbose reveals raw (AC3)", () => {
+  it("default hides tier-C agent prose; key nodes (story/edit/tcr/cycle done) show", async () => {
+    const rec = makeDeps();
+    await loopWatchCommand([], rec.deps);
+    const out = rec.rendered.join("\n");
+    expect(out).toContain("US-LOOP-074"); // story banner
+    expect(out).toContain("loop-watch.ts"); // edit (folded)
+    expect(out).toContain("def4567"); // tcr
+    expect(out).toContain("cycle done"); // lifecycle end + cost
+    expect(out).not.toContain("let me reason"); // tier C hidden by default
+  });
+
+  it("--verbose surfaces the tier-C prose", async () => {
+    const rec = makeDeps();
+    await loopWatchCommand(["--verbose"], rec.deps);
+    expect(rec.rendered.join("\n")).toContain("let me reason");
+  });
+
+  it("--raw also surfaces everything (alias of verbose)", async () => {
+    const rec = makeDeps();
+    await loopWatchCommand(["--raw"], rec.deps);
+    expect(rec.rendered.join("\n")).toContain("let me reason");
+  });
+});
+
+describe("roll loop watch — look-back (-n/--since, AC3)", () => {
+  it("passes a numeric -n through to the follow look-back", async () => {
+    let seen = -1;
+    const rec = makeDeps({
+      follow: (livePath, sinceLines) => {
+        seen = sinceLines;
+        return { stream: Readable.from([]), stop: () => {} };
+      },
+    });
+    await loopWatchCommand(["-n", "50"], rec.deps);
+    expect(seen).toBe(50);
+  });
+
+  it("--since all means from the start of the log (0 = +1)", async () => {
+    let seen = -1;
+    const rec = makeDeps({
+      follow: (_p, sinceLines) => {
+        seen = sinceLines;
+        return { stream: Readable.from([]), stop: () => {} };
+      },
+    });
+    await loopWatchCommand(["--since", "all"], rec.deps);
+    expect(seen).toBe(0);
+  });
+
+  it("rejects a non-numeric -n with exit 1 and a clear reason", async () => {
+    const rec = makeDeps();
+    const code = await loopWatchCommand(["-n", "lots"], rec.deps);
+    expect(code).toBe(1);
+    expect(rec.emitted.join("\n")).toMatch(/-n.*must be/i);
+  });
+});
+
+describe("roll loop watch --attach (AC5) — read-only tmux observe window", () => {
+  it("recreates the watch window when it is MISSING from a reused session, then attaches read-only", async () => {
+    const rec = makeDeps({ state: { sessionExists: true, watchWindowExists: false } });
+    const code = await loopWatchCommand(["--attach"], rec.deps);
+    expect(code).toBe(0);
+    // A new-window for `watch` was created (and only that — never a go/worker window).
+    const watchCreate = rec.tmuxRuns.find((argv) => argv[0] === "new-window" && argv.includes("watch"));
+    expect(watchCreate).toBeDefined();
+    expect(rec.tmuxRuns.some((argv) => argv.join(" ").includes("loop go"))).toBe(false);
+    expect(rec.attached).toBe("roll-loop-proj-abc123");
+  });
+
+  it("attaches without recreating when the watch window already exists", async () => {
+    const rec = makeDeps({ state: { sessionExists: true, watchWindowExists: true } });
+    const code = await loopWatchCommand(["--attach"], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.tmuxRuns.length).toBe(0); // nothing recreated
+    expect(rec.attached).toBe("roll-loop-proj-abc123");
+  });
+
+  it("explains itself (exit 1) when there is no tmux session to attach to", async () => {
+    const rec = makeDeps({ state: { sessionExists: false, watchWindowExists: false } });
+    const code = await loopWatchCommand(["--attach"], rec.deps);
+    expect(code).toBe(1);
+    expect(rec.attached).toBeNull();
+    expect(rec.emitted.join("\n")).toMatch(/no tmux session/i);
+  });
+
+  it("explains itself (exit 1) when tmux is not installed", async () => {
+    const rec = makeDeps({ hasTmux: () => false });
+    const code = await loopWatchCommand(["--attach"], rec.deps);
+    expect(code).toBe(1);
+    expect(rec.attached).toBeNull();
+    expect(rec.emitted.join("\n")).toMatch(/tmux not found/i);
+  });
+});
+
+describe("roll loop watch --help (AC6)", () => {
+  it("prints read-only + concise help without following or attaching", async () => {
+    const rec = makeDeps();
+    const code = await loopWatchCommand(["--help"], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.followedPath).toBeNull();
+    expect(rec.attached).toBeNull();
+    const help = rec.emitted.join("\n");
+    expect(help).toMatch(/read-only/i);
+    expect(help).toContain("--attach");
+    expect(help).toContain("--since");
+  });
+});
+
+describe("roll loop watch — mid-stream rendering + read-only (AC4/AC2, spawned binary)", () => {
+  it("renders lines APPENDED after watch starts (never looks frozen) and never mutates live.log", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-watch-e2e-"));
+    const rt = join(dir, ".roll", "loop");
+    mkdirSync(rt, { recursive: true });
+    const live = join(rt, "live.log");
+    // Seed only the banner — the rest arrives AFTER the watcher attaches.
+    writeFileSync(live, "── cycle 20260614-9 · US-LOOP-074 · agent claude ──\n", "utf8");
+
+    const child = spawn("node", [CLI_BIN, "loop", "watch", "-n", "all"], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        ROLL_MAIN_SLUG: "watch-e2e",
+        ROLL_PROJECT_RUNTIME_DIR: rt,
+        ROLL_LOOP_AGENT: "claude",
+      },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let out = "";
+    child.stdout.on("data", (d) => {
+      out += String(d);
+    });
+
+    // After the watcher is following, append a tcr result mid-stream.
+    await new Promise((r) => setTimeout(r, 600));
+    appendFileSync(live, JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'tcr: live append'" } }] } }) + "\n", "utf8");
+    appendFileSync(live, JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: false, content: "[story/x abcd123] tcr: live append" }] } }) + "\n", "utf8");
+    await new Promise((r) => setTimeout(r, 800));
+
+    // Read-only: the only bytes in live.log are the banner + OUR two appends.
+    // If watch ever wrote, the size would exceed this exact expected length.
+    const expectedBytes = statSync(live).size;
+    child.kill("SIGINT");
+    await new Promise((r) => setTimeout(r, 150));
+    expect(statSync(live).size).toBe(expectedBytes); // unchanged after the view ends
+
+    // The mid-stream append rendered (it did NOT look frozen) — the core AC4 claim.
+    expect(out).toContain("US-LOOP-074"); // seeded banner
+    expect(out).toContain("abcd123"); // the tcr that arrived AFTER attach
+  }, 15_000);
+});

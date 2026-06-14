@@ -51,6 +51,7 @@ import { initCommand } from "./init.js";
 // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
 // The lang module's write/clear/read surfaces are consumed by config.ts.
 import { loopFmtCommand } from "./loop-fmt.js";
+import { loopWatchCommand } from "./loop-watch.js";
 import {
   loopGcCommand,
   loopMuteCommand,
@@ -343,6 +344,11 @@ export function registerAll(): void {
     // `loop fmt`: the observation-window formatter (US-PORT-012) — stdin
     // stream-json → three-tier transcript. v3-native; the watch pipe feeds it.
     if (args[0] === "fmt") return loopFmtCommand(args.slice(1));
+    // `loop watch`: the one-command, READ-ONLY, concise live view (US-LOOP-074) —
+    // auto-locates THIS project's .roll/loop/live.log and streams it through the
+    // US-LOOP-077 renderer. Never writes/signals the loop; not network-gated
+    // (local file tail only — see networkNeeds). `--attach` = tmux attach -r.
+    if (args[0] === "watch") return loopWatchCommand(args.slice(1));
     // `loop pr-inbox`: the dedicated PR-loop tick (US-PORT-001) — drives the
     // pure core/pr-loop.ts decisions; the pr runner calls this instead of the
     // retired bash `_loop_pr_inbox`.

@@ -207,6 +207,13 @@ describe("FIX-298 networkNeeds — the ONE declarative model of which commands n
     }
   });
 
+  it("US-LOOP-074: `loop watch` is local-only (tails live.log) → NOT network-gated", () => {
+    expect(networkNeeds("loop", ["watch"])).toBeNull();
+    expect(networkNeeds("loop", ["watch", "-n", "all"])).toBeNull();
+    expect(networkNeeds("loop", ["watch", "--attach"])).toBeNull();
+    expect(networkNeeds("loop", ["watch", "--verbose"])).toBeNull();
+  });
+
   it("does NOT gate the release read-only / local routes", () => {
     expect(networkNeeds("release", ["--json"])).toBeNull();
     expect(networkNeeds("release", ["--gate-check"])).toBeNull();

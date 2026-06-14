@@ -6,8 +6,6 @@
 
 - 项目页选角现在按复杂度阶梯展示；Hooks 只列本仓 git 钩子，不再把调度 lane 当钩子。(FIX-284) `[loop]`
   <!-- evidence: .roll/features/delivery-dossier/FIX-284/latest/FIX-284-report.html -->
-- 故事档案现在直接展开测试输出 `[dossier]`
-  <!-- evidence: .roll/features/delivery-dossier/FIX-285/latest/FIX-285-report.html -->
 
 ## v3.614.4 — 2026-06-14
 

@@ -91,6 +91,7 @@ import {
   worktreeAdd,
   worktreeFetchOrigin,
   worktreeRemove,
+  worktreeSubmoduleInit,
   push as gitPush,
   type CaptureMarker,
   type ScreenshotResult,
@@ -135,6 +136,11 @@ export interface GitPort {
   fetchOrigin(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
   /** `_worktree_create` — STRICT add (exit code propagated). */
   worktreeAdd(repoCwd: string, path: string, branch: string, base: string): Promise<{ code: number }>;
+  /** FIX-302: `_worktree_submodule_init` — `git submodule update --init
+   *  --recursive` in the worktree. A fresh git worktree carries NO submodule
+   *  contents (notably `skills/` is empty), so the full test can never run.
+   *  STRICT: exit code propagated so the runner can fail the setup honestly. */
+  worktreeSubmoduleInit(worktreePath: string): Promise<{ code: number }>;
   /** `_worktree_cleanup` — tolerant remove (always code 0). */
   worktreeRemove(repoCwd: string, path: string, branch: string): Promise<{ code: number }>;
   /** `git push origin <branch>` (orphan push safety net). */
@@ -409,6 +415,21 @@ export async function executeCommand(
       // the worktree so the contract holds (single source of truth; the inner
       // lock already guarantees one cycle at a time).
       await linkRollIntoWorktree(ports.repoCwd, ports.paths.worktreePath);
+      // FIX-302 root cause: a git worktree carries NONE of the parent repo's
+      // submodule contents — `skills/` lands EMPTY (0 files; main has 28). The
+      // full `roll test`/`pnpm -r test` reads skills/, so on an empty worktree
+      // the suite can never run, AC4 stays "partial", and the cycle can never
+      // honestly close a card. Populate the submodule HERE, in the runner (same
+      // place deps install — network + warm caches). On failure, fail the
+      // worktree setup with an honest terminal reason rather than spawn the
+      // agent into an env where AC4 silently goes partial.
+      const skillsOk = await bootstrapWorktreeSkills(
+        ports.paths.worktreePath,
+        ports.paths.alertsPath,
+        ports.events,
+        ports.git.worktreeSubmoduleInit,
+      );
+      if (!skillsOk) return { event: { type: "worktree_failed" } };
       // FIX-268 root cause: a fresh worktree has NO node_modules, and the
       // agent sandbox has no network — its own install dies on ENOTFOUND,
       // tests never run, the TCR gate never passes, and the whole cycle can
@@ -1435,6 +1456,80 @@ export async function bootstrapWorktreeDeps(
   }
 }
 
+/** Submodule update can clone over the network (cold) — give it the same room. */
+export const SKILLS_BOOTSTRAP_TIMEOUT_MS = 600_000;
+
+/** Count immediate entries under `<worktree>/skills` (0 ⇒ unpopulated). */
+function skillsEntryCount(worktreePath: string): number {
+  const dir = join(worktreePath, "skills");
+  if (!existsSync(dir)) return 0;
+  try {
+    return readdirSync(dir).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Populate the worktree's git SUBMODULES (notably `skills/`) BEFORE the agent
+ * spawns. FIX-302 root cause: a fresh `git worktree` carries none of a parent
+ * repo's submodule contents — `skills/` lands EMPTY (0 files; main has 28). The
+ * full `roll test` / `pnpm -r test` reads `skills/`, so on an empty worktree the
+ * suite can never run and AC4 stays "partial" forever — the cycle can never
+ * honestly close a card.
+ *
+ * Approach: `git submodule update --init --recursive` (v2's
+ * `_worktree_submodule_init`). A symlink was rejected empirically: `skills/` is a
+ * TRACKED submodule path (gitlink), and git refuses a symlink there — `git
+ * status` errors out (`expected submodule path 'skills' not to be a symbolic
+ * link`), which would topple the whole TCR gate. The submodule init is
+ * git-native, leaves `git status` clean, and pins the same SHA as main.
+ *
+ * Runs in the runner (network + warm caches), like {@link bootstrapWorktreeDeps}.
+ * Idempotent: skips when `skills/` is already populated. Skips non-submodule
+ * projects (no `.gitmodules`). STRICT on failure: a loud ALERT and a false
+ * return let the caller stop before agent spawn with an honest terminal — never
+ * an empty `skills/` where AC4 silently goes partial.
+ */
+export async function bootstrapWorktreeSkills(
+  worktreePath: string,
+  alertsPath: string,
+  events: EventsPort,
+  submoduleInit: (worktreePath: string) => Promise<{ code: number }>,
+): Promise<boolean> {
+  // No submodules declared → nothing to populate (ordinary projects).
+  if (!existsSync(join(worktreePath, ".gitmodules"))) return true;
+  // Already populated (idempotent re-entry) → skip the network round-trip.
+  if (skillsEntryCount(worktreePath) > 0) return true;
+  try {
+    const r = await submoduleInit(worktreePath);
+    if (r.code !== 0) {
+      events.appendAlert(
+        alertsPath,
+        `[FAIL] worktree submodule init failed (git submodule update --init --recursive, code ${r.code}): skills/ would be empty → the full test cannot run; stopping before agent spawn`,
+      );
+      return false;
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
+    events.appendAlert(
+      alertsPath,
+      `[FAIL] worktree submodule init failed (git submodule update --init --recursive): ${msg} — stopping before agent spawn`,
+    );
+    return false;
+  }
+  // Defensive verification: init reported success but skills/ is still empty
+  // (e.g. a partial clone) → fail honestly rather than spawn into a broken env.
+  if (skillsEntryCount(worktreePath) === 0) {
+    events.appendAlert(
+      alertsPath,
+      `[FAIL] worktree submodule init reported success but skills/ is still empty — stopping before agent spawn`,
+    );
+    return false;
+  }
+  return true;
+}
+
 // ── Node-backed Ports wiring (real infra) ─────────────────────────────────────
 
 /**
@@ -1466,6 +1561,9 @@ export function nodePorts(opts: {
       },
       async worktreeAdd(repoCwd, path, branch, base) {
         return worktreeAdd(repoCwd, path, branch, base);
+      },
+      async worktreeSubmoduleInit(worktreePath) {
+        return worktreeSubmoduleInit(worktreePath);
       },
       async worktreeRemove(repoCwd, path, branch) {
         return worktreeRemove(repoCwd, path, branch);

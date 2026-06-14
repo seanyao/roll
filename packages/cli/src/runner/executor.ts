@@ -66,6 +66,7 @@ import {
   STATUS_MARKER,
   absent,
   buildTerminalEvent,
+  findStatusMarker,
   present,
   type CycleCost,
   type FactOr,
@@ -454,6 +455,14 @@ export async function executeCommand(
       const items = ports.backlog.read(ports.repoCwd);
       const story = pickStory(items as never);
       if (story === undefined) return { event: { type: "no_story" } };
+      // FIX-304: capture the story's PRE-cycle status BEFORE we claim it 🔨.
+      // The terminal (append_run) uses it to UNDO a premature ✅ Done the agent
+      // wrote into the symlinked .roll backlog (FIX-204C) when the cycle does
+      // NOT merge — done ≡ merged. Read it from the freshly-read rows so the
+      // captured value is the true pre-cycle state (typically 📋 Todo), not the
+      // 🔨 we are about to write. Best-effort: an absent status leaves it unset
+      // (no revert target — the terminal then leaves the row untouched).
+      const preCycleStatus = (story as { status?: string }).status;
       // Claim immediately on the MAIN backlog: 🔨 In Progress is the
       // anti-duplicate-pick signal and must be visible to `roll backlog`/brief
       // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
@@ -467,7 +476,13 @@ export async function executeCommand(
         runDir: evidenceRunDir,
         ts: ports.clock(),
       });
-      return { event: { type: "story_picked", storyId: story.id }, ctxPatch: { evidenceRunDir } };
+      return {
+        event: { type: "story_picked", storyId: story.id },
+        ctxPatch: {
+          evidenceRunDir,
+          ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
+        },
+      };
     }
 
     // agent/router resolveRoute (+ pre-spawn availability fallback).
@@ -1058,13 +1073,29 @@ export async function executeCommand(
       // preflight reconcile (decideClaimReconcile) flips it once the async PR
       // loop merges. The runs row keeps `done` for v2/dashboard parity — only
       // the backlog flip waits for the merge evidence.
-      if ((cmd.status === "done" || cmd.status === "published") && (ctx.storyId ?? "") !== "") {
+      const terminalStoryId = ctx.storyId ?? "";
+      if ((cmd.status === "done" || cmd.status === "published") && terminalStoryId !== "") {
         const state = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => "UNKNOWN");
         if (state === "MERGED") {
-          ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", STATUS_MARKER.done);
+          ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.done);
+        } else {
+          // FIX-304: done ≡ merged. The PR did NOT merge (still OPEN / closed /
+          // gh down), yet the agent may have ALREADY flipped this row ✅ Done in
+          // the symlinked .roll backlog (FIX-204C → the REAL .roll). A delivered
+          // row legitimately rests at 🔨 (pending merge), but a premature ✅ Done
+          // is a FALSE-Done — undo it back to the pre-cycle status so the backlog
+          // reflects TRUE delivery. The async PR loop's later preflight reconcile
+          // (decideClaimReconcile) flips it once the PR actually merges.
+          revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
         }
-      } else if (cmd.status === "idle" && (ctx.storyId ?? "") !== "") {
-        ports.backlog.markStatus?.(ports.repoCwd, ctx.storyId ?? "", STATUS_MARKER.todo);
+      } else if (cmd.status === "idle" && terminalStoryId !== "") {
+        ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.todo);
+      } else if (terminalStoryId !== "") {
+        // FIX-304: a failed / blocked / aborted / orphan terminal NEVER merged
+        // this cycle's work to main. If the agent pre-flipped the row ✅ Done
+        // (the FIX-284 / FIX-285 false-Done), revert it to the pre-cycle status
+        // so a non-merged cycle can never leave a premature Done in the backlog.
+        revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
       }
       // FIX-290 AC5: a failed/idle cycle is first-class — refresh the dossier
       // aggregates on EVERY cycle terminal so the cycle surfaces on the web #loop
@@ -1277,6 +1308,41 @@ function readRunsRows(runsPath: string): ReconcileRunRow[] {
       .filter((r): r is ReconcileRunRow => r !== undefined);
   } catch {
     return [];
+  }
+}
+
+/**
+ * FIX-304 — enforce done ≡ merged at the cycle terminal: undo a PREMATURE
+ * ✅ Done the agent wrote into the backlog when this cycle did NOT merge.
+ *
+ * The roll-build / roll-fix skills instruct the agent to mark its card Done in
+ * `.roll/backlog.md`, which FIX-204C SYMLINKS into the cycle worktree — so the
+ * agent's edit lands in the REAL `.roll`. If the cycle never merges (it failed,
+ * was blocked, or the PR is still open), that premature Done persists, showing a
+ * card Done with no commit on main (the observed FIX-284 / FIX-285 false-Done).
+ *
+ * The undo is SCOPED to THIS cycle's own story id — it is the row this cycle
+ * just claimed and (in a non-merged terminal) the agent just falsely flipped, so
+ * it is distinct from a genuine pre-card-era Done (which is never this cycle's
+ * picked story). We revert ONLY when the row is currently ✅ Done; a delivered
+ * row that already rests at 🔨 In Progress (pending merge) is left untouched.
+ * The target is the pre-cycle status captured at pick time (typically 📋 Todo);
+ * when it was unread or itself Done (a re-run of an already-Done card), fall back
+ * to 📋 Todo so a non-merged story is left re-pickable, never falsely Done.
+ */
+export function revertPrematureDone(ports: Ports, storyId: string, preCycleStatus: string | undefined): void {
+  try {
+    const rows = ports.backlog.read(ports.repoCwd) as Array<{ id: string; status?: string }>;
+    const row = rows.find((r) => r.id === storyId);
+    if (row === undefined) return;
+    const current = findStatusMarker(row.status ?? "");
+    // Only a ✅ Done row is a premature flip to undo; anything else is correct.
+    if (current !== STATUS_MARKER.done) return;
+    const captured = findStatusMarker(preCycleStatus ?? "");
+    const target = captured !== undefined && captured !== STATUS_MARKER.done ? captured : STATUS_MARKER.todo;
+    ports.backlog.markStatus?.(ports.repoCwd, storyId, target);
+  } catch {
+    /* best-effort: the terminal must never fail on a backlog read/write blip */
   }
 }
 

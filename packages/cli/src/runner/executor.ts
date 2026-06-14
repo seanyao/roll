@@ -94,6 +94,8 @@ import {
   worktreeRemove,
   worktreeSubmoduleInit,
   push as gitPush,
+  git as gitRun,
+  commit as gitCommit,
   type CaptureMarker,
   type ScreenshotResult,
 } from "@roll/infra";
@@ -198,6 +200,38 @@ export interface BacklogPort {
   markStatus?(projectCwd: string, id: string, status: string): void;
 }
 
+/** Outcome of a runner-side `.roll` metadata commit. */
+export interface MetadataCommitResult {
+  /** A commit was created (there were staged changes). */
+  committed: boolean;
+  /** The commit (if any) was pushed to the metadata remote. */
+  pushed: boolean;
+  /** The `.roll` working tree was clean — nothing to commit (clean no-op). */
+  nothingToCommit: boolean;
+  /** A human-readable failure reason when a commit or push did not succeed. */
+  error?: string;
+}
+
+/**
+ * Metadata facet (FIX-306) — commit + push the project's `.roll` metadata repo.
+ *
+ * Why the RUNNER owns this, never the agent: the loop's worktree agent writes
+ * `.roll` FILES (acceptance reports, evidence, ac-map, backlog marks) into the
+ * symlinked `.roll`, but the GIT commit of that nested repo must be the runner's
+ * job. A sandboxed agent (codex runs under `--sandbox workspace-write` with the
+ * `.roll` dir passed via `--add-dir`) can write those files yet CANNOT
+ * `git -C .roll commit`: the `.roll` repo's git-internal dir
+ * (`.git/worktrees/roll-meta-v3/index.lock`) lives OUTSIDE the sandbox writable
+ * roots, so `git add -A` fails and the cycle ends `failed` (meta-commit-blocked).
+ * The runner runs unsandboxed with full FS access, so it commits uniformly for
+ * EVERY agent — no per-agent special-casing (roll's normalize-agents thesis).
+ */
+export interface MetadataPort {
+  /** Stage, commit, and push `<projectCwd>/.roll`. No-op cleanly when clean;
+   *  reports a failure reason (never a silent false-success) on push failure. */
+  commit(projectCwd: string, message: string): Promise<MetadataCommitResult>;
+}
+
 /** Routing facet — resolve tier→agent for a story (router.ts). */
 export interface RoutePort {
   resolve(storyId: string, estMin: number | undefined): { agent: string; model: string };
@@ -234,6 +268,8 @@ export interface Ports {
   process: ProcessPort;
   events: EventsPort;
   backlog: BacklogPort;
+  /** FIX-306: the runner-owned `.roll` metadata commit (never the sandboxed agent). */
+  metadata: MetadataPort;
   route: RoutePort;
   budget: BudgetPort;
   evidence: EvidencePort;
@@ -1103,6 +1139,17 @@ export async function executeCommand(
       // execution section at publish) or a manual `roll index`. Best-effort: a
       // refresh failure WARNs and never fails the cycle terminal.
       refreshAggregates(ports.repoCwd);
+      // FIX-306: the RUNNER commits + pushes the `.roll` metadata repo — the
+      // sandboxed agent (codex) only WROTE its files (acceptance report, evidence,
+      // ac-map, backlog marks) and CANNOT git-commit `.roll` (its git-internal dir
+      // is outside the sandbox writable roots → meta-commit-blocked → failed
+      // cycle). Runs LAST so it captures everything this terminal wrote (the runs
+      // twin's backlog flip + the refreshed aggregates) plus the agent's files.
+      // Uniform for every agent (no `if codex`). This does NOT decide the Done
+      // flip — that stays gated on MERGED above; it only commits whatever `.roll`
+      // state exists. A push failure is surfaced as an ALERT (never a silent
+      // false-success); a clean tree no-ops without noise.
+      await commitRollMetadata(ports, ctx);
       return {};
     }
 
@@ -1126,6 +1173,34 @@ export async function executeCommand(
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * FIX-306: the runner-side `.roll` metadata commit, invoked at cycle finalize.
+ * Delegates to {@link MetadataPort.commit}; a clean tree (`nothingToCommit`) is a
+ * silent no-op, while any unfinished commit/push (no `pushed`) raises an auditable
+ * ALERT — the cycle never reports a silent false-success on metadata it failed to
+ * land. Best-effort: a thrown port (e.g. git missing) is alerted, never fatal.
+ */
+async function commitRollMetadata(ports: Ports, ctx: CycleContext): Promise<void> {
+  const message = `chore: loop cycle ${ctx.cycleId}${ctx.storyId !== undefined && ctx.storyId !== "" ? ` ${ctx.storyId}` : ""} metadata`;
+  let res: MetadataCommitResult;
+  try {
+    res = await ports.metadata.commit(ports.repoCwd, message);
+  } catch (e) {
+    ports.events.appendAlert(
+      ports.paths.alertsPath,
+      `.roll metadata commit threw for cycle ${ctx.cycleId} — ${String(e)}`,
+    );
+    return;
+  }
+  if (res.nothingToCommit) return; // clean tree → quiet no-op
+  if (!res.pushed) {
+    ports.events.appendAlert(
+      ports.paths.alertsPath,
+      `.roll metadata push FAILED for cycle ${ctx.cycleId}${res.committed ? " (committed locally, not pushed)" : ""} — ${res.error ?? "unknown error"}`,
+    );
+  }
+}
 
 /** Stamp `ts` onto an event the orchestrator built with ts=0 (it owns no clock). */
 function stampTs(event: RollEvent, ts: number): RollEvent {
@@ -1471,6 +1546,69 @@ async function linkRollIntoWorktree(repoCwd: string, worktreePath: string): Prom
   }
 }
 
+/**
+ * FIX-306 — stage, commit, and push the project's `.roll` metadata repo. This is
+ * the RUNNER's job (it runs unsandboxed, with full FS + network access), NOT the
+ * agent's: a sandboxed codex agent can write `.roll` files but cannot
+ * `git -C .roll commit` (its git-internal dir is outside the sandbox writable
+ * roots → meta-commit-blocked). The behaviour is uniform for every agent.
+ *
+ * Contract (mirrors {@link MetadataPort.commit}):
+ *   - `.roll` absent, not a git repo, or part of the MAIN repo (a project that
+ *     TRACKS `.roll` inside its own checkout) → clean no-op (`nothingToCommit`):
+ *     for those projects the `.roll` content rides the delivery PR, not a
+ *     separate metadata commit. Only the nested roll-meta layout is committed.
+ *   - `git add -A` then a clean tree → clean no-op (`nothingToCommit`).
+ *   - staged changes → commit; on commit failure report `{committed:false, error}`.
+ *   - committed → push; a push failure reports `{committed:true, pushed:false,
+ *     error}` so the caller can ALERT rather than claim a silent false-success.
+ */
+export async function commitRollMetadataRepo(
+  projectCwd: string,
+  message: string,
+): Promise<MetadataCommitResult> {
+  const rollDir = join(projectCwd, ".roll");
+  if (!existsSync(rollDir)) return { committed: false, pushed: false, nothingToCommit: true };
+  // `.roll` must be its OWN git repo (the nested roll-meta), NOT a `.roll` dir
+  // that the MAIN repo tracks. The discriminator: `.roll`'s git toplevel must BE
+  // the `.roll` dir itself. If it resolves to a parent (the main checkout), the
+  // `.roll` content is delivered by the PR — committing it here would stage the
+  // whole main repo. Resolve both sides through symlinks (the cycle worktree's
+  // `.roll` is a symlink to the main one; FIX-204C) before comparing.
+  const top = await gitRun(["rev-parse", "--show-toplevel"], rollDir);
+  if (top.code !== 0) return { committed: false, pushed: false, nothingToCommit: true };
+  let topReal: string;
+  let rollReal: string;
+  try {
+    topReal = realpathSync(top.stdout.trim());
+    rollReal = realpathSync(rollDir);
+  } catch {
+    return { committed: false, pushed: false, nothingToCommit: true };
+  }
+  if (topReal !== rollReal) return { committed: false, pushed: false, nothingToCommit: true };
+  // Stage everything the agent + runner wrote (reports, evidence, ac-map, backlog
+  // marks, dossier aggregates). `add -A` is the runner's privilege — the failing
+  // step inside the sandboxed agent.
+  const staged = await gitRun(["add", "-A"], rollDir);
+  if (staged.code !== 0) {
+    return { committed: false, pushed: false, nothingToCommit: false, error: `git add -A failed: ${staged.stderr.trim()}` };
+  }
+  const status = await gitRun(["status", "--porcelain"], rollDir);
+  if (status.code === 0 && status.stdout.trim() === "") {
+    return { committed: false, pushed: false, nothingToCommit: true };
+  }
+  const committed = await gitCommit(rollDir, message);
+  if (committed.code !== 0) {
+    return { committed: false, pushed: false, nothingToCommit: false, error: `git commit failed: ${committed.stderr.trim()}` };
+  }
+  const branch = (await gitRun(["rev-parse", "--abbrev-ref", "HEAD"], rollDir)).stdout.trim() || "main";
+  const pushed = await gitPush(rollDir, branch);
+  if (pushed.code !== 0) {
+    return { committed: true, pushed: false, nothingToCommit: false, error: `git push failed: ${pushed.stderr.trim()}` };
+  }
+  return { committed: true, pushed: true, nothingToCommit: false };
+}
+
 /** Ceiling for the worktree dependency install (cold pnpm store on first run). */
 export const DEPS_BOOTSTRAP_TIMEOUT_MS = 600_000;
 
@@ -1724,6 +1862,13 @@ export function nodePorts(opts: {
         } catch {
           /* best-effort: reconcile owns the fallback */
         }
+      },
+    },
+    // FIX-306: the runner commits + pushes the `.roll` metadata repo. See the
+    // {@link MetadataPort} doc for WHY this is the runner's job, not the agent's.
+    metadata: {
+      async commit(projectCwd, message) {
+        return commitRollMetadataRepo(projectCwd, message);
       },
     },
     route: opts.routeDeps

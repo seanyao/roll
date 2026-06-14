@@ -481,6 +481,9 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     backlog: {
       read: vi.fn(() => [{ id: "US-RUN-001", desc: "est_min:5", status: "📋 Todo" }]),
     },
+    metadata: {
+      commit: vi.fn(async () => ({ committed: true, pushed: true, nothingToCommit: false })),
+    },
     route: { resolve: vi.fn(() => ({ agent: "claude", model: "" })) },
     budget: { check: vi.fn(() => "ok" as const) },
     ...over,
@@ -1510,6 +1513,58 @@ describe("executeCommand — command → executor mapping", () => {
       CTX, // no preCycleStatus captured
     );
     expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+  });
+
+  // ── FIX-306: the RUNNER commits the `.roll` metadata repo, NOT the sandboxed
+  // agent. codex runs under `--sandbox workspace-write` and can WRITE files under
+  // `.roll` (passed via --add-dir) but CANNOT git-commit inside it — the
+  // `.roll` repo's git-internal dir (`.git/worktrees/roll-meta-*/`) lives outside
+  // the sandbox writable roots, so `git -C .roll add -A` fails on index.lock.
+  // The runner (unsandboxed) owns the commit at cycle finalization, uniformly for
+  // every agent — no per-agent special-casing. ──────────────────────────────────
+  it("FIX-306: append_run commits the .roll metadata repo via the runner (not the agent)", async () => {
+    const commit = vi.fn(async () => ({ committed: true, pushed: true, nothingToCommit: false }));
+    const { ports } = fakePorts({ metadata: { commit } });
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    // The runner is the one that commits .roll, against the MAIN repo (repoCwd) —
+    // the agent never runs `git -C .roll commit`.
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect((commit.mock.calls[0] as unknown[])[0]).toBe("/repo");
+  });
+
+  it("FIX-306: a failed metadata push surfaces a clear ALERT (no silent false-success)", async () => {
+    const commit = vi.fn(async () => ({
+      committed: true,
+      pushed: false,
+      nothingToCommit: false,
+      error: "push rejected: non-fast-forward",
+    }));
+    const { ports, calls } = fakePorts({ metadata: { commit } });
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alerts).toContain(".roll");
+    expect(alerts.toLowerCase()).toContain("push");
+  });
+
+  it("FIX-306: a clean .roll (nothing to commit) no-ops without an ALERT", async () => {
+    const commit = vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true }));
+    const { ports, calls } = fakePorts({ metadata: { commit } });
+    await executeCommand(
+      { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    expect(commit).toHaveBeenCalledTimes(1);
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alerts).not.toContain(".roll metadata");
   });
 
   it("release_lock reports lockReleased", async () => {

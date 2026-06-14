@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 修复
+
+- **项目页的选角和钩子信息按正确稿显示了**:Casting 区恢复 3+1 阶梯卡、ramp 竖条和场景角色三列布局;Loop 的 Hooks 区改为列本仓真实 git 钩子,不再把调度 lane 当成 hooks。(FIX-284) `[loop]`
+  <!-- evidence: .roll/features/delivery-dossier/FIX-284/latest/FIX-284-report.html -->
+
 ## v3.614.4 — 2026-06-14
 
 ### 改进

@@ -30,4 +30,20 @@ describe("goal progress helpers", () => {
       known: false,
     });
   });
+
+  // The spin-hole inputs: rows the per-card progress loop CANNOT attribute. A row
+  // with no tcr_count and no delivery evidence is `known:false`; a row with no
+  // story_id is `undefined`. Both are SKIPPED by the per-card streak loop in
+  // updateProgressFromRows — so the GLOBAL dead-loop breaker must count them by
+  // row presence alone (rows.length), or a cycle that keeps appending them spins
+  // forever. This locks in the shapes the airtight breaker has to cover.
+  it("returns an unattributable attempt for rows the per-card path cannot use", () => {
+    // No tcr_count + no evidence (but has a story_id) → known:false → skipped.
+    expect(runAttemptFromRow({ story_id: "US-SPIN", cycle_id: "c1", status: "failed" })).toMatchObject({
+      storyId: "US-SPIN",
+      known: false,
+    });
+    // No story_id at all → undefined → the per-card loop has nothing to key on.
+    expect(runAttemptFromRow({ cycle_id: "c1", status: "failed" })).toBeUndefined();
+  });
 });

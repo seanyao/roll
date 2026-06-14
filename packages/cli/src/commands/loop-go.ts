@@ -718,9 +718,12 @@ function appendReviewAlert(projectPath: string, slug: string, session: string, r
  * progress this cycle); a `gave_up`/zero-delivery terminal increments the card's
  * streak. ALERT on the FIRST no-progress (no 2-hit silence); skip the card once
  * its streak reaches {@link CARD_NO_PROGRESS_SKIP}. The whole-goal
- * `noProgressCycles` counter increments when a cycle delivered nothing and
- * resets the moment any card delivers — it is the input to the hard global
- * breaker (checked in the gate slot the budget gate vacated).
+ * `noProgressCycles` counter resets the moment any card delivers and otherwise
+ * increments for ANY cycle that appended >=1 runs row without delivering —
+ * including rows that are not parseable as a known terminal (no `tcr_count`,
+ * no delivery evidence, or no `story_id`). It is the FAIL-SAFE input to the
+ * hard global breaker (checked in the gate slot the budget gate vacated): a row
+ * the per-card loop cannot attribute still counts against the airtight backstop.
  */
 function updateProgressFromRows(
   projectPath: string,
@@ -732,7 +735,6 @@ function updateProgressFromRows(
   bus: EventBus,
 ): void {
   let delivered = false;
-  let sawNoProgress = false;
   for (const row of rows) {
     const attempt = runAttemptFromRow(row);
     if (attempt === undefined || !attempt.known) continue;
@@ -741,7 +743,6 @@ function updateProgressFromRows(
       delivered = true;
       continue;
     }
-    sawNoProgress = true;
     const nextCount = (progress.zeroStreaks.get(attempt.storyId) ?? 0) + 1;
     progress.zeroStreaks.set(attempt.storyId, nextCount);
     // ALERT on the FIRST no-progress terminal for a card (no 2-hit streak): the
@@ -759,12 +760,21 @@ function updateProgressFromRows(
       ts: deps.nowSec(),
     });
   }
-  // Whole-goal no-progress accounting (feeds the hard breaker): any delivery
-  // this cycle resets the streak; a cycle that delivered nothing but produced a
-  // known no-progress terminal increments it. A cycle that produced no known
-  // attempt at all (e.g. nothing ran) leaves the counter unchanged.
+  // Whole-goal no-progress accounting (feeds the hard breaker) — FAIL-SAFE: any
+  // delivery this cycle resets the streak; ANY cycle that appended >=1 runs row
+  // but delivered NOTHING increments it, whether or not the row was parseable as
+  // a KNOWN no-progress terminal. This closes the spin-hole: a row with no
+  // `tcr_count`/evidence (or no `story_id`) is `known:false`/`undefined` and is
+  // skipped by the per-card loop above, yet it must still count against the
+  // global breaker — otherwise a cycle that keeps appending such rows spins
+  // forever (cycles increase, so the no-cycle-terminal backstop never fires).
+  // A cycle that appended NO row leaves the counter unchanged (that case is
+  // broken by the `after.summary.cycles <= before.summary.cycles` backstop).
+  // Invariant: every cycle either appends no row (backstop breaks) OR appends a
+  // row → delivers (reset) or doesn't (increment → breaker STOPS at K). No
+  // infinite spin is possible regardless of row parseability.
   if (delivered) progress.noProgressCycles = 0;
-  else if (sawNoProgress) progress.noProgressCycles += 1;
+  else if (rows.length > 0) progress.noProgressCycles += 1;
 }
 
 function goalEvaluationFromTruth(truths: StoryTruth[], scope: GoalScope, opts: { allowEmptyAllComplete: boolean }): GoalEvaluation {

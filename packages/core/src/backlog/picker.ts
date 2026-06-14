@@ -25,11 +25,9 @@
  * predicate; done-ness is computed from the parsed items themselves (mirroring
  * bash, which re-greps the same backlog file for each dep's status).
  */
-import { STATUS_MARKER } from "@roll/spec";
+import { classifyStatus, STATUS_MARKER } from "@roll/spec";
 import type { BacklogItem } from "./store.js";
 
-/** Status string that marks a row pickable (exact, like the oracle). */
-const TODO = STATUS_MARKER.todo;
 /** Substring the oracle greps for to decide a dependency is satisfied. */
 const DONE = STATUS_MARKER.done;
 
@@ -71,7 +69,8 @@ export function parseDependsOn(desc: string): string[] {
  * order), applying the oracle gates. Returns the chosen item or `undefined`.
  *
  * Gates per candidate:
- *   - status === `📋 Todo` (exact)
+ *   - status classifies as `todo` (FIX-300 classifier) — tolerant of an
+ *     annotated marker, e.g. `📋 Todo (rebased)` (FIX-301), not exact-match
  *   - every depends-on id resolves to a row whose status contains `✅ Done`
  *   - no open PR references the id (injected predicate)
  * Priority: all FIX first (file order), then US, then REFACTOR.
@@ -86,7 +85,12 @@ export function pickStory(items: BacklogItem[], opts: PickOptions = {}): Backlog
     items.some((it) => it.id === id && it.status.includes(DONE));
 
   const eligible = (it: BacklogItem): boolean => {
-    if (it.status !== TODO) return false;
+    // Recognize the Todo marker via the single-source classifier (FIX-300),
+    // not an exact-string equality. An annotated status — the Todo marker
+    // followed by parenthetical text (e.g. `📋 Todo (rebased)`) — is still a
+    // Todo and must stay pickable; an exact `=== "📋 Todo"` check silently
+    // dropped such rows and idled the loop (FIX-301).
+    if (classifyStatus(it.status) !== "todo") return false;
     for (const dep of parseDependsOn(it.desc)) {
       if (!isDone(dep)) return false;
     }

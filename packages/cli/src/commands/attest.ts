@@ -639,9 +639,12 @@ const USAGE = [
   "Usage: roll attest <story-id> [--deploy-url <url>] [--run-dir <path>]",
   "       roll attest backfill [--dry-run]",
   "                   [--capture-terminal | --capture-tmux <session> | --capture-command <cmd>]",
-  "                   [--capture-region <x,y,w,h>]",
+  "                   [--capture-web <url|file>] [--capture-browser <app>] [--capture-region <x,y,w,h>]",
   "  --capture-tmux <session>   self-capture a terminal attached to a tmux session (unattended Gate)",
   "  --capture-command <cmd>    self-capture a terminal running <cmd>",
+  "  --capture-web <url|file>   self-capture a REAL screenshot of a rendered page (FIX-305) —",
+  "                             the FIX-291 ladder: macOS GUI browser, else headless Chromium (no GUI needed)",
+  "  --capture-browser <app>    GUI lane browser app to drive (default Google Chrome)",
   "  --capture-region <rect>    screencapture -R rectangle (default 0,0,1280,800)",
   "  (terminal lane honestly skips off-GUI / without screen-recording permission)",
 ].join("\n");
@@ -772,7 +775,7 @@ async function attestBackfillCommand(args: string[], deps: AttestDeps): Promise<
 /** `roll attest <story-id> [--deploy-url <url>] [--capture-tmux <s> | --capture-command <c>]` */
 export async function attestCommand(args: string[], deps: AttestDeps = {}): Promise<number> {
   if (args[0] === "backfill") return attestBackfillCommand(args.slice(1), deps);
-  const flagsWithValue = new Set(["--deploy-url", "--run-dir", "--capture-tmux", "--capture-command", "--capture-region"]);
+  const flagsWithValue = new Set(["--deploy-url", "--run-dir", "--capture-tmux", "--capture-command", "--capture-region", "--capture-web", "--capture-browser"]);
   let storyId: string | undefined;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -806,6 +809,14 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const captureCommand = flagVal("--capture-command");
   const captureRegion = flagVal("--capture-region");
   const captureTerminal = args.includes("--capture-terminal") || captureTmux !== undefined || captureCommand !== undefined;
+  // FIX-305 — UI/dossier self-capture lane. A UI/dossier card's acceptance is a
+  // RENDERED page, so its evidence must be a REAL pixel screenshot, not a
+  // machine-skip. `--capture-web <url|file>` drives the FIX-291 web ladder
+  // (macOS GUI browser → headless Chromium → honest skip); the headless rung
+  // needs NO GUI, so a network-only loop runner self-produces a real PNG of the
+  // dossier/story page instead of leaving the screenshots dir empty.
+  const captureWeb = flagVal("--capture-web");
+  const captureBrowser = flagVal("--capture-browser");
 
   const projectPath = process.cwd();
   const featureFile = findFeatureFile(projectPath, storyId);
@@ -838,7 +849,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // into this run's screenshots/ BEFORE evidence sweep, then bridge a TAKEN shot
   // to a report figure. A SKIP (headless / no permission) yields null → the
   // screenshot block is dropped, but FIX-258 records the structured skip fact.
-  let selfCaptures: EvidenceRef[] = [];
+  const selfCaptures: EvidenceRef[] = [];
   const captureFacts: CaptureFact[] = [];
   let commandFact: CaptureCommandFact | null = null;
   if (captureTerminal) {
@@ -867,8 +878,40 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
     });
     const ref = screenshotEvidenceRef(shot, "screenshots/terminal.png");
-    if (ref !== null) selfCaptures = [ref];
+    if (ref !== null) selfCaptures.push(ref);
     else warn(`terminal self-capture skipped: ${shot.skipped ?? "unknown"}`);
+  }
+
+  // FIX-305 — UI/dossier web self-capture lane. For a card whose acceptance is a
+  // rendered page (the dossier story page, or any url/file the Gate supplies),
+  // attest must CAPTURE a real screenshot rather than machine-skip. We drive the
+  // FIX-291 web ladder: a macOS GUI host shoots a real browser window, and a
+  // headless host (CI / network-only loop runner) falls through to headless
+  // Chromium — NO GUI required — producing an unforgeable PNG. Only an honest
+  // failure (ROLL_ATTEST_NO_BROWSER, no url, npx/network down) yields a recorded
+  // skip; for a reachable web/dossier page the capture succeeds.
+  if (captureWeb !== undefined && captureWeb !== "") {
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    const out = join(runDir, "screenshots", "web.png");
+    const shot = await captureScreenshot(
+      {
+        kind: "web",
+        out,
+        url: captureWeb,
+        ...(captureBrowser !== undefined && captureBrowser !== "" ? { browser: captureBrowser } : {}),
+        ...(captureRegion !== undefined ? { region: captureRegion } : {}),
+      },
+      deps.capture ?? {},
+    );
+    captureFacts.push({
+      kind: shot.kind,
+      out: shot.out,
+      taken: shot.taken,
+      ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
+    });
+    const ref = screenshotEvidenceRef(shot, "screenshots/web.png");
+    if (ref !== null) selfCaptures.push(ref);
+    else warn(`web self-capture skipped: ${shot.skipped ?? "unknown"}`);
   }
 
   // hard facts.

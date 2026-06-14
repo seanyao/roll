@@ -17,6 +17,7 @@ import {
   storyHasAcBlock,
   verificationReportFresh,
   verificationReportHasContent,
+  webCaptureTargetForStory,
 } from "../src/runner/attest-gate.js";
 
 const dirs: string[] = [];
@@ -364,5 +365,36 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.blocked).toBe(false);
     expect(alerts).toHaveLength(0);
     expect(events[0]?.verdict).toBe("produced");
+  });
+});
+
+
+describe("FIX-305 — webCaptureTargetForStory: drive a real screenshot for UI/dossier cards", () => {
+  function withSpec(storyId: string, specText: string): string {
+    const wt = tmp("web");
+    const dir = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), specText);
+    return wt;
+  }
+
+  it("UI/web card → the rendered dossier index.html (file://) is the page to shoot", () => {
+    const wt = withSpec("FIX-WEB", "# FIX-WEB\n\n**AC:**\n- [ ] the web casting page renders\n");
+    const target = webCaptureTargetForStory(wt, "FIX-WEB");
+    expect(target).not.toBeNull();
+    expect(target).toMatch(/^file:\/\//);
+    expect(target).toContain("FIX-WEB/index.html");
+  });
+
+  it("an explicit deployed-url override wins over the dossier page", () => {
+    const wt = withSpec("FIX-WEB", "# FIX-WEB\n\n**AC:**\n- [ ] the web casting page renders\n");
+    expect(webCaptureTargetForStory(wt, "FIX-WEB", "https://app.test/casting")).toBe("https://app.test/casting");
+    // a blank/whitespace override is ignored — falls back to the dossier page
+    expect(webCaptureTargetForStory(wt, "FIX-WEB", "   ")).toContain("FIX-WEB/index.html");
+  });
+
+  it("a non-UI card owes no web capture → null (no forced shot)", () => {
+    const wt = withSpec("FIX-CORE", "# FIX-CORE\n\n**AC:**\n- [ ] the parser handles empty input\n");
+    expect(webCaptureTargetForStory(wt, "FIX-CORE")).toBeNull();
   });
 });

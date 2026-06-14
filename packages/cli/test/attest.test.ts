@@ -770,6 +770,107 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
   });
 });
 
+describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a skip)", () => {
+  // A UI project whose AC concerns a rendered web page.
+  function webProject(): string {
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-web-")));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll", "features", "demo", "FIX-WEB"), { recursive: true });
+    writeFileSync(
+      join(proj, ".roll", "features", "demo", "FIX-WEB", "spec.md"),
+      ["# FIX-WEB — dossier casting page", "", "**AC:**", "- [ ] the casting web page renders", ""].join("\n"),
+    );
+    return proj;
+  }
+
+  // A headless host (no GUI) whose npx playwright lands a real PNG at the out path.
+  function headlessShot(): { run: ShotRun; calls: string[] } {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Background\n", stderr: "" }); // not Aqua → headless rung
+      if (cmd === "npx") {
+        writeFileSync(String(argv[argv.length - 1]), "PNGDATA"); // out = last argv
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    return { run, calls };
+  }
+
+  it("AC: --capture-web drives the FIX-291 headless ladder and lands a REAL screenshot", async () => {
+    const proj = webProject();
+    const { run: shot, calls } = headlessShot();
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-WEB", "--capture-web", "https://app.test/casting"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shot, platform: "linux", env: {} }, // no GUI → headless Chromium
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-WEB", "2026-06-06T01-02-03");
+    // a real PNG landed — not a machine-skip, not an empty screenshots dir
+    expect(existsSync(join(runDir, "screenshots", "web.png"))).toBe(true);
+    // the headless rung was invoked with the EXACT url to shoot
+    expect(calls.join("\n")).toContain("playwright@latest screenshot https://app.test/casting");
+    const html = readFileSync(join(runDir, "FIX-WEB-report.html"), "utf8");
+    expect(html).toContain('<img src="screenshots/web.png"');
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean }>;
+    };
+    expect(evidence.captures).toContainEqual({ kind: "web", out: join(runDir, "screenshots", "web.png"), taken: true });
+  });
+
+  it("ROLL_ATTEST_NO_BROWSER=1 → honest skip recorded, no placeholder image", async () => {
+    const proj = webProject();
+    const { run: shot } = headlessShot();
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-WEB", "--capture-web", "https://app.test/casting"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shot, platform: "linux", env: { ROLL_ATTEST_NO_BROWSER: "1" } },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-WEB", "2026-06-06T01-02-03");
+    expect(existsSync(join(runDir, "screenshots", "web.png"))).toBe(false);
+    const html = readFileSync(join(runDir, "FIX-WEB-report.html"), "utf8");
+    expect(html).not.toContain('<img src="screenshots/web.png"');
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    expect(evidence.captures).toContainEqual({
+      kind: "web",
+      out: join(runDir, "screenshots", "web.png"),
+      taken: false,
+      skipped: "ROLL_ATTEST_NO_BROWSER=1",
+    });
+  });
+
+  it("no --capture-web ⇒ web lane never runs (back-compat)", async () => {
+    const proj = webProject();
+    const { run: shot, calls } = headlessShot();
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-WEB"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shot, platform: "linux", env: {} },
+        }),
+      ),
+    );
+    expect(calls.some((c) => c.startsWith("npx "))).toBe(false);
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-WEB", "2026-06-06T01-02-03");
+    expect(existsSync(join(runDir, "screenshots", "web.png"))).toBe(false);
+  });
+});
+
 describe("US-ATTEST-009 — self-score notes feed the report", () => {
   it("same-story notes render in the fold; unrelated stories don't", async () => {
     const proj = project();

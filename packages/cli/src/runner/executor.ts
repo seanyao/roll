@@ -93,6 +93,7 @@ import {
   worktreeFetchOrigin,
   worktreeRemove,
   worktreeSubmoduleInit,
+  worktreeResetHard,
   fetchRemoteBranch,
   branchMergedIntoMain,
   branchCleanlyRebasesOntoMain,
@@ -166,6 +167,12 @@ export interface GitPort {
   /** RESUME-PRIOR-WORK condition (b): does `origin/<branch>` cleanly merge with
    *  origin/main (no conflicts)? Non-mutating `merge-tree` dry-run. */
   branchCleanlyRebasesOntoMain(repoCwd: string, branch: string): Promise<boolean>;
+  /** RESUME-PRIOR-WORK re-point: fetch `<branch>` into the worktree and
+   *  `git reset --hard <ref>` so the worktree's tracked tree moves onto the
+   *  resume branch (called AFTER the story is picked — see `resume_worktree`).
+   *  `code !== 0` ⇒ the re-point failed; the caller leaves the worktree on
+   *  origin/main rather than topple the cycle. */
+  resetWorktreeHard(worktreeCwd: string, ref: string, branch?: string): Promise<{ code: number }>;
 }
 
 /** GitHub facet — the publish-plan executor + slug resolution. */
@@ -442,16 +449,16 @@ export async function executeCommand(
     // infra/git _worktree_create (STRICT). worktree_created on success, else
     // worktree_failed (→ failed terminal, bin/roll:9000).
     case "create_worktree": {
-      // RESUME-PRIOR-WORK: by default (I12 fresh-context contract) every cycle
-      // bases its worktree on origin/main and redoes any prior partial work from
-      // scratch. When the picked card has a prior UN-MERGED cycle branch that
-      // cleanly rebases onto origin/main, base on THAT branch instead so the
-      // agent RESUMES (verifies + finalizes) rather than redoes — the FIX-284/285
-      // stranded-work case. Falls back to origin/main when no resumable branch
-      // exists, none cleanly rebases, or resume is disabled (byte-identical to
-      // the pre-resume behaviour). Keys purely on the runs ledger + git, uniform
-      // for every agent (roll normalize-agents thesis — no per-agent特判).
-      const base = await resolveResumeBase(ports, ctx.storyId);
+      // Always base the cycle worktree on origin/main (the I12 fresh-context
+      // default). RESUME-PRIOR-WORK does NOT happen here: the picker reads the
+      // backlog INSIDE the worktree (FIX-198/FIX-204C), so the story id is still
+      // UNDEFINED at create_worktree time — resolveResumeBase would early-return
+      // origin/main with no alert and resume could never engage (the FIX-284
+      // bug). The resume decision is deferred to `resume_worktree`, which fires
+      // AFTER pick_story with the real story id and re-points this worktree onto a
+      // resumable un-merged branch when one exists. Keying purely on the runs
+      // ledger + git keeps it uniform for every agent (normalize-agents thesis).
+      const base = "origin/main";
       const r = await ports.git.worktreeAdd(
         ports.repoCwd,
         ports.paths.worktreePath,
@@ -543,6 +550,45 @@ export async function executeCommand(
           ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
         },
       };
+    }
+
+    // RESUME-PRIOR-WORK re-point (post-pick) — the ONE real resume decision point.
+    //
+    // The worktree was created on origin/main (the fresh-context default) BEFORE
+    // the story was picked; this is the FIRST step that has the real picked story
+    // id (pick_story reads the backlog INSIDE the worktree, FIX-198/FIX-204C, so
+    // the id is undefined at create_worktree — moving the decision here is the
+    // FIX-284 wiring fix). resolveResumeBase keys purely on the runs ledger + git
+    // (uniform for every agent — normalize-agents thesis):
+    //   · returns origin/main → no resumable un-merged branch (or resume disabled
+    //     / probe blip) → leave the worktree on origin/main (unchanged no-op).
+    //   · returns origin/<branch> ≠ origin/main → a prior un-merged cycle branch
+    //     cleanly rebases onto origin/main → RE-POINT this already-created worktree
+    //     to it (fetch + reset --hard) so the agent RESUMES the prior product code
+    //     rather than redoing it. The ALERT is already emitted by resolveResumeBase.
+    // The symlinked .roll (FIX-204C) and the picker's 🔨 backlog mark are NOT part
+    // of the worktree's tracked git content, so the hard reset leaves them intact.
+    // Runs BEFORE resolve_route → spawn_agent (orchestrator command order), so the
+    // worktree carries the resume tree by the time the agent spawns. Best-effort: a
+    // reset failure leaves the worktree on origin/main rather than topple the cycle.
+    case "resume_worktree": {
+      const base = await resolveResumeBase(ports, cmd.storyId);
+      if (base === "origin/main" || base.trim() === "") return {};
+      // `origin/<branch>` → derive the bare branch name for the worktree-local
+      // fetch (the resume probes fetched it into the MAIN tree, not this worktree).
+      const branch = base.startsWith("origin/") ? base.slice("origin/".length) : undefined;
+      try {
+        const r = await ports.git.resetWorktreeHard(ports.paths.worktreePath, base, branch);
+        if (r.code !== 0) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `resume-prior-work: re-point of worktree onto ${base} for ${cmd.storyId} FAILED (git reset --hard exit ${r.code}); proceeding fresh from origin/main`,
+          );
+        }
+      } catch {
+        /* resume is an optimization — a re-point blip must never topple the cycle */
+      }
+      return {};
     }
 
     // agent/router resolveRoute (+ pre-spawn availability fallback).
@@ -1991,6 +2037,10 @@ export function nodePorts(opts: {
       },
       async branchCleanlyRebasesOntoMain(repoCwd, branch) {
         return branchCleanlyRebasesOntoMain(repoCwd, branch);
+      },
+      async resetWorktreeHard(worktreeCwd, ref, branch) {
+        const r = await worktreeResetHard(worktreeCwd, ref, branch);
+        return { code: r.code };
       },
     },
     github: {

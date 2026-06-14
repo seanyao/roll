@@ -976,3 +976,86 @@ describe("FIX-209 — cycle baseline freshness: preflight fetches the remote mer
     expect(mergeVisibleInWorktree).toBe(true);
   });
 });
+
+describe("FIX-284 — RESUME-PRIOR-WORK engages POST-pick (the storyId-timing wiring fix)", () => {
+  it("a picked story with an un-merged clean prior cycle branch RE-POINTS the worktree to it (the agent resumes prior product code, not origin/main)", async () => {
+    const { repo, remote } = makeFixture("resume-e2e");
+    const rt = tmp("resume-e2e-rt");
+    const cycleId = "20260615-090000-3284";
+    const p = paths(rt, cycleId);
+
+    // A PRIOR cycle left an UN-MERGED branch on the remote that carries product
+    // code (the FIX-284 stranded-work shape: git-hooks.ts + cast work). It is NOT
+    // merged into main and rebases cleanly. Build it on the remote via a throwaway
+    // clone branched off main.
+    const priorCycleId = "20260614-195600-25595";
+    const priorBranch = `loop/cycle-${priorCycleId}`;
+    const prior = tmp("resume-e2e-prior");
+    git(prior, ["clone", "-q", remote, "."]);
+    git(prior, ["checkout", "-q", "-b", priorBranch, "origin/main"]);
+    writeFileSync(join(prior, "git-hooks.ts"), "export const installHooks = () => {/* FIX-284 prior work */};\n", "utf8");
+    git(prior, [...GIT_ID, "add", "-A"]);
+    git(prior, [...GIT_ID, "commit", "-q", "-m", "tcr: FIX-284 prior cycle stranded work (git-hooks + casting)"]);
+    git(prior, ["push", "-q", "origin", priorBranch]);
+
+    // The runs ledger links the picked story → that prior cycle branch (the
+    // story_id↔cycle_id link resumeCandidateBranches reads). This is the only
+    // signal resolveResumeBase keys on, uniform for every agent.
+    writeFileSync(
+      p.runsPath,
+      JSON.stringify({ story_id: "US-RUN-001", cycle_id: priorCycleId, status: "orphan" }) + "\n",
+      "utf8",
+    );
+
+    // Capture, AT execute time (before the done-path worktree cleanup), whether
+    // the prior product file is present in the worktree's TRACKED tree. Pre-fix
+    // it was always absent (worktree on origin/main, resume never engaged).
+    let priorWorkVisibleInWorktree = false;
+    const shim: AgentSpawn = async (agent, opts) => {
+      priorWorkVisibleInWorktree = existsSync(join(opts.cwd, "git-hooks.ts"));
+      return shimAgentTcr(agent, opts);
+    };
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.ran).toBe(true);
+    // The crown assertion: the agent ran on the RESUMED tree — the prior cycle's
+    // git-hooks.ts is present in the worktree (resume engaged post-pick).
+    expect(priorWorkVisibleInWorktree).toBe(true);
+    // The resume ALERT was emitted (operator sees the resume happened).
+    const alerts = existsSync(p.alertsPath) ? readFileSync(p.alertsPath, "utf8") : "";
+    expect(alerts).toContain("resume-prior-work");
+    expect(alerts).toContain(`resumes un-merged branch ${priorBranch}`);
+  });
+
+  it("a picked story with NO recorded prior branch bases the worktree on origin/main (fresh-context default, no resume)", async () => {
+    const { repo } = makeFixture("resume-e2e-none");
+    const rt = tmp("resume-e2e-none-rt");
+    const cycleId = "20260615-091000-3285";
+    const p = paths(rt, cycleId);
+    // No runs.jsonl prior link → no resume candidate.
+
+    let strayResumeFile = false;
+    const shim: AgentSpawn = async (agent, opts) => {
+      strayResumeFile = existsSync(join(opts.cwd, "git-hooks.ts"));
+      return shimAgentTcr(agent, opts);
+    };
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.ran).toBe(true);
+    expect(strayResumeFile).toBe(false); // pure fresh-context — nothing resumed
+    const alerts = existsSync(p.alertsPath) ? readFileSync(p.alertsPath, "utf8") : "";
+    expect(alerts).not.toContain("resume-prior-work");
+  });
+});

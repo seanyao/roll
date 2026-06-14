@@ -103,6 +103,11 @@ export function selectPeerReviewer(input: PeerReviewerInput): PeerReviewerSelect
     return { status: "selected", effectiveMode: "self", reviewer, provider: agentVendor(reviewer), degraded: false };
   }
 
+  // FIX-312 — `auto` is hetero-FIRST. Both `auto` and `hetero` resolve a
+  // different-vendor reviewer here BEFORE any self path is even considered, so a
+  // configured heterogeneous peer is ALWAYS used when one exists; `auto` never
+  // falls back to self while a hetero peer is available. The self fallback below
+  // is reachable only when NO heterogeneous candidate exists (single-vendor env).
   const workers = uniqueCanonical(input.workerAgents);
   const hetero = candidates.find((agent) => workers.length === 0 || workers.every((worker) => isHeterogeneous(worker, agent)));
   if (hetero !== undefined) {

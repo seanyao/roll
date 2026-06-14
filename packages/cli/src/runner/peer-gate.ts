@@ -23,16 +23,32 @@
  * `loop_safety.peer_gate: soft` in policy.yaml keeps the old record-only
  * behaviour for an explicit migration window; absent ⇒ hard (the owner default).
  *
+ * FIX-312 — the gate is now HETERO-AVAILABILITY-aware (owner ruling 2026-06-15:
+ * "hetero available → must use it; self only when hetero is truly impossible").
+ * When a heterogeneous (different-vendor) peer is GENUINELY available, the hard
+ * enforcement extends to ALL substantive deliveries — not just high-complexity:
+ * any non-empty cycle that ships with NO peer evidence (it self-reviewed while
+ * hetero was available) is a VIOLATION and is BLOCKED (ALERT, not-Done). When
+ * hetero is genuinely UNAVAILABLE (single-agent / single-vendor setup),
+ * self-review is an ALLOWED, RECORDED fallback — the gate records a
+ * `self_review_fallback` verdict with a reason and NEVER blocks (the self path is
+ * preserved for future single-agent users, never hard-removed). `heteroAvailable`
+ * is computed uniformly by vendor through the standard model — NO per-agent
+ * hardcoding (roll core thesis).
+ *
  * Complexity is deterministic and cheap — `git diff --name-only` of the cycle
  * branch vs origin/main in the worktree:
  *   - more than 3 files changed, or
  *   - 2+ distinct `packages/<name>` touched (cross-module), or
  *   - any high-risk path (CI workflows, infra git/github/process seams).
+ * Complexity still drives the *reason* detail; FIX-312 makes hetero-availability
+ * (not complexity alone) the switch that turns the hard block on for EVERY
+ * substantive delivery.
  *
  * Peer evidence contract (FIX-150a alignment): a per-cycle evidence file at
  * `<rt>/peer/cycle-<cycleId>.*` (md/json), written by the roll-peer skill, the
  * pairing gate, or any consult wrapper. Presence = consulted; absence on a
- * high-complexity delivery = "skipped" verdict.
+ * gated delivery = "skipped" verdict.
  */
 import { parsePolicy } from "@roll/core";
 import { execFile } from "node:child_process";
@@ -95,19 +111,37 @@ export function peerEvidencePresent(runtimeDir: string, cycleId: string): boolea
 export type PeerGateMode = "soft" | "hard";
 
 export interface PeerGateResult {
-  verdict: "consulted" | "skipped" | "not-required";
+  /** FIX-312 adds `self-review-allowed` — a substantive delivery that shipped
+   *  with no peer evidence BUT no heterogeneous peer was available, so self-review
+   *  is the recorded (non-blocking) fallback. */
+  verdict: "consulted" | "skipped" | "not-required" | "self-review-allowed";
   mode: PeerGateMode;
   reasons: string[];
   /** true ONLY when mode==="hard" && verdict==="skipped" — the delivery is
-   *  blocked (high-complexity work shipped with no peer review). The executor
-   *  consumes this: it re-attempts the consult once and, if still blocked, fails
-   *  the capture so the story is NOT marked Done. */
+   *  blocked (a substantive delivery shipped with no peer review while a
+   *  heterogeneous peer WAS available). The executor consumes this: it
+   *  re-attempts the consult once and, if still blocked, fails the capture so the
+   *  story is NOT marked Done. Never set when hetero is unavailable. */
   blocked: boolean;
+  /** FIX-312 — was a heterogeneous (different-vendor) peer available for this
+   *  cycle's builder? Drives the decision: true ⇒ self-review is a violation
+   *  (block); false ⇒ self-review is an allowed recorded fallback. undefined when
+   *  the caller did not supply availability (legacy/complexity-only path). */
+  heteroAvailable?: boolean;
 }
 
 export interface PeerGateSinks {
   alert: (message: string) => void;
   event: (payload: { cycleId: string; verdict: string; reasons: string[] }) => void;
+}
+
+/** FIX-312 — optional hetero-availability input to {@link runPeerGate}. */
+export interface PeerGateOptions {
+  /** Is a heterogeneous (different-vendor) peer GENUINELY available for the
+   *  builder? Compute via `heteroAvailable(installed, workingAgent)` from
+   *  @roll/core (vendor-based, agent-agnostic). When omitted the gate keeps the
+   *  legacy complexity-only behaviour (high-complexity + no evidence ⇒ block). */
+  heteroAvailable?: boolean;
 }
 
 /** Read `loop_safety.peer_gate` from `<repoCwd>/.roll/policy.yaml`; default hard.
@@ -130,6 +164,19 @@ export function readPeerGateMode(repoCwd: string): PeerGateMode {
  * FIX-293: when `mode === "hard"` (the default), a high-complexity delivery with
  * no peer evidence is `blocked`. The soft mode records the same `skipped` verdict
  * but never blocks (explicit migration window).
+ *
+ * FIX-312: when `opts.heteroAvailable` is supplied, hetero-availability drives the
+ * decision (owner ruling: "hetero available → must use it; self only when hetero
+ * is truly impossible"):
+ *   - heteroAvailable === true  → the hard block extends to ALL substantive
+ *     (non-empty) deliveries, not just high-complexity. No peer evidence here
+ *     means the cycle self-reviewed while a hetero peer was available — a
+ *     VIOLATION → blocked (hard mode) + ALERT.
+ *   - heteroAvailable === false → self-review is an ALLOWED recorded fallback:
+ *     verdict `self-review-allowed`, a `peer:gate` event with the reason, and the
+ *     gate NEVER blocks (the self path is preserved for single-agent setups).
+ * When `opts.heteroAvailable` is undefined the gate keeps the legacy
+ * complexity-only behaviour (back-compat for callers/tests that don't pass it).
  */
 export async function runPeerGate(
   worktreeCwd: string,
@@ -137,22 +184,55 @@ export async function runPeerGate(
   cycleId: string,
   mode: PeerGateMode,
   sinks: PeerGateSinks,
+  opts: PeerGateOptions = {},
 ): Promise<PeerGateResult> {
   try {
     const files = await cycleChangedFiles(worktreeCwd);
     const cx = assessComplexity(files);
-    if (!cx.high) return { verdict: "not-required", mode, reasons: [], blocked: false };
+    const { heteroAvailable } = opts;
+
+    // Nothing substantive shipped → never gated.
+    if (files.length === 0) return { verdict: "not-required", mode, reasons: [], blocked: false, ...(heteroAvailable !== undefined ? { heteroAvailable } : {}) };
+
+    // FIX-312: when hetero-availability is known, IT is the switch (not complexity
+    // alone). A substantive delivery with no peer evidence is gated whenever a
+    // hetero peer was available; otherwise (no hetero) self-review is allowed.
+    // When availability is unknown, fall back to the legacy complexity-only gate.
+    const gated = heteroAvailable === true ? true : heteroAvailable === false ? false : cx.high;
+
+    if (heteroAvailable === false) {
+      // No heterogeneous peer to consult → self-review is the ALLOWED fallback.
+      // Record it (never silent), but NEVER block and NEVER remove the self path.
+      if (peerEvidencePresent(runtimeDir, cycleId)) {
+        sinks.event({ cycleId, verdict: "consulted", reasons: cx.reasons });
+        return { verdict: "consulted", mode, reasons: cx.reasons, blocked: false, heteroAvailable };
+      }
+      const reasons = ["self_review_fallback: no heterogeneous (different-vendor) peer available", ...cx.reasons];
+      sinks.alert(`peer gate (${mode}): self-review fallback — no heterogeneous peer available; recorded (not blocked) — cycle ${cycleId}`);
+      sinks.event({ cycleId, verdict: "self-review-allowed", reasons });
+      return { verdict: "self-review-allowed", mode, reasons, blocked: false, heteroAvailable };
+    }
+
+    if (!gated) return { verdict: "not-required", mode, reasons: [], blocked: false, ...(heteroAvailable !== undefined ? { heteroAvailable } : {}) };
+
     if (peerEvidencePresent(runtimeDir, cycleId)) {
       sinks.event({ cycleId, verdict: "consulted", reasons: cx.reasons });
-      return { verdict: "consulted", mode, reasons: cx.reasons, blocked: false };
+      return { verdict: "consulted", mode, reasons: cx.reasons, blocked: false, ...(heteroAvailable !== undefined ? { heteroAvailable } : {}) };
     }
+
+    // No peer evidence on a gated delivery. With a hetero peer available this is a
+    // self-review violation; legacy path keeps the high-complexity framing.
     const blocked = mode === "hard";
+    const why = heteroAvailable === true
+      ? `substantive delivery self-reviewed while a heterogeneous peer was available${cx.reasons.length > 0 ? ` (${cx.reasons.join("; ")})` : ""}`
+      : `high-complexity work without peer review (${cx.reasons.join("; ")})`;
     sinks.alert(
-      `peer gate (${mode}): high-complexity work without peer review (${cx.reasons.join("; ")}) — cycle ${cycleId}` +
+      `peer gate (${mode}): ${why} — cycle ${cycleId}` +
         (blocked ? " — retrying the consult; story not marked Done unless peer evidence is produced" : ""),
     );
-    sinks.event({ cycleId, verdict: "skipped", reasons: cx.reasons });
-    return { verdict: "skipped", mode, reasons: cx.reasons, blocked };
+    const reasons = heteroAvailable === true ? ["hetero_available_self_review_violation", ...cx.reasons] : cx.reasons;
+    sinks.event({ cycleId, verdict: "skipped", reasons });
+    return { verdict: "skipped", mode, reasons, blocked, ...(heteroAvailable !== undefined ? { heteroAvailable } : {}) };
   } catch {
     return { verdict: "not-required", mode, reasons: [], blocked: false }; // gate must never fail the cycle by surprise
   }

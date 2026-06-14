@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentVendor,
   defaultPairingConfig,
+  heteroAvailable,
   isHeterogeneous,
   pairingPoolView,
   parsePairingConfig,
@@ -36,6 +37,29 @@ describe("agentVendor + isHeterogeneous", () => {
     expect(isHeterogeneous("claude", "codex")).toBe(true);
     expect(isHeterogeneous("codex", "openai")).toBe(false); // alias, same backend
     expect(isHeterogeneous("agy", "gemini")).toBe(false);
+  });
+});
+
+describe("heteroAvailable (FIX-312 — the review-routing switch)", () => {
+  it("multi-vendor pool → true (a different-vendor peer exists for the builder)", () => {
+    expect(heteroAvailable(["claude", "codex", "kimi"], "claude")).toBe(true);
+    expect(heteroAvailable(["claude", "pi"], "claude")).toBe(true);
+  });
+  it("single-agent / single-vendor pool → false (self-review fallback allowed)", () => {
+    expect(heteroAvailable(["claude"], "claude")).toBe(false);
+    expect(heteroAvailable([], "claude")).toBe(false);
+  });
+  it("same vendor by alias is NOT heterogeneous (agent-agnostic, vendor-based)", () => {
+    // codex and openai collapse to one vendor → no heterogeneous option.
+    expect(heteroAvailable(["codex", "openai"], "codex")).toBe(false);
+    expect(heteroAvailable(["agy", "gemini"], "agy")).toBe(false);
+  });
+  it("builder absent from the pool still counts other vendors", () => {
+    // builder is kimi (not installed locally) but a claude peer is available.
+    expect(heteroAvailable(["claude"], "kimi")).toBe(true);
+  });
+  it("no per-agent hardcoding — an unknown vendor pairs with any known one", () => {
+    expect(heteroAvailable(["claude", "made-up-agent"], "claude")).toBe(true);
   });
 });
 

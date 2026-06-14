@@ -860,13 +860,21 @@ describe("FIX-204B — the executor pins the picked story into the agent spawn",
     const rt = tmp("pin-rt");
     const cycleId = "20260606-031500-3101";
     const p = paths(rt, cycleId);
+    // Capture the storyId from the BUILDER spawn. FIX-312: the peer gate may fire
+    // a second (peer-review) spawn that legitimately carries NO storyId — record
+    // the first spawn that actually pins one so the later peer spawn can't clobber
+    // the assertion (only the builder spawn pins; the peer-review spawn never does).
     let seenStoryId: string | undefined;
     const pinProbe: AgentSpawn = async (agent, opts) => {
-      seenStoryId = opts.storyId;
+      if (opts.storyId !== undefined && seenStoryId === undefined) seenStoryId = opts.storyId;
       return shimAgentTcr(agent, opts);
     };
+    // FIX-312: pin a deterministic single-vendor pool so the peer gate's
+    // hetero-availability decision is independent of the CI host's installed
+    // agents (heteroAvailable=false → self-review allowed → no extra peer spawn);
+    // this keeps the test focused on builder-spawn storyId pinning, portably.
     const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
-    const ports: Ports = { ...base, agentSpawn: pinProbe, github: fakeGithub(0) };
+    const ports: Ports = { ...base, agentSpawn: pinProbe, github: fakeGithub(0), installedAgents: () => ["claude"] };
     const result = await runCycleOnce({
       ports,
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },

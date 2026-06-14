@@ -81,9 +81,12 @@ export type RollEvent =
       reason: string;
       ts: number;
     }
-  // Peer gate (FIX-150b) — the hard-trigger audit trail: every high-complexity
-  // delivery records whether peer review happened ("consulted") or was skipped.
-  | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped"; reasons: string[]; ts: number }
+  // Peer gate (FIX-150b) — the hard-trigger audit trail: every gated delivery
+  // records whether peer review happened ("consulted") or was skipped. FIX-312
+  // adds "self-review-allowed": a substantive delivery shipped with no peer
+  // evidence BECAUSE no heterogeneous peer was available (recorded fallback, not
+  // a block — distinct from a "skipped" violation where hetero WAS available).
+  | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped" | "self-review-allowed"; reasons: string[]; ts: number }
   // Cross-Agent Pairing (US-PAIR-003) — a heterogeneous peer one-way reviews a
   // delivery. `pair:*` is deliberately distinct from `peer:gate` (decoupled audit).
   | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; ts: number }

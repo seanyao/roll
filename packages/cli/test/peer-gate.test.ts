@@ -160,6 +160,102 @@ describe("runPeerGate (end-to-end against a real git worktree)", () => {
   });
 });
 
+describe("runPeerGate — FIX-312 hetero-availability drives the decision", () => {
+  it("heteroAvailable=true + self-reviewed (no evidence) → BLOCKED even for a SMALL delivery", async () => {
+    // AC3/AC5: with a hetero peer available, the hard block extends to ALL
+    // substantive deliveries — a 1-file (low-complexity) self-reviewed cycle is a
+    // VIOLATION, not "not-required".
+    const wt = cycleWorktree(1);
+    const rt = tmp("rt");
+    const { alerts, events, s } = sinks();
+    const r = await runPeerGate(wt, rt, "h-1", "hard", s, { heteroAvailable: true });
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.heteroAvailable).toBe(true);
+    expect(alerts[0]).toContain("heterogeneous peer was available");
+    expect(events[0]?.verdict).toBe("skipped");
+    expect(events[0]?.reasons[0]).toBe("hetero_available_self_review_violation");
+  });
+
+  it("heteroAvailable=true + high-complexity + self-reviewed → BLOCKED (violation)", async () => {
+    const wt = cycleWorktree(5);
+    const rt = tmp("rt");
+    const { s } = sinks();
+    const r = await runPeerGate(wt, rt, "h-2", "hard", s, { heteroAvailable: true });
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+  });
+
+  it("heteroAvailable=true + peer evidence present → consulted, not blocked", async () => {
+    const wt = cycleWorktree(2);
+    const rt = tmp("rt");
+    mkdirSync(join(rt, "peer"), { recursive: true });
+    writeFileSync(join(rt, "peer", "cycle-h-3.json"), "{}\n");
+    const { alerts, s } = sinks();
+    const r = await runPeerGate(wt, rt, "h-3", "hard", s, { heteroAvailable: true });
+    expect(r.verdict).toBe("consulted");
+    expect(r.blocked).toBe(false);
+    expect(alerts).toHaveLength(0);
+  });
+
+  it("heteroAvailable=false + self-reviewed → self-review-allowed: RECORDED, never blocked", async () => {
+    // AC4: single-agent / single-vendor → self-review is an allowed fallback. It
+    // is recorded (alert + event with a reason) but the gate NEVER blocks.
+    const wt = cycleWorktree(5); // even a high-complexity delivery is allowed
+    const rt = tmp("rt");
+    const { alerts, events, s } = sinks();
+    const r = await runPeerGate(wt, rt, "h-4", "hard", s, { heteroAvailable: false });
+    expect(r.verdict).toBe("self-review-allowed");
+    expect(r.blocked).toBe(false);
+    expect(r.heteroAvailable).toBe(false);
+    expect(r.reasons[0]).toContain("self_review_fallback");
+    expect(alerts[0]).toContain("self-review fallback");
+    expect(alerts[0]).toContain("not blocked");
+    expect(events[0]?.verdict).toBe("self-review-allowed");
+  });
+
+  it("heteroAvailable=false + peer evidence present → consulted (a peer ran anyway)", async () => {
+    const wt = cycleWorktree(2);
+    const rt = tmp("rt");
+    mkdirSync(join(rt, "peer"), { recursive: true });
+    writeFileSync(join(rt, "peer", "cycle-h-5.md"), "AGREE\n");
+    const { s } = sinks();
+    const r = await runPeerGate(wt, rt, "h-5", "hard", s, { heteroAvailable: false });
+    expect(r.verdict).toBe("consulted");
+    expect(r.blocked).toBe(false);
+  });
+
+  it("empty delivery → not-required regardless of heteroAvailable", async () => {
+    const wt = cycleWorktree(0);
+    const { events, s } = sinks();
+    const rOn = await runPeerGate(wt, tmp("rt"), "h-6a", "hard", s, { heteroAvailable: true });
+    const rOff = await runPeerGate(wt, tmp("rt"), "h-6b", "hard", s, { heteroAvailable: false });
+    expect(rOn.verdict).toBe("not-required");
+    expect(rOff.verdict).toBe("not-required");
+    expect(rOn.blocked).toBe(false);
+    expect(rOff.blocked).toBe(false);
+    expect(events).toHaveLength(0);
+  });
+
+  it("heteroAvailable omitted → legacy complexity-only behaviour is unchanged", async () => {
+    // Back-compat: callers/tests that don't pass availability keep the FIX-293
+    // contract (high-complexity + no evidence ⇒ block; small ⇒ not-required).
+    const wtSmall = cycleWorktree(1);
+    const wtBig = cycleWorktree(5);
+    const { s } = sinks();
+    expect((await runPeerGate(wtSmall, tmp("rt"), "h-7a", "hard", s)).verdict).toBe("not-required");
+    expect((await runPeerGate(wtBig, tmp("rt"), "h-7b", "hard", s)).blocked).toBe(true);
+  });
+
+  it("heteroAvailable=true + soft mode → recorded skipped but NOT blocked (migration window honoured)", async () => {
+    const wt = cycleWorktree(1);
+    const { s } = sinks();
+    const r = await runPeerGate(wt, tmp("rt"), "h-8", "soft", s, { heteroAvailable: true });
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(false);
+  });
+});
+
 describe("readPeerGateMode (FIX-293 AC-H4 policy flag)", () => {
   function repoWithPolicy(body: string | null): string {
     const repo = tmp("policy");

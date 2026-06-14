@@ -58,6 +58,34 @@ export function isHeterogeneous(a: string, b: string): boolean {
   return agentVendor(a) !== agentVendor(b);
 }
 
+/**
+ * FIX-312 — is a heterogeneous peer GENUINELY available for `workingAgent`?
+ *
+ * The owner-calibrated line for review routing: "hetero available → must use it;
+ * self only when hetero is truly impossible." This is the single predicate that
+ * decision drives on — `auto` defaults to hetero-FIRST, and a cycle that
+ * self-reviewed while this returns true is a VIOLATION (the peer gate blocks it).
+ *
+ * Agent-agnostic by construction (roll core thesis): "heterogeneous" = a
+ * different VENDOR than the builder, computed uniformly through {@link agentVendor}
+ * — NO per-agent hardcoding. Returns true iff ≥1 CONFIGURED/installed agent
+ * resolves to a vendor different from the builder's. A single-agent / single-vendor
+ * setup → false → self-review is an allowed recorded fallback (never blocked).
+ */
+export function heteroAvailable(installed: readonly string[], workingAgent: string): boolean {
+  const working = agentVendor(workingAgent);
+  if (working === "" || canonicalAgentName(workingAgent) === "") {
+    // No builder identity → can't reason about heterogeneity; conservatively
+    // treat any second distinct vendor in the pool as a heterogeneous option.
+    const vendors = new Set(installed.map(agentVendor).filter((v) => v !== ""));
+    return vendors.size >= 2;
+  }
+  return installed.some((a) => {
+    const c = canonicalAgentName(a);
+    return c !== "" && agentVendor(c) !== working;
+  });
+}
+
 export interface PairingConfig {
   enabled: boolean;
   stages: PairingStage[];

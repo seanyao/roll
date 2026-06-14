@@ -1037,6 +1037,56 @@ describe("executeCommand — command → executor mapping", () => {
     expect(events.some((e) => e.type === "peer:gate" && e.verdict === "consulted")).toBe(true);
   });
 
+  it("FIX-293 follow-up: single-agent-type env → same-type SEPARATE-SESSION retry produces evidence, NOT blocked (agentExit 0)", async () => {
+    // The owner fix for #711's over-blocking: with ONLY the working agent's type
+    // installed (no heterogeneous peer), the retry falls back to a fresh instance
+    // of that same type. agentSpawn is a distinct subprocess (separate session,
+    // never the builder's own), so a parseable verdict writes evidence → the gate
+    // re-runs `consulted` and the cycle is NOT blocked.
+    const wt = highComplexityWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-same-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const spawnedAgents: string[] = [];
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude"], // ONLY the working agent's type — no heterogeneous peer
+      agentSpawn: vi.fn(async (agent: string) => {
+        spawnedAgents.push(agent);
+        return { stdout: "VERDICT: agree\n", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    // NOT blocked — the same-type separate-session review produced evidence.
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
+    // The reviewer was spawned as a fresh claude process (a separate session).
+    expect(spawnedAgents).toContain("claude");
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "peer:gate" && e.verdict === "consulted")).toBe(true);
+    // It did NOT degrade to a fail-loud none-available — a peer WAS consulted.
+    expect(events.some((e) => e.type === "pair:none-available")).toBe(false);
+  });
+
+  it("FIX-293 follow-up: single-agent-type env where the same-type retry yields no evidence → STILL blocked (agentExit 1)", async () => {
+    // Block now means "the separate-session review produced no evidence", not "no
+    // other agent installed". A failing same-type spawn (exit 1 → reviewPeer null)
+    // leaves no evidence → the cycle stays BLOCKED NOT-Done.
+    const wt = highComplexityWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-same-blk-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude"], // only the working type
+      agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false })), // spawn fails → no evidence
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
+    expect(ports.agentSpawn).toHaveBeenCalled(); // the same-type retry DID fire
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1] as string);
+    expect(alerts.some((m) => m.includes("peer gate (hard)") && m.includes("BLOCKED"))).toBe(true);
+  });
+
   it("FIX-293 AC-H4: policy peer_gate=soft → high-complexity + no review records but does NOT block", async () => {
     const wt = highComplexityWorktree();
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-rt3-")));

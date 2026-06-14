@@ -356,15 +356,6 @@ describe("retryPeerConsult — FIX-293 AC-H3 (bounded retry, config-independent)
     expect(existsSync(join(rt, "peer", "cycle-c-to.pair.json"))).toBe(false);
   });
 
-  it("no heterogeneous peer installed → none-available (audited), no evidence", async () => {
-    const { rt } = project(null);
-    const { d, events } = retryDeps({ installed: ["claude"] }); // only the working agent
-    const r = await retryPeerConsult(rt, rt, "c-na", d);
-    expect(r.status).toBe("none-available");
-    expect(events[0]?.type).toBe("pair:none-available");
-    expect(existsSync(join(rt, "peer", "cycle-c-na.pair.json"))).toBe(false);
-  });
-
   it("empty diff → nothing to review (no peer burned)", async () => {
     const { rt } = project(null);
     const { d } = retryDeps({ diff: async () => "   " });
@@ -378,5 +369,94 @@ describe("retryPeerConsult — FIX-293 AC-H3 (bounded retry, config-independent)
     const { d } = retryDeps({ timeoutMs: 12345, reviewPeer: async (_p, _d, t) => { seenTimeout = t; return { verdict: "agree", findings: [], cost: 0 }; } });
     await retryPeerConsult(rt, rt, "c-t", d);
     expect(seenTimeout).toBe(12345);
+  });
+});
+
+describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fallback", () => {
+  // (a) Single coding-agent-type env: only the working agent is installed. The
+  // retry must NOT report none-available — it falls back to a fresh instance of
+  // the working agent's OWN type (spawned via reviewPeer = a separate session),
+  // produces evidence, and is NOT blocked. The over-blocking #711 bug is gone.
+  it("single-agent-type env → falls back to a same-type separate-session peer, reviewed (not blocked)", async () => {
+    const { rt } = project(null);
+    const spawnedPeers: string[] = [];
+    const { d, events } = retryDeps({
+      installed: ["claude"], // only the working agent's type is installed
+      workingAgent: "claude",
+      reviewPeer: async (peer) => { spawnedPeers.push(peer); return { verdict: "agree", findings: [], cost: 0.03 }; },
+    });
+    const r = await retryPeerConsult(rt, rt, "c-same", d);
+    expect(r.status).toBe("reviewed");
+    expect(r.peer).toBe("claude"); // the reviewer is a fresh claude instance
+    expect(r.sameTypeFallback).toBe(true);
+    // reviewPeer (which spawns a distinct subprocess) WAS invoked → separate session.
+    expect(spawnedPeers).toEqual(["claude"]);
+    // Evidence is written → the gate re-runs green and the cycle is NOT blocked.
+    expect(existsSync(join(rt, "peer", "cycle-c-same.pair.json"))).toBe(true);
+    const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c-same.pair.json"), "utf8")) as { peer: string; sameTypeFallback: boolean };
+    expect(ev.peer).toBe("claude");
+    expect(ev.sameTypeFallback).toBe(true);
+    const selected = events.find((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>;
+    expect(selected.peer).toBe("claude");
+    // No fail-loud none-available event — a peer WAS consulted.
+    expect(events.some((e) => e.type === "pair:none-available")).toBe(false);
+  });
+
+  // (b) Heterogeneous is still PREFERRED when a different-vendor agent exists —
+  // the same-type fallback is the LAST resort, not the default.
+  it("heterogeneous peer still PREFERRED over the same-type fallback", async () => {
+    const { rt } = project(null);
+    const { d } = retryDeps({ installed: ["claude", "codex"], workingAgent: "claude" });
+    const r = await retryPeerConsult(rt, rt, "c-het", d);
+    expect(r.status).toBe("reviewed");
+    expect(r.peer).toBe("codex"); // different vendor wins
+    expect(r.sameTypeFallback).toBe(false);
+  });
+
+  // (c) The cycle STILL BLOCKS when the separate-session consult yields no
+  // evidence (timeout/failure) — even via the same-type fallback. Block now means
+  // "the separate-session review produced no evidence", not "no other agent".
+  it("same-type fallback that times out → still blocked (timeout), no evidence", async () => {
+    const { rt } = project(null);
+    const { d } = retryDeps({ installed: ["claude"], workingAgent: "claude", reviewPeer: async () => null });
+    const r = await retryPeerConsult(rt, rt, "c-same-to", d);
+    expect(r.status).toBe("timeout");
+    expect(r.sameTypeFallback).toBe(true);
+    expect(existsSync(join(rt, "peer", "cycle-c-same-to.pair.json"))).toBe(false);
+  });
+
+  // (d) THE RED LINE: the reviewer is always reached through reviewPeer, which
+  // spawns a DISTINCT process — even when the peer type equals the working type,
+  // it is a separate session, never the builder scoring its own work in-session.
+  // Here reviewPeer asserts it received a peer name to spawn (a separate session);
+  // an in-session self-score path would never invoke reviewPeer at all.
+  it("RED LINE — same-type peer is reached via reviewPeer (separate spawn), never in-session self-review", async () => {
+    const { rt } = project(null);
+    let reviewPeerInvoked = false;
+    const { d } = retryDeps({
+      installed: ["claude"],
+      workingAgent: "claude",
+      reviewPeer: async (peer) => {
+        reviewPeerInvoked = true;
+        // The reviewer is invoked as a spawned peer with a name, not the builder's
+        // own live session producing a self-verdict.
+        expect(peer).toBe("claude");
+        return { verdict: "agree", findings: [], cost: 0 };
+      },
+    });
+    await retryPeerConsult(rt, rt, "c-redline", d);
+    expect(reviewPeerInvoked).toBe(true);
+  });
+
+  // The only true none-available now: nothing to spawn at all (no installed agent
+  // AND no working-agent name) — NOT "only one vendor installed".
+  it("no agent at all (empty installed + empty workingAgent) → none-available (audited)", async () => {
+    const { rt } = project(null);
+    const { d, events } = retryDeps({ installed: [], workingAgent: "" });
+    const r = await retryPeerConsult(rt, rt, "c-none", d);
+    expect(r.status).toBe("none-available");
+    const none = events.find((e) => e.type === "pair:none-available") as Extract<PairEvent, { type: "pair:none-available" }>;
+    expect(none.reason).toContain("no peer could be consulted");
+    expect(existsSync(join(rt, "peer", "cycle-c-none.pair.json"))).toBe(false);
   });
 });

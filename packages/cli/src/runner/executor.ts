@@ -699,9 +699,15 @@ export async function executeCommand(
         }
         if (peerBlocked) {
           // Still no peer evidence after the retry → escalate; cycle ends NOT-Done.
+          // The retry already prefers a different-type agent and, when none is
+          // installed, falls back to a fresh SEPARATE-SESSION instance of the
+          // working agent's own type — so a block here means the separate-session
+          // review itself produced no evidence (it timed out / errored), NOT that
+          // no other agent was installed.
+          const how = retry.sameTypeFallback === true ? "same-type separate-session review" : "peer review";
           ports.events.appendAlert(
             ports.paths.alertsPath,
-            `peer gate (hard): high-complexity work still without peer review after one retry (${retry.status}) — cycle ${cycleIdStr} BLOCKED; story not marked Done`,
+            `peer gate (hard): high-complexity work still without peer evidence after one retry — the ${how} produced no evidence (${retry.status}) — cycle ${cycleIdStr} BLOCKED; story not marked Done`,
           );
         }
       }

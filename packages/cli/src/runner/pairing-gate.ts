@@ -331,6 +331,10 @@ export interface RetryPeerConsultDeps {
 export interface RetryPeerConsultResult {
   status: "none-available" | "reviewed" | "timeout" | "empty" | "error";
   peer?: string;
+  /** true when no heterogeneous peer was installed and the reviewer fell back to
+   *  a fresh SEPARATE-SESSION instance of the working agent's own type (still a
+   *  distinct spawned process, never the builder's session). For diagnostics. */
+  sameTypeFallback?: boolean;
 }
 
 /**
@@ -340,13 +344,33 @@ export interface RetryPeerConsultResult {
  * Unlike {@link runPairing} this is NOT gated on `.roll/pairing.yaml`: the peer
  * gate is the always-on, agent-agnostic safety mechanism (pairing is the opt-in
  * enhancement), so the block-triggered retry must fire whether or not pairing is
- * configured. It picks the first heterogeneous installed peer (registry order, so
- * the choice is deterministic — no `if agent==='x'` special-casing) and runs the
- * SAME `reviewPeer` consult path the pairing gate uses, with the SAME 30s hard
- * timeout. On a real verdict it writes the canonical peer-gate evidence file
- * (`<rt>/peer/cycle-<id>.pair.json`) so a re-run of the gate sees evidence and
- * unblocks. Never throws — the retry is a best-effort rescue, not a new way to
- * topple a cycle.
+ * configured. It runs the SAME `reviewPeer` consult path the pairing gate uses,
+ * with the SAME 30s hard timeout, and on a real verdict writes the canonical
+ * peer-gate evidence file (`<rt>/peer/cycle-<id>.pair.json`) so a re-run of the
+ * gate sees evidence and unblocks. Never throws — the retry is a best-effort
+ * rescue, not a new way to topple a cycle.
+ *
+ * FIX-293 follow-up (owner ruling) — reviewer allocation by the cross-agent
+ * strategy, with precedence:
+ *   1. Heterogeneous peer PREFERRED — the first different-vendor installed agent
+ *      (registry order, so the choice is deterministic, no `if agent==='x'`).
+ *   2. FALLBACK: the working agent's OWN canonical type — `reviewPeer` spawns it
+ *      as a FRESH, SEPARATE-SESSION subprocess (ports.agentSpawn always forks a
+ *      new process), so a single-coding-agent environment is no longer
+ *      permanently blocked. A different instance of the same type is acceptable.
+ *   3. THE RED LINE: the reviewer is ALWAYS a separately-spawned session — never
+ *      the builder's own session self-scoring its own work. The builder is the
+ *      executor process; `reviewPeer` → `ports.agentSpawn` is a distinct child,
+ *      so same-type here is a separate session, never in-session self-review.
+ *   4. BLOCK only when even that separate-session consult yields no evidence
+ *      (timeout / error / empty diff). With the same-type fallback "no peer at
+ *      all" is rare — the block becomes "the separate-session review produced no
+ *      evidence", not "no heterogeneous agent installed".
+ *
+ * Agent-agnostic by construction: the allocation (heterogeneous-preferred,
+ * same-type-fallback) lives here in the normalization layer; the gate downstream
+ * keys only on "separate-session peer evidence present?", with no per-agent
+ * special-casing.
  */
 export async function retryPeerConsult(
   worktreeCwd: string,
@@ -356,12 +380,22 @@ export async function retryPeerConsult(
 ): Promise<RetryPeerConsultResult> {
   try {
     const working = canonicalAgentName(deps.workingAgent);
-    const peer = deps.installed
+    const distinct = deps.installed
       .map(canonicalAgentName)
-      .filter((a, i, arr) => arr.indexOf(a) === i)
-      .filter((a) => a !== working && isHeterogeneous(a, working))[0];
-    if (peer === undefined) {
-      deps.event({ type: "pair:none-available", cycleId, stage: "code", reason: "peer-gate retry: no heterogeneous peer installed", ts: deps.now() });
+      .filter((a, i, arr) => arr.indexOf(a) === i);
+    // (1) Heterogeneous peer PREFERRED; (2) FALLBACK to the working agent's own
+    // canonical type — reviewPeer spawns a fresh, separate-session instance of it
+    // (NEVER the builder's session), so a single-agent-type env is not permanently
+    // blocked. peer === working here is a different process, not self-review.
+    const heterogeneous = distinct.filter((a) => a !== working && isHeterogeneous(a, working))[0];
+    const peer = heterogeneous ?? working;
+    const sameTypeFallback = heterogeneous === undefined;
+    // The only true "no peer to consult" case: we don't even know the working
+    // agent's type (no installed agent AND no working-agent name) — there is
+    // nothing to spawn a separate session of. This is now rare (it is NOT "only
+    // one vendor installed"); audited as a fail-loud absence.
+    if (peer === "") {
+      deps.event({ type: "pair:none-available", cycleId, stage: "code", reason: "peer-gate retry: no peer could be consulted (no agent to spawn a separate-session review)", ts: deps.now() });
       return { status: "none-available" };
     }
     const diff = await deps.diff(worktreeCwd);
@@ -369,13 +403,13 @@ export async function retryPeerConsult(
     deps.event({ type: "pair:selected", cycleId, workingAgent: working, peer, stage: "code", ts: deps.now() });
 
     const review = await deps.reviewPeer(peer, diff, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    if (review === null) return { status: "timeout", peer }; // flaky peer — stays blocked, no death-spiral
+    if (review === null) return { status: "timeout", peer, sameTypeFallback }; // flaky peer — stays blocked, no death-spiral
 
     const path = evidencePath(runtimeDir, cycleId, "code");
     mkdirSync(join(runtimeDir, "peer"), { recursive: true });
-    writeFileSync(path, JSON.stringify({ cycleId, workingAgent: working, peer, stage: "code", ...review }, null, 2), "utf8");
+    writeFileSync(path, JSON.stringify({ cycleId, workingAgent: working, peer, stage: "code", sameTypeFallback, ...review }, null, 2), "utf8");
     deps.event({ type: "pair:verdict", cycleId, peer, verdict: review.verdict, findings: review.findings.length, cost: review.cost, stage: "code", ts: deps.now() });
-    return { status: "reviewed", peer };
+    return { status: "reviewed", peer, sameTypeFallback };
   } catch {
     return { status: "error" }; // never throw — the retry is a rescue, not a cycle killer
   }

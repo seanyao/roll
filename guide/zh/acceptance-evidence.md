@@ -95,18 +95,13 @@ HTML——双语、明暗主题、可打印）：
 .roll/features/<epic>/index.html       ← 史诗页：史诗账本 + 故事三分组
                                          （已合主干 / 周期中 / 待办）
 .roll/features/<epic>/<id>/index.html  ← 故事档案：五站——立项、设计、执行、
-                                         交付（验收横幅 + 逐 AC 证据块）、复盘
+                                         交付（验收横幅 + AC 表）、复盘
 ```
 
 页面上每个数字都来自真相模型——anchors -> selectors -> adapter ->
 projections——绝不手填。Story 聚合对比 backlog 声明与 merge/证据真相；
 Cycle 聚合只读 TerminalOutcome 终态记录；Release 聚合读取最新发版闸 verdict
 和有效 waiver。一句话：**待办是愿望，主干是事实，done ≡ merged。**
-
-故事档案里，每条 AC 都有自己的证据块。截图仍以缩略图呈现并链接到原图；
-Vitest 输出这类文本证据会从卡片文件夹读取，并以内联可折叠
-`<details><pre>` 展开，正文做 HTML 转义。文本证据缺失时显示明确的不可用状态，
-不会伪装成可点击的证明链接。
 
 首页真相板会显式保留未知。`?` 表示事实缺失或不在已知 schema 内；`0` 表示
 已知为零。过早写下的 backlog `✅ Done` 只是和真相冲突的声明，会显示为漂移，

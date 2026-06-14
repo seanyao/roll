@@ -227,18 +227,17 @@ describe("US-DOSSIER-038 — web ↔ CLI: one number on every surface / 同一�
     const cliBodyRows = cli.split("\n").filter((l) => /^ {2}\S/.test(l) && !/^ {2}Role\b/.test(l)).length;
     const cliEmpty = count(cli, "slot empty");
 
-    // WEB: the grid now renders four `data-exec-slot` cards plus four
-    // `data-scenario-role` rows; together they are still one DOM row per VM row.
-    // Bound each block to its own row/card so trailing page content (other `—`
-    // glyphs) never bleeds into the empty-slot count.
+    // WEB: the grid stamps one `data-casting="<key>"` per row; an empty slot's
+    // agent cell renders the SAME em-dash token (`>—</span>`). Bound each block
+    // to its own row (next data-casting, or the grid `</section>`) so trailing
+    // page content (other `—` glyphs) never bleeds into the count.
     const web = renderConsole();
-    const webRows = count(web, "data-exec-slot=") + count(web, "data-scenario-role=");
-    const blocks = web.split(/data-(?:exec-slot|scenario-role)=/).slice(1);
+    const webRows = count(web, "data-casting=");
+    const blocks = web.split("data-casting=").slice(1);
     const rowCell = (b: string): string => {
-      const exec = b.indexOf("data-exec-slot=");
-      const role = b.indexOf("data-scenario-role=");
+      const next = b.indexOf("data-casting=");
       const sec = b.indexOf("</section>");
-      const ends = [exec, role, sec].filter((i) => i !== -1);
+      const ends = [next, sec].filter((i) => i !== -1);
       const end = ends.length > 0 ? Math.min(...ends) : b.length;
       return b.slice(0, end);
     };

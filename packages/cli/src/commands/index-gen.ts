@@ -28,7 +28,6 @@ import { collectSkillsPanel } from "../lib/skills-panel.js";
 import { renderSkillsPage } from "../lib/page-skills.js"; // US-DOSSIER-032
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { collectCasting, defaultCastingDeps } from "../lib/casting.js";
-import { collectGitHooks, defaultGitHooksDeps } from "../lib/git-hooks.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { morningReportHref } from "../lib/morning-report.js";
@@ -434,10 +433,10 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // project's own charter docs, collected from the real doc tree (docs/*.md,
         // per-epic plan .md files, guide map) and rendered via `renderMarkdown`.
         charter: collectCharter(defaultCharterDeps(cwd, renderMarkdown)),
-        // FIX-284: Casting uses the router slot config; Hooks uses the checkout's
-        // configured git hooks path, not loop heartbeat lanes.
+        // US-DOSSIER-030: the Loop-tab Casting grid — complexity slots + scenario
+        // roles, resolved purely from the router slot config (agents.yaml) and the
+        // route:resolve audit; the Hooks panel reuses the same `loop` heartbeat.
         casting: collectCasting(defaultCastingDeps(cwd)),
-        gitHooks: collectGitHooks(defaultGitHooksDeps(cwd)),
         // US-DOSSIER-027: the top-bar project switcher reads the cross-project
         // registry (US-DOSSIER-028 writes it). Absent today → [] → the console
         // degrades to current-project-only via currentSlug, never erroring.

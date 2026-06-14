@@ -1764,47 +1764,9 @@ describe("US-DOSSIER-024 — per-AC evidence blocks", () => {
     // AC1's inline screenshot thumbnail renders BENEATH it (real-pixel proof)
     expect(html).toContain('class="ac-shot"');
     expect(html).toContain('<img src="latest/screenshots/page.png"');
-    // AC2's text evidence no longer links away; without hydrated text it shows
-    // an honest unavailable state instead of pretending to have inline body.
-    expect(html).toContain('class="ac-text-missing"');
-    expect(html).toContain("Text evidence unavailable");
-    expect(html).not.toContain('class="ac-evlink ac-ev-doc"');
-  });
-
-  it("FIX-285: text evidence is read from the card folder and rendered inline, while screenshots stay linked", () => {
-    const p = project();
-    const storyDir = join(p, ".roll", "features", "alpha", "FIX-285");
-    const runDir = join(storyDir, "2026-06-14T00-00-00");
-    mkdirSync(join(runDir, "screenshots"), { recursive: true });
-    mkdirSync(join(runDir, "evidence"), { recursive: true });
-    writeFileSync(join(runDir, "screenshots", "terminal.png"), "PNGDATA");
-    writeFileSync(join(runDir, "evidence", "vitest.txt"), "vitest <passed> & \"quoted\"");
-    symlinkSync(runDir, join(storyDir, "latest"));
-    writeFileSync(
-      join(storyDir, "ac-map.json"),
-      JSON.stringify([
-        {
-          ac: "FIX-285:AC1",
-          status: "pass",
-          evidence: [
-            { kind: "text", label: "vitest", textFile: "evidence/vitest.txt" },
-            { kind: "screenshot", label: "terminal", href: "screenshots/terminal.png" },
-          ],
-        },
-        { ac: "FIX-285:AC2", status: "readonly", evidence: [{ kind: "text", label: "missing log", textFile: "evidence/missing.txt" }] },
-      ]),
-    );
-    const input = collectStoryDossierInput(p, { id: "FIX-285", epic: "alpha", type: "FIX", delivered: true });
-    const html = renderStoryDossier(input);
-
-    expect(html).toContain('class="ac-text-evidence"');
-    expect(html).toContain("<summary>vitest</summary>");
-    expect(html).toContain("<pre>vitest &lt;passed&gt; &amp; &quot;quoted&quot;</pre>");
-    expect(html).not.toContain('class="ac-evlink ac-ev-doc" href="latest/evidence/vitest.txt"');
-    expect(html).toContain('class="ac-shot"');
-    expect(html).toContain('<img src="latest/screenshots/terminal.png"');
-    expect(html).toContain('class="ac-text-missing"');
-    expect(html).toContain("Text evidence unavailable");
+    // AC2's text evidence is an inline doc link beneath it
+    expect(html).toContain('class="ac-evlink ac-ev-doc"');
+    expect(html).toContain('href="latest/evidence/map.txt"');
   });
 
   it("AC2: observable vs readonly class chip is labelled on each block", () => {

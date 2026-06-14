@@ -165,6 +165,66 @@ export async function worktreeSubmoduleInit(worktreePath: string): Promise<GitRe
   return git(["submodule", "update", "--init", "--recursive", "--quiet"], worktreePath);
 }
 
+// ─── RESUME-PRIOR-WORK probes (un-merged audit-branch reuse) ──────────────────
+
+/**
+ * Fetch a candidate prior-cycle branch from origin so its ref is resolvable
+ * locally before the resume probes run. LENIENT (mirrors `_worktree_fetch_origin`):
+ * `fetched:false` on a missing branch / network blip — the caller treats an
+ * unfetchable candidate as "not resumable" and falls back to origin/main.
+ */
+export async function fetchRemoteBranch(
+  repoCwd: string,
+  branch: string,
+): Promise<{ fetched: boolean }> {
+  const r = await git(["fetch", "origin", branch, "--quiet"], repoCwd);
+  return { fetched: r.code === 0 };
+}
+
+/**
+ * Is `origin/<branch>` ALREADY merged into `origin/main`? Uses
+ * `git merge-base --is-ancestor origin/<branch> origin/main` (exit 0 = the branch
+ * tip is an ancestor of main = merged). A non-zero / errored probe (unknown ref)
+ * returns `false` so the caller treats an unresolvable branch as un-merged and
+ * lets the conflict probe arbitrate; only a definite 0 reports "merged".
+ *
+ * RESUME-PRIOR-WORK condition (a): a branch already on main has nothing to
+ * resume — it must be skipped.
+ */
+export async function branchMergedIntoMain(
+  repoCwd: string,
+  branch: string,
+): Promise<boolean> {
+  const r = await git(
+    ["merge-base", "--is-ancestor", `origin/${branch}`, "origin/main"],
+    repoCwd,
+  );
+  return r.code === 0;
+}
+
+/**
+ * Does `origin/<branch>` cleanly merge with `origin/main` (no conflicts)? Uses
+ * `git merge-tree --write-tree origin/main origin/<branch>` — a NON-MUTATING
+ * 3-way merge dry-run (git ≥ 2.38): exit 0 = clean, exit 1 = conflict. A clean
+ * merge proves the branch's commits can be replayed onto current main without
+ * a conflicted tree, so the resumed worktree is workable rather than a manual
+ * merge-conflict mess. Any other exit (bad ref / old git) returns `false` so the
+ * caller falls back to origin/main rather than risk spawning into a broken tree.
+ *
+ * RESUME-PRIOR-WORK condition (b): only a branch that cleanly rebases onto
+ * origin/main is resumed; otherwise fresh-context (origin/main) + an ALERT.
+ */
+export async function branchCleanlyRebasesOntoMain(
+  repoCwd: string,
+  branch: string,
+): Promise<boolean> {
+  const r = await git(
+    ["merge-tree", "--write-tree", "origin/main", `origin/${branch}`],
+    repoCwd,
+  );
+  return r.code === 0;
+}
+
 // ─── branch / commit / push / queries ────────────────────────────────────────
 
 /** `git branch -D <branch>` (lenient; mirrors the oracle's tolerant deletes). */

@@ -24,6 +24,8 @@ import {
   executeCommand,
   parseEstMin,
   realAgentSpawn,
+  RESUME_DISABLED_ENV,
+  resolveResumeBase,
   revertPrematureDone,
   withPtyWrap,
 } from "../src/runner/index.js";
@@ -462,6 +464,11 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       commitsAhead: vi.fn(async () => 3),
       mainAhead: vi.fn(async () => 0),
       tcrCount: vi.fn(async () => 4),
+      // RESUME-PRIOR-WORK probes — defaults make every fakePorts cycle base on
+      // origin/main (no recorded prior branch in the default runs.jsonl path).
+      fetchRemoteBranch: vi.fn(async () => ({ fetched: true })),
+      branchMergedIntoMain: vi.fn(async () => false),
+      branchCleanlyRebasesOntoMain: vi.fn(async () => true),
     },
     github: {
       repoSlug: vi.fn(async () => "o/r"),
@@ -542,6 +549,131 @@ describe("executeCommand — command → executor mapping", () => {
     expect(alert).toContain("[FAIL] worktree submodule init failed");
     // deps bootstrap must NOT run once skills populate has failed.
     expect(ports.depsExec).not.toHaveBeenCalled();
+  });
+
+  // ── RESUME-PRIOR-WORK (un-merged audit-branch reuse) ──────────────────────
+  // Each scenario writes a runs.jsonl that links the picked story → a prior
+  // cycle, then asserts which BASE create_worktree branches off.
+
+  /** Build fakePorts whose runs.jsonl records a prior `orphan` cycle for the
+   *  picked story (the FIX-284/285 stranded-work shape). */
+  function resumePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<string, unknown[]>; runsPath: string } {
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-resume-")));
+    execDirs.push(rt);
+    const runsPath = join(rt, "runs.jsonl");
+    writeFileSync(
+      runsPath,
+      JSON.stringify({ story_id: "US-RUN-001", cycle_id: "20260614-195600-25595", status: "orphan" }) + "\n",
+    );
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, runsPath },
+      ...over,
+    });
+    return { ports, calls, runsPath };
+  }
+
+  it("resume: a card with a clean un-merged prior cycle branch bases the worktree on that branch", async () => {
+    delete process.env[RESUME_DISABLED_ENV];
+    const { ports, calls } = resumePorts(); // defaults: not merged, clean rebase
+    const r = await executeCommand({ kind: "create_worktree", branch: "loop/cycle-new" }, ports, CTX);
+    expect(r.event).toEqual({ type: "worktree_created" });
+    // worktreeAdd's 4th arg (base) is the audit branch tip, not origin/main.
+    expect(ports.git.worktreeAdd).toHaveBeenCalledWith(
+      "/repo",
+      ports.paths.worktreePath,
+      "loop/cycle-new",
+      "origin/loop/cycle-20260614-195600-25595",
+    );
+    const alert = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alert).toContain("resume-prior-work");
+    expect(alert).toContain("resumes un-merged branch loop/cycle-20260614-195600-25595");
+  });
+
+  it("resume: no recorded prior branch → origin/main (fresh-context default unchanged)", async () => {
+    delete process.env[RESUME_DISABLED_ENV];
+    // The default fakePorts runsPath does not exist → no candidates.
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "create_worktree", branch: "loop/cycle-new" }, ports, CTX);
+    expect(r.event).toEqual({ type: "worktree_created" });
+    expect(ports.git.worktreeAdd).toHaveBeenCalledWith(
+      "/repo",
+      ports.paths.worktreePath,
+      "loop/cycle-new",
+      "origin/main",
+    );
+  });
+
+  it("resume: a prior branch that does NOT cleanly rebase → origin/main + an ALERT", async () => {
+    delete process.env[RESUME_DISABLED_ENV];
+    const base = resumePorts();
+    const { ports, calls } = resumePorts({
+      git: {
+        ...base.ports.git,
+        branchMergedIntoMain: vi.fn(async () => false),
+        branchCleanlyRebasesOntoMain: vi.fn(async () => false), // conflict
+      },
+    });
+    const r = await executeCommand({ kind: "create_worktree", branch: "loop/cycle-new" }, ports, CTX);
+    expect(r.event).toEqual({ type: "worktree_created" });
+    expect(ports.git.worktreeAdd).toHaveBeenCalledWith(
+      "/repo",
+      ports.paths.worktreePath,
+      "loop/cycle-new",
+      "origin/main",
+    );
+    const alert = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alert).toContain("does NOT cleanly rebase");
+    expect(alert).toContain("resume SKIPPED");
+  });
+
+  it("resume: a prior branch already merged into origin/main → origin/main (no resume, no skip ALERT)", async () => {
+    delete process.env[RESUME_DISABLED_ENV];
+    const base = resumePorts();
+    const { ports, calls } = resumePorts({
+      git: {
+        ...base.ports.git,
+        branchMergedIntoMain: vi.fn(async () => true), // already on main
+        branchCleanlyRebasesOntoMain: vi.fn(async () => true),
+      },
+    });
+    const r = await executeCommand({ kind: "create_worktree", branch: "loop/cycle-new" }, ports, CTX);
+    expect(ports.git.worktreeAdd).toHaveBeenCalledWith(
+      "/repo",
+      ports.paths.worktreePath,
+      "loop/cycle-new",
+      "origin/main",
+    );
+    // A merged branch is not "resumable but skipped" → no conflict ALERT.
+    const alert = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alert).not.toContain("resume-prior-work");
+  });
+
+  it("resume: ROLL_LOOP_NO_RESUME=1 always bases on origin/main (kill switch), no probes run", async () => {
+    process.env[RESUME_DISABLED_ENV] = "1";
+    try {
+      const { ports } = resumePorts(); // a resumable branch IS recorded
+      const r = await executeCommand({ kind: "create_worktree", branch: "loop/cycle-new" }, ports, CTX);
+      expect(ports.git.worktreeAdd).toHaveBeenCalledWith(
+        "/repo",
+        ports.paths.worktreePath,
+        "loop/cycle-new",
+        "origin/main",
+      );
+      // Disabled → the git resume probes are never consulted.
+      expect(ports.git.fetchRemoteBranch).not.toHaveBeenCalled();
+      expect(ports.git.branchMergedIntoMain).not.toHaveBeenCalled();
+    } finally {
+      delete process.env[RESUME_DISABLED_ENV];
+    }
+  });
+
+  it("resolveResumeBase: an empty storyId falls back to origin/main without probing", async () => {
+    delete process.env[RESUME_DISABLED_ENV];
+    const { ports } = resumePorts();
+    const base = await resolveResumeBase(ports, "");
+    expect(base).toBe("origin/main");
+    expect(ports.git.fetchRemoteBranch).not.toHaveBeenCalled();
   });
 
   it("FIX-209: preflight fetches origin main before the worktree branches off it", async () => {

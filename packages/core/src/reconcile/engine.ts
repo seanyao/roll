@@ -391,6 +391,70 @@ export function latestDeliveringCycle(
   return found;
 }
 
+// ── 3. Resume-prior-work candidate lookup (RESUME-PRIOR-WORK hook) ────────────
+
+/**
+ * The runs-row statuses whose cycle PUSHED real commits to a `loop/cycle-<id>`
+ * branch on origin — so the branch is a candidate to RESUME from instead of
+ * redoing the work on a fresh origin/main worktree:
+ *   - `orphan`    : publish failed, branch+tag pushed for audit (orchestrator
+ *                   push_orphan) — the FIX-284/285 stranded-work case.
+ *   - `built`     : claimed-but-unconfirmed; the cycle branch holds commits.
+ *   - `published` : PR opened, merge pending — the branch is on the remote.
+ *   - `done`      : PR opened/ff-merged — the branch was pushed (a still-OPEN PR
+ *                   that never merged is un-merged and resumable; a merged one is
+ *                   filtered out by the executor's git merged-into-origin/main
+ *                   probe, so listing it here is safe and correct).
+ *   - `failed`    : a gate-killed cycle WITH commits pushes its branch via
+ *                   push_orphan (orchestrator facts_captured failed-with-commits)
+ *                   — the prior agent's real work is reachable on origin.
+ * `idle` / `blocked` / `aborted` never pushed a branch with new work, so they are
+ * NOT candidates.
+ */
+export const RESUME_CANDIDATE_STATUSES: ReadonlySet<string> = new Set([
+  "orphan",
+  "built",
+  "published",
+  "done",
+  "failed",
+  "merged",
+]);
+
+/**
+ * Resolve the prior cycle branches that may hold un-merged real work for
+ * `storyId`, MOST-RECENT-FIRST (the runs ledger links story_id ↔ cycle_id and is
+ * appended oldest→newest, so we reverse). Each entry is the `loop/cycle-<id>`
+ * branch name the cycle would have pushed; the caller probes git to keep only the
+ * one that is (a) NOT merged into origin/main and (b) cleanly rebases onto it.
+ *
+ * Pure: runs rows in, ordered branch names out. The git merged/rebase probes are
+ * the executor's (RESUME-PRIOR-WORK hook in create_worktree); core never spawns.
+ * Distinct from {@link latestDeliveringCycle} (single delivery row for the
+ * preflight claim reconcile): this returns the FULL ordered candidate list
+ * across every branch-pushing terminal, because a delivery may have failed while
+ * an earlier audit branch still carries the salvageable work.
+ */
+export function resumeCandidateBranches(
+  rows: readonly ReconcileRunRow[],
+  storyId: string,
+): string[] {
+  const cycleIds: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const sid = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
+    if (sid !== storyId) continue;
+    const status = typeof row.status === "string" ? row.status : "";
+    if (!RESUME_CANDIDATE_STATUSES.has(status)) continue;
+    const cid = typeof row.cycle_id === "string" ? row.cycle_id : "";
+    if (cid === "" || seen.has(cid)) continue;
+    seen.add(cid);
+    cycleIds.push(cid);
+  }
+  // Oldest→newest in the ledger → reverse to most-recent-first so the caller
+  // prefers the freshest stranded work and only falls back to older branches.
+  return cycleIds.reverse().map((id) => reconcileBranchName(id));
+}
+
 /** Apply a stuck-story revert to backlog text: flip the FIRST `| 🔨 In Progress |`
  *  → `| 📋 Todo |` on each reverted story's row, mirroring loop_unstick.py:162
  *  (`lines[idx].replace("| 🔨 In Progress |", "| 📋 Todo |")`, first occurrence).

@@ -61,7 +61,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll offboard` | Remove Roll from this project |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |
-| `roll release [--dry-run]` | The ONE release flow: bump → changelog fold → package gate → PR → merge → consistency gate → tag push |
+| `roll release [--dry-run]` | The ONE release flow: bump → changelog fold → package gate → commit-push → consistency gate → PR → auto-merge → tag push (gate runs before merge; drives the merge via GitHub auto-merge) |
 | `roll showcase [--card <ID>]` | The golden-path standard E2E in an isolated sandbox: reset the card, cast a heterogeneous real-agent trio (kimi/claude/pi), deliver via the loop, capture CLI+web screenshots, assemble the evidence chain, emit a pass/fail verdict |
 | `roll pair [init\|status\|score]` | Cross-agent pairing: heterogeneous peer re-checks and scores deliveries |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | The cycle ledger — one line per cycle, failures never swallowed |

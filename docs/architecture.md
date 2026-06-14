@@ -219,5 +219,5 @@ web          控制台（React，WebSocket 订阅 daemon）
 - **claim vs truth**:backlog 的 `✅ Done` 是声明,不是事实源;`main` 合并、证据报告、终态事件、发版闸事件才是事实锚点。所有 UI 投影必须把声明和真相分开呈现。
 - **truth board**:`roll index` 首页渲染 Story / Cycle / Release tiles 和真相条;未知事实显示 `?`,已知为零才显示 `0`。premature Done 会被标成 drift/fail,不会被当作已交付。
 - **影子审计**:只读漂移扫描作为 `roll release` 闸的内部模块运行,报告落 `.roll/reports/consistency/`。
-- **发版闸**:`roll release` 是唯一发版命令,事务内置一致性闸;任一维 fail 拦截发版,没有豁免路径——修掉漂移才能发。历史 release:waiver 事件仅作存档,不再有写入者。
+- **发版闸**:`roll release` 是唯一发版命令,事务内置一致性闸;任一维 fail 拦截发版,没有豁免路径——修掉漂移才能发。历史 release:waiver 事件仅作存档,不再有写入者。一致性闸跑在**开 PR / 合并之前**(发布分支上 bump+changelog 已提交、未合并),漂移在落 `main` 前就被拦,绝不留"已合并但没打 tag"的半成品。`main` 受 PR 保护,发版给自己也开 PR,再用 GitHub 原生 auto-merge(`gh pr merge --auto --squash`)自驱合并:不依赖 `com.roll.pr.<slug>` 看护 lane,进程中断也由 GitHub 完成合并;等待期逐轮打印进度,CI 不调度时推空提交 nudge;仓库未开 "Allow auto-merge" 则诚实报错而非静默挂死。
 - **变更点护栏** `packages/spec/src/types/truth-registry.ts`(`TRUTH_FIELD_REGISTRY`):落盘且被第二处读取的字段必须登记(绑锚点、记写者、derived-cache 必声明 rebuild);未登记字段 CI 红并指路登记——历史 v2 字段 grandfather 列单。局部变量不登记。

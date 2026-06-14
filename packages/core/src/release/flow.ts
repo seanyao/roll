@@ -1,9 +1,16 @@
 /**
  * US-REL-007 — the ONE release flow's pure pieces. `roll release` is the only
  * release command: it owns version bump → changelog fold → package gate →
- * release PR → merge → consistency gate → tag push, in that order, every
- * irreversible step behind an earlier gate. These helpers are deterministic so
- * the transaction is unit-testable without git/gh.
+ * commit-push → consistency gate → release PR → merge → tag push, in that order,
+ * every irreversible step behind an earlier gate. These helpers are
+ * deterministic so the transaction is unit-testable without git/gh.
+ *
+ * FIX-288 moved the consistency gate BEFORE open-pr/merge: the gate runs on the
+ * release branch (bump+changelog committed, NOT yet merged), so a drifting
+ * release aborts before anything lands on main — no merged-but-untagged
+ * half-product. The merge is GitHub-native auto-merge (`gh pr merge --auto
+ * --squash`), driven by `roll release` itself, with poll feedback and a CI
+ * nudge — no dependency on the `com.roll.pr.<slug>` lane.
  */
 
 export interface ChangelogFold {
@@ -50,17 +57,22 @@ function hasBullet(s: string): boolean {
   return /^\s*-\s+\S/m.test(s);
 }
 
-/** The transaction's ordered steps — names are the observable progress output. */
+/**
+ * The transaction's ordered steps — names are the observable progress output.
+ * FIX-288: `consistency-gate` runs BEFORE `open-pr` so the gate guards the
+ * release branch state before the bump+changelog can merge to main (no
+ * merged-but-untagged half-product when docs drift).
+ */
 export const RELEASE_STEPS = [
   "plan",
   "fold-changelog",
   "bump-version",
   "package-gate",
   "commit-push",
+  "consistency-gate",
   "open-pr",
   "wait-merge",
   "sync-main",
-  "consistency-gate",
   "tag-push",
 ] as const;
 export type ReleaseStep = (typeof RELEASE_STEPS)[number];

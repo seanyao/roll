@@ -17,10 +17,23 @@ roll release --gate-check # machine entry (CI uses it); exit 0 = all pass
 
 ## The release gate
 
-Every `v*` tag runs the **consistency gate** before the GitHub Release is
-created: any failing dimension aborts the release, and the job log lists
-exactly which gaps to close. Shipping with a known drift requires fixing the
-drift — not skipping the gate.
+`roll release` runs the **consistency gate twice in the same place: before
+anything irreversible.** Locally, the gate runs on the release branch — after
+the version bump and changelog fold are committed, but **before** the PR is
+opened or merged. A failing dimension aborts the release while it is still just
+a local branch: the bump+changelog never reach `main`, so there is no
+merged-but-untagged half-product. Remotely, every `v*` tag re-runs the same gate
+in `release.yml` before the GitHub Release is created. Shipping with a known
+drift requires fixing the drift — not skipping the gate.
+
+`main` stays PR-protected, so the release opens a PR even for itself. It then
+drives the merge through GitHub-native **auto-merge** (`gh pr merge --auto
+--squash`) rather than waiting on a background lane: the merge completes when CI
+goes green, even if you close the terminal. While it waits, the release prints a
+progress line per poll and nudges CI (an empty commit) if a fresh PR's checks
+never schedule. This needs **"Allow auto-merge"** enabled on the repo (Settings
+→ General → Pull Requests); without it the release stops with an honest error
+asking you to enable the setting or merge the PR manually — never a silent hang.
 
 The acceptance-evidence gate is `hard` by default. `loop_safety.attest_gate: soft`
 is an explicit project policy for migration windows; consistency still reports

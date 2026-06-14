@@ -9,6 +9,20 @@ import { describe, expect, it } from "vitest";
 import type { ReleaseStep } from "@roll/core";
 import { commitPushWithGate, releaseCommand, runReleaseFlow, type ReleaseFlowDeps } from "../src/commands/release.js";
 
+/** De-dupe a step trace to its first-seen order — the wait-merge poll feedback
+ *  re-emits its own step name once per poll, so the trace can repeat it. */
+function uniqueInOrder(steps: ReleaseStep[]): ReleaseStep[] {
+  const seen = new Set<ReleaseStep>();
+  const out: ReleaseStep[] = [];
+  for (const s of steps) {
+    if (!seen.has(s)) {
+      seen.add(s);
+      out.push(s);
+    }
+  }
+  return out;
+}
+
 function fakeDeps(over: Partial<ReleaseFlowDeps> = {}): { deps: ReleaseFlowDeps; steps: ReleaseStep[]; writes: string[] } {
   const steps: ReleaseStep[] = [];
   const writes: string[] = [];
@@ -24,6 +38,8 @@ function fakeDeps(over: Partial<ReleaseFlowDeps> = {}): { deps: ReleaseFlowDeps;
     packageGate: () => true,
     commitPush: (_c, b) => void writes.push(`push:${b}`),
     openPr: () => "https://github.com/x/y/pull/1",
+    enableAutoMerge: (_c, pr) => void writes.push(`automerge:${pr}`),
+    nudgePr: (_c, b) => void writes.push(`nudge:${b}`),
     waitMerged: () => true,
     syncMain: () => true,
     consistencyGate: () => true,
@@ -42,19 +58,78 @@ describe("runReleaseFlow — the one transaction", () => {
     const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
     expect(res.status).toBe("released");
     expect(res.tag).toBe("v3.613.1");
-    expect(steps).toEqual([
+    // FIX-288: consistency-gate moved BEFORE open-pr. Each ReleaseStep appears
+    // once in this order (the wait-merge poll feedback can repeat the step, but
+    // the happy path's stub merges on the first poll → one wait-merge mark).
+    expect(uniqueInOrder(steps)).toEqual([
       "plan",
       "fold-changelog",
       "bump-version",
       "package-gate",
       "commit-push",
+      "consistency-gate",
       "open-pr",
       "wait-merge",
       "sync-main",
-      "consistency-gate",
       "tag-push",
     ]);
     expect(writes.at(-1)).toBe("pushTag:v3.613.1");
+  });
+
+  it("FIX-288 AC4: a drifting consistency gate aborts BEFORE the PR/merge — nothing lands on main", async () => {
+    const { deps, writes } = fakeDeps({ consistencyGate: () => false });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("aborted");
+    expect(res.step).toBe("consistency-gate");
+    // The bump+changelog are committed on the release branch, but NO PR is
+    // opened, NO auto-merge armed, NO tag pushed → no merged-but-untagged half.
+    expect(writes.some((w) => w.startsWith("automerge:"))).toBe(false);
+    expect(writes.some((w) => w.startsWith("tag:") || w.startsWith("pushTag:"))).toBe(false);
+  });
+
+  it("FIX-288 AC1: open-pr arms GitHub auto-merge before the wait", async () => {
+    const { deps, writes } = fakeDeps();
+    await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    const prIdx = writes.findIndex((w) => w.startsWith("automerge:"));
+    expect(prIdx).toBeGreaterThan(-1);
+    expect(writes[prIdx]).toContain("/pull/1");
+  });
+
+  it("FIX-288 AC5: a repo without auto-merge aborts cleanly at open-pr (no tag)", async () => {
+    const { deps, writes } = fakeDeps({
+      enableAutoMerge: () => {
+        throw new Error('auto-merge is not enabled on this repo. Enable "Allow auto-merge"');
+      },
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("aborted");
+    expect(res.step).toBe("open-pr");
+    expect(res.reason).toContain("Allow auto-merge");
+    expect(writes.some((w) => w.startsWith("tag:") || w.startsWith("pushTag:"))).toBe(false);
+  });
+
+  it("FIX-288 AC2/AC3: the wait loop prints per-poll feedback and can nudge CI", async () => {
+    const feedback: string[] = [];
+    let nudges = 0;
+    const { deps } = fakeDeps({
+      waitMerged: (_c, _pr, _b, hooks) => {
+        hooks.onWait("waited 1m"); // AC2
+        hooks.onWait("waited 2m");
+        hooks.nudge(); // AC3
+        return true;
+      },
+      onStep: () => {},
+    });
+    deps.onStep = (s, d) => {
+      if (s === "wait-merge") feedback.push(d);
+    };
+    deps.nudgePr = () => void nudges++;
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("released");
+    expect(feedback).toContain("waited 1m");
+    expect(feedback).toContain("waited 2m");
+    expect(feedback).toContain("merged");
+    expect(nudges).toBe(1);
   });
 
   it("same-day rerun bumps the sequence (calver third segment)", async () => {

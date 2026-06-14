@@ -14,7 +14,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   readAttestGateMode,
   runAttestGate,
+  screenshotExemption,
   storyHasAcBlock,
+  storyRequiresScreenshot,
   verificationReportFresh,
   verificationReportHasContent,
   webCaptureTargetForStory,
@@ -37,8 +39,13 @@ function tmp(tag: string): string {
  * index.json, so cardArchiveDir falls back to `uncategorized`); return the
  * worktree root. A real delivery has both — the empty-shell case is exercised
  * separately by {@link withEmptyShell}.
+ *
+ * FIX-309: a screenshot is the BASELINE for every (non-exempt) story, so the
+ * default body carries a real `<figure class="shot">` — a generic real delivery
+ * now MUST present captured visual evidence (the screenshot-floor cases that
+ * deliberately use text-only / claimed-only evidence pass their own `body`).
  */
-function withReport(storyId: string, mtimeSec?: number, body = '<div class="ev ev-text">proof</div>'): string {
+function withReport(storyId: string, mtimeSec?: number, body = '<div class="ev ev-text">proof</div><figure class="shot"><img src="screenshots/p.png"></figure>'): string {
   const wt = tmp("wt");
   const storyDir = join(wt, ".roll", "features", "uncategorized", storyId);
   const dir = join(storyDir, "latest");
@@ -138,7 +145,7 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
   });
 
   it("interactive story requires screenshot evidence or a machine capture skip", () => {
-    const noShot = withReport("FIX-CLI", 2000);
+    const noShot = withReport("FIX-CLI", 2000, '<div class="ev ev-text">text proof only</div>');
     writeFileSync(join(noShot, ".roll", "features", "uncategorized", "FIX-CLI", "spec.md"), "**AC:**\n- [ ] CLI shows output\n");
     expect(verificationReportHasContent(noShot, "FIX-CLI")).toBe(false);
 
@@ -155,7 +162,7 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
   });
 
   it("FIX-261/FIX-258: modern Acceptance Criteria makes CLI text-only reports fail the screenshot floor", () => {
-    const noShot = withReport("FIX-MODERN", 2000);
+    const noShot = withReport("FIX-MODERN", 2000, '<div class="ev ev-text">text proof only</div>');
     writeFileSync(
       join(noShot, ".roll", "features", "uncategorized", "FIX-MODERN", "spec.md"),
       "# FIX-MODERN\n\n## Acceptance Criteria\n\n- [ ] CLI output can be inspected\n",
@@ -393,8 +400,158 @@ describe("FIX-305 — webCaptureTargetForStory: drive a real screenshot for UI/d
     expect(webCaptureTargetForStory(wt, "FIX-WEB", "   ")).toContain("FIX-WEB/index.html");
   });
 
-  it("a non-UI card owes no web capture → null (no forced shot)", () => {
+  it("FIX-309: a non-UI card still owes a baseline web capture (能截则截) — the dossier page", () => {
+    // FIX-309 makes a screenshot the baseline for EVERY story: a "no-keyword"
+    // card (the FIX-284 leak shape) now still gets the always-present dossier
+    // page to shoot, instead of being silently exempted by keyword absence.
     const wt = withSpec("FIX-CORE", "# FIX-CORE\n\n**AC:**\n- [ ] the parser handles empty input\n");
-    expect(webCaptureTargetForStory(wt, "FIX-CORE")).toBeNull();
+    expect(webCaptureTargetForStory(wt, "FIX-CORE")).toContain("FIX-CORE/index.html");
+  });
+
+  it("FIX-309: an EXPLICITLY-exempted card owes no web capture → null", () => {
+    const wt = withSpec(
+      "FIX-MIGRATE",
+      "---\nid: FIX-MIGRATE\nscreenshot_exempt: pure data migration, no visible surface\n---\n# FIX-MIGRATE\n\n**AC:**\n- [ ] rows migrate\n",
+    );
+    expect(webCaptureTargetForStory(wt, "FIX-MIGRATE")).toBeNull();
+  });
+});
+
+/**
+ * FIX-309 — a screenshot is the BASELINE for EVERY story ("能截则截，应截尽截").
+ * The requirement is ALWAYS-ON by default; keyword/rule matching may NEVER
+ * enable it, only EXEMPT (explicit, recorded). These tests lock the default
+ * (no-keyword / FIX-284 shape → required) and both exemption channels, plus the
+ * gate enforcement (required-but-uncaptured FAILS; required-with-capture PASSES).
+ */
+describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT", () => {
+  function withSpec(storyId: string, specText: string): string {
+    const wt = tmp("fix309");
+    const dir = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), specText);
+    return wt;
+  }
+  /** Write a spec.md into an existing withReport() worktree (same uncategorized epic). */
+  function addSpec(wt: string, storyId: string, specText: string): void {
+    writeFileSync(join(wt, ".roll", "features", "uncategorized", storyId, "spec.md"), specText);
+  }
+
+  it("AC1: a FIX-284-shape card (NO keywords) is REQUIRED by default — keyword absence does NOT exempt", () => {
+    // The exact leak: a clear UI Casting redesign whose spec lacks the literal
+    // CLI/web/UI/TUI/截图 keywords. Old code judged "no screenshot needed" and it
+    // slipped the iron rule. Now: required by default.
+    const wt = withSpec("FIX-284", "# FIX-284 — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout is reworked\n");
+    expect(storyRequiresScreenshot(wt, "FIX-284")).toBe(true);
+    expect(screenshotExemption(wt, "FIX-284").reason).toBeUndefined();
+  });
+
+  it("AC1: a card with NO spec at all is still REQUIRED (cannot prove an exemption)", () => {
+    const wt = tmp("fix309-nospec");
+    expect(storyRequiresScreenshot(wt, "FIX-NOSPEC")).toBe(true);
+  });
+
+  it("AC2: an explicit `screenshot_exempt: <reason>` exempts → required=false WITH the recorded reason", () => {
+    const wt = withSpec(
+      "FIX-DATA",
+      "---\nid: FIX-DATA\nscreenshot_exempt: pure data migration; no rendered surface\n---\n# FIX-DATA\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n",
+    );
+    expect(storyRequiresScreenshot(wt, "FIX-DATA")).toBe(false);
+    expect(screenshotExemption(wt, "FIX-DATA").reason).toMatch(/screenshot_exempt \(spec\): pure data migration/);
+  });
+
+  it("AC2: a falsy `screenshot_exempt: false` does NOT exempt — still required", () => {
+    const wt = withSpec("FIX-FALSY", "---\nid: FIX-FALSY\nscreenshot_exempt: false\n---\n# FIX-FALSY\n\n## Acceptance Criteria\n\n- [ ] x\n");
+    expect(storyRequiresScreenshot(wt, "FIX-FALSY")).toBe(true);
+  });
+
+  it("AC2: a deny-listed non-visual epic exempts → required=false WITH the recorded reason; keyword/rule only EXEMPTS", () => {
+    const wt = tmp("fix309-deny");
+    mkdirSync(join(wt, ".roll"), { recursive: true });
+    writeFileSync(join(wt, ".roll", "policy.yaml"), "acceptance:\n  screenshot_exempt_epics:\n    - data-migration\n");
+    const dir = join(wt, ".roll", "features", "data-migration", "FIX-MIG");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# FIX-MIG\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n");
+    expect(storyRequiresScreenshot(wt, "FIX-MIG")).toBe(false);
+    expect(screenshotExemption(wt, "FIX-MIG").reason).toMatch(/screenshot_exempt_epics \(policy\).*data-migration/);
+
+    // a card in a NON-exempt epic with the same (no-keyword) spec stays required
+    const dir2 = join(wt, ".roll", "features", "acceptance-evidence", "FIX-VIS");
+    mkdirSync(dir2, { recursive: true });
+    writeFileSync(join(dir2, "spec.md"), "# FIX-VIS\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n");
+    expect(storyRequiresScreenshot(wt, "FIX-VIS")).toBe(true);
+  });
+
+  it("AC2: inline-list deny form is also honoured", () => {
+    const wt = tmp("fix309-inline");
+    mkdirSync(join(wt, ".roll"), { recursive: true });
+    writeFileSync(join(wt, ".roll", "policy.yaml"), "acceptance:\n  screenshot_exempt_epics: [data-migration, infra-only]\n");
+    const dir = join(wt, ".roll", "features", "infra-only", "FIX-INF");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# FIX-INF\n\n## Acceptance Criteria\n\n- [ ] x\n");
+    expect(storyRequiresScreenshot(wt, "FIX-INF")).toBe(false);
+  });
+
+  it("AC4: the gate FAILS a REQUIRED-but-uncaptured story (no screenshot, no honest skip) — hard-blocked", () => {
+    // A FIX-284-shape delivery (no keywords) with a content report but NO captured
+    // visual evidence and NO machine-skip → not "produced".
+    const wt = withReport("FIX-UNCAP", 2000, '<div class="ev ev-text">text proof only</div>');
+    addSpec(wt, "FIX-UNCAP", "# FIX-UNCAP — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout is reworked\n");
+    withSelfScore(wt, "FIX-UNCAP", 8, "good");
+    expect(storyRequiresScreenshot(wt, "FIX-UNCAP")).toBe(true);
+    expect(verificationReportHasContent(wt, "FIX-UNCAP")).toBe(false);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-UNCAP", "c-uncap", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("AC4: the gate PASSES a REQUIRED story that HAS a real capture", () => {
+    const wt = withReport("FIX-CAP", 2000, '<figure class="shot"><img src="screenshots/casting.png"></figure>');
+    addSpec(wt, "FIX-CAP", "# FIX-CAP — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout is reworked\n");
+    withSelfScore(wt, "FIX-CAP", 8, "good");
+    expect(storyRequiresScreenshot(wt, "FIX-CAP")).toBe(true);
+    expect(verificationReportHasContent(wt, "FIX-CAP")).toBe(true);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-CAP", "c-cap", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("AC4: an EXEMPT story PASSES with text-only evidence (no capture owed)", () => {
+    const wt = withReport("FIX-EXEMPT", 2000, '<div class="ev ev-text">text proof only</div>');
+    addSpec(
+      wt,
+      "FIX-EXEMPT",
+      "---\nid: FIX-EXEMPT\nscreenshot_exempt: pure data migration; no rendered surface\n---\n# FIX-EXEMPT\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n",
+    );
+    withSelfScore(wt, "FIX-EXEMPT", 8, "good");
+    expect(storyRequiresScreenshot(wt, "FIX-EXEMPT")).toBe(false);
+    expect(verificationReportHasContent(wt, "FIX-EXEMPT")).toBe(true);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-EXEMPT", "c-exempt", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("AC3: a required story with an HONEST recorded machine-skip PASSES (deletion-not-placeholder, not silent)", () => {
+    const wt = withReport("FIX-SKIP309", 2000, '<div class="ev ev-text">{"taken":false,"skipped":"no GUI session"}</div>');
+    addSpec(wt, "FIX-SKIP309", "# FIX-SKIP309 — TUI redesign\n\n## Acceptance Criteria\n\n- [ ] the TUI renders\n");
+    withSelfScore(wt, "FIX-SKIP309", 8, "good");
+    writeEvidenceJson(wt, "FIX-SKIP309", {
+      captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI session" }],
+    });
+    expect(storyRequiresScreenshot(wt, "FIX-SKIP309")).toBe(true);
+    expect(verificationReportHasContent(wt, "FIX-SKIP309")).toBe(true);
+    const { alerts, s } = sinks();
+    const r = runAttestGate(wt, "FIX-SKIP309", "c-skip309", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(alerts).toHaveLength(0);
   });
 });

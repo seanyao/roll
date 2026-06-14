@@ -85,28 +85,174 @@ export function storyHasAcBlock(worktreeCwd: string, storyId: string): boolean |
 }
 
 /**
- * FIX-305 — whether a story's acceptance concerns a UI/dossier surface (CLI,
- * web, UI, TUI, 界面/交互/截屏/截图/screenshot). Exported so the attest render
- * wiring can decide to drive a REAL web screenshot (the FIX-291 ladder) instead
- * of letting the visual floor machine-skip with an empty screenshots dir.
+ * FIX-309 — a captured screenshot is the BASELINE for EVERY story
+ * ("能截则截，应截尽截"): the default is ALWAYS REQUIRED, regardless of surface
+ * (Web/CLI/TUI/anything). Keyword/rule matching may NEVER decide whether a
+ * screenshot is required — it is always required by default. The ONLY place a
+ * rule may run is to identify an EXPLICIT, recorded EXEMPTION.
+ *
+ * This replaces the FIX-284 leak: the old keyword regex (`(CLI|web|UI|TUI)|界面…`)
+ * was used as an ENABLER — a clear UI Casting redesign that happened to lack the
+ * literal keywords was judged "no screenshot needed" and slipped the iron rule.
+ *
+ * Exemption is the ONLY rule path (see {@link screenshotExemption}):
+ *   1. spec frontmatter `screenshot_exempt: <reason>` — an explicit, recorded,
+ *      per-card exemption, OR
+ *   2. a configurable deny-list of genuinely-non-visual epics
+ *      (`acceptance.screenshot_exempt_epics:` in `.roll/policy.yaml`).
+ * An exemption returns false WITH the recorded reason; everything else is
+ * REQUIRED. Returns true ⇒ this story owes captured visual evidence; the attest
+ * render wiring drives a REAL capture for the appropriate surface (web/dossier →
+ * FIX-291 ladder via {@link webCaptureTargetForStory}; CLI/TUI → the terminal
+ * capture / honest machine-skip lane).
  */
 export function storyRequiresScreenshot(worktreeCwd: string, storyId: string): boolean {
-  const spec = storySpecPath(worktreeCwd, storyId);
-  if (spec === null) return false;
-  try {
-    return /\b(CLI|web|UI|TUI)\b|界面|交互|截屏|截图|screenshot/i.test(readFileSync(spec, "utf8"));
-  } catch {
-    return false;
-  }
+  return screenshotExemption(worktreeCwd, storyId).reason === undefined;
 }
 
 /**
- * FIX-305 — the web page a UI/dossier card's attest should CAPTURE a real
+ * FIX-309 — resolve a story's screenshot exemption. Returns the recorded
+ * `reason` when (and only when) the story is EXPLICITLY exempted; `undefined`
+ * reason ⇒ a screenshot is REQUIRED (the default for every story).
+ *
+ * The two recognised exemptions, both explicit and recorded:
+ *   - spec frontmatter `screenshot_exempt: <reason>` (per-card), or
+ *   - the story's epic appears in the policy deny-list
+ *     `acceptance.screenshot_exempt_epics:` (genuinely-non-visual epics, e.g.
+ *     pure data-migration).
+ * No keyword/content matching is consulted — matching can only EXEMPT, never
+ * enable.
+ */
+export function screenshotExemption(worktreeCwd: string, storyId: string): { reason?: string } {
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return {};
+  let text: string;
+  try {
+    text = readFileSync(spec, "utf8");
+  } catch {
+    return {};
+  }
+  // (1) per-card explicit exemption: frontmatter `screenshot_exempt: <reason>`.
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text);
+  if (fm !== null) {
+    const m = /^screenshot_exempt:\s*(.+)$/m.exec(fm[1] ?? "");
+    if (m !== null) {
+      const reason = stripQuotes((m[1] ?? "").trim());
+      if (reason !== "" && !/^(false|no|0)$/i.test(reason)) {
+        return { reason: `screenshot_exempt (spec): ${reason}` };
+      }
+    }
+  }
+  // (2) epic deny-list exemption: this story's epic is recorded as non-visual.
+  const epic = epicForSpec(spec);
+  if (epic !== null) {
+    const denied = screenshotExemptEpics(worktreeCwd);
+    if (denied.includes(epic)) {
+      return { reason: `screenshot_exempt_epics (policy): epic "${epic}" is a recorded non-visual epic` };
+    }
+  }
+  return {};
+}
+
+function stripQuotes(value: string): string {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+/** The epic directory name a spec lives under (`features/<epic>/<ID>/spec.md`). */
+function epicForSpec(specPath: string): string | null {
+  // …/features/<epic>/<ID>/spec.md  OR  …/features/<epic>/<ID>.md
+  const parts = specPath.split(/[\\/]/);
+  const fi = parts.lastIndexOf("features");
+  if (fi === -1 || fi + 1 >= parts.length) return null;
+  return parts[fi + 1] ?? null;
+}
+
+/**
+ * FIX-309 — the configurable deny-list of genuinely-non-visual epics, read from
+ * `.roll/policy.yaml` under `acceptance.screenshot_exempt_epics:` (a YAML list).
+ * Absent / unreadable ⇒ empty (nothing exempted by epic). This is the ONLY
+ * place a configurable rule influences the screenshot requirement, and it can
+ * only EXEMPT, never enable.
+ */
+export function screenshotExemptEpics(worktreeCwd: string): string[] {
+  try {
+    const p = join(worktreeCwd, ".roll", "policy.yaml");
+    if (!existsSync(p)) return [];
+    return parseScreenshotExemptEpics(readFileSync(p, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/** Parse `acceptance.screenshot_exempt_epics:` — a block or inline YAML list. */
+function parseScreenshotExemptEpics(yaml: string): string[] {
+  const lines = yaml.split(/\r?\n/);
+  const out: string[] = [];
+  let inAcceptance = false;
+  let inList = false;
+  let listIndent = 0;
+  for (const raw of lines) {
+    const line = raw.replace(/\t/g, "  ");
+    if (/^acceptance:\s*$/.test(line)) {
+      inAcceptance = true;
+      inList = false;
+      continue;
+    }
+    if (inAcceptance) {
+      // inline form: `  screenshot_exempt_epics: [a, b]`
+      const inline = /^\s+screenshot_exempt_epics:\s*\[(.*)\]\s*$/.exec(line);
+      if (inline !== null) {
+        for (const tok of (inline[1] ?? "").split(",")) {
+          const v = stripQuotes(tok.trim());
+          if (v !== "") out.push(v);
+        }
+        inList = false;
+        continue;
+      }
+      // block form: `  screenshot_exempt_epics:` then `    - epic`
+      const blockHead = /^(\s+)screenshot_exempt_epics:\s*$/.exec(line);
+      if (blockHead !== null) {
+        inList = true;
+        listIndent = (blockHead[1] ?? "").length;
+        continue;
+      }
+      if (inList) {
+        const item = /^(\s+)-\s*(.+?)\s*$/.exec(line);
+        if (item !== null && (item[1] ?? "").length > listIndent) {
+          out.push(stripQuotes((item[2] ?? "").trim()));
+          continue;
+        }
+        // a non-indented / sibling key ends the list
+        if (line.trim() !== "" && !/^\s+-/.test(line)) inList = false;
+      }
+      // a top-level key (no leading space) ends the acceptance block
+      if (/^\S/.test(line) && !/^acceptance:/.test(line)) {
+        inAcceptance = false;
+        inList = false;
+      }
+    }
+  }
+  return out.filter((v) => v !== "");
+}
+
+/**
+ * FIX-305 / FIX-309 — the web page a card's attest should CAPTURE a real
  * screenshot of. An explicit override (e.g. a deployed product page set by the
  * Gate via `ROLL_ATTEST_WEB_URL`) wins; otherwise the card's rendered dossier
  * story page (`features/<epic>/<ID>/index.html`) is the always-present, real
- * rendered HTML to shoot through the FIX-291 ladder. Returns null only when the
- * story does NOT concern a UI/dossier surface — then no web capture is owed.
+ * rendered HTML to shoot through the FIX-291 ladder.
+ *
+ * FIX-309 makes a screenshot the BASELINE for every story, so a web capture is
+ * owed for EVERY non-exempt story — the rendered dossier page is the
+ * always-present surface every card can shoot ("能截则截"). For a genuine CLI/TUI
+ * card the terminal capture is the PRIMARY surface (driven separately via the
+ * evidence captures / honest machine-skip lane); the dossier page here is the
+ * always-available baseline visual on top of that. Returns null ONLY when the
+ * story is EXPLICITLY exempted (`screenshot_exempt` / a non-visual epic) — then
+ * no captured evidence is owed at all.
  */
 export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, override?: string): string | null {
   if (!storyRequiresScreenshot(worktreeCwd, storyId)) return null;

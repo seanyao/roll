@@ -170,22 +170,22 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual([prompt]);
   });
 
-  it("agy: agy -p --dangerously-skip-permissions <prompt>", () => {
+  it("agy: agy --dangerously-skip-permissions -p <prompt> (FIX-296: flag before -p so -p does not swallow it)", () => {
     const { bin, args } = buildSpawnCommand("agy", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("agy");
-    expect(args).toEqual(["-p", "--dangerously-skip-permissions", prompt]);
+    expect(args).toEqual(["--dangerously-skip-permissions", "-p", prompt]);
   });
 
-  it("gemini aliases to agy argv", () => {
+  it("gemini aliases to agy argv (FIX-296 order)", () => {
     const { bin, args } = buildSpawnCommand("gemini", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("agy");
-    expect(args).toEqual(["-p", "--dangerously-skip-permissions", prompt]);
+    expect(args).toEqual(["--dangerously-skip-permissions", "-p", prompt]);
   });
 
-  it("antigravity aliases to agy argv", () => {
+  it("antigravity aliases to agy argv (FIX-296 order)", () => {
     const { bin, args } = buildSpawnCommand("antigravity", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("agy");
-    expect(args).toEqual(["-p", "--dangerously-skip-permissions", prompt]);
+    expect(args).toEqual(["--dangerously-skip-permissions", "-p", prompt]);
   });
 
   it("throws a loud, documented error for an un-ported agent (fail-loud, not silent)", () => {

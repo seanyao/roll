@@ -257,7 +257,7 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
     return { bin: opts.bin ?? "qwen", args: [prompt] };
   }
   if (agent === "agy" || agent === "gemini" || agent === "antigravity") {
-    return { bin: opts.bin ?? "agy", args: ["-p", "--dangerously-skip-permissions", prompt] };
+    return { bin: opts.bin ?? "agy", args: ["--dangerously-skip-permissions", "-p", prompt] };
   }
   const hint = AGENT_ARGV_TODO[agent] ?? "unknown agent";
   throw new Error(

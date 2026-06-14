@@ -28,7 +28,7 @@ export function textAgentArgv(agent: string, prompt: string): { bin: string; arg
     case "gemini":
     case "agy":
     case "antigravity":
-      return { bin: "agy", args: ["-p", "--dangerously-skip-permissions", prompt] };
+      return { bin: "agy", args: ["--dangerously-skip-permissions", "-p", prompt] };
     default:
       return null;
   }

@@ -8,12 +8,16 @@
  * visual evidence is the ANSI→HTML text capture, US-ATTEST-002).
  *
  *   web           FIX-291 fallback ladder — NEVER a silent DOM downgrade:
- *                 (1) macOS GUI (Aqua session + screen-recording permission) →
- *                     open the target in a REAL browser window, position it to
- *                     the capture rect (AppleScript bounds), `screencapture -x -R`
- *                     the live window rect, then close the window. Zero-install,
- *                     real pixels, no Playwright/Chromium/tool-manager dependency.
- *                 (2) no GUI / CI → headless Chromium via
+ *                 ROLL_ATTEST_HEADLESS=1 (set by loop / unattended paths) forces
+ *                 the headless lane directly — the GUI lane is NEVER entered when
+ *                 this flag is set (prevents GUI browser popup + Chrome file://
+ *                 blockage in unattended cycles; FIX-314).
+ *                 (1) macOS GUI (Aqua session + screen-recording permission, and
+ *                     ROLL_ATTEST_HEADLESS≠1) → open the target in a REAL browser
+ *                     window, position it to the capture rect (AppleScript bounds),
+ *                     `screencapture -x -R` the live window rect, then close the
+ *                     window. Zero-install, real pixels, no Playwright dependency.
+ *                 (2) no GUI / CI / ROLL_ATTEST_HEADLESS=1 → headless Chromium via
  *                     `npx -y playwright@latest screenshot <url> <out>`.
  *                 (3) neither → honest machine-skip (taken:false + reason).
  *                 skip: ROLL_ATTEST_NO_BROWSER=1 · npx/network unavailable
@@ -511,17 +515,24 @@ export async function captureScreenshot(
     if (req.kind === "web") {
       if ((env["ROLL_ATTEST_NO_BROWSER"] ?? "") === "1") return skip("ROLL_ATTEST_NO_BROWSER=1");
       if (req.url === undefined || req.url === "") return skip("no url");
+      // FIX-314 — ROLL_ATTEST_HEADLESS=1: unattended / loop paths MUST bypass the
+      // GUI lane entirely. Opening a real browser (a) pops the user's Chrome
+      // repeatedly (disruptive) and (b) modern Chrome blocks file:// access
+      // ("无法访问你的文件"), so the capture grabs an error page. Headless Chromium
+      // can load file:// with no GUI and no popups.
+      const forceHeadless = (env["ROLL_ATTEST_HEADLESS"] ?? "") === "1";
       // FIX-291 fallback ladder — NEVER silently downgrade to DOM:
-      //   (1) macOS GUI (Aqua + screen-recording) → real-browser screencapture,
-      //   (2) no GUI / CI → headless Chromium via playwright,
+      //   (1) macOS GUI (Aqua + screen-recording, not forced headless) → real-browser
+      //       screencapture,
+      //   (2) no GUI / CI / ROLL_ATTEST_HEADLESS=1 → headless Chromium via playwright,
       //   (3) neither → honest machine-skip with a recorded reason.
-      if (platform === "darwin" && await hasGuiSession(run)) {
+      if (!forceHeadless && platform === "darwin" && await hasGuiSession(run)) {
         const reason = await captureWebViaBrowser(req, run);
         if (reason !== null) return skip(`GUI browser capture: ${reason}`);
       } else {
         const r = await run("npx", ["-y", "playwright@latest", "screenshot", req.url, req.out]);
         if (r.code !== 0) {
-          const why = platform === "darwin" ? "no GUI session" : "non-macOS host";
+          const why = forceHeadless ? "ROLL_ATTEST_HEADLESS=1 (headless-only mode)" : platform === "darwin" ? "no GUI session" : "non-macOS host";
           return skip(`headless Chromium unavailable or capture failed (${why}; screencapture fallback not applicable)`);
         }
       }

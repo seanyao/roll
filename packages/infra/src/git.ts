@@ -165,6 +165,37 @@ export async function worktreeSubmoduleInit(worktreePath: string): Promise<GitRe
   return git(["submodule", "update", "--init", "--recursive", "--quiet"], worktreePath);
 }
 
+/**
+ * RESUME-PRIOR-WORK: re-point an ALREADY-created cycle worktree's TRACKED tree to
+ * a resume ref. The worktree was created on `origin/main` (the fresh-context
+ * default) BEFORE the story was picked; once the picker has named the story, the
+ * runner discovers a resumable prior-cycle branch and calls this to move the
+ * worktree onto it so the agent RESUMES the prior product code rather than redoes
+ * it.
+ *
+ * Two steps in the worktree:
+ *   1. `git fetch origin <branch> --quiet` — make `origin/<branch>` resolvable in
+ *      THIS worktree's object store (the resume probes fetched in the MAIN tree).
+ *   2. `git reset --hard <ref>` — move the worktree branch + working tree to the
+ *      resume tip.
+ *
+ * STRICT in shape (returns git's code) but the caller treats a non-zero as
+ * "stay on origin/main" — the resume optimization must never topple a cycle. The
+ * symlinked `.roll` (FIX-204C) and the picker's 🔨 backlog mark live OUTSIDE the
+ * worktree's tracked git content, so the hard reset leaves them untouched.
+ */
+export async function worktreeResetHard(
+  worktreePath: string,
+  ref: string,
+  branch?: string,
+): Promise<GitResult> {
+  if (branch !== undefined && branch.trim() !== "") {
+    const f = await git(["fetch", "origin", branch, "--quiet"], worktreePath);
+    if (f.code !== 0) return f;
+  }
+  return git(["reset", "--hard", ref], worktreePath);
+}
+
 // ─── RESUME-PRIOR-WORK probes (un-merged audit-branch reuse) ──────────────────
 
 /**

@@ -24,6 +24,7 @@ import {
   projectIdentity,
   worktreeAdd,
   worktreeRemove,
+  worktreeResetHard,
 } from "../src/index.js";
 import { projectSlug } from "@roll/spec";
 
@@ -182,6 +183,23 @@ describe("RESUME-PRIOR-WORK probes (un-merged audit-branch reuse)", () => {
     });
     await fetchRemoteBranch(conflict.clone, conflict.cycleBranch);
     expect(await branchCleanlyRebasesOntoMain(conflict.clone, conflict.cycleBranch)).toBe(false);
+  });
+
+  it("worktreeResetHard fetches + reset --hard onto the resume ref so the prior work appears in the tree", async () => {
+    // The clone is on main (no feat.txt); the resume ref carries it. After the
+    // re-point, the tracked tree carries the prior cycle's file.
+    const { clone, cycleBranch } = setup("reset", { branchFile: "git-hooks.ts", cycleBody: "prior work" });
+    expect(existsSync(join(clone, "git-hooks.ts"))).toBe(false);
+    const r = await worktreeResetHard(clone, `origin/${cycleBranch}`, cycleBranch);
+    expect(r.code).toBe(0);
+    expect(existsSync(join(clone, "git-hooks.ts"))).toBe(true);
+    expect(W(clone, "show", "-s", "--format=%s", "HEAD")).toBe("prior cycle work");
+  });
+
+  it("worktreeResetHard returns a non-zero code for an unfetchable branch (caller stays fresh)", async () => {
+    const { clone } = setup("reset-miss", { branchFile: "x.txt", cycleBody: "x" });
+    const r = await worktreeResetHard(clone, "origin/loop/cycle-missing", "loop/cycle-missing");
+    expect(r.code).not.toBe(0);
   });
 });
 

@@ -254,6 +254,8 @@ function describeCommand(cmd: CycleCommand): string {
       return `create_worktree      → git.worktreeAdd(${cmd.branch})`;
     case "pick_story":
       return "pick_story           → picker.pickStory(.roll/backlog.md)";
+    case "resume_worktree":
+      return `resume_worktree      → resolveResumeBase(${cmd.storyId}) + git.resetWorktreeHard`;
     case "resolve_route":
       return `resolve_route        → router.resolveRoute(${cmd.storyId})`;
     case "spawn_agent":

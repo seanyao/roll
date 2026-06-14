@@ -205,6 +205,7 @@ describe("happy-path phase walk → done", () => {
       "create_worktree",
       "emit_event", // cycle:start
       "pick_story",
+      "resume_worktree", // RESUME-PRIOR-WORK re-point (post-pick, before route/spawn)
       "resolve_route",
       "spawn_agent",
       "capture_facts",
@@ -216,6 +217,23 @@ describe("happy-path phase walk → done", () => {
     expect(state.done).toBe(true);
     expect(state.terminal).toBe("published");
     expect(state.phase).toBe("cleanup");
+  });
+
+  it("RESUME wiring (FIX-284): story_picked emits resume_worktree with the picked id BEFORE resolve_route/spawn_agent", () => {
+    // The resume decision MUST carry the freshly-picked story id (the pick runs
+    // INSIDE the worktree, so storyId is undefined until story_picked), and must
+    // happen before the agent spawns so the worktree can be re-pointed in time.
+    const r = cycleStep(
+      { ...initialCycleState(CTX), phase: "pick", worktreeReady: true },
+      { type: "story_picked", storyId: "FIX-284" },
+    );
+    const resumeIdx = r.commands.findIndex((c) => c.kind === "resume_worktree");
+    const routeIdx = r.commands.findIndex((c) => c.kind === "resolve_route");
+    expect(resumeIdx).toBeGreaterThanOrEqual(0);
+    expect(routeIdx).toBeGreaterThan(resumeIdx); // resume re-point precedes route → spawn
+    expect(r.commands[resumeIdx]).toEqual({ kind: "resume_worktree", storyId: "FIX-284" });
+    // The story id threaded into ctx is the picked one (feeds resolveResumeBase).
+    expect(r.state.ctx.storyId).toBe("FIX-284");
   });
 });
 

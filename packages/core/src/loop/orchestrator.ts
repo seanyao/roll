@@ -402,6 +402,7 @@ export type CycleCommand =
   | { kind: "preflight" } // recovery.ts preflightPlan + orphan recovery.
   | { kind: "create_worktree"; branch: string } // infra/git _worktree_create.
   | { kind: "pick_story" } // backlog/picker pickStory.
+  | { kind: "resume_worktree"; storyId: string } // RESUME-PRIOR-WORK re-point (post-pick).
   | { kind: "resolve_route"; storyId: string } // agent/router resolveRoute+Fallback.
   | { kind: "spawn_agent"; agent: AgentId; attempt: number } // execute (TCR inside).
   | { kind: "kill_agent"; graceSec: number } // watchdog teardown.
@@ -658,9 +659,22 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       ]);
 
     case "story_picked":
+      // RESUME-PRIOR-WORK is decided HERE, not at create_worktree: the picker
+      // reads the backlog INSIDE the worktree (FIX-198/FIX-204C), so the story id
+      // is only known AFTER the worktree exists. The worktree was created on
+      // origin/main (the fresh-context default); now that we have the picked
+      // story, `resume_worktree` consults resolveResumeBase(storyId) and — only
+      // when a resumable un-merged branch cleanly rebases — RE-POINTS the worktree
+      // to it (fetch + reset --hard) so the agent resumes the prior product code.
+      // It runs BEFORE resolve_route → spawn_agent (commands execute in order), so
+      // the worktree carries the resume tree by the time the agent spawns. When no
+      // resume branch exists it is a clean no-op (worktree stays on origin/main).
       return {
         state: { ...state, phase: "route", ctx: { ...state.ctx, storyId: event.storyId } },
-        commands: [{ kind: "resolve_route", storyId: event.storyId }],
+        commands: [
+          { kind: "resume_worktree", storyId: event.storyId },
+          { kind: "resolve_route", storyId: event.storyId },
+        ],
       };
 
     case "route_resolved":

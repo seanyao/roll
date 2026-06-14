@@ -11,10 +11,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  branchCleanlyRebasesOntoMain,
   branchCreate,
+  branchMergedIntoMain,
   canonicalProjectPath,
   commit,
   currentBranch,
+  fetchRemoteBranch,
   isAncestor,
   lsRemote,
   mergeBase,
@@ -113,6 +116,72 @@ describe("raw wrappers", () => {
     expect(refs.length).toBeGreaterThan(0);
     expect(refs[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
     expect(refs.some((r) => r.ref === "HEAD")).toBe(true);
+  });
+});
+
+describe("RESUME-PRIOR-WORK probes (un-merged audit-branch reuse)", () => {
+  const W = (p: string, ...args: string[]): string =>
+    execFileSync("git", args, { cwd: p, encoding: "utf8" }).trim();
+  /** Build an origin repo with main + a `loop/cycle-<tag>` branch holding work,
+   *  then a clone whose origin/* tracking refs the probes read. The cycle branch
+   *  ALWAYS branches off the same main commit so it is un-merged by construction;
+   *  `mainExtra` files (added on main AFTER the branch point) drive the rebase
+   *  clean-vs-conflict outcome. */
+  function setup(tag: string, opts: { branchFile: string; mainExtra?: { file: string; body: string } | undefined; cycleBody: string }): { clone: string; cycleBranch: string } {
+    const origin = initRepo(`origin-${tag}`);
+    const cycleBranch = `loop/cycle-${tag}`;
+    // Branch the cycle off main, add the prior work, push it back to origin.
+    W(origin, "checkout", "-q", "-b", cycleBranch);
+    execFileSync("bash", ["-c", `printf '%s' '${opts.cycleBody}' > ${opts.branchFile}`], { cwd: origin });
+    W(origin, "add", "-A");
+    W(origin, "commit", "-q", "-m", "prior cycle work");
+    W(origin, "checkout", "-q", "main");
+    if (opts.mainExtra !== undefined) {
+      execFileSync("bash", ["-c", `printf '%s' '${opts.mainExtra.body}' > ${opts.mainExtra.file}`], { cwd: origin });
+      W(origin, "add", "-A");
+      W(origin, "commit", "-q", "-m", "main moved on");
+    }
+    const clone = tmp(`clone-${tag}`);
+    execFileSync("git", ["clone", "-q", origin, clone], { cwd: tmp(`clonebase-${tag}`) });
+    return { clone, cycleBranch };
+  }
+
+  it("fetchRemoteBranch reports true for an existing branch, false for a missing one", async () => {
+    const { clone, cycleBranch } = setup("fetch", { branchFile: "feat.txt", cycleBody: "work" });
+    expect((await fetchRemoteBranch(clone, cycleBranch)).fetched).toBe(true);
+    expect((await fetchRemoteBranch(clone, "loop/cycle-does-not-exist")).fetched).toBe(false);
+  });
+
+  it("branchMergedIntoMain: false for an un-merged branch, true once it lands on main", async () => {
+    const { clone, cycleBranch } = setup("merged", { branchFile: "feat.txt", cycleBody: "work" });
+    await fetchRemoteBranch(clone, cycleBranch);
+    // Un-merged: the cycle branch's tip is not an ancestor of origin/main.
+    expect(await branchMergedIntoMain(clone, cycleBranch)).toBe(false);
+    // Merge it into the origin's main and re-fetch → now it IS on main.
+    const originPath = W(clone, "remote", "get-url", "origin");
+    W(originPath, "merge", "-q", "--no-ff", cycleBranch, "-m", "merge cycle");
+    W(clone, "fetch", "-q", "origin", "main");
+    expect(await branchMergedIntoMain(clone, cycleBranch)).toBe(true);
+  });
+
+  it("branchCleanlyRebasesOntoMain: true when no overlap, false on a conflicting file", async () => {
+    // Clean: the cycle touches feat.txt; main moves on a DIFFERENT file.
+    const clean = setup("clean", {
+      branchFile: "feat.txt",
+      cycleBody: "feat work",
+      mainExtra: { file: "other.txt", body: "unrelated main change" },
+    });
+    await fetchRemoteBranch(clean.clone, clean.cycleBranch);
+    expect(await branchCleanlyRebasesOntoMain(clean.clone, clean.cycleBranch)).toBe(true);
+
+    // Conflict: both the cycle branch and main edit the SAME file divergently.
+    const conflict = setup("conflict", {
+      branchFile: "shared.txt",
+      cycleBody: "cycle version",
+      mainExtra: { file: "shared.txt", body: "main version" },
+    });
+    await fetchRemoteBranch(conflict.clone, conflict.cycleBranch);
+    expect(await branchCleanlyRebasesOntoMain(conflict.clone, conflict.cycleBranch)).toBe(false);
   });
 });
 

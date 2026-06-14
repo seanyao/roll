@@ -52,6 +52,7 @@ import {
   planPublishDocPr,
   planPublishPr,
   reconcileBranchName,
+  resumeCandidateBranches,
   resolveRoute,
   resolveFallback,
   extractUsage,
@@ -92,6 +93,9 @@ import {
   worktreeFetchOrigin,
   worktreeRemove,
   worktreeSubmoduleInit,
+  fetchRemoteBranch,
+  branchMergedIntoMain,
+  branchCleanlyRebasesOntoMain,
   push as gitPush,
   git as gitRun,
   commit as gitCommit,
@@ -153,6 +157,15 @@ export interface GitPort {
   /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
    *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree. */
   tcrCount(worktreeCwd: string): Promise<number>;
+  /** RESUME-PRIOR-WORK: fetch a candidate prior-cycle branch from origin so its
+   *  ref resolves locally. LENIENT — `fetched:false` on a missing branch. */
+  fetchRemoteBranch(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
+  /** RESUME-PRIOR-WORK condition (a): is `origin/<branch>` already merged into
+   *  origin/main? A merged branch has nothing to resume. */
+  branchMergedIntoMain(repoCwd: string, branch: string): Promise<boolean>;
+  /** RESUME-PRIOR-WORK condition (b): does `origin/<branch>` cleanly merge with
+   *  origin/main (no conflicts)? Non-mutating `merge-tree` dry-run. */
+  branchCleanlyRebasesOntoMain(repoCwd: string, branch: string): Promise<boolean>;
 }
 
 /** GitHub facet — the publish-plan executor + slug resolution. */
@@ -429,11 +442,21 @@ export async function executeCommand(
     // infra/git _worktree_create (STRICT). worktree_created on success, else
     // worktree_failed (→ failed terminal, bin/roll:9000).
     case "create_worktree": {
+      // RESUME-PRIOR-WORK: by default (I12 fresh-context contract) every cycle
+      // bases its worktree on origin/main and redoes any prior partial work from
+      // scratch. When the picked card has a prior UN-MERGED cycle branch that
+      // cleanly rebases onto origin/main, base on THAT branch instead so the
+      // agent RESUMES (verifies + finalizes) rather than redoes — the FIX-284/285
+      // stranded-work case. Falls back to origin/main when no resumable branch
+      // exists, none cleanly rebases, or resume is disabled (byte-identical to
+      // the pre-resume behaviour). Keys purely on the runs ledger + git, uniform
+      // for every agent (roll normalize-agents thesis — no per-agent特判).
+      const base = await resolveResumeBase(ports, ctx.storyId);
       const r = await ports.git.worktreeAdd(
         ports.repoCwd,
         ports.paths.worktreePath,
         cmd.branch,
-        "origin/main",
+        base,
       );
       if (r.code !== 0) return { event: { type: "worktree_failed" } };
       // FIX-204C: `.roll/` is a nested gitignored repo — a fresh worktree has
@@ -1416,6 +1439,78 @@ function readRunsRows(runsPath: string): ReconcileRunRow[] {
   }
 }
 
+/** RESUME-PRIOR-WORK kill switch — set `ROLL_LOOP_NO_RESUME=1` to force the I12
+ *  fresh-context default (always base the worktree on origin/main). */
+export const RESUME_DISABLED_ENV = "ROLL_LOOP_NO_RESUME";
+
+/** True when resume-prior-work is disabled via {@link RESUME_DISABLED_ENV}. The
+ *  feature is default-ON (serves the no-waste intent); set the env to 1 to disable. */
+function resumeDisabled(): boolean {
+  return (process.env[RESUME_DISABLED_ENV] ?? "").trim() === "1";
+}
+
+/**
+ * RESUME-PRIOR-WORK — resolve the git base ref the cycle worktree should branch
+ * off. Default-ON; the result is `origin/main` (fresh-context, byte-identical to
+ * the pre-resume behaviour) UNLESS the picked card has a prior un-merged cycle
+ * branch that cleanly rebases onto origin/main, in which case it returns that
+ * branch (`origin/loop/cycle-<id>`) so the new cycle RESUMES the prior work.
+ *
+ * Selection (keys purely on the runs ledger + git — uniform for every agent):
+ *   1. disabled (ROLL_LOOP_NO_RESUME=1) or no storyId → origin/main.
+ *   2. {@link resumeCandidateBranches} maps the card → its branch-pushing cycle
+ *      branches, MOST-RECENT-FIRST (runs ledger story_id↔cycle_id link).
+ *   3. for each candidate, fetch it, then keep the first that is (a) NOT merged
+ *      into origin/main AND (b) cleanly rebases onto origin/main → resume on it.
+ *   4. when a resumable branch EXISTED but none cleanly rebased, emit an ALERT so
+ *      the operator knows resume was skipped, then fall back to origin/main.
+ *
+ * Best-effort by contract: a probe that throws degrades to origin/main — the
+ * resume optimization must NEVER topple a cycle that fresh-context would run.
+ */
+export async function resolveResumeBase(
+  ports: Ports,
+  storyId: string | undefined,
+): Promise<string> {
+  const FRESH = "origin/main";
+  if (resumeDisabled()) return FRESH;
+  if (storyId === undefined || storyId.trim() === "") return FRESH;
+  try {
+    const rows = readRunsRows(ports.paths.runsPath);
+    const candidates = resumeCandidateBranches(rows, storyId);
+    if (candidates.length === 0) return FRESH;
+    let sawUnmergedConflict = false;
+    for (const branch of candidates) {
+      const { fetched } = await ports.git.fetchRemoteBranch(ports.repoCwd, branch);
+      if (!fetched) continue; // branch gone from origin → nothing to resume here.
+      // Condition (a): a branch already merged into origin/main has nothing to
+      // resume — its work is on main; the next candidate (older) may still hold
+      // un-merged work, so keep scanning.
+      if (await ports.git.branchMergedIntoMain(ports.repoCwd, branch)) continue;
+      // Condition (b): only a clean rebase is safe to spawn into. A conflicting
+      // un-merged branch is the "resumable existed but skipped" case → ALERT.
+      if (await ports.git.branchCleanlyRebasesOntoMain(ports.repoCwd, branch)) {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `resume-prior-work: cycle for ${storyId} resumes un-merged branch ${branch} (rebased onto origin/main) instead of redoing from scratch`,
+        );
+        return `origin/${branch}`;
+      }
+      sawUnmergedConflict = true;
+    }
+    if (sawUnmergedConflict) {
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `resume-prior-work: ${storyId} has un-merged prior cycle work but it does NOT cleanly rebase onto origin/main — resume SKIPPED; starting fresh from origin/main (manual rescue needed)`,
+      );
+    }
+    return FRESH;
+  } catch {
+    /* resume is an optimization — never topple the cycle on a probe blip */
+    return FRESH;
+  }
+}
+
 /**
  * FIX-304 — enforce done ≡ merged at the cycle terminal: undo a PREMATURE
  * ✅ Done the agent wrote into the backlog when this cycle did NOT merge.
@@ -1886,6 +1981,16 @@ export function nodePorts(opts: {
         return (r.stdout ?? "")
           .split("\n")
           .filter((l) => l.includes(" tcr:")).length;
+      },
+      // RESUME-PRIOR-WORK probes (un-merged audit-branch reuse).
+      async fetchRemoteBranch(repoCwd, branch) {
+        return fetchRemoteBranch(repoCwd, branch);
+      },
+      async branchMergedIntoMain(repoCwd, branch) {
+        return branchMergedIntoMain(repoCwd, branch);
+      },
+      async branchCleanlyRebasesOntoMain(repoCwd, branch) {
+        return branchCleanlyRebasesOntoMain(repoCwd, branch);
       },
     },
     github: {

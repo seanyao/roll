@@ -16,6 +16,7 @@ import {
   reconcileBranchName,
   reconcileMergeEvidence,
   reconcileStuckBacklog,
+  resumeCandidateBranches,
 } from "../src/index.js";
 
 const HOUR = 3_600_000;
@@ -229,5 +230,41 @@ describe("latestDeliveringCycle — map a 🔨 story to the cycle that delivered
 
   it("returns undefined for a story with no runs row (dead claim, no PR)", () => {
     expect(latestDeliveringCycle(rows, "US-404")).toBeUndefined();
+  });
+});
+
+describe("resumeCandidateBranches — map a card to its un-merged cycle branches", () => {
+  it("returns branch-pushing terminals most-recent-first (orphan/failed/built/published/done)", () => {
+    const rows: ReconcileRunRow[] = [
+      { story_id: "FIX-284", cycle_id: "20260614-195600-25595", status: "orphan" },
+      { story_id: "FIX-285", cycle_id: "other", status: "orphan" },
+      { story_id: "FIX-284", cycle_id: "20260614-204221-43478", status: "failed" },
+    ];
+    expect(resumeCandidateBranches(rows, "FIX-284")).toEqual([
+      reconcileBranchName("20260614-204221-43478"),
+      reconcileBranchName("20260614-195600-25595"),
+    ]);
+  });
+
+  it("excludes idle / blocked / aborted (no branch with new work was pushed)", () => {
+    const rows: ReconcileRunRow[] = [
+      { story_id: "US-1", cycle_id: "c-idle", status: "idle" },
+      { story_id: "US-1", cycle_id: "c-blocked", status: "blocked" },
+      { story_id: "US-1", cycle_id: "c-aborted", status: "aborted" },
+    ];
+    expect(resumeCandidateBranches(rows, "US-1")).toEqual([]);
+  });
+
+  it("dedupes repeated cycle_id rows and keeps only the picked story", () => {
+    const rows: ReconcileRunRow[] = [
+      { story_id: "US-1", cycle_id: "c1", status: "built" }, // first row for c1
+      { story_id: "US-2", cycle_id: "c2", status: "orphan" }, // different story
+      { story_id: "US-1", cycle_id: "c1", status: "published" }, // upsert of same c1
+    ];
+    expect(resumeCandidateBranches(rows, "US-1")).toEqual([reconcileBranchName("c1")]);
+  });
+
+  it("returns [] for a story with no recorded cycles", () => {
+    expect(resumeCandidateBranches([], "US-404")).toEqual([]);
   });
 });

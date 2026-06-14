@@ -10,6 +10,7 @@ import { renderAgentsMachinePage } from "../src/lib/page-agents.js";
 import { renderSkillsPage } from "../src/lib/page-skills.js";
 import { collectLoopHeartbeat } from "../src/lib/loop-heartbeat.js";
 import { collectCasting } from "../src/lib/casting.js";
+import { collectGitHooks, type GitHooksVM } from "../src/lib/git-hooks.js";
 import { parseProjectsRegistry, reachableProjects } from "../src/lib/projects-registry.js";
 
 const SNAP: TruthSnapshot = {
@@ -87,6 +88,15 @@ const CASTING = collectCasting({
   onboardClient: () => undefined,
   routeAudit: (slot) => (slot === "hard" ? "claude best for US in-tier (hit_rate 0.91, n=12); slot kept" : undefined),
 });
+
+const GIT_HOOKS: GitHooksVM = {
+  hooksPath: "hooks",
+  configured: true,
+  rows: [
+    { name: "pre-commit", descEn: "TCR proof gate before commit", descZh: "提交前 TCR 测试证明闸", path: "hooks/pre-commit" },
+    { name: "prepare-commit-msg", descEn: "append AI co-author trailer", descZh: "追加 AI 协作者 trailer", path: "hooks/prepare-commit-msg" },
+  ],
+};
 
 // US-DOSSIER-033 — Charter browser view-model: a charter group (docs), a guide
 // group with one bilingual guide/en↔zh pair, and an epic-plans group.
@@ -183,6 +193,7 @@ function render(
     githubSlug: "seanyao/roll",
     skills: SKILLS,
     casting: CASTING,
+    gitHooks: GIT_HOOKS,
     charter: CHARTER,
     ...extra,
   });
@@ -240,6 +251,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
       releaseScope: { pending: [], shipped: [], pendingCount: 0, shippedCount: 0, history: [] },
       skills: { summary: { skills: 0, violations: 0, hubLines: 0, auditRan: true }, groups: [] },
       casting: collectCasting({ readSlot: () => undefined }),
+      gitHooks: { hooksPath: "hooks", configured: false, rows: [] },
       charter: { groups: [] },
     });
     expect(custom).toContain("acme");
@@ -458,6 +470,12 @@ describe("collectCasting — US-DOSSIER-030 (pure)", () => {
     expect(slots.map((r) => r.key)).toEqual(["easy", "default", "hard", "fallback"]);
     expect(slots.map((r) => r.agentEn)).toEqual(["kimi", "codex", "claude", "claude"]);
     expect(slots.every((r) => r.mono && !r.empty)).toBe(true);
+    expect(vm.execSlots?.map((r) => [r.key, r.ramp.length, r.fallback])).toEqual([
+      ["easy", 1, false],
+      ["default", 2, false],
+      ["hard", 3, false],
+      ["fallback", 0, true],
+    ]);
     expect(vm.configured).toBe(true);
   });
 
@@ -474,6 +492,7 @@ describe("collectCasting — US-DOSSIER-030 (pure)", () => {
 
   it("AC2: scenario rows — peer differ-from-builder, spar pair, onboard follows client", () => {
     const vm = collectCasting(deps);
+    expect(vm.scenarioRoles?.map((r) => r.key)).toEqual(["peer", "review-pr", "spar", "onboard"]);
     const peer = vm.rows.find((r) => r.key === "peer");
     expect(peer?.agentEn).toContain("must differ from builder");
     expect(peer?.agentZh).toContain("强制异构");
@@ -497,6 +516,31 @@ describe("collectCasting — US-DOSSIER-030 (pure)", () => {
   });
 });
 
+describe("collectGitHooks — FIX-284", () => {
+  it("collects real hook files from the configured hooks path and ignores samples", () => {
+    const vm = collectGitHooks({
+      hooksPath: "hooks",
+      listHookFiles: () => ["pre-commit", "prepare-commit-msg", "pre-push.sample"],
+      hookPath: (name) => `hooks/${name}`,
+    });
+    expect(vm.configured).toBe(true);
+    expect(vm.hooksPath).toBe("hooks");
+    expect(vm.rows.map((r) => r.name)).toEqual(["pre-commit", "prepare-commit-msg"]);
+    expect(vm.rows[0]?.descEn).toContain("TCR");
+    expect(vm.rows[1]?.descEn).toContain("co-author");
+  });
+
+  it("empty/default git hook dirs render honestly without inventing launchd lanes", () => {
+    const vm = collectGitHooks({
+      hooksPath: ".git/hooks",
+      listHookFiles: () => ["pre-commit.sample", "commit-msg.sample"],
+      hookPath: (name) => `.git/hooks/${name}`,
+    });
+    expect(vm.configured).toBe(false);
+    expect(vm.rows).toEqual([]);
+  });
+});
+
 // US-DOSSIER-040: Casting is its OWN top-level project tab (executor complexity
 // ladder + scenario roles), promoted OUT of the Loop tab. The Hooks-this-repo
 // panel stays in the Loop tab. The grid view-model is unchanged (collectCasting).
@@ -512,24 +556,31 @@ describe("Casting tab + Loop tab IA — US-DOSSIER-030 / US-DOSSIER-040", () => 
   const castingPane = paneOf("tab-casting");
   const loopPane = paneOf("tab-loop");
 
-  it("AC1/US-040: Casting is its OWN tab pane (kicker + title + the grid)", () => {
+  it("AC1/US-040: Casting is its OWN tab pane (kicker + 3+1 executor ladder + role grid)", () => {
     expect(html).toContain('id="tab-casting"');
     expect(html).toContain('data-tab="casting"');
-    // the executor ladder + scenario roles render INSIDE the Casting pane
-    for (const key of ["easy", "default", "hard", "fallback", "peer", "review-pr", "spar", "onboard"]) {
-      expect(castingPane).toContain(`data-casting="${key}"`);
+    expect(castingPane).toContain('data-exec-ladder="true"');
+    expect(castingPane).toContain("grid-template-columns:repeat(3,1fr) 1.1fr");
+    for (const key of ["easy", "default", "hard", "fallback"]) {
+      expect(castingPane).toContain(`data-exec-slot="${key}"`);
     }
+    expect(castingPane).toContain('data-ramp="1"');
+    expect(castingPane).toContain('data-ramp="2"');
+    expect(castingPane).toContain('data-ramp="3"');
+    expect(castingPane).toContain("↩");
     expect(castingPane).toContain("Casting");
     expect(castingPane).toContain("选角"); // the Casting tab label (CORRECT稿)
     expect(castingPane).toContain("角色分工"); // the grid section label
   });
 
-  it("AC2: Casting grid renders Role / Agent / Note rows for all eight roles", () => {
+  it("AC2: Casting scenario roles render as 140px | 1fr | auto rows", () => {
     expect(html).toContain("Casting");
     expect(html).toContain("角色分工");
-    for (const key of ["easy", "default", "hard", "fallback", "peer", "review-pr", "spar", "onboard"]) {
-      expect(html).toContain(`data-casting="${key}"`);
+    expect(castingPane).toContain('data-scenario-roles="true"');
+    for (const key of ["peer", "review-pr", "spar", "onboard"]) {
+      expect(castingPane).toContain(`data-scenario-role="${key}"`);
     }
+    expect(castingPane).toContain("grid-template-columns:140px 1fr auto");
     expect(html).toContain("Executor · easy");
     expect(html).toContain("执行 · easy");
     // resolved slot agents from the router config (no hardcoded arrays)
@@ -550,20 +601,23 @@ describe("Casting tab + Loop tab IA — US-DOSSIER-030 / US-DOSSIER-040", () => 
     expect(html).toContain("claude best for US in-tier (hit_rate 0.91, n=12); slot kept");
   });
 
-  it("AC3: a Hooks-this-repo panel enumerates the scheduled lanes, distinct from Overview", () => {
+  it("AC3: Hooks-this-repo enumerates configured git hooks, not scheduled lanes", () => {
     expect(html).toContain('data-hooks="this-repo"');
     expect(html).toContain("Hooks · this repo");
     expect(html).toContain("钩子 · 本仓");
-    expect(html).toContain("scheduled launchd lanes wired into this checkout");
-    // the lane data is the SAME collectLoopHeartbeat output as the Overview tile
-    expect(html).toContain(">loop<"); // lane name from snapshot.loop.lanes
-    expect(html).toContain("1/1 "); // running / total scheduled count
+    expect(html).toContain("git hooks wired into this checkout");
+    expect(html).toContain("本检出已配置的 git 钩子");
+    expect(html).toContain('data-hook="pre-commit"');
+    expect(html).toContain('data-hook="prepare-commit-msg"');
+    expect(html).toContain("TCR proof gate before commit");
+    expect(html).not.toContain("scheduled launchd lanes wired into this checkout");
   });
 
   it("US-040: the Loop tab is cleaned — no inline agents panel, no inline casting ladder", () => {
     expect(loopPane).not.toBe("");
     // the casting grid + scenario roles are NOT inside the Loop pane (moved out)
-    expect(loopPane).not.toContain('data-casting="easy"');
+    expect(loopPane).not.toContain('data-exec-slot="easy"');
+    expect(loopPane).not.toContain('data-scenario-role="peer"');
     expect(loopPane).not.toContain("Executor · easy");
     expect(loopPane).not.toContain("roll agent list");
     // the inline agents inventory left the Loop tab (it is the machine Agents page)
@@ -580,7 +634,7 @@ describe("Casting tab + Loop tab IA — US-DOSSIER-030 / US-DOSSIER-040", () => 
     for (const [en, zh] of [
       ["Casting", "角色分工"],
       ["Hooks · this repo", "钩子 · 本仓"],
-      ["scheduled", "已调度"],
+      ["git hooks", "git 钩子"],
       ["pairing rule", "结对规则"],
       ["interactive", "交互式"],
     ] as const) {

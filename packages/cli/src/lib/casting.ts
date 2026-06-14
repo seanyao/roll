@@ -44,9 +44,30 @@ export interface CastingRow {
   audit: string;
 }
 
+/** One executor tier card in the Casting tab's 3+1 complexity ladder. */
+export interface CastingExecSlot {
+  key: "easy" | "default" | "hard" | "fallback";
+  roleEn: string;
+  roleZh: string;
+  agentEn: string;
+  agentZh: string;
+  mono: boolean;
+  empty: boolean;
+  noteEn: string;
+  noteZh: string;
+  audit: string;
+  /** Design-ramp bars: easy=1, default=2, hard=3; fallback is the dashed reroute card. */
+  ramp: number[];
+  fallback: boolean;
+}
+
 /** The Casting view-model (the four complexity slots, then the four scenarios). */
 export interface CastingVM {
   rows: CastingRow[];
+  /** FIX-284: executor complexity ladder cards for the web Casting tab. */
+  execSlots?: CastingExecSlot[];
+  /** FIX-284: scenario role rows rendered below the ladder. */
+  scenarioRoles?: CastingRow[];
   /** A casting was resolvable at all (any slot configured OR a scenario known). */
   configured: boolean;
 }
@@ -105,15 +126,16 @@ function slotRow(
  *   known; the onboard row follows the active interactive client.
  */
 export function collectCasting(deps: CastingDeps): CastingVM {
-  const rows: CastingRow[] = [
+  const complexityRows: CastingRow[] = [
     slotRow("easy", "Executor · easy", "执行 · easy", deps),
     slotRow("default", "Executor · default", "执行 · default", deps),
     slotRow("hard", "Executor · hard", "执行 · hard", deps),
     slotRow("fallback", "Executor · fallback", "执行 · fallback", deps),
   ];
+  const rows: CastingRow[] = [...complexityRows];
 
   // peer re-check — never a fixed agent; the heterogeneity rule IS the truth.
-  rows.push({
+  const scenarioRoles: CastingRow[] = [{
     key: "peer",
     roleEn: "Peer re-check",
     roleZh: "同伴复核 peer",
@@ -124,12 +146,12 @@ export function collectCasting(deps: CastingDeps): CastingVM {
     noteEn: "pairing rule",
     noteZh: "结对规则",
     audit: "",
-  });
+  }];
 
   // PR review — the loop dispatches review-pr to the `default` slot agent.
   const prAgent = deps.readSlot("default");
   const prEmpty = prAgent === undefined || prAgent === "";
-  rows.push({
+  scenarioRoles.push({
     key: "review-pr",
     roleEn: "PR review",
     roleZh: "PR 评审",
@@ -145,7 +167,7 @@ export function collectCasting(deps: CastingDeps): CastingVM {
   // adversarial spar — the heterogeneous attacker ⚔ defender pair.
   const pair = deps.sparPair?.();
   const sparEmpty = pair === undefined;
-  rows.push({
+  scenarioRoles.push({
     key: "spar",
     roleEn: "Adversarial TDD",
     roleZh: "攻防 spar",
@@ -160,7 +182,7 @@ export function collectCasting(deps: CastingDeps): CastingVM {
 
   // onboard — follows whatever client is interactive right now.
   const client = deps.onboardClient?.();
-  rows.push({
+  scenarioRoles.push({
     key: "onboard",
     roleEn: "Onboard",
     roleZh: "接入 onboard",
@@ -173,8 +195,25 @@ export function collectCasting(deps: CastingDeps): CastingVM {
     audit: "",
   });
 
+  rows.push(...scenarioRoles);
+
+  const execSlots: CastingExecSlot[] = complexityRows.map((r, index) => ({
+    key: r.key as "easy" | "default" | "hard" | "fallback",
+    roleEn: r.roleEn,
+    roleZh: r.roleZh,
+    agentEn: r.agentEn,
+    agentZh: r.agentZh,
+    mono: r.mono,
+    empty: r.empty,
+    noteEn: r.noteEn,
+    noteZh: r.noteZh,
+    audit: r.audit,
+    ramp: r.key === "fallback" ? [] : Array.from({ length: index + 1 }, (_, i) => i + 1),
+    fallback: r.key === "fallback",
+  }));
+
   const configured = rows.some((r) => !r.empty && (r.key === "easy" || r.key === "default" || r.key === "hard" || r.key === "fallback"));
-  return { rows, configured };
+  return { rows, execSlots, scenarioRoles, configured };
 }
 
 const SLOTS: readonly AgentSlot[] = ["easy", "default", "hard", "fallback"];

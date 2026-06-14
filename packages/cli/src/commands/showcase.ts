@@ -115,21 +115,47 @@ function rollBin(): string {
   return join(packageRoot(), "packages", "cli", "bin", "roll.js");
 }
 
-interface SubResult {
+export interface SubResult {
   code: number;
   stdout: string;
   stderr: string;
 }
 
-/** Run a roll subcommand against the sandbox with an isolated ROLL_HOME. */
-function runRoll(sandbox: string, rollHome: string, args: string[], extraEnv: Record<string, string> = {}): SubResult {
+export interface RunRollOptions {
+  /** Extra env vars layered on top of the inherited environment. */
+  extraEnv?: Record<string, string>;
+  /**
+   * Probe against the REAL environment's ROLL_HOME instead of the throwaway
+   * sandbox home. Agent availability is a machine-level fact (which agent CLIs
+   * are installed/configured on this box), independent of the sandbox — so the
+   * availability probe must NOT override ROLL_HOME to the empty sandbox home,
+   * or `roll agent list` reports zero agents and the showcase falsely aborts.
+   * The sandboxed DELIVERY steps (reset/loop-go/index/attest) keep the sandbox
+   * home; only the probe sets this.
+   */
+  realHome?: boolean;
+}
+
+/**
+ * Run a roll subcommand. By default it is pinned to the throwaway sandbox
+ * ROLL_HOME so the delivery steps never touch the real ~/.roll. With
+ * `{realHome: true}` it inherits the real environment's ROLL_HOME (so the
+ * agent-availability probe sees the agents actually installed on this box).
+ */
+function runRoll(sandbox: string, rollHome: string, args: string[], opts: RunRollOptions = {}): SubResult {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    ROLL_HOME: rollHome,
     ROLL_LANG: process.env["ROLL_LANG"] ?? "en",
     GIT_TERMINAL_PROMPT: "0",
-    ...extraEnv,
+    ...opts.extraEnv,
   };
+  if (opts.realHome === true) {
+    // Inherit the real ROLL_HOME (process.env carries it through the spread
+    // above; ~/.roll is roll's own default when it is unset). Do NOT pin the
+    // sandbox home.
+  } else {
+    env.ROLL_HOME = rollHome;
+  }
   const r = spawnSync(process.execPath, [rollBin(), ...args], {
     cwd: sandbox,
     env,
@@ -203,13 +229,25 @@ function findCardSpec(sandbox: string, card: string): string | undefined {
  * delivered pulse command/badge so the run always starts from a clean to-deliver
  * state. Best-effort + honest — reports what it could / could not reset.
  */
-function resetSandbox(sandbox: string, card: string): { reset: boolean; notes: string[] } {
+export function resetSandbox(sandbox: string, card: string): { ok: boolean; reset: boolean; notes: string[] } {
   const notes: string[] = [];
+  // `reset` records whether we actually flipped a status token; `ok` records
+  // whether the card ended up in the Todo start state (the only thing that
+  // matters for the run). Being ALREADY Todo is a benign no-op, not a failure
+  // (FIX-292): a clean repeatable start state is exactly the goal.
   let reset = false;
+  let ok = false;
 
   const backlogPath = join(sandbox, ".roll", "backlog.md");
   if (existsSync(backlogPath)) {
     const before = readFileSync(backlogPath, "utf8");
+    // Does the card's row already carry a status token, and is it already Todo?
+    const cardRow = before
+      .split("\n")
+      .find((line) => line.startsWith("|") && line.includes(card));
+    const hadStatusToken =
+      cardRow !== undefined && /(✅ *Done|🚧 *WIP|🔄 *In Progress|⏳ *Hold|📋 *Todo|✔️ *Done)/.test(cardRow);
+    const alreadyTodo = cardRow !== undefined && /📋 *Todo/.test(cardRow);
     // Flip the card's row status to 📋 Todo regardless of its current state.
     const lines = before.split("\n").map((line) => {
       if (!line.includes(card) || !line.startsWith("|")) return line;
@@ -219,9 +257,19 @@ function resetSandbox(sandbox: string, card: string): { reset: boolean; notes: s
     if (after !== before) {
       writeFileSync(backlogPath, after, "utf8");
       reset = true;
+      ok = true;
       notes.push(`backlog: ${card} → Todo`);
+    } else if (alreadyTodo) {
+      // Already in the start state — a benign success/skip, not a failure.
+      ok = true;
+      notes.push(`backlog: ${card} already Todo (no-op)`);
+    } else if (!hadStatusToken) {
+      // No recognizable status token on the card's row — genuinely can't reset.
+      notes.push(`backlog: ${card} has no status token`);
     } else {
-      notes.push(`backlog: ${card} already Todo (or no status token)`);
+      // Had a token, no change, but not Todo — shouldn't happen, treat as ok.
+      ok = true;
+      notes.push(`backlog: ${card} already Todo`);
     }
   } else {
     notes.push("backlog: .roll/backlog.md absent");
@@ -234,7 +282,7 @@ function resetSandbox(sandbox: string, card: string): { reset: boolean; notes: s
     notes.push("removed prior pulse.ts surface");
   }
 
-  return { reset, notes };
+  return { ok, reset, notes };
 }
 
 /** (b) Write the casting override into the sandbox agents.yaml so the loop routes the builder. */
@@ -401,7 +449,10 @@ export async function showcaseCommand(args: string[]): Promise<number> {
       throw new ShowcaseAbort(`card ${card} absent`);
     }
     const reset = resetSandbox(sandbox, card);
-    emit("reset", reset.reset, reset.notes.join("; "));
+    // Being already in the Todo start state is a benign no-op, not a failure:
+    // gate the step on `ok` (card is in the start state), not on whether a flip
+    // physically happened (FIX-292).
+    emit("reset", reset.ok, reset.notes.join("; "));
 
     // (b) Casting — write the override into the sandbox agents.yaml.
     writeCasting(sandbox, casting);
@@ -496,10 +547,28 @@ export async function showcaseCommand(args: string[]): Promise<number> {
 /** A deliberate, honest abort (a missing step/agent) — never a faked chain. */
 class ShowcaseAbort extends Error {}
 
-/** Probe the cast agents for availability against the sandbox; returns the unavailable ones. */
-function probeMissingAgents(sandbox: string, rollHome: string, casting: ShowcaseCasting): string[] {
+/**
+ * Probe the cast agents for availability against the REAL environment, NOT the
+ * throwaway sandbox home. Agent availability is a machine-level fact (which
+ * agent CLIs are installed/configured on this box), independent of the empty
+ * sandbox ROLL_HOME — so the probe runs `roll agent list` with `{realHome:true}`
+ * (inheriting the real `process.env.ROLL_HOME` / `~/.roll`). Probing the empty
+ * sandbox home instead would list zero agents and falsely abort (FIX-292).
+ * Returns the cast agents that are genuinely unavailable in the real env.
+ *
+ * `runner` is injectable so the unit suite can pin this against a mocked
+ * `roll agent list` (available agents pass; a truly-missing one fails) without
+ * touching real agents.
+ */
+export function probeMissingAgents(
+  sandbox: string,
+  rollHome: string,
+  casting: ShowcaseCasting,
+  runner: (sandbox: string, rollHome: string, args: string[], opts?: RunRollOptions) => SubResult = runRoll,
+): string[] {
   const wanted = [...new Set([casting.builder, casting.reviewer, casting.scorer])];
-  const r = runRoll(sandbox, rollHome, ["agent", "list"]);
+  // realHome:true — query the agents installed on THIS machine, not the sandbox.
+  const r = runner(sandbox, rollHome, ["agent", "list"], { realHome: true });
   // `roll agent list` prints installed agents; an agent we cast that is not
   // listed is treated as unavailable (fail-loud). When the listing fails
   // entirely, do not fabricate availability — report all cast agents missing.

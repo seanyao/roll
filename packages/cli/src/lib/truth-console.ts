@@ -454,7 +454,11 @@ export function copyChip(cmd: string): string {
 
 function cycleRow(cy: CycleLedgerRow): string {
   const color = VERDICT_COLORS[cy.verdict] ?? C.slate;
-  const n = cy.cycleId.slice(-6);
+  // FIX-297: the displayed handle is the trailing digit run — IDENTICAL to the
+  // copy-chip below and to what `roll cycle <handle>` resolves. A naive
+  // `.slice(-6)` on `20260614-020436-32144` grabs the `-` separator and shows a
+  // fake negative "-32144"; cycleHandle() strips it.
+  const n = cycleHandle(cy.cycleId);
   return (
     `<details class="cy-row" data-ts="${cy.tsSec}" data-verdict="${cy.verdict}" data-open-key="cy:${esc(cy.cycleId)}" style="border-top:1px solid ${C.hair};">` +
     `<summary style="display:grid;grid-template-columns:14px 70px 1fr auto;align-items:center;gap:14px;padding:12px 18px;cursor:pointer;list-style:none;">` +
@@ -636,7 +640,12 @@ function hooksPanel(input: TruthConsoleInput): string {
 }
 
 function loopTab(input: TruthConsoleInput): string {
+  // FIX-297: the loop runs hundreds of cycles a week, so the ledger opens on a
+  // count-capped "recent" window (newest ~50) instead of dumping all history.
+  // The time ranges expand it; "all" shows everything. Failures are NEVER hidden
+  // by the window — see applyRange.
   const ranges: Array<[string, string, string]> = [
+    ["recent", "Recent", "近期"],
     ["1", "Today", "今天"],
     ["3", "3 days", "三天"],
     ["7", "7 days", "七天"],
@@ -663,11 +672,14 @@ function loopTab(input: TruthConsoleInput): string {
     ranges
       .map(
         ([key, en, zh]) =>
-          `<button type="button" class="cy-range${key === "3" ? " on" : ""}" data-range="${key}" style="appearance:none;border:0;background:transparent;${MONO}font-size:11px;padding:6px 13px;cursor:pointer;color:${C.sub};">${bi(en, zh)}</button>`,
+          `<button type="button" class="cy-range${key === "recent" ? " on" : ""}" data-range="${key}" style="appearance:none;border:0;background:transparent;${MONO}font-size:11px;padding:6px 13px;cursor:pointer;color:${C.sub};">${bi(en, zh)}</button>`,
       )
       .join("") +
     `</div>` +
-    `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;"><span id="cy-count">—</span> ${bi("cycles", "周期")} <span style="color:${C.faint};">·</span> <b id="cy-failed" style="color:#d23b3b;font-weight:600;">—</b> ${bi("failed", "失败")}</span></div>` +
+    // FIX-297: the count tracks the active window; the failed tally is ALWAYS
+    // the full-ledger total (failures are first-class — never hidden by a window),
+    // and every failed cycle stays in view regardless of the range chosen.
+    `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;"><span id="cy-count">—</span> ${bi("shown", "显示")} <span style="color:${C.faint};">·</span> <b id="cy-failed" style="color:#d23b3b;font-weight:600;">—</b> ${bi("failed (all)", "失败（全部）")}</span></div>` +
     `<section id="cy-ledger" style="border:1px solid ${C.line};border-radius:14px;background:${C.card};overflow:hidden;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     (input.cycles.length > 0
       ? input.cycles.map(cycleRow).join("")
@@ -1273,26 +1285,38 @@ export const CONSOLE_SCRIPT = `<script>
       chips[c].classList.toggle("on", !!active[chips[c].getAttribute("data-filter")]);
     }
   }
-  // US-DOSSIER-013: cycle ledger range filter (verdicts recounted, failures never hidden).
+  // US-DOSSIER-013 / FIX-297: cycle ledger range filter. Rows render newest-first.
+  // The default "recent" window count-caps the view to the newest RECENT_CAP cycles
+  // (the loop runs hundreds a week, so showing all history overwhelms the page).
+  // Two invariants hold for EVERY range, including "recent":
+  //   1. A failed/reverted/blocked cycle is NEVER hidden by the window — failures
+  //      are first-class, always in view however narrow the window.
+  //   2. The "failed" tally counts the FULL ledger, not just what's visible, so it
+  //      stays accurate no matter which range is active.
+  var RECENT_CAP = 50;
   function applyRange(range) {
     var rows = document.querySelectorAll(".cy-row");
     var nowSec = Math.floor(Date.now() / 1000);
-    var horizon = range === "all" ? Infinity : Number(range) * 86400;
-    var count = 0, failed = 0;
+    var horizon = range === "all" || range === "recent" ? Infinity : Number(range) * 86400;
+    var shown = 0, failedAll = 0, kept = 0;
     for (var i = 0; i < rows.length; i++) {
+      var v = rows[i].getAttribute("data-verdict");
+      var isFail = v === "failed" || v === "reverted" || v === "blocked";
+      if (isFail) failedAll++; // full-ledger tally, independent of the window
       var ts = Number(rows[i].getAttribute("data-ts")) || 0;
-      var show = range === "all" || nowSec - ts <= horizon;
+      var inWindow = range === "all" ? true
+        : range === "recent" ? kept < RECENT_CAP
+        : nowSec - ts <= horizon;
+      // Failures are always shown; otherwise honor the window.
+      var show = isFail || inWindow;
       rows[i].style.display = show ? "" : "none";
-      if (show) {
-        count++;
-        var v = rows[i].getAttribute("data-verdict");
-        if (v === "failed" || v === "reverted" || v === "blocked") failed++;
-      }
+      if (show) shown++;
+      if (inWindow) kept++; // the cap counts non-fail slots; failures are bonus
     }
     var c = document.getElementById("cy-count");
     var f = document.getElementById("cy-failed");
-    if (c) c.textContent = String(count);
-    if (f) f.textContent = String(failed);
+    if (c) c.textContent = String(shown);
+    if (f) f.textContent = String(failedAll);
     var btns = document.querySelectorAll(".cy-range");
     for (var b = 0; b < btns.length; b++) btns[b].classList.toggle("on", btns[b].getAttribute("data-range") === range);
   }
@@ -1394,7 +1418,7 @@ export const CONSOLE_SCRIPT = `<script>
     for (var rb = 0; rb < rbs.length; rb++) {
       rbs[rb].addEventListener("click", function () { applyRange(this.getAttribute("data-range")); });
     }
-    applyRange("3");
+    applyRange("recent");
     applyFreshness();
     tickCountdown();
     setInterval(tickCountdown, 30000);

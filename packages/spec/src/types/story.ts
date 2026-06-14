@@ -18,25 +18,105 @@ export const STATUS_MARKER: Record<StoryStatus, string> = {
 };
 
 /**
+ * Legacy / alias markers that older backlog rows (and the divergent showcase
+ * reset) wrote, mapped onto their canonical {@link StoryStatus}. This is the ONE
+ * tolerance table: every reader recognizes these, every writer emits the
+ * canonical {@link STATUS_MARKER} instead (FIX-300). They are NOT canonical — the
+ * enum has only `todo | in_progress | done | hold` — but they must not vanish
+ * silently from a backlog row.
+ *
+ * `🚧 WIP` and `🔄 In Progress` both meant "work underway" → `in_progress`;
+ * `⏳ Hold` was the old hourglass hold → `hold`; `✔️ Done` was an alternate
+ * checkmark → `done`. `🔒 Blocked` / `⏸ Deferred` are historical triage markers
+ * that fold into `hold` (no separate deferred state; all three mean "parked").
+ */
+export const LEGACY_STATUS_MARKERS: ReadonlyArray<{ marker: string; status: StoryStatus }> = [
+  { marker: "✔️ Done", status: "done" },
+  { marker: "🚧 WIP", status: "in_progress" },
+  { marker: "🔄 In Progress", status: "in_progress" },
+  { marker: "⏳ Hold", status: "hold" },
+  { marker: "🔒 Blocked", status: "hold" },
+  { marker: "⏸ Deferred", status: "hold" },
+];
+
+/**
+ * One regex matching every status marker token — canonical and legacy alike —
+ * built from the single-source {@link STATUS_MARKER} + {@link LEGACY_STATUS_MARKERS}
+ * tables (FIX-300). Each alternative tolerates any inter-glyph whitespace
+ * (`✅  Done` vs `✅ Done`). Use {@link findStatusMarker} to extract the token
+ * from a backlog row, or {@link STATUS_MARKER_RE} directly to test/replace.
+ *
+ * Order matters: terminal/longer markers (`✅ Done`, `✔️ Done`, `🔄 In Progress`)
+ * precede shorter ones so the alternation never matches a prefix of a longer
+ * token. A fresh, non-global instance is returned to avoid shared `lastIndex`.
+ */
+const STATUS_MARKER_ALTERNATIVES: ReadonlyArray<{ marker: string; status: StoryStatus }> = [
+  // Canonical first (these are what writers emit), then legacy aliases.
+  { marker: STATUS_MARKER.done, status: "done" },
+  { marker: STATUS_MARKER.in_progress, status: "in_progress" },
+  { marker: STATUS_MARKER.hold, status: "hold" },
+  { marker: STATUS_MARKER.todo, status: "todo" },
+  ...LEGACY_STATUS_MARKERS,
+];
+
+/** Turn a marker like `📋 Todo` into a regex source tolerant of inter-glyph spaces. */
+function markerToPattern(marker: string): string {
+  return marker
+    .split(/\s+/)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join(" *");
+}
+
+const STATUS_MARKER_RE_SOURCE = `(${STATUS_MARKER_ALTERNATIVES.map((a) => markerToPattern(a.marker)).join("|")})`;
+
+/** Build a fresh, non-global regex (callers that need `g` should pass true). */
+export function statusMarkerRe(global = false): RegExp {
+  return new RegExp(STATUS_MARKER_RE_SOURCE, global ? "g" : undefined);
+}
+
+/** A non-global instance for tests/callers that only need `.test()` / `.exec()`. */
+export const STATUS_MARKER_RE: RegExp = statusMarkerRe(false);
+
+/**
+ * Find the (canonical or legacy) status marker token in a backlog row, normalized
+ * to single inter-glyph spaces (e.g. `✅  Done` → `✅ Done`). Returns `undefined`
+ * when no recognized marker is present. This is the ONE extractor the showcase
+ * reset and status readers share so they can never diverge again (FIX-300).
+ */
+export function findStatusMarker(line: string): string | undefined {
+  const m = statusMarkerRe(false).exec(line);
+  if (m === null || m[1] === undefined) return undefined;
+  return m[1].replace(/\s+/g, " ").trim();
+}
+
+/**
  * The ONE parser from a raw backlog status cell to the typed {@link StoryStatus}.
  *
  * Keys on the LEADING marker glyph — the status emoji appears only as the marker,
  * never in the human reason text, so a hold whose reason reads "…全 Done 后…" is
- * not misread as done (the loose-substring bug). Historical triage markers
- * `🔒 Blocked` / `⏸ Deferred` fold into `hold` — the enum has no separate
- * deferred state; all three mean "parked, not pickable". Falls back to the status
- * WORD (terminal states first) only for emoji-less cells. Returns `null` for an
- * unrecognized cell so callers fail loud rather than silently dropping a row (the
- * v2 renderer's blindness to `🚫 Hold` bug).
+ * not misread as done (the loose-substring bug). Canonical markers
+ * ({@link STATUS_MARKER}) and legacy aliases ({@link LEGACY_STATUS_MARKERS}) are
+ * recognized identically — `✔️ Done` is as much done as `✅ Done`, `🚧 WIP` /
+ * `🔄 In Progress` are in_progress, `⏳ Hold` / `🔒 Blocked` / `⏸ Deferred` fold
+ * into `hold`. Falls back to the status WORD (terminal states first) only for
+ * emoji-less cells. Returns `null` for an unrecognized cell so callers fail loud
+ * rather than silently dropping a row (the v2 renderer's blindness to `🚫 Hold`
+ * bug).
  */
 export function classifyStatus(cell: string): StoryStatus | null {
-  if (cell.includes("✅")) return "done";
-  if (cell.includes("🔨")) return "in_progress";
-  if (cell.includes("🚫") || cell.includes("🔒") || cell.includes("⏸")) return "hold";
+  if (cell.includes("✅") || cell.includes("✔️") || cell.includes("✔")) return "done";
+  if (cell.includes("🔨") || cell.includes("🔄") || cell.includes("🚧")) return "in_progress";
+  if (
+    cell.includes("🚫") ||
+    cell.includes("🔒") ||
+    cell.includes("⏸") ||
+    cell.includes("⏳")
+  )
+    return "hold";
   if (cell.includes("📋")) return "todo";
   // Emoji-less fallback: match the status word, most-specific terminal first.
   if (cell.includes("Done")) return "done";
-  if (cell.includes("In Progress")) return "in_progress";
+  if (cell.includes("In Progress") || cell.includes("WIP")) return "in_progress";
   if (cell.includes("Hold") || cell.includes("Blocked") || cell.includes("Deferred")) return "hold";
   if (cell.includes("Todo")) return "todo";
   return null;

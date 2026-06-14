@@ -5,7 +5,14 @@
  * No consumer may re-derive status by ad-hoc substring matching.
  */
 import { describe, expect, it } from "vitest";
-import { classifyStatus, STATUS_MARKER, type StoryStatus } from "../src/types/story.js";
+import {
+  classifyStatus,
+  findStatusMarker,
+  LEGACY_STATUS_MARKERS,
+  STATUS_MARKER,
+  statusMarkerRe,
+  type StoryStatus,
+} from "../src/types/story.js";
 
 describe("STATUS_MARKER ↔ classifyStatus round-trip", () => {
   it("every canonical marker classifies back to its own status", () => {
@@ -42,7 +49,69 @@ describe("classifyStatus", () => {
   });
 
   it("returns null for an unrecognized cell (fail-loud, no silent drop)", () => {
-    expect(classifyStatus("🚧 部分")).toBeNull();
+    // 🚧 is now a recognized legacy WIP marker (FIX-300), so a genuinely
+    // unknown glyph must be used to exercise the fail-loud null path.
+    expect(classifyStatus("❓ 未知")).toBeNull();
     expect(classifyStatus("")).toBeNull();
+  });
+});
+
+describe("FIX-300 single-source markers — legacy tolerance", () => {
+  it("classifies the divergent showcase legacy markers onto canonical statuses", () => {
+    // These are exactly the markers the old showcase reset regex used, which
+    // classifyStatus / the picker / the renderer were blind to before FIX-300.
+    expect(classifyStatus("🚧 WIP")).toBe("in_progress");
+    expect(classifyStatus("🔄 In Progress")).toBe("in_progress");
+    expect(classifyStatus("⏳ Hold")).toBe("hold");
+    expect(classifyStatus("✔️ Done")).toBe("done");
+  });
+
+  it("LEGACY_STATUS_MARKERS each round-trip through classifyStatus to their status", () => {
+    for (const { marker, status } of LEGACY_STATUS_MARKERS) {
+      expect(classifyStatus(marker)).toBe(status);
+    }
+  });
+});
+
+describe("FIX-300 single-source markers — regex / extractor", () => {
+  it("the regex matches every canonical marker", () => {
+    const statuses: StoryStatus[] = ["todo", "in_progress", "done", "hold"];
+    for (const s of statuses) {
+      expect(statusMarkerRe(false).test(`| ${STATUS_MARKER[s]} |`)).toBe(true);
+    }
+  });
+
+  it("the regex matches every legacy marker", () => {
+    for (const { marker } of LEGACY_STATUS_MARKERS) {
+      expect(statusMarkerRe(false).test(`| ${marker} |`)).toBe(true);
+    }
+  });
+
+  it("findStatusMarker extracts and normalizes the marker token from a row", () => {
+    expect(findStatusMarker("| [US-1](x) | desc | ✅ Done |")).toBe("✅ Done");
+    // Tolerates extra inter-glyph whitespace and normalizes back to one space.
+    expect(findStatusMarker("| [US-1](x) | desc | 📋  Todo |")).toBe("📋 Todo");
+    // Legacy marker is still extracted (not dropped).
+    expect(findStatusMarker("| [US-1](x) | desc | ⏳ Hold |")).toBe("⏳ Hold");
+  });
+
+  it("findStatusMarker returns undefined for a row with no recognized marker", () => {
+    expect(findStatusMarker("| [US-1](x) | desc | ❓ 未知 |")).toBeUndefined();
+  });
+
+  it("does not match a status WORD buried in the reason text without a glyph", () => {
+    // The hold reason mentions Done but carries no marker glyph — must not match.
+    expect(findStatusMarker("| [US-1](x) | desc | done-ish note |")).toBeUndefined();
+  });
+});
+
+describe("FIX-300 single-source markers — cross-module agreement", () => {
+  it("every canonical marker is recognized identically by classifyStatus and the regex", () => {
+    const statuses: StoryStatus[] = ["todo", "in_progress", "done", "hold"];
+    for (const s of statuses) {
+      const marker = STATUS_MARKER[s];
+      expect(classifyStatus(marker)).toBe(s);
+      expect(findStatusMarker(`| x | y | ${marker} |`)).toBe(marker);
+    }
   });
 });

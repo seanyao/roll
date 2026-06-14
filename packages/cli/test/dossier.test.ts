@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlink
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { STATUS_MARKER } from "@roll/spec";
 import { collectDossier, type DossierEpic, type DossierStory } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
 import { LADDER_CSS, deriveDeliveryLadder, renderFeaturesIndex, renderTruthBoard, spineMotif, storyLadderState } from "../src/lib/dossier-index.js";
@@ -238,6 +239,15 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).toContain('data-sf="hold"');
     expect(html).not.toContain('data-sf="done"'); // the old lumped bucket is gone
     expect(html).toContain(DOSSIER_FILTER_SCRIPT);
+  });
+
+  it("FIX-300: the Hold tally + filter chip use the canonical @roll/spec glyph (🚫), never the legacy lock (🔒)", () => {
+    // The dossier sources its status display glyphs from the ONE STATUS_MARKER set,
+    // so the Hold rung shows the canonical 🚫 (STATUS_MARKER.hold) — the same glyph
+    // the showcase reset/picker/renderer key on — not the divergent legacy lock 🔒.
+    expect(STATUS_MARKER.hold).toContain("🚫"); // guard: canonical glyph is 🚫
+    expect(html).toContain("🚫"); // Hold tally card + chip render the canonical glyph
+    expect(html).not.toContain("🔒"); // the legacy lock never leaks into the dossier
   });
 
   it("US-EVID-016: links the fixed morning report when present", () => {

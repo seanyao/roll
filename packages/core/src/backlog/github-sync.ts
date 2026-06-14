@@ -7,6 +7,7 @@
  * without the network. The HTTP fetch, token resolution, and file writes live
  * in the CLI command (packages/cli/src/commands/backlog-sync.ts).
  */
+import { STATUS_MARKER } from "@roll/spec";
 
 /** A GitHub issue, as the REST API returns it (only the fields we read). */
 export interface GhIssue {
@@ -29,11 +30,12 @@ const LABEL_TYPE_MAP: Record<string, string> = {
 };
 export const DEFAULT_TYPE = "US";
 
+// Single-source markers (FIX-300): consume @roll/spec, never re-spell a literal.
 const STATE_STATUS_MAP: Record<string, string> = {
-  open: "📋 Todo",
-  closed: "✅ Done",
+  open: STATUS_MARKER.todo,
+  closed: STATUS_MARKER.done,
 };
-export const DEFAULT_STATUS = "📋 Todo";
+export const DEFAULT_STATUS = STATUS_MARKER.todo;
 
 function labelName(label: { name?: string } | string): string {
   return typeof label === "string" ? label : (label.name ?? "");

@@ -28,6 +28,7 @@
  *   (tmp-file + rename) via the injected {@link FileStore}.
  */
 import { createHash } from "node:crypto";
+import { STATUS_MARKER } from "@roll/spec";
 import { type FileStore, nodeFileStore } from "./infra-default.js";
 
 /** A parsed backlog table row. */
@@ -137,7 +138,7 @@ export function appendBacklogRow(
   row: { id: string; title: string; epic: string },
 ): { content: string; appended: boolean } {
   if (content.includes(`| [${row.id}]`)) return { content, appended: false };
-  const line = `| [${row.id}](.roll/features/${row.epic}/${row.id}/spec.md) | ${row.title} | 📋 Todo |`;
+  const line = `| [${row.id}](.roll/features/${row.epic}/${row.id}/spec.md) | ${row.title} | ${STATUS_MARKER.todo} |`;
   const lines = content.split("\n");
   let anchor = -1;
   let lastTableRow = -1;

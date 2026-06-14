@@ -45,7 +45,7 @@ import {
   defaultPairingConfig,
   renderPairingConfig,
 } from "@roll/core";
-import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { c, renderState, row, COLS } from "../render.js";
 import { realAgentEnv } from "./agent-list.js";
 import { onPath, rollPkgDir, syncConventions as sharedSyncConventions } from "./setup-shared.js";
@@ -851,11 +851,16 @@ function seedBacklogRow(backlog: string, heading: string, row: string, id: strin
 }
 
 function seedBacklogStory(backlog: string, id: string, title: string): boolean {
-  return seedBacklogRow(backlog, "## Epic: Initial Setup", `| ${id} | ${title} | 📋 Todo |`, id);
+  return seedBacklogRow(
+    backlog,
+    "## Epic: Initial Setup",
+    `| ${id} | ${title} | ${STATUS_MARKER.todo} |`,
+    id,
+  );
 }
 
 function seedBacklogFix(backlog: string, id: string, title: string): boolean {
-  return seedBacklogRow(backlog, "## Bug Fixes", `| ${id} | ${title} | 📋 Todo |`, id);
+  return seedBacklogRow(backlog, "## Bug Fixes", `| ${id} | ${title} | ${STATUS_MARKER.todo} |`, id);
 }
 
 function confirmSeed(count: number, noun: "story" | "fix", ids: string[], titles: string[]): boolean {

@@ -42,6 +42,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalAgentName } from "@roll/core";
+import { findStatusMarker, STATUS_MARKER, statusMarkerRe } from "@roll/spec";
 import { stripAnsi } from "../render.js";
 import {
   assembleEvidenceChain,
@@ -247,13 +248,18 @@ export function resetSandbox(sandbox: string, card: string): { ok: boolean; rese
     const cardRow = before
       .split("\n")
       .find((line) => line.startsWith("|") && line.includes(card));
-    const hadStatusToken =
-      cardRow !== undefined && /(✅ *Done|🚧 *WIP|🔄 *In Progress|⏳ *Hold|📋 *Todo|✔️ *Done)/.test(cardRow);
-    const alreadyTodo = cardRow !== undefined && /📋 *Todo/.test(cardRow);
-    // Flip the card's row status to 📋 Todo regardless of its current state.
+    // Status-marker recognition is single-source (FIX-300): every canonical
+    // marker AND every legacy alias (🚧 WIP / 🔄 In Progress / ⏳ Hold / ✔️ Done)
+    // comes from @roll/spec, so the reset can never diverge from the picker /
+    // classifyStatus / renderer again.
+    const hadStatusToken = cardRow !== undefined && statusMarkerRe(false).test(cardRow);
+    const alreadyTodo =
+      cardRow !== undefined && findStatusMarker(cardRow) === STATUS_MARKER.todo;
+    // Flip the card's row status to the canonical 📋 Todo regardless of its
+    // current marker (canonical or legacy).
     const lines = before.split("\n").map((line) => {
       if (!line.includes(card) || !line.startsWith("|")) return line;
-      return line.replace(/(✅ *Done|🚧 *WIP|🔄 *In Progress|⏳ *Hold|📋 *Todo|✔️ *Done)/g, "📋 Todo");
+      return line.replace(statusMarkerRe(true), STATUS_MARKER.todo);
     });
     const after = lines.join("\n");
     if (after !== before) {
@@ -349,8 +355,9 @@ function readBacklogStatus(sandbox: string, card: string): string | undefined {
   if (!existsSync(backlogPath)) return undefined;
   for (const line of readFileSync(backlogPath, "utf8").split("\n")) {
     if (line.startsWith("|") && line.includes(card)) {
-      const m = /(✅ *Done|🚧 *WIP|🔄 *In Progress|⏳ *Hold|📋 *Todo|✔️ *Done)/.exec(line);
-      if (m !== null && m[1] !== undefined) return m[1].replace(/\s+/g, " ").trim();
+      // Single-source marker extraction (FIX-300): canonical + legacy aliases.
+      const marker = findStatusMarker(line);
+      if (marker !== undefined) return marker;
     }
   }
   return undefined;

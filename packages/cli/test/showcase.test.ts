@@ -333,4 +333,30 @@ describe("resetSandbox — already-Todo is a benign success, not a failure (FIX-
     const r = resetSandbox(sandbox, "US-DEMO-001");
     expect(r.ok).toBe(false);
   });
+
+  // FIX-300: status markers are single-source. The reset must recognize BOTH the
+  // canonical 🚫 Hold (which the old divergent regex was blind to → "no status
+  // token") AND the legacy markers, flipping each to canonical 📋 Todo.
+  it("recognizes the canonical 🚫 Hold marker the old divergent reset missed", () => {
+    const sandbox = sandboxWithBacklog("| US-DEMO-001 | demo | 🚫 Hold (parked) |\n");
+    const r = resetSandbox(sandbox, "US-DEMO-001");
+    expect(r.ok).toBe(true);
+    expect(r.reset).toBe(true);
+    expect(r.notes.join(" ")).not.toContain("no status token");
+    const after = readFileSync(join(sandbox, ".roll", "backlog.md"), "utf8");
+    expect(after).toContain("📋 Todo");
+    expect(after).not.toContain("🚫 Hold");
+  });
+
+  it("tolerates legacy markers (🚧 WIP / 🔄 In Progress / ⏳ Hold / ✔️ Done) → 📋 Todo", () => {
+    for (const legacy of ["🚧 WIP", "🔄 In Progress", "⏳ Hold", "✔️ Done"]) {
+      const sandbox = sandboxWithBacklog(`| US-DEMO-001 | demo | ${legacy} |\n`);
+      const r = resetSandbox(sandbox, "US-DEMO-001");
+      expect(r.ok, legacy).toBe(true);
+      expect(r.reset, legacy).toBe(true);
+      const after = readFileSync(join(sandbox, ".roll", "backlog.md"), "utf8");
+      expect(after, legacy).toContain("📋 Todo");
+      expect(after, legacy).not.toContain(legacy);
+    }
+  });
 });

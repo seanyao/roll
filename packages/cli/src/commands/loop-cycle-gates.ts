@@ -19,7 +19,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { agentCommand } from "./agent.js";
 
 function lang(): Lang {
@@ -129,12 +129,15 @@ function realEnforceTcrDeps(): EnforceTcrDeps {
   };
 }
 
-/** Revert a story's `✅ Done` cell to `📋 Todo` (matched by `[<id>]`). */
+/** Revert a story's `✅ Done` cell to `📋 Todo` (matched by `[<id>]`). Markers come
+ *  from the single source (@roll/spec) so the gate can never drift (FIX-300). */
 export function revertStoryDone(content: string, storyId: string): string {
   return content
     .split("\n")
     .map((line) =>
-      line.includes(`[${storyId}]`) ? line.replace(" | ✅ Done |", " | 📋 Todo |") : line,
+      line.includes(`[${storyId}]`)
+        ? line.replace(` | ${STATUS_MARKER.done} |`, ` | ${STATUS_MARKER.todo} |`)
+        : line,
     )
     .join("\n");
 }

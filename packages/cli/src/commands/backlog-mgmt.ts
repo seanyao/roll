@@ -16,7 +16,7 @@ import {
   lintIdeaDescription,
   reconcileStuckBacklog,
 } from "@roll/core";
-import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { projectSlug, sharedRoot } from "./dashboard.js";
@@ -41,7 +41,13 @@ function errLine(line: string): void {
   process.stderr.write(line + "\n");
 }
 
-/** New status string for a set-status subcommand (mirrors the bash case). */
+/**
+ * New status string for a set-status subcommand (mirrors the bash case).
+ * `block`/`defer` keep their distinct surface markers (`🔒 Blocked` / `⏸ Deferred`,
+ * both legacy hold aliases that `classifyStatus` folds to `hold`) so the renderer
+ * can still tell a blocked row from a deferred one; unblock/promote return the
+ * canonical Todo marker from the single source (FIX-300).
+ */
 export function statusFor(subcmd: string, reason: string): string | null {
   switch (subcmd) {
     case "block":
@@ -50,7 +56,7 @@ export function statusFor(subcmd: string, reason: string): string | null {
       return `⏸ Deferred${reason ? ` [${reason}]` : ""}`;
     case "unblock":
     case "promote":
-      return "📋 Todo";
+      return STATUS_MARKER.todo;
     default:
       return null;
   }

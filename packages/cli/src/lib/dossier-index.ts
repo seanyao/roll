@@ -10,7 +10,7 @@
  * Self-contained single file: chrome script + dossier filter script only.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
-import { type DeliveryLadder, type StoryEvidenceFlags } from "@roll/spec";
+import { STATUS_MARKER, type DeliveryLadder, type StoryEvidenceFlags } from "@roll/spec";
 import { type DossierEpic } from "./archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "./dossier-css.js";
 
@@ -29,6 +29,12 @@ export const SPINE_STAGES = [
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** The leading display glyph of a canonical {@link STATUS_MARKER} token (FIX-300).
+ *  The dossier shows only the icon (the EN/ZH label is rendered separately), so it
+ *  sources the glyph from the ONE marker set rather than hardcoding its own — e.g.
+ *  Hold is the canonical 🚫, never the legacy lock 🔒. */
+const markerGlyph = (marker: string): string => marker.split(" ")[0] ?? marker;
 
 /**
  * US-DOSSIER-025 — the claimed→merged→attested ladder's visual identity for the
@@ -467,9 +473,9 @@ function overview(epics: DossierEpic[]): string {
     card("claimed", "△", "Claimed", "仅声称") +
     card("fail", "!", "Drift", "漂移") +
     card("unknown", "?", "Unknown", "未知") +
-    card("wip", "🔨", "In progress", "进行中") +
-    card("todo", "📋", "Todo", "待办") +
-    card("hold", "🔒", "Hold", "挂起") +
+    card("wip", markerGlyph(STATUS_MARKER.in_progress), "In progress", "进行中") +
+    card("todo", markerGlyph(STATUS_MARKER.todo), "Todo", "待办") +
+    card("hold", markerGlyph(STATUS_MARKER.hold), "Hold", "挂起") +
     `</div>` +
     `<div class="spectrum-wrap">` +
     spectrum(t, "spectrum") +
@@ -496,9 +502,9 @@ function toolbarFilter(): string {
     chip("claimed", "△", "Claimed", "仅声称") +
     chip("fail", "!", "Drift", "漂移") +
     chip("unknown", "?", "Unknown", "未知") +
-    chip("wip", "🔨", "WIP", "进行") +
-    chip("todo", "📋", "Todo", "待办") +
-    chip("hold", "🔒", "Hold", "挂起") +
+    chip("wip", markerGlyph(STATUS_MARKER.in_progress), "WIP", "进行") +
+    chip("todo", markerGlyph(STATUS_MARKER.todo), "Todo", "待办") +
+    chip("hold", markerGlyph(STATUS_MARKER.hold), "Hold", "挂起") +
     `</div></div>\n`
   );
 }

@@ -12,6 +12,7 @@
  * Pure functions only (no I/O) so they unit-test without files; the adapter in
  * packages/cli wires them to `BacklogStore`.
  */
+import { STATUS_MARKER } from "@roll/spec";
 import type { BacklogItem } from "./store.js";
 
 /** Classification of a captured line: a defect or a forward-looking idea. */
@@ -212,7 +213,7 @@ export function appendIdea(
   kind: IdeaKind,
   desc: string,
 ): AppendResult {
-  const row = `| ${id} | ${desc} | 📋 Todo |`;
+  const row = `| ${id} | ${desc} | ${STATUS_MARKER.todo} |`;
   const heading = IDEA_SECTIONS[kind];
   const lines = content.split("\n");
   const matcher = sectionMatcher(kind);

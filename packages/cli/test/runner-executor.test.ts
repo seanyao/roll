@@ -1210,52 +1210,54 @@ describe("executeCommand — command → executor mapping", () => {
     expect(events.some((e) => e.type === "peer:gate" && e.verdict === "consulted")).toBe(true);
   });
 
-  it("FIX-293 follow-up: single-agent-type env → same-type SEPARATE-SESSION retry produces evidence, NOT blocked (agentExit 0)", async () => {
-    // The owner fix for #711's over-blocking: with ONLY the working agent's type
-    // installed (no heterogeneous peer), the retry falls back to a fresh instance
-    // of that same type. agentSpawn is a distinct subprocess (separate session,
-    // never the builder's own), so a parseable verdict writes evidence → the gate
-    // re-runs `consulted` and the cycle is NOT blocked.
+  it("FIX-312: single-agent / single-vendor env → self-review is an ALLOWED recorded fallback, NOT blocked (agentExit 0)", async () => {
+    // FIX-312 supersedes the FIX-293 same-type-retry workaround for #711's
+    // over-blocking. With NO heterogeneous (different-vendor) peer available
+    // (heteroAvailable=false), self-review is the OWNER-ALLOWED fallback: the gate
+    // records a `self-review-allowed` peer:gate event with a reason and NEVER
+    // blocks. The self path is preserved for future single-agent users, not
+    // removed. No forced retry spawn is needed when hetero is genuinely impossible.
     const wt = highComplexityWorktree();
-    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-same-")));
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-312-self-")));
     execDirs.push(rt);
     const base = fakePorts();
-    const spawnedAgents: string[] = [];
     const { ports, calls } = fakePorts({
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
-      installedAgents: () => ["claude"], // ONLY the working agent's type — no heterogeneous peer
-      agentSpawn: vi.fn(async (agent: string) => {
-        spawnedAgents.push(agent);
-        return { stdout: "VERDICT: agree\n", stderr: "", exitCode: 0, timedOut: false };
-      }),
+      installedAgents: () => ["claude"], // ONLY the working agent's vendor — no heterogeneous peer
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
-    // NOT blocked — the same-type separate-session review produced evidence.
+    // NOT blocked — self-review is the recorded fallback when hetero is unavailable.
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
-    // The reviewer was spawned as a fresh claude process (a separate session).
-    expect(spawnedAgents).toContain("claude");
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
-    expect(events.some((e) => e.type === "peer:gate" && e.verdict === "consulted")).toBe(true);
-    // It did NOT degrade to a fail-loud none-available — a peer WAS consulted.
-    expect(events.some((e) => e.type === "pair:none-available")).toBe(false);
+    const gate = events.find((e) => e.type === "peer:gate");
+    expect(gate).toBeDefined();
+    expect((gate as { verdict: string }).verdict).toBe("self-review-allowed");
+    // The fallback is RECORDED (auditable alert), not silent.
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1] as string);
+    expect(alerts.some((m) => m.includes("self-review fallback"))).toBe(true);
   });
 
-  it("FIX-293 follow-up: single-agent-type env where the same-type retry yields no evidence → STILL blocked (agentExit 1)", async () => {
-    // Block now means "the separate-session review produced no evidence", not "no
-    // other agent installed". A failing same-type spawn (exit 1 → reviewPeer null)
-    // leaves no evidence → the cycle stays BLOCKED NOT-Done.
+  it("FIX-312: multi-vendor env + self-reviewed (no peer evidence) → VIOLATION, BLOCKED (agentExit 1)", async () => {
+    // The mirror of the case above: when a heterogeneous peer WAS available
+    // (heteroAvailable=true) but the cycle shipped with no peer evidence, that is
+    // a self-review VIOLATION. The gate blocks, re-attempts the consult once, and
+    // when that still yields no evidence the cycle ends NOT-Done with an
+    // escalation alert. (Reproduces the FIX-284 root cause: multi-vendor configured
+    // yet self-scored.)
     const wt = highComplexityWorktree();
-    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-same-blk-")));
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-312-violation-")));
     execDirs.push(rt);
     const base = fakePorts();
     const { ports, calls } = fakePorts({
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
-      installedAgents: () => ["claude"], // only the working type
-      agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false })), // spawn fails → no evidence
+      installedAgents: () => ["claude", "codex"], // codex is heterogeneous from claude → hetero IS available
+      agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false })), // retry spawn fails → no evidence
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
-    expect(ports.agentSpawn).toHaveBeenCalled(); // the same-type retry DID fire
+    expect(ports.agentSpawn).toHaveBeenCalled(); // the bounded retry DID fire
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "peer:gate" && e.verdict === "skipped")).toBe(true);
     const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1] as string);
     expect(alerts.some((m) => m.includes("peer gate (hard)") && m.includes("BLOCKED"))).toBe(true);
   });
@@ -1270,6 +1272,13 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports, calls } = fakePorts({
       repoCwd: wt, // policy.yaml is read from repoCwd
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      // FIX-312: pin a heterogeneous pool so heteroAvailable resolves deterministically
+      // (true) regardless of the real installed-agent env (local multi-vendor vs CI
+      // single-vendor). Without this the executor falls back to agentsInstalled(realAgentEnv())
+      // and the verdict flips "skipped"↔"self-review-allowed" by environment. This test's
+      // intent is the SOFT-mode contract: a gated delivery records "skipped" but does NOT
+      // block — which requires the gated (hetero-available) path.
+      installedAgents: () => ["claude", "codex"],
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });

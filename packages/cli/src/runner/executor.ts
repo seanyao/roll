@@ -33,6 +33,7 @@
 import {
   BacklogStore,
   agentsInstalled,
+  heteroAvailable,
   type CapturedFacts,
   type CycleCommand,
   type CycleContext,
@@ -903,24 +904,34 @@ export async function executeCommand(
       const peerGateMode = readPeerGateMode(ports.repoCwd);
       const runtimeDir = dirname(ports.paths.eventsPath);
       const cycleIdStr = ctx.cycleId ?? "";
+      // FIX-312: hetero-availability drives the gate (owner ruling: "hetero
+      // available → must use it; self only when hetero is truly impossible").
+      // Computed uniformly by vendor through the standard model (no per-agent
+      // special-casing): is there ≥1 installed agent of a DIFFERENT vendor than
+      // the builder? true ⇒ a self-reviewed substantive delivery is blocked;
+      // false ⇒ self-review is an allowed recorded fallback (single-agent setups).
+      const peerGateInstalled = ports.installedAgents?.() ?? agentsInstalled(realAgentEnv());
+      const peerGateWorker = ctx.agent ?? "claude";
+      const peerHeteroAvailable = heteroAvailable(peerGateInstalled, peerGateWorker);
       const peerGateSinks = {
         alert: (m: string) => ports.events.appendAlert(ports.paths.alertsPath, m),
         event: (p: { cycleId: string; verdict: string; reasons: string[] }) =>
           ports.events.appendEvent(ports.paths.eventsPath, {
             type: "peer:gate",
             cycleId: p.cycleId,
-            verdict: p.verdict as "consulted" | "skipped",
+            verdict: p.verdict as "consulted" | "skipped" | "self-review-allowed",
             reasons: p.reasons,
             ts: ports.clock(),
           }),
       };
-      let peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks);
+      const peerGateOpts = { heteroAvailable: peerHeteroAvailable };
+      let peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
       let peerBlocked = peerGate.blocked;
       if (peerGate.blocked) {
         // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
         const retry = await retryPeerConsult(ports.paths.worktreePath, runtimeDir, cycleIdStr, {
-          installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
-          workingAgent: ctx.agent ?? "claude",
+          installed: peerGateInstalled,
+          workingAgent: peerGateWorker,
           reviewPeer,
           diff: cycleDiff,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
@@ -928,7 +939,7 @@ export async function executeCommand(
         });
         if (retry.status === "reviewed" && peerEvidencePresent(runtimeDir, cycleIdStr)) {
           // Retry produced evidence → re-run the gate; it now sees `consulted`.
-          peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks);
+          peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
           peerBlocked = peerGate.blocked;
         }
         if (peerBlocked) {

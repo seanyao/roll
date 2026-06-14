@@ -111,3 +111,40 @@ describe("pickStory — open-PR skip (injected predicate, FIX-141)", () => {
     expect(pickStory([item("US-1", TODO)])?.id).toBe("US-1");
   });
 });
+
+describe("pickStory — annotated Todo gate is tolerant (FIX-301)", () => {
+  it("picks an annotated Todo (marker + parenthetical text), not just a bare marker", () => {
+    // FIX-284/285 carried `📋 Todo (...)`; an exact `=== "📋 Todo"` check dropped
+    // them and idled the loop. The classifier recognizes the Todo marker regardless.
+    expect(pickStory([item("FIX-1", "📋 Todo (rebased onto main)")])?.id).toBe("FIX-1");
+  });
+
+  it("still picks a bare Todo marker", () => {
+    expect(pickStory([item("FIX-1", TODO)])?.id).toBe("FIX-1");
+  });
+
+  it("does not pick a non-Todo even when annotated", () => {
+    expect(pickStory([item("FIX-1", "🚫 Hold (waiting on owner)")])).toBeUndefined();
+  });
+
+  it("when every Todo carries an annotation, still yields the first workable card", () => {
+    // Priority (FIX > US > REFACTOR) and file order survive: every row is an
+    // annotated Todo, so the first FIX in file order wins (the picker takes the
+    // first eligible row top-to-bottom, not the lowest-numbered id).
+    const items = [
+      item("REFACTOR-1", "📋 Todo (low priority)"),
+      item("US-1", "📋 Todo (needs design)"),
+      item("FIX-2", "📋 Todo (cleanup)"),
+      item("FIX-1", "📋 Todo (urgent)"),
+    ];
+    expect(pickStory(items)?.id).toBe("FIX-2");
+  });
+
+  it("an annotated Todo whose dep is Done is still gated by depends-on", () => {
+    const items = [
+      item("US-A", "✅ Done"),
+      item("US-X", "📋 Todo (blocked earlier)", "x `depends-on:US-A`"),
+    ];
+    expect(pickStory(items)?.id).toBe("US-X");
+  });
+});

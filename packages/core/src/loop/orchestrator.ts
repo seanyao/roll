@@ -454,6 +454,12 @@ export interface CycleContext {
   /** US-TRUTH-001: the cycle's published PR url, patched by the publish_pr
    *  executor — feeds the terminal event's pr fact. Absent ⇒ no publish. */
   prUrl?: string;
+  /** FIX-304: the story's backlog status captured at pick time, BEFORE this
+   *  cycle flipped it to 🔨 In Progress. The terminal uses it to UNDO a
+   *  PREMATURE ✅ Done the agent wrote (via the symlinked .roll backlog) when
+   *  the cycle did NOT merge — done ≡ merged. Absent ⇒ status unread at pick
+   *  (no revert target; the terminal leaves the row untouched). */
+  preCycleStatus?: string;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

@@ -640,6 +640,68 @@ describe("FIX-211 — Done ≡ merged: no publish-time 抢跑 on the gitignored 
   });
 });
 
+describe("FIX-304 — enforce done ≡ merged: a non-merged cycle leaves no premature Done", () => {
+  // The live bug (FIX-284 / FIX-285): the roll-build skill tells the agent to
+  // mark its card ✅ Done in .roll/backlog.md, which FIX-204C symlinks into the
+  // cycle worktree — so the agent's flip lands in the REAL backlog. If the
+  // cycle does NOT merge, that premature Done persists with NO commit on main.
+  // A shim agent that flips Done (through the worktree's symlinked .roll, like
+  // the real agent) reproduces it; the terminal must revert the false-Done.
+
+  /** A shim that delivers (commits) AND prematurely flips the backlog ✅ Done
+   *  via the worktree's symlinked .roll — exactly the roll-build instruction. */
+  const shimFlipsDone: AgentSpawn = async (agent, opts) => {
+    const res = await shimAgentTcr(agent, opts);
+    const wtBacklog = join(opts.cwd, ".roll", "backlog.md");
+    writeFileSync(wtBacklog, readFileSync(wtBacklog, "utf8").replace("🔨 In Progress", "✅ Done"), "utf8");
+    return res;
+  };
+
+  it("a published-but-OPEN cycle whose agent pre-flipped ✅ Done is reverted to 📋 Todo (no false-Done)", async () => {
+    const { repo } = makeGitignoredFixture("fix304-open");
+    const rt = tmp("fix304-open-rt");
+    const cycleId = "20260606-052000-5301";
+    const p = paths(rt, cycleId);
+    const backlogPath = join(repo, ".roll", "backlog.md");
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    // PR opened (status 0) but still OPEN — not merged. The agent already
+    // flipped the symlinked backlog ✅ Done; the terminal must undo it.
+    const ports: Ports = { ...base, agentSpawn: shimFlipsDone, github: fakeGithub(0, "OPEN") };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("published");
+    const backlog = readFileSync(backlogPath, "utf8");
+    // done ≡ merged: an unmerged delivery is never Done. The premature flip is
+    // reverted to the pre-cycle status (Todo), re-pickable until the PR merges.
+    expect(backlog).not.toContain("✅ Done");
+    expect(backlog).toContain("📋 Todo");
+  });
+
+  it("a MERGED cycle whose agent flipped ✅ Done KEEPS Done (true delivery)", async () => {
+    const { repo } = makeGitignoredFixture("fix304-merged");
+    const rt = tmp("fix304-merged-rt");
+    const cycleId = "20260606-052000-5303";
+    const p = paths(rt, cycleId);
+    const backlogPath = join(repo, ".roll", "backlog.md");
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = { ...base, agentSpawn: shimFlipsDone, github: fakeGithub(0, "MERGED") };
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("published");
+    const backlog = readFileSync(backlogPath, "utf8");
+    expect(backlog).toContain("✅ Done"); // merged → Done is the truth
+    expect(backlog).not.toContain("🔨 In Progress");
+  });
+});
+
 describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a stuck 🔨", () => {
   // The async case from the card: a PRIOR cycle published US-PRIOR (rests at 🔨
   // + open PR), the dedicated PR loop merged it between cycles. The NEXT cycle's

@@ -36,7 +36,7 @@ import {
   watchdogVerdict,
 } from "@roll/core";
 import { CYCLE_TIMEOUT_SEC } from "@roll/core";
-import { type Ports, type ProcessClock, executeCommand, buildRunRow } from "./executor.js";
+import { type Ports, type ProcessClock, executeCommand, buildRunRow, revertPrematureDone } from "./executor.js";
 
 /** Inputs for one cycle run. */
 export interface RunCycleOptions {
@@ -176,6 +176,15 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
           { storyId: liveCtx.storyId ?? "", cycleId: liveCtx.cycleId },
           buildRunRow(fakeAppend, liveCtx),
         );
+        // FIX-304: this aborted fallback never reached the executor's append_run,
+        // so undo a premature ✅ Done HERE too. An aborted cycle did NOT merge —
+        // if the agent had already flipped the claimed story Done in the
+        // symlinked .roll backlog (FIX-204C), the false-Done would otherwise
+        // persist (the next preflight reconcile only inspects 🔨 claims). Revert
+        // it to the pre-cycle status so done ≡ merged holds on every exit path.
+        if ((liveCtx.storyId ?? "") !== "") {
+          revertPrematureDone(ports, liveCtx.storyId ?? "", liveCtx.preCycleStatus);
+        }
       } catch {
         /* best-effort terminal write; never mask the original failure */
       }

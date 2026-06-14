@@ -24,6 +24,7 @@ import {
   executeCommand,
   parseEstMin,
   realAgentSpawn,
+  revertPrematureDone,
   withPtyWrap,
 } from "../src/runner/index.js";
 
@@ -1402,6 +1403,113 @@ describe("executeCommand — command → executor mapping", () => {
     );
     const flips = markStatus.mock.calls.filter((c) => c[2] === "✅ Done");
     expect(flips).toHaveLength(0);
+  });
+
+  // ── FIX-304: enforce done ≡ merged — a cycle that did NOT merge must NOT
+  // leave a PREMATURE ✅ Done. The roll-build skill tells the agent to flip its
+  // card Done in the symlinked .roll backlog (FIX-204C); a non-merged terminal
+  // (failed cycle, or a `done`/`published` whose PR never merged) reverts that
+  // false-Done to the pre-cycle status captured at pick time. ────────────────
+  it("FIX-304: pick_story captures the story's pre-cycle status into ctxPatch", async () => {
+    const has = fakePorts(); // default row is 📋 Todo
+    const r = await executeCommand({ kind: "pick_story" }, has.ports, CTX);
+    expect(r.ctxPatch?.preCycleStatus).toBe("📋 Todo");
+  });
+
+  // The aborted-fallback path (run-cycle.ts finally) calls this helper directly
+  // rather than the executor's append_run, so cover it in isolation.
+  it("FIX-304: revertPrematureDone flips a ✅ Done row back to the pre-cycle status", () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
+    });
+    revertPrematureDone(ports, "US-RUN-001", "📋 Todo");
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+  });
+
+  it("FIX-304: revertPrematureDone leaves a 🔨 In Progress row untouched (not a premature flip)", () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+    });
+    revertPrematureDone(ports, "US-RUN-001", "📋 Todo");
+    expect(markStatus).not.toHaveBeenCalled();
+  });
+
+  it("FIX-304: a `done` terminal whose PR did NOT merge reverts the agent's premature ✅ Done to the pre-cycle status", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      // The agent already flipped the row ✅ Done inside the worktree (symlinked .roll).
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "OPEN") },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, preCycleStatus: "📋 Todo" },
+    );
+    // No false-Done left behind; the row is reverted to its pre-cycle Todo.
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+  });
+
+  it("FIX-304: a FAILED terminal reverts the agent's premature ✅ Done (the FIX-284/FIX-285 false-Done)", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, preCycleStatus: "📋 Todo" },
+    );
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+  });
+
+  it("FIX-304: a genuinely MERGED `done` terminal KEEPS ✅ Done (no revert)", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "MERGED") },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, preCycleStatus: "📋 Todo" },
+    );
+    // Merged → Done is true; it is (re)affirmed, never reverted to Todo.
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+  });
+
+  it("FIX-304: a non-merged `done` row that already rests at 🔨 (no premature flip) is left untouched", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "OPEN") },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, preCycleStatus: "📋 Todo" },
+    );
+    // Delivered-pending-merge legitimately rests at 🔨 — never force it to Todo.
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+  });
+
+  it("FIX-304: a premature ✅ Done with no captured pre-cycle status falls back to 📋 Todo (re-pickable, never falsely Done)", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "blocked", outcome: "blocked", cycleId: CTX.cycleId },
+      ports,
+      CTX, // no preCycleStatus captured
+    );
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
   });
 
   it("release_lock reports lockReleased", async () => {

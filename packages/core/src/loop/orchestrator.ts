@@ -3,7 +3,7 @@
  *
  * This is the COMPOSITION card: nearly every building block already exists as a
  * pure module (backlog/picker, agent/router, delivery/{pr,tcr}, reconcile/engine,
- * cost/budget, events/bus, loop/recovery). This module is the conductor — a PURE
+ * events/bus, loop/recovery). This module is the conductor — a PURE
  * state machine that walks the {@link CyclePhase} ladder, deciding at each step
  * WHICH building-block command to run next and WHAT terminal {@link TerminalOutcome}
  * the cycle lands on. It NEVER spawns a process, sleeps, or reads a clock; every
@@ -86,14 +86,15 @@
  * Exhaustion → `failed` (NEVER agent-swap — I6). The timeout breach short-circuits
  * the retry loop (bin/roll:9066 `break`), so a timed-out attempt is NOT retried.
  *
- * ── Budget gate insertion point (I11) ─────────────────────────────────────────
- * v2 has NO cost gate in the runner. The v3 budget guardrail (cost/budget.ts
- * {@link budgetVerdict}) is wired at the route→execute boundary: after the route
- * is resolved but BEFORE the agent spawns, the caller may consult the ledger and,
- * on `downgrade`/`pause_and_notify`, emit the documented commands. {@link
- * budgetGateCommands} renders that insertion WITHOUT altering the oracle SEQUENCE
- * (when the verdict is `ok`, zero commands are emitted, so parity with v2 is
- * preserved). This is documented NEW-v3 behaviour layered cleanly per I11.
+ * ── No cost gate (budget control removed) ─────────────────────────────────────
+ * v2 had NO cost gate in the runner, and v3 no longer adds one: the dollar
+ * ceiling was a lagging, gameable proxy for "this run is wasting resources".
+ * route_resolved now transitions straight to the agent spawn. Runaway-spend
+ * protection moved to the DIRECT progress guardrails in loop-go.ts (the
+ * per-cycle productivity floor + the cross-session dead-loop breaker), which
+ * stop the loop on NO PROGRESS — earlier and deterministically. Per-cycle
+ * token/cost is still fully RECORDED (cost/tracker.ts → runs.jsonl); only the
+ * CONTROL was removed, not the observability.
  *
  * Purity: no spawn, no sleep, no clock, no fs. The stepper is a referentially
  * transparent `(state, event) → { state, commands }`. Callers thread the returned
@@ -121,7 +122,7 @@ import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
  *               (bin/roll:8756).
  *   - blocked : hard-timeout breach (bin/roll:8679).
  */
-export type V2CycleStatus = "idle" | "built" | "done" | "published" | "orphan" | "failed" | "aborted" | "blocked";
+export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" | "orphan" | "failed" | "aborted" | "blocked";
 
 /**
  * Bridge v2's runs.jsonl status onto the closed {@link TerminalOutcome}
@@ -144,6 +145,11 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       return "published_pending_merge";
     case "idle":
       return "idle_no_work";
+    case "gave_up":
+      // Hook 1: an agent EXECUTED but produced nothing — a failed-class terminal,
+      // NOT a silent idle. Distinct outcome so the dashboard/ledger and the
+      // dead-loop breaker can tell a give-up from a genuine no-op.
+      return "gave_up";
     case "orphan":
       return "aborted_with_delivery";
     case "failed":
@@ -161,6 +167,15 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
 export interface CapturedFacts {
   /** Worktree isolation succeeded (`_USE_WORKTREE=1`). */
   usedWorktree: boolean;
+  /**
+   * Hook 1 (productivity floor): did an agent actually EXECUTE this cycle? True
+   * when the agent slot was non-empty AND its spend/duration was above a tiny
+   * no-op epsilon (the executor reuses the `rowSpentZeroNoExecution` semantics).
+   * Distinguishes a `gave_up` (agent ran, 0 output) from a genuine no-op idle.
+   * Absent ⇒ treated as "executed" for back-compat with the v2 accept path
+   * (capture is only reached after an agent spawn, so a captured cycle ran one).
+   */
+  agentExecuted?: boolean;
   /** Agent process exit code (0 = clean). bin/roll:9063 `_exit`. */
   agentExit: number;
   /** Watchdog fired this cycle (`_CYCLE_TIMED_OUT=1`). bin/roll:9074. */
@@ -181,7 +196,11 @@ export interface CapturedFacts {
  *   - timed out                       → blocked (the watchdog path owns teardown).
  *   - worktree-setup failed           → failed (bin/roll:9000-9007).
  *   - agent exit ≠ 0                  → failed (bin/roll:9132-9133).
- *   - exit 0, commitsAhead === 0 and local main not ahead → idle (bin/roll:9180).
+ *   - exit 0, commitsAhead === 0 and local main not ahead:
+ *       · an agent EXECUTED (Hook 1 productivity floor) → gave_up (failed-class,
+ *         alerted on cycle 1 — an agent that burned tokens/time but produced
+ *         nothing is NOT a silent idle).
+ *       · no agent executed (genuine no_story/no-op $0) → idle (bin/roll:9180).
  *   - exit 0, commitsAhead > 0        → built (bin/roll:9141-9142; refined by the
  *                                       publish ladder to done/orphan/failed).
  * Returns the status BEFORE the publish ladder runs; {@link classifyPublish}
@@ -200,7 +219,13 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
     return "failed";
   }
   if (facts.commitsAhead === 0 && (facts.mainAhead ?? 0) > 0) return "failed";
-  if (facts.commitsAhead === 0) return "idle";
+  if (facts.commitsAhead === 0) {
+    // Hook 1 (productivity floor): split the commit-count-only idle. An agent
+    // that EXECUTED but left 0 commits and no delivery gave_up (a failed-class
+    // terminal); a cycle where no agent ran is a genuine idle no-op. `undefined`
+    // ⇒ executed (back-compat: capture is only reached after an agent spawn).
+    return facts.agentExecuted === false ? "idle" : "gave_up";
+  }
   return "built";
 }
 
@@ -365,37 +390,6 @@ export function backoffSchedule(
   return out;
 }
 
-// ── Budget gate insertion (I11, NEW v3; cost/budget.ts wiring point) ──────────
-
-/** The budget verdict action the gate consumes (cost/budget.ts BudgetVerdict). */
-export type BudgetGateAction = "ok" | "downgrade" | "pause_and_notify";
-
-/**
- * Render the commands for the budget gate at the route→execute boundary (I11).
- * v2 has NO cost gate, so when the verdict is `ok` this emits ZERO commands and
- * the oracle SEQUENCE is preserved exactly. NEW-v3 behaviour:
- *   - downgrade        → emit a policy:flag-style downgrade signal (soft landing;
- *     the caller may re-route to a cheaper model — advisory, no auto-mutation).
- *   - pause_and_notify → emit policy:safety_pause + alert:notify and STOP the
- *     cycle before spawning the agent (fail-loud, fail-closed).
- * The gate gates on EFFECTIVE cost (budget.ts already enforces I11); this only
- * translates the verdict into ordered commands.
- */
-export function budgetGateCommands(
-  action: BudgetGateAction,
-  ctx: { loop: string; reason: string },
-): CycleCommand[] {
-  if (action === "ok") return [];
-  if (action === "downgrade") {
-    return [{ kind: "budget_downgrade", reason: ctx.reason }];
-  }
-  return [
-    { kind: "emit_event", event: { type: "policy:safety_pause", loop: ctx.loop as never, reason: ctx.reason, ts: 0 } },
-    { kind: "emit_event", event: { type: "alert:notify", channel: "budget", message: ctx.reason, ts: 0 } },
-    { kind: "halt_cycle", reason: ctx.reason },
-  ];
-}
-
 // ── Cycle commands (the language the stepper emits) ───────────────────────────
 
 /**
@@ -409,9 +403,6 @@ export type CycleCommand =
   | { kind: "create_worktree"; branch: string } // infra/git _worktree_create.
   | { kind: "pick_story" } // backlog/picker pickStory.
   | { kind: "resolve_route"; storyId: string } // agent/router resolveRoute+Fallback.
-  | { kind: "budget_check"; storyId: string } // cost/budget budgetVerdict (I11).
-  | { kind: "budget_downgrade"; reason: string }
-  | { kind: "halt_cycle"; reason: string }
   | { kind: "spawn_agent"; agent: AgentId; attempt: number } // execute (TCR inside).
   | { kind: "kill_agent"; graceSec: number } // watchdog teardown.
   | { kind: "sleep_backoff"; seconds: number } // retry backoff (adapter sleeps).
@@ -504,8 +495,6 @@ export type CycleEvent =
   | { type: "story_picked"; storyId: string }
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
   | { type: "route_resolved"; agent: AgentId; model: ModelId }
-  | { type: "budget_ok" }
-  | { type: "budget_halt"; reason: string } // I11 breach → blocked-class halt.
   | { type: "agent_exited"; exit: number; timedOut: boolean }
   | { type: "facts_captured"; facts: CapturedFacts }
   | { type: "published"; result: PublishResult }
@@ -532,8 +521,6 @@ const EVENT_VALID_PHASES: Record<Exclude<CycleEvent["type"], "start">, CyclePhas
   story_picked: ["pick"],
   no_story: ["pick"],
   route_resolved: ["route"],
-  budget_ok: ["route"],
-  budget_halt: ["route"],
   agent_exited: ["execute"],
   facts_captured: ["reconcile"],
   published: ["publish"],
@@ -620,7 +607,11 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
   if (event.type !== "start") {
     if (state.done) return { state, commands: [] };
     const valid = EVENT_VALID_PHASES[event.type];
-    if (!valid.includes(state.phase)) return { state, commands: [] };
+    // An unknown event type (e.g. a now-removed transition like the retired
+    // `budget_ok`/`budget_check` replayed from a pre-upgrade persisted stream)
+    // has no phase entry — treat it as inert, exactly like a stale/out-of-phase
+    // event, rather than crashing the resumable replay.
+    if (valid === undefined || !valid.includes(state.phase)) return { state, commands: [] };
     // Disambiguate the two `pick`-phase events: `preflight_done` only PRE-worktree,
     // `story_picked`/`no_story` only POST-worktree (the pick runs inside it).
     if (event.type === "preflight_done" && state.worktreeReady === true) return { state, commands: [] };
@@ -673,27 +664,18 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       };
 
     case "route_resolved":
+      // The cost/budget gate is REMOVED — the loop no longer stops on a dollar
+      // ceiling. Route resolves straight into the agent spawn (the progress
+      // guardrails in loop-go now own runaway-spend protection).
       return {
         state: {
           ...state,
-          phase: "route",
+          phase: "execute",
+          attempt: 1,
           ctx: { ...state.ctx, agent: event.agent, model: event.model },
         },
-        // I11 insertion point: gate on budget BEFORE spawning the agent.
-        commands: [{ kind: "budget_check", storyId: state.ctx.storyId ?? "" }],
+        commands: [{ kind: "spawn_agent", agent: event.agent, attempt: 1 }],
       };
-
-    case "budget_ok":
-      return {
-        state: { ...state, phase: "execute", attempt: 1 },
-        commands: [{ kind: "spawn_agent", agent: state.ctx.agent ?? "", attempt: 1 }],
-      };
-
-    case "budget_halt":
-      // I11 breach (fail-loud): no agent spawn; cycle ends blocked-class.
-      return terminate({ ...state, phase: "execute" }, "blocked", [
-        { kind: "halt_cycle", reason: event.reason },
-      ]);
 
     case "agent_exited": {
       const plan = retryPlan({ attempt: state.attempt, exit: event.exit, timedOut: event.timedOut });
@@ -741,6 +723,17 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         const extra: CycleCommand[] =
           status === "idle" || status === "published"
             ? [{ kind: "cleanup_worktree", branch: state.ctx.branch }]
+            : status === "gave_up"
+              ? // Hook 1: an agent ran but produced nothing — clean the (empty)
+                // worktree AND ALERT on the FIRST occurrence (no 2-hit streak).
+                // failed-class, so the terminal runs revertPrematureDone.
+                [
+                  { kind: "cleanup_worktree", branch: state.ctx.branch },
+                  {
+                    kind: "append_alert",
+                    message: `cycle ${state.ctx.cycleId}: agent executed but produced 0 commits and no delivery — gave_up (productivity floor); story left re-pickable, spec truth reset`,
+                  },
+                ]
             : status === "failed" && (event.facts.mainAhead ?? 0) > 0
               ? [
                   {

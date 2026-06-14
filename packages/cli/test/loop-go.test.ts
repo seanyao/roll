@@ -99,11 +99,14 @@ describe("US-GOAL-002 — roll loop go", () => {
     const r = await capture(() => loopGoCommand(["--help"], completeGoalDeps(p)));
     expect(r.code).toBe(0);
     expect(r.out).toContain("Usage: roll loop go");
-    expect(r.out).toContain("--budget <usd>");
     expect(r.out).toContain("--for <duration>");
-    expect(r.out).toContain("--usage-threshold <ratio>");
-    expect(r.out).toContain("--no-wait");
-    expect(r.out).toContain("Safety gates");
+    expect(r.out).toContain("--max-cycles <n>");
+    // The cost/usage CONTROL flags are gone — the loop stops on NO PROGRESS.
+    expect(r.out).not.toContain("--budget");
+    expect(r.out).not.toContain("--usage-threshold");
+    expect(r.out).not.toContain("--no-wait");
+    expect(r.out).toContain("Progress guardrails");
+    expect(r.out).toContain("dead-loop breaker");
     expect(r.out).toContain("--review <mode>");
     expect(r.out).toContain("hetero");
     expect(r.out).toContain("goal:final_review SKIPPED");
@@ -111,12 +114,9 @@ describe("US-GOAL-002 — roll loop go", () => {
     expect(r.err).toBe("");
   });
 
-  it("fails loud for invalid safety gate option values before starting a session", async () => {
+  it("fails loud for an invalid --for duration before starting a session", async () => {
     const cases: Array<{ args: string[]; message: string }> = [
-      { args: ["--worker", "--budget", "abc"], message: "--budget must be a non-negative number" },
-      { args: ["--worker", "--budget="], message: "--budget must be a non-negative number" },
       { args: ["--worker", "--for", "never"], message: "--for must be a duration" },
-      { args: ["--worker", "--usage-threshold", "2"], message: "--usage-threshold must be a ratio between 0 and 1" },
     ];
 
     for (const item of cases) {
@@ -410,7 +410,10 @@ describe("US-GOAL-004 — no-progress suppression", () => {
     expect(events.some((e) => e.type === "goal:state" && e.to === "paused" && e.reason === "no_progress_on_all_cards")).toBe(true);
     const alert = readFileSync(join(p, ".roll", "loop", "ALERT-proj-abc123.md"), "utf8");
     expect(alert).toContain("REFACTOR-048");
-    expect(alert).toContain("zero delivery");
+    // Hook 2: the first no-progress cycle is alerted immediately (no 2-hit
+    // silence) and the card-skip on the streak threshold is a distinct ALERT.
+    expect(alert).toContain("no progress");
+    expect(alert).toContain("skipped (no-progress streak)");
   });
 
   it("passes only unskipped scoped cards to run-once after a card is skipped", async () => {
@@ -458,277 +461,7 @@ describe("US-GOAL-004 — no-progress suppression", () => {
   });
 });
 
-describe("US-GOAL-005 — goal safety gates", () => {
-  it("--budget moves the goal to budget_limited and records the actual cost reading", async () => {
-    const p = project();
-    writeBacklog(p, [
-      "| [US-COST](.roll/features/goal-mode/US-COST/spec.md) | cost | 📋 Todo |",
-    ]);
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_500 + calls,
-      nowIso: () => `2026-06-11T11:00:0${calls}Z`,
-      hasTmux: () => false,
-      startTmux: () => false,
-      runOnce: async ({ projectPath }) => {
-        calls += 1;
-        writeFileSync(
-          join(projectPath, ".roll", "loop", "runs.jsonl"),
-          `${JSON.stringify({ story_id: "US-COST", cycle_id: "cycle-1", ts: "2026-06-11T11:00:01Z", cost_usd: 6, cost_effective_usd: 6, status: "failed" })}\n`,
-          { flag: "a" },
-        );
-        return 1;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-COST", "--budget", "5"], deps));
-
-    expect(r.code).toBe(0);
-    expect(calls).toBe(1);
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    expect(goal.status).toBe("budget_limited");
-    expect(goal.lastDecisionReason).toBe("budget_exceeded");
-    expect(goal.safety?.lastGate).toBe("budget");
-    expect(goal.safety?.lastReading).toContain("$6.00 / $5.00");
-    const event = readEvents(p).find((e) => e.type === "goal:gate_tripped" && e.gate === "budget");
-    expect(event).toMatchObject({ action: "budget_limited", reason: "budget_exceeded", reading: { costUsd: 6, budgetUsd: 5 } });
-  });
-
-  it("--budget treats missing usage_cost fields as unknown, not zero", async () => {
-    const p = project();
-    writeBacklog(p, [
-      "| [US-UNKNOWN](.roll/features/goal-mode/US-UNKNOWN/spec.md) | unknown | 📋 Todo |",
-    ]);
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_600 + calls,
-      nowIso: () => `2026-06-11T11:10:0${calls}Z`,
-      hasTmux: () => false,
-      startTmux: () => false,
-      runOnce: async ({ projectPath }) => {
-        calls += 1;
-        writeFileSync(
-          join(projectPath, ".roll", "loop", "runs.jsonl"),
-          `${JSON.stringify({ story_id: "US-UNKNOWN", cycle_id: "cycle-1", ts: "2026-06-11T11:10:01Z", status: "failed" })}\n`,
-          { flag: "a" },
-        );
-        return 1;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-UNKNOWN", "--budget", "10"], deps));
-
-    expect(r.code).toBe(0);
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    expect(goal.status).toBe("budget_limited");
-    expect(goal.usage.costUnknownRows).toBe(1);
-    expect(goal.lastDecisionReason).toBe("budget_unknown_cost");
-    const event = readEvents(p).find((e) => e.type === "goal:gate_tripped" && e.gate === "budget");
-    expect(event).toMatchObject({ reason: "budget_unknown_cost", reading: { unknownCostRows: 1, budgetUsd: 10 } });
-  });
-
-  it("--budget blocks an already over-budget resumed goal before starting another cycle", async () => {
-    const p = project();
-    writeFileSync(
-      join(p, ".roll", "loop", "goal.yaml"),
-      `schema: goal.v1
-scope:
-  kind: all
-review: auto
-budgetUsd: 5
-limits:
-status: active
-usage:
-  cycles: 2
-  costUsd: 6
-createdAt: 2026-06-11T11:15:00Z
-updatedAt: 2026-06-11T11:15:00Z
-`,
-    );
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_650,
-      nowIso: () => "2026-06-11T11:15:30Z",
-      hasTmux: () => false,
-      startTmux: () => false,
-      runOnce: async () => {
-        calls += 1;
-        return 0;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--budget", "5"], deps));
-
-    expect(r.code).toBe(0);
-    expect(calls).toBe(0);
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    expect(goal.status).toBe("budget_limited");
-    expect(goal.lastDecisionReason).toBe("budget_exceeded");
-    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "budget" && e.action === "budget_limited")).toBe(true);
-  });
-
-  it("FIX-279: a flagless go does not inherit a prior session's budget — budget is explicit per go", async () => {
-    const p = project();
-    // Stale goal from a prior session: $2 budget, capped at 1 cycle, already
-    // budget_limited with a leftover unknown-cost row. Today's flagless `go`
-    // must NOT inherit any of that — no --budget means no budget this run.
-    writeFileSync(
-      join(p, ".roll", "loop", "goal.yaml"),
-      `schema: goal.v1
-scope:
-  kind: epic
-  epic: US-CLI
-review: auto
-budgetUsd: 2
-limits:
-  maxCycles: 1
-status: budget_limited
-usage:
-  cycles: 1
-  costUsd: 0
-  costUnknownRows: 1
-createdAt: 2026-06-11T16:11:49Z
-updatedAt: 2026-06-12T00:00:00Z
-`,
-    );
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_650,
-      nowIso: () => "2026-06-13T06:31:30Z",
-      hasTmux: () => false,
-      startTmux: () => false,
-      runOnce: async () => {
-        calls += 1;
-        return 0;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--epic", "US-CLI"], deps));
-
-    expect(r.code).toBe(0);
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    // budget cleared (not inherited), and the stale maxCycles:1 cap dropped.
-    expect(goal.budgetUsd).toBeUndefined();
-    expect(goal.limits.maxCycles).toBeUndefined();
-    // no budget gate trip — the run is not bricked before doing any work.
-    expect(goal.lastDecisionReason).not.toBe("budget_unknown_cost");
-    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.action === "budget_limited")).toBe(false);
-  });
-
-  it("FIX-280: an idle_no_work cycle counts as a known $0 and does not trip budget_unknown_cost", async () => {
-    const p = project();
-    writeBacklog(p, [
-      "| [US-IDLE](.roll/features/goal-mode/US-IDLE/spec.md) | idle | 📋 Todo |",
-    ]);
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_700 + calls,
-      nowIso: () => `2026-06-13T07:00:0${calls}Z`,
-      hasTmux: () => false,
-      startTmux: () => false,
-      runOnce: async ({ projectPath }) => {
-        calls += 1;
-        // A poll that found no runnable work: no agent ran, no cost recorded.
-        writeFileSync(
-          join(projectPath, ".roll", "loop", "runs.jsonl"),
-          `${JSON.stringify({ story_id: "US-IDLE", cycle_id: "cycle-1", ts: "2026-06-13T07:00:01Z", agent: "", built: [], tcr_count: 0, status: "idle", outcome: "idle_no_work" })}\n`,
-          { flag: "a" },
-        );
-        return 0;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-IDLE", "--budget", "10", "--max-cycles", "1"], deps));
-
-    expect(r.code).toBe(0);
-    expect(calls).toBe(1);
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    // The idle cycle spent $0 (not unknown), so the budget gate never trips on
-    // unknown cost. The goal is capped by max-cycles, never budget-limited.
-    expect(goal.status).not.toBe("budget_limited");
-    expect(goal.usage.costUnknownRows ?? 0).toBe(0);
-    expect(goal.usage.costUsd).toBe(0);
-    expect(goal.lastDecisionReason).not.toBe("budget_unknown_cost");
-    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.reason === "budget_unknown_cost")).toBe(false);
-  });
-
-  it("FIX-280: a resumed goal with a stale idle-origin costUnknownRows recomputes to runnable even with a budget", async () => {
-    const p = project();
-    writeBacklog(p, [
-      "| [US-RESUME](.roll/features/goal-mode/US-RESUME/spec.md) | resume | 📋 Todo |",
-    ]);
-    // Live-bug shape: a prior session attributed an idle poll as an unknown-cost
-    // row and parked the goal at budget_limited. The runs ledger holds only that
-    // idle row — under the fixed snapshot it reads as a known $0, not unknown.
-    writeFileSync(
-      join(p, ".roll", "loop", "runs.jsonl"),
-      `${JSON.stringify({ story_id: "US-RESUME", cycle_id: "stale-idle", ts: "2026-06-13T06:31:44Z", agent: "", built: [], tcr_count: 0, status: "idle", outcome: "idle_no_work" })}\n`,
-    );
-    writeFileSync(
-      join(p, ".roll", "loop", "goal.yaml"),
-      `schema: goal.v1
-scope:
-  kind: cards
-  cards: [US-RESUME]
-review: auto
-budgetUsd: 5
-limits:
-status: budget_limited
-usage:
-  cycles: 0
-  costUsd: 0
-  costUnknownRows: 1
-safety:
-  lastGate: budget
-  lastReason: budget_unknown_cost
-  lastAt: 2026-06-13T06:33:03Z
-  lastReading: $0.00 / $5.00; unknown cost rows 1
-createdAt: 2026-06-11T16:11:49Z
-updatedAt: 2026-06-13T06:33:03Z
-lastDecisionReason: budget_unknown_cost
-`,
-    );
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_800 + calls,
-      nowIso: () => `2026-06-13T08:00:0${calls}Z`,
-      hasTmux: () => false,
-      startTmux: () => false,
-      runOnce: async ({ projectPath }) => {
-        calls += 1;
-        writeFileSync(
-          join(projectPath, ".roll", "loop", "runs.jsonl"),
-          `${JSON.stringify({ story_id: "US-RESUME", cycle_id: "cycle-1", ts: "2026-06-13T08:00:01Z", agent: "claude", tcr_count: 1, cost_usd: 1, cost_effective_usd: 1, status: "done" })}\n`,
-          { flag: "a" },
-        );
-        return 0;
-      },
-    };
-
-    // Resume with the SAME budget — the stale unknown must recompute to 0 from the
-    // corrected ledger so the goal becomes runnable instead of instantly tripping.
-    const r = await capture(() => loopGoCommand(["--worker", "--budget", "5", "--max-cycles", "1"], deps));
-
-    expect(r.code).toBe(0);
-    // The pre-cycle budget gate did NOT brick the run on a stale unknown row.
-    expect(calls).toBe(1);
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    expect(goal.lastDecisionReason).not.toBe("budget_unknown_cost");
-    expect(goal.usage.costUnknownRows ?? 0).toBe(0);
-  });
-
+describe("US-GOAL-005 — goal session gates (progress, scope-resume, timebox)", () => {
   it("FIX-259: explicit --cards replaces a resumed paused all-backlog goal scope", async () => {
     const p = project();
     writeBacklog(p, [
@@ -805,175 +538,6 @@ lastDecisionReason: no_cycle_terminal
     expect(goal.lastDecisionReason).toContain("egress blocked");
     const end = readEvents(p).find((e) => e.type === "goal:session_end");
     expect(end).toMatchObject({ reason: expect.stringContaining("egress blocked") });
-  });
-
-  it("--budget 0 blocks a new goal before starting the first cycle", async () => {
-    const p = project();
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_675,
-      nowIso: () => "2026-06-11T11:17:00Z",
-      hasTmux: () => false,
-      startTmux: () => false,
-      runOnce: async () => {
-        calls += 1;
-        return 0;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--budget", "0"], deps));
-
-    expect(r.code).toBe(0);
-    expect(calls).toBe(0);
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    expect(goal.status).toBe("budget_limited");
-    expect(goal.lastDecisionReason).toBe("budget_exceeded");
-    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "budget" && e.action === "budget_limited")).toBe(true);
-  });
-
-  it("usage limit waits for the next window by default, then resumes at the boundary", async () => {
-    const p = project();
-    writeBacklog(p, [
-      "| [US-LIMIT](.roll/features/goal-mode/US-LIMIT/spec.md) | limit | 📋 Todo |",
-    ]);
-    let calls = 0;
-    let usageReads = 0;
-    let sleeps = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_700 + calls + usageReads,
-      nowIso: () => `2026-06-11T11:20:0${calls + usageReads}Z`,
-      hasTmux: () => false,
-      startTmux: () => false,
-      readUsageLimits: async () => {
-        usageReads += 1;
-        if (usageReads === 1) {
-          return { status: "known", windows: [{ window: "five_hour", used: 86, limit: 100, resetAtSec: 1_780_003_000 }] };
-        }
-        return { status: "known", windows: [{ window: "five_hour", used: 20, limit: 100, resetAtSec: 1_780_006_000 }] };
-      },
-      sleep: async () => {
-        sleeps += 1;
-      },
-      runOnce: async ({ projectPath }) => {
-        calls += 1;
-        writeFileSync(
-          join(projectPath, ".roll", "loop", "runs.jsonl"),
-          `${JSON.stringify({ story_id: "US-LIMIT", cycle_id: "cycle-1", ts: "2026-06-11T11:20:03Z", cost_usd: 1, cost_effective_usd: 1, status: "failed" })}\n`,
-          { flag: "a" },
-        );
-        return 1;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-LIMIT", "--max-cycles", "1"], deps));
-
-    expect(r.code).toBe(0);
-    expect(calls).toBe(1);
-    expect(sleeps).toBe(1);
-    const events = readEvents(p);
-    expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "usage" && e.action === "paused" && e.waitUntilSec === 1_780_003_000)).toBe(true);
-    expect(events.some((e) => e.type === "goal:state" && e.from === "paused" && e.to === "active" && e.reason === "usage_window_recovered")).toBe(true);
-  });
-
-  it("--no-wait leaves usage limit pauses for a human instead of resuming", async () => {
-    const p = project();
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_800,
-      nowIso: () => "2026-06-11T11:30:00Z",
-      hasTmux: () => false,
-      startTmux: () => false,
-      readUsageLimits: async () => ({ status: "known", windows: [{ window: "weekly", used: 85, limit: 100, resetAtSec: 1_780_500_000 }] }),
-      runOnce: async () => {
-        calls += 1;
-        return 0;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--no-wait"], deps));
-
-    expect(r.code).toBe(0);
-    expect(calls).toBe(0);
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    expect(goal.status).toBe("paused");
-    expect(goal.lastDecisionReason).toBe("usage_limit_threshold");
-  });
-
-  it("FIX-280: the usage-gate recovery wait is bounded — a far-future reset times out instead of stalling forever", async () => {
-    const p = project();
-    writeBacklog(p, [
-      "| [US-HANG](.roll/features/goal-mode/US-HANG/spec.md) | hang | 📋 Todo |",
-    ]);
-    let calls = 0;
-    let sleeps = 0;
-    let sleptMs = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_700,
-      nowIso: () => "2026-06-11T11:50:00Z",
-      hasTmux: () => false,
-      startTmux: () => false,
-      // A weekly window over threshold whose reset is days away (far beyond the
-      // 6h bounded wait) — the old unbounded sleep would park the session for days.
-      readUsageLimits: async () => ({ status: "known", windows: [{ window: "weekly", used: 95, limit: 100, resetAtSec: 1_780_000_700 + 7 * 24 * 3600 }] }),
-      sleep: async (ms: number) => {
-        sleeps += 1;
-        sleptMs = ms;
-      },
-      runOnce: async () => {
-        calls += 1;
-        return 0;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-HANG"], deps));
-
-    expect(r.code).toBe(0);
-    // Bounded: the gate stopped the session instead of spinning, and no cycle ran.
-    expect(calls).toBe(0);
-    expect(sleeps).toBe(1);
-    expect(sleptMs).toBeLessThanOrEqual(6 * 3_600_000); // capped, not the 7-day request
-    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    expect(goal.status).toBe("paused");
-    const events = readEvents(p);
-    expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "usage" && e.action === "audit" && e.reason === "usage_wait_timeout")).toBe(true);
-    expect(events.some((e) => e.type === "goal:state" && e.to === "active" && e.reason === "usage_window_recovered")).toBe(false);
-  });
-
-  it("unknown usage limit reads are audited but do not block a cycle", async () => {
-    const p = project();
-    let calls = 0;
-    const deps: LoopGoDeps = {
-      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
-      pid: () => 12345,
-      nowSec: () => 1_780_000_900 + calls,
-      nowIso: () => `2026-06-11T11:40:0${calls}Z`,
-      hasTmux: () => false,
-      startTmux: () => false,
-      readUsageLimits: async () => ({ status: "unknown", reason: "usage_api_unreachable" }),
-      runOnce: async ({ projectPath }) => {
-        calls += 1;
-        writeFileSync(
-          join(projectPath, ".roll", "loop", "runs.jsonl"),
-          `${JSON.stringify({ story_id: "US-UNKNOWN-LIMIT", cycle_id: "cycle-1", ts: "2026-06-11T11:40:01Z", cost_usd: 1, status: "failed" })}\n`,
-          { flag: "a" },
-        );
-        return 1;
-      },
-    };
-
-    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "1"], deps));
-
-    expect(r.code).toBe(0);
-    expect(calls).toBe(1);
-    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.gate === "usage" && e.action === "audit" && e.reason === "usage_api_unreachable")).toBe(true);
   });
 
   it("--for stops after the current cycle reaches the wall-clock box", async () => {

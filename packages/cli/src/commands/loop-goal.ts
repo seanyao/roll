@@ -39,14 +39,12 @@ function safetyLabel(goal: RollGoal): string {
 }
 
 function renderGoal(goal: RollGoal): string {
-  const budget = money(goal.budgetUsd);
   const cost = money(goal.usage.costUsd);
-  const unknown = goal.usage.costUnknownRows !== undefined && goal.usage.costUnknownRows > 0 ? `, unknown cost rows ${goal.usage.costUnknownRows}` : "";
   return [
     `Goal status / 目标状态: ${goal.status}`,
     `Scope / 范围: ${scopeLabel(goal.scope)}`,
     `Review / 终审: ${goal.review.mode}`,
-    `Usage / 用量: cycles ${goal.usage.cycles}, cost ${cost} / ${budget}${unknown}`,
+    `Usage / 用量: cycles ${goal.usage.cycles}, cost ${cost}`,
     `Limits / 限制: ${limitLabel(goal)}`,
     `Safety gate / 安全闸: ${safetyLabel(goal)}`,
     `Last decision / 最近裁定: ${goal.lastDecisionReason ?? "-"}`,

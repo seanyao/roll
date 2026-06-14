@@ -476,7 +476,7 @@ export async function showcaseCommand(args: string[]): Promise<number> {
     emit("agents", true, `all cast agents available: ${casting.builder}, ${casting.reviewer}, ${casting.scorer}`);
 
     // (c) Run via `go` — the only non-deterministic step (real models, std TCR).
-    const go = runRoll(sandbox, rollHome, ["loop", "go", "--cards", card, "--no-tmux", "--no-wait"]);
+    const go = runRoll(sandbox, rollHome, ["loop", "go", "--cards", card, "--no-tmux"]);
     emit("loop-go", go.code === 0, go.code === 0 ? "loop cycle completed" : `loop go exited ${go.code}: ${tail(go.stderr || go.stdout)}`);
 
     // Regenerate the dossier/truth.json so the Overview + truth ladder reflect the run.

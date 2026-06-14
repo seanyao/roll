@@ -88,7 +88,6 @@ describe("FIX-247 — gate-killed work is pushed, listed, and deliberately not a
       { type: "worktree_created" },
       { type: "story_picked", storyId: "FIX-X" },
       { type: "route_resolved", agent: "pi", model: "" },
-      { type: "budget_ok" },
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead } },
     ];

@@ -15,14 +15,4 @@ export interface LoopSafetyPolicy {
   maxConsecutiveFailures: number;
   /** Same-story failures before permanent hold (I5). */
   maxStoryFailures: number;
-  budget?: BudgetPolicy;
-}
-
-export interface BudgetPolicy {
-  dailyUsd: number;
-  weeklyUsd: number;
-  /** Gate on effective cost (includes reverts), not nominal (I11). */
-  metric: "effective_cost";
-  onApproach: "downgrade";
-  onBreach: "pause_and_notify";
 }

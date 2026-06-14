@@ -18,8 +18,13 @@ import { classifyCaptured, classifyPublish, type V2CycleStatus } from "../src/in
 
 describe("frozen: capture cascade == classifyCaptured (bin/roll:9127-9157)", () => {
   // (usedWorktree × agentExit × timedOut × commitsAhead) in nested-loop order.
+  // Hook 1 (productivity floor): the first row (wt=true, exit=0, commits=0) was
+  // v2's commit-count-only `idle`; it is now `gave_up` because `agentExecuted` is
+  // absent here and DEFAULTS to executed (capture only follows an agent spawn) —
+  // an agent that ran and produced nothing is a failed-class give-up, not a
+  // silent idle. A genuine no-op (agentExecuted:false) still classifies idle.
   const FROZEN: V2CycleStatus[] = [
-    "idle", "built", "built", "blocked", "blocked", "blocked",
+    "gave_up", "built", "built", "blocked", "blocked", "blocked",
     "failed", "failed", "failed", "blocked", "blocked", "blocked",
     "failed", "failed", "failed", "blocked", "blocked", "blocked",
     "failed", "failed", "failed", "blocked", "blocked", "blocked",

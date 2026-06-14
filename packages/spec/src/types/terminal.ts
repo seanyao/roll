@@ -25,7 +25,9 @@ export const TERMINAL_EVENT_SCHEMA_VERSION = 1 as const;
 export const TERMINAL_SCHEMA_EPOCH_SEC = Date.UTC(2026, 5, 10, 17, 30) / 1000;
 
 /** AC2 — the closed outcome vocabulary. `idle_no_work` is the honest name for
- *  an exit-0 zero-commit cycle (the spec's minimum eight + idle). */
+ *  an exit-0 zero-commit cycle where NO agent ran (a genuine no-op); `gave_up`
+ *  is the honest name for an exit-0 zero-commit cycle where an agent EXECUTED
+ *  but produced nothing (the productivity-floor failure, alerted on cycle 1). */
 export const TERMINAL_OUTCOMES = [
   "delivered",
   "published_pending_merge",
@@ -35,6 +37,7 @@ export const TERMINAL_OUTCOMES = [
   "aborted_with_delivery",
   "orphan_timeout",
   "idle_no_work",
+  "gave_up",
   "unknown",
 ] as const;
 export type TerminalOutcome = (typeof TERMINAL_OUTCOMES)[number];

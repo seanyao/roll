@@ -64,39 +64,40 @@ describe("US-GOAL-001 — roll loop goal", () => {
 scope:
   kind: epic
   epic: goal-mode
-budgetUsd: 8
 limits:
   maxCycles: 12
   maxHours: 5
-status: budget_limited
+status: paused
 review: self
 usage:
   cycles: 4
   costUsd: 3.25
 safety:
-  lastGate: budget
-  lastReason: budget_exceeded
+  lastGate: progress
+  lastReason: no_progress_on_all_cards
   lastAt: 2026-06-11T08:45:00Z
-  lastReading: $9.20 / $8.00
+  lastReading: 3 consecutive no-progress cycles >= 3
 createdAt: 2026-06-11T07:00:00Z
 updatedAt: 2026-06-11T09:00:00Z
-lastDecisionReason: weekly_limit_guard
+lastDecisionReason: no_progress_on_all_cards
 `,
     );
 
     const r = await capture(() => loopGoalCommand([], { projectPath: () => p }));
     expect(r.code).toBe(0);
     expect(r.out).toContain("Goal status");
-    expect(r.out).toContain("budget_limited");
+    expect(r.out).toContain("paused");
     expect(r.out).toContain("epic goal-mode");
     expect(r.out).toContain("cycles 4");
-    expect(r.out).toContain("$3.25 / $8.00");
+    // Cost is RECORDED and displayed; there is no budget ceiling to render against.
+    expect(r.out).toContain("$3.25");
+    expect(r.out).not.toContain("/ $");
     expect(r.out).toContain("Review");
     expect(r.out).toContain("self");
     expect(r.out).toContain("Safety gate");
-    expect(r.out).toContain("budget budget_exceeded");
-    expect(r.out).toContain("$9.20 / $8.00");
-    expect(r.out).toContain("weekly_limit_guard");
+    // The surviving gate is the dead-loop breaker (progress), not budget/usage.
+    expect(r.out).toContain("progress no_progress_on_all_cards");
+    expect(r.out).toContain("no-progress cycles");
   });
 
   it("fails loud on malformed goal.yaml", async () => {

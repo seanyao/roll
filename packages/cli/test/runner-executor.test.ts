@@ -5,7 +5,7 @@
  * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
  */
 import { execFileSync, execSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ import {
   AUTORUN_DIRECTIVE,
   type Ports,
   bootstrapWorktreeDeps,
+  bootstrapWorktreeSkills,
   buildClaudeArgv,
   buildRunRow,
   buildSpawnCommand,
@@ -453,6 +454,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     git: {
       fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
+      worktreeSubmoduleInit: vi.fn(async () => ({ code: 0 })),
       worktreeRemove: vi.fn(async () => ({ code: 0 })),
       push: vi.fn(async () => ({ code: 0 })),
       commitsAhead: vi.fn(async () => 3),
@@ -517,6 +519,25 @@ describe("executeCommand — command → executor mapping", () => {
     expect(alert).toContain("[FAIL]");
     expect(alert).toContain("worktree deps bootstrap failed");
     expect(alert).toContain("ENOTFOUND");
+  });
+
+  it("FIX-302: submodule init failure fails the worktree before agent spawn", async () => {
+    const wt = realpathSync(mkdtempSync(join(tmpdir(), "roll-skills-command-")));
+    execDirs.push(wt);
+    writeFileSync(join(wt, ".gitmodules"), '[submodule "skills"]\n  path = skills\n');
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt },
+      git: { ...base.ports.git, worktreeSubmoduleInit: vi.fn(async () => ({ code: 128 })) },
+    });
+
+    const r = await executeCommand({ kind: "create_worktree", branch: "b" }, ports, CTX);
+
+    expect(r.event).toEqual({ type: "worktree_failed" });
+    const alert = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alert).toContain("[FAIL] worktree submodule init failed");
+    // deps bootstrap must NOT run once skills populate has failed.
+    expect(ports.depsExec).not.toHaveBeenCalled();
   });
 
   it("FIX-209: preflight fetches origin main before the worktree branches off it", async () => {
@@ -1557,5 +1578,88 @@ describe("FIX-268 — worktree deps bootstrap before agent spawn", () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toContain("[FAIL] worktree deps bootstrap failed");
     expect(alerts[0]).toContain("ENOTFOUND");
+  });
+});
+
+describe("FIX-302 — worktree submodule (skills/) populate before agent spawn", () => {
+  function tmpWorktree(): string {
+    const d = realpathSync(mkdtempSync(join(tmpdir(), "roll-skills-")));
+    execDirs.push(d);
+    return d;
+  }
+  function alertSink(): { events: { appendAlert: ReturnType<typeof vi.fn> }; alerts: string[] } {
+    const alerts: string[] = [];
+    return { events: { appendAlert: vi.fn((_p: string, msg: string) => alerts.push(msg)) }, alerts };
+  }
+
+  it("skips a non-submodule worktree (no .gitmodules) without init or alert", async () => {
+    const wt = tmpWorktree();
+    const init = vi.fn(async () => ({ code: 0 }));
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(true);
+    expect(init).not.toHaveBeenCalled();
+    expect(alerts).toEqual([]);
+  });
+
+  it("runs submodule init and verifies skills/ is populated (AC1/AC2)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, ".gitmodules"), '[submodule "skills"]\n  path = skills\n');
+    // init double materializes skills/ like a real `git submodule update`.
+    const init = vi.fn(async () => {
+      mkdirSync(join(wt, "skills", "roll-build"), { recursive: true });
+      writeFileSync(join(wt, "skills", "roll-build", "SKILL.md"), "# skill\n");
+      return { code: 0 };
+    });
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(true);
+    expect(init).toHaveBeenCalledTimes(1);
+    expect(init.mock.calls[0]?.[0]).toBe(wt);
+    expect(readdirSync(join(wt, "skills")).length).toBeGreaterThan(0);
+    expect(alerts).toEqual([]);
+  });
+
+  it("skips when skills/ is already populated (idempotent re-entry)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, ".gitmodules"), '[submodule "skills"]\n  path = skills\n');
+    mkdirSync(join(wt, "skills", "roll-build"), { recursive: true });
+    writeFileSync(join(wt, "skills", "roll-build", "SKILL.md"), "# skill\n");
+    const init = vi.fn(async () => ({ code: 0 }));
+    const { events } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(true);
+    expect(init).not.toHaveBeenCalled();
+  });
+
+  it("a non-zero init code leaves a FAIL alert and reports failure (AC3)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, ".gitmodules"), '[submodule "skills"]\n  path = skills\n');
+    const init = vi.fn(async () => ({ code: 128 }));
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(false);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain("[FAIL] worktree submodule init failed");
+    expect(alerts[0]).toContain("skills/");
+  });
+
+  it("a thrown init (network/auth) leaves a FAIL alert and reports failure (AC3)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, ".gitmodules"), '[submodule "skills"]\n  path = skills\n');
+    const init = vi.fn(async () => {
+      throw new Error("Permission denied (publickey)");
+    });
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(false);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain("[FAIL] worktree submodule init failed");
+    expect(alerts[0]).toContain("Permission denied");
+  });
+
+  it("init reports success but skills/ stays empty → honest FAIL (AC3)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, ".gitmodules"), '[submodule "skills"]\n  path = skills\n');
+    const init = vi.fn(async () => ({ code: 0 })); // lies: leaves skills/ empty
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(false);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain("still empty");
   });
 });

@@ -607,6 +607,183 @@ updatedAt: 2026-06-11T12:00:00Z
   });
 });
 
+// The whole-goal dead-loop breaker is the ONLY backstop against a runaway loop
+// now that the budget gate is gone. These tests prove it is AIRTIGHT: a cycle
+// that keeps appending a runs row can NEVER spin forever — it either delivers
+// (reset), appends a no-delivery row (increment → STOP at K), or appends no row
+// at all (the no-cycle-terminal backstop breaks). GOAL_NO_PROGRESS_STOP === 3.
+describe("US-GOAL-005 — dead-loop breaker is airtight (no spin-hole)", () => {
+  // THE SPIN-HOLE REGRESSION: a row with NO tcr_count AND no delivery evidence
+  // is `known:false`, so the per-card loop skips it — but cycles INCREASE (a row
+  // was appended), so the no-cycle-terminal backstop does NOT fire. Before the
+  // fail-safe fix this spun forever. It must now STOP within K cycles via the
+  // global breaker, regardless of the row being unparseable as a known terminal.
+  it("STOPS within K cycles when every cycle appends a known:false (no tcr_count, no evidence) row", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-SPIN](.roll/features/goal-mode/US-SPIN/spec.md) | unparseable terminal | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_010_000 + calls,
+      nowIso: () => `2026-06-11T13:00:${String(calls).padStart(2, "0")}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        // A row WITH a story_id but WITHOUT tcr_count and WITHOUT any delivery
+        // evidence → runAttemptFromRow returns known:false → per-card skip. The
+        // appended row still bumps the cycle count, defeating the 1543 backstop.
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-SPIN", cycle_id: `cycle-${calls}`, ts: `2026-06-11T13:00:0${calls}Z`, status: "failed" })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    // --max-cycles 50 is deliberately MUCH higher than the breaker bound: if the
+    // breaker did not fire the loop would run all 50 (or, in production, forever).
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-SPIN", "--max-cycles", "50"], deps));
+
+    expect(r.code).toBe(0);
+    // The breaker must stop it AT the threshold — not at max-cycles, not never.
+    expect(calls).toBe(3);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("no_progress_breaker");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "progress" && e.reason === "no_progress_breaker")).toBe(true);
+    const alert = readFileSync(join(p, ".roll", "loop", "ALERT-proj-abc123.md"), "utf8");
+    expect(alert).toContain("dead-loop breaker");
+  });
+
+  // Even harsher: a row with NO story_id at all is `undefined` from
+  // runAttemptFromRow — the per-card loop cannot attribute it. The fail-safe
+  // global accounting must still count it, so the loop STOPS within K.
+  it("STOPS within K cycles when every cycle appends a row with no story_id (undefined attempt)", async () => {
+    const p = project();
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_011_000 + calls,
+      nowIso: () => `2026-06-11T13:10:${String(calls).padStart(2, "0")}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ cycle_id: `cycle-${calls}`, ts: `2026-06-11T13:10:0${calls}Z`, status: "failed" })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "50"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(3);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("no_progress_breaker");
+  });
+
+  // A KNOWN gave_up sequence (tcr_count: 0, no evidence) must also STOP within K
+  // — the existing zero-delivery path, asserted here as a guard against the fix
+  // accidentally changing known-row accounting.
+  it("STOPS within K cycles for a known gave_up (tcr_count 0, no evidence) sequence", async () => {
+    const p = project();
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_012_000 + calls,
+      nowIso: () => `2026-06-11T13:20:${String(calls).padStart(2, "0")}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        // Each cycle targets a DISTINCT story so the per-card skip (which needs a
+        // 2-streak on one storyId) never fires — only the GLOBAL breaker can stop
+        // this, proving the global counter advances on every known no-progress.
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: `US-GAVEUP-${calls}`, cycle_id: `cycle-${calls}`, ts: `2026-06-11T13:20:0${calls}Z`, status: "gave_up", tcr_count: 0 })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "50"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(3);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("no_progress_breaker");
+  });
+
+  // A delivering sequence must COMPLETE — the breaker never trips when work lands
+  // (each delivery resets noProgressCycles to 0).
+  it("does NOT trip the breaker for a delivering sequence (completes the goal)", async () => {
+    const p = project();
+    writeIndex(p, { "US-DONE": "goal-mode" });
+    writeBacklog(p, [
+      "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
+    ]);
+    const deps = completeGoalDeps(p, approveFinalReview);
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE", "--max-cycles", "10"], deps));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("complete");
+    const events = readEvents(p);
+    // The progress breaker never tripped — delivery reset the counter each cycle.
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "progress")).toBe(false);
+  });
+
+  // A cycle that appends NO row at all must break via the no-cycle-terminal
+  // backstop (cycles did not increase) — NOT spin. The global no-progress counter
+  // stays unchanged in that case (rows.length === 0); the backstop owns it.
+  it("breaks immediately when a cycle appends no runs row (no-cycle-terminal backstop)", async () => {
+    const p = project();
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_013_000 + calls,
+      nowIso: () => `2026-06-11T13:30:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      // Appends NOTHING — no runs row → cycles do not advance.
+      runOnce: async () => {
+        calls += 1;
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "50"], deps));
+
+    expect(r.code).toBe(0);
+    // One cycle, then the backstop breaks — it does NOT run all 50 / spin.
+    expect(calls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("no_cycle_terminal");
+    // The global breaker did NOT trip — the no-row case is owned by the backstop.
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "progress")).toBe(false);
+  });
+});
+
 describe("US-GOAL-006 — goal final review gate", () => {
   it("APPROVE completes the goal and records the final review event", async () => {
     const p = project();

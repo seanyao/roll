@@ -105,7 +105,7 @@ import {
   realAgentSpawn,
 } from "./agent-spawn.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
-import { readAttestGateMode, runAttestGate, verificationReportPath } from "./attest-gate.js";
+import { readAttestGateMode, runAttestGate, verificationReportPath, webCaptureTargetForStory } from "./attest-gate.js";
 import { recoverPiUsage } from "./usage-recovery.js";
 import { realBudgetCheck } from "./budget-check.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
@@ -1687,7 +1687,16 @@ export function nodePorts(opts: {
         const prev = process.cwd();
         try {
           process.chdir(projectCwd);
-          return await attestCommand([storyId, "--run-dir", runDir]);
+          // FIX-305: a UI/dossier card's acceptance is a RENDERED page, so its
+          // evidence must be a real pixel screenshot, not a machine-skip with an
+          // empty screenshots dir. Auto-drive the web self-capture lane against
+          // the card's rendered dossier page (file://…/index.html), or an explicit
+          // ROLL_ATTEST_WEB_URL deployed product page. The FIX-291 ladder falls
+          // through to headless Chromium on a network-only loop runner (no GUI
+          // needed), producing an unforgeable PNG.
+          const webTarget = webCaptureTargetForStory(projectCwd, storyId, process.env["ROLL_ATTEST_WEB_URL"]);
+          const webArgs = webTarget !== null ? ["--capture-web", webTarget] : [];
+          return await attestCommand([storyId, "--run-dir", runDir, ...webArgs]);
         } finally {
           process.chdir(prev);
         }

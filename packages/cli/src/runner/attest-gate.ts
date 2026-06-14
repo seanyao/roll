@@ -34,6 +34,7 @@
 import { acForStory, parsePolicy } from "@roll/core";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { evaluateSelfScoreGate } from "../lib/self-score.js";
 
@@ -83,7 +84,13 @@ export function storyHasAcBlock(worktreeCwd: string, storyId: string): boolean |
   }
 }
 
-function storyRequiresScreenshot(worktreeCwd: string, storyId: string): boolean {
+/**
+ * FIX-305 — whether a story's acceptance concerns a UI/dossier surface (CLI,
+ * web, UI, TUI, 界面/交互/截屏/截图/screenshot). Exported so the attest render
+ * wiring can decide to drive a REAL web screenshot (the FIX-291 ladder) instead
+ * of letting the visual floor machine-skip with an empty screenshots dir.
+ */
+export function storyRequiresScreenshot(worktreeCwd: string, storyId: string): boolean {
   const spec = storySpecPath(worktreeCwd, storyId);
   if (spec === null) return false;
   try {
@@ -91,6 +98,21 @@ function storyRequiresScreenshot(worktreeCwd: string, storyId: string): boolean 
   } catch {
     return false;
   }
+}
+
+/**
+ * FIX-305 — the web page a UI/dossier card's attest should CAPTURE a real
+ * screenshot of. An explicit override (e.g. a deployed product page set by the
+ * Gate via `ROLL_ATTEST_WEB_URL`) wins; otherwise the card's rendered dossier
+ * story page (`features/<epic>/<ID>/index.html`) is the always-present, real
+ * rendered HTML to shoot through the FIX-291 ladder. Returns null only when the
+ * story does NOT concern a UI/dossier surface — then no web capture is owed.
+ */
+export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, override?: string): string | null {
+  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return null;
+  const trimmed = (override ?? "").trim();
+  if (trimmed !== "") return trimmed;
+  return pathToFileURL(join(cardArchiveDir(worktreeCwd, storyId), "index.html")).href;
 }
 
 interface AcMapEvidence {

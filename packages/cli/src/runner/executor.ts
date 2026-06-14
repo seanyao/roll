@@ -60,6 +60,12 @@ import {
   toCycleCost,
   pairingHistory,
   peerReviewCost,
+  type CycleObserverState,
+  type ObservedCommit,
+  newCycleObserverState,
+  observeBuildStart,
+  observeCommits,
+  maybeBuildHeartbeat,
 } from "@roll/core";
 import {
   parseEventLine,
@@ -158,6 +164,12 @@ export interface GitPort {
   /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
    *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree. */
   tcrCount(worktreeCwd: string): Promise<number>;
+  /** US-LOOP-076: the runner's OWN observation of commits on the cycle branch —
+   *  `git log --format=%H%x09%ct%x09%s origin/main..HEAD` (oldest-first) in the
+   *  worktree. Feeds the agent-agnostic cycle observer so the build/TCR phase
+   *  emits standard signals for EVERY agent, never by parsing agent stdout.
+   *  LENIENT: returns [] on any git error (observation must never fail a cycle). */
+  recentCommits(worktreeCwd: string): Promise<ObservedCommit[]>;
   /** RESUME-PRIOR-WORK: fetch a candidate prior-cycle branch from origin so its
    *  ref resolves locally. LENIENT — `fetched:false` on a missing branch. */
   fetchRemoteBranch(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
@@ -327,6 +339,64 @@ export interface ExecuteResult {
    *  and clock/spawn-free) — real tcr count + parsed cost. The driver folds
    *  this into liveCtx so the later append_run / cycle:end carry truthful data. */
   ctxPatch?: Partial<CycleContext>;
+}
+
+/** Default poll cadence for the runner's build-phase observation (ms). Frequent
+ *  enough that a new TCR commit becomes an event within a few seconds; cheap (one
+ *  `git log` per tick). Overridable via ROLL_OBSERVE_POLL_MS for tests. */
+const OBSERVE_POLL_MS = 5_000;
+
+/**
+ * US-LOOP-076 — start the runner's agent-agnostic cycle observer for the build
+ * phase. Emits the build-start phase marker immediately, then polls the worktree
+ * git log on a timer, deriving standard {@link RollEvent}s (cycle:tcr per new
+ * commit, a periodic build heartbeat) into events.ndjson. Returns a handle whose
+ * `stop()` clears the timer AND takes one final await'd snapshot so the last
+ * commits before agent exit are never dropped.
+ *
+ * All meaning lives in @roll/core's pure {@link observeCommits} /
+ * {@link maybeBuildHeartbeat}; this is just the I/O loop (git read + event
+ * append). Best-effort throughout: observation must NEVER fail the cycle.
+ */
+function startCycleObserver(ports: Ports, cycleId: string): { stop(): Promise<void> } {
+  if (cycleId === "") return { stop: async () => {} };
+  const st: CycleObserverState = newCycleObserverState(cycleId);
+  const emit = (events: RollEvent[]): void => {
+    for (const ev of events) {
+      try {
+        ports.events.appendEvent(ports.paths.eventsPath, ev);
+      } catch {
+        /* observation append is best-effort */
+      }
+    }
+  };
+  const pollGapMs = Number((process.env["ROLL_OBSERVE_POLL_MS"] ?? "").trim()) || OBSERVE_POLL_MS;
+  emit(observeBuildStart(st, Date.now()));
+  let running = false;
+  const tick = async (): Promise<void> => {
+    if (running) return; // a slow git read must not stack ticks
+    running = true;
+    try {
+      const commits = await ports.git.recentCommits(ports.paths.worktreePath);
+      const now = Date.now();
+      emit(observeCommits(commits, st, now));
+      emit(maybeBuildHeartbeat(st, now));
+    } catch {
+      /* never let a probe blip topple the cycle */
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => void tick(), pollGapMs);
+  timer.unref?.();
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      // One final synchronous snapshot — captures the TCR commits that landed
+      // between the last tick and the agent exiting.
+      await tick();
+    },
+  };
 }
 
 function createCaptureMarkerSink(runDir: string, capture: CapturePort): { onChunk(chunk: Buffer): void; flush(): Promise<void> } {
@@ -619,27 +689,44 @@ export async function executeCommand(
         ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== ""
           ? createCaptureMarkerSink(ctx.evidenceRunDir, ports.capture)
           : undefined;
-      const res = await ports.agentSpawn(cmd.agent, {
-        cwd: ports.paths.worktreePath,
-        skillBody: ports.skillBody,
-        ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-        writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
-        env: {
-          ...process.env,
-          ROLL_LOOP_ALERT: ports.paths.alertsPath,
-        },
-        // FIX-204B: pin the executor-picked story into the agent prompt — the
-        // claim (pick_story → 🔨) and the work must be the same story.
-        ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
-        onChunk: (d: Buffer) => {
-          captureSink?.onChunk(d);
-          try {
-            appendFileSync(livePath, d);
-          } catch {
-            /* best-effort */
-          }
-        },
-      });
+      // US-LOOP-076 (folds in FIX-310) — the BLACK-BOX KILLER. The agent run
+      // below blocks for the WHOLE build/TCR phase (37 min observed). Before this
+      // the runner emitted ZERO structured events in that window for every agent,
+      // and the only "key node" extraction parsed claude stream-json (codex/kimi/
+      // pi build phases invisible — a core-thesis violation). The poller fixes it
+      // ONE agent-agnostic way: it observes the runner's OWN view of the cycle —
+      // git commits on the worktree branch + the wall clock — and DERIVES standard
+      // cycle:tcr / cycle:phase / build-heartbeat events into events.ndjson. It
+      // never parses the agent's stdout, so a single path serves EVERY agent.
+      const observer = startCycleObserver(ports, ctx.cycleId ?? "");
+      let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
+      try {
+        res = await ports.agentSpawn(cmd.agent, {
+          cwd: ports.paths.worktreePath,
+          skillBody: ports.skillBody,
+          ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+          writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+          env: {
+            ...process.env,
+            ROLL_LOOP_ALERT: ports.paths.alertsPath,
+          },
+          // FIX-204B: pin the executor-picked story into the agent prompt — the
+          // claim (pick_story → 🔨) and the work must be the same story.
+          ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
+          onChunk: (d: Buffer) => {
+            captureSink?.onChunk(d);
+            try {
+              appendFileSync(livePath, d);
+            } catch {
+              /* best-effort */
+            }
+          },
+        });
+      } finally {
+        // Stop the timer AND take one final synchronous-await snapshot so the LAST
+        // TCR commits (landed between the last tick and agent exit) are not lost.
+        await observer.stop();
+      }
       await captureSink?.flush();
       persistWorktreeAlerts(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
       // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
@@ -2027,6 +2114,28 @@ export function nodePorts(opts: {
         return (r.stdout ?? "")
           .split("\n")
           .filter((l) => l.includes(" tcr:")).length;
+      },
+      async recentCommits(worktreeCwd) {
+        // The runner's OWN git observation — oldest-first so observeCommits()
+        // appends events in chronological order. %ct = committer epoch seconds.
+        const r = await execFileAsync(
+          "git",
+          ["log", "--reverse", "--format=%H%x09%ct%x09%s", "origin/main..HEAD"],
+          { cwd: worktreeCwd, encoding: "utf8" },
+        ).catch(() => ({ stdout: "" }));
+        const out: ObservedCommit[] = [];
+        for (const line of (r.stdout ?? "").split("\n")) {
+          if (line.trim() === "") continue;
+          const [hash, ct, ...rest] = line.split("\t");
+          if (hash === undefined || hash === "") continue;
+          const tsSec = Number((ct ?? "0").trim());
+          out.push({
+            hash,
+            message: rest.join("\t"),
+            tsSec: Number.isFinite(tsSec) ? tsSec : 0,
+          });
+        }
+        return out;
       },
       // RESUME-PRIOR-WORK probes (un-merged audit-branch reuse).
       async fetchRemoteBranch(repoCwd, branch) {

@@ -104,6 +104,23 @@ describe("extractCycleSignals — three-layer reduction", () => {
     expect(extractCycleSignals([], CYCLE).timeline).toEqual([]);
   });
 
+  it("US-LOOP-076: a runner-observed build heartbeat surfaces on the outline spine", () => {
+    const evs: RollEvent[] = [
+      { type: "cycle:start", cycleId: CYCLE, storyId: "S", agent: "codex", model: "m", ts: 1000 },
+      { type: "cycle:phase", cycleId: CYCLE, phase: "execute", ts: 1001 },
+      { type: "cycle:stdout", cycleId: CYCLE, data: "heartbeat: building · still working (1) · 3m quiet · 0 tcr so far", ts: 1181 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "abc123", message: "tcr: green", ts: 1200 },
+    ];
+    const r = extractCycleSignals(evs, CYCLE);
+    const beat = r.timeline.find((t) => t.marker === "build:heartbeat");
+    expect(beat).toBeDefined();
+    expect(beat?.layer).toBe("outline"); // liveness, not a turning point
+    expect(beat?.label).toContain("still working");
+    // ordinary (un-tagged) stdout stays out of the timeline (firehose noise).
+    const noisy: RollEvent[] = [{ type: "cycle:stdout", cycleId: CYCLE, data: "some agent prose", ts: 1100 }];
+    expect(extractCycleSignals(noisy, CYCLE).timeline).toEqual([]);
+  });
+
   it("a non-matching cycleId drops cycle-bound events but keeps caller-scoped PR/CI", () => {
     const r = extractCycleSignals(events(), "NOPE");
     // cycle-bound lifecycle/tcr/attest drop

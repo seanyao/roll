@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cyclesCommand, cyclesLedgerJson, renderCyclesLedger } from "../src/commands/cycles.js";
+import type { RollEvent } from "@roll/spec";
+import { cyclesCommand, cyclesLedgerJson, renderCyclesLedger, renderCycleDetail, cycleDetailJson } from "../src/commands/cycles.js";
 import { collectCycleLedger } from "../src/lib/cycle-ledger.js";
 import { stripAnsi } from "../src/render.js";
 
@@ -96,6 +97,86 @@ describe("roll cycles — US-CLI-012", () => {
     const parsed = JSON.parse(out.join("")) as { since: string; cycles: number };
     expect(parsed.since).toBe("all");
     expect(parsed.cycles).toBe(5);
+  });
+
+  it("US-LOOP-076: --detail needs a cycle id (loud fail)", async () => {
+    const save = process.cwd();
+    process.chdir(project());
+    let err = "";
+    const se = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((s: string) => ((err += s), true)) as typeof process.stderr.write;
+    try {
+      expect(cyclesCommand(["--detail"])).toBe(1);
+    } finally {
+      process.stderr.write = se;
+      process.chdir(save);
+    }
+    expect(err).toContain("--detail needs a cycle id");
+  });
+});
+
+describe("roll cycles --detail — US-LOOP-076 build-phase timeline", () => {
+  const CYCLE = "20260615-x-0312";
+  function buildEvents(): RollEvent[] {
+    // A "37min / 2-commit" shape: a long quiet build with two TCR commits + a
+    // runner-observed heartbeat — exactly the anomaly the detail view exposes.
+    return [
+      { type: "cycle:start", cycleId: CYCLE, storyId: "FIX-284", agent: "codex", model: "gpt-5", ts: 1000 },
+      { type: "cycle:phase", cycleId: CYCLE, phase: "execute", ts: 1001 },
+      { type: "cycle:stdout", cycleId: CYCLE, data: "heartbeat: building · still working (1) · 18m quiet · 0 tcr so far", ts: 1000 + 18 * 60 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "aaa1112223", message: "tcr: red test", ts: 1000 + 30 * 60 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "bbb2223334", message: "tcr: green impl", ts: 1000 + 37 * 60 },
+      { type: "cycle:end", cycleId: CYCLE, outcome: "delivered", cost: { cycleId: CYCLE, agent: "codex", model: "gpt-5", tokensIn: 0, tokensOut: 0, estimatedCost: 0, revertCount: 0, effectiveCost: 0 }, ts: 1000 + 38 * 60 },
+    ];
+  }
+
+  it("renders per-commit timing, the heartbeat, and a span/TCR summary", () => {
+    const out = stripAnsi(renderCycleDetail(buildEvents(), CYCLE, "en"));
+    expect(out).toContain("#0312");
+    expect(out).toContain("build-phase timeline");
+    expect(out).toContain("tcr");
+    expect(out).toContain("red test");
+    expect(out).toContain("build:heartbeat");
+    // 37min between cycle:start and the 2nd commit → "37:xx" offset shows the anomaly.
+    expect(out).toContain("38:00 span · 2 TCR commits · 1 heartbeats");
+  });
+
+  it("empty events → an honest 'no events' line, never a crash", () => {
+    const out = stripAnsi(renderCycleDetail([], CYCLE, "en"));
+    expect(out).toContain("no events recorded");
+  });
+
+  it("--json mirrors the render (same span/tcrCount/timeline)", () => {
+    const j = cycleDetailJson(buildEvents(), CYCLE) as { spanSec: number; tcrCount: number; heartbeats: number; timeline: unknown[] };
+    expect(j.spanSec).toBe(38 * 60);
+    expect(j.tcrCount).toBe(2);
+    expect(j.heartbeats).toBe(1);
+    // start + phase + heartbeat + 2×tcr + end = 6 entries.
+    expect(j.timeline.length).toBe(6);
+  });
+
+  it("cyclesCommand --detail reads events.ndjson and prints the timeline (exit 0)", async () => {
+    const p = mkdtempSync(join(tmpdir(), "roll-cyc-detail-"));
+    dirs.push(p);
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(p, ".roll", "loop", "runs.jsonl"), JSON.stringify({ cycle_id: CYCLE, status: "merged", outcome: "delivered", story_id: "FIX-284", agent: "codex", ts: "2026-06-15T10:00:00Z", duration_sec: 2280 }) + "\n");
+    writeFileSync(join(p, ".roll", "loop", "events.ndjson"), buildEvents().map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const save = process.cwd();
+    process.chdir(p);
+    const out: string[] = [];
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => (out.push(s), true)) as typeof process.stdout.write;
+    let status: number;
+    try {
+      status = cyclesCommand(["--detail", "0312", "--no-color"]);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(status).toBe(0);
+    const text = out.join("");
+    expect(text).toContain("build-phase timeline");
+    expect(text).toContain("2 TCR commits");
   });
 
   it("AC1: illegal --since fails loud", async () => {

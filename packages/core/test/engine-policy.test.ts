@@ -161,6 +161,21 @@ loop_safety:
 `).loopSafety.peerGate).toBeUndefined();
   });
 
+  it("parses loop_safety.proxy_enable_cmd (FIX-298); absent/empty ⇒ undefined", () => {
+    expect(parsePolicy("").loopSafety.proxyEnableCmd).toBeUndefined();
+    // a non-empty string is the configured network-guard recovery hook (the
+    // user's own proxy-on command — nothing is hardcoded).
+    expect(parsePolicy(`
+loop_safety:
+  proxy_enable_cmd: proxy rule
+`).loopSafety.proxyEnableCmd).toBe("proxy rule");
+    // empty value ⇒ undefined (no auto-enable; the guard halts-and-tells).
+    expect(parsePolicy(`
+loop_safety:
+  proxy_enable_cmd:
+`).loopSafety.proxyEnableCmd).toBeUndefined();
+  });
+
   it("ignores comments and unknown keys (forward-compatible)", () => {
     const p = parsePolicy(`
 # leading comment

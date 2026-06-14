@@ -373,9 +373,26 @@ function maxBytes(kind: "cast" | "video"): number {
   return kind === "cast" ? DEFAULT_MAX_CAST_BYTES : DEFAULT_MAX_VIDEO_BYTES;
 }
 
-function localEvidencePath(runDir: string, href: string): string | null {
+/** FIX-315: resolve a relative evidence ref against BOTH the run/era dir
+ *  (era-specific artifacts: screenshots, casts) and the card/story archive dir
+ *  (shared story-level evidence: dom probes, test logs). The ac-map routinely
+ *  references story-level evidence as `evidence/x.txt`; resolving against both
+ *  known-safe homes makes the render surface it regardless of which dir the agent
+ *  wrote it to. Without this a fully-evidenced delivery is silently downgraded to
+ *  `claimed` (enforceRedLine) and the attest gate rejects it as an empty shell.
+ *  Returns the first existing path, or null — the honesty red line is preserved:
+ *  the file must actually exist in one of the two bases. Agent-agnostic. */
+function resolveEvidenceFile(runDir: string, cardDir: string, ref: string): string | null {
+  for (const base of [runDir, cardDir]) {
+    const p = join(base, ref);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+function localEvidencePath(runDir: string, cardDir: string, href: string): string | null {
   if (href === "" || href.startsWith("/") || href.includes("..") || /^[a-z]+:/i.test(href)) return null;
-  return join(runDir, href);
+  return resolveEvidenceFile(runDir, cardDir, href);
 }
 
 /** Read + validate the optional AI intent map; null when absent/malformed. */
@@ -394,12 +411,12 @@ function readAcMap(storyDir: string): Map<string, AcMapEntry> | null {
   }
 }
 
-function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): EvidenceRef | null {
+function toRef(runDir: string, cardDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): EvidenceRef | null {
   const kind = (e.kind ?? "") as EvidenceRef["kind"];
   const label = e.label ?? kind;
   if (kind === "text" && e.textFile !== undefined) {
-    const p = join(runDir, e.textFile);
-    if (!existsSync(p)) return null;
+    const p = resolveEvidenceFile(runDir, cardDir, e.textFile);
+    if (p === null) return null;
     try {
       // RED LINE (US-ATTEST-012): scrub secrets/PII BEFORE the text is inlined
       // into the report — once archived, the run dir is never overwritten. A
@@ -412,7 +429,7 @@ function toRef(runDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): 
     }
   }
   if ((kind === "cast" || kind === "video") && e.href !== undefined) {
-    const p = localEvidencePath(runDir, e.href);
+    const p = localEvidencePath(runDir, cardDir, e.href);
     if (p === null || !existsSync(p)) return null;
     try {
       const size = statSync(p).size;
@@ -940,7 +957,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         ? (mapped.status as AcStatus)
         : "claimed";
     const evidence = (mapped?.evidence ?? [])
-      .map((e) => toRef(runDir, e))
+      .map((e) => toRef(runDir, storyDir, e))
       .filter((x): x is EvidenceRef => x !== null);
     return {
       id: ac.id,

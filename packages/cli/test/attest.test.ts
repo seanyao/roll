@@ -165,6 +165,37 @@ describe("attestCommand", () => {
     expect(readFileSync(join(proj, ".roll", "features", "index.html"), "utf8")).toContain("FIX-300");
   });
 
+  it("FIX-315: ac-map evidence at the story/card dir resolves — a pass with story-level evidence is NOT downgraded to claimed", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    // The common shape: dom probes / test logs live at the STORY (card) level,
+    // NOT inside the era run dir, and the ac-map references them run-dir-relative
+    // (`evidence/x`) — the way agents routinely write it. Before FIX-315 the
+    // render resolved evidence ONLY against the era run dir, dropped the ref,
+    // emptied the AC's evidence, and enforceRedLine downgraded pass → claimed,
+    // so the attest gate rejected a fully-evidenced delivery as an empty shell.
+    mkdirSync(join(storyDir, "evidence"), { recursive: true });
+    writeFileSync(join(storyDir, "evidence", "probe.txt"), "DOM PROBE OK — ladder grid present\n");
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        { ac: "FIX-300:AC1", status: "pass", evidence: [{ kind: "text", label: "dom probe", textFile: "evidence/probe.txt" }] },
+        { ac: "FIX-300:AC2", status: "pass", evidence: [{ kind: "text", label: "dom probe", textFile: "evidence/probe.txt" }] },
+      ]),
+    );
+    const code = await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(code).toBe(0);
+    const html = readFileSync(join(storyDir, "2026-06-06T01-02-03", "FIX-300-report.html"), "utf8");
+    // Story-level evidence resolved → the positive verdict stands (no honesty
+    // downgrade) and the probe text is inlined into the AC section.
+    expect(html).toContain("DOM PROBE OK — ladder grid present");
+    expect(html).toMatch(/<section class="ac s-pass"/);
+    // Both ACs were `pass` with real evidence → none downgraded to claimed.
+    expect(html).not.toMatch(/<section class="ac s-claimed"/);
+  });
+
   it("US-EVID-007: backfill creates one pre-evidence report for old Done cards and never overwrites existing latest", async () => {
     const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-backfill-")));
     dirs.push(proj);

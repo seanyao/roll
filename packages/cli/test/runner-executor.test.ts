@@ -962,6 +962,126 @@ describe("executeCommand — command → executor mapping", () => {
     expect(ports.github.prState).not.toHaveBeenCalled();
   });
 
+  // FIX-293 — the peer gate now has teeth (was: verdict discarded, cycle
+  // self-scored anyway). A high-complexity delivery with no peer review BLOCKS
+  // (agentExit 1, so Done is withheld) and the executor re-attempts the consult
+  // ONCE. The complexity check keys on a real cycle diff, so these tests build a
+  // real git worktree whose branch is N files ahead of origin/main.
+  function highComplexityWorktree(): string {
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-exec-")));
+    execDirs.push(proj);
+    const git = (cmd: string): void => execSync(`git ${cmd}`, { cwd: proj, stdio: "pipe" });
+    git("init -q -b main");
+    git("config user.email t@t");
+    git("config user.name t");
+    git("config commit.gpgsign false");
+    // A story spec WITH NO AC block → the attest gate is a no-op (storyHasAcBlock
+    // false), isolating the peer gate as the only thing that can block.
+    const specDir = join(proj, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), "# US-RUN-001\n\nprose only, no AC block\n");
+    writeFileSync(join(proj, "seed.txt"), "s\n");
+    git("add -A");
+    git('commit -q -m seed');
+    git("update-ref refs/remotes/origin/main HEAD");
+    git("checkout -q -b loop/cycle-x");
+    for (let i = 0; i < 5; i++) writeFileSync(join(proj, `f${i}.txt`), `${i}\n`); // >3 → high
+    git("add -A");
+    git('commit -q -m "tcr: work"');
+    return proj;
+  }
+
+  it("FIX-293 AC-H1/H2: high-complexity + no peer review (hard) → BLOCKED, agentExit 1, escalation alert", async () => {
+    const wt = highComplexityWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-rt-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      // Pin a deterministic peer pool: codex is heterogeneous from claude, so the
+      // retry DOES consult — but the peer spawn fails (exit 1 → reviewPeer null →
+      // timeout) so no evidence is produced and the cycle stays blocked NOT-Done.
+      installedAgents: () => ["claude", "codex"],
+      agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false })),
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
+    expect(ports.agentSpawn).toHaveBeenCalled(); // the retry fired exactly once
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "peer:gate" && e.verdict === "skipped")).toBe(true);
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1] as string);
+    expect(alerts.some((m) => m.includes("peer gate (hard)") && m.includes("BLOCKED"))).toBe(true);
+  });
+
+  it("FIX-293 AC-H3: retry produces peer evidence → gate re-runs consulted, NOT blocked (agentExit 0)", async () => {
+    const wt = highComplexityWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-rt2-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    // The retry's consult writes the canonical evidence file the gate reads — we
+    // simulate a successful peer by having agentSpawn drop it on disk (so the
+    // re-run sees `consulted` regardless of which heterogeneous peer was picked).
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude", "codex"], // codex is the heterogeneous reviewer
+      agentSpawn: vi.fn(async () => {
+        // A successful peer consult: retryPeerConsult writes the canonical
+        // evidence file on a non-null review (exit 0, parseable VERDICT).
+        return { stdout: "VERDICT: agree\n", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    // The re-run sees evidence on disk → consulted → not blocked → accept path.
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "peer:gate" && e.verdict === "consulted")).toBe(true);
+  });
+
+  it("FIX-293 AC-H4: policy peer_gate=soft → high-complexity + no review records but does NOT block", async () => {
+    const wt = highComplexityWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-rt3-")));
+    execDirs.push(rt);
+    mkdirSync(join(wt, ".roll"), { recursive: true });
+    writeFileSync(join(wt, ".roll", "policy.yaml"), "loop_safety:\n  peer_gate: soft\n");
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: wt, // policy.yaml is read from repoCwd
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "peer:gate" && e.verdict === "skipped")).toBe(true);
+    // soft → never invokes the retry spawn.
+    expect(ports.agentSpawn).not.toHaveBeenCalled();
+  });
+
+  it("FIX-293: prior peer evidence present → consulted, no retry, not blocked", async () => {
+    const wt = highComplexityWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-rt4-")));
+    execDirs.push(rt);
+    mkdirSync(join(rt, "peer"), { recursive: true });
+    writeFileSync(join(rt, "peer", `cycle-${CTX.cycleId}.md`), "[PEER_REVIEW] AGREE\n");
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
+    expect(ports.agentSpawn).not.toHaveBeenCalled(); // no retry needed
+  });
+
+  it("FIX-293: low-complexity delivery → peer gate not-required, no retry spawn, no peer:gate event", async () => {
+    // The default fake worktree is not a git repo → cycleChangedFiles=[] → not
+    // high → the peer gate is not-required: no retry, no peer:gate event. (The
+    // attest gate is a separate concern and may still block on a missing report.)
+    const { ports, calls } = fakePorts();
+    await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(ports.agentSpawn).not.toHaveBeenCalled(); // no peer-gate retry
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "peer:gate")).toBe(false);
+  });
+
   // US-TRUTH-001 — append_run writes the versioned complete-or-reasoned
   // terminal twin alongside the runs row, from the SAME ctx facts.
   it("US-TRUTH-001: append_run appends a cycle:terminal event with present-or-reasoned facts", async () => {

@@ -103,13 +103,13 @@ import {
   type AgentSpawn,
   realAgentSpawn,
 } from "./agent-spawn.js";
-import { cycleChangedFiles, runPeerGate } from "./peer-gate.js";
+import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate, verificationReportPath } from "./attest-gate.js";
 import { recoverPiUsage } from "./usage-recovery.js";
 import { realBudgetCheck } from "./budget-check.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
-import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
+import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { refreshAggregates } from "../commands/index-gen.js";
@@ -233,6 +233,11 @@ export interface Ports {
   capture: CapturePort;
   attest: AttestPort;
   agentSpawn: AgentSpawn;
+  /** Canonical installed agents — the heterogeneous-peer pool for the peer-gate
+   *  retry (FIX-293) and the opt-in pairing stages. Injectable so tests can pin
+   *  a deterministic peer pool; defaults to {@link agentsInstalled} over the real
+   *  environment probe. */
+  installedAgents?: () => string[];
   depsExec?: DepsExec;
   clock: ProcessClock;
   /** Runtime paths the executor writes to. */
@@ -601,27 +606,105 @@ export async function executeCommand(
       } catch {
         /* count is best-effort; a git miss must not fail the cycle */
       }
-      // FIX-150b peer hard-trigger gate: agent-agnostic, runs in EVERY cycle's
-      // capture step. High-complexity delivery without peer evidence → ALERT +
-      // `peer:gate` event (auditable); soft by default — the gate records, it
-      // never fails the cycle (unattended deliveries must not deadlock on a
-      // flaky peer; a policy.yaml escalation can consume the same verdict later).
-      await runPeerGate(
-        ports.paths.worktreePath,
-        dirname(ports.paths.eventsPath),
-        ctx.cycleId ?? "",
-        {
-          alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
-          event: (p) =>
-            ports.events.appendEvent(ports.paths.eventsPath, {
-              type: "peer:gate",
-              cycleId: p.cycleId,
-              verdict: p.verdict as "consulted" | "skipped",
-              reasons: p.reasons,
-              ts: ports.clock(),
+      // The one-way peer-consult closure, shared by the peer gate's retry
+      // (FIX-293) and the opt-in pairing stages (US-PAIR-003). A different agent
+      // reads the cycle diff and returns a terse verdict; 30s hard timeout
+      // (belt-and-braces race) so a flaky peer (pi) never stalls the cycle.
+      const reviewPeer = async (peer: string, diff: string, timeoutMs: number): Promise<PairReview | null> => {
+        const prompt =
+          `You are a heterogeneous PAIRING reviewer. A different agent wrote the diff below; ` +
+          `give it a terse second-pair-of-eyes review (correctness, edge cases, quality). ` +
+          `End with exactly one line "VERDICT: agree|refine|object" and one "FINDING: <issue>" line per concrete issue.\n\nDIFF:\n` +
+          diff;
+        let res;
+        try {
+          // Belt-and-braces hard timeout (pi pair-review): race the spawn against
+          // a wall clock so 30s is enforced even if an agent's spawn path ignores
+          // its own timeoutMs. Whichever loses, the cycle is never stalled.
+          res = await Promise.race([
+            ports.agentSpawn(peer, {
+              cwd: ports.paths.worktreePath,
+              skillBody: prompt,
+              timeoutMs,
+              ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
             }),
-        },
-      );
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
+          ]);
+        } catch {
+          return null;
+        }
+        if (res === null || res.timedOut || res.exitCode !== 0) return null;
+        const vm = /VERDICT:\s*(agree|refine|object)/i.exec(res.stdout);
+        const verdict = (vm?.[1]?.toLowerCase() ?? "agree") as PairReview["verdict"];
+        const findings = [...res.stdout.matchAll(/^\s*FINDING:\s*(.+)$/gim)].map((m) => (m[1] ?? "").trim());
+        // US-PAIR-006 cost observability (owner's top priority "至少知道花了多少钱"):
+        // the pair:verdict cost is now the peer's REAL list cost, parsed from its
+        // own stdout (claude stream-json or the per-agent stdout-scrape extractors).
+        // Best-effort by contract — an unparseable peer records 0, never throws.
+        const cost = peerReviewCost(peer, res.stdout);
+        return { verdict, findings, cost };
+      };
+      // Full cycle diff (origin/main...HEAD), shared by the gate retry + pairing.
+      const cycleDiff = async (cwd: string): Promise<string> => {
+        try {
+          // Baseline mirrors peer-gate's cycleChangedFiles (origin/main...HEAD):
+          // roll's loop always targets main (Done ≡ merged to main), so this is
+          // the cycle's net change. Kept identical to peer-gate for consistency.
+          const { stdout } = await execFileAsync("git", ["diff", "origin/main...HEAD"], { cwd, encoding: "utf8" });
+          return stdout.slice(0, 60_000);
+        } catch {
+          return "";
+        }
+      };
+      // FIX-293 peer gate: agent-agnostic, runs in EVERY cycle's capture step.
+      // High-complexity delivery (>3 files / cross-module / high-risk) WITHOUT
+      // peer evidence → ALERT + `peer:gate` event AND, in the default HARD mode,
+      // a BLOCK: the verdict is no longer discarded. On a block we RE-ATTEMPT the
+      // peer consult ONCE (existing reviewPeer path, same 30s hard timeout — no
+      // death-spiral on a flaky peer). If the retry produces evidence the gate
+      // re-runs green and the cycle proceeds; if it still yields none the cycle
+      // ends NOT-Done (peerBlocked → facts.agentExit=1, mirroring the attest gate)
+      // and an escalation alert fires. `loop_safety.peer_gate: soft` in
+      // policy.yaml keeps the legacy record-only behaviour for a migration window.
+      const peerGateMode = readPeerGateMode(ports.repoCwd);
+      const runtimeDir = dirname(ports.paths.eventsPath);
+      const cycleIdStr = ctx.cycleId ?? "";
+      const peerGateSinks = {
+        alert: (m: string) => ports.events.appendAlert(ports.paths.alertsPath, m),
+        event: (p: { cycleId: string; verdict: string; reasons: string[] }) =>
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "peer:gate",
+            cycleId: p.cycleId,
+            verdict: p.verdict as "consulted" | "skipped",
+            reasons: p.reasons,
+            ts: ports.clock(),
+          }),
+      };
+      let peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks);
+      let peerBlocked = peerGate.blocked;
+      if (peerGate.blocked) {
+        // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
+        const retry = await retryPeerConsult(ports.paths.worktreePath, runtimeDir, cycleIdStr, {
+          installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
+          workingAgent: ctx.agent ?? "claude",
+          reviewPeer,
+          diff: cycleDiff,
+          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
+          now: () => ports.clock(),
+        });
+        if (retry.status === "reviewed" && peerEvidencePresent(runtimeDir, cycleIdStr)) {
+          // Retry produced evidence → re-run the gate; it now sees `consulted`.
+          peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks);
+          peerBlocked = peerGate.blocked;
+        }
+        if (peerBlocked) {
+          // Still no peer evidence after the retry → escalate; cycle ends NOT-Done.
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `peer gate (hard): high-complexity work still without peer review after one retry (${retry.status}) — cycle ${cycleIdStr} BLOCKED; story not marked Done`,
+          );
+        }
+      }
       // US-PAIR-003 cross-agent pairing: after the peer gate, a heterogeneous
       // peer ONE-WAY reviews the diff. file-absent (.roll/pairing.yaml) = OFF, so
       // this is inert until the owner opts in via `roll pair init` — no behavior
@@ -639,40 +722,6 @@ export async function executeCommand(
       // Every stage preserves the PAIR-003 invariants (timeout / non-blocking /
       // cost / file-absent=off) since they all route through runPairing.
       {
-        const reviewPeer = async (peer: string, diff: string, timeoutMs: number): Promise<PairReview | null> => {
-          const prompt =
-            `You are a heterogeneous PAIRING reviewer. A different agent wrote the diff below; ` +
-            `give it a terse second-pair-of-eyes review (correctness, edge cases, quality). ` +
-            `End with exactly one line "VERDICT: agree|refine|object" and one "FINDING: <issue>" line per concrete issue.\n\nDIFF:\n` +
-            diff;
-          let res;
-          try {
-            // Belt-and-braces hard timeout (pi pair-review): race the spawn against
-            // a wall clock so 30s is enforced even if an agent's spawn path ignores
-            // its own timeoutMs. Whichever loses, the cycle is never stalled.
-            res = await Promise.race([
-              ports.agentSpawn(peer, {
-                cwd: ports.paths.worktreePath,
-                skillBody: prompt,
-                timeoutMs,
-                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-              }),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
-            ]);
-          } catch {
-            return null;
-          }
-          if (res === null || res.timedOut || res.exitCode !== 0) return null;
-          const vm = /VERDICT:\s*(agree|refine|object)/i.exec(res.stdout);
-          const verdict = (vm?.[1]?.toLowerCase() ?? "agree") as PairReview["verdict"];
-          const findings = [...res.stdout.matchAll(/^\s*FINDING:\s*(.+)$/gim)].map((m) => (m[1] ?? "").trim());
-          // US-PAIR-006 cost observability (owner's top priority "至少知道花了多少钱"):
-          // the pair:verdict cost is now the peer's REAL list cost, parsed from its
-          // own stdout (claude stream-json or the per-agent stdout-scrape extractors).
-          // Best-effort by contract — an unparseable peer records 0, never throws.
-          const cost = peerReviewCost(peer, res.stdout);
-          return { verdict, findings, cost };
-        };
         // US-PAIR-006: per-peer track record from the event stream drives the
         // ε-greedy hit-rate preference. Best-effort: an unreadable/absent events
         // file → no history → pure seeded round-robin (US-PAIR-001 behaviour).
@@ -690,22 +739,12 @@ export async function executeCommand(
         }
         // US-PAIR-004: build the deps once, then run each enabled stage.
         const pairingDeps = {
-          installed: agentsInstalled(realAgentEnv()),
+          installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
           isAvailable: () => true, // MVP: `installed` is the hard gate; a dead peer → reviewPeer null (non-blocking). Real probe is a refinement.
           reviewPeer,
           ...(pairHistory !== undefined ? { history: pairHistory } : {}),
           changedFiles: cycleChangedFiles,
-          diff: async (cwd: string) => {
-            try {
-              // Baseline mirrors peer-gate's cycleChangedFiles (origin/main...HEAD):
-              // roll's loop always targets main (Done ≡ merged to main), so this is
-              // the cycle's net change. Kept identical to peer-gate for consistency.
-              const { stdout } = await execFileAsync("git", ["diff", "origin/main...HEAD"], { cwd, encoding: "utf8" });
-              return stdout.slice(0, 60_000);
-            } catch {
-              return "";
-            }
-          },
+          diff: cycleDiff,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => ports.clock(),
         };
@@ -850,10 +889,13 @@ export async function executeCommand(
       }
       const facts: CapturedFacts = {
         usedWorktree: true,
-        // accept-path reaches capture at exit 0; a HARD attest block fails the
-        // capture (classifyCaptured: exit ≠ 0 → failed) so Done is withheld —
-        // unless the PR-state probe reclassifies it "published" (FIX-244).
-        agentExit: attestBlocked ? 1 : 0,
+        // accept-path reaches capture at exit 0; a HARD attest OR peer block fails
+        // the capture (classifyCaptured: exit ≠ 0 → failed) so Done is withheld.
+        // FIX-293: a high-complexity delivery with no peer review (even after the
+        // one retry) is peerBlocked → it MUST NOT self-score / flip Done. The
+        // FIX-244 PR-state "published" reclassification stays scoped to the attest
+        // block (a peer-blocked cycle still owes peer review; Done≡merged anyway).
+        agentExit: attestBlocked || peerBlocked ? 1 : 0,
         timedOut: false,
         commitsAhead,
         ...(mainAhead > 0 ? { mainAhead } : {}),

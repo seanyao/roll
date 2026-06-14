@@ -18,7 +18,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
+import { canonicalAgentName, isHeterogeneous, parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
 import { writeSelfScoreNote } from "../lib/self-score.js";
 import { assessComplexity } from "./peer-gate.js";
 
@@ -307,6 +307,78 @@ export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | 
   const score = Number(sm[1]);
   if (!Number.isInteger(score) || score < 1 || score > 10) return null;
   return { score, verdict: vm[1].toLowerCase() as PairScore["verdict"], rationale: rm[1].trim() };
+}
+
+// ── FIX-293: the peer-gate retry consult ─────────────────────────────────────
+
+export interface RetryPeerConsultDeps {
+  /** Installed agents (canonical), e.g. agentsInstalled(realAgentEnv()). */
+  installed: string[];
+  /** The agent that did the work — its heterogeneous peer is the reviewer. */
+  workingAgent: string;
+  /** One-way review (the existing consult closure): the peer reads the diff and
+   *  returns a verdict, or null on timeout/error. The 30s hard timeout lives in
+   *  the implementation — this retry respects it (a flaky peer can't spiral). */
+  reviewPeer: (peer: string, diff: string, timeoutMs: number) => Promise<PairReview | null>;
+  /** Full cycle diff the peer reviews. */
+  diff: (worktreeCwd: string) => Promise<string>;
+  event: (e: PairEvent) => void;
+  now: () => number;
+  /** Override the 30s default (tests). */
+  timeoutMs?: number;
+}
+
+export interface RetryPeerConsultResult {
+  status: "none-available" | "reviewed" | "timeout" | "empty" | "error";
+  peer?: string;
+}
+
+/**
+ * FIX-293 — re-attempt the peer consultation ONCE when the peer gate blocks a
+ * high-complexity delivery that shipped with no peer review.
+ *
+ * Unlike {@link runPairing} this is NOT gated on `.roll/pairing.yaml`: the peer
+ * gate is the always-on, agent-agnostic safety mechanism (pairing is the opt-in
+ * enhancement), so the block-triggered retry must fire whether or not pairing is
+ * configured. It picks the first heterogeneous installed peer (registry order, so
+ * the choice is deterministic — no `if agent==='x'` special-casing) and runs the
+ * SAME `reviewPeer` consult path the pairing gate uses, with the SAME 30s hard
+ * timeout. On a real verdict it writes the canonical peer-gate evidence file
+ * (`<rt>/peer/cycle-<id>.pair.json`) so a re-run of the gate sees evidence and
+ * unblocks. Never throws — the retry is a best-effort rescue, not a new way to
+ * topple a cycle.
+ */
+export async function retryPeerConsult(
+  worktreeCwd: string,
+  runtimeDir: string,
+  cycleId: string,
+  deps: RetryPeerConsultDeps,
+): Promise<RetryPeerConsultResult> {
+  try {
+    const working = canonicalAgentName(deps.workingAgent);
+    const peer = deps.installed
+      .map(canonicalAgentName)
+      .filter((a, i, arr) => arr.indexOf(a) === i)
+      .filter((a) => a !== working && isHeterogeneous(a, working))[0];
+    if (peer === undefined) {
+      deps.event({ type: "pair:none-available", cycleId, stage: "code", reason: "peer-gate retry: no heterogeneous peer installed", ts: deps.now() });
+      return { status: "none-available" };
+    }
+    const diff = await deps.diff(worktreeCwd);
+    if (diff.trim() === "") return { status: "empty" };
+    deps.event({ type: "pair:selected", cycleId, workingAgent: working, peer, stage: "code", ts: deps.now() });
+
+    const review = await deps.reviewPeer(peer, diff, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    if (review === null) return { status: "timeout", peer }; // flaky peer — stays blocked, no death-spiral
+
+    const path = evidencePath(runtimeDir, cycleId, "code");
+    mkdirSync(join(runtimeDir, "peer"), { recursive: true });
+    writeFileSync(path, JSON.stringify({ cycleId, workingAgent: working, peer, stage: "code", ...review }, null, 2), "utf8");
+    deps.event({ type: "pair:verdict", cycleId, peer, verdict: review.verdict, findings: review.findings.length, cost: review.cost, stage: "code", ts: deps.now() });
+    return { status: "reviewed", peer };
+  } catch {
+    return { status: "error" }; // never throw — the retry is a rescue, not a cycle killer
+  }
 }
 
 /** The score-stage prompt (shared by the loop executor and `roll pair score`). */

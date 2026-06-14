@@ -1,5 +1,5 @@
 /**
- * FIX-150b — the peer HARD-trigger gate.
+ * FIX-150b / FIX-293 — the peer HARD-trigger gate.
  *
  * v2's peer review was a skill-text suggestion: nothing enforced it, non-claude
  * cycle agents never saw it, and skips left zero trace (owner audit 2026-05-31:
@@ -7,13 +7,21 @@
  * RUNTIME MECHANISM that runs inside every cycle's capture step, agent-agnostic:
  *
  *   high-complexity delivery  AND  no peer evidence
- *     ⇒ ALERT + a `peer` gate event in events.ndjson (auditable forever).
+ *     ⇒ ALERT + a `peer:gate` event in events.ndjson (auditable forever).
  *
- * The gate is SOFT by default (record, don't block): an unattended cycle that
- * hard-fails on a missing peer would deadlock deliveries on flaky peers (the
- * timebox lesson — peers do hang). `loop_safety.peer_gate: hard` in policy.yaml
- * is the escalation hook (consumed by a later card; the verdict string is
- * already emitted here so the audit trail is complete either way).
+ * FIX-293 — the gate now has TEETH. It used to be SOFT (record, don't block) and
+ * its verdict was DISCARDED by the executor, so a high-complexity cycle with NO
+ * peer review still silently fell back to self-score and flipped the card Done —
+ * degrading the standard exactly when peer review matters most (FIX-284). The
+ * owner decision: a high-complexity delivery with no peer evidence MUST NOT
+ * self-score. The gate is now HARD by default — it BLOCKS the delivery and the
+ * executor RE-ATTEMPTS the peer consultation ONCE (bounded; the existing peer
+ * 30s hard timeout is respected so a flaky peer like pi can't death-spiral the
+ * cycle). If the retry produces evidence → proceed; if it still yields none →
+ * stay blocked, escalate via ALERT, and the cycle ends NOT-Done.
+ *
+ * `loop_safety.peer_gate: soft` in policy.yaml keeps the old record-only
+ * behaviour for an explicit migration window; absent ⇒ hard (the owner default).
  *
  * Complexity is deterministic and cheap — `git diff --name-only` of the cycle
  * branch vs origin/main in the worktree:
@@ -22,12 +30,13 @@
  *   - any high-risk path (CI workflows, infra git/github/process seams).
  *
  * Peer evidence contract (FIX-150a alignment): a per-cycle evidence file at
- * `<rt>/peer/cycle-<cycleId>.*` (md/json), written by the roll-peer skill or
- * any consult wrapper. Presence = consulted; absence on a high-complexity
- * delivery = "skipped" verdict.
+ * `<rt>/peer/cycle-<cycleId>.*` (md/json), written by the roll-peer skill, the
+ * pairing gate, or any consult wrapper. Presence = consulted; absence on a
+ * high-complexity delivery = "skipped" verdict.
  */
+import { parsePolicy } from "@roll/core";
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -83,9 +92,17 @@ export function peerEvidencePresent(runtimeDir: string, cycleId: string): boolea
   }
 }
 
+export type PeerGateMode = "soft" | "hard";
+
 export interface PeerGateResult {
   verdict: "consulted" | "skipped" | "not-required";
+  mode: PeerGateMode;
   reasons: string[];
+  /** true ONLY when mode==="hard" && verdict==="skipped" — the delivery is
+   *  blocked (high-complexity work shipped with no peer review). The executor
+   *  consumes this: it re-attempts the consult once and, if still blocked, fails
+   *  the capture so the story is NOT marked Done. */
+  blocked: boolean;
 }
 
 export interface PeerGateSinks {
@@ -93,30 +110,50 @@ export interface PeerGateSinks {
   event: (payload: { cycleId: string; verdict: string; reasons: string[] }) => void;
 }
 
+/** Read `loop_safety.peer_gate` from `<repoCwd>/.roll/policy.yaml`; default hard.
+ *  FIX-293: the owner default is hard (block + retry); an explicit `soft` keeps
+ *  the legacy record-only behaviour. Mirrors {@link readAttestGateMode}. */
+export function readPeerGateMode(repoCwd: string): PeerGateMode {
+  try {
+    const p = join(repoCwd, ".roll", "policy.yaml");
+    if (!existsSync(p)) return "hard";
+    return parsePolicy(readFileSync(p, "utf8")).loopSafety.peerGate === "soft" ? "soft" : "hard";
+  } catch {
+    return "hard"; // unreadable / unparseable policy → fail closed (block)
+  }
+}
+
 /**
  * Run the gate for one cycle. Pure decision + sink side-effects; never throws.
- * Returns the verdict so callers/tests can assert without reading the sinks.
+ * Returns the verdict + `blocked` so callers/tests can assert without the sinks.
+ *
+ * FIX-293: when `mode === "hard"` (the default), a high-complexity delivery with
+ * no peer evidence is `blocked`. The soft mode records the same `skipped` verdict
+ * but never blocks (explicit migration window).
  */
 export async function runPeerGate(
   worktreeCwd: string,
   runtimeDir: string,
   cycleId: string,
+  mode: PeerGateMode,
   sinks: PeerGateSinks,
 ): Promise<PeerGateResult> {
   try {
     const files = await cycleChangedFiles(worktreeCwd);
     const cx = assessComplexity(files);
-    if (!cx.high) return { verdict: "not-required", reasons: [] };
+    if (!cx.high) return { verdict: "not-required", mode, reasons: [], blocked: false };
     if (peerEvidencePresent(runtimeDir, cycleId)) {
       sinks.event({ cycleId, verdict: "consulted", reasons: cx.reasons });
-      return { verdict: "consulted", reasons: cx.reasons };
+      return { verdict: "consulted", mode, reasons: cx.reasons, blocked: false };
     }
+    const blocked = mode === "hard";
     sinks.alert(
-      `peer gate: high-complexity delivery without peer evidence (${cx.reasons.join("; ")}) — cycle ${cycleId}`,
+      `peer gate (${mode}): high-complexity work without peer review (${cx.reasons.join("; ")}) — cycle ${cycleId}` +
+        (blocked ? " — retrying the consult; story not marked Done unless peer evidence is produced" : ""),
     );
     sinks.event({ cycleId, verdict: "skipped", reasons: cx.reasons });
-    return { verdict: "skipped", reasons: cx.reasons };
+    return { verdict: "skipped", mode, reasons: cx.reasons, blocked };
   } catch {
-    return { verdict: "not-required", reasons: [] }; // gate must never fail the cycle
+    return { verdict: "not-required", mode, reasons: [], blocked: false }; // gate must never fail the cycle by surprise
   }
 }

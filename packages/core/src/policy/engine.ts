@@ -72,6 +72,10 @@ export interface LoopSafetyConfig {
   /** FIX-207 acceptance-report gate escalation. Absent ⇒ soft (record-only);
    *  `hard` makes a delivery with no fresh acceptance report fail the cycle. */
   attestGate?: "soft" | "hard";
+  /** FIX-293 peer-review gate escalation. Absent ⇒ hard (the owner default —
+   *  high-complexity work without peer evidence is blocked + retried, not self-
+   *  scored); set `soft` to keep the old record-only behaviour explicitly. */
+  peerGate?: "soft" | "hard";
   /** US-EVID-016: same-story correction returns/reroutes before PAUSE. */
   correctionOscillationThreshold: number;
   /** US-EVID-016: same failure signal repetitions before PAUSE. */
@@ -339,6 +343,9 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     ...(budget ? { budget } : {}),
     ...(flat["attest_gate"] === "hard" || flat["attest_gate"] === "soft"
       ? { attestGate: flat["attest_gate"] as "soft" | "hard" }
+      : {}),
+    ...(flat["peer_gate"] === "hard" || flat["peer_gate"] === "soft"
+      ? { peerGate: flat["peer_gate"] as "soft" | "hard" }
       : {}),
   };
   return [i, cfg];

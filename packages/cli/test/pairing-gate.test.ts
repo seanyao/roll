@@ -317,3 +317,66 @@ describe("score never routes through the review loop (kimi pair-review)", () => 
     expect(events).toHaveLength(0);
   });
 });
+
+// ── FIX-293: the peer-gate retry consult ─────────────────────────────────────
+import { retryPeerConsult, type RetryPeerConsultDeps } from "../src/runner/pairing-gate.js";
+
+function retryDeps(over: Partial<RetryPeerConsultDeps> = {}): { d: RetryPeerConsultDeps; events: PairEvent[] } {
+  const events: PairEvent[] = [];
+  const d: RetryPeerConsultDeps = {
+    installed: ["claude", "codex"], // codex is heterogeneous from claude
+    workingAgent: "claude",
+    reviewPeer: async (_peer, _diff, _t) => ({ verdict: "agree", findings: [], cost: 0.05 }),
+    diff: async () => "diff --git a/a.ts ...",
+    event: (e) => events.push(e),
+    now: () => 7777,
+    ...over,
+  };
+  return { d, events };
+}
+
+describe("retryPeerConsult — FIX-293 AC-H3 (bounded retry, config-independent)", () => {
+  it("fires WITHOUT pairing.yaml (always-on gate, not opt-in) and writes the gate's evidence file", async () => {
+    const { rt } = project(null); // no pairing.yaml — the gate retry still runs
+    const wt = rt; // diff is injected, so worktree path is irrelevant here
+    const { d, events } = retryDeps();
+    const r = await retryPeerConsult(wt, rt, "c-retry", d);
+    expect(r.status).toBe("reviewed");
+    expect(r.peer).toBe("codex");
+    // The evidence file is the canonical peer-gate path → peerEvidencePresent flips true.
+    expect(existsSync(join(rt, "peer", "cycle-c-retry.pair.json"))).toBe(true);
+    expect(events.map((e) => e.type)).toEqual(["pair:selected", "pair:verdict"]);
+  });
+
+  it("a flaky/timed-out peer (reviewPeer→null) stays blocked, no evidence, no death-spiral", async () => {
+    const { rt } = project(null);
+    const { d } = retryDeps({ reviewPeer: async () => null });
+    const r = await retryPeerConsult(rt, rt, "c-to", d);
+    expect(r.status).toBe("timeout");
+    expect(existsSync(join(rt, "peer", "cycle-c-to.pair.json"))).toBe(false);
+  });
+
+  it("no heterogeneous peer installed → none-available (audited), no evidence", async () => {
+    const { rt } = project(null);
+    const { d, events } = retryDeps({ installed: ["claude"] }); // only the working agent
+    const r = await retryPeerConsult(rt, rt, "c-na", d);
+    expect(r.status).toBe("none-available");
+    expect(events[0]?.type).toBe("pair:none-available");
+    expect(existsSync(join(rt, "peer", "cycle-c-na.pair.json"))).toBe(false);
+  });
+
+  it("empty diff → nothing to review (no peer burned)", async () => {
+    const { rt } = project(null);
+    const { d } = retryDeps({ diff: async () => "   " });
+    const r = await retryPeerConsult(rt, rt, "c-empty", d);
+    expect(r.status).toBe("empty");
+  });
+
+  it("respects the injected timeout (it is what bounds the consult)", async () => {
+    const { rt } = project(null);
+    let seenTimeout = -1;
+    const { d } = retryDeps({ timeoutMs: 12345, reviewPeer: async (_p, _d, t) => { seenTimeout = t; return { verdict: "agree", findings: [], cost: 0 }; } });
+    await retryPeerConsult(rt, rt, "c-t", d);
+    expect(seenTimeout).toBe(12345);
+  });
+});

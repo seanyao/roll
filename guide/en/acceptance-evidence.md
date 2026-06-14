@@ -110,7 +110,7 @@ theme-aware, printable):
                                          groups (merged / in a cycle / in backlog)
 .roll/features/<epic>/<id>/index.html  ← story dossier: five stations — Definition,
                                          Design, Execution, Delivery (attest banner
-                                         + AC table), Retrospective
+                                         + per-AC evidence blocks), Retrospective
 ```
 
 Every figure is computed from the truth model — anchors -> selectors -> adapter
@@ -118,6 +118,12 @@ Every figure is computed from the truth model — anchors -> selectors -> adapte
 and evidence truth; Cycle facts use TerminalOutcome records; Release facts use
 the latest gate verdict and active waiver. The guiding line: **backlog is wish,
 main is truth, done ≡ merged.**
+
+In story dossiers, each AC renders its own evidence block. Screenshots stay as
+thumbnails linked to the full image; text artifacts such as Vitest output are
+read from the card folder and shown inline in a collapsible `<details><pre>`
+block, with HTML escaped. Missing text evidence is shown as an explicit
+unavailable state rather than a link that pretends the proof exists.
 
 The front-page truth board keeps unknown visible. `?` means the fact is absent
 or outside the known schema; `0` means a known zero. A premature backlog

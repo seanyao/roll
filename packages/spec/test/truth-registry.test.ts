@@ -54,7 +54,7 @@ describe("US-TRUTH-006 AC2 — real builders' fields are all registered", () => 
   });
 
   it("US-GOAL-001 registers persisted goal.yaml fields", () => {
-    const keys = ["schema", "scope", "review", "budgetUsd", "limits", "status", "usage", "createdAt", "updatedAt", "lastDecisionReason"];
+    const keys = ["schema", "scope", "review", "limits", "status", "usage", "createdAt", "updatedAt", "lastDecisionReason"];
     const missing = unregisteredFields("goal", keys);
     expect(missing, registrationHint("goal", missing)).toEqual([]);
   });

@@ -19,8 +19,9 @@
  *     "same input → same route", just generalised from one slot to a rule table.
  *   - `max_consecutive_failures` default 3 mirrors the only v2 strike count.
  *   - `action_on_breach: pause_and_notify` is v2's PAUSE-sentinel channel.
- *   - budget gate (§6) lives in cost/budget.ts (BudgetPolicy); this parser only
- *     reads its shape so the whole `policy.yaml` round-trips through one loader.
+ *   - the cost/budget ceiling is REMOVED — the loop now stops on NO PROGRESS
+ *     (a deterministic dead-loop breaker), not on a dollar ceiling; this parser
+ *     ignores any stale `budget:` block a user policy.yaml may still carry.
  *
  * NEW v3 AC (B-group) — 防误伤非本项目仓: refuse to run in a non-compliant repo.
  * v2's structural guard is the FIX-065 tripwire (bin/roll:7917-7934): before any
@@ -35,8 +36,6 @@
  * compliance verdict are pure. Filesystem probes for compliance are injected as
  * boolean facts ({@link RepoMarkers}); core reads no files itself.
  */
-import type { BudgetPolicy } from "@roll/spec";
-
 // ── policy.yaml shape (architecture §5.1 + §6.1) ─────────────────────────────
 
 /** A routing rule's match clause — level and/or a type glob. */
@@ -67,8 +66,6 @@ export interface LoopSafetyConfig {
   maxStoryFailures: number;
   /** Action when the per-story ceiling trips. */
   actionOnStoryBreach: string;
-  /** Cost ceiling (§6.1 budget) — shape mirrors @roll/spec BudgetPolicy + hints. */
-  budget?: PolicyBudget;
   /** FIX-207 acceptance-report gate escalation. Absent ⇒ soft (record-only);
    *  `hard` makes a delivery with no fresh acceptance report fail the cycle. */
   attestGate?: "soft" | "hard";
@@ -90,18 +87,6 @@ export interface LoopSafetyConfig {
    *  no proxy tool is hardcoded — the user sets their own command here; absent ⇒
    *  no auto-enable (the guard halts-and-tells). Absent ⇒ undefined. */
   proxyEnableCmd?: string;
-}
-
-/** Budget block under loop_safety — superset of @roll/spec {@link BudgetPolicy}
- *  carrying the upgrade-hint trigger (architecture §6.1). */
-export interface PolicyBudget extends Partial<BudgetPolicy> {
-  dailyUsd: number;
-  weeklyUsd: number;
-  metric: "effective_cost";
-  onApproach: "downgrade";
-  onBreach: "pause_and_notify";
-  /** Cheap-model revert-rate trigger → suggest_upgrade (never auto-changes). */
-  upgradeHint?: { revertRateGt: number; action: "suggest_upgrade" };
 }
 
 /** The whole parsed policy.yaml. */
@@ -311,23 +296,17 @@ function assignRuleField(cur: Partial<PolicyRoutingRule> & { match: PolicyMatch 
   }
 }
 
-/** Parse the `loop_safety:` mapping (+ nested budget) from `start`; return
- *  [nextTopLevelIndex, config]. */
+/** Parse the `loop_safety:` mapping from `start`; return
+ *  [nextTopLevelIndex, config]. A stale nested `budget:` block (the removed cost
+ *  ceiling) is ignored like any other unknown key. */
 function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyConfig] {
   const flat: Record<string, string> = {};
-  let budget: PolicyBudget | undefined;
   let i = start;
   for (; i < lines.length; i++) {
     const ln = lines[i];
     if (ln === undefined) break;
     if (ln.indent === 0) break;
     const text = ln.text.trim();
-    if (text.startsWith("budget:")) {
-      const [next, b] = parseBudget(lines, i + 1, ln.indent);
-      budget = b;
-      i = next - 1;
-      continue;
-    }
     const idx = text.indexOf(":");
     if (idx < 0) continue;
     const key = text.slice(0, idx).trim();
@@ -346,7 +325,6 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     correctionSignalThreshold: numOr(flat["correction_signal_threshold"], DEFAULT_CORRECTION_SIGNAL_THRESHOLD),
     correctionSignalWindowSec: numOr(flat["correction_signal_window_sec"], DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC),
     correctionActuator: flat["correction_actuator"] === "auto" ? "auto" : DEFAULT_CORRECTION_ACTUATOR,
-    ...(budget ? { budget } : {}),
     ...(flat["attest_gate"] === "hard" || flat["attest_gate"] === "soft"
       ? { attestGate: flat["attest_gate"] as "soft" | "hard" }
       : {}),
@@ -362,90 +340,6 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
   return [i, cfg];
 }
 
-/** Parse the nested `budget:` mapping (+ nested on_approach/on_breach/
- *  upgrade_hint) starting at `start`; return [nextIndex, budget]. Anything at or
- *  below `parentIndent` ends the block. */
-function parseBudget(lines: PreLine[], start: number, parentIndent: number): [number, PolicyBudget] {
-  const flat: Record<string, string> = {};
-  let onApproach = "downgrade";
-  let onBreach = "pause_and_notify";
-  let upgradeHint: PolicyBudget["upgradeHint"];
-  let i = start;
-  for (; i < lines.length; i++) {
-    const ln = lines[i];
-    if (ln === undefined) break;
-    if (ln.indent <= parentIndent) break;
-    const text = ln.text.trim();
-    const idx = text.indexOf(":");
-    if (idx < 0) continue;
-    const key = text.slice(0, idx).trim();
-    const val = text.slice(idx + 1).trim();
-    if (key === "on_approach" || key === "on_breach") {
-      // Either inline `{ action: x }` or a nested `action:` on the next lines.
-      let action = "";
-      if (val.startsWith("{")) action = parseFlowMap(val)["action"] ?? "";
-      else action = readNestedAction(lines, i + 1, ln.indent);
-      if (key === "on_approach" && action !== "") onApproach = action;
-      if (key === "on_breach" && action !== "") onBreach = action;
-      continue;
-    }
-    if (key === "upgrade_hint") {
-      upgradeHint = readUpgradeHint(lines, i + 1, ln.indent, val);
-      continue;
-    }
-    if (val !== "") flat[key] = unquote(val);
-  }
-  const budget: PolicyBudget = {
-    dailyUsd: numOr(flat["daily_usd"], 0),
-    weeklyUsd: numOr(flat["weekly_usd"], 0),
-    metric: "effective_cost",
-    onApproach: onApproach as "downgrade",
-    onBreach: onBreach as "pause_and_notify",
-    ...(upgradeHint ? { upgradeHint } : {}),
-  };
-  return [i, budget];
-}
-
-/** Read an `action:` value nested under on_approach/on_breach (one level in). */
-function readNestedAction(lines: PreLine[], start: number, parentIndent: number): string {
-  for (let i = start; i < lines.length; i++) {
-    const ln = lines[i];
-    if (ln === undefined || ln.indent <= parentIndent) break;
-    const text = ln.text.trim();
-    if (text.startsWith("action:")) return unquote(text.slice("action:".length).trim());
-  }
-  return "";
-}
-
-/** Read the upgrade_hint block (`when: { revert_rate_gt: N }` + `action:`). */
-function readUpgradeHint(
-  lines: PreLine[],
-  start: number,
-  parentIndent: number,
-  inlineVal: string,
-): PolicyBudget["upgradeHint"] {
-  let revertRateGt = 0;
-  let action = "suggest_upgrade";
-  if (inlineVal.startsWith("{")) {
-    const m = parseFlowMap(inlineVal);
-    revertRateGt = numOr(m["revert_rate_gt"], 0);
-    if (m["action"] !== undefined) action = m["action"];
-  }
-  for (let i = start; i < lines.length; i++) {
-    const ln = lines[i];
-    if (ln === undefined || ln.indent <= parentIndent) break;
-    const text = ln.text.trim();
-    if (text.startsWith("when:")) {
-      const rest = text.slice("when:".length).trim();
-      if (rest.startsWith("{")) revertRateGt = numOr(parseFlowMap(rest)["revert_rate_gt"], revertRateGt);
-    } else if (text.startsWith("revert_rate_gt:")) {
-      revertRateGt = numOr(text.slice("revert_rate_gt:".length).trim(), revertRateGt);
-    } else if (text.startsWith("action:")) {
-      action = unquote(text.slice("action:".length).trim());
-    }
-  }
-  return { revertRateGt, action: action as "suggest_upgrade" };
-}
 
 // ── Rule matching (first-match, deterministic — D1/I10) ──────────────────────
 

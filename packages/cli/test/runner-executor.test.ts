@@ -247,7 +247,8 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(row["cost_usd"]).toBe(0.42);
     expect(row["tokens_in"]).toBe(150);
     expect(row["tokens_out"]).toBe(60);
-    // FIX-249: model + effective cost ride the row too (budget gates on effective).
+    // FIX-249: model + effective cost are RECORDED on the row (observability kept;
+    // the budget gate that consumed effective cost was removed).
     expect(row["model"]).toBe("claude-opus-4-8");
     expect(row["cost_effective_usd"]).toBe(0.42);
   });
@@ -485,7 +486,6 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       commit: vi.fn(async () => ({ committed: true, pushed: true, nothingToCommit: false })),
     },
     route: { resolve: vi.fn(() => ({ agent: "claude", model: "" })) },
-    budget: { check: vi.fn(() => "ok" as const) },
     ...over,
   };
   return { ports, calls };
@@ -589,16 +589,6 @@ describe("executeCommand — command → executor mapping", () => {
       runDir: "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1",
       ts: 42,
     });
-  });
-
-  it("budget_check pause → budget_halt; ok → budget_ok", async () => {
-    const halt = fakePorts({ budget: { check: () => "pause_and_notify" } });
-    const r1 = await executeCommand({ kind: "budget_check", storyId: "US-RUN-001" }, halt.ports, CTX);
-    expect(r1.event?.type).toBe("budget_halt");
-
-    const ok = fakePorts();
-    const r2 = await executeCommand({ kind: "budget_check", storyId: "US-RUN-001" }, ok.ports, CTX);
-    expect(r2.event).toEqual({ type: "budget_ok" });
   });
 
   it("spawn_agent → agent_exited with the agent exit code", async () => {

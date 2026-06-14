@@ -216,7 +216,7 @@ function mergeCtx(live: CycleContext, next: CycleContext): CycleContext {
 /**
  * Render the command PLAN the cycle WOULD execute, without running anything.
  * Drives the pure {@link cycleStep} with a SCRIPTED happy-path event sequence
- * (preflight→worktree→pick→route→budget→execute(accept)→capture(built)→publish→
+ * (preflight→worktree→pick→route→execute(accept)→capture(built)→publish→
  * done), collecting every command. No ports, no I/O — purely the orchestrator's
  * command vocabulary, so `roll loop run-once --dry-run` shows the executor map.
  */
@@ -227,7 +227,6 @@ export function dryRunPlan(ctx: CycleContext): string[] {
     { type: "worktree_created" },
     { type: "story_picked", storyId: ctx.storyId ?? "US-EXAMPLE" },
     { type: "route_resolved", agent: ctx.agent ?? "claude", model: ctx.model ?? "" },
-    { type: "budget_ok" },
     { type: "agent_exited", exit: 0, timedOut: false },
     {
       type: "facts_captured",
@@ -257,12 +256,6 @@ function describeCommand(cmd: CycleCommand): string {
       return "pick_story           → picker.pickStory(.roll/backlog.md)";
     case "resolve_route":
       return `resolve_route        → router.resolveRoute(${cmd.storyId})`;
-    case "budget_check":
-      return `budget_check         → budget.budgetVerdict(${cmd.storyId})`;
-    case "budget_downgrade":
-      return `budget_downgrade     → alert(downgrade: ${cmd.reason})`;
-    case "halt_cycle":
-      return `halt_cycle           → alert + stop (${cmd.reason})`;
     case "spawn_agent":
       return `spawn_agent          → agentSpawn(${cmd.agent}, attempt ${cmd.attempt})`;
     case "kill_agent":

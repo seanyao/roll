@@ -68,14 +68,52 @@ describe("classifyCaptured — pre-publish six-state (bin/roll:9127-9157)", () =
   it("agent exit ≠ 0 → failed (bin/roll:9133)", () => {
     expect(classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 0 })).toBe("failed");
   });
-  it("exit 0 + 0 commits → idle (bin/roll:9180)", () => {
-    expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0 })).toBe("idle");
+  it("exit 0 + 0 commits + no agent executed → idle (genuine no-op, bin/roll:9180)", () => {
+    expect(classifyCaptured({ usedWorktree: true, agentExecuted: false, agentExit: 0, timedOut: false, commitsAhead: 0 })).toBe("idle");
   });
   it("FIX-252: exit 0 + 0 branch commits but local main ahead origin → failed drift, not idle", () => {
     expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, mainAhead: 1 })).toBe("failed");
   });
   it("exit 0 + commits → built (bin/roll:9142)", () => {
     expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 2 })).toBe("built");
+  });
+});
+
+describe("Hook 1 — productivity floor: gave_up vs idle", () => {
+  it("agent EXECUTED + exit 0 + 0 commits → gave_up (failed-class), not idle", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExecuted: true, agentExit: 0, timedOut: false, commitsAhead: 0 }),
+    ).toBe("gave_up");
+  });
+  it("no agent executed (genuine no-op) → still idle, never gave_up", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExecuted: false, agentExit: 0, timedOut: false, commitsAhead: 0 }),
+    ).toBe("idle");
+  });
+  it("agentExecuted undefined defaults to executed (capture only follows a spawn) → gave_up", () => {
+    expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0 })).toBe("gave_up");
+  });
+  it("gave_up maps to its own terminal outcome (failed-class, not idle_no_work)", () => {
+    expect(mapV2Status("gave_up")).toBe("gave_up");
+  });
+  it("a gave_up cycle cleans the worktree and ALERTs on the FIRST occurrence (no streak)", () => {
+    const { state, kinds, commands } = walk([
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "FIX-284" },
+      { type: "route_resolved", agent: "codex", model: "" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExecuted: true, agentExit: 0, timedOut: false, commitsAhead: 0 } },
+    ]);
+    expect(state.terminal).toBe("gave_up");
+    expect(kinds).toContain("cleanup_worktree");
+    // ALERT is written on the FIRST gave_up — no 2-hit streak required.
+    const alert = commands.find((c) => c.kind === "append_alert");
+    expect(alert).toMatchObject({ message: expect.stringContaining("gave_up") });
+    // The terminal runs row carries the gave_up status (failed-class).
+    const run = commands.find((c) => c.kind === "append_run");
+    expect(run).toMatchObject({ status: "gave_up", outcome: "gave_up" });
   });
 });
 
@@ -156,18 +194,18 @@ describe("happy-path phase walk → done", () => {
       { type: "worktree_created" },
       { type: "story_picked", storyId: "US-1" },
       { type: "route_resolved", agent: "claude", model: "sonnet" },
-      { type: "budget_ok" },
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 2 } },
       { type: "published", result: { status: 0 } },
     ]);
+    // The budget gate is REMOVED — route_resolved now emits spawn_agent directly
+    // (no intermediate budget_check step).
     expect(kinds).toEqual([
       "preflight",
       "create_worktree",
       "emit_event", // cycle:start
       "pick_story",
       "resolve_route",
-      "budget_check",
       "spawn_agent",
       "capture_facts",
       "publish_pr",
@@ -203,7 +241,6 @@ describe("failure branches", () => {
       { type: "worktree_created" },
       { type: "story_picked", storyId: "FIX-252" },
       { type: "route_resolved", agent: "pi", model: "" },
-      { type: "budget_ok" },
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, mainAhead: 1 } },
     ]);
@@ -237,7 +274,6 @@ describe("failure branches", () => {
     drive({ type: "worktree_created" });
     drive({ type: "story_picked", storyId: "US-1" });
     drive({ type: "route_resolved", agent: "pi", model: "k2" });
-    drive({ type: "budget_ok" }); // → spawn attempt 1
     // attempt 1 fails → retry to 2
     let cmds = drive({ type: "agent_exited", exit: 1, timedOut: false });
     expect(cmds.map((c) => c.kind)).toEqual(["sleep_backoff", "spawn_agent"]);
@@ -261,7 +297,6 @@ describe("failure branches", () => {
       { type: "worktree_created" },
       { type: "story_picked", storyId: "US-1" },
       { type: "route_resolved", agent: "claude", model: "sonnet" },
-      { type: "budget_ok" },
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 } },
       { type: "published", result: { status: 2, mergedBack: true } },
@@ -276,7 +311,6 @@ describe("failure branches", () => {
       { type: "worktree_created" },
       { type: "story_picked", storyId: "US-1" },
       { type: "route_resolved", agent: "claude", model: "sonnet" },
-      { type: "budget_ok" },
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 } },
       { type: "published", result: { status: 1, orphanPushed: true } },
@@ -290,7 +324,6 @@ describe("failure branches", () => {
       { type: "worktree_created" },
       { type: "story_picked", storyId: "US-1" },
       { type: "route_resolved", agent: "claude", model: "sonnet" },
-      { type: "budget_ok" },
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 } },
       { type: "published", result: { status: 1 } },
@@ -300,7 +333,7 @@ describe("failure branches", () => {
     expect(failed.kinds).not.toContain("cleanup_worktree");
   });
 
-  it("budget breach (I11) halts before spawn → blocked, no agent spawn", () => {
+  it("route_resolved spawns the agent directly (budget gate removed)", () => {
     let state = initialCycleState(CTX);
     const drive = (ev: CycleEvent): CycleCommand[] => {
       const r = cycleStep(state, ev);
@@ -311,11 +344,11 @@ describe("failure branches", () => {
     drive({ type: "preflight_done" });
     drive({ type: "worktree_created" });
     drive({ type: "story_picked", storyId: "US-1" });
-    drive({ type: "route_resolved", agent: "claude", model: "opus" });
-    const cmds = drive({ type: "budget_halt", reason: "daily ceiling reached" });
-    expect(state.terminal).toBe("blocked");
-    expect(cmds.map((c) => c.kind)).toEqual(["halt_cycle", "emit_event", "append_run"]);
-    expect(cmds.some((c) => c.kind === "spawn_agent")).toBe(false);
+    const cmds = drive({ type: "route_resolved", agent: "claude", model: "opus" });
+    // No budget_check / halt_cycle step — the route goes straight to spawn.
+    expect(cmds.map((c) => c.kind)).toEqual(["spawn_agent"]);
+    expect(state.phase).toBe("execute");
+    expect(state.attempt).toBe(1);
   });
 });
 
@@ -362,7 +395,6 @@ describe("timeout breach mid-execute → clean teardown ORDER", () => {
     drive({ type: "worktree_created" });
     drive({ type: "story_picked", storyId: "US-1" });
     drive({ type: "route_resolved", agent: "claude", model: "sonnet" });
-    drive({ type: "budget_ok" });
     const cmds = drive({ type: "agent_exited", exit: 0, timedOut: true });
     expect(state.terminal).toBe("blocked");
     expect(state.done).toBe(true);
@@ -389,7 +421,7 @@ describe("retryPlan — bounded transient retry + backoff (I6, bin/roll:9032-907
     expect(retryPlan({ attempt: 1, exit: 1, timedOut: false })).toEqual({ action: "retry", nextAttempt: 2, backoffSec: 30 });
     expect(retryPlan({ attempt: 2, exit: 1, timedOut: false })).toEqual({ action: "retry", nextAttempt: 3, backoffSec: 60 });
   });
-  it("fail at the budget → exhausted (NOT agent-swap, I6)", () => {
+  it("fail at the retry budget → exhausted (NOT agent-swap, I6)", () => {
     expect(retryPlan({ attempt: MAX_AGENT_ATTEMPTS, exit: 1, timedOut: false })).toEqual({ action: "exhausted" });
   });
   it("backoffSchedule has maxAttempts-1 entries, doubling from base", () => {
@@ -418,7 +450,6 @@ describe("resumability — late/duplicate events are no-ops (I8)", () => {
       { type: "worktree_created" },
       { type: "story_picked", storyId: "US-1" },
       { type: "route_resolved", agent: "claude", model: "sonnet" },
-      { type: "budget_ok" },
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 } },
       { type: "published", result: { status: 0 } },
@@ -487,7 +518,6 @@ describe("event-sourcing round-trip (I8)", () => {
       { type: "worktree_created" },
       { type: "story_picked", storyId: "US-7" },
       { type: "route_resolved", agent: "claude", model: "sonnet" },
-      { type: "budget_ok" },
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 } },
       { type: "published", result: { status: 0 } },

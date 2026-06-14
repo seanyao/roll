@@ -43,7 +43,6 @@ import {
   type RouteDeps,
   type RunKey,
   type Tier,
-  budgetVerdict,
   classifyComplexity,
   decideClaimReconcile,
   latestDeliveringCycle,
@@ -110,7 +109,6 @@ import {
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate, verificationReportPath, webCaptureTargetForStory } from "./attest-gate.js";
 import { recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
-import { realBudgetCheck } from "./budget-check.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
@@ -237,11 +235,6 @@ export interface RoutePort {
   resolve(storyId: string, estMin: number | undefined): { agent: string; model: string };
 }
 
-/** Budget facet — the I11 gate verdict at route→execute boundary. */
-export interface BudgetPort {
-  check(storyId: string): "ok" | "downgrade" | "pause_and_notify";
-}
-
 /** Evidence frame facet — opens `.roll/features/<epic>/<ID>/<run-id>/`. */
 export interface EvidencePort {
   openFrame(projectCwd: string, storyId: string, runId: string): string;
@@ -271,7 +264,6 @@ export interface Ports {
   /** FIX-306: the runner-owned `.roll` metadata commit (never the sandboxed agent). */
   metadata: MetadataPort;
   route: RoutePort;
-  budget: BudgetPort;
   evidence: EvidencePort;
   capture: CapturePort;
   attest: AttestPort;
@@ -491,6 +483,15 @@ export async function executeCommand(
       const items = ports.backlog.read(ports.repoCwd);
       const story = pickStory(items as never);
       if (story === undefined) return { event: { type: "no_story" } };
+      // Hook 3 (pre-spawn spec-truth check): the picker only returns a card whose
+      // backlog row is NOT ✅ Done and that has no open PR (so by construction it
+      // is NOT merged). If that card's spec.md still claims "✅ Fixed/Done / [x]
+      // AC", the spec is STALE (a prior non-merged cycle left it poisoned). Reset
+      // it BEFORE the agent reads it, so the agent never silently concludes "done
+      // → nothing to do → idle". This is exactly the FIX-284/285 dead-end: with a
+      // clean spec the re-run can deliver. A genuinely merged Done card is never
+      // picked here (its row is ✅ Done), so this never touches a real Done spec.
+      resetStaleSpecTruth(ports, story.id);
       // FIX-304: capture the story's PRE-cycle status BEFORE we claim it 🔨.
       // The terminal (append_run) uses it to UNDO a premature ✅ Done the agent
       // wrote into the symlinked .roll backlog (FIX-204C) when the cycle does
@@ -529,26 +530,6 @@ export async function executeCommand(
       const r = ports.route.resolve(cmd.storyId, estMin);
       return { event: { type: "route_resolved", agent: r.agent, model: r.model } };
     }
-
-    // cost/budget budgetVerdict (I11) at the route→execute boundary.
-    case "budget_check": {
-      const verdict = ports.budget.check(cmd.storyId);
-      if (verdict === "pause_and_notify") {
-        return { event: { type: "budget_halt", reason: `budget gate: ${cmd.storyId}` } };
-      }
-      // downgrade is advisory (no auto-mutation) → proceed as ok.
-      return { event: { type: "budget_ok" } };
-    }
-
-    // budget downgrade signal (advisory) — record an alert, no mutation.
-    case "budget_downgrade":
-      ports.events.appendAlert(ports.paths.alertsPath, `budget downgrade: ${cmd.reason}`);
-      return {};
-
-    // halt the cycle before spawning (fail-closed). Side effect only.
-    case "halt_cycle":
-      ports.events.appendAlert(ports.paths.alertsPath, `cycle halted: ${cmd.reason}`);
-      return {};
 
     // execute: spawn the agent (TCR commits happen inside the worktree). The
     // exit code + timeout feed back as agent_exited; usage is captured for cost.
@@ -990,8 +971,16 @@ export async function executeCommand(
       if (attestBlocked && commitsAhead > 0) {
         prState = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => undefined);
       }
+      // Hook 1 (productivity floor): reaching capture means an agent WAS spawned
+      // this cycle (the no_story no-op terminates idle before ever capturing). An
+      // executed cycle that leaves 0 commits is therefore a `gave_up`, NOT a
+      // silent idle. The signal mirrors the `rowSpentZeroNoExecution` semantics:
+      // an agent slot is set, and the spawn ran (its spend/duration are recorded
+      // on the runs row). A defensively-empty agent slot stays idle.
+      const agentExecuted = (ctx.agent ?? "").trim() !== "";
       const facts: CapturedFacts = {
         usedWorktree: true,
+        agentExecuted,
         // accept-path reaches capture at exit 0; a HARD attest OR peer block fails
         // the capture (classifyCaptured: exit ≠ 0 → failed) so Done is withheld.
         // FIX-293: a high-complexity delivery with no peer review (even after the
@@ -1135,9 +1124,11 @@ export async function executeCommand(
       // loop merges. The runs row keeps `done` for v2/dashboard parity — only
       // the backlog flip waits for the merge evidence.
       const terminalStoryId = ctx.storyId ?? "";
+      let terminalMerged = false;
       if ((cmd.status === "done" || cmd.status === "published") && terminalStoryId !== "") {
         const state = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => "UNKNOWN");
         if (state === "MERGED") {
+          terminalMerged = true;
           ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.done);
         } else {
           // FIX-304: done ≡ merged. The PR did NOT merge (still OPEN / closed /
@@ -1149,7 +1140,8 @@ export async function executeCommand(
           // (decideClaimReconcile) flips it once the PR actually merges.
           revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
         }
-      } else if (cmd.status === "idle" && terminalStoryId !== "") {
+      } else if ((cmd.status === "idle" || cmd.status === "gave_up") && terminalStoryId !== "") {
+        // idle / gave_up never merged → the row goes back to 📋 Todo (re-pickable).
         ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.todo);
       } else if (terminalStoryId !== "") {
         // FIX-304: a failed / blocked / aborted / orphan terminal NEVER merged
@@ -1157,6 +1149,18 @@ export async function executeCommand(
         // (the FIX-284 / FIX-285 false-Done), revert it to the pre-cycle status
         // so a non-merged cycle can never leave a premature Done in the backlog.
         revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
+      }
+      // Hook 3 (spec-truth reconciliation): on ANY non-merged terminal
+      // (idle/gave_up/failed/blocked/aborted/orphan) reset a stale "✅ Fixed/Done"
+      // tick and the "[x]" AC checkboxes in the card's spec.md back to unchecked.
+      // The agent commits a false "done" spec into the symlinked .roll on a cycle
+      // whose product work never merged (FIX-284/285); FIX-304 only fixed the
+      // backlog ROW, leaving the spec poisoned so every re-run reads "done" → 0
+      // commits → idles forever. Resetting it here (committed via the
+      // commitRollMetadata path below) closes that permanent dead-end so a re-run
+      // CAN deliver. A genuinely MERGED Done spec is left untouched.
+      if (!terminalMerged && terminalStoryId !== "") {
+        resetStaleSpecTruth(ports, terminalStoryId);
       }
       // FIX-290 AC5: a failed/idle cycle is first-class — refresh the dossier
       // aggregates on EVERY cycle terminal so the cycle surfaces on the web #loop
@@ -1326,6 +1330,7 @@ export function buildTerminalRecord(
     published: "published_pending_merge",
     built: "published_pending_merge",
     idle: "idle_no_work",
+    gave_up: "gave_up",
     failed: "failed",
     blocked: "blocked",
     aborted: "aborted_no_delivery",
@@ -1443,6 +1448,63 @@ export function revertPrematureDone(ports: Ports, storyId: string, preCycleStatu
     ports.backlog.markStatus?.(ports.repoCwd, storyId, target);
   } catch {
     /* best-effort: the terminal must never fail on a backlog read/write blip */
+  }
+}
+
+/**
+ * Hook 3 — the PURE spec-truth reset transform. Given a card's `spec.md` text,
+ * undo a STALE "done" claim so a re-run reads an honest, workable spec:
+ *   - the H1 title's trailing "✅" tick (e.g. `# FIX-167 ✅`) is dropped;
+ *   - a `**Status**: ✅ Done` / `✅ Fixed` line is reset to `📋 Todo`;
+ *   - every checked AC checkbox `- [x]` / `- [X]` is reset to `- [ ]`.
+ * Idempotent: a spec with no ticks/checks is returned unchanged (so the caller
+ * can skip a no-op commit). Pure string→string — unit-tested directly.
+ */
+export function resetSpecTruthText(text: string): { text: string; changed: boolean } {
+  let changed = false;
+  const lines = text.split("\n");
+  const out = lines.map((line) => {
+    // H1 title trailing tick: `# <ID> ✅` → `# <ID>`.
+    if (/^#\s/.test(line) && /[✅✔]\s*$/.test(line)) {
+      changed = true;
+      return line.replace(/\s*[✅✔]\s*$/, "");
+    }
+    // Status line claiming done/fixed → reset to Todo (preserve any trailer text
+    // after the marker, e.g. parenthetical PR notes, by dropping the false claim).
+    if (/^\*\*Status\*\*\s*:/.test(line) && /[✅✔]\s*(Done|Fixed|Fix)\b/i.test(line)) {
+      changed = true;
+      return "**Status**: 📋 Todo";
+    }
+    // Checked AC checkbox → unchecked.
+    if (/^(\s*[-*]\s+)\[[xX]\]/.test(line)) {
+      changed = true;
+      return line.replace(/^(\s*[-*]\s+)\[[xX]\]/, "$1[ ]");
+    }
+    return line;
+  });
+  return { text: out.join("\n"), changed };
+}
+
+/**
+ * Hook 3 — apply {@link resetSpecTruthText} to the card's spec.md on disk (read
+ * via the symlinked .roll inside the worktree → the REAL .roll). Best-effort: a
+ * missing/unreadable spec or a no-op (no stale claim) leaves the tree untouched;
+ * the actual roll-meta commit is the caller's {@link commitRollMetadata}.
+ */
+export function resetStaleSpecTruth(ports: Ports, storyId: string): void {
+  try {
+    const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
+    if (!existsSync(specPath)) return;
+    const before = readFileSync(specPath, "utf8");
+    const { text, changed } = resetSpecTruthText(before);
+    if (!changed) return;
+    writeFileSync(specPath, text);
+    ports.events.appendAlert(
+      ports.paths.alertsPath,
+      `spec truth reset for ${storyId}: a non-merged terminal cleared a stale ✅/[x] spec claim so a re-run can deliver`,
+    );
+  } catch {
+    /* best-effort: a spec read/write blip must never fail the cycle terminal */
   }
 }
 
@@ -1771,7 +1833,6 @@ export function nodePorts(opts: {
   paths: RunnerPaths;
   skillBody: string;
   routeDeps: RouteDeps;
-  budget?: BudgetPort;
   agentSpawn?: AgentSpawn;
   clock?: ProcessClock;
 }): Ports {
@@ -1905,9 +1966,6 @@ export function nodePorts(opts: {
           },
         }
       : { resolve: () => ({ agent: "claude", model: "" }) },
-    // FIX-249: the budget gate is LIVE — runs.jsonl cost rows + policy.yaml
-    // `loop_safety.budget` → budgetVerdict (I11). No budget block → "ok".
-    budget: opts.budget ?? { check: () => realBudgetCheck(opts.repoCwd, opts.paths.runsPath, clock() * 1000) },
     evidence: {
       openFrame(projectCwd, storyId, runId) {
         return openEvidenceFrame({ runDir: join(cardArchiveDir(projectCwd, storyId), runId) }).runDir;
@@ -1946,11 +2004,10 @@ function appendAlertLine(alertsPath: string, message: string): void {
   appendFileSync(alertsPath, `${message}\n`, "utf8");
 }
 
-// Keep these referenced so resolveFallback / budgetVerdict / parseClaimedIds are
-// not stripped by a too-eager tree-shaker in the test bundle (they document the
-// available execution surface; nodePorts wires the common path).
+// Keep these referenced so resolveFallback / parseClaimedIds are not stripped by
+// a too-eager tree-shaker in the test bundle (they document the available
+// execution surface; nodePorts wires the common path).
 export const _availableCoreSurface = {
   resolveFallback,
-  budgetVerdict,
   parseClaimedIdsFromBacklog,
 } as const;

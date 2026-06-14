@@ -12,7 +12,6 @@ const GOAL_YAML = `schema: goal.v1
 scope:
   kind: cards
   cards: [US-GOAL-001, US-GOAL-002]
-budgetUsd: 12.5
 limits:
   maxCycles: 7
   maxHours: 5
@@ -20,12 +19,16 @@ status: active
 usage:
   cycles: 2
   costUsd: 0.42
-  costUnknownRows: 1
+progress:
+  zeroStreaks:
+    US-GOAL-002: 1
+  skippedCards: [US-GOAL-003]
+  noProgressCycles: 2
 safety:
-  lastGate: usage
-  lastReason: usage_limit_threshold
+  lastGate: progress
+  lastReason: no_progress_breaker
   lastAt: 2026-06-11T07:20:00Z
-  lastReading: five_hour 86/100 (86.0%)
+  lastReading: 3 consecutive no-progress cycles >= 3
 createdAt: 2026-06-11T07:00:00Z
 updatedAt: 2026-06-11T07:30:00Z
 lastDecisionReason: waiting_for_merge
@@ -37,15 +40,20 @@ describe("US-GOAL-001 — goal.yaml schema", () => {
     expect(goal.schema).toBe(GOAL_SCHEMA_VERSION);
     expect(goal.scope).toEqual({ kind: "cards", cards: ["US-GOAL-001", "US-GOAL-002"] });
     expect(goal.review.mode).toBe("auto");
-    expect(goal.budgetUsd).toBe(12.5);
+    expect(goal.budgetUsd).toBeUndefined();
     expect(goal.limits).toEqual({ maxCycles: 7, maxHours: 5 });
     expect(goal.status).toBe("active");
-    expect(goal.usage).toEqual({ cycles: 2, costUsd: 0.42, costUnknownRows: 1 });
+    expect(goal.usage).toEqual({ cycles: 2, costUsd: 0.42 });
+    expect(goal.progress).toEqual({
+      zeroStreaks: { "US-GOAL-002": 1 },
+      skippedCards: ["US-GOAL-003"],
+      noProgressCycles: 2,
+    });
     expect(goal.safety).toEqual({
-      lastGate: "usage",
-      lastReason: "usage_limit_threshold",
+      lastGate: "progress",
+      lastReason: "no_progress_breaker",
       lastAt: "2026-06-11T07:20:00Z",
-      lastReading: "five_hour 86/100 (86.0%)",
+      lastReading: "3 consecutive no-progress cycles >= 3",
     });
     expect(goal.lastDecisionReason).toBe("waiting_for_merge");
   });
@@ -59,21 +67,53 @@ describe("US-GOAL-001 — goal.yaml schema", () => {
     expect(goal.review.mode).toBe("hetero");
   });
 
-  it("renders an explicit, re-parseable goal.yaml", () => {
+  it("renders an explicit, re-parseable goal.yaml (progress round-trips)", () => {
     const goal = parseGoalYaml(GOAL_YAML);
     const rendered = renderGoalYaml(goal);
     expect(rendered).toContain("schema: goal.v1");
     expect(rendered).toContain("cards: [US-GOAL-001, US-GOAL-002]");
     expect(rendered).toContain("review: auto");
-    expect(rendered).toContain("costUnknownRows: 1");
-    expect(rendered).toContain("lastGate: usage");
+    expect(rendered).toContain("noProgressCycles: 2");
+    expect(rendered).toContain("US-GOAL-002: 1");
+    expect(rendered).toContain("lastGate: progress");
     expect(parseGoalYaml(rendered)).toEqual(goal);
+  });
+
+  it("tolerates a legacy goal.yaml: budgetUsd/costUnknownRows ignored, budget_limited→paused", () => {
+    const legacy = `schema: goal.v1
+scope:
+  kind: all
+review: auto
+budgetUsd: 12.5
+limits:
+  maxCycles: 7
+status: budget_limited
+usage:
+  cycles: 2
+  costUsd: 0.42
+  costUnknownRows: 1
+safety:
+  lastGate: usage
+  lastReason: usage_limit_threshold
+  lastAt: 2026-06-11T07:20:00Z
+  lastReading: five_hour 86/100 (86.0%)
+createdAt: 2026-06-11T07:00:00Z
+updatedAt: 2026-06-11T07:30:00Z
+`;
+    const goal = parseGoalYaml(legacy);
+    // The retired budget status maps to paused, never throws.
+    expect(goal.status).toBe("paused");
+    // The retired cost-control fields are simply dropped.
+    expect(goal.budgetUsd).toBeUndefined();
+    expect(goal.usage).toEqual({ cycles: 2, costUsd: 0.42 });
+    // A legacy cost gate label maps to the surviving `progress` gate.
+    expect(goal.safety?.lastGate).toBe("progress");
   });
 });
 
 describe("US-GOAL-001 — closed goal state machine", () => {
-  it("has exactly the four persisted states", () => {
-    expect(GOAL_STATUSES satisfies readonly GoalStatus[]).toEqual(["active", "paused", "budget_limited", "complete"]);
+  it("has exactly the three persisted states (budget_limited removed)", () => {
+    expect(GOAL_STATUSES satisfies readonly GoalStatus[]).toEqual(["active", "paused", "complete"]);
   });
 
   it("allows ordinary control-plane pauses and resumes", () => {

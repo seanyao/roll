@@ -7,6 +7,7 @@ import {
   parseGoalYaml,
   renderGoalYaml,
   transitionGoal,
+  type GoalProgress,
   type GoalReviewMode,
   type GoalSafetyGate,
   type GoalScope,
@@ -19,11 +20,9 @@ import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, 
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
-import { ledgerVerdict } from "../lib/cycle-ledger.js";
 import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
-import { readAnthropicUsageLimits } from "../lib/anthropic-usage.js";
 import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
@@ -32,13 +31,16 @@ const FINAL_REVIEW_TIMEOUT_MS = 300_000;
 const INNER_LOCK_WAIT_MS = 20_000;
 /** Give up waiting for the inner lock after this long (covers a full cycle). */
 const INNER_LOCK_WAIT_MAX_MS = 3_600_000;
+
 /**
- * FIX-280 (AC2): cap the usage-gate recovery wait. A hung usage API (a sleep
- * that never resolves, or a reset time far in the future) must not stall the
- * whole session forever — give up after this long, record an audit event, and
- * exit the wait cleanly. Mirrors {@link INNER_LOCK_WAIT_MAX_MS}.
+ * Cross-session dead-loop breaker (REPLACES the removed budget ceiling as the
+ * global backstop): after this many CONSECUTIVE whole-goal no-progress cycles
+ * (no card delivered) the goal is STOPPED with a loud ALERT — an unmergeable
+ * card can never spin indefinitely. Deterministic: the loop halts within K.
  */
-const USAGE_GATE_WAIT_MAX_MS = 6 * 3_600_000; // 6h: longer than any single window reset.
+const GOAL_NO_PROGRESS_STOP = 3;
+/** Per-card consecutive no-progress cycles before the card is skipped. */
+const CARD_NO_PROGRESS_SKIP = 2;
 
 interface ProjectId {
   path: string;
@@ -67,36 +69,19 @@ export interface LoopGoDeps {
   /** FIX-289 (AC3): follow the read-only live feed in the foreground (`--attach`). */
   followFeed?: (projectPath: string, rollBin: string) => Promise<void>;
   runOnce: (input: RunOnceInput) => Promise<number>;
-  readUsageLimits?: () => Promise<UsageLimitSnapshot>;
   sleep?: (ms: number) => Promise<void>;
   prEvidence?: (projectPath: string, storyId: string, backlogStatus: string) => Promise<AuditPrEvidence | undefined>;
   finalReview?: (input: GoalFinalReviewInput) => Promise<GoalFinalReviewResult>;
 }
 
-export type UsageLimitWindowName = "five_hour" | "weekly";
-
-export interface UsageLimitWindow {
-  window: UsageLimitWindowName;
-  used: number;
-  limit: number;
-  resetAtSec?: number;
-}
-
-export type UsageLimitSnapshot =
-  | { status: "unknown"; reason: string }
-  | { status: "known"; windows: UsageLimitWindow[] };
-
 interface GoOptions {
   worker: boolean;
   noTmux: boolean;
-  noWait: boolean;
   attach: boolean;
   scope: GoalScope;
   scopeSpecified: boolean;
-  budgetUsd?: number;
   maxCycles?: number;
   forSeconds?: number;
-  usageThreshold: number;
   reviewMode: GoalReviewMode;
   reviewModeSpecified: boolean;
 }
@@ -104,7 +89,6 @@ interface GoOptions {
 interface RunSummary {
   cycles: number;
   costUsd: number;
-  costUnknownRows: number;
 }
 
 interface RunRowSnapshot {
@@ -125,9 +109,48 @@ export interface GoalEvaluation {
   delivered: number;
 }
 
+/**
+ * The cross-session progress accounting (Hook 2 — the dead-loop breaker that
+ * REPLACES the removed budget ceiling). Hydrated from `goal.progress` at session
+ * start so the per-card no-progress streaks AND the whole-goal no-progress
+ * counter SURVIVE resume — two back-to-back sessions on the same unmergeable
+ * card accumulate the count instead of starting fresh, so a card that can never
+ * merge is deterministically stopped within K cycles rather than spinning
+ * forever. Synced back onto the goal after every cycle.
+ */
 interface ProgressState {
   zeroStreaks: Map<string, number>;
   skippedCards: Set<string>;
+  /** Consecutive whole-goal no-progress cycles (no card delivered). */
+  noProgressCycles: number;
+}
+
+/** Hydrate the in-memory progress accounting from the persisted goal. */
+function progressFromGoal(goal: RollGoal): ProgressState {
+  const p = goal.progress;
+  return {
+    zeroStreaks: new Map(Object.entries(p?.zeroStreaks ?? {})),
+    skippedCards: new Set(p?.skippedCards ?? []),
+    noProgressCycles: p?.noProgressCycles ?? 0,
+  };
+}
+
+/** Project the in-memory progress accounting back onto the goal for persistence. */
+function goalWithProgress(goal: RollGoal, progress: ProgressState): RollGoal {
+  const zeroStreaks: Record<string, number> = {};
+  for (const [id, n] of progress.zeroStreaks) if (n > 0) zeroStreaks[id] = n;
+  const skipped = [...progress.skippedCards];
+  const next: GoalProgress = {
+    ...(Object.keys(zeroStreaks).length > 0 ? { zeroStreaks } : {}),
+    ...(skipped.length > 0 ? { skippedCards: skipped } : {}),
+    ...(progress.noProgressCycles > 0 ? { noProgressCycles: progress.noProgressCycles } : {}),
+  };
+  const hasAny = Object.keys(next).length > 0;
+  if (!hasAny) {
+    const { progress: _drop, ...rest } = goal;
+    return rest;
+  }
+  return { ...goal, progress: next };
 }
 
 export interface GoalFinalReviewInput {
@@ -170,7 +193,6 @@ function realDeps(): LoopGoDeps {
     startTmux: startGoTmux,
     followFeed: followGoLiveFeed,
     runOnce: realRunOnce,
-    readUsageLimits: readAnthropicUsageLimits,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     prEvidence: defaultPrEvidence,
   };
@@ -219,14 +241,11 @@ function runsPath(projectPath: string): string {
 
 function parseOptions(args: string[]): GoOptions {
   let scope: GoalScope = { kind: "all" };
-  let budgetUsd: number | undefined;
   let maxCycles: number | undefined;
   let forSeconds: number | undefined;
-  let usageThreshold = 0.85;
   const cards: string[] = [];
   let worker = false;
   let noTmux = false;
-  let noWait = false;
   let attach = false;
   let scopeSpecified = false;
   let reviewMode: GoalReviewMode = "auto";
@@ -240,10 +259,6 @@ function parseOptions(args: string[]): GoOptions {
     }
     if (arg === "--no-tmux") {
       noTmux = true;
-      continue;
-    }
-    if (arg === "--no-wait") {
-      noWait = true;
       continue;
     }
     if (arg === "--attach" || arg === "--follow") {
@@ -267,15 +282,6 @@ function parseOptions(args: string[]): GoOptions {
       }
       continue;
     }
-    if (arg === "--budget") {
-      budgetUsd = parseRequiredNonNegativeNumber(args[i + 1], "--budget");
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--budget=")) {
-      budgetUsd = parseRequiredNonNegativeNumber(arg.slice("--budget=".length), "--budget");
-      continue;
-    }
     if (arg === "--max-cycles") {
       maxCycles = parseNonNegativeInteger(args[i + 1]);
       i += 1;
@@ -292,15 +298,6 @@ function parseOptions(args: string[]): GoOptions {
     }
     if (arg.startsWith("--for=")) {
       forSeconds = parseRequiredDurationSeconds(arg.slice("--for=".length), "--for");
-      continue;
-    }
-    if (arg === "--usage-threshold") {
-      usageThreshold = parseRequiredRatio(args[i + 1], "--usage-threshold");
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--usage-threshold=")) {
-      usageThreshold = parseRequiredRatio(arg.slice("--usage-threshold=".length), "--usage-threshold");
       continue;
     }
     if (arg === "--review") {
@@ -333,14 +330,11 @@ function parseOptions(args: string[]): GoOptions {
   return {
     worker,
     noTmux,
-    noWait,
     attach,
     scope,
     scopeSpecified,
     reviewMode,
     reviewModeSpecified,
-    usageThreshold,
-    ...(budgetUsd !== undefined ? { budgetUsd } : {}),
     ...(maxCycles !== undefined ? { maxCycles } : {}),
     ...(forSeconds !== undefined ? { forSeconds } : {}),
   };
@@ -352,32 +346,29 @@ function hasHelpArg(args: readonly string[]): boolean {
 
 function loopGoHelp(): string {
   return [
-    "Usage: roll loop go [--epic <name>|--cards <ids>] [--budget <usd>] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--no-wait] [--attach] [--no-tmux]",
-    "  Chain goal-mode cycles until the scoped backlog is complete, paused, budget-limited, or capped.",
-    "  按 goal 范围连续执行 cycle，直到完成、暂停、预算受限或达到上限。",
+    "Usage: roll loop go [--epic <name>|--cards <ids>] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--attach] [--no-tmux]",
+    "  Chain goal-mode cycles until the scoped backlog is complete, paused, or capped.",
+    "  按 goal 范围连续执行 cycle，直到完成、暂停或达到上限。",
     "",
     "Options:",
     "  --epic <name>       Limit the goal to one epic.",
     "  --cards <ids>       Limit the goal to comma/space separated card IDs.",
-    "  --budget <usd>      Move the goal to budget_limited once recorded cost reaches the budget.",
     "  --for <duration>    Stop after the current cycle once the wall-clock box is reached (default unit: minutes).",
     "  --max-cycles <n>    Stop after n cycles in this go session.",
-    "  --usage-threshold <ratio>  Pause when account usage reaches this ratio; default 0.85.",
-    "  --no-wait           Do not wait for usage windows to recover after a usage-limit pause.",
     "  --review <mode>     Final review policy before completion: auto, hetero, self, or off.",
     "  --attach, --follow  Start the session, then follow the read-only live feed in the foreground (Ctrl-C stops the view, not the loop).",
     "  --no-tmux           Run in the current process instead of starting a tmux session.",
     "",
     "Limits are explicit per run (FIX-279):",
-    "  --budget / --max-cycles / --for apply to THIS go only. Omit one and it is unset for this run — never inherited from a prior session.",
-    "  --budget / --max-cycles / --for 仅对本次 go 生效；省略即本轮不设限，绝不沿用上次会话的预算或上限。",
+    "  --max-cycles / --for apply to THIS go only. Omit one and it is unset for this run — never inherited from a prior session.",
+    "  --max-cycles / --for 仅对本次 go 生效；省略即本轮不设限，绝不沿用上次会话的上限。",
     "  Scope (--epic/--cards) and --review still persist when unspecified — they are the goal's identity, not a per-run safety knob.",
     "  范围 (--epic/--cards) 与 --review 省略时仍沿用——它们是 goal 的身份，不是每次的安全旋钮。",
     "",
-    "Safety gates:",
-    "  budget  Uses effective run cost; an idle/aborted cycle that ran no agent counts as a known $0, but a row where an agent executed without parseable usage stays unknown and stops conservatively.",
-    "  usage   Audits five-hour and weekly account headroom; unavailable usage APIs record an audit event but do not block.",
-    "  timebox Stops only at a cycle boundary and records a goal:gate_tripped event.",
+    "Progress guardrails (the loop stops on NO PROGRESS, not on cost):",
+    "  productivity floor  A cycle whose agent EXECUTED but produced 0 commits and no delivery is a `gave_up` terminal — alerted on the first occurrence (no streak).",
+    "  dead-loop breaker   A card is skipped after consecutive no-progress cycles; the whole goal STOPS after K consecutive no-progress cycles (a loud ALERT) — an unmergeable card can never spin forever.",
+    "  timebox             Stops only at a cycle boundary and records a goal:gate_tripped event.",
     "",
     "Review modes:",
     "  auto    Default. Prefer a heterogeneous reviewer; degrade to self review only when no other provider is available.",
@@ -401,27 +392,9 @@ function parseNonNegativeNumber(value: string | undefined): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-function parseRequiredNonNegativeNumber(value: string | undefined, flag: string): number {
-  const n = parseNonNegativeNumber(value);
-  if (n === undefined) throw new Error(`roll loop go: ${flag} must be a non-negative number`);
-  return n;
-}
-
 function parseNonNegativeInteger(value: string | undefined): number | undefined {
   const n = parseNonNegativeNumber(value);
   return n !== undefined && Number.isInteger(n) ? n : undefined;
-}
-
-function parseRatio(value: string | undefined): number | undefined {
-  const n = parseNonNegativeNumber(value);
-  if (n === undefined || n > 1) return undefined;
-  return n;
-}
-
-function parseRequiredRatio(value: string | undefined, flag: string): number {
-  const n = parseRatio(value);
-  if (n === undefined) throw new Error(`roll loop go: ${flag} must be a ratio between 0 and 1`);
-  return n;
 }
 
 function parseDurationSeconds(value: string | undefined): number | undefined {
@@ -601,7 +574,6 @@ function createGoal(opts: GoOptions, at: string): RollGoal {
     schema: GOAL_SCHEMA_VERSION,
     scope: opts.scope,
     review: { mode: opts.reviewMode },
-    ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
     limits: {
       ...(opts.maxCycles !== undefined ? { maxCycles: opts.maxCycles } : {}),
       ...(opts.forSeconds !== undefined ? { maxHours: opts.forSeconds / 3600 } : {}),
@@ -617,38 +589,16 @@ function summarizeRuns(path: string): RunSummary {
   return readRunSnapshot(path).summary;
 }
 
-/**
- * FIX-280 (AC1): a run row that recorded NO parseable cost is only a genuine
- * `unknown` when an agent actually executed and we lost its usage. A
- * non-executing cycle — `idle_no_work` / aborted-before-delivery / any row the
- * cycle ledger classifies as `idle` — spent $0 by definition (no agent ran), so
- * it must count as a KNOWN $0, never as an unknown-cost row. Counting idle polls
- * as unknown was the root cause of a live goal stuck in `budget_limited`: one
- * idle poll tripped `applyBudgetGate`'s `unknownRows > 0` hard stop.
- */
-function rowSpentZeroNoExecution(row: Record<string, unknown>): boolean {
-  const status = typeof row["status"] === "string" ? row["status"] : "";
-  const outcome = typeof row["outcome"] === "string" ? row["outcome"] : "";
-  if (ledgerVerdict(status, outcome) === "idle") return true;
-  // Aborted-before-delivery: the cycle never ran an agent (empty agent slot,
-  // zero micro-commits), so $0 is the truth, not a measurement gap.
-  const aborted = status === "aborted" || outcome === "aborted_no_delivery" || outcome === "orphan_timeout";
-  const agent = typeof row["agent"] === "string" ? row["agent"].trim() : "";
-  const tcr = typeof row["tcr_count"] === "number" && Number.isFinite(row["tcr_count"]) ? row["tcr_count"] : 0;
-  return aborted && agent === "" && tcr === 0;
-}
-
 function readRunSnapshot(path: string): RunRowSnapshot {
   let text = "";
   try {
     text = readFileSync(path, "utf8");
   } catch {
-    return { rows: [], summary: { cycles: 0, costUsd: 0, costUnknownRows: 0 } };
+    return { rows: [], summary: { cycles: 0, costUsd: 0 } };
   }
   const rows: Record<string, unknown>[] = [];
   let cycles = 0;
   let costUsd = 0;
-  let costUnknownRows = 0;
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line === "") continue;
@@ -660,18 +610,18 @@ function readRunSnapshot(path: string): RunRowSnapshot {
     }
     rows.push(row);
     cycles += 1;
+    // Per-row cost is still RECORDED on every runs row (cost_usd /
+    // cost_effective_usd); we only sum the KNOWN cost here to feed the
+    // session-total display. A row with no parseable cost is silently skipped
+    // (its truthful `usage_unknown:true` flag lives on the row itself) — there
+    // is no budget gate to trip, so the unknown-row counter is gone.
     const effective = typeof row["cost_effective_usd"] === "number" && Number.isFinite(row["cost_effective_usd"]) ? row["cost_effective_usd"] : undefined;
     const estimated = typeof row["cost_usd"] === "number" && Number.isFinite(row["cost_usd"]) ? row["cost_usd"] : undefined;
     if (effective !== undefined || estimated !== undefined) {
       costUsd += effective ?? estimated ?? 0;
-    } else if (rowSpentZeroNoExecution(row)) {
-      // Known $0: no agent executed — do not count as unknown cost.
-    } else {
-      // An agent executed but its usage is unparseable — a genuine unknown.
-      costUnknownRows += 1;
     }
   }
-  return { rows, summary: { cycles, costUsd, costUnknownRows } };
+  return { rows, summary: { cycles, costUsd } };
 }
 
 function readBacklogRows(projectPath: string): ScopeRow[] {
@@ -727,11 +677,28 @@ function alertPath(projectPath: string, slug: string): string {
   return join(runtimeDir(projectPath), `ALERT-${slug}.md`);
 }
 
-function appendGoalAlert(projectPath: string, slug: string, storyId: string, cycleId: string | undefined, at: string): void {
+function appendGoalAlert(projectPath: string, slug: string, storyId: string, cycleId: string | undefined, streak: number, at: string): void {
   const path = alertPath(projectPath, slug);
   mkdirSync(dirname(path), { recursive: true });
   const cycleLine = cycleId === undefined ? "" : ` cycle=${cycleId}`;
-  appendFileSync(path, `[${at}] goal card skipped: ${storyId}${cycleLine} reason=zero delivery streak\n`, "utf8");
+  const verb = streak >= CARD_NO_PROGRESS_SKIP ? "skipped (no-progress streak)" : "no progress";
+  appendFileSync(path, `[${at}] ALERT goal card ${verb}: ${storyId}${cycleLine} no_progress_cycles=${streak}\n`, "utf8");
+}
+
+/**
+ * Hook 2 — the HARD GLOBAL breaker ALERT: K consecutive whole-goal no-progress
+ * cycles STOP the goal. Distinct, loud, and carries a remediation hint so the
+ * owner knows the loop halted itself rather than spun forever.
+ */
+function appendBreakerAlert(projectPath: string, slug: string, cycles: number, at: string): void {
+  const path = alertPath(projectPath, slug);
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(
+    path,
+    `[${at}] ALERT goal STOPPED: ${cycles} consecutive no-progress cycles (dead-loop breaker). ` +
+      `Remediation: a card cannot be delivered by re-running — check the spec/dependencies, split or hold the card, then resume.\n`,
+    "utf8",
+  );
 }
 
 /**
@@ -745,6 +712,16 @@ function appendReviewAlert(projectPath: string, slug: string, session: string, r
   appendFileSync(path, `[${at}] ALERT goal final review failed: session=${session} reason=${reason.replace(/\s+/g, " ").slice(0, 200)}\n`, "utf8");
 }
 
+/**
+ * Hook 2 — fold a cycle's appended runs rows into the cross-session progress
+ * accounting. A delivery resets that card's streak (and signals whole-goal
+ * progress this cycle); a `gave_up`/zero-delivery terminal increments the card's
+ * streak. ALERT on the FIRST no-progress (no 2-hit silence); skip the card once
+ * its streak reaches {@link CARD_NO_PROGRESS_SKIP}. The whole-goal
+ * `noProgressCycles` counter increments when a cycle delivered nothing and
+ * resets the moment any card delivers — it is the input to the hard global
+ * breaker (checked in the gate slot the budget gate vacated).
+ */
 function updateProgressFromRows(
   projectPath: string,
   slug: string,
@@ -754,28 +731,40 @@ function updateProgressFromRows(
   deps: LoopGoDeps,
   bus: EventBus,
 ): void {
+  let delivered = false;
+  let sawNoProgress = false;
   for (const row of rows) {
     const attempt = runAttemptFromRow(row);
     if (attempt === undefined || !attempt.known) continue;
     if (!attempt.zeroDelivery) {
       progress.zeroStreaks.delete(attempt.storyId);
+      delivered = true;
       continue;
     }
+    sawNoProgress = true;
     const nextCount = (progress.zeroStreaks.get(attempt.storyId) ?? 0) + 1;
     progress.zeroStreaks.set(attempt.storyId, nextCount);
-    if (nextCount < 2 || progress.skippedCards.has(attempt.storyId)) continue;
+    // ALERT on the FIRST no-progress terminal for a card (no 2-hit streak): the
+    // very first expensive idle/gave_up cycle is now loud, not silent.
+    appendGoalAlert(projectPath, slug, attempt.storyId, attempt.cycleId, nextCount, deps.nowIso());
+    if (nextCount < CARD_NO_PROGRESS_SKIP || progress.skippedCards.has(attempt.storyId)) continue;
     progress.skippedCards.add(attempt.storyId);
     bus.appendEvent(eventsPath(projectPath), {
       type: "goal:card_skipped",
       sessionId: session,
       storyId: attempt.storyId,
-      reason: "zero_delivery_streak",
+      reason: "no_progress_streak",
       zeroDeliveries: nextCount,
       ...(attempt.cycleId !== undefined ? { cycleId: attempt.cycleId } : {}),
       ts: deps.nowSec(),
     });
-    appendGoalAlert(projectPath, slug, attempt.storyId, attempt.cycleId, deps.nowIso());
   }
+  // Whole-goal no-progress accounting (feeds the hard breaker): any delivery
+  // this cycle resets the streak; a cycle that delivered nothing but produced a
+  // known no-progress terminal increments it. A cycle that produced no known
+  // attempt at all (e.g. nothing ran) leaves the counter unchanged.
+  if (delivered) progress.noProgressCycles = 0;
+  else if (sawNoProgress) progress.noProgressCycles += 1;
 }
 
 function goalEvaluationFromTruth(truths: StoryTruth[], scope: GoalScope, opts: { allowEmptyAllComplete: boolean }): GoalEvaluation {
@@ -1117,14 +1106,6 @@ function appendGoalState(bus: EventBus, path: string, from: GoalStatus, goal: Ro
   });
 }
 
-function money(value: number): string {
-  return `$${value.toFixed(2)}`;
-}
-
-function percent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
-}
-
 function withSafety(goal: RollGoal, gate: GoalSafetyGate, reason: string, reading: string, at: string): RollGoal {
   return {
     ...goal,
@@ -1142,7 +1123,7 @@ function appendGoalGate(
   path: string,
   session: string,
   gate: GoalSafetyGate,
-  action: "audit" | "paused" | "budget_limited",
+  action: "audit" | "paused",
   reason: string,
   reading: Record<string, string | number | boolean>,
   ts: number,
@@ -1173,13 +1154,11 @@ function pauseGoal(projectPath: string, bus: EventBus, reason: string, at: strin
 
 function updateUsage(projectPath: string, goal: RollGoal, baseline: RunSummary, initial: RunSummary, at: string): RollGoal {
   const current = summarizeRuns(runsPath(projectPath));
-  const costUnknownRows = initial.costUnknownRows + Math.max(0, current.costUnknownRows - baseline.costUnknownRows);
   return {
     ...goal,
     usage: {
       cycles: initial.cycles + Math.max(0, current.cycles - baseline.cycles),
       costUsd: initial.costUsd + Math.max(0, current.costUsd - baseline.costUsd),
-      ...(costUnknownRows > 0 ? { costUnknownRows } : {}),
     },
     updatedAt: at,
   };
@@ -1189,49 +1168,21 @@ function runSummaryFromGoal(goal: RollGoal): RunSummary {
   return {
     cycles: goal.usage.cycles,
     costUsd: goal.usage.costUsd,
-    costUnknownRows: goal.usage.costUnknownRows ?? 0,
-  };
-}
-
-/**
- * FIX-280 (AC1/AC5): a goal persisted by the OLD `readRunSnapshot` may carry a
- * stale `costUnknownRows` that was actually an idle/aborted (zero-cost) cycle.
- * On resume, recompute the unknown count from the corrected runs ledger and
- * clamp the persisted value down to it — a stale unknown that originated from an
- * idle row now correctly reads as 0, so a resumed goal recovers to runnable
- * instead of being instantly tripped by `applyBudgetGate`'s `unknownRows > 0`.
- * The clamp never INFLATES the count: a genuine in-flight unknown is preserved.
- */
-function reconcileResumedUsage(projectPath: string, goal: RollGoal): RollGoal {
-  const persistedUnknown = goal.usage.costUnknownRows ?? 0;
-  if (persistedUnknown === 0) return goal;
-  const ledgerUnknown = summarizeRuns(runsPath(projectPath)).costUnknownRows;
-  const reconciled = Math.min(persistedUnknown, ledgerUnknown);
-  if (reconciled === persistedUnknown) return goal;
-  const { costUnknownRows: _stale, ...usageRest } = goal.usage;
-  return {
-    ...goal,
-    usage: {
-      ...usageRest,
-      ...(reconciled > 0 ? { costUnknownRows: reconciled } : {}),
-    },
   };
 }
 
 function applyRunOptions(goal: RollGoal, opts: GoOptions, at: string): RollGoal {
-  // FIX-279: budget and run limits are EXPLICIT per `roll loop go` — they come
-  // only from THIS invocation's flags, never silently inherited from a prior
-  // session's persisted goal. Omitting --budget / --max-cycles / --for means
-  // "no limit this run" (the same defaults a fresh goal gets), so a flagless go
-  // can't be capped or bricked by a budget the user set days ago. (Scope and
-  // review still persist when unspecified — those are the goal's identity, not
-  // a per-run safety knob.) Strip the persisted budget/limits, then re-apply
-  // only what was passed now.
-  const { budgetUsd: _staleBudget, limits: _staleLimits, ...rest } = goal;
+  // FIX-279: run limits are EXPLICIT per `roll loop go` — they come only from
+  // THIS invocation's flags, never silently inherited from a prior session's
+  // persisted goal. Omitting --max-cycles / --for means "no limit this run" (the
+  // same defaults a fresh goal gets), so a flagless go can't be capped by a
+  // limit set days ago. (Scope and review still persist when unspecified — those
+  // are the goal's identity, not a per-run safety knob.) Strip the persisted
+  // limits, then re-apply only what was passed now.
+  const { limits: _staleLimits, ...rest } = goal;
   return {
     ...rest,
     scope: opts.scopeSpecified ? opts.scope : goal.scope,
-    ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
     review: opts.reviewModeSpecified ? { mode: opts.reviewMode } : goal.review,
     limits: {
       ...(opts.maxCycles !== undefined ? { maxCycles: opts.maxCycles } : {}),
@@ -1308,112 +1259,36 @@ async function waitForInnerLock(
   return "free";
 }
 
-function applyBudgetGate(projectPath: string, bus: EventBus, session: string, goal: RollGoal, deps: LoopGoDeps): { goal: RollGoal; stopped: boolean; reason?: string } {
-  const budgetUsd = goal.budgetUsd;
-  if (budgetUsd === undefined) return { goal, stopped: false };
-  const unknownRows = goal.usage.costUnknownRows ?? 0;
-  const at = deps.nowIso();
-  const ts = deps.nowSec();
-  if (unknownRows > 0) {
-    const reason = "budget_unknown_cost";
-    const reading = { costUsd: goal.usage.costUsd, budgetUsd, unknownCostRows: unknownRows };
-    const labelled = withSafety(goal, "budget", reason, `${money(goal.usage.costUsd)} / ${money(budgetUsd)}; unknown cost rows ${unknownRows}`, at);
-    const next = transitionGoal(labelled, "budget_limited", { actor: "system", reason, at });
-    writeGoal(goalPath(projectPath), next);
-    appendGoalState(bus, eventsPath(projectPath), goal.status, next, "system", reason, ts);
-    appendGoalGate(bus, eventsPath(projectPath), session, "budget", "budget_limited", reason, reading, ts);
-    return { goal: next, stopped: true, reason };
-  }
-  if (goal.usage.costUsd < budgetUsd) return { goal, stopped: false };
-  const reason = "budget_exceeded";
-  const reading = { costUsd: goal.usage.costUsd, budgetUsd };
-  const labelled = withSafety(goal, "budget", reason, `${money(goal.usage.costUsd)} / ${money(budgetUsd)}`, at);
-  const next = transitionGoal(labelled, "budget_limited", { actor: "system", reason, at });
-  writeGoal(goalPath(projectPath), next);
-  appendGoalState(bus, eventsPath(projectPath), goal.status, next, "system", reason, ts);
-  appendGoalGate(bus, eventsPath(projectPath), session, "budget", "budget_limited", reason, reading, ts);
-  return { goal: next, stopped: true, reason };
-}
-
-function usageRatio(window: UsageLimitWindow): number {
-  return window.limit > 0 ? window.used / window.limit : 0;
-}
-
-function trippedUsageWindow(snapshot: UsageLimitSnapshot, threshold: number): UsageLimitWindow | undefined {
-  if (snapshot.status === "unknown") return undefined;
-  return snapshot.windows
-    .filter((window) => usageRatio(window) >= threshold)
-    .sort((a, b) => usageRatio(b) - usageRatio(a))[0];
-}
-
-async function enforceUsageGate(
+/**
+ * Hook 2 — the cross-session dead-loop breaker, in the gate slot the removed
+ * budget gate vacated. When the whole-goal no-progress streak reaches
+ * {@link GOAL_NO_PROGRESS_STOP}, STOP the goal (pause) with a distinct loud
+ * ALERT + remediation hint and a `progress` gate event. This is the
+ * deterministic global backstop that replaces the dollar ceiling: an unmergeable
+ * card can never spin past K cycles. The counter persists on the goal so the K
+ * cap holds ACROSS sessions, not just within one.
+ */
+function applyProgressGate(
   projectPath: string,
   bus: EventBus,
   session: string,
+  slug: string,
   goal: RollGoal,
-  opts: GoOptions,
+  progress: ProgressState,
   deps: LoopGoDeps,
-): Promise<{ goal: RollGoal; stopped: boolean; reason?: string }> {
-  const read = deps.readUsageLimits;
-  if (read === undefined) return { goal, stopped: false };
-  let currentGoal = goal;
-  while (true) {
-    const snapshot = await read();
-    const ts = deps.nowSec();
-    if (snapshot.status === "unknown") {
-      appendGoalGate(bus, eventsPath(projectPath), session, "usage", "audit", snapshot.reason, { status: "unknown", reason: snapshot.reason }, ts);
-      return { goal: currentGoal, stopped: false };
-    }
-    const tripped = trippedUsageWindow(snapshot, opts.usageThreshold);
-    if (tripped === undefined) return { goal: currentGoal, stopped: false };
-
-    const ratio = usageRatio(tripped);
-    const reason = "usage_limit_threshold";
-    const at = deps.nowIso();
-    const reading = {
-      window: tripped.window,
-      used: tripped.used,
-      limit: tripped.limit,
-      ratio,
-      threshold: opts.usageThreshold,
-    };
-    const labelled = withSafety(currentGoal, "usage", reason, `${tripped.window} ${tripped.used}/${tripped.limit} (${percent(ratio)})`, at);
-    const paused = transitionGoal(labelled, "paused", { actor: "system", reason, at });
-    writeGoal(goalPath(projectPath), paused);
-    appendGoalState(bus, eventsPath(projectPath), currentGoal.status, paused, "system", reason, ts);
-    appendGoalGate(bus, eventsPath(projectPath), session, "usage", "paused", reason, reading, ts, tripped.resetAtSec);
-    if (opts.noWait) return { goal: paused, stopped: true, reason };
-
-    // FIX-280 (AC2): bound the recovery wait. A reset time far in the future or a
-    // never-resolving sleep (hung API) must not stall the session forever — cap
-    // the wait at USAGE_GATE_WAIT_MAX_MS, guard the sleep, and on a timeout (or a
-    // throwing sleep) record an audit event and leave the goal paused/stopped so
-    // the session ends cleanly instead of spinning.
-    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-    const waitUntilSec = tripped.resetAtSec ?? ts + 60;
-    const requestedMs = Math.max(0, waitUntilSec - ts) * 1000;
-    const cappedMs = Math.min(requestedMs, USAGE_GATE_WAIT_MAX_MS);
-    let waitFailed = false;
-    try {
-      await sleep(cappedMs);
-    } catch (error) {
-      waitFailed = true;
-      appendGoalGate(bus, eventsPath(projectPath), session, "usage", "audit", "usage_wait_error", { window: tripped.window, error: error instanceof Error ? error.message : "sleep_failed", waitedMs: cappedMs }, deps.nowSec());
-    }
-    if (waitFailed || cappedMs < requestedMs) {
-      // Timed out before the window could recover (or the sleep threw): do not
-      // spin. Record the bounded-wait timeout and exit with the goal paused.
-      if (!waitFailed) {
-        appendGoalGate(bus, eventsPath(projectPath), session, "usage", "audit", "usage_wait_timeout", { window: tripped.window, waitedMs: cappedMs, requestedMs }, deps.nowSec());
-      }
-      return { goal: paused, stopped: true, reason: "usage_wait_timeout" };
-    }
-    const resumedAt = deps.nowIso();
-    const resumed = transitionGoal(paused, "active", { actor: "system", reason: "usage_window_recovered", at: resumedAt });
-    writeGoal(goalPath(projectPath), resumed);
-    appendGoalState(bus, eventsPath(projectPath), paused.status, resumed, "system", "usage_window_recovered", deps.nowSec());
-    currentGoal = resumed;
-  }
+): { goal: RollGoal; stopped: boolean; reason?: string } {
+  if (progress.noProgressCycles < GOAL_NO_PROGRESS_STOP) return { goal, stopped: false };
+  const reason = "no_progress_breaker";
+  const at = deps.nowIso();
+  const ts = deps.nowSec();
+  const reading = { noProgressCycles: progress.noProgressCycles, threshold: GOAL_NO_PROGRESS_STOP };
+  const labelled = withSafety(goal, "progress", reason, `${progress.noProgressCycles} consecutive no-progress cycles >= ${GOAL_NO_PROGRESS_STOP}`, at);
+  const paused = transitionGoal(labelled, "paused", { actor: "system", reason, at });
+  writeGoal(goalPath(projectPath), paused);
+  appendGoalState(bus, eventsPath(projectPath), goal.status, paused, "system", reason, ts);
+  appendGoalGate(bus, eventsPath(projectPath), session, "progress", "paused", reason, reading, ts);
+  appendBreakerAlert(projectPath, slug, progress.noProgressCycles, at);
+  return { goal: paused, stopped: true, reason };
 }
 
 function timeboxDeadlineSec(goal: RollGoal, opts: GoOptions, startedSec: number): number | undefined {
@@ -1531,9 +1406,11 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
   const startedSec = deps.nowSec();
   const sid = sessionId(startedAt, deps.pid());
   const baseline = summarizeRuns(runsPath(id.path));
-  let initialUsage: RunSummary = { cycles: 0, costUsd: 0, costUnknownRows: 0 };
+  let initialUsage: RunSummary = { cycles: 0, costUsd: 0 };
   let goal: RollGoal;
-  const progress: ProgressState = { zeroStreaks: new Map(), skippedCards: new Set() };
+  // Hook 2: hydrate the no-progress accounting from the persisted goal once it
+  // is loaded (below) so the dead-loop breaker counts ACROSS sessions.
+  let progress: ProgressState = { zeroStreaks: new Map(), skippedCards: new Set(), noProgressCycles: 0 };
   let stopReason: string | undefined;
   let stopRequested = false;
   let workerAgents: string[] = [];
@@ -1554,7 +1431,6 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         scope: goal.scope,
         status: "active",
         review: goal.review.mode,
-        ...(goal.budgetUsd !== undefined ? { budgetUsd: goal.budgetUsd } : {}),
         ts: startedSec,
       });
     } else if (existing.status === "complete") {
@@ -1568,11 +1444,10 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       appendGoalState(bus, evPath, existing.status, goal, "owner", "go_start", startedSec);
     }
     goal = applyRunOptions(goal, opts, startedAt);
-    // FIX-280 (AC5): correct any stale unknown-cost row a prior session attributed
-    // to what was actually an idle/aborted (zero-cost) cycle, so a resumed goal
-    // recovers to runnable instead of being instantly tripped on budget_unknown_cost.
-    goal = reconcileResumedUsage(id.path, goal);
     writeGoal(gPath, goal);
+    // Hook 2: resume the persisted no-progress accounting so an unmergeable card
+    // that idled in a PRIOR session keeps accumulating toward the breaker.
+    progress = progressFromGoal(goal);
     initialUsage = runSummaryFromGoal(goal);
     const deadlineSec = timeboxDeadlineSec(goal, opts, startedSec);
     bus.appendEvent(evPath, { type: "goal:session_start", sessionId: sid, scope: goal.scope, ts: startedSec });
@@ -1588,16 +1463,12 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         stopReason = "max_cycles";
         break;
       }
-      const preBudgetGate = applyBudgetGate(id.path, bus, sid, goal, deps);
-      goal = preBudgetGate.goal;
-      if (preBudgetGate.stopped) {
-        stopReason = preBudgetGate.reason;
-        break;
-      }
-      const usageGate = await enforceUsageGate(id.path, bus, sid, goal, opts, deps);
-      goal = usageGate.goal;
-      if (usageGate.stopped) {
-        stopReason = usageGate.reason;
+      // Hook 2: cross-session breaker — if a PRIOR session already accumulated
+      // K no-progress cycles (a resumed dead loop), STOP before burning another.
+      const preProgressGate = applyProgressGate(id.path, bus, sid, id.slug, goal, progress, deps);
+      goal = preProgressGate.goal;
+      if (preProgressGate.stopped) {
+        stopReason = preProgressGate.reason;
         break;
       }
 
@@ -1627,10 +1498,16 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       const appendedRows = after.rows.slice(before.rows.length);
       workerAgents = uniqueStrings([...workerAgents, ...workerAgentsFromRunRows(appendedRows)]);
       updateProgressFromRows(id.path, id.slug, sid, appendedRows, progress, deps, bus);
-      const budgetGate = applyBudgetGate(id.path, bus, sid, goal, deps);
-      goal = budgetGate.goal;
-      if (budgetGate.stopped) {
-        stopReason = budgetGate.reason;
+      // Hook 2: persist the no-progress accounting onto the goal so the breaker
+      // count survives this session ending (resume-safe global backstop).
+      goal = goalWithProgress(goal, progress);
+      writeGoal(gPath, goal);
+      // Hook 2 (post-cycle): the dead-loop breaker now occupies the slot the
+      // budget gate vacated. K consecutive whole-goal no-progress cycles STOP.
+      const progressGate = applyProgressGate(id.path, bus, sid, id.slug, goal, progress, deps);
+      goal = progressGate.goal;
+      if (progressGate.stopped) {
+        stopReason = progressGate.reason;
         break;
       }
       if (allScopeCardsSkipped(id.path, goal, progress)) {
@@ -1670,7 +1547,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
     }
 
     const finalReason = stopReason ?? "stop_requested";
-    const finalGoal = goal.status === "complete" || goal.status === "budget_limited" ? goal : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
+    const finalGoal = goal.status === "complete" || goal.status === "paused" ? goal : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
     bus.appendEvent(evPath, {
       type: "goal:session_end",
       sessionId: sid,

@@ -84,7 +84,7 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
     expect(policy.modelRouting[4]?.match.level).toBe("*");
   });
 
-  it("parses loop_safety + nested budget + upgrade_hint", () => {
+  it("parses loop_safety and IGNORES a stale nested budget block (cost gate removed)", () => {
     expect(policy.loopSafety.maxConsecutiveFailures).toBe(3);
     expect(policy.loopSafety.actionOnBreach).toBe("pause_and_notify");
     expect(policy.loopSafety.maxStoryFailures).toBe(3);
@@ -93,14 +93,9 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
     expect(policy.loopSafety.correctionSignalThreshold).toBe(4);
     expect(policy.loopSafety.correctionSignalWindowSec).toBe(21600);
     expect(policy.loopSafety.correctionActuator).toBe("auto");
-    expect(policy.loopSafety.budget).toMatchObject({
-      dailyUsd: 20,
-      weeklyUsd: 100,
-      metric: "effective_cost",
-      onApproach: "downgrade",
-      onBreach: "pause_and_notify",
-      upgradeHint: { revertRateGt: 0.4, action: "suggest_upgrade" },
-    });
+    // The retired budget ceiling is no longer parsed — a stale `budget:` block in
+    // a user policy.yaml is silently ignored (forward-compatible), never surfaced.
+    expect((policy.loopSafety as Record<string, unknown>)["budget"]).toBeUndefined();
   });
 
   it("falls back to v2-aligned defaults for an empty/absent policy", () => {

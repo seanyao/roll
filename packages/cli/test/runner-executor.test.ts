@@ -1272,6 +1272,13 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports, calls } = fakePorts({
       repoCwd: wt, // policy.yaml is read from repoCwd
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      // FIX-312: pin a heterogeneous pool so heteroAvailable resolves deterministically
+      // (true) regardless of the real installed-agent env (local multi-vendor vs CI
+      // single-vendor). Without this the executor falls back to agentsInstalled(realAgentEnv())
+      // and the verdict flips "skipped"↔"self-review-allowed" by environment. This test's
+      // intent is the SOFT-mode contract: a gated delivery records "skipped" but does NOT
+      // block — which requires the gated (hetero-available) path.
+      installedAgents: () => ["claude", "codex"],
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });

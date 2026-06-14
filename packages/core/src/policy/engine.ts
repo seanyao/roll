@@ -84,6 +84,12 @@ export interface LoopSafetyConfig {
   correctionSignalWindowSec: number;
   /** US-EVID-014: conservative records/alerts only; auto mutates backlog. */
   correctionActuator: "conservative" | "auto";
+  /** FIX-298 network-guard recovery hook. A shell command the network guard runs
+   *  to ACTIVELY enable connectivity (e.g. turn on the user's proxy) when the
+   *  first-checkpoint connectivity probe fails, before it re-checks. PORTABILITY:
+   *  no proxy tool is hardcoded — the user sets their own command here; absent ⇒
+   *  no auto-enable (the guard halts-and-tells). Absent ⇒ undefined. */
+  proxyEnableCmd?: string;
 }
 
 /** Budget block under loop_safety — superset of @roll/spec {@link BudgetPolicy}
@@ -346,6 +352,11 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
       : {}),
     ...(flat["peer_gate"] === "hard" || flat["peer_gate"] === "soft"
       ? { peerGate: flat["peer_gate"] as "soft" | "hard" }
+      : {}),
+    // FIX-298: the network-guard recovery hook. A non-empty string is the shell
+    // command the guard runs to enable connectivity before re-checking.
+    ...(flat["proxy_enable_cmd"] !== undefined && flat["proxy_enable_cmd"] !== ""
+      ? { proxyEnableCmd: flat["proxy_enable_cmd"] }
       : {}),
   };
   return [i, cfg];

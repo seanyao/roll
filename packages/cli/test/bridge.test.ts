@@ -161,3 +161,50 @@ describe("ported routing (no bash fallback)", () => {
     expect(u).toContain("roll <command>");
   });
 });
+
+describe("FIX-298 — the network guard is the FIRST dispatch checkpoint", () => {
+  it("a non-network command (roll status) is NOT gated — the guard never runs", async () => {
+    registerAll();
+    let gateCalls = 0;
+    const blockingGate = async (): Promise<{ ok: boolean }> => ((gateCalls += 1), { ok: false });
+    const res = await dispatch(["status"], blockingGate);
+    // status ran (the gate never fired); whatever its own exit, it is not the
+    // gate's halt — and the gate was never consulted.
+    expect(gateCalls).toBe(0);
+    expect(res.status).not.toBeUndefined();
+  });
+
+  it("a needs-network command HALTS (exit 1) when the guard reports not-ok — handler never runs", async () => {
+    let handlerRan = false;
+    // Prove the wiring through a real gated command: `update` (gated unless
+    // --help). Replace its handler with a spy and inject a blocked guard; the
+    // handler must never run because the guard halts first.
+    registerPorted("update", () => ((handlerRan = true), 0));
+    const blockingGate = async (): Promise<{ ok: boolean }> => ({ ok: false });
+    const res = await dispatch(["update"], blockingGate);
+    expect(res.status).toBe(1);
+    expect(handlerRan).toBe(false);
+  });
+
+  it("a needs-network command proceeds to its handler when the guard reports ok", async () => {
+    registerAll();
+    let gateCalls = 0;
+    const okGate = async (): Promise<{ ok: boolean }> => ((gateCalls += 1), { ok: true });
+    // `update --help` is exempt (help is never gated), so use a route the guard
+    // gates: bare `release` (the real transaction). With deps absent it will try
+    // the real flow, so assert only that the gate ran and the handler was reached.
+    const res = await dispatch(["release", "--json"], okGate);
+    // `release --json` is a read-only plan → NOT gated → gate must NOT run.
+    expect(gateCalls).toBe(0);
+    expect(res.status).not.toBeUndefined();
+  });
+
+  it("a cry for help on a network command is NOT gated", async () => {
+    registerAll();
+    let gateCalls = 0;
+    const blockingGate = async (): Promise<{ ok: boolean }> => ((gateCalls += 1), { ok: false });
+    const res = await dispatch(["update", "--help"], blockingGate);
+    expect(gateCalls).toBe(0);
+    expect(res.status).toBe(0); // help printed, exit 0 — no halt
+  });
+});

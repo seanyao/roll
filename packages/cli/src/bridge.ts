@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveLang } from "@roll/spec";
+import { networkNeeds, requireNetwork } from "./lib/require-network.js";
 import { renderFrontDoor } from "./lib/front-door.js";
 import { isSnapshotStale, loadTruthSnapshot, renderNowMs } from "./lib/truth-read.js";
 import { renderState } from "./render.js";
@@ -122,7 +123,12 @@ export function frontDoor(): string {
  * prints the front door (US-DOSSIER-035, exit 0); any other unknown command
  * prints "unknown command" + usage (exit 1).
  */
-export async function dispatch(argv: string[]): Promise<RunResult> {
+export async function dispatch(
+  argv: string[],
+  // FIX-298: the network guard is injectable so the wiring is unit-testable
+  // without real network IO. Production passes nothing → the real guard runs.
+  gate: (commandName: string) => Promise<{ ok: boolean }> = (name) => requireNetwork(name, process.cwd()),
+): Promise<RunResult> {
   const [command, ...rest] = argv;
   if (command !== undefined) {
     const handler = ported.get(command);
@@ -133,6 +139,17 @@ export async function dispatch(argv: string[]): Promise<RunResult> {
         const text = typeof help === "function" ? help() : help;
         process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
         return { status: 0 };
+      }
+      // FIX-298: the network guard is the FIRST checkpoint for any command that
+      // needs the network. ONE declarative model (networkNeeds) + ONE shared
+      // guard (requireNetwork); downstream handlers stay agnostic. On a dead
+      // network with no recovery the guard halts here — the handler never runs,
+      // never spins, never silently degrades. `roll run-once` runs its own
+      // per-cycle guard, so networkNeeds returns null for it (no double check).
+      const gateName = networkNeeds(command, rest);
+      if (gateName !== null) {
+        const net = await gate(gateName);
+        if (!net.ok) return { status: 1 };
       }
       return { status: await handler(rest) };
     }

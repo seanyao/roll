@@ -177,4 +177,25 @@ export const v3Catalog: Catalog = {
     en: "egress blocked (proxy?): network pre-check failed — cycle %s refused to start",
     zh: "出网阻断（疑似代理？）：网络预检失败 — 周期 %s 拒绝启动",
   },
+
+  // FIX-298: shared network guard (first-checkpoint connectivity + active recovery).
+  // Lines are emitted one per locale (the single-language contract) — EN and ZH
+  // are kept on separate lines by the caller, never inline on one line.
+  "net.recovering": {
+    en: "network unreachable — running the configured proxy-enable command, then re-checking…",
+    zh: "网络不可达 — 正在执行已配置的代理启用命令，然后重新检测……",
+  },
+  "net.recovered": {
+    en: "network restored after the proxy-enable command — continuing.",
+    zh: "执行代理启用命令后网络已恢复 — 继续。",
+  },
+  // %s is the command name (e.g. `roll loop go`). Halt message: clear, actionable.
+  "net.blocked_no_hook": {
+    en: "%s needs the network, but it is unreachable. No proxy-enable command is configured, so roll will not guess one. Add `loop_safety.proxy_enable_cmd: <your proxy-on command>` to .roll/policy.yaml (e.g. your VPN/proxy toggle), check your connection, then retry.",
+    zh: "%s 需要网络，但当前不可达。未配置代理启用命令，roll 不会自行猜测。请在 .roll/policy.yaml 中加入 `loop_safety.proxy_enable_cmd: <你的开代理命令>`（例如你的 VPN/代理开关），检查网络后重试。",
+  },
+  "net.blocked_after_hook": {
+    en: "%s needs the network, but it is STILL unreachable after running the configured proxy-enable command. Check that the command actually turns on connectivity, verify your network, then retry.",
+    zh: "%s 需要网络，但执行已配置的代理启用命令后仍不可达。请确认该命令确实能打开网络、检查连接后重试。",
+  },
 };

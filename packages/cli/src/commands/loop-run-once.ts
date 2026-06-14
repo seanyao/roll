@@ -25,10 +25,10 @@ import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { filterByAllowedCards, parseAllowedCardsEnv } from "../lib/goal-progress.js";
 import { writeLatestMorningReport } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
+import { requireNetwork, tcpConnect } from "../lib/require-network.js";
 import { gcCommand } from "./gc.js";
 import { execFileSync, spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
-import { createConnection } from "node:net";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 
 /** US-PORT-011: after a delivered cycle, surface the acceptance report —
@@ -427,24 +427,40 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
   };
 
-  // FIX-232 AC2: lightweight egress pre-check — detect proxy-poisoned
-  // launchd environment BEFORE acquiring the lock and burning agent tokens.
-  // DNS + TCP connect to github.com:443; a dead proxy at 127.0.0.1:7897
-  // passes DNS but fails TCP → blocked → ALERT + clean exit.
-  if (await egressBlocked()) {
+  // FIX-298: the per-cycle network checkpoint is now the SHARED requireNetwork
+  // guard (superseding the FIX-232 egress-only pre-check). As the FIRST thing a
+  // cycle does — BEFORE acquiring the lock and burning agent tokens — it probes
+  // connectivity; if blocked it runs the CONFIGURED proxy-enable hook and
+  // re-checks. Only if it is STILL down (or nothing is configured) does the
+  // cycle halt with an ALERT + clean exit. The guard's bilingual lines are
+  // mirrored to both stderr and the per-cycle ALERT file (the FIX-232 behaviour).
+  {
     const lang = resolveLang({
       rollLang: process.env["ROLL_LANG"],
       lcAll: process.env["LC_ALL"],
       lang: process.env["LANG"],
     });
-    const msg = t(v3Catalog, lang, "loop.egress_blocked", cycleId);
-    try {
-      appendFileSync(alertsPath, `[${new Date().toISOString()}] ALERT ${msg}\n`, "utf8");
-    } catch {
-      /* the stderr line below still fires */
+    const guardLines: string[] = [];
+    const net = await requireNetwork(`loop run-once (cycle ${cycleId})`, id.path, {
+      lang,
+      emit: (line) => {
+        guardLines.push(line);
+        process.stderr.write(`loop run-once: ${line}\n`);
+      },
+    });
+    if (!net.ok) {
+      // Preserve the per-cycle ALERT contract: write the egress-blocked headline
+      // plus the guard's actionable reason to the ALERT file the dashboard reads.
+      const headline = t(v3Catalog, lang, "loop.egress_blocked", cycleId);
+      try {
+        const ts = new Date().toISOString();
+        appendFileSync(alertsPath, `[${ts}] ALERT ${headline}\n`, "utf8");
+        for (const line of guardLines) appendFileSync(alertsPath, `[${ts}] ALERT ${line}\n`, "utf8");
+      } catch {
+        /* the stderr lines already fired */
+      }
+      return 1;
     }
-    process.stderr.write(`loop run-once: ${msg}\n`);
-    return 1;
   }
 
   // FIX-204A: an empty workflow document = a blind agent burning tokens for
@@ -650,23 +666,11 @@ export async function isOffline(
   }
 }
 
-export function tcpConnect(host: string, port: number, timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const socket = createConnection({ host, port });
-    let settled = false;
-    const done = (err?: Error): void => {
-      if (settled) return;
-      settled = true;
-      socket.removeAllListeners();
-      socket.destroy();
-      if (err) reject(err);
-      else resolve();
-    };
-    socket.setTimeout(timeoutMs, () => done(new Error("tcp timeout")));
-    socket.once("connect", () => done());
-    socket.once("error", done);
-  });
-}
+// FIX-298: `tcpConnect` is the SINGLE shared connectivity primitive — it lives
+// in ../lib/require-network.ts and is re-exported here for the existing
+// importers (egressBlocked below + its tests). One probe implementation, no
+// duplicate.
+export { tcpConnect };
 
 /**
  * FIX-232 AC2 — lightweight egress pre-check. Before a cycle acquires the

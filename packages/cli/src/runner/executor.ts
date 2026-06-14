@@ -2237,7 +2237,14 @@ export function nodePorts(opts: {
     },
     capture: {
       fromMarker(marker, runDir) {
-        return captureFromMarker(marker, { runDir });
+        // FIX-314 — force headless in the loop capture path: ROLL_ATTEST_HEADLESS=1
+        // prevents the web lane from opening a real GUI browser (disruptive in
+        // unattended cycles; Chrome also blocks file:// → "无法访问你的文件").
+        // Playwright headless Chromium handles file:// with no GUI.
+        return captureFromMarker(marker, {
+          runDir,
+          deps: { env: { ...process.env, ROLL_ATTEST_HEADLESS: "1" } },
+        });
       },
     },
     attest: {
@@ -2252,9 +2259,14 @@ export function nodePorts(opts: {
           // ROLL_ATTEST_WEB_URL deployed product page. The FIX-291 ladder falls
           // through to headless Chromium on a network-only loop runner (no GUI
           // needed), producing an unforgeable PNG.
+          // FIX-314: pass ROLL_ATTEST_HEADLESS=1 so the web capture in attest
+          // never pops a GUI browser — headless Chromium is the only web lane in
+          // an unattended cycle.
           const webTarget = webCaptureTargetForStory(projectCwd, storyId, process.env["ROLL_ATTEST_WEB_URL"]);
           const webArgs = webTarget !== null ? ["--capture-web", webTarget] : [];
-          return await attestCommand([storyId, "--run-dir", runDir, ...webArgs]);
+          return await attestCommand([storyId, "--run-dir", runDir, ...webArgs], {
+            capture: { env: { ...process.env, ROLL_ATTEST_HEADLESS: "1" } },
+          });
         } finally {
           process.chdir(prev);
         }

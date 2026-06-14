@@ -91,6 +91,59 @@ describe("web (headless Chromium lane — no GUI / CI)", () => {
   });
 });
 
+describe("FIX-314 ROLL_ATTEST_HEADLESS=1 — loop / unattended path forces headless, never GUI browser", () => {
+  it("macOS GUI host with ROLL_ATTEST_HEADLESS=1 → headless lane only, NO browser window opened", async () => {
+    // Simulate macOS Aqua session (launchctl → "Aqua") but ROLL_ATTEST_HEADLESS=1:
+    // the GUI lane must be completely bypassed — no osascript Chrome window, no screencapture.
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "npx") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/dossier/index.html", out: outPath() },
+      { run, env: { ROLL_ATTEST_HEADLESS: "1" }, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true);
+    const joined = calls.join("\n");
+    // headless playwright was used
+    expect(joined).toContain("playwright@latest screenshot file:///tmp/dossier/index.html");
+    // GUI probed must NOT have happened (launchctl never called; the flag short-circuits before it)
+    expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false);
+    // No real browser window was opened
+    expect(calls.some((c) => c.includes("tell application") && c.includes("Chrome"))).toBe(false);
+    // No screencapture
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false);
+  });
+
+  it("ROLL_ATTEST_HEADLESS=1 on non-macOS also hits headless lane", async () => {
+    const { run, calls } = fake({ npx: { code: 0, writes: true } });
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/dossier/index.html", out: outPath() },
+      { run, env: { ROLL_ATTEST_HEADLESS: "1" }, platform: "linux" },
+    );
+    expect(r.taken).toBe(true);
+    expect(calls.some((c) => c.includes("playwright@latest screenshot"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false);
+  });
+
+  it("ROLL_ATTEST_HEADLESS=1 + npx fails → honest skip with ROLL_ATTEST_HEADLESS=1 reason", async () => {
+    const { run } = fake({ npx: { code: 1 } });
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/dossier/index.html", out: outPath() },
+      { run, env: { ROLL_ATTEST_HEADLESS: "1" }, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("ROLL_ATTEST_HEADLESS=1");
+    expect(r.skipped).toContain("headless-only mode");
+  });
+});
+
 describe("FIX-291 web fallback ladder — never a silent DOM downgrade", () => {
   // A GUI macOS host: launchctl reports the Aqua session manager.
   const aqua = { code: 0, stdout: "Aqua\n" };

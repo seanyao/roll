@@ -135,6 +135,10 @@ roll loop now         # Run one cycle immediately (same as launchd fires)
 roll loop test        # Quick smoke test: verify tmux/popup/stream chain works
 
 roll loop status      # Show scheduler state and current loop state
+roll loop watch       # Read-only, concise, real-time view of this project's loop (tails live.log through the renderer)
+roll loop watch -n 50 # Look back 50 lines before following (default 200; 'all' = whole log)
+roll loop watch --verbose  # Also show the raw agent transcript (default folds it away)
+roll loop watch --attach   # Read-only attach to the loop's tmux observe window (tmux attach -r)
 roll loop go          # Run goal mode manually for all backlog until complete/pause/guardrail
 roll loop go --epic <name>              # Limit the goal to one epic
 roll loop go --cards US-1,FIX-2         # Limit the goal to selected cards

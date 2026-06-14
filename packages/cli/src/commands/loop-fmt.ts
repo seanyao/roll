@@ -20,6 +20,7 @@
  * MEANS) live in @roll/core's normalizers — downstream never re-parses an
  * agent's wire format.
  */
+import type { Readable, Writable } from "node:stream";
 import { createInterface } from "node:readline";
 import {
   type ActivityKind,
@@ -129,6 +130,48 @@ function hms(): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/**
+ * Drive the renderer over a live input stream, line by line, with a heartbeat.
+ *
+ * The ONE streaming engine shared by `roll loop fmt` (stdin) and `roll loop
+ * watch` (a `tail -F live.log` child's stdout). Two properties matter:
+ *
+ *   - AC4 (no mid-stream freeze): each rendered line is written AND flushed the
+ *     instant its source line arrives — `readline` yields per `\n`, and we drain
+ *     synchronously. There is no batch fold, so attaching to a stream already in
+ *     progress shows activity immediately instead of looking stuck.
+ *   - heartbeat: a wall-clock timer surfaces a "still alive" line when the agent
+ *     goes quiet, independent of input lines, so a long phase never looks frozen.
+ *
+ * Returns when the input stream ends. Pure render + I/O glue; all meaning lives
+ * in @roll/core's normalizers (no agent special-casing here).
+ */
+export async function streamThroughRenderer(
+  input: Readable,
+  out: Writable,
+  opts: { agent: string; verbose: boolean; gapMs?: number },
+): Promise<void> {
+  const norm = normalizerFor(opts.agent);
+  const st = newNormalizerState();
+  const gapMs = opts.gapMs ?? DEFAULT_HEARTBEAT_GAP_MS;
+  const write = (sig: ActivitySignal): void => {
+    if (tierVisible(sig.tier, opts.verbose)) out.write(renderSignal(sig, { ts: hms() }) + "\n");
+  };
+  const beat = setInterval(() => {
+    for (const sig of maybeHeartbeat(st, Date.now(), gapMs)) write(sig);
+  }, Math.min(gapMs, 15_000));
+  beat.unref?.();
+  const rl = createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const raw of rl) {
+      for (const sig of norm.normalize(raw, st, Date.now())) write(sig);
+    }
+  } finally {
+    clearInterval(beat);
+    rl.close();
+  }
+}
+
 const HELP = `Usage: roll loop fmt [--verbose] [--no-color]
 
 Reads the running agent's raw stream on stdin and writes a formatted, tiered
@@ -160,29 +203,6 @@ export async function loopFmtCommand(args: string[]): Promise<number> {
   const verbose = args.includes("--verbose") || args.includes("--raw");
   const agent = (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude";
 
-  const norm = normalizerFor(agent);
-  const st = newNormalizerState();
-  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-
-  // Heartbeat: a timer surfaces a "still alive" line when no signal has been
-  // emitted for a while, so a quiet agent (or a long phase) never looks frozen.
-  // Driven off the wall clock, independent of stdin lines.
-  const gapMs = DEFAULT_HEARTBEAT_GAP_MS;
-  const beat = setInterval(() => {
-    for (const sig of maybeHeartbeat(st, Date.now(), gapMs)) {
-      if (tierVisible(sig.tier, verbose)) process.stdout.write(renderSignal(sig, { ts: hms() }) + "\n");
-    }
-  }, Math.min(gapMs, 15_000));
-  beat.unref?.();
-
-  try {
-    for await (const raw of rl) {
-      for (const sig of norm.normalize(raw, st, Date.now())) {
-        if (tierVisible(sig.tier, verbose)) process.stdout.write(renderSignal(sig, { ts: hms() }) + "\n");
-      }
-    }
-  } finally {
-    clearInterval(beat);
-  }
+  await streamThroughRenderer(process.stdin, process.stdout, { agent, verbose });
   return 0;
 }

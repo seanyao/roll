@@ -72,7 +72,9 @@ export function networkNeeds(command: string, args: readonly string[]): string |
     }
     case "loop": {
       // Only the agent-spawning / PR sub-routes need the network. Everything
-      // else under `loop` is a read-only viewer or local maintenance.
+      // else under `loop` is a read-only viewer or local maintenance — e.g.
+      // `loop watch` (US-LOOP-074) just tails the local .roll/loop/live.log, so
+      // it must NOT be gated by the connectivity check.
       const sub = args[0];
       if (sub === "go") return "roll loop go";
       if (sub === "now") return "roll loop now";

@@ -176,6 +176,11 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (4 items refreshed)  —  run roll init inside a project
       ════════════════════════════════════════════════════════════════════════════════
+
+        → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
+          or the release will stop and ask you to merge the PR manually.
+        → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
+          否则发版会停下并提示你手动合并 PR。
       ",
       }
     `);
@@ -201,6 +206,11 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (4 items refreshed)  —  run roll init inside a project
       ════════════════════════════════════════════════════════════════════════════════
+
+        → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
+          or the release will stop and ask you to merge the PR manually.
+        → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
+          否则发版会停下并提示你手动合并 PR。
       ",
       }
     `);
@@ -226,6 +236,11 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup re-installed (forced — 4 items)  —  run roll init inside a project
       ════════════════════════════════════════════════════════════════════════════════
+
+        → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
+          or the release will stop and ask you to merge the PR manually.
+        → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
+          否则发版会停下并提示你手动合并 PR。
       ",
       }
     `);
@@ -251,6 +266,11 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup re-installed (forced — 4 items)  —  run roll init inside a project
       ════════════════════════════════════════════════════════════════════════════════
+
+        → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
+          or the release will stop and ask you to merge the PR manually.
+        → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
+          否则发版会停下并提示你手动合并 PR。
       ",
       }
     `);
@@ -298,6 +318,11 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (no changes)  —  everything already up to date
       ════════════════════════════════════════════════════════════════════════════════
+
+        → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
+          or the release will stop and ask you to merge the PR manually.
+        → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
+          否则发版会停下并提示你手动合并 PR。
       ",
       }
     `);
@@ -323,6 +348,11 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (no changes)  —  everything already up to date
       ════════════════════════════════════════════════════════════════════════════════
+
+        → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
+          or the release will stop and ask you to merge the PR manually.
+        → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
+          否则发版会停下并提示你手动合并 PR。
       ",
       }
     `);

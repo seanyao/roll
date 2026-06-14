@@ -345,5 +345,18 @@ export function setupCommand(args: string[]): number {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY;
   renderState.useColor = !noColor;
   emitSetupUi(steps);
+
+  // FIX-288 AC5: `roll release` drives the merge via GitHub-native auto-merge
+  // (`gh pr merge --auto --squash`). That needs "Allow auto-merge" enabled on
+  // the repo; otherwise the release aborts with an honest error. Surface the
+  // one-time toggle here so a first release does not hit a wall. EN and ZH on
+  // separate lines (project bilingual convention — never inline-mixed).
+  process.stdout.write(
+    "\n" +
+      `  ${c("dim", "→ For `roll release`: enable \"Allow auto-merge\" in your repo (Settings → General → Pull Requests),")}\n` +
+      `  ${c("dim", "  or the release will stop and ask you to merge the PR manually.")}\n` +
+      `  ${c("dim", "→ roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），")}\n` +
+      `  ${c("dim", "  否则发版会停下并提示你手动合并 PR。")}\n`,
+  );
   return 0;
 }

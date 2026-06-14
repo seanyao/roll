@@ -5,12 +5,22 @@
  * irreversible step behind an earlier gate:
  *
  *   plan → fold-changelog → bump-version → package-gate → commit-push →
- *   open-pr → wait-merge → sync-main → consistency-gate → tag-push
+ *   consistency-gate → open-pr → wait-merge → sync-main → tag-push
  *
  * The old sub-surfaces (`ship`, `waiver`, `changelog`, `consistency`) are
  * GONE — not hidden, not redirected: they exit through the normal
  * unknown-route error. There is no public waiver path: shipping over a known
  * fail-level drift is blocked; fix the drift.
+ *
+ * FIX-288: the release drives the merge itself via GitHub-native auto-merge
+ * (`gh pr merge <pr> --auto --squash`) instead of outsourcing it to the
+ * `com.roll.pr.<slug>` watch lane — so a release never sits silent for 20
+ * minutes waiting for a lane that may be off, and it still completes even if
+ * the process is interrupted (GitHub finishes the merge). The wait loop prints
+ * one feedback line per poll and nudges the PR (an empty commit) if checks
+ * never schedule. The consistency gate moved BEFORE open-pr/merge: it now runs
+ * on the release branch, so a drifting release aborts before the bump+changelog
+ * can land on main (no merged-but-untagged half-product).
  *
  * It stops at the tag push (release.yml runs the remote gate + GitHub
  * Release); `npm publish` stays the owner's separate, 2FA-authenticated step.
@@ -53,8 +63,33 @@ export interface ReleaseFlowDeps {
   packageGate: (cwd: string) => boolean;
   commitPush: (cwd: string, branch: string, message: string) => void;
   openPr: (cwd: string, branch: string, title: string) => string;
-  /** Polls until the PR is merged (the PR lane usually merges it); false on timeout. */
-  waitMerged: (cwd: string, prRef: string) => boolean;
+  /**
+   * FIX-288 AC1: arm GitHub-native auto-merge on the freshly opened PR
+   * (`gh pr merge <pr> --auto --squash`). Once armed, GitHub completes the
+   * merge when checks go green — even if this process is Ctrl-C'd. AC5: if the
+   * repo has "Allow auto-merge" disabled, this THROWS an honest, actionable
+   * error rather than silently hanging.
+   */
+  enableAutoMerge: (cwd: string, prRef: string, branch: string) => void;
+  /**
+   * FIX-288 AC3: nudge the release PR — an empty commit pushed to its branch
+   * fires a `synchronize` event, which reliably schedules `pull_request` CI when
+   * a fresh PR's checks never triggered (a known GitHub flake). Best-effort.
+   */
+  nudgePr: (cwd: string, branch: string) => void;
+  /**
+   * FIX-288 AC2/AC3: polls until the PR is merged. GitHub auto-merge does the
+   * merging; this loop only watches and gives feedback. `onWait` is called once
+   * per poll with a human waited-so-far line (AC2). After a stretch with no
+   * checks scheduled it NUDGES the PR via `nudge` to fire a `synchronize` event
+   * (AC3). Returns false on close/timeout.
+   */
+  waitMerged: (
+    cwd: string,
+    prRef: string,
+    branch: string,
+    hooks: { onWait: (line: string) => void; nudge: () => void },
+  ) => boolean;
   syncMain: (cwd: string) => boolean;
   consistencyGate: (cwd: string) => Promise<boolean> | boolean;
   tag: (cwd: string, tag: string, version: string) => void;
@@ -171,16 +206,76 @@ export function realReleaseDeps(): ReleaseFlowDeps {
       ).trim();
       return out.split("\n").at(-1) ?? branch;
     },
-    waitMerged: (cwd, prRef) => {
-      const deadline = Date.now() + 20 * 60_000;
+    // FIX-288 AC1: arm GitHub-native auto-merge so the release drives its own
+    // merge (no dependency on the com.roll.pr.<slug> lane) and finishes even if
+    // this process is interrupted. AC5: a repo without "Allow auto-merge" makes
+    // `gh pr merge --auto` fail — surface that as an honest, actionable error
+    // instead of silently waiting forever.
+    enableAutoMerge: (cwd, prRef) => {
+      try {
+        execFileSync("gh", ["pr", "merge", prRef, "--auto", "--squash"], {
+          cwd,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (e) {
+        const out = e instanceof Error && "stderr" in e ? String((e as { stderr?: unknown }).stderr ?? "") : "";
+        const enabledHint = /auto.?merge.*(not allowed|disabled|enabled)|allow auto-?merge/i.test(out);
+        const detail = out.split("\n").find((l) => l.trim() !== "")?.trim() ?? (e instanceof Error ? e.message : String(e));
+        throw new Error(
+          enabledHint
+            ? `auto-merge is not enabled on this repo. Enable "Allow auto-merge" in Settings → General → Pull Requests, or merge PR ${prRef} manually. (${detail})`
+            : `could not arm auto-merge on PR ${prRef}: ${detail}`,
+        );
+      }
+    },
+    // FIX-288 AC3: an empty commit pushed to the release branch fires a
+    // `synchronize` event so a fresh PR's pull_request CI gets scheduled. The
+    // empty commit is harmless: it squash-merges away into the single release
+    // commit on main. Best-effort — a failed nudge never aborts the release.
+    nudgePr: (cwd, branch) => {
+      const run = (args: string[]): void =>
+        void execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      run(["commit", "--allow-empty", "-m", "chore: nudge CI (roll release)", "--no-verify"]);
+      run(["push", "origin", branch]);
+    },
+    // FIX-288 AC2/AC3: GitHub auto-merge does the merging; this only watches.
+    // Each poll prints one feedback line (AC2). After NUDGE_AFTER quiet polls
+    // with no scheduled checks, fire a `synchronize` (AC3) — a fresh PR's CI
+    // sometimes never schedules. Returns false on close/timeout.
+    waitMerged: (cwd, prRef, _branch, hooks) => {
+      const start = Date.now();
+      const deadline = start + 20 * 60_000;
+      const NUDGE_AFTER = 4; // ~80s of no checks before we kick the PR once
+      let quietPolls = 0;
+      let nudged = false;
       while (Date.now() < deadline) {
+        const waitedMin = Math.max(1, Math.round((Date.now() - start) / 60_000));
         try {
           const state = execFileSync("gh", ["pr", "view", prRef, "--json", "state", "--jq", ".state"], { cwd, encoding: "utf8" }).trim();
           if (state === "MERGED") return true;
           if (state === "CLOSED") return false;
+          // AC3: no checks scheduled? count quiet polls; nudge once.
+          let checks = "";
+          try {
+            checks = execFileSync("gh", ["pr", "checks", prRef], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+          } catch {
+            checks = ""; // `gh pr checks` exits non-zero when there are no checks yet
+          }
+          if (checks === "") {
+            quietPolls += 1;
+            if (!nudged && quietPolls >= NUDGE_AFTER) {
+              hooks.nudge();
+              nudged = true;
+              quietPolls = 0;
+            }
+          } else {
+            quietPolls = 0;
+          }
         } catch {
           /* transient gh error — keep polling */
         }
+        hooks.onWait(`#${prRef} — waited ${waitedMin}m, waiting for auto-merge / CI`);
         execFileSync("sleep", ["20"]);
       }
       return false;
@@ -294,21 +389,37 @@ async function runReleaseFlowInner(
   deps.commitPush(cwd, branch, `Release: ${plan.tag}`);
   step("commit-push", branch);
 
+  // FIX-288 AC4: the consistency gate runs HERE — on the release branch, with
+  // the bump+changelog committed but NOT yet merged. A drifting release aborts
+  // cleanly before any PR is opened or merged, so the bump+changelog never land
+  // on main untagged (no merged-but-untagged half-product). US-REL-007 stands:
+  // no waiver path; fix the drift, then release.
+  mark("consistency-gate");
+  if (!(await deps.consistencyGate(cwd))) return abort("consistency-gate", "a consistency dimension is failing — fix the drift (no waiver path)");
+  step("consistency-gate", "all dimensions pass");
+
   mark("open-pr");
   const prRef = deps.openPr(cwd, branch, `Release: ${plan.tag}`);
   step("open-pr", prRef);
 
+  // FIX-288 AC1: drive the merge ourselves via GitHub-native auto-merge. The
+  // release no longer waits on the com.roll.pr.<slug> lane, and GitHub finishes
+  // the merge even if this process is interrupted. AC5: a repo without "Allow
+  // auto-merge" throws here with an actionable error — never a silent hang.
+  deps.enableAutoMerge(cwd, prRef, branch);
+  step("open-pr", `auto-merge armed on ${prRef}`);
+
   mark("wait-merge");
-  if (!deps.waitMerged(cwd, prRef)) return abort("wait-merge", "release PR not merged (checks failed or timeout)");
+  const merged = deps.waitMerged(cwd, prRef, branch, {
+    onWait: (line) => step("wait-merge", line),
+    nudge: () => deps.nudgePr(cwd, branch),
+  });
+  if (!merged) return abort("wait-merge", "release PR not merged (checks failed or timeout)");
   step("wait-merge", "merged");
 
   mark("sync-main");
   if (!deps.syncMain(cwd)) return abort("sync-main", "fast-forward to origin/main failed");
   step("sync-main", "main up to date");
-
-  mark("consistency-gate");
-  if (!(await deps.consistencyGate(cwd))) return abort("consistency-gate", "a consistency dimension is failing — fix the drift (no waiver path)");
-  step("consistency-gate", "all dimensions pass");
 
   if (deps.tagExists(cwd, plan.tag)) return abort("tag-push", `tag ${plan.tag} appeared concurrently`);
   mark("tag-push");
@@ -394,7 +505,13 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
   // just prints a pointer to run it.
   const showcase = args.includes("--showcase");
   deps.onStep = (s, detail) => {
-    process.stdout.write(`${c("green", "✓")} ${s.padEnd(17)} ${detail}\n`);
+    // FIX-288 AC2: the wait-merge poll emits one progress line per poll (and the
+    // armed-auto-merge note) — those are "still working", not "done", so they
+    // render with a waiting glyph; the terminal `merged` and all other steps get
+    // the completion check. No more 20-minute silence while the PR merges.
+    const inProgress = s === "wait-merge" && detail !== "merged";
+    const glyph = inProgress ? c("dim", "…") : c("green", "✓");
+    process.stdout.write(`${glyph} ${s.padEnd(17)} ${detail}\n`);
   };
   const res = await runReleaseFlow(cwd, deps, { dryRun, yes });
   if (res.status === "released") {

@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  parseAvailableAgents,
   probeMissingAgents,
   resetSandbox,
   type RunRollOptions,
@@ -223,15 +224,24 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
     expect(calls[0]?.opts?.realHome).toBe(true);
   });
 
+  // ANSI color escapes, exactly as agentListCommand emits them.
+  const G = "\x1b[0;32m"; // green (installed)
+  const Y = "\x1b[0;33m"; // yellow (not installed)
+  const NC = "\x1b[0m";
+
   it("when the cast trio IS available in the real env, nothing is missing (no false abort)", () => {
-    // The real `roll agent list` lists claude / kimi / pi — all cast agents present.
-    const { runner } = recordingRunner("Available agents:\n  claude\n  kimi\n  pi\n");
+    // The real `roll agent list` lists claude / kimi / pi with a ✓ marker.
+    const { runner } = recordingRunner(
+      `  Available agents\n\n    ${G}✓ claude${NC}\n    ${G}✓ kimi${NC}\n    ${G}✓ pi${NC}\n`,
+    );
     expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual([]);
   });
 
   it("a GENUINELY-missing cast agent fails loud (reported as missing)", () => {
-    // pi is NOT installed in the real env → only pi is reported missing.
-    const { runner } = recordingRunner("Available agents:\n  claude\n  kimi\n");
+    // pi is NOT installed (✗ … not installed) in the real env → only pi is reported missing.
+    const { runner } = recordingRunner(
+      `  Available agents\n\n    ${G}✓ claude${NC}\n    ${G}✓ kimi${NC}\n    ${Y}✗ pi${NC}  (not installed)\n`,
+    );
     expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual(["pi"]);
   });
 
@@ -245,6 +255,52 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
       "claude",
       "pi",
     ]);
+  });
+
+  // FIX-299 — the probe MISPARSED the real, colored, marker-bearing output and
+  // reported installed agents as missing. This pins the real format end-to-end.
+  it("FIX-299: parses the REAL colored ✓/✗ output — installed cast agents are NOT flagged missing", () => {
+    // The exact shape `roll agent list` prints: ANSI color codes, ✓ for installed,
+    // ✗  …  (not installed) for absent, "(current)" on the active agent, and a
+    // localized header (here zh, as on the reporter's box).
+    const realOutput =
+      `\n  可用 agent\n\n` +
+      `    ${G}✓ claude${NC}  (current)\n` +
+      `    ${G}✓ kimi${NC}\n` +
+      `    ${Y}✗ deepseek${NC}  (not installed)\n` +
+      `    ${Y}✗ opencode${NC}  (not installed)\n` +
+      `    ${G}✓ codex${NC}\n` +
+      `    ${G}✓ openai${NC}\n` +
+      `    ${G}✓ pi${NC}\n` +
+      `    ${Y}✗ qwen${NC}  (not installed)\n` +
+      `    ${G}✓ antigravity (agy)${NC}\n\n`;
+    const { runner } = recordingRunner(realOutput);
+    // kimi / claude / pi are ALL ✓ available → none reported missing (the bug).
+    expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual([]);
+
+    // A genuinely ✗ (not installed) cast agent IS reported missing.
+    const deepseekCast = { builder: "kimi", reviewer: "claude", scorer: "deepseek" };
+    expect(probeMissingAgents("/sandbox", "/throwaway-home", deepseekCast, runner)).toEqual([
+      "deepseek",
+    ]);
+  });
+
+  it("FIX-299: parseAvailableAgents reads ✓/✗ markers, strips ANSI, and canonicalises (agy)", () => {
+    const realOutput =
+      `\n  可用 agent\n\n` +
+      `    ${G}✓ claude${NC}  (current)\n` +
+      `    ${G}✓ kimi${NC}\n` +
+      `    ${Y}✗ deepseek${NC}  (not installed)\n` +
+      `    ${G}✓ pi${NC}\n` +
+      `    ${G}✓ antigravity (agy)${NC}\n`;
+    const available = parseAvailableAgents(realOutput);
+    // ✓ rows are available (agy comes from the parenthesised canonical name).
+    expect(available.has("claude")).toBe(true);
+    expect(available.has("kimi")).toBe(true);
+    expect(available.has("pi")).toBe(true);
+    expect(available.has("agy")).toBe(true);
+    // ✗ "not installed" rows are NOT available even though the name is in the blob.
+    expect(available.has("deepseek")).toBe(false);
   });
 });
 

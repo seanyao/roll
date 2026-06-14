@@ -41,6 +41,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canonicalAgentName } from "@roll/core";
+import { stripAnsi } from "../render.js";
 import {
   assembleEvidenceChain,
   castingAgentsYaml,
@@ -569,12 +571,50 @@ export function probeMissingAgents(
   const wanted = [...new Set([casting.builder, casting.reviewer, casting.scorer])];
   // realHome:true — query the agents installed on THIS machine, not the sandbox.
   const r = runner(sandbox, rollHome, ["agent", "list"], { realHome: true });
-  // `roll agent list` prints installed agents; an agent we cast that is not
-  // listed is treated as unavailable (fail-loud). When the listing fails
-  // entirely, do not fabricate availability — report all cast agents missing.
+  // `roll agent list` prints one row per agent with a ✓ (installed) or ✗
+  // (not installed) marker, wrapped in ANSI color codes (see agentListCommand).
+  // When the listing fails entirely with no output, do not fabricate
+  // availability — report all cast agents missing (fail-loud).
   if (r.code !== 0 && r.stdout.trim() === "") return wanted;
-  const listed = r.stdout.toLowerCase();
-  return wanted.filter((a) => !listed.includes(a.toLowerCase()));
+  const available = parseAvailableAgents(r.stdout);
+  // Compare on canonical names so an agent listed as `antigravity (agy)` matches
+  // a cast `agy`/`gemini`/`antigravity`. A cast agent absent from the available
+  // set — including one explicitly marked ✗ (not installed) — is reported missing.
+  return wanted.filter((a) => !available.has(canonicalAgentName(a)));
+}
+
+/**
+ * Parse `roll agent list` output into the set of canonical agent names that are
+ * AVAILABLE (installed). The real output carries ANSI color escapes and marks
+ * each row with a ✓ (installed) or ✗ (not installed) glyph, e.g.:
+ *
+ *   \x1b[0;32m✓ claude\x1b[0m  (current)
+ *   \x1b[0;33m✗ deepseek\x1b[0m  (not installed)
+ *   \x1b[0;32m✓ antigravity (agy)\x1b[0m
+ *
+ * The previous probe did a naive substring scan of the whole blob, which both
+ * (a) ignored the ✓/✗ marker — so a ✗ "not installed" agent counted as present —
+ * and (b) was collision-prone. This strips ANSI, reads the marker per line, and
+ * extracts the agent token (including any parenthesised canonical like `(agy)`),
+ * canonicalising for a robust, marker-aware membership check.
+ */
+export function parseAvailableAgents(out: string): Set<string> {
+  const available = new Set<string>();
+  for (const raw of stripAnsi(out).split("\n")) {
+    const line = raw.trim();
+    if (line === "") continue;
+    // Available iff the row is marked with ✓ AND not flagged "not installed".
+    const isAvailable = line.startsWith("✓");
+    const isMissing = line.startsWith("✗") || /\(not installed\)/i.test(line);
+    if (!isAvailable || isMissing) continue;
+    // Strip the marker, then take the first word as the agent token. The first
+    // word is always the agent name (`antigravity` in `antigravity (agy)`);
+    // trailing parens are annotations (`(current)`) — never the name. Canonicalise
+    // so `antigravity` → `agy`, matching a cast `agy`/`gemini`/`antigravity`.
+    const token = line.replace(/^✓\s*/, "").split(/\s+/)[0];
+    if (token) available.add(canonicalAgentName(token));
+  }
+  return available;
 }
 
 /** Pull the attest Gate verdict word from the attest command output. */

@@ -107,7 +107,7 @@ import {
 } from "./agent-spawn.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate, verificationReportPath, webCaptureTargetForStory } from "./attest-gate.js";
-import { recoverPiUsage } from "./usage-recovery.js";
+import { recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { realBudgetCheck } from "./budget-check.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
@@ -569,21 +569,26 @@ export async function executeCommand(
       } catch {
         /* logging must never fail the cycle */
       }
-      // FIX-208/FIX-249: fold the agent's real usage into a per-cycle cost,
-      // trying every adapter lane in order:
+      // FIX-208/FIX-249/FIX-303: fold the agent's real usage into a per-cycle
+      // cost via a per-agent normalization layer onto ONE 4-component model
+      // (input/output/cache-read/cache-write — the roll thesis). Lanes:
       //   1. claude stream-json (per-turn usage + final total_cost_usd);
-      //   2. stdout-scrape footer agents (openai/gemini/kimi/qwen, REGISTRY);
-      //   3. pi session-store recovery (pi prints no usage; its session files
-      //      under ~/.pi/agent/sessions/<encoded-cwd>/ are authoritative,
-      //      scoped to this cycle's worktree + start time).
-      // Best-effort: a miss on every lane leaves cost absent (n/a, never a
-      // fake zero) — usage accounting must never fail the cycle.
+      //   2. AUTHORITATIVE session-store recovery for the agents whose `-p`/
+      //      `exec` stdout carries no parseable usage — each writes real per-turn
+      //      usage to its own store, scoped here to this cycle's worktree + start:
+      //        pi    → ~/.pi/agent/sessions/<encoded-cwd>/*.jsonl
+      //        kimi  → ~/.kimi-code/sessions/wd_<wt>_*/.../wire.jsonl
+      //        codex → ~/.codex/sessions/<date>/rollout-*.jsonl
+      //   3. generic stdout-scrape footer agents (openai/gemini/kimi/qwen
+      //      REGISTRY) — the lossy 2-component legacy fallback, tried LAST so a
+      //      session recovery's full 4-component split always wins when present.
+      // Best-effort: a miss on every lane leaves cost absent (n/a, never a fake
+      // zero) — usage accounting must never fail the cycle.
       let costPatch: CycleCost | undefined;
       try {
         const agentName = ctx.agent ?? cmd.agent;
         const lines = res.stdout.split("\n");
         let usage = sumClaudeStream(lines);
-        if (usage === null) usage = extractUsage(agentName, lines);
         if (usage === null && agentName === "pi") {
           const rootOverride = (process.env["ROLL_PI_SESSIONS_ROOT"] ?? "").trim();
           usage = recoverPiUsage(
@@ -592,6 +597,26 @@ export async function executeCommand(
             ...(rootOverride !== "" ? [rootOverride] : []),
           );
         }
+        if (usage === null && agentName === "kimi") {
+          const rootOverride = (process.env["ROLL_KIMI_SESSIONS_DIR"] ?? "").trim();
+          usage = recoverKimiUsage(
+            ports.paths.worktreePath,
+            ctx.startSec,
+            ...(rootOverride !== "" ? [rootOverride] : []),
+          );
+        }
+        if (usage === null && (agentName === "codex" || agentName === "openai")) {
+          const rootOverride = (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim();
+          usage = recoverCodexUsage(
+            ports.paths.worktreePath,
+            ctx.startSec,
+            ...(rootOverride !== "" ? [rootOverride] : []),
+          );
+        }
+        // Legacy stdout-scrape fallback (LAST): only when no authoritative
+        // session usage was found, so a 2-component footer never overrides a
+        // recovered 4-component split.
+        if (usage === null) usage = extractUsage(agentName, lines);
         if (usage !== null) {
           costPatch = toCycleCost(usage, {
             cycleId: ctx.cycleId,

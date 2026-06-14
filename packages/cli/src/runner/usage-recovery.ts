@@ -1,4 +1,14 @@
 /**
+ * Session-file usage recovery (cli adapters over core's pure summers).
+ *
+ * FIX-303 broadened this from pi-only to the three agents whose `-p`/`exec`
+ * stdout carries no parseable usage — pi, kimi, and codex — so a real cycle
+ * for any of them no longer records `usage_unknown` (tokens "?", cost $0).
+ * Each agent persists authoritative per-turn usage to its own store, and the
+ * core summers (`sumPiSession`/`sumKimiWire`/`sumCodexSession`) normalize all
+ * three onto the ONE 4-component model; these adapters do the per-agent file
+ * discovery the core deliberately leaves to the caller.
+ *
  * FIX-249 — pi session-file usage recovery (cli adapter).
  *
  * pi's text-mode stdout carries no usage — `piExtract` is an always-null stub —
@@ -16,10 +26,19 @@
  * THIS cycle (mtime ≥ cycle start), sum, and shape the result as AgentUsage so
  * `toCycleCost` prices it from the table (pi reports no list cost).
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { type Dirent, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { PI_DEFAULT_MODEL, type AgentUsage, aggregateSessions, sumPiSession } from "@roll/core";
+import { basename, join } from "node:path";
+import {
+  CODEX_DEFAULT_MODEL,
+  KIMI_DEFAULT_MODEL,
+  PI_DEFAULT_MODEL,
+  type AgentUsage,
+  aggregateSessions,
+  sumCodexSession,
+  sumKimiWire,
+  sumPiSession,
+} from "@roll/core";
 
 /** Default pi session store root. */
 export function defaultPiSessionsRoot(): string {
@@ -70,4 +89,172 @@ export function recoverPiUsage(
     // prices from the table (no cost_list_usd here, by design).
     cost_reported: agg.cost_reported,
   };
+}
+
+
+// ── kimi session-file recovery (FIX-303) ─────────────────────────────────────
+
+/** Default kimi-code session store root (env override → ~/.kimi-code/sessions). */
+export function defaultKimiSessionsRoot(): string {
+  return (process.env["ROLL_KIMI_SESSIONS_DIR"] ?? "").trim() || join(homedir(), ".kimi-code", "sessions");
+}
+
+/**
+ * Recover this cycle's kimi usage from its persisted wire files, mirroring the
+ * v2 `kimi.usage_from_session` (FIX-303: kimi-code's `-p` stdout carries no
+ * parseable usage footer — the stdout-scrape `kimiExtract` lane is null on a
+ * real cycle — so its runs row showed tokens "?"/cost $0). kimi-code persists
+ * authoritative per-turn usage at
+ *   <root>/wd_<worktree-basename>_<hash>/session_(star)/agents/main/wire.jsonl
+ * Scope: match the `wd_<basename>_` segment against the cycle worktree basename
+ * (retries reuse the same worktree → multiple files SUMMED), then `sumKimiWire`
+ * each into the 4-component model. `sinceSec` scopes to files touched this cycle
+ * (mtime ≥ cycle start). Returns null when nothing is attributable ("n/a, never
+ * fake zeros").
+ */
+export function recoverKimiUsage(
+  worktreeCwd: string,
+  sinceSec?: number,
+  sessionsRoot: string = defaultKimiSessionsRoot(),
+): AgentUsage | null {
+  const wantBasename = basename(worktreeCwd.replace(/\/+$/, ""));
+  let wdDirs: string[];
+  try {
+    wdDirs = readdirSync(sessionsRoot).filter((d) => d.startsWith(`wd_${wantBasename}_`));
+  } catch {
+    return null; // no kimi session store
+  }
+  const wireFiles: string[] = [];
+  for (const wd of wdDirs) {
+    const agentsRoot = join(sessionsRoot, wd);
+    let sessions: string[];
+    try {
+      sessions = readdirSync(agentsRoot).filter((s) => s.startsWith("session_"));
+    } catch {
+      continue;
+    }
+    for (const session of sessions) {
+      wireFiles.push(join(agentsRoot, session, "agents", "main", "wire.jsonl"));
+    }
+  }
+  const summaries = [];
+  for (const p of wireFiles) {
+    try {
+      if (sinceSec !== undefined && statSync(p).mtimeMs / 1000 < sinceSec) continue;
+      summaries.push(sumKimiWire(readFileSync(p, "utf8").split("\n")));
+    } catch {
+      /* unreadable / absent wire file: skip, never fail the cycle */
+    }
+  }
+  const agg = aggregateSessions(summaries, KIMI_DEFAULT_MODEL);
+  if (agg === null) return null;
+  return {
+    model: agg.model ?? KIMI_DEFAULT_MODEL,
+    input_tokens: agg.input_tokens,
+    output_tokens: agg.output_tokens,
+    cache_creation_tokens: agg.cache_creation_tokens,
+    cache_read_tokens: agg.cache_read_tokens,
+  };
+}
+
+// ── codex session-file recovery (FIX-303) ────────────────────────────────────
+
+/** Default codex CLI session store root (env override → ~/.codex/sessions). */
+export function defaultCodexSessionsRoot(): string {
+  return (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim() || join(homedir(), ".codex", "sessions");
+}
+
+/** Recursively collect `rollout-*.jsonl` files under a codex sessions root
+ *  (codex shards by `<root>/YYYY/MM/DD/rollout-*.jsonl`). Tolerant of a missing
+ *  root and unreadable subdirs — a probe miss is never a cycle failure. */
+function collectCodexRollouts(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 6) return;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (e.isFile() && e.name.startsWith("rollout-") && e.name.endsWith(".jsonl")) out.push(p);
+    }
+  };
+  walk(root, 0);
+  return out;
+}
+
+/**
+ * Recover this cycle's codex usage from its persisted session jsonl (FIX-303:
+ * codex `exec` prints no usage footer, so the stdout-scrape lane is always
+ * null — without this the codex runs row showed tokens "?"/cost $0). codex
+ * writes one `rollout-*.jsonl` per session under
+ *   <root>/YYYY/MM/DD/rollout-<ts>-<id>.jsonl
+ * whose `session_meta` carries the run `cwd`. Scope: select rollouts whose
+ * `session_meta.payload.cwd` matches the cycle worktree (basename, robust to
+ * realpath/symlink differences) and whose mtime ≥ cycle start, then take the
+ * one with the largest cumulative `total_token_usage` (the running total for
+ * the cycle's worktree; an exec re-invocation appends a fresh cumulative
+ * snapshot rather than splitting the count). Returns null when nothing is
+ * attributable ("n/a, never fake zeros").
+ */
+export function recoverCodexUsage(
+  worktreeCwd: string,
+  sinceSec?: number,
+  sessionsRoot: string = defaultCodexSessionsRoot(),
+): AgentUsage | null {
+  const wantBasename = basename(worktreeCwd.replace(/\/+$/, ""));
+  const files = collectCodexRollouts(sessionsRoot);
+  let best: AgentUsage | null = null;
+  let bestTokens = -1;
+  for (const p of files) {
+    let raw: string;
+    try {
+      if (sinceSec !== undefined && statSync(p).mtimeMs / 1000 < sinceSec) continue;
+      raw = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    if (!sessionCwdMatches(raw, worktreeCwd, wantBasename)) continue;
+    const agg = sumCodexSession(raw.split("\n"));
+    if (agg === null) continue;
+    const tokens = agg.input_tokens + agg.output_tokens + agg.cache_read_tokens + agg.cache_creation_tokens;
+    if (tokens > bestTokens) {
+      bestTokens = tokens;
+      best = {
+        model: agg.model ?? CODEX_DEFAULT_MODEL,
+        input_tokens: agg.input_tokens,
+        output_tokens: agg.output_tokens,
+        cache_creation_tokens: agg.cache_creation_tokens,
+        cache_read_tokens: agg.cache_read_tokens,
+      };
+    }
+  }
+  return best;
+}
+
+/** True iff a codex rollout's `session_meta.payload.cwd` is the cycle worktree.
+ *  Matches the full path first, then falls back to the basename so a realpath /
+ *  symlink difference between the spawn cwd and the recorded cwd never drops a
+ *  genuine match. */
+function sessionCwdMatches(raw: string, worktreeCwd: string, wantBasename: string): boolean {
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    let o: Record<string, unknown>;
+    try {
+      o = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (o["type"] !== "session_meta") continue;
+    const p = (o["payload"] ?? {}) as Record<string, unknown>;
+    const cwd = typeof p["cwd"] === "string" ? (p["cwd"] as string) : "";
+    if (cwd === "") return false;
+    return cwd === worktreeCwd || basename(cwd.replace(/\/+$/, "")) === wantBasename;
+  }
+  return false;
 }

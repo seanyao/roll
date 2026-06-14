@@ -27,12 +27,12 @@ const STDOUT_FIXTURES: Array<{ agent: string; ex: Extractor; lines: string[]; ex
   {
     agent: "openai", ex: openaiExtract,
     lines: ["Model: gpt-4o", "Token usage: total=18420 input=15300 output=3120"],
-    expected: { model: "gpt-4o", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.1837, duration_ms: null },
+    expected: { model: "gpt-4o", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.0694, duration_ms: null },
   },
   {
     agent: "openai", ex: openaiExtract,
     lines: ["tokens used: 12,345"],
-    expected: { model: "gpt-4o", input_tokens: 12345, output_tokens: 0, cost_list_usd: 0.0802, duration_ms: null },
+    expected: { model: "gpt-4o", input_tokens: 12345, output_tokens: 0, cost_list_usd: 0.0309, duration_ms: null },
   },
   {
     agent: "openai", ex: openaiExtract,

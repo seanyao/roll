@@ -312,6 +312,69 @@ export function sumKimiWire(lines: readonly string[]): SessionAgg | null {
   };
 }
 
+/** FIX-303: exported — the cli codex session-recovery adapter needs the same
+ *  default when a codex session omits its model id. Tracks the codex CLI's
+ *  current default model (gpt-5.5); priced in USD via the openai/gpt snapshot. */
+export const CODEX_DEFAULT_MODEL = "gpt-5.5";
+
+/**
+ * Sum a codex CLI session `rollout-*.jsonl`, mirroring how pi/kimi recover from
+ * their persisted stores (FIX-303 — codex `exec` prints no parseable usage
+ * footer, so its stdout-scrape lane is always null; the authoritative usage
+ * lives in `~/.codex/sessions/**` + `/rollout-*.jsonl`). Each `event_msg` line
+ * whose `payload.type === "token_count"` carries a CUMULATIVE
+ * `info.total_token_usage` snapshot, so — unlike pi/kimi per-message lines that
+ * SUM — the running total is the LAST snapshot (taking the max guards against an
+ * out-of-order tail). Field mapping (OpenAI billing): codex `input_tokens`
+ * INCLUDES `cached_input_tokens`, so cache-miss input = input − cached;
+ * cache_read = cached_input_tokens; output = output_tokens (reasoning is already
+ * counted within the billed output total, not additive); OpenAI levies no
+ * cache-write surcharge so cache_creation = 0. The model is the session's
+ * `turn_context` / `session_meta` `payload.model`. Returns null when no
+ * token_count event was seen ("n/a, never fake zero").
+ */
+export function sumCodexSession(lines: readonly string[]): SessionAgg | null {
+  let inputTotal = 0;
+  let cachedTotal = 0;
+  let outputTotal = 0;
+  let model: string | null = null;
+  let seen = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === "") continue;
+    let o: Record<string, unknown>;
+    try {
+      o = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const p = (o["payload"] ?? {}) as Record<string, unknown>;
+    const type = o["type"];
+    if ((type === "session_meta" || type === "turn_context") && typeof p["model"] === "string" && p["model"]) {
+      model = p["model"] as string;
+    }
+    if (type !== "event_msg" || p["type"] !== "token_count") continue;
+    const info = (p["info"] ?? {}) as Record<string, unknown>;
+    const total = info["total_token_usage"] as Record<string, unknown> | undefined | null;
+    if (!total) continue;
+    seen = true;
+    // Cumulative snapshots: take the max so an out-of-order tail can't shrink it.
+    inputTotal = Math.max(inputTotal, intOr(total["input_tokens"]));
+    cachedTotal = Math.max(cachedTotal, intOr(total["cached_input_tokens"]));
+    outputTotal = Math.max(outputTotal, intOr(total["output_tokens"]));
+  }
+  if (!seen) return null;
+  const cacheRead = Math.min(cachedTotal, inputTotal);
+  return {
+    model: model ?? CODEX_DEFAULT_MODEL,
+    input_tokens: Math.max(0, inputTotal - cacheRead),
+    output_tokens: outputTotal,
+    cache_creation_tokens: 0,
+    cache_read_tokens: cacheRead,
+    cost_reported: 0,
+  };
+}
+
 const CLAUDE_DEFAULT_MODEL = "claude";
 
 /**

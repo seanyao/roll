@@ -1,0 +1,29 @@
+{
+  "version": "2026-06-14",
+  "effective_at": "2026-06-14",
+  "source_url": "https://openrouter.ai/openai/gpt-5.5",
+  "vendor": "openai",
+  "currency": "USD",
+  "default_model": "kimi-k2.6",
+  "notes": "Rates per million tokens in USD — OpenAI's native billing currency for the Codex CLI (agent ids codex/openai). GPT-5.5 was the standing model as of 2026-06 (codex CLI 0.13x reports model gpt-5.5); the 2026-04-23 GPT-5.5 release doubled the GPT-5 line to in 5 / out 30. cache_read is the documented cached-input rate ($0.50/M = 90% off input). Field convention matches the deepseek/kimi snapshots: cache_create = cache-miss input rate (OpenAI levies no separate cache-write surcharge, and codex sessions report no cacheWrite tokens, so this only ever multiplies near-zero cacheWrite). gpt-5 / gpt-4o retained for currency resolution of legacy/aliased codex model ids. NOTE: default_model is intentionally kept at the prior snapshot's kimi-k2.6 so the GLOBAL unknown-model fallback (and its frozen difftests) is unchanged — this vendor snapshot only ADDS the gpt-* price keys and their USD currency.",
+  "prices": {
+    "gpt-5.5": {
+      "in": 5.0,
+      "out": 30.0,
+      "cache_create": 5.0,
+      "cache_read": 0.5
+    },
+    "gpt-5": {
+      "in": 2.5,
+      "out": 15.0,
+      "cache_create": 2.5,
+      "cache_read": 0.25
+    },
+    "gpt-4o": {
+      "in": 2.5,
+      "out": 10.0,
+      "cache_create": 2.5,
+      "cache_read": 1.25
+    }
+  }
+}

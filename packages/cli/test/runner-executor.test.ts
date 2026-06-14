@@ -1164,6 +1164,55 @@ describe("executeCommand — command → executor mapping", () => {
     expect((args[2] as Record<string, unknown>)["status"]).toBe("done");
   });
 
+  // ── FIX-295 AC-FIX1: done ≡ merged — a `done`/`published` terminal flips the
+  // backlog card ONLY on confirmed MERGED evidence; a cycle that opened a PR but
+  // did not merge (committed-but-unmerged) leaves the card NOT Done. ───────────
+  it("FIX-295 (AC-FIX1): append_run `done` flips Done ONLY when the PR is MERGED", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "MERGED") },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+  });
+
+  it("FIX-295 (AC-FIX1): a delivered cycle whose PR is still OPEN does NOT flip Done", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "OPEN") },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    // Committed-but-not-merged: the card rests at 🔨 (pending merge), never ✅ Done.
+    const flips = markStatus.mock.calls.filter((c) => c[2] === "✅ Done");
+    expect(flips).toHaveLength(0);
+  });
+
+  it("FIX-295 (AC-FIX1/AC-FIX2): a published terminal with an unmerged/unknown PR does NOT flip Done", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+      // gh down / PR never opened → prState probe rejects → "UNKNOWN" fallback.
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => Promise.reject(new Error("gh down"))) },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    const flips = markStatus.mock.calls.filter((c) => c[2] === "✅ Done");
+    expect(flips).toHaveLength(0);
+  });
+
   it("release_lock reports lockReleased", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "release_lock" }, ports, CTX);

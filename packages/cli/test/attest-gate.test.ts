@@ -309,4 +309,60 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.blocked).toBe(true);
     expect(alerts).toHaveLength(1);
   });
+
+  // ── FIX-295: a red assertion is a regression, never an env exception ─────────
+
+  it("FIX-295 (AC-FIX2/AC-FIX3): a `fail` AC blocks in hard mode — a red check is a regression, not waivable", () => {
+    // The FIX-284 shape: AC1-3 pass with evidence, AC4 ran the full suite and
+    // went red. The cycle MUST fail — a red check on a cycle branch is a
+    // regression (main is always green), never an "environmental" exception.
+    const wt = withReport("FIX-RED", 2000, '<figure class="shot"><img src="screenshots/p.png"></figure>');
+    withSelfScore(wt, "FIX-RED", 8, "good");
+    writeAcMap(wt, "FIX-RED", [
+      { ac: "FIX-RED:AC1", status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/p.png" }] },
+      { ac: "FIX-RED:AC4", status: "fail", evidence: [{ kind: "test-pass", label: "full suite" }] },
+    ]);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-RED", "c-red", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons[0]).toContain("FIX-RED:AC4");
+    expect(r.reasons[0]).toMatch(/regression|cannot be waived|not an environment/i);
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(alerts[0]).toMatch(/never waived as environmental|regression/i);
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("FIX-295: a `fail` AC in soft mode is still skipped (recorded), just not blocked", () => {
+    const wt = withReport("FIX-RED-SOFT", 2000, '<figure class="shot"><img src="screenshots/p.png"></figure>');
+    withSelfScore(wt, "FIX-RED-SOFT", 8, "good");
+    writeAcMap(wt, "FIX-RED-SOFT", [
+      { ac: "FIX-RED-SOFT:AC1", status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/p.png" }] },
+      { ac: "FIX-RED-SOFT:AC2", status: "fail", evidence: [] },
+    ]);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-RED-SOFT", "c-red-soft", "soft", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(false);
+    expect(alerts[0]).not.toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("FIX-295: a `blocked` AC (could-not-execute) is NOT a fail — the gate still produces", () => {
+    // `blocked` = "a precondition blocks verification" — the genuine
+    // non-execution / infra case. It is NOT a red assertion, so it does not
+    // trip the regression floor; the delivery passes the gate as before.
+    const wt = withReport("FIX-BLOCKED", 2000, '<figure class="shot"><img src="screenshots/p.png"></figure>');
+    withSelfScore(wt, "FIX-BLOCKED", 8, "good");
+    writeAcMap(wt, "FIX-BLOCKED", [
+      { ac: "FIX-BLOCKED:AC1", status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/p.png" }] },
+      { ac: "FIX-BLOCKED:AC2", status: "blocked", evidence: [] },
+    ]);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-BLOCKED", "c-blocked", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
+  });
 });

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { STATUS_MARKER } from "@roll/spec";
+import { generateDossierPages } from "../src/commands/index-gen.js";
 import { collectDossier, type DossierEpic, type DossierStory } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
 import { LADDER_CSS, deriveDeliveryLadder, renderFeaturesIndex, renderTruthBoard, spineMotif, storyLadderState } from "../src/lib/dossier-index.js";
@@ -186,6 +187,41 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
 
     const facts = collectGitDossierFacts(repo);
     expect(storyHasMergeEvidence(facts, "FIX-308")).toBe(true);
+  });
+
+  it("FIX-308: dossier generation fetches origin/main before classifying merged stories", () => {
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-fetch-remote-")));
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-fetch-repo-")));
+    const pusher = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-fetch-pusher-")));
+    dirs.push(remote, repo, pusher);
+
+    execFileSync("git", ["init", "--bare", "--initial-branch=main"], { cwd: remote });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: repo });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "base\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: repo });
+    execFileSync("git", ["push", "-u", "origin", "main"], { cwd: repo });
+    execFileSync("git", ["checkout", "-b", "stale-local-main"], { cwd: repo });
+
+    execFileSync("git", ["clone", remote, pusher]);
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: pusher });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: pusher });
+    writeFileSync(join(pusher, "README.md"), "base\nFIX-308 landed remotely\n");
+    execFileSync("git", ["commit", "-am", "loop cycle cycle-20260614 (#701)\n\nStory FIX-308 delivered"], { cwd: pusher });
+    execFileSync("git", ["push", "origin", "main"], { cwd: pusher });
+
+    const storyDir = join(repo, ".roll", "features", "acceptance-evidence", "FIX-308");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(storyDir + "/spec.md", "---\nid: FIX-308\ntitle: stale merge baseline\ntype: fix\n---\n\n# FIX-308\n");
+    writeFileSync(join(repo, ".roll", "backlog.md"), "| Story | Desc | Status |\n|---|---|---|\n| [FIX-308](x) | stale merge baseline | ✅ Done |\n");
+
+    generateDossierPages(repo, false);
+
+    const truth = JSON.parse(readFileSync(join(repo, ".roll", "features", "truth.json"), "utf8")) as { stories: Array<{ id: string; ladder: string }> };
+    expect(truth.stories.find((s) => s.id === "FIX-308")).toMatchObject({ ladder: "merged" });
   });
 
   it("US-DOSSIER-008: pre-v3 done card (no latest/, no ac-map) is legacy; latest/ or ac-map cancels it", () => {

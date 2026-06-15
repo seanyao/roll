@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="zh" data-lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>roll-design · Design Before Code</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Aligned to the roll site stylesheet (roll-site.css dark theme tokens). */
+  :root{
+    --bg:#0a0a0c; --bg2:#0d0d10; --panel:#131319; --panel2:#1a1a1f;
+    --fg:#f4f4f6; --soft:#c8c8d0; --muted:#8a8a95; --faint:#5b5b66;
+    --line:#1d1d22; --line2:#26262d; --accent-soft:hsl(226 88% 72% / .13);
+    --accent:hsl(226 88% 72%); --accent-fg:hsl(226 88% 80%);
+    --plan:hsl(226 88% 72%); --build:#4ade80; --ship:#fbbf24; --verify:#f87171; --gate:#c084fc;
+    --radius:10px; --radius-lg:14px;
+    --mono:"Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, "PingFang SC", "Microsoft YaHei", monospace;
+    --sans:"Geist", "Noto Sans SC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  html[data-lang="en"] .lang-zh{display:none}
+  html[data-lang="zh"] .lang-en{display:none}
+  body{
+    margin:0; background:
+      radial-gradient(1200px 600px at 80% -10%, #16161f 0%, transparent 60%),
+      radial-gradient(900px 500px at -10% 10%, #131320 0%, transparent 55%),
+      var(--bg);
+    color:var(--fg); font-family:var(--sans); line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:48px 28px 72px}
+  .chrome{position:fixed; top:16px; right:16px; z-index:20; display:flex; border:1px solid var(--line2);
+    border-radius:999px; overflow:hidden; background:rgba(20,20,29,.8); backdrop-filter:blur(8px)}
+  .chrome button{all:unset; cursor:pointer; font:600 12px/1 var(--mono); padding:8px 13px; color:var(--muted)}
+  .chrome button.on{background:var(--accent); color:#0b0b0f}
+  .chrome button:not(.on):hover{color:var(--fg)}
+  .kicker{font:600 12px/1 var(--mono); letter-spacing:.22em; text-transform:uppercase; color:var(--accent); margin:0 0 14px}
+  h1{font-size:clamp(30px,5vw,46px); line-height:1.05; margin:0 0 12px; letter-spacing:-.02em; font-weight:680}
+  h1 .sub{display:block; font-size:.46em; font-weight:520; color:var(--soft); letter-spacing:0; margin-top:10px}
+  .lede{color:var(--soft); max-width:62ch; font-size:15.5px; margin:0}
+  .lede b{color:var(--fg); font-weight:620}
+  .rule{height:1px;background:linear-gradient(90deg,var(--line2),transparent);margin:34px 0}
+  .funnel{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px}
+  @media(max-width:600px){.funnel{grid-template-columns:1fr}}
+  .mode{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px 20px; position:relative; overflow:hidden}
+  .mode::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--accent)}
+  .mode h3{margin:0 0 4px; font-size:15px; display:flex; align-items:center; gap:9px}
+  .mode .tag{font:600 10.5px/1 var(--mono); letter-spacing:.08em; padding:3px 7px; border-radius:5px; background:var(--accent-soft); color:var(--accent)}
+  .mode p{margin:6px 0 0; color:var(--muted); font-size:13px}
+  .mode code{font-family:var(--mono); font-size:12px; color:var(--soft); background:var(--bg2); padding:1px 6px; border-radius:5px; border:1px solid var(--line)}
+  .merge{text-align:center; color:var(--faint); font:600 12px/1 var(--mono); letter-spacing:.1em; margin:4px 0 26px}
+  .legend{display:flex; flex-wrap:wrap; gap:8px 16px; margin:0 0 26px; font-size:12.5px; color:var(--muted)}
+  .legend span{display:inline-flex; align-items:center; gap:7px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .gatekey{width:13px;height:13px;border-radius:3px;display:inline-grid;place-items:center;font-size:9px;color:#0b0b0f;font-weight:800}
+  .spine{position:relative; margin-left:6px; padding-left:34px}
+  .spine::before{content:"";position:absolute;left:11px;top:6px;bottom:6px;width:2px;
+    background:linear-gradient(180deg,var(--plan),var(--build) 38%,var(--ship) 66%,var(--verify))}
+  .step{position:relative; margin:0 0 12px}
+  .step::before{content:"";position:absolute;left:-28px;top:18px;width:16px;height:16px;border-radius:50%;
+    background:var(--bg); border:3px solid var(--c); box-shadow:0 0 0 4px var(--bg)}
+  .step.loop::before,.step.gate::before{border-radius:4px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 18px; border-left:3px solid var(--c)}
+  .card:hover{border-color:var(--line2); background:var(--panel2)}
+  .step .no{font:700 11px/1 var(--mono); color:var(--c); letter-spacing:.04em}
+  .step .ttl{font-size:15px; font-weight:620; margin:4px 0 0; display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .step .desc{color:var(--muted); font-size:13px; margin:5px 0 0; max-width:66ch}
+  .step .desc b{color:var(--soft); font-weight:600}
+  .step .desc code{font-family:var(--mono);font-size:12px;color:var(--soft);background:var(--bg2);padding:1px 5px;border-radius:5px;border:1px solid var(--line)}
+  .chip{font:600 10px/1 var(--mono); letter-spacing:.06em; padding:3px 7px; border-radius:999px; border:1px solid var(--c); color:var(--c); white-space:nowrap}
+  .chip.solid{background:var(--c); color:#0b0b0f; border-color:var(--c)}
+  .ddd{background:linear-gradient(180deg,rgba(74,222,128,.08),transparent); border:1px solid rgba(74,222,128,.3)}
+  .dial{display:flex; align-items:stretch; gap:10px; flex-wrap:wrap; margin-top:11px}
+  .dial .seg{flex:1; min-width:150px; padding:9px 12px; border-radius:8px; background:var(--bg2); border:1px solid var(--line2)}
+  .dial .seg .lvl{font:700 11px/1 var(--mono); letter-spacing:.06em; color:var(--build)}
+  .dial .seg .det{font-size:11.5px; color:var(--muted); margin-top:5px; line-height:1.45}
+  .dial .seg .det b{color:var(--soft); font-weight:600}
+  .band{font:700 11px/1 var(--mono); letter-spacing:.18em; text-transform:uppercase; color:var(--c); margin:22px 0 12px; padding-left:2px; display:flex; align-items:center; gap:10px}
+  .band::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--c),transparent);opacity:.4}
+  .foot{display:grid; grid-template-columns:1.3fr 1fr; gap:18px; margin-top:38px}
+  @media(max-width:720px){.foot{grid-template-columns:1fr}}
+  .box{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px 22px}
+  .box h4{margin:0 0 13px; font-size:13px; letter-spacing:.04em; color:var(--accent); font-family:var(--mono); text-transform:uppercase}
+  .box ul{margin:0; padding:0; list-style:none; display:grid; gap:9px}
+  .box li{font-size:13.5px; color:var(--soft); padding-left:20px; position:relative}
+  .box li::before{content:"→";position:absolute;left:0;color:var(--accent);font-weight:700}
+  .box li b{color:var(--fg)}
+  .hard{background:linear-gradient(180deg,rgba(200,121,230,.09),transparent); border-color:rgba(200,121,230,.32)}
+  .hard h4{color:var(--gate)} .hard li::before{content:"⛩";color:var(--gate)}
+  .home{display:inline-flex;align-items:center;gap:7px;margin-top:30px;font:600 12.5px/1 var(--mono);color:var(--accent);text-decoration:none;border:1px solid var(--line2);border-radius:999px;padding:9px 15px}
+  .home:hover{background:var(--accent-soft)}
+  footer{margin-top:42px; padding-top:18px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-family:var(--mono)}
+  @media print{body{background:#fff;color:#111}.chrome{display:none}.card,.box,.mode{break-inside:avoid}.wrap{max-width:none}}
+</style>
+</head>
+<body>
+
+<nav class="chrome" aria-label="language">
+  <button type="button" data-set="en">EN</button>
+  <button type="button" data-set="zh">中</button>
+</nav>
+
+<div class="wrap">
+
+  <header>
+    <p class="kicker"><span class="lang-en">roll skill · design before code</span><span class="lang-zh">roll 技能 · 先设计再编码</span></p>
+    <h1>roll-design
+      <span class="sub">Discuss. Model. Decompose. No code.<span class="lang-zh"> · 讨论、建模、拆解，不写代码。</span></span>
+    </h1>
+    <p class="lede">
+      <span class="lang-en">Turn an idea or a vague sentence into <b>INVEST stories with a concrete, signed-off design behind them</b>. DDD modeling depth scales with risk; decomposition only ever <b>slices an agreed design</b> — it never substitutes for one. The skill writes backlog and spec artifacts and <b>stops before implementation</b>.</span>
+      <span class="lang-zh">把一个想法或一句模糊的话，变成<b>背后有具体、已签字方案的 INVEST 故事</b>。DDD 建模深度随风险伸缩；拆解永远只是<b>切分一个已认可的方案</b>，绝不替代设计本身。本技能只写 backlog 与 spec 产物，<b>到实现前即止步</b>。</span>
+    </p>
+  </header>
+
+  <div class="rule"></div>
+
+  <div class="funnel">
+    <div class="mode">
+      <h3><span class="tag">A</span> <span class="lang-en">Interactive mode</span><span class="lang-zh">交互模式</span></h3>
+      <p>
+        <span class="lang-en">Input is vague or an approach is open — run <code>Clarify</code> (3–5 questions) then <code>Discuss</code> (opinionated, multi-turn) before designing.</span>
+        <span class="lang-zh">输入模糊或方向开放 —— 先 <code>Clarify</code>（问 3–5 个问题）再 <code>Discuss</code>（有主张、多轮），然后才设计。</span>
+      </p>
+    </div>
+    <div class="mode">
+      <h3><span class="tag">B</span> <span class="lang-en">Non-interactive mode</span><span class="lang-zh">非交互模式</span></h3>
+      <p>
+        <span class="lang-en"><code>--from-file</code> / <code>--from-idea</code> / high-confidence input — skip Clarify &amp; Discuss, write stories straight to backlog as <code>📋 Todo</code>.</span>
+        <span class="lang-zh"><code>--from-file</code> / <code>--from-idea</code> / 高置信输入 —— 跳过 Clarify 与 Discuss，故事直接以 <code>📋 Todo</code> 写入 backlog。</span>
+      </p>
+    </div>
+  </div>
+  <div class="merge"><span class="lang-en">▼ &nbsp; both converge on the shared design pipeline &nbsp; ▼</span><span class="lang-zh">▼ &nbsp; 殊途同归：共享设计流水线 &nbsp; ▼</span></div>
+
+  <div class="legend">
+    <span><i class="dot" style="background:var(--plan)"></i><span class="lang-en">Clarify</span><span class="lang-zh">澄清</span></span>
+    <span><i class="dot" style="background:var(--build)"></i><span class="lang-en">Model</span><span class="lang-zh">建模</span></span>
+    <span><i class="dot" style="background:var(--ship)"></i><span class="lang-en">Design</span><span class="lang-zh">设计</span></span>
+    <span><i class="dot" style="background:var(--verify)"></i><span class="lang-en">Decompose</span><span class="lang-zh">拆解</span></span>
+    <span><i class="gatekey" style="background:var(--gate)">⛩</i><span class="lang-en">Hard gate (no pass, no go)</span><span class="lang-zh">硬闸（不过不放行）</span></span>
+    <span><i class="gatekey" style="background:var(--build)">⌥</i><span class="lang-en">Peer review (10s opt-out)</span><span class="lang-zh">同行评审（10s 可跳过）</span></span>
+  </div>
+
+  <div class="spine">
+
+    <div class="band" style="--c:var(--plan)"><span class="lang-en">Clarify</span><span class="lang-zh">澄清</span></div>
+
+    <div class="step" style="--c:var(--plan)"><div class="card">
+      <div class="no">STEP 0</div>
+      <div class="ttl"><span class="lang-en">Pre-clarify localization</span><span class="lang-zh">Pre-clarify 三步定位</span> <span class="chip"><span class="lang-en">silent, always</span><span class="lang-zh">静默、必跑</span></span></div>
+      <p class="desc">
+        <span class="lang-en">Internally pin <b>product end</b> (web / mobile / API / CLI), <b>role</b> (end user / admin / system / external), and <b>business domain</b> before asking anything. Already-known dimensions become context, not open questions.</span>
+        <span class="lang-zh">问任何问题前，先内部锁定<b>产品端</b>（web / mobile / API / CLI）、<b>角色</b>（终端用户 / 管理员 / 系统 / 外部）、<b>业务域</b>。已知维度变成上下文前缀，不再当开放问题问。</span>
+      </p>
+    </div></div>
+
+    <div class="step" style="--c:var(--plan)"><div class="card">
+      <div class="no">STEP 1</div>
+      <div class="ttl"><span class="lang-en">Clarify (when vague)</span><span class="lang-zh">Clarify（输入模糊时）</span> <span class="chip"><span class="lang-en">3–5 questions · wait</span><span class="lang-zh">问 3–5 个 · 等回复</span></span></div>
+      <p class="desc">
+        <span class="lang-en">Vague sentence, fuzzy terms (&ldquo;优化一下&rdquo; / &ldquo;改一下&rdquo;), or multiple readings → summarize intent, assess complexity, ask 3–5 targeted questions, then <b>wait for the reply</b>. Skipped silently on high-confidence or <code>--from-*</code> input.</span>
+        <span class="lang-zh">模糊一句话、含糊词（&ldquo;优化一下&rdquo; / &ldquo;改一下&rdquo;）或多种解读 → 复述意图、评估复杂度、问 3–5 个针对性问题，然后<b>等用户回复</b>。高置信或 <code>--from-*</code> 输入时静默跳过。</span>
+      </p>
+    </div></div>
+
+    <div class="step" style="--c:var(--plan)"><div class="card">
+      <div class="no">STEP 1.5</div>
+      <div class="ttl"><span class="lang-en">Discuss (when uncertain)</span><span class="lang-zh">Discuss（方向不定时）</span> <span class="chip"><span class="lang-en">opinionated · multi-turn</span><span class="lang-zh">有主张 · 多轮</span></span></div>
+      <p class="desc">
+        <span class="lang-en">More than two viable paths or an unfamiliar stack → lead with one <b>opinionated recommendation</b> and its key tradeoff, follow the thread, surface hidden assumptions. Name convergence, then ask: <code>continue to design, or keep exploring?</code> — and wait.</span>
+        <span class="lang-zh">超过两条可行路径或陌生技术栈 → 先给一个<b>有主张的推荐</b>和它的关键取舍，顺着用户的线索深挖，点破隐藏假设。明确收敛后再问：<code>进入方案设计，还是继续探讨？</code>——并等待。</span>
+      </p>
+    </div></div>
+
+    <div class="step gate" style="--c:var(--gate)"><div class="card">
+      <div class="no">PEER · 1</div>
+      <div class="ttl"><span class="lang-en">Direction review</span><span class="lang-zh">方向评审</span> <span class="chip solid">⌥ PEER</span> <span class="chip"><span class="lang-en">10s opt-out</span><span class="lang-zh">10s 可跳过</span></span></div>
+      <p class="desc">
+        <span class="lang-en">When complexity is medium/large or the work crosses Bounded Contexts → one <b>cross-agent challenge</b> on the direction (<code>roll-peer</code>, tag=architecture) before any modeling. AGREE / skip proceeds; REFINE/OBJECT regenerates; ESCALATE goes to the owner.</span>
+        <span class="lang-zh">复杂度 medium/大、或工作跨 Bounded Context 时 → 在建模前对方向做一次<b>跨 agent 挑战</b>（<code>roll-peer</code>，tag=architecture）。AGREE / 跳过则放行；REFINE/OBJECT 重做；ESCALATE 交还 owner 定夺。</span>
+      </p>
+    </div></div>
+
+    <div class="band" style="--c:var(--build)"><span class="lang-en">Model</span><span class="lang-zh">建模</span></div>
+
+    <div class="step" style="--c:var(--build)"><div class="card ddd">
+      <div class="no"><span class="lang-en">STEP 2 · DDD depth dial</span><span class="lang-zh">STEP 2 · DDD 深度拨盘</span></div>
+      <div class="ttl"><span class="lang-en">Analyze &amp; set domain depth</span><span class="lang-zh">分析并定建模深度</span> <span class="chip"><span class="lang-en">auto-detected</span><span class="lang-zh">自动判定</span></span></div>
+      <p class="desc">
+        <span class="lang-en">Depth is a <b>dial, not a switch</b> — auto-detected from scope. Greenfield gets full modeling; a feature gets a slice; a fix gets a tag.</span>
+        <span class="lang-zh">深度是<b>拨盘不是开关</b>——按范围自动判定。新项目走全量建模、特性走切片、修复只打标签。</span>
+      </p>
+      <div class="dial">
+        <div class="seg">
+          <div class="lvl"><span class="lang-en">FULL · greenfield</span><span class="lang-zh">FULL · 新项目</span></div>
+          <div class="det"><span class="lang-en"><b>Event Storming</b> → Context Map + Ubiquitous Language → Tactical Model per context → <code>.roll/domain/</code></span><span class="lang-zh"><b>事件风暴</b> → Context Map + 统一语言 → 每个 Context 的战术模型 → <code>.roll/domain/</code></span></div>
+        </div>
+        <div class="seg">
+          <div class="lvl"><span class="lang-en">SLICE · user story</span><span class="lang-zh">SLICE · 用户故事</span></div>
+          <div class="det"><span class="lang-en">Locate the <b>Bounded Context</b>, key Aggregate, touched Entities/VOs, Domain Events raised &amp; cross-context impact → US Domain Model block.</span><span class="lang-zh">定位<b>所属 Context</b>、关键 Aggregate、触碰的 Entity/VO、触发的 Domain Event 与跨域影响 → 写入 US 的 Domain Model 段。</span></div>
+        </div>
+        <div class="seg">
+          <div class="lvl"><span class="lang-en">TAG · bug fix</span><span class="lang-zh">TAG · 缺陷修复</span></div>
+          <div class="det"><span class="lang-en">No modeling — just locate <code>Context &gt; Aggregate &gt; Entity</code> on the FIX description's first line.</span><span class="lang-zh">不建模——只在 FIX 描述首行定位 <code>Context &gt; Aggregate &gt; Entity</code>。</span></div>
+        </div>
+      </div>
+    </div></div>
+
+    <div class="step" style="--c:var(--build)"><div class="card">
+      <div class="no">STEP 2a · 2b</div>
+      <div class="ttl"><span class="lang-en">Strategic modeling (greenfield)</span><span class="lang-zh">战略建模（新项目）</span> <span class="chip"><span class="lang-en">facilitated</span><span class="lang-zh">对话引导</span></span></div>
+      <p class="desc">
+        <span class="lang-en">Event Storming as a guided conversation: discover Domain Events (past-tense), identify Actors/Commands, mark <b>Hot Spots ⚠️</b>; then draw Bounded Contexts, the Context Map (relationship types), and the Ubiquitous Language glossary.</span>
+        <span class="lang-zh">事件风暴用对话引导：发现 Domain Event（过去式）、识别 Actor/Command、标记 <b>Hot Spot ⚠️</b>；再画 Bounded Context、Context Map（关系类型）与统一语言词汇表。</span>
+      </p>
+    </div></div>
+
+    <div class="band" style="--c:var(--ship)"><span class="lang-en">Design</span><span class="lang-zh">设计</span></div>
+
+    <div class="step gate" style="--c:var(--gate)"><div class="card">
+      <div class="no"><span class="lang-en">STEP 3 · core</span><span class="lang-zh">STEP 3 · 核心</span></div>
+      <div class="ttl"><span class="lang-en">Detailed (solution) design</span><span class="lang-zh">详细方案设计</span> <span class="chip solid">⛩ MANDATORY</span></div>
+      <p class="desc">
+        <span class="lang-en">Before <b>any</b> decomposition, produce a concrete, implementable artifact (depth scales with risk): <b>(a)</b> data/contract schema · <b>(b)</b> ≥1 <b>complete worked sample</b> of the intended output · <b>(c)</b> key interface signatures · <b>(d)</b> mapping/normalization rules · <b>(e)</b> edge cases &amp; failure modes. Greenfield adds a Tactical Model per context. <b>No worked sample → the design is NOT done.</b></span>
+        <span class="lang-zh">在<b>任何</b>拆解之前，先产出一份具体、可实现的产物（深度随风险伸缩）：<b>(a)</b> 数据/契约 schema · <b>(b)</b> ≥1 个目标输出的<b>完整样例</b> · <b>(c)</b> 关键接口签名 · <b>(d)</b> 映射/归一化规则 · <b>(e)</b> 边界与失败模式。新项目另加每 Context 的战术模型。<b>拿不出完整样例 → 设计就不算完成。</b></span>
+      </p>
+    </div></div>
+
+    <div class="step gate" style="--c:var(--gate)"><div class="card">
+      <div class="no">PEER · 2</div>
+      <div class="ttl"><span class="lang-en">Plan review</span><span class="lang-zh">方案评审</span> <span class="chip solid">⌥ PEER</span> <span class="chip"><span class="lang-en">10s opt-out</span><span class="lang-zh">10s 可跳过</span></span></div>
+      <p class="desc">
+        <span class="lang-en">For medium/large designs (greenfield always qualifies) → a full <b>cross-agent plan review</b> before splitting. AGREE / skip continues; REFINE/OBJECT incorporates feedback and re-triggers; ESCALATE presents both proposals to the owner.</span>
+        <span class="lang-zh">medium/大的方案（新项目必触发）→ 拆分前做一次完整的<b>跨 agent 方案评审</b>。AGREE / 跳过则继续；REFINE/OBJECT 吸收反馈重审；ESCALATE 把两套方案交 owner 抉择。</span>
+      </p>
+    </div></div>
+
+    <div class="step gate" style="--c:var(--gate)"><div class="card">
+      <div class="no">GATE</div>
+      <div class="ttl"><span class="lang-en">Owner sign-off on the design</span><span class="lang-zh">Owner 对方案签字</span> <span class="chip solid">⛩ GATE</span></div>
+      <p class="desc">
+        <span class="lang-en">Decomposition slices an <b>agreed</b> design — it does not replace designing. Get owner sign-off (proportional to risk) <b>before</b> splitting into stories. No sign-off, no decomposition.</span>
+        <span class="lang-zh">拆解是切分一份<b>已认可</b>的方案——它不替代设计。拆故事<b>之前</b>必须拿到 owner 的签字（程度随风险）。没签字，不拆解。</span>
+      </p>
+    </div></div>
+
+    <div class="band" style="--c:var(--verify)"><span class="lang-en">Decompose</span><span class="lang-zh">拆解</span></div>
+
+    <div class="step" style="--c:var(--verify)"><div class="card">
+      <div class="no">STEP 4</div>
+      <div class="ttl"><span class="lang-en">Split into INVEST stories</span><span class="lang-zh">拆成 INVEST 故事</span> <span class="chip"><span class="lang-en">1 story ≈ 1 AI cycle</span><span class="lang-zh">1 故事 ≈ 1 AI cycle</span></span></div>
+      <p class="desc">
+        <span class="lang-en">Slice the agreed design into INVEST stories at <b>AI-cycle grain (5–10 min)</b>. <code>est_min &gt; ~15</code> is a &ldquo;split again&rdquo; signal. Order dependent slices with <code>depends-on:</code> chains (<code>chain_depth ≤ 2</code>); the real enemy is same-file parallel conflict, not dependency itself.</span>
+        <span class="lang-zh">把已认可的方案切成 INVEST 故事，按 <b>AI cycle 量纲（5–10 min）</b>。<code>est_min &gt; ~15</code> 是&ldquo;再拆&rdquo;信号。有先后的切片用 <code>depends-on:</code> 串链（<code>chain_depth ≤ 2</code>）；真正要躲的是改同一文件的并行冲突，不是依赖本身。</span>
+      </p>
+    </div></div>
+
+    <div class="step gate" style="--c:var(--gate)"><div class="card">
+      <div class="no">STEP 4.5</div>
+      <div class="ttl"><span class="lang-en">Doc-refresh closer (mandatory check)</span><span class="lang-zh">文档刷新收尾（强制检查）</span> <span class="chip solid">⛩ IF USER-VISIBLE</span></div>
+      <p class="desc">
+        <span class="lang-en">If <b>any</b> story in the batch changes user-visible behavior (CLI output / flags / status semantics / error text / a new command) → append a closing <b>doc-refresh story</b>, wired <code>depends-on:</code> against every preceding user-facing US so it runs last. Bilingual EN/ZH on separate lines. Pure-internal batches skip it.</span>
+        <span class="lang-zh">若本批次<b>任一</b>故事改了用户可见行为（CLI 输出 / flag / 状态语义 / 错误文案 / 新命令）→ 末尾追加一张<b>文档刷新故事</b>，<code>depends-on:</code> 串上所有面向用户的前置 US，使其最后执行。中英双轨分行。纯内部批次可跳过。</span>
+      </p>
+    </div></div>
+
+    <div class="step" style="--c:var(--verify)"><div class="card">
+      <div class="no">STEP 5</div>
+      <div class="ttl"><span class="lang-en">Write specs &amp; backlog → self-score</span><span class="lang-zh">写 spec 与 backlog → 自评</span> <span class="chip">roll story new</span></div>
+      <p class="desc">
+        <span class="lang-en">Mint each card via <code>roll story new</code> (never hand-craft folders), edit <code>spec.md</code> for full AC / Files / Dependencies / Agent profile (<code>est_min</code> is the sole loop-routing input), append the one-line index row to <code>.roll/backlog.md</code>, then self-score the design session. Then: <code>confirm and execute?</code> — <code>No</code> just leaves it queued for the next loop pass.</span>
+        <span class="lang-zh">每张卡用 <code>roll story new</code> 铸造（绝不手搓目录），编辑 <code>spec.md</code> 补全 AC / Files / 依赖 / Agent profile（<code>est_min</code> 是 loop 路由唯一输入），把一行索引追加进 <code>.roll/backlog.md</code>，再对本次设计自评。然后：<code>确认并执行？</code>——选 <code>No</code> 只是留在队列等下一轮 loop。</span>
+      </p>
+    </div></div>
+
+  </div>
+
+  <div class="foot">
+    <div class="box">
+      <h4><span class="lang-en">Core philosophy</span><span class="lang-zh">核心理念</span></h4>
+      <ul>
+        <li><b>Clarity over assumptions</b> — <span class="lang-en">unclear scope → clarify first, never assume.</span><span class="lang-zh">范围不清先 clarify，绝不臆测。</span></li>
+        <li><b>Design before decompose</b> — <span class="lang-en">a concrete artifact comes first; splitting only slices it.</span><span class="lang-zh">先有具体方案产物，拆解只是切分它。</span></li>
+        <li><b>Show a worked sample</b> — <span class="lang-en">no complete worked sample → the design is not done.</span><span class="lang-zh">拿不出完整样例 → 设计就不算完成。</span></li>
+        <li><b>Depth on a dial</b> — <span class="lang-en">DDD depth scales with risk: full / slice / tag.</span><span class="lang-zh">DDD 深度随风险伸缩：full / slice / tag。</span></li>
+        <li><b>Cycle-grained stories</b> — <span class="lang-en">one story ≈ one AI cycle (5–10 min); too big → split.</span><span class="lang-zh">一个故事 ≈ 一个 AI cycle（5–10 min）；太大就拆。</span></li>
+      </ul>
+    </div>
+    <div class="box hard">
+      <h4><span class="lang-en">Hard Rules</span><span class="lang-zh">硬规则</span></h4>
+      <ul>
+        <li><b><span class="lang-en">No implementation</span><span class="lang-zh">不实现</span></b><span class="lang-en"> — this skill writes backlog/spec only; it never starts coding (use roll-build).</span><span class="lang-zh">：本技能只写 backlog/spec，绝不开始编码（写代码用 roll-build）。</span></li>
+        <li><b><span class="lang-en">Design-gated decompose</span><span class="lang-zh">设计闸守拆解</span></b><span class="lang-en">: no story split until a detailed design exists and the owner signs off.</span><span class="lang-zh">：没有详细方案且 owner 未签字，不得拆故事。</span></li>
+        <li><b><span class="lang-en">Doc-refresh closer</span><span class="lang-zh">文档收尾</span></b><span class="lang-en">: any user-visible change ⇒ a closing doc-refresh story, EN/ZH on separate lines.</span><span class="lang-zh">：任何用户可见变更 ⇒ 末尾追加文档刷新故事，中英分行。</span></li>
+        <li><b><span class="lang-en">Backlog ↔ spec consistency</span><span class="lang-zh">backlog ↔ spec 一致</span></b><span class="lang-en">: index rows and spec files must stay in sync; mint via roll story new.</span><span class="lang-zh">：索引行与 spec 文件必须同步；一律用 roll story new 铸造。</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <a class="home" href="../index.html">← <span class="lang-en">Back to roll</span><span class="lang-zh">回到 roll 主页</span></a>
+
+  <footer>
+    <span>Roll · roll-design skill</span>
+    <span><span class="lang-en">Design before code · slice an agreed plan</span><span class="lang-zh">先设计再编码 · 拆切已认可的方案</span></span>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  var KEY="roll-ig-lang";
+  var root=document.documentElement;
+  function set(l){
+    root.setAttribute("data-lang",l);
+    root.setAttribute("lang",l==="zh"?"zh":"en");
+    try{localStorage.setItem(KEY,l)}catch(e){}
+    document.querySelectorAll(".chrome button").forEach(function(b){b.classList.toggle("on",b.getAttribute("data-set")===l)});
+  }
+  var init;try{init=localStorage.getItem(KEY)}catch(e){}
+  if(!init){
+    var p=new URLSearchParams(location.search).get("lang");
+    init=(p==="en"||p==="zh")?p:((navigator.language||"").toLowerCase().indexOf("zh")===0?"zh":"en");
+  }
+  set(init==="en"?"en":"zh");
+  document.querySelectorAll(".chrome button").forEach(function(b){b.addEventListener("click",function(){set(b.getAttribute("data-set"))})});
+})();
+</script>
+</body>
+</html>

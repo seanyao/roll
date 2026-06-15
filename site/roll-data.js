@@ -130,7 +130,7 @@ window.RollData = (function () {
       ]},
       { id: "lifecycle", title: "Story Lifecycle", blurb: "Idea to merged PR, in one flow.", features: [
         { name: "$roll-idea",   mono: true, desc: "One-liner capture — instant FIX or IDEA backlog entry.", badges: ["core"] },
-        { name: "$roll-design", mono: true, desc: "DDD-backed planning: clarify → design → split into INVEST stories.", badges: ["core"] },
+        { name: "$roll-design", mono: true, desc: "DDD-backed planning: clarify → design → split into INVEST stories.", badges: ["core"], href: "diagrams/roll-design-skill.html", external: true },
         { name: "$roll-build",  mono: true, desc: "TCR story execution → worktree → PR → auto-merge.", badges: ["core"], href: "diagrams/roll-build-skill.html", external: true },
         { name: "$roll-fix",    mono: true, desc: "Fast-path bug fix — same CI gate, lighter ceremony.", badges: [] },
       ]},
@@ -312,7 +312,7 @@ window.RollData = (function () {
       ]},
       { id: "lifecycle", title: "故事生命周期", blurb: "从想法到合入,同一条流。", features: [
         { name: "$roll-idea",   mono: true, desc: "一行捕获——即时生成 FIX 或 IDEA 条目。", badges: ["core"] },
-        { name: "$roll-design", mono: true, desc: "DDD 驱动规划:澄清 → 设计 → 拆成 INVEST 故事。", badges: ["core"] },
+        { name: "$roll-design", mono: true, desc: "DDD 驱动规划:澄清 → 设计 → 拆成 INVEST 故事。", badges: ["core"], href: "diagrams/roll-design-skill.html", external: true },
         { name: "$roll-build",  mono: true, desc: "TCR 故事执行 → worktree → PR → 自动合入。", badges: ["core"], href: "diagrams/roll-build-skill.html", external: true },
         { name: "$roll-fix",    mono: true, desc: "Bug 修复快车道——同样的 CI 门禁,流程更轻。", badges: [] },
       ]},

@@ -283,7 +283,15 @@ export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, o
   if (declared === null) return null; // FIX-321: NO dossier fallback — caller records an honest skip
   if (declared === "dossier") return pathToFileURL(join(cardArchiveDir(worktreeCwd, storyId), "index.html")).href;
   if (/^(?:https?|file):\/\//i.test(declared)) return declared;
-  return pathToFileURL(join(worktreeCwd, declared)).href; // relative → built artifact under the worktree
+  // relative → a built artifact under the worktree. FIX-321b: split a trailing
+  // #fragment BEFORE join (else pathToFileURL encodes the "#" into the filename),
+  // then re-append it to the file:// URL — so `features/index.html#casting`
+  // deep-links the console's Casting tab (the console routes on location.hash),
+  // capturing the actual deliverable view, not the default tab.
+  const hashIdx = declared.indexOf("#");
+  const relPath = hashIdx >= 0 ? declared.slice(0, hashIdx) : declared;
+  const fragment = hashIdx >= 0 ? declared.slice(hashIdx) : "";
+  return pathToFileURL(join(worktreeCwd, relPath)).href + fragment;
 }
 
 interface AcMapEvidence {

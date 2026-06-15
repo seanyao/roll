@@ -414,6 +414,14 @@ describe("FIX-305 — webCaptureTargetForStory: drive a real screenshot for UI/d
     expect(webCaptureTargetForStory(wt, "FIX-AL")).toBe("https://app.test/x");
   });
 
+  it("FIX-321b: a relative deliverable_url with a #fragment deep-links a tab (split before join, re-appended)", () => {
+    const wt = withSpec("FIX-FRAG", "---\nid: FIX-FRAG\ndeliverable_url: .roll/features/index.html#casting\n---\n# FIX-FRAG\n\n**AC:**\n- [ ] x\n");
+    const t = webCaptureTargetForStory(wt, "FIX-FRAG");
+    expect(t).toMatch(/^file:\/\//);
+    expect(t).toContain("/.roll/features/index.html#casting"); // fragment preserved, not encoded into the path
+    expect(t).not.toContain("%23"); // the "#" must NOT be percent-encoded into the filename
+  });
+
   it("FIX-309/321: an EXPLICITLY-exempted card owes no web capture → null", () => {
     const wt = withSpec(
       "FIX-MIGRATE",

@@ -3,6 +3,7 @@
  * the SAME serialized snapshot in the page, and never swallows failures in the
  * cycle aggregate (the FIX-248 regression pinned for good).
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,6 +30,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   delete process.env["ROLL_RENDER_NOW"];
+  delete process.env["ROLL_BRAND_NAME"];
   if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
   else process.env["ROLL_HOME"] = savedRollHome;
 });
@@ -169,6 +171,25 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     // it never existed) — the whole point of the fix.
     const realAfter = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
     expect(realAfter).toBe(realBefore);
+  });
+
+  it("FIX-307: self-register and page chrome use the derived git remote project name", async () => {
+    const p = project(REPO_ROOT);
+    execFileSync("git", ["init", "-q"], { cwd: p });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:seanyao/APE-PR.git"], { cwd: p });
+
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    await runIndex(p);
+
+    const sandboxRegistry = join(process.env["ROLL_HOME"]!, ".roll", "projects.json");
+    const rows = JSON.parse(readFileSync(sandboxRegistry, "utf8")) as Array<{ name: string; slug: string; path: string }>;
+    expect(rows[0]).toMatchObject({
+      name: "APE-PR",
+      slug: expect.stringContaining("ape-pr-"),
+      path: realpathSync(p),
+    });
+    const html = readFileSync(join(p, ".roll", "features", "index.html"), "utf8");
+    expect(html).toContain("APE-PR");
   });
 
   // FIX-283 (AC3) — robust tmp-skip: a tmp fixture cwd is skipped REGARDLESS of

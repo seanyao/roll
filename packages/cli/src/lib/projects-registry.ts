@@ -10,9 +10,10 @@
  * `--json` output of `roll ls` equals this file verbatim, so the registry is the
  * ONE source both the web switcher and the CLI listing read.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import type { ProjectRegistryEntry } from "./truth-console.js";
 
 /**
@@ -132,6 +133,54 @@ export function shouldSelfRegister(cwd: string): boolean {
   }
   const tmpPrefix = tmpReal.endsWith(sep) ? tmpReal : tmpReal + sep;
   return projectReal !== tmpReal && !projectReal.startsWith(tmpPrefix);
+}
+
+function gitOutput(cwd: string, args: string[]): string | null {
+  try {
+    return execFileSync("git", ["-C", cwd, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function remoteRepoName(cwd: string): string | null {
+  const origin = gitOutput(cwd, ["remote", "get-url", "origin"]);
+  const remote =
+    origin ??
+    gitOutput(cwd, ["remote"])
+      ?.split("\n")
+      .map((name) => name.trim())
+      .find((name) => name !== "");
+  const url = origin ?? (remote !== undefined ? gitOutput(cwd, ["remote", "get-url", remote]) : null);
+  if (url === null || url === "") return null;
+  const clean = url.replace(/\/+$/, "").replace(/\.git$/, "");
+  const repo = basename(clean);
+  return repo !== "" ? repo : null;
+}
+
+/** FIX-307: the human project display name, shared by registry writes and page chrome. */
+export function resolveProjectName(cwd: string): string {
+  const envName = (process.env["ROLL_BRAND_NAME"] ?? "").trim();
+  if (envName !== "") return envName;
+
+  const remoteName = remoteRepoName(cwd);
+  if (remoteName !== null) return remoteName;
+
+  const top = gitOutput(cwd, ["rev-parse", "--show-toplevel"]);
+  if (top !== null && top !== "") return basename(top) || "roll";
+
+  try {
+    const real = realpathSync(cwd);
+    const base = basename(real);
+    if (base !== "") return base;
+  } catch {
+    const base = basename(cwd);
+    if (base !== "") return base;
+  }
+  return "roll";
 }
 
 /** The ONE serialization both `roll index` writes and `roll ls --json` echoes

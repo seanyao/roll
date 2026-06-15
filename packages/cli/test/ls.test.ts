@@ -9,7 +9,8 @@
  * render takes injected nowMs/staleMs and an injected pathExists, so the same
  * rows render byte-identically on any machine in any timezone.
  */
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,6 +24,7 @@ import {
 import {
   collectProjectsRegistry,
   projectsRegistryPath,
+  resolveProjectName,
   serializeProjectsRegistry,
   shouldSelfRegister,
   upsertProjectRow,
@@ -144,6 +146,52 @@ describe("shouldSelfRegister — FIX-283 robust tmp/non-existent skip", () => {
     expect(shouldSelfRegister(realProj)).toBe(true);
   });
 });
+
+describe("resolveProjectName — FIX-307 real project display name", () => {
+  const REPO_ROOT = resolve(__dirname, "../../..");
+
+  function realProj(prefix: string): string {
+    const proj = realpathSync(mkdtempSync(join(REPO_ROOT, prefix)));
+    homes.push(proj);
+    return proj;
+  }
+
+  it("prefers ROLL_BRAND_NAME when explicitly set", () => {
+    const proj = realProj("roll-name-env-");
+    process.env["ROLL_BRAND_NAME"] = "Custom Brand";
+    expect(resolveProjectName(proj)).toBe("Custom Brand");
+    delete process.env["ROLL_BRAND_NAME"];
+  });
+
+  it("derives the git remote repository name before local path names", () => {
+    const proj = realProj("roll-name-remote-");
+    execFileSync("git", ["init", "-q"], { cwd: proj });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:seanyao/APE-PR.git"], { cwd: proj });
+    expect(resolveProjectName(proj)).toBe("APE-PR");
+  });
+
+  it("falls back to the git top-level directory basename", () => {
+    const proj = realProj("roll-name-top-");
+    const child = join(proj, "packages", "app");
+    mkdirSync(child, { recursive: true });
+    execFileSync("git", ["init", "-q"], { cwd: proj });
+    expect(resolveProjectName(child)).toBe(basenameForTest(proj));
+  });
+
+  it("falls back to cwd basename outside git", () => {
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-name-cwd-")));
+    homes.push(proj);
+    expect(resolveProjectName(proj)).toBe(basenameForTest(proj));
+  });
+
+  it("uses roll only when no project name can be derived", () => {
+    expect(resolveProjectName("")).toBe("roll");
+  });
+});
+
+function basenameForTest(p: string): string {
+  return p.split("/").filter(Boolean).at(-1) ?? "roll";
+}
 
 describe("projectStatus — AC4 fail-loud classifier", () => {
   it("missing when the path no longer exists (wins over staleness)", () => {

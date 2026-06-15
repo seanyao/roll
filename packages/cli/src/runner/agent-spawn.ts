@@ -127,6 +127,13 @@ export interface ClaudeArgvInput {
    *  interactive — drop --verbose and --output-format stream-json so the
    *  output is human-readable instead of a JSON flood. */
   interactive?: boolean;
+  /** FIX-319: a BARE spawn sends `skillBody` verbatim — NO autorun directive, NO
+   *  story pin. Used for the heterogeneous PEER REVIEWER: a reviewer must NOT get
+   *  the worker directive ("complete the delivery, don't just summarize, do the
+   *  work") — that mis-frames it as a builder so it tries to deliver instead of
+   *  returning a terse VERDICT (and may mutate the worktree). The review prompt
+   *  itself carries the reviewer framing. */
+  bare?: boolean;
 }
 
 /**
@@ -149,7 +156,10 @@ export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: st
   // AUTORUN_DIRECTIVE itself stays byte-identical to the oracle; a cycle with
   // no picked story (undefined) produces the exact pre-204 prompt.
   const pin = input.storyId !== undefined && input.storyId !== "" ? storyPinDirective(input.storyId) : "";
-  const prompt = `${AUTORUN_DIRECTIVE}${pin}${input.skillBody}`;
+  // FIX-319: a bare (peer-reviewer) spawn sends the body verbatim — no worker
+  // autorun directive, no story pin — so the reviewer is framed only by its own
+  // review prompt, not told to "complete the delivery".
+  const prompt = input.bare === true ? input.skillBody : `${AUTORUN_DIRECTIVE}${pin}${input.skillBody}`;
   // FIX-220: manual `roll loop now` runs in an interactive terminal — strip
   // --verbose and --output-format stream-json so the user sees plain text
   // instead of a JSON flood. Cost tracking is best-effort on this path.
@@ -193,6 +203,9 @@ export interface AgentSpawnOptions {
   /** FIX-220: when the user manually triggers `roll loop now`, drop --verbose
    *  and --output-format stream-json for a human-readable terminal. */
   interactive?: boolean;
+  /** FIX-319: bare spawn — send `skillBody` verbatim (no autorun directive / no
+   *  story pin). Used for the heterogeneous peer reviewer (review-only framing). */
+  bare?: boolean;
 }
 
 /** Result of an agent spawn — the orchestrator feeds `exitCode` back as
@@ -224,7 +237,12 @@ export type AgentSpawn = (
  */
 /** Build the spawn argv for a resolved agent — exported for unit tests. */
 export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: string; args: string[] } {
-  const prompt = `${AUTORUN_DIRECTIVE}${opts.storyId !== undefined && opts.storyId !== "" ? storyPinDirective(opts.storyId) : ""}${opts.skillBody}`;
+  // FIX-319: bare (peer-reviewer) spawn sends the body verbatim — no worker
+  // autorun directive, no story pin — for every agent shape below.
+  const prompt =
+    opts.bare === true
+      ? opts.skillBody
+      : `${AUTORUN_DIRECTIVE}${opts.storyId !== undefined && opts.storyId !== "" ? storyPinDirective(opts.storyId) : ""}${opts.skillBody}`;
   if (agent === "claude") {
     return buildClaudeArgv({
       worktree: opts.cwd,
@@ -232,6 +250,7 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
       ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
       bin: opts.bin,
       interactive: opts.interactive,
+      ...(opts.bare === true ? { bare: true } : {}),
     });
   }
   if (agent === "pi") {

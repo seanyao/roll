@@ -96,6 +96,13 @@ export type RollEvent =
   // US-PAIR-009: the score stage's outcome — a heterogeneous peer scored the cycle.
   | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: "good" | "ok" | "regression"; cost: number; stage: "score"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number }
+  // FIX-319 — wall-clock timing of EVERY heterogeneous peer consult (the
+  // reviewPeer spawn), success or not, so the 120s hard timeout can be tuned
+  // empirically from real data instead of guessed. outcome: a parsed verdict
+  // (`reviewed`), the timeout fired (`timeout`), or a spawn/non-zero-exit
+  // (`error`). durationMs is the real spawn wall-clock (capped near the timeout
+  // when it fires).
+  | { type: "pair:consult"; cycleId: string; peer: string; durationMs: number; outcome: "reviewed" | "timeout" | "error"; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }

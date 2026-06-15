@@ -198,6 +198,30 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     );
     expect(Object.keys(AGENT_ARGV_TODO)).toContain("opencode");
   });
+
+  // FIX-319 — a BARE spawn (peer reviewer) sends the body verbatim: NO worker
+  // autorun directive, NO story pin. The reviewer must not be told to "complete
+  // the delivery / do the work" — it would try to deliver instead of reviewing.
+  describe("FIX-319 bare spawn (peer reviewer framing)", () => {
+    it("claude bare: prompt is the body verbatim — no autorun directive, no pin", () => {
+      const { args } = buildSpawnCommand("claude", { cwd: "/wt", skillBody: "REVIEW THIS", bare: true, storyId: "FIX-1" });
+      expect(args[0]).toBe("-p");
+      expect(args[1]).toBe("REVIEW THIS");
+      expect(args[1]).not.toContain(AUTORUN_DIRECTIVE);
+      expect(args[1]).not.toContain("FIX-1"); // no story pin either
+    });
+    it("pi/kimi/codex bare: body verbatim, no autorun directive", () => {
+      for (const agent of ["pi", "kimi", "codex"]) {
+        const { args } = buildSpawnCommand(agent, { cwd: "/wt", skillBody: "REVIEW THIS", bare: true });
+        expect(args.some((a) => a.includes(AUTORUN_DIRECTIVE))).toBe(false);
+        expect(args.some((a) => a === "REVIEW THIS")).toBe(true);
+      }
+    });
+    it("non-bare (default) still prepends the autorun directive (unchanged worker path)", () => {
+      const { args } = buildSpawnCommand("claude", { cwd: "/wt", skillBody: "DO WORK" });
+      expect(args[1]).toBe(`${AUTORUN_DIRECTIVE}DO WORK`);
+    });
+  });
 });
 
 describe("parseEstMin", () => {

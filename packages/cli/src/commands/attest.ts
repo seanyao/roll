@@ -792,7 +792,7 @@ async function attestBackfillCommand(args: string[], deps: AttestDeps): Promise<
 /** `roll attest <story-id> [--deploy-url <url>] [--capture-tmux <s> | --capture-command <c>]` */
 export async function attestCommand(args: string[], deps: AttestDeps = {}): Promise<number> {
   if (args[0] === "backfill") return attestBackfillCommand(args.slice(1), deps);
-  const flagsWithValue = new Set(["--deploy-url", "--run-dir", "--capture-tmux", "--capture-command", "--capture-region", "--capture-web", "--capture-browser"]);
+  const flagsWithValue = new Set(["--deploy-url", "--run-dir", "--capture-tmux", "--capture-command", "--capture-region", "--capture-web", "--capture-web-skip", "--capture-browser"]);
   let storyId: string | undefined;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -833,6 +833,11 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // needs NO GUI, so a network-only loop runner self-produces a real PNG of the
   // dossier/story page instead of leaving the screenshots dir empty.
   const captureWeb = flagVal("--capture-web");
+  // FIX-321: when no deliverable web target is declared, the runner passes
+  // --capture-web-skip <reason> instead of --capture-web. We record an HONEST web
+  // skip (taken:false) — no browser, no hollow dossier shot — which satisfies the
+  // visual floor via hasMachineCaptureSkip without faking evidence.
+  const captureWebSkip = flagVal("--capture-web-skip");
   const captureBrowser = flagVal("--capture-browser");
 
   const projectPath = process.cwd();
@@ -929,6 +934,12 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     const ref = screenshotEvidenceRef(shot, "screenshots/web.png");
     if (ref !== null) selfCaptures.push(ref);
     else warn(`web self-capture skipped: ${shot.skipped ?? "unknown"}`);
+  } else if (captureWebSkip !== undefined && captureWebSkip !== "") {
+    // FIX-321: honest recorded web skip — no deliverable target declared. NO
+    // browser, NO hollow dossier shot. taken:false + a reason makes the visual
+    // floor satisfiable (hasMachineCaptureSkip) while disclosing the gap.
+    captureFacts.push({ kind: "web", out: join(runDir, "screenshots", "web.png"), taken: false, skipped: captureWebSkip });
+    warn(`web self-capture skipped: ${captureWebSkip}`);
   }
 
   // hard facts.

@@ -11,13 +11,15 @@
  * without real evidence; the render layer still downgrades fabricated passes.
  */
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   acMapPath,
+  autoAttachScreenshotToAcMap,
   buildAcMapRemediationPrompt,
+  capturedScreenshotRef,
   needsAcMapRemediation,
 } from "../src/runner/attest-remediation.js";
 
@@ -86,5 +88,111 @@ describe("buildAcMapRemediationPrompt", () => {
     expect(p).toContain("../evidence/"); // run-dir-relative evidence convention
     expect(p).toMatch(/never fabricate|绝不伪造/); // bilingual red line present
     expect(p).toMatch(/do not commit/i); // surgical scope: file write only
+  });
+});
+
+// ── FIX-317: harness↔attest screenshot bridge ──────────────────────────────
+
+/** A cycle run dir (era) under the card archive, with a captures manifest +
+ *  optional screenshot files actually on disk. */
+function withRunDir(
+  wt: string,
+  storyId: string,
+  captures: Array<{ out: string; taken: boolean }>,
+  filesOnDisk: string[],
+): string {
+  const runDir = join(dirname(acMapPath(wt, storyId)), "2026-06-15T00-00-00");
+  mkdirSync(join(runDir, "screenshots"), { recursive: true });
+  for (const f of filesOnDisk) writeFileSync(join(runDir, "screenshots", f), "PNGDATA");
+  writeFileSync(join(runDir, "evidence.json"), JSON.stringify({ captures }));
+  return runDir;
+}
+
+/** A pass/claimed/… AC the agent wired with TEXT-only evidence (the bug shape). */
+const textAc = (id: string, status: string): unknown => ({
+  ac: id,
+  status,
+  evidence: [{ kind: "text", label: "vitest", textFile: "../evidence/vitest.txt" }],
+});
+
+describe("FIX-317 capturedScreenshotRef (honesty + path safety)", () => {
+  it("real capture (taken:true) + file on disk → run-dir-relative ref", () => {
+    const wt = withStory("FIX-905");
+    const rd = withRunDir(wt, "FIX-905", [{ out: "/abs/era/screenshots/web.png", taken: true }], ["web.png"]);
+    expect(capturedScreenshotRef(rd)).toBe("screenshots/web.png");
+  });
+  it("recorded machine-skip (taken:false) → null (never fabricate)", () => {
+    const wt = withStory("FIX-906");
+    const rd = withRunDir(wt, "FIX-906", [{ out: "x/web.png", taken: false }], ["web.png"]);
+    expect(capturedScreenshotRef(rd)).toBeNull();
+  });
+  it("taken:true but PNG missing on disk → null (disk is the honesty guard)", () => {
+    const wt = withStory("FIX-907");
+    const rd = withRunDir(wt, "FIX-907", [{ out: "x/web.png", taken: true }], []);
+    expect(capturedScreenshotRef(rd)).toBeNull();
+  });
+  it("absent / unreadable evidence.json → null", () => {
+    const wt = withStory("FIX-908");
+    const rd = join(dirname(acMapPath(wt, "FIX-908")), "no-frame");
+    mkdirSync(rd, { recursive: true });
+    expect(capturedScreenshotRef(rd)).toBeNull();
+  });
+  it("prefers web.png over terminal.png when both were genuinely captured", () => {
+    const wt = withStory("FIX-909");
+    const rd = withRunDir(
+      wt, "FIX-909",
+      [{ out: "x/terminal.png", taken: true }, { out: "x/web.png", taken: true }],
+      ["web.png", "terminal.png"],
+    );
+    expect(capturedScreenshotRef(rd)).toBe("screenshots/web.png");
+  });
+});
+
+describe("FIX-317 autoAttachScreenshotToAcMap", () => {
+  it("attaches the captured screenshot to every pass AC lacking visual evidence (the FIX-284 shape)", () => {
+    const wt = withStory("FIX-910");
+    writeFileSync(acMapPath(wt, "FIX-910"), JSON.stringify([textAc("FIX-910:AC1", "pass"), textAc("FIX-910:AC2", "pass")]));
+    const rd = withRunDir(wt, "FIX-910", [{ out: "x/web.png", taken: true }], ["web.png"]);
+    expect(autoAttachScreenshotToAcMap(wt, "FIX-910", rd)).toEqual({ href: "screenshots/web.png", count: 2 });
+    const map = JSON.parse(readFileSync(acMapPath(wt, "FIX-910"), "utf8")) as Array<{ evidence: Array<{ kind: string; href?: string }> }>;
+    for (const e of map) {
+      expect(e.evidence.some((ev) => ev.kind === "screenshot" && ev.href === "screenshots/web.png")).toBe(true);
+      expect(e.evidence.some((ev) => ev.kind === "text")).toBe(true); // agent's text evidence preserved
+    }
+  });
+  it("is idempotent — a second call makes no change (byte-identical)", () => {
+    const wt = withStory("FIX-911");
+    writeFileSync(acMapPath(wt, "FIX-911"), JSON.stringify([textAc("FIX-911:AC1", "pass")]));
+    const rd = withRunDir(wt, "FIX-911", [{ out: "x/web.png", taken: true }], ["web.png"]);
+    expect(autoAttachScreenshotToAcMap(wt, "FIX-911", rd)).not.toBeNull();
+    const after1 = readFileSync(acMapPath(wt, "FIX-911"), "utf8");
+    expect(autoAttachScreenshotToAcMap(wt, "FIX-911", rd)).toBeNull();
+    expect(readFileSync(acMapPath(wt, "FIX-911"), "utf8")).toBe(after1);
+  });
+  it("touches pass ACs ONLY — claimed/partial are left untouched", () => {
+    const wt = withStory("FIX-912");
+    writeFileSync(acMapPath(wt, "FIX-912"), JSON.stringify([textAc("FIX-912:AC1", "pass"), textAc("FIX-912:AC2", "claimed")]));
+    const rd = withRunDir(wt, "FIX-912", [{ out: "x/web.png", taken: true }], ["web.png"]);
+    expect(autoAttachScreenshotToAcMap(wt, "FIX-912", rd)).toEqual({ href: "screenshots/web.png", count: 1 });
+    const map = JSON.parse(readFileSync(acMapPath(wt, "FIX-912"), "utf8")) as Array<{ status: string; evidence: Array<{ kind: string }> }>;
+    const claimed = map.find((e) => e.status === "claimed");
+    expect(claimed?.evidence.some((ev) => ev.kind === "screenshot")).toBe(false);
+  });
+  it("no honest screenshot (taken:false) → no attach, ac-map untouched (skip path stays in charge)", () => {
+    const wt = withStory("FIX-913");
+    writeFileSync(acMapPath(wt, "FIX-913"), JSON.stringify([textAc("FIX-913:AC1", "pass")]));
+    const before = readFileSync(acMapPath(wt, "FIX-913"), "utf8");
+    const rd = withRunDir(wt, "FIX-913", [{ out: "x/web.png", taken: false }], ["web.png"]);
+    expect(autoAttachScreenshotToAcMap(wt, "FIX-913", rd)).toBeNull();
+    expect(readFileSync(acMapPath(wt, "FIX-913"), "utf8")).toBe(before);
+  });
+  it("a pass AC the agent already wired with a screenshot → no duplicate", () => {
+    const wt = withStory("FIX-914");
+    writeFileSync(
+      acMapPath(wt, "FIX-914"),
+      JSON.stringify([{ ac: "FIX-914:AC1", status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/manual.png" }] }]),
+    );
+    const rd = withRunDir(wt, "FIX-914", [{ out: "x/web.png", taken: true }], ["web.png"]);
+    expect(autoAttachScreenshotToAcMap(wt, "FIX-914", rd)).toBeNull();
   });
 });

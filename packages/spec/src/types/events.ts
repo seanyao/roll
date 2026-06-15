@@ -103,6 +103,12 @@ export type RollEvent =
   // (no ac-map.json) gets ONE surgical same-agent second pass before attest
   // renders. The outcome is auditable; honest statuses only — never a bypass.
   | { type: "attest:remediation"; cycleId: string; storyId: string; agent: string; outcome: "written" | "still-missing" | "spawn-failed"; ts: number }
+  // FIX-317 — the harness bridged a REAL captured screenshot into the ac-map's
+  // pass ACs (the agent wired text-only evidence; the visual floor needs a
+  // per-AC screenshot ref). Auditable: `href` + `attachedCount` distinguish
+  // harness-added visual baselines from agent-supplied evidence. Honest — only a
+  // screenshot that exists on disk this cycle is ever attached.
+  | { type: "attest:auto-attach"; cycleId: string; storyId: string; href: string; attachedCount: number; ts: number }
   // Correction loop (US-EVID-014/016) — story-level negative feedback and the
   // safety brake that stops oscillation before the loop burns cycles.
   | {

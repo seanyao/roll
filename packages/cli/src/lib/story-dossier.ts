@@ -1041,6 +1041,53 @@ export function renderStoryDossier(d: StoryDossierInput): string {
  * note, and the story's `tcr:` commits from git history. Every read is
  * best-effort — a missing source renders as an honest empty state.
  */
+/**
+ * FIX-334 — pull the `**Bold**:` primitive line off a FIX-format spec body.
+ * Matches `**<label>**: <text>` (EN or 中 label, optional colon) and returns the
+ * text after the colon. Returns "" when absent. General over any FIX spec.
+ */
+function fixPrimitiveLine(spec: string, labels: readonly string[]): string {
+  for (const label of labels) {
+    const re = new RegExp(`^\\*\\*${label}\\*\\*\\s*[:：]?\\s*(.*)$`, "im");
+    const m = re.exec(spec);
+    if (m !== null) {
+      const text = (m[1] ?? "").trim();
+      if (text !== "") return text;
+    }
+  }
+  return "";
+}
+
+/**
+ * FIX-334 — derive the Definition-station wish for a FIX-format spec that has no
+ * As-a/I-want narrative and no blockquote. Order: `**Problem**` (what's broken)
+ * → `**Solution**` (the intent) → the spec's H1 title line. Returns "" only when
+ * the spec is truly bare. General: works for ANY FIX card, not one fixture.
+ */
+export function parseFixWish(spec: string): string {
+  const problem = fixPrimitiveLine(spec, ["Problem", "问题"]);
+  if (problem !== "") return problem;
+  const solution = fixPrimitiveLine(spec, ["Solution", "方案", "解决", "Fix"]);
+  if (solution !== "") return solution;
+  const h1 = /^#\s+(.*)$/m.exec(spec);
+  return h1 !== null ? (h1[1] ?? "").trim() : "";
+}
+
+/**
+ * FIX-334 — derive Design-station bullets for a FIX-format spec whose approach
+ * lives in `**Root Cause**:` / `**Solution**:` bold lines rather than a
+ * `## Solution` heading + bullets. Each present primitive becomes one labelled
+ * bullet. General over any FIX spec; empty when none are present.
+ */
+export function parseFixDesign(spec: string): string[] {
+  const bullets: string[] = [];
+  const rootCause = fixPrimitiveLine(spec, ["Root Cause", "根因", "原因"]);
+  if (rootCause !== "") bullets.push(`${bi("Root cause", "根因")}: ${rootCause}`);
+  const solution = fixPrimitiveLine(spec, ["Solution", "方案", "解决", "Fix"]);
+  if (solution !== "") bullets.push(`${bi("Solution", "方案")}: ${solution}`);
+  return bullets;
+}
+
 export function collectStoryDossierInput(projectPath: string, story: DossierStory, cache?: DossierRunCache): StoryDossierInput {
   const gitFacts = cache === undefined ? undefined : cache.git;
   const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id);
@@ -1068,19 +1115,34 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     if (iWant !== null) narr.iWant = (iWant[1] ?? "").trim();
     if (soThat !== null) narr.soThat = (soThat[1] ?? "").trim();
     if (narr.asA !== undefined || narr.iWant !== undefined || narr.soThat !== undefined) out.narrative = narr;
+    // FIX-334: a FIX-format spec carries no As-a/I-want narrative — its wish lives
+    // in the `**Problem**:` line. When neither the blockquote nor the narrative
+    // primitive fills the Definition station, fall back to the FIX primitives
+    // (`**Problem**` → `**Solution**`), then the H1 title, so a FIX card's
+    // Definition is never an empty "未记录故事原语". General: matches ANY FIX spec.
+    if (out.narrative === undefined && (out.wish === undefined || out.wish === "")) {
+      const fixWish = parseFixWish(spec);
+      if (fixWish !== "") out.wish = fixWish;
+    }
     // US-DOSSIER-003: Domain Model Context line.
     const ctx = /^[-*]\s*Context:\s*(.*)$/im.exec(spec);
     if (ctx !== null) out.context = (ctx[1] ?? "").trim();
-    // US-DOSSIER-003: AC checklist (the `**AC:**` block's checkbox items).
+    // US-DOSSIER-003 + FIX-334: AC checklist. Two on-disk shapes both feed the
+    // same checklist: the US `**AC:**` bold block AND the FIX-format
+    // `## Acceptance Criteria` (／`## 验收标准`) markdown section. Either opens
+    // collection; the next bold section or markdown heading closes it.
     const acItems: { text: string; checked: boolean }[] = [];
     let inAc = false;
     for (const l of spec.split("\n")) {
-      if (/^\*\*AC:?\*\*/i.test(l.trim())) { inAc = true; continue; }
-      if (inAc && /^\*\*[A-Z]/.test(l.trim())) break; // next bold section ends the block
-      const m = /^[-*]\s*\[([ xX])\]\s+(.*)$/.exec(l.trim());
+      const t = l.trim();
+      if (/^\*\*AC:?\*\*/i.test(t)) { inAc = true; continue; }
+      if (/^#{1,6}\s*(Acceptance Criteria|验收标准|验收清单|AC)\s*$/i.test(t)) { inAc = true; continue; }
+      if (inAc && (/^\*\*[A-Za-z一-鿿]/.test(t) || /^#{1,6}\s/.test(t))) break; // next bold/heading section ends the block
+      const m = /^[-*]\s*\[([ xX])\]\s+(.*)$/.exec(t);
       if (inAc && m !== null) acItems.push({ checked: (m[1] ?? "").toLowerCase() === "x", text: (m[2] ?? "").trim() });
     }
     if (acItems.length > 0) out.acItems = acItems;
+    // Design bullets under a 方案/Solution/Design markdown heading (US format).
     const design: string[] = [];
     let inDesign = false;
     for (const l of spec.split("\n")) {
@@ -1091,6 +1153,11 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
         if (m !== null) design.push((m[1] ?? "").trim());
       }
     }
+    // FIX-334: a FIX-format spec states its design as the `**Solution**:` (and
+    // `**Root Cause**:`) bold lines, not a `## Solution` heading + bullets. When
+    // the heading walk found nothing, fall back to those primitives so the Design
+    // station carries the real fix approach instead of "尚未设计". General.
+    if (design.length === 0) design.push(...parseFixDesign(spec));
     if (design.length > 0) out.design = design;
   } catch {
     /* no spec — bare card */

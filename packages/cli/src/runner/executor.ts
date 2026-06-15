@@ -111,7 +111,7 @@ import {
   type CaptureMarker,
   type ScreenshotResult,
 } from "@roll/infra";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -1852,7 +1852,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function agentWritableRoots(repoCwd: string, alertsPath: string): string[] {
+/**
+ * The filesystem roots a cycle's WORK needs to write — consumed by agents that
+ * run under an explicit workspace sandbox (codex `--sandbox workspace-write`
+ * splices these as `--add-dir`; non-sandboxing agents like claude/pi ignore
+ * them). This is an agent-AGNOSTIC fact-about-the-work, not a per-agent special
+ * case (the sandbox/test/acceptance behaviours that DO differ per agent belong
+ * behind the agent factory — FIX-313/US-LOOP-…). The per-agent decision of
+ * WHETHER and HOW to apply these roots lives in agent-spawn.
+ */
+export function agentWritableRoots(repoCwd: string, alertsPath: string): string[] {
   const roots: string[] = [];
   const add = (p: string): void => {
     if (p.trim() === "") return;
@@ -1862,6 +1871,23 @@ function agentWritableRoots(repoCwd: string, alertsPath: string): string[] {
   const rollDir = join(repoCwd, ".roll");
   if (existsSync(rollDir)) add(rollDir);
   add(dirname(alertsPath));
+  // FIX-326: the cycle worktree's git-internal dir (the shared object store +
+  // the worktree's own gitdir under <common>/worktrees/<cycle>) lives OUTSIDE
+  // the worktree — under the repo's git-common-dir. Without write access there,
+  // a sandboxed agent's `git write-tree` / `git commit` silently fail: no
+  // test-pass proof is written and no TCR commit can be created, so a cycle that
+  // produced complete, green work is discarded as gave_up (observed: FIX-285,
+  // 3× $4-7 cycles, 0 commits). `git commit` needs the same dir, so granting the
+  // common dir is what makes the agent's own-branch TCR commits work at all.
+  try {
+    const common = execFileSync("git", ["-C", repoCwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      encoding: "utf8",
+    }).trim();
+    if (common !== "") add(common);
+  } catch {
+    /* best-effort: if the git probe fails the agent's commits will fail loudly
+       (no silent proof), surfacing the issue rather than masking it. */
+  }
   return roots;
 }
 

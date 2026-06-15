@@ -93,13 +93,44 @@ describe("runPairing — US-PAIR-003", () => {
     expect(events[0]?.type).toBe("pair:none-available");
   });
 
-  it("non-blocking: reviewPeer timeout (null) → status timeout, no verdict event, no throw", async () => {
+  it("non-blocking: reviewPeer timeout (null) for the WHOLE pool → status timeout, no verdict event, no throw", async () => {
     const { dir, rt } = project(ENABLED);
+    // FIX-331: every candidate now gets a pair:selected as the consult rotates;
+    // the whole pool timing out yields status timeout with NO verdict + no evidence.
     const { d, events } = deps({ reviewPeer: async () => null });
     const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
     expect(res.status).toBe("timeout");
-    expect(events.map((e) => e.type)).toEqual(["pair:selected"]); // selected but no verdict
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect(events.every((e) => e.type === "pair:selected")).toBe(true); // selected per candidate
+    expect(events.some((e) => e.type === "pair:verdict")).toBe(false); // never a verdict
     expect(existsSync(join(rt, "peer", "cycle-c1.pair.json"))).toBe(false);
+  });
+
+  it("FIX-331: first selected peer returns null → rotates to the next candidate, reviewed with that peer", async () => {
+    const { dir, rt } = project(ENABLED);
+    // The first peer the selector picks is transiently unavailable (null); the
+    // consult must rotate to the next candidate rather than sink the whole review.
+    let calls = 0;
+    const { d, events } = deps({
+      reviewPeer: async () => {
+        calls += 1;
+        return calls === 1 ? null : { verdict: "agree", findings: ["ok"], cost: 0.1 };
+      },
+    });
+    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    expect(res.status).toBe("reviewed");
+    // the reviewer is the SECOND candidate (the one consulted after the first null).
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
+    expect(selecteds.length).toBeGreaterThanOrEqual(2);
+    expect(res.peer).toBe(selecteds[1]?.peer); // second candidate won
+    // evidence records the second peer, and a single verdict follows the selecteds.
+    const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
+    expect(ev.peer).toBe(res.peer);
+    expect(ev.peer).toBe(selecteds[1]?.peer);
+    const verdicts = events.filter((e) => e.type === "pair:verdict");
+    expect(verdicts).toHaveLength(1);
+    // verdict comes after at least two selected events (rotation happened).
+    expect(events.indexOf(verdicts[0]!)).toBeGreaterThan(events.indexOf(selecteds[1]!));
   });
 
   it("never throws: a broken reviewPeer yields status error, not an exception", async () => {
@@ -259,6 +290,26 @@ describe("runScorePairing — US-PAIR-009", () => {
     const scoreEvent = events[1] as Extract<PairEvent, { type: "pair:score" }>;
     expect(scoreEvent.score).toBe(8);
     expect(scoreEvent.cost).toBe(0.05);
+  });
+
+  it("FIX-331: first scorer times out → ROTATES to the next hetero candidate (not self-score)", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    // first scorer flakes (null); the next returns a real score → must rotate, NOT fall back to self-score.
+    const { d, events } = scoreDeps({
+      installed: ["claude", "codex", "kimi"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return tried.length === 1 ? null : { score: 7, verdict: "ok" as const, rationale: "rotated peer scored", cost: 0.02 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored"); // a real peer score, NOT the self-score fallback
+    expect(tried.length).toBeGreaterThanOrEqual(2); // first flaked → rotated to the next candidate
+    expect(r.peer).toBe(tried[tried.length - 1]);
+    expect(events.filter((e) => e.type === "pair:selected").length).toBeGreaterThanOrEqual(2);
+    expect(events.some((e) => e.type === "pair:score")).toBe(true);
+    expect(readStorySelfScores(dir, "US-X-001")[0]?.score).toBe(7); // recorded as a pair score
   });
 
   it("no heterogeneous candidate → none-available event, never blocks", async () => {
@@ -423,6 +474,31 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
     expect(r.status).toBe("timeout");
     expect(r.sameTypeFallback).toBe(true);
     expect(existsSync(join(rt, "peer", "cycle-c-same-to.pair.json"))).toBe(false);
+  });
+
+  // (c2) FIX-331 + codex peer-review: when heterogeneous peers EXIST but ALL fail
+  // (timeout/null), the retry STAYS BLOCKED — it must NOT degrade to a same-type
+  // review even though the working agent's own type could produce a verdict. A
+  // wholly-failing hetero pool blocking is FIX-293's hard gate; same-type is ONLY
+  // for the zero-hetero (single-vendor) env.
+  it("hetero peers all fail → blocked (timeout), never falls back to same-type while hetero exists", async () => {
+    const { rt } = project(null);
+    const spawned: string[] = [];
+    const { d } = retryDeps({
+      installed: ["claude", "codex"], // codex is heterogeneous from claude
+      workingAgent: "claude",
+      // hetero (codex) fails; the working agent's own type (claude) WOULD pass —
+      // but it must never be reached while a hetero peer was available.
+      reviewPeer: async (peer) => {
+        spawned.push(peer);
+        return peer === "claude" ? { verdict: "agree", findings: [], cost: 0 } : null;
+      },
+    });
+    const r = await retryPeerConsult(rt, rt, "c-hetero-allfail", d);
+    expect(r.status).toBe("timeout"); // blocked, NOT reviewed via same-type
+    expect(r.sameTypeFallback).toBe(false); // the failing peer was the hetero codex
+    expect(spawned).toEqual(["codex"]); // same-type claude was NEVER attempted
+    expect(existsSync(join(rt, "peer", "cycle-c-hetero-allfail.pair.json"))).toBe(false);
   });
 
   // (d) THE RED LINE: the reviewer is always reached through reviewPeer, which

@@ -846,29 +846,56 @@ export async function executeCommand(
       // reads the cycle diff and returns a terse verdict; 30s hard timeout
       // (belt-and-braces race) so a flaky peer (pi) never stalls the cycle.
       const reviewPeer = async (peer: string, diff: string, timeoutMs: number): Promise<PairReview | null> => {
+        // FIX-319: a REVIEW-ONLY prompt. The spawn is `bare` (no worker autorun
+        // directive), so the reviewer is framed solely by this — it is NOT told to
+        // "complete the delivery / don't just summarize / do the work", which made
+        // reviewers try to deliver (and risk mutating the worktree) instead of
+        // returning a terse verdict.
         const prompt =
-          `You are a heterogeneous PAIRING reviewer. A different agent wrote the diff below; ` +
-          `give it a terse second-pair-of-eyes review (correctness, edge cases, quality). ` +
+          `You are a heterogeneous PAIRING reviewer — a DIFFERENT agent wrote the diff below. ` +
+          `Your ONLY job is a terse second-pair-of-eyes review (correctness, edge cases, quality). ` +
+          `Do NOT modify files, do NOT commit, do NOT try to "complete" or deliver anything — just review. ` +
           `End with exactly one line "VERDICT: agree|refine|object" and one "FINDING: <issue>" line per concrete issue.\n\nDIFF:\n` +
           diff;
+        // FIX-319: record EVERY consult's real wall-clock + outcome (pair:consult)
+        // so the 120s hard timeout can be tuned from data, not guessed.
+        const t0 = Date.now();
+        const emitConsult = (outcome: "reviewed" | "timeout" | "error"): void =>
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "pair:consult",
+            cycleId: ctx.cycleId ?? "",
+            peer,
+            durationMs: Date.now() - t0,
+            outcome,
+            ts: ports.clock(),
+          });
         let res;
         try {
-          // Belt-and-braces hard timeout (pi pair-review): race the spawn against
-          // a wall clock so 30s is enforced even if an agent's spawn path ignores
-          // its own timeoutMs. Whichever loses, the cycle is never stalled.
+          // Belt-and-braces hard timeout: race the spawn against a wall clock so
+          // the cap is enforced even if an agent's spawn path ignores its own
+          // timeoutMs. Whichever loses, the cycle is never stalled.
           res = await Promise.race([
             ports.agentSpawn(peer, {
               cwd: ports.paths.worktreePath,
               skillBody: prompt,
               timeoutMs,
+              bare: true, // FIX-319: review-only framing, no worker autorun directive
               ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
             }),
             new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
           ]);
         } catch {
+          emitConsult("error");
           return null;
         }
-        if (res === null || res.timedOut || res.exitCode !== 0) return null;
+        if (res === null || res.timedOut) {
+          emitConsult("timeout");
+          return null;
+        }
+        if (res.exitCode !== 0) {
+          emitConsult("error");
+          return null;
+        }
         const vm = /VERDICT:\s*(agree|refine|object)/i.exec(res.stdout);
         const verdict = (vm?.[1]?.toLowerCase() ?? "agree") as PairReview["verdict"];
         const findings = [...res.stdout.matchAll(/^\s*FINDING:\s*(.+)$/gim)].map((m) => (m[1] ?? "").trim());
@@ -877,6 +904,7 @@ export async function executeCommand(
         // own stdout (claude stream-json or the per-agent stdout-scrape extractors).
         // Best-effort by contract — an unparseable peer records 0, never throws.
         const cost = peerReviewCost(peer, res.stdout);
+        emitConsult("reviewed");
         return { verdict, findings, cost };
       };
       // Full cycle diff (origin/main...HEAD), shared by the gate retry + pairing.

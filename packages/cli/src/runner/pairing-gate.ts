@@ -102,7 +102,12 @@ export interface RunPairingResult {
   verdict?: PairReview["verdict"];
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+// FIX-319: 30s was too short for a real heterogeneous review (a cold claude/kimi
+// spawn that reads a diff + reasons + answers needs longer) — every hetero
+// consult timed out → no peer evidence → the peer gate blocked delivery. Raised
+// to 2min (owner's ≤3min peer-review policy). NOT final: pair:consult records
+// each consult's real duration so this is tuned from data, not guessed.
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
  * Run one pairing for a cycle AT A GIVEN STAGE. Returns a status (callers/tests

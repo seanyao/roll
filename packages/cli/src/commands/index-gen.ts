@@ -19,7 +19,7 @@ import { renderAgentsMachinePage } from "../lib/page-agents.js";
 import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
 import { collectConventions, defaultConventionsDeps, renderConventionsPage } from "../lib/page-conventions.js";
-import { collectProjectsRegistry, reachableProjects, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
+import { collectProjectsRegistry, reachableProjects, resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
 import { collectCycleLedger } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
@@ -382,6 +382,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     });
     const snapshotJson = serializeTruthSnapshot(snapshot);
     writeFileSync(join(featuresDir, "truth.json"), snapshotJson, "utf8");
+    const projectName = resolveProjectName(cwd);
     // US-DOSSIER-028: lift this project's verdict + release tag into the shared
     // cross-project registry (`~/.roll/projects.json`) the web switcher reads.
     // SAME口径 by construction: verdict/releaseTag are taken verbatim from the
@@ -398,7 +399,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       if (shouldSelfRegister(cwd)) {
         const slug = projectSlug(cwd);
         writeProjectRow({
-          name: process.env["ROLL_BRAND_NAME"] ?? "roll",
+          name: projectName,
           slug,
           path: cwd,
           ...(snapshot.release?.latestTag !== undefined ? { releaseTag: snapshot.release.latestTag } : {}),
@@ -421,7 +422,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         snapshot,
         snapshotJson,
         brand: {
-          name: process.env["ROLL_BRAND_NAME"] ?? "roll",
+          name: projectName,
           slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works.",
         },
         backlog: backlogViewModel(epics),
@@ -470,7 +471,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     // with real content; today they are stub targets so the links never 404 and
     // already wear the sticky top-bar shell.
     const machineBar = {
-      brand: { name: process.env["ROLL_BRAND_NAME"] ?? "roll", slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works." },
+      brand: { name: projectName, slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works." },
       snapshot,
       // FIX-283 (AC2): reachable-only on the machine pages too — same switcher.
       projects: reachableProjects(collectProjectsRegistry()),

@@ -5,6 +5,7 @@
  * command directly, freezes visible output, and asserts the scaffold/apply
  * filesystem side effects in sandboxed project + ROLL_HOME fixtures.
  */
+import { execFileSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -199,7 +200,7 @@ afterAll(() => {
 
 const ENV_KEYS = [
   "PATH", "HOME", "ROLL_HOME", "ROLL_PKG_DIR", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "PWD",
-  "ROLL_AGENT_ROUTES_TEMPLATE", "ROLL_ONBOARD_AGENT", "ROLL_ASSUME_TTY",
+  "ROLL_AGENT_ROUTES_TEMPLATE", "ROLL_ONBOARD_AGENT", "ROLL_ASSUME_TTY", "ROLL_BRAND_NAME",
 ];
 
 function envBase(fx: Fixture, extra: Record<string, string>): Record<string, string> {
@@ -276,6 +277,18 @@ function assertScaffold(fx: Fixture): void {
 }
 
 describe("frozen: roll init", () => {
+  it("FIX-307: registers a real project under its derived git remote name", () => {
+    const fx = realFixture();
+    execFileSync("git", ["init", "-q"], { cwd: fx.proj });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:seanyao/APE-PR.git"], { cwd: fx.proj });
+    expect(tsInit(fx, []).status).toBe(0);
+    expect(collectProjectsRegistry(fx.home)[0]).toMatchObject({
+      name: "APE-PR",
+      slug: expect.stringContaining("ape-pr-"),
+      path: fx.proj,
+    });
+  });
+
   it("fresh init scaffolds an unknown project", () => {
     const fx = freshFixture();
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`

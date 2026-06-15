@@ -50,7 +50,7 @@ import { c, renderState, row, COLS } from "../render.js";
 import { realAgentEnv } from "./agent-list.js";
 import { onPath, rollPkgDir, syncConventions as sharedSyncConventions } from "./setup-shared.js";
 import { rollVersion } from "./version.js";
-import { shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
+import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
 import { projectSlug } from "./dashboard.js";
 
 /**
@@ -66,7 +66,7 @@ function registerProject(projectDir: string): void {
   try {
     if (!shouldSelfRegister(projectDir)) return;
     writeProjectRow({
-      name: process.env["ROLL_BRAND_NAME"] ?? "roll",
+      name: resolveProjectName(projectDir),
       slug: projectSlug(projectDir),
       path: projectDir,
       lastIndexedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),

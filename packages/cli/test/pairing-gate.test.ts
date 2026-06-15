@@ -69,11 +69,18 @@ describe("runPairing — US-PAIR-003", () => {
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
     expect(ev.peer).toBe(res.peer);
     expect(ev.verdict).toBe("refine");
-    // events: selected then verdict (with findings count + cost)
-    expect(events.map((e) => e.type)).toEqual(["pair:selected", "pair:verdict"]);
-    const verdict = events[1] as Extract<PairEvent, { type: "pair:verdict" }>;
-    expect(verdict.findings).toBe(2);
-    expect(verdict.cost).toBe(0.12);
+    // FIX-335 parallel: every candidate emits a selected (fired concurrently);
+    // exactly ONE verdict — the winner's — and it comes after the selecteds.
+    const selecteds = events.filter((e) => e.type === "pair:selected");
+    const verdicts = events.filter((e) => e.type === "pair:verdict") as Extract<PairEvent, { type: "pair:verdict" }>[];
+    expect(selecteds.length).toBeGreaterThanOrEqual(1);
+    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:verdict")).toBe(true);
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0]?.peer).toBe(res.peer);
+    expect(verdicts[0]?.findings).toBe(2);
+    expect(verdicts[0]?.cost).toBe(0.12);
+    // the lone verdict is emitted only after a peer was selected.
+    expect(events.indexOf(verdicts[0]!)).toBeGreaterThan(events.indexOf(selecteds[0]!));
   });
 
   it("empty diff = not-required, no peer burned, no selected event (pi pair-review)", async () => {
@@ -95,8 +102,8 @@ describe("runPairing — US-PAIR-003", () => {
 
   it("non-blocking: reviewPeer timeout (null) for the WHOLE pool → status timeout, no verdict event, no throw", async () => {
     const { dir, rt } = project(ENABLED);
-    // FIX-331: every candidate now gets a pair:selected as the consult rotates;
-    // the whole pool timing out yields status timeout with NO verdict + no evidence.
+    // FIX-335: every candidate is fired in parallel (one pair:selected each); the
+    // whole pool returning null yields status timeout with NO verdict + no evidence.
     const { d, events } = deps({ reviewPeer: async () => null });
     const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
     expect(res.status).toBe("timeout");
@@ -106,31 +113,52 @@ describe("runPairing — US-PAIR-003", () => {
     expect(existsSync(join(rt, "peer", "cycle-c1.pair.json"))).toBe(false);
   });
 
-  it("FIX-331: first selected peer returns null → rotates to the next candidate, reviewed with that peer", async () => {
+  it("FIX-335 parallel take-first: a null peer is skipped, the non-null peer wins, evidence/verdict are the winner's", async () => {
     const { dir, rt } = project(ENABLED);
-    // The first peer the selector picks is transiently unavailable (null); the
-    // consult must rotate to the next candidate rather than sink the whole review.
-    let calls = 0;
+    // Two heterogeneous candidates are fired concurrently: "codex" flakes (null),
+    // "kimi" returns a real verdict. The winner must be the non-null peer, with a
+    // single verdict + evidence recording that peer — regardless of dispatch order.
     const { d, events } = deps({
-      reviewPeer: async () => {
-        calls += 1;
-        return calls === 1 ? null : { verdict: "agree", findings: ["ok"], cost: 0.1 };
+      reviewPeer: async (peer) =>
+        peer === "kimi" ? { verdict: "agree", findings: ["ok"], cost: 0.1 } : null,
+    });
+    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    expect(res.status).toBe("reviewed");
+    expect(res.peer).toBe("kimi"); // the non-null peer won, not the flaky one
+    expect(res.verdict).toBe("agree");
+    // every candidate emitted a selected (parallel dispatch); exactly one verdict.
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
+    expect(selecteds.length).toBeGreaterThanOrEqual(2);
+    expect(selecteds.some((e) => e.peer === "kimi")).toBe(true);
+    const verdicts = events.filter((e) => e.type === "pair:verdict") as Extract<PairEvent, { type: "pair:verdict" }>[];
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0]?.peer).toBe("kimi");
+    // evidence is the winner's only — the flaky peer never wrote anything.
+    const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
+    expect(ev.peer).toBe("kimi");
+    expect(ev.verdict).toBe("agree");
+  });
+
+  it("FIX-335: the FIRST non-null result wins (a slow null does not beat a faster real verdict)", async () => {
+    const { dir, rt } = project(ENABLED);
+    // "codex" returns null quickly; "kimi" returns a real verdict a tick later.
+    // take-first must wait past the fast null and use the real verdict, never
+    // resolving null while a valid result is still in flight.
+    const { d, events } = deps({
+      reviewPeer: async (peer) => {
+        if (peer === "kimi") {
+          await new Promise((r) => setTimeout(r, 10));
+          return { verdict: "refine", findings: ["a", "b"], cost: 0.2 };
+        }
+        return null; // fast null
       },
     });
     const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
     expect(res.status).toBe("reviewed");
-    // the reviewer is the SECOND candidate (the one consulted after the first null).
-    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
-    expect(selecteds.length).toBeGreaterThanOrEqual(2);
-    expect(res.peer).toBe(selecteds[1]?.peer); // second candidate won
-    // evidence records the second peer, and a single verdict follows the selecteds.
-    const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
-    expect(ev.peer).toBe(res.peer);
-    expect(ev.peer).toBe(selecteds[1]?.peer);
-    const verdicts = events.filter((e) => e.type === "pair:verdict");
+    expect(res.peer).toBe("kimi");
+    const verdicts = events.filter((e) => e.type === "pair:verdict") as Extract<PairEvent, { type: "pair:verdict" }>[];
     expect(verdicts).toHaveLength(1);
-    // verdict comes after at least two selected events (rotation happened).
-    expect(events.indexOf(verdicts[0]!)).toBeGreaterThan(events.indexOf(selecteds[1]!));
+    expect(verdicts[0]?.findings).toBe(2);
   });
 
   it("never throws: a broken reviewPeer yields status error, not an exception", async () => {
@@ -285,28 +313,33 @@ describe("runScorePairing — US-PAIR-009", () => {
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.score.pair.json"), "utf8"));
     expect(ev.score).toBe(8);
     expect(ev.stage).toBe("score");
-    // events: selected + score, both stage-stamped
-    expect(events.map((e) => e.type)).toEqual(["pair:selected", "pair:score"]);
-    const scoreEvent = events[1] as Extract<PairEvent, { type: "pair:score" }>;
-    expect(scoreEvent.score).toBe(8);
-    expect(scoreEvent.cost).toBe(0.05);
+    // FIX-335 parallel: each candidate emits a selected (fired concurrently);
+    // exactly ONE pair:score — the winner's.
+    const selecteds = events.filter((e) => e.type === "pair:selected");
+    const scoreEvents = events.filter((e) => e.type === "pair:score") as Extract<PairEvent, { type: "pair:score" }>[];
+    expect(selecteds.length).toBeGreaterThanOrEqual(1);
+    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:score")).toBe(true);
+    expect(scoreEvents).toHaveLength(1);
+    expect(scoreEvents[0]?.score).toBe(8);
+    expect(scoreEvents[0]?.cost).toBe(0.05);
   });
 
-  it("FIX-331: first scorer times out → ROTATES to the next hetero candidate (not self-score)", async () => {
+  it("FIX-335: one scorer flakes (null), the other scores → uses the real peer score (not self-score)", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
-    // first scorer flakes (null); the next returns a real score → must rotate, NOT fall back to self-score.
+    // Both hetero scorers fire in parallel: "codex" flakes (null), "kimi" returns a
+    // real score → take-first must use the non-null peer, NOT fall back to self-score.
     const { d, events } = scoreDeps({
       installed: ["claude", "codex", "kimi"],
       scorePeer: async (peer: string) => {
         tried.push(peer);
-        return tried.length === 1 ? null : { score: 7, verdict: "ok" as const, rationale: "rotated peer scored", cost: 0.02 };
+        return peer === "kimi" ? { score: 7, verdict: "ok" as const, rationale: "the live peer scored", cost: 0.02 } : null;
       },
     });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("scored"); // a real peer score, NOT the self-score fallback
-    expect(tried.length).toBeGreaterThanOrEqual(2); // first flaked → rotated to the next candidate
-    expect(r.peer).toBe(tried[tried.length - 1]);
+    expect(tried.length).toBeGreaterThanOrEqual(2); // both candidates were fired (parallel)
+    expect(r.peer).toBe("kimi"); // the non-null scorer won
     expect(events.filter((e) => e.type === "pair:selected").length).toBeGreaterThanOrEqual(2);
     expect(events.some((e) => e.type === "pair:score")).toBe(true);
     expect(readStorySelfScores(dir, "US-X-001")[0]?.score).toBe(7); // recorded as a pair score

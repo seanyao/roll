@@ -1255,3 +1255,246 @@ describe("FIX-289 — go startup feedback + reliable watch window", () => {
     expect(r.out).toContain("follow the read-only live feed");
   });
 });
+
+describe("FIX-333 — published_pending_merge cards are not re-picked (no double delivery)", () => {
+  // The double-PR bug: a card delivered as published_pending_merge (PR open,
+  // merge handed to the PR lane) whose ✅ Done lives only on the cycle branch —
+  // the main-checkout backlog still reads 📋 Todo. Without the in-flight guard
+  // the session re-picks it next cycle and the worker opens a SECOND PR for the
+  // same work (FIX-308 → #759 + #760).
+  it("does NOT re-pick a card it just delivered as published_pending_merge; ends the session cleanly", async () => {
+    const p = project();
+    // Backlog still reads Todo (worktree-isolated Done not yet on main).
+    writeBacklog(p, [
+      "| [FIX-308](.roll/features/goal-mode/FIX-308/spec.md) | flaky card | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const allowed: Array<string[] | undefined> = [];
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_020_000 + calls,
+      nowIso: () => `2026-06-13T09:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath, allowedCards }) => {
+        calls += 1;
+        allowed.push(allowedCards);
+        // A genuine published delivery: PR open, merge pending.
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({
+            story_id: "FIX-308",
+            cycle_id: `cycle-${calls}`,
+            ts: `2026-06-13T09:00:0${calls}Z`,
+            agent: "claude",
+            status: "published",
+            outcome: "published_pending_merge",
+            tcr_count: 3,
+            pr_url: "https://github.com/o/r/pull/759",
+          })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    // --max-cycles 10 is deliberately higher than any legitimate cycle count: a
+    // re-pick would burn more cycles and produce a second PR.
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-308", "--max-cycles", "10"], deps));
+
+    expect(r.code).toBe(0);
+    // Exactly ONE cycle: the card delivered once, then the scope is in-flight
+    // and the session ends. NEVER a second delivery (the double-PR regression).
+    expect(calls).toBe(1);
+    expect(allowed).toEqual([["FIX-308"]]);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("scope_in_flight");
+    const end = readEvents(p).find((e) => e.type === "goal:session_end");
+    expect(end).toMatchObject({ reason: "scope_in_flight" });
+    // The breaker never tripped — a delivery is progress, not a stall.
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "progress")).toBe(false);
+  });
+
+  it("still advances to the next scope card after the first delivers in-flight", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-308](.roll/features/goal-mode/FIX-308/spec.md) | first | 📋 Todo |",
+      "| [FIX-309](.roll/features/goal-mode/FIX-309/spec.md) | second | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const allowed: Array<string[] | undefined> = [];
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_021_000 + calls,
+      nowIso: () => `2026-06-13T09:10:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath, allowedCards }) => {
+        calls += 1;
+        allowed.push(allowedCards);
+        // Cycle 1 delivers FIX-308; cycle 2 delivers FIX-309.
+        const story = calls === 1 ? "FIX-308" : "FIX-309";
+        const pr = calls === 1 ? 759 : 761;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({
+            story_id: story,
+            cycle_id: `cycle-${calls}`,
+            ts: `2026-06-13T09:10:0${calls}Z`,
+            agent: "claude",
+            status: "published",
+            outcome: "published_pending_merge",
+            tcr_count: 2,
+            pr_url: `https://github.com/o/r/pull/${pr}`,
+          })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-308,FIX-309", "--max-cycles", "10"], deps));
+
+    expect(r.code).toBe(0);
+    // Two cycles: one per card, then both in-flight → clean end. No re-delivery.
+    expect(calls).toBe(2);
+    // Cycle 1 may pick either; cycle 2's allow-list EXCLUDES the delivered card.
+    expect(allowed[0]).toEqual(["FIX-308", "FIX-309"]);
+    expect(allowed[1]).toEqual(["FIX-309"]);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.lastDecisionReason).toContain("scope_in_flight");
+  });
+});
+
+describe("FIX-333 — changing scope resets the progress counters", () => {
+  // The breaker-on-start bug: a paused goal that accumulated no-progress cycles
+  // on its OLD scope must not carry that count into a NEW scope and trip the
+  // no_progress_breaker the instant it resumes.
+  it("drops noProgressCycles/zeroStreaks/skippedCards when --cards changes the scope", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-NEW](.roll/features/goal-mode/FIX-NEW/spec.md) | fresh scope | 📋 Todo |",
+    ]);
+    // A persisted paused goal on a DIFFERENT scope (FIX-OLD) that already sat at
+    // the breaker threshold (noProgressCycles 3 === GOAL_NO_PROGRESS_STOP).
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: cards
+  cards: [FIX-OLD]
+review: auto
+limits:
+status: paused
+usage:
+  cycles: 0
+  costUsd: 0
+progress:
+  zeroStreaks:
+    FIX-OLD: 2
+  skippedCards: [FIX-OLD]
+  noProgressCycles: 3
+createdAt: 2026-06-13T08:00:00Z
+updatedAt: 2026-06-13T08:30:00Z
+lastDecisionReason: no_progress_breaker
+`,
+    );
+    let calls = 0;
+    const allowed: Array<string[] | undefined> = [];
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_022_000 + calls,
+      nowIso: () => `2026-06-13T09:20:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath, allowedCards }) => {
+        calls += 1;
+        allowed.push(allowedCards);
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({
+            story_id: "FIX-NEW",
+            cycle_id: `cycle-${calls}`,
+            ts: `2026-06-13T09:20:0${calls}Z`,
+            agent: "claude",
+            status: "failed",
+            outcome: "failed",
+            tcr_count: 0,
+          })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-NEW", "--max-cycles", "10"], deps));
+
+    expect(r.code).toBe(0);
+    // The breaker did NOT trip on start: the new scope began with a clean count,
+    // so at least one cycle actually RAN (the OLD count of 3 was discarded).
+    expect(calls).toBeGreaterThanOrEqual(1);
+    // The very first run-once was reached (would be 0 if the pre-cycle breaker
+    // fired immediately on the inherited count).
+    expect(allowed[0]).toEqual(["FIX-NEW"]);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.scope).toEqual({ kind: "cards", cards: ["FIX-NEW"] });
+    // The persisted goal no longer carries the stale OLD-scope counters.
+    expect(goal.progress?.skippedCards ?? []).not.toContain("FIX-OLD");
+    expect(goal.progress?.zeroStreaks?.["FIX-OLD"]).toBeUndefined();
+  });
+
+  it("keeps the progress counters when the scope is UNCHANGED on resume", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-SAME](.roll/features/goal-mode/FIX-SAME/spec.md) | same scope | 📋 Todo |",
+    ]);
+    // Same scope (FIX-SAME) with a noProgressCycles already at the threshold:
+    // resuming must NOT reset it — the cross-session breaker must still fire.
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: cards
+  cards: [FIX-SAME]
+review: auto
+limits:
+status: paused
+usage:
+  cycles: 0
+  costUsd: 0
+progress:
+  noProgressCycles: 3
+createdAt: 2026-06-13T08:00:00Z
+updatedAt: 2026-06-13T08:30:00Z
+lastDecisionReason: no_progress_breaker
+`,
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_023_000 + calls,
+      nowIso: () => `2026-06-13T09:30:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-SAME", "--max-cycles", "10"], deps));
+
+    expect(r.code).toBe(0);
+    // The inherited breaker count fires on start (same scope) — NO cycle runs.
+    expect(calls).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("no_progress_breaker");
+  });
+});

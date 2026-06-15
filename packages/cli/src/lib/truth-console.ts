@@ -25,8 +25,9 @@ import type { AgentPanelRow } from "./agent-panel.js";
 import type { ReleasePanelVM } from "./release-panel.js";
 import type { ReleaseScopeVM, ScopeEpicGroup } from "./release-scope.js";
 import type { SkillsPanelVM } from "./skills-panel.js";
-import type { CastingVM, CastingRow } from "./casting.js";
+import type { CastingExecSlot, CastingVM, CastingRow } from "./casting.js";
 import type { CharterVM } from "./page-charter.js";
+import type { GitHooksVM } from "./git-hooks.js";
 
 export interface TruthConsoleBrand {
   /** Injected, never hardcoded (owner ruling): project name + slogan. */
@@ -120,6 +121,8 @@ export interface TruthConsoleInput {
    * Resolved by the pure `collectCasting()`; never a hardcoded array.
    */
   casting: CastingVM;
+  /** FIX-284 — project-scoped git hooks, sourced from core.hooksPath/.git hooks. */
+  gitHooks?: GitHooksVM;
   /**
    * US-DOSSIER-033 — the Charter PROJECT TAB: a markdown browser over the
    * project's own charter docs (docs/*.md, the per-epic plan .md files, and the
@@ -547,7 +550,40 @@ export function agentRow(ag: AgentPanelRow): string {
  * slot's em-dash renders faint so the honesty reads at a glance. A route-resolve
  * rationale, when present, rides a second muted line beneath the agent.
  */
-function castingRowHtml(cr: CastingRow): string {
+function castingAgentStyle(empty: boolean, mono: boolean): string {
+  return empty
+    ? `${MONO}font-size:12.5px;font-weight:600;color:${C.faint};`
+    : mono
+      ? `${MONO}font-size:12.5px;font-weight:700;color:${C.ink};`
+      : `font-size:12.5px;color:${C.sub};`;
+}
+
+function execSlotCard(slot: CastingExecSlot): string {
+  const border = slot.fallback ? `1px dashed ${C.line}` : `1px solid ${C.line}`;
+  const bg = slot.fallback ? "#fbfcfe" : C.card;
+  const agentStyle = castingAgentStyle(slot.empty, slot.mono);
+  const audit =
+    slot.audit !== ""
+      ? `<div style="${MONO}font-size:10px;color:${C.dim};margin-top:8px;line-height:1.35;">${esc(slot.audit)}</div>`
+      : "";
+  const ramp =
+    slot.fallback
+      ? `<div aria-hidden="true" style="${MONO}font-size:26px;line-height:1;color:${C.faint};">↩</div>`
+      : `<div aria-hidden="true" style="height:36px;display:flex;align-items:flex-end;gap:4px;">${slot.ramp
+          .map((v) => `<span data-ramp-bar="${esc(slot.key)}" style="display:block;width:8px;height:${10 + v * 7}px;border-radius:5px;background:${C.blue};opacity:${0.34 + v * 0.18};"></span>`)
+          .join("")}</div>`;
+  return (
+    `<article data-exec-slot="${esc(slot.key)}" data-ramp="${slot.ramp.length}" style="min-width:0;border:${border};border-radius:8px;background:${bg};padding:14px 14px 13px;display:flex;flex-direction:column;gap:11px;">` +
+    `<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;">${ramp}` +
+    `<span style="${MONO}font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:${C.faint};font-weight:600;">${bi(slot.key, slot.key)}</span></div>` +
+    `<div><div style="font-size:12px;color:${C.sub};font-weight:600;white-space:nowrap;">${bi(slot.roleEn, slot.roleZh)}</div>` +
+    `<div style="margin-top:5px;"><span style="${agentStyle}">${bi(esc(slot.agentEn), esc(slot.agentZh))}</span></div>${audit}</div>` +
+    `<div style="${MONO}font-size:10.5px;color:${C.faint};margin-top:auto;">${bi(slot.noteEn, slot.noteZh)}</div>` +
+    `</article>`
+  );
+}
+
+function scenarioRoleRow(cr: CastingRow): string {
   const agentStyle = cr.empty
     ? `${MONO}font-size:12.5px;font-weight:600;color:${C.faint};`
     : cr.mono
@@ -558,7 +594,7 @@ function castingRowHtml(cr: CastingRow): string {
       ? `<div style="${MONO}font-size:10px;color:${C.dim};margin-top:3px;white-space:normal;">${esc(cr.audit)}</div>`
       : "";
   return (
-    `<div data-casting="${esc(cr.key)}" style="display:grid;grid-template-columns:200px 1fr auto;align-items:center;gap:14px;padding:10px 18px;border-top:1px solid #f4f6f9;">` +
+    `<div data-scenario-role="${esc(cr.key)}" style="display:grid;grid-template-columns:140px 1fr auto;align-items:center;gap:14px;padding:10px 18px;border-top:1px solid #f4f6f9;">` +
     `<span style="font-size:12.5px;color:${C.sub};font-weight:600;white-space:nowrap;">${bi(cr.roleEn, cr.roleZh)}</span>` +
     `<span><span style="${agentStyle}">${bi(esc(cr.agentEn), esc(cr.agentZh))}</span>${audit}</span>` +
     `<span style="${MONO}font-size:10.5px;color:${C.faint};white-space:nowrap;">${bi(cr.noteEn, cr.noteZh)}</span>` +
@@ -573,6 +609,8 @@ function castingRowHtml(cr: CastingRow): string {
  * list` chip (the command that reconciles these slots).
  */
 function castingGrid(input: TruthConsoleInput): string {
+  const execSlots = input.casting.execSlots ?? [];
+  const scenarioRoles = input.casting.scenarioRoles ?? input.casting.rows.filter((r) => r.key === "peer" || r.key === "review-pr" || r.key === "spar" || r.key === "onboard");
   return (
     `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Casting", "角色分工")}</span>` +
@@ -584,7 +622,12 @@ function castingGrid(input: TruthConsoleInput): string {
     copyChip("roll agent list") +
     `</div>` +
     `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    input.casting.rows.map(castingRowHtml).join("") +
+    `<div data-exec-ladder="true" style="display:grid;grid-template-columns:repeat(3,1fr) 1.1fr;gap:12px;padding:16px 18px;background:#fbfcfe;">` +
+    execSlots.map(execSlotCard).join("") +
+    `</div>` +
+    `<div data-scenario-roles="true">` +
+    scenarioRoles.map(scenarioRoleRow).join("") +
+    `</div>` +
     `</section>`
   );
 }
@@ -611,30 +654,35 @@ function castingTab(input: TruthConsoleInput): string {
 }
 
 /**
- * US-DOSSIER-030 — the HOOKS-this-repo panel: every scheduled launchd lane this
- * repo runs, sourced from the SAME `collectLoopHeartbeat` output behind the
- * Overview heartbeat tile (`snapshot.loop.lanes`) — one number on every surface.
- * Distinct from the Overview tile: it enumerates ALL scheduled lanes (cycle loop
- * + nightly dream + any future lane) as scheduled-lane rows, not just the cycle
- * loop. Each row: name · running/off · mode · every · last · next.
+ * FIX-284 — the HOOKS-this-repo panel: project-scoped git hooks from the
+ * checkout's configured hooks path. Scheduled loop lanes belong to the heartbeat
+ * and cycle ledger; they are not commit hooks.
  */
 function hooksPanel(input: TruthConsoleInput): string {
-  const lanes = input.snapshot.loop?.lanes ?? [];
-  const runningN = lanes.filter((l) => l.running).length;
+  const hooks = input.gitHooks ?? { hooksPath: ".git/hooks", configured: false, rows: [] };
   return (
     `<div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Hooks · this repo", "钩子 · 本仓")}</span>` +
     `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi(
-      "scheduled launchd lanes wired into this checkout",
-      "本检出已挂的 launchd 调度 lane",
+      "git hooks wired into this checkout",
+      "本检出已配置的 git 钩子",
     )}</span>` +
     `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
-    `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;">${runningN}/${lanes.length} ${bi("scheduled", "已调度")}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;">${hooks.rows.length} ${bi("git hooks", "git 钩子")} · ${esc(hooks.hooksPath)}</span>` +
     `</div>` +
     `<section data-hooks="this-repo" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    (lanes.length > 0
-      ? lanes.map(heartbeatRow).join("")
-      : `<div style="padding:14px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no scheduled lanes on this machine", "本机没有已调度的 lane")}</div>`) +
+    (hooks.rows.length > 0
+      ? hooks.rows
+          .map(
+            (h) =>
+              `<div data-hook="${esc(h.name)}" style="display:grid;grid-template-columns:170px 1fr auto;align-items:center;gap:14px;padding:12px 18px;border-top:1px solid #f4f6f9;">` +
+              `<span style="${MONO}font-size:12.5px;color:${C.ink};font-weight:700;">${esc(h.name)}</span>` +
+              `<span style="font-size:12.5px;color:${C.sub};">${bi(esc(h.descEn), esc(h.descZh))}</span>` +
+              `<span style="${MONO}font-size:10.5px;color:${C.faint};white-space:nowrap;">${esc(h.path)}</span>` +
+              `</div>`,
+          )
+          .join("")
+      : `<div style="padding:14px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no configured git hooks in this checkout", "本检出没有已配置的 git 钩子")}</div>`) +
     `</section>`
   );
 }
@@ -1603,6 +1651,8 @@ a{color:${C.blue};}
 .cy-row summary:hover{background:#fbfcfe;}
 .cy-range.on{background:${C.blue};color:#fff;}
 .ag-row summary::-webkit-details-marker{display:none;}
+@media(max-width:720px){[data-exec-ladder="true"]{grid-template-columns:1fr 1fr!important;}}
+@media(max-width:520px){[data-exec-ladder="true"],[data-scenario-role],[data-hook]{grid-template-columns:1fr!important;}}
 .ag-row[open] .bl-caret{transform:rotate(90deg);}
 .ag-row summary:hover{background:#fbfcfe;}
 .sk-row summary::-webkit-details-marker{display:none;}

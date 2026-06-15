@@ -236,19 +236,25 @@ describe("FIX-204A — skill resolution + blind-agent refusal", () => {
       if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
       else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
     }
-    // FIX-232: the egress pre-check may block the cycle before the skill check.
-    // On a proxy-poisoned machine (Darwin + dead proxy endpoint), the egress
-    // check returns "egress blocked"; on a clean machine, the skill check fails
-    // with "refusing to spawn a blind agent". Both are valid early-exit paths.
+    // The network guard may block the cycle before the skill check. Older
+    // egress-only paths say "egress blocked"; the shared guard says the command
+    // needs the network. On a network-clear machine, the skill check fails with
+    // "refusing to spawn a blind agent". All are valid early-exit paths.
     const blockedByEgress = err.includes("egress blocked") || err.includes("egress_blocked");
+    const blockedByNetworkGuard = err.includes("needs the network") || err.includes("network unreachable");
     const blockedBySkill = err.includes("refusing to spawn a blind agent");
-    expect(blockedByEgress || blockedBySkill).toBe(true);
+    expect(blockedByEgress || blockedByNetworkGuard || blockedBySkill).toBe(true);
     const { readFileSync: rf, existsSync: ex } = await import("node:fs");
     const { readdirSync: rds } = await import("node:fs");
     const alertFiles = rds(rt).filter((f) => f.startsWith("ALERT-") && f.endsWith(".md"));
     expect(alertFiles.length).toBe(1);
     const alertBody = rf(join(rt, alertFiles[0]), "utf8");
-    const alertOk = alertBody.includes("SKILL.md not found") || alertBody.includes("egress blocked") || alertBody.includes("egress_blocked");
+    const alertOk =
+      alertBody.includes("SKILL.md not found") ||
+      alertBody.includes("egress blocked") ||
+      alertBody.includes("egress_blocked") ||
+      alertBody.includes("needs the network") ||
+      alertBody.includes("network unreachable");
     expect(alertOk).toBe(true);
     expect(ex(join(rt, "inner.lock"))).toBe(false);
     expect(ex(join(rt, "worktrees"))).toBe(false);

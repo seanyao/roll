@@ -1023,7 +1023,9 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("delivery", "Delivery", "交付", delivery, !hasDeliveryBody) +
     (corrections !== "" ? section("corrections", "Correction trace", "纠正留痕", corrections, false) : "") +
     section("retrospective", "Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
-    `<footer>Roll · <a href="spec.html">spec</a> · <a href="spec.md">spec.md (raw)</a></footer>\n` +
+    // FIX-286: footer keeps a SINGLE spec link (the readable rendered spec.html);
+    // the redundant `spec.md (raw)` link was dropped (owner: 两个链接指向几乎同一份东西,留一个).
+    `<footer>Roll · <a href="spec.html">spec</a></footer>\n` +
     // EVID-010: inline copy handler (display only — never executes the command).
     `<script>document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest(".copy-btn");if(!b||!navigator.clipboard)return;var t=b.getAttribute("data-copy")||"";navigator.clipboard.writeText(t).then(function(){b.classList.add("copied");setTimeout(function(){b.classList.remove("copied")},1200);}).catch(function(){});});</script>\n` +
     `</body>\n</html>\n`

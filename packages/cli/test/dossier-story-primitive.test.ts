@@ -39,6 +39,14 @@ describe("renderStoryDossier — US-DOSSIER-003 full context entry", () => {
     // the masthead kv carries a spec.md link
     expect(html.split("</div>\n</div>")[0]).toContain('href="spec.html"');
   });
+  it("FIX-286: footer keeps a SINGLE spec link (rendered spec.html), no redundant spec.md (raw)", () => {
+    const footer = html.match(/<footer>[\s\S]*?<\/footer>/)?.[0] ?? "";
+    expect(footer).not.toBe("");
+    expect(footer).toContain('<a href="spec.html">spec</a>');
+    expect(footer).not.toContain("spec.md (raw)"); // the redundant raw link is gone
+    expect(footer).not.toContain('href="spec.md"');
+    expect((footer.match(/<a /g) ?? []).length).toBe(1); // exactly one link in the footer
+  });
   it("falls back to wish, then empty, when no narrative", () => {
     const noNarr = renderStoryDossier({ ...base, narrative: undefined, wish: "退回的愿望" });
     expect(noNarr).toContain("退回的愿望");

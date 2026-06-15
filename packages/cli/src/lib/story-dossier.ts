@@ -2197,5 +2197,10 @@ function statDir(p: string): boolean {
   return statSync(p).isFile();
 }
 function execGit(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8", timeout: 10_000 });
+  // FIX-327: ignore git's stderr. In a non-git dir (a test fixture's temp dir,
+  // or a project that gitignores .roll) git prints "fatal: not a git repository"
+  // to stderr. The caller already treats a throw as "no facts" (returns null),
+  // but the leaked stderr polluted captured test output that agents attach as
+  // inline AC evidence — a passing dossier run showed 52 scary "fatal:" lines.
+  return execFileSync("git", args, { cwd, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] });
 }

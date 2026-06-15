@@ -156,24 +156,32 @@ export async function runPairing(
       return { status: "none-available" };
     }
 
-    const peer = candidates[0] as string;
     const diff = await deps.diff(worktreeCwd);
     // empty diff → nothing to review; don't waste a peer or emit a selected event (pi pair-review).
     if (diff.trim() === "") return { status: "not-required" };
-    deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage, ts: deps.now() });
 
-    const review = await deps.reviewPeer(peer, diff, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    if (review === null) return { status: "timeout", peer }; // non-blocking: move on
-
-    const path = evidencePath(runtimeDir, cycleId, stage);
-    mkdirSync(join(runtimeDir, "peer"), { recursive: true });
-    writeFileSync(
-      path,
-      JSON.stringify({ cycleId, workingAgent, peer, stage, ...review }, null, 2),
-      "utf8",
-    );
-    deps.event({ type: "pair:verdict", cycleId, peer, verdict: review.verdict, findings: review.findings.length, cost: review.cost, stage, ts: deps.now() });
-    return { status: "reviewed", peer, verdict: review.verdict };
+    // FIX-331: rotate through ranked candidates so one peer's transient unavailability (claude 5h limit / kimi cold-start timeout) doesn't sink the consult — upholds FIX-293 (still a real hetero verdict; whole pool failing still blocks).
+    let lastTimeoutPeer: string | undefined;
+    for (const candidate of candidates) {
+      const peer = candidate as string;
+      deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage, ts: deps.now() });
+      const review = await deps.reviewPeer(peer, diff, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      if (review === null) {
+        lastTimeoutPeer = peer; // non-blocking: rotate to the next candidate
+        continue;
+      }
+      const path = evidencePath(runtimeDir, cycleId, stage);
+      mkdirSync(join(runtimeDir, "peer"), { recursive: true });
+      writeFileSync(
+        path,
+        JSON.stringify({ cycleId, workingAgent, peer, stage, ...review }, null, 2),
+        "utf8",
+      );
+      deps.event({ type: "pair:verdict", cycleId, peer, verdict: review.verdict, findings: review.findings.length, cost: review.cost, stage, ts: deps.now() });
+      return { status: "reviewed", peer, verdict: review.verdict };
+    }
+    // Whole candidate pool failed (timeout/error) → block (no real hetero verdict).
+    return lastTimeoutPeer === undefined ? { status: "timeout" } : { status: "timeout", peer: lastTimeoutPeer };
   } catch {
     return { status: "error" }; // never throw — pairing must not fail the cycle
   }
@@ -262,37 +270,46 @@ export async function runScorePairing(
       return { status: "none-available" };
     }
 
-    const peer = candidates[0] as string;
-    deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", ts: deps.now() });
+    // FIX-331 (score stage): rotate through the ranked hetero candidates so a single
+    // scorer's transient unavailability (e.g. kimi cold-start >120s timeout) doesn't
+    // force the self-score fallback when other hetero scorers (pi/claude/…) are ready.
+    // Self-score remains the FALLBACK (US-PAIR-009) ONLY when the WHOLE pool fails.
+    let lastTimeoutPeer: string | undefined;
+    for (const candidate of candidates) {
+      const peer = candidate as string;
+      deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", ts: deps.now() });
 
-    const scored = await deps.scorePeer(peer, summary, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    if (scored === null) return { status: "timeout", peer }; // non-blocking: self-score stands
+      const scored = await deps.scorePeer(peer, summary, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      if (scored === null) { lastTimeoutPeer = peer; continue; } // this scorer flaked — rotate to the next
 
-    // Note first (the writer is the validator): a bad peer payload throws here
-    // and leaves NOTHING on disk — no evidence, no event, status "error".
-    const note = (deps.writeNote ?? writeSelfScoreNote)(projectDir, {
-      skill,
-      story: storyId,
-      score: scored.score,
-      verdict: scored.verdict,
-      rationale: scored.rationale,
-      scoredBy: peer,
-      scoring: "pair",
-    });
+      // Note first (the writer is the validator): a bad peer payload throws here
+      // and leaves NOTHING on disk — no evidence, no event, status "error".
+      const note = (deps.writeNote ?? writeSelfScoreNote)(projectDir, {
+        skill,
+        story: storyId,
+        score: scored.score,
+        verdict: scored.verdict,
+        rationale: scored.rationale,
+        scoredBy: peer,
+        scoring: "pair",
+      });
 
-    try {
-      const path = evidencePath(runtimeDir, cycleId, "score");
-      mkdirSync(join(runtimeDir, "peer"), { recursive: true });
-      writeFileSync(
-        path,
-        JSON.stringify({ cycleId, workingAgent, peer, stage: "score", score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost }, null, 2),
-        "utf8",
-      );
-      deps.event({ type: "pair:score", cycleId, peer, score: scored.score, verdict: scored.verdict, cost: scored.cost, stage: "score", ts: deps.now() });
-    } catch {
-      /* evidence/event are auxiliaries — the note is the product */
+      try {
+        const path = evidencePath(runtimeDir, cycleId, "score");
+        mkdirSync(join(runtimeDir, "peer"), { recursive: true });
+        writeFileSync(
+          path,
+          JSON.stringify({ cycleId, workingAgent, peer, stage: "score", score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost }, null, 2),
+          "utf8",
+        );
+        deps.event({ type: "pair:score", cycleId, peer, score: scored.score, verdict: scored.verdict, cost: scored.cost, stage: "score", ts: deps.now() });
+      } catch {
+        /* evidence/event are auxiliaries — the note is the product */
+      }
+      return { status: "scored", peer, score: scored.score, notePath: note.path };
     }
-    return { status: "scored", peer, score: scored.score, notePath: note.path };
+    // Whole scorer pool flaked (timeout/error) → self-score stands (US-PAIR-009 fallback).
+    return lastTimeoutPeer === undefined ? { status: "timeout" } : { status: "timeout", peer: lastTimeoutPeer };
   } catch {
     return { status: "error" }; // never throw — scoring must not fail the cycle
   }
@@ -388,33 +405,53 @@ export async function retryPeerConsult(
     const distinct = deps.installed
       .map(canonicalAgentName)
       .filter((a, i, arr) => arr.indexOf(a) === i);
-    // (1) Heterogeneous peer PREFERRED; (2) FALLBACK to the working agent's own
-    // canonical type — reviewPeer spawns a fresh, separate-session instance of it
-    // (NEVER the builder's session), so a single-agent-type env is not permanently
-    // blocked. peer === working here is a different process, not self-review.
-    const heterogeneous = distinct.filter((a) => a !== working && isHeterogeneous(a, working))[0];
-    const peer = heterogeneous ?? working;
-    const sameTypeFallback = heterogeneous === undefined;
+    // FIX-331 (+ codex peer-review): rotate through EVERY heterogeneous peer so one
+    // peer's transient unavailability (claude 5h limit / kimi cold-start timeout)
+    // doesn't sink the consult. Upholds FIX-293's HARD gate:
+    //   • heterogeneous peers PREFERRED — when ANY exist we rotate through them
+    //     ONLY and BLOCK if they all fail; a wholly-failing hetero pool must NOT
+    //     degrade to a same-type / self review (that would weaken the gate).
+    //   • the same-type SEPARATE-SESSION fallback fires ONLY when zero hetero peers
+    //     are installed (single-vendor env — FIX-293's "not permanently blocked"):
+    //     still a fresh distinct subprocess, never the builder's own session.
+    const heteroPeers = distinct.filter((a) => a !== working && isHeterogeneous(a, working));
+    const tryOrder: { peer: string; sameTypeFallback: boolean }[] =
+      heteroPeers.length > 0
+        ? heteroPeers.map((p) => ({ peer: p, sameTypeFallback: false }))
+        : working !== ""
+          ? [{ peer: working, sameTypeFallback: true }]
+          : [];
     // The only true "no peer to consult" case: we don't even know the working
     // agent's type (no installed agent AND no working-agent name) — there is
     // nothing to spawn a separate session of. This is now rare (it is NOT "only
     // one vendor installed"); audited as a fail-loud absence.
-    if (peer === "") {
+    if (tryOrder.length === 0) {
       deps.event({ type: "pair:none-available", cycleId, stage: "code", reason: "peer-gate retry: no peer could be consulted (no agent to spawn a separate-session review)", ts: deps.now() });
       return { status: "none-available" };
     }
     const diff = await deps.diff(worktreeCwd);
     if (diff.trim() === "") return { status: "empty" };
-    deps.event({ type: "pair:selected", cycleId, workingAgent: working, peer, stage: "code", ts: deps.now() });
 
-    const review = await deps.reviewPeer(peer, diff, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    if (review === null) return { status: "timeout", peer, sameTypeFallback }; // flaky peer — stays blocked, no death-spiral
-
-    const path = evidencePath(runtimeDir, cycleId, "code");
-    mkdirSync(join(runtimeDir, "peer"), { recursive: true });
-    writeFileSync(path, JSON.stringify({ cycleId, workingAgent: working, peer, stage: "code", sameTypeFallback, ...review }, null, 2), "utf8");
-    deps.event({ type: "pair:verdict", cycleId, peer, verdict: review.verdict, findings: review.findings.length, cost: review.cost, stage: "code", ts: deps.now() });
-    return { status: "reviewed", peer, sameTypeFallback };
+    let lastPeer: string | undefined;
+    let lastSameType = false;
+    for (const { peer, sameTypeFallback } of tryOrder) {
+      deps.event({ type: "pair:selected", cycleId, workingAgent: working, peer, stage: "code", ts: deps.now() });
+      const review = await deps.reviewPeer(peer, diff, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      if (review === null) {
+        lastPeer = peer; // flaky/unavailable peer — rotate to the next in the ordered pool
+        lastSameType = sameTypeFallback;
+        continue;
+      }
+      const path = evidencePath(runtimeDir, cycleId, "code");
+      mkdirSync(join(runtimeDir, "peer"), { recursive: true });
+      writeFileSync(path, JSON.stringify({ cycleId, workingAgent: working, peer, stage: "code", sameTypeFallback, ...review }, null, 2), "utf8");
+      deps.event({ type: "pair:verdict", cycleId, peer, verdict: review.verdict, findings: review.findings.length, cost: review.cost, stage: "code", ts: deps.now() });
+      return { status: "reviewed", peer, sameTypeFallback };
+    }
+    // Whole ordered pool failed (timeout/error) → stays blocked, no death-spiral.
+    return lastPeer === undefined
+      ? { status: "timeout", sameTypeFallback: lastSameType }
+      : { status: "timeout", peer: lastPeer, sameTypeFallback: lastSameType };
   } catch {
     return { status: "error" }; // never throw — the retry is a rescue, not a cycle killer
   }

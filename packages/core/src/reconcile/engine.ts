@@ -384,7 +384,13 @@ export function latestDeliveringCycle(
     const sid = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
     if (sid !== storyId) continue;
     const status = typeof row.status === "string" ? row.status : "";
-    if (status !== "done" && status !== "built" && status !== "merged") continue;
+    // FIX-322: include "published" — a cycle that opened a PR (publish-ok, merge
+    // pending) IS a delivering cycle whose branch is on the remote. Excluding it
+    // made a story whose only delivering cycle rested at `published` look like a
+    // dead claim → preflight flipped 🔨→📋 Todo → the card was re-picked and
+    // re-delivered (duplicate) before merge-backfill stamped it merged. Aligns
+    // with BACKFILL_CANDIDATE_STATUSES (which already includes "published").
+    if (status !== "done" && status !== "built" && status !== "merged" && status !== "published") continue;
     const cid = typeof row.cycle_id === "string" ? row.cycle_id : "";
     if (cid !== "") found = cid;
   }

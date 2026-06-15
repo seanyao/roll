@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 
-export type CycleLedgerVerdict = "delivered" | "reverted" | "failed" | "blocked" | "idle" | "unknown";
+export type CycleLedgerVerdict = "delivered" | "pending_merge" | "reverted" | "failed" | "blocked" | "idle" | "unknown";
 
 export interface CycleTapeSegment {
   key: "cycle" | "story" | "build" | "peer" | "ci" | "pr" | "end";
@@ -39,7 +39,20 @@ export interface CycleLedgerRow {
 /** The CLI's verdict vocabulary (AC4): delivered / reverted / failed / blocked. */
 export function ledgerVerdict(status: string, outcome: string): CycleLedgerVerdict {
   if (status === "reverted") return "reverted";
-  if (outcome === "delivered" || outcome === "published_pending_merge" || status === "done" || status === "merged") return "delivered";
+  // FIX-322: delivered ≡ MERGED only (done≡merged). The merge-backfill stamps
+  // status=merged / outcome=delivered on a gh-confirmed merge; until then a cycle
+  // that opened a PR is IN-FLIGHT (pending_merge), NOT delivered. Labeling
+  // published as delivered made an open, unmerged PR count as a delivery — and
+  // showed two "delivered" rows for one card re-delivered across the merge window.
+  if (status === "merged" || outcome === "delivered") return "delivered";
+  if (
+    outcome === "published_pending_merge" ||
+    status === "published" ||
+    status === "built" ||
+    status === "done"
+  ) {
+    return "pending_merge";
+  }
   if (outcome === "blocked" || status === "blocked") return "blocked";
   if (outcome === "idle_no_work" || status === "idle") return "idle";
   if (

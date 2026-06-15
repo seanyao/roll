@@ -29,6 +29,20 @@ describe("ledgerVerdict — AC4: the CLI's vocabulary", () => {
     expect(ledgerVerdict("idle", "idle_no_work")).toBe("idle");
     expect(ledgerVerdict("", "")).toBe("unknown");
   });
+
+  it("FIX-322: published (PR open, not merged) is pending_merge, NOT delivered (done≡merged)", () => {
+    expect(ledgerVerdict("published", "published_pending_merge")).toBe("pending_merge");
+    expect(ledgerVerdict("published", "")).toBe("pending_merge");
+    expect(ledgerVerdict("built", "")).toBe("pending_merge");
+    expect(ledgerVerdict("done", "")).toBe("pending_merge"); // un-backfilled done = not yet merged
+    expect(ledgerVerdict("merged", "delivered")).toBe("delivered"); // only a real merge is delivered
+    expect(ledgerVerdict("", "delivered")).toBe("delivered");
+  });
+
+  it("FIX-322: one card with a published row + a merged row → exactly one delivered, one pending_merge (no double-delivered)", () => {
+    expect(ledgerVerdict("published", "published_pending_merge")).toBe("pending_merge");
+    expect(ledgerVerdict("merged", "delivered")).toBe("delivered");
+  });
 });
 
 describe("collectCycleLedger", () => {

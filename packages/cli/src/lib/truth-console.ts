@@ -1491,7 +1491,7 @@ export const CONSOLE_SCRIPT = `<script>
 export const SHELL_CSS = `
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
-body{background:${C.bg};color:${C.body};font-family:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;}
+body{background:${C.bg};color:${C.body};font:15px/1.7 "IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
 @keyframes beat{0%{box-shadow:0 0 0 0 rgba(23,138,82,.5);}70%{box-shadow:0 0 0 8px rgba(23,138,82,0);}100%{box-shadow:0 0 0 0 rgba(23,138,82,0);}}
 ::selection{background:rgba(45,84,232,.16);}
 html[data-lang="en"] .lang-zh{display:none;}
@@ -1509,6 +1509,12 @@ html:not([data-lang]) .lang-zh{display:none;}
  *  US-DOSSIER-039: re-exports core's `FONT_LINKS` so the console and the chrome
  *  pages load the SAME IBM Plex faces from ONE source — no duplicated link tag. */
 export const FONT_LINKS = CORE_FONT_LINKS;
+
+/** FIX-287 — the machine-global pages use the SAME masthead scale as the
+ * console Charter tab (`index.html#charter`): 28px h1 and 14.5px lede. */
+export const MACHINE_PAGE_HEADER_STYLE = "padding:30px 0 4px;";
+export const MACHINE_PAGE_H1_STYLE = `margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};`;
+export const MACHINE_PAGE_LEDE_STYLE = `margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};`;
 
 /**
  * US-DOSSIER-027 — the sticky dark top bar: the stable shell across every
@@ -1721,10 +1727,10 @@ export function renderMachineStubPage(input: MachineStubInput): string {
     `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
     header +
     `<main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;">` +
-    `<div style="padding:34px 0 8px;">` +
+    `<div style="${MACHINE_PAGE_HEADER_STYLE}">` +
     kicker(bi("Machine layer", "机器层")) +
-    `<h1 style="margin:10px 0 0;font-size:33px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi(meta.en, meta.zh)}</h1>` +
-    `<p style="margin:12px 0 0;max-width:660px;font-size:15.5px;line-height:1.6;color:${C.sub};">${bi(note.en, note.zh)}</p></div>` +
+    `<h1 style="${MACHINE_PAGE_H1_STYLE}">${bi(meta.en, meta.zh)}</h1>` +
+    `<p style="${MACHINE_PAGE_LEDE_STYLE}">${bi(note.en, note.zh)}</p></div>` +
     `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:28px 24px;margin:18px 0;color:${C.faint};font-size:13.5px;">` +
     bi("This page is being built.", "本页建设中。") +
     `</section>` +

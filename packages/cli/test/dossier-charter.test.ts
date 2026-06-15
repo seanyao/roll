@@ -18,8 +18,11 @@ import { serializeTruthSnapshot, type TruthSnapshot } from "@roll/spec";
 import { renderTruthConsole } from "../src/lib/truth-console.js";
 import { collectCharter, type CharterDeps, type CharterVM } from "../src/lib/page-charter.js";
 import { collectAbout, renderAboutPage } from "../src/lib/page-about.js";
+import { renderAgentsMachinePage } from "../src/lib/page-agents.js";
 import { collectConventions, renderConventionsPage } from "../src/lib/page-conventions.js";
+import { renderSkillsPage } from "../src/lib/page-skills.js";
 import type { AgentPanelRow } from "../src/lib/agent-panel.js";
+import type { SkillsPanelVM } from "../src/lib/skills-panel.js";
 
 const SNAP: TruthSnapshot = {
   generatedAt: "2026-06-13T00:00:00Z",
@@ -132,6 +135,64 @@ const AGENTS: AgentPanelRow[] = [
   { name: "kimi", display: "kimi", runner: "Kimi CLI", version: "—", installed: true, cycles72h: 1, costUsd72h: 0, files: [], syncStale: true, setupCmd: "roll setup -f kimi" },
   // codex / agy absent — not installed on this machine.
 ];
+
+const SKILLS_VM: SkillsPanelVM = {
+  summary: { skills: 1, violations: 0, hubLines: 20, auditRan: true },
+  groups: [
+    {
+      key: "delivery",
+      rows: [
+        {
+          name: "roll-build",
+          group: "delivery",
+          hubLines: 20,
+          description: "Load when shipping a story",
+          violations: [],
+          auditKnown: true,
+          hasGotchas: true,
+          hasLoadTrigger: true,
+          routeCases: { positive: 1, negative: 1 },
+          usage: 1,
+          files: [{ path: "SKILL.md", lines: 20, dir: false }],
+          dirPath: "/repo/skills/roll-build",
+          hubText: "# Roll Build\n",
+        },
+      ],
+    },
+  ],
+};
+
+describe("machine pages typography — FIX-287", () => {
+  const convVM = collectConventions({
+    readConfig: () => "",
+    agents: AGENTS,
+    readDoc: () => undefined,
+    render: mdTag,
+  });
+  const pages = [
+    ["agents", renderAgentsMachinePage({ brand: BRAND, snapshot: SNAP, agents: AGENTS })],
+    ["skills", renderSkillsPage({ brand: BRAND, snapshot: SNAP, skills: SKILLS_VM })],
+    ["conventions", renderConventionsPage({ brand: BRAND, snapshot: SNAP, vm: convVM })],
+    ["about", renderAboutPage({ brand: BRAND, snapshot: SNAP, vm: collectAbout({ docExists: () => true }) })],
+  ] as const;
+
+  it("aligns all machine mastheads to the console Charter tab scale", () => {
+    for (const [name, html] of pages) {
+      expect(html, name).toContain("font-size:28px;line-height:1.1");
+      expect(html, name).toContain("font-size:14.5px;line-height:1.55");
+      expect(html, name).not.toContain("font-size:33px;line-height:1.1");
+      expect(html, name).not.toContain("font-size:30px;line-height:1.15");
+      expect(html, name).not.toContain("font-size:15.5px;line-height:1.6");
+    }
+  });
+
+  it("loads IBM Plex fonts the same way on all four machine pages", () => {
+    for (const [name, html] of pages) {
+      expect(html, name).toContain("fonts.googleapis.com");
+      expect(html, name).toContain("IBM+Plex+Sans");
+    }
+  });
+});
 
 describe("collectConventions — US-DOSSIER-033 (pure)", () => {
   const config: Record<string, string> = {
@@ -262,15 +323,17 @@ describe("About machine page — US-DOSSIER-041 (structured charter)", () => {
     expect(html).toContain('data-set-lang="zh"'); // lang toggle rides along
   });
 
-  it("AC3: cool design, bilingual EN/中 (separate lines), self-contained — NO external <link>", () => {
+  it("AC3: cool design, bilingual EN/中 (separate lines), shared IBM Plex font links", () => {
     // the injected brand rides the top bar (never hardcoded)
     expect(html).toContain(">roll<");
     expect(html).toContain("It just works.");
     // bilingual masthead — EN and 中 each present (rendered on separate lines via bi())
     expect(html).toContain("How roll works");
     expect(html).toContain("roll 怎么运转");
-    // self-contained single file — no external font/style link
-    expect(html).not.toContain("<link");
+    // FIX-287: About uses the same IBM Plex FONT_LINKS path as the other
+    // machine pages, so the rendered face matches the console.
+    expect(html).toContain("fonts.googleapis.com");
+    expect(html).toContain("IBM+Plex+Sans");
     expect(html).not.toContain("fetch(");
     expect(html).not.toContain("undefined");
   });

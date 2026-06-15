@@ -46,6 +46,7 @@ import {
   type Tier,
   classifyComplexity,
   decideClaimReconcile,
+  hasMergedDelivery,
   latestDeliveringCycle,
   parseClaimedIdsFromBacklog,
   parseBacklog,
@@ -476,9 +477,20 @@ export async function executeCommand(
       //                          safety net for a claim that never resolves).
       try {
         const rows = ports.backlog.read(ports.repoCwd) as Array<{ id: string; status?: string }>;
+        const runRows = readRunsRows(ports.paths.runsPath);
+        // FIX-323: a 📋 Todo card whose delivery already MERGED is Done — its
+        // deliverable is on main (a prior gave_up reset the status text but not
+        // the merge). Flip it here (cheap, local, no gh probe) so the picker
+        // pool stays honest and the merged zombie is never re-picked. This
+        // complements the picker's own hasMergedDelivery guard (belt-and-suspenders).
+        for (const r of rows) {
+          if (!(r.status ?? "").includes(STATUS_MARKER.todo)) continue;
+          if (hasMergedDelivery(runRows, r.id)) {
+            ports.backlog.markStatus?.(ports.repoCwd, r.id, STATUS_MARKER.done);
+          }
+        }
         const claims = rows.filter((r) => (r.status ?? "").includes("🔨"));
         if (claims.length > 0) {
-          const runRows = readRunsRows(ports.paths.runsPath);
           const slug = await ports.github.repoSlug(ports.repoCwd).catch(() => undefined);
           for (const claim of claims) {
             const cycle = latestDeliveringCycle(runRows, claim.id);
@@ -582,7 +594,15 @@ export async function executeCommand(
       // .roll/, so the worktree has no backlog at all — a worktree read picks
       // nothing and the loop silently idles.
       const items = ports.backlog.read(ports.repoCwd);
-      const story = pickStory(items as never);
+      // FIX-323: feed the picker the merge truth from runs.jsonl. A card whose
+      // deliverable already MERGED is Done — even if its backlog row was reset to
+      // 📋 Todo by a prior gave_up cycle (the agent found the work on main, made
+      // no commit → gave_up → status reset → re-pick → burn). The picker reads
+      // only backlog text, so without this it re-picks the merged zombie forever.
+      const pickRunRows = readRunsRows(ports.paths.runsPath);
+      const story = pickStory(items as never, {
+        hasMergedDelivery: (id) => hasMergedDelivery(pickRunRows, id),
+      });
       if (story === undefined) return { event: { type: "no_story" } };
       // Hook 3 (pre-spawn spec-truth check): the picker only returns a card whose
       // backlog row is NOT ✅ Done and that has no open PR (so by construction it

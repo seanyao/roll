@@ -11,6 +11,7 @@ import {
   cycleEndForPick,
   decideClaimReconcile,
   detectStuckStories,
+  hasMergedDelivery,
   inProgressStories,
   latestDeliveringCycle,
   reconcileBranchName,
@@ -236,6 +237,36 @@ describe("latestDeliveringCycle — map a 🔨 story to the cycle that delivered
     // Before FIX-322 this returned undefined → preflight flipped 🔨→Todo → the
     // card was re-picked and re-delivered (duplicate) before merge-backfill.
     expect(latestDeliveringCycle([{ story_id: "US-7", cycle_id: "c-pub", status: "published" }], "US-7")).toBe("c-pub");
+  });
+});
+
+describe("hasMergedDelivery — FIX-323 zombie re-pick guard signal", () => {
+  it("true when a row is status=merged (backfill stamped the landed PR)", () => {
+    const rows: ReconcileRunRow[] = [
+      { story_id: "FIX-284", cycle_id: "c1", status: "published" },
+      { story_id: "FIX-284", cycle_id: "c2", status: "merged", outcome: "delivered" },
+    ];
+    expect(hasMergedDelivery(rows, "FIX-284")).toBe(true);
+  });
+
+  it("true on the legacy outcome=delivered even without status=merged", () => {
+    expect(hasMergedDelivery([{ story_id: "US-1", cycle_id: "c", status: "done", outcome: "delivered" }], "US-1")).toBe(true);
+  });
+
+  it("STRICTER than latestDeliveringCycle: a still-open `published` cycle is NOT a merged delivery", () => {
+    const rows: ReconcileRunRow[] = [{ story_id: "US-7", cycle_id: "c-pub", status: "published" }];
+    expect(latestDeliveringCycle(rows, "US-7")).toBe("c-pub"); // delivering…
+    expect(hasMergedDelivery(rows, "US-7")).toBe(false); // …but not merged
+  });
+
+  it("false for built / failed / gave_up rows and for an unknown story", () => {
+    const rows: ReconcileRunRow[] = [
+      { story_id: "US-1", cycle_id: "c1", status: "built" },
+      { story_id: "US-1", cycle_id: "c2", status: "gave_up" },
+      { story_id: "US-1", cycle_id: "c3", status: "failed" },
+    ];
+    expect(hasMergedDelivery(rows, "US-1")).toBe(false);
+    expect(hasMergedDelivery(rows, "US-404")).toBe(false);
   });
 });
 

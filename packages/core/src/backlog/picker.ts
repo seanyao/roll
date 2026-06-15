@@ -41,6 +41,15 @@ export interface PickOptions {
    * a duplicate PR — FIX-141). Optional; defaults to "no open PRs".
    */
   hasOpenPr?: (id: string) => boolean;
+  /**
+   * True iff this story already has a MERGED delivery in runs.jsonl — its
+   * deliverable is on main, so it is Done and must NEVER be re-picked (FIX-323).
+   * The picker only reads backlog status text and is blind to delivery truth;
+   * a merged card that got reset to 📋 Todo (e.g. a prior cycle gave_up after
+   * finding the work already merged) would otherwise be re-picked every cycle,
+   * burning cost on a zombie. Optional; defaults to "no merged delivery".
+   */
+  hasMergedDelivery?: (id: string) => boolean;
 }
 
 /** First occurrence of a depends-on tag, mirroring the bash regex. */
@@ -77,6 +86,7 @@ export function parseDependsOn(desc: string): string[] {
  */
 export function pickStory(items: BacklogItem[], opts: PickOptions = {}): BacklogItem | undefined {
   const hasOpenPr = opts.hasOpenPr ?? (() => false);
+  const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
 
   // Done-ness index over the parsed items (bash re-greps the file per dep; here
   // we read the same parsed model). A dep is satisfied iff a row with that id
@@ -95,6 +105,10 @@ export function pickStory(items: BacklogItem[], opts: PickOptions = {}): Backlog
       if (!isDone(dep)) return false;
     }
     if (hasOpenPr(it.id)) return false;
+    // FIX-323: a card whose deliverable already MERGED is Done — never re-pick,
+    // even if its backlog status was (wrongly) reset to 📋 Todo. The picker is
+    // blind to delivery truth, so this guard is injected from runs.jsonl.
+    if (hasMergedDelivery(it.id)) return false;
     return true;
   };
 

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 修复
+
+- 机器页字体字号现在和项目控制台一致。(FIX-287) `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/FIX-287/latest/FIX-287-report.html -->
+
 ## v3.615.1 — 2026-06-15
 
 ### 修复

@@ -1764,9 +1764,11 @@ describe("US-DOSSIER-024 — per-AC evidence blocks", () => {
     // AC1's inline screenshot thumbnail renders BENEATH it (real-pixel proof)
     expect(html).toContain('class="ac-shot"');
     expect(html).toContain('<img src="latest/screenshots/page.png"');
-    // AC2's text evidence is an inline doc link beneath it
-    expect(html).toContain('class="ac-evlink ac-ev-doc"');
-    expect(html).toContain('href="latest/evidence/map.txt"');
+    // FIX-285: text evidence no longer renders as a click-through doc link.
+    // Ad-hoc render inputs with no hydrated body show an honest empty state.
+    expect(html).not.toContain('class="ac-evlink ac-ev-doc"');
+    expect(html).not.toContain('href="latest/evidence/map.txt"');
+    expect(html).toContain("Text evidence unavailable");
   });
 
   it("AC2: observable vs readonly class chip is labelled on each block", () => {
@@ -1847,6 +1849,47 @@ describe("US-DOSSIER-024 — per-AC evidence blocks", () => {
     // ROOT (`screenshots/x`) so the `<img>` on the story page resolves.
     expect(got.acRows?.[0]?.evidence).toEqual([{ kind: "screenshot", label: "render", href: "screenshots/render.png" }]);
     expect(got.screenshotFiles).toEqual(["latest/screenshots/render.png"]);
+  });
+
+  it("FIX-285: text evidence renders inline from the evidence file while screenshots stay thumbnails", () => {
+    const p = project();
+    const storyDir = join(p, ".roll", "features", "alpha", "US-AC-TEXT");
+    const runDir = join(storyDir, "2026-06-15T00-00-00");
+    mkdirSync(join(runDir, "evidence"), { recursive: true });
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "evidence", "vitest.txt"), "Vitest says <green> & stable\n");
+    writeFileSync(join(runDir, "screenshots", "page.png"), "PNGDATA");
+    symlinkSync(runDir, join(storyDir, "latest"));
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        {
+          ac: "US-AC-TEXT:AC1",
+          status: "readonly",
+          evidence: [
+            { kind: "text", label: "vitest output", textFile: "evidence/vitest.txt" },
+            { kind: "screenshot", label: "page", href: "screenshots/page.png" },
+          ],
+        },
+        {
+          ac: "US-AC-TEXT:AC2",
+          status: "readonly",
+          evidence: [{ kind: "text", label: "missing log", textFile: "evidence/missing.txt" }],
+        },
+      ]),
+    );
+
+    const input = collectStoryDossierInput(p, { id: "US-AC-TEXT", epic: "alpha", type: "US", delivered: true });
+    const html = renderStoryDossier(input);
+
+    expect(html).toContain('<details class="ac-text-evidence">');
+    expect(html).toContain("<summary>vitest output</summary>");
+    expect(html).toContain("Vitest says &lt;green&gt; &amp; stable");
+    expect(html).not.toContain('href="latest/evidence/vitest.txt"');
+    expect(html).toContain('class="ac-shot"');
+    expect(html).toContain('<img src="latest/screenshots/page.png"');
+    expect(html).toContain('class="ac-evidence-empty"');
+    expect(html).toContain("Text evidence unavailable");
   });
 });
 

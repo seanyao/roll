@@ -18,7 +18,7 @@ import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { type DeliveryLadder, parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join as joinPath } from "node:path";
+import { join as joinPath, resolve as resolvePath, sep } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { rowDelivered } from "./truth-adapter.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
@@ -30,12 +30,16 @@ const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** US-DOSSIER-024: one piece of inline evidence attached to an AC. `screenshot`
- *  is real-pixel proof (renders a thumbnail); `text` is a doc/contract link. */
+ *  is real-pixel proof (renders a thumbnail); `text` is inline file content. */
 export interface AcEvidence {
   kind: "screenshot" | "text" | "cast" | "video";
   label?: string;
   /** Relative href to the artifact (screenshot/cast/video or a text file). */
   href?: string;
+  /** FIX-285: story-page-safe text evidence body, read from the card folder. */
+  textContent?: string;
+  /** FIX-285: honest empty state when a text evidence file cannot be read. */
+  textError?: "missing";
 }
 
 /** US-DOSSIER-024: whether an AC is "observable" (visual/interactive UI — needs a
@@ -722,6 +726,12 @@ function section(phaseKey: string, en: string, zh: string, body: string, empty: 
  */
 function acEvidenceItemHtml(e: AcEvidence): string {
   const label = esc(e.label ?? e.href ?? e.kind);
+  if (e.kind === "text") {
+    if (e.textContent !== undefined) {
+      return `<details class="ac-text-evidence"><summary>${label}</summary><pre>${esc(e.textContent)}</pre></details>`;
+    }
+    return `<span class="ac-evidence-empty">${bi("Text evidence unavailable", "文本证据不可用")}${e.href !== undefined ? `: <code>${esc(e.href)}</code>` : ""}</span>`;
+  }
   if (e.kind === "screenshot" && e.href !== undefined) {
     return (
       `<a class="ac-shot" href="${esc(e.href)}" title="${label}">` +
@@ -930,6 +940,9 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.ac-shot { display:flex; flex-direction:column; gap:4px; width:160px; text-decoration:none; }\n` +
     `.ac-shot img { width:160px; height:96px; object-fit:cover; border:1px solid var(--line); border-radius:6px; background:#fff; display:block; }\n` +
     `.ac-shot-cap { font:10.5px/1.3 var(--mono); color:var(--muted); word-break:break-word; }\n` +
+    `.ac-text-evidence { flex:1 1 280px; min-width:min(100%,280px); border:1px solid var(--line); border-radius:6px; padding:7px 9px; background:color-mix(in srgb, var(--fg) 3%, transparent); }\n` +
+    `.ac-text-evidence summary { cursor:pointer; font:600 11.5px/1.5 var(--mono); color:var(--muted); }\n` +
+    `.ac-text-evidence pre { margin:7px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11.5px; line-height:1.5; }\n` +
     `.ac-evlink { display:inline-flex; align-items:center; gap:5px; font:11.5px/1.5 var(--mono); border:1px solid var(--line); border-radius:6px; padding:5px 9px; color:var(--muted); text-decoration:none; }\n` +
     `.ac-evlink.ac-ev-cast, .ac-evlink.ac-ev-video { color:#2d54e8; border-color:#2d54e855; }\n` +
     `.ac-evidence-empty { margin:9px 0 0; font-size:12px; color:#c77d12; }\n` +
@@ -1099,7 +1112,7 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
           // FIX-282: ac-map evidence hrefs are run-dir-relative (`../acceptance/x`);
           // the story page sits at the story root, so re-base before rendering or
           // every `<img>` resolves to the wrong parent dir (404).
-          const evidence = rebaseAcEvidenceToStoryRoot(parseAcEvidence(r.evidence));
+          const evidence = hydrateTextEvidence(dir, rebaseAcEvidenceToStoryRoot(parseAcEvidence(r.evidence)));
           return {
             ac: r.ac as string,
             status: r.status as string,
@@ -2156,6 +2169,24 @@ export function rebaseEvidenceHrefToStoryRoot(href: string): string {
  *  ac-map evidence list when rendering the STORY PAGE. */
 export function rebaseAcEvidenceToStoryRoot(ev: AcEvidence[]): AcEvidence[] {
   return ev.map((e) => (e.href !== undefined ? { ...e, href: rebaseEvidenceHrefToStoryRoot(e.href) } : e));
+}
+
+/** FIX-285 — text evidence is useful only when visible in the AC block. Read
+ * story-root-relative text refs from the card folder and keep missing/unreadable
+ * files as an honest empty state. Off-tree refs are not fetched. */
+function hydrateTextEvidence(storyDir: string, ev: AcEvidence[]): AcEvidence[] {
+  return ev.map((e) => {
+    if (e.kind !== "text" || e.href === undefined) return e;
+    if (/^[a-z]+:/i.test(e.href) || e.href.startsWith("/") || e.href.startsWith("#")) return { ...e, textError: "missing" };
+    const root = resolvePath(storyDir);
+    const target = resolvePath(storyDir, e.href);
+    if (target !== root && !target.startsWith(`${root}${sep}`)) return { ...e, textError: "missing" };
+    try {
+      return { ...e, textContent: readFile(target) };
+    } catch {
+      return { ...e, textError: "missing" };
+    }
+  });
 }
 
 // Thin fs/git seams (kept local so the renderer stays pure above).

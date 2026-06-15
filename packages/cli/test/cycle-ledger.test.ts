@@ -30,6 +30,12 @@ describe("ledgerVerdict — AC4: the CLI's vocabulary", () => {
     expect(ledgerVerdict("", "")).toBe("unknown");
   });
 
+  it("FIX-324: gave_up is a failure-to-deliver, never a dirty `unknown`", () => {
+    expect(ledgerVerdict("gave_up", "gave_up")).toBe("failed");
+    expect(ledgerVerdict("gave_up", "")).toBe("failed"); // status-only
+    expect(ledgerVerdict("", "gave_up")).toBe("failed"); // outcome-only
+  });
+
   it("FIX-322: published (PR open, not merged) is pending_merge, NOT delivered (done≡merged)", () => {
     expect(ledgerVerdict("published", "published_pending_merge")).toBe("pending_merge");
     expect(ledgerVerdict("published", "")).toBe("pending_merge");

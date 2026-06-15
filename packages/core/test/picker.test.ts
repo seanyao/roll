@@ -112,6 +112,25 @@ describe("pickStory — open-PR skip (injected predicate, FIX-141)", () => {
   });
 });
 
+describe("pickStory — merged-delivery skip (injected predicate, FIX-323)", () => {
+  it("skips a 📋 Todo card whose deliverable already MERGED (zombie re-pick guard)", () => {
+    // FIX-284 case: a prior gave_up reset the merged card to Todo; without the
+    // guard the picker re-picks it forever. With the guard it takes the next.
+    const items = [item("FIX-284", TODO), item("FIX-285", TODO)];
+    const pick = pickStory(items, { hasMergedDelivery: (id) => id === "FIX-284" });
+    expect(pick?.id).toBe("FIX-285");
+  });
+
+  it("returns undefined when the only Todo card has a merged delivery", () => {
+    const pick = pickStory([item("FIX-284", TODO)], { hasMergedDelivery: (id) => id === "FIX-284" });
+    expect(pick).toBeUndefined();
+  });
+
+  it("defaults to no merged deliveries when the predicate is omitted", () => {
+    expect(pickStory([item("FIX-284", TODO)])?.id).toBe("FIX-284");
+  });
+});
+
 describe("pickStory — annotated Todo gate is tolerant (FIX-301)", () => {
   it("picks an annotated Todo (marker + parenthetical text), not just a bare marker", () => {
     // FIX-284/285 carried `📋 Todo (...)`; an exact `=== "📋 Todo"` check dropped

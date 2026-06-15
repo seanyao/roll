@@ -397,6 +397,32 @@ export function latestDeliveringCycle(
   return found;
 }
 
+/**
+ * FIX-323 — true iff `storyId` has at least one MERGED delivery in `rows`.
+ *
+ * The signal is `status === "merged"` (stamped by merge-backfill when the
+ * delivery PR landed — see {@link reconcileMergeEvidence}) or the legacy
+ * `outcome === "delivered"`. A merged delivery means the deliverable is on main
+ * and the card is Done ≡ merged. This is STRICTER than
+ * {@link latestDeliveringCycle} (which also counts `published`/`built`
+ * in-flight cycles): only a TRULY-merged delivery may suppress re-pick, so a
+ * still-open delivery is never mistaken for done.
+ *
+ * Used by the picker (injected as `hasMergedDelivery`) and the preflight
+ * reconcile to keep a merged-but-mis-statused card (e.g. reset to 📋 Todo by a
+ * gave_up cycle) from being re-picked and re-burned forever.
+ */
+export function hasMergedDelivery(rows: readonly ReconcileRunRow[], storyId: string): boolean {
+  for (const row of rows) {
+    const sid = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
+    if (sid !== storyId) continue;
+    const status = typeof row.status === "string" ? row.status : "";
+    const outcome = typeof row.outcome === "string" ? row.outcome : "";
+    if (status === "merged" || outcome === "delivered") return true;
+  }
+  return false;
+}
+
 // ── 3. Resume-prior-work candidate lookup (RESUME-PRIOR-WORK hook) ────────────
 
 /**

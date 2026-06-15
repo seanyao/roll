@@ -345,6 +345,39 @@ function hasMachineCaptureSkip(worktreeCwd: string, storyId: string): boolean {
   });
 }
 
+/**
+ * FIX-309 (堵 284 洞①) — whether this delivery OWES a REAL web capture, i.e. an
+ * honest machine-skip can NO LONGER satisfy its visual floor. True iff the story
+ * is non-exempt (`storyRequiresScreenshot`) AND it DECLARED a `deliverable_url`
+ * (alias `screenshot_url`) — a concrete, technically-captureable web surface.
+ *
+ * The FIX-284 leak this closes: a card that DECLARED a deliverable surface but
+ * whose capture errored / was skipped (`{kind:"web",taken:false,skipped}`) used
+ * to pass via {@link hasMachineCaptureSkip} — "声明了 url 却从没真截也能过". Once a
+ * surface is declared, only a REAL capture (`taken:true`) discharges it; an
+ * honest-skip is reserved for "确实无可视面 + 记录化豁免" (an EXEMPT card, or a
+ * required card with NO declared web target — e.g. a TUI/terminal deliverable
+ * riding the separate terminal-capture lane).
+ */
+function owesRealWebCapture(worktreeCwd: string, storyId: string): boolean {
+  return storyRequiresScreenshot(worktreeCwd, storyId) && deliverableUrlForStory(worktreeCwd, storyId) !== null;
+}
+
+/**
+ * FIX-309 — a REAL, taken web capture is present in the evidence manifest
+ * (`{kind:"web",taken:true}`). This is the ONLY thing that discharges a card
+ * that {@link owesRealWebCapture}; a `taken:false` web skip never counts.
+ */
+function hasRealWebCapture(worktreeCwd: string, storyId: string): boolean {
+  const manifest = evidenceManifest(worktreeCwd, storyId);
+  if (manifest === null || !Array.isArray(manifest.captures)) return false;
+  return manifest.captures.some((raw) => {
+    if (typeof raw !== "object" || raw === null) return false;
+    const row = raw as Record<string, unknown>;
+    return row["kind"] === "web" && row["taken"] === true;
+  });
+}
+
 function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
   const entries = readAcMapEntries(worktreeCwd, storyId);
   if (entries === null) return { ok: true };
@@ -352,6 +385,13 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   if (pass.length === 0) return { ok: true };
   const missing = pass.filter((e) => !(e.evidence ?? []).some((ev) => ev.kind === "screenshot" && typeof ev.href === "string" && ev.href !== ""));
   if (missing.length === 0) return { ok: true };
+  // FIX-309 (堵 284 洞①): a declared-deliverable card may NOT excuse a missing
+  // screenshot via an honest-skip — it must carry a REAL web capture.
+  if (owesRealWebCapture(worktreeCwd, storyId)) {
+    if (hasRealWebCapture(worktreeCwd, storyId)) return { ok: true, reason: "real web capture present" };
+    const ids = missing.map((e) => e.ac ?? "?").join(", ");
+    return { ok: false, reason: `pass AC(s) lack screenshot evidence and the declared deliverable_url was never really captured (honest-skip does not satisfy a declared surface): ${ids}` };
+  }
   if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
   const ids = missing.map((e) => e.ac ?? "?").join(", ");
   return { ok: false, reason: `pass AC(s) lack screenshot evidence or machine capture skip: ${ids}` };
@@ -449,6 +489,13 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
     if (positiveWithEvidence === 0) return false;
     if (!passAcVisualFloor(worktreeCwd, storyId).ok) return false;
     if (storyRequiresScreenshot(worktreeCwd, storyId)) {
+      // FIX-309 (堵 284 洞①+②): a card that DECLARED a deliverable_url owes a
+      // REAL web capture — neither an honest-skip nor a bare `<figure class=shot>`
+      // in the HTML (which could be a self-referential dossier self-shot, the
+      // FIX-321 forgery shape) discharges it; only a recorded `taken:true` web
+      // capture does. A required card with NO declared surface (TUI / terminal
+      // lane) keeps the prior floor: a captured figure ref OR an honest skip.
+      if (owesRealWebCapture(worktreeCwd, storyId)) return hasRealWebCapture(worktreeCwd, storyId);
       return /<figure class="shot\b|href="screenshots\/|src="screenshots\//i.test(html) || hasMachineCaptureSkip(worktreeCwd, storyId);
     }
     return true;

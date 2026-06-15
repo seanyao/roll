@@ -575,3 +575,169 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
     expect(alerts).toHaveLength(0);
   });
 });
+
+/**
+ * FIX-309 — 堵 284 两洞 (the declared-deliverable enforcement).
+ *
+ * The two leaks FIX-284 exposed:
+ *   ① a card that DECLARED a `deliverable_url` (a concrete, technically-captureable
+ *     web surface) but whose capture was an honest-skip / empty shell still passed
+ *     the visual floor (`hasMachineCaptureSkip` excused it) — "声明了 url 却从没真截也能过";
+ *   ② a bare `<figure class="shot">` (a self-referential dossier self-shot, the
+ *     FIX-321 forgery shape) passed `verificationReportHasContent` even though no
+ *     REAL capture of the declared surface ever happened — "dossier 自拍空壳也能过".
+ *
+ * The fix: once a non-exempt card DECLARES a deliverable_url, ONLY a recorded
+ * `{kind:"web",taken:true}` capture discharges its visual floor. honest-skip stays
+ * valid ONLY for "确实无可视面 + 记录化豁免": an EXEMPT card, or a required card with
+ * NO declared web target (a TUI/terminal deliverable on the terminal-capture lane).
+ */
+describe("FIX-309 — declared deliverable_url demands a REAL capture (堵 284 两洞)", () => {
+  function withSpec(storyId: string, specText: string): string {
+    const wt = tmp("fix309-deliv");
+    const dir = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), specText);
+    return wt;
+  }
+  function addSpec(wt: string, storyId: string, specText: string): void {
+    writeFileSync(join(wt, ".roll", "features", "uncategorized", storyId, "spec.md"), specText);
+  }
+
+  it("(a) DEFAULT: a no-keyword card with NO declared surface still REQUIRES a screenshot", () => {
+    const wt = withSpec("FIX-309A", "# FIX-309A — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting layout reworked\n");
+    expect(storyRequiresScreenshot(wt, "FIX-309A")).toBe(true);
+    expect(webCaptureTargetForStory(wt, "FIX-309A")).toBeNull(); // no declared surface → terminal/honest-skip lane
+  });
+
+  it("(b) EXEMPTION with a reason passes with text-only evidence (no capture owed)", () => {
+    const wt = withReport("FIX-309B", 2000, '<div class="ev ev-text">text proof only</div>');
+    addSpec(
+      wt,
+      "FIX-309B",
+      "---\nid: FIX-309B\nscreenshot_exempt: pure data migration; no rendered surface\n---\n# FIX-309B\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n",
+    );
+    withSelfScore(wt, "FIX-309B", 8, "good");
+    expect(storyRequiresScreenshot(wt, "FIX-309B")).toBe(false);
+    expect(verificationReportHasContent(wt, "FIX-309B")).toBe(true);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-309B", "c-309b", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("(c) a BARE `screenshot_exempt: true` (no reason) is NOT an exemption — still required", () => {
+    const wt = withSpec("FIX-309C", "---\nid: FIX-309C\nscreenshot_exempt: true\n---\n# FIX-309C\n\n## Acceptance Criteria\n\n- [ ] x\n");
+    expect(storyRequiresScreenshot(wt, "FIX-309C")).toBe(true);
+    expect(screenshotExemption(wt, "FIX-309C").reason).toBeUndefined();
+  });
+
+  it("(d) 堵 284 洞①: DECLARED a deliverable_url but only an HONEST web-skip ⇒ FAIL (hard-blocked)", () => {
+    // The exact leak: a UI card declares its deliverable surface, the capture is
+    // skipped (browser down / never run), and the old gate let the honest-skip
+    // satisfy the visual floor. Now: a declared surface owes a REAL capture.
+    const wt = withReport("FIX-309D", 2000, '<div class="ev ev-text">text proof only</div>');
+    addSpec(
+      wt,
+      "FIX-309D",
+      "---\nid: FIX-309D\ndeliverable_url: .roll/features/index.html#casting\n---\n# FIX-309D — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n",
+    );
+    withSelfScore(wt, "FIX-309D", 8, "good");
+    writeEvidenceJson(wt, "FIX-309D", {
+      captures: [{ kind: "web", out: "screenshots/web.png", taken: false, skipped: "ROLL_ATTEST_NO_BROWSER" }],
+    });
+    expect(storyRequiresScreenshot(wt, "FIX-309D")).toBe(true);
+    // declared a surface → an honest-skip no longer satisfies the floor.
+    expect(verificationReportHasContent(wt, "FIX-309D")).toBe(false);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-309D", "c-309d", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("(d') 堵 284 洞②: DECLARED a deliverable_url + a bare `<figure shot>` self-shot but NO real web capture ⇒ FAIL", () => {
+    // The dossier-self-shot forgery shape: the report HTML carries a `<figure
+    // class=shot>` (which used to satisfy verificationReportHasContent) but the
+    // evidence manifest has NO taken:true web capture. A declared surface must be
+    // really captured — a hollow figure does not count.
+    const wt = withReport("FIX-309D2", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(
+      wt,
+      "FIX-309D2",
+      "---\nid: FIX-309D2\ndeliverable_url: https://app.test/casting\n---\n# FIX-309D2 — Casting\n\n## Acceptance Criteria\n\n- [ ] casting renders\n",
+    );
+    withSelfScore(wt, "FIX-309D2", 8, "good");
+    writeEvidenceJson(wt, "FIX-309D2", {
+      captures: [{ kind: "web", out: "screenshots/web.png", taken: false, skipped: "capture errored: net down" }],
+    });
+    expect(storyRequiresScreenshot(wt, "FIX-309D2")).toBe(true);
+    expect(verificationReportHasContent(wt, "FIX-309D2")).toBe(false);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-309D2", "c-309d2", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("(e) DECLARED a deliverable_url WITH a REAL captured web.png (taken:true) ⇒ PASS", () => {
+    const wt = withReport("FIX-309E", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(
+      wt,
+      "FIX-309E",
+      "---\nid: FIX-309E\ndeliverable_url: .roll/features/index.html#casting\n---\n# FIX-309E — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n",
+    );
+    withSelfScore(wt, "FIX-309E", 8, "good");
+    writeEvidenceJson(wt, "FIX-309E", {
+      captures: [{ kind: "web", out: "screenshots/web.png", taken: true }],
+    });
+    expect(storyRequiresScreenshot(wt, "FIX-309E")).toBe(true);
+    expect(verificationReportHasContent(wt, "FIX-309E")).toBe(true);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-309E", "c-309e", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("(e') a pass AC lacking a screenshot ref is EXCUSED by a real web capture, but NOT by an honest-skip, when a surface is declared", () => {
+    // passAcVisualFloor branch: declared surface + pass AC without a screenshot
+    // evidence ref. A real web capture rescues it; an honest-skip does not.
+    const wtSkip = withReport("FIX-309F", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(wtSkip, "FIX-309F", "---\nid: FIX-309F\ndeliverable_url: https://app.test/x\n---\n# FIX-309F\n\n**AC:**\n- [ ] renders\n");
+    writeAcMap(wtSkip, "FIX-309F", [
+      { ac: "FIX-309F:AC1", status: "pass", evidence: [{ kind: "text", label: "log", textFile: "evidence/proof.txt" }] },
+    ]);
+    writeEvidenceJson(wtSkip, "FIX-309F", { captures: [{ kind: "web", out: "screenshots/web.png", taken: false, skipped: "no browser" }] });
+    expect(verificationReportHasContent(wtSkip, "FIX-309F")).toBe(false); // honest-skip cannot excuse a declared surface
+
+    const wtReal = withReport("FIX-309G", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(wtReal, "FIX-309G", "---\nid: FIX-309G\ndeliverable_url: https://app.test/x\n---\n# FIX-309G\n\n**AC:**\n- [ ] renders\n");
+    writeAcMap(wtReal, "FIX-309G", [
+      { ac: "FIX-309G:AC1", status: "pass", evidence: [{ kind: "text", label: "log", textFile: "evidence/proof.txt" }] },
+    ]);
+    writeEvidenceJson(wtReal, "FIX-309G", { captures: [{ kind: "web", out: "screenshots/web.png", taken: true }] });
+    expect(verificationReportHasContent(wtReal, "FIX-309G")).toBe(true);
+  });
+
+  it("(regression) a required TUI card with NO declared surface + honest terminal-skip STILL passes (no over-enforce)", () => {
+    // The over-enforce guard: tightening must NOT kill genuinely-non-web cards.
+    const wt = withReport("FIX-309H", 2000, '<div class="ev ev-text">{"taken":false}</div>');
+    addSpec(wt, "FIX-309H", "# FIX-309H — TUI redesign\n\n## Acceptance Criteria\n\n- [ ] the TUI renders\n");
+    withSelfScore(wt, "FIX-309H", 8, "good");
+    writeEvidenceJson(wt, "FIX-309H", {
+      captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI session" }],
+    });
+    expect(storyRequiresScreenshot(wt, "FIX-309H")).toBe(true);
+    expect(webCaptureTargetForStory(wt, "FIX-309H")).toBeNull(); // no declared surface
+    expect(verificationReportHasContent(wt, "FIX-309H")).toBe(true);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-309H", "c-309h", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
+  });
+});
